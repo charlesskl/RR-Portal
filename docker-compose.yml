@@ -137,20 +137,24 @@ services:
     networks:
       - platform-net
 
-  printing3d:
-    build:
-      context: "./plugins/3D打印"
-      dockerfile: Dockerfile
-    env_file:
-      - "./plugins/3D打印/.env"
-    environment:
-      - PORT=3000
-      - DATA_PATH=/app/data/data.json
-    volumes:
-      - "./plugins/3D打印/data:/app/data"
-    restart: unless-stopped
-    networks:
-      - platform-net
+  # printing3d 需要直连局域网打印机（MQTT/TLS），
+  # Windows Docker 无法可靠转发，改为宿主机直接运行 Node.js
+  # 启动方式：运行 plugins/3D打印/启动服务器.bat
+  # 端口：3001（宿主机）
+  # printing3d:
+  #   build:
+  #     context: "./plugins/3D打印"
+  #     dockerfile: Dockerfile
+  #   env_file:
+  #     - "./plugins/3D打印/.env"
+  #   environment:
+  #     - PORT=3000
+  #     - DATA_PATH=/app/data/data.json
+  #   volumes:
+  #     - "./plugins/3D打印/data:/app/data"
+  #   restart: unless-stopped
+  #   networks:
+  #     - platform-net
 
   zuru-ma:
     build:

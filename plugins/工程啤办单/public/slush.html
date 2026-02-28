@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>搪胶部 - 生产订单</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+  <link href="style.css" rel="stylesheet">
+</head>
+<body class="bg-light">
+
+<nav class="navbar navbar-dark" style="background:#16a085">
+  <div class="container-fluid">
+    <span class="navbar-brand"><i class="bi bi-droplet-half me-2"></i>搪胶部 — 生产任务单</span>
+    <div class="d-flex gap-2">
+      <a href="index.html"       class="nav-dept-link"><i class="bi bi-house me-1"></i>主页</a>
+      <a href="engineering.html" class="nav-dept-link">工程部</a>
+      <a href="injection.html"   class="nav-dept-link">啤机部</a>
+      <a href="spray.html"       class="nav-dept-link">喷油部</a>
+    </div>
+  </div>
+</nav>
+
+<div class="container-fluid mt-3">
+  <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
+    <div class="status-filter d-flex flex-wrap gap-1">
+      <button class="btn btn-sm btn-outline-secondary active" onclick="filterStatus('',this)">全部</button>
+      <button class="btn btn-sm btn-warning"  onclick="filterStatus('待生产',this)">待生产</button>
+      <button class="btn btn-sm btn-info"     onclick="filterStatus('生产中',this)">生产中</button>
+      <button class="btn btn-sm btn-success"  onclick="filterStatus('已完成',this)">已完成</button>
+    </div>
+    <small class="text-muted"><i class="bi bi-arrow-clockwise me-1"></i>每30秒自动刷新</small>
+  </div>
+
+  <div class="card shadow-sm">
+    <div class="card-body p-0">
+      <div id="orderList"><div class="text-center p-4 text-muted">加载中...</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- 详情 Modal -->
+<div class="modal fade" id="detailModal" tabindex="-1">
+  <div class="modal-dialog modal-xl">
+    <div class="modal-content">
+      <div class="modal-header" style="background:#16a085;color:#fff">
+        <h5 class="modal-title" id="detailTitle">搪胶单详情</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body" id="detailBody"></div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
+        <button class="btn btn-outline-primary" id="detailPrintBtn"><i class="bi bi-printer me-1"></i>打印</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 问题反馈 Modal -->
+<div class="modal fade" id="problemModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header bg-danger text-white">
+        <h5 class="modal-title"><i class="bi bi-exclamation-triangle-fill me-2"></i>问题反馈 — <span id="pmOrderNum"></span></h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div id="pmProblemsList" class="mb-3"></div>
+        <hr class="my-2">
+        <label class="form-label fw-bold">反馈新问题</label>
+        <textarea class="form-control" id="pmDescription" rows="3" placeholder="请描述具体问题，例如：尺寸不对、颜色偏差、模具损坏..."></textarea>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
+        <button class="btn btn-danger" onclick="submitProblem()">
+          <i class="bi bi-exclamation-triangle me-1"></i>提交问题
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+let allOrders = [];
+let problemsMap = {};
+let currentFilter = '';
+
+const statusBadge = s => ({
+  '待生产': '<span class="badge badge-pending">待生产</span>',
+  '生产中': '<span class="badge badge-progress">生产中</span>',
+  '已完成': '<span class="badge badge-done">已完成</span>',
+  '已取消': '<span class="badge bg-secondary">已取消</span>'
+}[s] || `<span class="badge bg-secondary">${s}</span>`);
+
+function filterStatus(status, el) {
+  currentFilter = status;
+  document.querySelectorAll('.status-filter .btn').forEach(b => b.classList.remove('active'));
+  el.classList.add('active');
+  renderOrders(currentFilter ? allOrders.filter(o => o.status === currentFilter) : allOrders);
+}
+
+function loadOrders() {
+  Promise.all([
+    fetch('/api/slush').then(r => r.json()),
+    fetch('/api/problems?type=slush').then(r => r.json())
+  ]).then(([orders, problems]) => {
+    allOrders = orders;
+    problemsMap = {};
+    problems.filter(p => p.status === '待处理').forEach(p => {
+      problemsMap[p.order_id] = (problemsMap[p.order_id] || 0) + 1;
+    });
+    renderOrders(currentFilter ? orders.filter(o => o.status === currentFilter) : orders);
+  }).catch(() => {
+    document.getElementById('orderList').innerHTML = '<div class="text-center p-4 text-danger">加载失败，请刷新页面</div>';
+  });
+}
+
+function renderOrders(orders) {
+  if (!orders.length) {
+    document.getElementById('orderList').innerHTML = `<div class="empty-state"><i class="bi bi-inbox"></i><p class="mt-2">暂无搪胶任务</p></div>`;
+    return;
+  }
+  const rows = orders.map(o => `
+    <tr class="order-row" onclick="viewOrder(${o.id})">
+      <td><strong>${o.order_number || '-'}</strong></td>
+      <td>${o.date || '-'}</td>
+      <td>${o.order_type || '-'}</td>
+      <td>${o.workshop || '-'}</td>
+      <td>${o.supervisor || '-'}</td>
+      <td>${o.eng_name || '-'}</td>
+      <td>${o.reason || '-'}</td>
+      <td>
+        ${statusBadge(o.status)}
+        ${problemsMap[o.id] ? `<span class="badge bg-danger ms-1"><i class="bi bi-exclamation-triangle-fill me-1"></i>${problemsMap[o.id]}个问题</span>` : ''}
+      </td>
+      <td>
+        <div class="btn-group btn-group-sm">
+          ${handleBtn(o.id, o.status)}
+          <button class="btn btn-outline-danger" onclick="event.stopPropagation();openProblemModal(${o.id},'${(o.order_number||'').replace(/'/g,'')}')" title="问题反馈">
+            <i class="bi bi-exclamation-triangle"></i>
+          </button>
+          <button class="btn btn-outline-secondary" onclick="event.stopPropagation();printOrder(${o.id})">
+            <i class="bi bi-printer"></i>
+          </button>
+        </div>
+      </td>
+    </tr>`).join('');
+
+  document.getElementById('orderList').innerHTML = `
+    <table class="table table-hover table-sm mb-0">
+      <thead class="table-dark">
+        <tr><th>订单编号</th><th>日期</th><th>类型</th><th>车间</th><th>主管</th><th>跟进工程师</th><th>原因</th><th>状态</th><th>处理</th></tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
+function viewOrder(id) {
+  fetch(`/api/slush/${id}`)
+    .then(r => r.json())
+    .then(order => {
+      document.getElementById('detailTitle').textContent = `搪胶单 #${order.id} — ${order.order_number || ''}`;
+      document.getElementById('detailPrintBtn').onclick = () => printOrder(id);
+
+      const items = order.items || [];
+      const rows = items.map(it => `
+        <tr>
+          <td>${it.seq_no||''}</td>
+          <td>${it.product_id||''}</td>
+          <td>${it.product_image ? `<img src="${it.product_image}" style="max-width:50px;max-height:50px">` : ''}</td>
+          <td>${it.mold_id||''}</td><td>${it.mold_name||''}</td><td>${it.material||''}</td>
+          <td>${it.color_code||''}</td><td>${it.pigment_no||''}</td>
+          <td>${it.unit_weight||''}</td><td>${it.quantity||''}</td>
+          <td>${it.required_date||''}</td><td>${it.return_time||''}</td>
+          <td>${it.notes||''}</td>
+        </tr>`).join('');
+
+      document.getElementById('detailBody').innerHTML = `
+        <div class="detail-header row g-3">
+          <div class="col-md-3"><div class="label">订单编号</div><div class="value">${order.order_number||'-'}</div></div>
+          <div class="col-md-3"><div class="label">日期</div><div class="value">${order.date||'-'}</div></div>
+          <div class="col-md-3"><div class="label">类型</div><div class="value">${order.order_type||'-'}</div></div>
+          <div class="col-md-3"><div class="label">状态</div><div class="value">${statusBadge(order.status)}</div></div>
+          <div class="col-12"><div class="label">原因</div><div class="value">${order.reason||'-'}</div></div>
+        </div>
+        <div class="table-responsive">
+          <table class="table table-bordered table-sm">
+            <thead class="table-dark" style="font-size:.8rem">
+              <tr>
+                <th>序号</th><th>产品编号</th><th>产品图片</th><th>工模编号</th><th>工模名称</th>
+                <th>原料</th><th>颜色/编号</th><th>色粉编号</th><th>每啤毛重(g)</th>
+                <th>数量</th><th>要求完成日期</th><th>回模时间</th><th>备注</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>`;
+
+      new bootstrap.Modal(document.getElementById('detailModal')).show();
+    });
+}
+
+let currentProblemOrderId = null;
+let currentProblemOrderNum = '';
+
+function openProblemModal(orderId, orderNumber) {
+  currentProblemOrderId = orderId;
+  currentProblemOrderNum = orderNumber;
+  document.getElementById('pmOrderNum').textContent = orderNumber || `#${orderId}`;
+  document.getElementById('pmDescription').value = '';
+  document.getElementById('pmProblemsList').innerHTML = '<div class="text-muted small">加载中...</div>';
+  new bootstrap.Modal(document.getElementById('problemModal')).show();
+
+  fetch(`/api/problems?type=slush&order_id=${orderId}`)
+    .then(r => r.json())
+    .then(list => {
+      if (!list.length) {
+        document.getElementById('pmProblemsList').innerHTML = '<div class="text-muted small">暂无历史问题记录</div>';
+        return;
+      }
+      document.getElementById('pmProblemsList').innerHTML = `
+        <p class="fw-bold mb-2">历史问题记录</p>
+        ${list.map(p => `
+          <div class="border rounded p-2 mb-2 ${p.status==='已解决' ? 'bg-light' : 'bg-warning-subtle'}">
+            <div class="d-flex justify-content-between align-items-start">
+              <span class="small">${p.description}</span>
+              <span class="badge ${p.status==='已解决' ? 'bg-success' : 'bg-danger'} ms-2 flex-shrink-0">${p.status}</span>
+            </div>
+            <div class="text-muted" style="font-size:.75rem;margin-top:4px">
+              ${p.reported_by} · ${p.created_at.replace('T',' ').slice(0,16)}
+            </div>
+          </div>`).join('')}`;
+    });
+}
+
+function submitProblem() {
+  const desc = document.getElementById('pmDescription').value.trim();
+  if (!desc) { alert('请输入问题描述'); return; }
+  fetch('/api/problems', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      order_type: 'slush',
+      order_id: currentProblemOrderId,
+      order_number: currentProblemOrderNum,
+      description: desc,
+      reported_by: '搪胶部'
+    })
+  }).then(() => {
+    document.getElementById('pmDescription').value = '';
+    bootstrap.Modal.getInstance(document.getElementById('problemModal'))?.hide();
+    loadOrders();
+  });
+}
+
+function handleBtn(id, status) {
+  if (status === '待生产') return `<button class="btn btn-warning" onclick="event.stopPropagation();setStatus(${id},'生产中')" title="开始处理"><i class="bi bi-play-fill me-1"></i>开始处理</button>`;
+  if (status === '生产中') return `<button class="btn btn-success" onclick="event.stopPropagation();setStatus(${id},'已完成')" title="标记完成"><i class="bi bi-check-lg me-1"></i>标记完成</button>`;
+  return '';
+}
+
+function setStatus(id, status) {
+  fetch(`/api/slush/${id}/status`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status })
+  }).then(() => loadOrders());
+}
+
+function printOrder(id) {
+  window.open(`print.html?type=slush&id=${id}`, '_blank');
+}
+
+loadOrders();
+setInterval(loadOrders, 30000);
+</script>
+</body>
+</html>

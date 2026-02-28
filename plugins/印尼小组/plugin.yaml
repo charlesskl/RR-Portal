@@ -1,0 +1,8 @@
+name: indonesia
+display_name: "印尼小组 Indonesia Team"
+version: "1.0.0"
+department: Indonesia
+description: Indonesia team - no active systems yet
+api_prefix: /api/indonesia
+health_check: /api/indonesia/health
+permissions: []

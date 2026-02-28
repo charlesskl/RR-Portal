@@ -1,0 +1,682 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>原料仓库 - 生产订单</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+  <link href="style.css" rel="stylesheet">
+  <style>
+    .th-eng  { background:#fff3cd; font-weight:600; }
+    .th-mach { background:#cfe2ff; font-weight:600; }
+    .th-wh   { background:#d1ecf1; font-weight:600; }
+    .editable-input { border:1px solid #ced4da; border-radius:4px; padding:2px 6px; background:#fff; }
+    .editable-input:focus { outline:2px solid #0d6efd; border-color:#0d6efd; }
+    .stat-total { font-weight:700; background:#f0f7f0; }
+    .price-col  { width:110px; }
+    .wt-col     { width:100px; }
+    .amt-col    { width:120px; }
+    .notes-col  { width:110px; }
+    .del-col    { width:46px; }
+  </style>
+</head>
+<body class="bg-light">
+
+<nav class="navbar navbar-dark" style="background:#27ae60">
+  <div class="container-fluid">
+    <span class="navbar-brand"><i class="bi bi-box2-heart me-2"></i>原料仓库 — 领料管理</span>
+    <div class="d-flex gap-2">
+      <a href="index.html"       class="nav-dept-link"><i class="bi bi-house me-1"></i>主页</a>
+      <a href="engineering.html" class="nav-dept-link">工程部</a>
+      <a href="injection.html"   class="nav-dept-link">啤机部</a>
+      <a href="slush.html"       class="nav-dept-link">搪胶部</a>
+      <a href="spray.html"       class="nav-dept-link">喷油部</a>
+    </div>
+  </div>
+</nav>
+
+<div class="container-fluid mt-3">
+
+  <!-- Tabs -->
+  <ul class="nav nav-tabs mb-3" id="mainTabs">
+    <li class="nav-item">
+      <button class="nav-link active" onclick="switchTab('orders',this)">
+        <i class="bi bi-list-ul me-1"></i>订单管理
+      </button>
+    </li>
+    <li class="nav-item">
+      <button class="nav-link" onclick="switchTab('req',this)">
+        <i class="bi bi-clipboard-plus me-1"></i>领料单
+      </button>
+    </li>
+    <li class="nav-item">
+      <button class="nav-link" onclick="switchTab('stats',this)">
+        <i class="bi bi-bar-chart-line me-1"></i>原料汇总表
+      </button>
+    </li>
+  </ul>
+
+  <!-- ── 订单管理 Tab ─────────────────────────────────────────────────────── -->
+  <div id="tabOrders">
+    <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
+      <div class="status-filter d-flex flex-wrap gap-1">
+        <button class="btn btn-sm btn-outline-secondary active" onclick="filterStatus('',this)">全部</button>
+        <button class="btn btn-sm btn-warning"  onclick="filterStatus('待生产',this)">待生产</button>
+        <button class="btn btn-sm btn-info"     onclick="filterStatus('生产中',this)">生产中</button>
+        <button class="btn btn-sm btn-success"  onclick="filterStatus('已完成',this)">已完成</button>
+      </div>
+      <small class="text-muted"><i class="bi bi-arrow-clockwise me-1"></i>每30秒自动刷新</small>
+    </div>
+    <div class="card shadow-sm">
+      <div class="card-body p-0">
+        <div id="orderList"><div class="text-center p-4 text-muted">加载中...</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── 领料单 Tab ──────────────────────────────────────────────────────── -->
+  <div id="tabReq" style="display:none">
+    <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
+      <div class="d-flex flex-wrap gap-1">
+        <button class="btn btn-sm btn-outline-secondary active" id="reqFilterAll" onclick="filterReq('',this)">全部</button>
+        <button class="btn btn-sm btn-warning" onclick="filterReq('待出库',this)">待出库</button>
+        <button class="btn btn-sm btn-success" onclick="filterReq('已出库',this)">已出库</button>
+      </div>
+      <button class="btn btn-success" onclick="openReqModal()">
+        <i class="bi bi-plus-lg me-1"></i>新建领料单
+      </button>
+    </div>
+    <div class="card shadow-sm">
+      <div class="card-body p-0">
+        <div id="reqList"><div class="text-center p-4 text-muted">加载中...</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── 原料汇总表 Tab ───────────────────────────────────────────────────── -->
+  <div id="tabStats" style="display:none">
+    <div class="card shadow-sm">
+      <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <h6 class="mb-0"><i class="bi bi-table me-2"></i>工程原料汇总表</h6>
+        <div class="d-flex gap-2 flex-wrap align-items-center">
+          <div class="input-group input-group-sm" style="width:220px">
+            <span class="input-group-text"><i class="bi bi-search"></i></span>
+            <input type="text" class="form-control" id="matSearch"
+              placeholder="搜索原料型号..." oninput="renderStats()" autocomplete="off">
+            <button class="btn btn-outline-secondary" onclick="document.getElementById('matSearch').value='';renderStats()" title="清除">
+              <i class="bi bi-x-lg"></i>
+            </button>
+          </div>
+          <button class="btn btn-sm btn-outline-success" onclick="addMaterialRow()">
+            <i class="bi bi-plus-lg me-1"></i>添加原料
+          </button>
+          <button class="btn btn-sm btn-primary" onclick="savePrices()">
+            <i class="bi bi-save me-1"></i>保存价格
+          </button>
+          <button class="btn btn-sm btn-outline-secondary" onclick="loadStats()">
+            <i class="bi bi-arrow-clockwise me-1"></i>刷新数据
+          </button>
+        </div>
+      </div>
+      <div class="card-body p-0">
+        <div class="table-responsive">
+          <table class="table table-bordered table-sm mb-0" id="statsTable">
+            <thead class="table-dark text-center" style="font-size:.82rem">
+              <tr>
+                <th style="width:46px">序号</th>
+                <th>原料型号</th>
+                <th class="price-col">原料单价<br><small>(磅/HKD)</small></th>
+                <th class="wt-col">总实领重量<br><small>(KG)</small></th>
+                <th class="amt-col">工程原料总费用<br><small>(HKD)</small></th>
+                <th class="notes-col">备注</th>
+                <th class="del-col"></th>
+              </tr>
+            </thead>
+            <tbody id="statsBody">
+              <tr><td colspan="7" class="text-center text-muted p-3">加载中...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ── 新建领料单 Modal ────────────────────────────────────────────────────── -->
+<div class="modal fade" id="reqModal" tabindex="-1" data-bs-backdrop="static">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header" style="background:#27ae60;color:#fff">
+        <h5 class="modal-title"><i class="bi bi-clipboard-plus me-2"></i>新建领料单</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="row g-3">
+          <div class="col-md-4">
+            <label class="form-label fw-bold">日期 <span class="text-danger">*</span></label>
+            <input type="date" class="form-control" id="req-date">
+          </div>
+          <div class="col-md-4">
+            <label class="form-label fw-bold">申请人 <span class="text-danger">*</span></label>
+            <input type="text" class="form-control" id="req-applicant" placeholder="请输入姓名">
+          </div>
+          <div class="col-md-4">
+            <label class="form-label fw-bold">关联啤办单 <span class="text-muted fw-normal small">（可选）</span></label>
+            <select class="form-select" id="req-order">
+              <option value="">不关联</option>
+            </select>
+          </div>
+          <div class="col-md-8">
+            <label class="form-label fw-bold">原料型号 <span class="text-danger">*</span></label>
+            <input type="text" class="form-control" id="req-material" list="matDatalist"
+              placeholder="输入关键词搜索，如 ABS、PP、TPE..." autocomplete="off">
+            <datalist id="matDatalist"></datalist>
+            <div id="req-material-hint" class="form-text text-muted" style="display:none"></div>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label fw-bold">申请料重 (KG) <span class="text-danger">*</span></label>
+            <input type="number" class="form-control" id="req-weight" step="0.01" min="0" placeholder="0.00">
+          </div>
+          <div class="col-12">
+            <label class="form-label fw-bold">备注</label>
+            <input type="text" class="form-control" id="req-notes" placeholder="可选备注">
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+        <button class="btn btn-success" onclick="saveReq()"><i class="bi bi-save me-1"></i>提交领料单</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── 详情 Modal ─────────────────────────────────────────────────────────── -->
+<div class="modal fade" id="detailModal" tabindex="-1">
+  <div class="modal-dialog modal-fullscreen">
+    <div class="modal-content">
+      <div class="modal-header" style="background:#27ae60;color:#fff">
+        <h5 class="modal-title" id="detailTitle">啤办单领料详情</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body" id="detailBody"></div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+let allOrders   = [];
+let currentFilter = '';
+let statsData   = [];
+
+const statusBadge = s => ({
+  '待生产': '<span class="badge badge-pending">待生产</span>',
+  '生产中': '<span class="badge badge-progress">生产中</span>',
+  '已完成': '<span class="badge badge-done">已完成</span>',
+  '待审核': '<span class="badge badge-review">待审核</span>',
+  '已驳回': '<span class="badge bg-danger">已驳回</span>',
+}[s] || `<span class="badge bg-secondary">${s}</span>`);
+
+// ── 标签页切换 ────────────────────────────────────────────────────────────────
+function switchTab(name, el) {
+  document.querySelectorAll('#mainTabs .nav-link').forEach(b => b.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById('tabOrders').style.display = name === 'orders' ? '' : 'none';
+  document.getElementById('tabReq').style.display    = name === 'req'    ? '' : 'none';
+  document.getElementById('tabStats').style.display  = name === 'stats'  ? '' : 'none';
+  if (name === 'stats') loadStats();
+  if (name === 'req')   loadReqs();
+}
+
+// ── 订单列表 ──────────────────────────────────────────────────────────────────
+function filterStatus(status, el) {
+  currentFilter = status;
+  document.querySelectorAll('.status-filter .btn').forEach(b => b.classList.remove('active'));
+  el.classList.add('active');
+  renderOrders(currentFilter ? allOrders.filter(o => o.status === currentFilter) : allOrders);
+}
+
+function loadOrders() {
+  fetch('/api/injection')
+    .then(r => r.json())
+    .then(orders => {
+      allOrders = orders;
+      renderOrders(currentFilter ? orders.filter(o => o.status === currentFilter) : orders);
+    })
+    .catch(() => {
+      document.getElementById('orderList').innerHTML =
+        '<div class="text-center p-4 text-danger">加载失败，请刷新页面</div>';
+    });
+}
+
+function renderOrders(orders) {
+  if (!orders.length) {
+    document.getElementById('orderList').innerHTML =
+      `<div class="text-center p-5 text-muted"><i class="bi bi-inbox fs-1"></i><p class="mt-2">暂无订单</p></div>`;
+    return;
+  }
+  const rows = orders.map(o => `
+    <tr class="order-row" onclick="viewOrder(${o.id})" style="cursor:pointer">
+      <td><strong>${o.order_number||'-'}</strong></td>
+      <td>${o.date||'-'}</td>
+      <td>${o.order_type||'-'}</td>
+      <td>${o.workshop||'-'}</td>
+      <td>${o.supervisor||'-'}</td>
+      <td>${o.eng_name||'-'}</td>
+      <td>${o.reason||'-'}</td>
+      <td>${statusBadge(o.status)}</td>
+      <td><small class="text-muted"><i class="bi bi-box-arrow-in-right"></i> 点击开单</small></td>
+    </tr>`).join('');
+  document.getElementById('orderList').innerHTML = `
+    <table class="table table-hover table-sm mb-0">
+      <thead class="table-dark">
+        <tr>
+          <th>订单编号</th><th>日期</th><th>类型</th><th>车间</th>
+          <th>主管</th><th>跟进工程师</th><th>原因</th><th>状态</th><th></th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
+// ── 订单详情（仓库只读查看）────────────────────────────────────────────────────
+function viewOrder(id) {
+  fetch(`/api/injection/${id}`)
+    .then(r => r.json())
+    .then(order => {
+      document.getElementById('detailTitle').textContent =
+        `啤办单 #${order.id} — ${order.order_number||''}`;
+
+      const items = order.items || [];
+      let totalCollected = 0, totalActual = 0, totalAmt = 0;
+      const rows = items.map((it, idx) => {
+        totalCollected += +(it.collected_weight_kg || 0);
+        totalActual    += +(it.actual_weight_kg    || 0);
+        totalAmt       += +(it.actual_amount_hkd   || 0);
+        return `
+        <tr>
+          <td>${it.mold_id||''}</td>
+          <td>${it.mold_name||''}</td>
+          <td>${it.material||''}</td>
+          <td>${it.color||''}</td>
+          <td>${it.pigment_no||it.color_code||''}</td>
+          <td class="text-center">${it.quantity||''}</td>
+          <td class="text-center">${it.shoot_qty||it.color_weight_g||''}</td>
+          <td class="text-center">${it.gross_weight_g||it.total_weight_kg||''}</td>
+          <td class="text-center">${it.required_material_kg||''}</td>
+          <td>${it.mold_return_time||it.mold_fee_time||''}</td>
+          <td>${it.completion_time||''}</td>
+          <td>${it.notes||''}</td>
+          <td class="text-center">${it.regrind_no||'-'}</td>
+          <td class="text-center">${it.regrind_weight_kg != null ? it.regrind_weight_kg : '-'}</td>
+          <td class="text-center">${it.receipt_no||'-'}</td>
+          <td class="text-center">${it.collected_weight_kg != null ? it.collected_weight_kg : '-'}</td>
+          <td class="text-center">${it.actual_weight_kg != null ? it.actual_weight_kg : '-'}</td>
+          <td class="text-center fw-bold" style="color:${it.actual_amount_hkd ? '#1a6e3a' : '#999'}">
+            ${it.actual_amount_hkd != null ? it.actual_amount_hkd.toFixed(2) : '-'}
+          </td>
+        </tr>`;
+      }).join('');
+
+      const totalRow = `
+        <tr class="table-warning fw-bold text-center">
+          <td colspan="15">合计</td>
+          <td>${totalCollected ? totalCollected.toFixed(2) : '-'}</td>
+          <td>${totalActual ? totalActual.toFixed(2) : '-'}</td>
+          <td style="color:#1a6e3a">${totalAmt ? totalAmt.toFixed(2) : '-'}</td>
+        </tr>`;
+
+      document.getElementById('detailBody').innerHTML = `
+        <div class="row g-2 mb-3 p-2 rounded" style="background:#e8f5e9">
+          <div class="col-6 col-md-2"><small class="text-muted">订单编号</small>
+            <div class="fw-bold">${order.order_number||'-'}</div></div>
+          <div class="col-6 col-md-2"><small class="text-muted">日期</small>
+            <div>${order.date||'-'}</div></div>
+          <div class="col-6 col-md-2"><small class="text-muted">类型</small>
+            <div>${order.order_type||'-'}</div></div>
+          <div class="col-6 col-md-2"><small class="text-muted">车间</small>
+            <div>${order.workshop||'-'}</div></div>
+          <div class="col-6 col-md-2"><small class="text-muted">主管</small>
+            <div>${order.supervisor||'-'}</div></div>
+          <div class="col-6 col-md-2"><small class="text-muted">状态</small>
+            <div>${statusBadge(order.status)}</div></div>
+          <div class="col-12"><small class="text-muted">跟进工程师：</small>${order.eng_name||'-'}
+            &nbsp;<small class="text-muted ms-3">原因：</small>${order.reason||'-'}</div>
+        </div>
+        <p class="text-muted small mb-1">
+          <i class="bi bi-eye me-1"></i>此页面为只读查看，领料和用料数据由啤机部填写
+        </p>
+        <div class="table-responsive">
+          <table class="table table-bordered table-sm" style="font-size:.82rem">
+            <thead>
+              <tr class="text-center">
+                <th colspan="12" class="th-eng">工程填写</th>
+                <th colspan="6" class="th-mach">啤机部填写</th>
+              </tr>
+              <tr class="table-dark text-center" style="font-size:.78rem">
+                <th>工模编号</th><th>工模名称</th><th>原料</th><th>颜色</th>
+                <th>色粉编号</th><th>件数/套数</th><th>数量(啤)</th><th>整啤毛重(g)</th>
+                <th>所需用料(KG)</th><th>模具回厂时间</th><th>啤办完成时间</th><th>备注</th>
+                <th>回胶头单号</th><th>回胶头重量(KG)</th>
+                <th>领原料单号</th><th>领料重量(KG)</th>
+                <th>实际用料(KG)</th><th>用料金额(HKD)</th>
+              </tr>
+            </thead>
+            <tbody>${rows}${totalRow}</tbody>
+          </table>
+        </div>`;
+
+      new bootstrap.Modal(document.getElementById('detailModal')).show();
+    });
+}
+
+// ── 原料汇总表 ────────────────────────────────────────────────────────────────
+function loadStats() {
+  Promise.all([
+    fetch('/api/material-stats').then(r => r.json()),
+    fetch('/api/material-prices').then(r => r.json())
+  ]).then(([stats, prices]) => {
+    const usageMap = {};
+    stats.forEach(s => { usageMap[s.material] = s; });
+    // 以价格表顺序为准，合并实际用量
+    statsData = prices.map((p, i) => ({
+      seq: i + 1,
+      material:            p.material,
+      unit_price:          p.unit_price,
+      notes:               p.notes || '',
+      total_actual_weight: (usageMap[p.material] || {}).total_actual_weight || 0,
+      total_amount:        (usageMap[p.material] || {}).total_amount        || 0
+    }));
+    renderStats();
+  });
+}
+
+function renderStats() {
+  const q = (document.getElementById('matSearch')?.value || '').trim().toLowerCase();
+  let totalWeight = 0, totalAmount = 0;
+  // Totals always over all data
+  statsData.forEach(s => {
+    totalWeight += (s.total_actual_weight || 0);
+    totalAmount += (s.total_amount        || 0);
+  });
+
+  let visibleCount = 0;
+  const rows = statsData.map((s, i) => {
+    if (q && !s.material.toLowerCase().includes(q)) return '';
+    visibleCount++;
+    return `
+      <tr data-idx="${i}">
+        <td class="text-center text-muted" style="font-size:.8rem">${i + 1}</td>
+        <td><input class="form-control form-control-sm" name="mat"
+            value="${escHtml(s.material)}" placeholder="原料型号"></td>
+        <td class="text-end">
+          <input type="number" class="form-control form-control-sm text-end" name="price"
+            value="${s.unit_price}" step="0.01" style="width:90px;display:inline-block">
+        </td>
+        <td class="text-end">${s.total_actual_weight ? s.total_actual_weight.toFixed(2) : '<span class="text-muted">-</span>'}</td>
+        <td class="text-end fw-bold" style="color:${s.total_amount ? '#1a6e3a' : '#aaa'}">
+          ${s.total_amount ? s.total_amount.toFixed(2) : '0.00'}
+        </td>
+        <td><input class="form-control form-control-sm" name="notes"
+            value="${escHtml(s.notes||'')}" placeholder="备注"></td>
+        <td class="text-center">
+          <button class="btn btn-sm btn-outline-danger" onclick="deleteMaterial(${i})">
+            <i class="bi bi-x-lg"></i>
+          </button>
+        </td>
+      </tr>`;
+  }).join('');
+
+  const emptyRow = (!rows.trim()) ? `<tr><td colspan="7" class="text-center text-muted p-3">没有匹配的原料</td></tr>` : '';
+  const hint = q ? `<small class="text-muted ms-2">共 ${visibleCount} 条结果（共 ${statsData.length} 条）</small>` : '';
+  document.getElementById('statsBody').innerHTML = rows + emptyRow + `
+    <tr class="stat-total">
+      <td colspan="3" class="text-end">合计 ${hint}</td>
+      <td class="text-end fw-bold">${totalWeight ? totalWeight.toFixed(2) : '-'}</td>
+      <td class="text-end fw-bold" style="color:#1a6e3a">${totalAmount.toFixed(2)}</td>
+      <td colspan="2"></td>
+    </tr>`;
+}
+
+function addMaterialRow() {
+  statsData.push({ material: '', unit_price: 0, notes: '', total_actual_weight: 0, total_amount: 0 });
+  renderStats();
+  const rows = document.getElementById('statsBody').querySelectorAll('tr[data-idx]');
+  rows[rows.length - 1]?.querySelector('[name="mat"]')?.focus();
+}
+
+function deleteMaterial(idx) {
+  if (!confirm('确认从价格表中删除此原料？')) return;
+  statsData.splice(idx, 1);
+  renderStats();
+}
+
+function savePrices() {
+  // Sync any edited visible rows back into statsData first
+  document.getElementById('statsBody').querySelectorAll('tr[data-idx]').forEach(tr => {
+    const idx = +tr.dataset.idx;
+    statsData[idx].material  = tr.querySelector('[name="mat"]').value.trim();
+    statsData[idx].unit_price = parseFloat(tr.querySelector('[name="price"]').value) || 0;
+    statsData[idx].notes     = tr.querySelector('[name="notes"]').value;
+  });
+  // Save all (including hidden filtered rows)
+  const prices = statsData.map(s => ({
+    material:   s.material,
+    unit_price: s.unit_price,
+    notes:      s.notes
+  }));
+  fetch('/api/material-prices', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(prices)
+  }).then(r => r.json()).then(() => {
+    showToast('价格已保存', 'primary');
+    loadStats();
+  });
+}
+
+// ── 工具 ──────────────────────────────────────────────────────────────────────
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+}
+
+function showToast(msg, color) {
+  const t = document.createElement('div');
+  t.className = 'position-fixed bottom-0 end-0 p-3'; t.style.zIndex = 9999;
+  t.innerHTML = `<div class="toast show text-white bg-${color} border-0">
+    <div class="d-flex">
+      <div class="toast-body"><i class="bi bi-check-circle me-1"></i>${msg}</div>
+      <button class="btn-close btn-close-white me-2 m-auto"
+        onclick="this.closest('.position-fixed').remove()"></button>
+    </div></div>`;
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 3000);
+}
+
+// ── 领料单 ────────────────────────────────────────────────────────────────────
+let allReqs = [];
+let currentReqFilter = '';
+let _reqMatPrices = [];
+let _reqOrders = [];
+
+function filterReq(status, el) {
+  currentReqFilter = status;
+  document.querySelectorAll('#tabReq .btn-sm').forEach(b => b.classList.remove('active'));
+  el.classList.add('active');
+  renderReqs();
+}
+
+function loadReqs() {
+  document.getElementById('reqList').innerHTML = '<div class="text-center p-4 text-muted">加载中...</div>';
+  fetch('/api/requisitions')
+    .then(r => r.json())
+    .then(list => {
+      allReqs = list;
+      renderReqs();
+    })
+    .catch(() => {
+      document.getElementById('reqList').innerHTML = '<div class="text-center p-4 text-danger">加载失败</div>';
+    });
+}
+
+function renderReqs() {
+  const list = currentReqFilter ? allReqs.filter(r => r.status === currentReqFilter) : allReqs;
+  if (!list.length) {
+    document.getElementById('reqList').innerHTML =
+      `<div class="text-center p-5 text-muted"><i class="bi bi-clipboard-x fs-1"></i><p class="mt-2">暂无领料单</p></div>`;
+    return;
+  }
+  const reqBadge = s => s === '已出库'
+    ? '<span class="badge bg-success">已出库</span>'
+    : '<span class="badge bg-warning text-dark">待出库</span>';
+  const rows = list.map(r => `
+    <tr>
+      <td><strong>${r.req_number||'-'}</strong></td>
+      <td>${r.date||'-'}</td>
+      <td>${r.order_number ? `<span class="badge bg-secondary">${r.order_number}</span>` : '-'}</td>
+      <td><strong>${r.material||'-'}</strong></td>
+      <td class="text-end">${r.requested_weight_kg||'-'} KG</td>
+      <td>${r.applicant||'-'}</td>
+      <td>${r.notes||'-'}</td>
+      <td>${reqBadge(r.status)}</td>
+      <td>
+        <div class="btn-group btn-group-sm">
+          ${r.status === '待出库'
+            ? `<button class="btn btn-success" onclick="issueReq(${r.id})" title="标记已出库"><i class="bi bi-check-lg"></i> 出库</button>`
+            : `<span class="text-muted small">${(r.issued_at||'').replace('T',' ').slice(0,16)}</span>`}
+          <button class="btn btn-outline-danger" onclick="deleteReq(${r.id})" title="删除"><i class="bi bi-trash"></i></button>
+        </div>
+      </td>
+    </tr>`).join('');
+  document.getElementById('reqList').innerHTML = `
+    <table class="table table-hover table-sm mb-0">
+      <thead class="table-dark">
+        <tr>
+          <th>单号</th><th>日期</th><th>关联啤办单</th><th>原料型号</th>
+          <th class="text-end">申请料重</th><th>申请人</th><th>备注</th><th>状态</th><th>操作</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
+function openReqModal() {
+  document.getElementById('req-date').value = new Date().toISOString().slice(0, 10);
+  document.getElementById('req-applicant').value = '';
+  document.getElementById('req-weight').value = '';
+  document.getElementById('req-notes').value = '';
+
+  // 加载原料搜索
+  const matInput = document.getElementById('req-material');
+  matInput.value = '';
+  document.getElementById('req-material-hint').style.display = 'none';
+  const populateDatalist = prices => {
+    document.getElementById('matDatalist').innerHTML =
+      prices.map(p => `<option value="${p.material}" data-price="${p.unit_price}">`).join('');
+  };
+  if (_reqMatPrices.length === 0) {
+    fetch('/api/material-prices').then(r => r.json()).then(prices => {
+      _reqMatPrices = prices;
+      populateDatalist(prices);
+    });
+  } else {
+    populateDatalist(_reqMatPrices);
+  }
+  // Show unit price hint when user selects a material
+  matInput.oninput = () => {
+    const val = matInput.value;
+    const match = _reqMatPrices.find(p => p.material === val);
+    const hint = document.getElementById('req-material-hint');
+    if (match) {
+      hint.textContent = `单价：${match.unit_price} HKD/磅`;
+      hint.style.display = '';
+    } else {
+      hint.style.display = 'none';
+    }
+  };
+
+  // 加载关联订单下拉（仅待生产/生产中）
+  const ordSel = document.getElementById('req-order');
+  if (_reqOrders.length === 0) {
+    fetch('/api/injection').then(r => r.json()).then(orders => {
+      _reqOrders = orders.filter(o => ['待生产','生产中'].includes(o.status));
+      ordSel.innerHTML = '<option value="">不关联</option>' +
+        _reqOrders.map(o => `<option value="${o.id}" data-num="${o.order_number||''}">${o.order_number||('#'+o.id)}</option>`).join('');
+    });
+  } else {
+    ordSel.innerHTML = '<option value="">不关联</option>' +
+      _reqOrders.map(o => `<option value="${o.id}" data-num="${o.order_number||''}">${o.order_number||('#'+o.id)}</option>`).join('');
+  }
+  ordSel.value = '';
+
+  new bootstrap.Modal(document.getElementById('reqModal')).show();
+}
+
+function saveReq() {
+  const date      = document.getElementById('req-date').value;
+  const applicant = document.getElementById('req-applicant').value.trim();
+  const material  = document.getElementById('req-material').value;
+  const weight    = parseFloat(document.getElementById('req-weight').value);
+  const notes     = document.getElementById('req-notes').value.trim();
+  const ordSel    = document.getElementById('req-order');
+  const ordId     = ordSel.value || null;
+  const ordNum    = ordId ? (ordSel.selectedOptions[0]?.dataset.num || '') : '';
+
+  if (!applicant) { alert('请填写申请人'); return; }
+  if (!material)  { alert('请选择原料型号'); return; }
+  if (!weight || weight <= 0) { alert('请填写有效的申请料重'); return; }
+
+  fetch('/api/requisitions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ date, applicant, material, requested_weight_kg: weight, notes, order_id: ordId, order_number: ordNum })
+  })
+    .then(r => r.json())
+    .then(data => {
+      if (data.error) { alert(data.error); return; }
+      bootstrap.Modal.getInstance(document.getElementById('reqModal'))?.hide();
+      allReqs.unshift(data);
+      renderReqs();
+      showToast(`领料单 ${data.req_number} 已创建`, 'success');
+    })
+    .catch(() => showToast('提交失败', 'danger'));
+}
+
+function issueReq(id) {
+  if (!confirm('确认出库？此操作将标记该领料单为已出库。')) return;
+  fetch(`/api/requisitions/${id}/status`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status: '已出库' })
+  })
+    .then(r => r.json())
+    .then(updated => {
+      const idx = allReqs.findIndex(r => r.id === id);
+      if (idx !== -1) allReqs[idx] = updated;
+      renderReqs();
+      showToast('已标记出库', 'success');
+    });
+}
+
+function deleteReq(id) {
+  if (!confirm('确定删除此领料单？')) return;
+  fetch(`/api/requisitions/${id}`, { method: 'DELETE' })
+    .then(() => {
+      allReqs = allReqs.filter(r => r.id !== id);
+      renderReqs();
+      showToast('已删除', 'success');
+    });
+}
+
+// ── 初始化 ────────────────────────────────────────────────────────────────────
+loadOrders();
+setInterval(loadOrders, 30000);
+</script>
+</body>
+</html>

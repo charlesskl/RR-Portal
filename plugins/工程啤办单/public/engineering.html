@@ -1,0 +1,1478 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>工程部 - 生产订单管理</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+  <link href="style.css" rel="stylesheet">
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+  <style>
+    .type-tabs .nav-link { color: #333; font-weight: 500; }
+    .type-tabs .nav-link.active { background: #1a3a6c; color: #fff; border-color: #1a3a6c; }
+    .modal-fullscreen .modal-body { overflow-y: auto; }
+    .items-table input[type=number] { min-width: 60px; max-width: 90px; }
+    .items-table input[type=text]   { min-width: 60px; }
+    .items-table input.w-date { min-width: 90px; max-width: 100px; }
+    .items-table input:focus { position: relative; z-index: 10; min-width: 200px; box-shadow: 0 0 0 3px rgba(13,110,253,.3); }
+    .items-table input[name=mold_name]:focus,
+    .items-table input[list]:focus { min-width: 280px; }
+    .items-table td { overflow: visible; }
+    .fill-handle { width:9px; height:9px; background:#0d6efd; border-radius:1px; cursor:crosshair; margin:3px auto 0; transition:transform .1s; }
+    .fill-handle:hover { background:#0a58ca; transform:scale(1.4); }
+    .fill-drag-tip { position:fixed; background:#0d6efd; color:#fff; border-radius:4px; padding:2px 10px; font-size:13px; pointer-events:none; z-index:9999; white-space:nowrap; display:none; }
+  </style>
+</head>
+<body class="bg-light">
+
+<!-- 导航栏 -->
+<nav class="navbar navbar-dark" style="background:#1a3a6c">
+  <div class="container-fluid">
+    <span class="navbar-brand"><i class="bi bi-tools me-2"></i>工程部 — 生产订单管理</span>
+    <div class="d-flex gap-2 align-items-center">
+      <button id="notifBtn" class="btn btn-sm btn-outline-light" onclick="toggleNotifications()" title="点击开启完成通知">
+        <i class="bi bi-bell" id="notifIcon"></i>
+      </button>
+      <a href="index.html"     class="nav-dept-link"><i class="bi bi-house me-1"></i>主页</a>
+      <a href="injection.html" class="nav-dept-link">啤机部</a>
+      <a href="slush.html"     class="nav-dept-link">搪胶部</a>
+      <a href="spray.html"     class="nav-dept-link">喷油部</a>
+      <a href="supervisor.html" class="nav-dept-link" style="background:rgba(253,126,20,.25);border-color:rgba(253,126,20,.6)"><i class="bi bi-shield-check me-1"></i>主管审核</a>
+      <a href="manager.html" class="nav-dept-link" style="background:rgba(124,58,237,.25);border-color:rgba(124,58,237,.6)"><i class="bi bi-person-badge me-1"></i>经理审核</a>
+    </div>
+  </div>
+</nav>
+
+<div class="container-fluid mt-3">
+  <!-- 标签切换 -->
+  <ul class="nav nav-tabs type-tabs mb-3" id="mainTabs">
+    <li class="nav-item"><a class="nav-link active" href="#" onclick="switchTab('injection',this)"><i class="bi bi-box-seam me-1"></i>啤办单</a></li>
+    <li class="nav-item"><a class="nav-link" href="#" onclick="switchTab('slush',this)"><i class="bi bi-droplet-half me-1"></i>搪胶单</a></li>
+    <li class="nav-item"><a class="nav-link" href="#" onclick="switchTab('spray',this)"><i class="bi bi-palette me-1"></i>喷油单</a></li>
+  </ul>
+
+  <!-- 操作栏 -->
+  <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
+    <div class="d-flex flex-wrap align-items-center gap-2">
+      <div class="status-filter d-flex flex-wrap gap-1">
+        <button class="btn btn-sm btn-outline-secondary active" onclick="filterStatus('',this)">全部</button>
+        <button class="btn btn-sm" style="background:#fd7e14;color:#fff;border-color:#fd7e14" onclick="filterStatus('待审核',this)">待审核</button>
+        <button class="btn btn-sm" style="background:#7c3aed;color:#fff;border-color:#7c3aed" onclick="filterStatus('待经理审核',this)">待经理审核</button>
+        <button class="btn btn-sm btn-warning"  onclick="filterStatus('待生产',this)">待生产</button>
+        <button class="btn btn-sm btn-info"     onclick="filterStatus('生产中',this)">生产中</button>
+        <button class="btn btn-sm btn-success"  onclick="filterStatus('已完成',this)">已完成</button>
+        <button class="btn btn-sm btn-danger"   onclick="filterStatus('已驳回',this)">已驳回</button>
+      </div>
+      <select id="workshopFilter" class="form-select form-select-sm" style="width:auto" onchange="filterWorkshop(this.value)">
+        <option value="">全部车间</option>
+        <option value="A车间">A车间</option>
+        <option value="B车间">B车间</option>
+        <option value="华登车间">华登车间</option>
+        <option value="湖南车间">湖南车间</option>
+        <option value="模厂">模厂</option>
+      </select>
+    </div>
+    <div class="d-flex gap-2">
+      <button class="btn btn-outline-secondary" onclick="openSummary()">
+        <i class="bi bi-table me-1"></i>总表
+      </button>
+      <button class="btn btn-primary" onclick="openNewModal()">
+        <i class="bi bi-plus-lg me-1"></i>新建单据
+      </button>
+    </div>
+  </div>
+
+  <!-- 订单列表 -->
+  <div class="card shadow-sm">
+    <div class="card-body p-0">
+      <div id="orderList"><div class="empty-state"><i class="bi bi-inbox"></i><p class="mt-2">加载中...</p></div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════ 啤办单 Modal ═══════════════════ -->
+<div class="modal fade" id="injModal" tabindex="-1" data-bs-backdrop="static">
+  <div class="modal-dialog modal-fullscreen">
+    <div class="modal-content">
+      <div class="modal-header" style="background:#1a3a6c;color:#fff">
+        <h5 class="modal-title"><i class="bi bi-box-seam me-2"></i><span id="injModalTitle">新建啤办单</span></h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="inj-id">
+        <input type="hidden" id="inj-status" value="待审核">
+        <div class="row g-3 mb-3">
+          <div class="col-md-3"><label class="form-label fw-bold">产品编号</label><input class="form-control" id="inj-order_number" placeholder="如 HD2024001"></div>
+          <div class="col-md-3"><label class="form-label fw-bold">订单编号</label><input class="form-control" id="inj-doc_number" placeholder="订单编号"></div>
+          <div class="col-md-3"><label class="form-label fw-bold">日期</label><input type="date" class="form-control" id="inj-date"></div>
+          <div class="col-md-3"><label class="form-label fw-bold">阶段</label>
+            <select class="form-select" id="inj-stage">
+              <option value="">请选择阶段</option>
+              <option>T0</option><option>EP</option><option>FEP</option><option>PP</option>
+            </select>
+          </div>
+          <div class="col-md-3"><label class="form-label fw-bold">类型</label>
+            <select class="form-select" id="inj-order_type">
+              <option>试模</option><option>试色</option><option>啤办</option>
+            </select>
+          </div>
+          <div class="col-md-3"><label class="form-label fw-bold">车间</label>
+            <select class="form-select" id="inj-workshop">
+              <option>A车间</option><option>B车间</option><option>华登车间</option><option>湖南车间</option><option>模厂</option>
+            </select>
+          </div>
+          <div class="col-md-3"><label class="form-label fw-bold">主管</label>
+            <select class="form-select" id="inj-supervisor">
+              <option value="">请选择主管</option>
+              <option>段新辉</option><option>唐海林</option><option>蒙海欢</option><option>万志勇</option><option>章发东</option><option>刘际维</option><option>甘勇辉</option><option>王玉国</option>
+            </select>
+          </div>
+          <div class="col-md-3"><label class="form-label fw-bold">跟进工程师</label><input class="form-control" id="inj-engineer" placeholder="请输入姓名"></div>
+          <div class="col-12"><label class="form-label fw-bold">原因/备注</label><input class="form-control" id="inj-reason" placeholder="如 测试问题 用于优化做办"></div>
+        </div>
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <strong>明细行</strong>
+          <div class="d-flex gap-2">
+            <button class="btn btn-sm btn-outline-success" onclick="triggerExcelImport('injection')"><i class="bi bi-file-earmark-excel me-1"></i>导入Excel</button>
+            <button class="btn btn-sm btn-outline-primary" onclick="addInjRow()"><i class="bi bi-plus-lg me-1"></i>添加行</button>
+          </div>
+        </div>
+        <div class="items-table-wrap">
+          <table class="table table-bordered table-sm items-table" id="injItemsTable">
+            <thead>
+              <tr>
+                <th>工模编号</th><th>工模名称</th><th>机型</th><th>原料</th><th>颜色</th><th>色粉编号</th>
+                <th>件数/套数</th><th>数量(啤)</th><th>整啤毛重(g)</th><th>所需用料(KG)</th>
+                <th>模具回厂时间</th><th>啤办完成时间</th><th>备注</th><th></th>
+              </tr>
+            </thead>
+            <tbody id="injItemsBody"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+        <button class="btn btn-primary" onclick="saveOrder('injection')"><i class="bi bi-save me-1"></i>保存</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════ 搪胶单 Modal ═══════════════════ -->
+<div class="modal fade" id="slushModal" tabindex="-1" data-bs-backdrop="static">
+  <div class="modal-dialog modal-fullscreen">
+    <div class="modal-content">
+      <div class="modal-header" style="background:#16a085;color:#fff">
+        <h5 class="modal-title"><i class="bi bi-droplet-half me-2"></i><span id="slushModalTitle">新建搪胶单</span></h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="slush-id">
+        <input type="hidden" id="slush-status" value="待审核">
+        <div class="row g-3 mb-3">
+          <div class="col-md-3"><label class="form-label fw-bold">产品编号</label><input class="form-control" id="slush-order_number" placeholder="如 XX2024001"></div>
+          <div class="col-md-3"><label class="form-label fw-bold">日期</label><input type="date" class="form-control" id="slush-date"></div>
+          <div class="col-md-3"><label class="form-label fw-bold">类型</label>
+            <select class="form-select" id="slush-order_type">
+              <option>搪胶</option><option>搪办</option><option>试色</option>
+            </select>
+          </div>
+          <div class="col-md-3"><label class="form-label fw-bold">主管</label>
+            <select class="form-select" id="slush-supervisor">
+              <option value="">请选择主管</option>
+              <option>段新辉</option><option>唐海林</option><option>蒙海欢</option><option>万志勇</option><option>章发东</option><option>刘际维</option><option>甘勇辉</option><option>王玉国</option>
+            </select>
+          </div>
+          <div class="col-md-3"><label class="form-label fw-bold">跟进工程师</label><input class="form-control" id="slush-engineer" placeholder="请输入姓名"></div>
+          <div class="col-12"><label class="form-label fw-bold">原因/备注</label><input class="form-control" id="slush-reason" placeholder="如 新颜色啤办"></div>
+        </div>
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <strong>明细行</strong>
+          <button class="btn btn-sm btn-outline-success" onclick="triggerExcelImport('slush')" style="color:#16a085;border-color:#16a085"><i class="bi bi-file-earmark-excel me-1"></i>导入Excel</button>
+            <button class="btn btn-sm btn-outline-success" onclick="addSlushRow()"><i class="bi bi-plus-lg me-1"></i>添加行</button>
+        </div>
+        <div class="items-table-wrap">
+          <table class="table table-bordered table-sm items-table" id="slushItemsTable">
+            <thead>
+              <tr>
+                <th>序号</th><th>产品编号</th><th>工模编号</th><th>工模名称</th><th>原料</th>
+                <th>颜色/编号</th><th>色粉编号</th><th>每啤毛重(g)</th><th>数量</th>
+                <th>要求完成日期</th><th>回模时间</th><th>备注</th><th></th>
+              </tr>
+            </thead>
+            <tbody id="slushItemsBody"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+        <button class="btn btn-success" onclick="saveOrder('slush')"><i class="bi bi-save me-1"></i>保存</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════ 喷油单 Modal ═══════════════════ -->
+<div class="modal fade" id="sprayModal" tabindex="-1" data-bs-backdrop="static">
+  <div class="modal-dialog modal-fullscreen">
+    <div class="modal-content">
+      <div class="modal-header" style="background:#8e44ad;color:#fff">
+        <h5 class="modal-title"><i class="bi bi-palette me-2"></i><span id="sprayModalTitle">新建喷油单</span></h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="spray-id">
+        <input type="hidden" id="spray-status" value="待审核">
+        <div class="row g-3 mb-3">
+          <div class="col-md-3"><label class="form-label fw-bold">产品编号</label><input class="form-control" id="spray-order_number" placeholder="如 PY2024001"></div>
+          <div class="col-md-3"><label class="form-label fw-bold">日期</label><input type="date" class="form-control" id="spray-date"></div>
+          <div class="col-md-3"><label class="form-label fw-bold">类型</label>
+            <select class="form-select" id="spray-order_type">
+              <option>喷油</option><option>试色</option><option>返工</option>
+            </select>
+          </div>
+          <div class="col-md-3"><label class="form-label fw-bold">车间</label>
+            <select class="form-select" id="spray-workshop">
+              <option>湖南车间</option><option>华登车间</option><option>模厂</option>
+            </select>
+          </div>
+          <div class="col-md-3"><label class="form-label fw-bold">主管</label>
+            <select class="form-select" id="spray-supervisor">
+              <option value="">请选择主管</option>
+              <option>段新辉</option><option>唐海林</option><option>蒙海欢</option><option>万志勇</option><option>章发东</option><option>刘际维</option><option>甘勇辉</option><option>王玉国</option>
+            </select>
+          </div>
+          <div class="col-md-3"><label class="form-label fw-bold">跟进工程师</label><input class="form-control" id="spray-engineer" placeholder="请输入姓名"></div>
+          <div class="col-md-3"><label class="form-label fw-bold">收到胶件时间</label><input type="date" class="form-control" id="spray-receive_time"></div>
+          <div class="col-md-3"><label class="form-label fw-bold">工程预计完成时间</label><input type="date" class="form-control" id="spray-eng_complete_time"></div>
+          <div class="col-12"><label class="form-label fw-bold">原因/备注</label><input class="form-control" id="spray-reason" placeholder="如 新款喷油打样"></div>
+        </div>
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <strong>明细行</strong>
+          <button class="btn btn-sm btn-outline-success" onclick="triggerExcelImport('spray')" style="color:#8e44ad;border-color:#8e44ad"><i class="bi bi-file-earmark-excel me-1"></i>导入Excel</button>
+            <button class="btn btn-sm btn-outline-purple" onclick="addSprayRow()" style="color:#8e44ad;border-color:#8e44ad"><i class="bi bi-plus-lg me-1"></i>添加行</button>
+        </div>
+        <div class="items-table-wrap">
+          <table class="table table-bordered table-sm items-table" id="sprayItemsTable">
+            <thead>
+              <tr>
+                <th>客名</th><th>名称</th><th>样板数量</th>
+                <th style="color:#dc3545">喷油交货时间</th><th>工程师/PMC</th><th>备注</th><th></th>
+              </tr>
+            </thead>
+            <tbody id="sprayItemsBody"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+        <button class="btn btn-primary" style="background:#8e44ad;border-color:#8e44ad" onclick="saveOrder('spray')"><i class="bi bi-save me-1"></i>保存</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 订单详情查看 Modal -->
+<div class="modal fade" id="orderDetailModal" tabindex="-1">
+  <div class="modal-dialog modal-xl">
+    <div class="modal-content">
+      <div class="modal-header" style="background:#1a3a6c;color:#fff">
+        <h5 class="modal-title"><i class="bi bi-file-text me-2"></i>订单详情 — <span id="detailModalLabel"></span></h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body" id="orderDetailBody"><div class="text-center text-muted py-4">加载中...</div></div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
+        <button class="btn btn-outline-primary" id="detailEditBtn"><i class="bi bi-pencil me-1"></i>编辑</button>
+        <button class="btn btn-outline-secondary" id="detailPrintBtn"><i class="bi bi-printer me-1"></i>打印</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 问题查看/处理 Modal -->
+<div class="modal fade" id="engProblemModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header bg-danger text-white">
+        <h5 class="modal-title"><i class="bi bi-exclamation-triangle-fill me-2"></i>问题处理 — <span id="epmOrderNum"></span></h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body" id="epmBody">加载中...</div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 主管审核 Modal -->
+<div class="modal fade" id="reviewModal" tabindex="-1" data-bs-backdrop="static">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header" style="background:#fd7e14;color:#fff">
+        <h5 class="modal-title"><i class="bi bi-shield-check me-2"></i>主管审核 — <span id="reviewOrderLabel"></span></h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <!-- 单据内容（只读） -->
+        <div id="reviewOrderDetails"><div class="text-center text-muted py-4">加载中...</div></div>
+
+        <hr class="my-4">
+
+        <!-- 审核操作区 -->
+        <div class="row g-3">
+          <div class="col-md-4">
+            <label class="form-label fw-bold">审核码 <span class="text-danger">*</span></label>
+            <input type="password" id="reviewPin" class="form-control" placeholder="请输入主管审核码" autocomplete="off">
+            <div id="reviewPinError" class="text-danger small mt-1 d-none">审核码错误，无法审核</div>
+          </div>
+          <div class="col-md-8">
+            <label class="form-label fw-bold">驳回原因 <span class="text-muted fw-normal small">（可选）</span></label>
+            <input type="text" id="rejectReason" class="form-control" placeholder="请说明驳回原因（可留空）">
+            <div id="rejectReasonError" class="d-none"></div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer justify-content-between">
+        <button class="btn btn-outline-secondary" data-bs-dismiss="modal">取消</button>
+        <div class="d-flex gap-2">
+          <button class="btn btn-danger" onclick="submitReview('reject')"><i class="bi bi-x-circle me-1"></i>驳回</button>
+          <button class="btn btn-success" onclick="submitReview('approve')"><i class="bi bi-check-circle me-1"></i>审核通过</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 总表 Modal -->
+<div class="modal fade" id="summaryModal" tabindex="-1">
+  <div class="modal-dialog modal-fullscreen">
+    <div class="modal-content">
+      <div class="modal-header" style="background:#1a3a6c;color:#fff">
+        <h5 class="modal-title"><i class="bi bi-table me-2"></i>生产总表</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body p-2">
+        <div class="d-flex flex-wrap gap-2 mb-3 align-items-center">
+          <select id="summaryTypeFilter" class="form-select form-select-sm" style="width:auto" onchange="renderSummaryTable()">
+            <option value="">全部部门</option>
+            <option value="injection">啤办单</option>
+            <option value="slush">搪胶单</option>
+            <option value="spray">喷油单</option>
+          </select>
+          <select id="summaryStatusFilter" class="form-select form-select-sm" style="width:auto" onchange="renderSummaryTable()">
+            <option value="">全部状态</option>
+            <option value="待审核">待审核</option>
+            <option value="待生产">待生产</option>
+            <option value="生产中">生产中</option>
+            <option value="已完成">已完成</option>
+            <option value="已驳回">已驳回</option>
+            <option value="已取消">已取消</option>
+          </select>
+          <select id="summaryWorkshopFilter" class="form-select form-select-sm" style="width:auto" onchange="renderSummaryTable()">
+            <option value="">全部车间</option>
+            <option value="A车间">A车间</option>
+            <option value="B车间">B车间</option>
+            <option value="华登车间">华登车间</option>
+            <option value="湖南车间">湖南车间</option>
+            <option value="模厂">模厂</option>
+          </select>
+          <button class="btn btn-sm btn-outline-secondary" onclick="loadSummary()"><i class="bi bi-arrow-clockwise me-1"></i>刷新</button>
+          <span id="summaryCount" class="text-muted small ms-1"></span>
+        </div>
+        <div id="summaryTableWrap"><div class="text-center text-muted py-4">加载中...</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Toast通知 -->
+<div class="position-fixed bottom-0 end-0 p-3" style="z-index:9999">
+  <div id="toast" class="toast align-items-center text-white border-0" role="alert">
+    <div class="d-flex">
+      <div class="toast-body" id="toastMsg">操作成功</div>
+      <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+// ─── 状态管理 ────────────────────────────────────────────────────────────────
+let currentTab = 'injection';
+let currentFilter = '';
+let currentWorkshop = '';
+
+function switchTab(type, el) {
+  document.querySelectorAll('.type-tabs .nav-link').forEach(a => a.classList.remove('active'));
+  el.classList.add('active');
+  currentTab = type;
+  currentFilter = '';
+  currentWorkshop = '';
+  document.querySelectorAll('.status-filter .btn').forEach((b, i) => b.classList.toggle('active', i === 0));
+  document.getElementById('workshopFilter').value = '';
+  loadOrders();
+  return false;
+}
+
+function filterWorkshop(val) {
+  currentWorkshop = val;
+  loadOrders();
+}
+
+function filterStatus(status, el) {
+  currentFilter = status;
+  document.querySelectorAll('.status-filter .btn').forEach(b => b.classList.remove('active'));
+  el.classList.add('active');
+  loadOrders();
+}
+
+// ─── 加载/渲染订单列表 ────────────────────────────────────────────────────────
+let engProblemsMap = {};
+
+function loadOrders() {
+  document.getElementById('orderList').innerHTML = '<div class="text-center p-4 text-muted">加载中...</div>';
+  Promise.all([
+    fetch(`/api/${currentTab}`).then(r => r.json()),
+    fetch(`/api/problems?type=${currentTab}`).then(r => r.json())
+  ]).then(([orders, problems]) => {
+    engProblemsMap = {};
+    problems.filter(p => p.status === '待处理').forEach(p => {
+      engProblemsMap[p.order_id] = (engProblemsMap[p.order_id] || 0) + 1;
+    });
+    if (currentFilter)   orders = orders.filter(o => o.status === currentFilter);
+    if (currentWorkshop) orders = orders.filter(o => o.workshop === currentWorkshop);
+    // 按主管分组，每组内待审核排最前，其次按 ID 降序
+    const _sOrd = { '待审核':0, '待经理审核':1, '待生产':2, '生产中':3, '已完成':4, '已驳回':5, '已取消':6 };
+    orders.sort((a, b) => {
+      const sa = (a.supervisor || ''), sb = (b.supervisor || '');
+      if (sa !== sb) return sa.localeCompare(sb, 'zh');
+      const oa = _sOrd[a.status] ?? 9, ob = _sOrd[b.status] ?? 9;
+      if (oa !== ob) return oa - ob;
+      return b.id - a.id;
+    });
+    renderOrderList(orders);
+  }).catch(() => showToast('加载失败', 'danger'));
+}
+
+const statusBadge = s => ({
+  '待审核': '<span class="badge" style="background:#fd7e14">待审核</span>',
+  '待经理审核': '<span class="badge" style="background:#7c3aed">待经理审核</span>',
+  '待生产': '<span class="badge badge-pending">待生产</span>',
+  '生产中': '<span class="badge badge-progress">生产中</span>',
+  '已完成': '<span class="badge badge-done">已完成</span>',
+  '已取消': '<span class="badge bg-secondary">已取消</span>',
+  '已驳回': '<span class="badge bg-danger">已驳回</span>'
+}[s] || `<span class="badge bg-secondary">${s}</span>`);
+
+const typeNames = { injection: '啤办单', slush: '搪胶单', spray: '喷油单' };
+
+function renderOrderList(orders) {
+  if (!orders.length) {
+    document.getElementById('orderList').innerHTML = `<div class="empty-state"><i class="bi bi-inbox"></i><p class="mt-2">暂无单据</p></div>`;
+    return;
+  }
+  const isSpray = currentTab === 'spray';
+  const rows = orders.map(o => `
+    <tr class="order-row" style="cursor:pointer" onclick="viewOrderDetail(${o.id},'${(o.order_number||'').replace(/'/g,'')}')">
+      <td>${o.id}</td>
+      <td><strong>${o.order_number || '-'}</strong></td>
+      <td>${o.date || '-'}</td>
+      <td>${o.order_type || '-'}</td>
+      <td>${o.workshop || '-'}</td>
+      <td>${o.supervisor || '-'}</td>
+      <td>${o.eng_name || '-'}</td>
+      ${isSpray ? `<td style="color:#0d6efd;font-weight:500">${o.receive_time || '-'}</td><td style="color:#d63384;font-weight:500">${o.eng_complete_time || '-'}</td>` : ''}
+      <td>${o.reason || '-'}</td>
+      <td>
+        ${statusBadge(o.status)}
+        ${engProblemsMap[o.id] ? `<span class="badge bg-danger ms-1" style="cursor:pointer" onclick="event.stopPropagation();viewEngProblems(${o.id},'${(o.order_number||'').replace(/'/g,'')}')"><i class="bi bi-exclamation-triangle-fill me-1"></i>${engProblemsMap[o.id]}个问题</span>` : ''}
+      </td>
+      <td>${fmtDate(o.created_at)}</td>
+      <td onclick="event.stopPropagation()">
+        <div class="btn-group btn-group-sm">
+          ${(currentTab === 'injection' && (o.status === '待审核' || o.status === '待经理审核')) ? `<button class="btn ${o.status === '待经理审核' ? 'btn-primary' : 'btn-warning'} fw-bold" onclick="reviewOrder(${o.id},'${(o.order_number||'').replace(/'/g,'')}')"><i class="bi bi-shield-check me-1"></i>审核</button>` : ''}
+            <button class="btn btn-outline-primary"  onclick="editOrder(${o.id})" title="编辑"><i class="bi bi-pencil"></i></button>
+            <button class="btn btn-outline-danger"   onclick="deleteOrder(${o.id})" title="删除"><i class="bi bi-trash"></i></button>
+          <button class="btn btn-outline-success"    onclick="editOrder(${o.id},true)" title="复制此单新建"><i class="bi bi-copy"></i></button>
+          <button class="btn btn-outline-secondary"  onclick="printOrder(${o.id})" title="打印"><i class="bi bi-printer"></i></button>
+          ${engProblemsMap[o.id] ? `<button class="btn btn-danger" onclick="viewEngProblems(${o.id},'${(o.order_number||'').replace(/'/g,'')}')" title="查看问题"><i class="bi bi-exclamation-triangle-fill"></i></button>` : ''}
+        </div>
+      </td>
+    </tr>`).join('');
+
+  document.getElementById('orderList').innerHTML = `
+    <table class="table table-hover table-sm mb-0">
+      <thead class="table-dark">
+        <tr>
+          <th>ID</th><th>产品编号</th><th>日期</th><th>类型</th><th>车间</th><th>主管</th><th>跟进工程师</th>
+          ${isSpray ? `<th style="color:#7eb8ff">收到胶件时间</th><th style="color:#f9a8d4">工程预计完成时间</th>` : ''}
+          <th>原因</th><th>状态</th><th>创建时间</th><th>操作</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
+function fmtDate(s) {
+  if (!s) return '-';
+  return new Date(s).toLocaleString('zh-CN', {
+    timeZone: 'Asia/Shanghai', hour12: false,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit'
+  }).replace(/\//g, '-');
+}
+
+// ─── 新建/编辑 ────────────────────────────────────────────────────────────────
+function openNewModal() {
+  const modalId = { injection: 'injModal', slush: 'slushModal', spray: 'sprayModal' }[currentTab];
+  const titleId = { injection: 'injModalTitle', slush: 'slushModalTitle', spray: 'sprayModalTitle' }[currentTab];
+  const bodyId  = { injection: 'injItemsBody', slush: 'slushItemsBody', spray: 'sprayItemsBody' }[currentTab];
+  const prefix  = currentTab === 'injection' ? 'inj' : currentTab === 'slush' ? 'slush' : 'spray';
+
+  document.getElementById(titleId).textContent = `新建${typeNames[currentTab]}`;
+  document.getElementById(`${prefix}-id`).value = '';
+  document.getElementById(`${prefix}-order_number`).value = '';
+  const docNumElNew = document.getElementById(`${prefix}-doc_number`);
+  if (docNumElNew) docNumElNew.value = '';
+  document.getElementById(`${prefix}-date`).value = new Date().toISOString().slice(0,10);
+  document.getElementById(`${prefix}-order_type`).value = prefix === 'inj' ? '试模' : prefix === 'slush' ? '搪胶' : '喷油';
+  const stgElNew = document.getElementById(`${prefix}-stage`);
+  if (stgElNew) stgElNew.value = '';
+  document.getElementById(`${prefix}-status`).value = (currentTab === 'injection') ? '待审核' : '待生产';
+  document.getElementById(`${prefix}-reason`).value = '';
+  const wsElNew = document.getElementById(`${prefix}-workshop`);
+  if (wsElNew) wsElNew.value = prefix === 'inj' ? 'A车间' : '湖南车间';
+  const supElNew = document.getElementById(`${prefix}-supervisor`);
+  if (supElNew) supElNew.value = '';
+  document.getElementById(`${prefix}-engineer`).value = '';
+  const rcvElNew = document.getElementById(`${prefix}-receive_time`);
+  if (rcvElNew) rcvElNew.value = '';
+  const engCtElNew = document.getElementById(`${prefix}-eng_complete_time`);
+  if (engCtElNew) engCtElNew.value = '';
+
+  const showModal = () => {
+    document.getElementById(bodyId).innerHTML = '';
+    if (currentTab === 'injection') addInjRow();
+    else if (currentTab === 'slush') addSlushRow();
+    else addSprayRow();
+    new bootstrap.Modal(document.getElementById(modalId)).show();
+  };
+
+  // 注塑单需要原料列表，若还未加载则先拉取
+  if (currentTab === 'injection' && _matPrices.length === 0) {
+    fetch('/api/material-prices').then(r => r.json()).then(p => { _matPrices = p; showModal(); });
+  } else {
+    showModal();
+  }
+}
+
+function editOrder(id, isDuplicate = false) {
+  fetch(`/api/${currentTab}/${id}`)
+    .then(r => r.json())
+    .then(order => {
+      const prefix  = currentTab === 'injection' ? 'inj' : currentTab === 'slush' ? 'slush' : 'spray';
+      const modalId = { injection: 'injModal', slush: 'slushModal', spray: 'sprayModal' }[currentTab];
+      const titleId = { injection: 'injModalTitle', slush: 'slushModalTitle', spray: 'sprayModalTitle' }[currentTab];
+      const bodyId  = { injection: 'injItemsBody', slush: 'slushItemsBody', spray: 'sprayItemsBody' }[currentTab];
+
+      document.getElementById(titleId).textContent = isDuplicate ? `复制${typeNames[currentTab]}（新建）` : `编辑${typeNames[currentTab]} #${id}`;
+      document.getElementById(`${prefix}-id`).value = isDuplicate ? '' : order.id;
+      document.getElementById(`${prefix}-order_number`).value = order.order_number || '';
+      const docNumElEdit = document.getElementById(`${prefix}-doc_number`);
+      if (docNumElEdit) docNumElEdit.value = isDuplicate ? '' : (order.doc_number || '');
+      document.getElementById(`${prefix}-date`).value = new Date().toISOString().slice(0,10);
+      document.getElementById(`${prefix}-order_type`).value = order.order_type || '';
+      document.getElementById(`${prefix}-status`).value = isDuplicate ? '待审核' : (order.status || '待审核');
+      document.getElementById(`${prefix}-reason`).value = order.reason || '';
+      const wsElEdit = document.getElementById(`${prefix}-workshop`);
+      if (wsElEdit) wsElEdit.value = order.workshop || '';
+      const stgElEdit = document.getElementById(`${prefix}-stage`);
+      if (stgElEdit) stgElEdit.value = order.stage || '';
+      const supElEdit = document.getElementById(`${prefix}-supervisor`);
+      if (supElEdit) supElEdit.value = order.supervisor || '';
+      document.getElementById(`${prefix}-engineer`).value = order.eng_name || '';
+      const rcvEl = document.getElementById(`${prefix}-receive_time`);
+      if (rcvEl) rcvEl.value = order.receive_time || '';
+      const engCtEl = document.getElementById(`${prefix}-eng_complete_time`);
+      if (engCtEl) engCtEl.value = order.eng_complete_time || '';
+
+      const fillRows = () => {
+        const tbody = document.getElementById(bodyId);
+        tbody.innerHTML = '';
+        (order.items || []).forEach(it => {
+          if (currentTab === 'injection') addInjRow(it);
+          else if (currentTab === 'slush') addSlushRow(it);
+          else addSprayRow(it);
+        });
+        new bootstrap.Modal(document.getElementById(modalId)).show();
+      };
+
+      // 编辑注塑单时同样确保原料列表已加载
+      if (currentTab === 'injection' && _matPrices.length === 0) {
+        fetch('/api/material-prices').then(r => r.json()).then(p => { _matPrices = p; fillRows(); });
+      } else {
+        fillRows();
+      }
+    })
+    .catch(() => showToast('加载失败', 'danger'));
+}
+
+// ─── 添加表格行 ───────────────────────────────────────────────────────────────
+function inp(type, name, val='', extra='') {
+  const v = val === null || val === undefined ? '' : val;
+  const escaped = String(v).replace(/"/g, '&quot;');
+  return `<input type="${type}" class="form-control form-control-sm" name="${name}" value="${escaped}" title="${escaped}" ${extra} onfocus="this.title=this.value" oninput="this.title=this.value">`;
+}
+function sel(name, opts, val='') {
+  return `<select class="form-select form-select-sm" name="${name}">${opts.map(o => `<option${o===val?' selected':''}>${o}</option>`).join('')}</select>`;
+}
+// ── 全局原料下拉框（挂在body上，不被任何容器裁剪）──
+const _matDropEl = document.createElement('div');
+_matDropEl.id = 'globalMatDrop';
+_matDropEl.style.cssText = 'display:none;position:fixed;z-index:9999;background:#fff;border:1px solid #bbb;border-radius:6px;max-height:340px;overflow-y:auto;width:280px;box-shadow:0 6px 20px rgba(0,0,0,.25);font-size:.85rem;padding:4px 0';
+document.body.appendChild(_matDropEl);
+let _matDropInp = null;
+
+function matSel(val) {
+  const v = (val||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;');
+  return `<div class="mat-sel-wrap" style="min-width:130px">
+    <input type="text" class="form-control form-control-sm" name="material"
+      value="${v}" placeholder="搜索原料..." autocomplete="off"
+      onfocus="matDropShow(this)" oninput="matDropFilter(this)">
+  </div>`;
+}
+function matDropShow(inp) {
+  if (_matPrices.length === 0) return;
+  _matDropInp = inp;
+  matDropFilter(inp);
+  _matDropPos(inp);
+  _matDropEl.style.display = '';
+  setTimeout(() => {
+    const close = e => {
+      if (_matDropEl.contains(e.target) || e.target === inp) return;
+      _matDropEl.style.display = 'none';
+      _matDropInp = null;
+      document.removeEventListener('mousedown', close);
+    };
+    document.addEventListener('mousedown', close);
+  }, 0);
+}
+function _matDropPos(inp) {
+  const r = inp.getBoundingClientRect();
+  const spaceBelow = window.innerHeight - r.bottom;
+  const spaceAbove = r.top;
+  // 优先向下，空间不够则向上
+  if (spaceBelow >= 200) {
+    _matDropEl.style.top = r.bottom + 2 + 'px';
+    _matDropEl.style.bottom = '';
+  } else {
+    _matDropEl.style.bottom = (window.innerHeight - r.top + 2) + 'px';
+    _matDropEl.style.top = '';
+  }
+  _matDropEl.style.left = Math.max(4, Math.min(r.left, window.innerWidth - 290)) + 'px';
+}
+function matDropFilter(inp) {
+  _matDropInp = inp;
+  const q = inp.value.trim().toLowerCase();
+  const matches = q ? _matPrices.filter(p => p.material.toLowerCase().includes(q)) : _matPrices;
+  _matDropEl.innerHTML = matches.slice(0, 80).map(p =>
+    `<div style="padding:5px 10px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"
+      onmousedown="matDropPick(this,'${p.material.replace(/'/g,"\\'")}')"
+      onmouseover="this.style.background='#e2e6ea'" onmouseout="this.style.background=''"
+      title="${p.material}">${p.material}${p.unit_price ? ' <small style=color:#888>(' + p.unit_price + ' HKD/KG)</small>' : ''}</div>`
+  ).join('') + (matches.length > 80 ? '<div style="padding:5px 10px;color:#999;font-size:.78rem">还有 ' + (matches.length-80) + ' 条，输入更多关键字筛选...</div>' : '');
+  _matDropPos(inp);
+  _matDropEl.style.display = '';
+}
+function matDropPick(el, val) {
+  if (_matDropInp) { _matDropInp.value = val; _matDropInp.title = val; }
+  _matDropEl.style.display = 'none';
+  _matDropInp = null;
+}
+function delBtn() {
+  return `<div class="d-flex flex-column align-items-center gap-1">
+    <button type="button" class="btn btn-sm btn-danger" onclick="this.closest('tr').remove()"><i class="bi bi-x-lg"></i></button>
+    <div class="fill-handle" title="按住向下拖动可复制此行" onmousedown="startFillDrag(event,this)"></div>
+  </div>`;
+}
+function injDelBtn() {
+  return `<div class="d-flex flex-column align-items-center gap-1">
+    <button type="button" class="btn btn-sm btn-danger" title="删除此行" onclick="this.closest('tr').remove()"><i class="bi bi-x-lg"></i></button>
+    <button type="button" class="btn btn-sm btn-outline-secondary" title="添加同模件" style="padding:1px 5px;font-size:11px" onclick="addInjSubRow(this)">+件</button>
+    <div class="fill-handle" title="按住向下拖动可复制此行" onmousedown="startFillDrag(event,this)"></div>
+  </div>`;
+}
+
+function addInjRow(it={}, isSubRow=false) {
+  const tr = document.createElement('tr');
+  if (isSubRow) tr.style.background = '#f8f9ff';
+  const moldStyle = isSubRow ? 'style="background:#eef2ff;font-size:11px;color:#666"' : '';
+  tr.innerHTML = `
+    <td><input type="text" class="form-control form-control-sm" name="mold_id" value="${it.mold_id||''}" ${moldStyle}></td>
+    <td>${inp('text','mold_name',it.mold_name)}</td>
+    <td>${inp('text','machine_type',it.machine_type,'style="width:70px"' )}</td>
+    <td>${matSel(it.material||'')}</td>
+    <td>${inp('text','color',it.color,'style="width:70px"')}</td>
+    <td>${inp('text','pigment_no',it.pigment_no||it.color_code,'style="width:70px"')}</td>
+    <td>${inp('text','quantity',it.quantity,'style="width:60px"')}</td>
+    <td>${inp('number','shoot_qty',it.shoot_qty||it.color_weight_g,'style="width:65px"')}</td>
+    <td>${inp('number','gross_weight_g',it.gross_weight_g||it.total_weight_kg,'style="width:70px"')}</td>
+    <td>${inp('number','required_material_kg',it.required_material_kg,'style="width:70px"')}</td>
+    <td>${inp('text','mold_return_time',it.mold_return_time||it.mold_fee_time||it.print_time,'class="w-date"')}</td>
+    <td>${inp('text','completion_time',it.completion_time,'class="w-date"')}</td>
+    <td>${inp('text','notes',it.notes||'注塑')}</td>
+    <td>${injDelBtn()}</td>`;
+  document.getElementById('injItemsBody').appendChild(tr);
+}
+
+// 在当前行下方插入同一工模的子件行（除工模名称外全部复制）
+function addInjSubRow(btn) {
+  const curTr = btn.closest('tr');
+  const g = name => (curTr.querySelector(`[name="${name}"]`) || {}).value || '';
+  const tr = document.createElement('tr');
+  tr.style.background = '#f8f9ff';
+  tr.innerHTML = `
+    <td><input type="text" class="form-control form-control-sm" name="mold_id" value="${g('mold_id')}" style="background:#eef2ff;font-size:11px;color:#666"></td>
+    <td>${inp('text','mold_name','')}</td>
+    <td>${inp('text','machine_type',g('machine_type'),'style="width:70px"')}</td>
+    <td>${matSel(g('material'))}</td>
+    <td>${inp('text','color',g('color'),'style="width:70px"')}</td>
+    <td>${inp('text','pigment_no',g('pigment_no'),'style="width:70px"')}</td>
+    <td>${inp('text','quantity',g('quantity'),'style="width:60px"')}</td>
+    <td>${inp('number','shoot_qty',g('shoot_qty'),'style="width:65px"')}</td>
+    <td>${inp('number','gross_weight_g',g('gross_weight_g'),'style="width:70px"')}</td>
+    <td>${inp('number','required_material_kg',g('required_material_kg'),'style="width:70px"')}</td>
+    <td>${inp('text','mold_return_time',g('mold_return_time'),'class="w-date"')}</td>
+    <td>${inp('text','completion_time',g('completion_time'),'class="w-date"')}</td>
+    <td>${inp('text','notes',g('notes'))}</td>
+    <td>${injDelBtn()}</td>`;
+  curTr.parentNode.insertBefore(tr, curTr.nextSibling);
+}
+
+function addSlushRow(it={}) {
+  const tr = document.createElement('tr');
+  tr.innerHTML = `
+    <td>${inp('number','seq_no',it.seq_no,'style="width:45px"')}</td>
+    <td>${inp('text','product_id',it.product_id)}</td>
+    <td>${inp('text','mold_id',it.mold_id)}</td>
+    <td>${inp('text','mold_name',it.mold_name)}</td>
+    <td>${inp('text','material',it.material||'PVC95度','style="width:80px"')}</td>
+    <td>${inp('text','color_code',it.color_code)}</td>
+    <td>${inp('text','pigment_no',it.pigment_no,'style="width:70px"')}</td>
+    <td>${inp('number','unit_weight',it.unit_weight,'style="width:70px"')}</td>
+    <td>${inp('number','quantity',it.quantity,'style="width:60px"')}</td>
+    <td>${inp('text','required_date',it.required_date,'class="w-date"')}</td>
+    <td>${inp('text','return_time',it.return_time,'style="width:65px"')}</td>
+    <td>${inp('text','notes',it.notes)}</td>
+    <td>${delBtn()}</td>`;
+  document.getElementById('slushItemsBody').appendChild(tr);
+}
+
+function addSprayRow(it={}) {
+  const tr = document.createElement('tr');
+  tr.innerHTML = `
+    <td>${inp('text','client_name',it.client_name)}</td>
+    <td>${inp('text','product_name',it.product_name)}</td>
+    <td>${inp('number','sample_qty',it.sample_qty,'style="width:65px"')}</td>
+    <td>${inp('text','delivery_time',it.delivery_time,'class="w-date"')}</td>
+    <td>${inp('text','engineer',it.engineer)}</td>
+    <td>${inp('text','notes',it.notes)}</td>
+    <td>${delBtn()}</td>`;
+  document.getElementById('sprayItemsBody').appendChild(tr);
+}
+
+// ─── 保存订单 ─────────────────────────────────────────────────────────────────
+function collectRows(tbodyId, fields) {
+  return Array.from(document.getElementById(tbodyId).querySelectorAll('tr')).map(tr => {
+    const obj = {};
+    fields.forEach(f => {
+      const el = tr.querySelector(`[name="${f}"]`);
+      obj[f] = el ? (el.value.trim() || null) : null;
+    });
+    return obj;
+  });
+}
+
+const injFields   = ['mold_id','mold_name','machine_type','material','color','pigment_no','quantity','shoot_qty','gross_weight_g','required_material_kg','mold_return_time','completion_time','notes'];
+const slushFields = ['seq_no','product_id','mold_id','mold_name','material','color_code','pigment_no','unit_weight','quantity','required_date','return_time','notes'];
+const sprayFields = ['client_name','product_name','sample_qty','delivery_time','engineer','notes'];
+
+function saveOrder(type) {
+  const prefix = type === 'injection' ? 'inj' : type;
+  const id = document.getElementById(`${prefix}-id`).value;
+  const wsElSave  = document.getElementById(`${prefix}-workshop`);
+  const supElSave = document.getElementById(`${prefix}-supervisor`);
+  const stgElSave = document.getElementById(`${prefix}-stage`);
+  const body = {
+    order_number: document.getElementById(`${prefix}-order_number`).value,
+    doc_number:   document.getElementById(`${prefix}-doc_number`)?.value || null,
+    date:         document.getElementById(`${prefix}-date`).value,
+    order_type:   document.getElementById(`${prefix}-order_type`).value,
+    stage:        stgElSave ? (stgElSave.value || null) : null,
+    status:       document.getElementById(`${prefix}-status`).value,
+    reason:       document.getElementById(`${prefix}-reason`).value,
+    workshop:     wsElSave  ? wsElSave.value  : null,
+    supervisor:   supElSave ? supElSave.value : null,
+    eng_name:     document.getElementById(`${prefix}-engineer`).value || null,
+    receive_time:      (type === 'spray' ? document.getElementById('spray-receive_time')?.value      : null) || null,
+    eng_complete_time: (type === 'spray' ? document.getElementById('spray-eng_complete_time')?.value : null) || null,
+    items: type === 'injection' ? collectRows('injItemsBody', injFields)
+         : type === 'slush'     ? collectRows('slushItemsBody', slushFields)
+         :                        collectRows('sprayItemsBody', sprayFields)
+  };
+
+  const url    = id ? `/api/${type}/${id}` : `/api/${type}`;
+  const method = id ? 'PUT' : 'POST';
+  const hdrs   = { 'Content-Type': 'application/json' };
+
+  fetch(url, { method, headers: hdrs, body: JSON.stringify(body) })
+    .then(r => r.json())
+    .then(data => {
+      if (data.error) { showToast(data.error, 'danger'); return; }
+      const modalId = { injection: 'injModal', slush: 'slushModal', spray: 'sprayModal' }[type];
+      bootstrap.Modal.getInstance(document.getElementById(modalId))?.hide();
+      showToast(id ? '更新成功！' : '创建成功！', 'success');
+      loadOrders();
+    })
+    .catch(() => showToast('保存失败', 'danger'));
+}
+
+// ─── 问题查看与处理 ───────────────────────────────────────────────────────────
+function viewEngProblems(orderId, orderNumber) {
+  document.getElementById('epmOrderNum').textContent = orderNumber || `#${orderId}`;
+  document.getElementById('epmBody').innerHTML = '<div class="text-muted">加载中...</div>';
+  new bootstrap.Modal(document.getElementById('engProblemModal')).show();
+
+  fetch(`/api/problems?type=${currentTab}&order_id=${orderId}`)
+    .then(r => r.json())
+    .then(list => {
+      if (!list.length) {
+        document.getElementById('epmBody').innerHTML = '<div class="text-muted">暂无问题记录</div>';
+        return;
+      }
+      document.getElementById('epmBody').innerHTML = list.map(p => `
+        <div class="border rounded p-3 mb-2 ${p.status==='已解决' ? 'bg-light' : 'bg-warning-subtle'}">
+          <div class="d-flex justify-content-between align-items-start gap-2">
+            <div>
+              <div class="fw-bold">${p.description}</div>
+              <div class="text-muted small mt-1">${p.reported_by} · ${fmtDate(p.created_at)}</div>
+              ${p.resolved_at ? `<div class="text-success small">已解决：${fmtDate(p.resolved_at)}</div>` : ''}
+            </div>
+            <div class="flex-shrink-0">
+              ${p.status === '待处理'
+                ? `<button class="btn btn-sm btn-success" onclick="resolveProblem(${p.id})"><i class="bi bi-check-lg me-1"></i>标记已解决</button>`
+                : '<span class="badge bg-success">已解决</span>'}
+            </div>
+          </div>
+        </div>`).join('');
+    });
+}
+
+function resolveProblem(problemId) {
+  fetch(`/api/problems/${problemId}/resolve`, { method: 'PATCH' })
+    .then(r => r.json())
+    .then(() => {
+      // 刷新弹窗内容
+      const modal = document.getElementById('epmBody');
+      const item = modal.querySelector(`[data-pid="${problemId}"]`);
+      loadOrders();  // 同步刷新列表问题数
+      // 重新加载弹窗（简单方式：关闭重开）
+      bootstrap.Modal.getInstance(document.getElementById('engProblemModal'))?.hide();
+      showToast('问题已标记为解决', 'success');
+    });
+}
+
+// ─── 删除/打印 ────────────────────────────────────────────────────────────────
+function deleteOrder(id) {
+  if (!confirm(`确定删除这条单据吗？删除后无法恢复。`)) return;
+  fetch(`/api/${currentTab}/${id}`, { method: 'DELETE' })
+    .then(r => r.json())
+    .then(d => {
+      if (d.error) { showToast(d.error, 'danger'); return; }
+      showToast('删除成功', 'success'); loadOrders();
+    })
+    .catch(() => showToast('删除失败', 'danger'));
+}
+
+function printOrder(id) {
+  window.open(`print.html?type=${currentTab}&id=${id}`, '_blank');
+}
+
+// ─── Toast提示 ────────────────────────────────────────────────────────────────
+function showToast(msg, type = 'success') {
+  const el = document.getElementById('toast');
+  const colors = { success: '#198754', danger: '#dc3545', warning: '#ffc107' };
+  el.style.background = colors[type] || '#333';
+  document.getElementById('toastMsg').textContent = msg;
+  new bootstrap.Toast(el, { delay: 2500 }).show();
+}
+
+// ─── 主管审核 ─────────────────────────────────────────────────────────────────
+const SUPERVISOR_PINS = {
+  '段新辉': '6602', '唐海林': '6603',
+  '蒙海欢': '6604', '万志勇': '6605', '章发东': '6606', '刘际维': '6607',
+  '甘勇辉': '6608', '王玉国': '6609'
+};
+const MANAGER_PIN = { '易东存': '6601' };
+
+let reviewingOrderId = null;
+let reviewingOrderSupervisor = null;
+
+function reviewOrder(id, orderNum) {
+  reviewingOrderId = id;
+  reviewingOrderSupervisor = null;
+  document.getElementById('reviewOrderLabel').textContent = orderNum || `#${id}`;
+  document.getElementById('reviewPin').value = '';
+  document.getElementById('rejectReason').value = '';
+  document.getElementById('reviewPinError').classList.add('d-none');
+  document.getElementById('rejectReasonError').classList.add('d-none');
+  document.getElementById('reviewOrderDetails').innerHTML = '<div class="text-center text-muted py-4">加载中...</div>';
+  new bootstrap.Modal(document.getElementById('reviewModal')).show();
+
+  fetch(`/api/${currentTab}/${id}`)
+    .then(r => r.json())
+    .then(order => {
+      reviewingOrderSupervisor = order.supervisor || null;
+      document.getElementById('reviewOrderDetails').innerHTML = renderReviewDetails(order, currentTab);
+    })
+    .catch(() => {
+      document.getElementById('reviewOrderDetails').innerHTML = '<div class="text-danger">加载单据失败</div>';
+    });
+}
+
+function viewOrderDetail(id, orderNum) {
+  document.getElementById('detailModalLabel').textContent = orderNum || `#${id}`;
+  document.getElementById('orderDetailBody').innerHTML = '<div class="text-center text-muted py-4">加载中...</div>';
+  document.getElementById('detailEditBtn').onclick = () => {
+    bootstrap.Modal.getInstance(document.getElementById('orderDetailModal'))?.hide();
+    editOrder(id);
+  };
+  document.getElementById('detailPrintBtn').onclick = () => printOrder(id);
+  new bootstrap.Modal(document.getElementById('orderDetailModal')).show();
+  fetch(`/api/${currentTab}/${id}`)
+    .then(r => r.json())
+    .then(order => {
+      document.getElementById('orderDetailBody').innerHTML = renderReviewDetails(order, currentTab);
+    })
+    .catch(() => {
+      document.getElementById('orderDetailBody').innerHTML = '<div class="text-danger">加载失败</div>';
+    });
+}
+
+function renderReviewDetails(order, type) {
+  const headerHtml = `
+    <div class="row g-2 mb-3">
+      <div class="col-6 col-md-3"><div class="text-muted small">产品编号</div><div class="fw-bold">${order.order_number || '-'}</div></div>
+      <div class="col-6 col-md-3"><div class="text-muted small">日期</div><div>${order.date || '-'}</div></div>
+      <div class="col-6 col-md-3"><div class="text-muted small">类型</div><div>${order.order_type || '-'}</div></div>
+      <div class="col-6 col-md-3"><div class="text-muted small">车间</div><div>${order.workshop || '-'}</div></div>
+      <div class="col-6 col-md-3"><div class="text-muted small">主管</div><div>${order.supervisor || '-'}</div></div>
+      <div class="col-6 col-md-3"><div class="text-muted small">跟进工程师</div><div>${order.eng_name || '-'}</div></div>
+      <div class="col-6 col-md-3"><div class="text-muted small">状态</div><div>${statusBadge(order.status)}</div></div>
+      ${order.reason ? `<div class="col-12"><div class="text-muted small">原因/备注</div><div>${order.reason}</div></div>` : ''}
+    </div>`;
+
+  const items = order.items || [];
+  if (!items.length) return headerHtml + '<div class="text-muted small">（无明细行）</div>';
+
+  let thead = '', rows = '';
+  if (type === 'injection') {
+    thead = '<tr><th>工模编号</th><th>工模名称</th><th>机型</th><th>原料</th><th>颜色</th><th>色粉编号</th><th>件数/套数</th><th>数量(啤)</th><th>整啤毛重(g)</th><th>所需用料(KG)</th><th>模具回厂时间</th><th>完成时间</th><th>备注</th></tr>';
+    rows = items.map(it => `<tr><td>${it.mold_id||'-'}</td><td>${it.mold_name||'-'}</td><td>${it.machine_type||'-'}</td><td>${it.material||'-'}</td><td>${it.color||'-'}</td><td>${it.pigment_no||'-'}</td><td>${it.quantity||'-'}</td><td>${it.shoot_qty||'-'}</td><td>${it.gross_weight_g||'-'}</td><td>${it.required_material_kg||'-'}</td><td>${it.mold_return_time||'-'}</td><td>${it.completion_time||'-'}</td><td>${it.notes||'-'}</td></tr>`).join('');
+  } else if (type === 'slush') {
+    thead = '<tr><th>序号</th><th>产品编号</th><th>工模编号</th><th>工模名称</th><th>原料</th><th>颜色/编号</th><th>色粉编号</th><th>每啤毛重(g)</th><th>数量</th><th>要求完成日期</th><th>回模时间</th><th>备注</th></tr>';
+    rows = items.map(it => `<tr><td>${it.seq_no||'-'}</td><td>${it.product_id||'-'}</td><td>${it.mold_id||'-'}</td><td>${it.mold_name||'-'}</td><td>${it.material||'-'}</td><td>${it.color_code||'-'}</td><td>${it.pigment_no||'-'}</td><td>${it.unit_weight||'-'}</td><td>${it.quantity||'-'}</td><td>${it.required_date||'-'}</td><td>${it.return_time||'-'}</td><td>${it.notes||'-'}</td></tr>`).join('');
+  } else {
+    thead = '<tr><th>客名</th><th>名称</th><th>样板数量</th><th>提供胶件时间</th><th>收到胶件时间</th><th>工程预计完成时间</th><th>喷油交货时间</th><th>工程师/PMC</th><th>备注</th></tr>';
+    rows = items.map(it => `<tr><td>${it.client_name||'-'}</td><td>${it.product_name||'-'}</td><td>${it.sample_qty||'-'}</td><td>${it.provide_time||'-'}</td><td>${it.receive_time||'-'}</td><td>${it.eng_complete_time||'-'}</td><td>${it.delivery_time||'-'}</td><td>${it.engineer||'-'}</td><td>${it.notes||'-'}</td></tr>`).join('');
+  }
+
+  return headerHtml + `<div class="table-responsive"><table class="table table-bordered table-sm"><thead class="table-light">${thead}</thead><tbody>${rows}</tbody></table></div>`;
+}
+
+function submitReview(action) {
+  const enteredPin = document.getElementById('reviewPin').value.trim();
+  const rejectReason = document.getElementById('rejectReason').value.trim();
+
+  // 检查是否为经理PIN
+  const isManager = Object.values(MANAGER_PIN).includes(enteredPin);
+  // 检查是否为该单据主管PIN
+  const correctSupPin = reviewingOrderSupervisor ? SUPERVISOR_PINS[reviewingOrderSupervisor] : null;
+  const isSupervisor = correctSupPin && enteredPin === correctSupPin;
+
+  if (!enteredPin || (!isManager && !isSupervisor)) {
+    document.getElementById('reviewPinError').classList.remove('d-none');
+    document.getElementById('reviewPin').focus();
+    return;
+  }
+  document.getElementById('reviewPinError').classList.add('d-none');
+
+  let newStatus;
+  let toastMsg;
+  if (action === 'reject') {
+    newStatus = '已驳回';
+    toastMsg = '已驳回';
+  } else if (isManager) {
+    // 经理审核：直接进入待生产
+    newStatus = '待生产';
+    toastMsg = '经理审核通过！单据已进入待生产';
+  } else {
+    // 主管审核：进入待经理审核
+    newStatus = '待经理审核';
+    toastMsg = '主管审核通过！已转交经理审核';
+  }
+
+  const doUpdate = action === 'reject'
+    ? fetch(`/api/${currentTab}/${reviewingOrderId}`)
+        .then(r => r.json())
+        .then(order => {
+          const { items, ...header } = order;
+          return fetch(`/api/${currentTab}/${reviewingOrderId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ...header, status: newStatus, reason: rejectReason, items })
+          });
+        })
+    : fetch(`/api/${currentTab}/${reviewingOrderId}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newStatus })
+      });
+
+  doUpdate
+    .then(() => {
+      bootstrap.Modal.getInstance(document.getElementById('reviewModal'))?.hide();
+      showToast(toastMsg, action === 'approve' ? 'success' : 'danger');
+      loadOrders();
+    })
+    .catch(() => showToast('操作失败', 'danger'));
+}
+
+// ─── 生产总表 ─────────────────────────────────────────────────────────────────
+let summaryAll = [];
+
+function openSummary() {
+  new bootstrap.Modal(document.getElementById('summaryModal')).show();
+  loadSummary();
+}
+
+function loadSummary() {
+  document.getElementById('summaryTableWrap').innerHTML = '<div class="text-center text-muted py-4">加载中...</div>';
+  document.getElementById('summaryCount').textContent = '';
+  Promise.all([
+    fetch('/api/injection').then(r => r.json()),
+    fetch('/api/slush').then(r => r.json()),
+    fetch('/api/spray').then(r => r.json())
+  ]).then(([inj, slush, spray]) => {
+    summaryAll = [
+      ...inj.map(o   => ({ ...o, _type: 'injection' })),
+      ...slush.map(o => ({ ...o, _type: 'slush' })),
+      ...spray.map(o => ({ ...o, _type: 'spray' }))
+    ];
+    renderSummaryTable();
+  }).catch(() => {
+    document.getElementById('summaryTableWrap').innerHTML = '<div class="text-danger text-center py-4">加载失败</div>';
+  });
+}
+
+function renderSummaryTable() {
+  const typeF     = document.getElementById('summaryTypeFilter').value;
+  const statusF   = document.getElementById('summaryStatusFilter').value;
+  const workshopF = document.getElementById('summaryWorkshopFilter').value;
+
+  let list = summaryAll;
+  if (typeF)     list = list.filter(o => o._type === typeF);
+  if (statusF)   list = list.filter(o => o.status === statusF);
+  if (workshopF) list = list.filter(o => o.workshop === workshopF);
+
+  list = [...list].sort((a, b) => {
+    if (a.date && b.date && a.date !== b.date) return a.date < b.date ? 1 : -1;
+    return b.id - a.id;
+  });
+
+  document.getElementById('summaryCount').textContent = `共 ${list.length} 条`;
+
+  if (!list.length) {
+    document.getElementById('summaryTableWrap').innerHTML = `<div class="empty-state"><i class="bi bi-inbox"></i><p class="mt-2">暂无记录</p></div>`;
+    return;
+  }
+
+  const typeLabel = { injection: '啤办单', slush: '搪胶单', spray: '喷油单' };
+  const rows = list.map(o => `
+    <tr>
+      <td>${typeLabel[o._type] || o._type}</td>
+      <td>${o.workshop || '-'}</td>
+      <td><strong>${o.order_number || '-'}</strong></td>
+      <td>${o.date || '-'}</td>
+      <td>${o.order_type || '-'}</td>
+      <td>${statusBadge(o.status)}</td>
+      <td>${o.reason || '-'}</td>
+      <td>${fmtDate(o.created_at)}</td>
+    </tr>`).join('');
+
+  document.getElementById('summaryTableWrap').innerHTML = `
+    <div class="table-responsive">
+      <table class="table table-hover table-sm table-bordered mb-0">
+        <thead class="table-dark" style="position:sticky;top:0">
+          <tr><th>部门</th><th>车间</th><th>产品编号</th><th>日期</th><th>订单类型</th><th>状态</th><th>原因/备注</th><th>创建时间</th></tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+}
+
+// ─── 桌面通知 ─────────────────────────────────────────────────────────────────
+const trackedDone = { injection: new Set(), slush: new Set(), spray: new Set() };
+const typeDisplayName = { injection: '啤办单', slush: '搪胶单', spray: '喷油单' };
+let notifyEnabled = false;
+
+function updateNotifBtn() {
+  const btn  = document.getElementById('notifBtn');
+  const icon = document.getElementById('notifIcon');
+  if (notifyEnabled) {
+    btn.className  = 'btn btn-sm btn-light';
+    icon.className = 'bi bi-bell-fill text-warning';
+    btn.title = '通知已开启（点击关闭）';
+  } else {
+    btn.className  = 'btn btn-sm btn-outline-light';
+    icon.className = 'bi bi-bell';
+    btn.title = '点击开启完成通知';
+  }
+}
+
+function loadDoneSnapshot() {
+  ['injection', 'slush', 'spray'].forEach(type => {
+    fetch(`/api/${type}`)
+      .then(r => r.json())
+      .then(orders => orders.filter(o => o.status === '已完成').forEach(o => trackedDone[type].add(o.id)))
+      .catch(() => {});
+  });
+}
+
+function checkForNewCompletions() {
+  if (!notifyEnabled) return;
+  ['injection', 'slush', 'spray'].forEach(type => {
+    fetch(`/api/${type}`)
+      .then(r => r.json())
+      .then(orders => {
+        orders.filter(o => o.status === '已完成').forEach(o => {
+          if (!trackedDone[type].has(o.id)) {
+            trackedDone[type].add(o.id);
+            const n = new Notification(`✅ ${typeDisplayName[type]}已完成`, {
+              body: `单号：${o.order_number || ('#' + o.id)}  已由生产部门完成`,
+              tag: `done-${type}-${o.id}`
+            });
+            n.onclick = () => { window.focus(); n.close(); };
+          }
+        });
+      })
+      .catch(() => {});
+  });
+}
+
+function toggleNotifications() {
+  if (!('Notification' in window)) {
+    showToast('此浏览器不支持桌面通知', 'warning'); return;
+  }
+  if (notifyEnabled) {
+    notifyEnabled = false;
+    updateNotifBtn();
+    showToast('通知已关闭', 'warning');
+    return;
+  }
+  if (Notification.permission === 'granted') {
+    notifyEnabled = true;
+    loadDoneSnapshot();
+    updateNotifBtn();
+    showToast('桌面通知已开启', 'success');
+  } else if (Notification.permission === 'denied') {
+    showToast('通知权限已被拒绝，请在浏览器地址栏左侧的锁图标里手动开启', 'warning');
+  } else {
+    Notification.requestPermission().then(perm => {
+      if (perm === 'granted') {
+        notifyEnabled = true;
+        loadDoneSnapshot();
+        updateNotifBtn();
+        showToast('桌面通知已开启', 'success');
+      } else {
+        showToast('已拒绝通知权限', 'warning');
+      }
+    });
+  }
+}
+
+// 如果已授权过，自动开启
+if ('Notification' in window && Notification.permission === 'granted') {
+  notifyEnabled = true;
+  loadDoneSnapshot();
+  updateNotifBtn();
+}
+
+// ─── Excel 导入 ───────────────────────────────────────────────────────────────
+// 列名标准化：去空格、全角括号转半角、统一小写
+function normCol(s) {
+  return String(s).trim()
+    .replace(/\s+/g,'')
+    .replace(/（/g,'(').replace(/）/g,')')
+    .replace(/【/g,'[').replace(/】/g,']')
+    .toLowerCase();
+}
+
+// 列名 → 字段名 映射（key 均已标准化）
+const EXCEL_COL_MAP = {
+  injection: {
+    '工模编号':'mold_id','模具编号':'mold_id','moldid':'mold_id',
+    '工模名称':'mold_name','模具名称':'mold_name',
+    '原料':'material','材料':'material',
+    '颜色':'color',
+    '色粉编号':'pigment_no','色粉':'pigment_no',
+    '件数':'quantity','套数':'quantity','件数/套数':'quantity','件数套数':'quantity',
+    '数量(啤)':'shoot_qty','数量（啤）':'shoot_qty','啤数':'shoot_qty','数量':'shoot_qty',
+    '整啤毛重(g)':'gross_weight_g','整啤毛重（g）':'gross_weight_g',
+    '单个重量(g)':'gross_weight_g','单个重量（g）':'gross_weight_g','单个毛重(g)':'gross_weight_g',
+    '每啤毛重':'gross_weight_g','毛重':'gross_weight_g',
+    '所需用料(kg)':'required_material_kg','所需用料（kg）':'required_material_kg',
+    '所需用料(KG)':'required_material_kg','所需用料':'required_material_kg','用料':'required_material_kg',
+    '模具回厂时间':'mold_return_time','回厂时间':'mold_return_time','回模时间':'mold_return_time',
+    '啤办完成时间':'completion_time','完成时间':'completion_time','要求日期':'completion_time','要求完成日期':'completion_time',
+    '备注':'notes'
+  },
+  slush: {
+    '序号':'seq_no','产品编号':'product_id',
+    '工模编号':'mold_id','模具编号':'mold_id',
+    '工模名称':'mold_name','模具名称':'mold_name',
+    '原料':'material','颜色':'color_code','颜色/编号':'color_code','颜色/编通号':'color_code',
+    '色粉编号':'pigment_no',
+    '每啤毛重(g)':'unit_weight','每啤毛重':'unit_weight',
+    '数量':'quantity','要求完成日期':'required_date','回模时间':'return_time','备注':'notes',
+    '产品图片':'product_image'
+  },
+  spray: {
+    '客名':'client_name','客户':'client_name',
+    '名称':'product_name','产品名称':'product_name',
+    '样板数量':'sample_qty',
+    '喷油交货时间':'delivery_time','交货时间':'delivery_time',
+    '工程师':'engineer','工程师/pmc':'engineer',
+    '备注':'notes'
+  }
+};
+
+// 表头识别关键词（出现≥2个则认为是表头行）
+const HEADER_KEYWORDS = ['工模编号','工模名称','模具编号','模具名称','原料','颜色','备注','序号','产品编号','色粉'];
+
+let _excelImportType = 'injection';
+const _excelInput = (() => {
+  const el = document.createElement('input');
+  el.type = 'file';
+  el.accept = '.xlsx,.xls,.csv';
+  el.style.display = 'none';
+  document.body.appendChild(el);
+  el.addEventListener('change', onExcelFileSelected);
+  return el;
+})();
+
+function triggerExcelImport(type) {
+  _excelImportType = type;
+  _excelInput.value = '';
+  _excelInput.click();
+}
+
+function onExcelFileSelected() {
+  const file = _excelInput.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const wb = XLSX.read(e.target.result, { type: 'array', cellDates: true });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+
+      // 读取所有行（raw数组格式），自动找表头行
+      const allRows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', raw: false });
+      if (!allRows.length) { showToast('Excel 文件没有数据', 'warning'); return; }
+
+      // 扫描找表头行：第一个包含≥2个关键词的行
+      let headerRowIdx = -1;
+      for (let i = 0; i < allRows.length; i++) {
+        const cells = allRows[i].map(c => normCol(c));
+        const hits = HEADER_KEYWORDS.filter(k => cells.some(c => c.includes(normCol(k))));
+        if (hits.length >= 2) { headerRowIdx = i; break; }
+      }
+      if (headerRowIdx === -1) {
+        showToast('未找到表头行，请确保Excel含有"工模编号""工模名称"等列名', 'warning');
+        return;
+      }
+
+      // ── 从表头上方提取订单信息（产品编号、订单编号、日期、原因等）──
+      if (_excelImportType === 'injection' || _excelImportType === 'slush') {
+        const prefix = _excelImportType === 'injection' ? 'inj' : 'slush';
+        for (let i = 0; i < headerRowIdx; i++) {
+          const rowText = allRows[i].map(c => String(c)).join(' ');
+          // 产品编号
+          const pMatch = rowText.match(/产品编号[：:]\s*([^\s]+)/);
+          if (pMatch) {
+            const el = document.getElementById(`${prefix}-order_number`);
+            if (el && !el.value) el.value = pMatch[1].trim();
+          }
+          // 订单编号
+          const dMatch = rowText.match(/订单编号[：:]\s*([^\s]+(?:\s?\d+)?)/);
+          if (dMatch) {
+            const el = document.getElementById(`${prefix}-doc_number`) || document.getElementById(`inj-doc_number`);
+            if (el && !el.value) el.value = dMatch[1].replace(/\s+/g, '').trim();
+          }
+          // 原因
+          const rMatch = rowText.match(/原因\s*[：:]\s*(.+)/);
+          if (rMatch) {
+            const el = document.getElementById(`${prefix}-reason`);
+            if (el && !el.value) el.value = rMatch[1].trim();
+          }
+          // 车间识别（从公司名）
+          if (rowText.includes('华登')) {
+            const el = document.getElementById(`${prefix === 'inj' ? 'inj' : prefix}-workshop`);
+            if (el) el.value = '华登车间';
+          }
+        }
+      }
+
+      const headers = allRows[headerRowIdx].map(c => String(c).trim());
+      const dataRows = allRows.slice(headerRowIdx + 1);
+      const colMap = EXCEL_COL_MAP[_excelImportType] || {};
+
+      // 建立 列索引 → 字段名 映射
+      const idxMap = {};
+      headers.forEach((h, i) => {
+        if (!h) return;
+        const hn = normCol(h);
+        Object.keys(colMap).forEach(k => {
+          const kn = normCol(k);
+          if (hn === kn || hn.includes(kn)) idxMap[i] = colMap[k];
+        });
+      });
+
+      if (!Object.keys(idxMap).length) {
+        showToast('列名无法匹配，找到的表头: ' + headers.filter(Boolean).join('、'), 'warning');
+        return;
+      }
+
+      // 注释行识别：工模编号或工模名称以这些关键字开头则跳过
+      const SKIP_RE = /^(注[：:。\s]|说明|要求|※|\*|附[：:：]|备注[：:：]|[①②③④⑤]|\d+[.、．]\D)/;
+
+      // 需要去掉中文单位的数值字段（quantity 不在此列，因为件数/套数可能含 "/" 如 "28/1"）
+      const NUMERIC_FIELDS = ['shoot_qty','gross_weight_g','required_material_kg','unit_weight','sample_qty'];
+
+      // 解析数据行
+      const items = dataRows.map(row => {
+        const obj = {};
+        Object.keys(idxMap).forEach(i => {
+          let val = row[i];
+          if (val === null || val === undefined) return;
+          val = String(val).trim();
+          if (val && val !== '0') {
+            const field = idxMap[i];
+            // 数值字段去掉中文单位后缀（如 "20啤" → "20"，"5.6kg" → "5.6"）
+            if (NUMERIC_FIELDS.includes(field)) {
+              const num = val.replace(/[^\d.\-]/g, '');
+              if (num) val = num;
+            }
+            obj[field] = val;
+          }
+        });
+        return obj;
+      }).filter(obj => {
+        const moldId   = (obj.mold_id   || '').trim();
+        const moldName = (obj.mold_name || '').trim();
+        const productId = (obj.product_id || '').trim();
+        const material = (obj.material || '').trim();
+        const color = (obj.color || obj.color_code || '').trim();
+        // 啤办单：有原料或颜色的行也算有效（同模不同原料的子件行）
+        const hasKey = moldId || moldName || productId
+          || (_excelImportType === 'injection' && (material || color))
+          || (_excelImportType === 'spray' && obj.client_name);
+        if (!hasKey) return false;
+        // 跳过注释行（工模编号/名称以注释关键词开头）
+        if (SKIP_RE.test(moldId) || SKIP_RE.test(moldName)) return false;
+        // 工模名称超过25字且没有工模编号，很可能是说明文字
+        if (!moldId && moldName.length > 25) return false;
+        return true;
+      });
+
+      if (!items.length) { showToast('表头下方没有有效数据行', 'warning'); return; }
+
+      // 清空现有行，填入导入的行
+      const bodyId = { injection:'injItemsBody', slush:'slushItemsBody', spray:'sprayItemsBody' }[_excelImportType];
+      document.getElementById(bodyId).innerHTML = '';
+      if (_excelImportType === 'injection') {
+        // 空工模编号 = 同模子件，继承上一行工模编号并用子件样式
+        let lastMoldId = '';
+        items.forEach(it => {
+          if (it.mold_id) {
+            lastMoldId = it.mold_id;
+            addInjRow(it, false);
+          } else {
+            addInjRow({ ...it, mold_id: lastMoldId }, true);
+          }
+        });
+      } else {
+        items.forEach(it => {
+          if (_excelImportType === 'slush') addSlushRow(it);
+          else addSprayRow(it);
+        });
+      }
+      showToast(`已从第${headerRowIdx+1}行识别表头，成功导入 ${items.length} 行`, 'success');
+    } catch(err) {
+      showToast('解析失败：' + err.message, 'danger');
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+// ─── 拖动填充（类 Excel） ─────────────────────────────────────────────────────
+let _fillState = null;
+const _fillTip = (() => { const d = document.createElement('div'); d.className = 'fill-drag-tip'; document.body.appendChild(d); return d; })();
+
+function startFillDrag(e, handle) {
+  e.preventDefault();
+  const tr = handle.closest('tr');
+  const tbodyId = tr.closest('tbody').id;
+  const addFn = { injItemsBody: addInjRow, slushItemsBody: addSlushRow, sprayItemsBody: addSprayRow }[tbodyId];
+  if (!addFn) return;
+  _fillState = { tr, addFn, startY: e.clientY };
+  document.body.style.userSelect = 'none';
+}
+
+document.addEventListener('mousemove', e => {
+  if (!_fillState) return;
+  const rowH = _fillState.tr.offsetHeight || 33;
+  const count = Math.max(0, Math.floor((e.clientY - _fillState.startY) / rowH));
+  _fillTip.style.left = (e.clientX + 14) + 'px';
+  _fillTip.style.top  = (e.clientY - 12) + 'px';
+  _fillTip.style.display = 'block';
+  _fillTip.textContent = count > 0 ? `复制 ${count} 行` : '向下拖动复制';
+});
+
+document.addEventListener('mouseup', e => {
+  if (!_fillState) return;
+  const rowH = _fillState.tr.offsetHeight || 33;
+  const count = Math.min(30, Math.max(0, Math.floor((e.clientY - _fillState.startY) / rowH)));
+  if (count > 0) {
+    const src = {};
+    _fillState.tr.querySelectorAll('[name]').forEach(el => { src[el.name] = el.value; });
+    for (let i = 0; i < count; i++) _fillState.addFn(src);
+  }
+  document.body.style.userSelect = '';
+  _fillTip.style.display = 'none';
+  _fillState = null;
+});
+
+
+// ─── 初始化 ───────────────────────────────────────────────────────────────────
+let _matPrices = [];
+fetch('/api/material-prices').then(r => r.json()).then(p => { _matPrices = p; });
+
+loadOrders();
+setInterval(() => { loadOrders(); checkForNewCompletions(); }, 30000);
+</script>
+</body>
+</html>

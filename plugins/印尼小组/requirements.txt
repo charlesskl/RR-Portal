@@ -1,0 +1,2 @@
+# Plugin SDK is pre-installed in the Docker image
+# Add Indonesia-team-specific dependencies below if needed

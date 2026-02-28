@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>打印单据</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="style.css" rel="stylesheet">
+  <style>
+    body { font-family: 'Microsoft YaHei', '微软雅黑', sans-serif; background: #fff; margin: 0; }
+    .print-wrapper { max-width: 1100px; margin: 0 auto; padding: 12px; }
+    .print-header { text-align: center; margin-bottom: 2px; }
+    .print-header .company-name { font-size: 16pt; font-weight: bold; letter-spacing: 1px; color: #000; }
+    .meta-row { display: flex; gap: 0; border: 1px solid #333; border-bottom: none; }
+    .meta-cell { flex: 1; padding: 3px 6px; border-right: 1px solid #333; font-size: 9pt; }
+    .meta-cell:last-child { border-right: none; }
+    .meta-label { color: #333; font-weight: bold; display: inline; }
+    .meta-val { border-bottom: 1px solid #333; display: inline-block; min-width: 80px; margin-left: 4px; }
+    .reason-row { border: 1px solid #333; border-bottom: none; padding: 3px 6px; font-size: 9pt; }
+    .print-table { width: 100%; border-collapse: collapse; font-size: 8pt; margin-top: 0; }
+    .print-table th, .print-table td { border: 1px solid #333; padding: 1px 3px; text-align: center; vertical-align: middle; }
+    .print-table th { background: #e8e8e8; font-weight: bold; white-space: nowrap; }
+    .print-table .notes-col { background: #ffff99; font-weight: bold; }
+    .checkbox-row { display: flex; gap: 0; border: 1px solid #333; border-bottom: none; font-size: 8.5pt; }
+    .checkbox-group { flex: 1; padding: 2px 6px; border-right: 1px solid #333; }
+    .checkbox-group:last-child { border-right: none; }
+    .checkbox-label { font-weight: bold; margin-right: 6px; }
+    .cb-item { margin-right: 8px; display: inline-block; }
+    .cb-box { display: inline-block; width: 11px; height: 11px; border: 1px solid #333; margin-right: 2px; vertical-align: middle; text-align: center; line-height: 11px; font-size: 8pt; }
+    .checked { background: #000; color: #fff; }
+    .print-controls { position: fixed; top: 10px; right: 10px; z-index: 999; }
+    @media print {
+      .print-controls { display: none; }
+      .print-wrapper { padding: 4px; max-width: 100%; }
+      @page { margin: 6mm 8mm; size: A4 portrait; }
+      .print-table th, .print-table td { padding: 1px 2px; }
+      .print-table thead { display: table-header-group; }
+      .print-table tbody { display: table-row-group; }
+      tr { page-break-inside: avoid; }
+    }
+
+    /* Slush-specific */
+    .product-img { max-width: 60px; max-height: 60px; }
+  </style>
+</head>
+<body>
+  <div class="print-controls no-print">
+    <button onclick="window.print()" class="btn btn-primary btn-sm me-2">
+      <i class="bi bi-printer me-1"></i>打印
+    </button>
+    <button onclick="window.close()" class="btn btn-secondary btn-sm">关闭</button>
+  </div>
+
+  <div class="print-wrapper" id="printContent">
+    <div class="text-center py-5 text-muted" id="loading">正在加载数据...</div>
+  </div>
+
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+  <script>
+    const params = new URLSearchParams(location.search);
+    const type = params.get('type');
+    const id   = params.get('id');
+
+    const typeMap = { injection: '啤办单', slush: '搪胶单', spray: '喷油单' };
+
+    fetch(`/api/${type}/${id}`)
+      .then(r => r.json())
+      .then(order => {
+        document.title = `${typeMap[type]} - ${order.order_number || order.id}`;
+        const el = document.getElementById('printContent');
+        el.innerHTML = type === 'injection' ? renderInjection(order)
+                     : type === 'slush'     ? renderSlush(order)
+                     :                        renderSpray(order);
+        setTimeout(() => window.print(), 600);
+      })
+      .catch(() => {
+        document.getElementById('loading').textContent = '加载失败，请关闭后重试';
+      });
+
+    function ck(checked) {
+      return `<span class="cb-box${checked ? ' checked' : ''}">${checked ? '√' : ''}</span>`;
+    }
+    function v(val) { return val || ''; }
+
+    function renderInjection(o) {
+      const items = o.items || [];
+      const isHuaDeng = o.workshop === '华登车间';
+      const companyName = isHuaDeng ? '东莞华登塑胶制品有限公司' : '东莞兴信塑胶制品有限公司';
+      const stg = o.stage || '';
+      const op  = o.order_type || '';
+
+      function isCk(s, t) {
+        if (stg !== s) return false;
+        return (t === '啤板') ? (op === '啤办' || op === '啤板') : op === t;
+      }
+
+      // Pad to fill page — 12 rows min, no excess empty rows
+      const minRows = 12;
+      const allItems = [...items];
+      while (allItems.length < minRows) allItems.push({});
+
+      // Calculate rowspan for mold_id
+      const spans = allItems.map((it, i) => {
+        const mid = it.mold_id || '';
+        if (!mid) return 1;
+        if (i > 0 && (allItems[i-1].mold_id || '') === mid) return 0;
+        let span = 1;
+        for (let j = i + 1; j < allItems.length; j++) {
+          if ((allItems[j].mold_id || '') === mid) span++; else break;
+        }
+        return span;
+      });
+
+      // Seq numbers (only for main rows, not sub-part continuations)
+      let seqNo = 0;
+      const displaySeqs = allItems.map((it, i) => {
+        if (i >= items.length || spans[i] === 0) return '';
+        seqNo++;
+        return seqNo;
+      });
+
+      // Checkbox section — EP / FEP / PP / 其他
+      const cbSection = `
+        <div style="border:1px solid #333;border-bottom:none;padding:3px 8px;font-size:9pt;display:flex;align-items:center">
+          <div style="flex:1;border-right:1px solid #999;padding-right:6px">
+            <strong>EP</strong>&ensp;${ck(isCk('EP','试模'))}试模&ensp;${ck(isCk('EP','试色'))}试色&ensp;${ck(isCk('EP','啤板'))}啤板
+          </div>
+          <div style="flex:1;border-right:1px solid #999;padding:0 6px">
+            <strong>FEP</strong>&ensp;${ck(isCk('FEP','试模'))}试模&ensp;${ck(isCk('FEP','试色'))}试色&ensp;${ck(isCk('FEP','啤板'))}啤板
+          </div>
+          <div style="flex:1;border-right:1px solid #999;padding:0 6px">
+            <strong>PP</strong>&ensp;${ck(isCk('PP','试模'))}试模&ensp;${ck(isCk('PP','试色'))}试色&ensp;${ck(isCk('PP','啤板'))}啤板
+          </div>
+          <div style="flex:1;padding-left:6px">
+            <strong>其他</strong>
+          </div>
+        </div>`;
+
+      // Type checkboxes row
+      const typeRow = `
+        <div style="border:1px solid #333;border-bottom:none;padding:3px 8px;font-size:9pt">
+          ${ck(op==='试模')}试模&emsp;&emsp;${ck(op==='试色')}试色&emsp;${ck(op==='啤板'||op==='啤办')}啤板
+        </div>`;
+
+      // Data rows — unified 13-column layout
+      const rows = allItems.map((it, i) => {
+        const span = spans[i];
+        const moldTd = span === 0 ? '' :
+          `<td rowspan="${span}" style="vertical-align:middle;text-align:center">${v(it.mold_id)}</td>`;
+        return `
+        <tr style="height:16px">
+          <td style="text-align:center">${displaySeqs[i]}</td>
+          ${moldTd}
+          <td>${v(it.mold_name)}</td>
+          <td>${v(it.material)}</td>
+          <td>${v(it.color)}</td>
+          <td>${v(it.pigment_no)}</td>
+          <td style="text-align:center">${v(it.quantity)}</td>
+          <td style="text-align:center">${v(it.shoot_qty)}</td>
+          <td style="text-align:center">${v(it.gross_weight_g)}</td>
+          <td style="text-align:center">${v(it.required_material_kg)}</td>
+          <td>${v(it.mold_return_time)}</td>
+          <td>${v(it.completion_time)}</td>
+          <td>${v(it.notes)}</td>
+        </tr>`;
+      }).join('');
+
+      const engineer  = v(o.eng_name);
+      const supervisor = v(o.supervisor);
+
+      return `
+        <div class="print-header" style="margin-bottom:4px">
+          <div class="company-name">${companyName}</div>
+        </div>
+        <div style="border:1px solid #333;border-bottom:none;padding:4px 8px;font-size:10pt;display:flex;gap:0">
+          <span style="flex:2"><strong>由：</strong>工程部</span>
+          <span style="flex:3"><strong>产品编号：</strong>${v(o.order_number)}</span>
+          <span style="flex:3"><strong>订单编号：</strong>${v(o.doc_number)}</span>
+          <span style="flex:2"><strong>车间：</strong>${v(o.workshop)}</span>
+          <span style="flex:2;text-align:right"><strong>日期：</strong>${v(o.date)}</span>
+        </div>
+        ${cbSection}
+        ${typeRow}
+        <div style="border:1px solid #333;border-bottom:none;padding:4px 8px;font-size:10pt">
+          <strong>原因：</strong>${v(o.reason)}
+        </div>
+        <table class="print-table">
+          <thead>
+            <tr>
+              <th style="width:30px">序号</th>
+              <th>工模编号</th>
+              <th>工模名称</th>
+              <th>原料</th>
+              <th>颜色</th>
+              <th>色粉编号</th>
+              <th>件数/<br>套数</th>
+              <th>数量<br>（啤）</th>
+              <th>整啤毛重<br>（g）</th>
+              <th>所需用料<br>（KG）</th>
+              <th>模具回厂<br>时间</th>
+              <th>啤办完成<br>时间</th>
+              <th>备注</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+        <div style="border:1px solid #333;border-top:none;padding:6px 8px;font-size:8pt;line-height:1.9;white-space:pre-line">备注：
+1.试模请写报告。
+2.每套模留10啤，不需剪水口，每啤分开装再装入一个大袋。
+3.啤机必须洗干净，不能有遗留黑点和杂色，顶针位不能有油污。
+4.胶件颜色必须对到样板或色牌，需调色啤办单注明调色，需通知本人对色。
+5.胶件需摆放整齐，避免胶件刮花。
+6.150吨及以下机型给3KG，150吨及以上机型给5KG。</div>
+        <div style="border:1px solid #333;border-top:none;padding:4px 8px;font-size:8.5pt">
+          <strong>分发：</strong>□经理室&emsp;&emsp;&emsp;□业务部&emsp;&emsp;&emsp;&emsp;□啤机部&emsp;&emsp;&emsp;&emsp;□喷油部&emsp;&emsp;&emsp;□装配部&emsp;&emsp;&emsp;□QC部
+        </div>
+        <div style="border:1px solid #333;border-top:none;padding:6px 8px;font-size:9pt;display:flex">
+          <span style="flex:1"><strong>申请：</strong>${engineer}</span>
+          <span style="flex:1;text-align:right"><strong>审核：</strong>${supervisor}</span>
+        </div>
+        <div style="border:1px solid #333;border-top:none;padding:2px 8px;font-size:7pt;display:flex;justify-content:space-between;color:#666">
+          <span>HSQR0112</span><span>HSQR0112</span>
+        </div>`;
+    }
+
+    function renderSlush(o) {
+      const items = o.items || [];
+      let rows = items.map(it => `
+        <tr>
+          <td>${v(it.seq_no)}</td>
+          <td>${v(it.product_id)}</td>
+          <td>${it.product_image ? `<img src="${it.product_image}" class="product-img">` : ''}</td>
+          <td>${v(it.mold_id)}</td>
+          <td>${v(it.mold_name)}</td>
+          <td>${v(it.material)}</td>
+          <td>${v(it.color_code)}</td>
+          <td>${v(it.pigment_no)}</td>
+          <td>${v(it.unit_weight)}</td>
+          <td>${v(it.quantity)}</td>
+          <td>${v(it.required_date)}</td>
+          <td>${v(it.return_time)}</td>
+          <td>${v(it.notes)}</td>
+        </tr>`).join('');
+
+      return `
+        <div class="print-header">
+          <div class="company-name">东莞兴信塑胶制品有限公司</div>
+          <div class="doc-title">搪胶搪办通知书</div>
+        </div>
+        <div class="meta-row">
+          <div class="meta-cell"><span class="meta-label">由：</span><span class="meta-val">工程部</span></div>
+          <div class="meta-cell"><span class="meta-label">订单编号：</span><span class="meta-val">${v(o.order_number)}</span></div>
+          <div class="meta-cell"><span class="meta-label">日期：</span><span class="meta-val">${v(o.date)}</span></div>
+          <div class="meta-cell"><span class="meta-label">车间：</span><span class="meta-val">搪胶部</span></div>
+        </div>
+        <div class="checkbox-row">
+          <div class="checkbox-group">
+            <span class="checkbox-label">EP</span>
+            <span class="cb-item">${ck(false)}试模</span>
+            <span class="cb-item">${ck(false)}试色</span>
+            <span class="cb-item">${ck(false)}啤板</span>
+          </div>
+          <div class="checkbox-group">
+            <span class="checkbox-label">FEP</span>
+            <span class="cb-item">${ck(false)}试模</span>
+            <span class="cb-item">${ck(false)}试色</span>
+            <span class="cb-item">${ck(false)}啤板</span>
+          </div>
+          <div class="checkbox-group">
+            <span class="checkbox-label">PP</span>
+            <span class="cb-item">${ck(false)}试模</span>
+            <span class="cb-item">${ck(false)}试色</span>
+            <span class="cb-item">${ck(o.order_type==='搪办')}啤板</span>
+          </div>
+          <div class="checkbox-group">
+            <span class="checkbox-label">其他</span>
+            <span class="cb-item">${ck(true)}新颜色啤办</span>
+          </div>
+        </div>
+        <div class="reason-row"><strong>原因：</strong>${v(o.reason)}</div>
+        <table class="print-table">
+          <thead>
+            <tr>
+              <th>序号</th><th>产品编号</th><th>产品图片</th><th>工模编号</th><th>工模名称</th>
+              <th>原料</th><th>颜色/编号</th><th>色粉编号</th><th>每啤毛重</th>
+              <th>数量</th><th>要求完成日期</th><th>回模时间</th><th>备注</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>`;
+    }
+
+    function renderSpray(o) {
+      const items = o.items || [];
+      let rows = items.map(it => `
+        <tr>
+          <td>${v(it.client_name)}</td>
+          <td>${v(it.product_name)}</td>
+          <td>${v(it.sample_qty)}</td>
+          <td>${v(it.provide_time)}</td>
+          <td>${v(it.receive_time)}</td>
+          <td>${v(it.eng_complete_time)}</td>
+          <td style="color:#c00;font-weight:bold">${v(it.delivery_time)}</td>
+          <td>${v(it.engineer)}</td>
+          <td>${v(it.notes)}</td>
+        </tr>`).join('');
+
+      return `
+        <div class="print-header">
+          <div class="company-name">东莞华登塑胶制品有限公司</div>
+          <div class="doc-title">喷油样板表</div>
+        </div>
+        <div class="meta-row">
+          <div class="meta-cell"><span class="meta-label">订单编号：</span><span class="meta-val">${v(o.order_number)}</span></div>
+          <div class="meta-cell"><span class="meta-label">日期：</span><span class="meta-val">${v(o.date)}</span></div>
+          <div class="meta-cell"><span class="meta-label">原因：</span><span class="meta-val">${v(o.reason)}</span></div>
+        </div>
+        <table class="print-table">
+          <thead>
+            <tr>
+              <th>客名</th><th>名称</th><th>样板数量</th>
+              <th>提供胶件时间</th><th>收到胶件时间</th><th>工程预计完成时间</th>
+              <th style="color:#c00">喷油交货时间</th><th>工程师/PMC</th><th>备注</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>`;
+    }
+  </script>
+</body>
+</html>

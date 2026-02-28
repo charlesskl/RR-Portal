@@ -1,0 +1,11 @@
+name: rr-production-system
+display_name: "工程啤办单"
+version: "2.0.0"
+department: Engineering
+description: 生产订单管理（啤办单/搪胶单/喷油单）、问题反馈、原料管理、领料单
+api_prefix: /api/rr-production
+health_check: /api/rr-production/health
+permissions:
+  - rr-production:read
+  - rr-production:write
+  - rr-production:manage

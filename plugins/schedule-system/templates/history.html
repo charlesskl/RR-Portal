@@ -6,7 +6,7 @@
     <h5 class="mb-0"><i class="bi bi-clock-history me-2"></i>PO操作历史记录</h5>
     <div class="d-flex gap-2 align-items-center">
         <small class="text-muted">记录精确到分钟，不可删除</small>
-        <a href="/api/export-history" class="btn btn-sm btn-success" download>
+        <a href="{{ url_for('export_history') }}" class="btn btn-sm btn-success" download>
             <i class="bi bi-file-earmark-excel me-1"></i>导出Excel
         </a>
     </div>

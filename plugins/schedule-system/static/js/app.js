@@ -16,6 +16,9 @@ const App = {
         if (type === 'success') setTimeout(() => { el.style.display = 'none'; }, 4000);
     },
     async api(url, options = {}) {
+        // 自动加上反向代理前缀（如 /schedule）
+        const baseUrl = window.BASE_URL || '';
+        if (url.startsWith('/') && baseUrl) url = baseUrl + url;
         const defaults = { headers: { 'Content-Type': 'application/json' } };
         if (options.body && typeof options.body === 'object' && !(options.body instanceof FormData)) {
             options.body = JSON.stringify(options.body);

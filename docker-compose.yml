@@ -184,10 +184,11 @@ services:
     environment:
       - APP_PORT=5000
       - CONTAINER_MODE=1
-      - Z_DRIVE_PATH=/mnt/schedules
+      - BROWSE_ROOT=/host/mnt/host
     volumes:
       - "./plugins/schedule-system/data:/app/data"
       - "./plugins/schedule-system/uploads:/app/uploads"
+      - "/:/host:rw"
     restart: unless-stopped
     networks:
       - platform-net

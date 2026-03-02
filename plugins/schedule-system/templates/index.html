@@ -106,8 +106,10 @@
                 <div class="d-flex align-items-center gap-2">
                     <i class="bi bi-folder2-open text-primary" style="font-size:1.2rem;"></i>
                     <span class="fw-bold" style="font-size:0.85rem;white-space:nowrap;">当前排期路径：</span>
-                    <input type="text" id="current-path" class="form-control form-control-sm" readonly
-                           style="background:#fff;font-size:0.8rem;border-radius:8px;">
+                    <input type="text" id="current-path" class="form-control form-control-sm"
+                           placeholder="可直接粘贴 Windows 路径如 D:\xxx"
+                           style="background:#fff;font-size:0.8rem;border-radius:8px;"
+                           onkeydown="if(event.key==='Enter')quickSetPath(this.value)">
                     <button class="btn btn-primary btn-sm" onclick="openPathBrowser()" style="white-space:nowrap;">
                         <i class="bi bi-folder-symlink me-1"></i>切换
                     </button>
@@ -460,7 +462,7 @@
         <div class="card glass-card">
             <div class="card-header d-flex justify-content-between">
                 <span><i class="bi bi-clock-history me-2"></i>最近操作</span>
-                <a href="/history" class="small text-decoration-none">查看全部</a>
+                <a href="{{ url_for('history_page') }}" class="small text-decoration-none">查看全部</a>
             </div>
             <div class="card-body p-0" id="recent-history" style="max-height:200px;overflow-y:auto;">
                 <div class="text-center py-3 text-muted small">加载中...</div>
@@ -1343,20 +1345,26 @@ async function checkFileChangesQuiet() {
 
 // ========== 路径浏览器 ==========
 let BROWSE_PATH = '';
+let BROWSE_ROOT = '';
+let IS_LINUX = false;
 let pathModal = null;
 
 async function loadCurrentPath() {
     try {
         const data = await App.api('/api/current-path');
         document.getElementById('current-path').value = data.path || '';
-        BROWSE_PATH = data.path || 'Z:\\各客排期';
+        BROWSE_PATH = data.path || data.browse_root || '';
+        BROWSE_ROOT = data.browse_root || '';
+        IS_LINUX = !!data.is_linux;
     } catch(e) {}
 }
 loadCurrentPath();
 
+function _pathSep() { return IS_LINUX ? '/' : '\\'; }
+
 function openPathBrowser() {
     if (!pathModal) pathModal = new bootstrap.Modal(document.getElementById('pathModal'));
-    browseTo(BROWSE_PATH || 'Z:\\各客排期');
+    browseTo(BROWSE_PATH || BROWSE_ROOT || '/');
     pathModal.show();
 }
 
@@ -1369,7 +1377,7 @@ async function browseTo(path) {
         const data = await App.api('/api/browse-dirs', { method: 'POST', body: { path } });
         let html = '';
         data.dirs.forEach(d => {
-            html += `<div class="browse-item dir" onclick="browseTo('${d.path.replace(/\\/g, '\\\\')}')">
+            html += `<div class="browse-item dir" onclick="browseTo('${d.path.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}')">
                 <i class="bi bi-folder-fill text-warning me-2"></i>
                 <span>${d.name}</span>
                 <i class="bi bi-chevron-right ms-auto text-muted"></i>
@@ -1395,16 +1403,34 @@ async function browseTo(path) {
 }
 
 function browseUp() {
-    const parts = BROWSE_PATH.replace(/\\$/, '').split('\\');
+    const sep = _pathSep();
+    const cleaned = BROWSE_PATH.replace(/[\/\\]$/, '');
+    const parts = cleaned.split(IS_LINUX ? '/' : '\\');
     if (parts.length > 1) {
         parts.pop();
-        browseTo(parts.join('\\'));
+        let parent = parts.join(sep);
+        if (IS_LINUX && !parent) parent = '/';
+        browseTo(parent);
     }
 }
 
 function browseCustomPath() {
-    const p = prompt('输入完整路径：', BROWSE_PATH);
+    const p = prompt('输入完整路径（支持 Windows 路径如 D:\\xxx）：', BROWSE_PATH);
     if (p) browseTo(p.trim());
+}
+
+async function quickSetPath(path) {
+    if (!path || !path.trim()) return;
+    App.showLoading('正在切换排期路径...');
+    try {
+        await App.api('/api/set-schedule-path', { method: 'POST', body: { path: path.trim() } });
+        const data = await App.api('/api/current-path');
+        document.getElementById('current-path').value = data.path || path.trim();
+        App.alert(`排期路径已切换`, 'success');
+        loadDashboard();
+    } catch(e) {
+        App.alert('路径无效: ' + e.message, 'danger');
+    } finally { App.hideLoading(); }
 }
 
 async function confirmPath() {
@@ -1879,12 +1905,12 @@ async function assignSchedule(filepath, sheet) {
 async function syncSchedules() {
     const curPath = document.getElementById('current-path').value;
     if (!curPath) { App.alert('请先设置排期路径', 'warning'); return; }
-    if (!confirm(`确认同步Z盘排期到本地？\n\n源：Z:\\各客排期\\ZURU生产排期\n目标：${curPath}\n\n将复制新文件、更新已修改文件、删除多余文件。`)) return;
+    if (!confirm(`确认同步排期到当前目录？\n\n目标：${curPath}\n\n将复制新文件、更新已修改文件、删除多余文件。`)) return;
     App.showLoading('正在同步排期文件...');
     try {
         const data = await App.api('/api/sync-schedules', {
             method: 'POST',
-            body: { source: 'Z:\\各客排期\\ZURU生产排期', dest: curPath }
+            body: { dest: curPath }
         });
         let msg = `同步完成！`;
         if (data.copied) msg += ` 新增${data.copied}个`;

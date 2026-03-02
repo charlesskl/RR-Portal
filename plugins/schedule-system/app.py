@@ -11,6 +11,34 @@ app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = os.path.join(os.path.dirname(__file__), 'uploads')
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
+
+# =================== 反向代理前缀支持 ===================
+class ReverseProxyMiddleware:
+    """支持反向代理URL前缀（如 /schedule/）
+    优先读取HTTP头 X-Script-Name / X-Forwarded-Prefix，
+    否则使用环境变量 APP_PREFIX"""
+    def __init__(self, wsgi_app, default_prefix=''):
+        self.wsgi_app = wsgi_app
+        self.default_prefix = default_prefix.rstrip('/')
+
+    def __call__(self, environ, start_response):
+        prefix = (environ.get('HTTP_X_SCRIPT_NAME', '') or
+                  environ.get('HTTP_X_FORWARDED_PREFIX', '') or
+                  self.default_prefix)
+        if prefix:
+            prefix = prefix.rstrip('/')
+            environ['SCRIPT_NAME'] = prefix
+            path_info = environ.get('PATH_INFO', '')
+            if path_info.startswith(prefix):
+                environ['PATH_INFO'] = path_info[len(prefix):] or '/'
+        return self.wsgi_app(environ, start_response)
+
+
+app.wsgi_app = ReverseProxyMiddleware(
+    app.wsgi_app,
+    default_prefix=os.environ.get('APP_PREFIX', '')
+)
+
 CFG_FILE = os.path.join(os.path.dirname(__file__), 'data', 'config.json')
 os.makedirs(os.path.dirname(CFG_FILE), exist_ok=True)
 
@@ -42,8 +70,49 @@ def _add_issues(new_items):
     _save_issues(existing)
 
 
+def _default_z_path():
+    """根据环境变量或运行环境返回默认排期路径"""
+    env = os.environ.get('Z_DRIVE_PATH', '').strip()
+    if env:
+        return env
+    return r'Z:\各客排期\ZURU生产排期'
+
+
+def _default_browse_root():
+    """返回路径浏览器的根目录（独立于排期路径）"""
+    env = os.environ.get('BROWSE_ROOT', '').strip()
+    if env:
+        return env
+    # 兼容：如果没有 BROWSE_ROOT，也不用 Z_DRIVE_PATH（避免扫描整个文件系统）
+    if os.name != 'nt':
+        return '/'
+    return r'Z:\各客排期'
+
+
+def _is_linux():
+    return os.name != 'nt'
+
+
+def _win_to_container_path(win_path):
+    """将 Windows 路径（如 D:\\xxx）转换为容器内路径（/host/mnt/host/d/xxx）
+    如果已经是 Linux 路径则原样返回"""
+    if not win_path or not _is_linux():
+        return win_path
+    # 已经是 Linux 路径
+    if win_path.startswith('/'):
+        return win_path
+    # Windows 路径：D:\xxx 或 D:/xxx
+    import re
+    m = re.match(r'^([A-Za-z]):[/\\](.*)$', win_path)
+    if m:
+        drive = m.group(1).lower()
+        rest = m.group(2).replace('\\', '/')
+        return f'/host/mnt/host/{drive}/{rest}'.rstrip('/')
+    return win_path
+
+
 def cfg():
-    d = {'z_drive_path': r'Z:\各客排期\ZURU生产排期'}
+    d = {'z_drive_path': _default_z_path()}
     if os.path.exists(CFG_FILE):
         with open(CFG_FILE, 'r', encoding='utf-8') as f:
             d.update(json.load(f))
@@ -491,7 +560,7 @@ def clear_issues():
 @app.route('/api/schedule-dirs')
 def schedule_dirs():
     """扫描各客排期目录，按客户分类返回"""
-    base = r'Z:\各客排期'
+    base = _default_browse_root()
     if not os.path.isdir(base):
         return jsonify({'error': '各客排期目录不存在', 'groups': []})
     groups = []
@@ -535,7 +604,8 @@ def open_folder():
 @app.route('/api/browse-dirs', methods=['POST'])
 def browse_dirs():
     """浏览目录，返回子目录和xlsx文件列表"""
-    path = request.json.get('path', r'Z:\各客排期')
+    path = request.json.get('path', _default_browse_root())
+    path = _win_to_container_path(path)
     if not os.path.isdir(path):
         return jsonify({'error': f'路径不存在: {path}', 'dirs': [], 'files': []}), 400
     dirs, files = [], []
@@ -548,7 +618,10 @@ def browse_dirs():
                 files.append({'name': item, 'path': fp})
     except PermissionError:
         return jsonify({'error': '无权限访问', 'dirs': [], 'files': []}), 403
-    parent = os.path.dirname(path) if path != os.path.splitdrive(path)[0] + '\\' else ''
+    if _is_linux():
+        parent = os.path.dirname(path) if path != '/' else ''
+    else:
+        parent = os.path.dirname(path) if path != os.path.splitdrive(path)[0] + '\\' else ''
     return jsonify({'current': path, 'parent': parent, 'dirs': dirs, 'files': files})
 
 
@@ -556,6 +629,7 @@ def browse_dirs():
 def set_schedule_path():
     """设置排期文件路径"""
     new_path = request.json.get('path', '')
+    new_path = _win_to_container_path(new_path)
     if not new_path or not os.path.isdir(new_path):
         return jsonify({'error': '无效路径'}), 400
     c = cfg()
@@ -567,7 +641,11 @@ def set_schedule_path():
 
 @app.route('/api/current-path')
 def current_path():
-    return jsonify({'path': cfg().get('z_drive_path', '')})
+    return jsonify({
+        'path': cfg().get('z_drive_path', ''),
+        'browse_root': _default_browse_root(),
+        'is_linux': _is_linux(),
+    })
 
 
 # =================== 排期同步 ===================
@@ -576,7 +654,7 @@ def current_path():
 def sync_schedules():
     """从Z盘正式排期目录同步到本地目录"""
     import shutil
-    source = request.json.get('source', r'Z:\各客排期\ZURU生产排期')
+    source = request.json.get('source', _default_z_path())
     dest = request.json.get('dest', cfg().get('z_drive_path', ''))
     if not dest:
         return jsonify({'error': '未设置目标路径'}), 400
@@ -1179,9 +1257,9 @@ def start_auto_retry():
 
 if __name__ == '__main__':
     print('=' * 50)
-    print('  ZURU 排期录入系统 v4 (测试版)')
-    print('  http://localhost:5001')
-    print('  自动重试：每60秒检查待保存文件+定时任务')
+    print('  ZURU 排期录入系统 v4')
+    print('  http://localhost:5000')
+    print('  自动重试：每3分钟检查待保存文件')
     print('=' * 50)
     start_auto_retry()
-    app.run(host='0.0.0.0', port=5001, debug=True, use_reloader=True)
+    app.run(host='0.0.0.0', port=5000, debug=True, use_reloader=True)

@@ -64,9 +64,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 
 EXPOSE ${APP_PORT}
 
-# 注意：Windows Docker bind mount 权限问题，不切换用户
-# USER appuser
-
+# 注意: 不使用 USER appuser，因为 bind mount 的宿主机目录权限不兼容
 # 用 tini 作为 PID 1，处理僵尸进程
 ENTRYPOINT ["tini", "--"]
 

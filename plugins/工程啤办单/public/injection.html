@@ -47,11 +47,21 @@
   <div id="injTabOrders">
     <!-- 筛选 -->
     <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
-      <div class="status-filter d-flex flex-wrap gap-1">
-        <button class="btn btn-sm btn-outline-secondary active" onclick="filterStatus('',this)">全部</button>
-        <button class="btn btn-sm btn-warning"  onclick="filterStatus('待生产',this)">待生产</button>
-        <button class="btn btn-sm btn-info"     onclick="filterStatus('生产中',this)">生产中</button>
-        <button class="btn btn-sm btn-success"  onclick="filterStatus('已完成',this)">已完成</button>
+      <div class="d-flex flex-wrap gap-2 align-items-center">
+        <select id="workshopFilter" class="form-select form-select-sm" style="width:auto" onchange="applyFilters()">
+          <option value="">全部车间</option>
+          <option value="A车间">A车间</option>
+          <option value="B车间">B车间</option>
+          <option value="华登车间">华登车间</option>
+          <option value="湖南车间">湖南车间</option>
+          <option value="模厂">模厂</option>
+        </select>
+        <div class="status-filter d-flex flex-wrap gap-1">
+          <button class="btn btn-sm btn-outline-secondary active" onclick="filterStatus('',this)">全部</button>
+          <button class="btn btn-sm btn-warning"  onclick="filterStatus('待生产',this)">待生产</button>
+          <button class="btn btn-sm btn-info"     onclick="filterStatus('生产中',this)">生产中</button>
+          <button class="btn btn-sm btn-success"  onclick="filterStatus('已完成',this)">已完成</button>
+        </div>
       </div>
       <small class="text-muted"><i class="bi bi-arrow-clockwise me-1"></i>每30秒自动刷新</small>
     </div>
@@ -255,7 +265,14 @@ function filterStatus(status, el) {
   currentFilter = status;
   document.querySelectorAll('.status-filter .btn').forEach(b => b.classList.remove('active'));
   el.classList.add('active');
-  renderOrders(currentFilter ? allOrders.filter(o => o.status === currentFilter) : allOrders);
+  applyFilters();
+}
+function applyFilters() {
+  let filtered = allOrders;
+  const ws = document.getElementById('workshopFilter')?.value || '';
+  if (ws) filtered = filtered.filter(o => o.workshop === ws);
+  if (currentFilter) filtered = filtered.filter(o => o.status === currentFilter);
+  renderOrders(filtered);
 }
 
 function loadOrders() {
@@ -275,7 +292,7 @@ function loadOrders() {
     problems.filter(p => p.status === '待处理').forEach(p => {
       problemsMap[p.order_id] = (problemsMap[p.order_id] || 0) + 1;
     });
-    renderOrders(currentFilter ? orders.filter(o => o.status === currentFilter) : orders);
+    applyFilters();
   }).catch(() => {
     document.getElementById('orderList').innerHTML = '<div class="text-center p-4 text-danger">加载失败，请刷新页面</div>';
   });

@@ -884,6 +884,68 @@
           "_gcodeFile": ""
         }
       ]
+    },
+    "2026-03-01": {
+      "off": false,
+      "items": []
+    },
+    "2026-03-28": {
+      "off": false,
+      "items": []
+    },
+    "2026-03-27": {
+      "off": false,
+      "items": []
+    },
+    "2026-03-02": {
+      "off": false,
+      "items": [
+        {
+          "machine": 1,
+          "status": "running",
+          "productName": "小玩偶.stl_2 + 小玩偶.stl_4 + 小玩偶.stl_5 + 小玩偶.stl_7",
+          "material": "",
+          "weight": 0,
+          "qty": 1,
+          "time": 0.6,
+          "price": 0,
+          "remark": "",
+          "autoRecord": true,
+          "printStartTime": "2026-03-02T00:28:46.326Z",
+          "printEndTime": "2026-03-02T01:03:53.499Z",
+          "_gcodeFile": "小玩偶.stl_2 + 小玩偶.stl_4 + 小玩偶.stl_5 + 小玩偶.stl_7"
+        },
+        {
+          "machine": 3,
+          "status": "running",
+          "productName": "炮炮蛋玩偶",
+          "material": "",
+          "weight": 0,
+          "qty": 1,
+          "time": 0,
+          "price": 0,
+          "remark": "",
+          "autoRecord": true,
+          "printStartTime": "2026-03-02T00:47:50.646Z",
+          "printEndTime": null,
+          "_gcodeFile": "炮炮蛋玩偶"
+        },
+        {
+          "machine": 5,
+          "status": "running",
+          "productName": "炮炮蛋玩偶",
+          "material": "",
+          "weight": 0,
+          "qty": 1,
+          "time": 0,
+          "price": 0,
+          "remark": "",
+          "autoRecord": true,
+          "printStartTime": "2026-03-02T00:49:40.836Z",
+          "printEndTime": null,
+          "_gcodeFile": "炮炮蛋玩偶"
+        }
+      ]
     }
   }
 }

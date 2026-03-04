@@ -93,6 +93,11 @@ services:
       - PORT=3000
     volumes:
       - ./plugins/工程啤办单/data:/app/data
+    healthcheck:
+      test: ["CMD", "wget", "-qO", "/dev/null", "http://127.0.0.1:3000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
     restart: unless-stopped
     networks:
       - platform-net
@@ -101,6 +106,12 @@ services:
     build:
       context: ./plugins/印尼小组
       dockerfile: Dockerfile
+    healthcheck:
+      test: ["CMD", "wget", "-qO", "/dev/null", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
     restart: unless-stopped
     networks:
       - platform-net

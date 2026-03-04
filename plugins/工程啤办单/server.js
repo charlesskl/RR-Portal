@@ -156,6 +156,9 @@ function verifyPin(name, pin, role) {
   return pins.supervisors && pins.supervisors[name] === hash;
 }
 
+// ─── Health Check ────────────────────────────────────────────────────────────
+app.get('/health', (req, res) => res.json({ status: 'ok', service: 'rr-production' }));
+
 // ─── Middleware ──────────────────────────────────────────────────────────────
 app.use(express.json({ limit: '10mb' }));
 // 禁用 HTML 缓存，确保每次都获取最新版本

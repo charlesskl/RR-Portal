@@ -19,6 +19,9 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     JWT_EXPIRATION_MINUTES: int = 60
 
+    # ─── CORS ───
+    ALLOWED_ORIGINS: str = "*"
+
     # ─── Admin bootstrap ───
     ADMIN_USERNAME: str = "admin"
     ADMIN_PASSWORD: str = "admin123"

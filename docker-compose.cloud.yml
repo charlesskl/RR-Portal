@@ -14,6 +14,7 @@ services:
       - "${PORT:-80}:80"
     volumes:
       - ./nginx/nginx.cloud.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/.htpasswd:/etc/nginx/.htpasswd:ro
       - ./frontend/index.cloud.html:/usr/share/nginx/html/index.html:ro
       - ./frontend/logo.png:/usr/share/nginx/html/logo.png:ro
     depends_on:

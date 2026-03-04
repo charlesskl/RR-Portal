@@ -1,2 +1,0 @@
-# Plugin SDK is pre-installed in the Docker image
-# Add Engineering-specific dependencies below if needed

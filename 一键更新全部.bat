@@ -124,7 +124,7 @@ if errorlevel 1 (
 :: 提交代码到 GitHub
 echo.
 echo     提交更新到 GitHub...
-git add -A
+git add plugins/ nginx/nginx.conf nginx/nginx.cloud.conf docker-compose.yml docker-compose.cloud.yml
 git commit -m "chore: update plugins from upstream repos" >nul 2>&1
 git push origin main
 if errorlevel 1 (

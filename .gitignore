@@ -30,6 +30,9 @@ plugins/schedule-system/data/
 plugins/schedule-system/uploads/
 .claude/
 
+# Auth files
+nginx/.htpasswd
+
 # Cloud deployment data
 data/postgres/*
 !data/postgres/.gitkeep

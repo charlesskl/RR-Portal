@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     JWT_EXPIRATION_MINUTES: int = 60
 
     # ─── CORS ───
-    ALLOWED_ORIGINS: str = "*"
+    ALLOWED_ORIGINS: str = "http://localhost"
 
     # ─── Admin bootstrap ───
     ADMIN_USERNAME: str = "admin"

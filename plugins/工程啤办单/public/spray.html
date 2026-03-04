@@ -82,6 +82,7 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script src="utils.js"></script>
 <script>
 let allOrders = [];
 let problemsMap = {};
@@ -92,7 +93,7 @@ const statusBadge = s => ({
   '生产中': '<span class="badge badge-progress">生产中</span>',
   '已完成': '<span class="badge badge-done">已完成</span>',
   '已取消': '<span class="badge bg-secondary">已取消</span>'
-}[s] || `<span class="badge bg-secondary">${s}</span>`);
+}[s] || `<span class="badge bg-secondary">${esc(s)}</span>`);
 
 function filterStatus(status, el) {
   currentFilter = status;
@@ -103,8 +104,8 @@ function filterStatus(status, el) {
 
 function loadOrders() {
   Promise.all([
-    fetch('/api/spray').then(r => r.json()),
-    fetch('/api/problems?type=spray').then(r => r.json())
+    apiFetch('/api/spray').then(r => r.json()),
+    apiFetch('/api/problems?type=spray').then(r => r.json())
   ]).then(([orders, problems]) => {
     allOrders = orders;
     problemsMap = {};
@@ -125,16 +126,23 @@ function renderOrders(orders) {
   const rows = orders.map(o => {
     const provideTime = o.receive_time || '-';
     const engTime = o.eng_complete_time || '-';
+    const actualReceive = o.actual_receive_time || '';
     return `
     <tr class="order-row" onclick="viewOrder(${o.id})">
-      <td><strong>${o.order_number || '-'}</strong></td>
-      <td>${o.date || '-'}</td>
-      <td>${o.order_type || '-'}</td>
-      <td>${o.workshop || '-'}</td>
-      <td>${o.eng_name || '-'}</td>
-      <td style="color:#0d6efd;font-weight:500">${provideTime}</td>
-      <td style="color:#d63384;font-weight:500">${engTime}</td>
-      <td>${o.reason || '-'}</td>
+      <td><strong>${esc(o.order_number || '-')}</strong></td>
+      <td>${esc(o.date ? o.date.slice(5) : '-')}</td>
+      <td>${esc(o.order_type || '-')}</td>
+      <td>${esc(o.workshop || '-')}</td>
+      <td>${esc(o.eng_name || '-')}</td>
+      <td style="color:#0d6efd;font-weight:500">${esc(provideTime)}</td>
+      <td style="color:#d63384;font-weight:500">${esc(engTime)}</td>
+      <td onclick="event.stopPropagation()">
+        <input type="date" class="form-control form-control-sm" style="min-width:120px"
+          value="${esc(actualReceive)}"
+          onchange="saveActualReceive(${o.id}, this.value)"
+          title="实际收到胶件日期">
+      </td>
+      <td>${esc(o.reason || '-')}</td>
       <td>
         ${statusBadge(o.status)}
         ${problemsMap[o.id] ? `<span class="badge bg-danger ms-1"><i class="bi bi-exclamation-triangle-fill me-1"></i>${problemsMap[o.id]}个问题</span>` : ''}
@@ -160,6 +168,7 @@ function renderOrders(orders) {
           <th>订单编号</th><th>日期</th><th>类型</th><th>车间</th><th>跟进工程师</th>
           <th style="color:#7eb8ff">收到胶件时间</th>
           <th style="color:#f9a8d4">工程预计完成时间</th>
+          <th style="color:#86efac">实际收到胶件</th>
           <th>原因</th><th>状态</th><th>处理</th>
         </tr>
       </thead>
@@ -168,7 +177,7 @@ function renderOrders(orders) {
 }
 
 function viewOrder(id) {
-  fetch(`/api/spray/${id}`)
+  apiFetch(`/api/spray/${id}`)
     .then(r => r.json())
     .then(order => {
       document.getElementById('detailTitle').textContent = `喷油单 #${order.id} — ${order.order_number || ''}`;
@@ -177,20 +186,20 @@ function viewOrder(id) {
       const items = order.items || [];
       const rows = items.map(it => `
         <tr>
-          <td>${it.client_name||''}</td><td>${it.product_name||''}</td>
-          <td>${it.sample_qty||''}</td><td>${it.provide_time||''}</td>
-          <td>${it.receive_time||''}</td><td>${it.eng_complete_time||''}</td>
-          <td><strong style="color:#dc3545">${it.delivery_time||''}</strong></td>
-          <td>${it.engineer||''}</td><td>${it.notes||''}</td>
+          <td>${esc(it.client_name||'')}</td><td>${esc(it.product_name||'')}</td>
+          <td>${esc(it.sample_qty||'')}</td><td>${esc(it.provide_time||'')}</td>
+          <td>${esc(it.receive_time||'')}</td><td>${esc(it.eng_complete_time||'')}</td>
+          <td><strong style="color:#dc3545">${esc(it.delivery_time||'')}</strong></td>
+          <td>${esc(it.engineer||'')}</td><td>${esc(it.notes||'')}</td>
         </tr>`).join('');
 
       document.getElementById('detailBody').innerHTML = `
         <div class="detail-header row g-3">
-          <div class="col-md-3"><div class="label">订单编号</div><div class="value">${order.order_number||'-'}</div></div>
-          <div class="col-md-3"><div class="label">日期</div><div class="value">${order.date||'-'}</div></div>
-          <div class="col-md-3"><div class="label">类型</div><div class="value">${order.order_type||'-'}</div></div>
+          <div class="col-md-3"><div class="label">订单编号</div><div class="value">${esc(order.order_number||'-')}</div></div>
+          <div class="col-md-3"><div class="label">日期</div><div class="value">${esc(order.date||'-')}</div></div>
+          <div class="col-md-3"><div class="label">类型</div><div class="value">${esc(order.order_type||'-')}</div></div>
           <div class="col-md-3"><div class="label">状态</div><div class="value">${statusBadge(order.status)}</div></div>
-          <div class="col-12"><div class="label">原因</div><div class="value">${order.reason||'-'}</div></div>
+          <div class="col-12"><div class="label">原因</div><div class="value">${esc(order.reason||'-')}</div></div>
         </div>
         <div class="table-responsive">
           <table class="table table-bordered table-sm">
@@ -220,7 +229,7 @@ function openProblemModal(orderId, orderNumber) {
   document.getElementById('pmProblemsList').innerHTML = '<div class="text-muted small">加载中...</div>';
   new bootstrap.Modal(document.getElementById('problemModal')).show();
 
-  fetch(`/api/problems?type=spray&order_id=${orderId}`)
+  apiFetch(`/api/problems?type=spray&order_id=${orderId}`)
     .then(r => r.json())
     .then(list => {
       if (!list.length) {
@@ -232,11 +241,11 @@ function openProblemModal(orderId, orderNumber) {
         ${list.map(p => `
           <div class="border rounded p-2 mb-2 ${p.status==='已解决' ? 'bg-light' : 'bg-warning-subtle'}">
             <div class="d-flex justify-content-between align-items-start">
-              <span class="small">${p.description}</span>
-              <span class="badge ${p.status==='已解决' ? 'bg-success' : 'bg-danger'} ms-2 flex-shrink-0">${p.status}</span>
+              <span class="small">${esc(p.description)}</span>
+              <span class="badge ${p.status==='已解决' ? 'bg-success' : 'bg-danger'} ms-2 flex-shrink-0">${esc(p.status)}</span>
             </div>
             <div class="text-muted" style="font-size:.75rem;margin-top:4px">
-              ${p.reported_by} · ${p.created_at.replace('T',' ').slice(0,16)}
+              ${esc(p.reported_by)} · ${esc(p.created_at.replace('T',' ').slice(0,16))}
             </div>
           </div>`).join('')}`;
     });
@@ -245,9 +254,9 @@ function openProblemModal(orderId, orderNumber) {
 function submitProblem() {
   const desc = document.getElementById('pmDescription').value.trim();
   if (!desc) { alert('请输入问题描述'); return; }
-  fetch('/api/problems', {
+  apiFetch('/api/problems', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'X-User': encodeURIComponent('喷油部') },
     body: JSON.stringify({
       order_type: 'spray',
       order_id: currentProblemOrderId,
@@ -269,11 +278,19 @@ function handleBtn(id, status) {
 }
 
 function setStatus(id, status) {
-  fetch(`/api/spray/${id}/status`, {
+  apiFetch(`/api/spray/${id}/status`, {
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'X-User': encodeURIComponent('喷油部') },
     body: JSON.stringify({ status })
   }).then(() => loadOrders());
+}
+
+function saveActualReceive(id, value) {
+  apiFetch(`/api/spray/${id}/actual-receive`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', 'X-User': encodeURIComponent('喷油部') },
+    body: JSON.stringify({ actual_receive_time: value })
+  }).then(r => { if (!r.ok) alert('保存失败，请重试'); });
 }
 
 function printOrder(id) {

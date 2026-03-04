@@ -23,6 +23,7 @@
     .inj  .card-header { background: #e67e22; color: #fff; }
     .slush .card-header { background: #16a085; color: #fff; }
     .spray .card-header { background: #8e44ad; color: #fff; }
+    .asm .card-header { background: #2980b9; color: #fff; }
   </style>
 </head>
 <body>
@@ -134,6 +135,31 @@
         </div>
       </div>
 
+      <!-- 装配部 -->
+      <div class="col-md-6 col-lg-3">
+        <div class="card dept-card-big asm h-100">
+          <div class="card-header"><i class="bi bi-gear-wide-connected me-2"></i>装配部</div>
+          <div class="card-body d-flex flex-column">
+            <p class="text-muted small mb-3">创建和管理装配任务单据</p>
+            <div class="row text-center mb-3 g-2">
+              <div class="col-4">
+                <div class="stat-num text-warning" id="asm-pending">-</div>
+                <div class="stat-label">待生产</div>
+              </div>
+              <div class="col-4">
+                <div class="stat-num text-info" id="asm-progress">-</div>
+                <div class="stat-label">生产中</div>
+              </div>
+              <div class="col-4">
+                <div class="stat-num text-success" id="asm-done">-</div>
+                <div class="stat-label">已完成</div>
+              </div>
+            </div>
+            <a href="assembly.html" class="btn go-btn mt-auto w-100" style="background:#2980b9;color:#fff">进入装配部</a>
+          </div>
+        </div>
+      </div>
+
 
     </div>
 
@@ -144,13 +170,14 @@
     </p>
   </div>
 
+  <script src="utils.js"></script>
   <script>
     function loadStats() {
-      fetch('/api/stats').then(r => r.json()).then(s => {
+      apiFetch('/api/stats').then(r => r.json()).then(s => {
         const total = (a, b, c) => (a.pending||0) + (a.inProgress||0) + (a.done||0);
-        document.getElementById('eng-pending').textContent  = (s.injection.pending||0) + (s.slush.pending||0) + (s.spray.pending||0);
-        document.getElementById('eng-progress').textContent = (s.injection.inProgress||0) + (s.slush.inProgress||0) + (s.spray.inProgress||0);
-        document.getElementById('eng-done').textContent     = (s.injection.done||0) + (s.slush.done||0) + (s.spray.done||0);
+        document.getElementById('eng-pending').textContent  = (s.injection.pending||0) + (s.slush.pending||0) + (s.spray.pending||0) + (s.assembly?.pending||0);
+        document.getElementById('eng-progress').textContent = (s.injection.inProgress||0) + (s.slush.inProgress||0) + (s.spray.inProgress||0) + (s.assembly?.inProgress||0);
+        document.getElementById('eng-done').textContent     = (s.injection.done||0) + (s.slush.done||0) + (s.spray.done||0) + (s.assembly?.done||0);
         document.getElementById('inj-pending').textContent  = s.injection.pending || 0;
         document.getElementById('inj-progress').textContent = s.injection.inProgress || 0;
         document.getElementById('inj-done').textContent     = s.injection.done || 0;
@@ -160,6 +187,9 @@
         document.getElementById('spray-pending').textContent  = s.spray.pending || 0;
         document.getElementById('spray-progress').textContent = s.spray.inProgress || 0;
         document.getElementById('spray-done').textContent     = s.spray.done || 0;
+        document.getElementById('asm-pending').textContent  = s.assembly?.pending || 0;
+        document.getElementById('asm-progress').textContent = s.assembly?.inProgress || 0;
+        document.getElementById('asm-done').textContent     = s.assembly?.done || 0;
       }).catch(() => {});
     }
     loadStats();

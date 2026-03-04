@@ -1,71 +1,46 @@
 @echo off
 chcp 65001 >nul
 echo ========================================
-echo   3D打印 - 从 GitHub 拉取最新代码
+echo   3D打印 - 拉取最新代码
 echo ========================================
 echo.
 
-cd /d "%~dp0"
+:: 备份数据
+echo [1/3] 备份数据...
+if exist "%~dp0data\data.json" copy /Y "%~dp0data\data.json" "%~dp0data\data.json.bak" >nul 2>&1
 
-:: ──────────────────────────────────────
-:: 请在下方设置 GitHub 仓库地址
-:: 例如: set REPO_URL=https://github.com/wendyxiaowen/3D-
-:: ──────────────────────────────────────
-set REPO_URL=https://github.com/wendyxiaowen/3D-.git
-
-if "%REPO_URL%"=="" (
+:: 从 GitHub 拉取最新代码
+echo [2/3] 从 GitHub 拉取最新代码...
+set "TEMP_DIR=%TEMP%\3D-"
+if exist "%TEMP_DIR%" rmdir /S /Q "%TEMP_DIR%"
+git clone --depth 1 https://github.com/wendyxiaowen/3D- "%TEMP_DIR%"
+if errorlevel 1 (
     echo.
-    echo ❌ 尚未设置 GitHub 仓库地址！
-    echo.
-    echo 请用记事本打开此文件，修改第 14 行：
-    echo   set REPO_URL=https://github.com/wendyxiaowen/3D-
-    echo.
+    echo ❌ 代码拉取失败！请检查网络或 Git 配置
     pause
     exit /b 1
 )
 
-:: 检查是否已初始化 Git
-if not exist ".git" (
-    echo 首次运行，正在克隆仓库...
-    echo.
-    git clone %REPO_URL% temp_clone
-    if errorlevel 1 (
-        echo.
-        echo ❌ 克隆失败！请检查仓库地址和网络连接
-        pause
-        exit /b 1
-    )
-    :: 将克隆内容移到当前目录（保留此 bat 文件）
-    xcopy /E /Y /I temp_clone\* .
-    xcopy /E /Y /H temp_clone\.git .git\
-    rd /S /Q temp_clone
-    echo.
-    echo ✅ 仓库克隆完成！
-) else (
-    echo 正在拉取最新代码...
-    git pull origin main
-    if errorlevel 1 (
-        echo.
-        echo ❌ 拉取失败！请检查网络连接
-        pause
-        exit /b 1
-    )
-    echo.
-    echo ✅ 代码已更新到最新版本！
+:: 复制更新的文件（保留本地 data 目录和 .env）
+echo     复制 server.js ...
+copy /Y "%TEMP_DIR%\server.js" "%~dp0server.js" >nul
+echo     复制 index.html ...
+copy /Y "%TEMP_DIR%\index.html" "%~dp0index.html" >nul
+
+:: 清理临时目录
+rmdir /S /Q "%TEMP_DIR%" >nul 2>&1
+
+:: 恢复数据备份（防止覆盖）
+if exist "%~dp0data\data.json.bak" (
+    copy /Y "%~dp0data\data.json.bak" "%~dp0data\data.json" >nul 2>&1
 )
 
-:: 重新构建 Docker 服务（如果有的话）
-echo.
-echo 正在重新构建 Docker 服务...
-cd /d "%~dp0..\.."
-docker compose up -d --build 2>nul
-if errorlevel 1 (
-    echo.
-    echo ⚠️ Docker 重建跳过（可能尚未配置 Docker 服务）
-)
-
+echo [3/3] 完成！
 echo.
 echo ========================================
 echo   ✅ 更新完成！
+echo ========================================
+echo   注意: 3D打印在宿主机运行，请重启服务器:
+echo   运行 启动服务器.bat
 echo ========================================
 pause

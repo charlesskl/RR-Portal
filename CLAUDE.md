@@ -30,9 +30,23 @@ RR Portal
 └── docker-compose.yml
 ```
 
-## Plugin SDK 规范
+## 插件类型
 
-所有插件必须遵循以下结构和规范：
+RR Portal 支持两种插件类型：
+
+### 1. Standalone Service（独立服务）
+团队成员用自己熟悉的技术栈（Node.js/Express 等）开发，直接容器化运行，不依赖 plugin_sdk。
+- 数据存储：JSON 文件 + bind mount（`./plugins/xxx/data:/app/data`）
+- 认证：自行实现（如 PIN 验证、X-User header）
+- Nginx：通过子路径代理（如 `/rr/` → `rr-production:3000`）
+- **当前 Standalone 插件：工程啤办单 (Node.js)、3D打印 (Node.js)、印尼小组 (Node.js)、排期录入系统 (Python/Flask)**
+
+### 2. Plugin SDK 插件（Python/FastAPI）
+使用 plugin_sdk 统一架构，适用于需要核心权限系统和 PostgreSQL 的场景。
+
+## Plugin SDK 规范（仅适用于 Plugin SDK 类型插件）
+
+以下规范适用于选择使用 plugin_sdk 的插件：
 
 ### 文件结构
 ```
@@ -149,10 +163,10 @@ CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
 6. **执行下方「插件上线 Checklist」确保容器内功能完整**
 
 **关键原则：**
-- 不管 repo 用什么技术栈，统一转换成 Python/FastAPI + SQLAlchemy async
-- 保持 plugin_sdk 标准接口（BasePlugin, PluginDatabase, StandardResponse）
-- 权限用 `require_plugin_permission("<name>:<action>")`
-- 数据库用 `PluginDatabase("plugin_<name>")` 隔离 schema
+- **Standalone Service 优先**：如果 repo 本身已是完整可运行的应用（Node.js/Express 等），保持原技术栈，直接容器化
+- 仅在需要核心权限系统或 PostgreSQL 时，才转换为 plugin_sdk 架构
+- Standalone 服务通过 nginx 子路径代理接入平台
+- 数据持久化统一用 bind mount
 
 ## 插件上线 Checklist（本地 → Docker 适配）
 
@@ -214,9 +228,10 @@ volumes:
 
 ## 插件注册表
 
-| 文件夹 (repo名) | 显示名 | 部门 | GitHub Repo |
-|-----------------|--------|------|-------------|
-| RR-production-system | 工程啤办单 | Engineering | https://github.com/hufan4308-blip/RR-production-system |
-| 3D打印 | 3D打印 | Engineering | https://github.com/wendyxiaowen/3D- |
-| business | 业务部 | Business | — |
-| indonesia | 印尼 | Indonesia | — |
+| 文件夹 (repo名) | 显示名 | 部门 | 类型 | GitHub Repo |
+|-----------------|--------|------|------|-------------|
+| 工程啤办单 | 工程啤办单 | Engineering | Standalone (Node.js) | https://github.com/hufan4308-blip/RR-production-system |
+| 3D打印 | 3D打印 | Engineering | Standalone (Node.js) | https://github.com/wendyxiaowen/3D- |
+| Zuru MA 包装差价系统 | Zuru MA 包装差价系统 | Business | Standalone (Node.js) | — |
+| 印尼小组 | 印尼出货明细资料核对系统 | Indonesia | Standalone (Node.js) | https://github.com/charlesskl/Export-to-Indonesia |
+| schedule-system | 排期录入系统 | Production | Standalone (Python/Flask) | https://github.com/hanson678/schedule-system |

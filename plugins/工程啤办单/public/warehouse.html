@@ -210,6 +210,7 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script src="utils.js"></script>
 <script>
 let allOrders   = [];
 let currentFilter = '';
@@ -221,7 +222,7 @@ const statusBadge = s => ({
   '已完成': '<span class="badge badge-done">已完成</span>',
   '待审核': '<span class="badge badge-review">待审核</span>',
   '已驳回': '<span class="badge bg-danger">已驳回</span>',
-}[s] || `<span class="badge bg-secondary">${s}</span>`);
+}[s] || `<span class="badge bg-secondary">${esc(s)}</span>`);
 
 // ── 标签页切换 ────────────────────────────────────────────────────────────────
 function switchTab(name, el) {
@@ -243,7 +244,7 @@ function filterStatus(status, el) {
 }
 
 function loadOrders() {
-  fetch('/api/injection')
+  apiFetch('/api/injection')
     .then(r => r.json())
     .then(orders => {
       allOrders = orders;
@@ -263,13 +264,13 @@ function renderOrders(orders) {
   }
   const rows = orders.map(o => `
     <tr class="order-row" onclick="viewOrder(${o.id})" style="cursor:pointer">
-      <td><strong>${o.order_number||'-'}</strong></td>
-      <td>${o.date||'-'}</td>
-      <td>${o.order_type||'-'}</td>
-      <td>${o.workshop||'-'}</td>
-      <td>${o.supervisor||'-'}</td>
-      <td>${o.eng_name||'-'}</td>
-      <td>${o.reason||'-'}</td>
+      <td><strong>${esc(o.order_number||'-')}</strong></td>
+      <td>${esc(o.date||'-')}</td>
+      <td>${esc(o.order_type||'-')}</td>
+      <td>${esc(o.workshop||'-')}${o.send_to ? ' <span class="badge bg-info text-dark">'+esc(o.send_to)+'</span>' : ''}</td>
+      <td>${esc(o.supervisor||'-')}</td>
+      <td>${esc(o.eng_name||'-')}</td>
+      <td>${esc(o.reason||'-')}</td>
       <td>${statusBadge(o.status)}</td>
       <td><small class="text-muted"><i class="bi bi-box-arrow-in-right"></i> 点击开单</small></td>
     </tr>`).join('');
@@ -287,7 +288,7 @@ function renderOrders(orders) {
 
 // ── 订单详情（仓库只读查看）────────────────────────────────────────────────────
 function viewOrder(id) {
-  fetch(`/api/injection/${id}`)
+  apiFetch(`/api/injection/${id}`)
     .then(r => r.json())
     .then(order => {
       document.getElementById('detailTitle').textContent =
@@ -301,23 +302,23 @@ function viewOrder(id) {
         totalAmt       += +(it.actual_amount_hkd   || 0);
         return `
         <tr>
-          <td>${it.mold_id||''}</td>
-          <td>${it.mold_name||''}</td>
-          <td>${it.material||''}</td>
-          <td>${it.color||''}</td>
-          <td>${it.pigment_no||it.color_code||''}</td>
-          <td class="text-center">${it.quantity||''}</td>
-          <td class="text-center">${it.shoot_qty||it.color_weight_g||''}</td>
-          <td class="text-center">${it.gross_weight_g||it.total_weight_kg||''}</td>
-          <td class="text-center">${it.required_material_kg||''}</td>
-          <td>${it.mold_return_time||it.mold_fee_time||''}</td>
-          <td>${it.completion_time||''}</td>
-          <td>${it.notes||''}</td>
-          <td class="text-center">${it.regrind_no||'-'}</td>
-          <td class="text-center">${it.regrind_weight_kg != null ? it.regrind_weight_kg : '-'}</td>
-          <td class="text-center">${it.receipt_no||'-'}</td>
-          <td class="text-center">${it.collected_weight_kg != null ? it.collected_weight_kg : '-'}</td>
-          <td class="text-center">${it.actual_weight_kg != null ? it.actual_weight_kg : '-'}</td>
+          <td>${esc(it.mold_id||'')}</td>
+          <td>${esc(it.mold_name||'')}</td>
+          <td>${esc(it.material||'')}</td>
+          <td>${esc(it.color||'')}</td>
+          <td>${esc(it.pigment_no||it.color_code||'')}</td>
+          <td class="text-center">${esc(it.quantity||'')}</td>
+          <td class="text-center">${esc(it.shoot_qty||it.color_weight_g||'')}</td>
+          <td class="text-center">${esc(it.gross_weight_g||it.total_weight_kg||'')}</td>
+          <td class="text-center">${esc(it.required_material_kg||'')}</td>
+          <td>${esc(it.mold_return_time||it.mold_fee_time||'')}</td>
+          <td>${esc(it.completion_time||'')}</td>
+          <td>${esc(it.notes||'')}</td>
+          <td class="text-center">${esc(it.regrind_no||'-')}</td>
+          <td class="text-center">${it.regrind_weight_kg != null ? esc(it.regrind_weight_kg) : '-'}</td>
+          <td class="text-center">${esc(it.receipt_no||'-')}</td>
+          <td class="text-center">${it.collected_weight_kg != null ? esc(it.collected_weight_kg) : '-'}</td>
+          <td class="text-center">${it.actual_weight_kg != null ? esc(it.actual_weight_kg) : '-'}</td>
           <td class="text-center fw-bold" style="color:${it.actual_amount_hkd ? '#1a6e3a' : '#999'}">
             ${it.actual_amount_hkd != null ? it.actual_amount_hkd.toFixed(2) : '-'}
           </td>
@@ -335,19 +336,19 @@ function viewOrder(id) {
       document.getElementById('detailBody').innerHTML = `
         <div class="row g-2 mb-3 p-2 rounded" style="background:#e8f5e9">
           <div class="col-6 col-md-2"><small class="text-muted">订单编号</small>
-            <div class="fw-bold">${order.order_number||'-'}</div></div>
+            <div class="fw-bold">${esc(order.order_number||'-')}</div></div>
           <div class="col-6 col-md-2"><small class="text-muted">日期</small>
-            <div>${order.date||'-'}</div></div>
+            <div>${esc(order.date||'-')}</div></div>
           <div class="col-6 col-md-2"><small class="text-muted">类型</small>
-            <div>${order.order_type||'-'}</div></div>
+            <div>${esc(order.order_type||'-')}</div></div>
           <div class="col-6 col-md-2"><small class="text-muted">车间</small>
-            <div>${order.workshop||'-'}</div></div>
+            <div>${esc(order.workshop||'-')}${order.send_to ? ' <span class="badge bg-info text-dark">'+esc(order.send_to)+'</span>' : ''}</div></div>
           <div class="col-6 col-md-2"><small class="text-muted">主管</small>
-            <div>${order.supervisor||'-'}</div></div>
+            <div>${esc(order.supervisor||'-')}</div></div>
           <div class="col-6 col-md-2"><small class="text-muted">状态</small>
             <div>${statusBadge(order.status)}</div></div>
-          <div class="col-12"><small class="text-muted">跟进工程师：</small>${order.eng_name||'-'}
-            &nbsp;<small class="text-muted ms-3">原因：</small>${order.reason||'-'}</div>
+          <div class="col-12"><small class="text-muted">跟进工程师：</small>${esc(order.eng_name||'-')}
+            &nbsp;<small class="text-muted ms-3">原因：</small>${esc(order.reason||'-')}</div>
         </div>
         <p class="text-muted small mb-1">
           <i class="bi bi-eye me-1"></i>此页面为只读查看，领料和用料数据由啤机部填写
@@ -379,8 +380,8 @@ function viewOrder(id) {
 // ── 原料汇总表 ────────────────────────────────────────────────────────────────
 function loadStats() {
   Promise.all([
-    fetch('/api/material-stats').then(r => r.json()),
-    fetch('/api/material-prices').then(r => r.json())
+    apiFetch('/api/material-stats').then(r => r.json()),
+    apiFetch('/api/material-prices').then(r => r.json())
   ]).then(([stats, prices]) => {
     const usageMap = {};
     stats.forEach(s => { usageMap[s.material] = s; });
@@ -471,9 +472,9 @@ function savePrices() {
     unit_price: s.unit_price,
     notes:      s.notes
   }));
-  fetch('/api/material-prices', {
+  apiFetch('/api/material-prices', {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'X-User': encodeURIComponent('原料仓库') },
     body: JSON.stringify(prices)
   }).then(r => r.json()).then(() => {
     showToast('价格已保存', 'primary');
@@ -491,7 +492,7 @@ function showToast(msg, color) {
   t.className = 'position-fixed bottom-0 end-0 p-3'; t.style.zIndex = 9999;
   t.innerHTML = `<div class="toast show text-white bg-${color} border-0">
     <div class="d-flex">
-      <div class="toast-body"><i class="bi bi-check-circle me-1"></i>${msg}</div>
+      <div class="toast-body"><i class="bi bi-check-circle me-1"></i>${esc(msg)}</div>
       <button class="btn-close btn-close-white me-2 m-auto"
         onclick="this.closest('.position-fixed').remove()"></button>
     </div></div>`;
@@ -514,7 +515,7 @@ function filterReq(status, el) {
 
 function loadReqs() {
   document.getElementById('reqList').innerHTML = '<div class="text-center p-4 text-muted">加载中...</div>';
-  fetch('/api/requisitions')
+  apiFetch('/api/requisitions')
     .then(r => r.json())
     .then(list => {
       allReqs = list;
@@ -537,19 +538,19 @@ function renderReqs() {
     : '<span class="badge bg-warning text-dark">待出库</span>';
   const rows = list.map(r => `
     <tr>
-      <td><strong>${r.req_number||'-'}</strong></td>
-      <td>${r.date||'-'}</td>
-      <td>${r.order_number ? `<span class="badge bg-secondary">${r.order_number}</span>` : '-'}</td>
-      <td><strong>${r.material||'-'}</strong></td>
-      <td class="text-end">${r.requested_weight_kg||'-'} KG</td>
-      <td>${r.applicant||'-'}</td>
-      <td>${r.notes||'-'}</td>
+      <td><strong>${esc(r.req_number||'-')}</strong></td>
+      <td>${esc(r.date||'-')}</td>
+      <td>${r.order_number ? `<span class="badge bg-secondary">${esc(r.order_number)}</span>` : '-'}</td>
+      <td><strong>${esc(r.material||'-')}</strong></td>
+      <td class="text-end">${esc(r.requested_weight_kg||'-')} KG</td>
+      <td>${esc(r.applicant||'-')}</td>
+      <td>${esc(r.notes||'-')}</td>
       <td>${reqBadge(r.status)}</td>
       <td>
         <div class="btn-group btn-group-sm">
           ${r.status === '待出库'
             ? `<button class="btn btn-success" onclick="issueReq(${r.id})" title="标记已出库"><i class="bi bi-check-lg"></i> 出库</button>`
-            : `<span class="text-muted small">${(r.issued_at||'').replace('T',' ').slice(0,16)}</span>`}
+            : `<span class="text-muted small">${esc((r.issued_at||'').replace('T',' ').slice(0,16))}</span>`}
           <button class="btn btn-outline-danger" onclick="deleteReq(${r.id})" title="删除"><i class="bi bi-trash"></i></button>
         </div>
       </td>
@@ -578,10 +579,10 @@ function openReqModal() {
   document.getElementById('req-material-hint').style.display = 'none';
   const populateDatalist = prices => {
     document.getElementById('matDatalist').innerHTML =
-      prices.map(p => `<option value="${p.material}" data-price="${p.unit_price}">`).join('');
+      prices.map(p => `<option value="${esc(p.material)}" data-price="${p.unit_price}">`).join('');
   };
   if (_reqMatPrices.length === 0) {
-    fetch('/api/material-prices').then(r => r.json()).then(prices => {
+    apiFetch('/api/material-prices').then(r => r.json()).then(prices => {
       _reqMatPrices = prices;
       populateDatalist(prices);
     });
@@ -604,14 +605,14 @@ function openReqModal() {
   // 加载关联订单下拉（仅待生产/生产中）
   const ordSel = document.getElementById('req-order');
   if (_reqOrders.length === 0) {
-    fetch('/api/injection').then(r => r.json()).then(orders => {
+    apiFetch('/api/injection').then(r => r.json()).then(orders => {
       _reqOrders = orders.filter(o => ['待生产','生产中'].includes(o.status));
       ordSel.innerHTML = '<option value="">不关联</option>' +
-        _reqOrders.map(o => `<option value="${o.id}" data-num="${o.order_number||''}">${o.order_number||('#'+o.id)}</option>`).join('');
+        _reqOrders.map(o => `<option value="${o.id}" data-num="${esc(o.order_number||'')}">${esc(o.order_number||('#'+o.id))}</option>`).join('');
     });
   } else {
     ordSel.innerHTML = '<option value="">不关联</option>' +
-      _reqOrders.map(o => `<option value="${o.id}" data-num="${o.order_number||''}">${o.order_number||('#'+o.id)}</option>`).join('');
+      _reqOrders.map(o => `<option value="${o.id}" data-num="${esc(o.order_number||'')}">${esc(o.order_number||('#'+o.id))}</option>`).join('');
   }
   ordSel.value = '';
 
@@ -632,9 +633,9 @@ function saveReq() {
   if (!material)  { alert('请选择原料型号'); return; }
   if (!weight || weight <= 0) { alert('请填写有效的申请料重'); return; }
 
-  fetch('/api/requisitions', {
+  apiFetch('/api/requisitions', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'X-User': encodeURIComponent('原料仓库') },
     body: JSON.stringify({ date, applicant, material, requested_weight_kg: weight, notes, order_id: ordId, order_number: ordNum })
   })
     .then(r => r.json())
@@ -650,9 +651,9 @@ function saveReq() {
 
 function issueReq(id) {
   if (!confirm('确认出库？此操作将标记该领料单为已出库。')) return;
-  fetch(`/api/requisitions/${id}/status`, {
+  apiFetch(`/api/requisitions/${id}/status`, {
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'X-User': encodeURIComponent('原料仓库') },
     body: JSON.stringify({ status: '已出库' })
   })
     .then(r => r.json())
@@ -666,7 +667,7 @@ function issueReq(id) {
 
 function deleteReq(id) {
   if (!confirm('确定删除此领料单？')) return;
-  fetch(`/api/requisitions/${id}`, { method: 'DELETE' })
+  apiFetch(`/api/requisitions/${id}`, { method: 'DELETE', headers: { 'X-User': encodeURIComponent('原料仓库') } })
     .then(() => {
       allReqs = allReqs.filter(r => r.id !== id);
       renderReqs();

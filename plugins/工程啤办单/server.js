@@ -2,6 +2,7 @@ const express = require('express');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const crypto = require('crypto');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -20,15 +21,22 @@ try {
   console.warn('Warning: default-material-prices.json not found, starting with empty prices');
 }
 
+let _cache = null;
+
 function loadData() {
-  if (!fs.existsSync(DATA_FILE)) return initData();
+  if (_cache) return JSON.parse(JSON.stringify(_cache));
+  if (!fs.existsSync(DATA_FILE)) { _cache = initData(); return JSON.parse(JSON.stringify(_cache)); }
   try {
     const data = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
     if (!data.material_prices || data.material_prices.length === 0) data.material_prices = DEFAULT_MATERIAL_PRICES.slice();
     if (!data.material_requisitions) data.material_requisitions = [];
-    return data;
+    if (!data.assembly_orders) data.assembly_orders = [];
+    if (!data.assembly_items) data.assembly_items = [];
+    if (!data.assembly_users) data.assembly_users = [];
+    _cache = data;
+    return JSON.parse(JSON.stringify(_cache));
   }
-  catch (e) { return initData(); }
+  catch (e) { _cache = initData(); return JSON.parse(JSON.stringify(_cache)); }
 }
 
 function initData() {
@@ -36,14 +44,17 @@ function initData() {
     injection_orders: [], injection_items: [],
     slush_orders: [],    slush_items: [],
     spray_orders: [],    spray_items: [],
+    assembly_orders: [],  assembly_items: [],
     problems: [],
     material_prices: DEFAULT_MATERIAL_PRICES.slice(),
     material_requisitions: [],
+    assembly_users: [],
     nextId: 1
   };
 }
 
 function saveData(data) {
+  _cache = JSON.parse(JSON.stringify(data));
   const tmp = DATA_FILE + '.tmp';
   fs.writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf8');
   fs.renameSync(tmp, DATA_FILE);
@@ -119,6 +130,32 @@ function updateStatus(type, id, status) {
   }
 }
 
+// ─── PIN 安全验证 ────────────────────────────────────────────────────────────
+const PIN_SALT = process.env.PIN_SALT || 'rr-production-pin-salt-2026';
+function hashPin(pin) {
+  return crypto.createHash('sha256').update(PIN_SALT + String(pin)).digest('hex');
+}
+
+// PIN 已迁移到 data.json 的 auth_pins（哈希存储），源码不再保存明文 PIN
+(function initPins() {
+  const data = loadData();
+  if (!data.auth_pins) {
+    data.auth_pins = { supervisors: {}, manager: {} };
+    saveData(data);
+    console.warn('WARNING: auth_pins not found. PINs must be set via /api/change-pin.');
+  }
+})();
+
+function verifyPin(name, pin, role) {
+  const data = loadData();
+  const pins = data.auth_pins || {};
+  const hash = hashPin(pin);
+  if (role === 'manager') {
+    return pins.manager && pins.manager[name] === hash;
+  }
+  return pins.supervisors && pins.supervisors[name] === hash;
+}
+
 // ─── Middleware ──────────────────────────────────────────────────────────────
 app.use(express.json({ limit: '10mb' }));
 // 禁用 HTML 缓存，确保每次都获取最新版本
@@ -132,11 +169,22 @@ app.use((req, res, next) => {
 });
 app.use(express.static(path.join(__dirname, 'public')));
 
-// ─── Health check ────────────────────────────────────────────────────────────
-app.get('/health', (req, res) => res.json({ status: 'ok' }));
+// ─── 写操作认证中间件 ─────────────────────────────────────────────────────────
+app.use('/api', (req, res, next) => {
+  if (req.method === 'GET') return next();
+  // PATCH /status 已有 PIN 验证
+  if (req.method === 'PATCH' && req.path.match(/\/\d+\/status$/)) return next();
+  // 认证端点本身不需要 X-User
+  if (req.path === '/verify-pin' || req.path === '/change-pin') return next();
+  const user = req.headers['x-user'];
+  if (!user || !decodeURIComponent(user).trim()) {
+    return res.status(401).json({ error: '未授权：请登录后操作' });
+  }
+  next();
+});
 
 // ─── 路由工厂 ─────────────────────────────────────────────────────────────────
-['injection', 'slush', 'spray'].forEach(type => {
+['injection', 'slush', 'spray', 'assembly'].forEach(type => {
   app.get(`/api/${type}`, (req, res) => res.json(getOrders(type)));
 
   app.get(`/api/${type}/:id`, (req, res) => {
@@ -165,7 +213,57 @@ app.get('/health', (req, res) => res.json({ status: 'ok' }));
   });
 
   app.patch(`/api/${type}/:id/status`, (req, res) => {
-    updateStatus(type, req.params.id, req.body.status);
+    const { status, pin, reviewer_name, reviewer_role } = req.body;
+    // 审核操作需要 PIN 验证（主管审核 / 经理审核 / 驳回）
+    const reviewStatuses = ['待经理审核', '待生产', '已驳回'];
+    if (reviewStatuses.includes(status)) {
+      if (!pin || !reviewer_name) {
+        return res.status(403).json({ error: 'PIN验证失败' });
+      }
+      const role = reviewer_role || (status === '待生产' ? 'manager' : 'supervisor');
+      if (!verifyPin(reviewer_name, pin, role)) {
+        return res.status(403).json({ error: 'PIN验证失败' });
+      }
+    }
+    // 发至模厂/发至湖南：经理审核通过（待生产）→ 直接设为已完成，实际用料=领料重量，自动计算料金额
+    if (status === '待生产' && type === 'injection') {
+      const data = loadData();
+      const order = data.injection_orders.find(o => o.id === +req.params.id);
+      const isAutoComplete = order && (
+        order.send_to === '发至模厂' || order.send_to === '发至湖南' ||
+        order.workshop === '模厂'
+      );
+      if (isAutoComplete) {
+        order.status = '已完成';
+        order.updated_at = new Date().toISOString();
+        order.completed_date = new Date().toLocaleDateString('zh-CN', { timeZone: 'Asia/Shanghai' }).replace(/\//g, '-');
+        // 实际用料 = 领料重量，用料金额 = 领料重量 × 单价
+        const priceMap = {};
+        (data.material_prices || []).forEach(p => { priceMap[p.material] = +(p.unit_price || 0); });
+        const items = data.injection_items.filter(i => i.order_id === +req.params.id);
+        items.forEach(item => {
+          const weight = +(item.collected_weight_kg || item.required_material_kg || 0);
+          const price = priceMap[item.material] || 0;
+          item.actual_weight_kg = weight;
+          item.actual_amount_hkd = Math.round(weight * price * 100) / 100;
+        });
+        saveData(data);
+        return res.json({ success: true, auto_completed: true });
+      }
+    }
+    // 驳回时保存原因
+    if (status === '已驳回' && req.body.reason) {
+      const data = loadData();
+      const order = data[`${type}_orders`].find(o => o.id === +req.params.id);
+      if (order) {
+        order.status = status;
+        order.reject_reason = req.body.reason;
+        order.updated_at = new Date().toISOString();
+        saveData(data);
+        return res.json({ success: true });
+      }
+    }
+    updateStatus(type, req.params.id, status);
     res.json({ success: true });
   });
 
@@ -175,11 +273,11 @@ app.get('/health', (req, res) => res.json({ status: 'ok' }));
       const data = loadData();
       const updates = req.body.updates || [];
       const items = data[`${type}_items`];
+      const ITEM_WHITELIST = ['receipt_no','collected_weight_kg','actual_weight_kg','actual_amount_hkd','injection_cost'];
       updates.forEach(u => {
         const item = items.find(i => i.id === +u.id && i.order_id === +req.params.id);
         if (item) {
-          const { id: _id, order_id: _oid, sort_order: _so, ...fields } = u;
-          Object.assign(item, fields);
+          ITEM_WHITELIST.forEach(f => { if (f in u) item[f] = u[f]; });
         }
       });
       saveData(data);
@@ -224,6 +322,24 @@ app.patch('/api/problems/:id/resolve', (req, res) => {
   res.json(p);
 });
 
+// ─── 客户列表管理 ──────────────────────────────────────────────────────────────
+app.get('/api/clients', (req, res) => {
+  const data = loadData();
+  res.json(data.clients || []);
+});
+
+app.put('/api/clients', (req, res) => {
+  try {
+    if (!Array.isArray(req.body) || !req.body.every(c => typeof c === 'string')) {
+      return res.status(400).json({ error: '客户列表格式错误：需要字符串数组' });
+    }
+    const data = loadData();
+    data.clients = req.body;
+    saveData(data);
+    res.json(data.clients);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ─── 原料价格管理 ──────────────────────────────────────────────────────────────
 app.get('/api/material-prices', (req, res) => {
   const data = loadData();
@@ -232,6 +348,9 @@ app.get('/api/material-prices', (req, res) => {
 
 app.put('/api/material-prices', (req, res) => {
   try {
+    if (!Array.isArray(req.body) || !req.body.every(p => p && typeof p === 'object' && typeof p.material === 'string')) {
+      return res.status(400).json({ error: '原料价格格式错误：需要含 material 字段的对象数组' });
+    }
     const data = loadData();
     data.material_prices = req.body;
     saveData(data);
@@ -253,28 +372,34 @@ app.get('/api/material-stats', (req, res) => {
     };
   });
 
-  // 如有月份、订单编号或车间过滤，先找出匹配的订单 ID 集合
+  // 如有月份、订单编号、产品编号、客名或车间过滤，先找出匹配的订单 ID 集合
   const orderSearch = req.query.order_number; // optional order number search
   const workshop = req.query.workshop; // optional workshop filter
-  let validOrderIds = null;
-  if (month || orderSearch || workshop) {
-    const q = (orderSearch || '').toLowerCase();
-    validOrderIds = new Set(
-      (data.injection_orders || [])
-        .filter(o => {
-          if (month && !(o.date || '').startsWith(month)) return false;
-          if (q && !((o.order_number || '') + (o.doc_number || '')).toLowerCase().includes(q)) return false;
-          if (workshop && o.workshop !== workshop) return false;
-          return true;
-        })
-        .map(o => o.id)
-    );
-  }
+  const docSearch = req.query.doc_number; // optional product number search
+  const clientSearch = req.query.client_name; // optional client name search
+  const APPROVED_S = ['待生产','生产中','已完成','已取消'];
+  // 始终只统计审核通过的订单
+  const q = (orderSearch || '').toLowerCase();
+  const dq = (docSearch || '').toLowerCase();
+  const cq = (clientSearch || '').toLowerCase();
+  const validOrderIds = new Set(
+    (data.injection_orders || [])
+      .filter(o => {
+        if (!APPROVED_S.includes(o.status)) return false;
+        if (month && !(o.date || '').startsWith(month)) return false;
+        if (q && !((o.order_number || '') + (o.doc_number || '')).toLowerCase().includes(q)) return false;
+        if (dq && !(o.doc_number || '').toLowerCase().includes(dq)) return false;
+        if (cq && !(o.client_name || '').toLowerCase().includes(cq)) return false;
+        if (workshop && o.workshop !== workshop) return false;
+        return true;
+      })
+      .map(o => o.id)
+  );
 
   // 累加 injection_items 里的仓库实填数据
   (data.injection_items || []).forEach(item => {
     if (!item.material) return;
-    if (validOrderIds && !validOrderIds.has(item.order_id)) return;
+    if (!validOrderIds.has(item.order_id)) return;
     if (!stats[item.material]) {
       stats[item.material] = {
         seq: Object.keys(stats).length + 1, material: item.material,
@@ -291,7 +416,8 @@ app.get('/api/material-stats', (req, res) => {
 app.get('/api/injection-costs', (req, res) => {
   const data = loadData();
   const month = req.query.month; // optional YYYY-MM filter
-  let orders = data.injection_orders || [];
+  const APPROVED = ['待生产','生产中','已完成','已取消'];
+  let orders = (data.injection_orders || []).filter(o => APPROVED.includes(o.status));
   if (month) orders = orders.filter(o => (o.date || '').startsWith(month));
   const items = data.injection_items || [];
   const result = [];
@@ -301,6 +427,8 @@ app.get('/api/injection-costs', (req, res) => {
       result.push({
         order_number: o.order_number || '',
         doc_number: o.doc_number || '',
+        product_name: o.product_name || '',
+        client_name: o.client_name || '',
         date: o.date || '',
         workshop: o.workshop || '',
         mold_id: it.mold_id || '',
@@ -311,6 +439,97 @@ app.get('/api/injection-costs', (req, res) => {
     });
   });
   res.json(result);
+});
+
+// ─── 待审核提醒 ─────────────────────────────────────────────────────────────
+app.get('/api/pending-reviews', (req, res) => {
+  const data = loadData();
+  const role = req.query.role;
+  const name = req.query.name ? decodeURIComponent(req.query.name) : '';
+
+  if (role === 'supervisor' && name) {
+    const injPending = (data.injection_orders || []).filter(o => o.status === '待审核' && o.supervisor === name);
+    const asmPending = (data.assembly_orders || []).filter(o => o.status === '待审核' && o.supervisor === name);
+    const allPending = [...injPending, ...asmPending];
+    return res.json({
+      count: allPending.length,
+      orders: allPending.map(o => ({
+        id: o.id, order_number: o.order_number, client_name: o.client_name, date: o.date,
+        type: injPending.includes(o) ? 'injection' : 'assembly'
+      }))
+    });
+  }
+  if (role === 'manager') {
+    const pending = (data.injection_orders || []).filter(o => o.status === '待经理审核');
+    return res.json({ count: pending.length, orders: pending.map(o => ({ id: o.id, order_number: o.order_number, client_name: o.client_name, date: o.date, supervisor: o.supervisor })) });
+  }
+  res.json({ count: 0, orders: [] });
+});
+
+// ─── 发至订单手动触发完成并计算料费 ──────────────────────────────────────────
+app.post('/api/injection/:id/auto-complete', (req, res) => {
+  const data = loadData();
+  const order = data.injection_orders.find(o => o.id === +req.params.id);
+  if (!order) return res.status(404).json({ error: '未找到' });
+  const isSendTo = order.send_to === '发至模厂' || order.send_to === '发至湖南' || order.workshop === '模厂';
+  if (!isSendTo) return res.status(400).json({ error: '该订单不是发至外厂订单' });
+  order.status = '已完成';
+  order.updated_at = new Date().toISOString();
+  order.completed_date = new Date().toLocaleDateString('zh-CN', { timeZone: 'Asia/Shanghai' }).replace(/\//g, '-');
+  const priceMap = {};
+  (data.material_prices || []).forEach(p => { priceMap[p.material] = +(p.unit_price || 0); });
+  const items = data.injection_items.filter(i => i.order_id === +req.params.id);
+  items.forEach(item => {
+    const weight = +(item.collected_weight_kg || item.required_material_kg || 0);
+    const price = priceMap[item.material] || 0;
+    item.actual_weight_kg = weight;
+    item.actual_amount_hkd = Math.round(weight * price * 100) / 100;
+  });
+  saveData(data);
+  res.json({ success: true });
+});
+
+// ─── 喷油部：实际收到胶件时间 ────────────────────────────────────────────────
+app.patch('/api/spray/:id/actual-receive', (req, res) => {
+  const data = loadData();
+  const order = data.spray_orders.find(o => o.id === +req.params.id);
+  if (!order) return res.status(404).json({ error: '未找到' });
+  order.actual_receive_time = req.body.actual_receive_time || null;
+  order.updated_at = new Date().toISOString();
+  saveData(data);
+  res.json({ success: true });
+});
+
+// ─── PIN 验证接口 ────────────────────────────────────────────────────────────
+app.post('/api/verify-pin', (req, res) => {
+  const { name, pin, role } = req.body;
+  if (!name || !pin || !role) {
+    return res.json({ success: false });
+  }
+  res.json({ success: verifyPin(name, pin, role) });
+});
+
+app.post('/api/change-pin', (req, res) => {
+  const { name, old_pin, new_pin, role } = req.body;
+  if (!name || !new_pin || !role) {
+    return res.status(400).json({ error: '参数不完整' });
+  }
+  if (new_pin.length < 4) {
+    return res.status(400).json({ error: 'PIN码至少4位' });
+  }
+  const data = loadData();
+  const bucket = role === 'manager' ? 'manager' : 'supervisors';
+  const existing = data.auth_pins[bucket][name];
+  // 首次设置 PIN（用户不存在）：不需要旧 PIN
+  if (existing) {
+    if (!old_pin) return res.status(400).json({ error: '请输入原PIN码' });
+    if (!verifyPin(name, old_pin, role)) {
+      return res.status(403).json({ error: '原PIN码错误' });
+    }
+  }
+  data.auth_pins[bucket][name] = hashPin(new_pin);
+  saveData(data);
+  res.json({ success: true, first_time: !existing });
 });
 
 // ─── 领料单 ───────────────────────────────────────────────────────────────────
@@ -365,17 +584,45 @@ app.delete('/api/requisitions/:id', (req, res) => {
   res.json({ success: true });
 });
 
+// ─── 装配部用户验证 ──────────────────────────────────────────────────────────
+app.post('/api/assembly-users/verify', (req, res) => {
+  const { name, pin } = req.body;
+  if (!name || !pin) return res.json({ success: false });
+  const data = loadData();
+  const hash = hashPin(pin);
+  const user = (data.assembly_users || []).find(u => u.name === name && u.pin === hash);
+  res.json({ success: !!user });
+});
+
+app.get('/api/assembly-users', (req, res) => {
+  const data = loadData();
+  res.json((data.assembly_users || []).map(u => ({ name: u.name })));
+});
+
+app.post('/api/assembly-users', (req, res) => {
+  const { name, pin } = req.body;
+  if (!name || !pin) return res.status(400).json({ error: '姓名和PIN必填' });
+  const data = loadData();
+  if (!data.assembly_users) data.assembly_users = [];
+  if (data.assembly_users.find(u => u.name === name)) {
+    return res.status(400).json({ error: '用户已存在' });
+  }
+  data.assembly_users.push({ name, pin: hashPin(pin) });
+  saveData(data);
+  res.status(201).json({ success: true });
+});
+
 // ─── 统计 ─────────────────────────────────────────────────────────────────────
 app.get('/api/stats', (req, res) => {
   const data = loadData();
   const count = (arr, status) => status ? arr.filter(o => o.status === status).length : arr.length;
   const stat = type => ({
-    total:      count(data[`${type}_orders`]),
-    pending:    count(data[`${type}_orders`], '待生产'),
-    inProgress: count(data[`${type}_orders`], '生产中'),
-    done:       count(data[`${type}_orders`], '已完成')
+    total:      count(data[`${type}_orders`] || []),
+    pending:    count(data[`${type}_orders`] || [], '待生产'),
+    inProgress: count(data[`${type}_orders`] || [], '生产中'),
+    done:       count(data[`${type}_orders`] || [], '已完成')
   });
-  res.json({ injection: stat('injection'), slush: stat('slush'), spray: stat('spray') });
+  res.json({ injection: stat('injection'), slush: stat('slush'), spray: stat('spray'), assembly: stat('assembly') });
 });
 
 // ─── 启动 ─────────────────────────────────────────────────────────────────────
@@ -400,6 +647,7 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`  啤机部:  http://${ip}:${PORT}/injection.html`);
   console.log(`  搪胶部:  http://${ip}:${PORT}/slush.html`);
   console.log(`  喷油部:  http://${ip}:${PORT}/spray.html`);
+  console.log(`  装配部:  http://${ip}:${PORT}/assembly.html`);
   console.log(`  原料仓库: http://${ip}:${PORT}/warehouse.html`);
   console.log('='.repeat(55));
 });

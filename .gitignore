@@ -29,3 +29,7 @@ plugins/工程啤办单/data/
 plugins/schedule-system/data/
 plugins/schedule-system/uploads/
 .claude/
+
+# Cloud deployment data
+data/postgres/*
+!data/postgres/.gitkeep

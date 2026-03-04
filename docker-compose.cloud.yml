@@ -1,0 +1,108 @@
+# Batch A: Cloud Deployment
+# Usage: docker compose -f docker-compose.cloud.yml up -d --build
+#
+# Includes: core + db + redis + nginx + rr-production + indonesia-export
+# Excludes: 3D打印 (hardware), schedule-system (SMB/Windows), zuru-ma (deferred)
+
+services:
+  # ──────────────────────────────────────
+  # Infrastructure
+  # ──────────────────────────────────────
+  nginx:
+    image: nginx:1.25-alpine
+    ports:
+      - "${PORT:-80}:80"
+    volumes:
+      - ./nginx/nginx.cloud.conf:/etc/nginx/nginx.conf:ro
+      - ./frontend/index.cloud.html:/usr/share/nginx/html/index.html:ro
+      - ./frontend/logo.png:/usr/share/nginx/html/logo.png:ro
+    depends_on:
+      core:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - platform-net
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${DB_USER:-rrportal}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME:-rrportal}
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-rrportal}"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - platform-net
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - platform-net
+
+  # ──────────────────────────────────────
+  # Core System
+  # ──────────────────────────────────────
+  core:
+    build:
+      context: ./core
+      dockerfile: Dockerfile
+    env_file: .env.cloud
+    environment:
+      - SERVICE_NAME=core
+      - DATABASE_URL=postgresql+asyncpg://${DB_USER:-rrportal}:${DB_PASSWORD}@db:5432/${DB_NAME:-rrportal}
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - platform-net
+
+  # ──────────────────────────────────────
+  # Batch A Plugins
+  # ──────────────────────────────────────
+  rr-production:
+    build:
+      context: ./plugins/工程啤办单
+      dockerfile: Dockerfile.node
+    environment:
+      - BASE_PATH=/rr
+      - PORT=3000
+    volumes:
+      - ./plugins/工程啤办单/data:/app/data
+    restart: unless-stopped
+    networks:
+      - platform-net
+
+  indonesia-export:
+    build:
+      context: ./plugins/印尼小组
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    networks:
+      - platform-net
+
+networks:
+  platform-net:
+    driver: bridge

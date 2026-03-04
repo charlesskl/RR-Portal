@@ -1,0 +1,47 @@
+# Batch B: Local-only services (hardware/network dependencies)
+# Usage: docker compose -f docker-compose.local.yml up -d --build
+#
+# Includes: zuru-ma, schedule-system
+# Note: 3D打印 runs natively on host (启动服务器.bat), not in Docker
+# Note: This file does NOT include core/db/redis - use the main
+#        docker-compose.yml for the full local stack instead
+
+services:
+  # ──────────────────────────────────────
+  # Batch B Plugins
+  # ──────────────────────────────────────
+  zuru-ma:
+    build:
+      context: "./plugins/Zuru MA 包装差价系统"
+      dockerfile: Dockerfile
+    environment:
+      - BASE_PATH=/zuru-ma
+      - PORT=3000
+    restart: unless-stopped
+    networks:
+      - platform-net
+
+  schedule-system:
+    build:
+      context: "./plugins/schedule-system"
+      dockerfile: Dockerfile
+    ports:
+      - "5000:5000"
+    environment:
+      - APP_PORT=5000
+      - CONTAINER_MODE=1
+      - BROWSE_ROOT=/host/mnt/host
+    volumes:
+      - "./plugins/schedule-system/data:/app/data"
+      - "./plugins/schedule-system/uploads:/app/uploads"
+      - "/:/host:rw"
+    restart: unless-stopped
+    networks:
+      - platform-net
+
+  # 3D打印: 宿主机直接运行 (plugins/3D打印/启动服务器.bat)
+  # nginx 通过 host.docker.internal:3001 代理
+
+networks:
+  platform-net:
+    driver: bridge

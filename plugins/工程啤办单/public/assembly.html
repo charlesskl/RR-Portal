@@ -1,0 +1,568 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>装配部 - 生产订单管理</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+  <link href="style.css" rel="stylesheet">
+  <style>
+    .items-table input[type=text]   { min-width: 60px; }
+    .items-table input[type=number] { min-width: 60px; max-width: 90px; }
+    .items-table input.w-date { min-width: 90px; max-width: 100px; }
+    .items-table input:focus { position: relative; z-index: 10; min-width: 200px; box-shadow: 0 0 0 3px rgba(41,128,185,.3); }
+    .items-table td { overflow: visible; }
+  </style>
+</head>
+<body class="bg-light">
+
+<!-- 导航栏 -->
+<nav class="navbar navbar-dark" style="background:#2980b9">
+  <div class="container-fluid">
+    <span class="navbar-brand"><i class="bi bi-wrench-adjustable-circle me-2"></i>装配部 — 生产订单管理</span>
+    <div class="d-flex gap-2 align-items-center">
+      <span id="navUserBadge" class="badge bg-light text-dark" style="font-size:.85rem;cursor:pointer" onclick="switchUser()" title="点击切换用户"></span>
+      <a href="index.html" class="nav-dept-link"><i class="bi bi-house me-1"></i>主页</a>
+    </div>
+  </div>
+</nav>
+
+<div class="container-fluid mt-3">
+  <!-- 操作栏 -->
+  <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
+    <div class="d-flex flex-wrap align-items-center gap-2">
+      <div class="status-filter d-flex flex-wrap gap-1">
+        <button class="btn btn-sm btn-outline-secondary active" onclick="filterStatus('',this)">全部</button>
+        <button class="btn btn-sm" style="background:#fd7e14;color:#fff;border-color:#fd7e14" onclick="filterStatus('待审核',this)">待审核</button>
+        <button class="btn btn-sm btn-warning"  onclick="filterStatus('待生产',this)">待生产</button>
+        <button class="btn btn-sm btn-info"     onclick="filterStatus('生产中',this)">生产中</button>
+        <button class="btn btn-sm btn-success"  onclick="filterStatus('已完成',this)">已完成</button>
+        <button class="btn btn-sm btn-danger"   onclick="filterStatus('已驳回',this)">已驳回</button>
+      </div>
+    </div>
+    <div class="d-flex gap-2">
+      <button class="btn btn-outline-secondary" onclick="loadOrders()"><i class="bi bi-arrow-clockwise me-1"></i>刷新</button>
+      <button class="btn btn-primary" style="background:#2980b9;border-color:#2980b9" onclick="openNewModal()">
+        <i class="bi bi-plus-lg me-1"></i>新建装配单
+      </button>
+    </div>
+  </div>
+
+  <!-- 订单列表 -->
+  <div class="card shadow-sm">
+    <div class="card-body p-0">
+      <div id="orderList"><div class="empty-state"><i class="bi bi-inbox"></i><p class="mt-2">加载中...</p></div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════ 装配单 Modal ═══════════════════ -->
+<div class="modal fade" id="asmModal" tabindex="-1" data-bs-backdrop="static">
+  <div class="modal-dialog modal-xl">
+    <div class="modal-content">
+      <div class="modal-header" style="background:#2980b9;color:#fff">
+        <h5 class="modal-title"><i class="bi bi-wrench-adjustable-circle me-2"></i><span id="asmModalTitle">新建装配单</span></h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="asm-id">
+        <input type="hidden" id="asm-status" value="待审核">
+        <div class="row g-3 mb-3">
+          <div class="col-md-3"><label class="form-label fw-bold">产品编号</label><input class="form-control" id="asm-order_number" placeholder="如 ZP2024001"></div>
+          <div class="col-md-3"><label class="form-label fw-bold">产品名称</label><input class="form-control" id="asm-product_name" placeholder="产品名称"></div>
+          <div class="col-md-3"><label class="form-label fw-bold">客名</label>
+            <select class="form-select" id="asm-client_name">
+              <option value="">请选择客户</option>
+            </select>
+          </div>
+          <div class="col-md-3"><label class="form-label fw-bold">日期</label><input type="date" class="form-control" id="asm-date"></div>
+          <div class="col-md-3"><label class="form-label fw-bold">主管</label>
+            <select class="form-select" id="asm-supervisor">
+              <option value="">请选择主管</option>
+              <option>段新辉</option><option>唐海林</option><option>蒙海欢</option><option>万志勇</option><option>章发东</option><option>刘际维</option><option>甘勇辉</option><option>王玉国</option>
+            </select>
+          </div>
+          <div class="col-md-9"><label class="form-label fw-bold">备注</label><input class="form-control" id="asm-reason" placeholder="备注信息"></div>
+        </div>
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <strong>明细行</strong>
+          <button class="btn btn-sm btn-outline-primary" onclick="addAsmRow()"><i class="bi bi-plus-lg me-1"></i>添加行</button>
+        </div>
+        <div class="items-table-wrap">
+          <table class="table table-bordered table-sm items-table" id="asmItemsTable">
+            <thead>
+              <tr>
+                <th>产品编号</th><th>产品名称</th><th>数量</th><th>要求完成日期</th><th>备注</th><th></th>
+              </tr>
+            </thead>
+            <tbody id="asmItemsBody"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+        <button class="btn btn-primary" style="background:#2980b9;border-color:#2980b9" onclick="saveOrder()"><i class="bi bi-save me-1"></i>保存</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════ 订单详情 Modal ═══════════════════ -->
+<div class="modal fade" id="orderDetailModal" tabindex="-1">
+  <div class="modal-dialog modal-xl">
+    <div class="modal-content">
+      <div class="modal-header" style="background:#2980b9;color:#fff">
+        <h5 class="modal-title"><i class="bi bi-file-text me-2"></i>订单详情 — <span id="detailModalLabel"></span></h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body" id="orderDetailBody"><div class="text-center text-muted py-4">加载中...</div></div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
+        <button class="btn btn-outline-primary" id="detailEditBtn"><i class="bi bi-pencil me-1"></i>编辑</button>
+        <button class="btn btn-outline-secondary" id="detailPrintBtn"><i class="bi bi-printer me-1"></i>打印</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Toast通知 -->
+<div class="position-fixed bottom-0 end-0 p-3" style="z-index:9999">
+  <div id="toast" class="toast align-items-center text-white border-0" role="alert">
+    <div class="d-flex">
+      <div class="toast-body" id="toastMsg">操作成功</div>
+      <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+    </div>
+  </div>
+</div>
+
+<!-- ─── 登录 Modal ─────────────────────────────────────────────────────────── -->
+<div class="modal fade" id="asmLoginModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false">
+  <div class="modal-dialog modal-sm modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header" style="background:#2980b9;color:#fff">
+        <h5 class="modal-title"><i class="bi bi-person-circle me-2"></i>装配部登录</h5>
+      </div>
+      <div class="modal-body">
+        <div class="mb-3">
+          <label class="form-label fw-bold">姓名</label>
+          <input type="text" id="asmLoginName" class="form-control" placeholder="输入您的姓名"
+            onkeydown="if(event.key==='Enter')document.getElementById('asmLoginPin').focus()">
+          <div class="invalid-feedback">请输入姓名</div>
+        </div>
+        <div>
+          <label class="form-label fw-bold">PIN码</label>
+          <input type="password" id="asmLoginPin" class="form-control" placeholder="输入PIN码"
+            onkeydown="if(event.key==='Enter')doLogin()">
+          <div class="invalid-feedback" id="pinError">PIN码错误</div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-primary w-100" style="background:#2980b9;border-color:#2980b9" onclick="doLogin()">
+          <i class="bi bi-box-arrow-in-right me-1"></i>确认登录
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script src="utils.js"></script>
+<script>
+// ─── 状态管理 ────────────────────────────────────────────────────────────────
+let currentFilter = '';
+let currentUser = sessionStorage.getItem('assembly_user') || '';
+let currentPin  = sessionStorage.getItem('assembly_pin') || '';
+
+// ─── 状态筛选 ────────────────────────────────────────────────────────────────
+function filterStatus(status, el) {
+  currentFilter = status;
+  document.querySelectorAll('.status-filter .btn').forEach(b => b.classList.remove('active'));
+  el.classList.add('active');
+  loadOrders();
+}
+
+// ─── 加载/渲染订单列表 ────────────────────────────────────────────────────────
+function loadOrders() {
+  document.getElementById('orderList').innerHTML = '<div class="text-center p-4 text-muted">加载中...</div>';
+  apiFetch('/api/assembly')
+    .then(r => r.json())
+    .then(orders => {
+      if (currentFilter) orders = orders.filter(o => o.status === currentFilter);
+      // 按主管分组，每组内待审核排最前，其次按 ID 降序
+      const _sOrd = { '待审核':0, '待生产':1, '生产中':2, '已完成':3, '已驳回':4, '已取消':5 };
+      orders.sort((a, b) => {
+        const sa = (a.supervisor || ''), sb = (b.supervisor || '');
+        if (sa !== sb) return sa.localeCompare(sb, 'zh');
+        const oa = _sOrd[a.status] ?? 9, ob = _sOrd[b.status] ?? 9;
+        if (oa !== ob) return oa - ob;
+        return b.id - a.id;
+      });
+      renderOrderList(orders);
+    })
+    .catch(() => showToast('加载失败', 'danger'));
+}
+
+const statusBadge = s => ({
+  '待审核': '<span class="badge" style="background:#fd7e14">待审核</span>',
+  '待生产': '<span class="badge badge-pending">待生产</span>',
+  '生产中': '<span class="badge badge-progress">生产中</span>',
+  '已完成': '<span class="badge badge-done">已完成</span>',
+  '已取消': '<span class="badge bg-secondary">已取消</span>',
+  '已驳回': '<span class="badge bg-danger">已驳回</span>'
+}[s] || `<span class="badge bg-secondary">${esc(s)}</span>`);
+
+function renderOrderList(orders) {
+  if (!orders.length) {
+    document.getElementById('orderList').innerHTML = `<div class="empty-state"><i class="bi bi-inbox"></i><p class="mt-2">暂无单据</p></div>`;
+    return;
+  }
+  const rows = orders.map(o => {
+    const isOwner = currentUser && o.created_by === currentUser;
+    const canEdit = isOwner && (o.status === '待审核' || o.status === '已驳回');
+    const canDelete = canEdit;
+    const canStart = isOwner && o.status === '待生产';
+    const canFinish = isOwner && o.status === '生产中';
+    return `
+    <tr class="order-row" style="cursor:pointer" onclick="viewOrderDetail(${o.id},'${esc((o.order_number||'').replace(/'/g,''))}')">
+      <td>${esc(o.order_number || '-')}</td>
+      <td>${esc(o.product_name || '-')}</td>
+      <td>${esc(o.client_name || '-')}</td>
+      <td>${esc(o.date ? o.date.slice(5) : '-')}</td>
+      <td>${esc(o.supervisor || '-')}</td>
+      <td>${esc(o.created_by || '-')}</td>
+      <td class="text-nowrap">${statusBadge(o.status)}</td>
+      <td class="text-nowrap" onclick="event.stopPropagation()">
+        <div class="btn-group btn-group-sm">
+          ${canEdit   ? `<button class="btn btn-outline-primary" onclick="editOrder(${o.id})" title="编辑"><i class="bi bi-pencil"></i></button>` : ''}
+          ${canDelete ? `<button class="btn btn-outline-danger"  onclick="deleteOrder(${o.id})" title="删除"><i class="bi bi-trash"></i></button>` : ''}
+          ${canStart  ? `<button class="btn btn-info text-white" onclick="changeStatus(${o.id},'生产中')" title="开始生产"><i class="bi bi-play-fill me-1"></i>开始生产</button>` : ''}
+          ${canFinish ? `<button class="btn btn-success"         onclick="changeStatus(${o.id},'已完成')" title="完成"><i class="bi bi-check-lg me-1"></i>完成</button>` : ''}
+          <button class="btn btn-outline-secondary" onclick="printOrder(${o.id})" title="打印"><i class="bi bi-printer"></i></button>
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+
+  document.getElementById('orderList').innerHTML = `
+    <table class="table table-hover table-sm mb-0" style="font-size:.82rem">
+      <thead class="table-dark">
+        <tr>
+          <th>产品编号</th><th>产品名称</th><th>客名</th><th>日期</th><th>主管</th><th>创建人</th><th>状态</th><th>操作</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
+function fmtDateTime(s) {
+  if (!s) return '-';
+  return new Date(s).toLocaleString('zh-CN', {
+    timeZone: 'Asia/Shanghai', hour12: false,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit'
+  }).replace(/\//g, '-');
+}
+
+// ─── 新建/编辑 ────────────────────────────────────────────────────────────────
+function openNewModal() {
+  if (!currentUser) { showLoginModal(); return; }
+  document.getElementById('asmModalTitle').textContent = '新建装配单';
+  document.getElementById('asm-id').value = '';
+  document.getElementById('asm-order_number').value = '';
+  document.getElementById('asm-product_name').value = '';
+  document.getElementById('asm-client_name').value = '';
+  document.getElementById('asm-date').value = new Date().toISOString().slice(0,10);
+  document.getElementById('asm-supervisor').value = '';
+  document.getElementById('asm-reason').value = '';
+  document.getElementById('asm-status').value = '待审核';
+  document.getElementById('asmItemsBody').innerHTML = '';
+  addAsmRow();
+  new bootstrap.Modal(document.getElementById('asmModal')).show();
+}
+
+function editOrder(id) {
+  if (!currentUser) { showLoginModal(); return; }
+  apiFetch(`/api/assembly/${id}`)
+    .then(r => r.json())
+    .then(order => {
+      // Only allow edit if owner and status is 待审核 or 已驳回
+      if (order.created_by !== currentUser) {
+        showToast('只能编辑自己创建的单据', 'danger');
+        return;
+      }
+      if (order.status !== '待审核' && order.status !== '已驳回') {
+        showToast('当前状态不允许编辑', 'danger');
+        return;
+      }
+
+      document.getElementById('asmModalTitle').textContent = `编辑装配单 #${id}`;
+      document.getElementById('asm-id').value = order.id;
+      document.getElementById('asm-order_number').value = order.order_number || '';
+      document.getElementById('asm-product_name').value = order.product_name || '';
+      document.getElementById('asm-client_name').value = order.client_name || '';
+      document.getElementById('asm-date').value = order.date || new Date().toISOString().slice(0,10);
+      document.getElementById('asm-supervisor').value = order.supervisor || '';
+      document.getElementById('asm-reason').value = order.reason || '';
+      // If editing a rejected order, reset status to 待审核
+      document.getElementById('asm-status').value = (order.status === '已驳回') ? '待审核' : order.status;
+
+      const tbody = document.getElementById('asmItemsBody');
+      tbody.innerHTML = '';
+      (order.items || []).forEach(it => addAsmRow(it));
+      if (!order.items || !order.items.length) addAsmRow();
+
+      new bootstrap.Modal(document.getElementById('asmModal')).show();
+    })
+    .catch(() => showToast('加载失败', 'danger'));
+}
+
+// ─── 添加表格行 ───────────────────────────────────────────────────────────────
+function inp(type, name, val='', extra='') {
+  const escaped = esc(val === null || val === undefined ? '' : val);
+  return `<input type="${type}" class="form-control form-control-sm" name="${name}" value="${escaped}" title="${escaped}" ${extra} onfocus="this.title=this.value" oninput="this.title=this.value">`;
+}
+
+function addAsmRow(it={}) {
+  const tr = document.createElement('tr');
+  tr.innerHTML = `
+    <td>${inp('text','product_id',it.product_id)}</td>
+    <td>${inp('text','product_name',it.product_name)}</td>
+    <td>${inp('number','quantity',it.quantity,'style="width:80px"')}</td>
+    <td>${inp('text','required_date',it.required_date,'class="w-date"')}</td>
+    <td>${inp('text','notes',it.notes)}</td>
+    <td><button type="button" class="btn btn-sm btn-danger" onclick="this.closest('tr').remove()"><i class="bi bi-x-lg"></i></button></td>`;
+  document.getElementById('asmItemsBody').appendChild(tr);
+}
+
+// ─── 保存订单 ─────────────────────────────────────────────────────────────────
+const asmFields = ['product_id','product_name','quantity','required_date','notes'];
+
+function collectRows(tbodyId, fields) {
+  return Array.from(document.getElementById(tbodyId).querySelectorAll('tr')).map(tr => {
+    const obj = {};
+    fields.forEach(f => {
+      const el = tr.querySelector(`[name="${f}"]`);
+      obj[f] = el ? (el.value.trim() || null) : null;
+    });
+    return obj;
+  });
+}
+
+function saveOrder() {
+  if (!currentUser) { showLoginModal(); return; }
+  const id = document.getElementById('asm-id').value;
+  const body = {
+    order_number:  document.getElementById('asm-order_number').value,
+    product_name:  document.getElementById('asm-product_name').value || null,
+    client_name:   document.getElementById('asm-client_name').value || null,
+    date:          document.getElementById('asm-date').value,
+    supervisor:    document.getElementById('asm-supervisor').value || null,
+    reason:        document.getElementById('asm-reason').value || null,
+    status:        document.getElementById('asm-status').value,
+    items:         collectRows('asmItemsBody', asmFields),
+  };
+
+  const url    = id ? `/api/assembly/${id}` : '/api/assembly';
+  const method = id ? 'PUT' : 'POST';
+  const hdrs   = { 'Content-Type': 'application/json', 'X-User': encodeURIComponent(currentUser) };
+
+  apiFetch(url, { method, headers: hdrs, body: JSON.stringify(body) })
+    .then(r => r.json())
+    .then(data => {
+      if (data.error) { showToast(data.error, 'danger'); return; }
+      bootstrap.Modal.getInstance(document.getElementById('asmModal'))?.hide();
+      showToast(id ? '更新成功！' : '创建成功！', 'success');
+      loadOrders();
+    })
+    .catch(() => showToast('保存失败', 'danger'));
+}
+
+// ─── 状态变更 ────────────────────────────────────────────────────────────────
+function changeStatus(id, newStatus) {
+  if (!currentUser) { showLoginModal(); return; }
+  const label = newStatus === '生产中' ? '开始生产' : '完成';
+  if (!confirm(`确定要将此单据标记为「${newStatus}」吗？`)) return;
+
+  apiFetch(`/api/assembly/${id}/status`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', 'X-User': encodeURIComponent(currentUser) },
+    body: JSON.stringify({ status: newStatus })
+  })
+    .then(r => r.json())
+    .then(d => {
+      if (d.error) { showToast(d.error, 'danger'); return; }
+      showToast(`已${label}`, 'success');
+      loadOrders();
+    })
+    .catch(() => showToast('操作失败', 'danger'));
+}
+
+// ─── 删除/打印 ────────────────────────────────────────────────────────────────
+function deleteOrder(id) {
+  if (!confirm('确定删除这条单据吗？删除后无法恢复。')) return;
+  apiFetch(`/api/assembly/${id}`, { method: 'DELETE' })
+    .then(r => r.json())
+    .then(d => {
+      if (d.error) { showToast(d.error, 'danger'); return; }
+      showToast('删除成功', 'success'); loadOrders();
+    })
+    .catch(() => showToast('删除失败', 'danger'));
+}
+
+function printOrder(id) {
+  window.open(`print.html?type=assembly&id=${id}`, '_blank');
+}
+
+// ─── 订单详情查看 ─────────────────────────────────────────────────────────────
+function viewOrderDetail(id, orderNum) {
+  document.getElementById('detailModalLabel').textContent = orderNum || `#${id}`;
+  document.getElementById('orderDetailBody').innerHTML = '<div class="text-center text-muted py-4">加载中...</div>';
+  document.getElementById('detailEditBtn').onclick = () => {
+    bootstrap.Modal.getInstance(document.getElementById('orderDetailModal'))?.hide();
+    editOrder(id);
+  };
+  document.getElementById('detailPrintBtn').onclick = () => printOrder(id);
+  new bootstrap.Modal(document.getElementById('orderDetailModal')).show();
+  apiFetch(`/api/assembly/${id}`)
+    .then(r => r.json())
+    .then(order => {
+      // Show/hide edit button based on permissions
+      const isOwner = currentUser && order.created_by === currentUser;
+      const canEdit = isOwner && (order.status === '待审核' || order.status === '已驳回');
+      document.getElementById('detailEditBtn').style.display = canEdit ? '' : 'none';
+      document.getElementById('orderDetailBody').innerHTML = renderOrderDetails(order);
+    })
+    .catch(() => {
+      document.getElementById('orderDetailBody').innerHTML = '<div class="text-danger">加载失败</div>';
+    });
+}
+
+function renderOrderDetails(order) {
+  const headerHtml = `
+    <div class="row g-2 mb-3">
+      <div class="col-6 col-md-3"><div class="text-muted small">产品编号</div><div class="fw-bold">${esc(order.order_number || '-')}</div></div>
+      <div class="col-6 col-md-3"><div class="text-muted small">产品名称</div><div>${esc(order.product_name || '-')}</div></div>
+      <div class="col-6 col-md-3"><div class="text-muted small">客名</div><div>${esc(order.client_name || '-')}</div></div>
+      <div class="col-6 col-md-3"><div class="text-muted small">日期</div><div>${esc(order.date || '-')}</div></div>
+      <div class="col-6 col-md-3"><div class="text-muted small">主管</div><div>${esc(order.supervisor || '-')}</div></div>
+      <div class="col-6 col-md-3"><div class="text-muted small">创建人</div><div>${esc(order.created_by || '-')}</div></div>
+      <div class="col-6 col-md-3"><div class="text-muted small">状态</div><div>${statusBadge(order.status)}</div></div>
+      <div class="col-6 col-md-3"><div class="text-muted small">创建时间</div><div>${fmtDateTime(order.created_at)}</div></div>
+      ${order.reason ? `<div class="col-12"><div class="text-muted small">备注</div><div>${esc(order.reason)}</div></div>` : ''}
+      ${order.reject_reason ? `<div class="col-12"><div class="text-muted small text-danger">驳回原因</div><div class="text-danger fw-bold">${esc(order.reject_reason)}</div></div>` : ''}
+    </div>`;
+
+  const items = order.items || [];
+  if (!items.length) return headerHtml + '<div class="text-muted small">（无明细行）</div>';
+
+  const thead = '<tr><th>产品编号</th><th>产品名称</th><th>数量</th><th>要求完成日期</th><th>备注</th></tr>';
+  const rows = items.map(it => `<tr><td>${esc(it.product_id||'-')}</td><td>${esc(it.product_name||'-')}</td><td>${esc(it.quantity||'-')}</td><td>${esc(it.required_date||'-')}</td><td>${esc(it.notes||'-')}</td></tr>`).join('');
+
+  return headerHtml + `<div class="table-responsive"><table class="table table-bordered table-sm"><thead class="table-light">${thead}</thead><tbody>${rows}</tbody></table></div>`;
+}
+
+// ─── Toast提示 ────────────────────────────────────────────────────────────────
+function showToast(msg, type = 'success') {
+  const el = document.getElementById('toast');
+  const colors = { success: '#198754', danger: '#dc3545', warning: '#ffc107' };
+  el.style.background = colors[type] || '#333';
+  document.getElementById('toastMsg').textContent = msg;
+  new bootstrap.Toast(el, { delay: 2500 }).show();
+}
+
+// ─── 用户登录 ─────────────────────────────────────────────────────────────────
+function showLoginModal() {
+  document.getElementById('asmLoginName').value = '';
+  document.getElementById('asmLoginPin').value = '';
+  document.getElementById('asmLoginName').classList.remove('is-invalid');
+  document.getElementById('asmLoginPin').classList.remove('is-invalid');
+  new bootstrap.Modal(document.getElementById('asmLoginModal')).show();
+  setTimeout(() => document.getElementById('asmLoginName').focus(), 300);
+}
+
+function doLogin() {
+  const name = document.getElementById('asmLoginName').value.trim();
+  const pin  = document.getElementById('asmLoginPin').value.trim();
+  if (!name) { document.getElementById('asmLoginName').classList.add('is-invalid'); return; }
+  document.getElementById('asmLoginName').classList.remove('is-invalid');
+  if (!pin)  { document.getElementById('asmLoginPin').classList.add('is-invalid'); return; }
+  document.getElementById('asmLoginPin').classList.remove('is-invalid');
+
+  apiFetch('/api/assembly-users/verify', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, pin })
+  })
+    .then(r => r.json())
+    .then(d => {
+      if (!d.success) {
+        document.getElementById('asmLoginPin').classList.add('is-invalid');
+        document.getElementById('pinError').textContent = '姓名或PIN码错误';
+        return;
+      }
+      currentUser = name;
+      currentPin  = pin;
+      sessionStorage.setItem('assembly_user', name);
+      sessionStorage.setItem('assembly_pin', pin);
+      document.getElementById('navUserBadge').textContent = '\uD83D\uDC64 ' + name;
+      bootstrap.Modal.getInstance(document.getElementById('asmLoginModal'))?.hide();
+      showToast('登录成功', 'success');
+      loadOrders();
+    })
+    .catch(() => showToast('登录验证失败', 'danger'));
+}
+
+function switchUser() {
+  sessionStorage.removeItem('assembly_user');
+  sessionStorage.removeItem('assembly_pin');
+  currentUser = '';
+  currentPin  = '';
+  document.getElementById('navUserBadge').textContent = '';
+  showLoginModal();
+}
+
+// ─── 加载客户列表 ────────────────────────────────────────────────────────────
+apiFetch('/api/clients').then(r => r.json()).then(clients => {
+  const sel = document.getElementById('asm-client_name');
+  if (sel) {
+    clients.forEach(c => { const o = document.createElement('option'); o.value = c; o.textContent = c; sel.appendChild(o); });
+  }
+}).catch(() => {});
+
+// ─── 初始化 ──────────────────────────────────────────────────────────────────
+if (currentUser) {
+  // Auto-restore session: verify the stored credentials are still valid
+  apiFetch('/api/assembly-users/verify', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: currentUser, pin: currentPin })
+  })
+    .then(r => r.json())
+    .then(d => {
+      if (d.success) {
+        document.getElementById('navUserBadge').textContent = '\uD83D\uDC64 ' + currentUser;
+        loadOrders();
+      } else {
+        // Stored credentials invalid, force re-login
+        sessionStorage.removeItem('assembly_user');
+        sessionStorage.removeItem('assembly_pin');
+        currentUser = '';
+        currentPin  = '';
+        window.addEventListener('load', showLoginModal);
+      }
+    })
+    .catch(() => {
+      document.getElementById('navUserBadge').textContent = '\uD83D\uDC64 ' + currentUser;
+      loadOrders();
+    });
+} else {
+  window.addEventListener('load', showLoginModal);
+}
+
+// Auto-refresh every 30s
+setInterval(loadOrders, 30000);
+</script>
+
+</body>
+</html>

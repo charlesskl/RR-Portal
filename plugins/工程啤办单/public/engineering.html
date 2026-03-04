@@ -34,6 +34,7 @@
       <button id="notifBtn" class="btn btn-sm btn-outline-light" onclick="toggleNotifications()" title="点击开启完成通知">
         <i class="bi bi-bell" id="notifIcon"></i>
       </button>
+      <span id="navUserBadge" class="badge bg-light text-dark" style="font-size:.85rem;cursor:pointer" onclick="switchUser()" title="点击切换用户"></span>
       <a href="index.html"     class="nav-dept-link"><i class="bi bi-house me-1"></i>主页</a>
       <a href="injection.html" class="nav-dept-link">啤机部</a>
       <a href="slush.html"     class="nav-dept-link">搪胶部</a>
@@ -69,8 +70,6 @@
         <option value="A车间">A车间</option>
         <option value="B车间">B车间</option>
         <option value="华登车间">华登车间</option>
-        <option value="湖南车间">湖南车间</option>
-        <option value="模厂">模厂</option>
       </select>
     </div>
     <div class="d-flex gap-2">
@@ -105,6 +104,12 @@
         <div class="row g-3 mb-3">
           <div class="col-md-3"><label class="form-label fw-bold">产品编号</label><input class="form-control" id="inj-order_number" placeholder="如 HD2024001"></div>
           <div class="col-md-3"><label class="form-label fw-bold">订单编号</label><input class="form-control" id="inj-doc_number" placeholder="订单编号"></div>
+          <div class="col-md-3"><label class="form-label fw-bold">产品名称</label><input class="form-control" id="inj-product_name" placeholder="产品名称"></div>
+          <div class="col-md-3"><label class="form-label fw-bold">客名</label>
+            <select class="form-select" id="inj-client_name">
+              <option value="">请选择客户</option>
+            </select>
+          </div>
           <div class="col-md-3"><label class="form-label fw-bold">日期</label><input type="date" class="form-control" id="inj-date"></div>
           <div class="col-md-3"><label class="form-label fw-bold">阶段</label>
             <select class="form-select" id="inj-stage">
@@ -119,7 +124,12 @@
           </div>
           <div class="col-md-3"><label class="form-label fw-bold">车间</label>
             <select class="form-select" id="inj-workshop">
-              <option>A车间</option><option>B车间</option><option>华登车间</option><option>湖南车间</option><option>模厂</option>
+              <option>A车间</option><option>B车间</option><option>华登车间</option>
+            </select>
+          </div>
+          <div class="col-md-3"><label class="form-label fw-bold">发至 <span class="text-muted fw-normal small">（可选）</span></label>
+            <select class="form-select" id="inj-send_to">
+              <option value="">无</option><option value="发至湖南">发至湖南</option><option value="发至模厂">发至模厂</option>
             </select>
           </div>
           <div class="col-md-3"><label class="form-label fw-bold">主管</label>
@@ -135,7 +145,7 @@
           <strong>明细行</strong>
           <div class="d-flex gap-2">
             <button class="btn btn-sm btn-outline-success" onclick="triggerExcelImport('injection')"><i class="bi bi-file-earmark-excel me-1"></i>导入Excel</button>
-            <button class="btn btn-sm btn-outline-primary" onclick="addInjRow()"><i class="bi bi-plus-lg me-1"></i>添加行</button>
+            <button class="btn btn-sm btn-outline-primary" onclick="addInjRow()"><i class="bi bi-plus-lg me-1"></i>添加模</button>
           </div>
         </div>
         <div class="items-table-wrap">
@@ -150,6 +160,7 @@
             <tbody id="injItemsBody"></tbody>
           </table>
         </div>
+        <div id="injMatSummary" style="display:none;margin-top:10px"></div>
       </div>
       <div class="modal-footer">
         <button class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
@@ -234,7 +245,7 @@
           </div>
           <div class="col-md-3"><label class="form-label fw-bold">车间</label>
             <select class="form-select" id="spray-workshop">
-              <option>湖南车间</option><option>华登车间</option><option>模厂</option>
+              <option>A车间</option><option>B车间</option><option>华登车间</option>
             </select>
           </div>
           <div class="col-md-3"><label class="form-label fw-bold">主管</label>
@@ -376,8 +387,6 @@
             <option value="A车间">A车间</option>
             <option value="B车间">B车间</option>
             <option value="华登车间">华登车间</option>
-            <option value="湖南车间">湖南车间</option>
-            <option value="模厂">模厂</option>
           </select>
           <button class="btn btn-sm btn-outline-secondary" onclick="loadSummary()"><i class="bi bi-arrow-clockwise me-1"></i>刷新</button>
           <span id="summaryCount" class="text-muted small ms-1"></span>
@@ -399,6 +408,7 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script src="utils.js"></script>
 <script>
 // ─── 状态管理 ────────────────────────────────────────────────────────────────
 let currentTab = 'injection';
@@ -435,8 +445,8 @@ let engProblemsMap = {};
 function loadOrders() {
   document.getElementById('orderList').innerHTML = '<div class="text-center p-4 text-muted">加载中...</div>';
   Promise.all([
-    fetch(`/api/${currentTab}`).then(r => r.json()),
-    fetch(`/api/problems?type=${currentTab}`).then(r => r.json())
+    apiFetch(`/api/${currentTab}`).then(r => r.json()),
+    apiFetch(`/api/problems?type=${currentTab}`).then(r => r.json())
   ]).then(([orders, problems]) => {
     engProblemsMap = {};
     problems.filter(p => p.status === '待处理').forEach(p => {
@@ -465,7 +475,7 @@ const statusBadge = s => ({
   '已完成': '<span class="badge badge-done">已完成</span>',
   '已取消': '<span class="badge bg-secondary">已取消</span>',
   '已驳回': '<span class="badge bg-danger">已驳回</span>'
-}[s] || `<span class="badge bg-secondary">${s}</span>`);
+}[s] || `<span class="badge bg-secondary">${esc(s)}</span>`);
 
 const typeNames = { injection: '啤办单', slush: '搪胶单', spray: '喷油单' };
 
@@ -477,26 +487,26 @@ function renderOrderList(orders) {
   const isSpray = currentTab === 'spray';
   const rows = orders.map(o => `
     <tr class="order-row" style="cursor:pointer" onclick="viewOrderDetail(${o.id},'${(o.order_number||'').replace(/'/g,'')}')">
-      <td>${o.id}</td>
-      <td><strong>${o.order_number || '-'}</strong></td>
-      <td>${o.date || '-'}</td>
-      <td>${o.order_type || '-'}</td>
-      <td>${o.workshop || '-'}</td>
-      <td>${o.supervisor || '-'}</td>
-      <td>${o.eng_name || '-'}</td>
-      ${isSpray ? `<td style="color:#0d6efd;font-weight:500">${o.receive_time || '-'}</td><td style="color:#d63384;font-weight:500">${o.eng_complete_time || '-'}</td>` : ''}
-      <td>${o.reason || '-'}</td>
-      <td>
+      ${!isSpray ? `<td>${esc(o.order_number || '-')}</td>` : ''}
+      <td>${esc(o.product_name || '-')}</td>
+      <td>${esc(o.client_name || '-')}</td>
+      <td>${esc(o.date ? o.date.slice(5) : '-')}</td>
+      <td>${esc(o.order_type || '-')}</td>
+      <td>${esc(o.workshop || '-')}${o.send_to ? ' <span class="badge bg-info text-dark">'+esc(o.send_to)+'</span>' : ''}</td>
+      ${!isSpray ? `<td>${esc(o.supervisor || '-')}</td>` : ''}
+      <td>${esc(o.eng_name || '-')}</td>
+      ${isSpray ? `<td style="color:#0d6efd;font-weight:500">${esc(o.receive_time || '-')}</td><td style="color:#d63384;font-weight:500">${esc(o.eng_complete_time || '-')}</td>` : ''}
+      <td class="text-truncate" style="max-width:120px" title="${esc(o.reason||'')}">${esc(o.reason || '-')}</td>
+      <td class="text-nowrap">
         ${statusBadge(o.status)}
-        ${engProblemsMap[o.id] ? `<span class="badge bg-danger ms-1" style="cursor:pointer" onclick="event.stopPropagation();viewEngProblems(${o.id},'${(o.order_number||'').replace(/'/g,'')}')"><i class="bi bi-exclamation-triangle-fill me-1"></i>${engProblemsMap[o.id]}个问题</span>` : ''}
+        ${engProblemsMap[o.id] ? `<span class="badge bg-danger ms-1" style="cursor:pointer" onclick="event.stopPropagation();viewEngProblems(${o.id},'${(o.order_number||'').replace(/'/g,'')}')"><i class="bi bi-exclamation-triangle-fill me-1"></i>${engProblemsMap[o.id]}</span>` : ''}
       </td>
-      <td>${fmtDate(o.created_at)}</td>
-      <td onclick="event.stopPropagation()">
+      <td class="text-nowrap" onclick="event.stopPropagation()">
         <div class="btn-group btn-group-sm">
-          ${(currentTab === 'injection' && (o.status === '待审核' || o.status === '待经理审核')) ? `<button class="btn ${o.status === '待经理审核' ? 'btn-primary' : 'btn-warning'} fw-bold" onclick="reviewOrder(${o.id},'${(o.order_number||'').replace(/'/g,'')}')"><i class="bi bi-shield-check me-1"></i>审核</button>` : ''}
-            <button class="btn btn-outline-primary"  onclick="editOrder(${o.id})" title="编辑"><i class="bi bi-pencil"></i></button>
-            <button class="btn btn-outline-danger"   onclick="deleteOrder(${o.id})" title="删除"><i class="bi bi-trash"></i></button>
-          <button class="btn btn-outline-success"    onclick="editOrder(${o.id},true)" title="复制此单新建"><i class="bi bi-copy"></i></button>
+          ${(currentTab === 'injection' && (o.status === '待审核' || o.status === '待经理审核')) ? `<button class="btn ${o.status === '待经理审核' ? 'btn-primary' : 'btn-warning'} fw-bold" onclick="reviewOrder(${o.id},'${(o.order_number||'').replace(/'/g,'')}')">审核</button>` : ''}
+          <button class="btn btn-outline-primary"  onclick="editOrder(${o.id})" title="编辑"><i class="bi bi-pencil"></i></button>
+          <button class="btn btn-outline-danger"   onclick="deleteOrder(${o.id})" title="删除"><i class="bi bi-trash"></i></button>
+          <button class="btn btn-outline-success"   onclick="editOrder(${o.id},true)" title="复制"><i class="bi bi-copy"></i></button>
           <button class="btn btn-outline-secondary"  onclick="printOrder(${o.id})" title="打印"><i class="bi bi-printer"></i></button>
           ${engProblemsMap[o.id] ? `<button class="btn btn-danger" onclick="viewEngProblems(${o.id},'${(o.order_number||'').replace(/'/g,'')}')" title="查看问题"><i class="bi bi-exclamation-triangle-fill"></i></button>` : ''}
         </div>
@@ -504,19 +514,22 @@ function renderOrderList(orders) {
     </tr>`).join('');
 
   document.getElementById('orderList').innerHTML = `
-    <table class="table table-hover table-sm mb-0">
+    <table class="table table-hover table-sm mb-0" style="font-size:.82rem">
       <thead class="table-dark">
         <tr>
-          <th>ID</th><th>产品编号</th><th>日期</th><th>类型</th><th>车间</th><th>主管</th><th>跟进工程师</th>
-          ${isSpray ? `<th style="color:#7eb8ff">收到胶件时间</th><th style="color:#f9a8d4">工程预计完成时间</th>` : ''}
-          <th>原因</th><th>状态</th><th>创建时间</th><th>操作</th>
+          ${!isSpray ? '<th>产品编号</th>' : ''}
+          <th>产品名称</th><th>客名</th><th>日期</th><th>类型</th><th>车间</th>
+          ${!isSpray ? '<th>主管</th>' : ''}
+          <th>工程师</th>
+          ${isSpray ? `<th style="color:#7eb8ff">收到胶件</th><th style="color:#f9a8d4">预计完成</th>` : ''}
+          <th>原因</th><th>状态</th><th>操作</th>
         </tr>
       </thead>
       <tbody>${rows}</tbody>
     </table>`;
 }
 
-function fmtDate(s) {
+function fmtDateTime(s) {
   if (!s) return '-';
   return new Date(s).toLocaleString('zh-CN', {
     timeZone: 'Asia/Shanghai', hour12: false,
@@ -544,7 +557,9 @@ function openNewModal() {
   document.getElementById(`${prefix}-status`).value = (currentTab === 'injection') ? '待审核' : '待生产';
   document.getElementById(`${prefix}-reason`).value = '';
   const wsElNew = document.getElementById(`${prefix}-workshop`);
-  if (wsElNew) wsElNew.value = prefix === 'inj' ? 'A车间' : '湖南车间';
+  if (wsElNew) wsElNew.value = 'A车间';
+  const sendToElNew = document.getElementById(`${prefix}-send_to`);
+  if (sendToElNew) sendToElNew.value = '';
   const supElNew = document.getElementById(`${prefix}-supervisor`);
   if (supElNew) supElNew.value = '';
   document.getElementById(`${prefix}-engineer`).value = '';
@@ -555,7 +570,7 @@ function openNewModal() {
 
   const showModal = () => {
     document.getElementById(bodyId).innerHTML = '';
-    if (currentTab === 'injection') addInjRow();
+    if (currentTab === 'injection') { addInjRow(); refreshMatSummary(); }
     else if (currentTab === 'slush') addSlushRow();
     else addSprayRow();
     new bootstrap.Modal(document.getElementById(modalId)).show();
@@ -563,14 +578,14 @@ function openNewModal() {
 
   // 注塑单需要原料列表，若还未加载则先拉取
   if (currentTab === 'injection' && _matPrices.length === 0) {
-    fetch('/api/material-prices').then(r => r.json()).then(p => { _matPrices = p; showModal(); });
+    apiFetch('/api/material-prices').then(r => r.json()).then(p => { _matPrices = p; showModal(); });
   } else {
     showModal();
   }
 }
 
 function editOrder(id, isDuplicate = false) {
-  fetch(`/api/${currentTab}/${id}`)
+  apiFetch(`/api/${currentTab}/${id}`)
     .then(r => r.json())
     .then(order => {
       const prefix  = currentTab === 'injection' ? 'inj' : currentTab === 'slush' ? 'slush' : 'spray';
@@ -583,12 +598,18 @@ function editOrder(id, isDuplicate = false) {
       document.getElementById(`${prefix}-order_number`).value = order.order_number || '';
       const docNumElEdit = document.getElementById(`${prefix}-doc_number`);
       if (docNumElEdit) docNumElEdit.value = isDuplicate ? '' : (order.doc_number || '');
+      const prodNameElEdit = document.getElementById(`${prefix}-product_name`);
+      if (prodNameElEdit) prodNameElEdit.value = order.product_name || '';
+      const clientNameElEdit = document.getElementById(`${prefix}-client_name`);
+      if (clientNameElEdit) clientNameElEdit.value = order.client_name || '';
       document.getElementById(`${prefix}-date`).value = new Date().toISOString().slice(0,10);
       document.getElementById(`${prefix}-order_type`).value = order.order_type || '';
       document.getElementById(`${prefix}-status`).value = isDuplicate ? '待审核' : (order.status || '待审核');
       document.getElementById(`${prefix}-reason`).value = order.reason || '';
       const wsElEdit = document.getElementById(`${prefix}-workshop`);
       if (wsElEdit) wsElEdit.value = order.workshop || '';
+      const sendToElEdit = document.getElementById(`${prefix}-send_to`);
+      if (sendToElEdit) sendToElEdit.value = order.send_to || '';
       const stgElEdit = document.getElementById(`${prefix}-stage`);
       if (stgElEdit) stgElEdit.value = order.stage || '';
       const supElEdit = document.getElementById(`${prefix}-supervisor`);
@@ -607,12 +628,13 @@ function editOrder(id, isDuplicate = false) {
           else if (currentTab === 'slush') addSlushRow(it);
           else addSprayRow(it);
         });
+        if (currentTab === 'injection') refreshMatSummary();
         new bootstrap.Modal(document.getElementById(modalId)).show();
       };
 
       // 编辑注塑单时同样确保原料列表已加载
       if (currentTab === 'injection' && _matPrices.length === 0) {
-        fetch('/api/material-prices').then(r => r.json()).then(p => { _matPrices = p; fillRows(); });
+        apiFetch('/api/material-prices').then(r => r.json()).then(p => { _matPrices = p; fillRows(); });
       } else {
         fillRows();
       }
@@ -622,8 +644,7 @@ function editOrder(id, isDuplicate = false) {
 
 // ─── 添加表格行 ───────────────────────────────────────────────────────────────
 function inp(type, name, val='', extra='') {
-  const v = val === null || val === undefined ? '' : val;
-  const escaped = String(v).replace(/"/g, '&quot;');
+  const escaped = esc(val === null || val === undefined ? '' : val);
   return `<input type="${type}" class="form-control form-control-sm" name="${name}" value="${escaped}" title="${escaped}" ${extra} onfocus="this.title=this.value" oninput="this.title=this.value">`;
 }
 function sel(name, opts, val='') {
@@ -637,7 +658,7 @@ document.body.appendChild(_matDropEl);
 let _matDropInp = null;
 
 function matSel(val) {
-  const v = (val||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;');
+  const v = esc(val||'');
   return `<div class="mat-sel-wrap" style="min-width:130px">
     <input type="text" class="form-control form-control-sm" name="material"
       value="${v}" placeholder="搜索原料..." autocomplete="off"
@@ -662,8 +683,16 @@ function matDropShow(inp) {
 }
 function _matDropPos(inp) {
   const r = inp.getBoundingClientRect();
+  // 如果输入框滚出可视区域，隐藏下拉
+  const wrap = inp.closest('.items-table-wrap');
+  if (wrap) {
+    const wr = wrap.getBoundingClientRect();
+    if (r.bottom < wr.top || r.top > wr.bottom) {
+      _matDropEl.style.display = 'none';
+      return;
+    }
+  }
   const spaceBelow = window.innerHeight - r.bottom;
-  const spaceAbove = r.top;
   // 优先向下，空间不够则向上
   if (spaceBelow >= 200) {
     _matDropEl.style.top = r.bottom + 2 + 'px';
@@ -674,21 +703,30 @@ function _matDropPos(inp) {
   }
   _matDropEl.style.left = Math.max(4, Math.min(r.left, window.innerWidth - 290)) + 'px';
 }
+// 滚动时重新定位下拉框
+document.addEventListener('scroll', () => {
+  if (_matDropInp && _matDropEl.style.display !== 'none') _matDropPos(_matDropInp);
+}, true);
 function matDropFilter(inp) {
   _matDropInp = inp;
   const q = inp.value.trim().toLowerCase();
-  const matches = q ? _matPrices.filter(p => p.material.toLowerCase().includes(q)) : _matPrices;
+  const qNorm = q.replace(/[\s（）()【】\[\]]/g, '');
+  const matches = q ? _matPrices.filter(p => {
+    const mLow = p.material.toLowerCase();
+    const mNorm = mLow.replace(/[\s（）()【】\[\]]/g, '');
+    return mLow.includes(q) || mNorm.includes(qNorm);
+  }) : _matPrices;
   _matDropEl.innerHTML = matches.slice(0, 80).map(p =>
     `<div style="padding:5px 10px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"
-      onmousedown="matDropPick(this,'${p.material.replace(/'/g,"\\'")}')"
+      onmousedown="matDropPick(this,'${p.material.replace(/'/g,"\\'").replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}')"
       onmouseover="this.style.background='#e2e6ea'" onmouseout="this.style.background=''"
-      title="${p.material}">${p.material}${p.unit_price ? ' <small style=color:#888>(' + p.unit_price + ' HKD/KG)</small>' : ''}</div>`
+      title="${esc(p.material)}">${esc(p.material)}${p.unit_price ? ' <small style=color:#888>(' + esc(p.unit_price) + ' HKD/KG)</small>' : ''}</div>`
   ).join('') + (matches.length > 80 ? '<div style="padding:5px 10px;color:#999;font-size:.78rem">还有 ' + (matches.length-80) + ' 条，输入更多关键字筛选...</div>' : '');
   _matDropPos(inp);
   _matDropEl.style.display = '';
 }
 function matDropPick(el, val) {
-  if (_matDropInp) { _matDropInp.value = val; _matDropInp.title = val; }
+  if (_matDropInp) { _matDropInp.value = val; _matDropInp.title = val; _matDropInp.style.border = ''; }
   _matDropEl.style.display = 'none';
   _matDropInp = null;
 }
@@ -700,7 +738,7 @@ function delBtn() {
 }
 function injDelBtn() {
   return `<div class="d-flex flex-column align-items-center gap-1">
-    <button type="button" class="btn btn-sm btn-danger" title="删除此行" onclick="this.closest('tr').remove()"><i class="bi bi-x-lg"></i></button>
+    <button type="button" class="btn btn-sm btn-danger" title="删除此行" onclick="this.closest('tr').remove();refreshMatSummary()"><i class="bi bi-x-lg"></i></button>
     <button type="button" class="btn btn-sm btn-outline-secondary" title="添加同模件" style="padding:1px 5px;font-size:11px" onclick="addInjSubRow(this)">+件</button>
     <div class="fill-handle" title="按住向下拖动可复制此行" onmousedown="startFillDrag(event,this)"></div>
   </div>`;
@@ -711,7 +749,7 @@ function addInjRow(it={}, isSubRow=false) {
   if (isSubRow) tr.style.background = '#f8f9ff';
   const moldStyle = isSubRow ? 'style="background:#eef2ff;font-size:11px;color:#666"' : '';
   tr.innerHTML = `
-    <td><input type="text" class="form-control form-control-sm" name="mold_id" value="${it.mold_id||''}" ${moldStyle}></td>
+    <td><input type="text" class="form-control form-control-sm" name="mold_id" value="${esc(it.mold_id||'')}" ${moldStyle}></td>
     <td>${inp('text','mold_name',it.mold_name)}</td>
     <td>${inp('text','machine_type',it.machine_type,'style="width:70px"' )}</td>
     <td>${matSel(it.material||'')}</td>
@@ -726,6 +764,15 @@ function addInjRow(it={}, isSubRow=false) {
     <td>${inp('text','notes',it.notes||'注塑')}</td>
     <td>${injDelBtn()}</td>`;
   document.getElementById('injItemsBody').appendChild(tr);
+  // 未匹配原料：红框提示，placeholder 显示原始名称
+  if (it._matUnmatched) {
+    const matInp = tr.querySelector('[name="material"]');
+    if (matInp) {
+      matInp.style.border = '2px solid #dc3545';
+      matInp.placeholder = it._matUnmatched + '（未匹配，请手动选择）';
+      matInp.title = '原始原料：' + it._matUnmatched;
+    }
+  }
 }
 
 // 在当前行下方插入同一工模的子件行（除工模名称外全部复制）
@@ -735,7 +782,7 @@ function addInjSubRow(btn) {
   const tr = document.createElement('tr');
   tr.style.background = '#f8f9ff';
   tr.innerHTML = `
-    <td><input type="text" class="form-control form-control-sm" name="mold_id" value="${g('mold_id')}" style="background:#eef2ff;font-size:11px;color:#666"></td>
+    <td><input type="text" class="form-control form-control-sm" name="mold_id" value="${esc(g('mold_id'))}" style="background:#eef2ff;font-size:11px;color:#666"></td>
     <td>${inp('text','mold_name','')}</td>
     <td>${inp('text','machine_type',g('machine_type'),'style="width:70px"')}</td>
     <td>${matSel(g('material'))}</td>
@@ -807,28 +854,32 @@ function saveOrder(type) {
   const supElSave = document.getElementById(`${prefix}-supervisor`);
   const stgElSave = document.getElementById(`${prefix}-stage`);
   const body = {
-    order_number: document.getElementById(`${prefix}-order_number`).value,
-    doc_number:   document.getElementById(`${prefix}-doc_number`)?.value || null,
-    date:         document.getElementById(`${prefix}-date`).value,
+    order_number:  document.getElementById(`${prefix}-order_number`).value,
+    doc_number:    document.getElementById(`${prefix}-doc_number`)?.value || null,
+    product_name:  document.getElementById(`${prefix}-product_name`)?.value || null,
+    client_name:   document.getElementById(`${prefix}-client_name`)?.value || null,
+    date:          document.getElementById(`${prefix}-date`).value,
     order_type:   document.getElementById(`${prefix}-order_type`).value,
     stage:        stgElSave ? (stgElSave.value || null) : null,
     status:       document.getElementById(`${prefix}-status`).value,
     reason:       document.getElementById(`${prefix}-reason`).value,
     workshop:     wsElSave  ? wsElSave.value  : null,
+    send_to:      document.getElementById(`${prefix}-send_to`)?.value || null,
     supervisor:   supElSave ? supElSave.value : null,
     eng_name:     document.getElementById(`${prefix}-engineer`).value || null,
     receive_time:      (type === 'spray' ? document.getElementById('spray-receive_time')?.value      : null) || null,
     eng_complete_time: (type === 'spray' ? document.getElementById('spray-eng_complete_time')?.value : null) || null,
     items: type === 'injection' ? collectRows('injItemsBody', injFields)
          : type === 'slush'     ? collectRows('slushItemsBody', slushFields)
-         :                        collectRows('sprayItemsBody', sprayFields)
+         :                        collectRows('sprayItemsBody', sprayFields),
   };
 
+  if (!currentUser) { showLoginModal(); return; }
   const url    = id ? `/api/${type}/${id}` : `/api/${type}`;
   const method = id ? 'PUT' : 'POST';
-  const hdrs   = { 'Content-Type': 'application/json' };
+  const hdrs   = { 'Content-Type': 'application/json', 'X-User': encodeURIComponent(currentUser) };
 
-  fetch(url, { method, headers: hdrs, body: JSON.stringify(body) })
+  apiFetch(url, { method, headers: hdrs, body: JSON.stringify(body) })
     .then(r => r.json())
     .then(data => {
       if (data.error) { showToast(data.error, 'danger'); return; }
@@ -846,7 +897,7 @@ function viewEngProblems(orderId, orderNumber) {
   document.getElementById('epmBody').innerHTML = '<div class="text-muted">加载中...</div>';
   new bootstrap.Modal(document.getElementById('engProblemModal')).show();
 
-  fetch(`/api/problems?type=${currentTab}&order_id=${orderId}`)
+  apiFetch(`/api/problems?type=${currentTab}&order_id=${orderId}`)
     .then(r => r.json())
     .then(list => {
       if (!list.length) {
@@ -857,9 +908,9 @@ function viewEngProblems(orderId, orderNumber) {
         <div class="border rounded p-3 mb-2 ${p.status==='已解决' ? 'bg-light' : 'bg-warning-subtle'}">
           <div class="d-flex justify-content-between align-items-start gap-2">
             <div>
-              <div class="fw-bold">${p.description}</div>
-              <div class="text-muted small mt-1">${p.reported_by} · ${fmtDate(p.created_at)}</div>
-              ${p.resolved_at ? `<div class="text-success small">已解决：${fmtDate(p.resolved_at)}</div>` : ''}
+              <div class="fw-bold">${esc(p.description)}</div>
+              <div class="text-muted small mt-1">${esc(p.reported_by)} · ${fmtDateTime(p.created_at)}</div>
+              ${p.resolved_at ? `<div class="text-success small">已解决：${fmtDateTime(p.resolved_at)}</div>` : ''}
             </div>
             <div class="flex-shrink-0">
               ${p.status === '待处理'
@@ -872,7 +923,7 @@ function viewEngProblems(orderId, orderNumber) {
 }
 
 function resolveProblem(problemId) {
-  fetch(`/api/problems/${problemId}/resolve`, { method: 'PATCH' })
+  apiFetch(`/api/problems/${problemId}/resolve`, { method: 'PATCH' })
     .then(r => r.json())
     .then(() => {
       // 刷新弹窗内容
@@ -888,7 +939,7 @@ function resolveProblem(problemId) {
 // ─── 删除/打印 ────────────────────────────────────────────────────────────────
 function deleteOrder(id) {
   if (!confirm(`确定删除这条单据吗？删除后无法恢复。`)) return;
-  fetch(`/api/${currentTab}/${id}`, { method: 'DELETE' })
+  apiFetch(`/api/${currentTab}/${id}`, { method: 'DELETE', headers: { 'X-User': encodeURIComponent(currentUser) } })
     .then(r => r.json())
     .then(d => {
       if (d.error) { showToast(d.error, 'danger'); return; }
@@ -911,12 +962,7 @@ function showToast(msg, type = 'success') {
 }
 
 // ─── 主管审核 ─────────────────────────────────────────────────────────────────
-const SUPERVISOR_PINS = {
-  '段新辉': '6602', '唐海林': '6603',
-  '蒙海欢': '6604', '万志勇': '6605', '章发东': '6606', '刘际维': '6607',
-  '甘勇辉': '6608', '王玉国': '6609'
-};
-const MANAGER_PIN = { '易东存': '6601' };
+// PIN 已移至服务端验证，前端不存储任何 PIN
 
 let reviewingOrderId = null;
 let reviewingOrderSupervisor = null;
@@ -932,7 +978,7 @@ function reviewOrder(id, orderNum) {
   document.getElementById('reviewOrderDetails').innerHTML = '<div class="text-center text-muted py-4">加载中...</div>';
   new bootstrap.Modal(document.getElementById('reviewModal')).show();
 
-  fetch(`/api/${currentTab}/${id}`)
+  apiFetch(`/api/${currentTab}/${id}`)
     .then(r => r.json())
     .then(order => {
       reviewingOrderSupervisor = order.supervisor || null;
@@ -952,7 +998,7 @@ function viewOrderDetail(id, orderNum) {
   };
   document.getElementById('detailPrintBtn').onclick = () => printOrder(id);
   new bootstrap.Modal(document.getElementById('orderDetailModal')).show();
-  fetch(`/api/${currentTab}/${id}`)
+  apiFetch(`/api/${currentTab}/${id}`)
     .then(r => r.json())
     .then(order => {
       document.getElementById('orderDetailBody').innerHTML = renderReviewDetails(order, currentTab);
@@ -965,14 +1011,16 @@ function viewOrderDetail(id, orderNum) {
 function renderReviewDetails(order, type) {
   const headerHtml = `
     <div class="row g-2 mb-3">
-      <div class="col-6 col-md-3"><div class="text-muted small">产品编号</div><div class="fw-bold">${order.order_number || '-'}</div></div>
-      <div class="col-6 col-md-3"><div class="text-muted small">日期</div><div>${order.date || '-'}</div></div>
-      <div class="col-6 col-md-3"><div class="text-muted small">类型</div><div>${order.order_type || '-'}</div></div>
-      <div class="col-6 col-md-3"><div class="text-muted small">车间</div><div>${order.workshop || '-'}</div></div>
-      <div class="col-6 col-md-3"><div class="text-muted small">主管</div><div>${order.supervisor || '-'}</div></div>
-      <div class="col-6 col-md-3"><div class="text-muted small">跟进工程师</div><div>${order.eng_name || '-'}</div></div>
+      <div class="col-6 col-md-3"><div class="text-muted small">产品编号</div><div class="fw-bold">${esc(order.order_number || '-')}</div></div>
+      <div class="col-6 col-md-3"><div class="text-muted small">产品名称</div><div>${esc(order.product_name || '-')}</div></div>
+      <div class="col-6 col-md-3"><div class="text-muted small">客名</div><div>${esc(order.client_name || '-')}</div></div>
+      <div class="col-6 col-md-3"><div class="text-muted small">日期</div><div>${esc(order.date || '-')}</div></div>
+      <div class="col-6 col-md-3"><div class="text-muted small">类型</div><div>${esc(order.order_type || '-')}</div></div>
+      <div class="col-6 col-md-3"><div class="text-muted small">车间</div><div>${esc(order.workshop || '-')}${order.send_to ? ' <span class="badge bg-info text-dark">'+esc(order.send_to)+'</span>' : ''}</div></div>
+      <div class="col-6 col-md-3"><div class="text-muted small">主管</div><div>${esc(order.supervisor || '-')}</div></div>
+      <div class="col-6 col-md-3"><div class="text-muted small">跟进工程师</div><div>${esc(order.eng_name || '-')}</div></div>
       <div class="col-6 col-md-3"><div class="text-muted small">状态</div><div>${statusBadge(order.status)}</div></div>
-      ${order.reason ? `<div class="col-12"><div class="text-muted small">原因/备注</div><div>${order.reason}</div></div>` : ''}
+      ${order.reason ? `<div class="col-12"><div class="text-muted small">原因/备注</div><div>${esc(order.reason)}</div></div>` : ''}
     </div>`;
 
   const items = order.items || [];
@@ -981,74 +1029,92 @@ function renderReviewDetails(order, type) {
   let thead = '', rows = '';
   if (type === 'injection') {
     thead = '<tr><th>工模编号</th><th>工模名称</th><th>机型</th><th>原料</th><th>颜色</th><th>色粉编号</th><th>件数/套数</th><th>数量(啤)</th><th>整啤毛重(g)</th><th>所需用料(KG)</th><th>模具回厂时间</th><th>完成时间</th><th>备注</th></tr>';
-    rows = items.map(it => `<tr><td>${it.mold_id||'-'}</td><td>${it.mold_name||'-'}</td><td>${it.machine_type||'-'}</td><td>${it.material||'-'}</td><td>${it.color||'-'}</td><td>${it.pigment_no||'-'}</td><td>${it.quantity||'-'}</td><td>${it.shoot_qty||'-'}</td><td>${it.gross_weight_g||'-'}</td><td>${it.required_material_kg||'-'}</td><td>${it.mold_return_time||'-'}</td><td>${it.completion_time||'-'}</td><td>${it.notes||'-'}</td></tr>`).join('');
+    rows = items.map(it => `<tr><td>${esc(it.mold_id||'-')}</td><td>${esc(it.mold_name||'-')}</td><td>${esc(it.machine_type||'-')}</td><td>${esc(it.material||'-')}</td><td>${esc(it.color||'-')}</td><td>${esc(it.pigment_no||'-')}</td><td>${esc(it.quantity||'-')}</td><td>${esc(it.shoot_qty||'-')}</td><td>${esc(it.gross_weight_g||'-')}</td><td>${esc(it.required_material_kg||'-')}</td><td>${esc(it.mold_return_time||'-')}</td><td>${esc(it.completion_time||'-')}</td><td>${esc(it.notes||'-')}</td></tr>`).join('');
   } else if (type === 'slush') {
     thead = '<tr><th>序号</th><th>产品编号</th><th>工模编号</th><th>工模名称</th><th>原料</th><th>颜色/编号</th><th>色粉编号</th><th>每啤毛重(g)</th><th>数量</th><th>要求完成日期</th><th>回模时间</th><th>备注</th></tr>';
-    rows = items.map(it => `<tr><td>${it.seq_no||'-'}</td><td>${it.product_id||'-'}</td><td>${it.mold_id||'-'}</td><td>${it.mold_name||'-'}</td><td>${it.material||'-'}</td><td>${it.color_code||'-'}</td><td>${it.pigment_no||'-'}</td><td>${it.unit_weight||'-'}</td><td>${it.quantity||'-'}</td><td>${it.required_date||'-'}</td><td>${it.return_time||'-'}</td><td>${it.notes||'-'}</td></tr>`).join('');
+    rows = items.map(it => `<tr><td>${esc(it.seq_no||'-')}</td><td>${esc(it.product_id||'-')}</td><td>${esc(it.mold_id||'-')}</td><td>${esc(it.mold_name||'-')}</td><td>${esc(it.material||'-')}</td><td>${esc(it.color_code||'-')}</td><td>${esc(it.pigment_no||'-')}</td><td>${esc(it.unit_weight||'-')}</td><td>${esc(it.quantity||'-')}</td><td>${esc(it.required_date||'-')}</td><td>${esc(it.return_time||'-')}</td><td>${esc(it.notes||'-')}</td></tr>`).join('');
   } else {
     thead = '<tr><th>客名</th><th>名称</th><th>样板数量</th><th>提供胶件时间</th><th>收到胶件时间</th><th>工程预计完成时间</th><th>喷油交货时间</th><th>工程师/PMC</th><th>备注</th></tr>';
-    rows = items.map(it => `<tr><td>${it.client_name||'-'}</td><td>${it.product_name||'-'}</td><td>${it.sample_qty||'-'}</td><td>${it.provide_time||'-'}</td><td>${it.receive_time||'-'}</td><td>${it.eng_complete_time||'-'}</td><td>${it.delivery_time||'-'}</td><td>${it.engineer||'-'}</td><td>${it.notes||'-'}</td></tr>`).join('');
+    rows = items.map(it => `<tr><td>${esc(it.client_name||'-')}</td><td>${esc(it.product_name||'-')}</td><td>${esc(it.sample_qty||'-')}</td><td>${esc(it.provide_time||'-')}</td><td>${esc(it.receive_time||'-')}</td><td>${esc(it.eng_complete_time||'-')}</td><td>${esc(it.delivery_time||'-')}</td><td>${esc(it.engineer||'-')}</td><td>${esc(it.notes||'-')}</td></tr>`).join('');
   }
 
   return headerHtml + `<div class="table-responsive"><table class="table table-bordered table-sm"><thead class="table-light">${thead}</thead><tbody>${rows}</tbody></table></div>`;
 }
 
-function submitReview(action) {
+async function submitReview(action) {
   const enteredPin = document.getElementById('reviewPin').value.trim();
   const rejectReason = document.getElementById('rejectReason').value.trim();
 
-  // 检查是否为经理PIN
-  const isManager = Object.values(MANAGER_PIN).includes(enteredPin);
-  // 检查是否为该单据主管PIN
-  const correctSupPin = reviewingOrderSupervisor ? SUPERVISOR_PINS[reviewingOrderSupervisor] : null;
-  const isSupervisor = correctSupPin && enteredPin === correctSupPin;
-
-  if (!enteredPin || (!isManager && !isSupervisor)) {
+  if (!enteredPin) {
     document.getElementById('reviewPinError').classList.remove('d-none');
     document.getElementById('reviewPin').focus();
     return;
   }
   document.getElementById('reviewPinError').classList.add('d-none');
 
-  let newStatus;
-  let toastMsg;
+  let isManager = false;
+  let reviewerName = '';
+  let reviewerRole = '';
+
+  try {
+    // 先尝试经理身份验证
+    const mgrR = await apiFetch('/api/verify-pin', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: '易东存', pin: enteredPin, role: 'manager' })
+    });
+    const mgrD = await mgrR.json();
+    if (mgrD.success) { isManager = true; reviewerName = '易东存'; reviewerRole = 'manager'; }
+
+    // 再尝试主管身份验证
+    if (!isManager && reviewingOrderSupervisor) {
+      const supR = await apiFetch('/api/verify-pin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: reviewingOrderSupervisor, pin: enteredPin, role: 'supervisor' })
+      });
+      const supD = await supR.json();
+      if (supD.success) { reviewerName = reviewingOrderSupervisor; reviewerRole = 'supervisor'; }
+    }
+  } catch (e) {
+    showToast('无法连接服务器验证PIN', 'danger');
+    return;
+  }
+
+  if (!reviewerName) {
+    document.getElementById('reviewPinError').classList.remove('d-none');
+    document.getElementById('reviewPin').focus();
+    return;
+  }
+
+  let newStatus, toastMsg;
   if (action === 'reject') {
     newStatus = '已驳回';
     toastMsg = '已驳回';
   } else if (isManager) {
-    // 经理审核：直接进入待生产
     newStatus = '待生产';
     toastMsg = '经理审核通过！单据已进入待生产';
   } else {
-    // 主管审核：进入待经理审核
     newStatus = '待经理审核';
     toastMsg = '主管审核通过！已转交经理审核';
   }
 
-  const doUpdate = action === 'reject'
-    ? fetch(`/api/${currentTab}/${reviewingOrderId}`)
-        .then(r => r.json())
-        .then(order => {
-          const { items, ...header } = order;
-          return fetch(`/api/${currentTab}/${reviewingOrderId}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ ...header, status: newStatus, reason: rejectReason, items })
-          });
-        })
-    : fetch(`/api/${currentTab}/${reviewingOrderId}/status`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: newStatus })
-      });
-
-  doUpdate
-    .then(() => {
-      bootstrap.Modal.getInstance(document.getElementById('reviewModal'))?.hide();
-      showToast(toastMsg, action === 'approve' ? 'success' : 'danger');
-      loadOrders();
-    })
-    .catch(() => showToast('操作失败', 'danger'));
+  try {
+    const patchBody = { status: newStatus, pin: enteredPin, reviewer_name: reviewerName, reviewer_role: reviewerRole };
+    if (action === 'reject' && rejectReason) patchBody.reason = rejectReason;
+    const resp = await apiFetch(`/api/${currentTab}/${reviewingOrderId}/status`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', 'X-User': encodeURIComponent(currentUser) },
+      body: JSON.stringify(patchBody)
+    });
+    const result = await resp.json();
+    if (result.error) { showToast(result.error, 'danger'); return; }
+    bootstrap.Modal.getInstance(document.getElementById('reviewModal'))?.hide();
+    showToast(toastMsg, action === 'approve' ? 'success' : 'danger');
+    loadOrders();
+  } catch (e) {
+    showToast('操作失败：' + e.message, 'danger');
+  }
 }
 
 // ─── 生产总表 ─────────────────────────────────────────────────────────────────
@@ -1063,9 +1129,9 @@ function loadSummary() {
   document.getElementById('summaryTableWrap').innerHTML = '<div class="text-center text-muted py-4">加载中...</div>';
   document.getElementById('summaryCount').textContent = '';
   Promise.all([
-    fetch('/api/injection').then(r => r.json()),
-    fetch('/api/slush').then(r => r.json()),
-    fetch('/api/spray').then(r => r.json())
+    apiFetch('/api/injection').then(r => r.json()),
+    apiFetch('/api/slush').then(r => r.json()),
+    apiFetch('/api/spray').then(r => r.json())
   ]).then(([inj, slush, spray]) => {
     summaryAll = [
       ...inj.map(o   => ({ ...o, _type: 'injection' })),
@@ -1103,14 +1169,14 @@ function renderSummaryTable() {
   const typeLabel = { injection: '啤办单', slush: '搪胶单', spray: '喷油单' };
   const rows = list.map(o => `
     <tr>
-      <td>${typeLabel[o._type] || o._type}</td>
-      <td>${o.workshop || '-'}</td>
-      <td><strong>${o.order_number || '-'}</strong></td>
-      <td>${o.date || '-'}</td>
-      <td>${o.order_type || '-'}</td>
+      <td>${typeLabel[o._type] || esc(o._type)}</td>
+      <td>${esc(o.workshop || '-')}</td>
+      <td><strong>${esc(o.order_number || '-')}</strong></td>
+      <td>${esc(o.date || '-')}</td>
+      <td>${esc(o.order_type || '-')}</td>
       <td>${statusBadge(o.status)}</td>
-      <td>${o.reason || '-'}</td>
-      <td>${fmtDate(o.created_at)}</td>
+      <td>${esc(o.reason || '-')}</td>
+      <td>${fmtDateTime(o.created_at)}</td>
     </tr>`).join('');
 
   document.getElementById('summaryTableWrap').innerHTML = `
@@ -1145,7 +1211,7 @@ function updateNotifBtn() {
 
 function loadDoneSnapshot() {
   ['injection', 'slush', 'spray'].forEach(type => {
-    fetch(`/api/${type}`)
+    apiFetch(`/api/${type}`)
       .then(r => r.json())
       .then(orders => orders.filter(o => o.status === '已完成').forEach(o => trackedDone[type].add(o.id)))
       .catch(() => {});
@@ -1155,7 +1221,7 @@ function loadDoneSnapshot() {
 function checkForNewCompletions() {
   if (!notifyEnabled) return;
   ['injection', 'slush', 'spray'].forEach(type => {
-    fetch(`/api/${type}`)
+    apiFetch(`/api/${type}`)
       .then(r => r.json())
       .then(orders => {
         orders.filter(o => o.status === '已完成').forEach(o => {
@@ -1226,10 +1292,11 @@ const EXCEL_COL_MAP = {
   injection: {
     '工模编号':'mold_id','模具编号':'mold_id','moldid':'mold_id',
     '工模名称':'mold_name','模具名称':'mold_name',
-    '原料':'material','材料':'material',
-    '颜色':'color',
-    '色粉编号':'pigment_no','色粉':'pigment_no',
-    '件数':'quantity','套数':'quantity','件数/套数':'quantity','件数套数':'quantity',
+    '原料':'material','材料':'material','用料名称':'material',
+    '颜色':'color','顔色':'color',
+    '色粉编号':'pigment_no','色粉号':'pigment_no','色粉':'pigment_no',
+    '啤机机型':'machine_type','机型':'machine_type',
+    '件数':'quantity','套数':'quantity','件数/套数':'quantity','件数套数':'quantity','整啤模腔数':'quantity',
     '数量(啤)':'shoot_qty','数量（啤）':'shoot_qty','啤数':'shoot_qty','数量':'shoot_qty',
     '整啤毛重(g)':'gross_weight_g','整啤毛重（g）':'gross_weight_g',
     '单个重量(g)':'gross_weight_g','单个重量（g）':'gross_weight_g','单个毛重(g)':'gross_weight_g',
@@ -1322,6 +1389,27 @@ function onExcelFileSelected() {
             const el = document.getElementById(`${prefix}-doc_number`) || document.getElementById(`inj-doc_number`);
             if (el && !el.value) el.value = dMatch[1].replace(/\s+/g, '').trim();
           }
+          // 客户名称
+          const cMatch = rowText.match(/客户名称[：:]\s*(\S+)/);
+          if (cMatch) {
+            const el = document.getElementById(`${prefix}-client_name`);
+            if (el && !el.value) el.value = cMatch[1].trim();
+          }
+          // 产品名称
+          const pnMatch = rowText.match(/产品名称[：:]\s*(\S+)/);
+          if (pnMatch) {
+            const el = document.getElementById(`${prefix}-product_name`);
+            if (el && !el.value) el.value = pnMatch[1].trim();
+          }
+          // 日期
+          const dtMatch = rowText.match(/日期[：:]\s*([\d/.-]+)/);
+          if (dtMatch) {
+            const el = document.getElementById(`${prefix}-date`);
+            if (el && !el.value) {
+              const parts = dtMatch[1].split(/[/.-]/);
+              if (parts.length >= 3) el.value = `${parts[0]}-${parts[1].padStart(2,'0')}-${parts[2].padStart(2,'0')}`;
+            }
+          }
           // 原因
           const rMatch = rowText.match(/原因\s*[：:]\s*(.+)/);
           if (rMatch) {
@@ -1340,15 +1428,42 @@ function onExcelFileSelected() {
       const dataRows = allRows.slice(headerRowIdx + 1);
       const colMap = EXCEL_COL_MAP[_excelImportType] || {};
 
-      // 建立 列索引 → 字段名 映射
+      // ── 排模表检测 + 预处理：拼接件数/套数 ──
+      const isPaiMoBiao = _excelImportType === 'injection'
+        && headers.some(h => normCol(h).includes('零件编号'));
+      if (isPaiMoBiao) {
+        const moldCol   = headers.findIndex(h => normCol(h) === normCol('工模编号'));
+        const cavityCol = headers.findIndex(h => normCol(h).includes('整啤模腔数'));
+        const suiteCol  = headers.findIndex(h => normCol(h) === normCol('套数'));
+        if (moldCol >= 0 && cavityCol >= 0 && suiteCol >= 0) {
+          for (let i = 0; i < dataRows.length; i++) {
+            const row = dataRows[i];
+            if (row[moldCol] && row[cavityCol]) {
+              // 从下方第一个子行取套数，拼成 "件数/套数"
+              for (let j = i + 1; j < dataRows.length; j++) {
+                if (dataRows[j][moldCol]) break;
+                if (dataRows[j][suiteCol]) {
+                  row[cavityCol] = String(row[cavityCol]).trim() + '/' + String(dataRows[j][suiteCol]).trim();
+                  break;
+                }
+              }
+            }
+          }
+        }
+      }
+
+      // 建立 列索引 → 字段名 映射（优先精确匹配，再取最长子串匹配）
       const idxMap = {};
       headers.forEach((h, i) => {
         if (!h) return;
         const hn = normCol(h);
+        let bestField = null, bestLen = 0, isExact = false;
         Object.keys(colMap).forEach(k => {
           const kn = normCol(k);
-          if (hn === kn || hn.includes(kn)) idxMap[i] = colMap[k];
+          if (hn === kn) { bestField = colMap[k]; isExact = true; }
+          else if (!isExact && hn.includes(kn) && kn.length > bestLen) { bestField = colMap[k]; bestLen = kn.length; }
         });
+        if (bestField) idxMap[i] = bestField;
       });
 
       if (!Object.keys(idxMap).length) {
@@ -1363,7 +1478,7 @@ function onExcelFileSelected() {
       const NUMERIC_FIELDS = ['shoot_qty','gross_weight_g','required_material_kg','unit_weight','sample_qty'];
 
       // 解析数据行
-      const items = dataRows.map(row => {
+      let items = dataRows.map(row => {
         const obj = {};
         Object.keys(idxMap).forEach(i => {
           let val = row[i];
@@ -1398,6 +1513,53 @@ function onExcelFileSelected() {
         return true;
       });
 
+      // 排模表模式：只保留有原料的模具主行（整啤模腔数→件数）
+      if (isPaiMoBiao) {
+        items = items.filter(obj => obj.mold_id && obj.material);
+      }
+
+      // 模糊匹配原料名称：先精确→去符号→相似度≥70%，找不到则清空让工程师手动选
+      if (_excelImportType === 'injection' && _matPrices.length) {
+        const normMat = s => String(s).replace(/[\s（）()【】\[\]#]/g, '').toLowerCase();
+        // 最长公共子序列相似度
+        function similarity(a, b) {
+          const m = a.length, n = b.length;
+          if (!m || !n) return 0;
+          const dp = Array.from({length: m+1}, () => new Uint16Array(n+1));
+          for (let i = 1; i <= m; i++)
+            for (let j = 1; j <= n; j++)
+              dp[i][j] = a[i-1] === b[j-1] ? dp[i-1][j-1]+1 : Math.max(dp[i-1][j], dp[i][j-1]);
+          return dp[m][n] / Math.max(m, n);
+        }
+        const priceNorms = _matPrices.map(p => ({ name: p.material, norm: normMat(p.material) }));
+        items.forEach(it => {
+          if (!it.material) return;
+          // 1) 精确匹配
+          if (_matPrices.some(p => p.material === it.material)) return;
+          // 2) 去符号精确匹配
+          const itNorm = normMat(it.material);
+          const exactNorm = priceNorms.find(p => p.norm === itNorm);
+          if (exactNorm) { it.material = exactNorm.name; return; }
+          // 3) 相似度匹配（≥70%）— 先用前缀过滤缩小候选集
+          let bestName = null, bestScore = 0;
+          const prefix2 = itNorm.slice(0, 2);
+          const candidates = priceNorms.filter(p => p.norm.slice(0, 2) === prefix2);
+          (candidates.length ? candidates : priceNorms).forEach(p => {
+            const s = similarity(itNorm, p.norm);
+            if (s > bestScore) { bestScore = s; bestName = p.name; }
+          });
+          // Fallback: if prefix-filtered candidates didn't reach threshold, try full list
+          if (bestScore < 0.7 && candidates.length && candidates.length < priceNorms.length) {
+            priceNorms.forEach(p => {
+              const s = similarity(itNorm, p.norm);
+              if (s > bestScore) { bestScore = s; bestName = p.name; }
+            });
+          }
+          if (bestScore >= 0.7) { it.material = bestName; }
+          else { it._matUnmatched = it.material; it.material = ''; }
+        });
+      }
+
       if (!items.length) { showToast('表头下方没有有效数据行', 'warning'); return; }
 
       // 清空现有行，填入导入的行
@@ -1420,7 +1582,12 @@ function onExcelFileSelected() {
           else addSprayRow(it);
         });
       }
-      showToast(`已从第${headerRowIdx+1}行识别表头，成功导入 ${items.length} 行`, 'success');
+      // 刷新原料汇总（从明细行动态统计）
+      if (_excelImportType === 'injection') refreshMatSummary();
+
+      showToast(isPaiMoBiao
+        ? `已识别排模表，导入 ${items.length} 个模具`
+        : `已从第${headerRowIdx+1}行识别表头，成功导入 ${items.length} 行`, 'success');
     } catch(err) {
       showToast('解析失败：' + err.message, 'danger');
     }
@@ -1469,10 +1636,105 @@ document.addEventListener('mouseup', e => {
 
 // ─── 初始化 ───────────────────────────────────────────────────────────────────
 let _matPrices = [];
-fetch('/api/material-prices').then(r => r.json()).then(p => { _matPrices = p; });
+apiFetch('/api/material-prices').then(r => r.json()).then(p => { _matPrices = p; });
+
+// ─── 原料汇总（从明细行动态统计）──────────────────────────────────────────────
+function refreshMatSummary() {
+  const el = document.getElementById('injMatSummary');
+  if (!el) return;
+  const agg = {};
+  document.querySelectorAll('#injItemsBody tr').forEach(tr => {
+    const mat = (tr.querySelector('[name="material"]')?.value || '').trim();
+    const kg = parseFloat(tr.querySelector('[name="required_material_kg"]')?.value) || 0;
+    if (mat && kg > 0) agg[mat] = (agg[mat] || 0) + kg;
+  });
+  const entries = Object.entries(agg);
+  if (!entries.length) { el.style.display = 'none'; return; }
+  const total = entries.reduce((s, [, kg]) => s + kg, 0);
+  el.style.display = '';
+  el.innerHTML = `<table class="table table-bordered table-sm" style="width:auto;font-size:.82rem;margin:0">
+    <thead><tr style="background:#e8f0fe"><th>原料</th><th>所需用料 (KG)</th></tr></thead>
+    <tbody>${entries.map(([mat, kg]) =>
+      `<tr><td>${esc(mat)}</td><td class="text-end">${kg.toFixed(2)}</td></tr>`
+    ).join('')}
+    <tr style="font-weight:700;background:#f0f7f0"><td>合计</td><td class="text-end">${total.toFixed(2)}</td></tr>
+    </tbody>
+  </table>`;
+}
+// Auto-refresh material summary when material or weight inputs change
+document.getElementById('injItemsBody').addEventListener('change', function(e) {
+  const n = e.target.name;
+  if (n === 'material' || n === 'required_material_kg') refreshMatSummary();
+});
+
+// 客户列表（从API加载）
+let _clientList = [];
+apiFetch('/api/clients').then(r => r.json()).then(clients => {
+  _clientList = clients;
+  const sel = document.getElementById('inj-client_name');
+  if (sel) {
+    clients.forEach(c => { const o = document.createElement('option'); o.value = c; o.textContent = c; sel.appendChild(o); });
+  }
+}).catch(() => {});
+
+// ─── 用户登录 ─────────────────────────────────────────────────────────────────
+let currentUser = sessionStorage.getItem('eng_user') || '';
+
+function showLoginModal() {
+  new bootstrap.Modal(document.getElementById('engLoginModal')).show();
+  document.getElementById('engLoginName').focus();
+}
+
+function doLogin() {
+  const name = document.getElementById('engLoginName').value.trim();
+  if (!name) { document.getElementById('engLoginName').classList.add('is-invalid'); return; }
+  document.getElementById('engLoginName').classList.remove('is-invalid');
+  currentUser = name;
+  sessionStorage.setItem('eng_user', name);
+  document.getElementById('navUserBadge').textContent = '👤 ' + name;
+  bootstrap.Modal.getInstance(document.getElementById('engLoginModal'))?.hide();
+}
+
+function switchUser() {
+  sessionStorage.removeItem('eng_user');
+  currentUser = '';
+  document.getElementById('engLoginName').value = '';
+  showLoginModal();
+}
+
+// 初始化用户
+if (currentUser) {
+  document.getElementById('navUserBadge').textContent = '👤 ' + currentUser;
+} else {
+  // 延迟等 bootstrap 加载完
+  window.addEventListener('load', showLoginModal);
+}
 
 loadOrders();
 setInterval(() => { loadOrders(); checkForNewCompletions(); }, 30000);
 </script>
+
+<!-- ─── 登录 Modal ─────────────────────────────────────────────────────────── -->
+<div class="modal fade" id="engLoginModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false">
+  <div class="modal-dialog modal-sm modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header" style="background:#1a3a6c;color:#fff">
+        <h5 class="modal-title"><i class="bi bi-person-circle me-2"></i>请登录</h5>
+      </div>
+      <div class="modal-body">
+        <label class="form-label fw-bold">您的姓名</label>
+        <input type="text" id="engLoginName" class="form-control" placeholder="输入您的姓名"
+          onkeydown="if(event.key==='Enter')doLogin()">
+        <div class="invalid-feedback">请输入姓名</div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-primary w-100" onclick="doLogin()">
+          <i class="bi bi-box-arrow-in-right me-1"></i>确认登录
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
 </body>
 </html>

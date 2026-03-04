@@ -140,7 +140,7 @@ if $NGINX_OK && $CORE_OK; then
     echo "║  RR Portal is live!                          ║"
     echo "╚══════════════════════════════════════════════╝"
     echo ""
-    echo "Access: http://8.148.146.194/"
+    echo "Access: http://$(curl -sf https://api.ipify.org 2>/dev/null || hostname -I | awk '{print $1}')/"
     echo ""
 else
     echo "Some services failed. Check logs with:"

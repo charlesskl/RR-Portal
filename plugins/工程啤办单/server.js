@@ -24,8 +24,8 @@ try {
 let _cache = null;
 
 function loadData() {
-  if (_cache) return JSON.parse(JSON.stringify(_cache));
-  if (!fs.existsSync(DATA_FILE)) { _cache = initData(); return JSON.parse(JSON.stringify(_cache)); }
+  if (_cache) return _cache;
+  if (!fs.existsSync(DATA_FILE)) { _cache = initData(); return _cache; }
   try {
     const data = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
     if (!data.material_prices || data.material_prices.length === 0) data.material_prices = DEFAULT_MATERIAL_PRICES.slice();
@@ -34,10 +34,11 @@ function loadData() {
     if (!data.assembly_items) data.assembly_items = [];
     if (!data.assembly_users) data.assembly_users = [];
     _cache = data;
-    return JSON.parse(JSON.stringify(_cache));
+    return _cache;
   }
-  catch (e) { _cache = initData(); return JSON.parse(JSON.stringify(_cache)); }
+  catch (e) { _cache = initData(); return _cache; }
 }
+
 
 function initData() {
   return {
@@ -54,7 +55,7 @@ function initData() {
 }
 
 function saveData(data) {
-  _cache = JSON.parse(JSON.stringify(data));
+  _cache = data;
   const tmp = DATA_FILE + '.tmp';
   fs.writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf8');
   fs.renameSync(tmp, DATA_FILE);
@@ -63,11 +64,14 @@ function saveData(data) {
 // ─── 通用 CRUD 帮助 ─────────────────────────────────────────────────────────
 function getOrders(type) {
   const data = loadData();
-  const orders = data[`${type}_orders`].sort((a, b) => b.id - a.id);
-  // 附带 items 信息（完成时间等）供前端显示
-  const items = data[`${type}_items`] || [];
+  const orders = data[`${type}_orders`].slice().sort((a, b) => b.id - a.id);
+  // 用 Map 索引 items，避免 O(n²) 过滤
+  const itemsByOrder = {};
+  (data[`${type}_items`] || []).forEach(i => {
+    (itemsByOrder[i.order_id] = itemsByOrder[i.order_id] || []).push(i);
+  });
   orders.forEach(o => {
-    o.items = items.filter(i => i.order_id === o.id).sort((a,b) => a.sort_order - b.sort_order);
+    o.items = (itemsByOrder[o.id] || []).sort((a,b) => a.sort_order - b.sort_order);
   });
   return orders;
 }

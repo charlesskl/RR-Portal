@@ -1,0 +1,31 @@
+name: Deploy to Cloud
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.CLOUD_HOST }}
+          username: ${{ secrets.CLOUD_USER }}
+          password: ${{ secrets.CLOUD_PASS }}
+          script: |
+            cd /opt/rr-portal
+            bash deploy/update-server.sh
+
+      - name: Health Check
+        run: |
+          sleep 25
+          STATUS=$(curl -sf -o /dev/null -w "%{http_code}" "http://${{ secrets.CLOUD_HOST }}/nginx-health" || echo "000")
+          if [ "$STATUS" = "200" ] || [ "$STATUS" = "401" ]; then
+            echo "Deployment successful (HTTP $STATUS)"
+          else
+            echo "Deployment may have failed (HTTP $STATUS)"
+            exit 1
+          fi

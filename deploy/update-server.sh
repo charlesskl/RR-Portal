@@ -18,7 +18,8 @@ git pull
 echo "[2/3] Rebuilding and restarting services..."
 docker compose -f docker-compose.cloud.yml --env-file "$ENV_FILE" up -d --build
 
-echo "[3/3] Waiting for services (20s)..."
+echo "[3/3] Restarting nginx and waiting for services (20s)..."
+docker compose -f docker-compose.cloud.yml restart nginx
 sleep 20
 
 # Health check

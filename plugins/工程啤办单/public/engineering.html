@@ -7,7 +7,7 @@
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
   <link href="style.css" rel="stylesheet">
-  <script defer src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+  <!-- XLSX loaded on demand when importing Excel -->
   <style>
     .type-tabs .nav-link { color: #333; font-weight: 500; }
     .type-tabs .nav-link.active { background: #1a3a6c; color: #fff; border-color: #1a3a6c; }
@@ -1347,9 +1347,21 @@ function triggerExcelImport(type) {
   _excelInput.click();
 }
 
+function loadXLSX() {
+  if (window.XLSX) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = 'https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js';
+    s.onload = resolve;
+    s.onerror = () => reject(new Error('Failed to load XLSX library'));
+    document.head.appendChild(s);
+  });
+}
+
 function onExcelFileSelected() {
   const file = _excelInput.files[0];
   if (!file) return;
+  loadXLSX().then(() => {
   const reader = new FileReader();
   reader.onload = e => {
     try {
@@ -1593,6 +1605,7 @@ function onExcelFileSelected() {
     }
   };
   reader.readAsArrayBuffer(file);
+  }).catch(err => showToast('加载Excel库失败：' + err.message, 'danger'));
 }
 
 // ─── 拖动填充（类 Excel） ─────────────────────────────────────────────────────

@@ -357,6 +357,32 @@
   </div>
 </div>
 
+<!-- 强制修改PIN Modal -->
+<div class="modal fade" id="changePinModal" tabindex="-1" data-bs-backdrop="static">
+  <div class="modal-dialog modal-sm">
+    <div class="modal-content">
+      <div class="modal-header bg-warning text-dark">
+        <h5 class="modal-title"><i class="bi bi-key me-2"></i>首次使用 — 请修改PIN码</h5>
+      </div>
+      <div class="modal-body">
+        <p class="text-muted small mb-3">您当前使用的是默认PIN码，为安全起见请设置新的PIN码（至少4位）。</p>
+        <div class="mb-3">
+          <label class="form-label fw-bold">新PIN码 <span class="text-danger">*</span></label>
+          <input type="password" id="newPinInput" class="form-control" placeholder="请输入新PIN码" autocomplete="off">
+        </div>
+        <div class="mb-2">
+          <label class="form-label fw-bold">确认新PIN码 <span class="text-danger">*</span></label>
+          <input type="password" id="confirmPinInput" class="form-control" placeholder="再次输入新PIN码" autocomplete="off">
+        </div>
+        <div id="changePinError" class="text-danger small d-none"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-warning w-100 fw-bold" onclick="submitChangePin()">确认修改</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- 总表 Modal -->
 <div class="modal fade" id="summaryModal" tabindex="-1">
   <div class="modal-dialog modal-fullscreen">
@@ -966,6 +992,39 @@ function showToast(msg, type = 'success') {
 
 let reviewingOrderId = null;
 let reviewingOrderSupervisor = null;
+let pendingChangePinUser = null;
+
+async function submitChangePin() {
+  const newPin = document.getElementById('newPinInput').value.trim();
+  const confirmPin = document.getElementById('confirmPinInput').value.trim();
+  const errEl = document.getElementById('changePinError');
+
+  if (!newPin || newPin.length < 4) {
+    errEl.textContent = 'PIN码至少4位'; errEl.classList.remove('d-none'); return;
+  }
+  if (newPin === '1234') {
+    errEl.textContent = '不能使用默认PIN码'; errEl.classList.remove('d-none'); return;
+  }
+  if (newPin !== confirmPin) {
+    errEl.textContent = '两次输入不一致'; errEl.classList.remove('d-none'); return;
+  }
+  errEl.classList.add('d-none');
+
+  try {
+    const resp = await apiFetch('/api/change-pin', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: pendingChangePinUser.name, old_pin: pendingChangePinUser.oldPin, new_pin: newPin, role: pendingChangePinUser.role })
+    });
+    const result = await resp.json();
+    if (result.error) { errEl.textContent = result.error; errEl.classList.remove('d-none'); return; }
+    bootstrap.Modal.getInstance(document.getElementById('changePinModal'))?.hide();
+    showToast('PIN码修改成功！请用新PIN码重新审核', 'success');
+    pendingChangePinUser = null;
+  } catch (e) {
+    errEl.textContent = '操作失败：' + e.message; errEl.classList.remove('d-none');
+  }
+}
 
 function reviewOrder(id, orderNum) {
   reviewingOrderId = id;
@@ -1057,6 +1116,8 @@ async function submitReview(action) {
   let reviewerRole = '';
 
   try {
+    let verifyResult = null;
+
     // 先尝试经理身份验证
     const mgrR = await apiFetch('/api/verify-pin', {
       method: 'POST',
@@ -1064,7 +1125,7 @@ async function submitReview(action) {
       body: JSON.stringify({ name: '易东存', pin: enteredPin, role: 'manager' })
     });
     const mgrD = await mgrR.json();
-    if (mgrD.success) { isManager = true; reviewerName = '易东存'; reviewerRole = 'manager'; }
+    if (mgrD.success) { isManager = true; reviewerName = '易东存'; reviewerRole = 'manager'; verifyResult = mgrD; }
 
     // 再尝试主管身份验证
     if (!isManager && reviewingOrderSupervisor) {
@@ -1074,7 +1135,19 @@ async function submitReview(action) {
         body: JSON.stringify({ name: reviewingOrderSupervisor, pin: enteredPin, role: 'supervisor' })
       });
       const supD = await supR.json();
-      if (supD.success) { reviewerName = reviewingOrderSupervisor; reviewerRole = 'supervisor'; }
+      if (supD.success) { reviewerName = reviewingOrderSupervisor; reviewerRole = 'supervisor'; verifyResult = supD; }
+    }
+
+    // 检查是否需要强制修改 PIN
+    if (verifyResult && verifyResult.must_change) {
+      pendingChangePinUser = { name: reviewerName, role: reviewerRole, oldPin: enteredPin, action };
+      bootstrap.Modal.getInstance(document.getElementById('reviewModal'))?.hide();
+      document.getElementById('newPinInput').value = '';
+      document.getElementById('confirmPinInput').value = '';
+      document.getElementById('changePinError').classList.add('d-none');
+      new bootstrap.Modal(document.getElementById('changePinModal')).show();
+      document.getElementById('newPinInput').focus();
+      return;
     }
   } catch (e) {
     showToast('无法连接服务器验证PIN', 'danger');

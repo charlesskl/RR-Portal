@@ -14,7 +14,7 @@ jobs:
         with:
           host: ${{ secrets.CLOUD_HOST }}
           username: ${{ secrets.CLOUD_USER }}
-          password: ${{ secrets.CLOUD_PASS }}
+          key: ${{ secrets.CLOUD_SSH_KEY }}
           script: |
             cd /opt/rr-portal
             bash deploy/update-server.sh

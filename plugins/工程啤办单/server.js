@@ -141,13 +141,37 @@ function hashPin(pin) {
 }
 
 // PIN 已迁移到 data.json 的 auth_pins（哈希存储），源码不再保存明文 PIN
+const DEFAULT_PIN = '1234';
+const ALL_SUPERVISORS = ['段新辉','唐海林','蒙海欢','万志勇','章发东','刘际维','甘勇辉','王玉国'];
+const ALL_MANAGERS = ['易东存'];
+
 (function initPins() {
   const data = loadData();
   if (!data.auth_pins) {
     data.auth_pins = { supervisors: {}, manager: {} };
-    saveData(data);
-    console.warn('WARNING: auth_pins not found. PINs must be set via /api/change-pin.');
   }
+  if (!data.auth_pins_must_change) {
+    data.auth_pins_must_change = { supervisors: {}, manager: {} };
+  }
+  // 自动为没有 PIN 的主管/经理设置默认 PIN (1234)，并标记强制修改
+  let changed = false;
+  for (const name of ALL_SUPERVISORS) {
+    if (!data.auth_pins.supervisors[name]) {
+      data.auth_pins.supervisors[name] = hashPin(DEFAULT_PIN);
+      data.auth_pins_must_change.supervisors[name] = true;
+      changed = true;
+      console.log(`Auto-initialized default PIN for supervisor: ${name}`);
+    }
+  }
+  for (const name of ALL_MANAGERS) {
+    if (!data.auth_pins.manager[name]) {
+      data.auth_pins.manager[name] = hashPin(DEFAULT_PIN);
+      data.auth_pins_must_change.manager[name] = true;
+      changed = true;
+      console.log(`Auto-initialized default PIN for manager: ${name}`);
+    }
+  }
+  if (changed) saveData(data);
 })();
 
 function verifyPin(name, pin, role) {
@@ -513,7 +537,12 @@ app.post('/api/verify-pin', (req, res) => {
   if (!name || !pin || !role) {
     return res.json({ success: false });
   }
-  res.json({ success: verifyPin(name, pin, role) });
+  const success = verifyPin(name, pin, role);
+  if (!success) return res.json({ success: false });
+  const data = loadData();
+  const bucket = role === 'manager' ? 'manager' : 'supervisors';
+  const mustChange = !!(data.auth_pins_must_change && data.auth_pins_must_change[bucket] && data.auth_pins_must_change[bucket][name]);
+  res.json({ success: true, must_change: mustChange });
 });
 
 app.post('/api/change-pin', (req, res) => {
@@ -535,6 +564,9 @@ app.post('/api/change-pin', (req, res) => {
     }
   }
   data.auth_pins[bucket][name] = hashPin(new_pin);
+  if (data.auth_pins_must_change && data.auth_pins_must_change[bucket]) {
+    delete data.auth_pins_must_change[bucket][name];
+  }
   saveData(data);
   res.json({ success: true, first_time: !existing });
 });

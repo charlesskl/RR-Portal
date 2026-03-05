@@ -147,12 +147,12 @@ const ALL_MANAGERS = ['易东存'];
 
 (function initPins() {
   const data = loadData();
-  if (!data.auth_pins) {
-    data.auth_pins = { supervisors: {}, manager: {} };
-  }
-  if (!data.auth_pins_must_change) {
-    data.auth_pins_must_change = { supervisors: {}, manager: {} };
-  }
+  if (!data.auth_pins) data.auth_pins = {};
+  if (!data.auth_pins.supervisors) data.auth_pins.supervisors = {};
+  if (!data.auth_pins.manager) data.auth_pins.manager = {};
+  if (!data.auth_pins_must_change) data.auth_pins_must_change = {};
+  if (!data.auth_pins_must_change.supervisors) data.auth_pins_must_change.supervisors = {};
+  if (!data.auth_pins_must_change.manager) data.auth_pins_must_change.manager = {};
   // 自动为没有 PIN 的主管/经理设置默认 PIN (1234)，并标记强制修改
   let changed = false;
   for (const name of ALL_SUPERVISORS) {

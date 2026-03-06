@@ -255,8 +255,6 @@
             </select>
           </div>
           <div class="col-md-3"><label class="form-label fw-bold">跟进工程师</label><input class="form-control" id="spray-engineer" placeholder="请输入姓名"></div>
-          <div class="col-md-3"><label class="form-label fw-bold">收到胶件时间</label><input type="date" class="form-control" id="spray-receive_time"></div>
-          <div class="col-md-3"><label class="form-label fw-bold">工程预计完成时间</label><input type="date" class="form-control" id="spray-eng_complete_time"></div>
           <div class="col-12"><label class="form-label fw-bold">原因/备注</label><input class="form-control" id="spray-reason" placeholder="如 新款喷油打样"></div>
         </div>
         <div class="d-flex justify-content-between align-items-center mb-2">
@@ -268,8 +266,8 @@
           <table class="table table-bordered table-sm items-table" id="sprayItemsTable">
             <thead>
               <tr>
-                <th>客名</th><th>名称</th><th>样板数量</th>
-                <th style="color:#dc3545">喷油交货时间</th><th>工程师/PMC</th><th>备注</th><th></th>
+                <th>客名</th><th>名称</th><th>工序</th><th>样板数量</th><th>提供胶件时间</th>
+                <th>工程预计完成时间</th><th style="color:#dc3545">喷油复交货时间</th><th>工程师</th><th>跟进人</th><th></th>
               </tr>
             </thead>
             <tbody id="sprayItemsBody"></tbody>
@@ -511,17 +509,56 @@ function renderOrderList(orders) {
     return;
   }
   const isSpray = currentTab === 'spray';
-  const rows = orders.map(o => `
+  let rows;
+  if (isSpray) {
+    // 喷油单：展开 items，flat table
+    const rowArr = [];
+    orders.forEach(o => {
+      const items = o.items || [];
+      if (!items.length) {
+        rowArr.push(`<tr class="order-row" style="cursor:pointer" onclick="viewOrderDetail(${o.id},'${(o.order_number||'').replace(/'/g,'')}')">
+          <td><strong>${esc(o.order_number||'-')}</strong></td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td>
+          <td>${statusBadge(o.status)}</td>
+          <td class="text-nowrap" onclick="event.stopPropagation()"><div class="btn-group btn-group-sm">
+            <button class="btn btn-outline-primary" onclick="editOrder(${o.id})" title="编辑"><i class="bi bi-pencil"></i></button>
+            <button class="btn btn-outline-danger" onclick="deleteOrder(${o.id})" title="删除"><i class="bi bi-trash"></i></button>
+            <button class="btn btn-outline-secondary" onclick="printOrder(${o.id})" title="打印"><i class="bi bi-printer"></i></button>
+          </div></td></tr>`);
+        return;
+      }
+      items.forEach((it, idx) => {
+        rowArr.push(`<tr class="order-row" style="cursor:pointer" onclick="viewOrderDetail(${o.id},'${(o.order_number||'').replace(/'/g,'')}')">
+          <td>${idx===0 ? `<strong>${esc(o.order_number||'-')}</strong>` : ''}</td>
+          <td>${esc(it.client_name||'-')}</td>
+          <td>${esc(it.product_name||'-')}</td>
+          <td>${esc(it.process||'-')}</td>
+          <td>${esc(it.sample_qty||'-')}</td>
+          <td>${esc(it.provide_time||'-')}</td>
+          <td>${esc(it.eng_complete_time||'-')}</td>
+          <td style="color:#dc3545;font-weight:500">${esc(it.delivery_time||'-')}</td>
+          <td>${esc(it.engineer||'-')}</td>
+          <td>${idx===0 ? statusBadge(o.status) : ''}</td>
+          <td class="text-nowrap" onclick="event.stopPropagation()">${idx===0 ? `<div class="btn-group btn-group-sm">
+            <button class="btn btn-outline-primary" onclick="editOrder(${o.id})" title="编辑"><i class="bi bi-pencil"></i></button>
+            <button class="btn btn-outline-danger" onclick="deleteOrder(${o.id})" title="删除"><i class="bi bi-trash"></i></button>
+            <button class="btn btn-outline-success" onclick="editOrder(${o.id},true)" title="复制"><i class="bi bi-copy"></i></button>
+            <button class="btn btn-outline-secondary" onclick="printOrder(${o.id})" title="打印"><i class="bi bi-printer"></i></button>
+          </div>` : ''}</td>
+        </tr>`);
+      });
+    });
+    rows = rowArr.join('');
+  } else {
+    rows = orders.map(o => `
     <tr class="order-row" style="cursor:pointer" onclick="viewOrderDetail(${o.id},'${(o.order_number||'').replace(/'/g,'')}')">
-      ${!isSpray ? `<td>${esc(o.order_number || '-')}</td>` : ''}
+      <td>${esc(o.order_number || '-')}</td>
       <td>${esc(o.product_name || '-')}</td>
       <td>${esc(o.client_name || '-')}</td>
       <td>${esc(o.date ? o.date.slice(5) : '-')}</td>
       <td>${esc(o.order_type || '-')}</td>
       <td>${esc(o.workshop || '-')}${o.send_to ? ' <span class="badge bg-info text-dark">'+esc(o.send_to)+'</span>' : ''}</td>
-      ${!isSpray ? `<td>${esc(o.supervisor || '-')}</td>` : ''}
+      <td>${esc(o.supervisor || '-')}</td>
       <td>${esc(o.eng_name || '-')}</td>
-      ${isSpray ? `<td style="color:#0d6efd;font-weight:500">${esc(o.receive_time || '-')}</td><td style="color:#d63384;font-weight:500">${esc(o.eng_complete_time || '-')}</td>` : ''}
       <td class="text-truncate" style="max-width:120px" title="${esc(o.reason||'')}">${esc(o.reason || '-')}</td>
       <td class="text-nowrap">
         ${statusBadge(o.status)}
@@ -538,17 +575,16 @@ function renderOrderList(orders) {
         </div>
       </td>
     </tr>`).join('');
+  }
 
   document.getElementById('orderList').innerHTML = `
     <table class="table table-hover table-sm mb-0" style="font-size:.82rem">
       <thead class="table-dark">
         <tr>
-          ${!isSpray ? '<th>产品编号</th>' : ''}
-          <th>产品名称</th><th>客名</th><th>日期</th><th>类型</th><th>车间</th>
-          ${!isSpray ? '<th>主管</th>' : ''}
-          <th>工程师</th>
-          ${isSpray ? `<th style="color:#7eb8ff">收到胶件</th><th style="color:#f9a8d4">预计完成</th>` : ''}
-          <th>原因</th><th>状态</th><th>操作</th>
+          ${isSpray ? `<th>编号</th><th>客名</th><th>名称</th><th>工序</th><th>样板数量</th>
+            <th>提供胶件时间</th><th>工程预计完成时间</th><th style="color:#fca5a5">喷油复交货时间</th><th>工程师</th>` :
+            `<th>产品编号</th><th>产品名称</th><th>客名</th><th>日期</th><th>类型</th><th>车间</th><th>主管</th><th>工程师</th><th>原因</th>`}
+          <th>状态</th><th>操作</th>
         </tr>
       </thead>
       <tbody>${rows}</tbody>
@@ -849,10 +885,21 @@ function addSprayRow(it={}) {
   tr.innerHTML = `
     <td>${inp('text','client_name',it.client_name)}</td>
     <td>${inp('text','product_name',it.product_name)}</td>
+    <td><select name="process" class="form-select form-select-sm" style="min-width:90px">
+      <option value="喷油" ${it.process==='喷油'?'selected':''}>喷油</option>
+      <option value="移印" ${it.process==='移印'?'selected':''}>移印</option>
+      <option value="UV" ${it.process==='UV'?'selected':''}>UV</option>
+      <option value="喷油/移印" ${it.process==='喷油/移印'?'selected':''}>喷油/移印</option>
+      <option value="喷油/UV" ${it.process==='喷油/UV'?'selected':''}>喷油/UV</option>
+      <option value="移印/UV" ${it.process==='移印/UV'?'selected':''}>移印/UV</option>
+      <option value="喷油/移印/UV" ${it.process==='喷油/移印/UV'?'selected':''}>喷油/移印/UV</option>
+    </select></td>
     <td>${inp('number','sample_qty',it.sample_qty,'style="width:65px"')}</td>
-    <td>${inp('text','delivery_time',it.delivery_time,'class="w-date"')}</td>
+    <td>${inp('date','provide_time',it.provide_time,'class="w-date"')}</td>
+    <td>${inp('date','eng_complete_time',it.eng_complete_time,'class="w-date"')}</td>
+    <td>${inp('date','delivery_time',it.delivery_time,'class="w-date"')}</td>
     <td>${inp('text','engineer',it.engineer)}</td>
-    <td>${inp('text','notes',it.notes)}</td>
+    <td>${inp('text','follower',it.follower)}</td>
     <td>${delBtn()}</td>`;
   document.getElementById('sprayItemsBody').appendChild(tr);
 }
@@ -871,7 +918,7 @@ function collectRows(tbodyId, fields) {
 
 const injFields   = ['mold_id','mold_name','machine_type','material','color','pigment_no','quantity','shoot_qty','gross_weight_g','required_material_kg','mold_return_time','completion_time','notes'];
 const slushFields = ['seq_no','product_id','mold_id','mold_name','material','color_code','pigment_no','unit_weight','quantity','required_date','return_time','notes'];
-const sprayFields = ['client_name','product_name','sample_qty','delivery_time','engineer','notes'];
+const sprayFields = ['client_name','product_name','process','sample_qty','provide_time','eng_complete_time','delivery_time','engineer','follower'];
 
 function saveOrder(type) {
   const prefix = type === 'injection' ? 'inj' : type;

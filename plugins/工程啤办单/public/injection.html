@@ -136,7 +136,7 @@
               <tr>
                 <th style="width:46px">序号</th>
                 <th>原料型号</th>
-                <th style="width:110px">原料单价<br><small>(HKD/KG)</small></th>
+                <th style="width:110px">原料单价<br><small>(HKD/磅)</small></th>
                 <th style="width:100px">总实领重量<br><small>(KG)</small></th>
                 <th style="width:120px">工程原料总费用<br><small>(HKD)</small></th>
                 <th style="width:110px">备注</th>
@@ -386,7 +386,7 @@ function viewOrder(id) {
           <td>${esc(it.mold_id||'')}</td>
           <td>${esc(it.mold_name||'')}</td>
           <td>${esc(it.machine_type||'')}</td>
-          <td><strong>${esc(it.material||'')}</strong>${unitPrice ? `<br><small class="text-muted">${unitPrice} HKD/KG</small>` : ''}</td>
+          <td><strong>${esc(it.material||'')}</strong>${unitPrice ? `<br><small class="text-muted">${unitPrice} HKD/磅</small>` : ''}</td>
           <td>${esc(it.color||'')}</td>
           <td>${esc(it.pigment_no||it.color_code||'')}</td>
           <td class="text-center">${esc(it.quantity||'')}</td>
@@ -443,7 +443,7 @@ function viewOrder(id) {
         </div>
         <p class="text-muted small mb-1">
           <i class="bi bi-pencil-square me-1 text-info"></i>蓝色为啤机填写区 &nbsp;|&nbsp;
-          <i class="bi bi-calculator me-1 text-warning"></i>用料金额 = 实际用料(KG) × 原料单价，填完实际用料后自动计算
+          <i class="bi bi-calculator me-1 text-warning"></i>用料金额 = 实际用料(KG) × 2.20462 × 原料单价(HKD/磅)，填完实际用料后自动计算
         </p>
         <div class="table-responsive">
           <table class="table table-bordered table-sm" style="font-size:.82rem">
@@ -497,13 +497,15 @@ function viewOrder(id) {
     });
 }
 
+const KG_TO_LB = 2.20462; // 1 KG = 2.20462 磅
+
 function autoCalcAmt(input) {
   const tr = input.closest('tr');
-  const unitPrice = parseFloat(tr.dataset.unitPrice) || 0;
+  const unitPrice = parseFloat(tr.dataset.unitPrice) || 0; // HKD/磅
   const kg = parseFloat(input.value) || 0;
   const amtInput = tr.querySelector('[name="actual_amount_hkd"]');
   if (amtInput && unitPrice > 0) {
-    amtInput.value = kg > 0 ? (kg * unitPrice).toFixed(2) : '';
+    amtInput.value = kg > 0 ? (kg * KG_TO_LB * unitPrice).toFixed(2) : '';
   }
   recalcTotals();
 }
@@ -864,7 +866,7 @@ function printTable(type) {
       </tr>`;
     }).join('');
     tableHtml = `<table>
-      <thead><tr><th>序号</th><th>原料型号</th><th>原料单价(HKD/KG)</th><th>总实领重量(KG)</th><th>工程原料总费用(HKD)</th><th>备注</th></tr></thead>
+      <thead><tr><th>序号</th><th>原料型号</th><th>原料单价(HKD/磅)</th><th>总实领重量(KG)</th><th>工程原料总费用(HKD)</th><th>备注</th></tr></thead>
       <tbody>${trs}
         <tr style="font-weight:700;background:#f0f7f0">
           <td colspan="3" class="text-end">合计（共 ${used.length} 条）</td>

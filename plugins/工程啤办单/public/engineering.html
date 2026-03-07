@@ -782,7 +782,7 @@ function matDropFilter(inp) {
     `<div style="padding:5px 10px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"
       onmousedown="matDropPick(this,'${p.material.replace(/'/g,"\\'").replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}')"
       onmouseover="this.style.background='#e2e6ea'" onmouseout="this.style.background=''"
-      title="${esc(p.material)}">${esc(p.material)}${p.unit_price ? ' <small style=color:#888>(' + esc(p.unit_price) + ' HKD/KG)</small>' : ''}</div>`
+      title="${esc(p.material)}">${esc(p.material)}${p.unit_price ? ' <small style=color:#888>(' + esc(p.unit_price) + ' HKD/磅)</small>' : ''}</div>`
   ).join('') + (matches.length > 80 ? '<div style="padding:5px 10px;color:#999;font-size:.78rem">还有 ' + (matches.length-80) + ' 条，输入更多关键字筛选...</div>' : '');
   _matDropPos(inp);
   _matDropEl.style.display = '';

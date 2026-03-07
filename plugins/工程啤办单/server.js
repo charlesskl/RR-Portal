@@ -276,7 +276,7 @@ app.use('/api', (req, res, next) => {
           const weight = +(item.collected_weight_kg || item.required_material_kg || 0);
           const price = priceMap[item.material] || 0;
           item.actual_weight_kg = weight;
-          item.actual_amount_hkd = Math.round(weight * price * 100) / 100;
+          item.actual_amount_hkd = Math.round(weight * 2.20462 * price * 100) / 100;
         });
         saveData(data);
         return res.json({ success: true, auto_completed: true });
@@ -514,7 +514,7 @@ app.post('/api/injection/:id/auto-complete', (req, res) => {
     const weight = +(item.collected_weight_kg || item.required_material_kg || 0);
     const price = priceMap[item.material] || 0;
     item.actual_weight_kg = weight;
-    item.actual_amount_hkd = Math.round(weight * price * 100) / 100;
+    item.actual_amount_hkd = Math.round(weight * 2.20462 * price * 100) / 100;
   });
   saveData(data);
   res.json({ success: true });
@@ -551,7 +551,8 @@ app.patch('/api/spray/:id/item-delivery', (req, res) => {
   if (!order) return res.status(404).json({ error: '未找到' });
   const { item_id, delivery_time } = req.body;
   if (item_id === undefined) return res.status(400).json({ error: '参数不完整' });
-  const item = (order.items || []).find((it, idx) => (it.id !== undefined ? it.id === item_id : idx === item_id));
+  const items = data.spray_items.filter(i => i.order_id === +req.params.id);
+  const item = items.find(it => it.id === item_id);
   if (!item) return res.status(404).json({ error: '未找到该项' });
   item.delivery_time = delivery_time || null;
   order.updated_at = new Date().toISOString();
@@ -568,7 +569,8 @@ app.patch('/api/spray/:id/item-progress', (req, res) => {
   if (item_id === undefined || !Array.isArray(processes_done) || !done_by) {
     return res.status(400).json({ error: '参数不完整' });
   }
-  const item = (order.items || []).find((it, idx) => (it.id !== undefined ? it.id === item_id : idx === item_id));
+  const items = data.spray_items.filter(i => i.order_id === +req.params.id);
+  const item = items.find(it => it.id === item_id);
   if (!item) return res.status(404).json({ error: '未找到该项' });
   if (!item.process_status) item.process_status = {};
   const now = new Date().toISOString();
@@ -584,7 +586,7 @@ app.patch('/api/spray/:id/item-progress', (req, res) => {
     item.progress_at = now;
   }
   // 所有项目都已完成 → 自动标记订单已完成
-  const orderAllDone = (order.items || []).every(it => it.progress === '已完成');
+  const orderAllDone = items.every(it => it.progress === '已完成');
   if (orderAllDone) {
     order.status = '已完成';
     order.completed_date = new Date().toLocaleDateString('zh-CN', { timeZone: 'Asia/Shanghai' }).replace(/\//g, '-');

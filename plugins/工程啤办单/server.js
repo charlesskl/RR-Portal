@@ -276,7 +276,7 @@ app.use('/api', (req, res, next) => {
           const weight = +(item.collected_weight_kg || item.required_material_kg || 0);
           const price = priceMap[item.material] || 0;
           item.actual_weight_kg = weight;
-          item.actual_amount_hkd = Math.round(weight * price * 100) / 100;
+          item.actual_amount_hkd = Math.round(weight * 2.20462 * price * 100) / 100;
         });
         saveData(data);
         return res.json({ success: true, auto_completed: true });
@@ -514,7 +514,7 @@ app.post('/api/injection/:id/auto-complete', (req, res) => {
     const weight = +(item.collected_weight_kg || item.required_material_kg || 0);
     const price = priceMap[item.material] || 0;
     item.actual_weight_kg = weight;
-    item.actual_amount_hkd = Math.round(weight * price * 100) / 100;
+    item.actual_amount_hkd = Math.round(weight * 2.20462 * price * 100) / 100;
   });
   saveData(data);
   res.json({ success: true });
@@ -529,6 +529,71 @@ app.patch('/api/spray/:id/actual-receive', (req, res) => {
   order.updated_at = new Date().toISOString();
   saveData(data);
   res.json({ success: true });
+});
+
+// ─── 喷油部：更新喷油部可编辑字段 ────────────────────────────────────────────
+app.patch('/api/spray/:id/spray-fields', (req, res) => {
+  const data = loadData();
+  const order = data.spray_orders.find(o => o.id === +req.params.id);
+  if (!order) return res.status(404).json({ error: '未找到' });
+  const { actual_receive_time, spray_notes } = req.body;
+  if (actual_receive_time !== undefined) order.actual_receive_time = actual_receive_time || null;
+  if (spray_notes !== undefined) order.spray_notes = spray_notes || '';
+  order.updated_at = new Date().toISOString();
+  saveData(data);
+  res.json({ success: true });
+});
+
+// ─── 喷油部：更新单项喷油复交货时间 ──────────────────────────────────────────
+app.patch('/api/spray/:id/item-delivery', (req, res) => {
+  const data = loadData();
+  const order = data.spray_orders.find(o => o.id === +req.params.id);
+  if (!order) return res.status(404).json({ error: '未找到' });
+  const { item_id, delivery_time } = req.body;
+  if (item_id === undefined) return res.status(400).json({ error: '参数不完整' });
+  const items = data.spray_items.filter(i => i.order_id === +req.params.id);
+  const item = items.find(it => it.id === item_id);
+  if (!item) return res.status(404).json({ error: '未找到该项' });
+  item.delivery_time = delivery_time || null;
+  order.updated_at = new Date().toISOString();
+  saveData(data);
+  res.json({ success: true });
+});
+
+// ─── 喷油部：更新单项工序进度（按工序逐个打勾） ──────────────────────────────
+app.patch('/api/spray/:id/item-progress', (req, res) => {
+  const data = loadData();
+  const order = data.spray_orders.find(o => o.id === +req.params.id);
+  if (!order) return res.status(404).json({ error: '未找到' });
+  const { item_id, processes_done, done_by } = req.body;
+  if (item_id === undefined || !Array.isArray(processes_done) || !done_by) {
+    return res.status(400).json({ error: '参数不完整' });
+  }
+  const items = data.spray_items.filter(i => i.order_id === +req.params.id);
+  const item = items.find(it => it.id === item_id);
+  if (!item) return res.status(404).json({ error: '未找到该项' });
+  if (!item.process_status) item.process_status = {};
+  const now = new Date().toISOString();
+  processes_done.forEach(p => {
+    item.process_status[p] = { done: true, done_by, done_at: now };
+  });
+  // 检查该项所有工序是否全部完成
+  const allProcs = (item.process || '').split('/').map(s => s.trim()).filter(Boolean);
+  const itemAllDone = allProcs.length > 0 && allProcs.every(p => item.process_status[p] && item.process_status[p].done);
+  if (itemAllDone) {
+    item.progress = '已完成';
+    item.progress_by = done_by;
+    item.progress_at = now;
+  }
+  // 所有项目都已完成 → 自动标记订单已完成
+  const orderAllDone = items.every(it => it.progress === '已完成');
+  if (orderAllDone) {
+    order.status = '已完成';
+    order.completed_date = new Date().toLocaleDateString('zh-CN', { timeZone: 'Asia/Shanghai' }).replace(/\//g, '-');
+  }
+  order.updated_at = now;
+  saveData(data);
+  res.json({ success: true, item_done: itemAllDone, order_done: orderAllDone });
 });
 
 // ─── PIN 验证接口 ────────────────────────────────────────────────────────────

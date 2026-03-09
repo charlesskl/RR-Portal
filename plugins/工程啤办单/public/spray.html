@@ -163,7 +163,7 @@ function renderOrders(orders) {
           <td>-</td><td>-</td>
           <td>${statusBadge(o.status)} ${problemsMap[o.id]?`<span class="badge bg-danger ms-1">${problemsMap[o.id]}问题</span>`:''}</td>
           <td><div class="btn-group btn-group-sm">
-            <button class="btn btn-outline-danger" onclick="event.stopPropagation();openProblemModal(${o.id},'${(o.order_number||'').replace(/'/g,'')}')" title="问题反馈"><i class="bi bi-exclamation-triangle"></i></button>
+            <button class="btn btn-outline-danger" data-order-id="${o.id}" data-order-num="${esc(o.order_number||'')}" onclick="event.stopPropagation();openProblemModalFromBtn(this)" title="问题反馈"><i class="bi bi-exclamation-triangle"></i></button>
             <button class="btn btn-outline-secondary" onclick="event.stopPropagation();printOrder(${o.id})"><i class="bi bi-printer"></i></button>
           </div></td>
         </tr>`);
@@ -191,7 +191,7 @@ function renderOrders(orders) {
             ${idx===0 ? `<div class="btn-group btn-group-sm">
               ${statusBadge(o.status)}
               ${problemsMap[o.id]?`<span class="badge bg-danger ms-1">${problemsMap[o.id]}问题</span>`:''}
-              <button class="btn btn-outline-danger" onclick="event.stopPropagation();openProblemModal(${o.id},'${(o.order_number||'').replace(/'/g,'')}')" title="问题反馈"><i class="bi bi-exclamation-triangle"></i></button>
+              <button class="btn btn-outline-danger" data-order-id="${o.id}" data-order-num="${esc(o.order_number||'')}" onclick="event.stopPropagation();openProblemModalFromBtn(this)" title="问题反馈"><i class="bi bi-exclamation-triangle"></i></button>
               <button class="btn btn-outline-secondary" onclick="event.stopPropagation();printOrder(${o.id})"><i class="bi bi-printer"></i></button>
             </div>` : ''}
           </td>
@@ -397,6 +397,10 @@ function confirmProgress() {
 // ─── 问题反馈 ─────────────────────────────────────────────────────────────────
 let currentProblemOrderId = null;
 let currentProblemOrderNum = '';
+
+function openProblemModalFromBtn(btn) {
+  openProblemModal(Number(btn.dataset.orderId), btn.dataset.orderNum);
+}
 
 function openProblemModal(orderId, orderNumber) {
   currentProblemOrderId = orderId;

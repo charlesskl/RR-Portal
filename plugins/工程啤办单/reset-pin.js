@@ -1,0 +1,11 @@
+const crypto = require('crypto');
+const fs = require('fs');
+const salt = 'rr-production-pin-salt-2026';
+const hash = crypto.createHash('sha256').update(salt + '1234').digest('hex');
+const f = __dirname + '/data/data.json';
+const d = JSON.parse(fs.readFileSync(f, 'utf8'));
+d.auth_pins.manager['易东存'] = hash;
+if (!d.auth_pins_must_change) d.auth_pins_must_change = { supervisors: {}, manager: {} };
+d.auth_pins_must_change.manager['易东存'] = true;
+fs.writeFileSync(f, JSON.stringify(d, null, 2));
+console.log('Manager PIN reset to 1234');

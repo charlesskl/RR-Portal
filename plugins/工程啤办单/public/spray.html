@@ -7,6 +7,11 @@
   <link href="./vendor/bootstrap.min.css" rel="stylesheet">
   <link href="./vendor/bootstrap-icons.min.css" rel="stylesheet">
   <link href="style.css" rel="stylesheet">
+  <style>
+    .proc-done { color:#0f5132; background:#d1e7dd; border-radius:4px; padding:1px 6px; font-size:.75rem; }
+    .proc-pending { color:#664d03; background:#fff3cd; border-radius:4px; padding:1px 6px; font-size:.75rem; cursor:pointer; }
+    .proc-pending:hover { background:#ffe69c; }
+  </style>
 </head>
 <body class="bg-light">
 
@@ -42,7 +47,7 @@
 
 <!-- 详情 Modal -->
 <div class="modal fade" id="detailModal" tabindex="-1">
-  <div class="modal-dialog modal-xl">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
     <div class="modal-content">
       <div class="modal-header" style="background:#8e44ad;color:#fff">
         <h5 class="modal-title" id="detailTitle">喷油单详情</h5>
@@ -52,6 +57,29 @@
       <div class="modal-footer">
         <button class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
         <button class="btn btn-outline-primary" id="detailPrintBtn"><i class="bi bi-printer me-1"></i>打印</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 进度更新 Modal -->
+<div class="modal fade" id="progressModal" tabindex="-1">
+  <div class="modal-dialog modal-sm">
+    <div class="modal-content">
+      <div class="modal-header bg-success text-white">
+        <h5 class="modal-title"><i class="bi bi-check-circle me-2"></i>工序进度</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <p class="mb-2"><strong id="pgItemName"></strong></p>
+        <div id="pgProcessList" class="mb-3"></div>
+        <label class="form-label fw-bold">操作人 <span class="text-danger">*</span></label>
+        <input type="text" id="pgOperator" class="form-control" placeholder="请输入姓名" autocomplete="off">
+        <div id="pgError" class="text-danger small mt-1 d-none"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+        <button class="btn btn-success" onclick="confirmProgress()"><i class="bi bi-check-lg me-1"></i>保存</button>
       </div>
     </div>
   </div>
@@ -123,103 +151,256 @@ function renderOrders(orders) {
     document.getElementById('orderList').innerHTML = `<div class="empty-state"><i class="bi bi-inbox"></i><p class="mt-2">暂无喷油任务</p></div>`;
     return;
   }
-  const rows = orders.map(o => {
-    const provideTime = o.receive_time || '-';
-    const engTime = o.eng_complete_time || '-';
-    const actualReceive = o.actual_receive_time || '';
-    return `
-    <tr class="order-row" onclick="viewOrder(${o.id})">
-      <td><strong>${esc(o.order_number || '-')}</strong></td>
-      <td>${esc(o.date ? o.date.slice(5) : '-')}</td>
-      <td>${esc(o.order_type || '-')}</td>
-      <td>${esc(o.workshop || '-')}</td>
-      <td>${esc(o.eng_name || '-')}</td>
-      <td style="color:#0d6efd;font-weight:500">${esc(provideTime)}</td>
-      <td style="color:#d63384;font-weight:500">${esc(engTime)}</td>
-      <td onclick="event.stopPropagation()">
-        <input type="date" class="form-control form-control-sm" style="min-width:120px"
-          value="${esc(actualReceive)}"
-          onchange="saveActualReceive(${o.id}, this.value)"
-          title="实际收到胶件日期">
-      </td>
-      <td>${esc(o.reason || '-')}</td>
-      <td>
-        ${statusBadge(o.status)}
-        ${problemsMap[o.id] ? `<span class="badge bg-danger ms-1"><i class="bi bi-exclamation-triangle-fill me-1"></i>${problemsMap[o.id]}个问题</span>` : ''}
-      </td>
-      <td>
-        <div class="btn-group btn-group-sm">
-          ${handleBtn(o.id, o.status)}
-          <button class="btn btn-outline-danger" onclick="event.stopPropagation();openProblemModal(${o.id},'${(o.order_number||'').replace(/'/g,'')}')" title="问题反馈">
-            <i class="bi bi-exclamation-triangle"></i>
-          </button>
-          <button class="btn btn-outline-secondary" onclick="event.stopPropagation();printOrder(${o.id})">
-            <i class="bi bi-printer"></i>
-          </button>
-        </div>
-      </td>
-    </tr>`;
-  }).join('');
+  // 展平：每个明细行一行
+  const rows = [];
+  orders.forEach(o => {
+    const items = o.items || [];
+    if (!items.length) {
+      rows.push(`
+        <tr class="order-row" onclick="viewOrder(${o.id})">
+          <td><strong>${esc(o.order_number||'-')}</strong></td>
+          <td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td>
+          <td>-</td><td>-</td>
+          <td>${statusBadge(o.status)} ${problemsMap[o.id]?`<span class="badge bg-danger ms-1">${problemsMap[o.id]}问题</span>`:''}</td>
+          <td><div class="btn-group btn-group-sm">
+            <button class="btn btn-outline-danger" data-order-id="${o.id}" data-order-num="${esc(o.order_number||'')}" onclick="event.stopPropagation();openProblemModalFromBtn(this)" title="问题反馈"><i class="bi bi-exclamation-triangle"></i></button>
+            <button class="btn btn-outline-secondary" onclick="event.stopPropagation();printOrder(${o.id})"><i class="bi bi-printer"></i></button>
+          </div></td>
+        </tr>`);
+      return;
+    }
+    items.forEach((it, idx) => {
+      rows.push(`
+        <tr class="order-row" onclick="viewOrder(${o.id})">
+          <td>${idx===0 ? `<strong>${esc(o.order_number||'-')}</strong>` : ''}</td>
+          <td>${esc(it.client_name||'-')}</td>
+          <td>${esc(it.product_name||'-')}</td>
+          <td>${esc(it.process||'-')}</td>
+          <td>${esc(it.sample_qty||'-')}</td>
+          <td>${esc(it.provide_time||'-')}</td>
+          <td>${esc(it.receive_time || o.actual_receive_time || '-')}</td>
+          <td>${esc(it.eng_complete_time||'-')}</td>
+          <td>${esc(it.delivery_time||'-')}</td>
+          <td>${esc(it.engineer||'-')}</td>
+          <td>${esc(it.follower||'-')}</td>
+          <td>${idx===0 ? esc(o.completed_date||'-') : ''}</td>
+          <td onclick="event.stopPropagation()">
+            ${renderProcessBadges(it, o.id)}
+          </td>
+          <td>
+            ${idx===0 ? `<div class="btn-group btn-group-sm">
+              ${statusBadge(o.status)}
+              ${problemsMap[o.id]?`<span class="badge bg-danger ms-1">${problemsMap[o.id]}问题</span>`:''}
+              <button class="btn btn-outline-danger" data-order-id="${o.id}" data-order-num="${esc(o.order_number||'')}" onclick="event.stopPropagation();openProblemModalFromBtn(this)" title="问题反馈"><i class="bi bi-exclamation-triangle"></i></button>
+              <button class="btn btn-outline-secondary" onclick="event.stopPropagation();printOrder(${o.id})"><i class="bi bi-printer"></i></button>
+            </div>` : ''}
+          </td>
+        </tr>`);
+    });
+  });
 
   document.getElementById('orderList').innerHTML = `
+    <div class="table-responsive">
     <table class="table table-hover table-sm mb-0">
       <thead class="table-dark">
         <tr>
-          <th>订单编号</th><th>日期</th><th>类型</th><th>车间</th><th>跟进工程师</th>
-          <th style="color:#7eb8ff">收到胶件时间</th>
+          <th>编号</th><th>客名</th><th>名称</th><th>工序</th><th>样板数量</th><th>提供胶件时间</th>
+          <th style="color:#86efac">收到胶件时间</th>
           <th style="color:#f9a8d4">工程预计完成时间</th>
-          <th style="color:#86efac">实际收到胶件</th>
-          <th>原因</th><th>状态</th><th>处理</th>
+          <th style="color:#fca5a5">喷油复交货时间</th>
+          <th>工程师</th><th>跟进人</th><th style="color:#86efac">完成时间</th><th>进度</th><th>状态/操作</th>
         </tr>
       </thead>
-      <tbody>${rows}</tbody>
-    </table>`;
+      <tbody>${rows.join('')}</tbody>
+    </table></div>`;
 }
 
+// ─── 详情 ─────────────────────────────────────────────────────────────────────
+let currentDetailOrderId = null;
+
 function viewOrder(id) {
+  currentDetailOrderId = id;
   apiFetch(`/api/spray/${id}`)
     .then(r => r.json())
     .then(order => {
-      document.getElementById('detailTitle').textContent = `喷油单 #${order.id} — ${order.order_number || ''}`;
+      document.getElementById('detailTitle').textContent = `喷油单 — ${order.order_number || '#'+order.id}`;
       document.getElementById('detailPrintBtn').onclick = () => printOrder(id);
 
       const items = order.items || [];
-      const rows = items.map(it => `
+      const itemRows = items.map(it => `
         <tr>
-          <td>${esc(it.client_name||'')}</td><td>${esc(it.product_name||'')}</td>
-          <td>${esc(it.sample_qty||'')}</td><td>${esc(it.provide_time||'')}</td>
-          <td>${esc(it.receive_time||'')}</td><td>${esc(it.eng_complete_time||'')}</td>
-          <td><strong style="color:#dc3545">${esc(it.delivery_time||'')}</strong></td>
-          <td>${esc(it.engineer||'')}</td><td>${esc(it.notes||'')}</td>
+          <td>${esc(it.client_name||'-')}</td>
+          <td>${esc(it.product_name||'-')}</td>
+          <td>${esc(it.process||'-')}</td>
+          <td>${esc(it.sample_qty||'-')}</td>
+          <td>${esc(it.provide_time||'-')}</td>
+          <td>${esc(it.receive_time || order.actual_receive_time || '-')}</td>
+          <td>${esc(it.eng_complete_time||'-')}</td>
+          <td><input type="date" class="form-control form-control-sm spray-delivery" data-order-id="${order.id}" data-item-id="${it.id}" value="${esc(it.delivery_time||'')}" onchange="saveItemDelivery(this)" style="min-width:130px"></td>
+          <td>${esc(it.engineer||'-')}</td>
+          <td>${esc(it.follower||'-')}</td>
+          <td>
+            ${renderProcessBadges(it, order.id, true)}
+          </td>
         </tr>`).join('');
 
       document.getElementById('detailBody').innerHTML = `
-        <div class="detail-header row g-3">
+        <div class="detail-header row g-3 mb-3">
           <div class="col-md-3"><div class="label">订单编号</div><div class="value">${esc(order.order_number||'-')}</div></div>
           <div class="col-md-3"><div class="label">日期</div><div class="value">${esc(order.date||'-')}</div></div>
           <div class="col-md-3"><div class="label">类型</div><div class="value">${esc(order.order_type||'-')}</div></div>
           <div class="col-md-3"><div class="label">状态</div><div class="value">${statusBadge(order.status)}</div></div>
-          <div class="col-12"><div class="label">原因</div><div class="value">${esc(order.reason||'-')}</div></div>
+          <div class="col-md-3"><div class="label">车间</div><div class="value">${esc(order.workshop||'-')}</div></div>
+          <div class="col-md-3"><div class="label">主管</div><div class="value">${esc(order.supervisor||'-')}</div></div>
+          <div class="col-12"><div class="label">原因/备注</div><div class="value">${esc(order.reason||'-')}</div></div>
         </div>
+
         <div class="table-responsive">
           <table class="table table-bordered table-sm">
             <thead class="table-dark" style="font-size:.8rem">
               <tr>
-                <th>客名</th><th>名称</th><th>样板数量</th>
-                <th>提供胶件时间</th><th>收到胶件时间</th><th>工程预计完成时间</th>
-                <th style="color:#f66">喷油交货时间</th><th>工程师/PMC</th><th>备注</th>
+                <th>客名</th><th>名称</th><th>工序</th><th>样板数量</th><th>提供胶件时间</th>
+                <th>收到胶件时间</th><th>工程预计完成时间</th>
+                <th style="color:#fca5a5">喷油复交货时间</th><th>工程师</th><th>跟进人</th><th>进度</th>
               </tr>
             </thead>
-            <tbody>${rows}</tbody>
+            <tbody>${itemRows || '<tr><td colspan="11" class="text-muted text-center">无明细</td></tr>'}</tbody>
           </table>
-        </div>`;
+        </div>
+
+        <h6 class="mt-3 mb-2 fw-bold">喷油部填写</h6>
+        <div class="row g-3">
+          <div class="col-md-4">
+            <label class="form-label">实际收到胶件时间</label>
+            <input type="date" class="form-control" id="sf-actual-receive" value="${esc(order.actual_receive_time||'')}" onchange="saveSprayFields(${order.id})">
+          </div>
+          <div class="col-md-8">
+            <label class="form-label">备注</label>
+            <input type="text" class="form-control" id="sf-notes" value="${esc(order.spray_notes||'')}" placeholder="喷油部备注" onchange="saveSprayFields(${order.id})">
+          </div>
+        </div>
+        ${order.completed_date ? '<div class="mt-2"><span class="badge bg-success">完成时间: '+esc(order.completed_date)+'</span></div>' : ''}`;
 
       new bootstrap.Modal(document.getElementById('detailModal')).show();
     });
 }
 
+function saveSprayFields(id) {
+  apiFetch(`/api/spray/${id}/spray-fields`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', 'X-User': encodeURIComponent('喷油部') },
+    body: JSON.stringify({
+      actual_receive_time: document.getElementById('sf-actual-receive').value,
+      spray_notes: document.getElementById('sf-notes').value
+    })
+  }).then(r => { if (r.ok) loadOrders(); });
+}
+
+// ─── 喷油复交货时间（per-item） ───────────────────────────────────────────────
+function saveItemDelivery(el) {
+  const orderId = el.dataset.orderId;
+  const itemId = +el.dataset.itemId;
+  apiFetch(`/api/spray/${orderId}/item-delivery`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', 'X-User': encodeURIComponent('喷油部') },
+    body: JSON.stringify({ item_id: itemId, delivery_time: el.value })
+  }).then(r => { if (r.ok) loadOrders(); });
+}
+
+// ─── 工序进度 ─────────────────────────────────────────────────────────────────
+let pendingProgress = null;
+
+/** 解析工序字段为数组，如 "喷油/移印/UV" → ["喷油","移印","UV"] */
+function parseProcesses(proc) {
+  if (!proc || proc === '-') return [];
+  return proc.split('/').map(s => s.trim()).filter(Boolean);
+}
+
+/** 缓存 item process_status 用于 openProgress 取值，避免 inline JSON */
+const _psCache = {};
+
+/** 渲染工序打勾标签（列表和详情通用） */
+function renderProcessBadges(item, orderId, showDetail) {
+  const procs = parseProcesses(item.process);
+  if (!procs.length) return '-';
+  const ps = item.process_status || {};
+  const cacheKey = orderId + '_' + item.id;
+  _psCache[cacheKey] = { ps, process: item.process, name: item.product_name || '' };
+  const allDone = procs.every(p => ps[p] && ps[p].done);
+  let html = procs.map(p => {
+    const done = ps[p] && ps[p].done;
+    if (done) {
+      const tip = showDetail ? `<div style="font-size:.65rem;color:#6c757d">${esc(ps[p].done_by||'')} ${esc((ps[p].done_at||'').replace('T',' ').slice(0,16))}</div>` : '';
+      return `<span class="proc-done" style="margin-right:4px"><i class="bi bi-check-circle-fill me-1"></i>${esc(p)}</span>${tip}`;
+    }
+    return `<span class="badge bg-secondary" style="margin-right:4px;cursor:pointer" onclick="event.stopPropagation();openProgressCached(${orderId},${item.id})">${esc(p)}</span>`;
+  }).join('');
+  if (allDone) html = `<span class="badge bg-success me-1">全部完成</span>` + html;
+  return html;
+}
+
+function openProgressCached(orderId, itemId) {
+  const c = _psCache[orderId + '_' + itemId] || {};
+  openProgress(orderId, itemId, c.name || '', c.process || '', c.ps || {});
+}
+
+function openProgress(orderId, itemId, itemName, processStr, currentStatus) {
+  const procs = parseProcesses(processStr);
+  const ps = currentStatus || {};
+  pendingProgress = { orderId, itemId, processes: procs };
+  document.getElementById('pgItemName').textContent = itemName || `#${itemId}`;
+  document.getElementById('pgOperator').value = '';
+  document.getElementById('pgError').classList.add('d-none');
+  // 渲染工序勾选列表
+  document.getElementById('pgProcessList').innerHTML = procs.map(p => {
+    const done = ps[p] && ps[p].done;
+    return `<div class="form-check form-check-inline mb-2">
+      <input class="form-check-input pg-proc-check" type="checkbox" id="pg-${p}" value="${esc(p)}" ${done ? 'checked disabled' : ''}>
+      <label class="form-check-label" for="pg-${p}">${esc(p)} ${done ? '<span class="text-success small">(已完成 - '+esc(ps[p].done_by||'')+')</span>' : ''}</label>
+    </div>`;
+  }).join('');
+  new bootstrap.Modal(document.getElementById('progressModal')).show();
+}
+
+function confirmProgress() {
+  const operator = document.getElementById('pgOperator').value.trim();
+  const checks = document.querySelectorAll('.pg-proc-check:checked:not(:disabled)');
+  if (checks.length === 0) {
+    document.getElementById('pgError').textContent = '请至少勾选一个新完成的工序';
+    document.getElementById('pgError').classList.remove('d-none');
+    return;
+  }
+  if (!operator) {
+    document.getElementById('pgError').textContent = '请输入操作人姓名';
+    document.getElementById('pgError').classList.remove('d-none');
+    return;
+  }
+  const newlyDone = Array.from(checks).map(c => c.value);
+  apiFetch(`/api/spray/${pendingProgress.orderId}/item-progress`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', 'X-User': encodeURIComponent('喷油部') },
+    body: JSON.stringify({ item_id: pendingProgress.itemId, processes_done: newlyDone, done_by: operator })
+  }).then(r => r.json()).then(d => {
+    if (d.error) {
+      document.getElementById('pgError').textContent = d.error;
+      document.getElementById('pgError').classList.remove('d-none');
+      return;
+    }
+    bootstrap.Modal.getInstance(document.getElementById('progressModal'))?.hide();
+    if (document.getElementById('detailModal').classList.contains('show')) {
+      viewOrder(pendingProgress.orderId);
+    }
+    loadOrders();
+  });
+}
+
+// ─── 问题反馈 ─────────────────────────────────────────────────────────────────
 let currentProblemOrderId = null;
 let currentProblemOrderNum = '';
+
+function openProblemModalFromBtn(btn) {
+  openProblemModal(Number(btn.dataset.orderId), btn.dataset.orderNum);
+}
 
 function openProblemModal(orderId, orderNumber) {
   currentProblemOrderId = orderId;
@@ -269,28 +450,6 @@ function submitProblem() {
     bootstrap.Modal.getInstance(document.getElementById('problemModal'))?.hide();
     loadOrders();
   });
-}
-
-function handleBtn(id, status) {
-  if (status === '待生产') return `<button class="btn btn-warning" onclick="event.stopPropagation();setStatus(${id},'生产中')" title="开始处理"><i class="bi bi-play-fill me-1"></i>开始处理</button>`;
-  if (status === '生产中') return `<button class="btn btn-success" onclick="event.stopPropagation();setStatus(${id},'已完成')" title="标记完成"><i class="bi bi-check-lg me-1"></i>标记完成</button>`;
-  return '';
-}
-
-function setStatus(id, status) {
-  apiFetch(`/api/spray/${id}/status`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json', 'X-User': encodeURIComponent('喷油部') },
-    body: JSON.stringify({ status })
-  }).then(() => loadOrders());
-}
-
-function saveActualReceive(id, value) {
-  apiFetch(`/api/spray/${id}/actual-receive`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json', 'X-User': encodeURIComponent('喷油部') },
-    body: JSON.stringify({ actual_receive_time: value })
-  }).then(r => { if (!r.ok) alert('保存失败，请重试'); });
 }
 
 function printOrder(id) {

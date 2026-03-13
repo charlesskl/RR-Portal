@@ -326,7 +326,9 @@ function renderOrders(orders) {
     document.getElementById('orderList').innerHTML = `<div class="empty-state"><i class="bi bi-inbox"></i><p class="mt-2">暂无啤办任务</p></div>`;
     return;
   }
-  const rows = orders.map(o => `
+  const rows = orders.map(o => {
+    const hasMissingPrice = (o.items || []).some(it => it.material && !_injMatPrices[it.material]);
+    return `
     <tr class="order-row" onclick="viewOrder(${o.id})">
       <td><strong>${esc(o.order_number || '-')}</strong></td>
       <td>${esc(o.product_name || '-')}</td>
@@ -341,6 +343,7 @@ function renderOrders(orders) {
       <td>${esc(o.reason || '-')}</td>
       <td>
         ${statusBadge(o.status)}
+        ${hasMissingPrice ? '<span class="badge bg-warning text-dark ms-1" title="部分原料未录入价格"><i class="bi bi-exclamation-circle me-1"></i>料价缺</span>' : ''}
         ${problemsMap[o.id] ? `<span class="badge bg-danger ms-1"><i class="bi bi-exclamation-triangle-fill me-1"></i>${problemsMap[o.id]}个问题</span>` : ''}
       </td>
       <td>
@@ -355,7 +358,8 @@ function renderOrders(orders) {
           </button>
         </div>
       </td>
-    </tr>`).join('');
+    </tr>`;
+  }).join('');
 
   document.getElementById('orderList').innerHTML = `
     <table class="table table-hover table-sm mb-0">
@@ -655,9 +659,9 @@ function printOrder(id) {
 
 apiFetch('/api/material-prices').then(r => r.json()).then(prices => {
   prices.forEach(p => { _injMatPrices[p.material] = p.unit_price; });
+}).finally(() => {
+  loadOrders();
 });
-
-loadOrders();
 setInterval(loadOrders, 30000);
 
 // 搜索框：按回车触发查询
@@ -706,14 +710,28 @@ function loadStats() {
   ]).then(([stats, prices]) => {
     const usageMap = {};
     stats.forEach(s => { usageMap[s.material] = s; });
+    const priceSet = new Set(prices.map(p => p.material));
     statsData = prices.map((p, i) => ({
       seq: i + 1,
       material:            p.material,
       unit_price:          p.unit_price,
       notes:               p.notes || '',
       total_actual_weight: (usageMap[p.material] || {}).total_actual_weight || 0,
-      total_amount:        (usageMap[p.material] || {}).total_amount        || 0
+      total_amount:        (usageMap[p.material] || {}).total_amount        || 0,
+      no_price:            false
     }));
+    // 追加不在价格表中但订单使用了的原料，标记为无价格
+    stats.forEach(s => {
+      if (!priceSet.has(s.material) && (s.total_actual_weight > 0 || s.total_amount > 0)) {
+        statsData.push({
+          seq: statsData.length + 1,
+          material: s.material, unit_price: 0, notes: '',
+          total_actual_weight: s.total_actual_weight || 0,
+          total_amount: s.total_amount || 0,
+          no_price: true
+        });
+      }
+    });
     renderStats();
   });
 }
@@ -816,11 +834,13 @@ function renderStats() {
   const rows = statsData.map((s, i) => {
     if (q && !s.material.toLowerCase().includes(q)) return '';
     visibleCount++;
+    const noPriceStyle = s.no_price ? ' style="background:#fff3cd"' : '';
+    const noPriceBadge = s.no_price ? ' <span class="badge bg-warning text-dark" style="font-size:.65rem">未录入价格</span>' : '';
     return `
-      <tr>
+      <tr${noPriceStyle}>
         <td class="text-center text-muted" style="font-size:.8rem">${i + 1}</td>
-        <td>${esc(s.material)}</td>
-        <td class="text-end">${s.unit_price || '-'}</td>
+        <td>${esc(s.material)}${noPriceBadge}</td>
+        <td class="text-end">${s.unit_price || '<span class="text-danger">-</span>'}</td>
         <td class="text-end">${s.total_actual_weight ? s.total_actual_weight.toFixed(2) : '<span class="text-muted">-</span>'}</td>
         <td class="text-end fw-bold" style="color:${s.total_amount ? '#1a6e3a' : '#aaa'}">
           ${s.total_amount ? s.total_amount.toFixed(2) : '0.00'}

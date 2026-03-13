@@ -585,6 +585,10 @@ app.patch('/api/spray/:id/item-progress', (req, res) => {
     item.progress_by = done_by;
     item.progress_at = now;
   }
+  // 有工序完成且订单仍为待生产 → 自动改为生产中
+  if (order.status === '待生产') {
+    order.status = '生产中';
+  }
   // 所有项目都已完成 → 自动标记订单已完成
   const orderAllDone = items.every(it => it.progress === '已完成');
   if (orderAllDone) {

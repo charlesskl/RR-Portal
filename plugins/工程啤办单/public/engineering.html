@@ -104,7 +104,7 @@
         <div class="row g-3 mb-3">
           <div class="col-md-3"><label class="form-label fw-bold">产品编号</label><input class="form-control" id="inj-order_number" placeholder="如 HD2024001"></div>
           <div class="col-md-3"><label class="form-label fw-bold">订单编号</label><input class="form-control" id="inj-doc_number" placeholder="订单编号"></div>
-          <div class="col-md-3"><label class="form-label fw-bold">产品名称</label><input class="form-control" id="inj-product_name" placeholder="产品名称"></div>
+          <div class="col-md-3"><label class="form-label fw-bold">产品名称 <span class="text-danger">*</span></label><input class="form-control" id="inj-product_name" placeholder="产品名称" required></div>
           <div class="col-md-3"><label class="form-label fw-bold">客名</label>
             <select class="form-select" id="inj-client_name">
               <option value="">请选择客户</option>
@@ -183,6 +183,7 @@
         <input type="hidden" id="slush-status" value="待审核">
         <div class="row g-3 mb-3">
           <div class="col-md-3"><label class="form-label fw-bold">产品编号</label><input class="form-control" id="slush-order_number" placeholder="如 XX2024001"></div>
+          <div class="col-md-3"><label class="form-label fw-bold">产品名称 <span class="text-danger">*</span></label><input class="form-control" id="slush-product_name" placeholder="产品名称" required></div>
           <div class="col-md-3"><label class="form-label fw-bold">日期</label><input type="date" class="form-control" id="slush-date"></div>
           <div class="col-md-3"><label class="form-label fw-bold">类型</label>
             <select class="form-select" id="slush-order_type">
@@ -236,7 +237,6 @@
         <input type="hidden" id="spray-id">
         <input type="hidden" id="spray-status" value="待审核">
         <div class="row g-3 mb-3">
-          <div class="col-md-3"><label class="form-label fw-bold">产品编号</label><input class="form-control" id="spray-order_number" placeholder="如 PY2024001"></div>
           <div class="col-md-3"><label class="form-label fw-bold">日期</label><input type="date" class="form-control" id="spray-date"></div>
           <div class="col-md-3"><label class="form-label fw-bold">类型</label>
             <select class="form-select" id="spray-order_type">
@@ -245,16 +245,9 @@
           </div>
           <div class="col-md-3"><label class="form-label fw-bold">车间</label>
             <select class="form-select" id="spray-workshop">
-              <option>A车间</option><option>B车间</option><option>华登车间</option>
+              <option>兴信车间</option><option>华登车间</option>
             </select>
           </div>
-          <div class="col-md-3"><label class="form-label fw-bold">主管</label>
-            <select class="form-select" id="spray-supervisor">
-              <option value="">请选择主管</option>
-              <option>段新辉</option><option>唐海林</option><option>蒙海欢</option><option>万志勇</option><option>章发东</option><option>刘际维</option><option>甘勇辉</option><option>王玉国</option>
-            </select>
-          </div>
-          <div class="col-md-3"><label class="form-label fw-bold">跟进工程师</label><input class="form-control" id="spray-engineer" placeholder="请输入姓名"></div>
           <div class="col-12"><label class="form-label fw-bold">原因/备注</label><input class="form-control" id="spray-reason" placeholder="如 新款喷油打样"></div>
         </div>
         <div class="d-flex justify-content-between align-items-center mb-2">
@@ -266,7 +259,7 @@
           <table class="table table-bordered table-sm items-table" id="sprayItemsTable">
             <thead>
               <tr>
-                <th>客名</th><th>名称</th><th>工序</th><th>样板数量</th><th>提供胶件时间</th>
+                <th>客名</th><th>产品名称 <span class="text-danger">*</span></th><th>零件名称</th><th>工序</th><th>样板数量</th><th>提供胶件时间</th>
                 <th>工程预计完成时间</th><th style="color:#dc3545">喷油复交货时间</th><th>工程师</th><th>跟进人</th><th></th>
               </tr>
             </thead>
@@ -609,7 +602,8 @@ function openNewModal() {
 
   document.getElementById(titleId).textContent = `新建${typeNames[currentTab]}`;
   document.getElementById(`${prefix}-id`).value = '';
-  document.getElementById(`${prefix}-order_number`).value = '';
+  const orderNumElNew = document.getElementById(`${prefix}-order_number`);
+  if (orderNumElNew) orderNumElNew.value = '';
   const docNumElNew = document.getElementById(`${prefix}-doc_number`);
   if (docNumElNew) docNumElNew.value = '';
   document.getElementById(`${prefix}-date`).value = new Date().toISOString().slice(0,10);
@@ -619,12 +613,13 @@ function openNewModal() {
   document.getElementById(`${prefix}-status`).value = (currentTab === 'injection') ? '待审核' : '待生产';
   document.getElementById(`${prefix}-reason`).value = '';
   const wsElNew = document.getElementById(`${prefix}-workshop`);
-  if (wsElNew) wsElNew.value = 'A车间';
+  if (wsElNew) wsElNew.value = wsElNew.options[0]?.value || '';
   const sendToElNew = document.getElementById(`${prefix}-send_to`);
   if (sendToElNew) sendToElNew.value = '';
   const supElNew = document.getElementById(`${prefix}-supervisor`);
   if (supElNew) supElNew.value = '';
-  document.getElementById(`${prefix}-engineer`).value = '';
+  const engElNew = document.getElementById(`${prefix}-engineer`);
+  if (engElNew) engElNew.value = '';
   const rcvElNew = document.getElementById(`${prefix}-receive_time`);
   if (rcvElNew) rcvElNew.value = '';
   const engCtElNew = document.getElementById(`${prefix}-eng_complete_time`);
@@ -657,7 +652,8 @@ function editOrder(id, isDuplicate = false) {
 
       document.getElementById(titleId).textContent = isDuplicate ? `复制${typeNames[currentTab]}（新建）` : `编辑${typeNames[currentTab]} #${id}`;
       document.getElementById(`${prefix}-id`).value = isDuplicate ? '' : order.id;
-      document.getElementById(`${prefix}-order_number`).value = order.order_number || '';
+      const orderNumElEdit = document.getElementById(`${prefix}-order_number`);
+      if (orderNumElEdit) orderNumElEdit.value = order.order_number || '';
       const docNumElEdit = document.getElementById(`${prefix}-doc_number`);
       if (docNumElEdit) docNumElEdit.value = isDuplicate ? '' : (order.doc_number || '');
       const prodNameElEdit = document.getElementById(`${prefix}-product_name`);
@@ -676,7 +672,8 @@ function editOrder(id, isDuplicate = false) {
       if (stgElEdit) stgElEdit.value = order.stage || '';
       const supElEdit = document.getElementById(`${prefix}-supervisor`);
       if (supElEdit) supElEdit.value = order.supervisor || '';
-      document.getElementById(`${prefix}-engineer`).value = order.eng_name || '';
+      const engElEdit = document.getElementById(`${prefix}-engineer`);
+      if (engElEdit) engElEdit.value = order.eng_name || '';
       const rcvEl = document.getElementById(`${prefix}-receive_time`);
       if (rcvEl) rcvEl.value = order.receive_time || '';
       const engCtEl = document.getElementById(`${prefix}-eng_complete_time`);
@@ -885,6 +882,7 @@ function addSprayRow(it={}) {
   tr.innerHTML = `
     <td>${inp('text','client_name',it.client_name)}</td>
     <td>${inp('text','product_name',it.product_name)}</td>
+    <td>${inp('text','part_name',it.part_name)}</td>
     <td><select name="process" class="form-select form-select-sm" style="min-width:90px">
       <option value="喷油" ${it.process==='喷油'?'selected':''}>喷油</option>
       <option value="移印" ${it.process==='移印'?'selected':''}>移印</option>
@@ -918,7 +916,7 @@ function collectRows(tbodyId, fields) {
 
 const injFields   = ['mold_id','mold_name','machine_type','material','color','pigment_no','quantity','shoot_qty','gross_weight_g','required_material_kg','mold_return_time','completion_time','notes'];
 const slushFields = ['seq_no','product_id','mold_id','mold_name','material','color_code','pigment_no','unit_weight','quantity','required_date','return_time','notes'];
-const sprayFields = ['client_name','product_name','process','sample_qty','provide_time','eng_complete_time','delivery_time','engineer','follower'];
+const sprayFields = ['client_name','product_name','part_name','process','sample_qty','provide_time','eng_complete_time','delivery_time','engineer','follower'];
 
 function saveOrder(type) {
   const prefix = type === 'injection' ? 'inj' : type;
@@ -927,7 +925,7 @@ function saveOrder(type) {
   const supElSave = document.getElementById(`${prefix}-supervisor`);
   const stgElSave = document.getElementById(`${prefix}-stage`);
   const body = {
-    order_number:  document.getElementById(`${prefix}-order_number`).value,
+    order_number:  document.getElementById(`${prefix}-order_number`)?.value || '',
     doc_number:    document.getElementById(`${prefix}-doc_number`)?.value || null,
     product_name:  document.getElementById(`${prefix}-product_name`)?.value || null,
     client_name:   document.getElementById(`${prefix}-client_name`)?.value || null,
@@ -939,13 +937,20 @@ function saveOrder(type) {
     workshop:     wsElSave  ? wsElSave.value  : null,
     send_to:      document.getElementById(`${prefix}-send_to`)?.value || null,
     supervisor:   supElSave ? supElSave.value : null,
-    eng_name:     document.getElementById(`${prefix}-engineer`).value || null,
+    eng_name:     document.getElementById(`${prefix}-engineer`)?.value || null,
     receive_time:      (type === 'spray' ? document.getElementById('spray-receive_time')?.value      : null) || null,
     eng_complete_time: (type === 'spray' ? document.getElementById('spray-eng_complete_time')?.value : null) || null,
     items: type === 'injection' ? collectRows('injItemsBody', injFields)
          : type === 'slush'     ? collectRows('slushItemsBody', slushFields)
          :                        collectRows('sprayItemsBody', sprayFields),
   };
+
+  // 产品名称必填：注塑/搪胶检查头部字段，喷油检查明细行
+  if (type === 'spray') {
+    if (body.items && body.items.some(it => !it.product_name)) { alert('请填写所有明细行的产品名称'); return; }
+  } else {
+    if (!body.product_name) { alert('请填写产品名称'); return; }
+  }
 
   if (!currentUser) { showLoginModal(); return; }
   const url    = id ? `/api/${type}/${id}` : `/api/${type}`;

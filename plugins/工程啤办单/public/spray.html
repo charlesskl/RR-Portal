@@ -158,8 +158,8 @@ function renderOrders(orders) {
     if (!items.length) {
       rows.push(`
         <tr class="order-row" onclick="viewOrder(${o.id})">
-          <td><strong>${esc(o.order_number||'-')}</strong></td>
-          <td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td>
+          <td>${esc(o.workshop||'-')}</td>
+          <td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td>
           <td>-</td><td>-</td>
           <td>${statusBadge(o.status)} ${problemsMap[o.id]?`<span class="badge bg-danger ms-1">${problemsMap[o.id]}问题</span>`:''}</td>
           <td><div class="btn-group btn-group-sm">
@@ -172,9 +172,10 @@ function renderOrders(orders) {
     items.forEach((it, idx) => {
       rows.push(`
         <tr class="order-row" onclick="viewOrder(${o.id})">
-          <td>${idx===0 ? `<strong>${esc(o.order_number||'-')}</strong>` : ''}</td>
+          <td>${idx===0 ? esc(o.workshop||'-') : ''}</td>
           <td>${esc(it.client_name||'-')}</td>
           <td>${esc(it.product_name||'-')}</td>
+          <td>${esc(it.part_name||'-')}</td>
           <td>${esc(it.process||'-')}</td>
           <td>${esc(it.sample_qty||'-')}</td>
           <td>${esc(it.provide_time||'-')}</td>
@@ -204,7 +205,7 @@ function renderOrders(orders) {
     <table class="table table-hover table-sm mb-0">
       <thead class="table-dark">
         <tr>
-          <th>编号</th><th>客名</th><th>名称</th><th>工序</th><th>样板数量</th><th>提供胶件时间</th>
+          <th>车间</th><th>客名</th><th>产品名称</th><th>零件名称</th><th>工序</th><th>样板数量</th><th>提供胶件时间</th>
           <th style="color:#86efac">收到胶件时间</th>
           <th style="color:#f9a8d4">工程预计完成时间</th>
           <th style="color:#fca5a5">喷油复交货时间</th>
@@ -231,6 +232,7 @@ function viewOrder(id) {
         <tr>
           <td>${esc(it.client_name||'-')}</td>
           <td>${esc(it.product_name||'-')}</td>
+          <td>${esc(it.part_name||'-')}</td>
           <td>${esc(it.process||'-')}</td>
           <td>${esc(it.sample_qty||'-')}</td>
           <td>${esc(it.provide_time||'-')}</td>
@@ -246,12 +248,10 @@ function viewOrder(id) {
 
       document.getElementById('detailBody').innerHTML = `
         <div class="detail-header row g-3 mb-3">
-          <div class="col-md-3"><div class="label">订单编号</div><div class="value">${esc(order.order_number||'-')}</div></div>
           <div class="col-md-3"><div class="label">日期</div><div class="value">${esc(order.date||'-')}</div></div>
           <div class="col-md-3"><div class="label">类型</div><div class="value">${esc(order.order_type||'-')}</div></div>
           <div class="col-md-3"><div class="label">状态</div><div class="value">${statusBadge(order.status)}</div></div>
           <div class="col-md-3"><div class="label">车间</div><div class="value">${esc(order.workshop||'-')}</div></div>
-          <div class="col-md-3"><div class="label">主管</div><div class="value">${esc(order.supervisor||'-')}</div></div>
           <div class="col-12"><div class="label">原因/备注</div><div class="value">${esc(order.reason||'-')}</div></div>
         </div>
 
@@ -259,7 +259,7 @@ function viewOrder(id) {
           <table class="table table-bordered table-sm">
             <thead class="table-dark" style="font-size:.8rem">
               <tr>
-                <th>客名</th><th>名称</th><th>工序</th><th>样板数量</th><th>提供胶件时间</th>
+                <th>客名</th><th>产品名称</th><th>零件名称</th><th>工序</th><th>样板数量</th><th>提供胶件时间</th>
                 <th>收到胶件时间</th><th>工程预计完成时间</th>
                 <th style="color:#fca5a5">喷油复交货时间</th><th>工程师</th><th>跟进人</th><th>进度</th>
               </tr>

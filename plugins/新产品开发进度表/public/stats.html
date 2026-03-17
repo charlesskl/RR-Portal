@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>汇总统计 — 新产品开发进度表</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+  <link href="style.css" rel="stylesheet">
+  <style>
+    .stat-card { border-left: 4px solid; }
+    .stat-card.blue  { border-color: #0d6efd; }
+    .stat-card.green { border-color: #198754; }
+    .stat-card.yellow{ border-color: #ffc107; }
+    .stat-card.red   { border-color: #dc3545; }
+    .stat-card .display-5 { font-weight: 700; }
+    .stat-card .label { font-size: 13px; color: #6c757d; }
+    .section-card { margin-bottom: 1.5rem; }
+    .table-stats { font-size: 13px; }
+    .table-stats th { background: #f8f9fa; }
+    .row-delayed td { background-color: #f8d7da !important; }
+    .row-upcoming td { background-color: #fff3cd !important; }
+  </style>
+</head>
+<body>
+
+<!-- 导航栏 -->
+<nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+  <div class="container-fluid">
+    <a class="navbar-brand" href="./">新产品开发进度表</a>
+    <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navContent">
+      <span class="navbar-toggler-icon"></span>
+    </button>
+    <div class="collapse navbar-collapse" id="navContent">
+      <ul class="navbar-nav me-auto">
+        <li class="nav-item"><a class="nav-link" href="./">项目列表</a></li>
+        <li class="nav-item"><a class="nav-link active" href="stats.html">汇总统计</a></li>
+        <li class="nav-item"><a class="nav-link" href="settings.html">设置</a></li>
+      </ul>
+      <button class="btn btn-sm btn-outline-light" onclick="loadStats()">
+        <i class="bi bi-arrow-clockwise"></i> 刷新
+      </button>
+    </div>
+  </div>
+</nav>
+
+<div class="container-fluid mt-3">
+
+  <!-- 加载提示 -->
+  <div id="loadingTip" class="text-center text-muted py-5">
+    <div class="spinner-border spinner-border-sm me-2"></div>加载中...
+  </div>
+
+  <!-- 主内容 -->
+  <div id="statsContent" style="display:none;">
+
+    <!-- 1. 整体看板 -->
+    <div class="card section-card">
+      <div class="card-header fw-semibold"><i class="bi bi-grid-1x2"></i> 整体看板</div>
+      <div class="card-body">
+        <!-- 4 个统计卡片 -->
+        <div class="row g-3 mb-4">
+          <div class="col-md-3 col-6">
+            <div class="card stat-card blue p-3">
+              <div class="label"><i class="bi bi-folder2-open text-primary"></i> 总项目数</div>
+              <div class="display-5 text-primary mt-1" id="ov-total">—</div>
+            </div>
+          </div>
+          <div class="col-md-3 col-6">
+            <div class="card stat-card green p-3">
+              <div class="label"><i class="bi bi-check-circle text-success"></i> 已完成</div>
+              <div class="display-5 text-success mt-1" id="ov-completed">—</div>
+            </div>
+          </div>
+          <div class="col-md-3 col-6">
+            <div class="card stat-card yellow p-3">
+              <div class="label"><i class="bi bi-hourglass-split text-warning"></i> 进行中</div>
+              <div class="display-5 text-warning mt-1" id="ov-inprogress">—</div>
+            </div>
+          </div>
+          <div class="col-md-3 col-6">
+            <div class="card stat-card red p-3">
+              <div class="label"><i class="bi bi-exclamation-triangle text-danger"></i> 延期</div>
+              <div class="display-5 text-danger mt-1" id="ov-delayed">—</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 延期项目 & 即将到期 -->
+        <div class="row g-3">
+          <div class="col-md-6">
+            <h6 class="mb-2 text-danger"><i class="bi bi-clock-history"></i> 延期项目</h6>
+            <div class="table-responsive">
+              <table class="table table-bordered table-sm table-stats mb-0">
+                <thead>
+                  <tr>
+                    <th>产品名称</th>
+                    <th>当前阶段</th>
+                    <th>截止日期</th>
+                  </tr>
+                </thead>
+                <tbody id="delayedList"></tbody>
+              </table>
+            </div>
+          </div>
+          <div class="col-md-6">
+            <h6 class="mb-2 text-warning"><i class="bi bi-calendar-event"></i> 即将到期（7天内）</h6>
+            <div class="table-responsive">
+              <table class="table table-bordered table-sm table-stats mb-0">
+                <thead>
+                  <tr>
+                    <th>产品名称</th>
+                    <th>当前阶段</th>
+                    <th>截止日期</th>
+                  </tr>
+                </thead>
+                <tbody id="upcomingList"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 2. 按车间汇总 -->
+    <div class="card section-card">
+      <div class="card-header fw-semibold"><i class="bi bi-building"></i> 按车间汇总</div>
+      <div class="card-body p-0">
+        <div class="table-responsive">
+          <table class="table table-bordered table-sm table-stats mb-0">
+            <thead>
+              <tr>
+                <th>车间</th>
+                <th class="text-center">项目数</th>
+                <th class="text-center">开发时间</th>
+                <th class="text-center">FS</th>
+                <th class="text-center">EP</th>
+                <th class="text-center">FEP</th>
+                <th class="text-center">PP</th>
+                <th class="text-center">塑胶BOM</th>
+                <th class="text-center">采购BOM</th>
+                <th class="text-center">PO1日期</th>
+              </tr>
+            </thead>
+            <tbody id="workshopList"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- 3. 按客户汇总 -->
+    <div class="card section-card">
+      <div class="card-header fw-semibold"><i class="bi bi-people"></i> 按客户汇总</div>
+      <div class="card-body p-0">
+        <div class="table-responsive">
+          <table class="table table-bordered table-sm table-stats mb-0">
+            <thead>
+              <tr>
+                <th>客户</th>
+                <th class="text-center">项目数</th>
+                <th class="text-center">已完成</th>
+                <th class="text-center">进行中</th>
+                <th class="text-center">延期</th>
+              </tr>
+            </thead>
+            <tbody id="customerList"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- 4. 按主管汇总 -->
+    <div class="card section-card">
+      <div class="card-header fw-semibold"><i class="bi bi-person-badge"></i> 按主管汇总</div>
+      <div class="card-body p-0">
+        <div class="table-responsive">
+          <table class="table table-bordered table-sm table-stats mb-0">
+            <thead>
+              <tr>
+                <th>主管</th>
+                <th class="text-center">项目数</th>
+                <th class="text-center">已完成</th>
+                <th style="min-width:180px;">完成率</th>
+              </tr>
+            </thead>
+            <tbody id="supervisorList"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /statsContent -->
+
+  <!-- 错误提示 -->
+  <div id="errorTip" class="alert alert-danger d-none" role="alert">
+    <i class="bi bi-exclamation-circle"></i> <span id="errorMsg">加载失败，请稍后重试。</span>
+  </div>
+
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script src="stats.js"></script>
+</body>
+</html>

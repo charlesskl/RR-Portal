@@ -235,3 +235,4 @@ volumes:
 | Zuru MA 包装差价系统 | Zuru MA 包装差价系统 | Business | Standalone (Node.js) | — |
 | 印尼小组 | 印尼出货明细资料核对系统 | Indonesia | Standalone (Node.js) | https://github.com/charlesskl/Export-to-Indonesia |
 | schedule-system | 排期录入系统 | Production | Standalone (Python/Flask) | https://github.com/hanson678/schedule-system |
+| 新产品开发进度表 | 新产品开发进度表 | Engineering | Standalone (Node.js) | — |

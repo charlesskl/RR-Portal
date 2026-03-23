@@ -174,16 +174,12 @@
         <div class="stat-label">部门数量</div>
       </div>
       <div class="stat-card">
-        <div class="stat-value" id="statPlugins">--</div>
-        <div class="stat-label">活跃插件</div>
+        <div class="stat-value" id="statPlugins">2</div>
+        <div class="stat-label">应用数量</div>
       </div>
       <div class="stat-card">
         <div class="stat-value" id="statHealthy">--</div>
         <div class="stat-label">服务状态</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-value" id="statVersion">v1.1.0</div>
-        <div class="stat-label">平台版本</div>
       </div>
     </div>
 
@@ -306,8 +302,8 @@ async function checkHealth() {
       { name: 'rr', url: '/rr/health', dot: 'rrDot', detailDot: 'rrDetailDot' },
       { name: 'zouhuo', url: '/zouhuo/health', dot: 'zouhuoDot', detailDot: 'zouhuoDetailDot' },
     ];
-    var healthy = 1;
-    var total = 1 + checks.length;
+    var healthy = 0;
+    var total = checks.length;
 
     for (var i = 0; i < checks.length; i++) {
       var check = checks[i];
@@ -327,9 +323,9 @@ async function checkHealth() {
       }
     }
 
-    pluginCountEl.textContent = checks.length + 1;
+    pluginCountEl.textContent = checks.length;
     healthyEl.textContent = healthy + ' / ' + total;
-    statusEl.textContent = healthy === total ? '所有服务运行正常' : healthy + '/' + total + ' 个服务运行中';
+    statusEl.textContent = healthy === total ? '所有服务运行正常' : healthy + '/' + total + ' 个应用运行中';
   } catch(e) {
     statusEl.textContent = '连接失败';
   }

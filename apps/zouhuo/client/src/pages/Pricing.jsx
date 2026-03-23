@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Table, Button, Modal, Form, Input, Select, InputNumber, Tag, Space, message, Popconfirm, Typography } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
+import axios from 'axios';
 import dayjs from 'dayjs';
 
 const { Title } = Typography;
@@ -21,16 +22,6 @@ const currencyOptions = [
 
 const API = '/api/pricings';
 
-async function apiFetch(url, options = {}) {
-  const res = await fetch(url, {
-    headers: { 'Content-Type': 'application/json' },
-    ...options,
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.message || '请求失败');
-  return data;
-}
-
 export default function Pricing() {
   const [items, setItems]       = useState([]);
   const [products, setProducts] = useState([]);
@@ -43,13 +34,13 @@ export default function Pricing() {
   const loadData = (status) => {
     setLoading(true);
     const qs = status ? `?status=${status}` : '';
-    apiFetch(`${API}${qs}`)
-      .then(setItems)
+    axios.get(`${API}${qs}`)
+      .then(res => setItems(res.data))
       .finally(() => setLoading(false));
   };
 
   useEffect(() => {
-    apiFetch('/api/products').then(setProducts).catch(() => {});
+    axios.get('/api/products').then(res => setProducts(res.data)).catch(() => {});
     loadData();
   }, []);
 
@@ -57,10 +48,10 @@ export default function Pricing() {
     try {
       const values = await form.validateFields();
       if (editing) {
-        await apiFetch(`${API}/${editing._id}`, { method: 'PUT', body: JSON.stringify(values) });
+        await axios.put(`${API}/${editing._id}`, values);
         message.success('核价记录已更新');
       } else {
-        await apiFetch(API, { method: 'POST', body: JSON.stringify(values) });
+        await axios.post(API, values);
         message.success('核价记录已创建');
       }
       setModalOpen(false);
@@ -80,7 +71,7 @@ export default function Pricing() {
 
   const handleDelete = async (id) => {
     try {
-      await apiFetch(`${API}/${id}`, { method: 'DELETE' });
+      await axios.delete(`${API}/${id}`);
       message.success('记录已删除');
       loadData(filterStatus);
     } catch (err) {

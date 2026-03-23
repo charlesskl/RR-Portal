@@ -255,8 +255,8 @@ State directory: ${STATE_DIR}
 Dry run: ${DRY_RUN}
 Context: ${CONTEXT:-none provided}
 
-Environment variables available:
-  DEPLOY_SERVER=${DEPLOY_SERVER:-not set}
+Environment variables available (read from env, do NOT log their values):
+  DEPLOY_SERVER (set in environment)
   DEPLOY_DRY_RUN=${DRY_RUN}
   DEPLOY_COMPOSE_PATH=${DEPLOY_COMPOSE_PATH:-/opt/rr-portal/docker-compose.cloud.yml}
 

@@ -87,7 +87,7 @@ SSH_OPTS="-o ControlPath=${SSH_CONTROL_PATH}"
 
 # Helper: SSH with connection reuse
 deploy_ssh() {
-  ssh ${SSH_OPTS} "${DEPLOY_SERVER}" "$@"
+  ssh "${SSH_OPTS}" "${DEPLOY_SERVER}" "$@"
 }
 
 # Cleanup SSH multiplexer on exit
@@ -167,83 +167,45 @@ if [ -z "${INTERNAL_PORT}" ]; then
   INTERNAL_PORT="8080"
 fi
 
+# Ensure pyyaml is available on remote
+deploy_ssh "pip3 install --quiet pyyaml 2>/dev/null || true"
+
 # Update remote docker-compose.yml — only this app's service section
 deploy_ssh python3 - "${APP_NAME}" "${HOST_PORT}" "${INTERNAL_PORT}" "${DEPLOY_COMPOSE_PATH}" << 'PYEOF'
 import sys
+import yaml
 
 app_name = sys.argv[1]
 host_port = sys.argv[2]
 container_port = sys.argv[3]
 compose_path = sys.argv[4]
 
-# Build the new service block
-service_block = """  {app}:
-    image: rr-portal/{app}:latest
-    ports:
-      - "{host}:{container}"
-    env_file:
-      - ./apps/{app}/.env
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:{container}/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3""".format(app=app_name, host=host_port, container=container_port)
-
 with open(compose_path, 'r') as f:
-    content = f.read()
+    compose = yaml.safe_load(f)
 
-lines = content.split('\n')
-new_lines = []
-in_target_service = False
-skip_until_next_service = False
-service_inserted = False
-indent_size = 2
+if compose is None:
+    compose = {}
 
-i = 0
-while i < len(lines):
-    line = lines[i]
-    stripped = line.strip()
+# Ensure top-level 'services' key exists
+if 'services' not in compose:
+    compose['services'] = {}
 
-    # Detect start of our target service
-    if stripped == app_name + ':' and not line.startswith('    '):
-        in_target_service = True
-        skip_until_next_service = True
-        i += 1
-        continue
-
-    # If skipping old service block, wait for next top-level service or end
-    if skip_until_next_service:
-        if stripped and not line.startswith('    ') and not line.startswith('  '):
-            skip_until_next_service = False
-        elif stripped and line.startswith('  ') and not line.startswith('    ') and ':' in stripped:
-            skip_until_next_service = False
-            if not service_inserted:
-                new_lines.append(service_block)
-                service_inserted = True
-        else:
-            i += 1
-            continue
-
-    new_lines.append(line)
-    i += 1
-
-# If service was found and removed but not yet reinserted (was last service)
-if in_target_service and not service_inserted:
-    new_lines.append(service_block)
-    service_inserted = True
-
-# If service was never found, append it
-if not in_target_service:
-    new_lines.append(service_block)
-
-result = '\n'.join(new_lines)
-# Ensure file ends with newline
-if not result.endswith('\n'):
-    result += '\n'
+# Build the new service definition
+compose['services'][app_name] = {
+    'image': f'rr-portal/{app_name}:latest',
+    'ports': [f'{host_port}:{container_port}'],
+    'env_file': [f'./apps/{app_name}/.env'],
+    'restart': 'unless-stopped',
+    'healthcheck': {
+        'test': ['CMD', 'wget', '--spider', '-q', f'http://localhost:{container_port}/health'],
+        'interval': '30s',
+        'timeout': '10s',
+        'retries': 3,
+    },
+}
 
 with open(compose_path, 'w') as f:
-    f.write(result)
+    yaml.dump(compose, f, default_flow_style=False, sort_keys=False)
 
 print("Updated " + compose_path + " for service " + app_name)
 PYEOF

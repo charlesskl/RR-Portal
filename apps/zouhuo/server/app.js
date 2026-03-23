@@ -6,6 +6,12 @@ require('dotenv').config({
     : path.join(__dirname, '.env'),
 });
 
+// Validate required env vars
+if (!process.env.JWT_SECRET) {
+  console.error('FATAL: JWT_SECRET environment variable is required. Set it in .env file.');
+  process.exit(1);
+}
+
 const express = require('express');
 const cors    = require('cors');
 const helmet  = require('helmet');

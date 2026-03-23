@@ -46,19 +46,19 @@ fi
 
 # Load current state
 HEALTH_STATE=$(python3 -c "
-import json
-with open('${STATE_FILE}') as f:
+import json, sys
+with open(sys.argv[1]) as f:
     print(json.dumps(json.load(f)))
-")
+" "$STATE_FILE")
 
 # Helper: get previous state for an app ("up", "down", or "unknown")
 get_prev_state() {
   local app="$1"
   python3 -c "
-import json
-state = json.loads('${HEALTH_STATE}')
-print(state.get('${app}', 'unknown'))
-"
+import json, sys
+state = json.loads(sys.argv[1])
+print(state.get(sys.argv[2], 'unknown'))
+" "$HEALTH_STATE" "$app"
 }
 
 # Helper: set state for an app
@@ -66,11 +66,11 @@ set_state() {
   local app="$1"
   local new_state="$2"
   HEALTH_STATE=$(python3 -c "
-import json
-state = json.loads('${HEALTH_STATE}')
-state['${app}'] = '${new_state}'
+import json, sys
+state = json.loads(sys.argv[1])
+state[sys.argv[2]] = sys.argv[3]
 print(json.dumps(state))
-")
+" "$HEALTH_STATE" "$app" "$new_state")
 }
 
 # --- Read apps from registry ---
@@ -81,12 +81,12 @@ if [ ! -f "${APPS_FILE}" ]; then
 fi
 
 APPS=$(python3 -c "
-import json
-d = json.load(open('${APPS_FILE}'))
+import json, sys
+d = json.load(open(sys.argv[1]))
 for name, info in d.items():
     if info.get('status') == 'active':
         print(f\"{name}:{info['port']}\")
-")
+" "$APPS_FILE")
 
 if [ -z "${APPS}" ]; then
   log "No active apps found in apps.json"
@@ -144,12 +144,12 @@ done
 
 # --- Save updated state ---
 python3 -c "
-import json
-state = json.loads('${HEALTH_STATE}')
-with open('${STATE_FILE}', 'w') as f:
+import json, sys
+state = json.loads(sys.argv[1])
+with open(sys.argv[2], 'w') as f:
     json.dump(state, f, indent=2)
     f.write('\n')
-"
+" "$HEALTH_STATE" "$STATE_FILE"
 
 log "=== HEALTH-CHECK: Complete ==="
 exit 0

@@ -1,8 +1,8 @@
 # Batch A: Cloud Deployment
 # Usage: docker compose -f docker-compose.cloud.yml up -d --build
 #
-# Includes: core + db + redis + nginx + rr-production + indonesia-export
-# Excludes: 3D打印 (hardware), schedule-system (SMB/Windows), zuru-ma (deferred)
+# Includes: core + db + redis + nginx + rr-production
+# Excludes: 3D打印 (hardware), schedule-system (SMB/Windows), zuru-ma (deferred), indonesia-export (deleted)
 
 services:
   # ──────────────────────────────────────
@@ -98,20 +98,6 @@ services:
       interval: 10s
       timeout: 5s
       retries: 3
-    restart: unless-stopped
-    networks:
-      - platform-net
-
-  indonesia-export:
-    build:
-      context: ./plugins/印尼小组
-      dockerfile: Dockerfile
-    healthcheck:
-      test: ["CMD", "wget", "-qO", "/dev/null", "http://localhost:8080/health"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 5s
     restart: unless-stopped
     networks:
       - platform-net

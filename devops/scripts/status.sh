@@ -51,12 +51,12 @@ echo "--- Health Checks ---"
 APPS_FILE="${REPO_ROOT}/devops/config/apps.json"
 if [[ -f "$APPS_FILE" ]]; then
   APPS=$(python3 -c "
-import json
-d = json.load(open('${APPS_FILE}'))
+import json, sys
+d = json.load(open(sys.argv[1]))
 for name, info in d.items():
     if info.get('status') == 'active':
         print(f'{name}:{info[\"port\"]}')
-" 2>/dev/null || true)
+" "$APPS_FILE" 2>/dev/null || true)
 
   for entry in $APPS; do
     app="${entry%%:*}"

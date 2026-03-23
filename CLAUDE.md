@@ -226,12 +226,21 @@ volumes:
 - [ ] 从浏览器访问确认功能正常
 - [ ] 确认数据读写正常（创建数据 → 重启容器 → 数据仍在）
 
-## 插件注册表
+## App 注册表
 
-| 文件夹 (repo名) | 显示名 | 部门 | 类型 | GitHub Repo |
-|-----------------|--------|------|------|-------------|
-| 工程啤办单 | 工程啤办单 | Engineering | Standalone (Node.js) | https://github.com/hufan4308-blip/RR-production-system |
-| 3D打印 | 3D打印 | Engineering | Standalone (Node.js) | https://github.com/wendyxiaowen/3D- |
-| Zuru MA 包装差价系统 | Zuru MA 包装差价系统 | Business | Standalone (Node.js) | — |
-| 印尼小组 | 印尼出货明细资料核对系统 | Indonesia | Standalone (Node.js) | https://github.com/charlesskl/Export-to-Indonesia |
-| schedule-system | 排期录入系统 | Production | Standalone (Python/Flask) | https://github.com/hanson678/schedule-system |
+所有 app 按部门组织。部署新 app 时需指定所属部门。
+
+### 已部署 Apps
+
+| App 名 | 显示名 | 部门 | 类型 | 路径 | GitHub Repo |
+|---------|--------|------|------|------|-------------|
+| rr-production (工程啤办单) | 工程啤办单 | Engineering | Standalone (Node.js) | /rr/ | https://github.com/hufan4308-blip/RR-production-system |
+| zouhuo | 走货明细系统 | Business | Standalone (Node.js) | /zouhuo/ | — |
+
+### 旧插件（已删除）
+
+以下插件已从 plugins/ 目录移除（2026-03-23）：
+- 3D打印 (Engineering)
+- Zuru MA 包装差价系统 (Business)
+- 印尼小组 (Indonesia)
+- schedule-system (Production)

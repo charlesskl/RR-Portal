@@ -41,11 +41,10 @@ app.delete('/tasks/:id', (req, res) => {
   res.status(204).send();
 });
 
-// No health endpoint (DevOps agent should inject one)
+// Health endpoint is at line 5 (GET /health)
 // Hardcoded port in listen call (DevOps agent should extract to env var)
 const server = app.listen(process.env.PORT || 8080, () => {
-  console.log('Task API running on port 8080');
-  console.log(`Connected to DB at ${DB_URL}`);
+  console.log(`Task API running on port ${process.env.PORT || 8080}`);
 });
 
 // Graceful shutdown (injected by DevOps onboarding)

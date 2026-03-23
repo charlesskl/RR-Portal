@@ -1,3 +1,7 @@
+// NOTE: This JSON-file database is NOT safe for concurrent writes.
+// Concurrent requests may cause lost updates (read-modify-write race).
+// Acceptable for this app's low-concurrency internal use case.
+// If traffic grows, migrate to SQLite or PostgreSQL.
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');

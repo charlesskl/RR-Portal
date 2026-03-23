@@ -46,7 +46,8 @@ while [[ $# -gt 0 ]]; do
 done
 
 # --- Configuration ---
-LOCK_FILE="/tmp/devops-agent.lock"
+LOCK_DIR="/tmp/devops-agent.lock"   # directory — mkdir is atomic
+LOCK_FILE="${LOCK_DIR}/info"        # metadata file inside the lock dir
 LOCK_TTL=3600  # 60 minutes
 STATE_DIR="/tmp/devops-state/${APP_NAME}"
 PHASE_TIMEOUT="${PHASE_TIMEOUT:-3600}"
@@ -123,14 +124,17 @@ echo "--- Pre-flight passed ---"
 # Concurrency lock with TTL
 # ============================================================
 acquire_lock() {
-  if [[ -f "$LOCK_FILE" ]]; then
+  if [[ -d "$LOCK_DIR" ]]; then
     # Check if lock is stale (older than TTL)
     local lock_age
-    lock_age=$(( $(date +%s) - $(stat -f %m "$LOCK_FILE" 2>/dev/null || echo "0") ))
+    # macOS uses stat -f %m, Linux uses stat -c %Y
+    local lock_mtime
+    lock_mtime=$(stat -f %m "$LOCK_DIR" 2>/dev/null || stat -c %Y "$LOCK_DIR" 2>/dev/null || echo "0")
+    lock_age=$(( $(date +%s) - lock_mtime ))
 
     if [[ $lock_age -gt $LOCK_TTL ]]; then
       echo "=== TRIGGER: Stale lock detected (${lock_age}s old). Removing. ==="
-      rm -f "$LOCK_FILE"
+      rm -rf "$LOCK_DIR"
     else
       # Check if PID in lock file is still running
       local lock_pid
@@ -140,12 +144,18 @@ acquire_lock() {
         exit 0
       else
         echo "=== TRIGGER: Lock held by dead process (PID ${lock_pid}). Removing. ==="
-        rm -f "$LOCK_FILE"
+        rm -rf "$LOCK_DIR"
       fi
     fi
   fi
 
-  # Create lock with PID and timestamp
+  # Atomic lock acquisition — mkdir fails if dir already exists
+  if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+    echo "=== TRIGGER: Lock race lost — another instance acquired the lock. Skipping. ==="
+    exit 0
+  fi
+
+  # Write metadata into the lock directory
   echo "$$" > "$LOCK_FILE"
   echo "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$LOCK_FILE"
   echo "app=${APP_NAME}" >> "$LOCK_FILE"
@@ -153,7 +163,7 @@ acquire_lock() {
 }
 
 release_lock() {
-  rm -f "$LOCK_FILE"
+  rm -rf "$LOCK_DIR"
   echo "=== TRIGGER: Lock released ==="
 }
 
@@ -233,8 +243,11 @@ run_phase() {
   claude_cmd+=" --dangerously-skip-permissions"
   claude_cmd+=" --max-turns 50"
 
-  # Add the prompt with agent protocol context
-  local full_prompt="You are the autonomous DevOps agent. Read ${AGENT_DIR}/CLAUDE.md for your full protocol.
+  # Write prompt to temp file to avoid shell injection from user-controlled content
+  local prompt_file
+  prompt_file=$(mktemp /tmp/devops-prompt-XXXXXXXX)
+  cat > "$prompt_file" << PROMPT_EOF
+You are the autonomous DevOps agent. Read ${AGENT_DIR}/CLAUDE.md for your full protocol.
 
 Execute Phase: ${phase_name}
 App: ${APP_NAME}
@@ -247,11 +260,12 @@ Environment variables available:
   DEPLOY_DRY_RUN=${DRY_RUN}
   DEPLOY_COMPOSE_PATH=${DEPLOY_COMPOSE_PATH:-/opt/rr-portal/docker-compose.cloud.yml}
 
-${prompt}"
+${prompt}
+PROMPT_EOF
 
-  # Execute with timeout
+  # Execute with timeout — read prompt from file to avoid shell injection
   local exit_code=0
-  if timeout "${PHASE_TIMEOUT}" bash -c "cd '${REPO_ROOT}' && ${claude_cmd} -p '$(echo "$full_prompt" | sed "s/'/'\\\\''/g")'" > "$phase_log" 2>&1; then
+  if timeout "${PHASE_TIMEOUT}" bash -c "cd '${REPO_ROOT}' && ${claude_cmd} -p \"\$(cat '${prompt_file}')\"" > "$phase_log" 2>&1; then
     echo "=== Phase ${phase_name}: completed ==="
     exit_code=0
   else
@@ -263,6 +277,9 @@ ${prompt}"
       echo "=== Phase ${phase_name}: FAILED (exit ${exit_code}) ==="
     fi
   fi
+
+  # Clean up prompt temp file
+  rm -f "$prompt_file"
 
   # Validate output state file exists
   local output_file="${STATE_DIR}/${phase_name}.json"

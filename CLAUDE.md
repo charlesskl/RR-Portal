@@ -18,14 +18,15 @@ Always respond in 简体中文 (Simplified Chinese).
 
 ```
 RR Portal
+├── apps/            — 独立应用（非 plugin_sdk）
+│   ├── task-api/    — 任务 API (Node.js)
+│   └── zouhuo/      — 走货明细系统 (Node.js)
 ├── core/            — 核心服务 (FastAPI, 用户/权限/插件注册)
+├── devops/          — DevOps 自动化（agent、脚本、部署模板）
 ├── frontend/        — 前端静态文件 (Nginx托管)
 ├── plugin_sdk/      — 插件SDK (所有插件共用)
 ├── plugins/         — 插件目录（按 repo 名命名）
-│   ├── RR-production-system/  — 工程啤办单 (Engineering)
-│   ├── business/              — 业务部 (Business)
-│   └── indonesia/             — 印尼 (Indonesia)
-├── services/        — 独立服务
+│   └── 工程啤办单/   — 工程啤办单 (Engineering, Node.js)
 ├── nginx/           — Nginx配置
 └── docker-compose.yml
 ```
@@ -39,7 +40,7 @@ RR Portal 支持两种插件类型：
 - 数据存储：JSON 文件 + bind mount（`./plugins/xxx/data:/app/data`）
 - 认证：自行实现（如 PIN 验证、X-User header）
 - Nginx：通过子路径代理（如 `/rr/` → `rr-production:3000`）
-- **当前 Standalone 插件：工程啤办单 (Node.js)、3D打印 (Node.js)、印尼小组 (Node.js)、排期录入系统 (Python/Flask)**
+- **当前 Standalone 服务：工程啤办单 (Node.js, plugins/)、zouhuo (Node.js, apps/)、task-api (Node.js, apps/)**
 
 ### 2. Plugin SDK 插件（Python/FastAPI）
 使用 plugin_sdk 统一架构，适用于需要核心权限系统和 PostgreSQL 的场景。
@@ -236,6 +237,7 @@ volumes:
 |---------|--------|------|------|------|-------------|
 | rr-production (工程啤办单) | 工程啤办单 | Engineering | Standalone (Node.js) | /rr/ | https://github.com/hufan4308-blip/RR-production-system |
 | zouhuo | 走货明细系统 | Business | Standalone (Node.js) | /zouhuo/ | — |
+| task-api | 任务 API | — | Standalone (Node.js) | — | — |
 
 ### 旧插件（已删除）
 

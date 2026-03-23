@@ -32,14 +32,16 @@ COMPOSE_FILE="${REPO_ROOT}/docker-compose.yml"
 registry_allocate_port() {
   local app_name="$1"
   python3 -c "
-import json
-d = json.load(open('${PORTS_FILE}'))
+import json, sys
+ports_file = sys.argv[1]
+app = sys.argv[2]
+d = json.load(open(ports_file))
 port = d['_nextPort']
-d['${app_name}'] = {'port': port}
+d[app] = {'port': port}
 d['_nextPort'] = port + 1
-json.dump(d, open('${PORTS_FILE}', 'w'), indent=2)
+json.dump(d, open(ports_file, 'w'), indent=2)
 print(port)
-"
+" "$PORTS_FILE" "$app_name"
 }
 
 # ============================================================
@@ -53,17 +55,22 @@ print(port)
 registry_register_app() {
   local app_name="$1" stack="$2" port="$3" entrypoint="$4"
   python3 -c "
-import json, datetime
-d = json.load(open('${APPS_FILE}'))
-d['${app_name}'] = {
-  'stack': '${stack}',
-  'port': ${port},
+import json, datetime, sys
+apps_file = sys.argv[1]
+app = sys.argv[2]
+stack = sys.argv[3]
+port = int(sys.argv[4])
+entrypoint = sys.argv[5]
+d = json.load(open(apps_file))
+d[app] = {
+  'stack': stack,
+  'port': port,
   'status': 'active',
-  'entrypoint': '${entrypoint}',
+  'entrypoint': entrypoint,
   'addedAt': datetime.datetime.utcnow().isoformat() + 'Z'
 }
-json.dump(d, open('${APPS_FILE}', 'w'), indent=2)
-"
+json.dump(d, open(apps_file, 'w'), indent=2)
+" "$APPS_FILE" "$app_name" "$stack" "$port" "$entrypoint"
 }
 
 # ============================================================
@@ -137,9 +144,11 @@ registry_app_exists() {
   local app_name="$1"
   python3 -c "
 import json, sys
-d = json.load(open('${APPS_FILE}'))
-sys.exit(0 if '${app_name}' in d else 1)
-"
+apps_file = sys.argv[1]
+app = sys.argv[2]
+d = json.load(open(apps_file))
+sys.exit(0 if app in d else 1)
+" "$APPS_FILE" "$app_name"
 }
 
 # ============================================================

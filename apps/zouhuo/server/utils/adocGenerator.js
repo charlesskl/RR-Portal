@@ -29,18 +29,15 @@ function getCells(rowXml) {
 }
 
 // Replace ONLY the first <w:t>...</w:t> content in a cell — keeps all XML intact
-// Also fix w:hint to "default" so Latin chars use Times New Roman, CJK chars use 等线
+// Preserves the template's original font settings (w:hint, rFonts, etc.)
 function fillCell(cellXml, text) {
   const escaped = escapeXml(text);
   let done = false;
-  let result = cellXml.replace(/<w:t(\s[^>]*)?>[\s\S]*?<\/w:t>/, (_, attrs) => {
+  return cellXml.replace(/<w:t(\s[^>]*)?>[\s\S]*?<\/w:t>/, (_, attrs) => {
     if (done) return _;
     done = true;
     return `<w:t xml:space="preserve">${escaped}</w:t>`;
   });
-  // Fix hint so Word/WPS uses the correct font per character type
-  result = result.replace(/w:hint="eastAsia"/g, 'w:hint="default"');
-  return result;
 }
 
 // Build one data row from the template row XML

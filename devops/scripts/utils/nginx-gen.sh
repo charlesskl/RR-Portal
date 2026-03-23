@@ -79,25 +79,28 @@ inject_nginx_config() {
     local upstream_block
     upstream_block="$(generate_nginx_upstream "$app_name" "$container_port")"
 
-    python3 -c "
+    printf '%s' "$upstream_block" | python3 -c "
 import sys
-conf = open('${nginx_conf}').read()
+nginx_conf_path = sys.argv[1]
+upstream_name = sys.argv[2]
+app_name = sys.argv[3]
+container_port = sys.argv[4]
+upstream_block = sys.stdin.read()
+conf = open(nginx_conf_path).read()
 # Insert upstream before 'server {' line
-upstream = '''${upstream_block}
-
-'''
+upstream = upstream_block + '\n\n'
 # Find the 'server {' line
 idx = conf.find('    server {')
 if idx == -1:
     idx = conf.find('server {')
 if idx > 0:
     conf = conf[:idx] + upstream + conf[idx:]
-    with open('${nginx_conf}', 'w') as f:
+    with open(nginx_conf_path, 'w') as f:
         f.write(conf)
-    print('[NGINX] ADDED: upstream ${upstream_name} -> ${app_name}:${container_port}')
+    print(f'[NGINX] ADDED: upstream {upstream_name} -> {app_name}:{container_port}')
 else:
     print('[NGINX] WARN: could not find server block to insert upstream')
-" 2>/dev/null || echo "[NGINX] WARN: could not inject upstream"
+" "$nginx_conf" "$upstream_name" "$app_name" "$container_port" 2>/dev/null || echo "[NGINX] WARN: could not inject upstream"
     changes_made=1
   fi
 
@@ -109,11 +112,12 @@ else:
     local location_block
     location_block="$(generate_nginx_locations "$app_name")"
 
-    python3 -c "
+    printf '%s' "$location_block" | python3 -c "
 import sys
-conf = open('${nginx_conf}').read()
-locations = '''${location_block}
-'''
+nginx_conf_path = sys.argv[1]
+app_name = sys.argv[2]
+location_block = sys.stdin.read() + '\n'
+conf = open(nginx_conf_path).read()
 # Insert before the last '}' in the server block (second-to-last '}' in file)
 # Find the last '}' on its own line
 lines = conf.split('\n')
@@ -132,13 +136,13 @@ elif closing_indices:
     insert_idx = closing_indices[-1]
 
 if insert_idx > 0:
-    lines.insert(insert_idx, locations)
-    with open('${nginx_conf}', 'w') as f:
+    lines.insert(insert_idx, location_block)
+    with open(nginx_conf_path, 'w') as f:
         f.write('\n'.join(lines))
-    print('[NGINX] ADDED: location blocks for /${app_name}/')
+    print(f'[NGINX] ADDED: location blocks for /{app_name}/')
 else:
     print('[NGINX] WARN: could not find server closing brace')
-" 2>/dev/null || echo "[NGINX] WARN: could not inject location blocks"
+" "$nginx_conf" "$app_name" 2>/dev/null || echo "[NGINX] WARN: could not inject location blocks"
     changes_made=1
   fi
 

@@ -34,6 +34,9 @@ app.use(rateLimit({
 
 app.use(express.json({ limit: '1mb' }));
 
+// Health check endpoint (for Docker HEALTHCHECK and DevOps agent)
+app.get('/health', (req, res) => res.json({ status: 'ok' }));
+
 // 认证路由（不需登录）
 app.use('/api/auth', require('./routes/auth'));
 

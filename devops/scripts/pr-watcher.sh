@@ -65,24 +65,24 @@ with open('${STATE_FILE}') as f:
 get_pr_status() {
   local pr_num="$1"
   python3 -c "
-import json
-with open('${STATE_FILE}') as f:
+import json, sys
+with open(sys.argv[1]) as f:
     state = json.load(f)
-entry = state.get('${pr_num}', {})
+entry = state.get(sys.argv[2], {})
 print(entry.get('status', ''))
-"
+" "$STATE_FILE" "$pr_num"
 }
 
 # Get headSha for a specific PR number (empty string if not found)
 get_pr_sha() {
   local pr_num="$1"
   python3 -c "
-import json
-with open('${STATE_FILE}') as f:
+import json, sys
+with open(sys.argv[1]) as f:
     state = json.load(f)
-entry = state.get('${pr_num}', {})
+entry = state.get(sys.argv[2], {})
 print(entry.get('headSha', ''))
-"
+" "$STATE_FILE" "$pr_num"
 }
 
 # Update a single PR entry in the state file
@@ -90,26 +90,27 @@ update_pr_state() {
   local pr_num="$1"
   local status="$2"
   local head_sha="$3"
-  local result="$4"
+  local result="${4:-}"
 
   python3 -c "
-import json
+import json, sys
 from datetime import datetime, timezone
 
-with open('${STATE_FILE}') as f:
+state_file = sys.argv[1]
+with open(state_file) as f:
     state = json.load(f)
 
-state['${pr_num}'] = {
-    'status': '${status}',
-    'headSha': '${head_sha}',
+state[sys.argv[2]] = {
+    'status': sys.argv[3],
+    'headSha': sys.argv[4],
     'processedAt': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
-    'result': '${result}'
+    'result': sys.argv[5] if len(sys.argv) > 5 else ''
 }
 
-with open('${STATE_FILE}', 'w') as f:
+with open(state_file, 'w') as f:
     json.dump(state, f, indent=2)
     f.write('\n')
-"
+" "$STATE_FILE" "$pr_num" "$status" "$head_sha" "$result"
 }
 
 # ============================================================
@@ -122,9 +123,9 @@ poll_for_prs() {
   PR_LIST_JSON=$(gh pr list --base main --state open --json number,headRefName,headRefOid,author,title 2>/dev/null || echo "[]")
 
   # Parse and process each PR
-  PR_COUNT=$(python3 -c "
-import json
-data = json.loads('''${PR_LIST_JSON}''')
+  PR_COUNT=$(echo "$PR_LIST_JSON" | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
 print(len(data))
 " 2>/dev/null || echo "0")
 
@@ -139,15 +140,15 @@ print(len(data))
   local idx=0
   while [ "$idx" -lt "$PR_COUNT" ]; do
     # Extract PR details using python3
-    PR_INFO=$(python3 -c "
-import json
-data = json.loads('''${PR_LIST_JSON}''')
-pr = data[${idx}]
+    PR_INFO=$(echo "$PR_LIST_JSON" | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+pr = data[int(sys.argv[1])]
 print(pr['number'])
 print(pr.get('headRefOid', ''))
 print(pr.get('author', {}).get('login', ''))
 print(pr.get('title', ''))
-" 2>/dev/null)
+" "$idx" 2>/dev/null)
 
     PR_NUM=$(echo "$PR_INFO" | sed -n '1p')
     PR_SHA=$(echo "$PR_INFO" | sed -n '2p')

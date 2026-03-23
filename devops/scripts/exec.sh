@@ -13,6 +13,12 @@ set -euo pipefail
 APP_NAME="${1:?Usage: exec.sh <app-name> [command...]}"
 shift
 
+# Validate app name — prevent shell injection
+if [[ ! "$APP_NAME" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
+  echo "ERROR: Invalid app name '${APP_NAME}' — must be lowercase alphanumeric with hyphens/underscores"
+  exit 1
+fi
+
 if [[ -z "${DEPLOY_SERVER:-}" ]]; then
   echo "ERROR: DEPLOY_SERVER not set"
   exit 1
@@ -34,5 +40,6 @@ if [[ $# -eq 0 ]]; then
   echo "Opening shell in ${CONTAINER}..."
   ssh -t "${DEPLOY_SERVER}" "docker exec -it ${CONTAINER} /bin/sh"
 else
-  ssh "${DEPLOY_SERVER}" "docker exec ${CONTAINER} $*"
+  # shellcheck disable=SC2029 — intentional remote command execution
+  ssh "${DEPLOY_SERVER}" "docker exec ${CONTAINER} $(printf '%q ' "$@")"
 fi

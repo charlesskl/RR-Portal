@@ -47,6 +47,12 @@ if [ -z "${APP_NAME}" ]; then
   exit 1
 fi
 
+# Validate app name format — prevent shell injection in SSH commands
+if [[ ! "${APP_NAME}" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
+  echo "ERROR: Invalid app name '${APP_NAME}' — must be lowercase alphanumeric with hyphens/underscores"
+  exit 1
+fi
+
 # Validate app exists in apps.json
 if ! registry_app_exists "${APP_NAME}"; then
   echo "ERROR: App '${APP_NAME}' not found in apps.json"

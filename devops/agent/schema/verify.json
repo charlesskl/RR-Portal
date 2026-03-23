@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "phase": "verify",
+  "app_name": "",
+  "timestamp": "",
+  "status": "success|failed",
+  "health_check": "pass|fail|skip",
+  "frontend_loads": "pass|fail|skip",
+  "api_endpoints_tested": 0,
+  "api_endpoints_passed": 0,
+  "asset_404s": 0,
+  "screenshot_path": null,
+  "playwright_available": false,
+  "telegram_sent": false,
+  "error": null
+}

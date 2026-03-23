@@ -1,0 +1,47 @@
+# RR-Portal — Docker Compose
+#
+# This file is managed by the DevOps agent. Do not edit manually.
+# Apps are added here automatically during onboarding (Phase 2+).
+#
+# Example app entry (added by agent):
+#
+#   app-name:
+#     build:
+#       context: ./apps/app-name
+#       dockerfile: Dockerfile
+#     ports:
+#       - "3001:3000"
+#     env_file:
+#       - ./apps/app-name/.env
+#     restart: unless-stopped
+#     logging:
+#       driver: json-file
+#       options:
+#         max-size: "10m"
+#         max-file: "3"
+#     healthcheck:
+#       test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/health"]
+#       interval: 30s
+#       timeout: 10s
+#       retries: 3
+
+services:
+  task-api:
+    build:
+      context: ./apps/task-api
+      dockerfile: Dockerfile
+    ports:
+      - "3001:8080"
+    env_file:
+      - ./apps/task-api/.env
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3

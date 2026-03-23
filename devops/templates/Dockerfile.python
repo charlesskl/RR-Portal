@@ -1,0 +1,49 @@
+# ============================================================
+# Python Dockerfile Template — RR-Portal
+# ============================================================
+# Managed by the DevOps agent. Do not edit manually.
+# Phase 2 onboarding scripts copy this and customize per app.
+#
+# .dockerignore patterns (create alongside Dockerfile):
+#   __pycache__, .git, .env, *.md, .vscode, .idea, .venv, venv
+# ============================================================
+
+# --- Stage 1: Build ---
+FROM python:3.12-slim AS builder
+
+WORKDIR /app
+
+# CUSTOMIZE: requirements file (requirements.txt or pyproject.toml)
+COPY requirements.txt ./
+RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
+
+COPY . .
+
+# --- Stage 2: Production ---
+FROM python:3.12-slim AS production
+
+# Non-root user
+RUN groupadd -r appgroup && useradd -r -g appgroup appuser
+
+WORKDIR /app
+
+# Copy installed packages from builder
+COPY --from=builder /install /usr/local
+COPY --from=builder /app .
+
+# CUSTOMIZE: remove dev files if needed
+# RUN rm -rf tests/ *_test.py
+
+# CUSTOMIZE: exposed port (internal container port, mapped in docker-compose)
+EXPOSE 3000
+
+# Switch to non-root
+USER appuser
+
+# Health check — expects GET /health to return 200
+HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
+  CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:3000/health')" || exit 1
+
+# CUSTOMIZE: entry point (gunicorn for web apps, python for scripts)
+# Gunicorn with graceful shutdown (SIGTERM handled natively)
+CMD ["gunicorn", "--bind", "0.0.0.0:3000", "--workers", "2", "--graceful-timeout", "30", "app:app"]

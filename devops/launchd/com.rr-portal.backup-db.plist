@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.rr-portal.backup-db</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>__REPO_ROOT__/devops/scripts/backup-db.sh</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>__REPO_ROOT__</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin</string>
+        <key>DEPLOY_SERVER</key>
+        <string>__DEPLOY_SERVER__</string>
+        <key>TELEGRAM_BOT_TOKEN</key>
+        <string>__TELEGRAM_BOT_TOKEN__</string>
+        <key>TELEGRAM_CHAT_ID</key>
+        <string>__TELEGRAM_CHAT_ID__</string>
+    </dict>
+
+    <!-- Run daily at 2:00 AM (before cleanup at 3:00 AM) -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>2</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>__REPO_ROOT__/devops/logs/backup-stdout.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>__REPO_ROOT__/devops/logs/backup-stderr.log</string>
+</dict>
+</plist>

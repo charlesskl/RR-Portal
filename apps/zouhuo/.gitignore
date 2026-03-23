@@ -1,0 +1,34 @@
+# Dependencies
+node_modules/
+
+# Data files (runtime data, not source code)
+server/data/*.json
+server/data/audit.log
+!server/data/.gitkeep
+
+# Uploads
+server/uploads/
+!server/uploads/.gitkeep
+
+# Environment
+.env
+.env.local
+
+# Build output
+dist/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE & tools
+.vscode/
+.idea/
+.claude/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Archive
+*.zip

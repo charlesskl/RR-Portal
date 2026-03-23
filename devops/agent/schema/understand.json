@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "phase": "understand",
+  "app_name": "",
+  "timestamp": "",
+  "status": "success|failed",
+  "action": "onboard|update",
+  "stack": "node|python",
+  "framework": "express|next|vite|flask|fastapi|django|nestjs|unknown",
+  "detected_port": 3000,
+  "env_vars_needed": [],
+  "is_monorepo": false,
+  "server_dir": null,
+  "client_dir": null,
+  "has_dockerfile": false,
+  "has_health_endpoint": false,
+  "error": null
+}

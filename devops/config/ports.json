@@ -1,0 +1,6 @@
+{
+  "_nextPort": 3002,
+  "task-api": {
+    "port": 3001
+  }
+}

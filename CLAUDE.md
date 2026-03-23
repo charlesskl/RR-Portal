@@ -236,7 +236,7 @@ volumes:
 | App 名 | 显示名 | 部门 | 类型 | 路径 | GitHub Repo |
 |---------|--------|------|------|------|-------------|
 | rr-production (工程啤办单) | 工程啤办单 | Engineering | Standalone (Node.js) | /rr/ | https://github.com/hufan4308-blip/RR-production-system |
-| zouhuo | 走货明细系统 | Business | Standalone (Node.js) | /zouhuo/ | — |
+| zouhuo | 走货明细系统 | Engineering | Standalone (Node.js) | /zouhuo/ | — |
 | task-api | 任务 API | — | Standalone (Node.js) | — | — |
 
 ### 旧插件（已删除）

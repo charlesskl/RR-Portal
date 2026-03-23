@@ -67,10 +67,10 @@ fi
 
 # --- Step 4: Summary ---
 HOST_PORT=$(python3 -c "
-import json
-d = json.load(open('${REPO_ROOT}/devops/config/apps.json'))
-print(d.get('${APP_NAME}', {}).get('port', 'unknown'))
-" 2>/dev/null || echo "unknown")
+import json, sys
+d = json.load(open(sys.argv[1]))
+print(d.get(sys.argv[2], {}).get('port', 'unknown'))
+" "${REPO_ROOT}/devops/config/apps.json" "$APP_NAME" 2>/dev/null || echo "unknown")
 
 echo ""
 echo "============================================"

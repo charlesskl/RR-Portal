@@ -37,10 +37,10 @@ COMPOSE_FILE="$(basename "$COMPOSE_PATH")"
 
 # Read port
 HOST_PORT=$(python3 -c "
-import json
-d = json.load(open('${REPO_ROOT}/devops/config/apps.json'))
-print(d.get('${APP_NAME}', {}).get('port', ''))
-" 2>/dev/null || echo "")
+import json, sys
+d = json.load(open(sys.argv[1]))
+print(d.get(sys.argv[2], {}).get('port', ''))
+" "${REPO_ROOT}/devops/config/apps.json" "$APP_NAME" 2>/dev/null || echo "")
 
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
 REPORT_FILE="${REPO_ROOT}/devops/logs/incident-${APP_NAME}-${TIMESTAMP}.log"

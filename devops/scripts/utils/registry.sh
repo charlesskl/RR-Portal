@@ -85,12 +85,12 @@ registry_get_port() {
   local app_name="$1"
   python3 -c "
 import json, sys
-d = json.load(open('${APPS_FILE}'))
-app = sys.argv[1]
+d = json.load(open(sys.argv[1]))
+app = sys.argv[2]
 if app not in d:
     sys.exit(1)
 print(d[app]['port'])
-" "$app_name"
+" "$APPS_FILE" "$app_name"
 }
 
 # ============================================================
@@ -105,12 +105,12 @@ registry_get_stack() {
   local app_name="$1"
   python3 -c "
 import json, sys
-d = json.load(open('${APPS_FILE}'))
-app = sys.argv[1]
+d = json.load(open(sys.argv[1]))
+app = sys.argv[2]
 if app not in d:
     sys.exit(1)
 print(d[app]['stack'])
-" "$app_name"
+" "$APPS_FILE" "$app_name"
 }
 
 # ============================================================
@@ -125,12 +125,12 @@ registry_get_status() {
   local app_name="$1"
   python3 -c "
 import json, sys
-d = json.load(open('${APPS_FILE}'))
-app = sys.argv[1]
+d = json.load(open(sys.argv[1]))
+app = sys.argv[2]
 if app not in d:
     sys.exit(1)
 print(d[app]['status'])
-" "$app_name"
+" "$APPS_FILE" "$app_name"
 }
 
 # ============================================================
@@ -165,10 +165,11 @@ compose_add_service() {
 
   # Use python3 to safely generate and insert the YAML service block
   python3 -c "
-app_name = '${app_name}'
-host_port = '${host_port}'
-container_port = '${container_port}'
-compose_file = '${COMPOSE_FILE}'
+import sys
+app_name = sys.argv[1]
+host_port = sys.argv[2]
+container_port = sys.argv[3]
+compose_file = sys.argv[4]
 
 service_block = '  ' + app_name + ':\n'
 service_block += '    build:\n'
@@ -195,5 +196,5 @@ else:
 
 with open(compose_file, 'w') as f:
     f.write(content)
-" 
+" "$app_name" "$host_port" "$container_port" "$COMPOSE_FILE"
 }

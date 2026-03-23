@@ -42,12 +42,12 @@ if [[ ! -f "$APPS_FILE" ]]; then
 fi
 
 APPS=$(python3 -c "
-import json
-d = json.load(open('${APPS_FILE}'))
+import json, sys
+d = json.load(open(sys.argv[1]))
 for name, info in d.items():
     if info.get('status') == 'active':
         print(f'{name}:{info[\"port\"]}')
-" 2>/dev/null || true)
+" "$APPS_FILE" 2>/dev/null || true)
 
 SLOW_APPS=""
 
@@ -61,7 +61,7 @@ for entry in $APPS; do
 
   HTTP_CODE=$(echo "$RESPONSE" | awk '{print $1}')
   TIME_TOTAL=$(echo "$RESPONSE" | awk '{print $2}')
-  TIME_MS=$(python3 -c "print(int(float('${TIME_TOTAL}') * 1000))" 2>/dev/null || echo "0")
+  TIME_MS=$(python3 -c "import sys; print(int(float(sys.argv[1]) * 1000))" "$TIME_TOTAL" 2>/dev/null || echo "0")
 
   if [[ "$HTTP_CODE" == "200" ]]; then
     if [[ "$TIME_MS" -gt "$ALERT_THRESHOLD_MS" ]]; then

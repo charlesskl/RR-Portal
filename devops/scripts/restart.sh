@@ -60,10 +60,10 @@ echo "  [OK] Container restarted"
 # Health check
 sleep 5
 HOST_PORT=$(python3 -c "
-import json
-d = json.load(open('${REPO_ROOT}/devops/config/apps.json'))
-print(d.get('${APP_NAME}', {}).get('port', ''))
-" 2>/dev/null || echo "")
+import json, sys
+d = json.load(open(sys.argv[1]))
+print(d.get(sys.argv[2], {}).get('port', ''))
+" "${REPO_ROOT}/devops/config/apps.json" "$APP_NAME" 2>/dev/null || echo "")
 
 if [[ -n "$HOST_PORT" ]]; then
   if curl -sf --max-time 5 "http://${DEPLOY_SERVER_HOST}:${HOST_PORT}/health" > /dev/null 2>&1; then

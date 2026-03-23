@@ -39,3 +39,19 @@ nginx/.htpasswd
 # Cloud deployment data
 data/postgres/*
 !data/postgres/.gitkeep
+
+# Docker
+*.tar
+
+# DevOps logs (keep structure, ignore content)
+devops/logs/*.log
+devops/logs/*.tsv
+devops/logs/*.jsonl
+devops/logs/*.txt
+
+# Apps - ignore nested git repos and build artifacts
+apps/*/.git/
+apps/*/node_modules/
+apps/*/.next/
+apps/*/dist/
+apps/*/build/

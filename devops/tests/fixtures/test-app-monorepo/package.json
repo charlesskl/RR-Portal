@@ -1,0 +1,7 @@
+{
+  "name": "test-app-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": ["client", "server"],
+  "scripts": { "start": "npm start --workspace=server" }
+}

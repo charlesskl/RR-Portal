@@ -103,7 +103,7 @@
     <!-- 类型标签 -->
     <ul class="nav nav-tabs type-tabs mb-3" id="supTabs">
       <li class="nav-item"><a class="nav-link active" href="#" onclick="return switchSupTab('injection',this)"><i class="bi bi-box-seam me-1"></i>啤办单</a></li>
-      <li class="nav-item"><a class="nav-link" href="#" onclick="return switchSupTab('assembly',this)"><i class="bi bi-gear-wide-connected me-1"></i>装配单</a></li>
+      <li class="nav-item"><a class="nav-link" href="#" onclick="return switchSupTab('assembly',this)"><i class="bi bi-gear-wide-connected me-1"></i>夹具单</a></li>
     </ul>
 
     <!-- 筛选 -->
@@ -384,10 +384,10 @@ function renderSupDetails(order, type) {
       <td>${esc(it.required_date||'-')}</td><td>${esc(it.return_time||'-')}</td><td>${esc(it.notes||'-')}</td>
     </tr>`).join('');
   } else if (type === 'assembly') {
-    thead = '<tr><th>序号</th><th>产品编号</th><th>产品名称</th><th>数量</th><th>要求完成日期</th><th>备注</th></tr>';
+    thead = '<tr><th>序号</th><th>名称</th><th>数量</th><th>日期</th><th>备注</th><th>完成时间</th></tr>';
     rows = items.map((it, i) => `<tr>
-      <td>${i+1}</td><td>${esc(it.product_number||'-')}</td><td>${esc(it.product_name||'-')}</td>
-      <td>${esc(it.quantity||'-')}</td><td>${esc(it.completion_time||'-')}</td><td>${esc(it.notes||'-')}</td>
+      <td>${i+1}</td><td>${esc(it.product_name||'-')}</td>
+      <td>${esc(it.quantity||'-')}</td><td>${esc(it.required_date||'-')}</td><td>${esc(it.notes||'-')}</td><td>${esc(it.completion_time||'-')}</td>
     </tr>`).join('');
   } else {
     thead = '<tr><th>客名</th><th>名称</th><th>样板数量</th><th>提供胶件时间</th><th>收到胶件时间</th><th>工程预计完成时间</th><th>喷油交货时间</th><th>工程师/PMC</th><th>备注</th></tr>';
@@ -403,7 +403,7 @@ function renderSupDetails(order, type) {
 
 async function submitSupReview(action) {
   const rejectReason = document.getElementById('supRejectReason').value.trim();
-  const approveStatus = supTab === 'assembly' ? '待生产' : '待经理审核';
+  const approveStatus = '待经理审核';
   const newStatus = action === 'approve' ? approveStatus : '已驳回';
   const pin = sessionStorage.getItem('sup_pin') || '';
 
@@ -427,7 +427,7 @@ async function submitSupReview(action) {
     }
     bootstrap.Modal.getInstance(document.getElementById('supReviewModal'))?.hide();
     showToast(action === 'approve'
-      ? (supTab === 'assembly' ? '审核通过！已转为待生产' : '审核通过！已转交经理审核')
+      ? '审核通过！已转交经理审核'
       : '已驳回', action === 'approve' ? 'success' : 'danger');
     loadSupOrders();
     checkPendingReviews();

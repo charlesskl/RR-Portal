@@ -75,7 +75,7 @@
     const type = params.get('type');
     const id   = params.get('id');
 
-    const typeMap = { injection: '啤办单', slush: '搪胶单', spray: '喷油单', assembly: '装配单' };
+    const typeMap = { injection: '啤办单', slush: '搪胶单', spray: '喷油单', assembly: '夹具单' };
 
     // 参数白名单校验
     if (!typeMap[type] || !/^\d+$/.test(id)) {
@@ -261,7 +261,7 @@
           ${matSummaryHtml}
         </div>
         <div style="border:1px solid #333;border-top:none;padding:4px 8px;font-size:8.5pt">
-          <strong>分发：</strong>□经理室&emsp;&emsp;&emsp;□业务部&emsp;&emsp;&emsp;&emsp;□啤机部&emsp;&emsp;&emsp;&emsp;□喷油部&emsp;&emsp;&emsp;□装配部&emsp;&emsp;&emsp;□QC部
+          <strong>分发：</strong>□经理室&emsp;&emsp;&emsp;□业务部&emsp;&emsp;&emsp;&emsp;□啤机部&emsp;&emsp;&emsp;&emsp;□喷油部&emsp;&emsp;&emsp;□夹具部&emsp;&emsp;&emsp;□QC部
         </div>
         <div style="border:1px solid #333;border-top:none;padding:6px 8px;font-size:9pt;display:flex;align-items:center">
           <span style="flex:1"><strong>申请：</strong>${engineer}</span>
@@ -349,42 +349,41 @@
       const rows = allItems.map((it, i) => `
         <tr style="height:18px">
           <td style="text-align:center">${i < items.length ? i + 1 : ''}</td>
-          <td>${v(it.product_number)}</td>
           <td>${v(it.product_name)}</td>
           <td style="text-align:center">${v(it.quantity)}</td>
-          <td>${v(it.completion_time)}</td>
+          <td>${v(it.required_date)}</td>
           <td>${v(it.notes)}</td>
+          <td>${v(it.completion_time)}</td>
         </tr>`).join('');
 
       return `
         <div class="print-header" style="margin-bottom:4px">
           <div class="company-name">东莞兴信塑胶制品有限公司</div>
-          <div style="font-size:12pt;font-weight:bold;margin:4px 0">装配通知单</div>
+          <div style="font-size:12pt;font-weight:bold;margin:4px 0">夹具申请单</div>
         </div>
         <div style="border:1px solid #333;border-bottom:none;padding:4px 8px;font-size:10pt;display:flex;gap:0">
+          <span style="flex:3"><strong>货号：</strong>${v(o.order_number)}</span>
           <span style="flex:2"><strong>客户：</strong>${v(o.client_name)}</span>
-          <span style="flex:3"><strong>产品编号：</strong>${v(o.order_number)}</span>
-          <span style="flex:3"><strong>产品名称：</strong>${v(o.product_name)}</span>
         </div>
-        <div style="border:1px solid #333;border-top:none;border-bottom:none;padding:4px 8px;font-size:10pt;display:flex;gap:0">
-          <span style="flex:2"><strong>日期：</strong>${v(o.date)}</span>
-          <span style="flex:2"><strong>主管：</strong>${v(o.supervisor)}</span>
-          <span style="flex:2;text-align:right"><strong>创建人：</strong>${v(o.created_by)}</span>
-        </div>
-        ${o.notes ? `<div style="border:1px solid #333;border-top:none;border-bottom:none;padding:4px 8px;font-size:10pt"><strong>备注：</strong>${v(o.notes)}</div>` : ''}
+        ${o.reason ? `<div style="border:1px solid #333;border-top:none;border-bottom:none;padding:4px 8px;font-size:10pt"><strong>备注：</strong>${v(o.reason)}</div>` : ''}
         <table class="print-table">
           <thead>
             <tr>
               <th style="width:40px">序号</th>
-              <th>产品编号</th>
-              <th>产品名称</th>
+              <th>名称</th>
               <th>数量</th>
-              <th>要求完成日期</th>
+              <th>日期</th>
               <th>备注</th>
+              <th>完成时间</th>
             </tr>
           </thead>
           <tbody>${rows}</tbody>
-        </table>`;
+        </table>
+        <div style="border:1px solid #333;border-top:none;padding:12px 8px;font-size:10pt;display:flex;gap:0">
+          <span style="flex:2"><strong>申请人：</strong>${v(o.created_by)}</span>
+          <span style="flex:2"><strong>审核：</strong></span>
+          <span style="flex:2"><strong>批准：</strong></span>
+        </div>`;
     }
 
     function renderSpray(o) {

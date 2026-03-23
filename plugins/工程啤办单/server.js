@@ -491,8 +491,11 @@ app.get('/api/pending-reviews', (req, res) => {
     });
   }
   if (role === 'manager') {
-    const pending = (data.injection_orders || []).filter(o => o.status === '待经理审核');
-    return res.json({ count: pending.length, orders: pending.map(o => ({ id: o.id, order_number: o.order_number, client_name: o.client_name, date: o.date, supervisor: o.supervisor })) });
+    const injPending = (data.injection_orders || []).filter(o => o.status === '待经理审核');
+    const asmPending = (data.assembly_orders || []).filter(o => o.status === '待经理审核');
+    const allPending = [...injPending.map(o => ({ id: o.id, order_number: o.order_number, client_name: o.client_name, date: o.date, supervisor: o.supervisor, type: 'injection' })),
+                        ...asmPending.map(o => ({ id: o.id, order_number: o.order_number, client_name: o.client_name, date: o.date, type: 'assembly' }))];
+    return res.json({ count: allPending.length, orders: allPending });
   }
   res.json({ count: 0, orders: [] });
 });
@@ -692,7 +695,7 @@ app.delete('/api/requisitions/:id', (req, res) => {
   res.json({ success: true });
 });
 
-// ─── 装配部用户验证 ──────────────────────────────────────────────────────────
+// ─── 夹具部用户验证 ──────────────────────────────────────────────────────────
 app.post('/api/assembly-users/verify', (req, res) => {
   const { name, pin } = req.body;
   if (!name || !pin) return res.json({ success: false });
@@ -755,7 +758,7 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`  啤机部:  http://${ip}:${PORT}/injection.html`);
   console.log(`  搪胶部:  http://${ip}:${PORT}/slush.html`);
   console.log(`  喷油部:  http://${ip}:${PORT}/spray.html`);
-  console.log(`  装配部:  http://${ip}:${PORT}/assembly.html`);
+  console.log(`  夹具部:  http://${ip}:${PORT}/assembly.html`);
   console.log(`  原料仓库: http://${ip}:${PORT}/warehouse.html`);
   console.log('='.repeat(55));
 });

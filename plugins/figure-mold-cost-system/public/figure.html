@@ -448,7 +448,7 @@ function initPage() {
     }
   });
 
-  authFetch('/api/factories').then(function(r) { return r.json(); }).then(function(d) {
+  authFetch('api/factories').then(function(r) { return r.json(); }).then(function(d) {
     factoryOrder = d.figure_factories || [];
     var mSel = document.getElementById('m-figure_factory');
     factoryOrder.forEach(function(f) {
@@ -465,7 +465,7 @@ function initPage() {
 }
 
 function loadCustomers() {
-  authFetch('/api/customers').then(function(r) { return r.json(); }).then(function(custs) {
+  authFetch('api/customers').then(function(r) { return r.json(); }).then(function(custs) {
     var fSel = document.getElementById('fCustomer');
     fSel.innerHTML = '<option value="">全部</option>';
     var mSel = document.getElementById('m-customer');
@@ -496,11 +496,11 @@ function loadOrders() {
   var y = document.getElementById('fYear').value; if (y) params.set('year', y);
   var m = document.getElementById('fMonth').value; if (m) params.set('month', m);
 
-  authFetch('/api/figure-orders?' + params.toString())
+  authFetch('api/figure-orders?' + params.toString())
     .then(function(r) { return r.json(); })
     .then(function(orders) {
       allOrders = orders;
-      authFetch('/api/purchase-orders?type=figure')
+      authFetch('api/purchase-orders?type=figure')
         .then(function(r) { return r.json(); })
         .then(function(pos) { allPOs = pos; });
       renderGroupedTable(orders);
@@ -727,7 +727,7 @@ function saveOrder() {
 
 function deleteOrder(id) {
   if (!confirm('确定删除此订单？')) return;
-  authFetch('/api/figure-orders/' + id, { method: 'DELETE', headers: authHeaders() })
+  authFetch('api/figure-orders/' + id, { method: 'DELETE', headers: authHeaders() })
     .then(function(r) { if (!r.ok) throw new Error('删除失败'); return r.json(); })
     .then(function() { showToast('已删除'); loadOrders(); })
     .catch(function(e) { showToast(e.message, 'danger'); });
@@ -735,7 +735,7 @@ function deleteOrder(id) {
 
 function advanceStatus(id, newStatus) {
   if (!confirm('确定将状态更新为 "' + newStatus + '"？')) return;
-  authFetch('/api/figure-orders/' + id + '/status', {
+  authFetch('api/figure-orders/' + id + '/status', {
     method: 'PUT', headers: authHeaders(), body: JSON.stringify({ status: newStatus })
   })
     .then(function(r) { if (!r.ok) throw new Error('状态更新失败'); return r.json(); })
@@ -756,7 +756,7 @@ function loadStats() {
   var gb = document.querySelector('input[name="groupBy"]:checked').value;
   params.set('group_by', gb);
 
-  authFetch('/api/figure-orders/stats?' + params.toString())
+  authFetch('api/figure-orders/stats?' + params.toString())
     .then(function(r) { return r.json(); })
     .then(function(stats) {
       renderStatsCards(stats);
@@ -854,7 +854,7 @@ function openNewPO() {
   });
   document.getElementById('po-delivery_address').value = '东莞清溪上元管理区银坑路兴信厂';
   document.getElementById('po-payment_terms').value = '月结30天';
-  authFetch('/api/purchase-orders/next-number?type=figure')
+  authFetch('api/purchase-orders/next-number?type=figure')
     .then(function(r) { return r.json(); })
     .then(function(d) { document.getElementById('po-po_number').value = d.po_number; });
   document.getElementById('po-our_contact').value = currentUser;
@@ -934,7 +934,7 @@ function savePO() {
   fetch(url, { method: method, headers: authHeaders(), body: JSON.stringify(body) })
     .then(function(r) { if (!r.ok) throw new Error('保存失败'); return r.json(); })
     .then(function(savedPO) {
-      return authFetch('/api/purchase-orders/' + savedPO.id + '/status', {
+      return authFetch('api/purchase-orders/' + savedPO.id + '/status', {
         method: 'PUT', headers: authHeaders(), body: JSON.stringify({ status: '已确认' })
       });
     })
@@ -1005,7 +1005,7 @@ function startBatchParse(files) {
   }
 
   // Load customer list first, then parse all files
-  authFetch('/api/customers').then(function(r) { return r.json(); }).then(function(custs) {
+  authFetch('api/customers').then(function(r) { return r.json(); }).then(function(custs) {
     customerListCache = custs;
     // Fill batch customer dropdown
     var bSel = document.getElementById('imp-batch-customer');
@@ -1031,7 +1031,7 @@ function parseAllFiles() {
       document.getElementById('importProgress').textContent = (idx + 1) + '/' + batchFiles.length;
       var formData = new FormData();
       formData.append('file', item.file);
-      return authFetch('/api/import-po/preview', {
+      return authFetch('api/import-po/preview', {
         method: 'POST',
         headers: { 'Authorization': 'Bearer ' + getToken() },
         body: formData
@@ -1131,7 +1131,7 @@ function handleAddMore(input) {
       document.getElementById('importProgress').textContent = (i + 1) + '/' + newFiles.length;
       var formData = new FormData();
       formData.append('file', item.file);
-      return authFetch('/api/import-po/preview', {
+      return authFetch('api/import-po/preview', {
         method: 'POST',
         headers: { 'Authorization': 'Bearer ' + getToken() },
         body: formData
@@ -1196,7 +1196,7 @@ function confirmBatchImport() {
       formData.append('customer', task.customer);
       formData.append('payment_type', task.payment);
       formData.append('order_date', task.order_date);
-      return authFetch('/api/import-po/confirm', {
+      return authFetch('api/import-po/confirm', {
         method: 'POST',
         headers: { 'Authorization': 'Bearer ' + getToken() },
         body: formData

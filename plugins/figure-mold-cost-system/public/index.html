@@ -48,7 +48,7 @@ function doLogin() {
     showErr('请输入姓名和PIN码');
     return;
   }
-  fetch('/api/login', {
+  fetch('api/login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name: name, pin: pin })

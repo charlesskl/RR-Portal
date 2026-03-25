@@ -13,7 +13,8 @@ cd "$INSTALL_DIR"
 echo "=== Updating RR Portal ==="
 
 echo "[1/3] Pulling latest code..."
-git pull
+git fetch origin
+git reset --hard origin/main
 
 # Ensure data directories exist for new plugins
 mkdir -p plugins/new-product-schedule/data plugins/new-product-schedule/uploads

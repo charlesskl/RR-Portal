@@ -209,19 +209,187 @@
         <button class="btn btn-sm btn-outline-primary mt-2" onclick="addPurchaseRow()">+ 添加外购件</button>
       </div>
 
-      <!-- ─── Tab 4: 尺寸重量 (placeholder) ──────────────────────────── -->
+      <!-- ─── Tab 4: 尺寸重量 ────────────────────────────────────────── -->
       <div class="tab-pane fade" id="tab-dimensions" role="tabpanel">
-        <p class="text-muted">尺寸重量（待实现）</p>
+        <div class="card">
+          <div class="card-body">
+
+            <!-- 装箱方式 / 材质 -->
+            <div class="row g-2 mb-3">
+              <div class="col-12">
+                <label class="form-label fw-semibold">装箱方式</label>
+                <input type="text" class="form-control" id="dim_packing_method" placeholder="如 每箱12套，2层×6套">
+              </div>
+              <div class="col-md-6">
+                <label class="form-label fw-semibold">内箱材质</label>
+                <input type="text" class="form-control" id="dim_inner_box_material" placeholder="如 E坑白盒">
+              </div>
+              <div class="col-md-6">
+                <label class="form-label fw-semibold">外箱材质</label>
+                <input type="text" class="form-control" id="dim_outer_box_material" placeholder="如 B坑纸箱">
+              </div>
+            </div>
+
+            <!-- 产品光身 -->
+            <h6 class="section-header mt-3">产品光身</h6>
+            <div class="row g-2 align-items-center mb-2">
+              <div class="col-2"><label class="form-label mb-0">阶段</label>
+                <input type="text" class="form-control form-control-sm" id="dim_product_stage" placeholder="如 T1"></div>
+              <div class="col-2"><label class="form-label mb-0">长 cm</label>
+                <input type="number" class="form-control form-control-sm" id="dim_product_width" step="any" min="0"></div>
+              <div class="col-2"><label class="form-label mb-0">宽 cm</label>
+                <input type="number" class="form-control form-control-sm" id="dim_product_depth" step="any" min="0"></div>
+              <div class="col-2"><label class="form-label mb-0">高 cm</label>
+                <input type="number" class="form-control form-control-sm" id="dim_product_height" step="any" min="0"></div>
+              <div class="col-2"><label class="form-label mb-0">重量 kg</label>
+                <input type="number" class="form-control form-control-sm" id="dim_product_weight_kg" step="any" min="0"></div>
+            </div>
+
+            <!-- 包装 -->
+            <h6 class="section-header mt-3">包装</h6>
+            <div class="row g-2 align-items-center mb-2">
+              <div class="col-2"><label class="form-label mb-0">阶段</label>
+                <input type="text" class="form-control form-control-sm" id="dim_package_stage" placeholder="如 T1"></div>
+              <div class="col-2"><label class="form-label mb-0">长 cm</label>
+                <input type="number" class="form-control form-control-sm" id="dim_package_width" step="any" min="0"></div>
+              <div class="col-2"><label class="form-label mb-0">宽 cm</label>
+                <input type="number" class="form-control form-control-sm" id="dim_package_depth" step="any" min="0"></div>
+              <div class="col-2"><label class="form-label mb-0">高含J钩 cm</label>
+                <input type="number" class="form-control form-control-sm" id="dim_package_height_with_hook" step="any" min="0"></div>
+              <div class="col-2"><label class="form-label mb-0">高不含J钩 cm</label>
+                <input type="number" class="form-control form-control-sm" id="dim_package_height_no_hook" step="any" min="0"></div>
+              <div class="col-2"><label class="form-label mb-0">毛重 kg</label>
+                <input type="number" class="form-control form-control-sm" id="dim_package_gross_weight_kg" step="any" min="0"></div>
+            </div>
+
+            <!-- PDQ/展示盒 (collapsible) -->
+            <h6 class="section-header mt-3">
+              <a class="text-decoration-none" data-bs-toggle="collapse" href="#dim-display-section" role="button" aria-expanded="false">
+                PDQ / 展示盒 <small class="text-muted">(点击展开)</small>
+              </a>
+            </h6>
+            <div class="collapse" id="dim-display-section">
+              <div class="row g-2 align-items-center mb-2">
+                <div class="col-2"><label class="form-label mb-0">长 cm</label>
+                  <input type="number" class="form-control form-control-sm" id="dim_display_width" step="any" min="0"></div>
+                <div class="col-2"><label class="form-label mb-0">宽 cm</label>
+                  <input type="number" class="form-control form-control-sm" id="dim_display_depth" step="any" min="0"></div>
+                <div class="col-2"><label class="form-label mb-0">组装高 cm</label>
+                  <input type="number" class="form-control form-control-sm" id="dim_display_closed_height" step="any" min="0"></div>
+                <div class="col-2"><label class="form-label mb-0">打开高 cm</label>
+                  <input type="number" class="form-control form-control-sm" id="dim_display_open_height" step="any" min="0"></div>
+                <div class="col-2"><label class="form-label mb-0">总重量 kg</label>
+                  <input type="number" class="form-control form-control-sm" id="dim_display_total_weight_kg" step="any" min="0"></div>
+              </div>
+            </div>
+
+            <!-- 内箱资料 -->
+            <h6 class="section-header mt-3">内箱资料</h6>
+            <div class="row g-2 align-items-end mb-2">
+              <div class="col-auto"><label class="form-label mb-0 text-muted" style="width:90px">订箱尺寸<br><small>(用于采购订箱)</small></label></div>
+              <div class="col-2"><label class="form-label mb-0">长 cm</label>
+                <input type="number" class="form-control form-control-sm" id="dim_inner_order_width" step="any" min="0"></div>
+              <div class="col-2"><label class="form-label mb-0">宽 cm</label>
+                <input type="number" class="form-control form-control-sm" id="dim_inner_order_depth" step="any" min="0"></div>
+              <div class="col-2"><label class="form-label mb-0">高 cm</label>
+                <input type="number" class="form-control form-control-sm" id="dim_inner_order_height" step="any" min="0"></div>
+              <div class="col-2"><label class="form-label mb-0">净重 kg</label>
+                <input type="number" class="form-control form-control-sm" id="dim_inner_order_nw" step="any" min="0"></div>
+              <div class="col-2"><label class="form-label mb-0">毛重 kg</label>
+                <input type="number" class="form-control form-control-sm" id="dim_inner_order_gw" step="any" min="0"></div>
+            </div>
+            <div class="row g-2 align-items-end mb-2">
+              <div class="col-auto"><label class="form-label mb-0 text-muted" style="width:90px">量箱尺寸<br><small>(用于装柜)</small></label></div>
+              <div class="col-2"><label class="form-label mb-0">长 cm</label>
+                <input type="number" class="form-control form-control-sm" id="dim_inner_measure_width" step="any" min="0"></div>
+              <div class="col-2"><label class="form-label mb-0">宽 cm</label>
+                <input type="number" class="form-control form-control-sm" id="dim_inner_measure_depth" step="any" min="0"></div>
+              <div class="col-2"><label class="form-label mb-0">高 cm</label>
+                <input type="number" class="form-control form-control-sm" id="dim_inner_measure_height" step="any" min="0"></div>
+              <div class="col-2"><label class="form-label mb-0">净重 kg</label>
+                <input type="number" class="form-control form-control-sm" id="dim_inner_measure_nw" step="any" min="0"></div>
+              <div class="col-2"><label class="form-label mb-0">毛重 kg</label>
+                <input type="number" class="form-control form-control-sm" id="dim_inner_measure_gw" step="any" min="0"></div>
+            </div>
+
+            <!-- 外箱资料 -->
+            <h6 class="section-header mt-3">外箱资料</h6>
+            <div class="row g-2 align-items-end mb-2">
+              <div class="col-auto"><label class="form-label mb-0 text-muted" style="width:90px">订箱尺寸<br><small>(用于采购订箱)</small></label></div>
+              <div class="col-2"><label class="form-label mb-0">长 cm</label>
+                <input type="number" class="form-control form-control-sm" id="dim_outer_order_width" step="any" min="0"></div>
+              <div class="col-2"><label class="form-label mb-0">宽 cm</label>
+                <input type="number" class="form-control form-control-sm" id="dim_outer_order_depth" step="any" min="0"></div>
+              <div class="col-2"><label class="form-label mb-0">高 cm</label>
+                <input type="number" class="form-control form-control-sm" id="dim_outer_order_height" step="any" min="0"></div>
+              <div class="col-2"><label class="form-label mb-0">净重 kg</label>
+                <input type="number" class="form-control form-control-sm" id="dim_outer_order_nw" step="any" min="0"></div>
+              <div class="col-2"><label class="form-label mb-0">毛重 kg</label>
+                <input type="number" class="form-control form-control-sm" id="dim_outer_order_gw" step="any" min="0"></div>
+            </div>
+            <div class="row g-2 align-items-end mb-2">
+              <div class="col-auto"><label class="form-label mb-0 text-muted" style="width:90px">量箱尺寸<br><small>(用于装柜)</small></label></div>
+              <div class="col-2"><label class="form-label mb-0">长 cm</label>
+                <input type="number" class="form-control form-control-sm" id="dim_outer_measure_width" step="any" min="0"></div>
+              <div class="col-2"><label class="form-label mb-0">宽 cm</label>
+                <input type="number" class="form-control form-control-sm" id="dim_outer_measure_depth" step="any" min="0"></div>
+              <div class="col-2"><label class="form-label mb-0">高 cm</label>
+                <input type="number" class="form-control form-control-sm" id="dim_outer_measure_height" step="any" min="0"></div>
+              <div class="col-2"><label class="form-label mb-0">净重 kg</label>
+                <input type="number" class="form-control form-control-sm" id="dim_outer_measure_nw" step="any" min="0"></div>
+              <div class="col-2"><label class="form-label mb-0">毛重 kg</label>
+                <input type="number" class="form-control form-control-sm" id="dim_outer_measure_gw" step="any" min="0"></div>
+            </div>
+
+          </div>
+        </div>
       </div>
 
-      <!-- ─── Tab 5: 生产注意事项 (placeholder) ─────────────────────── -->
+      <!-- ─── Tab 5: 生产注意事项 ──────────────────────────────────────── -->
       <div class="tab-pane fade" id="tab-notes" role="tabpanel">
-        <p class="text-muted">生产注意事项（待实现）</p>
+        <div class="card">
+          <div class="card-body">
+            <div class="row g-3">
+
+              <div class="col-12">
+                <label class="form-label fw-semibold" for="notes_product_intro">产品介绍</label>
+                <textarea class="form-control" id="notes_product_intro" rows="4" placeholder="简要描述产品用途、特点及目标用户群体"></textarea>
+              </div>
+
+              <div class="col-12">
+                <label class="form-label fw-semibold" for="notes_function_desc">功能玩法描述</label>
+                <textarea class="form-control" id="notes_function_desc" rows="4" placeholder="描述产品的主要功能及玩法步骤"></textarea>
+              </div>
+
+              <div class="col-12">
+                <label class="form-label fw-semibold" for="notes_test_requirements">测试要求</label>
+                <textarea class="form-control" id="notes_test_requirements" rows="3" placeholder="列出需要通过的测试标准及具体要求"></textarea>
+              </div>
+
+              <div class="col-12">
+                <label class="form-label fw-semibold" for="notes_injection_notes">啤塑注意事项</label>
+                <textarea class="form-control" id="notes_injection_notes" rows="4" placeholder="注塑过程中的温度、压力、用料等注意事项"></textarea>
+              </div>
+
+              <div class="col-12">
+                <label class="form-label fw-semibold" for="notes_assembly_notes">装配 / 贴水纸注意事项</label>
+                <textarea class="form-control" id="notes_assembly_notes" rows="4" placeholder="装配顺序、贴纸位置及方向、手力控制等注意事项"></textarea>
+              </div>
+
+              <div class="col-12">
+                <label class="form-label fw-semibold" for="notes_packaging_notes">包装注意事项</label>
+                <textarea class="form-control" id="notes_packaging_notes" rows="4" placeholder="包装方式、装箱要求、标签张贴位置等注意事项"></textarea>
+              </div>
+
+            </div>
+          </div>
+        </div>
       </div>
 
-      <!-- ─── Tab 6: 作业指导书 (placeholder) ───────────────────────── -->
+      <!-- ─── Tab 6: 作业指导书 ────────────────────────────────────────── -->
       <div class="tab-pane fade" id="tab-sop" role="tabpanel">
-        <p class="text-muted">作业指导书（待实现）</p>
+        <div id="sop-cards-container"></div>
+        <button class="btn btn-outline-primary mt-2" onclick="addSopCard()">+ 添加工序</button>
       </div>
 
     </div><!-- /tab-content -->
@@ -283,6 +451,68 @@
       // Tab 3 — 外购件
       const purchases = product.purchases || [];
       purchases.forEach(row => addPurchaseRow(row));
+
+      // Tab 4 — 尺寸重量
+      const dim = product.dimensions || {};
+      setValue('dim_packing_method',    dim.packing_method);
+      setValue('dim_inner_box_material', dim.inner_box_material);
+      setValue('dim_outer_box_material', dim.outer_box_material);
+      const dp = dim.product || {};
+      setValue('dim_product_stage',     dp.stage);
+      setValue('dim_product_width',     dp.width);
+      setValue('dim_product_depth',     dp.depth);
+      setValue('dim_product_height',    dp.height);
+      setValue('dim_product_weight_kg', dp.weight_kg);
+      const dpk = dim.package || {};
+      setValue('dim_package_stage',           dpk.stage);
+      setValue('dim_package_width',           dpk.width);
+      setValue('dim_package_depth',           dpk.depth);
+      setValue('dim_package_height_with_hook', dpk.height_with_hook);
+      setValue('dim_package_height_no_hook',   dpk.height_no_hook);
+      setValue('dim_package_gross_weight_kg',  dpk.gross_weight_kg);
+      const ddisp = dim.display || {};
+      setValue('dim_display_width',        ddisp.width);
+      setValue('dim_display_depth',        ddisp.depth);
+      setValue('dim_display_closed_height', ddisp.closed_height);
+      setValue('dim_display_open_height',   ddisp.open_height);
+      setValue('dim_display_total_weight_kg', ddisp.total_weight_kg);
+      const ico = dim.inner_carton_order || {};
+      setValue('dim_inner_order_width',  ico.width);
+      setValue('dim_inner_order_depth',  ico.depth);
+      setValue('dim_inner_order_height', ico.height);
+      setValue('dim_inner_order_nw',     ico.nw_kg);
+      setValue('dim_inner_order_gw',     ico.gw_kg);
+      const icm = dim.inner_carton_measure || {};
+      setValue('dim_inner_measure_width',  icm.width);
+      setValue('dim_inner_measure_depth',  icm.depth);
+      setValue('dim_inner_measure_height', icm.height);
+      setValue('dim_inner_measure_nw',     icm.nw_kg);
+      setValue('dim_inner_measure_gw',     icm.gw_kg);
+      const oco = dim.outer_carton_order || {};
+      setValue('dim_outer_order_width',  oco.width);
+      setValue('dim_outer_order_depth',  oco.depth);
+      setValue('dim_outer_order_height', oco.height);
+      setValue('dim_outer_order_nw',     oco.nw_kg);
+      setValue('dim_outer_order_gw',     oco.gw_kg);
+      const ocm = dim.outer_carton_measure || {};
+      setValue('dim_outer_measure_width',  ocm.width);
+      setValue('dim_outer_measure_depth',  ocm.depth);
+      setValue('dim_outer_measure_height', ocm.height);
+      setValue('dim_outer_measure_nw',     ocm.nw_kg);
+      setValue('dim_outer_measure_gw',     ocm.gw_kg);
+
+      // Tab 5 — 生产注意事项
+      const notes = product.production_notes || {};
+      setValue('notes_product_intro',     notes.product_intro);
+      setValue('notes_function_desc',     notes.function_desc);
+      setValue('notes_test_requirements', notes.test_requirements);
+      setValue('notes_injection_notes',   notes.injection_notes);
+      setValue('notes_assembly_notes',    notes.assembly_notes);
+      setValue('notes_packaging_notes',   notes.packaging_notes);
+
+      // Tab 6 — 作业指导书
+      const wis = product.work_instructions || [];
+      wis.forEach(wi => addSopCard(wi));
     }
 
     function setValue(id, val) {
@@ -321,6 +551,76 @@
         'customs_name', 'color', 'usage_ratio', 'order_qty', 'unit_weight_g',
         'supplier', 'surface_treatment', 'purpose', 'notes'
       ]);
+
+      // Tab 4 — 尺寸重量
+      data.dimensions = {
+        packing_method:    document.getElementById('dim_packing_method').value,
+        inner_box_material: document.getElementById('dim_inner_box_material').value,
+        outer_box_material: document.getElementById('dim_outer_box_material').value,
+        product: {
+          stage:     document.getElementById('dim_product_stage').value,
+          width:     numOrNull(document.getElementById('dim_product_width').value),
+          depth:     numOrNull(document.getElementById('dim_product_depth').value),
+          height:    numOrNull(document.getElementById('dim_product_height').value),
+          weight_kg: numOrNull(document.getElementById('dim_product_weight_kg').value),
+        },
+        package: {
+          stage:           document.getElementById('dim_package_stage').value,
+          width:           numOrNull(document.getElementById('dim_package_width').value),
+          depth:           numOrNull(document.getElementById('dim_package_depth').value),
+          height_with_hook: numOrNull(document.getElementById('dim_package_height_with_hook').value),
+          height_no_hook:  numOrNull(document.getElementById('dim_package_height_no_hook').value),
+          gross_weight_kg: numOrNull(document.getElementById('dim_package_gross_weight_kg').value),
+        },
+        display: {
+          width:          numOrNull(document.getElementById('dim_display_width').value),
+          depth:          numOrNull(document.getElementById('dim_display_depth').value),
+          closed_height:  numOrNull(document.getElementById('dim_display_closed_height').value),
+          open_height:    numOrNull(document.getElementById('dim_display_open_height').value),
+          total_weight_kg: numOrNull(document.getElementById('dim_display_total_weight_kg').value),
+        },
+        inner_carton_order: {
+          width:  numOrNull(document.getElementById('dim_inner_order_width').value),
+          depth:  numOrNull(document.getElementById('dim_inner_order_depth').value),
+          height: numOrNull(document.getElementById('dim_inner_order_height').value),
+          nw_kg:  numOrNull(document.getElementById('dim_inner_order_nw').value),
+          gw_kg:  numOrNull(document.getElementById('dim_inner_order_gw').value),
+        },
+        inner_carton_measure: {
+          width:  numOrNull(document.getElementById('dim_inner_measure_width').value),
+          depth:  numOrNull(document.getElementById('dim_inner_measure_depth').value),
+          height: numOrNull(document.getElementById('dim_inner_measure_height').value),
+          nw_kg:  numOrNull(document.getElementById('dim_inner_measure_nw').value),
+          gw_kg:  numOrNull(document.getElementById('dim_inner_measure_gw').value),
+        },
+        outer_carton_order: {
+          width:  numOrNull(document.getElementById('dim_outer_order_width').value),
+          depth:  numOrNull(document.getElementById('dim_outer_order_depth').value),
+          height: numOrNull(document.getElementById('dim_outer_order_height').value),
+          nw_kg:  numOrNull(document.getElementById('dim_outer_order_nw').value),
+          gw_kg:  numOrNull(document.getElementById('dim_outer_order_gw').value),
+        },
+        outer_carton_measure: {
+          width:  numOrNull(document.getElementById('dim_outer_measure_width').value),
+          depth:  numOrNull(document.getElementById('dim_outer_measure_depth').value),
+          height: numOrNull(document.getElementById('dim_outer_measure_height').value),
+          nw_kg:  numOrNull(document.getElementById('dim_outer_measure_nw').value),
+          gw_kg:  numOrNull(document.getElementById('dim_outer_measure_gw').value),
+        },
+      };
+
+      // Tab 5 — 生产注意事项
+      data.production_notes = {
+        product_intro:     document.getElementById('notes_product_intro').value,
+        function_desc:     document.getElementById('notes_function_desc').value,
+        test_requirements: document.getElementById('notes_test_requirements').value,
+        injection_notes:   document.getElementById('notes_injection_notes').value,
+        assembly_notes:    document.getElementById('notes_assembly_notes').value,
+        packaging_notes:   document.getElementById('notes_packaging_notes').value,
+      };
+
+      // Tab 6 — 作业指导书
+      data.work_instructions = collectWorkInstructions();
 
       return data;
     }
@@ -488,6 +788,113 @@
     function numVal(val) {
       if (val === undefined || val === null || val === '') return '';
       return val;
+    }
+
+    // ─── SOP (作业指导书) ────────────────────────────────────────────────────
+
+    function renumberSopCards() {
+      document.querySelectorAll('#sop-cards-container .sop-card').forEach((card, idx) => {
+        const badge = card.querySelector('.sop-seq');
+        if (badge) badge.textContent = idx + 1;
+      });
+    }
+
+    function addSopPartRow(tbody, data) {
+      data = data || {};
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td><input type="text" class="form-control form-control-sm" value="${esc(data.name)}" placeholder="零件名称"></td>
+        <td><input type="text" class="form-control form-control-sm" value="${esc(data.material_spec)}" placeholder="材料规格"></td>
+        <td><input type="text" class="form-control form-control-sm" value="${esc(data.qty)}" placeholder="1"></td>
+        <td><button type="button" class="btn btn-sm btn-outline-danger" onclick="this.closest('tr').remove()">删</button></td>
+      `;
+      tbody.appendChild(tr);
+    }
+
+    function addSopCard(data) {
+      data = data || {};
+      const container = document.getElementById('sop-cards-container');
+      const seq = container.querySelectorAll('.sop-card').length + 1;
+
+      const card = document.createElement('div');
+      card.className = 'card mb-3 sop-card';
+      card.innerHTML = `
+        <div class="card-header d-flex align-items-center">
+          <span class="me-2">工序</span>
+          <span class="sop-seq badge bg-primary me-2">${seq}</span>
+          <input type="text" class="form-control form-control-sm me-2" style="width:200px" placeholder="工序名称" data-field="name" value="${esc(data.name)}">
+          <label class="me-1 mb-0">操作时间:</label>
+          <input type="text" class="form-control form-control-sm me-2" style="width:80px" placeholder="如 9S" data-field="cycle_time" value="${esc(data.cycle_time)}">
+          <button class="btn btn-sm btn-outline-danger ms-auto btn-delete-sop">删除工序</button>
+        </div>
+        <div class="card-body">
+          <div class="row">
+            <div class="col-md-6">
+              <label class="fw-bold mb-1">使用零件</label>
+              <table class="table table-sm table-bordered sop-parts-table">
+                <thead><tr><th>名称</th><th>材料规格</th><th>用量</th><th></th></tr></thead>
+                <tbody></tbody>
+              </table>
+              <button type="button" class="btn btn-sm btn-outline-secondary btn-add-sop-part">+ 添加零件</button>
+            </div>
+            <div class="col-md-6">
+              <label class="fw-bold mb-1">作业内容 (每行一个步骤)</label>
+              <textarea class="form-control mb-2" rows="5" data-field="steps" placeholder="1. 第一步&#10;2. 第二步">${esc(data.steps)}</textarea>
+              <label class="fw-bold mb-1">作业工具 (逗号分隔)</label>
+              <input type="text" class="form-control mb-2" data-field="tools" placeholder="布条, 清水, 手套" value="${esc(data.tools)}">
+              <label class="fw-bold mb-1">注意事项 (逗号分隔)</label>
+              <input type="text" class="form-control" data-field="cautions" placeholder="温度不能过高, 不能太用力" value="${esc(data.cautions)}">
+            </div>
+          </div>
+        </div>
+      `;
+
+      // Bind delete button
+      card.querySelector('.btn-delete-sop').addEventListener('click', () => {
+        card.remove();
+        renumberSopCards();
+      });
+
+      // Bind add-part button
+      card.querySelector('.btn-add-sop-part').addEventListener('click', () => {
+        const tbody = card.querySelector('.sop-parts-table tbody');
+        addSopPartRow(tbody);
+      });
+
+      // Populate existing parts
+      const parts = data.parts || [];
+      const tbody = card.querySelector('.sop-parts-table tbody');
+      parts.forEach(p => addSopPartRow(tbody, p));
+
+      container.appendChild(card);
+    }
+
+    function collectWorkInstructions() {
+      const cards = document.querySelectorAll('#sop-cards-container .sop-card');
+      return Array.from(cards).map(card => {
+        const getField = (field) => {
+          const el = card.querySelector(`[data-field="${field}"]`);
+          return el ? el.value : '';
+        };
+        // Collect parts from the parts table
+        const partRows = card.querySelectorAll('.sop-parts-table tbody tr');
+        const parts = Array.from(partRows).map(tr => {
+          const inputs = tr.querySelectorAll('input');
+          return {
+            name:          inputs[0] ? inputs[0].value : '',
+            material_spec: inputs[1] ? inputs[1].value : '',
+            qty:           inputs[2] ? inputs[2].value : '',
+          };
+        });
+        return {
+          name:       getField('name'),
+          cycle_time: getField('cycle_time'),
+          steps:      getField('steps'),
+          tools:      getField('tools'),
+          cautions:   getField('cautions'),
+          parts,
+        };
+      });
     }
 
     // ─── Init ────────────────────────────────────────────────────────────────

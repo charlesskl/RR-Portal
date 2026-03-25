@@ -2,6 +2,7 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
+const archiver = require('archiver');
 
 // ---------------------------------------------------------------------------
 // Environment
@@ -304,6 +305,83 @@ app.get('/api/config', (req, res) => {
 app.put('/api/config', async (req, res) => {
   await saveConfig(req.body);
   res.json(req.body);
+});
+
+// ---------------------------------------------------------------------------
+// API Routes — Generate Excel
+// ---------------------------------------------------------------------------
+const moldTable = require('./generators/mold-table');
+const cartonSpec = require('./generators/carton-spec');
+const purchaseList = require('./generators/purchase-list');
+const productionNotes = require('./generators/production-notes');
+const workInstructions = require('./generators/work-instructions');
+
+const GENERATORS = {
+  mold: { gen: moldTable, suffix: '排模表' },
+  carton: { gen: cartonSpec, suffix: '外箱资料' },
+  purchase: { gen: purchaseList, suffix: '外购清单' },
+  notes: { gen: productionNotes, suffix: '生产注意事项' },
+  sop: { gen: workInstructions, suffix: '作业指导书' },
+};
+
+// Generate all → ZIP download
+app.post('/api/products/:id/generate', async (req, res) => {
+  try {
+    const product = loadProduct(req.params.id);
+    if (!product) return res.status(404).json({ error: 'Product not found' });
+
+    const config = loadConfig();
+    const factory = config.factories.find(f => f.name === product.factory) || config.factories[0];
+
+    const zipName = `${product.product_number}_${product.product_name}_工程资料.zip`;
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(zipName)}`);
+
+    const archive = archiver('zip', { zlib: { level: 5 } });
+    archive.pipe(res);
+
+    for (const [key, { gen, suffix }] of Object.entries(GENERATORS)) {
+      const wb = await gen.generate(product, factory);
+      const buffer = await wb.xlsx.writeBuffer();
+      const fileName = `${product.product_number} ${product.product_name}${suffix}.xlsx`;
+      archive.append(buffer, { name: fileName });
+    }
+
+    await archive.finalize();
+  } catch (err) {
+    console.error('Generate error:', err);
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Failed to generate Excel files' });
+    }
+  }
+});
+
+// Generate single document
+app.post('/api/products/:id/generate/:type', async (req, res) => {
+  try {
+    const { type } = req.params;
+    if (!GENERATORS[type]) return res.status(400).json({ error: 'Invalid type. Valid: ' + Object.keys(GENERATORS).join(', ') });
+
+    const product = loadProduct(req.params.id);
+    if (!product) return res.status(404).json({ error: 'Product not found' });
+
+    const config = loadConfig();
+    const factory = config.factories.find(f => f.name === product.factory) || config.factories[0];
+    const { gen, suffix } = GENERATORS[type];
+
+    const wb = await gen.generate(product, factory);
+    const buffer = await wb.xlsx.writeBuffer();
+    const fileName = `${product.product_number} ${product.product_name}${suffix}.xlsx`;
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(fileName)}`);
+    res.send(Buffer.from(buffer));
+  } catch (err) {
+    console.error('Generate error:', err);
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Failed to generate Excel file' });
+    }
+  }
 });
 
 // ---------------------------------------------------------------------------

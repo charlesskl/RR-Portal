@@ -15,6 +15,7 @@ jobs:
           host: ${{ secrets.CLOUD_HOST }}
           username: ${{ secrets.CLOUD_USER }}
           key: ${{ secrets.CLOUD_SSH_KEY }}
+          command_timeout: 30m
           script: |
             cd /opt/rr-portal
             git fetch origin

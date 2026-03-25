@@ -1,0 +1,8 @@
+{
+  "factories": [
+    { "name": "华登", "full_name": "东莞华登塑胶制品有限公司", "logo": "huadeng.png" },
+    { "name": "兴信", "full_name": "东莞兴信塑胶制品有限公司", "logo": "xingxin.png" }
+  ],
+  "engineers": [],
+  "suppliers": []
+}

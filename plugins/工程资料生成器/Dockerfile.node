@@ -1,0 +1,9 @@
+FROM node:20-alpine
+WORKDIR /app
+RUN apk add --no-cache curl
+COPY plugins/工程资料生成器/package.json ./
+RUN npm install --production
+COPY plugins/工程资料生成器/ ./
+EXPOSE 3000
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 CMD curl -f http://localhost:3000/health || exit 1
+CMD ["node", "server.js"]

@@ -1,0 +1,209 @@
+#!/usr/bin/env bash
+# ============================================================
+# PR Processor — End-to-end PR processing pipeline
+# ============================================================
+# Checks out a PR branch, reads its context, runs QC with
+# auto-fix, pushes fix commits, and auto-merges on pass or
+# escalates via Telegram after 5 failed QC rounds. After
+# merge, triggers deployment for affected apps.
+#
+# Usage: pr-processor.sh <pr-number>
+#
+# Exit 0: PR processed successfully (merged + deployed, or skipped)
+# Exit 1: PR processing failed (escalation sent)
+# ============================================================
+
+set -euo pipefail
+
+# --- Argument parsing ---
+PR_NUMBER="${1:?Usage: pr-processor.sh <pr-number>}"
+
+# --- Resolve paths ---
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# --- Source utilities ---
+source "${SCRIPT_DIR}/utils/telegram.sh"
+
+# --- Per-PR logging ---
+mkdir -p "${REPO_ROOT}/devops/logs"
+LOG_FILE="${REPO_ROOT}/devops/logs/pr-${PR_NUMBER}-$(date +%Y%m%d-%H%M%S).log"
+exec > >(tee -a "${LOG_FILE}") 2>&1
+
+echo "=== PR-PROCESSOR: Starting processing for PR #${PR_NUMBER} ==="
+echo "=== PR-PROCESSOR: Log file: ${LOG_FILE} ==="
+
+# --- Cleanup trap: always return to main branch ---
+cleanup() {
+  echo "=== PR-PROCESSOR: Cleanup — returning to main branch ==="
+  git checkout main 2>/dev/null || true
+  git branch -D "pr-${PR_NUMBER}" 2>/dev/null || true
+}
+trap cleanup EXIT
+
+# ============================================================
+# Step 1: Read PR context (PR-02)
+# ============================================================
+echo "=== PR-PROCESSOR: Reading PR context ==="
+
+PR_JSON=$(gh pr view "$PR_NUMBER" --json title,body,headRefName,baseRefName,author,files)
+
+# Extract fields using python3
+HEAD_BRANCH=$(python3 -c "
+import json, sys
+data = json.loads(sys.stdin.read())
+print(data['headRefName'])
+" <<< "$PR_JSON")
+
+PR_TITLE=$(python3 -c "
+import json, sys
+data = json.loads(sys.stdin.read())
+print(data['title'])
+" <<< "$PR_JSON")
+
+PR_AUTHOR=$(python3 -c "
+import json, sys
+data = json.loads(sys.stdin.read())
+print(data['author']['login'])
+" <<< "$PR_JSON")
+
+echo "=== PR-PROCESSOR: PR #${PR_NUMBER} — '${PR_TITLE}' by ${PR_AUTHOR} ==="
+echo "=== PR-PROCESSOR: Branch: ${HEAD_BRANCH} ==="
+
+# Read PR diff for logging
+echo "=== PR-PROCESSOR: Reading PR diff ==="
+PR_DIFF=$(gh pr diff "$PR_NUMBER" 2>/dev/null || echo "(no diff available)")
+echo "$PR_DIFF" | head -50
+echo "=== PR-PROCESSOR: (diff truncated for log) ==="
+
+# Identify affected apps from changed file paths
+AFFECTED_APPS=$(python3 -c "
+import json, sys
+data = json.loads(sys.stdin.read())
+apps = set()
+for f in data.get('files', []):
+    path = f.get('path', '')
+    parts = path.split('/')
+    if len(parts) >= 2 and parts[0] == 'apps':
+        apps.add(parts[1])
+for app in sorted(apps):
+    print(app)
+" <<< "$PR_JSON")
+
+if [ -z "$AFFECTED_APPS" ]; then
+  echo "=== PR-PROCESSOR: No app changes detected in PR #${PR_NUMBER}. Skipping. ==="
+  exit 0
+fi
+
+echo "=== PR-PROCESSOR: Affected apps: ${AFFECTED_APPS} ==="
+
+# ============================================================
+# Step 2: Checkout PR branch (PR-03)
+# ============================================================
+echo "=== PR-PROCESSOR: Checking out PR branch ==="
+
+git fetch origin "pull/${PR_NUMBER}/head:pr-${PR_NUMBER}"
+git checkout "pr-${PR_NUMBER}"
+
+echo "=== PR-PROCESSOR: On branch pr-${PR_NUMBER} ==="
+
+# ============================================================
+# Step 3: Run QC pipeline with fix rounds (PR-04, PR-05)
+# ============================================================
+QC_ALL_PASSED=true
+FAILED_APPS=""
+ALL_FAILED_CHECKS=""
+
+while IFS= read -r APP_NAME; do
+  [ -z "$APP_NAME" ] && continue
+
+  APP_DIR="apps/${APP_NAME}"
+
+  if [ ! -d "${REPO_ROOT}/${APP_DIR}" ]; then
+    echo "=== PR-PROCESSOR: WARNING — app directory not found: ${APP_DIR} ==="
+    continue
+  fi
+
+  echo "=== PR-PROCESSOR: Running QC for ${APP_NAME} ==="
+
+  QC_OUTPUT=""
+  QC_EXIT=0
+  if QC_OUTPUT=$("${SCRIPT_DIR}/qc-runner.sh" "${APP_DIR}" 2>&1); then
+    echo "=== PR-PROCESSOR: QC PASSED for ${APP_NAME} ==="
+  else
+    QC_EXIT=1
+    echo "=== PR-PROCESSOR: QC FAILED for ${APP_NAME} ==="
+    QC_ALL_PASSED=false
+    FAILED_APPS="${FAILED_APPS} ${APP_NAME}"
+
+    # Extract which checks failed from QC output
+    FAILED_CHECKS=$(echo "$QC_OUTPUT" | grep -o 'Still failing: .*' | sed 's/Still failing: //' || echo "unknown")
+    ALL_FAILED_CHECKS="${ALL_FAILED_CHECKS} ${APP_NAME}:${FAILED_CHECKS}"
+  fi
+
+  echo "$QC_OUTPUT"
+done <<< "$AFFECTED_APPS"
+
+# Push any fix commits back to PR branch
+FIX_COMMITS=$(git log --oneline "origin/${HEAD_BRANCH}..HEAD" 2>/dev/null || true)
+if [ -n "$FIX_COMMITS" ]; then
+  echo "=== PR-PROCESSOR: Pushing fix commits to PR branch ==="
+  echo "$FIX_COMMITS"
+  git push origin "pr-${PR_NUMBER}:${HEAD_BRANCH}"
+  echo "=== PR-PROCESSOR: Fix commits pushed ==="
+else
+  echo "=== PR-PROCESSOR: No fix commits to push ==="
+fi
+
+# ============================================================
+# Step 4: Merge or escalate
+# ============================================================
+if [ "$QC_ALL_PASSED" = "true" ]; then
+  # --- Auto-merge on pass (PR-06) ---
+  echo "=== PR-PROCESSOR: All QC checks passed — merging PR #${PR_NUMBER} ==="
+
+  gh pr merge "$PR_NUMBER" --squash --delete-branch \
+    --body "Auto-merged by DevOps agent. All QC checks passed."
+
+  echo "=== PR-PROCESSOR: PR #${PR_NUMBER} merged successfully ==="
+
+  # Return to main and pull latest
+  git checkout main
+  git pull origin main
+
+  # Trigger deploy for each affected app
+  while IFS= read -r APP_NAME; do
+    [ -z "$APP_NAME" ] && continue
+
+    echo "=== PR-PROCESSOR: Deploying ${APP_NAME} ==="
+
+    if "${SCRIPT_DIR}/deploy.sh" "$APP_NAME"; then
+      echo "=== PR-PROCESSOR: Deploy SUCCESS for ${APP_NAME} ==="
+    else
+      echo "=== PR-PROCESSOR: Deploy FAILED for ${APP_NAME} ==="
+    fi
+  done <<< "$AFFECTED_APPS"
+
+  echo "=== PR-PROCESSOR: PR #${PR_NUMBER} processing complete ==="
+  exit 0
+
+else
+  # --- Escalation on failure (PR-07) ---
+  echo "=== PR-PROCESSOR: QC failed after 5 rounds — escalating PR #${PR_NUMBER} ==="
+
+  # Build escalation for each failed app
+  while IFS= read -r APP_NAME; do
+    [ -z "$APP_NAME" ] && continue
+
+    # Extract this app's failed checks
+    APP_FAILED=$(echo "$ALL_FAILED_CHECKS" | tr ' ' '\n' | grep "^${APP_NAME}:" | sed "s/^${APP_NAME}://" || echo "unknown")
+
+    ESCALATION_MSG=$(format_escalation "$APP_NAME" "$PR_NUMBER" "$APP_FAILED")
+    send_telegram "$ESCALATION_MSG"
+
+    echo "=== PR-PROCESSOR: Escalation sent for ${APP_NAME} ==="
+  done <<< "$FAILED_APPS"
+
+  echo "=== PR-PROCESSOR: PR #${PR_NUMBER} left open for manual review ==="
+  exit 1
+fi

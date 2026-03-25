@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "phase": "prepare",
+  "app_name": "",
+  "timestamp": "",
+  "status": "success|failed",
+  "action": "onboard|update",
+  "qc_rounds": 0,
+  "qc_fixes_applied": [],
+  "qc_checks_passed": [],
+  "qc_checks_failed": [],
+  "dockerfile_generated": false,
+  "health_endpoint_added": false,
+  "error": null
+}

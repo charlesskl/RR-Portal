@@ -1,0 +1,89 @@
+# RR-Portal — Docker Compose
+#
+# This file is managed by the DevOps agent. Do not edit manually.
+# Apps are added here automatically during onboarding (Phase 2+).
+#
+# Example app entry (added by agent):
+#
+#   app-name:
+#     build:
+#       context: ./apps/app-name
+#       dockerfile: Dockerfile
+#     ports:
+#       - "3001:3000"
+#     env_file:
+#       - ./apps/app-name/.env
+#     restart: unless-stopped
+#     logging:
+#       driver: json-file
+#       options:
+#         max-size: "10m"
+#         max-file: "3"
+#     healthcheck:
+#       test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/health"]
+#       interval: 30s
+#       timeout: 10s
+#       retries: 3
+
+services:
+  task-api:
+    build:
+      context: ./apps/task-api
+      dockerfile: Dockerfile
+    ports:
+      - "3001:8080"
+    env_file:
+      - ./apps/task-api/.env
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  new-product-schedule:
+    build:
+      context: ./plugins/new-product-schedule
+      dockerfile: Dockerfile
+    env_file:
+      - ./plugins/new-product-schedule/.env
+    volumes:
+      - "./plugins/new-product-schedule/data:/app/data"
+      - "./plugins/new-product-schedule/uploads:/app/uploads"
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  figure-mold-cost-system:
+    build:
+      context: ./plugins/figure-mold-cost-system
+      dockerfile: Dockerfile
+    env_file:
+      - ./plugins/figure-mold-cost-system/.env
+    volumes:
+      - "./plugins/figure-mold-cost-system/data:/app/data"
+      - "./plugins/figure-mold-cost-system/public/uploads:/app/public/uploads"
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3

@@ -18,14 +18,15 @@ Always respond in 简体中文 (Simplified Chinese).
 
 ```
 RR Portal
+├── apps/            — 独立应用（非 plugin_sdk）
+│   ├── task-api/    — 任务 API (Node.js)
+│   └── zouhuo/      — 走货明细系统 (Node.js)
 ├── core/            — 核心服务 (FastAPI, 用户/权限/插件注册)
+├── devops/          — DevOps 自动化（agent、脚本、部署模板）
 ├── frontend/        — 前端静态文件 (Nginx托管)
 ├── plugin_sdk/      — 插件SDK (所有插件共用)
 ├── plugins/         — 插件目录（按 repo 名命名）
-│   ├── RR-production-system/  — 工程啤办单 (Engineering)
-│   ├── business/              — 业务部 (Business)
-│   └── indonesia/             — 印尼 (Indonesia)
-├── services/        — 独立服务
+│   └── 工程啤办单/   — 工程啤办单 (Engineering, Node.js)
 ├── nginx/           — Nginx配置
 └── docker-compose.yml
 ```
@@ -39,7 +40,7 @@ RR Portal 支持两种插件类型：
 - 数据存储：JSON 文件 + bind mount（`./plugins/xxx/data:/app/data`）
 - 认证：自行实现（如 PIN 验证、X-User header）
 - Nginx：通过子路径代理（如 `/rr/` → `rr-production:3000`）
-- **当前 Standalone 插件：工程啤办单 (Node.js)、3D打印 (Node.js)、印尼小组 (Node.js)、排期录入系统 (Python/Flask)**
+- **当前 Standalone 服务：工程啤办单 (Node.js, plugins/)、zouhuo (Node.js, apps/)、task-api (Node.js, apps/)**
 
 ### 2. Plugin SDK 插件（Python/FastAPI）
 使用 plugin_sdk 统一架构，适用于需要核心权限系统和 PostgreSQL 的场景。
@@ -226,13 +227,24 @@ volumes:
 - [ ] 从浏览器访问确认功能正常
 - [ ] 确认数据读写正常（创建数据 → 重启容器 → 数据仍在）
 
-## 插件注册表
+## App 注册表
 
-| 文件夹 (repo名) | 显示名 | 部门 | 类型 | GitHub Repo |
-|-----------------|--------|------|------|-------------|
-| 工程啤办单 | 工程啤办单 | Engineering | Standalone (Node.js) | https://github.com/hufan4308-blip/RR-production-system |
-| 3D打印 | 3D打印 | Engineering | Standalone (Node.js) | https://github.com/wendyxiaowen/3D- |
-| Zuru MA 包装差价系统 | Zuru MA 包装差价系统 | Business | Standalone (Node.js) | — |
-| 印尼小组 | 印尼出货明细资料核对系统 | Indonesia | Standalone (Node.js) | https://github.com/charlesskl/Export-to-Indonesia |
-| schedule-system | 排期录入系统 | Production | Standalone (Python/Flask) | https://github.com/hanson678/schedule-system |
-| 新产品开发进度表 | 新产品开发进度表 | Engineering | Standalone (Node.js) | — |
+所有 app 按部门组织。部署新 app 时需指定所属部门。
+
+### 已部署 Apps
+
+| App 名 | 显示名 | 部门 | 类型 | 路径 | GitHub Repo |
+|---------|--------|------|------|------|-------------|
+| rr-production (工程啤办单) | 工程啤办单 | Engineering | Standalone (Node.js) | /rr/ | https://github.com/hufan4308-blip/RR-production-system |
+| zouhuo | 走货明细系统 | Engineering | Standalone (Node.js) | /zouhuo/ | — |
+| task-api | 任务 API | — | Standalone (Node.js) | — | — |
+| new-product-schedule | 新产品开发进度表 | Engineering | Standalone (Node.js) | /new-product-schedule/ | https://github.com/hufan4308-blip/new-product-schedule |
+| figure-mold-cost-system | 模具手办采购订单 | Engineering | Standalone (Node.js) | /figure-mold-cost-system/ | https://github.com/hufan4308-blip/figure-mold-cost-system |
+
+### 旧插件（已删除）
+
+以下插件已从 plugins/ 目录移除（2026-03-23）：
+- 3D打印 (Engineering)
+- Zuru MA 包装差价系统 (Business)
+- 印尼小组 (Indonesia)
+- schedule-system (Production)

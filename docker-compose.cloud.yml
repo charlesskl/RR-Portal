@@ -1,8 +1,8 @@
 # Batch A: Cloud Deployment
 # Usage: docker compose -f docker-compose.cloud.yml up -d --build
 #
-# Includes: core + db + redis + nginx + rr-production + indonesia-export
-# Excludes: 3D打印 (hardware), schedule-system (SMB/Windows), zuru-ma (deferred)
+# Includes: core + db + redis + nginx + rr-production
+# Excludes: 3D打印 (hardware), schedule-system (SMB/Windows), zuru-ma (deferred), indonesia-export (deleted)
 
 services:
   # ──────────────────────────────────────
@@ -102,16 +102,42 @@ services:
     networks:
       - platform-net
 
-  indonesia-export:
+  new-product-schedule:
     build:
-      context: ./plugins/印尼小组
+      context: ./plugins/new-product-schedule
       dockerfile: Dockerfile
+    environment:
+      - PORT=3000
+      - DATA_PATH=/app/data
+    volumes:
+      - ./plugins/new-product-schedule/data:/app/data
+      - ./plugins/new-product-schedule/uploads:/app/uploads
     healthcheck:
-      test: ["CMD", "wget", "-qO", "/dev/null", "http://localhost:8080/health"]
-      interval: 30s
+      test: ["CMD", "wget", "-qO", "/dev/null", "http://127.0.0.1:3000/health"]
+      interval: 10s
       timeout: 5s
       retries: 3
-      start_period: 5s
+    restart: unless-stopped
+    networks:
+      - platform-net
+
+  figure-mold-cost-system:
+    build:
+      context: ./plugins/figure-mold-cost-system
+      dockerfile: Dockerfile
+    environment:
+      - PORT=3001
+      - JWT_SECRET=${FIGURE_MOLD_JWT_SECRET:-rr-procurement-secret-2026}
+      - DATA_PATH=/app/data
+      - UPLOADS_PATH=/app/public/uploads
+    volumes:
+      - ./plugins/figure-mold-cost-system/data:/app/data
+      - ./plugins/figure-mold-cost-system/public/uploads:/app/public/uploads
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
     restart: unless-stopped
     networks:
       - platform-net

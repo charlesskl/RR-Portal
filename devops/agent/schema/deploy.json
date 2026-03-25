@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "phase": "deploy",
+  "app_name": "",
+  "timestamp": "",
+  "status": "success|failed",
+  "image_tag": "",
+  "host_port": 0,
+  "internal_port": 0,
+  "transfer_size_mb": 0,
+  "deploy_duration_seconds": 0,
+  "rollback_triggered": false,
+  "error": null
+}

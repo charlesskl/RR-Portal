@@ -31,6 +31,10 @@ plugins/*/node_modules/
 plugins/工程啤办单/data/
 plugins/schedule-system/data/
 plugins/schedule-system/uploads/
+plugins/new-product-schedule/data/
+plugins/new-product-schedule/uploads/
+plugins/figure-mold-cost-system/data/
+plugins/figure-mold-cost-system/public/uploads/
 .claude/
 
 # Auth files
@@ -39,3 +43,20 @@ nginx/.htpasswd
 # Cloud deployment data
 data/postgres/*
 !data/postgres/.gitkeep
+
+# Docker
+*.tar
+
+# DevOps logs (keep structure, ignore content)
+devops/logs/*.log
+devops/logs/*.tsv
+devops/logs/*.jsonl
+devops/logs/*.txt
+
+# Apps - ignore nested git repos and build artifacts
+apps/*/.git/
+apps/*/node_modules/
+apps/*/.next/
+apps/*/dist/
+apps/*/build/
+.gstack/

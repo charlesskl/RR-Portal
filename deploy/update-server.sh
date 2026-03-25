@@ -19,6 +19,7 @@ git reset --hard origin/main
 # Ensure data directories exist for new plugins
 mkdir -p plugins/new-product-schedule/data plugins/new-product-schedule/uploads
 mkdir -p plugins/figure-mold-cost-system/data plugins/figure-mold-cost-system/public/uploads
+mkdir -p apps/zouhuo/data apps/zouhuo/uploads
 
 echo "[2/3] Rebuilding and restarting services..."
 docker compose -f docker-compose.cloud.yml --env-file "$ENV_FILE" up -d --build

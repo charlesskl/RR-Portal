@@ -142,6 +142,30 @@ services:
     networks:
       - platform-net
 
+  zouhuo:
+    build:
+      context: ./apps/zouhuo
+      dockerfile: Dockerfile
+    environment:
+      - PORT=3002
+      - JWT_SECRET=${ZOUHUO_JWT_SECRET:-rr-zouhuo-secret-2026}
+      - JWT_EXPIRES_IN=8h
+      - CORS_ORIGIN=*
+      - RATE_LIMIT_WINDOW_MS=900000
+      - RATE_LIMIT_MAX=200
+      - MAX_FILE_SIZE_MB=50
+    volumes:
+      - ./apps/zouhuo/data:/app/server/data
+      - ./apps/zouhuo/uploads:/app/server/uploads
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3002/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - platform-net
+
 networks:
   platform-net:
     driver: bridge

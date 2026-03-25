@@ -35,6 +35,8 @@ plugins/new-product-schedule/data/
 plugins/new-product-schedule/uploads/
 plugins/figure-mold-cost-system/data/
 plugins/figure-mold-cost-system/public/uploads/
+apps/zouhuo/data/
+apps/zouhuo/uploads/
 .claude/
 
 # Auth files

@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>新产品开发进度表</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+  <link href="style.css" rel="stylesheet">
+</head>
+<body>
+
+<!-- 导航栏 -->
+<nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+  <div class="container-fluid">
+    <a class="navbar-brand" href="./">新产品开发进度表</a>
+    <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navContent">
+      <span class="navbar-toggler-icon"></span>
+    </button>
+    <div class="collapse navbar-collapse" id="navContent">
+      <ul class="navbar-nav me-auto">
+        <li class="nav-item"><a class="nav-link active" href="./">项目列表</a></li>
+        <li class="nav-item"><a class="nav-link" href="stats.html">汇总统计</a></li>
+        <li class="nav-item"><a class="nav-link" href="settings.html">设置</a></li>
+      </ul>
+    </div>
+  </div>
+</nav>
+
+<div class="container-fluid mt-3">
+
+  <!-- 筛选栏 -->
+  <div class="row g-2 mb-3 filter-bar align-items-end">
+    <div class="col-auto">
+      <label class="form-label mb-0">车间</label>
+      <select id="filterWorkshop" class="form-select form-select-sm">
+        <option value="">全部</option>
+      </select>
+    </div>
+    <div class="col-auto">
+      <label class="form-label mb-0">客户</label>
+      <select id="filterCustomer" class="form-select form-select-sm">
+        <option value="">全部</option>
+      </select>
+    </div>
+    <div class="col-auto">
+      <label class="form-label mb-0">主管</label>
+      <select id="filterSupervisor" class="form-select form-select-sm">
+        <option value="">全部</option>
+      </select>
+    </div>
+    <div class="col-auto">
+      <label class="form-label mb-0">关键词</label>
+      <input id="filterKeyword" type="text" class="form-control form-control-sm" placeholder="搜索...">
+    </div>
+    <div class="col-auto">
+      <button id="btnSearch" class="btn btn-sm btn-primary"><i class="bi bi-search"></i> 搜索</button>
+    </div>
+    <div class="col-auto">
+      <button id="btnClearFilter" class="btn btn-sm btn-outline-secondary"><i class="bi bi-x-circle"></i> 清除</button>
+    </div>
+  </div>
+
+  <!-- 操作栏 -->
+  <div class="d-flex gap-2 mb-3 flex-wrap">
+    <button id="btnAdd" class="btn btn-sm btn-primary"><i class="bi bi-plus-lg"></i> 添加项目</button>
+    <button id="btnImport" class="btn btn-sm btn-success"><i class="bi bi-file-earmark-arrow-up"></i> Excel导入</button>
+    <input id="importFile" type="file" accept=".xlsx,.xls" hidden>
+    <button id="btnExport" class="btn btn-sm btn-outline-secondary"><i class="bi bi-file-earmark-arrow-down"></i> Excel导出</button>
+    <button id="btnBatchDelete" class="btn btn-sm btn-outline-danger" disabled><i class="bi bi-trash"></i> 批量删除</button>
+  </div>
+
+  <!-- 项目表格 -->
+  <div class="table-responsive">
+    <table id="projectTable" class="table table-bordered table-sm mb-0">
+      <thead>
+        <tr>
+          <th class="checkbox-col"><input type="checkbox" id="checkAll"></th>
+          <th>序号</th>
+          <th>厂区</th>
+          <th>主管</th>
+          <th>工程师</th>
+          <th>客户</th>
+          <th>产品名称</th>
+          <th>图片</th>
+          <th>工模套数</th>
+          <th>年龄</th>
+          <th>数量</th>
+          <th>货价</th>
+          <th>退税</th>
+          <th>开发时间</th>
+          <th>FS</th>
+          <th>EP</th>
+          <th>FEP</th>
+          <th>PP</th>
+          <th>塑胶BOM</th>
+          <th>采购BOM</th>
+          <th>PO1日期</th>
+          <th>PO1数量</th>
+          <th>外发湖南</th>
+          <th>备注</th>
+          <th>操作</th>
+        </tr>
+      </thead>
+      <tbody id="projectBody"></tbody>
+    </table>
+  </div>
+
+</div>
+
+<!-- 添加/编辑项目 Modal -->
+<div class="modal fade" id="projectModal" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="projectModalLabel">添加项目</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="editProjectId">
+        <form id="projectForm">
+          <div class="row g-3">
+            <div class="col-md-4">
+              <label class="form-label">车间</label>
+              <select id="formWorkshop" class="form-select"></select>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">主管</label>
+              <select id="formSupervisor" class="form-select"></select>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">工程师</label>
+              <input id="formEngineer" type="text" class="form-control">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">客户</label>
+              <select id="formCustomer" class="form-select"></select>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">产品名称</label>
+              <input id="formProductName" type="text" class="form-control">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">工模套数</label>
+              <input id="formMoldSets" type="text" class="form-control">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">年龄等级</label>
+              <input id="formAgeGrade" type="text" class="form-control">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">预计数量</label>
+              <input id="formEstimatedQty" type="text" class="form-control">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">货价 (USD)</label>
+              <input id="formUnitPrice" type="number" step="0.01" class="form-control">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">退税码点</label>
+              <input id="formTaxRebate" type="number" step="0.01" class="form-control">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">开发时间</label>
+              <input id="formDevStart" type="text" class="form-control" placeholder="YYYY-MM-DD">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">FS</label>
+              <input id="formFs" type="text" class="form-control" placeholder="YYYY-MM-DD">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">EP</label>
+              <input id="formEp" type="text" class="form-control">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">FEP</label>
+              <input id="formFep" type="text" class="form-control" placeholder="YYYY-MM-DD">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">PP</label>
+              <input id="formPp" type="text" class="form-control">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">塑胶BOM</label>
+              <input id="formBomPlastic" type="text" class="form-control" placeholder="YYYY-MM-DD">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">采购BOM</label>
+              <input id="formBomPurchase" type="text" class="form-control" placeholder="YYYY-MM-DD">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">PO1日期</label>
+              <input id="formPo1Date" type="text" class="form-control" placeholder="YYYY-MM-DD">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">PO1数量</label>
+              <input id="formPo1Qty" type="text" class="form-control">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">外发湖南</label>
+              <select id="formOutsource" class="form-select">
+                <option value="">--</option>
+                <option value="是">是</option>
+                <option value="否">否</option>
+                <option value="待定">待定</option>
+              </select>
+            </div>
+            <div class="col-md-12">
+              <label class="form-label">备注</label>
+              <textarea id="formRemarks" class="form-control" rows="2"></textarea>
+            </div>
+          </div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+        <button type="button" id="btnSaveProject" class="btn btn-primary">保存</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 导入预览 Modal -->
+<div class="modal fade" id="importModal" tabindex="-1">
+  <div class="modal-dialog modal-xl">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">导入预览</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <p id="importCount" class="mb-2"></p>
+        <div class="table-responsive" style="max-height:400px; overflow-y:auto;">
+          <table id="importPreview" class="table table-bordered table-sm" style="font-size:12px;">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>厂区</th>
+                <th>工程师</th>
+                <th>客户</th>
+                <th>产品名称</th>
+                <th>工模套数</th>
+                <th>数量</th>
+                <th>货价</th>
+                <th>开发时间</th>
+                <th>外发湖南</th>
+                <th>备注</th>
+              </tr>
+            </thead>
+            <tbody id="importPreviewBody"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+        <button type="button" id="btnConfirmImport" class="btn btn-success">确认导入</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+<script src="projects.js"></script>
+</body>
+</html>

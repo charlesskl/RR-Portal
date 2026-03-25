@@ -240,6 +240,7 @@ volumes:
 | task-api | 任务 API | — | Standalone (Node.js) | — | — |
 | new-product-schedule | 新产品开发进度表 | Engineering | Standalone (Node.js) | /new-product-schedule/ | https://github.com/hufan4308-blip/new-product-schedule |
 | figure-mold-cost-system | 模具手办采购订单 | Engineering | Standalone (Node.js) | /figure-mold-cost-system/ | https://github.com/hufan4308-blip/figure-mold-cost-system |
+| 工程资料生成器 | 工程资料生成器 | Engineering | Standalone (Node.js) | /eng-docs/ | — |
 
 ### 旧插件（已删除）
 

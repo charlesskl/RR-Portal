@@ -142,6 +142,19 @@ services:
     networks:
       - platform-net
 
+  eng-doc-generator:
+    build:
+      context: .
+      dockerfile: plugins/工程资料生成器/Dockerfile.node
+    environment:
+      - PORT=3000
+      - DATA_PATH=/app/data
+    volumes:
+      - "./plugins/工程资料生成器/data:/app/data"
+    restart: unless-stopped
+    networks:
+      - platform-net
+
 networks:
   platform-net:
     driver: bridge

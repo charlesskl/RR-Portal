@@ -87,3 +87,24 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+
+  zouhuo:
+    build:
+      context: ./apps/zouhuo
+      dockerfile: Dockerfile
+    env_file:
+      - ./apps/zouhuo/.env
+    volumes:
+      - "./apps/zouhuo/data:/app/server/data"
+      - "./apps/zouhuo/uploads:/app/server/uploads"
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3

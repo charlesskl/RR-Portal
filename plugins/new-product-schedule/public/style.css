@@ -1,0 +1,95 @@
+/* ========== 进度颜色 ========== */
+.stage-none { background-color: #e9ecef !important; }
+.stage-active { background-color: #fff3cd !important; }
+.stage-done { background-color: #d1e7dd !important; }
+.stage-delayed { background-color: #f8d7da !important; }
+
+/* ========== 导航栏 ========== */
+.navbar-brand { font-weight: 700; }
+.nav-link.active { font-weight: 600; }
+
+/* ========== 表格 ========== */
+.table-responsive {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+#projectTable {
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+#projectTable thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: #f8f9fa;
+  border-bottom: 2px solid #dee2e6;
+  vertical-align: middle;
+  text-align: center;
+  padding: 6px 8px;
+}
+
+#projectTable tbody td {
+  padding: 4px 8px;
+  vertical-align: middle;
+}
+
+#projectTable tbody tr:hover {
+  background-color: #e8f0fe;
+}
+
+/* ========== 缩略图 ========== */
+.thumb-img {
+  max-height: 40px;
+  cursor: pointer;
+  border-radius: 3px;
+}
+
+/* ========== 行内编辑 ========== */
+.editable {
+  cursor: pointer;
+  border-bottom: 1px dashed #adb5bd;
+}
+
+.editable:hover {
+  background-color: #fff9e6;
+}
+
+.editable input,
+.editable select,
+.editable textarea {
+  font-size: 13px;
+  padding: 2px 4px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+/* ========== 操作按钮 ========== */
+.btn-action {
+  padding: 2px 6px;
+  font-size: 12px;
+  margin: 0 1px;
+}
+
+/* ========== 筛选栏 ========== */
+.filter-bar .form-select,
+.filter-bar .form-control {
+  font-size: 13px;
+}
+
+/* ========== 通用 ========== */
+.upload-icon {
+  cursor: pointer;
+  color: #6c757d;
+  font-size: 18px;
+}
+
+.upload-icon:hover {
+  color: #0d6efd;
+}
+
+.checkbox-col {
+  width: 30px;
+  text-align: center;
+}

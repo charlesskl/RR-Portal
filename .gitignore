@@ -31,6 +31,10 @@ plugins/*/node_modules/
 plugins/工程啤办单/data/
 plugins/schedule-system/data/
 plugins/schedule-system/uploads/
+plugins/new-product-schedule/data/
+plugins/new-product-schedule/uploads/
+plugins/figure-mold-cost-system/data/
+plugins/figure-mold-cost-system/public/uploads/
 .claude/
 
 # Auth files

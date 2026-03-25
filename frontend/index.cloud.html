@@ -174,7 +174,7 @@
         <div class="stat-label">部门数量</div>
       </div>
       <div class="stat-card">
-        <div class="stat-value" id="statPlugins">2</div>
+        <div class="stat-value" id="statPlugins">4</div>
         <div class="stat-label">应用数量</div>
       </div>
       <div class="stat-card">
@@ -192,7 +192,7 @@
           <div class="dept-icon engineering">&#9881;</div>
           <div>
             <div class="dept-name">工程部</div>
-            <div class="dept-desc">生产订单管理 · 走货明细</div>
+            <div class="dept-desc">工程啤办单 · 走货明细 · 新产品排期 · 模具手办采购</div>
           </div>
         </div>
         <div class="dept-card-body">
@@ -209,6 +209,20 @@
                 <div class="plugin-dot gray" id="zouhuoDot"></div>
                 <span class="plugin-name">走货明细管理</span>
                 <span class="plugin-tag">明细</span>
+              </div>
+            </div>
+            <div class="plugin-item">
+              <div class="plugin-info">
+                <div class="plugin-dot gray" id="devProgressDot"></div>
+                <span class="plugin-name">新产品开发进度表</span>
+                <span class="plugin-tag">排期</span>
+              </div>
+            </div>
+            <div class="plugin-item">
+              <div class="plugin-info">
+                <div class="plugin-dot gray" id="figureMoldDot"></div>
+                <span class="plugin-name">模具手办采购订单</span>
+                <span class="plugin-tag">采购</span>
               </div>
             </div>
           </div>
@@ -230,7 +244,7 @@
       <div class="dept-icon engineering" style="width:40px;height:40px;font-size:18px;">&#9881;</div>
       工程部
     </div>
-    <div class="page-subtitle">生产订单管理 · 走货明细</div>
+    <div class="page-subtitle">工程啤办单 · 走货明细 · 新产品排期 · 模具手办采购</div>
 
     <div class="detail-plugin-card">
       <div class="detail-plugin-left">
@@ -273,6 +287,46 @@
         <a href="/zouhuo/" target="_blank" class="btn btn-primary">打开系统</a>
       </div>
     </div>
+
+    <div class="detail-plugin-card">
+      <div class="detail-plugin-left">
+        <div class="detail-plugin-icon" style="background:linear-gradient(135deg,#3b82f6,#06b6d4);">&#128197;</div>
+        <div>
+          <div class="detail-plugin-name">新产品开发进度表</div>
+          <div class="detail-plugin-desc">追踪新产品从开发到PO1出货全流程进度，支持Excel导入导出、按车间/客户/主管筛选统计</div>
+          <div class="feature-grid">
+            <div class="feature-tag">&#128197; 进度追踪</div>
+            <div class="feature-tag">&#128202; 汇总统计</div>
+            <div class="feature-tag">&#128230; Excel导入导出</div>
+            <div class="feature-tag">&#128247; 产品图片</div>
+          </div>
+        </div>
+      </div>
+      <div class="detail-plugin-right">
+        <div class="detail-plugin-status"><div class="plugin-dot gray" id="devProgressDetailDot"></div> 检查中...</div>
+        <a href="/new-product-schedule/" target="_blank" class="btn btn-primary">打开系统</a>
+      </div>
+    </div>
+
+    <div class="detail-plugin-card">
+      <div class="detail-plugin-left">
+        <div class="detail-plugin-icon" style="background:linear-gradient(135deg,#f59e0b,#ef4444);">&#128296;</div>
+        <div>
+          <div class="detail-plugin-name">模具手办采购订单系统</div>
+          <div class="detail-plugin-desc">模具与手办采购订单管理，支持采购单创建/打印、Excel导入、按工厂分组统计报表</div>
+          <div class="feature-grid">
+            <div class="feature-tag">&#128296; 模具订单</div>
+            <div class="feature-tag">&#127922; 手办订单</div>
+            <div class="feature-tag">&#128196; 采购单打印</div>
+            <div class="feature-tag">&#128202; 统计报表</div>
+          </div>
+        </div>
+      </div>
+      <div class="detail-plugin-right">
+        <div class="detail-plugin-status"><div class="plugin-dot gray" id="figureMoldDetailDot"></div> 检查中...</div>
+        <a href="/figure-mold-cost-system/" target="_blank" class="btn btn-primary">打开系统</a>
+      </div>
+    </div>
   </div>
 
 </div>
@@ -301,6 +355,8 @@ async function checkHealth() {
     var checks = [
       { name: 'rr', url: '/rr/health', dot: 'rrDot', detailDot: 'rrDetailDot' },
       { name: 'zouhuo', url: '/zouhuo/health', dot: 'zouhuoDot', detailDot: 'zouhuoDetailDot' },
+      { name: 'devProgress', url: '/new-product-schedule/health', dot: 'devProgressDot', detailDot: 'devProgressDetailDot' },
+      { name: 'figureMold', url: '/figure-mold-cost-system/health', dot: 'figureMoldDot', detailDot: 'figureMoldDetailDot' },
     ];
     var healthy = 0;
     var total = checks.length;

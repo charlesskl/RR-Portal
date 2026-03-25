@@ -181,7 +181,7 @@
 
     <div class="stats-bar">
       <div class="stat-card">
-        <div class="stat-value" id="statDepts">4</div>
+        <div class="stat-value" id="statDepts">4</div><!-- legacy dept count -->
         <div class="stat-label">部门数量</div>
       </div>
       <div class="stat-card">
@@ -236,7 +236,7 @@
           <div class="dept-icon engineering">&#9881;</div>
           <div>
             <div class="dept-name">工程部</div>
-            <div class="dept-desc">工程啤办单</div>
+            <div class="dept-desc">工程啤办单 · 新产品排期 · 模具手办采购</div>
           </div>
         </div>
         <div class="dept-card-body">
@@ -246,6 +246,20 @@
                 <div class="plugin-dot green"></div>
                 <span class="plugin-name">工程啤办单</span>
                 <span class="plugin-tag">生产</span>
+              </div>
+            </div>
+            <div class="plugin-item">
+              <div class="plugin-info">
+                <div class="plugin-dot green" id="dotNewProductSchedule"></div>
+                <span class="plugin-name">新产品开发进度表</span>
+                <span class="plugin-tag">排期</span>
+              </div>
+            </div>
+            <div class="plugin-item">
+              <div class="plugin-info">
+                <div class="plugin-dot green" id="dotFigureMoldCost"></div>
+                <span class="plugin-name">模具手办采购订单</span>
+                <span class="plugin-tag">采购</span>
               </div>
             </div>
           </div>
@@ -432,7 +446,7 @@
       <div class="dept-icon engineering" style="width:40px;height:40px;font-size:18px;">&#9881;</div>
       工程部
     </div>
-    <div class="page-subtitle">工程啤办单管理系统</div>
+    <div class="page-subtitle">工程啤办单 · 新产品排期 · 模具手办采购</div>
 
     <div class="detail-plugin-card">
       <div class="detail-plugin-left">
@@ -453,6 +467,46 @@
       <div class="detail-plugin-right">
         <div class="detail-plugin-status"><div class="plugin-dot green"></div> 运行中</div>
         <a href="/rr/" target="_blank" class="btn btn-primary">打开系统</a>
+      </div>
+    </div>
+
+    <div class="detail-plugin-card">
+      <div class="detail-plugin-left">
+        <div class="detail-plugin-icon" style="background:linear-gradient(135deg,#3b82f6,#06b6d4);">&#128197;</div>
+        <div>
+          <div class="detail-plugin-name">新产品开发进度表</div>
+          <div class="detail-plugin-desc">追踪新产品从开发到PO1出货全流程进度，支持Excel导入导出、按车间/客户/主管筛选统计</div>
+          <div class="feature-grid">
+            <div class="feature-tag">&#128197; 进度追踪</div>
+            <div class="feature-tag">&#128202; 汇总统计</div>
+            <div class="feature-tag">&#128230; Excel导入导出</div>
+            <div class="feature-tag">&#128247; 产品图片</div>
+          </div>
+        </div>
+      </div>
+      <div class="detail-plugin-right">
+        <div class="detail-plugin-status"><div class="plugin-dot green"></div> 运行中</div>
+        <a href="/new-product-schedule/" target="_blank" class="btn btn-primary">打开系统</a>
+      </div>
+    </div>
+
+    <div class="detail-plugin-card">
+      <div class="detail-plugin-left">
+        <div class="detail-plugin-icon" style="background:linear-gradient(135deg,#f59e0b,#ef4444);">&#128296;</div>
+        <div>
+          <div class="detail-plugin-name">模具手办采购订单系统</div>
+          <div class="detail-plugin-desc">模具与手办采购订单管理，支持采购单创建/打印、Excel导入、按工厂分组统计报表</div>
+          <div class="feature-grid">
+            <div class="feature-tag">&#128296; 模具订单</div>
+            <div class="feature-tag">&#127922; 手办订单</div>
+            <div class="feature-tag">&#128196; 采购单打印</div>
+            <div class="feature-tag">&#128202; 统计报表</div>
+          </div>
+        </div>
+      </div>
+      <div class="detail-plugin-right">
+        <div class="detail-plugin-status"><div class="plugin-dot green"></div> 运行中</div>
+        <a href="/figure-mold-cost-system/" target="_blank" class="btn btn-primary">打开系统</a>
       </div>
     </div>
   </div>
@@ -481,10 +535,9 @@ async function checkHealth() {
   try {
     await fetch('/health');
     const checks = [
-      { name: 'zuruma', url: '/zuru-ma/' },
-      { name: 'indonesia', url: '/api/indonesia/health' },
       { name: 'rr', url: '/rr/health' },
-      { name: 'printing3d', url: '/3d/api/version' },
+      { name: 'newProductSchedule', url: '/new-product-schedule/health' },
+      { name: 'figureMoldCost', url: '/figure-mold-cost-system/health' },
     ];
     let healthy = 1;
     let total = 1 + checks.length;
@@ -500,10 +553,9 @@ async function checkHealth() {
     healthyEl.textContent = healthy + ' / ' + total;
     statusEl.textContent = healthy === total ? '所有服务运行正常' : healthy + '/' + total + ' 个服务运行中';
 
-    updateDots('zuruma', '/zuru-ma/');
-    updateDots('indonesia', '/api/indonesia/health');
     updateDots('rr', '/rr/health');
-    updateDots('printing3d', '/3d/api/version');
+    updateDot('dotNewProductSchedule', '/new-product-schedule/health');
+    updateDot('dotFigureMoldCost', '/figure-mold-cost-system/health');
   } catch(e) {
     statusEl.textContent = '连接失败';
   }
@@ -517,6 +569,17 @@ async function updateDots(dept, url) {
   } catch(e) {
     document.querySelectorAll('#' + dept + 'PluginList .plugin-dot')
       .forEach(d => d.className = 'plugin-dot red');
+  }
+}
+
+async function updateDot(dotId, url) {
+  var el = document.getElementById(dotId);
+  if (!el) return;
+  try {
+    var r = await fetch(url);
+    el.className = 'plugin-dot ' + (r.ok ? 'green' : 'red');
+  } catch(e) {
+    el.className = 'plugin-dot red';
   }
 }
 

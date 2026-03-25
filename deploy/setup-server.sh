@@ -102,6 +102,10 @@ fi
 echo "[7/8] Creating data directories..."
 mkdir -p data/postgres
 mkdir -p "plugins/工程啤办单/data"
+mkdir -p plugins/new-product-schedule/data
+mkdir -p plugins/new-product-schedule/uploads
+mkdir -p plugins/figure-mold-cost-system/data
+mkdir -p plugins/figure-mold-cost-system/public/uploads
 
 # ─── 8. Start services ───
 echo "[8/8] Building and starting services..."

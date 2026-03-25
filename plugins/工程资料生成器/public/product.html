@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>产品编辑 - 工程资料生成器</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="style.css" rel="stylesheet">
+  <style>
+    /* Parts table needs extra min-width due to 24+ columns */
+    #parts-table {
+      min-width: 2200px;
+    }
+    #purchases-table {
+      min-width: 1400px;
+    }
+    /* Fixed-width hints for dense columns */
+    .col-narrow { min-width: 70px; }
+    .col-medium { min-width: 100px; }
+    .col-wide   { min-width: 130px; }
+    .col-num    { min-width: 70px; }
+  </style>
+</head>
+<body>
+  <!-- Top Action Bar -->
+  <div class="page-header no-print">
+    <div class="container-fluid">
+      <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
+        <div class="d-flex align-items-center gap-3">
+          <a href="index.html" class="btn btn-outline-secondary btn-sm">← 返回列表</a>
+          <h5 id="page-title" class="mb-0 fw-bold text-dark">新建产品</h5>
+        </div>
+        <div class="d-flex gap-2">
+          <button id="btn-save" class="btn btn-primary" onclick="saveProduct()">保存</button>
+          <button id="btn-generate" class="btn btn-success d-none" onclick="generateExcel()">生成Excel</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="container-fluid py-3">
+    <!-- Tabs Navigation -->
+    <ul class="nav nav-tabs" id="productTabs" role="tablist">
+      <li class="nav-item" role="presentation">
+        <a class="nav-link active" id="tab-basic-tab" data-bs-toggle="tab" href="#tab-basic" role="tab">基本信息</a>
+      </li>
+      <li class="nav-item" role="presentation">
+        <a class="nav-link" id="tab-parts-tab" data-bs-toggle="tab" href="#tab-parts" role="tab">零件清单</a>
+      </li>
+      <li class="nav-item" role="presentation">
+        <a class="nav-link" id="tab-purchases-tab" data-bs-toggle="tab" href="#tab-purchases" role="tab">外购件</a>
+      </li>
+      <li class="nav-item" role="presentation">
+        <a class="nav-link" id="tab-dimensions-tab" data-bs-toggle="tab" href="#tab-dimensions" role="tab">尺寸重量</a>
+      </li>
+      <li class="nav-item" role="presentation">
+        <a class="nav-link" id="tab-notes-tab" data-bs-toggle="tab" href="#tab-notes" role="tab">生产注意事项</a>
+      </li>
+      <li class="nav-item" role="presentation">
+        <a class="nav-link" id="tab-sop-tab" data-bs-toggle="tab" href="#tab-sop" role="tab">作业指导书</a>
+      </li>
+    </ul>
+
+    <div class="tab-content" id="productTabsContent">
+
+      <!-- ─── Tab 1: 基本信息 ─────────────────────────────────────────── -->
+      <div class="tab-pane fade show active" id="tab-basic" role="tabpanel">
+        <div class="card">
+          <div class="card-body">
+            <div class="row g-3">
+
+              <!-- 厂区 (full row) -->
+              <div class="col-12">
+                <label class="form-label">厂区 <span class="text-danger">*</span></label>
+                <div class="d-flex gap-4">
+                  <div class="form-check">
+                    <input class="form-check-input" type="radio" name="factory" id="factory-huadeng" value="华登">
+                    <label class="form-check-label" for="factory-huadeng">华登</label>
+                  </div>
+                  <div class="form-check">
+                    <input class="form-check-input" type="radio" name="factory" id="factory-xingxin" value="兴信">
+                    <label class="form-check-label" for="factory-xingxin">兴信</label>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 产品编号 -->
+              <div class="col-md-6">
+                <label class="form-label" for="product_number">产品编号 <span class="text-danger">*</span></label>
+                <input type="text" class="form-control" id="product_number" placeholder="请输入产品编号">
+              </div>
+
+              <!-- 产品名称 -->
+              <div class="col-md-6">
+                <label class="form-label" for="product_name">产品名称 <span class="text-danger">*</span></label>
+                <input type="text" class="form-control" id="product_name" placeholder="请输入产品名称">
+              </div>
+
+              <!-- 客户名称 -->
+              <div class="col-md-6">
+                <label class="form-label" for="client_name">客户名称</label>
+                <input type="text" class="form-control" id="client_name" placeholder="请输入客户名称">
+              </div>
+
+              <!-- 订单数量 -->
+              <div class="col-md-6">
+                <label class="form-label" for="order_qty">订单数量</label>
+                <input type="number" class="form-control" id="order_qty" placeholder="请输入订单数量" step="any" min="0">
+              </div>
+
+              <!-- 年龄分组 -->
+              <div class="col-md-6">
+                <label class="form-label" for="age_grade">年龄分组</label>
+                <input type="text" class="form-control" id="age_grade" placeholder="如 4+">
+              </div>
+
+              <!-- 工程师 -->
+              <div class="col-md-6">
+                <label class="form-label" for="engineer">工程师</label>
+                <input type="text" class="form-control" id="engineer" placeholder="请输入工程师姓名">
+              </div>
+
+              <!-- 编制日期 -->
+              <div class="col-md-6">
+                <label class="form-label" for="created_at">编制日期</label>
+                <input type="date" class="form-control" id="created_at">
+              </div>
+
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ─── Tab 2: 零件清单 ─────────────────────────────────────────── -->
+      <div class="tab-pane fade" id="tab-parts" role="tabpanel">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <h6 class="mb-0 fw-semibold">零件清单</h6>
+          <button class="btn btn-sm btn-outline-primary" onclick="addPartRow()">+ 添加零件</button>
+        </div>
+        <div class="table-scroll-wrapper">
+          <table class="table table-bordered table-sm dynamic-table" id="parts-table">
+            <thead>
+              <tr>
+                <th class="col-narrow">分组</th>
+                <th class="col-medium">工模编号</th>
+                <th class="col-wide">模具名称</th>
+                <th class="col-medium">零件编号</th>
+                <th class="col-wide">物料名称</th>
+                <th class="col-medium">材料</th>
+                <th class="col-wide">海关备案</th>
+                <th class="col-narrow">颜色</th>
+                <th class="col-medium">色粉编号</th>
+                <th class="col-wide">加工内容</th>
+                <th class="col-num">水口比率%</th>
+                <th class="col-num">混水口%</th>
+                <th class="col-num">整啤毛重g</th>
+                <th class="col-num">整啤净重g</th>
+                <th class="col-num">单净重g</th>
+                <th class="col-num">模腔数</th>
+                <th class="col-num">出模数</th>
+                <th class="col-num">套数</th>
+                <th class="col-narrow">用量</th>
+                <th class="col-num">需求数</th>
+                <th class="col-medium">机型</th>
+                <th class="col-medium">模架尺寸</th>
+                <th class="col-narrow">模具数量</th>
+                <th class="col-wide">备注</th>
+                <th style="min-width: 60px;">操作</th>
+              </tr>
+            </thead>
+            <tbody id="parts-tbody">
+            </tbody>
+          </table>
+        </div>
+        <button class="btn btn-sm btn-outline-primary mt-2" onclick="addPartRow()">+ 添加零件</button>
+      </div>
+
+      <!-- ─── Tab 3: 外购件 ───────────────────────────────────────────── -->
+      <div class="tab-pane fade" id="tab-purchases" role="tabpanel">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <h6 class="mb-0 fw-semibold">外购件</h6>
+          <button class="btn btn-sm btn-outline-primary" onclick="addPurchaseRow()">+ 添加外购件</button>
+        </div>
+        <div class="table-scroll-wrapper">
+          <table class="table table-bordered table-sm dynamic-table" id="purchases-table">
+            <thead>
+              <tr>
+                <th class="col-medium">类别</th>
+                <th class="col-wide">物料名称</th>
+                <th class="col-medium">物料编号</th>
+                <th class="col-wide">规格</th>
+                <th class="col-medium">材料</th>
+                <th class="col-wide">海关备案</th>
+                <th class="col-narrow">颜色</th>
+                <th class="col-narrow">用量</th>
+                <th class="col-num">需求数</th>
+                <th class="col-num">单重g</th>
+                <th class="col-wide">供应商</th>
+                <th class="col-wide">表面处理</th>
+                <th class="col-medium">用途</th>
+                <th class="col-wide">备注</th>
+                <th style="min-width: 60px;">操作</th>
+              </tr>
+            </thead>
+            <tbody id="purchases-tbody">
+            </tbody>
+          </table>
+        </div>
+        <button class="btn btn-sm btn-outline-primary mt-2" onclick="addPurchaseRow()">+ 添加外购件</button>
+      </div>
+
+      <!-- ─── Tab 4: 尺寸重量 (placeholder) ──────────────────────────── -->
+      <div class="tab-pane fade" id="tab-dimensions" role="tabpanel">
+        <p class="text-muted">尺寸重量（待实现）</p>
+      </div>
+
+      <!-- ─── Tab 5: 生产注意事项 (placeholder) ─────────────────────── -->
+      <div class="tab-pane fade" id="tab-notes" role="tabpanel">
+        <p class="text-muted">生产注意事项（待实现）</p>
+      </div>
+
+      <!-- ─── Tab 6: 作业指导书 (placeholder) ───────────────────────── -->
+      <div class="tab-pane fade" id="tab-sop" role="tabpanel">
+        <p class="text-muted">作业指导书（待实现）</p>
+      </div>
+
+    </div><!-- /tab-content -->
+  </div><!-- /container-fluid -->
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="utils.js"></script>
+  <script>
+    // ─── Helpers ────────────────────────────────────────────────────────────
+    function getProductId() {
+      const params = new URLSearchParams(window.location.search);
+      return params.get('id') || null;
+    }
+
+    function today() {
+      return new Date().toISOString().slice(0, 10);
+    }
+
+    function updateTitle(product) {
+      const title = document.getElementById('page-title');
+      if (product && (product.product_number || product.product_name)) {
+        title.textContent = [product.product_number, product.product_name].filter(Boolean).join(' ');
+      } else {
+        title.textContent = '新建产品';
+      }
+    }
+
+    // ─── Load product ────────────────────────────────────────────────────────
+    async function loadProduct(id) {
+      try {
+        const product = await api('GET', '/api/products/' + id);
+        populateForm(product);
+        updateTitle(product);
+        document.getElementById('btn-generate').classList.remove('d-none');
+      } catch (e) {
+        showToast('加载产品数据失败: ' + e.message, 'error');
+      }
+    }
+
+    // ─── Populate form from product data ────────────────────────────────────
+    function populateForm(product) {
+      // Tab 1 — 基本信息
+      if (product.factory) {
+        const radio = document.querySelector(`input[name="factory"][value="${product.factory}"]`);
+        if (radio) radio.checked = true;
+      }
+      setValue('product_number', product.product_number);
+      setValue('product_name',   product.product_name);
+      setValue('client_name',    product.client_name);
+      setValue('order_qty',      product.order_qty);
+      setValue('age_grade',      product.age_grade);
+      setValue('engineer',       product.engineer);
+      setValue('created_at',     product.created_at ? product.created_at.slice(0, 10) : '');
+
+      // Tab 2 — 零件清单
+      const parts = product.parts || [];
+      parts.forEach(row => addPartRow(row));
+
+      // Tab 3 — 外购件
+      const purchases = product.purchases || [];
+      purchases.forEach(row => addPurchaseRow(row));
+    }
+
+    function setValue(id, val) {
+      const el = document.getElementById(id);
+      if (el && val !== undefined && val !== null) el.value = val;
+    }
+
+    // ─── Collect form data ───────────────────────────────────────────────────
+    function collectData() {
+      // Basic info
+      const factoryRadio = document.querySelector('input[name="factory"]:checked');
+      const data = {
+        factory:        factoryRadio ? factoryRadio.value : '',
+        product_number: document.getElementById('product_number').value.trim(),
+        product_name:   document.getElementById('product_name').value.trim(),
+        client_name:    document.getElementById('client_name').value.trim(),
+        order_qty:      numOrNull(document.getElementById('order_qty').value),
+        age_grade:      document.getElementById('age_grade').value.trim(),
+        engineer:       document.getElementById('engineer').value.trim(),
+        created_at:     document.getElementById('created_at').value || null,
+      };
+
+      // Parts
+      data.parts = collectTableRows('parts-tbody', [
+        'group', 'mold_id', 'mold_name', 'part_number', 'part_name',
+        'material', 'customs_name', 'color', 'pigment_no', 'process',
+        'runner_ratio', 'mixed_ratio', 'gross_weight_g', 'net_weight_g',
+        'single_net_weight_g', 'cavities', 'output_per_shot', 'sets',
+        'usage_ratio', 'order_qty', 'machine_type', 'mold_size',
+        'mold_count', 'notes'
+      ]);
+
+      // Purchases
+      data.purchases = collectTableRows('purchases-tbody', [
+        'category', 'name', 'part_number', 'spec', 'material',
+        'customs_name', 'color', 'usage_ratio', 'order_qty', 'unit_weight_g',
+        'supplier', 'surface_treatment', 'purpose', 'notes'
+      ]);
+
+      return data;
+    }
+
+    function collectTableRows(tbodyId, fields) {
+      const rows = document.getElementById(tbodyId).querySelectorAll('tr');
+      return Array.from(rows).map(tr => {
+        const inputs = tr.querySelectorAll('input, select, textarea');
+        const obj = {};
+        fields.forEach((field, i) => {
+          const el = inputs[i];
+          if (!el) return;
+          const val = el.value;
+          // Treat number inputs specially
+          if (el.type === 'number') {
+            obj[field] = val === '' ? null : parseFloat(val);
+          } else {
+            obj[field] = val;
+          }
+        });
+        return obj;
+      });
+    }
+
+    function numOrNull(val) {
+      if (val === '' || val === undefined || val === null) return null;
+      const n = parseFloat(val);
+      return isNaN(n) ? null : n;
+    }
+
+    // ─── Save product ────────────────────────────────────────────────────────
+    async function saveProduct() {
+      const data = collectData();
+
+      // Validate required fields
+      if (!data.factory) {
+        showToast('请选择厂区', 'error');
+        // Switch to basic tab
+        bootstrap.Tab.getOrCreateInstance(document.getElementById('tab-basic-tab')).show();
+        return;
+      }
+      if (!data.product_number) {
+        showToast('请填写产品编号', 'error');
+        bootstrap.Tab.getOrCreateInstance(document.getElementById('tab-basic-tab')).show();
+        document.getElementById('product_number').focus();
+        return;
+      }
+      if (!data.product_name) {
+        showToast('请填写产品名称', 'error');
+        bootstrap.Tab.getOrCreateInstance(document.getElementById('tab-basic-tab')).show();
+        document.getElementById('product_name').focus();
+        return;
+      }
+
+      const btn = document.getElementById('btn-save');
+      btn.disabled = true;
+      btn.textContent = '保存中...';
+
+      try {
+        let result;
+        const id = getProductId();
+        if (id) {
+          result = await api('PUT', '/api/products/' + id, data);
+        } else {
+          result = await api('POST', '/api/products', data);
+          // Update URL to include new ID (no page reload)
+          window.history.replaceState({}, '', 'product.html?id=' + result.id);
+          // Show generate button
+          document.getElementById('btn-generate').classList.remove('d-none');
+        }
+        showToast('保存成功');
+        updateTitle(result);
+      } catch (e) {
+        showToast('保存失败: ' + e.message, 'error');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '保存';
+      }
+    }
+
+    // ─── Generate Excel ──────────────────────────────────────────────────────
+    function generateExcel() {
+      const id = getProductId();
+      if (!id) { showToast('请先保存产品', 'error'); return; }
+      const num  = document.getElementById('product_number').value || 'product';
+      const name = document.getElementById('product_name').value || '';
+      const filename = `${num}_${name}_工程资料.zip`;
+      downloadFromPost('/api/products/' + id + '/generate', filename);
+    }
+
+    // ─── Dynamic rows — 零件清单 ─────────────────────────────────────────────
+    function addPartRow(data) {
+      data = data || {};
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td><input type="text"   class="form-control form-control-sm col-narrow" value="${esc(data.group)}"></td>
+        <td><input type="text"   class="form-control form-control-sm col-medium" value="${esc(data.mold_id)}"></td>
+        <td><input type="text"   class="form-control form-control-sm col-wide"   value="${esc(data.mold_name)}"></td>
+        <td><input type="text"   class="form-control form-control-sm col-medium" value="${esc(data.part_number)}"></td>
+        <td><input type="text"   class="form-control form-control-sm col-wide"   value="${esc(data.part_name)}"></td>
+        <td><input type="text"   class="form-control form-control-sm col-medium" value="${esc(data.material)}"></td>
+        <td><input type="text"   class="form-control form-control-sm col-wide"   value="${esc(data.customs_name)}"></td>
+        <td><input type="text"   class="form-control form-control-sm col-narrow" value="${esc(data.color)}"></td>
+        <td><input type="text"   class="form-control form-control-sm col-medium" value="${esc(data.pigment_no)}"></td>
+        <td><input type="text"   class="form-control form-control-sm col-wide"   value="${esc(data.process)}"></td>
+        <td><input type="number" class="form-control form-control-sm col-num" step="any" value="${numVal(data.runner_ratio)}"></td>
+        <td><input type="number" class="form-control form-control-sm col-num" step="any" value="${numVal(data.mixed_ratio)}"></td>
+        <td><input type="number" class="form-control form-control-sm col-num" step="any" value="${numVal(data.gross_weight_g)}"></td>
+        <td><input type="number" class="form-control form-control-sm col-num" step="any" value="${numVal(data.net_weight_g)}"></td>
+        <td><input type="number" class="form-control form-control-sm col-num" step="any" value="${numVal(data.single_net_weight_g)}"></td>
+        <td><input type="number" class="form-control form-control-sm col-num" step="any" value="${numVal(data.cavities)}"></td>
+        <td><input type="number" class="form-control form-control-sm col-num" step="any" value="${numVal(data.output_per_shot)}"></td>
+        <td><input type="number" class="form-control form-control-sm col-num" step="any" value="${numVal(data.sets)}"></td>
+        <td><input type="text"   class="form-control form-control-sm col-narrow" value="${esc(data.usage_ratio)}"></td>
+        <td><input type="number" class="form-control form-control-sm col-num" step="any" value="${numVal(data.order_qty)}"></td>
+        <td><input type="text"   class="form-control form-control-sm col-medium" value="${esc(data.machine_type)}"></td>
+        <td><input type="text"   class="form-control form-control-sm col-medium" value="${esc(data.mold_size)}"></td>
+        <td><input type="text"   class="form-control form-control-sm col-narrow" value="${esc(data.mold_count)}"></td>
+        <td><input type="text"   class="form-control form-control-sm col-wide"   value="${esc(data.notes)}"></td>
+        <td><button type="button" class="btn btn-sm btn-outline-danger btn-delete-row" onclick="this.closest('tr').remove()">删</button></td>
+      `;
+      document.getElementById('parts-tbody').appendChild(tr);
+    }
+
+    // ─── Dynamic rows — 外购件 ───────────────────────────────────────────────
+    function addPurchaseRow(data) {
+      data = data || {};
+      const categoryOptions = ['彩盒', '吸塑', '辅料', '纸箱'];
+      const optionsHtml = categoryOptions.map(opt =>
+        `<option value="${opt}"${data.category === opt ? ' selected' : ''}>${opt}</option>`
+      ).join('');
+
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>
+          <select class="form-select form-select-sm col-medium">
+            <option value="">--</option>
+            ${optionsHtml}
+          </select>
+        </td>
+        <td><input type="text"   class="form-control form-control-sm col-wide"   value="${esc(data.name)}"></td>
+        <td><input type="text"   class="form-control form-control-sm col-medium" value="${esc(data.part_number)}"></td>
+        <td><input type="text"   class="form-control form-control-sm col-wide"   value="${esc(data.spec)}"></td>
+        <td><input type="text"   class="form-control form-control-sm col-medium" value="${esc(data.material)}"></td>
+        <td><input type="text"   class="form-control form-control-sm col-wide"   value="${esc(data.customs_name)}"></td>
+        <td><input type="text"   class="form-control form-control-sm col-narrow" value="${esc(data.color)}"></td>
+        <td><input type="text"   class="form-control form-control-sm col-narrow" value="${esc(data.usage_ratio)}"></td>
+        <td><input type="number" class="form-control form-control-sm col-num" step="any" value="${numVal(data.order_qty)}"></td>
+        <td><input type="number" class="form-control form-control-sm col-num" step="any" value="${numVal(data.unit_weight_g)}"></td>
+        <td><input type="text"   class="form-control form-control-sm col-wide"   value="${esc(data.supplier)}"></td>
+        <td><input type="text"   class="form-control form-control-sm col-wide"   value="${esc(data.surface_treatment)}"></td>
+        <td><input type="text"   class="form-control form-control-sm col-medium" value="${esc(data.purpose)}"></td>
+        <td><input type="text"   class="form-control form-control-sm col-wide"   value="${esc(data.notes)}"></td>
+        <td><button type="button" class="btn btn-sm btn-outline-danger btn-delete-row" onclick="this.closest('tr').remove()">删</button></td>
+      `;
+      document.getElementById('purchases-tbody').appendChild(tr);
+    }
+
+    // ─── Escape helpers ──────────────────────────────────────────────────────
+    function esc(val) {
+      if (val === undefined || val === null) return '';
+      return String(val).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    function numVal(val) {
+      if (val === undefined || val === null || val === '') return '';
+      return val;
+    }
+
+    // ─── Init ────────────────────────────────────────────────────────────────
+    (function init() {
+      // Set default date to today
+      document.getElementById('created_at').value = today();
+
+      const id = getProductId();
+      if (id) {
+        loadProduct(id);
+      }
+    })();
+  </script>
+</body>
+</html>

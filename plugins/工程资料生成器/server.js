@@ -1,6 +1,7 @@
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
+const { v4: uuidv4 } = require('uuid');
 
 // ---------------------------------------------------------------------------
 // Environment
@@ -121,6 +122,188 @@ app.use('/assets', express.static(path.join(__dirname, 'assets')));
 // ---------------------------------------------------------------------------
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok' });
+});
+
+// ---------------------------------------------------------------------------
+// API Routes — Products
+// ---------------------------------------------------------------------------
+
+// GET /api/products — List products with optional search/engineer filter
+app.get('/api/products', (req, res) => {
+  let index = loadIndex();
+  const { search, engineer } = req.query;
+  if (search) {
+    const s = search.toLowerCase();
+    index = index.filter(p =>
+      (p.product_number || '').toLowerCase().includes(s) ||
+      (p.product_name || '').toLowerCase().includes(s) ||
+      (p.client_name || '').toLowerCase().includes(s)
+    );
+  }
+  if (engineer) {
+    index = index.filter(p => p.engineer === engineer);
+  }
+  // Sort by updated_at descending
+  index.sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''));
+  res.json(index);
+});
+
+// GET /api/products/:id — Get full product
+app.get('/api/products/:id', (req, res) => {
+  const product = loadProduct(req.params.id);
+  if (!product) return res.status(404).json({ error: 'Product not found' });
+  res.json(product);
+});
+
+// POST /api/products — Create product
+app.post('/api/products', async (req, res) => {
+  const { factory, product_number, product_name } = req.body;
+  if (!factory || !product_number || !product_name) {
+    return res.status(400).json({ error: 'factory, product_number, product_name are required' });
+  }
+
+  const now = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+  const product = {
+    id: uuidv4(),
+    factory: factory,
+    product_number: product_number,
+    product_name: product_name,
+    client_name: req.body.client_name || '',
+    order_qty: req.body.order_qty || null,
+    age_grade: req.body.age_grade || '',
+    engineer: req.body.engineer || '',
+    created_at: now,
+    updated_at: now,
+    parts: req.body.parts || [],
+    purchases: req.body.purchases || [],
+    dimensions: req.body.dimensions || {
+      packing_method: '', inner_box_material: '', outer_box_material: '',
+      product: { stage: '', width: null, depth: null, height: null, weight_kg: null },
+      package: { stage: '', width: null, depth: null, height_with_hook: null, height_no_hook: null, gross_weight_kg: null },
+      display: { width: null, depth: null, closed_height: null, open_height: null, total_weight_kg: null },
+      inner_carton_order: { width: null, depth: null, height: null, nw_kg: null, gw_kg: null },
+      inner_carton_measure: { width: null, depth: null, height: null, nw_kg: null, gw_kg: null },
+      outer_carton_order: { width: null, depth: null, height: null, nw_kg: null, gw_kg: null },
+      outer_carton_measure: { width: null, depth: null, height: null, nw_kg: null, gw_kg: null }
+    },
+    production_notes: req.body.production_notes || {
+      product_intro: '', function_desc: '', test_requirements: '',
+      injection_notes: '', assembly_notes: '', packaging_notes: ''
+    },
+    work_instructions: req.body.work_instructions || []
+  };
+
+  await saveProduct(product);
+
+  // Add to index
+  const index = loadIndex();
+  index.push({
+    id: product.id,
+    product_number: product.product_number,
+    product_name: product.product_name,
+    client_name: product.client_name,
+    factory: product.factory,
+    engineer: product.engineer,
+    created_at: product.created_at,
+    updated_at: product.updated_at
+  });
+  await saveIndex(index);
+
+  res.status(201).json(product);
+});
+
+// PUT /api/products/:id — Update product (merge)
+app.put('/api/products/:id', async (req, res) => {
+  const existing = loadProduct(req.params.id);
+  if (!existing) return res.status(404).json({ error: 'Product not found' });
+
+  // Merge top-level fields
+  const updated = { ...existing, ...req.body, id: existing.id, created_at: existing.created_at };
+  updated.updated_at = new Date().toISOString().slice(0, 10);
+
+  await saveProduct(updated);
+
+  // Update index entry
+  const index = loadIndex();
+  const idx = index.findIndex(p => p.id === updated.id);
+  if (idx !== -1) {
+    index[idx] = {
+      id: updated.id,
+      product_number: updated.product_number,
+      product_name: updated.product_name,
+      client_name: updated.client_name,
+      factory: updated.factory,
+      engineer: updated.engineer,
+      created_at: updated.created_at,
+      updated_at: updated.updated_at
+    };
+    await saveIndex(index);
+  }
+
+  res.json(updated);
+});
+
+// DELETE /api/products/:id — Delete product
+app.delete('/api/products/:id', async (req, res) => {
+  const existing = loadProduct(req.params.id);
+  if (!existing) return res.status(404).json({ error: 'Product not found' });
+
+  deleteProduct(req.params.id);
+
+  const index = loadIndex();
+  const filtered = index.filter(p => p.id !== req.params.id);
+  await saveIndex(filtered);
+
+  res.json({ success: true });
+});
+
+// ---------------------------------------------------------------------------
+// API Routes — Copy
+// ---------------------------------------------------------------------------
+
+// POST /api/products/:id/copy — Deep copy product with new ID
+app.post('/api/products/:id/copy', async (req, res) => {
+  const source = loadProduct(req.params.id);
+  if (!source) return res.status(404).json({ error: 'Product not found' });
+
+  const now = new Date().toISOString().slice(0, 10);
+  const copy = JSON.parse(JSON.stringify(source)); // Deep clone
+  copy.id = uuidv4();
+  copy.product_number = ''; // Clear for user to fill
+  copy.created_at = now;
+  copy.updated_at = now;
+
+  await saveProduct(copy);
+
+  const index = loadIndex();
+  index.push({
+    id: copy.id,
+    product_number: copy.product_number,
+    product_name: copy.product_name + ' (副本)',
+    client_name: copy.client_name,
+    factory: copy.factory,
+    engineer: copy.engineer,
+    created_at: copy.created_at,
+    updated_at: copy.updated_at
+  });
+  await saveIndex(index);
+
+  res.status(201).json(copy);
+});
+
+// ---------------------------------------------------------------------------
+// API Routes — Config
+// ---------------------------------------------------------------------------
+
+// GET /api/config — Get config
+app.get('/api/config', (req, res) => {
+  res.json(loadConfig());
+});
+
+// PUT /api/config — Update config
+app.put('/api/config', async (req, res) => {
+  await saveConfig(req.body);
+  res.json(req.body);
 });
 
 // ---------------------------------------------------------------------------

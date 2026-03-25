@@ -39,7 +39,14 @@ function loadData() {
       fs.writeFileSync(DATA_FILE, JSON.stringify({
         mold_orders: [], figure_orders: [],
         mold_factories: [], figure_factories: [],
-        customers: [], eng_users: [], nextId: 1
+        customers: ['ZURU', 'JAZWARES', 'Moose', 'TOMY'],
+        mold_factories: ['东莞兴信模具厂', '华登模具厂'],
+        figure_factories: ['东莞兴信手办厂'],
+        eng_users: [
+          { name: '管理员', pin: '123456' },
+          { name: '测试用户', pin: '123456' }
+        ],
+        nextId: 1, po_next_id: 1
       }, null, 2));
     }
     try {
@@ -47,6 +54,14 @@ function loadData() {
     } catch (e) {
       console.error('[FATAL] data.json parse error:', e.message);
       throw new Error('数据文件损坏，请联系管理员');
+    }
+    // Seed default users if none exist
+    if (!_cache.eng_users || _cache.eng_users.length === 0) {
+      _cache.eng_users = [
+        { name: '管理员', pin: '123456' },
+        { name: '测试用户', pin: '123456' }
+      ];
+      saveData(_cache);
     }
   }
   return JSON.parse(JSON.stringify(_cache));

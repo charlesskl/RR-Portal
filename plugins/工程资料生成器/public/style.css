@@ -1,0 +1,204 @@
+/* ─── 全局 ─────────────────────────────────────────────────────────────── */
+body {
+  font-family: 'Microsoft YaHei', '微软雅黑', sans-serif;
+  background: #f8f9fa;
+}
+
+/* ─── 页面标题区 ──────────────────────────────────────────────────────── */
+.page-header {
+  background: #fff;
+  border-bottom: 1px solid #dee2e6;
+  padding: 1rem 0;
+  margin-bottom: 1.5rem;
+}
+.page-header h4 {
+  font-weight: bold;
+  margin: 0;
+}
+.page-header .breadcrumb {
+  font-size: 0.85rem;
+  margin: 0;
+}
+
+/* ─── 导航样式 ──────────────────────────────────────────────────────────── */
+.navbar-brand { font-weight: bold; font-size: 1.1rem; }
+.nav-dept-link {
+  font-size: .9rem;
+  padding: 6px 12px;
+  border-radius: 6px;
+  text-decoration: none;
+  color: rgba(255,255,255,.85);
+}
+.nav-dept-link:hover { color: #fff; background: rgba(255,255,255,.15); }
+.nav-dept-link.active { color: #fff; background: rgba(255,255,255,.25); }
+
+/* ─── 卡片 ──────────────────────────────────────────────────────────────── */
+.card {
+  border-radius: 8px;
+  box-shadow: 0 1px 4px rgba(0,0,0,.08);
+  border: 1px solid #e9ecef;
+}
+.card-header {
+  background: #fff;
+  border-bottom: 2px solid #e9ecef;
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+/* ─── 产品列表卡片（点击跳转） ──────────────────────────────────────────── */
+.product-card {
+  transition: all 0.2s;
+  border: 2px solid transparent;
+  cursor: pointer;
+}
+.product-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 6px 16px rgba(0,0,0,.12);
+  border-color: #0d6efd;
+}
+
+/* ─── 表格（通用） ──────────────────────────────────────────────────────── */
+.table-sm td, .table-sm th {
+  padding: 0.3rem 0.5rem;
+  vertical-align: middle;
+}
+.table-hover tbody tr:hover { background: #f0f4ff; }
+
+/* ─── 宽表格横向滚动 ────────────────────────────────────────────────────── */
+.table-scroll-wrapper {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.table-scroll-wrapper .table {
+  min-width: 900px;
+}
+
+/* ─── 动态行表格（零件 / 外购件 / 工艺步骤） ─────────────────────────── */
+.dynamic-table th {
+  background: #343a40;
+  color: #fff;
+  white-space: nowrap;
+  font-size: 0.78rem;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+.dynamic-table td {
+  padding: 2px 4px;
+  vertical-align: middle;
+}
+.dynamic-table .form-control,
+.dynamic-table .form-select {
+  font-size: 0.78rem;
+  padding: 0.2rem 0.4rem;
+  height: auto;
+}
+
+/* ─── 表格内 input/select 紧凑样式 ─────────────────────────────────────── */
+.table input, .table select, .table textarea {
+  font-size: 0.85rem;
+  padding: 0.25rem 0.5rem;
+}
+
+/* ─── 删除行按钮 ────────────────────────────────────────────────────────── */
+.btn-delete-row {
+  opacity: 0.5;
+  transition: opacity 0.15s;
+}
+.btn-delete-row:hover { opacity: 1; }
+
+/* ─── Tab 面板 ──────────────────────────────────────────────────────────── */
+.nav-tabs .nav-link {
+  font-size: 0.9rem;
+  color: #495057;
+}
+.nav-tabs .nav-link.active {
+  font-weight: 600;
+  color: #0d6efd;
+}
+.tab-pane { padding: 1.5rem 0; }
+
+/* ─── 表单区块标题 ──────────────────────────────────────────────────────── */
+.section-header {
+  font-weight: bold;
+  padding: 0.5rem 0;
+  border-bottom: 2px solid #dee2e6;
+  margin: 1rem 0 0.5rem;
+  color: #343a40;
+}
+
+/* ─── 表单布局 ──────────────────────────────────────────────────────────── */
+.form-label {
+  font-weight: 500;
+  font-size: 0.88rem;
+  color: #495057;
+}
+.form-control, .form-select {
+  font-size: 0.9rem;
+}
+
+/* ─── 操作按钮区 ────────────────────────────────────────────────────────── */
+.action-bar {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+/* ─── 状态徽章 ─────────────────────────────────────────────────────────── */
+.badge-pending   { background: #ffc107; color: #000; }
+.badge-progress  { background: #0dcaf0; color: #000; }
+.badge-done      { background: #198754; color: #fff; }
+.badge-cancelled { background: #6c757d; color: #fff; }
+
+/* ─── 空状态 ─────────────────────────────────────────────────────────────── */
+.empty-state {
+  text-align: center;
+  padding: 60px 20px;
+  color: #adb5bd;
+}
+.empty-state i { font-size: 3rem; }
+
+/* ─── Toast 定位 ────────────────────────────────────────────────────────── */
+.toast-container {
+  z-index: 1080;
+}
+
+/* ─── 加载遮罩 ──────────────────────────────────────────────────────────── */
+.loading-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(255,255,255,0.75);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+}
+.loading-overlay .spinner-border {
+  width: 3rem;
+  height: 3rem;
+}
+
+/* ─── 响应式 ─────────────────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  .page-header h4 { font-size: 1.1rem; }
+  .action-bar { flex-direction: column; align-items: stretch; }
+  .action-bar .btn { width: 100%; }
+  .tab-pane { padding: 1rem 0; }
+}
+
+/* ─── 打印样式 ──────────────────────────────────────────────────────────── */
+@media print {
+  * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  body { font-size: 11pt; margin: 0; background: #fff; }
+  .no-print { display: none !important; }
+  .print-only { display: block !important; }
+  .print-page { page-break-after: always; }
+  .card { box-shadow: none; border: 1px solid #ccc; }
+  .loading-overlay { display: none !important; }
+}
+
+@media screen {
+  .print-only { display: none; }
+}

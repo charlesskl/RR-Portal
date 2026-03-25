@@ -238,6 +238,8 @@ volumes:
 | rr-production (工程啤办单) | 工程啤办单 | Engineering | Standalone (Node.js) | /rr/ | https://github.com/hufan4308-blip/RR-production-system |
 | zouhuo | 走货明细系统 | Engineering | Standalone (Node.js) | /zouhuo/ | — |
 | task-api | 任务 API | — | Standalone (Node.js) | — | — |
+| new-product-schedule | 新产品开发进度表 | Engineering | Standalone (Node.js) | /new-product-schedule/ | https://github.com/hufan4308-blip/new-product-schedule |
+| figure-mold-cost-system | 模具手办采购订单 | Engineering | Standalone (Node.js) | /figure-mold-cost-system/ | https://github.com/hufan4308-blip/figure-mold-cost-system |
 
 ### 旧插件（已删除）
 

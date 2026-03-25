@@ -45,3 +45,45 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+
+  new-product-schedule:
+    build:
+      context: ./plugins/new-product-schedule
+      dockerfile: Dockerfile
+    env_file:
+      - ./plugins/new-product-schedule/.env
+    volumes:
+      - "./plugins/new-product-schedule/data:/app/data"
+      - "./plugins/new-product-schedule/uploads:/app/uploads"
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  figure-mold-cost-system:
+    build:
+      context: ./plugins/figure-mold-cost-system
+      dockerfile: Dockerfile
+    env_file:
+      - ./plugins/figure-mold-cost-system/.env
+    volumes:
+      - "./plugins/figure-mold-cost-system/data:/app/data"
+      - "./plugins/figure-mold-cost-system/public/uploads:/app/public/uploads"
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3

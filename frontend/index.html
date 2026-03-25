@@ -182,7 +182,7 @@
 
     <div class="stats-bar">
       <div class="stat-card">
-        <div class="stat-value" id="statDepts">5</div>
+        <div class="stat-value" id="statDepts">4</div>
         <div class="stat-label">部门数量</div>
       </div>
       <div class="stat-card">
@@ -237,7 +237,7 @@
           <div class="dept-icon engineering">&#9881;</div>
           <div>
             <div class="dept-name">工程部</div>
-            <div class="dept-desc">工程啤办单 · 新产品排期 · 模具手办采购</div>
+            <div class="dept-desc">工程啤办单 · 走货明细 · 新产品排期 · 模具手办采购</div>
           </div>
         </div>
         <div class="dept-card-body">
@@ -247,6 +247,13 @@
                 <div class="plugin-dot green"></div>
                 <span class="plugin-name">工程啤办单</span>
                 <span class="plugin-tag">生产</span>
+              </div>
+            </div>
+            <div class="plugin-item">
+              <div class="plugin-info">
+                <div class="plugin-dot green" id="dotZouhuo"></div>
+                <span class="plugin-name">走货明细系统</span>
+                <span class="plugin-tag">走货</span>
               </div>
             </div>
             <div class="plugin-item">
@@ -311,27 +318,6 @@
         </div>
       </div>
 
-      <!-- 生产部 -->
-      <div class="dept-card" onclick="showDept('production')">
-        <div class="dept-card-header">
-          <div class="dept-icon production">&#128230;</div>
-          <div>
-            <div class="dept-name">生产部</div>
-            <div class="dept-desc">走货明细 · 核价管理 · A-DOC采购单</div>
-          </div>
-        </div>
-        <div class="dept-card-body">
-          <div class="plugin-list" id="productionPluginList">
-            <div class="plugin-item">
-              <div class="plugin-info">
-                <div class="plugin-dot green" id="dotZouhuo"></div>
-                <span class="plugin-name">走货明细系统</span>
-                <span class="plugin-tag">走货</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
 
     </div>
 
@@ -457,43 +443,6 @@
     </div>
   </div>
 
-  <!-- ===== 生产部详情 ===== -->
-  <div class="detail-view" id="productionDetail">
-    <div class="back-btn" onclick="goHome()">&larr; 返回部门总览</div>
-    <div class="breadcrumb">
-      <a href="#" onclick="goHome()">控制台</a>
-      <span class="sep">/</span>
-      <span style="color:#f97316">生产部</span>
-    </div>
-    <div class="page-title" style="display:flex;align-items:center;gap:14px;">
-      <div class="dept-icon production" style="width:40px;height:40px;font-size:18px;">&#128230;</div>
-      生产部
-    </div>
-    <div class="page-subtitle">走货明细管理 · 核价系统 · A-DOC采购订单生成</div>
-
-    <div class="detail-plugin-card">
-      <div class="detail-plugin-left">
-        <div class="detail-plugin-icon" style="background:linear-gradient(135deg,#f97316,#ea580c);">&#128230;</div>
-        <div>
-          <div class="detail-plugin-name">走货明细系统</div>
-          <div class="detail-plugin-desc">上传Excel走货明细表，自动解析BOM表与外购清单，核价管理，A-DOC采购订单Word文档生成</div>
-          <div class="feature-grid">
-            <div class="feature-tag">&#128230; 走货明细解析</div>
-            <div class="feature-tag">&#128176; 核价管理</div>
-            <div class="feature-tag">&#128196; A-DOC 生成</div>
-            <div class="feature-tag">&#128202; BOM 表生成</div>
-            <div class="feature-tag">&#128230; Excel 导入导出</div>
-            <div class="feature-tag">&#128203; 模板下载</div>
-          </div>
-        </div>
-      </div>
-      <div class="detail-plugin-right">
-        <div class="detail-plugin-status"><div class="plugin-dot green" id="dotZouhuoDetail"></div> 运行中</div>
-        <a href="/zouhuo/" target="_blank" class="btn btn-primary">打开系统</a>
-      </div>
-    </div>
-  </div>
-
   <!-- ===== 工程部详情 ===== -->
   <div class="detail-view" id="engineeringDetail">
     <div class="back-btn" onclick="goHome()">&larr; 返回部门总览</div>
@@ -506,7 +455,7 @@
       <div class="dept-icon engineering" style="width:40px;height:40px;font-size:18px;">&#9881;</div>
       工程部
     </div>
-    <div class="page-subtitle">工程啤办单 · 新产品排期 · 模具手办采购</div>
+    <div class="page-subtitle">工程啤办单 · 走货明细 · 新产品排期 · 模具手办采购</div>
 
     <div class="detail-plugin-card">
       <div class="detail-plugin-left">
@@ -527,6 +476,26 @@
       <div class="detail-plugin-right">
         <div class="detail-plugin-status"><div class="plugin-dot green"></div> 运行中</div>
         <a href="/rr/" target="_blank" class="btn btn-primary">打开系统</a>
+      </div>
+    </div>
+
+    <div class="detail-plugin-card">
+      <div class="detail-plugin-left">
+        <div class="detail-plugin-icon" style="background:linear-gradient(135deg,#3b82f6,#06b6d4);">&#128196;</div>
+        <div>
+          <div class="detail-plugin-name">走货明细系统</div>
+          <div class="detail-plugin-desc">上传Excel走货明细表，自动解析BOM表与外购清单，核价管理，A-DOC采购订单Word文档生成</div>
+          <div class="feature-grid">
+            <div class="feature-tag">&#128230; 走货明细解析</div>
+            <div class="feature-tag">&#128176; 核价管理</div>
+            <div class="feature-tag">&#128196; A-DOC 生成</div>
+            <div class="feature-tag">&#128202; BOM 表生成</div>
+          </div>
+        </div>
+      </div>
+      <div class="detail-plugin-right">
+        <div class="detail-plugin-status"><div class="plugin-dot green" id="dotZouhuoDetail"></div> 运行中</div>
+        <a href="/zouhuo/" target="_blank" class="btn btn-primary">打开系统</a>
       </div>
     </div>
 
@@ -574,7 +543,7 @@
 </div>
 
 <script>
-var allDepts = ['business', 'engineering', 'indonesia', 'printing3d', 'production'];
+var allDepts = ['business', 'engineering', 'indonesia', 'printing3d'];
 
 function showDept(dept) {
   document.getElementById('homeView').classList.add('hidden');

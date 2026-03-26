@@ -3,4 +3,4 @@ Flask-SQLAlchemy==3.1.1
 pdfplumber==0.11.6
 pandas==2.2.3
 openpyxl==3.1.5
-easyocr==1.7.2
+# easyocr==1.7.2  # Optional: OCR for delivery notes (requires torch, ~200MB)

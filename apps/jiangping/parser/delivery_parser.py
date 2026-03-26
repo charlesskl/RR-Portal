@@ -9,11 +9,27 @@ import os
 from datetime import datetime
 
 
+def is_ocr_available() -> bool:
+    """Check if easyocr is installed."""
+    try:
+        import easyocr  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
 def parse_delivery_file(filepath: str) -> dict:
     """Parse a delivery note PDF or image via OCR.
 
     Returns dict with raw OCR lines and best-effort extracted fields.
     """
+    if not is_ocr_available():
+        return {
+            'error': 'OCR功能未安装（需要easyocr），请使用Excel导入代替',
+            'supplier': '', 'delivery_date': '', 'delivery_no': '',
+            'items': [], 'raw_text': '',
+        }
+
     ext = os.path.splitext(filepath)[1].lower()
     if ext == '.pdf':
         lines = _ocr_pdf(filepath)

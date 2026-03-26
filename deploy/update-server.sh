@@ -36,3 +36,9 @@ if curl -sf http://localhost/nginx-health > /dev/null 2>&1; then
 else
     echo "[WARN] nginx not responding. Check: docker compose -f docker-compose.cloud.yml logs"
 fi
+
+# Show logs for any unhealthy containers
+echo "=== Container Status ==="
+docker compose -f docker-compose.cloud.yml ps --format "table {{.Name}}\t{{.Status}}" 2>/dev/null || true
+echo "=== Paiji Logs (last 30 lines) ==="
+docker compose -f docker-compose.cloud.yml logs paiji --tail 30 2>/dev/null || true

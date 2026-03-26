@@ -166,6 +166,27 @@ services:
     networks:
       - platform-net
 
+  jiangping:
+    build:
+      context: ./apps/jiangping
+      dockerfile: Dockerfile
+    environment:
+      - BASE_PATH=/jiangping
+      - DATA_PATH=/app/data
+      - UPLOAD_FOLDER=/app/uploads
+      - SECRET_KEY=${JIANGPING_SECRET_KEY:-huadeng-jiangping-2026}
+    volumes:
+      - ./apps/jiangping/data:/app/data
+      - ./apps/jiangping/uploads:/app/uploads
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5001/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - platform-net
+
 networks:
   platform-net:
     driver: bridge

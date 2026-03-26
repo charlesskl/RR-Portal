@@ -1,0 +1,315 @@
+{% extends 'base.html' %}
+{% block title %}PDF导入 - 采购管理系统{% endblock %}
+
+{% block extra_css %}
+<style>
+  #drop-zone {
+    border: 2px dashed #6c757d;
+    border-radius: 12px;
+    transition: border-color 0.2s, background-color 0.2s;
+    cursor: pointer;
+    min-height: 180px;
+  }
+  #drop-zone.dragover {
+    border-color: #0d6efd;
+    background-color: #e8f0fe;
+  }
+  #drop-zone:hover {
+    border-color: #0d6efd;
+  }
+  #file-input {
+    display: none;
+  }
+  #preview-section {
+    display: none;
+  }
+  .table-preview th {
+    white-space: nowrap;
+  }
+  .spinner-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.35);
+    z-index: 9999;
+    align-items: center;
+    justify-content: center;
+  }
+  .spinner-overlay.active {
+    display: flex;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<h2 class="mb-1">PDF导入</h2>
+<p class="text-muted mb-4">上传采购订单PDF文件，系统将自动解析并导入数据。</p>
+
+<!-- Upload Zone -->
+<div class="card mb-4">
+  <div class="card-body p-4">
+    <div id="drop-zone" class="d-flex flex-column align-items-center justify-content-center text-center p-5"
+         onclick="document.getElementById('file-input').click()">
+      <i class="bi bi-file-earmark-pdf text-danger" style="font-size: 3.5rem;"></i>
+      <p class="mt-3 mb-1 fw-semibold fs-5">点击选择或拖拽PDF文件至此处</p>
+      <p class="text-muted small">支持单个或批量上传 · 仅限 .pdf 格式</p>
+      <button type="button" class="btn btn-outline-primary btn-sm mt-2"
+              onclick="event.stopPropagation(); document.getElementById('file-input').click()">
+        <i class="bi bi-folder2-open me-1"></i>浏览文件
+      </button>
+    </div>
+    <input type="file" id="file-input" accept=".pdf" multiple>
+  </div>
+</div>
+
+<!-- Alert area -->
+<div id="alert-area"></div>
+
+<!-- Preview Section -->
+<div id="preview-section">
+  <div class="card">
+    <div class="card-header d-flex align-items-center justify-content-between">
+      <span class="fw-semibold fs-5"><i class="bi bi-eye me-2"></i>解析预览</span>
+      <span id="warning-badge" class="badge bg-warning text-dark d-none"></span>
+    </div>
+    <div class="card-body">
+      <!-- Header info row -->
+      <div class="row g-3 mb-3">
+        <div class="col-sm-6 col-md-3">
+          <label class="form-label text-muted small mb-1">采购单号</label>
+          <div id="info-po-no" class="fw-semibold"></div>
+        </div>
+        <div class="col-sm-6 col-md-3">
+          <label class="form-label text-muted small mb-1">日期</label>
+          <div id="info-po-date"></div>
+        </div>
+        <div class="col-sm-6 col-md-3">
+          <label class="form-label text-muted small mb-1">供应商</label>
+          <div id="info-supplier"></div>
+        </div>
+        <div class="col-sm-6 col-md-3">
+          <label class="form-label text-muted small mb-1">交货期</label>
+          <div id="info-delivery-date"></div>
+        </div>
+      </div>
+
+      <!-- Items Table -->
+      <div class="table-responsive">
+        <table class="table table-bordered table-hover table-sm align-middle table-preview">
+          <thead class="table-light">
+            <tr>
+              <th>#</th>
+              <th>物料编号</th>
+              <th>货号</th>
+              <th>货品名称</th>
+              <th>规格</th>
+              <th class="text-end">数量</th>
+              <th>单位</th>
+              <th class="text-end">单价</th>
+              <th class="text-end">金额</th>
+            </tr>
+          </thead>
+          <tbody id="preview-tbody"></tbody>
+          <tfoot>
+            <tr class="table-secondary fw-semibold">
+              <td colspan="8" class="text-end">合计</td>
+              <td class="text-end" id="preview-total"></td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+
+      <!-- Action buttons -->
+      <div class="d-flex gap-2 justify-content-end mt-3">
+        <button type="button" class="btn btn-secondary" id="btn-cancel">
+          <i class="bi bi-x-circle me-1"></i>取消
+        </button>
+        <button type="button" class="btn btn-primary" id="btn-save">
+          <i class="bi bi-save me-1"></i>保存入库
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Loading Spinner -->
+<div class="spinner-overlay" id="spinner-overlay">
+  <div class="text-center text-white">
+    <div class="spinner-border mb-2" style="width:3rem;height:3rem;" role="status"></div>
+    <div>正在解析PDF，请稍候…</div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+  'use strict';
+
+  // ── State ──────────────────────────────────────────────────────────────────
+  let parsedData = null;
+
+  // ── Element refs ──────────────────────────────────────────────────────────
+  const dropZone       = document.getElementById('drop-zone');
+  const fileInput      = document.getElementById('file-input');
+  const alertArea      = document.getElementById('alert-area');
+  const previewSection = document.getElementById('preview-section');
+  const warningBadge   = document.getElementById('warning-badge');
+  const infoPono       = document.getElementById('info-po-no');
+  const infoPoDate     = document.getElementById('info-po-date');
+  const infoSupplier   = document.getElementById('info-supplier');
+  const infoDelivery   = document.getElementById('info-delivery-date');
+  const tbody          = document.getElementById('preview-tbody');
+  const totalCell      = document.getElementById('preview-total');
+  const btnSave        = document.getElementById('btn-save');
+  const btnCancel      = document.getElementById('btn-cancel');
+  const spinner        = document.getElementById('spinner-overlay');
+
+  // ── Helpers ───────────────────────────────────────────────────────────────
+  function showAlert(msg, type = 'danger') {
+    alertArea.innerHTML = `
+      <div class="alert alert-${type} alert-dismissible fade show" role="alert">
+        ${msg}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+      </div>`;
+  }
+
+  function clearAlert() { alertArea.innerHTML = ''; }
+
+  function fmtNum(v) {
+    const n = parseFloat(v);
+    return isNaN(n) ? '—' : n.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+
+  function showSpinner()  { spinner.classList.add('active'); }
+  function hideSpinner()  { spinner.classList.remove('active'); }
+
+  // ── Drag-drop events ──────────────────────────────────────────────────────
+  dropZone.addEventListener('dragover', e => {
+    e.preventDefault();
+    dropZone.classList.add('dragover');
+  });
+  dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+  dropZone.addEventListener('drop', e => {
+    e.preventDefault();
+    dropZone.classList.remove('dragover');
+    const files = Array.from(e.dataTransfer.files).filter(f => f.name.toLowerCase().endsWith('.pdf'));
+    if (files.length === 0) { showAlert('请拖拽 PDF 文件'); return; }
+    uploadFile(files[0]);
+  });
+
+  fileInput.addEventListener('change', () => {
+    if (fileInput.files.length) uploadFile(fileInput.files[0]);
+    fileInput.value = '';   // reset so the same file can be re-selected
+  });
+
+  // ── Upload & Parse ────────────────────────────────────────────────────────
+  async function uploadFile(file) {
+    clearAlert();
+    previewSection.style.display = 'none';
+    parsedData = null;
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    showSpinner();
+    try {
+      const res  = await fetch('/upload/parse', { method: 'POST', body: formData });
+      const json = await res.json();
+      if (!res.ok || json.error) {
+        showAlert(json.error || '解析失败');
+        return;
+      }
+      parsedData = json;
+      renderPreview(json);
+    } catch (err) {
+      showAlert('网络错误：' + err.message);
+    } finally {
+      hideSpinner();
+    }
+  }
+
+  // ── Render Preview ────────────────────────────────────────────────────────
+  function renderPreview(data) {
+    // Header info
+    infoPono.textContent      = data.po_no        || '—';
+    infoPoDate.textContent    = data.po_date       || '—';
+    infoSupplier.textContent  = data.supplier_name || '—';
+    infoDelivery.textContent  = data.delivery_date || '—';
+
+    // Warning badge
+    if (data.warning) {
+      warningBadge.textContent = data.warning;
+      warningBadge.classList.remove('d-none');
+    } else {
+      warningBadge.textContent = '';
+      warningBadge.classList.add('d-none');
+    }
+
+    // Table rows
+    tbody.innerHTML = '';
+    const items = data.items || [];
+    let total = 0;
+    items.forEach((item, idx) => {
+      total += parseFloat(item.amount) || 0;
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td class="text-muted">${idx + 1}</td>
+        <td>${esc(item.material_code)}</td>
+        <td>${esc(item.product_code)}</td>
+        <td>${esc(item.product_name)}</td>
+        <td>${esc(item.specification)}</td>
+        <td class="text-end">${fmtNum(item.quantity)}</td>
+        <td>${esc(item.unit)}</td>
+        <td class="text-end">${fmtNum(item.unit_price)}</td>
+        <td class="text-end">${fmtNum(item.amount)}</td>`;
+      tbody.appendChild(tr);
+    });
+
+    totalCell.textContent = fmtNum(total);
+    previewSection.style.display = 'block';
+    previewSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  function esc(str) {
+    if (!str) return '—';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+  }
+
+  // ── Save ──────────────────────────────────────────────────────────────────
+  btnSave.addEventListener('click', async () => {
+    if (!parsedData) return;
+    showSpinner();
+    try {
+      const res  = await fetch('/upload/save', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify(parsedData),
+      });
+      const json = await res.json();
+      if (!res.ok || json.error) {
+        showAlert(json.error || '保存失败');
+        return;
+      }
+      showAlert(`<i class="bi bi-check-circle me-1"></i>${json.message}`, 'success');
+      previewSection.style.display = 'none';
+      parsedData = null;
+    } catch (err) {
+      showAlert('网络错误：' + err.message);
+    } finally {
+      hideSpinner();
+    }
+  });
+
+  // ── Cancel ────────────────────────────────────────────────────────────────
+  btnCancel.addEventListener('click', () => {
+    previewSection.style.display = 'none';
+    parsedData = null;
+    clearAlert();
+  });
+})();
+</script>
+{% endblock %}

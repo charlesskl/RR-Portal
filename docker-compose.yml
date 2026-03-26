@@ -108,3 +108,24 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+
+  jiangping:
+    build:
+      context: ./apps/jiangping
+      dockerfile: Dockerfile
+    env_file:
+      - ./apps/jiangping/.env
+    volumes:
+      - "./apps/jiangping/data:/app/data"
+      - "./apps/jiangping/uploads:/app/uploads"
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3

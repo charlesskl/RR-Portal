@@ -68,6 +68,7 @@
   }
   .dept-icon.engineering { background: linear-gradient(135deg, #3b82f6, #06b6d4); }
   .dept-icon.production { background: linear-gradient(135deg, #f97316, #ea580c); }
+  .dept-icon.pmc { background: linear-gradient(135deg, #10b981, #059669); }
   .dept-icon.business { background: linear-gradient(135deg, #f59e0b, #ef4444); }
   .dept-name { font-size: 20px; font-weight: 600; color: #f1f5f9; }
   .dept-desc { font-size: 13px; color: #94a3b8; margin-top: 2px; }
@@ -171,11 +172,11 @@
 
     <div class="stats-bar">
       <div class="stat-card">
-        <div class="stat-value" id="statDepts">1</div>
+        <div class="stat-value" id="statDepts">2</div>
         <div class="stat-label">部门数量</div>
       </div>
       <div class="stat-card">
-        <div class="stat-value" id="statPlugins">4</div>
+        <div class="stat-value" id="statPlugins">5</div>
         <div class="stat-label">应用数量</div>
       </div>
       <div class="stat-card">
@@ -223,6 +224,30 @@
               <div class="plugin-info">
                 <div class="plugin-dot gray" id="figureMoldDot"></div>
                 <span class="plugin-name">模具手办采购订单</span>
+                <span class="plugin-tag">采购</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+      <!-- PMC跟仓管 -->
+      <div class="dept-card" onclick="showDept('pmc')">
+        <div class="dept-card-header">
+          <div class="dept-icon pmc">&#128230;</div>
+          <div>
+            <div class="dept-name">PMC跟仓管</div>
+            <div class="dept-desc">采购订单管理</div>
+          </div>
+        </div>
+        <div class="dept-card-body">
+          <div class="plugin-list" id="pmcPluginList">
+            <div class="plugin-item">
+              <div class="plugin-info">
+                <div class="plugin-dot gray" id="jiangpingDot"></div>
+                <span class="plugin-name">采购订单管理系统</span>
                 <span class="plugin-tag">采购</span>
               </div>
             </div>
@@ -331,10 +356,47 @@
   </div>
 
 
+  <!-- ===== PMC跟仓管详情 ===== -->
+  <div class="detail-view" id="pmcDetail">
+    <div class="back-btn" onclick="goHome()">&larr; 返回部门总览</div>
+    <div class="breadcrumb">
+      <a href="#" onclick="goHome()">控制台</a>
+      <span class="sep">/</span>
+      <span style="color:#10b981">PMC跟仓管</span>
+    </div>
+    <div class="page-title" style="display:flex;align-items:center;gap:14px;">
+      <div class="dept-icon pmc" style="width:40px;height:40px;font-size:18px;">&#128230;</div>
+      PMC跟仓管
+    </div>
+    <div class="page-subtitle">采购订单与送货管理</div>
+
+    <div class="detail-plugin-card">
+      <div class="detail-plugin-left">
+        <div class="detail-plugin-icon" style="background:linear-gradient(135deg,#10b981,#059669);">&#128196;</div>
+        <div>
+          <div class="detail-plugin-name">采购订单管理系统</div>
+          <div class="detail-plugin-desc">PDF采购单解析、送货单OCR识别、供应商管理、采购对账与数据分析</div>
+          <div class="feature-grid">
+            <div class="feature-tag">&#128196; PDF采购单解析</div>
+            <div class="feature-tag">&#128247; OCR送货单识别</div>
+            <div class="feature-tag">&#128101; 供应商管理</div>
+            <div class="feature-tag">&#128202; 数据分析仪表盘</div>
+            <div class="feature-tag">&#128230; Excel导入导出</div>
+            <div class="feature-tag">&#128176; 采购对账</div>
+          </div>
+        </div>
+      </div>
+      <div class="detail-plugin-right">
+        <div class="detail-plugin-status"><div class="plugin-dot gray" id="jiangpingDetailDot"></div> 检查中...</div>
+        <a href="/jiangping/" target="_blank" class="btn btn-primary">打开系统</a>
+      </div>
+    </div>
+  </div>
+
 </div>
 
 <script>
-var allDepts = ['engineering'];
+var allDepts = ['engineering', 'pmc'];
 
 function showDept(dept) {
   document.getElementById('homeView').classList.add('hidden');
@@ -359,6 +421,7 @@ async function checkHealth() {
       { name: 'zouhuo', url: '/zouhuo/health', dot: 'zouhuoDot', detailDot: 'zouhuoDetailDot' },
       { name: 'devProgress', url: '/new-product-schedule/health', dot: 'devProgressDot', detailDot: 'devProgressDetailDot' },
       { name: 'figureMold', url: '/figure-mold-cost-system/health', dot: 'figureMoldDot', detailDot: 'figureMoldDetailDot' },
+      { name: 'jiangping', url: '/jiangping/health', dot: 'jiangpingDot', detailDot: 'jiangpingDetailDot' },
     ];
     var healthy = 0;
     var total = checks.length;

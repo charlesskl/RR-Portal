@@ -1,0 +1,172 @@
+{% extends 'base.html' %}
+{% block title %}供应商管理 - 采购管理系统{% endblock %}
+
+{% block content %}
+<h2>供应商管理</h2>
+<p class="text-muted">查看和管理所有供应商信息。</p>
+
+<div class="card">
+    <div class="card-body">
+        <table id="suppliersTable" class="table table-striped table-hover align-middle">
+            <thead class="table-dark">
+                <tr>
+                    <th>简称</th>
+                    <th>全称</th>
+                    <th>联系人</th>
+                    <th>电话</th>
+                    <th>订单数</th>
+                    <th>总金额 (RMB)</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for s, order_count, total_amount in suppliers %}
+                <tr>
+                    <td>{{ s.short_name or '' }}</td>
+                    <td>{{ s.name }}</td>
+                    <td>{{ s.contact or '' }}</td>
+                    <td>{{ s.tel or '' }}</td>
+                    <td>{{ order_count }}</td>
+                    <td>{{ '%.2f'|format(total_amount|float) }}</td>
+                    <td>
+                        <button class="btn btn-sm btn-outline-primary btn-edit"
+                                data-id="{{ s.id }}"
+                                data-name="{{ s.name }}"
+                                data-short-name="{{ s.short_name or '' }}"
+                                data-contact="{{ s.contact or '' }}"
+                                data-tel="{{ s.tel or '' }}"
+                                data-fax="{{ s.fax or '' }}"
+                                data-address="{{ s.address or '' }}"
+                                data-bs-toggle="modal"
+                                data-bs-target="#editModal">
+                            <i class="bi bi-pencil"></i> 编辑
+                        </button>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Edit Modal -->
+<div class="modal fade" id="editModal" tabindex="-1" aria-labelledby="editModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="editModalLabel">编辑供应商</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="editSupplierId">
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <label for="editName" class="form-label">全称 <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="editName" placeholder="供应商全称">
+                    </div>
+                    <div class="col-md-6">
+                        <label for="editShortName" class="form-label">简称</label>
+                        <input type="text" class="form-control" id="editShortName" placeholder="供应商简称">
+                    </div>
+                    <div class="col-md-6">
+                        <label for="editContact" class="form-label">联系人</label>
+                        <input type="text" class="form-control" id="editContact" placeholder="联系人姓名">
+                    </div>
+                    <div class="col-md-6">
+                        <label for="editTel" class="form-label">电话</label>
+                        <input type="text" class="form-control" id="editTel" placeholder="联系电话">
+                    </div>
+                    <div class="col-md-6">
+                        <label for="editFax" class="form-label">传真</label>
+                        <input type="text" class="form-control" id="editFax" placeholder="传真号码">
+                    </div>
+                    <div class="col-md-6">
+                        <label for="editAddress" class="form-label">地址</label>
+                        <input type="text" class="form-control" id="editAddress" placeholder="供应商地址">
+                    </div>
+                </div>
+                <div id="editError" class="alert alert-danger mt-3 d-none"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                <button type="button" class="btn btn-primary" id="saveSupplierBtn">
+                    <i class="bi bi-save me-1"></i>保存
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+$(document).ready(function () {
+    // Initialize DataTables with Chinese language
+    $('#suppliersTable').DataTable({
+        language: {
+            url: 'https://cdn.datatables.net/plug-ins/1.13.8/i18n/zh.json'
+        },
+        order: [[0, 'asc']],
+        columnDefs: [
+            { orderable: false, targets: 6 }
+        ]
+    });
+
+    // Populate modal when edit button is clicked
+    $(document).on('click', '.btn-edit', function () {
+        var btn = $(this);
+        $('#editSupplierId').val(btn.data('id'));
+        $('#editName').val(btn.data('name'));
+        $('#editShortName').val(btn.data('short-name'));
+        $('#editContact').val(btn.data('contact'));
+        $('#editTel').val(btn.data('tel'));
+        $('#editFax').val(btn.data('fax'));
+        $('#editAddress').val(btn.data('address'));
+        $('#editError').addClass('d-none').text('');
+    });
+
+    // Save supplier via AJAX POST
+    $('#saveSupplierBtn').on('click', function () {
+        var supplierId = $('#editSupplierId').val();
+        var name = $('#editName').val().trim();
+
+        if (!name) {
+            $('#editError').removeClass('d-none').text('供应商全称不能为空。');
+            return;
+        }
+
+        var payload = {
+            name:       name,
+            short_name: $('#editShortName').val().trim(),
+            contact:    $('#editContact').val().trim(),
+            tel:        $('#editTel').val().trim(),
+            fax:        $('#editFax').val().trim(),
+            address:    $('#editAddress').val().trim()
+        };
+
+        $('#saveSupplierBtn').prop('disabled', true).html('<span class="spinner-border spinner-border-sm me-1"></span>保存中...');
+
+        $.ajax({
+            url: '/suppliers/' + supplierId + '/update',
+            method: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify(payload),
+            success: function (resp) {
+                if (resp.success) {
+                    location.reload();
+                } else {
+                    $('#editError').removeClass('d-none').text('保存失败，请重试。');
+                    $('#saveSupplierBtn').prop('disabled', false).html('<i class="bi bi-save me-1"></i>保存');
+                }
+            },
+            error: function (xhr) {
+                var msg = '保存失败，请重试。';
+                try { msg = JSON.parse(xhr.responseText).error || msg; } catch(e) {}
+                $('#editError').removeClass('d-none').text(msg);
+                $('#saveSupplierBtn').prop('disabled', false).html('<i class="bi bi-save me-1"></i>保存');
+            }
+        });
+    });
+});
+</script>
+{% endblock %}

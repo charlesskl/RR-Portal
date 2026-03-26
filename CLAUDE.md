@@ -240,6 +240,7 @@ volumes:
 | task-api | 任务 API | — | Standalone (Node.js) | — | — |
 | new-product-schedule | 新产品开发进度表 | Engineering | Standalone (Node.js) | /new-product-schedule/ | https://github.com/hufan4308-blip/new-product-schedule |
 | figure-mold-cost-system | 模具手办采购订单 | Engineering | Standalone (Node.js) | /figure-mold-cost-system/ | https://github.com/hufan4308-blip/figure-mold-cost-system |
+| jiangping | 采购订单管理系统 | PMC跟仓管 | Standalone (Python/Flask) | /jiangping/ | https://github.com/fxxaxxx/jiangping |
 
 ### 旧插件（已删除）
 

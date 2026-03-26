@@ -1,0 +1,29 @@
+#sidebar .nav-link:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+    border-radius: 0.375rem;
+}
+.border-dashed {
+    border-style: dashed !important;
+}
+#dropZone.border-primary {
+    background-color: rgba(13, 110, 253, 0.05);
+}
+
+/* 采购表格 - 不换行，可横向滚动 */
+.table-scroll-wrapper {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+}
+#purchases-table,
+#delivery-table {
+    white-space: nowrap;
+    width: auto !important;
+    min-width: 100%;
+}
+#purchases-table td,
+#purchases-table th,
+#delivery-table td,
+#delivery-table th {
+    white-space: nowrap;
+    padding: 0.4rem 0.6rem;
+}

@@ -1,0 +1,281 @@
+{% extends 'base.html' %}
+{% block title %}统计图表 - 采购管理系统{% endblock %}
+
+{% block content %}
+<h2 class="mb-4">统计图表</h2>
+
+<!-- Row 1: By Supplier + By Month -->
+<div class="row g-4 mb-4">
+    <div class="col-md-6">
+        <div class="card h-100">
+            <div class="card-header fw-semibold">按供应商采购金额</div>
+            <div class="card-body">
+                <canvas id="chartSupplier"></canvas>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card h-100">
+            <div class="card-header fw-semibold">按月采购趋势</div>
+            <div class="card-body">
+                <canvas id="chartMonth"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Row 2: By Product Top 20 + Delivery Stats -->
+<div class="row g-4 mb-4">
+    <div class="col-md-6">
+        <div class="card h-100">
+            <div class="card-header fw-semibold">按货号采购量 Top 20</div>
+            <div class="card-body">
+                <canvas id="chartProduct"></canvas>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card h-100">
+            <div class="card-header fw-semibold">交货情况</div>
+            <div class="card-body d-flex justify-content-center align-items-center">
+                <canvas id="chartDelivery" style="max-width: 320px; max-height: 320px;"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Row 3: Period Comparison (full width) -->
+<div class="row g-4 mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header fw-semibold">按时间段对比</div>
+            <div class="card-body">
+                <div class="row g-3 align-items-end mb-3">
+                    <div class="col-auto">
+                        <label class="form-label mb-1 fw-semibold text-primary">时间段一</label>
+                        <div class="d-flex gap-2 align-items-center">
+                            <input type="date" id="p1From" class="form-control form-control-sm" style="width:150px;">
+                            <span class="text-muted">至</span>
+                            <input type="date" id="p1To" class="form-control form-control-sm" style="width:150px;">
+                        </div>
+                    </div>
+                    <div class="col-auto">
+                        <label class="form-label mb-1 fw-semibold text-danger">时间段二</label>
+                        <div class="d-flex gap-2 align-items-center">
+                            <input type="date" id="p2From" class="form-control form-control-sm" style="width:150px;">
+                            <span class="text-muted">至</span>
+                            <input type="date" id="p2To" class="form-control form-control-sm" style="width:150px;">
+                        </div>
+                    </div>
+                    <div class="col-auto">
+                        <button id="btnCompare" class="btn btn-primary btn-sm">
+                            <i class="bi bi-bar-chart-line me-1"></i>对比
+                        </button>
+                    </div>
+                </div>
+                <canvas id="chartPeriod"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+    'use strict';
+
+    // ── 1. By Supplier (horizontal bar) ────────────────────────────────────
+    fetch(BASE_URL + '/dashboard/api/by_supplier')
+        .then(r => r.json())
+        .then(d => {
+            new Chart(document.getElementById('chartSupplier'), {
+                type: 'bar',
+                data: {
+                    labels: d.labels,
+                    datasets: [{
+                        label: '采购金额',
+                        data: d.data,
+                        backgroundColor: 'rgba(54,162,235,0.7)',
+                        borderColor: 'rgba(54,162,235,1)',
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    indexAxis: 'y',
+                    responsive: true,
+                    plugins: {
+                        legend: { display: false }
+                    },
+                    scales: {
+                        x: {
+                            beginAtZero: true,
+                            ticks: {
+                                callback: v => '¥' + v.toLocaleString()
+                            }
+                        }
+                    }
+                }
+            });
+        });
+
+    // ── 2. By Month (line) ─────────────────────────────────────────────────
+    fetch(BASE_URL + '/dashboard/api/by_month')
+        .then(r => r.json())
+        .then(d => {
+            new Chart(document.getElementById('chartMonth'), {
+                type: 'line',
+                data: {
+                    labels: d.labels,
+                    datasets: [{
+                        label: '月度采购金额',
+                        data: d.data,
+                        borderColor: '#198754',
+                        backgroundColor: 'rgba(25,135,84,0.1)',
+                        fill: true,
+                        tension: 0.3,
+                        pointRadius: 4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        legend: { display: false }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                callback: v => '¥' + v.toLocaleString()
+                            }
+                        }
+                    }
+                }
+            });
+        });
+
+    // ── 3. By Product Top 20 (bar) ─────────────────────────────────────────
+    fetch(BASE_URL + '/dashboard/api/by_product?n=20')
+        .then(r => r.json())
+        .then(d => {
+            new Chart(document.getElementById('chartProduct'), {
+                type: 'bar',
+                data: {
+                    labels: d.labels,
+                    datasets: [{
+                        label: '采购数量',
+                        data: d.quantities,
+                        backgroundColor: 'rgba(255,159,64,0.7)',
+                        borderColor: 'rgba(255,159,64,1)',
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        legend: { display: false }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true
+                        },
+                        x: {
+                            ticks: {
+                                maxRotation: 45,
+                                minRotation: 30
+                            }
+                        }
+                    }
+                }
+            });
+        });
+
+    // ── 4. Delivery Stats (doughnut) ───────────────────────────────────────
+    fetch(BASE_URL + '/dashboard/api/delivery_stats')
+        .then(r => r.json())
+        .then(d => {
+            new Chart(document.getElementById('chartDelivery'), {
+                type: 'doughnut',
+                data: {
+                    labels: ['准时', '延迟', '未交', '部分'],
+                    datasets: [{
+                        data: [d.on_time, d.late, d.undelivered, d.partial],
+                        backgroundColor: ['#198754', '#dc3545', '#6c757d', '#ffc107'],
+                        borderWidth: 2
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        legend: {
+                            position: 'bottom'
+                        }
+                    }
+                }
+            });
+        });
+
+    // ── 5. Period Comparison (bar, on button click) ────────────────────────
+    let periodChart = null;
+
+    document.getElementById('btnCompare').addEventListener('click', function () {
+        const p1From = document.getElementById('p1From').value;
+        const p1To   = document.getElementById('p1To').value;
+        const p2From = document.getElementById('p2From').value;
+        const p2To   = document.getElementById('p2To').value;
+
+        if (!p1From || !p1To || !p2From || !p2To) {
+            alert('请填写两个完整的时间段。');
+            return;
+        }
+
+        const url = BASE_URL + `/dashboard/api/period_compare?p1_from=${p1From}&p1_to=${p1To}&p2_from=${p2From}&p2_to=${p2To}`;
+
+        fetch(url)
+            .then(r => r.json())
+            .then(d => {
+                if (periodChart) {
+                    periodChart.destroy();
+                    periodChart = null;
+                }
+                periodChart = new Chart(document.getElementById('chartPeriod'), {
+                    type: 'bar',
+                    data: {
+                        labels: d.labels,
+                        datasets: [
+                            {
+                                label: `时间段一 (${p1From} ~ ${p1To})`,
+                                data: d.period1,
+                                backgroundColor: 'rgba(54,162,235,0.7)',
+                                borderColor: 'rgba(54,162,235,1)',
+                                borderWidth: 1
+                            },
+                            {
+                                label: `时间段二 (${p2From} ~ ${p2To})`,
+                                data: d.period2,
+                                backgroundColor: 'rgba(255,99,132,0.7)',
+                                borderColor: 'rgba(255,99,132,1)',
+                                borderWidth: 1
+                            }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        plugins: {
+                            legend: { position: 'top' }
+                        },
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                ticks: {
+                                    callback: v => '¥' + v.toLocaleString()
+                                }
+                            }
+                        }
+                    }
+                });
+            });
+    });
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,259 @@
+{% extends 'base.html' %}
+
+{% block title %}收货对账 - 采购管理系统{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h4 class="mb-0"><i class="bi bi-clipboard-check me-2"></i>收货对账</h4>
+</div>
+
+<!-- Filter Card -->
+<div class="card mb-4 shadow-sm">
+    <div class="card-body">
+        <div class="row g-3 align-items-end">
+            <div class="col-md-4">
+                <label for="supplierFilter" class="form-label">供应商</label>
+                <select id="supplierFilter" class="form-select">
+                    <option value="">-- 全部供应商 --</option>
+                    {% for s in suppliers %}
+                    <option value="{{ s.id }}">{{ s.short_name or s.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-4">
+                <label for="poNoFilter" class="form-label">采购单号</label>
+                <input type="text" id="poNoFilter" class="form-control" placeholder="输入采购单号搜索">
+            </div>
+            <div class="col-md-4">
+                <button id="btnQuery" class="btn btn-primary w-100">
+                    <i class="bi bi-search me-1"></i>查询
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Reconciliation Table -->
+<div class="card shadow-sm">
+    <div class="card-body">
+        <div class="table-responsive">
+            <table id="deliveryTable" class="table table-hover table-bordered align-middle w-100">
+                <thead class="table-dark">
+                    <tr>
+                        <th>采购单号</th>
+                        <th>采购日期</th>
+                        <th>供应商</th>
+                        <th>货号</th>
+                        <th>货品名称</th>
+                        <th>采购数量</th>
+                        <th>已交数量</th>
+                        <th>差异</th>
+                        <th>状态</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Add Delivery Modal -->
+<div class="modal fade" id="addDeliveryModal" tabindex="-1" aria-labelledby="addDeliveryModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="addDeliveryModalLabel"><i class="bi bi-plus-circle me-2"></i>登记收货记录</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <form id="deliveryForm">
+                    <input type="hidden" id="modalItemId">
+                    <div class="mb-3">
+                        <label class="form-label text-muted">货品信息</label>
+                        <div id="modalItemInfo" class="p-2 bg-light rounded small"></div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="modalDeliveryDate" class="form-label">收货日期 <span class="text-danger">*</span></label>
+                        <input type="date" id="modalDeliveryDate" class="form-control" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="modalQty" class="form-label">收货数量 <span class="text-danger">*</span></label>
+                        <input type="number" id="modalQty" class="form-control" min="1" required placeholder="请输入收货数量">
+                    </div>
+                    <div class="mb-3">
+                        <label for="modalRemarks" class="form-label">备注</label>
+                        <textarea id="modalRemarks" class="form-control" rows="2" placeholder="可选备注信息"></textarea>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                <button type="button" id="btnSaveDelivery" class="btn btn-primary">
+                    <i class="bi bi-save me-1"></i>保存
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const statusMap = {
+    undelivered: { label: '未交',   cls: 'danger'  },
+    partial:     { label: '少交',   cls: 'warning'  },
+    complete:    { label: '已完成', cls: 'success'  },
+    over:        { label: '超交',   cls: 'primary'  },
+};
+
+let table = null;
+
+function buildUrl() {
+    const supplierId = $('#supplierFilter').val();
+    const poNo = $('#poNoFilter').val().trim();
+    let url = BASE_URL + '/delivery/api/reconciliation?';
+    if (supplierId) url += 'supplier_id=' + supplierId + '&';
+    if (poNo) url += 'po_no=' + encodeURIComponent(poNo) + '&';
+    return url;
+}
+
+function initTable() {
+    table = $('#deliveryTable').DataTable({
+        ajax: { url: buildUrl(), dataSrc: 'data' },
+        columns: [
+            { data: 'po_no' },
+            { data: 'po_date' },
+            { data: 'supplier' },
+            { data: 'product_code', defaultContent: '' },
+            { data: 'product_name', defaultContent: '' },
+            { data: 'quantity', className: 'text-end' },
+            { data: 'delivered_qty', className: 'text-end' },
+            {
+                data: 'diff', className: 'text-end',
+                render: function(data) {
+                    if (data > 0) return '<span class="text-primary">+' + data + '</span>';
+                    if (data < 0) return '<span class="text-danger">' + data + '</span>';
+                    return '<span class="text-success">0</span>';
+                }
+            },
+            {
+                data: 'status',
+                render: function(data) {
+                    const s = statusMap[data] || { label: data, cls: 'secondary' };
+                    return '<span class="badge bg-' + s.cls + '">' + s.label + '</span>';
+                }
+            },
+            {
+                data: null,
+                orderable: false,
+                render: function(data, type, row) {
+                    return '<button class="btn btn-sm btn-outline-primary add-delivery" '
+                        + 'data-item-id="' + row.item_id + '" '
+                        + 'data-po-no="' + row.po_no + '" '
+                        + 'data-product-code="' + (row.product_code || '') + '" '
+                        + 'data-product-name="' + (row.product_name || '') + '" '
+                        + 'data-quantity="' + row.quantity + '">'
+                        + '<i class="bi bi-plus-circle me-1"></i>登记收货</button>';
+                }
+            }
+        ],
+        language: {
+            url: 'https://cdn.datatables.net/plug-ins/1.13.8/i18n/zh.json'
+        },
+        order: [[1, 'desc']],
+        pageLength: 25,
+        responsive: true,
+    });
+}
+
+$(document).ready(function () {
+    // Set default date to today
+    const today = new Date().toISOString().split('T')[0];
+    $('#modalDeliveryDate').val(today);
+
+    initTable();
+
+    // Query button reloads table with new filters
+    $('#btnQuery').on('click', function () {
+        if (table) {
+            table.ajax.url(buildUrl()).load();
+        }
+    });
+
+    // Also allow Enter key in po_no input
+    $('#poNoFilter').on('keydown', function (e) {
+        if (e.key === 'Enter') $('#btnQuery').trigger('click');
+    });
+
+    // Open add delivery modal on row button click
+    $('#deliveryTable').on('click', '.add-delivery', function () {
+        const btn = $(this);
+        const itemId = btn.data('item-id');
+        const poNo = btn.data('po-no');
+        const productCode = btn.data('product-code');
+        const productName = btn.data('product-name');
+        const quantity = btn.data('quantity');
+
+        $('#modalItemId').val(itemId);
+        $('#modalItemInfo').html(
+            '<strong>采购单号：</strong>' + poNo +
+            '&nbsp;&nbsp;<strong>货号：</strong>' + (productCode || '-') +
+            '<br><strong>货品名称：</strong>' + (productName || '-') +
+            '&nbsp;&nbsp;<strong>采购数量：</strong>' + quantity
+        );
+        $('#modalQty').val('');
+        $('#modalRemarks').val('');
+        $('#modalDeliveryDate').val(new Date().toISOString().split('T')[0]);
+
+        const modal = new bootstrap.Modal(document.getElementById('addDeliveryModal'));
+        modal.show();
+    });
+
+    // Save delivery record
+    $('#btnSaveDelivery').on('click', function () {
+        const itemId = $('#modalItemId').val();
+        const deliveryDate = $('#modalDeliveryDate').val();
+        const qty = parseInt($('#modalQty').val(), 10);
+        const remarks = $('#modalRemarks').val().trim();
+
+        if (!deliveryDate) {
+            alert('请选择收货日期');
+            return;
+        }
+        if (!qty || qty < 1) {
+            alert('请输入有效的收货数量');
+            return;
+        }
+
+        $('#btnSaveDelivery').prop('disabled', true).html('<span class="spinner-border spinner-border-sm me-1"></span>保存中...');
+
+        $.ajax({
+            url: BASE_URL + '/delivery/api/record',
+            type: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({
+                item_id: parseInt(itemId, 10),
+                delivery_date: deliveryDate,
+                delivered_quantity: qty,
+                remarks: remarks,
+            }),
+            success: function (res) {
+                if (res.success) {
+                    bootstrap.Modal.getInstance(document.getElementById('addDeliveryModal')).hide();
+                    table.ajax.reload(null, false);
+                } else {
+                    alert('保存失败，请重试');
+                }
+            },
+            error: function () {
+                alert('请求失败，请检查网络或联系管理员');
+            },
+            complete: function () {
+                $('#btnSaveDelivery').prop('disabled', false).html('<i class="bi bi-save me-1"></i>保存');
+            }
+        });
+    });
+});
+</script>
+{% endblock %}

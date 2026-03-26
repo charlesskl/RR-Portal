@@ -1,0 +1,112 @@
+{% extends 'base.html' %}
+{% block title %}采购单 {{ order.po_no }} - 采购管理系统{% endblock %}
+
+{% block content %}
+<!-- Header -->
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h2 class="mb-0"><i class="bi bi-file-text me-2"></i>采购单详情</h2>
+    <a href="{{ url_for('purchase.list_purchases') }}" class="btn btn-secondary">
+        <i class="bi bi-arrow-left me-1"></i>返回列表
+    </a>
+</div>
+
+<!-- Order info -->
+<div class="card mb-4">
+    <div class="card-header bg-primary text-white fw-bold">
+        采购单号：{{ order.po_no }}
+    </div>
+    <div class="card-body">
+        <div class="row g-3">
+            <div class="col-md-3">
+                <span class="text-muted">供应商</span>
+                <div class="fw-semibold">
+                    {{ order.supplier.short_name or order.supplier.name if order.supplier else '—' }}
+                </div>
+            </div>
+            <div class="col-md-2">
+                <span class="text-muted">日期</span>
+                <div class="fw-semibold">
+                    {{ order.po_date.strftime('%Y-%m-%d') if order.po_date else '—' }}
+                </div>
+            </div>
+            <div class="col-md-2">
+                <span class="text-muted">交货期</span>
+                <div class="fw-semibold">
+                    {{ order.delivery_date.strftime('%Y-%m-%d') if order.delivery_date else '—' }}
+                </div>
+            </div>
+            <div class="col-md-2">
+                <span class="text-muted">收货人</span>
+                <div class="fw-semibold">{{ order.receiver or '—' }}</div>
+            </div>
+            <div class="col-md-3">
+                <span class="text-muted">合计金额 (RMB)</span>
+                <div class="fw-semibold text-success fs-5">
+                    {{ '%.2f'|format(order.total_amount|float) }}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Items table -->
+<div class="card">
+    <div class="card-header fw-bold">
+        <i class="bi bi-list-ul me-1"></i>明细列表（共 {{ items|length }} 项）
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-bordered table-hover table-sm mb-0">
+                <thead class="table-dark">
+                    <tr>
+                        <th class="text-center" style="width:45px;">#</th>
+                        <th>物料编号</th>
+                        <th>货号</th>
+                        <th>货品名称</th>
+                        <th>规格</th>
+                        <th class="text-end">数量</th>
+                        <th>单位</th>
+                        <th class="text-end">单价</th>
+                        <th class="text-end">金额</th>
+                        <th>备注</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in items %}
+                    <tr>
+                        <td class="text-center text-muted">{{ loop.index }}</td>
+                        <td>{{ item.material_code or '' }}</td>
+                        <td>{{ item.product_code or '' }}</td>
+                        <td>{{ item.product_name or '' }}</td>
+                        <td>{{ item.specification or '' }}</td>
+                        <td class="text-end">{{ item.quantity }}</td>
+                        <td>{{ item.unit or '' }}</td>
+                        <td class="text-end">{{ '%.4f'|format(item.unit_price|float) }}</td>
+                        <td class="text-end">{{ '%.2f'|format(item.amount|float) }}</td>
+                        <td>{{ item.remarks or '' }}</td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="10" class="text-center text-muted py-4">暂无明细数据</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+                {% if items %}
+                <tfoot class="table-light fw-bold">
+                    <tr>
+                        <td colspan="5" class="text-end">合计</td>
+                        <td class="text-end">{{ items|sum(attribute='quantity') }}</td>
+                        <td></td>
+                        <td></td>
+                        <td class="text-end text-success">
+                            {{ '%.2f'|format(order.total_amount|float) }}
+                        </td>
+                        <td></td>
+                    </tr>
+                </tfoot>
+                {% endif %}
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}

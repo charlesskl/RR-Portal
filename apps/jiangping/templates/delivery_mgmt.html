@@ -1,0 +1,803 @@
+{% extends 'base.html' %}
+{% block title %}交货管理 - 采购管理系统{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h2 class="mb-0"><i class="bi bi-truck me-2"></i>交货管理</h2>
+    <div>
+        <button class="btn btn-warning me-2" id="btn-add-note">
+            <i class="bi bi-plus-circle me-1"></i>新增交货单
+        </button>
+        <button class="btn btn-info me-2" id="btn-ocr-upload">
+            <i class="bi bi-camera me-1"></i>PDF/图片导入
+        </button>
+        <button class="btn btn-primary me-2" data-bs-toggle="modal" data-bs-target="#importModal">
+            <i class="bi bi-upload me-1"></i>导入 Excel
+        </button>
+        <a href="{{ url_for('export.export_delivery_excel') }}"
+           id="btn-export" class="btn btn-success">
+            <i class="bi bi-file-earmark-excel me-1"></i>导出 Excel
+        </a>
+    </div>
+</div>
+
+<!-- Filter card -->
+<div class="card mb-3">
+    <div class="card-body">
+        <div class="row g-2 align-items-end">
+            <div class="col-md-3">
+                <label class="form-label mb-1">供应商</label>
+                <select id="filter-supplier" class="form-select form-select-sm">
+                    <option value="">全部供应商</option>
+                    {% for s in suppliers %}
+                    <option value="{{ s.id }}">{{ s.short_name or s.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label mb-1">日期从</label>
+                <input type="date" id="filter-date-from" class="form-control form-control-sm">
+            </div>
+            <div class="col-md-2">
+                <label class="form-label mb-1">日期至</label>
+                <input type="date" id="filter-date-to" class="form-control form-control-sm">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label mb-1">采购单号</label>
+                <input type="text" id="filter-po-no" class="form-control form-control-sm" placeholder="输入采购单号搜索...">
+            </div>
+            <div class="col-md-2">
+                <button id="btn-query" class="btn btn-primary btn-sm w-100">
+                    <i class="bi bi-search me-1"></i>查询
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- DataTable -->
+<div class="card">
+    <div class="card-body p-0 table-scroll-wrapper">
+        <table id="delivery-table" class="table table-bordered table-hover mb-0" style="font-size: 0.85rem;">
+            <thead class="table-dark">
+                <tr>
+                    <th>日期</th>
+                    <th>供应商</th>
+                    <th>送货单号</th>
+                    <th>货号</th>
+                    <th>货号名称</th>
+                    <th>数量</th>
+                    <th>单位RMB</th>
+                    <th>单价RMB</th>
+                    <th>金额RMB</th>
+                    <th>采购单号</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody></tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Import Excel modal -->
+<div class="modal fade" id="importModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-upload me-2"></i>导入交货 Excel</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form action="{{ url_for('delivery_mgmt.import_excel') }}" method="POST" enctype="multipart/form-data">
+                <div class="modal-body">
+                    <p class="text-muted small">支持导入按供应商分sheet的交货Excel文件（.xls/.xlsx），每个sheet名为供应商简称，表头格式：日期、送货单号、货号、货号名称、数量、单位RMB、单价RMB、金额RMB、备注（采购单号）</p>
+                    <div class="mb-3">
+                        <label class="form-label">选择 Excel 文件</label>
+                        <input type="file" name="file" class="form-control" accept=".xls,.xlsx" required>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="submit" class="btn btn-primary"><i class="bi bi-upload me-1"></i>开始导入</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- OCR upload modal -->
+<div class="modal fade" id="ocrModal" tabindex="-1">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-camera me-2"></i>PDF/图片识别导入</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <!-- Step 1: Upload -->
+                <div id="ocr-step1">
+                    <div class="mb-3">
+                        <label class="form-label">选择 PDF 或图片文件</label>
+                        <input type="file" id="ocr-file" class="form-control" accept=".pdf,.jpg,.jpeg,.png,.bmp,.tiff,.tif">
+                    </div>
+                    <button type="button" id="btn-ocr-start" class="btn btn-primary w-100">
+                        <i class="bi bi-cpu me-1"></i>开始识别
+                    </button>
+                    <div id="ocr-loading" class="text-center py-4 d-none">
+                        <div class="spinner-border text-primary" role="status"></div>
+                        <div class="mt-2">正在识别中，请稍候...</div>
+                    </div>
+                </div>
+                <!-- Step 2: Preview & Edit -->
+                <div id="ocr-step2" class="d-none">
+                    <div class="row g-3 mb-3">
+                        <div class="col-md-4">
+                            <label class="form-label">供应商 <span class="text-danger">*</span></label>
+                            <select id="ocr-supplier" class="form-select">
+                                <option value="">请选择</option>
+                                {% for s in suppliers %}
+                                <option value="{{ s.id }}">{{ s.short_name or s.name }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">交货日期 <span class="text-danger">*</span></label>
+                            <input type="date" id="ocr-date" class="form-control">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">送货单号</label>
+                            <input type="text" id="ocr-delivery-no" class="form-control">
+                        </div>
+                    </div>
+                    <div class="mb-2">
+                        <a data-bs-toggle="collapse" href="#ocr-raw" class="small text-muted">查看 OCR 原始文本</a>
+                        <div class="collapse" id="ocr-raw">
+                            <pre id="ocr-raw-text" class="bg-light p-2 small" style="max-height:150px;overflow:auto;"></pre>
+                        </div>
+                    </div>
+                    <h6>识别结果 <button type="button" class="btn btn-sm btn-outline-primary ms-2" id="btn-ocr-add-row"><i class="bi bi-plus me-1"></i>添加行</button></h6>
+                    <div class="table-responsive">
+                        <table class="table table-bordered table-sm">
+                            <thead class="table-light">
+                                <tr>
+                                    <th style="width:140px">采购单号</th>
+                                    <th style="width:100px">货号</th>
+                                    <th style="width:200px">货号名称 <span class="text-danger">*</span></th>
+                                    <th style="width:90px">数量</th>
+                                    <th style="width:80px">单位</th>
+                                    <th style="width:100px">单价RMB</th>
+                                    <th style="width:110px">金额RMB</th>
+                                    <th style="width:50px"></th>
+                                </tr>
+                            </thead>
+                            <tbody id="ocr-items-body"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                <button type="button" id="btn-ocr-save" class="btn btn-primary d-none">
+                    <i class="bi bi-save me-1"></i>保存
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Add/Edit delivery note modal -->
+<div class="modal fade" id="noteModal" tabindex="-1">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="noteModalTitle"><i class="bi bi-plus-circle me-2"></i>新增交货单</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="row g-3 mb-3">
+                    <div class="col-md-4">
+                        <label class="form-label">供应商 <span class="text-danger">*</span></label>
+                        <select id="note-supplier" class="form-select">
+                            <option value="">请选择</option>
+                            {% for s in suppliers %}
+                            <option value="{{ s.id }}">{{ s.short_name or s.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">交货日期 <span class="text-danger">*</span></label>
+                        <input type="date" id="note-date" class="form-control">
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">送货单号</label>
+                        <input type="text" id="note-delivery-no" class="form-control" placeholder="送货单号">
+                    </div>
+                </div>
+                <hr>
+                <h6>明细列表 <button type="button" class="btn btn-sm btn-outline-primary ms-2" id="btn-add-row"><i class="bi bi-plus me-1"></i>添加行</button></h6>
+                <div class="table-responsive">
+                    <table class="table table-bordered table-sm" id="note-items-table">
+                        <thead class="table-light">
+                            <tr>
+                                <th style="width:140px">采购单号</th>
+                                <th style="width:200px">货号名称 <span class="text-danger">*</span></th>
+                                <th style="width:100px">货号</th>
+                                <th style="width:90px">数量</th>
+                                <th style="width:80px">单位RMB</th>
+                                <th style="width:100px">单价RMB</th>
+                                <th style="width:110px">金额RMB</th>
+                                <th style="width:50px"></th>
+                            </tr>
+                        </thead>
+                        <tbody id="note-items-body"></tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                <button type="button" id="btn-save-note" class="btn btn-primary">
+                    <i class="bi bi-save me-1"></i>保存
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Edit item modal -->
+<div class="modal fade" id="editItemModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-pencil me-2"></i>编辑明细</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="edit-item-id">
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <label class="form-label">货号</label>
+                        <input type="text" id="edit-product-code" class="form-control">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">货号名称 <span class="text-danger">*</span></label>
+                        <input type="text" id="edit-product-name" class="form-control">
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">数量</label>
+                        <input type="number" id="edit-quantity" class="form-control" step="any">
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">单位</label>
+                        <input type="text" id="edit-unit" class="form-control">
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">单价</label>
+                        <input type="number" id="edit-unit-price" class="form-control" step="any">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">金额</label>
+                        <input type="number" id="edit-amount" class="form-control" step="any">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">采购单号</label>
+                        <input type="text" id="edit-po-no" class="form-control">
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                <button type="button" id="btn-save-edit" class="btn btn-primary">
+                    <i class="bi bi-save me-1"></i>保存
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+var table;
+
+function getFilterParams() {
+    return {
+        supplier_id: $('#filter-supplier').val(),
+        date_from:   $('#filter-date-from').val(),
+        date_to:     $('#filter-date-to').val(),
+        po_no:       $('#filter-po-no').val()
+    };
+}
+
+function buildQueryString(params) {
+    return Object.entries(params)
+        .filter(function(e) { return e[1]; })
+        .map(function(e) { return encodeURIComponent(e[0]) + '=' + encodeURIComponent(e[1]); })
+        .join('&');
+}
+
+function addItemRow() {
+    var row = '<tr>' +
+        '<td><input type="text" class="form-control form-control-sm item-po" placeholder="如FDJA20260001"></td>' +
+        '<td><select class="form-select form-select-sm item-name-select d-none"><option value="">--选择物料--</option></select>' +
+            '<input type="text" class="form-control form-control-sm item-name" required></td>' +
+        '<td><input type="text" class="form-control form-control-sm item-code"></td>' +
+        '<td><input type="number" class="form-control form-control-sm item-qty" step="any" value="0"></td>' +
+        '<td><input type="text" class="form-control form-control-sm item-unit" value="PCS"></td>' +
+        '<td><input type="number" class="form-control form-control-sm item-price" step="any" value="0"></td>' +
+        '<td><input type="number" class="form-control form-control-sm item-amount" step="any" value="0"></td>' +
+        '<td><button type="button" class="btn btn-sm btn-outline-danger remove-row"><i class="bi bi-trash"></i></button></td>' +
+        '</tr>';
+    $('#note-items-body').append(row);
+}
+
+$(document).ready(function () {
+    table = $('#delivery-table').DataTable({
+        ajax: {
+            url: '{{ url_for("delivery_mgmt.api_list") }}',
+            data: function () { return getFilterParams(); },
+            dataSrc: 'data'
+        },
+        columns: [
+            {
+                data: 'delivery_date',
+                render: function (d, type, row) {
+                    if (!d) return '';
+                    if (row.is_first) return '<strong>' + d + '</strong>';
+                    return '';
+                }
+            },
+            {
+                data: 'supplier',
+                render: function (d, type, row) {
+                    return row.is_first ? '<strong>' + d + '</strong>' : '';
+                }
+            },
+            {
+                data: 'delivery_no',
+                render: function (d, type, row) {
+                    if (!d) return '';
+                    return '<strong>' + d + '</strong>';
+                }
+            },
+            { data: 'product_code' },
+            { data: 'product_name' },
+            {
+                data: 'quantity',
+                className: 'text-end',
+                render: function (d) {
+                    if (!d) return '';
+                    return d % 1 === 0 ? d.toFixed(0) : d.toFixed(2);
+                }
+            },
+            { data: 'unit' },
+            {
+                data: 'unit_price',
+                className: 'text-end',
+                render: function (d) { return d ? d.toFixed(4) : ''; }
+            },
+            {
+                data: 'amount',
+                className: 'text-end',
+                render: function (d) { return d ? d.toLocaleString('zh-CN', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : ''; }
+            },
+            { data: 'po_no' },
+            {
+                data: null,
+                orderable: false,
+                className: 'text-center',
+                render: function (data, type, row) {
+                    return '<button class="btn btn-sm btn-outline-primary me-1 btn-edit" title="编辑">' +
+                        '<i class="bi bi-pencil"></i></button>' +
+                        '<button class="btn btn-sm btn-outline-danger btn-del-item" title="删除">' +
+                        '<i class="bi bi-trash"></i></button>';
+                }
+            }
+        ],
+        language: { url: 'https://cdn.datatables.net/plug-ins/1.13.8/i18n/zh.json' },
+        ordering: false,
+        pageLength: 50,
+        createdRow: function (row, data) {
+            if (data.is_first) {
+                $(row).css('border-top', '2px solid #adb5bd');
+            }
+        }
+    });
+
+    // Query
+    $('#btn-query').on('click', function () {
+        var qs = buildQueryString(getFilterParams());
+        $('#btn-export').attr('href', '{{ url_for("export.export_delivery_excel") }}' + (qs ? '?' + qs : ''));
+        table.ajax.reload();
+    });
+    $('#filter-po-no').on('keydown', function (e) {
+        if (e.key === 'Enter') $('#btn-query').trigger('click');
+    });
+
+    // ========== CREATE ==========
+    $('#btn-add-note').on('click', function () {
+        $('#note-supplier').val('');
+        $('#note-date').val(new Date().toISOString().split('T')[0]);
+        $('#note-delivery-no').val('');
+        $('#note-items-body').empty();
+        addItemRow();
+        new bootstrap.Modal(document.getElementById('noteModal')).show();
+    });
+
+    $('#btn-add-row').on('click', addItemRow);
+
+    $('#note-items-body').on('click', '.remove-row', function () {
+        $(this).closest('tr').remove();
+    });
+
+    // Auto-calc amount when qty or price changes
+    $('#note-items-body').on('input', '.item-qty, .item-price', function () {
+        var row = $(this).closest('tr');
+        var qty = parseFloat(row.find('.item-qty').val()) || 0;
+        var price = parseFloat(row.find('.item-price').val()) || 0;
+        row.find('.item-amount').val((qty * price).toFixed(2));
+    });
+
+    $('#btn-save-note').on('click', function () {
+        var supplierId = $('#note-supplier').val();
+        var date = $('#note-date').val();
+        if (!supplierId) { alert('请选择供应商'); return; }
+        if (!date) { alert('请选择日期'); return; }
+
+        var items = [];
+        var valid = true;
+        $('#note-items-body tr').each(function () {
+            var sel = $(this).find('.item-name-select');
+            var name = sel.hasClass('d-none') ? $(this).find('.item-name').val().trim() : (sel.val() || $(this).find('.item-name').val().trim());
+            if (!name) { valid = false; return false; }
+            items.push({
+                product_code: $(this).find('.item-code').val().trim(),
+                product_name: name,
+                quantity: parseFloat($(this).find('.item-qty').val()) || 0,
+                unit: $(this).find('.item-unit').val().trim() || 'PCS',
+                unit_price: parseFloat($(this).find('.item-price').val()) || 0,
+                amount: parseFloat($(this).find('.item-amount').val()) || 0,
+                po_no: $(this).find('.item-po').val().trim(),
+            });
+        });
+        if (!valid) { alert('请填写所有货号名称'); return; }
+        if (items.length === 0) { alert('请添加至少一条明细'); return; }
+
+        $('#btn-save-note').prop('disabled', true);
+        $.ajax({
+            url: '{{ url_for("delivery_mgmt.api_create") }}',
+            type: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({
+                supplier_id: parseInt(supplierId),
+                delivery_date: date,
+                delivery_no: $('#note-delivery-no').val().trim(),
+                items: items
+            }),
+            success: function (res) {
+                if (res.success) {
+                    bootstrap.Modal.getInstance(document.getElementById('noteModal')).hide();
+                    table.ajax.reload();
+                } else {
+                    alert(res.error || '保存失败');
+                }
+            },
+            error: function () { alert('请求失败'); },
+            complete: function () { $('#btn-save-note').prop('disabled', false); }
+        });
+    });
+
+    // ========== EDIT ==========
+    $('#delivery-table').on('click', '.btn-edit', function () {
+        var data = table.row($(this).closest('tr')).data();
+        $('#edit-item-id').val(data.item_id);
+        $('#edit-product-code').val(data.product_code);
+        $('#edit-product-name').val(data.product_name);
+        $('#edit-quantity').val(data.quantity);
+        $('#edit-unit').val(data.unit);
+        $('#edit-unit-price').val(data.unit_price);
+        $('#edit-amount').val(data.amount);
+        $('#edit-po-no').val(data.po_no);
+        new bootstrap.Modal(document.getElementById('editItemModal')).show();
+    });
+
+    // Auto-calc amount in edit modal
+    $('#edit-quantity, #edit-unit-price').on('input', function () {
+        var qty = parseFloat($('#edit-quantity').val()) || 0;
+        var price = parseFloat($('#edit-unit-price').val()) || 0;
+        $('#edit-amount').val((qty * price).toFixed(2));
+    });
+
+    $('#btn-save-edit').on('click', function () {
+        var itemId = $('#edit-item-id').val();
+        var name = $('#edit-product-name').val().trim();
+        if (!name) { alert('请填写货号名称'); return; }
+
+        $('#btn-save-edit').prop('disabled', true);
+        $.ajax({
+            url: BASE_URL + '/delivery-mgmt/api/item/' + itemId,
+            type: 'PUT',
+            contentType: 'application/json',
+            data: JSON.stringify({
+                product_code: $('#edit-product-code').val().trim(),
+                product_name: name,
+                quantity: parseFloat($('#edit-quantity').val()) || 0,
+                unit: $('#edit-unit').val().trim() || 'PCS',
+                unit_price: parseFloat($('#edit-unit-price').val()) || 0,
+                amount: parseFloat($('#edit-amount').val()) || 0,
+                po_no: $('#edit-po-no').val().trim(),
+            }),
+            success: function (res) {
+                if (res.success) {
+                    bootstrap.Modal.getInstance(document.getElementById('editItemModal')).hide();
+                    table.ajax.reload();
+                } else {
+                    alert(res.error || '保存失败');
+                }
+            },
+            error: function () { alert('请求失败'); },
+            complete: function () { $('#btn-save-edit').prop('disabled', false); }
+        });
+    });
+
+    // ========== DELETE ITEM ==========
+    $('#delivery-table').on('click', '.btn-del-item', function () {
+        var data = table.row($(this).closest('tr')).data();
+        if (!confirm('确定删除该明细？\n' + data.product_name)) return;
+        $.ajax({
+            url: BASE_URL + '/delivery-mgmt/api/item/' + data.item_id,
+            type: 'DELETE',
+            success: function (res) {
+                if (res.success) table.ajax.reload();
+                else alert('删除失败');
+            },
+            error: function () { alert('请求失败'); }
+        });
+    });
+
+    // ========== DELETE NOTE ==========
+    $('#delivery-table').on('click', '.btn-del-note', function () {
+        var data = table.row($(this).closest('tr')).data();
+        if (!confirm('确定删除整个交货单 ' + data.delivery_no + ' 及所有明细？')) return;
+        $.ajax({
+            url: BASE_URL + '/delivery-mgmt/api/note/' + data.note_id,
+            type: 'DELETE',
+            success: function (res) {
+                if (res.success) table.ajax.reload();
+                else alert('删除失败');
+            },
+            error: function () { alert('请求失败'); }
+        });
+    });
+
+    // ========== OCR UPLOAD ==========
+    $('#btn-ocr-upload').on('click', function () {
+        $('#ocr-step1').show();
+        $('#ocr-step2').addClass('d-none');
+        $('#btn-ocr-save').addClass('d-none');
+        $('#ocr-loading').addClass('d-none');
+        $('#ocr-file').val('');
+        new bootstrap.Modal(document.getElementById('ocrModal')).show();
+    });
+
+    function addOcrItemRow(item) {
+        var row = '<tr>' +
+            '<td><input type="text" class="form-control form-control-sm item-po" value="' + (item.po_no || '') + '"></td>' +
+            '<td><input type="text" class="form-control form-control-sm item-code" value="' + (item.product_code || '') + '"></td>' +
+            '<td><input type="text" class="form-control form-control-sm item-name" value="' + (item.product_name || '') + '"></td>' +
+            '<td><input type="number" class="form-control form-control-sm item-qty" step="any" value="' + (item.quantity || 0) + '"></td>' +
+            '<td><input type="text" class="form-control form-control-sm item-unit" value="' + (item.unit || 'PCS') + '"></td>' +
+            '<td><input type="number" class="form-control form-control-sm item-price" step="any" value="' + (item.unit_price || 0) + '"></td>' +
+            '<td><input type="number" class="form-control form-control-sm item-amount" step="any" value="' + (item.amount || 0) + '"></td>' +
+            '<td><button type="button" class="btn btn-sm btn-outline-danger remove-row"><i class="bi bi-trash"></i></button></td>' +
+            '</tr>';
+        $('#ocr-items-body').append(row);
+    }
+
+    $('#btn-ocr-add-row').on('click', function () {
+        addOcrItemRow({});
+    });
+
+    $('#ocr-items-body').on('click', '.remove-row', function () {
+        $(this).closest('tr').remove();
+    });
+
+    // Auto-calc amount in OCR table
+    $('#ocr-items-body').on('input', '.item-qty, .item-price', function () {
+        var row = $(this).closest('tr');
+        var qty = parseFloat(row.find('.item-qty').val()) || 0;
+        var price = parseFloat(row.find('.item-price').val()) || 0;
+        row.find('.item-amount').val((qty * price).toFixed(2));
+    });
+
+    // Auto-match purchase data when po_no or product_name changes in OCR table
+    $('#ocr-items-body').on('change', '.item-po, .item-name, .item-code', function () {
+        var row = $(this).closest('tr');
+        var poNo = row.find('.item-po').val().trim();
+        var productName = row.find('.item-name').val().trim();
+        var productCode = row.find('.item-code').val().trim();
+        if (!poNo) return;
+        $.ajax({
+            url: '{{ url_for("delivery_mgmt.api_match_purchase") }}',
+            type: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({ po_no: poNo, product_name: productName, product_code: productCode }),
+            success: function (res) {
+                if (res.found) {
+                    row.find('.item-unit').val(res.unit);
+                    row.find('.item-price').val(res.unit_price);
+                    var qty = parseFloat(row.find('.item-qty').val()) || 0;
+                    row.find('.item-amount').val((qty * res.unit_price).toFixed(2));
+                }
+            }
+        });
+    });
+
+    // When 采购单号 changes in note modal, fetch purchase items and show dropdown
+    $('#note-items-body').on('change', '.item-po', function () {
+        var row = $(this).closest('tr');
+        var poNo = row.find('.item-po').val().trim();
+        var sel = row.find('.item-name-select');
+        var inp = row.find('.item-name');
+        if (!poNo) {
+            sel.addClass('d-none');
+            inp.removeClass('d-none');
+            return;
+        }
+        $.ajax({
+            url: BASE_URL + '/delivery-mgmt/api/purchase-items?po_no=' + encodeURIComponent(poNo),
+            type: 'GET',
+            success: function (res) {
+                if (res.items && res.items.length > 0) {
+                    sel.empty().append('<option value="">--选择物料--</option>');
+                    res.items.forEach(function (item) {
+                        var label = (item.product_code ? item.product_code + ' - ' : '') + item.product_name + ' (数量:' + item.quantity + ')';
+                        sel.append('<option value="' + item.product_name + '" ' +
+                            'data-code="' + item.product_code + '" ' +
+                            'data-unit="' + item.unit + '" ' +
+                            'data-price="' + item.unit_price + '">' + label + '</option>');
+                    });
+                    sel.removeClass('d-none');
+                    inp.addClass('d-none');
+                } else {
+                    sel.addClass('d-none');
+                    inp.removeClass('d-none');
+                }
+            }
+        });
+    });
+
+    // When a product is selected from dropdown, fill in the row
+    $('#note-items-body').on('change', '.item-name-select', function () {
+        var row = $(this).closest('tr');
+        var opt = $(this).find(':selected');
+        var name = opt.val();
+        if (!name) return;
+        row.find('.item-name').val(name);
+        row.find('.item-code').val(opt.data('code') || '');
+        row.find('.item-unit').val(opt.data('unit') || 'PCS');
+        row.find('.item-price').val(opt.data('price') || 0);
+        var qty = parseFloat(row.find('.item-qty').val()) || 0;
+        row.find('.item-amount').val((qty * (opt.data('price') || 0)).toFixed(2));
+    });
+
+    // Auto-calc when qty changes in note modal (re-calc with current price)
+    $('#note-items-body').on('input', '.item-qty', function () {
+        var row = $(this).closest('tr');
+        var qty = parseFloat(row.find('.item-qty').val()) || 0;
+        var price = parseFloat(row.find('.item-price').val()) || 0;
+        row.find('.item-amount').val((qty * price).toFixed(2));
+    });
+
+    $('#btn-ocr-start').on('click', function () {
+        var fileInput = document.getElementById('ocr-file');
+        if (!fileInput.files.length) { alert('请选择文件'); return; }
+
+        var formData = new FormData();
+        formData.append('file', fileInput.files[0]);
+
+        $('#btn-ocr-start').prop('disabled', true);
+        $('#ocr-loading').removeClass('d-none');
+
+        $.ajax({
+            url: '{{ url_for("delivery_mgmt.api_parse") }}',
+            type: 'POST',
+            data: formData,
+            processData: false,
+            contentType: false,
+            success: function (res) {
+                if (res.error) {
+                    alert(res.error);
+                    return;
+                }
+                // Fill form
+                $('#ocr-date').val(res.delivery_date || new Date().toISOString().split('T')[0]);
+                $('#ocr-delivery-no').val(res.delivery_no || '');
+                $('#ocr-raw-text').text(res.raw_text || '');
+
+                // Try to match supplier
+                if (res.supplier) {
+                    var matched = false;
+                    $('#ocr-supplier option').each(function () {
+                        if ($(this).text().indexOf(res.supplier) >= 0 || res.supplier.indexOf($(this).text()) >= 0) {
+                            $('#ocr-supplier').val($(this).val());
+                            matched = true;
+                            return false;
+                        }
+                    });
+                }
+
+                // Fill items
+                $('#ocr-items-body').empty();
+                if (res.items && res.items.length > 0) {
+                    res.items.forEach(function (item) {
+                        addOcrItemRow(item);
+                    });
+                } else {
+                    addOcrItemRow({});
+                }
+
+                $('#ocr-step1').hide();
+                $('#ocr-step2').removeClass('d-none');
+                $('#btn-ocr-save').removeClass('d-none');
+            },
+            error: function (xhr) {
+                var msg = '识别失败';
+                try { msg = JSON.parse(xhr.responseText).error || msg; } catch(e) {}
+                alert(msg);
+            },
+            complete: function () {
+                $('#btn-ocr-start').prop('disabled', false);
+                $('#ocr-loading').addClass('d-none');
+            }
+        });
+    });
+
+    $('#btn-ocr-save').on('click', function () {
+        var supplierId = $('#ocr-supplier').val();
+        var date = $('#ocr-date').val();
+        if (!supplierId) { alert('请选择供应商'); return; }
+        if (!date) { alert('请选择日期'); return; }
+
+        var items = [];
+        var valid = true;
+        $('#ocr-items-body tr').each(function () {
+            var name = $(this).find('.item-name').val().trim();
+            if (!name) { valid = false; return false; }
+            items.push({
+                product_code: $(this).find('.item-code').val().trim(),
+                product_name: name,
+                quantity: parseFloat($(this).find('.item-qty').val()) || 0,
+                unit: $(this).find('.item-unit').val().trim() || 'PCS',
+                unit_price: parseFloat($(this).find('.item-price').val()) || 0,
+                amount: parseFloat($(this).find('.item-amount').val()) || 0,
+                po_no: $(this).find('.item-po').val().trim(),
+            });
+        });
+        if (!valid) { alert('请填写所有货号名称'); return; }
+        if (items.length === 0) { alert('请添加至少一条明细'); return; }
+
+        $('#btn-ocr-save').prop('disabled', true);
+        $.ajax({
+            url: '{{ url_for("delivery_mgmt.api_create") }}',
+            type: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({
+                supplier_id: parseInt(supplierId),
+                delivery_date: date,
+                delivery_no: $('#ocr-delivery-no').val().trim(),
+                items: items
+            }),
+            success: function (res) {
+                if (res.success) {
+                    bootstrap.Modal.getInstance(document.getElementById('ocrModal')).hide();
+                    table.ajax.reload();
+                } else {
+                    alert(res.error || '保存失败');
+                }
+            },
+            error: function () { alert('请求失败'); },
+            complete: function () { $('#btn-ocr-save').prop('disabled', false); }
+        });
+    });
+});
+</script>
+{% endblock %}

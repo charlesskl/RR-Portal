@@ -319,6 +319,28 @@
         </div>
       </div>
 
+      <!-- 生产部 -->
+      <div class="dept-card" onclick="showDept('production')">
+        <div class="dept-card-header">
+          <div class="dept-icon production">&#9881;</div>
+          <div>
+            <div class="dept-name">生产部</div>
+            <div class="dept-desc">AI注塑啤机排产</div>
+          </div>
+        </div>
+        <div class="dept-card-body">
+          <div class="plugin-list" id="productionPluginList">
+            <div class="plugin-item">
+              <div class="plugin-info">
+                <div class="plugin-dot green" id="dotPaiji"></div>
+                <span class="plugin-name">AI注塑啤机排产系统</span>
+                <span class="plugin-tag">排产</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- 3D打印 -->
       <div class="dept-card" onclick="showDept('printing3d')">
         <div class="dept-card-header">
@@ -466,6 +488,43 @@
     </div>
   </div>
 
+  <!-- ===== 生产部详情 ===== -->
+  <div class="detail-view" id="productionDetail">
+    <div class="back-btn" onclick="goHome()">&larr; 返回部门总览</div>
+    <div class="breadcrumb">
+      <a href="#" onclick="goHome()">控制台</a>
+      <span class="sep">/</span>
+      <span style="color:#f97316">生产部</span>
+    </div>
+    <div class="page-title" style="display:flex;align-items:center;gap:14px;">
+      <div class="dept-icon production" style="width:40px;height:40px;font-size:18px;">&#9881;</div>
+      生产部
+    </div>
+    <div class="page-subtitle">AI注塑啤机排产管理</div>
+
+    <div class="detail-plugin-card">
+      <div class="detail-plugin-left">
+        <div class="detail-plugin-icon" style="background:linear-gradient(135deg,#f97316,#ea580c);">&#129302;</div>
+        <div>
+          <div class="detail-plugin-name">AI注塑啤机排产系统</div>
+          <div class="detail-plugin-desc">智能排产引擎，基于历史数据自动匹配机台，支持多车间、PDF/Excel订单导入、排机单导出</div>
+          <div class="feature-grid">
+            <div class="feature-tag">&#129302; 智能排机</div>
+            <div class="feature-tag">&#128196; 订单导入</div>
+            <div class="feature-tag">&#128202; 排机结果</div>
+            <div class="feature-tag">&#128187; 机台档案</div>
+            <div class="feature-tag">&#128218; 历史数据库</div>
+            <div class="feature-tag">&#128230; Excel导出</div>
+          </div>
+        </div>
+      </div>
+      <div class="detail-plugin-right">
+        <div class="detail-plugin-status"><div class="plugin-dot green" id="dotPaijiDetail"></div> 运行中</div>
+        <a href="/paiji/" target="_blank" class="btn btn-primary">打开系统</a>
+      </div>
+    </div>
+  </div>
+
   <!-- ===== PMC跟仓管详情 ===== -->
   <div class="detail-view" id="pmcDetail">
     <div class="back-btn" onclick="goHome()">&larr; 返回部门总览</div>
@@ -603,7 +662,7 @@
 </div>
 
 <script>
-var allDepts = ['business', 'engineering', 'pmc', 'indonesia', 'printing3d'];
+var allDepts = ['business', 'engineering', 'pmc', 'indonesia', 'printing3d', 'production'];
 
 function showDept(dept) {
   document.getElementById('homeView').classList.add('hidden');
@@ -629,6 +688,7 @@ async function checkHealth() {
       { name: 'figureMoldCost', url: '/figure-mold-cost-system/health' },
       { name: 'zouhuo', url: '/zouhuo/health' },
       { name: 'jiangping', url: '/jiangping/health' },
+      { name: 'paiji', url: '/paiji/health' },
     ];
     let healthy = 1;
     let total = 1 + checks.length;

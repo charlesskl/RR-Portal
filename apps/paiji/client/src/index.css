@@ -1,0 +1,18 @@
+* { box-sizing: border-box; }
+body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+
+/* 结转行高亮 */
+.carry-over-row td {
+  background-color: #fff7e6 !important;
+}
+.carry-over-row:hover td {
+  background-color: #ffe7ba !important;
+}
+
+/* 白班行（夜班视图中显示白班排单，标橙） */
+.day-shift-row td {
+  background-color: #fff3e0 !important;
+}
+.day-shift-row:hover td {
+  background-color: #ffe0b2 !important;
+}

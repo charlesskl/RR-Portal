@@ -1,0 +1,12 @@
+node_modules/
+server/data/*.db
+server/data/*.db-shm
+server/data/*.db-wal
+server/db/*.db
+server/db/*.db-shm
+server/db/*.db-wal
+server/uploads/
+server/server.log
+client/dist/
+*.log
+.env

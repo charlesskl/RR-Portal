@@ -187,6 +187,25 @@ services:
     networks:
       - platform-net
 
+  paiji:
+    build:
+      context: ./apps/paiji
+      dockerfile: Dockerfile
+    environment:
+      - PORT=3000
+      - DATA_PATH=/app/data
+    volumes:
+      - ./apps/paiji/data:/app/data
+      - ./apps/paiji/uploads:/app/uploads
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - platform-net
+
 networks:
   platform-net:
     driver: bridge

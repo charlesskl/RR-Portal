@@ -129,3 +129,24 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+
+  paiji:
+    build:
+      context: ./apps/paiji
+      dockerfile: Dockerfile
+    env_file:
+      - ./apps/paiji/.env
+    volumes:
+      - "./apps/paiji/data:/app/data"
+      - "./apps/paiji/uploads:/app/uploads"
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3

@@ -513,7 +513,7 @@ $(document).ready(function () {
 
         $('#btn-save-edit').prop('disabled', true);
         $.ajax({
-            url: '/delivery-mgmt/api/item/' + itemId,
+            url: BASE_URL + '/delivery-mgmt/api/item/' + itemId,
             type: 'PUT',
             contentType: 'application/json',
             data: JSON.stringify({
@@ -543,7 +543,7 @@ $(document).ready(function () {
         var data = table.row($(this).closest('tr')).data();
         if (!confirm('确定删除该明细？\n' + data.product_name)) return;
         $.ajax({
-            url: '/delivery-mgmt/api/item/' + data.item_id,
+            url: BASE_URL + '/delivery-mgmt/api/item/' + data.item_id,
             type: 'DELETE',
             success: function (res) {
                 if (res.success) table.ajax.reload();
@@ -558,7 +558,7 @@ $(document).ready(function () {
         var data = table.row($(this).closest('tr')).data();
         if (!confirm('确定删除整个交货单 ' + data.delivery_no + ' 及所有明细？')) return;
         $.ajax({
-            url: '/delivery-mgmt/api/note/' + data.note_id,
+            url: BASE_URL + '/delivery-mgmt/api/note/' + data.note_id,
             type: 'DELETE',
             success: function (res) {
                 if (res.success) table.ajax.reload();
@@ -643,7 +643,7 @@ $(document).ready(function () {
             return;
         }
         $.ajax({
-            url: '/delivery-mgmt/api/purchase-items?po_no=' + encodeURIComponent(poNo),
+            url: BASE_URL + '/delivery-mgmt/api/purchase-items?po_no=' + encodeURIComponent(poNo),
             type: 'GET',
             success: function (res) {
                 if (res.items && res.items.length > 0) {

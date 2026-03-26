@@ -147,7 +147,7 @@ $(document).ready(function () {
         $('#saveSupplierBtn').prop('disabled', true).html('<span class="spinner-border spinner-border-sm me-1"></span>保存中...');
 
         $.ajax({
-            url: '/suppliers/' + supplierId + '/update',
+            url: BASE_URL + '/suppliers/' + supplierId + '/update',
             method: 'POST',
             contentType: 'application/json',
             data: JSON.stringify(payload),

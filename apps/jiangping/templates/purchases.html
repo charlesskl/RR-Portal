@@ -278,7 +278,7 @@ $(document).ready(function () {
                 data: 'po_no',
                 render: function (d, type, row) {
                     if (!d) return '';
-                    return '<a href="/purchases/' + row.order_id + '" class="text-decoration-none">' + d + '</a>';
+                    return '<a href="' + BASE_URL + '/purchases/' + row.order_id + '" class="text-decoration-none">' + d + '</a>';
                 }
             },
             { data: 'product_code' },
@@ -332,7 +332,7 @@ $(document).ready(function () {
     // Query
     $('#btn-query').on('click', function () {
         var qs = buildQueryString(getFilterParams());
-        $('#btn-export').attr('href', '/export/excel' + (qs ? '?' + qs : ''));
+        $('#btn-export').attr('href', BASE_URL + '/export/excel' + (qs ? '?' + qs : ''));
         table.ajax.reload();
     });
 
@@ -442,7 +442,7 @@ $(document).ready(function () {
 
         $('#btn-save-edit').prop('disabled', true);
         $.ajax({
-            url: '/purchases/api/item/' + itemId,
+            url: BASE_URL + '/purchases/api/item/' + itemId,
             type: 'PUT',
             contentType: 'application/json',
             data: JSON.stringify({
@@ -472,7 +472,7 @@ $(document).ready(function () {
         var data = table.row($(this).closest('tr')).data();
         if (!confirm('确定删除该明细？\n' + data.product_name)) return;
         $.ajax({
-            url: '/purchases/api/item/' + data.item_id,
+            url: BASE_URL + '/purchases/api/item/' + data.item_id,
             type: 'DELETE',
             success: function (res) {
                 if (res.success) table.ajax.reload();

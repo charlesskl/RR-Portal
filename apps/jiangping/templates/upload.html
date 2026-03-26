@@ -214,7 +214,7 @@
 
     showSpinner();
     try {
-      const res  = await fetch('/upload/parse', { method: 'POST', body: formData });
+      const res  = await fetch(BASE_URL + '/upload/parse', { method: 'POST', body: formData });
       const json = await res.json();
       if (!res.ok || json.error) {
         showAlert(json.error || '解析失败');
@@ -284,7 +284,7 @@
     if (!parsedData) return;
     showSpinner();
     try {
-      const res  = await fetch('/upload/save', {
+      const res  = await fetch(BASE_URL + '/upload/save', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify(parsedData),

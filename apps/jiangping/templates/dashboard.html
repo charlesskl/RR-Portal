@@ -86,7 +86,7 @@
     'use strict';
 
     // ── 1. By Supplier (horizontal bar) ────────────────────────────────────
-    fetch('/dashboard/api/by_supplier')
+    fetch(BASE_URL + '/dashboard/api/by_supplier')
         .then(r => r.json())
         .then(d => {
             new Chart(document.getElementById('chartSupplier'), {
@@ -120,7 +120,7 @@
         });
 
     // ── 2. By Month (line) ─────────────────────────────────────────────────
-    fetch('/dashboard/api/by_month')
+    fetch(BASE_URL + '/dashboard/api/by_month')
         .then(r => r.json())
         .then(d => {
             new Chart(document.getElementById('chartMonth'), {
@@ -155,7 +155,7 @@
         });
 
     // ── 3. By Product Top 20 (bar) ─────────────────────────────────────────
-    fetch('/dashboard/api/by_product?n=20')
+    fetch(BASE_URL + '/dashboard/api/by_product?n=20')
         .then(r => r.json())
         .then(d => {
             new Chart(document.getElementById('chartProduct'), {
@@ -191,7 +191,7 @@
         });
 
     // ── 4. Delivery Stats (doughnut) ───────────────────────────────────────
-    fetch('/dashboard/api/delivery_stats')
+    fetch(BASE_URL + '/dashboard/api/delivery_stats')
         .then(r => r.json())
         .then(d => {
             new Chart(document.getElementById('chartDelivery'), {
@@ -229,7 +229,7 @@
             return;
         }
 
-        const url = `/dashboard/api/period_compare?p1_from=${p1From}&p1_to=${p1To}&p2_from=${p2From}&p2_to=${p2To}`;
+        const url = BASE_URL + `/dashboard/api/period_compare?p1_from=${p1From}&p1_to=${p1To}&p2_from=${p2From}&p2_to=${p2To}`;
 
         fetch(url)
             .then(r => r.json())

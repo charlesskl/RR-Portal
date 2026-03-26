@@ -112,7 +112,7 @@ let table = null;
 function buildUrl() {
     const supplierId = $('#supplierFilter').val();
     const poNo = $('#poNoFilter').val().trim();
-    let url = '/delivery/api/reconciliation?';
+    let url = BASE_URL + '/delivery/api/reconciliation?';
     if (supplierId) url += 'supplier_id=' + supplierId + '&';
     if (poNo) url += 'po_no=' + encodeURIComponent(poNo) + '&';
     return url;
@@ -229,7 +229,7 @@ $(document).ready(function () {
         $('#btnSaveDelivery').prop('disabled', true).html('<span class="spinner-border spinner-border-sm me-1"></span>保存中...');
 
         $.ajax({
-            url: '/delivery/api/record',
+            url: BASE_URL + '/delivery/api/record',
             type: 'POST',
             contentType: 'application/json',
             data: JSON.stringify({

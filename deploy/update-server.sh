@@ -22,6 +22,8 @@ mkdir -p plugins/figure-mold-cost-system/data plugins/figure-mold-cost-system/pu
 mkdir -p apps/zouhuo/data apps/zouhuo/uploads
 mkdir -p apps/jiangping/data apps/jiangping/uploads
 mkdir -p apps/paiji/data apps/paiji/uploads
+# Remove stale paiji.db that was created with old schema (missing workshop column)
+rm -f apps/paiji/data/paiji.db apps/paiji/data/paiji.db-wal apps/paiji/data/paiji.db-shm 2>/dev/null || true
 
 echo "[2/3] Rebuilding and restarting services..."
 docker compose -f docker-compose.cloud.yml --env-file "$ENV_FILE" up -d --build

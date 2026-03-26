@@ -20,6 +20,8 @@ git reset --hard origin/main
 mkdir -p plugins/new-product-schedule/data plugins/new-product-schedule/uploads
 mkdir -p plugins/figure-mold-cost-system/data plugins/figure-mold-cost-system/public/uploads
 mkdir -p apps/zouhuo/data apps/zouhuo/uploads
+mkdir -p apps/jiangping/data apps/jiangping/uploads
+mkdir -p apps/paiji/data apps/paiji/uploads
 
 echo "[2/3] Rebuilding and restarting services..."
 docker compose -f docker-compose.cloud.yml --env-file "$ENV_FILE" up -d --build

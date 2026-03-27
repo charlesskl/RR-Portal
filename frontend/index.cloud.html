@@ -475,6 +475,7 @@ async function checkHealth() {
   var pluginCountEl = document.getElementById('statPlugins');
   var healthyEl = document.getElementById('statHealthy');
 
+  var dotEl = document.querySelector('.status-dot');
   try {
     await fetch('/health');
     var checks = [
@@ -509,8 +510,10 @@ async function checkHealth() {
     pluginCountEl.textContent = checks.length;
     healthyEl.textContent = healthy + ' / ' + total;
     statusEl.textContent = healthy === total ? '所有服务运行正常' : healthy + '/' + total + ' 个应用运行中';
+    if (dotEl) dotEl.style.background = healthy === total ? '#22c55e' : '#f59e0b';
   } catch(e) {
     statusEl.textContent = '连接失败';
+    if (dotEl) dotEl.style.background = '#ef4444';
   }
 }
 

@@ -3,6 +3,7 @@ import react from '@vitejs/plugin-react';
 
 export default defineConfig({
   plugins: [react()],
+  base: '/zouhuo/',
   build: {
     target: 'es2020',
     minify: 'terser',

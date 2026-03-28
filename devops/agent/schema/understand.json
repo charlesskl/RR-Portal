@@ -14,5 +14,13 @@
   "client_dir": null,
   "has_dockerfile": false,
   "has_health_endpoint": false,
+  "database": {
+    "type": "none|postgresql|mongodb|sqlite|mysql",
+    "detected_from": "",
+    "connection_env_var": "",
+    "needs_provisioning": false,
+    "has_migrations": false,
+    "has_seed_data": false
+  },
   "error": null
 }

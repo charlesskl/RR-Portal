@@ -37,7 +37,21 @@ Steps:
 5. If app does NOT exist in apps.json: action = "onboard"
 6. If apps.json and server state DISAGREE: STOP and escalate via Telegram. Do not proceed.
 7. Identify environment variables needed (read `.env.example` if it exists)
-8. Write understand.json with all findings
+8. **Detect database requirements** — this is critical for full functionality:
+   - Grep source code for database indicators:
+     - `require('better-sqlite3')` or `import sqlite3` → type = "sqlite" (file-based, no provisioning)
+     - `require('mongoose')` or `mongodb://` or `MONGODB_URL` → type = "mongodb"
+     - `require('pg')` or `require('sequelize')` or `postgresql://` or `DATABASE_URL` → type = "postgresql"
+     - `require('mysql2')` or `mysql://` → type = "mysql"
+     - `require('prisma')` → read `prisma/schema.prisma` for `provider` field
+     - `require('knex')` → read `knexfile.js` for client type
+     - `require('typeorm')` → read `ormconfig.js` or `data-source.ts` for type
+   - Check for migration files: `migrations/`, `prisma/migrations/`, `db/migrate/`, `alembic/`
+   - Check for seed data: `seed.js`, `seeds/`, `fixtures/`, `*.sql` files
+   - Set `needs_provisioning = true` if type is postgresql or mongodb (server-hosted DBs need setup)
+   - Set `needs_provisioning = false` if type is sqlite or none (file-based or no DB)
+   - Record which env var holds the connection string (e.g., DATABASE_URL, MONGODB_URL)
+9. Write understand.json with all findings
 
 ### Phase: PREPARE
 
@@ -48,10 +62,45 @@ Steps:
 1. Validate input JSON (schema_version must be 1, status must be "success")
 2. If action is "onboard": run `devops/scripts/onboard.sh <repo-url> <app-name>`
 3. If action is "update": run `git pull` in `apps/<app-name>/` to get latest code
-4. Run `devops/scripts/qc-runner.sh apps/<app-name>/`
-5. If QC fails: read the failure output, apply fixes, re-run QC (up to 3 rounds)
-6. If QC still fails after 3 rounds: escalate via Telegram, write prepare.json with status "failed"
-7. If QC passes: write prepare.json with status "success"
+4. **Database provisioning** (if understand.json shows `database.needs_provisioning = true`):
+   - For PostgreSQL:
+     a. Check if database already exists: `ssh $DEPLOY_SERVER "docker exec rr-portal-db-1 psql -U rrportal -lqt | grep -w <app_name>"`
+     b. If NOT exists, create it:
+        ```bash
+        ssh $DEPLOY_SERVER "docker exec rr-portal-db-1 psql -U rrportal -c \"CREATE DATABASE ${APP_NAME//-/_};\""
+        ssh $DEPLOY_SERVER "docker exec rr-portal-db-1 psql -U rrportal -c \"CREATE USER ${APP_NAME//-/_} WITH PASSWORD '$(openssl rand -hex 16)';\""
+        ssh $DEPLOY_SERVER "docker exec rr-portal-db-1 psql -U rrportal -c \"GRANT ALL ON DATABASE ${APP_NAME//-/_} TO ${APP_NAME//-/_};\""
+        ```
+     c. Write the real DATABASE_URL to the app's `.env` file (not a placeholder):
+        `DATABASE_URL=postgresql://<user>:<password>@db:5432/<dbname>`
+     d. Test connection: `ssh $DEPLOY_SERVER "docker exec rr-portal-db-1 psql -U <user> -d <dbname> -c 'SELECT 1'"`
+     e. If connection fails: escalate via Telegram, do NOT proceed with deploy
+   - For MongoDB:
+     a. MongoDB auto-creates databases on first use — no explicit CREATE needed
+     b. Write MONGODB_URL to `.env`: `mongodb://mongo:27017/<app_name>`
+     c. Test connection: `ssh $DEPLOY_SERVER "docker exec rr-portal-mongo-1 mongosh --eval 'db.runCommand({ping:1})'" 2>/dev/null`
+   - For SQLite:
+     a. No server-side provisioning needed — file-based
+     b. Ensure the data directory exists and is writable (volume mount)
+     c. If app has a seed database file (e.g., `data/database.sqlite`), ensure it's in the volume
+   - **After provisioning, validate**: attempt a test query. If it fails, STOP and escalate.
+   - **For updates**: skip DB creation but still validate connection works
+5. **Volume directory preparation** (always, not just for DB apps):
+   - Read docker-compose.cloud.yml for this app's volume mounts
+   - For each volume mount, ensure host directory exists on server:
+     `ssh $DEPLOY_SERVER "mkdir -p <host_path> && chown -R 100:101 <host_path>"`
+   - If app has seed data files in the repo, copy them to the volume:
+     `scp -r apps/<app>/data/* $DEPLOY_SERVER:<host_path>/`
+6. **Environment file validation**:
+   - Read the app's `.env` file
+   - For EVERY variable, check it's not a placeholder (reject: CHANGE_ME, your_*_here, password, secret)
+   - For DATABASE_URL: verify the hostname resolves inside Docker network (must be `db`, not `localhost`)
+   - For MONGODB_URL: verify hostname is `mongo`, not `localhost`
+   - If any required secret is missing or placeholder: escalate via Telegram with the list of missing vars
+7. Run `devops/scripts/qc-runner.sh apps/<app-name>/`
+8. If QC fails: read the failure output, apply fixes, re-run QC (up to 3 rounds)
+9. If QC still fails after 3 rounds: escalate via Telegram, write prepare.json with status "failed"
+10. If QC passes: write prepare.json with status "success"
 
 ### Phase: DEPLOY
 
@@ -73,11 +122,28 @@ Steps:
 Steps:
 1. Validate input JSON (status must be "success")
 2. Run `devops/scripts/verify-deploy.sh <app-name> <server-host> <host-port> <compose-path>`
-3. Load the app in a browser via Playwright (if available): `http://8.148.146.194/<app-name>/`
-4. Take a screenshot as evidence
-5. Check for: page loads without errors, no JS console errors, static assets return 200, API endpoints respond
-6. If verification fails: escalate, write verify.json with status "failed"
-7. If verification passes: send Telegram success message with screenshot, write verify.json with status "success"
+3. **Deep verification through nginx** (not just /health):
+   a. Health check through nginx (not direct port): `curl -sf http://8.148.146.194/<app-name>/health`
+   b. Frontend verification: `curl -sf http://8.148.146.194/<app-name>/` and check:
+      - HTTP 200 response
+      - HTML contains `<script>` and `<link>` tags (frontend assets)
+      - Extract all JS/CSS URLs from HTML → verify each returns HTTP 200
+      - No hardcoded `localhost` or `127.0.0.1` in the HTML source
+   c. API verification: discover API endpoints from source code and test through nginx:
+      - `curl -sf http://8.148.146.194/<app-name>/api/` (or similar)
+      - Any API endpoint should return non-500 (400/401/404 are OK — they mean the route exists)
+      - If ALL API endpoints return 404 through nginx but work on direct port → routing problem
+   d. **Database connectivity verification** (if app has a database):
+      - Check container logs for DB connection errors: `ssh $DEPLOY_SERVER "docker logs <container> 2>&1 | tail -20 | grep -i 'error\|fail\|refused\|timeout'"`
+      - Test a read endpoint that requires DB: if it returns empty data (not error), DB is connected
+      - If DB errors found: write verify.json with status "failed" and specific DB error in error field
+   e. **Data persistence check** (if app writes to filesystem):
+      - Verify volume mount is working: `ssh $DEPLOY_SERVER "docker exec <container> ls -la /app/data/ 2>/dev/null"`
+      - If /app/data doesn't exist or is empty when seed data was expected: flag as warning
+4. Load the app in a browser via Playwright (if available): `http://8.148.146.194/<app-name>/`
+5. Take a screenshot as evidence
+6. If ANY verification step fails: escalate, write verify.json with status "failed"
+7. If all pass: send Telegram success message with screenshot, write verify.json with status "success"
 8. Append deployment record to `devops/logs/deployments.jsonl`
 
 ## Failure Pattern Registry

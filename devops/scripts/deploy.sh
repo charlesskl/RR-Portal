@@ -449,6 +449,40 @@ if [[ -n "$VOLUME_DIRS" ]]; then
     deploy_ssh "mkdir -p '${FULL_DIR}' && chown -R 100:101 '${FULL_DIR}'" 2>/dev/null || true
   done <<< "$VOLUME_DIRS"
   echo "Volume directories created with appuser ownership (100:101)"
+
+  # --- Transfer initial/seed data files to server volumes ---
+  # For file-based apps (JSON, SQLite), the data directory starts empty on server.
+  # If the local app has data files, copy them as seed data (only if server dir is empty).
+  echo "=== DEPLOY: checking for seed data to transfer ==="
+  while IFS= read -r vol_dir; do
+    [[ -z "$vol_dir" ]] && continue
+    FULL_DIR="${COMPOSE_DIR}/${vol_dir#./}"
+    LOCAL_DIR="${REPO_ROOT}/${vol_dir#./}"
+
+    # Also check the non-volume data directories (e.g., apps/<app>/server/data)
+    [[ ! -d "$LOCAL_DIR" ]] && LOCAL_DIR="${REPO_ROOT}/apps/${APP_NAME}/server/$(basename "$vol_dir")"
+    [[ ! -d "$LOCAL_DIR" ]] && LOCAL_DIR="${REPO_ROOT}/apps/${APP_NAME}/$(basename "$vol_dir")"
+    [[ ! -d "$LOCAL_DIR" ]] && continue
+
+    # Count local data files (JSON, SQLite, CSV — excluding node_modules)
+    LOCAL_DATA_COUNT=$(find "$LOCAL_DIR" -maxdepth 1 \( -name "*.json" -o -name "*.sqlite*" -o -name "*.db" -o -name "*.csv" \) 2>/dev/null | wc -l | tr -d ' ')
+
+    if [[ "$LOCAL_DATA_COUNT" -gt 0 ]]; then
+      # Check if server dir is empty (don't overwrite existing data on updates)
+      SERVER_FILE_COUNT=$(deploy_ssh "find '${FULL_DIR}' -maxdepth 1 -type f 2>/dev/null | wc -l | tr -d ' '" 2>/dev/null || echo "0")
+
+      if [[ "$SERVER_FILE_COUNT" == "0" ]]; then
+        echo "  Transferring ${LOCAL_DATA_COUNT} seed data file(s) from ${LOCAL_DIR} to server..."
+        scp -o ControlPath="${SSH_CONTROL_PATH}" -r "$LOCAL_DIR"/*.{json,sqlite,sqlite3,db,csv} "${DEPLOY_SERVER}:${FULL_DIR}/" 2>/dev/null || \
+        scp -r "$LOCAL_DIR"/*.json "${DEPLOY_SERVER}:${FULL_DIR}/" 2>/dev/null || true
+        # Fix ownership after transfer
+        deploy_ssh "chown -R 100:101 '${FULL_DIR}'" 2>/dev/null || true
+        echo "  Seed data transferred and ownership set"
+      else
+        echo "  Server ${FULL_DIR} already has ${SERVER_FILE_COUNT} file(s) — skipping seed transfer"
+      fi
+    fi
+  done <<< "$VOLUME_DIRS"
 else
   echo "No volume mounts found for ${APP_NAME}"
 fi

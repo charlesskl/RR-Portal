@@ -38,7 +38,7 @@ const tab_bd_decoration = {
       <tr>
         <td>${f.label}</td>
         <td class="num editable" data-section="painting" data-field="${f.key}" data-type="number">
-          ${formatNumber(pd[f.key], 4)}
+          ${formatNumber(pd[f.key], 2)}
         </td>
       </tr>
     `).join('');
@@ -48,9 +48,9 @@ const tab_bd_decoration = {
         <span class="toolbar-title">D. Decoration (喷油)</span>
         <span class="toolbar-spacer"></span>
         <span class="toolbar-stats">
-          Sub Total: <b>${formatNumber(subTotal, 4)}</b> &nbsp;|&nbsp;
+          Sub Total: <b>${formatNumber(subTotal, 2)}</b> &nbsp;|&nbsp;
           Mark Up: <b>${(markup * 100).toFixed(1)}%</b> &nbsp;|&nbsp;
-          Amount: <b>${formatNumber(amount, 4)}</b>
+          Amount: <b>${formatNumber(amount, 2)}</b>
         </span>
       </div>
       <div style="display:flex;gap:20px;flex-wrap:wrap">
@@ -98,7 +98,7 @@ const tab_bd_decoration = {
               body: JSON.stringify(update),
             });
             await api.calculate(versionId);
-            app.selectVersion(null, versionId);
+            app.refresh();
           } catch (e) { showToast('保存失败: ' + e.message, 'error'); }
         },
       });

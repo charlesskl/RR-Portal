@@ -13,9 +13,9 @@ const tab_bd_purchase = {
         <td class="center"><input type="checkbox" class="row-check" data-id="${h.id}"></td>
         <td class="editable" data-id="${h.id}" data-field="name" data-type="text">${escapeHtml(h.name || '')}</td>
         <td class="editable num" data-id="${h.id}" data-field="quantity" data-type="number">${h.quantity != null ? h.quantity : ''}</td>
-        <td class="editable num" data-id="${h.id}" data-field="old_price" data-type="number">${formatNumber(h.old_price, 4)}</td>
-        <td class="editable num" data-id="${h.id}" data-field="new_price" data-type="number">${formatNumber(h.new_price, 4)}</td>
-        <td class="num ${(h.difference || 0) >= 0 ? '' : 'text-danger'}">${formatNumber(h.difference, 4)}</td>
+        <td class="editable num" data-id="${h.id}" data-field="old_price" data-type="number">${formatNumber(h.old_price, 2)}</td>
+        <td class="editable num" data-id="${h.id}" data-field="new_price" data-type="number">${formatNumber(h.new_price, 2)}</td>
+        <td class="num ${(h.difference || 0) >= 0 ? '' : 'text-danger'}">${formatNumber(h.difference, 2)}</td>
         <td class="center">${escapeHtml(h.tax_type || '')}</td>
       </tr>
     `).join('');
@@ -27,9 +27,9 @@ const tab_bd_purchase = {
         <button class="btn btn-danger" id="bdPurDelete">删除选中</button>
         <span class="toolbar-spacer"></span>
         <span class="toolbar-stats">
-          Sub Total: <b>${formatNumber(subTotal, 4)}</b> &nbsp;|&nbsp;
+          Sub Total: <b>${formatNumber(subTotal, 2)}</b> &nbsp;|&nbsp;
           Mark Up: <b>${(markup * 100).toFixed(1)}%</b> &nbsp;|&nbsp;
-          Amount: <b>${formatNumber(amount, 4)}</b>
+          Amount: <b>${formatNumber(amount, 2)}</b>
         </span>
       </div>
       <div class="data-table-wrap">
@@ -55,7 +55,7 @@ const tab_bd_purchase = {
     container.querySelector('#bdPurAdd')?.addEventListener('click', async () => {
       try {
         await api.addSectionItem(versionId, 'hardware', { name: '新零件', quantity: 1, new_price: 0 });
-        app.selectVersion(null, versionId);
+        app.refresh();
       } catch (e) { showToast('添加失败: ' + e.message, 'error'); }
     });
 
@@ -65,7 +65,7 @@ const tab_bd_purchase = {
       if (!confirm(`确定删除 ${ids.length} 行？`)) return;
       try {
         await Promise.all(ids.map(id => api.deleteSectionItem(versionId, 'hardware', id)));
-        app.selectVersion(null, versionId);
+        app.refresh();
       } catch (e) { showToast('删除失败: ' + e.message, 'error'); }
     });
 
@@ -87,7 +87,7 @@ const tab_bd_purchase = {
           }
           try {
             await api.updateSectionItem(versionId, 'hardware', id, update);
-            app.selectVersion(null, versionId);
+            app.refresh();
           } catch (e) { showToast('保存失败: ' + e.message, 'error'); }
         },
       });

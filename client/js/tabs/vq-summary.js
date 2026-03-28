@@ -120,9 +120,9 @@ const tab_vq_summary = {
         <span class="toolbar-title">VQ Summary</span>
         <span class="toolbar-spacer"></span>
         <span class="toolbar-stats">
-          Body: <b>${formatNumber(bodyCost, 4)}</b> &nbsp;|&nbsp;
-          Pkg: <b>${formatNumber(packagingTotal, 4)}</b> &nbsp;|&nbsp;
-          CTN/pc: <b>${formatNumber(cartonPerPc, 4)}</b> HKD
+          Body: <b>${formatNumber(bodyCost, 2)}</b> &nbsp;|&nbsp;
+          Pkg: <b>${formatNumber(packagingTotal, 2)}</b> &nbsp;|&nbsp;
+          CTN/pc: <b>${formatNumber(cartonPerPc, 2)}</b> HKD
         </span>
       </div>
 
@@ -141,39 +141,39 @@ const tab_vq_summary = {
             ${rowOf('E. Transport /pc HKD (YT40)', 'transport')}
             <tr style="font-weight:bold;background:#eef2fb">
               <td>小计 Sub Total HKD</td>
-              ${matrix.map(r => `<td class="num"><b>${formatNumber(r.subTotal, 4)}</b></td>`).join('')}
+              ${matrix.map(r => `<td class="num"><b>${formatNumber(r.subTotal, 2)}</b></td>`).join('')}
             </tr>
             <tr>
               <td>附加税 (${((surcharge)*100).toFixed(2)}%)</td>
-              ${matrix.map(r => `<td class="num">${formatNumber(r.surcharge, 4)}</td>`).join('')}
+              ${matrix.map(r => `<td class="num">${formatNumber(r.surcharge, 2)}</td>`).join('')}
             </tr>
             <tr>
               <td>码点 (×${markupPoint.toFixed(4)})</td>
-              ${matrix.map(r => `<td class="num">${formatNumber(r.markupPointAmt, 4)}</td>`).join('')}
+              ${matrix.map(r => `<td class="num">${formatNumber(r.markupPointAmt, 2)}</td>`).join('')}
             </tr>
             <tr>
               <td>找数 (÷${paymentDiv.toFixed(4)})</td>
-              ${matrix.map(r => `<td class="num">${formatNumber(r.totalHkd - r.withPoint, 4)}</td>`).join('')}
+              ${matrix.map(r => `<td class="num">${formatNumber(r.totalHkd - r.withPoint, 2)}</td>`).join('')}
             </tr>
             <tr style="font-weight:bold;background:#dce8f8">
               <td>合计 Total HKD</td>
-              ${matrix.map(r => `<td class="num"><b>${formatNumber(r.totalHkd, 4)}</b></td>`).join('')}
+              ${matrix.map(r => `<td class="num"><b>${formatNumber(r.totalHkd, 2)}</b></td>`).join('')}
             </tr>
             <tr style="font-weight:bold;background:#dce8f8">
               <td>合计 Total USD</td>
-              ${matrix.map(r => `<td class="num"><b>${formatNumber(r.totalUsd, 4)}</b></td>`).join('')}
+              ${matrix.map(r => `<td class="num"><b>${formatNumber(r.totalUsd, 2)}</b></td>`).join('')}
             </tr>
             <tr style="border-top:2px solid #ccc">
               <td style="color:#888">模费摊销/件 HKD</td>
-              ${matrix.map(() => `<td class="num" style="color:#888">${formatNumber(moldPerPc, 4)}</td>`).join('')}
+              ${matrix.map(() => `<td class="num" style="color:#888">${formatNumber(moldPerPc, 2)}</td>`).join('')}
             </tr>
             <tr style="font-weight:bold;background:#fef9e7">
               <td>含模费 Total HKD</td>
-              ${matrix.map(r => `<td class="num"><b>${formatNumber(r.totalWithMoldHkd, 4)}</b></td>`).join('')}
+              ${matrix.map(r => `<td class="num"><b>${formatNumber(r.totalWithMoldHkd, 2)}</b></td>`).join('')}
             </tr>
             <tr style="font-weight:bold;background:#fef9e7">
               <td>含模费 Total USD</td>
-              ${matrix.map(r => `<td class="num"><b>${formatNumber(r.totalWithMoldUsd, 4)}</b></td>`).join('')}
+              ${matrix.map(r => `<td class="num"><b>${formatNumber(r.totalWithMoldUsd, 2)}</b></td>`).join('')}
             </tr>
           </tbody>
         </table>
@@ -203,11 +203,11 @@ const tab_vq_summary = {
                 <tr><td>五金模 RMB</td><td class="num">${formatNumber(versionData.mold_cost.hardware_mold_cost_rmb, 2)}</td></tr>
                 <tr><td>喷油模 RMB</td><td class="num">${formatNumber(versionData.mold_cost.paint_mold_cost_rmb, 2)}</td></tr>
                 <tr><td><b>模费合计 RMB</b></td><td class="num"><b>${formatNumber(versionData.mold_cost.total_mold_rmb, 2)}</b></td></tr>
-                <tr><td>模费合计 USD</td><td class="num">${formatNumber(versionData.mold_cost.total_mold_usd, 4)}</td></tr>
-                <tr><td>客户补贴 USD</td><td class="num">${formatNumber(versionData.mold_cost.customer_subsidy_usd, 4)}</td></tr>
+                <tr><td>模费合计 USD</td><td class="num">${formatNumber(versionData.mold_cost.total_mold_usd, 2)}</td></tr>
+                <tr><td>客户补贴 USD</td><td class="num">${formatNumber(versionData.mold_cost.customer_subsidy_usd, 2)}</td></tr>
                 <tr><td>摊销数量</td><td class="num">${versionData.mold_cost.amortization_qty || '—'}</td></tr>
                 <tr><td>摊销金额 RMB</td><td class="num">${formatNumber(versionData.mold_cost.amortization_rmb, 2)}</td></tr>
-                <tr><td>摊销/件 HKD</td><td class="num">${formatNumber(moldPerPc, 4)}</td></tr>
+                <tr><td>摊销/件 HKD</td><td class="num">${formatNumber(moldPerPc, 2)}</td></tr>
               ` : '<tr><td colspan="2" style="text-align:center;color:#aaa">无模费数据</td></tr>'}
             </tbody>
           </table>

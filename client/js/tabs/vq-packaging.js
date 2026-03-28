@@ -15,9 +15,9 @@ const tab_vq_packaging = {
         <td class="center"><input type="checkbox" class="row-check" data-id="${item.id}"></td>
         <td class="editable" data-id="${item.id}" data-field="name" data-type="text">${escapeHtml(item.name || '')}</td>
         <td class="editable num" data-id="${item.id}" data-field="quantity" data-type="number">${item.quantity != null ? item.quantity : ''}</td>
-        <td class="editable num" data-id="${item.id}" data-field="old_price" data-type="number">${formatNumber(item.old_price, 4)}</td>
-        <td class="editable num" data-id="${item.id}" data-field="new_price" data-type="number">${formatNumber(item.new_price, 4)}</td>
-        <td class="num ${(item.difference || 0) >= 0 ? '' : 'text-danger'}">${formatNumber(item.difference, 4)}</td>
+        <td class="editable num" data-id="${item.id}" data-field="old_price" data-type="number">${formatNumber(item.old_price, 2)}</td>
+        <td class="editable num" data-id="${item.id}" data-field="new_price" data-type="number">${formatNumber(item.new_price, 2)}</td>
+        <td class="num ${(item.difference || 0) >= 0 ? '' : 'text-danger'}">${formatNumber(item.difference, 2)}</td>
         <td class="center">${escapeHtml(item.tax_type || '')}</td>
       </tr>
     `).join('');
@@ -29,11 +29,11 @@ const tab_vq_packaging = {
         <button class="btn btn-danger" id="vqPkgDelete">删除选中</button>
         <span class="toolbar-spacer"></span>
         <span class="toolbar-stats">
-          Items: <b>${formatNumber(itemsTotal, 4)}</b> &nbsp;+&nbsp;
-          Box: <b>${formatNumber(boxPrice, 4)}</b> &nbsp;|&nbsp;
-          Sub Total: <b>${formatNumber(subTotal, 4)}</b> &nbsp;|&nbsp;
+          Items: <b>${formatNumber(itemsTotal, 2)}</b> &nbsp;+&nbsp;
+          Box: <b>${formatNumber(boxPrice, 2)}</b> &nbsp;|&nbsp;
+          Sub Total: <b>${formatNumber(subTotal, 2)}</b> &nbsp;|&nbsp;
           Mark Up: <b>${(markup * 100).toFixed(1)}%</b> &nbsp;|&nbsp;
-          Amount: <b>${formatNumber(amount, 4)}</b>
+          Amount: <b>${formatNumber(amount, 2)}</b>
         </span>
       </div>
       <div class="data-table-wrap">
@@ -48,7 +48,7 @@ const tab_vq_packaging = {
         </table>
       </div>
       <div style="margin-top:8px;font-size:12px;color:#666">
-        * 纸箱 (Box) 价格在参数面板中设置 (box_price_hkd = ${formatNumber(boxPrice, 4)} HKD)
+        * 纸箱 (Box) 价格在参数面板中设置 (box_price_hkd = ${formatNumber(boxPrice, 2)} HKD)
       </div>
       <style>.text-danger{color:#e74c3c}</style>
     `;
@@ -62,7 +62,7 @@ const tab_vq_packaging = {
     container.querySelector('#vqPkgAdd')?.addEventListener('click', async () => {
       try {
         await api.addSectionItem(versionId, 'packaging', { name: '新包装件', quantity: 1, new_price: 0 });
-        app.selectVersion(null, versionId);
+        app.refresh();
       } catch (e) { showToast('添加失败: ' + e.message, 'error'); }
     });
 
@@ -72,7 +72,7 @@ const tab_vq_packaging = {
       if (!confirm(`确定删除 ${ids.length} 行？`)) return;
       try {
         await Promise.all(ids.map(id => api.deleteSectionItem(versionId, 'packaging', id)));
-        app.selectVersion(null, versionId);
+        app.refresh();
       } catch (e) { showToast('删除失败: ' + e.message, 'error'); }
     });
 
@@ -93,7 +93,7 @@ const tab_vq_packaging = {
           }
           try {
             await api.updateSectionItem(versionId, 'packaging', id, update);
-            app.selectVersion(null, versionId);
+            app.refresh();
           } catch (e) { showToast('保存失败: ' + e.message, 'error'); }
         },
       });

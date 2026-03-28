@@ -18,7 +18,7 @@ const tab_bd_molding = {
         <td class="editable num" data-id="${p.id}" data-field="cavity_count" data-type="number">${p.cavity_count != null ? p.cavity_count : ''}</td>
         <td class="editable num" data-id="${p.id}" data-field="sets_per_toy" data-type="number">${p.sets_per_toy != null ? p.sets_per_toy : ''}</td>
         <td class="editable num" data-id="${p.id}" data-field="target_qty" data-type="number">${p.target_qty != null ? p.target_qty : ''}</td>
-        <td class="num">${formatNumber(p.molding_labor, 4)}</td>
+        <td class="num">${formatNumber(p.molding_labor, 2)}</td>
       </tr>
     `).join('');
 
@@ -27,9 +27,9 @@ const tab_bd_molding = {
         <span class="toolbar-title">B. Molding Labour Cost</span>
         <span class="toolbar-spacer"></span>
         <span class="toolbar-stats">
-          Sub Total: <b>${formatNumber(subTotal, 4)}</b> &nbsp;|&nbsp;
+          Sub Total: <b>${formatNumber(subTotal, 2)}</b> &nbsp;|&nbsp;
           Mark Up: <b>${(markup * 100).toFixed(1)}%</b> &nbsp;|&nbsp;
-          Amount: <b>${formatNumber(amount, 4)}</b>
+          Amount: <b>${formatNumber(amount, 2)}</b>
         </span>
       </div>
       <div class="data-table-wrap">
@@ -67,7 +67,7 @@ const tab_bd_molding = {
           try {
             await api.updateSectionItem(versionId, 'mold-parts', id, { [field]: val });
             await api.calculate(versionId);
-            app.selectVersion(null, versionId);
+            app.refresh();
           } catch (e) { showToast('保存失败: ' + e.message, 'error'); }
         },
       });

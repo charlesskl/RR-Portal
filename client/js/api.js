@@ -28,6 +28,7 @@ const api = (() => {
     getProducts: () => request('GET', '/api/products'),
     createProduct: (data) => request('POST', '/api/products', data),
     getProduct: (id) => request('GET', `/api/products/${id}`),
+    updateProduct: (id, data) => request('PUT', `/api/products/${id}`, data),
     deleteProduct: (id) => request('DELETE', `/api/products/${id}`),
 
     // Versions

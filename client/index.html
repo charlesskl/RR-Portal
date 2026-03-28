@@ -42,6 +42,15 @@
     <div class="params-body" id="paramsBody" style="display:none"></div>
   </div>
 
+  <!-- Header Info panel -->
+  <div class="header-info-panel" id="headerInfoPanel" style="display:none">
+    <div class="header-info-toggle" id="headerInfoToggle">
+      <span>表头信息</span>
+      <span class="header-info-arrow">▼</span>
+    </div>
+    <div class="header-info-body" id="headerInfoBody" style="display:none"></div>
+  </div>
+
   <!-- Two-level tab navigation -->
   <div class="tab-nav-wrapper" id="tabNavWrapper" style="display:none">
     <!-- Top-level tabs -->
@@ -118,6 +127,31 @@
   </div>
 </div>
 
+<!-- ─── New Product Modal ─────────────────────────────────────────────────── -->
+<div class="modal-overlay" id="newProductModal" style="display:none">
+  <div class="modal">
+    <div class="modal-header">新建产品</div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label>产品编号 *</label>
+        <input type="text" id="npItemNo" class="form-input" placeholder="例如: 47712">
+      </div>
+      <div class="form-group">
+        <label>产品名称</label>
+        <input type="text" id="npItemDesc" class="form-input" placeholder="例如: Big Farm Tractor">
+      </div>
+      <div class="form-group">
+        <label>厂商</label>
+        <input type="text" id="npVendor" class="form-input" placeholder="例如: ROYAL REGENT">
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-cancel" id="npCancel">取消</button>
+      <button class="btn btn-primary" id="npConfirm">创建</button>
+    </div>
+  </div>
+</div>
+
 <!-- Hidden file input -->
 <input type="file" id="fileInput" accept=".xlsx,.xls" style="display:none">
 
@@ -135,6 +169,7 @@
 <script src="js/tabs/bd-purchase.js"></script>
 <script src="js/tabs/bd-decoration.js"></script>
 <script src="js/tabs/bd-others.js"></script>
+<script src="js/header-info.js"></script>
 <script src="js/params.js"></script>
 <script src="js/app.js"></script>
 

@@ -34,7 +34,7 @@ const tab_vq_transport = {
       const cost = parseFloat(tc[r.costKey]) || 0;
       const cells = moqs.map(q => {
         const v = perPc(cCuft, cost, q);
-        return `<td class="num">${v != null ? formatNumber(v, 4) : '—'}</td>`;
+        return `<td class="num">${v != null ? formatNumber(v, 2) : '—'}</td>`;
       }).join('');
       return `
         <tr>
@@ -50,7 +50,7 @@ const tab_vq_transport = {
         <tr>
           <td>${label}</td>
           <td class="num editable" data-field="${key}" data-type="number">
-            ${tc[key] != null ? formatNumber(tc[key], 4) : '—'}
+            ${tc[key] != null ? formatNumber(tc[key], 2) : '—'}
           </td>
           ${unit ? `<td style="color:#888">${unit}</td>` : '<td></td>'}
         </tr>
@@ -62,7 +62,7 @@ const tab_vq_transport = {
         <span class="toolbar-title">E. Transport</span>
         <span class="toolbar-spacer"></span>
         <span class="toolbar-stats">
-          体积/箱: <b>${formatNumber(cuft, 4)}</b> cuft &nbsp;|&nbsp;
+          体积/箱: <b>${formatNumber(cuft, 2)}</b> cuft &nbsp;|&nbsp;
           PCS/箱: <b>${pcsPerBox}</b>
         </span>
       </div>
@@ -113,7 +113,7 @@ const tab_vq_transport = {
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ [field]: val }),
             });
-            app.selectVersion(null, versionId);
+            app.refresh();
           } catch (e) { showToast('保存失败: ' + e.message, 'error'); }
         },
       });

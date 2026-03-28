@@ -13,7 +13,7 @@ const tab_vq_carton = {
         <tr>
           <td>${label}</td>
           <td class="num editable" data-section="dimensions" data-field="${key}" data-type="number">
-            ${dim[key] != null ? formatNumber(dim[key], 4) : '—'}
+            ${dim[key] != null ? formatNumber(dim[key], 2) : '—'}
           </td>
           ${unit ? `<td style="color:#888">${unit}</td>` : '<td></td>'}
         </tr>
@@ -25,9 +25,9 @@ const tab_vq_carton = {
         <span class="toolbar-title">D. Master Carton</span>
         <span class="toolbar-spacer"></span>
         <span class="toolbar-stats">
-          Carton Price: <b>${formatNumber(cartonPrice, 4)}</b> HKD &nbsp;|&nbsp;
+          Carton Price: <b>${formatNumber(cartonPrice, 2)}</b> HKD &nbsp;|&nbsp;
           PCS/CTN: <b>${pcsPerCarton || '—'}</b> &nbsp;|&nbsp;
-          Per PC: <b>${formatNumber(perPc, 4)}</b> HKD
+          Per PC: <b>${formatNumber(perPc, 2)}</b> HKD
         </span>
       </div>
       <div style="display:flex;gap:20px;flex-wrap:wrap">
@@ -66,7 +66,7 @@ const tab_vq_carton = {
               ${dimField('carton_price', '纸箱价', 'HKD')}
               <tr>
                 <td><b>每件摊销</b></td>
-                <td class="num" colspan="2"><b>${formatNumber(perPc, 4)}</b> HKD</td>
+                <td class="num" colspan="2"><b>${formatNumber(perPc, 2)}</b> HKD</td>
               </tr>
             </tbody>
           </table>
@@ -91,7 +91,7 @@ const tab_vq_carton = {
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ [field]: val }),
             });
-            app.selectVersion(null, versionId);
+            app.refresh();
           } catch (e) { showToast('保存失败: ' + e.message, 'error'); }
         },
       });

@@ -12,9 +12,9 @@ const tab_vq_purchase = {
       <tr>
         <td>${escapeHtml(h.name || '')}</td>
         <td class="num">${h.quantity != null ? h.quantity : '—'}</td>
-        <td class="num">${formatNumber(h.old_price, 4)}</td>
-        <td class="num">${formatNumber(h.new_price, 4)}</td>
-        <td class="num ${(h.difference || 0) >= 0 ? '' : 'text-danger'}">${formatNumber(h.difference, 4)}</td>
+        <td class="num">${formatNumber(h.old_price, 2)}</td>
+        <td class="num">${formatNumber(h.new_price, 2)}</td>
+        <td class="num ${(h.difference || 0) >= 0 ? '' : 'text-danger'}">${formatNumber(h.difference, 2)}</td>
         <td class="center">${escapeHtml(h.tax_type || '')}</td>
       </tr>
     `).join('');
@@ -24,9 +24,9 @@ const tab_vq_purchase = {
         <span class="toolbar-title">C. Purchase Parts Cost</span>
         <span class="toolbar-spacer"></span>
         <span class="toolbar-stats">
-          Sub Total: <b>${formatNumber(subTotal, 4)}</b> &nbsp;|&nbsp;
+          Sub Total: <b>${formatNumber(subTotal, 2)}</b> &nbsp;|&nbsp;
           Mark Up: <b>${(markup * 100).toFixed(1)}%</b> &nbsp;|&nbsp;
-          Amount: <b>${formatNumber(amount, 4)}</b>
+          Amount: <b>${formatNumber(amount, 2)}</b>
         </span>
       </div>
       <div class="data-table-wrap">

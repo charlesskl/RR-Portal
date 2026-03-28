@@ -101,6 +101,46 @@ if [[ "$DRY_RUN" != "true" ]]; then
   fi
 fi
 
+# --- Server-side pre-flight (skip in dry-run) ---
+if [[ "$DRY_RUN" != "true" && -n "${DEPLOY_SERVER:-}" ]]; then
+  echo ""
+  echo "--- Server readiness checks ---"
+
+  # Docker daemon running on server
+  preflight_check "Server Docker" "ssh -o ConnectTimeout=5 ${DEPLOY_SERVER} 'docker info > /dev/null 2>&1'" || PREFLIGHT_PASS=false
+
+  # Disk space (at least 2 GB free)
+  SERVER_DISK_FREE=$(ssh -o ConnectTimeout=5 "${DEPLOY_SERVER}" "df -k /opt/rr-portal 2>/dev/null | tail -1 | awk '{print \$4}'" 2>/dev/null || echo "0")
+  SERVER_DISK_GB=$(( SERVER_DISK_FREE / 1048576 ))
+  if [[ "$SERVER_DISK_FREE" -lt 2097152 ]]; then
+    echo "  [FAIL] Server disk: ${SERVER_DISK_GB} GB free (need 2 GB)"
+    PREFLIGHT_PASS=false
+  else
+    echo "  [OK] Server disk: ${SERVER_DISK_GB} GB free"
+  fi
+
+  # nginx running
+  preflight_check "Server nginx" "ssh -o ConnectTimeout=5 ${DEPLOY_SERVER} 'docker ps --format {{.Names}} | grep -q nginx'" || {
+    echo "  [WARN] nginx not running — deployment will succeed but app won't be reachable"
+  }
+
+  # PostgreSQL running (if any app uses it)
+  DB_RUNNING=$(ssh -o ConnectTimeout=5 "${DEPLOY_SERVER}" "docker ps --format '{{.Names}}' | grep -q 'db\|postgres' && echo yes || echo no" 2>/dev/null || echo "unknown")
+  if [[ "$DB_RUNNING" == "yes" ]]; then
+    echo "  [OK] Server PostgreSQL: running"
+  elif [[ "$DB_RUNNING" == "no" ]]; then
+    echo "  [WARN] Server PostgreSQL: not running — DB-dependent apps will fail"
+  fi
+
+  # Available memory (at least 256 MB)
+  SERVER_MEM_FREE=$(ssh -o ConnectTimeout=5 "${DEPLOY_SERVER}" "free -m 2>/dev/null | awk '/Mem:/ {print \$7}'" 2>/dev/null || echo "0")
+  if [[ "$SERVER_MEM_FREE" -lt 256 ]]; then
+    echo "  [WARN] Server memory: ${SERVER_MEM_FREE} MB free (low — builds may OOM)"
+  else
+    echo "  [OK] Server memory: ${SERVER_MEM_FREE} MB free"
+  fi
+fi
+
 # Playwright check (non-fatal — falls back to curl)
 PLAYWRIGHT_AVAILABLE=false
 if command -v npx > /dev/null 2>&1 && npx playwright --version > /dev/null 2>&1; then

@@ -10,6 +10,8 @@ const LIST_SECTIONS = {
   'packaging': 'PackagingItem',
   'body-accessory': 'BodyAccessory',
   'raw-material': 'RawMaterial',
+  'sewing-detail': 'SewingDetail',
+  'rotocast': 'RotocastItem',
 };
 
 // Singleton sections (one record per version)
@@ -36,6 +38,8 @@ const ALL_SECTION_TABLES = {
   machine_prices: 'MachinePrice',
   body_accessories: 'BodyAccessory',
   raw_materials: 'RawMaterial',
+  sewing_details: 'SewingDetail',
+  rotocast_items: 'RotocastItem',
 };
 
 // Helper: get columns for a table (excluding id and version_id)

@@ -226,6 +226,34 @@ function initDb() {
       unit_price REAL DEFAULT 0,
       sort_order INTEGER DEFAULT 0
     );
+
+    CREATE TABLE IF NOT EXISTS SewingDetail (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      version_id INTEGER NOT NULL REFERENCES QuoteVersion(id) ON DELETE CASCADE,
+      product_name TEXT,
+      fabric_name TEXT,
+      position TEXT,
+      cut_pieces INTEGER,
+      usage_amount REAL,
+      material_price_rmb REAL,
+      price_rmb REAL,
+      markup_point REAL DEFAULT 1.15,
+      total_price_rmb REAL,
+      sort_order INTEGER DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS RotocastItem (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      version_id INTEGER NOT NULL REFERENCES QuoteVersion(id) ON DELETE CASCADE,
+      mold_no TEXT,
+      name TEXT,
+      output_qty INTEGER,
+      usage_pcs INTEGER DEFAULT 1,
+      unit_price_hkd REAL,
+      total_hkd REAL,
+      remark TEXT,
+      sort_order INTEGER DEFAULT 0
+    );
   `);
 
   // Migrate: add header fields to QuoteVersion if they don't exist yet
@@ -254,6 +282,11 @@ function initDb() {
     if (!existingCols.includes(colMap[sql])) {
       db.exec(sql);
     }
+  }
+
+  // Migrate: add format_type to QuoteVersion
+  if (!existingCols.includes('format_type')) {
+    db.exec("ALTER TABLE QuoteVersion ADD COLUMN format_type TEXT DEFAULT 'injection'");
   }
 
   return db;

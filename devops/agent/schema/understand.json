@@ -14,6 +14,9 @@
   "client_dir": null,
   "has_dockerfile": false,
   "has_health_endpoint": false,
+  "display_name": "",
+  "description": "",
+  "department": "",
   "database": {
     "type": "none|postgresql|mongodb|sqlite|mysql",
     "detected_from": "",

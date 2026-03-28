@@ -500,7 +500,43 @@ else
 fi
 
 # ============================================================
-# Step 9: Success notification (DEPL-07)
+# Step 9: Dashboard registration (first deploy only)
+# ============================================================
+# Only runs for new apps (action=onboard). Reads display_name and
+# department from apps.json or state JSON, adds app card to the
+# portal homepage so users can find it.
+REMOTE_HTML="$(dirname "${DEPLOY_COMPOSE_PATH}")/frontend/index.cloud.html"
+APP_ON_DASHBOARD=$(deploy_ssh "grep -c '/${APP_NAME}/' '${REMOTE_HTML}' 2>/dev/null || echo 0" 2>/dev/null || echo "0")
+
+if [[ "${APP_ON_DASHBOARD}" == "0" ]]; then
+  echo "=== DEPLOY: registering ${APP_NAME} on portal dashboard ==="
+  source "${SCRIPT_DIR}/utils/dashboard.sh"
+
+  # Read display_name and department from apps.json
+  DISPLAY_NAME=$(python3 -c "
+import json, sys
+d = json.load(open('${REPO_ROOT}/devops/config/apps.json'))
+app = d.get(sys.argv[1], {})
+print(app.get('display_name', sys.argv[1]))
+" "$APP_NAME" 2>/dev/null || echo "$APP_NAME")
+
+  DEPARTMENT=$(python3 -c "
+import json, sys
+d = json.load(open('${REPO_ROOT}/devops/config/apps.json'))
+app = d.get(sys.argv[1], {})
+print(app.get('department', 'Engineering'))
+" "$APP_NAME" 2>/dev/null || echo "Engineering")
+
+  DESCRIPTION="${DISPLAY_NAME} (${DEPARTMENT})"
+
+  add_to_dashboard "$APP_NAME" "$DISPLAY_NAME" "$DESCRIPTION" "$DEPARTMENT" "$DEPLOY_SERVER_HOST" "$REMOTE_HTML" 2>&1 || \
+    echo "[DASHBOARD] WARN: could not add to dashboard — non-blocking, manual fix possible"
+else
+  echo "=== DEPLOY: ${APP_NAME} already on dashboard ==="
+fi
+
+# ============================================================
+# Step 10: Success notification (DEPL-07)
 # ============================================================
 echo "=== DEPLOY: ${APP_NAME} deployed successfully ==="
 

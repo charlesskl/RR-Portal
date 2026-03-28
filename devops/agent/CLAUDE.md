@@ -32,7 +32,11 @@ You will be told which phase to execute. Read your input state JSON, execute the
 Steps:
 1. Read the app's source code in `apps/<app-name>/`
 2. Source `devops/scripts/utils/detect-stack.sh` and run `detect_app_stack` on the app directory
-3. Check `devops/config/apps.json` — does this app already exist?
+3. Extract app metadata for portal dashboard:
+   - `display_name`: Read from package.json `name` or `description` field, or README.md first heading, or context from PR. Use Chinese if available. Example: "走货明细系统"
+   - `description`: One-line summary from README.md or package.json `description`. Example: "Engineering department shipping detail system"
+   - `department`: From PR context, or infer from file path (e.g., apps in Engineering group). Must match existing departments: Engineering, 生产部, PMC跟仓管, Business
+4. Check `devops/config/apps.json` — does this app already exist?
 4. If app exists in apps.json AND exists on server (verify via SSH): action = "update"
 5. If app does NOT exist in apps.json: action = "onboard"
 6. If apps.json and server state DISAGREE: STOP and escalate via Telegram. Do not proceed.

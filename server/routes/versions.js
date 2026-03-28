@@ -8,6 +8,8 @@ const LIST_SECTIONS = {
   'hardware': 'HardwareItem',
   'electronics': 'ElectronicItem',
   'packaging': 'PackagingItem',
+  'body-accessory': 'BodyAccessory',
+  'raw-material': 'RawMaterial',
 };
 
 // Singleton sections (one record per version)
@@ -32,6 +34,8 @@ const ALL_SECTION_TABLES = {
   product_dimension: 'ProductDimension',
   material_prices: 'MaterialPrice',
   machine_prices: 'MachinePrice',
+  body_accessories: 'BodyAccessory',
+  raw_materials: 'RawMaterial',
 };
 
 // Helper: get columns for a table (excluding id and version_id)
@@ -56,9 +60,10 @@ router.get('/:id', (req, res) => {
     const version = getVersion(db, req.params.id);
     if (!version) return res.status(404).json({ error: 'Version not found' });
 
-    const params = db.prepare('SELECT * FROM QuoteParams WHERE version_id = ?').get(req.params.id);
+    const params  = db.prepare('SELECT * FROM QuoteParams WHERE version_id = ?').get(req.params.id);
+    const product = db.prepare('SELECT * FROM Product WHERE id = ?').get(version.product_id);
 
-    const result = { ...version, params: params || null };
+    const result = { ...version, product: product || null, params: params || null };
     for (const [key, table] of Object.entries(ALL_SECTION_TABLES)) {
       const rows = db.prepare(`SELECT * FROM ${table} WHERE version_id = ?`).all(req.params.id);
       // Singleton sections return single object or null
@@ -81,11 +86,13 @@ router.put('/:id', (req, res) => {
     const version = getVersion(db, req.params.id);
     if (!version) return res.status(404).json({ error: 'Version not found' });
 
-    const { status, version_name } = req.body;
+    const UPDATABLE = ['status', 'version_name', 'quote_date', 'item_rev', 'prepared_by',
+      'quote_rev', 'fty_delivery_date', 'body_no', 'bd_prepared_by', 'bd_date', 'body_cost_revision'];
     const sets = [];
     const vals = [];
-    if (status !== undefined) { sets.push('status = ?'); vals.push(status); }
-    if (version_name !== undefined) { sets.push('version_name = ?'); vals.push(version_name); }
+    for (const field of UPDATABLE) {
+      if (req.body[field] !== undefined) { sets.push(`${field} = ?`); vals.push(req.body[field]); }
+    }
     if (sets.length === 0) return res.status(400).json({ error: 'No fields to update' });
 
     sets.push("updated_at = datetime('now')");
@@ -125,9 +132,12 @@ router.post('/:id/duplicate', (req, res) => {
     const dup = db.transaction(() => {
       // Copy QuoteVersion
       const vResult = db.prepare(`
-        INSERT INTO QuoteVersion (product_id, version_name, source_sheet, date_code, quote_date, status)
-        VALUES (?, ?, ?, ?, ?, 'draft')
-      `).run(version.product_id, newName, version.source_sheet, version.date_code, version.quote_date);
+        INSERT INTO QuoteVersion (product_id, version_name, source_sheet, date_code, quote_date, status,
+          item_rev, prepared_by, quote_rev, fty_delivery_date, body_no, bd_prepared_by, bd_date, body_cost_revision)
+        VALUES (?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(version.product_id, newName, version.source_sheet, version.date_code, version.quote_date,
+        version.item_rev, version.prepared_by, version.quote_rev, version.fty_delivery_date,
+        version.body_no, version.bd_prepared_by, version.bd_date, version.body_cost_revision);
       const newId = vResult.lastInsertRowid;
 
       // Copy QuoteParams

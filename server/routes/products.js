@@ -54,6 +54,30 @@ router.get('/:id', (req, res) => {
   }
 });
 
+// PUT /:id — update product
+router.put('/:id', (req, res) => {
+  try {
+    const db = getDb();
+    const product = db.prepare('SELECT * FROM Product WHERE id = ?').get(req.params.id);
+    if (!product) return res.status(404).json({ error: 'Product not found' });
+
+    const { item_no, item_desc, vendor } = req.body;
+    const sets = [];
+    const vals = [];
+    if (item_no !== undefined) { sets.push('item_no = ?'); vals.push(item_no); }
+    if (item_desc !== undefined) { sets.push('item_desc = ?'); vals.push(item_desc); }
+    if (vendor !== undefined) { sets.push('vendor = ?'); vals.push(vendor); }
+    if (sets.length === 0) return res.status(400).json({ error: 'No fields to update' });
+
+    sets.push("updated_at = datetime('now')");
+    vals.push(req.params.id);
+    db.prepare(`UPDATE Product SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+    res.json(db.prepare('SELECT * FROM Product WHERE id = ?').get(req.params.id));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // DELETE /:id — delete product (CASCADE)
 router.delete('/:id', (req, res) => {
   try {

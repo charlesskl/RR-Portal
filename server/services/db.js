@@ -204,7 +204,57 @@ function initDb() {
       carton_price REAL,
       pcs_per_carton INTEGER
     );
+
+    CREATE TABLE IF NOT EXISTS RawMaterial (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      version_id INTEGER NOT NULL REFERENCES QuoteVersion(id) ON DELETE CASCADE,
+      category TEXT NOT NULL DEFAULT 'plastic',
+      material_name TEXT,
+      spec TEXT,
+      weight_g REAL,
+      unit_price_per_kg REAL,
+      sort_order INTEGER DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS BodyAccessory (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      version_id INTEGER NOT NULL REFERENCES QuoteVersion(id) ON DELETE CASCADE,
+      part_no TEXT,
+      description TEXT,
+      moq INTEGER DEFAULT 2500,
+      usage_qty REAL DEFAULT 1,
+      unit_price REAL DEFAULT 0,
+      sort_order INTEGER DEFAULT 0
+    );
   `);
+
+  // Migrate: add header fields to QuoteVersion if they don't exist yet
+  const existingCols = db.prepare('PRAGMA table_info(QuoteVersion)').all().map(c => c.name);
+  const migrations = [
+    'ALTER TABLE QuoteVersion ADD COLUMN item_rev TEXT',
+    'ALTER TABLE QuoteVersion ADD COLUMN prepared_by TEXT',
+    'ALTER TABLE QuoteVersion ADD COLUMN quote_rev TEXT',
+    'ALTER TABLE QuoteVersion ADD COLUMN fty_delivery_date TEXT',
+    'ALTER TABLE QuoteVersion ADD COLUMN body_no TEXT',
+    'ALTER TABLE QuoteVersion ADD COLUMN bd_prepared_by TEXT',
+    'ALTER TABLE QuoteVersion ADD COLUMN bd_date TEXT',
+    'ALTER TABLE QuoteVersion ADD COLUMN body_cost_revision TEXT',
+  ];
+  const colMap = {
+    'ALTER TABLE QuoteVersion ADD COLUMN item_rev TEXT': 'item_rev',
+    'ALTER TABLE QuoteVersion ADD COLUMN prepared_by TEXT': 'prepared_by',
+    'ALTER TABLE QuoteVersion ADD COLUMN quote_rev TEXT': 'quote_rev',
+    'ALTER TABLE QuoteVersion ADD COLUMN fty_delivery_date TEXT': 'fty_delivery_date',
+    'ALTER TABLE QuoteVersion ADD COLUMN body_no TEXT': 'body_no',
+    'ALTER TABLE QuoteVersion ADD COLUMN bd_prepared_by TEXT': 'bd_prepared_by',
+    'ALTER TABLE QuoteVersion ADD COLUMN bd_date TEXT': 'bd_date',
+    'ALTER TABLE QuoteVersion ADD COLUMN body_cost_revision TEXT': 'body_cost_revision',
+  };
+  for (const sql of migrations) {
+    if (!existingCols.includes(colMap[sql])) {
+      db.exec(sql);
+    }
+  }
 
   return db;
 }

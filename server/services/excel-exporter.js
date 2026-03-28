@@ -28,10 +28,18 @@ function loadData(versionId) {
     productDim:     db.prepare('SELECT * FROM ProductDimension WHERE version_id = ?').get(versionId) || {},
     materialPrices: db.prepare('SELECT * FROM MaterialPrice WHERE version_id = ? ORDER BY id').all(versionId),
     machinePrices:  db.prepare('SELECT * FROM MachinePrice  WHERE version_id = ? ORDER BY id').all(versionId),
+    bodyAccessories:db.prepare('SELECT * FROM BodyAccessory WHERE version_id = ? ORDER BY sort_order').all(versionId),
+    rawMaterials:   db.prepare('SELECT * FROM RawMaterial WHERE version_id = ? ORDER BY sort_order').all(versionId),
   };
 }
 
-// ─── Cell helper — only write to data cells, skip formula cells ───────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+// Round a numeric value to 2 decimal places (for monetary amounts)
+function r2(v) {
+  const n = parseFloat(v);
+  return (n == null || isNaN(n)) ? null : Math.round(n * 100) / 100;
+}
 
 function setVal(ws, row, col, value) {
   const cell = ws.getCell(row, col);
@@ -57,15 +65,17 @@ function clearRows(ws, startRow, endRow, dataCols) {
 // ─── Fill Vendor Quotation sheet ─────────────────────────────────────────────
 
 function fillVQ(ws, d) {
-  const { version, product, params, packagingItems, productDim, transportConfig } = d;
+  const { version, product, params, packagingItems, productDim, transportConfig, bodyAccessories } = d;
 
   // ── Header (rows 2–5) ──────────────────────────────────────────────────────
   setVal(ws, 2, 3, product?.vendor || '');
-  setVal(ws, 2, 8, params.prepared_by || '');
+  setVal(ws, 2, 8, version.prepared_by || '');
   setVal(ws, 3, 3, product?.item_no || '');
   setVal(ws, 3, 8, version.quote_date ? new Date(version.quote_date) : '');
   setVal(ws, 4, 3, product?.item_desc || '');
-  setVal(ws, 4, 8, version.version_name || '');
+  setVal(ws, 4, 8, version.quote_rev || '');
+  setVal(ws, 5, 3, version.item_rev || '');
+  setVal(ws, 5, 8, version.fty_delivery_date || '');
 
   // ── Section A (rows 11–16): Body Cost — row 11 formula stays (='BCD'!F23) ─
   // Just update part no and description for main body row
@@ -76,8 +86,16 @@ function fillVQ(ws, d) {
     setVal(ws, 11, 6, 1);     // usage 1 per toy
     // G11 = ='Body Cost Breakdown'!F23 — do NOT overwrite (formula)
   }
-  // Clear accessory rows 12–16 data
+  // Fill accessory rows 12–16
   clearRows(ws, 12, 16, [1, 2, 5, 6, 7]);
+  bodyAccessories.slice(0, 5).forEach((acc, i) => {
+    const r = 12 + i;
+    setVal(ws, r, 1, acc.part_no || '');
+    setVal(ws, r, 2, acc.description || '');
+    setVal(ws, r, 5, parseInt(acc.moq) || 2500);
+    setVal(ws, r, 6, parseFloat(acc.usage_qty) || 1);
+    setVal(ws, r, 7, r2(acc.unit_price) || 0);
+  });
 
   // ── Section B (rows 23–35): Packaging ──────────────────────────────────────
   const PKG_START = 23, PKG_END = 35;
@@ -91,7 +109,7 @@ function fillVQ(ws, d) {
     setVal(ws, r, 3, item.remark || '');    // specifications / remark
     setVal(ws, r, 5, moq);
     setVal(ws, r, 6, item.quantity || 1);
-    setVal(ws, r, 7, parseFloat(item.new_price) || 0);
+    setVal(ws, r, 7, r2(item.new_price) || 0);
     // H col = formula =ROUND(F*G,2) — not touched
   });
   // Mark Up row 36: G36 = markup%
@@ -104,16 +122,16 @@ function fillVQ(ws, d) {
     setVal(ws, 52, 3, parseFloat(productDim.carton_w_inch) || null);
     setVal(ws, 52, 4, parseFloat(productDim.carton_h_inch) || null);
     setVal(ws, 52, 6, parseInt(productDim.pcs_per_carton) || null);
-    setVal(ws, 52, 7, parseFloat(productDim.carton_price) || null);
+    setVal(ws, 52, 7, r2(productDim.carton_price));
   }
 
   // ── Section E (row 58): Transport cost parameters ──────────────────────────
   // Template: F58=Ex-Factory cost/CuFt, G58=FOB FCL cost/CuFt, H58=FOB LCL cost/CuFt
   // C58 = formula =B52*C52*D52/1728*F52 (CuFt per toy, don't touch)
   if (transportConfig) {
-    setVal(ws, 58, 6, parseFloat(transportConfig.hk_10t_cost) || 0.5);   // Ex-Factory
-    setVal(ws, 58, 7, parseFloat(transportConfig.yt_40_cost)  || 4.3);   // FOB FCL
-    setVal(ws, 58, 8, parseFloat(transportConfig.hk_40_cost)  || 15.85); // FOB LCL
+    setVal(ws, 58, 6, r2(transportConfig.hk_10t_cost) || 0.5);   // Ex-Factory
+    setVal(ws, 58, 7, r2(transportConfig.yt_40_cost)  || 4.3);   // FOB FCL
+    setVal(ws, 58, 8, r2(transportConfig.hk_40_cost)  || 15.85); // FOB LCL
   }
 }
 
@@ -121,14 +139,15 @@ function fillVQ(ws, d) {
 
 function fillBCD(ws, d) {
   const { version, product, params, moldParts, hardwareItems, electronicItems,
-          paintingDetail, materialPrices } = d;
+          paintingDetail, materialPrices, rawMaterials } = d;
 
   // ── Header (row 7) ─────────────────────────────────────────────────────────
+  setVal(ws, 7, 1, version.body_no || '');
   setVal(ws, 7, 2, product?.item_desc || '');
-  setVal(ws, 7, 3, '0');  // body cost revision
+  setVal(ws, 7, 3, version.body_cost_revision || '');
   setVal(ws, 7, 4, product?.vendor || '');
-  setVal(ws, 7, 6, params.prepared_by || '');
-  setVal(ws, 7, 8, version.quote_date ? new Date(version.quote_date) : '');
+  setVal(ws, 7, 6, version.bd_prepared_by || '');
+  setVal(ws, 7, 8, version.bd_date ? new Date(version.bd_date) : '');
 
   // ── Summary section markup % (rows 14–22, col E) ──────────────────────────
   const bodyMkup = parseFloat(params.markup_body) || 0.18;
@@ -137,45 +156,35 @@ function fillBCD(ws, d) {
   }
   setVal(ws, 17, 5, 0); // D (Expensive Components) — markup 0%
 
-  // ── Section A: Raw Material (rows 31–34 = ABS, PP, PCTG, PVC) ─────────────
-  // Group mold parts by material type → sum weight_g
-  const matWeight = {};
-  moldParts.forEach(p => {
-    const m = (p.material || '').toUpperCase().trim();
-    if (m) matWeight[m] = (matWeight[m] || 0) + (parseFloat(p.weight_g) || 0);
-  });
+  // ── Section A: Raw Material — 3 sub-sections ──────────────────────────────
+  // 1. Plastic/Resin: R31–R34 (4 slots), SUM at R36 col G = SUM(F31:F34)
+  // 2. Alloy:         R38–R41 (4 slots), no SUM formula in template
+  // 3. Fabric:        R43–R55 (13 slots), SUM at R57 col G = SUM(F43:F55)
+  // Total:            R59 col G = SUM(G29:G58)
 
-  // Helper: get price per KG for a material type
-  function matPricePerKg(matType) {
-    const mt = matType.toUpperCase();
-    const found = materialPrices.find(mp => (mp.material_type || '').toUpperCase() === mt);
-    if (!found) return null;
-    if (found.price_hkd_per_g) return found.price_hkd_per_g * 1000;  // g→kg
-    if (found.price_hkd_per_lb) return found.price_hkd_per_lb * 2.20462; // lb→kg
-    return null;
+  const plastics = (rawMaterials || []).filter(m => m.category === 'plastic');
+  const alloys   = (rawMaterials || []).filter(m => m.category === 'alloy');
+  const fabrics  = (rawMaterials || []).filter(m => m.category === 'fabric');
+
+  // Helper: fill a range of rows with raw material items
+  function fillMatRows(items, startRow, endRow, hasSpec) {
+    const cols = hasSpec ? [2, 3, 4, 5] : [2, 4, 5];
+    clearRows(ws, startRow, endRow, cols);
+    items.slice(0, endRow - startRow + 1).forEach((m, i) => {
+      const r = startRow + i;
+      setVal(ws, r, 2, m.material_name || '');
+      if (hasSpec) setVal(ws, r, 3, m.spec || '');
+      setVal(ws, r, 4, parseFloat(m.weight_g) || null);
+      setVal(ws, r, 5, r2(m.unit_price_per_kg));
+    });
   }
 
-  // Fixed template rows for plastic types (add more if needed)
-  const plasticRows = [
-    { row: 31, type: 'ABS' },
-    { row: 32, type: 'PP'  },
-    { row: 33, type: 'PCTG' },
-    { row: 34, type: 'PVC' },
-  ];
-
-  // Fill known plastic rows
-  const usedTypes = new Set();
-  plasticRows.forEach(({ row, type }) => {
-    const weight = matWeight[type] || null;
-    const priceKg = matPricePerKg(type);
-    setVal(ws, row, 2, type);
-    setVal(ws, row, 4, weight);
-    setVal(ws, row, 5, priceKg);
-    if (weight) usedTypes.add(type);
-    // F col = formula =ROUND(D*E/1000,3) — not touched
-  });
-
-  // If there are other material types not in the fixed rows, we skip (template limitation)
+  // 1. Plastic/Resin R31–R34 (formula: =ROUND(D*E/1000,3))
+  fillMatRows(plastics, 31, 34, false);
+  // 2. Alloy R38–R41
+  fillMatRows(alloys, 38, 41, false);
+  // 3. Fabric R43–R55 (formula: =D*E, has spec/position in col C)
+  fillMatRows(fabrics, 43, 55, true);
 
   // ── Section B: Molding Labour (rows 67–90 = injection molding data) ────────
   const MOLD_START = 67, MOLD_END = 90;
@@ -183,15 +192,16 @@ function fillBCD(ws, d) {
 
   moldParts.slice(0, MOLD_END - MOLD_START + 1).forEach((part, i) => {
     const r = MOLD_START + i;
-    const shots = parseFloat(part.sets_per_toy) || 1;
+    const setsPerToy  = parseFloat(part.sets_per_toy) || 1;
+    const shots = setsPerToy > 0 ? 1 / setsPerToy : 1;   // Shot/Toy = 1 ÷ 出模套数
     const laborPerToy = parseFloat(part.molding_labor) || 0;
-    const costPerShot = shots > 0 ? laborPerToy / shots : 0;
+    const costPerShot = r2(laborPerToy * setsPerToy);   // Cost/Shot = 啤工 × 出模套数
 
     setVal(ws, r, 1, part.part_no || '');
     setVal(ws, r, 2, part.description || '');
     setVal(ws, r, 3, part.machine_type || '');
     setVal(ws, r, 4, shots);
-    setVal(ws, r, 5, parseFloat(costPerShot.toFixed(6)));
+    setVal(ws, r, 5, r2(costPerShot));
     // F col = formula =D*E — not touched (already in template)
   });
 
@@ -204,7 +214,7 @@ function fillBCD(ws, d) {
     setVal(ws, r, 2, item.part_name || '');
     setVal(ws, r, 3, 'pc');
     setVal(ws, r, 4, parseFloat(item.quantity) || 1);
-    setVal(ws, r, 5, parseFloat(item.unit_price_usd) || 0);
+    setVal(ws, r, 5, r2(item.unit_price_usd) || 0);
     // F col = formula =E*D — not touched
   });
 
@@ -217,7 +227,7 @@ function fillBCD(ws, d) {
     setVal(ws, r, 2, item.name || '');
     setVal(ws, r, 3, 'pc');
     setVal(ws, r, 4, parseFloat(item.quantity) || 1);
-    setVal(ws, r, 5, parseFloat(item.new_price) || 0);
+    setVal(ws, r, 5, r2(item.new_price) || 0);
     // F col = formula =D*E — not touched
   });
 
@@ -228,7 +238,7 @@ function fillBCD(ws, d) {
       ? (parseFloat(paintingDetail.labor_cost_hkd) || 0) / sprayOps
       : 0;
     setVal(ws, 153, 4, sprayOps || null);
-    setVal(ws, 153, 5, parseFloat(laborPerOp.toFixed(4)) || null);
+    setVal(ws, 153, 5, r2(laborPerOp));
     // F153 = formula =E153*D153 — not touched
   }
 
@@ -237,7 +247,7 @@ function fillBCD(ws, d) {
   const assemblyHours = parseFloat(params.assembly_hours) || null;
   const laborRate = parseFloat(params.labor_hkd) || null;
   setVal(ws, 165, 4, assemblyHours);
-  setVal(ws, 165, 5, laborRate);
+  setVal(ws, 165, 5, r2(laborRate));
 }
 
 // ─── Main Export Function ─────────────────────────────────────────────────────

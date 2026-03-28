@@ -289,6 +289,35 @@ All modifications MUST be committed with the `[DevOps]` prefix:
 [DevOps] chore: generate Dockerfile for Node.js app
 ```
 
+## Self-Healing Protocol
+
+When trigger.sh retries a failed phase, your prompt will include `PREVIOUS ATTEMPT FAILED` context with the error message and log tail. Follow this diagnostic process:
+
+### Step 1: Read the error carefully
+Don't just retry the same commands. The error message tells you what went wrong. Common patterns:
+- "EACCES" or "permission denied" → volume mount permissions (FP-02)
+- "ECONNREFUSED" or "connection refused" → database not running or wrong hostname (FP-12)
+- "404" in asset paths → base path misconfiguration (FP-01)
+- "YAML parse error" → docker-compose syntax (FP-04)
+- "OOM" or "killed" → memory limits (FP-10)
+
+### Step 2: Match against failure pattern registry
+Read the Failure Pattern Registry (FP-01 through FP-12) and `devops/agent/learned-patterns.md`. If the error matches a known pattern, apply the documented fix.
+
+### Step 3: If no pattern matches, diagnose from logs
+- Read container logs: `ssh $DEPLOY_SERVER "docker logs <container> 2>&1 | tail -50"`
+- Read nginx error log: `ssh $DEPLOY_SERVER "docker logs rr-portal-nginx-1 2>&1 | tail -20"`
+- Check if the container is running: `ssh $DEPLOY_SERVER "docker ps | grep <app>"`
+- Check if the port is listening: `ssh $DEPLOY_SERVER "docker exec <container> netstat -tuln 2>/dev/null || ss -tuln"`
+
+### Step 4: Apply a targeted fix
+- Record what you fixed in the state JSON `fixes[]` array
+- Set `pattern_known: false` if this is a new failure type (trigger.sh will auto-learn it)
+- If you cannot diagnose the issue after reading logs, escalate via Telegram with the full error context
+
+### Step 5: Never retry blindly
+If you can't identify what went wrong, do NOT retry the same commands. Escalate immediately. A blind retry wastes time and may make things worse (e.g., creating duplicate entries, corrupting state).
+
 ## Rollback Protocol
 
 Before modifying any shared config file on the server, snapshot it:

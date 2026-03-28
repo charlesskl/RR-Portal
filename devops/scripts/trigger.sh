@@ -333,29 +333,108 @@ if ! "${AGENT_DIR}/validate-state.sh" "${STATE_DIR}/prepare.json" "prepare" --re
   exit 1
 fi
 
-# --- Phase 3: DEPLOY ---
-run_phase "deploy" \
-  "Read ${STATE_DIR}/prepare.json for context. Build the Docker image with buildx, transfer to server, update compose, and start the container. Write results to ${STATE_DIR}/deploy.json." \
-  3
+# ============================================================
+# Self-healing retry loop — DEPLOY + VERIFY with diagnosis
+# ============================================================
+MAX_HEAL_ATTEMPTS=2
+HEAL_ATTEMPT=0
+DEPLOY_SUCCESS=false
 
-if ! "${AGENT_DIR}/validate-state.sh" "${STATE_DIR}/deploy.json" "deploy" --require-success; then
-  echo "=== TRIGGER: DEPLOY phase failed. Running rollback. ==="
-  # Attempt rollback
-  if [[ "$DRY_RUN" != "true" ]]; then
-    "${SCRIPT_DIR}/rollback.sh" "$APP_NAME" 2>&1 || true
+while [[ "$HEAL_ATTEMPT" -lt "$MAX_HEAL_ATTEMPTS" ]]; do
+  HEAL_ATTEMPT=$((HEAL_ATTEMPT + 1))
+
+  # --- Collect failure context from previous attempt ---
+  FAILURE_CONTEXT=""
+  if [[ "$HEAL_ATTEMPT" -gt 1 ]]; then
+    # Read previous failure for diagnosis
+    for prev_phase in deploy verify; do
+      PREV_STATE="${STATE_DIR}/${prev_phase}.json"
+      if [[ -f "$PREV_STATE" ]]; then
+        PREV_STATUS=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1])).get('status','unknown'))" "$PREV_STATE" 2>/dev/null || echo "unknown")
+        if [[ "$PREV_STATUS" == "failed" ]]; then
+          PREV_ERROR=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1])).get('error','unknown'))" "$PREV_STATE" 2>/dev/null || echo "unknown")
+          FAILURE_CONTEXT="PREVIOUS ATTEMPT FAILED at ${prev_phase}: ${PREV_ERROR}. This is retry ${HEAL_ATTEMPT}/${MAX_HEAL_ATTEMPTS}. Read the failure pattern registry in CLAUDE.md and learned-patterns.md. Diagnose the root cause BEFORE retrying. If you applied a fix, describe it in the fixes[] array."
+          # Read last 30 lines of phase log for more context
+          PREV_LOG="${REPO_ROOT}/devops/logs/phase-${APP_NAME}-${prev_phase}-${TIMESTAMP}.log"
+          if [[ -f "$PREV_LOG" ]]; then
+            LOG_TAIL=$(tail -30 "$PREV_LOG" 2>/dev/null | head -20)
+            FAILURE_CONTEXT="${FAILURE_CONTEXT}\n\nLast 20 lines of ${prev_phase} log:\n${LOG_TAIL}"
+          fi
+          break
+        fi
+      fi
+    done
+
+    if [[ -n "$FAILURE_CONTEXT" ]]; then
+      echo ""
+      echo "=== TRIGGER: Self-healing attempt ${HEAL_ATTEMPT}/${MAX_HEAL_ATTEMPTS} ==="
+      echo "  Previous failure context provided to agent for diagnosis"
+    fi
   fi
-  send_telegram "Deployment of ${APP_NAME} failed at DEPLOY phase and was rolled back. $(cat "${STATE_DIR}/deploy.json" 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin).get("error","unknown error"))' 2>/dev/null || echo 'Check logs.')"
-  exit 1
-fi
 
-# --- Phase 4: VERIFY ---
-run_phase "verify" \
-  "Read ${STATE_DIR}/deploy.json for context. Verify the deployment works: health check, frontend loads, API endpoints respond. Take screenshots if Playwright is available (PLAYWRIGHT_AVAILABLE=${PLAYWRIGHT_AVAILABLE}). Send Telegram notification with results. Write results to ${STATE_DIR}/verify.json." \
-  4
+  # --- Phase 3: DEPLOY ---
+  DEPLOY_PROMPT="Read ${STATE_DIR}/prepare.json for context. Build the Docker image with buildx, transfer to server, update compose, and start the container. Write results to ${STATE_DIR}/deploy.json."
+  if [[ -n "$FAILURE_CONTEXT" ]]; then
+    DEPLOY_PROMPT="${DEPLOY_PROMPT}\n\n${FAILURE_CONTEXT}"
+  fi
 
-if ! "${AGENT_DIR}/validate-state.sh" "${STATE_DIR}/verify.json" "verify" --require-success; then
-  echo "=== TRIGGER: VERIFY phase failed. Deployment may be broken. ==="
-  send_telegram "Deployment of ${APP_NAME} completed but verification FAILED. The app may not be working correctly. Manual check recommended."
+  run_phase "deploy" "$DEPLOY_PROMPT" 3
+
+  if ! "${AGENT_DIR}/validate-state.sh" "${STATE_DIR}/deploy.json" "deploy" --require-success; then
+    DEPLOY_ERROR=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1])).get('error','unknown'))" "${STATE_DIR}/deploy.json" 2>/dev/null || echo "unknown")
+    echo "=== TRIGGER: DEPLOY phase failed (attempt ${HEAL_ATTEMPT}): ${DEPLOY_ERROR} ==="
+
+    if [[ "$HEAL_ATTEMPT" -lt "$MAX_HEAL_ATTEMPTS" ]]; then
+      echo "=== TRIGGER: Will retry with failure diagnosis ==="
+      continue
+    else
+      # Final attempt failed — rollback and escalate
+      echo "=== TRIGGER: All ${MAX_HEAL_ATTEMPTS} attempts exhausted. Rolling back. ==="
+      if [[ "$DRY_RUN" != "true" ]]; then
+        "${SCRIPT_DIR}/rollback.sh" "$APP_NAME" 2>&1 || true
+      fi
+      send_telegram "Deployment of ${APP_NAME} failed after ${MAX_HEAL_ATTEMPTS} attempts and was rolled back. Last error: ${DEPLOY_ERROR}"
+      exit 1
+    fi
+  fi
+
+  # --- Phase 4: VERIFY ---
+  VERIFY_PROMPT="Read ${STATE_DIR}/deploy.json for context. Verify the deployment works: health check, frontend loads, API endpoints respond. Take screenshots if Playwright is available (PLAYWRIGHT_AVAILABLE=${PLAYWRIGHT_AVAILABLE}). Send Telegram notification with results. Write results to ${STATE_DIR}/verify.json."
+  if [[ -n "$FAILURE_CONTEXT" ]]; then
+    VERIFY_PROMPT="${VERIFY_PROMPT}\n\nPrevious attempt context: ${FAILURE_CONTEXT}"
+  fi
+
+  run_phase "verify" "$VERIFY_PROMPT" 4
+
+  if ! "${AGENT_DIR}/validate-state.sh" "${STATE_DIR}/verify.json" "verify" --require-success; then
+    VERIFY_ERROR=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1])).get('error','unknown'))" "${STATE_DIR}/verify.json" 2>/dev/null || echo "unknown")
+    echo "=== TRIGGER: VERIFY phase failed (attempt ${HEAL_ATTEMPT}): ${VERIFY_ERROR} ==="
+
+    if [[ "$HEAL_ATTEMPT" -lt "$MAX_HEAL_ATTEMPTS" ]]; then
+      echo "=== TRIGGER: Will retry DEPLOY+VERIFY with failure diagnosis ==="
+      continue
+    else
+      # Final attempt — app is deployed but broken
+      echo "=== TRIGGER: Verification failed after ${MAX_HEAL_ATTEMPTS} attempts. Rolling back. ==="
+      if [[ "$DRY_RUN" != "true" ]]; then
+        "${SCRIPT_DIR}/rollback.sh" "$APP_NAME" 2>&1 || true
+      fi
+      send_telegram "Deployment of ${APP_NAME} failed verification after ${MAX_HEAL_ATTEMPTS} attempts and was rolled back. Last error: ${VERIFY_ERROR}"
+      exit 1
+    fi
+  fi
+
+  # Both DEPLOY and VERIFY passed
+  DEPLOY_SUCCESS=true
+  if [[ "$HEAL_ATTEMPT" -gt 1 ]]; then
+    echo "=== TRIGGER: Self-healed on attempt ${HEAL_ATTEMPT} ==="
+    send_telegram "Deployment of ${APP_NAME} self-healed after ${HEAL_ATTEMPT} attempts. The first attempt failed but the agent diagnosed and fixed the issue."
+  fi
+  break
+done
+
+if [[ "$DEPLOY_SUCCESS" != "true" ]]; then
+  echo "=== TRIGGER: Deployment loop exited without success — this should not happen ==="
   exit 1
 fi
 

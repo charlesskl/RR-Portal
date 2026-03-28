@@ -222,25 +222,6 @@ Beyond QC and deployment, a fully-developed DevOps agent handles:
 
 All scheduled via launchd plists in `devops/launchd/`.
 
-## QC Pipeline — 14 Checks
-
-| # | Check | Purpose | Auto-fix? |
-|---|-------|---------|-----------|
-| 01 | check-config | Hardcoded config scanner | Yes |
-| 02 | check-health | Health endpoint injection | Yes |
-| 03 | check-lockfiles | Lock file generation | Yes |
-| 04 | check-dockerfile | Dockerfile generation | Yes |
-| 05 | check-lint | ESLint/Ruff auto-fix | Yes |
-| 06 | check-api-basepath | Sub-path API routing (Vite/Next.js) | Yes |
-| 07 | check-auth-bypass | Remove per-app auth | Yes |
-| 08 | check-app-dirs | Dockerfile directory completeness | Yes |
-| 09 | check-env-vars | Environment variable validation | Yes |
-| 10 | check-docker-build | Docker build verification | Yes |
-| 11 | check-ports | Port conflict resolution | Yes |
-| 12 | check-compose-network | Docker network membership | Yes |
-| 13 | check-resource-limits | Container memory limits | Yes |
-| 14 | check-image-size | Image size warning | Advisory |
-
 ### Pattern 13: Missing Security Headers
 **Symptom**: APIs vulnerable to XSS, clickjacking, MIME sniffing.
 **Root cause**: No helmet middleware (Node.js) or security headers.
@@ -294,7 +275,7 @@ All scheduled via launchd plists in `devops/launchd/`.
 | cleanup | Daily 3:00 AM | Docker/disk maintenance |
 | backup-db | Daily 2:00 AM | Database backup |
 
-## QC Pipeline — 16 Checks
+## QC Pipeline — 17 Checks
 
 | # | Check | Category | Auto-fix? |
 |---|-------|----------|-----------|
@@ -314,6 +295,7 @@ All scheduled via launchd plists in `devops/launchd/`.
 | 14 | check-image-size | Optimization | Advisory |
 | 15 | check-security | Security | Advisory |
 | 16 | check-deps | Security | Advisory |
+| 17 | check-tests | Testing | Advisory |
 
 *This document grows autonomously as the agent discovers new failure patterns.*
 *Last updated: 2026-03-21 (R3)*

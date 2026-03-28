@@ -11,5 +11,6 @@
   "qc_checks_failed": [],
   "dockerfile_generated": false,
   "health_endpoint_added": false,
+  "fixes": [],
   "error": null
 }

@@ -360,6 +360,215 @@ if ! "${AGENT_DIR}/validate-state.sh" "${STATE_DIR}/verify.json" "verify" --requ
 fi
 
 # ============================================================
+# Post-VERIFY: Performance baseline and regression detection
+# ============================================================
+PERF_AVG_MS=""
+
+if [[ "$DRY_RUN" != "true" ]]; then
+  echo ""
+  echo "--- Performance check (30s warm-up) ---"
+  sleep 30
+
+  if [[ -x "${SCRIPT_DIR}/perf-check.sh" ]]; then
+    # Run perf-check and capture output
+    PERF_OUTPUT=$("${SCRIPT_DIR}/perf-check.sh" 2>&1 || true)
+    echo "$PERF_OUTPUT" | tail -5
+
+    # Extract average response time for this app from the TSV output
+    PERF_TSV="${REPO_ROOT}/devops/logs/perf-check.tsv"
+    if [[ -f "$PERF_TSV" ]]; then
+      PERF_AVG_MS=$(python3 -c "
+import sys, csv
+total, count = 0, 0
+with open(sys.argv[1]) as f:
+    reader = csv.reader(f, delimiter='\t')
+    next(reader, None)  # skip header
+    for row in reader:
+        if len(row) >= 5 and row[1] == sys.argv[2]:
+            try:
+                total += float(row[4])
+                count += 1
+            except ValueError:
+                pass
+# Only use the last run's entries (tail of file)
+if count > 0:
+    print(int(total / count))
+else:
+    print('')
+" "$PERF_TSV" "$APP_NAME" 2>/dev/null || echo "")
+    fi
+
+    if [[ -n "$PERF_AVG_MS" ]]; then
+      echo "  Average response time: ${PERF_AVG_MS}ms"
+
+      # Compare with previous deploy baseline
+      DEPLOYMENTS_JSONL="${REPO_ROOT}/devops/logs/deployments.jsonl"
+      if [[ -f "$DEPLOYMENTS_JSONL" ]]; then
+        PREV_PERF=$(python3 -c "
+import json, sys
+# Read all lines, find last entry for this app with perf data
+prev = None
+with open(sys.argv[1]) as f:
+    for line in f:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entry = json.loads(line)
+            if entry.get('app') == sys.argv[2] and entry.get('perf_avg_ms'):
+                prev = entry['perf_avg_ms']
+        except (json.JSONDecodeError, KeyError):
+            pass
+if prev is not None:
+    print(prev)
+else:
+    print('')
+" "$DEPLOYMENTS_JSONL" "$APP_NAME" 2>/dev/null || echo "")
+
+        if [[ -n "$PREV_PERF" && "$PREV_PERF" != "0" ]]; then
+          # Check for >50% regression
+          REGRESSION=$(python3 -c "
+import sys
+current = int(sys.argv[1])
+previous = int(sys.argv[2])
+if current > previous * 1.5:
+    print(f'REGRESSION: {previous}ms -> {current}ms ({int((current/previous - 1) * 100)}% slower)')
+else:
+    print('')
+" "$PERF_AVG_MS" "$PREV_PERF" 2>/dev/null || echo "")
+
+          if [[ -n "$REGRESSION" ]]; then
+            echo "  WARNING: ${REGRESSION}"
+            send_telegram "Performance regression detected for ${APP_NAME}: ${REGRESSION}. Previous baseline: ${PREV_PERF}ms, current: ${PERF_AVG_MS}ms."
+          else
+            echo "  No regression (previous: ${PREV_PERF}ms)"
+          fi
+        else
+          echo "  First deploy with perf data — recording baseline (no comparison)"
+        fi
+      fi
+    else
+      echo "  Could not extract perf data — skipping regression check"
+    fi
+  else
+    echo "  perf-check.sh not found — skipping"
+  fi
+else
+  echo ""
+  echo "--- Performance check skipped (dry-run) ---"
+fi
+
+# ============================================================
+# Post-VERIFY: Pattern learning (auto-append novel fixes)
+# ============================================================
+LEARNED_PATTERNS_FILE="${AGENT_DIR}/learned-patterns.md"
+MAX_LEARNED_PATTERNS=50
+
+_learn_patterns_from_phase() {
+  local phase_file="$1"
+  local phase_name="$2"
+
+  [[ ! -f "$phase_file" ]] && return 0
+
+  # Extract fixes where pattern_known=false
+  python3 -c "
+import json, sys
+
+phase_file = sys.argv[1]
+patterns_file = sys.argv[2]
+max_patterns = int(sys.argv[3])
+phase_name = sys.argv[4]
+
+try:
+    with open(phase_file) as f:
+        state = json.load(f)
+except (json.JSONDecodeError, FileNotFoundError):
+    sys.exit(0)
+
+fixes = state.get('fixes', [])
+if not fixes:
+    sys.exit(0)
+
+novel_fixes = [f for f in fixes if isinstance(f, dict) and not f.get('pattern_known', True)]
+if not novel_fixes:
+    sys.exit(0)
+
+# Read existing patterns to check for duplicates
+existing_types = set()
+existing_lines = []
+try:
+    with open(patterns_file) as f:
+        existing_lines = f.readlines()
+        for line in existing_lines:
+            if line.startswith('### '):
+                existing_types.add(line.strip().lstrip('#').strip().lower())
+except FileNotFoundError:
+    pass
+
+# Count existing pattern entries (lines starting with ###)
+pattern_count = sum(1 for l in existing_lines if l.startswith('### '))
+
+added = 0
+for fix in novel_fixes:
+    fix_type = fix.get('type', 'unknown')
+    fix_desc = fix.get('description', 'No description')
+
+    # Skip duplicates
+    if fix_type.lower() in existing_types:
+        continue
+
+    # If at cap, remove oldest pattern (first ### block)
+    if pattern_count >= max_patterns:
+        # Find and remove first pattern block
+        new_lines = []
+        removed_first = False
+        skip_block = False
+        for line in existing_lines:
+            if line.startswith('### ') and not removed_first:
+                skip_block = True
+                removed_first = True
+                pattern_count -= 1
+                continue
+            if skip_block and line.startswith('### '):
+                skip_block = False
+            if skip_block:
+                continue
+            new_lines.append(line)
+        existing_lines = new_lines
+
+    # Append new pattern
+    from datetime import datetime, timezone
+    ts = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+    entry = f'''
+### {fix_type}
+**Discovered:** {ts} during {phase_name} phase
+**Description:** {fix_desc}
+
+'''
+    existing_lines.append(entry)
+    pattern_count += 1
+    existing_types.add(fix_type.lower())
+    added += 1
+
+if added > 0:
+    # Write header if file was empty
+    if not any(l.startswith('# ') for l in existing_lines):
+        existing_lines.insert(0, '# Learned Failure Patterns\\n\\nAuto-discovered patterns from deployment fixes. Max {max_patterns} entries (FIFO).\\n\\n')
+
+    with open(patterns_file, 'w') as f:
+        f.writelines(existing_lines)
+    print(f'Learned {added} new pattern(s) from {phase_name}')
+else:
+    print(f'No new patterns from {phase_name}')
+" "$phase_file" "$LEARNED_PATTERNS_FILE" "$MAX_LEARNED_PATTERNS" "$phase_name" 2>/dev/null || true
+}
+
+echo ""
+echo "--- Pattern learning ---"
+_learn_patterns_from_phase "${STATE_DIR}/prepare.json" "PREPARE"
+_learn_patterns_from_phase "${STATE_DIR}/deploy.json" "DEPLOY"
+
+# ============================================================
 # Success — log deployment record
 # ============================================================
 DEPLOY_END=$(date +%s)
@@ -373,20 +582,23 @@ echo "  Duration: ${DEPLOY_DURATION}s"
 echo "  Log: ${LOG_FILE}"
 echo "=========================================="
 
-# Append to deployment log
+# Append to deployment log (includes perf_avg_ms for regression tracking)
 python3 -c "
 import json, sys
 from datetime import datetime, timezone
 record = {
-    'timestamp': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
+    'ts': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
     'app': sys.argv[1],
     'status': 'success',
     'duration_seconds': int(sys.argv[2]),
     'dry_run': sys.argv[3] == 'true',
     'log_file': sys.argv[4]
 }
+perf = sys.argv[6]
+if perf:
+    record['perf_avg_ms'] = int(perf)
 with open(sys.argv[5], 'a') as f:
     f.write(json.dumps(record) + '\n')
-" "$APP_NAME" "$DEPLOY_DURATION" "$DRY_RUN" "$LOG_FILE" "${REPO_ROOT}/devops/logs/deployments.jsonl"
+" "$APP_NAME" "$DEPLOY_DURATION" "$DRY_RUN" "$LOG_FILE" "${REPO_ROOT}/devops/logs/deployments.jsonl" "${PERF_AVG_MS:-}"
 
 echo "=== TRIGGER: Deployment record written to deployments.jsonl ==="

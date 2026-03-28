@@ -10,5 +10,6 @@
   "transfer_size_mb": 0,
   "deploy_duration_seconds": 0,
   "rollback_triggered": false,
+  "fixes": [],
   "error": null
 }

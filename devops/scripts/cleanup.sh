@@ -85,7 +85,19 @@ fi
 log "Rotating deploy logs..."
 find "${REPO_ROOT}/devops/logs" -name "deploy-*.log" -mtime +30 -delete 2>/dev/null || true
 find "${REPO_ROOT}/devops/logs" -name "verify-*.log" -mtime +30 -delete 2>/dev/null || true
+find "${REPO_ROOT}/devops/logs" -name "trigger-*.log" -mtime +30 -delete 2>/dev/null || true
+find "${REPO_ROOT}/devops/logs" -name "phase-*.log" -mtime +30 -delete 2>/dev/null || true
 log "Old logs cleaned"
+
+# --- 6b. Remove old .bak-* config snapshots on server (keep last 7 days) ---
+log "Cleaning old config snapshots on server..."
+BAK_DELETED=$(ssh "${DEPLOY_SERVER}" "find /opt/rr-portal -maxdepth 1 -name '*.bak-*' -mtime +7 -print -delete 2>/dev/null | wc -l" 2>/dev/null || echo "0")
+BAK_DELETED=$(echo "$BAK_DELETED" | tr -d '[:space:]')
+if [[ "$BAK_DELETED" -gt 0 ]]; then
+  log "Removed ${BAK_DELETED} old .bak-* snapshot(s) from server"
+else
+  log "No old config snapshots to clean"
+fi
 
 # --- 7. Report Docker image sizes ---
 log "Docker image sizes:"

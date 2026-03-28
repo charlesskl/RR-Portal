@@ -82,7 +82,21 @@ Steps:
 
 ## Failure Pattern Registry
 
-When you encounter a failure, check this registry FIRST before attempting generic debugging.
+When you encounter a failure, check this registry FIRST, then also check `devops/agent/learned-patterns.md` for auto-discovered patterns. If you fix a failure that is NOT in either file, record it in your state JSON's `fixes` array:
+
+```json
+{
+  "fixes": [
+    {
+      "type": "descriptive-name-of-failure",
+      "pattern_known": false,
+      "description": "What failed and how you fixed it"
+    }
+  ]
+}
+```
+
+Set `pattern_known: true` if the fix matches an existing FP-XX pattern. Set `pattern_known: false` for novel failures — trigger.sh will auto-append these to `learned-patterns.md`.
 
 ### FP-01: Frontend assets return 404
 **Symptom:** CSS/JS files return 404 through nginx sub-path

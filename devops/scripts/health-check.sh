@@ -38,6 +38,58 @@ DEPLOY_SERVER_HOST="${DEPLOY_SERVER#*@}"
 DEPLOY_COMPOSE_PATH="${DEPLOY_COMPOSE_PATH:-/opt/rr-portal/docker-compose.yml}"
 DEPLOY_COMPOSE_DIR="$(dirname "${DEPLOY_COMPOSE_PATH}")"
 
+# --- Adaptive interval: intensive (every 60s) within 30min of last deploy, normal (every 5min) otherwise ---
+DEPLOYMENTS_JSONL="${REPO_ROOT}/devops/logs/deployments.jsonl"
+INTENSIVE_WINDOW_SECONDS=1800  # 30 minutes
+
+_should_run() {
+  local now_epoch
+  now_epoch=$(date +%s)
+
+  # Try to read the last deployment entry
+  if [[ -f "${DEPLOYMENTS_JSONL}" ]]; then
+    local last_line
+    last_line=$(tail -1 "${DEPLOYMENTS_JSONL}" 2>/dev/null || true)
+    if [[ -n "${last_line}" ]]; then
+      local last_ts
+      last_ts=$(python3 -c "
+import json, sys, datetime
+try:
+    entry = json.loads(sys.argv[1])
+    # Skip dry-run deployments
+    if entry.get('dry_run', False):
+        print('0')
+        sys.exit(0)
+    ts = entry.get('ts', '')
+    dt = datetime.datetime.fromisoformat(ts.replace('Z', '+00:00'))
+    print(int(dt.timestamp()))
+except Exception:
+    print('0')
+" "$last_line" 2>/dev/null || echo "0")
+
+      local elapsed=$(( now_epoch - last_ts ))
+      if [[ "${elapsed}" -lt "${INTENSIVE_WINDOW_SECONDS}" ]]; then
+        # Within 30min of last deploy: always run (intensive mode)
+        return 0
+      fi
+    fi
+  fi
+
+  # Normal mode: only run if current minute is divisible by 5
+  local current_minute
+  current_minute=$(date +%M | sed 's/^0//')
+  current_minute=${current_minute:-0}
+  if (( current_minute % 5 == 0 )); then
+    return 0
+  fi
+
+  return 1
+}
+
+if ! _should_run; then
+  exit 0  # Not our turn — skip this cycle
+fi
+
 # --- State tracking ---
 STATE_FILE="${REPO_ROOT}/devops/logs/health-state.json"
 if [ ! -f "${STATE_FILE}" ]; then

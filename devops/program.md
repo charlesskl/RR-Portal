@@ -298,4 +298,4 @@ All scheduled via launchd plists in `devops/launchd/`.
 | 17 | check-tests | Testing | Advisory |
 
 *This document grows autonomously as the agent discovers new failure patterns.*
-*Last updated: 2026-03-21 (R3)*
+*Last updated: 2026-03-28 (R4)*

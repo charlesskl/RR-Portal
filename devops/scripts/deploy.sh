@@ -208,18 +208,42 @@ if 'services' not in compose:
     compose['services'] = {}
 
 # Build the new service definition
-compose['services'][app_name] = {
+service_def = {
     'image': f'rr-portal/{app_name}:latest',
     'ports': [f'{host_port}:{container_port}'],
     'env_file': [f'./apps/{app_name}/.env'],
+    'volumes': [
+        f'./apps/{app_name}/data:/app/data',
+        f'./apps/{app_name}/uploads:/app/uploads',
+    ],
     'restart': 'unless-stopped',
+    'networks': ['platform-net'],
     'healthcheck': {
-        'test': ['CMD', 'wget', '--spider', '-q', f'http://localhost:{container_port}/health'],
+        'test': ['CMD', 'curl', '-sf', f'http://localhost:{container_port}/health'],
         'interval': '30s',
         'timeout': '10s',
         'retries': 3,
     },
 }
+
+# Preserve existing service config (don't overwrite custom volumes/env on update)
+existing = compose.get('services', {}).get(app_name)
+if existing:
+    # Update image but keep existing volumes, env, and networks
+    existing['image'] = service_def['image']
+    existing['ports'] = service_def['ports']
+    existing.setdefault('networks', service_def['networks'])
+    existing.setdefault('volumes', service_def['volumes'])
+    existing.setdefault('healthcheck', service_def['healthcheck'])
+    compose['services'][app_name] = existing
+else:
+    compose['services'][app_name] = service_def
+
+# Ensure platform-net network is defined at top level
+if 'networks' not in compose:
+    compose['networks'] = {}
+if 'platform-net' not in compose.get('networks', {}):
+    compose['networks']['platform-net'] = {'driver': 'bridge'}
 
 with open(compose_path, 'w') as f:
     yaml.dump(compose, f, default_flow_style=False, sort_keys=False)

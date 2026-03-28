@@ -235,6 +235,24 @@ ssh -fNM -o ControlPath="${SSH_CONTROL_PATH}" -o ControlPersist=300 "${DEPLOY_SE
 2. If still failing: use multi-stage build to reduce peak memory
 3. Escalate if build cannot complete locally
 
+### FP-11: App crashes with undefined environment variables
+**Symptom:** Container starts but immediately crashes with "Cannot read property" or "undefined" errors
+**Diagnosis:** .env file has placeholder values (CHANGE_ME) or is missing entirely
+**Fix:** QC-12 now generates real values for common env vars (secrets, ports, paths, DB URLs). If you still see placeholders in .env:
+1. For secrets: `openssl rand -hex 32` to generate a real value
+2. For DATABASE_URL: use `postgresql://<app>:<generated-pass>@db:5432/<app>` (Docker service name, not localhost)
+3. For MONGODB_URL: use `mongodb://mongo:27017/<app>` (Docker service name, not localhost)
+4. NEVER deploy with CHANGE_ME values — they will crash at runtime
+
+### FP-12: Database connection refused inside Docker
+**Symptom:** App logs show "ECONNREFUSED 127.0.0.1:5432" or "connection refused"
+**Diagnosis:** .env uses `localhost` for DB hostname, but inside Docker containers, localhost is the container itself
+**Fix:** Replace `localhost` or `127.0.0.1` with Docker service name:
+- PostgreSQL: `db` (the service name in docker-compose.cloud.yml)
+- MongoDB: `mongo`
+- Redis: `redis`
+QC-12 now auto-fixes this, but if it persists, check docker-compose.cloud.yml for the correct service name.
+
 ## Guardrails
 
 ### NEVER do these:

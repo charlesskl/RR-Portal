@@ -75,18 +75,41 @@ if [[ ! -f "$ENV_EXAMPLE" ]]; then
   while IFS= read -r var; do
     [[ -z "$var" ]] && continue
 
-    # Provide sensible defaults
+    # Generate real, deployment-ready values (not placeholders)
     local default_val="CHANGE_ME"
+    local db_name="${APP_NAME//-/_}"
     case "$var" in
-      PORT)           default_val="3000" ;;
+      PORT)
+        # Try to read allocated port from registry; fall back to 3000
+        local reg_port=""
+        if [[ -f "${APP_DIR}/../../devops/config/ports.json" ]]; then
+          reg_port=$(python3 -c "import json; d=json.load(open('${APP_DIR}/../../devops/config/ports.json')); print(d.get('${APP_NAME}',''))" 2>/dev/null || true)
+        fi
+        default_val="${reg_port:-3000}"
+        ;;
       NODE_ENV)       default_val="production" ;;
-      JWT_SECRET)     default_val="CHANGE_ME_BEFORE_DEPLOY" ;;
+      JWT_SECRET|SECRET_KEY|SESSION_SECRET|APP_SECRET)
+        # Generate a real random secret (64 hex chars)
+        default_val="$(openssl rand -hex 32 2>/dev/null || python3 -c 'import secrets; print(secrets.token_hex(32))' 2>/dev/null || echo 'CHANGE_ME_BEFORE_DEPLOY')"
+        ;;
       JWT_EXPIRES_IN) default_val="8h" ;;
       CORS_ORIGIN)    default_val="*" ;;
       LOG_LEVEL)      default_val="info" ;;
-      DATABASE_URL)   default_val="postgresql://postgres:password@db:5432/${APP_NAME//-/_}" ;;
+      DATABASE_URL|POSTGRES_URL|PG_URL)
+        # Use Docker service name 'db', auto-generated password, app-specific DB name
+        local db_pass="$(openssl rand -hex 16 2>/dev/null || echo 'changeme')"
+        default_val="postgresql://${db_name}:${db_pass}@db:5432/${db_name}"
+        ;;
       REDIS_URL)      default_val="redis://redis:6379" ;;
-      MONGODB_URL)    default_val="mongodb://mongo:27017/${APP_NAME//-/_}" ;;
+      MONGODB_URL|MONGO_URL|MONGO_URI)
+        default_val="mongodb://mongo:27017/${db_name}"
+        ;;
+      BASE_PATH|BASE_URL|URL_PREFIX|VITE_BASE_PATH)
+        default_val="/${APP_NAME}/"
+        ;;
+      DATA_PATH)      default_val="/app/data" ;;
+      UPLOADS_PATH)   default_val="/app/uploads" ;;
+      *)              default_val="CHANGE_ME" ;;
     esac
 
     echo "${var}=${default_val}" >> "$ENV_EXAMPLE"
@@ -106,11 +129,30 @@ else
   done <<< "$DISCOVERED_VARS"
 fi
 
-# --- Create .env from .env.example if missing ---
+# --- Create .env with real values if missing ---
+# .env.example has generated values from above (which are real for most vars).
+# For secrets that need to be unique per deployment, re-generate them for .env
+# so .env.example and .env don't share the same secret.
 ENV_FILE="${SERVER_DIR}/.env"
 if [[ ! -f "$ENV_FILE" ]]; then
   cp "$ENV_EXAMPLE" "$ENV_FILE"
-  echo "[QC-12] FIXED: created .env from .env.example"
+
+  # Re-generate secrets so .env has unique values (not same as .env.example)
+  while IFS= read -r line; do
+    [[ -z "$line" || "$line" == \#* ]] && continue
+    var_name="${line%%=*}"
+    case "$var_name" in
+      JWT_SECRET|SECRET_KEY|SESSION_SECRET|APP_SECRET)
+        new_secret="$(openssl rand -hex 32 2>/dev/null || python3 -c 'import secrets; print(secrets.token_hex(32))' 2>/dev/null || true)"
+        if [[ -n "$new_secret" ]]; then
+          sed -i '' "s|^${var_name}=.*|${var_name}=${new_secret}|" "$ENV_FILE" 2>/dev/null || \
+          sed -i "s|^${var_name}=.*|${var_name}=${new_secret}|" "$ENV_FILE"
+        fi
+        ;;
+    esac
+  done < "$ENV_FILE"
+
+  echo "[QC-12] FIXED: created .env with deployment-ready values (secrets regenerated)"
   FIXES_MADE=$((FIXES_MADE + 1))
 fi
 

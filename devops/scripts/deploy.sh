@@ -173,6 +173,41 @@ fi
 echo "Image transferred and tagged on ${DEPLOY_SERVER} (ID: ${LOADED_ID})"
 
 # ============================================================
+# Step 3b: Transfer .env file to server
+# ============================================================
+echo "=== DEPLOY: transferring .env to server ==="
+
+APP_ENV_LOCAL="${REPO_ROOT}/apps/${APP_NAME}/.env"
+SERVER_ENV_DIR="$(dirname "${DEPLOY_COMPOSE_PATH}")/apps/${APP_NAME}"
+
+# Look for .env in app directory or server subdirectory
+if [[ ! -f "$APP_ENV_LOCAL" ]]; then
+  # Check server/ subdirectory (monorepo pattern)
+  if [[ -f "${REPO_ROOT}/apps/${APP_NAME}/server/.env" ]]; then
+    APP_ENV_LOCAL="${REPO_ROOT}/apps/${APP_NAME}/server/.env"
+  fi
+fi
+
+if [[ -f "$APP_ENV_LOCAL" ]]; then
+  # Create the directory on server and transfer .env
+  deploy_ssh "mkdir -p '${SERVER_ENV_DIR}'"
+  scp -o ControlPath="${SSH_CONTROL_PATH}" "$APP_ENV_LOCAL" "${DEPLOY_SERVER}:${SERVER_ENV_DIR}/.env" 2>/dev/null || \
+    scp "$APP_ENV_LOCAL" "${DEPLOY_SERVER}:${SERVER_ENV_DIR}/.env"
+  echo "  .env transferred to ${SERVER_ENV_DIR}/.env"
+
+  # Verify the file landed
+  ENV_SIZE=$(deploy_ssh "wc -c < '${SERVER_ENV_DIR}/.env' 2>/dev/null || echo 0")
+  if [[ "$ENV_SIZE" -gt 0 ]]; then
+    echo "  .env verified on server (${ENV_SIZE} bytes)"
+  else
+    echo "  WARNING: .env transfer may have failed (0 bytes on server)"
+  fi
+else
+  echo "  WARNING: No .env file found locally at ${APP_ENV_LOCAL}"
+  echo "  Container will start without env_file — may fail if env vars are required"
+fi
+
+# ============================================================
 # Step 4: Remote compose update (DEPL-03)
 # ============================================================
 echo "=== DEPLOY: updating remote docker-compose.yml ==="

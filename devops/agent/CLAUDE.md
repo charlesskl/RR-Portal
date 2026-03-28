@@ -116,7 +116,20 @@ Steps:
 2. Run `devops/scripts/deploy.sh <app-name>`
 3. If deploy fails: read logs, diagnose, attempt fix, retry (up to 2 retries)
 4. If deploy still fails: run `devops/scripts/rollback.sh <app-name>`, write deploy.json with status "failed"
-5. If deploy succeeds: write deploy.json with status "success"
+5. If deploy succeeds, **run database migrations** (if understand.json shows `database.has_migrations = true`):
+   - Detect the ORM from source code and run the correct migration command inside the container:
+     - Prisma: `ssh $DEPLOY_SERVER "docker exec <container> npx prisma migrate deploy"`
+     - Knex: `ssh $DEPLOY_SERVER "docker exec <container> npx knex migrate:latest"`
+     - Sequelize: `ssh $DEPLOY_SERVER "docker exec <container> npx sequelize-cli db:migrate"`
+     - Alembic (Python): `ssh $DEPLOY_SERVER "docker exec <container> alembic upgrade head"`
+     - Django: `ssh $DEPLOY_SERVER "docker exec <container> python manage.py migrate"`
+     - SQLite with inline CREATE: no action needed (self-initializes on startup)
+   - If migration fails: check logs, this often means DB credentials are wrong or DB doesn't exist yet
+   - **Run seed data** (if understand.json shows `database.has_seed_data = true` AND this is first deploy):
+     - Look for `seed.js`, `seed.ts`, `prisma/seed.ts`, or `*.seed.sql` in app source
+     - Run: `ssh $DEPLOY_SERVER "docker exec <container> node seed.js"` (or equivalent)
+     - Only seed on first deploy (action=onboard), never on updates
+6. Write deploy.json with status "success"
 
 ### Phase: VERIFY
 

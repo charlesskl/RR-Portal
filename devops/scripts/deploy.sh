@@ -482,6 +482,88 @@ if [ "${deploy_success}" = "false" ]; then
 fi
 
 # ============================================================
+# Step 7b: Post-deploy database migration (if needed)
+# ============================================================
+# Detect and run migration commands inside the running container.
+# This runs AFTER the container is healthy but BEFORE endpoint verification,
+# because endpoints will fail without tables/schema.
+
+APP_SOURCE="${REPO_ROOT}/apps/${APP_NAME}"
+SERVER_DIR="$APP_SOURCE"
+[[ -d "$APP_SOURCE/server" ]] && SERVER_DIR="$APP_SOURCE/server"
+CONTAINER_NAME="${APP_NAME}"
+
+echo "=== DEPLOY: checking for database migrations ==="
+
+MIGRATION_RAN=false
+
+# Prisma
+if [[ -d "$SERVER_DIR/prisma/migrations" ]]; then
+  echo "  Prisma migrations detected — running migrate deploy..."
+  if deploy_ssh "docker exec ${CONTAINER_NAME} npx prisma migrate deploy 2>&1" 2>/dev/null; then
+    echo "  Prisma migrations: SUCCESS"
+    MIGRATION_RAN=true
+  else
+    echo "  Prisma migrations: FAILED (check container logs)"
+  fi
+# Knex
+elif [[ -f "$SERVER_DIR/knexfile.js" ]] || [[ -f "$SERVER_DIR/knexfile.ts" ]]; then
+  echo "  Knex migrations detected — running migrate:latest..."
+  if deploy_ssh "docker exec ${CONTAINER_NAME} npx knex migrate:latest 2>&1" 2>/dev/null; then
+    echo "  Knex migrations: SUCCESS"
+    MIGRATION_RAN=true
+  else
+    echo "  Knex migrations: FAILED (check container logs)"
+  fi
+# Sequelize
+elif [[ -f "$SERVER_DIR/.sequelizerc" ]] || [[ -d "$SERVER_DIR/migrations" ]]; then
+  if grep -rq "sequelize" "$SERVER_DIR/package.json" 2>/dev/null; then
+    echo "  Sequelize migrations detected — running db:migrate..."
+    if deploy_ssh "docker exec ${CONTAINER_NAME} npx sequelize-cli db:migrate 2>&1" 2>/dev/null; then
+      echo "  Sequelize migrations: SUCCESS"
+      MIGRATION_RAN=true
+    else
+      echo "  Sequelize migrations: FAILED (check container logs)"
+    fi
+  fi
+# Alembic (Python)
+elif [[ -d "$SERVER_DIR/alembic" ]] || [[ -f "$SERVER_DIR/alembic.ini" ]]; then
+  echo "  Alembic migrations detected — running upgrade head..."
+  if deploy_ssh "docker exec ${CONTAINER_NAME} alembic upgrade head 2>&1" 2>/dev/null; then
+    echo "  Alembic migrations: SUCCESS"
+    MIGRATION_RAN=true
+  else
+    echo "  Alembic migrations: FAILED (check container logs)"
+  fi
+# Django
+elif [[ -f "$SERVER_DIR/manage.py" ]]; then
+  if grep -q "django" "$SERVER_DIR/requirements.txt" 2>/dev/null || grep -q "django" "$SERVER_DIR/Pipfile" 2>/dev/null; then
+    echo "  Django migrations detected — running migrate..."
+    if deploy_ssh "docker exec ${CONTAINER_NAME} python manage.py migrate 2>&1" 2>/dev/null; then
+      echo "  Django migrations: SUCCESS"
+      MIGRATION_RAN=true
+    else
+      echo "  Django migrations: FAILED (check container logs)"
+    fi
+  fi
+else
+  echo "  No explicit migrations detected (app may self-initialize on startup)"
+fi
+
+# Seed data (first deploy only — check if app was just registered)
+if [[ "$MIGRATION_RAN" == "true" ]]; then
+  for seed_file in "seed.js" "seed.ts" "prisma/seed.ts" "prisma/seed.js"; do
+    if [[ -f "$SERVER_DIR/$seed_file" ]]; then
+      echo "  Seed file found: $seed_file — running..."
+      deploy_ssh "docker exec ${CONTAINER_NAME} node /app/${seed_file} 2>&1" 2>/dev/null || \
+      deploy_ssh "docker exec ${CONTAINER_NAME} npx ts-node /app/${seed_file} 2>&1" 2>/dev/null || \
+        echo "  Seed: FAILED (non-blocking)"
+      break
+    fi
+  done
+fi
+
+# ============================================================
 # Step 8: Post-deploy endpoint verification (DEPL-08)
 # ============================================================
 echo "=== DEPLOY: running endpoint verification ==="

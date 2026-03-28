@@ -283,7 +283,13 @@ else:
         location = /{app_name} {{
             return 301 /{app_name}/;
         }}
+        location = /{app_name}/health {{
+            auth_basic off;
+            proxy_pass http://{upstream_name}/health;
+            proxy_set_header Host $host;
+        }}
         location /{app_name}/api/ {{
+            auth_basic off;
             proxy_pass http://{upstream_name}/api/;
             proxy_set_header Host $host;
             proxy_set_header X-Real-IP $remote_addr;

@@ -289,6 +289,16 @@ All modifications MUST be committed with the `[DevOps]` prefix:
 [DevOps] chore: generate Dockerfile for Node.js app
 ```
 
+### FP-13: Health check or API blocked by nginx basic auth
+**Symptom:** Health check returns 401 Unauthorized through nginx; API calls return 401 even with valid JWT
+**Diagnosis:** Portal uses nginx basic auth globally. Health and API endpoints need `auth_basic off` in their location blocks.
+**Fix:** deploy.sh now auto-generates `auth_basic off` for `/<app>/health` and `/<app>/api/` locations.
+If you see 401 on health/API through nginx, check the nginx config for the app's location blocks:
+```bash
+ssh $DEPLOY_SERVER "grep -A3 'location.*/${APP_NAME}' /opt/rr-portal/nginx/nginx.cloud.conf"
+```
+Ensure `auth_basic off;` is present in the health and api location blocks.
+
 ## Self-Healing Protocol
 
 When trigger.sh retries a failed phase, your prompt will include `PREVIOUS ATTEMPT FAILED` context with the error message and log tail. Follow this diagnostic process:

@@ -44,6 +44,7 @@ ALL_CHECKS=(
   "check-security"
   "check-deps"
   "check-tests"
+  "check-db-ready"
 )
 
 # --- Dependency map ---
@@ -59,7 +60,7 @@ get_dependents() {
     check-lint)          echo "check-docker-build" ;;
     check-api-basepath)  echo "check-docker-build" ;;
     check-app-dirs)      echo "check-docker-build" ;;
-    check-env-vars)      echo "check-docker-build" ;;
+    check-env-vars)      echo "check-docker-build check-db-ready" ;;
     *)                   echo "" ;;
   esac
 }

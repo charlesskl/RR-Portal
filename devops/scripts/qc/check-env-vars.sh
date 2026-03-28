@@ -84,9 +84,9 @@ if [[ ! -f "$ENV_EXAMPLE" ]]; then
       JWT_EXPIRES_IN) default_val="8h" ;;
       CORS_ORIGIN)    default_val="*" ;;
       LOG_LEVEL)      default_val="info" ;;
-      DATABASE_URL)   default_val="postgresql://postgres:password@db:5432/portal" ;;
+      DATABASE_URL)   default_val="postgresql://postgres:password@db:5432/${APP_NAME//-/_}" ;;
       REDIS_URL)      default_val="redis://redis:6379" ;;
-      MONGODB_URL)    default_val="mongodb://localhost:27017/app" ;;
+      MONGODB_URL)    default_val="mongodb://mongo:27017/${APP_NAME//-/_}" ;;
     esac
 
     echo "${var}=${default_val}" >> "$ENV_EXAMPLE"
@@ -112,6 +112,66 @@ if [[ ! -f "$ENV_FILE" ]]; then
   cp "$ENV_EXAMPLE" "$ENV_FILE"
   echo "[QC-12] FIXED: created .env from .env.example"
   FIXES_MADE=$((FIXES_MADE + 1))
+fi
+
+# --- Validate .env has no localhost in connection strings (Docker networking) ---
+if [[ -f "$ENV_FILE" ]]; then
+  while IFS= read -r line; do
+    [[ -z "$line" || "$line" == \#* ]] && continue
+    var_name="${line%%=*}"
+    var_value="${line#*=}"
+
+    # Fix localhost in DB connection strings — inside Docker, use service names
+    case "$var_name" in
+      DATABASE_URL|POSTGRES_URL|PG_URL)
+        if echo "$var_value" | grep -qE 'localhost|127\.0\.0\.1'; then
+          fixed_val=$(echo "$var_value" | sed -E 's/(localhost|127\.0\.0\.1)/db/g')
+          sed -i '' "s|^${var_name}=.*|${var_name}=${fixed_val}|" "$ENV_FILE" 2>/dev/null || \
+          sed -i "s|^${var_name}=.*|${var_name}=${fixed_val}|" "$ENV_FILE"
+          echo "[QC-12] FIXED: ${var_name} — replaced localhost with Docker service name 'db'"
+          FIXES_MADE=$((FIXES_MADE + 1))
+        fi
+        ;;
+      MONGODB_URL|MONGO_URL|MONGO_URI)
+        if echo "$var_value" | grep -qE 'localhost|127\.0\.0\.1'; then
+          fixed_val=$(echo "$var_value" | sed -E 's/(localhost|127\.0\.0\.1)/mongo/g')
+          sed -i '' "s|^${var_name}=.*|${var_name}=${fixed_val}|" "$ENV_FILE" 2>/dev/null || \
+          sed -i "s|^${var_name}=.*|${var_name}=${fixed_val}|" "$ENV_FILE"
+          echo "[QC-12] FIXED: ${var_name} — replaced localhost with Docker service name 'mongo'"
+          FIXES_MADE=$((FIXES_MADE + 1))
+        fi
+        ;;
+      REDIS_URL|REDIS_URI)
+        if echo "$var_value" | grep -qE 'localhost|127\.0\.0\.1'; then
+          fixed_val=$(echo "$var_value" | sed -E 's/(localhost|127\.0\.0\.1)/redis/g')
+          sed -i '' "s|^${var_name}=.*|${var_name}=${fixed_val}|" "$ENV_FILE" 2>/dev/null || \
+          sed -i "s|^${var_name}=.*|${var_name}=${fixed_val}|" "$ENV_FILE"
+          echo "[QC-12] FIXED: ${var_name} — replaced localhost with Docker service name 'redis'"
+          FIXES_MADE=$((FIXES_MADE + 1))
+        fi
+        ;;
+    esac
+  done < "$ENV_FILE"
+fi
+
+# --- Warn about placeholder values in .env that will break at runtime ---
+if [[ -f "$ENV_FILE" ]]; then
+  PLACEHOLDER_VARS=""
+  while IFS= read -r line; do
+    [[ -z "$line" || "$line" == \#* ]] && continue
+    var_name="${line%%=*}"
+    var_value="${line#*=}"
+
+    if echo "$var_value" | grep -qiE '^(CHANGE_ME|CHANGE_ME_BEFORE_DEPLOY|your_.*_here|xxx|TODO|FIXME|REPLACE_ME)$'; then
+      PLACEHOLDER_VARS="${PLACEHOLDER_VARS}  - ${var_name}\n"
+    fi
+  done < "$ENV_FILE"
+
+  if [[ -n "$PLACEHOLDER_VARS" ]]; then
+    echo "[QC-12] WARN: These .env variables still have placeholder values (will fail at runtime):"
+    printf "$PLACEHOLDER_VARS"
+    echo "[QC-12] WARN: Set real values before deploying. The agent will provision DB credentials in PREPARE phase."
+  fi
 fi
 
 # --- Check for real secrets in .env.example (should only have placeholders) ---

@@ -375,7 +375,7 @@ if [[ "$DRY_RUN" != "true" ]]; then
     echo "$PERF_OUTPUT" | tail -5
 
     # Extract average response time for this app from the TSV output
-    PERF_TSV="${REPO_ROOT}/devops/logs/perf-check.tsv"
+    PERF_TSV="${REPO_ROOT}/devops/logs/performance.tsv"
     if [[ -f "$PERF_TSV" ]]; then
       PERF_AVG_MS=$(python3 -c "
 import sys, csv
@@ -398,7 +398,7 @@ else:
 " "$PERF_TSV" "$APP_NAME" 2>/dev/null || echo "")
     fi
 
-    if [[ -n "$PERF_AVG_MS" ]]; then
+    if [[ -n "$PERF_AVG_MS" && "$PERF_AVG_MS" != "0" ]]; then
       echo "  Average response time: ${PERF_AVG_MS}ms"
 
       # Compare with previous deploy baseline
@@ -553,7 +553,7 @@ for fix in novel_fixes:
 if added > 0:
     # Write header if file was empty
     if not any(l.startswith('# ') for l in existing_lines):
-        existing_lines.insert(0, '# Learned Failure Patterns\\n\\nAuto-discovered patterns from deployment fixes. Max {max_patterns} entries (FIFO).\\n\\n')
+        existing_lines.insert(0, f'# Learned Failure Patterns\n\nAuto-discovered patterns from deployment fixes. Max {max_patterns} entries (FIFO).\n\n')
 
     with open(patterns_file, 'w') as f:
         f.writelines(existing_lines)
@@ -565,8 +565,10 @@ else:
 
 echo ""
 echo "--- Pattern learning ---"
+_learn_patterns_from_phase "${STATE_DIR}/understand.json" "UNDERSTAND"
 _learn_patterns_from_phase "${STATE_DIR}/prepare.json" "PREPARE"
 _learn_patterns_from_phase "${STATE_DIR}/deploy.json" "DEPLOY"
+_learn_patterns_from_phase "${STATE_DIR}/verify.json" "VERIFY"
 
 # ============================================================
 # Success — log deployment record

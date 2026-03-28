@@ -109,8 +109,25 @@ GIT_HASH="$(git rev-parse --short HEAD)"
 echo "=== DEPLOY: preserving previous image for rollback ==="
 docker tag "rr-portal/${APP_NAME}:latest" "rr-portal/${APP_NAME}:previous" 2>/dev/null || true
 
+# Detect build args needed for frontend sub-path routing
+BUILD_ARGS=""
+APP_DOCKERFILE="${REPO_ROOT}/apps/${APP_NAME}/Dockerfile"
+if [[ -f "$APP_DOCKERFILE" ]]; then
+  # If Dockerfile declares ARG BASE_PATH, pass the app name as the base path
+  if grep -q "ARG BASE_PATH" "$APP_DOCKERFILE"; then
+    BUILD_ARGS="${BUILD_ARGS} --build-arg BASE_PATH=/${APP_NAME}/"
+    echo "  Passing --build-arg BASE_PATH=/${APP_NAME}/"
+  fi
+  # If Dockerfile declares ARG VITE_BASE_PATH (direct, without ARG BASE_PATH alias)
+  if grep -q "ARG VITE_BASE_PATH" "$APP_DOCKERFILE" && ! grep -q "ARG BASE_PATH" "$APP_DOCKERFILE"; then
+    BUILD_ARGS="${BUILD_ARGS} --build-arg VITE_BASE_PATH=/${APP_NAME}/"
+    echo "  Passing --build-arg VITE_BASE_PATH=/${APP_NAME}/"
+  fi
+fi
+
 # Build image with git hash tag (cross-compile for linux/amd64 since Mac is ARM)
 docker buildx build --platform linux/amd64 --load \
+  ${BUILD_ARGS} \
   -t "rr-portal/${APP_NAME}:${GIT_HASH}" "${REPO_ROOT}/apps/${APP_NAME}"
 
 # Tag as latest

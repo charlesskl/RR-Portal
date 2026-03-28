@@ -45,6 +45,7 @@ ALL_CHECKS=(
   "check-deps"
   "check-tests"
   "check-db-ready"
+  "check-frontend-basepath"
 )
 
 # --- Dependency map ---
@@ -55,7 +56,7 @@ get_dependents() {
   local check="$1"
   case "$check" in
     check-config)     echo "check-dockerfile" ;;
-    check-dockerfile) echo "check-docker-build" ;;
+    check-dockerfile) echo "check-docker-build check-frontend-basepath" ;;
     check-lockfiles)  echo "check-docker-build" ;;
     check-lint)          echo "check-docker-build" ;;
     check-api-basepath)  echo "check-docker-build" ;;

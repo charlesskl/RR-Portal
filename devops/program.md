@@ -275,7 +275,7 @@ All scheduled via launchd plists in `devops/launchd/`.
 | cleanup | Daily 3:00 AM | Docker/disk maintenance |
 | backup-db | Daily 2:00 AM | Database backup |
 
-## QC Pipeline — 18 Checks
+## QC Pipeline — 19 Checks
 
 | # | Check | Category | Auto-fix? |
 |---|-------|----------|-----------|
@@ -297,6 +297,7 @@ All scheduled via launchd plists in `devops/launchd/`.
 | 16 | check-deps | Security | Advisory |
 | 17 | check-tests | Testing | Advisory |
 | 18 | check-db-ready | Database | Advisory |
+| 19 | check-frontend-basepath | Routing | Yes |
 
 *This document grows autonomously as the agent discovers new failure patterns.*
 *Last updated: 2026-03-28 (R4)*

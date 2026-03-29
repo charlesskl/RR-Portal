@@ -142,16 +142,82 @@ if grep -q "ARG VITE_BASE_PATH" "$APP_DOCKERFILE" && ! grep -q "ARG BASE_PATH" "
   echo "  Passing --build-arg VITE_BASE_PATH=/${APP_NAME}/"
 fi
 
-# Build image with git hash tag (cross-compile for linux/amd64 since Mac is ARM)
-docker buildx build --platform linux/amd64 --load \
+# --- Ensure .dockerignore exists (prevents sending node_modules to daemon) ---
+if [[ ! -f "${APP_SOURCE_DIR}/.dockerignore" ]]; then
+  echo "  Generating .dockerignore (prevents slow context upload)"
+  cat > "${APP_SOURCE_DIR}/.dockerignore" << 'DIGNORE'
+**/node_modules
+.git
+.env
+*.md
+.vscode
+.idea
+coverage
+.next
+__pycache__
+.venv
+venv
+*.pyc
+DIGNORE
+fi
+
+# --- Build timeout (10 minutes for normal apps, 20 for heavy ones) ---
+BUILD_TIMEOUT=600
+# Heavy apps get more time (puppeteer, better-sqlite3 need native compilation)
+if grep -qE 'puppeteer|better-sqlite3|sharp|easyocr|torch' "${APP_SOURCE_DIR}/package.json" "${APP_SOURCE_DIR}/server/package.json" "${APP_SOURCE_DIR}/requirements.txt" 2>/dev/null; then
+  BUILD_TIMEOUT=1200
+  echo "  Heavy dependencies detected — build timeout extended to 20 minutes"
+fi
+
+# --- Build with Docker layer cache for speed ---
+echo "=== DEPLOY: building Docker image (timeout: ${BUILD_TIMEOUT}s) ==="
+BUILD_START=$(date +%s)
+
+# Use cache-from previous build to speed up rebuilds
+if timeout "${BUILD_TIMEOUT}" docker buildx build --platform linux/amd64 --load \
   ${BUILD_ARGS} \
-  -t "rr-portal/${APP_NAME}:${GIT_HASH}" "${APP_SOURCE_DIR}"
+  --cache-from "type=registry,ref=rr-portal/${APP_NAME}:buildcache" 2>/dev/null \
+  -t "rr-portal/${APP_NAME}:${GIT_HASH}" "${APP_SOURCE_DIR}" 2>&1; then
+  BUILD_OK=true
+else
+  BUILD_EXIT=$?
+  if [[ $BUILD_EXIT -eq 124 ]]; then
+    echo "ERROR: Docker build timed out after ${BUILD_TIMEOUT}s"
+    echo "  This usually means a heavy dependency (puppeteer, native modules)"
+    echo "  Try: reduce dependencies or use pre-built base image"
+    send_telegram "$(format_deploy_failure "${APP_NAME}" "Docker build timed out after ${BUILD_TIMEOUT}s — likely heavy dependencies")"
+    exit 1
+  fi
+  # cache-from might fail (no previous cache) — retry without it
+  echo "  Cache miss — building without cache..."
+  if ! timeout "${BUILD_TIMEOUT}" docker buildx build --platform linux/amd64 --load \
+    ${BUILD_ARGS} \
+    -t "rr-portal/${APP_NAME}:${GIT_HASH}" "${APP_SOURCE_DIR}" 2>&1; then
+    echo "ERROR: Docker build failed"
+    send_telegram "$(format_deploy_failure "${APP_NAME}" "Docker build failed")"
+    exit 1
+  fi
+  BUILD_OK=true
+fi
+
+BUILD_END=$(date +%s)
+BUILD_DURATION=$(( BUILD_END - BUILD_START ))
+echo "  Build completed in ${BUILD_DURATION}s"
 
 # Tag as latest
 docker tag "rr-portal/${APP_NAME}:${GIT_HASH}" "rr-portal/${APP_NAME}:latest"
 
-echo "Built: rr-portal/${APP_NAME}:${GIT_HASH}"
+# Log image size for monitoring
+IMAGE_SIZE=$(docker image inspect "rr-portal/${APP_NAME}:${GIT_HASH}" --format='{{.Size}}' 2>/dev/null || echo "0")
+IMAGE_SIZE_MB=$(( IMAGE_SIZE / 1048576 ))
+echo "Built: rr-portal/${APP_NAME}:${GIT_HASH} (${IMAGE_SIZE_MB} MB)"
 echo "Tagged: rr-portal/${APP_NAME}:latest"
+
+# Warn if image is very large (>500MB)
+if [[ "$IMAGE_SIZE_MB" -gt 500 ]]; then
+  echo "  WARNING: Image is ${IMAGE_SIZE_MB} MB — consider optimizing dependencies"
+  echo "  Common causes: puppeteer (+150MB), dev dependencies included, no multi-stage build"
+fi
 
 # ============================================================
 # Step 3: Image transfer via SSH (DEPL-02)
@@ -173,8 +239,13 @@ echo "=== DEPLOY: transferring image to ${DEPLOY_SERVER} ==="
 # Preserve previous image on server for rollback (tag before overwriting)
 deploy_ssh "docker tag rr-portal/${APP_NAME}:latest rr-portal/${APP_NAME}:previous 2>/dev/null || true"
 
-# Transfer only the :hash image (single transfer — saves bandwidth)
-docker save "rr-portal/${APP_NAME}:${GIT_HASH}" | deploy_ssh "docker load"
+# Transfer image with gzip compression (2-5x faster for large images)
+echo "  Compressing and transferring image (${IMAGE_SIZE_MB} MB)..."
+TRANSFER_START=$(date +%s)
+docker save "rr-portal/${APP_NAME}:${GIT_HASH}" | gzip -1 | deploy_ssh "gunzip | docker load"
+TRANSFER_END=$(date +%s)
+TRANSFER_DURATION=$(( TRANSFER_END - TRANSFER_START ))
+echo "  Transfer completed in ${TRANSFER_DURATION}s"
 
 # Tag on server: hash → latest (no re-transfer needed)
 deploy_ssh "docker tag rr-portal/${APP_NAME}:${GIT_HASH} rr-portal/${APP_NAME}:latest"
@@ -626,13 +697,14 @@ while [ "${deploy_attempt}" -le "${max_deploy_attempts}" ]; do
     echo "=== DEPLOY: restarting container ==="
     deploy_ssh "cd $(dirname "${DEPLOY_COMPOSE_PATH}") && docker compose restart ${APP_NAME}"
   else
-    # Round 3: rebuild, re-transfer, redeploy
-    echo "=== DEPLOY: full rebuild and redeploy ==="
-    docker buildx build --platform linux/amd64 --load \
+    # Round 3: rebuild with no cache, re-transfer, redeploy
+    echo "=== DEPLOY: full rebuild and redeploy (no cache) ==="
+    timeout "${BUILD_TIMEOUT}" docker buildx build --platform linux/amd64 --load \
+      --no-cache \
       ${BUILD_ARGS} \
       -t "rr-portal/${APP_NAME}:${GIT_HASH}" "${APP_SOURCE_DIR}"
     docker tag "rr-portal/${APP_NAME}:${GIT_HASH}" "rr-portal/${APP_NAME}:latest"
-    docker save "rr-portal/${APP_NAME}:${GIT_HASH}" | deploy_ssh "docker load"
+    docker save "rr-portal/${APP_NAME}:${GIT_HASH}" | gzip -1 | deploy_ssh "gunzip | docker load"
     deploy_ssh "docker tag rr-portal/${APP_NAME}:${GIT_HASH} rr-portal/${APP_NAME}:latest"
     deploy_ssh "cd $(dirname "${DEPLOY_COMPOSE_PATH}") && docker compose up -d ${APP_NAME}"
   fi

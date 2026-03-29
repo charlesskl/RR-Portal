@@ -134,3 +134,27 @@ QC-20 already detects puppeteer and switches to slim. But Chromium + CJK fonts m
 **Cause:** jiangping's templates reference CDN URLs (cdn.jsdelivr.net for Bootstrap, jQuery, DataTables, Chart.js). If the cloud server can't reach CDNs, all styling/charting breaks.
 **Fix:** Non-blocking — CDN access usually works from cloud servers. But for air-gapped deployments, would need to vendor all frontend assets. Agent should verify CDN reachability in verify-deploy.sh.
 **Automated:** NOT YET — verify-deploy.sh should test CDN URLs from container
+
+### LP-16: Docker build takes 10+ minutes because node_modules sent to build context
+**Date:** 2026-03-29
+**App:** zouhuo, paiji (and any app without .dockerignore)
+**Symptom:** `docker buildx build` hangs at "transferring context" for minutes
+**Cause:** No `.dockerignore` — Docker daemon receives the entire directory including `node_modules/` (200-500MB) as build context before even starting the build
+**Fix:** deploy.sh now auto-generates `.dockerignore` if missing, excluding `node_modules/`, `.git/`, `dist/`, etc. Build context drops from 500MB to 5MB.
+**Automated:** deploy.sh Step 2 auto-generates .dockerignore
+
+### LP-17: Image transfer over SSH is slow for large images (200MB+)
+**Date:** 2026-03-29
+**App:** rr-production (puppeteer ~250MB), zouhuo (~180MB)
+**Symptom:** `docker save | ssh docker load` takes 5-10 minutes on slow connections
+**Cause:** Uncompressed Docker image transfer. A 250MB image could be compressed to 80-100MB.
+**Fix:** deploy.sh now pipes through `gzip -1` (fast compression, ~2-3x size reduction): `docker save | gzip -1 | ssh "gunzip | docker load"`
+**Automated:** deploy.sh Step 3 gzip transfer
+
+### LP-18: Docker build timeout kills deploy silently
+**Date:** 2026-03-29
+**App:** rr-production (puppeteer compilation), paiji (better-sqlite3 compilation)
+**Symptom:** deploy.sh hangs forever during `docker buildx build` for apps with native modules
+**Cause:** No timeout on Docker build. Native module compilation (especially cross-platform via buildx for linux/amd64 on ARM Mac) can take 10-20 minutes.
+**Fix:** deploy.sh now uses `timeout` wrapper: 10 minutes for normal apps, 20 minutes for apps with heavy deps (puppeteer, better-sqlite3, sharp). On timeout, sends Telegram alert with clear message.
+**Automated:** deploy.sh Step 2 BUILD_TIMEOUT

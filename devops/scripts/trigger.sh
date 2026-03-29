@@ -352,7 +352,7 @@ DEPLOY_START=$(date +%s)
 
 # --- Phase 1: UNDERSTAND ---
 run_phase "understand" \
-  "Read the app code in apps/${APP_NAME}/, detect its stack and requirements, and decide whether this is a new onboard or an update. Write your findings to ${STATE_DIR}/understand.json." \
+  "Read the app code (check BOTH apps/${APP_NAME}/ and plugins/${APP_NAME}/ — use whichever exists). Detect its stack and requirements, and decide whether this is a new onboard or an update. Write your findings to ${STATE_DIR}/understand.json." \
   1
 
 # Validate understand output

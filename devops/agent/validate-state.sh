@@ -22,6 +22,18 @@ if [[ ! -f "$JSON_FILE" ]]; then
   exit 1
 fi
 
+# Quick sanity checks before parsing
+FILE_SIZE=$(wc -c < "$JSON_FILE" | tr -d ' ')
+if [[ "$FILE_SIZE" -eq 0 ]]; then
+  echo "ERROR: State file is empty (0 bytes): $JSON_FILE" >&2
+  exit 1
+fi
+if [[ "$FILE_SIZE" -lt 20 ]]; then
+  echo "ERROR: State file is suspiciously small (${FILE_SIZE} bytes): $JSON_FILE" >&2
+  echo "  Content: $(cat "$JSON_FILE")" >&2
+  exit 1
+fi
+
 # Validate JSON is parseable and has required fields
 python3 -c "
 import json, sys
@@ -58,6 +70,22 @@ if require_success and data.get('status') != 'success':
     if data.get('error'):
         print(f'  Previous error: {data[\"error\"]}', file=sys.stderr)
     sys.exit(1)
+
+# Phase-specific field validation (warn on missing recommended fields)
+recommended = {
+    'understand': ['action', 'stack'],
+    'prepare': ['qc_checks_passed'],
+    'deploy': ['image_tag', 'host_port'],
+    'verify': ['health_check'],
+}
+
+missing_recommended = []
+for field in recommended.get(expected_phase, []):
+    if field not in data:
+        missing_recommended.append(field)
+
+if missing_recommended:
+    print(f'WARN: Phase \"{expected_phase}\" missing recommended fields: {missing_recommended}', file=sys.stderr)
 
 print(f'OK: {expected_phase} state valid (status={data[\"status\"]})')
 " "$JSON_FILE" "$EXPECTED_PHASE" "$REQUIRE_SUCCESS"

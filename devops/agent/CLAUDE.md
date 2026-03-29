@@ -30,7 +30,7 @@ You will be told which phase to execute. Read your input state JSON, execute the
 **Output:** `/tmp/devops-state/<app>/understand.json`
 
 Steps:
-1. Read the app's source code in `apps/<app-name>/`
+1. Read the app's source code — check BOTH `apps/<app-name>/` and `plugins/<app-name>/` (use whichever exists)
 2. Source `devops/scripts/utils/detect-stack.sh` and run `detect_app_stack` on the app directory
 3. Extract app metadata for portal dashboard:
    - `display_name`: Read from package.json `name` or `description` field, or README.md first heading, or context from PR. Use Chinese if available. Example: "走货明细系统"
@@ -81,7 +81,7 @@ Steps:
 Steps:
 1. Validate input JSON (schema_version must be 1, status must be "success")
 2. If action is "onboard": run `devops/scripts/onboard.sh <repo-url> <app-name>`
-3. If action is "update": run `git pull` in `apps/<app-name>/` to get latest code
+3. If action is "update": run `git pull` in the app directory (may be `apps/<app>/` or `plugins/<app>/`)
 4. **Database provisioning** (if understand.json shows `database.needs_provisioning = true`):
    - For PostgreSQL:
      a. Check if database already exists: `ssh $DEPLOY_SERVER "docker exec rr-portal-db-1 psql -U rrportal -lqt | grep -w <app_name>"`
@@ -117,7 +117,7 @@ Steps:
    - For DATABASE_URL: verify the hostname resolves inside Docker network (must be `db`, not `localhost`)
    - For MONGODB_URL: verify hostname is `mongo`, not `localhost`
    - If any required secret is missing or placeholder: escalate via Telegram with the list of missing vars
-7. Run `devops/scripts/qc-runner.sh apps/<app-name>/`
+7. Run `devops/scripts/qc-runner.sh <app-directory>/` (use the actual path from step 3)
 8. If QC fails: read the failure output, apply fixes, re-run QC (up to 3 rounds)
 9. If QC still fails after 3 rounds: escalate via Telegram, write prepare.json with status "failed"
 10. If QC passes: write prepare.json with status "success"

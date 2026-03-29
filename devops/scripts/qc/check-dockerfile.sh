@@ -379,7 +379,11 @@ if [[ "$STACK" == "python" ]]; then
       SYS_LIBS="${SYS_LIBS} libglib2.0-0"
     fi
     if grep -qi 'opencv\|easyocr' "$REQ_FILE" 2>/dev/null; then
-      SYS_LIBS="${SYS_LIBS} libgl1-mesa-glx libglib2.0-0"
+      SYS_LIBS="${SYS_LIBS} libgl1-mesa-glx"
+      # libglib2.0-0 may already be added above — deduplicate
+      if [[ "$SYS_LIBS" != *"libglib2.0-0"* ]]; then
+        SYS_LIBS="${SYS_LIBS} libglib2.0-0"
+      fi
     fi
   fi
   if [[ -n "$SYS_LIBS" ]]; then

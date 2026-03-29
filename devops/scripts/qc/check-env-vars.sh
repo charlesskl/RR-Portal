@@ -68,6 +68,50 @@ fi
 
 echo "[QC-12] Found env vars in source: $(echo "$DISCOVERED_VARS" | wc -l | tr -d ' ')"
 
+# --- Generate smart default value for an env var ---
+generate_default_value() {
+  local var="$1"
+  local app_name="$2"
+  local app_dir="$3"
+  local db_name="${app_name//-/_}"
+
+  case "$var" in
+    PORT)
+      local reg_port=""
+      if [[ -f "${app_dir}/../../devops/config/ports.json" ]]; then
+        reg_port=$(python3 -c "import json; d=json.load(open('${app_dir}/../../devops/config/ports.json')); print(d.get('${app_name}',''))" 2>/dev/null || true)
+      fi
+      echo "${reg_port:-3000}"
+      ;;
+    NODE_ENV)       echo "production" ;;
+    JWT_SECRET|SECRET_KEY|SESSION_SECRET|APP_SECRET|FLASK_SECRET_KEY)
+      openssl rand -hex 32 2>/dev/null || python3 -c 'import secrets; print(secrets.token_hex(32))' 2>/dev/null || echo 'CHANGE_ME_BEFORE_DEPLOY'
+      ;;
+    JWT_EXPIRES_IN) echo "8h" ;;
+    CORS_ORIGIN)    echo "*" ;;
+    LOG_LEVEL)      echo "info" ;;
+    DATABASE_URL|POSTGRES_URL|PG_URL)
+      local db_pass
+      db_pass="$(openssl rand -hex 16 2>/dev/null || echo 'changeme')"
+      echo "postgresql://${db_name}:${db_pass}@db:5432/${db_name}"
+      ;;
+    REDIS_URL)      echo "redis://redis:6379" ;;
+    MONGODB_URL|MONGO_URL|MONGO_URI)
+      echo "mongodb://mongo:27017/${db_name}" ;;
+    BASE_PATH|BASE_URL|URL_PREFIX|VITE_BASE_PATH)
+      echo "/${app_name}/" ;;
+    DATA_PATH)      echo "/app/data" ;;
+    UPLOADS_PATH|UPLOAD_FOLDER) echo "/app/uploads" ;;
+    PIN_SALT)
+      openssl rand -hex 16 2>/dev/null || echo 'rr-portal-pin-salt-2026' ;;
+    RATE_LIMIT_WINDOW_MS) echo "900000" ;;
+    RATE_LIMIT_MAX)       echo "200" ;;
+    MAX_FILE_SIZE_MB)     echo "50" ;;
+    FLASK_ENV)            echo "production" ;;
+    *)                    echo "CHANGE_ME" ;;
+  esac
+}
+
 # --- Create .env.example if it doesn't exist ---
 if [[ ! -f "$ENV_EXAMPLE" ]]; then
   echo "# Environment variables for ${APP_NAME}" > "$ENV_EXAMPLE"
@@ -76,69 +120,19 @@ if [[ ! -f "$ENV_EXAMPLE" ]]; then
 
   while IFS= read -r var; do
     [[ -z "$var" ]] && continue
-
-    # Generate real, deployment-ready values (not placeholders)
-    default_val="CHANGE_ME"
-    db_name="${APP_NAME//-/_}"
-    case "$var" in
-      PORT)
-        # Try to read allocated port from registry; fall back to 3000
-        reg_port=""
-        if [[ -f "${APP_DIR}/../../devops/config/ports.json" ]]; then
-          reg_port=$(python3 -c "import json; d=json.load(open('${APP_DIR}/../../devops/config/ports.json')); print(d.get('${APP_NAME}',''))" 2>/dev/null || true)
-        fi
-        default_val="${reg_port:-3000}"
-        ;;
-      NODE_ENV)       default_val="production" ;;
-      JWT_SECRET|SECRET_KEY|SESSION_SECRET|APP_SECRET)
-        # Generate a real random secret (64 hex chars)
-        default_val="$(openssl rand -hex 32 2>/dev/null || python3 -c 'import secrets; print(secrets.token_hex(32))' 2>/dev/null || echo 'CHANGE_ME_BEFORE_DEPLOY')"
-        ;;
-      JWT_EXPIRES_IN) default_val="8h" ;;
-      CORS_ORIGIN)    default_val="*" ;;
-      LOG_LEVEL)      default_val="info" ;;
-      DATABASE_URL|POSTGRES_URL|PG_URL)
-        # Use Docker service name 'db', auto-generated password, app-specific DB name
-        db_pass="$(openssl rand -hex 16 2>/dev/null || echo 'changeme')"
-        default_val="postgresql://${db_name}:${db_pass}@db:5432/${db_name}"
-        ;;
-      REDIS_URL)      default_val="redis://redis:6379" ;;
-      MONGODB_URL|MONGO_URL|MONGO_URI)
-        default_val="mongodb://mongo:27017/${db_name}"
-        ;;
-      BASE_PATH|BASE_URL|URL_PREFIX|VITE_BASE_PATH)
-        default_val="/${APP_NAME}/"
-        ;;
-      DATA_PATH)      default_val="/app/data" ;;
-      UPLOADS_PATH|UPLOAD_FOLDER)
-        default_val="/app/uploads" ;;
-      PIN_SALT)
-        default_val="$(openssl rand -hex 16 2>/dev/null || echo 'rr-portal-pin-salt-2026')"
-        ;;
-      RATE_LIMIT_WINDOW_MS) default_val="900000" ;;
-      RATE_LIMIT_MAX)       default_val="200" ;;
-      MAX_FILE_SIZE_MB)     default_val="50" ;;
-      FLASK_SECRET_KEY|FLASK_ENV)
-        if [[ "$var" == "FLASK_ENV" ]]; then
-          default_val="production"
-        else
-          default_val="$(openssl rand -hex 32 2>/dev/null || echo 'CHANGE_ME_BEFORE_DEPLOY')"
-        fi
-        ;;
-      *)              default_val="CHANGE_ME" ;;
-    esac
-
+    default_val="$(generate_default_value "$var" "$APP_NAME" "$APP_DIR")"
     echo "${var}=${default_val}" >> "$ENV_EXAMPLE"
   done <<< "$DISCOVERED_VARS"
 
   echo "[QC-12] FIXED: created .env.example with $(echo "$DISCOVERED_VARS" | wc -l | tr -d ' ') variable(s)"
   FIXES_MADE=$((FIXES_MADE + 1))
 else
-  # Check if all discovered vars are in .env.example
+  # Check if all discovered vars are in .env.example — use smart defaults, not CHANGE_ME
   while IFS= read -r var; do
     [[ -z "$var" ]] && continue
     if ! grep -q "^${var}=" "$ENV_EXAMPLE" 2>/dev/null; then
-      echo "${var}=CHANGE_ME" >> "$ENV_EXAMPLE"
+      default_val="$(generate_default_value "$var" "$APP_NAME" "$APP_DIR")"
+      echo "${var}=${default_val}" >> "$ENV_EXAMPLE"
       echo "[QC-12] FIXED: added missing var ${var} to .env.example"
       FIXES_MADE=$((FIXES_MADE + 1))
     fi

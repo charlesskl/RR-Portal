@@ -109,26 +109,43 @@ GIT_HASH="$(git rev-parse --short HEAD)"
 echo "=== DEPLOY: preserving previous image for rollback ==="
 docker tag "rr-portal/${APP_NAME}:latest" "rr-portal/${APP_NAME}:previous" 2>/dev/null || true
 
+# Detect app directory: may be in apps/ or plugins/
+APP_SOURCE_DIR="${REPO_ROOT}/apps/${APP_NAME}"
+if [[ ! -d "$APP_SOURCE_DIR" ]]; then
+  APP_SOURCE_DIR="${REPO_ROOT}/plugins/${APP_NAME}"
+fi
+if [[ ! -d "$APP_SOURCE_DIR" ]]; then
+  echo "ERROR: App directory not found in apps/ or plugins/ for '${APP_NAME}'"
+  exit 1
+fi
+echo "App source: ${APP_SOURCE_DIR}"
+
+# Verify Dockerfile exists before attempting build
+if [[ ! -f "${APP_SOURCE_DIR}/Dockerfile" ]]; then
+  echo "ERROR: No Dockerfile found at ${APP_SOURCE_DIR}/Dockerfile"
+  echo "  Run QC pipeline first: devops/scripts/qc-runner.sh ${APP_SOURCE_DIR}"
+  send_telegram "$(format_deploy_failure "${APP_NAME}" "No Dockerfile found — run QC pipeline")"
+  exit 1
+fi
+
 # Detect build args needed for frontend sub-path routing
 BUILD_ARGS=""
-APP_DOCKERFILE="${REPO_ROOT}/apps/${APP_NAME}/Dockerfile"
-if [[ -f "$APP_DOCKERFILE" ]]; then
-  # If Dockerfile declares ARG BASE_PATH, pass the app name as the base path
-  if grep -q "ARG BASE_PATH" "$APP_DOCKERFILE"; then
-    BUILD_ARGS="${BUILD_ARGS} --build-arg BASE_PATH=/${APP_NAME}/"
-    echo "  Passing --build-arg BASE_PATH=/${APP_NAME}/"
-  fi
-  # If Dockerfile declares ARG VITE_BASE_PATH (direct, without ARG BASE_PATH alias)
-  if grep -q "ARG VITE_BASE_PATH" "$APP_DOCKERFILE" && ! grep -q "ARG BASE_PATH" "$APP_DOCKERFILE"; then
-    BUILD_ARGS="${BUILD_ARGS} --build-arg VITE_BASE_PATH=/${APP_NAME}/"
-    echo "  Passing --build-arg VITE_BASE_PATH=/${APP_NAME}/"
-  fi
+APP_DOCKERFILE="${APP_SOURCE_DIR}/Dockerfile"
+# If Dockerfile declares ARG BASE_PATH, pass the app name as the base path
+if grep -q "ARG BASE_PATH" "$APP_DOCKERFILE"; then
+  BUILD_ARGS="${BUILD_ARGS} --build-arg BASE_PATH=/${APP_NAME}/"
+  echo "  Passing --build-arg BASE_PATH=/${APP_NAME}/"
+fi
+# If Dockerfile declares ARG VITE_BASE_PATH (direct, without ARG BASE_PATH alias)
+if grep -q "ARG VITE_BASE_PATH" "$APP_DOCKERFILE" && ! grep -q "ARG BASE_PATH" "$APP_DOCKERFILE"; then
+  BUILD_ARGS="${BUILD_ARGS} --build-arg VITE_BASE_PATH=/${APP_NAME}/"
+  echo "  Passing --build-arg VITE_BASE_PATH=/${APP_NAME}/"
 fi
 
 # Build image with git hash tag (cross-compile for linux/amd64 since Mac is ARM)
 docker buildx build --platform linux/amd64 --load \
   ${BUILD_ARGS} \
-  -t "rr-portal/${APP_NAME}:${GIT_HASH}" "${REPO_ROOT}/apps/${APP_NAME}"
+  -t "rr-portal/${APP_NAME}:${GIT_HASH}" "${APP_SOURCE_DIR}"
 
 # Tag as latest
 docker tag "rr-portal/${APP_NAME}:${GIT_HASH}" "rr-portal/${APP_NAME}:latest"
@@ -177,14 +194,14 @@ echo "Image transferred and tagged on ${DEPLOY_SERVER} (ID: ${LOADED_ID})"
 # ============================================================
 echo "=== DEPLOY: transferring .env to server ==="
 
-APP_ENV_LOCAL="${REPO_ROOT}/apps/${APP_NAME}/.env"
+APP_ENV_LOCAL="${APP_SOURCE_DIR}/.env"
 SERVER_ENV_DIR="$(dirname "${DEPLOY_COMPOSE_PATH}")/apps/${APP_NAME}"
 
 # Look for .env in app directory or server subdirectory
 if [[ ! -f "$APP_ENV_LOCAL" ]]; then
   # Check server/ subdirectory (monorepo pattern)
-  if [[ -f "${REPO_ROOT}/apps/${APP_NAME}/server/.env" ]]; then
-    APP_ENV_LOCAL="${REPO_ROOT}/apps/${APP_NAME}/server/.env"
+  if [[ -f "${APP_SOURCE_DIR}/server/.env" ]]; then
+    APP_ENV_LOCAL="${APP_SOURCE_DIR}/server/.env"
   fi
 fi
 
@@ -203,8 +220,18 @@ if [[ -f "$APP_ENV_LOCAL" ]]; then
     echo "  WARNING: .env transfer may have failed (0 bytes on server)"
   fi
 else
-  echo "  WARNING: No .env file found locally at ${APP_ENV_LOCAL}"
-  echo "  Container will start without env_file — may fail if env vars are required"
+  echo "  WARNING: No .env file found locally — generating minimal .env"
+  # Create a minimal .env with PORT so the container can at least start
+  MINIMAL_ENV="${APP_SOURCE_DIR}/.env"
+  {
+    echo "# Auto-generated minimal .env by deploy.sh"
+    echo "NODE_ENV=production"
+    echo "PORT=${INTERNAL_PORT:-3000}"
+  } > "$MINIMAL_ENV"
+  deploy_ssh "mkdir -p '${SERVER_ENV_DIR}'"
+  scp -o ControlPath="${SSH_CONTROL_PATH}" "$MINIMAL_ENV" "${DEPLOY_SERVER}:${SERVER_ENV_DIR}/.env" 2>/dev/null || \
+    scp "$MINIMAL_ENV" "${DEPLOY_SERVER}:${SERVER_ENV_DIR}/.env"
+  echo "  Minimal .env created and transferred (PORT=${INTERNAL_PORT:-3000})"
 fi
 
 # ============================================================
@@ -213,17 +240,53 @@ fi
 echo "=== DEPLOY: updating remote docker-compose.yml ==="
 
 # Read internal port from Dockerfile EXPOSE line
-INTERNAL_PORT=$(grep "^EXPOSE" "${REPO_ROOT}/apps/${APP_NAME}/Dockerfile" | awk '{print $2}')
+INTERNAL_PORT=$(grep "^EXPOSE" "${APP_SOURCE_DIR}/Dockerfile" | head -1 | awk '{print $2}')
 if [ -z "${INTERNAL_PORT}" ]; then
-  echo "WARNING: No EXPOSE found in Dockerfile, defaulting to 8080"
-  INTERNAL_PORT="8080"
+  # Fallback: try to detect from ENV PORT= in Dockerfile
+  INTERNAL_PORT=$(grep -oE 'ENV PORT=([0-9]+)' "${APP_SOURCE_DIR}/Dockerfile" | head -1 | cut -d= -f2 || true)
 fi
+if [ -z "${INTERNAL_PORT}" ]; then
+  # Fallback: try to detect from source code listen() calls
+  INTERNAL_PORT=$(grep -rhoE 'listen\s*\(\s*[0-9]{4,5}' "${APP_SOURCE_DIR}" --include='*.js' --include='*.py' --exclude-dir='node_modules' 2>/dev/null \
+    | head -1 | grep -oE '[0-9]{4,5}' || true)
+fi
+if [ -z "${INTERNAL_PORT}" ]; then
+  # Last resort: default to 3000 (most common port in this portal)
+  echo "WARNING: Could not detect internal port from Dockerfile or source, defaulting to 3000"
+  INTERNAL_PORT="3000"
+fi
+echo "Internal port: ${INTERNAL_PORT}"
+
+# Snapshot config files before modification (for rollback)
+BACKUP_TS="$(date +%s)"
+deploy_ssh "cp '${DEPLOY_COMPOSE_PATH}' '${DEPLOY_COMPOSE_PATH}.bak-${BACKUP_TS}'" 2>/dev/null || true
 
 # Ensure pyyaml is available on remote
 deploy_ssh "pip3 install --quiet pyyaml 2>/dev/null || true"
 
+# Resolve volume hints locally (hints file is on dev machine, not server)
+VOLUME_HINTS_JSON="[]"
+for hints_dir in "${APP_SOURCE_DIR}" "${APP_SOURCE_DIR}/server"; do
+  if [[ -f "${hints_dir}/.volume-hints" ]]; then
+    # Parse hints into JSON array of "host_sub:container_path" strings
+    VOLUME_HINTS_JSON=$(python3 -c "
+import json
+vols = []
+with open('${hints_dir}/.volume-hints') as f:
+    for line in f:
+        line = line.strip()
+        if line.startswith('VOLUME='):
+            spec = line[7:]
+            host_sub, container_path = spec.split(':', 1)
+            vols.append(f'./apps/${APP_NAME}/{host_sub}:{container_path}')
+print(json.dumps(vols))
+" 2>/dev/null || echo "[]")
+    break
+  fi
+done
+
 # Update remote docker-compose.yml — only this app's service section
-deploy_ssh python3 - "${APP_NAME}" "${HOST_PORT}" "${INTERNAL_PORT}" "${DEPLOY_COMPOSE_PATH}" << 'PYEOF'
+deploy_ssh python3 - "${APP_NAME}" "${HOST_PORT}" "${INTERNAL_PORT}" "${DEPLOY_COMPOSE_PATH}" "${VOLUME_HINTS_JSON}" << 'PYEOF'
 import sys
 import yaml
 
@@ -242,15 +305,31 @@ if compose is None:
 if 'services' not in compose:
     compose['services'] = {}
 
+# Determine the app directory prefix (apps/ or plugins/)
+# On the server, all apps are deployed under apps/ regardless of local layout
+app_prefix = 'apps'
+
+# Read volume hints passed as env var from deploy.sh (resolved locally before SSH)
+import json as _json
+volume_hints_json = sys.argv[5] if len(sys.argv) > 5 else '[]'
+try:
+    volumes = _json.loads(volume_hints_json)
+except:
+    volumes = []
+
+# Fallback: standard data + uploads volumes
+if not volumes:
+    volumes = [
+        f'./{app_prefix}/{app_name}/data:/app/data',
+        f'./{app_prefix}/{app_name}/uploads:/app/uploads',
+    ]
+
 # Build the new service definition
 service_def = {
     'image': f'rr-portal/{app_name}:latest',
     'ports': [f'{host_port}:{container_port}'],
-    'env_file': [f'./apps/{app_name}/.env'],
-    'volumes': [
-        f'./apps/{app_name}/data:/app/data',
-        f'./apps/{app_name}/uploads:/app/uploads',
-    ],
+    'env_file': [f'./{app_prefix}/{app_name}/.env'],
+    'volumes': volumes,
     'restart': 'unless-stopped',
     'networks': ['platform-net'],
     'healthcheck': {
@@ -286,7 +365,17 @@ with open(compose_path, 'w') as f:
 print("Updated " + compose_path + " for service " + app_name)
 PYEOF
 
-echo "Remote docker-compose.yml updated for ${APP_NAME}"
+# Validate docker-compose after update
+echo "=== DEPLOY: validating docker-compose.yml syntax ==="
+if deploy_ssh "cd $(dirname "${DEPLOY_COMPOSE_PATH}") && docker compose config --quiet" 2>/dev/null; then
+  echo "Remote docker-compose.yml updated and validated for ${APP_NAME}"
+else
+  echo "ERROR: docker-compose.yml validation failed after update"
+  # Restore from backup if available
+  deploy_ssh "cp '${DEPLOY_COMPOSE_PATH}.bak-'* '${DEPLOY_COMPOSE_PATH}' 2>/dev/null" || true
+  send_telegram "$(format_deploy_failure "${APP_NAME}" "docker-compose.yml syntax error after update")"
+  exit 1
+fi
 
 # ============================================================
 # Step 4b: Remote nginx config update (DEPL-03b)
@@ -459,9 +548,9 @@ if [[ -n "$VOLUME_DIRS" ]]; then
     FULL_DIR="${COMPOSE_DIR}/${vol_dir#./}"
     LOCAL_DIR="${REPO_ROOT}/${vol_dir#./}"
 
-    # Also check the non-volume data directories (e.g., apps/<app>/server/data)
-    [[ ! -d "$LOCAL_DIR" ]] && LOCAL_DIR="${REPO_ROOT}/apps/${APP_NAME}/server/$(basename "$vol_dir")"
-    [[ ! -d "$LOCAL_DIR" ]] && LOCAL_DIR="${REPO_ROOT}/apps/${APP_NAME}/$(basename "$vol_dir")"
+    # Also check the non-volume data directories (apps/ or plugins/ + server/ subdir)
+    [[ ! -d "$LOCAL_DIR" ]] && LOCAL_DIR="${APP_SOURCE_DIR}/server/$(basename "$vol_dir")"
+    [[ ! -d "$LOCAL_DIR" ]] && LOCAL_DIR="${APP_SOURCE_DIR}/$(basename "$vol_dir")"
     [[ ! -d "$LOCAL_DIR" ]] && continue
 
     # Count local data files (JSON, SQLite, CSV — excluding node_modules)
@@ -511,6 +600,13 @@ check_health() {
   done
 
   echo "Health check failed after ${max_attempts} attempts (60 seconds)"
+
+  # Dump container logs for diagnosis
+  echo "=== DEPLOY: container logs (last 30 lines) ==="
+  deploy_ssh "docker logs ${APP_NAME} 2>&1 | tail -30" 2>/dev/null || true
+  echo "=== DEPLOY: container status ==="
+  deploy_ssh "docker ps -a --filter name=${APP_NAME} --format '{{.Status}}'" 2>/dev/null || true
+
   return 1
 }
 
@@ -533,7 +629,8 @@ while [ "${deploy_attempt}" -le "${max_deploy_attempts}" ]; do
     # Round 3: rebuild, re-transfer, redeploy
     echo "=== DEPLOY: full rebuild and redeploy ==="
     docker buildx build --platform linux/amd64 --load \
-      -t "rr-portal/${APP_NAME}:${GIT_HASH}" "${REPO_ROOT}/apps/${APP_NAME}"
+      ${BUILD_ARGS} \
+      -t "rr-portal/${APP_NAME}:${GIT_HASH}" "${APP_SOURCE_DIR}"
     docker tag "rr-portal/${APP_NAME}:${GIT_HASH}" "rr-portal/${APP_NAME}:latest"
     docker save "rr-portal/${APP_NAME}:${GIT_HASH}" | deploy_ssh "docker load"
     deploy_ssh "docker tag rr-portal/${APP_NAME}:${GIT_HASH} rr-portal/${APP_NAME}:latest"
@@ -581,9 +678,9 @@ fi
 # This runs AFTER the container is healthy but BEFORE endpoint verification,
 # because endpoints will fail without tables/schema.
 
-APP_SOURCE="${REPO_ROOT}/apps/${APP_NAME}"
-SERVER_DIR="$APP_SOURCE"
-[[ -d "$APP_SOURCE/server" ]] && SERVER_DIR="$APP_SOURCE/server"
+# Re-use the already-detected APP_SOURCE_DIR for migration detection
+SERVER_DIR="$APP_SOURCE_DIR"
+[[ -d "$APP_SOURCE_DIR/server" ]] && SERVER_DIR="$APP_SOURCE_DIR/server"
 CONTAINER_NAME="${APP_NAME}"
 
 echo "=== DEPLOY: checking for database migrations ==="

@@ -48,10 +48,12 @@ discover_env_vars() {
   if [[ "$STACK" == "node" ]]; then
     vars=$(grep -rhoE 'process\.env\.\w+' "$SERVER_DIR" \
       --include='*.js' --include='*.ts' --include='*.mjs' \
+      --exclude-dir='node_modules' --exclude-dir='dist' --exclude-dir='.next' --exclude-dir='coverage' \
       2>/dev/null | sed 's/process\.env\.//' | sort -u || true)
   elif [[ "$STACK" == "python" ]]; then
     vars=$(grep -rhoE "os\.environ\.(get\()?['\"][A-Z_]+['\"]" "$SERVER_DIR" \
-      --include='*.py' 2>/dev/null | grep -oE "[A-Z_]+" | sort -u || true)
+      --include='*.py' --exclude-dir='__pycache__' --exclude-dir='.venv' --exclude-dir='venv' \
+      2>/dev/null | grep -oE "[A-Z_]+" | sort -u || true)
   fi
 
   echo "$vars"
@@ -76,12 +78,12 @@ if [[ ! -f "$ENV_EXAMPLE" ]]; then
     [[ -z "$var" ]] && continue
 
     # Generate real, deployment-ready values (not placeholders)
-    local default_val="CHANGE_ME"
-    local db_name="${APP_NAME//-/_}"
+    default_val="CHANGE_ME"
+    db_name="${APP_NAME//-/_}"
     case "$var" in
       PORT)
         # Try to read allocated port from registry; fall back to 3000
-        local reg_port=""
+        reg_port=""
         if [[ -f "${APP_DIR}/../../devops/config/ports.json" ]]; then
           reg_port=$(python3 -c "import json; d=json.load(open('${APP_DIR}/../../devops/config/ports.json')); print(d.get('${APP_NAME}',''))" 2>/dev/null || true)
         fi
@@ -97,7 +99,7 @@ if [[ ! -f "$ENV_EXAMPLE" ]]; then
       LOG_LEVEL)      default_val="info" ;;
       DATABASE_URL|POSTGRES_URL|PG_URL)
         # Use Docker service name 'db', auto-generated password, app-specific DB name
-        local db_pass="$(openssl rand -hex 16 2>/dev/null || echo 'changeme')"
+        db_pass="$(openssl rand -hex 16 2>/dev/null || echo 'changeme')"
         default_val="postgresql://${db_name}:${db_pass}@db:5432/${db_name}"
         ;;
       REDIS_URL)      default_val="redis://redis:6379" ;;
@@ -108,7 +110,21 @@ if [[ ! -f "$ENV_EXAMPLE" ]]; then
         default_val="/${APP_NAME}/"
         ;;
       DATA_PATH)      default_val="/app/data" ;;
-      UPLOADS_PATH)   default_val="/app/uploads" ;;
+      UPLOADS_PATH|UPLOAD_FOLDER)
+        default_val="/app/uploads" ;;
+      PIN_SALT)
+        default_val="$(openssl rand -hex 16 2>/dev/null || echo 'rr-portal-pin-salt-2026')"
+        ;;
+      RATE_LIMIT_WINDOW_MS) default_val="900000" ;;
+      RATE_LIMIT_MAX)       default_val="200" ;;
+      MAX_FILE_SIZE_MB)     default_val="50" ;;
+      FLASK_SECRET_KEY|FLASK_ENV)
+        if [[ "$var" == "FLASK_ENV" ]]; then
+          default_val="production"
+        else
+          default_val="$(openssl rand -hex 32 2>/dev/null || echo 'CHANGE_ME_BEFORE_DEPLOY')"
+        fi
+        ;;
       *)              default_val="CHANGE_ME" ;;
     esac
 

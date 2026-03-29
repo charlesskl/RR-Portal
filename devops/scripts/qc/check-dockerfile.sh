@@ -23,6 +23,19 @@ log_info()  { echo "[QC-04] INFO: $*"; }
 log_fixed() { echo "[QC-04] FIXED: $*"; }
 log_error() { echo "[QC-04] ERROR: $*"; }
 
+# ---- Check for Dockerfile variants (LP-10: some devs name it Dockerfile.node) ----
+
+if [[ ! -f "$APP_DIR/Dockerfile" ]]; then
+  # Look for common naming variants
+  for variant in Dockerfile.node Dockerfile.prod Dockerfile.production dockerfile; do
+    if [[ -f "$APP_DIR/$variant" ]]; then
+      cp "$APP_DIR/$variant" "$APP_DIR/Dockerfile"
+      log_fixed "copied $variant → Dockerfile (non-standard name)"
+      break
+    fi
+  done
+fi
+
 # ---- Validate existing Dockerfile ----
 
 if [[ -f "$APP_DIR/Dockerfile" ]]; then
@@ -164,8 +177,45 @@ except: pass
   sed -i '' "s|EXPOSE 3000|EXPOSE $PORT|" "$APP_DIR/Dockerfile"
   sed -i '' "s|localhost:3000|localhost:$PORT|g" "$APP_DIR/Dockerfile"
 
-  # Set entry point
-  sed -i '' "s|CMD \\[\"node\", \"app.js\"\\]|CMD [\"node\", \"$ENTRY\"]|" "$APP_DIR/Dockerfile"
+  # --- Detect startup scripts that must run before the main entry ---
+  STARTUP_CMD=""
+  for script in "scripts/seed-users.js" "scripts/seed.js" "scripts/init.js" "seed.js" "seed-users.js"; do
+    if [[ -f "$PKG_DIR/$script" ]]; then
+      STARTUP_CMD="node $script && "
+      log_info "Found startup script: $script"
+      break
+    fi
+  done
+
+  # Set entry point (with or without startup script)
+  # Use python to safely replace the CMD line (avoids sed quoting issues)
+  python3 -c "
+import re
+with open('$APP_DIR/Dockerfile') as f:
+    content = f.read()
+startup = '$STARTUP_CMD'
+entry = '$ENTRY'
+if startup:
+    new_cmd = 'CMD [\"sh\", \"-c\", \"' + startup + 'node ' + entry + '\"]'
+else:
+    new_cmd = 'CMD [\"node\", \"' + entry + '\"]'
+content = re.sub(r'CMD \[\"node\", \"app\.js\"\]', new_cmd, content)
+with open('$APP_DIR/Dockerfile', 'w') as f:
+    f.write(content)
+" 2>/dev/null || true
+
+  # --- Detect where the server expects to find client dist ---
+  # Some apps serve from ../client/dist (in-place), others from ./client-dist (copied)
+  CLIENT_DIST_PATH=""
+  client_ref=$(grep -rhoE "client[/-]dist|client/dist|\.\./(client|frontend)/dist" "$PKG_DIR"/*.js 2>/dev/null | head -1 || true)
+  if echo "$client_ref" | grep -q '\.\./client/dist\|path.*client.*dist'; then
+    # App references ../client/dist — it expects the dist in the original client/ location
+    CLIENT_DIST_PATH="/app/client/dist"
+    log_info "Server expects client dist at: ../client/dist"
+  fi
+  if [[ -n "$CLIENT_DIST_PATH" ]]; then
+    sed -i '' "s|COPY --from=client-build /build/dist /app/client-dist|COPY --from=client-build /build/dist ${CLIENT_DIST_PATH}|" "$APP_DIR/Dockerfile"
+  fi
 
   # Detect Vite output directory
   if [[ -f "$CLIENT_DIR/vite.config.js" || -f "$CLIENT_DIR/vite.config.ts" ]]; then
@@ -317,47 +367,82 @@ if [[ "$STACK" == "python" ]]; then
   # --- Requirements file ---
   if [[ -f "$APP_DIR/pyproject.toml" && ! -f "$APP_DIR/requirements.txt" ]]; then
     sed -i '' 's|COPY requirements.txt ./|COPY pyproject.toml ./|' "$APP_DIR/Dockerfile"
-    sed -i '' 's|RUN pip install --no-cache-dir --prefix=/install -r requirements.txt|RUN pip install --no-cache-dir --prefix=/install .|' "$APP_DIR/Dockerfile"
+    sed -i '' 's|RUN pip install --no-cache-dir -r requirements.txt gunicorn|RUN pip install --no-cache-dir . gunicorn|' "$APP_DIR/Dockerfile"
+  fi
+
+  # --- System library detection ---
+  SYS_LIBS=""
+  REQ_FILE="$APP_DIR/requirements.txt"
+  [[ ! -f "$REQ_FILE" ]] && REQ_FILE="$APP_DIR/pyproject.toml"
+  if [[ -f "$REQ_FILE" ]]; then
+    if grep -qi 'pdfplumber\|Pillow\|camelot\|reportlab' "$REQ_FILE" 2>/dev/null; then
+      SYS_LIBS="${SYS_LIBS} libglib2.0-0"
+    fi
+    if grep -qi 'opencv\|easyocr' "$REQ_FILE" 2>/dev/null; then
+      SYS_LIBS="${SYS_LIBS} libgl1-mesa-glx libglib2.0-0"
+    fi
+  fi
+  if [[ -n "$SYS_LIBS" ]]; then
+    # Insert system libs into the apt-get install line (not in comments)
+    if ! grep -v '^#' "$APP_DIR/Dockerfile" | grep -q 'libglib' 2>/dev/null; then
+      # Insert system libs line after '    curl \' using perl (macOS sed can't do multiline)
+      perl -i -pe "s{^(    curl \\\\)\$}{\$1\n    ${SYS_LIBS} \\\\}" "$APP_DIR/Dockerfile"
+      log_fixed "added system libraries:${SYS_LIBS}"
+    fi
   fi
 
   # --- Entry point detection ---
   MODULE="app"
   VARIABLE="app"
   USE_UVICORN=false
+  USE_WSGI=false
 
-  # Search Python source files for app variable
-  for pyfile in "$APP_DIR"/*.py "$APP_DIR"/src/*.py; do
-    [[ -f "$pyfile" ]] || continue
-    basename_no_ext=$(basename "$pyfile" .py)
+  # Priority 1: Check for wsgi.py (WSGI entry point — use gunicorn)
+  if [[ -f "$APP_DIR/wsgi.py" ]]; then
+    MODULE="wsgi"
+    VARIABLE="app"
+    USE_WSGI=true
+    # Try to detect the variable name in wsgi.py
+    wsgi_var=$(grep -oE '^(app|application)\s*=' "$APP_DIR/wsgi.py" 2>/dev/null | head -1 | cut -d= -f1 | tr -d ' ' || true)
+    [[ -n "$wsgi_var" ]] && VARIABLE="$wsgi_var"
+    log_info "Found wsgi.py — using gunicorn with $MODULE:$VARIABLE"
+  fi
 
-    # FastAPI detection
-    if grep -q 'FastAPI()' "$pyfile" 2>/dev/null; then
-      var=$(grep -oE '^([a-zA-Z_]+)\s*=\s*FastAPI\(' "$pyfile" | head -1 | cut -d= -f1 | tr -d ' ')
-      if [[ -n "$var" ]]; then
+  # Priority 2: Search Python source files for app variable (skip if wsgi.py found)
+  if [[ "$USE_WSGI" == "false" ]]; then
+    for pyfile in "$APP_DIR"/*.py "$APP_DIR"/src/*.py; do
+      [[ -f "$pyfile" ]] || continue
+      basename_no_ext=$(basename "$pyfile" .py)
+
+      # FastAPI detection
+      if grep -q 'FastAPI()' "$pyfile" 2>/dev/null; then
+        var=$(grep -oE '^([a-zA-Z_]+)\s*=\s*FastAPI\(' "$pyfile" | head -1 | cut -d= -f1 | tr -d ' ')
+        if [[ -n "$var" ]]; then
+          MODULE="$basename_no_ext"
+          VARIABLE="$var"
+          USE_UVICORN=true
+          break
+        fi
+      fi
+
+      # Flask detection
+      if grep -q 'Flask(' "$pyfile" 2>/dev/null; then
+        var=$(grep -oE '^([a-zA-Z_]+)\s*=\s*Flask\(' "$pyfile" | head -1 | cut -d= -f1 | tr -d ' ')
+        if [[ -n "$var" ]]; then
+          MODULE="$basename_no_ext"
+          VARIABLE="$var"
+          break
+        fi
+      fi
+
+      # Generic "application = " detection (WSGI)
+      if grep -qE '^application\s*=' "$pyfile" 2>/dev/null; then
         MODULE="$basename_no_ext"
-        VARIABLE="$var"
-        USE_UVICORN=true
+        VARIABLE="application"
         break
       fi
-    fi
-
-    # Flask detection
-    if grep -q 'Flask(' "$pyfile" 2>/dev/null; then
-      var=$(grep -oE '^([a-zA-Z_]+)\s*=\s*Flask\(' "$pyfile" | head -1 | cut -d= -f1 | tr -d ' ')
-      if [[ -n "$var" ]]; then
-        MODULE="$basename_no_ext"
-        VARIABLE="$var"
-        break
-      fi
-    fi
-
-    # Generic "application = " detection (WSGI)
-    if grep -qE '^application\s*=' "$pyfile" 2>/dev/null; then
-      MODULE="$basename_no_ext"
-      VARIABLE="application"
-      break
-    fi
-  done
+    done
+  fi
 
   # --- Port detection ---
   PORT="3000"
@@ -380,8 +465,19 @@ if [[ "$STACK" == "python" ]]; then
   # Replace CMD based on framework
   if [[ "$USE_UVICORN" == true ]]; then
     sed -i '' "s|CMD \\[\"gunicorn\".*|CMD [\"uvicorn\", \"$MODULE:$VARIABLE\", \"--host\", \"0.0.0.0\", \"--port\", \"$PORT\"]|" "$APP_DIR/Dockerfile"
+  elif [[ "$USE_WSGI" == true ]]; then
+    # WSGI app: use gunicorn with extended timeout for file upload apps
+    sed -i '' "s|CMD \\[\"gunicorn\".*|CMD [\"gunicorn\", \"--bind\", \"0.0.0.0:$PORT\", \"--workers\", \"2\", \"--timeout\", \"120\", \"$MODULE:$VARIABLE\"]|" "$APP_DIR/Dockerfile"
   else
     sed -i '' "s|\"app:app\"|\"$MODULE:$VARIABLE\"|" "$APP_DIR/Dockerfile"
+  fi
+
+  # Ensure gunicorn is in requirements.txt (needed for production)
+  req_file=""
+  [[ -f "$APP_DIR/requirements.txt" ]] && req_file="$APP_DIR/requirements.txt"
+  if [[ -n "$req_file" ]] && ! grep -qi 'gunicorn' "$req_file" 2>/dev/null; then
+    echo "gunicorn" >> "$req_file"
+    log_fixed "added gunicorn to requirements.txt"
   fi
 
   # --- Generate .dockerignore ---

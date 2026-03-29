@@ -31,6 +31,8 @@ ALL_CHECKS=(
   "check-health"
   "check-lockfiles"
   "check-dockerfile"
+  "check-native-deps"
+  "check-volumes"
   "check-lint"
   "check-api-basepath"
   "check-auth-bypass"
@@ -56,7 +58,9 @@ get_dependents() {
   local check="$1"
   case "$check" in
     check-config)     echo "check-dockerfile" ;;
-    check-dockerfile) echo "check-docker-build check-frontend-basepath" ;;
+    check-dockerfile) echo "check-native-deps check-docker-build check-frontend-basepath" ;;
+    check-native-deps)   echo "check-docker-build" ;;
+    check-volumes)       echo "check-docker-build" ;;
     check-lockfiles)  echo "check-docker-build" ;;
     check-lint)          echo "check-docker-build" ;;
     check-api-basepath)  echo "check-docker-build" ;;

@@ -370,7 +370,146 @@ while [[ $ROUND -lt $MAX_ROUNDS ]]; do
 done
 
 # ============================================================
-# Phase 4: Frontend asset verification
+# Phase 4: Deep container health checks
+# ============================================================
+verify_container_health() {
+  echo ""
+  echo "=== VERIFY: deep container health checks ==="
+
+  local compose_dir
+  compose_dir=$(dirname "$COMPOSE_PATH")
+  local failures=0
+
+  # --- 4a: Container log error scan ---
+  echo "[VERIFY] Scanning container logs for errors..."
+  local error_lines
+  error_lines=$(ssh "root@${SERVER_HOST}" \
+    "docker logs ${APP_NAME} 2>&1 | tail -50 | grep -iE 'error|ENOENT|EACCES|refused|fatal|cannot find|MODULE_NOT_FOUND|ECONNREFUSED' | head -10" \
+    2>/dev/null || true)
+
+  if [[ -n "$error_lines" ]]; then
+    echo "[VERIFY] WARN: Found error patterns in container logs:"
+    echo "$error_lines" | while IFS= read -r line; do echo "  ! $line"; done
+
+    # Classify severity: some errors are expected (e.g., "connection refused" during startup)
+    if echo "$error_lines" | grep -qiE 'ENOENT.*data|MODULE_NOT_FOUND|Cannot find module|EACCES'; then
+      echo "[VERIFY] FAIL: Critical errors detected (missing files or permissions)"
+      failures=$((failures + 1))
+    else
+      echo "[VERIFY] INFO: Errors appear non-critical (may be startup transients)"
+    fi
+  else
+    echo "[VERIFY] OK: No error patterns in recent container logs"
+  fi
+
+  # --- 4b: Volume mount verification ---
+  echo "[VERIFY] Checking volume mounts..."
+  local volume_check
+  volume_check=$(ssh "root@${SERVER_HOST}" \
+    "docker exec ${APP_NAME} sh -c 'ls -la /app/data/ 2>/dev/null && echo VOLUME_OK || echo VOLUME_MISSING'" \
+    2>/dev/null || echo "CONTAINER_UNREACHABLE")
+
+  if echo "$volume_check" | grep -q "VOLUME_OK"; then
+    local file_count
+    file_count=$(ssh "root@${SERVER_HOST}" \
+      "docker exec ${APP_NAME} sh -c 'find /app/data -maxdepth 1 -type f 2>/dev/null | wc -l'" \
+      2>/dev/null || echo "0")
+    echo "[VERIFY] OK: /app/data mounted (${file_count} file(s))"
+  elif echo "$volume_check" | grep -q "VOLUME_MISSING"; then
+    echo "[VERIFY] INFO: /app/data does not exist (may be expected for this app)"
+  else
+    echo "[VERIFY] WARN: Could not check volume mount (container may not be running)"
+  fi
+
+  # --- 4c: Write test (can the app write to its data directory?) ---
+  echo "[VERIFY] Testing data directory write access..."
+  local write_test
+  write_test=$(ssh "root@${SERVER_HOST}" \
+    "docker exec ${APP_NAME} sh -c 'echo test > /app/data/.write-test 2>/dev/null && rm /app/data/.write-test && echo WRITE_OK || echo WRITE_FAIL'" \
+    2>/dev/null || echo "SKIP")
+
+  case "$write_test" in
+    *WRITE_OK*) echo "[VERIFY] OK: Data directory is writable" ;;
+    *WRITE_FAIL*) echo "[VERIFY] WARN: Data directory is NOT writable (permission issue?)"
+                  failures=$((failures + 1)) ;;
+    *) echo "[VERIFY] INFO: Write test skipped (no /app/data or container not running)" ;;
+  esac
+
+  # --- 4d: SQLite WAL check (for better-sqlite3 / sqlite3 apps) ---
+  local has_sqlite
+  has_sqlite=$(ssh "root@${SERVER_HOST}" \
+    "docker exec ${APP_NAME} sh -c 'ls /app/data/*.db /app/data/*.sqlite 2>/dev/null | head -1'" \
+    2>/dev/null || true)
+
+  if [[ -n "$has_sqlite" ]]; then
+    echo "[VERIFY] SQLite database found: $has_sqlite"
+    # Check if WAL mode files exist (indicates healthy SQLite with WAL)
+    local wal_file="${has_sqlite}-wal"
+    local wal_exists
+    wal_exists=$(ssh "root@${SERVER_HOST}" \
+      "docker exec ${APP_NAME} sh -c 'test -f \"${wal_file}\" && echo YES || echo NO'" \
+      2>/dev/null || echo "SKIP")
+    if [[ "$wal_exists" == "YES" ]]; then
+      echo "[VERIFY] OK: SQLite WAL file exists (WAL mode active)"
+    else
+      echo "[VERIFY] INFO: No WAL file — SQLite may use default journal mode"
+    fi
+
+    # Try a simple integrity check
+    local integrity
+    integrity=$(ssh "root@${SERVER_HOST}" \
+      "docker exec ${APP_NAME} sh -c 'test -f /usr/bin/sqlite3 && sqlite3 \"${has_sqlite}\" \"PRAGMA integrity_check\" 2>/dev/null || echo SKIP'" \
+      2>/dev/null || echo "SKIP")
+    if [[ "$integrity" == "ok" ]]; then
+      echo "[VERIFY] OK: SQLite integrity check passed"
+    elif [[ "$integrity" != "SKIP" ]]; then
+      echo "[VERIFY] WARN: SQLite integrity: $integrity"
+    fi
+  fi
+
+  # --- 4e: Seed data / critical file check ---
+  # Check if known critical files exist (from QC-21 volume hints)
+  local app_source="${REPO_ROOT}/apps/${APP_NAME}"
+  [[ ! -d "$app_source" ]] && app_source="${REPO_ROOT}/plugins/${APP_NAME}"
+  local hints_file=""
+  [[ -f "$app_source/.volume-hints" ]] && hints_file="$app_source/.volume-hints"
+  [[ -z "$hints_file" && -f "$app_source/server/.volume-hints" ]] && hints_file="$app_source/server/.volume-hints"
+
+  if [[ -n "$hints_file" ]]; then
+    echo "[VERIFY] Checking seed files from volume hints..."
+    while IFS= read -r line; do
+      [[ "$line" != SEED=* ]] && continue
+      local seed_path="${line#SEED=}"
+      local container_path="/app/$seed_path"
+      local seed_check
+      seed_check=$(ssh "root@${SERVER_HOST}" \
+        "docker exec ${APP_NAME} sh -c 'test -f \"${container_path}\" && echo EXISTS || echo MISSING'" \
+        2>/dev/null || echo "SKIP")
+      if [[ "$seed_check" == "EXISTS" ]]; then
+        echo "  [OK] ${seed_path}"
+      elif [[ "$seed_check" == "MISSING" ]]; then
+        echo "  [WARN] ${seed_path} — MISSING in container"
+      fi
+    done < "$hints_file"
+  fi
+
+  # --- Summary ---
+  if [[ "$failures" -gt 0 ]]; then
+    echo "[VERIFY] Deep health: ${failures} issue(s) found"
+    return 1
+  fi
+  echo "[VERIFY] Deep health checks passed"
+  return 0
+}
+
+# Run deep container health (non-blocking — reports warnings but doesn't fail deploy)
+DEEP_HEALTH_OK=true
+if ! verify_container_health; then
+  DEEP_HEALTH_OK=false
+fi
+
+# ============================================================
+# Phase 5: Frontend asset verification
 # ============================================================
 verify_frontend_assets() {
   echo ""
@@ -447,22 +586,16 @@ fi
 
 echo ""
 echo "=========================================="
-if [[ "$ALL_PASS" == "true" && "$ASSETS_OK" == "true" ]]; then
-  echo "  VERIFICATION PASSED"
-  echo "  All endpoints and assets verified"
-  echo "=========================================="
+echo "  VERIFICATION SUMMARY — ${APP_NAME}"
+echo "=========================================="
+echo "  API endpoints:   $([ "$ALL_PASS" == "true" ] && echo "PASS" || echo "FAIL")"
+echo "  Frontend assets: $([ "$ASSETS_OK" == "true" ] && echo "PASS" || echo "WARN")"
+echo "  Deep health:     $([ "$DEEP_HEALTH_OK" == "true" ] && echo "PASS" || echo "WARN")"
+echo "  Log: ${VERIFY_LOG}"
+echo "=========================================="
+
+if [[ "$ALL_PASS" == "true" ]]; then
   exit 0
-elif [[ "$ALL_PASS" == "true" ]]; then
-  echo "  VERIFICATION PARTIAL"
-  echo "  API endpoints OK, but some frontend assets failed"
-  echo "  Check: ${VERIFY_LOG}"
-  echo "=========================================="
-  exit 0  # Don't fail deployment for asset issues
 else
-  echo "  VERIFICATION FAILED"
-  echo "  Some endpoints still unreachable after ${MAX_ROUNDS} fix attempts"
-  echo "  Check: ${VERIFY_LOG}"
-  echo "  Results: ${VERIFY_TSV}"
-  echo "=========================================="
   exit 1
 fi

@@ -55,7 +55,23 @@ Steps:
    - Set `needs_provisioning = true` if type is postgresql or mongodb (server-hosted DBs need setup)
    - Set `needs_provisioning = false` if type is sqlite or none (file-based or no DB)
    - Record which env var holds the connection string (e.g., DATABASE_URL, MONGODB_URL)
-9. Write understand.json with all findings
+9. **Detect native modules and system dependencies** (critical for Docker build success):
+   - Source `devops/scripts/utils/detect-stack.sh` — check `HAS_NATIVE_MODULES`, `NATIVE_MODULES_LIST`
+   - If native modules found: note them in understand.json (QC-20 will handle Dockerfile fixes)
+   - For Python: check if app needs system libs (pdfplumber → libglib2.0-0, etc.)
+10. **Detect volume requirements** (critical for data persistence):
+    - Check for file writes: `writeFileSync`, `json.dump`, `sqlite3`, `multer` uploads
+    - Determine exact upload path: `public/uploads/` vs `uploads/`
+    - List critical seed files that must exist at startup
+    - Source `detect-stack.sh` — check `DATA_DIRS`, `UPLOAD_DIRS`, `CRITICAL_SEED_FILES`
+11. **Detect startup scripts** (scripts that run before main entry):
+    - Check Dockerfile CMD for chained commands: `sh -c "node seed.js && node app.js"`
+    - Check for `scripts/seed-users.js`, `scripts/init.js`, `seed.js` files
+    - Source `detect-stack.sh` — check `STARTUP_SCRIPTS`
+12. **Detect app directory location** — app may be in `apps/` or `plugins/`:
+    - Check both `apps/<app-name>/` and `plugins/<app-name>/`
+    - Record the actual path in understand.json
+13. Write understand.json with all findings
 
 ### Phase: PREPARE
 
@@ -306,6 +322,53 @@ All modifications MUST be committed with the `[DevOps]` prefix:
 [DevOps] chore: generate Dockerfile for Node.js app
 ```
 
+### FP-14: Native module compilation fails on Alpine
+**Symptom:** `npm ci` fails with "gyp ERR!" or "node-gyp rebuild failed" during Docker build
+**Diagnosis:** Native Node.js modules (better-sqlite3, sharp, bcrypt, etc.) require C++ compilation tools that are missing on Alpine, or use glibc APIs unavailable in musl
+**Fix:** QC-20 (check-native-deps.sh) detects these and either:
+1. Adds `python3 make g++` to Alpine: `RUN apk add --no-cache python3 make g++`
+2. Switches base image to `node:20-slim` (Debian) for modules that need glibc (better-sqlite3, puppeteer)
+Known native modules: better-sqlite3, sqlite3, bcrypt, sharp, canvas, puppeteer, node-sass, grpc, re2, leveldown, argon2
+
+### FP-15: App crashes because critical seed file is missing
+**Symptom:** Container starts but immediately crashes with "ENOENT" or "file not found" on a data file
+**Diagnosis:** App requires initial data files (e.g., `default-material-prices.json`, `data.json` with defaults) that must be present in the volume before first start
+**Fix:**
+1. QC-21 (check-volumes.sh) detects critical seed files by scanning code for file references
+2. deploy.sh transfers seed files to server volumes (only if server dir is empty)
+3. If seed file is missing locally: escalate — it must come from the original repo
+
+### FP-16: Python app returns 404 for all routes under sub-path
+**Symptom:** Health check passes on direct port but all routes return 404 through nginx `/<app>/` prefix
+**Diagnosis:** Flask/Django app doesn't have sub-path middleware. Unlike Vite (which has `base:` config), Python apps need WSGI middleware to strip the prefix.
+**Fix:** Ensure the app uses `PrefixMiddleware` or equivalent, and `BASE_PATH` env var is set:
+```python
+# Flask PrefixMiddleware pattern (jiangping uses this):
+class PrefixMiddleware:
+    def __init__(self, app, prefix=''):
+        self.app = app
+        self.prefix = prefix
+    def __call__(self, environ, start_response):
+        if environ['PATH_INFO'].startswith(self.prefix):
+            environ['PATH_INFO'] = environ['PATH_INFO'][len(self.prefix):]
+            environ['SCRIPT_NAME'] = self.prefix
+        return self.app(environ, start_response)
+```
+Set `BASE_PATH=/<app-name>` in `.env` and QC-12 handles this automatically.
+
+### FP-17: Upload files 404 through nginx
+**Symptom:** Image uploads work (POST succeeds) but uploaded files return 404 when accessed
+**Diagnosis:** Upload directory is at `public/uploads/` not `uploads/`, so the volume mount is wrong
+**Fix:** QC-21 (check-volumes.sh) detects the actual upload path from source code:
+- If code references `public/uploads`: mount `./apps/<app>/public/uploads:/app/public/uploads`
+- If code references `uploads/`: mount `./apps/<app>/uploads:/app/uploads`
+- Never assume — always grep the source code for the actual path
+
+### FP-18: App in plugins/ directory not found
+**Symptom:** deploy.sh fails with "App directory not found" even though the app exists
+**Diagnosis:** App is in `plugins/<app-name>/` not `apps/<app-name>/`. Some apps were originally standalone plugins.
+**Fix:** deploy.sh now checks both `apps/` and `plugins/` directories. The docker-compose volume mounts also use the correct prefix.
+
 ### FP-13: Health check or API blocked by nginx basic auth
 **Symptom:** Health check returns 401 Unauthorized through nginx; API calls return 401 even with valid JWT
 **Diagnosis:** Portal uses nginx basic auth globally. Health and API endpoints need `auth_basic off` in their location blocks.
@@ -315,6 +378,87 @@ If you see 401 on health/API through nginx, check the nginx config for the app's
 ssh $DEPLOY_SERVER "grep -A3 'location.*/${APP_NAME}' /opt/rr-portal/nginx/nginx.cloud.conf"
 ```
 Ensure `auth_basic off;` is present in the health and api location blocks.
+
+## App Deployment Patterns Knowledge Base
+
+Reference for deploying each app type observed in the portal. Use this to anticipate issues.
+
+### Pattern: Node.js + JSON File Storage (6 apps)
+**Apps:** rr-production, new-product-schedule, figure-mold-cost-system, task-api, zouhuo (partial), paiji (legacy)
+**Key needs:**
+- Volume mount for `data/` directory (JSON files)
+- Atomic write support (app uses write-to-tmp + rename)
+- Seed data files must be transferred on first deploy
+- No database provisioning needed
+**Watch for:** Apps that store data in `server/data/` (monorepos) vs `data/` (simple apps)
+
+### Pattern: Node.js + SQLite (better-sqlite3)
+**Apps:** paiji
+**Key needs:**
+- `node:20-slim` base image (NOT alpine — better-sqlite3 needs glibc)
+- Build tools: `python3 make g++ curl`
+- Volume mount for `data/` (contains `.db`, `.db-wal`, `.db-shm` files)
+- WAL mode creates auxiliary files that must also be in the volume
+**Watch for:** Multiple gunicorn/Node workers can cause SQLite locking
+
+### Pattern: Python/Flask + SQLite
+**Apps:** jiangping
+**Key needs:**
+- `python:3.12-slim` base image
+- Gunicorn WSGI server (NOT uvicorn) — detect `wsgi.py` entry point
+- `BASE_PATH` env var + `PrefixMiddleware` for sub-path routing
+- System libs: `libglib2.0-0 curl` for PDF/imaging support
+- Volume mounts: `data/` (SQLite DB) + `uploads/` (file uploads)
+**Watch for:** `wsgi.py` as entry point, NOT `app.py`
+
+### Pattern: Node.js + React Monorepo (Vite build)
+**Apps:** zouhuo, paiji
+**Key needs:**
+- Multi-stage Docker build: Stage 1 builds React frontend, Stage 2 runs server
+- `ARG BASE_PATH=/<app>/` passed to Vite build
+- Built frontend goes to `/app/client-dist` or equivalent
+- Server serves static files from built directory
+**Watch for:** Client and server have separate `package.json` files; lock files in both dirs
+
+### Pattern: Node.js + JWT Authentication
+**Apps:** zouhuo, figure-mold-cost-system
+**Key needs:**
+- `JWT_SECRET` must be generated (never use placeholder)
+- Seed users script may run at container startup (zouhuo: `seed-users.js`)
+- nginx `auth_basic off` on `/api/` routes (app handles its own JWT auth)
+**Watch for:** Default credentials in seed scripts (admin/admin123)
+
+### Pattern: Node.js + PIN Authentication (SHA256)
+**Apps:** rr-production
+**Key needs:**
+- PIN salt as env var (`PIN_SALT`)
+- Auto-initialization of supervisors/managers on first run
+- Default PIN (1234) must be changed on first login
+**Watch for:** If PIN_SALT changes, all existing PINs become invalid
+
+### Pattern: External API Dependencies
+**Apps:** zouhuo (Google Translate API)
+**Key needs:**
+- Container must have DNS resolution for external domains
+- Graceful fallback when API is unreachable
+- Docker bridge network allows outbound by default
+**Watch for:** Corporate firewalls blocking outbound from Docker
+
+### Pattern: Image/File Upload
+**Apps:** rr-production, new-product-schedule, figure-mold-cost-system, zouhuo, jiangping
+**Key needs:**
+- Upload directory volume mount (may be `uploads/` or `public/uploads/`)
+- nginx `client_max_body_size` sufficient (currently 50m)
+- Cleanup of orphaned uploads on delete
+**Watch for:** Some apps store images as base64 decoded to disk (figure-mold-cost-system)
+
+### Pattern: Excel Import/Export
+**Apps:** new-product-schedule, figure-mold-cost-system, zouhuo, jiangping, paiji
+**Key needs:**
+- `xlsx` or `exceljs` npm package (Node.js) or `openpyxl`/`pandas` (Python)
+- Temp directory for upload processing (multer)
+- Chinese column header support (UTF-8)
+**Watch for:** Large Excel files can block event loop; timeout settings matter
 
 ## Self-Healing Protocol
 

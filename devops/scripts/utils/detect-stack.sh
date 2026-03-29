@@ -19,6 +19,14 @@ detect_app_stack() {
   SERVER_DIR=""
   CLIENT_DIR=""
   IS_MONOREPO=false
+  HAS_NATIVE_MODULES=false
+  NATIVE_MODULES_LIST=""
+  STARTUP_SCRIPTS=""
+  WSGI_ENTRY=""
+  NEEDS_BUILD_TOOLS=false
+  DATA_DIRS=""
+  UPLOAD_DIRS=""
+  CRITICAL_SEED_FILES=""
 
   # --- Detect monorepo structure ---
   if [[ -d "$app_dir/server" && -d "$app_dir/client" ]]; then
@@ -127,6 +135,108 @@ else:
         break
       fi
     done
+  fi
+
+  # --- Detect native Node.js modules requiring build tools ---
+  if [[ "$STACK" == "node" ]]; then
+    local pkg_file="$pkg_dir/package.json"
+    if [[ -f "$pkg_file" ]]; then
+      # Known native modules that need python3/make/g++ to compile
+      local native_mods=("better-sqlite3" "sqlite3" "bcrypt" "sharp" "canvas" "node-gyp" "grpc" "node-sass" "puppeteer" "re2" "leveldown" "farmhash" "argon2")
+      for mod in "${native_mods[@]}"; do
+        if grep -q "\"$mod\"" "$pkg_file" 2>/dev/null; then
+          HAS_NATIVE_MODULES=true
+          NATIVE_MODULES_LIST="${NATIVE_MODULES_LIST:+$NATIVE_MODULES_LIST,}$mod"
+        fi
+      done
+      # Also check for node-gyp in scripts (build/install hooks)
+      if grep -q "node-gyp" "$pkg_file" 2>/dev/null; then
+        HAS_NATIVE_MODULES=true
+      fi
+    fi
+    if [[ "$HAS_NATIVE_MODULES" == "true" ]]; then
+      NEEDS_BUILD_TOOLS=true
+    fi
+  fi
+
+  # --- Detect Python system dependencies ---
+  if [[ "$STACK" == "python" ]]; then
+    local req_file="$pkg_dir/requirements.txt"
+    if [[ -f "$req_file" ]]; then
+      # Packages needing system libs
+      if grep -qi 'easyocr\|torch\|tensorflow\|opencv' "$req_file" 2>/dev/null; then
+        NEEDS_BUILD_TOOLS=true
+      fi
+      if grep -qi 'Pillow\|pdfplumber\|camelot' "$req_file" 2>/dev/null; then
+        # These need libglib, etc.
+        NEEDS_BUILD_TOOLS=true
+      fi
+    fi
+  fi
+
+  # --- Detect startup scripts (scripts that run before main entry) ---
+  local search_dir="${SERVER_DIR:-$app_dir}"
+  # Check Dockerfile CMD for chained commands (sh -c "script && main")
+  if [[ -f "$app_dir/Dockerfile" ]]; then
+    local cmd_line
+    cmd_line=$(grep -E '^CMD ' "$app_dir/Dockerfile" | tail -1)
+    if echo "$cmd_line" | grep -qE 'sh -c.*&&'; then
+      # Extract pre-start scripts from "sh -c "node seed.js && node app.js""
+      STARTUP_SCRIPTS=$(echo "$cmd_line" | grep -oE 'node [^ &]+' | head -n -1 | sed 's/node //' || true)
+    fi
+  fi
+  # Check for seed-users.js, init.js, setup.js patterns
+  for script in "scripts/seed-users.js" "scripts/seed.js" "scripts/init.js" "seed-users.js" "seed.js" "init-db.js"; do
+    if [[ -f "$search_dir/$script" ]]; then
+      STARTUP_SCRIPTS="${STARTUP_SCRIPTS:+$STARTUP_SCRIPTS,}$script"
+    fi
+  done
+
+  # --- Detect WSGI entry for Python apps ---
+  if [[ "$STACK" == "python" ]]; then
+    if [[ -f "$pkg_dir/wsgi.py" ]]; then
+      WSGI_ENTRY="wsgi:app"
+    fi
+  fi
+
+  # --- Detect data and upload directories from source code ---
+  if [[ "$STACK" == "node" ]]; then
+    # Scan for directory references in code
+    local code_dirs
+    code_dirs=$(grep -rhoE "(DATA_PATH|__dirname.*data|/app/data|./data)" "$search_dir" \
+      --include='*.js' --include='*.ts' 2>/dev/null | sort -u || true)
+    if [[ -n "$code_dirs" ]]; then
+      DATA_DIRS="data"
+    fi
+    # Detect upload directories
+    if grep -rq "uploads\|upload\|multer" "$search_dir" --include='*.js' --include='*.ts' 2>/dev/null; then
+      # Check specific upload paths from code
+      if grep -rq "public/uploads" "$search_dir" --include='*.js' --include='*.ts' 2>/dev/null; then
+        UPLOAD_DIRS="public/uploads"
+      elif grep -rq "/uploads" "$search_dir" --include='*.js' --include='*.ts' 2>/dev/null; then
+        UPLOAD_DIRS="uploads"
+      fi
+    fi
+  elif [[ "$STACK" == "python" ]]; then
+    if grep -rq "DATA_PATH\|data\.db\|data\.json\|/app/data" "$search_dir" --include='*.py' 2>/dev/null; then
+      DATA_DIRS="data"
+    fi
+    if grep -rq "UPLOAD_FOLDER\|/uploads\|multer" "$search_dir" --include='*.py' 2>/dev/null; then
+      UPLOAD_DIRS="uploads"
+    fi
+  fi
+
+  # --- Detect critical seed files that MUST exist for app to function ---
+  for seed_file in "data/default-material-prices.json" "data/data.json" "data/molds.json" "data/machines.json"; do
+    if [[ -f "$search_dir/$seed_file" ]]; then
+      CRITICAL_SEED_FILES="${CRITICAL_SEED_FILES:+$CRITICAL_SEED_FILES,}$seed_file"
+    fi
+  done
+  # Also check if code references specific data files at startup
+  if grep -rq "default-material-prices" "$search_dir" --include='*.js' --include='*.py' 2>/dev/null; then
+    if [[ -f "$search_dir/data/default-material-prices.json" ]]; then
+      CRITICAL_SEED_FILES="${CRITICAL_SEED_FILES:+$CRITICAL_SEED_FILES,}data/default-material-prices.json"
+    fi
   fi
 }
 

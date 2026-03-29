@@ -6,6 +6,9 @@
 # Stage 2: Production server with built client assets
 #
 # Managed by the DevOps agent. Do not edit manually.
+#
+# CUSTOMIZE markers indicate lines that check-dockerfile.sh
+# auto-replaces based on app analysis.
 # ============================================================
 
 # --- Stage 1: Build the frontend ---
@@ -18,13 +21,16 @@ COPY client/package.json client/package-lock.json ./
 RUN npm ci
 
 COPY client/ ./
-# CUSTOMIZE: build command and base path
-RUN npm run build
+# CUSTOMIZE: build command, base path, and output dir
+ARG BASE_PATH=/
+ENV VITE_BASE_PATH=${BASE_PATH}
+RUN npx vite build --base ${BASE_PATH}
 
 # --- Stage 2: Production server ---
+# CUSTOMIZE: base image — use node:20-slim for native modules (better-sqlite3, sharp)
 FROM node:20-alpine
 
-# Install tini for proper signal handling and curl for health checks
+# CUSTOMIZE: system deps — add python3 make g++ for native modules
 RUN apk add --no-cache tini curl
 
 WORKDIR /app
@@ -41,22 +47,17 @@ COPY server/ ./
 # CUSTOMIZE: output directory name (dist/ or build/ or .next/)
 COPY --from=client-build /build/dist /app/client-dist
 
-# Create data directories (added by QC-10 if needed)
-RUN mkdir -p /app/data /app/uploads /app/templates
-
-# Non-root user
-RUN addgroup -S appgroup && adduser -S appuser -G appgroup
-RUN chown -R appuser:appgroup /app/data /app/uploads /app/templates
-USER appuser
+# CUSTOMIZE: data directories — detected by QC-21
+RUN mkdir -p /app/data /app/uploads
 
 # CUSTOMIZE: port
 ENV PORT=3000
 ENV NODE_ENV=production
 EXPOSE 3000
 
-HEALTHCHECK --interval=10s --timeout=3s --retries=3 \
-  CMD curl -f http://localhost:3000/health || exit 1
+HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
+  CMD curl -sf http://localhost:3000/health || exit 1
 
 ENTRYPOINT ["/sbin/tini", "--"]
-# CUSTOMIZE: entry point
+# CUSTOMIZE: entry point — may include startup scripts (seed-users.js, init.js)
 CMD ["node", "app.js"]

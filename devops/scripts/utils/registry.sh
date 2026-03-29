@@ -11,6 +11,9 @@
 #   registry_get_port <app_name>           — read allocated port (stdout)
 #   registry_app_exists <app_name>         — 0 if exists, 1 if not
 #   compose_add_service <name> <host_port> <container_port>   — add to docker-compose.yml
+#
+# All write operations use fcntl file locking + atomic temp-file
+# rename to prevent race conditions on concurrent access.
 # ============================================================
 
 # Resolve repo root — works whether sourced from anywhere
@@ -20,6 +23,10 @@ REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || echo "$(cd "$(dirname 
 PORTS_FILE="${REPO_ROOT}/devops/config/ports.json"
 APPS_FILE="${REPO_ROOT}/devops/config/apps.json"
 COMPOSE_FILE="${REPO_ROOT}/docker-compose.yml"
+
+# --- Lock file paths ---
+PORTS_LOCK="${PORTS_FILE}.lock"
+APPS_LOCK="${APPS_FILE}.lock"
 
 # ============================================================
 # registry_allocate_port — assign next available port to an app
@@ -32,16 +39,34 @@ COMPOSE_FILE="${REPO_ROOT}/docker-compose.yml"
 registry_allocate_port() {
   local app_name="$1"
   python3 -c "
-import json, sys
+import json, sys, fcntl, tempfile, os
+
 ports_file = sys.argv[1]
 app = sys.argv[2]
-d = json.load(open(ports_file))
-port = d['_nextPort']
-d[app] = {'port': port}
-d['_nextPort'] = port + 1
-json.dump(d, open(ports_file, 'w'), indent=2)
-print(port)
-" "$PORTS_FILE" "$app_name"
+lock_file = sys.argv[3]
+
+lock_fd = open(lock_file, 'w')
+try:
+    fcntl.flock(lock_fd, fcntl.LOCK_EX)
+    d = json.load(open(ports_file))
+    port = d['_nextPort']
+    d[app] = {'port': port}
+    d['_nextPort'] = port + 1
+    # Atomic write: temp file + rename
+    dir_name = os.path.dirname(ports_file)
+    fd, tmp_path = tempfile.mkstemp(dir=dir_name, suffix='.json')
+    try:
+        with os.fdopen(fd, 'w') as f:
+            json.dump(d, f, indent=2)
+        os.rename(tmp_path, ports_file)
+    except:
+        os.unlink(tmp_path)
+        raise
+    print(port)
+finally:
+    fcntl.flock(lock_fd, fcntl.LOCK_UN)
+    lock_fd.close()
+" "$PORTS_FILE" "$app_name" "$PORTS_LOCK"
 }
 
 # ============================================================
@@ -55,22 +80,40 @@ print(port)
 registry_register_app() {
   local app_name="$1" stack="$2" port="$3" entrypoint="$4"
   python3 -c "
-import json, datetime, sys
+import json, datetime, sys, fcntl, tempfile, os
+
 apps_file = sys.argv[1]
 app = sys.argv[2]
 stack = sys.argv[3]
 port = int(sys.argv[4])
 entrypoint = sys.argv[5]
-d = json.load(open(apps_file))
-d[app] = {
-  'stack': stack,
-  'port': port,
-  'status': 'active',
-  'entrypoint': entrypoint,
-  'addedAt': datetime.datetime.utcnow().isoformat() + 'Z'
-}
-json.dump(d, open(apps_file, 'w'), indent=2)
-" "$APPS_FILE" "$app_name" "$stack" "$port" "$entrypoint"
+lock_file = sys.argv[6]
+
+lock_fd = open(lock_file, 'w')
+try:
+    fcntl.flock(lock_fd, fcntl.LOCK_EX)
+    d = json.load(open(apps_file))
+    d[app] = {
+      'stack': stack,
+      'port': port,
+      'status': 'active',
+      'entrypoint': entrypoint,
+      'addedAt': datetime.datetime.utcnow().isoformat() + 'Z'
+    }
+    # Atomic write: temp file + rename
+    dir_name = os.path.dirname(apps_file)
+    fd, tmp_path = tempfile.mkstemp(dir=dir_name, suffix='.json')
+    try:
+        with os.fdopen(fd, 'w') as f:
+            json.dump(d, f, indent=2)
+        os.rename(tmp_path, apps_file)
+    except:
+        os.unlink(tmp_path)
+        raise
+finally:
+    fcntl.flock(lock_fd, fcntl.LOCK_UN)
+    lock_fd.close()
+" "$APPS_FILE" "$app_name" "$stack" "$port" "$entrypoint" "$APPS_LOCK"
 }
 
 # ============================================================

@@ -1,0 +1,26 @@
+{
+  "task-api": {
+    "deep_endpoint": "/tasks",
+    "expected_status": 200
+  },
+  "zouhuo": {
+    "deep_endpoint": "/api/products",
+    "expected_status": 200
+  },
+  "jiangping": {
+    "deep_endpoint": "/dashboard/api/by_supplier",
+    "expected_status": 200
+  },
+  "paiji": {
+    "deep_endpoint": "/api/machines",
+    "expected_status": 200
+  },
+  "new-product-schedule": {
+    "deep_endpoint": "/api/projects",
+    "expected_status": 200
+  },
+  "figure-mold-cost-system": {
+    "deep_endpoint": "/api/mold-orders",
+    "expected_status": 200
+  }
+}

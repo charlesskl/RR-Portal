@@ -58,6 +58,14 @@ devops/logs/*.log
 devops/logs/*.tsv
 devops/logs/*.jsonl
 devops/logs/*.txt
+devops/logs/*.lock
+devops/logs/.health-check.lock/
+
+# DevOps backups (keep directory, ignore content)
+devops/backups/*.bak
+
+# DevOps config lock files
+devops/config/*.lock
 
 # Apps - ignore nested git repos and build artifacts
 apps/*/.git/

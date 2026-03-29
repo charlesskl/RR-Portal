@@ -1,31 +1,44 @@
-FROM node:20-alpine
+# --- Stage 1: Build frontend ---
+FROM node:20-alpine AS frontend-build
 
-WORKDIR /app
-
-# Install build tools for native modules (bcrypt, jimp, etc.)
-RUN apk add --no-cache python3 make g++ curl
-
-# ── Build frontend ──
-COPY client/package.json client/package-lock.json ./client/
-WORKDIR /app/client
+WORKDIR /build/client
+COPY client/package.json client/package-lock.json ./
 RUN npm ci
-
 COPY client/ ./
 RUN npm run build
 
-# ── Install backend ──
+# --- Stage 2: Production ---
+FROM node:20-alpine AS production
+
+# Install tini for proper signal handling + curl for healthcheck
+RUN apk add --no-cache tini curl
+
+# Non-root user
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+
 WORKDIR /app/server
+
+# Install production dependencies
 COPY server/package.json server/package-lock.json ./
 RUN npm ci --omit=dev
 
 COPY server/ ./
 
-# Express serves from path.join(__dirname, '..', 'client', 'dist')
-# __dirname = /app/server → clientDist = /app/client/dist (already built above)
+# Copy built frontend — Express serves from path.join(__dirname, '..', 'client', 'dist')
+COPY --from=frontend-build /build/client/dist /app/client/dist
 
-# Ensure data & uploads directories exist
-RUN mkdir -p /app/server/data /app/server/uploads
+# Ensure data & uploads directories exist with correct ownership
+RUN mkdir -p /app/server/data /app/server/uploads && \
+    chown -R appuser:appgroup /app
+
+ENV NODE_ENV=production
 
 EXPOSE 3002
 
+USER appuser
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
+  CMD curl -sf http://localhost:3002/health || exit 1
+
+ENTRYPOINT ["tini", "--"]
 CMD ["sh", "-c", "node scripts/seed-users.js && node app.js"]

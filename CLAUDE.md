@@ -195,7 +195,25 @@ volumes:
   - xxx_data:/app/data
 ```
 
-### 3. Hardcoded 配置 → 环境变量
+### 3. 首次启动种子数据
+- [ ] 确认 app 在**全空数据目录**下能正常启动（不能崩溃）
+- [ ] 如果 app 需要预置数据（工厂列表、默认用户、模板配置等），**必须在代码中内置种子逻辑**
+- [ ] 种子逻辑仅在数据为空时运行（幂等），不覆盖已有数据
+- [ ] 不依赖 gitignored 的数据文件作为唯一数据来源
+- [ ] 验证：删除 data 目录 → 重启容器 → app 功能正常且有必要的初始数据
+
+```javascript
+// ✅ 正确 - 代码内置种子数据
+if (orders.length === 0 && fs.existsSync(seedFile)) {
+  const seed = JSON.parse(fs.readFileSync(seedFile));
+  insertAll(seed);
+}
+
+// ❌ 错误 - 仅依赖 gitignored 文件，首次部署数据丢失
+const data = JSON.parse(fs.readFileSync('data/data.json'));
+```
+
+### 4. Hardcoded 配置 → 环境变量
 - [ ] IP 地址 → `process.env.XXX_IP`
 - [ ] 端口号 → `process.env.PORT`
 - [ ] API 密钥/密码 → `process.env.XXX_KEY`
@@ -204,23 +222,23 @@ volumes:
 - [ ] 创建 `.env` 文件（填入实际值）
 - [ ] 创建 `.env.example` 文件（模板，不含敏感信息）
 
-### 4. 网络访问
+### 5. 网络访问
 - [ ] 检查是否需要访问局域网硬件（打印机、扫描仪、PLC 等）
   - 如果需要：考虑 `network_mode: host`（注意 Windows Docker Desktop 限制）
   - 如果不需要：使用默认 `platform-net` bridge 网络即可
 - [ ] 检查是否调用外部 API（需确保 DNS 解析正常）
 
-### 5. docker-compose.yml
+### 6. docker-compose.yml
 - [ ] 添加服务定义（build、env_file、environment、volumes）
 - [ ] 添加 `restart: unless-stopped`
 - [ ] 添加 `networks: platform-net`（除非用 host 模式）
 - [ ] 如需通过 nginx 访问：更新 nginx.conf（upstream + location）
 
-### 6. 数据库 Schema（plugin_sdk 插件）
+### 7. 数据库 Schema（plugin_sdk 插件）
 - [ ] 确认 PostgreSQL 中存在对应 schema：`CREATE SCHEMA IF NOT EXISTS plugin_xxx`
 - [ ] 或在 `init-db.sql` 中添加
 
-### 7. 部署后验证
+### 8. 部署后验证
 - [ ] `docker compose up -d --build <service>` 构建启动
 - [ ] `docker compose logs <service>` 检查无报错
 - [ ] `docker compose restart nginx` 刷新 nginx DNS

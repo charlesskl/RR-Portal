@@ -37,10 +37,17 @@ function loadData() {
     if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
     if (!fs.existsSync(DATA_FILE)) {
       fs.writeFileSync(DATA_FILE, JSON.stringify({
-        mold_orders: [], figure_orders: [],
-        mold_factories: [], figure_factories: [],
-        customers: [], eng_users: [], nextId: 1
+        mold_orders: [], figure_orders: [], purchase_orders: [],
+        mold_factories: ['东莞兴信模具厂', '华登模具厂'],
+        figure_factories: ['东莞兴信手办厂'],
+        customers: ['ZURU', 'JAZWARES', 'Moose', 'TOMY'],
+        eng_users: [
+          { name: '管理员', pin: '123456' },
+          { name: '测试用户', pin: '123456' }
+        ],
+        nextId: 1, po_next_id: 1
       }, null, 2));
+      console.log('已创建 data.json 并预置工厂/客户/用户数据');
     }
     try {
       _cache = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));

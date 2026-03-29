@@ -10,15 +10,15 @@ RUN npx vite build --base ${BASE_PATH}
 
 FROM node:20-alpine AS production
 
-# Install tini for proper signal handling + curl for healthcheck
-RUN apk add --no-cache tini curl
+# Install tini for proper signal handling + curl for healthcheck + build tools for native modules
+RUN apk add --no-cache tini curl python3 make g++
 
 # Non-root user
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 
 WORKDIR /app
 COPY server/package.json server/package-lock.json ./
-RUN npm ci --omit=dev
+RUN npm ci --omit=dev && apk del python3 make g++
 
 COPY server/ ./
 COPY --from=frontend-build /build/client/dist /app/client-dist

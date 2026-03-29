@@ -17,10 +17,22 @@ services:
       - ./nginx/.htpasswd:/etc/nginx/.htpasswd:ro
       - ./frontend/index.cloud.html:/usr/share/nginx/html/index.html:ro
       - ./frontend/logo.png:/usr/share/nginx/html/logo.png:ro
+      # Uncomment for HTTPS after running setup-ssl.sh:
+      # - ./ssl:/etc/nginx/ssl:ro
     depends_on:
       core:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO /dev/null http://127.0.0.1:80/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     networks:
       - platform-net
 
@@ -40,6 +52,11 @@ services:
       timeout: 3s
       retries: 5
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     networks:
       - platform-net
 
@@ -52,6 +69,11 @@ services:
       timeout: 3s
       retries: 5
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     networks:
       - platform-net
 
@@ -78,6 +100,11 @@ services:
       timeout: 5s
       retries: 3
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     networks:
       - platform-net
 
@@ -99,6 +126,11 @@ services:
       timeout: 5s
       retries: 3
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     networks:
       - platform-net
 
@@ -118,6 +150,11 @@ services:
       timeout: 5s
       retries: 3
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     networks:
       - platform-net
 
@@ -127,7 +164,7 @@ services:
       dockerfile: Dockerfile
     environment:
       - PORT=3001
-      - JWT_SECRET=${FIGURE_MOLD_JWT_SECRET:-rr-procurement-secret-2026}
+      - JWT_SECRET=${FIGURE_MOLD_JWT_SECRET:?FIGURE_MOLD_JWT_SECRET is required}
       - DATA_PATH=/app/data
       - UPLOADS_PATH=/app/public/uploads
     volumes:
@@ -139,6 +176,11 @@ services:
       timeout: 5s
       retries: 3
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     networks:
       - platform-net
 
@@ -148,9 +190,9 @@ services:
       dockerfile: Dockerfile
     environment:
       - PORT=3002
-      - JWT_SECRET=${ZOUHUO_JWT_SECRET:-rr-zouhuo-secret-2026}
+      - JWT_SECRET=${ZOUHUO_JWT_SECRET:?ZOUHUO_JWT_SECRET is required}
       - JWT_EXPIRES_IN=8h
-      - CORS_ORIGIN=*
+      - CORS_ORIGIN=${ZOUHUO_CORS_ORIGIN:?ZOUHUO_CORS_ORIGIN is required - do not use wildcard *}
       - RATE_LIMIT_WINDOW_MS=900000
       - RATE_LIMIT_MAX=200
       - MAX_FILE_SIZE_MB=50
@@ -163,6 +205,11 @@ services:
       timeout: 5s
       retries: 3
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     networks:
       - platform-net
 
@@ -174,7 +221,7 @@ services:
       - BASE_PATH=/jiangping
       - DATA_PATH=/app/data
       - UPLOAD_FOLDER=/app/uploads
-      - SECRET_KEY=${JIANGPING_SECRET_KEY:-huadeng-jiangping-2026}
+      - SECRET_KEY=${JIANGPING_SECRET_KEY:?JIANGPING_SECRET_KEY is required}
     volumes:
       - ./apps/jiangping/data:/app/data
       - ./apps/jiangping/uploads:/app/uploads
@@ -184,6 +231,11 @@ services:
       timeout: 5s
       retries: 3
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     networks:
       - platform-net
 
@@ -203,6 +255,11 @@ services:
       timeout: 5s
       retries: 3
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     networks:
       - platform-net
 

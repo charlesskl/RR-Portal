@@ -73,13 +73,23 @@ if [ ! -f "$ENV_FILE" ]; then
     REDIS_PASS=$(openssl rand -base64 24 | tr -d '/+=')
     JWT_SEC=$(openssl rand -base64 48 | tr -d '/+=')
     ADMIN_PASS=$(openssl rand -base64 16 | tr -d '/+=')
+    FIGURE_MOLD_SEC=$(openssl rand -base64 48 | tr -d '/+=')
+    ZOUHUO_SEC=$(openssl rand -base64 48 | tr -d '/+=')
+    JIANGPING_SEC=$(openssl rand -base64 48 | tr -d '/+=')
+
+    # Detect server public IP for default CORS/origins
+    SERVER_IP=$(curl -sf https://api.ipify.org 2>/dev/null || hostname -I | awk '{print $1}')
 
     # Fill in required fields
     sed -i "s/^DB_PASSWORD=.*/DB_PASSWORD=${DB_PASS}/" "$ENV_FILE"
     sed -i "s/^REDIS_PASSWORD=.*/REDIS_PASSWORD=${REDIS_PASS}/" "$ENV_FILE"
     sed -i "s/^JWT_SECRET=.*/JWT_SECRET=${JWT_SEC}/" "$ENV_FILE"
     sed -i "s/^ADMIN_PASSWORD=.*/ADMIN_PASSWORD=${ADMIN_PASS}/" "$ENV_FILE"
-    sed -i "s/^ALLOWED_ORIGINS=.*/ALLOWED_ORIGINS=*/" "$ENV_FILE"
+    sed -i "s/^ALLOWED_ORIGINS=.*/ALLOWED_ORIGINS=http:\/\/${SERVER_IP}/" "$ENV_FILE"
+    sed -i "s/^FIGURE_MOLD_JWT_SECRET=.*/FIGURE_MOLD_JWT_SECRET=${FIGURE_MOLD_SEC}/" "$ENV_FILE"
+    sed -i "s/^ZOUHUO_JWT_SECRET=.*/ZOUHUO_JWT_SECRET=${ZOUHUO_SEC}/" "$ENV_FILE"
+    sed -i "s/^JIANGPING_SECRET_KEY=.*/JIANGPING_SECRET_KEY=${JIANGPING_SEC}/" "$ENV_FILE"
+    sed -i "s/^ZOUHUO_CORS_ORIGIN=.*/ZOUHUO_CORS_ORIGIN=http:\/\/${SERVER_IP}/" "$ENV_FILE"
 
     echo ""
     echo "╔══════════════════════════════════════════════╗"

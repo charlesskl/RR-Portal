@@ -45,8 +45,28 @@ echo "=== Step 2: Merging PR ==="
 PR_NUMBER=$(gh pr list --head "onboard/${APP_NAME}" --json number --jq '.[0].number' 2>/dev/null || echo "")
 
 if [[ -n "$PR_NUMBER" ]]; then
-  gh pr merge "$PR_NUMBER" --squash --auto 2>/dev/null || true
-  echo "  [OK] PR #${PR_NUMBER} merged"
+  echo "  PR #${PR_NUMBER} created. Waiting for review and merge..."
+  echo "  Run: gh pr merge ${PR_NUMBER} --squash"
+  echo ""
+
+  # Wait for PR to be merged (poll every 10s, max 10 min)
+  echo "  Polling for PR merge status..."
+  MERGE_ATTEMPTS=0
+  MAX_MERGE_WAIT=60  # 60 * 10s = 10 minutes
+  while [[ $MERGE_ATTEMPTS -lt $MAX_MERGE_WAIT ]]; do
+    PR_STATE=$(gh pr view "$PR_NUMBER" --json state --jq '.state' 2>/dev/null || echo "UNKNOWN")
+    if [[ "$PR_STATE" == "MERGED" ]]; then
+      echo "  [OK] PR #${PR_NUMBER} merged"
+      break
+    fi
+    sleep 10
+    MERGE_ATTEMPTS=$((MERGE_ATTEMPTS + 1))
+  done
+
+  if [[ "$PR_STATE" != "MERGED" ]]; then
+    echo "  [WARN] PR #${PR_NUMBER} not merged after 10 minutes — aborting deploy"
+    exit 1
+  fi
 
   # Switch to main and pull
   git checkout main 2>/dev/null

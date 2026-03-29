@@ -5,10 +5,10 @@ set -euo pipefail
 # ============================================================
 # Tests all discovered API endpoints through nginx reverse proxy.
 # If endpoints return 404 through nginx but 200 directly,
-# diagnoses routing issues and attempts auto-fixes.
+# diagnoses routing issues and reports recommendations.
 #
-# Inspired by autoresearch's experiment loop:
-# discover -> test -> diagnose -> fix -> re-test -> keep/discard
+# REPORT-ONLY: This script never modifies production source files.
+# Fix routing issues in source code and redeploy.
 #
 # Usage: verify-deploy.sh <app-name> <server-host> <host-port> <compose-path>
 # Exit 0: All endpoints verified OK
@@ -223,18 +223,18 @@ test_endpoints() {
 }
 
 # ============================================================
-# Phase 3: Attempt auto-fix for routing issues
+# Phase 3: Diagnose routing issues (report-only, no auto-fix)
 # ============================================================
-attempt_fix() {
+diagnose_routing() {
   local round="$1"
   echo ""
-  echo "=== VERIFY: attempting auto-fix (round ${round}) ==="
+  echo "=== VERIFY: diagnosing routing issues (round ${round}) ==="
 
   local compose_dir
   compose_dir=$(dirname "$COMPOSE_PATH")
   local app_dir="${compose_dir}/apps/${APP_NAME}"
 
-  # Strategy 1: Inject axios baseURL
+  # Check 1: Does the app have axios baseURL configured?
   echo "[VERIFY] Checking for axios baseURL..."
   local has_baseurl
   has_baseurl=$(ssh "root@${SERVER_HOST}" "
@@ -242,99 +242,49 @@ attempt_fix() {
   " 2>/dev/null || true)
 
   if [[ -z "$has_baseurl" ]]; then
-    echo "[VERIFY] Injecting axios.defaults.baseURL = '/${APP_NAME}'..."
-
-    ssh "root@${SERVER_HOST}" "
-      # Find the main app file with axios import
-      APP_FILE=\$(grep -rl \"import axios\" '${app_dir}/client/src/' '${app_dir}/frontend/src/' '${app_dir}/src/' 2>/dev/null | head -1)
-
-      if [[ -n \"\$APP_FILE\" ]]; then
-        # Insert baseURL after the axios import line
-        sed -i \"s|import axios from 'axios';|import axios from 'axios';\naxios.defaults.baseURL = '/${APP_NAME}';|\" \"\$APP_FILE\" 2>/dev/null || \
-        sed -i \"s|import axios from \\\"axios\\\";|import axios from \\\"axios\\\";\naxios.defaults.baseURL = '/${APP_NAME}';|\" \"\$APP_FILE\" 2>/dev/null || true
-        echo \"FIXED: injected baseURL in \$APP_FILE\"
-      else
-        # Check for fetch() usage — inject a global wrapper in main entry
-        MAIN_FILE=\$(find '${app_dir}/client/src/' '${app_dir}/frontend/src/' '${app_dir}/src/' -name 'main.*' -o -name 'index.*' 2>/dev/null | grep -E '\.(jsx|tsx|js|ts)$' | head -1)
-        if [[ -n \"\$MAIN_FILE\" ]]; then
-          # Prepend fetch wrapper
-          WRAPPER=\"const _originalFetch = window.fetch;
-window.fetch = (url, opts) => {
-  if (typeof url === 'string' && url.startsWith('/api/')) {
-    url = '/${APP_NAME}' + url;
-  }
-  return _originalFetch(url, opts);
-};
-\"
-          echo \"\$WRAPPER\" | cat - \"\$MAIN_FILE\" > /tmp/main_fixed && mv /tmp/main_fixed \"\$MAIN_FILE\"
-          echo \"FIXED: injected fetch wrapper in \$MAIN_FILE\"
-        fi
-      fi
-    " 2>/dev/null || true
-
-    # Strategy 2: Check vite.config base path
-    echo "[VERIFY] Checking Vite base path..."
-    ssh "root@${SERVER_HOST}" "
-      VITE_CONFIG=\$(find '${app_dir}/client/' '${app_dir}/frontend/' '${app_dir}/' -maxdepth 2 -name 'vite.config.*' 2>/dev/null | head -1)
-      if [[ -n \"\$VITE_CONFIG\" ]]; then
-        if ! grep -q 'base:.*\"/${APP_NAME}/\"' \"\$VITE_CONFIG\" 2>/dev/null; then
-          if grep -q 'base:' \"\$VITE_CONFIG\" 2>/dev/null; then
-            sed -i 's|base:.*|base: \"/${APP_NAME}/\",|' \"\$VITE_CONFIG\" 2>/dev/null || true
-          else
-            sed -i 's|plugins:|base: \"/${APP_NAME}/\",\n  plugins:|' \"\$VITE_CONFIG\" 2>/dev/null || true
-          fi
-          echo \"FIXED: set vite base to /${APP_NAME}/\"
-        fi
-      fi
-    " 2>/dev/null || true
-
-    # Rebuild Docker image on server
-    echo "[VERIFY] Rebuilding Docker image..."
-    ssh "root@${SERVER_HOST}" "
-      cd '${app_dir}' && \
-      docker build -t rr-portal/${APP_NAME}:latest . 2>&1 | tail -5
-    " 2>/dev/null || true
-
-    sleep 2
-
-    # Restart container
-    echo "[VERIFY] Restarting container..."
-    ssh "root@${SERVER_HOST}" "
-      cd '${compose_dir}' && \
-      docker compose -f '$(basename "$COMPOSE_PATH")' up -d ${APP_NAME} 2>&1
-    " 2>/dev/null || true
-
-    # Wait for container to be healthy
-    echo "[VERIFY] Waiting for container health..."
-    local attempts=0
-    while [[ $attempts -lt 15 ]]; do
-      if curl -sf "http://${SERVER_HOST}:${HOST_PORT}/health" > /dev/null 2>&1; then
-        echo "[VERIFY] Container healthy after fix"
-        return 0
-      fi
-      sleep 2
-      attempts=$((attempts + 1))
-    done
-
-    echo "[VERIFY] WARNING: Container not healthy after fix attempt"
-    return 1
+    echo "[VERIFY] ISSUE: No axios baseURL set for /${APP_NAME}"
+    echo "[VERIFY] RECOMMENDATION: Add axios.defaults.baseURL = '/${APP_NAME}' to the app source"
   else
-    echo "[VERIFY] baseURL already set — checking nginx config..."
-
-    # Check nginx has the right location blocks
-    local nginx_has_route
-    nginx_has_route=$(ssh "root@${SERVER_HOST}" "
-      grep -c 'location.*/${APP_NAME}/' /opt/rr-portal/nginx/nginx.cloud.conf 2>/dev/null || echo 0
-    " 2>/dev/null || echo "0")
-
-    if [[ "$nginx_has_route" == "0" ]]; then
-      echo "[VERIFY] WARN: nginx missing location block for /${APP_NAME}/ — manual intervention needed"
-      return 1
-    fi
-
-    echo "[VERIFY] nginx config looks correct — issue may be elsewhere"
-    return 1
+    echo "[VERIFY] OK: axios baseURL is configured"
   fi
+
+  # Check 2: Does nginx have the right location block?
+  echo "[VERIFY] Checking nginx config..."
+  local nginx_has_route
+  nginx_has_route=$(ssh "root@${SERVER_HOST}" "
+    grep -c 'location.*/${APP_NAME}/' /opt/rr-portal/nginx/nginx.cloud.conf 2>/dev/null || echo 0
+  " 2>/dev/null || echo "0")
+
+  if [[ "$nginx_has_route" == "0" ]]; then
+    echo "[VERIFY] ISSUE: nginx missing location block for /${APP_NAME}/"
+    echo "[VERIFY] RECOMMENDATION: Add location /${APP_NAME}/ to nginx.cloud.conf"
+  else
+    echo "[VERIFY] OK: nginx has location block for /${APP_NAME}/"
+  fi
+
+  # Check 3: Vite base path
+  echo "[VERIFY] Checking Vite base path..."
+  local vite_base
+  vite_base=$(ssh "root@${SERVER_HOST}" "
+    VITE_CONFIG=\$(find '${app_dir}/client/' '${app_dir}/frontend/' '${app_dir}/' -maxdepth 2 -name 'vite.config.*' 2>/dev/null | head -1)
+    if [[ -n \"\$VITE_CONFIG\" ]]; then
+      grep 'base:' \"\$VITE_CONFIG\" 2>/dev/null || echo 'NO_BASE'
+    else
+      echo 'NO_VITE'
+    fi
+  " 2>/dev/null || echo "SKIP")
+
+  case "$vite_base" in
+    *NO_VITE*) echo "[VERIFY] INFO: No vite.config found (not a Vite app)" ;;
+    *NO_BASE*) echo "[VERIFY] ISSUE: vite.config missing base path — should be '/${APP_NAME}/'" ;;
+    *"/${APP_NAME}/"*) echo "[VERIFY] OK: Vite base path is set correctly" ;;
+    *) echo "[VERIFY] WARN: Vite base path may be incorrect: $vite_base" ;;
+  esac
+
+  # Report-only: never modify production source files
+  echo ""
+  echo "[VERIFY] NOTE: This script is report-only. Fix routing issues in source code and redeploy."
+  return 1
 }
 
 # ============================================================
@@ -360,12 +310,9 @@ while [[ $ROUND -lt $MAX_ROUNDS ]]; do
   fi
 
   if [[ $ROUND -lt $MAX_ROUNDS ]]; then
-    if attempt_fix "$ROUND"; then
-      echo "[VERIFY] Fix applied — re-testing in next round"
-      sleep 5  # Give container time to start
-    else
-      echo "[VERIFY] Fix attempt failed"
-    fi
+    diagnose_routing "$ROUND"
+    echo "[VERIFY] Routing issues reported — re-testing in case of transient failure"
+    sleep 5  # Give container time to stabilize
   fi
 done
 

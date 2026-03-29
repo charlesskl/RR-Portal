@@ -29,16 +29,28 @@ jobs:
           script: |
             cd /opt/rr-portal
             git fetch origin
-            git reset --hard origin/main
+            git checkout main
+            git pull --ff-only origin main
             bash deploy/update-server.sh
 
       - name: Health Check
         run: |
-          sleep 25
-          STATUS=$(curl -sf -o /dev/null -w "%{http_code}" "http://${{ secrets.CLOUD_HOST }}/nginx-health" || echo "000")
-          if [ "$STATUS" = "200" ] || [ "$STATUS" = "401" ]; then
-            echo "Deployment successful (HTTP $STATUS)"
-          else
-            echo "Deployment may have failed (HTTP $STATUS)"
+          sleep 30
+          FAILED=0
+          for ENDPOINT in /nginx-health /health /rr/health /zouhuo/health /jiangping/health /paiji/health /new-product-schedule/health /figure-mold-cost-system/health; do
+            STATUS=$(curl -sf -o /dev/null -w "%{http_code}" --max-time 10 "http://${{ secrets.CLOUD_HOST }}${ENDPOINT}" 2>/dev/null || echo "000")
+            if [ "$STATUS" = "200" ]; then
+              echo "[OK] ${ENDPOINT} (HTTP $STATUS)"
+            else
+              echo "[FAIL] ${ENDPOINT} (HTTP $STATUS)"
+              FAILED=$((FAILED + 1))
+            fi
+          done
+          if [ "$FAILED" -gt 2 ]; then
+            echo "Deployment failed: $FAILED services unhealthy"
             exit 1
+          elif [ "$FAILED" -gt 0 ]; then
+            echo "Deployment partial: $FAILED services unhealthy (non-critical)"
+          else
+            echo "Deployment successful: all services healthy"
           fi

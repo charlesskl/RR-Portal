@@ -1,7 +1,7 @@
 {
   "task-api": {
     "stack": "node",
-    "port": 3001,
+    "port": 8080,
     "status": "active",
     "entrypoint": "server.js",
     "department": "Engineering",
@@ -14,5 +14,45 @@
     "entrypoint": "server/app.js",
     "department": "Engineering",
     "addedAt": "2026-03-21T00:00:00Z"
+  },
+  "rr-production": {
+    "stack": "node",
+    "port": 3000,
+    "status": "active",
+    "entrypoint": "server.js",
+    "department": "Engineering",
+    "addedAt": "2026-03-01T00:00:00Z"
+  },
+  "jiangping": {
+    "stack": "python",
+    "port": 5001,
+    "status": "active",
+    "entrypoint": "app.py",
+    "department": "PMC",
+    "addedAt": "2026-03-15T00:00:00Z"
+  },
+  "paiji": {
+    "stack": "node",
+    "port": 3000,
+    "status": "active",
+    "entrypoint": "server/index.js",
+    "department": "Production",
+    "addedAt": "2026-03-15T00:00:00Z"
+  },
+  "new-product-schedule": {
+    "stack": "node",
+    "port": 3000,
+    "status": "active",
+    "entrypoint": "server.js",
+    "department": "Engineering",
+    "addedAt": "2026-03-22T00:00:00Z"
+  },
+  "figure-mold-cost-system": {
+    "stack": "node",
+    "port": 3001,
+    "status": "active",
+    "entrypoint": "server.js",
+    "department": "Engineering",
+    "addedAt": "2026-03-22T00:00:00Z"
   }
 }

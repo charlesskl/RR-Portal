@@ -40,7 +40,8 @@ check_resume
 save_state "pulling"
 echo "[1/5] Pulling latest code..."
 git fetch origin
-git reset --hard origin/main
+git checkout main
+git pull --ff-only origin main
 
 # ─── Step 2: Ensure data directories from docker-compose ───
 save_state "directories"

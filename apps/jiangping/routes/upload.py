@@ -31,7 +31,10 @@ def parse_pdf():
     if not file.filename.lower().endswith('.pdf'):
         return jsonify({'error': '请上传PDF文件'}), 400
     original_name = file.filename
-    filepath = os.path.join(current_app.config['UPLOAD_FOLDER'], original_name)
+    safe_name = secure_filename(original_name)
+    if not safe_name:
+        return jsonify({'error': '文件名无效'}), 400
+    filepath = os.path.join(current_app.config['UPLOAD_FOLDER'], safe_name)
     file.save(filepath)
     try:
         data = parse_purchase_pdf(filepath)
@@ -41,7 +44,8 @@ def parse_pdf():
             data['warning'] = f"采购单 {data['po_no']} 已存在，保存将覆盖原有数据"
         return jsonify(data)
     except Exception as e:
-        return jsonify({'error': f'PDF解析失败: {str(e)}'}), 400
+        current_app.logger.exception('PDF parse failed for %s', safe_name)
+        return jsonify({'error': 'PDF解析失败，请确认文件格式正确'}), 400
 
 
 @bp.route('/save', methods=['POST'])

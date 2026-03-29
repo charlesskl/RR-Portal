@@ -23,10 +23,14 @@ const app = express();
 // 安全头
 app.use(helmet({ contentSecurityPolicy: false }));
 
-// CORS 限制
+// CORS — never allow wildcard with credentials
 const corsOrigin = process.env.CORS_ORIGIN || 'http://localhost:3001';
+if (corsOrigin === '*') {
+  console.error('FATAL: CORS_ORIGIN must not be wildcard * when credentials are enabled.');
+  process.exit(1);
+}
 app.use(cors({
-  origin: corsOrigin === '*' ? true : corsOrigin,
+  origin: corsOrigin.split(',').map(o => o.trim()),
   credentials: true,
 }));
 

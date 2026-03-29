@@ -1,4 +1,6 @@
+import sys
 from pydantic_settings import BaseSettings
+from pydantic import field_validator
 from functools import lru_cache
 
 
@@ -15,7 +17,7 @@ class Settings(BaseSettings):
     REDIS_URL: str = "redis://redis:6379/0"
 
     # ─── JWT ───
-    JWT_SECRET: str = "change-me-in-production"
+    JWT_SECRET: str  # No default — must be set via env
     JWT_ALGORITHM: str = "HS256"
     JWT_EXPIRATION_MINUTES: int = 60
 
@@ -24,8 +26,26 @@ class Settings(BaseSettings):
 
     # ─── Admin bootstrap ───
     ADMIN_USERNAME: str = "admin"
-    ADMIN_PASSWORD: str = "admin123"
+    ADMIN_PASSWORD: str  # No default — must be set via env
     ADMIN_EMAIL: str = "admin@company.com"
+
+    @field_validator("JWT_SECRET")
+    @classmethod
+    def jwt_secret_must_be_strong(cls, v: str) -> str:
+        banned = {"change-me-in-production", "change-me", "secret", ""}
+        if v in banned or len(v) < 32:
+            print("FATAL: JWT_SECRET must be at least 32 characters and not a known default.", file=sys.stderr)
+            sys.exit(1)
+        return v
+
+    @field_validator("ADMIN_PASSWORD")
+    @classmethod
+    def admin_password_must_be_strong(cls, v: str) -> str:
+        banned = {"admin123", "password", "admin", "changeme", ""}
+        if v in banned or len(v) < 10:
+            print("FATAL: ADMIN_PASSWORD must be at least 10 characters and not a known default.", file=sys.stderr)
+            sys.exit(1)
+        return v
 
     model_config = {"env_file": ".env", "extra": "ignore"}
 

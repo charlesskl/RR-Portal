@@ -1,4 +1,6 @@
 const db = require('./connection');
+const fs = require('fs');
+const path = require('path');
 
 function initDatabase() {
   // ========== 机台配置表 ==========
@@ -132,6 +134,20 @@ function initDatabase() {
   db.exec(`CREATE INDEX IF NOT EXISTS idx_items_schedule ON schedule_items(schedule_id)`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_items_machine ON schedule_items(machine_no)`);
 
+  // ========== 模具目标表（24H/11H产量目标） ==========
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS mold_targets (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      mold_no TEXT NOT NULL UNIQUE,
+      mold_name TEXT,
+      target_24h INTEGER DEFAULT 0,
+      target_11h INTEGER DEFAULT 0,
+      notes TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
   // Migrations (run BEFORE inserts that depend on new columns)
   try { db.prepare("ALTER TABLE orders ADD COLUMN order_notes TEXT DEFAULT ''").run(); } catch(e){}
   try { db.prepare("ALTER TABLE schedule_items ADD COLUMN is_carry_over INTEGER DEFAULT 0").run(); } catch(e){}
@@ -209,21 +225,79 @@ function initDatabase() {
   }));
   insertManyWs(machinesC);
 
-  // ========== 模具目标表（24H/11H产量目标） ==========
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS mold_targets (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      mold_no TEXT NOT NULL UNIQUE,
-      mold_name TEXT,
-      target_24h INTEGER DEFAULT 0,
-      target_11h INTEGER DEFAULT 0,
-      notes TEXT,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
-
   console.log('数据库初始化完成，28台机数据已预置');
+
+  // ========== 从JSON文件导入预置数据（仅首次启动时） ==========
+  seedFromJSON();
+}
+
+function seedFromJSON() {
+  const dataDir = process.env.DATA_PATH || path.join(__dirname, '..', 'data');
+
+  // 导入订单数据（orders.json → orders表）
+  const orderCount = db.prepare('SELECT COUNT(*) as cnt FROM orders').get().cnt;
+  if (orderCount === 0) {
+    const ordersFile = path.join(dataDir, 'orders.json');
+    if (fs.existsSync(ordersFile)) {
+      try {
+        const orders = JSON.parse(fs.readFileSync(ordersFile, 'utf8'));
+        const insertOrder = db.prepare(`
+          INSERT INTO orders (product_code, mold_no, mold_name, color, material_type,
+            quantity_needed, status, import_batch, source_file, workshop)
+          VALUES (?, ?, ?, ?, ?, ?, 'pending', 'json_seed', 'orders.json', 'B')
+        `);
+        const insertAll = db.transaction((list) => {
+          for (const o of list) {
+            insertOrder.run(
+              o.款号 || '',
+              o.模具编号 || '',
+              o.工模名称 || '',
+              o.颜色 || '',
+              o.材料 || '',
+              Number(o.啤数) || 0
+            );
+          }
+        });
+        insertAll(orders);
+        console.log(`从 orders.json 导入 ${orders.length} 条订单`);
+      } catch (e) {
+        console.error('导入 orders.json 失败:', e.message);
+      }
+    }
+  }
+
+  // 导入模具目标数据（molds.json → mold_targets表）
+  const moldCount = db.prepare('SELECT COUNT(*) as cnt FROM mold_targets').get().cnt;
+  if (moldCount === 0) {
+    const moldsFile = path.join(dataDir, 'molds.json');
+    if (fs.existsSync(moldsFile)) {
+      try {
+        const molds = JSON.parse(fs.readFileSync(moldsFile, 'utf8'));
+        const insertMoldTarget = db.prepare(`
+          INSERT OR IGNORE INTO mold_targets (mold_no, mold_name, target_24h, target_11h, workshop)
+          VALUES (?, ?, ?, ?, 'B')
+        `);
+        const insertAll = db.transaction((list) => {
+          for (const m of list) {
+            const cavity = Number(m.模穴) || 1;
+            const cycleTime = Number(m.周期) || 30;
+            const target24h = Math.round((24 * 3600 / cycleTime) * cavity);
+            const target11h = Math.round((11 * 3600 / cycleTime) * cavity);
+            insertMoldTarget.run(
+              m.模具编号 || '',
+              m.工模名称 || '',
+              target24h,
+              target11h
+            );
+          }
+        });
+        insertAll(molds);
+        console.log(`从 molds.json 导入 ${molds.length} 条模具目标`);
+      } catch (e) {
+        console.error('导入 molds.json 失败:', e.message);
+      }
+    }
+  }
 }
 
 module.exports = { initDatabase };

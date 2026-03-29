@@ -39,13 +39,15 @@ fi
 DB_TYPE="none"
 DB_DETECTED_FROM=""
 
-# PostgreSQL indicators
-if grep -rq "require.*pg\b\|from.*pg\b\|import.*pg\b\|postgresql://\|postgres://" "$SERVER_DIR" \
-    --include="*.js" --include="*.ts" --include="*.py" --include="*.mjs" --include="*.cjs" 2>/dev/null; then
+# PostgreSQL indicators — exclude node_modules, lock files, and vendor files
+if grep -rq "require(['\"]pg['\"])\|from ['\"]pg['\"]\|import ['\"]pg['\"]\|postgresql://\|postgres://" "$SERVER_DIR" \
+    --include="*.js" --include="*.ts" --include="*.py" --include="*.mjs" --include="*.cjs" \
+    --exclude-dir='node_modules' --exclude-dir='__pycache__' --exclude='package-lock.json' --exclude='yarn.lock' 2>/dev/null; then
   DB_TYPE="postgresql"
   DB_DETECTED_FROM="pg module or postgresql:// URL in source"
 elif grep -rq "sequelize\|typeorm\|knex\|prisma" "$SERVER_DIR" \
-    --include="*.js" --include="*.ts" --include="*.json" 2>/dev/null; then
+    --include="*.js" --include="*.ts" --include="*.json" \
+    --exclude-dir='node_modules' --exclude='package-lock.json' 2>/dev/null; then
   # Check which backend the ORM uses
   if [[ -f "$SERVER_DIR/prisma/schema.prisma" ]]; then
     PRISMA_PROVIDER=$(grep 'provider.*=' "$SERVER_DIR/prisma/schema.prisma" 2>/dev/null | grep -oE '"[^"]*"' | tr -d '"' | tail -1)
@@ -64,7 +66,8 @@ fi
 # MongoDB indicators
 if [[ "$DB_TYPE" == "none" ]]; then
   if grep -rq "require.*mongoose\|from.*mongoose\|import.*mongoose\|mongodb://\|mongodb+srv://" "$SERVER_DIR" \
-      --include="*.js" --include="*.ts" --include="*.py" --include="*.mjs" --include="*.cjs" 2>/dev/null; then
+      --include="*.js" --include="*.ts" --include="*.py" --include="*.mjs" --include="*.cjs" \
+      --exclude-dir='node_modules' --exclude='package-lock.json' 2>/dev/null; then
     DB_TYPE="mongodb"
     DB_DETECTED_FROM="mongoose module or mongodb:// URL in source"
   fi
@@ -72,8 +75,9 @@ fi
 
 # SQLite indicators
 if [[ "$DB_TYPE" == "none" ]]; then
-  if grep -rq "better-sqlite3\|sqlite3\|import sqlite3\|\.sqlite\|\.db'" "$SERVER_DIR" \
-      --include="*.js" --include="*.ts" --include="*.py" --include="*.mjs" --include="*.cjs" --include="*.json" 2>/dev/null; then
+  if grep -rq "better-sqlite3\|require.*sqlite3\|import sqlite3\|\.sqlite\|\.db'" "$SERVER_DIR" \
+      --include="*.js" --include="*.ts" --include="*.py" --include="*.mjs" --include="*.cjs" \
+      --exclude-dir='node_modules' --exclude='package-lock.json' 2>/dev/null; then
     DB_TYPE="sqlite"
     DB_DETECTED_FROM="sqlite module or .sqlite/.db file reference"
   fi

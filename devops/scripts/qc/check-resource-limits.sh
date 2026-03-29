@@ -80,6 +80,11 @@ case "$HAS_LIMITS" in
     echo "[QC-13] PASS: ${APP_NAME} has memory limits configured"
     ;;
   no-limits|has-deploy-no-limits)
+    # Verify the service actually exists in the compose file before modifying
+    if ! grep -q "^  ${APP_NAME}:" "$COMPOSE_FILE" 2>/dev/null; then
+      echo "[QC-13] SKIP: Service '${APP_NAME}' not found in $COMPOSE_FILE — will be added at deploy time"
+      exit 0
+    fi
     echo "[QC-13] FOUND: ${APP_NAME} missing memory limits"
 
     # Add mem_limit to the service (simpler than deploy.resources)

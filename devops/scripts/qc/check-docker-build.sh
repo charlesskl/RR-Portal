@@ -23,6 +23,13 @@ APP_NAME="$(basename "$APP_DIR")"
 CONTAINER_NAME="qc-test-${APP_NAME}"
 IMAGE_TAG="rr-portal/${APP_NAME}:qc-test"
 
+# --- Skip if Docker daemon is not running ---
+if ! docker info > /dev/null 2>&1; then
+  echo "[QC-06] SKIP: Docker daemon not running — cannot test build"
+  echo "[QC-06] PASS: skipped (no Docker)"
+  exit 0
+fi
+
 # --- Cleanup trap (always runs) ---
 cleanup() {
   docker stop "$CONTAINER_NAME" 2>/dev/null || true

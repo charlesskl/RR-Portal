@@ -200,6 +200,22 @@ router.post('/', upload.single('file'), async (req, res) => {
           const pricePerKg = pricePerG ? pricePerG * 1000 : null;
           insertRaw.run(versionId, 'plastic', matName, null, weight, pricePerKg, sortIdx++);
         }
+
+        // Fabric from sewingDetails: rows with both fabric_name and position are fabric cuts
+        const fabricMap = new Map();
+        for (const s of (data.sewingDetails || [])) {
+          if (!s.fabric_name || !s.position) continue;
+          const key = s.fabric_name.trim();
+          const existing = fabricMap.get(key);
+          if (existing) {
+            existing.usage += (s.usage_amount || 0);
+          } else {
+            fabricMap.set(key, { usage: s.usage_amount || 0, price: s.material_price_rmb });
+          }
+        }
+        for (const [fabricName, { usage, price }] of fabricMap) {
+          insertRaw.run(versionId, 'fabric', fabricName, null, usage, price, sortIdx++);
+        }
       }
 
       // RotocastItem (plush format)

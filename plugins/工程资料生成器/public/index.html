@@ -31,6 +31,9 @@
       <button class="btn btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#copy-modal">
         从已有产品复制
       </button>
+      <button class="btn btn-outline-success" data-bs-toggle="modal" data-bs-target="#import-modal">
+        从Excel导入
+      </button>
     </div>
 
     <!-- Product Table -->
@@ -73,6 +76,63 @@
         </div>
         <div class="modal-footer">
           <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Import Modal -->
+  <div class="modal fade" id="import-modal" tabindex="-1" aria-labelledby="import-modal-label" aria-hidden="true">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="import-modal-label">从Excel导入工程资料</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+        </div>
+        <div class="modal-body">
+          <p class="text-muted small mb-3">
+            支持导入：排模表、外购清单、外箱资料、生产注意事项、作业指导书。
+            系统会根据文件名自动识别类型。
+          </p>
+
+          <!-- Tab: folder path or file upload -->
+          <ul class="nav nav-tabs mb-3" role="tablist">
+            <li class="nav-item"><a class="nav-link active" data-bs-toggle="tab" href="#import-folder-tab">输入文件夹路径</a></li>
+            <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#import-upload-tab">上传文件</a></li>
+          </ul>
+          <div class="tab-content">
+            <div class="tab-pane fade show active" id="import-folder-tab">
+              <div class="mb-3">
+                <label class="form-label">文件夹路径</label>
+                <input type="text" id="import-folder-path" class="form-control" placeholder="例如: D:\产品\xxx\工程资料">
+              </div>
+            </div>
+            <div class="tab-pane fade" id="import-upload-tab">
+              <div class="mb-3">
+                <label class="form-label">选择Excel文件</label>
+                <input type="file" id="import-files" class="form-control" multiple accept=".xls,.xlsx">
+              </div>
+            </div>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label">厂区</label>
+            <select id="import-factory" class="form-select">
+              <option value="华登">华登</option>
+              <option value="兴信">兴信</option>
+            </select>
+          </div>
+
+          <div id="import-result" style="display:none;" class="mt-3">
+            <div id="import-matched" class="text-success small"></div>
+            <div id="import-errors" class="text-danger small"></div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+          <button type="button" class="btn btn-success" id="import-btn" onclick="doImport()">
+            开始导入
+          </button>
         </div>
       </div>
     </div>
@@ -197,6 +257,55 @@
         window.location.href = 'product.html?id=' + newProduct.id;
       } catch (e) {
         showToast('复制失败: ' + e.message, 'error');
+      }
+    }
+
+    // Import
+    async function doImport() {
+      const btn = document.getElementById('import-btn');
+      btn.disabled = true;
+      btn.textContent = '导入中...';
+      const resultDiv = document.getElementById('import-result');
+      resultDiv.style.display = 'none';
+
+      const factory = document.getElementById('import-factory').value;
+      const folderTab = document.querySelector('#import-folder-tab.active, #import-folder-tab.show');
+
+      try {
+        let data;
+        if (folderTab) {
+          // Folder path mode
+          const folderPath = document.getElementById('import-folder-path').value.trim();
+          if (!folderPath) { showToast('请输入文件夹路径', 'error'); return; }
+          data = await api('POST', '/api/import/folder', { folder_path: folderPath, factory });
+        } else {
+          // File upload mode
+          const fileInput = document.getElementById('import-files');
+          if (!fileInput.files.length) { showToast('请选择文件', 'error'); return; }
+          const formData = new FormData();
+          formData.append('factory', factory);
+          for (const f of fileInput.files) formData.append('files', f);
+          const res = await fetch('/api/import/files', { method: 'POST', body: formData });
+          if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.error || 'Import failed'); }
+          data = await res.json();
+        }
+
+        // Show results
+        resultDiv.style.display = '';
+        document.getElementById('import-matched').innerHTML =
+          '<strong>成功匹配：</strong><br>' + (data.matched || []).map(m => '✓ ' + m).join('<br>');
+        document.getElementById('import-errors').innerHTML =
+          data.errors?.length ? '<strong>警告：</strong><br>' + data.errors.map(e => '⚠ ' + e).join('<br>') : '';
+
+        showToast('导入成功！正在跳转到编辑页面...');
+        setTimeout(() => {
+          window.location.href = 'product.html?id=' + data.product.id;
+        }, 1500);
+      } catch (e) {
+        showToast('导入失败: ' + e.message, 'error');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '开始导入';
       }
     }
 

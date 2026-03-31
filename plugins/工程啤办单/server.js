@@ -366,9 +366,11 @@ app.patch('/api/problems/:id/resolve', (req, res) => {
 });
 
 // ─── 客户列表管理 ──────────────────────────────────────────────────────────────
+const DEFAULT_CLIENTS = ['ZURU','JAZWARES','Moose','TOMY','Tigerhead','Zanzoon(嘉苏)','AZAD','Brybelly +Entertoymen','Lifelines','ToyMonster','Cepia','Tikino','Sky Castle','Masterkidz','John Adams','智海鑫','PWP(多美）','CareFocus','永恒','spin master','Tokidos'];
+
 app.get('/api/clients', (req, res) => {
   const data = loadData();
-  res.json(data.clients || []);
+  res.json(data.clients || DEFAULT_CLIENTS);
 });
 
 app.put('/api/clients', (req, res) => {

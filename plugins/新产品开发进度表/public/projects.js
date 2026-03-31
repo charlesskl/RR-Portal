@@ -516,9 +516,16 @@ function parseExcelData(wb) {
       var productName = row[5];
       if (!productName && !row[4] && !row[0]) continue;
 
-      var workshop = row[0] ? String(row[0]) : '';
+      var workshop = row[0] ? String(row[0]).trim() : '';
       // 如果厂区为空，尝试用sheet名
       if (!workshop && name) workshop = name;
+      // 厂区代码映射为中文名
+      var workshopMap = {
+        'XX-A': '兴信A', 'XX-B': '兴信B', 'HD': '华登',
+        'xx-a': '兴信A', 'xx-b': '兴信B', 'hd': '华登',
+        'Xx-A': '兴信A', 'Xx-B': '兴信B', 'Hd': '华登'
+      };
+      if (workshopMap[workshop]) workshop = workshopMap[workshop];
 
       results.push({
         workshop: workshop,

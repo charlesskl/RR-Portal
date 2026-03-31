@@ -88,6 +88,7 @@ services:
     build:
       context: ./plugins/工程啤办单
       dockerfile: Dockerfile.node
+    user: "0:0"
     environment:
       - BASE_PATH=/rr
       - PORT=3000
@@ -151,6 +152,19 @@ services:
       - DATA_PATH=/app/data
     volumes:
       - "./plugins/工程资料生成器/data:/app/data"
+    restart: unless-stopped
+    networks:
+      - platform-net
+
+  po-parser:
+    build:
+      context: ./plugins/PO智能识别
+      dockerfile: Dockerfile
+    environment:
+      - PORT=3200
+      - DATA_PATH=/app/data
+    volumes:
+      - "./plugins/PO智能识别/data:/app/data"
     restart: unless-stopped
     networks:
       - platform-net

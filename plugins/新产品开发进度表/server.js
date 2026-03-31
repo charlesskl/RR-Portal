@@ -633,7 +633,7 @@ app.use((err, _req, res, _next) => {
 // ---------------------------------------------------------------------------
 // Start server
 // ---------------------------------------------------------------------------
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`[dev-progress-system] Server running on port ${PORT}`);
   console.log(`  Data path : ${path.resolve(DATA_PATH)}`);
   console.log(`  Uploads   : ${path.resolve(UPLOADS_DIR)}`);

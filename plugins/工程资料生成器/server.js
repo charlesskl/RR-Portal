@@ -3,6 +3,8 @@ const fs = require('fs');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 const archiver = require('archiver');
+const multer = require('multer');
+const { importFromFolder, importFromFiles } = require('./importers');
 
 // ---------------------------------------------------------------------------
 // Environment
@@ -305,6 +307,100 @@ app.get('/api/config', (req, res) => {
 app.put('/api/config', async (req, res) => {
   await saveConfig(req.body);
   res.json(req.body);
+});
+
+// ---------------------------------------------------------------------------
+// API Routes — Import from Excel
+// ---------------------------------------------------------------------------
+const upload = multer({ dest: path.join(DATA_PATH, '_uploads') });
+
+// Import from local folder path
+app.post('/api/import/folder', async (req, res) => {
+  try {
+    const { folder_path, factory } = req.body;
+    if (!folder_path) return res.status(400).json({ error: 'folder_path is required' });
+
+    const { product: parsed, matched, errors } = importFromFolder(folder_path);
+    parsed.factory = factory || parsed.factory || '';
+
+    // Create product
+    const now = new Date().toISOString().slice(0, 10);
+    const product = {
+      id: uuidv4(),
+      ...parsed,
+      created_at: now,
+      updated_at: now,
+    };
+
+    await saveProduct(product);
+    const index = loadIndex();
+    index.push({
+      id: product.id,
+      product_number: product.product_number,
+      product_name: product.product_name,
+      client_name: product.client_name,
+      factory: product.factory,
+      engineer: product.engineer,
+      created_at: product.created_at,
+      updated_at: product.updated_at,
+    });
+    await saveIndex(index);
+
+    res.status(201).json({ product, matched, errors });
+  } catch (err) {
+    console.error('Import error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Import from uploaded files
+app.post('/api/import/files', upload.array('files', 10), async (req, res) => {
+  try {
+    if (!req.files || req.files.length === 0) {
+      return res.status(400).json({ error: 'No files uploaded' });
+    }
+
+    const { product: parsed, matched, errors } = importFromFiles(req.files);
+    parsed.factory = req.body.factory || parsed.factory || '';
+
+    const now = new Date().toISOString().slice(0, 10);
+    const product = {
+      id: uuidv4(),
+      ...parsed,
+      created_at: now,
+      updated_at: now,
+    };
+
+    await saveProduct(product);
+    const index = loadIndex();
+    index.push({
+      id: product.id,
+      product_number: product.product_number,
+      product_name: product.product_name,
+      client_name: product.client_name,
+      factory: product.factory,
+      engineer: product.engineer,
+      created_at: product.created_at,
+      updated_at: product.updated_at,
+    });
+    await saveIndex(index);
+
+    // Clean up uploaded temp files
+    for (const f of req.files) {
+      try { fs.unlinkSync(f.path); } catch (_) {}
+    }
+
+    res.status(201).json({ product, matched, errors });
+  } catch (err) {
+    console.error('Import error:', err);
+    // Clean up on error
+    if (req.files) {
+      for (const f of req.files) {
+        try { fs.unlinkSync(f.path); } catch (_) {}
+      }
+    }
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ---------------------------------------------------------------------------

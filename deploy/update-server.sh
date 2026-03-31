@@ -117,7 +117,7 @@ docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --build
 # ─── Step 5: Restart nginx and health check ───
 save_state "healthcheck"
 echo "[5/5] Restarting nginx and checking health..."
-docker compose -f "$COMPOSE_FILE" restart nginx
+docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" restart nginx
 
 # Wait for services with readiness polling instead of hardcoded sleep
 echo "  Waiting for services to become healthy..."

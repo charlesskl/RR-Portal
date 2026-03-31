@@ -172,11 +172,11 @@
 
     <div class="stats-bar">
       <div class="stat-card">
-        <div class="stat-value" id="statDepts">3</div>
+        <div class="stat-value" id="statDepts">5</div>
         <div class="stat-label">部门数量</div>
       </div>
       <div class="stat-card">
-        <div class="stat-value" id="statPlugins">6</div>
+        <div class="stat-value" id="statPlugins">8</div>
         <div class="stat-label">应用数量</div>
       </div>
       <div class="stat-card">
@@ -269,6 +269,50 @@
                 <div class="plugin-dot gray" id="paijiDot"></div>
                 <span class="plugin-name">AI注塑啤机排产系统</span>
                 <span class="plugin-tag">排产</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Business -->
+      <div class="dept-card" onclick="showDept('business')">
+        <div class="dept-card-header">
+          <div class="dept-icon business">&#128176;</div>
+          <div>
+            <div class="dept-name">Business</div>
+            <div class="dept-desc">ZURU出货助手</div>
+          </div>
+        </div>
+        <div class="dept-card-body">
+          <div class="plugin-list">
+            <div class="plugin-item">
+              <div class="plugin-info">
+                <div class="plugin-dot gray" id="zuruDot"></div>
+                <span class="plugin-name">ZURU出货助手</span>
+                <span class="plugin-tag">出货</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 总部 -->
+      <div class="dept-card" onclick="showDept('statistics')">
+        <div class="dept-card-header">
+          <div class="dept-icon pmc">&#128202;</div>
+          <div>
+            <div class="dept-name">总部</div>
+            <div class="dept-desc">生产经营数据统计</div>
+          </div>
+        </div>
+        <div class="dept-card-body">
+          <div class="plugin-list">
+            <div class="plugin-item">
+              <div class="plugin-info">
+                <div class="plugin-dot gray" id="businessDataDot"></div>
+                <span class="plugin-name">生产经营数据系统</span>
+                <span class="plugin-tag">统计</span>
               </div>
             </div>
           </div>
@@ -413,6 +457,76 @@
     </div>
   </div>
 
+  <!-- ===== Business详情 ===== -->
+  <div class="detail-view" id="businessDetail">
+    <div class="back-btn" onclick="goHome()">&larr; 返回部门总览</div>
+    <div class="breadcrumb">
+      <a href="#" onclick="goHome()">控制台</a>
+      <span class="sep">/</span>
+      <span style="color:#f59e0b">Business</span>
+    </div>
+    <div class="page-title" style="display:flex;align-items:center;gap:14px;">
+      <div class="dept-icon business" style="width:40px;height:40px;font-size:18px;">&#128176;</div>
+      Business
+    </div>
+    <div class="page-subtitle">ZURU出货匹配与标记</div>
+
+    <div class="detail-plugin-card">
+      <div class="detail-plugin-left">
+        <div class="detail-plugin-icon" style="background:linear-gradient(135deg,#f59e0b,#ef4444);">&#128230;</div>
+        <div>
+          <div class="detail-plugin-name">ZURU出货助手</div>
+          <div class="detail-plugin-desc">上传接单表与出货资料文件夹，自动匹配出货记录并标记日期，支持金额表与库存异常报告</div>
+          <div class="feature-grid">
+            <div class="feature-tag">&#128230; 出货匹配</div>
+            <div class="feature-tag">&#128197; 日期标记</div>
+            <div class="feature-tag">&#128202; 库存报告</div>
+            <div class="feature-tag">&#128196; Excel处理</div>
+          </div>
+        </div>
+      </div>
+      <div class="detail-plugin-right">
+        <div class="detail-plugin-status"><div class="plugin-dot gray" id="zuruDetailDot"></div> 检查中...</div>
+        <a href="/zuru-shipment/" target="_blank" class="btn btn-primary">打开系统</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== 总部详情 ===== -->
+  <div class="detail-view" id="statisticsDetail">
+    <div class="back-btn" onclick="goHome()">&larr; 返回部门总览</div>
+    <div class="breadcrumb">
+      <a href="#" onclick="goHome()">控制台</a>
+      <span class="sep">/</span>
+      <span style="color:#10b981">总部</span>
+    </div>
+    <div class="page-title" style="display:flex;align-items:center;gap:14px;">
+      <div class="dept-icon pmc" style="width:40px;height:40px;font-size:18px;">&#128202;</div>
+      总部
+    </div>
+    <div class="page-subtitle">生产经营数据统计与分析</div>
+
+    <div class="detail-plugin-card">
+      <div class="detail-plugin-left">
+        <div class="detail-plugin-icon" style="background:linear-gradient(135deg,#7F41C0,#57B894);">&#128202;</div>
+        <div>
+          <div class="detail-plugin-name">生产经营数据系统</div>
+          <div class="detail-plugin-desc">啤机部/印喷部/装配部三部门经营数据录入、自动结余计算、三工汇总报表、Excel导入导出</div>
+          <div class="feature-grid">
+            <div class="feature-tag">&#128202; 结余计算</div>
+            <div class="feature-tag">&#128230; Excel导入导出</div>
+            <div class="feature-tag">&#128200; 仪表盘</div>
+            <div class="feature-tag">&#128274; 数据锁定</div>
+          </div>
+        </div>
+      </div>
+      <div class="detail-plugin-right">
+        <div class="detail-plugin-status"><div class="plugin-dot gray" id="businessDataDetailDot"></div> 检查中...</div>
+        <a href="/business-data/" target="_blank" class="btn btn-primary">打开系统</a>
+      </div>
+    </div>
+  </div>
+
   <!-- ===== PMC跟仓管详情 ===== -->
   <div class="detail-view" id="pmcDetail">
     <div class="back-btn" onclick="goHome()">&larr; 返回部门总览</div>
@@ -453,7 +567,7 @@
 </div>
 
 <script>
-var allDepts = ['engineering', 'pmc', 'production'];
+var allDepts = ['engineering', 'pmc', 'production', 'business', 'statistics'];
 
 function showDept(dept) {
   document.getElementById('homeView').classList.add('hidden');
@@ -481,6 +595,8 @@ async function checkHealth() {
       { name: 'figureMold', url: '/figure-mold-cost-system/health', dot: 'figureMoldDot', detailDot: 'figureMoldDetailDot' },
       { name: 'jiangping', url: '/jiangping/health', dot: 'jiangpingDot', detailDot: 'jiangpingDetailDot' },
       { name: 'paiji', url: '/paiji/health', dot: 'paijiDot', detailDot: 'paijiDetailDot' },
+      { name: 'zuru', url: '/zuru-shipment/health', dot: 'zuruDot', detailDot: 'zuruDetailDot' },
+      { name: 'businessData', url: '/business-data/health', dot: 'businessDataDot', detailDot: 'businessDataDetailDot' },
     ];
     var healthy = 0;
     var total = checks.length;

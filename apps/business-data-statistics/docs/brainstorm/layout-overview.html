@@ -1,0 +1,258 @@
+<h2>三工结余系统 — 整体界面布局</h2>
+<p class="subtitle">使用你指定的莫兰迪配色方案，请看看整体结构是否合适</p>
+
+<div class="mockup">
+  <div class="mockup-header">页面整体布局</div>
+  <div class="mockup-body" style="background:#f5f0eb;padding:0;min-height:600px;display:flex;flex-direction:column;">
+
+    <!-- 顶部导航栏 -->
+    <div style="background:#7030A0;color:#fff;padding:12px 24px;display:flex;align-items:center;justify-content:space-between;">
+      <div style="display:flex;align-items:center;gap:16px;">
+        <span style="font-size:18px;font-weight:bold;">生产经营数据系统</span>
+        <span style="opacity:0.7;font-size:13px;">三工结余模块</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:12px;font-size:13px;">
+        <span style="background:rgba(255,255,255,0.15);padding:4px 12px;border-radius:4px;">录入文员</span>
+        <span>张三</span>
+        <span style="opacity:0.6;cursor:pointer;">退出</span>
+      </div>
+    </div>
+
+    <div style="display:flex;flex:1;">
+      <!-- 左侧菜单 -->
+      <div style="width:180px;background:#fff;border-right:1px solid #e0d8cf;padding:16px 0;flex-shrink:0;">
+        <div style="padding:10px 20px;color:#7030A0;font-weight:bold;background:#f0e8f7;border-left:3px solid #7030A0;font-size:14px;">啤机部</div>
+        <div style="padding:10px 20px;color:#666;font-size:14px;cursor:pointer;">印喷部</div>
+        <div style="padding:10px 20px;color:#666;font-size:14px;cursor:pointer;">装配部</div>
+        <div style="padding:10px 20px;color:#999;font-size:13px;margin-top:20px;border-top:1px solid #eee;padding-top:16px;">三工汇总</div>
+        <div style="padding:10px 20px;color:#999;font-size:13px;">系统设置</div>
+      </div>
+
+      <!-- 主内容区 -->
+      <div style="flex:1;display:flex;flex-direction:column;overflow:hidden;">
+
+        <!-- 工具栏 -->
+        <div style="padding:12px 20px;background:#fff;border-bottom:1px solid #e0d8cf;display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span style="color:#666;font-size:13px;">时间范围：</span>
+            <div style="border:1px solid #d0c8bf;border-radius:4px;padding:5px 10px;font-size:13px;background:#fff;color:#333;">2026-03-03</div>
+            <span style="color:#999;">至</span>
+            <div style="border:1px solid #d0c8bf;border-radius:4px;padding:5px 10px;font-size:13px;background:#fff;color:#333;">2026-03-09</div>
+          </div>
+          <div style="display:flex;gap:4px;">
+            <div style="padding:5px 12px;border-radius:4px;background:#7030A0;color:#fff;font-size:12px;">近7天</div>
+            <div style="padding:5px 12px;border-radius:4px;background:#f0e8f7;color:#7030A0;font-size:12px;">本月</div>
+            <div style="padding:5px 12px;border-radius:4px;background:#f0e8f7;color:#7030A0;font-size:12px;">本季</div>
+          </div>
+          <div style="border:1px solid #d0c8bf;border-radius:4px;padding:5px 10px;font-size:13px;background:#fff;color:#999;min-width:160px;">
+            🔍 搜索车间...
+          </div>
+          <div style="margin-left:auto;display:flex;gap:8px;">
+            <div style="padding:5px 14px;border-radius:4px;background:#57B894;color:#fff;font-size:12px;">+ 新增</div>
+            <div style="padding:5px 14px;border-radius:4px;background:#E88EA0;color:#fff;font-size:12px;">导入Excel</div>
+            <div style="padding:5px 14px;border-radius:4px;background:#A88DF3;color:#fff;font-size:12px;">导出Excel</div>
+            <div style="padding:5px 14px;border-radius:4px;background:#f0e0e0;color:#c55;font-size:12px;">批量删除</div>
+          </div>
+        </div>
+
+        <!-- 数据表格区域（可滚动） -->
+        <div style="flex:1;overflow:auto;padding:0;">
+          <table style="width:100%;border-collapse:collapse;font-size:12px;min-width:1200px;">
+            <thead>
+              <tr style="background:#7030A0;color:#fff;">
+                <th style="padding:8px 6px;text-align:center;border:1px solid #8040b0;white-space:nowrap;">☐</th>
+                <th style="padding:8px 6px;text-align:center;border:1px solid #8040b0;white-space:nowrap;">日期</th>
+                <th style="padding:8px 6px;text-align:center;border:1px solid #8040b0;white-space:nowrap;">车间</th>
+                <th style="padding:8px 6px;text-align:center;border:1px solid #8040b0;white-space:nowrap;">管工人数</th>
+                <th style="padding:8px 6px;text-align:center;border:1px solid #8040b0;white-space:nowrap;">员工人数</th>
+                <th style="padding:8px 6px;text-align:center;border:1px solid #8040b0;white-space:nowrap;">总产值/天</th>
+                <th style="padding:8px 6px;text-align:center;border:1px solid #8040b0;white-space:nowrap;">员工工资</th>
+                <th style="padding:8px 6px;text-align:center;border:1px solid #8040b0;white-space:nowrap;">管工工资</th>
+                <th style="padding:8px 6px;text-align:center;border:1px solid #8040b0;white-space:nowrap;">房租</th>
+                <th style="padding:8px 6px;text-align:center;border:1px solid #8040b0;white-space:nowrap;">水电费</th>
+                <th style="padding:8px 6px;text-align:center;border:1px solid #8040b0;white-space:nowrap;">...</th>
+                <th style="padding:8px 6px;text-align:center;border:1px solid #8040b0;white-space:nowrap;background:#3D8361;">结余金额</th>
+                <th style="padding:8px 6px;text-align:center;border:1px solid #8040b0;white-space:nowrap;background:#3D8361;">结余%</th>
+                <th style="padding:8px 6px;text-align:center;border:1px solid #8040b0;white-space:nowrap;color:#ddd;">独有项...</th>
+                <th style="padding:8px 6px;text-align:center;border:1px solid #8040b0;white-space:nowrap;">备注</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr style="background:#fff;">
+                <td style="padding:6px;text-align:center;border:1px solid #e8e0d8;">☐</td>
+                <td style="padding:6px;text-align:center;border:1px solid #e8e0d8;">03-09</td>
+                <td style="padding:6px;text-align:center;border:1px solid #e8e0d8;">兴信A</td>
+                <td style="padding:6px;text-align:right;border:1px solid #e8e0d8;">8</td>
+                <td style="padding:6px;text-align:right;border:1px solid #e8e0d8;">12</td>
+                <td style="padding:6px;text-align:right;border:1px solid #e8e0d8;">49,064</td>
+                <td style="padding:6px;text-align:right;border:1px solid #e8e0d8;">6,658</td>
+                <td style="padding:6px;text-align:right;border:1px solid #e8e0d8;">2,395</td>
+                <td style="padding:6px;text-align:right;border:1px solid #e8e0d8;">895</td>
+                <td style="padding:6px;text-align:right;border:1px solid #e8e0d8;">7,625</td>
+                <td style="padding:6px;text-align:center;border:1px solid #e8e0d8;color:#999;">...</td>
+                <td style="padding:6px;text-align:right;border:1px solid #e8e0d8;font-weight:bold;color:#3D8361;">17,665</td>
+                <td style="padding:6px;text-align:right;border:1px solid #e8e0d8;font-weight:bold;color:#3D8361;">38.9%</td>
+                <td style="padding:6px;text-align:center;border:1px solid #e8e0d8;color:#999;">...</td>
+                <td style="padding:6px;text-align:left;border:1px solid #e8e0d8;font-size:11px;color:#888;">啤机2台</td>
+              </tr>
+              <tr style="background:#faf8f5;">
+                <td style="padding:6px;text-align:center;border:1px solid #e8e0d8;">☐</td>
+                <td style="padding:6px;text-align:center;border:1px solid #e8e0d8;">03-09</td>
+                <td style="padding:6px;text-align:center;border:1px solid #e8e0d8;">兴信B</td>
+                <td style="padding:6px;text-align:right;border:1px solid #e8e0d8;">5</td>
+                <td style="padding:6px;text-align:right;border:1px solid #e8e0d8;">14</td>
+                <td style="padding:6px;text-align:right;border:1px solid #e8e0d8;">34,704</td>
+                <td style="padding:6px;text-align:right;border:1px solid #e8e0d8;">4,887</td>
+                <td style="padding:6px;text-align:right;border:1px solid #e8e0d8;">1,800</td>
+                <td style="padding:6px;text-align:right;border:1px solid #e8e0d8;">799</td>
+                <td style="padding:6px;text-align:right;border:1px solid #e8e0d8;">5,484</td>
+                <td style="padding:6px;text-align:center;border:1px solid #e8e0d8;color:#999;">...</td>
+                <td style="padding:6px;text-align:right;border:1px solid #e8e0d8;font-weight:bold;color:#3D8361;">11,517</td>
+                <td style="padding:6px;text-align:right;border:1px solid #e8e0d8;font-weight:bold;color:#3D8361;">28.3%</td>
+                <td style="padding:6px;text-align:center;border:1px solid #e8e0d8;color:#999;">...</td>
+                <td style="padding:6px;text-align:left;border:1px solid #e8e0d8;font-size:11px;color:#888;"></td>
+              </tr>
+              <tr style="background:#fff;">
+                <td style="padding:6px;text-align:center;border:1px solid #e8e0d8;">☐</td>
+                <td style="padding:6px;text-align:center;border:1px solid #e8e0d8;">03-09</td>
+                <td style="padding:6px;text-align:center;border:1px solid #e8e0d8;">华登</td>
+                <td style="padding:6px;text-align:right;border:1px solid #e8e0d8;">5</td>
+                <td style="padding:6px;text-align:right;border:1px solid #e8e0d8;">12</td>
+                <td style="padding:6px;text-align:right;border:1px solid #e8e0d8;">39,714</td>
+                <td style="padding:6px;text-align:right;border:1px solid #e8e0d8;">5,075</td>
+                <td style="padding:6px;text-align:right;border:1px solid #e8e0d8;">1,520</td>
+                <td style="padding:6px;text-align:right;border:1px solid #e8e0d8;">886</td>
+                <td style="padding:6px;text-align:right;border:1px solid #e8e0d8;">8,155</td>
+                <td style="padding:6px;text-align:center;border:1px solid #e8e0d8;color:#999;">...</td>
+                <td style="padding:6px;text-align:right;border:1px solid #e8e0d8;font-weight:bold;color:#3D8361;">15,424</td>
+                <td style="padding:6px;text-align:right;border:1px solid #e8e0d8;font-weight:bold;color:#3D8361;">38.4%</td>
+                <td style="padding:6px;text-align:center;border:1px solid #e8e0d8;color:#999;">...</td>
+                <td style="padding:6px;text-align:left;border:1px solid #e8e0d8;font-size:11px;color:#888;"></td>
+              </tr>
+              <tr style="background:#f5f0eb;color:#999;font-size:11px;">
+                <td colspan="15" style="padding:8px;text-align:center;border:1px solid #e8e0d8;">↕ 更多数据行（可滚动）...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- 底部固定合计区 -->
+        <div style="border-top:2px solid #7030A0;background:#fff;box-shadow:0 -2px 8px rgba(0,0,0,0.08);flex-shrink:0;">
+          <table style="width:100%;border-collapse:collapse;font-size:12px;min-width:1200px;">
+            <tbody>
+              <tr style="background:#f0e8f7;">
+                <td style="padding:6px;border:1px solid #d8d0e8;font-weight:bold;color:#7030A0;text-align:center;" colspan="2">兴信A合计</td>
+                <td style="padding:6px;border:1px solid #d8d0e8;text-align:center;color:#666;">—</td>
+                <td style="padding:6px;border:1px solid #d8d0e8;text-align:right;">56</td>
+                <td style="padding:6px;border:1px solid #d8d0e8;text-align:right;">84</td>
+                <td style="padding:6px;border:1px solid #d8d0e8;text-align:right;">344,289</td>
+                <td style="padding:6px;border:1px solid #d8d0e8;text-align:right;">...</td>
+                <td style="padding:6px;border:1px solid #d8d0e8;text-align:right;">...</td>
+                <td style="padding:6px;border:1px solid #d8d0e8;text-align:right;">...</td>
+                <td style="padding:6px;border:1px solid #d8d0e8;text-align:right;">...</td>
+                <td style="padding:6px;border:1px solid #d8d0e8;text-align:center;">...</td>
+                <td style="padding:6px;border:1px solid #d8d0e8;text-align:right;font-weight:bold;color:#3D8361;">134,580</td>
+                <td style="padding:6px;border:1px solid #d8d0e8;text-align:right;font-weight:bold;color:#3D8361;">39.1%</td>
+                <td style="padding:6px;border:1px solid #d8d0e8;"></td>
+                <td style="padding:6px;border:1px solid #d8d0e8;"></td>
+              </tr>
+              <tr style="background:#f0e8f7;">
+                <td style="padding:6px;border:1px solid #d8d0e8;font-weight:bold;color:#7030A0;text-align:center;" colspan="2">兴信B合计</td>
+                <td style="padding:6px;border:1px solid #d8d0e8;text-align:center;color:#666;">—</td>
+                <td style="padding:6px;border:1px solid #d8d0e8;text-align:right;">35</td>
+                <td style="padding:6px;border:1px solid #d8d0e8;text-align:right;">98</td>
+                <td style="padding:6px;border:1px solid #d8d0e8;text-align:right;">239,262</td>
+                <td style="padding:6px;border:1px solid #d8d0e8;text-align:right;">...</td>
+                <td style="padding:6px;border:1px solid #d8d0e8;text-align:right;">...</td>
+                <td style="padding:6px;border:1px solid #d8d0e8;text-align:right;">...</td>
+                <td style="padding:6px;border:1px solid #d8d0e8;text-align:right;">...</td>
+                <td style="padding:6px;border:1px solid #d8d0e8;text-align:center;">...</td>
+                <td style="padding:6px;border:1px solid #d8d0e8;text-align:right;font-weight:bold;color:#3D8361;">92,922</td>
+                <td style="padding:6px;border:1px solid #d8d0e8;text-align:right;font-weight:bold;color:#3D8361;">38.4%</td>
+                <td style="padding:6px;border:1px solid #d8d0e8;"></td>
+                <td style="padding:6px;border:1px solid #d8d0e8;"></td>
+              </tr>
+              <tr style="background:#f0e8f7;">
+                <td style="padding:6px;border:1px solid #d8d0e8;font-weight:bold;color:#7030A0;text-align:center;" colspan="2">华登合计</td>
+                <td style="padding:6px;border:1px solid #d8d0e8;text-align:center;color:#666;">—</td>
+                <td style="padding:6px;border:1px solid #d8d0e8;text-align:right;">35</td>
+                <td style="padding:6px;border:1px solid #d8d0e8;text-align:right;">77</td>
+                <td style="padding:6px;border:1px solid #d8d0e8;text-align:right;">262,460</td>
+                <td style="padding:6px;border:1px solid #d8d0e8;text-align:right;">...</td>
+                <td style="padding:6px;border:1px solid #d8d0e8;text-align:right;">...</td>
+                <td style="padding:6px;border:1px solid #d8d0e8;text-align:right;">...</td>
+                <td style="padding:6px;border:1px solid #d8d0e8;text-align:right;">...</td>
+                <td style="padding:6px;border:1px solid #d8d0e8;text-align:center;">...</td>
+                <td style="padding:6px;border:1px solid #d8d0e8;text-align:right;font-weight:bold;color:#3D8361;">100,713</td>
+                <td style="padding:6px;border:1px solid #d8d0e8;text-align:right;font-weight:bold;color:#3D8361;">38.4%</td>
+                <td style="padding:6px;border:1px solid #d8d0e8;"></td>
+                <td style="padding:6px;border:1px solid #d8d0e8;"></td>
+              </tr>
+              <tr style="background:#e8dff0;font-weight:bold;">
+                <td style="padding:7px;border:1px solid #c8b8d8;color:#7030A0;text-align:center;" colspan="2">🏭 清溪合计</td>
+                <td style="padding:7px;border:1px solid #c8b8d8;text-align:center;color:#666;">—</td>
+                <td style="padding:7px;border:1px solid #c8b8d8;text-align:right;">126</td>
+                <td style="padding:7px;border:1px solid #c8b8d8;text-align:right;">259</td>
+                <td style="padding:7px;border:1px solid #c8b8d8;text-align:right;">845,961</td>
+                <td style="padding:7px;border:1px solid #c8b8d8;text-align:right;">...</td>
+                <td style="padding:7px;border:1px solid #c8b8d8;text-align:right;">...</td>
+                <td style="padding:7px;border:1px solid #c8b8d8;text-align:right;">...</td>
+                <td style="padding:7px;border:1px solid #c8b8d8;text-align:right;">...</td>
+                <td style="padding:7px;border:1px solid #c8b8d8;text-align:center;">...</td>
+                <td style="padding:7px;border:1px solid #c8b8d8;text-align:right;color:#3D8361;">328,214</td>
+                <td style="padding:7px;border:1px solid #c8b8d8;text-align:right;color:#3D8361;">38.8%</td>
+                <td style="padding:7px;border:1px solid #c8b8d8;"></td>
+                <td style="padding:7px;border:1px solid #c8b8d8;"></td>
+              </tr>
+              <tr style="background:#f0e8f7;">
+                <td style="padding:6px;border:1px solid #d8d0e8;font-weight:bold;color:#7030A0;text-align:center;" colspan="2">邵阳合计</td>
+                <td style="padding:6px;border:1px solid #d8d0e8;text-align:center;color:#666;">—</td>
+                <td style="padding:6px;border:1px solid #d8d0e8;text-align:right;">42</td>
+                <td style="padding:6px;border:1px solid #d8d0e8;text-align:right;">54</td>
+                <td style="padding:6px;border:1px solid #d8d0e8;text-align:right;">341,368</td>
+                <td style="padding:6px;border:1px solid #d8d0e8;text-align:right;">...</td>
+                <td style="padding:6px;border:1px solid #d8d0e8;text-align:right;">...</td>
+                <td style="padding:6px;border:1px solid #d8d0e8;text-align:right;">...</td>
+                <td style="padding:6px;border:1px solid #d8d0e8;text-align:right;">...</td>
+                <td style="padding:6px;border:1px solid #d8d0e8;text-align:center;">...</td>
+                <td style="padding:6px;border:1px solid #d8d0e8;text-align:right;font-weight:bold;color:#3D8361;">118,756</td>
+                <td style="padding:6px;border:1px solid #d8d0e8;text-align:right;font-weight:bold;color:#3D8361;">34.8%</td>
+                <td style="padding:6px;border:1px solid #d8d0e8;"></td>
+                <td style="padding:6px;border:1px solid #d8d0e8;"></td>
+              </tr>
+              <tr style="background:#7030A0;color:#fff;font-weight:bold;">
+                <td style="padding:8px;border:1px solid #8040b0;text-align:center;" colspan="2">📊 总合计</td>
+                <td style="padding:8px;border:1px solid #8040b0;text-align:center;">—</td>
+                <td style="padding:8px;border:1px solid #8040b0;text-align:right;">168</td>
+                <td style="padding:8px;border:1px solid #8040b0;text-align:right;">313</td>
+                <td style="padding:8px;border:1px solid #8040b0;text-align:right;">1,187,329</td>
+                <td style="padding:8px;border:1px solid #8040b0;text-align:right;">...</td>
+                <td style="padding:8px;border:1px solid #8040b0;text-align:right;">...</td>
+                <td style="padding:8px;border:1px solid #8040b0;text-align:right;">...</td>
+                <td style="padding:8px;border:1px solid #8040b0;text-align:right;">...</td>
+                <td style="padding:8px;border:1px solid #8040b0;text-align:center;">...</td>
+                <td style="padding:8px;border:1px solid #8040b0;text-align:right;">446,970</td>
+                <td style="padding:8px;border:1px solid #8040b0;text-align:right;">37.6%</td>
+                <td style="padding:8px;border:1px solid #8040b0;"></td>
+                <td style="padding:8px;border:1px solid #8040b0;"></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</div>
+
+<div style="margin-top:24px;padding:16px;background:#f8f6f3;border-radius:8px;font-size:13px;line-height:1.8;">
+  <h3 style="margin:0 0 8px 0;color:#7030A0;">界面结构说明</h3>
+  <ul style="margin:0;padding-left:20px;color:#555;">
+    <li><strong>顶部导航栏</strong>：幽砚紫主色，显示系统名称 + 用户角色</li>
+    <li><strong>左侧菜单</strong>：啤机部 / 印喷部 / 装配部 切换 + 三工汇总</li>
+    <li><strong>工具栏</strong>：日期筛选、快捷按钮（近7天/本月/本季）、搜索、新增/导入/导出/批量删除</li>
+    <li><strong>数据表格</strong>：中间可滚动区域，表头紫色固定</li>
+    <li><strong>底部固定合计</strong>：各车间合计 → 清溪合计 → 邵阳合计 → 总合计，始终可见</li>
+    <li><strong>结余列</strong>：用橄榄绿(#3D8361)高亮，一眼看出核心数据</li>
+  </ul>
+</div>

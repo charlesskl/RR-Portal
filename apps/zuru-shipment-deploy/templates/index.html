@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ZURU 出货助手</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+    background: #f0f2f5; color: #333; min-height: 100vh;
+  }
+  .container { max-width: 860px; margin: 0 auto; padding: 30px 20px; }
+  h1 { text-align: center; font-size: 28px; color: #1a1a1a; margin-bottom: 6px; }
+  .subtitle { text-align: center; color: #888; font-size: 14px; margin-bottom: 28px; }
+  .card {
+    background: #fff; border-radius: 10px;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+    padding: 24px 28px; margin-bottom: 20px;
+  }
+  .form-group { margin-bottom: 20px; }
+  .form-group:last-child { margin-bottom: 0; }
+  .form-group label {
+    display: block; font-weight: bold; font-size: 14px;
+    margin-bottom: 6px; color: #333;
+  }
+  .form-group .hint {
+    font-size: 12px; color: #999; font-weight: normal; margin-left: 6px;
+  }
+  .input-row {
+    display: flex; align-items: center; gap: 8px;
+  }
+  .input-row input[type="file"] { display: none; }
+  .btn-s {
+    flex-shrink: 0; padding: 10px 16px;
+    border: none; border-radius: 6px;
+    font-size: 13px; cursor: pointer; white-space: nowrap; color: #fff;
+  }
+  .btn-green { background: #4CAF50; }
+  .btn-green:hover { background: #43a047; }
+  .file-name {
+    flex: 1; font-size: 13px; color: #666;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .upload-info { font-size: 12px; color: #4CAF50; margin-top: 4px; }
+  .date-row { display: flex; align-items: center; gap: 12px; }
+  .date-row input[type="date"] {
+    flex: 1; max-width: 220px; padding: 10px 14px;
+    border: 1px solid #d9d9d9; border-radius: 6px;
+    font-size: 14px; outline: none;
+  }
+  .date-row input:focus {
+    border-color: #4CAF50;
+    box-shadow: 0 0 0 2px rgba(76,175,80,0.15);
+  }
+  .btn-today {
+    padding: 8px 16px; background: #eee; border: 1px solid #ccc;
+    border-radius: 6px; font-size: 13px; cursor: pointer;
+  }
+  .btn-today:hover { background: #ddd; }
+  .date-preview { font-size: 14px; color: #4CAF50; font-weight: bold; }
+  .btn-start {
+    display: block; width: 100%; padding: 14px;
+    background: #4CAF50; color: #fff; border: none;
+    border-radius: 8px; font-size: 18px; font-weight: bold;
+    cursor: pointer; margin-bottom: 20px;
+  }
+  .btn-start:hover { background: #43a047; }
+  .btn-start:disabled { background: #999; cursor: not-allowed; }
+  .log-card {
+    background: #1e1e1e; border-radius: 10px;
+    padding: 16px; margin-bottom: 20px; display: none;
+  }
+  .log-card.show { display: block; }
+  .log-title { color: #aaa; font-size: 13px; margin-bottom: 8px; }
+  #logBox {
+    width: 100%; height: 360px; background: #1e1e1e; color: #d4d4d4;
+    font-family: "Consolas", "Courier New", monospace;
+    font-size: 12px; line-height: 1.6;
+    border: none; outline: none; resize: vertical;
+    overflow-y: auto; white-space: pre-wrap; word-break: break-all;
+  }
+  .status-bar {
+    display: none; align-items: center; gap: 12px;
+    padding: 12px 16px; border-radius: 8px;
+    margin-bottom: 20px; font-size: 14px; font-weight: bold;
+  }
+  .status-bar.show { display: flex; }
+  .status-bar.running { background: #e3f2fd; color: #1565c0; }
+  .status-bar.done { background: #e8f5e9; color: #2e7d32; }
+  .status-bar.error { background: #ffebee; color: #c62828; }
+  .spinner {
+    display: inline-block; width: 18px; height: 18px;
+    border: 3px solid #90caf9; border-top-color: #1565c0;
+    border-radius: 50%; animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .download-area { display: none; }
+  .download-area.show { display: block; }
+  .download-area h3 { font-size: 15px; margin-bottom: 10px; }
+  .dl-item {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 14px; background: #f9f9f9;
+    border: 1px solid #e0e0e0; border-radius: 6px; margin-bottom: 8px;
+  }
+  .dl-item .dl-info { font-size: 13px; }
+  .dl-item .dl-type { color: #888; font-size: 12px; }
+  .btn-dl {
+    padding: 6px 16px; background: #2196F3; color: #fff;
+    border: none; border-radius: 4px; font-size: 13px;
+    cursor: pointer; text-decoration: none;
+  }
+  .btn-dl:hover { background: #1e88e5; }
+  .footer { text-align: center; color: #bbb; font-size: 12px; margin-top: 30px; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>ZURU 出货助手</h1>
+  <p class="subtitle">上传出货资料 + 接单表 → 自动匹配 → 下载结果</p>
+
+  <div class="card">
+    <div class="form-group">
+      <label>接单表 <span class="hint">（Excel文件）</span></label>
+      <div class="input-row">
+        <button type="button" class="btn-s btn-green" onclick="document.getElementById('orderFile').click()">选择接单表</button>
+        <input type="file" id="orderFile" accept=".xlsx,.xls" onchange="onFileSelect(this, 'orderFileName')">
+        <span class="file-name" id="orderFileName">未选择文件</span>
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label>出货资料文件夹 <span class="hint">（选择整个文件夹上传）</span></label>
+      <div class="input-row">
+        <button type="button" class="btn-s btn-green" onclick="document.getElementById('folderFiles').click()">选择文件夹</button>
+        <input type="file" id="folderFiles" webkitdirectory multiple onchange="onFolderSelect(this)">
+        <span class="file-name" id="folderFileName">未选择</span>
+      </div>
+      <div class="upload-info" id="folderUploadInfo"></div>
+    </div>
+
+    <div class="form-group">
+      <label>出货金额表 <span class="hint">（可选）</span></label>
+      <div class="input-row">
+        <button type="button" class="btn-s btn-green" onclick="document.getElementById('amountFile').click()">选择金额表</button>
+        <input type="file" id="amountFile" accept=".xlsx,.xls" onchange="onFileSelect(this, 'amountFileName')">
+        <span class="file-name" id="amountFileName">未选择（可选）</span>
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label>备注日期 <span class="hint">（统一填入接单表备注列）</span></label>
+      <div class="date-row">
+        <input type="date" id="markDate">
+        <button type="button" class="btn-today" onclick="setToday()">今天</button>
+        <span class="date-preview" id="datePreview"></span>
+      </div>
+    </div>
+  </div>
+
+  <button class="btn-start" id="btnStart" onclick="startProcess()">开始处理</button>
+
+  <div class="status-bar" id="statusBar">
+    <span class="spinner" id="statusSpinner"></span>
+    <span id="statusText">处理中...</span>
+  </div>
+
+  <div class="download-area" id="downloadArea">
+    <div class="card">
+      <h3>输出文件</h3>
+      <div id="downloadList"></div>
+    </div>
+  </div>
+
+  <div class="log-card" id="logCard">
+    <div class="log-title">处理日志</div>
+    <div id="logBox"></div>
+  </div>
+
+  <div class="footer">ZURU出货助手 Web版</div>
+</div>
+
+<script>
+function setToday() {
+  var d = new Date();
+  document.getElementById('markDate').value =
+    d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+  updateDatePreview();
+}
+function updateDatePreview() {
+  var v = document.getElementById('markDate').value;
+  var el = document.getElementById('datePreview');
+  if (!v) { el.textContent=''; return; }
+  var p = v.split('-');
+  el.textContent = parseInt(p[1])+'月'+parseInt(p[2])+'日';
+}
+document.getElementById('markDate').addEventListener('change', updateDatePreview);
+setToday();
+
+function onFileSelect(input, nameId) {
+  document.getElementById(nameId).textContent =
+    input.files.length > 0 ? input.files[0].name : '未选择文件';
+}
+function onFolderSelect(input) {
+  var files = input.files;
+  if (!files.length) {
+    document.getElementById('folderFileName').textContent = '未选择';
+    document.getElementById('folderUploadInfo').textContent = '';
+    return;
+  }
+  var rel = files[0].webkitRelativePath || '';
+  document.getElementById('folderFileName').textContent = rel.split('/')[0] || '已选文件夹';
+  document.getElementById('folderUploadInfo').textContent = '共 '+files.length+' 个文件';
+}
+
+function startProcess() {
+  var orderInput = document.getElementById('orderFile');
+  var folderInput = document.getElementById('folderFiles');
+  var amountInput = document.getElementById('amountFile');
+  var markDateVal = document.getElementById('markDate').value;
+
+  if (!orderInput.files.length) { alert('请先选择接单表文件'); return; }
+  if (!folderInput.files.length) { alert('请先选择出货资料文件夹'); return; }
+
+  var markDate = '';
+  if (markDateVal) {
+    var p = markDateVal.split('-');
+    markDate = parseInt(p[1])+'月'+parseInt(p[2])+'日';
+  }
+
+  var fd = new FormData();
+  fd.append('order_file', orderInput.files[0]);
+  for (var i = 0; i < folderInput.files.length; i++) {
+    fd.append('folder_files', folderInput.files[i]);
+  }
+  if (amountInput.files.length) {
+    fd.append('amount_file', amountInput.files[0]);
+  }
+  fd.append('mark_date', markDate);
+
+  var btn = document.getElementById('btnStart');
+  btn.disabled = true; btn.textContent = '上传并处理中...';
+  document.getElementById('logCard').classList.add('show');
+  document.getElementById('logBox').textContent = '';
+  document.getElementById('statusBar').className = 'status-bar show running';
+  document.getElementById('statusSpinner').style.display = 'inline-block';
+  document.getElementById('statusText').textContent = '上传文件中...';
+  document.getElementById('downloadArea').classList.remove('show');
+
+  fetch('start', { method: 'POST', body: fd })
+  .then(function(r) { return r.json(); })
+  .then(function(d) {
+    if (!d.ok) { alert(d.msg); resetUI(); return; }
+    document.getElementById('statusText').textContent = '处理中...';
+    startSSE(d.task_id);
+  })
+  .catch(function(e) { alert('请求失败: '+e); resetUI(); });
+}
+
+function startSSE(taskId) {
+  var es = new EventSource('logs/'+taskId);
+  var logBox = document.getElementById('logBox');
+  es.onmessage = function(e) {
+    var p; try { p = JSON.parse(e.data); } catch(_) { return; }
+    if (p.type === 'log') {
+      logBox.textContent += p.msg+'\n';
+      logBox.scrollTop = logBox.scrollHeight;
+    } else if (p.type === 'done') {
+      es.close();
+      document.getElementById('statusSpinner').style.display = 'none';
+      if (p.status === 'done') {
+        document.getElementById('statusBar').className = 'status-bar show done';
+        document.getElementById('statusText').textContent = '处理完成！';
+        showDownloads(taskId, p.files || []);
+      } else {
+        document.getElementById('statusBar').className = 'status-bar show error';
+        document.getElementById('statusText').textContent = '处理失败: '+(p.error||'未知错误');
+      }
+      resetUI();
+    }
+  };
+  es.onerror = function() {
+    es.close();
+    document.getElementById('statusBar').className = 'status-bar show error';
+    document.getElementById('statusSpinner').style.display = 'none';
+    document.getElementById('statusText').textContent = '连接断开';
+    resetUI();
+  };
+}
+
+function showDownloads(taskId, files) {
+  if (!files.length) return;
+  var list = document.getElementById('downloadList');
+  list.innerHTML = '';
+  files.forEach(function(f) {
+    var div = document.createElement('div');
+    div.className = 'dl-item';
+    div.innerHTML =
+      '<div class="dl-info"><div>'+escapeHtml(f.name)+'</div>'+
+      '<div class="dl-type">'+escapeHtml(f.type)+'</div></div>'+
+      '<a class="btn-dl" href="download/'+taskId+'/'+f.index+'" target="_blank">下载</a>';
+    list.appendChild(div);
+  });
+  document.getElementById('downloadArea').classList.add('show');
+}
+function resetUI() {
+  document.getElementById('btnStart').disabled = false;
+  document.getElementById('btnStart').textContent = '开始处理';
+}
+function escapeHtml(s) {
+  var d = document.createElement('div'); d.textContent = s; return d.innerHTML;
+}
+</script>
+</body>
+</html>

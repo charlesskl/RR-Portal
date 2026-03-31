@@ -45,7 +45,9 @@ services:
       PGDATA: /var/lib/postgresql/data/pgdata
     volumes:
       - ./data/postgres:/var/lib/postgresql/data
-      - ./scripts/init-db.cloud.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - ./scripts/init-db.cloud.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+      - ./scripts/business-data-init.sql:/docker-entrypoint-initdb.d/seed/business-data-init.sql:ro
+      - ./scripts/init-business-data.sh:/docker-entrypoint-initdb.d/02-init-business-data.sh:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-rrportal}"]
       interval: 5s
@@ -254,6 +256,65 @@ services:
       interval: 10s
       timeout: 5s
       retries: 3
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - platform-net
+
+  zuru-shipment:
+    build:
+      context: ./apps/zuru-shipment-deploy
+      dockerfile: Dockerfile
+    environment:
+      - PORT=5003
+      - DATA_PATH=/app/data
+    volumes:
+      - ./apps/zuru-shipment-deploy/data:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5003/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    mem_limit: 512m
+    memswap_limit: 512m
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - platform-net
+
+  business-data:
+    build:
+      context: ./apps/business-data-statistics
+      dockerfile: Dockerfile
+    environment:
+      - PORT=6001
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_NAME=business_data
+      - DB_USER=${DB_USER:-rrportal}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - JWT_SECRET=${BUSINESS_DATA_JWT_SECRET:?BUSINESS_DATA_JWT_SECRET is required}
+      - NODE_ENV=production
+    volumes:
+      - ./apps/business-data-statistics/backups:/app/backups
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6001/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    mem_limit: 512m
+    memswap_limit: 512m
     restart: unless-stopped
     logging:
       driver: json-file

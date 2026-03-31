@@ -4,11 +4,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Communication
 
-Always respond in 简体中文 (Simplified Chinese).
+Always respond in 简体中文 (Simplified Chinese). Code, commands, file paths remain in English.
 
 ## Project Overview
 
 **RR Portal** — 企业级微服务平台，Docker Compose 架构。
+- **Cloud**: Aliyun ECS (8.148.146.194)
+- **Core**: Python 3.12 + FastAPI (async) + SQLAlchemy 2.0 + asyncpg + Redis
+- **Apps/Plugins**: Mixed Node.js/Express + Python/Flask, each self-contained
+- **Infra**: Docker Compose + Nginx reverse proxy + PostgreSQL
 
 ### 核心概念
 
@@ -30,6 +34,76 @@ RR Portal
 ├── nginx/           — Nginx配置
 └── docker-compose.yml
 ```
+
+## 常用命令
+
+```bash
+# 构建并启动所有服务
+docker compose up -d --build
+
+# 构建/重启单个服务
+docker compose up -d --build <service-name>
+
+# 查看日志
+docker compose logs <service-name>
+docker compose logs -f <service-name>  # 实时跟踪
+
+# 重启 nginx（新增/修改 upstream 后必须执行）
+docker compose restart nginx
+
+# 健康检查
+curl http://localhost:<port>/health
+```
+
+### DevOps 脚本（从 RR-Portal/ 目录运行）
+
+```bash
+./devops/scripts/deploy.sh           # 完整部署流水线
+./devops/scripts/quick-deploy.sh     # 快速增量部署
+./devops/scripts/health-check.sh     # 服务健康监控
+./devops/scripts/status.sh           # 系统状态
+./devops/scripts/rollback.sh         # 回滚到上一版本
+./devops/scripts/logs.sh             # 日志聚合
+./devops/scripts/qc-runner.sh        # 质量检查（35+ 自动化测试）
+```
+
+## 核心服务架构
+
+### 认证流程 (core/app/auth/)
+1. 用户登录 → `POST /api/auth/login` → bcrypt 验证密码
+2. 生成 JWT token（含 user_id, role, department, permissions）
+3. Token 有效期：60 分钟（`JWT_EXPIRATION_MINUTES`）
+4. 依赖注入：`get_current_user()` 验证 token，`require_admin()` 限制管理员
+5. 插件端用 `plugin_sdk.auth.require_plugin_permission("<name>:read")` 做权限校验
+
+### 数据库 (core/app/database.py)
+- PostgreSQL async，连接池 size=20, max_overflow=10
+- **public schema**: 核心表（users, plugins, audit）
+- **plugin_* schemas**: 每个插件独立 schema（如 `plugin_engineering`）
+- 初始化脚本：`scripts/init-db.sql`
+
+### 事件总线 (core/app/events.py)
+- Redis pub/sub，插件间通信
+- plugin_sdk 提供 `PluginEventBus` 封装
+
+### 配置 (core/app/config.py)
+- Pydantic BaseSettings 从 `.env` 加载
+- **必填**：`JWT_SECRET`（≥32 字符）、`ADMIN_PASSWORD`（≥10 字符）
+- 启动时自动创建默认 admin 用户
+
+## 服务端口映射
+
+| Service | Tech | Internal Port | Nginx Path |
+|---------|------|---------------|------------|
+| core | FastAPI | 8000 | /api/ |
+| task-api | Node.js | 8080 | — |
+| new-product-schedule | Node.js | 3000 | /new-product-schedule/ |
+| figure-mold-cost-system | Node.js | 3001 | /figure-mold-cost-system/ |
+| zouhuo | Node.js | 3002 | /zouhuo/ |
+| jiangping | Flask | 5001 | /jiangping/ |
+| paiji | Node.js | 3000 | /paiji/ |
+| zuru-shipment | Flask | 5003 | /zuru-shipment/ |
+| business-data | Node.js+PG | 6001 | /business-data/ |
 
 ## 插件类型
 
@@ -260,6 +334,8 @@ const data = JSON.parse(fs.readFileSync('data/data.json'));
 | figure-mold-cost-system | 模具手办采购订单 | Engineering | Standalone (Node.js) | /figure-mold-cost-system/ | https://github.com/hufan4308-blip/figure-mold-cost-system |
 | jiangping | 采购订单管理系统 | PMC跟仓管 | Standalone (Python/Flask) | /jiangping/ | https://github.com/fxxaxxx/jiangping |
 | paiji | AI注塑啤机排产系统 | 生产部 | Standalone (Node.js) | /paiji/ | https://github.com/duanlei10/234 |
+| zuru-shipment-deploy | ZURU出货助手 | Business | Standalone (Python/Flask) | /zuru-shipment/ | https://github.com/hanson678/zuru-shipment-deploy |
+| business-data-statistics | 生产经营数据系统 | 总部 | Standalone (Node.js+PostgreSQL) | /business-data/ | https://github.com/josie-peng/Business-data-statistics |
 
 ### 旧插件（已删除）
 

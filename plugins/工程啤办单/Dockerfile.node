@@ -4,9 +4,6 @@ WORKDIR /app
 
 RUN apk add --no-cache tini wget
 
-# Non-root user
-RUN addgroup -S appgroup && adduser -S appuser -G appgroup
-
 COPY package.json package-lock.json ./
 RUN npm ci --production
 
@@ -14,11 +11,7 @@ COPY server.js ./
 COPY public/ ./public/
 COPY data/ ./data/
 
-RUN chown -R appuser:appgroup /app
-
 EXPOSE 3000
-
-USER appuser
 
 HEALTHCHECK --interval=10s --timeout=5s --retries=3 \
   CMD wget -qO- http://127.0.0.1:3000/health || exit 1

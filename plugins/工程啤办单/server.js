@@ -230,8 +230,15 @@ app.use('/api', (req, res, next) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
+  const LOCKED_STATUSES = ['待生产', '生产中', '已完成'];
+
   app.put(`/api/${type}/:id`, (req, res) => {
     try {
+      const data = loadData();
+      const order = data[`${type}_orders`].find(o => o.id === +req.params.id);
+      if (order && LOCKED_STATUSES.includes(order.status)) {
+        return res.status(403).json({ error: '经理已审核，不可修改' });
+      }
       const { items, ...header } = req.body;
       const updated = updateOrder(type, req.params.id, header, items);
       updated ? res.json(updated) : res.status(404).json({ error: '未找到' });
@@ -239,6 +246,11 @@ app.use('/api', (req, res, next) => {
   });
 
   app.delete(`/api/${type}/:id`, (req, res) => {
+    const data = loadData();
+    const order = data[`${type}_orders`].find(o => o.id === +req.params.id);
+    if (order && LOCKED_STATUSES.includes(order.status)) {
+      return res.status(403).json({ error: '经理已审核，不可删除' });
+    }
     deleteOrder(type, req.params.id);
     res.json({ success: true });
   });

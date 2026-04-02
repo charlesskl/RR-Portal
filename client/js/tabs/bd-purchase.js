@@ -63,7 +63,7 @@ const tab_bd_purchase = {
 
     // ── 2. Sewing Accessories — fabric items from 车缝明细 with no position ──
     const sewingDetails = versionData.sewing_details || [];
-    const sewingItems = sewingDetails.filter(s => !s.position);
+    const sewingItems = sewingDetails.filter(s => !s.position && s.position !== '__labor__');
     // Convert total_price_rmb → HKD for sub total
     const rmb_hkd = parseFloat(params.rmb_hkd) || 0.85;
     const sewingSub = sewingItems.reduce((s, sw) => {

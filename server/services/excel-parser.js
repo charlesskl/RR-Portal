@@ -278,10 +278,13 @@ function parseSewingDetails(workbook) {
     if (colC) lastFabricName = colC;
     const fabricName = colC || lastFabricName;
 
+    // Mark labor rows with special position value
+    const position = fabricName === '人工' ? '__labor__' : colD;
+
     items.push({
       product_name: currentProductName,
       fabric_name: fabricName,
-      position: colD,
+      position,
       cut_pieces: numVal(ws.getCell(row, 5)) ? Math.round(numVal(ws.getCell(row, 5))) : null,
       usage_amount: numVal(ws.getCell(row, 6)),
       material_price_rmb: Math.round((numVal(ws.getCell(row, 7)) || 0) * 1.08 * 100) / 100,

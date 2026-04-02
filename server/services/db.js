@@ -332,10 +332,19 @@ function initDb() {
       SET is_latest = 1
       WHERE id IN (
         SELECT id FROM QuoteVersion qv1
-        WHERE date_code = (
-          SELECT MAX(date_code) FROM QuoteVersion qv2
-          WHERE qv2.product_id = qv1.product_id
-        )
+        WHERE
+          (date_code IS NOT NULL AND date_code = (
+            SELECT MAX(date_code) FROM QuoteVersion qv2
+            WHERE qv2.product_id = qv1.product_id AND qv2.date_code IS NOT NULL
+          ))
+          OR
+          (date_code IS NULL AND NOT EXISTS (
+            SELECT 1 FROM QuoteVersion qv3
+            WHERE qv3.product_id = qv1.product_id AND qv3.date_code IS NOT NULL
+          ) AND id = (
+            SELECT MAX(id) FROM QuoteVersion qv4
+            WHERE qv4.product_id = qv1.product_id
+          ))
       )
     `);
   }

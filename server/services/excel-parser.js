@@ -284,7 +284,7 @@ function parseSewingDetails(workbook) {
       position: colD,
       cut_pieces: numVal(ws.getCell(row, 5)) ? Math.round(numVal(ws.getCell(row, 5))) : null,
       usage_amount: numVal(ws.getCell(row, 6)),
-      material_price_rmb: numVal(ws.getCell(row, 7)),
+      material_price_rmb: ((numVal(ws.getCell(row, 7)) || 0) * 1.08),
       price_rmb: numVal(ws.getCell(row, 8)),
       markup_point: numVal(ws.getCell(row, 9)) || 1.15,
       total_price_rmb: numVal(ws.getCell(row, 10)),
@@ -445,7 +445,7 @@ function parseElectronics(workbook, mainWs) {
       const part_name = strVal(row.getCell(2));
       if (!part_name) continue;
       const quantity = numVal(row.getCell(3));
-      const unit_price_usd = numVal(row.getCell(5)) ?? numVal(row.getCell(4));
+      const unit_price_usd = ((numVal(row.getCell(5)) || numVal(row.getCell(4)) || 0) * 1.08);
       electronicItems.push({ part_name, spec: null, quantity, unit_price_usd, total_usd: null, remark: null, sort_order: electronicItems.length });
     }
   }

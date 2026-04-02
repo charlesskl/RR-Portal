@@ -301,9 +301,11 @@ router.post('/', upload.single('file'), async (req, res) => {
 
     insertAll();
 
-    // Mark this version as latest for this product
-    db.prepare('UPDATE QuoteVersion SET is_latest = 0 WHERE product_id = ?').run(product.id);
-    db.prepare('UPDATE QuoteVersion SET is_latest = 1 WHERE id = ?').run(versionId);
+    // Mark this version as latest for this product (atomic)
+    db.transaction(() => {
+      db.prepare('UPDATE QuoteVersion SET is_latest = 0 WHERE product_id = ?').run(product.id);
+      db.prepare('UPDATE QuoteVersion SET is_latest = 1 WHERE id = ?').run(versionId);
+    })();
 
     res.json({
       success: true,

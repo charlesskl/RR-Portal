@@ -39,7 +39,10 @@ router.post('/', upload.single('file'), async (req, res) => {
 
     // ── Create QuoteVersion (or reuse existing with same source_sheet) ───────
     // Use sheet name as version identifier (more reliable than internal date)
-    const versionLabel = data.product.date_code || data.sheetName;
+    // Extract only the numeric date portion from date_code (e.g. "日期:20250207" → "20250207")
+    const rawDateCode = data.product.date_code || '';
+    const dateMatch = rawDateCode.match(/\d{6,8}/);
+    const versionLabel = (dateMatch ? dateMatch[0] : null) || data.sheetName;
     let versionId;
     const existingVersion = db.prepare(
       'SELECT id FROM QuoteVersion WHERE product_id = ? AND source_sheet = ?'

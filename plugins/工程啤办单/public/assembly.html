@@ -80,7 +80,10 @@
         </div>
         <div class="d-flex justify-content-between align-items-center mb-2">
           <strong>夹具明细</strong>
-          <button class="btn btn-sm btn-outline-primary" onclick="addAsmRow()"><i class="bi bi-plus-lg me-1"></i>添加行</button>
+          <div class="d-flex gap-2">
+            <button class="btn btn-sm btn-outline-success" onclick="triggerAsmExcelImport()"><i class="bi bi-file-earmark-excel me-1"></i>导入Excel</button>
+            <button class="btn btn-sm btn-outline-primary" onclick="addAsmRow()"><i class="bi bi-plus-lg me-1"></i>添加行</button>
+          </div>
         </div>
         <div class="items-table-wrap">
           <table class="table table-bordered table-sm items-table" id="asmItemsTable">
@@ -437,6 +440,112 @@ apiFetch('/api/clients').then(r => r.json()).then(clients => {
     clients.forEach(c => { const o = document.createElement('option'); o.value = c; o.textContent = c; sel.appendChild(o); });
   }
 }).catch(() => {});
+
+// ─── Excel 导入 ──────────────────────────────────────────────────────────────
+const _asmExcelInput = (() => {
+  const el = document.createElement('input');
+  el.type = 'file'; el.accept = '.xlsx,.xls,.csv'; el.style.display = 'none';
+  document.body.appendChild(el);
+  el.addEventListener('change', onAsmExcelSelected);
+  return el;
+})();
+
+function triggerAsmExcelImport() { _asmExcelInput.value = ''; _asmExcelInput.click(); }
+
+function loadXLSX() {
+  if (window.XLSX) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = 'https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js';
+    s.onload = resolve;
+    s.onerror = () => reject(new Error('Failed to load XLSX library'));
+    document.head.appendChild(s);
+  });
+}
+
+function excelDateToStr(v) {
+  if (!v) return '';
+  if (typeof v === 'string') return v;
+  if (typeof v === 'number') {
+    const d = new Date((v - 25569) * 86400000);
+    return d.toISOString().slice(0, 10);
+  }
+  if (v instanceof Date) return v.toISOString().slice(0, 10);
+  return String(v);
+}
+
+function onAsmExcelSelected() {
+  const file = _asmExcelInput.files[0];
+  if (!file) return;
+  loadXLSX().then(() => {
+    const reader = new FileReader();
+    reader.onload = e => {
+      try {
+        const wb = XLSX.read(e.target.result, { type: 'array' });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const allRows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', raw: true });
+        if (!allRows.length) { showToast('Excel 文件没有数据', 'warning'); return; }
+
+        let orderNumber = '';
+        let headerIdx = -1;
+
+        for (let i = 0; i < Math.min(allRows.length, 10); i++) {
+          const rowText = allRows[i].map(c => String(c)).join(' ');
+          const m = rowText.match(/货号[：:]\s*(.+)/);
+          if (m) orderNumber = m[1].trim();
+          const cells = allRows[i].map(c => String(c).trim());
+          if (cells.includes('序号') && cells.includes('名称')) { headerIdx = i; break; }
+        }
+
+        if (headerIdx === -1) {
+          for (let i = 0; i < Math.min(allRows.length, 10); i++) {
+            const cells = allRows[i].map(c => String(c).trim());
+            if (cells.some(c => c.includes('名称')) && cells.some(c => c.includes('数量'))) { headerIdx = i; break; }
+          }
+        }
+        if (headerIdx === -1) { showToast('未找到表头行（需含"序号""名称"列）', 'warning'); return; }
+
+        const headers = allRows[headerIdx].map(c => String(c).trim());
+        const nameCol = headers.findIndex(h => h.includes('名称'));
+        const qtyCol = headers.findIndex(h => h.includes('数量'));
+        const dateCol = headers.findIndex(h => h === '日期');
+        const notesCol = headers.findIndex(h => h.includes('备注'));
+        const complCol = headers.findIndex(h => h.includes('完成'));
+
+        if (orderNumber) document.getElementById('asm-order_number').value = orderNumber;
+
+        const dataRows = allRows.slice(headerIdx + 1);
+        const tbody = document.getElementById('asmItemsBody');
+        tbody.innerHTML = '';
+        _rowSeq = 0;
+        let imported = 0;
+
+        for (const row of dataRows) {
+          const name = nameCol >= 0 ? String(row[nameCol] || '').trim() : '';
+          if (!name) continue;
+          const rowText = row.map(c => String(c)).join('');
+          if (rowText.includes('申请人') || rowText.includes('批准') || rowText.includes('审核')) break;
+
+          addAsmRow({
+            product_name: name,
+            quantity: qtyCol >= 0 ? (row[qtyCol] || '') : '',
+            required_date: dateCol >= 0 ? excelDateToStr(row[dateCol]) : '',
+            notes: notesCol >= 0 ? String(row[notesCol] || '') : '',
+            completion_time: complCol >= 0 ? excelDateToStr(row[complCol]) : '',
+          });
+          imported++;
+        }
+
+        if (imported === 0) addAsmRow();
+        showToast(`成功导入 ${imported} 项夹具`, 'success');
+      } catch (err) {
+        console.error(err);
+        showToast('Excel 解析失败: ' + err.message, 'danger');
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  }).catch(() => showToast('加载 XLSX 库失败', 'danger'));
+}
 
 // ─── 初始化 ──────────────────────────────────────────────────────────────────
 loadOrders();

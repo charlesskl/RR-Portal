@@ -517,7 +517,7 @@ function parseHardwareSheet(workbook, mainWs) {
     items.push({
       description: name,
       usage_qty: numVal(row.getCell(3)) ?? 1,
-      unit_price: numVal(row.getCell(5)) || numVal(row.getCell(4)) || 0,  // col E 样板报价，fallback col D 开模报价
+      unit_price: ((numVal(row.getCell(5)) || numVal(row.getCell(4)) || 0) * 1.08),  // col E 样板报价，fallback col D 开模报价，×1.08
       sort_order: items.length,
     });
   }

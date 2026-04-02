@@ -289,6 +289,57 @@ function initDb() {
     db.exec("ALTER TABLE QuoteVersion ADD COLUMN format_type TEXT DEFAULT 'injection'");
   }
 
+  // Migrate: add part_category to HardwareItem
+  const hwCols = db.prepare('PRAGMA table_info(HardwareItem)').all().map(c => c.name);
+  if (!hwCols.includes('part_category')) {
+    db.exec("ALTER TABLE HardwareItem ADD COLUMN part_category TEXT DEFAULT 'other'");
+  }
+
+  // Migrate: add eng_name to SewingDetail
+  const sewCols = db.prepare('PRAGMA table_info(SewingDetail)').all().map(c => c.name);
+  if (!sewCols.includes('eng_name')) {
+    db.exec("ALTER TABLE SewingDetail ADD COLUMN eng_name TEXT");
+  }
+
+  // Migrate: add eng_name to MoldPart, HardwareItem, PackagingItem, ElectronicItem
+  const moldCols = db.prepare('PRAGMA table_info(MoldPart)').all().map(c => c.name);
+  if (!moldCols.includes('eng_name')) db.exec("ALTER TABLE MoldPart ADD COLUMN eng_name TEXT");
+
+  const hwEngCols = db.prepare('PRAGMA table_info(HardwareItem)').all().map(c => c.name);
+  if (!hwEngCols.includes('eng_name')) db.exec("ALTER TABLE HardwareItem ADD COLUMN eng_name TEXT");
+
+  const pkgCols = db.prepare('PRAGMA table_info(PackagingItem)').all().map(c => c.name);
+  if (!pkgCols.includes('eng_name')) db.exec("ALTER TABLE PackagingItem ADD COLUMN eng_name TEXT");
+
+  const elecItemCols = db.prepare('PRAGMA table_info(ElectronicItem)').all().map(c => c.name);
+  if (!elecItemCols.includes('eng_name')) db.exec("ALTER TABLE ElectronicItem ADD COLUMN eng_name TEXT");
+
+  // Migrate: add eng_name to RawMaterial
+  const rawMatCols = db.prepare('PRAGMA table_info(RawMaterial)').all().map(c => c.name);
+  if (!rawMatCols.includes('eng_name')) db.exec("ALTER TABLE RawMaterial ADD COLUMN eng_name TEXT");
+  if (!rawMatCols.includes('spec_eng')) db.exec("ALTER TABLE RawMaterial ADD COLUMN spec_eng TEXT");
+
+  // Migrate: add eng_name to RotocastItem
+  const rotoCols = db.prepare('PRAGMA table_info(RotocastItem)').all().map(c => c.name);
+  if (!rotoCols.includes('eng_name')) db.exec("ALTER TABLE RotocastItem ADD COLUMN eng_name TEXT");
+
+  // Migrate: add is_latest to QuoteVersion
+  if (!existingCols.includes('is_latest')) {
+    db.exec("ALTER TABLE QuoteVersion ADD COLUMN is_latest INTEGER NOT NULL DEFAULT 0");
+    // One-time: mark the latest version per product (highest date_code)
+    db.exec(`
+      UPDATE QuoteVersion
+      SET is_latest = 1
+      WHERE id IN (
+        SELECT id FROM QuoteVersion qv1
+        WHERE date_code = (
+          SELECT MAX(date_code) FROM QuoteVersion qv2
+          WHERE qv2.product_id = qv1.product_id
+        )
+      )
+    `);
+  }
+
   return db;
 }
 

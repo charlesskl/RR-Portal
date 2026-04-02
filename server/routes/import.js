@@ -39,7 +39,7 @@ router.post('/', upload.single('file'), async (req, res) => {
 
     // ── Create QuoteVersion (or reuse existing with same source_sheet) ───────
     // Use sheet name as version identifier (more reliable than internal date)
-    const versionName = data.sheetName;
+    const versionLabel = data.product.date_code || data.sheetName;
     let versionId;
     const existingVersion = db.prepare(
       'SELECT id FROM QuoteVersion WHERE product_id = ? AND source_sheet = ?'
@@ -55,12 +55,12 @@ router.post('/', upload.single('file'), async (req, res) => {
         db.prepare(`DELETE FROM ${t} WHERE version_id = ?`).run(versionId);
       }
       db.prepare(`UPDATE QuoteVersion SET version_name=?, date_code=?, quote_date=?, format_type=?, updated_at=? WHERE id=?`)
-        .run(data.product.date_code, data.product.date_code, data.product.date_code, data.format_type || 'injection', now, versionId);
+        .run(versionLabel, data.product.date_code, data.product.date_code, data.format_type || 'injection', now, versionId);
     } else {
       const vr = db.prepare(
         `INSERT INTO QuoteVersion (product_id, version_name, source_sheet, date_code, quote_date, status, format_type, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, 'draft', ?, ?, ?)`
-      ).run(product.id, data.product.date_code, data.sheetName, data.product.date_code, data.product.date_code, data.format_type || 'injection', now, now);
+      ).run(product.id, versionLabel, data.sheetName, data.product.date_code, data.product.date_code, data.format_type || 'injection', now, now);
       versionId = vr.lastInsertRowid;
     }
 

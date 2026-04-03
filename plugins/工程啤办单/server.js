@@ -268,7 +268,7 @@ app.use('/api', (req, res, next) => {
       if (!pin || !reviewer_name) {
         return res.status(403).json({ error: 'PIN验证失败' });
       }
-      const role = reviewer_role || (status === '待生产' ? 'manager' : 'supervisor');
+      const role = reviewer_role || 'supervisor';
       if (!verifyPin(reviewer_name, pin, role)) {
         return res.status(403).json({ error: 'PIN验证失败' });
       }

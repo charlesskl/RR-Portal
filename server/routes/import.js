@@ -111,12 +111,18 @@ router.post('/', upload.single('file'), async (req, res) => {
 
       // HardwareItem
       const insertHw = db.prepare(
-        `INSERT INTO HardwareItem (version_id, name, quantity, old_price, new_price, difference, tax_type, sort_order)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO HardwareItem (version_id, name, quantity, old_price, new_price, difference, tax_type, sort_order, part_category)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
       );
       for (let i = 0; i < (data.hardwareItems || []).length; i++) {
         const h = data.hardwareItems[i];
-        insertHw.run(versionId, h.name, h.quantity, h.old_price, h.new_price, h.difference, h.tax_type, i);
+        insertHw.run(versionId, h.name, h.quantity, h.old_price, h.new_price, h.difference, h.tax_type, i, 'other');
+      }
+
+      // Labor items (装配人工, 包装人工 etc.) → HardwareItem with part_category='labor_assembly'
+      for (let i = 0; i < (data.laborItems || []).length; i++) {
+        const h = data.laborItems[i];
+        insertHw.run(versionId, h.name, h.quantity, h.old_price, h.new_price, h.difference, h.tax_type, i, 'labor_assembly');
       }
 
       // PackagingItem

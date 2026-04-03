@@ -299,28 +299,42 @@ function parseSewingDetails(workbook) {
 
 // ─── Cost Items Parser ───────────────────────────────────────────────────────
 
-function parseCostItems(ws) {
+function parseCostItems(ws, format) {
   // Parse a range of rows into items [{name, quantity, old_price, new_price, difference, tax_type}]
   // R40 is the header row; R41-R43 are summary computed rows (料价进口料, 料价国内采购, 啤工)
   // Actual labor items start at R44
   function parseItemRange(startRow, endRow) {
     const items = [];
     for (let r = startRow; r <= endRow; r++) {
-      const name = strVal(ws.getCell(r, 1));
+      // col A is category label (may be null), col B is item name
+      const name = strVal(ws.getCell(r, 2));
       if (!name) continue;
-      const quantity = numVal(ws.getCell(r, 2));
-      const old_price = numVal(ws.getCell(r, 3));
-      const new_price = numVal(ws.getCell(r, 4));
-      const difference = numVal(ws.getCell(r, 5));
+      const quantity = numVal(ws.getCell(r, 3));
+      const old_price = numVal(ws.getCell(r, 4));
+      const new_price = numVal(ws.getCell(r, 5));
+      const difference = numVal(ws.getCell(r, 6));
       const tax_type = strVal(ws.getCell(r, 9));
       items.push({ name, quantity, old_price, new_price, difference, tax_type });
     }
     return items;
   }
 
-  // R44-R47: Labor items (装配人工, 包装人工, 喷油人工, 油漆)
-  // R40 = header, R41-R43 = computed summary rows, R44+ = actual items
-  const laborItems = parseItemRange(44, 47);
+  // R44-R47: Labor items (装配人工, 包装人工, 喷油人工, 油漆) — injection format fixed rows
+  // Plush format: scan full sheet for rows where col B contains 人工
+  let laborItems = [];
+  if (format === 'plush') {
+    for (let r = 1; r <= ws.rowCount; r++) {
+      const colA = strVal(ws.getCell(r, 1));
+      const name = strVal(ws.getCell(r, 2));
+      if (!name || colA) continue;
+      if (!name.includes('人工')) continue;
+      const quantity = numVal(ws.getCell(r, 3));
+      const new_price = numVal(ws.getCell(r, 4));
+      laborItems.push({ name, quantity, old_price: null, new_price, difference: null, tax_type: null });
+    }
+  } else {
+    laborItems = parseItemRange(44, 47);
+  }
 
   // R48-R76: Hardware items (五金件, 电镀件, 贴纸, IC, PCBA, 电池)
   const hardwareItems = parseItemRange(48, 76);
@@ -568,7 +582,7 @@ async function parseWorkbook(filePath) {
   const sewingDetails = format === 'plush' ? parseSewingDetails(workbook) : [];
   const bodyAccessories = parseHardwareSheet(workbook, ws);
 
-  const costItems = parseCostItems(ws);
+  const costItems = parseCostItems(ws, format);
   const summary = parseSummary(ws);
   const transport = parseTransport(ws);
   const { electronicItems, electronicSummary } = parseElectronics(workbook, ws);

@@ -268,7 +268,7 @@ app.use('/api', (req, res, next) => {
       if (!pin || !reviewer_name) {
         return res.status(403).json({ error: 'PIN验证失败' });
       }
-      const role = reviewer_role || (status === '待生产' ? 'manager' : 'supervisor');
+      const role = reviewer_role || 'supervisor';
       if (!verifyPin(reviewer_name, pin, role)) {
         return res.status(403).json({ error: 'PIN验证失败' });
       }
@@ -380,7 +380,17 @@ const DEFAULT_CLIENTS = ['ZURU','JAZWARES','Moose','TOMY','Tigerhead','Zanzoon(�
 
 app.get('/api/clients', (req, res) => {
   const data = loadData();
-  res.json(data.clients || DEFAULT_CLIENTS);
+  if (!data.clients) {
+    res.json(DEFAULT_CLIENTS);
+  } else if (data.clients.length < DEFAULT_CLIENTS.length) {
+    // 旧数据客户数少于默认列表，合并去重
+    const merged = [...new Set([...data.clients, ...DEFAULT_CLIENTS])];
+    data.clients = merged;
+    saveData(data);
+    res.json(merged);
+  } else {
+    res.json(data.clients);
+  }
 });
 
 app.put('/api/clients', (req, res) => {

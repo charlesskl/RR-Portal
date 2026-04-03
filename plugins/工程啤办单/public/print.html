@@ -292,42 +292,36 @@
           <td>${v(it.notes)}</td>
         </tr>`).join('');
 
+      const supervisor = v(o.supervisor);
+      const engineer = v(o.eng_name);
+      const stg = o.stage || '';
+      const op = o.order_type || '';
+      function isCkS(s, t) { return stg === s && op === t; }
+
       return `
-        <div class="print-header">
+        <div class="print-header" style="margin-bottom:4px">
           <div class="company-name">东莞兴信塑胶制品有限公司</div>
-          <div class="doc-title">搪胶搪办通知书</div>
         </div>
-        <div class="meta-row">
-          <div class="meta-cell"><span class="meta-label">由：</span><span class="meta-val">工程部</span></div>
-          <div class="meta-cell"><span class="meta-label">订单编号：</span><span class="meta-val">${v(o.order_number)}</span></div>
-          <div class="meta-cell"><span class="meta-label">日期：</span><span class="meta-val">${v(o.date)}</span></div>
-          <div class="meta-cell"><span class="meta-label">车间：</span><span class="meta-val">搪胶部</span></div>
+        <div style="border:1px solid #333;border-bottom:none;padding:4px 8px;font-size:10pt;display:flex;gap:0">
+          <span style="flex:2"><strong>客户：</strong>${v(o.client_name)}</span>
+          <span style="flex:3"><strong>产品编号：</strong>${v(o.order_number)}</span>
+          <span style="flex:3"><strong>产品名称：</strong>${v(o.product_name)}</span>
+          <span style="flex:3;text-align:right"><strong>订单编号：</strong>${v(o.doc_number)}</span>
         </div>
-        <div class="checkbox-row">
-          <div class="checkbox-group">
-            <span class="checkbox-label">EP</span>
-            <span class="cb-item">${ck(false)}试模</span>
-            <span class="cb-item">${ck(false)}试色</span>
-            <span class="cb-item">${ck(false)}啤板</span>
-          </div>
-          <div class="checkbox-group">
-            <span class="checkbox-label">FEP</span>
-            <span class="cb-item">${ck(false)}试模</span>
-            <span class="cb-item">${ck(false)}试色</span>
-            <span class="cb-item">${ck(false)}啤板</span>
-          </div>
-          <div class="checkbox-group">
-            <span class="checkbox-label">PP</span>
-            <span class="cb-item">${ck(false)}试模</span>
-            <span class="cb-item">${ck(false)}试色</span>
-            <span class="cb-item">${ck(o.order_type==='搪办')}啤板</span>
-          </div>
-          <div class="checkbox-group">
-            <span class="checkbox-label">其他</span>
-            <span class="cb-item">${ck(true)}新颜色啤办</span>
-          </div>
+        <div style="border:1px solid #333;border-top:none;border-bottom:none;padding:4px 8px;font-size:10pt;display:flex;gap:0">
+          <span style="flex:2"><strong>车间：</strong>搪胶部</span>
+          <span style="flex:2;text-align:right"><strong>日期：</strong>${v(o.date)}</span>
         </div>
-        <div class="reason-row"><strong>原因：</strong>${v(o.reason)}</div>
+        <div style="border:1px solid #333;border-bottom:none;padding:3px 8px;font-size:9pt;display:flex;align-items:center">
+          <div style="flex:1;border-right:1px solid #999;padding-right:6px"><strong>EP</strong>&ensp;${ck(isCkS('EP','搪胶'))}试模&ensp;${ck(isCkS('EP','试色'))}试色&ensp;${ck(isCkS('EP','搪办'))}啤板</div>
+          <div style="flex:1;border-right:1px solid #999;padding:0 6px"><strong>FEP</strong>&ensp;${ck(isCkS('FEP','搪胶'))}试模&ensp;${ck(isCkS('FEP','试色'))}试色&ensp;${ck(isCkS('FEP','搪办'))}啤板</div>
+          <div style="flex:1;border-right:1px solid #999;padding:0 6px"><strong>PP</strong>&ensp;${ck(isCkS('PP','搪胶'))}试模&ensp;${ck(isCkS('PP','试色'))}试色&ensp;${ck(isCkS('PP','搪办'))}啤板</div>
+          <div style="flex:1;padding-left:6px"><strong>其他</strong></div>
+        </div>
+        <div style="border:1px solid #333;border-bottom:none;padding:3px 8px;font-size:9pt">
+          ${ck(op==='搪胶')}试模&emsp;&emsp;${ck(op==='试色')}试色&emsp;${ck(op==='搪办')}啤板
+        </div>
+        <div style="border:1px solid #333;border-bottom:none;padding:4px 8px;font-size:10pt"><strong>原因：</strong>${v(o.reason)}</div>
         <table class="print-table">
           <thead>
             <tr>
@@ -337,7 +331,12 @@
             </tr>
           </thead>
           <tbody>${rows}</tbody>
-        </table>`;
+        </table>
+        <div style="border:1px solid #333;border-top:none;padding:6px 8px;font-size:9pt;display:flex;align-items:center">
+          <span style="flex:1"><strong>申请：</strong>${engineer}</span>
+          <span style="flex:1;text-align:center">${SUPERVISOR_STAMP[supervisor] && ['待生产','生产中','已完成'].includes(o.status) ? `<span class="stamp">研发:${SUPERVISOR_STAMP[supervisor]}</span>` : ''}</span>
+          <span style="flex:1;text-align:right"><strong>审核：</strong>${supervisor}</span>
+        </div>`;
     }
 
     function renderAssembly(o) {
@@ -352,7 +351,7 @@
           <td>${v(it.product_name)}</td>
           <td style="text-align:center">${v(it.quantity)}</td>
           <td>${v(it.required_date)}</td>
-          <td>${v(it.notes)}</td>
+          <td>${v(it.price)}</td>
           <td>${v(it.completion_time)}</td>
         </tr>`).join('');
 
@@ -362,8 +361,10 @@
           <div style="font-size:12pt;font-weight:bold;margin:4px 0">夹具申请单</div>
         </div>
         <div style="border:1px solid #333;border-bottom:none;padding:4px 8px;font-size:10pt;display:flex;gap:0">
-          <span style="flex:3"><strong>货号：</strong>${v(o.order_number)}</span>
           <span style="flex:2"><strong>客户：</strong>${v(o.client_name)}</span>
+          <span style="flex:3"><strong>产品编号：</strong>${v(o.order_number)}</span>
+          <span style="flex:3"><strong>产品名称：</strong>${v(o.product_name)}</span>
+          <span style="flex:2;text-align:right"><strong>日期：</strong>${v((o.created_at||'').slice(0,10))}</span>
         </div>
         ${o.reason ? `<div style="border:1px solid #333;border-top:none;border-bottom:none;padding:4px 8px;font-size:10pt"><strong>备注：</strong>${v(o.reason)}</div>` : ''}
         <table class="print-table">
@@ -372,55 +373,85 @@
               <th style="width:40px">序号</th>
               <th>名称</th>
               <th>数量</th>
-              <th>日期</th>
-              <th>备注</th>
+              <th>要求完成日期</th>
+              <th>价格</th>
               <th>完成时间</th>
             </tr>
           </thead>
           <tbody>${rows}</tbody>
         </table>
-        <div style="border:1px solid #333;border-top:none;padding:12px 8px;font-size:10pt;display:flex;gap:0">
-          <span style="flex:2"><strong>申请人：</strong>${v(o.created_by)}</span>
-          <span style="flex:2"><strong>审核：</strong></span>
-          <span style="flex:2"><strong>批准：</strong></span>
+        <div style="border:1px solid #333;border-top:none;padding:6px 8px;font-size:9pt;display:flex;align-items:center">
+          <span style="flex:1"><strong>申请：</strong>${v(o.eng_name || o.created_by)}</span>
+          <span style="flex:1;text-align:center">${SUPERVISOR_STAMP[v(o.supervisor)] && ['待生产','生产中','已完成'].includes(o.status) ? `<span class="stamp">研发:${SUPERVISOR_STAMP[v(o.supervisor)]}</span>` : ''}</span>
+          <span style="flex:1;text-align:right"><strong>审核：</strong>${v(o.supervisor)}</span>
         </div>`;
     }
 
     function renderSpray(o) {
       const items = o.items || [];
+      const isHuaDeng = o.workshop === '华登车间';
+      const companyName = isHuaDeng ? '东莞华登塑胶制品有限公司' : '东莞兴信塑胶制品有限公司';
+      const supervisor = v(o.supervisor);
+      const engineer = v(o.eng_name);
+      const stg = o.stage || '';
+      const op = o.order_type || '';
+      function isCkP(s, t) { return stg === s && op === t; }
+
       let rows = items.map(it => `
         <tr>
           <td>${v(it.client_name)}</td>
           <td>${v(it.product_name)}</td>
+          <td>${v(it.part_name)}</td>
+          <td>${v(it.process)}</td>
           <td>${v(it.sample_qty)}</td>
           <td>${v(it.provide_time)}</td>
           <td>${v(it.receive_time)}</td>
           <td>${v(it.eng_complete_time)}</td>
           <td style="color:#c00;font-weight:bold">${v(it.delivery_time)}</td>
           <td>${v(it.engineer)}</td>
+          <td>${v(it.follower)}</td>
           <td>${v(it.notes)}</td>
         </tr>`).join('');
 
       return `
-        <div class="print-header">
-          <div class="company-name">东莞华登塑胶制品有限公司</div>
-          <div class="doc-title">喷油样板表</div>
+        <div class="print-header" style="margin-bottom:4px">
+          <div class="company-name">${companyName}</div>
         </div>
-        <div class="meta-row">
-          <div class="meta-cell"><span class="meta-label">订单编号：</span><span class="meta-val">${v(o.order_number)}</span></div>
-          <div class="meta-cell"><span class="meta-label">日期：</span><span class="meta-val">${v(o.date)}</span></div>
-          <div class="meta-cell"><span class="meta-label">原因：</span><span class="meta-val">${v(o.reason)}</span></div>
+        <div style="border:1px solid #333;border-bottom:none;padding:4px 8px;font-size:10pt;display:flex;gap:0">
+          <span style="flex:2"><strong>客户：</strong>${v(o.client_name)}</span>
+          <span style="flex:3"><strong>产品编号：</strong>${v(o.order_number)}</span>
+          <span style="flex:3"><strong>产品名称：</strong>${v(o.product_name)}</span>
+          <span style="flex:3;text-align:right"><strong>订单编号：</strong>${v(o.doc_number)}</span>
         </div>
+        <div style="border:1px solid #333;border-top:none;border-bottom:none;padding:4px 8px;font-size:10pt;display:flex;gap:0">
+          <span style="flex:2"><strong>车间：</strong>${v(o.workshop)}</span>
+          <span style="flex:2;text-align:right"><strong>日期：</strong>${v(o.date)}</span>
+        </div>
+        <div style="border:1px solid #333;border-bottom:none;padding:3px 8px;font-size:9pt;display:flex;align-items:center">
+          <div style="flex:1;border-right:1px solid #999;padding-right:6px"><strong>EP</strong>&ensp;${ck(isCkP('EP','喷油'))}试模&ensp;${ck(isCkP('EP','试色'))}试色&ensp;${ck(false)}啤板</div>
+          <div style="flex:1;border-right:1px solid #999;padding:0 6px"><strong>FEP</strong>&ensp;${ck(isCkP('FEP','喷油'))}试模&ensp;${ck(isCkP('FEP','试色'))}试色&ensp;${ck(false)}啤板</div>
+          <div style="flex:1;border-right:1px solid #999;padding:0 6px"><strong>PP</strong>&ensp;${ck(isCkP('PP','喷油'))}试模&ensp;${ck(isCkP('PP','试色'))}试色&ensp;${ck(false)}啤板</div>
+          <div style="flex:1;padding-left:6px"><strong>其他</strong></div>
+        </div>
+        <div style="border:1px solid #333;border-bottom:none;padding:3px 8px;font-size:9pt">
+          ${ck(op==='喷油')}试模&emsp;&emsp;${ck(op==='试色')}试色&emsp;${ck(op==='返工')}返工
+        </div>
+        <div style="border:1px solid #333;border-bottom:none;padding:4px 8px;font-size:10pt"><strong>原因：</strong>${v(o.reason)}</div>
         <table class="print-table">
           <thead>
             <tr>
-              <th>客名</th><th>名称</th><th>样板数量</th>
+              <th>客名</th><th>名称</th><th>零件名称</th><th>工序</th><th>样板数量</th>
               <th>提供胶件时间</th><th>收到胶件时间</th><th>工程预计完成时间</th>
-              <th style="color:#c00">喷油交货时间</th><th>工程师/PMC</th><th>备注</th>
+              <th style="color:#c00">喷油复交货时间</th><th>工程师</th><th>跟进人</th><th>备注</th>
             </tr>
           </thead>
           <tbody>${rows}</tbody>
-        </table>`;
+        </table>
+        <div style="border:1px solid #333;border-top:none;padding:6px 8px;font-size:9pt;display:flex;align-items:center">
+          <span style="flex:1"><strong>申请：</strong>${engineer}</span>
+          <span style="flex:1;text-align:center">${SUPERVISOR_STAMP[supervisor] && ['待生产','生产中','已完成'].includes(o.status) ? `<span class="stamp">研发:${SUPERVISOR_STAMP[supervisor]}</span>` : ''}</span>
+          <span style="flex:1;text-align:right"><strong>审核：</strong>${supervisor}</span>
+        </div>`;
     }
   </script>
 </body>

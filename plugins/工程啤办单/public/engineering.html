@@ -72,6 +72,9 @@
         <option value="B车间">B车间</option>
         <option value="华登车间">华登车间</option>
       </select>
+      <select id="clientFilter" class="form-select form-select-sm" style="width:auto" onchange="filterClient(this.value)">
+        <option value="">全部客户</option>
+      </select>
     </div>
     <div class="d-flex gap-2">
       <button class="btn btn-outline-secondary" onclick="openSummary()">
@@ -184,6 +187,7 @@
         <input type="hidden" id="slush-status" value="待审核">
         <div class="row g-3 mb-3">
           <div class="col-md-3"><label class="form-label fw-bold">产品编号</label><input class="form-control" id="slush-order_number" placeholder="如 XX2024001"></div>
+          <div class="col-md-3"><label class="form-label fw-bold">订单编号</label><input class="form-control" id="slush-doc_number" placeholder="订单编号"></div>
           <div class="col-md-3"><label class="form-label fw-bold">产品名称 <span class="text-danger">*</span></label><input class="form-control" id="slush-product_name" placeholder="产品名称" required></div>
           <div class="col-md-3"><label class="form-label fw-bold">客名</label>
             <select class="form-select" id="slush-client_name">
@@ -191,6 +195,12 @@
             </select>
           </div>
           <div class="col-md-3"><label class="form-label fw-bold">日期</label><input type="date" class="form-control" id="slush-date"></div>
+          <div class="col-md-3"><label class="form-label fw-bold">阶段</label>
+            <select class="form-select" id="slush-stage">
+              <option value="">请选择阶段</option>
+              <option>T0</option><option>EP</option><option>FEP</option><option>PP</option>
+            </select>
+          </div>
           <div class="col-md-3"><label class="form-label fw-bold">类型</label>
             <select class="form-select" id="slush-order_type">
               <option>搪胶</option><option>搪办</option><option>试色</option>
@@ -243,7 +253,21 @@
         <input type="hidden" id="spray-id">
         <input type="hidden" id="spray-status" value="待审核">
         <div class="row g-3 mb-3">
+          <div class="col-md-3"><label class="form-label fw-bold">产品编号</label><input class="form-control" id="spray-order_number" placeholder="如 HD2024001"></div>
+          <div class="col-md-3"><label class="form-label fw-bold">订单编号</label><input class="form-control" id="spray-doc_number" placeholder="订单编号"></div>
+          <div class="col-md-3"><label class="form-label fw-bold">产品名称 <span class="text-danger">*</span></label><input class="form-control" id="spray-product_name" placeholder="产品名称" required></div>
+          <div class="col-md-3"><label class="form-label fw-bold">客名</label>
+            <select class="form-select" id="spray-client_name">
+              <option value="">请选择客户</option>
+            </select>
+          </div>
           <div class="col-md-3"><label class="form-label fw-bold">日期</label><input type="date" class="form-control" id="spray-date"></div>
+          <div class="col-md-3"><label class="form-label fw-bold">阶段</label>
+            <select class="form-select" id="spray-stage">
+              <option value="">请选择阶段</option>
+              <option>T0</option><option>EP</option><option>FEP</option><option>PP</option>
+            </select>
+          </div>
           <div class="col-md-3"><label class="form-label fw-bold">类型</label>
             <select class="form-select" id="spray-order_type">
               <option>喷油</option><option>试色</option><option>返工</option>
@@ -254,6 +278,13 @@
               <option>兴信车间</option><option>华登车间</option>
             </select>
           </div>
+          <div class="col-md-3"><label class="form-label fw-bold">主管</label>
+            <select class="form-select" id="spray-supervisor">
+              <option value="">请选择主管</option>
+              <option>段新辉</option><option>唐海林</option><option>蒙海欢</option><option>万志勇</option><option>章发东</option><option>刘际维</option><option>甘勇辉</option><option>王玉国</option>
+            </select>
+          </div>
+          <div class="col-md-3"><label class="form-label fw-bold">跟进工程师</label><input class="form-control" id="spray-engineer" placeholder="请输入姓名"></div>
           <div class="col-12"><label class="form-label fw-bold">原因/备注</label><input class="form-control" id="spray-reason" placeholder="如 新款喷油打样"></div>
         </div>
         <div class="d-flex justify-content-between align-items-center mb-2">
@@ -293,13 +324,22 @@
         <input type="hidden" id="asm-id">
         <input type="hidden" id="asm-status" value="待审核">
         <div class="row g-3 mb-3">
-          <div class="col-md-4"><label class="form-label fw-bold">货号 <span class="text-danger">*</span></label><input class="form-control" id="asm-order_number" placeholder="如 3寸暴力熊"></div>
-          <div class="col-md-4"><label class="form-label fw-bold">客名</label>
+          <div class="col-md-3"><label class="form-label fw-bold">产品编号 <span class="text-danger">*</span></label><input class="form-control" id="asm-order_number" placeholder="如 157149"></div>
+          <div class="col-md-3"><label class="form-label fw-bold">产品名称</label><input class="form-control" id="asm-product_name" placeholder="产品名称"></div>
+          <div class="col-md-3"><label class="form-label fw-bold">客名</label>
             <select class="form-select" id="asm-client_name">
               <option value="">请选择客户</option>
             </select>
           </div>
-          <div class="col-md-4"><label class="form-label fw-bold">备注</label><input class="form-control" id="asm-reason" placeholder="备注信息"></div>
+          <div class="col-md-3"><label class="form-label fw-bold">日期</label><input type="date" class="form-control" id="asm-date"></div>
+          <div class="col-md-3"><label class="form-label fw-bold">主管</label>
+            <select class="form-select" id="asm-supervisor">
+              <option value="">请选择主管</option>
+              <option>段新辉</option><option>唐海林</option><option>蒙海欢</option><option>万志勇</option><option>章发东</option><option>刘际维</option><option>甘勇辉</option><option>王玉国</option>
+            </select>
+          </div>
+          <div class="col-md-3"><label class="form-label fw-bold">跟进工程师</label><input class="form-control" id="asm-engineer" placeholder="请输入姓名"></div>
+          <div class="col-md-6"><label class="form-label fw-bold">原因/备注</label><input class="form-control" id="asm-reason" placeholder="备注信息"></div>
         </div>
         <div class="d-flex justify-content-between align-items-center mb-2">
           <strong>夹具明细</strong>
@@ -310,7 +350,7 @@
         </div>
         <div class="items-table-wrap">
           <table class="table table-bordered table-sm items-table">
-            <thead><tr><th style="width:50px">序号</th><th>名称</th><th style="width:80px">数量</th><th>日期</th><th>备注</th><th>完成时间</th><th style="width:40px"></th></tr></thead>
+            <thead><tr><th style="width:50px">序号</th><th>名称</th><th style="width:80px">数量</th><th>要求完成日期</th><th>价格</th><th>完成时间</th><th style="width:40px"></th></tr></thead>
             <tbody id="asmItemsBody"></tbody>
           </table>
         </div>
@@ -487,14 +527,22 @@ function switchTab(type, el) {
   currentTab = type;
   currentFilter = '';
   currentWorkshop = '';
+  currentClient = '';
   document.querySelectorAll('.status-filter .btn').forEach((b, i) => b.classList.toggle('active', i === 0));
   document.getElementById('workshopFilter').value = '';
+  document.getElementById('clientFilter').value = '';
   loadOrders();
   return false;
 }
 
 function filterWorkshop(val) {
   currentWorkshop = val;
+  loadOrders();
+}
+
+let currentClient = '';
+function filterClient(val) {
+  currentClient = val;
   loadOrders();
 }
 
@@ -520,6 +568,7 @@ function loadOrders() {
     });
     if (currentFilter)   orders = orders.filter(o => o.status === currentFilter);
     if (currentWorkshop) orders = orders.filter(o => o.workshop === currentWorkshop);
+    if (currentClient)   orders = orders.filter(o => o.client_name === currentClient || (o.items && o.items.some(it => it.client_name === currentClient)));
     // 按主管分组，每组内待审核排最前，其次按 ID 降序
     const _sOrd = { '待审核':0, '待经理审核':1, '待生产':2, '生产中':3, '已完成':4, '已驳回':5, '已取消':6 };
     orders.sort((a, b) => {
@@ -1073,7 +1122,11 @@ function editAsmOrder(id) {
       document.getElementById('asmModalTitle').textContent = `编辑夹具申请单 #${id}`;
       document.getElementById('asm-id').value = order.id;
       document.getElementById('asm-order_number').value = order.order_number || '';
+      document.getElementById('asm-product_name').value = order.product_name || '';
       document.getElementById('asm-client_name').value = order.client_name || '';
+      document.getElementById('asm-date').value = order.date || '';
+      document.getElementById('asm-supervisor').value = order.supervisor || '';
+      document.getElementById('asm-engineer').value = order.eng_name || '';
       document.getElementById('asm-reason').value = order.reason || '';
       document.getElementById('asm-status').value = (order.status === '已驳回') ? '待审核' : order.status;
       const tbody = document.getElementById('asmItemsBody');
@@ -1086,7 +1139,7 @@ function editAsmOrder(id) {
     .catch(() => showToast('加载失败', 'danger'));
 }
 
-const asmItemFields = ['product_name','quantity','required_date','notes','completion_time'];
+const asmItemFields = ['product_name','quantity','required_date','price','completion_time'];
 
 function saveAsmOrder() {
   const orderNumber = document.getElementById('asm-order_number').value.trim();
@@ -1098,7 +1151,11 @@ function saveAsmOrder() {
   const id = document.getElementById('asm-id').value;
   const body = {
     order_number: orderNumber,
+    product_name: document.getElementById('asm-product_name').value || null,
     client_name: document.getElementById('asm-client_name').value || null,
+    date: document.getElementById('asm-date').value || null,
+    supervisor: document.getElementById('asm-supervisor').value || null,
+    eng_name: document.getElementById('asm-engineer').value || null,
     reason: document.getElementById('asm-reason').value || null,
     status: document.getElementById('asm-status').value,
     items: items,
@@ -1307,8 +1364,8 @@ function renderReviewDetails(order, type) {
     thead = '<tr><th>序号</th><th>产品编号</th><th>工模编号</th><th>工模名称</th><th>原料</th><th>颜色/编号</th><th>色粉编号</th><th>每啤毛重(g)</th><th>数量</th><th>要求完成日期</th><th>回模时间</th><th>备注</th></tr>';
     rows = items.map(it => `<tr><td>${esc(it.seq_no||'-')}</td><td>${esc(it.product_id||'-')}</td><td>${esc(it.mold_id||'-')}</td><td>${esc(it.mold_name||'-')}</td><td>${esc(it.material||'-')}</td><td>${esc(it.color_code||'-')}</td><td>${esc(it.pigment_no||'-')}</td><td>${esc(it.unit_weight||'-')}</td><td>${esc(it.quantity||'-')}</td><td>${esc(it.required_date||'-')}</td><td>${esc(it.return_time||'-')}</td><td>${esc(it.notes||'-')}</td></tr>`).join('');
   } else if (type === 'assembly') {
-    thead = '<tr><th>序号</th><th>名称</th><th>数量</th><th>日期</th><th>备注</th><th>完成时间</th></tr>';
-    rows = items.map((it, i) => `<tr><td>${i+1}</td><td>${esc(it.product_name||'-')}</td><td>${esc(it.quantity||'-')}</td><td>${esc(it.required_date||'-')}</td><td>${esc(it.notes||'-')}</td><td>${esc(it.completion_time||'-')}</td></tr>`).join('');
+    thead = '<tr><th>序号</th><th>名称</th><th>数量</th><th>要求完成日期</th><th>价格</th><th>完成时间</th></tr>';
+    rows = items.map((it, i) => `<tr><td>${i+1}</td><td>${esc(it.product_name||'-')}</td><td>${esc(it.quantity||'-')}</td><td>${esc(it.required_date||'-')}</td><td>${esc(it.price||'-')}</td><td>${esc(it.completion_time||'-')}</td></tr>`).join('');
   } else {
     thead = '<tr><th>客名</th><th>名称</th><th>样板数量</th><th>提供胶件时间</th><th>收到胶件时间</th><th>工程预计完成时间</th><th>喷油交货时间</th><th>工程师/PMC</th><th>备注</th></tr>';
     rows = items.map(it => `<tr><td>${esc(it.client_name||'-')}</td><td>${esc(it.product_name||'-')}</td><td>${esc(it.sample_qty||'-')}</td><td>${esc(it.provide_time||'-')}</td><td>${esc(it.receive_time||'-')}</td><td>${esc(it.eng_complete_time||'-')}</td><td>${esc(it.delivery_time||'-')}</td><td>${esc(it.engineer||'-')}</td><td>${esc(it.notes||'-')}</td></tr>`).join('');
@@ -1379,7 +1436,7 @@ async function submitReview(action) {
 
   let newStatus, toastMsg;
   // 啤办单需要经理二级审核，其余（搪胶/喷油/夹具）主管通过即可
-  const needManagerReview = currentTab === 'injection';
+  const needManagerReview = currentTab === 'injection' || currentTab === 'assembly';
   if (action === 'reject') {
     newStatus = '已驳回';
     toastMsg = '已驳回';
@@ -1977,10 +2034,13 @@ let _clientList = [];
 apiFetch('/api/clients').then(r => r.json()).then(clients => {
   _clientList = clients;
   // 填充所有客户下拉框（啤办单、搪胶单、夹具单头部）
-  ['inj-client_name', 'slush-client_name', 'asm-client_name'].forEach(id => {
+  ['inj-client_name', 'slush-client_name', 'spray-client_name', 'asm-client_name'].forEach(id => {
     const sel = document.getElementById(id);
     if (sel) clients.forEach(c => { const o = document.createElement('option'); o.value = c; o.textContent = c; sel.appendChild(o); });
   });
+  // 填充客名筛选下拉框
+  const clientFilterSel = document.getElementById('clientFilter');
+  if (clientFilterSel) clients.forEach(c => { const o = document.createElement('option'); o.value = c; o.textContent = c; clientFilterSel.appendChild(o); });
 }).catch(() => {});
 
 // ─── 用户登录 ─────────────────────────────────────────────────────────────────
@@ -2062,7 +2122,11 @@ function openNewAsmModal() {
   document.getElementById('asmModalTitle').textContent = '新建夹具申请单';
   document.getElementById('asm-id').value = '';
   document.getElementById('asm-order_number').value = '';
+  document.getElementById('asm-product_name').value = '';
   document.getElementById('asm-client_name').value = '';
+  document.getElementById('asm-date').value = new Date().toISOString().slice(0,10);
+  document.getElementById('asm-supervisor').value = '';
+  document.getElementById('asm-engineer').value = '';
   document.getElementById('asm-reason').value = '';
   document.getElementById('asm-status').value = '待审核';
   document.getElementById('asmItemsBody').innerHTML = '';
@@ -2078,8 +2142,8 @@ function addAsmRow(it={}) {
     <td class="text-center asm-seq">${_asmRowSeq}</td>
     <td>${inp('text','product_name',it.product_name||'','placeholder="夹具名称"')}</td>
     <td>${inp('number','quantity',it.quantity||'','style="width:80px" min="1"')}</td>
-    <td>${inp('text','required_date',it.required_date||'','placeholder="YYYY-MM-DD"')}</td>
-    <td>${inp('text','notes',it.notes||'')}</td>
+    <td>${inp('date','required_date',it.required_date||'')}</td>
+    <td>${inp('number','price',it.price||'','placeholder="价格" step="0.01"')}</td>
     <td>${inp('text','completion_time',it.completion_time||'','placeholder="完成时间"')}</td>
     <td><button type="button" class="btn btn-sm btn-danger" onclick="removeAsmRow(this)"><i class="bi bi-x-lg"></i></button></td>`;
   document.getElementById('asmItemsBody').appendChild(tr);

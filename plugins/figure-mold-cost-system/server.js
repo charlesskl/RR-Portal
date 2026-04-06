@@ -32,21 +32,22 @@ const upload = multer({
 // ─── JSON Storage (cache + atomic write) ────────────────────────────────
 let _cache = null;
 
-function loadData() {
+function ensureCache() {
   if (!_cache) {
     if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
     if (!fs.existsSync(DATA_FILE)) {
-      fs.writeFileSync(DATA_FILE, JSON.stringify({
+      const seed = {
         mold_orders: [], figure_orders: [], purchase_orders: [],
-        mold_factories: ['东莞兴信模具厂', '华登模具厂'],
-        figure_factories: ['东莞兴信手办厂'],
+        mold_factories: ['力众', '亚细亚', '龙之联', '亿隆泰', '范仕达'],
+        figure_factories: ['力图', '海洋', '广祥', '伟盟'],
         customers: ['ZURU', 'JAZWARES', 'Moose', 'TOMY'],
         eng_users: [
-          { name: '管理员', pin: '123456' },
-          { name: '测试用户', pin: '123456' }
+          { name: '管理员', pin: bcrypt.hashSync('123456', 10) },
+          { name: '测试用户', pin: bcrypt.hashSync('123456', 10) }
         ],
         nextId: 1, po_next_id: 1
-      }, null, 2));
+      };
+      fs.writeFileSync(DATA_FILE, JSON.stringify(seed, null, 2));
       console.log('已创建 data.json 并预置工厂/客户/用户数据');
     }
     try {
@@ -56,6 +57,17 @@ function loadData() {
       throw new Error('数据文件损坏，请联系管理员');
     }
   }
+}
+
+// Read-only access: return cache directly (no deep copy)
+function readData() {
+  ensureCache();
+  return _cache;
+}
+
+// Write access: return a deep copy so caller can mutate safely
+function loadData() {
+  ensureCache();
   return JSON.parse(JSON.stringify(_cache));
 }
 
@@ -155,12 +167,12 @@ app.post('/api/login', loginLimiter, (req, res) => {
 
 // ─── Base Data ──────────────────────────────────────────────────────────
 app.get('/api/factories', (req, res) => {
-  const data = loadData();
+  const data = readData();
   res.json({ mold_factories: data.mold_factories || [], figure_factories: data.figure_factories || [] });
 });
 
 app.get('/api/customers', (req, res) => {
-  const data = loadData();
+  const data = readData();
   res.json(data.customers || []);
 });
 
@@ -170,7 +182,7 @@ app.get('/api/customers', (req, res) => {
 
 // Stats (MUST be before /:id)
 app.get('/api/mold-orders/stats', (req, res) => {
-  const data = loadData();
+  const data = readData();
   let orders = data.mold_orders || [];
   const { year, month, group, group_by } = req.query;
   if (group) orders = orders.filter(o => o.group === group);
@@ -205,7 +217,7 @@ app.get('/api/mold-orders/stats', (req, res) => {
 
 // List
 app.get('/api/mold-orders', (req, res) => {
-  const data = loadData();
+  const data = readData();
   let orders = data.mold_orders || [];
   const { group, factory, customer, status, year, month } = req.query;
   if (group) orders = orders.filter(o => o.group === group);
@@ -220,7 +232,7 @@ app.get('/api/mold-orders', (req, res) => {
 
 // Get single
 app.get('/api/mold-orders/:id', (req, res) => {
-  const data = loadData();
+  const data = readData();
   const order = data.mold_orders.find(o => o.id === Number(req.params.id));
   if (!order) return res.status(404).json({ error: '订单不存在' });
   res.json(order);
@@ -320,7 +332,7 @@ app.put('/api/mold-orders/:id/status', (req, res) => {
 
 // Stats (MUST be before /:id)
 app.get('/api/figure-orders/stats', (req, res) => {
-  const data = loadData();
+  const data = readData();
   let orders = data.figure_orders || [];
   const { year, month, group, group_by } = req.query;
   if (group) orders = orders.filter(o => o.group === group);
@@ -358,7 +370,7 @@ app.get('/api/figure-orders/stats', (req, res) => {
 
 // List
 app.get('/api/figure-orders', (req, res) => {
-  const data = loadData();
+  const data = readData();
   let orders = data.figure_orders || [];
   const { group, factory, customer, status, year, month } = req.query;
   if (group) orders = orders.filter(o => o.group === group);
@@ -373,7 +385,7 @@ app.get('/api/figure-orders', (req, res) => {
 
 // Get single
 app.get('/api/figure-orders/:id', (req, res) => {
-  const data = loadData();
+  const data = readData();
   const order = data.figure_orders.find(o => o.id === Number(req.params.id));
   if (!order) return res.status(404).json({ error: '订单不存在' });
   res.json(order);
@@ -480,7 +492,7 @@ app.get('/api/purchase-orders/next-number', (req, res) => {
 
 // List
 app.get('/api/purchase-orders', (req, res) => {
-  const data = loadData();
+  const data = readData();
   let pos = data.purchase_orders || [];
   const { type, group, year, status } = req.query;
   if (type) pos = pos.filter(p => p.type === type);
@@ -493,7 +505,7 @@ app.get('/api/purchase-orders', (req, res) => {
 
 // Get single (AFTER /next-number to avoid route conflict)
 app.get('/api/purchase-orders/:id', (req, res) => {
-  const data = loadData();
+  const data = readData();
   const po = (data.purchase_orders || []).find(p => p.id === Number(req.params.id));
   if (!po) return res.status(404).json({ error: '采购单不存在' });
   res.json(po);
@@ -954,7 +966,7 @@ function parseExcelPO(filePath) {
         nature: gateVal,
         quantity: Number(qtyVal) || 0,
         unit: colMap.unit !== undefined ? getCellValue(ws, r, colMap.unit) : '',
-        unit_price: Number(colMap.unit !== undefined ? getCellValue(ws, r, colMap.unit_price) : 0) || 0,
+        unit_price: Number(colMap.unit_price !== undefined ? getCellValue(ws, r, colMap.unit_price) : 0) || 0,
         amount: Number(amountStr) || 0,
         notes: colMap.notes !== undefined ? getCellValue(ws, r, colMap.notes) : ''
       });

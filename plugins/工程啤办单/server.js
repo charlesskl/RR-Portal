@@ -174,18 +174,6 @@ const ALL_MANAGERS = ['易东存'];
   if (changed) saveData(data);
 })();
 
-// 启动时合并客户默认列表（旧数据迁移，幂等）
-(function initClients() {
-  const data = loadData();
-  if (!data.clients) {
-    data.clients = DEFAULT_CLIENTS.slice();
-    saveData(data);
-  } else if (data.clients.length < DEFAULT_CLIENTS.length) {
-    data.clients = [...new Set([...data.clients, ...DEFAULT_CLIENTS])];
-    saveData(data);
-  }
-})();
-
 function verifyPin(name, pin, role) {
   const data = loadData();
   const pins = data.auth_pins || {};
@@ -389,6 +377,18 @@ app.get('/api/roles', (req, res) => {
 
 // ─── 客户列表管理 ──────────────────────────────────────────────────────────────
 const DEFAULT_CLIENTS = ['ZURU','JAZWARES','Moose','TOMY','Tigerhead','Zanzoon(嘉苏)','AZAD','Brybelly +Entertoymen','Lifelines','ToyMonster','Cepia','Tikino','Sky Castle','Masterkidz','John Adams','智海鑫','PWP(多美）','CareFocus','永恒','spin master','Tokidos'];
+
+// 启动时合并客户默认列表（旧数据迁移，幂等）
+(function initClients() {
+  const data = loadData();
+  if (!data.clients) {
+    data.clients = DEFAULT_CLIENTS.slice();
+    saveData(data);
+  } else if (data.clients.length < DEFAULT_CLIENTS.length) {
+    data.clients = [...new Set([...data.clients, ...DEFAULT_CLIENTS])];
+    saveData(data);
+  }
+})();
 
 app.get('/api/clients', (req, res) => {
   const data = loadData();

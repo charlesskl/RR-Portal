@@ -174,6 +174,18 @@ const ALL_MANAGERS = ['易东存'];
   if (changed) saveData(data);
 })();
 
+// 启动时合并客户默认列表（旧数据迁移，幂等）
+(function initClients() {
+  const data = loadData();
+  if (!data.clients) {
+    data.clients = DEFAULT_CLIENTS.slice();
+    saveData(data);
+  } else if (data.clients.length < DEFAULT_CLIENTS.length) {
+    data.clients = [...new Set([...data.clients, ...DEFAULT_CLIENTS])];
+    saveData(data);
+  }
+})();
+
 function verifyPin(name, pin, role) {
   const data = loadData();
   const pins = data.auth_pins || {};
@@ -268,7 +280,7 @@ app.use('/api', (req, res, next) => {
       if (!pin || !reviewer_name) {
         return res.status(403).json({ error: 'PIN验证失败' });
       }
-      const role = reviewer_role || (status === '待生产' ? 'manager' : 'supervisor');
+      const role = reviewer_role || 'supervisor';
       if (!verifyPin(reviewer_name, pin, role)) {
         return res.status(403).json({ error: 'PIN验证失败' });
       }

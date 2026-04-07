@@ -89,7 +89,7 @@
           <table class="table table-bordered table-sm items-table" id="asmItemsTable">
             <thead>
               <tr>
-                <th style="width:50px">序号</th><th>名称</th><th style="width:80px">数量</th><th>日期</th><th>备注</th><th>完成时间</th><th style="width:40px"></th>
+                <th style="width:50px">序号</th><th>名称</th><th style="width:80px">数量</th><th>要求完成日期</th><th>价格</th><th>完成时间</th><th style="width:40px"></th>
               </tr>
             </thead>
             <tbody id="asmItemsBody"></tbody>
@@ -283,7 +283,7 @@ function addAsmRow(it={}) {
     <td>${inp('text','product_name',it.product_name,'placeholder="夹具名称"')}</td>
     <td>${inp('number','quantity',it.quantity,'style="width:80px" min="1"')}</td>
     <td>${inp('text','required_date',it.required_date,'placeholder="YYYY-MM-DD" class="w-date"')}</td>
-    <td>${inp('text','notes',it.notes)}</td>
+    <td>${inp('number','price',it.price||'','placeholder="价格" step="0.01"')}</td>
     <td>${inp('text','completion_time',it.completion_time,'placeholder="完成时间" class="w-date"')}</td>
     <td><button type="button" class="btn btn-sm btn-danger" onclick="removeRow(this)"><i class="bi bi-x-lg"></i></button></td>`;
   document.getElementById('asmItemsBody').appendChild(tr);
@@ -298,7 +298,7 @@ function removeRow(btn) {
 }
 
 // ─── 保存订单 ─────────────────────────────────────────────────────────────────
-const asmFields = ['product_name','quantity','required_date','notes','completion_time'];
+const asmFields = ['product_name','quantity','required_date','price','completion_time'];
 
 function collectRows(tbodyId, fields) {
   return Array.from(document.getElementById(tbodyId).querySelectorAll('tr')).map(tr => {
@@ -418,8 +418,8 @@ function renderOrderDetails(order) {
   const items = order.items || [];
   if (!items.length) return headerHtml + '<div class="text-muted small">（无明细行）</div>';
 
-  const thead = '<tr><th>序号</th><th>名称</th><th>数量</th><th>日期</th><th>备注</th><th>完成时间</th></tr>';
-  const rows = items.map((it, i) => `<tr><td>${i+1}</td><td>${esc(it.product_name||'-')}</td><td>${esc(it.quantity||'-')}</td><td>${esc(it.required_date||'-')}</td><td>${esc(it.notes||'-')}</td><td>${esc(it.completion_time||'-')}</td></tr>`).join('');
+  const thead = '<tr><th>序号</th><th>名称</th><th>数量</th><th>要求完成日期</th><th>价格</th><th>完成时间</th></tr>';
+  const rows = items.map((it, i) => `<tr><td>${i+1}</td><td>${esc(it.product_name||'-')}</td><td>${esc(it.quantity||'-')}</td><td>${esc(it.required_date||'-')}</td><td>${esc(it.price||'-')}</td><td>${esc(it.completion_time||'-')}</td></tr>`).join('');
 
   return headerHtml + `<div class="table-responsive"><table class="table table-bordered table-sm"><thead class="table-light">${thead}</thead><tbody>${rows}</tbody></table></div>`;
 }
@@ -509,7 +509,7 @@ function onAsmExcelSelected() {
         const nameCol = headers.findIndex(h => h.includes('名称'));
         const qtyCol = headers.findIndex(h => h.includes('数量'));
         const dateCol = headers.findIndex(h => h === '日期');
-        const notesCol = headers.findIndex(h => h.includes('备注'));
+        const notesCol = headers.findIndex(h => h.includes('价格'));
         const complCol = headers.findIndex(h => h.includes('完成'));
 
         if (orderNumber) document.getElementById('asm-order_number').value = orderNumber;
@@ -530,7 +530,7 @@ function onAsmExcelSelected() {
             product_name: name,
             quantity: qtyCol >= 0 ? (row[qtyCol] || '') : '',
             required_date: dateCol >= 0 ? excelDateToStr(row[dateCol]) : '',
-            notes: notesCol >= 0 ? String(row[notesCol] || '') : '',
+            price: notesCol >= 0 ? String(row[notesCol] || '') : '',
             completion_time: complCol >= 0 ? excelDateToStr(row[complCol]) : '',
           });
           imported++;

@@ -59,10 +59,10 @@ function ensureCache() {
   }
 }
 
-// Read-only access: return cache directly (no deep copy)
+// Read-only access: return shallow copy to prevent callers from mutating cache
 function readData() {
   ensureCache();
-  return _cache;
+  return { ..._cache };
 }
 
 // Write access: return a deep copy so caller can mutate safely

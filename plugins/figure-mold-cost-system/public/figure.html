@@ -655,7 +655,7 @@ function showDetail(orderId) {
 
   // Load linked PO on demand
   if (o.from_po_id) {
-    authFetch('api/purchase-orders/' + o.from_po_id)
+    authFetch('api/purchase-orders/' + parseInt(o.from_po_id, 10))
       .then(function(r) { return r.ok ? r.json() : null; })
       .then(function(po) {
         var area = document.getElementById('po-detail-area');

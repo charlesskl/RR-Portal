@@ -4,6 +4,10 @@ WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends curl gosu && rm -rf /var/lib/apt/lists/*
 
+# 阿里云 PyPI 镜像（pypi.org 在国内不稳定，会超时）
+ENV PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
+ENV PIP_TRUSTED_HOST=mirrors.aliyun.com
+
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt gunicorn
 

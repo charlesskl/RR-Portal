@@ -1,9 +1,15 @@
 FROM node:20-alpine
 
+# 阿里云 Alpine 镜像源（dl-cdn 在国内很慢）
+RUN sed -i 's|https\?://dl-cdn.alpinelinux.org|https://mirrors.aliyun.com|g' /etc/apk/repositories
+
 # better-sqlite3 requires native compilation
 RUN apk add --no-cache python3 make g++ su-exec
 
 WORKDIR /app
+
+# 阿里云 npm 镜像
+RUN npm config set registry https://registry.npmmirror.com
 
 # Install dependencies first (layer cache)
 COPY package*.json ./

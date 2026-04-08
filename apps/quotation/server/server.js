@@ -11,7 +11,8 @@ const PORT = process.env.PORT || 3000;
 initDb();
 
 // Middleware
-app.use(cors());
+const corsOrigin = process.env.CORS_ORIGIN || 'http://localhost';
+app.use(cors({ origin: corsOrigin.split(',').map(s => s.trim()) }));
 app.use(express.json());
 
 // Serve static files from client directory

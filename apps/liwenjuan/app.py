@@ -1,13 +1,34 @@
 # app.py - 成品核对系统 Web 入口
 import os
+import re
 import uuid
 from flask import Flask, render_template, request, jsonify, send_file, session
+from werkzeug.utils import secure_filename
 
 from core.checker import run_check, build_excel
 
 app = Flask(__name__)
-app.secret_key = os.environ.get('SECRET_KEY', 'hd-lwj-checker-2026')
-app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50 MB limit
+_secret_key = os.environ.get('SECRET_KEY')
+if not _secret_key:
+    raise RuntimeError('SECRET_KEY environment variable is required')
+app.secret_key = _secret_key
+app.config.update(
+    MAX_CONTENT_LENGTH=50 * 1024 * 1024,  # 50 MB limit
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE='Lax',
+    # Set SESSION_COOKIE_SECURE=True once nginx is fronting HTTPS
+    SESSION_COOKIE_SECURE=os.environ.get('SESSION_COOKIE_SECURE', '0') == '1',
+)
+
+ALLOWED_EXTENSIONS = {'.xls', '.xlsx'}
+_TOKEN_RE = re.compile(r'^[a-f0-9]{32}$')
+
+
+def _safe_ext(filename):
+    ext = os.path.splitext(secure_filename(filename) or '')[1].lower()
+    if ext not in ALLOWED_EXTENSIONS:
+        return None
+    return ext
 
 # Apply BASE_PATH prefix for sub-path reverse proxy (nginx /liwenjuan/ → container)
 class PrefixMiddleware:
@@ -58,7 +79,9 @@ def run():
     main_file = request.files.get('main')
     if not main_file or not main_file.filename:
         return jsonify({'error': 'Missing base file'}), 400
-    ext = os.path.splitext(main_file.filename)[1]
+    ext = _safe_ext(main_file.filename)
+    if not ext:
+        return jsonify({'error': 'Invalid base file type (only .xls/.xlsx allowed)'}), 400
     main_path = os.path.join(UPLOAD_DIR, f'main_{uuid.uuid4().hex}{ext}')
     main_file.save(main_path)
     paths['main'] = main_path
@@ -76,7 +99,9 @@ def run():
             return jsonify({'error': f'Cannot identify file: {f.filename} (filename must contain ZU / qty / shipment / 26-1 etc.)'}), 400
         if ftype in paths:
             return jsonify({'error': f'Duplicate file type detected: {f.filename}'}), 400
-        ext = os.path.splitext(f.filename)[1]
+        ext = _safe_ext(f.filename)
+        if not ext:
+            return jsonify({'error': f'Invalid file type: {f.filename} (only .xls/.xlsx allowed)'}), 400
         save_path = os.path.join(UPLOAD_DIR, f'{ftype}_{uuid.uuid4().hex}{ext}')
         f.save(save_path)
         paths[ftype] = save_path
@@ -92,12 +117,17 @@ def run():
             paths['main'], paths['f261'],
             paths['f262ck'], paths['zu'], paths['qty']
         )
-        excel_path = os.path.join(UPLOAD_DIR, f'result_{uuid.uuid4().hex}.xlsx')
+        token = uuid.uuid4().hex
+        excel_path = os.path.join(UPLOAD_DIR, f'result_{token}.xlsx')
         build_excel(result, excel_path)
-        session['excel_path'] = excel_path
+        session['result_token'] = token
         return jsonify(result)
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    except (ValueError, KeyError, OSError) as e:
+        app.logger.exception('run_check failed')
+        return jsonify({'error': 'Check failed. See server logs for details.'}), 500
+    except Exception:
+        app.logger.exception('Unexpected error in /run')
+        return jsonify({'error': 'Internal server error'}), 500
     finally:
         for key in ['main', 'f261', 'f262ck', 'zu', 'qty']:
             p = paths.get(key)
@@ -111,15 +141,25 @@ def run():
 @app.route('/download')
 def download():
     """下载最近一次核对生成的 Excel"""
-    excel_path = session.get('excel_path')
-    if not excel_path or not os.path.exists(excel_path):
+    token = session.get('result_token')
+    if not token or not _TOKEN_RE.match(token):
         return 'No result file yet. Please run a check first.', 404
-    response = send_file(excel_path, as_attachment=True, download_name='check_result.xlsx')
+    excel_path = os.path.join(UPLOAD_DIR, f'result_{token}.xlsx')
+    # Path safety: realpath must stay inside UPLOAD_DIR (defense in depth)
+    real_upload_dir = os.path.realpath(UPLOAD_DIR)
+    real_excel_path = os.path.realpath(excel_path)
+    if not real_excel_path.startswith(real_upload_dir + os.sep):
+        app.logger.error('Refused to send file outside UPLOAD_DIR: %s', real_excel_path)
+        return 'Invalid result file', 400
+    if not os.path.exists(real_excel_path):
+        session.pop('result_token', None)
+        return 'No result file yet. Please run a check first.', 404
+    response = send_file(real_excel_path, as_attachment=True, download_name='check_result.xlsx')
     try:
-        os.remove(excel_path)
+        os.remove(real_excel_path)
     except OSError:
         pass
-    session.pop('excel_path', None)
+    session.pop('result_token', None)
     return response
 
 

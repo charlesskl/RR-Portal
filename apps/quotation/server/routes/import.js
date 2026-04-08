@@ -6,7 +6,10 @@ const os = require('os');
 const { getDb } = require('../services/db');
 const { parseWorkbook } = require('../services/excel-parser');
 
-const upload = multer({ storage: multer.memoryStorage() });
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 50 * 1024 * 1024 }, // 50 MB cap (matches nginx client_max_body_size)
+});
 
 // POST /api/import — upload and parse 本厂报价明细 Excel
 router.post('/', upload.single('file'), async (req, res) => {
@@ -29,46 +32,45 @@ router.post('/', upload.single('file'), async (req, res) => {
     const itemDesc = req.body.item_desc || null;
     const vendor = req.body.vendor || null;
 
-    let product = db.prepare('SELECT * FROM Product WHERE item_no = ?').get(productNo);
-    if (!product) {
-      const r = db.prepare(
-        'INSERT INTO Product (item_no, item_desc, vendor, created_at, updated_at) VALUES (?, ?, ?, ?, ?)'
-      ).run(productNo, itemDesc, vendor, now, now);
-      product = { id: r.lastInsertRowid, item_no: productNo };
-    }
-
-    // ── Create QuoteVersion (or reuse existing with same source_sheet) ───────
-    // Use sheet name as version identifier (more reliable than internal date)
-    // Extract only the numeric date portion from date_code (e.g. "日期:20250207" → "20250207")
+    // Extract version label (used inside the transaction below)
     const rawDateCode = data.product.date_code || '';
     const dateMatch = rawDateCode.match(/\d{6,8}/);
     const versionLabel = (dateMatch ? dateMatch[0] : null) || data.sheetName;
+
+    // ── Single atomic transaction: product upsert + version upsert + all data + is_latest flip ──
+    let product;
     let versionId;
-    const existingVersion = db.prepare(
-      'SELECT id FROM QuoteVersion WHERE product_id = ? AND source_sheet = ?'
-    ).get(product.id, data.sheetName);
-
-    if (existingVersion) {
-      // Delete old data and re-import fresh
-      versionId = existingVersion.id;
-      const tables = ['QuoteParams','MaterialPrice','MachinePrice','MoldPart','HardwareItem',
-        'PackagingItem','ElectronicItem','ElectronicSummary','PaintingDetail','TransportConfig',
-        'MoldCost','RawMaterial','BodyAccessory','SewingDetail','RotocastItem','ProductDimension'];
-      for (const t of tables) {
-        db.prepare(`DELETE FROM ${t} WHERE version_id = ?`).run(versionId);
+    const importTxn = db.transaction(() => {
+      product = db.prepare('SELECT * FROM Product WHERE item_no = ?').get(productNo);
+      if (!product) {
+        const r = db.prepare(
+          'INSERT INTO Product (item_no, item_desc, vendor, created_at, updated_at) VALUES (?, ?, ?, ?, ?)'
+        ).run(productNo, itemDesc, vendor, now, now);
+        product = { id: r.lastInsertRowid, item_no: productNo };
       }
-      db.prepare(`UPDATE QuoteVersion SET version_name=?, date_code=?, quote_date=?, format_type=?, updated_at=? WHERE id=?`)
-        .run(versionLabel, data.product.date_code, data.product.date_code, data.format_type || 'injection', now, versionId);
-    } else {
-      const vr = db.prepare(
-        `INSERT INTO QuoteVersion (product_id, version_name, source_sheet, date_code, quote_date, status, format_type, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, 'draft', ?, ?, ?)`
-      ).run(product.id, versionLabel, data.sheetName, data.product.date_code, data.product.date_code, data.format_type || 'injection', now, now);
-      versionId = vr.lastInsertRowid;
-    }
 
-    // ── Insert all data in a transaction ──────────────────────────────────
-    const insertAll = db.transaction(() => {
+      const existingVersion = db.prepare(
+        'SELECT id FROM QuoteVersion WHERE product_id = ? AND source_sheet = ?'
+      ).get(product.id, data.sheetName);
+
+      if (existingVersion) {
+        versionId = existingVersion.id;
+        const tables = ['QuoteParams','MaterialPrice','MachinePrice','MoldPart','HardwareItem',
+          'PackagingItem','ElectronicItem','ElectronicSummary','PaintingDetail','TransportConfig',
+          'MoldCost','RawMaterial','BodyAccessory','SewingDetail','RotocastItem','ProductDimension'];
+        for (const t of tables) {
+          db.prepare(`DELETE FROM ${t} WHERE version_id = ?`).run(versionId);
+        }
+        db.prepare(`UPDATE QuoteVersion SET version_name=?, date_code=?, quote_date=?, format_type=?, updated_at=? WHERE id=?`)
+          .run(versionLabel, data.product.date_code, data.product.date_code, data.format_type || 'injection', now, versionId);
+      } else {
+        const vr = db.prepare(
+          `INSERT INTO QuoteVersion (product_id, version_name, source_sheet, date_code, quote_date, status, format_type, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, 'draft', ?, ?, ?)`
+        ).run(product.id, versionLabel, data.sheetName, data.product.date_code, data.product.date_code, data.format_type || 'injection', now, now);
+        versionId = vr.lastInsertRowid;
+      }
+
 
       // QuoteParams
       const p = data.params || {};
@@ -306,15 +308,12 @@ router.post('/', upload.single('file'), async (req, res) => {
           pd.carton_cuft, pd.carton_price, pd.pcs_per_carton, pd.case_pack || null
         );
       }
-    });
-
-    insertAll();
-
-    // Mark this version as latest for this product (atomic)
-    db.transaction(() => {
+      // Mark this version as latest for this product
       db.prepare('UPDATE QuoteVersion SET is_latest = 0 WHERE product_id = ?').run(product.id);
       db.prepare('UPDATE QuoteVersion SET is_latest = 1 WHERE id = ?').run(versionId);
-    })();
+    });
+
+    importTxn();
 
     res.json({
       success: true,
@@ -332,7 +331,7 @@ router.post('/', upload.single('file'), async (req, res) => {
     });
   } catch (err) {
     console.error('Import error:', err);
-    res.status(500).json({ error: err.message, stack: err.stack });
+    res.status(500).json({ error: 'Import failed. See server logs for details.' });
   } finally {
     fs.unlink(tmpPath, () => {});
   }

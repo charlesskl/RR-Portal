@@ -2,6 +2,12 @@ const router = require('express').Router();
 const { getDb } = require('../services/db');
 const { recalculate } = require('../services/calculator');
 
+// Centralized error handler: logs full error server-side, returns sanitized message
+function handleError(res, err) {
+  console.error('[versions] error:', err);
+  res.status(500).json({ error: 'Internal server error' });
+}
+
 // Section name → table mapping (list sections)
 const LIST_SECTIONS = {
   'mold-parts': 'MoldPart',
@@ -81,7 +87,7 @@ router.get('/:id', (req, res) => {
     }
     res.json(result);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    handleError(res, err);
   }
 });
 
@@ -108,7 +114,7 @@ router.put('/:id', (req, res) => {
     const updated = getVersion(db, req.params.id);
     res.json(updated);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    handleError(res, err);
   }
 });
 
@@ -122,7 +128,7 @@ router.delete('/:id', (req, res) => {
     db.prepare('DELETE FROM QuoteVersion WHERE id = ?').run(req.params.id);
     res.json({ message: 'Version deleted' });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    handleError(res, err);
   }
 });
 
@@ -173,7 +179,7 @@ router.post('/:id/duplicate', (req, res) => {
     const newVersion = getVersion(db, dup);
     res.status(201).json(newVersion);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    handleError(res, err);
   }
 });
 
@@ -196,7 +202,7 @@ router.get('/:id/params', (req, res) => {
       machine_prices: machinePrices,
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    handleError(res, err);
   }
 });
 
@@ -232,7 +238,7 @@ router.put('/:id/params', (req, res) => {
     const updated = db.prepare('SELECT * FROM QuoteParams WHERE version_id = ?').get(req.params.id);
     res.json(updated);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    handleError(res, err);
   }
 });
 
@@ -258,7 +264,7 @@ router.put('/:id/material-prices', (req, res) => {
     const rows = db.prepare('SELECT * FROM MaterialPrice WHERE version_id = ?').all(req.params.id);
     res.json(rows);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    handleError(res, err);
   }
 });
 
@@ -284,7 +290,7 @@ router.put('/:id/machine-prices', (req, res) => {
     const rows = db.prepare('SELECT * FROM MachinePrice WHERE version_id = ?').all(req.params.id);
     res.json(rows);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    handleError(res, err);
   }
 });
 
@@ -309,7 +315,7 @@ router.get('/:id/sections/:section', (req, res) => {
       res.json(rows);
     }
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    handleError(res, err);
   }
 });
 
@@ -340,7 +346,7 @@ router.post('/:id/sections/:section', (req, res) => {
     const created = db.prepare(`SELECT * FROM ${table} WHERE id = ?`).get(result.lastInsertRowid);
     res.status(201).json(created);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    handleError(res, err);
   }
 });
 
@@ -390,7 +396,7 @@ router.put('/:id/sections/:section/:itemId', (req, res) => {
     const updated = db.prepare(`SELECT * FROM ${table} WHERE id = ? AND version_id = ?`).get(itemId, id);
     res.json(updated);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    handleError(res, err);
   }
 });
 
@@ -416,7 +422,7 @@ router.delete('/:id/sections/:section/:itemId', (req, res) => {
     db.prepare(`DELETE FROM ${table} WHERE id = ? AND version_id = ?`).run(itemId, id);
     res.json({ message: 'Item deleted' });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    handleError(res, err);
   }
 });
 
@@ -458,7 +464,7 @@ router.put('/:id/sections/:section', (req, res) => {
     const updated = db.prepare(`SELECT * FROM ${table} WHERE version_id = ?`).get(id);
     res.json(updated);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    handleError(res, err);
   }
 });
 
@@ -474,7 +480,7 @@ router.get('/:id/calculate', (req, res) => {
     const result = recalculate(req.params.id);
     res.json(result);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    handleError(res, err);
   }
 });
 
@@ -490,10 +496,16 @@ router.post('/:id/translate-all', async (req, res) => {
 
     async function myMemoryTranslate(text) {
       const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=zh|en`;
-      const resp = await fetch(url);
-      const data = await resp.json();
-      if (data.responseStatus === 200) return data.responseData.translatedText;
-      throw new Error(data.responseDetails || 'Translation failed');
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 5000);
+      try {
+        const resp = await fetch(url, { signal: controller.signal });
+        const data = await resp.json();
+        if (data.responseStatus === 200) return data.responseData.translatedText;
+        throw new Error(data.responseDetails || 'Translation failed');
+      } finally {
+        clearTimeout(timer);
+      }
     }
 
     const EMPTY = "(eng_name IS NULL OR eng_name = '')";
@@ -528,13 +540,15 @@ router.post('/:id/translate-all', async (req, res) => {
           update.run(eng, row.id);
           total++;
           await new Promise(r => setTimeout(r, 200)); // avoid rate limit
-        } catch (_) { /* skip on error */ }
+        } catch (err) {
+          console.warn(`[translate] failed for "${text}":`, err.message);
+        }
       }
     }
 
     res.json({ translated: total });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    handleError(res, err);
   }
 });
 

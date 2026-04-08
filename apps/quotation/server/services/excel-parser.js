@@ -188,7 +188,7 @@ function parseMoldParts(ws, startRow = 18) {
     const mold_cost_rmb = numVal(ws.getCell(row, C_MCRMB));
     const remark = strVal(ws.getCell(row, C_REM));
 
-    const is_old_mold = (remark && remark.includes('旧模')) || mold_cost_rmb === null ? 1 : 0;
+    const is_old_mold = (remark && remark.includes('旧模')) ? 1 : 0;
 
     moldParts.push({
       part_no,

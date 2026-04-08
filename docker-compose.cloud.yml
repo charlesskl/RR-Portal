@@ -325,6 +325,58 @@ services:
     networks:
       - platform-net
 
+  quotation:
+    build:
+      context: ./apps/quotation
+      dockerfile: Dockerfile
+    environment:
+      - PORT=3004
+      - NODE_ENV=production
+    volumes:
+      - ./apps/quotation/server/data:/app/server/data
+    healthcheck:
+      test: ["CMD", "wget", "-qO", "/dev/null", "http://127.0.0.1:3004/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    mem_limit: 512m
+    memswap_limit: 512m
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - platform-net
+
+  liwenjuan:
+    build:
+      context: ./apps/liwenjuan
+      dockerfile: Dockerfile
+    environment:
+      - PORT=5004
+      - BASE_PATH=/liwenjuan
+      - UPLOAD_FOLDER=/app/uploads
+      - SECRET_KEY=${LIWENJUAN_SECRET_KEY:-hd-lwj-default-session-key}
+    volumes:
+      - ./apps/liwenjuan/uploads:/app/uploads
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5004/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    mem_limit: 512m
+    memswap_limit: 512m
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - platform-net
+
 networks:
   platform-net:
     driver: bridge

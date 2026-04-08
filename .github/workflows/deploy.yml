@@ -37,7 +37,7 @@ jobs:
         run: |
           sleep 30
           FAILED=0
-          for ENDPOINT in /nginx-health /health /rr/health /zouhuo/health /jiangping/health /paiji/health /new-product-schedule/health /figure-mold-cost-system/health; do
+          for ENDPOINT in /nginx-health /health /rr/health /zouhuo/health /jiangping/health /paiji/health /new-product-schedule/health /figure-mold-cost-system/health /quotation/health /liwenjuan/health; do
             STATUS=$(curl -sf -o /dev/null -w "%{http_code}" --max-time 10 "http://${{ secrets.CLOUD_HOST }}${ENDPOINT}" 2>/dev/null || echo "000")
             if [ "$STATUS" = "200" ]; then
               echo "[OK] ${ENDPOINT} (HTTP $STATUS)"

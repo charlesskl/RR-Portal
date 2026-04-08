@@ -40,7 +40,7 @@ form.addEventListener('submit', async e => {
 
   const fd = new FormData(form);
   try {
-    const res  = await fetch('/run', { method: 'POST', body: fd });
+    const res  = await fetch(window.LIWENJUAN_RUN_URL || '/run', { method: 'POST', body: fd });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Server error');
 

@@ -1,6 +1,9 @@
 /* API client — all calls go through this module */
 const api = (() => {
-  const BASE = '';
+  // Derive base path from current URL so the app works under any reverse-proxy
+  // prefix (e.g. nginx /quotation/ -> container /). location.pathname is the
+  // directory the page is served from; strip trailing file/slash to get '/quotation'.
+  const BASE = location.pathname.replace(/\/[^/]*$/, '');
 
   async function request(method, path, body) {
     const opts = {

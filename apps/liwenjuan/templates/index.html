@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Finished Goods Check System</title>
-  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
 
@@ -36,7 +36,7 @@
     </div>
     <div style="display:flex;flex-direction:column;gap:8px;align-items:stretch;">
       <button class="btn-run" type="submit" id="btn-run">Start Check</button>
-      <a class="btn-dl hidden" id="btn-dl" href="/download">Download Excel</a>
+      <a class="btn-dl hidden" id="btn-dl" href="{{ url_for('download') }}">Download Excel</a>
     </div>
   </form>
 
@@ -147,6 +147,7 @@
 
 </div><!-- /container -->
 
-<script src="/static/main.js"></script>
+<script>window.LIWENJUAN_RUN_URL = "{{ url_for('run') }}";</script>
+<script src="{{ url_for('static', filename='main.js') }}"></script>
 </body>
 </html>

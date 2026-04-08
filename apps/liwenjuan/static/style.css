@@ -1,0 +1,140 @@
+/* static/style.css */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'Microsoft YaHei', Arial, sans-serif; background: #f5f6fa; color: #333; font-size: 14px; }
+
+/* 顶部导航 */
+.navbar {
+  background: #1a3c5e; color: white;
+  padding: 14px 24px; display: flex; align-items: center;
+}
+.navbar h1 { font-size: 18px; }
+.navbar .sub { margin-left: auto; font-size: 12px; opacity: 0.7; }
+
+/* 主内容区 */
+.container { padding: 20px; display: flex; flex-direction: column; gap: 16px; max-width: 1400px; margin: 0 auto; }
+
+/* 上传区 */
+.upload-card {
+  background: white; border-radius: 8px; padding: 16px;
+  box-shadow: 0 1px 4px rgba(0,0,0,.1);
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+}
+.upload-group { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 160px; }
+.upload-group label { font-size: 11px; color: #888; }
+.file-input-wrapper {
+  border: 1px solid #ccc; border-radius: 4px; padding: 6px 10px;
+  font-size: 12px; background: #f9f9f9; cursor: pointer; white-space: nowrap; overflow: hidden;
+}
+.file-input-wrapper input[type=file] { display: none; }
+.file-input-wrapper span { color: #888; }
+.file-input-wrapper.has-file span { color: #2e7d32; font-weight: bold; }
+
+/* 按钮 */
+.btn-run {
+  background: #1a3c5e; color: white;
+  border: none; padding: 9px 24px; border-radius: 6px;
+  font-size: 13px; font-weight: bold; cursor: pointer; white-space: nowrap;
+}
+.btn-run:hover { background: #245a8a; }
+.btn-run:disabled { background: #aaa; cursor: not-allowed; }
+.btn-dl {
+  background: #4472C4; color: white;
+  border: none; padding: 9px 18px; border-radius: 6px;
+  font-size: 12px; cursor: pointer; white-space: nowrap; text-decoration: none;
+}
+.btn-dl:hover { background: #2e57a8; }
+.btn-dl.hidden { display: none; }
+
+/* 统计卡片 */
+.stats-grid {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;
+}
+.stat-card {
+  background: white; border-radius: 8px; padding: 14px;
+  text-align: center; box-shadow: 0 1px 4px rgba(0,0,0,.08);
+}
+.stat-card .num { font-size: 28px; font-weight: bold; }
+.stat-card .label { font-size: 11px; color: #888; margin-top: 2px; }
+.stat-card.total   .num { color: #1a3c5e; }
+.stat-card.matched .num { color: #2e7d32; }
+.stat-card.anomaly .num { color: #e53935; }
+.stats-grid.hidden, .tabs-section.hidden, .search-section.hidden { display: none; }
+
+/* Tab 栏 */
+.tabs-section { background: white; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,.1); overflow: hidden; }
+.tab-bar { display: flex; border-bottom: 2px solid #eee; }
+.tab-btn {
+  padding: 10px 20px; font-size: 13px; font-weight: bold;
+  color: #888; cursor: pointer; border: none; background: none;
+  border-bottom: 2px solid transparent; margin-bottom: -2px;
+}
+.tab-btn.active { color: #1a3c5e; border-bottom-color: #1a3c5e; background: #f0f4ff; }
+.tab-btn .badge {
+  display: inline-block; border-radius: 10px; padding: 1px 8px;
+  font-size: 11px; color: white; margin-left: 6px;
+}
+.tab-btn.matched .badge { background: #2e7d32; }
+.tab-btn.unmatched .badge { background: #aaa; }
+.tab-btn.anomaly .badge { background: #e53935; }
+
+.tab-search {
+  padding: 8px 14px; border-bottom: 1px solid #eee; background: #fafafa;
+}
+.tab-search input {
+  border: 1px solid #ccc; border-radius: 4px; padding: 5px 10px;
+  font-size: 12px; width: 240px;
+}
+
+/* 结果表格 */
+.result-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.result-table th {
+  background: #1a3c5e; color: white; padding: 8px 10px; text-align: left; font-weight: normal;
+}
+.result-table th.center, .result-table td.center { text-align: center; }
+.result-table td { padding: 6px 10px; border-bottom: 1px solid #f0f0f0; }
+.result-table tr:hover td { background: #f9f9f9; }
+.cell-yes { background: #e8f5e9; color: #2e7d32; font-weight: bold; text-align: center; }
+.cell-no  { background: #ffebee; color: #c62828; font-weight: bold; text-align: center; }
+.cell-anomaly { background: #e53935; color: white; font-weight: bold; text-align: center; }
+.tab-panel { display: none; }
+.tab-panel.active { display: block; }
+.table-wrap { overflow-x: auto; max-height: 420px; overflow-y: auto; }
+
+/* 搜索详情 */
+.search-section { background: white; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,.1); padding: 16px; }
+.search-section h3 { font-size: 13px; color: #1a3c5e; margin-bottom: 10px; }
+.search-bar { display: flex; gap: 8px; margin-bottom: 14px; }
+.search-bar input {
+  flex: 1; border: 2px solid #4472C4; border-radius: 6px;
+  padding: 7px 12px; font-size: 13px;
+}
+.btn-search {
+  background: #4472C4; color: white; border: none;
+  padding: 7px 20px; border-radius: 6px; font-size: 13px; cursor: pointer;
+}
+.detail-card {
+  border: 1px solid #e0e8ff; border-radius: 8px; margin-bottom: 10px; overflow: hidden;
+}
+.detail-header {
+  background: #f0f4ff; padding: 8px 14px; font-size: 12px; font-weight: bold;
+  display: flex; align-items: center; justify-content: space-between; cursor: pointer;
+}
+.detail-body { padding: 14px; display: none; }
+.detail-body.open { display: block; }
+.info-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 12px; }
+.info-item { background: #f0f4ff; border-radius: 6px; padding: 8px 10px; }
+.info-item .key { font-size: 10px; color: #888; margin-bottom: 2px; }
+.info-item .val { font-size: 13px; font-weight: bold; color: #1a3c5e; }
+.check-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.check-item { border-radius: 6px; padding: 8px; text-align: center; }
+.check-item .key { font-size: 10px; color: #555; margin-bottom: 4px; }
+.check-item .val { font-size: 14px; font-weight: bold; }
+.check-item.yes { background: #e8f5e9; border: 1px solid #a5d6a7; }
+.check-item.yes .val { color: #2e7d32; }
+.check-item.no  { background: #ffebee; border: 1px solid #ef9a9a; }
+.check-item.no  .val { color: #c62828; }
+#search-empty { color: #aaa; font-size: 13px; text-align: center; padding: 20px; display: none; }
+
+/* 加载提示 */
+.loading { text-align: center; padding: 40px; color: #888; font-size: 16px; display: none; }
+.error-msg { background: #ffebee; color: #c62828; border-radius: 6px; padding: 10px 16px; display: none; }

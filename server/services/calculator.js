@@ -72,16 +72,7 @@ function calcMoldPart(part, materialPrices, machinePrices) {
   const weight = parseFloat(part.weight_g) || 0;
   const material_cost_hkd = weight * unit_price_hkd_g;
 
-  // Molding labor: machine_price / cavity_count / target_qty * sets_per_toy
-  const machinePrice = lookupMachinePrice(part.machine_type, machinePrices);
-  const cavityCount = parseFloat(part.cavity_count) || 1;
-  const targetQty = parseFloat(part.target_qty) || 1;
-  const setsPerToy = parseFloat(part.sets_per_toy) || 1;
-  const molding_labor = machinePrice > 0 && targetQty > 0
-    ? (machinePrice / cavityCount / targetQty) * setsPerToy
-    : (part.molding_labor || 0);
-
-  return { unit_price_hkd_g, material_cost_hkd, molding_labor };
+  return { unit_price_hkd_g, material_cost_hkd };
 }
 
 // ─── Body Cost Breakdown ──────────────────────────────────────────────────────
@@ -101,8 +92,8 @@ function calcBodyBreakdown(versionData) {
   const rawMaterialSub = sum(mold_parts, 'material_cost_hkd');
   const rawMaterialAmt = rawMaterialSub * (1 + markupBody);
 
-  // B. Molding Labour — sum of molding_labor from all mold parts
-  const moldingLabourSub = sum(mold_parts, 'molding_labor');
+  // B. Molding Labour — sum of molding_labor × 1.08
+  const moldingLabourSub = mold_parts.reduce((s, p) => s + (parseFloat(p.molding_labor) || 0) * 1.08, 0);
   const moldingLabourAmt = moldingLabourSub * (1 + markupBody);
 
   // C. Purchase Parts — sum of new_price from hardware items (new = current price)
@@ -295,15 +286,15 @@ function recalculate(versionId) {
   const moldCost = db.prepare('SELECT * FROM MoldCost WHERE version_id = ?').get(versionId);
   const productDimension = db.prepare('SELECT * FROM ProductDimension WHERE version_id = ?').get(versionId);
 
-  // Recalculate each mold part and update DB
+  // Recalculate each mold part and update DB (molding_labor kept as raw imported value)
   const updatePart = db.prepare(`
-    UPDATE MoldPart SET unit_price_hkd_g = ?, material_cost_hkd = ?, molding_labor = ?
+    UPDATE MoldPart SET unit_price_hkd_g = ?, material_cost_hkd = ?
     WHERE id = ?
   `);
 
   const updatedParts = moldParts.map(part => {
     const calc = calcMoldPart(part, materialPrices, machinePrices);
-    updatePart.run(calc.unit_price_hkd_g, calc.material_cost_hkd, calc.molding_labor, part.id);
+    updatePart.run(calc.unit_price_hkd_g, calc.material_cost_hkd, part.id);
     return { ...part, ...calc };
   });
 

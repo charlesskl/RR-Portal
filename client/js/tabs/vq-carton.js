@@ -4,16 +4,18 @@ const tab_vq_carton = {
     const dim = versionData.product_dimension || {};
     const params = versionData.params || {};
 
-    const cartonPrice = parseFloat(dim.carton_price) || 0;
+    const cartonPrice = parseFloat(dim.carton_price) || 0;  // = Amount
+    const casePack = parseFloat(dim.case_pack) || 1;
+    const unitCost = casePack > 0 ? cartonPrice / casePack : cartonPrice;
     const pcsPerCarton = parseInt(dim.pcs_per_carton) || 0;
-    const perPc = pcsPerCarton > 0 ? cartonPrice / pcsPerCarton : 0;
+    const perPc = cartonPrice;  // Amount IS the per-carton cost
 
     function dimField(key, label, unit) {
       return `
         <tr>
           <td>${label}</td>
           <td class="num editable" data-section="dimensions" data-field="${key}" data-type="number">
-            ${dim[key] != null ? formatNumber(dim[key], 2) : '—'}
+            ${dim[key] != null ? formatNumber(dim[key], 3) : '—'}
           </td>
           ${unit ? `<td style="color:#888">${unit}</td>` : '<td></td>'}
         </tr>
@@ -62,7 +64,13 @@ const tab_vq_carton = {
           <table class="data-table">
             <thead><tr><th>装箱 (Packing)</th><th>数值</th><th>单位</th></tr></thead>
             <tbody>
-              ${dimField('pcs_per_carton', 'PCS/CTN', 'pcs')}
+              <tr>
+                <td>Case Pack</td>
+                <td class="num editable" data-section="dimensions" data-field="case_pack" data-type="number">
+                  ${dim.case_pack != null ? dim.case_pack : '—'}
+                </td>
+                <td style="color:#888">pcs</td>
+              </tr>
               ${dimField('carton_price', '纸箱价', 'HKD')}
               <tr>
                 <td><b>每件摊销</b></td>

@@ -202,7 +202,8 @@ function initDb() {
       carton_h_inch REAL,
       carton_cuft REAL,
       carton_price REAL,
-      pcs_per_carton INTEGER
+      pcs_per_carton INTEGER,
+      case_pack TEXT
     );
 
     CREATE TABLE IF NOT EXISTS RawMaterial (
@@ -217,6 +218,18 @@ function initDb() {
     );
 
     CREATE TABLE IF NOT EXISTS BodyAccessory (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      version_id INTEGER NOT NULL REFERENCES QuoteVersion(id) ON DELETE CASCADE,
+      part_no TEXT,
+      description TEXT,
+      category TEXT DEFAULT '五金',
+      moq INTEGER DEFAULT 2500,
+      usage_qty REAL DEFAULT 1,
+      unit_price REAL DEFAULT 0,
+      sort_order INTEGER DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS VQSupplement (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       version_id INTEGER NOT NULL REFERENCES QuoteVersion(id) ON DELETE CASCADE,
       part_no TEXT,
@@ -295,6 +308,12 @@ function initDb() {
     db.exec("ALTER TABLE HardwareItem ADD COLUMN part_category TEXT DEFAULT 'other'");
   }
 
+  // Migrate: add category to BodyAccessory
+  const baCols = db.prepare('PRAGMA table_info(BodyAccessory)').all().map(c => c.name);
+  if (!baCols.includes('category')) {
+    db.exec("ALTER TABLE BodyAccessory ADD COLUMN category TEXT DEFAULT '五金'");
+  }
+
   // Migrate: add eng_name to SewingDetail
   const sewCols = db.prepare('PRAGMA table_info(SewingDetail)').all().map(c => c.name);
   if (!sewCols.includes('eng_name')) {
@@ -310,6 +329,8 @@ function initDb() {
 
   const pkgCols = db.prepare('PRAGMA table_info(PackagingItem)').all().map(c => c.name);
   if (!pkgCols.includes('eng_name')) db.exec("ALTER TABLE PackagingItem ADD COLUMN eng_name TEXT");
+  if (!pkgCols.includes('pm_no'))    db.exec("ALTER TABLE PackagingItem ADD COLUMN pm_no TEXT");
+  if (!pkgCols.includes('moq'))      db.exec("ALTER TABLE PackagingItem ADD COLUMN moq INTEGER DEFAULT 2500");
 
   const elecItemCols = db.prepare('PRAGMA table_info(ElectronicItem)').all().map(c => c.name);
   if (!elecItemCols.includes('eng_name')) db.exec("ALTER TABLE ElectronicItem ADD COLUMN eng_name TEXT");
@@ -322,6 +343,10 @@ function initDb() {
   // Migrate: add eng_name to RotocastItem
   const rotoCols = db.prepare('PRAGMA table_info(RotocastItem)').all().map(c => c.name);
   if (!rotoCols.includes('eng_name')) db.exec("ALTER TABLE RotocastItem ADD COLUMN eng_name TEXT");
+
+  // Migrate: add eng_name to BodyAccessory
+  const baCols2 = db.prepare('PRAGMA table_info(BodyAccessory)').all().map(c => c.name);
+  if (!baCols2.includes('eng_name')) db.exec("ALTER TABLE BodyAccessory ADD COLUMN eng_name TEXT");
 
   // Migrate: add is_latest to QuoteVersion
   if (!existingCols.includes('is_latest')) {
@@ -348,6 +373,10 @@ function initDb() {
       )
     `);
   }
+
+  // Migrate: add case_pack to ProductDimension
+  const dimCols = db.prepare('PRAGMA table_info(ProductDimension)').all().map(c => c.name);
+  if (!dimCols.includes('case_pack')) db.exec("ALTER TABLE ProductDimension ADD COLUMN case_pack TEXT");
 
   return db;
 }

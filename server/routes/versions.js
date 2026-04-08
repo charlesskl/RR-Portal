@@ -9,6 +9,7 @@ const LIST_SECTIONS = {
   'electronics': 'ElectronicItem',
   'packaging': 'PackagingItem',
   'body-accessory': 'BodyAccessory',
+  'vq-supplement': 'VQSupplement',
   'raw-material': 'RawMaterial',
   'sewing-detail': 'SewingDetail',
   'rotocast': 'RotocastItem',
@@ -37,6 +38,7 @@ const ALL_SECTION_TABLES = {
   material_prices: 'MaterialPrice',
   machine_prices: 'MachinePrice',
   body_accessories: 'BodyAccessory',
+  vq_supplements: 'VQSupplement',
   raw_materials: 'RawMaterial',
   sewing_details: 'SewingDetail',
   rotocast_items: 'RotocastItem',
@@ -474,6 +476,72 @@ router.get('/:id/calculate', (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// ─── Auto-translate all Chinese names for a version ──────────
+
+// POST /:id/translate-all
+router.post('/:id/translate-all', async (req, res) => {
+  try {
+    const db = getDb();
+    const version = getVersion(db, req.params.id);
+    if (!version) return res.status(404).json({ error: 'Version not found' });
+    const vid = req.params.id;
+
+    async function myMemoryTranslate(text) {
+      const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=zh|en`;
+      const resp = await fetch(url);
+      const data = await resp.json();
+      if (data.responseStatus === 200) return data.responseData.translatedText;
+      throw new Error(data.responseDetails || 'Translation failed');
+    }
+
+    const EMPTY = "(eng_name IS NULL OR eng_name = '')";
+    const batches = [
+      { table: 'MoldPart',       field: 'description', sql: `SELECT id, description FROM MoldPart       WHERE version_id=? AND ${EMPTY} ORDER BY sort_order` },
+      { table: 'HardwareItem',   field: 'name',        sql: `SELECT id, name        FROM HardwareItem   WHERE version_id=? AND ${EMPTY} ORDER BY sort_order` },
+      { table: 'PackagingItem',  field: 'name',        sql: `SELECT id, name        FROM PackagingItem  WHERE version_id=? AND ${EMPTY} ORDER BY sort_order` },
+      { table: 'ElectronicItem', field: 'part_name',   sql: `SELECT id, part_name   FROM ElectronicItem WHERE version_id=? AND ${EMPTY} ORDER BY sort_order` },
+      { table: 'SewingDetail',   field: 'fabric_name', sql: `SELECT id, fabric_name FROM SewingDetail   WHERE version_id=? AND ${EMPTY} ORDER BY sort_order` },
+      { table: 'RawMaterial',    field: 'material_name', sql: `SELECT id, material_name FROM RawMaterial WHERE version_id=? AND ${EMPTY} ORDER BY sort_order` },
+      { table: 'RawMaterial',    field: 'spec',          engField: 'spec_eng', sql: `SELECT id, spec FROM RawMaterial WHERE version_id=? AND category='fabric' AND spec IS NOT NULL AND spec != '' AND (spec_eng IS NULL OR spec_eng = '') ORDER BY sort_order` },
+      { table: 'RotocastItem',   field: 'name',          sql: `SELECT id, name FROM RotocastItem WHERE version_id=? AND ${EMPTY} ORDER BY sort_order` },
+      { table: 'BodyAccessory',  field: 'description',   sql: `SELECT id, description FROM BodyAccessory WHERE version_id=? AND ${EMPTY} ORDER BY sort_order` },
+    ];
+
+    let total = 0;
+    for (const b of batches) {
+      const rows = db.prepare(b.sql).all(vid);
+      if (!rows.length) continue;
+      const update = db.prepare(`UPDATE ${b.table} SET ${b.engField || 'eng_name'} = ? WHERE id = ?`);
+      for (const row of rows) {
+        const text = row[b.field];
+        if (!text) continue;
+        // Skip if already English (no Chinese characters)
+        if (!/[\u4e00-\u9fff]/.test(text)) {
+          update.run(text, row.id);
+          total++;
+          continue;
+        }
+        try {
+          const eng = await myMemoryTranslate(text);
+          update.run(eng, row.id);
+          total++;
+          await new Promise(r => setTimeout(r, 200)); // avoid rate limit
+        } catch (_) { /* skip on error */ }
+      }
+    }
+
+    res.json({ translated: total });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /:id/translate-sewing (kept for backward compat)
+router.post('/:id/translate-sewing', async (req, res) => {
+  req.url = `/${req.params.id}/translate-all`;
+  res.redirect(307, `/api/versions/${req.params.id}/translate-all`);
 });
 
 module.exports = router;

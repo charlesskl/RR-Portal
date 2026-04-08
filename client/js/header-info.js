@@ -40,6 +40,7 @@ const headerInfoModule = (() => {
       if (Object.keys(vFields).length) tasks.push(api.updateVersion(_versionId, vFields));
       if (Object.keys(pFields).length) tasks.push(api.updateProduct(_productId, pFields));
       await Promise.all(tasks);
+      if (Object.keys(pFields).length) await app.loadProducts();
     } catch (e) {
       showToast('表头信息保存失败: ' + e.message, 'error');
     }

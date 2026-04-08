@@ -240,9 +240,21 @@ const app = (() => {
         <button class="btn ${isFinal ? 'btn-success' : 'btn-outline'}" id="btnToggleFinal" title="${isFinal ? '点击改为草稿' : '点击标记为定稿'}">
           ${isFinal ? '✓ 定稿' : '草稿'}
         </button>
+        <button class="btn btn-primary" id="btnTranslateAll">自动翻译英文</button>
         <button class="btn btn-export" id="btnExport">导出 Excel</button>
       </div>
     `;
+    document.getElementById('btnTranslateAll').addEventListener('click', async () => {
+      try {
+        showToast('正在翻译，请稍候...', 'info');
+        const r = await fetch(`/api/versions/${currentVersionId}/translate-all`, { method: 'POST' });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.error);
+        showToast(`已翻译 ${d.translated} 条名称`, 'success');
+        versionData = await api.getVersion(currentVersionId);
+        renderCurrentTab();
+      } catch (e) { showToast('翻译失败: ' + e.message, 'error'); }
+    });
     document.getElementById('btnExport').addEventListener('click', () => {
       api.exportExcel(currentVersionId).catch(e => showToast('导出失败: ' + e.message, 'error'));
     });

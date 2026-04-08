@@ -14,7 +14,7 @@ const tab_bd_material = {
     let grandTotal = 0;
 
     const sections = this._categories.map(cat => {
-      const items = rawMats.filter(m => m.category === cat.key);
+      const items = rawMats.filter(m => m.category === cat.key && m.spec !== '__labor__');
       const isFabricCalc = cat.key === 'fabric';
       const subTotal = items.reduce((s, m) => {
         const w = parseFloat(m.weight_g) || 0;
@@ -32,8 +32,8 @@ const tab_bd_material = {
         return `
           <tr>
             <td class="center"><input type="checkbox" class="mat-check" data-id="${m.id}" data-cat="${cat.key}"></td>
-            <td class="editable" data-id="${m.id}" data-field="material_name" data-type="text">${escapeHtml(m.material_name || '')}</td>
-            ${isFabric ? `<td class="editable" data-id="${m.id}" data-field="spec" data-type="text">${escapeHtml(m.spec || '')}</td>` : ''}
+            <td class="editable" data-id="${m.id}" data-field="material_name" data-type="text">${escapeHtml(m.material_name || '')}${m.eng_name && m.eng_name.toLowerCase() !== (m.material_name || '').toLowerCase() ? `<br><span style="color:#888;font-size:11px">${escapeHtml(m.eng_name)}</span>` : ''}</td>
+            ${isFabric ? `<td class="editable" data-id="${m.id}" data-field="spec" data-type="text">${escapeHtml(m.spec || '')}${m.spec_eng ? `<br><span style="color:#888;font-size:11px">${escapeHtml(m.spec_eng)}</span>` : ''}</td>` : ''}
             <td class="editable num" data-id="${m.id}" data-field="weight_g" data-type="number">${m.weight_g != null ? m.weight_g : ''}</td>
             <td class="editable num" data-id="${m.id}" data-field="unit_price_per_kg" data-type="number">${formatNumber(m.unit_price_per_kg, 2)}</td>
             <td class="num">${formatNumber(amt, 2)}</td>

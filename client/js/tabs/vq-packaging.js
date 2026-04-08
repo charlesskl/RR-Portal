@@ -1,39 +1,43 @@
-/* Tab: vq-packaging — B. Packaging (VQ) */
+/* Tab: vq-packaging — B. Packaging Materials & Packing Labour Cost */
 const tab_vq_packaging = {
   render(versionData) {
     const items = versionData.packaging_items || [];
     const params = versionData.params || {};
     const markup = parseFloat(params.markup_packaging) || 0;
-    const boxPrice = parseFloat(params.box_price_hkd) || 0;
 
-    const itemsTotal = items.reduce((s, i) => s + (parseFloat(i.new_price) || 0), 0);
-    const subTotal = itemsTotal + boxPrice;
-    const amount = subTotal * (1 + markup);
+    const subTotal = items.reduce((s, i) => {
+      return s + (parseFloat(i.quantity) || 0) * (parseFloat(i.new_price) || 0);
+    }, 0);
+    const markupAmt = subTotal * markup;
+    const total = subTotal + markupAmt;
 
-    const rows = items.map((item, i) => `
-      <tr data-idx="${i}">
-        <td class="center"><input type="checkbox" class="row-check" data-id="${item.id}"></td>
-        <td class="editable" data-id="${item.id}" data-field="name" data-type="text">${escapeHtml(item.name || '')}</td>
-        <td class="editable num" data-id="${item.id}" data-field="quantity" data-type="number">${item.quantity != null ? item.quantity : ''}</td>
-        <td class="editable num" data-id="${item.id}" data-field="old_price" data-type="number">${formatNumber(item.old_price, 2)}</td>
-        <td class="editable num" data-id="${item.id}" data-field="new_price" data-type="number">${formatNumber(item.new_price, 2)}</td>
-        <td class="num ${(item.difference || 0) >= 0 ? '' : 'text-danger'}">${formatNumber(item.difference, 2)}</td>
-        <td class="center">${escapeHtml(item.tax_type || '')}</td>
-      </tr>
-    `).join('');
+    const rows = items.map(item => {
+      const amount = (parseFloat(item.quantity) || 0) * (parseFloat(item.new_price) || 0);
+      return `
+        <tr>
+          <td class="center"><input type="checkbox" class="row-check" data-id="${item.id}"></td>
+          <td class="editable" data-id="${item.id}" data-field="pm_no" data-type="text">${escapeHtml(item.pm_no || '')}</td>
+          <td class="editable" data-id="${item.id}" data-field="name" data-type="text">${escapeHtml(item.name || '')}${item.eng_name && item.eng_name.toLowerCase() !== (item.name || '').toLowerCase() ? `<br><span style="color:#888;font-size:11px">${escapeHtml(item.eng_name)}</span>` : ''}</td>
+          <td class="editable" data-id="${item.id}" data-field="remark" data-type="text">${escapeHtml(item.remark || '')}</td>
+          <td class="editable num" data-id="${item.id}" data-field="moq" data-type="number">${item.moq != null ? item.moq : ''}</td>
+          <td class="editable num" data-id="${item.id}" data-field="quantity" data-type="number">${formatNumber(item.quantity, 3)}</td>
+          <td class="editable num" data-id="${item.id}" data-field="new_price" data-type="number">${formatNumber(item.new_price, 3)}</td>
+          <td class="num">${formatNumber(amount, 2)}</td>
+        </tr>
+      `;
+    }).join('');
 
     return `
       <div class="toolbar">
-        <span class="toolbar-title">B. Packaging</span>
+        <span class="toolbar-title">B. Packaging Materials &amp; Packing Labour Cost</span>
+        <button class="btn btn-primary" id="vqPkgTranslate">自动翻译英文</button>
         <button class="btn btn-primary" id="vqPkgAdd">+ 添加行</button>
         <button class="btn btn-danger" id="vqPkgDelete">删除选中</button>
         <span class="toolbar-spacer"></span>
         <span class="toolbar-stats">
-          Items: <b>${formatNumber(itemsTotal, 2)}</b> &nbsp;+&nbsp;
-          Box: <b>${formatNumber(boxPrice, 2)}</b> &nbsp;|&nbsp;
           Sub Total: <b>${formatNumber(subTotal, 2)}</b> &nbsp;|&nbsp;
           Mark Up: <b>${(markup * 100).toFixed(1)}%</b> &nbsp;|&nbsp;
-          Amount: <b>${formatNumber(amount, 2)}</b>
+          Amount: <b>${formatNumber(total, 2)}</b> HK$
         </span>
       </div>
       <div class="data-table-wrap">
@@ -41,27 +45,66 @@ const tab_vq_packaging = {
           <thead>
             <tr>
               <th><input type="checkbox" id="vqPkgAll"></th>
-              <th>名称</th><th>用量</th><th>开模报价</th><th>样板报价</th><th>差额</th><th>含税</th>
+              <th>PM No.</th>
+              <th>Part Descriptions</th>
+              <th>Specifications</th>
+              <th>MOQ</th>
+              <th>Usage/Toy</th>
+              <th>Unit Cost (HK$)</th>
+              <th>Amount (HK$)</th>
             </tr>
           </thead>
-          <tbody>${rows || '<tr><td colspan="7" style="text-align:center;color:#aaa;padding:20px">暂无包装项目</td></tr>'}</tbody>
+          <tbody>
+            ${rows || '<tr><td colspan="8" style="text-align:center;color:#aaa;padding:20px">暂无包装项目</td></tr>'}
+            <tr style="font-weight:bold;background:#f0f4fa">
+              <td colspan="6" style="text-align:right">Mark Up <span id="pkgMarkupCell" class="editable-inline" style="cursor:pointer;border-bottom:1px dashed #888">${(markup * 100).toFixed(2)}%</span></td>
+              <td class="num">${formatNumber(markupAmt, 2)}</td>
+              <td class="num" style="background:#222;color:#fff">HK$${formatNumber(total, 2)}</td>
+            </tr>
+          </tbody>
         </table>
       </div>
-      <div style="margin-top:8px;font-size:12px;color:#666">
-        * 纸箱 (Box) 价格在参数面板中设置 (box_price_hkd = ${formatNumber(boxPrice, 2)} HKD)
-      </div>
-      <style>.text-danger{color:#e74c3c}</style>
     `;
   },
 
   init(container, versionData, versionId) {
+    const items = versionData.packaging_items || [];
+    const params = versionData.params || {};
+
+    // Editable Mark Up
+    const markupCell = container.querySelector('#pkgMarkupCell');
+    if (markupCell) {
+      makeEditable(markupCell, {
+        type: 'number',
+        value: (parseFloat(params.markup_packaging) || 0) * 100,
+        format: v => parseFloat(v).toFixed(2) + '%',
+        onSave: async (val) => {
+          try {
+            await api.updateParams(versionId, { markup_packaging: parseFloat(val) / 100 });
+            app.refresh();
+          } catch (e) { showToast('保存失败: ' + e.message, 'error'); }
+        },
+      });
+    }
+
     container.querySelector('#vqPkgAll')?.addEventListener('change', e => {
       container.querySelectorAll('.row-check').forEach(cb => cb.checked = e.target.checked);
     });
 
+    container.querySelector('#vqPkgTranslate')?.addEventListener('click', async () => {
+      try {
+        showToast('正在翻译...', 'info');
+        const r = await fetch(`/api/versions/${versionId}/translate-all`, { method: 'POST' });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.error);
+        showToast(`已翻译 ${d.translated} 条`, 'success');
+        app.refresh();
+      } catch (e) { showToast('翻译失败: ' + e.message, 'error'); }
+    });
+
     container.querySelector('#vqPkgAdd')?.addEventListener('click', async () => {
       try {
-        await api.addSectionItem(versionId, 'packaging', { name: '新包装件', quantity: 1, new_price: 0 });
+        await api.addSectionItem(versionId, 'packaging', { name: '新包装件', pm_no: '', remark: '', moq: 2500, quantity: 1, new_price: 0 });
         app.refresh();
       } catch (e) { showToast('添加失败: ' + e.message, 'error'); }
     });
@@ -80,19 +123,13 @@ const tab_vq_packaging = {
       const id = td.dataset.id;
       const field = td.dataset.field;
       const type = td.dataset.type;
-      const item = versionData.packaging_items.find(i => String(i.id) === id) || {};
+      const item = items.find(i => String(i.id) === id) || {};
       makeEditable(td, {
         type,
         value: item[field],
         onSave: async (val) => {
-          const update = { [field]: val };
-          if (field === 'new_price' || field === 'old_price') {
-            const newP = field === 'new_price' ? val : item.new_price;
-            const oldP = field === 'old_price' ? val : item.old_price;
-            update.difference = (parseFloat(newP) || 0) - (parseFloat(oldP) || 0);
-          }
           try {
-            await api.updateSectionItem(versionId, 'packaging', id, update);
+            await api.updateSectionItem(versionId, 'packaging', id, { [field]: val });
             app.refresh();
           } catch (e) { showToast('保存失败: ' + e.message, 'error'); }
         },

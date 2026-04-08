@@ -31,7 +31,7 @@ const tab_bd_decoration = {
     const costFields = [
       { key: 'labor_cost_hkd', label: '喷油人工 HKD' },
       { key: 'paint_cost_hkd', label: '油漆 HKD' },
-      { key: 'quoted_price_hkd', label: '报价 HKD' },
+      { key: 'quoted_price_hkd', label: '报价 HKD <span style="color:#888;font-size:11px">(含码点 ×1.08)</span>' },
     ];
 
     const costRows = costFields.map(f => `

@@ -7,13 +7,11 @@ const tab_bd_purchase = {
     const elecSummary = versionData.electronic_summary || null;
     const params   = versionData.params || {};
     const markup   = parseFloat(params.markup_body) || 0;
-    const hkdUsd   = parseFloat(params.hkd_usd) || 0.1291;
 
     // ── 1. Electronic Components ──────────────────────────────────────────────
-    const elecSubTotalUsd = elecSummary
+    const elecSubTotalHkd = elecSummary
       ? (parseFloat(elecSummary.final_price_usd) || 0)
       : elecItems.reduce((s, e) => s + (parseFloat(e.total_usd) || 0), 0);
-    const elecSubTotalHkd = hkdUsd > 0 ? elecSubTotalUsd / hkdUsd : 0;
 
     const elecRows = elecItems.map(e => `
       <tr>
@@ -30,7 +28,7 @@ const tab_bd_purchase = {
       <tr style="background:#f0f4ff;font-weight:bold">
         <td></td>
         <td colspan="4">Electronic Summary (Final Price)</td>
-        <td class="num">${formatNumber(elecSummary.final_price_usd, 4)} USD</td>
+        <td class="num">${formatNumber(elecSummary.final_price_usd, 2)} HK$</td>
       </tr>
     ` : '';
 
@@ -40,8 +38,7 @@ const tab_bd_purchase = {
           <span class="toolbar-title">1. 电子零件 Electronic Components</span>
           <span class="toolbar-spacer"></span>
           <span class="toolbar-stats">
-            Sub Total: <b>${formatNumber(elecSubTotalUsd, 4)} USD</b>
-            &nbsp;≈&nbsp;<b>${formatNumber(elecSubTotalHkd, 2)} HK$</b>
+            Sub Total: <b>${formatNumber(elecSubTotalHkd, 2)} HK$</b>
           </span>
         </div>
         <div class="data-table-wrap">
@@ -49,7 +46,7 @@ const tab_bd_purchase = {
             <thead>
               <tr>
                 <th style="width:30px"></th>
-                <th>零件名称 Part Name</th><th>规格 Spec</th><th>数量 Qty</th><th>单价 Unit Price (USD)</th><th>合计 Total (USD)</th>
+                <th>零件名称 Part Name</th><th>规格 Spec</th><th>数量 Qty</th><th>单价 Unit Price (HK$)</th><th>合计 Total (HK$)</th>
               </tr>
             </thead>
             <tbody>
@@ -113,17 +110,15 @@ const tab_bd_purchase = {
 
     // ── 3. Other Components — 身体外购件 from BodyAccessory ──────────────────
     const bodyAccs = versionData.body_accessories || [];
-    const otherSub = bodyAccs.reduce((s, b) => {
-      return s + (parseFloat(b.usage_qty) || 0) * (parseFloat(b.unit_price) || 0);
-    }, 0);
-
+    const otherSub = bodyAccs.reduce((s, b) => s + (parseFloat(b.usage_qty) || 0) * (parseFloat(b.unit_price) || 0), 0);
     const otherRows = bodyAccs.map(b => {
       const amount = (parseFloat(b.usage_qty) || 0) * (parseFloat(b.unit_price) || 0);
       return `
         <tr>
           <td class="center"><input type="checkbox" class="row-check ba-check" data-id="${b.id}"></td>
+          <td class="editable" data-table="body-accessory" data-id="${b.id}" data-field="category"    data-type="text">${escapeHtml(b.category || '五金')}</td>
           <td class="editable" data-table="body-accessory" data-id="${b.id}" data-field="part_no"    data-type="text">${escapeHtml(b.part_no || '')}</td>
-          <td class="editable" data-table="body-accessory" data-id="${b.id}" data-field="description" data-type="text">${escapeHtml(b.description || '')}</td>
+          <td class="editable" data-table="body-accessory" data-id="${b.id}" data-field="description" data-type="text">${escapeHtml(b.description || '')}${b.eng_name ? `<br><span style="color:#888;font-size:11px">${escapeHtml(b.eng_name)}</span>` : ''}</td>
           <td class="editable num" data-table="body-accessory" data-id="${b.id}" data-field="moq"       data-type="number">${b.moq != null ? b.moq : ''}</td>
           <td class="editable num" data-table="body-accessory" data-id="${b.id}" data-field="usage_qty" data-type="number">${formatNumber(b.usage_qty, 4)}</td>
           <td class="editable num" data-table="body-accessory" data-id="${b.id}" data-field="unit_price" data-type="number">${formatNumber(b.unit_price, 4)}</td>
@@ -131,11 +126,11 @@ const tab_bd_purchase = {
         </tr>
       `;
     }).join('');
-
     const otherSection = `
       <div class="pur-section" data-cat="other" style="margin-top:16px;">
         <div class="toolbar">
           <span class="toolbar-title">3. 外购件 Other Components</span>
+          <button class="btn btn-primary" id="baAutoTranslate">自动翻译英文</button>
           <button class="btn btn-primary" id="baAdd">+ 添加</button>
           <button class="btn btn-danger"  id="baDel">删除选中</button>
           <span class="toolbar-spacer"></span>
@@ -143,14 +138,12 @@ const tab_bd_purchase = {
         </div>
         <div class="data-table-wrap">
           <table class="data-table">
-            <thead>
-              <tr>
-                <th style="width:30px"><input type="checkbox" id="baAll"></th>
-                <th>零件编号 Part No.</th><th>描述 Description</th><th>MOQ</th><th>用量 Usage/Toy</th><th>单价 Unit Price (HK$)</th><th>金额 Amount</th>
-              </tr>
-            </thead>
+            <thead><tr>
+              <th style="width:30px"><input type="checkbox" id="baAll"></th>
+              <th>分类</th><th>零件编号 Part No.</th><th>描述 Description</th><th>MOQ</th><th>用量 Usage/Toy</th><th>单价 Unit Price (HK$)</th><th>金额 Amount</th>
+            </tr></thead>
             <tbody>
-              ${otherRows || '<tr><td colspan="7" style="text-align:center;color:#aaa;padding:10px">暂无，点击 + 添加</td></tr>'}
+              ${otherRows || '<tr><td colspan="8" style="text-align:center;color:#aaa;padding:10px">暂无，点击 + 添加</td></tr>'}
             </tbody>
           </table>
         </div>
@@ -180,18 +173,16 @@ const tab_bd_purchase = {
   init(container, versionData, versionId) {
     const bodyAccs = versionData.body_accessories || [];
 
-    // ── Body Accessory (Other Components) ──
+    // ── Body Accessory ──
     container.querySelector('#baAll')?.addEventListener('change', e => {
       container.querySelectorAll('.ba-check').forEach(c => c.checked = e.target.checked);
     });
-
     container.querySelector('#baAdd')?.addEventListener('click', async () => {
       try {
         await api.addSectionItem(versionId, 'body-accessory', { part_no: '', description: '', moq: 2500, usage_qty: 1, unit_price: 0 });
         app.refresh();
       } catch (e) { showToast('添加失败: ' + e.message, 'error'); }
     });
-
     container.querySelector('#baDel')?.addEventListener('click', async () => {
       const ids = [...container.querySelectorAll('.ba-check:checked')].map(c => c.dataset.id);
       if (!ids.length) return showToast('请先选择要删除的行', 'info');

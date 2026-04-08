@@ -368,13 +368,27 @@ function parseSummary(ws) {
   const product_l = numVal(ws.getCell(108, 8));    // H108
   const product_w = numVal(ws.getCell(108, 10));   // J108
   const product_h = numVal(ws.getCell(108, 12));   // L108
-  const carton_l = numVal(ws.getCell(109, 8));     // H109
-  const carton_w = numVal(ws.getCell(109, 10));    // J109
-  const carton_h = numVal(ws.getCell(109, 12));    // L109
-  const carton_paper = strVal(ws.getCell(109, 9)); // I109
+  const carton_l = numVal(ws.getCell(109, 9));     // I109 = L (A+B)
+  const carton_w = numVal(ws.getCell(109, 11));    // K109 = W
+  const carton_h = numVal(ws.getCell(109, 13));    // M109 = H
+  const carton_paper = strVal(ws.getCell(109, 8)); // H109 = 纸板
   const carton_cuft = numVal(ws.getCell(110, 8));  // H110
-  const carton_price = numVal(ws.getCell(110, 10)); // J110
   const pcs_per_carton = numVal(ws.getCell(110, 12)); // L110
+
+  // Carton price + case pack: scan main sheet for col A="纸箱", col B contains "纸箱"
+  let carton_price = numVal(ws.getCell(110, 10)) || 0; // J110 fallback
+  let case_pack = null;
+  for (let r = 1; r <= ws.rowCount; r++) {
+    const row = ws.getRow(r);
+    const colA = strVal(row.getCell(1));
+    const colB = strVal(row.getCell(2));
+    if (colB && /纸箱/.test(colB) && colA === '纸箱') {
+      const rawPrice = numVal(row.getCell(5)) || 0;
+      carton_price = Math.round(rawPrice * 1.08 * 100) / 100;
+      case_pack = strVal(row.getCell(3)) || null; // keep raw text e.g. "1/2"
+      break;
+    }
+  }
 
   // R129-R136: Mold costs
   // R129-R130: section headers
@@ -396,7 +410,7 @@ function parseSummary(ws) {
       product_l_inch: product_l, product_w_inch: product_w, product_h_inch: product_h,
       carton_l_inch: carton_l, carton_w_inch: carton_w, carton_h_inch: carton_h,
       carton_cuft, carton_price, pcs_per_carton: pcs_per_carton ? Math.round(pcs_per_carton) : null,
-      carton_paper,
+      carton_paper, case_pack,
     },
     moldCost: {
       mold_cost_rmb, hardware_mold_cost_rmb, paint_mold_cost_rmb,
@@ -461,9 +475,10 @@ function parseElectronics(workbook, mainWs) {
       if (colA !== '电子') continue;
       const part_name = strVal(row.getCell(2));
       if (!part_name) continue;
-      const quantity = numVal(row.getCell(3));
+      const quantity = numVal(row.getCell(3)) ?? 1;
       const unit_price_usd = Math.round((numVal(row.getCell(5)) || numVal(row.getCell(4)) || 0) * 1.08 * 100) / 100;
-      electronicItems.push({ part_name, spec: null, quantity, unit_price_usd, total_usd: null, remark: null, sort_order: electronicItems.length });
+      const total_usd = Math.round(unit_price_usd * quantity * 10000) / 10000;
+      electronicItems.push({ part_name, spec: null, quantity, unit_price_usd, total_usd, remark: null, sort_order: electronicItems.length });
     }
   }
   return { electronicItems, electronicSummary: null };
@@ -472,28 +487,34 @@ function parseElectronics(workbook, mainWs) {
 // ─── Painting Parser ─────────────────────────────────────────────────────────
 
 function parsePainting(ws) {
-  // R46-R47: labor and paint costs
-  const labor_cost_hkd = numVal(ws.getCell('C46')) || numVal(ws.getCell('D46'));
-  const paint_cost_hkd = numVal(ws.getCell('C47')) || numVal(ws.getCell('D47'));
+  // R46: 喷油人工, R47: 油漆 — labor costs
+  const labor_cost_hkd = numVal(ws.getCell('E46')) || numVal(ws.getCell('D46')) || numVal(ws.getCell('C46'));
+  const paint_cost_hkd = numVal(ws.getCell('E47')) || numVal(ws.getCell('D47')) || numVal(ws.getCell('C47'));
 
-  // R129-R132: painting detail counts
-  const clamp_count = numVal(ws.getCell('C129')) || numVal(ws.getCell('D129'));
-  const print_count = numVal(ws.getCell('C130')) || numVal(ws.getCell('D130'));
-  const wipe_count = numVal(ws.getCell('C131')) || numVal(ws.getCell('D131'));
-  const edge_count = numVal(ws.getCell('C132')) || numVal(ws.getCell('D132'));
-  const spray_count = numVal(ws.getCell('C133')) || numVal(ws.getCell('D133'));
-  const total_operations = numVal(ws.getCell('C134')) || numVal(ws.getCell('D134'));
-  const quoted_price_hkd = numVal(ws.getCell('C135')) || numVal(ws.getCell('D135'));
+  // Parse operation counts from R46 col B description, e.g. "喷油人工 (16夹23散39边02珠)"
+  // Suffixes: 夹=clamp, 散枪/散=spray, 边=edge, 印=print, 抹=wipe
+  const paintDesc = strVal(ws.getCell('B46')) || '';
+  function extractOp(suffixes) {
+    for (const s of suffixes) {
+      const m = paintDesc.match(new RegExp('(\\d+)' + s));
+      if (m) return parseInt(m[1]);
+    }
+    return null;
+  }
+  const clamp_count = extractOp(['夹']);
+  const spray_count = extractOp(['散枪', '散']);
+  const edge_count  = extractOp(['边']);
+  const print_count = extractOp(['印']);
+  const wipe_count  = extractOp(['抹']);
+
+  const total_operations = (clamp_count || 0) + (spray_count || 0) + (edge_count || 0)
+    + (print_count || 0) + (wipe_count || 0) || null;
 
   return {
     labor_cost_hkd, paint_cost_hkd,
-    clamp_count: clamp_count ? Math.round(clamp_count) : null,
-    print_count: print_count ? Math.round(print_count) : null,
-    wipe_count: wipe_count ? Math.round(wipe_count) : null,
-    edge_count: edge_count ? Math.round(edge_count) : null,
-    spray_count: spray_count ? Math.round(spray_count) : null,
-    total_operations: total_operations ? Math.round(total_operations) : null,
-    quoted_price_hkd,
+    clamp_count, print_count, wipe_count, edge_count, spray_count,
+    total_operations,
+    quoted_price_hkd: Math.round(((labor_cost_hkd || 0) + (paint_cost_hkd || 0)) * 1.08 * 100) / 100,
   };
 }
 
@@ -521,23 +542,101 @@ function parseHardwareSheet(workbook, mainWs) {
     if (items.length > 0) return items;
   }
 
-  // 2. Fallback: scan the active (latest) sheet — only rows where col A explicitly = "五金"
+  // 2. Fallback: scan the active (latest) sheet — rows where col A = "五金" or "利宝"
   if (!mainWs) return [];
 
   const items = [];
   for (let r = 1; r <= mainWs.rowCount; r++) {
     const row = mainWs.getRow(r);
     const colA = strVal(row.getCell(1));
-    if (colA !== '五金') continue;
+    if (colA !== '五金' && colA !== '利宝') continue;
     const name  = strVal(row.getCell(2));
     if (!name) continue;
     items.push({
       description: name,
+      category: colA,  // '五金' or '利宝'
       usage_qty: numVal(row.getCell(3)) ?? 1,
-      unit_price: Math.round((numVal(row.getCell(5)) || 0) * 1.08 * 100) / 100,  // col E 样板报价 ×1.08
+      unit_price: Math.round((numVal(row.getCell(5)) || 0) * 1.08 * 100) / 100,
       sort_order: items.length,
     });
   }
+  return items;
+}
+
+// ─── Packaging Items from Main Sheet (彩盒/吸塑/胶袋 rows) ──────────────────
+
+const PKG_LABEL_PATTERN = /^(彩盒|吸塑|胶袋|杂项|纸箱)$/;
+
+const ACCESSORIES_PATTERN   = /包装辅料/;
+const PACKING_LABOUR_PATTERN = /拆货|包装人工/;
+
+function parsePackagingFromMainSheet(mainWs) {
+  if (!mainWs) return [];
+  const items = [];
+  let accessoriesTotal = 0;
+  let packingLabourTotal = 0;
+
+  for (let r = 1; r <= mainWs.rowCount; r++) {
+    const row = mainWs.getRow(r);
+    const colA = strVal(row.getCell(1));
+    const colB = strVal(row.getCell(2));
+
+    // Collect 包装辅料 → Accessories
+    if (colB && ACCESSORIES_PATTERN.test(colB)) {
+      accessoriesTotal += numVal(row.getCell(5)) || 0;
+      continue;
+    }
+
+    // Collect 拆货 + 包装人工 → Packing Labour
+    if (colB && PACKING_LABOUR_PATTERN.test(colB)) {
+      packingLabourTotal += numVal(row.getCell(5)) || 0;
+      continue;
+    }
+
+    if (!colA || !PKG_LABEL_PATTERN.test(colA)) continue;
+    if (colA === '纸箱') continue;  // 纸箱单独作为 carton_price，不进包装列表
+    const rawName = colB;
+    if (!rawName) continue;
+    const splitM = rawName.match(/^(.+?)\s+([\d"'*].+)$/);
+    const name   = splitM ? splitM[1].trim() : rawName;
+    const spec   = splitM ? splitM[2].trim() : '';
+    const usageQty = numVal(row.getCell(3)) ?? 1;
+    const rawTotal = numVal(row.getCell(5)) || 0;
+    const totalWithMarkup = Math.round(rawTotal * 1.08 * 10000) / 10000;
+    const unitPrice = usageQty > 0 ? Math.round(totalWithMarkup / usageQty * 10000) / 10000 : 0;
+    items.push({
+      pm_no:     '',
+      name,
+      remark:    spec,
+      moq:       2500,
+      quantity:  usageQty,
+      new_price: unitPrice,
+      sort_order: items.length,
+    });
+  }
+
+  // Fixed row: Accessories (倒数第二)
+  items.push({
+    pm_no:     '',
+    name:      'Accessories',
+    remark:    '',
+    moq:       null,
+    quantity:  1,
+    new_price: 0.15,
+    sort_order: items.length,
+  });
+
+  // Fixed row: Packing Labour (最后)
+  items.push({
+    pm_no:     '',
+    name:      'Packing Labour',
+    remark:    '',
+    moq:       null,
+    quantity:  1,
+    new_price: Math.round(packingLabourTotal * 1.08 * 10000) / 10000,
+    sort_order: items.length,
+  });
+
   return items;
 }
 
@@ -582,6 +681,7 @@ async function parseWorkbook(filePath) {
   const sewingDetails = format === 'plush' ? parseSewingDetails(workbook) : [];
   const bodyAccessories = parseHardwareSheet(workbook, ws);
 
+  const packagingFromMain = parsePackagingFromMainSheet(ws);
   const costItems = parseCostItems(ws, format);
   const summary = parseSummary(ws);
   const transport = parseTransport(ws);
@@ -605,7 +705,7 @@ async function parseWorkbook(filePath) {
     bodyAccessories,
     hardwareItems: costItems.hardwareItems,
     laborItems: costItems.laborItems,
-    packagingItems: costItems.packagingItems,
+    packagingItems: packagingFromMain.length > 0 ? packagingFromMain : costItems.packagingItems,
     electronicItems,
     electronicSummary,
     paintingDetail,

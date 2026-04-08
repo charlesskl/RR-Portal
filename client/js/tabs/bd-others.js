@@ -7,7 +7,10 @@ const tab_bd_others = {
 
     // ASSEMBLY — HardwareItem with part_category='labor_assembly'
     const hwItems = versionData.hardware_items || [];
-    const assemblyItems = hwItems.filter(h => h.part_category === 'labor_assembly');
+    const assemblyItems = hwItems.filter(h =>
+      h.part_category === 'labor_assembly' &&
+      !/(喷油|油漆|包装人工)/.test(h.name || '')
+    );
     const assemblyRows = assemblyItems.map(h => `
       <tr>
         <td>${escapeHtml(h.name || '')}</td>
@@ -15,6 +18,7 @@ const tab_bd_others = {
       </tr>
     `).join('');
     const assemblySub = assemblyItems.reduce((s, h) => s + (parseFloat(h.new_price) || 0), 0);
+    const assemblyQuoted = assemblySub * 1.08;
 
     // 4 SEWING — SewingDetail with position='__labor__'
     const sewingDetails = versionData.sewing_details || [];
@@ -53,6 +57,10 @@ const tab_bd_others = {
             <thead><tr><th>项目</th><th>金额 (HK$)</th></tr></thead>
             <tbody>
               ${assemblyRows || '<tr><td colspan="2" style="text-align:center;color:#aaa;padding:10px">暂无</td></tr>'}
+              <tr style="border-top:2px solid #ddd;font-weight:bold">
+                <td>报价 <span style="color:#888;font-size:11px;font-weight:normal">(含码点 ×1.08)</span></td>
+                <td class="num">${formatNumber(assemblyQuoted, 2)}</td>
+              </tr>
             </tbody>
           </table>
         </div>
@@ -75,7 +83,10 @@ const tab_bd_others = {
   init(container, versionData, versionId) {
     // Assembly labor editable
     const hwItems = versionData.hardware_items || [];
-    const assemblyItems = hwItems.filter(h => h.part_category === 'labor_assembly');
+    const assemblyItems = hwItems.filter(h =>
+      h.part_category === 'labor_assembly' &&
+      !/(喷油|油漆|包装人工)/.test(h.name || '')
+    );
     container.querySelectorAll('td.editable[data-table="hardware-labor"]').forEach(td => {
       const id    = td.dataset.id;
       const field = td.dataset.field;

@@ -127,12 +127,12 @@ router.post('/', upload.single('file'), async (req, res) => {
 
       // PackagingItem
       const insertPkg = db.prepare(
-        `INSERT INTO PackagingItem (version_id, name, quantity, old_price, new_price, difference, tax_type, sort_order)
+        `INSERT INTO PackagingItem (version_id, pm_no, name, remark, moq, quantity, new_price, sort_order)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
       );
       for (let i = 0; i < (data.packagingItems || []).length; i++) {
         const pk = data.packagingItems[i];
-        insertPkg.run(versionId, pk.name, pk.quantity, pk.old_price, pk.new_price, pk.difference, pk.tax_type, i);
+        insertPkg.run(versionId, pk.pm_no || '', pk.name, pk.remark || '', pk.moq ?? 2500, pk.quantity, pk.new_price, i);
       }
 
       // ElectronicItem
@@ -260,14 +260,14 @@ router.post('/', upload.single('file'), async (req, res) => {
         }
       }
 
-      // BodyAccessory (from 五金 sheet)
+      // BodyAccessory (五金 and 利宝 from main sheet)
       if (data.bodyAccessories && data.bodyAccessories.length > 0) {
         const insertBA = db.prepare(
-          `INSERT INTO BodyAccessory (version_id, description, usage_qty, unit_price, sort_order)
-           VALUES (?, ?, ?, ?, ?)`
+          `INSERT INTO BodyAccessory (version_id, description, category, usage_qty, unit_price, sort_order)
+           VALUES (?, ?, ?, ?, ?, ?)`
         );
         for (const ba of data.bodyAccessories) {
-          insertBA.run(versionId, ba.description, ba.usage_qty, ba.unit_price, ba.sort_order);
+          insertBA.run(versionId, ba.description, ba.category || '五金', ba.usage_qty, ba.unit_price, ba.sort_order);
         }
       }
 
@@ -298,12 +298,12 @@ router.post('/', upload.single('file'), async (req, res) => {
         const pd = data.productDimension;
         db.prepare(
           `INSERT INTO ProductDimension (version_id, product_l_inch, product_w_inch, product_h_inch,
-           carton_l_inch, carton_paper, carton_w_inch, carton_h_inch, carton_cuft, carton_price, pcs_per_carton)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+           carton_l_inch, carton_paper, carton_w_inch, carton_h_inch, carton_cuft, carton_price, pcs_per_carton, case_pack)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         ).run(
           versionId, pd.product_l_inch, pd.product_w_inch, pd.product_h_inch,
           pd.carton_l_inch, pd.carton_paper, pd.carton_w_inch, pd.carton_h_inch,
-          pd.carton_cuft, pd.carton_price, pd.pcs_per_carton
+          pd.carton_cuft, pd.carton_price, pd.pcs_per_carton, pd.case_pack || null
         );
       }
     });

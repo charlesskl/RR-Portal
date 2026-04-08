@@ -5,14 +5,51 @@ const tab_vq_body_cost = {
     const hw = versionData.hardware_items || [];
     const pd = versionData.painting_detail || {};
     const params = versionData.params || {};
-    const accessories = versionData.body_accessories || [];
+    const accessories = versionData.vq_supplements || [];
     const markup = parseFloat(params.markup_body) || 0;
 
-    const rawSub = parts.reduce((s, p) => s + (parseFloat(p.material_cost_hkd) || 0), 0);
-    const moldSub = parts.reduce((s, p) => s + (parseFloat(p.molding_labor) || 0), 0);
-    const purSub  = hw.reduce((s, h) => s + (parseFloat(h.new_price) || 0), 0);
-    const decSub  = (parseFloat(pd.labor_cost_hkd) || 0) + (parseFloat(pd.paint_cost_hkd) || 0);
-    const othSub  = 0;
+    const hkdUsd  = parseFloat(params.hkd_usd) || 0.1291;
+    const rmb_hkd = parseFloat(params.rmb_hkd) || 0.85;
+    const rawMats = versionData.raw_materials || [];
+    const bodyAccs = versionData.body_accessories || [];
+    const sewingDetails = versionData.sewing_details || [];
+    const elecItems = versionData.electronic_items || [];
+    const elecSummary = versionData.electronic_summary || null;
+
+    // A. Raw Material — same as bd-material.js
+    const rawSub = rawMats.reduce((s, m) => {
+      const w = parseFloat(m.weight_g) || 0;
+      const p = parseFloat(m.unit_price_per_kg) || 0;
+      return s + w * p / (m.category === 'fabric' ? 1 : 1000);
+    }, 0);
+
+    // B. Molding Labour — same as bd-molding.js (molding_labor × 1.08)
+    const moldSub = parts.reduce((s, p) => {
+      const sets = parseFloat(p.sets_per_toy) || 1;
+      const shotPerToy = sets > 0 ? 1 / sets : 0;
+      const moldingLabor = parseFloat(p.molding_labor) || 0;
+      const costPerShot = shotPerToy > 0 ? (moldingLabor * 1.08) / shotPerToy : 0;
+      return s + costPerShot * shotPerToy;
+    }, 0);
+
+    // C. Purchase Parts — same as bd-purchase.js
+    const elecSubHkd = elecSummary
+      ? (parseFloat(elecSummary.final_price_usd) || 0)
+      : elecItems.reduce((s, e) => s + (parseFloat(e.total_usd) || 0), 0);
+    const sewingItems = sewingDetails.filter(s => !s.position && s.position !== '__labor__');
+    const sewingSub = sewingItems.reduce((s, sw) => s + (rmb_hkd > 0 ? (parseFloat(sw.total_price_rmb) || 0) / rmb_hkd : 0), 0);
+    const otherSub = bodyAccs.reduce((s, b) => s + (parseFloat(b.usage_qty) || 0) * (parseFloat(b.unit_price) || 0), 0);
+    const purSub = elecSubHkd + sewingSub + otherSub;
+
+    // D. Decoration — quoted_price_hkd = (labor + paint) × 1.08
+    const decSub = parseFloat(pd.quoted_price_hkd) || ((parseFloat(pd.labor_cost_hkd) || 0) + (parseFloat(pd.paint_cost_hkd) || 0)) * 1.08;
+
+    // E. Others — assembly quoted (×1.08) + sewing labor
+    const assemblyItems = hw.filter(h => h.part_category === 'labor_assembly' && !/(喷油|油漆|包装人工)/.test(h.name || ''));
+    const assemblySub = assemblyItems.reduce((s, h) => s + (parseFloat(h.new_price) || 0), 0);
+    const sewingLaborItems = sewingDetails.filter(s => s.position === '__labor__');
+    const sewingLaborSub = sewingLaborItems.reduce((s, sl) => s + (rmb_hkd > 0 ? (parseFloat(sl.total_price_rmb) || 0) / rmb_hkd : 0), 0);
+    const othSub = assemblySub * 1.08 + sewingLaborSub;
 
     const rawAmt  = rawSub * (1 + markup);
     const moldAmt = moldSub * (1 + markup);
@@ -116,7 +153,7 @@ const tab_vq_body_cost = {
   },
 
   init(container, versionData, versionId) {
-    const accessories = versionData.body_accessories || [];
+    const accessories = versionData.vq_supplements || [];
 
     container.querySelector('#accAll')?.addEventListener('change', e => {
       container.querySelectorAll('.acc-check').forEach(cb => cb.checked = e.target.checked);
@@ -124,7 +161,7 @@ const tab_vq_body_cost = {
 
     container.querySelector('#accAdd')?.addEventListener('click', async () => {
       try {
-        await api.addSectionItem(versionId, 'body-accessory', { part_no: '', description: '新配件', moq: 2500, usage_qty: 1, unit_price: 0 });
+        await api.addSectionItem(versionId, 'vq-supplement', { part_no: '', description: '新配件', moq: 2500, usage_qty: 1, unit_price: 0 });
         app.refresh();
       } catch (e) { showToast('添加失败: ' + e.message, 'error'); }
     });
@@ -134,7 +171,7 @@ const tab_vq_body_cost = {
       if (!ids.length) return showToast('请先选择要删除的行', 'info');
       if (!confirm(`确定删除 ${ids.length} 行？`)) return;
       try {
-        await Promise.all(ids.map(id => api.deleteSectionItem(versionId, 'body-accessory', id)));
+        await Promise.all(ids.map(id => api.deleteSectionItem(versionId, 'vq-supplement', id)));
         app.refresh();
       } catch (e) { showToast('删除失败: ' + e.message, 'error'); }
     });
@@ -150,7 +187,7 @@ const tab_vq_body_cost = {
         value: item[field],
         onSave: async (val) => {
           try {
-            await api.updateSectionItem(versionId, 'body-accessory', id, { [field]: val });
+            await api.updateSectionItem(versionId, 'vq-supplement', id, { [field]: val });
             app.refresh();
           } catch (e) { showToast('保存失败: ' + e.message, 'error'); }
         },

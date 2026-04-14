@@ -206,7 +206,7 @@ app.use('/api', (req, res, next) => {
   // PATCH /status 已有 PIN 验证
   if (req.method === 'PATCH' && req.path.match(/\/\d+\/status$/)) return next();
   // 认证端点本身不需要 X-User
-  if (req.path === '/verify-pin' || req.path === '/change-pin') return next();
+  if (req.path === '/verify-pin' || req.path === '/change-pin' || req.path === '/reset-supervisor-pin') return next();
   const user = req.headers['x-user'];
   if (!user || !decodeURIComponent(user).trim()) {
     return res.status(401).json({ error: '未授权：请登录后操作' });
@@ -649,6 +649,33 @@ app.post('/api/verify-pin', (req, res) => {
   const bucket = role === 'manager' ? 'manager' : 'supervisors';
   const mustChange = !!(data.auth_pins_must_change && data.auth_pins_must_change[bucket] && data.auth_pins_must_change[bucket][name]);
   res.json({ success: true, must_change: mustChange });
+});
+
+// 经理重置主管 PIN（需经理 PIN 授权）
+app.post('/api/reset-supervisor-pin', (req, res) => {
+  const { manager_name, manager_pin, target_name, new_pin } = req.body;
+  if (!manager_name || !manager_pin || !target_name || !new_pin) {
+    return res.status(400).json({ error: '参数不完整' });
+  }
+  if (!verifyPin(manager_name, manager_pin, 'manager')) {
+    return res.status(403).json({ error: '经理 PIN 验证失败' });
+  }
+  if (!ALL_SUPERVISORS.includes(target_name)) {
+    return res.status(400).json({ error: '目标主管不存在' });
+  }
+  if (String(new_pin).length < 4) {
+    return res.status(400).json({ error: '新 PIN 至少 4 位' });
+  }
+  const data = loadData();
+  if (!data.auth_pins) data.auth_pins = { supervisors: {}, manager: {} };
+  if (!data.auth_pins.supervisors) data.auth_pins.supervisors = {};
+  if (!data.auth_pins_must_change) data.auth_pins_must_change = { supervisors: {}, manager: {} };
+  if (!data.auth_pins_must_change.supervisors) data.auth_pins_must_change.supervisors = {};
+  data.auth_pins.supervisors[target_name] = hashPin(String(new_pin));
+  data.auth_pins_must_change.supervisors[target_name] = true;
+  saveData(data);
+  console.log(`[reset-pin] manager=${manager_name} reset supervisor=${target_name}`);
+  res.json({ success: true });
 });
 
 app.post('/api/change-pin', (req, res) => {

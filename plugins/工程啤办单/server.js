@@ -184,6 +184,40 @@ function verifyPin(name, pin, role) {
   return pins.supervisors && pins.supervisors[name] === hash;
 }
 
+// ─── PIN Brute-Force Lockout (in-memory, per IP+key) ─────────────────────────
+// 5 failed attempts within 15 min triggers 15-min lockout.
+const PIN_ATTEMPTS = new Map();
+const PIN_MAX_ATTEMPTS = 5;
+const PIN_WINDOW_MS = 15 * 60 * 1000;
+function checkPinLockout(key) {
+  const rec = PIN_ATTEMPTS.get(key);
+  if (!rec) return { allowed: true };
+  if (rec.lockUntil && Date.now() < rec.lockUntil) {
+    const remaining = Math.ceil((rec.lockUntil - Date.now()) / 1000);
+    return { allowed: false, remaining };
+  }
+  return { allowed: true };
+}
+function recordPinFailure(key) {
+  const now = Date.now();
+  let rec = PIN_ATTEMPTS.get(key);
+  if (!rec || now - rec.firstAt > PIN_WINDOW_MS) {
+    rec = { count: 0, firstAt: now, lockUntil: 0 };
+  }
+  rec.count += 1;
+  if (rec.count >= PIN_MAX_ATTEMPTS) {
+    rec.lockUntil = now + PIN_WINDOW_MS;
+  }
+  PIN_ATTEMPTS.set(key, rec);
+}
+function clearPinFailures(key) {
+  PIN_ATTEMPTS.delete(key);
+}
+function pinKey(req, name) {
+  const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown').split(',')[0].trim();
+  return `${ip}:${name || 'anon'}`;
+}
+
 // ─── Health Check ────────────────────────────────────────────────────────────
 app.get('/health', (req, res) => res.json({ status: 'ok', service: 'rr-production' }));
 
@@ -206,7 +240,7 @@ app.use('/api', (req, res, next) => {
   // PATCH /status 已有 PIN 验证
   if (req.method === 'PATCH' && req.path.match(/\/\d+\/status$/)) return next();
   // 认证端点本身不需要 X-User
-  if (req.path === '/verify-pin' || req.path === '/change-pin') return next();
+  if (req.path === '/verify-pin' || req.path === '/change-pin' || req.path === '/reset-supervisor-pin') return next();
   const user = req.headers['x-user'];
   if (!user || !decodeURIComponent(user).trim()) {
     return res.status(401).json({ error: '未授权：请登录后操作' });
@@ -651,6 +685,56 @@ app.post('/api/verify-pin', (req, res) => {
   const bucket = role === 'manager' ? 'manager' : 'supervisors';
   const mustChange = !!(data.auth_pins_must_change && data.auth_pins_must_change[bucket] && data.auth_pins_must_change[bucket][name]);
   res.json({ success: true, must_change: mustChange });
+});
+
+// 经理重置主管 PIN（需经理 PIN 授权）
+app.post('/api/reset-supervisor-pin', (req, res) => {
+  const { manager_name, manager_pin, target_name, new_pin } = req.body;
+  if (!manager_name || !manager_pin || !target_name || !new_pin) {
+    return res.status(400).json({ error: '参数不完整' });
+  }
+  if (!ALL_MANAGERS.includes(manager_name)) {
+    return res.status(400).json({ error: '经理不存在' });
+  }
+  const lockKey = pinKey(req, manager_name);
+  const gate = checkPinLockout(lockKey);
+  if (!gate.allowed) {
+    return res.status(429).json({ error: `尝试过多，请 ${gate.remaining} 秒后重试` });
+  }
+  if (!verifyPin(manager_name, manager_pin, 'manager')) {
+    recordPinFailure(lockKey);
+    return res.status(403).json({ error: '经理 PIN 验证失败' });
+  }
+  clearPinFailures(lockKey);
+  if (!ALL_SUPERVISORS.includes(target_name)) {
+    return res.status(400).json({ error: '目标主管不存在' });
+  }
+  const newPinStr = String(new_pin);
+  if (newPinStr.length < 4 || newPinStr.length > 8) {
+    return res.status(400).json({ error: '新 PIN 需 4-8 位' });
+  }
+  const data = loadData();
+  if (!data.auth_pins) data.auth_pins = { supervisors: {}, manager: {} };
+  if (!data.auth_pins.supervisors) data.auth_pins.supervisors = {};
+  if (!data.auth_pins_must_change) data.auth_pins_must_change = { supervisors: {}, manager: {} };
+  if (!data.auth_pins_must_change.supervisors) data.auth_pins_must_change.supervisors = {};
+  if (!Array.isArray(data.audit_log)) data.audit_log = [];
+  data.auth_pins.supervisors[target_name] = hashPin(newPinStr);
+  data.auth_pins_must_change.supervisors[target_name] = true;
+  const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown').split(',')[0].trim();
+  data.audit_log.push({
+    ts: new Date().toISOString(),
+    action: 'reset-supervisor-pin',
+    actor: manager_name,
+    target: target_name,
+    ip,
+    ua: req.headers['user-agent'] || ''
+  });
+  // cap audit log to last 2000 entries
+  if (data.audit_log.length > 2000) data.audit_log = data.audit_log.slice(-2000);
+  saveData(data);
+  console.log(`[reset-pin] manager=${manager_name} reset supervisor=${target_name} from=${ip}`);
+  res.json({ success: true });
 });
 
 app.post('/api/change-pin', (req, res) => {

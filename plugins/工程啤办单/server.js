@@ -493,11 +493,12 @@ app.get('/api/material-stats', (req, res) => {
   const data = loadData();
   const month = req.query.month; // optional YYYY-MM filter
 
-  // 以价格表为基础建立统计结构
+  // 以价格表为基础建立统计结构（按规范化 key 聚合，容纳格式差异与混合料）
+  const priceMap = buildPriceMap(data.material_prices);
   const stats = {};
   (data.material_prices || []).forEach((p, i) => {
-    stats[p.material] = {
-      seq: i + 1, material: p.material, unit_price: p.unit_price,
+    stats[normMat(p.material)] = {
+      seq: i + 1, material: p.material, unit_price: +p.unit_price || 0,
       notes: p.notes || '', total_actual_weight: 0, total_amount: 0
     };
   });
@@ -526,20 +527,25 @@ app.get('/api/material-stats', (req, res) => {
       .map(o => o.id)
   );
 
-  // 累加 injection_items 里的仓库实填数据
+  // 累加 injection_items 里的仓库实填数据（按规范化 key 合并同义名）
   (data.injection_items || []).forEach(item => {
     if (!item.material) return;
     if (!validOrderIds.has(item.order_id)) return;
-    if (!stats[item.material]) {
-      stats[item.material] = {
+    const key = normMat(item.material);
+    if (!stats[key]) {
+      // 价格表里没这条 → 尝试解析（含混合料）拿一个参考价，否则标记未录入
+      const resolved = resolvePrice(item.material, priceMap);
+      stats[key] = {
         seq: Object.keys(stats).length + 1, material: item.material,
-        unit_price: 0, notes: '', total_actual_weight: 0, total_amount: 0
+        unit_price: resolved, notes: '', total_actual_weight: 0, total_amount: 0
       };
     }
-    stats[item.material].total_actual_weight += +(item.actual_weight_kg || 0);
-    stats[item.material].total_amount        += +(item.actual_amount_hkd || 0);
+    stats[key].total_actual_weight += +(item.actual_weight_kg || 0);
+    stats[key].total_amount        += +(item.actual_amount_hkd || 0);
   });
-  res.json(Object.values(stats));
+  // 补充 no_price 标记供前端徽章判断
+  const result = Object.values(stats).map(s => ({ ...s, no_price: !(+s.unit_price > 0) }));
+  res.json(result);
 });
 
 // ─── 啤办费用汇总 ─────────────────────────────────────────────────────────────

@@ -258,7 +258,7 @@ app.use('/api', (req, res, next) => {
   // PATCH /status 已有 PIN 验证
   if (req.method === 'PATCH' && req.path.match(/\/\d+\/status$/)) return next();
   // 认证端点本身不需要 X-User
-  if (req.path === '/verify-pin' || req.path === '/change-pin' || req.path === '/reset-supervisor-pin' || req.path === '/recalc-amounts') return next();
+  if (req.path === '/verify-pin' || req.path === '/change-pin' || req.path === '/reset-supervisor-pin' || req.path === '/recalc-amounts' || req.path === '/manager-update-prices') return next();
   const user = req.headers['x-user'];
   if (!user || !decodeURIComponent(user).trim()) {
     return res.status(401).json({ error: '未授权：请登录后操作' });
@@ -740,6 +740,40 @@ app.post('/api/reset-supervisor-pin', (req, res) => {
   saveData(data);
   console.log(`[reset-pin] manager=${manager_name} reset supervisor=${target_name}`);
   res.json({ success: true });
+});
+
+// 经理更新价格表（保存后自动回填金额=0 的历史明细）
+app.post('/api/manager-update-prices', (req, res) => {
+  const { manager_name, manager_pin, prices } = req.body;
+  if (!manager_name || !manager_pin || !Array.isArray(prices)) {
+    return res.status(400).json({ error: '参数不完整' });
+  }
+  if (!verifyPin(manager_name, manager_pin, 'manager')) {
+    return res.status(403).json({ error: '经理 PIN 验证失败' });
+  }
+  if (!prices.every(p => p && typeof p === 'object' && typeof p.material === 'string' && p.material.trim())) {
+    return res.status(400).json({ error: '价格数据格式错误' });
+  }
+  const data = loadData();
+  data.material_prices = prices.map(p => ({
+    material: String(p.material).trim(),
+    unit_price: +(p.unit_price || 0),
+    notes: String(p.notes || '')
+  }));
+  const priceMap = buildPriceMap(data.material_prices);
+  let backfilled = 0;
+  (data.injection_items || []).forEach(item => {
+    const amount = +(item.actual_amount_hkd || 0);
+    const weight = +(item.actual_weight_kg || 0);
+    if (amount > 0 || weight <= 0) return;
+    const price = resolvePrice(item.material, priceMap);
+    if (price <= 0) return;
+    item.actual_amount_hkd = Math.round(weight * 2.20462 * price * 100) / 100;
+    backfilled++;
+  });
+  saveData(data);
+  console.log(`[price-update] manager=${manager_name} total=${data.material_prices.length} backfilled=${backfilled}`);
+  res.json({ success: true, total: data.material_prices.length, backfilled });
 });
 
 // 经理一键重算：按当前价格表回填所有「金额=0 且 重量>0」的历史明细

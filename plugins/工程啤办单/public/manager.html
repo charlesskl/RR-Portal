@@ -72,6 +72,9 @@
       <div class="d-flex gap-2 align-items-center">
         <a href="index.html" class="nav-dept-link"><i class="bi bi-house me-1"></i>主页</a>
         <a href="engineering.html" class="nav-dept-link">工程部</a>
+        <button class="btn btn-sm btn-outline-light" onclick="openPriceTableModal()">
+          <i class="bi bi-table me-1"></i>价格表管理
+        </button>
         <button class="btn btn-sm btn-outline-light" onclick="doRecalcAmounts()">
           <i class="bi bi-calculator me-1"></i>料费重算
         </button>
@@ -177,6 +180,52 @@
         <button class="btn btn-outline-secondary" data-bs-dismiss="modal">取消</button>
         <button class="btn btn-primary" style="background:#7c3aed;border-color:#7c3aed" onclick="submitResetPin()">
           <i class="bi bi-check-circle me-1"></i>确认重置
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ─── 价格表管理 Modal ──────────────────────────────────────────────────── -->
+<div class="modal fade" id="priceTableModal" tabindex="-1" data-bs-backdrop="static">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header" style="background:#7c3aed;color:#fff">
+        <h5 class="modal-title"><i class="bi bi-table me-2"></i>原料价格表管理</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="d-flex gap-2 mb-3 align-items-center">
+          <input id="ptSearch" class="form-control form-control-sm" style="max-width:240px" placeholder="搜索原料名..." oninput="renderPriceTable()">
+          <div class="form-check">
+            <input type="checkbox" id="ptOnlyMissing" class="form-check-input" onchange="renderPriceTable()">
+            <label for="ptOnlyMissing" class="form-check-label small">只看未录入价格</label>
+          </div>
+          <button class="btn btn-sm btn-outline-primary ms-auto" onclick="addPriceRow()">
+            <i class="bi bi-plus-circle me-1"></i>新增原料
+          </button>
+          <span id="ptStats" class="small text-muted"></span>
+        </div>
+        <div class="table-responsive" style="max-height:60vh">
+          <table class="table table-sm table-hover align-middle">
+            <thead class="table-light sticky-top">
+              <tr>
+                <th style="width:50px">#</th>
+                <th>原料名</th>
+                <th style="width:160px">单价 (HKD/磅)</th>
+                <th>备注</th>
+                <th style="width:60px"></th>
+              </tr>
+            </thead>
+            <tbody id="priceTableBody"></tbody>
+          </table>
+        </div>
+        <div id="priceTableError" class="text-danger small d-none"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline-secondary" data-bs-dismiss="modal">取消</button>
+        <button class="btn btn-primary" style="background:#7c3aed;border-color:#7c3aed" onclick="savePriceTable()">
+          <i class="bi bi-check-circle me-1"></i>保存并回填
         </button>
       </div>
     </div>
@@ -639,6 +688,93 @@ async function submitResetPin() {
     }
     bootstrap.Modal.getInstance(document.getElementById('resetPinModal')).hide();
     showToast(`已将 ${target} 的 PIN 重置为 ${newPin}，首次登录需修改`);
+  } catch (e) {
+    err.textContent = '网络错误';
+    err.classList.remove('d-none');
+  }
+}
+
+// ─── 价格表管理 ────────────────────────────────────────────────────────────
+let _priceRows = [];
+async function openPriceTableModal() {
+  document.getElementById('priceTableError').classList.add('d-none');
+  document.getElementById('ptSearch').value = '';
+  document.getElementById('ptOnlyMissing').checked = false;
+  try {
+    const r = await apiFetch('/api/material-prices');
+    _priceRows = (await r.json()).map(p => ({
+      material: p.material || '',
+      unit_price: +(p.unit_price || 0),
+      notes: p.notes || ''
+    }));
+  } catch (e) { _priceRows = []; }
+  renderPriceTable();
+  new bootstrap.Modal(document.getElementById('priceTableModal')).show();
+}
+
+function renderPriceTable() {
+  const q = (document.getElementById('ptSearch').value || '').toLowerCase();
+  const onlyMissing = document.getElementById('ptOnlyMissing').checked;
+  const body = document.getElementById('priceTableBody');
+  const filtered = _priceRows.map((p, idx) => ({ ...p, _idx: idx }))
+    .filter(p => !q || p.material.toLowerCase().includes(q))
+    .filter(p => !onlyMissing || !(+p.unit_price > 0));
+  const missingCount = _priceRows.filter(p => !(+p.unit_price > 0)).length;
+  document.getElementById('ptStats').textContent = `共 ${_priceRows.length} 项，未录入 ${missingCount} 项`;
+  body.innerHTML = filtered.map(p => `
+    <tr class="${!(+p.unit_price > 0) ? 'table-warning' : ''}">
+      <td class="text-muted small">${p._idx + 1}</td>
+      <td><input class="form-control form-control-sm" value="${esc(p.material)}"
+                 oninput="_priceRows[${p._idx}].material=this.value"></td>
+      <td><input type="number" step="0.0001" min="0" class="form-control form-control-sm"
+                 value="${+p.unit_price || ''}" placeholder="未录入"
+                 oninput="_priceRows[${p._idx}].unit_price=+this.value||0;this.closest('tr').classList.toggle('table-warning',!(+this.value>0))"></td>
+      <td><input class="form-control form-control-sm" value="${esc(p.notes)}"
+                 oninput="_priceRows[${p._idx}].notes=this.value"></td>
+      <td><button class="btn btn-sm btn-outline-danger" onclick="removePriceRow(${p._idx})"><i class="bi bi-trash"></i></button></td>
+    </tr>
+  `).join('') || '<tr><td colspan="5" class="text-center text-muted py-3">无匹配项</td></tr>';
+}
+
+function esc(s) { return String(s || '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
+
+function addPriceRow() {
+  _priceRows.push({ material: '', unit_price: 0, notes: '' });
+  document.getElementById('ptOnlyMissing').checked = false;
+  renderPriceTable();
+  setTimeout(() => {
+    const inputs = document.querySelectorAll('#priceTableBody tr:last-child input');
+    if (inputs[0]) inputs[0].focus();
+  }, 50);
+}
+
+function removePriceRow(idx) {
+  if (!confirm(`删除「${_priceRows[idx].material || '(空)'}」？`)) return;
+  _priceRows.splice(idx, 1);
+  renderPriceTable();
+}
+
+async function savePriceTable() {
+  const err = document.getElementById('priceTableError');
+  err.classList.add('d-none');
+  const clean = _priceRows.filter(p => p.material && p.material.trim());
+  const names = clean.map(p => p.material.trim().toLowerCase());
+  const dup = names.find((n, i) => names.indexOf(n) !== i);
+  if (dup) { err.textContent = `存在重复原料名：${dup}`; err.classList.remove('d-none'); return; }
+  const managerPin = sessionStorage.getItem('mgr_pin') || '';
+  if (!managerPin) { err.textContent = '登录状态已失效'; err.classList.remove('d-none'); return; }
+  try {
+    const r = await apiFetch('/api/manager-update-prices', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ manager_name: MANAGER_NAME, manager_pin: managerPin, prices: clean })
+    });
+    const d = await r.json();
+    if (!r.ok || !d.success) { err.textContent = d.error || '保存失败'; err.classList.remove('d-none'); return; }
+    bootstrap.Modal.getInstance(document.getElementById('priceTableModal')).hide();
+    showToast(d.backfilled > 0
+      ? `已保存 ${d.total} 项价格，回填 ${d.backfilled} 条历史明细`
+      : `已保存 ${d.total} 项价格`);
   } catch (e) {
     err.textContent = '网络错误';
     err.classList.remove('d-none');

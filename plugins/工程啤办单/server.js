@@ -28,7 +28,15 @@ function loadData() {
   if (!fs.existsSync(DATA_FILE)) { _cache = initData(); return _cache; }
   try {
     const data = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
-    if (!data.material_prices || data.material_prices.length === 0) data.material_prices = DEFAULT_MATERIAL_PRICES.slice();
+    if (!data.material_prices || data.material_prices.length === 0) {
+      data.material_prices = DEFAULT_MATERIAL_PRICES.slice();
+    } else if (DEFAULT_MATERIAL_PRICES.length) {
+      // Upsert：seed 中有但 data.json 中没有的材料自动补进去，已有的不覆盖（保留用户手动录入的价格）
+      const existing = new Set(data.material_prices.map(p => normMat(p.material)));
+      DEFAULT_MATERIAL_PRICES.forEach(p => {
+        if (!existing.has(normMat(p.material))) data.material_prices.push(p);
+      });
+    }
     if (!data.material_requisitions) data.material_requisitions = [];
     if (!data.assembly_orders) data.assembly_orders = [];
     if (!data.assembly_items) data.assembly_items = [];
@@ -59,6 +67,50 @@ function saveData(data) {
   const tmp = DATA_FILE + '.tmp';
   fs.writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf8');
   fs.renameSync(tmp, DATA_FILE);
+}
+
+// ─── 材料价格解析（模糊匹配 + 混合料按最高比例组分取价） ───────────────────
+// 规范化：去掉空格/括号/横杠并转小写，用于模糊比对
+//   "PP(EP332K)" / "PP (EP332K)" / "PPEP332K" / "pp-ep332k" → "ppep332k"
+//   "TPR 3度" / "TPR 3°" / "TPR3度" → "tpr3°"（度/°统一；数字全半角统一）
+function normMat(s) {
+  return String(s || '')
+    .toLowerCase()
+    .replace(/[０-９]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0))
+    .replace(/度/g, '°')
+    .replace(/[\s\-\(\)（）_]/g, '');
+}
+
+// 构建 normalized material -> unit_price (>0) 的映射
+function buildPriceMap(prices) {
+  const map = {};
+  (prices || []).forEach(p => {
+    const price = +(p.unit_price || 0);
+    if (price > 0 && p.material) map[normMat(p.material)] = price;
+  });
+  return map;
+}
+
+// 解析材料名获取单价：
+// 1) 规范化直接匹配
+// 2) 混合料 "70%ABS抽粒+30%ABS 750W" → 取比例最高的组分的单价
+function resolvePrice(material, priceMap) {
+  if (!material) return 0;
+  const direct = priceMap[normMat(material)];
+  if (direct) return direct;
+  const parts = String(material).split(/[+＋]/).map(s => s.trim()).filter(Boolean);
+  if (parts.length < 2) return 0;
+  const mixed = parts.map(p => {
+    const m = p.match(/^(\d+(?:\.\d+)?)\s*[%％]\s*(.+)$/);
+    return m ? { pct: +m[1], name: m[2].trim() } : null;
+  }).filter(Boolean);
+  if (mixed.length < 2) return 0;
+  mixed.sort((a, b) => b.pct - a.pct);
+  for (const m of mixed) {
+    const price = priceMap[normMat(m.name)];
+    if (price) return price;
+  }
+  return 0;
 }
 
 // ─── 通用 CRUD 帮助 ─────────────────────────────────────────────────────────
@@ -286,12 +338,11 @@ app.use('/api', (req, res, next) => {
         order.updated_at = new Date().toISOString();
         order.completed_date = new Date().toLocaleDateString('zh-CN', { timeZone: 'Asia/Shanghai' }).replace(/\//g, '-');
         // 实际用料 = 领料重量，用料金额 = 领料重量 × 单价
-        const priceMap = {};
-        (data.material_prices || []).forEach(p => { priceMap[p.material] = +(p.unit_price || 0); });
+        const priceMap = buildPriceMap(data.material_prices);
         const items = data.injection_items.filter(i => i.order_id === +req.params.id);
         items.forEach(item => {
           const weight = +(item.collected_weight_kg || item.required_material_kg || 0);
-          const price = priceMap[item.material] || 0;
+          const price = resolvePrice(item.material, priceMap);
           item.actual_weight_kg = weight;
           item.actual_amount_hkd = Math.round(weight * 2.20462 * price * 100) / 100;
         });
@@ -418,8 +469,22 @@ app.put('/api/material-prices', (req, res) => {
     }
     const data = loadData();
     data.material_prices = req.body;
+
+    // 方案 C：补录价格后回填历史订单中「金额为 0 且重量>0」的明细
+    // 已有金额的保留历史价格不动；本次仍为 0 的材料不处理
+    const priceMap = buildPriceMap(data.material_prices);
+    let backfilled = 0;
+    (data.injection_items || []).forEach(item => {
+      const amount = +(item.actual_amount_hkd || 0);
+      const weight = +(item.actual_weight_kg || 0);
+      if (amount > 0 || weight <= 0) return;
+      const price = resolvePrice(item.material, priceMap);
+      if (price <= 0) return;
+      item.actual_amount_hkd = Math.round(weight * 2.20462 * price * 100) / 100;
+      backfilled++;
+    });
     saveData(data);
-    res.json(data.material_prices);
+    res.json({ prices: data.material_prices, backfilled });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -544,12 +609,11 @@ app.post('/api/injection/:id/auto-complete', (req, res) => {
   order.status = '已完成';
   order.updated_at = new Date().toISOString();
   order.completed_date = new Date().toLocaleDateString('zh-CN', { timeZone: 'Asia/Shanghai' }).replace(/\//g, '-');
-  const priceMap = {};
-  (data.material_prices || []).forEach(p => { priceMap[p.material] = +(p.unit_price || 0); });
+  const priceMap = buildPriceMap(data.material_prices);
   const items = data.injection_items.filter(i => i.order_id === +req.params.id);
   items.forEach(item => {
     const weight = +(item.collected_weight_kg || item.required_material_kg || 0);
-    const price = priceMap[item.material] || 0;
+    const price = resolvePrice(item.material, priceMap);
     item.actual_weight_kg = weight;
     item.actual_amount_hkd = Math.round(weight * 2.20462 * price * 100) / 100;
   });

@@ -492,8 +492,9 @@ function savePrices() {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json', 'X-User': encodeURIComponent('原料仓库') },
     body: JSON.stringify(prices)
-  }).then(r => r.json()).then(() => {
-    showToast('价格已保存', 'primary');
+  }).then(r => r.json()).then(d => {
+    const n = (d && d.backfilled) || 0;
+    showToast(n > 0 ? `价格已保存，回填 ${n} 条历史明细` : '价格已保存', 'primary');
     loadStats();
   });
 }

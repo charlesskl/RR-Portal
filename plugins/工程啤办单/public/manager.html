@@ -72,6 +72,9 @@
       <div class="d-flex gap-2 align-items-center">
         <a href="index.html" class="nav-dept-link"><i class="bi bi-house me-1"></i>主页</a>
         <a href="engineering.html" class="nav-dept-link">工程部</a>
+        <button class="btn btn-sm btn-outline-light" onclick="doRecalcAmounts()">
+          <i class="bi bi-calculator me-1"></i>料费重算
+        </button>
         <button class="btn btn-sm btn-outline-light" onclick="openResetPinModal()">
           <i class="bi bi-key me-1"></i>重置主管密码
         </button>
@@ -639,6 +642,28 @@ async function submitResetPin() {
   } catch (e) {
     err.textContent = '网络错误';
     err.classList.remove('d-none');
+  }
+}
+
+// ─── 料费重算（按当前价格表回填金额=0 的历史明细） ──────────────────────────
+async function doRecalcAmounts() {
+  if (!confirm('将按当前价格表重算历史订单中金额为 0 的料费明细。\n已有金额的订单不会被修改。是否继续？')) return;
+  const managerPin = sessionStorage.getItem('mgr_pin') || '';
+  if (!managerPin) { showToast('登录状态已失效，请重新登录', 'danger'); return; }
+  try {
+    const r = await apiFetch('/api/recalc-amounts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ manager_name: MANAGER_NAME, manager_pin: managerPin })
+    });
+    const d = await r.json();
+    if (!r.ok || !d.success) { showToast(d.error || '重算失败', 'danger'); return; }
+    const msg = d.backfilled > 0
+      ? `已回填 ${d.backfilled} 条料费` + (d.missing_price > 0 ? `（${d.missing_price} 条仍缺价格）` : '')
+      : '没有需要回填的明细' + (d.missing_price > 0 ? `（${d.missing_price} 条缺价格）` : '');
+    showToast(msg, 'primary');
+  } catch (e) {
+    showToast('网络错误', 'danger');
   }
 }
 </script>

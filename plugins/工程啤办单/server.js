@@ -258,7 +258,7 @@ app.use('/api', (req, res, next) => {
   // PATCH /status 已有 PIN 验证
   if (req.method === 'PATCH' && req.path.match(/\/\d+\/status$/)) return next();
   // 认证端点本身不需要 X-User
-  if (req.path === '/verify-pin' || req.path === '/change-pin' || req.path === '/reset-supervisor-pin') return next();
+  if (req.path === '/verify-pin' || req.path === '/change-pin' || req.path === '/reset-supervisor-pin' || req.path === '/recalc-amounts') return next();
   const user = req.headers['x-user'];
   if (!user || !decodeURIComponent(user).trim()) {
     return res.status(401).json({ error: '未授权：请登录后操作' });
@@ -740,6 +740,32 @@ app.post('/api/reset-supervisor-pin', (req, res) => {
   saveData(data);
   console.log(`[reset-pin] manager=${manager_name} reset supervisor=${target_name}`);
   res.json({ success: true });
+});
+
+// 经理一键重算：按当前价格表回填所有「金额=0 且 重量>0」的历史明细
+app.post('/api/recalc-amounts', (req, res) => {
+  const { manager_name, manager_pin } = req.body;
+  if (!manager_name || !manager_pin) {
+    return res.status(400).json({ error: '参数不完整' });
+  }
+  if (!verifyPin(manager_name, manager_pin, 'manager')) {
+    return res.status(403).json({ error: '经理 PIN 验证失败' });
+  }
+  const data = loadData();
+  const priceMap = buildPriceMap(data.material_prices);
+  let backfilled = 0, skipped = 0, missingPrice = 0;
+  (data.injection_items || []).forEach(item => {
+    const amount = +(item.actual_amount_hkd || 0);
+    const weight = +(item.actual_weight_kg || 0);
+    if (amount > 0 || weight <= 0) { skipped++; return; }
+    const price = resolvePrice(item.material, priceMap);
+    if (price <= 0) { missingPrice++; return; }
+    item.actual_amount_hkd = Math.round(weight * 2.20462 * price * 100) / 100;
+    backfilled++;
+  });
+  if (backfilled > 0) saveData(data);
+  console.log(`[recalc] manager=${manager_name} backfilled=${backfilled} missing_price=${missingPrice}`);
+  res.json({ success: true, backfilled, missing_price: missingPrice });
 });
 
 app.post('/api/change-pin', (req, res) => {

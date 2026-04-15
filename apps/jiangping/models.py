@@ -77,3 +77,19 @@ class DeliveryRecord(db.Model):
     delivered_quantity = db.Column(db.Integer, default=0)
     remarks = db.Column(db.String(200))
     created_at = db.Column(db.DateTime, default=datetime.now)
+
+
+class MatchProblem(db.Model):
+    """匹配问题记录 — imported from upstream"""
+    __tablename__ = 'match_problems'
+    id = db.Column(db.Integer, primary_key=True)
+    type = db.Column(db.String(50))          # po_missing / product_missing
+    po_no = db.Column(db.String(50))
+    product_name = db.Column(db.String(200))
+    quantity = db.Column(db.String(50))
+    supplier = db.Column(db.String(100))
+    delivery_no = db.Column(db.String(50))
+    delivery_date = db.Column(db.String(50))
+    status = db.Column(db.String(20), default='unresolved')  # unresolved / resolved
+    resolved_at = db.Column(db.DateTime)
+    created_at = db.Column(db.DateTime, default=datetime.now)

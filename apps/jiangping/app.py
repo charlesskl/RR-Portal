@@ -36,6 +36,7 @@ def create_app():
     from routes.export import bp as export_bp
     from routes.dashboard import bp as dashboard_bp
     from routes.delivery_mgmt import bp as delivery_mgmt_bp
+    from routes.problems import bp as problems_bp
 
     app.register_blueprint(upload_bp)
     app.register_blueprint(purchase_bp)
@@ -44,6 +45,7 @@ def create_app():
     app.register_blueprint(export_bp)
     app.register_blueprint(dashboard_bp)
     app.register_blueprint(delivery_mgmt_bp)
+    app.register_blueprint(problems_bp)
 
     @app.route('/')
     def index():

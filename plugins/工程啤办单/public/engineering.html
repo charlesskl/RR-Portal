@@ -72,6 +72,9 @@
         <option value="B车间">B车间</option>
         <option value="华登车间">华登车间</option>
       </select>
+      <select id="clientFilter" class="form-select form-select-sm" style="width:auto" onchange="filterClient(this.value)">
+        <option value="">全部客户</option>
+      </select>
     </div>
     <div class="d-flex gap-2">
       <button class="btn btn-outline-secondary" onclick="openSummary()">
@@ -184,8 +187,20 @@
         <input type="hidden" id="slush-status" value="待审核">
         <div class="row g-3 mb-3">
           <div class="col-md-3"><label class="form-label fw-bold">产品编号</label><input class="form-control" id="slush-order_number" placeholder="如 XX2024001"></div>
+          <div class="col-md-3"><label class="form-label fw-bold">订单编号</label><input class="form-control" id="slush-doc_number" placeholder="订单编号"></div>
           <div class="col-md-3"><label class="form-label fw-bold">产品名称 <span class="text-danger">*</span></label><input class="form-control" id="slush-product_name" placeholder="产品名称" required></div>
+          <div class="col-md-3"><label class="form-label fw-bold">客名</label>
+            <select class="form-select" id="slush-client_name">
+              <option value="">请选择客户</option>
+            </select>
+          </div>
           <div class="col-md-3"><label class="form-label fw-bold">日期</label><input type="date" class="form-control" id="slush-date"></div>
+          <div class="col-md-3"><label class="form-label fw-bold">阶段</label>
+            <select class="form-select" id="slush-stage">
+              <option value="">请选择阶段</option>
+              <option>T0</option><option>EP</option><option>FEP</option><option>PP</option>
+            </select>
+          </div>
           <div class="col-md-3"><label class="form-label fw-bold">类型</label>
             <select class="form-select" id="slush-order_type">
               <option>搪胶</option><option>搪办</option><option>试色</option>
@@ -238,7 +253,21 @@
         <input type="hidden" id="spray-id">
         <input type="hidden" id="spray-status" value="待审核">
         <div class="row g-3 mb-3">
+          <div class="col-md-3"><label class="form-label fw-bold">产品编号</label><input class="form-control" id="spray-order_number" placeholder="如 HD2024001"></div>
+          <div class="col-md-3"><label class="form-label fw-bold">订单编号</label><input class="form-control" id="spray-doc_number" placeholder="订单编号"></div>
+          <div class="col-md-3"><label class="form-label fw-bold">产品名称 <span class="text-danger">*</span></label><input class="form-control" id="spray-product_name" placeholder="产品名称" required></div>
+          <div class="col-md-3"><label class="form-label fw-bold">客名</label>
+            <select class="form-select" id="spray-client_name">
+              <option value="">请选择客户</option>
+            </select>
+          </div>
           <div class="col-md-3"><label class="form-label fw-bold">日期</label><input type="date" class="form-control" id="spray-date"></div>
+          <div class="col-md-3"><label class="form-label fw-bold">阶段</label>
+            <select class="form-select" id="spray-stage">
+              <option value="">请选择阶段</option>
+              <option>T0</option><option>EP</option><option>FEP</option><option>PP</option>
+            </select>
+          </div>
           <div class="col-md-3"><label class="form-label fw-bold">类型</label>
             <select class="form-select" id="spray-order_type">
               <option>喷油</option><option>试色</option><option>返工</option>
@@ -249,6 +278,13 @@
               <option>兴信车间</option><option>华登车间</option>
             </select>
           </div>
+          <div class="col-md-3"><label class="form-label fw-bold">主管</label>
+            <select class="form-select" id="spray-supervisor">
+              <option value="">请选择主管</option>
+              <option>段新辉</option><option>唐海林</option><option>蒙海欢</option><option>万志勇</option><option>章发东</option><option>刘际维</option><option>甘勇辉</option><option>王玉国</option>
+            </select>
+          </div>
+          <div class="col-md-3"><label class="form-label fw-bold">跟进工程师</label><input class="form-control" id="spray-engineer" placeholder="请输入姓名"></div>
           <div class="col-12"><label class="form-label fw-bold">原因/备注</label><input class="form-control" id="spray-reason" placeholder="如 新款喷油打样"></div>
         </div>
         <div class="d-flex justify-content-between align-items-center mb-2">
@@ -288,21 +324,33 @@
         <input type="hidden" id="asm-id">
         <input type="hidden" id="asm-status" value="待审核">
         <div class="row g-3 mb-3">
-          <div class="col-md-4"><label class="form-label fw-bold">货号 <span class="text-danger">*</span></label><input class="form-control" id="asm-order_number" placeholder="如 3寸暴力熊"></div>
-          <div class="col-md-4"><label class="form-label fw-bold">客名</label>
+          <div class="col-md-3"><label class="form-label fw-bold">产品编号 <span class="text-danger">*</span></label><input class="form-control" id="asm-order_number" placeholder="如 157149"></div>
+          <div class="col-md-3"><label class="form-label fw-bold">产品名称</label><input class="form-control" id="asm-product_name" placeholder="产品名称"></div>
+          <div class="col-md-3"><label class="form-label fw-bold">客名</label>
             <select class="form-select" id="asm-client_name">
               <option value="">请选择客户</option>
             </select>
           </div>
-          <div class="col-md-4"><label class="form-label fw-bold">备注</label><input class="form-control" id="asm-reason" placeholder="备注信息"></div>
+          <div class="col-md-3"><label class="form-label fw-bold">日期</label><input type="date" class="form-control" id="asm-date"></div>
+          <div class="col-md-3"><label class="form-label fw-bold">主管</label>
+            <select class="form-select" id="asm-supervisor">
+              <option value="">请选择主管</option>
+              <option>段新辉</option><option>唐海林</option><option>蒙海欢</option><option>万志勇</option><option>章发东</option><option>刘际维</option><option>甘勇辉</option><option>王玉国</option>
+            </select>
+          </div>
+          <div class="col-md-3"><label class="form-label fw-bold">跟进工程师</label><input class="form-control" id="asm-engineer" placeholder="请输入姓名"></div>
+          <div class="col-md-6"><label class="form-label fw-bold">原因/备注</label><input class="form-control" id="asm-reason" placeholder="备注信息"></div>
         </div>
         <div class="d-flex justify-content-between align-items-center mb-2">
           <strong>夹具明细</strong>
-          <button class="btn btn-sm btn-outline-primary" onclick="addAsmRow()"><i class="bi bi-plus-lg me-1"></i>添加行</button>
+          <div class="d-flex gap-2">
+            <button class="btn btn-sm btn-outline-success" onclick="triggerAsmExcelImport()"><i class="bi bi-file-earmark-excel me-1"></i>导入Excel</button>
+            <button class="btn btn-sm btn-outline-primary" onclick="addAsmRow()"><i class="bi bi-plus-lg me-1"></i>添加行</button>
+          </div>
         </div>
         <div class="items-table-wrap">
           <table class="table table-bordered table-sm items-table">
-            <thead><tr><th style="width:50px">序号</th><th>名称</th><th style="width:80px">数量</th><th>日期</th><th>备注</th><th>完成时间</th><th style="width:40px"></th></tr></thead>
+            <thead><tr><th style="width:50px">序号</th><th>名称</th><th style="width:80px">数量</th><th>要求完成日期</th><th>价格</th><th>完成时间</th><th style="width:40px"></th></tr></thead>
             <tbody id="asmItemsBody"></tbody>
           </table>
         </div>
@@ -479,14 +527,22 @@ function switchTab(type, el) {
   currentTab = type;
   currentFilter = '';
   currentWorkshop = '';
+  currentClient = '';
   document.querySelectorAll('.status-filter .btn').forEach((b, i) => b.classList.toggle('active', i === 0));
   document.getElementById('workshopFilter').value = '';
+  document.getElementById('clientFilter').value = '';
   loadOrders();
   return false;
 }
 
 function filterWorkshop(val) {
   currentWorkshop = val;
+  loadOrders();
+}
+
+let currentClient = '';
+function filterClient(val) {
+  currentClient = val;
   loadOrders();
 }
 
@@ -512,6 +568,7 @@ function loadOrders() {
     });
     if (currentFilter)   orders = orders.filter(o => o.status === currentFilter);
     if (currentWorkshop) orders = orders.filter(o => o.workshop === currentWorkshop);
+    if (currentClient)   orders = orders.filter(o => o.client_name === currentClient || (o.items && o.items.some(it => it.client_name === currentClient)));
     // 按主管分组，每组内待审核排最前，其次按 ID 降序
     const _sOrd = { '待审核':0, '待经理审核':1, '待生产':2, '生产中':3, '已完成':4, '已驳回':5, '已取消':6 };
     orders.sort((a, b) => {
@@ -524,6 +581,13 @@ function loadOrders() {
     renderOrderList(orders);
   }).catch(() => showToast('加载失败', 'danger'));
 }
+
+// 主管审核后的状态，普通用户不可编辑/删除；主管/经理可以
+const lockedStatuses = ['待经理审核', '待生产', '生产中', '已完成'];
+let _supervisors = [], _managers = [];
+apiFetch('/api/roles').then(r => r.json()).then(d => { _supervisors = d.supervisors || []; _managers = d.managers || []; }).catch(() => {});
+function isPrivileged() { return _supervisors.includes(currentUser) || _managers.includes(currentUser); }
+const isLocked = s => lockedStatuses.includes(s) && !isPrivileged();
 
 const statusBadge = s => ({
   '待审核': '<span class="badge" style="background:#fd7e14">待审核</span>',
@@ -558,8 +622,9 @@ function renderOrderList(orders) {
         <td>${statusBadge(o.status)}</td>
         <td class="text-nowrap" onclick="event.stopPropagation()">
           <div class="btn-group btn-group-sm">
-            <button class="btn btn-outline-primary" onclick="editOrder(${o.id})" title="编辑"><i class="bi bi-pencil"></i></button>
-            <button class="btn btn-outline-danger" onclick="deleteOrder(${o.id})" title="删除"><i class="bi bi-trash"></i></button>
+            ${(o.status === '待审核' || o.status === '待经理审核') ? `<button class="btn ${o.status === '待经理审核' ? 'btn-primary' : 'btn-warning'} fw-bold" onclick="reviewOrder(${o.id},'${(o.order_number||'').replace(/'/g,'')}')">审核</button>` : ''}
+            ${!isLocked(o.status) ? `<button class="btn btn-outline-primary" onclick="editOrder(${o.id})" title="编辑"><i class="bi bi-pencil"></i></button>` : ''}
+            ${!isLocked(o.status) ? `<button class="btn btn-outline-danger" onclick="deleteOrder(${o.id})" title="删除"><i class="bi bi-trash"></i></button>` : ''}
             <button class="btn btn-outline-secondary" onclick="printOrder(${o.id})" title="打印"><i class="bi bi-printer"></i></button>
           </div>
         </td>
@@ -594,8 +659,9 @@ function renderOrderList(orders) {
           <td>${esc(it.engineer||'-')}</td>
           <td>${idx===0 ? statusBadge(o.status) : ''}</td>
           <td class="text-nowrap" onclick="event.stopPropagation()">${idx===0 ? `<div class="btn-group btn-group-sm">
-            <button class="btn btn-outline-primary" onclick="editOrder(${o.id})" title="编辑"><i class="bi bi-pencil"></i></button>
-            <button class="btn btn-outline-danger" onclick="deleteOrder(${o.id})" title="删除"><i class="bi bi-trash"></i></button>
+            ${(o.status === '待审核' || o.status === '待经理审核') ? `<button class="btn ${o.status === '待经理审核' ? 'btn-primary' : 'btn-warning'} fw-bold" onclick="reviewOrder(${o.id},'${(o.order_number||'').replace(/'/g,'')}')">审核</button>` : ''}
+            ${!isLocked(o.status) ? `<button class="btn btn-outline-primary" onclick="editOrder(${o.id})" title="编辑"><i class="bi bi-pencil"></i></button>` : ''}
+            ${!isLocked(o.status) ? `<button class="btn btn-outline-danger" onclick="deleteOrder(${o.id})" title="删除"><i class="bi bi-trash"></i></button>` : ''}
             <button class="btn btn-outline-success" onclick="editOrder(${o.id},true)" title="复制"><i class="bi bi-copy"></i></button>
             <button class="btn btn-outline-secondary" onclick="printOrder(${o.id})" title="打印"><i class="bi bi-printer"></i></button>
           </div>` : ''}</td>
@@ -621,9 +687,9 @@ function renderOrderList(orders) {
       </td>
       <td class="text-nowrap" onclick="event.stopPropagation()">
         <div class="btn-group btn-group-sm">
-          ${(currentTab === 'injection' && (o.status === '待审核' || o.status === '待经理审核')) ? `<button class="btn ${o.status === '待经理审核' ? 'btn-primary' : 'btn-warning'} fw-bold" onclick="reviewOrder(${o.id},'${(o.order_number||'').replace(/'/g,'')}')">审核</button>` : ''}
-          <button class="btn btn-outline-primary"  onclick="editOrder(${o.id})" title="编辑"><i class="bi bi-pencil"></i></button>
-          <button class="btn btn-outline-danger"   onclick="deleteOrder(${o.id})" title="删除"><i class="bi bi-trash"></i></button>
+          ${(o.status === '待审核' || o.status === '待经理审核') ? `<button class="btn ${o.status === '待经理审核' ? 'btn-primary' : 'btn-warning'} fw-bold" onclick="reviewOrder(${o.id},'${(o.order_number||'').replace(/'/g,'')}')">审核</button>` : ''}
+          ${!isLocked(o.status) ? `<button class="btn btn-outline-primary" onclick="editOrder(${o.id})" title="编辑"><i class="bi bi-pencil"></i></button>` : ''}
+          ${!isLocked(o.status) ? `<button class="btn btn-outline-danger" onclick="deleteOrder(${o.id})" title="删除"><i class="bi bi-trash"></i></button>` : ''}
           <button class="btn btn-outline-success"   onclick="editOrder(${o.id},true)" title="复制"><i class="bi bi-copy"></i></button>
           <button class="btn btn-outline-secondary"  onclick="printOrder(${o.id})" title="打印"><i class="bi bi-printer"></i></button>
           ${engProblemsMap[o.id] ? `<button class="btn btn-danger" onclick="viewEngProblems(${o.id},'${(o.order_number||'').replace(/'/g,'')}')" title="查看问题"><i class="bi bi-exclamation-triangle-fill"></i></button>` : ''}
@@ -676,7 +742,7 @@ function openNewModal() {
   document.getElementById(`${prefix}-order_type`).value = prefix === 'inj' ? '试模' : prefix === 'slush' ? '搪胶' : '喷油';
   const stgElNew = document.getElementById(`${prefix}-stage`);
   if (stgElNew) stgElNew.value = '';
-  document.getElementById(`${prefix}-status`).value = (currentTab === 'injection') ? '待审核' : '待生产';
+  document.getElementById(`${prefix}-status`).value = '待审核';
   document.getElementById(`${prefix}-reason`).value = '';
   const wsElNew = document.getElementById(`${prefix}-workshop`);
   if (wsElNew) wsElNew.value = wsElNew.options[0]?.value || '';
@@ -946,10 +1012,18 @@ function addSlushRow(it={}) {
   document.getElementById('slushItemsBody').appendChild(tr);
 }
 
+function clientSel(val) {
+  const v = esc(val || '');
+  return `<select name="client_name" class="form-select form-select-sm">
+    <option value="">请选择</option>
+    ${_clientList.map(c => `<option${c===v?' selected':''}>${esc(c)}</option>`).join('')}
+  </select>`;
+}
+
 function addSprayRow(it={}) {
   const tr = document.createElement('tr');
   tr.innerHTML = `
-    <td>${inp('text','client_name',it.client_name)}</td>
+    <td>${clientSel(it.client_name)}</td>
     <td>${inp('text','product_name',it.product_name)}</td>
     <td>${inp('text','part_name',it.part_name)}</td>
     <td><select name="process" class="form-select form-select-sm" style="min-width:90px">
@@ -1048,7 +1122,11 @@ function editAsmOrder(id) {
       document.getElementById('asmModalTitle').textContent = `编辑夹具申请单 #${id}`;
       document.getElementById('asm-id').value = order.id;
       document.getElementById('asm-order_number').value = order.order_number || '';
+      document.getElementById('asm-product_name').value = order.product_name || '';
       document.getElementById('asm-client_name').value = order.client_name || '';
+      document.getElementById('asm-date').value = order.date || '';
+      document.getElementById('asm-supervisor').value = order.supervisor || '';
+      document.getElementById('asm-engineer').value = order.eng_name || '';
       document.getElementById('asm-reason').value = order.reason || '';
       document.getElementById('asm-status').value = (order.status === '已驳回') ? '待审核' : order.status;
       const tbody = document.getElementById('asmItemsBody');
@@ -1061,7 +1139,7 @@ function editAsmOrder(id) {
     .catch(() => showToast('加载失败', 'danger'));
 }
 
-const asmItemFields = ['product_name','quantity','required_date','notes','completion_time'];
+const asmItemFields = ['product_name','quantity','required_date','price','completion_time'];
 
 function saveAsmOrder() {
   const orderNumber = document.getElementById('asm-order_number').value.trim();
@@ -1073,7 +1151,11 @@ function saveAsmOrder() {
   const id = document.getElementById('asm-id').value;
   const body = {
     order_number: orderNumber,
+    product_name: document.getElementById('asm-product_name').value || null,
     client_name: document.getElementById('asm-client_name').value || null,
+    date: document.getElementById('asm-date').value || null,
+    supervisor: document.getElementById('asm-supervisor').value || null,
+    eng_name: document.getElementById('asm-engineer').value || null,
     reason: document.getElementById('asm-reason').value || null,
     status: document.getElementById('asm-status').value,
     items: items,
@@ -1282,8 +1364,8 @@ function renderReviewDetails(order, type) {
     thead = '<tr><th>序号</th><th>产品编号</th><th>工模编号</th><th>工模名称</th><th>原料</th><th>颜色/编号</th><th>色粉编号</th><th>每啤毛重(g)</th><th>数量</th><th>要求完成日期</th><th>回模时间</th><th>备注</th></tr>';
     rows = items.map(it => `<tr><td>${esc(it.seq_no||'-')}</td><td>${esc(it.product_id||'-')}</td><td>${esc(it.mold_id||'-')}</td><td>${esc(it.mold_name||'-')}</td><td>${esc(it.material||'-')}</td><td>${esc(it.color_code||'-')}</td><td>${esc(it.pigment_no||'-')}</td><td>${esc(it.unit_weight||'-')}</td><td>${esc(it.quantity||'-')}</td><td>${esc(it.required_date||'-')}</td><td>${esc(it.return_time||'-')}</td><td>${esc(it.notes||'-')}</td></tr>`).join('');
   } else if (type === 'assembly') {
-    thead = '<tr><th>序号</th><th>名称</th><th>数量</th><th>日期</th><th>备注</th><th>完成时间</th></tr>';
-    rows = items.map((it, i) => `<tr><td>${i+1}</td><td>${esc(it.product_name||'-')}</td><td>${esc(it.quantity||'-')}</td><td>${esc(it.required_date||'-')}</td><td>${esc(it.notes||'-')}</td><td>${esc(it.completion_time||'-')}</td></tr>`).join('');
+    thead = '<tr><th>序号</th><th>名称</th><th>数量</th><th>要求完成日期</th><th>价格</th><th>完成时间</th></tr>';
+    rows = items.map((it, i) => `<tr><td>${i+1}</td><td>${esc(it.product_name||'-')}</td><td>${esc(it.quantity||'-')}</td><td>${esc(it.required_date||'-')}</td><td>${esc(it.price||'-')}</td><td>${esc(it.completion_time||'-')}</td></tr>`).join('');
   } else {
     thead = '<tr><th>客名</th><th>名称</th><th>样板数量</th><th>提供胶件时间</th><th>收到胶件时间</th><th>工程预计完成时间</th><th>喷油交货时间</th><th>工程师/PMC</th><th>备注</th></tr>';
     rows = items.map(it => `<tr><td>${esc(it.client_name||'-')}</td><td>${esc(it.product_name||'-')}</td><td>${esc(it.sample_qty||'-')}</td><td>${esc(it.provide_time||'-')}</td><td>${esc(it.receive_time||'-')}</td><td>${esc(it.eng_complete_time||'-')}</td><td>${esc(it.delivery_time||'-')}</td><td>${esc(it.engineer||'-')}</td><td>${esc(it.notes||'-')}</td></tr>`).join('');
@@ -1353,12 +1435,14 @@ async function submitReview(action) {
   }
 
   let newStatus, toastMsg;
+  // 啤办单需要经理二级审核，其余（搪胶/喷油/夹具）主管通过即可
+  const needManagerReview = currentTab === 'injection' || currentTab === 'assembly';
   if (action === 'reject') {
     newStatus = '已驳回';
     toastMsg = '已驳回';
-  } else if (isManager) {
+  } else if (isManager || !needManagerReview) {
     newStatus = '待生产';
-    toastMsg = '经理审核通过！单据已进入待生产';
+    toastMsg = isManager ? '经理审核通过！单据已进入待生产' : '主管审核通过！单据已进入待生产';
   } else {
     newStatus = '待经理审核';
     toastMsg = '主管审核通过！已转交经理审核';
@@ -1949,10 +2033,14 @@ document.getElementById('injItemsBody').addEventListener('change', function(e) {
 let _clientList = [];
 apiFetch('/api/clients').then(r => r.json()).then(clients => {
   _clientList = clients;
-  const sel = document.getElementById('inj-client_name');
-  if (sel) {
-    clients.forEach(c => { const o = document.createElement('option'); o.value = c; o.textContent = c; sel.appendChild(o); });
-  }
+  // 填充所有客户下拉框（啤办单、搪胶单、夹具单头部）
+  ['inj-client_name', 'slush-client_name', 'spray-client_name', 'asm-client_name'].forEach(id => {
+    const sel = document.getElementById(id);
+    if (sel) clients.forEach(c => { const o = document.createElement('option'); o.value = c; o.textContent = c; sel.appendChild(o); });
+  });
+  // 填充客名筛选下拉框
+  const clientFilterSel = document.getElementById('clientFilter');
+  if (clientFilterSel) clients.forEach(c => { const o = document.createElement('option'); o.value = c; o.textContent = c; clientFilterSel.appendChild(o); });
 }).catch(() => {});
 
 // ─── 用户登录 ─────────────────────────────────────────────────────────────────
@@ -1963,20 +2051,59 @@ function showLoginModal() {
   document.getElementById('engLoginName').focus();
 }
 
-function doLogin() {
+function checkLoginRole() {
   const name = document.getElementById('engLoginName').value.trim();
   if (!name) { document.getElementById('engLoginName').classList.add('is-invalid'); return; }
   document.getElementById('engLoginName').classList.remove('is-invalid');
+  // 主管/经理需要PIN验证
+  if (_supervisors.includes(name) || _managers.includes(name)) {
+    document.getElementById('engLoginPinWrap').style.display = '';
+    document.getElementById('engLoginBtn').setAttribute('onclick', 'doLogin()');
+    document.getElementById('engLoginPin').focus();
+  } else {
+    // 普通用户直接登录
+    finishLogin(name);
+  }
+}
+
+async function doLogin() {
+  const name = document.getElementById('engLoginName').value.trim();
+  const pin = document.getElementById('engLoginPin').value.trim();
+  if (!name || !pin) return;
+  const role = _managers.includes(name) ? 'manager' : 'supervisor';
+  try {
+    const r = await apiFetch('/api/verify-pin', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, pin, role })
+    });
+    const d = await r.json();
+    if (!d.success) {
+      document.getElementById('engLoginPinError').classList.remove('d-none');
+      return;
+    }
+    document.getElementById('engLoginPinError').classList.add('d-none');
+    finishLogin(name);
+  } catch(e) {
+    showToast('验证失败', 'danger');
+  }
+}
+
+function finishLogin(name) {
   currentUser = name;
   sessionStorage.setItem('eng_user', name);
   document.getElementById('navUserBadge').textContent = '👤 ' + name;
   bootstrap.Modal.getInstance(document.getElementById('engLoginModal'))?.hide();
+  loadOrders(); // 重新渲染列表（根据权限显示按钮）
 }
 
 function switchUser() {
   sessionStorage.removeItem('eng_user');
   currentUser = '';
   document.getElementById('engLoginName').value = '';
+  document.getElementById('engLoginPin').value = '';
+  document.getElementById('engLoginPinWrap').style.display = 'none';
+  document.getElementById('engLoginBtn').setAttribute('onclick', 'checkLoginRole()');
   showLoginModal();
 }
 
@@ -1995,7 +2122,11 @@ function openNewAsmModal() {
   document.getElementById('asmModalTitle').textContent = '新建夹具申请单';
   document.getElementById('asm-id').value = '';
   document.getElementById('asm-order_number').value = '';
+  document.getElementById('asm-product_name').value = '';
   document.getElementById('asm-client_name').value = '';
+  document.getElementById('asm-date').value = new Date().toISOString().slice(0,10);
+  document.getElementById('asm-supervisor').value = '';
+  document.getElementById('asm-engineer').value = '';
   document.getElementById('asm-reason').value = '';
   document.getElementById('asm-status').value = '待审核';
   document.getElementById('asmItemsBody').innerHTML = '';
@@ -2011,8 +2142,8 @@ function addAsmRow(it={}) {
     <td class="text-center asm-seq">${_asmRowSeq}</td>
     <td>${inp('text','product_name',it.product_name||'','placeholder="夹具名称"')}</td>
     <td>${inp('number','quantity',it.quantity||'','style="width:80px" min="1"')}</td>
-    <td>${inp('text','required_date',it.required_date||'','placeholder="YYYY-MM-DD"')}</td>
-    <td>${inp('text','notes',it.notes||'')}</td>
+    <td>${inp('date','required_date',it.required_date||'')}</td>
+    <td>${inp('number','price',it.price||'','placeholder="价格" step="0.01"')}</td>
     <td>${inp('text','completion_time',it.completion_time||'','placeholder="完成时间"')}</td>
     <td><button type="button" class="btn btn-sm btn-danger" onclick="removeAsmRow(this)"><i class="bi bi-x-lg"></i></button></td>`;
   document.getElementById('asmItemsBody').appendChild(tr);
@@ -2026,11 +2157,110 @@ function removeAsmRow(btn) {
   _asmRowSeq = document.querySelectorAll('#asmItemsBody tr').length;
 }
 
-// 加载客户到夹具单选择框
-apiFetch('/api/clients').then(r => r.json()).then(clients => {
-  const sel = document.getElementById('asm-client_name');
-  if (sel) clients.forEach(c => { const o = document.createElement('option'); o.value = c; o.textContent = c; sel.appendChild(o); });
-}).catch(() => {});
+// ─── 夹具单 Excel 导入 ───
+const _asmExcelInput = (() => {
+  const el = document.createElement('input');
+  el.type = 'file'; el.accept = '.xlsx,.xls,.csv'; el.style.display = 'none';
+  document.body.appendChild(el);
+  el.addEventListener('change', onAsmExcelSelected);
+  return el;
+})();
+
+function triggerAsmExcelImport() { _asmExcelInput.value = ''; _asmExcelInput.click(); }
+
+function excelDateToStr(v) {
+  if (!v) return '';
+  if (typeof v === 'string') return v;
+  if (typeof v === 'number') {
+    // Excel serial date → JS Date
+    const d = new Date((v - 25569) * 86400000);
+    return d.toISOString().slice(0, 10);
+  }
+  if (v instanceof Date) return v.toISOString().slice(0, 10);
+  return String(v);
+}
+
+function onAsmExcelSelected() {
+  const file = _asmExcelInput.files[0];
+  if (!file) return;
+  loadXLSX().then(() => {
+    const reader = new FileReader();
+    reader.onload = e => {
+      try {
+        const wb = XLSX.read(e.target.result, { type: 'array' });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const allRows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', raw: true });
+        if (!allRows.length) { showToast('Excel 文件没有数据', 'warning'); return; }
+
+        // 解析夹具申请单格式
+        let orderNumber = '';
+        let headerIdx = -1;
+
+        for (let i = 0; i < Math.min(allRows.length, 10); i++) {
+          const rowText = allRows[i].map(c => String(c)).join(' ');
+          // 货号识别
+          const m = rowText.match(/货号[：:]\s*(.+)/);
+          if (m) orderNumber = m[1].trim();
+          // 表头行识别
+          const cells = allRows[i].map(c => String(c).trim());
+          if (cells.includes('序号') && cells.includes('名称')) { headerIdx = i; break; }
+        }
+
+        if (headerIdx === -1) {
+          // 备选：找包含"名称"和"数量"的行
+          for (let i = 0; i < Math.min(allRows.length, 10); i++) {
+            const cells = allRows[i].map(c => String(c).trim());
+            if (cells.some(c => c.includes('名称')) && cells.some(c => c.includes('数量'))) { headerIdx = i; break; }
+          }
+        }
+        if (headerIdx === -1) { showToast('未找到表头行（需含"序号""名称"列）', 'warning'); return; }
+
+        // 映射列索引
+        const headers = allRows[headerIdx].map(c => String(c).trim());
+        const nameCol = headers.findIndex(h => h.includes('名称'));
+        const qtyCol = headers.findIndex(h => h.includes('数量'));
+        const dateCol = headers.findIndex(h => h.includes('日期'));
+        const notesCol = headers.findIndex(h => h.includes('备注'));
+        const complCol = headers.findIndex(h => h.includes('完成'));
+
+        // 填充货号
+        if (orderNumber) document.getElementById('asm-order_number').value = orderNumber;
+
+        // 解析数据行
+        const dataRows = allRows.slice(headerIdx + 1);
+        const tbody = document.getElementById('asmItemsBody');
+        tbody.innerHTML = '';
+        _asmRowSeq = 0;
+        let imported = 0;
+
+        for (const row of dataRows) {
+          const name = nameCol >= 0 ? String(row[nameCol] || '').trim() : '';
+          if (!name) continue; // 跳过空行
+          // 如果碰到"申请人"等底部文字则停止
+          const rowText = row.map(c => String(c)).join('');
+          if (rowText.includes('申请人') || rowText.includes('批准') || rowText.includes('审核')) break;
+
+          addAsmRow({
+            product_name: name,
+            quantity: qtyCol >= 0 ? (row[qtyCol] || '') : '',
+            required_date: dateCol >= 0 ? excelDateToStr(row[dateCol]) : '',
+            notes: notesCol >= 0 ? String(row[notesCol] || '') : '',
+            completion_time: complCol >= 0 ? excelDateToStr(row[complCol]) : '',
+          });
+          imported++;
+        }
+
+        if (imported === 0) addAsmRow();
+        showToast(`成功导入 ${imported} 项夹具`, 'success');
+      } catch (err) {
+        console.error(err);
+        showToast('Excel 解析失败: ' + err.message, 'danger');
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  }).catch(() => showToast('加载 XLSX 库失败', 'danger'));
+}
+
 
 loadOrders();
 setInterval(() => { loadOrders(); checkForNewCompletions(); }, 30000);
@@ -2046,11 +2276,17 @@ setInterval(() => { loadOrders(); checkForNewCompletions(); }, 30000);
       <div class="modal-body">
         <label class="form-label fw-bold">您的姓名</label>
         <input type="text" id="engLoginName" class="form-control" placeholder="输入您的姓名"
-          onkeydown="if(event.key==='Enter')doLogin()">
+          onkeydown="if(event.key==='Enter'){if(document.getElementById('engLoginPinWrap').style.display!=='none')doLogin();else checkLoginRole()}">
         <div class="invalid-feedback">请输入姓名</div>
+        <div id="engLoginPinWrap" style="display:none" class="mt-3">
+          <label class="form-label fw-bold">PIN 密码</label>
+          <input type="password" id="engLoginPin" class="form-control" placeholder="输入PIN密码"
+            onkeydown="if(event.key==='Enter')doLogin()">
+          <div id="engLoginPinError" class="text-danger small mt-1 d-none">PIN密码错误</div>
+        </div>
       </div>
       <div class="modal-footer">
-        <button class="btn btn-primary w-100" onclick="doLogin()">
+        <button class="btn btn-primary w-100" id="engLoginBtn" onclick="checkLoginRole()">
           <i class="bi bi-box-arrow-in-right me-1"></i>确认登录
         </button>
       </div>

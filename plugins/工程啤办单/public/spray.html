@@ -42,7 +42,13 @@
         <button class="btn btn-sm btn-success"  onclick="filterStatus('已完成',this)">已完成</button>
       </div>
     </div>
-    <small class="text-muted"><i class="bi bi-arrow-clockwise me-1"></i>每30秒自动刷新</small>
+    <div class="d-flex gap-2 align-items-center">
+      <div class="btn-group btn-group-sm">
+        <button class="btn btn-outline-primary active" id="viewListBtn" onclick="switchView('list')"><i class="bi bi-list-ul me-1"></i>列表</button>
+        <button class="btn btn-outline-primary" id="viewSummaryBtn" onclick="switchView('summary')"><i class="bi bi-table me-1"></i>总表</button>
+      </div>
+      <small class="text-muted"><i class="bi bi-arrow-clockwise me-1"></i>每30秒自动刷新</small>
+    </div>
   </div>
 
   <div class="card shadow-sm">
@@ -122,6 +128,7 @@
 let allOrders = [];
 let problemsMap = {};
 let currentFilter = '';
+let currentView = 'list'; // 'list' or 'summary'
 
 const statusBadge = s => ({
   '待生产': '<span class="badge badge-pending">待生产</span>',
@@ -136,12 +143,23 @@ function filterStatus(status, el) {
   el.classList.add('active');
   applyFilters();
 }
+function switchView(view) {
+  currentView = view;
+  document.getElementById('viewListBtn').classList.toggle('active', view === 'list');
+  document.getElementById('viewSummaryBtn').classList.toggle('active', view === 'summary');
+  applyFilters();
+}
+
 function applyFilters() {
   let filtered = allOrders;
   const ws = document.getElementById('workshopFilter')?.value || '';
   if (ws) filtered = filtered.filter(o => o.workshop === ws);
   if (currentFilter) filtered = filtered.filter(o => o.status === currentFilter);
-  renderOrders(filtered);
+  if (currentView === 'summary') {
+    renderSummary(filtered);
+  } else {
+    renderOrders(filtered);
+  }
 }
 
 function loadOrders() {
@@ -228,6 +246,115 @@ function renderOrders(orders) {
       </thead>
       <tbody>${rows.join('')}</tbody>
     </table></div>`;
+}
+
+// ─── 总表视图 ───────────────────────────────────────────────────────────────────
+function renderSummary(orders) {
+  if (!orders.length) {
+    document.getElementById('orderList').innerHTML = `<div class="empty-state"><i class="bi bi-inbox"></i><p class="mt-2">暂无喷油任务</p></div>`;
+    return;
+  }
+
+  // 按车间分组
+  const byWorkshop = {};
+  orders.forEach(o => {
+    const ws = o.workshop || '未分配';
+    if (!byWorkshop[ws]) byWorkshop[ws] = [];
+    byWorkshop[ws].push(o);
+  });
+
+  let html = '';
+  for (const ws of Object.keys(byWorkshop).sort()) {
+    const wsOrders = byWorkshop[ws];
+    // 按客户分组
+    const byClient = {};
+    wsOrders.forEach(o => {
+      (o.items || []).forEach(it => {
+        const client = it.client_name || o.client_name || '-';
+        if (!byClient[client]) byClient[client] = [];
+        byClient[client].push({ order: o, item: it });
+      });
+    });
+
+    html += `<div class="mb-4">
+      <h6 class="fw-bold px-3 py-2 mb-0" style="background:#8e44ad;color:#fff;border-radius:6px 6px 0 0">
+        <i class="bi bi-building me-1"></i>${esc(ws)}样板编排计划表
+      </h6>
+      <div class="table-responsive">
+      <table class="table table-bordered table-sm mb-0" style="font-size:.8rem">
+        <thead style="background:#f8f9fa">
+          <tr>
+            <th style="width:100px">客名</th>
+            <th>名称</th>
+            <th>工序</th>
+            <th style="width:70px">样板数量</th>
+            <th>提供胶件时间</th>
+            <th>收到胶件时间</th>
+            <th>工程预计完成时间</th>
+            <th style="color:#dc3545">喷油复交货时间</th>
+            <th>工程师</th>
+            <th>跟进人</th>
+            <th style="width:180px">进度</th>
+            <th>备注</th>
+          </tr>
+        </thead>
+        <tbody>`;
+
+    for (const client of Object.keys(byClient)) {
+      const entries = byClient[client];
+      entries.forEach((e, idx) => {
+        const it = e.item;
+        const o = e.order;
+        const procs = parseProcesses(it.process);
+        const ps = it.process_status || {};
+        const totalProcs = procs.length;
+        const doneProcs = procs.filter(p => ps[p] && ps[p].done).length;
+        const allDone = totalProcs > 0 && doneProcs === totalProcs;
+
+        // 进度条
+        let progressHtml = '';
+        if (totalProcs > 0) {
+          const pct = Math.round(doneProcs / totalProcs * 100);
+          const color = allDone ? '#198754' : pct > 0 ? '#fd7e14' : '#dee2e6';
+          progressHtml = `<div style="display:flex;align-items:center;gap:4px">
+            <div style="flex:1;background:#dee2e6;border-radius:3px;height:8px;overflow:hidden">
+              <div style="width:${pct}%;background:${color};height:100%;border-radius:3px"></div>
+            </div>
+            <span style="font-size:.7rem;white-space:nowrap;${allDone?'color:#198754;font-weight:bold':''}">${allDone ? '已完成' : doneProcs+'/'+totalProcs}</span>
+          </div>
+          <div style="font-size:.65rem;margin-top:2px">${procs.map(p => {
+            const done = ps[p] && ps[p].done;
+            return done
+              ? '<span style="color:#198754"><i class="bi bi-check-circle-fill"></i> '+esc(p)+'</span>'
+              : '<span style="color:#999">○ '+esc(p)+'</span>';
+          }).join(' ')}</div>`;
+        }
+
+        // 收到胶件：如果未收到显示红色
+        const rcvTime = it.receive_time || o.actual_receive_time || '';
+        const rcvDisplay = rcvTime ? esc(rcvTime) : '<span style="color:#dc3545">未收到胶件</span>';
+
+        html += `<tr${allDone ? ' style="background:#d1e7dd22"' : ''}>
+          ${idx === 0 ? `<td rowspan="${entries.length}" style="vertical-align:middle;font-weight:bold">${esc(client)}</td>` : ''}
+          <td>${esc(it.product_name || '-')}</td>
+          <td>${esc(it.process || '-')}</td>
+          <td class="text-center">${esc(it.sample_qty || '-')}</td>
+          <td>${esc(it.provide_time || '-')}</td>
+          <td>${rcvDisplay}</td>
+          <td>${esc(it.eng_complete_time || '-')}</td>
+          <td style="color:#dc3545;font-weight:500">${esc(it.delivery_time || '-')}</td>
+          <td>${esc(it.engineer || '-')}</td>
+          <td>${esc(it.follower || '-')}</td>
+          <td onclick="event.stopPropagation()">${progressHtml || '-'}</td>
+          <td>${esc(it.notes || '-')}</td>
+        </tr>`;
+      });
+    }
+
+    html += `</tbody></table></div></div>`;
+  }
+
+  document.getElementById('orderList').innerHTML = html;
 }
 
 // ─── 详情 ─────────────────────────────────────────────────────────────────────

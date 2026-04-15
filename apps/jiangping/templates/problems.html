@@ -1,0 +1,144 @@
+{% extends 'base.html' %}
+{% block title %}匹配问题 - 采购管理系统{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h2 class="mb-0">
+        <i class="bi bi-exclamation-triangle me-2"></i>匹配问题
+        {% if unresolved > 0 %}
+        <span class="badge bg-danger">{{ unresolved }} 未解决</span>
+        {% else %}
+        <span class="badge bg-success">全部已解决</span>
+        {% endif %}
+    </h2>
+    <div>
+        <button class="btn btn-primary me-2" id="btn-rematch">
+            <i class="bi bi-arrow-repeat me-1"></i>一键匹配
+        </button>
+        <button class="btn btn-danger" id="btn-clear-resolved">
+            <i class="bi bi-trash me-1"></i>清理已解决
+        </button>
+    </div>
+</div>
+
+{% if problems %}
+<div class="card">
+    <div class="card-body p-0">
+        <table class="table table-bordered table-hover mb-0" style="font-size: 0.8rem; table-layout: fixed; width: 100%;">
+            <thead class="table-dark">
+                <tr>
+                    <th style="width:9%">问题类型</th>
+                    <th style="width:11%">采购单号</th>
+                    <th style="width:22%">物料名称</th>
+                    <th style="width:6%">数量</th>
+                    <th style="width:7%">供应商</th>
+                    <th style="width:9%">送货单号</th>
+                    <th style="width:9%">交货日期</th>
+                    <th style="width:7%">状态</th>
+                    <th style="width:7%">操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for p in problems %}
+                <tr id="problem-{{ p.id }}" class="{% if p.status == 'resolved' %}table-success{% endif %}">
+                    <td>
+                        {% if p.type == 'po_missing' %}
+                        <span class="badge bg-danger">单号不存在</span>
+                        {% else %}
+                        <span class="badge bg-warning text-dark">物料未匹配</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ p.po_no }}</td>
+                    <td style="word-wrap:break-word;">{{ p.product_name }}</td>
+                    <td>{{ p.quantity }}</td>
+                    <td>{{ p.supplier }}</td>
+                    <td>{{ p.delivery_no }}</td>
+                    <td>{{ p.delivery_date }}</td>
+                    <td class="status-cell">
+                        {% if p.status == 'resolved' %}
+                        <span class="badge bg-success">已解决</span>
+                        {% else %}
+                        <span class="badge bg-secondary">未解决</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if p.status == 'unresolved' %}
+                        <button class="btn btn-sm btn-success btn-resolve" data-id="{{ p.id }}">
+                            <i class="bi bi-check-lg"></i>
+                        </button>
+                        {% else %}
+                        <button class="btn btn-sm btn-outline-secondary btn-unresolve" data-id="{{ p.id }}">
+                            <i class="bi bi-arrow-counterclockwise"></i>
+                        </button>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% else %}
+<div class="alert alert-success">
+    <i class="bi bi-check-circle me-2"></i>没有匹配问题，采购和交货数据完全匹配。
+</div>
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    // Resolve single problem
+    $(document).on('click', '.btn-resolve', function () {
+        var id = $(this).data('id');
+        var row = $('#problem-' + id);
+        $.post('/problems/api/resolve/' + id, function (res) {
+            if (res.success) {
+                row.addClass('table-success');
+                row.find('.status-cell').html('<span class="badge bg-success">已解决</span>');
+                row.find('td:last').html(
+                    '<button class="btn btn-sm btn-outline-secondary btn-unresolve" data-id="' + id + '">' +
+                    '<i class="bi bi-arrow-counterclockwise"></i></button>'
+                );
+            }
+        });
+    });
+
+    // Unresolve
+    $(document).on('click', '.btn-unresolve', function () {
+        var id = $(this).data('id');
+        var row = $('#problem-' + id);
+        $.post('/problems/api/unresolve/' + id, function (res) {
+            if (res.success) {
+                row.removeClass('table-success');
+                row.find('.status-cell').html('<span class="badge bg-secondary">未解决</span>');
+                row.find('td:last').html(
+                    '<button class="btn btn-sm btn-success btn-resolve" data-id="' + id + '">' +
+                    '<i class="bi bi-check-lg"></i></button>'
+                );
+            }
+        });
+    });
+
+    // Clear all resolved
+    $('#btn-clear-resolved').on('click', function () {
+        if (!confirm('确定清理所有已解决的问题？')) return;
+        $.post('/problems/api/clear-resolved', function (res) {
+            if (res.success) location.reload();
+        });
+    });
+
+    // Rematch all
+    $('#btn-rematch').on('click', function () {
+        var btn = $(this);
+        btn.prop('disabled', true).html('<i class="bi bi-hourglass-split me-1"></i>匹配中...');
+        $.post('/problems/api/rematch', function (res) {
+            if (res.success) {
+                alert('匹配完成！已解决 ' + res.matched + ' 条，剩余 ' + res.remaining + ' 条未解决');
+                location.reload();
+            }
+        }).always(function () {
+            btn.prop('disabled', false).html('<i class="bi bi-arrow-repeat me-1"></i>一键匹配');
+        });
+    });
+</script>
+{% endblock %}

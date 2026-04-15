@@ -23,7 +23,8 @@ services:
       core:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO /dev/null http://127.0.0.1:80/ || exit 1"]
+      # 走 /nginx-health（auth_basic off），不要走 / 否则永远拿到 401
+      test: ["CMD-SHELL", "wget -qO /dev/null http://127.0.0.1:80/nginx-health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -117,6 +118,7 @@ services:
     build:
       context: ./plugins/工程啤办单
       dockerfile: Dockerfile.node
+    user: "0:0"
     environment:
       - BASE_PATH=/rr
       - PORT=3000
@@ -310,6 +312,60 @@ services:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:6001/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    mem_limit: 512m
+    memswap_limit: 512m
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - platform-net
+
+  quotation:
+    build:
+      context: ./apps/quotation
+      dockerfile: Dockerfile
+    environment:
+      - PORT=3004
+      - NODE_ENV=production
+      - CORS_ORIGIN=${QUOTATION_CORS_ORIGIN:-http://8.148.146.194}
+    volumes:
+      - ./apps/quotation/server/data:/app/server/data
+    healthcheck:
+      # node:20-alpine 没有 wget/curl，用 node 内置 http 模块做健康检查
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:3004/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    mem_limit: 512m
+    memswap_limit: 512m
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - platform-net
+
+  liwenjuan:
+    build:
+      context: ./apps/liwenjuan
+      dockerfile: Dockerfile
+    environment:
+      - PORT=5004
+      - BASE_PATH=/liwenjuan
+      - UPLOAD_FOLDER=/app/uploads
+      - SECRET_KEY=${LIWENJUAN_SECRET_KEY:?LIWENJUAN_SECRET_KEY is required}
+    volumes:
+      - ./apps/liwenjuan/uploads:/app/uploads
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5004/health"]
       interval: 10s
       timeout: 5s
       retries: 3

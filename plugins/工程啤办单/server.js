@@ -230,8 +230,22 @@ app.use('/api', (req, res, next) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
+  // 主管审核后锁定，仅主管/经理可修改删除
+  const LOCKED_STATUSES = ['待经理审核', '待生产', '生产中', '已完成'];
+
+  function checkLock(req, res, order, action) {
+    if (!order || !LOCKED_STATUSES.includes(order.status)) return false;
+    const user = decodeURIComponent(req.headers['x-user'] || '');
+    if (ALL_SUPERVISORS.includes(user) || ALL_MANAGERS.includes(user)) return false;
+    res.status(403).json({ error: `主管已审核，普通用户不可${action}` });
+    return true;
+  }
+
   app.put(`/api/${type}/:id`, (req, res) => {
     try {
+      const data = loadData();
+      const order = data[`${type}_orders`].find(o => o.id === +req.params.id);
+      if (checkLock(req, res, order, '修改')) return;
       const { items, ...header } = req.body;
       const updated = updateOrder(type, req.params.id, header, items);
       updated ? res.json(updated) : res.status(404).json({ error: '未找到' });
@@ -239,6 +253,9 @@ app.use('/api', (req, res, next) => {
   });
 
   app.delete(`/api/${type}/:id`, (req, res) => {
+    const data = loadData();
+    const order = data[`${type}_orders`].find(o => o.id === +req.params.id);
+    if (checkLock(req, res, order, '删除')) return;
     deleteOrder(type, req.params.id);
     res.json({ success: true });
   });
@@ -251,7 +268,7 @@ app.use('/api', (req, res, next) => {
       if (!pin || !reviewer_name) {
         return res.status(403).json({ error: 'PIN验证失败' });
       }
-      const role = reviewer_role || (status === '待生产' ? 'manager' : 'supervisor');
+      const role = reviewer_role || 'supervisor';
       if (!verifyPin(reviewer_name, pin, role)) {
         return res.status(403).json({ error: 'PIN验证失败' });
       }
@@ -353,10 +370,29 @@ app.patch('/api/problems/:id/resolve', (req, res) => {
   res.json(p);
 });
 
+// ─── 权限角色查询 ──────────────────────────────────────────────────────────────
+app.get('/api/roles', (req, res) => {
+  res.json({ supervisors: ALL_SUPERVISORS, managers: ALL_MANAGERS });
+});
+
 // ─── 客户列表管理 ──────────────────────────────────────────────────────────────
+const DEFAULT_CLIENTS = ['ZURU','JAZWARES','Moose','TOMY','Tigerhead','Zanzoon(嘉苏)','AZAD','Brybelly +Entertoymen','Lifelines','ToyMonster','Cepia','Tikino','Sky Castle','Masterkidz','John Adams','智海鑫','PWP(多美）','CareFocus','永恒','spin master','Tokidos'];
+
+// 启动时合并客户默认列表（旧数据迁移，幂等）
+(function initClients() {
+  const data = loadData();
+  if (!data.clients) {
+    data.clients = DEFAULT_CLIENTS.slice();
+    saveData(data);
+  } else if (data.clients.length < DEFAULT_CLIENTS.length) {
+    data.clients = [...new Set([...data.clients, ...DEFAULT_CLIENTS])];
+    saveData(data);
+  }
+})();
+
 app.get('/api/clients', (req, res) => {
   const data = loadData();
-  res.json(data.clients || []);
+  res.json(data.clients || DEFAULT_CLIENTS);
 });
 
 app.put('/api/clients', (req, res) => {

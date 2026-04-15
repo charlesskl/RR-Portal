@@ -761,7 +761,7 @@ function parseExcelPO(filePath) {
         nature: gateVal,
         quantity: Number(qtyVal) || 0,
         unit: colMap.unit !== undefined ? getCellValue(ws, r, colMap.unit) : '',
-        unit_price: Number(colMap.unit !== undefined ? getCellValue(ws, r, colMap.unit_price) : 0) || 0,
+        unit_price: Number(colMap.unit_price !== undefined ? getCellValue(ws, r, colMap.unit_price) : 0) || 0,
         amount: Number(amountStr) || 0,
         notes: colMap.notes !== undefined ? getCellValue(ws, r, colMap.notes) : ''
       });

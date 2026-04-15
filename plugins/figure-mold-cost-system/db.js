@@ -3,6 +3,7 @@
 const path = require('path');
 const fs = require('fs');
 const Database = require('better-sqlite3');
+const bcrypt = require('bcryptjs');
 
 const DATA_DIR = process.env.DATA_PATH || path.join(__dirname, 'data');
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -109,10 +110,11 @@ function seedIfEmpty() {
   const seed = db.transaction(() => {
     if (db.prepare('SELECT COUNT(*) c FROM mold_factories').get().c === 0) {
       const ins = db.prepare('INSERT OR IGNORE INTO mold_factories (name) VALUES (?)');
-      ['东莞兴信模具厂', '华登模具厂'].forEach(n => ins.run(n));
+      ['力众', '亚细亚', '龙之联', '亿隆泰', '范仕达'].forEach(n => ins.run(n));
     }
     if (db.prepare('SELECT COUNT(*) c FROM figure_factories').get().c === 0) {
-      db.prepare('INSERT OR IGNORE INTO figure_factories (name) VALUES (?)').run('东莞兴信手办厂');
+      const ins = db.prepare('INSERT OR IGNORE INTO figure_factories (name) VALUES (?)');
+      ['力图', '海洋', '广祥', '伟盟'].forEach(n => ins.run(n));
     }
     if (db.prepare('SELECT COUNT(*) c FROM customers').get().c === 0) {
       const ins = db.prepare('INSERT OR IGNORE INTO customers (name) VALUES (?)');
@@ -120,8 +122,9 @@ function seedIfEmpty() {
     }
     if (db.prepare('SELECT COUNT(*) c FROM eng_users').get().c === 0) {
       const ins = db.prepare('INSERT OR IGNORE INTO eng_users (name, pin) VALUES (?, ?)');
-      ins.run('管理员', '123456');
-      ins.run('测试用户', '123456');
+      const hashed = bcrypt.hashSync('123456', 10);
+      ins.run('管理员', hashed);
+      ins.run('测试用户', hashed);
     }
     const ensureCounter = db.prepare('INSERT OR IGNORE INTO counters (key, value) VALUES (?, 1)');
     ensureCounter.run('nextId');

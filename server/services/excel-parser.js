@@ -27,6 +27,31 @@ function strVal(cell) {
   return String(v).trim();
 }
 
+// ─── MOQ Price Column Detector ────────────────────────────────────────────────
+// Scans header rows for MOQ labels like "5K", "2.5K", "看图报价 5K"
+// Returns { col, moq } — col is the column index, moq is the numeric MOQ value
+function detectPriceCol(ws, defaultCol = 4) {
+  const moqCols = {}; // numeric moq -> col index
+  for (let r = 1; r <= Math.min(30, ws.rowCount); r++) {
+    const row = ws.getRow(r);
+    for (let c = 1; c <= 12; c++) {
+      const v = strVal(row.getCell(c));
+      if (!v) continue;
+      const m = v.match(/(\d+\.?\d*)\s*[Kk]/);
+      if (m) {
+        const moqNum = Math.round(parseFloat(m[1]) * 1000); // e.g. 2.5K -> 2500, 5K -> 5000
+        moqCols[moqNum] = c;
+      }
+    }
+    if (Object.keys(moqCols).length > 0) break;
+  }
+  if (Object.keys(moqCols).length === 0) return { col: defaultCol, moq: 2500 };
+  // Prefer 5000, else pick the largest available MOQ
+  const moqNums = Object.keys(moqCols).map(Number).sort((a, b) => b - a);
+  const preferred = moqNums.includes(5000) ? 5000 : moqNums[0];
+  return { col: moqCols[preferred], moq: preferred };
+}
+
 // ─── Sheet Detection ──────────────────────────────────────────────────────────
 
 function detectFormat(workbook) {
@@ -40,13 +65,15 @@ function detectFormat(workbook) {
 function detectLatestSheet(workbook) {
   const sheets = workbook.worksheets.map(ws => ws.name);
 
-  // Extract trailing date/number from any sheet name for sorting
+  // Extract date/number from anywhere in sheet name for sorting
   function parseSheetDate(name) {
-    const m = name.match(/(\d{6})$/);   // YYMMDD at end
-    if (m) return parseInt(m[1], 10);
-    const m2 = name.match(/(\d{4})$/);  // MMDD or sequence at end
+    // Find all 6-digit sequences anywhere in the name (e.g. 260406 in "260406改噶件")
+    const all6 = [...name.matchAll(/(\d{6})/g)].map(m => parseInt(m[1], 10));
+    if (all6.length > 0) return Math.max(...all6);
+    // Trailing 4-digit
+    const m2 = name.match(/(\d{4})/);
     if (m2) return parseInt(m2[1], 10);
-    const vm = name.match(/V(\d+)$/i);  // V2, V3 style
+    const vm = name.match(/V(\d+)/i);
     if (vm) return parseInt(vm[1], 10);
     return 0;
   }
@@ -142,8 +169,14 @@ function parseHeader(ws, format) {
 function parseMoldParts(ws, startRow = 18) {
   const moldParts = [];
 
-  // startRow: 18 for injection (header R17), 17 for plush (header R16)
-  let row = startRow;
+  // Dynamically find header row containing "模号" to handle varying layouts
+  let detectedStart = 0;
+  for (let r = 1; r < startRow + 10; r++) {
+    const b = strVal(ws.getCell(r, 2));
+    const c = strVal(ws.getCell(r, 3));
+    if (/模号|模具/.test(b) && /名称/.test(c)) { detectedStart = r + 1; break; }
+  }
+  let row = detectedStart || startRow;
   let sortOrder = 0;
 
   // Mold part columns are offset by 1 (col A is empty, data starts at col B=2)
@@ -174,6 +207,12 @@ function parseMoldParts(ws, startRow = 18) {
     if (!part_no && !description) {
       row++;
       continue;
+    }
+
+    // Stop when hitting cost summary rows (not mold parts)
+    const COST_ROW_PATTERN = /料价|啤工|人工|油漆|喷油|搪胶|车缝|拆货|包装|吊咭|合计|总计|利润|运费/;
+    if (COST_ROW_PATTERN.test(part_no) || COST_ROW_PATTERN.test(description)) {
+      break;
     }
 
     const material = strVal(ws.getCell(row, C_MAT));
@@ -218,13 +257,21 @@ function parseMoldParts(ws, startRow = 18) {
 
 function parseRotocastItems(ws) {
   const items = [];
-  // R20: header (模号 | 名称 | 出数 | 用量pcs | 单价HK | 合计 | 备注)
-  // R21+: data until 合计 row
-  let row = 21;
+  // Dynamically find header row containing 模号/名称/出数
+  let startRow = 0;
+  for (let r = 1; r <= 50; r++) {
+    const b = strVal(ws.getCell(r, 2));
+    const c = strVal(ws.getCell(r, 3));
+    const d = strVal(ws.getCell(r, 4));
+    if (/模号/.test(b) && /名称/.test(c) && /出数/.test(d)) { startRow = r + 1; break; }
+  }
+  if (!startRow) return items; // no rotocast section found
+
+  let row = startRow;
   let sortOrder = 0;
 
-  while (row <= 40) {
-    const colF = strVal(ws.getCell(row, 6));  // col F = 合计 label in template
+  while (row <= startRow + 30) {
+    const colF = strVal(ws.getCell(row, 6));
     if (colF && colF.includes('合计')) break;
 
     const mold_no = strVal(ws.getCell(row, 2));  // col B
@@ -287,7 +334,7 @@ function parseSewingDetails(workbook) {
       position,
       cut_pieces: numVal(ws.getCell(row, 5)) ? Math.round(numVal(ws.getCell(row, 5))) : null,
       usage_amount: numVal(ws.getCell(row, 6)),
-      material_price_rmb: Math.round((numVal(ws.getCell(row, 7)) || 0) * 1.08 * 100) / 100,
+      material_price_rmb: Math.round((numVal(ws.getCell(row, 7)) || 0) * 1.08 * 10000) / 10000,
       price_rmb: numVal(ws.getCell(row, 8)),
       markup_point: numVal(ws.getCell(row, 9)) || 1.15,
       total_price_rmb: numVal(ws.getCell(row, 10)),
@@ -360,35 +407,64 @@ function parseSummary(ws) {
   const total_hkd = numVal(ws.getCell('C105'));         // TOTAL HK$
   const total_usd = numVal(ws.getCell('C106'));         // USD
 
-  // Dimensions at R108-R110, columns H(8)/J(10)/L(12)
-  // R107: headers (L, W, H)
-  // R108: product dimensions in inches
-  // R109: carton dimensions in inches; I109 = paper type (e.g. "A=B")
-  // R110: CU.FT, carton price, pcs per carton
-  const product_l = numVal(ws.getCell(108, 8));    // H108
-  const product_w = numVal(ws.getCell(108, 10));   // J108
-  const product_h = numVal(ws.getCell(108, 12));   // L108
-  const carton_l = numVal(ws.getCell(109, 9));     // I109 = L (A+B)
-  const carton_w = numVal(ws.getCell(109, 11));    // K109 = W
-  const carton_h = numVal(ws.getCell(109, 13));    // M109 = H
-  const carton_paper = strVal(ws.getCell(109, 8)); // H109 = 纸板
-  const carton_cuft = numVal(ws.getCell(110, 8));  // H110
-  const pcs_per_carton = numVal(ws.getCell(110, 12)); // L110
+  // Dynamically locate dimension rows by scanning all columns for keyword labels
+  let productDimRow = 0, cartonDimRow = 0, cuftRow = 0;
+  for (let r = 1; r <= ws.rowCount; r++) {
+    let rowText = '';
+    for (let c = 1; c <= 16; c++) rowText += strVal(ws.getCell(r, c));
+    if (!productDimRow && /产品尺寸/.test(rowText)) { productDimRow = r; }
+    if (!cartonDimRow  && /纸箱尺寸|外箱尺寸/.test(rowText)) { cartonDimRow = r; }
+    if (!cuftRow       && /CU\.?FT/i.test(rowText)) { cuftRow = r; break; }
+  }
 
-  // Carton price + case pack: scan main sheet for col A="纸箱", col B contains "纸箱"
-  let carton_price = numVal(ws.getCell(110, 10)) || 0; // J110 fallback
+  // Find L/W/H header row (a row that contains L, W, H as separate cells)
+  // Usually one row above productDimRow
+  let lwh_header_row = productDimRow > 1 ? productDimRow - 1 : 0;
+  let lCol = 0, wCol = 0, hCol = 0;
+  if (lwh_header_row) {
+    for (let c = 1; c <= 16; c++) {
+      const v = strVal(ws.getCell(lwh_header_row, c)) || '';
+      if (v === 'L' && !lCol) lCol = c;
+      else if (v === 'W' && !wCol) wCol = c;
+      else if (v === 'H' && !hCol) hCol = c;
+    }
+  }
+  // Fallback column positions (injection default)
+  if (!lCol) lCol = 8;
+  if (!wCol) wCol = 10;
+  if (!hCol) hCol = 12;
+  if (!productDimRow) productDimRow = 108;
+  if (!cartonDimRow)  cartonDimRow  = 109;
+  if (!cuftRow)       cuftRow       = 110;
+
+  const product_l = numVal(ws.getCell(productDimRow, lCol));
+  const product_w = numVal(ws.getCell(productDimRow, wCol));
+  const product_h = numVal(ws.getCell(productDimRow, hCol));
+  const carton_l  = numVal(ws.getCell(cartonDimRow, lCol));
+  const carton_w  = numVal(ws.getCell(cartonDimRow, wCol));
+  const carton_h  = numVal(ws.getCell(cartonDimRow, hCol));
+  const carton_paper = strVal(ws.getCell(cartonDimRow, lCol - 1)) || strVal(ws.getCell(cartonDimRow, lCol - 2));
+  const carton_cuft  = numVal(ws.getCell(cuftRow, lCol));
+  const pcs_per_carton = numVal(ws.getCell(cuftRow, hCol));
+
+  // Carton price: sum of all rows where col A contains "纸箱" × 1.08
+  // Case pack: first row where col B contains "外箱" or "纸箱"
+  const { col: mainPriceCol } = detectPriceCol(ws);
+  let carton_price_raw = 0;
   let case_pack = null;
   for (let r = 1; r <= ws.rowCount; r++) {
     const row = ws.getRow(r);
-    const colA = strVal(row.getCell(1));
-    const colB = strVal(row.getCell(2));
-    if (colB && /纸箱/.test(colB) && colA === '纸箱') {
-      const rawPrice = numVal(row.getCell(5)) || 0;
-      carton_price = Math.round(rawPrice * 1.08 * 100) / 100;
-      case_pack = strVal(row.getCell(3)) || null; // keep raw text e.g. "1/2"
-      break;
+    const colA = strVal(row.getCell(1)) || '';
+    const colB = strVal(row.getCell(2)) || '';
+    if (/纸箱/.test(colA)) {
+      carton_price_raw += numVal(row.getCell(mainPriceCol)) || 0;
+    }
+    if (case_pack == null && /外箱|纸箱/.test(colB)) {
+      const cp = strVal(row.getCell(3));
+      if (cp) case_pack = cp;
     }
   }
+  const carton_price = Math.round(carton_price_raw * 1.08 * 100) / 100;
 
   // R129-R136: Mold costs
   // R129-R130: section headers
@@ -487,14 +563,53 @@ function parseElectronics(workbook, mainWs) {
 // ─── Painting Parser ─────────────────────────────────────────────────────────
 
 function parsePainting(ws) {
-  // R46: 喷油人工, R47: 油漆 — labor costs
-  const labor_cost_hkd = numVal(ws.getCell('E46')) || numVal(ws.getCell('D46')) || numVal(ws.getCell('C46'));
-  const paint_cost_hkd = numVal(ws.getCell('E47')) || numVal(ws.getCell('D47')) || numVal(ws.getCell('C47'));
+  // Dynamically find 喷油人工 and 油漆 rows by scanning col B
+  let laborRow = 0, paintRow = 0;
+  for (let r = 1; r <= ws.rowCount; r++) {
+    const b = strVal(ws.getCell(r, 2)) || '';
+    const a = strVal(ws.getCell(r, 1)) || '';
+    if (!laborRow && /喷油人工/.test(b + a)) laborRow = r;
+    if (!paintRow  && /^油漆$/.test(b + a)) paintRow = r;
+    if (laborRow && paintRow) break;
+  }
+  // If not found, return null values (no painting data)
+  if (!laborRow && !paintRow) return {
+    labor_cost_hkd: null, paint_cost_hkd: null,
+    clamp_count: null, print_count: null, wipe_count: null, edge_count: null, spray_count: null,
+    total_operations: null, quoted_price_hkd: null,
+  };
+  if (!paintRow) paintRow = laborRow + 1;
 
-  // Parse operation counts from R46 col B description, e.g. "喷油人工 (16夹23散39边02珠)"
-  // Suffixes: 夹=clamp, 散枪/散=spray, 边=edge, 印=print, 抹=wipe
-  const paintDesc = strVal(ws.getCell('B46')) || '';
+  const { col: priceCol } = detectPriceCol(ws);
+  const labor_cost_hkd = laborRow ? (numVal(ws.getCell(laborRow, priceCol)) || numVal(ws.getCell(laborRow, 4)) || numVal(ws.getCell(laborRow, 3))) : null;
+  const paint_cost_hkd = paintRow ? (numVal(ws.getCell(paintRow, priceCol)) || numVal(ws.getCell(paintRow, 4)) || numVal(ws.getCell(paintRow, 3))) : null;
+
+  // Parse operation counts — try two strategies:
+  // 1. Embedded in col B description: "喷油人工 (16夹23散39边)"
+  // 2. Separate rows near laborRow with keyword in col B and count in col C or priceCol
+  const paintDesc = strVal(ws.getCell(laborRow, 2)) || '';
+
+  // Build a map of keyword -> count from nearby rows (scan ±15 rows around laborRow)
+  const opRowMap = {}; // keyword -> numeric count
+  const scanStart = Math.max(1, laborRow - 5);
+  const scanEnd   = Math.min(ws.rowCount, laborRow + 15);
+  for (let r = scanStart; r <= scanEnd; r++) {
+    const label = (strVal(ws.getCell(r, 2)) || '') + (strVal(ws.getCell(r, 1)) || '');
+    // Look for op-specific rows like "夹", "印", "抹油", "边", "散枪"
+    const opMatch = label.match(/^(夹|散枪|散|印|抹油|抹|边)[次数]?$/);
+    if (opMatch) {
+      // Count is usually in col C (3) or col D (4) or priceCol
+      const cnt = numVal(ws.getCell(r, 3)) ?? numVal(ws.getCell(r, 4)) ?? numVal(ws.getCell(r, priceCol));
+      if (cnt != null) opRowMap[opMatch[1]] = cnt;
+    }
+  }
+
   function extractOp(suffixes) {
+    // First check separate row map
+    for (const s of suffixes) {
+      if (opRowMap[s] != null) return opRowMap[s];
+    }
+    // Fall back to embedded description
     for (const s of suffixes) {
       const m = paintDesc.match(new RegExp('(\\d+)' + s));
       if (m) return parseInt(m[1]);
@@ -505,10 +620,11 @@ function parsePainting(ws) {
   const spray_count = extractOp(['散枪', '散']);
   const edge_count  = extractOp(['边']);
   const print_count = extractOp(['印']);
-  const wipe_count  = extractOp(['抹']);
+  const wipe_count  = extractOp(['抹油', '抹']);
 
-  const total_operations = (clamp_count || 0) + (spray_count || 0) + (edge_count || 0)
-    + (print_count || 0) + (wipe_count || 0) || null;
+  const opsSum = (clamp_count || 0) + (spray_count || 0) + (edge_count || 0) + (print_count || 0) + (wipe_count || 0);
+  // If there's a painting quote but no operation counts found, default total to 1
+  const total_operations = opsSum > 0 ? opsSum : ((labor_cost_hkd || paint_cost_hkd) ? 1 : null);
 
   return {
     labor_cost_hkd, paint_cost_hkd,
@@ -545,6 +661,8 @@ function parseHardwareSheet(workbook, mainWs) {
   // 2. Fallback: scan the active (latest) sheet — rows where col A = "五金" or "利宝"
   if (!mainWs) return [];
 
+  const { col: priceCol, moq: detectedMoq } = detectPriceCol(mainWs);
+
   const items = [];
   for (let r = 1; r <= mainWs.rowCount; r++) {
     const row = mainWs.getRow(r);
@@ -552,11 +670,15 @@ function parseHardwareSheet(workbook, mainWs) {
     if (colA !== '五金' && colA !== '利宝') continue;
     const name  = strVal(row.getCell(2));
     if (!name) continue;
+    const usage_qty = numVal(row.getCell(3)) || 1;
+    const amount_with_markup = Math.round((numVal(row.getCell(priceCol)) || 0) * 1.08 * 100) / 100;
+    const unit_price = Math.round(amount_with_markup / usage_qty * 10000) / 10000;
     items.push({
       description: name,
       category: colA,  // '五金' or '利宝'
-      usage_qty: numVal(row.getCell(3)) ?? 1,
-      unit_price: Math.round((numVal(row.getCell(5)) || 0) * 1.08 * 100) / 100,
+      usage_qty,
+      moq: detectedMoq,
+      unit_price,
       sort_order: items.length,
     });
   }
@@ -576,6 +698,8 @@ function parsePackagingFromMainSheet(mainWs) {
   let accessoriesTotal = 0;
   let packingLabourTotal = 0;
 
+  const { col: priceCol, moq: detectedMoq } = detectPriceCol(mainWs);
+
   for (let r = 1; r <= mainWs.rowCount; r++) {
     const row = mainWs.getRow(r);
     const colA = strVal(row.getCell(1));
@@ -583,13 +707,13 @@ function parsePackagingFromMainSheet(mainWs) {
 
     // Collect 包装辅料 → Accessories
     if (colB && ACCESSORIES_PATTERN.test(colB)) {
-      accessoriesTotal += numVal(row.getCell(5)) || 0;
+      accessoriesTotal += numVal(row.getCell(priceCol)) || 0;
       continue;
     }
 
     // Collect 拆货 + 包装人工 → Packing Labour
     if (colB && PACKING_LABOUR_PATTERN.test(colB)) {
-      packingLabourTotal += numVal(row.getCell(5)) || 0;
+      packingLabourTotal += numVal(row.getCell(priceCol)) || 0;
       continue;
     }
 
@@ -601,14 +725,14 @@ function parsePackagingFromMainSheet(mainWs) {
     const name   = splitM ? splitM[1].trim() : rawName;
     const spec   = splitM ? splitM[2].trim() : '';
     const usageQty = numVal(row.getCell(3)) ?? 1;
-    const rawTotal = numVal(row.getCell(5)) || 0;
+    const rawTotal = numVal(row.getCell(priceCol)) || 0;
     const totalWithMarkup = Math.round(rawTotal * 1.08 * 10000) / 10000;
     const unitPrice = usageQty > 0 ? Math.round(totalWithMarkup / usageQty * 10000) / 10000 : 0;
     items.push({
       pm_no:     '',
       name,
       remark:    spec,
-      moq:       2500,
+      moq:       detectedMoq,
       quantity:  usageQty,
       new_price: unitPrice,
       sort_order: items.length,
@@ -620,7 +744,7 @@ function parsePackagingFromMainSheet(mainWs) {
     pm_no:     '',
     name:      'Accessories',
     remark:    '',
-    moq:       null,
+    moq:       detectedMoq,
     quantity:  1,
     new_price: 0.15,
     sort_order: items.length,
@@ -631,7 +755,7 @@ function parsePackagingFromMainSheet(mainWs) {
     pm_no:     '',
     name:      'Packing Labour',
     remark:    '',
-    moq:       null,
+    moq:       detectedMoq,
     quantity:  1,
     new_price: Math.round(packingLabourTotal * 1.08 * 10000) / 10000,
     sort_order: items.length,

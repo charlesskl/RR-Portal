@@ -211,6 +211,11 @@ router.post('/', upload.single('file'), async (req, res) => {
           if (!mp.material) continue;
           const key = mp.material.trim();
           if (!key) continue;
+          // Skip rows that are clearly notes/remarks, not real material entries
+          // Valid material rows must have either unit_price_hkd_g or material_cost_hkd
+          if (!mp.unit_price_hkd_g && !mp.material_cost_hkd) continue;
+          // Skip purely numeric or very short material names (likely formula/remark cells)
+          if (/^\d+(\.\d+)?$/.test(key) || key.length < 2) continue;
           const weight = parseFloat(mp.weight_g) || 0;
           const existing = matMap.get(key);
           if (existing) {
@@ -242,7 +247,7 @@ router.post('/', upload.single('file'), async (req, res) => {
           const usageRounded = s.usage_amount != null ? Math.round(s.usage_amount * 10000) / 10000 : 0;
           const markupPoint = s.markup_point || 1.15;
           const priceHkd = s.material_price_rmb != null
-            ? Math.round(s.material_price_rmb * markupPoint * 1.05 / hkdRmb * 10000) / 10000
+            ? Math.round(s.material_price_rmb * markupPoint / hkdRmb * 10000) / 10000
             : null;
           console.log('[import] fabric:', s.fabric_name, s.position, 'rmb:', s.material_price_rmb, 'markup:', markupPoint, '=> hkd:', priceHkd);
           insertRaw.run(versionId, 'fabric', s.fabric_name, s.position, usageRounded, priceHkd, sortIdx++);
@@ -263,11 +268,11 @@ router.post('/', upload.single('file'), async (req, res) => {
       // BodyAccessory (五金 and 利宝 from main sheet)
       if (data.bodyAccessories && data.bodyAccessories.length > 0) {
         const insertBA = db.prepare(
-          `INSERT INTO BodyAccessory (version_id, description, category, usage_qty, unit_price, sort_order)
-           VALUES (?, ?, ?, ?, ?, ?)`
+          `INSERT INTO BodyAccessory (version_id, description, category, moq, usage_qty, unit_price, sort_order)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`
         );
         for (const ba of data.bodyAccessories) {
-          insertBA.run(versionId, ba.description, ba.category || '五金', ba.usage_qty, ba.unit_price, ba.sort_order);
+          insertBA.run(versionId, ba.description, ba.category || '五金', ba.moq || 2500, ba.usage_qty, ba.unit_price, ba.sort_order);
         }
       }
 

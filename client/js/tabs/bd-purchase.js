@@ -78,7 +78,7 @@ const tab_bd_purchase = {
               style="color:#888;font-style:italic">${escapeHtml(sw.eng_name || '')}</td>
           <td class="editable num" data-table="sewing-detail" data-id="${sw.id}" data-field="usage_amount" data-type="number">${formatNumber(sw.usage_amount, 4)}</td>
           <td class="editable num" data-table="sewing-detail" data-id="${sw.id}" data-field="material_price_rmb" data-type="number">${formatNumber(sw.material_price_rmb, 4)}</td>
-          <td class="num">${formatNumber(hkd, 4)}</td>
+          <td class="num">${formatNumber(hkd, 2)}</td>
         </tr>
       `;
     }).join('');

@@ -236,6 +236,40 @@ function verifyPin(name, pin, role) {
   return pins.supervisors && pins.supervisors[name] === hash;
 }
 
+// ─── PIN Brute-Force Lockout (in-memory, per IP+key) ─────────────────────────
+// 5 failed attempts within 15 min triggers 15-min lockout.
+const PIN_ATTEMPTS = new Map();
+const PIN_MAX_ATTEMPTS = 5;
+const PIN_WINDOW_MS = 15 * 60 * 1000;
+function checkPinLockout(key) {
+  const rec = PIN_ATTEMPTS.get(key);
+  if (!rec) return { allowed: true };
+  if (rec.lockUntil && Date.now() < rec.lockUntil) {
+    const remaining = Math.ceil((rec.lockUntil - Date.now()) / 1000);
+    return { allowed: false, remaining };
+  }
+  return { allowed: true };
+}
+function recordPinFailure(key) {
+  const now = Date.now();
+  let rec = PIN_ATTEMPTS.get(key);
+  if (!rec || now - rec.firstAt > PIN_WINDOW_MS) {
+    rec = { count: 0, firstAt: now, lockUntil: 0 };
+  }
+  rec.count += 1;
+  if (rec.count >= PIN_MAX_ATTEMPTS) {
+    rec.lockUntil = now + PIN_WINDOW_MS;
+  }
+  PIN_ATTEMPTS.set(key, rec);
+}
+function clearPinFailures(key) {
+  PIN_ATTEMPTS.delete(key);
+}
+function pinKey(req, name) {
+  const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown').split(',')[0].trim();
+  return `${ip}:${name || 'anon'}`;
+}
+
 // ─── Health Check ────────────────────────────────────────────────────────────
 app.get('/health', (req, res) => res.json({ status: 'ok', service: 'rr-production' }));
 
@@ -429,19 +463,21 @@ app.get('/api/roles', (req, res) => {
 // ─── 客户列表管理 ──────────────────────────────────────────────────────────────
 const DEFAULT_CLIENTS = ['ZURU','JAZWARES','Moose','TOMY','Tigerhead','Zanzoon(嘉苏)','AZAD','Brybelly +Entertoymen','Lifelines','ToyMonster','Cepia','Tikino','Sky Castle','Masterkidz','John Adams','智海鑫','PWP(多美）','CareFocus','永恒','spin master','Tokidos'];
 
-app.get('/api/clients', (req, res) => {
+// 启动时合并客户默认列表（旧数据迁移，幂等）
+(function initClients() {
   const data = loadData();
   if (!data.clients) {
-    res.json(DEFAULT_CLIENTS);
-  } else if (data.clients.length < DEFAULT_CLIENTS.length) {
-    // 旧数据客户数少于默认列表，合并去重
-    const merged = [...new Set([...data.clients, ...DEFAULT_CLIENTS])];
-    data.clients = merged;
+    data.clients = DEFAULT_CLIENTS.slice();
     saveData(data);
-    res.json(merged);
-  } else {
-    res.json(data.clients);
+  } else if (data.clients.length < DEFAULT_CLIENTS.length) {
+    data.clients = [...new Set([...data.clients, ...DEFAULT_CLIENTS])];
+    saveData(data);
   }
+})();
+
+app.get('/api/clients', (req, res) => {
+  const data = loadData();
+  res.json(data.clients || DEFAULT_CLIENTS);
 });
 
 app.put('/api/clients', (req, res) => {
@@ -462,6 +498,8 @@ app.get('/api/material-prices', (req, res) => {
   res.json(data.material_prices || DEFAULT_MATERIAL_PRICES.slice());
 });
 
+// 旧端点：仅更新价格表，不再触发回填（回填需走 /api/manager-update-prices，需经理 PIN）
+// 保留以兼容现有 UI 调用；任何写改历史 actual_amount_hkd 的能力都收敛到经理端点
 app.put('/api/material-prices', (req, res) => {
   try {
     if (!Array.isArray(req.body) || !req.body.every(p => p && typeof p === 'object' && typeof p.material === 'string')) {
@@ -469,22 +507,8 @@ app.put('/api/material-prices', (req, res) => {
     }
     const data = loadData();
     data.material_prices = req.body;
-
-    // 方案 C：补录价格后回填历史订单中「金额为 0 且重量>0」的明细
-    // 已有金额的保留历史价格不动；本次仍为 0 的材料不处理
-    const priceMap = buildPriceMap(data.material_prices);
-    let backfilled = 0;
-    (data.injection_items || []).forEach(item => {
-      const amount = +(item.actual_amount_hkd || 0);
-      const weight = +(item.actual_weight_kg || 0);
-      if (amount > 0 || weight <= 0) return;
-      const price = resolvePrice(item.material, priceMap);
-      if (price <= 0) return;
-      item.actual_amount_hkd = Math.round(weight * 2.20462 * price * 100) / 100;
-      backfilled++;
-    });
     saveData(data);
-    res.json({ prices: data.material_prices, backfilled });
+    res.json({ prices: data.material_prices, backfilled: 0 });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -721,35 +745,97 @@ app.post('/api/reset-supervisor-pin', (req, res) => {
   if (!manager_name || !manager_pin || !target_name || !new_pin) {
     return res.status(400).json({ error: '参数不完整' });
   }
+  if (!ALL_MANAGERS.includes(manager_name)) {
+    return res.status(400).json({ error: '经理不存在' });
+  }
+  const lockKey = pinKey(req, manager_name);
+  const gate = checkPinLockout(lockKey);
+  if (!gate.allowed) {
+    return res.status(429).json({ error: `尝试过多，请 ${gate.remaining} 秒后重试` });
+  }
   if (!verifyPin(manager_name, manager_pin, 'manager')) {
+    recordPinFailure(lockKey);
     return res.status(403).json({ error: '经理 PIN 验证失败' });
   }
+  clearPinFailures(lockKey);
   if (!ALL_SUPERVISORS.includes(target_name)) {
     return res.status(400).json({ error: '目标主管不存在' });
   }
-  if (String(new_pin).length < 4) {
-    return res.status(400).json({ error: '新 PIN 至少 4 位' });
+  const newPinStr = String(new_pin);
+  if (newPinStr.length < 4 || newPinStr.length > 8) {
+    return res.status(400).json({ error: '新 PIN 需 4-8 位' });
   }
   const data = loadData();
   if (!data.auth_pins) data.auth_pins = { supervisors: {}, manager: {} };
   if (!data.auth_pins.supervisors) data.auth_pins.supervisors = {};
   if (!data.auth_pins_must_change) data.auth_pins_must_change = { supervisors: {}, manager: {} };
   if (!data.auth_pins_must_change.supervisors) data.auth_pins_must_change.supervisors = {};
-  data.auth_pins.supervisors[target_name] = hashPin(String(new_pin));
+  if (!Array.isArray(data.audit_log)) data.audit_log = [];
+  data.auth_pins.supervisors[target_name] = hashPin(newPinStr);
   data.auth_pins_must_change.supervisors[target_name] = true;
+  const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown').split(',')[0].trim();
+  data.audit_log.push({
+    ts: new Date().toISOString(),
+    action: 'reset-supervisor-pin',
+    actor: manager_name,
+    target: target_name,
+    ip,
+    ua: req.headers['user-agent'] || ''
+  });
+  // cap audit log to last 2000 entries
+  if (data.audit_log.length > 2000) data.audit_log = data.audit_log.slice(-2000);
   saveData(data);
-  console.log(`[reset-pin] manager=${manager_name} reset supervisor=${target_name}`);
+  console.log(`[reset-pin] manager=${manager_name} reset supervisor=${target_name} from=${ip}`);
   res.json({ success: true });
 });
 
-// 经理更新价格表（保存后自动回填金额=0 的历史明细）
-app.post('/api/manager-update-prices', (req, res) => {
-  const { manager_name, manager_pin, prices } = req.body;
-  if (!manager_name || !manager_pin || !Array.isArray(prices)) {
-    return res.status(400).json({ error: '参数不完整' });
+// ─── 经理认证 + 审计辅助（manager-update-prices / recalc-amounts 共用） ─────
+function authManager(req, res) {
+  const { manager_name, manager_pin } = req.body;
+  if (!manager_name || !manager_pin) {
+    res.status(400).json({ error: '参数不完整' });
+    return null;
+  }
+  if (!ALL_MANAGERS.includes(manager_name)) {
+    res.status(400).json({ error: '经理不存在' });
+    return null;
+  }
+  const lockKey = pinKey(req, manager_name);
+  const gate = checkPinLockout(lockKey);
+  if (!gate.allowed) {
+    res.status(429).json({ error: `尝试过多，请 ${gate.remaining} 秒后重试` });
+    return null;
   }
   if (!verifyPin(manager_name, manager_pin, 'manager')) {
-    return res.status(403).json({ error: '经理 PIN 验证失败' });
+    recordPinFailure(lockKey);
+    res.status(403).json({ error: '经理 PIN 验证失败' });
+    return null;
+  }
+  clearPinFailures(lockKey);
+  return manager_name;
+}
+
+function appendAudit(data, req, action, actor, extra) {
+  if (!Array.isArray(data.audit_log)) data.audit_log = [];
+  const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown').split(',')[0].trim();
+  data.audit_log.push({
+    ts: new Date().toISOString(),
+    action,
+    actor,
+    ip,
+    ua: req.headers['user-agent'] || '',
+    ...(extra || {})
+  });
+  if (data.audit_log.length > 2000) data.audit_log = data.audit_log.slice(-2000);
+}
+
+// 经理更新价格表（保存后自动回填金额=0 的历史明细）
+app.post('/api/manager-update-prices', (req, res) => {
+  const actor = authManager(req, res);
+  if (!actor) return;
+  const { prices } = req.body;
+  if (!Array.isArray(prices)) {
+    return res.status(400).json({ error: '参数不完整' });
   }
   if (!prices.every(p => p && typeof p === 'object' && typeof p.material === 'string' && p.material.trim())) {
     return res.status(400).json({ error: '价格数据格式错误' });
@@ -771,20 +857,16 @@ app.post('/api/manager-update-prices', (req, res) => {
     item.actual_amount_hkd = Math.round(weight * 2.20462 * price * 100) / 100;
     backfilled++;
   });
+  appendAudit(data, req, 'manager-update-prices', actor, { total: data.material_prices.length, backfilled });
   saveData(data);
-  console.log(`[price-update] manager=${manager_name} total=${data.material_prices.length} backfilled=${backfilled}`);
+  console.log(`[price-update] manager=${actor} total=${data.material_prices.length} backfilled=${backfilled}`);
   res.json({ success: true, total: data.material_prices.length, backfilled });
 });
 
 // 经理一键重算：按当前价格表回填所有「金额=0 且 重量>0」的历史明细
 app.post('/api/recalc-amounts', (req, res) => {
-  const { manager_name, manager_pin } = req.body;
-  if (!manager_name || !manager_pin) {
-    return res.status(400).json({ error: '参数不完整' });
-  }
-  if (!verifyPin(manager_name, manager_pin, 'manager')) {
-    return res.status(403).json({ error: '经理 PIN 验证失败' });
-  }
+  const actor = authManager(req, res);
+  if (!actor) return;
   const data = loadData();
   const priceMap = buildPriceMap(data.material_prices);
   let backfilled = 0, skipped = 0, missingPrice = 0;
@@ -797,8 +879,11 @@ app.post('/api/recalc-amounts', (req, res) => {
     item.actual_amount_hkd = Math.round(weight * 2.20462 * price * 100) / 100;
     backfilled++;
   });
-  if (backfilled > 0) saveData(data);
-  console.log(`[recalc] manager=${manager_name} backfilled=${backfilled} missing_price=${missingPrice}`);
+  if (backfilled > 0) {
+    appendAudit(data, req, 'recalc-amounts', actor, { backfilled, missing_price: missingPrice });
+    saveData(data);
+  }
+  console.log(`[recalc] manager=${actor} backfilled=${backfilled} missing_price=${missingPrice}`);
   res.json({ success: true, backfilled, missing_price: missingPrice });
 });
 

@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Finished Goods Check System</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+<div class="navbar">
+  <h1>Finished Goods Check System</h1>
+  <span class="sub">Huadeng - Li Wenjuan</span>
+</div>
+
+<div class="container">
+
+  <!-- Error message -->
+  <div class="error-msg" id="error-msg"></div>
+
+  <!-- Upload + Run -->
+  <form class="upload-card" id="upload-form" enctype="multipart/form-data">
+    <div class="upload-group">
+      <label>Base File (26-2 Finished Goods Detail)</label>
+      <div class="file-input-wrapper" data-placeholder="Click to select file">
+        <input type="file" name="main" accept=".xlsx,.xls">
+        <span>Click to select file</span>
+      </div>
+    </div>
+    <div class="upload-group" style="flex:3">
+      <label>Comparison Files (26-1 Finished Goods / Shipment Detail / ZU Shipment / Quantity, select up to 4)</label>
+      <div class="file-input-wrapper" data-placeholder="Click to select files (multi-select)">
+        <input type="file" name="others" accept=".xlsx,.xls" multiple>
+        <span>Click to select files (multi-select)</span>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px;align-items:stretch;">
+      <button class="btn-run" type="submit" id="btn-run">Start Check</button>
+      <a class="btn-dl hidden" id="btn-dl" href="{{ url_for('download') }}">Download Excel</a>
+    </div>
+  </form>
+
+  <!-- Loading -->
+  <div class="loading" id="loading">Checking, please wait...</div>
+
+  <!-- Stats cards -->
+  <div class="stats-grid hidden" id="stats-grid">
+    <div class="stat-card total">
+      <div class="num" id="stat-total">&mdash;</div>
+      <div class="label">Total Base Records</div>
+    </div>
+    <div class="stat-card matched">
+      <div class="num" id="stat-matched">&mdash;</div>
+      <div class="label">At Least One Match</div>
+    </div>
+    <div class="stat-card anomaly">
+      <div class="num" id="stat-anomaly">&mdash;</div>
+      <div class="label">Anomaly (No Match)</div>
+    </div>
+  </div>
+
+  <!-- Result Tabs -->
+  <div class="tabs-section hidden" id="tabs-section">
+    <div class="tab-bar">
+      <button class="tab-btn matched active" data-target="panel-matched">
+        Matched <span class="badge" id="badge-matched">0</span>
+      </button>
+      <button class="tab-btn unmatched" data-target="panel-unmatched">
+        Unmatched <span class="badge" id="badge-unmatched">0</span>
+      </button>
+      <button class="tab-btn anomaly" data-target="panel-anomaly">
+        Anomaly <span class="badge" id="badge-anomaly">0</span>
+      </button>
+    </div>
+
+    <!-- Matched -->
+    <div class="tab-panel active" id="panel-matched">
+      <div class="tab-search">
+        <input class="tab-filter" type="text" placeholder="Search contract/item number in this tab...">
+      </div>
+      <div class="table-wrap">
+        <table class="result-table" id="table-matched">
+          <thead><tr>
+            <th>Brand/Customer</th><th>Contract</th><th>Item No.</th>
+            <th class="center">Inventory<br><small>26-1 Finished Goods</small></th>
+            <th class="center">Shipment<br><small>Shipment Detail</small></th>
+            <th class="center">Shipment<br><small>ZU Shipment</small></th>
+            <th class="center">Shipment<br><small>Quantity</small></th>
+            <th class="center">Status</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Unmatched -->
+    <div class="tab-panel" id="panel-unmatched">
+      <div class="tab-search">
+        <input class="tab-filter" type="text" placeholder="Search contract/item number in this tab...">
+      </div>
+      <div class="table-wrap">
+        <table class="result-table" id="table-unmatched">
+          <thead><tr>
+            <th>Brand/Customer</th><th>Contract</th><th>Item No.</th>
+            <th class="center">Inventory<br><small>26-1 Finished Goods</small></th>
+            <th class="center">Shipment<br><small>Shipment Detail</small></th>
+            <th class="center">Shipment<br><small>ZU Shipment</small></th>
+            <th class="center">Shipment<br><small>Quantity</small></th>
+            <th class="center">Status</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Anomaly -->
+    <div class="tab-panel" id="panel-anomaly">
+      <div class="tab-search">
+        <input class="tab-filter" type="text" placeholder="Search contract/item number in this tab...">
+      </div>
+      <div class="table-wrap">
+        <table class="result-table" id="table-anomaly">
+          <thead><tr>
+            <th>Brand/Customer</th><th>Contract</th><th>Item No.</th>
+            <th class="center">Inventory<br><small>26-1 Finished Goods</small></th>
+            <th class="center">Shipment<br><small>Shipment Detail</small></th>
+            <th class="center">Shipment<br><small>ZU Shipment</small></th>
+            <th class="center">Shipment<br><small>Quantity</small></th>
+            <th class="center">Status</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Search details -->
+  <div class="search-section hidden" id="search-section">
+    <h3>Search Details</h3>
+    <div class="search-bar">
+      <input type="text" id="search-input" placeholder="Enter contract or item number, press Enter to search...">
+      <button class="btn-search" id="btn-search">Search</button>
+    </div>
+    <div id="detail-results"></div>
+    <div id="search-empty">No matching records found</div>
+  </div>
+
+</div><!-- /container -->
+
+<script>window.LIWENJUAN_RUN_URL = "{{ url_for('run') }}";</script>
+<script src="{{ url_for('static', filename='main.js') }}"></script>
+</body>
+</html>

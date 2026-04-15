@@ -165,8 +165,12 @@
           <select id="resetTarget" class="form-select"></select>
         </div>
         <div class="mb-3">
-          <label class="form-label fw-bold">新 PIN 码（至少 4 位）</label>
+          <label class="form-label fw-bold">新 PIN 码（4-8 位）</label>
           <input type="text" id="resetNewPin" class="form-control" maxlength="8" placeholder="例如 1234" autocomplete="off">
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-bold">经理 PIN 确认</label>
+          <input type="password" id="resetMgrPin" class="form-control" maxlength="8" placeholder="重新输入经理 PIN" autocomplete="off">
         </div>
         <div id="resetPinError" class="text-danger small d-none"></div>
       </div>
@@ -611,12 +615,12 @@ async function openResetPinModal() {
 async function submitResetPin() {
   const target = document.getElementById('resetTarget').value;
   const newPin = document.getElementById('resetNewPin').value.trim();
+  const managerPin = document.getElementById('resetMgrPin').value.trim();
   const err = document.getElementById('resetPinError');
   err.classList.add('d-none');
   if (!target) { err.textContent = '请选择主管'; err.classList.remove('d-none'); return; }
-  if (newPin.length < 4) { err.textContent = '新 PIN 至少 4 位'; err.classList.remove('d-none'); return; }
-  const managerPin = sessionStorage.getItem('mgr_pin') || '';
-  if (!managerPin) { err.textContent = '登录状态已失效，请重新登录'; err.classList.remove('d-none'); return; }
+  if (newPin.length < 4 || newPin.length > 8) { err.textContent = '新 PIN 需 4-8 位'; err.classList.remove('d-none'); return; }
+  if (!managerPin) { err.textContent = '请输入经理 PIN'; err.classList.remove('d-none'); return; }
   try {
     const r = await apiFetch('/api/reset-supervisor-pin', {
       method: 'POST',
@@ -635,6 +639,7 @@ async function submitResetPin() {
       return;
     }
     bootstrap.Modal.getInstance(document.getElementById('resetPinModal')).hide();
+    document.getElementById('resetMgrPin').value = '';
     showToast(`已将 ${target} 的 PIN 重置为 ${newPin}，首次登录需修改`);
   } catch (e) {
     err.textContent = '网络错误';

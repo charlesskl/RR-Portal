@@ -28,7 +28,15 @@ function loadData() {
   if (!fs.existsSync(DATA_FILE)) { _cache = initData(); return _cache; }
   try {
     const data = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
-    if (!data.material_prices || data.material_prices.length === 0) data.material_prices = DEFAULT_MATERIAL_PRICES.slice();
+    if (!data.material_prices || data.material_prices.length === 0) {
+      data.material_prices = DEFAULT_MATERIAL_PRICES.slice();
+    } else if (DEFAULT_MATERIAL_PRICES.length) {
+      // Upsert：seed 中有但 data.json 中没有的材料自动补进去，已有的不覆盖（保留用户手动录入的价格）
+      const existing = new Set(data.material_prices.map(p => normMat(p.material)));
+      DEFAULT_MATERIAL_PRICES.forEach(p => {
+        if (!existing.has(normMat(p.material))) data.material_prices.push(p);
+      });
+    }
     if (!data.material_requisitions) data.material_requisitions = [];
     if (!data.assembly_orders) data.assembly_orders = [];
     if (!data.assembly_items) data.assembly_items = [];
@@ -59,6 +67,50 @@ function saveData(data) {
   const tmp = DATA_FILE + '.tmp';
   fs.writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf8');
   fs.renameSync(tmp, DATA_FILE);
+}
+
+// ─── 材料价格解析（模糊匹配 + 混合料按最高比例组分取价） ───────────────────
+// 规范化：去掉空格/括号/横杠并转小写，用于模糊比对
+//   "PP(EP332K)" / "PP (EP332K)" / "PPEP332K" / "pp-ep332k" → "ppep332k"
+//   "TPR 3度" / "TPR 3°" / "TPR3度" → "tpr3°"（度/°统一；数字全半角统一）
+function normMat(s) {
+  return String(s || '')
+    .toLowerCase()
+    .replace(/[０-９]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0))
+    .replace(/度/g, '°')
+    .replace(/[\s\-\(\)（）_]/g, '');
+}
+
+// 构建 normalized material -> unit_price (>0) 的映射
+function buildPriceMap(prices) {
+  const map = {};
+  (prices || []).forEach(p => {
+    const price = +(p.unit_price || 0);
+    if (price > 0 && p.material) map[normMat(p.material)] = price;
+  });
+  return map;
+}
+
+// 解析材料名获取单价：
+// 1) 规范化直接匹配
+// 2) 混合料 "70%ABS抽粒+30%ABS 750W" → 取比例最高的组分的单价
+function resolvePrice(material, priceMap) {
+  if (!material) return 0;
+  const direct = priceMap[normMat(material)];
+  if (direct) return direct;
+  const parts = String(material).split(/[+＋]/).map(s => s.trim()).filter(Boolean);
+  if (parts.length < 2) return 0;
+  const mixed = parts.map(p => {
+    const m = p.match(/^(\d+(?:\.\d+)?)\s*[%％]\s*(.+)$/);
+    return m ? { pct: +m[1], name: m[2].trim() } : null;
+  }).filter(Boolean);
+  if (mixed.length < 2) return 0;
+  mixed.sort((a, b) => b.pct - a.pct);
+  for (const m of mixed) {
+    const price = priceMap[normMat(m.name)];
+    if (price) return price;
+  }
+  return 0;
 }
 
 // ─── 通用 CRUD 帮助 ─────────────────────────────────────────────────────────
@@ -240,7 +292,7 @@ app.use('/api', (req, res, next) => {
   // PATCH /status 已有 PIN 验证
   if (req.method === 'PATCH' && req.path.match(/\/\d+\/status$/)) return next();
   // 认证端点本身不需要 X-User
-  if (req.path === '/verify-pin' || req.path === '/change-pin' || req.path === '/reset-supervisor-pin') return next();
+  if (req.path === '/verify-pin' || req.path === '/change-pin' || req.path === '/reset-supervisor-pin' || req.path === '/recalc-amounts' || req.path === '/manager-update-prices') return next();
   const user = req.headers['x-user'];
   if (!user || !decodeURIComponent(user).trim()) {
     return res.status(401).json({ error: '未授权：请登录后操作' });
@@ -320,12 +372,11 @@ app.use('/api', (req, res, next) => {
         order.updated_at = new Date().toISOString();
         order.completed_date = new Date().toLocaleDateString('zh-CN', { timeZone: 'Asia/Shanghai' }).replace(/\//g, '-');
         // 实际用料 = 领料重量，用料金额 = 领料重量 × 单价
-        const priceMap = {};
-        (data.material_prices || []).forEach(p => { priceMap[p.material] = +(p.unit_price || 0); });
+        const priceMap = buildPriceMap(data.material_prices);
         const items = data.injection_items.filter(i => i.order_id === +req.params.id);
         items.forEach(item => {
           const weight = +(item.collected_weight_kg || item.required_material_kg || 0);
-          const price = priceMap[item.material] || 0;
+          const price = resolvePrice(item.material, priceMap);
           item.actual_weight_kg = weight;
           item.actual_amount_hkd = Math.round(weight * 2.20462 * price * 100) / 100;
         });
@@ -447,6 +498,8 @@ app.get('/api/material-prices', (req, res) => {
   res.json(data.material_prices || DEFAULT_MATERIAL_PRICES.slice());
 });
 
+// 旧端点：仅更新价格表，不再触发回填（回填需走 /api/manager-update-prices，需经理 PIN）
+// 保留以兼容现有 UI 调用；任何写改历史 actual_amount_hkd 的能力都收敛到经理端点
 app.put('/api/material-prices', (req, res) => {
   try {
     if (!Array.isArray(req.body) || !req.body.every(p => p && typeof p === 'object' && typeof p.material === 'string')) {
@@ -455,7 +508,7 @@ app.put('/api/material-prices', (req, res) => {
     const data = loadData();
     data.material_prices = req.body;
     saveData(data);
-    res.json(data.material_prices);
+    res.json({ prices: data.material_prices, backfilled: 0 });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -580,12 +633,11 @@ app.post('/api/injection/:id/auto-complete', (req, res) => {
   order.status = '已完成';
   order.updated_at = new Date().toISOString();
   order.completed_date = new Date().toLocaleDateString('zh-CN', { timeZone: 'Asia/Shanghai' }).replace(/\//g, '-');
-  const priceMap = {};
-  (data.material_prices || []).forEach(p => { priceMap[p.material] = +(p.unit_price || 0); });
+  const priceMap = buildPriceMap(data.material_prices);
   const items = data.injection_items.filter(i => i.order_id === +req.params.id);
   items.forEach(item => {
     const weight = +(item.collected_weight_kg || item.required_material_kg || 0);
-    const price = priceMap[item.material] || 0;
+    const price = resolvePrice(item.material, priceMap);
     item.actual_weight_kg = weight;
     item.actual_amount_hkd = Math.round(weight * 2.20462 * price * 100) / 100;
   });
@@ -735,6 +787,104 @@ app.post('/api/reset-supervisor-pin', (req, res) => {
   saveData(data);
   console.log(`[reset-pin] manager=${manager_name} reset supervisor=${target_name} from=${ip}`);
   res.json({ success: true });
+});
+
+// ─── 经理认证 + 审计辅助（manager-update-prices / recalc-amounts 共用） ─────
+function authManager(req, res) {
+  const { manager_name, manager_pin } = req.body;
+  if (!manager_name || !manager_pin) {
+    res.status(400).json({ error: '参数不完整' });
+    return null;
+  }
+  if (!ALL_MANAGERS.includes(manager_name)) {
+    res.status(400).json({ error: '经理不存在' });
+    return null;
+  }
+  const lockKey = pinKey(req, manager_name);
+  const gate = checkPinLockout(lockKey);
+  if (!gate.allowed) {
+    res.status(429).json({ error: `尝试过多，请 ${gate.remaining} 秒后重试` });
+    return null;
+  }
+  if (!verifyPin(manager_name, manager_pin, 'manager')) {
+    recordPinFailure(lockKey);
+    res.status(403).json({ error: '经理 PIN 验证失败' });
+    return null;
+  }
+  clearPinFailures(lockKey);
+  return manager_name;
+}
+
+function appendAudit(data, req, action, actor, extra) {
+  if (!Array.isArray(data.audit_log)) data.audit_log = [];
+  const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown').split(',')[0].trim();
+  data.audit_log.push({
+    ts: new Date().toISOString(),
+    action,
+    actor,
+    ip,
+    ua: req.headers['user-agent'] || '',
+    ...(extra || {})
+  });
+  if (data.audit_log.length > 2000) data.audit_log = data.audit_log.slice(-2000);
+}
+
+// 经理更新价格表（保存后自动回填金额=0 的历史明细）
+app.post('/api/manager-update-prices', (req, res) => {
+  const actor = authManager(req, res);
+  if (!actor) return;
+  const { prices } = req.body;
+  if (!Array.isArray(prices)) {
+    return res.status(400).json({ error: '参数不完整' });
+  }
+  if (!prices.every(p => p && typeof p === 'object' && typeof p.material === 'string' && p.material.trim())) {
+    return res.status(400).json({ error: '价格数据格式错误' });
+  }
+  const data = loadData();
+  data.material_prices = prices.map(p => ({
+    material: String(p.material).trim(),
+    unit_price: +(p.unit_price || 0),
+    notes: String(p.notes || '')
+  }));
+  const priceMap = buildPriceMap(data.material_prices);
+  let backfilled = 0;
+  (data.injection_items || []).forEach(item => {
+    const amount = +(item.actual_amount_hkd || 0);
+    const weight = +(item.actual_weight_kg || 0);
+    if (amount > 0 || weight <= 0) return;
+    const price = resolvePrice(item.material, priceMap);
+    if (price <= 0) return;
+    item.actual_amount_hkd = Math.round(weight * 2.20462 * price * 100) / 100;
+    backfilled++;
+  });
+  appendAudit(data, req, 'manager-update-prices', actor, { total: data.material_prices.length, backfilled });
+  saveData(data);
+  console.log(`[price-update] manager=${actor} total=${data.material_prices.length} backfilled=${backfilled}`);
+  res.json({ success: true, total: data.material_prices.length, backfilled });
+});
+
+// 经理一键重算：按当前价格表回填所有「金额=0 且 重量>0」的历史明细
+app.post('/api/recalc-amounts', (req, res) => {
+  const actor = authManager(req, res);
+  if (!actor) return;
+  const data = loadData();
+  const priceMap = buildPriceMap(data.material_prices);
+  let backfilled = 0, skipped = 0, missingPrice = 0;
+  (data.injection_items || []).forEach(item => {
+    const amount = +(item.actual_amount_hkd || 0);
+    const weight = +(item.actual_weight_kg || 0);
+    if (amount > 0 || weight <= 0) { skipped++; return; }
+    const price = resolvePrice(item.material, priceMap);
+    if (price <= 0) { missingPrice++; return; }
+    item.actual_amount_hkd = Math.round(weight * 2.20462 * price * 100) / 100;
+    backfilled++;
+  });
+  if (backfilled > 0) {
+    appendAudit(data, req, 'recalc-amounts', actor, { backfilled, missing_price: missingPrice });
+    saveData(data);
+  }
+  console.log(`[recalc] manager=${actor} backfilled=${backfilled} missing_price=${missingPrice}`);
+  res.json({ success: true, backfilled, missing_price: missingPrice });
 });
 
 app.post('/api/change-pin', (req, res) => {

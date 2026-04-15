@@ -30,6 +30,7 @@ plugins/*/.git/
 plugins/*/node_modules/
 plugins/工程啤办单/data/*
 !plugins/工程啤办单/data/.gitkeep
+!plugins/工程啤办单/data/default-material-prices.json
 plugins/schedule-system/data/
 plugins/schedule-system/uploads/
 plugins/new-product-schedule/data/*

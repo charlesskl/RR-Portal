@@ -103,7 +103,6 @@ curl http://localhost:<port>/health
 | jiangping | Flask | 5001 | /jiangping/ |
 | paiji | Node.js | 3000 | /paiji/ |
 | zuru-shipment | Flask | 5003 | /zuru-shipment/ |
-| business-data | Node.js+PG | 6001 | /business-data/ |
 
 ## 插件类型
 
@@ -335,12 +334,12 @@ const data = JSON.parse(fs.readFileSync('data/data.json'));
 | jiangping | 采购订单管理系统 | PMC跟仓管 | Standalone (Python/Flask) | /jiangping/ | https://github.com/fxxaxxx/jiangping |
 | paiji | AI注塑啤机排产系统 | 生产部 | Standalone (Node.js) | /paiji/ | https://github.com/duanlei10/234 |
 | zuru-shipment-deploy | ZURU出货助手 | Business | Standalone (Python/Flask) | /zuru-shipment/ | https://github.com/hanson678/zuru-shipment-deploy |
-| business-data-statistics | 生产经营数据系统 | 总部 | Standalone (Node.js+PostgreSQL) | /business-data/ | https://github.com/josie-peng/Business-data-statistics |
 
 ### 旧插件（已删除）
 
-以下插件已从 plugins/ 目录移除（2026-03-23）：
-- 3D打印 (Engineering)
-- Zuru MA 包装差价系统 (Business)
-- 印尼小组 (Indonesia)
+以下插件已从 plugins/ 目录移除：
+- 3D打印 (Engineering) — 2026-03-23
+- Zuru MA 包装差价系统 (Business) — 2026-03-23
+- 印尼小组 (Indonesia) — 2026-03-23
+- business-data-statistics 生产经营数据系统 (总部) — 2026-04-15
 - schedule-system (Production)

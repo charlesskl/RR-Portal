@@ -286,26 +286,6 @@
         </div>
       </div>
 
-      <!-- 总部 -->
-      <div class="dept-card" onclick="showDept('statistics')">
-        <div class="dept-card-header">
-          <div class="dept-icon pmc">&#128202;</div>
-          <div>
-            <div class="dept-name">总部</div>
-          </div>
-        </div>
-        <div class="dept-card-body">
-          <div class="plugin-list">
-            <div class="plugin-item">
-              <div class="plugin-info">
-                <div class="plugin-dot gray" id="businessDataDot"></div>
-                <span class="plugin-name">生产结余数据系统</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
     </div>
   </div>
 
@@ -479,41 +459,6 @@
     </div>
   </div>
 
-  <!-- ===== 总部详情 ===== -->
-  <div class="detail-view" id="statisticsDetail">
-    <div class="back-btn" onclick="goHome()">&larr; 返回部门总览</div>
-    <div class="breadcrumb">
-      <a href="#" onclick="goHome()">控制台</a>
-      <span class="sep">/</span>
-      <span style="color:#10b981">总部</span>
-    </div>
-    <div class="page-title" style="display:flex;align-items:center;gap:14px;">
-      <div class="dept-icon pmc" style="width:40px;height:40px;font-size:18px;">&#128202;</div>
-      总部
-    </div>
-    <div class="page-subtitle">生产结余数据统计与分析</div>
-
-    <div class="detail-plugin-card">
-      <div class="detail-plugin-left">
-        <div class="detail-plugin-icon" style="background:linear-gradient(135deg,#7F41C0,#57B894);">&#128202;</div>
-        <div>
-          <div class="detail-plugin-name">生产结余数据系统</div>
-          <div class="detail-plugin-desc">啤机部/印喷部/装配部三部门经营数据录入、自动结余计算、三工汇总报表、Excel导入导出</div>
-          <div class="feature-grid">
-            <div class="feature-tag">&#128202; 结余计算</div>
-            <div class="feature-tag">&#128230; Excel导入导出</div>
-            <div class="feature-tag">&#128200; 仪表盘</div>
-            <div class="feature-tag">&#128274; 数据锁定</div>
-          </div>
-        </div>
-      </div>
-      <div class="detail-plugin-right">
-        <div class="detail-plugin-status"><div class="plugin-dot gray" id="businessDataDetailDot"></div> 检查中...</div>
-        <a href="/business-data/" target="_blank" class="btn btn-primary">打开系统</a>
-      </div>
-    </div>
-  </div>
-
   <!-- ===== PMC跟仓管详情 ===== -->
   <div class="detail-view" id="pmcDetail">
     <div class="back-btn" onclick="goHome()">&larr; 返回部门总览</div>
@@ -583,7 +528,6 @@ async function checkHealth() {
       { name: 'jiangping', url: '/jiangping/health', dot: 'jiangpingDot', detailDot: 'jiangpingDetailDot' },
       { name: 'paiji', url: '/paiji/health', dot: 'paijiDot', detailDot: 'paijiDetailDot' },
       { name: 'zuru', url: '/zuru-shipment/health', dot: 'zuruDot', detailDot: 'zuruDetailDot' },
-      { name: 'businessData', url: '/business-data/health', dot: 'businessDataDot', detailDot: 'businessDataDetailDot' },
     ];
     var healthy = 0;
     var total = checks.length;

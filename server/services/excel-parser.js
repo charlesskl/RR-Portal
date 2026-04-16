@@ -62,7 +62,7 @@ function detectFormat(workbook) {
   if (assemblySheet) {
     let hasSpinLabel = false;
     assemblySheet.getRow(2).eachCell(cell => {
-      const v = strVal(cell) || '';
+      const v = (strVal(cell) || '').normalize('NFKC');
       if (v.includes('SPIN')) hasSpinLabel = true;
     });
     if (hasSpinLabel) return 'spin';

@@ -30,14 +30,14 @@ Full details: `.planning/milestones/v1.1-ROADMAP.md`
 ## Phase Details
 
 ### Phase 4: v1.1 缺口修复
-**Goal**: v1.1 已知的三个未修复缺口全部关闭，系统无已知回归
-**Depends on**: Nothing (standalone fixes)
-**Requirements**: FIX2-01, FIX2-02, FIX2-03
+**Goal**: 修复版本复制时 format_type 丢失的 bug
+**Depends on**: Nothing (standalone fix)
+**Requirements**: FIX2-03
 **Success Criteria** (what must be TRUE):
-  1. 毛绒公仔数据导入后，前端导航栏可见"车缝明细"tab 按钮并可点击切换
-  2. 前端导航栏可见"搪胶件"tab 按钮并可点击切换
-  3. 复制一个毛绒公仔版本后，新版本的 format_type 与原版本一致（不丢失）
-**Plans**: TBD
+  1. 复制一个毛绒公仔版本后，新版本的 format_type 与原版本一致（不丢失）
+**Plans**: 1 plan
+Plans:
+- [ ] 04-01-PLAN.md — 在 duplicate INSERT 中补充 format_type 字段
 
 ### Phase 5: SPIN 解析引擎
 **Goal**: 用户可导入 SPIN 内部报价明细 Excel，系统正确识别格式并将全部数据存入数据库
@@ -81,7 +81,7 @@ Full details: `.planning/milestones/v1.1-ROADMAP.md`
 | 1. 基础修复与代码整理 | v1.1 | 1/1 | Complete | 2026-03-28 |
 | 2. 毛绒公仔解析引擎 | v1.1 | 2/2 | Complete | 2026-03-28 |
 | 3. 前端双格式展示 | v1.1 | 1/1 | Complete | 2026-03-28 |
-| 4. v1.1 缺口修复 | v1.2 | 0/? | Not started | - |
+| 4. v1.1 缺口修复 | v1.2 | 0/1 | Not started | - |
 | 5. SPIN 解析引擎 | v1.2 | 0/? | Not started | - |
 | 6. SPIN 单款导出 | v1.2 | 0/? | Not started | - |
 | 7. SPIN 批量导出 | v1.2 | 0/? | Not started | - |

@@ -725,7 +725,7 @@ async function submitResetPin() {
     }
     bootstrap.Modal.getInstance(document.getElementById('resetPinModal')).hide();
     document.getElementById('resetMgrPin').value = '';
-    showToast(`已将 ${target} 的 PIN 重置为 ${newPin}，首次登录需修改`);
+    showToast(`已重置 ${target} 的 PIN，首次登录需修改`);
   } catch (e) {
     err.textContent = '网络错误';
     err.classList.remove('d-none');
@@ -774,8 +774,6 @@ function renderPriceTable() {
     </tr>
   `).join('') || '<tr><td colspan="5" class="text-center text-muted py-3">无匹配项</td></tr>';
 }
-
-function esc(s) { return String(s || '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
 
 function addPriceRow() {
   _priceRows.push({ material: '', unit_price: 0, notes: '' });

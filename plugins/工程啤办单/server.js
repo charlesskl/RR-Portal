@@ -507,8 +507,22 @@ app.put('/api/material-prices', (req, res) => {
     }
     const data = loadData();
     data.material_prices = req.body;
+
+    // 方案 C：补录价格后回填历史订单中「金额为 0 且重量>0」的明细
+    // 已有金额的保留历史价格不动；本次仍为 0 的材料不处理
+    const priceMap = buildPriceMap(data.material_prices);
+    let backfilled = 0;
+    (data.injection_items || []).forEach(item => {
+      const amount = +(item.actual_amount_hkd || 0);
+      const weight = +(item.actual_weight_kg || 0);
+      if (amount > 0 || weight <= 0) return;
+      const price = resolvePrice(item.material, priceMap);
+      if (price <= 0) return;
+      item.actual_amount_hkd = Math.round(weight * 2.20462 * price * 100) / 100;
+      backfilled++;
+    });
     saveData(data);
-    res.json({ prices: data.material_prices, backfilled: 0 });
+    res.json({ prices: data.material_prices, backfilled });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -517,11 +531,12 @@ app.get('/api/material-stats', (req, res) => {
   const data = loadData();
   const month = req.query.month; // optional YYYY-MM filter
 
-  // 以价格表为基础建立统计结构
+  // 以价格表为基础建立统计结构（按规范化 key 聚合，容纳格式差异与混合料）
+  const priceMap = buildPriceMap(data.material_prices);
   const stats = {};
   (data.material_prices || []).forEach((p, i) => {
-    stats[p.material] = {
-      seq: i + 1, material: p.material, unit_price: p.unit_price,
+    stats[normMat(p.material)] = {
+      seq: i + 1, material: p.material, unit_price: +p.unit_price || 0,
       notes: p.notes || '', total_actual_weight: 0, total_amount: 0
     };
   });
@@ -550,20 +565,25 @@ app.get('/api/material-stats', (req, res) => {
       .map(o => o.id)
   );
 
-  // 累加 injection_items 里的仓库实填数据
+  // 累加 injection_items 里的仓库实填数据（按规范化 key 合并同义名）
   (data.injection_items || []).forEach(item => {
     if (!item.material) return;
     if (!validOrderIds.has(item.order_id)) return;
-    if (!stats[item.material]) {
-      stats[item.material] = {
+    const key = normMat(item.material);
+    if (!stats[key]) {
+      // 价格表里没这条 → 尝试解析（含混合料）拿一个参考价，否则标记未录入
+      const resolved = resolvePrice(item.material, priceMap);
+      stats[key] = {
         seq: Object.keys(stats).length + 1, material: item.material,
-        unit_price: 0, notes: '', total_actual_weight: 0, total_amount: 0
+        unit_price: resolved, notes: '', total_actual_weight: 0, total_amount: 0
       };
     }
-    stats[item.material].total_actual_weight += +(item.actual_weight_kg || 0);
-    stats[item.material].total_amount        += +(item.actual_amount_hkd || 0);
+    stats[key].total_actual_weight += +(item.actual_weight_kg || 0);
+    stats[key].total_amount        += +(item.actual_amount_hkd || 0);
   });
-  res.json(Object.values(stats));
+  // 补充 no_price 标记供前端徽章判断
+  const result = Object.values(stats).map(s => ({ ...s, no_price: !(+s.unit_price > 0) }));
+  res.json(result);
 });
 
 // ─── 啤办费用汇总 ─────────────────────────────────────────────────────────────
@@ -762,8 +782,8 @@ app.post('/api/reset-supervisor-pin', (req, res) => {
     return res.status(400).json({ error: '目标主管不存在' });
   }
   const newPinStr = String(new_pin);
-  if (newPinStr.length < 4 || newPinStr.length > 8) {
-    return res.status(400).json({ error: '新 PIN 需 4-8 位' });
+  if (!/^\d{4,8}$/.test(newPinStr)) {
+    return res.status(400).json({ error: '新 PIN 须为 4-8 位纯数字' });
   }
   const data = loadData();
   if (!data.auth_pins) data.auth_pins = { supervisors: {}, manager: {} };

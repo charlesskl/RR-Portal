@@ -327,7 +327,7 @@ function renderOrders(orders) {
     return;
   }
   const rows = orders.map(o => {
-    const hasMissingPrice = (o.items || []).some(it => it.material && !_injMatPrices[it.material]);
+    const hasMissingPrice = (o.items || []).some(it => it.material && !resolvePrice(it.material, _injMatPrices));
     return `
     <tr class="order-row" onclick="viewOrder(${o.id})">
       <td><strong>${esc(o.order_number || '-')}</strong></td>
@@ -371,7 +371,7 @@ function renderOrders(orders) {
 }
 
 let _currentMachineOrderId = null;
-let _injMatPrices = {};  // material → unit_price
+let _injMatPrices = {};  // normalized material → unit_price (from buildPriceMap)
 
 function viewOrder(id) {
   _currentMachineOrderId = id;
@@ -384,7 +384,7 @@ function viewOrder(id) {
 
       const items = order.items || [];
       const rows = items.map((it, idx) => {
-        const unitPrice = _injMatPrices[it.material] || 0;
+        const unitPrice = resolvePrice(it.material, _injMatPrices);
         return `
         <tr data-item-id="${it.id}" data-unit-price="${unitPrice}">
           <td>${esc(it.mold_id||'')}</td>
@@ -658,7 +658,7 @@ function printOrder(id) {
 }
 
 apiFetch('/api/material-prices').then(r => r.json()).then(prices => {
-  prices.forEach(p => { _injMatPrices[p.material] = p.unit_price; });
+  _injMatPrices = buildPriceMap(prices);
 }).finally(() => {
   loadOrders();
 });

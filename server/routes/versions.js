@@ -139,11 +139,13 @@ router.post('/:id/duplicate', (req, res) => {
       // Copy QuoteVersion
       const vResult = db.prepare(`
         INSERT INTO QuoteVersion (product_id, version_name, source_sheet, date_code, quote_date, status,
-          item_rev, prepared_by, quote_rev, fty_delivery_date, body_no, bd_prepared_by, bd_date, body_cost_revision)
-        VALUES (?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?)
+          item_rev, prepared_by, quote_rev, fty_delivery_date, body_no, bd_prepared_by, bd_date, body_cost_revision,
+          format_type)
+        VALUES (?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(version.product_id, newName, version.source_sheet, version.date_code, version.quote_date,
         version.item_rev, version.prepared_by, version.quote_rev, version.fty_delivery_date,
-        version.body_no, version.bd_prepared_by, version.bd_date, version.body_cost_revision);
+        version.body_no, version.bd_prepared_by, version.bd_date, version.body_cost_revision,
+        version.format_type);
       const newId = vResult.lastInsertRowid;
 
       // Copy QuoteParams

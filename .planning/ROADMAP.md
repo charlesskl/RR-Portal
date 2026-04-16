@@ -64,7 +64,7 @@ Plans:
   5. 款式 sheet 的 Markup 汇总区域（Material / Packaging / Labor markup）数值正确
 **Plans**: 1 plan
 Plans:
-- [ ] 05-01-PLAN.md — SPIN 格式识别 + MoldPart/车缝明细解析
+- [x] 05-01-PLAN.md — SPIN 格式识别 + MoldPart/车缝明细解析
 **UI hint**: yes
 
 ### Phase 7: SPIN 批量导出

@@ -48,7 +48,7 @@ def api_list():
         result.append({
             'note_id': note.id,
             'item_id': item.id,
-            'delivery_date': note.delivery_date.strftime('%#m/%#d') if note.delivery_date and is_first else '',
+            'delivery_date': note.delivery_date.strftime('%Y/%#m/%#d') if note.delivery_date and is_first else '',
             'supplier': (note.supplier.short_name or note.supplier.name) if is_first else '',
             'delivery_no': note.delivery_no if is_first else '',
             'product_code': item.product_code or '',
@@ -141,15 +141,26 @@ def import_excel():
 
                     dn_date = _parse_excel_date(delivery_date_val)
 
-                    current_note = DeliveryNote(
+                    # Check for existing delivery note to avoid duplicates
+                    current_note = DeliveryNote.query.filter_by(
                         supplier_id=supplier.id,
                         delivery_no=dn_no,
-                        delivery_date=dn_date,
-                        total_amount=0,
-                    )
-                    db.session.add(current_note)
-                    db.session.flush()
-                    total_notes += 1
+                    ).first()
+                    if current_note:
+                        # Delete old items to re-import
+                        DeliveryNoteItem.query.filter_by(delivery_note_id=current_note.id).delete()
+                        current_note.delivery_date = dn_date
+                        db.session.flush()
+                    else:
+                        current_note = DeliveryNote(
+                            supplier_id=supplier.id,
+                            delivery_no=dn_no,
+                            delivery_date=dn_date,
+                            total_amount=0,
+                        )
+                        db.session.add(current_note)
+                        db.session.flush()
+                        total_notes += 1
 
                 if not current_note:
                     continue
@@ -208,6 +219,11 @@ def import_excel():
                 )
 
         db.session.commit()
+
+        # Refresh match problems
+        from routes.problems import refresh_problems
+        refresh_problems()
+
         flash(f'导入成功！共导入 {total_notes} 个交货单，{total_items} 条明细', 'success')
 
     except Exception as e:
@@ -296,6 +312,54 @@ def api_purchase_items():
             'quantity': int(item.quantity or 0),
         })
     return jsonify({'items': items})
+
+
+@bp.route('/api/suggest/po-no')
+def api_suggest_po_no():
+    """Fuzzy suggestions for 采购单号. Sources: PurchaseOrder + DeliveryNoteItem."""
+    q = request.args.get('q', '').strip()
+    if not q:
+        return jsonify({'suggestions': []})
+    like = f'%{q}%'
+    pos = db.session.query(PurchaseOrder.po_no).filter(PurchaseOrder.po_no.ilike(like)).limit(50).all()
+    dns = db.session.query(DeliveryNoteItem.po_no).filter(DeliveryNoteItem.po_no.ilike(like)).limit(50).all()
+    seen, out = set(), []
+    for (v,) in list(pos) + list(dns):
+        if v and v not in seen:
+            seen.add(v)
+            out.append(v)
+        if len(out) >= 20:
+            break
+    return jsonify({'suggestions': out})
+
+
+@bp.route('/api/suggest/product-code')
+def api_suggest_product_code():
+    """Fuzzy suggestions for 货号. Sources: PurchaseItem + DeliveryNoteItem."""
+    q = request.args.get('q', '').strip()
+    if not q:
+        return jsonify({'suggestions': []})
+    like = f'%{q}%'
+    pis = db.session.query(PurchaseItem.product_code, PurchaseItem.product_name).filter(PurchaseItem.product_code.ilike(like)).limit(50).all()
+    dns = db.session.query(DeliveryNoteItem.product_code, DeliveryNoteItem.product_name).filter(DeliveryNoteItem.product_code.ilike(like)).limit(50).all()
+    seen, out = set(), []
+    for code, name in list(pis) + list(dns):
+        if code and code not in seen:
+            seen.add(code)
+            out.append({'code': code, 'name': name or ''})
+        if len(out) >= 20:
+            break
+    return jsonify({'suggestions': out})
+
+
+@bp.route('/api/clear-all', methods=['POST'])
+def api_clear_all():
+    """Delete all delivery notes and items."""
+    count = DeliveryNote.query.count()
+    DeliveryNoteItem.query.delete()
+    DeliveryNote.query.delete()
+    db.session.commit()
+    return jsonify({'success': True, 'deleted': count})
 
 
 @bp.route('/api/create', methods=['POST'])
@@ -595,6 +659,8 @@ def _remove_purchase_remarks(po_no, product_name, product_code, delivery_date, q
     parts = [p.strip() for p in current.replace('、', '，').replace(',', '，').split('，') if p.strip()]
     parts = [p for p in parts if p != entry]
     match.remarks = '，'.join(parts)
+
+
 
 
 def _detect_delivery_columns(header):

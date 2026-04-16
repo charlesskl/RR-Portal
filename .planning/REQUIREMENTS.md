@@ -49,3 +49,4 @@
 | PLUSH-01 ~ PLUSH-07 | Phase 2 |
 | DB-01 ~ DB-03 | Phase 2 |
 | UI-01 ~ UI-03 | Phase 3 |
+| UI-02, UI-03, DB-03, PLUSH-01 | Phase 4 (gap closure) |

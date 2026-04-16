@@ -26,6 +26,18 @@
   6. QuoteVersion.format_type 区分两种格式
 **Plans**: TBD
 
+### Phase 4: 修复毛绒公仔 UI Tab 与格式字段
+**Goal**: 修复审计发现的三个缺口：添加车缝明细和搪胶件 tab 导航按钮，修复版本复制时 format_type 丢失，强化格式检测逻辑
+**Depends on**: Phase 3
+**Requirements**: UI-02, UI-03, DB-03, PLUSH-01
+**Gap Closure**: 关闭 v1.1 里程碑审计缺口
+**Success Criteria**:
+  1. 毛绒公仔报价页面的 Body Cost Breakdown 区域可见并可点击「车缝明细」tab
+  2. 毛绒公仔报价页面的 Body Cost Breakdown 区域可见并可点击「搪胶件」tab
+  3. 复制毛绒公仔版本后，复制版本的 format_type 仍为 plush（而非默认 injection）
+  4. 格式检测同时支持 3K报价-* sheet 名称检测和子 sheet 名称检测
+**Plans**: TBD
+
 ### Phase 3: 前端双格式展示
 **Goal**: 前端界面能正确展示毛绒公仔格式的所有数据，包括新增的车缝明细和搪胶件 tab
 **Depends on**: Phase 2

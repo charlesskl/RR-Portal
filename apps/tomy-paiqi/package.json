@@ -1,0 +1,40 @@
+{
+  "name": "tomy-schedule-checker",
+  "version": "1.0.0",
+  "description": "TOMY PO and schedule reconciliation system",
+  "main": "server/index.ts",
+  "scripts": {
+    "dev": "npx tsx server/index.ts",
+    "build": "npx tsc",
+    "test": "npx vitest run"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "archiver": "^7.0.1",
+    "chinese-days": "^1.5.7",
+    "cors": "^2.8.6",
+    "date-fns": "^4.1.0",
+    "exceljs": "^4.4.0",
+    "express": "^5.2.1",
+    "multer": "^2.1.1",
+    "pdf-parse": "^2.4.5",
+    "pdfjs-dist": "^5.5.207",
+    "tsx": "^4.21.0"
+  },
+  "devDependencies": {
+    "@types/archiver": "^7.0.0",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/jszip": "^3.4.0",
+    "@types/multer": "^2.1.0",
+    "@types/node": "^25.5.0",
+    "@types/pdf-parse": "^1.1.5",
+    "@typescript-eslint/parser": "^8.57.1",
+    "esbuild": "^0.27.4",
+    "jszip": "^3.10.1",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.0"
+  }
+}

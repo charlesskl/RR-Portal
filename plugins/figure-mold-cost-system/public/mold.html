@@ -116,7 +116,7 @@
     <div class="filter-bar row g-2 mb-3 align-items-end">
       <div class="col-auto">
         <label>年份</label>
-        <select class="form-select form-select-sm" id="sYear"></select>
+        <select class="form-select form-select-sm" id="sYear"><option value="">全部</option></select>
       </div>
       <div class="col-auto">
         <label>月份</label>
@@ -300,7 +300,7 @@
           </div>
           <div class="col-md-3">
             <label class="form-label">费用承担 *</label>
-            <select class="form-select" id="po-payment_type"><option value="">请选择</option><option>客付</option><option>自付</option></select>
+            <select class="form-select" id="po-payment_type"><option value="">请选择</option><option>客付</option><option>自付</option><option>现金</option></select>
           </div>
         </div>
         <div class="row g-3 mb-3">
@@ -405,7 +405,7 @@
             </div>
             <div class="col-auto">
               <label class="form-label mb-1">批量设置费用承担</label>
-              <select class="form-select form-select-sm" id="imp-batch-payment" onchange="batchSetField('payment',this.value)"><option value="">--</option><option>客付</option><option>自付</option></select>
+              <select class="form-select form-select-sm" id="imp-batch-payment" onchange="batchSetField('payment',this.value)"><option value="">--</option><option>客付</option><option>自付</option><option>现金</option></select>
             </div>
             <div class="col-auto">
               <button class="btn btn-sm btn-outline-success" onclick="addMoreFiles()"><i class="bi bi-plus-circle"></i> 继续添加文件</button>
@@ -547,10 +547,6 @@ function loadOrders() {
     .then(function(r) { return r.json(); })
     .then(function(orders) {
       allOrders = orders;
-      // Load POs in background
-      authFetch('api/purchase-orders?type=mold')
-        .then(function(r) { return r.json(); })
-        .then(function(pos) { allPOs = pos; });
       renderGroupedTable(orders);
     });
 }
@@ -697,37 +693,9 @@ function showDetail(orderId) {
     html += '<div class="mb-3"><strong>备注：</strong> ' + esc(o.notes) + '</div>';
   }
 
-  // Show linked PO details if exists
+  // Show linked PO (load on demand)
   if (o.from_po_id) {
-    var po = allPOs.find(function(p) { return p.id === o.from_po_id; });
-    if (po) {
-      html += '<hr>';
-      html += '<div class="po-detail-card">';
-      html += '<h6><i class="bi bi-file-earmark-text"></i> 关联采购单: ' + esc(po.po_number) + ' <span class="badge ' + (po.status === '已确认' ? 'bg-success' : 'bg-secondary') + '">' + esc(po.status) + '</span>';
-      html += ' <a href="po-print.html?id=' + po.id + '" target="_blank" class="btn btn-sm btn-outline-info ms-2"><i class="bi bi-printer"></i> 打印</a>';
-      html += '</h6>';
-
-      html += '<div class="row g-2 mb-2">';
-      html += '<div class="col-md-3"><small class="text-muted">供应商：</small> ' + esc(po.supplier_name) + '</div>';
-      html += '<div class="col-md-3"><small class="text-muted">联络人：</small> ' + esc(po.supplier_contact) + '</div>';
-      html += '<div class="col-md-3"><small class="text-muted">费用承担：</small> ' + esc(po.payment_type) + '</div>';
-      html += '<div class="col-md-3"><small class="text-muted">创建时间：</small> ' + fmtDate(po.created_at) + '</div>';
-      html += '</div>';
-
-      // PO items table
-      if (po.items && po.items.length) {
-        html += '<table class="table table-sm table-bordered mt-2 mb-0">';
-        html += '<thead class="table-light"><tr><th>序号</th><th>零件名称</th><th>材料</th><th>GATE</th><th>CAV/UP</th><th>单价</th><th>金额(RMB)</th><th>备注</th></tr></thead><tbody>';
-        var totalAmt = 0;
-        po.items.forEach(function(it, i) {
-          totalAmt += Number(it.amount) || 0;
-          html += '<tr><td>' + (i + 1) + '</td><td>' + esc(it.part_name) + '</td><td>' + esc(it.material) + '</td><td>' + esc(it.gate) + '</td><td>' + esc(it.cav_up) + '</td><td>' + (it.unit_price || '') + '</td><td>' + (it.amount ? Number(it.amount).toLocaleString() : '') + '</td><td>' + esc(it.notes) + '</td></tr>';
-        });
-        html += '<tr class="table-secondary fw-bold"><td colspan="6" class="text-end">合计：</td><td>¥' + totalAmt.toLocaleString() + '</td><td></td></tr>';
-        html += '</tbody></table>';
-      }
-      html += '</div>';
-    }
+    html += '<hr><div id="po-detail-area"><i class="bi bi-hourglass-split"></i> 加载采购单...</div>';
   }
 
   // Status advancement buttons
@@ -741,6 +709,38 @@ function showDetail(orderId) {
   document.getElementById('detailTitle').textContent = '订单详情 - ' + (o.mold_name || '');
   document.getElementById('detailBody').innerHTML = html;
   new bootstrap.Modal(document.getElementById('detailModal')).show();
+
+  // Load linked PO on demand
+  if (o.from_po_id) {
+    authFetch('api/purchase-orders/' + parseInt(o.from_po_id, 10))
+      .then(function(r) { return r.ok ? r.json() : null; })
+      .then(function(po) {
+        var area = document.getElementById('po-detail-area');
+        if (!area || !po) { if (area) area.innerHTML = ''; return; }
+        var ph = '<div class="po-detail-card">';
+        ph += '<h6><i class="bi bi-file-earmark-text"></i> 关联采购单: ' + esc(po.po_number) + ' <span class="badge ' + (po.status === '已确认' ? 'bg-success' : 'bg-secondary') + '">' + esc(po.status) + '</span>';
+        ph += ' <a href="po-print.html?id=' + po.id + '" target="_blank" class="btn btn-sm btn-outline-info ms-2"><i class="bi bi-printer"></i> 打印</a></h6>';
+        ph += '<div class="row g-2 mb-2">';
+        ph += '<div class="col-md-3"><small class="text-muted">供应商：</small> ' + esc(po.supplier_name) + '</div>';
+        ph += '<div class="col-md-3"><small class="text-muted">联络人：</small> ' + esc(po.supplier_contact) + '</div>';
+        ph += '<div class="col-md-3"><small class="text-muted">费用承担：</small> ' + esc(po.payment_type) + '</div>';
+        ph += '<div class="col-md-3"><small class="text-muted">创建时间：</small> ' + fmtDate(po.created_at) + '</div>';
+        ph += '</div>';
+        if (po.items && po.items.length) {
+          ph += '<table class="table table-sm table-bordered mt-2 mb-0">';
+          ph += '<thead class="table-light"><tr><th>序号</th><th>零件名称</th><th>材料</th><th>GATE</th><th>CAV/UP</th><th>单价</th><th>金额(RMB)</th><th>备注</th></tr></thead><tbody>';
+          var totalAmt = 0;
+          po.items.forEach(function(it, i) {
+            totalAmt += Number(it.amount) || 0;
+            ph += '<tr><td>' + (i + 1) + '</td><td>' + esc(it.part_name) + '</td><td>' + esc(it.material) + '</td><td>' + esc(it.gate) + '</td><td>' + esc(it.cav_up) + '</td><td>' + (it.unit_price || '') + '</td><td>' + (it.amount ? Number(it.amount).toLocaleString() : '') + '</td><td>' + esc(it.notes) + '</td></tr>';
+          });
+          ph += '<tr class="table-secondary fw-bold"><td colspan="6" class="text-end">合计：</td><td>¥' + totalAmt.toLocaleString() + '</td><td></td></tr>';
+          ph += '</tbody></table>';
+        }
+        ph += '</div>';
+        area.innerHTML = ph;
+      });
+  }
 }
 
 // ─── Image ───────────────────────────────────────────────────────────
@@ -813,7 +813,7 @@ function saveOrder() {
     return;
   }
   if (pendingImageData) body.image_data = pendingImageData;
-  var url = id ? '/api/mold-orders/' + id : '/api/mold-orders';
+  var url = id ? 'api/mold-orders/' + id : 'api/mold-orders';
   var method = id ? 'PUT' : 'POST';
   fetch(url, { method: method, headers: authHeaders(), body: JSON.stringify(body) })
     .then(function(r) { if (!r.ok) throw new Error('保存失败'); return r.json(); })
@@ -1035,7 +1035,7 @@ function savePO() {
     showToast('请填写采购单编号、分组和供应商', 'danger');
     return;
   }
-  var url = id ? '/api/purchase-orders/' + id : '/api/purchase-orders';
+  var url = id ? 'api/purchase-orders/' + id : 'api/purchase-orders';
   var method = id ? 'PUT' : 'POST';
   fetch(url, { method: method, headers: authHeaders(), body: JSON.stringify(body) })
     .then(function(r) { if (!r.ok) throw new Error('保存失败'); return r.json(); })
@@ -1194,7 +1194,7 @@ function renderBatchTable() {
       '<td><input type="date" class="form-control form-control-sm imp-row-date" data-idx="' + i + '" value="' + dateVal + '"></td>' +
       '<td>' + custHtml + '</td>' +
       '<td><select class="form-select form-select-sm imp-row-group" data-idx="' + i + '"><option value="">请选择</option><option>A车间</option><option>B车间</option><option>华登车间</option></select></td>' +
-      '<td><select class="form-select form-select-sm imp-row-payment" data-idx="' + i + '"><option value="">--</option><option>客付</option><option>自付</option></select></td>' +
+      '<td><select class="form-select form-select-sm imp-row-payment" data-idx="' + i + '"><option value="">--</option><option>客付</option><option>自付</option><option>现金</option></select></td>' +
       '<td class="imp-row-status" id="imp-status-' + i + '"><span class="badge bg-secondary">待导入</span></td>' +
       '</tr>';
   });
@@ -1333,7 +1333,7 @@ function confirmBatchImport() {
   });
 }
 
-setInterval(loadOrders, 30000);
+setInterval(loadOrders, 120000);
 </script>
 </body>
 </html>

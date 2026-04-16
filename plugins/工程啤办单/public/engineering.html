@@ -622,7 +622,7 @@ function renderOrderList(orders) {
         <td>${statusBadge(o.status)}</td>
         <td class="text-nowrap" onclick="event.stopPropagation()">
           <div class="btn-group btn-group-sm">
-            ${o.status === '待审核' ? `<button class="btn btn-warning fw-bold" onclick="reviewOrder(${o.id},'${(o.order_number||'').replace(/'/g,'')}')">审核</button>` : ''}
+            ${(o.status === '待审核' || o.status === '待经理审核') ? `<button class="btn ${o.status === '待经理审核' ? 'btn-primary' : 'btn-warning'} fw-bold" onclick="reviewOrder(${o.id},'${(o.order_number||'').replace(/'/g,'')}')">审核</button>` : ''}
             ${!isLocked(o.status) ? `<button class="btn btn-outline-primary" onclick="editOrder(${o.id})" title="编辑"><i class="bi bi-pencil"></i></button>` : ''}
             ${!isLocked(o.status) ? `<button class="btn btn-outline-danger" onclick="deleteOrder(${o.id})" title="删除"><i class="bi bi-trash"></i></button>` : ''}
             <button class="btn btn-outline-secondary" onclick="printOrder(${o.id})" title="打印"><i class="bi bi-printer"></i></button>
@@ -659,7 +659,7 @@ function renderOrderList(orders) {
           <td>${esc(it.engineer||'-')}</td>
           <td>${idx===0 ? statusBadge(o.status) : ''}</td>
           <td class="text-nowrap" onclick="event.stopPropagation()">${idx===0 ? `<div class="btn-group btn-group-sm">
-            ${o.status === '待审核' ? `<button class="btn btn-warning fw-bold" onclick="reviewOrder(${o.id},'${(o.order_number||'').replace(/'/g,'')}')">审核</button>` : ''}
+            ${(o.status === '待审核' || o.status === '待经理审核') ? `<button class="btn ${o.status === '待经理审核' ? 'btn-primary' : 'btn-warning'} fw-bold" onclick="reviewOrder(${o.id},'${(o.order_number||'').replace(/'/g,'')}')">审核</button>` : ''}
             ${!isLocked(o.status) ? `<button class="btn btn-outline-primary" onclick="editOrder(${o.id})" title="编辑"><i class="bi bi-pencil"></i></button>` : ''}
             ${!isLocked(o.status) ? `<button class="btn btn-outline-danger" onclick="deleteOrder(${o.id})" title="删除"><i class="bi bi-trash"></i></button>` : ''}
             <button class="btn btn-outline-success" onclick="editOrder(${o.id},true)" title="复制"><i class="bi bi-copy"></i></button>
@@ -2227,7 +2227,7 @@ function onAsmExcelSelected() {
         const headers = allRows[headerIdx].map(c => String(c).trim());
         const nameCol = headers.findIndex(h => h.includes('名称'));
         const qtyCol = headers.findIndex(h => h.includes('数量'));
-        const dateCol = headers.findIndex(h => h === '日期');
+        const dateCol = headers.findIndex(h => h.includes('日期'));
         const notesCol = headers.findIndex(h => h.includes('备注'));
         const complCol = headers.findIndex(h => h.includes('完成'));
 

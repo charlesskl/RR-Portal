@@ -1,3 +1,14 @@
+FROM node:20-alpine AS builder
+
+WORKDIR /app
+
+# Build deps for better-sqlite3 native compile
+RUN apk add --no-cache python3 make g++
+
+COPY package*.json ./
+RUN npm ci --omit=dev
+
+
 FROM node:20-alpine
 
 WORKDIR /app
@@ -7,9 +18,9 @@ RUN apk add --no-cache tini curl
 # Non-root user
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 
+# Copy compiled node_modules from builder
+COPY --from=builder /app/node_modules ./node_modules
 COPY package*.json ./
-RUN npm ci --omit=dev
-
 COPY . .
 
 RUN mkdir -p data public/uploads && \

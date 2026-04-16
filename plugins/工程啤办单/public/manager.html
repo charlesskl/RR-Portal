@@ -75,7 +75,7 @@
         <button class="btn btn-sm btn-outline-light" onclick="openPriceTableModal()">
           <i class="bi bi-table me-1"></i>价格表管理
         </button>
-        <button class="btn btn-sm btn-outline-light" onclick="doRecalcAmounts()">
+        <button class="btn btn-sm btn-outline-light" onclick="openRecalcModal()">
           <i class="bi bi-calculator me-1"></i>料费重算
         </button>
         <button class="btn btn-sm btn-outline-light" onclick="openResetPinModal()">
@@ -171,8 +171,12 @@
           <select id="resetTarget" class="form-select"></select>
         </div>
         <div class="mb-3">
-          <label class="form-label fw-bold">新 PIN 码（4-8 位纯数字）</label>
-          <input type="text" id="resetNewPin" class="form-control" maxlength="8" placeholder="例如 1234" pattern="\d{4,8}" inputmode="numeric" autocomplete="off">
+          <label class="form-label fw-bold">新 PIN 码（4-8 位）</label>
+          <input type="text" id="resetNewPin" class="form-control" maxlength="8" placeholder="例如 1234" autocomplete="off">
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-bold">经理 PIN 确认</label>
+          <input type="password" id="resetMgrPin" class="form-control" maxlength="8" placeholder="重新输入经理 PIN" autocomplete="off">
         </div>
         <div id="resetPinError" class="text-danger small d-none"></div>
       </div>
@@ -222,15 +226,48 @@
         </div>
         <div id="priceTableError" class="text-danger small d-none"></div>
       </div>
+      <div class="modal-footer flex-column align-items-stretch">
+        <div class="mb-2">
+          <label class="form-label fw-bold small mb-1">经理 PIN 确认（保存并回填需验证）</label>
+          <input type="password" id="ptMgrPin" class="form-control form-control-sm" maxlength="8" placeholder="请输入经理 PIN" autocomplete="off">
+        </div>
+        <div class="d-flex justify-content-end gap-2">
+          <button class="btn btn-outline-secondary" data-bs-dismiss="modal">取消</button>
+          <button class="btn btn-primary" style="background:#7c3aed;border-color:#7c3aed" onclick="savePriceTable()">
+            <i class="bi bi-check-circle me-1"></i>保存并回填
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ─── 料费重算 Modal ──────────────────────────────────────────────────── -->
+<div class="modal fade" id="recalcModal" tabindex="-1" data-bs-backdrop="static">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header" style="background:#7c3aed;color:#fff">
+        <h5 class="modal-title"><i class="bi bi-calculator me-2"></i>料费重算</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <p class="small text-muted mb-3">将根据最新原料价格表，重新计算所有未完成订单的料费金额。</p>
+        <div class="mb-3">
+          <label class="form-label fw-bold">经理 PIN 确认</label>
+          <input type="password" id="recalcMgrPin" class="form-control" maxlength="8" placeholder="请输入经理 PIN" autocomplete="off">
+        </div>
+        <div id="recalcError" class="text-danger small d-none"></div>
+      </div>
       <div class="modal-footer">
         <button class="btn btn-outline-secondary" data-bs-dismiss="modal">取消</button>
-        <button class="btn btn-primary" style="background:#7c3aed;border-color:#7c3aed" onclick="savePriceTable()">
-          <i class="bi bi-check-circle me-1"></i>保存并回填
+        <button class="btn btn-primary" style="background:#7c3aed;border-color:#7c3aed" onclick="submitRecalc()">
+          <i class="bi bi-check-circle me-1"></i>确认重算
         </button>
       </div>
     </div>
   </div>
 </div>
+
 
 <!-- Toast -->
 <div class="position-fixed bottom-0 end-0 p-3" style="z-index:9999">
@@ -663,12 +700,12 @@ async function openResetPinModal() {
 async function submitResetPin() {
   const target = document.getElementById('resetTarget').value;
   const newPin = document.getElementById('resetNewPin').value.trim();
+  const managerPin = document.getElementById('resetMgrPin').value.trim();
   const err = document.getElementById('resetPinError');
   err.classList.add('d-none');
   if (!target) { err.textContent = '请选择主管'; err.classList.remove('d-none'); return; }
-  if (!/^\d{4,8}$/.test(newPin)) { err.textContent = '新 PIN 须为 4-8 位纯数字'; err.classList.remove('d-none'); return; }
-  const managerPin = sessionStorage.getItem('mgr_pin') || '';
-  if (!managerPin) { err.textContent = '登录状态已失效，请重新登录'; err.classList.remove('d-none'); return; }
+  if (newPin.length < 4 || newPin.length > 8) { err.textContent = '新 PIN 需 4-8 位'; err.classList.remove('d-none'); return; }
+  if (!managerPin) { err.textContent = '请输入经理 PIN'; err.classList.remove('d-none'); return; }
   try {
     const r = await apiFetch('/api/reset-supervisor-pin', {
       method: 'POST',
@@ -687,6 +724,7 @@ async function submitResetPin() {
       return;
     }
     bootstrap.Modal.getInstance(document.getElementById('resetPinModal')).hide();
+    document.getElementById('resetMgrPin').value = '';
     showToast(`已重置 ${target} 的 PIN，首次登录需修改`);
   } catch (e) {
     err.textContent = '网络错误';
@@ -700,6 +738,7 @@ async function openPriceTableModal() {
   document.getElementById('priceTableError').classList.add('d-none');
   document.getElementById('ptSearch').value = '';
   document.getElementById('ptOnlyMissing').checked = false;
+  document.getElementById('ptMgrPin').value = '';
   try {
     const r = await apiFetch('/api/material-prices');
     _priceRows = (await r.json()).map(p => ({
@@ -759,8 +798,8 @@ async function savePriceTable() {
   const names = clean.map(p => p.material.trim().toLowerCase());
   const dup = names.find((n, i) => names.indexOf(n) !== i);
   if (dup) { err.textContent = `存在重复原料名：${dup}`; err.classList.remove('d-none'); return; }
-  const managerPin = sessionStorage.getItem('mgr_pin') || '';
-  if (!managerPin) { err.textContent = '登录状态已失效'; err.classList.remove('d-none'); return; }
+  const managerPin = (document.getElementById('ptMgrPin').value || '').trim();
+  if (!managerPin) { err.textContent = '请输入经理 PIN'; err.classList.remove('d-none'); return; }
   try {
     const r = await apiFetch('/api/manager-update-prices', {
       method: 'POST',
@@ -770,6 +809,7 @@ async function savePriceTable() {
     const d = await r.json();
     if (!r.ok || !d.success) { err.textContent = d.error || '保存失败'; err.classList.remove('d-none'); return; }
     bootstrap.Modal.getInstance(document.getElementById('priceTableModal')).hide();
+    document.getElementById('ptMgrPin').value = '';
     showToast(d.backfilled > 0
       ? `已保存 ${d.total} 项价格，回填 ${d.backfilled} 条历史明细`
       : `已保存 ${d.total} 项价格`);
@@ -780,10 +820,17 @@ async function savePriceTable() {
 }
 
 // ─── 料费重算（按当前价格表回填金额=0 的历史明细） ──────────────────────────
-async function doRecalcAmounts() {
-  if (!confirm('将按当前价格表重算历史订单中金额为 0 的料费明细。\n已有金额的订单不会被修改。是否继续？')) return;
-  const managerPin = sessionStorage.getItem('mgr_pin') || '';
-  if (!managerPin) { showToast('登录状态已失效，请重新登录', 'danger'); return; }
+function openRecalcModal() {
+  document.getElementById('recalcError').classList.add('d-none');
+  document.getElementById('recalcMgrPin').value = '';
+  new bootstrap.Modal(document.getElementById('recalcModal')).show();
+}
+
+async function submitRecalc() {
+  const err = document.getElementById('recalcError');
+  err.classList.add('d-none');
+  const managerPin = (document.getElementById('recalcMgrPin').value || '').trim();
+  if (!managerPin) { err.textContent = '请输入经理 PIN'; err.classList.remove('d-none'); return; }
   try {
     const r = await apiFetch('/api/recalc-amounts', {
       method: 'POST',
@@ -791,13 +838,16 @@ async function doRecalcAmounts() {
       body: JSON.stringify({ manager_name: MANAGER_NAME, manager_pin: managerPin })
     });
     const d = await r.json();
-    if (!r.ok || !d.success) { showToast(d.error || '重算失败', 'danger'); return; }
+    if (!r.ok || !d.success) { err.textContent = d.error || '重算失败'; err.classList.remove('d-none'); return; }
+    bootstrap.Modal.getInstance(document.getElementById('recalcModal')).hide();
+    document.getElementById('recalcMgrPin').value = '';
     const msg = d.backfilled > 0
       ? `已回填 ${d.backfilled} 条料费` + (d.missing_price > 0 ? `（${d.missing_price} 条仍缺价格）` : '')
       : '没有需要回填的明细' + (d.missing_price > 0 ? `（${d.missing_price} 条缺价格）` : '');
     showToast(msg, 'primary');
   } catch (e) {
-    showToast('网络错误', 'danger');
+    err.textContent = '网络错误';
+    err.classList.remove('d-none');
   }
 }
 </script>

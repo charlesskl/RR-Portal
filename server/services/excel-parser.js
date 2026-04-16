@@ -56,6 +56,18 @@ function detectPriceCol(ws, defaultCol = 4) {
 
 function detectFormat(workbook) {
   const sheetNames = workbook.worksheets.map(ws => ws.name);
+
+  // SPIN detection: has '装配' sheet and Row 2 of that sheet contains 'SPIN' (any column)
+  const assemblySheet = workbook.worksheets.find(ws => ws.name === '装配');
+  if (assemblySheet) {
+    let hasSpinLabel = false;
+    assemblySheet.getRow(2).eachCell(cell => {
+      const v = strVal(cell) || '';
+      if (v.includes('SPIN')) hasSpinLabel = true;
+    });
+    if (hasSpinLabel) return 'spin';
+  }
+
   const hasPlushIndicator = sheetNames.some(n =>
     n.includes('车缝明细') || n.includes('搪胶')
   );
@@ -98,7 +110,7 @@ function detectLatestSheet(workbook) {
 
 // ─── Header Parser (R1–R16) ───────────────────────────────────────────────────
 
-function parseHeader(ws, format) {
+function parseHeader(ws, format, workbook) {
   // R1: product_no
   // Injection: A1="产品编号：", B1=value
   // Plush:     B1="产品编号：", C1=value
@@ -106,6 +118,16 @@ function parseHeader(ws, format) {
   let product_no = strVal(ws.getCell('B1'));
   if (!product_no || (typeof product_no === 'string' && product_no.includes('编号'))) {
     product_no = strVal(ws.getCell('C1'));
+  }
+
+  // SPIN: product_no from 总表 sheet, Row 8, Col 2, format "货号：#29090"
+  if (format === 'spin' && workbook) {
+    const summarySheet = workbook.worksheets.find(ws => ws.name.includes('总表'));
+    if (summarySheet) {
+      const raw = strVal(summarySheet.getCell(8, 2)) || '';
+      const m = raw.match(/\d+/);
+      if (m) product_no = m[0];
+    }
   }
 
   // R2-R6: Material price table
@@ -778,7 +800,7 @@ async function parseWorkbook(filePath) {
   }
 
   const format = detectFormat(workbook);
-  const header = parseHeader(ws, format);
+  const header = parseHeader(ws, format, workbook);
 
   // Fall back to sheet name only if B1 is empty
   if (!header.product_no) {

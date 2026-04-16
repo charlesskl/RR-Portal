@@ -327,7 +327,18 @@ function parseSewingDetails(workbook) {
   let lastFabricName = null;
   let sortOrder = 0;
 
-  for (let row = 4; row <= 100; row++) {
+  // Dynamically find header row (contains 物料名称 or 裁片部位)
+  let dataStartRow = 4; // default for plush
+  for (let r = 1; r <= 5; r++) {
+    const b = strVal(ws.getCell(r, 2));
+    const c = strVal(ws.getCell(r, 3));
+    if ((b && b.includes('物料名称')) || (c && c.includes('裁片部位'))) {
+      dataStartRow = r + 1;
+      break;
+    }
+  }
+
+  for (let row = dataStartRow; row <= 100; row++) {
     const colI = strVal(ws.getCell(row, 9));
     if (colI && colI.includes('合计')) break;
 
@@ -391,7 +402,7 @@ function parseCostItems(ws, format) {
   // R44-R47: Labor items (装配人工, 包装人工, 喷油人工, 油漆) — injection format fixed rows
   // Plush format: scan full sheet for rows where col B contains 人工
   let laborItems = [];
-  if (format === 'plush') {
+  if (format === 'plush' || format === 'spin') {
     for (let r = 1; r <= ws.rowCount; r++) {
       const colA = strVal(ws.getCell(r, 1));
       const name = strVal(ws.getCell(r, 2));
@@ -819,12 +830,12 @@ async function parseWorkbook(filePath) {
     }
   }
 
-  const moldStartRow = format === 'plush' ? 17 : 18;
+  const moldStartRow = format === 'spin' ? 12 : format === 'plush' ? 17 : 18;
   const moldParts = parseMoldParts(ws, moldStartRow);
 
   // Plush-specific parsing
   const rotocastItems = format === 'plush' ? parseRotocastItems(ws) : [];
-  const sewingDetails = format === 'plush' ? parseSewingDetails(workbook) : [];
+  const sewingDetails = (format === 'plush' || format === 'spin') ? parseSewingDetails(workbook) : [];
   const bodyAccessories = parseHardwareSheet(workbook, ws);
 
   const packagingFromMain = parsePackagingFromMainSheet(ws);

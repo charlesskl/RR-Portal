@@ -103,6 +103,9 @@ curl http://localhost:<port>/health
 | jiangping | Flask | 5001 | /jiangping/ |
 | paiji | Node.js | 3000 | /paiji/ |
 | zuru-shipment | Flask | 5003 | /zuru-shipment/ |
+| quotation 套客表系统 | Node.js | 3004 | /quotation/ |
+| tomy-paiqi TOMY排期核对系统 | Node.js/React | 3006 | /tomy-paiqi/ |
+| liwenjuan 成品核对系统 | Flask | 5004 | /liwenjuan/ |
 
 ## 插件类型
 
@@ -333,7 +336,10 @@ const data = JSON.parse(fs.readFileSync('data/data.json'));
 | figure-mold-cost-system | 模具手办采购订单 | Engineering | Standalone (Node.js) | /figure-mold-cost-system/ | https://github.com/hufan4308-blip/figure-mold-cost-system |
 | jiangping | 采购订单管理系统 | PMC跟仓管 | Standalone (Python/Flask) | /jiangping/ | https://github.com/fxxaxxx/jiangping |
 | paiji | AI注塑啤机排产系统 | 生产部 | Standalone (Node.js) | /paiji/ | https://github.com/duanlei10/234 |
-| zuru-shipment-deploy | ZURU出货助手 | Business | Standalone (Python/Flask) | /zuru-shipment/ | https://github.com/hanson678/zuru-shipment-deploy |
+| zuru-shipment-deploy | ZURU出货助手 | 业务部 | Standalone (Python/Flask) | /zuru-shipment/ | https://github.com/hanson678/zuru-shipment-deploy |
+| quotation | 套客表系统 | 业务部 | Standalone (Node.js) | /quotation/ | — |
+| tomy-paiqi | TOMY排期核对系统 | 业务部 | Standalone (Node.js/React) | /tomy-paiqi/ | — |
+| liwenjuan | 成品核对系统 | PMC跟仓管 | Standalone (Python/Flask) | /liwenjuan/ | — |
 
 ### 旧插件（已删除）
 

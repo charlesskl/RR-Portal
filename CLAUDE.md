@@ -24,7 +24,7 @@ Always respond in 简体中文 (Simplified Chinese). Code, commands, file paths 
 RR Portal
 ├── apps/            — 独立应用（非 plugin_sdk）
 │   ├── task-api/    — 任务 API (Node.js)
-│   └── zouhuo/      — 走货明细系统 (Node.js)
+│   └── zouhuo/      — A-doc生成系統 (Node.js)
 ├── core/            — 核心服务 (FastAPI, 用户/权限/插件注册)
 ├── devops/          — DevOps 自动化（agent、脚本、部署模板）
 ├── frontend/        — 前端静态文件 (Nginx托管)
@@ -327,7 +327,7 @@ const data = JSON.parse(fs.readFileSync('data/data.json'));
 | App 名 | 显示名 | 部门 | 类型 | 路径 | GitHub Repo |
 |---------|--------|------|------|------|-------------|
 | rr-production (工程啤办单) | 工程啤办单 | Engineering | Standalone (Node.js) | /rr/ | https://github.com/hufan4308-blip/RR-production-system |
-| zouhuo | 走货明细系统 | Engineering | Standalone (Node.js) | /zouhuo/ | https://github.com/duanlei10/123 |
+| zouhuo | A-doc生成系統 | Engineering | Standalone (Node.js) | /zouhuo/ | https://github.com/duanlei10/123 |
 | task-api | 任务 API | — | Standalone (Node.js) | — | — |
 | new-product-schedule | 新产品开发进度表 | Engineering | Standalone (Node.js) | /new-product-schedule/ | https://github.com/hufan4308-blip/new-product-schedule |
 | figure-mold-cost-system | 模具手办采购订单 | Engineering | Standalone (Node.js) | /figure-mold-cost-system/ | https://github.com/hufan4308-blip/figure-mold-cost-system |

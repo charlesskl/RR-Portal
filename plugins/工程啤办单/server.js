@@ -733,8 +733,8 @@ app.post('/api/reset-supervisor-pin', (req, res) => {
   if (!ALL_SUPERVISORS.includes(target_name)) {
     return res.status(400).json({ error: '目标主管不存在' });
   }
-  if (String(new_pin).length < 4) {
-    return res.status(400).json({ error: '新 PIN 至少 4 位' });
+  if (!/^\d{4,8}$/.test(String(new_pin))) {
+    return res.status(400).json({ error: '新 PIN 须为 4-8 位纯数字' });
   }
   const data = loadData();
   if (!data.auth_pins) data.auth_pins = { supervisors: {}, manager: {} };

@@ -171,8 +171,8 @@
           <select id="resetTarget" class="form-select"></select>
         </div>
         <div class="mb-3">
-          <label class="form-label fw-bold">新 PIN 码（至少 4 位）</label>
-          <input type="text" id="resetNewPin" class="form-control" maxlength="8" placeholder="例如 1234" autocomplete="off">
+          <label class="form-label fw-bold">新 PIN 码（4-8 位纯数字）</label>
+          <input type="text" id="resetNewPin" class="form-control" maxlength="8" placeholder="例如 1234" pattern="\d{4,8}" inputmode="numeric" autocomplete="off">
         </div>
         <div id="resetPinError" class="text-danger small d-none"></div>
       </div>
@@ -666,7 +666,7 @@ async function submitResetPin() {
   const err = document.getElementById('resetPinError');
   err.classList.add('d-none');
   if (!target) { err.textContent = '请选择主管'; err.classList.remove('d-none'); return; }
-  if (newPin.length < 4) { err.textContent = '新 PIN 至少 4 位'; err.classList.remove('d-none'); return; }
+  if (!/^\d{4,8}$/.test(newPin)) { err.textContent = '新 PIN 须为 4-8 位纯数字'; err.classList.remove('d-none'); return; }
   const managerPin = sessionStorage.getItem('mgr_pin') || '';
   if (!managerPin) { err.textContent = '登录状态已失效，请重新登录'; err.classList.remove('d-none'); return; }
   try {
@@ -687,7 +687,7 @@ async function submitResetPin() {
       return;
     }
     bootstrap.Modal.getInstance(document.getElementById('resetPinModal')).hide();
-    showToast(`已将 ${target} 的 PIN 重置为 ${newPin}，首次登录需修改`);
+    showToast(`已重置 ${target} 的 PIN，首次登录需修改`);
   } catch (e) {
     err.textContent = '网络错误';
     err.classList.remove('d-none');
@@ -735,8 +735,6 @@ function renderPriceTable() {
     </tr>
   `).join('') || '<tr><td colspan="5" class="text-center text-muted py-3">无匹配项</td></tr>';
 }
-
-function esc(s) { return String(s || '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
 
 function addPriceRow() {
   _priceRows.push({ material: '', unit_price: 0, notes: '' });

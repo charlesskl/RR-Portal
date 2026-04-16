@@ -62,9 +62,10 @@ Plans:
   3. 款式 sheet 的 Packaging 区域（H-tag、CDU、Master carton）数据正确填入
   4. 款式 sheet 的 Labor 区域（Sewing、Packing、Cutting 工时/工价）数据正确填入
   5. 款式 sheet 的 Markup 汇总区域（Material / Packaging / Labor markup）数值正确
-**Plans**: 1 plan
+**Plans**: 2 plans
 Plans:
-- [x] 05-01-PLAN.md — SPIN 格式识别 + MoldPart/车缝明细解析
+- [ ] 06-01-PLAN.md — 复制 SPIN 模板 + 创建 spin-exporter.js 导出服务
+- [ ] 06-02-PLAN.md — 接入导出路由 + 端到端验证
 **UI hint**: yes
 
 ### Phase 7: SPIN 批量导出
@@ -77,7 +78,7 @@ Plans:
   3. 导出的 Excel 文件中，每个所选版本对应一个独立的款式 sheet，数据各自正确
 **Plans**: 1 plan
 Plans:
-- [ ] 05-01-PLAN.md — SPIN 格式识别 + MoldPart/车缝明细解析
+- [ ] 07-01-PLAN.md — 批量导出
 **UI hint**: yes
 
 ## Progress
@@ -89,5 +90,5 @@ Plans:
 | 3. 前端双格式展示 | v1.1 | 1/1 | Complete | 2026-03-28 |
 | 4. v1.1 缺口修复 | v1.2 | 0/1 | Not started | - |
 | 5. SPIN 解析引擎 | v1.2 | 1/1 | Complete   | 2026-04-16 |
-| 6. SPIN 单款导出 | v1.2 | 0/? | Not started | - |
-| 7. SPIN 批量导出 | v1.2 | 0/? | Not started | - |
+| 6. SPIN 单款导出 | v1.2 | 0/2 | Not started | - |
+| 7. SPIN 批量导出 | v1.2 | 0/1 | Not started | - |

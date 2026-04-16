@@ -150,3 +150,44 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+
+  quotation:
+    build:
+      context: ./apps/quotation
+      dockerfile: Dockerfile
+    environment:
+      - PORT=3004
+      - NODE_ENV=production
+      - CORS_ORIGIN=${QUOTATION_CORS_ORIGIN:-http://localhost}
+    volumes:
+      - "./apps/quotation/server/data:/app/server/data"
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:3004/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  tomy-paiqi:
+    build:
+      context: ./apps/tomy-paiqi
+      dockerfile: Dockerfile
+    environment:
+      - PORT=3006
+      - NODE_ENV=production
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:3006/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3

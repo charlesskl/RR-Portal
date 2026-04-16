@@ -94,7 +94,7 @@ const tab_vq_carton = {
         value: dim[field],
         onSave: async (val) => {
           try {
-            await fetch(`/api/versions/${versionId}/sections/dimensions`, {
+            await fetch(`${api.BASE}/api/versions/${versionId}/sections/dimensions`, {
               method: 'PUT',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ [field]: val }),

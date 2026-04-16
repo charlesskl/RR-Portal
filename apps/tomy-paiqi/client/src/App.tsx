@@ -208,7 +208,7 @@ function App() {
     }
 
     try {
-      const response = await fetch('/api/process', {
+      const response = await fetch('./api/process', {
         method: 'POST',
         body: formData,
       })
@@ -228,7 +228,7 @@ function App() {
     if (!result?.sessionId) return
     setDownloading(true)
     try {
-      const response = await fetch(`/api/download/${result.sessionId}`)
+      const response = await fetch(`./api/download/${result.sessionId}`)
       if (!response.ok) {
         throw new Error(`下载失败: ${response.status} ${response.statusText}`)
       }

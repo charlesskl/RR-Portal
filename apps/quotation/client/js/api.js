@@ -27,6 +27,7 @@ const api = (() => {
   }
 
   return {
+    BASE,
     // Products
     getProducts: () => request('GET', '/api/products'),
     createProduct: (data) => request('POST', '/api/products', data),

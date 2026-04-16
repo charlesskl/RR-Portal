@@ -48,7 +48,9 @@ Plans:
   2. 导入后数据库中 MoldPart 区域数据（料型、料重、机型、件数）与源 Excel 一致
   3. 导入后数据库中车缝明细数据（布料名称、用量、物料价）与源 Excel 一致
   4. 导入的版本 format_type 字段标记为 SPIN
-**Plans**: TBD
+**Plans**: 1 plan
+Plans:
+- [ ] 05-01-PLAN.md — SPIN 格式识别 + MoldPart/车缝明细解析
 
 ### Phase 6: SPIN 单款导出
 **Goal**: 用户可从任意 SPIN 版本导出一个完整 SPIN Vendor Quote Form Excel 文件
@@ -60,7 +62,9 @@ Plans:
   3. 款式 sheet 的 Packaging 区域（H-tag、CDU、Master carton）数据正确填入
   4. 款式 sheet 的 Labor 区域（Sewing、Packing、Cutting 工时/工价）数据正确填入
   5. 款式 sheet 的 Markup 汇总区域（Material / Packaging / Labor markup）数值正确
-**Plans**: TBD
+**Plans**: 1 plan
+Plans:
+- [ ] 05-01-PLAN.md — SPIN 格式识别 + MoldPart/车缝明细解析
 **UI hint**: yes
 
 ### Phase 7: SPIN 批量导出
@@ -71,7 +75,9 @@ Plans:
   1. 导出界面支持勾选多个 SPIN 版本（至少 2 个）并触发批量导出
   2. 导出的 Excel 文件中，Summary sheet 列出所有所选款式
   3. 导出的 Excel 文件中，每个所选版本对应一个独立的款式 sheet，数据各自正确
-**Plans**: TBD
+**Plans**: 1 plan
+Plans:
+- [ ] 05-01-PLAN.md — SPIN 格式识别 + MoldPart/车缝明细解析
 **UI hint**: yes
 
 ## Progress

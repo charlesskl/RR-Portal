@@ -176,7 +176,7 @@
         <div class="stat-label">部门数量</div>
       </div>
       <div class="stat-card">
-        <div class="stat-value" id="statPlugins">9</div>
+        <div class="stat-value" id="statPlugins">10</div>
         <div class="stat-label">应用数量</div>
       </div>
       <div class="stat-card">
@@ -240,6 +240,12 @@
               <div class="plugin-info">
                 <div class="plugin-dot gray" id="jiangpingDot"></div>
                 <span class="plugin-name">采购订单管理系统</span>
+              </div>
+            </div>
+            <div class="plugin-item">
+              <div class="plugin-info">
+                <div class="plugin-dot gray" id="liwenjuanDot"></div>
+                <span class="plugin-name">成品核对系统</span>
               </div>
             </div>
           </div>
@@ -523,7 +529,7 @@
       <div class="dept-icon pmc" style="width:40px;height:40px;font-size:18px;">&#128230;</div>
       PMC跟仓管
     </div>
-    <div class="page-subtitle">采购订单与送货管理</div>
+    <div class="page-subtitle">采购订单 · 成品核对</div>
 
     <div class="detail-plugin-card">
       <div class="detail-plugin-left">
@@ -544,6 +550,25 @@
       <div class="detail-plugin-right">
         <div class="detail-plugin-status"><div class="plugin-dot gray" id="jiangpingDetailDot"></div> 检查中...</div>
         <a href="/jiangping/" target="_blank" class="btn btn-primary">打开系统</a>
+      </div>
+    </div>
+
+    <div class="detail-plugin-card">
+      <div class="detail-plugin-left">
+        <div class="detail-plugin-icon" style="background:linear-gradient(135deg,#10b981,#059669);">&#9989;</div>
+        <div>
+          <div class="detail-plugin-name">成品核对系统</div>
+          <div class="detail-plugin-desc">上传成品清单Excel文件，自动核对数据一致性，输出核对结果报告</div>
+          <div class="feature-grid">
+            <div class="feature-tag">&#128196; Excel上传</div>
+            <div class="feature-tag">&#9989; 数据核对</div>
+            <div class="feature-tag">&#128202; 结果报告</div>
+          </div>
+        </div>
+      </div>
+      <div class="detail-plugin-right">
+        <div class="detail-plugin-status"><div class="plugin-dot gray" id="liwenjuanDetailDot"></div> 检查中...</div>
+        <a href="/liwenjuan/" target="_blank" class="btn btn-primary">打开系统</a>
       </div>
     </div>
   </div>
@@ -580,6 +605,7 @@ async function checkHealth() {
       { name: 'jiangping', url: '/jiangping/health', dot: 'jiangpingDot', detailDot: 'jiangpingDetailDot' },
       { name: 'paiji', url: '/paiji/health', dot: 'paijiDot', detailDot: 'paijiDetailDot' },
       { name: 'zuru', url: '/zuru-shipment/health', dot: 'zuruDot', detailDot: 'zuruDetailDot' },
+      { name: 'liwenjuan', url: '/liwenjuan/health', dot: 'liwenjuanDot', detailDot: 'liwenjuanDetailDot' },
       { name: 'quotation', url: '/quotation/health', dot: 'quotationDot', detailDot: 'quotationDetailDot' },
       { name: 'tomy', url: '/tomy-paiqi/health', dot: 'tomyDot', detailDot: 'tomyDetailDot' },
     ];

@@ -227,11 +227,14 @@ services:
     volumes:
       - ./apps/jiangping/data:/app/data
       - ./apps/jiangping/uploads:/app/uploads
+      - ./apps/jiangping/easyocr-models:/home/appuser/.EasyOCR
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5001/health"]
       interval: 10s
       timeout: 5s
       retries: 3
+    mem_limit: 2g
+    memswap_limit: 2g
     restart: unless-stopped
     logging:
       driver: json-file

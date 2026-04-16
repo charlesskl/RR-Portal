@@ -5,10 +5,16 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     libglib2.0-0 \
+    libgl1 \
     && rm -rf /var/lib/apt/lists/*
 
+ENV PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
+ENV PIP_TRUSTED_HOST=mirrors.aliyun.com
+
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt gunicorn
+# Install torch CPU-only first (skip ~2GB CUDA), then easyocr + the rest
+RUN pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu && \
+    pip install --no-cache-dir -r requirements.txt gunicorn
 
 COPY . .
 

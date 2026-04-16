@@ -2,11 +2,20 @@
 
 ## What This Is
 
-基于浏览器的报价管理系统，导入本厂报价明细 Excel，交互式编辑成本数据，导出客户格式的 Vendor Quotation Excel。支持注塑产品和毛绒公仔两种报价格式，当前导出支持 TOMY 模板。
+基于浏览器的报价管理系统，导入本厂报价明细 Excel，交互式编辑成本数据，导出客户格式的 Vendor Quotation Excel。支持注塑产品和毛绒公仔两种报价格式，导出支持 TOMY 和 SPIN Master 两种客户模板。
 
 ## Core Value
 
 准确高效地将内部报价明细转换为客户报价单，消除手工填写的错误和重复劳动。
+
+## Current Milestone: v1.2 SPIN 报价支持
+
+**Goal:** 支持 SPIN Master 客户的内部报价明细导入和 Vendor Quote Form 批量导出
+
+**Target features:**
+- 解析 SPIN 内部报价明细 Excel（类似毛绒公仔格式，结构有差异）
+- 生成 SPIN Vendor Quote Form（Summary sheet + 每款一个 sheet，USD 报价）
+- 批量导出：选多个版本，生成含 Summary + 多款式 sheet 的完整 SPIN 文件
 
 ## Current State
 
@@ -38,24 +47,27 @@
 - ✓ 产品编号从主报价 sheet B1 正确识别 — v1.1
 - ✓ 毛绒公仔格式完整解析（格式检测、搪胶件、车缝明细） — v1.1
 - ✓ SewingDetail / RotocastItem 数据表 — v1.1
-- ✓ format_type 字段区分格式 — v1.1 (partial — frontend not consuming)
+- ✓ format_type 字段区分格式 — v1.1 (partial)
 
 ### Active
 
-- [ ] SPIN 客户报价表导出格式支持
-- [ ] 修复 v1.1 已知缺口：车缝明细/搪胶件 tab 导航按钮、format_type 版本复制丢失
+- [ ] SPIN 内部报价明细解析（类毛绒公仔格式，适配差异）
+- [ ] SPIN Vendor Quote Form 单款导出（Summary + 款式 sheet）
+- [ ] SPIN 批量多款导出
+- [ ] 修复 v1.1 缺口：车缝明细/搪胶件 tab 导航按钮、format_type 版本复制丢失
 
 ### Out of Scope
 
 - 后端服务器认证 — 内部工具无需登录
 - 在线部署 — 本地工具
-- 修改 TOMY 模板结构
+- 修改 TOMY/SPIN 模板结构
 - 数据库迁移工具 — 开发阶段直接重建
 
 ## Context
 
 - 现有完整系统：注塑产品（47712）+ 毛绒公仔（L21014）两种格式均支持导入
-- 导出目前仅支持 TOMY 模板；SPIN 是下一个目标客户格式
+- SPIN 内部报价格式：有报价明细主 sheet + 车缝明细等子 sheet，与毛绒公仔格式"有区别但类似"
+- SPIN Vendor Quote Form：Summary sheet + 每款独立 sheet（Rocky/Skye/Marshall 等），结构与 TOMY 完全不同
 - v1.1 已知未修复缺口见 `.planning/v1.1-MILESTONE-AUDIT.md`
 
 ## Constraints
@@ -71,11 +83,11 @@
 | Raw Material 从 MoldPart.unit_price_hkd_g 取价格 | MoldPart 自带对应料价，比从 MaterialPrice 匹配更准确 | ✓ Good |
 | Raw Material weight 不乘 sets_per_toy | sets_per_toy 是啤工计算用，原料重量应为单件克重累加 | ✓ Good |
 | 产品编号从主报价 sheet B1 提取 | 车缝明细等子 sheet 的 B1 不是货号 | ✓ Good |
-| 不根据 format_type 动态隐藏 tab（D-02） | 简化前端逻辑 | — Revisit（导致 tab 按钮缺失问题） |
+| 不根据 format_type 动态隐藏 tab（D-02） | 简化前端逻辑 | — Revisit |
 
 ## Evolution
 
 This document evolves at phase transitions and milestone boundaries.
 
 ---
-*Last updated: 2026-04-16 after v1.1 milestone*
+*Last updated: 2026-04-16 — milestone v1.2 started*

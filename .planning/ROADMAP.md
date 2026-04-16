@@ -37,7 +37,7 @@ Full details: `.planning/milestones/v1.1-ROADMAP.md`
   1. 复制一个毛绒公仔版本后，新版本的 format_type 与原版本一致（不丢失）
 **Plans**: 1 plan
 Plans:
-- [ ] 04-01-PLAN.md — 在 duplicate INSERT 中补充 format_type 字段
+- [x] 04-01-PLAN.md — 在 duplicate INSERT 中补充 format_type 字段
 
 ### Phase 5: SPIN 解析引擎
 **Goal**: 用户可导入 SPIN 内部报价明细 Excel，系统正确识别格式并将全部数据存入数据库

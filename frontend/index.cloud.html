@@ -176,7 +176,7 @@
         <div class="stat-label">部门数量</div>
       </div>
       <div class="stat-card">
-        <div class="stat-value" id="statPlugins">8</div>
+        <div class="stat-value" id="statPlugins">9</div>
         <div class="stat-label">应用数量</div>
       </div>
       <div class="stat-card">
@@ -280,6 +280,18 @@
               <div class="plugin-info">
                 <div class="plugin-dot gray" id="zuruDot"></div>
                 <span class="plugin-name">ZURU出货助手</span>
+              </div>
+            </div>
+            <div class="plugin-item">
+              <div class="plugin-info">
+                <div class="plugin-dot gray" id="quotationDot"></div>
+                <span class="plugin-name">报价系统</span>
+              </div>
+            </div>
+            <div class="plugin-item">
+              <div class="plugin-info">
+                <div class="plugin-dot gray" id="tomyDot"></div>
+                <span class="plugin-name">TOMY排期核对系统</span>
               </div>
             </div>
           </div>
@@ -436,7 +448,7 @@
       <div class="dept-icon business" style="width:40px;height:40px;font-size:18px;">&#128176;</div>
       业务
     </div>
-    <div class="page-subtitle">ZURU出货管理</div>
+    <div class="page-subtitle">ZURU出货 · 报价管理 · TOMY排期核对</div>
 
     <div class="detail-plugin-card">
       <div class="detail-plugin-left">
@@ -455,6 +467,46 @@
       <div class="detail-plugin-right">
         <div class="detail-plugin-status"><div class="plugin-dot gray" id="zuruDetailDot"></div> 检查中...</div>
         <a href="/zuru-shipment/" target="_blank" class="btn btn-primary">打开系统</a>
+      </div>
+    </div>
+
+    <div class="detail-plugin-card">
+      <div class="detail-plugin-left">
+        <div class="detail-plugin-icon" style="background:linear-gradient(135deg,#f59e0b,#ef4444);">&#128176;</div>
+        <div>
+          <div class="detail-plugin-name">报价系统</div>
+          <div class="detail-plugin-desc">供应商报价管理，支持Excel导入导出、多版本报价对比、MOQ阶梯价格、RMB/HKD汇率换算</div>
+          <div class="feature-grid">
+            <div class="feature-tag">&#128196; Excel导入</div>
+            <div class="feature-tag">&#128202; 报价对比</div>
+            <div class="feature-tag">&#128176; MOQ阶梯价</div>
+            <div class="feature-tag">&#128230; 报价导出</div>
+          </div>
+        </div>
+      </div>
+      <div class="detail-plugin-right">
+        <div class="detail-plugin-status"><div class="plugin-dot gray" id="quotationDetailDot"></div> 检查中...</div>
+        <a href="/quotation/" target="_blank" class="btn btn-primary">打开系统</a>
+      </div>
+    </div>
+
+    <div class="detail-plugin-card">
+      <div class="detail-plugin-left">
+        <div class="detail-plugin-icon" style="background:linear-gradient(135deg,#f59e0b,#ef4444);">&#128197;</div>
+        <div>
+          <div class="detail-plugin-name">TOMY排期核对系统</div>
+          <div class="detail-plugin-desc">上传TOMY排期Excel与PDF文件进行核对，自动匹配出货记录并输出核对结果Excel及日期码</div>
+          <div class="feature-grid">
+            <div class="feature-tag">&#128197; 排期核对</div>
+            <div class="feature-tag">&#128196; Excel/PDF上传</div>
+            <div class="feature-tag">&#128202; 核对结果</div>
+            <div class="feature-tag">&#128230; 导出报告</div>
+          </div>
+        </div>
+      </div>
+      <div class="detail-plugin-right">
+        <div class="detail-plugin-status"><div class="plugin-dot gray" id="tomyDetailDot"></div> 检查中...</div>
+        <a href="/tomy-paiqi/" target="_blank" class="btn btn-primary">打开系统</a>
       </div>
     </div>
   </div>
@@ -528,6 +580,8 @@ async function checkHealth() {
       { name: 'jiangping', url: '/jiangping/health', dot: 'jiangpingDot', detailDot: 'jiangpingDetailDot' },
       { name: 'paiji', url: '/paiji/health', dot: 'paijiDot', detailDot: 'paijiDetailDot' },
       { name: 'zuru', url: '/zuru-shipment/health', dot: 'zuruDot', detailDot: 'zuruDetailDot' },
+      { name: 'quotation', url: '/quotation/health', dot: 'quotationDot', detailDot: 'quotationDetailDot' },
+      { name: 'tomy', url: '/tomy-paiqi/health', dot: 'tomyDot', detailDot: 'tomyDetailDot' },
     ];
     var healthy = 0;
     var total = checks.length;

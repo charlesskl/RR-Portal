@@ -317,6 +317,29 @@ services:
     networks:
       - platform-net
 
+  tomy-paiqi:
+    build:
+      context: ./apps/tomy-paiqi
+      dockerfile: Dockerfile
+    environment:
+      - PORT=3006
+      - NODE_ENV=production
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:3006/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    mem_limit: 512m
+    memswap_limit: 512m
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - platform-net
+
   liwenjuan:
     build:
       context: ./apps/liwenjuan

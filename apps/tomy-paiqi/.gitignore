@@ -1,0 +1,11 @@
+node_modules/
+dist/
+*.pdf
+*.xlsx
+!client/**/*.xlsx
+DATA/
+.env
+*.log
+client/dist/
+dist-portable/
+*.zip

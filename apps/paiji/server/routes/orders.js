@@ -122,6 +122,68 @@ router.delete('/', (req, res) => {
   }
 });
 
+// 下载订单导入模板
+router.get('/template', async (req, res) => {
+  const ExcelJS = require('exceljs');
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('订单模板');
+
+  const colWidths = [14, 18, 20, 10, 12, 16, 10, 10, 10, 14, 10];
+  colWidths.forEach((w, i) => { ws.getColumn(i + 1).width = w; });
+
+  ws.mergeCells('A1:K1');
+  const tc = ws.getCell('A1');
+  tc.value = '啤机部订单导入模板';
+  tc.font = { size: 18, bold: true, name: '宋体' };
+  tc.alignment = { horizontal: 'center', vertical: 'middle' };
+  tc.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD9E1F2' } };
+  ws.getRow(1).height = 36;
+
+  ws.mergeCells('A2:K2');
+  ws.getCell('A2').value = '填写说明：按下面表头填写订单数据，每行一条。带*的为必填项。灰色示例行请删除后填写。';
+  ws.getCell('A2').font = { size: 10, color: { argb: 'FFFF0000' }, name: '宋体' };
+  ws.getRow(2).height = 22;
+
+  const headers = ['*产品货号', '*模具编号', '模具名称', '*颜色', '色粉编号', '*料型', '*啤重G', '用料KG', '*需啤数', '下单单号', '备注'];
+  const hr = ws.getRow(3);
+  const thin = { style: 'thin' };
+  headers.forEach((h, i) => {
+    const c = hr.getCell(i + 1);
+    c.value = h;
+    c.font = { size: 11, bold: true, name: '宋体', color: { argb: 'FFFFFFFF' } };
+    c.alignment = { horizontal: 'center', vertical: 'middle' };
+    c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1677FF' } };
+    c.border = { top: thin, left: thin, bottom: thin, right: thin };
+  });
+  hr.height = 28;
+
+  const samples = [
+    ['92105', 'RBCA-08M-01', '奶嘴模具', '金色', '87793', 'LDPE 260GG', 17.6, 73.18, 4138, 'ZWY260002/B', ''],
+    ['47391', 'RC01854', '吃尺转动轴', '黑色', '88066', 'ABS AG15AIH', 15.3, 43.05, 2800, 'LWW20260317006/B', ''],
+  ];
+  samples.forEach((s, i) => {
+    const row = ws.getRow(4 + i);
+    s.forEach((v, j) => {
+      const c = row.getCell(j + 1);
+      c.value = v;
+      c.font = { size: 10, name: '宋体', color: { argb: 'FF999999' } };
+      c.alignment = { horizontal: 'center', vertical: 'middle' };
+    });
+  });
+
+  for (let i = 6; i <= 50; i++) {
+    for (let j = 1; j <= 11; j++) {
+      ws.getRow(i).getCell(j).border = { top: { style: 'thin', color: { argb: 'FFDDDDDD' } }, left: { style: 'thin', color: { argb: 'FFDDDDDD' } }, bottom: { style: 'thin', color: { argb: 'FFDDDDDD' } }, right: { style: 'thin', color: { argb: 'FFDDDDDD' } } };
+    }
+  }
+
+  ws.views = [{ state: 'frozen', ySplit: 3, activeCell: 'A4' }];
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent('订单导入模板.xlsx')}`);
+  await wb.xlsx.write(res);
+  res.end();
+});
+
 // 调试：返回PDF原始文本（临时接口）
 router.post('/debug-pdf', upload.single('file'), async (req, res) => {
   try {
@@ -158,8 +220,8 @@ router.post('/import', upload.single('file'), async (req, res) => {
       const wbCheck = XLSX.readFile(req.file.path);
       const wsCheck = wbCheck.Sheets[wbCheck.SheetNames[0]];
       const rowsCheck = XLSX.utils.sheet_to_json(wsCheck, { header: 1, defval: '' });
-      const checkText = rowsCheck.slice(0, 8).map(r => r.join(' ')).join(' ');
-      const isXingxin = checkText.includes('啤净重') || checkText.includes('出模数') || checkText.includes('兴信啤机');
+      const checkText = rowsCheck.slice(0, 12).map(r => r.join(' ')).join(' ');
+      const isXingxin = checkText.includes('啤净重') || checkText.includes('净重G') || checkText.includes('出模数') || checkText.includes('兴信啤机') || checkText.includes('啤货表') || checkText.includes('啤 机');
       if (isXingxin) {
         parsed = parseXingxinOrderExcel(req.file.path);
         console.log('[兴信生产单导入] 解析结果:', parsed.length, '条');
@@ -191,7 +253,7 @@ router.post('/import', upload.single('file'), async (req, res) => {
     });
 
     insertMany(parsed);
-    res.json({ message: `成功导入 ${parsed.length} 条订单`, added: parsed.length });
+    res.json({ message: `成功导入 ${parsed.length} 条订单`, count: parsed.length, added: parsed.length });
   } catch (err) {
     res.status(500).json({ message: '导入失败：' + err.message });
   } finally {

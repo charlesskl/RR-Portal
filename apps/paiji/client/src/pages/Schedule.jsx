@@ -174,7 +174,7 @@ export default function Schedule({ onDone }) {
           <div style={{ marginTop: 16, textAlign: 'right' }}>
             <Space>
               <Button onClick={() => {
-                const url = `${import.meta.env.BASE_URL.replace(/\/$/, '')}/api/schedule/${result.id}/export`;
+                const url = `/api/schedule/${result.id}/export`;
                 window.open(url);
               }}>导出 Excel</Button>
               <Button type="primary" onClick={onDone}>查看所有排机表</Button>

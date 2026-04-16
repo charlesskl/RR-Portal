@@ -291,11 +291,203 @@ async function exportScheduleExcel(scheduleId) {
   // ========== 冻结前3行+前1列 ==========
   ws.views = [{ state: 'frozen', xSplit: 1, ySplit: 3, activeCell: 'B4' }];
 
+  // ========== Sheet 2: 上一班次排单（历史记录） ==========
+  const prevSchedule = findPreviousSchedule(schedule);
+  if (prevSchedule) {
+    const prevItems = db.prepare(`
+      SELECT si.*, m.arm_type, m.tonnage, m.brand
+      FROM schedule_items si
+      LEFT JOIN machines m ON si.machine_no = m.machine_no
+      WHERE si.schedule_id = ?
+      ORDER BY CAST(REPLACE(REPLACE(REPLACE(si.machine_no, '#', ''), 'C-', ''), 'A-', '') AS INTEGER), si.sort_order, si.id
+    `).all(prevSchedule.id);
+
+    if (prevItems.length > 0) {
+      const prevSheetName = `${prevSchedule.schedule_date} ${prevSchedule.shift}`;
+      const ws2 = wb.addWorksheet(prevSheetName, {
+        pageSetup: { orientation: 'landscape', paperSize: 9, fitToPage: true, fitToWidth: 1, fitToHeight: 0 },
+      });
+      writeScheduleSheet(ws2, prevSchedule, prevItems, machineMap, wsName);
+    }
+  }
+
   const buffer = await wb.xlsx.writeBuffer();
   return {
     buffer,
-    filename: `${schedule.workshop === 'A' ? '兴信A' : schedule.workshop === 'C' ? '华登' : '兴信B'}注塑部排机单_${schedule.schedule_date}_${schedule.shift}.xlsx`,
+    filename: `${wsName}注塑部排机单_${schedule.schedule_date}_${schedule.shift}.xlsx`,
   };
+}
+
+/**
+ * 查找上一班次的排机单
+ */
+function findPreviousSchedule(schedule) {
+  // 找同车间、当前排单之前的最近一个排单
+  return db.prepare(`
+    SELECT * FROM schedules
+    WHERE workshop = ? AND id < ?
+    ORDER BY schedule_date DESC, shift DESC, id DESC
+    LIMIT 1
+  `).get(schedule.workshop || 'B', schedule.id);
+}
+
+/**
+ * 将排机数据写入一个worksheet
+ */
+function writeScheduleSheet(ws, schedule, items, machineMap, wsName) {
+  const colWidths = [6, 13, 26, 12, 10, 16, 8, 9, 9, 8, 10, 10, 10, 12, 10, 10, 10, 7, 18, 9, 8, 10, 10, 8, 6];
+  colWidths.forEach((w, i) => { ws.getColumn(i + 1).width = w; });
+
+  const headers = [
+    '机台', '产品货号', '模号名称', '颜色', '色粉编号', '料型',
+    '啤重G', '用料KG', '水口百分比%', '比率%', '累计数', '需啤数', '欠数',
+    '下单单号', '单号', '24H目标数', '11H目标数', '天数',
+    '备注', '机械手', '夹具', '转膜时间', '调机人员', '分类', '吨位',
+  ];
+
+  // Row 1: 标题
+  ws.mergeCells('A1:Y1');
+  const titleCell = ws.getCell('A1');
+  titleCell.value = `${wsName}注塑部每日排单表`;
+  titleCell.font = { size: 22, bold: true, name: '宋体' };
+  titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
+  ws.getRow(1).height = 42;
+
+  // Row 2: 班次 + 日期
+  ws.mergeCells('A2:C2');
+  ws.getCell('A2').value = formatShift(schedule.shift);
+  ws.getCell('A2').font = { size: 16, bold: true, name: '宋体' };
+  ws.getCell('A2').alignment = { horizontal: 'left', vertical: 'middle' };
+  ws.mergeCells('D2:H2');
+  ws.getCell('D2').value = formatDateChinese(schedule.schedule_date);
+  ws.getCell('D2').font = { size: 16, bold: true, name: '宋体' };
+  ws.getCell('D2').alignment = { horizontal: 'left', vertical: 'middle' };
+  ws.getRow(2).height = 30;
+
+  // Row 3: 表头
+  const headerRow = ws.getRow(3);
+  headers.forEach((h, i) => {
+    const cell = headerRow.getCell(i + 1);
+    cell.value = h;
+    cell.font = { size: 10, bold: true, name: '宋体' };
+    cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+    cell.border = fullBorder();
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD9E1F2' } };
+  });
+  headerRow.height = 26;
+
+  // 数据行
+  let rowNum = 4;
+  const machineGroups = {};
+  let prevMachineNo = null;
+
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    const row = ws.getRow(rowNum);
+    const machine = machineMap[item.machine_no] || {};
+
+    if (item.machine_no !== prevMachineNo) {
+      if (!machineGroups[item.machine_no]) machineGroups[item.machine_no] = [];
+      machineGroups[item.machine_no].push({ start: rowNum, end: rowNum });
+    } else {
+      const groups = machineGroups[item.machine_no];
+      groups[groups.length - 1].end = rowNum;
+    }
+    prevMachineNo = item.machine_no;
+
+    let armLabel = '';
+    if (machine.arm_type) {
+      if (machine.arm_type.includes('五轴')) armLabel = '五轴';
+      else if (machine.arm_type.includes('三轴')) armLabel = '三轴';
+      else armLabel = machine.arm_type;
+    }
+
+    const values = [
+      item.machine_no, item.product_code || '', item.mold_name || '',
+      item.color || '', item.color_powder_no || '', item.material_type || '',
+      item.shot_weight || 0, item.material_kg || 0, item.sprue_pct || 0, item.ratio_pct || 0,
+      item.accumulated || 0, item.quantity_needed || 0,
+      Math.max(0, (item.quantity_needed||0) - (item.accumulated||0)),
+      item.order_no || '', '',
+      item.target_24h || 0,
+      item.target_24h ? Math.round((item.target_24h)/24*11) : 0,
+      item.target_24h ? Math.round(Math.max(0,(item.quantity_needed||0)-(item.accumulated||0))/(item.target_24h)*100)/100 : '',
+      item.notes || '', item.robot_arm || '', item.clamp || '',
+      item.mold_change_time || '', item.adjuster || '', armLabel, machine.tonnage || '',
+    ];
+
+    values.forEach((v, idx) => {
+      const cell = row.getCell(idx + 1);
+      cell.value = v;
+      cell.font = { size: 10, name: '宋体' };
+      cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+      cell.border = fullBorder();
+    });
+
+    row.getCell(3).alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
+    row.getCell(6).alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
+
+    if ((item.accumulated || 0) > 0) {
+      row.getCell(11).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFC000' } };
+    }
+    if (item.notes) {
+      row.getCell(19).font = { size: 10, bold: true, color: { argb: 'FFFF0000' }, name: '宋体' };
+    }
+
+    if (rowNum % 2 === 1) {
+      for (let c = 1; c <= 25; c++) {
+        const cell = row.getCell(c);
+        if (!cell.fill || !cell.fill.fgColor || cell.fill.fgColor.argb === 'FF000000') {
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF5F5F5' } };
+        }
+      }
+    }
+    row.height = 22;
+    rowNum++;
+  }
+
+  // 汇总行
+  const summaryRow = ws.getRow(rowNum);
+  ws.mergeCells(`A${rowNum}:F${rowNum}`);
+  summaryRow.getCell(1).value = `合计: ${items.length} 条排机记录`;
+  summaryRow.getCell(1).font = { size: 10, bold: true, name: '宋体' };
+  summaryRow.getCell(1).alignment = { horizontal: 'left', vertical: 'middle' };
+  summaryRow.getCell(1).border = fullBorder();
+  for (let c = 7; c <= 25; c++) summaryRow.getCell(c).border = fullBorder();
+  summaryRow.height = 22;
+  rowNum++;
+
+  // 制表人/审核
+  const footerRow = ws.getRow(rowNum);
+  ws.mergeCells(`A${rowNum}:E${rowNum}`);
+  footerRow.getCell(1).value = '制表人：';
+  footerRow.getCell(1).font = { size: 11, name: '宋体' };
+  footerRow.getCell(1).alignment = { horizontal: 'left', vertical: 'middle' };
+  ws.mergeCells(`L${rowNum}:P${rowNum}`);
+  footerRow.getCell(12).value = '审核：';
+  footerRow.getCell(12).font = { size: 11, name: '宋体' };
+  footerRow.getCell(12).alignment = { horizontal: 'left', vertical: 'middle' };
+  footerRow.height = 28;
+
+  // 合并同机台单元格
+  for (const machineNo in machineGroups) {
+    for (const { start, end } of machineGroups[machineNo]) {
+      if (end > start) {
+        ws.mergeCells(`A${start}:A${end}`);
+        ws.mergeCells(`X${start}:X${end}`);
+        ws.mergeCells(`Y${start}:Y${end}`);
+      }
+      ws.getCell(`A${start}`).font = { size: 11, bold: true, name: '宋体' };
+      ws.getCell(`A${start}`).alignment = { horizontal: 'center', vertical: 'middle' };
+      ws.getCell(`A${start}`).border = fullBorder();
+      ws.getCell(`X${start}`).alignment = { horizontal: 'center', vertical: 'middle' };
+      ws.getCell(`X${start}`).border = fullBorder();
+      ws.getCell(`Y${start}`).alignment = { horizontal: 'center', vertical: 'middle' };
+      ws.getCell(`Y${start}`).border = fullBorder();
+    }
+  }
+
+  ws.views = [{ state: 'frozen', xSplit: 1, ySplit: 3, activeCell: 'B4' }];
 }
 
 function fullBorder() {

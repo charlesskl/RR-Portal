@@ -5,7 +5,13 @@ const db = require('../db/connection');
 // 获取所有机台（含啤重统计）
 router.get('/', (req, res) => {
   const workshop = req.query.workshop || 'B';
-  const machines = db.prepare('SELECT * FROM machines WHERE workshop = ? ORDER BY id').all(workshop);
+  // 按机台号排序：其他机台 排最后，其他按数字升序
+  const machines = db.prepare(`
+    SELECT * FROM machines WHERE workshop = ?
+    ORDER BY
+      CASE WHEN machine_no = '其他机台' THEN 1 ELSE 0 END,
+      CAST(REPLACE(REPLACE(REPLACE(machine_no, '#', ''), 'C-', ''), 'A-', '') AS INTEGER)
+  `).all(workshop);
   res.json(machines);
 });
 

@@ -40,8 +40,18 @@
 
 ## Traceability
 
-| REQ-ID | Phase |
-|--------|-------|
-| FIX2-01, FIX2-02, FIX2-03 | TBD |
-| SPIN-01 ~ SPIN-04 | TBD |
-| EXP-01 ~ EXP-06 | TBD |
+| REQ-ID | Phase | Status |
+|--------|-------|--------|
+| FIX2-01 | Phase 4 | Pending |
+| FIX2-02 | Phase 4 | Pending |
+| FIX2-03 | Phase 4 | Pending |
+| SPIN-01 | Phase 5 | Pending |
+| SPIN-02 | Phase 5 | Pending |
+| SPIN-03 | Phase 5 | Pending |
+| SPIN-04 | Phase 5 | Pending |
+| EXP-01 | Phase 6 | Pending |
+| EXP-02 | Phase 6 | Pending |
+| EXP-03 | Phase 6 | Pending |
+| EXP-04 | Phase 6 | Pending |
+| EXP-05 | Phase 6 | Pending |
+| EXP-06 | Phase 7 | Pending |

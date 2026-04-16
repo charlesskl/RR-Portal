@@ -1,20 +1,30 @@
+---
+gsd_state_version: 1.0
+milestone: v1.1
+milestone_name: 双格式支持
+status: completed
+last_updated: "2026-04-16"
+last_activity: 2026-04-16
+progress:
+  total_phases: 3
+  completed_phases: 3
+  total_plans: 4
+  completed_plans: 4
+  percent: 100
+---
+
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-03-28)
+See: .planning/PROJECT.md (updated 2026-04-16)
 
 **Core value:** 准确高效地将内部报价明细转换为客户报价单
-**Current focus:** Phase 1 — 基础修复与代码整理
+**Current focus:** 规划下一里程碑 — SPIN 报价表支持
 
 ## Current Position
 
-Phase: 1 of 3 (基础修复与代码整理)
-Plan: 0 of ? in current phase
-Status: Ready to plan
-Last activity: 2026-03-28 — Project initialized, FIX-01 and FIX-02 partially implemented
-
-Progress: [░░░░░░░░░░] 0%
+Milestone v1.1 complete. Ready for next milestone.
 
 ## Accumulated Context
 
@@ -25,17 +35,23 @@ Progress: [░░░░░░░░░░] 0%
 - 产品编号从含"报价"关键字的 sheet 的 B1 提取
 - 两种报价格式：注塑（报价明细-YYMMDD）和毛绒公仔（3K报价-地区-YYMMDD）
 
-### Pending Todos
+### Deferred Items
 
-None yet.
+Items acknowledged and deferred at milestone close on 2026-04-16:
+
+| Category | Item | Status |
+|----------|------|--------|
+| gap | UI-02: 车缝明细 tab button missing in index.html | partial |
+| gap | UI-03: 搪胶件 tab button missing in index.html | partial |
+| gap | DB-03: format_type lost on version duplicate | partial |
+| gap | PLUSH-01: format detection uses sub-sheet heuristic only | partial |
 
 ### Blockers/Concerns
 
-- FIX-01 和 FIX-02 的代码已改但尚未 commit
-- 21 个未提交文件需要先整理提交
+None.
 
 ## Session Continuity
 
-Last session: 2026-03-28
-Stopped at: GSD 初始化完成，准备 plan Phase 1
+Last session: 2026-04-16
+Stopped at: v1.1 milestone archived. Next: /gsd-new-milestone for SPIN support.
 Resume file: None

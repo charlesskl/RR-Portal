@@ -1875,8 +1875,16 @@ function onExcelFileSelected() {
       });
 
       // 排模表模式：只保留有原料的模具主行（整啤模腔数→件数）
+      // 每套模只取最上面的零件：同 mold_id 去重保留第一条
       if (isPaiMoBiao) {
         items = items.filter(obj => obj.mold_id && obj.material);
+        const seen = new Set();
+        items = items.filter(obj => {
+          const key = String(obj.mold_id).trim();
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
       }
 
       // 模糊匹配原料名称：先精确→去符号→相似度≥70%，找不到则清空让工程师手动选

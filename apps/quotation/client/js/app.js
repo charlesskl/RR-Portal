@@ -247,7 +247,7 @@ const app = (() => {
     document.getElementById('btnTranslateAll').addEventListener('click', async () => {
       try {
         showToast('正在翻译，请稍候...', 'info');
-        const r = await fetch(`/api/versions/${currentVersionId}/translate-all`, { method: 'POST' });
+        const r = await fetch(`${api.BASE}/api/versions/${currentVersionId}/translate-all`, { method: 'POST' });
         const d = await r.json();
         if (!r.ok) throw new Error(d.error);
         showToast(`已翻译 ${d.translated} 条名称`, 'success');

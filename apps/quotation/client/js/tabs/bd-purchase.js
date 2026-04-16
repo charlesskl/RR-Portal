@@ -212,7 +212,7 @@ const tab_bd_purchase = {
     container.querySelector('#sewAutoTranslate')?.addEventListener('click', async () => {
       try {
         showToast('正在翻译...', 'info');
-        const r = await fetch(`/api/versions/${versionId}/translate-sewing`, { method: 'POST' });
+        const r = await fetch(`${api.BASE}/api/versions/${versionId}/translate-sewing`, { method: 'POST' });
         const d = await r.json();
         if (!r.ok) throw new Error(d.error);
         showToast(`已翻译 ${d.translated} 条`, 'success');

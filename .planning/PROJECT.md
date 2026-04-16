@@ -54,7 +54,7 @@
 - [ ] SPIN 内部报价明细解析（类毛绒公仔格式，适配差异）
 - [ ] SPIN Vendor Quote Form 单款导出（Summary + 款式 sheet）
 - [ ] SPIN 批量多款导出
-- [ ] 修复 v1.1 缺口：车缝明细/搪胶件 tab 导航按钮、format_type 版本复制丢失
+- ✓ format_type 版本复制丢失修复 — Phase 4 (v1.2)
 
 ### Out of Scope
 
@@ -90,4 +90,4 @@
 This document evolves at phase transitions and milestone boundaries.
 
 ---
-*Last updated: 2026-04-16 — milestone v1.2 started*
+*Last updated: 2026-04-16 — Phase 4 complete (format_type duplicate fix)*

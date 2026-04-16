@@ -20,8 +20,6 @@
 
 ### v1.1 缺口修复
 
-- [ ] **FIX2-01**: 添加车缝明细 tab 导航按钮（client/index.html #tabsBd）
-- [ ] **FIX2-02**: 添加搪胶件 tab 导航按钮（client/index.html #tabsBd）
 - [ ] **FIX2-03**: 修复版本复制时 format_type 丢失（server/routes/versions.js duplicate endpoint）
 
 ## Future Requirements (Deferred)
@@ -42,8 +40,6 @@
 
 | REQ-ID | Phase | Status |
 |--------|-------|--------|
-| FIX2-01 | Phase 4 | Pending |
-| FIX2-02 | Phase 4 | Pending |
 | FIX2-03 | Phase 4 | Pending |
 | SPIN-01 | Phase 5 | Pending |
 | SPIN-02 | Phase 5 | Pending |

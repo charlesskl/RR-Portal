@@ -4,10 +4,10 @@
 
 ### SPIN 内部报价解析
 
-- [ ] **SPIN-01**: 识别 SPIN 报价格式（主 sheet 含"报价明细"关键字，与毛绒公仔格式区分）
-- [ ] **SPIN-02**: 解析 SPIN 主 sheet 的 MoldPart 区域（料型、料重、机型、件数）
-- [ ] **SPIN-03**: 解析 SPIN 车缝明细 sheet（布料名称、用量、物料价等）
-- [ ] **SPIN-04**: 将 SPIN 解析数据正确存入现有数据库表
+- [x] **SPIN-01**: 识别 SPIN 报价格式（主 sheet 含"报价明细"关键字，与毛绒公仔格式区分）
+- [x] **SPIN-02**: 解析 SPIN 主 sheet 的 MoldPart 区域（料型、料重、机型、件数）
+- [x] **SPIN-03**: 解析 SPIN 车缝明细 sheet（布料名称、用量、物料价等）
+- [x] **SPIN-04**: 将 SPIN 解析数据正确存入现有数据库表
 
 ### SPIN Vendor Quote Form 导出
 
@@ -41,10 +41,10 @@
 | REQ-ID | Phase | Status |
 |--------|-------|--------|
 | FIX2-03 | Phase 4 | Pending |
-| SPIN-01 | Phase 5 | Pending |
-| SPIN-02 | Phase 5 | Pending |
-| SPIN-03 | Phase 5 | Pending |
-| SPIN-04 | Phase 5 | Pending |
+| SPIN-01 | Phase 5 | Complete |
+| SPIN-02 | Phase 5 | Complete |
+| SPIN-03 | Phase 5 | Complete |
+| SPIN-04 | Phase 5 | Complete |
 | EXP-01 | Phase 6 | Pending |
 | EXP-02 | Phase 6 | Pending |
 | EXP-03 | Phase 6 | Pending |

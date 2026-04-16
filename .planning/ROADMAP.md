@@ -23,7 +23,7 @@ Full details: `.planning/milestones/v1.1-ROADMAP.md`
 ### v1.2 SPIN 报价支持
 
 - [ ] **Phase 4: v1.1 缺口修复** — 补齐 v1.1 遗留的 UI 导航按钮和版本复制 bug
-- [ ] **Phase 5: SPIN 解析引擎** — 识别 SPIN 格式并将报价明细完整存入数据库
+- [x] **Phase 5: SPIN 解析引擎** — 识别 SPIN 格式并将报价明细完整存入数据库 (completed 2026-04-16)
 - [ ] **Phase 6: SPIN 单款导出** — 从单个版本生成完整 SPIN Vendor Quote Form
 - [ ] **Phase 7: SPIN 批量导出** — 选多个版本生成含 Summary + 多款式 sheet 的 SPIN 文件
 
@@ -50,7 +50,7 @@ Plans:
   4. 导入的版本 format_type 字段标记为 SPIN
 **Plans**: 1 plan
 Plans:
-- [ ] 05-01-PLAN.md — SPIN 格式识别 + MoldPart/车缝明细解析
+- [x] 05-01-PLAN.md — SPIN 格式识别 + MoldPart/车缝明细解析
 
 ### Phase 6: SPIN 单款导出
 **Goal**: 用户可从任意 SPIN 版本导出一个完整 SPIN Vendor Quote Form Excel 文件
@@ -88,6 +88,6 @@ Plans:
 | 2. 毛绒公仔解析引擎 | v1.1 | 2/2 | Complete | 2026-03-28 |
 | 3. 前端双格式展示 | v1.1 | 1/1 | Complete | 2026-03-28 |
 | 4. v1.1 缺口修复 | v1.2 | 0/1 | Not started | - |
-| 5. SPIN 解析引擎 | v1.2 | 0/? | Not started | - |
+| 5. SPIN 解析引擎 | v1.2 | 1/1 | Complete   | 2026-04-16 |
 | 6. SPIN 单款导出 | v1.2 | 0/? | Not started | - |
 | 7. SPIN 批量导出 | v1.2 | 0/? | Not started | - |

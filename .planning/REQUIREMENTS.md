@@ -11,11 +11,11 @@
 
 ### SPIN Vendor Quote Form 导出
 
-- [ ] **EXP-01**: 单款导出 — 从一个版本生成含 Summary + 款式 sheet 的 SPIN Excel
-- [ ] **EXP-02**: 款式 sheet 填写 Purchased Parts（布料 Fabric Cost 区域）
-- [ ] **EXP-03**: 款式 sheet 填写 Packaging（H-tag、CDU、Master carton）
-- [ ] **EXP-04**: 款式 sheet 填写 Labor（Sewing、Packing、Cutting 等工时和工价）
-- [ ] **EXP-05**: 款式 sheet 填写 Markup 汇总（Material / Packaging / Labor markup）
+- [x] **EXP-01**: 单款导出 — 从一个版本生成含 Summary + 款式 sheet 的 SPIN Excel
+- [x] **EXP-02**: 款式 sheet 填写 Purchased Parts（布料 Fabric Cost 区域）
+- [x] **EXP-03**: 款式 sheet 填写 Packaging（H-tag、CDU、Master carton）
+- [x] **EXP-04**: 款式 sheet 填写 Labor（Sewing、Packing、Cutting 等工时和工价）
+- [x] **EXP-05**: 款式 sheet 填写 Markup 汇总（Material / Packaging / Labor markup）
 - [ ] **EXP-06**: 批量多款导出 — 选多个版本，生成一个含 Summary + 多款式 sheet 的 SPIN 文件
 
 ### v1.1 缺口修复
@@ -45,9 +45,9 @@
 | SPIN-02 | Phase 5 | Complete |
 | SPIN-03 | Phase 5 | Complete |
 | SPIN-04 | Phase 5 | Complete |
-| EXP-01 | Phase 6 | Pending |
-| EXP-02 | Phase 6 | Pending |
-| EXP-03 | Phase 6 | Pending |
-| EXP-04 | Phase 6 | Pending |
-| EXP-05 | Phase 6 | Pending |
+| EXP-01 | Phase 6 | Complete |
+| EXP-02 | Phase 6 | Complete |
+| EXP-03 | Phase 6 | Complete |
+| EXP-04 | Phase 6 | Complete |
+| EXP-05 | Phase 6 | Complete |
 | EXP-06 | Phase 7 | Pending |

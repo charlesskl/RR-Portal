@@ -15,6 +15,19 @@ const pdfParse = require('pdf-parse');
  * 注意：款号可能跨行（如77858-MA/77858-MA/\n77858-MA），模具编号在下一行
  */
 async function parsePdf(filePath) {
+  // 优先使用XY坐标解析（更准确）
+  try {
+    const { parsePdfXY } = require('./pdfParserXY');
+    const xyResult = await parsePdfXY(filePath);
+    if (xyResult.length > 0) {
+      console.log('[PDF] XY坐标解析成功:', xyResult.length, '条');
+      return xyResult;
+    }
+    console.log('[PDF] XY坐标解析无结果，回退到文本解析');
+  } catch (e) {
+    console.log('[PDF] XY解析失败，回退到文本解析:', e.message);
+  }
+
   const buf = fs.readFileSync(filePath);
   const data = await pdfParse(buf);
   const text = data.text;
@@ -22,15 +35,17 @@ async function parsePdf(filePath) {
   console.log('[PDF] 原始文本前500字符:', text.substring(0, 500));
   console.log('[PDF] 总行数:', text.split('\n').length);
 
-  // 委托加工合同格式（ZCS 单号）
-  if (text.includes('委托加工合同')) {
+  // 委托加工合同格式（ZCS/CMC/ZWZ/ZWY 单号）
+  // 区分倒序格式（色粉号在表头最前面）vs 兴信格式（款号在前面）
+  const isReversedLayout = text.indexOf('色粉号') < text.indexOf('款号') && text.indexOf('色粉号') >= 0 && text.indexOf('色粉号') < 200;
+  if (text.includes('委托加工合同') || (isReversedLayout && /(?:ZCS|CMC|ZWZ|ZWY)\d{6,}/.test(text))) {
     console.log('[PDF] 检测为委托加工合同格式');
     const result = parseZCSPdf(text);
     console.log('[PDF] 解析结果条数:', result.length);
     return result;
   }
   // 华登格式（啤机喷油生产单）
-  if (text.includes('华登啤机') || text.includes('华登注塑') || (text.includes('FDYA-') && text.includes('JAZ-'))) {
+  if (text.includes('华登啤机') || text.includes('华登注塑') || ((text.includes('FDYA-') || text.includes('FDTA-')) && text.includes('JAZ-'))) {
     console.log('[PDF] 检测为华登格式');
     const result = parseHuadengPdf(text);
     console.log('[PDF] 解析结果条数:', result.length);
@@ -40,7 +55,20 @@ async function parsePdf(filePath) {
   if (text.includes('啤货表') || text.includes('啤 机') || text.includes('生产单号')) {
     console.log('[PDF] 检测为兴信格式');
     const result = parseXingxinPdf(text);
-    console.log('[PDF] 解析结果条数:', result.length);
+    console.log('[PDF] 兴信解析结果条数:', result.length);
+    // 如果兴信解析效果不好，尝试ZCS倒序
+    if (result.length <= 1 || result.filter(r => r.quantity_needed > 0).length === 0) {
+      const orderNoMatch2 = text.match(/(?:ZCS|CMC|ZWZ|ZWY)\d{6,}/);
+      if (orderNoMatch2) {
+        const lines2 = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+        const reversed = parseZCSReversed(lines2, orderNoMatch2[0]);
+        const validReversed = reversed.filter(r => r.quantity_needed > 0);
+        if (validReversed.length > result.length) {
+          console.log('[PDF] ZCS倒序结果更好，使用倒序结果:', validReversed.length);
+          return validReversed;
+        }
+      }
+    }
     return result;
   }
   console.log('[PDF] 检测为通用格式');
@@ -524,10 +552,27 @@ function parseEntryLines(lines, orderNo) {
  *     例: 18A360078.60 3100 1/13100 244.9 9%
  */
 function parseHuadengPdf(text) {
-  const orderNoMatch = text.match(/FDYA-\d+/);
+  const orderNoMatch = text.match(/FD[YTA]A?-\d+/);
   const orderNo = orderNoMatch ? orderNoMatch[0] : '';
 
   const rawLines = text.split('\n').map(l => l.trim()).filter(Boolean);
+
+  // 预处理：合并跨行的 JAZ- 模具编号（如 "JAZ-CMW0008-M12-" + "001"）
+  const mergedLines = [];
+  for (let i = 0; i < rawLines.length; i++) {
+    const l = rawLines[i];
+    if (l.startsWith('JAZ-') && l.endsWith('-') && i + 1 < rawLines.length) {
+      // 下一行是编号的延续部分（如 "001" 或 "001-01"）
+      const next = rawLines[i + 1];
+      if (/^\d{3}/.test(next) && next.length < 10) {
+        mergedLines.push(l + next);
+        i++; // 跳过下一行
+        continue;
+      }
+    }
+    mergedLines.push(l);
+  }
+
   const results = [];
 
   // 产品货号模式：2-6大写字母 + 4+位数字，单独一行或在JAZ-前缀
@@ -536,23 +581,29 @@ function parseHuadengPdf(text) {
   const dateRe = /^\d{2}\/\d{1,2}\/\d{1,2}$/;
 
   // 找所有含 JAZ- 的行索引
-  const jazIdxs = rawLines.reduce((acc, l, i) => {
+  const jazIdxs = mergedLines.reduce((acc, l, i) => {
     if (l.includes('JAZ-')) acc.push(i);
     return acc;
   }, []);
 
-  if (jazIdxs.length === 0) return results;
+  if (jazIdxs.length === 0) {
+    // 非JAZ-格式的华登啤机单（如50#92108啤机更改单）
+    // 格式: 产品编号+BBCL-01M-01+名称+颜色/色粉+料型+数字...
+    console.log('[华登] 无JAZ-行，尝试BBCL/直排格式');
+    const directResult = parseHuadengDirect(mergedLines, orderNo, text);
+    return directResult;
+  }
 
   let currentProduct = '';
 
   for (let ji = 0; ji < jazIdxs.length; ji++) {
     const jazIdx = jazIdxs[ji];
-    const nextJazIdx = ji + 1 < jazIdxs.length ? jazIdxs[ji + 1] : rawLines.length;
+    const nextJazIdx = ji + 1 < jazIdxs.length ? jazIdxs[ji + 1] : mergedLines.length;
 
     // 向前找产品货号行（上一行是单独的货号）
     let entryStart = jazIdx;
     if (jazIdx > 0) {
-      const prevLine = rawLines[jazIdx - 1];
+      const prevLine = mergedLines[jazIdx - 1];
       const prevJazIdx = ji > 0 ? jazIdxs[ji - 1] : -1;
       if (!prevLine.includes('JAZ-') && !dateRe.test(prevLine) &&
           productCodeRe.test(prevLine) && jazIdx - 1 > prevJazIdx) {
@@ -564,20 +615,26 @@ function parseHuadengPdf(text) {
     let entryEnd = nextJazIdx;
     if (ji + 1 < jazIdxs.length) {
       const nj = jazIdxs[ji + 1];
-      if (nj > 0 && !rawLines[nj - 1].includes('JAZ-') && !dateRe.test(rawLines[nj - 1]) &&
-          productCodeRe.test(rawLines[nj - 1])) {
+      if (nj > 0 && !mergedLines[nj - 1].includes('JAZ-') && !dateRe.test(mergedLines[nj - 1]) &&
+          productCodeRe.test(mergedLines[nj - 1])) {
         entryEnd = nj - 1;
       }
     }
 
     // 收集条目行，过滤日期行
-    const entryLines = rawLines.slice(entryStart, entryEnd).filter(l => !dateRe.test(l));
+    const entryLines = mergedLines.slice(entryStart, entryEnd).filter(l => !dateRe.test(l));
     const entryText = entryLines.join(' ');
 
-    // 提取模具编号（M后接2位数字，如 -M01 / -M02）
-    const moldNoMatch = entryText.match(/(JAZ-[A-Z0-9]+-M\d{2})/);
-    if (!moldNoMatch) continue;
-    const moldNo = moldNoMatch[1];
+    // 提取模具编号（支持 JAZ-XXX-M01, JAZ-CMW0008-M12-001, JAZ-CMW0001-M27-001-01 等）
+    const moldNoMatch = entryText.match(/(JAZ-[A-Z0-9]+-M\d+-\d+(?:-\d+)?)/);
+    if (!moldNoMatch) {
+      // 兜底：只到 -Mxx
+      const moldNoMatch2 = entryText.match(/(JAZ-[A-Z0-9]+-M\d{2})/);
+      if (!moldNoMatch2) continue;
+      var moldNo = moldNoMatch2[1];
+    } else {
+      var moldNo = moldNoMatch[1];
+    }
 
     // 更新产品货号
     const beforeJaz = entryText.slice(0, entryText.indexOf('JAZ-'));
@@ -588,55 +645,95 @@ function parseHuadengPdf(text) {
     const afterMoldStart = entryText.indexOf(moldNo) + moldNo.length;
     const afterMold = entryText.slice(afterMoldStart);
 
-    // 机型+目标数（如 18A3600）：目标数为3-4位整数，避免与啤重小数粘连
+    // 机型+目标数（如 18A3600）：目标数为3-4位整数
     const machineMatch = afterMold.match(/(\d{1,2})A(\d{3,4})/);
-    if (!machineMatch) continue;
-    const target24h = parseInt(machineMatch[2]);
+    let target24h = 0;
+    let beforeMachine, afterMachine;
 
-    const beforeMachine = afterMold.slice(0, afterMold.indexOf(machineMatch[0]));
-    const afterMachine = afterMold.slice(afterMold.indexOf(machineMatch[0]) + machineMatch[0].length);
+    if (machineMatch) {
+      target24h = parseInt(machineMatch[2]);
+      beforeMachine = afterMold.slice(0, afterMold.indexOf(machineMatch[0]));
+      afterMachine = afterMold.slice(afterMold.indexOf(machineMatch[0]) + machineMatch[0].length);
+    } else {
+      // 无机型标记（如 CMW0298 格式: "2#下身40001000 359C 绿色85928ABS 750NSW13.0113.0"）
+      beforeMachine = afterMold;
+      afterMachine = '';
+    }
 
-    // 啤重G（机型后第一个小数，最多2位小数避免粘连下一个数字）
-    const shotMatch = afterMachine.match(/^(\d{1,4}\.\d{1,2})/);
-    const shotWeight = shotMatch ? parseFloat(shotMatch[1]) : 0;
+    // 啤重G
+    let shotWeight = 0;
+    if (afterMachine) {
+      const shotMatch = afterMachine.match(/^(\d{1,4}\.\d{1,2})/);
+      shotWeight = shotMatch ? parseFloat(shotMatch[1]) : 0;
+    }
 
-    // 需啤数：格式 {订单数} 1/{腔数}{需啤数}，腔数为1位，需啤数紧跟其后
+    // 需啤数
     let quantityNeeded = 0;
-    const qtyMatch = afterMachine.match(/(\d+)\s*1\/(\d)\s*(\d+)/);
-    if (qtyMatch) {
-      quantityNeeded = parseInt(qtyMatch[3]);
+    if (afterMachine) {
+      const qtyMatch = afterMachine.match(/(\d+)\s*1\/(\d)\s*(\d+)/);
+      if (qtyMatch) quantityNeeded = parseInt(qtyMatch[3]);
+    }
+
+    // 无机型时从 beforeMachine 直接提取（格式: "名称+总套数+啤数 颜色+色粉号+料型+啤重+净重"）
+    if (!machineMatch) {
+      // 总套数+啤数（如 "40001000"）
+      const qtyMatch2 = beforeMachine.match(/(\d{3,}?)(\d{3,})\s/);
+      if (qtyMatch2) {
+        // 尝试合理分割
+        const fullNum = beforeMachine.match(/(\d{4,})\s/);
+        if (fullNum) {
+          const d = fullNum[1];
+          for (let sp = Math.floor(d.length/2)-1; sp <= Math.ceil(d.length/2)+1; sp++) {
+            if (sp <= 0 || sp >= d.length) continue;
+            const a = parseInt(d.substring(0, sp));
+            const b = parseInt(d.substring(sp));
+            if (a > 0 && b > 0 && a >= b && a <= b * 10) { quantityNeeded = b; break; }
+          }
+        }
+      }
+      // 啤重（料型后面的第一个小数）
+      const swMatch = beforeMachine.match(/(?:ABS|PP|PVC|LDPE|POM|透明)[\w\s（）()度]*?(\d+\.?\d)\d*\.?\d*/);
+      if (swMatch) shotWeight = parseFloat(swMatch[1]);
     }
 
     // 色粉号（/ 后4-6位数字）
     const powderMatch = beforeMachine.match(/\/\s*(\d{4,6})/);
     const colorPowder = powderMatch ? powderMatch[1] : '';
+    // 也试直接数字模式
+    let colorPowder2 = '';
+    if (!colorPowder) {
+      const cpnMatch = beforeMachine.match(/(?:色|蓝|绿|红|白|黄|紫|粉)\s*(\d{5})/);
+      if (cpnMatch) colorPowder2 = cpnMatch[1];
+    }
 
     // 用料类型
     let material = '';
     const matPatterns = [
       /透明ABS\s*[\w+():\d\/\s.-]*/,
       /ABS\s*[\w+():\d\/\s.-]*/,
-      /PP[\u4e00-\u9fa5]+/,                           // PP黑色抽粒 等含中文的PP料型
-      /PP\s*[\w+():\d\/\s.()\[\]-]*/,
+      /PP[\u4e00-\u9fa5]+/,
+      /PP\s*[\(\w+():\d\/\s.()\[\]-]*/,
       /TPR[\w\s.-]*/,
-      /PVC[\w\s.-]*/,
-      /KR\d+[\w\s.-]*/,                               // KR03 等KR系列料型
+      /PVC[\w\s.（）()度-]*/,
+      /LDPE\s*[\w.-]*/,
+      /POM\s*[\w.-]*/,
+      /KR\d+[\w\s.-]*/,
       /K料[\w\s.-]*/,
     ];
     for (const pat of matPatterns) {
       const m = beforeMachine.match(pat);
       if (m) {
-        material = m[0].trim().replace(/\s+$/, '');
+        material = m[0].trim().replace(/\s+$/, '').replace(/\d+\.?\d*$/, '').trim();
         break;
       }
     }
 
-    // 先提取颜色，再用颜色定位模具名称（避免名称混入颜色）
+    // 提取颜色
     const textBeforeMat = material
       ? beforeMachine.slice(0, beforeMachine.indexOf(material))
       : beforeMachine;
     const cleanForColor = textBeforeMat.replace(/\/\s*\d{4,6}/, '').replace(/[A-Z0-9]{4,}/g, '');
-    const colorWords = [...cleanForColor.matchAll(/((?:高光|浅|深|淡|半透明)?(?:黑|白|红|蓝|绿|黄|灰|棕|橙|紫|粉|金|银|肉|咖|透明|本白|奶白)色?(?:\/\w+)?)/g)];
+    const colorWords = [...cleanForColor.matchAll(/((?:高光|浅|深|淡|半透明|珠光)?(?:黑|白|红|蓝|绿|黄|灰|棕|橙|紫|粉|金|银|肉|咖|透明|本白|奶白|原色|渌)色?(?:\+闪粉)?(?:\/\w+)?)/g)];
     const color = colorWords.length > 0 ? colorWords[colorWords.length - 1][1].trim() : '';
 
     // 模具名称：颜色之前的中文文字（如"儿童黑豹 2"、"电池箱"）
@@ -724,8 +821,8 @@ function parseGenericPdf(text) {
 function parseZCSPdf(text) {
   const results = [];
 
-  // 提取采购单号（支持 ZCS / CMC 格式）
-  const orderNoMatch = text.match(/(?:ZCS|CMC)\d{6,}/);
+  // 提取采购单号（支持 ZCS / CMC / ZWZ / ZWY 格式）
+  const orderNoMatch = text.match(/(?:ZCS|CMC|ZWZ|ZWY)\d{6,}/);
   const orderNo = orderNoMatch ? orderNoMatch[0] : '';
 
   const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
@@ -762,7 +859,11 @@ function parseZCSPdf(text) {
   }
 
   if (pcLineIdxs.length === 0) {
-    console.log('[ZCS] 未找到货號行，dataLines:', dataLines.slice(0, 10));
+    console.log('[ZCS] 未找到货號行，尝试倒序格式解析');
+    // 倒序格式：色粉+料型+啤重在前，款号+模具编号+名称在后
+    // 锚点：找含模具编号的行（字母-数字M-数字 或 数字-M数字 模式）
+    const reversedResult = parseZCSReversed(lines, orderNo);
+    if (reversedResult.length > 0) return reversedResult;
     return results;
   }
 
@@ -1003,6 +1104,413 @@ function parseZCSPdf(text) {
   console.log('[ZCS] 解析结果:', results.map(r =>
     `${r.product_code} ${r.mold_no} qty=${r.quantity_needed} color=${r.color} mat=${r.material_type}`
   ));
+
+  // 过滤掉啤重和啤数都为0的无效结果
+  const validResults = results.filter(r => r.quantity_needed > 0 || r.shot_weight > 0);
+
+  // 如果有效结果太少，尝试倒序格式
+  if (validResults.length <= 1) {
+    const reversedResult = parseZCSReversed(lines, orderNo);
+    const validReversed = reversedResult.filter(r => r.quantity_needed > 0);
+    if (validReversed.length > validResults.length) {
+      console.log('[ZCS] 倒序格式结果更好，使用倒序结果');
+      return validReversed;
+    }
+  }
+
+  return validResults.length > 0 ? validResults : results;
+
+  return results;
+}
+
+/**
+ * 解析倒序格式的 ZCS/CMC/ZWZ PDF（动态按日期行分组）
+ *
+ * 策略：用日期行（2026-xx-xx 或 2026/x/x）作为每条记录的结束标志
+ * 把两个日期行之间的所有行合并成一条记录的文本，然后从中提取各字段
+ */
+function parseZCSReversed(lines, orderNo) {
+  const results = [];
+
+  // 过滤掉表头、页脚、汇总行，只保留数据行
+  const skipPatterns = [
+    /^$/, /〖/, /特别注明/, /操作员/, /下单人/, /接单人/, /收货人/,
+    /啤 机 部/, /供应商/, /塑 胶/, /^第\d+/, /^页，共/, /^\d+页$/,
+    /色粉号用料/, /款号模具/, /净重G/, /加工金/, /额\(HK/, /^整啤$/,
+    /总净$/, /^重KG/, /加工单价/, /生产单号/, /出单日期/, /交货日期：/,
+    /地址：/, /傳真：/, /電話：/, /^(?:ZCS|CMC|ZWZ|ZWY|FDYA|FDTA)\d/,
+    /^备\s*注$/, /凡是移印/,
+  ];
+  const isSkipLine = l => skipPatterns.some(p => p.test(l));
+  const isDateLine = l => /^\d{4}[-/]\d{1,2}[-/]\d{1,2}$/.test(l) || /^0?26\/\d{1,2}\/\d{1,2}$/.test(l);
+
+  // 找数据区起点
+  let dataStart = 0;
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].includes('交货日期') && !lines[i].includes('交货日期：')) {
+      dataStart = i + 1; break;
+    }
+  }
+
+  // 按日期行分组：每遇到日期行就结束一条记录
+  const records = [];
+  let currentLines = [];
+  for (let i = dataStart; i < lines.length; i++) {
+    const l = lines[i];
+    if (isSkipLine(l)) continue;
+    if (isDateLine(l)) {
+      if (currentLines.length > 0) {
+        records.push(currentLines);
+        currentLines = [];
+      }
+      continue;
+    }
+    currentLines.push(l);
+  }
+
+  console.log('[ZCS动态] 按日期分组:', records.length, '条记录');
+
+  // 已知料型关键词
+  const matKeywords = ['ABS', 'MABS', 'PP', 'PVC', 'LDPE', 'POM', 'POK', 'PA6', 'PA-', 'TPR', 'TPE', 'HDPE', 'PC', '尼龙', '透明ABS', '透明MABS'];
+  const hasMat = s => matKeywords.some(k => s.toUpperCase().includes(k));
+  const colorWords = ['黑', '白', '红', '蓝', '绿', '黄', '灰', '棕', '橙', '紫', '粉', '银', '金', '透明', '啡', '咖', '原色', '浅', '深', '珠光', '玫红', '温变'];
+  const hasColor = s => colorWords.some(c => s.includes(c)) || /^\d+[A-Z]\//.test(s) || /^色$/.test(s);
+
+  for (const rec of records) {
+    let productCode = '', moldNo = '', moldName = '', color = '';
+    let colorPowderNo = '', materialType = '', shotWeight = 0, quantityNeeded = 0;
+    let materialKg = 0, notes = '';
+
+    // 逐行分类
+    const matLines = [];     // 料型相关行
+    const moldLines = [];    // 含模具编号的行
+    const colorLines = [];   // 颜色行
+    const numberLines = [];  // 纯数字行
+
+    for (const l of rec) {
+      // 含模具编号的行（多种格式）
+      if ((/[A-Z]{2,}[\w]*-\d+/.test(l) || /[A-Z]+\d+-M\d+-\d+/.test(l)) && /[\u4e00-\u9fa5]/.test(l)) {
+        moldLines.push(l);
+      } else if (/\d{4,}-[PM]\d+/.test(l) && /[\u4e00-\u9fa5]/.test(l)) {
+        moldLines.push(l);
+      } else if (/\d{4,5}[A-Z]{2,}-\d+/.test(l) && /[\u4e00-\u9fa5]/.test(l)) {
+        moldLines.push(l); // 20388WT-03, 1113-03
+      } else if (/\d{5,}-M\d+/.test(l)) {
+        moldLines.push(l);
+      } else if (/\d{3,}-\d{2}/.test(l) && /[\u4e00-\u9fa5]{2,}/.test(l)) {
+        moldLines.push(l); // 1113-03灯罩... (数字-数字+中文名称2字以上)
+      } else if (hasMat(l)) {
+        matLines.push(l);
+      } else if (hasColor(l)) {
+        colorLines.push(l);
+      } else if (/^\d+\.\d+/.test(l) && !l.includes('喷油')) {
+        numberLines.push(l);
+      } else if (l.includes('喷油')) {
+        notes = '喷油';
+        // 也可能含净重（如 "64.8喷油0"）
+        const nwm = l.match(/^(\d+\.?\d*)/);
+        if (nwm) materialKg = parseFloat(nwm[1]);
+      }
+    }
+
+    // 提取模具编号和名称
+    const moldText = moldLines.join('');
+    if (moldText) {
+      // 模具编号模式
+      const moldPatterns = [
+        /([A-Z]{2,}[\w]*-\d+M-\d+(?:-\d+)?)/, // PABR-01M-01
+        /([A-Z]+\d+-M\d+-\d+)/,                // PF001-M07-01
+        /(\d{5,}-M\d+)/,                        // 1226146-M01
+        /(\d{4,5}[A-Z]{2,}-\d+)/,              // 20388WT-03
+        /(\d{4,}-P\d+)/,                        // 9680-P01
+        /(\d{3,4}-\d{2})/,                      // 1113-03
+        /([A-Z]{2,}-\d{4,5}(?:-\d+)?)/,         // YH-10866
+      ];
+      for (const pat of moldPatterns) {
+        const mm = moldText.match(pat);
+        if (mm) { moldNo = mm[1]; break; }
+      }
+
+      if (moldNo) {
+        const idx = moldText.indexOf(moldNo);
+        // 款号在模具编号之前
+        const before = moldText.substring(0, idx).replace(/[（(][^）)]*[）)]/g, '');
+        const pcm = before.match(/(\d{4,7})/);
+        if (pcm) productCode = pcm[1];
+
+        // 模具名称在模具编号之后
+        const after = moldText.substring(idx + moldNo.length);
+        const nm = after.match(/^([\u4e00-\u9fa5/()（）]+)/);
+        if (nm) moldName = nm[1];
+
+        // 数字部分：总套数+啤数
+        const afterName = nm ? after.substring(nm[0].length) : after;
+        // 提取所有数字（包含可能粘连的颜色文字后的数字）
+        const digitsOnly = afterName.replace(/[\u4e00-\u9fa5a-zA-Z/（）()]/g, '').replace(/\s/g, '');
+        if (digitsOnly.length >= 4) {
+          for (let sp = Math.floor(digitsOnly.length / 2) - 1; sp <= Math.ceil(digitsOnly.length / 2) + 1; sp++) {
+            if (sp <= 0 || sp >= digitsOnly.length) continue;
+            const a = parseInt(digitsOnly.substring(0, sp));
+            const b = parseInt(digitsOnly.substring(sp));
+            if (a > 0 && b > 0 && a >= b && a <= b * 20) {
+              quantityNeeded = b; break;
+            }
+          }
+        }
+      }
+    }
+
+    if (!moldNo) continue;
+
+    // 如果没款号，从记录行中查找含字母+数字的款号行
+    if (!productCode) {
+      for (const l of rec) {
+        // 跨行款号如 "PF001A1-KMART/PF001A1-KMART/..."
+        const pcMatch2 = l.match(/([A-Z]{2,}\d+[A-Z0-9]*(?:-[A-Z]+)?)/);
+        if (pcMatch2 && !hasMat(l) && !hasColor(l) && !l.includes('JAZ-')) {
+          productCode = pcMatch2[1];
+          break;
+        }
+      }
+    }
+    // 从模具编号提取（如 1226146-M01 → 1226146）
+    if (!productCode) {
+      const pcm = moldNo.match(/^(\d{4,7})-/);
+      if (pcm) productCode = pcm[1];
+    }
+
+    // 提取料型：把所有料型行合并
+    const matText = matLines.join(' ');
+    if (matText) {
+      // 提取色粉号（4-5位数字，在料型关键词之前）
+      const cpnMatch = matText.match(/^(\d{4,5})/);
+      if (cpnMatch) colorPowderNo = cpnMatch[1];
+
+      // 提取料型名称和啤重
+      // 合并后的matText如: "89324POM M90-4420.8" 或 "63138ABS 750NSW76.2" 或 "63374 透明ABS TR558AI 33.0"
+      // 去掉色粉号后: "POM M90-4420.8"
+      let afterCpn = matText.replace(/^\d{4,5}\s*/, '');
+      // 用已知料型列表精确匹配，把料型和啤重分开
+      const knownMats = [
+        'POM M90-44', 'POM M90',
+        'ABS KF-740', 'ABS 750NSW', 'ABS 750', 'ABS 709S', 'ABS AG15AIH', 'ABS GP22', 'ABS GP',
+        'ABS 557AI', 'ABS PA-747',
+        '透明ABS TR558AI', '透明ABS TR557I', '透明ABS',
+        '透明MABS TX-0520IM-NP', '透明MABS',
+        'PP EP332K', 'PP 5090T', 'PP 3015', 'PP3015', 'PP 1120', 'PP',
+        '1#PP EP332K',
+        'PVC 110度本白', 'PVC 95度（透明）', 'PVC 95度（本白）', 'PVC 85度（透明）', 'PVC 85度（本白）',
+        'PVC 80度', 'PVC 75度', 'PVC',
+        'LDPE 260GG', 'LDPE',
+        'POK YM-MF060', 'POK',
+        'PA6 1010C2', 'PA6',
+        'TPR I603BT-B4709', 'TPR I602BT-B5478', 'TPR',
+        'TPE', 'HDPE', 'PC', 'SAN 310NTR', '尼龙',
+      ];
+      let matched = false;
+      for (const km of knownMats) {
+        const idx = afterCpn.indexOf(km);
+        if (idx >= 0) {
+          materialType = km;
+          const afterMat = afterCpn.substring(idx + km.length);
+          // 啤重是料型后面的数字
+          const swMatch = afterMat.match(/^(\d+\.?\d*)/);
+          if (swMatch) {
+            const sw = parseFloat(swMatch[1]);
+            if (sw >= 1 && sw < 1000) shotWeight = sw;
+          }
+          matched = true;
+          break;
+        }
+      }
+      if (!matched) {
+        // 兜底：整个文本作为料型
+        materialType = afterCpn.replace(/\d+\.?\d*$/, '').trim();
+        const swFallback = afterCpn.match(/(\d+\.?\d*)$/);
+        if (swFallback) {
+          const sw = parseFloat(swFallback[1]);
+          if (sw >= 1 && sw < 1000) shotWeight = sw;
+        }
+      }
+    }
+
+    // 提取颜色
+    color = colorLines.join('').replace(/\s+/g, '');
+    // 颜色也可能嵌在模具行末尾（如 "...40000白色"）
+    if (!color && moldText) {
+      const embColor = moldText.match(/([\u4e00-\u9fa5]*(?:黑|白|红|蓝|绿|黄|灰|棕|橙|紫|粉|银|金|透明|啡|咖|原色|浅|深|珠光)色?)$/);
+      if (embColor) color = embColor[1];
+    }
+
+    // 净重KG
+    if (!materialKg && numberLines.length > 0) {
+      // 最大的数字通常是净重
+      for (const nl of numberLines) {
+        const v = parseFloat(nl);
+        if (v > 10 && v < 100000) materialKg = v;
+      }
+    }
+
+    const fullMoldName = moldName ? `${moldNo} ${moldName}` : moldNo;
+
+    results.push({
+      product_code: productCode,
+      mold_no: moldNo,
+      mold_name: fullMoldName,
+      color,
+      color_powder_no: colorPowderNo,
+      material_type: materialType,
+      shot_weight: shotWeight,
+      material_kg: materialKg,
+      sprue_pct: 0,
+      ratio_pct: 0,
+      quantity_needed: quantityNeeded,
+      accumulated: 0,
+      cavity: 1,
+      cycle_time: 0,
+      order_no: orderNo,
+      is_three_plate: 0,
+      packing_qty: 0,
+      notes,
+    });
+  }
+
+  console.log('[ZCS动态] 解析结果:', results.map(r =>
+    `${r.product_code} ${r.mold_no} qty=${r.quantity_needed} color=${r.color} mat=${r.material_type} shot=${r.shot_weight}`
+  ));
+  return results;
+}
+
+/**
+ * 解析华登直排格式（无JAZ-前缀，如92108啤机更改单）
+ * 每行格式: 产品编号+模具编号+名称+颜色/色粉+料型+啤重+数量+腔数+啤数+用料KG+水口%
+ * 例: 92108BBCL-01M-01独角兽摇床上壳珠光浅渌/93468
+ *     PP(EP332K)+TPE 50
+ *     96:4
+ *     140.8 62431/23121.5441.7 4%
+ */
+function parseHuadengDirect(lines, orderNo, text) {
+  const results = [];
+
+  // 提取产品编号（从标题行"编号："或"（数字）"）
+  let productCode = '';
+  const pcMatch = text.match(/[（(](\d{5})[）)]/);
+  if (pcMatch) productCode = pcMatch[1];
+
+  // 找含模具编号的行（如 BBCL-01M-01, RBCA-08M-01 等）
+  const moldRe = /([A-Z]{2,}-\d+M-\d+)/;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const moldMatch = line.match(moldRe);
+    if (!moldMatch) continue;
+
+    const moldNo = moldMatch[1];
+    const moldIdx = line.indexOf(moldNo);
+
+    // 模具编号之前可能有产品编号
+    const before = line.substring(0, moldIdx);
+    const pcm = before.match(/(\d{5})/);
+    if (pcm) productCode = pcm[1];
+    // 也可能有"大摇篮公仔"等前缀（跳过）
+
+    // 模具编号之后提取名称
+    const after = line.substring(moldIdx + moldNo.length);
+    const nameMatch = after.match(/^([\u4e00-\u9fa5/()（）\s]+)/);
+    const moldName = nameMatch ? nameMatch[1].trim() : '';
+
+    // 颜色/色粉号在名称之后
+    let color = '', colorPowderNo = '';
+    const afterName = nameMatch ? after.substring(nameMatch[0].length) : after;
+    const colorMatch = afterName.match(/([\u4e00-\u9fa5+]+(?:\/\d{5})?)/);
+    if (colorMatch) {
+      const cv = colorMatch[1];
+      const cpnM = cv.match(/\/(\d{5})$/);
+      if (cpnM) {
+        color = cv.substring(0, cv.indexOf('/'));
+        colorPowderNo = cpnM[1];
+      } else {
+        color = cv;
+      }
+    }
+
+    // 料型在下面几行（含 ABS/PP/PVC/LDPE/POM/TPE/透明 等）
+    let materialType = '', shotWeight = 0, quantityNeeded = 0, materialKg = 0, cavity = 1;
+    const matLines = [];
+    for (let j = i + 1; j < Math.min(i + 5, lines.length); j++) {
+      const nl = lines[j];
+      if (moldRe.test(nl)) break; // 下一条记录了
+      if (nl.includes('共用模') || nl.includes('PO:') || nl.includes('备注')) break;
+      matLines.push(nl);
+    }
+
+    const matText = matLines.join(' ');
+    // 提取料型
+    const matMatch = matText.match(/((?:PP|ABS|PVC|LDPE|POM|TPE|透明ABS|SAN)[^0-9]*)/i);
+    if (matMatch) materialType = matMatch[1].trim();
+
+    // 提取啤重（第一个合理小数）
+    const swMatch = matText.match(/(\d+\.?\d*)\s+\d+/);
+    if (swMatch) {
+      const sw = parseFloat(swMatch[1]);
+      if (sw > 0 && sw < 1000) shotWeight = sw;
+    }
+
+    // 提取数量：格式 "62431/23121.5" → 总套数=6243, 腔数=1/2, 啤数=3121
+    // 或 "10001/8125" → 总套数=1000, 腔数=1/8, 啤数=125
+    const qtyMatch = matText.match(/(\d+)(\d)\/(\d)(\d+)/);
+    if (qtyMatch) {
+      // 解析：数字分割点在 cavity(1/X) 处
+      // 尝试各种分割
+      const fullDigits = matText.match(/(\d+)\/(\d)(\d+)/);
+      if (fullDigits) {
+        cavity = parseInt(fullDigits[2]);
+        quantityNeeded = parseInt(fullDigits[3]);
+        // 如果啤数太大或太小，重新分割
+        if (quantityNeeded < 10 && fullDigits[3].length > 1) {
+          // 可能分割错了，用整个数字
+        }
+      }
+    }
+
+    // 更简单的方式：找 "数字 1/数字 数字" 模式
+    const simpleQty = matText.match(/(\d+)\s+(\d)\/(\d)\s*(\d+)/);
+    if (simpleQty) {
+      quantityNeeded = parseInt(simpleQty[4]);
+      cavity = parseInt(simpleQty[3]);
+    }
+
+    // 用料KG
+    const kgMatch = matText.match(/(\d+\.?\d*)\s+\d+%/);
+    if (kgMatch) materialKg = parseFloat(kgMatch[1]);
+
+    if (!moldNo) continue;
+
+    const fullMoldName = moldName ? `${moldNo} ${moldName}` : moldNo;
+
+    results.push({
+      product_code: productCode,
+      mold_no: moldNo,
+      mold_name: fullMoldName,
+      color,
+      color_powder_no: colorPowderNo,
+      material_type: materialType,
+      shot_weight: shotWeight,
+      material_kg: materialKg,
+      sprue_pct: 0,
+      ratio_pct: 0,
+      quantity_needed: quantityNeeded,
+      accumulated: 0,
+      cavity,
+      cycle_time: 0,
+      order_no: orderNo,
+      is_three_plate: 0,
+      packing_qty: 0,
+      notes: '',
+    });
+  }
+
+  console.log('[华登直排] 解析结果:', results.length, '条');
   return results;
 }
 

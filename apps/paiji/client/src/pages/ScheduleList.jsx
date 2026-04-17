@@ -47,7 +47,7 @@ export default function ScheduleList() {
   };
 
   const handleExport = (id) => {
-    window.open(`${import.meta.env.BASE_URL.replace(/\/$/, '')}/api/schedule/${id}/export`);
+    window.open(`/api/schedule/${id}/export`);
   };
 
   const handlePrint = () => {

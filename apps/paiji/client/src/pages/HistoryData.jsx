@@ -76,23 +76,29 @@ export default function HistoryData({ workshop = 'B' }) {
           <Upload beforeUpload={handleUpload} showUploadList={false} accept=".xlsx,.xls">
             <Button icon={<UploadOutlined />} type="primary">导入历史排单Excel</Button>
           </Upload>
-          <span style={{ color: '#999' }}>已导入 {total} 条历史记录，覆盖 {machinesWithData.length} 台机</span>
+          <span style={{ color: '#999' }}>已导入 {total} 条历史记录，覆盖 {machinesWithData.length} / {stats.length} 台机</span>
         </Space>
       </Card>
 
-      {machinesWithData.length > 0 && (
+      {stats.length > 0 && (
         <Card title="各机台啤重G区间统计" size="small" style={{ marginBottom: 16 }}>
           <Row gutter={[8, 8]}>
-            {machinesWithData.map(s => (
+            {stats.map(s => (
               <Col key={s.machine_no} span={4}>
-                <Card size="small" style={{ textAlign: 'center' }}>
+                <Card size="small" style={{ textAlign: 'center', opacity: s.record_count > 0 ? 1 : 0.5 }}>
                   <div style={{ fontWeight: 'bold', marginBottom: 4 }}>{s.machine_no}</div>
-                  <div style={{ fontSize: 12, color: '#666' }}>
-                    {s.min_shot_weight}g ~ {s.max_shot_weight}g
-                  </div>
-                  <div style={{ fontSize: 11, color: '#999' }}>
-                    均{s.avg_shot_weight}g / {s.record_count}条
-                  </div>
+                  {s.record_count > 0 ? (
+                    <>
+                      <div style={{ fontSize: 12, color: '#666' }}>
+                        {s.min_shot_weight}g ~ {s.max_shot_weight}g
+                      </div>
+                      <div style={{ fontSize: 11, color: '#999' }}>
+                        均{s.avg_shot_weight}g / {s.record_count}条
+                      </div>
+                    </>
+                  ) : (
+                    <div style={{ fontSize: 11, color: '#bbb' }}>暂无历史数据</div>
+                  )}
                 </Card>
               </Col>
             ))}

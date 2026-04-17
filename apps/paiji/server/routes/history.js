@@ -28,7 +28,15 @@ router.get('/', (req, res) => {
 // 每台机啤重G统计
 router.get('/stats', (req, res) => {
   const workshop = req.query.workshop || 'B';
-  const stats = db.prepare(`
+  // 获取所有机台
+  const machines = db.prepare(`
+    SELECT machine_no FROM machines
+    WHERE workshop = ? AND status = 'active' AND machine_no != '其他机台'
+    ORDER BY CAST(REPLACE(REPLACE(REPLACE(machine_no, '#', ''), 'C-', ''), 'A-', '') AS INTEGER)
+  `).all(workshop);
+
+  // 获取历史统计（同时支持带前缀和不带前缀的机台号）
+  const histStats = db.prepare(`
     SELECT machine_no,
            MIN(shot_weight) as min_shot_weight,
            MAX(shot_weight) as max_shot_weight,
@@ -39,8 +47,39 @@ router.get('/stats', (req, res) => {
     FROM history_records
     WHERE shot_weight > 0 AND workshop = ?
     GROUP BY machine_no
-    ORDER BY machine_no
   `).all(workshop);
+
+  // 建索引：按原始机台号建map（不要覆盖）
+  const histMap = {};
+  for (const h of histStats) {
+    histMap[h.machine_no] = h;
+  }
+
+  // 合并：对每台机，同时找带前缀和不带前缀的历史记录并合并
+  const stats = machines.map(m => {
+    const stripped = m.machine_no.replace(/^[A-Z]-/, '');
+    const candidates = [histMap[m.machine_no], histMap[stripped]].filter(x => x);
+    // 去重（如果stripped和原始一样会只有一个）
+    const unique = [...new Set(candidates)];
+
+    if (unique.length === 0) {
+      return { machine_no: m.machine_no, min_shot_weight: 0, max_shot_weight: 0, avg_shot_weight: 0, record_count: 0, mold_count: 0, material_count: 0 };
+    }
+    if (unique.length === 1) {
+      return { ...unique[0], machine_no: m.machine_no };
+    }
+    // 合并多条
+    const totalCnt = unique.reduce((sum, h) => sum + h.record_count, 0);
+    return {
+      machine_no: m.machine_no,
+      min_shot_weight: Math.min(...unique.map(h => h.min_shot_weight)),
+      max_shot_weight: Math.max(...unique.map(h => h.max_shot_weight)),
+      avg_shot_weight: Math.round(unique.reduce((sum, h) => sum + h.avg_shot_weight * h.record_count, 0) / totalCnt * 100) / 100,
+      record_count: totalCnt,
+      mold_count: Math.max(...unique.map(h => h.mold_count)),
+      material_count: Math.max(...unique.map(h => h.material_count)),
+    };
+  });
   res.json(stats);
 });
 

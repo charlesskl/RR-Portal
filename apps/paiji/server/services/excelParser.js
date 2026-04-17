@@ -181,41 +181,126 @@ function parseXingxinOrderExcel(filePath) {
   const ws = wb.Sheets[wb.SheetNames[0]];
   const rawRows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
 
-  // 从前几行提取单号（编号:LWW...）
+  // 从前几行提取单号（编号:LWW... 或 生产单号:CMC...）
   let orderNo = '';
-  for (let i = 0; i < Math.min(rawRows.length, 5); i++) {
+  for (let i = 0; i < Math.min(rawRows.length, 10); i++) {
     const rowStr = rawRows[i].join(' ');
-    const m = rowStr.match(/编号[：:]\s*([A-Z0-9/]+)/);
+    const m = rowStr.match(/(?:编号|生产单号)[：:]\s*([A-Z0-9/]+)/);
     if (m) { orderNo = m[1]; break; }
   }
 
-  // 找表头行（含"货号"或"模具编号"和"用料"）
-  const keywords = ['货号', '模具编号', '用料', '啤净重', '需啤数'];
+  // 找表头行（含"款号/货号"或"模具编号"和"用料/颜色"等）
+  const keywords = ['货号', '款号', '模具编号', '用料', '啤净重', '需啤数', '啤数', '颜色', '净重'];
   let headerIdx = -1;
-  for (let i = 0; i < Math.min(rawRows.length, 10); i++) {
+  for (let i = 0; i < Math.min(rawRows.length, 15); i++) {
     const row = rawRows[i].map(c => String(c ?? ''));
     const hits = row.filter(c => keywords.some(k => c.includes(k))).length;
     if (hits >= 3) { headerIdx = i; break; }
   }
   if (headerIdx < 0) return [];
 
-  const headers = rawRows[headerIdx].map(c => String(c ?? '').trim());
-  const dataRows = rawRows.slice(headerIdx + 1);
+  let headers = rawRows[headerIdx].map(c => String(c ?? '').trim());
+  let dataRows = rawRows.slice(headerIdx + 1);
+
+  // 特殊处理：表头和第一条数据合并在同一单元格（用换行分隔）
+  // 例如："       款号\n\n15727   总MA" → 表头是"款号"，数据是"15727   总MA"
+  const hasEmbeddedData = headers.some(h => h.includes('\n') && keywords.some(k => h.includes(k)));
+  let embeddedFirstRow = null;
+  if (hasEmbeddedData) {
+    embeddedFirstRow = [];
+    headers = headers.map((h, idx) => {
+      if (h.includes('\n')) {
+        const parts = h.split('\n').map(p => p.trim()).filter(p => p);
+        // 第一个含关键词的部分是表头，其余是数据
+        const headerPart = parts.find(p => keywords.some(k => p.includes(k))) || parts[0];
+        const dataParts = parts.filter(p => p !== headerPart);
+        embeddedFirstRow[idx] = dataParts.join(' ').trim();
+        return headerPart;
+      }
+      embeddedFirstRow[idx] = '';
+      return h;
+    });
+    // 保存嵌入数据供后续合并使用（不直接放入dataRows，避免干扰列推断）
+  }
 
   const findCol = (...kws) => headers.findIndex(h => kws.some(k => h.includes(k)));
-  const cols = {
-    product_code:    findCol('货号', '产品货号'),
+  let cols = {
+    product_code:    findCol('货号', '产品货号', '款号'),
     mold_no:         findCol('模具编号', '模具号'),
-    mold_name:       findCol('模具名称', '模号名称', '模名'),
+    mold_name:       findCol('模具名称', '模号名称', '模名', '工模名称'),
     color_combined:  findCol('颜色/编号', '颜色'),
-    material_type:   findCol('用料', '料型', '材料'),
-    shot_weight:     findCol('啤净重', '啤重'),
+    color_powder:    findCol('色粉号', '色粉编号'),
+    material_type:   findCol('用料名称', '用料', '料型', '材料'),
+    shot_weight:     findCol('啤净重', '净重G', '啤重'),
     cavity:          findCol('出模数', '模穴', '穴数'),
     quantity_needed: findCol('需啤数量', '需啤数', '啤数'),
-    material_kg:     findCol('用料量', '用料KG'),
+    total_sets:      findCol('总套数'),
+    material_kg:     findCol('用料量', '用料KG', '总净'),
     sprue_pct:       findCol('水口比例', '水口%', '水口'),
     notes:           findCol('备注'),
+    delivery_date:   findCol('交货日期'),
   };
+
+  // 智能修正：用数据行实际内容推断列位置（找非空列最多的行作为样本）
+  const sortedSample = [...dataRows.slice(0, 15)]
+    .map((r, i) => ({ r, i, cnt: (Array.isArray(r) ? r : []).filter(v => v !== '' && v !== null && v !== undefined).length }))
+    .sort((a, b) => b.cnt - a.cnt)
+    .map(x => x.r);
+  for (const row of sortedSample) {
+    const rowArr = Array.isArray(row) ? row : [];
+    // 找含模具编号的行（字母+数字+连字符模式），且需要至少6个非空列（排除不完整行）
+    const nonEmptyCols = rowArr.filter(v => v !== '' && v !== null && v !== undefined).length;
+    if (nonEmptyCols < 6) continue;
+    let moldCol = -1;
+    for (let ci = 0; ci < rowArr.length; ci++) {
+      const v = String(rowArr[ci] ?? '').trim();
+      if (v && /^[A-Z]{2,}.*-\d+/.test(v)) { moldCol = ci; break; }
+    }
+    if (moldCol < 0) continue;
+
+    // 从这行推断所有列位置（重置所有为-1，重新扫描）
+    for (const k of Object.keys(cols)) cols[k] = -1;
+    cols.mold_no = moldCol;
+
+    // 款号：模具编号之前的列中找含数字的
+    for (let j = 0; j < moldCol; j++) {
+      const v = String(rowArr[j] ?? '').trim();
+      if (v && /\d{4,}/.test(v)) { cols.product_code = j; break; }
+    }
+
+    // 模具编号之后逐列识别
+    for (let j = moldCol + 1; j < rowArr.length; j++) {
+      const v = String(rowArr[j] ?? '');
+      const vt = v.trim();
+      if (!vt) continue;
+
+      // 工模名称：中文字符
+      if (/^[\u4e00-\u9fa5()（）]+/.test(vt) && cols.mold_name < 0 && !/(ABS|PP|PVC|LDPE|POM|TPR|HIPS)/i.test(vt)) {
+        cols.mold_name = j; continue;
+      }
+      // 大整数(>100)：先是总套数，再是啤数
+      if (/^\d+$/.test(vt) && parseInt(vt) >= 100) {
+        if (cols.total_sets < 0 && cols.quantity_needed < 0) { cols.total_sets = j; continue; }
+        if (cols.total_sets >= 0 && cols.quantity_needed < 0) { cols.quantity_needed = j; continue; }
+      }
+      // 颜色：中文颜色词
+      if (/[\u4e00-\u9fa5]/.test(vt) && /(色|白|黑|红|蓝|绿|黄|灰|棕|橙|紫|粉|银|金|咖|啡|梅|原|透明|浅|深)/.test(vt) && cols.color_combined < 0) {
+        cols.color_combined = j; continue;
+      }
+      // 色粉号：4-5位数字
+      if (/^\d{4,5}[A-Z]?$/.test(vt) && cols.color_powder < 0) { cols.color_powder = j; continue; }
+      // 料型：含ABS/PP等
+      if (/(ABS|PP|PVC|LDPE|POM|TPR|TPE|HIPS|POE|PC|透明|尼龙|MABS)/i.test(vt) && cols.material_type < 0) {
+        cols.material_type = j; continue;
+      }
+      // 小数(1-999)：啤重
+      if (/^\d+\.?\d*$/.test(vt) && cols.shot_weight < 0) {
+        const sv = parseFloat(vt);
+        if (sv >= 1 && sv < 1000) { cols.shot_weight = j; continue; }
+      }
+    }
+    break; // 找到一行就够了
+  }
 
   const get = (row, key) => {
     const idx = cols[key];
@@ -225,31 +310,115 @@ function parseXingxinOrderExcel(filePath) {
   const getNum = (row, key) => parseFloat(get(row, key).replace(/,/g, '')) || 0;
 
   const orders = [];
+  let lastProductCode = ''; // 合并单元格货号继承
   for (const row of dataRows) {
-    const product_code = get(row, 'product_code');
+    let product_code = get(row, 'product_code');
     const mold_name = get(row, 'mold_name');
     if (!product_code && !mold_name) continue;
-    // 跳过汇总行
-    if (String(row[0]).includes('合计') || String(row[0]).includes('本页')) continue;
+    // 合并单元格：货号为空时继承上一行
+    if (!product_code && mold_name && lastProductCode) {
+      product_code = lastProductCode;
+    } else if (product_code) {
+      lastProductCode = product_code;
+    }
+    // 跳过汇总行、备注行、页脚行
+    const firstCell = String(row[0] ?? '');
+    if (firstCell.includes('合计') || firstCell.includes('本页') || firstCell.includes('〖') ||
+        firstCell.includes('特别注明') || firstCell.includes('操作员') || firstCell.includes('收货人') ||
+        firstCell.includes('下单人') || firstCell.includes('接单人') || firstCell.includes('接单日期') ||
+        firstCell.includes('备') || /^第\d*$/.test(firstCell.trim())) continue;
+    // 跳过无模具编号的行
+    const moldCheck = get(row, 'mold_no');
+    if (!moldCheck && !mold_name) continue;
 
-    // 颜色/编号 拆分：如 "黑色88066" → color=黑色, powder=88066
+    // 颜色/编号 拆分
     const colorCombined = get(row, 'color_combined');
-    let color = colorCombined, color_powder_no = '';
-    const colorMatch = colorCombined.match(/^([\u4e00-\u9fa5]+[a-zA-Z]*)\s*(\d{5,})$/);
-    if (colorMatch) {
-      color = colorMatch[1];
-      color_powder_no = colorMatch[2];
+    let color = colorCombined, color_powder_no = get(row, 'color_powder');
+    // 如果没有单独的色粉号列，从颜色中拆分（如 "黑色88066"）
+    if (!color_powder_no) {
+      const colorMatch = colorCombined.match(/^([\u4e00-\u9fa5]+[a-zA-Z]*)\s*(\d{5,})$/);
+      if (colorMatch) {
+        color = colorMatch[1];
+        color_powder_no = colorMatch[2];
+      }
+    }
+
+    // 啤数：优先用"需啤数"列，没有则用"啤数"列
+    let qty = getNum(row, 'quantity_needed');
+    if (!qty && cols.total_sets >= 0) {
+      // 没有单独的需啤数列，可能啤数就是需啤数
+      qty = getNum(row, 'quantity_needed');
+    }
+
+    // 款号清理：去掉中文后缀（如 "15726  总毛绒MA" → "15726"）
+    let pc = product_code.replace(/\s+.*$/, '').replace(/[（(].*$/, '').trim();
+    const pcDigits = pc.match(/^(\d{4,7})/);
+    if (pcDigits) pc = pcDigits[1];
+
+    const moldNo = get(row, 'mold_no');
+    const fullMoldName = moldNo && mold_name ? `${moldNo} ${mold_name}` : mold_name || moldNo;
+
+    // 嵌入数据补齐：如果是第一条订单，且颜色/色粉/料型/啤重缺失，从嵌入数据补
+    let shot_weight = getNum(row, 'shot_weight');
+    let material_type = get(row, 'material_type');
+    if (orders.length === 0 && embeddedFirstRow) {
+      // 从嵌入数据里找颜色/料型/啤重
+      if (!color) {
+        for (const v of embeddedFirstRow) {
+          const s = String(v ?? '').trim();
+          if (s && /^[\u4e00-\u9fa5]*(色|透明|原色)/.test(s) && !/ABS|PP|PVC/.test(s)) {
+            color = s; break;
+          }
+        }
+      }
+      if (!material_type) {
+        for (const v of embeddedFirstRow) {
+          const s = String(v ?? '').trim();
+          if (s && /(ABS|PP|PVC|LDPE|POM|TPR|HIPS|POE|MABS|透明ABS)/i.test(s)) {
+            // 拆分"88397   ABS 750NSW"成色粉号和料型
+            const parts = s.split(/\s+/).filter(p => p);
+            if (parts.length >= 2 && /^\d{4,5}$/.test(parts[0])) {
+              if (!color_powder_no) color_powder_no = parts[0];
+              material_type = parts.slice(1).join(' ');
+            } else {
+              material_type = s;
+            }
+            break;
+          }
+        }
+      }
+      if (!shot_weight) {
+        for (const v of embeddedFirstRow) {
+          const s = String(v ?? '').trim();
+          // 提取数字部分（可能被前缀中文包围，如"整啤 42.0"）
+          const m = s.match(/(\d+\.?\d*)/);
+          if (m) {
+            const sw = parseFloat(m[1]);
+            if (sw > 0 && sw < 500 && (s.includes('.') || s.length < 10)) {
+              shot_weight = sw; break;
+            }
+          }
+        }
+      }
+      // 款号补齐
+      if (!pc) {
+        for (const v of embeddedFirstRow) {
+          const s = String(v ?? '').trim();
+          const m = s.match(/^(\d{4,7})/);
+          if (m) { pc = m[1]; break; }
+        }
+      }
     }
 
     orders.push({
-      product_code,
-      mold_no:         get(row, 'mold_no'),
-      mold_name,
+      product_code: pc,
+      mold_no:         moldNo,
+      mold_name:       fullMoldName,
       color,
       color_powder_no,
-      material_type:   get(row, 'material_type'),
-      shot_weight:     getNum(row, 'shot_weight'),
-      quantity_needed: getNum(row, 'quantity_needed'),
+      material_type,
+      shot_weight,
+      quantity_needed: qty,
       material_kg:     getNum(row, 'material_kg'),
       sprue_pct:       getNum(row, 'sprue_pct'),
       cavity:          getNum(row, 'cavity') || 1,

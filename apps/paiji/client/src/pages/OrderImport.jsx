@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Upload, Button, Table, message, Card, Space, Tag, Popconfirm } from 'antd';
-import { UploadOutlined, DeleteOutlined, ClearOutlined } from '@ant-design/icons';
+import { UploadOutlined, DeleteOutlined, ClearOutlined, DownloadOutlined } from '@ant-design/icons';
 import axios from 'axios';
 
 const API = '/api/orders';
@@ -22,18 +22,45 @@ export default function OrderImport({ workshop = 'B' }) {
 
   useEffect(() => { fetchOrders(); }, [workshop]);
 
-  const handleUpload = async (file) => {
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('workshop', workshop);
-    try {
-      const { data } = await axios.post(`${API}/import`, formData);
-      message.success(data.message);
-      fetchOrders();
-    } catch (e) {
-      message.error('导入失败：' + (e.response?.data?.message || e.message));
-    }
+  const uploadQueue = useRef([]);
+  const uploadTimer = useRef(null);
+
+  const handleUpload = (file) => {
+    uploadQueue.current.push(file);
+    // 用定时器合并同一批选择的文件
+    if (uploadTimer.current) clearTimeout(uploadTimer.current);
+    uploadTimer.current = setTimeout(() => processUploadQueue(), 100);
     return false;
+  };
+
+  const processUploadQueue = async () => {
+    const files = [...uploadQueue.current];
+    uploadQueue.current = [];
+    let totalCount = 0;
+    let failCount = 0;
+    let failNames = [];
+    for (const f of files) {
+      const formData = new FormData();
+      formData.append('file', f);
+      formData.append('workshop', workshop);
+      try {
+        const { data } = await axios.post(`${API}/import`, formData);
+        const cnt = data.count || 0;
+        totalCount += cnt;
+        if (cnt === 0) failNames.push(f.name);
+      } catch (e) {
+        failCount++;
+        failNames.push(f.name);
+      }
+    }
+    if (totalCount > 0) {
+      let msg = `成功导入 ${totalCount} 条订单`;
+      if (failNames.length > 0) msg += `（${failNames.length}个文件未解析：${failNames.join('、')}）`;
+      message.success(msg);
+    } else {
+      message.warning('未解析出订单数据');
+    }
+    fetchOrders();
   };
 
   const handleDelete = async (id) => {
@@ -48,6 +75,17 @@ export default function OrderImport({ workshop = 'B' }) {
     setOrders([]);
   };
 
+  const handleToggleStatus = async (record) => {
+    const newStatus = record.status === 'scheduled' ? 'pending' : 'scheduled';
+    try {
+      await axios.put(`${API}/${record.id}`, { status: newStatus });
+      message.success(newStatus === 'pending' ? '已改为待排' : '已改为已排');
+      fetchOrders();
+    } catch (e) {
+      message.error('修改失败：' + (e.response?.data?.message || e.message));
+    }
+  };
+
   const columns = [
     { title: '产品货号', dataIndex: 'product_code', width: 120 },
     { title: '模号名称', dataIndex: 'mold_name', width: 150 },
@@ -57,7 +95,16 @@ export default function OrderImport({ workshop = 'B' }) {
     { title: '需啤数', dataIndex: 'quantity_needed', width: 80 },
     { title: '下单单号', dataIndex: 'order_no', width: 120 },
     { title: '状态', dataIndex: 'status', width: 80,
-      render: s => <Tag color={s === 'pending' ? 'blue' : s === 'scheduled' ? 'green' : 'default'}>{s === 'pending' ? '待排' : s === 'scheduled' ? '已排' : s}</Tag>
+      render: (s, record) => (
+        <Tag
+          color={s === 'pending' ? 'blue' : s === 'scheduled' ? 'green' : 'default'}
+          style={{ cursor: 'pointer' }}
+          onClick={() => handleToggleStatus(record)}
+          title="点击切换状态"
+        >
+          {s === 'pending' ? '待排' : s === 'scheduled' ? '已排' : s}
+        </Tag>
+      )
     },
     { title: '操作', width: 80,
       render: (_, r) => <Popconfirm title="确定删除?" onConfirm={() => handleDelete(r.id)}><Button type="link" danger size="small">删除</Button></Popconfirm>
@@ -68,9 +115,10 @@ export default function OrderImport({ workshop = 'B' }) {
     <div>
       <Card size="small" style={{ marginBottom: 16 }}>
         <Space>
-          <Upload beforeUpload={handleUpload} showUploadList={false} accept=".pdf,.xlsx,.xls">
+          <Upload beforeUpload={handleUpload} showUploadList={false} accept=".pdf,.xlsx,.xls" multiple>
             <Button icon={<UploadOutlined />} type="primary">导入订单 (PDF/Excel)</Button>
           </Upload>
+          <Button icon={<DownloadOutlined />} onClick={() => window.open('/api/orders/template')}>下载导入模板</Button>
           <Popconfirm title="确定清空所有订单?" onConfirm={handleClearAll}>
             <Button icon={<ClearOutlined />} danger>清空全部</Button>
           </Popconfirm>

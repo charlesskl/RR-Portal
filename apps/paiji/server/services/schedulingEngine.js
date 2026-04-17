@@ -93,29 +93,27 @@ function generateSchedule({ orderIds, date, shift, workshop }) {
   // 2b. 获取模具目标数据（仅当前车间）
   const allMoldTargets = db.prepare('SELECT * FROM mold_targets WHERE workshop = ?').all(ws);
   const moldTargetMap = {};
+  // 只建立两种索引：完整 mold_no 原文 + 纯编号（去中文）
+  // 不再做"逐步剥离前缀"的跨模具匹配，那会把 FUGG-05M-01 错匹配到 RBCEZ-05M-01
   for (const mt of allMoldTargets) {
     moldTargetMap[mt.mold_no] = mt;
-    // 去掉 mold_no 末尾的中文名称部分，只保留纯编号（如 RBCEZ-05M-01中蛋下壳 → RBCEZ-05M-01）
     const codeOnly = mt.mold_no.replace(/[\u4e00-\u9fa5].*$/, '').trim();
     if (codeOnly && codeOnly !== mt.mold_no) moldTargetMap[codeOnly] = mt;
-    // 逐步去掉前缀大写字母，建立后缀索引（如 RBCEZ-05M-01 → BCEZ-05M-01 → CEZ-05M-01）
-    let s = codeOnly || mt.mold_no;
-    while (s.length > 3 && /^[A-Z]/.test(s)) {
-      s = s.substring(1);
-      if (!moldTargetMap[s]) moldTargetMap[s] = mt;
-    }
   }
   const findMoldTarget = (moldNo) => {
     if (!moldNo) return null;
-    // 先去掉订单模具号末尾中文（防止 mold_name 混入）
+    // 去掉订单模具号末尾中文
     const code = moldNo.replace(/[\u4e00-\u9fa5].*$/, '').trim();
+    // 1) 精确匹配
     if (moldTargetMap[code]) return moldTargetMap[code];
-    // 逐步去掉订单模具号前缀大写字母，尝试匹配（如 MARBCEZ2-04M-01 → ARBCEZ2 → RBCEZ2 → BCEZ2...）
-    let s = code;
-    while (s.length > 3 && /^[A-Z]/.test(s)) {
-      s = s.substring(1);
-      if (moldTargetMap[s]) return moldTargetMap[s];
-    }
+    // 2) 同套模匹配：去掉末尾 "-数字"（如 FUGG-05M-01-1 → FUGG-05M-01）
+    const parentCode = code.replace(/-\d+$/, '');
+    if (parentCode !== code && moldTargetMap[parentCode]) return moldTargetMap[parentCode];
+    // 3) 工厂前缀匹配：MAMNVN / MARBCEZ 等带 MA 前缀的去掉 MA（MAMNVN-17M-01 → MNVN-17M-01）
+    const noMA = code.replace(/^MA(?=[A-Z]{3,})/, '');
+    if (noMA !== code && moldTargetMap[noMA]) return moldTargetMap[noMA];
+    const noMAparent = noMA.replace(/-\d+$/, '');
+    if (noMAparent !== noMA && moldTargetMap[noMAparent]) return moldTargetMap[noMAparent];
     return null;
   };
 
@@ -179,14 +177,51 @@ function generateSchedule({ orderIds, date, shift, workshop }) {
 
   // 6. 为新订单分配机台
   const newAssignments = [];
-  const moldBase = s => (s || '').replace(/-\d+$/, '');
+  // 提取模具核心编号，用于同套模分组
+  // FUGG-07M-01 和 FUGG-07M-01-1 是同套模（转水口模），应分到同机
+  // MNVN-17M-01 和 MAMNVN-17M-01-1 也是同套模
+  // 核心规则：提取"字母前缀+数字M" (如 FUGG-07M, MNVN-17M)，忽略后面的 -01/-01-1
+  const moldBase = s => {
+    if (!s) return '';
+    // 取模具编号部分（空格前）
+    let code = String(s).split(' ')[0];
+    // 去除 MA 工厂前缀（如 MAMNVN → MNVN, MARBCEZ2 → RBCEZ2）
+    // 只去掉最前面的 MA，保留后面部分
+    code = code.replace(/^MA(?=[A-Z]{3,})/, '');
+    // 匹配"字母+数字M"（如 FUGG-07M、MNVN-17M、RBCEZ2-04M）
+    const m = code.match(/^([A-Z]+\d*-\d+M)/);
+    if (m) return m[1];
+    // 匹配纯编号格式（如 1226146-M02 → 1226146）
+    const m2 = code.match(/^(\d{4,})-[A-Z]\d+/);
+    if (m2) return m2[1];
+    // 无法识别的格式：直接返回原始编号（避免误合并不同模具）
+    return code;
+  };
 
   // 预记录：同模号已决定的机台（强制同机）
-  const moldGroupMachine = {}; // moldBase(mold_no) -> machine_no
+  const moldGroupMachine = {}; // moldBase(mold_name) -> machine_no
+
+  // 重排新订单：同套模内按啤重降序，让啤重最大的先决定机台
+  // 这样避免先排啤重小的导致机台锁定后无法容纳啤重大的
+  const orderGroupMaxWeight = {};
+  for (const o of newOrders) {
+    const key = moldBase(o.mold_no || o.mold_name || '');
+    const w = o.shot_weight || 0;
+    if (!(key in orderGroupMaxWeight) || w > orderGroupMaxWeight[key]) {
+      orderGroupMaxWeight[key] = w;
+    }
+  }
+  newOrders.sort((a, b) => {
+    const kA = moldBase(a.mold_no || a.mold_name || '');
+    const kB = moldBase(b.mold_no || b.mold_name || '');
+    // 组内按啤重降序，组间按组内最大啤重降序
+    if (kA === kB) return (b.shot_weight || 0) - (a.shot_weight || 0);
+    return (orderGroupMaxWeight[kB] || 0) - (orderGroupMaxWeight[kA] || 0);
+  });
 
   for (const order of newOrders) {
     // 若同模号已分配过机台，直接强制分到同一台机
-    const orderMoldKey = moldBase(order.mold_no || '');
+    const orderMoldKey = moldBase(order.mold_no || order.mold_name || '');
     if (orderMoldKey && moldGroupMachine[orderMoldKey]) {
       const forcedMachine = moldGroupMachine[orderMoldKey];
       newAssignments.push({
@@ -227,6 +262,12 @@ function generateSchedule({ orderIds, date, shift, workshop }) {
           score += 30;
           reasons.push('啤重匹配');
         } else {
+          // 啤重超出历史范围太多（>50%），直接跳过该机台
+          const upperLimit = ms.max_w * 1.5;
+          const lowerLimit = ms.min_w * 0.5;
+          if (shotWeight > upperLimit || shotWeight < lowerLimit) {
+            continue; // 跳过此机台
+          }
           const distance = shotWeight < ms.min_w
             ? (ms.min_w - shotWeight) / ms.min_w
             : (shotWeight - ms.max_w) / ms.max_w;

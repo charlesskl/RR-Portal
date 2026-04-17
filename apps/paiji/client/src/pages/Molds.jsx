@@ -123,7 +123,7 @@ export default function Molds() {
         <Upload beforeUpload={handleImport} showUploadList={false} accept=".xlsx,.xls">
           <Button icon={<UploadOutlined />}>导入 Excel</Button>
         </Upload>
-        <Button icon={<DownloadOutlined />} onClick={() => window.open((import.meta.env.BASE_URL.replace(/\/$/, '')) + '/api/molds/template')}>下载模板</Button>
+        <Button icon={<DownloadOutlined />} onClick={() => window.open('/api/molds/template')}>下载模板</Button>
         <Tag color="geekblue">共 {molds.length} 条排模数据</Tag>
       </Space>
 

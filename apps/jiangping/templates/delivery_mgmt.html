@@ -335,10 +335,10 @@ $(document).on('input focus', 'input[list="po-suggestions"], input[list="code-su
             var $dl = $('#' + listId).empty();
             (res.suggestions || []).forEach(function (s) {
                 if (typeof s === 'string') {
-                    $dl.append('<option value="' + s.replace(/"/g, '&quot;') + '">');
+                    $dl.append($('<option></option>').val(s));
                 } else if (s && s.code) {
                     var label = s.name ? (s.code + ' — ' + s.name) : s.code;
-                    $dl.append('<option value="' + s.code.replace(/"/g, '&quot;') + '">' + label.replace(/</g, '&lt;') + '</option>');
+                    $dl.append($('<option></option>').val(s.code).text(label));
                 }
             });
         });
@@ -676,10 +676,13 @@ $(document).ready(function () {
                     var bestScore = -1;
                     res.items.forEach(function (pi) {
                         var label = (pi.product_code ? pi.product_code + ' - ' : '') + pi.product_name + ' (数量:' + pi.quantity + ')';
-                        sel.append('<option value="' + pi.product_name + '" ' +
-                            'data-code="' + pi.product_code + '" ' +
-                            'data-unit="' + pi.unit + '" ' +
-                            'data-price="' + pi.unit_price + '">' + label + '</option>');
+                        var $opt = $('<option></option>')
+                            .val(pi.product_name || '')
+                            .attr('data-code', pi.product_code || '')
+                            .attr('data-unit', pi.unit || '')
+                            .attr('data-price', pi.unit_price || '')
+                            .text(label);
+                        sel.append($opt);
                         // Auto-select: match by product_code or product_name similarity
                         var score = 0;
                         if (ocrCode && pi.product_code && pi.product_code.indexOf(ocrCode) >= 0) score += 10;
@@ -763,10 +766,13 @@ $(document).ready(function () {
                     sel.empty().append('<option value="">--选择物料--</option>');
                     res.items.forEach(function (item) {
                         var label = (item.product_code ? item.product_code + ' - ' : '') + item.product_name + ' (数量:' + item.quantity + ')';
-                        sel.append('<option value="' + item.product_name + '" ' +
-                            'data-code="' + item.product_code + '" ' +
-                            'data-unit="' + item.unit + '" ' +
-                            'data-price="' + item.unit_price + '">' + label + '</option>');
+                        var $opt = $('<option></option>')
+                            .val(item.product_name || '')
+                            .attr('data-code', item.product_code || '')
+                            .attr('data-unit', item.unit || '')
+                            .attr('data-price', item.unit_price || '')
+                            .text(label);
+                        sel.append($opt);
                     });
                     sel.removeClass('d-none');
                     inp.addClass('d-none');

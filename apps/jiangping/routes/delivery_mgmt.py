@@ -354,7 +354,10 @@ def api_suggest_product_code():
 
 @bp.route('/api/clear-all', methods=['POST'])
 def api_clear_all():
-    """Delete all delivery notes and items."""
+    """Delete all delivery notes and items. Requires confirm=true in body."""
+    data = request.get_json(silent=True) or {}
+    if not data.get('confirm'):
+        return jsonify({'success': False, 'error': '请传入 {"confirm": true} 确认删除'}), 400
     count = DeliveryNote.query.count()
     DeliveryNoteItem.query.delete()
     DeliveryNote.query.delete()

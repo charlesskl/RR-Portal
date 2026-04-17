@@ -3,6 +3,7 @@ const router = express.Router();
 const path = require('path');
 const fs = require('fs');
 const multer = require('multer');
+const ExcelJS = require('exceljs');
 const db = require('../db/connection');
 
 const upload = multer({ dest: path.join(__dirname, '..', 'uploads') });
@@ -124,7 +125,6 @@ router.delete('/', (req, res) => {
 
 // 下载订单导入模板
 router.get('/template', async (req, res) => {
-  const ExcelJS = require('exceljs');
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet('订单模板');
 

@@ -213,16 +213,23 @@ function initDatabase() {
     )
   `);
 
-  // Migrations
-  try { db.prepare("ALTER TABLE orders ADD COLUMN order_notes TEXT DEFAULT ''").run(); } catch(e){}
-  try { db.prepare("ALTER TABLE schedule_items ADD COLUMN is_carry_over INTEGER DEFAULT 0").run(); } catch(e){}
+  // Migrations — only suppress "duplicate column" errors; log anything else
+  const migrate = (sql) => {
+    try { db.prepare(sql).run(); }
+    catch(e) { if (!e.message.includes('duplicate column')) console.error('Migration failed:', sql, e.message); }
+  };
+  migrate("ALTER TABLE orders ADD COLUMN order_notes TEXT DEFAULT ''");
+  migrate("ALTER TABLE schedule_items ADD COLUMN is_carry_over INTEGER DEFAULT 0");
   // 多车间支持
-  try { db.prepare("ALTER TABLE machines ADD COLUMN workshop TEXT DEFAULT 'B'").run(); } catch(e){}
-  try { db.prepare("ALTER TABLE orders ADD COLUMN workshop TEXT DEFAULT 'B'").run(); } catch(e){}
-  try { db.prepare("ALTER TABLE schedules ADD COLUMN notes TEXT").run(); } catch(e){}
-  try { db.prepare("ALTER TABLE schedules ADD COLUMN workshop TEXT DEFAULT 'B'").run(); } catch(e){}
-  try { db.prepare("ALTER TABLE history_records ADD COLUMN workshop TEXT DEFAULT 'B'").run(); } catch(e){}
-  try { db.prepare("ALTER TABLE mold_targets ADD COLUMN workshop TEXT DEFAULT 'B'").run(); } catch(e){}
+  migrate("ALTER TABLE machines ADD COLUMN workshop TEXT DEFAULT 'B'");
+  migrate("ALTER TABLE orders ADD COLUMN workshop TEXT DEFAULT 'B'");
+  migrate("ALTER TABLE schedules ADD COLUMN notes TEXT");
+  migrate("ALTER TABLE schedules ADD COLUMN workshop TEXT DEFAULT 'B'");
+  migrate("ALTER TABLE history_records ADD COLUMN workshop TEXT DEFAULT 'B'");
+  migrate("ALTER TABLE mold_targets ADD COLUMN workshop TEXT DEFAULT 'B'");
+
+  // Performance indexes
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_schedules_workshop_date ON schedules(workshop, schedule_date)`);
 
   console.log('数据库初始化完成，28台机数据已预置');
 }

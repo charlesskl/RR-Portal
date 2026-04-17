@@ -7,9 +7,11 @@ Extracts: supplier, delivery_no, delivery_date, and line items
 
 import re
 import os
+import threading
 from datetime import datetime
 
 _paddle_reader = None
+_paddle_lock = threading.Lock()
 
 _MODELS_ROOT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'models', 'paddleocr')
 
@@ -17,15 +19,17 @@ _MODELS_ROOT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__fi
 def _get_reader():
     global _paddle_reader
     if _paddle_reader is None:
-        from paddleocr import PaddleOCR
-        _paddle_reader = PaddleOCR(
-            use_angle_cls=True,
-            lang='ch',
-            show_log=False,
-            det_model_dir=os.path.join(_MODELS_ROOT, 'det', 'ch', 'ch_PP-OCRv4_det_infer'),
-            rec_model_dir=os.path.join(_MODELS_ROOT, 'rec', 'ch', 'ch_PP-OCRv4_rec_infer'),
-            cls_model_dir=os.path.join(_MODELS_ROOT, 'cls', 'ch_ppocr_mobile_v2.0_cls_infer'),
-        )
+        with _paddle_lock:
+            if _paddle_reader is None:
+                from paddleocr import PaddleOCR
+                _paddle_reader = PaddleOCR(
+                    use_angle_cls=True,
+                    lang='ch',
+                    show_log=False,
+                    det_model_dir=os.path.join(_MODELS_ROOT, 'det', 'ch', 'ch_PP-OCRv4_det_infer'),
+                    rec_model_dir=os.path.join(_MODELS_ROOT, 'rec', 'ch', 'ch_PP-OCRv4_rec_infer'),
+                    cls_model_dir=os.path.join(_MODELS_ROOT, 'cls', 'ch_ppocr_mobile_v2.0_cls_infer'),
+                )
     return _paddle_reader
 
 

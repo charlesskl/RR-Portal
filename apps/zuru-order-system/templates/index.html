@@ -1,0 +1,685 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ZURU 接单表入单系统</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family:'Microsoft YaHei',sans-serif; background:#f0f2f5; color:#333; }
+.header { background:linear-gradient(135deg,#1a73e8,#0d47a1); color:#fff; padding:20px 30px; }
+.header h1 { font-size:22px; }
+.header p { font-size:13px; opacity:.8; margin-top:4px; }
+.container { max-width:960px; margin:20px auto; padding:0 20px; }
+
+/* 接单表路径设置 */
+.config-bar { background:#fff; border-radius:8px; padding:14px 20px; margin-bottom:16px;
+  box-shadow:0 1px 3px rgba(0,0,0,.1); display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.config-bar label { font-size:13px; font-weight:600; white-space:nowrap; }
+.config-bar input[type="text"] { flex:1; min-width:200px; padding:7px 12px; border:1px solid #ccc;
+  border-radius:6px; font-size:13px; font-family:monospace; }
+.config-bar input[type="text"]:focus { outline:none; border-color:#1a73e8; }
+.btn-sm { padding:6px 16px; border:none; border-radius:6px; font-size:12px; cursor:pointer;
+  font-weight:600; transition:all .2s; }
+.btn-sm-primary { background:#1a73e8; color:#fff; }
+.btn-sm-primary:hover { background:#1557b0; }
+.config-status { font-size:12px; margin-left:4px; }
+.config-status.ok { color:#2e7d32; }
+.config-status.err { color:#c62828; }
+.config-status.warn { color:#e65100; }
+
+/* 上传区 */
+.upload-zone { background:#fff; border:2px dashed #90caf9; border-radius:8px; padding:40px;
+  text-align:center; cursor:pointer; transition:all .2s; margin-bottom:16px; }
+.upload-zone:hover, .upload-zone.dragover { border-color:#1a73e8; background:#e3f2fd; }
+.upload-zone p { font-size:15px; color:#666; }
+.upload-zone .hint { font-size:12px; color:#999; margin-top:8px; }
+
+/* 文件列表 */
+.file-list { margin-bottom:16px; }
+.file-item { background:#fff; border-radius:6px; padding:10px 16px; margin-bottom:6px;
+  display:flex; justify-content:space-between; align-items:center; box-shadow:0 1px 2px rgba(0,0,0,.06); }
+.file-item .name { font-size:13px; }
+.file-item .po-num { font-size:11px; color:#888; margin-left:8px; }
+.file-item .tag { font-size:11px; padding:2px 8px; border-radius:10px; }
+.tag-new { background:#e8f5e9; color:#2e7d32; }
+.tag-rev { background:#fff3e0; color:#e65100; }
+.tag-unknown { background:#f5f5f5; color:#999; }
+.tag-dup { background:#fce4ec; color:#d32f2f; font-weight:700; }
+.file-item .remove { cursor:pointer; color:#999; font-size:18px; padding:0 4px; }
+.file-item .remove:hover { color:#c62828; }
+.file-count { font-size:14px; color:#333; margin-bottom:10px; padding:12px 18px; background:#fff;
+  border-radius:8px; box-shadow:0 1px 3px rgba(0,0,0,.1); font-weight:600; display:none; }
+.file-count.show { display:block; }
+.file-count .cnt-new { color:#2e7d32; }
+.file-count .cnt-rev { color:#e65100; }
+.file-count .cnt-unk { color:#999; }
+
+/* 按钮 */
+.btn-row { display:flex; gap:12px; margin-bottom:16px; }
+.btn { padding:10px 24px; border:none; border-radius:6px; font-size:14px; cursor:pointer;
+  font-weight:600; transition:all .2s; }
+.btn-primary { background:#1a73e8; color:#fff; }
+.btn-primary:hover { background:#1557b0; }
+.btn-primary:disabled { background:#bbb; cursor:not-allowed; }
+.btn-download { background:#2e7d32; color:#fff; }
+.btn-download:hover { background:#1b5e20; }
+
+/* 进度条 */
+.progress-wrap { background:#fff; border-radius:8px; padding:20px; margin-bottom:16px;
+  box-shadow:0 1px 3px rgba(0,0,0,.1); display:none; }
+.progress-bar-bg { background:#e0e0e0; border-radius:10px; height:20px; overflow:hidden; margin:10px 0; }
+.progress-bar { background:linear-gradient(90deg,#1a73e8,#42a5f5); height:100%;
+  border-radius:10px; transition:width .3s; min-width:2%; }
+.progress-text { font-size:13px; color:#666; display:flex; justify-content:space-between; }
+
+/* 结果区 */
+.result-panel { background:#fff; border-radius:8px; padding:20px; margin-bottom:16px;
+  box-shadow:0 1px 3px rgba(0,0,0,.1); display:none; }
+.result-panel h3 { font-size:16px; margin-bottom:12px; }
+.result-section { margin-bottom:12px; padding:10px 14px; border-radius:6px; font-size:13px; }
+.result-success { background:#e8f5e9; border-left:4px solid #4caf50; }
+.result-warning { background:#fff3e0; border-left:4px solid #ff9800; }
+.result-error { background:#fce4ec; border-left:4px solid #f44336; }
+.result-info { background:#e3f2fd; border-left:4px solid #2196f3; }
+.result-section ul { margin:6px 0 0 18px; }
+.result-section li { margin:3px 0; }
+.download-area { text-align:center; margin-top:16px; padding:16px; background:#e8f5e9; border-radius:8px; }
+.download-area .btn { font-size:16px; padding:12px 36px; }
+
+/* 文件浏览器弹窗 */
+.modal-overlay { position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,.4);
+  z-index:1000; display:none; justify-content:center; align-items:center; }
+.modal-overlay.show { display:flex; }
+.modal { background:#fff; border-radius:10px; width:600px; max-width:90vw; max-height:80vh;
+  display:flex; flex-direction:column; box-shadow:0 8px 32px rgba(0,0,0,.2); }
+.modal-header { padding:16px 20px; border-bottom:1px solid #eee; display:flex;
+  justify-content:space-between; align-items:center; }
+.modal-header h3 { font-size:16px; }
+.modal-close { cursor:pointer; font-size:22px; color:#999; border:none; background:none; }
+.modal-close:hover { color:#333; }
+.modal-nav { padding:10px 20px; background:#f8f9fa; border-bottom:1px solid #eee;
+  display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.modal-nav .path-display { font-size:12px; font-family:monospace; color:#555;
+  flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.modal-nav .btn-up { padding:4px 12px; font-size:12px; border:1px solid #ccc;
+  border-radius:4px; background:#fff; cursor:pointer; }
+.modal-nav .btn-up:hover { background:#e3f2fd; }
+.drive-list { padding:6px 20px; background:#f0f2f5; display:flex; gap:6px; flex-wrap:wrap; }
+.drive-btn { padding:3px 10px; font-size:12px; border:1px solid #ccc; border-radius:4px;
+  background:#fff; cursor:pointer; font-family:monospace; }
+.drive-btn:hover { background:#e3f2fd; border-color:#1a73e8; }
+.modal-body { flex:1; overflow-y:auto; padding:8px 0; min-height:200px; }
+.browse-item { padding:8px 20px; cursor:pointer; display:flex; align-items:center; gap:10px;
+  font-size:13px; transition:background .1s; }
+.browse-item:hover { background:#e3f2fd; }
+.browse-item .icon { font-size:18px; width:24px; text-align:center; }
+.browse-item.is-dir .icon { color:#f9a825; }
+.browse-item.is-file .icon { color:#43a047; }
+.browse-item .item-name { flex:1; }
+.modal-footer { padding:12px 20px; border-top:1px solid #eee; display:flex;
+  justify-content:flex-end; gap:10px; }
+.browse-empty { padding:40px; text-align:center; color:#999; font-size:13px; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>ZURU 接单表入单系统</h1>
+  <p>上传PO文件 → 自动比对接单表 → 识别新单/修改单 → 生成Excel下载</p>
+</div>
+
+<div class="container">
+  <!-- 接单表路径设置 -->
+  <div class="config-bar">
+    <label>接单表：</label>
+    <!-- 远程模式：只显示上传按钮 -->
+    <span id="remoteMode" style="display:none">
+      <button class="btn-sm" style="background:#43a047;color:#fff;padding:8px 20px;font-size:13px" onclick="document.getElementById('tableFileInput').click()">上传接单表文件</button>
+    </span>
+    <!-- 本机模式：路径输入+浏览+上传 -->
+    <span id="localMode" style="display:none">
+      <input type="text" id="tablePath" placeholder="输入路径 或 点击上传/浏览">
+      <button class="btn-sm btn-sm-primary" onclick="openBrowser()">浏览</button>
+      <button class="btn-sm btn-sm-primary" onclick="savePath()">验证</button>
+      <button class="btn-sm" style="background:#43a047;color:#fff" onclick="document.getElementById('tableFileInput').click()">上传</button>
+    </span>
+    <input type="file" id="tableFileInput" accept=".xlsx,.xls" style="display:none">
+    <span class="config-status" id="configStatus"></span>
+  </div>
+
+  <!-- 上传区 -->
+  <div class="upload-zone" id="dropZone" onclick="document.getElementById('fileInput').click()">
+    <p>点击选择或拖拽PO文件到此处</p>
+    <p class="hint">支持多个.xlsx文件同时上传 | 自动比对接单表识别新单/修改单</p>
+    <input type="file" id="fileInput" multiple accept=".xlsx,.xls" style="display:none">
+  </div>
+
+  <!-- 文件列表 -->
+  <div class="file-count" id="fileCount"></div>
+  <div class="file-list" id="fileList"></div>
+
+  <!-- 操作按钮 -->
+  <div class="btn-row">
+    <label style="font-size:13px;font-weight:600;display:flex;align-items:center;gap:6px;white-space:nowrap;">
+      接单日期：<input type="date" id="orderDate" style="padding:6px 10px;border:1px solid #ccc;border-radius:6px;font-size:13px;">
+      <span style="font-size:11px;color:#999;">不选则用PO原日期</span>
+    </label>
+    <button class="btn btn-primary" onclick="startProcess()" id="btnProcess" disabled>开始处理（仅新单）</button>
+  </div>
+
+  <!-- 进度条 -->
+  <div class="progress-wrap" id="progressWrap">
+    <div class="progress-text">
+      <span id="progressMsg">准备中...</span>
+      <span id="progressPct">0%</span>
+    </div>
+    <div class="progress-bar-bg">
+      <div class="progress-bar" id="progressBar" style="width:0%"></div>
+    </div>
+  </div>
+
+  <!-- 结果 -->
+  <div class="result-panel" id="resultPanel"></div>
+</div>
+
+<!-- 文件浏览器弹窗 -->
+<div class="modal-overlay" id="browserModal">
+  <div class="modal">
+    <div class="modal-header">
+      <h3>选择接单表文件</h3>
+      <button class="modal-close" onclick="closeBrowser()">&times;</button>
+    </div>
+    <div class="drive-list" id="driveList"></div>
+    <div class="modal-nav">
+      <button class="btn-up" onclick="goUp()">上级目录</button>
+      <span class="path-display" id="currentPath"></span>
+    </div>
+    <div class="modal-body" id="browserBody"></div>
+    <div class="modal-footer">
+      <button class="btn-sm" style="background:#eee" onclick="closeBrowser()">取消</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const fileInput = document.getElementById('fileInput');
+const dropZone = document.getElementById('dropZone');
+const fileList = document.getElementById('fileList');
+const fileCount = document.getElementById('fileCount');
+const btnProcess = document.getElementById('btnProcess');
+const progressWrap = document.getElementById('progressWrap');
+const progressBar = document.getElementById('progressBar');
+const progressMsg = document.getElementById('progressMsg');
+const progressPct = document.getElementById('progressPct');
+const resultPanel = document.getElementById('resultPanel');
+const tablePath = document.getElementById('tablePath');
+const configStatus = document.getElementById('configStatus');
+
+let selectedFiles = [];
+let fileClassification = {}; // filename → {po, is_revision}
+let duplicatePos = {};       // po → [filename, ...] 重复PO映射
+let tableConnected = false;  // 是否已连接接单表
+let browserCurrentPath = '';  // 文件浏览器当前路径
+
+// === 文件浏览器 ===
+async function openBrowser() {
+  const modal = document.getElementById('browserModal');
+  modal.classList.add('show');
+  await browseTo('');  // 默认桌面
+}
+
+function closeBrowser() {
+  document.getElementById('browserModal').classList.remove('show');
+}
+
+async function browseTo(path) {
+  try {
+    const res = await fetch('api/browse', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({path})
+    });
+    const data = await res.json();
+    if (!data.ok) return;
+
+    browserCurrentPath = data.current;
+    document.getElementById('currentPath').textContent = data.current;
+
+    // 盘符列表
+    const driveList = document.getElementById('driveList');
+    driveList.innerHTML = data.drives.map(d =>
+      `<button class="drive-btn" onclick="browseTo('${d.replace(/\\/g,'\\\\')}')">${d}</button>`
+    ).join('');
+
+    // 目录内容
+    const body = document.getElementById('browserBody');
+    if (data.items.length === 0) {
+      body.innerHTML = '<div class="browse-empty">此目录下没有文件夹或Excel文件</div>';
+      return;
+    }
+    body.innerHTML = data.items.map(item => {
+      const escaped = (data.current + '\\' + item.name).replace(/\\/g, '\\\\');
+      if (item.type === 'dir') {
+        return `<div class="browse-item is-dir" ondblclick="browseTo('${escaped}')">
+          <span class="icon">&#128193;</span>
+          <span class="item-name">${item.name}</span>
+        </div>`;
+      } else {
+        return `<div class="browse-item is-file" onclick="selectFile('${escaped}')">
+          <span class="icon">&#128196;</span>
+          <span class="item-name">${item.name}</span>
+        </div>`;
+      }
+    }).join('');
+  } catch(e) {
+    document.getElementById('browserBody').innerHTML =
+      `<div class="browse-empty">加载失败: ${e.message}</div>`;
+  }
+}
+
+function goUp() {
+  if (!browserCurrentPath) return;
+  // 获取父目录
+  const parts = browserCurrentPath.replace(/\//g, '\\').split('\\');
+  if (parts.length <= 1) return;
+  parts.pop();
+  const parent = parts.join('\\') || parts[0] + '\\';
+  browseTo(parent);
+}
+
+function selectFile(path) {
+  // 选中文件，填入路径框并关闭弹窗
+  tablePath.value = path.replace(/\\\\/g, '\\');
+  closeBrowser();
+  savePath();  // 自动验证
+}
+
+// 上传接单表
+document.getElementById('tableFileInput').addEventListener('change', async function(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  configStatus.textContent = '上传中...';
+  configStatus.className = 'config-status';
+  const fd = new FormData();
+  fd.append('file', file);
+  try {
+    const res = await fetch('api/upload_table', { method: 'POST', body: fd });
+    const d = await res.json();
+    if (d.ok) {
+      configStatus.textContent = `已上传「${d.filename}」（${d.count}个PO）`;
+      configStatus.className = 'config-status ok';
+      tablePath.value = '(已上传) ' + d.filename;
+      tableConnected = true;
+      if (selectedFiles.length > 0) classifyFiles();
+    } else {
+      configStatus.textContent = d.error || '上传失败';
+      configStatus.className = 'config-status err';
+    }
+  } catch(e) {
+    configStatus.textContent = '上传失败: ' + e.message;
+    configStatus.className = 'config-status err';
+  }
+  this.value = '';
+});
+
+// 由服务端 LOCAL_MODE 决定（云端永远显示远程模式）
+const isLocal = {{ 'true' if local_mode else 'false' }};
+if (isLocal) {
+  document.getElementById('localMode').style.display = 'contents';
+  document.getElementById('remoteMode').style.display = 'none';
+} else {
+  document.getElementById('localMode').style.display = 'none';
+  document.getElementById('remoteMode').style.display = 'inline';
+}
+
+// 页面加载时读取已保存的路径
+(async function init() {
+  try {
+    const res = await fetch('api/config');
+    const cfg = await res.json();
+    if (cfg.order_table_path) {
+      tablePath.value = cfg.order_table_path;
+      // 自动验证
+      const r2 = await fetch('api/check_path', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({path: cfg.order_table_path})
+      });
+      const d2 = await r2.json();
+      if (d2.ok) {
+        configStatus.textContent = `已连接（${d2.count}个PO）`;
+        configStatus.className = 'config-status ok';
+        tableConnected = true;
+      } else {
+        configStatus.textContent = '路径失效，请重新设置';
+        configStatus.className = 'config-status warn';
+      }
+    } else {
+      configStatus.textContent = isLocal ? '未设置（将按文件名识别修改单）' : '请先上传接单表文件';
+      configStatus.className = 'config-status warn';
+    }
+  } catch(e) { /* 忽略 */ }
+})();
+
+async function savePath() {
+  const path = tablePath.value.trim();
+  if (!path) {
+    configStatus.textContent = '请输入路径';
+    configStatus.className = 'config-status err';
+    return;
+  }
+  configStatus.textContent = '验证中...';
+  configStatus.className = 'config-status';
+
+  try {
+    // 先验证路径
+    const r1 = await fetch('api/check_path', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({path})
+    });
+    const d1 = await r1.json();
+    if (!d1.ok) {
+      configStatus.textContent = d1.error || '文件不存在';
+      configStatus.className = 'config-status err';
+      tableConnected = false;
+      return;
+    }
+    // 保存
+    await fetch('api/config', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({order_table_path: path})
+    });
+    configStatus.textContent = `已连接（${d1.count}个PO）`;
+    configStatus.className = 'config-status ok';
+    tableConnected = true;
+
+    // 重新分类已选文件
+    if (selectedFiles.length > 0) classifyFiles();
+  } catch(e) {
+    configStatus.textContent = '连接失败: ' + e.message;
+    configStatus.className = 'config-status err';
+    tableConnected = false;
+  }
+}
+
+// 文件名兜底判断
+function isRevisionByName(name) {
+  return /(?:Rev\d*\.?|(?:^|\W)R\d\b|\.rev\.)/i.test(name);
+}
+
+fileInput.addEventListener('change', e => { addFiles(e.target.files); fileInput.value=''; });
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+dropZone.addEventListener('drop', e => { e.preventDefault(); dropZone.classList.remove('dragover'); addFiles(e.dataTransfer.files); });
+
+function addFiles(files) {
+  for (const f of files) {
+    if (!f.name.match(/\.xlsx?$/i)) continue;
+    if (selectedFiles.some(sf => sf.name === f.name)) continue;
+    selectedFiles.push(f);
+  }
+  // 先立即显示文件列表（标签显示"识别中..."）
+  renderFileList();
+  // 再后台分类更新标签
+  if (tableConnected) classifyFiles();
+}
+
+async function classifyFiles() {
+  // 显示分类中状态
+  document.querySelectorAll('.tag-unknown').forEach(el => { el.textContent = '识别中...'; });
+  const fd = new FormData();
+  selectedFiles.forEach(f => fd.append('files', f));
+  try {
+    const res = await fetch('api/classify', { method: 'POST', body: fd });
+    const data = await res.json();
+    if (data.ok) {
+      fileClassification = {};
+      data.results.forEach(r => {
+        fileClassification[r.filename] = {
+          po: r.po, is_revision: r.is_revision,
+          missing_items: r.missing_items || []
+        };
+      });
+      duplicatePos = data.duplicate_pos || {};
+    }
+  } catch(e) { /* 回退到文件名判断 */ }
+  renderFileList();
+}
+
+function removeFile(idx) {
+  const name = selectedFiles[idx].name;
+  delete fileClassification[name];
+  selectedFiles.splice(idx, 1);
+  // 重新计算 duplicatePos
+  const poFiles = {};
+  selectedFiles.forEach(f => {
+    const c = fileClassification[f.name];
+    if (c && c.po) {
+      if (!poFiles[c.po]) poFiles[c.po] = [];
+      poFiles[c.po].push(f.name);
+    }
+  });
+  duplicatePos = {};
+  for (const [po, fnames] of Object.entries(poFiles)) {
+    if (fnames.length > 1) duplicatePos[po] = fnames;
+  }
+  renderFileList();
+}
+
+function getFileType(fname) {
+  // 优先用接单表比对结果
+  if (fileClassification[fname]) {
+    return fileClassification[fname].is_revision ? 'rev' : 'new';
+  }
+  // 回退到文件名判断
+  return isRevisionByName(fname) ? 'rev' : 'unknown';
+}
+
+function renderFileList() {
+  let newCnt = 0, revCnt = 0, unkCnt = 0;
+  selectedFiles.forEach(f => {
+    const t = getFileType(f.name);
+    if (t === 'new') newCnt++;
+    else if (t === 'rev') revCnt++;
+    else unkCnt++;
+  });
+
+  if (selectedFiles.length > 0) {
+    // 统计未匹配货号数
+    let missingCnt = 0;
+    selectedFiles.forEach(f => {
+      const c = fileClassification[f.name];
+      if (c && c.missing_items) missingCnt += c.missing_items.length;
+    });
+
+    let html = `共 ${selectedFiles.length} 个文件 &nbsp;|&nbsp; `;
+    if (newCnt) html += `<span class="cnt-new">新单 ${newCnt} 个</span> &nbsp;|&nbsp; `;
+    if (revCnt) html += `<span class="cnt-rev">修改单 ${revCnt} 个（将跳过）</span> &nbsp;|&nbsp; `;
+    if (unkCnt) html += `<span class="cnt-unk">识别中 ${unkCnt} 个</span> &nbsp;|&nbsp; `;
+    const dupGroupCnt = Object.keys(duplicatePos).length;
+    if (dupGroupCnt) html += `<span style="color:#d32f2f;font-weight:700">⚠ 重复PO ${dupGroupCnt} 组</span> &nbsp;|&nbsp; `;
+    if (missingCnt) html += `<span style="color:#c62828">货号匹配不到 ${missingCnt} 个</span> &nbsp;|&nbsp; `;
+    html = html.replace(/&nbsp;\|&nbsp;\s*$/, '');
+    fileCount.innerHTML = html;
+    fileCount.classList.add('show');
+  } else {
+    fileCount.innerHTML = '';
+    fileCount.classList.remove('show');
+  }
+
+  fileList.innerHTML = '';
+  selectedFiles.forEach((f, i) => {
+    const type = getFileType(f.name);
+    const cls = fileClassification[f.name];
+    const poLabel = cls && cls.po ? `<span class="po-num">PO: ${cls.po}</span>` : '';
+    let tagClass, tagText;
+    if (type === 'new') { tagClass = 'tag-new'; tagText = '新单'; }
+    else if (type === 'rev') { tagClass = 'tag-rev'; tagText = '修改单'; }
+    else { tagClass = 'tag-unknown'; tagText = '待确认'; }
+
+    // 重复PO检测
+    let dupHtml = '';
+    const filePo = cls && cls.po;
+    if (filePo && duplicatePos[filePo]) {
+      const others = duplicatePos[filePo].filter(n => n !== f.name);
+      if (others.length > 0) {
+        dupHtml = `<div style="font-size:11px;color:#d32f2f;margin-top:4px;font-weight:600;">
+          ⚠ 重复PO！同PO文件: ${others.join(', ')}</div>`;
+      }
+    }
+
+    // 未匹配货号提示
+    let missingHtml = '';
+    if (cls && cls.missing_items && cls.missing_items.length > 0 && type === 'new') {
+      missingHtml = `<div style="font-size:11px;color:#c62828;margin-top:4px;">
+        匹配不到: ${cls.missing_items.join(', ')}（将跳过）</div>`;
+    }
+
+    // 重复PO标签
+    let dupTag = '';
+    if (filePo && duplicatePos[filePo] && duplicatePos[filePo].length > 1) {
+      dupTag = `<span class="tag tag-dup">重复PO</span> `;
+    }
+
+    fileList.innerHTML += `<div class="file-item" style="flex-wrap:wrap">
+      <span class="name">${f.name}${poLabel}</span>
+      <span>
+        ${dupTag}<span class="tag ${tagClass}">${tagText}</span>
+        <span class="remove" onclick="removeFile(${i})">&times;</span>
+      </span>${dupHtml}${missingHtml}
+    </div>`;
+  });
+  btnProcess.disabled = selectedFiles.length === 0;
+}
+
+async function startProcess() {
+  if (!selectedFiles.length) return;
+  btnProcess.disabled = true;
+  resultPanel.style.display = 'none';
+  progressWrap.style.display = 'block';
+  progressBar.style.width = '0%';
+  progressBar.style.background = '';
+  progressMsg.textContent = '上传文件中...';
+  progressPct.textContent = '0%';
+
+  // 假进度条：每 500ms 自增到 90%，POST 完成后跳到 100%
+  // (取消 SSE 因为存在 task_id 同步与 thread leak 问题，对短任务用 fake progress 更稳)
+  let fakePct = 0;
+  const fakeStep = selectedFiles.length > 5 ? 3 : 8;
+  const fakeTimer = setInterval(() => {
+    fakePct = Math.min(90, fakePct + fakeStep);
+    progressBar.style.width = fakePct + '%';
+    progressPct.textContent = fakePct + '%';
+    progressMsg.textContent = `处理中（${selectedFiles.length} 个文件）...`;
+  }, 500);
+
+  const fd = new FormData();
+  selectedFiles.forEach(f => fd.append('files', f));
+  const odVal = document.getElementById('orderDate').value;
+  if (odVal) fd.append('order_date', odVal);
+  try {
+    const res = await fetch('api/process', { method: 'POST', body: fd });
+    clearInterval(fakeTimer);
+    progressBar.style.width = '100%';
+    progressPct.textContent = '100%';
+    const text = await res.text();
+    let data;
+    try { data = JSON.parse(text); } catch(pe) {
+      progressMsg.textContent = '服务器返回异常';
+      resultPanel.innerHTML = `<h3>处理异常</h3>
+        <div class="result-section result-error">服务器返回了非JSON数据，请刷新重试<br><small>${escapeHtml(text.substring(0,200))}</small></div>`;
+      resultPanel.style.display = 'block';
+      resultPanel.scrollIntoView({ behavior: 'smooth' });
+      btnProcess.disabled = false;
+      return;
+    }
+    progressMsg.textContent = '完成!';
+    showResult(data);
+  } catch(e) {
+    clearInterval(fakeTimer);
+    progressMsg.textContent = '处理失败: ' + e.message;
+    progressBar.style.background = '#f44336';
+    resultPanel.innerHTML = `<h3>处理失败</h3>
+      <div class="result-section result-error">${escapeHtml(e.message)}<br>请检查网络连接后重试</div>`;
+    resultPanel.style.display = 'block';
+    resultPanel.scrollIntoView({ behavior: 'smooth' });
+  }
+  btnProcess.disabled = false;
+}
+
+function dlFile(fn) {
+  fetch('api/download/' + encodeURIComponent(fn))
+    .then(r => r.blob())
+    .then(blob => {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = fn;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+    })
+    .catch(e => alert('下载失败: ' + e.message));
+}
+
+function showResult(data) {
+  const newCnt = (data.details || []).length;
+  const revCnt = (data.revisions || []).length;
+  const warnCnt = (data.warnings || []).length;
+  const errCnt = (data.parse_errors || []).length;
+
+  let html = '<h3>处理结果</h3>';
+
+  // 汇总统计
+  const totalPo = newCnt + revCnt + errCnt;
+  html += `<div class="result-section result-info" style="font-size:15px;font-weight:600;">
+    共 ${totalPo} 个PO — 新单 ${newCnt} 个（${data.written}行写入）`;
+  if (revCnt) html += ` | 修改单 ${revCnt} 个（已跳过）`;
+  if (errCnt) html += ` | 解析失败 ${errCnt} 个`;
+  if (warnCnt) html += ` | 警告 ${warnCnt}`;
+  html += `</div>`;
+
+  // 下载按钮
+  if (data.filename) {
+    html += `<div class="download-area">
+      <button class="btn btn-download" style="font-size:16px;padding:14px 40px;" onclick="dlFile('${data.filename.replace(/'/g,"\\'")}')">下载接单表Excel</button>
+    </div>`;
+  } else if (data.written === 0 && !revCnt) {
+    html += '<div class="result-section result-error">没有可处理的新单数据</div>';
+  }
+
+  // 新单明细
+  if (data.details && data.details.length) {
+    html += `<div class="result-section result-success"><b>新单明细:</b>
+      <ul>${data.details.map(d => '<li>'+d+'</li>').join('')}</ul></div>`;
+  }
+
+  // 修改单
+  if (data.revisions && data.revisions.length) {
+    html += `<div class="result-section result-warning"><b>修改单（接单表已有，已跳过）:</b>
+      <ul>${data.revisions.map(r => '<li>'+r+'</li>').join('')}</ul></div>`;
+  }
+
+  // 警告（含匹配不到的货号）
+  if (data.warnings && data.warnings.length) {
+    html += `<div class="result-section result-error"><b>匹配不到 / 警告:</b>
+      <ul>${data.warnings.map(w => '<li>'+w+'</li>').join('')}</ul></div>`;
+  }
+
+  // 解析错误
+  if (data.parse_errors && data.parse_errors.length) {
+    html += `<div class="result-section result-error"><b>解析失败:</b>
+      <ul>${data.parse_errors.map(e => '<li>'+e+'</li>').join('')}</ul></div>`;
+  }
+
+  resultPanel.innerHTML = html;
+  resultPanel.style.display = 'block';
+  // 自动滚动到结果区
+  resultPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+</script>
+</body>
+</html>

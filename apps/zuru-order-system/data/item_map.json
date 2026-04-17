@@ -1,0 +1,2372 @@
+{
+  "9522": {
+    "cn_name": "火烈鸟",
+    "workshop": "兴信B",
+    "schedule_name": "火烈鸟"
+  },
+  "9504": {
+    "cn_name": "仓鼠",
+    "workshop": "兴信A",
+    "schedule_name": "电动仓鼠"
+  },
+  "9543": {
+    "cn_name": "仓鼠",
+    "workshop": "兴信A",
+    "schedule_name": "电动仓鼠"
+  },
+  "9564": {
+    "cn_name": "仓鼠圆筒装",
+    "workshop": "兴信A",
+    "schedule_name": "电动仓鼠"
+  },
+  "7115": {
+    "cn_name": "翼龙",
+    "workshop": "河源",
+    "schedule_name": "恐龙系列"
+  },
+  "7169": {
+    "cn_name": "大蟒蛇",
+    "workshop": "河源",
+    "schedule_name": "恐龙系列"
+  },
+  "7170": {
+    "cn_name": "大蜘蛛",
+    "workshop": "河源",
+    "schedule_name": "恐龙系列"
+  },
+  "7197": {
+    "cn_name": "大蜘蛛+小蜘蛛+小蛇混装",
+    "workshop": "兴信A",
+    "schedule_name": "恐龙系列"
+  },
+  "2749": {
+    "cn_name": "恐龙、蛇、蜥蜴混装",
+    "workshop": "兴信A",
+    "schedule_name": "恐龙系列"
+  },
+  "2757": {
+    "cn_name": "新色恐龙+速龙装一个PDQ再加蛇+蜥蜴装一个PDQ，两个PDQ混装入箱",
+    "workshop": "兴信A",
+    "schedule_name": "恐龙系列"
+  },
+  "2758": {
+    "cn_name": "新色恐龙，蜘蛛，速龙，蜥蜴混装",
+    "workshop": "兴信A",
+    "schedule_name": "恐龙系列"
+  },
+  "2767": {
+    "cn_name": "蜥蜴/霸王龙/速龙PDQ混装",
+    "workshop": "兴信A",
+    "schedule_name": "恐龙系列"
+  },
+  "7123": {
+    "cn_name": "蜥蜴+蛇+蜘蛛+恐龙混装",
+    "workshop": "兴信A",
+    "schedule_name": "恐龙系列"
+  },
+  "7128": {
+    "cn_name": "蜘蛛，蜥蜴，蛇混装",
+    "workshop": "兴信A",
+    "schedule_name": "恐龙系列"
+  },
+  "7116": {
+    "cn_name": "蜘蛛，蛇，蟑螂混装",
+    "workshop": "兴信A",
+    "schedule_name": "恐龙系列"
+  },
+  "MEC69": {
+    "cn_name": "展示架（蜘蛛/恐龙/蛇/蜥蜴）",
+    "workshop": "兴信A",
+    "schedule_name": "恐龙系列"
+  },
+  "7113": {
+    "cn_name": "两只蜘蛛邮包盒装",
+    "workshop": "兴信A",
+    "schedule_name": "恐龙系列"
+  },
+  "7122": {
+    "cn_name": "蟑螂蜘蛛混装",
+    "workshop": "兴信A",
+    "schedule_name": "恐龙系列"
+  },
+  "7119": {
+    "cn_name": "（蜘蛛成品+蟑螂成品）胶袋套装",
+    "workshop": "兴信A",
+    "schedule_name": "恐龙系列"
+  },
+  "25309": {
+    "cn_name": "两个蜘蛛+2个蟑螂入邮包盒",
+    "workshop": "兴信A",
+    "schedule_name": "恐龙系列"
+  },
+  "25308": {
+    "cn_name": "两个速龙入邮包盒",
+    "workshop": "兴信A",
+    "schedule_name": "恐龙系列"
+  },
+  "25289": {
+    "cn_name": "速龙",
+    "workshop": "兴信A",
+    "schedule_name": "恐龙系列"
+  },
+  "7127": {
+    "cn_name": "恐龙",
+    "workshop": "兴信A",
+    "schedule_name": "恐龙系列"
+  },
+  "MUQ60": {
+    "cn_name": "混装（7127+7149+71126）",
+    "workshop": "兴信A",
+    "schedule_name": "恐龙系列"
+  },
+  "7132": {
+    "cn_name": "红色霸王龙",
+    "workshop": "兴信A",
+    "schedule_name": "恐龙系列"
+  },
+  "7133": {
+    "cn_name": "橙色速龙",
+    "workshop": "兴信A",
+    "schedule_name": "恐龙系列"
+  },
+  "7111": {
+    "cn_name": "蜘蛛",
+    "workshop": "兴信A",
+    "schedule_name": "恐龙系列"
+  },
+  "7110": {
+    "cn_name": "恐龙",
+    "workshop": "兴信A",
+    "schedule_name": "恐龙系列"
+  },
+  "7114": {
+    "cn_name": "两色恐龙混装",
+    "workshop": "兴信A",
+    "schedule_name": "恐龙系列"
+  },
+  "7140": {
+    "cn_name": "两只新恐龙彩盒套装",
+    "workshop": "兴信A",
+    "schedule_name": "恐龙系列"
+  },
+  "MB169": {
+    "cn_name": "恐龙",
+    "workshop": "兴信A",
+    "schedule_name": "恐龙系列"
+  },
+  "MB148": {
+    "cn_name": "混装（7133+7149+7150+71152）",
+    "workshop": "兴信A",
+    "schedule_name": "恐龙系列"
+  },
+  "71132": {
+    "cn_name": "两只新恐龙彩盒套装",
+    "workshop": "兴信A",
+    "schedule_name": "恐龙系列"
+  },
+  "7147": {
+    "cn_name": "两只霸王龙彩盒套装",
+    "workshop": "兴信A",
+    "schedule_name": "恐龙系列"
+  },
+  "7136": {
+    "cn_name": "霸王龙+剑龙+速龙混装",
+    "workshop": "兴信A",
+    "schedule_name": "恐龙系列"
+  },
+  "7146": {
+    "cn_name": "两个橙色速龙入邮包盒",
+    "workshop": "兴信A",
+    "schedule_name": "恐龙系列"
+  },
+  "25296": {
+    "cn_name": "恐龙+速龙",
+    "workshop": "兴信A",
+    "schedule_name": "恐龙系列"
+  },
+  "7139": {
+    "cn_name": "恐龙+剑龙彩盒套装",
+    "workshop": "兴信A",
+    "schedule_name": "恐龙系列"
+  },
+  "7151": {
+    "cn_name": "夜光蜘蛛",
+    "workshop": "兴信A",
+    "schedule_name": "恐龙系列"
+  },
+  "7152": {
+    "cn_name": "夜光蟑螂",
+    "workshop": "兴信A",
+    "schedule_name": "恐龙系列"
+  },
+  "7153": {
+    "cn_name": "夜光蜥蜴蛇混装",
+    "workshop": "兴信A",
+    "schedule_name": "恐龙系列"
+  },
+  "7149": {
+    "cn_name": "夜光蜥蜴",
+    "workshop": "兴信A",
+    "schedule_name": "恐龙系列"
+  },
+  "7150": {
+    "cn_name": "夜光蛇",
+    "workshop": "兴信A",
+    "schedule_name": "恐龙系列"
+  },
+  "7168": {
+    "cn_name": "两条发光蛇入邮包盒",
+    "workshop": "兴信A",
+    "schedule_name": "恐龙系列"
+  },
+  "MB21": {
+    "cn_name": "霸王龙",
+    "workshop": "兴信A",
+    "schedule_name": "恐龙系列"
+  },
+  "7181": {
+    "cn_name": "霸王龙混装",
+    "workshop": "兴信A",
+    "schedule_name": "恐龙系列"
+  },
+  "7182": {
+    "cn_name": "霸王龙混装",
+    "workshop": "兴信A",
+    "schedule_name": "恐龙系列"
+  },
+  "7196": {
+    "cn_name": "发光蜥蜴发光蛇混装",
+    "workshop": "兴信A",
+    "schedule_name": "恐龙系列"
+  },
+  "7154": {
+    "cn_name": "8PCS夜光蜘蛛+4pcs夜光蟑螂",
+    "workshop": "兴信A",
+    "schedule_name": "恐龙系列"
+  },
+  "7137": {
+    "cn_name": "橙色速龙+红色霸王龙彩盒套装",
+    "workshop": "兴信A",
+    "schedule_name": "恐龙系列"
+  },
+  "7198": {
+    "cn_name": "发光橙色蜥蜴+发光绿蛇入邮包盒",
+    "workshop": "兴信A",
+    "schedule_name": "恐龙系列"
+  },
+  "7189": {
+    "cn_name": "两只夜光蜘蛛入邮包盒",
+    "workshop": "兴信A",
+    "schedule_name": "恐龙系列"
+  },
+  "7190": {
+    "cn_name": "两只夜光蟑螂入邮包盒",
+    "workshop": "兴信A",
+    "schedule_name": "恐龙系列"
+  },
+  "7167": {
+    "cn_name": "两个发光蜥蜴入邮包盒",
+    "workshop": "兴信A",
+    "schedule_name": "恐龙系列"
+  },
+  "7164": {
+    "cn_name": "夜光蜥蜴夜光蛇夜光蜘蛛混装",
+    "workshop": "兴信A",
+    "schedule_name": "恐龙系列"
+  },
+  "MB34": {
+    "cn_name": "速龙混装",
+    "workshop": "兴信A",
+    "schedule_name": "恐龙系列"
+  },
+  "71101": {
+    "cn_name": "机甲霸王龙",
+    "workshop": "兴信A",
+    "schedule_name": "恐龙系列"
+  },
+  "MB120": {
+    "cn_name": "",
+    "workshop": "兴信A",
+    "schedule_name": "恐龙系列"
+  },
+  "MB58": {
+    "cn_name": "速龙+恐龙+蜥蜴+蜘蛛混装",
+    "workshop": "兴信A",
+    "schedule_name": "恐龙系列"
+  },
+  "MB106": {
+    "cn_name": "灰色恐龙混装展示架",
+    "workshop": "兴信A",
+    "schedule_name": "恐龙系列"
+  },
+  "MB139": {
+    "cn_name": "",
+    "workshop": "兴信A",
+    "schedule_name": "恐龙系列"
+  },
+  "71141": {
+    "cn_name": "灰色恐龙不含slime 蛋",
+    "workshop": "兴信A",
+    "schedule_name": "恐龙系列"
+  },
+  "71137": {
+    "cn_name": "眼镜蛇",
+    "workshop": "兴信A",
+    "schedule_name": "恐龙系列"
+  },
+  "MB152": {
+    "cn_name": "7149+71137",
+    "workshop": "兴信A",
+    "schedule_name": "恐龙系列"
+  },
+  "MSLB06": {
+    "cn_name": "混装（7149+71137）",
+    "workshop": "兴信A",
+    "schedule_name": "恐龙系列"
+  },
+  "MB108": {
+    "cn_name": "",
+    "workshop": "兴信A",
+    "schedule_name": "恐龙系列"
+  },
+  "MUQ44": {
+    "cn_name": "",
+    "workshop": "兴信A",
+    "schedule_name": "恐龙系列"
+  },
+  "MEC245": {
+    "cn_name": "7149+7150+7151+7152+71126",
+    "workshop": "兴信A",
+    "schedule_name": "恐龙系列"
+  },
+  "71144": {
+    "cn_name": "",
+    "workshop": "兴信A",
+    "schedule_name": "恐龙系列"
+  },
+  "71145": {
+    "cn_name": "",
+    "workshop": "兴信A",
+    "schedule_name": "恐龙系列"
+  },
+  "7794": {
+    "cn_name": "惊喜球",
+    "workshop": "兴信A",
+    "schedule_name": "迷你恐龙"
+  },
+  "77110": {
+    "cn_name": "惊喜球3PK PVC圆筒装",
+    "workshop": "兴信A",
+    "schedule_name": "迷你恐龙"
+  },
+  "77118": {
+    "cn_name": "2PK PVC筒装",
+    "workshop": "兴信A",
+    "schedule_name": "迷你恐龙"
+  },
+  "77200": {
+    "cn_name": "迷你恐龙",
+    "workshop": "兴信A",
+    "schedule_name": "迷你恐龙"
+  },
+  "77239": {
+    "cn_name": "两个球圆筒装",
+    "workshop": "兴信A",
+    "schedule_name": "迷你恐龙"
+  },
+  "77254": {
+    "cn_name": "迷你恐龙球 2PK邮包盒装",
+    "workshop": "兴信A",
+    "schedule_name": "迷你恐龙"
+  },
+  "77243": {
+    "cn_name": "迷你恐龙球 5PK 邮包盒装",
+    "workshop": "兴信A",
+    "schedule_name": "迷你恐龙"
+  },
+  "MB20": {
+    "cn_name": "惊喜球",
+    "workshop": "兴信A",
+    "schedule_name": "迷你恐龙"
+  },
+  "77361": {
+    "cn_name": "迷你恐龙球",
+    "workshop": "兴信A",
+    "schedule_name": "迷你恐龙"
+  },
+  "77375": {
+    "cn_name": "迷你恐龙三代",
+    "workshop": "兴信A",
+    "schedule_name": "迷你恐龙"
+  },
+  "77489": {
+    "cn_name": "迷你恐龙四代",
+    "workshop": "兴信A",
+    "schedule_name": "迷你恐龙"
+  },
+  "77593": {
+    "cn_name": "迷你恐龙四代",
+    "workshop": "兴信A",
+    "schedule_name": "迷你恐龙"
+  },
+  "77523": {
+    "cn_name": "迷你恐龙四代两个装",
+    "workshop": "兴信A",
+    "schedule_name": "迷你恐龙"
+  },
+  "77614": {
+    "cn_name": "迷你恐龙四代",
+    "workshop": "兴信A",
+    "schedule_name": "迷你恐龙"
+  },
+  "77353": {
+    "cn_name": "迪士尼球2代",
+    "workshop": "兴信A",
+    "schedule_name": "迪士尼球二代"
+  },
+  "77397": {
+    "cn_name": "迪士尼球2代四个装一个圆筒",
+    "workshop": "兴信A",
+    "schedule_name": "迪士尼球二代"
+  },
+  "77354": {
+    "cn_name": "迪士尼球2代收藏盒",
+    "workshop": "兴信A",
+    "schedule_name": "迪士尼球二代"
+  },
+  "77399": {
+    "cn_name": "迪士尼球2代两个装一个圆筒",
+    "workshop": "兴信A",
+    "schedule_name": "迪士尼球二代"
+  },
+  "77365": {
+    "cn_name": "迪士尼球2代 3个+收藏盒 1个入邮包盒",
+    "workshop": "兴信A",
+    "schedule_name": "迪士尼球二代"
+  },
+  "77387": {
+    "cn_name": "迪士尼球2代3个球入圆筒卡板装",
+    "workshop": "兴信A",
+    "schedule_name": "迪士尼球二代"
+  },
+  "77414": {
+    "cn_name": "迪士尼球2代",
+    "workshop": "兴信A",
+    "schedule_name": "迪士尼球二代"
+  },
+  "77415": {
+    "cn_name": "迪士尼袋子装",
+    "workshop": "兴信A",
+    "schedule_name": "迪士尼球二代"
+  },
+  "77420": {
+    "cn_name": "迪士尼球2代",
+    "workshop": "兴信A",
+    "schedule_name": "迪士尼球二代"
+  },
+  "77521": {
+    "cn_name": "迪士尼球2代",
+    "workshop": "兴信A",
+    "schedule_name": "迪士尼球二代"
+  },
+  "MEC239": {
+    "cn_name": "迪士尼混装",
+    "workshop": "兴信A",
+    "schedule_name": "迪士尼球二代"
+  },
+  "77617": {
+    "cn_name": "迪士尼球2代",
+    "workshop": "兴信A",
+    "schedule_name": "迪士尼球二代"
+  },
+  "MFD160": {
+    "cn_name": "",
+    "workshop": "兴信A",
+    "schedule_name": "迪士尼球二代"
+  },
+  "77555": {
+    "cn_name": "迷你房子",
+    "workshop": "兴信A",
+    "schedule_name": "迷你房子"
+  },
+  "77754": {
+    "cn_name": "迷你房子",
+    "workshop": "兴信A",
+    "schedule_name": "迷你房子"
+  },
+  "77679": {
+    "cn_name": "迷你房子",
+    "workshop": "兴信A",
+    "schedule_name": "迷你房子"
+  },
+  "77641": {
+    "cn_name": "迷你房子3PCS装",
+    "workshop": "兴信A",
+    "schedule_name": "迷你房子"
+  },
+  "77584": {
+    "cn_name": "迷你房子",
+    "workshop": "兴信A",
+    "schedule_name": "迷你房子"
+  },
+  "77556": {
+    "cn_name": "迷你房子3PCS装",
+    "workshop": "兴信A",
+    "schedule_name": "迷你房子"
+  },
+  "MEC255": {
+    "cn_name": "77555+77515混装",
+    "workshop": "兴信A",
+    "schedule_name": "迷你房子"
+  },
+  "MEC251": {
+    "cn_name": "77555+77515混装",
+    "workshop": "兴信A",
+    "schedule_name": "迷你房子"
+  },
+  "MSLD90": {
+    "cn_name": "",
+    "workshop": "兴信A",
+    "schedule_name": "迷你房子"
+  },
+  "MEC309": {
+    "cn_name": "77555+77515混装",
+    "workshop": "兴信A",
+    "schedule_name": "迷你房子"
+  },
+  "MEC307": {
+    "cn_name": "",
+    "workshop": "兴信A",
+    "schedule_name": "迷你房子"
+  },
+  "77625": {
+    "cn_name": "迷你车仔",
+    "workshop": "兴信B",
+    "schedule_name": "迷你车仔"
+  },
+  "77651": {
+    "cn_name": "迷你车仔2个装",
+    "workshop": "兴信B",
+    "schedule_name": "迷你车仔"
+  },
+  "77618": {
+    "cn_name": "S3迷你球",
+    "workshop": "兴信A",
+    "schedule_name": "迷你球三代"
+  },
+  "77683": {
+    "cn_name": "S3迷你球3   2个装",
+    "workshop": "兴信A",
+    "schedule_name": "迷你球三代"
+  },
+  "77682": {
+    "cn_name": "S3迷你球3  3个装",
+    "workshop": "兴信A",
+    "schedule_name": "迷你球三代"
+  },
+  "77351": {
+    "cn_name": "S3迷你球24PCS/箱",
+    "workshop": "兴信A",
+    "schedule_name": "迷你球三代"
+  },
+  "77396": {
+    "cn_name": "S3迷你球4个圆筒装",
+    "workshop": "兴信A",
+    "schedule_name": "迷你球三代"
+  },
+  "MSLD51": {
+    "cn_name": "四个装一个圆筒",
+    "workshop": "兴信A",
+    "schedule_name": "迷你球三代"
+  },
+  "77352": {
+    "cn_name": "S3收藏盒12PCS/箱",
+    "workshop": "兴信A",
+    "schedule_name": "迷你球三代"
+  },
+  "77385": {
+    "cn_name": "S3迷你球3个圆筒装",
+    "workshop": "兴信A",
+    "schedule_name": "迷你球三代"
+  },
+  "77398": {
+    "cn_name": "S3迷你球2个圆筒装",
+    "workshop": "兴信A",
+    "schedule_name": "迷你球三代"
+  },
+  "77412": {
+    "cn_name": "S3迷你球 3个+1个收藏盒入邮包盒",
+    "workshop": "兴信A",
+    "schedule_name": "迷你球三代"
+  },
+  "77413": {
+    "cn_name": "5个S3迷你球入邮包盒",
+    "workshop": "兴信A",
+    "schedule_name": "迷你球三代"
+  },
+  "MGQ03": {
+    "cn_name": "迪士尼球、迷你球混装",
+    "workshop": "兴信A",
+    "schedule_name": "迷你球三代"
+  },
+  "77447": {
+    "cn_name": "三代日历盒",
+    "workshop": "兴信A",
+    "schedule_name": "迷你球三代"
+  },
+  "77519": {
+    "cn_name": "S3迷你球*2空白邮包盒装",
+    "workshop": "兴信A",
+    "schedule_name": "迷你球三代"
+  },
+  "MSLD70": {
+    "cn_name": "77396+77346+77551+77552）混装",
+    "workshop": "兴信A",
+    "schedule_name": "迷你球三代"
+  },
+  "77621": {
+    "cn_name": "三代日历盒",
+    "workshop": "兴信A",
+    "schedule_name": "迷你球三代"
+  },
+  "77610": {
+    "cn_name": "三代日历盒",
+    "workshop": "兴信A",
+    "schedule_name": "迷你球三代"
+  },
+  "77540": {
+    "cn_name": "10-031单款公仔1250入袋子装",
+    "workshop": "兴信A",
+    "schedule_name": "迷你球三代"
+  },
+  "77538": {
+    "cn_name": "8-079 单款公仔1250个入袋子装",
+    "workshop": "兴信A",
+    "schedule_name": "迷你球三代"
+  },
+  "77539": {
+    "cn_name": "10-085单款公仔1250个入袋子装",
+    "workshop": "兴信A",
+    "schedule_name": "迷你球三代"
+  },
+  "77537": {
+    "cn_name": "16-099单款公仔1250个入袋子装",
+    "workshop": "兴信A",
+    "schedule_name": "迷你球三代"
+  },
+  "77533": {
+    "cn_name": "6-075单款公仔1250入袋子装",
+    "workshop": "兴信A",
+    "schedule_name": "迷你球三代"
+  },
+  "77534": {
+    "cn_name": "12-091单款公仔1250入袋子装",
+    "workshop": "兴信A",
+    "schedule_name": "迷你球三代"
+  },
+  "77549": {
+    "cn_name": "单款公仔",
+    "workshop": "兴信A",
+    "schedule_name": "迷你球三代"
+  },
+  "77541": {
+    "cn_name": "单款公仔",
+    "workshop": "兴信A",
+    "schedule_name": "迷你球三代"
+  },
+  "77542": {
+    "cn_name": "单款公仔",
+    "workshop": "兴信A",
+    "schedule_name": "迷你球三代"
+  },
+  "77543": {
+    "cn_name": "单款公仔",
+    "workshop": "兴信A",
+    "schedule_name": "迷你球三代"
+  },
+  "77421": {
+    "cn_name": "迷你独角兽",
+    "workshop": "兴信B",
+    "schedule_name": "迷你独角兽"
+  },
+  "77451": {
+    "cn_name": "迷你独角兽两只装",
+    "workshop": "兴信B",
+    "schedule_name": "迷你独角兽"
+  },
+  "77595": {
+    "cn_name": "迷你独角兽",
+    "workshop": "兴信B",
+    "schedule_name": "迷你独角兽"
+  },
+  "MEC259": {
+    "cn_name": "77593+77595+9543 混装",
+    "workshop": "兴信B",
+    "schedule_name": "迷你独角兽"
+  },
+  "MEC253": {
+    "cn_name": "77593+77595混装",
+    "workshop": "兴信B",
+    "schedule_name": "迷你独角兽"
+  },
+  "77607": {
+    "cn_name": "3个球装圆筒",
+    "workshop": "兴信B",
+    "schedule_name": "迷你独角兽"
+  },
+  "77612": {
+    "cn_name": "独角兽",
+    "workshop": "兴信B",
+    "schedule_name": "迷你独角兽"
+  },
+  "77656": {
+    "cn_name": "3个球装圆筒",
+    "workshop": "兴信B",
+    "schedule_name": "迷你独角兽"
+  },
+  "77270": {
+    "cn_name": "金色版本球",
+    "workshop": "兴信A",
+    "schedule_name": "迷你玩具"
+  },
+  "77269": {
+    "cn_name": "金色版本收藏盒",
+    "workshop": "兴信A",
+    "schedule_name": "迷你玩具"
+  },
+  "77292": {
+    "cn_name": "S2日历套装",
+    "workshop": "兴信A",
+    "schedule_name": "迷你玩具"
+  },
+  "7792": {
+    "cn_name": "S1日历套装",
+    "workshop": "兴信A",
+    "schedule_name": "迷你玩具"
+  },
+  "7759": {
+    "cn_name": "S1迷你球",
+    "workshop": "兴信A",
+    "schedule_name": "迷你玩具"
+  },
+  "77126": {
+    "cn_name": "5个球入邮包盒",
+    "workshop": "兴信A",
+    "schedule_name": "迷你玩具"
+  },
+  "7793": {
+    "cn_name": "S1PVC圆筒2只装",
+    "workshop": "兴信A",
+    "schedule_name": "迷你玩具"
+  },
+  "7790": {
+    "cn_name": "S1PVC圆筒3只装",
+    "workshop": "兴信A",
+    "schedule_name": "迷你玩具"
+  },
+  "77190": {
+    "cn_name": "S1 1个收藏盒+3个球入邮包盒",
+    "workshop": "兴信A",
+    "schedule_name": "迷你玩具"
+  },
+  "7780": {
+    "cn_name": "S1收藏盒",
+    "workshop": "兴信A",
+    "schedule_name": "迷你玩具"
+  },
+  "77218": {
+    "cn_name": "S2收藏盒",
+    "workshop": "兴信A",
+    "schedule_name": "迷你玩具"
+  },
+  "77197": {
+    "cn_name": "S2美国版本迷你球",
+    "workshop": "兴信A",
+    "schedule_name": "迷你玩具"
+  },
+  "77220": {
+    "cn_name": "S2国际版本迷你球",
+    "workshop": "兴信A",
+    "schedule_name": "迷你玩具"
+  },
+  "77240": {
+    "cn_name": "S1 国际版PVC圆筒2只装",
+    "workshop": "兴信A",
+    "schedule_name": "迷你玩具"
+  },
+  "77244": {
+    "cn_name": "S2 国际版 3个球+1个收藏盒入邮包盒",
+    "workshop": "兴信A",
+    "schedule_name": "迷你玩具"
+  },
+  "77241": {
+    "cn_name": "S2 国际版 5个球入邮包盒装",
+    "workshop": "兴信A",
+    "schedule_name": "迷你玩具"
+  },
+  "77251": {
+    "cn_name": "S2美国版2个球入邮包盒",
+    "workshop": "兴信A",
+    "schedule_name": "迷你玩具"
+  },
+  "77253": {
+    "cn_name": "S2 美国版 3个球+1个收藏盒入邮包盒",
+    "workshop": "兴信A",
+    "schedule_name": "迷你玩具"
+  },
+  "77217": {
+    "cn_name": "S2 美国版 PVC圆筒2只装",
+    "workshop": "兴信A",
+    "schedule_name": "迷你玩具"
+  },
+  "77258": {
+    "cn_name": "S2（美国版）12个PVC圆筒（两个球装）装一个PDQ",
+    "workshop": "兴信A",
+    "schedule_name": "迷你玩具"
+  },
+  "77152": {
+    "cn_name": "迷你超市",
+    "workshop": "河源",
+    "schedule_name": "迷你玩具"
+  },
+  "77153": {
+    "cn_name": "迷你超市",
+    "workshop": "河源",
+    "schedule_name": "迷你玩具"
+  },
+  "77238": {
+    "cn_name": "收藏盒",
+    "workshop": "兴信A",
+    "schedule_name": "迷你玩具"
+  },
+  "77323": {
+    "cn_name": "金版收藏盒",
+    "workshop": "兴信A",
+    "schedule_name": "迷你玩具"
+  },
+  "77304": {
+    "cn_name": "国际版本的3PK装",
+    "workshop": "兴信A",
+    "schedule_name": "迷你玩具"
+  },
+  "77303": {
+    "cn_name": "国际版 5个球入彩盒8/箱",
+    "workshop": "兴信A",
+    "schedule_name": "迷你玩具"
+  },
+  "77418": {
+    "cn_name": "15个玫瑰金小球+5个白加红色小球入一个大胶袋，20个大袋子入一箱",
+    "workshop": "兴信A",
+    "schedule_name": "迷你玩具"
+  },
+  "25251": {
+    "cn_name": "鸭子",
+    "workshop": "兴信A",
+    "schedule_name": "游水系列"
+  },
+  "25252": {
+    "cn_name": "鱷魚",
+    "workshop": "兴信A",
+    "schedule_name": "游水系列"
+  },
+  "25253": {
+    "cn_name": "金魚",
+    "workshop": "兴信A",
+    "schedule_name": "游水系列"
+  },
+  "25257": {
+    "cn_name": "三款混裝",
+    "workshop": "兴信A",
+    "schedule_name": "游水系列"
+  },
+  "25291": {
+    "cn_name": "滑道鲨鱼",
+    "workshop": "兴信A",
+    "schedule_name": "游水系列"
+  },
+  "7163": {
+    "cn_name": "小鲨鱼",
+    "workshop": "兴信A",
+    "schedule_name": "游水系列"
+  },
+  "7175": {
+    "cn_name": "黄色小鲨鱼+粉色小鲨鱼",
+    "workshop": "兴信A",
+    "schedule_name": "游水系列"
+  },
+  "25282": {
+    "cn_name": "鯊魚",
+    "workshop": "兴信B",
+    "schedule_name": "游水系列"
+  },
+  "25284": {
+    "cn_name": "鯊魚（2个装入PDQ）",
+    "workshop": "兴信B",
+    "schedule_name": "游水系列"
+  },
+  "25285": {
+    "cn_name": "3个鲨鱼入邮包盒",
+    "workshop": "兴信B",
+    "schedule_name": "游水系列"
+  },
+  "7166": {
+    "cn_name": "3PK小鲨鱼",
+    "workshop": "兴信A",
+    "schedule_name": "游水系列"
+  },
+  "71104": {
+    "cn_name": "鯊魚3PK",
+    "workshop": "兴信B",
+    "schedule_name": "游水系列"
+  },
+  "71109": {
+    "cn_name": "蓝色鯊魚",
+    "workshop": "兴信B",
+    "schedule_name": "游水系列"
+  },
+  "25234": {
+    "cn_name": "蜥蜴",
+    "workshop": "兴信A",
+    "schedule_name": "蛇+蜥蜴+蟑螂"
+  },
+  "25235": {
+    "cn_name": "蛇",
+    "workshop": "兴信A",
+    "schedule_name": "蛇+蜥蜴+蟑螂"
+  },
+  "25261": {
+    "cn_name": "蜥蜴蛇混装",
+    "workshop": "兴信A",
+    "schedule_name": "蛇+蜥蜴+蟑螂"
+  },
+  "MEC50": {
+    "cn_name": "蛇，蜥蜴展示架",
+    "workshop": "兴信A",
+    "schedule_name": "蛇+蜥蜴+蟑螂"
+  },
+  "SLD12": {
+    "cn_name": "蛇/蜥蜴展示架",
+    "workshop": "兴信A",
+    "schedule_name": "蛇+蜥蜴+蟑螂"
+  },
+  "7112": {
+    "cn_name": "蟑螂",
+    "workshop": "兴信A",
+    "schedule_name": "蛇+蜥蜴+蟑螂"
+  },
+  "7120": {
+    "cn_name": "两只蟑螂邮包盒装",
+    "workshop": "兴信A",
+    "schedule_name": "蛇+蜥蜴+蟑螂"
+  },
+  "77515": {
+    "cn_name": "Mini Brands 迷你球DIY厨艺系列",
+    "workshop": "兴信A",
+    "schedule_name": "迷你球DIY厨艺系列"
+  },
+  "MB201": {
+    "cn_name": "迷你球DIY厨艺系列",
+    "workshop": "兴信A",
+    "schedule_name": "迷你球DIY厨艺系列"
+  },
+  "77773": {
+    "cn_name": "迷你球DIY厨艺系列二代",
+    "workshop": "兴信A",
+    "schedule_name": "迷你球DIY厨艺系列"
+  },
+  "77909": {
+    "cn_name": "迷你球DIY厨艺系列二代",
+    "workshop": "兴信A",
+    "schedule_name": "迷你球DIY厨艺系列"
+  },
+  "77809": {
+    "cn_name": "迷你球DIY厨艺系列二代",
+    "workshop": "兴信A",
+    "schedule_name": "迷你球DIY厨艺系列"
+  },
+  "77516": {
+    "cn_name": "Mini Brands 迷你球DIY厨艺系列两个装",
+    "workshop": "兴信A",
+    "schedule_name": "迷你球DIY厨艺系列"
+  },
+  "71126": {
+    "cn_name": "大白鲨",
+    "workshop": "兴信A",
+    "schedule_name": "大白鲨"
+  },
+  "9548": {
+    "cn_name": "惊喜鸭妈妈",
+    "workshop": "兴信A",
+    "schedule_name": "惊喜鸭妈妈"
+  },
+  "9283": {
+    "cn_name": "美人鱼6只装",
+    "workshop": "兴信A",
+    "schedule_name": "珠片系列"
+  },
+  "9286": {
+    "cn_name": "美人鱼6只装",
+    "workshop": "兴信A",
+    "schedule_name": "珠片系列"
+  },
+  "92146": {
+    "cn_name": "小魔法瓶",
+    "workshop": "兴信B",
+    "schedule_name": "小魔法瓶"
+  },
+  "MB158": {
+    "cn_name": "（9283+9261+71102）混装",
+    "workshop": "兴信A",
+    "schedule_name": "珠片系列"
+  },
+  "MSLD108": {
+    "cn_name": "9281+9283",
+    "workshop": "兴信A",
+    "schedule_name": "珠片系列"
+  },
+  "MEC222": {
+    "cn_name": "（9283+74108）混装",
+    "workshop": "兴信A",
+    "schedule_name": "珠片系列"
+  },
+  "MUQ23": {
+    "cn_name": "三款混装（9283/9261",
+    "workshop": "兴信A",
+    "schedule_name": "珠片系列"
+  },
+  "MEC192": {
+    "cn_name": "9283+9279+9280",
+    "workshop": "兴信A",
+    "schedule_name": "珠片系列"
+  },
+  "MB125": {
+    "cn_name": "9283+92107",
+    "workshop": "兴信A",
+    "schedule_name": "珠片系列"
+  },
+  "MPLB11": {
+    "cn_name": "混装（9548+9543）",
+    "workshop": "兴信A",
+    "schedule_name": "珠片系列"
+  },
+  "MEC345": {
+    "cn_name": "牙齿怪兽",
+    "workshop": "兴信A",
+    "schedule_name": "牙齿怪兽"
+  },
+  "15704": {
+    "cn_name": "牙齿怪兽",
+    "workshop": "华登",
+    "schedule_name": "牙齿怪兽"
+  },
+  "15794": {
+    "cn_name": "牙齿怪兽",
+    "workshop": "华登",
+    "schedule_name": "牙齿怪兽"
+  },
+  "15747": {
+    "cn_name": "牙齿怪兽",
+    "workshop": "兴信A",
+    "schedule_name": "牙齿怪兽"
+  },
+  "MEC412": {
+    "cn_name": "混装（15746+15752）",
+    "workshop": "兴信A",
+    "schedule_name": "牙齿怪兽"
+  },
+  "MB183": {
+    "cn_name": "混装（15747+15756+15726）",
+    "workshop": "兴信A",
+    "schedule_name": "牙齿怪兽"
+  },
+  "15726": {
+    "cn_name": "牙齿怪兽",
+    "workshop": "兴信A",
+    "schedule_name": "牙齿怪兽"
+  },
+  "15746": {
+    "cn_name": "牙齿怪兽",
+    "workshop": "兴信A-",
+    "schedule_name": "牙齿怪兽"
+  },
+  "MEC340": {
+    "cn_name": "混装（15714+15726+15727+15731）",
+    "workshop": "兴信A",
+    "schedule_name": "牙齿怪兽"
+  },
+  "15729": {
+    "cn_name": "牙齿怪兽",
+    "workshop": "兴信A",
+    "schedule_name": "牙齿怪兽"
+  },
+  "15751": {
+    "cn_name": "牙齿怪兽",
+    "workshop": "兴信A-",
+    "schedule_name": "牙齿怪兽"
+  },
+  "157120": {
+    "cn_name": "牙齿怪兽",
+    "workshop": "兴信A-",
+    "schedule_name": "牙齿怪兽"
+  },
+  "157120A": {
+    "cn_name": "牙齿怪兽",
+    "workshop": "兴信A-",
+    "schedule_name": "牙齿怪兽"
+  },
+  "157103": {
+    "cn_name": "牙齿怪兽",
+    "workshop": "兴信A-",
+    "schedule_name": "牙齿怪兽"
+  },
+  "15749": {
+    "cn_name": "牙齿怪兽",
+    "workshop": "兴信A-",
+    "schedule_name": "牙齿怪兽"
+  },
+  "15755": {
+    "cn_name": "牙齿怪兽",
+    "workshop": "兴信A-",
+    "schedule_name": "牙齿怪兽"
+  },
+  "15752": {
+    "cn_name": "牙齿怪兽",
+    "workshop": "兴信A",
+    "schedule_name": "牙齿怪兽"
+  },
+  "15783": {
+    "cn_name": "牙齿怪兽",
+    "workshop": "A-华嘉",
+    "schedule_name": "牙齿怪兽"
+  },
+  "157145": {
+    "cn_name": "牙齿怪兽",
+    "workshop": "华登",
+    "schedule_name": "牙齿怪兽"
+  },
+  "小鸡零钱包": {
+    "cn_name": "小鸡零钱包",
+    "workshop": "兴信A",
+    "schedule_name": "小鸡零钱包"
+  },
+  "MEC481": {
+    "cn_name": "15760+15749+15752混装",
+    "workshop": "兴信A",
+    "schedule_name": "牙齿怪兽"
+  },
+  "MEC399": {
+    "cn_name": "15760+15759+15774+15752混装",
+    "workshop": "兴信A",
+    "schedule_name": "牙齿怪兽"
+  },
+  "MEC421": {
+    "cn_name": "混装（15749+15752）",
+    "workshop": "兴信A",
+    "schedule_name": "牙齿怪兽"
+  },
+  "MEC383": {
+    "cn_name": "15755+15747+15752+15760+15756混装",
+    "workshop": "兴信A",
+    "schedule_name": "牙齿怪兽"
+  },
+  "71152": {
+    "cn_name": "机械龙",
+    "workshop": "兴信A",
+    "schedule_name": "机械龙"
+  },
+  "71174": {
+    "cn_name": "混装（7133+71152）",
+    "workshop": "兴信A",
+    "schedule_name": "机械龙"
+  },
+  "MB208": {
+    "cn_name": "混装（9561+71174）",
+    "workshop": "兴信A",
+    "schedule_name": "机械龙"
+  },
+  "9560": {
+    "cn_name": "海龟妈妈",
+    "workshop": "兴信A",
+    "schedule_name": "海龟妈妈"
+  },
+  "9565": {
+    "cn_name": "松鼠",
+    "workshop": "兴信A",
+    "schedule_name": "松鼠"
+  },
+  "9572": {
+    "cn_name": "松鼠",
+    "workshop": "兴信A",
+    "schedule_name": "松鼠"
+  },
+  "77711": {
+    "cn_name": "迷你冰箱小产品",
+    "workshop": "兴信A",
+    "schedule_name": "迷你冰箱小产品"
+  },
+  "77785": {
+    "cn_name": "迷你冰箱小产品",
+    "workshop": "兴信A",
+    "schedule_name": "迷你冰箱小产品"
+  },
+  "77803": {
+    "cn_name": "迷你冰箱小产品",
+    "workshop": "兴信A",
+    "schedule_name": "迷你冰箱小产品"
+  },
+  "77823": {
+    "cn_name": "迷你冰箱小产品",
+    "workshop": "兴信A",
+    "schedule_name": "迷你冰箱小产品"
+  },
+  "77673": {
+    "cn_name": "迷你冰箱",
+    "workshop": "兴信A",
+    "schedule_name": "迷你冰箱"
+  },
+  "77721": {
+    "cn_name": "迷你冰箱",
+    "workshop": "兴信A",
+    "schedule_name": "迷你冰箱"
+  },
+  "77731": {
+    "cn_name": "迷你冰箱小产品圆筒装",
+    "workshop": "兴信A",
+    "schedule_name": "迷你冰箱小产品"
+  },
+  "77782": {
+    "cn_name": "迷你冰箱小产品",
+    "workshop": "兴信A",
+    "schedule_name": "迷你冰箱小产品"
+  },
+  "77758": {
+    "cn_name": "迷你冰箱",
+    "workshop": "兴信A",
+    "schedule_name": "迷你冰箱"
+  },
+  "71172": {
+    "cn_name": "大脑",
+    "workshop": "兴信A",
+    "schedule_name": "大脑"
+  },
+  "MEC305": {
+    "cn_name": "混装（77673+77711）",
+    "workshop": "兴信A",
+    "schedule_name": "迷你冰箱"
+  },
+  "MEC356": {
+    "cn_name": "混装（77673+77782）",
+    "workshop": "兴信A",
+    "schedule_name": "迷你冰箱"
+  },
+  "9574": {
+    "cn_name": "水豚妈妈",
+    "workshop": "兴信A",
+    "schedule_name": "水豚妈妈"
+  },
+  "77858": {
+    "cn_name": "厨房套装",
+    "workshop": "兴信A",
+    "schedule_name": "迷你厨房套装"
+  },
+  "77889": {
+    "cn_name": "厨房套装",
+    "workshop": "兴信A",
+    "schedule_name": "迷你厨房套装"
+  },
+  "77843": {
+    "cn_name": "卡哇伊系列",
+    "workshop": "兴信A",
+    "schedule_name": "卡哇伊系列"
+  },
+  "77867": {
+    "cn_name": "卡哇伊系列4PK",
+    "workshop": "兴信A",
+    "schedule_name": "卡哇伊系列"
+  },
+  "77878": {
+    "cn_name": "卡哇伊系列2PK",
+    "workshop": "兴信A",
+    "schedule_name": "卡哇伊系列"
+  },
+  "MEC326": {
+    "cn_name": "9298+92104+9296+9283混装",
+    "workshop": "华登",
+    "schedule_name": "珠片系列"
+  },
+  "77198": {
+    "cn_name": "迷你小手袋",
+    "workshop": "兴信B",
+    "schedule_name": "迷你小手袋"
+  },
+  "77246": {
+    "cn_name": "迷你小手袋2PK入邮包盒/箱",
+    "workshop": "兴信B",
+    "schedule_name": "迷你小手袋"
+  },
+  "77366": {
+    "cn_name": "迷你小手袋2个球装",
+    "workshop": "兴信B",
+    "schedule_name": "迷你小手袋"
+  },
+  "MEC171": {
+    "cn_name": "MEC171展示架",
+    "workshop": "兴信B",
+    "schedule_name": "迷你小手袋"
+  },
+  "MEC165": {
+    "cn_name": "MEC165展示架",
+    "workshop": "兴信B",
+    "schedule_name": "迷你小手袋"
+  },
+  "MEC471": {
+    "cn_name": "15754+15750混装",
+    "workshop": "兴信B",
+    "schedule_name": "迷你小手袋"
+  },
+  "77349": {
+    "cn_name": "2代迷你小手袋",
+    "workshop": "兴信B",
+    "schedule_name": "迷你小手袋"
+  },
+  "77410": {
+    "cn_name": "2代迷你小手袋2只装入PVC圆筒",
+    "workshop": "兴信B",
+    "schedule_name": "迷你小手袋"
+  },
+  "PL76": {
+    "cn_name": "4个装入邮包盒",
+    "workshop": "兴信B",
+    "schedule_name": "迷你小手袋"
+  },
+  "77485": {
+    "cn_name": "3代迷你小手袋",
+    "workshop": "兴信B",
+    "schedule_name": "迷你小手袋"
+  },
+  "77601": {
+    "cn_name": "3代迷你小手袋",
+    "workshop": "兴信B",
+    "schedule_name": "迷你小手袋"
+  },
+  "77770": {
+    "cn_name": "4代迷你小手袋",
+    "workshop": "兴信B",
+    "schedule_name": "迷你小手袋"
+  },
+  "77486": {
+    "cn_name": "3代迷你小手袋 圆筒装",
+    "workshop": "兴信B",
+    "schedule_name": "迷你小手袋"
+  },
+  "MEC457": {
+    "cn_name": "77772+77794混装",
+    "workshop": "兴信B",
+    "schedule_name": "迷你唱片机"
+  },
+  "77772": {
+    "cn_name": "迷你唱片球",
+    "workshop": "兴信B",
+    "schedule_name": "迷你唱片球"
+  },
+  "77876": {
+    "cn_name": "迷你唱片球2PK",
+    "workshop": "兴信B",
+    "schedule_name": "迷你唱片球"
+  },
+  "77794": {
+    "cn_name": "迷你唱片机",
+    "workshop": "兴信B",
+    "schedule_name": "迷你唱片机"
+  },
+  "77869": {
+    "cn_name": "77772+77794混装",
+    "workshop": "兴信B",
+    "schedule_name": "迷你唱片机"
+  },
+  "77897": {
+    "cn_name": "迷你唱片机",
+    "workshop": "兴信B",
+    "schedule_name": "迷你唱片机"
+  },
+  "77896": {
+    "cn_name": "迷你唱片机",
+    "workshop": "兴信B",
+    "schedule_name": "迷你唱片机"
+  },
+  "MSLD104": {
+    "cn_name": "77515+77485",
+    "workshop": "兴信B",
+    "schedule_name": "迷你小手袋"
+  },
+  "77806": {
+    "cn_name": "4代迷你小手袋",
+    "workshop": "兴信B",
+    "schedule_name": "迷你小手袋"
+  },
+  "77425": {
+    "cn_name": "迷你衣柜",
+    "workshop": "兴信B",
+    "schedule_name": "迷你衣柜"
+  },
+  "9549": {
+    "cn_name": "魔法兔子",
+    "workshop": "兴信B",
+    "schedule_name": "魔法兔子"
+  },
+  "9561": {
+    "cn_name": "魔法小鸟",
+    "workshop": "兴信B",
+    "schedule_name": "魔法小鸟"
+  },
+  "9215": {
+    "cn_name": "中蛋殼毛絨公仔",
+    "workshop": "兴信B",
+    "schedule_name": "珠片系列"
+  },
+  "9202": {
+    "cn_name": "2代珠片公仔",
+    "workshop": "兴信B",
+    "schedule_name": "珠片系列"
+  },
+  "9212": {
+    "cn_name": "奖杯公仔",
+    "workshop": "兴信B",
+    "schedule_name": "珠片系列"
+  },
+  "9207": {
+    "cn_name": "2PK超小蛋殼公仔",
+    "workshop": "兴信B",
+    "schedule_name": "珠片系列"
+  },
+  "9208": {
+    "cn_name": "4PK超小蛋殼公仔",
+    "workshop": "兴信B",
+    "schedule_name": "珠片系列"
+  },
+  "9220": {
+    "cn_name": "8PK超小蛋殼公仔",
+    "workshop": "兴信B",
+    "schedule_name": "珠片系列"
+  },
+  "9238": {
+    "cn_name": "魔法仙女6只装",
+    "workshop": "兴信B",
+    "schedule_name": "珠片系列"
+  },
+  "9252": {
+    "cn_name": "客版9238+1个小蛋",
+    "workshop": "兴信B",
+    "schedule_name": "珠片系列"
+  },
+  "9255": {
+    "cn_name": "魔法仙女+3个小蛋",
+    "workshop": "兴信B",
+    "schedule_name": "珠片系列"
+  },
+  "9240": {
+    "cn_name": "二代吸塑卡装4PK",
+    "workshop": "兴信B",
+    "schedule_name": "珠片系列"
+  },
+  "9243": {
+    "cn_name": "二代吸塑卡邮包盒装",
+    "workshop": "兴信B",
+    "schedule_name": "珠片系列"
+  },
+  "9249": {
+    "cn_name": "二代吸塑卡装8PK",
+    "workshop": "兴信B",
+    "schedule_name": "珠片系列"
+  },
+  "9241": {
+    "cn_name": "二代奖杯公仔",
+    "workshop": "兴信B",
+    "schedule_name": "珠片系列"
+  },
+  "9258": {
+    "cn_name": "一窝蛋",
+    "workshop": "兴信B",
+    "schedule_name": "珠片系列"
+  },
+  "92151": {
+    "cn_name": "一窝蛋",
+    "workshop": "兴信B",
+    "schedule_name": "珠片系列"
+  },
+  "MEC352": {
+    "cn_name": "展示架",
+    "workshop": "兴信B",
+    "schedule_name": "珠片系列"
+  },
+  "92112": {
+    "cn_name": "一窝蛋",
+    "workshop": "兴信B",
+    "schedule_name": "珠片系列"
+  },
+  "MEC154": {
+    "cn_name": "展示架",
+    "workshop": "兴信B",
+    "schedule_name": "珠片系列"
+  },
+  "9281": {
+    "cn_name": "皇冠公仔6只装",
+    "workshop": "兴信B",
+    "schedule_name": "珠片系列"
+  },
+  "9282": {
+    "cn_name": "皇冠公仔6只装客制",
+    "workshop": "兴信B",
+    "schedule_name": "珠片系列"
+  },
+  "9294": {
+    "cn_name": "迷你中蛋-印章",
+    "workshop": "兴信B",
+    "schedule_name": "珠片系列"
+  },
+  "9285": {
+    "cn_name": "摇头小狗1PK",
+    "workshop": "兴信B",
+    "schedule_name": "珠片系列"
+  },
+  "9284": {
+    "cn_name": "摇头小狗3pk",
+    "workshop": "兴信B",
+    "schedule_name": "珠片系列"
+  },
+  "92103": {
+    "cn_name": "摇头小狗",
+    "workshop": "兴信B",
+    "schedule_name": "珠片系列"
+  },
+  "9296": {
+    "cn_name": "迷你窝蛋",
+    "workshop": "兴信B",
+    "schedule_name": "珠片系列"
+  },
+  "MB181": {
+    "cn_name": "混装9296+71153",
+    "workshop": "兴信B",
+    "schedule_name": "珠片系列"
+  },
+  "92126": {
+    "cn_name": "迷你窝蛋",
+    "workshop": "兴信B",
+    "schedule_name": "珠片系列"
+  },
+  "MB165": {
+    "cn_name": "混装（9296+92126）",
+    "workshop": "兴信B",
+    "schedule_name": "珠片系列"
+  },
+  "9297": {
+    "cn_name": "怪兽毛绒6只装",
+    "workshop": "兴信B",
+    "schedule_name": "珠片系列"
+  },
+  "MSLD83": {
+    "cn_name": "怪兽毛绒6只装混装",
+    "workshop": "兴信B",
+    "schedule_name": "珠片系列"
+  },
+  "92100": {
+    "cn_name": "摇头小狗2PK PDQ装(有挂钩）",
+    "workshop": "兴信B",
+    "schedule_name": "珠片系列"
+  },
+  "92109": {
+    "cn_name": "一窝蛋毛绒6只装",
+    "workshop": "兴信B",
+    "schedule_name": "珠片系列"
+  },
+  "92110": {
+    "cn_name": "9279+9296",
+    "workshop": "兴信B",
+    "schedule_name": "珠片系列"
+  },
+  "92105": {
+    "cn_name": "尿布蛋",
+    "workshop": "兴信B",
+    "schedule_name": "珠片系列"
+  },
+  "92125": {
+    "cn_name": "猫蛋",
+    "workshop": "兴信B",
+    "schedule_name": "珠片系列"
+  },
+  "MEC282": {
+    "cn_name": "9298+92104+92105+9296+9281混装",
+    "workshop": "兴信B",
+    "schedule_name": "珠片系列"
+  },
+  "MUQ39": {
+    "cn_name": "9283+9281",
+    "workshop": "兴信B",
+    "schedule_name": "珠片系列"
+  },
+  "15711": {
+    "cn_name": "牙齿怪兽",
+    "workshop": "兴信B",
+    "schedule_name": "牙齿怪兽"
+  },
+  "MTQ48": {
+    "cn_name": "混装（15728+15710）",
+    "workshop": "兴信B",
+    "schedule_name": "牙齿怪兽"
+  },
+  "15732": {
+    "cn_name": "牙齿怪兽",
+    "workshop": "兴信B",
+    "schedule_name": "牙齿怪兽"
+  },
+  "MEC442": {
+    "cn_name": "混装（15714+15731+15727）",
+    "workshop": "兴信B",
+    "schedule_name": "牙齿怪兽"
+  },
+  "15727": {
+    "cn_name": "牙齿怪兽",
+    "workshop": "兴信B",
+    "schedule_name": "牙齿怪兽"
+  },
+  "MEC476": {
+    "cn_name": "混装（15774+15749+15750）",
+    "workshop": "兴信B",
+    "schedule_name": "牙齿怪兽"
+  },
+  "15750": {
+    "cn_name": "牙齿怪兽",
+    "workshop": "兴信B",
+    "schedule_name": "牙齿怪兽"
+  },
+  "157114": {
+    "cn_name": "牙齿怪兽",
+    "workshop": "兴信B",
+    "schedule_name": "牙齿怪兽"
+  },
+  "MEC342": {
+    "cn_name": "15727+15726",
+    "workshop": "兴信B",
+    "schedule_name": "牙齿怪兽"
+  },
+  "MEC350": {
+    "cn_name": "混装（15710+15729）",
+    "workshop": "兴信B",
+    "schedule_name": "牙齿怪兽"
+  },
+  "MEC429": {
+    "cn_name": "15706+15704+15727+15711+15731混装",
+    "workshop": "兴信B",
+    "schedule_name": "牙齿怪兽"
+  },
+  "15762": {
+    "cn_name": "牙齿怪兽",
+    "workshop": "兴信B",
+    "schedule_name": "牙齿怪兽"
+  },
+  "15731": {
+    "cn_name": "牙齿怪兽",
+    "workshop": "兴信B",
+    "schedule_name": "牙齿怪兽"
+  },
+  "15763": {
+    "cn_name": "牙齿怪兽",
+    "workshop": "兴信B",
+    "schedule_name": "牙齿怪兽"
+  },
+  "15754": {
+    "cn_name": "牙齿怪兽",
+    "workshop": "兴信B-",
+    "schedule_name": "牙齿怪兽"
+  },
+  "MEC358": {
+    "cn_name": "混装（15701+15726+15727）",
+    "workshop": "兴信B",
+    "schedule_name": "牙齿怪兽"
+  },
+  "MEC339": {
+    "cn_name": "混装（15731+15704+15706+15701）",
+    "workshop": "兴信B",
+    "schedule_name": "牙齿怪兽"
+  },
+  "MEC415": {
+    "cn_name": "混装（15774+15757）",
+    "workshop": "兴信B",
+    "schedule_name": "牙齿怪兽"
+  },
+  "MEC385": {
+    "cn_name": "混装（15774+15759+15757）",
+    "workshop": "兴信B",
+    "schedule_name": "牙齿怪兽"
+  },
+  "MEC455": {
+    "cn_name": "15787混装",
+    "workshop": "兴信B",
+    "schedule_name": "牙齿怪兽"
+  },
+  "15787": {
+    "cn_name": "牙齿怪兽",
+    "workshop": "兴信B",
+    "schedule_name": "牙齿怪兽"
+  },
+  "15788": {
+    "cn_name": "牙齿怪兽",
+    "workshop": "兴信B",
+    "schedule_name": "牙齿怪兽"
+  },
+  "MEC468": {
+    "cn_name": "混装15787+15784",
+    "workshop": "兴信B",
+    "schedule_name": "牙齿怪兽"
+  },
+  "MEC469": {
+    "cn_name": "混装15788+15790",
+    "workshop": "兴信B",
+    "schedule_name": "牙齿怪兽"
+  },
+  "MSK160": {
+    "cn_name": "混装（15757+15759）",
+    "workshop": "兴信B",
+    "schedule_name": "牙齿怪兽"
+  },
+  "92149": {
+    "cn_name": "混装（92119+92129）",
+    "workshop": "兴信B",
+    "schedule_name": "冰雪蛋"
+  },
+  "92119": {
+    "cn_name": "冰雪蛋",
+    "workshop": "兴信B",
+    "schedule_name": "冰雪蛋"
+  },
+  "92132": {
+    "cn_name": "冰雪蛋",
+    "workshop": "兴信B",
+    "schedule_name": "冰雪蛋"
+  },
+  "77685": {
+    "cn_name": "迷你恐龙球",
+    "workshop": "兴信B",
+    "schedule_name": "迷你恐龙"
+  },
+  "MGQ15": {
+    "cn_name": "迷你恐龙球",
+    "workshop": "兴信B",
+    "schedule_name": "迷你恐龙"
+  },
+  "77723": {
+    "cn_name": "迷你恐龙球",
+    "workshop": "兴信B",
+    "schedule_name": "迷你恐龙"
+  },
+  "15733": {
+    "cn_name": "牙齿怪兽",
+    "workshop": "华登",
+    "schedule_name": "牙齿怪兽"
+  },
+  "15743": {
+    "cn_name": "牙齿怪兽",
+    "workshop": "华登",
+    "schedule_name": "牙齿怪兽"
+  },
+  "MEC370": {
+    "cn_name": "混装（15706+15706+15731）",
+    "workshop": "华登",
+    "schedule_name": "牙齿怪兽"
+  },
+  "15706": {
+    "cn_name": "牙齿怪兽",
+    "workshop": "华登",
+    "schedule_name": "牙齿怪兽"
+  },
+  "15795": {
+    "cn_name": "牙齿怪兽",
+    "workshop": "华登",
+    "schedule_name": "牙齿怪兽"
+  },
+  "15744": {
+    "cn_name": "牙齿怪兽",
+    "workshop": "华登",
+    "schedule_name": "牙齿怪兽"
+  },
+  "15745": {
+    "cn_name": "牙齿怪兽",
+    "workshop": "华登",
+    "schedule_name": "牙齿怪兽"
+  },
+  "15773": {
+    "cn_name": "牙齿怪兽",
+    "workshop": "华登",
+    "schedule_name": "牙齿怪兽"
+  },
+  "157127": {
+    "cn_name": "牙齿怪兽",
+    "workshop": "华登",
+    "schedule_name": "牙齿怪兽"
+  },
+  "157119": {
+    "cn_name": "牙齿怪兽",
+    "workshop": "华登",
+    "schedule_name": "牙齿怪兽"
+  },
+  "157102": {
+    "cn_name": "牙齿怪兽",
+    "workshop": "华登",
+    "schedule_name": "牙齿怪兽"
+  },
+  "157113": {
+    "cn_name": "牙齿怪兽",
+    "workshop": "华登",
+    "schedule_name": "牙齿怪兽"
+  },
+  "MB192": {
+    "cn_name": "混装15706+15760+157113",
+    "workshop": "华登",
+    "schedule_name": "牙齿怪兽"
+  },
+  "MB193": {
+    "cn_name": "混装15706+15760",
+    "workshop": "华登",
+    "schedule_name": "牙齿怪兽"
+  },
+  "157112": {
+    "cn_name": "牙齿怪兽",
+    "workshop": "华登",
+    "schedule_name": "牙齿怪兽"
+  },
+  "157119A": {
+    "cn_name": "牙齿怪兽",
+    "workshop": "华登",
+    "schedule_name": "牙齿怪兽"
+  },
+  "15799": {
+    "cn_name": "牙齿怪兽",
+    "workshop": "华登",
+    "schedule_name": "牙齿怪兽"
+  },
+  "15760": {
+    "cn_name": "牙齿怪兽",
+    "workshop": "华登-",
+    "schedule_name": "牙齿怪兽"
+  },
+  "157125": {
+    "cn_name": "牙齿怪兽",
+    "workshop": "华登-",
+    "schedule_name": "牙齿怪兽"
+  },
+  "157107": {
+    "cn_name": "牙齿怪兽",
+    "workshop": "华登-",
+    "schedule_name": "牙齿怪兽"
+  },
+  "157108": {
+    "cn_name": "牙齿怪兽",
+    "workshop": "华登",
+    "schedule_name": "牙齿怪兽"
+  },
+  "157116": {
+    "cn_name": "牙齿怪兽",
+    "workshop": "华登-",
+    "schedule_name": "牙齿怪兽"
+  },
+  "157111": {
+    "cn_name": "牙齿怪兽",
+    "workshop": "华登-",
+    "schedule_name": "牙齿怪兽"
+  },
+  "15756": {
+    "cn_name": "牙齿怪兽",
+    "workshop": "华登",
+    "schedule_name": "牙齿怪兽"
+  },
+  "157126": {
+    "cn_name": "牙齿怪兽",
+    "workshop": "华登",
+    "schedule_name": "牙齿怪兽"
+  },
+  "157101": {
+    "cn_name": "5PK15756入一个邮包盒",
+    "workshop": "华登",
+    "schedule_name": "牙齿怪兽"
+  },
+  "15789": {
+    "cn_name": "牙齿怪兽",
+    "workshop": "华登",
+    "schedule_name": "牙齿怪兽"
+  },
+  "157124": {
+    "cn_name": "牙齿怪兽",
+    "workshop": "华登",
+    "schedule_name": "牙齿怪兽"
+  },
+  "15797": {
+    "cn_name": "牙齿怪兽",
+    "workshop": "华登",
+    "schedule_name": "牙齿怪兽"
+  },
+  "15758": {
+    "cn_name": "牙齿怪兽",
+    "workshop": "华登",
+    "schedule_name": "牙齿怪兽"
+  },
+  "15790": {
+    "cn_name": "牙齿怪兽",
+    "workshop": "华登-",
+    "schedule_name": "牙齿怪兽"
+  },
+  "MEC360": {
+    "cn_name": "混装（15756+15701）",
+    "workshop": "华登",
+    "schedule_name": "牙齿怪兽"
+  },
+  "MSLD174": {
+    "cn_name": "15758+15792+15797混装",
+    "workshop": "华登",
+    "schedule_name": "牙齿怪兽"
+  },
+  "MBD12": {
+    "cn_name": "15759+15760+15789混装",
+    "workshop": "华登",
+    "schedule_name": "牙齿怪兽"
+  },
+  "MB167": {
+    "cn_name": "（92107+92127）混装",
+    "workshop": "华登",
+    "schedule_name": "大小摇篮公仔"
+  },
+  "92127": {
+    "cn_name": "小摇篮公仔",
+    "workshop": "华登",
+    "schedule_name": "大小摇篮公仔"
+  },
+  "92107": {
+    "cn_name": "小摇篮公仔",
+    "workshop": "华登",
+    "schedule_name": "大小摇篮公仔"
+  },
+  "92108": {
+    "cn_name": "大摇篮公仔",
+    "workshop": "华登",
+    "schedule_name": "大小摇篮公仔"
+  },
+  "92117": {
+    "cn_name": "小摇篮公仔",
+    "workshop": "华登",
+    "schedule_name": "大小摇篮公仔"
+  },
+  "92118": {
+    "cn_name": "大摇篮公仔",
+    "workshop": "华登",
+    "schedule_name": "大小摇篮公仔"
+  },
+  "MB190": {
+    "cn_name": "混装（92104+92120）",
+    "workshop": "华登",
+    "schedule_name": "珠片系列"
+  },
+  "92104": {
+    "cn_name": "长尾巴猫",
+    "workshop": "华登",
+    "schedule_name": "珠片系列"
+  },
+  "92116": {
+    "cn_name": "长尾巴猫",
+    "workshop": "华登",
+    "schedule_name": "珠片系列"
+  },
+  "92106": {
+    "cn_name": "超大一窝蛋",
+    "workshop": "华登",
+    "schedule_name": "珠片系列"
+  },
+  "92113": {
+    "cn_name": "超大一窝蛋",
+    "workshop": "华登",
+    "schedule_name": "珠片系列"
+  },
+  "92115": {
+    "cn_name": "超大一窝蛋",
+    "workshop": "华登",
+    "schedule_name": "珠片系列"
+  },
+  "9213": {
+    "cn_name": "大蛋殼毛絨公仔",
+    "workshop": "华登",
+    "schedule_name": "珠片系列"
+  },
+  "9214": {
+    "cn_name": "小蛋殼毛絨公仔",
+    "workshop": "华登",
+    "schedule_name": "珠片系列"
+  },
+  "9245": {
+    "cn_name": "小蛋殼毛絨公仔",
+    "workshop": "华登",
+    "schedule_name": "珠片系列"
+  },
+  "9237": {
+    "cn_name": "狗蛋PDQ",
+    "workshop": "华登",
+    "schedule_name": "珠片系列"
+  },
+  "9244": {
+    "cn_name": "三代大蛋壳",
+    "workshop": "华登",
+    "schedule_name": "珠片系列"
+  },
+  "9254": {
+    "cn_name": "三代大蛋壳+4个小蛋",
+    "workshop": "华登",
+    "schedule_name": "珠片系列"
+  },
+  "9259": {
+    "cn_name": "猫蛋PDQ",
+    "workshop": "华登",
+    "schedule_name": "珠片系列"
+  },
+  "9264": {
+    "cn_name": "狗蛋两只装",
+    "workshop": "华登",
+    "schedule_name": "珠片系列"
+  },
+  "9265": {
+    "cn_name": "猫蛋+兔蛋+狗蛋混装",
+    "workshop": "华登",
+    "schedule_name": "珠片系列"
+  },
+  "9279": {
+    "cn_name": "猫蛋二代",
+    "workshop": "华登",
+    "schedule_name": "珠片系列"
+  },
+  "92137": {
+    "cn_name": "猫蛋二代",
+    "workshop": "华登",
+    "schedule_name": "珠片系列"
+  },
+  "92135": {
+    "cn_name": "猫蛋二代",
+    "workshop": "华登",
+    "schedule_name": "珠片系列"
+  },
+  "92114": {
+    "cn_name": "猫蛋二代",
+    "workshop": "华登",
+    "schedule_name": "珠片系列"
+  },
+  "9295": {
+    "cn_name": "#4号pvc公仔",
+    "workshop": "华登",
+    "schedule_name": "珠片系列"
+  },
+  "9291": {
+    "cn_name": "猫蛋/狗蛋/摇头小狗/小蛋混装",
+    "workshop": "华登",
+    "schedule_name": "珠片系列"
+  },
+  "9276": {
+    "cn_name": "猫蛋",
+    "workshop": "华登",
+    "schedule_name": "珠片系列"
+  },
+  "92101": {
+    "cn_name": "紫色蛋壳",
+    "workshop": "华登",
+    "schedule_name": "珠片系列"
+  },
+  "9298": {
+    "cn_name": "狗蛋四代",
+    "workshop": "华登",
+    "schedule_name": "珠片系列"
+  },
+  "MB179": {
+    "cn_name": "9298混装",
+    "workshop": "华登",
+    "schedule_name": "珠片系列"
+  },
+  "92136": {
+    "cn_name": "狗蛋四代",
+    "workshop": "华登",
+    "schedule_name": "珠片系列"
+  },
+  "MTQ39": {
+    "cn_name": "混装（9298+92104）",
+    "workshop": "华登",
+    "schedule_name": "珠片系列"
+  },
+  "MTQ41": {
+    "cn_name": "混装（9279+9298）",
+    "workshop": "华登",
+    "schedule_name": "珠片系列"
+  },
+  "92124": {
+    "cn_name": "混装（92119+9298+92104）",
+    "workshop": "华登",
+    "schedule_name": "珠片系列"
+  },
+  "92123": {
+    "cn_name": "混装（9298+92104）",
+    "workshop": "华登",
+    "schedule_name": "珠片系列"
+  },
+  "MSLT29": {
+    "cn_name": "(9298)混装",
+    "workshop": "华登",
+    "schedule_name": "珠片系列"
+  },
+  "MB83": {
+    "cn_name": "猫蛋PDQ",
+    "workshop": "华登",
+    "schedule_name": "珠片系列"
+  },
+  "MB175": {
+    "cn_name": "(929892104)混装",
+    "workshop": "华登",
+    "schedule_name": "珠片系列"
+  },
+  "MEC143": {
+    "cn_name": "展示架",
+    "workshop": "华登",
+    "schedule_name": "珠片系列"
+  },
+  "MFD156": {
+    "cn_name": "92104+9298混装",
+    "workshop": "华登",
+    "schedule_name": "珠片系列"
+  },
+  "MB104": {
+    "cn_name": "9279+9298混装",
+    "workshop": "华登",
+    "schedule_name": "珠片系列"
+  },
+  "MEC241": {
+    "cn_name": "(9279+9298)混装",
+    "workshop": "华登",
+    "schedule_name": "珠片系列"
+  },
+  "MFD154": {
+    "cn_name": "9279混装",
+    "workshop": "华登",
+    "schedule_name": "珠片系列"
+  },
+  "MTQ28": {
+    "cn_name": "9259混装",
+    "workshop": "华登",
+    "schedule_name": "珠片系列"
+  },
+  "MB121": {
+    "cn_name": "9279+9298混装",
+    "workshop": "华登",
+    "schedule_name": "珠片系列"
+  },
+  "MB30": {
+    "cn_name": "狗蛋",
+    "workshop": "华登",
+    "schedule_name": "珠片系列"
+  },
+  "MTQ15": {
+    "cn_name": "猫蛋3个装",
+    "workshop": "华登",
+    "schedule_name": "珠片系列"
+  },
+  "MUQ18": {
+    "cn_name": "展示架",
+    "workshop": "华登",
+    "schedule_name": "珠片系列"
+  },
+  "MUQ55": {
+    "cn_name": "92104+9298混装",
+    "workshop": "华登",
+    "schedule_name": "珠片系列"
+  },
+  "MTQ47": {
+    "cn_name": "9298+92104+92129混装",
+    "workshop": "华登",
+    "schedule_name": "珠片系列"
+  },
+  "MB46": {
+    "cn_name": "猫蛋（胶袋装)",
+    "workshop": "华登",
+    "schedule_name": "珠片系列"
+  },
+  "11962": {
+    "cn_name": "猫头鹰",
+    "workshop": "华登",
+    "schedule_name": "猫头鹰"
+  },
+  "119214": {
+    "cn_name": "猫头鹰",
+    "workshop": "华登",
+    "schedule_name": "猫头鹰"
+  },
+  "119118": {
+    "cn_name": "猫头鹰",
+    "workshop": "华登",
+    "schedule_name": "猫头鹰"
+  },
+  "长兔貂绒玫红色包包": {
+    "cn_name": "长兔貂绒玫红色包包",
+    "workshop": "华登",
+    "schedule_name": "长兔貂绒玫红色包包"
+  },
+  "93930": {
+    "cn_name": "兔子安抚巾",
+    "workshop": "兴信A",
+    "schedule_name": "兔子安抚巾"
+  },
+  "931013": {
+    "cn_name": "兔子安抚巾",
+    "workshop": "兴信A",
+    "schedule_name": "兔子安抚巾"
+  },
+  "92129": {
+    "cn_name": "野生动物园",
+    "workshop": "华登",
+    "schedule_name": "野生动物园"
+  },
+  "92150": {
+    "cn_name": "92129+92120混装",
+    "workshop": "华登",
+    "schedule_name": "野生动物园"
+  },
+  "92148": {
+    "cn_name": "野生动物园",
+    "workshop": "华登",
+    "schedule_name": "野生动物园"
+  },
+  "92147": {
+    "cn_name": "大魔法瓶",
+    "workshop": "华登",
+    "schedule_name": "大魔法瓶"
+  },
+  "125122": {
+    "cn_name": "宠物系列",
+    "workshop": "华登",
+    "schedule_name": "宠物系列"
+  },
+  "125151": {
+    "cn_name": "宠物系列",
+    "workshop": "华登",
+    "schedule_name": "宠物系列"
+  },
+  "125160": {
+    "cn_name": "宠物系列",
+    "workshop": "兴信A",
+    "schedule_name": "宠物系列"
+  },
+  "125227": {
+    "cn_name": "宠物系列",
+    "workshop": "兴信A",
+    "schedule_name": "宠物系列"
+  },
+  "125222": {
+    "cn_name": "宠物系列",
+    "workshop": "兴信A",
+    "schedule_name": "宠物系列"
+  },
+  "125224": {
+    "cn_name": "宠物系列",
+    "workshop": "兴信A",
+    "schedule_name": "宠物系列"
+  },
+  "125169": {
+    "cn_name": "宠物系列",
+    "workshop": "兴信A",
+    "schedule_name": "宠物系列"
+  },
+  "125183": {
+    "cn_name": "宠物系列",
+    "workshop": "华登",
+    "schedule_name": "宠物系列"
+  },
+  "9260": {
+    "cn_name": "兔蛋",
+    "workshop": "华登",
+    "schedule_name": "9260（兔蛋公仔）华登"
+  },
+  "9266": {
+    "cn_name": "兔蛋2PK邮包盒装",
+    "workshop": "华登",
+    "schedule_name": "9260（兔蛋公仔）华登"
+  },
+  "157142": {
+    "cn_name": "15783UQ1 6PK",
+    "workshop": "A-华嘉",
+    "schedule_name": "牙齿怪兽"
+  },
+  "157144": {
+    "cn_name": "牙齿怪兽",
+    "workshop": "A-华嘉",
+    "schedule_name": "牙齿怪兽"
+  },
+  "157117": {
+    "cn_name": "牙齿怪兽",
+    "workshop": "A-华嘉",
+    "schedule_name": "牙齿怪兽"
+  },
+  "157143": {
+    "cn_name": "牙齿怪兽",
+    "workshop": "A-华嘉",
+    "schedule_name": "牙齿怪兽"
+  },
+  "15785": {
+    "cn_name": "8PK157117",
+    "workshop": "A-华嘉",
+    "schedule_name": "牙齿怪兽"
+  },
+  "15779": {
+    "cn_name": "足球系列",
+    "workshop": "A-华嘉",
+    "schedule_name": "牙齿怪兽"
+  },
+  "15792": {
+    "cn_name": "牙齿怪兽",
+    "workshop": "A-华嘉",
+    "schedule_name": "牙齿怪兽"
+  },
+  "15714": {
+    "cn_name": "牙齿怪兽",
+    "workshop": "A-华嘉",
+    "schedule_name": "牙齿怪兽"
+  },
+  "15701": {
+    "cn_name": "牙齿怪兽",
+    "workshop": "B-华嘉",
+    "schedule_name": "牙齿怪兽"
+  },
+  "15774": {
+    "cn_name": "牙齿怪兽",
+    "workshop": "B-华嘉",
+    "schedule_name": "牙齿怪兽"
+  },
+  "157140": {
+    "cn_name": "15774 2PK",
+    "workshop": "B-华嘉",
+    "schedule_name": "牙齿怪兽"
+  },
+  "15710": {
+    "cn_name": "牙齿怪兽",
+    "workshop": "B-华嘉",
+    "schedule_name": "牙齿怪兽"
+  },
+  "15757": {
+    "cn_name": "牙齿怪兽",
+    "workshop": "B-华嘉",
+    "schedule_name": "牙齿怪兽"
+  },
+  "15728": {
+    "cn_name": "牙齿怪兽",
+    "workshop": "B-华嘉",
+    "schedule_name": "牙齿怪兽"
+  },
+  "15780": {
+    "cn_name": "牙齿怪兽",
+    "workshop": "B-华嘉",
+    "schedule_name": "牙齿怪兽"
+  },
+  "15759": {
+    "cn_name": "牙齿怪兽",
+    "workshop": "C-华嘉",
+    "schedule_name": "牙齿怪兽"
+  }
+}

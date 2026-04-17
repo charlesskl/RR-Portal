@@ -293,6 +293,33 @@ services:
     networks:
       - platform-net
 
+  zuru-order-system:
+    build:
+      context: ./apps/zuru-order-system
+      dockerfile: Dockerfile
+    environment:
+      - PORT=5005
+      - DATA_PATH=/app
+    volumes:
+      - ./apps/zuru-order-system/data:/app/data
+      - ./apps/zuru-order-system/uploads:/app/uploads
+      - ./apps/zuru-order-system/exports:/app/exports
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5005/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    mem_limit: 512m
+    memswap_limit: 512m
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - platform-net
+
   quotation:
     build:
       context: ./apps/quotation

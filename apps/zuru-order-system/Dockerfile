@@ -14,9 +14,15 @@ COPY . .
 # 运行时卷挂载点
 RUN mkdir -p /app/data /app/uploads /app/exports
 
+# Non-root user
+RUN addgroup --system appgroup && adduser --system --ingroup appgroup appuser && \
+    chown -R appuser:appgroup /app
+
 ENV PORT=5005
 ENV DATA_PATH=/app
 
 EXPOSE 5005
 
-CMD ["gunicorn", "--bind", "0.0.0.0:5005", "--workers", "2", "--threads", "4", "--timeout", "300", "app:app"]
+USER appuser
+
+CMD ["gunicorn", "--bind", "0.0.0.0:5005", "--workers", "1", "--threads", "4", "--timeout", "300", "app:app"]

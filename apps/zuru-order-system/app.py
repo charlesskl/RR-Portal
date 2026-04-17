@@ -459,6 +459,13 @@ def classify():
             po_files.setdefault(r['po'], []).append(r['filename'])
     duplicate_pos = {po: fnames for po, fnames in po_files.items() if len(fnames) > 1}
 
+    # 清理上传的临时文件
+    for _, path in saved:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
     return jsonify({'ok': True, 'results': results, 'existing_count': len(existing_pos),
                     'duplicate_pos': duplicate_pos})
 
@@ -545,6 +552,13 @@ def process():
     _progress['done'] = True
     _progress['result'] = result
     _progress['msg'] = '完成'
+
+    # 清理上传的临时文件
+    for _, path in saved:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
 
     return jsonify(result)
 

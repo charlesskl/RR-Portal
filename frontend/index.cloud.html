@@ -301,6 +301,12 @@
                 <span class="plugin-name">TOMY排期核对系统</span>
               </div>
             </div>
+            <div class="plugin-item">
+              <div class="plugin-info">
+                <div class="plugin-dot gray" id="zuruMasterDot"></div>
+                <span class="plugin-name">ZURU总排期入单</span>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -455,7 +461,7 @@
       <div class="dept-icon business" style="width:40px;height:40px;font-size:18px;">&#128176;</div>
       业务部
     </div>
-    <div class="page-subtitle">ZURU出货 · 报价管理 · TOMY排期核对</div>
+    <div class="page-subtitle">ZURU出货 · 报价管理 · TOMY排期核对 · ZURU总排期入单</div>
 
     <div class="detail-plugin-card">
       <div class="detail-plugin-left">
@@ -514,6 +520,26 @@
       <div class="detail-plugin-right">
         <div class="detail-plugin-status"><div class="plugin-dot gray" id="tomyDetailDot"></div> 检查中...</div>
         <a href="/tomy-paiqi/" target="_blank" class="btn btn-primary">打开系统</a>
+      </div>
+    </div>
+
+    <div class="detail-plugin-card">
+      <div class="detail-plugin-left">
+        <div class="detail-plugin-icon" style="background:linear-gradient(135deg,#f59e0b,#ef4444);">&#128202;</div>
+        <div>
+          <div class="detail-plugin-name">ZURU总排期入单</div>
+          <div class="detail-plugin-desc">上传总排期Excel + 批量PO Excel，自动识别修改单/新单，输出修改明细与新单Excel供粘贴</div>
+          <div class="feature-grid">
+            <div class="feature-tag">&#128196; PO Excel解析</div>
+            <div class="feature-tag">&#128203; 修改单/新单识别</div>
+            <div class="feature-tag">&#128202; 有填充行汇总</div>
+            <div class="feature-tag">&#128230; 新单Excel生成</div>
+          </div>
+        </div>
+      </div>
+      <div class="detail-plugin-right">
+        <div class="detail-plugin-status"><div class="plugin-dot gray" id="zuruMasterDetailDot"></div> 检查中...</div>
+        <a href="/zuru-master/" target="_blank" class="btn btn-primary">打开系统</a>
       </div>
     </div>
   </div>
@@ -609,6 +635,7 @@ async function checkHealth() {
       { name: 'liwenjuan', url: '/liwenjuan/health', dot: 'liwenjuanDot', detailDot: 'liwenjuanDetailDot' },
       { name: 'quotation', url: '/quotation/health', dot: 'quotationDot', detailDot: 'quotationDetailDot' },
       { name: 'tomy', url: '/tomy-paiqi/health', dot: 'tomyDot', detailDot: 'tomyDetailDot' },
+      { name: 'zuruMaster', url: '/zuru-master/health', dot: 'zuruMasterDot', detailDot: 'zuruMasterDetailDot' },
     ];
     var healthy = 0;
     var total = checks.length;

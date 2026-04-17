@@ -1,0 +1,35 @@
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info
+.venv
+venv
+env
+
+# 运行时数据（通过卷挂载，不应打入镜像）
+uploads/*
+exports/*
+data/config.json
+data/ops.log
+data/uploaded_order_table.xlsx
+
+# 保留空目录
+!uploads/.gitkeep
+!exports/.gitkeep
+
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+
+*.bak
+*.tmp
+.DS_Store
+Thumbs.db
+
+.vscode
+.idea
+*.swp

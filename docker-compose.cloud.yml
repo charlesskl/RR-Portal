@@ -293,6 +293,61 @@ services:
     networks:
       - platform-net
 
+  zuru-master-schedule:
+    build:
+      context: ./plugins/zuru-总排期入单
+      dockerfile: Dockerfile
+    environment:
+      - APP_PORT=5003
+    volumes:
+      - "./plugins/zuru-总排期入单/data:/app/data"
+      - "./plugins/zuru-总排期入单/uploads:/app/uploads"
+      - "./plugins/zuru-总排期入单/exports:/app/exports"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5003/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    mem_limit: 512m
+    memswap_limit: 512m
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - platform-net
+
+  zuru-order-system:
+    build:
+      context: ./apps/zuru-order-system
+      dockerfile: Dockerfile
+    environment:
+      - PORT=5005
+      - DATA_PATH=/app
+      - LOCAL_MODE=0  # 云端：禁用任意路径浏览/check_path/config 写入
+      - FLASK_DEBUG=0
+    volumes:
+      - ./apps/zuru-order-system/data:/app/data
+      - ./apps/zuru-order-system/uploads:/app/uploads
+      - ./apps/zuru-order-system/exports:/app/exports
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5005/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    mem_limit: 512m
+    memswap_limit: 512m
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - platform-net
+
   quotation:
     build:
       context: ./apps/quotation

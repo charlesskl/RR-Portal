@@ -1,7 +1,13 @@
 __pycache__/
 *.pyc
-uploads/
-exports/
+uploads/*
+!uploads/.gitkeep
+!uploads/master/
+uploads/master/*
+!uploads/master/.gitkeep
+exports/*
+!exports/.gitkeep
 data/ops.log
 data/history.json
+data/master_state.json
 .env

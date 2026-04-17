@@ -7,6 +7,7 @@ import os, sys, json, logging, re
 from datetime import datetime
 from collections import defaultdict
 from flask import Flask, render_template, request, jsonify, send_file
+from werkzeug.utils import secure_filename
 from excel_po_parser import ExcelPOParser
 from master_schedule import write_orders, lookup_schedule_info
 from generate_yellow_summary import generate_summary
@@ -25,12 +26,27 @@ os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
 logging.basicConfig(filename=LOG_FILE, level=logging.INFO,
                     format='%(asctime)s %(message)s', encoding='utf-8')
 
-# 上传的总排期副本路径（运行时维护）
-_master_file = {'path': ''}
+# 上传的总排期副本路径（持久化到磁盘，多 worker 共享）
+_MASTER_STATE_FILE = os.path.join(APP_DIR, 'data', 'master_state.json')
 
 
 def _get_master_path():
-    return _master_file['path']
+    """从磁盘读取最新的总排期文件路径，确保 gunicorn 多 worker 一致"""
+    try:
+        if os.path.exists(_MASTER_STATE_FILE):
+            with open(_MASTER_STATE_FILE, 'r', encoding='utf-8') as f:
+                return (json.load(f) or {}).get('path', '')
+    except (json.JSONDecodeError, OSError):
+        pass
+    return ''
+
+
+def _set_master_path(path):
+    try:
+        with open(_MASTER_STATE_FILE, 'w', encoding='utf-8') as f:
+            json.dump({'path': path}, f, ensure_ascii=False)
+    except OSError as e:
+        logging.error(f'[总排期] 状态写入失败: {e}')
 
 
 @app.route('/')
@@ -54,13 +70,14 @@ def upload_master():
     ext = os.path.splitext(f.filename)[1].lower()
     if ext not in ('.xlsx', '.xls'):
         return jsonify({'error': '只支持xlsx/xls文件'}), 400
-    # 保存到master目录（覆盖旧的）
-    path = os.path.join(app.config['MASTER_FOLDER'], f.filename)
+    # secure_filename 防路径穿越；为空时退回固定名
+    safe_name = secure_filename(f.filename) or f'master{ext}'
+    path = os.path.join(app.config['MASTER_FOLDER'], safe_name)
     f.save(path)
-    _master_file['path'] = path
-    logging.info(f'[总排期] 上传副本: {f.filename}')
-    return jsonify({'ok': True, 'path': path, 'filename': f.filename,
-                    'msg': f'已上传总排期: {f.filename}'})
+    _set_master_path(path)
+    logging.info(f'[总排期] 上传副本: {safe_name}')
+    return jsonify({'ok': True, 'path': path, 'filename': safe_name,
+                    'msg': f'已上传总排期: {safe_name}'})
 
 
 @app.route('/api/master-schedule-info')
@@ -182,9 +199,10 @@ def master_schedule_upload():
         ext = os.path.splitext(f.filename)[1].lower()
         if ext not in ('.xlsx', '.xls'):
             continue
-        path = os.path.join(app.config['UPLOAD_FOLDER'], f.filename)
+        safe_name = secure_filename(f.filename) or f'po_{datetime.now().strftime("%H%M%S%f")}{ext}'
+        path = os.path.join(app.config['UPLOAD_FOLDER'], safe_name)
         f.save(path)
-        saved.append((f.filename, path))
+        saved.append((safe_name, path))
 
     if not saved:
         return jsonify({'error': '没有有效的Excel文件'}), 400

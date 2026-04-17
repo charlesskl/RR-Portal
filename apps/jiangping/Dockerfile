@@ -12,9 +12,7 @@ ENV PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
 ENV PIP_TRUSTED_HOST=mirrors.aliyun.com
 
 COPY requirements.txt .
-# Install torch CPU-only first (skip ~2GB CUDA), then easyocr + the rest
-RUN pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu && \
-    pip install --no-cache-dir -r requirements.txt gunicorn
+RUN pip install --no-cache-dir -r requirements.txt gunicorn
 
 COPY . .
 

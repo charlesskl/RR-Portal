@@ -15,38 +15,41 @@
             <i class="bi bi-upload me-1"></i>导入 Excel
         </button>
         <a href="{{ url_for('export.export_delivery_excel') }}"
-           id="btn-export" class="btn btn-success">
+           id="btn-export" class="btn btn-success me-2">
             <i class="bi bi-file-earmark-excel me-1"></i>导出 Excel
         </a>
+        <button class="btn btn-danger" id="btn-clear-all">
+            <i class="bi bi-trash me-1"></i>一键清理
+        </button>
     </div>
+</div>
+
+<!-- Supplier tabs -->
+<div class="mb-3 d-flex flex-wrap gap-2" id="supplier-tabs">
+    <button class="btn btn-sm btn-primary supplier-tab active" data-id="">全部</button>
+    {% for s in suppliers %}
+    <button class="btn btn-sm btn-outline-primary supplier-tab" data-id="{{ s.id }}">{{ s.short_name or s.name }}</button>
+    {% endfor %}
 </div>
 
 <!-- Filter card -->
 <div class="card mb-3">
     <div class="card-body">
         <div class="row g-2 align-items-end">
+            <input type="hidden" id="filter-supplier" value="">
             <div class="col-md-3">
-                <label class="form-label mb-1">供应商</label>
-                <select id="filter-supplier" class="form-select form-select-sm">
-                    <option value="">全部供应商</option>
-                    {% for s in suppliers %}
-                    <option value="{{ s.id }}">{{ s.short_name or s.name }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-            <div class="col-md-2">
                 <label class="form-label mb-1">日期从</label>
                 <input type="date" id="filter-date-from" class="form-control form-control-sm">
             </div>
-            <div class="col-md-2">
+            <div class="col-md-3">
                 <label class="form-label mb-1">日期至</label>
                 <input type="date" id="filter-date-to" class="form-control form-control-sm">
             </div>
             <div class="col-md-3">
                 <label class="form-label mb-1">采购单号</label>
-                <input type="text" id="filter-po-no" class="form-control form-control-sm" placeholder="输入采购单号搜索...">
+                <input type="text" id="filter-po-no" class="form-control form-control-sm" placeholder="输入采购单号搜索..." list="po-suggestions" autocomplete="off">
             </div>
-            <div class="col-md-2">
+            <div class="col-md-3">
                 <button id="btn-query" class="btn btn-primary btn-sm w-100">
                     <i class="bi bi-search me-1"></i>查询
                 </button>
@@ -57,21 +60,21 @@
 
 <!-- DataTable -->
 <div class="card">
-    <div class="card-body p-0 table-scroll-wrapper">
-        <table id="delivery-table" class="table table-bordered table-hover mb-0" style="font-size: 0.85rem;">
+    <div class="card-body p-0">
+        <table id="delivery-table" class="table table-bordered table-hover mb-0" style="font-size: 0.8rem;">
             <thead class="table-dark">
                 <tr>
-                    <th>日期</th>
-                    <th>供应商</th>
-                    <th>送货单号</th>
-                    <th>货号</th>
-                    <th>货号名称</th>
-                    <th>数量</th>
-                    <th>单位RMB</th>
-                    <th>单价RMB</th>
-                    <th>金额RMB</th>
-                    <th>采购单号</th>
-                    <th>操作</th>
+                    <th style="width:7%">日期</th>
+                    <th style="width:6%">供应商</th>
+                    <th style="width:8%">送货单号</th>
+                    <th style="width:7%">货号</th>
+                    <th style="width:20%">货号名称</th>
+                    <th style="width:6%">数量</th>
+                    <th style="width:5%">单位</th>
+                    <th style="width:6%">单价</th>
+                    <th style="width:8%">金额</th>
+                    <th style="width:10%">采购单号</th>
+                    <th style="width:6%">操作</th>
                 </tr>
             </thead>
             <tbody></tbody>
@@ -255,7 +258,7 @@
                 <div class="row g-3">
                     <div class="col-md-6">
                         <label class="form-label">货号</label>
-                        <input type="text" id="edit-product-code" class="form-control">
+                        <input type="text" id="edit-product-code" class="form-control" list="code-suggestions" autocomplete="off">
                     </div>
                     <div class="col-md-6">
                         <label class="form-label">货号名称 <span class="text-danger">*</span></label>
@@ -279,7 +282,7 @@
                     </div>
                     <div class="col-md-6">
                         <label class="form-label">采购单号</label>
-                        <input type="text" id="edit-po-no" class="form-control">
+                        <input type="text" id="edit-po-no" class="form-control" list="po-suggestions" autocomplete="off">
                     </div>
                 </div>
             </div>
@@ -292,6 +295,8 @@
         </div>
     </div>
 </div>
+<datalist id="po-suggestions"></datalist>
+<datalist id="code-suggestions"></datalist>
 {% endblock %}
 
 {% block extra_js %}
@@ -314,12 +319,38 @@ function buildQueryString(params) {
         .join('&');
 }
 
+// Type-ahead suggestions for any input with list="po-suggestions" / list="code-suggestions"
+var _suggestTimers = {};
+var _suggestEndpoints = {
+    'po-suggestions':   '/delivery-mgmt/api/suggest/po-no',
+    'code-suggestions': '/delivery-mgmt/api/suggest/product-code'
+};
+$(document).on('input focus', 'input[list="po-suggestions"], input[list="code-suggestions"]', function () {
+    var listId = $(this).attr('list');
+    var q = $(this).val().trim();
+    if (!q) return;
+    clearTimeout(_suggestTimers[listId]);
+    _suggestTimers[listId] = setTimeout(function () {
+        $.get(_suggestEndpoints[listId], { q: q }, function (res) {
+            var $dl = $('#' + listId).empty();
+            (res.suggestions || []).forEach(function (s) {
+                if (typeof s === 'string') {
+                    $dl.append($('<option></option>').val(s));
+                } else if (s && s.code) {
+                    var label = s.name ? (s.code + ' — ' + s.name) : s.code;
+                    $dl.append($('<option></option>').val(s.code).text(label));
+                }
+            });
+        });
+    }, 200);
+});
+
 function addItemRow() {
     var row = '<tr>' +
-        '<td><input type="text" class="form-control form-control-sm item-po" placeholder="如FDJA20260001"></td>' +
+        '<td><input type="text" class="form-control form-control-sm item-po" placeholder="如FDJA20260001" list="po-suggestions" autocomplete="off"></td>' +
         '<td><select class="form-select form-select-sm item-name-select d-none"><option value="">--选择物料--</option></select>' +
             '<input type="text" class="form-control form-control-sm item-name" required></td>' +
-        '<td><input type="text" class="form-control form-control-sm item-code"></td>' +
+        '<td><input type="text" class="form-control form-control-sm item-code" list="code-suggestions" autocomplete="off"></td>' +
         '<td><input type="number" class="form-control form-control-sm item-qty" step="any" value="0"></td>' +
         '<td><input type="text" class="form-control form-control-sm item-unit" value="PCS"></td>' +
         '<td><input type="number" class="form-control form-control-sm item-price" step="any" value="0"></td>' +
@@ -394,6 +425,7 @@ $(document).ready(function () {
         ],
         language: { url: 'https://cdn.datatables.net/plug-ins/1.13.8/i18n/zh.json' },
         ordering: false,
+        deferRender: true,
         pageLength: 50,
         createdRow: function (row, data) {
             if (data.is_first) {
@@ -402,14 +434,44 @@ $(document).ready(function () {
         }
     });
 
+    // Supplier tabs
+    $('#supplier-tabs').on('click', '.supplier-tab', function () {
+        $('#supplier-tabs .supplier-tab').removeClass('active btn-primary').addClass('btn-outline-primary');
+        $(this).removeClass('btn-outline-primary').addClass('active btn-primary');
+        $('#filter-supplier').val($(this).data('id'));
+        var qs = buildQueryString(getFilterParams());
+        $('#btn-export').attr('href', '{{ url_for("export.export_delivery_excel") }}' + (qs ? '?' + qs : ''));
+        table.ajax.reload();
+    });
+
     // Query
     $('#btn-query').on('click', function () {
+        var sid = $('#filter-supplier').val();
+        $('#supplier-tabs .supplier-tab').removeClass('active btn-primary').addClass('btn-outline-primary');
+        $('#supplier-tabs .supplier-tab[data-id="' + sid + '"]').removeClass('btn-outline-primary').addClass('active btn-primary');
         var qs = buildQueryString(getFilterParams());
         $('#btn-export').attr('href', '{{ url_for("export.export_delivery_excel") }}' + (qs ? '?' + qs : ''));
         table.ajax.reload();
     });
     $('#filter-po-no').on('keydown', function (e) {
         if (e.key === 'Enter') $('#btn-query').trigger('click');
+    });
+
+    // Clear all delivery data
+    $('#btn-clear-all').on('click', function () {
+        if (!confirm('确定清理所有交货数据？此操作不可恢复！')) return;
+        if (!confirm('再次确认：将删除所有交货单和明细，确定继续？')) return;
+        $.ajax({
+            url: '/delivery-mgmt/api/clear-all',
+            type: 'POST',
+            success: function (res) {
+                if (res.success) {
+                    alert('已清理 ' + res.deleted + ' 条交货单');
+                    table.ajax.reload();
+                }
+            },
+            error: function () { alert('请求失败'); }
+        });
     });
 
     // ========== CREATE ==========
@@ -513,7 +575,7 @@ $(document).ready(function () {
 
         $('#btn-save-edit').prop('disabled', true);
         $.ajax({
-            url: BASE_URL + '/delivery-mgmt/api/item/' + itemId,
+            url: '/delivery-mgmt/api/item/' + itemId,
             type: 'PUT',
             contentType: 'application/json',
             data: JSON.stringify({
@@ -543,7 +605,7 @@ $(document).ready(function () {
         var data = table.row($(this).closest('tr')).data();
         if (!confirm('确定删除该明细？\n' + data.product_name)) return;
         $.ajax({
-            url: BASE_URL + '/delivery-mgmt/api/item/' + data.item_id,
+            url: '/delivery-mgmt/api/item/' + data.item_id,
             type: 'DELETE',
             success: function (res) {
                 if (res.success) table.ajax.reload();
@@ -558,7 +620,7 @@ $(document).ready(function () {
         var data = table.row($(this).closest('tr')).data();
         if (!confirm('确定删除整个交货单 ' + data.delivery_no + ' 及所有明细？')) return;
         $.ajax({
-            url: BASE_URL + '/delivery-mgmt/api/note/' + data.note_id,
+            url: '/delivery-mgmt/api/note/' + data.note_id,
             type: 'DELETE',
             success: function (res) {
                 if (res.success) table.ajax.reload();
@@ -580,16 +642,65 @@ $(document).ready(function () {
 
     function addOcrItemRow(item) {
         var row = '<tr>' +
-            '<td><input type="text" class="form-control form-control-sm item-po" value="' + (item.po_no || '') + '"></td>' +
-            '<td><input type="text" class="form-control form-control-sm item-code" value="' + (item.product_code || '') + '"></td>' +
-            '<td><input type="text" class="form-control form-control-sm item-name" value="' + (item.product_name || '') + '"></td>' +
+            '<td><input type="text" class="form-control form-control-sm item-po" value="' + (item.po_no || '') + '" list="po-suggestions" autocomplete="off"></td>' +
+            '<td><input type="text" class="form-control form-control-sm item-code" value="' + (item.product_code || '') + '" list="code-suggestions" autocomplete="off"></td>' +
+            '<td>' +
+                '<select class="form-select form-select-sm item-name-select d-none"></select>' +
+                '<input type="text" class="form-control form-control-sm item-name" value="' + (item.product_name || '') + '">' +
+            '</td>' +
             '<td><input type="number" class="form-control form-control-sm item-qty" step="any" value="' + (item.quantity || 0) + '"></td>' +
             '<td><input type="text" class="form-control form-control-sm item-unit" value="' + (item.unit || 'PCS') + '"></td>' +
             '<td><input type="number" class="form-control form-control-sm item-price" step="any" value="' + (item.unit_price || 0) + '"></td>' +
             '<td><input type="number" class="form-control form-control-sm item-amount" step="any" value="' + (item.amount || 0) + '"></td>' +
             '<td><button type="button" class="btn btn-sm btn-outline-danger remove-row"><i class="bi bi-trash"></i></button></td>' +
             '</tr>';
-        $('#ocr-items-body').append(row);
+        var $row = $(row);
+        $('#ocr-items-body').append($row);
+
+        // If po_no is present, auto-load purchase items dropdown
+        if (item.po_no) {
+            _loadPurchaseItemsForRow($row, item.po_no, item.product_name || '', item.product_code || '');
+        }
+    }
+
+    // Load purchase items dropdown for a row and auto-select best match
+    function _loadPurchaseItemsForRow($row, poNo, ocrName, ocrCode) {
+        $.ajax({
+            url: '/delivery-mgmt/api/purchase-items?po_no=' + encodeURIComponent(poNo),
+            type: 'GET',
+            success: function (res) {
+                if (res.items && res.items.length > 0) {
+                    var sel = $row.find('.item-name-select');
+                    sel.empty().append('<option value="">--选择货号--</option>');
+                    var bestMatch = '';
+                    var bestScore = -1;
+                    res.items.forEach(function (pi) {
+                        var label = (pi.product_code ? pi.product_code + ' - ' : '') + pi.product_name + ' (数量:' + pi.quantity + ')';
+                        var $opt = $('<option></option>')
+                            .val(pi.product_name || '')
+                            .attr('data-code', pi.product_code || '')
+                            .attr('data-unit', pi.unit || '')
+                            .attr('data-price', pi.unit_price || '')
+                            .text(label);
+                        sel.append($opt);
+                        // Auto-select: match by product_code or product_name similarity
+                        var score = 0;
+                        if (ocrCode && pi.product_code && pi.product_code.indexOf(ocrCode) >= 0) score += 10;
+                        if (ocrName && pi.product_name && (pi.product_name.indexOf(ocrName) >= 0 || ocrName.indexOf(pi.product_name) >= 0)) score += 5;
+                        if (score > bestScore) {
+                            bestScore = score;
+                            bestMatch = pi.product_name;
+                        }
+                    });
+                    sel.removeClass('d-none');
+                    $row.find('.item-name').addClass('d-none');
+                    // Auto-select best match
+                    if (bestMatch && bestScore > 0) {
+                        sel.val(bestMatch).trigger('change');
+                    }
+                }
+            }
+        });
     }
 
     $('#btn-ocr-add-row').on('click', function () {
@@ -608,27 +719,32 @@ $(document).ready(function () {
         row.find('.item-amount').val((qty * price).toFixed(2));
     });
 
-    // Auto-match purchase data when po_no or product_name changes in OCR table
-    $('#ocr-items-body').on('change', '.item-po, .item-name, .item-code', function () {
+    // When 采购单号 changes in OCR table, load purchase items dropdown
+    $('#ocr-items-body').on('change', '.item-po', function () {
         var row = $(this).closest('tr');
         var poNo = row.find('.item-po').val().trim();
-        var productName = row.find('.item-name').val().trim();
-        var productCode = row.find('.item-code').val().trim();
-        if (!poNo) return;
-        $.ajax({
-            url: '{{ url_for("delivery_mgmt.api_match_purchase") }}',
-            type: 'POST',
-            contentType: 'application/json',
-            data: JSON.stringify({ po_no: poNo, product_name: productName, product_code: productCode }),
-            success: function (res) {
-                if (res.found) {
-                    row.find('.item-unit').val(res.unit);
-                    row.find('.item-price').val(res.unit_price);
-                    var qty = parseFloat(row.find('.item-qty').val()) || 0;
-                    row.find('.item-amount').val((qty * res.unit_price).toFixed(2));
-                }
-            }
-        });
+        var sel = row.find('.item-name-select');
+        var inp = row.find('.item-name');
+        if (!poNo) {
+            sel.addClass('d-none');
+            inp.removeClass('d-none');
+            return;
+        }
+        _loadPurchaseItemsForRow(row, poNo, inp.val().trim(), row.find('.item-code').val().trim());
+    });
+
+    // When a product is selected from dropdown in OCR table, fill in the row
+    $('#ocr-items-body').on('change', '.item-name-select', function () {
+        var row = $(this).closest('tr');
+        var opt = $(this).find(':selected');
+        var name = opt.val();
+        if (!name) return;
+        row.find('.item-name').val(name);
+        row.find('.item-code').val(opt.data('code') || '');
+        row.find('.item-unit').val(opt.data('unit') || 'PCS');
+        row.find('.item-price').val(opt.data('price') || 0);
+        var qty = parseFloat(row.find('.item-qty').val()) || 0;
+        row.find('.item-amount').val((qty * (opt.data('price') || 0)).toFixed(2));
     });
 
     // When 采购单号 changes in note modal, fetch purchase items and show dropdown
@@ -643,17 +759,20 @@ $(document).ready(function () {
             return;
         }
         $.ajax({
-            url: BASE_URL + '/delivery-mgmt/api/purchase-items?po_no=' + encodeURIComponent(poNo),
+            url: '/delivery-mgmt/api/purchase-items?po_no=' + encodeURIComponent(poNo),
             type: 'GET',
             success: function (res) {
                 if (res.items && res.items.length > 0) {
                     sel.empty().append('<option value="">--选择物料--</option>');
                     res.items.forEach(function (item) {
                         var label = (item.product_code ? item.product_code + ' - ' : '') + item.product_name + ' (数量:' + item.quantity + ')';
-                        sel.append('<option value="' + item.product_name + '" ' +
-                            'data-code="' + item.product_code + '" ' +
-                            'data-unit="' + item.unit + '" ' +
-                            'data-price="' + item.unit_price + '">' + label + '</option>');
+                        var $opt = $('<option></option>')
+                            .val(item.product_name || '')
+                            .attr('data-code', item.product_code || '')
+                            .attr('data-unit', item.unit || '')
+                            .attr('data-price', item.unit_price || '')
+                            .text(label);
+                        sel.append($opt);
                     });
                     sel.removeClass('d-none');
                     inp.addClass('d-none');

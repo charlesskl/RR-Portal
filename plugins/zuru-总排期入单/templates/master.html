@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ZURU 总排期入单（分析版）</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css" rel="stylesheet">
+    <style>
+        body { background: #f5f7fa; font-family: -apple-system, 'Microsoft YaHei', sans-serif; }
+        .main-card { max-width: 800px; margin: 40px auto; }
+        .drop-zone { border: 2px dashed #ccc; border-radius: 12px; padding: 50px 20px;
+                     text-align: center; cursor: pointer; transition: all 0.3s; background: #fff; }
+        .drop-zone:hover, .drop-zone.dragover { border-color: #198754; background: #f0fff4; }
+        .result-box { max-height: 500px; overflow-y: auto; }
+        .file-tag { display: inline-block; background: #e8f5e9; color: #2e7d32; border-radius: 4px;
+                    padding: 2px 8px; margin: 2px; font-size: 0.8rem; }
+        .master-zone { border: 2px dashed #0d6efd; border-radius: 8px; padding: 15px;
+                       text-align: center; cursor: pointer; background: #f0f4ff; transition: all 0.3s; }
+        .master-zone:hover { background: #e0e8ff; border-color: #0a58ca; }
+        .master-zone.uploaded { border-color: #198754; background: #f0fff4; }
+    </style>
+</head>
+<body>
+<div class="container main-card">
+    <div class="text-center mb-4">
+        <h3 class="fw-bold text-primary"><i class="bi bi-table me-2"></i>ZURU 总排期入单 <small class="text-muted" style="font-size:0.6em;">分析版</small></h3>
+        <p class="text-muted small mb-0">解析PO → 匹配总排期 → 输出修改单明细 + 生成新单Excel</p>
+    </div>
+
+    <!-- 第一步：上传总排期 -->
+    <div class="card mb-3">
+        <div class="card-header bg-primary text-white py-2">
+            <i class="bi bi-1-circle me-1"></i>上传总排期文件
+        </div>
+        <div class="card-body">
+            <div class="master-zone" id="masterZone" onclick="document.getElementById('masterInput').click()">
+                <i class="bi bi-file-earmark-spreadsheet" style="font-size:1.5rem;color:#0d6efd;"></i>
+                <p class="mt-1 mb-0 fw-bold" id="masterLabel">点击选择总排期 xlsx 文件</p>
+                <p class="text-muted small mb-0">用于匹配PO货号（判断修改单/新单）</p>
+            </div>
+            <input type="file" id="masterInput" accept=".xlsx,.xls" style="display:none" onchange="uploadMaster(this)">
+        </div>
+    </div>
+
+    <!-- 第二步：上传PO文件 -->
+    <div class="card mb-3">
+        <div class="card-header bg-success text-white py-2">
+            <i class="bi bi-2-circle me-1"></i>上传PO文件 → 分析
+        </div>
+        <div class="card-body">
+            <div class="drop-zone" id="dropZone" onclick="document.getElementById('fileInput').click()">
+                <i class="bi bi-cloud-arrow-up" style="font-size:2.5rem;color:#198754;"></i>
+                <p class="mt-2 mb-0 fw-bold">拖放Excel PO文件到此处</p>
+                <p class="text-muted small">或点击选择文件（支持多个.xlsx）</p>
+            </div>
+            <input type="file" id="fileInput" multiple accept=".xlsx,.xls" style="display:none"
+                   onchange="showFiles(this.files)">
+
+            <div id="fileList" class="mt-2" style="display:none;">
+                <div class="d-flex justify-content-between align-items-center mb-1">
+                    <span class="fw-bold small"><i class="bi bi-files me-1"></i>已选文件：<span id="fileCount">0</span>个</span>
+                    <button class="btn btn-outline-secondary btn-sm py-0" onclick="clearFiles()">清除</button>
+                </div>
+                <div id="fileTags" style="max-height:100px;overflow-y:auto;"></div>
+            </div>
+
+            <div class="d-flex gap-2 mt-3">
+                <button class="btn btn-success flex-fill" onclick="doUpload()" id="btnUpload">
+                    <i class="bi bi-search me-1"></i>分析PO + 生成新单Excel
+                </button>
+                <button class="btn btn-outline-warning" onclick="doYellowSummary()" id="btnSummary">
+                    <i class="bi bi-bar-chart me-1"></i>有填充行汇总
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 处理结果 -->
+    <div class="card" id="resultCard" style="display:none;">
+        <div class="card-body result-box">
+            <div id="resultContent"></div>
+        </div>
+    </div>
+</div>
+
+<script>
+const BASE = '/zuru-master';
+const dropZone = document.getElementById('dropZone');
+const fileInput = document.getElementById('fileInput');
+let selectedFiles = [];
+
+function _escHtml(s) {
+    const d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+}
+
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+dropZone.addEventListener('drop', e => {
+    e.preventDefault();
+    dropZone.classList.remove('dragover');
+    const files = [...e.dataTransfer.files].filter(f => f.name.match(/\.xlsx?$/i));
+    if (files.length) { selectedFiles = files; showFiles(files); }
+});
+
+function showFiles(files) {
+    if (files instanceof FileList) selectedFiles = [...files];
+    document.getElementById('fileList').style.display = '';
+    document.getElementById('fileCount').textContent = selectedFiles.length;
+    document.getElementById('fileTags').innerHTML = selectedFiles.map(f =>
+        `<span class="file-tag">${_escHtml(f.name)}</span>`).join('');
+}
+function clearFiles() {
+    selectedFiles = [];
+    fileInput.value = '';
+    document.getElementById('fileList').style.display = 'none';
+}
+
+async function uploadMaster(input) {
+    const f = input.files[0];
+    if (!f) return;
+    const fd = new FormData();
+    fd.append('master_file', f);
+    try {
+        const resp = await fetch(BASE + '/api/master-schedule-upload-master', { method: 'POST', body: fd });
+        const data = await resp.json();
+        if (data.ok) {
+            document.getElementById('masterLabel').textContent = '\u2705 \u5df2\u4e0a\u4f20: ' + f.name;
+            document.getElementById('masterZone').classList.add('uploaded');
+        } else {
+            alert(data.error || '\u4e0a\u4f20\u5931\u8d25');
+        }
+    } catch(e) {
+        alert('\u4e0a\u4f20\u5931\u8d25: ' + e.message);
+    }
+}
+
+async function doUpload() {
+    if (!selectedFiles.length) { alert('\u8bf7\u5148\u9009\u62e9Excel PO\u6587\u4ef6'); return; }
+    const btn = document.getElementById('btnUpload');
+    btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>\u5206\u6790\u4e2d...';
+
+    const fd = new FormData();
+    selectedFiles.forEach(f => fd.append('files', f));
+
+    try {
+        const resp = await fetch(BASE + '/api/master-schedule-upload', { method: 'POST', body: fd });
+        const data = await resp.json();
+        const rc = document.getElementById('resultCard');
+        const content = document.getElementById('resultContent');
+        rc.style.display = '';
+
+        if (data.ok) {
+            let html = `<div class="alert alert-success mb-2"><i class="bi bi-check-circle me-1"></i><b>${_escHtml(data.msg || '')}</b></div>`;
+            if (data.errors && data.errors.length) {
+                html += `<div class="alert alert-warning mb-2"><b>\u89e3\u6790\u5931\u8d25\uff1a</b><br>${data.errors.map(e => _escHtml(e)).join('<br>')}</div>`;
+            }
+            if (data.dedup_report && data.dedup_report.length) {
+                html += `<div class="alert alert-warning mb-2" style="border-left:4px solid #fd7e14;">`;
+                html += `<i class="bi bi-copy me-1"></i><b>\u91cd\u590dPO\u81ea\u52a8\u53bb\u91cd (${data.dedup_report.length}\u7ec4)\uff1a</b><br>`;
+                data.dedup_report.forEach(r => { html += `${_escHtml(r)}<br>`; });
+                html += `</div>`;
+            }
+            if (data.ignored_report && data.ignored_report.length) {
+                html += `<div class="alert alert-secondary mb-2" style="border-left:4px solid #6c757d;">`;
+                html += `<i class="bi bi-slash-circle me-1"></i><b>\u5df2\u5ffd\u7565\u8d27\u53f7\uff08\u4e0d\u5165\u6392\u671f\uff09\uff1a</b><br>`;
+                data.ignored_report.forEach(r => {
+                    html += `\u8d27\u53f7 <b>${_escHtml(r.item)}</b> \u00d7 ${r.count}\u884c <span class="text-muted">(${_escHtml(r.source)})</span><br>`;
+                });
+                html += `</div>`;
+            }
+            if (data.warnings && data.warnings.length) {
+                html += `<div class="alert alert-danger mb-2"><i class="bi bi-exclamation-triangle me-1"></i><b>\u5907\u6ce8\u8b66\u544a\uff1a</b><br>`;
+                data.warnings.forEach(w => { html += `${_escHtml(w)}<br>`; });
+                html += `</div>`;
+            }
+            if (data.mod_details && data.mod_details.length) {
+                html += `<div class="mb-2"><b class="text-primary"><i class="bi bi-pencil-square me-1"></i>\u4fee\u6539\u5355\u660e\u7ec6 (${data.mod_details.length}\u884c) \u2014 \u9700\u624b\u52a8\u66f4\u65b0\uff1a</b>`;
+                html += `<div class="list-group list-group-flush mt-1" style="font-size:0.85rem;">`;
+                data.mod_details.forEach(d => {
+                    if (typeof d === 'object') {
+                        const changes = d.changes.map(c => `<span class="badge bg-info text-dark me-1">${_escHtml(c)}</span>`).join('');
+                        html += `<div class="list-group-item py-1 px-2"><b>${_escHtml(d.item)}</b> <span class="text-muted">(\u884c${d.row})</span><br>${changes}</div>`;
+                    } else {
+                        html += `<div class="list-group-item py-1 px-2">${_escHtml(String(d))}</div>`;
+                    }
+                });
+                html += `</div></div>`;
+            }
+            if (data.new_details && data.new_details.length) {
+                html += `<div class="mb-2"><b class="text-success"><i class="bi bi-plus-circle me-1"></i>\u65b0\u589e\u8d27\u53f7 (${data.new_details.length}\u884c)\uff1a</b>`;
+                html += `<div class="mt-1" style="font-size:0.85rem;">`;
+                data.new_details.forEach(item => {
+                    html += `<span class="badge bg-success me-1 mb-1">${_escHtml(String(item))}</span>`;
+                });
+                html += `</div></div>`;
+            }
+            if (data.export_file) {
+                html += `<div class="mt-2"><a href="${BASE}/api/master-export-download/${encodeURIComponent(data.export_file)}" class="btn btn-primary btn-sm"><i class="bi bi-download me-1"></i>\u4e0b\u8f7d\u65b0\u5355Excel: ${_escHtml(data.export_file)}</a></div>`;
+            }
+            if (data.schedule_info) {
+                const si = data.schedule_info;
+                const matched = si.matched || {};
+                const unmatched = si.unmatched || [];
+                const mKeys = Object.keys(matched);
+                if (mKeys.length > 0 || unmatched.length > 0) {
+                    html += `<hr><div class="mb-2"><b><i class="bi bi-diagram-3 me-1"></i>\u5206\u6392\u671f\u5f52\u5c5e\uff1a</b></div>`;
+                    const byFile = {};
+                    mKeys.forEach(item => {
+                        matched[item].forEach(loc => {
+                            const key = loc.file;
+                            if (!byFile[key]) byFile[key] = [];
+                            byFile[key].push({item, sheet: loc.sheet});
+                        });
+                    });
+                    Object.keys(byFile).forEach(file => {
+                        const items = byFile[file];
+                        const sheets = [...new Set(items.map(i => i.sheet))];
+                        html += `<div class="card card-body py-1 px-2 mb-1" style="font-size:0.85rem;">`;
+                        html += `<div><i class="bi bi-file-earmark-spreadsheet text-success me-1"></i><b>${_escHtml(file)}</b></div>`;
+                        sheets.forEach(sh => {
+                            const shItems = items.filter(i => i.sheet === sh).map(i => i.item);
+                            html += `<div class="ms-3"><span class="text-muted">${_escHtml(sh)}\uff1a</span>`;
+                            shItems.forEach(it => { html += `<span class="badge bg-primary me-1">${_escHtml(it)}</span>`; });
+                            html += `</div>`;
+                        });
+                        html += `</div>`;
+                    });
+                    if (unmatched.length > 0) {
+                        html += `<div class="mt-1" style="font-size:0.85rem;"><span class="text-warning"><i class="bi bi-question-circle me-1"></i>\u672a\u8bc6\u522b\u5f52\u5c5e\uff1a</span>`;
+                        unmatched.forEach(it => { html += `<span class="badge bg-warning text-dark me-1">${_escHtml(it)}</span>`; });
+                        html += `</div>`;
+                    }
+                }
+            }
+            content.innerHTML = html;
+            clearFiles();
+        } else {
+            content.innerHTML = `<div class="alert alert-danger"><i class="bi bi-x-circle me-1"></i>${_escHtml(data.error || '')}</div>`;
+        }
+    } catch(e) {
+        document.getElementById('resultCard').style.display = '';
+        document.getElementById('resultContent').innerHTML =
+            `<div class="alert alert-danger">\u8bf7\u6c42\u5931\u8d25: ${_escHtml(e.message || '')}</div>`;
+    }
+    btn.disabled = false; btn.innerHTML = '<i class="bi bi-search me-1"></i>\u5206\u6790PO + \u751f\u6210\u65b0\u5355Excel';
+}
+
+async function doYellowSummary() {
+    const btn = document.getElementById('btnSummary');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>\u626b\u63cf\u4e2d...';
+    const content = document.getElementById('resultContent');
+    document.getElementById('resultCard').style.display = '';
+    content.innerHTML = '<div class="text-muted"><i class="bi bi-hourglass-split me-1"></i>\u6b63\u5728\u626b\u63cf\u603b\u6392\u671f\u6709\u586b\u5145\u884c\uff0c\u8bf7\u7a0d\u5019...</div>';
+    try {
+        const resp = await fetch(BASE + '/api/yellow-summary', {method:'POST'});
+        const data = await resp.json();
+        if (data.error) {
+            content.innerHTML = `<div class="alert alert-danger"><i class="bi bi-x-circle me-1"></i>${_escHtml(data.error)}</div>`;
+        } else if (data.total === 0) {
+            content.innerHTML = `<div class="alert alert-info">\u672a\u53d1\u73b0\u6574\u884c\u586b\u5145\u7684\u884c</div>`;
+        } else {
+            let html = `<div class="alert alert-success mb-2 py-2"><i class="bi bi-check-circle me-1"></i>`;
+            html += `\u5171 <b>${data.total}</b> \u884c\u6574\u884c\u586b\u5145\uff0c\u5206\u5e03\u5728 <b>${data.group_count}</b> \u4e2a\u5206\u6392\u671fsheet`;
+            if (data.unmatched && data.unmatched.length > 0) html += `\uff0c<span class="text-warning fw-bold">${data.unmatched.length} \u4e2a\u8d27\u53f7\u672a\u5339\u914d</span>`;
+            html += `</div>`;
+            html += `<div style="max-height:500px;overflow-y:auto;">`;
+            html += `<table class="table table-sm table-bordered" style="font-size:0.82rem;">`;
+            html += `<thead class="table-primary text-center"><tr><th>\u5206\u6392\u671f\u6587\u4ef6</th><th>Sheet</th><th>\u8d27\u53f7</th><th>\u4e2d\u6587\u540d</th><th>\u884c\u6570</th><th>\u6570\u91cf</th><th>\u5c0f\u8ba1</th></tr></thead><tbody>`;
+            (data.groups || []).forEach((g, gi) => {
+                const bg = gi % 2 === 0 ? '' : ' style="background:#f8f9fa;"';
+                g.items.forEach((it, ii) => {
+                    html += `<tr${bg}>`;
+                    html += ii === 0 ? `<td rowspan="${g.items.length+1}">${_escHtml(g.file)}</td><td rowspan="${g.items.length+1}">${_escHtml(g.sheet)}</td>` : '';
+                    html += `<td><b>${_escHtml(it.item)}</b></td><td>${_escHtml(it.cn_name)}</td><td class="text-center">${it.count}</td><td class="text-end">${it.qty_sum ? it.qty_sum.toLocaleString() : ''}</td><td></td></tr>`;
+                });
+                html += `<tr class="table-warning fw-bold"><td colspan="4" class="text-end">\u5c0f\u8ba1</td><td class="text-center">${g.total}</td></tr>`;
+            });
+            if (data.unmatched && data.unmatched.length) {
+                html += `<tr class="table-danger"><td colspan="7" class="fw-bold">\u672a\u5339\u914d\u5206\u6392\u671f</td></tr>`;
+                data.unmatched.forEach(u => {
+                    html += `<tr class="table-danger"><td></td><td></td><td><b>${_escHtml(u.item)}</b></td><td>${_escHtml(u.cn_name)}</td><td class="text-center">${u.count}</td><td class="text-end">${u.qty_sum ? u.qty_sum.toLocaleString() : ''}</td><td></td></tr>`;
+                });
+            }
+            html += `<tr class="table-success fw-bold"><td colspan="4" class="text-end">\u5408\u8ba1</td><td class="text-center">${data.total}</td><td></td><td></td></tr>`;
+            html += `</tbody></table></div>`;
+            content.innerHTML = html;
+        }
+    } catch(e) {
+        content.innerHTML = `<div class="alert alert-danger">\u8bf7\u6c42\u5931\u8d25: ${_escHtml(e.message || '')}</div>`;
+    }
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-bar-chart me-1"></i>\u6709\u586b\u5145\u884c\u6c47\u603b';
+}
+</script>
+</body>
+</html>

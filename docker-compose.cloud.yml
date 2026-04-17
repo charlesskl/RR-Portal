@@ -293,6 +293,32 @@ services:
     networks:
       - platform-net
 
+  zuru-master-schedule:
+    build:
+      context: ./plugins/zuru-总排期入单
+      dockerfile: Dockerfile
+    environment:
+      - APP_PORT=5003
+    volumes:
+      - "./plugins/zuru-总排期入单/data:/app/data"
+      - "./plugins/zuru-总排期入单/uploads:/app/uploads"
+      - "./plugins/zuru-总排期入单/exports:/app/exports"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5003/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    mem_limit: 512m
+    memswap_limit: 512m
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - platform-net
+
   zuru-order-system:
     build:
       context: ./apps/zuru-order-system

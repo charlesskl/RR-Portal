@@ -300,6 +300,8 @@ services:
     environment:
       - PORT=5005
       - DATA_PATH=/app
+      - LOCAL_MODE=0  # 云端：禁用任意路径浏览/check_path/config 写入
+      - FLASK_DEBUG=0
     volumes:
       - ./apps/zuru-order-system/data:/app/data
       - ./apps/zuru-order-system/uploads:/app/uploads

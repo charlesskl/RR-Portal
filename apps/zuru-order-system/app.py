@@ -6,26 +6,46 @@ import os
 import re
 import json
 import time
+import uuid
 import logging
+import logging.handlers
 import threading
 from datetime import datetime, timedelta
 
 from flask import (Flask, render_template, request, jsonify,
                    send_file, Response, stream_with_context)
 from werkzeug.middleware.proxy_fix import ProxyFix
+from werkzeug.utils import secure_filename
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 
 import po_parser
 
 
+# LOCAL_MODE 控制：本地（桌面上 Win/Mac 直接跑）= 1，cloud 部署 = 0
+# 影响 /api/browse 和 /api/check_path /api/config 的任意路径访问
+LOCAL_MODE = os.environ.get('LOCAL_MODE', '0') == '1'
+
+# Flask debug：仅当显式设置时启用，避免 RCE 风险
+FLASK_DEBUG = os.environ.get('FLASK_DEBUG', '0') == '1'
+
+
 def _safe_filename(name):
-    """清理文件名中的不安全字符，保留中文"""
-    # 替换路径分隔符和特殊空白
-    name = name.replace('\\', '_').replace('/', '_')
+    """清理文件名中的不安全字符，保留中文 (secure_filename 会去掉中文)"""
+    if not name:
+        return f'unnamed_{uuid.uuid4().hex[:8]}.xlsx'
+    # 替换路径分隔符、控制字符、特殊空白
+    name = name.replace('\\', '_').replace('/', '_').replace('\x00', '')
     name = name.replace('\xa0', ' ').replace('\r', '').replace('\n', '')
-    # 去掉前后空白
-    return name.strip() or 'unnamed.xlsx'
+    # 去掉所有控制字符
+    name = ''.join(c for c in name if ord(c) >= 32)
+    # 去掉前导 . 防止 .. 类路径穿越（os.path.join 不会解 .. 但保险）
+    name = name.lstrip('.').strip()
+    if not name or name in ('.', '..'):
+        return f'unnamed_{uuid.uuid4().hex[:8]}.xlsx'
+    # 加 uuid 前缀避免文件名碰撞 + 防止任何残留路径技巧
+    base = name[-100:]  # 限制长度
+    return f'{uuid.uuid4().hex[:8]}_{base}'
 
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -40,14 +60,19 @@ app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
 app.config['UPLOAD_FOLDER'] = os.path.join(DATA_PATH, 'uploads')
 app.config['EXPORT_FOLDER'] = os.path.join(DATA_PATH, 'exports')
 app.config['DATA_FOLDER'] = os.path.join(DATA_PATH, 'data')
-app.config['MAX_CONTENT_LENGTH'] = 512 * 1024 * 1024
+# 实际 PO 文件 ~MB 级别，限到 32MB 防止 OOM (mem_limit 512m)
+app.config['MAX_CONTENT_LENGTH'] = 32 * 1024 * 1024
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 os.makedirs(app.config['EXPORT_FOLDER'], exist_ok=True)
 os.makedirs(app.config['DATA_FOLDER'], exist_ok=True)
 
+# 日志：rotating 防止无限增长
 LOG_FILE = os.path.join(app.config['DATA_FOLDER'], 'ops.log')
-logging.basicConfig(filename=LOG_FILE, level=logging.INFO,
-                    format='%(asctime)s %(message)s', encoding='utf-8')
+_log_handler = logging.handlers.RotatingFileHandler(
+    LOG_FILE, maxBytes=10 * 1024 * 1024, backupCount=3, encoding='utf-8')
+_log_handler.setFormatter(logging.Formatter('%(asctime)s %(message)s'))
+logging.getLogger().setLevel(logging.INFO)
+logging.getLogger().addHandler(_log_handler)
 
 
 # === 加载映射数据 ===
@@ -63,8 +88,35 @@ def _load_json(name):
 COUNTRY_MAP = _load_json('country_map.json')
 ITEM_MAP = _load_json('item_map.json')
 
-# 全局进度状态
-_progress = {'current': 0, 'total': 0, 'msg': '', 'done': False, 'result': None}
+# 任务管理：每个 process 请求一个 task_id，避免并发互相覆盖
+_tasks = {}
+_tasks_lock = threading.Lock()
+_TASK_TTL_SECS = 600  # 10 分钟后清理已完成任务
+
+
+def _new_task():
+    task_id = uuid.uuid4().hex[:12]
+    task = {
+        'id': task_id,
+        'created_at': time.time(),
+        'current': 0, 'total': 0, 'msg': '排队中...',
+        'done': False, 'result': None,
+    }
+    with _tasks_lock:
+        # 清理过期任务
+        now = time.time()
+        stale = [tid for tid, t in _tasks.items()
+                 if t['done'] and (now - t['created_at']) > _TASK_TTL_SECS]
+        for tid in stale:
+            _tasks.pop(tid, None)
+        _tasks[task_id] = task
+    return task
+
+
+def _get_task(task_id):
+    with _tasks_lock:
+        return _tasks.get(task_id)
+
 
 # 接单表路径配置（运行时产物，存在 DATA_FOLDER 下，Docker环境下卷挂载）
 _CONFIG_FILE = os.path.join(app.config['DATA_FOLDER'], 'config.json')
@@ -86,7 +138,7 @@ def _read_existing_pos(filepath):
     """读取接单表B列所有PO号，返回set"""
     pos = set()
     try:
-        wb = openpyxl.load_workbook(filepath, data_only=True)
+        wb = openpyxl.load_workbook(filepath, data_only=True, read_only=True)
         ws = wb.active
         for r in range(3, ws.max_row + 1):
             v = ws.cell(r, 2).value
@@ -260,11 +312,9 @@ def _generate_excel(parsed_orders, custom_date=None):
             if country_cn:
                 ws.cell(r, 11, country_cn)
 
-            # L 车间 = VLOOKUP
-            ws.cell(r, 12).value = f'=VLOOKUP(C{r},货号!A$1:C$660,3,0)'
-
-            # M 排期品名 = VLOOKUP
-            ws.cell(r, 13).value = f'=VLOOKUP(C{r},货号!A$1:D$660,4,0)'
+            # 全列引用 (A:C / A:D)：避免硬编码行数限制货号表增长
+            ws.cell(r, 12).value = f'=VLOOKUP(C{r},货号!A:C,3,0)'
+            ws.cell(r, 13).value = f'=VLOOKUP(C{r},货号!A:D,4,0)'
 
             # 统一格式：绿色填充标记新数据
             for c in range(1, 15):
@@ -329,35 +379,40 @@ def health():
 
 @app.route('/')
 def index():
-    return render_template('index.html')
+    return render_template('index.html', local_mode=LOCAL_MODE)
 
 
 @app.route('/api/config', methods=['GET', 'POST'])
 def config_api():
-    """获取/保存配置（接单表路径）"""
+    """获取/保存配置（接单表路径）— 仅 LOCAL_MODE 下允许设置任意路径"""
     if request.method == 'GET':
         return jsonify(_load_config())
+    if not LOCAL_MODE:
+        return jsonify({'ok': False, 'error': '仅本机模式可设置接单表路径，请用上传'}), 403
     data = request.get_json(force=True)
     cfg = _load_config()
     if 'order_table_path' in data:
-        cfg['order_table_path'] = data['order_table_path']
+        new_path = str(data['order_table_path'] or '').strip()
+        # 即使本机模式也仅允许已存在的文件
+        if new_path and not os.path.isfile(new_path):
+            return jsonify({'ok': False, 'error': '路径不存在'}), 400
+        cfg['order_table_path'] = new_path
     _save_config(cfg)
     return jsonify({'ok': True})
 
 
 @app.route('/api/browse', methods=['POST'])
 def browse():
-    """浏览服务器目录，返回文件夹和xlsx文件列表"""
+    """浏览服务器目录 — 仅本机模式开启"""
+    if not LOCAL_MODE:
+        return jsonify({'ok': False, 'error': '云端部署不支持浏览服务器目录，请用上传'}), 403
     data = request.get_json(force=True)
     path = data.get('path', '').strip()
-    # 默认桌面
     if not path:
         path = os.path.join(os.path.expanduser('~'), 'Desktop')
-    # 安全检查：必须是已存在的目录
     if not os.path.isdir(path):
         return jsonify({'ok': False, 'error': '目录不存在'}), 400
     items = _list_dir(path)
-    # 获取盘符列表（Windows）
     drives = []
     if os.name == 'nt':
         import string
@@ -376,7 +431,9 @@ def browse():
 
 @app.route('/api/check_path', methods=['POST'])
 def check_path():
-    """检查接单表路径是否有效，返回PO数量"""
+    """检查接单表路径 — 仅本机模式"""
+    if not LOCAL_MODE:
+        return jsonify({'ok': False, 'error': '云端部署请用上传'}), 403
     data = request.get_json(force=True)
     path = data.get('path', '').strip()
     if not path or not os.path.isfile(path):
@@ -387,17 +444,15 @@ def check_path():
 
 @app.route('/api/upload_table', methods=['POST'])
 def upload_table():
-    """上传接单表文件（局域网其他电脑使用）"""
+    """上传接单表文件（云端默认入口）"""
     f = request.files.get('file')
     if not f or not f.filename:
         return jsonify({'ok': False, 'error': '未选择文件'}), 400
     ext = os.path.splitext(f.filename)[1].lower()
     if ext not in ('.xlsx', '.xls'):
         return jsonify({'ok': False, 'error': '仅支持Excel文件'}), 400
-    # 保存到data目录（Docker环境下卷挂载，持久化）
     save_path = os.path.join(app.config['DATA_FOLDER'], 'uploaded_order_table.xlsx')
     f.save(save_path)
-    # 验证并保存配置
     pos = _read_existing_pos(save_path)
     if not pos:
         return jsonify({'ok': False, 'error': '未能读取到PO数据，请确认是接单表文件'}), 400
@@ -435,7 +490,6 @@ def classify():
             data = po_parser.parse(path)
             po = data['po_number']
             is_rev = po in existing_pos
-            # 检查哪些货号不在映射表
             missing = []
             for ln in data['lines']:
                 sn = ln['simple_no']
@@ -452,12 +506,17 @@ def classify():
                 'is_revision': po_parser.is_revision(fname),
                 'missing_items': []
             })
-    # 检测上传文件之间的重复PO
     po_files = {}
     for r in results:
         if r['po']:
             po_files.setdefault(r['po'], []).append(r['filename'])
     duplicate_pos = {po: fnames for po, fnames in po_files.items() if len(fnames) > 1}
+
+    for _, path in saved:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
 
     return jsonify({'ok': True, 'results': results, 'existing_count': len(existing_pos),
                     'duplicate_pos': duplicate_pos})
@@ -465,8 +524,7 @@ def classify():
 
 @app.route('/api/process', methods=['POST'])
 def process():
-    """上传PO文件 → 解析 → 生成Excel"""
-    global _progress
+    """上传PO文件 → 解析 → 生成Excel（每请求一个 task_id）"""
     saved = []
     for f in request.files.getlist('files'):
         if not f.filename:
@@ -482,30 +540,30 @@ def process():
     if not saved:
         return jsonify({'error': '没有有效的Excel文件'}), 400
 
-    # 读取接单表已有PO号
     cfg = _load_config()
     table_path = cfg.get('order_table_path', '')
     existing_pos = set()
     if table_path and os.path.isfile(table_path):
         existing_pos = _read_existing_pos(table_path)
 
-    total = len(saved)
-    _progress = {'current': 0, 'total': total, 'msg': '开始解析...', 'done': False, 'result': None}
+    task = _new_task()
+    task['total'] = len(saved)
+    task['msg'] = '开始解析...'
 
     new_orders = []
     rev_orders = []
     parse_errors = []
 
     for i, (fname, path) in enumerate(saved):
-        _progress['current'] = i
-        _progress['msg'] = f'解析 {fname}...'
+        with _tasks_lock:
+            task['current'] = i
+            task['msg'] = f'解析 {fname}...'
 
         try:
             data = po_parser.parse(path)
             data['filename'] = fname
             po = data['po_number']
 
-            # 优先用接单表比对，无接单表时回退文件名判断
             if existing_pos:
                 is_rev = po in existing_pos
             else:
@@ -518,14 +576,14 @@ def process():
         except Exception as e:
             parse_errors.append(f'{fname}: {str(e)[:100]}')
 
-    # 生成Excel
-    _progress['msg'] = '正在生成Excel...'
-    _progress['current'] = total
+    with _tasks_lock:
+        task['msg'] = '正在生成Excel...'
+        task['current'] = task['total']
 
     result = {'ok': True, 'written': 0, 'warnings': [], 'details': [],
-              'filename': '', 'revisions': rev_orders, 'parse_errors': parse_errors}
+              'filename': '', 'revisions': rev_orders, 'parse_errors': parse_errors,
+              'task_id': task['id']}
 
-    # 用户自选接单日期（可选）
     custom_date_str = request.form.get('order_date', '')
     custom_date = None
     if custom_date_str:
@@ -542,40 +600,64 @@ def process():
         result['details'] = gen['details']
         result['filename'] = gen.get('filename', '')
 
-    _progress['done'] = True
-    _progress['result'] = result
-    _progress['msg'] = '完成'
+    with _tasks_lock:
+        task['done'] = True
+        task['result'] = result
+        task['msg'] = '完成'
+
+    for _, path in saved:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
 
     return jsonify(result)
 
 
 @app.route('/api/progress')
 def progress():
-    """SSE进度推送"""
+    """SSE进度推送 — 必须带 task_id，避免 thread leak"""
+    task_id = request.args.get('task_id', '').strip()
+
     def gen():
+        if not task_id:
+            yield 'data: {"error":"missing task_id","done":true}\n\n'
+            return
         last_msg = ''
-        while True:
-            p = _progress
-            msg = json.dumps({
-                'current': p['current'],
-                'total': p['total'],
-                'msg': p['msg'],
-                'done': p['done'],
-            }, ensure_ascii=False)
+        deadline = time.time() + 600  # 最长 10 分钟
+        while time.time() < deadline:
+            t = _get_task(task_id)
+            if not t:
+                yield 'data: {"error":"task not found","done":true}\n\n'
+                return
+            with _tasks_lock:
+                snapshot = {
+                    'current': t['current'],
+                    'total': t['total'],
+                    'msg': t['msg'],
+                    'done': t['done'],
+                }
+            msg = json.dumps(snapshot, ensure_ascii=False)
             if msg != last_msg:
                 yield f'data: {msg}\n\n'
                 last_msg = msg
-            if p['done']:
-                break
+            if snapshot['done']:
+                return
             time.sleep(0.3)
+        yield 'data: {"error":"timeout","done":true}\n\n'
+
     return Response(stream_with_context(gen()), mimetype='text/event-stream')
 
 
 @app.route('/api/download/<filename>')
 def download(filename):
     """下载生成的Excel"""
+    # 拒绝任何包含路径分隔符或 .. 的文件名
+    if '/' in filename or '\\' in filename or '..' in filename:
+        return jsonify({'error': '非法文件名'}), 403
     filepath = os.path.join(app.config['EXPORT_FOLDER'], filename)
-    if not os.path.abspath(filepath).startswith(os.path.abspath(app.config['EXPORT_FOLDER'])):
+    abs_export = os.path.abspath(app.config['EXPORT_FOLDER'])
+    if not os.path.abspath(filepath).startswith(abs_export + os.sep):
         return jsonify({'error': '非法路径'}), 403
     if not os.path.exists(filepath):
         return jsonify({'error': '文件不存在'}), 404
@@ -588,4 +670,4 @@ if __name__ == '__main__':
     print('  ZURU 接单表入单系统')
     print(f'  http://localhost:{port}')
     print('=' * 50)
-    app.run(host='0.0.0.0', port=port, debug=True, use_reloader=False, threaded=True)
+    app.run(host='0.0.0.0', port=port, debug=FLASK_DEBUG, use_reloader=False, threaded=True)

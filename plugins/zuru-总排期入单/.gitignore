@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+uploads/
+exports/
+data/ops.log
+data/history.json
+.env

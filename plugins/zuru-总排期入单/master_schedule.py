@@ -1,8 +1,12 @@
 # -*- coding: utf-8 -*-
-"""总排期分析/写入模块
-- openpyxl只读建索引（快速定位已有行）
-- Windows有WPS时：COM写入修改单到总排期
-- Linux/Docker(无WPS)：只做分析，修改单展示明细供人工参考，新单生成Excel
+"""总排期写入模块：双模式支持
+- Windows + WPS COM：直接写入总排期文件
+- Linux/Docker（云端）：只读分析模式，生成新单Excel
+关键设计：
+- openpyxl只读建索引（快速定位已有行），WPS COM写入（不破坏格式）
+- 匹配键：PO号+货号+line_no 三元组
+- COM打开后检查ReadOnly，被锁则立即退出
+- Save前备份.bak防崩溃
 """
 import os
 import re
@@ -11,14 +15,14 @@ import shutil
 import logging
 from datetime import datetime, timedelta
 
-# COM可用性检测：Linux/Docker环境下 pywin32 装不了
+# COM可用性检测：Linux/Docker环境自动降级为只读分析模式
 try:
     import pythoncom
     import win32com.client
     _COM_AVAILABLE = True
 except ImportError:
     _COM_AVAILABLE = False
-    logging.info('[总排期] pywin32 不可用，进入只读分析模式（修改单仅展示，不写入）')
+    logging.info('[总排期] pywin32 不可用，进入只读分析模式')
 
 DEFAULT_MASTER_PATH = r'Z:\各客排期\ZURU生产排期\2025年ZURU总生产排期.xlsx'
 SHEET_NAME = '总排期'
@@ -275,6 +279,7 @@ def _search_cn_name_com(ws, sku_spec, insert_row, max_row):
 
 def write_orders(filepath, orders, export_dir=None):
     """修改单用WPS COM写入总排期，新单生成到独立Excel供复制粘贴
+    云端模式（无COM）：只读分析，不写入
 
     Returns: {'ok': bool, 'modified': int, 'new_count': int, 'msg': str, 'export_file': str}
     """
@@ -298,60 +303,308 @@ def write_orders(filepath, orders, export_dir=None):
         logging.warning(f'[总排期] 中文名直查表加载失败: {e}')
     logging.info(f'[总排期] 索引完成: {len(index)}条记录, {len(cn_names)}个中文名, max_row={max_row}')
 
-    # 第2步：Save前备份（仅COM模式）
-    if _COM_AVAILABLE:
-        bak_path = filepath + '.bak'
-        try:
-            shutil.copy2(filepath, bak_path)
-            logging.info(f'[总排期] 备份: {bak_path}')
-        except Exception as e:
-            logging.warning(f'[总排期] 备份失败: {e}')
-
-    # ── 分析模式（Linux/Docker）或 COM写入模式（Windows） ──
-    if _COM_AVAILABLE:
-        # Windows COM写入：原始逻辑
-        pythoncom.CoInitialize()
-        wps = None
-        wb = None
-        try:
-            wps = win32com.client.Dispatch('Ket.Application')
-            wps.Visible = False
-            wps.DisplayAlerts = False
-            wb = wps.Workbooks.Open(filepath)
-
-            if wb.ReadOnly:
-                wb.Close(SaveChanges=False)
-                wb = None
-                return {'ok': False, 'new': 0, 'modified': 0,
-                        'msg': '总排期文件被占用（只读模式），请让同事先关闭文件后重试'}
-
-            ws = None
-            for i in range(1, wb.Sheets.Count + 1):
-                if wb.Sheets(i).Name == SHEET_NAME:
-                    ws = wb.Sheets(i)
-                    break
-            if not ws:
-                ws = wb.Sheets(1)
-
-            return _write_orders_com(ws, wb, wps, orders, index, cn_names, max_row, export_dir)
-        except Exception as e:
-            logging.error(f'[总排期] 写入失败: {e}')
-            raise
-        finally:
-            try:
-                if wb:
-                    wb.Close(SaveChanges=False)
-            except:
-                pass
-            try:
-                if wps:
-                    wps.Quit()
-            except:
-                pass
-            pythoncom.CoUninitialize()
-    else:
-        # 分析模式：纯openpyxl只读，不写入
+    # 云端模式：无COM，走只读分析
+    if not _COM_AVAILABLE:
         return _analyze_orders_readonly(orders, index, cn_names, max_row, export_dir)
+
+    # 第2步：Save前备份
+    bak_path = filepath + '.bak'
+    try:
+        shutil.copy2(filepath, bak_path)
+        logging.info(f'[总排期] 备份: {bak_path}')
+    except Exception as e:
+        logging.warning(f'[总排期] 备份失败: {e}')
+
+    # 第3步：WPS COM打开并写入（COM已在模块顶部导入）
+    pythoncom.CoInitialize()
+    wps = None
+    wb = None
+    try:
+        wps = win32com.client.Dispatch('Ket.Application')
+        wps.Visible = False
+        wps.DisplayAlerts = False
+        wb = wps.Workbooks.Open(filepath)
+
+        # 检查ReadOnly — 被锁则立即退出
+        if wb.ReadOnly:
+            wb.Close(SaveChanges=False)
+            wb = None
+            return {'ok': False, 'new': 0, 'modified': 0,
+                    'msg': '总排期文件被占用（只读模式），请让同事先关闭文件后重试'}
+
+        ws = None
+        for i in range(1, wb.Sheets.Count + 1):
+            if wb.Sheets(i).Name == SHEET_NAME:
+                ws = wb.Sheets(i)
+                break
+        if not ws:
+            ws = wb.Sheets(1)
+
+        new_count = 0
+        mod_count = 0
+        new_rows = []    # 新单数据收集（不写入Z盘，生成到独立Excel）
+        mod_details = [] # 修改单明细
+        warnings = []    # 警告信息
+        new_details = [] # 新单明细
+
+        for order in orders:
+            header = order.get('header') or order
+            po = _normalize_po(header.get('po_number', '') or order.get('po_number', ''))
+            po_date = header.get('po_date', '') or order.get('po_date', '')
+            customer = header.get('customer', '') or order.get('customer', '')
+            dest = header.get('destination_cn', '') or order.get('destination_cn', '')
+            from_person = header.get('from_person', '') or order.get('from_person', '')
+            ship_date_str = header.get('ship_date', '') or order.get('ship_date', '')
+
+            tc = header.get('tracking_code', '') or order.get('tracking_code', '') or ''
+            pi = header.get('packaging_info', '') or order.get('packaging_info', '') or ''
+            rm = header.get('remark', '') or order.get('remark', '') or ''
+            note_parts = []
+            if tc: note_parts.append(tc)
+            if pi: note_parts.append(f'Packaging Info: {pi}')
+            if rm: note_parts.append(f'Remark: {rm}')
+            full_note = '\n'.join(note_parts)
+            # 检测备注字段缺失（可能是图片/文本框格式）
+            _fname = order.get('filename', '')
+            if not pi and not rm:
+                warnings.append(f'{_fname}(PO={po}): 包装信息和备注均为空，可能是图片格式，请手动检查PO原文')
+            elif not pi:
+                warnings.append(f'{_fname}(PO={po}): 包装信息为空，可能是图片格式，请手动检查')
+            elif not rm:
+                warnings.append(f'{_fname}(PO={po}): 备注(Remark)为空，可能是图片格式，请手动检查')
+
+            ship_dt = None
+            if ship_date_str:
+                try:
+                    ship_dt = datetime.strptime(str(ship_date_str)[:10], '%Y-%m-%d')
+                except:
+                    pass
+
+            # 双排期货号展开：一行变多行
+            _lines = _expand_dual_items(order.get('lines', []))
+
+            for ln in _lines:
+                sku_spec = ln.get('sku_spec', '') or ln.get('sku', '')
+                qty = ln.get('qty', 0) or 0
+                price = ln.get('price', 0) or 0
+                inner_pcs = ln.get('inner_pcs', 0) or 0
+                outer_qty = ln.get('outer_qty', 0) or 0
+                customer_po = ln.get('customer_po', '')
+                is_pallet = ln.get('is_pallet', False)
+                pallet_count = ln.get('pallet_count', 0) or 0
+                line_no = ln.get('line_no', '')
+
+                # 混装标记
+                is_mixed = ln.get('is_mixed_carton', False)
+                carton_count = ln.get('carton_count', 0) or 0
+
+                # 外箱：混装=qty÷箱数，卡板=qty÷卡板数，普通=PO的outer_qty
+                if is_pallet and pallet_count > 0:
+                    if qty > pallet_count:
+                        outer_qty = qty // pallet_count
+                elif is_mixed and carton_count > 0:
+                    outer_qty = qty // carton_count
+                    logging.info(f'[混装外箱] {sku_spec}: {qty}//{carton_count}={outer_qty}')
+
+                # 总箱数：卡板=卡板数，混装=箱数，普通=qty÷外箱
+                if is_pallet and pallet_count > 0:
+                    total_ctns = pallet_count
+                elif is_mixed and carton_count > 0:
+                    total_ctns = carton_count
+                    logging.info(f'[混装总箱] {sku_spec}: 箱数={carton_count}')
+                elif outer_qty > 0:
+                    total_ctns = qty // outer_qty if qty else 0
+                else:
+                    total_ctns = ln.get('total_ctns', 0) or 0
+
+                # 金额：卡板/混装=总箱×单价，普通=数量×单价
+                if is_pallet and pallet_count > 0:
+                    total_usd = total_ctns * price
+                elif is_mixed and carton_count > 0:
+                    total_usd = total_ctns * price
+                    logging.info(f'[混装金额] {sku_spec}: {total_ctns}*{price}={total_usd}')
+                else:
+                    total_usd = qty * price
+
+                line_ship = ln.get('delivery', '') or ship_date_str
+                line_ship_dt = None
+                if line_ship:
+                    try:
+                        line_ship_dt = datetime.strptime(str(line_ship)[:10], '%Y-%m-%d')
+                    except:
+                        line_ship_dt = ship_dt
+                else:
+                    line_ship_dt = ship_dt
+                insp_dt = _calc_inspection(line_ship_dt, sku_spec)
+
+                f_sku = f"{po}-{line_no}" if po and line_no else ''
+                item_upper = re.sub(r'[\s\n]+', '', str(sku_spec)).strip().upper()
+
+                # 索引查找：先三元组，再二元组兜底
+                existing_row = index.get((po, item_upper, f_sku))
+                if not existing_row:
+                    existing_row = index.get((po, item_upper))
+                logging.info(f'[索引匹配] po={po} item={item_upper} f_sku={f_sku} '
+                             f'-> row={existing_row or "未找到(新单)"}')
+
+                if existing_row:
+                    # ========== 修改单 ==========
+                    r = existing_row
+                    updates = [(COL['qty'], qty)]
+                    if inner_pcs:
+                        updates.append((COL['inner'], inner_pcs))
+                    if outer_qty:
+                        updates.append((COL['outer'], outer_qty))
+                    # 总箱：公式=数量÷外箱
+                    updates.append((COL['total_box'], f'=RC{COL["qty"]}/RC{COL["outer"]}', True))
+                    if customer_po:
+                        updates.append((COL['cpo'], customer_po))
+                    if line_ship_dt:
+                        updates.append((COL['ship_date'], _date_serial(line_ship_dt)))
+                    if insp_dt:
+                        updates.append((COL['insp_date'], _date_serial(insp_dt)))
+                    if price:
+                        updates.append((COL['price'], round(price, 4)))
+                    # 金额：卡板=总箱×单价，普通=数量×单价
+                    if is_pallet and pallet_count > 0:
+                        updates.append((COL['amount'], f'=RC{COL["total_box"]}*RC{COL["price"]}', True))
+                    else:
+                        updates.append((COL['amount'], f'=RC{COL["qty"]}*RC{COL["price"]}', True))
+
+                    # 列号→中文名映射（用于变化明细展示）
+                    _COL_NAMES = {
+                        COL['qty']: '数量', COL['inner']: '内箱', COL['outer']: '外箱',
+                        COL['total_box']: '总箱', COL['cpo']: '客PO',
+                        COL['ship_date']: '出货期', COL['insp_date']: '验货期',
+                        COL['price']: '单价', COL['amount']: '金额',
+                    }
+                    changed_fields = []  # 记录具体变化
+                    for _upd in updates:
+                        is_formula = len(_upd) == 3 and _upd[2] is True
+                        col_num, new_val = _upd[0], _upd[1]
+                        old_val = ws.Cells(r, col_num).Value
+                        # 公式列：直接写入不比较（公式结果依赖其他单元格）
+                        if is_formula:
+                            old_show = str(old_val or '')
+                            ws.Cells(r, col_num).FormulaR1C1 = new_val
+                            ws.Cells(r, col_num).Interior.Color = BLUE_COM
+                            col_label = _COL_NAMES.get(col_num, f'列{col_num}')
+                            new_display = '公式'
+                            changed_fields.append(f'{col_label} {old_show}→{new_display}')
+                            continue
+                        # COM返回datetime时转为序列号比较
+                        old_display = old_val  # 用于展示的原始值
+                        if hasattr(old_val, 'year'):
+                            try:
+                                old_display = _fmt_date(old_val.replace(tzinfo=None))
+                                old_val = (old_val.replace(tzinfo=None) - datetime(1899, 12, 30)).days
+                            except Exception:
+                                pass
+                        # 值相同则跳过（不标蓝）
+                        try:
+                            if old_val is not None and new_val is not None:
+                                o_f = float(old_val)
+                                n_f = float(new_val)
+                                if abs(o_f - n_f) < 0.0001:
+                                    continue
+                        except (ValueError, TypeError):
+                            pass
+                        o_s = str(old_val or '').strip()
+                        n_s = str(new_val or '').strip()
+                        if o_s.endswith('.0'):
+                            o_s = o_s[:-2]
+                        if n_s.endswith('.0'):
+                            n_s = n_s[:-2]
+                        if o_s == n_s:
+                            continue
+                        # PO号/客PO：字符串写入，保留前导零（如客PO 0581402）
+                        if col_num in (COL['po'], COL['cpo']):
+                            _pv = str(new_val).strip()
+                            if _pv.endswith('.0'):
+                                _pv = _pv[:-2]
+                            ws.Cells(r, col_num).NumberFormat = '@'
+                            ws.Cells(r, col_num).Value = _pv
+                        else:
+                            ws.Cells(r, col_num).Value = new_val
+                        ws.Cells(r, col_num).Interior.Color = BLUE_COM
+                        # 记录变化：日期列用可读格式
+                        col_label = _COL_NAMES.get(col_num, f'列{col_num}')
+                        if col_num in (COL['ship_date'], COL['insp_date']):
+                            new_display = _fmt_date(datetime(1899, 12, 30) + timedelta(days=int(new_val))) if new_val else ''
+                            old_show = str(old_display or '')
+                        else:
+                            old_show = o_s
+                            new_display = n_s
+                        changed_fields.append(f'{col_label} {old_show}→{new_display}')
+
+                    if changed_fields:
+                        mod_count += 1
+                        mod_details.append({
+                            'item': sku_spec, 'row': r, 'po': po,
+                            'changes': changed_fields
+                        })
+                        logging.info(f'[总排期修改] row={r} PO={po} SKU={sku_spec} 变化: {", ".join(changed_fields)}')
+                else:
+                    # ========== 新单 → 收集到列表（不写入Z盘）==========
+                    cn_name = cn_names.get(_item_base(sku_spec), '')
+                    # 接单日期转datetime
+                    po_date_dt = None
+                    if po_date:
+                        try:
+                            po_date_dt = datetime.strptime(str(po_date)[:10], '%Y-%m-%d')
+                        except Exception:
+                            pass
+                    new_rows.append({
+                        'po_date': po_date_dt, 'customer': customer, 'dest': dest,
+                        'po': po, 'cpo': customer_po, 'sku_line': f_sku,
+                        'item': sku_spec, 'cn_name': cn_name,
+                        'qty': qty, 'inner': inner_pcs, 'outer': outer_qty,
+                        'total_box': '__FORMULA_TOTAL_BOX__',
+                        'ship_date': line_ship_dt,
+                        'insp_date': insp_dt,
+                        'remark': full_note,
+                        'from_person': from_person.strip() if from_person else '',
+                        'price': round(price, 4) if price else '',
+                        'amount': '__FORMULA_AMOUNT_PALLET__' if (is_pallet and pallet_count > 0) else '__FORMULA_AMOUNT__',
+                    })
+                    new_count += 1
+                    new_details.append(sku_spec)
+                    logging.info(f'[总排期新单] PO={po} SKU={sku_spec} (收集到Excel)')
+
+        if mod_count:
+            wb.Save()
+            logging.info(f'[总排期] 修改{mod_count}行已保存')
+
+        # 新单生成到独立Excel
+        export_file = ''
+        if new_rows and export_dir:
+            export_file = _generate_new_rows_excel(new_rows, export_dir)
+
+        parts = []
+        if mod_count: parts.append(f'修改{mod_count}行(已写入总排期)')
+        if new_count: parts.append(f'新增{new_count}行(已生成Excel)')
+        msg = '、'.join(parts) if parts else '无变化'
+        logging.info(f'[总排期] {msg}')
+        return {'ok': True, 'modified': mod_count, 'new_count': new_count,
+                'msg': msg, 'export_file': export_file,
+                'mod_details': mod_details, 'new_details': new_details,
+                'warnings': warnings}
+
+    except Exception as e:
+        logging.error(f'[总排期] 写入失败: {e}')
+        raise
+    finally:
+        try:
+            if wb:
+                wb.Close(SaveChanges=False)
+        except:
+            pass
+        try:
+            if wps:
+                wps.Quit()
+        except:
+            pass
+        pythoncom.CoUninitialize()
 
 
 def _analyze_orders_readonly(orders, index, cn_names, max_row, export_dir):
@@ -417,6 +670,16 @@ def _analyze_orders_readonly(orders, index, cn_names, max_row, export_dir):
             elif is_mixed and carton_count > 0:
                 outer_qty = qty // carton_count
 
+            # 总箱数
+            if is_pallet and pallet_count > 0:
+                total_ctns = pallet_count
+            elif is_mixed and carton_count > 0:
+                total_ctns = carton_count
+            elif outer_qty > 0:
+                total_ctns = qty // outer_qty if qty else 0
+            else:
+                total_ctns = ln.get('total_ctns', 0) or 0
+
             line_ship = ln.get('delivery', '') or ship_date_str
             line_ship_dt = None
             if line_ship:
@@ -439,8 +702,11 @@ def _analyze_orders_readonly(orders, index, cn_names, max_row, export_dir):
                 # 修改单：只记录明细，不写入
                 mod_count += 1
                 changes = [f'数量={qty}']
+                if inner_pcs: changes.append(f'内箱={inner_pcs}')
+                if outer_qty: changes.append(f'外箱={outer_qty}')
                 if price: changes.append(f'单价={price}')
                 if line_ship_dt: changes.append(f'出货={line_ship_dt.strftime("%Y-%m-%d")}')
+                if insp_dt: changes.append(f'验货={insp_dt.strftime("%Y-%m-%d")}')
                 mod_details.append({
                     'item': sku_spec, 'row': existing_row, 'po': po,
                     'changes': changes
@@ -477,260 +743,6 @@ def _analyze_orders_readonly(orders, index, cn_names, max_row, export_dir):
     if mod_count: parts.append(f'识别修改{mod_count}行(需手动更新)')
     if new_count: parts.append(f'新增{new_count}行(已生成Excel)')
     msg = '、'.join(parts) if parts else '无变化'
-    return {'ok': True, 'modified': mod_count, 'new_count': new_count,
-            'msg': msg, 'export_file': export_file,
-            'mod_details': mod_details, 'new_details': new_details,
-            'warnings': warnings}
-
-
-def _write_orders_com(ws, wb, wps, orders, index, cn_names, max_row, export_dir):
-    """COM写入模式（Windows + WPS）：原始完整写入逻辑"""
-    new_count = 0
-    mod_count = 0
-    new_rows = []
-    mod_details = []
-    warnings = []
-    new_details = []
-
-    for order in orders:
-        header = order.get('header') or order
-        po = _normalize_po(header.get('po_number', '') or order.get('po_number', ''))
-        po_date = header.get('po_date', '') or order.get('po_date', '')
-        customer = header.get('customer', '') or order.get('customer', '')
-        dest = header.get('destination_cn', '') or order.get('destination_cn', '')
-        from_person = header.get('from_person', '') or order.get('from_person', '')
-        ship_date_str = header.get('ship_date', '') or order.get('ship_date', '')
-
-        tc = header.get('tracking_code', '') or order.get('tracking_code', '') or ''
-        pi = header.get('packaging_info', '') or order.get('packaging_info', '') or ''
-        rm = header.get('remark', '') or order.get('remark', '') or ''
-        note_parts = []
-        if tc: note_parts.append(tc)
-        if pi: note_parts.append(f'Packaging Info: {pi}')
-        if rm: note_parts.append(f'Remark: {rm}')
-        full_note = '\n'.join(note_parts)
-        # 检测备注字段缺失（可能是图片/文本框格式）
-        _fname = order.get('filename', '')
-        if not pi and not rm:
-            warnings.append(f'{_fname}(PO={po}): 包装信息和备注均为空，可能是图片格式，请手动检查PO原文')
-        elif not pi:
-            warnings.append(f'{_fname}(PO={po}): 包装信息为空，可能是图片格式，请手动检查')
-        elif not rm:
-            warnings.append(f'{_fname}(PO={po}): 备注(Remark)为空，可能是图片格式，请手动检查')
-
-        ship_dt = None
-        if ship_date_str:
-            try:
-                ship_dt = datetime.strptime(str(ship_date_str)[:10], '%Y-%m-%d')
-            except:
-                pass
-
-        # 双排期货号展开：一行变多行
-        _lines = _expand_dual_items(order.get('lines', []))
-
-        for ln in _lines:
-            sku_spec = ln.get('sku_spec', '') or ln.get('sku', '')
-            qty = ln.get('qty', 0) or 0
-            price = ln.get('price', 0) or 0
-            inner_pcs = ln.get('inner_pcs', 0) or 0
-            outer_qty = ln.get('outer_qty', 0) or 0
-            customer_po = ln.get('customer_po', '')
-            is_pallet = ln.get('is_pallet', False)
-            pallet_count = ln.get('pallet_count', 0) or 0
-            line_no = ln.get('line_no', '')
-
-            # 混装标记
-            is_mixed = ln.get('is_mixed_carton', False)
-            carton_count = ln.get('carton_count', 0) or 0
-
-            # 外箱：混装=qty÷箱数，卡板=qty÷卡板数，普通=PO的outer_qty
-            if is_pallet and pallet_count > 0:
-                if qty > pallet_count:
-                    outer_qty = qty // pallet_count
-            elif is_mixed and carton_count > 0:
-                outer_qty = qty // carton_count
-                logging.info(f'[混装外箱] {sku_spec}: {qty}//{carton_count}={outer_qty}')
-
-            # 总箱数：卡板=卡板数，混装=箱数，普通=qty÷外箱
-            if is_pallet and pallet_count > 0:
-                total_ctns = pallet_count
-            elif is_mixed and carton_count > 0:
-                total_ctns = carton_count
-                logging.info(f'[混装总箱] {sku_spec}: 箱数={carton_count}')
-            elif outer_qty > 0:
-                total_ctns = qty // outer_qty if qty else 0
-            else:
-                total_ctns = ln.get('total_ctns', 0) or 0
-
-            # 金额：卡板/混装=总箱×单价，普通=数量×单价
-            if is_pallet and pallet_count > 0:
-                total_usd = total_ctns * price
-            elif is_mixed and carton_count > 0:
-                total_usd = total_ctns * price
-                logging.info(f'[混装金额] {sku_spec}: {total_ctns}*{price}={total_usd}')
-            else:
-                total_usd = qty * price
-
-            line_ship = ln.get('delivery', '') or ship_date_str
-            line_ship_dt = None
-            if line_ship:
-                try:
-                    line_ship_dt = datetime.strptime(str(line_ship)[:10], '%Y-%m-%d')
-                except:
-                    line_ship_dt = ship_dt
-            else:
-                line_ship_dt = ship_dt
-            insp_dt = _calc_inspection(line_ship_dt, sku_spec)
-
-            f_sku = f"{po}-{line_no}" if po and line_no else ''
-            item_upper = re.sub(r'[\s\n]+', '', str(sku_spec)).strip().upper()
-
-            # 索引查找：先三元组，再二元组兜底
-            existing_row = index.get((po, item_upper, f_sku))
-            if not existing_row:
-                existing_row = index.get((po, item_upper))
-            logging.info(f'[索引匹配] po={po} item={item_upper} f_sku={f_sku} '
-                         f'-> row={existing_row or "未找到(新单)"}')
-
-            if existing_row:
-                # ========== 修改单 ==========
-                r = existing_row
-                updates = [(COL['qty'], qty)]
-                if inner_pcs:
-                    updates.append((COL['inner'], inner_pcs))
-                if outer_qty:
-                    updates.append((COL['outer'], outer_qty))
-                # 总箱：公式=数量÷外箱
-                updates.append((COL['total_box'], f'=RC{COL["qty"]}/RC{COL["outer"]}', True))
-                if customer_po:
-                    updates.append((COL['cpo'], customer_po))
-                if line_ship_dt:
-                    updates.append((COL['ship_date'], _date_serial(line_ship_dt)))
-                if insp_dt:
-                    updates.append((COL['insp_date'], _date_serial(insp_dt)))
-                if price:
-                    updates.append((COL['price'], round(price, 4)))
-                # 金额：卡板=总箱×单价，普通=数量×单价
-                if is_pallet and pallet_count > 0:
-                    updates.append((COL['amount'], f'=RC{COL["total_box"]}*RC{COL["price"]}', True))
-                else:
-                    updates.append((COL['amount'], f'=RC{COL["qty"]}*RC{COL["price"]}', True))
-
-                # 列号→中文名映射（用于变化明细展示）
-                _COL_NAMES = {
-                    COL['qty']: '数量', COL['inner']: '内箱', COL['outer']: '外箱',
-                    COL['total_box']: '总箱', COL['cpo']: '客PO',
-                    COL['ship_date']: '出货期', COL['insp_date']: '验货期',
-                    COL['price']: '单价', COL['amount']: '金额',
-                }
-                changed_fields = []  # 记录具体变化
-                for _upd in updates:
-                    is_formula = len(_upd) == 3 and _upd[2] is True
-                    col_num, new_val = _upd[0], _upd[1]
-                    old_val = ws.Cells(r, col_num).Value
-                    # 公式列：直接写入不比较（公式结果依赖其他单元格）
-                    if is_formula:
-                        old_show = str(old_val or '')
-                        ws.Cells(r, col_num).FormulaR1C1 = new_val
-                        ws.Cells(r, col_num).Interior.Color = BLUE_COM
-                        col_label = _COL_NAMES.get(col_num, f'列{col_num}')
-                        new_display = '公式'
-                        changed_fields.append(f'{col_label} {old_show}→{new_display}')
-                        continue
-                    # COM返回datetime时转为序列号比较
-                    old_display = old_val  # 用于展示的原始值
-                    if hasattr(old_val, 'year'):
-                        try:
-                            old_display = _fmt_date(old_val.replace(tzinfo=None))
-                            old_val = (old_val.replace(tzinfo=None) - datetime(1899, 12, 30)).days
-                        except Exception:
-                            pass
-                    # 值相同则跳过（不标蓝）
-                    try:
-                        if old_val is not None and new_val is not None:
-                            o_f = float(old_val)
-                            n_f = float(new_val)
-                            if abs(o_f - n_f) < 0.0001:
-                                continue
-                    except (ValueError, TypeError):
-                        pass
-                    o_s = str(old_val or '').strip()
-                    n_s = str(new_val or '').strip()
-                    if o_s.endswith('.0'):
-                        o_s = o_s[:-2]
-                    if n_s.endswith('.0'):
-                        n_s = n_s[:-2]
-                    if o_s == n_s:
-                        continue
-                    # PO号/客PO：纯数字转int + 数值格式0位小数
-                    if col_num in (COL['po'], COL['cpo']):
-                        _pv = str(new_val).strip()
-                        if _pv.isdigit():
-                            ws.Cells(r, col_num).Value = int(_pv)
-                            ws.Cells(r, col_num).NumberFormat = '0'
-                        else:
-                            ws.Cells(r, col_num).Value = new_val
-                    else:
-                        ws.Cells(r, col_num).Value = new_val
-                    ws.Cells(r, col_num).Interior.Color = BLUE_COM
-                    # 记录变化：日期列用可读格式
-                    col_label = _COL_NAMES.get(col_num, f'列{col_num}')
-                    if col_num in (COL['ship_date'], COL['insp_date']):
-                        new_display = _fmt_date(datetime(1899, 12, 30) + timedelta(days=int(new_val))) if new_val else ''
-                        old_show = str(old_display or '')
-                    else:
-                        old_show = o_s
-                        new_display = n_s
-                    changed_fields.append(f'{col_label} {old_show}→{new_display}')
-
-                if changed_fields:
-                    mod_count += 1
-                    mod_details.append({
-                        'item': sku_spec, 'row': r, 'po': po,
-                        'changes': changed_fields
-                    })
-                    logging.info(f'[总排期修改] row={r} PO={po} SKU={sku_spec} 变化: {", ".join(changed_fields)}')
-            else:
-                # ========== 新单 → 收集到列表（不写入Z盘）==========
-                cn_name = cn_names.get(_item_base(sku_spec), '')
-                # 接单日期转datetime
-                po_date_dt = None
-                if po_date:
-                    try:
-                        po_date_dt = datetime.strptime(str(po_date)[:10], '%Y-%m-%d')
-                    except Exception:
-                        pass
-                new_rows.append({
-                    'po_date': po_date_dt, 'customer': customer, 'dest': dest,
-                    'po': po, 'cpo': customer_po, 'sku_line': f_sku,
-                    'item': sku_spec, 'cn_name': cn_name,
-                    'qty': qty, 'inner': inner_pcs, 'outer': outer_qty,
-                    'total_box': '__FORMULA_TOTAL_BOX__',
-                    'ship_date': line_ship_dt,
-                    'insp_date': insp_dt,
-                    'remark': full_note,
-                    'from_person': from_person.strip() if from_person else '',
-                    'price': round(price, 4) if price else '',
-                    'amount': '__FORMULA_AMOUNT_PALLET__' if (is_pallet and pallet_count > 0) else '__FORMULA_AMOUNT__',
-                })
-                new_count += 1
-                new_details.append(sku_spec)
-                logging.info(f'[总排期新单] PO={po} SKU={sku_spec} (收集到Excel)')
-
-    if mod_count:
-        wb.Save()
-        logging.info(f'[总排期] 修改{mod_count}行已保存')
-
-    # 新单生成到独立Excel
-    export_file = ''
-    if new_rows and export_dir:
-        export_file = _generate_new_rows_excel(new_rows, export_dir)
-
-    parts = []
-    if mod_count: parts.append(f'修改{mod_count}行(已写入总排期)')
-    if new_count: parts.append(f'新增{new_count}行(已生成Excel)')
-    msg = '、'.join(parts) if parts else '无变化'
-    logging.info(f'[总排期] {msg}')
     return {'ok': True, 'modified': mod_count, 'new_count': new_count,
             'msg': msg, 'export_file': export_file,
             'mod_details': mod_details, 'new_details': new_details,
@@ -807,10 +819,12 @@ def _generate_new_rows_excel(new_rows, output_dir):
                 if key in _DATE_KEYS and val:
                     cell.number_format = 'yyyy/m/d'
                 elif key in ('po', 'cpo') and val:
+                    # 字符串写入，保留前导零（如客PO 0581402）
                     _pv = str(val).strip()
-                    if _pv.replace('.0', '').isdigit():
-                        cell.value = int(float(val))
-                        cell.number_format = '0'
+                    if _pv.endswith('.0'):
+                        _pv = _pv[:-2]
+                    cell.value = _pv
+                    cell.number_format = '@'
 
     wb = openpyxl.Workbook()
 
@@ -1064,6 +1078,12 @@ def generate_excel(orders, output_dir):
                 cell.alignment = Alignment(vertical='center', wrap_text=(key == 'remark'))
                 if key in ('po_date', 'ship_date', 'insp_date') and val:
                     cell.number_format = 'yyyy/m/d'
+                elif key in ('po', 'cpo') and val:
+                    _pv = str(val).strip()
+                    if _pv.endswith('.0'):
+                        _pv = _pv[:-2]
+                    cell.value = _pv
+                    cell.number_format = '@'
             row_idx += 1
 
     # 列宽

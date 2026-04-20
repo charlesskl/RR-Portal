@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h3>库存</h3>
+  <div>
+    <a href="{{ url_for('pigments.new') }}" class="btn btn-primary"><i class="bi bi-plus"></i> 新增</a>
+    <a href="{{ url_for('pigments.export_excel') }}" class="btn btn-success"><i class="bi bi-download"></i> 导出</a>
+    <a href="{{ url_for('pigments.import_excel') }}" class="btn btn-warning"><i class="bi bi-upload"></i> 导入</a>
+    <a href="{{ url_for('pigments.template_excel') }}" class="btn btn-outline-secondary"><i class="bi bi-file-earmark"></i> 模板</a>
+  </div>
+</div>
+<table class="table table-hover dt">
+  <thead><tr><th>色粉编号</th><th>进货色粉编号</th><th>当前库存(kg)</th><th>单价(元/kg)</th><th>库存金额</th><th>操作</th></tr></thead>
+  <tbody>
+    {% for p in pigments %}
+      {% set qty = p.stock.quantity if p.stock else 0 %}
+      <tr{% if qty <= p.min_stock %} class="table-warning"{% endif %}>
+        <td>{{ p.code }}</td>
+        <td>{{ p.purchase_code }}</td>
+        <td>{{ qty }}</td>
+        <td>{{ "%.2f"|format(p.unit_price) }}</td>
+        <td>{{ "%.2f"|format(qty * p.unit_price) }}</td>
+        <td>
+          <a href="{{ url_for('pigments.edit', pid=p.id) }}" class="btn btn-sm btn-outline-primary"><i class="bi bi-pencil"></i></a>
+          <form action="{{ url_for('pigments.delete', pid=p.id) }}" method="post" class="d-inline" onsubmit="return confirm('确认删除?')">
+            <button class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button>
+          </form>
+        </td>
+      </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block content %}
+<h3>拍照识别出库单</h3>
+{% if rows is none %}
+<p class="text-muted">上传领用单据照片(jpg/png),系统会自动识别色粉编号与数量。识别后可在表格中核对修改,再一键批量出库。</p>
+<form method="post" enctype="multipart/form-data" class="mb-3" style="max-width:500px">
+  <input type="file" name="file" accept="image/*" class="form-control mb-2" required>
+  <button class="btn btn-primary"><i class="bi bi-camera"></i> 上传识别</button>
+  <a href="{{ url_for('transactions.out_list') }}" class="btn btn-secondary">取消</a>
+</form>
+{% else %}
+<p>共识别出 <strong>{{ rows|length }}</strong> 行。<strong>数量按克填写,系统会自动 ÷1000 转成 kg 扣减库存。</strong>色粉编号可点开下拉搜索或直接手动输入。<br><small class="text-muted">编号若在库存里找不到,会自动新建占位色粉(允许负库存),之后可去「颜料档案」修改名称/品牌并补入库。</small></p>
+<form method="post" action="{{ url_for('transactions.out_ocr_submit') }}">
+  <table class="table table-sm" id="ocrTable">
+    <thead><tr><th style="width:30%">识别文本</th><th>色粉编号(搜索/手动输入)</th><th>数量(克)</th><th></th></tr></thead>
+    <tbody>
+      {% for r in rows %}
+      <tr>
+        <td><small class="text-muted">{{ r.raw }}</small></td>
+        <td><input name="pigment_code[]" list="pigmentCodes" autocomplete="off"
+                   class="form-control form-control-sm" placeholder="色粉编号"
+                   value="{{ r.pigment_code or r.purchase_code or '' }}"></td>
+        <td><input type="number" name="quantity[]" value="{{ '%.2f'|format(r.quantity) }}" step="0.01" class="form-control form-control-sm" min="0"></td>
+        <td><button type="button" class="btn btn-sm btn-outline-danger" onclick="this.closest('tr').remove()">删</button></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <button type="button" class="btn btn-outline-secondary mb-3" onclick="addOutRow()">+ 添加行</button>
+  <div>
+    <button class="btn btn-danger"><i class="bi bi-check2"></i> 批量出库</button>
+    <a href="{{ url_for('transactions.out_ocr') }}" class="btn btn-secondary">重新上传</a>
+  </div>
+</form>
+
+<template id="outRowTpl">
+  <tr>
+    <td><small class="text-muted">手动</small></td>
+    <td><input name="pigment_code[]" list="pigmentCodes" autocomplete="off" class="form-control form-control-sm" placeholder="色粉编号"></td>
+    <td><input type="number" step="0.01" name="quantity[]" value="0" class="form-control form-control-sm" min="0"></td>
+    <td><button type="button" class="btn btn-sm btn-outline-danger" onclick="this.closest('tr').remove()">删</button></td>
+  </tr>
+</template>
+<datalist id="pigmentCodes">
+  {% for p in pigments %}
+    <option value="{{ p.code }}">{% if p.purchase_code %}进货:{{ p.purchase_code }} · {% endif %}{{ p.name }}</option>
+    {% if p.purchase_code %}<option value="{{ p.purchase_code }}">编号:{{ p.code }} · {{ p.name }}</option>{% endif %}
+  {% endfor %}
+</datalist>
+<script>
+function addOutRow(){
+  const t = document.getElementById('outRowTpl');
+  document.querySelector('#ocrTable tbody').appendChild(t.content.cloneNode(true));
+}
+</script>
+{% endif %}
+{% endblock %}

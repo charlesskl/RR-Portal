@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}仪表盘 · 配色库存{% endblock %}
+{% block content %}
+<h3 class="mb-4">仪表盘</h3>
+<div class="row g-3 mb-4">
+  <div class="col-md-3"><div class="card text-bg-primary"><div class="card-body"><h6>颜料总数</h6><h2>{{ total_pigments }}</h2></div></div></div>
+  <div class="col-md-3"><div class="card text-bg-success"><div class="card-body"><h6>总瓶数</h6><h2>{{ total_bottles }}</h2></div></div></div>
+  <div class="col-md-3"><div class="card text-bg-warning"><div class="card-body"><h6>低库存</h6><h2>{{ low_stock|length }}</h2></div></div></div>
+  <div class="col-md-3"><div class="card text-bg-info"><div class="card-body"><h6>本月流水</h6><h2>{{ month_tx_count }}</h2></div></div></div>
+</div>
+<div class="row g-3">
+  <div class="col-md-6">
+    <div class="card"><div class="card-body">
+      <h6>色系分布</h6>
+      <canvas id="familyChart"></canvas>
+    </div></div>
+  </div>
+  <div class="col-md-6">
+    <div class="card"><div class="card-body">
+      <h6>低库存清单</h6>
+      <ul class="list-group">
+        {% for p, s in low_stock %}
+          <li class="list-group-item d-flex justify-content-between">
+            <span>{{ p.code or p.purchase_code }}</span>
+            <span class="badge bg-danger">{{ s.quantity }} / {{ p.min_stock }}</span>
+          </li>
+        {% else %}
+          <li class="list-group-item text-muted">无</li>
+        {% endfor %}
+      </ul>
+    </div></div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+const familyLabels = {{ family_data|map(attribute=0)|list|tojson }};
+const familyCounts = {{ family_data|map(attribute=1)|list|tojson }};
+new Chart(document.getElementById('familyChart'), {
+  type: 'doughnut',
+  data: { labels: familyLabels, datasets: [{ data: familyCounts }] }
+});
+</script>
+{% endblock %}

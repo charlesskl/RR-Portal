@@ -9,7 +9,7 @@ from collections import defaultdict
 from flask import Flask, render_template, request, jsonify, send_file
 from excel_po_parser import ExcelPOParser
 from master_schedule import write_orders, lookup_schedule_info
-from generate_yellow_summary import generate_summary
+from generate_yellow_summary import generate_summary, generate_summary_excel
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 app = Flask(__name__, template_folder=os.path.join(APP_DIR, 'templates'))
@@ -268,6 +268,23 @@ def yellow_summary():
         return jsonify(result)
     except Exception as e:
         return jsonify({'error': f'生成汇总失败: {e}'}), 500
+
+
+@app.route('/api/yellow-summary-download', methods=['POST'])
+def yellow_summary_download():
+    """生成有填充行汇总Excel并下载"""
+    mp = _get_master_path()
+    if not mp or not os.path.exists(mp):
+        return jsonify({'error': '请先上传总排期文件'}), 400
+    export_dir = app.config['EXPORT_FOLDER']
+    try:
+        fname = generate_summary_excel(mp, export_dir)
+        if not fname:
+            return jsonify({'error': '无整行填充行，无法生成'}), 400
+        filepath = os.path.join(export_dir, fname)
+        return send_file(filepath, as_attachment=True, download_name=fname)
+    except Exception as e:
+        return jsonify({'error': f'生成汇总Excel失败: {e}'}), 500
 
 
 if __name__ == '__main__':

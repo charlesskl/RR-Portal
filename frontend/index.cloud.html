@@ -177,7 +177,7 @@
         <div class="stat-label">部门数量</div>
       </div>
       <div class="stat-card">
-        <div class="stat-value" id="statPlugins">10</div>
+        <div class="stat-value" id="statPlugins">12</div>
         <div class="stat-label">应用数量</div>
       </div>
       <div class="stat-card">
@@ -287,6 +287,12 @@
               <div class="plugin-info">
                 <div class="plugin-dot gray" id="zuruDot"></div>
                 <span class="plugin-name">ZURU出货助手</span>
+              </div>
+            </div>
+            <div class="plugin-item">
+              <div class="plugin-info">
+                <div class="plugin-dot gray" id="zuruOrderDot"></div>
+                <span class="plugin-name">ZURU接单表入单系统</span>
               </div>
             </div>
             <div class="plugin-item">
@@ -461,7 +467,7 @@
       <div class="dept-icon business" style="width:40px;height:40px;font-size:18px;">&#128176;</div>
       业务部
     </div>
-    <div class="page-subtitle">ZURU出货 · 报价管理 · TOMY排期核对 · ZURU总排期入单</div>
+    <div class="page-subtitle">ZURU出货 · ZURU接单表入单 · 报价管理 · TOMY排期核对 · ZURU总排期入单</div>
 
     <div class="detail-plugin-card">
       <div class="detail-plugin-left">
@@ -480,6 +486,26 @@
       <div class="detail-plugin-right">
         <div class="detail-plugin-status"><div class="plugin-dot gray" id="zuruDetailDot"></div> 检查中...</div>
         <a href="/zuru-shipment/" target="_blank" class="btn btn-primary">打开系统</a>
+      </div>
+    </div>
+
+    <div class="detail-plugin-card">
+      <div class="detail-plugin-left">
+        <div class="detail-plugin-icon" style="background:linear-gradient(135deg,#f59e0b,#ef4444);">&#128221;</div>
+        <div>
+          <div class="detail-plugin-name">ZURU接单表入单系统</div>
+          <div class="detail-plugin-desc">上传 PO Excel 自动解析入单，生成接单表，支持 VLOOKUP 匹配、日期码与库存异常报告</div>
+          <div class="feature-grid">
+            <div class="feature-tag">&#128196; PO Excel 解析</div>
+            <div class="feature-tag">&#128269; VLOOKUP 匹配</div>
+            <div class="feature-tag">&#128197; 日期码生成</div>
+            <div class="feature-tag">&#128230; 接单表导出</div>
+          </div>
+        </div>
+      </div>
+      <div class="detail-plugin-right">
+        <div class="detail-plugin-status"><div class="plugin-dot gray" id="zuruOrderDetailDot"></div> 检查中...</div>
+        <a href="/zuru-order-system/" target="_blank" class="btn btn-primary">打开系统</a>
       </div>
     </div>
 
@@ -632,6 +658,7 @@ async function checkHealth() {
       { name: 'jiangping', url: '/jiangping/health', dot: 'jiangpingDot', detailDot: 'jiangpingDetailDot' },
       { name: 'paiji', url: '/paiji/health', dot: 'paijiDot', detailDot: 'paijiDetailDot' },
       { name: 'zuru', url: '/zuru-shipment/health', dot: 'zuruDot', detailDot: 'zuruDetailDot' },
+      { name: 'zuruOrder', url: '/zuru-order-system/health', dot: 'zuruOrderDot', detailDot: 'zuruOrderDetailDot' },
       { name: 'liwenjuan', url: '/liwenjuan/health', dot: 'liwenjuanDot', detailDot: 'liwenjuanDetailDot' },
       { name: 'quotation', url: '/quotation/health', dot: 'quotationDot', detailDot: 'quotationDetailDot' },
       { name: 'tomy', url: '/tomy-paiqi/health', dot: 'tomyDot', detailDot: 'tomyDetailDot' },

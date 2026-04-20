@@ -226,6 +226,8 @@ services:
       - "./apps/zuru-order-system/data:/app/data"
       - "./apps/zuru-order-system/uploads:/app/uploads"
       - "./apps/zuru-order-system/exports:/app/exports"
+    mem_limit: 512m
+    memswap_limit: 512m
     restart: unless-stopped
     logging:
       driver: json-file

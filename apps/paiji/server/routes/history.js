@@ -132,27 +132,30 @@ router.post('/import', upload.single('file'), async (req, res) => {
     const batch = Date.now().toString();
     const workshop = req.body.workshop || 'B';
     const insert = db.prepare(`
-      INSERT INTO history_records (machine_no, product_code, mold_name, color, color_powder_no,
+      INSERT OR IGNORE INTO history_records (machine_no, product_code, mold_name, color, color_powder_no,
         material_type, shot_weight, material_kg, sprue_pct, ratio_pct, accumulated,
         quantity_needed, shortage, order_no, target_24h, target_11h, packing_qty, notes, import_batch, workshop)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     const insertAll = db.transaction((rows) => {
-      let count = 0;
+      let inserted = 0;
+      let skipped = 0;
       for (const r of rows) {
-        insert.run(
+        const result = insert.run(
           r.machine_no, r.product_code, r.mold_name, r.color, r.color_powder_no,
           r.material_type, r.shot_weight, r.material_kg, r.sprue_pct, r.ratio_pct,
           r.accumulated, r.quantity_needed, r.shortage, r.order_no,
           r.target_24h, r.target_11h, r.packing_qty, r.notes, batch, workshop
         );
-        count++;
+        if (result.changes > 0) inserted++;
+        else skipped++;
       }
-      return count;
+      return { inserted, skipped };
     });
 
-    const count = insertAll(records);
+    const { inserted, skipped } = insertAll(records);
+    const count = inserted;
 
     // 自动刷新机台啤重统计（按车间过滤）
     const stats = db.prepare(`
@@ -171,7 +174,10 @@ router.post('/import', upload.single('file'), async (req, res) => {
       for (const s of stats) updateMachine.run(s.min_w, s.max_w, s.avg_w, s.cnt, prefix + s.machine_no, workshop);
     })();
 
-    res.json({ message: `成功导入${count}条历史记录`, count, batch });
+    const msg = skipped > 0
+      ? `导入 ${inserted} 条，跳过 ${skipped} 条重复记录`
+      : `成功导入${count}条历史记录`;
+    res.json({ message: msg, count, inserted, skipped, batch });
   } catch (err) {
     console.error('导入历史数据失败:', err);
     res.status(500).json({ message: '导入失败: ' + err.message });

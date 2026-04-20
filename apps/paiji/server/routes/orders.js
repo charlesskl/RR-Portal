@@ -112,17 +112,6 @@ router.delete('/:id', (req, res) => {
   }
 });
 
-// 清空所有订单（仅当前车间）
-router.delete('/', (req, res) => {
-  try {
-    const workshop = req.query.workshop || req.body.workshop || 'B';
-    db.prepare('DELETE FROM orders WHERE workshop = ?').run(workshop);
-    res.json({ message: '已清空' });
-  } catch (err) {
-    res.status(500).json({ message: '清空失败：' + err.message });
-  }
-});
-
 // 下载订单导入模板
 router.get('/template', async (req, res) => {
   const wb = new ExcelJS.Workbook();
@@ -239,6 +228,21 @@ router.post('/import', upload.single('file'), async (req, res) => {
     }
 
     const workshop = req.body.workshop || 'B';
+
+    // 批内去重：同一份文件如果有完全相同的 (order_no + product_code + mold_no) 只保留第一条
+    const seen = new Set();
+    const dedup = [];
+    let dupeCount = 0;
+    for (const o of parsed) {
+      const key = [o.order_no || '', o.product_code || '', o.mold_no || ''].join('|');
+      if (key === '||' || !seen.has(key)) {
+        seen.add(key);
+        dedup.push(o);
+      } else {
+        dupeCount++;
+      }
+    }
+
     const insertMany = db.transaction((rows) => {
       for (const o of rows) {
         stmts().insert.run(
@@ -252,8 +256,11 @@ router.post('/import', upload.single('file'), async (req, res) => {
       }
     });
 
-    insertMany(parsed);
-    res.json({ message: `成功导入 ${parsed.length} 条订单`, count: parsed.length, added: parsed.length });
+    insertMany(dedup);
+    const msg = dupeCount > 0
+      ? `导入 ${dedup.length} 条订单（跳过 ${dupeCount} 条文件内重复）`
+      : `成功导入 ${dedup.length} 条订单`;
+    res.json({ message: msg, count: dedup.length, added: dedup.length, dupeCount });
   } catch (err) {
     res.status(500).json({ message: '导入失败：' + err.message });
   } finally {

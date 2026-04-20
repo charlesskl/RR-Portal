@@ -81,6 +81,9 @@ function initDatabase() {
   db.exec(`CREATE INDEX IF NOT EXISTS idx_history_shot_weight ON history_records(machine_no, shot_weight)`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_history_material ON history_records(material_type)`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_history_mold ON history_records(mold_name)`);
+  // 去重：同一批次里同一机台同一订单同一产品不重复（允许 import_batch 为 NULL 多占位）
+  db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS uq_history_batch_item
+           ON history_records(import_batch, machine_no, order_no, product_code, source_date)`);
 
   // ========== 排机单表 ==========
   db.exec(`

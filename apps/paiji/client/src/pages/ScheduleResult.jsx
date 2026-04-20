@@ -62,7 +62,7 @@ export default function ScheduleResult({ workshop = 'B' }) {
       const { data } = await axios.get('/api/machines', { params: { workshop } });
       setMachines(data.sort((a, b) => getMachineNum(a.machine_no) - getMachineNum(b.machine_no)));
     } catch (e) {
-      // 静默失败
+      message.error('机台列表加载失败，机械手/机台切换功能不可用');
     }
   };
 

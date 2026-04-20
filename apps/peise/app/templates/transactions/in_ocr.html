@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block content %}
+<h3>拍照识别入库单</h3>
+{% if rows is none %}
+<p class="text-muted">上传进货单据照片(jpg/png),系统会自动识别色粉编号、数量、单价。识别后可在表格中核对修改,再一键批量入库。</p>
+<form method="post" enctype="multipart/form-data" class="mb-3" style="max-width:500px">
+  <input type="file" name="file" accept="image/*" class="form-control mb-2" required>
+  <button class="btn btn-primary"><i class="bi bi-camera"></i> 上传识别</button>
+  <a href="{{ url_for('transactions.in_list') }}" class="btn btn-secondary">取消</a>
+</form>
+{% else %}
+<p>共识别出 <strong>{{ rows|length }}</strong> 行。请核对后提交,不需要的行点"删"移除。<br><small class="text-muted">已匹配库存的行显示 <span class="badge bg-success-subtle text-success-emphasis">→ 编号</span>;未匹配的行可手填"色粉编号",留空则自动新建待复核色粉。</small></p>
+<form method="post" action="{{ url_for('transactions.in_ocr_submit') }}">
+  <table class="table table-sm" id="ocrTable">
+    <thead><tr><th>进货色粉编号</th><th>色粉编号</th><th>数量(kg)</th><th>单价</th><th style="width:25%">识别文本</th><th></th></tr></thead>
+    <tbody>
+      {% for r in rows %}
+      <tr>
+        <td><input name="purchase_code[]" value="{{ r.purchase_code }}" class="form-control form-control-sm" readonly></td>
+        <td>
+          <input type="hidden" name="pigment_id[]" value="{{ r.pigment_id or '' }}">
+          {% if r.pigment_id %}
+            <span class="badge bg-success-subtle text-success-emphasis">→ {{ r.pigment_code or '(待填)' }}</span>
+            <input type="hidden" name="new_code[]" value="">
+          {% else %}
+            <input name="new_code[]" class="form-control form-control-sm" placeholder="留空则自动新建">
+          {% endif %}
+        </td>
+        <td><input type="number" name="quantity[]" value="{{ '%.2f'|format(r.quantity) }}" step="0.01" class="form-control form-control-sm" min="0"></td>
+        <td><input type="number" step="0.01" name="unit_price[]" value="{{ '%.2f'|format(r.unit_price) }}" class="form-control form-control-sm"></td>
+        <td><small class="text-muted">{{ r.raw }}</small></td>
+        <td><button type="button" class="btn btn-sm btn-outline-danger" onclick="this.closest('tr').remove()">删</button></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <button type="button" class="btn btn-outline-secondary mb-3" onclick="addInRow()">+ 添加行</button>
+  <div>
+    <button class="btn btn-success"><i class="bi bi-check2"></i> 批量入库</button>
+    <a href="{{ url_for('transactions.in_ocr') }}" class="btn btn-secondary">重新上传</a>
+  </div>
+</form>
+
+<template id="inRowTpl">
+  <tr>
+    <td><input name="purchase_code[]" class="form-control form-control-sm" placeholder="进货编号"></td>
+    <td>
+      <input type="hidden" name="pigment_id[]" value="">
+      <input name="new_code[]" class="form-control form-control-sm" placeholder="留空则自动新建">
+    </td>
+    <td><input type="number" step="0.01" name="quantity[]" value="0" class="form-control form-control-sm" min="0"></td>
+    <td><input type="number" step="0.01" name="unit_price[]" value="0" class="form-control form-control-sm"></td>
+    <td><small class="text-muted">手动</small></td>
+    <td><button type="button" class="btn btn-sm btn-outline-danger" onclick="this.closest('tr').remove()">删</button></td>
+  </tr>
+</template>
+<script>
+function addInRow(){
+  const t = document.getElementById('inRowTpl');
+  document.querySelector('#ocrTable tbody').appendChild(t.content.cloneNode(true));
+}
+</script>
+{% endif %}
+{% endblock %}

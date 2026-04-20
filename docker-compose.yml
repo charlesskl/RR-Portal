@@ -212,3 +212,28 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+
+  zuru-order-system:
+    build:
+      context: ./apps/zuru-order-system
+      dockerfile: Dockerfile
+    environment:
+      - PORT=5005
+      - DATA_PATH=/app
+      - LOCAL_MODE=1
+      - FLASK_DEBUG=0
+    volumes:
+      - "./apps/zuru-order-system/data:/app/data"
+      - "./apps/zuru-order-system/uploads:/app/uploads"
+      - "./apps/zuru-order-system/exports:/app/exports"
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5005/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3

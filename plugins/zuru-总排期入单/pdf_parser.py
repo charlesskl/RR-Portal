@@ -1,7 +1,10 @@
 # -*- coding: utf-8 -*-
 """PO PDF完整解析 v4 - 不漏行 + 取消单检测 + 异常分类"""
 import os, re, logging
-import pdfplumber
+try:
+    import pdfplumber
+except ImportError:
+    pdfplumber = None  # 云端不需要PDF解析，Excel PO解析器仅用静态方法
 
 
 def _normalize_date(s):

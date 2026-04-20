@@ -229,3 +229,133 @@ def generate_summary(master_path):
         'groups': groups_list,
         'unmatched': unmatched_list,
     }
+
+
+def generate_summary_excel(master_path, output_dir):
+    """生成有填充行汇总Excel：按分排期file→sheet分组，每个sheet小计+合计"""
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from datetime import datetime
+
+    result = generate_summary(master_path)
+    if not result.get('ok') or result.get('total', 0) == 0:
+        return None
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = '有填充行汇总'
+
+    # 样式
+    header_fill = PatternFill(start_color='4472C4', end_color='4472C4', fill_type='solid')
+    header_font = Font(name='宋体', size=11, bold=True, color='FFFFFF')
+    subtotal_fill = PatternFill(start_color='FFF2CC', end_color='FFF2CC', fill_type='solid')
+    total_fill = PatternFill(start_color='C6EFCE', end_color='C6EFCE', fill_type='solid')
+    unmatch_fill = PatternFill(start_color='FFC7CE', end_color='FFC7CE', fill_type='solid')
+    thin_border = Border(
+        left=Side(style='thin'), right=Side(style='thin'),
+        top=Side(style='thin'), bottom=Side(style='thin'))
+
+    headers = ['分排期文件', 'Sheet', '货号', '中文名', '行数', '数量']
+    for ci, h in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=ci, value=h)
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal='center', vertical='center')
+        cell.border = thin_border
+    ws.column_dimensions['A'].width = 45
+    ws.column_dimensions['B'].width = 18
+    ws.column_dimensions['C'].width = 18
+    ws.column_dimensions['D'].width = 30
+    ws.column_dimensions['E'].width = 8
+    ws.column_dimensions['F'].width = 12
+    ws.freeze_panes = 'A2'
+
+    row = 2
+    grand_total_count = 0
+    grand_total_qty = 0
+
+    for g in result['groups']:
+        group_start = row
+        for it in g['items']:
+            ws.cell(row=row, column=1, value=g['file']).border = thin_border
+            ws.cell(row=row, column=2, value=g['sheet']).border = thin_border
+            c3 = ws.cell(row=row, column=3, value=it['item'])
+            c3.border = thin_border
+            c3.font = Font(name='宋体', size=11, bold=True)
+            ws.cell(row=row, column=4, value=it['cn_name']).border = thin_border
+            ws.cell(row=row, column=5, value=it['count']).border = thin_border
+            ws.cell(row=row, column=6, value=it['qty_sum']).border = thin_border
+            row += 1
+        # 小计行
+        for ci in range(1, 7):
+            ws.cell(row=row, column=ci).fill = subtotal_fill
+            ws.cell(row=row, column=ci).border = thin_border
+            ws.cell(row=row, column=ci).font = Font(name='宋体', size=11, bold=True)
+        ws.cell(row=row, column=4, value='小计')
+        ws.cell(row=row, column=4).alignment = Alignment(horizontal='right')
+        ws.cell(row=row, column=5, value=g['total'])
+        grand_total_count += g['total']
+        group_qty = sum(it['qty_sum'] for it in g['items'])
+        ws.cell(row=row, column=6, value=group_qty)
+        grand_total_qty += group_qty
+        # 合并文件名和sheet列
+        if row - group_start > 1:
+            ws.merge_cells(start_row=group_start, start_column=1, end_row=row - 1, end_column=1)
+            ws.merge_cells(start_row=group_start, start_column=2, end_row=row - 1, end_column=2)
+            ws.cell(row=group_start, column=1).alignment = Alignment(vertical='center', wrap_text=True)
+            ws.cell(row=group_start, column=2).alignment = Alignment(vertical='center')
+        row += 1
+
+    # 未匹配
+    if result['unmatched']:
+        ws.cell(row=row, column=1, value='未匹配分排期')
+        for ci in range(1, 7):
+            ws.cell(row=row, column=ci).fill = unmatch_fill
+            ws.cell(row=row, column=ci).border = thin_border
+            ws.cell(row=row, column=ci).font = Font(name='宋体', size=11, bold=True)
+        row += 1
+        unmatch_start = row
+        unmatch_count = 0
+        unmatch_qty = 0
+        for u in result['unmatched']:
+            ws.cell(row=row, column=3, value=u['item']).border = thin_border
+            ws.cell(row=row, column=3).font = Font(name='宋体', size=11, bold=True)
+            ws.cell(row=row, column=4, value=u['cn_name']).border = thin_border
+            ws.cell(row=row, column=5, value=u['count']).border = thin_border
+            ws.cell(row=row, column=6, value=u['qty_sum']).border = thin_border
+            for ci in [1, 2]:
+                ws.cell(row=row, column=ci).border = thin_border
+            unmatch_count += u['count']
+            unmatch_qty += u['qty_sum']
+            row += 1
+        # 未匹配小计
+        for ci in range(1, 7):
+            ws.cell(row=row, column=ci).fill = unmatch_fill
+            ws.cell(row=row, column=ci).border = thin_border
+            ws.cell(row=row, column=ci).font = Font(name='宋体', size=11, bold=True)
+        ws.cell(row=row, column=4, value='小计')
+        ws.cell(row=row, column=4).alignment = Alignment(horizontal='right')
+        ws.cell(row=row, column=5, value=unmatch_count)
+        ws.cell(row=row, column=6, value=unmatch_qty)
+        grand_total_count += unmatch_count
+        grand_total_qty += unmatch_qty
+        row += 1
+
+    # 合计行
+    for ci in range(1, 7):
+        ws.cell(row=row, column=ci).fill = total_fill
+        ws.cell(row=row, column=ci).border = thin_border
+        ws.cell(row=row, column=ci).font = Font(name='宋体', size=11, bold=True)
+    ws.cell(row=row, column=4, value='合计')
+    ws.cell(row=row, column=4).alignment = Alignment(horizontal='right')
+    ws.cell(row=row, column=5, value=grand_total_count)
+    ws.cell(row=row, column=6, value=grand_total_qty)
+
+    ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+    os.makedirs(output_dir, exist_ok=True)
+    fname = f'有填充行汇总_{ts}.xlsx'
+    out_path = os.path.join(output_dir, fname)
+    wb.save(out_path)
+    wb.close()
+    logging.info(f'[汇总Excel] {out_path}')
+    return fname

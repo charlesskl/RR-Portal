@@ -69,6 +69,15 @@ function saveData(data) {
   fs.renameSync(tmp, DATA_FILE);
 }
 
+// 月份匹配：容忍 "YYYY-M-D"（completed_date 可能不补零）与 "YYYY-MM" 比较
+function monthMatches(dateStr, month) {
+  if (!dateStr || !month) return false;
+  const parts = String(dateStr).split(/[-\/]/);
+  if (parts.length < 2) return false;
+  const normalized = parts[0] + '-' + String(parts[1]).padStart(2, '0');
+  return normalized === month;
+}
+
 // ─── 材料价格解析（模糊匹配 + 混合料按最高比例组分取价） ───────────────────
 // 规范化：去掉空格/括号/横杠并转小写，用于模糊比对
 //   "PP(EP332K)" / "PP (EP332K)" / "PPEP332K" / "pp-ep332k" → "ppep332k"
@@ -546,16 +555,15 @@ app.get('/api/material-stats', (req, res) => {
   const workshop = req.query.workshop; // optional workshop filter
   const docSearch = req.query.doc_number; // optional product number search
   const clientSearch = req.query.client_name; // optional client name search
-  const APPROVED_S = ['待生产','生产中','已完成','已取消'];
-  // 始终只统计审核通过的订单
+  // 只统计已完成订单，月份按完成日期匹配
   const q = (orderSearch || '').toLowerCase();
   const dq = (docSearch || '').toLowerCase();
   const cq = (clientSearch || '').toLowerCase();
   const validOrderIds = new Set(
     (data.injection_orders || [])
       .filter(o => {
-        if (!APPROVED_S.includes(o.status)) return false;
-        if (month && !(o.date || '').startsWith(month)) return false;
+        if (o.status !== '已完成') return false;
+        if (month && !monthMatches(o.completed_date, month)) return false;
         if (q && !((o.order_number || '') + (o.doc_number || '')).toLowerCase().includes(q)) return false;
         if (dq && !(o.doc_number || '').toLowerCase().includes(dq)) return false;
         if (cq && !(o.client_name || '').toLowerCase().includes(cq)) return false;
@@ -591,9 +599,9 @@ app.get('/api/material-stats', (req, res) => {
 app.get('/api/injection-total-costs', (req, res) => {
   const data = loadData();
   const month = req.query.month;
-  const APPROVED = ['待生产','生产中','已完成','已取消'];
-  let orders = (data.injection_orders || []).filter(o => APPROVED.includes(o.status));
-  if (month) orders = orders.filter(o => (o.date || '').startsWith(month));
+  // 只统计已完成订单，按完成月份分组（3月的订单在4月完成就算4月费用）
+  let orders = (data.injection_orders || []).filter(o => o.status === '已完成');
+  if (month) orders = orders.filter(o => monthMatches(o.completed_date, month));
   const items = data.injection_items || [];
   const priceMap = buildPriceMap(data.material_prices);
   const result = orders.map(o => {
@@ -643,9 +651,9 @@ app.get('/api/injection-total-costs', (req, res) => {
 app.get('/api/injection-costs', (req, res) => {
   const data = loadData();
   const month = req.query.month; // optional YYYY-MM filter
-  const APPROVED = ['待生产','生产中','已完成','已取消'];
-  let orders = (data.injection_orders || []).filter(o => APPROVED.includes(o.status));
-  if (month) orders = orders.filter(o => (o.date || '').startsWith(month));
+  // 只统计已完成订单，月份按完成日期匹配
+  let orders = (data.injection_orders || []).filter(o => o.status === '已完成');
+  if (month) orders = orders.filter(o => monthMatches(o.completed_date, month));
   const items = data.injection_items || [];
   const result = [];
   orders.forEach(o => {

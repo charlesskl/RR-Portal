@@ -249,6 +249,12 @@
                 <span class="plugin-name">成品核对系统</span>
               </div>
             </div>
+            <div class="plugin-item">
+              <div class="plugin-info">
+                <div class="plugin-dot gray" id="peiseDot"></div>
+                <span class="plugin-name">配色库存管理</span>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -582,7 +588,7 @@
       <div class="dept-icon pmc" style="width:40px;height:40px;font-size:18px;">&#128230;</div>
       PMC跟仓管
     </div>
-    <div class="page-subtitle">采购订单 · 成品核对</div>
+    <div class="page-subtitle">采购订单 · 成品核对 · 配色库存</div>
 
     <div class="detail-plugin-card">
       <div class="detail-plugin-left">
@@ -624,6 +630,27 @@
         <a href="/liwenjuan/" target="_blank" class="btn btn-primary">打开系统</a>
       </div>
     </div>
+
+    <div class="detail-plugin-card">
+      <div class="detail-plugin-left">
+        <div class="detail-plugin-icon" style="background:linear-gradient(135deg,#10b981,#059669);">&#127912;</div>
+        <div>
+          <div class="detail-plugin-name">配色库存管理</div>
+          <div class="detail-plugin-desc">颜料/色粉档案与库存流水管理，拍照识别送货单（Gemini 多模态 OCR），Excel 批量导入导出</div>
+          <div class="feature-grid">
+            <div class="feature-tag">&#127912; 颜料档案</div>
+            <div class="feature-tag">&#128202; 库存仪表盘</div>
+            <div class="feature-tag">&#128247; Gemini OCR 送货单</div>
+            <div class="feature-tag">&#128230; Excel 导入/导出</div>
+            <div class="feature-tag">&#128221; 入库/出库流水</div>
+          </div>
+        </div>
+      </div>
+      <div class="detail-plugin-right">
+        <div class="detail-plugin-status"><div class="plugin-dot gray" id="peiseDetailDot"></div> 检查中...</div>
+        <a href="/peise/" target="_blank" class="btn btn-primary">打开系统</a>
+      </div>
+    </div>
   </div>
 
 </div>
@@ -663,6 +690,7 @@ async function checkHealth() {
       { name: 'quotation', url: '/quotation/health', dot: 'quotationDot', detailDot: 'quotationDetailDot' },
       { name: 'tomy', url: '/tomy-paiqi/health', dot: 'tomyDot', detailDot: 'tomyDetailDot' },
       { name: 'zuruMaster', url: '/zuru-master/health', dot: 'zuruMasterDot', detailDot: 'zuruMasterDetailDot' },
+      { name: 'peise', url: '/peise/health', dot: 'peiseDot', detailDot: 'peiseDetailDot' },
     ];
     var healthy = 0;
     var total = checks.length;

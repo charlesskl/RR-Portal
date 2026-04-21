@@ -239,3 +239,28 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+
+
+  peise:
+    build:
+      context: ./apps/peise
+      dockerfile: Dockerfile
+    env_file:
+      - ./apps/peise/.env
+    environment:
+      - BASE_PATH=/peise
+    volumes:
+      - "./apps/peise/instance:/app/instance"
+    mem_limit: 512m
+    memswap_limit: 512m
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5006/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3

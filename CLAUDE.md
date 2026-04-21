@@ -108,6 +108,7 @@ curl http://localhost:<port>/health
 | quotation 套客表系统 | Node.js | 3004 | /quotation/ |
 | tomy-paiqi TOMY排期核对系统 | Node.js/React | 3006 | /tomy-paiqi/ |
 | liwenjuan 成品核对系统 | Flask | 5004 | /liwenjuan/ |
+| peise 配色库存管理 | Flask | 5006 | /peise/ |
 
 ## 插件类型
 
@@ -344,6 +345,7 @@ const data = JSON.parse(fs.readFileSync('data/data.json'));
 | quotation | 套客表系统 | 业务部 | Standalone (Node.js) | /quotation/ | — |
 | tomy-paiqi | TOMY排期核对系统 | 业务部 | Standalone (Node.js/React) | /tomy-paiqi/ | — |
 | liwenjuan | 成品核对系统 | PMC跟仓管 | Standalone (Python/Flask) | /liwenjuan/ | — |
+| peise | 配色库存管理 | PMC跟仓管 | Standalone (Python/Flask) | /peise/ | https://github.com/fxxaxxx/peisecangku |
 
 ### 旧插件（已删除）
 

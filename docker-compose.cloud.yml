@@ -425,6 +425,33 @@ services:
     networks:
       - platform-net
 
+  peise:
+    build:
+      context: ./apps/peise
+      dockerfile: Dockerfile
+    environment:
+      - BASE_PATH=/peise
+      - GEMINI_API_KEY=${PEISE_GEMINI_API_KEY:-}
+      - GEMINI_BASE_URL=${PEISE_GEMINI_BASE_URL:-https://gemini-proxy.hufan4308.workers.dev}
+      - GEMINI_MODEL=${PEISE_GEMINI_MODEL:-gemini-2.5-flash}
+    volumes:
+      - ./apps/peise/instance:/app/instance
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5006/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    mem_limit: 512m
+    memswap_limit: 512m
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - platform-net
+
 networks:
   platform-net:
     driver: bridge

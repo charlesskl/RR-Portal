@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block content %}
+<h3>导入颜料 Excel</h3>
+<p>请先<a href="{{ url_for('pigments.template_excel') }}">下载模板</a>。按 (品牌, 色号) 匹配,存在则更新,不存在则新建。</p>
+<form method="post" enctype="multipart/form-data" class="mb-4">
+  <input type="file" name="file" accept=".xlsx" class="form-control mb-2" required>
+  <button class="btn btn-primary">上传导入</button>
+  <a href="{{ url_for('pigments.index') }}" class="btn btn-secondary">返回</a>
+</form>
+{% if report %}
+  <div class="alert alert-info">新增 {{ report.created }},更新 {{ report.updated }},失败 {{ report.errors|length }}</div>
+  {% if report.errors %}
+    <table class="table table-sm"><thead><tr><th>行号</th><th>原因</th></tr></thead>
+    <tbody>{% for e in report.errors %}<tr><td>{{ e.row }}</td><td>{{ e.reason }}</td></tr>{% endfor %}</tbody></table>
+  {% endif %}
+{% endif %}
+{% endblock %}

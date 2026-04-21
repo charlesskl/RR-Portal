@@ -490,8 +490,11 @@ function viewOrder(id) {
           <td><input type="number" class="form-control form-control-sm bg-light" name="actual_amount_hkd"
               value="${it.actual_amount_hkd||''}" step="0.01" style="width:85px" placeholder="自动计算"
               title="= 实际用料 × 单价，也可手动修改" oninput="recalcTotals()"></td>
-          <td><input type="number" class="form-control form-control-sm" name="injection_cost"
-              value="${it.injection_cost||''}" step="0.01" style="width:85px" placeholder="0.00" oninput="recalcTotals()"></td>
+          <td>
+            <input type="number" class="form-control form-control-sm" name="injection_cost"
+              value="${it.injection_cost||''}" step="0.01" style="width:85px" placeholder="0.00 RMB" oninput="recalcTotals();updateInjHkdPreview(this)">
+            <div class="small text-muted" data-role="inj-hkd-preview" style="font-size:.72rem;line-height:1.1"></div>
+          </td>
         </tr>`;
       }).join('');
 
@@ -540,7 +543,7 @@ function viewOrder(id) {
                 <th>工模编号</th><th>工模名称</th><th>机型</th><th>原料/单价</th><th>颜色</th><th>色粉编号</th><th>件数/套数</th>
                 <th>数量(啤)</th><th>整啤毛重(g)</th><th>所需用料(KG)</th><th>模具回厂时间</th><th>啤办完成时间</th><th>备注</th>
                 <th>领原料单号</th><th>领料重量(KG)</th>
-                <th>实际用料(KG)</th><th>用料金额(HKD)</th><th>啤办费用(HKD)</th>
+                <th>实际用料(KG)</th><th>用料金额(HKD)</th><th>啤办费用(RMB)</th>
               </tr>
             </thead>
             <tbody id="machineItemsBody">${rows}</tbody>
@@ -578,6 +581,7 @@ function viewOrder(id) {
       }
 
       new bootstrap.Modal(document.getElementById('detailModal')).show();
+      recalcTotals(); // 初始化预览和合计
     });
 }
 
@@ -594,18 +598,41 @@ function autoCalcAmt(input) {
   recalcTotals();
 }
 
+// 当前 RMB→HKD 汇率（由后端 /api/settings 加载）
+let _exchangeRate = 1.08;
+apiFetch('/api/settings').then(r => r.json()).then(s => {
+  if (s && +s.exchange_rate_rmb_to_hkd > 0) _exchangeRate = +s.exchange_rate_rmb_to_hkd;
+}).catch(() => {});
+
+// 更新单行啤办费 RMB→HKD 的预览文本
+function updateInjHkdPreview(inp) {
+  const tr = inp.closest('tr');
+  const preview = tr?.querySelector('[data-role="inj-hkd-preview"]');
+  if (!preview) return;
+  const rmb = parseFloat(inp.value);
+  if (!rmb || rmb <= 0) { preview.textContent = ''; return; }
+  const hkd = rmb * _exchangeRate;
+  preview.textContent = `≈ ${hkd.toFixed(2)} HKD @ ${_exchangeRate}`;
+}
+
+function refreshAllInjHkdPreview() {
+  document.querySelectorAll('#machineItemsBody [name="injection_cost"]').forEach(inp => updateInjHkdPreview(inp));
+}
+
 function recalcTotals() {
-  let totalAmt = 0, totalCost = 0;
+  let totalAmt = 0, totalCostRmb = 0;
   document.querySelectorAll('#machineItemsBody tr[data-item-id]').forEach(tr => {
     totalAmt  += parseFloat(tr.querySelector('[name="actual_amount_hkd"]')?.value) || 0;
-    totalCost += parseFloat(tr.querySelector('[name="injection_cost"]')?.value)    || 0;
+    totalCostRmb += parseFloat(tr.querySelector('[name="injection_cost"]')?.value) || 0;
   });
+  const totalCostHkd = totalCostRmb * _exchangeRate;
   const sumAmt = document.getElementById('sumAmt');
   const sumCost = document.getElementById('sumCost');
   const sumGrand = document.getElementById('sumGrand');
   if (sumAmt)   sumAmt.textContent  = totalAmt.toFixed(2);
-  if (sumCost)  sumCost.textContent = totalCost.toFixed(2);
-  if (sumGrand) sumGrand.textContent = (totalAmt + totalCost).toFixed(2) + ' HKD';
+  if (sumCost)  sumCost.textContent = totalCostRmb ? `${totalCostRmb.toFixed(2)} RMB (≈ ${totalCostHkd.toFixed(2)} HKD)` : '0.00';
+  if (sumGrand) sumGrand.textContent = (totalAmt + totalCostHkd).toFixed(2) + ' HKD';
+  refreshAllInjHkdPreview();
 }
 
 function saveMachineData(orderId) {

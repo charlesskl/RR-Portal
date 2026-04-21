@@ -41,6 +41,9 @@ function loadData() {
     if (!data.assembly_orders) data.assembly_orders = [];
     if (!data.assembly_items) data.assembly_items = [];
     if (!data.assembly_users) data.assembly_users = [];
+    if (typeof data.exchange_rate_rmb_to_hkd !== 'number' || !(data.exchange_rate_rmb_to_hkd > 0)) {
+      data.exchange_rate_rmb_to_hkd = 1.08;
+    }
     _cache = data;
     return _cache;
   }
@@ -416,10 +419,23 @@ app.use('/api', (req, res, next) => {
       const updates = req.body.updates || [];
       const items = data[`${type}_items`];
       const ITEM_WHITELIST = ['receipt_no','collected_weight_kg','actual_weight_kg','actual_amount_hkd','injection_cost'];
+      const rate = +(data.exchange_rate_rmb_to_hkd || 1.08);
       updates.forEach(u => {
         const item = items.find(i => i.id === +u.id && i.order_id === +req.params.id);
         if (item) {
           ITEM_WHITELIST.forEach(f => { if (f in u) item[f] = u[f]; });
+          // 啤办费：新录入的 injection_cost 视为 RMB，自动换算 HKD
+          // 历史已录入但无 injection_cost_hkd 的订单保持原值（视为 HKD），不触发换算
+          if (type === 'injection' && 'injection_cost' in u) {
+            const rmb = +(u.injection_cost || 0);
+            if (rmb > 0) {
+              item.injection_cost_hkd = Math.round(rmb * rate * 100) / 100;
+              item.exchange_rate_at_save = rate;
+            } else {
+              item.injection_cost_hkd = null;
+              item.exchange_rate_at_save = null;
+            }
+          }
         }
       });
       saveData(data);
@@ -499,6 +515,12 @@ app.put('/api/clients', (req, res) => {
     saveData(data);
     res.json(data.clients);
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── 系统设置（汇率等） ─────────────────────────────────────────────────────
+app.get('/api/settings', (req, res) => {
+  const data = loadData();
+  res.json({ exchange_rate_rmb_to_hkd: data.exchange_rate_rmb_to_hkd || 1.08 });
 });
 
 // ─── 原料价格管理 ──────────────────────────────────────────────────────────────
@@ -640,21 +662,26 @@ app.get('/api/injection-total-costs', (req, res) => {
     const details = orderItems.map(it => {
       const matRaw = +(it.actual_amount_hkd || 0);
       const mat = Number.isFinite(matRaw) ? matRaw : 0;
+      // 啤办费优先用 injection_cost_hkd（换算后），无则回退 injection_cost（legacy 视为 HKD）
       const injRaw = it.injection_cost;
-      const injNum = +(injRaw || 0);
-      const inj = Number.isFinite(injNum) ? injNum : 0;
+      const hasRaw = !(injRaw === null || injRaw === undefined || injRaw === '');
+      const injHkdRaw = it.injection_cost_hkd;
+      const hasHkd = !(injHkdRaw === null || injHkdRaw === undefined || injHkdRaw === '');
+      const injHkdNum = hasHkd ? +(injHkdRaw || 0) : (hasRaw ? +(injRaw || 0) : 0);
+      const inj = Number.isFinite(injHkdNum) ? injHkdNum : 0;
       totalMat += mat;
       if (!skipInjCost) totalInj += inj;
       // 料价缺：有材料名但模糊解析找不到价格
       if (it.material && resolvePrice(it.material, priceMap) <= 0) hasMissingPrice = true;
       // 啤办费缺：没有填写（null/undefined/空字符串），发至订单除外
-      if (!skipInjCost && (injRaw === null || injRaw === undefined || injRaw === '')) hasMissingInj = true;
+      if (!skipInjCost && !hasRaw && !hasHkd) hasMissingInj = true;
       return {
         mold_id: it.mold_id || '',
         mold_name: it.mold_name || '',
         material: it.material || '',
         material_cost: Math.round(mat * 100) / 100,
-        injection_cost: skipInjCost ? null : ((injRaw === null || injRaw === undefined || injRaw === '') ? null : inj)
+        injection_cost: skipInjCost ? null : (!hasRaw && !hasHkd ? null : inj),
+        injection_cost_rmb: skipInjCost ? null : (hasHkd && hasRaw ? +injRaw : null)
       };
     });
     return {
@@ -916,7 +943,7 @@ function appendAudit(data, req, action, actor, extra) {
 app.post('/api/manager-update-prices', (req, res) => {
   const actor = authManager(req, res);
   if (!actor) return;
-  const { prices } = req.body;
+  const { prices, exchange_rate } = req.body;
   if (!Array.isArray(prices)) {
     return res.status(400).json({ error: '参数不完整' });
   }
@@ -929,6 +956,13 @@ app.post('/api/manager-update-prices', (req, res) => {
     unit_price: +(p.unit_price || 0),
     notes: String(p.notes || '')
   }));
+  if (exchange_rate !== undefined && exchange_rate !== null && exchange_rate !== '') {
+    const rate = +exchange_rate;
+    if (!(rate > 0) || !Number.isFinite(rate)) {
+      return res.status(400).json({ error: '汇率必须为正数' });
+    }
+    data.exchange_rate_rmb_to_hkd = rate;
+  }
   const priceMap = buildPriceMap(data.material_prices);
   let backfilled = 0;
   (data.injection_items || []).forEach(item => {

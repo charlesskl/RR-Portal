@@ -53,6 +53,22 @@ def _cell_str(v) -> str:
     return str(v).strip()
 
 
+def _cell_float(v) -> float:
+    """Excel 空单元格是 NaN; NaN or 0 在 Python 里仍是 NaN(NaN 是 truthy)，会让
+    后续 SQLite NOT NULL 校验炸。先用 pd.isna() 把 NaN/None 折成 0。"""
+    if v is None:
+        return 0.0
+    try:
+        if pd.isna(v):
+            return 0.0
+    except (TypeError, ValueError):
+        pass
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def import_pigments_from_bytes(data: bytes) -> dict:
     """Excel 是 brand="" 正规色粉库的真源:
     - Excel 里出现的 code → 更新/新建,并取消归档
@@ -78,16 +94,10 @@ def import_pigments_from_bytes(data: bytes) -> dict:
                 p = Pigment(brand="", code=code, name=code, spec_unit="kg")
                 db.session.add(p)
             p.purchase_code = _cell_str(row.get("进货色粉编号"))
-            try:
-                p.unit_price = float(row.get("单价") or 0)
-            except (TypeError, ValueError):
-                p.unit_price = 0
+            p.unit_price = _cell_float(row.get("单价"))
             if "备注" in df.columns:
                 p.notes = _cell_str(row.get("备注"))
-            try:
-                qty = float(row.get("数量") or 0)
-            except (TypeError, ValueError):
-                qty = 0
+            qty = _cell_float(row.get("数量"))
             if p.stock is None:
                 p.stock = Stock(quantity=qty)
             else:

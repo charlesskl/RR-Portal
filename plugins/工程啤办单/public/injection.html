@@ -870,10 +870,13 @@ function renderTotalData() {
       : '';
     const detailRows = (o.items || []).map(it => {
       const matCls = (!it.material_cost || it.material_cost === 0) ? 'text-warning' : '';
-      const injCls = (it.injection_cost === null) ? 'text-warning' : '';
       const matTxt = it.material_cost ? it.material_cost.toFixed(2) : '<i class="bi bi-exclamation-circle"></i> 缺';
-      const injTxt = (it.injection_cost === null) ? '<i class="bi bi-exclamation-circle"></i> 缺' : it.injection_cost.toFixed(2);
-      const itemTotal = (it.material_cost || 0) + (it.injection_cost || 0);
+      // 发至模厂/湖南订单：啤办费显示「—」（N/A），不标红不计合计
+      let injTxt, injCls;
+      if (o.skip_inj) { injTxt = '<span class="text-muted">—</span>'; injCls = ''; }
+      else if (it.injection_cost === null) { injTxt = '<i class="bi bi-exclamation-circle"></i> 缺'; injCls = 'text-warning'; }
+      else { injTxt = it.injection_cost.toFixed(2); injCls = ''; }
+      const itemTotal = (it.material_cost || 0) + (o.skip_inj ? 0 : (it.injection_cost || 0));
       return `<tr class="detail-row" id="${gid}" style="display:none;background:#f8f9ff;font-size:.8rem">
         <td></td>
         <td class="text-muted ps-3">${esc(it.mold_id || '-')}</td>
@@ -893,7 +896,7 @@ function renderTotalData() {
         <td>${esc(o.date ? o.date.slice(5) : '-')}</td>
         <td>${esc(o.workshop || '-')}</td>
         <td class="text-end fw-bold" style="color:${o.total_material_cost ? '#1a6e3a' : '#aaa'}">${o.total_material_cost.toFixed(2)}</td>
-        <td class="text-end fw-bold" style="color:${o.total_injection_cost ? '#1a6e3a' : '#aaa'}">${o.total_injection_cost.toFixed(2)}</td>
+        <td class="text-end fw-bold" style="color:${o.total_injection_cost ? '#1a6e3a' : '#aaa'}">${o.skip_inj ? '<span class="text-muted" title="发至外厂订单不计啤办费">—</span>' : o.total_injection_cost.toFixed(2)}</td>
         <td class="text-end fw-bold" style="color:${o.total_cost ? '#0d6efd' : '#aaa'};font-size:.95rem">${o.total_cost.toFixed(2)}</td>
       </tr>
       ${detailRows}`;

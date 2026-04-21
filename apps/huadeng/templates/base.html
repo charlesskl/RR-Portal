@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}华登包材管理系统{% endblock %}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { font-family: -apple-system, "Microsoft YaHei", sans-serif; }
+        .table-scroll { overflow-x: auto; }
+        input[type="number"] { -moz-appearance: textfield; }
+        input::-webkit-outer-spin-button, input::-webkit-inner-spin-button { -webkit-appearance: none; }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <nav class="bg-white shadow-sm border-b">
+        <div class="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
+            <a href="/" class="text-xl font-bold text-blue-700">华登包材管理系统</a>
+            <div class="flex items-center gap-4 text-sm">
+                <a href="/" class="text-gray-600 hover:text-blue-600">首页</a>
+                <a href="/reports" class="text-gray-600 hover:text-blue-600">汇总报表</a>
+                <span class="text-gray-400 text-xs" id="autoRefreshInfo"></span>
+                <button onclick="toggleAutoRefresh()" id="refreshBtn"
+                        class="px-2 py-1 text-xs rounded border border-gray-300 text-gray-500 hover:bg-gray-100">
+                    自动刷新: 关
+                </button>
+            </div>
+        </div>
+    </nav>
+    <main class="max-w-full mx-auto px-4 py-6">
+        {% block content %}{% endblock %}
+    </main>
+    <script>
+    let autoRefresh = false;
+    let refreshTimer = null;
+    const REFRESH_INTERVAL = 30; // 秒
+
+    function isUserBusy() {
+        // 正在输入
+        var tag = document.activeElement ? document.activeElement.tagName : '';
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true;
+        // 弹窗打开
+        var modals = document.querySelectorAll('.fixed');
+        for (var i = 0; i < modals.length; i++) {
+            if (!modals[i].classList.contains('hidden')) return true;
+        }
+        // 新增表单展开
+        var addForms = document.querySelectorAll('[id^="addForm_"]');
+        for (var i = 0; i < addForms.length; i++) {
+            if (!addForms[i].classList.contains('hidden')) return true;
+        }
+        return false;
+    }
+
+    function startRefresh() {
+        let countdown = REFRESH_INTERVAL;
+        clearInterval(refreshTimer);
+        refreshTimer = setInterval(() => {
+            if (!autoRefresh) return;
+            countdown--;
+            document.getElementById('autoRefreshInfo').textContent = countdown + 's后刷新';
+            if (countdown <= 0) {
+                if (isUserBusy()) {
+                    countdown = REFRESH_INTERVAL;
+                    document.getElementById('autoRefreshInfo').textContent = '操作中，暂停刷新';
+                    return;
+                }
+                location.reload();
+            }
+        }, 1000);
+    }
+
+    function toggleAutoRefresh() {
+        autoRefresh = !autoRefresh;
+        const btn = document.getElementById('refreshBtn');
+        const info = document.getElementById('autoRefreshInfo');
+        if (autoRefresh) {
+            btn.textContent = '自动刷新: 开';
+            startRefresh();
+        } else {
+            btn.textContent = '自动刷新: 关';
+            info.textContent = '';
+            clearInterval(refreshTimer);
+        }
+    }
+
+    // 默认关闭，用户可手动开启
+    </script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

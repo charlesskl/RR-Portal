@@ -3,7 +3,7 @@
 <h3>{{ "编辑" if pigment else "新增" }}色粉</h3>
 <form method="post" class="row g-3" style="max-width:720px">
   <div class="col-md-6"><label>色粉编号</label><input name="code" class="form-control" value="{{ pigment.code if pigment else '' }}" required></div>
-  <div class="col-md-6"><label>进货色粉编号</label><input name="purchase_code" class="form-control" value="{{ pigment.purchase_code if pigment else '' }}"></div>
+  <div class="col-md-6"><label>进货编号</label><input name="purchase_code" class="form-control" value="{{ pigment.purchase_code if pigment else '' }}"></div>
   <div class="col-md-4"><label>数量</label><input type="number" step="0.0001" id="qty" name="quantity" class="form-control" value="{{ '%.4f'|format(pigment.stock.quantity) if pigment and pigment.stock else '0' }}" min="0"></div>
   <div class="col-md-3"><label>单价(元)</label><input type="number" step="0.01" id="price" name="unit_price" class="form-control" value="{{ '%.2f'|format(pigment.unit_price) if pigment else '0.00' }}"></div>
   <div class="col-md-2"><label>单位</label><input class="form-control" value="KG" readonly></div>

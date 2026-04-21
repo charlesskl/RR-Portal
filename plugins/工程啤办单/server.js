@@ -588,6 +588,8 @@ app.get('/api/injection-total-costs', (req, res) => {
       doc_number: o.doc_number || '',
       date: o.date || '',
       workshop: o.workshop || '',
+      send_to: o.send_to || '',
+      skip_inj: skipInjCost,
       status: o.status,
       total_material_cost: Math.round(totalMat * 100) / 100,
       total_injection_cost: Math.round(totalInj * 100) / 100,

@@ -587,6 +587,34 @@ app.get('/api/material-stats', (req, res) => {
 });
 
 // ─── 啤办费用汇总 ─────────────────────────────────────────────────────────────
+app.get('/api/injection-costs', (req, res) => {
+  const data = loadData();
+  const month = req.query.month; // optional YYYY-MM filter
+  const APPROVED = ['待生产','生产中','已完成','已取消'];
+  let orders = (data.injection_orders || []).filter(o => APPROVED.includes(o.status));
+  if (month) orders = orders.filter(o => (o.date || '').startsWith(month));
+  const items = data.injection_items || [];
+  const result = [];
+  orders.forEach(o => {
+    const orderItems = items.filter(i => i.order_id === o.id).sort((a,b) => a.sort_order - b.sort_order);
+    orderItems.forEach(it => {
+      result.push({
+        order_number: o.order_number || '',
+        doc_number: o.doc_number || '',
+        product_name: o.product_name || '',
+        client_name: o.client_name || '',
+        date: o.date || '',
+        workshop: o.workshop || '',
+        mold_id: it.mold_id || '',
+        mold_name: it.mold_name || '',
+        injection_cost: it.injection_cost || null,
+        notes: it.notes || ''
+      });
+    });
+  });
+  res.json(result);
+});
+
 // ─── 啤办总费用汇总（料费 + 啤办费） ─────────────────────────────────────────
 app.get('/api/injection-total-costs', (req, res) => {
   const data = loadData();
@@ -636,34 +664,6 @@ app.get('/api/injection-total-costs', (req, res) => {
       has_missing_injection_cost: hasMissingInj,
       items: details
     };
-  });
-  res.json(result);
-});
-
-app.get('/api/injection-costs', (req, res) => {
-  const data = loadData();
-  const month = req.query.month; // optional YYYY-MM filter
-  const APPROVED = ['待生产','生产中','已完成','已取消'];
-  let orders = (data.injection_orders || []).filter(o => APPROVED.includes(o.status));
-  if (month) orders = orders.filter(o => (o.date || '').startsWith(month));
-  const items = data.injection_items || [];
-  const result = [];
-  orders.forEach(o => {
-    const orderItems = items.filter(i => i.order_id === o.id).sort((a,b) => a.sort_order - b.sort_order);
-    orderItems.forEach(it => {
-      result.push({
-        order_number: o.order_number || '',
-        doc_number: o.doc_number || '',
-        product_name: o.product_name || '',
-        client_name: o.client_name || '',
-        date: o.date || '',
-        workshop: o.workshop || '',
-        mold_id: it.mold_id || '',
-        mold_name: it.mold_name || '',
-        injection_cost: it.injection_cost || null,
-        notes: it.notes || ''
-      });
-    });
   });
   res.json(result);
 });

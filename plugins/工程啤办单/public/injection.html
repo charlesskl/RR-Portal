@@ -833,6 +833,9 @@ function loadTotalData() {
     sel.innerHTML = '<option value="">全部客户</option>' + clients.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
     sel.value = prev;
     renderTotalData();
+  }).catch(e => {
+    document.getElementById('totalBody').innerHTML =
+      `<tr><td colspan="9" class="text-center text-danger p-3"><i class="bi bi-exclamation-triangle"></i> 加载失败：${esc(e.message || String(e))}</td></tr>`;
   });
 }
 
@@ -877,7 +880,7 @@ function renderTotalData() {
       else if (it.injection_cost === null) { injTxt = '<i class="bi bi-exclamation-circle"></i> 缺'; injCls = 'text-warning'; }
       else { injTxt = it.injection_cost.toFixed(2); injCls = ''; }
       const itemTotal = (it.material_cost || 0) + (o.skip_inj ? 0 : (it.injection_cost || 0));
-      return `<tr class="detail-row" id="${gid}" style="display:none;background:#f8f9ff;font-size:.8rem">
+      return `<tr class="detail-row detail-${gid}" style="display:none;background:#f8f9ff;font-size:.8rem">
         <td></td>
         <td class="text-muted ps-3">${esc(it.mold_id || '-')}</td>
         <td>${esc(it.mold_name || '-')}</td>
@@ -914,7 +917,7 @@ function renderTotalData() {
 }
 
 function toggleTotalGroup(gid, summaryRow) {
-  const rows = document.querySelectorAll(`tr[id="${gid}"]`);
+  const rows = document.querySelectorAll(`.detail-${gid}`);
   const icon = summaryRow.querySelector(`.toggle-icon-${gid}`);
   const isOpen = rows[0]?.style.display !== 'none';
   rows.forEach(r => r.style.display = isOpen ? 'none' : '');

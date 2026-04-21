@@ -876,12 +876,12 @@ function matSel(val) {
       <input type="text" class="form-control form-control-sm mat-name-1" style="flex:1;min-width:100px"
         value="${esc(n1)}" placeholder="搜索原料..." autocomplete="off"
         onfocus="matDropShow(this)" oninput="matDropFilter(this);matCompose(this)">
-      <input type="number" class="form-control form-control-sm mat-pct-1" style="width:52px;${isMixed?'':'display:none'}"
+      <input type="number" class="form-control form-control-sm mat-pct-1 ${isMixed?'':'d-none'}" style="width:52px"
         value="${esc(p1)}" placeholder="%" min="0" max="100" step="1" oninput="matCompose(this)">
       <button type="button" class="btn btn-sm btn-outline-secondary mat-toggle" style="padding:1px 6px;font-size:11px;white-space:nowrap"
         onclick="matToggleMixed(this)" title="${isMixed?'取消混合料':'添加第二种料'}">${isMixed?'−':'+料'}</button>
     </div>
-    <div class="d-flex gap-1 align-items-center mat-row-2" style="${isMixed?'':'display:none'}">
+    <div class="d-flex gap-1 align-items-center mat-row-2 ${isMixed?'':'d-none'}">
       <input type="text" class="form-control form-control-sm mat-name-2" style="flex:1;min-width:100px"
         value="${esc(n2)}" placeholder="第二种料..." autocomplete="off"
         onfocus="matDropShow(this)" oninput="matDropFilter(this);matCompose(this)">
@@ -900,7 +900,7 @@ function matCompose(el) {
   const n1 = wrap.querySelector('.mat-name-1').value.trim();
   const p1 = wrap.querySelector('.mat-pct-1').value.trim();
   const row2 = wrap.querySelector('.mat-row-2');
-  const mixed = row2 && row2.style.display !== 'none';
+  const mixed = row2 && !row2.classList.contains('d-none');
   if (mixed) {
     const n2 = wrap.querySelector('.mat-name-2').value.trim();
     const p2 = wrap.querySelector('.mat-pct-2').value.trim();
@@ -924,9 +924,9 @@ function matToggleMixed(btn) {
   const wrap = btn.closest('.mat-sel-wrap');
   const row2 = wrap.querySelector('.mat-row-2');
   const pct1 = wrap.querySelector('.mat-pct-1');
-  const on = row2.style.display === 'none';
-  row2.style.display = on ? '' : 'none';
-  pct1.style.display = on ? '' : 'none';
+  const on = row2.classList.contains('d-none');
+  row2.classList.toggle('d-none', !on);
+  pct1.classList.toggle('d-none', !on);
   btn.textContent = on ? '−' : '+料';
   btn.title = on ? '取消混合料' : '添加第二种料';
   if (!on) {

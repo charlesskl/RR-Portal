@@ -1,4 +1,8 @@
+import os
+
 from flask import Flask
+from werkzeug.middleware.proxy_fix import ProxyFix
+
 from .config import Config
 from .extensions import db
 
@@ -6,7 +10,9 @@ def create_app(config_class=Config):
     app = Flask(__name__, instance_relative_config=True)
     app.config.from_object(config_class)
 
-    import os
+    # 让 url_for() 在 nginx 子路径反代下生成正确链接（X-Forwarded-Prefix）
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
+
     os.makedirs(app.instance_path, exist_ok=True)
 
     db.init_app(app)

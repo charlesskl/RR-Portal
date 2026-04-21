@@ -247,6 +247,8 @@ services:
       dockerfile: Dockerfile
     env_file:
       - ./apps/peise/.env
+    environment:
+      - BASE_PATH=/peise
     volumes:
       - "./apps/peise/instance:/app/instance"
     mem_limit: 512m
@@ -258,7 +260,7 @@ services:
         max-size: "10m"
         max-file: "3"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:5006/health"]
       interval: 30s
       timeout: 10s
       retries: 3

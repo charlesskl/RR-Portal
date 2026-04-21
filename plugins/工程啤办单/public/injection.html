@@ -41,6 +41,11 @@
         <i class="bi bi-cash-coin me-1"></i>啤办费用表
       </button>
     </li>
+    <li class="nav-item">
+      <button class="nav-link" onclick="switchInjTab('total',this)">
+        <i class="bi bi-calculator me-1"></i>总费用表
+      </button>
+    </li>
   </ul>
 
   <!-- ── 任务单 Tab ── -->
@@ -215,6 +220,81 @@
             </thead>
             <tbody id="costBody">
               <tr><td colspan="11" class="text-center text-muted p-3">加载中...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── 总费用表 Tab ── -->
+  <div id="injTabTotal" style="display:none">
+    <div class="card shadow-sm">
+      <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <h6 class="mb-0"><i class="bi bi-calculator me-2"></i>总费用表（料费 + 啤办费）</h6>
+        <div class="d-flex gap-2 flex-wrap align-items-center">
+          <div class="input-group input-group-sm" style="width:150px">
+            <span class="input-group-text"><i class="bi bi-calendar3"></i></span>
+            <input type="month" class="form-control" id="totalMonth" onchange="loadTotalData()">
+          </div>
+          <button class="btn btn-sm btn-outline-warning" onclick="document.getElementById('totalMonth').value='';loadTotalData()" title="显示全部月份">全部</button>
+          <select id="totalWorkshop" class="form-select form-select-sm" style="width:auto" onchange="renderTotalData()">
+            <option value="">全部车间</option>
+            <option value="A车间">A车间</option>
+            <option value="B车间">B车间</option>
+            <option value="华登车间">华登车间</option>
+          </select>
+          <div class="input-group input-group-sm" style="width:180px">
+            <span class="input-group-text"><i class="bi bi-search"></i></span>
+            <input type="text" class="form-control" id="totalProductSearch"
+              placeholder="搜索产品编号..." oninput="renderTotalData()" autocomplete="off">
+            <button class="btn btn-outline-secondary"
+              onclick="document.getElementById('totalProductSearch').value='';renderTotalData()" title="清除">
+              <i class="bi bi-x-lg"></i>
+            </button>
+          </div>
+          <div class="input-group input-group-sm" style="width:180px">
+            <span class="input-group-text"><i class="bi bi-box-seam"></i></span>
+            <input type="text" class="form-control" id="totalOrderSearch"
+              placeholder="搜索订单编号..." oninput="renderTotalData()" autocomplete="off">
+            <button class="btn btn-outline-secondary"
+              onclick="document.getElementById('totalOrderSearch').value='';renderTotalData()" title="清除">
+              <i class="bi bi-x-lg"></i>
+            </button>
+          </div>
+          <select id="totalClientFilter" class="form-select form-select-sm" style="width:auto" onchange="renderTotalData()">
+            <option value="">全部客户</option>
+          </select>
+          <div class="form-check form-check-inline ms-1">
+            <input type="checkbox" id="totalOnlyMissing" class="form-check-input" onchange="renderTotalData()">
+            <label for="totalOnlyMissing" class="form-check-label small">只看缺料价/缺啤办费</label>
+          </div>
+          <button class="btn btn-sm btn-outline-secondary" onclick="loadTotalData()">
+            <i class="bi bi-arrow-clockwise me-1"></i>刷新数据
+          </button>
+          <button class="btn btn-sm btn-outline-primary" onclick="printTable('total')">
+            <i class="bi bi-printer me-1"></i>打印
+          </button>
+        </div>
+      </div>
+      <div class="card-body p-0">
+        <div class="table-responsive">
+          <table class="table table-bordered table-sm mb-0" id="totalTable">
+            <thead class="table-dark text-center" style="font-size:.82rem">
+              <tr>
+                <th style="width:46px">序号</th>
+                <th>产品编号</th>
+                <th>产品名称</th>
+                <th>客名</th>
+                <th>日期</th>
+                <th>车间</th>
+                <th style="width:120px">料费合计<br><small>(HKD)</small></th>
+                <th style="width:120px">啤办费合计<br><small>(HKD)</small></th>
+                <th style="width:130px">总合计<br><small>(HKD)</small></th>
+              </tr>
+            </thead>
+            <tbody id="totalBody">
+              <tr><td colspan="9" class="text-center text-muted p-3">加载中...</td></tr>
             </tbody>
           </table>
         </div>
@@ -684,8 +764,10 @@ function switchInjTab(name, el) {
   document.getElementById('injTabOrders').style.display = name === 'orders' ? '' : 'none';
   document.getElementById('injTabStats').style.display  = name === 'stats'  ? '' : 'none';
   document.getElementById('injTabCost').style.display   = name === 'cost'   ? '' : 'none';
+  document.getElementById('injTabTotal').style.display  = name === 'total'  ? '' : 'none';
   if (name === 'stats') loadStats();
   if (name === 'cost')  loadCostData();
+  if (name === 'total') loadTotalData();
 }
 
 // ── 原料汇总表（只读）──────────────────────────────────────────────────────
@@ -734,6 +816,110 @@ function loadStats() {
     });
     renderStats();
   });
+}
+
+// ── 总费用表（料费 + 啤办费） ────────────────────────────────────────────────
+let totalData = [];
+
+function loadTotalData() {
+  const month = document.getElementById('totalMonth')?.value || '';
+  const url = month ? `/api/injection-total-costs?month=${month}` : '/api/injection-total-costs';
+  apiFetch(url).then(r => r.json()).then(items => {
+    totalData = items;
+    // 客户下拉初始化
+    const sel = document.getElementById('totalClientFilter');
+    const prev = sel.value;
+    const clients = [...new Set(items.map(it => it.client_name).filter(Boolean))].sort();
+    sel.innerHTML = '<option value="">全部客户</option>' + clients.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
+    sel.value = prev;
+    renderTotalData();
+  });
+}
+
+function renderTotalData() {
+  const ws = document.getElementById('totalWorkshop')?.value || '';
+  const pq = (document.getElementById('totalProductSearch')?.value || '').trim().toLowerCase();
+  const oq = (document.getElementById('totalOrderSearch')?.value || '').trim().toLowerCase();
+  const cq = document.getElementById('totalClientFilter')?.value || '';
+  const onlyMissing = document.getElementById('totalOnlyMissing')?.checked;
+  let filtered = totalData;
+  if (ws) filtered = filtered.filter(it => it.workshop === ws);
+  if (pq) filtered = filtered.filter(it => (it.doc_number || '').toLowerCase().includes(pq));
+  if (oq) filtered = filtered.filter(it => (it.order_number || '').toLowerCase().includes(oq));
+  if (cq) filtered = filtered.filter(it => (it.client_name || '') === cq);
+  if (onlyMissing) filtered = filtered.filter(it => it.has_missing_price || it.has_missing_injection_cost);
+
+  const hasFilter = ws || pq || oq || cq || onlyMissing;
+  const body = document.getElementById('totalBody');
+  if (!filtered.length) {
+    body.innerHTML = `<tr><td colspan="9" class="text-center text-muted p-3">${hasFilter ? '没有匹配的订单' : '暂无数据'}</td></tr>`;
+    return;
+  }
+
+  let gMat = 0, gInj = 0, gTotal = 0;
+  const rows = filtered.map((o, i) => {
+    gMat += o.total_material_cost || 0;
+    gInj += o.total_injection_cost || 0;
+    gTotal += o.total_cost || 0;
+    const gid = `tg${i}`;
+    const badgeMat = o.has_missing_price
+      ? ' <span class="badge bg-warning text-dark ms-1" style="font-size:.65rem" title="部分原料未录入价格"><i class="bi bi-exclamation-circle"></i> 料价缺</span>'
+      : '';
+    const badgeInj = o.has_missing_injection_cost
+      ? ' <span class="badge bg-warning text-dark ms-1" style="font-size:.65rem" title="部分模具未填写啤办费"><i class="bi bi-exclamation-circle"></i> 啤办费缺</span>'
+      : '';
+    const detailRows = (o.items || []).map(it => {
+      const matCls = (!it.material_cost || it.material_cost === 0) ? 'text-warning' : '';
+      const matTxt = it.material_cost ? it.material_cost.toFixed(2) : '<i class="bi bi-exclamation-circle"></i> 缺';
+      // 发至模厂/湖南订单：啤办费显示「—」（N/A），不标红不计合计
+      let injTxt, injCls;
+      if (o.skip_inj) { injTxt = '<span class="text-muted">—</span>'; injCls = ''; }
+      else if (it.injection_cost === null) { injTxt = '<i class="bi bi-exclamation-circle"></i> 缺'; injCls = 'text-warning'; }
+      else { injTxt = it.injection_cost.toFixed(2); injCls = ''; }
+      const itemTotal = (it.material_cost || 0) + (o.skip_inj ? 0 : (it.injection_cost || 0));
+      return `<tr class="detail-row" id="${gid}" style="display:none;background:#f8f9ff;font-size:.8rem">
+        <td></td>
+        <td class="text-muted ps-3">${esc(it.mold_id || '-')}</td>
+        <td>${esc(it.mold_name || '-')}</td>
+        <td class="text-muted" colspan="3">${esc(it.material || '-')}</td>
+        <td class="text-end ${matCls}">${matTxt}</td>
+        <td class="text-end ${injCls}">${injTxt}</td>
+        <td class="text-end fw-bold">${itemTotal ? itemTotal.toFixed(2) : '0.00'}</td>
+      </tr>`;
+    }).join('');
+    return `
+      <tr style="cursor:pointer" onclick="toggleTotalGroup('${gid}',this)">
+        <td class="text-center text-muted" style="font-size:.8rem">${i + 1}</td>
+        <td><strong>${esc(o.order_number || '-')}</strong>&nbsp;<i class="bi bi-chevron-down toggle-icon-${gid}" style="font-size:.7rem;color:#888"></i></td>
+        <td>${esc(o.product_name || '-')}${badgeMat}${badgeInj}</td>
+        <td>${esc(o.client_name || '-')}</td>
+        <td>${esc(o.date ? o.date.slice(5) : '-')}</td>
+        <td>${esc(o.workshop || '-')}</td>
+        <td class="text-end fw-bold" style="color:${o.total_material_cost ? '#1a6e3a' : '#aaa'}">${o.total_material_cost.toFixed(2)}</td>
+        <td class="text-end fw-bold" style="color:${o.total_injection_cost ? '#1a6e3a' : '#aaa'}">${o.skip_inj ? '<span class="text-muted" title="发至外厂订单不计啤办费">—</span>' : o.total_injection_cost.toFixed(2)}</td>
+        <td class="text-end fw-bold" style="color:${o.total_cost ? '#0d6efd' : '#aaa'};font-size:.95rem">${o.total_cost.toFixed(2)}</td>
+      </tr>
+      ${detailRows}`;
+  });
+
+  const missing = filtered.filter(it => it.has_missing_price || it.has_missing_injection_cost).length;
+  const hint = hasFilter ? `（匹配 ${filtered.length} 个订单${missing ? '，其中 ' + missing + ' 个有缺项' : ''}）` : `（共 ${filtered.length} 个订单${missing ? '，其中 ' + missing + ' 个有缺项' : ''}）`;
+  body.innerHTML = rows.join('') + `
+    <tr style="font-weight:700;background:#f0f7f0">
+      <td colspan="6" class="text-end">合计${hint}</td>
+      <td class="text-end" style="color:#1a6e3a">${gMat.toFixed(2)}</td>
+      <td class="text-end" style="color:#1a6e3a">${gInj.toFixed(2)}</td>
+      <td class="text-end" style="color:#0d6efd">${gTotal.toFixed(2)}</td>
+    </tr>`;
+}
+
+function toggleTotalGroup(gid, summaryRow) {
+  const rows = document.querySelectorAll(`tr[id="${gid}"]`);
+  const icon = summaryRow.querySelector(`.toggle-icon-${gid}`);
+  const isOpen = rows[0]?.style.display !== 'none';
+  rows.forEach(r => r.style.display = isOpen ? 'none' : '');
+  if (icon) icon.className = isOpen ? `bi bi-chevron-down toggle-icon-${gid}` : `bi bi-chevron-up toggle-icon-${gid}`;
+  if (icon) icon.style.cssText = 'font-size:.7rem;color:#888';
 }
 
 // ── 啤办费用表 ──────────────────────────────────────────────────────────────
@@ -862,14 +1048,19 @@ function renderStats() {
 // ── 打印汇总表 ──────────────────────────────────────────────────────────────
 function printTable(type) {
   const isStats = type === 'stats';
-  const title = isStats ? '工程原料汇总表' : '啤办费用表';
+  const isTotal = type === 'total';
+  const title = isStats ? '工程原料汇总表' : (isTotal ? '总费用表' : '啤办费用表');
   const month = isStats
     ? (document.getElementById('matMonth')?.value || '')
-    : (document.getElementById('costMonth')?.value || '');
+    : (isTotal ? (document.getElementById('totalMonth')?.value || '') : (document.getElementById('costMonth')?.value || ''));
   const monthLabel = month || '全部';
 
   let tableHtml;
-  if (isStats) {
+  if (isTotal) {
+    const tableEl = document.getElementById('totalTable');
+    if (!tableEl) return;
+    tableHtml = tableEl.outerHTML;
+  } else if (isStats) {
     // 原料汇总表：只打印有使用量的原料
     const used = statsData.filter(s => s.total_actual_weight > 0 || s.total_amount > 0);
     let tw = 0, ta = 0;

@@ -81,9 +81,6 @@ function initDatabase() {
   db.exec(`CREATE INDEX IF NOT EXISTS idx_history_shot_weight ON history_records(machine_no, shot_weight)`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_history_material ON history_records(material_type)`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_history_mold ON history_records(mold_name)`);
-  // 去重：同一批次里同一机台同一订单同一产品不重复（允许 import_batch 为 NULL 多占位）
-  db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS uq_history_batch_item
-           ON history_records(import_batch, machine_no, order_no, product_code, source_date)`);
 
   // ========== 排机单表 ==========
   db.exec(`
@@ -216,25 +213,85 @@ function initDatabase() {
     )
   `);
 
-  // Migrations — only suppress "duplicate column" errors; log anything else
-  const migrate = (sql) => {
-    try { db.prepare(sql).run(); }
-    catch(e) { if (!e.message.includes('duplicate column')) console.error('Migration failed:', sql, e.message); }
-  };
-  migrate("ALTER TABLE orders ADD COLUMN order_notes TEXT DEFAULT ''");
-  migrate("ALTER TABLE schedule_items ADD COLUMN is_carry_over INTEGER DEFAULT 0");
+  // Migrations
+  try { db.prepare("ALTER TABLE orders ADD COLUMN order_notes TEXT DEFAULT ''").run(); } catch(e){}
+  try { db.prepare("ALTER TABLE schedule_items ADD COLUMN is_carry_over INTEGER DEFAULT 0").run(); } catch(e){}
   // 多车间支持
-  migrate("ALTER TABLE machines ADD COLUMN workshop TEXT DEFAULT 'B'");
-  migrate("ALTER TABLE orders ADD COLUMN workshop TEXT DEFAULT 'B'");
-  migrate("ALTER TABLE schedules ADD COLUMN notes TEXT");
-  migrate("ALTER TABLE schedules ADD COLUMN workshop TEXT DEFAULT 'B'");
-  migrate("ALTER TABLE history_records ADD COLUMN workshop TEXT DEFAULT 'B'");
-  migrate("ALTER TABLE mold_targets ADD COLUMN workshop TEXT DEFAULT 'B'");
-
-  // Performance indexes
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_schedules_workshop_date ON schedules(workshop, schedule_date)`);
+  try { db.prepare("ALTER TABLE machines ADD COLUMN workshop TEXT DEFAULT 'B'").run(); } catch(e){}
+  try { db.prepare("ALTER TABLE orders ADD COLUMN workshop TEXT DEFAULT 'B'").run(); } catch(e){}
+  try { db.prepare("ALTER TABLE schedules ADD COLUMN notes TEXT").run(); } catch(e){}
+  try { db.prepare("ALTER TABLE schedules ADD COLUMN workshop TEXT DEFAULT 'B'").run(); } catch(e){}
+  try { db.prepare("ALTER TABLE history_records ADD COLUMN workshop TEXT DEFAULT 'B'").run(); } catch(e){}
+  try { db.prepare("ALTER TABLE mold_targets ADD COLUMN workshop TEXT DEFAULT 'B'").run(); } catch(e){}
 
   console.log('数据库初始化完成，28台机数据已预置');
+
+  // 种子数据导入（仅在对应表为空或数据不完整时导入，不覆盖已有数据）
+  try { seedData(); } catch (e) { console.log('[种子导入失败]', e.message); }
+}
+
+/**
+ * 种子数据导入
+ * 规则：表为空 → 全量导入；表已有数据 → 不动
+ * machines 特殊处理：如果现有机台缺少 brand/tonnage（均为默认值），覆盖更新
+ */
+function seedData() {
+  const fs = require('fs');
+  const path = require('path');
+  const seedDir = path.join(__dirname, '..', 'seed');
+  if (!fs.existsSync(seedDir)) { console.log('[种子] 无 seed 目录，跳过'); return; }
+
+  // 1) mold_targets
+  const mtCount = db.prepare('SELECT COUNT(*) as c FROM mold_targets').get().c;
+  if (mtCount < 100) {
+    const file = path.join(seedDir, 'mold_targets.json');
+    if (fs.existsSync(file)) {
+      const data = JSON.parse(fs.readFileSync(file, 'utf8'));
+      const ins = db.prepare(`INSERT OR IGNORE INTO mold_targets (mold_no, mold_name, target_24h, target_11h, notes, workshop) VALUES (?, ?, ?, ?, ?, ?)`);
+      const tx = db.transaction(() => { for (const r of data) ins.run(r.mold_no, r.mold_name, r.target_24h || 0, r.target_11h || 0, r.notes || '', r.workshop || 'B'); });
+      tx();
+      console.log(`[种子] mold_targets 导入 ${data.length} 条（原 ${mtCount} 条）`);
+    }
+  }
+
+  // 2) machines（缺失或品牌未设置时补齐）
+  const mFile = path.join(seedDir, 'machines.json');
+  if (fs.existsSync(mFile)) {
+    const data = JSON.parse(fs.readFileSync(mFile, 'utf8'));
+    let inserted = 0, updated = 0;
+    const tx = db.transaction(() => {
+      for (const r of data) {
+        const exists = db.prepare('SELECT id, brand, tonnage FROM machines WHERE machine_no = ? AND workshop = ?').get(r.machine_no, r.workshop || 'B');
+        if (!exists) {
+          try { db.prepare(`INSERT INTO machines (machine_no, brand, tonnage, arm_type, model_desc, status, workshop) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+            .run(r.machine_no, r.brand || '', r.tonnage || 0, r.arm_type || '', r.model_desc || '', r.status || 'active', r.workshop || 'B');
+            inserted++; } catch(e){}
+        } else if (!exists.brand || exists.brand === '-' || exists.tonnage === 0) {
+          // 机台存在但信息不完整，更新
+          db.prepare(`UPDATE machines SET brand=?, tonnage=?, arm_type=?, model_desc=? WHERE id=?`)
+            .run(r.brand || '', r.tonnage || 0, r.arm_type || '', r.model_desc || '', exists.id);
+          updated++;
+        }
+      }
+    });
+    tx();
+    if (inserted || updated) console.log(`[种子] machines 新增 ${inserted} 台，更新 ${updated} 台`);
+  }
+
+  // 3) history_records（仅在为空时导入，历史数据量大）
+  const hCount = db.prepare('SELECT COUNT(*) as c FROM history_records').get().c;
+  if (hCount === 0) {
+    const file = path.join(seedDir, 'history_records.json');
+    if (fs.existsSync(file)) {
+      const data = JSON.parse(fs.readFileSync(file, 'utf8'));
+      const ins = db.prepare(`INSERT INTO history_records (machine_no, product_code, mold_name, color, color_powder_no, material_type, shot_weight, material_kg, sprue_pct, ratio_pct, accumulated, quantity_needed, shortage, order_no, target_24h, target_11h, packing_qty, notes, workshop) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+      const tx = db.transaction(() => {
+        for (const r of data) ins.run(r.machine_no, r.product_code, r.mold_name, r.color, r.color_powder_no, r.material_type, r.shot_weight || 0, r.material_kg || 0, r.sprue_pct || 0, r.ratio_pct || 0, r.accumulated || 0, r.quantity_needed || 0, r.shortage || 0, r.order_no, r.target_24h || 0, r.target_11h || 0, r.packing_qty || 0, r.notes, r.workshop || 'B');
+      });
+      tx();
+      console.log(`[种子] history_records 导入 ${data.length} 条`);
+    }
+  }
 }
 
 module.exports = { initDatabase };

@@ -851,13 +851,111 @@ _matDropEl.style.cssText = 'display:none;position:fixed;z-index:9999;background:
 document.body.appendChild(_matDropEl);
 let _matDropInp = null;
 
+// 校验原料输入必须在价格表中（空值允许）
+function matValidateInput(el) {
+  const v = (el.value || '').trim();
+  if (!v) { el.style.border = ''; el.title = ''; return true; }
+  const norm = normMat(v);
+  const match = _matPrices.find(p => normMat(p.material) === norm);
+  if (match) {
+    el.value = match.material; // 规范化为价格表中的标准写法
+    el.style.border = '';
+    el.title = match.material;
+    matCompose(el);
+    return true;
+  }
+  el.style.border = '2px solid #dc3545';
+  el.title = '「' + v + '」不在价格表中，请从下拉选择';
+  return false;
+}
+
+// 解析混合料字符串为 [{name,pct}, ...]
+function parseMaterial(s) {
+  const str = String(s || '').trim();
+  if (!str) return [];
+  const parts = str.split(/[+＋]/).map(p => p.trim()).filter(Boolean);
+  const parsed = parts.map(p => {
+    const m = p.match(/^(\d+(?:\.\d+)?)\s*[%％]\s*(.+)$/);
+    return m ? { pct: m[1], name: m[2].trim() } : { pct: '', name: p };
+  });
+  return parsed;
+}
+
 function matSel(val) {
-  const v = esc(val||'');
-  return `<div class="mat-sel-wrap" style="min-width:130px">
-    <input type="text" class="form-control form-control-sm" name="material"
-      value="${v}" placeholder="搜索原料..." autocomplete="off"
-      onfocus="matDropShow(this)" oninput="matDropFilter(this)">
+  const parsed = parseMaterial(val);
+  const n1 = parsed[0]?.name || '';
+  const p1 = parsed[0]?.pct || '';
+  const n2 = parsed[1]?.name || '';
+  const p2 = parsed[1]?.pct || '';
+  const isMixed = parsed.length >= 2;
+  return `<div class="mat-sel-wrap" style="min-width:180px;display:flex;flex-direction:column;gap:2px">
+    <input type="hidden" name="material" value="${esc(val||'')}">
+    <div class="d-flex gap-1 align-items-center">
+      <input type="text" class="form-control form-control-sm mat-name-1" style="flex:1;min-width:100px"
+        value="${esc(n1)}" placeholder="搜索原料..." autocomplete="off"
+        onfocus="matDropShow(this)" oninput="matDropFilter(this);matCompose(this)"
+        onblur="setTimeout(()=>matValidateInput(this),200)">
+      <input type="number" class="form-control form-control-sm mat-pct-1 ${isMixed?'':'d-none'}" style="width:52px"
+        value="${esc(p1)}" placeholder="%" min="0" max="100" step="1" oninput="matCompose(this)">
+      <button type="button" class="btn btn-sm btn-outline-secondary mat-toggle" style="padding:1px 6px;font-size:11px;white-space:nowrap"
+        onclick="matToggleMixed(this)" title="${isMixed?'取消混合料':'添加第二种料'}">${isMixed?'−':'+料'}</button>
+    </div>
+    <div class="d-flex gap-1 align-items-center mat-row-2 ${isMixed?'':'d-none'}">
+      <input type="text" class="form-control form-control-sm mat-name-2" style="flex:1;min-width:100px"
+        value="${esc(n2)}" placeholder="第二种料..." autocomplete="off"
+        onfocus="matDropShow(this)" oninput="matDropFilter(this);matCompose(this)"
+        onblur="setTimeout(()=>matValidateInput(this),200)">
+      <input type="number" class="form-control form-control-sm mat-pct-2" style="width:52px"
+        value="${esc(p2)}" placeholder="%" min="0" max="100" step="1" oninput="matCompose(this)">
+      <span style="width:28px"></span>
+    </div>
   </div>`;
+}
+
+// 根据两行输入拼接 hidden material 值
+function matCompose(el) {
+  const wrap = el.closest('.mat-sel-wrap');
+  if (!wrap) return;
+  const hidden = wrap.querySelector('input[name="material"]');
+  const n1 = wrap.querySelector('.mat-name-1').value.trim();
+  const p1 = wrap.querySelector('.mat-pct-1').value.trim();
+  const row2 = wrap.querySelector('.mat-row-2');
+  const mixed = row2 && !row2.classList.contains('d-none');
+  if (mixed) {
+    const n2 = wrap.querySelector('.mat-name-2').value.trim();
+    const p2 = wrap.querySelector('.mat-pct-2').value.trim();
+    // 两边都有料就拼成 pct%name+pct%name；缺则退化为单料
+    if (n1 && n2 && (p1 || p2)) {
+      hidden.value = `${p1||0}%${n1}+${p2||0}%${n2}`;
+    } else if (n1 && !n2) {
+      hidden.value = n1;
+    } else {
+      hidden.value = [n1 && (p1 ? `${p1}%${n1}` : n1), n2 && (p2 ? `${p2}%${n2}` : n2)].filter(Boolean).join('+');
+    }
+  } else {
+    hidden.value = n1;
+  }
+  // 触发 summary 刷新（保留原有逻辑）
+  hidden.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+// 切换混合料模式
+function matToggleMixed(btn) {
+  const wrap = btn.closest('.mat-sel-wrap');
+  const row2 = wrap.querySelector('.mat-row-2');
+  const pct1 = wrap.querySelector('.mat-pct-1');
+  const on = row2.classList.contains('d-none');
+  row2.classList.toggle('d-none', !on);
+  pct1.classList.toggle('d-none', !on);
+  btn.textContent = on ? '−' : '+料';
+  btn.title = on ? '取消混合料' : '添加第二种料';
+  if (!on) {
+    // 取消混合：清空第二行与比例
+    wrap.querySelector('.mat-name-2').value = '';
+    wrap.querySelector('.mat-pct-2').value = '';
+    pct1.value = '';
+  }
+  matCompose(btn);
 }
 function matDropShow(inp) {
   if (_matPrices.length === 0) return;
@@ -920,7 +1018,13 @@ function matDropFilter(inp) {
   _matDropEl.style.display = '';
 }
 function matDropPick(el, val) {
-  if (_matDropInp) { _matDropInp.value = val; _matDropInp.title = val; _matDropInp.style.border = ''; }
+  if (_matDropInp) {
+    _matDropInp.value = val;
+    _matDropInp.title = val;
+    _matDropInp.style.border = '';
+    // 若在混合料选择器中，同步更新 hidden name="material"
+    if (_matDropInp.closest('.mat-sel-wrap')) matCompose(_matDropInp);
+  }
   _matDropEl.style.display = 'none';
   _matDropInp = null;
 }
@@ -960,7 +1064,7 @@ function addInjRow(it={}, isSubRow=false) {
   document.getElementById('injItemsBody').appendChild(tr);
   // 未匹配原料：红框提示，placeholder 显示原始名称
   if (it._matUnmatched) {
-    const matInp = tr.querySelector('[name="material"]');
+    const matInp = tr.querySelector('.mat-name-1');
     if (matInp) {
       matInp.style.border = '2px solid #dc3545';
       matInp.placeholder = it._matUnmatched + '（未匹配，请手动选择）';
@@ -1096,6 +1200,24 @@ function saveOrder(type) {
     if (body.items && body.items.some(it => !it.product_name)) { alert('请填写所有明细行的产品名称'); return; }
   } else {
     if (!body.product_name) { alert('请填写产品名称'); return; }
+  }
+
+  // 啤办单：原料必须在价格表中（防止自由输入）
+  if (type === 'injection') {
+    const invalid = [];
+    document.querySelectorAll('#injItemsBody .mat-sel-wrap').forEach((wrap, i) => {
+      ['mat-name-1', 'mat-name-2'].forEach(cls => {
+        const inp = wrap.querySelector('.' + cls);
+        if (!inp) return;
+        // 只校验可见的输入（mat-name-2 在单料模式下 row2 隐藏，跳过）
+        if (cls === 'mat-name-2' && wrap.querySelector('.mat-row-2').classList.contains('d-none')) return;
+        if (!matValidateInput(inp)) invalid.push(`第 ${i+1} 行: ${inp.value}`);
+      });
+    });
+    if (invalid.length) {
+      alert('以下原料不在价格表中，请从下拉选择：\n' + invalid.join('\n'));
+      return;
+    }
   }
 
   if (!currentUser) { showLoginModal(); return; }

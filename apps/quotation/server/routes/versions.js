@@ -553,9 +553,9 @@ router.post('/:id/translate-all', async (req, res) => {
 });
 
 // POST /:id/translate-sewing (kept for backward compat)
+// 用相对路径，让浏览器基于原始 URL 解析，兼容 nginx 子路径部署
 router.post('/:id/translate-sewing', async (req, res) => {
-  req.url = `/${req.params.id}/translate-all`;
-  res.redirect(307, `/api/versions/${req.params.id}/translate-all`);
+  res.redirect(307, './translate-all');
 });
 
 module.exports = router;

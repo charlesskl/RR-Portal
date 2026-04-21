@@ -8,12 +8,14 @@ from datetime import datetime
 from collections import defaultdict
 from flask import Flask, render_template, request, jsonify, send_file
 from werkzeug.utils import secure_filename
+from werkzeug.middleware.proxy_fix import ProxyFix
 from excel_po_parser import ExcelPOParser
 from master_schedule import write_orders, lookup_schedule_info
 from generate_yellow_summary import generate_summary, generate_summary_excel
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 app = Flask(__name__, template_folder=os.path.join(APP_DIR, 'templates'))
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
 app.config['UPLOAD_FOLDER'] = os.path.join(APP_DIR, 'uploads')
 app.config['MASTER_FOLDER'] = os.path.join(APP_DIR, 'uploads', 'master')
 app.config['EXPORT_FOLDER'] = os.path.join(APP_DIR, 'exports')

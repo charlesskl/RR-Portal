@@ -670,7 +670,15 @@ function renderOrderList(orders) {
     });
     rows = rowArr.join('');
   } else {
-    rows = orders.map(o => `
+    const priceMapEng = (currentTab === 'injection') ? buildPriceMap(_matPrices) : null;
+    rows = orders.map(o => {
+      const hasMissingPrice = priceMapEng
+        ? (o.items || []).some(it => it.material && !resolvePrice(it.material, priceMapEng))
+        : false;
+      const matBadge = hasMissingPrice
+        ? ' <span class="badge bg-warning text-dark ms-1" title="部分原料未录入价格"><i class="bi bi-exclamation-circle me-1"></i>料价缺</span>'
+        : '';
+      return `
     <tr class="order-row" style="cursor:pointer" onclick="viewOrderDetail(${o.id},'${(o.order_number||'').replace(/'/g,'')}')">
       <td>${esc(o.order_number || '-')}</td>
       <td>${esc(o.product_name || '-')}</td>
@@ -682,7 +690,7 @@ function renderOrderList(orders) {
       <td>${esc(o.eng_name || '-')}</td>
       <td class="text-truncate" style="max-width:120px" title="${esc(o.reason||'')}">${esc(o.reason || '-')}</td>
       <td class="text-nowrap">
-        ${statusBadge(o.status)}
+        ${statusBadge(o.status)}${matBadge}
         ${engProblemsMap[o.id] ? `<span class="badge bg-danger ms-1" style="cursor:pointer" onclick="event.stopPropagation();viewEngProblems(${o.id},'${(o.order_number||'').replace(/'/g,'')}')"><i class="bi bi-exclamation-triangle-fill me-1"></i>${engProblemsMap[o.id]}</span>` : ''}
       </td>
       <td class="text-nowrap" onclick="event.stopPropagation()">
@@ -695,7 +703,8 @@ function renderOrderList(orders) {
           ${engProblemsMap[o.id] ? `<button class="btn btn-danger" onclick="viewEngProblems(${o.id},'${(o.order_number||'').replace(/'/g,'')}')" title="查看问题"><i class="bi bi-exclamation-triangle-fill"></i></button>` : ''}
         </div>
       </td>
-    </tr>`).join('');
+    </tr>`;
+    }).join('');
   }
 
   document.getElementById('orderList').innerHTML = `

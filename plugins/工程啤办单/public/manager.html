@@ -199,6 +199,12 @@
         <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body">
+        <div class="alert alert-info py-2 px-3 mb-3 d-flex align-items-center gap-2" style="font-size:.85rem">
+          <i class="bi bi-currency-exchange"></i>
+          <span class="fw-bold">RMB → HKD 汇率：</span>
+          <input type="number" id="ptExchangeRate" step="0.0001" min="0" class="form-control form-control-sm" style="width:90px" placeholder="1.08">
+          <span class="text-muted">1 RMB = X HKD（啤机部录入 RMB，保存时按此汇率折算 HKD）</span>
+        </div>
         <div class="d-flex gap-2 mb-3 align-items-center">
           <input id="ptSearch" class="form-control form-control-sm" style="max-width:240px" placeholder="搜索原料名..." oninput="renderPriceTable()">
           <div class="form-check">
@@ -739,13 +745,18 @@ async function openPriceTableModal() {
   document.getElementById('ptSearch').value = '';
   document.getElementById('ptOnlyMissing').checked = false;
   document.getElementById('ptMgrPin').value = '';
+  document.getElementById('ptExchangeRate').value = '';
   try {
-    const r = await apiFetch('/api/material-prices');
-    _priceRows = (await r.json()).map(p => ({
+    const [pr, sr] = await Promise.all([
+      apiFetch('/api/material-prices').then(r => r.json()),
+      apiFetch('/api/settings').then(r => r.json()).catch(() => ({}))
+    ]);
+    _priceRows = pr.map(p => ({
       material: p.material || '',
       unit_price: +(p.unit_price || 0),
       notes: p.notes || ''
     }));
+    document.getElementById('ptExchangeRate').value = sr.exchange_rate_rmb_to_hkd || '';
   } catch (e) { _priceRows = []; }
   renderPriceTable();
   new bootstrap.Modal(document.getElementById('priceTableModal')).show();
@@ -800,11 +811,14 @@ async function savePriceTable() {
   if (dup) { err.textContent = `存在重复原料名：${dup}`; err.classList.remove('d-none'); return; }
   const managerPin = (document.getElementById('ptMgrPin').value || '').trim();
   if (!managerPin) { err.textContent = '请输入经理 PIN'; err.classList.remove('d-none'); return; }
+  const rateRaw = (document.getElementById('ptExchangeRate').value || '').trim();
+  const exchange_rate = rateRaw ? +rateRaw : null;
+  if (rateRaw && !(exchange_rate > 0)) { err.textContent = '汇率必须为正数'; err.classList.remove('d-none'); return; }
   try {
     const r = await apiFetch('/api/manager-update-prices', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ manager_name: MANAGER_NAME, manager_pin: managerPin, prices: clean })
+      body: JSON.stringify({ manager_name: MANAGER_NAME, manager_pin: managerPin, prices: clean, ...(exchange_rate != null ? { exchange_rate } : {}) })
     });
     const d = await r.json();
     if (!r.ok || !d.success) { err.textContent = d.error || '保存失败'; err.classList.remove('d-none'); return; }

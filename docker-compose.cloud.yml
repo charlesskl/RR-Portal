@@ -431,9 +431,11 @@ services:
       dockerfile: Dockerfile
     environment:
       - BASE_PATH=/peise
-      # OCR 走 OpenRouter（CN ECS GFW 友好），默认免费 Gemma 4 31B vision
+      # OCR 走 OpenAI-compatible API（OpenRouter / Aliyun DashScope / Zhipu / Moonshot 等都支援）
+      # 默认 OpenRouter，但 BASE_URL 可换到任何 OpenAI-compat endpoint（如阿里云 DashScope 内网调用零延迟）
       - OPENROUTER_API_KEY=${PEISE_OPENROUTER_API_KEY:-}
       - OPENROUTER_MODEL=${PEISE_OPENROUTER_MODEL:-google/gemma-4-31b-it:free}
+      - OPENROUTER_BASE_URL=${PEISE_OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
     volumes:
       - ./apps/peise/instance:/app/instance
     healthcheck:

@@ -598,23 +598,25 @@ app.get('/api/injection-total-costs', (req, res) => {
   const priceMap = buildPriceMap(data.material_prices);
   const result = orders.map(o => {
     const orderItems = items.filter(i => i.order_id === o.id).sort((a,b) => a.sort_order - b.sort_order);
+    // 发至模厂/发至湖南（或车间=模厂）的订单不统计啤办费，也不提示缺项
+    const skipInjCost = o.send_to === '发至模厂' || o.send_to === '发至湖南' || o.workshop === '模厂';
     let totalMat = 0, totalInj = 0, hasMissingPrice = false, hasMissingInj = false;
     const details = orderItems.map(it => {
       const mat = +(it.actual_amount_hkd || 0);
       const injRaw = it.injection_cost;
       const inj = +(injRaw || 0);
       totalMat += mat;
-      totalInj += inj;
+      if (!skipInjCost) totalInj += inj;
       // 料价缺：有材料名但模糊解析找不到价格
       if (it.material && resolvePrice(it.material, priceMap) <= 0) hasMissingPrice = true;
-      // 啤办费缺：没有填写（null/undefined/空字符串）
-      if (injRaw === null || injRaw === undefined || injRaw === '') hasMissingInj = true;
+      // 啤办费缺：没有填写（null/undefined/空字符串），发至订单除外
+      if (!skipInjCost && (injRaw === null || injRaw === undefined || injRaw === '')) hasMissingInj = true;
       return {
         mold_id: it.mold_id || '',
         mold_name: it.mold_name || '',
         material: it.material || '',
         material_cost: Math.round(mat * 100) / 100,
-        injection_cost: (injRaw === null || injRaw === undefined || injRaw === '') ? null : inj
+        injection_cost: skipInjCost ? null : ((injRaw === null || injRaw === undefined || injRaw === '') ? null : inj)
       };
     });
     return {

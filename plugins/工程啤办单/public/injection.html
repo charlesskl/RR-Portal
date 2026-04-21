@@ -872,7 +872,7 @@ function renderTotalData() {
       ? ' <span class="badge bg-warning text-dark ms-1" style="font-size:.65rem" title="部分模具未填写啤办费"><i class="bi bi-exclamation-circle"></i> 啤办费缺</span>'
       : '';
     const detailRows = (o.items || []).map(it => {
-      const matCls = (!it.material_cost || it.material_cost === 0) ? 'text-warning' : '';
+      const matCls = !it.material_cost ? 'text-warning' : '';
       const matTxt = it.material_cost ? it.material_cost.toFixed(2) : '<i class="bi bi-exclamation-circle"></i> 缺';
       // 发至模厂/湖南订单：啤办费显示「—」（N/A），不标红不计合计
       let injTxt, injCls;
@@ -918,6 +918,7 @@ function renderTotalData() {
 
 function toggleTotalGroup(gid, summaryRow) {
   const rows = document.querySelectorAll(`.detail-${gid}`);
+  if (!rows.length) return;
   const icon = summaryRow.querySelector(`.toggle-icon-${gid}`);
   const isOpen = rows[0]?.style.display !== 'none';
   rows.forEach(r => r.style.display = isOpen ? 'none' : '');

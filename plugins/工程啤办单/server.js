@@ -630,9 +630,11 @@ app.get('/api/injection-total-costs', (req, res) => {
     const skipInjCost = o.send_to === '发至模厂' || o.send_to === '发至湖南' || o.workshop === '模厂';
     let totalMat = 0, totalInj = 0, hasMissingPrice = false, hasMissingInj = false;
     const details = orderItems.map(it => {
-      const mat = +(it.actual_amount_hkd || 0);
+      const matRaw = +(it.actual_amount_hkd || 0);
+      const mat = Number.isFinite(matRaw) ? matRaw : 0;
       const injRaw = it.injection_cost;
-      const inj = +(injRaw || 0);
+      const injNum = +(injRaw || 0);
+      const inj = Number.isFinite(injNum) ? injNum : 0;
       totalMat += mat;
       if (!skipInjCost) totalInj += inj;
       // 料价缺：有材料名但模糊解析找不到价格

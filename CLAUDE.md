@@ -109,6 +109,7 @@ curl http://localhost:<port>/health
 | tomy-paiqi TOMY排期核对系统 | Node.js/React | 3006 | /tomy-paiqi/ |
 | liwenjuan 成品核对系统 | Flask | 5004 | /liwenjuan/ |
 | peise 配色库存管理 | Flask | 5006 | /peise/ |
+| huadeng 华登包材管理 | Flask | 5007 | /huadeng/ |
 
 ## 插件类型
 
@@ -346,6 +347,7 @@ const data = JSON.parse(fs.readFileSync('data/data.json'));
 | tomy-paiqi | TOMY排期核对系统 | 业务部 | Standalone (Node.js/React) | /tomy-paiqi/ | — |
 | liwenjuan | 成品核对系统 | PMC跟仓管 | Standalone (Python/Flask) | /liwenjuan/ | — |
 | peise | 配色库存管理 | PMC跟仓管 | Standalone (Python/Flask) | /peise/ | https://github.com/fxxaxxx/peisecangku |
+| huadeng | 华登包材管理 | PMC跟仓管 | Standalone (Python/Flask) | /huadeng/ | — |
 
 ### 旧插件（已删除）
 

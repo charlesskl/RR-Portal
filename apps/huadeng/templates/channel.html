@@ -1,0 +1,398 @@
+{% extends "base.html" %}
+{% block title %}{{ channel.name }} - 包材往来{% endblock %}
+{% block content %}
+<div class="mb-4 flex items-center justify-between flex-wrap gap-2">
+    <h1 class="text-xl font-bold text-gray-800">{{ channel.name }} 包材往来</h1>
+    <div class="flex gap-2">
+        <a href="/export/channel/{{ ch }}" class="px-3 py-1.5 bg-green-600 text-white text-sm rounded hover:bg-green-700">导出流水</a>
+        <a href="/export/monthly/{{ ch }}" class="px-3 py-1.5 bg-green-600 text-white text-sm rounded hover:bg-green-700">导出月份统计</a>
+        <button onclick="document.getElementById('priceModal').classList.remove('hidden')"
+                class="px-3 py-1.5 bg-gray-600 text-white text-sm rounded hover:bg-gray-700">设置默认单价</button>
+    </div>
+</div>
+
+<!-- 日期筛选 -->
+<form class="bg-white rounded-lg shadow-sm p-4 mb-4 flex items-end gap-3 flex-wrap" method="GET">
+    <div>
+        <label class="block text-xs text-gray-500 mb-1">开始日期</label>
+        <input type="date" name="date_from" value="{{ date_from }}" class="border rounded px-2 py-1 text-sm">
+    </div>
+    <div>
+        <label class="block text-xs text-gray-500 mb-1">结束日期</label>
+        <input type="date" name="date_to" value="{{ date_to }}" class="border rounded px-2 py-1 text-sm">
+    </div>
+    <button type="submit" class="px-3 py-1.5 bg-blue-600 text-white text-sm rounded hover:bg-blue-700">筛选</button>
+    <a href="/channel/{{ ch }}" class="px-3 py-1.5 bg-gray-200 text-gray-700 text-sm rounded hover:bg-gray-300">重置</a>
+</form>
+
+<!-- 新增记录 -->
+<div class="bg-white rounded-lg shadow-sm mb-4">
+    <button onclick="toggleAdd()" class="w-full px-4 py-3 text-left font-semibold text-blue-600 hover:bg-blue-50 rounded-lg flex items-center justify-between">
+        <span>+ 新增记录</span>
+        <svg id="addArrow" class="w-4 h-4 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+        </svg>
+    </button>
+    <div id="addForm" class="hidden border-t">
+        <form method="POST" action="/channel/{{ ch }}/add" class="p-4">
+            <div class="flex gap-3 mb-3 flex-wrap">
+                <div>
+                    <label class="block text-xs text-gray-500 mb-1">日期</label>
+                    <input type="date" name="date" required class="border rounded px-2 py-1 text-sm">
+                </div>
+                <div>
+                    <label class="block text-xs text-gray-500 mb-1">收订单号</label>
+                    <input type="text" name="order_no" class="border rounded px-2 py-1 text-sm w-32">
+                </div>
+            </div>
+            <div class="table-scroll">
+                <table class="text-sm border-collapse w-full">
+                    <thead>
+                        <tr class="bg-gray-50">
+                            <th class="border px-2 py-1 text-left">包材</th>
+                            <th class="border px-2 py-1">数量</th>
+                            <th class="border px-2 py-1">单价</th>
+                            <th class="border px-2 py-1">金额</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for key, name in items %}
+                        <tr>
+                            <td class="border px-2 py-1 font-medium">{{ name }}</td>
+                            <td class="border px-1 py-1">
+                                <input type="number" step="any" name="{{ key }}_qty" id="add_{{ key }}_qty" value="0"
+                                       class="w-20 border rounded px-1 py-0.5 text-right text-sm"
+                                       oninput="calcAmount('{{ key }}', 'add')">
+                            </td>
+                            <td class="border px-1 py-1">
+                                <input type="number" step="any" name="{{ key }}_price" id="add_{{ key }}_price" value="{{ prices.get(key, 0) }}"
+                                       class="w-20 border rounded px-1 py-0.5 text-right text-sm"
+                                       oninput="calcAmount('{{ key }}', 'add')">
+                            </td>
+                            <td class="border px-2 py-1 text-right">
+                                <span id="add_{{ key }}_amount">0.00</span>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            <div class="mt-3">
+                <label class="block text-xs text-gray-500 mb-1">备注</label>
+                <input type="text" name="remarks" class="border rounded px-2 py-1 text-sm w-full">
+            </div>
+            <button type="submit" class="mt-3 px-4 py-2 bg-blue-600 text-white text-sm rounded hover:bg-blue-700">保存</button>
+        </form>
+    </div>
+</div>
+
+<!-- 流水记录表 -->
+<div class="bg-white rounded-lg shadow-sm mb-6">
+    <h2 class="px-4 py-3 font-semibold text-gray-700 border-b">流水记录</h2>
+    <div class="table-scroll">
+        <table class="text-xs border-collapse w-full min-w-[1200px]">
+            <thead>
+                <tr class="bg-gray-50">
+                    <th class="border px-2 py-2 sticky left-0 bg-gray-50 z-10">日期</th>
+                    <th class="border px-2 py-2">订单号</th>
+                    {% for key, name in items %}
+                    <th class="border px-1 py-2" colspan="3">{{ name }}</th>
+                    {% endfor %}
+                    <th class="border px-2 py-2">备注</th>
+                    <th class="border px-2 py-2">操作</th>
+                </tr>
+                <tr class="bg-gray-50 text-gray-500">
+                    <th class="border px-2 py-1 sticky left-0 bg-gray-50 z-10"></th>
+                    <th class="border px-2 py-1"></th>
+                    {% for key, name in items %}
+                    <th class="border px-1 py-1">数量</th>
+                    <th class="border px-1 py-1">单价</th>
+                    <th class="border px-1 py-1">金额</th>
+                    {% endfor %}
+                    <th class="border px-2 py-1"></th>
+                    <th class="border px-2 py-1"></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for rec in records %}
+                <tr class="hover:bg-blue-50" id="row_{{ rec.id }}">
+                    <td class="border px-2 py-1 sticky left-0 bg-white whitespace-nowrap">{{ rec.date }}</td>
+                    <td class="border px-2 py-1">{{ rec.order_no }}</td>
+                    {% for key, name in items %}
+                    <td class="border px-1 py-1 text-right">{{ rec[key ~ '_qty'] if rec[key ~ '_qty'] else '' }}</td>
+                    <td class="border px-1 py-1 text-right">{{ rec[key ~ '_price'] if rec[key ~ '_price'] else '' }}</td>
+                    <td class="border px-1 py-1 text-right">{{ '%.2f' % rec[key ~ '_amount'] if rec[key ~ '_amount'] else '' }}</td>
+                    {% endfor %}
+                    <td class="border px-2 py-1">{{ rec.remarks }}</td>
+                    <td class="border px-2 py-1 whitespace-nowrap">
+                        <button onclick="editRow({{ rec.id }})" class="text-blue-600 hover:underline">编辑</button>
+                        <form method="POST" action="/channel/{{ ch }}/delete/{{ rec.id }}" class="inline"
+                              onsubmit="return confirm('确定删除？')">
+                            <button type="submit" class="text-red-600 hover:underline ml-1">删除</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+                {% if not records %}
+                <tr><td colspan="100" class="border px-4 py-8 text-center text-gray-400">暂无记录</td></tr>
+                {% endif %}
+            </tbody>
+            <tfoot>
+                <tr class="bg-blue-50 font-semibold">
+                    <td class="border px-2 py-2 sticky left-0 bg-blue-50 z-10" colspan="2">合计</td>
+                    {% for key, name in items %}
+                    <td class="border px-1 py-1 text-right">{{ summary[key].qty if summary[key].qty else '' }}</td>
+                    <td class="border px-1 py-1"></td>
+                    <td class="border px-1 py-1 text-right">{{ '%.2f' % summary[key].amount if summary[key].amount else '' }}</td>
+                    {% endfor %}
+                    <td class="border px-2 py-1 text-right font-bold" colspan="2">总金额: {{ '%.2f' % grand_total }}</td>
+                </tr>
+            </tfoot>
+        </table>
+    </div>
+</div>
+
+<!-- 月份包材数量统计 -->
+<div class="bg-white rounded-lg shadow-sm mb-6">
+    <div class="px-4 py-3 border-b flex items-center justify-between">
+        <h2 class="font-semibold text-gray-700">月份包材数量统计</h2>
+        <button onclick="document.getElementById('invModal').classList.remove('hidden')"
+                class="px-3 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700">录入实存数</button>
+    </div>
+    <div class="table-scroll">
+        <table class="text-sm border-collapse w-full">
+            <thead>
+                <tr class="bg-gray-50">
+                    <th class="border px-3 py-2">范围</th>
+                    <th class="border px-3 py-2">时间</th>
+                    {% for key, name in stat_items %}
+                    <th class="border px-3 py-2">{{ name }}</th>
+                    {% endfor %}
+                    <th class="border px-3 py-2">备注</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for stat in stats_data %}
+                {% set ym = stat.year_month %}
+                {% set year = ym[:4]|int %}
+                {% set month = ym[5:7]|int %}
+                {% set prev_month = 12 if month == 1 else month - 1 %}
+                <tr class="bg-gray-50">
+                    <td class="border px-3 py-1 font-medium" rowspan="6">{{ channel.to }}</td>
+                    <td class="border px-3 py-1">{{ prev_month }}月实存数</td>
+                    {% for key, name in stat_items %}
+                    <td class="border px-3 py-1 text-right">{{ stat.item_data[key].prev_actual }}</td>
+                    {% endfor %}
+                    <td class="border px-3 py-1" rowspan="6">{{ stat.remarks }}</td>
+                </tr>
+                <tr>
+                    <td class="border px-3 py-1">投资</td>
+                    {% for key, name in stat_items %}
+                    <td class="border px-3 py-1 text-right text-blue-600">{{ stat.item_data[key].investment }}</td>
+                    {% endfor %}
+                </tr>
+                <tr class="bg-yellow-50">
+                    <td class="border px-3 py-1">{{ month }}月应存数</td>
+                    {% for key, name in stat_items %}
+                    <td class="border px-3 py-1 text-right font-medium">{{ stat.item_data[key].expected }}</td>
+                    {% endfor %}
+                </tr>
+                <tr>
+                    <td class="border px-3 py-1">{{ month }}月实存数</td>
+                    {% for key, name in stat_items %}
+                    <td class="border px-3 py-1 text-right text-green-600">{{ stat.item_data[key].actual }}</td>
+                    {% endfor %}
+                </tr>
+                <tr>
+                    <td class="border px-3 py-1">损耗</td>
+                    {% for key, name in stat_items %}
+                    <td class="border px-3 py-1 text-right text-red-600">{{ stat.item_data[key].loss }}</td>
+                    {% endfor %}
+                </tr>
+                <tr class="bg-red-50">
+                    <td class="border px-3 py-1">损耗占比</td>
+                    {% for key, name in stat_items %}
+                    <td class="border px-3 py-1 text-right text-red-600">{{ stat.item_data[key].loss_pct }}%</td>
+                    {% endfor %}
+                </tr>
+                {% endfor %}
+                {% if not stats_data %}
+                <tr><td colspan="7" class="border px-4 py-8 text-center text-gray-400">暂无统计数据，请先录入实存数</td></tr>
+                {% endif %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- 录入实存数弹窗 -->
+<div id="invModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+    <div class="bg-white rounded-lg shadow-xl w-96 p-6">
+        <h3 class="text-lg font-bold mb-4">录入月度实存数</h3>
+        <form method="POST" action="/channel/{{ ch }}/inventory">
+            <div class="mb-3">
+                <label class="block text-sm text-gray-600 mb-1">月份</label>
+                <input type="month" name="year_month" required class="border rounded px-3 py-1.5 w-full text-sm">
+            </div>
+            {% for key, name in stat_items %}
+            <div class="mb-2">
+                <label class="block text-sm text-gray-600 mb-1">{{ name }} 实存数</label>
+                <input type="number" step="any" name="{{ key }}_actual" value="0"
+                       class="border rounded px-3 py-1.5 w-full text-sm">
+            </div>
+            {% endfor %}
+            <div class="mb-3">
+                <label class="block text-sm text-gray-600 mb-1">备注</label>
+                <input type="text" name="inv_remarks" class="border rounded px-3 py-1.5 w-full text-sm">
+            </div>
+            <div class="flex justify-end gap-2">
+                <button type="button" onclick="document.getElementById('invModal').classList.add('hidden')"
+                        class="px-4 py-2 bg-gray-200 rounded text-sm">取消</button>
+                <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded text-sm">保存</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- 默认单价弹窗 -->
+<div id="priceModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+    <div class="bg-white rounded-lg shadow-xl w-96 p-6 max-h-[80vh] overflow-y-auto">
+        <h3 class="text-lg font-bold mb-4">设置默认单价</h3>
+        <div id="priceForm">
+            {% for key, name in items %}
+            <div class="mb-2 flex items-center justify-between">
+                <label class="text-sm text-gray-700">{{ name }}</label>
+                <input type="number" step="any" id="price_{{ key }}" value="{{ prices.get(key, 0) }}"
+                       class="border rounded px-2 py-1 text-sm w-24 text-right">
+            </div>
+            {% endfor %}
+        </div>
+        <div class="flex justify-end gap-2 mt-4">
+            <button onclick="document.getElementById('priceModal').classList.add('hidden')"
+                    class="px-4 py-2 bg-gray-200 rounded text-sm">取消</button>
+            <button onclick="savePrices()" class="px-4 py-2 bg-blue-600 text-white rounded text-sm">保存</button>
+        </div>
+    </div>
+</div>
+
+<!-- 编辑记录弹窗 -->
+<div id="editModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+    <div class="bg-white rounded-lg shadow-xl p-6 max-h-[90vh] overflow-y-auto w-[500px]">
+        <h3 class="text-lg font-bold mb-4">编辑记录</h3>
+        <form id="editForm" method="POST">
+            <div class="flex gap-3 mb-3">
+                <div>
+                    <label class="block text-xs text-gray-500 mb-1">日期</label>
+                    <input type="date" name="date" id="edit_date" required class="border rounded px-2 py-1 text-sm">
+                </div>
+                <div>
+                    <label class="block text-xs text-gray-500 mb-1">收订单号</label>
+                    <input type="text" name="order_no" id="edit_order_no" class="border rounded px-2 py-1 text-sm w-32">
+                </div>
+            </div>
+            <table class="text-sm border-collapse w-full">
+                <thead>
+                    <tr class="bg-gray-50">
+                        <th class="border px-2 py-1 text-left">包材</th>
+                        <th class="border px-2 py-1">数量</th>
+                        <th class="border px-2 py-1">单价</th>
+                        <th class="border px-2 py-1">金额</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for key, name in items %}
+                    <tr>
+                        <td class="border px-2 py-1 font-medium">{{ name }}</td>
+                        <td class="border px-1 py-1">
+                            <input type="number" step="any" name="{{ key }}_qty" id="edit_{{ key }}_qty" value="0"
+                                   class="w-20 border rounded px-1 py-0.5 text-right text-sm"
+                                   oninput="calcAmount('{{ key }}', 'edit')">
+                        </td>
+                        <td class="border px-1 py-1">
+                            <input type="number" step="any" name="{{ key }}_price" id="edit_{{ key }}_price" value="0"
+                                   class="w-20 border rounded px-1 py-0.5 text-right text-sm"
+                                   oninput="calcAmount('{{ key }}', 'edit')">
+                        </td>
+                        <td class="border px-2 py-1 text-right">
+                            <span id="edit_{{ key }}_amount">0.00</span>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            <div class="mt-3">
+                <label class="block text-xs text-gray-500 mb-1">备注</label>
+                <input type="text" name="remarks" id="edit_remarks" class="border rounded px-2 py-1 text-sm w-full">
+            </div>
+            <div class="flex justify-end gap-2 mt-4">
+                <button type="button" onclick="document.getElementById('editModal').classList.add('hidden')"
+                        class="px-4 py-2 bg-gray-200 rounded text-sm">取消</button>
+                <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded text-sm">保存</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+const ITEMS = {{ items|tojson }};
+// 记录数据用于编辑
+const RECORDS = {
+    {% for rec in records %}
+    {{ rec.id }}: {
+        date: "{{ rec.date }}",
+        order_no: "{{ rec.order_no }}",
+        remarks: "{{ rec.remarks }}",
+        {% for key, name in items %}
+        {{ key }}_qty: {{ rec[key ~ '_qty'] or 0 }},
+        {{ key }}_price: {{ rec[key ~ '_price'] or 0 }},
+        {% endfor %}
+    },
+    {% endfor %}
+};
+
+function toggleAdd() {
+    const form = document.getElementById('addForm');
+    const arrow = document.getElementById('addArrow');
+    form.classList.toggle('hidden');
+    arrow.classList.toggle('rotate-180');
+}
+
+function calcAmount(key, prefix) {
+    const q = parseFloat(document.getElementById(`${prefix}_${key}_qty`)?.value || 0);
+    const p = parseFloat(document.getElementById(`${prefix}_${key}_price`)?.value || 0);
+    document.getElementById(`${prefix}_${key}_amount`).textContent = (q * p).toFixed(2);
+}
+
+function editRow(id) {
+    const rec = RECORDS[id];
+    if (!rec) return;
+    document.getElementById('editForm').action = `/channel/{{ ch }}/edit/${id}`;
+    document.getElementById('edit_date').value = rec.date;
+    document.getElementById('edit_order_no').value = rec.order_no;
+    document.getElementById('edit_remarks').value = rec.remarks;
+    ITEMS.forEach(([key, name]) => {
+        document.getElementById(`edit_${key}_qty`).value = rec[`${key}_qty`];
+        document.getElementById(`edit_${key}_price`).value = rec[`${key}_price`];
+        calcAmount(key, 'edit');
+    });
+    document.getElementById('editModal').classList.remove('hidden');
+}
+
+function savePrices() {
+    const data = {};
+    ITEMS.forEach(([key, name]) => {
+        data[key] = parseFloat(document.getElementById(`price_${key}`).value || 0);
+    });
+    fetch('/api/prices', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(data),
+    }).then(r => r.json()).then(() => {
+        document.getElementById('priceModal').classList.add('hidden');
+        location.reload();
+    });
+}
+</script>
+{% endblock %}

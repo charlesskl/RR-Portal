@@ -452,6 +452,30 @@ services:
     networks:
       - platform-net
 
+  huadeng:
+    build:
+      context: ./apps/huadeng
+      dockerfile: Dockerfile
+    environment:
+      - DATA_PATH=/app/data
+    volumes:
+      - ./apps/huadeng/data:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5007/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    mem_limit: 512m
+    memswap_limit: 512m
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - platform-net
+
 networks:
   platform-net:
     driver: bridge

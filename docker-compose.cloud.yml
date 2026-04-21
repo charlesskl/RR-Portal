@@ -431,9 +431,9 @@ services:
       dockerfile: Dockerfile
     environment:
       - BASE_PATH=/peise
-      - GEMINI_API_KEY=${PEISE_GEMINI_API_KEY:-}
-      - GEMINI_BASE_URL=${PEISE_GEMINI_BASE_URL:-https://gemini-proxy.hufan4308.workers.dev}
-      - GEMINI_MODEL=${PEISE_GEMINI_MODEL:-gemini-2.5-flash}
+      # OCR 走 OpenRouter（CN ECS GFW 友好），默认免费 Gemma 4 31B vision
+      - OPENROUTER_API_KEY=${PEISE_OPENROUTER_API_KEY:-}
+      - OPENROUTER_MODEL=${PEISE_OPENROUTER_MODEL:-google/gemma-4-31b-it:free}
     volumes:
       - ./apps/peise/instance:/app/instance
     healthcheck:

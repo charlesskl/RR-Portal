@@ -1,14 +1,17 @@
-"""通过 Google AI Studio 的 Gemini 多模态模型识别送货单/出入库单。
+"""通过 OpenRouter 路由的多模态 LLM 识别送货单 / 出入库单。
 
-调用 generativelanguage.googleapis.com 的 generateContent,让模型直接返回 JSON 数组,
-字段与 Paddle 版保持一致,方便 _ocr_upload 直接拿去渲染模板。
+OpenRouter 是 unified gateway，后端可以是 Gemini / Claude / GPT-4o / Qwen-VL / Gemma 等任何
+多模态模型。云端 ECS 在中国大陆，原 Gemini 直连 + Cloudflare Worker `*.workers.dev` 都被 GFW 屏
+蔽，OpenRouter 自有域名 `openrouter.ai` 通畅。
 
 环境变量:
-  GEMINI_API_KEY   - 必填,在 https://aistudio.google.com/app/apikey 免费领
-  GEMINI_MODEL     - 可选,默认 gemini-2.5-flash(免费层 10 RPM / 250 RPD)
-  GEMINI_BASE_URL  - 可选,默认 https://generativelanguage.googleapis.com
-                     境内部署可设置为 Cloudflare Worker 反向代理地址
-                     (如 https://gemini-proxy.xxx.workers.dev)
+  OPENROUTER_API_KEY     必填 (https://openrouter.ai/keys)
+  OPENROUTER_MODEL       可选, 默认 google/gemma-4-31b-it:free (免费 vision，
+                          262k context). 也可以换成:
+                          - google/gemini-2.5-flash (付费，质量高，每张约 ¥0.005)
+                          - anthropic/claude-haiku-4.5 (付费，3x 价)
+                          - 任何 https://openrouter.ai/models 多模态模型
+  OPENROUTER_BASE_URL    可选, 默认 https://openrouter.ai/api/v1
 """
 from __future__ import annotations
 
@@ -19,8 +22,8 @@ import re
 
 import requests
 
-DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com"
-DEFAULT_MODEL = "gemini-2.5-flash"
+DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
+DEFAULT_MODEL = "google/gemma-4-31b-it:free"
 
 SYSTEM_PROMPT = """你是一个送货单/出入库单识别助手。
 给你一张图片,请只返回 JSON 数组,格式:
@@ -43,29 +46,35 @@ def parse_image_llm(
     pigment_lookup: dict[str, int],
     timeout: int = 60,
 ) -> list[dict]:
-    api_key = os.environ.get("GEMINI_API_KEY", "").strip()
+    api_key = os.environ.get("OPENROUTER_API_KEY", "").strip()
     if not api_key:
-        raise LLMOCRError("GEMINI_API_KEY 未设置")
-    model = (os.environ.get("GEMINI_MODEL", "").strip() or DEFAULT_MODEL)
-    base = (os.environ.get("GEMINI_BASE_URL", "").strip().rstrip("/") or DEFAULT_BASE_URL)
-    url = f"{base}/v1beta/models/{model}:generateContent"
+        raise LLMOCRError("OPENROUTER_API_KEY 未设置")
+    model = os.environ.get("OPENROUTER_MODEL", "").strip() or DEFAULT_MODEL
+    base = (os.environ.get("OPENROUTER_BASE_URL", "").strip().rstrip("/") or DEFAULT_BASE_URL)
+    url = f"{base}/chat/completions"
 
     b64 = base64.b64encode(image_bytes).decode("ascii")
     payload = {
-        "systemInstruction": {"parts": [{"text": SYSTEM_PROMPT}]},
-        "contents": [{
-            "role": "user",
-            "parts": [
-                {"text": "请识别并严格按 JSON 数组返回。"},
-                {"inlineData": {"mimeType": "image/png", "data": b64}},
-            ],
-        }],
-        "generationConfig": {
-            "temperature": 0,
-            "responseMimeType": "application/json",
-        },
+        "model": model,
+        "messages": [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "请识别并严格按 JSON 数组返回。"},
+                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
+                ],
+            },
+        ],
+        "temperature": 0,
     }
-    headers = {"Content-Type": "application/json", "x-goog-api-key": api_key}
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+        # OpenRouter 推荐填这两个 header 用于 attribution / 排队优先级
+        "HTTP-Referer": "https://8.148.146.194/peise/",
+        "X-Title": "RR Portal - peise OCR",
+    }
     try:
         resp = requests.post(url, json=payload, headers=headers, timeout=timeout)
     except requests.RequestException as e:
@@ -74,9 +83,11 @@ def parse_image_llm(
         raise LLMOCRError(f"HTTP {resp.status_code}: {resp.text[:500]}")
     try:
         data = resp.json()
-        content = data["candidates"][0]["content"]["parts"][0]["text"]
+        content = data["choices"][0]["message"]["content"]
     except (KeyError, ValueError, IndexError, TypeError) as e:
         raise LLMOCRError(f"响应结构异常:{e} / {resp.text[:300]}") from e
+    if not isinstance(content, str):
+        raise LLMOCRError(f"content 不是字符串: {type(content).__name__}")
 
     rows = _extract_json_array(content)
     return [_normalize_row(r, pigment_lookup) for r in rows if isinstance(r, dict)]

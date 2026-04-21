@@ -268,31 +268,6 @@ services:
     networks:
       - platform-net
 
-  zuru-shipment:
-    build:
-      context: ./apps/zuru-shipment-deploy
-      dockerfile: Dockerfile
-    environment:
-      - PORT=5003
-      - DATA_PATH=/app/data
-    volumes:
-      - ./apps/zuru-shipment-deploy/data:/app/data
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5003/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-    mem_limit: 512m
-    memswap_limit: 512m
-    restart: unless-stopped
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
-    networks:
-      - platform-net
-
   zuru-master-schedule:
     build:
       context: ./plugins/zuru-总排期入单

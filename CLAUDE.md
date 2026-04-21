@@ -102,7 +102,6 @@ curl http://localhost:<port>/health
 | zouhuo | Node.js | 3002 | /zouhuo/ |
 | jiangping | Flask | 5001 | /jiangping/ |
 | paiji | Node.js | 3000 | /paiji/ |
-| zuru-shipment | Flask | 5003 | /zuru-shipment/ |
 | zuru-master-schedule (ZURU总排期入单) | Flask | 5003 | /zuru-master/ |
 | zuru-order-system (ZURU接单表入单系统) | Flask | 5005 | /zuru-order-system/ |
 | quotation 套客表系统 | Node.js | 3004 | /quotation/ |
@@ -340,7 +339,6 @@ const data = JSON.parse(fs.readFileSync('data/data.json'));
 | figure-mold-cost-system | 模具手办采购订单 | Engineering | Standalone (Node.js) | /figure-mold-cost-system/ | https://github.com/hufan4308-blip/figure-mold-cost-system |
 | jiangping | 采购订单管理系统 | PMC跟仓管 | Standalone (Python/Flask) | /jiangping/ | https://github.com/fxxaxxx/jiangping |
 | paiji | AI注塑啤机排产系统 | 生产部 | Standalone (Node.js) | /paiji/ | https://github.com/duanlei10/234 |
-| zuru-shipment-deploy | ZURU出货助手 | 业务部 | Standalone (Python/Flask) | /zuru-shipment/ | https://github.com/hanson678/zuru-shipment-deploy |
 | zuru-master-schedule | ZURU总排期入单 | 业务部 | Standalone (Python/Flask) | /zuru-master/ | (PR #59) |
 | zuru-order-system | ZURU接单表入单系统 | 业务部 | Standalone (Python/Flask) | /zuru-order-system/ | https://github.com/hanson678/zuru-order-system |
 | quotation | 套客表系统 | 业务部 | Standalone (Node.js) | /quotation/ | — |
@@ -357,3 +355,4 @@ const data = JSON.parse(fs.readFileSync('data/data.json'));
 - 印尼小组 (Indonesia) — 2026-03-23
 - business-data-statistics 生产经营数据系统 (总部) — 2026-04-15
 - schedule-system (Production)
+- ZURU出货助手 zuru-shipment-deploy (业务部) — 2026-04-21（源码仍在 apps/zuru-shipment-deploy/，未 git rm，需要恢复时 revert 即可；服务器数据 /opt/rr-portal/apps/zuru-shipment-deploy/data/ 也保留）

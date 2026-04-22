@@ -266,7 +266,8 @@ function loadSeedJSON(seedDir, base) {
 
 /**
  * 种子数据导入
- * 规则：表为空 → 全量导入；表已有数据 → 不动（避免覆盖生产数据）
+ * 规则：表数据残缺 → 用种子补齐（INSERT OR IGNORE 靠 UNIQUE 约束幂等，不覆盖已有数据）
+ *      表数据足量 → 不动
  * 每个表独立 try/catch，任一失败不影响其他表
  */
 function seedData() {
@@ -275,16 +276,23 @@ function seedData() {
   const seedDir = path.join(__dirname, '..', 'seed');
   if (!fs.existsSync(seedDir)) { console.log('[种子] 无 seed 目录，跳过'); return; }
 
-  // 1) mold_targets — 表空才导入
+  // 1) mold_targets — 不足阈值就补齐（INSERT OR IGNORE 靠 mold_no UNIQUE 幂等）
+  // 阈值 500：真实种子 ~5k 条，prod 残缺时通常只有几十条。足量时跳过避免每次启动做 5k 次无谓 IGNORE。
   try {
     const mtCount = db.prepare('SELECT COUNT(*) as c FROM mold_targets').get().c;
-    if (mtCount === 0) {
+    if (mtCount < 500) {
       const data = loadSeedJSON(seedDir, 'mold_targets');
       if (data) {
         const ins = db.prepare(`INSERT OR IGNORE INTO mold_targets (mold_no, mold_name, target_24h, target_11h, notes, workshop) VALUES (?, ?, ?, ?, ?, ?)`);
-        const tx = db.transaction(() => { for (const r of data) ins.run(r.mold_no, r.mold_name, r.target_24h || 0, r.target_11h || 0, r.notes || '', r.workshop || 'B'); });
+        let changed = 0;
+        const tx = db.transaction(() => {
+          for (const r of data) {
+            const res = ins.run(r.mold_no, r.mold_name, r.target_24h || 0, r.target_11h || 0, r.notes || '', r.workshop || 'B');
+            if (res.changes > 0) changed++;
+          }
+        });
         tx();
-        console.log(`[种子] mold_targets 导入 ${data.length} 条`);
+        console.log(`[种子] mold_targets 补齐 ${changed} 条（原 ${mtCount} 条，种子 ${data.length} 条）`);
       }
     }
   } catch (e) { console.error('[种子] mold_targets 失败:', e.message); }

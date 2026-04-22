@@ -86,20 +86,20 @@ echo "[3/6] Analyzing affected services..."
 # 匹配规则：CHANGED_FILES 里任一行以下列 prefix 开头，就标记对应 service
 declare -A PATH_TO_SERVICE=(
   ["core/"]="core"
-  # 业务 app — 文件夹名为前端显示名（中文），service 名保持英文用于 DNS/nginx
-  ["apps/注塑啤机排产系统/"]="paiji"
-  ["apps/配色库存管理/"]="peise"
-  ["apps/A-doc生成系統/"]="zouhuo"
-  ["apps/TOMY排期核对系统/"]="tomy-paiqi"
-  ["apps/采购订单管理系统/"]="jiangping"
-  ["apps/套客表系统/"]="quotation"
-  ["apps/ZURU接单表入单系统/"]="zuru-order-system"
-  ["apps/成品核对系统/"]="liwenjuan"
-  ["apps/华登包材管理/"]="huadeng"
+  # 业务 app：按部门 nested。service 名保持英文（DNS/nginx 依赖）
+  ["apps/生产部/注塑啤机排产系统/"]="paiji"
+  ["apps/PMC跟仓管/配色库存管理/"]="peise"
+  ["apps/PMC跟仓管/华登包材管理/"]="huadeng"
+  ["apps/PMC跟仓管/采购订单管理系统/"]="jiangping"
+  ["apps/PMC跟仓管/成品核对系统/"]="liwenjuan"
+  ["apps/业务部/套客表系统/"]="quotation"
+  ["apps/业务部/TOMY排期核对系统/"]="tomy-paiqi"
+  ["apps/业务部/ZURU接单表入单系统/"]="zuru-order-system"
+  ["apps/业务部/ZURU总排期入单/"]="zuru-master-schedule"
+  ["apps/工程部/A-doc生成系統/"]="zouhuo"
+  ["apps/工程部/工程啤办单/"]="rr-production"
+  ["apps/工程部/模具手办采购订单系统/"]="figure-mold-cost-system"
   ["apps/task-api/"]="task-api"
-  ["plugins/模具手办采购订单系统/"]="figure-mold-cost-system"
-  ["plugins/ZURU总排期入单/"]="zuru-master-schedule"
-  ["plugins/工程啤办单/"]="rr-production"
 )
 
 AFFECTED_SERVICES=()

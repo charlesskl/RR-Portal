@@ -22,21 +22,24 @@ Always respond in 简体中文 (Simplified Chinese). Code, commands, file paths 
 
 ```
 RR-Portal/
-├── apps/                          — 独立应用（当前全部 standalone）
-│   ├── 注塑啤机排产系统/            — paiji (Node.js + React)
-│   ├── 配色库存管理/                — peise (Flask)
-│   ├── 华登包材管理/                — huadeng (Flask)
-│   ├── 采购订单管理系统/            — jiangping (Flask + EasyOCR)
-│   ├── 成品核对系统/                — liwenjuan (Flask)
-│   ├── 套客表系统/                  — quotation (Node.js)
-│   ├── TOMY排期核对系统/            — tomy-paiqi (Node.js + React)
-│   ├── A-doc生成系統/               — zouhuo (Node.js)
-│   ├── ZURU接单表入单系统/          — zuru-order-system (Flask)
-│   └── task-api/                  — 任务 API (Node.js，仅本地 compose)
-├── plugins/                       — 同 apps/，历史分类遗留
-│   ├── 工程啤办单/                  — rr-production (Node.js)
-│   ├── 模具手办采购订单系统/        — figure-mold-cost-system (Node.js)
-│   └── ZURU总排期入单/              — zuru-master-schedule (Flask)
+├── apps/                          — 按部门分组的所有业务应用
+│   ├── 工程部/
+│   │   ├── 工程啤办单/              — rr-production (Node.js)
+│   │   ├── A-doc生成系統/           — zouhuo (Node.js)
+│   │   └── 模具手办采购订单系统/    — figure-mold-cost-system (Node.js)
+│   ├── PMC跟仓管/
+│   │   ├── 采购订单管理系统/        — jiangping (Flask + EasyOCR)
+│   │   ├── 成品核对系统/            — liwenjuan (Flask)
+│   │   ├── 配色库存管理/            — peise (Flask)
+│   │   └── 华登包材管理/            — huadeng (Flask)
+│   ├── 生产部/
+│   │   └── 注塑啤机排产系统/        — paiji (Node.js + React)
+│   ├── 业务部/
+│   │   ├── ZURU接单表入单系统/      — zuru-order-system (Flask)
+│   │   ├── ZURU总排期入单/          — zuru-master-schedule (Flask)
+│   │   ├── 套客表系统/              — quotation (Node.js)
+│   │   └── TOMY排期核对系统/        — tomy-paiqi (Node.js + React)
+│   └── task-api/                  — 任务 API (Node.js，仅本地 compose，无部门)
 ├── archived/                      — 下线 / 历史代码，不参与部署
 ├── core/                          — 核心服务 (FastAPI, 用户/权限/插件注册)
 ├── plugin_sdk/                    — 插件 SDK（目前无插件在用）
@@ -54,11 +57,11 @@ RR-Portal/
 ```
 
 **命名约定**：
-- 文件夹名 = 前端显示名（中文），便于业务人直观识别
+- 文件夹名 = 前端显示名（中文），按部门分组
 - Docker service 名 = 英文（`paiji`, `peise`, `rr-production` 等），容器间 DNS / nginx upstream 靠这个解析，**永远保持不变**
 - URL 路径 = 英文（`/paiji/`, `/peise/`, `/rr/` 等），外部书签/链接稳定
 
-**备注**：`apps/` vs `plugins/` 的分类是历史遗留（原意区分 standalone vs plugin_sdk），实际**全部都是 standalone**。将来可能合并为单一 `apps/`。
+**历史**：`apps/` 和 `plugins/` 的分类原意区分 standalone vs plugin_sdk，2026-04-22 合并到单一 `apps/` 并按部门分组。`plugin_sdk/` 保留占位，将来真的用再说。
 
 ## 常用命令
 

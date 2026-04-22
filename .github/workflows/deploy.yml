@@ -26,11 +26,13 @@ jobs:
           username: ${{ secrets.CLOUD_USER }}
           key: ${{ secrets.CLOUD_SSH_KEY }}
           command_timeout: 60m
+          envs: BEFORE_COMMIT,AFTER_COMMIT
+          # BEFORE_COMMIT / AFTER_COMMIT 传给 update-server.sh 用于算 diff
+          # 脚本自己负责 git pull，不要在这里先 pull（否则 pull 后 HEAD 已经前进，脚本的 BEFORE==AFTER）
           script: |
+            export BEFORE_COMMIT="${{ github.event.before }}"
+            export AFTER_COMMIT="${{ github.event.after }}"
             cd /opt/rr-portal
-            git fetch origin
-            git checkout main
-            git pull --ff-only origin main
             bash deploy/update-server.sh
 
       - name: Health Check

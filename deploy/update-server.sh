@@ -50,7 +50,19 @@ fi
 # ─── Step 2: Pull latest + 算出变动文件 ───
 save_state "pulling"
 echo "[2/6] Pulling latest code..."
-BEFORE_HEAD=$(git rev-parse HEAD)
+
+# BEFORE_HEAD 优先级：
+#   1. env BEFORE_COMMIT（GitHub Action 传入 github.event.before，最可靠）
+#   2. 当前 HEAD（下面 pull 之前的状态）
+# 这样即使有人在 workflow 之外先 pull 了，也能算出真实 diff
+if [[ -n "${BEFORE_COMMIT:-}" ]] && git rev-parse "$BEFORE_COMMIT" >/dev/null 2>&1; then
+  BEFORE_HEAD=$(git rev-parse "$BEFORE_COMMIT")
+  echo "  BEFORE_HEAD from env BEFORE_COMMIT: ${BEFORE_HEAD:0:7}"
+else
+  BEFORE_HEAD=$(git rev-parse HEAD)
+  echo "  BEFORE_HEAD from local HEAD: ${BEFORE_HEAD:0:7}"
+fi
+
 git fetch origin
 git checkout main
 git pull --ff-only origin main

@@ -616,6 +616,21 @@ app.get('/api/material-stats', (req, res) => {
   res.json(result);
 });
 
+// 发至外厂订单判定（模厂/湖南不计啤办费）
+function isSendToExternal(o) {
+  return o.send_to === '发至模厂' || o.send_to === '发至湖南' || o.workshop === '模厂';
+}
+
+// 按 order_id 预分组 items，避免端点里每个订单线性扫描整个 items 表（O(M*N) → O(M+N)）
+function groupItemsByOrder(items) {
+  const by = {};
+  for (const it of items) {
+    (by[it.order_id] ||= []).push(it);
+  }
+  for (const k in by) by[k].sort((a, b) => a.sort_order - b.sort_order);
+  return by;
+}
+
 // ─── 啤办费用汇总 ─────────────────────────────────────────────────────────────
 app.get('/api/injection-costs', (req, res) => {
   const data = loadData();
@@ -623,10 +638,10 @@ app.get('/api/injection-costs', (req, res) => {
   // 只统计已完成订单，月份按完成日期匹配
   let orders = (data.injection_orders || []).filter(o => o.status === '已完成');
   if (month) orders = orders.filter(o => monthMatches(o.completed_date, month));
-  const items = data.injection_items || [];
+  const itemsByOrder = groupItemsByOrder(data.injection_items || []);
   const result = [];
   orders.forEach(o => {
-    const orderItems = items.filter(i => i.order_id === o.id).sort((a,b) => a.sort_order - b.sort_order);
+    const orderItems = itemsByOrder[o.id] || [];
     orderItems.forEach(it => {
       result.push({
         order_number: o.order_number || '',
@@ -652,12 +667,12 @@ app.get('/api/injection-total-costs', (req, res) => {
   // 只统计已完成订单，按完成月份分组（3月的订单在4月完成就算4月费用）
   let orders = (data.injection_orders || []).filter(o => o.status === '已完成');
   if (month) orders = orders.filter(o => monthMatches(o.completed_date, month));
-  const items = data.injection_items || [];
+  const itemsByOrder = groupItemsByOrder(data.injection_items || []);
   const priceMap = buildPriceMap(data.material_prices);
   const result = orders.map(o => {
-    const orderItems = items.filter(i => i.order_id === o.id).sort((a,b) => a.sort_order - b.sort_order);
+    const orderItems = itemsByOrder[o.id] || [];
     // 发至模厂/发至湖南（或车间=模厂）的订单不统计啤办费，也不提示缺项
-    const skipInjCost = o.send_to === '发至模厂' || o.send_to === '发至湖南' || o.workshop === '模厂';
+    const skipInjCost = isSendToExternal(o);
     let totalMat = 0, totalInj = 0, hasMissingPrice = false, hasMissingInj = false;
     const details = orderItems.map(it => {
       const matRaw = +(it.actual_amount_hkd || 0);
@@ -738,8 +753,7 @@ app.post('/api/injection/:id/auto-complete', (req, res) => {
   const data = loadData();
   const order = data.injection_orders.find(o => o.id === +req.params.id);
   if (!order) return res.status(404).json({ error: '未找到' });
-  const isSendTo = order.send_to === '发至模厂' || order.send_to === '发至湖南' || order.workshop === '模厂';
-  if (!isSendTo) return res.status(400).json({ error: '该订单不是发至外厂订单' });
+  if (!isSendToExternal(order)) return res.status(400).json({ error: '该订单不是发至外厂订单' });
   order.status = '已完成';
   order.updated_at = new Date().toISOString();
   order.completed_date = new Date().toLocaleDateString('zh-CN', { timeZone: 'Asia/Shanghai' }).replace(/\//g, '-');

@@ -1001,7 +1001,7 @@ function renderCostData() {
     const gid = `cg${i}`;
     const detailRows = g.items.map(it => {
       const cost = parseFloat(it.injection_cost) || 0;
-      return `<tr class="detail-row" id="${gid}" style="display:none;background:#f8f9ff;font-size:.8rem">
+      return `<tr class="detail-row detail-${gid}" style="display:none;background:#f8f9ff;font-size:.8rem">
         <td></td>
         <td class="text-muted ps-3">${esc(it.doc_number || '-')}</td>
         <td>${esc(it.mold_id || '-')}</td>
@@ -1032,12 +1032,15 @@ function renderCostData() {
 }
 
 function toggleCostGroup(gid, summaryRow) {
-  const rows = document.querySelectorAll(`tr[id="${gid}"]`);
+  const rows = document.querySelectorAll(`.detail-${gid}`);
+  if (!rows.length) return;
   const icon = summaryRow.querySelector(`.toggle-icon-${gid}`);
   const isOpen = rows[0]?.style.display !== 'none';
   rows.forEach(r => r.style.display = isOpen ? 'none' : '');
-  if (icon) icon.className = isOpen ? `bi bi-chevron-down toggle-icon-${gid}` : `bi bi-chevron-up toggle-icon-${gid}`;
-  icon.style.cssText = 'font-size:.7rem;color:#888';
+  if (icon) {
+    icon.className = isOpen ? `bi bi-chevron-down toggle-icon-${gid}` : `bi bi-chevron-up toggle-icon-${gid}`;
+    icon.style.cssText = 'font-size:.7rem;color:#888';
+  }
 }
 
 function renderStats() {

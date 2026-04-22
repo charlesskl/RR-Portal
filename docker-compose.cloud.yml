@@ -270,6 +270,32 @@ services:
     networks:
       - platform-net
 
+  hy-schedule-system:
+    build:
+      context: ./apps/业务部/ZURU河源排期入单
+      dockerfile: Dockerfile
+    environment:
+      - APP_PORT=5006
+    volumes:
+      - ".\apps\业务部\ZURU河源排期入单\data:/app/data"
+      - ".\apps\业务部\ZURU河源排期入单\uploads:/app/uploads"
+      - ".\apps\业务部\ZURU河源排期入单\exports:/app/exports"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5006/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    mem_limit: 512m
+    memswap_limit: 512m
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - platform-net
+
   zuru-order-system:
     build:
       context: ./apps/业务部/ZURU接单表入单系统

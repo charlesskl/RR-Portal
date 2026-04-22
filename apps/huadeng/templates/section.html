@@ -352,8 +352,8 @@
             <h3 class="text-lg font-bold mb-4">新增投资记录 — {{ d.channel['from'] }}</h3>
             <form method="POST" action="/channel/{{ d.ch }}/add-investment">
                 <div class="mb-4">
-                    <label class="block text-sm text-gray-600 mb-1">日期</label>
-                    <input type="date" name="year_month" required class="border rounded px-3 py-1.5 w-full text-sm">
+                    <label class="block text-sm text-gray-600 mb-1">月份</label>
+                    <input type="month" name="year_month" required class="border rounded px-3 py-1.5 w-full text-sm">
                 </div>
                 <table class="text-sm border-collapse w-full mb-4">
                     <thead>

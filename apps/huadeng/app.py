@@ -364,7 +364,7 @@ def add_investment_record(ch):
         return redirect(url_for('index'))
     sec = _ch_to_sec(ch)
     db = get_db()
-    year_month = request.form.get('year_month', '')
+    year_month = request.form.get('year_month', '')[:7]
     if year_month:
         vals = [ch, year_month]
         cols = ['channel', 'year_month']

@@ -2,17 +2,17 @@
 {% block content %}
 <h3>拍照识别入库单</h3>
 {% if rows is none %}
-<p class="text-muted">上传进货单据照片(jpg/png),系统会自动识别色粉编号、数量、单价。识别后可在表格中核对修改,再一键批量入库。</p>
+<p class="text-muted">上传进货单据照片(jpg/png),系统会自动识别色粉编号、库存KG、单价。识别后可在表格中核对修改,再一键批量入库。</p>
 <form method="post" enctype="multipart/form-data" class="mb-3" style="max-width:500px">
   <input type="file" name="file" accept="image/*" class="form-control mb-2" required>
   <button class="btn btn-primary"><i class="bi bi-camera"></i> 上传识别</button>
   <a href="{{ url_for('transactions.in_list') }}" class="btn btn-secondary">取消</a>
 </form>
 {% else %}
-<p>共识别出 <strong>{{ rows|length }}</strong> 行。请核对后提交,不需要的行点"删"移除。<br><small class="text-muted">已匹配库存的行显示 <span class="badge bg-success-subtle text-success-emphasis">→ 编号</span>;未匹配的行可手填"色粉编号",留空则自动新建待复核色粉。</small></p>
+<p>共识别出 <strong>{{ rows|length }}</strong> 行。请核对后提交,不需要的行点"删"移除。<br><small class="text-muted">已匹配库存的行显示 <span class="badge bg-success-subtle text-success-emphasis">→ 编号</span>;未匹配的行可手填"色粉编号",留空则按"进货编号"再查一次:匹到则累加(相同色粉编号或进货编号视为同一色粉,不分品牌),匹不到则新建待复核。</small></p>
 <form method="post" action="{{ url_for('transactions.in_ocr_submit') }}">
   <table class="table table-sm" id="ocrTable">
-    <thead><tr><th>进货色粉编号</th><th>色粉编号</th><th>数量(kg)</th><th>单价</th><th style="width:25%">识别文本</th><th></th></tr></thead>
+    <thead><tr><th>进货编号</th><th>色粉编号</th><th>库存KG</th><th>单价</th><th style="width:25%">识别文本</th><th></th></tr></thead>
     <tbody>
       {% for r in rows %}
       <tr>

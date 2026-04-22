@@ -3,7 +3,35 @@ import pandas as pd
 from app.models import Pigment, Stock
 from app.extensions import db
 
-COLUMNS = ["色粉编号", "进货色粉编号", "数量", "单位", "单价", "金额", "备注"]
+COLUMNS = ["色粉编号", "进货编号", "库存KG", "单价", "金额"]
+
+# 向后兼容：用户手上的旧 Excel 列名 → 新列名
+# 导出永远用新列名；导入同时接受两者，避免用户历史 Excel 被静默清空
+_LEGACY_COL_ALIASES = {
+    "进货编号": ["进货色粉编号"],
+    "库存KG": ["数量"],
+}
+
+
+def _row_get(row, col: str):
+    """Excel 导入取列值：先试新列名，落空回退历史列名。"""
+    v = row.get(col)
+    # pd.isna 会对字符串报 TypeError，用 _cell_str / _cell_float 前先判 None/NaN
+    if v is not None:
+        try:
+            if not pd.isna(v):
+                return v
+        except (TypeError, ValueError):
+            return v
+    for legacy in _LEGACY_COL_ALIASES.get(col, []):
+        lv = row.get(legacy)
+        if lv is not None:
+            try:
+                if not pd.isna(lv):
+                    return lv
+            except (TypeError, ValueError):
+                return lv
+    return None
 
 
 def _fmt_num(v: float) -> float:
@@ -18,12 +46,10 @@ def export_pigments_to_bytes() -> bytes:
         price = _fmt_num(p.unit_price)
         rows.append({
             "色粉编号": p.code,
-            "进货色粉编号": p.purchase_code or "",
-            "数量": qty,
-            "单位": "KG",
+            "进货编号": p.purchase_code or "",
+            "库存KG": qty,
             "单价": price,
             "金额": round(qty * price, 2),
-            "备注": p.notes or "",
         })
     df = pd.DataFrame(rows, columns=COLUMNS)
     buf = io.BytesIO()
@@ -93,11 +119,9 @@ def import_pigments_from_bytes(data: bytes) -> dict:
             if is_new:
                 p = Pigment(brand="", code=code, name=code, spec_unit="kg")
                 db.session.add(p)
-            p.purchase_code = _cell_str(row.get("进货色粉编号"))
+            p.purchase_code = _cell_str(_row_get(row, "进货编号"))
             p.unit_price = _cell_float(row.get("单价"))
-            if "备注" in df.columns:
-                p.notes = _cell_str(row.get("备注"))
-            qty = _cell_float(row.get("数量"))
+            qty = _cell_float(_row_get(row, "库存KG"))
             if p.stock is None:
                 p.stock = Stock(quantity=qty)
             else:

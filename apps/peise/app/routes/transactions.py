@@ -194,16 +194,28 @@ def _ocr_submit(tx_type: str):
                 failed += 1
                 errors.append(f"第{i+1}行:{e}")
             continue
-        # 未匹配:自动新建。new_code 填了就用作 code,否则留空待复核
+        # 未匹配:先按 (new_code 填了优先,否则 purchase_code) 二次精确匹配已有色粉;
+        # 找到 → 累加到已有色粉;找不到 → 新建 brand="未分类" 待复核
         new_code = new_codes[i].strip() if i < len(new_codes) else ""
         purchase_code = purchase_codes[i].strip() if i < len(purchase_codes) else ""
-        code = new_code
+        code = new_code or purchase_code
         if code:
-            base, n = code, 1
-            while Pigment.query.filter_by(brand="未分类", code=code).first():
-                n += 1
-                code = f"{base}-{n}"
-        display_name = code or purchase_code or f"待填-{datetime.now():%H%M%S}"
+            # 二次匹配:先按 code 精确匹配(对应用户原话"色粉编号相同=一致"),
+            # 没找到再按 purchase_code 匹配(对应"进货编号相同也视为同一色粉")
+            existing = Pigment.query.filter_by(code=code, is_archived=False).first()
+            if existing is None:
+                existing = Pigment.query.filter_by(purchase_code=code, is_archived=False).first()
+            if existing:
+                try:
+                    stock_in(existing.id, float(qty),
+                             unit_price=float(price) if price else None,
+                             note="拍照识别(进货编号精确匹配)")
+                    success += 1
+                except Exception as e:
+                    failed += 1
+                    errors.append(f"第{i+1}行:{e}")
+                continue
+        display_name = code or f"待填-{datetime.now():%H%M%S}"
         try:
             pigment = Pigment(
                 brand="未分类",
@@ -211,7 +223,7 @@ def _ocr_submit(tx_type: str):
                 name=display_name,
                 purchase_code=purchase_code,
                 unit_price=float(price) if price else 0,
-                notes="OCR 自动新建,待复核" if not code else "",
+                notes="OCR 自动新建,待复核" if not new_code else "",
             )
             db.session.add(pigment)
             db.session.flush()

@@ -10,7 +10,7 @@
   </div>
 </div>
 <table class="table table-hover dt">
-  <thead><tr><th>色粉编号</th><th>进货色粉编号</th><th>当前库存(kg)</th><th>单价(元/kg)</th><th>库存金额</th><th>操作</th></tr></thead>
+  <thead><tr><th>色粉编号</th><th>进货编号</th><th>库存KG</th><th>单价</th><th>金额</th><th>操作</th></tr></thead>
   <tbody>
     {% for p in pigments %}
       {% set qty = p.stock.quantity if p.stock else 0 %}

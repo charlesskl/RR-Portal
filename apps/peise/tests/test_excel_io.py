@@ -12,8 +12,8 @@ def test_export_contains_new_columns(db):
     db.session.add(p); db.session.commit()
     data = export_pigments_to_bytes()
     df = pd.read_excel(io.BytesIO(data))
-    assert set(["色粉编号", "进货色粉编号", "数量", "单价", "单位", "金额"]).issubset(df.columns)
-    assert df.iloc[0]["数量"] == 3
+    assert set(["色粉编号", "进货编号", "库存KG", "单价", "金额"]).issubset(df.columns)
+    assert df.iloc[0]["库存KG"] == 3
     assert df.iloc[0]["金额"] == 15.0
 
 
@@ -29,8 +29,8 @@ def test_import_upsert(db):
                        color_family="其他", spec_value=0, spec_unit="kg")
     db.session.add(existing); db.session.commit()
     data = _make_xlsx([
-        {"色粉编号": "X1", "进货色粉编号": "P1", "数量": 5, "单价": 10},
-        {"色粉编号": "X2", "进货色粉编号": "P2", "数量": 2, "单价": 3},
+        {"色粉编号": "X1", "进货编号": "P1", "库存KG": 5, "单价": 10},
+        {"色粉编号": "X2", "进货编号": "P2", "库存KG": 2, "单价": 3},
     ])
     report = import_pigments_from_bytes(data)
     assert report["created"] == 1
@@ -40,6 +40,20 @@ def test_import_upsert(db):
     assert x1.unit_price == 10
 
 
+def test_import_accepts_legacy_column_names(db):
+    """用户手上的旧 Excel 用「进货色粉编号」「数量」等老列名，必须仍能导入不静默清空。"""
+    data = _make_xlsx([
+        {"色粉编号": "L1", "进货色粉编号": "OLD1", "数量": 4, "单价": 6},
+        {"色粉编号": "L2", "进货色粉编号": "OLD2", "数量": 8, "单价": 2},
+    ])
+    report = import_pigments_from_bytes(data)
+    assert report["created"] == 2
+    l1 = Pigment.query.filter_by(code="L1").first()
+    assert l1.purchase_code == "OLD1"
+    assert l1.stock.quantity == 4
+    assert l1.unit_price == 6
+
+
 def test_import_archives_missing_and_handles_blank(db):
     a = Pigment(brand="", code="A1", name="A1", hex="#000000",
                 color_family="其他", spec_value=0, spec_unit="kg")
@@ -47,13 +61,12 @@ def test_import_archives_missing_and_handles_blank(db):
                 color_family="其他", spec_value=0, spec_unit="kg")
     a.stock = Stock(quantity=0); b.stock = Stock(quantity=0)
     db.session.add_all([a, b]); db.session.commit()
-    # Excel 只有 A1, 进货色粉编号/备注 留空
+    # Excel 只有 A1, 进货编号 留空
     data = _make_xlsx([
-        {"色粉编号": "A1", "进货色粉编号": None, "数量": 7, "单价": 4, "备注": None},
+        {"色粉编号": "A1", "进货编号": None, "库存KG": 7, "单价": 4},
     ])
     report = import_pigments_from_bytes(data)
     assert report["archived"] == 1
     a1 = Pigment.query.filter_by(code="A1").first()
     assert a1.purchase_code == ""  # 不再写 "nan"
-    assert a1.notes == ""
     assert Pigment.query.filter_by(code="B1").first().is_archived is True

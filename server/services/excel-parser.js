@@ -1,4 +1,5 @@
 const ExcelJS = require('exceljs');
+const fs = require('fs');
 
 // ─── Cell Value Helper ────────────────────────────────────────────────────────
 
@@ -69,7 +70,7 @@ function detectFormat(workbook) {
   }
 
   const hasPlushIndicator = sheetNames.some(n =>
-    n.includes('车缝明细') || n.includes('搪胶')
+    n && (n.includes('车缝明细') || n.includes('搪胶'))
   );
   return hasPlushIndicator ? 'plush' : 'injection';
 }
@@ -91,14 +92,14 @@ function detectLatestSheet(workbook) {
   }
 
   // Prefer "报价明细" sheets (injection format)
-  const mingxiCandidates = sheets.filter(n => n.includes('报价明细'));
+  const mingxiCandidates = sheets.filter(n => n && n.includes('报价明细'));
   if (mingxiCandidates.length > 0) {
     mingxiCandidates.sort((a, b) => parseSheetDate(b) - parseSheetDate(a));
     return mingxiCandidates[0];
   }
 
   // Fallback: any sheet containing "报价" — pick latest by date suffix
-  const quoteCandidates = sheets.filter(n => n.includes('报价'));
+  const quoteCandidates = sheets.filter(n => n && n.includes('报价'));
   if (quoteCandidates.length > 0) {
     quoteCandidates.sort((a, b) => parseSheetDate(b) - parseSheetDate(a));
     return quoteCandidates[0];
@@ -127,6 +128,16 @@ function parseHeader(ws, format, workbook) {
       const raw = strVal(summarySheet.getCell(8, 2)) || '';
       const m = raw.match(/\d+/);
       if (m) product_no = m[0];
+    }
+  }
+
+  // item_desc: scan for row containing "货号" in col B, take col B of next row
+  let item_desc = null;
+  for (let r = 1; r <= Math.min(ws.rowCount, 60); r++) {
+    const b = strVal(ws.getCell(r, 2));
+    if (b && b.includes('货号')) {
+      item_desc = strVal(ws.getCell(r + 1, 2)) || null;
+      break;
     }
   }
 
@@ -183,6 +194,7 @@ function parseHeader(ws, format, workbook) {
     params: { hkd_rmb_quote, hkd_rmb_check, rmb_hkd, hkd_usd, labor_hkd, box_price_hkd },
     date_code,
     ref_no,
+    item_desc,
   };
 }
 
@@ -318,63 +330,133 @@ function parseRotocastItems(ws) {
 
 function parseSewingDetails(workbook) {
   const wsNames = workbook.worksheets.map(ws => ws.name);
-  const sewingSheet = wsNames.find(n => n.includes('车缝明细'));
-  if (!sewingSheet) return [];
 
-  const ws = workbook.getWorksheet(sewingSheet);
-  const items = [];
-  let currentProductName = null;
-  let lastFabricName = null;
-  let sortOrder = 0;
+  // Collect ALL 车缝明细 sheets — each may represent a different sub-product (character)
+  const sewingSheets = wsNames.filter(n => n.includes('车缝明细'));
+  if (!sewingSheets.length) return [];
 
-  // Dynamically find header row (contains 物料名称 or 裁片部位)
-  let dataStartRow = 4; // default for plush
-  for (let r = 1; r <= 5; r++) {
-    const b = strVal(ws.getCell(r, 2));
-    const c = strVal(ws.getCell(r, 3));
-    if ((b && b.includes('物料名称')) || (c && c.includes('裁片部位'))) {
-      dataStartRow = r + 1;
-      break;
+  const allItems = [];
+
+  for (const sewingSheet of sewingSheets) {
+    // Derive sub_product from sheet name suffix, e.g. "车缝明细 3-15" → "3-15", "车缝明细" → null
+    const subMatch = sewingSheet.replace('车缝明细', '').trim();
+    const sub_product = subMatch || null;
+
+    const ws = workbook.getWorksheet(sewingSheet);
+    let currentProductName = null;
+    let currentProductEng = null;
+    let lastFabricName = null;
+    let sortOrder = allItems.length;
+
+    // Dynamically find header row (contains 物料名称 or 裁片部位)
+    // Also detect usage and price columns from header row
+    let dataStartRow = 4;
+    let usageCol = 6;  // default col F
+    let priceCol = 7;  // default col G
+    for (let r = 1; r <= 10; r++) {
+      const b = strVal(ws.getCell(r, 2));
+      const c = strVal(ws.getCell(r, 3));
+      if ((b && b.includes('物料名称')) || (c && c.includes('裁片部位'))) {
+        dataStartRow = r + 1;
+        // Detect usage/price columns from this header row
+        for (let col = 4; col <= 12; col++) {
+          const hdr = strVal(ws.getCell(r, col)) || '';
+          if (/用量/.test(hdr)) usageCol = col;
+          if (/单价/.test(hdr)) priceCol = col;
+        }
+        // Capture product name from the row just before the header
+        if (r > 1) {
+          const prevB = strVal(ws.getCell(r - 1, 2));
+          const prevC = strVal(ws.getCell(r - 1, 3));
+          if (prevB) currentProductName = prevB;
+          if (prevC) currentProductEng = prevC;
+        }
+        break;
+      }
+      // If this row has a product name (B non-empty, no numeric usage), capture it
+      if (b && !numVal(ws.getCell(r, usageCol)) && !b.includes('物料名称')) {
+        currentProductName = b;
+      }
+    }
+
+    for (let row = dataStartRow; row <= 300; row++) {
+      const colI = strVal(ws.getCell(row, 9));
+      // 合计行：重置状态继续读取下一个产品段（不 break）
+      if (colI && colI.includes('合计')) {
+        lastFabricName = null;
+        continue;
+      }
+
+      const colB = strVal(ws.getCell(row, 2));
+      const colC = strVal(ws.getCell(row, 3));
+      const colD = strVal(ws.getCell(row, 4));
+      const colF = numVal(ws.getCell(row, usageCol));
+      const colG = numVal(ws.getCell(row, priceCol));
+
+      // DEBUG: log rows containing 半成品
+      if (/半成品/.test(colB) || /半成品/.test(colC) || /半成品/.test(colD)) {
+        console.log(`[SEWING-DEBUG] sheet=${sewingSheet} row=${row} B=${JSON.stringify(colB)} C=${JSON.stringify(colC)} D=${JSON.stringify(colD)} F=${colF}`);
+        // Also print all columns
+        for (let c = 1; c <= 12; c++) { process.stdout.write(`C${c}:${JSON.stringify(strVal(ws.getCell(row,c)))}|`); }
+        console.log();
+      }
+
+      // New product section: B has product name, C has English name (or empty), no numeric usage
+      // Detected by: colB non-empty, colF null, AND (colC non-numeric or empty), not a header row
+      if (colB && colF == null && !colB.includes('物料名称') && !(colC && colC.includes('裁片部位'))) {
+        // Check next row is a header row — confirms this is a product title row
+        const nextB = strVal(ws.getCell(row + 1, 2));
+        const nextC = strVal(ws.getCell(row + 1, 3));
+        if ((nextB && nextB.includes('物料名称')) || (nextC && nextC.includes('裁片部位'))) {
+          currentProductName = colB;
+          currentProductEng = colC || null; // e.g. "Chase"
+          lastFabricName = null;
+          row++; // skip the header row
+          continue;
+        }
+        // Also treat as product name if B has value, C+D+F+G all empty, no usage, no price
+        // Exception: rows containing 人工 are labor items, not product headers
+        if (!colC && !colD && colG == null && !/人工/.test(colB)) {
+          currentProductName = colB;
+          currentProductEng = null;
+          lastFabricName = null;
+          continue;
+        }
+      }
+
+      // Skip truly empty rows (but keep labor rows even if they have no usage/spec data)
+      if (!colC && !colD && colF == null && colG == null && !/人工/.test(colB || '')) continue;
+
+      // Inherit fabric_name from 物料名称 (col B) — merged cell carries across rows
+      if (colB) lastFabricName = colB;
+      const fabricName = colB || lastFabricName;
+
+      const colA = strVal(ws.getCell(row, 1));
+      const isLabor = fabricName === '人工' || colC === '人工' || /人工/.test(fabricName || '');
+      const isEmbroidery = colA && colA.includes('电绣');
+      const position = isLabor ? '__labor__' : isEmbroidery ? '__embroidery__' : (colC || '__other__');
+
+      // Skip __other__ items with no price
+      if (position === '__other__' && !numVal(ws.getCell(row, priceCol))) continue;
+
+      allItems.push({
+        product_name: currentProductName,
+        product_eng: currentProductEng,
+        fabric_name: fabricName,
+        position,
+        sub_product,
+        cut_pieces: numVal(ws.getCell(row, 5)) ? Math.round(numVal(ws.getCell(row, 5))) : null,
+        usage_amount: numVal(ws.getCell(row, usageCol)),
+        material_price_rmb: numVal(ws.getCell(row, priceCol)) || 0,
+        price_rmb: numVal(ws.getCell(row, priceCol + 1)),
+        markup_point: numVal(ws.getCell(row, 9)) || 1.15,
+        total_price_rmb: numVal(ws.getCell(row, 10)),
+        sort_order: sortOrder++,
+      });
     }
   }
 
-  for (let row = dataStartRow; row <= 100; row++) {
-    const colI = strVal(ws.getCell(row, 9));
-    if (colI && colI.includes('合计')) break;
-
-    const colB = strVal(ws.getCell(row, 2));
-    const colC = strVal(ws.getCell(row, 3));
-    const colD = strVal(ws.getCell(row, 4));
-
-    // Product name row: B has value but C and D are empty
-    if (colB && !colC && !colD) {
-      currentProductName = colB;
-      continue;
-    }
-
-    if (!colC && !colD) continue;
-
-    // Inherit fabric_name from previous row if merged cell left it empty
-    if (colC) lastFabricName = colC;
-    const fabricName = colC || lastFabricName;
-
-    // Mark labor rows with special position value
-    const position = fabricName === '人工' ? '__labor__' : colD;
-
-    items.push({
-      product_name: currentProductName,
-      fabric_name: fabricName,
-      position,
-      cut_pieces: numVal(ws.getCell(row, 5)) ? Math.round(numVal(ws.getCell(row, 5))) : null,
-      usage_amount: numVal(ws.getCell(row, 6)),
-      material_price_rmb: Math.round((numVal(ws.getCell(row, 7)) || 0) * 1.08 * 10000) / 10000,
-      price_rmb: numVal(ws.getCell(row, 8)),
-      markup_point: numVal(ws.getCell(row, 9)) || 1.15,
-      total_price_rmb: numVal(ws.getCell(row, 10)),
-      sort_order: sortOrder++,
-    });
-  }
-  return items;
+  return allItems;
 }
 
 // ─── Cost Items Parser ───────────────────────────────────────────────────────
@@ -574,9 +656,38 @@ function parseTransport(ws) {
 // ─── Electronics Parser ──────────────────────────────────────────────────────
 
 function parseElectronics(workbook, mainWs) {
-  // Read from main sheet: rows where col A = "电子"
-  // Columns: A=label, B=part_name, C=quantity, D=old_price, E=new_price
   const electronicItems = [];
+
+  // Try SPIN-format dedicated "电子" sheet first
+  const elecWs = workbook.getWorksheet('电子') || workbook.worksheets.find(s => /^电子$/.test((s.name || '').trim()));
+  if (elecWs) {
+    // Find header row (contains "零件名称")
+    let dataStartRow = 7;
+    for (let r = 1; r <= Math.min(15, elecWs.rowCount); r++) {
+      if (/零件名称/.test(strVal(elecWs.getCell(r, 1)) || '')) {
+        dataStartRow = r + 1;
+        break;
+      }
+    }
+    for (let r = dataStartRow; r <= elecWs.rowCount; r++) {
+      const part_name = strVal(elecWs.getCell(r, 1));
+      if (!part_name) continue;
+      // Stop at footer/summary rows
+      if (/报价人|审核|小计|合计|总计|此报价/.test(part_name)) continue;
+      // Stop if no numeric quantity and no USD price (non-data row)
+      const quantity = numVal(elecWs.getCell(r, 3));
+      if (quantity === null) continue;
+      const spec     = strVal(elecWs.getCell(r, 2));
+      const remark   = strVal(elecWs.getCell(r, 6));
+      // Col H = 报客 USD unit price (already converted)
+      const unit_price_usd = numVal(elecWs.getCell(r, 8)) || 0;
+      const total_usd = Math.round(unit_price_usd * quantity * 10000) / 10000;
+      electronicItems.push({ part_name, spec, quantity, unit_price_usd, total_usd, remark, sort_order: electronicItems.length });
+    }
+    return { electronicItems, electronicSummary: null };
+  }
+
+  // Fallback: read from main sheet rows where col A = "电子"
   if (mainWs) {
     for (let r = 1; r <= mainWs.rowCount; r++) {
       const row = mainWs.getRow(r);
@@ -672,6 +783,45 @@ function parsePainting(ws) {
 // Known non-hardware item name patterns — stop collecting when encountered
 const NON_HW_PATTERN = /搪胶|车缝|吊咭|留言纸|镭射|PE袋|胶针|扎带|平咭|外箱|印尼运费|包装辅料|生产夹具|拆货|围膜|合计|总计/;
 
+function parseSpinHardwareFromMain(mainWs) {
+  if (!mainWs) return [];
+  const items = [];
+  // First pass: find the header row and column for '五金名称'
+  let headerRow = -1, nameCol = -1, priceCol = -1, qtyCol = -1;
+  for (let r = 1; r <= mainWs.rowCount; r++) {
+    for (let c = 1; c <= 30; c++) {
+      const v = strVal(mainWs.getCell(r, c));
+      if (v && v.includes('五金名称')) {
+        headerRow = r;
+        nameCol = c;
+        // Look for 单价 and 用量 headers in the same row (nearby columns)
+        for (let cc = c + 1; cc <= c + 5; cc++) {
+          const hdr = strVal(mainWs.getCell(r, cc)) || '';
+          if (/单价/.test(hdr)) priceCol = cc;
+          if (/用量/.test(hdr)) qtyCol = cc;
+        }
+        // Fallback: assume next columns are 单价, 用量, 总价
+        if (priceCol === -1) priceCol = c + 1;
+        if (qtyCol === -1) qtyCol = c + 2;
+        break;
+      }
+    }
+    if (headerRow !== -1) break;
+  }
+  if (headerRow === -1 || nameCol === -1) return [];
+
+  // Second pass: collect rows below header until empty name or 小计/合计
+  for (let r = headerRow + 1; r <= mainWs.rowCount; r++) {
+    const name = strVal(mainWs.getCell(r, nameCol));
+    if (!name || /小计|合计|总计/.test(name)) break;
+    const unitPrice = numVal(mainWs.getCell(r, priceCol)) || 0;
+    const usageQty = numVal(mainWs.getCell(r, qtyCol)) || 1;
+    if (!unitPrice) continue;
+    items.push({ description: name, usage_qty: usageQty, unit_price: unitPrice, sort_order: items.length });
+  }
+  return items;
+}
+
 function parseHardwareSheet(workbook, mainWs) {
   // 1. Try dedicated 五金 sheet first
   const hwWs = workbook.getWorksheet('五金');
@@ -718,6 +868,182 @@ function parseHardwareSheet(workbook, mainWs) {
   return items;
 }
 
+// ─── SPIN Labor Parser (reads 人工 rows from main 报价明细 sheet) ──────────────
+
+function parseSpinLaborFromMain(ws) {
+  if (!ws) return [];
+  // Row 15: English character names in cols 4–9 (Rocky, Skye, Marshall, Rex, Chase, Rubble)
+  const chars = [];
+  for (let c = 4; c <= 9; c++) {
+    const name = strVal(ws.getCell(15, c));
+    if (name) chars.push({ col: c, name });
+  }
+  if (!chars.length) return [];
+
+  const LABOR_WHITELIST = /^(半成品人工|裁床人工|车缝人工|手工人工)/;
+  const items = [];
+  for (let r = 1; r <= ws.rowCount; r++) {
+    const label = strVal(ws.getCell(r, 2));
+    if (!label || !LABOR_WHITELIST.test(label)) continue;
+    const laborRate = numVal(ws.getCell(r, 11)) || 0; // col 11 = labor rate (US$/hr)
+    chars.forEach(({ col, name: charName }) => {
+      const stdHour = numVal(ws.getCell(r, col));
+      if (stdHour == null || stdHour <= 0) return;
+      items.push({
+        fabric_name: label,
+        position: '__labor__',
+        sub_product: charName,
+        product_name: charName,
+        product_eng: charName,
+        usage_amount: stdHour,       // Standard Hour
+        material_price_rmb: laborRate, // Labor rate (US$/hr)
+        sort_order: items.length,
+      });
+    });
+  }
+  return items;
+}
+
+// ─── SPIN Other Cost Parser (车缝物料, PP胶料, 测试费 etc. from main sheet) ────
+
+function parseSpinOtherFromMain(ws) {
+  if (!ws) return [];
+  const chars = [];
+  for (let c = 4; c <= 9; c++) {
+    const name = strVal(ws.getCell(15, c));
+    if (name) chars.push({ col: c, name });
+  }
+  if (!chars.length) return [];
+
+  const PACKAGING = /retail\s*box|master\s*car/i;
+  const LABOR     = /^(半成品人工|裁床人工|车缝人工|手工人工)/;
+  const SKIP      = /TOTAL|合计|利润|报客价|相差|汇率|纸箱|人工|料型|单价|模号|吊柜|运费|货号/;
+  const items = [];
+
+  for (let r = 16; r <= ws.rowCount; r++) {
+    const colA = strVal(ws.getCell(r, 1));
+    if (colA && PACKAGING.test(colA)) continue;  // packaging rows
+    const label = strVal(ws.getCell(r, 2));
+    if (!label || LABOR.test(label) || SKIP.test(label)) continue;
+    // Must have at least one positive numeric value in cols 4-9
+    const hasVal = chars.some(({ col }) => { const v = numVal(ws.getCell(r, col)); return v != null && v > 0; });
+    if (!hasVal) continue;
+    chars.forEach(({ col, name: charName }) => {
+      const val = numVal(ws.getCell(r, col));
+      if (val == null || val <= 0) return;
+      items.push({
+        fabric_name: label,
+        position: '__other__',
+        sub_product: charName,
+        product_name: charName,
+        product_eng: charName,
+        usage_amount: 1,
+        material_price_rmb: val,   // already USD — skips RMB conversion in UI
+        sort_order: items.length,
+      });
+    });
+  }
+  return items;
+}
+
+// ─── SPIN Packaging Parser (Retail box / Master carton rows in summary sheet) ──
+
+function findCartonPcsPerBox(mainWs) {
+  // Find the outer carton (外箱) section: look for rows with both "箱价" and "数量"
+  // that have "外箱" appearing in the rows above (within 10 rows)
+  const candidates = [];
+  for (let r = 1; r <= mainWs.rowCount; r++) {
+    let hasBoxPrice = false, qtyCol = -1;
+    for (let c = 1; c <= 30; c++) {
+      const v = strVal(mainWs.getCell(r, c)) || '';
+      if (/箱价/.test(v)) hasBoxPrice = true;
+      if (/数量/.test(v) && !/实际/.test(v)) qtyCol = c;
+    }
+    if (hasBoxPrice && qtyCol !== -1) {
+      for (let c = qtyCol + 1; c <= qtyCol + 3; c++) {
+        const qty = numVal(mainWs.getCell(r, c));
+        if (qty !== null && qty > 0) {
+          // Check if "外箱" appears in nearby rows above
+          let isOuter = false;
+          for (let rr = Math.max(1, r - 10); rr <= r; rr++) {
+            for (let cc = 1; cc <= 30; cc++) {
+              if (/外箱/.test(strVal(mainWs.getCell(rr, cc)) || '')) { isOuter = true; break; }
+            }
+            if (isOuter) break;
+          }
+          candidates.push({ qty, isOuter });
+          break;
+        }
+      }
+    }
+  }
+  // Prefer the candidate associated with 外箱 section
+  const outer = candidates.find(c => c.isOuter);
+  if (outer) return outer.qty;
+  // Fallback: return the largest qty found
+  if (candidates.length) return Math.max(...candidates.map(c => c.qty));
+  return null;
+}
+
+function parseSpinPackaging(mainWs, hkdUsd = 7.75) {
+  if (!mainWs) return [];
+  const items = [];
+  const RETAIL = /retail\s*box/i;
+  const CARTON = /master\s*car/i;
+
+  const pcsPerBox = findCartonPcsPerBox(mainWs);
+
+  for (let r = 1; r <= mainWs.rowCount; r++) {
+    const colA = strVal(mainWs.getCell(r, 1));
+    if (!colA) continue;
+
+    const isRetail = RETAIL.test(colA);
+    const isMaster = CARTON.test(colA);
+    if (!isRetail && !isMaster) continue;
+
+    const name = strVal(mainWs.getCell(r, 2));
+    if (!name) continue;
+
+    let qty, unitPrice;
+    if (isMaster && /外箱/.test(name) && pcsPerBox) {
+      // 外箱: qty = 1/pcsPerBox, unit price = col D (HKD) / hkdUsd * pcsPerBox
+      qty = 1 / pcsPerBox;
+      unitPrice = (numVal(mainWs.getCell(r, 4)) || 0) / hkdUsd * pcsPerBox;
+    } else if (isMaster) {
+      // Other master carton items: qty from col C (default 1), price from col D (HKD) / hkdUsd
+      qty = numVal(mainWs.getCell(r, 3)) ?? 1;
+      unitPrice = (numVal(mainWs.getCell(r, 4)) || 0) / hkdUsd;
+    } else {
+      // Retail box items: qty from col C (default 1), price from col D (HKD) → USD * 1.06
+      qty = numVal(mainWs.getCell(r, 3)) ?? 1;
+      unitPrice = (numVal(mainWs.getCell(r, 4)) || 0) / hkdUsd * 1.06;
+    }
+
+    items.push({
+      name,
+      eng_name: /[\u4e00-\u9fff]/.test(name) ? '' : name,
+      quantity:  qty || 1,
+      new_price: unitPrice,
+      pkg_section: isRetail ? 'retail' : 'carton',
+      sort_order: items.length,
+    });
+  }
+
+  // Always add scotch tape & Tissue as fixed item in Master Carton
+  if (!items.some(i => /scotch/i.test(i.name))) {
+    items.push({
+      name: 'scotch tape、Tissue',
+      eng_name: 'scotch tape、Tissue',
+      quantity: 1,
+      new_price: 0.01,
+      pkg_section: 'carton',
+      sort_order: items.length,
+    });
+  }
+
+  return items;
+}
+
 // ─── Packaging Items from Main Sheet (彩盒/吸塑/胶袋 rows) ──────────────────
 
 const PKG_LABEL_PATTERN = /^(彩盒|吸塑|胶袋|杂项|纸箱)$/;
@@ -725,7 +1051,7 @@ const PKG_LABEL_PATTERN = /^(彩盒|吸塑|胶袋|杂项|纸箱)$/;
 const ACCESSORIES_PATTERN   = /包装辅料/;
 const PACKING_LABOUR_PATTERN = /拆货|包装人工/;
 
-function parsePackagingFromMainSheet(mainWs) {
+function parsePackagingFromMainSheet(mainWs, skipFixed = false) {
   if (!mainWs) return [];
   const items = [];
   let accessoriesTotal = 0;
@@ -772,27 +1098,29 @@ function parsePackagingFromMainSheet(mainWs) {
     });
   }
 
-  // Fixed row: Accessories (倒数第二)
-  items.push({
-    pm_no:     '',
-    name:      'Accessories',
-    remark:    '',
-    moq:       detectedMoq,
-    quantity:  1,
-    new_price: 0.15,
-    sort_order: items.length,
-  });
+  if (!skipFixed) {
+    // Fixed row: Accessories (倒数第二)
+    items.push({
+      pm_no:     '',
+      name:      'Accessories',
+      remark:    '',
+      moq:       detectedMoq,
+      quantity:  1,
+      new_price: 0.15,
+      sort_order: items.length,
+    });
 
-  // Fixed row: Packing Labour (最后)
-  items.push({
-    pm_no:     '',
-    name:      'Packing Labour',
-    remark:    '',
-    moq:       detectedMoq,
-    quantity:  1,
-    new_price: Math.round(packingLabourTotal * 1.08 * 10000) / 10000,
-    sort_order: items.length,
-  });
+    // Fixed row: Packing Labour (最后)
+    items.push({
+      pm_no:     '',
+      name:      'Packing Labour',
+      remark:    '',
+      moq:       detectedMoq,
+      quantity:  1,
+      new_price: Math.round(packingLabourTotal * 1.08 * 10000) / 10000,
+      sort_order: items.length,
+    });
+  }
 
   return items;
 }
@@ -831,14 +1159,29 @@ async function parseWorkbook(filePath) {
   }
 
   const moldStartRow = format === 'spin' ? 12 : format === 'plush' ? 17 : 18;
-  const moldParts = parseMoldParts(ws, moldStartRow);
+  let moldParts, rotocastItems, sewingDetails, bodyAccessories;
+  try { moldParts = parseMoldParts(ws, moldStartRow); } catch(e) { throw new Error('parseMoldParts: ' + e.message); }
+  try { rotocastItems = format === 'plush' ? parseRotocastItems(ws) : []; } catch(e) { throw new Error('parseRotocastItems: ' + e.message); }
+  try { sewingDetails = (format === 'plush' || format === 'spin') ? parseSewingDetails(workbook) : []; } catch(e) { throw new Error('parseSewingDetails: ' + e.message); }
+  // For SPIN: replace labor items with values from main sheet
+  if (format === 'spin') {
+    const mainLaborItems = parseSpinLaborFromMain(ws);
+    if (mainLaborItems.length > 0) {
+      sewingDetails = [
+        ...sewingDetails.filter(d => !/人工/.test(d.fabric_name || '')),
+        ...mainLaborItems,
+      ];
+    }
+  }
+  if (format === 'spin') {
+    bodyAccessories = parseSpinHardwareFromMain(ws);
+  } else {
+    try { bodyAccessories = parseHardwareSheet(workbook, ws); } catch(e) { throw new Error('parseHardwareSheet: ' + e.message); }
+  }
 
-  // Plush-specific parsing
-  const rotocastItems = format === 'plush' ? parseRotocastItems(ws) : [];
-  const sewingDetails = (format === 'plush' || format === 'spin') ? parseSewingDetails(workbook) : [];
-  const bodyAccessories = parseHardwareSheet(workbook, ws);
-
-  const packagingFromMain = parsePackagingFromMainSheet(ws);
+  const packagingFromMain = format === 'spin' ? [] : parsePackagingFromMainSheet(ws);
+  const hkdUsd = parseFloat(header.params && header.params.hkd_usd) || 7.75;
+  const spinPackaging = format === 'spin' ? parseSpinPackaging(ws, hkdUsd) : [];
   const costItems = parseCostItems(ws, format);
   const summary = parseSummary(ws);
   const transport = parseTransport(ws);
@@ -852,6 +1195,7 @@ async function parseWorkbook(filePath) {
       product_no: header.product_no,
       date_code: header.date_code,
       ref_no: header.ref_no,
+      item_desc: header.item_desc,
     },
     params: header.params,
     materialPrices: header.materialPrices,
@@ -860,9 +1204,17 @@ async function parseWorkbook(filePath) {
     rotocastItems,
     sewingDetails,
     bodyAccessories,
-    hardwareItems: costItems.hardwareItems,
+    hardwareItems: format === 'spin' ? bodyAccessories.map(b => ({
+      name: b.description,
+      quantity: b.usage_qty,
+      new_price: b.unit_price,
+      part_category: 'hardware',
+      sort_order: b.sort_order,
+    })) : costItems.hardwareItems,
     laborItems: costItems.laborItems,
-    packagingItems: packagingFromMain.length > 0 ? packagingFromMain : costItems.packagingItems,
+    packagingItems: format === 'spin'
+      ? spinPackaging
+      : (packagingFromMain.length > 0 ? packagingFromMain : costItems.packagingItems),
     electronicItems,
     electronicSummary,
     paintingDetail,

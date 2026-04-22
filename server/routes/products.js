@@ -22,14 +22,14 @@ router.get('/', (req, res) => {
 router.post('/', (req, res) => {
   try {
     const db = getDb();
-    const { item_no, item_desc, vendor } = req.body;
+    const { item_no, item_desc, vendor, client } = req.body;
     if (!item_no) {
       return res.status(400).json({ error: 'item_no is required' });
     }
     const now = new Date().toISOString();
     const result = db.prepare(
-      'INSERT INTO Product (item_no, item_desc, vendor, created_at, updated_at) VALUES (?, ?, ?, ?, ?)'
-    ).run(item_no, item_desc || null, vendor || null, now, now);
+      'INSERT INTO Product (item_no, item_desc, vendor, client, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)'
+    ).run(item_no, item_desc || null, vendor || null, client || null, now, now);
     const product = db.prepare('SELECT * FROM Product WHERE id = ?').get(result.lastInsertRowid);
     res.status(201).json(product);
   } catch (err) {
@@ -61,12 +61,13 @@ router.put('/:id', (req, res) => {
     const product = db.prepare('SELECT * FROM Product WHERE id = ?').get(req.params.id);
     if (!product) return res.status(404).json({ error: 'Product not found' });
 
-    const { item_no, item_desc, vendor } = req.body;
+    const { item_no, item_desc, vendor, client } = req.body;
     const sets = [];
     const vals = [];
     if (item_no !== undefined) { sets.push('item_no = ?'); vals.push(item_no); }
     if (item_desc !== undefined) { sets.push('item_desc = ?'); vals.push(item_desc); }
     if (vendor !== undefined) { sets.push('vendor = ?'); vals.push(vendor); }
+    if (client !== undefined) { sets.push('client = ?'); vals.push(client); }
     if (sets.length === 0) return res.status(400).json({ error: 'No fields to update' });
 
     sets.push("updated_at = datetime('now')");

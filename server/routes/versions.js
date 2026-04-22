@@ -1,6 +1,7 @@
 const router = require('express').Router();
 const { getDb } = require('../services/db');
 const { recalculate } = require('../services/calculator');
+const crypto = require('crypto');
 
 // Section name → table mapping (list sections)
 const LIST_SECTIONS = {
@@ -491,11 +492,15 @@ router.post('/:id/translate-all', async (req, res) => {
     const vid = req.params.id;
 
     async function myMemoryTranslate(text) {
-      const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=zh|en`;
+      const appid = process.env.BAIDU_APPID;
+      const key = process.env.BAIDU_KEY;
+      const salt = Date.now().toString();
+      const sign = crypto.createHash('md5').update(appid + text + salt + key).digest('hex');
+      const url = `https://fanyi-api.baidu.com/api/trans/vip/translate?q=${encodeURIComponent(text)}&from=zh&to=en&appid=${appid}&salt=${salt}&sign=${sign}`;
       const resp = await fetch(url);
       const data = await resp.json();
-      if (data.responseStatus === 200) return data.responseData.translatedText;
-      throw new Error(data.responseDetails || 'Translation failed');
+      if (data.trans_result && data.trans_result[0]) return data.trans_result[0].dst;
+      throw new Error(data.error_msg || 'Translation failed');
     }
 
     const EMPTY = "(eng_name IS NULL OR eng_name = '')";
@@ -511,7 +516,21 @@ router.post('/:id/translate-all', async (req, res) => {
       { table: 'BodyAccessory',  field: 'description',   sql: `SELECT id, description FROM BodyAccessory WHERE version_id=? AND ${EMPTY} ORDER BY sort_order` },
     ];
 
+    // Fixed translation overrides (Chinese keyword → fixed English)
+    const FIXED_TRANSLATIONS = {
+      '杂费': 'Dennison',
+      '外箱': 'Master Carton K3A',
+      '平卡': 'Inner B33',
+    };
+    function fixedTranslate(text) {
+      for (const [key, val] of Object.entries(FIXED_TRANSLATIONS)) {
+        if (text.includes(key)) return val;
+      }
+      return null;
+    }
+
     let total = 0;
+    const cache = {}; // text → translated, avoid duplicate API calls
     for (const b of batches) {
       const rows = db.prepare(b.sql).all(vid);
       if (!rows.length) continue;
@@ -519,6 +538,13 @@ router.post('/:id/translate-all', async (req, res) => {
       for (const row of rows) {
         const text = row[b.field];
         if (!text) continue;
+        // Check fixed overrides first
+        const fixed = fixedTranslate(text);
+        if (fixed) {
+          update.run(fixed, row.id);
+          total++;
+          continue;
+        }
         // Skip if already English (no Chinese characters)
         if (!/[\u4e00-\u9fff]/.test(text)) {
           update.run(text, row.id);
@@ -526,10 +552,11 @@ router.post('/:id/translate-all', async (req, res) => {
           continue;
         }
         try {
-          const eng = await myMemoryTranslate(text);
-          update.run(eng, row.id);
+          if (cache[text] === undefined) {
+            cache[text] = await myMemoryTranslate(text);
+          }
+          update.run(cache[text], row.id);
           total++;
-          await new Promise(r => setTimeout(r, 200)); // avoid rate limit
         } catch (_) { /* skip on error */ }
       }
     }

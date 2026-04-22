@@ -8,6 +8,7 @@ const app = (() => {
   let currentTab = 'vq-body-cost';
   let versionData = null;
   let products = [];
+  let spinActiveSub = null;  // shared character sub-product for SPIN tabs
 
   // Tab module registry
   const tabModules = {
@@ -24,12 +25,21 @@ const app = (() => {
     'bd-others':    typeof tab_bd_others !== 'undefined' ? tab_bd_others : null,
     'bd-sewing':   typeof tab_bd_sewing !== 'undefined' ? tab_bd_sewing : null,
     'bd-rotocast': typeof tab_bd_rotocast !== 'undefined' ? tab_bd_rotocast : null,
+    'spin-fabric':   typeof tab_spin_fabric !== 'undefined' ? tab_spin_fabric : null,
+    'spin-packaging':typeof tab_spin_packaging !== 'undefined' ? tab_spin_packaging : null,
+    'spin-labor':    typeof tab_spin_labor !== 'undefined' ? tab_spin_labor : null,
+    'spin-markup':   typeof tab_spin_markup !== 'undefined' ? tab_spin_markup : null,
+    'spin-summary':  typeof tab_spin_summary !== 'undefined' ? tab_spin_summary : null,
   };
 
   // ─── Init ─────────────────────────────────────────────────────────────────
+  // Current selected client (null = show client selection screen)
+  let currentClient = null;
+
   async function init() {
     setupEventListeners();
     await loadProducts();
+    if (!currentClient) showClientSelectScreen();
   }
 
   // ─── Refresh (reload current version in place) ────────────────────────────
@@ -49,38 +59,138 @@ const app = (() => {
     }
   }
 
+  // ─── Client Selection Screen (main content) ───────────────────────────────
+  function showClientSelectScreen() {
+    // Collect unique clients + counts
+    const groups = {};
+    for (const p of products) {
+      const key = p.client || '未分组';
+      groups[key] = (groups[key] || 0) + 1;
+    }
+    const clients = [
+      { name: 'Spin Master', icon: '🎯' },
+      { name: 'TOMY',        icon: '🧸' },
+    ];
+
+    document.getElementById('tabNavWrapper').style.display = 'none';
+    document.getElementById('summaryBar').style.display = 'none';
+    document.getElementById('paramsPanel').style.display = 'none';
+    document.getElementById('headerInfoPanel').style.display = 'none';
+    document.getElementById('infoBar').innerHTML = '';
+
+    document.getElementById('tabContent').innerHTML = `
+      <div class="client-select-screen">
+        <div class="client-select-title">报价管理系统</div>
+        <div class="client-select-subtitle">选择客户开始报价</div>
+        <div class="client-select-cards">
+          ${clients.map(c => `
+            <div class="client-select-card" data-client="${escapeHtml(c.name)}">
+              <div class="client-select-icon">${c.icon}</div>
+              <div class="client-select-name">${escapeHtml(c.name)}</div>
+              <div class="client-select-count">${groups[c.name] || 0} 个货号</div>
+              <div class="client-select-enter">进入 ›</div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    `;
+
+    document.querySelectorAll('.client-select-card').forEach(card => {
+      card.addEventListener('click', () => enterClient(card.dataset.client));
+    });
+
+    // Sidebar: show all products dimmed / or empty hint
+    renderSidebar(products);
+  }
+
+  // ─── Enter Client Workspace ───────────────────────────────────────────────
+  function enterClient(clientName) {
+    currentClient = clientName;
+    currentProductId = null;
+    currentVersionId = null;
+    versionData = null;
+
+    renderSidebar(products);
+
+    // Show client home in main area
+    document.getElementById('tabNavWrapper').style.display = 'none';
+    document.getElementById('summaryBar').style.display = 'none';
+    document.getElementById('paramsPanel').style.display = 'none';
+    document.getElementById('headerInfoPanel').style.display = 'none';
+    document.getElementById('infoBar').innerHTML = `
+      <div class="info-bar-client-home">
+        <span class="info-bar-client">${escapeHtml(clientName)}</span>
+        <span class="info-bar-home-hint">← 从左侧选择货号，或点击导入新文件</span>
+      </div>
+    `;
+    document.getElementById('tabContent').innerHTML = `
+      <div class="client-home-screen">
+        <div class="client-home-icon">${clientName === 'Spin Master' ? '🎯' : '🧸'}</div>
+        <div class="client-home-name">${escapeHtml(clientName)}</div>
+        <div class="client-home-desc">从左侧选择货号查看报价，或导入新的报价明细</div>
+        <button class="btn btn-primary client-home-import" id="clientHomeImport">+ 导入报价明细</button>
+      </div>
+    `;
+
+    document.getElementById('clientHomeImport').addEventListener('click', () => openImportModal());
+  }
+
   function renderSidebar(prods) {
     const list = document.getElementById('productList');
     const search = document.getElementById('searchInput').value.toLowerCase();
 
+    if (!currentClient) {
+      renderClientList(prods, list, search);
+    } else {
+      renderProductList(prods, list, search);
+    }
+  }
+
+  function renderClientList(prods, list, search) {
+    // Main area shows client cards — sidebar just shows a quiet hint
+    list.innerHTML = '<div class="sidebar-no-client">请从右侧选择客户</div>';
+  }
+
+  function renderProductList(prods, list, search) {
+    const clientProds = prods.filter(p => (p.client || '未分组') === currentClient);
     const filtered = search
-      ? prods.filter(p =>
+      ? clientProds.filter(p =>
           (p.item_no || '').toLowerCase().includes(search) ||
           (p.item_desc || '').toLowerCase().includes(search))
-      : prods;
+      : clientProds;
 
-    if (filtered.length === 0) {
-      list.innerHTML = '<div class="sidebar-empty">暂无产品，请导入报价明细</div>';
-      return;
-    }
-
-    list.innerHTML = filtered.map(p => `
-      <div class="product-item" data-product-id="${p.id}">
-        <div class="product-header ${p.id === currentProductId ? 'selected' : ''}">
-          <span class="product-arrow ${p.id === currentProductId ? 'expanded' : ''}">▶</span>
-          <div class="product-name">
-            <div class="product-no">${escapeHtml(p.item_no)}</div>
-            ${p.item_desc ? `<div class="product-desc">${escapeHtml(p.item_desc)}</div>` : ''}
-          </div>
-          <span class="prod-del-btn" title="删除产品" data-product-id="${p.id}">✕</span>
-        </div>
-        <div class="product-versions ${p.id === currentProductId ? 'open' : ''}" id="versions-${p.id}">
-          <div class="sidebar-empty" style="padding:6px 8px;font-size:11px">加载中…</div>
-        </div>
+    list.innerHTML = `
+      <div class="client-back-bar">
+        <button class="client-back-btn" id="clientBackBtn">‹ 返回客户列表</button>
+        <span class="client-back-name">${escapeHtml(currentClient)}</span>
       </div>
-    `).join('');
+      ${filtered.length === 0
+        ? '<div class="sidebar-empty">该客户暂无产品</div>'
+        : filtered.map(p => `
+          <div class="product-item" data-product-id="${p.id}">
+            <div class="product-header ${p.id === currentProductId ? 'selected' : ''}">
+              <span class="product-arrow ${p.id === currentProductId ? 'expanded' : ''}">▶</span>
+              <div class="product-name">
+                <div class="product-no">${escapeHtml(p.item_no)}</div>
+                ${p.item_desc ? `<div class="product-desc">${escapeHtml(p.item_desc)}</div>` : ''}
+              </div>
+              <span class="prod-del-btn" title="删除产品" data-product-id="${p.id}">✕</span>
+            </div>
+            <div class="product-versions ${p.id === currentProductId ? 'open' : ''}" id="versions-${p.id}">
+              <div class="sidebar-empty" style="padding:6px 8px;font-size:11px">加载中…</div>
+            </div>
+          </div>
+        `).join('')}
+    `;
 
-    // Attach click handlers for product headers
+    document.getElementById('clientBackBtn').addEventListener('click', () => {
+      currentClient = null;
+      currentProductId = null;
+      currentVersionId = null;
+      versionData = null;
+      showClientSelectScreen();
+    });
+
     list.querySelectorAll('.product-header').forEach(hdr => {
       hdr.addEventListener('click', (e) => {
         if (e.target.classList.contains('prod-del-btn')) return;
@@ -97,7 +207,6 @@ const app = (() => {
       });
     });
 
-    // If a product is already open, load its versions
     if (currentProductId) {
       loadVersionsForProduct(currentProductId);
     }
@@ -122,14 +231,10 @@ const app = (() => {
         currentProductId = null;
         currentVersionId = null;
         versionData = null;
-        document.getElementById('infoBar').innerHTML = '<div class="info-bar-empty">← 从左侧选择产品版本开始</div>';
-        document.getElementById('tabNavWrapper').style.display = 'none';
-        document.getElementById('summaryBar').style.display = 'none';
-        document.getElementById('paramsPanel').style.display = 'none';
         headerInfoModule.hide();
-        document.getElementById('tabContent').innerHTML = '<div class="tab-content-empty">请从左侧选择产品版本</div>';
       }
       await loadProducts();
+      if (currentClient) enterClient(currentClient);
       showToast('产品已删除', 'success');
     } catch (e) { showToast('删除失败: ' + e.message, 'error'); }
   }
@@ -149,6 +254,7 @@ const app = (() => {
              data-version-id="${v.id}" data-product-id="${productId}">
           <span class="version-name">${escapeHtml(v.version_name || v.source_sheet || `V${v.id}`)}</span>
           <span class="version-actions">
+            ${v.format_type === 'spin' ? '<span class="version-format spin">SPIN</span>' : '<span class="version-format tomy">TOMY</span>'}
             <span class="version-status ${v.status}">${v.status === 'final' ? '定稿' : '草稿'}</span>
             <span class="ver-btn ver-dup" title="复制版本" data-version-id="${v.id}">⎘</span>
             <span class="ver-btn ver-del" title="删除版本" data-version-id="${v.id}">✕</span>
@@ -218,9 +324,44 @@ const app = (() => {
       paramsModule.render(versionId, versionData.params || {});
       headerInfoModule.render(versionId, versionData, currentLevel);
       document.getElementById('tabNavWrapper').style.display = '';
-      document.getElementById('summaryBar').style.display = '';
+
+      // Switch tab nav based on format_type
+      const isSpin = versionData.format_type === 'spin';
+      document.querySelectorAll('.tab-top').forEach(btn => {
+        btn.style.display = isSpin ? 'none' : '';
+      });
+      document.getElementById('tabsVq').style.display = 'none';
+      document.getElementById('tabsBd').style.display = 'none';
+      const spinNav = document.getElementById('tabsSpin');
+      const spinRow1 = document.getElementById('tabsSpinRow1');
+      if (isSpin) {
+        if (spinNav) spinNav.style.display = '';
+        if (spinRow1) spinRow1.style.display = 'flex';
+        currentTab = 'spin-fabric';
+        currentLevel = 'spin';
+        spinNav && spinNav.querySelectorAll('.tab-sub').forEach((btn, i) => {
+          btn.classList.toggle('active', i === 0);
+        });
+        spinRow1 && spinRow1.querySelectorAll('.tab-sub').forEach(btn => btn.classList.remove('active'));
+        // Build shared character switcher
+        renderSpinCharSwitcher(versionData);
+      } else {
+        if (spinNav) spinNav.style.display = 'none';
+        if (spinRow1) spinRow1.style.display = 'none';
+        currentLevel = 'vq';
+        currentTab = 'vq-body-cost';
+        document.getElementById('tabsVq').style.display = '';
+        document.querySelectorAll('.tab-top').forEach(btn => {
+          btn.classList.toggle('active', btn.dataset.level === 'vq');
+        });
+        document.querySelectorAll('#tabsVq .tab-sub').forEach((btn, i) => {
+          btn.classList.toggle('active', i === 0);
+        });
+      }
+
+      document.getElementById('summaryBar').style.display = isSpin ? 'none' : '';
       renderCurrentTab();
-      updateSummaryBar();
+      if (!isSpin) updateSummaryBar();
     } catch (e) {
       showToast('加载版本失败: ' + e.message, 'error');
     }
@@ -233,6 +374,7 @@ const app = (() => {
     const v = data;
     const isFinal = v.status === 'final';
     bar.innerHTML = `
+      ${p.client ? `<span class="info-bar-client">${escapeHtml(p.client)}</span>` : ''}
       <span class="info-bar-product">${escapeHtml(p.item_no || '')} ${p.item_desc ? escapeHtml(p.item_desc) : ''}</span>
       <span class="info-bar-version">${escapeHtml(v.version_name || v.source_sheet || `V${v.id}`)}</span>
       ${p.vendor ? `<span class="info-bar-vendor">${escapeHtml(p.vendor)}</span>` : ''}
@@ -313,6 +455,8 @@ const app = (() => {
 
   // ─── Tab Switching ────────────────────────────────────────────────────────
   function switchLevel(level) {
+    // SPIN versions do not use top-level tab switching
+    if (versionData && versionData.format_type === 'spin') return;
     currentLevel = level;
     // Set first tab of that level
     currentTab = level === 'vq' ? 'vq-body-cost' : 'bd-material';
@@ -335,11 +479,60 @@ const app = (() => {
 
   function switchTab(tabName) {
     currentTab = tabName;
-    const level = tabName.startsWith('vq') ? 'vq' : 'bd';
-    document.querySelectorAll(`#tabs${level === 'vq' ? 'Vq' : 'Bd'} .tab-sub`).forEach(btn => {
+    let navId;
+    if (tabName.startsWith('spin')) {
+      navId = 'tabsSpin';
+      // Sync row1 Cost Summary button
+      document.querySelectorAll('#tabsSpinRow1 .tab-sub').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.tab === tabName);
+      });
+      // When Cost Summary active, clear row2 active states
+      if (tabName === 'spin-summary') {
+        document.querySelectorAll('#tabsSpin .tab-sub').forEach(btn => btn.classList.remove('active'));
+      }
+    } else {
+      navId = tabName.startsWith('vq') ? 'tabsVq' : 'tabsBd';
+    }
+    document.querySelectorAll(`#${navId} .tab-sub`).forEach(btn => {
       btn.classList.toggle('active', btn.dataset.tab === tabName);
     });
     renderCurrentTab();
+  }
+
+  function renderSpinCharSwitcher(data) {
+    const switcher = document.getElementById('spinCharSwitcher');
+    if (!switcher) return;
+    const all = (data && data.sewing_details) || [];
+    const subProducts = [...new Set(all.map(d => d.sub_product || d.product_name || '').filter(Boolean))];
+    if (subProducts.length === 0) {
+      switcher.style.display = 'none';
+      return;
+    }
+    switcher.style.display = 'flex';
+    if (subProducts.length === 1) {
+      // 单款式：只显示名称标签，不可点击
+      switcher.innerHTML = `
+        <span class="spin-char-label">款式</span>
+        <span class="spin-char-btn active" style="cursor:default">${escapeHtml(subProducts[0])}</span>
+      `;
+      return;
+    }
+    if (!spinActiveSub || !subProducts.includes(spinActiveSub)) spinActiveSub = subProducts[0];
+    switcher.innerHTML = `
+      <span class="spin-char-label">款式</span>
+      ${subProducts.map(sp => `
+        <button class="spin-char-btn ${sp === spinActiveSub ? 'active' : ''}" data-sub="${escapeHtml(sp)}">
+          ${escapeHtml(sp)}
+        </button>
+      `).join('')}
+    `;
+    switcher.querySelectorAll('.spin-char-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        spinActiveSub = btn.dataset.sub;
+        renderSpinCharSwitcher(versionData);
+        renderCurrentTab();
+      });
+    });
   }
 
   function renderCurrentTab() {
@@ -350,6 +543,8 @@ const app = (() => {
     }
     const mod = tabModules[currentTab];
     if (mod && mod.render) {
+      // Inject shared spin active sub into versionData for SPIN tabs
+      versionData._activeSub = spinActiveSub;
       container.innerHTML = mod.render(versionData);
       if (mod.init) mod.init(container, versionData, currentVersionId);
     } else {
@@ -362,30 +557,75 @@ const app = (() => {
   // ─── Import ───────────────────────────────────────────────────────────────
   function openImportModal() {
     const modal = document.getElementById('importModal');
+    modal.style.display = 'flex';
+
+    // If already in a client context, skip to step 2 directly
+    if (currentClient) {
+      document.getElementById('importClientSelect').value = currentClient;
+      showImportStep(2, currentClient);
+    } else {
+      showImportStep(1, null);
+      // Client card selection
+      modal.querySelectorAll('.import-client-card').forEach(card => {
+        card.onclick = () => {
+          const client = card.dataset.client;
+          document.getElementById('importClientSelect').value = client;
+          modal.querySelectorAll('.import-client-card').forEach(c => c.classList.remove('selected'));
+          card.classList.add('selected');
+          setTimeout(() => showImportStep(2, client), 180);
+        };
+      });
+    }
+
+    document.getElementById('importChangeClient').onclick = () => showImportStep(1, null);
+  }
+
+  function showImportStep(step, client) {
+    const step1 = document.getElementById('importStep1');
+    const step2 = document.getElementById('importStep2');
+    const dot1  = document.getElementById('importStep1Dot');
+    const dot2  = document.getElementById('importStep2Dot');
+    const title = document.getElementById('importWizardTitle');
     const dropZone = document.getElementById('importDropZone');
     const progress = document.getElementById('importProgress');
     const fileInput = document.getElementById('fileInput');
 
-    // Reset
-    dropZone.style.display = '';
-    progress.style.display = 'none';
-    modal.style.display = 'flex';
+    if (step === 1) {
+      title.textContent = '选择客户';
+      step1.style.display = '';
+      step2.style.display = 'none';
+      dot1.classList.add('active');
+      dot2.classList.remove('active');
+      // Reset cards
+      document.querySelectorAll('.import-client-card').forEach(c => c.classList.remove('selected'));
+      document.getElementById('importFormatSelect').value = '';
+    } else {
+      title.textContent = '上传文件';
+      step1.style.display = 'none';
+      step2.style.display = '';
+      dot1.classList.remove('active');
+      dot2.classList.add('active');
+      document.getElementById('importSelectedClientLabel').textContent = client;
+      dropZone.style.display = '';
+      progress.style.display = 'none';
 
-    // Click to pick file
-    dropZone.onclick = () => fileInput.click();
+      // Format: Spin Master → 'spin'; TOMY → 'injection' (plush uses same format)
+      const formatRow = document.getElementById('importFormatRow');
+      const formatSel = document.getElementById('importFormatSelect');
+      formatSel.value = client === 'Spin Master' ? 'spin' : 'injection';
+      if (formatRow) formatRow.style.display = 'none';
 
-    // Drag and drop
-    dropZone.addEventListener('dragover', (e) => {
-      e.preventDefault();
-      dropZone.classList.add('drag-over');
-    }, { once: false });
-    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
-    dropZone.addEventListener('drop', (e) => {
-      e.preventDefault();
-      dropZone.classList.remove('drag-over');
-      const file = e.dataTransfer.files[0];
-      if (file) doImport(file);
-    }, { once: true });
+      // File pick
+      dropZone.onclick = () => fileInput.click();
+      dropZone.ondragover = (e) => { e.preventDefault(); dropZone.classList.add('drag-over'); };
+      dropZone.ondragleave = () => dropZone.classList.remove('drag-over');
+      dropZone.ondrop = (e) => {
+        e.preventDefault();
+        dropZone.classList.remove('drag-over');
+        const file = e.dataTransfer.files[0];
+        if (file) doImport(file);
+      };
+    }
   }
 
   async function doImport(file) {
@@ -400,13 +640,20 @@ const app = (() => {
     try {
       const fd = new FormData();
       fd.append('file', file);
+      const forceClient = document.getElementById('importClientSelect')?.value;
+      if (forceClient) fd.append('client', forceClient);
+      const forceFormat = document.getElementById('importFormatSelect')?.value;
+      if (forceFormat) fd.append('force_format', forceFormat);
       const result = await api.importFile(fd);
       status.textContent = `导入成功！产品 #${result.productId} 版本 #${result.versionId}`;
+      // Set client BEFORE loadProducts so sidebar renders with correct filter
+      const importedClient = document.getElementById('importClientSelect')?.value;
+      if (importedClient) currentClient = importedClient;
       await loadProducts();
       setTimeout(() => {
         document.getElementById('importModal').style.display = 'none';
         selectVersion(result.productId, result.versionId);
-      }, 1000);
+      }, 800);
     } catch (e) {
       status.textContent = '导入失败: ' + e.message;
       showToast('导入失败: ' + e.message, 'error');
@@ -448,6 +695,7 @@ const app = (() => {
           item_no: itemNo,
           item_desc: document.getElementById('npItemDesc').value.trim() || null,
           vendor: document.getElementById('npVendor').value.trim() || null,
+          client: document.getElementById('npClient').value || null,
         });
         document.getElementById('newProductModal').style.display = 'none';
         await loadProducts();
@@ -488,6 +736,9 @@ const app = (() => {
     modal.querySelector('#npItemNo').value = '';
     modal.querySelector('#npItemDesc').value = '';
     modal.querySelector('#npVendor').value = '';
+    // Auto-select current client
+    const clientSel = modal.querySelector('#npClient');
+    if (clientSel && currentClient) clientSel.value = currentClient;
     modal.querySelector('#npItemNo').focus();
   }
 

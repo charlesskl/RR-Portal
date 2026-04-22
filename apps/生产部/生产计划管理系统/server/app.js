@@ -16,10 +16,13 @@ app.use('/api/upload', require('./routes/upload'));
 app.use('/api/orders', require('./routes/orders'));
 app.use('/api/export', require('./routes/export'));
 app.use('/api/summary', require('./routes/summary'));
+app.use('/api/scan', require('./routes/scan'));
+app.use('/api/kingsoft', require('./routes/kingsoft'));
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok', port: PORT }));
+app.get('/health', (req, res) => res.json({ status: 'ok', port: PORT }));
 
-const clientDist = path.join(__dirname, '../client/dist');
+const clientDist = process.env.CLIENT_DIST || path.join(__dirname, '../client/dist');
 app.use(express.static(clientDist));
 app.get('*', (req, res) => {
   const indexPath = path.join(clientDist, 'index.html');

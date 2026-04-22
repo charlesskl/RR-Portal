@@ -272,7 +272,8 @@ export default function SchedulingSheet({ workshop, tab, lineName = 'all', lines
   };
 
   const handleExport = () => {
-    window.open(`/api/export?workshop=${workshop}`, '_blank');
+    const basePrefix = import.meta.env.BASE_URL.replace(/\/$/, '');
+    window.open(`${basePrefix}/api/export?workshop=${workshop}`, '_blank');
   };
 
   const previewColumns = [

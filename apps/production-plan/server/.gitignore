@@ -1,7 +1,0 @@
-node_modules/
-.env
-data/confirmed.json
-data/*.db
-data/*.db-*
-data/line-config.json
-uploads/

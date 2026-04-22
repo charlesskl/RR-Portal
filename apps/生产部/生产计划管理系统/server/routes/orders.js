@@ -129,9 +129,10 @@ router.post('/', (req, res) => {
 });
 
 // PUT /api/orders/:id
+const ALLOWED_COLUMNS = new Set(ORDER_COLUMNS);
 router.put('/:id', (req, res) => {
   const data = req.body;
-  const keys = Object.keys(data).filter(k => k !== 'id' && k !== 'created_at');
+  const keys = Object.keys(data).filter(k => ALLOWED_COLUMNS.has(k));
   if (keys.length === 0) return res.status(400).json({ message: 'No fields to update' });
 
   const sets = keys.map(k => `${k} = ?`).join(', ');

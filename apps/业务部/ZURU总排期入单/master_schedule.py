@@ -279,7 +279,6 @@ def _search_cn_name_com(ws, sku_spec, insert_row, max_row):
 
 def write_orders(filepath, orders, export_dir=None):
     """修改单用WPS COM写入总排期，新单生成到独立Excel供复制粘贴
-    云端模式（无COM）：只读分析，不写入
 
     Returns: {'ok': bool, 'modified': int, 'new_count': int, 'msg': str, 'export_file': str}
     """
@@ -455,8 +454,8 @@ def write_orders(filepath, orders, export_dir=None):
                         updates.append((COL['inner'], inner_pcs))
                     if outer_qty:
                         updates.append((COL['outer'], outer_qty))
-                    # 总箱：公式=数量÷外箱
-                    updates.append((COL['total_box'], f'=RC{COL["qty"]}/RC{COL["outer"]}', True))
+                    # 总箱：公式=数量÷外箱（外箱=0时留空避免#DIV/0!）
+                    updates.append((COL['total_box'], f'=IF(RC{COL["outer"]}=0,"",RC{COL["qty"]}/RC{COL["outer"]})', True))
                     if customer_po:
                         updates.append((COL['cpo'], customer_po))
                     if line_ship_dt:
@@ -670,7 +669,6 @@ def _analyze_orders_readonly(orders, index, cn_names, max_row, export_dir):
             elif is_mixed and carton_count > 0:
                 outer_qty = qty // carton_count
 
-            # 总箱数
             if is_pallet and pallet_count > 0:
                 total_ctns = pallet_count
             elif is_mixed and carton_count > 0:
@@ -699,7 +697,6 @@ def _analyze_orders_readonly(orders, index, cn_names, max_row, export_dir):
                 existing_row = index.get((po, item_upper))
 
             if existing_row:
-                # 修改单：只记录明细，不写入
                 mod_count += 1
                 changes = [f'数量={qty}']
                 if inner_pcs: changes.append(f'内箱={inner_pcs}')
@@ -712,7 +709,6 @@ def _analyze_orders_readonly(orders, index, cn_names, max_row, export_dir):
                     'changes': changes
                 })
             else:
-                # 新单：收集到Excel
                 cn_name = cn_names.get(_item_base(sku_spec), '')
                 po_date_dt = None
                 if po_date:
@@ -806,7 +802,7 @@ def _generate_new_rows_excel(new_rows, output_dir):
             for ci, (key, _) in enumerate(col_order, start=1):
                 val = row_data.get(key, '')
                 if val == '__FORMULA_TOTAL_BOX__':
-                    val = f'={_QTY_COL}{ri}/{_OUTER_COL}{ri}'
+                    val = f'=IF({_OUTER_COL}{ri}=0,"",{_QTY_COL}{ri}/{_OUTER_COL}{ri})'
                 elif val == '__FORMULA_AMOUNT__':
                     val = f'={_QTY_COL}{ri}*{_PRICE_COL}{ri}'
                 elif val == '__FORMULA_AMOUNT_PALLET__':
@@ -846,13 +842,9 @@ def _generate_new_rows_excel(new_rows, output_dir):
                 base = re.match(r'^(.+?)(-S\d+.*)$', item, re.I)
                 base = base.group(1).upper() if base else item.upper()
                 # 查映射
-                locs = sub_map.get(base)
-                if not locs:
-                    num_m = re.match(r'^(\d+)', base)
-                    if num_m:
-                        locs = sub_map.get(num_m.group(1))
+                locs = _find_in_sub_map(sub_map, base)
                 if locs:
-                    sname = locs[0]['sheet']
+                    sname = _best_sheet_name(locs, base)
                     if sname not in grouped:
                         grouped[sname] = []
                     grouped[sname].append(row_data)
@@ -1062,7 +1054,7 @@ def generate_excel(orders, output_dir):
                 if val == '__FORMULA_TOTAL_BOX__':
                     _qc = openpyxl.utils.get_column_letter({k: i+1 for i, (k,_) in enumerate(col_order)}['qty'])
                     _oc = openpyxl.utils.get_column_letter({k: i+1 for i, (k,_) in enumerate(col_order)}['outer'])
-                    val = f'={_qc}{row_idx}/{_oc}{row_idx}'
+                    val = f'=IF({_oc}{row_idx}=0,"",{_qc}{row_idx}/{_oc}{row_idx})'
                 elif val == '__FORMULA_AMOUNT__':
                     _qc = openpyxl.utils.get_column_letter({k: i+1 for i, (k,_) in enumerate(col_order)}['qty'])
                     _pc = openpyxl.utils.get_column_letter({k: i+1 for i, (k,_) in enumerate(col_order)}['price'])
@@ -1115,6 +1107,46 @@ def generate_excel(orders, output_dir):
 
 _sub_map_cache = {}  # 缓存，避免每次重新加载
 
+def _find_in_sub_map(sub_map, base):
+    """在sub_schedule_map中查找货号，返回locs列表或None
+    查找优先级：1)精确匹配 2)数字前缀 3)base是某个key的前缀（如77896SLT匹配77896SLT-77772）
+    """
+    # 1) 精确匹配
+    if base in sub_map:
+        return sub_map[base]
+    # 2) 数字前缀
+    num_m = re.match(r'^(\d+)', base)
+    if num_m:
+        prefix = num_m.group(1)
+        if prefix in sub_map:
+            return sub_map[prefix]
+    # 3) base是某个key的前缀（如77896SLT → 77896SLT-77772）
+    for k, v in sub_map.items():
+        if k.startswith(base + '-') or k.startswith(base):
+            if k != base:  # 避免重复
+                return v
+    return None
+
+
+def _best_sheet_name(locs, base):
+    """从多个映射中选最佳sheet名：优先sheet名包含货号数字前缀的条目
+    例如 92119 有 [转B版本, 92119, 转B版本]，优先选 '92119'
+    """
+    if not locs:
+        return ''
+    if len(locs) == 1:
+        return locs[0]['sheet']
+    num_m = re.match(r'^(\d+)', base)
+    if num_m:
+        prefix = num_m.group(1)
+        for loc in locs:
+            sname = loc['sheet']
+            # sheet名以货号数字前缀开头（如"92119"、"92119明细"）
+            if sname.startswith(prefix):
+                return sname
+    return locs[0]['sheet']
+
+
 def _load_sub_schedule_map():
     """加载 sub_schedule_map.json"""
     map_path = os.path.join(os.path.dirname(__file__), 'data', 'sub_schedule_map.json')
@@ -1156,18 +1188,10 @@ def lookup_schedule_info(items):
         m = re.match(r'^(.+?)(-S\d+.*)$', raw, re.I)
         base = m.group(1).upper() if m else raw.upper()
 
-        # 1) 精确匹配
-        if base in sub_map:
-            matched[base] = sub_map[base]
+        locs = _find_in_sub_map(sub_map, base)
+        if locs:
+            matched[base] = locs
             continue
-
-        # 2) 数字前缀匹配：取货号的纯数字前缀（如77772）
-        num_prefix = re.match(r'^(\d+)', base)
-        if num_prefix:
-            prefix = num_prefix.group(1)
-            if prefix in sub_map:
-                matched[base] = sub_map[prefix]
-                continue
 
         unmatched.append(base)
 

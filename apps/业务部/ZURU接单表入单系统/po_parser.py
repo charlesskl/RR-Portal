@@ -11,6 +11,47 @@ import openpyxl
 
 logger = logging.getLogger(__name__)
 
+
+class _CellShim:
+    __slots__ = ('value',)
+
+    def __init__(self, value):
+        self.value = value
+
+
+_EMPTY_CELL = _CellShim(None)
+
+
+class _RowGrid:
+    """openpyxl worksheet 的 drop-in 替代：流式一次读完成 2D list，
+    之后 ws.cell(r,c).value / ws.max_row 访问都是 O(1)。
+
+    read_only=True 下原始 ws.cell(r,c) 每次从头 scan，循环读 N 行就是 O(N²)，
+    对 200+ 行的 PO 要几十秒。iter_rows 一次流式只要不到 1s。
+    """
+    __slots__ = ('_rows', '_max_row', '_max_col')
+
+    def __init__(self, ws):
+        self._rows = list(ws.iter_rows(values_only=True))
+        self._max_row = len(self._rows)
+        self._max_col = max((len(r) for r in self._rows), default=0)
+
+    def cell(self, r, c):
+        if 1 <= r <= self._max_row:
+            row = self._rows[r - 1]
+            if 1 <= c <= len(row):
+                return _CellShim(row[c - 1])
+        return _EMPTY_CELL
+
+    @property
+    def max_row(self):
+        return self._max_row
+
+    @property
+    def max_col(self):
+        return self._max_col
+
+
 # 修改单识别正则：文件名含Rev/R1/R2/R3/R4/Rev./.rev./Rev2.等
 _REV_RE = re.compile(r'(?:Rev\d*\.?|(?:^|\W)R\d\b|\.rev\.)', re.I)
 
@@ -190,7 +231,9 @@ def parse(filepath):
     }
     """
     wb = openpyxl.load_workbook(filepath, data_only=True, read_only=True)
-    ws = wb.active
+    # 流式读成 2D 数组后立刻关闭，后续所有 ws.cell(r,c).value 访问都是 O(1)
+    ws = _RowGrid(wb.active)
+    wb.close()
     result = {
         'po_number': '', 'po_date': None, 'customer': '',
         'customer_po': '', 'destination': '', 'from_person': '',
@@ -493,7 +536,6 @@ def parse(filepath):
     result['remark'] = '\n'.join(rm_parts)
     result['revision_records'] = '\n'.join(rev_parts)
 
-    wb.close()
     logger.info(f'[PO解析] PO={result["po_number"]} 客户={result["customer"]} '
                 f'{len(result["lines"])}行数据 目的国={result["destination"]}')
     return result

@@ -35,9 +35,15 @@ jobs:
             cd /opt/rr-portal
             bash deploy/update-server.sh
 
+      - name: Verify Portal Content
+        run: |
+          sleep 5
+          echo "Verifying portal index.html contains hy-schedule..."
+          curl -sf --max-time 10 "http://${{ secrets.CLOUD_HOST }}/" 2>/dev/null | grep -q "河源排期" && echo "[OK] Portal content verified" || { echo "[FAIL] Portal content missing hy-schedule"; exit 1; }
+
       - name: Health Check
         run: |
-          sleep 30
+          sleep 25
           FAILED=0
           check_endpoint() {
             local ep=$1
@@ -54,7 +60,7 @@ jobs:
             echo "[FAIL] ${ep} (HTTP $status after 3 attempts)"
             return 1
           }
-          for ENDPOINT in /nginx-health /health /rr/health /zouhuo/health /jiangping/health /paiji/health /figure-mold-cost-system/health /quotation/health /liwenjuan/health; do
+          for ENDPOINT in /nginx-health /health /hy-schedule/health /rr/health /zouhuo/health /jiangping/health /paiji/health /figure-mold-cost-system/health /quotation/health /liwenjuan/health; do
             check_endpoint "$ENDPOINT" || FAILED=$((FAILED + 1))
           done
           if [ "$FAILED" -gt 0 ]; then

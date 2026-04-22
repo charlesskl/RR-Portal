@@ -176,7 +176,6 @@ declare -A PATH_MAP=(
   [tomy-paiqi]="/tomy-paiqi/health"
   [liwenjuan]="/liwenjuan/health"
   [zuru-master-schedule]="/zuru-master/health"
-  [hy-schedule-system]="/hy-schedule-system/health"
   [zuru-order-system]="/zuru-order-system/health"
   [new-product-schedule]="/new-product-schedule/health"
   [figure-mold-cost-system]="/figure-mold-cost-system/health"

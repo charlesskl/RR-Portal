@@ -169,7 +169,6 @@ curl http://localhost:<port>/health
 | jiangping | Flask | 5001 | /jiangping/ |
 | paiji | Node.js | 3000 | /paiji/ |
 | zuru-master-schedule (ZURU总排期入单) | Flask | 5003 | /zuru-master/ |
-| hy-schedule-system (ZURU河源排期入单) | Flask | 5006 | /hy-schedule-system/ |
 | zuru-order-system (ZURU接单表入单系统) | Flask | 5005 | /zuru-order-system/ |
 | quotation 套客表系统 | Node.js | 3004 | /quotation/ |
 | tomy-paiqi TOMY排期核对系统 | Node.js/React | 3006 | /tomy-paiqi/ |
@@ -406,7 +405,6 @@ const data = JSON.parse(fs.readFileSync('data/data.json'));
 | jiangping | 采购订单管理系统 | PMC跟仓管 | Standalone (Python/Flask) | /jiangping/ | https://github.com/fxxaxxx/jiangping |
 | paiji | AI注塑啤机排产系统 | 生产部 | Standalone (Node.js) | /paiji/ | https://github.com/duanlei10/234 |
 | zuru-master-schedule | ZURU总排期入单 | 业务部 | Standalone (Python/Flask) | /zuru-master/ | (PR #59) |
-| hy-schedule-system | ZURU河源排期入单 | 业务部 | Standalone (Python/Flask) | /hy-schedule-system/ | (PR #79) |
 | zuru-order-system | ZURU接单表入单系统 | 业务部 | Standalone (Python/Flask) | /zuru-order-system/ | https://github.com/hanson678/zuru-order-system |
 | quotation | 套客表系统 | 业务部 | Standalone (Node.js) | /quotation/ | — |
 | tomy-paiqi | TOMY排期核对系统 | 业务部 | Standalone (Node.js/React) | /tomy-paiqi/ | — |

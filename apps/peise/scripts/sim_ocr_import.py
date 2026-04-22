@@ -27,7 +27,7 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
 
 from werkzeug.datastructures import MultiDict
 
-os.environ.setdefault("OPENROUTER_API_KEY", "fake-not-called-in-this-script")
+os.environ.setdefault("BAILIAN_API_KEY", "fake-not-called-in-this-script")
 
 # 用一个临时 sqlite 文件,不碰本地开发 DB
 _tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)

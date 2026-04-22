@@ -1,17 +1,12 @@
-"""通过 OpenRouter 路由的多模态 LLM 识别送货单 / 出入库单。
+"""通过阿里云百炼 (Bailian) 的 OpenAI 兼容端点调用通义千问 VL 识别送货单 / 出入库单。
 
-OpenRouter 是 unified gateway，后端可以是 Gemini / Claude / GPT-4o / Qwen-VL / Gemma 等任何
-多模态模型。云端 ECS 在中国大陆，原 Gemini 直连 + Cloudflare Worker `*.workers.dev` 都被 GFW 屏
-蔽，OpenRouter 自有域名 `openrouter.ai` 通畅。
+云端 ECS 在中国大陆，百炼国内直连稳定。
 
 环境变量:
-  OPENROUTER_API_KEY     必填 (https://openrouter.ai/keys)
-  OPENROUTER_MODEL       可选, 默认 google/gemma-4-31b-it:free (免费 vision，
-                          262k context). 也可以换成:
-                          - google/gemini-2.5-flash (付费，质量高，每张约 ¥0.005)
-                          - anthropic/claude-haiku-4.5 (付费，3x 价)
-                          - 任何 https://openrouter.ai/models 多模态模型
-  OPENROUTER_BASE_URL    可选, 默认 https://openrouter.ai/api/v1
+  BAILIAN_API_KEY     必填, 阿里云百炼 API key
+                       (https://bailian.console.aliyun.com/?tab=model#/api-key)
+  BAILIAN_MODEL       可选, 默认 qwen-vl-max-latest
+  BAILIAN_BASE_URL    可选, 默认 https://dashscope.aliyuncs.com/compatible-mode/v1
 """
 from __future__ import annotations
 
@@ -22,8 +17,8 @@ import re
 
 import requests
 
-DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
-DEFAULT_MODEL = "google/gemma-4-31b-it:free"
+DEFAULT_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+DEFAULT_MODEL = "qwen-vl-max-latest"
 
 SYSTEM_PROMPT = """你是一个送货单/出入库单识别助手。
 给你一张图片,请只返回 JSON 数组,格式:
@@ -46,11 +41,11 @@ def parse_image_llm(
     pigment_lookup: dict[str, int],
     timeout: int = 60,
 ) -> list[dict]:
-    api_key = os.environ.get("OPENROUTER_API_KEY", "").strip()
+    api_key = os.environ.get("BAILIAN_API_KEY", "").strip()
     if not api_key:
-        raise LLMOCRError("OPENROUTER_API_KEY 未设置")
-    model = os.environ.get("OPENROUTER_MODEL", "").strip() or DEFAULT_MODEL
-    base = (os.environ.get("OPENROUTER_BASE_URL", "").strip().rstrip("/") or DEFAULT_BASE_URL)
+        raise LLMOCRError("BAILIAN_API_KEY 未设置")
+    model = os.environ.get("BAILIAN_MODEL", "").strip() or DEFAULT_MODEL
+    base = (os.environ.get("BAILIAN_BASE_URL", "").strip().rstrip("/") or DEFAULT_BASE_URL)
     url = f"{base}/chat/completions"
 
     b64 = base64.b64encode(image_bytes).decode("ascii")
@@ -71,9 +66,6 @@ def parse_image_llm(
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
-        # OpenRouter 推荐填这两个 header 用于 attribution / 排队优先级
-        "HTTP-Referer": "https://8.148.146.194/peise/",
-        "X-Title": "RR Portal - peise OCR",
     }
     try:
         resp = requests.post(url, json=payload, headers=headers, timeout=timeout)

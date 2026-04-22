@@ -80,10 +80,10 @@ function fillVQ(ws, d) {
   const { version, product, params, packagingItems, productDim, transportConfig, vqSupplements } = d;
 
   // ── Header (rows 2–5) ──────────────────────────────────────────────────────
-  setVal(ws, 2, 3, product?.vendor || '');
+  setVal(ws, 2, 3, 'ROYAL REGENT PRODUCTS (H.K.) LIMITED');
   setVal(ws, 2, 8, version.prepared_by || '');
   setVal(ws, 3, 3, product?.item_no || '');
-  setVal(ws, 3, 8, version.quote_date ? new Date(version.quote_date) : '');
+  setVal(ws, 3, 8, new Date());
   setVal(ws, 4, 3, product?.item_desc || '');
   setVal(ws, 4, 8, version.quote_rev || '');
   setVal(ws, 5, 3, version.item_rev || '');
@@ -94,7 +94,8 @@ function fillVQ(ws, d) {
   if (product?.item_no) {
     setVal(ws, 11, 1, product.item_no + '-00');
     setVal(ws, 11, 2, product.item_desc || '');
-    setVal(ws, 11, 5, 2500);  // default MOQ
+    const detectedMoq = (packagingItems || []).find(i => i.moq)?.moq || 2500;
+    setVal(ws, 11, 5, detectedMoq);  // MOQ from packaging
     setVal(ws, 11, 6, 1);     // usage 1 per toy
     // G11 = ='Body Cost Breakdown'!F23 — do NOT overwrite (formula)
   }
@@ -191,6 +192,13 @@ function fillVQ(ws, d) {
     setVal(ws, 58, 7, r2(transportConfig.yt_40_cost)  || 4.3);   // FOB FCL
     setVal(ws, 58, 8, r2(transportConfig.hk_40_cost)  || 15.85); // FOB LCL
   }
+  // Rewrite R59 transport cost formulas (may be lost due to shared formula issues)
+  for (const col of [6, 7, 8]) {
+    const L = ['', 'A','B','C','D','E','F','G','H'][col];
+    const cell = ws.getCell(59, col);
+    delete cell._sharedFormula;
+    cell.value = { formula: `${L}58*$C$58`, result: 0 };
+  }
 
   // ── Vendor Cost Summary (rows 68–75): fix lost formulas ───────────────────
   // Row 68 (5K):  HKD = $I$17+$I$36+$I$44+$I$52+F59  (base + transport)
@@ -201,27 +209,35 @@ function fillVQ(ws, d) {
   const hkdUsdRate = 7.76;
   const colLetters = { 6: 'F', 7: 'G', 8: 'H' };
 
-  // Row 68/69 (5K) — base
-  for (const col of [6, 7, 8]) {
-    const L = colLetters[col];
-    const hCell = ws.getCell(68, col);
-    delete hCell._sharedFormula;
-    hCell.value = { formula: `$I$17+$I$36+$I$44+$I$52+${L}59`, result: 0 };
-    const uCell = ws.getCell(69, col);
-    delete uCell._sharedFormula;
-    uCell.value = { formula: `ROUND(${L}68/${hkdUsdRate},3)`, result: 0 };
+  // Vendor Cost Summary MOQ rows 68-75: dynamically generate MOQ sequence
+  // Sequence: detectedMoq, detectedMoq×2, detectedMoq×4, empty
+  const detectedMoq = (packagingItems || []).find(i => i.moq)?.moq || 2500;
+  function moqToLabel(n) {
+    if (!n) return '';
+    const k = n / 1000;
+    return k % 1 === 0 ? `${k}K` : `${k}K`;
   }
-
-  // Rows 70/72/74 — each = previous HKD × 0.995
-  [[70, 68], [72, 70], [74, 72]].forEach(([hkdRow, prevRow]) => {
+  const MOQ_TIERS = [2500, 5000, 10000, 15000];
+  const startIdx = Math.max(0, MOQ_TIERS.indexOf(detectedMoq));
+  const moqSequence = [0, 1, 2, 3].map(i => MOQ_TIERS[startIdx + i] || null);
+  const summaryHkdRows = [68, 70, 72, 74];
+  summaryHkdRows.forEach((hkdRow, idx) => {
+    const moq = moqSequence[idx];
+    ws.getCell(hkdRow, 5).value = moqToLabel(moq);
+    ws.getCell(hkdRow + 1, 5).value = moqToLabel(moq);
     for (const col of [6, 7, 8]) {
       const L = colLetters[col];
       const hCell = ws.getCell(hkdRow, col);
       delete hCell._sharedFormula;
-      hCell.value = { formula: `${L}${prevRow}*0.995`, result: 0 };
+      if (idx === 0) {
+        hCell.value = moq ? { formula: `$I$17+$I$36+$I$44+$I$52+${L}59`, result: 0 } : null;
+      } else {
+        const prevHkdRow = summaryHkdRows[idx - 1];
+        hCell.value = moq ? { formula: `${L}${prevHkdRow}*0.995`, result: 0 } : null;
+      }
       const uCell = ws.getCell(hkdRow + 1, col);
       delete uCell._sharedFormula;
-      uCell.value = { formula: `ROUND(${L}${hkdRow}/${hkdUsdRate},3)`, result: 0 };
+      uCell.value = moq ? { formula: `ROUND(${L}${hkdRow}/${hkdUsdRate},3)`, result: 0 } : null;
     }
   });
 
@@ -242,9 +258,9 @@ function fillBCD(ws, d) {
   setVal(ws, 7, 1, version.body_no || '');
   setVal(ws, 7, 2, product?.item_desc || '');
   setVal(ws, 7, 3, version.body_cost_revision || '');
-  setVal(ws, 7, 4, product?.vendor || '');
-  setVal(ws, 7, 6, version.bd_prepared_by || '');
-  setVal(ws, 7, 8, version.bd_date ? new Date(version.bd_date) : '');
+  setVal(ws, 7, 4, 'ROYAL REGENT PRODUCTS (H.K.) LIMITED');
+  setVal(ws, 7, 6, version.prepared_by || '');
+  setVal(ws, 7, 8, new Date());
 
   // ── Summary section markup % (rows 14–22, col E) ──────────────────────────
   const bodyMkup = parseFloat(params.markup_body) || 0.18;
@@ -253,21 +269,16 @@ function fillBCD(ws, d) {
   }
   setVal(ws, 17, 5, 0); // D (Expensive Components) — markup 0%
 
-  // Fix shared formula bug in col F (Amount) and col G (% to Body)
-  // Row 14 (A Raw Material) already has correct formula — only fix rows 15-22
-  // Sub Total is in col D, Markup% in col E, Amount in col F, %toBody in col G
-  for (const r of [15, 16, 17, 19, 20, 21, 22]) {
+  // Fix shared formula bug in col F (Amount) and col G (% to Body) — all summary rows
+  // Use ROUND to match template formula exactly
+  for (const r of [14, 15, 16, 17, 19, 20, 21, 22]) {
     const fCell = ws.getCell(r, 6);
     delete fCell._sharedFormula;
-    fCell.value = { formula: `D${r}*(1+E${r})`, result: 0 };
+    fCell.value = { formula: `ROUND(D${r}*(1+E${r}),2)`, result: 0 };
     const gCell = ws.getCell(r, 7);
     delete gCell._sharedFormula;
-    gCell.value = { formula: `F${r}/F23`, result: 0 };
+    gCell.value = { formula: `ROUND(F${r}/$F$23,3)`, result: 0 };
   }
-  // Also fix G14 % to Body (often shares formula from another cell)
-  const g14 = ws.getCell(14, 7);
-  delete g14._sharedFormula;
-  g14.value = { formula: `F14/F23`, result: 0 };
 
   // ── Section A: Raw Material — 3 sub-sections ──────────────────────────────
   // 1. Plastic/Resin: R31–R34 (4 slots), SUM at R36 col G = SUM(F31:F34)
@@ -325,10 +336,32 @@ function fillBCD(ws, d) {
   // 2. Alloy R38–R41
   fillMatRows(alloys, 38, 41, false);
   // 3. Fabric R43–R55 (formula: =D*E, has spec/position in col C)
-  fillMatRows(fabrics, 43, 55, true);
+  const fabricsFiltered = fabrics.filter(m => m.spec !== '__labor__');
+  const FABRIC_START = 43, FABRIC_SLOTS = 13; // template has 13 slots (R43-R55)
+  const FABRIC_SUBTOTAL = FABRIC_START + FABRIC_SLOTS; // R56 sub-total
+  const fabricExtra = Math.max(0, fabricsFiltered.length - FABRIC_SLOTS);
+  for (let i = 0; i < fabricExtra; i++) ws.insertRow(FABRIC_SUBTOTAL + i, [], 'i+');
+  const fabricEnd = FABRIC_START + Math.max(FABRIC_SLOTS, fabricsFiltered.length) - 1;
+  fillMatRows(fabricsFiltered, FABRIC_START, fabricEnd, true);
+  const fabricShift = fabricExtra;
+  // Rewrite fabric subtotal SUM to cover actual data range (original R56 shifts down by fabricExtra)
+  const fabricSubRow = FABRIC_SUBTOTAL + fabricExtra;
+  const fabricSum = fabricsFiltered.reduce((s, m) => s + (parseFloat(m.weight_g) || 0) * (parseFloat(m.unit_price_per_kg) || 0), 0);
+  { const c = ws.getCell(fabricSubRow, 7); delete c._sharedFormula; c.value = { formula: `SUM(F${FABRIC_START}:F${fabricEnd})`, result: Math.round(fabricSum * 1000) / 1000 }; }
+  // Clear stale formula rows between fabricSubRow and A.TOTAL row
+  for (let rr = fabricSubRow + 1; rr <= fabricSubRow + 3; rr++) {
+    for (let c = 4; c <= 7; c++) { const cc = ws.getCell(rr, c); delete cc._sharedFormula; cc.value = null; }
+  }
+  // Rewrite A. TOTAL RAW MATERIAL COST formula (template R59, shifts by fabricShift)
+  const aTotalRow = 59 + fabricShift;
+  { const c = ws.getCell(aTotalRow, 7); delete c._sharedFormula; c.value = { formula: `SUM(G29:G${fabricSubRow})`, result: null }; }
+  // Fix Summary row 14 (Raw Material Cost) to reference correct aTotalRow
+  if (fabricShift !== 0) {
+    const c = ws.getCell(14, 4); delete c._sharedFormula; c.value = { formula: `$G$${aTotalRow}`, result: null };
+  }
 
   // ── Section B1: Injection Molding (rows 67–86) ──────────────────────────────
-  const MOLD_START = 67, MOLD_END = 86;
+  const MOLD_START = 67 + fabricShift, MOLD_END = 86 + fabricShift;
   // Clear ALL cells — must splice shared formula metadata to prevent ExcelJS
   // from re-expanding F68:F86 shared formula over E column on file open
   for (let r = MOLD_START; r <= MOLD_END; r++) {
@@ -365,8 +398,8 @@ function fillBCD(ws, d) {
   const injShift = injDeleteCount > 0 ? injDeleteCount : 0;
 
   // ── Section B2: Blow Molding / Rotocast (row 90 shifted up by deleted rows) ──
-  const BLOW_TEMPLATE_ROW = 90 - injShift;
-  const BLOW_SUBTOTAL_ROW = 91 - injShift;
+  const BLOW_TEMPLATE_ROW = 90 + fabricShift - injShift;
+  const BLOW_SUBTOTAL_ROW = 91 + fabricShift - injShift;
   const rotoList = (rotocastItems || []).filter(r =>
     r.mold_no && /^[A-Za-z]+\d+/.test(r.mold_no.trim())
   );
@@ -397,11 +430,31 @@ function fillBCD(ws, d) {
   }
 
   // All sections below shift by: rotoExtra inserted rows - injShift deleted rows
-  const blowShift = rotoExtra - injShift;
+  const blowShift = fabricShift + rotoExtra - injShift;
+
+  // ── Rewrite B subtotal and B TOTAL formulas after row shifts ─────────────────
+  // Template: Blow subtotal at row 91, B TOTAL at row 94 (both shift by blowShift)
+  const BLOW_SUB_ROW  = 91 + blowShift;
+  const B_TOTAL_ROW   = 94 + blowShift;
+  const injSectionStart = MOLD_START; // row 67 (fixed)
+  const blowSectionEnd  = BLOW_TEMPLATE_ROW + Math.max(0, rotoList.length - 1); // last roto row
+  // Blow subtotal: SUM of G column from injection start to end of blow section
+  forceWriteFormula(BLOW_SUB_ROW, 7, `SUM(F${injSectionStart}:F${blowSectionEnd})`,
+    null);
+  // B TOTAL: same value (only one subtotal row feeds into it)
+  forceWriteFormula(B_TOTAL_ROW, 7, `G${BLOW_SUB_ROW}`, null);
 
   // ── Section C: Electronics (rows 101–103) ──────────────────────────────────
   const ELEC_START = 101 + blowShift, ELEC_END = 103 + blowShift;
-  clearRows(ws, ELEC_START, ELEC_END, [2, 3, 4, 5]);
+  // Clear cols 2-6 including F col formula to prevent stale template formulas
+  for (let r = ELEC_START; r <= ELEC_END; r++) {
+    for (let c = 2; c <= 6; c++) {
+      const cell = ws.getCell(r, c);
+      cell.value = null;
+      if (cell._value && cell._value._type !== undefined) cell._value._type = 0;
+      delete cell._sharedFormula;
+    }
+  }
 
   electronicItems.slice(0, ELEC_END - ELEC_START + 1).forEach((item, i) => {
     const r = ELEC_START + i;
@@ -409,34 +462,47 @@ function fillBCD(ws, d) {
     setVal(ws, r, 3, 'pc');
     setVal(ws, r, 4, parseFloat(item.quantity) || 1);
     setVal(ws, r, 5, r2(item.unit_price_usd) || 0);
-    // F col = formula =E*D — not touched
+    forceWriteFormula(r, 6, `D${r}*E${r}`,
+      r2((parseFloat(item.quantity) || 1) * (r2(item.unit_price_usd) || 0)));
   });
 
-  // ── Section C2: Sewing Accessories (rows 106–110, insert extra rows if needed) ──
-  const SEW_START = 106 + blowShift, SEW_TEMPLATE_END = 110 + blowShift;
+  // Rewrite Electronics sub-total SUM formula (template R104, shifts by blowShift)
+  const ELEC_SUBTOTAL_ROW = ELEC_END + 1; // row 104 + blowShift
+  forceWriteFormula(ELEC_SUBTOTAL_ROW, 7, `SUM(F${ELEC_START}:F${ELEC_END})`, null);
+
+  // ── Section C2: Sewing Accessories (rows 106–109 data, row 110 sub-total) ──
+  const SEW_START = 106 + blowShift, SEW_DATA_TEMPLATE_END = 109 + blowShift;
+  const SEW_SUBTOTAL_TEMPLATE = 110 + blowShift; // sub-total row in template
   const hkdRmb = parseFloat(params.rmb_hkd) || 0.85;
   const sewList = sewingItems || [];
   const baList  = bodyAccessories || [];
 
-  // Insert extra rows before row 111 (shifts everything down safely)
-  const sewExtra = Math.max(0, sewList.length - (SEW_TEMPLATE_END - SEW_START + 1));
+  // Insert extra rows before sub-total row if more data than template slots (4)
+  const sewExtra = Math.max(0, sewList.length - (SEW_DATA_TEMPLATE_END - SEW_START + 1));
   for (let i = 0; i < sewExtra; i++) {
-    ws.insertRow(SEW_TEMPLATE_END + 1, [], 'i+');
+    ws.insertRow(SEW_SUBTOTAL_TEMPLATE + i, [], 'i+');
   }
-  const SEW_END = SEW_TEMPLATE_END + sewExtra;
+  const SEW_END = SEW_DATA_TEMPLATE_END + sewExtra;
 
   // Clear + fill sewing rows
   clearRows(ws, SEW_START, SEW_END, [2, 3, 4, 5]);
+  const SEW_FONT = { size: 12, name: 'Arial', charset: 134 };
   sewList.forEach((item, i) => {
     const r = SEW_START + i;
-    const priceHkd = hkdRmb > 0 ? (parseFloat(item.total_price_rmb) || 0) / hkdRmb : 0;
+    const totalHkd = hkdRmb > 0 ? (parseFloat(item.total_price_rmb) || 0) / hkdRmb : 0;
     const usage = parseFloat(item.usage_amount) || 1;
-    ws.getCell(r, 2).value = biName(item.fabric_name, item.eng_name);
-    ws.getCell(r, 3).value = 'pc';
-    ws.getCell(r, 4).value = usage;
-    ws.getCell(r, 5).value = r2(priceHkd);
-    forceWriteFormula(r, 6, `D${r}*E${r}`, r2(usage * priceHkd));
+    const unitPriceHkd = Math.round(totalHkd / usage * 10000) / 10000; // 4 decimal places to avoid rounding to 0
+    const c2 = ws.getCell(r, 2); c2.value = biName(item.fabric_name, item.eng_name); c2.font = SEW_FONT; c2.alignment = { vertical: 'middle', wrapText: true };
+    const c3 = ws.getCell(r, 3); c3.value = usage > 1 ? 'pcs' : 'pc'; c3.font = SEW_FONT; c3.alignment = { horizontal: 'center' };
+    const c4 = ws.getCell(r, 4); c4.value = usage; c4.font = SEW_FONT;
+    const c5 = ws.getCell(r, 5); c5.value = unitPriceHkd; c5.font = SEW_FONT; c5.style = { numFmt: '#,##0.0000', font: SEW_FONT, alignment: { horizontal: 'right' } };
+    forceWriteFormula(r, 6, `ROUND(D${r}*E${r},2)`, r2(totalHkd));
+    const c6 = ws.getCell(r, 6); c6.font = SEW_FONT; c6.numFmt = '$#,##0.00';
   });
+
+  // Rewrite Sewing Accessories sub-total SUM formula (template R110, shifts by blowShift + sewExtra)
+  const SEW_SUBTOTAL_ROW = SEW_END + 1; // row 110 + blowShift + sewExtra
+  forceWriteFormula(SEW_SUBTOTAL_ROW, 7, `SUM(F${SEW_START}:F${SEW_END})`, null);
 
   // ── Section C3: Other Components (body accessories) ──────────────────────────
   // Template: data rows 113-134 (22 slots), Sub Total (SUM) at row 135, gap 136-138, C.TOTAL at 140
@@ -444,15 +510,19 @@ function fillBCD(ws, d) {
   const C3_DATA_START = 113 + totalShift;
   const C3_SLOTS = 22;     // data rows 113-134 in original template
   const C3_SUBTOTAL_ROW = C3_DATA_START + C3_SLOTS; // row 135 (+ shift)
-  const C3_GAP = 3;        // always leave 3 empty rows before subtotal
-  const c3Extra = Math.max(0, baList.length + C3_GAP - C3_SLOTS);
-  // Insert extra rows before the subtotal row
+  const C3_GAP = 4;        // always leave 4 empty rows after data before subtotal
+  const c3Need = baList.length + C3_GAP; // total rows needed (data + gap)
+  const c3Extra = Math.max(0, c3Need - C3_SLOTS); // extra rows to insert
+  const c3Delete = Math.max(0, C3_SLOTS - c3Need); // excess rows to delete
+  // Insert extra rows if needed
   for (let i = 0; i < c3Extra; i++) {
     ws.insertRow(C3_SUBTOTAL_ROW + i, [], 'i+');
   }
-  const C3_TOTAL = C3_SLOTS + c3Extra;
-  // Sub Total row moves down by c3Extra
-  const c3SubTotalRow = C3_SUBTOTAL_ROW + c3Extra;
+  // Delete excess empty rows if data is less than template slots
+  if (c3Delete > 0) ws.spliceRows(C3_DATA_START + baList.length, c3Delete);
+  const C3_TOTAL = C3_SLOTS + c3Extra - c3Delete;
+  // Sub Total row shifts accordingly
+  const c3SubTotalRow = C3_DATA_START + C3_TOTAL;
 
   // Force-clear cols 2-6 (incl. formula cells and shared formula metadata)
   for (let r = C3_DATA_START; r < C3_DATA_START + C3_TOTAL; r++) {
@@ -465,13 +535,13 @@ function fillBCD(ws, d) {
   }
   baList.forEach((item, i) => {
     const r = C3_DATA_START + i;
-    const usage = parseFloat(item.usage_qty) ?? 0;
-    const price = r2(item.unit_price) || 0;
+    const usage = parseFloat(item.usage_qty) || 1;
+    const unitPrice = r2(parseFloat(item.unit_price) || 0);
     ws.getCell(r, 2).value = biName(item.description, item.eng_name);
-    ws.getCell(r, 3).value = 'pc';
+    ws.getCell(r, 3).value = usage > 1 ? 'pcs' : 'pc';
     ws.getCell(r, 4).value = usage;
-    ws.getCell(r, 5).value = price;
-    forceWriteFormula(r, 6, `D${r}*E${r}`, r2(usage * price));
+    ws.getCell(r, 5).value = unitPrice;
+    forceWriteFormula(r, 6, `D${r}*E${r}`, r2(usage * unitPrice));
   });
 
   // Rewrite Sub Total SUM formula to cover actual data range
@@ -487,23 +557,37 @@ function fillBCD(ws, d) {
   // Template: C.TOTAL is 2 rows after the C3 sub-total row (c3SubTotalRow+2)
   const C_TOTAL_ROW = c3SubTotalRow + 2;
   const C_SUM_END   = C_TOTAL_ROW - 1;
-  forceWriteFormula(C_TOTAL_ROW, 7, `SUM(G97:G${C_SUM_END})`, null);
+  // C section starts at ELEC_START (101 + blowShift), use dynamic start instead of hardcoded 97
+  const C_SUM_START = ELEC_START;
+  forceWriteFormula(C_TOTAL_ROW, 7, `SUM(G${C_SUM_START}:G${C_SUM_END})`, null);
 
   // ── Section E: E. OTHER LABOUR & PROCESS ─────────────────────────────────────
-  // Template (base rows, before shift):
-  //   R153: 1. DECORATION — Spraying row (No.of process D, Unit Cost E)
-  //   R162: 4. SEWING header row
-  //   R163: Sewing labor data row (No.of process D, Unit Cost E)  ← sub-total formula at 163
-  //   R165: ASSEMBLY row (No.of process D, Unit Cost E)
-  //   R166: Plush labour row
-  //   R167: BONDING row
-  const eShift = totalShift + c3Extra;
+  // Anchor all Section D/E rows relative to c3SubTotalRow (template row 135).
+  // This avoids eShift arithmetic errors from mixed insertions/deletions above.
+  // Template offsets from c3SubTotalRow=135:
+  //   D data: +6..+8 (rows 141-143)   D.SUB: +9 (144)   D.TOTAL: +10 (145)
+  //   Ransburg: +17 (152)   Spraying: +18 (153)   Vacuum: +19 (154)
+  //   DECO subtotal: +20 (155)
+  //   Trimming: +22 (157)   Polishing: +23 (158)   TRIM subtotal: +24 (159)
+  //   WOOD CUTTING: +25 (160)   WOOD subtotal: +26 (161)
+  //   SEWING data: +27 (162)   SEWING subtotal: +28 (163)
+  //   ASSEMBLY: +30 (165)   E.TOTAL: +35 (170)
+  const E0 = c3SubTotalRow - 135; // net shift applied to all template row numbers
 
-  // Fix Section D (EXPENSIVE COMPONENT) sub-total and D.TOTAL formulas (template rows 144-145)
-  const D_SUB_ROW   = 144 + eShift;
-  const D_TOTAL_ROW = 145 + eShift;
-  forceWriteFormula(D_SUB_ROW,   7, `SUM(F${141 + eShift}:F${143 + eShift})`, 0);
-  forceWriteFormula(D_TOTAL_ROW, 7, `SUM(G${141 + eShift}:G${144 + eShift})`, 0);
+  // Clear stale data columns D-G in section D+E range
+  for (let r = 141 + E0; r <= 175 + E0; r++) {
+    for (const c of [4, 5, 6, 7]) {
+      const cell = ws.getCell(r, c);
+      delete cell._sharedFormula;
+      if (!(cell.value && typeof cell.value === 'object' && cell.value.formula)) cell.value = null;
+    }
+  }
+
+  // Fix Section D (EXPENSIVE COMPONENT) sub-total and D.TOTAL formulas
+  const D_SUB_ROW   = 144 + E0;
+  const D_TOTAL_ROW = 145 + E0;
+  forceWriteFormula(D_SUB_ROW,   7, `SUM(F${141 + E0}:F${143 + E0})`, 0);
+  forceWriteFormula(D_TOTAL_ROW, 7, `SUM(G${141 + E0}:G${144 + E0})`, 0);
 
   // Helper: force-write a numeric value to G column (clears template formulas/shared formulas)
   function writeSubTotal(row, value) {
@@ -514,48 +598,58 @@ function fillBCD(ws, d) {
     cell.value = { formula: `SUM(F${row - 4}:F${row - 1})`, result: r2(value) ?? 0 };
   }
 
-  // 1. DECORATION (row 153) — Spraying
-  const decoSprayRow    = 153 + eShift;
-  const decoSubTotalRow = 155 + eShift;
+  // 1. DECORATION — find Spraying row dynamically by scanning col B for "Spraying"
+  let decoSprayRow = 153 + E0; // fallback
+  let decoSubTotalRow = 155 + E0;
+  for (let r = Math.max(1, 140 + E0); r <= Math.min(ws.rowCount, 170 + E0); r++) {
+    const label = String(ws.getCell(r, 2).value || '').trim();
+    if (label === 'Spraying') { decoSprayRow = r; decoSubTotalRow = r + 2; break; }
+  }
   let decoAmount = 0;
   if (paintingDetail) {
     const totalOps  = parseInt(paintingDetail.total_operations) || 0;
     const quotedPrice = parseFloat(paintingDetail.quoted_price_hkd) || 0;
     const unitCost  = totalOps > 0 ? Math.round(quotedPrice / totalOps * 100) / 100 : null;
     decoAmount = r2((totalOps || 0) * (unitCost || 0)) || 0;
-    setVal(ws, decoSprayRow, 4, totalOps || null);
-    setVal(ws, decoSprayRow, 5, unitCost);
+    ws.getCell(decoSprayRow, 4).value = totalOps || null;
+    ws.getCell(decoSprayRow, 5).value = unitCost;
     forceWriteFormula(decoSprayRow, 6, `D${decoSprayRow}*E${decoSprayRow}`, decoAmount);
   }
   // DECORATION G sub-total = SUM(Ransburg + Spraying + Vacuum Plating)
   forceWriteFormula(decoSubTotalRow, 7,
-    `SUM(F${152 + eShift}:F${154 + eShift})`, decoAmount);
+    `SUM(F${decoSprayRow - 1}:F${decoSprayRow + 1})`, decoAmount);
 
   // 2. TRIMMING & DEGATING sub-total (rows 157-158, sub-total row 159)
-  const trimSubRow = 159 + eShift;
-  forceWriteFormula(trimSubRow, 7, `SUM(F${157 + eShift}:F${158 + eShift})`, 0);
+  const trimSubRow = 159 + E0;
+  forceWriteFormula(trimSubRow, 7, `SUM(F${157 + E0}:F${158 + E0})`, 0);
 
-  // 3. WOOD CUTTING sub-total (row 161)
-  forceWriteFormula(161 + eShift, 7, `SUM(F${160 + eShift}:F${160 + eShift})`, 0);
+  // 3. WOOD CUTTING sub-total (row 161) — clear surrounding cells to break shared formula chain
+  for (let rr = 157 + E0; rr <= 162 + E0; rr++) {
+    const cc = ws.getCell(rr, 7);
+    delete cc._sharedFormula;
+    if (cc.value && typeof cc.value === 'object' && cc.value.sharedFormula) cc.value = null;
+  }
+  forceWriteFormula(161 + E0, 7, `SUM(F${160 + E0}:F${160 + E0})`, 0);
 
-  // 4. SEWING (template row 163 — data D/E and sub-total G are on the same row)
+  // 4. SEWING — data on R162 (header row), sub-total G on R163
   const sewLaborList = sewingLaborItems || [];
   let sewAmount = 0;
-  const sewRow = 163 + eShift;
+  const sewDataRow = 162 + E0;  // data fills the SEWING header row
+  const sewRow     = 163 + E0;  // sub-total row (used by fixSubTotal)
   if (sewLaborList.length > 0) {
     const sewItem = sewLaborList[0];
     const hkdRmbRate = parseFloat(params.rmb_hkd) || 0.85;
     const sewUnitCostHkd = hkdRmbRate > 0 ? (parseFloat(sewItem.material_price_rmb) || 0) / hkdRmbRate : 0;
     const sewQty = parseFloat(sewItem.usage_amount) || 0;
     sewAmount = r2(sewQty * sewUnitCostHkd) || 0;
-    setVal(ws, sewRow, 4, sewQty || null);
-    setVal(ws, sewRow, 5, r2(sewUnitCostHkd));
-    forceWriteFormula(sewRow, 6, `D${sewRow}*E${sewRow}`, sewAmount);
+    setVal(ws, sewDataRow, 4, sewQty || null);
+    setVal(ws, sewDataRow, 5, r2(sewUnitCostHkd));
+    forceWriteFormula(sewDataRow, 6, `D${sewDataRow}*E${sewDataRow}`, sewAmount);
   }
-  forceWriteFormula(sewRow, 7, `SUM(F${sewRow}:F${sewRow})`, sewAmount);
+  forceWriteFormula(sewRow, 7, `SUM(F${sewDataRow}:F${sewDataRow})`, sewAmount);
 
   // 5. OTHERS — Assembly labour
-  const asmList = assemblyLaborItems || [];
+  const asmList = (assemblyLaborItems || []).filter(h => !/(喷油|油漆|包装人工)/.test(h.name || ''));
   const asmItem = asmList.find(h => (h.name || '').includes('装配')) || asmList[0];
   let asmAmount = 0;
   if (asmItem) {
@@ -567,19 +661,18 @@ function fillBCD(ws, d) {
     const asmQty   = 11;  // fixed at 11 hours
     const asmPrice = r2(asmTotalQuoted / asmQty);  // unit cost = quoted total / 11
     asmAmount = r2(asmQty * asmPrice) || 0;
-    const asmRow = 165 + eShift;
+    const asmRow = 165 + E0;
     setVal(ws, asmRow, 4, asmQty);
     setVal(ws, asmRow, 5, asmPrice);
     forceWriteFormula(asmRow, 6, `D${asmRow}*E${asmRow}`, asmAmount);
   }
   // OTHERS sub-total (row 168 = 165+3): sum Assembly + Plush + Bonding
-  forceWriteFormula(168 + eShift, 7, `SUM(F${165 + eShift}:F${167 + eShift})`, asmAmount);
+  forceWriteFormula(168 + E0, 7, `SUM(F${165 + E0}:F${167 + E0})`, asmAmount);
 
-  // E. TOTAL LABOUR & PROCESS COST (template row 170, shifted to 170+eShift)
-  // Sum all section G sub-totals: DECORATION(155), TRIMMING(159), WOOD CUTTING(161), SEWING(164), OTHERS(168)
+  // E. TOTAL LABOUR & PROCESS COST (template row 170)
   const totalEAmount = r2(decoAmount + sewAmount + asmAmount);
-  forceWriteFormula(170 + eShift, 7,
-    `SUM(G${153 + eShift}:G${168 + eShift})`, totalEAmount);
+  forceWriteFormula(170 + E0, 7,
+    `SUM(G${153 + E0}:G${168 + E0})`, totalEAmount);
 
   // ── Fix Summary section Sub Total column (col D, rows 16/17/19-22) ───────────
   // Template references these row numbers in col D; after row insertions they drift.
@@ -590,12 +683,13 @@ function fillBCD(ws, d) {
     delete cell._sharedFormula;
     cell.value = { formula: `G${srcRow}`, result: 0 };
   };
+  fixSubTotal(15, B_TOTAL_ROW);                // B Molding Labour
   fixSubTotal(16, C_TOTAL_ROW);                // C Purchase Parts
   fixSubTotal(17, D_TOTAL_ROW);                // D Expensive Components
   fixSubTotal(19, decoSubTotalRow);            // E.1 Decoration
   fixSubTotal(20, trimSubRow);                 // E.2 Trimming
   fixSubTotal(21, sewRow);                     // E.3 Sewing (= 163+eShift)
-  fixSubTotal(22, 168 + eShift);               // E.4 Others
+  fixSubTotal(22, 168 + E0);                    // E.4 Others
 }
 
 // ─── Fill Plush Template (3K报价 format) ──────────────────────────────────────
@@ -720,9 +814,11 @@ async function exportVersion(versionId) {
   const d = loadData(versionId);
   const isPlush = d.version.format_type === 'plush';
   const templatePath = isPlush ? TEMPLATE_PATH_PLUSH : TEMPLATE_PATH;
-
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.readFile(templatePath);
+
+  // Force Excel to recalculate all formulas on open
+  wb.calcProperties = { fullCalcOnLoad: true };
 
   fixSharedFormulas(wb);
 

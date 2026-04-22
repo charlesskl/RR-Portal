@@ -1,6 +1,7 @@
 const router = require('express').Router();
 const { getDb } = require('../services/db');
 const { recalculate } = require('../services/calculator');
+const crypto = require('crypto');
 
 // Centralized error handler: logs full error server-side, returns sanitized message
 function handleError(res, err) {
@@ -145,11 +146,13 @@ router.post('/:id/duplicate', (req, res) => {
       // Copy QuoteVersion
       const vResult = db.prepare(`
         INSERT INTO QuoteVersion (product_id, version_name, source_sheet, date_code, quote_date, status,
-          item_rev, prepared_by, quote_rev, fty_delivery_date, body_no, bd_prepared_by, bd_date, body_cost_revision)
-        VALUES (?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?)
+          item_rev, prepared_by, quote_rev, fty_delivery_date, body_no, bd_prepared_by, bd_date, body_cost_revision,
+          format_type)
+        VALUES (?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(version.product_id, newName, version.source_sheet, version.date_code, version.quote_date,
         version.item_rev, version.prepared_by, version.quote_rev, version.fty_delivery_date,
-        version.body_no, version.bd_prepared_by, version.bd_date, version.body_cost_revision);
+        version.body_no, version.bd_prepared_by, version.bd_date, version.body_cost_revision,
+        version.format_type);
       const newId = vResult.lastInsertRowid;
 
       // Copy QuoteParams
@@ -494,17 +497,25 @@ router.post('/:id/translate-all', async (req, res) => {
     if (!version) return res.status(404).json({ error: 'Version not found' });
     const vid = req.params.id;
 
+    const appid = process.env.BAIDU_APPID;
+    const key = process.env.BAIDU_KEY;
+    if (!appid || !key) {
+      return res.status(503).json({ error: 'Baidu translation not configured (BAIDU_APPID / BAIDU_KEY missing)' });
+    }
+
     async function myMemoryTranslate(text) {
-      const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=zh|en`;
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 5000);
+      const salt = Date.now().toString();
+      const sign = crypto.createHash('md5').update(appid + text + salt + key).digest('hex');
+      const url = `https://fanyi-api.baidu.com/api/trans/vip/translate?q=${encodeURIComponent(text)}&from=zh&to=en&appid=${appid}&salt=${salt}&sign=${sign}`;
+      const ctrl = new AbortController();
+      const timeout = setTimeout(() => ctrl.abort(), 8000);
       try {
-        const resp = await fetch(url, { signal: controller.signal });
+        const resp = await fetch(url, { signal: ctrl.signal });
         const data = await resp.json();
-        if (data.responseStatus === 200) return data.responseData.translatedText;
-        throw new Error(data.responseDetails || 'Translation failed');
+        if (data.trans_result && data.trans_result[0]) return data.trans_result[0].dst;
+        throw new Error(data.error_msg || 'Translation failed');
       } finally {
-        clearTimeout(timer);
+        clearTimeout(timeout);
       }
     }
 
@@ -521,7 +532,21 @@ router.post('/:id/translate-all', async (req, res) => {
       { table: 'BodyAccessory',  field: 'description',   sql: `SELECT id, description FROM BodyAccessory WHERE version_id=? AND ${EMPTY} ORDER BY sort_order` },
     ];
 
+    // Fixed translation overrides (Chinese keyword → fixed English)
+    const FIXED_TRANSLATIONS = {
+      '杂费': 'Dennison',
+      '外箱': 'Master Carton K3A',
+      '平卡': 'Inner B33',
+    };
+    function fixedTranslate(text) {
+      for (const [key, val] of Object.entries(FIXED_TRANSLATIONS)) {
+        if (text.includes(key)) return val;
+      }
+      return null;
+    }
+
     let total = 0;
+    const cache = {}; // text → translated, avoid duplicate API calls
     for (const b of batches) {
       const rows = db.prepare(b.sql).all(vid);
       if (!rows.length) continue;
@@ -529,6 +554,13 @@ router.post('/:id/translate-all', async (req, res) => {
       for (const row of rows) {
         const text = row[b.field];
         if (!text) continue;
+        // Check fixed overrides first
+        const fixed = fixedTranslate(text);
+        if (fixed) {
+          update.run(fixed, row.id);
+          total++;
+          continue;
+        }
         // Skip if already English (no Chinese characters)
         if (!/[\u4e00-\u9fff]/.test(text)) {
           update.run(text, row.id);
@@ -536,13 +568,12 @@ router.post('/:id/translate-all', async (req, res) => {
           continue;
         }
         try {
-          const eng = await myMemoryTranslate(text);
-          update.run(eng, row.id);
+          if (cache[text] === undefined) {
+            cache[text] = await myMemoryTranslate(text);
+          }
+          update.run(cache[text], row.id);
           total++;
-          await new Promise(r => setTimeout(r, 200)); // avoid rate limit
-        } catch (err) {
-          console.warn(`[translate] failed for "${text}":`, err.message);
-        }
+        } catch (_) { /* skip on error */ }
       }
     }
 

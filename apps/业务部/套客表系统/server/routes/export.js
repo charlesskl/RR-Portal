@@ -1,5 +1,6 @@
 const router = require('express').Router();
 const { exportVersion } = require('../services/excel-exporter');
+const { exportSpinVersion } = require('../services/spin-exporter');
 const { getDb } = require('../services/db');
 
 // GET /:versionId — export version as Excel workbook
@@ -12,9 +13,15 @@ router.get('/:versionId', async (req, res) => {
     const product = db.prepare('SELECT * FROM Product WHERE id = ?').get(version.product_id);
     const itemNo = (product?.item_no || 'VQ').replace(/[^\w-]/g, '_');
     const dateCode = (version.date_code || version.quote_date || '').replace(/[^\w-]/g, '');
-    const filename = `VQ_${itemNo}_${dateCode || req.params.versionId}.xlsx`;
+    const prefix = version.format_type === 'spin' ? 'SPIN_VQ' : 'VQ';
+    const filename = `${prefix}_${itemNo}_${dateCode || req.params.versionId}.xlsx`;
 
-    const buffer = await exportVersion(req.params.versionId);
+    let buffer;
+    if (version.format_type === 'spin') {
+      buffer = await exportSpinVersion(req.params.versionId);
+    } else {
+      buffer = await exportVersion(req.params.versionId);
+    }
 
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);

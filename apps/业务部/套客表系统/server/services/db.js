@@ -378,6 +378,18 @@ function initDb() {
   const dimCols = db.prepare('PRAGMA table_info(ProductDimension)').all().map(c => c.name);
   if (!dimCols.includes('case_pack')) db.exec("ALTER TABLE ProductDimension ADD COLUMN case_pack TEXT");
 
+  // Migrate: add client to Product (Spin Master / TOMY grouping)
+  const prodCols = db.prepare('PRAGMA table_info(Product)').all().map(c => c.name);
+  if (!prodCols.includes('client')) db.exec("ALTER TABLE Product ADD COLUMN client TEXT");
+
+  // Migrate: add pkg_section to PackagingItem (retail vs carton)
+  const pkgCols2 = db.prepare('PRAGMA table_info(PackagingItem)').all().map(c => c.name);
+  if (!pkgCols2.includes('pkg_section')) db.exec("ALTER TABLE PackagingItem ADD COLUMN pkg_section TEXT DEFAULT 'retail'");
+
+  // Migrate: add sub_product to SewingDetail (SPIN character sheet name)
+  const sewCols2 = db.prepare('PRAGMA table_info(SewingDetail)').all().map(c => c.name);
+  if (!sewCols2.includes('sub_product')) db.exec("ALTER TABLE SewingDetail ADD COLUMN sub_product TEXT");
+
   return db;
 }
 

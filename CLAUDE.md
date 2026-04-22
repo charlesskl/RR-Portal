@@ -37,19 +37,57 @@ RR Portal
 
 ## 常用命令
 
+### 单服务安全部署（**首选**，强烈推荐）
+
+直接调脚本，封装了所有安全检查：
+
 ```bash
-# 构建并启动所有服务
-docker compose up -d --build
+# 本地执行（脚本会 SSH 到 ECS）
+./devops/scripts/safe-redeploy.sh <service-name>
 
-# 构建/重启单个服务
-docker compose up -d --build <service-name>
+# 纯重启不重 build（代码没变时）
+./devops/scripts/safe-redeploy.sh <service-name> --restart-only
+```
 
+脚本做的事：扫僵尸容器 → 检查内存 → `--no-deps` build/restart 指定服务 → `nginx -t` → `nginx -s reload` → 健康检查。任一步失败立即停并回滚。
+
+### 手动操作时的纪律规则（**四条铁律**）
+
+脚本跑不通要手动 ssh 操作时，务必遵守：
+
+1. **任何 `docker compose up` 必须带 `--no-deps` + 服务名**。否则会拉起所有依赖，触发全站 recreate + IP 重洗：
+   ```bash
+   # ✅ 安全
+   docker compose -f docker-compose.cloud.yml --env-file .env.cloud.production up -d --build --no-deps <service>
+   # ❌ 危险（会 recreate 全部）
+   docker compose -f docker-compose.cloud.yml --env-file .env.cloud.production up -d --build
+   # ❌ 危险（会 recreate 依赖链）
+   docker compose -f docker-compose.cloud.yml --env-file .env.cloud.production up -d --build <service>
+   ```
+
+2. **代码没变只重启进程，用 `restart` 不用 `up`**。`restart` 不 recreate 容器，不触发 IP 重洗：
+   ```bash
+   docker compose restart <service>  # 容器 ID 不变，nginx upstream 不受影响
+   ```
+
+3. **`git push main` 和手动 SSH deploy 二选一**。push main 会触发隐性 auto-deploy（webhook），和手动 `docker compose up` 撞车 = 容器卡 Created + nginx emerg 炸（2026-04-22 事故根源）。
+
+4. **`restart nginx` 前必扫僵尸容器**：
+   ```bash
+   ssh rr-portal 'docker ps -a --filter status=created'
+   # 有任何 Created / Restarting 的先清掉
+   ssh rr-portal 'docker ps -a --filter status=created -q | xargs -r docker rm'
+   ```
+
+### 其他常用命令
+
+```bash
 # 查看日志
 docker compose logs <service-name>
 docker compose logs -f <service-name>  # 实时跟踪
 
-# 重启 nginx（新增/修改 upstream 后必须执行）
-docker compose restart nginx
+# nginx 热重载（改 nginx.conf 后）— 比 restart 安全
+docker exec rr-portal-nginx-1 nginx -t && docker exec rr-portal-nginx-1 nginx -s reload
 
 # 健康检查
 curl http://localhost:<port>/health

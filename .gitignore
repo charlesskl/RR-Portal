@@ -22,23 +22,18 @@ redis_data/
 *.swp
 *.zip
 node_modules/
-services/rr-production/.git/
-services/zuru-ma/.git/
-services/zuru-ma/.next/
-services/zuru-ma/node_modules/
 plugins/*/.git/
 plugins/*/node_modules/
+
+# Plugin data / uploads bind-mount（文件夹改中文后的路径）
 plugins/工程啤办单/data/*
 !plugins/工程啤办单/data/.gitkeep
 !plugins/工程啤办单/data/default-material-prices.json
-plugins/new-product-schedule/data/*
-!plugins/new-product-schedule/data/.gitkeep
-plugins/new-product-schedule/uploads/
-plugins/figure-mold-cost-system/data/*
-!plugins/figure-mold-cost-system/data/.gitkeep
-plugins/figure-mold-cost-system/public/uploads/
-apps/zouhuo/data/
-apps/zouhuo/uploads/
+plugins/模具手办采购订单系统/data/*
+!plugins/模具手办采购订单系统/data/.gitkeep
+plugins/模具手办采购订单系统/public/uploads/
+apps/A-doc生成系統/data/
+apps/A-doc生成系統/uploads/
 .claude/
 
 # Auth files

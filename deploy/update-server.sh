@@ -85,18 +85,19 @@ echo "[3/6] Analyzing affected services..."
 # 匹配规则：CHANGED_FILES 里任一行以下列 prefix 开头，就标记对应 service
 declare -A PATH_TO_SERVICE=(
   ["core/"]="core"
-  ["apps/paiji/"]="paiji"
-  ["apps/peise/"]="peise"
-  ["apps/zouhuo/"]="zouhuo"
-  ["apps/tomy-paiqi/"]="tomy-paiqi"
-  ["apps/jiangping/"]="jiangping"
-  ["apps/quotation/"]="quotation"
-  ["apps/zuru-master-schedule/"]="zuru-master-schedule"
-  ["apps/zuru-order-system/"]="zuru-order-system"
-  ["apps/liwenjuan/"]="liwenjuan"
-  ["apps/huadeng/"]="huadeng"
-  ["apps/new-product-schedule/"]="new-product-schedule"
-  ["apps/figure-mold-cost-system/"]="figure-mold-cost-system"
+  # 业务 app — 文件夹名为前端显示名（中文），service 名保持英文用于 DNS/nginx
+  ["apps/注塑啤机排产系统/"]="paiji"
+  ["apps/配色库存管理/"]="peise"
+  ["apps/A-doc生成系統/"]="zouhuo"
+  ["apps/TOMY排期核对系统/"]="tomy-paiqi"
+  ["apps/采购订单管理系统/"]="jiangping"
+  ["apps/套客表系统/"]="quotation"
+  ["apps/ZURU接单表入单系统/"]="zuru-order-system"
+  ["apps/成品核对系统/"]="liwenjuan"
+  ["apps/华登包材管理/"]="huadeng"
+  ["apps/task-api/"]="task-api"
+  ["plugins/模具手办采购订单系统/"]="figure-mold-cost-system"
+  ["plugins/ZURU总排期入单/"]="zuru-master-schedule"
   ["plugins/工程啤办单/"]="rr-production"
 )
 
@@ -236,11 +237,17 @@ save_state "deploy"
 echo "[6/6] Deploying..."
 
 if [[ "$COMPOSE_CHANGED" -eq 1 ]]; then
-  # 全量：compose 本身变了，服务定义可能改
-  echo "  [FULL] Compose 变动，全量 rebuild + recreate"
-  docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --build
-  # 全量部署后必须 restart nginx（upstream IP 全变）
-  docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" restart nginx
+  # Compose 变动：可能只是 context path 改了（代码没变），也可能加新服务
+  # 策略：先 up -d（无 --build），让 docker 用现有 image 只 recreate 容器
+  # 这样纯 rename 几乎零成本；如果有新服务或 Dockerfile 变了再用 AFFECTED_SERVICES 做增量 build
+  echo "  [COMPOSE] Compose 变动，recreate 容器（不强制 rebuild，避免 OOM 风险）"
+  docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d
+  # 还要 rebuild 那些真的动了源码的服务（incremental）
+  for svc in "${AFFECTED_SERVICES[@]}"; do
+    echo "  [INCR] Rebuilding $svc (--no-deps)..."
+    docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --build --no-deps "$svc"
+  done
+  # 容器 IP 全变，但 nginx 用动态 resolver 10 秒自动感知
 elif [[ "${#AFFECTED_SERVICES[@]}" -gt 0 ]]; then
   # 增量：只 rebuild 影响的服务，带 --no-deps 不触发依赖链
   for svc in "${AFFECTED_SERVICES[@]}"; do

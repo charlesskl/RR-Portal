@@ -6,85 +6,399 @@
     <title>ZURU 总排期入单</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css" rel="stylesheet">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
     <style>
-        body { background: #f5f7fa; font-family: -apple-system, 'Microsoft YaHei', sans-serif; }
-        .main-card { max-width: 800px; margin: 40px auto; }
-        .drop-zone { border: 2px dashed #ccc; border-radius: 12px; padding: 50px 20px;
-                     text-align: center; cursor: pointer; transition: all 0.3s; background: #fff; }
-        .drop-zone:hover, .drop-zone.dragover { border-color: #198754; background: #f0fff4; }
-        .result-box { max-height: 400px; overflow-y: auto; }
-        .file-tag { display: inline-block; background: #e8f5e9; color: #2e7d32; border-radius: 4px;
-                    padding: 2px 8px; margin: 2px; font-size: 0.8rem; }
+        :root {
+            /* 一套暖色调灰阶 */
+            --ink: #1a1a18;
+            --ink-2: #3a3934;
+            --muted: #6b6a65;
+            --border: #e8e6e1;
+            --border-strong: #d6d4ce;
+            --surface: #ffffff;
+            --canvas: #faf9f5;
+            --canvas-2: #f3f1ea;
+
+            /* 一个主色：深青绿 */
+            --accent: #0d7c66;
+            --accent-2: #0a6453;
+            --accent-soft: #e5f1ee;
+            --accent-tint: rgba(13, 124, 102, 0.08);
+
+            /* 功能色：保留语义但降饱和度 */
+            --warn: #b8750d;
+            --warn-soft: #fdf4e3;
+            --danger: #a83e3e;
+            --danger-soft: #faeaea;
+            --info: #2f5d8f;
+            --info-soft: #e8effa;
+
+            /* Bootstrap override — 所有 alert/btn/badge/table-* 会随之变 */
+            --bs-body-bg: var(--canvas);
+            --bs-body-color: var(--ink);
+            --bs-body-font-family: 'Geist', -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', 'Helvetica Neue', sans-serif;
+            --bs-body-font-size: 0.9375rem;
+            --bs-border-color: var(--border);
+            --bs-border-radius: 10px;
+            --bs-border-radius-sm: 6px;
+            --bs-primary: var(--info);
+            --bs-success: var(--accent);
+            --bs-warning: var(--warn);
+            --bs-danger: var(--danger);
+            --bs-info: var(--info);
+            --bs-secondary: var(--muted);
+        }
+
+        * { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+
+        body {
+            background: var(--canvas);
+            color: var(--ink);
+            font-feature-settings: "ss01", "cv11";
+        }
+
+        /* Monospace for paths, numbers, file names */
+        code, .mono, .file-tag, #masterPath {
+            font-family: 'Geist Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+            font-variant-numeric: tabular-nums;
+        }
+
+        /* ─── Page header ─── */
+        main { max-width: 960px; margin: 0 auto; padding: 48px 28px 80px; }
+        .page-head { margin-bottom: 32px; }
+        .page-head .eyebrow {
+            font-size: 0.75rem; font-weight: 500; color: var(--muted);
+            text-transform: none; letter-spacing: 0.04em; margin-bottom: 6px;
+        }
+        .page-head h1 {
+            font-family: 'Geist', sans-serif;
+            font-weight: 600; font-size: 1.875rem;
+            letter-spacing: -0.02em; line-height: 1.15;
+            color: var(--ink); margin: 0 0 4px 0;
+        }
+        .page-head .subtitle { font-size: 0.9375rem; color: var(--muted); }
+
+        /* ─── Status bar (总排期文件) ─── */
+        .status-bar {
+            display: grid; grid-template-columns: auto 1fr auto auto auto;
+            gap: 10px; align-items: center;
+            background: var(--surface); border: 1px solid var(--border);
+            border-radius: 10px; padding: 10px 14px;
+            box-shadow: 0 1px 2px rgba(26, 26, 24, 0.03);
+        }
+        .status-bar .label {
+            font-size: 0.78rem; font-weight: 500; color: var(--muted);
+        }
+        .status-bar input#masterPath {
+            border: 0; background: transparent; padding: 4px 0;
+            font-size: 0.82rem; color: var(--ink-2); outline: none;
+            min-width: 0;
+        }
+        .status-chip {
+            display: inline-flex; align-items: center; gap: 5px;
+            font-size: 0.72rem; font-weight: 500; padding: 4px 9px;
+            border-radius: 999px; white-space: nowrap;
+            border: 1px solid transparent;
+        }
+        .status-chip.ok { background: var(--accent-soft); color: var(--accent-2); border-color: rgba(13, 124, 102, 0.15); }
+        .status-chip.warn { background: var(--warn-soft); color: var(--warn); border-color: rgba(184, 117, 13, 0.15); }
+        .status-chip.err { background: var(--danger-soft); color: var(--danger); border-color: rgba(168, 62, 62, 0.15); }
+        .status-chip.neutral { background: var(--canvas-2); color: var(--muted); border-color: var(--border); }
+        .status-chip::before {
+            content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor;
+        }
+
+        /* ─── Btn overrides — restrained but responsive ─── */
+        .btn {
+            font-weight: 500; letter-spacing: -0.005em;
+            transition: background-color 160ms ease, transform 140ms ease,
+                        box-shadow 160ms ease, border-color 160ms ease;
+        }
+        .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; box-shadow: none; }
+        .btn:active { transform: translateY(1px); }
+        .btn-success {
+            background: var(--accent); border-color: var(--accent); color: #fff;
+            box-shadow: 0 1px 2px rgba(13, 124, 102, 0.2);
+        }
+        .btn-success:hover:not(:disabled) {
+            background: var(--accent-2); border-color: var(--accent-2);
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(13, 124, 102, 0.25);
+        }
+        .btn-outline-success {
+            color: var(--accent-2); border-color: var(--border-strong); background: var(--surface);
+        }
+        .btn-outline-success:hover:not(:disabled) {
+            background: var(--accent-soft); color: var(--accent-2); border-color: var(--accent);
+        }
+        .btn-outline-warning {
+            color: var(--warn); border-color: var(--border-strong); background: var(--surface);
+        }
+        .btn-outline-warning:hover:not(:disabled) {
+            background: var(--warn-soft); color: var(--warn); border-color: var(--warn);
+        }
+        .btn-outline-primary {
+            color: var(--info); border-color: var(--border-strong); background: var(--surface);
+        }
+        .btn-outline-primary:hover:not(:disabled) {
+            background: var(--info-soft); color: var(--info); border-color: var(--info);
+        }
+        .btn-outline-info {
+            color: var(--muted); border-color: var(--border-strong); background: var(--surface);
+        }
+        .btn-outline-info:hover:not(:disabled) {
+            background: var(--canvas-2); color: var(--ink-2); border-color: var(--border-strong);
+        }
+        .btn-outline-secondary {
+            color: var(--muted); border-color: var(--border); background: var(--surface);
+        }
+        .btn-outline-secondary:hover:not(:disabled) {
+            background: var(--canvas-2); color: var(--ink); border-color: var(--border-strong);
+        }
+        .btn-primary {
+            background: var(--info); border-color: var(--info); color: #fff;
+        }
+        .btn-primary:hover:not(:disabled) {
+            background: #254c76; border-color: #254c76;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(47, 93, 143, 0.25);
+        }
+
+        /* ─── Drop zone ─── */
+        .drop-zone {
+            border: 1.5px dashed var(--border-strong); border-radius: 12px;
+            padding: 48px 20px; text-align: center; cursor: pointer;
+            background: var(--surface);
+            transition: border-color 160ms ease, background-color 160ms ease, transform 160ms ease;
+            position: relative;
+        }
+        .drop-zone:hover, .drop-zone.dragover {
+            border-color: var(--accent); background: var(--accent-soft);
+            border-style: solid;
+        }
+        .drop-zone.dragover { transform: scale(1.005); }
+        .drop-zone .bi-cloud-arrow-up {
+            font-size: 2rem; color: var(--accent);
+            display: inline-block;
+            transition: transform 200ms ease;
+        }
+        .drop-zone:hover .bi-cloud-arrow-up { transform: translateY(-2px); }
+        .drop-zone p { margin: 12px 0 0; }
+        .drop-zone .title { font-weight: 600; color: var(--ink); font-size: 0.95rem; }
+        .drop-zone .hint { font-size: 0.82rem; color: var(--muted); margin-top: 4px; }
+
+        /* File tag chips */
+        .file-tag {
+            display: inline-flex; align-items: center; gap: 4px;
+            background: var(--accent-soft); color: var(--accent-2);
+            border: 1px solid rgba(13, 124, 102, 0.15);
+            border-radius: 6px; padding: 3px 9px; margin: 2px 3px 2px 0;
+            font-size: 0.76rem; font-weight: 500;
+            max-width: 240px; overflow: hidden; text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        /* ─── Card override ─── */
+        .card {
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            background: var(--surface);
+            box-shadow: 0 1px 2px rgba(26, 26, 24, 0.03);
+        }
+        .card-body { padding: 20px; }
+
+        /* Section headings */
+        .section-label {
+            display: flex; align-items: center; gap: 8px;
+            font-size: 0.74rem; font-weight: 500; color: var(--muted);
+            text-transform: none; letter-spacing: 0.04em;
+            margin: 0 0 10px 2px;
+        }
+        .section-label::before {
+            content: ''; display: inline-block;
+            width: 18px; height: 1px; background: var(--border-strong);
+        }
+
+        /* ─── Inline error banner (replaces alert()) ─── */
+        #inlineError {
+            position: fixed; top: 20px; right: 20px; z-index: 1080;
+            background: var(--danger); color: #fff;
+            padding: 11px 16px; border-radius: 10px;
+            font-size: 0.87rem; font-weight: 500;
+            box-shadow: 0 8px 24px rgba(168, 62, 62, 0.3);
+            display: none; max-width: 360px;
+            animation: slideInRight 180ms ease;
+        }
+        @keyframes slideInRight {
+            from { transform: translateX(8px); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+
+        /* ─── Alerts inside results: override Bootstrap shell ─── */
+        .alert {
+            border-radius: 10px; border: 1px solid transparent;
+            padding: 11px 14px; font-size: 0.875rem;
+        }
+        .alert-success { background: var(--accent-soft); color: var(--accent-2); border-color: rgba(13, 124, 102, 0.15); }
+        .alert-warning { background: var(--warn-soft); color: var(--warn); border-color: rgba(184, 117, 13, 0.18); }
+        .alert-danger { background: var(--danger-soft); color: var(--danger); border-color: rgba(168, 62, 62, 0.18); }
+        .alert-info { background: var(--info-soft); color: var(--info); border-color: rgba(47, 93, 143, 0.15); }
+        .alert-secondary { background: var(--canvas-2); color: var(--ink-2); border-color: var(--border); }
+
+        /* ─── Badges — tighter, no Bootstrap bulge ─── */
+        .badge {
+            font-weight: 500; padding: 3px 7px; border-radius: 5px;
+            font-size: 0.72rem; letter-spacing: 0;
+        }
+        .bg-success { background: var(--accent) !important; }
+        .bg-warning { background: var(--warn) !important; }
+        .bg-primary { background: var(--info) !important; }
+        .bg-danger { background: var(--danger) !important; }
+        .bg-info { background: var(--info) !important; color: #fff !important; }
+        .bg-secondary { background: var(--canvas-2) !important; color: var(--muted) !important; }
+
+        /* ─── Table — more editorial ─── */
+        .table { --bs-table-bg: transparent; font-size: 0.83rem; }
+        .table > :not(caption) > * > * { padding: 8px 10px; border-bottom-color: var(--border); }
+        .table-primary { --bs-table-bg: var(--info-soft); color: var(--info); }
+        .table-warning { --bs-table-bg: var(--warn-soft); color: var(--warn); }
+        .table-success { --bs-table-bg: var(--accent-soft); color: var(--accent-2); }
+        .table-danger  { --bs-table-bg: var(--danger-soft); color: var(--danger); }
+
+        /* ─── List group tighten ─── */
+        .list-group-item {
+            border-color: var(--border); padding: 8px 10px;
+            background: var(--canvas);
+        }
+
+        /* ─── Spinner: keep Bootstrap class but refine ─── */
+        .spinner-border { border-width: 0.15em; }
+
+        /* ─── Accent divider ─── */
+        hr { border: 0; height: 1px; background: var(--border); margin: 18px 0; }
+
+        /* Responsive */
+        @media (max-width: 640px) {
+            main { padding: 28px 16px 60px; }
+            .status-bar { grid-template-columns: 1fr; gap: 8px; }
+            .status-bar .label { font-size: 0.74rem; }
+        }
     </style>
 </head>
 <body>
-<div class="container main-card">
-    <div class="text-center mb-4">
-        <h3 class="fw-bold text-success"><i class="bi bi-table me-2"></i>ZURU 总排期入单</h3>
-        <div class="d-flex align-items-center justify-content-center gap-2 mt-1">
-            <input type="text" id="masterPath" class="form-control form-control-sm" style="max-width:450px;font-size:0.8rem;" readonly>
-            <label class="btn btn-outline-primary btn-sm py-0" style="font-size:0.75rem;white-space:nowrap;">
+
+<!-- Toast-style error banner (replaces alert()) -->
+<div id="inlineError" role="alert" aria-live="assertive"></div>
+
+<main>
+    <header class="page-head">
+        <div class="eyebrow">业务部 · ZURU</div>
+        <h1>总排期入单</h1>
+        <p class="subtitle">把 PO Excel 并入总排期表，自动去重、分排期归属、异常告警</p>
+    </header>
+
+    <!-- 总排期文件状态条 -->
+    <section aria-label="总排期文件">
+        <div class="section-label">总排期文件</div>
+        <div class="status-bar">
+            <span class="label">路径</span>
+            <input type="text" id="masterPath" readonly aria-label="总排期文件路径">
+            <label class="btn btn-outline-primary btn-sm py-1" style="font-size:0.78rem;white-space:nowrap;">
                 <i class="bi bi-upload"></i> 上传总排期
                 <input type="file" accept=".xlsx,.xls" style="display:none" onchange="uploadMaster(this)">
             </label>
-            <button class="btn btn-outline-info btn-sm py-0" style="font-size:0.75rem;white-space:nowrap;" onclick="checkStatus()"><i class="bi bi-arrow-clockwise"></i> 刷新</button>
-            <span id="file-status" class="badge bg-secondary small">检查中...</span>
+            <button class="btn btn-outline-info btn-sm py-1" style="font-size:0.78rem;white-space:nowrap;" onclick="checkStatus()">
+                <i class="bi bi-arrow-clockwise"></i> 刷新
+            </button>
+            <span id="file-status" class="status-chip neutral">检查中</span>
         </div>
-    </div>
+    </section>
 
-    <!-- 拖拽上传区 -->
-    <div class="card mb-3">
-        <div class="card-body">
-            <div class="drop-zone" id="dropZone" onclick="document.getElementById('fileInput').click()">
-                <i class="bi bi-cloud-arrow-up" style="font-size:2.5rem;color:#198754;"></i>
-                <p class="mt-2 mb-0 fw-bold">拖放Excel PO文件到此处</p>
-                <p class="text-muted small">或点击选择文件（支持多个.xlsx）</p>
-            </div>
-            <input type="file" id="fileInput" multiple accept=".xlsx,.xls" style="display:none"
-                   onchange="showFiles(this.files)">
-
-            <!-- 已选文件列表 -->
-            <div id="fileList" class="mt-2" style="display:none;">
-                <div class="d-flex justify-content-between align-items-center mb-1">
-                    <span class="fw-bold small"><i class="bi bi-files me-1"></i>已选文件：<span id="fileCount">0</span>个</span>
-                    <button class="btn btn-outline-secondary btn-sm py-0" onclick="clearFiles()">清除</button>
+    <!-- PO 文件上传 + 操作 -->
+    <section aria-label="PO 文件导入" style="margin-top: 24px;">
+        <div class="section-label">PO 文件导入</div>
+        <div class="card">
+            <div class="card-body">
+                <div class="drop-zone" id="dropZone" onclick="document.getElementById('fileInput').click()"
+                     role="button" tabindex="0" aria-label="拖拽或点击选择 PO Excel 文件">
+                    <i class="bi bi-cloud-arrow-up" aria-hidden="true"></i>
+                    <p class="title">把 Excel PO 文件拖到这里</p>
+                    <p class="hint">或点击选择文件 · 支持多选 .xlsx / .xls</p>
                 </div>
-                <div id="fileTags" style="max-height:100px;overflow-y:auto;"></div>
-            </div>
+                <input type="file" id="fileInput" multiple accept=".xlsx,.xls" style="display:none"
+                       onchange="showFiles(this.files)">
 
-            <!-- 操作按钮 -->
-            <div class="d-flex gap-2 mt-3">
-                <button class="btn btn-success flex-fill" onclick="doUpload()" id="btnUpload">
-                    <i class="bi bi-plus-circle me-1"></i>写入总排期
-                </button>
-                <button class="btn btn-outline-success" onclick="doDownload()">
-                    <i class="bi bi-download me-1"></i>下载总排期
-                </button>
-                <button class="btn btn-outline-warning" onclick="doYellowSummary()" id="btnSummary">
-                    <i class="bi bi-bar-chart me-1"></i>有填充行汇总
-                </button>
+                <!-- 已选文件列表 -->
+                <div id="fileList" class="mt-3" style="display:none;">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <span class="fw-semibold" style="font-size:0.82rem;color:var(--ink-2);">
+                            <i class="bi bi-files me-1"></i>已选 <span id="fileCount">0</span> 个
+                        </span>
+                        <button class="btn btn-outline-secondary btn-sm py-0" onclick="clearFiles()">清空</button>
+                    </div>
+                    <div id="fileTags" style="max-height:110px;overflow-y:auto;"></div>
+                </div>
+
+                <!-- 操作按钮 -->
+                <div class="d-flex gap-2 mt-4">
+                    <button class="btn btn-success flex-fill" onclick="doUpload()" id="btnUpload">
+                        <i class="bi bi-plus-circle me-1"></i>写入总排期
+                    </button>
+                    <button class="btn btn-outline-success" onclick="doDownload()">
+                        <i class="bi bi-download me-1"></i>下载总排期
+                    </button>
+                    <button class="btn btn-outline-warning" onclick="doYellowSummary()" id="btnSummary">
+                        <i class="bi bi-bar-chart me-1"></i>有填充行汇总
+                    </button>
+                </div>
             </div>
         </div>
-    </div>
+    </section>
 
     <!-- 处理结果 -->
-    <div class="card" id="resultCard" style="display:none;">
-        <div class="card-body result-box">
-            <div id="resultContent"></div>
+    <section aria-label="处理结果" id="resultSection" style="margin-top: 24px; display:none;">
+        <div class="section-label">处理结果</div>
+        <div class="card" id="resultCard">
+            <div class="card-body result-box" style="max-height:600px;overflow-y:auto;">
+                <div id="resultContent"></div>
+            </div>
         </div>
-    </div>
-</div>
+    </section>
+</main>
 
 <script>
 const BASE = '/zuru-master';
 const dropZone = document.getElementById('dropZone');
 const fileInput = document.getElementById('fileInput');
+const resultSection = document.getElementById('resultSection');
+const resultCard = document.getElementById('resultCard');
 let selectedFiles = [];
+let errorTimer = null;
 
 function _escHtml(s) {
     const d = document.createElement('div');
     d.textContent = s;
     return d.innerHTML;
+}
+
+// Replaces window.alert() — non-blocking, dismissable, not ugly
+function showError(msg) {
+    const el = document.getElementById('inlineError');
+    el.textContent = msg;
+    el.style.display = 'block';
+    clearTimeout(errorTimer);
+    errorTimer = setTimeout(() => el.style.display = 'none', 4500);
+}
+document.getElementById('inlineError').addEventListener('click', () => {
+    document.getElementById('inlineError').style.display = 'none';
+});
+
+// Show result section (adds container)
+function revealResult() {
+    resultSection.style.display = '';
+    resultCard.style.display = '';
 }
 
 // 拖拽
@@ -96,13 +410,17 @@ dropZone.addEventListener('drop', e => {
     const files = [...e.dataTransfer.files].filter(f => f.name.match(/\.xlsx?$/i));
     if (files.length) { selectedFiles = files; showFiles(files); }
 });
+// Keyboard activation on drop zone
+dropZone.addEventListener('keydown', e => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInput.click(); }
+});
 
 function showFiles(files) {
     if (files instanceof FileList) selectedFiles = [...files];
     document.getElementById('fileList').style.display = '';
     document.getElementById('fileCount').textContent = selectedFiles.length;
     document.getElementById('fileTags').innerHTML = selectedFiles.map(f =>
-        `<span class="file-tag">${_escHtml(f.name)}</span>`).join('');
+        `<span class="file-tag" title="${_escHtml(f.name)}">${_escHtml(f.name)}</span>`).join('');
 }
 function clearFiles() {
     selectedFiles = [];
@@ -120,19 +438,20 @@ async function uploadMaster(input) {
         const data = await resp.json();
         if (data.ok) {
             document.getElementById('masterPath').value = data.path || f.name;
-            document.getElementById('file-status').className = 'badge bg-success small';
-            document.getElementById('file-status').textContent = '文件可用';
+            const badge = document.getElementById('file-status');
+            badge.className = 'status-chip ok';
+            badge.textContent = '文件可用';
         } else {
-            alert(data.error || '上传失败');
+            showError(data.error || '上传失败');
         }
     } catch(e) {
-        alert('上传失败: ' + e.message);
+        showError('上传失败: ' + e.message);
     }
     input.value = '';
 }
 
 async function doUpload() {
-    if (!selectedFiles.length) { alert('请先选择Excel PO文件'); return; }
+    if (!selectedFiles.length) { showError('请先选择 Excel PO 文件'); return; }
     const btn = document.getElementById('btnUpload');
     btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>写入中...';
 
@@ -142,9 +461,8 @@ async function doUpload() {
     try {
         const resp = await fetch(BASE + '/api/master-schedule-upload', { method: 'POST', body: fd });
         const data = await resp.json();
-        const rc = document.getElementById('resultCard');
         const content = document.getElementById('resultContent');
-        rc.style.display = '';
+        revealResult();
 
         if (data.ok) {
             let html = `<div class="alert alert-success mb-2"><i class="bi bi-check-circle me-1"></i><b>${_escHtml(data.msg || '')}</b></div>`;
@@ -153,14 +471,14 @@ async function doUpload() {
             }
             // 重复PO去重提示
             if (data.dedup_report && data.dedup_report.length) {
-                html += `<div class="alert alert-warning mb-2" style="border-left:4px solid #fd7e14;">`;
+                html += `<div class="alert alert-warning mb-2" style="border-left:4px solid var(--warn);">`;
                 html += `<i class="bi bi-copy me-1"></i><b>重复PO自动去重 (${data.dedup_report.length}组)：</b><br>`;
                 data.dedup_report.forEach(r => { html += `${_escHtml(r)}<br>`; });
                 html += `</div>`;
             }
             // 黑名单忽略提示
             if (data.ignored_report && data.ignored_report.length) {
-                html += `<div class="alert alert-secondary mb-2" style="border-left:4px solid #6c757d;">`;
+                html += `<div class="alert alert-secondary mb-2" style="border-left:4px solid var(--muted);">`;
                 html += `<i class="bi bi-slash-circle me-1"></i><b>已忽略货号（不入排期）：</b><br>`;
                 data.ignored_report.forEach(r => {
                     html += `货号 <b>${_escHtml(r.item)}</b> × ${r.count}行 <span class="text-muted">(${_escHtml(r.source)})</span><br>`;
@@ -169,9 +487,9 @@ async function doUpload() {
             }
             // 数据异常警告（PDF转Excel丢失数据）
             if (data.data_warnings && data.data_warnings.length) {
-                html += `<div class="alert alert-danger mb-2" style="border-left:4px solid #dc3545;font-weight:bold;">`;
+                html += `<div class="alert alert-danger mb-2" style="border-left:4px solid var(--danger);font-weight:500;">`;
                 html += `<i class="bi bi-exclamation-octagon me-1"></i><b>数据异常（可能PDF转Excel丢失数据，请核对原始PO）：</b><br>`;
-                data.data_warnings.forEach(w => { html += `<span style="color:#dc3545;">${_escHtml(w)}</span><br>`; });
+                data.data_warnings.forEach(w => { html += `<span>${_escHtml(w)}</span><br>`; });
                 html += `</div>`;
             }
             // 备注缺失警告
@@ -227,7 +545,7 @@ async function doUpload() {
                         const items = byFile[file];
                         const sheets = [...new Set(items.map(i => i.sheet))];
                         html += `<div class="card card-body py-1 px-2 mb-1" style="font-size:0.85rem;">`;
-                        html += `<div><i class="bi bi-file-earmark-spreadsheet text-success me-1"></i><b>${_escHtml(file)}</b></div>`;
+                        html += `<div><i class="bi bi-file-earmark-spreadsheet me-1" style="color:var(--accent);"></i><b>${_escHtml(file)}</b></div>`;
                         sheets.forEach(sh => {
                             const shItems = items.filter(i => i.sheet === sh).map(i => i.item);
                             html += `<div class="ms-3"><span class="text-muted">${_escHtml(sh)}：</span>`;
@@ -237,7 +555,7 @@ async function doUpload() {
                         html += `</div>`;
                     });
                     if (unmatched.length > 0) {
-                        html += `<div class="mt-1" style="font-size:0.85rem;"><span class="text-warning"><i class="bi bi-question-circle me-1"></i>未识别归属：</span>`;
+                        html += `<div class="mt-1" style="font-size:0.85rem;"><span style="color:var(--warn);"><i class="bi bi-question-circle me-1"></i>未识别归属：</span>`;
                         unmatched.forEach(it => { html += `<span class="badge bg-warning text-dark me-1">${_escHtml(it)}</span>`; });
                         html += `</div>`;
                     }
@@ -249,7 +567,7 @@ async function doUpload() {
             content.innerHTML = `<div class="alert alert-danger"><i class="bi bi-x-circle me-1"></i>${_escHtml(data.error || '')}</div>`;
         }
     } catch(e) {
-        document.getElementById('resultCard').style.display = '';
+        revealResult();
         document.getElementById('resultContent').innerHTML =
             `<div class="alert alert-danger">请求失败: ${_escHtml(e.message || '')}</div>`;
     }
@@ -266,7 +584,7 @@ async function doYellowSummary() {
     btn.disabled = true;
     btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>扫描中...';
     const content = document.getElementById('resultContent');
-    document.getElementById('resultCard').style.display = '';
+    revealResult();
     content.innerHTML = '<div class="text-muted"><i class="bi bi-hourglass-split me-1"></i>正在扫描总排期有填充行，请稍候（首次较慢）...</div>';
     try {
         const resp = await fetch(BASE + '/api/yellow-summary', {method:'POST'});
@@ -278,14 +596,14 @@ async function doYellowSummary() {
         } else {
             let html = `<div class="alert alert-success mb-2 py-2 d-flex justify-content-between align-items-center"><div><i class="bi bi-check-circle me-1"></i>`;
             html += `共 <b>${data.total}</b> 行整行填充，分布在 <b>${data.group_count}</b> 个分排期sheet`;
-            if (data.unmatched && data.unmatched.length > 0) html += `，<span class="text-warning fw-bold">${data.unmatched.length} 个货号未匹配</span>`;
+            if (data.unmatched && data.unmatched.length > 0) html += `，<span style="color:var(--warn);font-weight:500;">${data.unmatched.length} 个货号未匹配</span>`;
             html += `</div><button class="btn btn-primary btn-sm ms-2" onclick="doDownloadSummary()"><i class="bi bi-download me-1"></i>下载Excel</button></div>`;
             // 分组表格
             html += `<div style="max-height:500px;overflow-y:auto;">`;
             html += `<table class="table table-sm table-bordered" style="font-size:0.82rem;">`;
             html += `<thead class="table-primary text-center"><tr><th>分排期文件</th><th>Sheet</th><th>货号</th><th>中文名</th><th>行数</th><th>数量</th><th>小计</th></tr></thead><tbody>`;
             (data.groups || []).forEach((g, gi) => {
-                const bg = gi % 2 === 0 ? '' : ' style="background:#f8f9fa;"';
+                const bg = gi % 2 === 0 ? '' : ' style="background:var(--canvas-2);"';
                 g.items.forEach((it, ii) => {
                     html += `<tr${bg}>`;
                     html += ii === 0 ? `<td rowspan="${g.items.length+1}">${_escHtml(g.file)}</td><td rowspan="${g.items.length+1}">${_escHtml(g.sheet)}</td>` : '';
@@ -317,7 +635,7 @@ async function doDownloadSummary() {
         const resp = await fetch(BASE + '/api/yellow-summary-download', {method:'POST'});
         if (!resp.ok) {
             const d = await resp.json();
-            alert(d.error || '下载失败');
+            showError(d.error || '下载失败');
             return;
         }
         const blob = await resp.blob();
@@ -331,7 +649,7 @@ async function doDownloadSummary() {
         a.click();
         URL.revokeObjectURL(a.href);
     } catch(e) {
-        alert('下载失败: ' + e.message);
+        showError('下载失败: ' + e.message);
     }
 }
 
@@ -342,15 +660,15 @@ async function checkStatus() {
         document.getElementById('masterPath').value = data.path || '';
         const badge = document.getElementById('file-status');
         if (!data.exists) {
-            badge.className = 'badge bg-danger small'; badge.textContent = '文件不存在';
+            badge.className = 'status-chip err'; badge.textContent = '文件不存在';
         } else if (data.locked) {
-            badge.className = 'badge bg-warning small'; badge.textContent = '文件被占用';
+            badge.className = 'status-chip warn'; badge.textContent = '文件被占用';
         } else {
-            badge.className = 'badge bg-success small'; badge.textContent = '文件可用';
+            badge.className = 'status-chip ok'; badge.textContent = '文件可用';
         }
     } catch(e) {
-        document.getElementById('file-status').className = 'badge bg-secondary small';
-        document.getElementById('file-status').textContent = '检查失败';
+        const badge = document.getElementById('file-status');
+        badge.className = 'status-chip neutral'; badge.textContent = '检查失败';
     }
 }
 

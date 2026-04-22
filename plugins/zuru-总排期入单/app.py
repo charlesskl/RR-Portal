@@ -8,7 +8,7 @@ from datetime import datetime
 from collections import defaultdict
 from flask import Flask, render_template, request, jsonify, send_file
 from excel_po_parser import ExcelPOParser
-from master_schedule import write_orders, lookup_schedule_info
+from master_schedule import write_orders, generate_excel, lookup_schedule_info
 from generate_yellow_summary import generate_summary, generate_summary_excel
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -213,6 +213,19 @@ def master_schedule_upload():
             'errors': errors, 'warnings': [],
         })
 
+    # 数据异常检测：PDF转Excel可能丢失数据，检测qty/outer为0的行
+    data_warnings = []
+    for od in orders:
+        fname = od.get('filename', '')
+        for ln in od.get('lines', []):
+            sku = ln.get('sku_spec') or ln.get('sku', '')
+            qty = ln.get('qty', 0) or 0
+            outer = ln.get('outer_qty', 0) or 0
+            if qty <= 0:
+                data_warnings.append(f'{fname}: {sku} 数量=0，可能是PDF转Excel时数据丢失，请核对原始PO')
+            elif outer <= 0:
+                data_warnings.append(f'{fname}: {sku} 外箱装箱数=0，可能是PDF转Excel时数据丢失，请核对原始PO')
+
     export_dir = app.config['EXPORT_FOLDER']
     try:
         result = write_orders(master_path, orders, export_dir=export_dir)
@@ -229,6 +242,8 @@ def master_schedule_upload():
             'dedup_report': dedup_report,
             'ignored_report': ignored_report,
         }
+        if data_warnings:
+            resp['data_warnings'] = data_warnings
         if result.get('export_file'):
             resp['export_file'] = result['export_file']
         try:
@@ -244,6 +259,29 @@ def master_schedule_upload():
         return jsonify(resp)
     except Exception as e:
         return jsonify({'error': f'处理失败: {e}'}), 500
+
+
+@app.route('/api/master-schedule-download')
+def master_schedule_download():
+    """下载总排期文件（云端：下载上传的副本）"""
+    mp = _get_master_path()
+    if not mp or not os.path.exists(mp):
+        return jsonify({'error': '总排期文件不存在，请先上传'}), 404
+    return send_file(mp, as_attachment=True,
+                     download_name=os.path.basename(mp))
+
+
+@app.route('/api/master-schedule-set-path', methods=['POST'])
+def master_schedule_set_path():
+    """切换总排期文件路径（云端：切换已上传的文件）"""
+    new_path = request.json.get('path', '').strip()
+    if not new_path:
+        _master_file['path'] = ''
+        return jsonify({'ok': True, 'path': '(未上传总排期文件)', 'msg': '已清除，请重新上传总排期'})
+    if not os.path.exists(new_path):
+        return jsonify({'error': f'路径不存在: {new_path}'}), 400
+    _master_file['path'] = new_path
+    return jsonify({'ok': True, 'path': new_path, 'msg': f'已切换到: {new_path}'})
 
 
 @app.route('/api/master-export-download/<filename>')

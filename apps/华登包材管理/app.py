@@ -170,14 +170,10 @@ def _build_stats(db, ch):
     ''', (ch,)).fetchall()
     mt_dict = {row['ym']: dict(row) for row in invest_rows}
 
-    record_months = [
-        r['ym'] for r in db.execute(
-            "SELECT DISTINCT strftime('%Y-%m', date) as ym FROM records WHERE channel = ? ORDER BY ym",
-            (ch,)
-        ).fetchall()
-    ]
-
-    all_months = sorted(set(list(inv_dict.keys()) + list(mt_dict.keys()) + record_months))
+    # 只从 inventory_counts + investment_records 取月份:
+    # records (流水订单) 不驱动月份统计行,避免单独一条订单产生幽灵行
+    # (用户删除该月后,records 里的订单仍在会重建行,造成"删不掉")
+    all_months = sorted(set(list(inv_dict.keys()) + list(mt_dict.keys())))
 
     stats_data = []
     for ym in all_months:

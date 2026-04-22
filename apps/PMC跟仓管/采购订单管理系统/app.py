@@ -1,7 +1,10 @@
 import os
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request, redirect, url_for, session
 from config import Config
 from models import db
+
+
+EXEMPT_ENDPOINTS = {'auth.login', 'auth.logout', 'health', 'static'}
 
 
 class PrefixMiddleware:
@@ -29,6 +32,7 @@ def create_app():
     with app.app_context():
         db.create_all()
 
+    from routes.auth import bp as auth_bp
     from routes.upload import bp as upload_bp
     from routes.purchase import bp as purchase_bp
     from routes.supplier import bp as supplier_bp
@@ -38,6 +42,7 @@ def create_app():
     from routes.delivery_mgmt import bp as delivery_mgmt_bp
     from routes.problems import bp as problems_bp
 
+    app.register_blueprint(auth_bp)
     app.register_blueprint(upload_bp)
     app.register_blueprint(purchase_bp)
     app.register_blueprint(supplier_bp)
@@ -47,9 +52,16 @@ def create_app():
     app.register_blueprint(delivery_mgmt_bp)
     app.register_blueprint(problems_bp)
 
+    @app.before_request
+    def require_login():
+        if session.get('logged_in'):
+            return None
+        if request.endpoint in EXEMPT_ENDPOINTS:
+            return None
+        return redirect(url_for('auth.login', next=request.full_path.rstrip('?')))
+
     @app.route('/')
     def index():
-        from flask import redirect, url_for
         return redirect(url_for('upload.upload_page'))
 
     @app.route('/health')

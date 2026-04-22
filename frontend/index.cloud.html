@@ -313,6 +313,12 @@
                 <span class="plugin-name">TOMY排期核对系统</span>
               </div>
             </div>
+            <div class="plugin-item">
+              <div class="plugin-info">
+                <div class="plugin-dot gray" id="hyScheduleDot"></div>
+                <span class="plugin-name">河源排期入单</span>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -447,7 +453,7 @@
       <div class="dept-icon business" style="width:40px;height:40px;font-size:18px;">&#128176;</div>
       业务部
     </div>
-    <div class="page-subtitle">ZURU接单表入单 · ZURU总排期入单 · 报价管理 · TOMY排期核对</div>
+    <div class="page-subtitle">ZURU接单表入单 · ZURU总排期入单 · 河源排期入单 · 报价管理 · TOMY排期核对</div>
 
     <div class="detail-plugin-card">
       <div class="detail-plugin-left">
@@ -526,6 +532,26 @@
       <div class="detail-plugin-right">
         <div class="detail-plugin-status"><div class="plugin-dot gray" id="tomyDetailDot"></div> 检查中...</div>
         <a href="/tomy-paiqi/" target="_blank" class="btn btn-primary">打开系统</a>
+      </div>
+    </div>
+
+    <div class="detail-plugin-card">
+      <div class="detail-plugin-left">
+        <div class="detail-plugin-icon" style="background:linear-gradient(135deg,#10b981,#059669);">&#128203;</div>
+        <div>
+          <div class="detail-plugin-name">河源排期入单</div>
+          <div class="detail-plugin-desc">解析PO Excel，匹配河源多文件排期，生成修改单/新单/未识别分类Excel</div>
+          <div class="feature-grid">
+            <div class="feature-tag">&#128196; PO解析</div>
+            <div class="feature-tag">&#128269; 货号匹配</div>
+            <div class="feature-tag">&#128230; 分类Excel</div>
+            <div class="feature-tag">&#128194; 多文件排期</div>
+          </div>
+        </div>
+      </div>
+      <div class="detail-plugin-right">
+        <div class="detail-plugin-status"><div class="plugin-dot gray" id="hyScheduleDetailDot"></div> 检查中...</div>
+        <a href="/hy-schedule/" target="_blank" class="btn btn-primary">打开系统</a>
       </div>
     </div>
   </div>
@@ -663,6 +689,7 @@ async function checkHealth() {
       { name: 'quotation', url: '/quotation/health', dot: 'quotationDot', detailDot: 'quotationDetailDot' },
       { name: 'tomy', url: '/tomy-paiqi/health', dot: 'tomyDot', detailDot: 'tomyDetailDot' },
       { name: 'zuruMaster', url: '/zuru-master/health', dot: 'zuruMasterDot', detailDot: 'zuruMasterDetailDot' },
+      { name: 'hySchedule', url: '/hy-schedule/health', dot: 'hyScheduleDot', detailDot: 'hyScheduleDetailDot' },
       { name: 'peise', url: '/peise/health', dot: 'peiseDot', detailDot: 'peiseDetailDot' },
       { name: 'huadeng', url: '/huadeng/health', dot: 'huadengDot', detailDot: 'huadengDetailDot' },
     ];

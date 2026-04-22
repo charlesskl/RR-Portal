@@ -265,12 +265,13 @@ fi
 # nginx 配置变动 → hot reload（零停机）
 if [[ "$NGINX_CHANGED" -eq 1 ]] || [[ "$FRONTEND_CHANGED" -eq 1 ]]; then
   echo "  [NGINX] 配置/前端变动，hot reload（零停机）"
-  if docker exec rr-portal-nginx-1 nginx -t 2>&1 | grep -q "syntax is ok"; then
+  _NGINX_TEST=$(docker exec rr-portal-nginx-1 nginx -t 2>&1 || true)
+  if echo "$_NGINX_TEST" | grep -q "syntax is ok"; then
     docker exec rr-portal-nginx-1 nginx -s reload
     echo "  [OK] nginx reloaded"
   else
     echo "  [ERROR] nginx -t 失败，拒绝 reload（保持旧配置运行）"
-    docker exec rr-portal-nginx-1 nginx -t 2>&1
+    echo "$_NGINX_TEST"
     exit 1
   fi
 fi

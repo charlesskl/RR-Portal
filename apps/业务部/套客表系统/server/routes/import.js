@@ -6,10 +6,7 @@ const os = require('os');
 const { getDb } = require('../services/db');
 const { parseWorkbook } = require('../services/excel-parser');
 
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 50 * 1024 * 1024 }, // 50 MB cap (matches nginx client_max_body_size)
-});
+const upload = multer({ storage: multer.memoryStorage() });
 
 // POST /api/import — upload and parse 本厂报价明细 Excel
 router.post('/', upload.single('file'), async (req, res) => {
@@ -24,53 +21,73 @@ router.post('/', upload.single('file'), async (req, res) => {
   try {
     const data = await parseWorkbook(tmpPath);
 
+    // Allow frontend to override auto-detected format
+    if (req.body.force_format && ['injection', 'plush', 'spin'].includes(req.body.force_format)) {
+      data.format_type = req.body.force_format;
+    }
+
     const db = getDb();
     const now = new Date().toISOString();
 
     // ── Create or update Product ───────────────────────────────────────────
     const productNo = data.product.product_no || req.body.item_no || 'UNKNOWN';
-    const itemDesc = req.body.item_desc || null;
+    const itemDesc = data.product.item_desc || req.body.item_desc || null;
     const vendor = req.body.vendor || null;
+    // Client is always determined by actual file format — SPIN files → Spin Master, others → TOMY
+    const formatType = data.format_type || 'injection';
+    const clientName = formatType === 'spin' ? 'Spin Master' : 'TOMY';
 
-    // Extract version label (used inside the transaction below)
+    let product = db.prepare('SELECT * FROM Product WHERE item_no = ?').get(productNo);
+    if (!product) {
+      const r = db.prepare(
+        'INSERT INTO Product (item_no, item_desc, vendor, client, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)'
+      ).run(productNo, itemDesc, vendor, clientName, now, now);
+      product = { id: r.lastInsertRowid, item_no: productNo };
+    } else {
+      // Always update client (user explicitly chose it during import)
+      // Update item_desc only if currently empty
+      const updates = ['client = ?', "updated_at = ?"];
+      const uvals = [clientName, now];
+      if (itemDesc && !product.item_desc) {
+        updates.unshift('item_desc = ?');
+        uvals.unshift(itemDesc);
+      }
+      uvals.push(product.id);
+      db.prepare(`UPDATE Product SET ${updates.join(', ')} WHERE id = ?`).run(...uvals);
+    }
+
+    // ── Same source_sheet → overwrite; different sheet → new version ──────────
     const rawDateCode = data.product.date_code || '';
     const dateMatch = rawDateCode.match(/\d{6,8}/);
     const versionLabel = (dateMatch ? dateMatch[0] : null) || data.sheetName;
-
-    // ── Single atomic transaction: product upsert + version upsert + all data + is_latest flip ──
-    let product;
     let versionId;
-    const importTxn = db.transaction(() => {
-      product = db.prepare('SELECT * FROM Product WHERE item_no = ?').get(productNo);
-      if (!product) {
-        const r = db.prepare(
-          'INSERT INTO Product (item_no, item_desc, vendor, created_at, updated_at) VALUES (?, ?, ?, ?, ?)'
-        ).run(productNo, itemDesc, vendor, now, now);
-        product = { id: r.lastInsertRowid, item_no: productNo };
+
+    const existingVersion = db.prepare(
+      'SELECT id FROM QuoteVersion WHERE product_id = ? AND source_sheet = ?'
+    ).get(product.id, data.sheetName);
+
+    if (existingVersion) {
+      // Same version: clear old detail data and re-import
+      versionId = existingVersion.id;
+      const tables = ['QuoteParams','MaterialPrice','MachinePrice','MoldPart','HardwareItem',
+        'PackagingItem','ElectronicItem','ElectronicSummary','PaintingDetail','TransportConfig',
+        'MoldCost','RawMaterial','BodyAccessory','SewingDetail','RotocastItem','ProductDimension'];
+      for (const t of tables) {
+        db.prepare(`DELETE FROM ${t} WHERE version_id = ?`).run(versionId);
       }
+      db.prepare(`UPDATE QuoteVersion SET version_name=?, date_code=?, quote_date=?, format_type=?, updated_at=? WHERE id=?`)
+        .run(versionLabel, data.product.date_code, data.product.date_code, data.format_type || 'injection', now, versionId);
+    } else {
+      // New version: insert fresh
+      const vr = db.prepare(
+        `INSERT INTO QuoteVersion (product_id, version_name, source_sheet, date_code, quote_date, status, format_type, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, 'draft', ?, ?, ?)`
+      ).run(product.id, versionLabel, data.sheetName, data.product.date_code, data.product.date_code, data.format_type || 'injection', now, now);
+      versionId = vr.lastInsertRowid;
+    }
 
-      const existingVersion = db.prepare(
-        'SELECT id FROM QuoteVersion WHERE product_id = ? AND source_sheet = ?'
-      ).get(product.id, data.sheetName);
-
-      if (existingVersion) {
-        versionId = existingVersion.id;
-        const tables = ['QuoteParams','MaterialPrice','MachinePrice','MoldPart','HardwareItem',
-          'PackagingItem','ElectronicItem','ElectronicSummary','PaintingDetail','TransportConfig',
-          'MoldCost','RawMaterial','BodyAccessory','SewingDetail','RotocastItem','ProductDimension'];
-        for (const t of tables) {
-          db.prepare(`DELETE FROM ${t} WHERE version_id = ?`).run(versionId);
-        }
-        db.prepare(`UPDATE QuoteVersion SET version_name=?, date_code=?, quote_date=?, format_type=?, updated_at=? WHERE id=?`)
-          .run(versionLabel, data.product.date_code, data.product.date_code, data.format_type || 'injection', now, versionId);
-      } else {
-        const vr = db.prepare(
-          `INSERT INTO QuoteVersion (product_id, version_name, source_sheet, date_code, quote_date, status, format_type, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, 'draft', ?, ?, ?)`
-        ).run(product.id, versionLabel, data.sheetName, data.product.date_code, data.product.date_code, data.format_type || 'injection', now, now);
-        versionId = vr.lastInsertRowid;
-      }
-
+    // ── Insert all data in a transaction ──────────────────────────────────
+    const insertAll = db.transaction(() => {
 
       // QuoteParams
       const p = data.params || {};
@@ -127,14 +144,16 @@ router.post('/', upload.single('file'), async (req, res) => {
         insertHw.run(versionId, h.name, h.quantity, h.old_price, h.new_price, h.difference, h.tax_type, i, 'labor_assembly');
       }
 
-      // PackagingItem
+      // PackagingItem — auto-assign pkg_section: 'carton' for master carton items, 'retail' for others
+      const CARTON_KEYWORDS = /master.?carton|inner|outer.?carton|scotch|tissue|divider|insert.?card|tray|防割|隔板/i;
       const insertPkg = db.prepare(
-        `INSERT INTO PackagingItem (version_id, pm_no, name, remark, moq, quantity, new_price, sort_order)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO PackagingItem (version_id, pm_no, name, remark, moq, quantity, new_price, sort_order, pkg_section)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
       );
       for (let i = 0; i < (data.packagingItems || []).length; i++) {
         const pk = data.packagingItems[i];
-        insertPkg.run(versionId, pk.pm_no || '', pk.name, pk.remark || '', pk.moq ?? 2500, pk.quantity, pk.new_price, i);
+        const section = pk.pkg_section || (CARTON_KEYWORDS.test(pk.name || '') ? 'carton' : 'retail');
+        insertPkg.run(versionId, pk.pm_no || '', pk.name, pk.remark || '', pk.moq ?? 2500, pk.quantity, pk.new_price, i, section);
       }
 
       // ElectronicItem
@@ -213,6 +232,11 @@ router.post('/', upload.single('file'), async (req, res) => {
           if (!mp.material) continue;
           const key = mp.material.trim();
           if (!key) continue;
+          // Skip rows that are clearly notes/remarks, not real material entries
+          // Valid material rows must have either unit_price_hkd_g or material_cost_hkd
+          if (!mp.unit_price_hkd_g && !mp.material_cost_hkd) continue;
+          // Skip purely numeric or very short material names (likely formula/remark cells)
+          if (/^\d+(\.\d+)?$/.test(key) || key.length < 2) continue;
           const weight = parseFloat(mp.weight_g) || 0;
           const existing = matMap.get(key);
           if (existing) {
@@ -244,7 +268,7 @@ router.post('/', upload.single('file'), async (req, res) => {
           const usageRounded = s.usage_amount != null ? Math.round(s.usage_amount * 10000) / 10000 : 0;
           const markupPoint = s.markup_point || 1.15;
           const priceHkd = s.material_price_rmb != null
-            ? Math.round(s.material_price_rmb * markupPoint * 1.05 / hkdRmb * 10000) / 10000
+            ? Math.round(s.material_price_rmb * markupPoint / hkdRmb * 10000) / 10000
             : null;
           console.log('[import] fabric:', s.fabric_name, s.position, 'rmb:', s.material_price_rmb, 'markup:', markupPoint, '=> hkd:', priceHkd);
           insertRaw.run(versionId, 'fabric', s.fabric_name, s.position, usageRounded, priceHkd, sortIdx++);
@@ -265,11 +289,11 @@ router.post('/', upload.single('file'), async (req, res) => {
       // BodyAccessory (五金 and 利宝 from main sheet)
       if (data.bodyAccessories && data.bodyAccessories.length > 0) {
         const insertBA = db.prepare(
-          `INSERT INTO BodyAccessory (version_id, description, category, usage_qty, unit_price, sort_order)
-           VALUES (?, ?, ?, ?, ?, ?)`
+          `INSERT INTO BodyAccessory (version_id, description, category, moq, usage_qty, unit_price, sort_order)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`
         );
         for (const ba of data.bodyAccessories) {
-          insertBA.run(versionId, ba.description, ba.category || '五金', ba.usage_qty, ba.unit_price, ba.sort_order);
+          insertBA.run(versionId, ba.description, ba.category || '五金', ba.moq || 2500, ba.usage_qty, ba.unit_price, ba.sort_order);
         }
       }
 
@@ -284,15 +308,63 @@ router.post('/', upload.single('file'), async (req, res) => {
         }
       }
 
-      // SewingDetail (plush format)
+      // SewingDetail (plush/spin format) — merge by fabric_name only (all cut parts of same fabric collapse into one row)
+      // Labor rows (__labor__) keep their own separate group
       if (data.sewingDetails && data.sewingDetails.length > 0) {
-        const insertSew = db.prepare(
-          `INSERT INTO SewingDetail (version_id, product_name, fabric_name, position, cut_pieces, usage_amount, material_price_rmb, price_rmb, markup_point, total_price_rmb, sort_order)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-        );
+        const mergedSew = [];
         for (const s of data.sewingDetails) {
-          insertSew.run(versionId, s.product_name, s.fabric_name, s.position, s.cut_pieces, s.usage_amount, s.material_price_rmb, s.price_rmb, s.markup_point, s.total_price_rmb, s.sort_order);
+          // Merge key includes product_name so different sub-products stay separate
+          const isLabor = s.position === '__labor__';
+          const isEmbroidery = s.position === '__embroidery__';
+          const pn = s.product_name || '';
+          // All embroidery rows per product merge into one "电绣" row
+          const key = isLabor ? pn + '\x00__labor__\x00' + (s.fabric_name || '')
+            : isEmbroidery ? pn + '\x00__embroidery__'
+            : pn + '\x00' + (s.fabric_name || '');
+          const existing = mergedSew.find(m => {
+            const mpn = m.product_name || '';
+            const isML = m.position === '__labor__';
+            const isME = m.position === '__embroidery__';
+            const mk = isML ? mpn + '\x00__labor__\x00' + (m.fabric_name || '')
+              : isME ? mpn + '\x00__embroidery__'
+              : mpn + '\x00' + (m.fabric_name || '');
+            return mk === key;
+          });
+          if (existing) {
+            if (isEmbroidery) {
+              // Accumulate total RMB cost into material_price_rmb (usage stays 1)
+              const addCost = (parseFloat(s.usage_amount) || 0) * (parseFloat(s.material_price_rmb) || 0);
+              existing.material_price_rmb = Math.round(((existing.material_price_rmb || 0) + addCost) * 10000) / 10000;
+            } else {
+              existing.usage_amount = Math.round(((existing.usage_amount || 0) + (s.usage_amount || 0)) * 10000) / 10000;
+              existing.price_rmb = Math.round(((existing.price_rmb || 0) + (s.price_rmb || 0)) * 10000) / 10000;
+              existing.total_price_rmb = Math.round(((existing.total_price_rmb || 0) + (s.total_price_rmb || 0)) * 10000) / 10000;
+              if (!isLabor && s.position && s.position !== '__other__') existing.position = '__fabric__';
+            }
+          } else {
+            const pos = isLabor ? '__labor__' : isEmbroidery ? '__embroidery__' : (s.position === '__other__' ? '__other__' : (s.position ? '__fabric__' : null));
+            const initCost = isEmbroidery
+              ? (parseFloat(s.usage_amount) || 0) * (parseFloat(s.material_price_rmb) || 0)
+              : (s.material_price_rmb || 0);
+            mergedSew.push({
+              ...s,
+              fabric_name: isEmbroidery ? '电绣' : (s.fabric_name || ''),
+              position: pos,
+              usage_amount: isEmbroidery ? 1 : (s.usage_amount || 0),
+              material_price_rmb: isEmbroidery ? Math.round(initCost * 10000) / 10000 : (s.material_price_rmb || 0),
+            });
+          }
         }
+        const insertSew = db.prepare(
+          `INSERT INTO SewingDetail (version_id, product_name, eng_name, fabric_name, position, sub_product, cut_pieces, usage_amount, material_price_rmb, price_rmb, markup_point, total_price_rmb, sort_order)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        );
+        mergedSew.forEach((s, i) => {
+          // eng_name: left empty for auto-translation of fabric_name
+          // sub_product: stores the character English name (e.g. "Chase") for sheet matching
+          const subProd = s.product_eng || s.sub_product || null;
+          insertSew.run(versionId, s.product_name, null, s.fabric_name, s.position, subProd, s.cut_pieces, s.usage_amount, s.material_price_rmb, s.price_rmb, s.markup_point, s.total_price_rmb, i);
+        });
       }
 
       // ProductDimension
@@ -308,12 +380,15 @@ router.post('/', upload.single('file'), async (req, res) => {
           pd.carton_cuft, pd.carton_price, pd.pcs_per_carton, pd.case_pack || null
         );
       }
-      // Mark this version as latest for this product
-      db.prepare('UPDATE QuoteVersion SET is_latest = 0 WHERE product_id = ?').run(product.id);
-      db.prepare('UPDATE QuoteVersion SET is_latest = 1 WHERE id = ?').run(versionId);
     });
 
-    importTxn();
+    insertAll();
+
+    // Mark this version as latest for this product (atomic)
+    db.transaction(() => {
+      db.prepare('UPDATE QuoteVersion SET is_latest = 0 WHERE product_id = ?').run(product.id);
+      db.prepare('UPDATE QuoteVersion SET is_latest = 1 WHERE id = ?').run(versionId);
+    })();
 
     res.json({
       success: true,
@@ -331,7 +406,7 @@ router.post('/', upload.single('file'), async (req, res) => {
     });
   } catch (err) {
     console.error('Import error:', err);
-    res.status(500).json({ error: 'Import failed. See server logs for details.' });
+    res.status(500).json({ error: err.message, stack: err.stack });
   } finally {
     fs.unlink(tmpPath, () => {});
   }

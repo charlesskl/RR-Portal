@@ -1,12 +1,7 @@
 const router = require('express').Router();
 const { getDb } = require('../services/db');
 const { recalculate } = require('../services/calculator');
-
-// Centralized error handler: logs full error server-side, returns sanitized message
-function handleError(res, err) {
-  console.error('[versions] error:', err);
-  res.status(500).json({ error: 'Internal server error' });
-}
+const crypto = require('crypto');
 
 // Section name → table mapping (list sections)
 const LIST_SECTIONS = {
@@ -87,7 +82,7 @@ router.get('/:id', (req, res) => {
     }
     res.json(result);
   } catch (err) {
-    handleError(res, err);
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -114,7 +109,7 @@ router.put('/:id', (req, res) => {
     const updated = getVersion(db, req.params.id);
     res.json(updated);
   } catch (err) {
-    handleError(res, err);
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -128,7 +123,7 @@ router.delete('/:id', (req, res) => {
     db.prepare('DELETE FROM QuoteVersion WHERE id = ?').run(req.params.id);
     res.json({ message: 'Version deleted' });
   } catch (err) {
-    handleError(res, err);
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -145,11 +140,13 @@ router.post('/:id/duplicate', (req, res) => {
       // Copy QuoteVersion
       const vResult = db.prepare(`
         INSERT INTO QuoteVersion (product_id, version_name, source_sheet, date_code, quote_date, status,
-          item_rev, prepared_by, quote_rev, fty_delivery_date, body_no, bd_prepared_by, bd_date, body_cost_revision)
-        VALUES (?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?)
+          item_rev, prepared_by, quote_rev, fty_delivery_date, body_no, bd_prepared_by, bd_date, body_cost_revision,
+          format_type)
+        VALUES (?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(version.product_id, newName, version.source_sheet, version.date_code, version.quote_date,
         version.item_rev, version.prepared_by, version.quote_rev, version.fty_delivery_date,
-        version.body_no, version.bd_prepared_by, version.bd_date, version.body_cost_revision);
+        version.body_no, version.bd_prepared_by, version.bd_date, version.body_cost_revision,
+        version.format_type);
       const newId = vResult.lastInsertRowid;
 
       // Copy QuoteParams
@@ -179,7 +176,7 @@ router.post('/:id/duplicate', (req, res) => {
     const newVersion = getVersion(db, dup);
     res.status(201).json(newVersion);
   } catch (err) {
-    handleError(res, err);
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -202,7 +199,7 @@ router.get('/:id/params', (req, res) => {
       machine_prices: machinePrices,
     });
   } catch (err) {
-    handleError(res, err);
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -238,7 +235,7 @@ router.put('/:id/params', (req, res) => {
     const updated = db.prepare('SELECT * FROM QuoteParams WHERE version_id = ?').get(req.params.id);
     res.json(updated);
   } catch (err) {
-    handleError(res, err);
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -264,7 +261,7 @@ router.put('/:id/material-prices', (req, res) => {
     const rows = db.prepare('SELECT * FROM MaterialPrice WHERE version_id = ?').all(req.params.id);
     res.json(rows);
   } catch (err) {
-    handleError(res, err);
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -290,7 +287,7 @@ router.put('/:id/machine-prices', (req, res) => {
     const rows = db.prepare('SELECT * FROM MachinePrice WHERE version_id = ?').all(req.params.id);
     res.json(rows);
   } catch (err) {
-    handleError(res, err);
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -315,7 +312,7 @@ router.get('/:id/sections/:section', (req, res) => {
       res.json(rows);
     }
   } catch (err) {
-    handleError(res, err);
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -346,7 +343,7 @@ router.post('/:id/sections/:section', (req, res) => {
     const created = db.prepare(`SELECT * FROM ${table} WHERE id = ?`).get(result.lastInsertRowid);
     res.status(201).json(created);
   } catch (err) {
-    handleError(res, err);
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -396,7 +393,7 @@ router.put('/:id/sections/:section/:itemId', (req, res) => {
     const updated = db.prepare(`SELECT * FROM ${table} WHERE id = ? AND version_id = ?`).get(itemId, id);
     res.json(updated);
   } catch (err) {
-    handleError(res, err);
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -422,7 +419,7 @@ router.delete('/:id/sections/:section/:itemId', (req, res) => {
     db.prepare(`DELETE FROM ${table} WHERE id = ? AND version_id = ?`).run(itemId, id);
     res.json({ message: 'Item deleted' });
   } catch (err) {
-    handleError(res, err);
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -464,7 +461,7 @@ router.put('/:id/sections/:section', (req, res) => {
     const updated = db.prepare(`SELECT * FROM ${table} WHERE version_id = ?`).get(id);
     res.json(updated);
   } catch (err) {
-    handleError(res, err);
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -480,7 +477,7 @@ router.get('/:id/calculate', (req, res) => {
     const result = recalculate(req.params.id);
     res.json(result);
   } catch (err) {
-    handleError(res, err);
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -495,17 +492,15 @@ router.post('/:id/translate-all', async (req, res) => {
     const vid = req.params.id;
 
     async function myMemoryTranslate(text) {
-      const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=zh|en`;
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 5000);
-      try {
-        const resp = await fetch(url, { signal: controller.signal });
-        const data = await resp.json();
-        if (data.responseStatus === 200) return data.responseData.translatedText;
-        throw new Error(data.responseDetails || 'Translation failed');
-      } finally {
-        clearTimeout(timer);
-      }
+      const appid = process.env.BAIDU_APPID;
+      const key = process.env.BAIDU_KEY;
+      const salt = Date.now().toString();
+      const sign = crypto.createHash('md5').update(appid + text + salt + key).digest('hex');
+      const url = `https://fanyi-api.baidu.com/api/trans/vip/translate?q=${encodeURIComponent(text)}&from=zh&to=en&appid=${appid}&salt=${salt}&sign=${sign}`;
+      const resp = await fetch(url);
+      const data = await resp.json();
+      if (data.trans_result && data.trans_result[0]) return data.trans_result[0].dst;
+      throw new Error(data.error_msg || 'Translation failed');
     }
 
     const EMPTY = "(eng_name IS NULL OR eng_name = '')";
@@ -521,7 +516,21 @@ router.post('/:id/translate-all', async (req, res) => {
       { table: 'BodyAccessory',  field: 'description',   sql: `SELECT id, description FROM BodyAccessory WHERE version_id=? AND ${EMPTY} ORDER BY sort_order` },
     ];
 
+    // Fixed translation overrides (Chinese keyword → fixed English)
+    const FIXED_TRANSLATIONS = {
+      '杂费': 'Dennison',
+      '外箱': 'Master Carton K3A',
+      '平卡': 'Inner B33',
+    };
+    function fixedTranslate(text) {
+      for (const [key, val] of Object.entries(FIXED_TRANSLATIONS)) {
+        if (text.includes(key)) return val;
+      }
+      return null;
+    }
+
     let total = 0;
+    const cache = {}; // text → translated, avoid duplicate API calls
     for (const b of batches) {
       const rows = db.prepare(b.sql).all(vid);
       if (!rows.length) continue;
@@ -529,6 +538,13 @@ router.post('/:id/translate-all', async (req, res) => {
       for (const row of rows) {
         const text = row[b.field];
         if (!text) continue;
+        // Check fixed overrides first
+        const fixed = fixedTranslate(text);
+        if (fixed) {
+          update.run(fixed, row.id);
+          total++;
+          continue;
+        }
         // Skip if already English (no Chinese characters)
         if (!/[\u4e00-\u9fff]/.test(text)) {
           update.run(text, row.id);
@@ -536,19 +552,18 @@ router.post('/:id/translate-all', async (req, res) => {
           continue;
         }
         try {
-          const eng = await myMemoryTranslate(text);
-          update.run(eng, row.id);
+          if (cache[text] === undefined) {
+            cache[text] = await myMemoryTranslate(text);
+          }
+          update.run(cache[text], row.id);
           total++;
-          await new Promise(r => setTimeout(r, 200)); // avoid rate limit
-        } catch (err) {
-          console.warn(`[translate] failed for "${text}":`, err.message);
-        }
+        } catch (_) { /* skip on error */ }
       }
     }
 
     res.json({ translated: total });
   } catch (err) {
-    handleError(res, err);
+    res.status(500).json({ error: err.message });
   }
 });
 

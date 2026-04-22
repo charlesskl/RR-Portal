@@ -75,6 +75,18 @@
       <button class="tab-sub" data-tab="bd-decoration">D. Decoration</button>
       <button class="tab-sub" data-tab="bd-others">E. Others</button>
     </div>
+    <!-- SPIN sub-tabs row 1: character switcher + Cost Summary -->
+    <div class="tab-nav-sub" id="tabsSpinRow1" style="display:none;align-items:center;gap:0">
+      <div id="spinCharSwitcher" style="display:none;flex:1;align-items:center;gap:6px;flex-wrap:wrap"></div>
+      <button class="btn-spin-summary tab-sub" data-tab="spin-summary">Cost Summary</button>
+    </div>
+    <!-- SPIN sub-tabs row 2: main tabs -->
+    <div class="tab-nav-sub" id="tabsSpin" style="display:none">
+      <button class="tab-sub active" data-tab="spin-fabric">Purchased Part</button>
+      <button class="tab-sub" data-tab="spin-packaging">Packaging</button>
+      <button class="tab-sub" data-tab="spin-labor">Labor Misc</button>
+      <button class="tab-sub" data-tab="spin-markup">Markup</button>
+    </div>
   </div>
 
   <!-- Tab content -->
@@ -108,18 +120,61 @@
 
 <!-- ─── Import Modal ─────────────────────────────────────────────────────── -->
 <div class="modal-overlay" id="importModal" style="display:none">
-  <div class="modal">
-    <div class="modal-header">导入报价明细</div>
+  <div class="modal import-wizard-modal">
+    <div class="modal-header">
+      <span id="importWizardTitle">选择客户</span>
+      <div class="import-steps">
+        <span class="import-step active" id="importStep1Dot">1</span>
+        <span class="import-step-line"></span>
+        <span class="import-step" id="importStep2Dot">2</span>
+      </div>
+    </div>
     <div class="modal-body" id="importModalBody">
-      <div class="import-drop-zone" id="importDropZone">
-        <div class="drop-icon">📂</div>
-        <div>拖入 Excel 文件，或点击选择</div>
-        <div class="drop-hint">支持 本厂报价明细*.xlsx</div>
+
+      <!-- Step 1: Client selection -->
+      <div id="importStep1" class="import-step-panel">
+        <p class="import-step-hint">请先选择要导入的客户</p>
+        <div class="import-client-cards">
+          <div class="import-client-card" data-client="Spin Master">
+            <div class="import-client-icon">🎯</div>
+            <div class="import-client-label">Spin Master</div>
+          </div>
+          <div class="import-client-card" data-client="TOMY">
+            <div class="import-client-icon">🧸</div>
+            <div class="import-client-label">TOMY</div>
+          </div>
+        </div>
+        <!-- Hidden select kept for JS compatibility -->
+        <select id="importClientSelect" style="display:none">
+          <option value="Spin Master">Spin Master</option>
+          <option value="TOMY">TOMY</option>
+        </select>
       </div>
-<div class="import-progress" id="importProgress" style="display:none">
-        <div class="spinner"></div>
-        <div id="importStatus">正在解析…</div>
+
+      <!-- Step 2: File upload -->
+      <div id="importStep2" class="import-step-panel" style="display:none">
+        <div class="import-step2-header">
+          <span class="import-selected-client" id="importSelectedClientLabel"></span>
+          <button class="import-change-client" id="importChangeClient">更换客户</button>
+        </div>
+        <div id="importFormatRow" style="margin-bottom:10px">
+          <label style="font-size:12px;color:#6a8aaa;display:block;margin-bottom:5px">格式</label>
+          <select id="importFormatSelect" style="width:100%;padding:6px 10px;background:#1e2a3a;border:1px solid #2d4a6a;border-radius:6px;color:#c8d6e5;font-size:13px">
+            <option value="injection">注塑</option>
+            <option value="plush">毛绒</option>
+          </select>
+        </div>
+        <div class="import-drop-zone" id="importDropZone">
+          <div class="drop-icon">📂</div>
+          <div>拖入 Excel 文件，或点击选择</div>
+          <div class="drop-hint">支持 本厂报价明细*.xlsx</div>
+        </div>
+        <div class="import-progress" id="importProgress" style="display:none">
+          <div class="spinner"></div>
+          <div id="importStatus">正在解析…</div>
+        </div>
       </div>
+
     </div>
     <div class="modal-footer">
       <button class="btn btn-cancel" id="importCancel">取消</button>
@@ -139,6 +194,14 @@
       <div class="form-group">
         <label>产品名称</label>
         <input type="text" id="npItemDesc" class="form-input" placeholder="例如: Big Farm Tractor">
+      </div>
+      <div class="form-group">
+        <label>客户</label>
+        <select id="npClient" class="form-input">
+          <option value="Spin Master">Spin Master</option>
+          <option value="TOMY">TOMY</option>
+          <option value="">其他</option>
+        </select>
       </div>
       <div class="form-group">
         <label>厂商</label>
@@ -171,6 +234,11 @@
 <script src="js/tabs/bd-others.js"></script>
 <script src="js/tabs/bd-sewing.js"></script>
 <script src="js/tabs/bd-rotocast.js"></script>
+<script src="js/tabs/spin-fabric.js"></script>
+<script src="js/tabs/spin-packaging.js"></script>
+<script src="js/tabs/spin-labor.js"></script>
+<script src="js/tabs/spin-markup.js"></script>
+<script src="js/tabs/spin-summary.js"></script>
 <script src="js/header-info.js"></script>
 <script src="js/params.js"></script>
 <script src="js/app.js"></script>

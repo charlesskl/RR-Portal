@@ -311,63 +311,76 @@ router.post('/', upload.single('file'), async (req, res) => {
         }
       }
 
-      // SewingDetail (plush/spin format) — merge by fabric_name only (all cut parts of same fabric collapse into one row)
-      // Labor rows (__labor__) keep their own separate group
+      // SewingDetail: plush 直插保留 per-row 结构（UI 依赖原始 position 与单独行）；
+      // spin 才走 merge-by-fabric_name（聚合同一布料的多个裁片）
       if (data.sewingDetails && data.sewingDetails.length > 0) {
-        const mergedSew = [];
-        for (const s of data.sewingDetails) {
-          // Merge key includes product_name so different sub-products stay separate
-          const isLabor = s.position === '__labor__';
-          const isEmbroidery = s.position === '__embroidery__';
-          const pn = s.product_name || '';
-          // All embroidery rows per product merge into one "电绣" row
-          const key = isLabor ? pn + '\x00__labor__\x00' + (s.fabric_name || '')
-            : isEmbroidery ? pn + '\x00__embroidery__'
-            : pn + '\x00' + (s.fabric_name || '');
-          const existing = mergedSew.find(m => {
-            const mpn = m.product_name || '';
-            const isML = m.position === '__labor__';
-            const isME = m.position === '__embroidery__';
-            const mk = isML ? mpn + '\x00__labor__\x00' + (m.fabric_name || '')
-              : isME ? mpn + '\x00__embroidery__'
-              : mpn + '\x00' + (m.fabric_name || '');
-            return mk === key;
-          });
-          if (existing) {
-            if (isEmbroidery) {
-              // Accumulate total RMB cost into material_price_rmb (usage stays 1)
-              const addCost = (parseFloat(s.usage_amount) || 0) * (parseFloat(s.material_price_rmb) || 0);
-              existing.material_price_rmb = Math.round(((existing.material_price_rmb || 0) + addCost) * 10000) / 10000;
-            } else {
-              existing.usage_amount = Math.round(((existing.usage_amount || 0) + (s.usage_amount || 0)) * 10000) / 10000;
-              existing.price_rmb = Math.round(((existing.price_rmb || 0) + (s.price_rmb || 0)) * 10000) / 10000;
-              existing.total_price_rmb = Math.round(((existing.total_price_rmb || 0) + (s.total_price_rmb || 0)) * 10000) / 10000;
-              if (!isLabor && s.position && s.position !== '__other__') existing.position = '__fabric__';
-            }
-          } else {
-            const pos = isLabor ? '__labor__' : isEmbroidery ? '__embroidery__' : (s.position === '__other__' ? '__other__' : (s.position ? '__fabric__' : null));
-            const initCost = isEmbroidery
-              ? (parseFloat(s.usage_amount) || 0) * (parseFloat(s.material_price_rmb) || 0)
-              : (s.material_price_rmb || 0);
-            mergedSew.push({
-              ...s,
-              fabric_name: isEmbroidery ? '电绣' : (s.fabric_name || ''),
-              position: pos,
-              usage_amount: isEmbroidery ? 1 : (s.usage_amount || 0),
-              material_price_rmb: isEmbroidery ? Math.round(initCost * 10000) / 10000 : (s.material_price_rmb || 0),
-            });
-          }
-        }
         const insertSew = db.prepare(
           `INSERT INTO SewingDetail (version_id, product_name, eng_name, fabric_name, position, sub_product, cut_pieces, usage_amount, material_price_rmb, price_rmb, markup_point, total_price_rmb, sort_order)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         );
-        mergedSew.forEach((s, i) => {
-          // eng_name: left empty for auto-translation of fabric_name
-          // sub_product: stores the character English name (e.g. "Chase") for sheet matching
-          const subProd = s.product_eng || s.sub_product || null;
-          insertSew.run(versionId, s.product_name, null, s.fabric_name, s.position, subProd, s.cut_pieces, s.usage_amount, s.material_price_rmb, s.price_rmb, s.markup_point, s.total_price_rmb, i);
-        });
+
+        const isSpin = (data.format_type === 'spin');
+        if (!isSpin) {
+          // PLUSH: per-row direct insert. Pre-v1.2 legacy behavior that vq-body-cost.js,
+          // vq-purchase.js, bd-purchase.js all depend on (they filter by !position
+          // for generic fabrics and by position==='__labor__' for labor rows).
+          data.sewingDetails.forEach((s, i) => {
+            const subProd = s.product_eng || s.sub_product || null;
+            insertSew.run(
+              versionId, s.product_name, null, s.fabric_name, s.position, subProd,
+              s.cut_pieces, s.usage_amount, s.material_price_rmb, s.price_rmb,
+              s.markup_point, s.total_price_rmb, i
+            );
+          });
+        } else {
+          // SPIN: merge by (product_name, fabric_name) — cut parts of same fabric
+          // collapse into one row. Labor and embroidery get their own aggregation.
+          const mergedSew = [];
+          for (const s of data.sewingDetails) {
+            const isLabor = s.position === '__labor__';
+            const isEmbroidery = s.position === '__embroidery__';
+            const pn = s.product_name || '';
+            const key = isLabor ? pn + '\x00__labor__\x00' + (s.fabric_name || '')
+              : isEmbroidery ? pn + '\x00__embroidery__'
+              : pn + '\x00' + (s.fabric_name || '');
+            const existing = mergedSew.find(m => {
+              const mpn = m.product_name || '';
+              const isML = m.position === '__labor__';
+              const isME = m.position === '__embroidery__';
+              const mk = isML ? mpn + '\x00__labor__\x00' + (m.fabric_name || '')
+                : isME ? mpn + '\x00__embroidery__'
+                : mpn + '\x00' + (m.fabric_name || '');
+              return mk === key;
+            });
+            if (existing) {
+              if (isEmbroidery) {
+                const addCost = (parseFloat(s.usage_amount) || 0) * (parseFloat(s.material_price_rmb) || 0);
+                existing.material_price_rmb = Math.round(((existing.material_price_rmb || 0) + addCost) * 10000) / 10000;
+              } else {
+                existing.usage_amount = Math.round(((existing.usage_amount || 0) + (s.usage_amount || 0)) * 10000) / 10000;
+                existing.price_rmb = Math.round(((existing.price_rmb || 0) + (s.price_rmb || 0)) * 10000) / 10000;
+                existing.total_price_rmb = Math.round(((existing.total_price_rmb || 0) + (s.total_price_rmb || 0)) * 10000) / 10000;
+                if (!isLabor && s.position && s.position !== '__other__') existing.position = '__fabric__';
+              }
+            } else {
+              const pos = isLabor ? '__labor__' : isEmbroidery ? '__embroidery__' : (s.position === '__other__' ? '__other__' : (s.position ? '__fabric__' : null));
+              const initCost = isEmbroidery
+                ? (parseFloat(s.usage_amount) || 0) * (parseFloat(s.material_price_rmb) || 0)
+                : (s.material_price_rmb || 0);
+              mergedSew.push({
+                ...s,
+                fabric_name: isEmbroidery ? '电绣' : (s.fabric_name || ''),
+                position: pos,
+                usage_amount: isEmbroidery ? 1 : (s.usage_amount || 0),
+                material_price_rmb: isEmbroidery ? Math.round(initCost * 10000) / 10000 : (s.material_price_rmb || 0),
+              });
+            }
+          }
+          mergedSew.forEach((s, i) => {
+            const subProd = s.product_eng || s.sub_product || null;
+            insertSew.run(versionId, s.product_name, null, s.fabric_name, s.position, subProd, s.cut_pieces, s.usage_amount, s.material_price_rmb, s.price_rmb, s.markup_point, s.total_price_rmb, i);
+          });
+        }
       }
 
       // ProductDimension

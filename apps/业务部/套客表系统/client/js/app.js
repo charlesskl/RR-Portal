@@ -609,11 +609,19 @@ const app = (() => {
       dropZone.style.display = '';
       progress.style.display = 'none';
 
-      // Format: Spin Master → 'spin'; TOMY → 'injection' (plush uses same format)
+      // Format: Spin Master → force 'spin' (dedicated detector).
+      // TOMY → let the server parser auto-detect between 'injection' and 'plush'
+      // based on sheet names (plush has 车缝明细/搪胶 sheets). Hardcoding
+      // 'injection' here breaks毛绒 exports.
       const formatRow = document.getElementById('importFormatRow');
       const formatSel = document.getElementById('importFormatSelect');
-      formatSel.value = client === 'Spin Master' ? 'spin' : 'injection';
-      if (formatRow) formatRow.style.display = 'none';
+      if (client === 'Spin Master') {
+        formatSel.value = 'spin';
+        if (formatRow) formatRow.style.display = 'none';
+      } else {
+        formatSel.value = '';  // '' means "don't override" — server auto-detects
+        if (formatRow) formatRow.style.display = 'none';
+      }
 
       // File pick
       dropZone.onclick = () => fileInput.click();

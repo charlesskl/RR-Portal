@@ -151,12 +151,12 @@ function parseHeader(ws, format, workbook) {
   for (let col = 2; col <= 22; col++) {
     const material_type = strVal(ws.getCell(2, col));
     if (!material_type) continue;
+    // Skip header-label cells (some plush templates have "料型" in col B of row 2)
+    if (material_type === '料型') continue;
     const price_hkd_per_lb = numVal(ws.getCell(4, col));
     const price_hkd_per_g = numVal(ws.getCell(5, col));
     const price_rmb_per_g = numVal(ws.getCell(6, col));
-    if (material_type) {
-      materialPrices.push({ material_type, price_hkd_per_lb, price_hkd_per_g, price_rmb_per_g });
-    }
+    materialPrices.push({ material_type, price_hkd_per_lb, price_hkd_per_g, price_rmb_per_g });
   }
 
   // R8-R10: Machine price table
@@ -167,6 +167,8 @@ function parseHeader(ws, format, workbook) {
   for (let col = 2; col <= 14; col++) {
     const machine_type = strVal(ws.getCell(8, col));
     if (!machine_type) continue;
+    // Skip header-label cells
+    if (machine_type === '机型') continue;
     const price_hkd = numVal(ws.getCell(9, col));
     const price_rmb = numVal(ws.getCell(10, col));
     machinePrices.push({ machine_type, price_hkd, price_rmb });
@@ -326,7 +328,68 @@ function parseRotocastItems(ws) {
   return items;
 }
 
-// ─── Sewing Details Parser (车缝明细 sheet) ────────────────────────────────
+// ─── Sewing Details Parser — PLUSH (3K报价 TOMY format) ────────────────────
+// Legacy parser restored from pre-v1.2 logic. Produces per-row output with
+// literal Chinese position (e.g. '头鬃毛') or '__labor__', matching what the
+// UI tabs (bd-purchase, vq-body-cost, vq-purchase) expect.
+
+function parseSewingDetailsPlush(workbook) {
+  const wsNames = workbook.worksheets.map(ws => ws.name);
+  const sewingSheet = wsNames.find(n => n && n.includes('车缝明细'));
+  if (!sewingSheet) return [];
+
+  const ws = workbook.getWorksheet(sewingSheet);
+  const items = [];
+  let currentProductName = null;
+  let lastFabricName = null;
+  let sortOrder = 0;
+
+  for (let row = 4; row <= 100; row++) {
+    const colI = strVal(ws.getCell(row, 9));
+    if (colI && colI.includes('合计')) break;
+
+    const colB = strVal(ws.getCell(row, 2));
+    const colC = strVal(ws.getCell(row, 3));
+    const colD = strVal(ws.getCell(row, 4));
+
+    // Product name row: B has value but C and D are empty
+    if (colB && !colC && !colD) {
+      currentProductName = colB;
+      continue;
+    }
+
+    if (!colC && !colD) continue;
+
+    // Skip obvious non-data rows (sheet titles, column headers)
+    if (colC && /报价明细表|名称|物料名称|裁片部位/.test(colC)) continue;
+
+    // Inherit fabric_name from previous row if merged cell left it empty
+    if (colC) lastFabricName = colC;
+    const fabricName = colC || lastFabricName;
+
+    // Mark labor rows with special position value
+    const position = fabricName === '人工' ? '__labor__' : colD;
+
+    items.push({
+      product_name: currentProductName,
+      fabric_name: fabricName,
+      position,
+      cut_pieces: numVal(ws.getCell(row, 5)) ? Math.round(numVal(ws.getCell(row, 5))) : null,
+      usage_amount: numVal(ws.getCell(row, 6)),
+      material_price_rmb: Math.round((numVal(ws.getCell(row, 7)) || 0) * 1.08 * 100) / 100,
+      price_rmb: numVal(ws.getCell(row, 8)),
+      markup_point: numVal(ws.getCell(row, 9)) || 1.15,
+      total_price_rmb: numVal(ws.getCell(row, 10)),
+      sort_order: sortOrder++,
+    });
+  }
+  return items;
+}
+
+// ─── Sewing Details Parser — SPIN (Spin Master multi-character format) ─────
+// Scans ALL 车缝明细 sheets (one per character), dynamic column detection,
+// product sections separated by header rows. Output is later merged by
+// fabric_name in import.js.
 
 function parseSewingDetails(workbook) {
   const wsNames = workbook.worksheets.map(ws => ws.name);
@@ -1154,7 +1217,15 @@ async function parseWorkbook(filePath) {
   let moldParts, rotocastItems, sewingDetails, bodyAccessories;
   try { moldParts = parseMoldParts(ws, moldStartRow); } catch(e) { throw new Error('parseMoldParts: ' + e.message); }
   try { rotocastItems = format === 'plush' ? parseRotocastItems(ws) : []; } catch(e) { throw new Error('parseRotocastItems: ' + e.message); }
-  try { sewingDetails = (format === 'plush' || format === 'spin') ? parseSewingDetails(workbook) : []; } catch(e) { throw new Error('parseSewingDetails: ' + e.message); }
+  try {
+    if (format === 'plush') {
+      sewingDetails = parseSewingDetailsPlush(workbook);
+    } else if (format === 'spin') {
+      sewingDetails = parseSewingDetails(workbook);
+    } else {
+      sewingDetails = [];
+    }
+  } catch(e) { throw new Error('parseSewingDetails: ' + e.message); }
   // For SPIN: replace labor items with values from main sheet, and merge
   // in the "其他费用" rows (车缝物料 / PP胶料 / 测试费 etc.) that live in
   // the main sheet (not in 车缝明细 sheets).

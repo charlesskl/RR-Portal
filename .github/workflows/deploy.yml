@@ -35,13 +35,24 @@ jobs:
             cd /opt/rr-portal
             bash deploy/update-server.sh
             echo ""
-            echo "=== Verify Portal Content (bypass CDN) ==="
+            echo "=== Direct file check ==="
+            if grep -q "河源排期" frontend/index.cloud.html; then
+              echo "[OK] frontend/index.cloud.html contains 河源排期"
+            else
+              echo "[FAIL] frontend/index.cloud.html MISSING 河源排期"
+              head -n 5 frontend/index.cloud.html
+            fi
+            echo ""
+            echo "=== Docker mount check ==="
+            docker exec rr-portal-nginx-1 cat /usr/share/nginx/html/index.html | grep -q "河源排期" && echo "[OK] nginx container index.html contains 河源排期" || echo "[FAIL] nginx container index.html MISSING 河源排期"
+            echo ""
+            echo "=== Verify Portal Content (localhost) ==="
             sleep 2
             if curl -sf --max-time 10 http://localhost/ 2>/dev/null | grep -q "河源排期"; then
-              echo "[OK] Portal content verified (localhost)"
+              echo "[OK] localhost returns 河源排期"
             else
-              echo "[FAIL] Portal content missing hy-schedule (localhost)"
-              echo "--- Actual content (first 500 chars) ---"
+              echo "[FAIL] localhost missing 河源排期"
+              echo "--- Actual HTTP response (first 500 chars) ---"
               curl -sf --max-time 10 http://localhost/ 2>/dev/null | head -c 500
               echo ""
               exit 1

@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ZURU 河源排期入单</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css" rel="stylesheet">
+    <style>
+        body { background: #f5f7fa; font-family: -apple-system, 'Microsoft YaHei', sans-serif; }
+        .main-card { max-width: 900px; margin: 30px auto; }
+        .drop-zone { border: 2px dashed #ccc; border-radius: 12px; padding: 50px 20px;
+                     text-align: center; cursor: pointer; transition: all 0.3s; background: #fff; }
+        .drop-zone:hover, .drop-zone.dragover { border-color: #0d6efd; background: #f0f7ff; }
+        .result-box { max-height: 500px; overflow-y: auto; }
+        .file-tag { display: inline-block; background: #e8f5e9; color: #2e7d32; border-radius: 4px;
+                    padding: 2px 8px; margin: 2px; font-size: 0.8rem; }
+        .mod-badge { display: inline-block; background: #fff3cd; color: #664d03; border-radius: 3px;
+                     padding: 1px 6px; margin: 1px; font-size: 0.75rem; }
+        .new-badge { display: inline-block; background: #d1e7dd; color: #0f5132; border-radius: 3px;
+                     padding: 1px 6px; margin: 1px; font-size: 0.75rem; }
+        .candidate-card { border: 1px solid #dee2e6; border-radius: 6px; padding: 10px; margin: 5px;
+                          cursor: pointer; transition: all 0.2s; }
+        .candidate-card:hover { border-color: #0d6efd; background: #f0f7ff; }
+        .candidate-card.selected { border-color: #0d6efd; background: #cfe2ff; }
+    </style>
+</head>
+<body>
+<div class="container main-card">
+    <div class="text-center mb-4">
+        <h3 class="fw-bold text-primary"><i class="bi bi-folder-symlink me-2"></i>ZURU 河源排期入单</h3>
+        <div class="d-flex align-items-center justify-content-center gap-2 mt-2 flex-wrap">
+            <input type="text" id="scheduleDir" class="form-control form-control-sm" style="max-width:450px;font-size:0.8rem;" readonly>
+            <button class="btn btn-outline-primary btn-sm py-0" style="font-size:0.75rem;" onclick="changeDir()">切换路径</button>
+            <button class="btn btn-outline-secondary btn-sm py-0" style="font-size:0.75rem;" onclick="resetDir()">默认</button>
+            <button class="btn btn-outline-info btn-sm py-0" style="font-size:0.75rem;" onclick="rescan()"><i class="bi bi-arrow-repeat"></i> 重建映射表</button>
+            <button class="btn btn-outline-success btn-sm py-0" style="font-size:0.75rem;" onclick="checkStatus()"><i class="bi bi-arrow-clockwise"></i> 刷新</button>
+        </div>
+        <div class="mt-1 small text-muted">
+            <span id="file-status">检查中...</span>
+        </div>
+    </div>
+
+    <!-- 拖拽上传区 -->
+    <div class="card mb-3">
+        <div class="card-body">
+            <div class="drop-zone" id="dropZone" onclick="document.getElementById('fileInput').click()">
+                <i class="bi bi-cloud-arrow-up" style="font-size:2.5rem;color:#0d6efd;"></i>
+                <p class="mt-2 mb-0 fw-bold">拖放Excel PO文件到此处</p>
+                <p class="text-muted small">或点击选择文件（支持多个.xlsx）</p>
+            </div>
+            <input type="file" id="fileInput" multiple accept=".xlsx,.xls" style="display:none"
+                   onchange="showFiles(this.files)">
+
+            <div id="fileList" class="mt-2" style="display:none;">
+                <div class="d-flex justify-content-between align-items-center mb-1">
+                    <span class="fw-bold small"><i class="bi bi-files me-1"></i>已选文件：<span id="fileCount">0</span>个</span>
+                    <button class="btn btn-outline-secondary btn-sm py-0" onclick="clearFiles()">清除</button>
+                </div>
+                <div id="fileTags" style="max-height:100px;overflow-y:auto;"></div>
+                <div class="d-grid mt-2">
+                    <button class="btn btn-primary" onclick="submitFiles()">
+                        <i class="bi bi-upload me-1"></i>上传并分析
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 处理中提示 -->
+    <div id="processing" class="text-center my-3" style="display:none;">
+        <div class="spinner-border text-primary" role="status"></div>
+        <p class="mt-2 mb-0 small text-muted" id="processingMsg">正在处理...</p>
+    </div>
+
+    <!-- 结果展示 -->
+    <div id="resultBox" class="card mb-3" style="display:none;">
+        <div class="card-body result-box">
+            <div id="resultContent"></div>
+        </div>
+    </div>
+</div>
+
+<!-- 重复货号选择Modal -->
+<div class="modal fade" id="ambiguousModal" tabindex="-1" data-bs-backdrop="static">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-exclamation-triangle text-warning me-2"></i>货号重复，请选择目标文件</h5>
+            </div>
+            <div class="modal-body">
+                <div class="alert alert-info small mb-3">
+                    以下货号在多个排期文件中都存在，请选择要写入的目标文件。<br>
+                    或点击<b>「生成分类Excel」</b>将所有匹配的排期都放入Excel，不直接写入。
+                </div>
+                <div id="ambiguousList"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" onclick="cancelSelection()">取消</button>
+                <button type="button" class="btn btn-success" onclick="exportOnly()">
+                    <i class="bi bi-file-earmark-spreadsheet me-1"></i>生成分类Excel
+                </button>
+                <button type="button" class="btn btn-primary" onclick="submitSelection()">
+                    <i class="bi bi-check-circle me-1"></i>确认并写入
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+let selectedFiles = [];
+let currentSession = null;
+let currentAmbiguous = [];
+
+function escHtml(s) {
+    return String(s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+async function checkStatus() {
+    try {
+        const r = await fetch('api/hy-info');
+        const data = await r.json();
+        document.getElementById('scheduleDir').value = data.dir || '';
+        const status = document.getElementById('file-status');
+        if (data.exists) {
+            status.innerHTML = `<span class="text-success"><i class="bi bi-check-circle"></i> ${data.file_count}个排期文件 | ${data.item_count}个货号已索引</span>`;
+        } else if (!data.dir) {
+            status.innerHTML = `<span class="text-warning"><i class="bi bi-exclamation-triangle"></i> 首次使用，请先设置排期目录</span>`;
+            setTimeout(() => {
+                if (confirm('检测到尚未设置排期目录，是否现在设置？')) changeDir();
+            }, 500);
+        } else {
+            status.innerHTML = `<span class="text-danger"><i class="bi bi-x-circle"></i> 目录不存在</span>`;
+        }
+    } catch (e) {
+        document.getElementById('file-status').innerHTML = `<span class="text-danger">连接失败</span>`;
+    }
+}
+
+async function changeDir() {
+    const newDir = prompt('请输入新的排期目录路径：', document.getElementById('scheduleDir').value);
+    if (!newDir) return;
+    const r = await fetch('api/hy-set-dir', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({dir: newDir})
+    });
+    const data = await r.json();
+    if (data.ok) {
+        alert(data.msg);
+        checkStatus();
+    } else {
+        alert('失败: ' + data.error);
+    }
+}
+
+async function resetDir() {
+    if (!confirm('恢复默认路径？')) return;
+    const r = await fetch('api/hy-set-dir', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({dir: ''})
+    });
+    const data = await r.json();
+    if (data.ok) checkStatus();
+}
+
+async function rescan() {
+    if (!confirm('重建货号映射表？这会扫描所有排期文件。')) return;
+    document.getElementById('processing').style.display = 'block';
+    document.getElementById('processingMsg').textContent = '正在扫描排期文件...';
+    try {
+        const r = await fetch('api/hy-rescan', {method: 'POST'});
+        const data = await r.json();
+        alert(data.ok ? '映射表已重建' : '失败: ' + (data.error || '未知错误'));
+        checkStatus();
+    } finally {
+        document.getElementById('processing').style.display = 'none';
+    }
+}
+
+// 拖拽上传
+const dropZone = document.getElementById('dropZone');
+dropZone.addEventListener('dragover', e => {
+    e.preventDefault();
+    dropZone.classList.add('dragover');
+});
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+dropZone.addEventListener('drop', e => {
+    e.preventDefault();
+    dropZone.classList.remove('dragover');
+    showFiles(e.dataTransfer.files);
+});
+
+function showFiles(files) {
+    const valid = [...files].filter(f => f.name.match(/\.(xlsx|xls)$/i));
+    if (!valid.length) return;
+    selectedFiles = valid;
+    document.getElementById('fileCount').textContent = valid.length;
+    document.getElementById('fileTags').innerHTML = valid.map(f =>
+        `<span class="file-tag"><i class="bi bi-file-earmark-excel"></i> ${escHtml(f.name)}</span>`
+    ).join('');
+    document.getElementById('fileList').style.display = 'block';
+}
+
+function clearFiles() {
+    selectedFiles = [];
+    document.getElementById('fileInput').value = '';
+    document.getElementById('fileList').style.display = 'none';
+    document.getElementById('resultBox').style.display = 'none';
+}
+
+async function submitFiles() {
+    if (!selectedFiles.length) return;
+    const fd = new FormData();
+    selectedFiles.forEach(f => fd.append('files', f));
+
+    document.getElementById('processing').style.display = 'block';
+    document.getElementById('processingMsg').textContent = '正在分析PO文件...';
+    document.getElementById('resultBox').style.display = 'none';
+
+    try {
+        const r = await fetch('api/hy-upload', {method: 'POST', body: fd});
+        const data = await r.json();
+        document.getElementById('processing').style.display = 'none';
+
+        if (!data.ok) {
+            showError(data.error || '处理失败');
+            return;
+        }
+
+        currentSession = data.session_id;
+        currentAmbiguous = data.ambiguous || [];
+
+        if (currentAmbiguous.length > 0) {
+            // 有重复货号 → 弹窗（含"生成分类Excel"和"确认并写入"）
+            showAmbiguousModal(currentAmbiguous, data);
+        } else {
+            // 无重复货号 → 直接显示摘要 + 操作按钮
+            showActionChoice(data);
+        }
+    } catch (e) {
+        document.getElementById('processing').style.display = 'none';
+        showError('请求失败: ' + e.message);
+    }
+}
+
+function showAmbiguousModal(ambiguous, meta) {
+    const container = document.getElementById('ambiguousList');
+    container.innerHTML = ambiguous.map((amb, idx) => `
+        <div class="mb-3 border-bottom pb-3" data-key="${amb.key}">
+            <div class="fw-bold mb-2">
+                <i class="bi bi-box text-warning"></i>
+                货号 <code>${escHtml(amb.item)}</code>
+                <span class="text-muted small">(PO: ${escHtml(amb.po)})</span>
+            </div>
+            <div class="d-flex flex-wrap">
+                ${amb.candidates.map((c, ci) => `
+                    <div class="candidate-card" onclick="selectCandidate('${amb.key}', ${ci}, this)">
+                        <div class="small fw-bold">${escHtml(c.file)}</div>
+                        <div class="text-muted small">[${escHtml(c.sheet)}]</div>
+                    </div>
+                `).join('')}
+            </div>
+        </div>
+    `).join('');
+    const modal = new bootstrap.Modal(document.getElementById('ambiguousModal'));
+    modal.show();
+}
+
+function selectCandidate(key, ci, el) {
+    const parent = el.parentElement;
+    parent.querySelectorAll('.candidate-card').forEach(c => c.classList.remove('selected'));
+    el.classList.add('selected');
+    el.dataset.selectedIdx = ci;
+}
+
+async function exportOnly() {
+    // 关闭弹窗（如果有打开的话）
+    const modal = bootstrap.Modal.getInstance(document.getElementById('ambiguousModal'));
+    if (modal) modal.hide();
+
+    document.getElementById('processing').style.display = 'block';
+    document.getElementById('processingMsg').textContent = '正在生成分类Excel...';
+
+    try {
+        const r = await fetch('api/hy-export-only', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({session_id: currentSession})
+        });
+        const data = await r.json();
+        document.getElementById('processing').style.display = 'none';
+
+        if (data.ok) {
+            let html = `<div class="alert alert-success"><i class="bi bi-check-circle-fill me-2"></i>${escHtml(data.msg)}</div>`;
+            html += `<div class="small text-muted mb-2">新单: ${data.new_count || 0} | 修改单: ${data.mod_count || 0} | 重复货号: ${data.ambiguous_count || 0}(已放入所有匹配sheet) | 未识别: ${data.unknown_count || 0}</div>`;
+            if (data.export_file) {
+                html += `<div class="mt-2"><a href="api/hy-export-download/${encodeURIComponent(data.export_file)}" class="btn btn-success"><i class="bi bi-download me-1"></i>下载分类Excel</a></div>`;
+            }
+            document.getElementById('resultContent').innerHTML = html;
+            document.getElementById('resultBox').style.display = 'block';
+            document.getElementById('resultBox').scrollIntoView({behavior: 'smooth'});
+        } else {
+            showError(data.error || '生成失败');
+        }
+    } catch (e) {
+        document.getElementById('processing').style.display = 'none';
+        showError('请求失败: ' + e.message);
+    }
+
+    currentSession = null;
+    currentAmbiguous = [];
+}
+
+async function doWriteOrders() {
+    // 无ambiguous时直接写入（等同于submitSelection但不需要选择）
+    document.getElementById('processing').style.display = 'block';
+    document.getElementById('processingMsg').textContent = '正在写入排期...';
+    document.getElementById('resultBox').style.display = 'none';
+
+    try {
+        const r = await fetch('api/hy-submit-selection', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({session_id: currentSession, selections: {}})
+        });
+        const data = await r.json();
+        document.getElementById('processing').style.display = 'none';
+        if (data.ok) {
+            showResult(data);
+        } else {
+            showError(data.error || '写入失败');
+        }
+    } catch (e) {
+        document.getElementById('processing').style.display = 'none';
+        showError('请求失败: ' + e.message);
+    }
+    currentSession = null;
+}
+
+async function submitSelection() {
+    const selections = {};
+    const items = document.querySelectorAll('#ambiguousList > div[data-key]');
+    let allSelected = true;
+    items.forEach(el => {
+        const key = el.dataset.key;
+        const sel = el.querySelector('.candidate-card.selected');
+        if (sel) {
+            const ci = parseInt(sel.dataset.selectedIdx);
+            const amb = currentAmbiguous.find(a => a.key === key);
+            selections[key] = amb.candidates[ci];
+        } else {
+            allSelected = false;
+        }
+    });
+    if (!allSelected) {
+        alert('请为每个重复货号选择目标文件');
+        return;
+    }
+
+    const modal = bootstrap.Modal.getInstance(document.getElementById('ambiguousModal'));
+    modal.hide();
+
+    document.getElementById('processing').style.display = 'block';
+    document.getElementById('processingMsg').textContent = '正在写入排期...';
+
+    try {
+        const r = await fetch('api/hy-submit-selection', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({session_id: currentSession, selections})
+        });
+        const data = await r.json();
+        document.getElementById('processing').style.display = 'none';
+        if (data.ok) {
+            showResult(data);
+        } else {
+            showError(data.error || '写入失败');
+        }
+    } catch (e) {
+        document.getElementById('processing').style.display = 'none';
+        showError('请求失败: ' + e.message);
+    }
+}
+
+function cancelSelection() {
+    currentSession = null;
+    currentAmbiguous = [];
+}
+
+function showActionChoice(data) {
+    const box = document.getElementById('resultBox');
+    const content = document.getElementById('resultContent');
+    let html = `<div class="alert alert-info mb-3"><i class="bi bi-info-circle-fill me-2"></i>分析完成，请选择操作方式</div>`;
+    html += `<div class="small mb-3">`;
+    if (data.modifications_count) html += `<span class="mod-badge">修改单 ${data.modifications_count} 条</span> `;
+    if (data.new_count) html += `<span class="new-badge">新单 ${data.new_count} 条</span> `;
+    if (data.unknown_count) html += `<span class="badge bg-danger"">未识别 ${data.unknown_count} 条</span> `;
+    html += `</div>`;
+    html += `<div class="d-flex gap-2">`;
+    html += `<button class="btn btn-success flex-fill" onclick="exportOnly()"><i class="bi bi-file-earmark-spreadsheet me-1"></i>生成分类Excel</button>`;
+    html += `<button class="btn btn-primary flex-fill" onclick="doWriteOrders()"><i class="bi bi-lightning-fill me-1"></i>确认并写入排期</button>`;
+    html += `</div>`;
+    content.innerHTML = html;
+    box.style.display = 'block';
+    box.scrollIntoView({behavior: 'smooth'});
+}
+
+function showResult(data) {
+    const box = document.getElementById('resultBox');
+    const content = document.getElementById('resultContent');
+    let html = `<div class="alert alert-success mb-3"><i class="bi bi-check-circle-fill me-2"></i>${escHtml(data.msg)}</div>`;
+
+    if (data.mod_details && data.mod_details.length) {
+        html += `<h6 class="text-primary"><i class="bi bi-pencil-square"></i> 修改单 (${data.mod_details.length})</h6><ul class="list-unstyled small">`;
+        data.mod_details.forEach(m => {
+            html += `<li class="mb-2">`;
+            html += `<strong>${escHtml(m.item)}</strong> `;
+            html += `<span class="text-muted">(PO: ${escHtml(m.po)} | ${escHtml(m.file)} / ${escHtml(m.sheet)} R${m.row})</span><br>`;
+            if (m.changes) {
+                m.changes.forEach(c => {
+                    html += `<span class="mod-badge">${escHtml(c)}</span>`;
+                });
+            }
+            html += `</li>`;
+        });
+        html += `</ul>`;
+    }
+
+    if (data.new_details && data.new_details.length) {
+        html += `<h6 class="text-success mt-3"><i class="bi bi-plus-square"></i> 新单 (${data.new_details.length})</h6><div class="small">`;
+        data.new_details.forEach(n => {
+            html += `<span class="new-badge">${escHtml(n)}</span> `;
+        });
+        html += `</div>`;
+    }
+
+    if (data.unknown && data.unknown.length) {
+        html += `<h6 class="text-danger mt-3"><i class="bi bi-question-circle"></i> 未知货号 (${data.unknown.length})</h6>`;
+        html += `<div class="small text-danger mb-1">已追加到新单 Excel 的 <strong>红色标签 sheet "未识别货号"</strong>,请手动核对目标排期后再录入</div>`;
+        html += `<ul class="small text-danger">`;
+        data.unknown.forEach(u => {
+            html += `<li>${escHtml(u.item)} (PO: ${escHtml(u.po)})</li>`;
+        });
+        html += `</ul>`;
+    }
+
+    if (data.export_file) {
+        html += `<div class="mt-3"><a href="api/hy-export-download/${encodeURIComponent(data.export_file)}" class="btn btn-success btn-sm"><i class="bi bi-download"></i> 下载新单Excel</a></div>`;
+    }
+
+    content.innerHTML = html;
+    box.style.display = 'block';
+    box.scrollIntoView({behavior: 'smooth'});
+}
+
+function showError(msg) {
+    const box = document.getElementById('resultBox');
+    document.getElementById('resultContent').innerHTML =
+        `<div class="alert alert-danger"><i class="bi bi-x-circle-fill me-2"></i>${escHtml(msg)}</div>`;
+    box.style.display = 'block';
+}
+
+// 初始化
+checkStatus();
+</script>
+</body>
+</html>

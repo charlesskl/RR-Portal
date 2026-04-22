@@ -50,3 +50,20 @@ class Transaction(db.Model):
     note = db.Column(db.Text, default="")
     pigment = db.relationship("Pigment", back_populates="transactions")
 
+
+class PendingReview(db.Model):
+    """待审核:入库未填色粉编号、出库找不到色粉或库存不足,都进这里等人工处理。
+    quantity 单位跟随 type: in=kg, out=克 (和表单输入一致,resolve 时再换算)。
+    """
+    __tablename__ = "pending_review"
+    id = db.Column(db.Integer, primary_key=True)
+    type = db.Column(db.String(8), nullable=False)  # 'in' or 'out'
+    pigment_code = db.Column(db.String(64), nullable=False, default="")
+    purchase_code = db.Column(db.String(64), nullable=False, default="")
+    name = db.Column(db.String(128), nullable=False, default="")
+    quantity = db.Column(db.Float, nullable=False)
+    unit_price = db.Column(db.Float, nullable=True)
+    reason = db.Column(db.String(256), nullable=False)
+    note = db.Column(db.Text, default="")
+    created_at = db.Column(db.DateTime, default=datetime.now)
+

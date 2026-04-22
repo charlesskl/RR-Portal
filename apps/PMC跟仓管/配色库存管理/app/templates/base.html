@@ -10,14 +10,20 @@
 </head>
 <body>
 <div class="d-flex">
-  <nav class="sidebar bg-dark text-white p-3" style="width:220px; min-height:100vh;">
+  <nav class="sidebar bg-dark text-white p-3 d-flex flex-column" style="width:220px; min-height:100vh;">
     <h5 class="mb-4"><i class="bi bi-palette-fill"></i> 配色库存</h5>
-    <ul class="nav flex-column">
+    <ul class="nav flex-column flex-grow-1">
       <li><a class="nav-link text-white" href="{{ url_for('dashboard.index') }}"><i class="bi bi-speedometer2"></i> 仪表盘</a></li>
       <li><a class="nav-link text-white" href="{{ url_for('pigments.index') }}"><i class="bi bi-droplet-fill"></i> 库存</a></li>
       <li><a class="nav-link text-white" href="{{ url_for('transactions.in_list') }}"><i class="bi bi-box-arrow-in-down"></i> 入库</a></li>
       <li><a class="nav-link text-white" href="{{ url_for('transactions.out_list') }}"><i class="bi bi-box-arrow-up"></i> 出库</a></li>
+      <li><a class="nav-link text-white" href="{{ url_for('pending.index') }}"><i class="bi bi-hourglass-split"></i> 待审核</a></li>
     </ul>
+    <form method="post" action="{{ url_for('auth.logout') }}" class="mt-auto">
+      <button type="submit" class="btn btn-outline-light btn-sm w-100">
+        <i class="bi bi-box-arrow-right"></i> 注销
+      </button>
+    </form>
   </nav>
   <main class="flex-grow-1 p-4">
     {% with messages = get_flashed_messages(with_categories=true) %}

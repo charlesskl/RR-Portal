@@ -701,8 +701,8 @@ app.get('/api/injection-total-costs', (req, res) => {
       const inj = Number.isFinite(injHkdNum) ? injHkdNum : 0;
       totalMat += mat;
       if (!skipInjCost) totalInj += inj;
-      // 料价缺：有材料名但模糊解析找不到价格
-      if (it.material && resolvePrice(it.material, priceMap) <= 0) hasMissingPrice = true;
+      // 料价缺：有材料名但明细料费为 0（材料不在价格表 / 实际领料未填 等）
+      if (it.material && mat <= 0) hasMissingPrice = true;
       // 啤办费缺：没有填写（null/undefined/空字符串），发至订单除外
       if (!skipInjCost && !hasRaw && !hasHkd) hasMissingInj = true;
       return {

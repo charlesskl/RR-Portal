@@ -407,7 +407,11 @@ function renderOrders(orders) {
     return;
   }
   const rows = orders.map(o => {
-    const hasMissingPrice = (o.items || []).some(it => it.material && !resolvePrice(it.material, _injMatPrices));
+    const hasMissingPrice = (o.items || []).some(it => {
+      if (!it.material) return false;
+      if (o.status === '已完成') return !(+(it.actual_amount_hkd || 0) > 0);
+      return !resolvePrice(it.material, _injMatPrices);
+    });
     return `
     <tr class="order-row" onclick="viewOrder(${o.id})">
       <td><strong>${esc(o.order_number || '-')}</strong></td>
@@ -423,7 +427,7 @@ function renderOrders(orders) {
       <td>${esc(o.reason || '-')}</td>
       <td>
         ${statusBadge(o.status)}
-        ${hasMissingPrice ? '<span class="badge bg-warning text-dark ms-1" title="部分原料未录入价格"><i class="bi bi-exclamation-circle me-1"></i>料价缺</span>' : ''}
+        ${hasMissingPrice ? '<span class="badge bg-warning text-dark ms-1" title="部分原料料费为 0（可能未录入价格或未填实际领料）"><i class="bi bi-exclamation-circle me-1"></i>料价缺</span>' : ''}
         ${problemsMap[o.id] ? `<span class="badge bg-danger ms-1"><i class="bi bi-exclamation-triangle-fill me-1"></i>${problemsMap[o.id]}个问题</span>` : ''}
       </td>
       <td>
@@ -911,7 +915,7 @@ function renderTotalData() {
     gTotal += o.total_cost || 0;
     const gid = `tg${i}`;
     const badgeMat = o.has_missing_price
-      ? ' <span class="badge bg-warning text-dark ms-1" style="font-size:.65rem" title="部分原料未录入价格"><i class="bi bi-exclamation-circle"></i> 料价缺</span>'
+      ? ' <span class="badge bg-warning text-dark ms-1" style="font-size:.65rem" title="部分原料料费为 0（可能未录入价格或未填实际领料）"><i class="bi bi-exclamation-circle"></i> 料价缺</span>'
       : '';
     const badgeInj = o.has_missing_injection_cost
       ? ' <span class="badge bg-warning text-dark ms-1" style="font-size:.65rem" title="部分模具未填写啤办费"><i class="bi bi-exclamation-circle"></i> 啤办费缺</span>'

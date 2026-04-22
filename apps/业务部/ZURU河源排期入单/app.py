@@ -88,6 +88,11 @@ def index():
     return render_template('hy_master.html')
 
 
+@app.route('/health')
+def health():
+    return {'status': 'ok'}, 200
+
+
 @app.route('/api/hy-info')
 def hy_info():
     """获取当前路径状态"""

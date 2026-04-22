@@ -312,7 +312,7 @@ services:
       - ./apps/业务部/ZURU河源排期入单/uploads:/app/uploads
       - ./apps/业务部/ZURU河源排期入单/exports:/app/exports
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5006/"]
+      test: ["CMD", "curl", "-f", "http://localhost:5006/health"]
       interval: 10s
       timeout: 5s
       retries: 3

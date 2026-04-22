@@ -40,6 +40,20 @@ def test_import_upsert(db):
     assert x1.unit_price == 10
 
 
+def test_import_accepts_legacy_column_names(db):
+    """用户手上的旧 Excel 用「进货色粉编号」「数量」等老列名，必须仍能导入不静默清空。"""
+    data = _make_xlsx([
+        {"色粉编号": "L1", "进货色粉编号": "OLD1", "数量": 4, "单价": 6},
+        {"色粉编号": "L2", "进货色粉编号": "OLD2", "数量": 8, "单价": 2},
+    ])
+    report = import_pigments_from_bytes(data)
+    assert report["created"] == 2
+    l1 = Pigment.query.filter_by(code="L1").first()
+    assert l1.purchase_code == "OLD1"
+    assert l1.stock.quantity == 4
+    assert l1.unit_price == 6
+
+
 def test_import_archives_missing_and_handles_blank(db):
     a = Pigment(brand="", code="A1", name="A1", hex="#000000",
                 color_family="其他", spec_value=0, spec_unit="kg")

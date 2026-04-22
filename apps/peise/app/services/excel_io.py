@@ -5,6 +5,34 @@ from app.extensions import db
 
 COLUMNS = ["色粉编号", "进货编号", "库存KG", "单价", "金额"]
 
+# 向后兼容：用户手上的旧 Excel 列名 → 新列名
+# 导出永远用新列名；导入同时接受两者，避免用户历史 Excel 被静默清空
+_LEGACY_COL_ALIASES = {
+    "进货编号": ["进货色粉编号"],
+    "库存KG": ["数量"],
+}
+
+
+def _row_get(row, col: str):
+    """Excel 导入取列值：先试新列名，落空回退历史列名。"""
+    v = row.get(col)
+    # pd.isna 会对字符串报 TypeError，用 _cell_str / _cell_float 前先判 None/NaN
+    if v is not None:
+        try:
+            if not pd.isna(v):
+                return v
+        except (TypeError, ValueError):
+            return v
+    for legacy in _LEGACY_COL_ALIASES.get(col, []):
+        lv = row.get(legacy)
+        if lv is not None:
+            try:
+                if not pd.isna(lv):
+                    return lv
+            except (TypeError, ValueError):
+                return lv
+    return None
+
 
 def _fmt_num(v: float) -> float:
     return round(float(v or 0), 6)
@@ -91,9 +119,9 @@ def import_pigments_from_bytes(data: bytes) -> dict:
             if is_new:
                 p = Pigment(brand="", code=code, name=code, spec_unit="kg")
                 db.session.add(p)
-            p.purchase_code = _cell_str(row.get("进货编号"))
+            p.purchase_code = _cell_str(_row_get(row, "进货编号"))
             p.unit_price = _cell_float(row.get("单价"))
-            qty = _cell_float(row.get("库存KG"))
+            qty = _cell_float(_row_get(row, "库存KG"))
             if p.stock is None:
                 p.stock = Stock(quantity=qty)
             else:

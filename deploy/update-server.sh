@@ -97,6 +97,7 @@ declare -A PATH_TO_SERVICE=(
   ["apps/业务部/TOMY排期核对系统/"]="tomy-paiqi"
   ["apps/业务部/ZURU接单表入单系统/"]="zuru-order-system"
   ["apps/业务部/ZURU总排期入单/"]="zuru-master-schedule"
+  ["apps/业务部/ZURU河源排期入单/"]="hy-schedule-system"
   ["apps/工程部/A-doc生成系統/"]="zouhuo"
   ["apps/工程部/工程啤办单/"]="rr-production"
   ["apps/工程部/模具手办采购订单系统/"]="figure-mold-cost-system"

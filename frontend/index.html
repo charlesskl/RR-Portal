@@ -206,7 +206,7 @@
           <div class="dept-icon business">&#128188;</div>
           <div>
             <div class="dept-name">业务部</div>
-            <div class="dept-desc">Zuru MA 包装差价 · 排期录入</div>
+            <div class="dept-desc">Zuru MA 包装差价 · 排期录入 · 河源排期</div>
           </div>
         </div>
         <div class="dept-card-body">
@@ -223,6 +223,13 @@
                 <div class="plugin-dot green"></div>
                 <span class="plugin-name">排期录入系统</span>
                 <span class="plugin-tag">排期</span>
+              </div>
+            </div>
+            <div class="plugin-item">
+              <div class="plugin-info">
+                <div class="plugin-dot green"></div>
+                <span class="plugin-name">河源排期入单</span>
+                <span class="plugin-tag">河源</span>
               </div>
             </div>
           </div>
@@ -326,7 +333,7 @@
       <div class="dept-icon business" style="width:40px;height:40px;font-size:18px;">&#128188;</div>
       业务部
     </div>
-    <div class="page-subtitle">Zuru MA 包装物料差价计算与发票生成 · 排期录入管理</div>
+    <div class="page-subtitle">Zuru MA 包装物料差价计算与发票生成 · 排期录入管理 · 河源排期入单</div>
 
     <div class="detail-plugin-card">
       <div class="detail-plugin-left">
@@ -367,6 +374,26 @@
       <div class="detail-plugin-right">
         <div class="detail-plugin-status"><div class="plugin-dot green"></div> 运行中</div>
         <a href="/schedule/" target="_blank" class="btn btn-primary">打开系统</a>
+      </div>
+    </div>
+
+    <div class="detail-plugin-card">
+      <div class="detail-plugin-left">
+        <div class="detail-plugin-icon" style="background:linear-gradient(135deg,#10b981,#059669);">&#128203;</div>
+        <div>
+          <div class="detail-plugin-name">河源排期入单</div>
+          <div class="detail-plugin-desc">解析PO Excel，匹配河源多文件排期，生成修改单/新单/未识别分类Excel</div>
+          <div class="feature-grid">
+            <div class="feature-tag">&#128196; PO解析</div>
+            <div class="feature-tag">&#128269; 货号匹配</div>
+            <div class="feature-tag">&#128230; 分类Excel</div>
+            <div class="feature-tag">&#128194; 多文件排期</div>
+          </div>
+        </div>
+      </div>
+      <div class="detail-plugin-right">
+        <div class="detail-plugin-status"><div class="plugin-dot green"></div> 运行中</div>
+        <a href="/hy-schedule/" target="_blank" class="btn btn-primary">打开系统</a>
       </div>
     </div>
   </div>
@@ -551,6 +578,7 @@ async function checkHealth() {
       { name: 'zouhuo', url: '/zouhuo/health' },
       { name: 'jiangping', url: '/jiangping/health' },
       { name: 'paiji', url: '/paiji/health' },
+      { name: 'hySchedule', url: '/hy-schedule/health' },
     ];
     let healthy = 1;
     let total = 1 + checks.length;

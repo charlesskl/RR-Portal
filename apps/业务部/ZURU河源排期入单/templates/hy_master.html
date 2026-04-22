@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ZURU 河源排期入单</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css" rel="stylesheet">
+    <style>
+        body { background: #f5f7fa; font-family: -apple-system, 'Microsoft YaHei', sans-serif; }
+        .main-card { max-width: 900px; margin: 30px auto; }
+        .drop-zone { border: 2px dashed #ccc; border-radius: 12px; padding: 50px 20px;
+                     text-align: center; cursor: pointer; transition: all 0.3s; background: #fff; }
+        .drop-zone:hover, .drop-zone.dragover { border-color: #0d6efd; background: #f0f7ff; }
+        .drop-zone-sm { border: 2px dashed #ccc; border-radius: 8px; padding: 20px 15px;
+                        text-align: center; cursor: pointer; transition: all 0.3s; background: #fff; }
+        .drop-zone-sm:hover, .drop-zone-sm.dragover { border-color: #198754; background: #f0fff4; }
+        .result-box { max-height: 500px; overflow-y: auto; }
+        .file-tag { display: inline-block; background: #e8f5e9; color: #2e7d32; border-radius: 4px;
+                    padding: 2px 8px; margin: 2px; font-size: 0.8rem; }
+        .schedule-file-item { display: flex; align-items: center; justify-content: space-between;
+                              padding: 4px 8px; border-bottom: 1px solid #eee; font-size: 0.85rem; }
+        .schedule-file-item:hover { background: #f8f9fa; }
+        .mod-badge { display: inline-block; background: #fff3cd; color: #664d03; border-radius: 3px;
+                     padding: 1px 6px; margin: 1px; font-size: 0.75rem; }
+        .new-badge { display: inline-block; background: #d1e7dd; color: #0f5132; border-radius: 3px;
+                     padding: 1px 6px; margin: 1px; font-size: 0.75rem; }
+        .candidate-card { border: 1px solid #dee2e6; border-radius: 6px; padding: 10px; margin: 5px;
+                          cursor: pointer; transition: all 0.2s; }
+        .candidate-card:hover { border-color: #0d6efd; background: #f0f7ff; }
+        .candidate-card.selected { border-color: #0d6efd; background: #cfe2ff; }
+    </style>
+</head>
+<body>
+<div class="container main-card">
+    <div class="text-center mb-4">
+        <h3 class="fw-bold text-primary"><i class="bi bi-folder-symlink me-2"></i>ZURU 河源排期入单</h3>
+        <div class="mt-1 small text-muted">
+            <span id="file-status">检查中...</span>
+        </div>
+    </div>
+
+    <!-- 排期文件管理区 -->
+    <div class="card mb-3">
+        <div class="card-header d-flex justify-content-between align-items-center py-2">
+            <span class="fw-bold small"><i class="bi bi-folder2-open me-1"></i>排期文件管理</span>
+            <div class="d-flex gap-1">
+                <button class="btn btn-outline-info btn-sm py-0" style="font-size:0.75rem;" onclick="rescan()"><i class="bi bi-arrow-repeat"></i> 重建映射表</button>
+                <button class="btn btn-sm py-0" style="font-size:0.75rem;" data-bs-toggle="collapse" data-bs-target="#schedulePanel">
+                    <i class="bi bi-chevron-down"></i>
+                </button>
+            </div>
+        </div>
+        <div class="collapse show" id="schedulePanel">
+            <div class="card-body py-2">
+                <div class="drop-zone-sm" id="scheduleDropZone" onclick="document.getElementById('scheduleInput').click()">
+                    <i class="bi bi-cloud-arrow-up" style="font-size:1.5rem;color:#198754;"></i>
+                    <p class="mt-1 mb-0 small fw-bold">拖放或点击上传排期文件（.xlsx）</p>
+                    <p class="text-muted small mb-0">支持多文件，上传后自动重建货号映射表</p>
+                </div>
+                <input type="file" id="scheduleInput" multiple accept=".xlsx,.xls" style="display:none"
+                       onchange="uploadSchedules(this.files)">
+                <div id="scheduleFileList" class="mt-2" style="max-height:200px;overflow-y:auto;"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- PO拖拽上传区 -->
+    <div class="card mb-3">
+        <div class="card-body">
+            <div class="drop-zone" id="dropZone" onclick="document.getElementById('fileInput').click()">
+                <i class="bi bi-cloud-arrow-up" style="font-size:2.5rem;color:#0d6efd;"></i>
+                <p class="mt-2 mb-0 fw-bold">拖放Excel PO文件到此处</p>
+                <p class="text-muted small">或点击选择文件（支持多个.xlsx）</p>
+            </div>
+            <input type="file" id="fileInput" multiple accept=".xlsx,.xls" style="display:none"
+                   onchange="showFiles(this.files)">
+            <div id="fileList" class="mt-2" style="display:none;">
+                <div class="d-flex justify-content-between align-items-center mb-1">
+                    <span class="fw-bold small"><i class="bi bi-files me-1"></i>已选文件：<span id="fileCount">0</span>个</span>
+                    <button class="btn btn-outline-secondary btn-sm py-0" onclick="clearFiles()">清除</button>
+                </div>
+                <div id="fileTags" style="max-height:100px;overflow-y:auto;"></div>
+                <div class="d-grid mt-2">
+                    <button class="btn btn-primary" onclick="submitFiles()">
+                        <i class="bi bi-upload me-1"></i>上传并分析
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="processing" class="text-center my-3" style="display:none;">
+        <div class="spinner-border text-primary" role="status"></div>
+        <p class="mt-2 mb-0 small text-muted" id="processingMsg">正在处理...</p>
+    </div>
+
+    <div id="resultBox" class="card mb-3" style="display:none;">
+        <div class="card-body result-box">
+            <div id="resultContent"></div>
+        </div>
+    </div>
+</div>
+
+<!-- 重复货号选择Modal -->
+<div class="modal fade" id="ambiguousModal" tabindex="-1" data-bs-backdrop="static">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-exclamation-triangle text-warning me-2"></i>货号重复，请选择目标文件</h5>
+            </div>
+            <div class="modal-body">
+                <div class="alert alert-info small mb-3">
+                    以下货号在多个排期文件中都存在，请选择要写入的目标文件。<br>
+                    或点击<b>「生成分类Excel」</b>将所有匹配的排期都放入Excel。
+                </div>
+                <div id="ambiguousList"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" onclick="cancelSelection()">取消</button>
+                <button type="button" class="btn btn-success" onclick="exportOnly()">
+                    <i class="bi bi-file-earmark-spreadsheet me-1"></i>生成分类Excel
+                </button>
+                <button type="button" class="btn btn-primary" onclick="submitSelection()">
+                    <i class="bi bi-check-circle me-1"></i>确认选择并生成Excel
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+let selectedFiles = [];
+let currentSession = null;
+let currentAmbiguous = [];
+
+function escHtml(s) {
+    return String(s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]);
+}
+
+// ── 排期文件管理 ──
+async function checkStatus() {
+    try {
+        const r = await fetch('/api/hy-info');
+        const data = await r.json();
+        const status = document.getElementById('file-status');
+        if (data.exists) {
+            status.innerHTML = `<span class="text-success"><i class="bi bi-check-circle"></i> ${data.file_count}个排期文件 | ${data.item_count}个货号已索引</span>`;
+        } else {
+            status.innerHTML = `<span class="text-warning"><i class="bi bi-exclamation-triangle"></i> 尚未上传排期文件，请先上传</span>`;
+        }
+        renderScheduleFiles(data.files || []);
+    } catch (e) {
+        document.getElementById('file-status').innerHTML = `<span class="text-danger">连接失败</span>`;
+    }
+}
+
+function renderScheduleFiles(files) {
+    const container = document.getElementById('scheduleFileList');
+    if (!files.length) {
+        container.innerHTML = '<div class="text-muted small text-center py-2">暂无排期文件</div>';
+        return;
+    }
+    container.innerHTML = files.map(f => `
+        <div class="schedule-file-item">
+            <span><i class="bi bi-file-earmark-excel text-success me-1"></i>${escHtml(f)}</span>
+            <button class="btn btn-outline-danger btn-sm py-0 px-1" style="font-size:0.7rem;" onclick="deleteSchedule('${escHtml(f)}')">
+                <i class="bi bi-trash"></i>
+            </button>
+        </div>
+    `).join('');
+}
+
+const scheduleDropZone = document.getElementById('scheduleDropZone');
+scheduleDropZone.addEventListener('dragover', e => { e.preventDefault(); scheduleDropZone.classList.add('dragover'); });
+scheduleDropZone.addEventListener('dragleave', () => scheduleDropZone.classList.remove('dragover'));
+scheduleDropZone.addEventListener('drop', e => { e.preventDefault(); scheduleDropZone.classList.remove('dragover'); uploadSchedules(e.dataTransfer.files); });
+
+async function uploadSchedules(files) {
+    const valid = [...files].filter(f => f.name.match(/\.(xlsx|xls)$/i));
+    if (!valid.length) return;
+    const fd = new FormData();
+    valid.forEach(f => fd.append('files', f));
+    document.getElementById('processing').style.display = 'block';
+    document.getElementById('processingMsg').textContent = '正在上传排期文件并重建映射表...';
+    try {
+        const r = await fetch('/api/hy-upload-schedules', {method: 'POST', body: fd});
+        const data = await r.json();
+        document.getElementById('processing').style.display = 'none';
+        if (data.ok) checkStatus();
+        else alert('上传失败: ' + (data.error || '未知错误'));
+    } catch (e) {
+        document.getElementById('processing').style.display = 'none';
+        alert('上传失败: ' + e.message);
+    }
+    document.getElementById('scheduleInput').value = '';
+}
+
+async function deleteSchedule(filename) {
+    if (!confirm(`确定删除排期文件「${filename}」？`)) return;
+    try {
+        const r = await fetch('/api/hy-delete-schedule', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({filename})
+        });
+        const data = await r.json();
+        if (data.ok) checkStatus();
+        else alert('删除失败: ' + (data.error || ''));
+    } catch (e) { alert('删除失败: ' + e.message); }
+}
+
+async function rescan() {
+    if (!confirm('重建货号映射表？')) return;
+    document.getElementById('processing').style.display = 'block';
+    document.getElementById('processingMsg').textContent = '正在扫描排期文件...';
+    try {
+        const r = await fetch('/api/hy-rescan', {method: 'POST'});
+        const data = await r.json();
+        alert(data.ok ? `映射表已重建，${data.item_count}个货号` : '失败');
+        checkStatus();
+    } finally { document.getElementById('processing').style.display = 'none'; }
+}
+
+// ── PO文件上传 ──
+const dropZone = document.getElementById('dropZone');
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+dropZone.addEventListener('drop', e => { e.preventDefault(); dropZone.classList.remove('dragover'); showFiles(e.dataTransfer.files); });
+
+function showFiles(files) {
+    const valid = [...files].filter(f => f.name.match(/\.(xlsx|xls)$/i));
+    if (!valid.length) return;
+    selectedFiles = valid;
+    document.getElementById('fileCount').textContent = valid.length;
+    document.getElementById('fileTags').innerHTML = valid.map(f =>
+        `<span class="file-tag"><i class="bi bi-file-earmark-excel"></i> ${escHtml(f.name)}</span>`
+    ).join('');
+    document.getElementById('fileList').style.display = 'block';
+}
+
+function clearFiles() {
+    selectedFiles = [];
+    document.getElementById('fileInput').value = '';
+    document.getElementById('fileList').style.display = 'none';
+    document.getElementById('resultBox').style.display = 'none';
+}
+
+async function submitFiles() {
+    if (!selectedFiles.length) return;
+    const fd = new FormData();
+    selectedFiles.forEach(f => fd.append('files', f));
+    document.getElementById('processing').style.display = 'block';
+    document.getElementById('processingMsg').textContent = '正在分析PO文件...';
+    document.getElementById('resultBox').style.display = 'none';
+    try {
+        const r = await fetch('/api/hy-upload', {method: 'POST', body: fd});
+        const data = await r.json();
+        document.getElementById('processing').style.display = 'none';
+        if (!data.ok) { showError(data.error || '处理失败'); return; }
+        currentSession = data.session_id;
+        currentAmbiguous = data.ambiguous || [];
+        if (currentAmbiguous.length > 0) showAmbiguousModal(currentAmbiguous, data);
+        else showActionChoice(data);
+    } catch (e) {
+        document.getElementById('processing').style.display = 'none';
+        showError('请求失败: ' + e.message);
+    }
+}
+
+function showAmbiguousModal(ambiguous) {
+    document.getElementById('ambiguousList').innerHTML = ambiguous.map(amb => `
+        <div class="mb-3 border-bottom pb-3" data-key="${amb.key}">
+            <div class="fw-bold mb-2"><i class="bi bi-box text-warning"></i> 货号 <code>${escHtml(amb.item)}</code> <span class="text-muted small">(PO: ${escHtml(amb.po)})</span></div>
+            <div class="d-flex flex-wrap">
+                ${amb.candidates.map((c, ci) => `
+                    <div class="candidate-card" onclick="selectCandidate('${amb.key}', ${ci}, this)">
+                        <div class="small fw-bold">${escHtml(c.file)}</div>
+                        <div class="text-muted small">[${escHtml(c.sheet)}]</div>
+                    </div>
+                `).join('')}
+            </div>
+        </div>
+    `).join('');
+    new bootstrap.Modal(document.getElementById('ambiguousModal')).show();
+}
+
+function selectCandidate(key, ci, el) {
+    el.parentElement.querySelectorAll('.candidate-card').forEach(c => c.classList.remove('selected'));
+    el.classList.add('selected');
+    el.dataset.selectedIdx = ci;
+}
+
+async function exportOnly() {
+    const modal = bootstrap.Modal.getInstance(document.getElementById('ambiguousModal'));
+    if (modal) modal.hide();
+    document.getElementById('processing').style.display = 'block';
+    document.getElementById('processingMsg').textContent = '正在生成分类Excel...';
+    try {
+        const r = await fetch('/api/hy-export-only', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({session_id: currentSession})
+        });
+        const data = await r.json();
+        document.getElementById('processing').style.display = 'none';
+        if (data.ok) {
+            let html = `<div class="alert alert-success"><i class="bi bi-check-circle-fill me-2"></i>${escHtml(data.msg)}</div>`;
+            html += `<div class="small text-muted mb-2">新单: ${data.new_count||0} | 修改单: ${data.mod_count||0} | 重复货号: ${data.ambiguous_count||0}(已放入所有匹配sheet) | 未识别: ${data.unknown_count||0}</div>`;
+            if (data.export_file) html += `<div class="mt-2"><a href="/api/hy-export-download/${encodeURIComponent(data.export_file)}" class="btn btn-success"><i class="bi bi-download me-1"></i>下载分类Excel</a></div>`;
+            document.getElementById('resultContent').innerHTML = html;
+            document.getElementById('resultBox').style.display = 'block';
+            document.getElementById('resultBox').scrollIntoView({behavior:'smooth'});
+        } else showError(data.error || '生成失败');
+    } catch (e) { document.getElementById('processing').style.display = 'none'; showError('请求失败: ' + e.message); }
+    currentSession = null; currentAmbiguous = [];
+}
+
+async function submitSelection() {
+    const selections = {};
+    let allSelected = true;
+    document.querySelectorAll('#ambiguousList > div[data-key]').forEach(el => {
+        const key = el.dataset.key, sel = el.querySelector('.candidate-card.selected');
+        if (sel) { const ci = parseInt(sel.dataset.selectedIdx); selections[key] = currentAmbiguous.find(a => a.key === key).candidates[ci]; }
+        else allSelected = false;
+    });
+    if (!allSelected) { alert('请为每个重复货号选择目标文件'); return; }
+    bootstrap.Modal.getInstance(document.getElementById('ambiguousModal')).hide();
+    document.getElementById('processing').style.display = 'block';
+    document.getElementById('processingMsg').textContent = '正在生成分类Excel...';
+    try {
+        const r = await fetch('/api/hy-submit-selection', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({session_id: currentSession, selections})
+        });
+        const data = await r.json();
+        document.getElementById('processing').style.display = 'none';
+        if (data.ok) showResult(data);
+        else showError(data.error || '处理失败');
+    } catch (e) { document.getElementById('processing').style.display = 'none'; showError('请求失败: ' + e.message); }
+}
+
+function cancelSelection() { currentSession = null; currentAmbiguous = []; }
+
+function showActionChoice(data) {
+    let html = `<div class="alert alert-info mb-3"><i class="bi bi-info-circle-fill me-2"></i>分析完成，请选择操作方式</div>`;
+    html += `<div class="small mb-3">`;
+    if (data.modifications_count) html += `<span class="mod-badge">修改单 ${data.modifications_count} 条</span> `;
+    if (data.new_count) html += `<span class="new-badge">新单 ${data.new_count} 条</span> `;
+    if (data.unknown_count) html += `<span class="badge bg-danger">未识别 ${data.unknown_count} 条</span> `;
+    html += `</div><div class="d-grid"><button class="btn btn-success" onclick="exportOnly()"><i class="bi bi-file-earmark-spreadsheet me-1"></i>生成分类Excel（含修改单/新单/未识别）</button></div>`;
+    document.getElementById('resultContent').innerHTML = html;
+    document.getElementById('resultBox').style.display = 'block';
+    document.getElementById('resultBox').scrollIntoView({behavior:'smooth'});
+}
+
+function showResult(data) {
+    let html = `<div class="alert alert-success mb-3"><i class="bi bi-check-circle-fill me-2"></i>${escHtml(data.msg)}</div>`;
+    if (data.mod_details && data.mod_details.length) {
+        html += `<h6 class="text-primary"><i class="bi bi-pencil-square"></i> 修改单 (${data.mod_details.length})</h6><ul class="list-unstyled small">`;
+        data.mod_details.forEach(m => { html += `<li class="mb-2"><strong>${escHtml(m.item)}</strong> <span class="text-muted">(PO: ${escHtml(m.po)} | ${escHtml(m.file)} / ${escHtml(m.sheet)} R${m.row})</span><br>`; if (m.changes) m.changes.forEach(c => { html += `<span class="mod-badge">${escHtml(c)}</span>`; }); html += `</li>`; });
+        html += `</ul>`;
+    }
+    if (data.new_details && data.new_details.length) {
+        html += `<h6 class="text-success mt-3"><i class="bi bi-plus-square"></i> 新单 (${data.new_details.length})</h6><div class="small">`;
+        data.new_details.forEach(n => { html += `<span class="new-badge">${escHtml(n)}</span> `; });
+        html += `</div>`;
+    }
+    if (data.unknown && data.unknown.length) {
+        html += `<h6 class="text-danger mt-3"><i class="bi bi-question-circle"></i> 未知货号 (${data.unknown.length})</h6>`;
+        html += `<div class="small text-danger mb-1">已追加到 Excel 的 <strong>红色标签 sheet "未识别货号"</strong>，请手动核对</div><ul class="small text-danger">`;
+        data.unknown.forEach(u => { html += `<li>${escHtml(u.item)} (PO: ${escHtml(u.po)})</li>`; });
+        html += `</ul>`;
+    }
+    if (data.export_file) html += `<div class="mt-3"><a href="/api/hy-export-download/${encodeURIComponent(data.export_file)}" class="btn btn-success btn-sm"><i class="bi bi-download"></i> 下载分类Excel</a></div>`;
+    document.getElementById('resultContent').innerHTML = html;
+    document.getElementById('resultBox').style.display = 'block';
+    document.getElementById('resultBox').scrollIntoView({behavior:'smooth'});
+}
+
+function showError(msg) {
+    document.getElementById('resultContent').innerHTML = `<div class="alert alert-danger"><i class="bi bi-x-circle-fill me-2"></i>${escHtml(msg)}</div>`;
+    document.getElementById('resultBox').style.display = 'block';
+}
+
+checkStatus();
+</script>
+</body>
+</html>

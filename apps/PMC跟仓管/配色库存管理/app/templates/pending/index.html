@@ -23,9 +23,8 @@
       <th>类型</th>
       <th>色粉编号</th>
       <th>进货编号</th>
-      <th>商品名</th>
       <th>数量</th>
-      <th>单价</th>
+      <th>单价(HK$)</th>
       <th>原因</th>
       <th>备注</th>
       <th>创建时间</th>
@@ -38,25 +37,27 @@
       <td>
         {% if it.type == 'in' %}
           <span class="badge bg-success">入库</span>
+        {% elif it.type == 'edit_in' %}
+          <span class="badge bg-warning text-dark">修改入库 #{{ it.ref_tx_id }}</span>
         {% else %}
           <span class="badge bg-danger">出库</span>
         {% endif %}
       </td>
       <td><input form="resolve-{{ it.id }}" name="pigment_code" value="{{ it.pigment_code }}"
                  class="form-control form-control-sm" placeholder="色粉编号" required></td>
-      <td><small class="text-muted">{{ it.purchase_code or '—' }}</small></td>
-      <td><small class="text-muted">{{ it.name or '—' }}</small></td>
+      <td><input form="resolve-{{ it.id }}" name="purchase_code" value="{{ it.purchase_code }}"
+                 class="form-control form-control-sm" placeholder="进货编号"></td>
       <td>
         <div class="input-group input-group-sm" style="width:140px">
-          <input form="resolve-{{ it.id }}" type="number" name="quantity" step="0.01" min="0.01"
-                 value="{{ '%.2f'|format(it.quantity) }}" class="form-control form-control-sm" required>
-          <span class="input-group-text">{{ 'kg' if it.type == 'in' else 'g' }}</span>
+          <input form="resolve-{{ it.id }}" type="number" name="quantity" step="0.0001" min="0.0001"
+                 value="{{ ('%.4f'|format(it.quantity)).rstrip('0').rstrip('.') }}" class="form-control form-control-sm" required>
+          <span class="input-group-text">{{ 'g' if it.type == 'out' else 'kg' }}</span>
         </div>
       </td>
       <td>
-        {% if it.type == 'in' %}
-          <input form="resolve-{{ it.id }}" type="number" name="unit_price" step="0.01"
-                 value="{% if it.unit_price is not none %}{{ '%.2f'|format(it.unit_price) }}{% endif %}"
+        {% if it.type in ('in', 'edit_in') %}
+          <input form="resolve-{{ it.id }}" type="number" name="unit_price" step="0.1"
+                 value="{% if it.unit_price is not none %}{{ '%.1f'|format(it.unit_price) }}{% endif %}"
                  class="form-control form-control-sm" style="width:100px">
         {% else %}—{% endif %}
       </td>
@@ -65,7 +66,10 @@
       <td><small class="text-muted">{{ it.created_at.strftime('%m-%d %H:%M') if it.created_at else '—' }}</small></td>
       <td>
         <button form="resolve-{{ it.id }}" class="btn btn-sm btn-primary" type="submit">
-          <i class="bi bi-check2"></i> 确认{{ '入库' if it.type == 'in' else '出库' }}
+          <i class="bi bi-check2"></i>
+          {% if it.type == 'in' %}确认入库
+          {% elif it.type == 'edit_in' %}强制修改
+          {% else %}确认出库{% endif %}
         </button>
         <button form="reject-{{ it.id }}" class="btn btn-sm btn-outline-secondary" type="submit">驳回</button>
       </td>

@@ -9,22 +9,20 @@
   <a href="{{ url_for('transactions.in_list') }}" class="btn btn-secondary">取消</a>
 </form>
 {% else %}
-<p>共识别出 <strong>{{ rows|length }}</strong> 行。请核对后提交,不需要的行点"删"移除。<br><small class="text-muted">已匹配库存的行显示 <span class="badge bg-success-subtle text-success-emphasis">→ 编号</span>;未匹配的行可手填"色粉编号",留空则按"进货编号"再查一次:匹到则累加(相同色粉编号或进货编号视为同一色粉,不分品牌),匹不到则新建待复核。</small></p>
+<p>共识别出 <strong>{{ rows|length }}</strong> 行。**所有字段都可修改**,提交前核对。<br><small class="text-muted">色粉编号留空 → 进待审核;填了能匹到库存已有色粉(不分大小写)→ 直接累加入库;填了但 DB 没这编号 → 也进待审核(在那边再决定新建或改编号)。</small></p>
 <form method="post" action="{{ url_for('transactions.in_ocr_submit') }}">
+  <p class="small text-muted">单价列填 RMB,提交时自动按当前汇率换算成 HKD 存入库存。</p>
   <table class="table table-sm" id="ocrTable">
-    <thead><tr><th>进货编号</th><th>色粉编号</th><th>库存KG</th><th>单价</th><th style="width:25%">识别文本</th><th></th></tr></thead>
+    <thead><tr><th>进货编号</th><th>色粉编号</th><th>库存KG</th><th>单价(RMB)</th><th style="width:25%">识别文本</th><th></th></tr></thead>
     <tbody>
       {% for r in rows %}
       <tr>
-        <td><input name="purchase_code[]" value="{{ r.purchase_code }}" class="form-control form-control-sm" readonly></td>
+        <td><input name="purchase_code[]" value="{{ r.purchase_code }}" class="form-control form-control-sm"></td>
         <td>
           <input type="hidden" name="pigment_id[]" value="{{ r.pigment_id or '' }}">
-          {% if r.pigment_id %}
-            <span class="badge bg-success-subtle text-success-emphasis">→ {{ r.pigment_code or '(待填)' }}</span>
-            <input type="hidden" name="new_code[]" value="">
-          {% else %}
-            <input name="new_code[]" class="form-control form-control-sm" placeholder="留空则自动新建">
-          {% endif %}
+          <input name="new_code[]" class="form-control form-control-sm"
+                 value="{{ r.pigment_code or '' }}"
+                 placeholder="色粉编号 (留空走待审核)">
         </td>
         <td><input type="number" name="quantity[]" value="{{ '%.2f'|format(r.quantity) }}" step="0.01" class="form-control form-control-sm" min="0"></td>
         <td><input type="number" step="0.01" name="unit_price[]" value="{{ '%.2f'|format(r.unit_price) }}" class="form-control form-control-sm"></td>

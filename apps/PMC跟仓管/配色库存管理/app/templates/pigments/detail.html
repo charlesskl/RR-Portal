@@ -10,10 +10,10 @@
 </div>
 <h5>流水</h5>
 <table class="table table-sm">
-  <thead><tr><th>时间</th><th>类型</th><th>数量</th><th>单价</th><th>备注</th></tr></thead>
+  <thead><tr><th>时间</th><th>类型</th><th>数量</th><th>单价(HK$)</th><th>备注</th></tr></thead>
   <tbody>
     {% for t in transactions %}
-      <tr><td>{{ t.occurred_at.strftime('%Y-%m-%d %H:%M') }}</td><td>{{ t.type }}</td><td>{{ t.quantity }}</td><td>{{ t.unit_price or '-' }}</td><td>{{ t.note }}</td></tr>
+      <tr><td>{{ t.occurred_at.strftime('%Y-%m-%d %H:%M') }}</td><td>{{ t.type }}</td><td>{{ t.quantity }}</td><td>{{ '%.1f'|format(t.unit_price) if t.unit_price else '-' }}</td><td>{{ t.note }}</td></tr>
     {% endfor %}
   </tbody>
 </table>

@@ -414,6 +414,14 @@ services:
       dockerfile: Dockerfile
     environment:
       - DATA_PATH=/app/data
+      # Session login (PR #82) — secrets live in .env.cloud.production only
+      - HUADENG_SECRET_KEY=${HUADENG_SECRET_KEY:?HUADENG_SECRET_KEY is required}
+      - HUADENG_SEC1_USER=${HUADENG_SEC1_USER:?HUADENG_SEC1_USER is required}
+      - HUADENG_SEC1_PASSWORD=${HUADENG_SEC1_PASSWORD:?HUADENG_SEC1_PASSWORD is required}
+      - HUADENG_SEC2_USER=${HUADENG_SEC2_USER:?HUADENG_SEC2_USER is required}
+      - HUADENG_SEC2_PASSWORD=${HUADENG_SEC2_PASSWORD:?HUADENG_SEC2_PASSWORD is required}
+      - HUADENG_SEC3_USER=${HUADENG_SEC3_USER:?HUADENG_SEC3_USER is required}
+      - HUADENG_SEC3_PASSWORD=${HUADENG_SEC3_PASSWORD:?HUADENG_SEC3_PASSWORD is required}
     volumes:
       - ./apps/PMC跟仓管/华登包材管理/data:/app/data
     healthcheck:

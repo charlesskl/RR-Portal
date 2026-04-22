@@ -48,13 +48,13 @@ services:
 
   figure-mold-cost-system:
     build:
-      context: ./plugins/模具手办采购订单系统
+      context: ./apps/工程部/模具手办采购订单系统
       dockerfile: Dockerfile
     env_file:
-      - ./plugins/模具手办采购订单系统/.env
+      - ./apps/工程部/模具手办采购订单系统/.env
     volumes:
-      - "./plugins/模具手办采购订单系统/data:/app/data"
-      - "./plugins/模具手办采购订单系统/public/uploads:/app/public/uploads"
+      - "./apps/工程部/模具手办采购订单系统/data:/app/data"
+      - "./apps/工程部/模具手办采购订单系统/public/uploads:/app/public/uploads"
     restart: unless-stopped
     logging:
       driver: json-file
@@ -69,13 +69,13 @@ services:
 
   zouhuo:
     build:
-      context: ./apps/A-doc生成系統
+      context: ./apps/工程部/A-doc生成系統
       dockerfile: Dockerfile
     env_file:
-      - ./apps/A-doc生成系統/.env
+      - ./apps/工程部/A-doc生成系統/.env
     volumes:
-      - "./apps/A-doc生成系統/data:/app/server/data"
-      - "./apps/A-doc生成系統/uploads:/app/server/uploads"
+      - "./apps/工程部/A-doc生成系統/data:/app/server/data"
+      - "./apps/工程部/A-doc生成系統/uploads:/app/server/uploads"
     restart: unless-stopped
     logging:
       driver: json-file
@@ -90,13 +90,13 @@ services:
 
   jiangping:
     build:
-      context: ./apps/采购订单管理系统
+      context: ./apps/PMC跟仓管/采购订单管理系统
       dockerfile: Dockerfile
     env_file:
-      - ./apps/采购订单管理系统/.env
+      - ./apps/PMC跟仓管/采购订单管理系统/.env
     volumes:
-      - "./apps/采购订单管理系统/data:/app/data"
-      - "./apps/采购订单管理系统/uploads:/app/uploads"
+      - "./apps/PMC跟仓管/采购订单管理系统/data:/app/data"
+      - "./apps/PMC跟仓管/采购订单管理系统/uploads:/app/uploads"
     mem_limit: 1g
     restart: unless-stopped
     logging:
@@ -112,13 +112,13 @@ services:
 
   paiji:
     build:
-      context: ./apps/注塑啤机排产系统
+      context: ./apps/生产部/注塑啤机排产系统
       dockerfile: Dockerfile
     env_file:
-      - ./apps/注塑啤机排产系统/.env
+      - ./apps/生产部/注塑啤机排产系统/.env
     volumes:
-      - "./apps/注塑啤机排产系统/data:/app/data"
-      - "./apps/注塑啤机排产系统/uploads:/app/uploads"
+      - "./apps/生产部/注塑啤机排产系统/data:/app/data"
+      - "./apps/生产部/注塑啤机排产系统/uploads:/app/uploads"
     restart: unless-stopped
     logging:
       driver: json-file
@@ -133,14 +133,14 @@ services:
 
   quotation:
     build:
-      context: ./apps/套客表系统
+      context: ./apps/业务部/套客表系统
       dockerfile: Dockerfile
     environment:
       - PORT=3004
       - NODE_ENV=production
       - CORS_ORIGIN=${QUOTATION_CORS_ORIGIN:-http://localhost}
     volumes:
-      - "./apps/套客表系统/server/data:/app/server/data"
+      - "./apps/业务部/套客表系统/server/data:/app/server/data"
     restart: unless-stopped
     logging:
       driver: json-file
@@ -155,7 +155,7 @@ services:
 
   tomy-paiqi:
     build:
-      context: ./apps/TOMY排期核对系统
+      context: ./apps/业务部/TOMY排期核对系统
       dockerfile: Dockerfile
     environment:
       - PORT=3006
@@ -174,12 +174,12 @@ services:
 
   zuru-master-schedule:
     build:
-      context: ./plugins/ZURU总排期入单
+      context: ./apps/业务部/ZURU总排期入单
       dockerfile: Dockerfile
     volumes:
-      - "./plugins/ZURU总排期入单/data:/app/data"
-      - "./plugins/ZURU总排期入单/uploads:/app/uploads"
-      - "./plugins/ZURU总排期入单/exports:/app/exports"
+      - "./apps/业务部/ZURU总排期入单/data:/app/data"
+      - "./apps/业务部/ZURU总排期入单/uploads:/app/uploads"
+      - "./apps/业务部/ZURU总排期入单/exports:/app/exports"
     restart: unless-stopped
     logging:
       driver: json-file
@@ -194,7 +194,7 @@ services:
 
   zuru-order-system:
     build:
-      context: ./apps/ZURU接单表入单系统
+      context: ./apps/业务部/ZURU接单表入单系统
       dockerfile: Dockerfile
     environment:
       - PORT=5005
@@ -202,9 +202,9 @@ services:
       - LOCAL_MODE=1
       - FLASK_DEBUG=0
     volumes:
-      - "./apps/ZURU接单表入单系统/data:/app/data"
-      - "./apps/ZURU接单表入单系统/uploads:/app/uploads"
-      - "./apps/ZURU接单表入单系统/exports:/app/exports"
+      - "./apps/业务部/ZURU接单表入单系统/data:/app/data"
+      - "./apps/业务部/ZURU接单表入单系统/uploads:/app/uploads"
+      - "./apps/业务部/ZURU接单表入单系统/exports:/app/exports"
     mem_limit: 512m
     memswap_limit: 512m
     restart: unless-stopped
@@ -222,14 +222,14 @@ services:
 
   peise:
     build:
-      context: ./apps/配色库存管理
+      context: ./apps/PMC跟仓管/配色库存管理
       dockerfile: Dockerfile
     env_file:
-      - ./apps/配色库存管理/.env
+      - ./apps/PMC跟仓管/配色库存管理/.env
     environment:
       - BASE_PATH=/peise
     volumes:
-      - "./apps/配色库存管理/instance:/app/instance"
+      - "./apps/PMC跟仓管/配色库存管理/instance:/app/instance"
     mem_limit: 512m
     memswap_limit: 512m
     restart: unless-stopped
@@ -246,12 +246,12 @@ services:
 
   huadeng:
     build:
-      context: ./apps/华登包材管理
+      context: ./apps/PMC跟仓管/华登包材管理
       dockerfile: Dockerfile
     environment:
       - DATA_PATH=/app/data
     volumes:
-      - "./apps/华登包材管理/data:/app/data"
+      - "./apps/PMC跟仓管/华登包材管理/data:/app/data"
     mem_limit: 512m
     memswap_limit: 512m
     restart: unless-stopped

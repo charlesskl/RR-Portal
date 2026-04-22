@@ -114,8 +114,11 @@ def init_db():
         mkb_qty REAL DEFAULT 0, mkb_price REAL DEFAULT 0, mkb_amount REAL DEFAULT 0,
         jkb_qty REAL DEFAULT 0, jkb_price REAL DEFAULT 0, jkb_amount REAL DEFAULT 0,
         jx_qty REAL DEFAULT 0,  jx_price REAL DEFAULT 0,  jx_amount REAL DEFAULT 0,
-        gx_qty REAL DEFAULT 0,  gx_price REAL DEFAULT 0,  gx_amount REAL DEFAULT 0
+        gx_qty REAL DEFAULT 0,  gx_price REAL DEFAULT 0,  gx_amount REAL DEFAULT 0,
+        UNIQUE(channel, year_month)
     )''')
+    # 兼容旧 DB: 若 investment_records 表已存在但没有 UNIQUE 约束，这里补一个索引
+    db.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_inv_ch_ym ON investment_records(channel, year_month)')
 
     for key, _ in ITEMS:
         db.execute('INSERT OR IGNORE INTO default_prices (item_key, price) VALUES (?, 10)', (key,))
@@ -366,16 +369,29 @@ def add_investment_record(ch):
     db = get_db()
     year_month = request.form.get('year_month', '')[:7]
     if year_month:
-        vals = [ch, year_month]
         cols = ['channel', 'year_month']
+        vals = [ch, year_month]
+        set_parts = []
         for key in ['mkb', 'jkb', 'jx', 'gx']:
             qty = float(request.form.get(f'{key}_qty', 0) or 0)
             price = float(request.form.get(f'{key}_price', 0) or 0)
             amount = round(qty * price, 2)
             cols += [f'{key}_qty', f'{key}_price', f'{key}_amount']
             vals += [qty, price, amount]
+            # 同月再录入: qty/amount 累加，price 用加权平均重算
+            set_parts += [
+                f'{key}_qty = {key}_qty + excluded.{key}_qty',
+                f'{key}_amount = {key}_amount + excluded.{key}_amount',
+                f'{key}_price = CASE WHEN ({key}_qty + excluded.{key}_qty) > 0 '
+                f'THEN ROUND(({key}_amount + excluded.{key}_amount) / ({key}_qty + excluded.{key}_qty), 4) '
+                f'ELSE excluded.{key}_price END',
+            ]
         placeholders = ', '.join(['?'] * len(vals))
-        db.execute(f'INSERT INTO investment_records ({", ".join(cols)}) VALUES ({placeholders})', vals)
+        sql = (
+            f'INSERT INTO investment_records ({", ".join(cols)}) VALUES ({placeholders}) '
+            f'ON CONFLICT(channel, year_month) DO UPDATE SET {", ".join(set_parts)}'
+        )
+        db.execute(sql, vals)
         db.commit()
     db.close()
     return redirect(url_for('section', sec=sec, tab=ch))

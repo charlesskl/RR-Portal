@@ -13,6 +13,11 @@ def is_logged_in() -> bool:
     return bool(session.get("logged_in"))
 
 
+def _full_next_path() -> str:
+    """next 必须带 script_root（如 /peise），否则登录后 redirect 到裸路径会跳到 portal 根。"""
+    return (request.script_root or "") + request.full_path.rstrip("?")
+
+
 def install_login_guard(app) -> None:
     @app.before_request
     def _require_login():
@@ -20,7 +25,7 @@ def install_login_guard(app) -> None:
             return None
         if is_logged_in():
             return None
-        return redirect(url_for("auth.login", next=request.full_path.rstrip("?")))
+        return redirect(url_for("auth.login", next=_full_next_path()))
 
 
 def login_required(view):
@@ -28,6 +33,6 @@ def login_required(view):
     @wraps(view)
     def wrapper(*args, **kwargs):
         if not is_logged_in():
-            return redirect(url_for("auth.login", next=request.full_path.rstrip("?")))
+            return redirect(url_for("auth.login", next=_full_next_path()))
         return view(*args, **kwargs)
     return wrapper

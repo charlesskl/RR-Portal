@@ -58,7 +58,9 @@ def create_app():
             return None
         if request.endpoint in EXEMPT_ENDPOINTS:
             return None
-        return redirect(url_for('auth.login', next=request.full_path.rstrip('?')))
+        # next 必须含 script_root（如 /jiangping），否则登录后裸路径 redirect 会跳到 portal 根
+        next_path = (request.script_root or '') + request.full_path.rstrip('?')
+        return redirect(url_for('auth.login', next=next_path))
 
     @app.route('/')
     def index():

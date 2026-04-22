@@ -15,12 +15,20 @@ def create_app(config_class=Config):
 
     os.makedirs(app.instance_path, exist_ok=True)
 
+    _ensure_secret_key(app)
+    _validate_auth_config(app)
+
     db.init_app(app)
 
-    from .routes import dashboard, pigments, transactions
+    from .routes import dashboard, pigments, transactions, pending, auth as auth_routes
+    app.register_blueprint(auth_routes.bp)
     app.register_blueprint(dashboard.bp)
     app.register_blueprint(pigments.bp, url_prefix="/pigments")
     app.register_blueprint(transactions.bp, url_prefix="/transactions")
+    app.register_blueprint(pending.bp, url_prefix="/pending")
+
+    from .auth import install_login_guard
+    install_login_guard(app)
 
     @app.route("/health")
     def _health():
@@ -32,6 +40,36 @@ def create_app(config_class=Config):
         _migrate_uq_brand_code_partial()
 
     return app
+
+
+def _ensure_secret_key(app):
+    """SECRET_KEY 优先读 env;没设就从 instance/.secret_key 读或首次生成后落盘。
+    instance/ 在云端是 bind mount,key 跨容器重启持久化。"""
+    if app.config.get("SECRET_KEY"):
+        return
+    import secrets
+    key_path = os.path.join(app.instance_path, ".secret_key")
+    if os.path.exists(key_path):
+        with open(key_path, "r", encoding="utf-8") as f:
+            app.config["SECRET_KEY"] = f.read().strip()
+            return
+    os.makedirs(app.instance_path, exist_ok=True)
+    new_key = secrets.token_hex(32)
+    with open(key_path, "w", encoding="utf-8") as f:
+        f.write(new_key)
+    app.config["SECRET_KEY"] = new_key
+
+
+def _validate_auth_config(app):
+    """启动时必须有 AUTH_USERNAME / AUTH_PASSWORD,否则拒绝起服务。
+    SECRET_KEY 由 _ensure_secret_key 保底,不在这里校验。"""
+    missing = [k for k in ("AUTH_USERNAME", "AUTH_PASSWORD")
+               if not app.config.get(k)]
+    if missing:
+        raise RuntimeError(
+            f"启动配置缺失: {', '.join(missing)}。"
+            f"请在 .env 里设置这些值(参考 .env.example)。"
+        )
 
 
 def _migrate_uq_brand_code_partial():

@@ -414,6 +414,10 @@ services:
       - BAILIAN_API_KEY=${PEISE_BAILIAN_API_KEY:-}
       - BAILIAN_MODEL=${PEISE_BAILIAN_MODEL:-qwen-vl-max-latest}
       - BAILIAN_BASE_URL=${PEISE_BAILIAN_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}
+      # 登录凭据(默认 ps/ps123456,改要改 .env.cloud 的 PEISE_AUTH_*)
+      # SECRET_KEY 不传,app 会在 instance/.secret_key 自建并持久化
+      - AUTH_USERNAME=${PEISE_AUTH_USERNAME:-ps}
+      - AUTH_PASSWORD=${PEISE_AUTH_PASSWORD:-ps123456}
     volumes:
       - ./apps/PMC跟仓管/配色库存管理/instance:/app/instance
     healthcheck:

@@ -3,10 +3,14 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const crypto = require('crypto');
 const { getDb } = require('../services/db');
 const { parseWorkbook } = require('../services/excel-parser');
 
-const upload = multer({ storage: multer.memoryStorage() });
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 50 * 1024 * 1024 }, // 50 MB cap (matches nginx client_max_body_size)
+});
 
 // POST /api/import — upload and parse 本厂报价明细 Excel
 router.post('/', upload.single('file'), async (req, res) => {
@@ -14,8 +18,9 @@ router.post('/', upload.single('file'), async (req, res) => {
     return res.status(400).json({ error: 'No file uploaded. Use field name "file".' });
   }
 
-  // Write to temp file so ExcelJS can read it
-  const tmpPath = path.join(os.tmpdir(), `quotation_${Date.now()}.xlsx`);
+  // Write to temp file so ExcelJS can read it. Use random suffix to avoid
+  // ms-precision collisions under concurrent uploads.
+  const tmpPath = path.join(os.tmpdir(), `quotation_${crypto.randomBytes(8).toString('hex')}.xlsx`);
   fs.writeFileSync(tmpPath, req.file.buffer);
 
   try {
@@ -262,7 +267,6 @@ router.post('/', upload.single('file'), async (req, res) => {
         // Fabric from sewingDetails: only rows with both fabric_name and position
         // Formula: HK$/YD = 物料价(RMB) × 码点 × 1.05 ÷ 港币兑人民币
         const hkdRmb = (p.hkd_rmb_quote && p.hkd_rmb_quote > 0) ? p.hkd_rmb_quote : 0.85;
-        console.log('[import] sewingDetails count:', (data.sewingDetails || []).length, 'hkd_rmb_quote:', p.hkd_rmb_quote, '=> hkdRmb:', hkdRmb);
         for (const s of (data.sewingDetails || [])) {
           if (!s.fabric_name || !s.position) continue;
           const usageRounded = s.usage_amount != null ? Math.round(s.usage_amount * 10000) / 10000 : 0;
@@ -270,7 +274,6 @@ router.post('/', upload.single('file'), async (req, res) => {
           const priceHkd = s.material_price_rmb != null
             ? Math.round(s.material_price_rmb * markupPoint / hkdRmb * 10000) / 10000
             : null;
-          console.log('[import] fabric:', s.fabric_name, s.position, 'rmb:', s.material_price_rmb, 'markup:', markupPoint, '=> hkd:', priceHkd);
           insertRaw.run(versionId, 'fabric', s.fabric_name, s.position, usageRounded, priceHkd, sortIdx++);
         }
 
@@ -382,10 +385,11 @@ router.post('/', upload.single('file'), async (req, res) => {
       }
     });
 
-    insertAll();
-
-    // Mark this version as latest for this product (atomic)
+    // Atomic: run insertAll + is_latest flip in one transaction so a mid-way
+    // failure in insertAll does not leave the version half-written while the
+    // next row's is_latest bit is still flipped.
     db.transaction(() => {
+      insertAll();
       db.prepare('UPDATE QuoteVersion SET is_latest = 0 WHERE product_id = ?').run(product.id);
       db.prepare('UPDATE QuoteVersion SET is_latest = 1 WHERE id = ?').run(versionId);
     })();
@@ -396,17 +400,17 @@ router.post('/', upload.single('file'), async (req, res) => {
       versionId,
       sheetName: data.sheetName,
       summary: {
-        moldParts: data.moldParts.length,
-        hardwareItems: data.hardwareItems.length,
-        packagingItems: data.packagingItems.length,
-        electronicItems: data.electronicItems.length,
-        materialPrices: data.materialPrices.length,
-        machinePrices: data.machinePrices.length,
+        moldParts: (data.moldParts || []).length,
+        hardwareItems: (data.hardwareItems || []).length,
+        packagingItems: (data.packagingItems || []).length,
+        electronicItems: (data.electronicItems || []).length,
+        materialPrices: (data.materialPrices || []).length,
+        machinePrices: (data.machinePrices || []).length,
       },
     });
   } catch (err) {
     console.error('Import error:', err);
-    res.status(500).json({ error: err.message, stack: err.stack });
+    res.status(500).json({ error: 'Internal server error' });
   } finally {
     fs.unlink(tmpPath, () => {});
   }

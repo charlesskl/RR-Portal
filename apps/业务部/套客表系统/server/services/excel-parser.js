@@ -393,14 +393,6 @@ function parseSewingDetails(workbook) {
       const colF = numVal(ws.getCell(row, usageCol));
       const colG = numVal(ws.getCell(row, priceCol));
 
-      // DEBUG: log rows containing 半成品
-      if (/半成品/.test(colB) || /半成品/.test(colC) || /半成品/.test(colD)) {
-        console.log(`[SEWING-DEBUG] sheet=${sewingSheet} row=${row} B=${JSON.stringify(colB)} C=${JSON.stringify(colC)} D=${JSON.stringify(colD)} F=${colF}`);
-        // Also print all columns
-        for (let c = 1; c <= 12; c++) { process.stdout.write(`C${c}:${JSON.stringify(strVal(ws.getCell(row,c)))}|`); }
-        console.log();
-      }
-
       // New product section: B has product name, C has English name (or empty), no numeric usage
       // Detected by: colB non-empty, colF null, AND (colC non-numeric or empty), not a header row
       if (colB && colF == null && !colB.includes('物料名称') && !(colC && colC.includes('裁片部位'))) {
@@ -1163,7 +1155,9 @@ async function parseWorkbook(filePath) {
   try { moldParts = parseMoldParts(ws, moldStartRow); } catch(e) { throw new Error('parseMoldParts: ' + e.message); }
   try { rotocastItems = format === 'plush' ? parseRotocastItems(ws) : []; } catch(e) { throw new Error('parseRotocastItems: ' + e.message); }
   try { sewingDetails = (format === 'plush' || format === 'spin') ? parseSewingDetails(workbook) : []; } catch(e) { throw new Error('parseSewingDetails: ' + e.message); }
-  // For SPIN: replace labor items with values from main sheet
+  // For SPIN: replace labor items with values from main sheet, and merge
+  // in the "其他费用" rows (车缝物料 / PP胶料 / 测试费 etc.) that live in
+  // the main sheet (not in 车缝明细 sheets).
   if (format === 'spin') {
     const mainLaborItems = parseSpinLaborFromMain(ws);
     if (mainLaborItems.length > 0) {
@@ -1171,6 +1165,10 @@ async function parseWorkbook(filePath) {
         ...sewingDetails.filter(d => !/人工/.test(d.fabric_name || '')),
         ...mainLaborItems,
       ];
+    }
+    const otherItems = parseSpinOtherFromMain(ws);
+    if (otherItems.length > 0) {
+      sewingDetails = [...sewingDetails, ...otherItems];
     }
   }
   if (format === 'spin') {

@@ -213,7 +213,7 @@
                 <th>产品编号</th>
                 <th>产品名称</th>
                 <th>客名</th>
-                <th>日期</th>
+                <th title="筛选按完成月份">完成日期</th>
                 <th>车间</th>
                 <th style="width:130px">啤办费用合计<br><small>(HKD)</small></th>
               </tr>
@@ -286,7 +286,7 @@
                 <th>产品编号</th>
                 <th>产品名称</th>
                 <th>客名</th>
-                <th>日期</th>
+                <th title="筛选按完成月份">完成日期</th>
                 <th>车间</th>
                 <th style="width:120px">料费合计<br><small>(HKD)</small></th>
                 <th style="width:120px">啤办费合计<br><small>(HKD)</small></th>
@@ -407,7 +407,11 @@ function renderOrders(orders) {
     return;
   }
   const rows = orders.map(o => {
-    const hasMissingPrice = (o.items || []).some(it => it.material && !resolvePrice(it.material, _injMatPrices));
+    const hasMissingPrice = (o.items || []).some(it => {
+      if (!it.material) return false;
+      if (o.status === '已完成') return !(+(it.actual_amount_hkd || 0) > 0);
+      return !resolvePrice(it.material, _injMatPrices);
+    });
     return `
     <tr class="order-row" onclick="viewOrder(${o.id})">
       <td><strong>${esc(o.order_number || '-')}</strong></td>
@@ -423,7 +427,7 @@ function renderOrders(orders) {
       <td>${esc(o.reason || '-')}</td>
       <td>
         ${statusBadge(o.status)}
-        ${hasMissingPrice ? '<span class="badge bg-warning text-dark ms-1" title="部分原料未录入价格"><i class="bi bi-exclamation-circle me-1"></i>料价缺</span>' : ''}
+        ${hasMissingPrice ? '<span class="badge bg-warning text-dark ms-1" title="部分原料料费为 0（可能未录入价格或未填实际领料）"><i class="bi bi-exclamation-circle me-1"></i>料价缺</span>' : ''}
         ${problemsMap[o.id] ? `<span class="badge bg-danger ms-1"><i class="bi bi-exclamation-triangle-fill me-1"></i>${problemsMap[o.id]}个问题</span>` : ''}
       </td>
       <td>
@@ -570,14 +574,24 @@ function viewOrder(id) {
       }
 
       // 已完成订单：锁定除啤办费用外的所有输入（发至模厂订单除外，可继续编辑）
+      // 例外：actual_weight_kg 为空的行仍允许编辑（补录漏填）—— 填了值保存后自动计算料金额并锁定
       if (order.status === '已完成' && order.send_to !== '发至模厂' && order.workshop !== '模厂') {
-        document.querySelectorAll('#machineItemsBody input').forEach(inp => {
-          if (inp.name !== 'injection_cost') {
+        document.querySelectorAll('#machineItemsBody tr[data-item-id]').forEach(tr => {
+          const wInp = tr.querySelector('[name="actual_weight_kg"]');
+          const amtInp = tr.querySelector('[name="actual_amount_hkd"]');
+          const wEmpty = !wInp || !wInp.value || +wInp.value <= 0;
+          tr.querySelectorAll('input').forEach(inp => {
+            if (inp.name === 'injection_cost') return; // 永远可编辑
+            if (wEmpty && (inp.name === 'actual_weight_kg' || inp.name === 'actual_amount_hkd')) return; // 空值补录
             inp.disabled = true;
             inp.style.background = '#f0f0f0';
+          });
+          if (wEmpty && wInp) {
+            wInp.style.background = '#fff3cd'; // 高亮待补录
+            wInp.title = '该行实际用料未填写，保存后将自动计算料金额并锁定';
           }
         });
-        document.getElementById('saveMachineBtn').textContent = '保存啤办费用';
+        document.getElementById('saveMachineBtn').textContent = '保存啤办费用/补录';
       }
 
       new bootstrap.Modal(document.getElementById('detailModal')).show();
@@ -740,9 +754,10 @@ function setStatus(id, status) {
       .then(r => r.json())
       .then(order => {
         const items = order.items || [];
-        const missing = items.filter(it => it.actual_weight_kg == null || it.actual_weight_kg === '');
+        const missing = items.filter(it => !(+(it.actual_weight_kg || 0) > 0));
         if (missing.length > 0) {
-          alert(`⚠️ 还有 ${missing.length} 条明细未填写"实际用料(KG)"，请先在订单详情中填写完整后再标记完成。`);
+          const names = missing.slice(0, 3).map(m => m.mold_id || m.mold_name || '未命名').join('、');
+          alert(`⚠️ 还有 ${missing.length} 条明细未填写"实际用料(KG)"，请先在订单详情中填写完整后再标记完成。\n\n涉及：${names}${missing.length > 3 ? '…' : ''}`);
           return;
         }
         doSetStatus(id, status);
@@ -757,7 +772,14 @@ function doSetStatus(id, status) {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json', 'X-User': encodeURIComponent('啤机部') },
     body: JSON.stringify({ status })
-  }).then(() => loadOrders());
+  }).then(async r => {
+    if (!r.ok) {
+      const d = await r.json().catch(() => ({}));
+      alert(d.error || `操作失败 (HTTP ${r.status})`);
+      return;
+    }
+    loadOrders();
+  });
 }
 
 function printOrder(id) {
@@ -893,7 +915,7 @@ function renderTotalData() {
     gTotal += o.total_cost || 0;
     const gid = `tg${i}`;
     const badgeMat = o.has_missing_price
-      ? ' <span class="badge bg-warning text-dark ms-1" style="font-size:.65rem" title="部分原料未录入价格"><i class="bi bi-exclamation-circle"></i> 料价缺</span>'
+      ? ' <span class="badge bg-warning text-dark ms-1" style="font-size:.65rem" title="部分原料料费为 0（可能未录入价格或未填实际领料）"><i class="bi bi-exclamation-circle"></i> 料价缺</span>'
       : '';
     const badgeInj = o.has_missing_injection_cost
       ? ' <span class="badge bg-warning text-dark ms-1" style="font-size:.65rem" title="部分模具未填写啤办费"><i class="bi bi-exclamation-circle"></i> 啤办费缺</span>'
@@ -923,7 +945,7 @@ function renderTotalData() {
         <td><strong>${esc(o.order_number || '-')}</strong>&nbsp;<i class="bi bi-chevron-down toggle-icon-${gid}" style="font-size:.7rem;color:#888"></i></td>
         <td>${esc(o.product_name || '-')}${badgeMat}${badgeInj}</td>
         <td>${esc(o.client_name || '-')}</td>
-        <td>${esc(o.date ? o.date.slice(5) : '-')}</td>
+        <td title="完成日期：${esc(o.completed_date || '-')}${o.date ? '&#10;接单日期：' + esc(o.date) : ''}">${esc(o.completed_date ? o.completed_date.slice(5) : (o.date ? o.date.slice(5) : '-'))}</td>
         <td>${esc(o.workshop || '-')}</td>
         <td class="text-end fw-bold" style="color:${o.total_material_cost ? '#1a6e3a' : '#aaa'}">${o.total_material_cost.toFixed(2)}</td>
         <td class="text-end fw-bold" style="color:${o.total_injection_cost ? '#1a6e3a' : '#aaa'}">${o.skip_inj ? '<span class="text-muted" title="发至外厂订单不计啤办费">—</span>' : o.total_injection_cost.toFixed(2)}</td>
@@ -988,7 +1010,7 @@ function renderCostData() {
   filtered.forEach(it => {
     const key = it.order_number || '-';
     if (!groupMap[key]) {
-      groupMap[key] = { order_number: key, product_name: it.product_name, client_name: it.client_name, date: it.date, workshop: it.workshop, items: [], totalCost: 0 };
+      groupMap[key] = { order_number: key, product_name: it.product_name, client_name: it.client_name, date: it.date, completed_date: it.completed_date, workshop: it.workshop, items: [], totalCost: 0 };
       groups.push(groupMap[key]);
     }
     groupMap[key].items.push(it);
@@ -1016,7 +1038,7 @@ function renderCostData() {
         <td><strong>${esc(g.order_number)}</strong>&nbsp;<i class="bi bi-chevron-down toggle-icon-${gid}" style="font-size:.7rem;color:#888"></i></td>
         <td>${esc(g.product_name || '-')}</td>
         <td>${esc(g.client_name || '-')}</td>
-        <td>${esc(g.date ? g.date.slice(5) : '-')}</td>
+        <td title="完成日期：${esc(g.completed_date || '-')}${g.date ? '&#10;接单日期：' + esc(g.date) : ''}">${esc(g.completed_date ? g.completed_date.slice(5) : (g.date ? g.date.slice(5) : '-'))}</td>
         <td>${esc(g.workshop || '-')}</td>
         <td class="text-end fw-bold" style="color:${g.totalCost ? '#1a6e3a' : '#aaa'}">${g.totalCost.toFixed(2)}</td>
       </tr>

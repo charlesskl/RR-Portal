@@ -82,9 +82,6 @@
   }
   .dept-icon.business { background: linear-gradient(135deg, #f59e0b, #ef4444); }
   .dept-icon.engineering { background: linear-gradient(135deg, #3b82f6, #06b6d4); }
-  .dept-icon.indonesia { background: linear-gradient(135deg, #ef4444, #f59e0b); }
-  .dept-icon.rr { background: linear-gradient(135deg, #22c55e, #16a085); }
-  .dept-icon.printing3d { background: linear-gradient(135deg, #8b5cf6, #6366f1); }
   .dept-icon.production { background: linear-gradient(135deg, #f97316, #ea580c); }
   .dept-icon.pmc { background: linear-gradient(135deg, #10b981, #059669); }
   .dept-name { font-size: 20px; font-weight: 600; color: #f1f5f9; }
@@ -183,7 +180,7 @@
 
     <div class="stats-bar">
       <div class="stat-card">
-        <div class="stat-value" id="statDepts">5</div>
+        <div class="stat-value" id="statDepts">4</div>
         <div class="stat-label">部门数量</div>
       </div>
       <div class="stat-card">
@@ -268,28 +265,6 @@
         </div>
       </div>
 
-      <!-- 印尼小组 -->
-      <div class="dept-card" onclick="showDept('indonesia')">
-        <div class="dept-card-header">
-          <div class="dept-icon indonesia">&#127470;</div>
-          <div>
-            <div class="dept-name">印尼小组</div>
-            <div class="dept-desc">印尼出货明细资料核对</div>
-          </div>
-        </div>
-        <div class="dept-card-body">
-          <div class="plugin-list" id="indonesiaPluginList">
-            <div class="plugin-item">
-              <div class="plugin-info">
-                <div class="plugin-dot green"></div>
-                <span class="plugin-name">印尼出货明细资料核对系统</span>
-                <span class="plugin-tag">出货</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
       <!-- PMC跟仓管 -->
       <div class="dept-card" onclick="showDept('pmc')">
         <div class="dept-card-header">
@@ -328,28 +303,6 @@
                 <div class="plugin-dot green" id="dotPaiji"></div>
                 <span class="plugin-name">AI注塑啤机排产系统</span>
                 <span class="plugin-tag">排产</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- 3D打印 -->
-      <div class="dept-card" onclick="showDept('printing3d')">
-        <div class="dept-card-header">
-          <div class="dept-icon printing3d">&#128424;</div>
-          <div>
-            <div class="dept-name">3D打印</div>
-            <div class="dept-desc">3D打印部门管理系统</div>
-          </div>
-        </div>
-        <div class="dept-card-body">
-          <div class="plugin-list" id="printing3dPluginList">
-            <div class="plugin-item">
-              <div class="plugin-info">
-                <div class="plugin-dot green"></div>
-                <span class="plugin-name">3D打印管理系统</span>
-                <span class="plugin-tag">打印</span>
               </div>
             </div>
           </div>
@@ -414,69 +367,6 @@
       <div class="detail-plugin-right">
         <div class="detail-plugin-status"><div class="plugin-dot green"></div> 运行中</div>
         <a href="/schedule/" target="_blank" class="btn btn-primary">打开系统</a>
-      </div>
-    </div>
-  </div>
-
-  <!-- ===== 印尼小组详情 ===== -->
-  <div class="detail-view" id="indonesiaDetail">
-    <div class="back-btn" onclick="goHome()">&larr; 返回部门总览</div>
-    <div class="breadcrumb">
-      <a href="#" onclick="goHome()">控制台</a>
-      <span class="sep">/</span>
-      <span style="color:#ef4444">印尼小组</span>
-    </div>
-    <div class="page-title" style="display:flex;align-items:center;gap:14px;">
-      <div class="dept-icon indonesia" style="width:40px;height:40px;font-size:18px;">&#127470;</div>
-      印尼小组
-    </div>
-    <div class="page-subtitle">印尼出货明细资料核对系统 - Excel 数据对比与核验</div>
-
-    <div class="detail-plugin-card">
-      <div class="detail-plugin-left">
-        <div class="detail-plugin-icon" style="background:linear-gradient(135deg,#ef4444,#f59e0b);">&#127470;</div>
-        <div>
-          <div class="detail-plugin-name">印尼出货明细资料核对系统</div>
-          <div class="detail-plugin-desc">印尼出货明细资料核对，支持 Excel 数据导入对比与核验</div>
-        </div>
-      </div>
-      <div>
-        <a href="/indonesia/" target="_blank" class="btn btn-primary">打开系统</a>
-      </div>
-    </div>
-  </div>
-
-  <!-- ===== 3D打印详情 ===== -->
-  <div class="detail-view" id="printing3dDetail">
-    <div class="back-btn" onclick="goHome()">&larr; 返回部门总览</div>
-    <div class="breadcrumb">
-      <a href="#" onclick="goHome()">控制台</a>
-      <span class="sep">/</span>
-      <span style="color:#8b5cf6">3D打印</span>
-    </div>
-    <div class="page-title" style="display:flex;align-items:center;gap:14px;">
-      <div class="dept-icon printing3d" style="width:40px;height:40px;font-size:18px;">&#128424;</div>
-      3D打印
-    </div>
-    <div class="page-subtitle">3D打印部门管理系统 - Bambu Lab &amp; FlashForge 打印机管理</div>
-
-    <div class="detail-plugin-card">
-      <div class="detail-plugin-left">
-        <div class="detail-plugin-icon" style="background:linear-gradient(135deg,#8b5cf6,#6366f1);">&#128424;</div>
-        <div>
-          <div class="detail-plugin-name">3D打印管理系统</div>
-          <div class="detail-plugin-desc">Bambu Lab P1S &amp; FlashForge Adventurer 5M 打印机实时监控、生产记录与成本管理</div>
-          <div class="feature-grid">
-            <div class="feature-tag">&#128424; 打印机监控</div>
-            <div class="feature-tag">&#128202; 生产记录</div>
-            <div class="feature-tag">&#128176; 成本管理</div>
-            <div class="feature-tag">&#128230; 材料管理</div>
-          </div>
-        </div>
-      </div>
-      <div class="detail-plugin-right">
-        <div class="detail-plugin-status"><div class="plugin-dot green"></div> 运行中</div>
-        <a href="/3d/" target="_blank" class="btn btn-primary">打开系统</a>
       </div>
     </div>
   </div>
@@ -635,7 +525,7 @@
 </div>
 
 <script>
-var allDepts = ['business', 'engineering', 'pmc', 'indonesia', 'printing3d', 'production'];
+var allDepts = ['business', 'engineering', 'pmc', 'production'];
 
 function showDept(dept) {
   document.getElementById('homeView').classList.add('hidden');

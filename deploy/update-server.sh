@@ -73,7 +73,8 @@ if [[ "$BEFORE_HEAD" == "$AFTER_HEAD" ]]; then
   exit 0
 fi
 
-CHANGED_FILES=$(git diff --name-only "$BEFORE_HEAD" "$AFTER_HEAD")
+# core.quotePath=false 让中文/非 ASCII 路径不被 \xxx 转义，否则 PATH_TO_SERVICE 前缀匹配会 fail
+CHANGED_FILES=$(git -c core.quotePath=false diff --name-only "$BEFORE_HEAD" "$AFTER_HEAD")
 echo "  Changed files (${BEFORE_HEAD:0:7} → ${AFTER_HEAD:0:7}):"
 echo "$CHANGED_FILES" | sed 's/^/    /'
 

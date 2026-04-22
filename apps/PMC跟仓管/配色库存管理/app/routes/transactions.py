@@ -5,7 +5,7 @@ from sqlalchemy import func
 from app.extensions import db
 from app.models import Pigment, Stock, Transaction, PendingReview
 from app.services.inventory import stock_in, stock_out, InsufficientStock
-from app.services.exchange import rmb_to_hkd, hkd_to_rmb
+from app.services.exchange import rmb_to_hkd, hkd_to_rmb, get_rate
 
 
 def _find_pigment_by_code(code: str) -> Pigment | None:
@@ -369,12 +369,14 @@ def _ocr_submit(tx_type: str):
     prices = request.form.getlist("unit_price[]")
     new_codes = request.form.getlist("new_code[]")
     purchase_codes = request.form.getlist("purchase_code[]")
+    # 批量入库共用同一个汇率,避免每行重新查 Setting 表
+    batch_rate = get_rate()
     for i, (pid, qty) in enumerate(zip(pids, qtys)):
         if not qty or float(qty) <= 0:
             continue
         price_raw = prices[i] if i < len(prices) else ""
         price_rmb = float(price_raw) if price_raw else None
-        price = rmb_to_hkd(price_rmb)  # OCR 表单 RMB → 存 HKD
+        price = rmb_to_hkd(price_rmb, rate=batch_rate)  # OCR 表单 RMB → 存 HKD
         new_code = new_codes[i].strip() if i < len(new_codes) else ""
         purchase_code = purchase_codes[i].strip() if i < len(purchase_codes) else ""
 

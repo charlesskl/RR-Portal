@@ -9,7 +9,7 @@
   <a href="{{ url_for('transactions.in_list') }}" class="btn btn-secondary">取消</a>
 </form>
 {% else %}
-<p>共识别出 <strong>{{ rows|length }}</strong> 行。**所有字段都可修改**,提交前核对。<br><small class="text-muted">色粉编号留空 → 进待审核;填了能匹到库存已有色粉(不分大小写)→ 直接累加入库;填了但 DB 没这编号 → 也进待审核(在那边再决定新建或改编号)。</small></p>
+<p>共识别出 <strong>{{ rows|length }}</strong> 行。<strong>所有字段都可修改</strong>,提交前核对。<br><small class="text-muted">色粉编号留空 → 进待审核;填了能匹到库存已有色粉(不分大小写)→ 直接累加入库;填了但 DB 没这编号 → 也进待审核(在那边再决定新建或改编号)。</small></p>
 <form method="post" action="{{ url_for('transactions.in_ocr_submit') }}">
   <p class="small text-muted">单价列填 RMB,提交时自动按当前汇率换算成 HKD 存入库存。</p>
   <table class="table table-sm" id="ocrTable">

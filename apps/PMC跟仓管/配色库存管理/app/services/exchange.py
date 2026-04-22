@@ -38,13 +38,13 @@ def set_rate(rate: float) -> None:
     db.session.commit()
 
 
-def rmb_to_hkd(rmb: float | None) -> float | None:
+def rmb_to_hkd(rmb: float | None, rate: float | None = None) -> float | None:
     if rmb is None or rmb == 0:
         return rmb
-    return round(rmb / get_rate(), 1)
+    return round(rmb / (rate if rate is not None else get_rate()), 1)
 
 
-def hkd_to_rmb(hkd: float | None) -> float | None:
+def hkd_to_rmb(hkd: float | None, rate: float | None = None) -> float | None:
     if hkd is None or hkd == 0:
         return hkd
-    return round(hkd * get_rate(), 1)
+    return round(hkd * (rate if rate is not None else get_rate()), 1)

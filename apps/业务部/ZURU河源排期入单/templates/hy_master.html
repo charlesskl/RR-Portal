@@ -31,11 +31,13 @@
         <h3 class="fw-bold text-primary"><i class="bi bi-folder-symlink me-2"></i>ZURU 河源排期入单</h3>
         <div class="d-flex align-items-center justify-content-center gap-2 mt-2 flex-wrap">
             <input type="text" id="scheduleDir" class="form-control form-control-sm" style="max-width:450px;font-size:0.8rem;" readonly>
+            <button class="btn btn-primary btn-sm py-0" style="font-size:0.75rem;" onclick="document.getElementById('scheduleFileInput').click()"><i class="bi bi-upload"></i> 上传排期文件</button>
             <button class="btn btn-outline-primary btn-sm py-0" style="font-size:0.75rem;" onclick="changeDir()">切换路径</button>
             <button class="btn btn-outline-secondary btn-sm py-0" style="font-size:0.75rem;" onclick="resetDir()">默认</button>
             <button class="btn btn-outline-info btn-sm py-0" style="font-size:0.75rem;" onclick="rescan()"><i class="bi bi-arrow-repeat"></i> 重建映射表</button>
             <button class="btn btn-outline-success btn-sm py-0" style="font-size:0.75rem;" onclick="checkStatus()"><i class="bi bi-arrow-clockwise"></i> 刷新</button>
         </div>
+        <input type="file" id="scheduleFileInput" multiple accept=".xlsx,.xls" style="display:none" onchange="uploadSchedules(this.files)">
         <div class="mt-1 small text-muted">
             <span id="file-status">检查中...</span>
         </div>
@@ -127,20 +129,53 @@ async function checkStatus() {
         if (data.exists) {
             status.innerHTML = `<span class="text-success"><i class="bi bi-check-circle"></i> ${data.file_count}个排期文件 | ${data.item_count}个货号已索引</span>`;
         } else if (!data.dir) {
-            status.innerHTML = `<span class="text-warning"><i class="bi bi-exclamation-triangle"></i> 首次使用，请先设置排期目录</span>`;
-            setTimeout(() => {
-                if (confirm('检测到尚未设置排期目录，是否现在设置？')) changeDir();
-            }, 500);
+            status.innerHTML = `<span class="text-warning"><i class="bi bi-exclamation-triangle"></i> 尚未上传排期文件，请点击「上传排期文件」</span>`;
         } else {
-            status.innerHTML = `<span class="text-danger"><i class="bi bi-x-circle"></i> 目录不存在</span>`;
+            status.innerHTML = `<span class="text-warning"><i class="bi bi-cloud-upload"></i> 排期目录为空，请点击「上传排期文件」批量上传 xlsx</span>`;
         }
     } catch (e) {
         document.getElementById('file-status').innerHTML = `<span class="text-danger">连接失败</span>`;
     }
 }
 
+async function uploadSchedules(files) {
+    if (!files || !files.length) return;
+    const xlsx = Array.from(files).filter(f => /\.(xlsx|xls)$/i.test(f.name));
+    if (!xlsx.length) {
+        alert('请选择 xlsx/xls 文件');
+        return;
+    }
+    const clear = confirm(`将上传 ${xlsx.length} 个排期文件到服务器。\n\n点「确定」= 清空服务器上旧排期再上传（推荐，避免重复）\n点「取消」= 追加到现有排期（不清空）`);
+
+    const fd = new FormData();
+    for (const f of xlsx) fd.append('files', f);
+    fd.append('clear', clear ? '1' : '0');
+
+    document.getElementById('processing').style.display = 'block';
+    document.getElementById('processingMsg').textContent = `正在上传 ${xlsx.length} 个排期文件...`;
+    try {
+        const r = await fetch('api/hy-upload-schedules', {method: 'POST', body: fd});
+        const data = await r.json();
+        document.getElementById('processing').style.display = 'none';
+        document.getElementById('scheduleFileInput').value = '';
+        if (data.ok) {
+            alert(data.msg + `\n\n已保存文件:\n${(data.saved || []).join('\n')}`);
+            // 上传成功 → 自动重建映射表
+            if (confirm('上传完成。现在自动扫描并重建货号映射表？')) {
+                await rescanNoConfirm();
+            }
+            checkStatus();
+        } else {
+            alert('失败: ' + (data.error || '未知错误'));
+        }
+    } catch (e) {
+        document.getElementById('processing').style.display = 'none';
+        alert('上传失败: ' + e.message);
+    }
+}
+
 async function changeDir() {
-    const newDir = prompt('请输入新的排期目录路径：', document.getElementById('scheduleDir').value);
+    const newDir = prompt('请输入新的排期目录路径（服务器上的路径，如 /app/data/schedule）：', document.getElementById('scheduleDir').value);
     if (!newDir) return;
     const r = await fetch('api/hy-set-dir', {
         method: 'POST',
@@ -169,6 +204,10 @@ async function resetDir() {
 
 async function rescan() {
     if (!confirm('重建货号映射表？这会扫描所有排期文件。')) return;
+    await rescanNoConfirm();
+}
+
+async function rescanNoConfirm() {
     document.getElementById('processing').style.display = 'block';
     document.getElementById('processingMsg').textContent = '正在扫描排期文件...';
     try {

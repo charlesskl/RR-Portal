@@ -22,8 +22,9 @@ APP_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(APP_DIR, 'data')
 EXPORT_DIR = os.path.join(APP_DIR, 'exports')
 UPLOAD_DIR = os.path.join(APP_DIR, 'uploads')
+SCHEDULE_DIR = os.path.join(DATA_DIR, 'schedule')
 
-for d in (DATA_DIR, EXPORT_DIR, UPLOAD_DIR):
+for d in (DATA_DIR, EXPORT_DIR, UPLOAD_DIR, SCHEDULE_DIR):
     os.makedirs(d, exist_ok=True)
 
 app = Flask(__name__,
@@ -46,7 +47,7 @@ def load_config():
     cfg_path = os.path.join(DATA_DIR, 'config.json')
     default = {
         'port': 5006,
-        'default_schedule_dir': r'C:\Users\Administrator\Desktop\河源排期新 - 副本'
+        'default_schedule_dir': SCHEDULE_DIR,
     }
     if os.path.exists(cfg_path):
         try:
@@ -133,6 +134,54 @@ def hy_set_dir():
         return jsonify({'ok': False, 'error': f'目录不存在: {new_dir}'}), 400
     _custom_path['dir'] = new_dir
     return jsonify({'ok': True, 'dir': new_dir, 'msg': f'已切换到: {new_dir}'})
+
+
+@app.route('/api/hy-upload-schedules', methods=['POST'])
+def hy_upload_schedules():
+    """批量上传排期Excel文件（替代本地文件夹模式，云端必需）"""
+    files = request.files.getlist('files')
+    if not files:
+        return jsonify({'ok': False, 'error': '请选择排期Excel文件'}), 400
+
+    clear_old = request.form.get('clear', '0') == '1'
+    if clear_old:
+        for old in os.listdir(SCHEDULE_DIR):
+            op = os.path.join(SCHEDULE_DIR, old)
+            if os.path.isfile(op) and old.lower().endswith(('.xlsx', '.xls')):
+                try:
+                    os.remove(op)
+                except Exception as e:
+                    logging.warning(f'[河源] 删除旧文件失败 {old}: {e}')
+
+    saved = []
+    skipped = []
+    for f in files:
+        if not f.filename:
+            continue
+        ext = os.path.splitext(f.filename)[1].lower()
+        if ext not in ('.xlsx', '.xls'):
+            skipped.append(f.filename)
+            continue
+        safe_name = secure_filename(f.filename) or f'schedule_{int(time.time())}{ext}'
+        if not safe_name.endswith(ext):
+            safe_name += ext
+        path = os.path.join(SCHEDULE_DIR, safe_name)
+        f.save(path)
+        saved.append(safe_name)
+
+    if not saved:
+        return jsonify({'ok': False, 'error': '没有有效的Excel文件（仅支持 .xlsx/.xls）'}), 400
+
+    _custom_path['dir'] = SCHEDULE_DIR
+    logging.info(f'[河源] 上传排期 {len(saved)} 个文件到 {SCHEDULE_DIR} (clear={clear_old})')
+
+    return jsonify({
+        'ok': True,
+        'dir': SCHEDULE_DIR,
+        'saved': saved,
+        'skipped': skipped,
+        'msg': f'已上传 {len(saved)} 个排期文件到服务器，现在可以点击「重建映射表」扫描',
+    })
 
 
 @app.route('/api/hy-rescan', methods=['POST'])

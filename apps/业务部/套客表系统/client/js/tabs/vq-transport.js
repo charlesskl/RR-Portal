@@ -108,7 +108,7 @@ const tab_vq_transport = {
         value: tc[field],
         onSave: async (val) => {
           try {
-            await fetch(`${api.BASE}/api/versions/${versionId}/sections/transport`, {
+            await fetch(`/api/versions/${versionId}/sections/transport`, {
               method: 'PUT',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ [field]: val }),

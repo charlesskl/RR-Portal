@@ -1,9 +1,6 @@
 /* API client — all calls go through this module */
 const api = (() => {
-  // Derive base path from current URL so the app works under any reverse-proxy
-  // prefix (e.g. nginx /quotation/ -> container /). location.pathname is the
-  // directory the page is served from; strip trailing file/slash to get '/quotation'.
-  const BASE = location.pathname.replace(/\/[^/]*$/, '');
+  const BASE = '';
 
   async function request(method, path, body) {
     const opts = {
@@ -27,7 +24,6 @@ const api = (() => {
   }
 
   return {
-    BASE,
     // Products
     getProducts: () => request('GET', '/api/products'),
     createProduct: (data) => request('POST', '/api/products', data),

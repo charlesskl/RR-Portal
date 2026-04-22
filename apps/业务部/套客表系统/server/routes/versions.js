@@ -3,12 +3,6 @@ const { getDb } = require('../services/db');
 const { recalculate } = require('../services/calculator');
 const crypto = require('crypto');
 
-// Centralized error handler: logs full error server-side, returns sanitized message
-function handleError(res, err) {
-  console.error('[versions] error:', err);
-  res.status(500).json({ error: 'Internal server error' });
-}
-
 // Section name → table mapping (list sections)
 const LIST_SECTIONS = {
   'mold-parts': 'MoldPart',
@@ -88,7 +82,7 @@ router.get('/:id', (req, res) => {
     }
     res.json(result);
   } catch (err) {
-    handleError(res, err);
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -115,7 +109,7 @@ router.put('/:id', (req, res) => {
     const updated = getVersion(db, req.params.id);
     res.json(updated);
   } catch (err) {
-    handleError(res, err);
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -129,7 +123,7 @@ router.delete('/:id', (req, res) => {
     db.prepare('DELETE FROM QuoteVersion WHERE id = ?').run(req.params.id);
     res.json({ message: 'Version deleted' });
   } catch (err) {
-    handleError(res, err);
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -182,7 +176,7 @@ router.post('/:id/duplicate', (req, res) => {
     const newVersion = getVersion(db, dup);
     res.status(201).json(newVersion);
   } catch (err) {
-    handleError(res, err);
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -205,7 +199,7 @@ router.get('/:id/params', (req, res) => {
       machine_prices: machinePrices,
     });
   } catch (err) {
-    handleError(res, err);
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -241,7 +235,7 @@ router.put('/:id/params', (req, res) => {
     const updated = db.prepare('SELECT * FROM QuoteParams WHERE version_id = ?').get(req.params.id);
     res.json(updated);
   } catch (err) {
-    handleError(res, err);
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -267,7 +261,7 @@ router.put('/:id/material-prices', (req, res) => {
     const rows = db.prepare('SELECT * FROM MaterialPrice WHERE version_id = ?').all(req.params.id);
     res.json(rows);
   } catch (err) {
-    handleError(res, err);
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -293,7 +287,7 @@ router.put('/:id/machine-prices', (req, res) => {
     const rows = db.prepare('SELECT * FROM MachinePrice WHERE version_id = ?').all(req.params.id);
     res.json(rows);
   } catch (err) {
-    handleError(res, err);
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -318,7 +312,7 @@ router.get('/:id/sections/:section', (req, res) => {
       res.json(rows);
     }
   } catch (err) {
-    handleError(res, err);
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -349,7 +343,7 @@ router.post('/:id/sections/:section', (req, res) => {
     const created = db.prepare(`SELECT * FROM ${table} WHERE id = ?`).get(result.lastInsertRowid);
     res.status(201).json(created);
   } catch (err) {
-    handleError(res, err);
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -399,7 +393,7 @@ router.put('/:id/sections/:section/:itemId', (req, res) => {
     const updated = db.prepare(`SELECT * FROM ${table} WHERE id = ? AND version_id = ?`).get(itemId, id);
     res.json(updated);
   } catch (err) {
-    handleError(res, err);
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -425,7 +419,7 @@ router.delete('/:id/sections/:section/:itemId', (req, res) => {
     db.prepare(`DELETE FROM ${table} WHERE id = ? AND version_id = ?`).run(itemId, id);
     res.json({ message: 'Item deleted' });
   } catch (err) {
-    handleError(res, err);
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -467,7 +461,7 @@ router.put('/:id/sections/:section', (req, res) => {
     const updated = db.prepare(`SELECT * FROM ${table} WHERE version_id = ?`).get(id);
     res.json(updated);
   } catch (err) {
-    handleError(res, err);
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -483,7 +477,7 @@ router.get('/:id/calculate', (req, res) => {
     const result = recalculate(req.params.id);
     res.json(result);
   } catch (err) {
-    handleError(res, err);
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -497,26 +491,16 @@ router.post('/:id/translate-all', async (req, res) => {
     if (!version) return res.status(404).json({ error: 'Version not found' });
     const vid = req.params.id;
 
-    const appid = process.env.BAIDU_APPID;
-    const key = process.env.BAIDU_KEY;
-    if (!appid || !key) {
-      return res.status(503).json({ error: 'Baidu translation not configured (BAIDU_APPID / BAIDU_KEY missing)' });
-    }
-
     async function myMemoryTranslate(text) {
+      const appid = process.env.BAIDU_APPID;
+      const key = process.env.BAIDU_KEY;
       const salt = Date.now().toString();
       const sign = crypto.createHash('md5').update(appid + text + salt + key).digest('hex');
       const url = `https://fanyi-api.baidu.com/api/trans/vip/translate?q=${encodeURIComponent(text)}&from=zh&to=en&appid=${appid}&salt=${salt}&sign=${sign}`;
-      const ctrl = new AbortController();
-      const timeout = setTimeout(() => ctrl.abort(), 8000);
-      try {
-        const resp = await fetch(url, { signal: ctrl.signal });
-        const data = await resp.json();
-        if (data.trans_result && data.trans_result[0]) return data.trans_result[0].dst;
-        throw new Error(data.error_msg || 'Translation failed');
-      } finally {
-        clearTimeout(timeout);
-      }
+      const resp = await fetch(url);
+      const data = await resp.json();
+      if (data.trans_result && data.trans_result[0]) return data.trans_result[0].dst;
+      throw new Error(data.error_msg || 'Translation failed');
     }
 
     const EMPTY = "(eng_name IS NULL OR eng_name = '')";
@@ -579,14 +563,14 @@ router.post('/:id/translate-all', async (req, res) => {
 
     res.json({ translated: total });
   } catch (err) {
-    handleError(res, err);
+    res.status(500).json({ error: err.message });
   }
 });
 
 // POST /:id/translate-sewing (kept for backward compat)
-// 用相对路径，让浏览器基于原始 URL 解析，兼容 nginx 子路径部署
 router.post('/:id/translate-sewing', async (req, res) => {
-  res.redirect(307, './translate-all');
+  req.url = `/${req.params.id}/translate-all`;
+  res.redirect(307, `/api/versions/${req.params.id}/translate-all`);
 });
 
 module.exports = router;

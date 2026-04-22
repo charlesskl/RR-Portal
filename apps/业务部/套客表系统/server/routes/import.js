@@ -3,14 +3,10 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
-const crypto = require('crypto');
 const { getDb } = require('../services/db');
 const { parseWorkbook } = require('../services/excel-parser');
 
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 50 * 1024 * 1024 }, // 50 MB cap (matches nginx client_max_body_size)
-});
+const upload = multer({ storage: multer.memoryStorage() });
 
 // POST /api/import — upload and parse 本厂报价明细 Excel
 router.post('/', upload.single('file'), async (req, res) => {
@@ -18,9 +14,8 @@ router.post('/', upload.single('file'), async (req, res) => {
     return res.status(400).json({ error: 'No file uploaded. Use field name "file".' });
   }
 
-  // Write to temp file so ExcelJS can read it. Use random suffix to avoid
-  // ms-precision collisions under concurrent uploads.
-  const tmpPath = path.join(os.tmpdir(), `quotation_${crypto.randomBytes(8).toString('hex')}.xlsx`);
+  // Write to temp file so ExcelJS can read it
+  const tmpPath = path.join(os.tmpdir(), `quotation_${Date.now()}.xlsx`);
   fs.writeFileSync(tmpPath, req.file.buffer);
 
   try {
@@ -267,6 +262,7 @@ router.post('/', upload.single('file'), async (req, res) => {
         // Fabric from sewingDetails: only rows with both fabric_name and position
         // Formula: HK$/YD = 物料价(RMB) × 码点 × 1.05 ÷ 港币兑人民币
         const hkdRmb = (p.hkd_rmb_quote && p.hkd_rmb_quote > 0) ? p.hkd_rmb_quote : 0.85;
+        console.log('[import] sewingDetails count:', (data.sewingDetails || []).length, 'hkd_rmb_quote:', p.hkd_rmb_quote, '=> hkdRmb:', hkdRmb);
         for (const s of (data.sewingDetails || [])) {
           if (!s.fabric_name || !s.position) continue;
           const usageRounded = s.usage_amount != null ? Math.round(s.usage_amount * 10000) / 10000 : 0;
@@ -274,6 +270,7 @@ router.post('/', upload.single('file'), async (req, res) => {
           const priceHkd = s.material_price_rmb != null
             ? Math.round(s.material_price_rmb * markupPoint / hkdRmb * 10000) / 10000
             : null;
+          console.log('[import] fabric:', s.fabric_name, s.position, 'rmb:', s.material_price_rmb, 'markup:', markupPoint, '=> hkd:', priceHkd);
           insertRaw.run(versionId, 'fabric', s.fabric_name, s.position, usageRounded, priceHkd, sortIdx++);
         }
 
@@ -311,76 +308,63 @@ router.post('/', upload.single('file'), async (req, res) => {
         }
       }
 
-      // SewingDetail: plush 直插保留 per-row 结构（UI 依赖原始 position 与单独行）；
-      // spin 才走 merge-by-fabric_name（聚合同一布料的多个裁片）
+      // SewingDetail (plush/spin format) — merge by fabric_name only (all cut parts of same fabric collapse into one row)
+      // Labor rows (__labor__) keep their own separate group
       if (data.sewingDetails && data.sewingDetails.length > 0) {
+        const mergedSew = [];
+        for (const s of data.sewingDetails) {
+          // Merge key includes product_name so different sub-products stay separate
+          const isLabor = s.position === '__labor__';
+          const isEmbroidery = s.position === '__embroidery__';
+          const pn = s.product_name || '';
+          // All embroidery rows per product merge into one "电绣" row
+          const key = isLabor ? pn + '\x00__labor__\x00' + (s.fabric_name || '')
+            : isEmbroidery ? pn + '\x00__embroidery__'
+            : pn + '\x00' + (s.fabric_name || '');
+          const existing = mergedSew.find(m => {
+            const mpn = m.product_name || '';
+            const isML = m.position === '__labor__';
+            const isME = m.position === '__embroidery__';
+            const mk = isML ? mpn + '\x00__labor__\x00' + (m.fabric_name || '')
+              : isME ? mpn + '\x00__embroidery__'
+              : mpn + '\x00' + (m.fabric_name || '');
+            return mk === key;
+          });
+          if (existing) {
+            if (isEmbroidery) {
+              // Accumulate total RMB cost into material_price_rmb (usage stays 1)
+              const addCost = (parseFloat(s.usage_amount) || 0) * (parseFloat(s.material_price_rmb) || 0);
+              existing.material_price_rmb = Math.round(((existing.material_price_rmb || 0) + addCost) * 10000) / 10000;
+            } else {
+              existing.usage_amount = Math.round(((existing.usage_amount || 0) + (s.usage_amount || 0)) * 10000) / 10000;
+              existing.price_rmb = Math.round(((existing.price_rmb || 0) + (s.price_rmb || 0)) * 10000) / 10000;
+              existing.total_price_rmb = Math.round(((existing.total_price_rmb || 0) + (s.total_price_rmb || 0)) * 10000) / 10000;
+              if (!isLabor && s.position && s.position !== '__other__') existing.position = '__fabric__';
+            }
+          } else {
+            const pos = isLabor ? '__labor__' : isEmbroidery ? '__embroidery__' : (s.position === '__other__' ? '__other__' : (s.position ? '__fabric__' : null));
+            const initCost = isEmbroidery
+              ? (parseFloat(s.usage_amount) || 0) * (parseFloat(s.material_price_rmb) || 0)
+              : (s.material_price_rmb || 0);
+            mergedSew.push({
+              ...s,
+              fabric_name: isEmbroidery ? '电绣' : (s.fabric_name || ''),
+              position: pos,
+              usage_amount: isEmbroidery ? 1 : (s.usage_amount || 0),
+              material_price_rmb: isEmbroidery ? Math.round(initCost * 10000) / 10000 : (s.material_price_rmb || 0),
+            });
+          }
+        }
         const insertSew = db.prepare(
           `INSERT INTO SewingDetail (version_id, product_name, eng_name, fabric_name, position, sub_product, cut_pieces, usage_amount, material_price_rmb, price_rmb, markup_point, total_price_rmb, sort_order)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         );
-
-        const isSpin = (data.format_type === 'spin');
-        if (!isSpin) {
-          // PLUSH: per-row direct insert. Pre-v1.2 legacy behavior that vq-body-cost.js,
-          // vq-purchase.js, bd-purchase.js all depend on (they filter by !position
-          // for generic fabrics and by position==='__labor__' for labor rows).
-          data.sewingDetails.forEach((s, i) => {
-            const subProd = s.product_eng || s.sub_product || null;
-            insertSew.run(
-              versionId, s.product_name, null, s.fabric_name, s.position, subProd,
-              s.cut_pieces, s.usage_amount, s.material_price_rmb, s.price_rmb,
-              s.markup_point, s.total_price_rmb, i
-            );
-          });
-        } else {
-          // SPIN: merge by (product_name, fabric_name) — cut parts of same fabric
-          // collapse into one row. Labor and embroidery get their own aggregation.
-          const mergedSew = [];
-          for (const s of data.sewingDetails) {
-            const isLabor = s.position === '__labor__';
-            const isEmbroidery = s.position === '__embroidery__';
-            const pn = s.product_name || '';
-            const key = isLabor ? pn + '\x00__labor__\x00' + (s.fabric_name || '')
-              : isEmbroidery ? pn + '\x00__embroidery__'
-              : pn + '\x00' + (s.fabric_name || '');
-            const existing = mergedSew.find(m => {
-              const mpn = m.product_name || '';
-              const isML = m.position === '__labor__';
-              const isME = m.position === '__embroidery__';
-              const mk = isML ? mpn + '\x00__labor__\x00' + (m.fabric_name || '')
-                : isME ? mpn + '\x00__embroidery__'
-                : mpn + '\x00' + (m.fabric_name || '');
-              return mk === key;
-            });
-            if (existing) {
-              if (isEmbroidery) {
-                const addCost = (parseFloat(s.usage_amount) || 0) * (parseFloat(s.material_price_rmb) || 0);
-                existing.material_price_rmb = Math.round(((existing.material_price_rmb || 0) + addCost) * 10000) / 10000;
-              } else {
-                existing.usage_amount = Math.round(((existing.usage_amount || 0) + (s.usage_amount || 0)) * 10000) / 10000;
-                existing.price_rmb = Math.round(((existing.price_rmb || 0) + (s.price_rmb || 0)) * 10000) / 10000;
-                existing.total_price_rmb = Math.round(((existing.total_price_rmb || 0) + (s.total_price_rmb || 0)) * 10000) / 10000;
-                if (!isLabor && s.position && s.position !== '__other__') existing.position = '__fabric__';
-              }
-            } else {
-              const pos = isLabor ? '__labor__' : isEmbroidery ? '__embroidery__' : (s.position === '__other__' ? '__other__' : (s.position ? '__fabric__' : null));
-              const initCost = isEmbroidery
-                ? (parseFloat(s.usage_amount) || 0) * (parseFloat(s.material_price_rmb) || 0)
-                : (s.material_price_rmb || 0);
-              mergedSew.push({
-                ...s,
-                fabric_name: isEmbroidery ? '电绣' : (s.fabric_name || ''),
-                position: pos,
-                usage_amount: isEmbroidery ? 1 : (s.usage_amount || 0),
-                material_price_rmb: isEmbroidery ? Math.round(initCost * 10000) / 10000 : (s.material_price_rmb || 0),
-              });
-            }
-          }
-          mergedSew.forEach((s, i) => {
-            const subProd = s.product_eng || s.sub_product || null;
-            insertSew.run(versionId, s.product_name, null, s.fabric_name, s.position, subProd, s.cut_pieces, s.usage_amount, s.material_price_rmb, s.price_rmb, s.markup_point, s.total_price_rmb, i);
-          });
-        }
+        mergedSew.forEach((s, i) => {
+          // eng_name: left empty for auto-translation of fabric_name
+          // sub_product: stores the character English name (e.g. "Chase") for sheet matching
+          const subProd = s.product_eng || s.sub_product || null;
+          insertSew.run(versionId, s.product_name, null, s.fabric_name, s.position, subProd, s.cut_pieces, s.usage_amount, s.material_price_rmb, s.price_rmb, s.markup_point, s.total_price_rmb, i);
+        });
       }
 
       // ProductDimension
@@ -398,11 +382,10 @@ router.post('/', upload.single('file'), async (req, res) => {
       }
     });
 
-    // Atomic: run insertAll + is_latest flip in one transaction so a mid-way
-    // failure in insertAll does not leave the version half-written while the
-    // next row's is_latest bit is still flipped.
+    insertAll();
+
+    // Mark this version as latest for this product (atomic)
     db.transaction(() => {
-      insertAll();
       db.prepare('UPDATE QuoteVersion SET is_latest = 0 WHERE product_id = ?').run(product.id);
       db.prepare('UPDATE QuoteVersion SET is_latest = 1 WHERE id = ?').run(versionId);
     })();
@@ -413,17 +396,17 @@ router.post('/', upload.single('file'), async (req, res) => {
       versionId,
       sheetName: data.sheetName,
       summary: {
-        moldParts: (data.moldParts || []).length,
-        hardwareItems: (data.hardwareItems || []).length,
-        packagingItems: (data.packagingItems || []).length,
-        electronicItems: (data.electronicItems || []).length,
-        materialPrices: (data.materialPrices || []).length,
-        machinePrices: (data.machinePrices || []).length,
+        moldParts: data.moldParts.length,
+        hardwareItems: data.hardwareItems.length,
+        packagingItems: data.packagingItems.length,
+        electronicItems: data.electronicItems.length,
+        materialPrices: data.materialPrices.length,
+        machinePrices: data.machinePrices.length,
       },
     });
   } catch (err) {
     console.error('Import error:', err);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ error: err.message, stack: err.stack });
   } finally {
     fs.unlink(tmpPath, () => {});
   }

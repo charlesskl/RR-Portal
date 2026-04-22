@@ -130,7 +130,7 @@ function fillCharacterSheet(ws, d) {
     const r = 23 + i;
     setVal(ws, r, 3, item.eng_name || item.fabric_name || '');
     setVal(ws, r, 4, item.fabric_name || '');
-    const unitPriceUsd = r2((parseFloat(item.material_price_rmb) || 0) / rmbUsdRate * 1.06);
+    const unitPriceUsd = r2((parseFloat(item.material_price_rmb) || 0) / 0.85 / 7.75 * 1.06);
     const usage = r2(item.usage_amount);
     setVal(ws, r, 10, unitPriceUsd);
     setVal(ws, r, 11, usage);
@@ -146,7 +146,7 @@ function fillCharacterSheet(ws, d) {
     setVal(ws, r, 4, item.fabric_name || '');
     const rmb = parseFloat(item.material_price_rmb) || 0;
     const unitPriceUsd = item.position === '__embroidery__'
-      ? r2(rmb / rmbUsdRate)
+      ? r2(rmb / 0.85 / 7.75)
       : r2(rmb / rmbUsdRate * 1.06);
     const usage = r2(parseFloat(item.usage_amount) || 0);
     setVal(ws, r, 10, unitPriceUsd);

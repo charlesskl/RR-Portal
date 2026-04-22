@@ -812,22 +812,15 @@ function fixSharedFormulas(wb) {
 
 async function exportVersion(versionId) {
   const d = loadData(versionId);
-  const isPlush = d.version.format_type === 'plush';
-  const templatePath = isPlush ? TEMPLATE_PATH_PLUSH : TEMPLATE_PATH;
   const wb = new ExcelJS.Workbook();
-  await wb.xlsx.readFile(templatePath);
+  await wb.xlsx.readFile(TEMPLATE_PATH);
 
   // Force Excel to recalculate all formulas on open
   wb.calcProperties = { fullCalcOnLoad: true };
 
   fixSharedFormulas(wb);
 
-  if (isPlush) {
-    // Plush template: first sheet has a dynamic name (e.g. "3K报价-印尼-260321")
-    const ws = wb.worksheets[0];
-    if (!ws) throw new Error('Plush template has no worksheets');
-    fillPlush(ws, d);
-  } else {
+  {
     const vqWs  = wb.getWorksheet('Vendor Quotation');
     const bcdWs = wb.getWorksheet('Body Cost Breakdown');
     if (!vqWs)  throw new Error('Template missing "Vendor Quotation" sheet');

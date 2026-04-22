@@ -11,15 +11,14 @@ const PORT = process.env.PORT || 3000;
 initDb();
 
 // Middleware
-const corsOrigin = process.env.CORS_ORIGIN || 'http://localhost';
-app.use(cors({ origin: corsOrigin.split(',').map(s => s.trim()) }));
+app.use(cors());
 app.use(express.json());
+
+// Health check for platform compose healthcheck
+app.get('/health', (req, res) => res.json({ status: 'ok' }));
 
 // Serve static files from client directory
 app.use(express.static(path.join(__dirname, '../client')));
-
-// Health check
-app.get('/health', (req, res) => res.json({ status: 'ok' }));
 
 // API routes
 app.use('/api/products', require('./routes/products'));

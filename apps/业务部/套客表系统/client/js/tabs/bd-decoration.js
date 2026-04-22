@@ -92,7 +92,7 @@ const tab_bd_decoration = {
           }
           try {
             // Painting is a singleton section — use PUT /sections/painting (no itemId)
-            await fetch(`${api.BASE}/api/versions/${versionId}/sections/painting`, {
+            await fetch(`/api/versions/${versionId}/sections/painting`, {
               method: 'PUT',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify(update),

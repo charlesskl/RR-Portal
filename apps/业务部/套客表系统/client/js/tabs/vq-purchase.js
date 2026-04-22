@@ -148,7 +148,7 @@ const tab_vq_purchase = {
     container.querySelector('#otherAutoTranslate')?.addEventListener('click', async () => {
       try {
         showToast('正在翻译...', 'info');
-        const r = await fetch(`${api.BASE}/api/versions/${versionId}/translate-all`, { method: 'POST' });
+        const r = await fetch(`/api/versions/${versionId}/translate-all`, { method: 'POST' });
         const d = await r.json();
         if (!r.ok) throw new Error(d.error);
         showToast(`已翻译 ${d.translated} 条`, 'success');

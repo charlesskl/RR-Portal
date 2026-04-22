@@ -389,7 +389,7 @@ const app = (() => {
     document.getElementById('btnTranslateAll').addEventListener('click', async () => {
       try {
         showToast('正在翻译，请稍候...', 'info');
-        const r = await fetch(`${api.BASE}/api/versions/${currentVersionId}/translate-all`, { method: 'POST' });
+        const r = await fetch(`/api/versions/${currentVersionId}/translate-all`, { method: 'POST' });
         const d = await r.json();
         if (!r.ok) throw new Error(d.error);
         showToast(`已翻译 ${d.translated} 条名称`, 'success');
@@ -609,19 +609,11 @@ const app = (() => {
       dropZone.style.display = '';
       progress.style.display = 'none';
 
-      // Format: Spin Master → force 'spin' (dedicated detector).
-      // TOMY → let the server parser auto-detect between 'injection' and 'plush'
-      // based on sheet names (plush has 车缝明细/搪胶 sheets). Hardcoding
-      // 'injection' here breaks毛绒 exports.
+      // Format: Spin Master → 'spin'; TOMY → 'injection' (plush uses same format)
       const formatRow = document.getElementById('importFormatRow');
       const formatSel = document.getElementById('importFormatSelect');
-      if (client === 'Spin Master') {
-        formatSel.value = 'spin';
-        if (formatRow) formatRow.style.display = 'none';
-      } else {
-        formatSel.value = '';  // '' means "don't override" — server auto-detects
-        if (formatRow) formatRow.style.display = 'none';
-      }
+      formatSel.value = client === 'Spin Master' ? 'spin' : 'injection';
+      if (formatRow) formatRow.style.display = 'none';
 
       // File pick
       dropZone.onclick = () => fileInput.click();

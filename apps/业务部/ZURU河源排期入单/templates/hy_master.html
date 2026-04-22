@@ -398,7 +398,7 @@ function showActionChoice(data) {
     html += `<div class="small mb-3">`;
     if (data.modifications_count) html += `<span class="mod-badge">修改单 ${data.modifications_count} 条</span> `;
     if (data.new_count) html += `<span class="new-badge">新单 ${data.new_count} 条</span> `;
-    if (data.unknown_count) html += `<span class="badge bg-danger"">未识别 ${data.unknown_count} 条</span> `;
+    if (data.unknown_count) html += `<span class="badge bg-danger">未识别 ${data.unknown_count} 条</span> `;
     html += `</div>`;
     html += `<div class="d-flex gap-2">`;
     html += `<button class="btn btn-success flex-fill" onclick="exportOnly()"><i class="bi bi-file-earmark-spreadsheet me-1"></i>生成分类Excel</button>`;

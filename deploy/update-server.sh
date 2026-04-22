@@ -44,7 +44,8 @@ ORPHANS=$(docker ps -a --filter status=created --filter status=restarting --form
 if [[ -n "$ORPHANS" ]]; then
   echo "  Removing:"
   echo "$ORPHANS" | sed 's/^/    /'
-  docker ps -a --filter status=created --filter status=restarting -q | xargs -r docker rm
+  # 用 -f 强删（restarting 状态的容器 docker rm 会拒绝）
+  docker ps -a --filter status=created --filter status=restarting -q | xargs -r docker rm -f
 fi
 
 # ─── Step 2: Pull latest + 算出变动文件 ───

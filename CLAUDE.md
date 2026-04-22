@@ -22,39 +22,43 @@ Always respond in 简体中文 (Simplified Chinese). Code, commands, file paths 
 
 ```
 RR-Portal/
-├── apps/                    — 独立应用（当前全部 standalone）
-│   ├── huadeng/             — 华登包材管理 (Flask)
-│   ├── jiangping/           — 采购订单管理 (Flask)
-│   ├── liwenjuan/           — 成品核对系统 (Flask)
-│   ├── paiji/               — AI注塑啤机排产系统 (Node.js + React)
-│   ├── peise/               — 配色库存管理 (Flask)
-│   ├── quotation/           — 套客表系统 (Node.js)
-│   ├── task-api/            — 任务 API (Node.js，仅本地)
-│   ├── tomy-paiqi/          — TOMY排期核对系统 (Node.js + React)
-│   ├── zouhuo/              — A-doc 生成系统 (Node.js)
-│   └── zuru-order-system/   — ZURU 接单表入单 (Flask)
-├── plugins/                 — 同 apps/，历史分类遗留
-│   ├── figure-mold-cost-system/ — 模具手办采购订单 (Node.js)
-│   ├── new-product-schedule/    — 新产品开发进度表 (Node.js)
-│   ├── zuru-总排期入单/          — ZURU 总排期入单 (Flask)
-│   └── 工程啤办单/              — 工程啤办单 (Node.js)
-├── archived/                — 下线 / 历史代码，不参与部署
-├── core/                    — 核心服务 (FastAPI，用户/权限/插件注册)
-├── plugin_sdk/              — 插件 SDK（目前无插件在用）
-├── nginx/                   — Nginx 配置（含 nginx.cloud.conf）
-├── frontend/                — 门户静态页（Nginx 托管）
-├── deploy/                  — CI 部署脚本（update-server.sh = auto-deploy 主流程）
-├── devops/                  — 运维脚本 / 监控 / agent 配置
-│   └── scripts/safe-redeploy.sh  — 手动单服务安全部署
-├── scripts/                 — DB 初始化 SQL（init-db.sql）
-├── docs/                    — 文档（含 操作手册.md）
-├── docker-compose.yml       — 本地开发 compose
-├── docker-compose.cloud.yml — 云端部署 compose
-├── CLAUDE.md                — Claude Code 项目指令
-└── TODOS.md                 — 任务追踪
+├── apps/                          — 独立应用（当前全部 standalone）
+│   ├── 注塑啤机排产系统/            — paiji (Node.js + React)
+│   ├── 配色库存管理/                — peise (Flask)
+│   ├── 华登包材管理/                — huadeng (Flask)
+│   ├── 采购订单管理系统/            — jiangping (Flask + EasyOCR)
+│   ├── 成品核对系统/                — liwenjuan (Flask)
+│   ├── 套客表系统/                  — quotation (Node.js)
+│   ├── TOMY排期核对系统/            — tomy-paiqi (Node.js + React)
+│   ├── A-doc生成系統/               — zouhuo (Node.js)
+│   ├── ZURU接单表入单系统/          — zuru-order-system (Flask)
+│   └── task-api/                  — 任务 API (Node.js，仅本地 compose)
+├── plugins/                       — 同 apps/，历史分类遗留
+│   ├── 工程啤办单/                  — rr-production (Node.js)
+│   ├── 模具手办采购订单系统/        — figure-mold-cost-system (Node.js)
+│   └── ZURU总排期入单/              — zuru-master-schedule (Flask)
+├── archived/                      — 下线 / 历史代码，不参与部署
+├── core/                          — 核心服务 (FastAPI, 用户/权限/插件注册)
+├── plugin_sdk/                    — 插件 SDK（目前无插件在用）
+├── nginx/                         — Nginx 配置（含 nginx.cloud.conf）
+├── frontend/                      — 门户静态页（Nginx 托管）
+├── deploy/                        — CI 部署脚本（update-server.sh = auto-deploy 主流程）
+├── devops/                        — 运维脚本 / 监控 / agent 配置
+│   └── scripts/safe-redeploy.sh   — 手动单服务安全部署
+├── scripts/                       — DB 初始化 SQL（init-db.sql）
+├── docs/                          — 文档（含 操作手册.md）
+├── docker-compose.yml             — 本地开发 compose
+├── docker-compose.cloud.yml       — 云端部署 compose
+├── CLAUDE.md                      — Claude Code 项目指令
+└── TODOS.md                       — 任务追踪
 ```
 
-**备注**：历史上 `apps/` vs `plugins/` 试图区分 standalone vs plugin_sdk，但现实里**全部都是 standalone**。未来计划合并为单一 `apps/`。
+**命名约定**：
+- 文件夹名 = 前端显示名（中文），便于业务人直观识别
+- Docker service 名 = 英文（`paiji`, `peise`, `rr-production` 等），容器间 DNS / nginx upstream 靠这个解析，**永远保持不变**
+- URL 路径 = 英文（`/paiji/`, `/peise/`, `/rr/` 等），外部书签/链接稳定
+
+**备注**：`apps/` vs `plugins/` 的分类是历史遗留（原意区分 standalone vs plugin_sdk），实际**全部都是 standalone**。将来可能合并为单一 `apps/`。
 
 ## 常用命令
 
@@ -157,7 +161,6 @@ curl http://localhost:<port>/health
 |---------|------|---------------|------------|
 | core | FastAPI | 8000 | /api/ |
 | task-api | Node.js | 8080 | — |
-| new-product-schedule | Node.js | 3000 | /new-product-schedule/ |
 | figure-mold-cost-system | Node.js | 3001 | /figure-mold-cost-system/ |
 | zouhuo | Node.js | 3002 | /zouhuo/ |
 | jiangping | Flask | 5001 | /jiangping/ |
@@ -395,7 +398,6 @@ const data = JSON.parse(fs.readFileSync('data/data.json'));
 | rr-production (工程啤办单) | 工程啤办单 | Engineering | Standalone (Node.js) | /rr/ | https://github.com/hufan4308-blip/RR-production-system |
 | zouhuo | A-doc生成系統 | Engineering | Standalone (Node.js) | /zouhuo/ | https://github.com/duanlei10/123 |
 | task-api | 任务 API | — | Standalone (Node.js) | — | — |
-| new-product-schedule | 新产品开发进度表 | Engineering | Standalone (Node.js) | /new-product-schedule/ | https://github.com/hufan4308-blip/new-product-schedule |
 | figure-mold-cost-system | 模具手办采购订单 | Engineering | Standalone (Node.js) | /figure-mold-cost-system/ | https://github.com/hufan4308-blip/figure-mold-cost-system |
 | jiangping | 采购订单管理系统 | PMC跟仓管 | Standalone (Python/Flask) | /jiangping/ | https://github.com/fxxaxxx/jiangping |
 | paiji | AI注塑啤机排产系统 | 生产部 | Standalone (Node.js) | /paiji/ | https://github.com/duanlei10/234 |
@@ -416,6 +418,6 @@ const data = JSON.parse(fs.readFileSync('data/data.json'));
 - business-data-statistics 生产经营数据系统 (总部) — 2026-04-15
 - schedule-system (Production)
 - ZURU出货助手 zuru-shipment-deploy (业务部) — 2026-04-21（源码已归档到 archived/zuru-shipment-deploy/，需要恢复时 git mv 回来；服务器数据 /opt/rr-portal/apps/zuru-shipment-deploy/data/ 也保留）
-- 新产品开发进度表（中文重复版本） — 2026-04-22（git rm；英文版 new-product-schedule 仍在跑）
+- 新产品开发进度表 / new-product-schedule (Engineering) — 2026-04-22 完全下线（git rm 源码 + 删服务器 data/uploads；数据备份至 `~/rr-backups/new-product-schedule-20260422-*.tar.gz`）
 - quotation-system (旧版) — 2026-04-22（git rm；已被 apps/quotation/ 完全取代）
 - product-library — 2026-04-22（git rm；从未实现过，只有占位 README）

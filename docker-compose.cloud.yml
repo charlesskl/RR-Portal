@@ -136,33 +136,9 @@ services:
     networks:
       - platform-net
 
-  new-product-schedule:
-    build:
-      context: ./plugins/new-product-schedule
-      dockerfile: Dockerfile
-    environment:
-      - PORT=3000
-      - DATA_PATH=/app/data
-    volumes:
-      - ./plugins/new-product-schedule/data:/app/data
-      - ./plugins/new-product-schedule/uploads:/app/uploads
-    healthcheck:
-      test: ["CMD", "wget", "-qO", "/dev/null", "http://127.0.0.1:3000/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-    restart: unless-stopped
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
-    networks:
-      - platform-net
-
   figure-mold-cost-system:
     build:
-      context: ./plugins/figure-mold-cost-system
+      context: ./plugins/模具手办采购订单系统
       dockerfile: Dockerfile
     environment:
       - PORT=3001
@@ -170,8 +146,8 @@ services:
       - DATA_PATH=/app/data
       - UPLOADS_PATH=/app/public/uploads
     volumes:
-      - ./plugins/figure-mold-cost-system/data:/app/data
-      - ./plugins/figure-mold-cost-system/public/uploads:/app/public/uploads
+      - ./plugins/模具手办采购订单系统/data:/app/data
+      - ./plugins/模具手办采购订单系统/public/uploads:/app/public/uploads
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
       interval: 10s
@@ -188,7 +164,7 @@ services:
 
   zouhuo:
     build:
-      context: ./apps/zouhuo
+      context: ./apps/A-doc生成系統
       dockerfile: Dockerfile
     environment:
       - PORT=3002
@@ -199,8 +175,8 @@ services:
       - RATE_LIMIT_MAX=200
       - MAX_FILE_SIZE_MB=50
     volumes:
-      - ./apps/zouhuo/data:/app/server/data
-      - ./apps/zouhuo/uploads:/app/server/uploads
+      - ./apps/A-doc生成系統/data:/app/server/data
+      - ./apps/A-doc生成系統/uploads:/app/server/uploads
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3002/health"]
       interval: 10s
@@ -217,7 +193,7 @@ services:
 
   jiangping:
     build:
-      context: ./apps/jiangping
+      context: ./apps/采购订单管理系统
       dockerfile: Dockerfile
     environment:
       - BASE_PATH=/jiangping
@@ -225,9 +201,9 @@ services:
       - UPLOAD_FOLDER=/app/uploads
       - SECRET_KEY=${JIANGPING_SECRET_KEY:?JIANGPING_SECRET_KEY is required}
     volumes:
-      - ./apps/jiangping/data:/app/data
-      - ./apps/jiangping/uploads:/app/uploads
-      - ./apps/jiangping/easyocr-models:/home/appuser/.EasyOCR
+      - ./apps/采购订单管理系统/data:/app/data
+      - ./apps/采购订单管理系统/uploads:/app/uploads
+      - ./apps/采购订单管理系统/easyocr-models:/home/appuser/.EasyOCR
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5001/health"]
       interval: 10s
@@ -246,14 +222,14 @@ services:
 
   paiji:
     build:
-      context: ./apps/paiji
+      context: ./apps/注塑啤机排产系统
       dockerfile: Dockerfile
     environment:
       - PORT=3000
       - DATA_PATH=/app/data
     volumes:
-      - ./apps/paiji/data:/app/data
-      - ./apps/paiji/uploads:/app/uploads
+      - ./apps/注塑啤机排产系统/data:/app/data
+      - ./apps/注塑啤机排产系统/uploads:/app/uploads
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
       interval: 10s
@@ -270,14 +246,14 @@ services:
 
   zuru-master-schedule:
     build:
-      context: ./plugins/zuru-总排期入单
+      context: ./plugins/ZURU总排期入单
       dockerfile: Dockerfile
     environment:
       - APP_PORT=5003
     volumes:
-      - "./plugins/zuru-总排期入单/data:/app/data"
-      - "./plugins/zuru-总排期入单/uploads:/app/uploads"
-      - "./plugins/zuru-总排期入单/exports:/app/exports"
+      - "./plugins/ZURU总排期入单/data:/app/data"
+      - "./plugins/ZURU总排期入单/uploads:/app/uploads"
+      - "./plugins/ZURU总排期入单/exports:/app/exports"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5003/health"]
       interval: 10s
@@ -296,7 +272,7 @@ services:
 
   zuru-order-system:
     build:
-      context: ./apps/zuru-order-system
+      context: ./apps/ZURU接单表入单系统
       dockerfile: Dockerfile
     environment:
       - PORT=5005
@@ -304,9 +280,9 @@ services:
       - LOCAL_MODE=0  # 云端：禁用任意路径浏览/check_path/config 写入
       - FLASK_DEBUG=0
     volumes:
-      - ./apps/zuru-order-system/data:/app/data
-      - ./apps/zuru-order-system/uploads:/app/uploads
-      - ./apps/zuru-order-system/exports:/app/exports
+      - ./apps/ZURU接单表入单系统/data:/app/data
+      - ./apps/ZURU接单表入单系统/uploads:/app/uploads
+      - ./apps/ZURU接单表入单系统/exports:/app/exports
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5005/health"]
       interval: 10s
@@ -325,14 +301,14 @@ services:
 
   quotation:
     build:
-      context: ./apps/quotation
+      context: ./apps/套客表系统
       dockerfile: Dockerfile
     environment:
       - PORT=3004
       - NODE_ENV=production
       - CORS_ORIGIN=${QUOTATION_CORS_ORIGIN:-http://8.148.146.194}
     volumes:
-      - ./apps/quotation/server/data:/app/server/data
+      - ./apps/套客表系统/server/data:/app/server/data
     healthcheck:
       # node:20-alpine 没有 wget/curl，用 node 内置 http 模块做健康检查
       test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:3004/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
@@ -352,7 +328,7 @@ services:
 
   tomy-paiqi:
     build:
-      context: ./apps/tomy-paiqi
+      context: ./apps/TOMY排期核对系统
       dockerfile: Dockerfile
     environment:
       - PORT=3006
@@ -375,7 +351,7 @@ services:
 
   liwenjuan:
     build:
-      context: ./apps/liwenjuan
+      context: ./apps/成品核对系统
       dockerfile: Dockerfile
     environment:
       - PORT=5004
@@ -383,7 +359,7 @@ services:
       - UPLOAD_FOLDER=/app/uploads
       - SECRET_KEY=${LIWENJUAN_SECRET_KEY:?LIWENJUAN_SECRET_KEY is required}
     volumes:
-      - ./apps/liwenjuan/uploads:/app/uploads
+      - ./apps/成品核对系统/uploads:/app/uploads
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5004/health"]
       interval: 10s
@@ -402,7 +378,7 @@ services:
 
   peise:
     build:
-      context: ./apps/peise
+      context: ./apps/配色库存管理
       dockerfile: Dockerfile
     environment:
       - BASE_PATH=/peise
@@ -411,7 +387,7 @@ services:
       - BAILIAN_MODEL=${PEISE_BAILIAN_MODEL:-qwen-vl-max-latest}
       - BAILIAN_BASE_URL=${PEISE_BAILIAN_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}
     volumes:
-      - ./apps/peise/instance:/app/instance
+      - ./apps/配色库存管理/instance:/app/instance
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5006/health"]
       interval: 10s
@@ -430,12 +406,12 @@ services:
 
   huadeng:
     build:
-      context: ./apps/huadeng
+      context: ./apps/华登包材管理
       dockerfile: Dockerfile
     environment:
       - DATA_PATH=/app/data
     volumes:
-      - ./apps/huadeng/data:/app/data
+      - ./apps/华登包材管理/data:/app/data
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5007/health"]
       interval: 10s

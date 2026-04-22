@@ -46,36 +46,15 @@ services:
       timeout: 10s
       retries: 3
 
-  new-product-schedule:
-    build:
-      context: ./plugins/new-product-schedule
-      dockerfile: Dockerfile
-    env_file:
-      - ./plugins/new-product-schedule/.env
-    volumes:
-      - "./plugins/new-product-schedule/data:/app/data"
-      - "./plugins/new-product-schedule/uploads:/app/uploads"
-    restart: unless-stopped
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
-    healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-
   figure-mold-cost-system:
     build:
-      context: ./plugins/figure-mold-cost-system
+      context: ./plugins/模具手办采购订单系统
       dockerfile: Dockerfile
     env_file:
-      - ./plugins/figure-mold-cost-system/.env
+      - ./plugins/模具手办采购订单系统/.env
     volumes:
-      - "./plugins/figure-mold-cost-system/data:/app/data"
-      - "./plugins/figure-mold-cost-system/public/uploads:/app/public/uploads"
+      - "./plugins/模具手办采购订单系统/data:/app/data"
+      - "./plugins/模具手办采购订单系统/public/uploads:/app/public/uploads"
     restart: unless-stopped
     logging:
       driver: json-file
@@ -90,13 +69,13 @@ services:
 
   zouhuo:
     build:
-      context: ./apps/zouhuo
+      context: ./apps/A-doc生成系統
       dockerfile: Dockerfile
     env_file:
-      - ./apps/zouhuo/.env
+      - ./apps/A-doc生成系統/.env
     volumes:
-      - "./apps/zouhuo/data:/app/server/data"
-      - "./apps/zouhuo/uploads:/app/server/uploads"
+      - "./apps/A-doc生成系統/data:/app/server/data"
+      - "./apps/A-doc生成系統/uploads:/app/server/uploads"
     restart: unless-stopped
     logging:
       driver: json-file
@@ -111,13 +90,13 @@ services:
 
   jiangping:
     build:
-      context: ./apps/jiangping
+      context: ./apps/采购订单管理系统
       dockerfile: Dockerfile
     env_file:
-      - ./apps/jiangping/.env
+      - ./apps/采购订单管理系统/.env
     volumes:
-      - "./apps/jiangping/data:/app/data"
-      - "./apps/jiangping/uploads:/app/uploads"
+      - "./apps/采购订单管理系统/data:/app/data"
+      - "./apps/采购订单管理系统/uploads:/app/uploads"
     mem_limit: 1g
     restart: unless-stopped
     logging:
@@ -133,13 +112,13 @@ services:
 
   paiji:
     build:
-      context: ./apps/paiji
+      context: ./apps/注塑啤机排产系统
       dockerfile: Dockerfile
     env_file:
-      - ./apps/paiji/.env
+      - ./apps/注塑啤机排产系统/.env
     volumes:
-      - "./apps/paiji/data:/app/data"
-      - "./apps/paiji/uploads:/app/uploads"
+      - "./apps/注塑啤机排产系统/data:/app/data"
+      - "./apps/注塑啤机排产系统/uploads:/app/uploads"
     restart: unless-stopped
     logging:
       driver: json-file
@@ -154,14 +133,14 @@ services:
 
   quotation:
     build:
-      context: ./apps/quotation
+      context: ./apps/套客表系统
       dockerfile: Dockerfile
     environment:
       - PORT=3004
       - NODE_ENV=production
       - CORS_ORIGIN=${QUOTATION_CORS_ORIGIN:-http://localhost}
     volumes:
-      - "./apps/quotation/server/data:/app/server/data"
+      - "./apps/套客表系统/server/data:/app/server/data"
     restart: unless-stopped
     logging:
       driver: json-file
@@ -176,7 +155,7 @@ services:
 
   tomy-paiqi:
     build:
-      context: ./apps/tomy-paiqi
+      context: ./apps/TOMY排期核对系统
       dockerfile: Dockerfile
     environment:
       - PORT=3006
@@ -195,12 +174,12 @@ services:
 
   zuru-master-schedule:
     build:
-      context: ./plugins/zuru-总排期入单
+      context: ./plugins/ZURU总排期入单
       dockerfile: Dockerfile
     volumes:
-      - "./plugins/zuru-总排期入单/data:/app/data"
-      - "./plugins/zuru-总排期入单/uploads:/app/uploads"
-      - "./plugins/zuru-总排期入单/exports:/app/exports"
+      - "./plugins/ZURU总排期入单/data:/app/data"
+      - "./plugins/ZURU总排期入单/uploads:/app/uploads"
+      - "./plugins/ZURU总排期入单/exports:/app/exports"
     restart: unless-stopped
     logging:
       driver: json-file
@@ -215,7 +194,7 @@ services:
 
   zuru-order-system:
     build:
-      context: ./apps/zuru-order-system
+      context: ./apps/ZURU接单表入单系统
       dockerfile: Dockerfile
     environment:
       - PORT=5005
@@ -223,9 +202,9 @@ services:
       - LOCAL_MODE=1
       - FLASK_DEBUG=0
     volumes:
-      - "./apps/zuru-order-system/data:/app/data"
-      - "./apps/zuru-order-system/uploads:/app/uploads"
-      - "./apps/zuru-order-system/exports:/app/exports"
+      - "./apps/ZURU接单表入单系统/data:/app/data"
+      - "./apps/ZURU接单表入单系统/uploads:/app/uploads"
+      - "./apps/ZURU接单表入单系统/exports:/app/exports"
     mem_limit: 512m
     memswap_limit: 512m
     restart: unless-stopped
@@ -243,14 +222,14 @@ services:
 
   peise:
     build:
-      context: ./apps/peise
+      context: ./apps/配色库存管理
       dockerfile: Dockerfile
     env_file:
-      - ./apps/peise/.env
+      - ./apps/配色库存管理/.env
     environment:
       - BASE_PATH=/peise
     volumes:
-      - "./apps/peise/instance:/app/instance"
+      - "./apps/配色库存管理/instance:/app/instance"
     mem_limit: 512m
     memswap_limit: 512m
     restart: unless-stopped
@@ -267,12 +246,12 @@ services:
 
   huadeng:
     build:
-      context: ./apps/huadeng
+      context: ./apps/华登包材管理
       dockerfile: Dockerfile
     environment:
       - DATA_PATH=/app/data
     volumes:
-      - "./apps/huadeng/data:/app/data"
+      - "./apps/华登包材管理/data:/app/data"
     mem_limit: 512m
     memswap_limit: 512m
     restart: unless-stopped

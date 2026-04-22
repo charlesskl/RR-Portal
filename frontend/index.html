@@ -259,13 +259,6 @@
             </div>
             <div class="plugin-item">
               <div class="plugin-info">
-                <div class="plugin-dot green" id="dotNewProductSchedule"></div>
-                <span class="plugin-name">新产品开发进度表</span>
-                <span class="plugin-tag">排期</span>
-              </div>
-            </div>
-            <div class="plugin-item">
-              <div class="plugin-info">
                 <div class="plugin-dot green" id="dotFigureMoldCost"></div>
                 <span class="plugin-name">模具手办采购订单</span>
                 <span class="plugin-tag">采购</span>
@@ -620,26 +613,6 @@
 
     <div class="detail-plugin-card">
       <div class="detail-plugin-left">
-        <div class="detail-plugin-icon" style="background:linear-gradient(135deg,#3b82f6,#06b6d4);">&#128197;</div>
-        <div>
-          <div class="detail-plugin-name">新产品开发进度表</div>
-          <div class="detail-plugin-desc">追踪新产品从开发到PO1出货全流程进度，支持Excel导入导出、按车间/客户/主管筛选统计</div>
-          <div class="feature-grid">
-            <div class="feature-tag">&#128197; 进度追踪</div>
-            <div class="feature-tag">&#128202; 汇总统计</div>
-            <div class="feature-tag">&#128230; Excel导入导出</div>
-            <div class="feature-tag">&#128247; 产品图片</div>
-          </div>
-        </div>
-      </div>
-      <div class="detail-plugin-right">
-        <div class="detail-plugin-status"><div class="plugin-dot green"></div> 运行中</div>
-        <a href="/new-product-schedule/" target="_blank" class="btn btn-primary">打开系统</a>
-      </div>
-    </div>
-
-    <div class="detail-plugin-card">
-      <div class="detail-plugin-left">
         <div class="detail-plugin-icon" style="background:linear-gradient(135deg,#f59e0b,#ef4444);">&#128296;</div>
         <div>
           <div class="detail-plugin-name">模具手办采购订单系统</div>
@@ -684,7 +657,6 @@ async function checkHealth() {
     await fetch('/health');
     const checks = [
       { name: 'rr', url: '/rr/health' },
-      { name: 'newProductSchedule', url: '/new-product-schedule/health' },
       { name: 'figureMoldCost', url: '/figure-mold-cost-system/health' },
       { name: 'zouhuo', url: '/zouhuo/health' },
       { name: 'jiangping', url: '/jiangping/health' },
@@ -705,7 +677,6 @@ async function checkHealth() {
     statusEl.textContent = healthy === total ? '所有服务运行正常' : healthy + '/' + total + ' 个服务运行中';
 
     updateDots('rr', '/rr/health');
-    updateDot('dotNewProductSchedule', '/new-product-schedule/health');
     updateDot('dotFigureMoldCost', '/figure-mold-cost-system/health');
     updateDot('dotZouhuo', '/zouhuo/health');
     updateDot('dotZouhuoDetail', '/zouhuo/health');

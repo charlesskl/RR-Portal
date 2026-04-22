@@ -213,12 +213,6 @@
             </div>
             <div class="plugin-item">
               <div class="plugin-info">
-                <div class="plugin-dot gray" id="devProgressDot"></div>
-                <span class="plugin-name">新产品开发进度表</span>
-              </div>
-            </div>
-            <div class="plugin-item">
-              <div class="plugin-info">
                 <div class="plugin-dot gray" id="figureMoldDot"></div>
                 <span class="plugin-name">模具手办采购订单</span>
               </div>
@@ -379,26 +373,6 @@
       <div class="detail-plugin-right">
         <div class="detail-plugin-status"><div class="plugin-dot gray" id="zouhuoDetailDot"></div> 检查中...</div>
         <a href="/zouhuo/" target="_blank" class="btn btn-primary">打开系统</a>
-      </div>
-    </div>
-
-    <div class="detail-plugin-card">
-      <div class="detail-plugin-left">
-        <div class="detail-plugin-icon" style="background:linear-gradient(135deg,#3b82f6,#06b6d4);">&#128197;</div>
-        <div>
-          <div class="detail-plugin-name">新产品开发进度表</div>
-          <div class="detail-plugin-desc">追踪新产品从开发到PO1出货全流程进度，支持Excel导入导出、按车间/客户/主管筛选统计</div>
-          <div class="feature-grid">
-            <div class="feature-tag">&#128197; 进度追踪</div>
-            <div class="feature-tag">&#128202; 汇总统计</div>
-            <div class="feature-tag">&#128230; Excel导入导出</div>
-            <div class="feature-tag">&#128247; 产品图片</div>
-          </div>
-        </div>
-      </div>
-      <div class="detail-plugin-right">
-        <div class="detail-plugin-status"><div class="plugin-dot gray" id="devProgressDetailDot"></div> 检查中...</div>
-        <a href="/new-product-schedule/" target="_blank" class="btn btn-primary">打开系统</a>
       </div>
     </div>
 
@@ -681,7 +655,6 @@ async function checkHealth() {
     var checks = [
       { name: 'rr', url: '/rr/health', dot: 'rrDot', detailDot: 'rrDetailDot' },
       { name: 'zouhuo', url: '/zouhuo/health', dot: 'zouhuoDot', detailDot: 'zouhuoDetailDot' },
-      { name: 'devProgress', url: '/new-product-schedule/health', dot: 'devProgressDot', detailDot: 'devProgressDetailDot' },
       { name: 'figureMold', url: '/figure-mold-cost-system/health', dot: 'figureMoldDot', detailDot: 'figureMoldDetailDot' },
       { name: 'jiangping', url: '/jiangping/health', dot: 'jiangpingDot', detailDot: 'jiangpingDetailDot' },
       { name: 'paiji', url: '/paiji/health', dot: 'paijiDot', detailDot: 'paijiDetailDot' },

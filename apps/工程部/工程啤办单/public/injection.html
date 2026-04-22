@@ -945,7 +945,7 @@ function renderTotalData() {
         <td><strong>${esc(o.order_number || '-')}</strong>&nbsp;<i class="bi bi-chevron-down toggle-icon-${gid}" style="font-size:.7rem;color:#888"></i></td>
         <td>${esc(o.product_name || '-')}${badgeMat}${badgeInj}</td>
         <td>${esc(o.client_name || '-')}</td>
-        <td title="完成日期：${esc(o.completed_date || '-')}${o.date ? '\\n接单日期：' + esc(o.date) : ''}">${esc(o.completed_date ? o.completed_date.slice(5) : (o.date ? o.date.slice(5) : '-'))}</td>
+        <td title="完成日期：${esc(o.completed_date || '-')}${o.date ? '&#10;接单日期：' + esc(o.date) : ''}">${esc(o.completed_date ? o.completed_date.slice(5) : (o.date ? o.date.slice(5) : '-'))}</td>
         <td>${esc(o.workshop || '-')}</td>
         <td class="text-end fw-bold" style="color:${o.total_material_cost ? '#1a6e3a' : '#aaa'}">${o.total_material_cost.toFixed(2)}</td>
         <td class="text-end fw-bold" style="color:${o.total_injection_cost ? '#1a6e3a' : '#aaa'}">${o.skip_inj ? '<span class="text-muted" title="发至外厂订单不计啤办费">—</span>' : o.total_injection_cost.toFixed(2)}</td>
@@ -1038,7 +1038,7 @@ function renderCostData() {
         <td><strong>${esc(g.order_number)}</strong>&nbsp;<i class="bi bi-chevron-down toggle-icon-${gid}" style="font-size:.7rem;color:#888"></i></td>
         <td>${esc(g.product_name || '-')}</td>
         <td>${esc(g.client_name || '-')}</td>
-        <td title="完成日期：${esc(g.completed_date || '-')}${g.date ? '\\n接单日期：' + esc(g.date) : ''}">${esc(g.completed_date ? g.completed_date.slice(5) : (g.date ? g.date.slice(5) : '-'))}</td>
+        <td title="完成日期：${esc(g.completed_date || '-')}${g.date ? '&#10;接单日期：' + esc(g.date) : ''}">${esc(g.completed_date ? g.completed_date.slice(5) : (g.date ? g.date.slice(5) : '-'))}</td>
         <td>${esc(g.workshop || '-')}</td>
         <td class="text-end fw-bold" style="color:${g.totalCost ? '#1a6e3a' : '#aaa'}">${g.totalCost.toFixed(2)}</td>
       </tr>

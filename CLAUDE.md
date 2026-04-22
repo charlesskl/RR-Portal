@@ -70,7 +70,7 @@ RR Portal
    docker compose restart <service>  # 容器 ID 不变，nginx upstream 不受影响
    ```
 
-3. **`git push main` 和手动 SSH deploy 二选一**。push main 会触发隐性 auto-deploy（webhook），和手动 `docker compose up` 撞车 = 容器卡 Created + nginx emerg 炸（2026-04-22 事故根源）。
+3. **`git push main` 和手动 SSH deploy 不要同时动同一个 service**。push main 触发 `.github/workflows/deploy.yml` → `deploy/update-server.sh`，**现在是 diff-based 智能部署**（2026-04-22 之后）：只 rebuild 改动的服务，nginx 用 hot reload。两者并行动 **不同** service 是安全的；动同一 service 会容器名冲突。不确定就隔 60 秒。
 
 4. **`restart nginx` 前必扫僵尸容器**：
    ```bash

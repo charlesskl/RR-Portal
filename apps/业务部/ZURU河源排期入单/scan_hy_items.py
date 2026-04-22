@@ -7,18 +7,29 @@ import re
 import sys
 import json
 import io
+from contextlib import contextmanager
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 
-# AutoFilter补丁
-import openpyxl.descriptors.base as _db
-_orig = _db.MatchPattern.__set__
-def _fix(self, inst, val):
-    try: _orig(self, inst, val)
-    except ValueError: inst.__dict__[self.name] = None
-_db.MatchPattern.__set__ = _fix
-
 import openpyxl
+import openpyxl.descriptors.base as _db
+
+@contextmanager
+def _openpyxl_autofilter_patch():
+    """临时补丁：openpyxl MatchPattern 遇到非法值时设为 None 而不是抛 ValueError
+    某些排期文件含不规范字符导致无法读取，patch 在扫描范围内生效，退出后恢复。"""
+    _orig = _db.MatchPattern.__set__
+    def _fix(self, inst, val):
+        try:
+            _orig(self, inst, val)
+        except ValueError:
+            inst.__dict__[self.name] = None
+    _db.MatchPattern.__set__ = _fix
+    try:
+        yield
+    finally:
+        _db.MatchPattern.__set__ = _orig
+
 
 # 复用 hy_schedule.py 的 sheet 筛选逻辑，保持唯一事实源
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -92,7 +103,8 @@ def main():
         print(f'错误：目录不存在 {schedule_dir}')
         sys.exit(1)
 
-    mapping = scan(schedule_dir)
+    with _openpyxl_autofilter_patch():
+        mapping = scan(schedule_dir)
 
     # 保存
     data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data')

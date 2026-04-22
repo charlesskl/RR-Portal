@@ -8,10 +8,13 @@ import sys
 import json
 import time
 import logging
+import pickle
+import re
+import secrets
 import subprocess
 import threading
 from datetime import datetime
-from flask import Flask, render_template, request, jsonify, send_file
+from flask import Flask, render_template, request, jsonify, send_file, after_this_request
 from werkzeug.utils import secure_filename
 from werkzeug.middleware.proxy_fix import ProxyFix
 
@@ -34,14 +37,16 @@ app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
 app.config['UPLOAD_FOLDER'] = UPLOAD_DIR
 app.config['SCHEDULE_FOLDER'] = SCHEDULE_DIR
 app.config['EXPORT_FOLDER'] = EXPORT_DIR
-app.config['MAX_CONTENT_LENGTH'] = 512 * 1024 * 1024
+app.config['MAX_CONTENT_LENGTH'] = 200 * 1024 * 1024
 
 LOG_FILE = os.path.join(DATA_DIR, 'ops.log')
 os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
-logging.basicConfig(
-    filename=LOG_FILE, level=logging.INFO,
-    format='%(asctime)s %(message)s', encoding='utf-8'
-)
+logger = logging.getLogger('hy_schedule')
+logger.setLevel(logging.INFO)
+if not logger.handlers:
+    _fh = logging.FileHandler(LOG_FILE, encoding='utf-8')
+    _fh.setFormatter(logging.Formatter('%(asctime)s %(message)s'))
+    logger.addHandler(_fh)
 
 
 # ========== 排期文件状态 ==========
@@ -76,29 +81,93 @@ def _run_scan():
             [sys.executable, script, SCHEDULE_DIR],
             capture_output=True, text=True, timeout=600, encoding='utf-8'
         )
-        logging.info(f'[河源] 重建映射表: rc={result.returncode}')
+        logger.info(f'[河源] 重建映射表: rc={result.returncode}')
         return result.returncode == 0, result.stdout, result.stderr
     except Exception as e:
-        logging.error(f'[河源] 扫描失败: {e}')
+        logger.error(f'[河源] 扫描失败: {e}')
         return False, '', str(e)
 
 
-# ========== 缓存待处理订单 ==========
+# ========== 基于文件的待处理订单缓存（支持多worker/重启不丢失） ==========
 
-_pending_sessions = {}
+SESSION_DIR = os.path.join(DATA_DIR, 'sessions')
+os.makedirs(SESSION_DIR, exist_ok=True)
 _sessions_lock = threading.Lock()
+
+
+def _session_path(session_id):
+    if not session_id or not re.match(r'^[a-zA-Z0-9_-]+$', str(session_id)):
+        return None
+    return os.path.join(SESSION_DIR, f'{session_id}.pkl')
+
+
+def _save_session(session_id, data):
+    path = _session_path(session_id)
+    if not path:
+        return
+    with _sessions_lock:
+        with open(path, 'wb') as f:
+            pickle.dump(data, f)
+
+
+def _load_session(session_id):
+    path = _session_path(session_id)
+    if not path:
+        return None
+    with _sessions_lock:
+        if not os.path.exists(path):
+            return None
+        try:
+            with open(path, 'rb') as f:
+                return pickle.load(f)
+        except Exception:
+            return None
+
+
+def _delete_session(session_id):
+    path = _session_path(session_id)
+    if not path:
+        return
+    with _sessions_lock:
+        if os.path.exists(path):
+            os.remove(path)
 
 
 def _cleanup_pending():
     now = datetime.now()
     with _sessions_lock:
-        expired = [k for k, v in _pending_sessions.items()
-                   if (now - v['timestamp']).total_seconds() > 3600]
-        for k in expired:
-            del _pending_sessions[k]
+        for fn in os.listdir(SESSION_DIR):
+            if not fn.endswith('.pkl'):
+                continue
+            path = os.path.join(SESSION_DIR, fn)
+            try:
+                with open(path, 'rb') as f:
+                    data = pickle.load(f)
+                ts = data.get('timestamp')
+                if isinstance(ts, datetime) and (now - ts).total_seconds() > 3600:
+                    os.remove(path)
+            except Exception:
+                pass
 
 
 # ========== 路由 ==========
+
+@app.after_request
+def _set_csrf_cookie(response):
+    if 'hy_csrf_token' not in request.cookies:
+        response.set_cookie('hy_csrf_token', secrets.token_urlsafe(24), samesite='Lax')
+    return response
+
+
+@app.before_request
+def _csrf_protect():
+    if request.method in ('GET', 'HEAD', 'OPTIONS', 'TRACE'):
+        return
+    cookie_token = request.cookies.get('hy_csrf_token', '')
+    header_token = request.headers.get('X-CSRF-Token', '')
+    if not cookie_token or cookie_token != header_token:
+        return jsonify({'error': 'CSRF验证失败，请刷新页面后重试'}), 403
+
 
 @app.route('/')
 def index():
@@ -148,7 +217,7 @@ def upload_schedules():
     ok, stdout, stderr = _run_scan()
     info = _get_schedule_info()
 
-    logging.info(f'[河源] 上传排期文件: {saved}')
+    logger.info(f'[河源] 上传排期文件: {saved}')
     return jsonify({
         'ok': True,
         'uploaded': saved,
@@ -173,7 +242,7 @@ def delete_schedule():
     os.remove(filepath)
     _run_scan()
     info = _get_schedule_info()
-    logging.info(f'[河源] 删除排期文件: {filename}')
+    logger.info(f'[河源] 删除排期文件: {filename}')
     return jsonify({
         'ok': True,
         'msg': f'已删除 {filename}',
@@ -239,16 +308,15 @@ def hy_upload():
     try:
         analysis = analyze_orders(SCHEDULE_DIR, orders)
     except Exception as e:
-        logging.error(f'[河源] 分析失败: {e}')
+        logger.error(f'[河源] 分析失败: {e}')
         return jsonify({'error': f'分析失败: {e}'}), 500
 
     session_id = datetime.now().strftime('%Y%m%d%H%M%S%f')
-    with _sessions_lock:
-        _pending_sessions[session_id] = {
-            'orders': orders,
-            'analysis': analysis,
-            'timestamp': datetime.now(),
-        }
+    _save_session(session_id, {
+        'orders': orders,
+        'analysis': analysis,
+        'timestamp': datetime.now(),
+    })
 
     amb_for_ui = []
     for amb in analysis['ambiguous']:
@@ -279,9 +347,7 @@ def hy_submit_selection():
     session_id = data.get('session_id')
     selections = data.get('selections', {})
 
-    with _sessions_lock:
-        session = _pending_sessions.get(session_id)
-
+    session = _load_session(session_id)
     if not session:
         return jsonify({'error': '会话已过期，请重新上传'}), 400
 
@@ -306,11 +372,10 @@ def hy_submit_selection():
                               ambiguous_selections=selections,
                               export_dir=EXPORT_DIR)
     except Exception as e:
-        logging.error(f'[河源] 提交写入失败: {e}')
+        logger.error(f'[河源] 提交写入失败: {e}')
         return jsonify({'error': f'处理失败: {e}'}), 500
     finally:
-        with _sessions_lock:
-            _pending_sessions.pop(session_id, None)
+        _delete_session(session_id)
 
     resp = {
         'ok': True, 'msg': result['msg'],
@@ -337,8 +402,7 @@ def hy_export_only():
     if not session_id:
         return jsonify({'error': '缺少session_id'}), 400
 
-    with _sessions_lock:
-        session = _pending_sessions.get(session_id)
+    session = _load_session(session_id)
     if not session:
         return jsonify({'error': '会话已过期，请重新上传'}), 400
 
@@ -453,10 +517,9 @@ def hy_export_only():
     if not export_file:
         return jsonify({'error': '生成Excel失败'}), 500
 
-    with _sessions_lock:
-        _pending_sessions.pop(session_id, None)
+    _delete_session(session_id)
 
-    logging.info(f'[河源] 仅导出分类Excel: {len(new_rows)}行, 文件={export_file}')
+    logger.info(f'[河源] 仅导出分类Excel: {len(new_rows)}行, 文件={export_file}')
     return jsonify({
         'ok': True,
         'msg': f'已生成分类Excel（{len(new_rows)}行，不写入排期）',
@@ -484,4 +547,4 @@ if __name__ == '__main__':
     print('  ZURU 河源排期入单系统（云端版）')
     print(f'  http://localhost:{port}')
     print('=' * 50)
-    app.run(host='0.0.0.0', port=port, debug=True, use_reloader=False, threaded=True)
+    app.run(host='0.0.0.0', port=port, debug=os.environ.get('FLASK_DEBUG') == '1', use_reloader=False, threaded=True)

@@ -10,6 +10,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app import (
     _session_path, _save_session, _load_session, _delete_session, _cleanup_pending,
+    _safe_path_under, SCHEDULE_DIR, EXPORT_DIR,
     app as flask_app,
 )
 
@@ -74,3 +75,24 @@ def test_path_traversal_in_delete_blocked():
                            json={'filename': '../../../etc/passwd'},
                            headers={'Content-Type': 'application/json'})
         assert resp.status_code in (403, 400)
+
+
+def test_safe_path_rejects_absolute_traversal():
+    assert _safe_path_under(SCHEDULE_DIR, '../../../etc/passwd') is None
+
+
+def test_safe_path_rejects_sibling_prefix_attack():
+    """Regression: abspath(filepath).startswith(abspath(dir)) allowed sibling dirs
+    that share a prefix. commonpath blocks them correctly."""
+    assert _safe_path_under(SCHEDULE_DIR, '../schedules_backup') is None
+    assert _safe_path_under(SCHEDULE_DIR, '../schedulesfoo.xlsx') is None
+    assert _safe_path_under(EXPORT_DIR, '../exports_v2/leak.xlsx') is None
+
+
+def test_safe_path_accepts_normal_filename():
+    assert _safe_path_under(SCHEDULE_DIR, 'schedule_2026.xlsx') is not None
+    assert _safe_path_under(EXPORT_DIR, 'out_123.xlsx') is not None
+
+
+def test_safe_path_rejects_empty():
+    assert _safe_path_under(SCHEDULE_DIR, '') is None

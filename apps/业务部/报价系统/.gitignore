@@ -1,0 +1,16 @@
+node_modules/
+.env
+.env.local
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# SQLite runtime — WAL/SHM are created at runtime and must never be committed
+server/data/*.db-wal
+server/data/*.db-shm
+server/data/*.db-journal
+
+# legacy placeholder DBs from initial scaffold
+server/baojia.db
+server/database.sqlite
+server/quotation.db

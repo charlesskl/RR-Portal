@@ -1,6 +1,8 @@
 /* API client — all calls go through this module */
 const api = (() => {
-  const BASE = '';
+  // 从当前 URL 派生 BASE，这样 app 在 nginx 子路径（/baojia/）和根路径都能跑。
+  // location.pathname 是当前页面目录；去掉最后一段 file/slash 得到 '/baojia'。
+  const BASE = location.pathname.replace(/\/[^/]*$/, '');
 
   async function request(method, path, body) {
     const opts = {

@@ -220,6 +220,22 @@
 <input type="file" id="fileInput" accept=".xlsx,.xls" style="display:none">
 
 <!-- ─── Scripts ──────────────────────────────────────────────────────────── -->
+<script>
+  // nginx 子路径部署适配：把散落在其他文件里的 `fetch('/api/...')` 绝对路径
+  // 自动加上当前页面路径前缀（例如 /baojia）。api.js 自己已经处理了前缀，
+  // 所以这里跳过已加过前缀的 URL，避免双重前缀。
+  (function () {
+    const base = location.pathname.replace(/\/[^/]*$/, '');
+    if (!base) return;
+    const origFetch = window.fetch.bind(window);
+    window.fetch = function (url, opts) {
+      if (typeof url === 'string' && url.startsWith('/api/')) {
+        url = base + url;
+      }
+      return origFetch(url, opts);
+    };
+  })();
+</script>
 <script src="js/utils.js"></script>
 <script src="js/api.js"></script>
 <script src="js/tabs/vq-body-cost.js"></script>

@@ -175,6 +175,7 @@ curl http://localhost:<port>/health
 | liwenjuan 成品核对系统 | Flask | 5004 | /liwenjuan/ |
 | peise 配色库存管理 | Flask | 5006 | /peise/ |
 | huadeng 华登包材管理 | Flask | 5007 | /huadeng/ |
+| hy-schedule-system ZURU河源排期入单 | Flask | 5008 | /hy-schedule/ |
 
 ## 插件类型
 
@@ -411,6 +412,7 @@ const data = JSON.parse(fs.readFileSync('data/data.json'));
 | liwenjuan | 成品核对系统 | PMC跟仓管 | Standalone (Python/Flask) | /liwenjuan/ | — |
 | peise | 配色库存管理 | PMC跟仓管 | Standalone (Python/Flask) | /peise/ | https://github.com/fxxaxxx/peisecangku |
 | huadeng | 华登包材管理 | PMC跟仓管 | Standalone (Python/Flask) | /huadeng/ | — |
+| hy-schedule-system | ZURU河源排期入单 | 业务部 | Standalone (Python/Flask) | /hy-schedule/ | https://github.com/hanson678/hy-schedule-system |
 
 ### 旧插件（已删除）
 

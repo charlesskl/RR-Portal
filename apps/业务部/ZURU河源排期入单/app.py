@@ -95,6 +95,21 @@ os.makedirs(SESSION_DIR, exist_ok=True)
 _sessions_lock = threading.Lock()
 
 
+def _safe_path_under(base_dir, filename):
+    """Resolve filename under base_dir, rejecting traversal and sibling-prefix tricks.
+    Returns absolute path on success, None on rejection."""
+    if not filename:
+        return None
+    abs_base = os.path.abspath(base_dir)
+    abs_target = os.path.abspath(os.path.join(abs_base, filename))
+    try:
+        if os.path.commonpath([abs_base, abs_target]) != abs_base:
+            return None
+    except ValueError:
+        return None
+    return abs_target
+
+
 def _session_path(session_id):
     if not session_id or not re.match(r'^[a-zA-Z0-9_-]+$', str(session_id)):
         return None
@@ -234,8 +249,8 @@ def delete_schedule():
     filename = (request.json or {}).get('filename', '')
     if not filename:
         return jsonify({'error': '缺少文件名'}), 400
-    filepath = os.path.join(SCHEDULE_DIR, filename)
-    if not os.path.abspath(filepath).startswith(os.path.abspath(SCHEDULE_DIR)):
+    filepath = _safe_path_under(SCHEDULE_DIR, filename)
+    if not filepath:
         return jsonify({'error': '非法路径'}), 403
     if not os.path.exists(filepath):
         return jsonify({'error': '文件不存在'}), 404
@@ -307,11 +322,11 @@ def hy_upload():
 
     try:
         analysis = analyze_orders(SCHEDULE_DIR, orders)
-    except Exception as e:
-        logger.error(f'[河源] 分析失败: {e}')
-        return jsonify({'error': f'分析失败: {e}'}), 500
+    except Exception:
+        logger.exception('[河源] 分析失败')
+        return jsonify({'error': '排期分析失败，请稍后重试或联系管理员'}), 500
 
-    session_id = datetime.now().strftime('%Y%m%d%H%M%S%f')
+    session_id = secrets.token_urlsafe(16)
     _save_session(session_id, {
         'orders': orders,
         'analysis': analysis,
@@ -371,9 +386,9 @@ def hy_submit_selection():
         result = write_orders(SCHEDULE_DIR, orders,
                               ambiguous_selections=selections,
                               export_dir=EXPORT_DIR)
-    except Exception as e:
-        logger.error(f'[河源] 提交写入失败: {e}')
-        return jsonify({'error': f'处理失败: {e}'}), 500
+    except Exception:
+        logger.exception('[河源] 提交写入失败')
+        return jsonify({'error': '处理失败，请稍后重试或联系管理员'}), 500
     finally:
         _delete_session(session_id)
 
@@ -409,8 +424,9 @@ def hy_export_only():
     orders = session['orders']
     try:
         analysis = analyze_orders(SCHEDULE_DIR, orders)
-    except Exception as e:
-        return jsonify({'error': f'分析失败: {e}'}), 500
+    except Exception:
+        logger.exception('[河源] 分析失败(export-only)')
+        return jsonify({'error': '排期分析失败，请稍后重试或联系管理员'}), 500
 
     import re
     for amb in analysis['ambiguous']:
@@ -533,8 +549,8 @@ def hy_export_only():
 
 @app.route('/api/hy-export-download/<filename>')
 def hy_export_download(filename):
-    filepath = os.path.join(EXPORT_DIR, filename)
-    if not os.path.abspath(filepath).startswith(os.path.abspath(EXPORT_DIR)):
+    filepath = _safe_path_under(EXPORT_DIR, filename)
+    if not filepath:
         return jsonify({'error': '非法路径'}), 403
     if not os.path.exists(filepath):
         return jsonify({'error': '文件不存在'}), 404
@@ -542,7 +558,7 @@ def hy_export_download(filename):
 
 
 if __name__ == '__main__':
-    port = int(os.environ.get('APP_PORT', 5006))
+    port = int(os.environ.get('APP_PORT', 5008))
     print('=' * 50)
     print('  ZURU 河源排期入单系统（云端版）')
     print(f'  http://localhost:{port}')

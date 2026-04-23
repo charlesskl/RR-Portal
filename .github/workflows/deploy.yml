@@ -33,6 +33,8 @@ jobs:
             export BEFORE_COMMIT="${{ github.event.before }}"
             export AFTER_COMMIT="${{ github.event.after }}"
             cd /opt/rr-portal
+            echo "=== Script version check ==="
+            grep -c "recreate" deploy/update-server.sh && echo "[OK] update-server.sh contains recreate logic" || echo "[WARN] update-server.sh MISSING recreate logic"
             bash deploy/update-server.sh
             echo ""
             echo "=== Verify Portal Content (localhost) ==="

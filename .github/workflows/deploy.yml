@@ -35,32 +35,12 @@ jobs:
             cd /opt/rr-portal
             bash deploy/update-server.sh
             echo ""
-            echo "=== Direct file check ==="
-            if grep -q "河源排期" frontend/index.cloud.html; then
-              echo "[OK] frontend/index.cloud.html contains 河源排期"
-            else
-              echo "[FAIL] frontend/index.cloud.html MISSING 河源排期"
-              head -n 5 frontend/index.cloud.html
-            fi
-            echo ""
-            echo "=== Docker container check ==="
-            docker ps --format "table {{.Names}}\t{{.Image}}" | grep -i nginx || echo "No nginx containers found"
-            echo ""
-            echo "=== Container mounts ==="
-            docker inspect rr-portal-nginx-1 --format '{{range .Mounts}}{{.Type}}: {{.Source}} -> {{.Destination}}{{println}}{{end}}' 2>/dev/null || echo "Cannot inspect container"
-            echo ""
-            echo "=== Container file content ==="
-            docker exec rr-portal-nginx-1 sh -c 'wc -c /usr/share/nginx/html/index.html && head -3 /usr/share/nginx/html/index.html' 2>/dev/null || echo "Cannot read container file"
-            echo ""
             echo "=== Verify Portal Content (localhost) ==="
-            sleep 2
+            sleep 3
             if curl -sf --max-time 10 http://localhost/ 2>/dev/null | grep -q "河源排期"; then
               echo "[OK] localhost returns 河源排期"
             else
               echo "[FAIL] localhost missing 河源排期"
-              echo "--- Actual HTTP response (first 500 chars) ---"
-              curl -sf --max-time 10 http://localhost/ 2>/dev/null | head -c 500
-              echo ""
               exit 1
             fi
 

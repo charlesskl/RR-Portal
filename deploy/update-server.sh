@@ -264,6 +264,13 @@ fi
 
 # nginx 配置变动 → hot reload（零停机）
 if [[ "$NGINX_CHANGED" -eq 1 ]] || [[ "$FRONTEND_CHANGED" -eq 1 ]]; then
+  # 前端文件变更时，文件级 bind mount 会指向旧 inode（git pull 删旧建新）。
+  # 必须 recreate 容器才能让 Docker 重新绑定到新文件的 inode。
+  if [[ "$FRONTEND_CHANGED" -eq 1 ]]; then
+    echo "  [NGINX] 前端文件变动，recreate 容器以刷新 bind mount（约 3s 停机）"
+    docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --force-recreate --no-deps nginx
+  fi
+
   echo "  [NGINX] 配置/前端变动，hot reload（零停机）"
   _NGINX_TEST=$(docker exec rr-portal-nginx-1 nginx -t 2>&1 || true)
   if echo "$_NGINX_TEST" | grep -q "syntax is ok"; then

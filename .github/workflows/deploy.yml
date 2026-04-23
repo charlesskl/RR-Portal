@@ -37,12 +37,12 @@ jobs:
             grep -c "recreate" deploy/update-server.sh && echo "[OK] update-server.sh contains recreate logic" || echo "[WARN] update-server.sh MISSING recreate logic"
             bash deploy/update-server.sh
             echo ""
-            echo "=== Verify Portal Content (localhost) ==="
-            sleep 3
-            if curl -sf --max-time 10 http://localhost/ 2>/dev/null | grep -q "河源排期"; then
-              echo "[OK] localhost returns 河源排期"
+            echo "=== Verify Portal Content (container file) ==="
+            sleep 2
+            if docker exec rr-portal-nginx-1 grep -q "河源排期" /usr/share/nginx/html/index.html; then
+              echo "[OK] nginx container index.html contains 河源排期"
             else
-              echo "[FAIL] localhost missing 河源排期"
+              echo "[FAIL] nginx container index.html missing 河源排期"
               exit 1
             fi
 

@@ -18,6 +18,7 @@
       <li><a class="nav-link text-white" href="{{ url_for('transactions.in_list') }}"><i class="bi bi-box-arrow-in-down"></i> 入库</a></li>
       <li><a class="nav-link text-white" href="{{ url_for('transactions.out_list') }}"><i class="bi bi-box-arrow-up"></i> 出库</a></li>
       <li><a class="nav-link text-white" href="{{ url_for('pending.index') }}"><i class="bi bi-hourglass-split"></i> 待审核</a></li>
+      <li><a class="nav-link text-white" href="{{ url_for('settings.index') }}"><i class="bi bi-gear"></i> 设置</a></li>
     </ul>
     <form method="post" action="{{ url_for('auth.logout') }}" class="mt-auto">
       <button type="submit" class="btn btn-outline-light btn-sm w-100">

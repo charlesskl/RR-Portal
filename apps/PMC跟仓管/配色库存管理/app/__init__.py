@@ -20,12 +20,13 @@ def create_app(config_class=Config):
 
     db.init_app(app)
 
-    from .routes import dashboard, pigments, transactions, pending, auth as auth_routes
+    from .routes import dashboard, pigments, transactions, pending, settings as settings_routes, auth as auth_routes
     app.register_blueprint(auth_routes.bp)
     app.register_blueprint(dashboard.bp)
     app.register_blueprint(pigments.bp, url_prefix="/pigments")
     app.register_blueprint(transactions.bp, url_prefix="/transactions")
     app.register_blueprint(pending.bp, url_prefix="/pending")
+    app.register_blueprint(settings_routes.bp, url_prefix="/settings")
 
     from .auth import install_login_guard
     install_login_guard(app)
@@ -38,8 +39,19 @@ def create_app(config_class=Config):
     with app.app_context():
         db.create_all()
         _migrate_uq_brand_code_partial()
+        _migrate_pending_review_ref_tx_id()
 
     return app
+
+
+def _migrate_pending_review_ref_tx_id():
+    """把 pending_review.ref_tx_id 列加到老表(支持 type='edit_in')。幂等。"""
+    from sqlalchemy import text
+    conn = db.session.connection()
+    cols = {r[1] for r in conn.execute(text("PRAGMA table_info(pending_review)"))}
+    if "ref_tx_id" not in cols:
+        conn.execute(text("ALTER TABLE pending_review ADD COLUMN ref_tx_id INTEGER"))
+        db.session.commit()
 
 
 def _ensure_secret_key(app):

@@ -426,7 +426,7 @@ const data = JSON.parse(fs.readFileSync('data/data.json'));
 - 新产品开发进度表 / new-product-schedule (Engineering) — 2026-04-22 完全下线（git rm 源码 + 删服务器 data/uploads；数据备份至 `~/rr-backups/new-product-schedule-20260422-*.tar.gz`）
 - quotation-system (旧版) — 2026-04-22（git rm；已被 apps/quotation/ 完全取代）
 - product-library — 2026-04-22（git rm；从未实现过，只有占位 README）
-- 套客表系统 quotation (业务部) — 2026-04-23（源码已归档到 archived/套客表系统/，需要恢复时 git mv 回来；服务器数据备份至 `~/rr-backups/quotation-data-20260423-*/`；已被 apps/业务部/报价系统/ (baojia) 取代）
+- 套客表系统 quotation (业务部) — 2026-04-23（完全下线：git rm 源码 + 删除服务器数据备份；已被 apps/业务部/报价系统/ (baojia) 取代。需要恢复时可从 git history commit 26faed8 之前找回源码）
 
 ---
 

@@ -47,14 +47,7 @@ jobs:
             docker ps --format "table {{.Names}}\t{{.Image}}" | grep -i nginx || echo "No nginx containers found"
             echo ""
             echo "=== Container mounts ==="
-            docker inspect rr-portal-nginx-1 2>/dev/null | python3 -c "
-import sys, json
-d = json.load(sys.stdin)[0]
-print('Name:', d['Name'])
-print('Mounts:')
-for m in d.get('Mounts', []):
-    print(f'  {m.get(\"Type\")}: {m.get(\"Source\")} -> {m.get(\"Destination\")}')
-" || echo "Cannot inspect container"
+            docker inspect rr-portal-nginx-1 --format '{{range .Mounts}}{{.Type}}: {{.Source}} -> {{.Destination}}{{println}}{{end}}' 2>/dev/null || echo "Cannot inspect container"
             echo ""
             echo "=== Container file content ==="
             docker exec rr-portal-nginx-1 sh -c 'wc -c /usr/share/nginx/html/index.html && head -3 /usr/share/nginx/html/index.html' 2>/dev/null || echo "Cannot read container file"

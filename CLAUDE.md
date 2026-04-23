@@ -424,3 +424,44 @@ const data = JSON.parse(fs.readFileSync('data/data.json'));
 - 新产品开发进度表 / new-product-schedule (Engineering) — 2026-04-22 完全下线（git rm 源码 + 删服务器 data/uploads；数据备份至 `~/rr-backups/new-product-schedule-20260422-*.tar.gz`）
 - quotation-system (旧版) — 2026-04-22（git rm；已被 apps/quotation/ 完全取代）
 - product-library — 2026-04-22（git rm；从未实现过，只有占位 README）
+
+---
+
+## Learnings (2026-04-23)
+
+### Debugging: Portal Content Not Visible After Deploy
+
+**Scenario:** User reported "portal 上还是看不到" after PR #86 deployed. The issue involved multiple layers of misdiagnosis.
+
+#### Mistake 1: Did not verify the most basic assumption first
+The original PR only modified `frontend/index.html`, but the cloud portal uses `frontend/index.cloud.html` (mounted in the nginx container via docker-compose). I spent time debugging before checking which file the cloud deployment actually serves.
+
+**Lesson:** Always verify "which file is actually served" before debugging content issues. Check docker-compose mounts and nginx root config first.
+
+#### Mistake 2: Misunderstood Linux file-level bind mount behavior
+After fixing `index.cloud.html`, the container still served old content. The root cause: Linux bind mounts bind to **inodes**, not paths. When `git pull` replaces a file (unlink old inode + create new inode), the container's bind mount still points to the old inode.
+
+**Lesson:** File-level bind mounts in Docker are inode-bound. Any file replacement (git pull, mv, rm+touch) requires container recreate (`--force-recreate`) to refresh the mount. Prefer directory-level mounts for files that change frequently.
+
+**Fix applied:** `deploy/update-server.sh` now `--force-recreate`s the nginx container when frontend files change.
+
+#### Mistake 3: CI verification was fundamentally broken
+I kept trying to verify by `curl -sf http://localhost/` in CI. I missed that nginx `location = /` inherits `auth_basic` from the server block, so curl without credentials returns 401. The `-f` flag suppresses output on error, so `grep` always failed. Burned ~6 CI cycles on this false negative.
+
+**Lesson:** Before adding CI verification, trace the request path: check auth, check redirects, run `curl -v`. Never assume a simple HTTP 200.
+
+**Fix applied:** CI now verifies via `docker exec` directly on the container file, bypassing HTTP entirely.
+
+#### Mistake 4: Wasted CI cycles with workflow-only changes
+Multiple commits only modified `.github/workflows/deploy.yml`. The deploy script treats `.github/*` as non-runtime changes and skips deployment entirely. I was running CI to verify changes that never deployed.
+
+**Lesson:** If testing deployment changes, ensure the diff includes at least one runtime file (frontend, nginx config, app code) to trigger the actual deploy path.
+
+#### Diagnostic Checklist (for future similar issues)
+
+When a deployed file change is not visible, check in this order:
+
+1. **Is the correct file being modified?** Check docker-compose mounts and nginx root.
+2. **Is the container using a file-level bind mount?** If so, does it need recreate after git pull?
+3. **Is the verification method actually valid?** Check auth, run `curl -v`, inspect response body.
+4. **Only then suspect browser/CDN cache.**

@@ -352,6 +352,31 @@ services:
     networks:
       - platform-net
 
+  baojia:
+    build:
+      context: ./apps/业务部/报价系统
+      dockerfile: Dockerfile
+    environment:
+      - PORT=3007
+      - NODE_ENV=production
+    volumes:
+      - ./apps/业务部/报价系统/server/data:/app/server/data
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:3007/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    mem_limit: 512m
+    memswap_limit: 512m
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - platform-net
+
   tomy-paiqi:
     build:
       context: ./apps/业务部/TOMY排期核对系统

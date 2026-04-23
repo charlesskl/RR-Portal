@@ -313,6 +313,12 @@
             </div>
             <div class="plugin-item">
               <div class="plugin-info">
+                <div class="plugin-dot gray" id="baojiaDot"></div>
+                <span class="plugin-name">报价系统</span>
+              </div>
+            </div>
+            <div class="plugin-item">
+              <div class="plugin-info">
                 <div class="plugin-dot gray" id="tomyDot"></div>
                 <span class="plugin-name">TOMY排期核对系统</span>
               </div>
@@ -521,6 +527,26 @@
 
     <div class="detail-plugin-card">
       <div class="detail-plugin-left">
+        <div class="detail-plugin-icon" style="background:linear-gradient(135deg,#8b5cf6,#6366f1);">&#128200;</div>
+        <div>
+          <div class="detail-plugin-name">报价系统</div>
+          <div class="detail-plugin-desc">SPIN / TOMY 供应商报价管理，Excel 导入解析（模具/车缝/包装/五金/人工），参考价格库，SPIN 报价单导出</div>
+          <div class="feature-grid">
+            <div class="feature-tag">&#128196; Excel导入</div>
+            <div class="feature-tag">&#128295; 模具/车缝/包装</div>
+            <div class="feature-tag">&#128200; 多版本报价</div>
+            <div class="feature-tag">&#128230; SPIN VQ 导出</div>
+          </div>
+        </div>
+      </div>
+      <div class="detail-plugin-right">
+        <div class="detail-plugin-status"><div class="plugin-dot gray" id="baojiaDetailDot"></div> 检查中...</div>
+        <a href="/baojia/" target="_blank" class="btn btn-primary">打开系统</a>
+      </div>
+    </div>
+
+    <div class="detail-plugin-card">
+      <div class="detail-plugin-left">
         <div class="detail-plugin-icon" style="background:linear-gradient(135deg,#f59e0b,#ef4444);">&#128197;</div>
         <div>
           <div class="detail-plugin-name">TOMY排期核对系统</div>
@@ -691,6 +717,7 @@ async function checkHealth() {
       { name: 'zuruOrder', url: '/zuru-order-system/health', dot: 'zuruOrderDot', detailDot: 'zuruOrderDetailDot' },
       { name: 'liwenjuan', url: '/liwenjuan/health', dot: 'liwenjuanDot', detailDot: 'liwenjuanDetailDot' },
       { name: 'quotation', url: '/quotation/health', dot: 'quotationDot', detailDot: 'quotationDetailDot' },
+      { name: 'baojia', url: '/baojia/health', dot: 'baojiaDot', detailDot: 'baojiaDetailDot' },
       { name: 'tomy', url: '/tomy-paiqi/health', dot: 'tomyDot', detailDot: 'tomyDetailDot' },
       { name: 'zuruMaster', url: '/zuru-master/health', dot: 'zuruMasterDot', detailDot: 'zuruMasterDetailDot' },
       { name: 'hySchedule', url: '/hy-schedule/health', dot: 'hyScheduleDot', detailDot: 'hyScheduleDetailDot' },

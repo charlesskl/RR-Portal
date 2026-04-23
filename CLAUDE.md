@@ -38,6 +38,7 @@ RR-Portal/
 │   │   ├── ZURU接单表入单系统/      — zuru-order-system (Flask)
 │   │   ├── ZURU总排期入单/          — zuru-master-schedule (Flask)
 │   │   ├── 套客表系统/              — quotation (Node.js)
+│   │   ├── 报价系统/                — baojia (Node.js, SPIN/TOMY 供应商报价)
 │   │   └── TOMY排期核对系统/        — tomy-paiqi (Node.js + React)
 │   └── task-api/                  — 任务 API (Node.js，仅本地 compose，无部门)
 ├── archived/                      — 下线 / 历史代码，不参与部署
@@ -176,6 +177,7 @@ curl http://localhost:<port>/health
 | peise 配色库存管理 | Flask | 5006 | /peise/ |
 | huadeng 华登包材管理 | Flask | 5007 | /huadeng/ |
 | hy-schedule-system ZURU河源排期入单 | Flask | 5008 | /hy-schedule/ |
+| baojia 报价系统 | Node.js | 3007 | /baojia/ |
 
 ## 插件类型
 
@@ -413,6 +415,7 @@ const data = JSON.parse(fs.readFileSync('data/data.json'));
 | peise | 配色库存管理 | PMC跟仓管 | Standalone (Python/Flask) | /peise/ | https://github.com/fxxaxxx/peisecangku |
 | huadeng | 华登包材管理 | PMC跟仓管 | Standalone (Python/Flask) | /huadeng/ | — |
 | hy-schedule-system | ZURU河源排期入单 | 业务部 | Standalone (Python/Flask) | /hy-schedule/ | https://github.com/hanson678/hy-schedule-system |
+| baojia | 报价系统 | 业务部 | Standalone (Node.js) | /baojia/ | — |
 
 ### 旧插件（已删除）
 

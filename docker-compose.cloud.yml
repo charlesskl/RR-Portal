@@ -408,6 +408,7 @@ services:
       dockerfile: Dockerfile
     environment:
       - BASE_PATH=/peise
+      - TZ=Asia/Shanghai
       # OCR 走阿里云百炼 (Bailian) OpenAI 兼容端点 + 通义千问 VL
       - BAILIAN_API_KEY=${PEISE_BAILIAN_API_KEY:-}
       - BAILIAN_MODEL=${PEISE_BAILIAN_MODEL:-qwen-vl-max-latest}

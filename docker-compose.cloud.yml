@@ -332,6 +332,10 @@ services:
     environment:
       - PORT=3007
       - NODE_ENV=production
+      # 阿里云百炼 (Bailian/Qwen) —— 翻译按钮用，和 peise 共用同一把 API key
+      - BAILIAN_API_KEY=${BAOJIA_BAILIAN_API_KEY:-}
+      - BAILIAN_BASE_URL=${BAOJIA_BAILIAN_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}
+      - BAILIAN_TEXT_MODEL=${BAOJIA_BAILIAN_TEXT_MODEL:-qwen-turbo}
     volumes:
       - ./apps/业务部/报价系统/server/data:/app/server/data
     healthcheck:

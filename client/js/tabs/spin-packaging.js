@@ -10,15 +10,6 @@ const tab_spin_packaging = {
     const retailItems = items.filter(i => !i.pkg_section || i.pkg_section === 'retail');
     const cartonItems = items.filter(i => i.pkg_section === 'carton');
 
-    // Packing Labor: 半成品人工 + 包装人工 + 查货 from hardware_items
-    const params   = versionData.params || {};
-    const hkd_usd  = parseFloat(params.hkd_usd) || 7.75;
-    const LABOR_NAMES = /半成品人工|包装人工|查货/;
-    const laborItems = (versionData.hardware_items || []).filter(
-      h => h.part_category === 'labor_assembly' && LABOR_NAMES.test(h.name || '')
-    );
-    const laborTotal = laborItems.reduce((s, h) => s + (parseFloat(h.new_price) || 0) / hkd_usd, 0);
-
     const totalRetail = retailItems.reduce((s, i) => s + (parseFloat(i.quantity) || 0) * (parseFloat(i.unit_price != null ? i.unit_price : i.new_price) || 0), 0);
     const totalCarton = cartonItems.reduce((s, i) => s + (parseFloat(i.quantity) || 0) * (parseFloat(i.unit_price != null ? i.unit_price : i.new_price) || 0), 0);
 
@@ -67,32 +58,7 @@ const tab_spin_packaging = {
     }
 
     return renderSection('Retail Box', '零售包装', retailItems, totalRetail, 'retail')
-         + renderSection('Master Carton', '外箱', cartonItems, totalCarton, 'carton')
-         + `
-        <div class="spin-section" style="margin-bottom:16px">
-          <div class="spin-section-header">
-            <div class="spin-section-accent" style="background:#e67e22"></div>
-            <span class="spin-section-title">Packing Labor <span class="spin-section-subtitle">包装人工</span></span>
-            <span class="spin-section-total">Sub Total: ${formatNumber(laborTotal, 4)} USD</span>
-          </div>
-          <div class="spin-section-body">
-            <div class="data-table-wrap">
-              <table class="data-table">
-                <thead><tr>
-                  <th>名称</th><th>金额(USD)</th>
-                </tr></thead>
-                <tbody>
-                  ${laborItems.length ? laborItems.map(h => `
-                    <tr>
-                      <td>${escapeHtml(h.name || '')}</td>
-                      <td class="num">${formatNumber((parseFloat(h.new_price) || 0) / hkd_usd, 4)}</td>
-                    </tr>
-                  `).join('') : '<tr><td colspan="2" style="text-align:center;color:#aaa;padding:8px">暂无数据</td></tr>'}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>`;
+         + renderSection('Master Carton', '外箱', cartonItems, totalCarton, 'carton');
   },
 
   init(container, versionData, versionId) {

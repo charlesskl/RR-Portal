@@ -80,6 +80,9 @@ function detectLatestSheet(workbook) {
 
   // Extract date/number from anywhere in sheet name for sorting
   function parseSheetDate(name) {
+    // Prefer 8-digit dates (e.g. 20260415) over 6-digit (e.g. 260415)
+    const all8 = [...name.matchAll(/(\d{8})/g)].map(m => parseInt(m[1], 10));
+    if (all8.length > 0) return Math.max(...all8);
     // Find all 6-digit sequences anywhere in the name (e.g. 260406 in "260406改噶件")
     const all6 = [...name.matchAll(/(\d{6})/g)].map(m => parseInt(m[1], 10));
     if (all6.length > 0) return Math.max(...all6);
@@ -326,7 +329,57 @@ function parseRotocastItems(ws) {
   return items;
 }
 
-// ─── Sewing Details Parser (车缝明细 sheet) ────────────────────────────────
+// ─── Sewing Details Parser — Plush/TOMY 旧版（单 sheet，简单可靠）────────────
+
+function parseSewingDetailsPlush(workbook) {
+  const wsNames = workbook.worksheets.map(ws => ws.name);
+  const sewingSheet = wsNames.find(n => n.includes('车缝明细'));
+  if (!sewingSheet) return [];
+
+  const ws = workbook.getWorksheet(sewingSheet);
+  const items = [];
+  let currentProductName = null;
+  let lastFabricName = null;
+  let sortOrder = 0;
+
+  for (let row = 4; row <= 100; row++) {
+    const colI = strVal(ws.getCell(row, 9));
+    if (colI && colI.includes('合计')) break;
+
+    const colB = strVal(ws.getCell(row, 2));
+    const colC = strVal(ws.getCell(row, 3));
+    const colD = strVal(ws.getCell(row, 4));
+
+    // Product name row: B has value but C and D are empty
+    if (colB && !colC && !colD) {
+      currentProductName = colB;
+      continue;
+    }
+    if (!colC && !colD) continue;
+
+    // Inherit fabric_name from previous row if merged cell left it empty
+    if (colC) lastFabricName = colC;
+    const fabricName = colC || lastFabricName;
+
+    const position = fabricName === '人工' ? '__labor__' : colD;
+
+    items.push({
+      product_name: currentProductName,
+      fabric_name: fabricName,
+      position,
+      cut_pieces: numVal(ws.getCell(row, 5)) ? Math.round(numVal(ws.getCell(row, 5))) : null,
+      usage_amount: numVal(ws.getCell(row, 6)),
+      material_price_rmb: Math.round((numVal(ws.getCell(row, 7)) || 0) * 1.08 * 10000) / 10000,
+      price_rmb: numVal(ws.getCell(row, 8)),
+      markup_point: numVal(ws.getCell(row, 9)) || 1.15,
+      total_price_rmb: numVal(ws.getCell(row, 10)),
+      sort_order: sortOrder++,
+    });
+  }
+  return items;
+}
+
+// ─── Sewing Details Parser — SPIN 版（多 sheet，支持多角色）────────────────
 
 function parseSewingDetails(workbook) {
   const wsNames = workbook.worksheets.map(ws => ws.name);
@@ -350,7 +403,7 @@ function parseSewingDetails(workbook) {
 
     // Dynamically find header row (contains 物料名称 or 裁片部位)
     // Also detect usage and price columns from header row
-    let dataStartRow = 4;
+    let dataStartRow = 0; // 0 = not found
     let usageCol = 6;  // default col F
     let priceCol = 7;  // default col G
     for (let r = 1; r <= 10; r++) {
@@ -378,6 +431,9 @@ function parseSewingDetails(workbook) {
         currentProductName = b;
       }
     }
+
+    // 没有找到标准表头（物料名称/裁片部位）的 sheet 跳过，避免误读
+    if (!dataStartRow) continue;
 
     for (let row = dataStartRow; row <= 300; row++) {
       const colI = strVal(ws.getCell(row, 9));
@@ -489,7 +545,7 @@ function parseCostItems(ws, format) {
       const colA = strVal(ws.getCell(r, 1));
       const name = strVal(ws.getCell(r, 2));
       if (!name || colA) continue;
-      if (!name.includes('人工')) continue;
+      if (!name.includes('人工') && !name.includes('查货')) continue;
       const quantity = numVal(ws.getCell(r, 3));
       const new_price = numVal(ws.getCell(r, 4));
       laborItems.push({ name, quantity, old_price: null, new_price, difference: null, tax_type: null });
@@ -684,7 +740,26 @@ function parseElectronics(workbook, mainWs) {
       const total_usd = Math.round(unit_price_usd * quantity * 10000) / 10000;
       electronicItems.push({ part_name, spec, quantity, unit_price_usd, total_usd, remark, sort_order: electronicItems.length });
     }
-    return { electronicItems, electronicSummary: null };
+    // Parse summary rows (贴片成本, 人工成本, 测试费用, 包装运输 etc.)
+    const electronicSummary = { parts_cost: 0, bonding_cost: 0, smt_cost: 0, labor_cost: 0, test_cost: 0, packaging_transport: 0, total_cost: 0 };
+    for (let r = 1; r <= elecWs.rowCount; r++) {
+      // Scan all columns for summary labels
+      for (let c = 1; c <= 10; c++) {
+        const label = strVal(elecWs.getCell(r, c)) || '';
+        if (!label) continue;
+        // Value is in the next non-empty column
+        const val = numVal(elecWs.getCell(r, c + 1));
+        if (val === null) continue;
+        if (/零件成本/.test(label)) electronicSummary.parts_cost = val;
+        else if (/邦定成本/.test(label)) electronicSummary.bonding_cost = val;
+        else if (/贴片成本/.test(label)) electronicSummary.smt_cost = val;
+        else if (/人工成本/.test(label)) electronicSummary.labor_cost = val;
+        else if (/测试费/.test(label)) electronicSummary.test_cost = val;
+        else if (/包装运输/.test(label)) electronicSummary.packaging_transport = val;
+        else if (/合计成本/.test(label)) electronicSummary.total_cost = val;
+      }
+    }
+    return { electronicItems, electronicSummary };
   }
 
   // Fallback: read from main sheet rows where col A = "电子"
@@ -885,20 +960,199 @@ function parseSpinLaborFromMain(ws) {
   for (let r = 1; r <= ws.rowCount; r++) {
     const label = strVal(ws.getCell(r, 2));
     if (!label || !LABOR_WHITELIST.test(label)) continue;
-    const laborRate = numVal(ws.getCell(r, 11)) || 0; // col 11 = labor rate (US$/hr)
+    const laborRateUsd = numVal(ws.getCell(r, 6)) || 0; // col F = labor rate USD/hr (3.226)
     chars.forEach(({ col, name: charName }) => {
-      const stdHour = numVal(ws.getCell(r, col));
-      if (stdHour == null || stdHour <= 0) return;
+      const costHkd = numVal(ws.getCell(r, col)); // col D = HKD cost per toy
+      if (costHkd == null || costHkd <= 0) return;
+      // Store labor rate as RMB equivalent (display recovers: rateUsd = material_price_rmb / rmbUsdRate)
+      const laborRateRmb = laborRateUsd * 0.85 * 7.75;
+      // Store HKD cost in price_rmb field; display converts: usdPerToy = price_rmb / hkd_usd
+      const defaultHkdUsd = 7.75;
+      const usdPerToy = costHkd / defaultHkdUsd;
+      const stdHour = laborRateUsd > 0 ? usdPerToy / laborRateUsd : 0;
       items.push({
         fabric_name: label,
         position: '__labor__',
         sub_product: charName,
         product_name: charName,
         product_eng: charName,
-        usage_amount: stdHour,       // Standard Hour
-        material_price_rmb: laborRate, // Labor rate (US$/hr)
+        usage_amount: stdHour,            // Standard Hour (approximate; display recomputes using actual hkd_usd)
+        material_price_rmb: laborRateRmb, // Labor rate encoded as RMB-equivalent
+        price_rmb: costHkd,              // HKD cost from col D
         sort_order: items.length,
       });
+    });
+  }
+  return items;
+}
+
+// ─── SPIN In-Housed Molding Parser ───────────────────────────────────────────
+// Supports two layouts:
+//   Chinese: 模号|名称|料型|料重(G)|料价(G)|机型(A)|件数|套数|目标数|工|料金额|模费人民币|...|实际秒数|报客秒数|报客模费
+//   English: Parts|Mold No.|Part No.|Cav/UP(×2 cols)|Material|Resin price(US$/kg)|Wt. per toy(g)|US$ per toy|Molding Cost|Cycle time|Machine size|Client sec
+function parseSpinMoldingFromMain(ws) {
+  if (!ws) return [];
+  const items = [];
+
+  // Find header row: contains "模号" (Chinese) OR "Mold No" (English)
+  let headerRow = -1;
+  let isEnglish = false;
+  for (let r = 1; r <= Math.min(ws.rowCount, 30); r++) {
+    for (let c = 1; c <= 15; c++) {
+      const v = strVal(ws.getCell(r, c)) || '';
+      if (/^模号$/.test(v)) { headerRow = r; isEnglish = false; break; }
+      if (/Mold\s*No/i.test(v)) { headerRow = r; isEnglish = true; break; }
+    }
+    if (headerRow !== -1) break;
+  }
+  if (headerRow === -1) return [];
+
+  // Map columns from header row
+  let colMoldNo=-1, colName=-1, colPartNo=-1, colMat=-1, colWt=-1, colResin=-1;
+  let colMachine=-1, colCav=-1, colSets=-1, colTarget=-1;
+  let colMoldCostRmb=-1, colCycleSec=-1, colClientSec=-1, colClientMoldFee=-1;
+  let colUsdPerToy=-1;
+  const headerDebug = [];
+
+  for (let c = 1; c <= 25; c++) {
+    const v = strVal(ws.getCell(headerRow, c)) || '';
+    if (v) headerDebug.push(`col${c}="${v}"`);
+
+    if (isEnglish) {
+      if (/Mold\s*No/i.test(v))              colMoldNo  = c;
+      else if (/^Parts/i.test(v))            colName    = c;
+      else if (/Part\s*No/i.test(v))         colPartNo  = c;
+      else if (/Cav\s*\/\s*UP/i.test(v))    { colCav = c; colSets = c + 1; } // next col = sets
+      else if (/^Material$/i.test(v))        colMat     = c;
+      else if (/Resin\s*price/i.test(v))     colResin   = c; // already USD/kg
+      else if (/Wt\.\s*per\s*toy/i.test(v)) colWt      = c;
+      else if (/US\$\s*per\s*toy/i.test(v)) colUsdPerToy = c;
+      else if (/Molding\s*Cost/i.test(v))   colClientMoldFee = c;
+      else if (/Cycle\s*time/i.test(v))     colCycleSec = c;
+      else if (/Machine\s*size/i.test(v))   colMachine  = c;
+      else if (/Client\s*sec/i.test(v))     colClientSec = c;
+    } else {
+      if (/^模号$/.test(v))                   colMoldNo  = c;
+      else if (/^名称$/.test(v))              colName    = c;
+      else if (/^料型$/.test(v))              colMat     = c;
+      else if (/料重/.test(v))                colWt      = c;
+      else if (/料价/.test(v))                colResin   = c;
+      else if (/机型/.test(v))                colMachine = c;
+      else if (/^件数$/.test(v))              colCav     = c;
+      else if (/^套数$/.test(v))              colSets    = c;
+      else if (/件\/套/.test(v))              colSets    = c;
+      else if (/目标数/.test(v))              colTarget  = c;
+      else if (/模费人民币/.test(v))          colMoldCostRmb = c;
+      else if (/实际秒数/.test(v))            colCycleSec   = c;
+      else if (/报客秒数/.test(v))            colClientSec  = c;
+      else if (/报客模费/.test(v) && colClientMoldFee === -1) colClientMoldFee = c;
+    }
+  }
+  console.log('[MOLD] headerRow='+headerRow+' isEnglish='+isEnglish+' cols: '+headerDebug.join(', '));
+  console.log('[MOLD] mapped: moldNo='+colMoldNo+' name='+colName+' mat='+colMat+' wt='+colWt+' resin='+colResin+' cav='+colCav+' sets='+colSets+' usdToy='+colUsdPerToy+' moldFee='+colClientMoldFee+' cycle='+colCycleSec);
+
+  // Read data rows below header — stop after 2 consecutive empty mold-no rows
+  let emptyRowCount = 0;
+  for (let r = headerRow + 1; r <= Math.min(headerRow + 50, ws.rowCount); r++) {
+    const moldNo = colMoldNo > 0 ? strVal(ws.getCell(r, colMoldNo)) : null;
+    if (!moldNo) {
+      emptyRowCount++;
+      if (emptyRowCount >= 2) break; // 2 consecutive empty rows → end of table
+      continue;
+    }
+    emptyRowCount = 0;
+    if (/合计|total/i.test(moldNo)) break;
+
+    const name        = colName   > 0 ? strVal(ws.getCell(r, colName))   : null;
+    const weight_g    = colWt     > 0 ? numVal(ws.getCell(r, colWt))     : null;
+    const resin_raw   = colResin  > 0 ? numVal(ws.getCell(r, colResin))  : null;
+    const mold_cost_rmb = colMoldCostRmb > 0 ? numVal(ws.getCell(r, colMoldCostRmb)) : null;
+    const cycle_sec   = colCycleSec > 0 ? numVal(ws.getCell(r, colCycleSec)) : null;
+    const client_sec  = colClientSec > 0 ? numVal(ws.getCell(r, colClientSec)) : null;
+    const client_fee  = colClientMoldFee > 0 ? numVal(ws.getCell(r, colClientMoldFee)) : null;
+    const target_qty  = colTarget > 0 ? numVal(ws.getCell(r, colTarget)) : null;
+    const usd_per_toy = colUsdPerToy > 0 ? numVal(ws.getCell(r, colUsdPerToy)) : null;
+    const part_no     = colPartNo > 0 ? strVal(ws.getCell(r, colPartNo)) : null;
+
+    if (!weight_g && !resin_raw) continue; // skip empty rows
+
+    // resin_price_usd_kg: English format has it directly in USD/kg;
+    // Chinese "料价(G)" is in RMB/g → convert to USD/kg (÷7.75 × 1000)
+    const HKD_USD = 7.75;
+    const resin_price_usd_kg = resin_raw != null
+      ? (isEnglish ? resin_raw : parseFloat((resin_raw * 1000 / HKD_USD).toFixed(4)))
+      : null;
+
+    items.push({
+      description:      name || '',
+      mold_no:          moldNo,
+      part_no:          part_no || null,
+      material:         colMat > 0 ? strVal(ws.getCell(r, colMat)) : null,
+      weight_g,
+      resin_price_usd_kg,
+      machine_type:     (() => {
+        if (colMachine <= 0) return null;
+        const raw = strVal(ws.getCell(r, colMachine)) || '';
+        if (!raw) return null;
+        // 中文格式机型列只存数字（如"14"），补全为"14A"
+        if (!isEnglish && /^\d+$/.test(raw.trim())) return raw.trim() + 'A';
+        return raw;
+      })(),
+      cavity_count:     colCav  > 0 ? numVal(ws.getCell(r, colCav))  : null,
+      sets_per_toy:     colSets > 0 ? numVal(ws.getCell(r, colSets)) : null,
+      target_qty,
+      mold_cost_rmb,
+      // Chinese: cycle_time_sec=报客秒数(client), labor_rate_usd=实际秒数(actual)
+      // English: cycle_time_sec=Cycle time, labor_rate_usd=Molding Labour Rate(USD/hr)
+      cycle_time_sec:   isEnglish ? cycle_sec : client_sec,
+      labor_rate_usd:   isEnglish ? client_sec : cycle_sec,
+      molding_cost_usd: client_fee,    // per-piece molding cost (USD)
+      usd_per_toy,                     // from English "US$ per toy" col; null in Chinese format
+      sort_order:       items.length,
+    });
+  }
+  return items;
+}
+
+// (old) Find section by English label — replaced above
+function _unused_parseSpinMoldingByEnglish(ws) {
+  if (!ws) return [];
+  const items = [];
+
+  let colParts = -1, colMoldNo = -1, colPartNo = -1, colCav = -1, colUp = -1;
+  let colMaterial = -1, colResin = -1, colWt = -1, colUsdToy = -1;
+  let colMoldCost = -1, colCycle = -1, colMachine = -1, colLabour = -1;
+
+  // Read data rows below header until Total/Sub-total/blank section
+  for (let r = 1; r <= Math.min(1, 0); r++) {
+    const desc = colParts > 0 ? strVal(ws.getCell(r, colParts)) : null;
+    if (!desc && !strVal(ws.getCell(r, colMoldNo > 0 ? colMoldNo : 2))) continue;
+    // Stop at total/sub-total rows
+    const rowText = (desc || '') + (strVal(ws.getCell(r, 1)) || '');
+    if (/total|sub.total|合计/i.test(rowText)) break;
+
+    const usd_per_toy     = colUsdToy   > 0 ? numVal(ws.getCell(r, colUsdToy))   : null;
+    const molding_cost    = colMoldCost > 0 ? numVal(ws.getCell(r, colMoldCost)) : null;
+    const resin_price     = colResin    > 0 ? numVal(ws.getCell(r, colResin))    : null;
+    const weight_g        = colWt       > 0 ? numVal(ws.getCell(r, colWt))       : null;
+
+    if (usd_per_toy === null && resin_price === null && weight_g === null) continue;
+
+    items.push({
+      description:         desc || '',
+      mold_no:             colMoldNo  > 0 ? strVal(ws.getCell(r, colMoldNo))  : null,
+      part_no:             colPartNo  > 0 ? strVal(ws.getCell(r, colPartNo))  : null,
+      cavity_count:        colCav     > 0 ? numVal(ws.getCell(r, colCav))     : null,
+      sets_per_toy:        colUp      > 0 ? numVal(ws.getCell(r, colUp))      : null,
+      material:            colMaterial> 0 ? strVal(ws.getCell(r, colMaterial)): null,
+      resin_price_usd_kg:  resin_price,
+      weight_g:            weight_g,
+      usd_per_toy:         usd_per_toy,
+      molding_cost_usd:    molding_cost,
+      cycle_time_sec:      colCycle   > 0 ? numVal(ws.getCell(r, colCycle))   : null,
+      machine_type:        colMachine > 0 ? strVal(ws.getCell(r, colMachine)) : null,
+      labor_rate_usd:      colLabour  > 0 ? numVal(ws.getCell(r, colLabour))  : null,
+      sort_order:          items.length,
     });
   }
   return items;
@@ -1160,9 +1414,14 @@ async function parseWorkbook(filePath) {
 
   const moldStartRow = format === 'spin' ? 12 : format === 'plush' ? 17 : 18;
   let moldParts, rotocastItems, sewingDetails, bodyAccessories;
-  try { moldParts = parseMoldParts(ws, moldStartRow); } catch(e) { throw new Error('parseMoldParts: ' + e.message); }
+  if (format === 'spin') {
+    moldParts = parseSpinMoldingFromMain(ws);
+  } else {
+    try { moldParts = parseMoldParts(ws, moldStartRow); } catch(e) { throw new Error('parseMoldParts: ' + e.message); }
+  }
   try { rotocastItems = format === 'plush' ? parseRotocastItems(ws) : []; } catch(e) { throw new Error('parseRotocastItems: ' + e.message); }
-  try { sewingDetails = (format === 'plush' || format === 'spin') ? parseSewingDetails(workbook) : []; } catch(e) { throw new Error('parseSewingDetails: ' + e.message); }
+  // plush(TOMY) 用旧版单 sheet 解析；spin 用多 sheet 版本
+  try { sewingDetails = format === 'spin' ? parseSewingDetails(workbook) : format === 'plush' ? parseSewingDetailsPlush(workbook) : []; } catch(e) { throw new Error('parseSewingDetails: ' + e.message); }
   // For SPIN: replace labor items with values from main sheet
   if (format === 'spin') {
     const mainLaborItems = parseSpinLaborFromMain(ws);

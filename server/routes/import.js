@@ -92,10 +92,10 @@ router.post('/', upload.single('file'), async (req, res) => {
       // QuoteParams
       const p = data.params || {};
       db.prepare(
-        `INSERT INTO QuoteParams (version_id, hkd_rmb_quote, hkd_rmb_check, rmb_hkd, hkd_usd, labor_hkd, box_price_hkd, markup_body, markup_packaging)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO QuoteParams (version_id, hkd_rmb_quote, hkd_rmb_check, rmb_hkd, hkd_usd, labor_hkd, box_price_hkd, markup_body, markup_packaging, markup_labor)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(versionId, p.hkd_rmb_quote, p.hkd_rmb_check, p.rmb_hkd, p.hkd_usd, p.labor_hkd, p.box_price_hkd,
-        p.markup_body ?? 0.18, p.markup_packaging ?? 0.12);
+        p.markup_body ?? 0.15, p.markup_packaging ?? 0.10, p.markup_labor ?? 0.15);
 
       // MaterialPrice
       const insertMat = db.prepare(
@@ -117,14 +117,17 @@ router.post('/', upload.single('file'), async (req, res) => {
       const insertMold = db.prepare(
         `INSERT INTO MoldPart (version_id, part_no, description, material, weight_g, unit_price_hkd_g,
          machine_type, cavity_count, sets_per_toy, target_qty, molding_labor, material_cost_hkd,
-         mold_cost_rmb, remark, is_old_mold, sort_order)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         mold_cost_rmb, remark, is_old_mold, sort_order,
+         mold_no, resin_price_usd_kg, cycle_time_sec, labor_rate_usd, molding_cost_usd, usd_per_toy)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       );
       for (const m of (data.moldParts || [])) {
         insertMold.run(
           versionId, m.part_no, m.description, m.material, m.weight_g, m.unit_price_hkd_g,
           m.machine_type, m.cavity_count, m.sets_per_toy, m.target_qty, m.molding_labor,
-          m.material_cost_hkd, m.mold_cost_rmb, m.remark, m.is_old_mold, m.sort_order
+          m.material_cost_hkd, m.mold_cost_rmb, m.remark, m.is_old_mold ?? 0, m.sort_order ?? 0,
+          m.mold_no ?? null, m.resin_price_usd_kg ?? null, m.cycle_time_sec ?? null,
+          m.labor_rate_usd ?? null, m.molding_cost_usd ?? null, m.usd_per_toy ?? null
         );
       }
 

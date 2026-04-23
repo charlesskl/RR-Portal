@@ -39,6 +39,8 @@ function loadData(versionId) {
     hardwareItems:  db.prepare('SELECT * FROM HardwareItem WHERE version_id = ? ORDER BY sort_order').all(versionId),
     electronicItems:db.prepare('SELECT * FROM ElectronicItem WHERE version_id = ? ORDER BY sort_order').all(versionId),
     transportConfig:db.prepare('SELECT * FROM TransportConfig WHERE version_id = ?').get(versionId) || {},
+    refMaterials:   db.prepare('SELECT * FROM RefMaterialPrice ORDER BY sort_order').all(),
+    refMachines:    db.prepare('SELECT * FROM RefMachineRate ORDER BY sort_order').all(),
   };
 }
 
@@ -206,24 +208,76 @@ function fillCharacterSheet(ws, d) {
   writeLaborRow(130, findLabor(['塞', 'stuff']));
 
   // ── In-Housed Molding (R10-R17): MoldPart rows ───────────────────────────────
-  // Cols: C=3 desc, D=4 mold_no, F=6 cav/up, H=8 cavity, I=9 material,
-  //       J=10 resin price USD/kg, K=11 weight_g, N=14 molding cost USD/pc
-  clearRows(ws, 10, 17, [3, 4, 6, 8, 9, 10, 11, 14]);
+  // Cols: C=3 desc, D=4 mold_no, E=5 part_no, F=6 cavity, G=7 sets,
+  //       I=9 material, J=10 resin(USD/kg), K=11 weight_g, L=12 US$/toy,
+  //       N=14 molding cost(USD/pc), O=15 cycle(sec), P=16 tonnage, Q=17 labour rate
+  clearRows(ws, 10, 17, [3, 4, 5, 6, 7, 9, 10, 11, 12, 14, 15, 16, 17]);
+
+  // 参考表辅助函数
+  const HKD_USD = 7.75, LB_G = 454;
+  function findMatRef(matName) {
+    if (!matName) return null;
+    const t = matName.trim().toUpperCase();
+    return (d.refMaterials || []).find(m => m.material_name && m.material_name.trim().toUpperCase() === t) || null;
+  }
+  function findMachRef(machType) {
+    if (!machType) return null;
+    const t = (machType + '').trim().toUpperCase();
+    let found = (d.refMachines || []).find(m => m.tonnage && m.tonnage.trim().toUpperCase() === t);
+    if (found) return found;
+    found = (d.refMachines || []).find(m => m.machine_type && m.machine_type.trim().toUpperCase() === t);
+    if (found) return found;
+    const aMatch = t.match(/^(\d+)A$/);
+    if (aMatch) {
+      const n = parseInt(aMatch[1]);
+      found = (d.refMachines || []).find(m => {
+        const parts = (m.machine_type || '').toUpperCase().split('-');
+        const lo = parseInt(parts[0]); const hi = parseInt((parts[1] || '').replace(/A$/, '') || parts[0]);
+        return !isNaN(lo) && !isNaN(hi) && n >= lo && n <= hi;
+      });
+    }
+    return found || null;
+  }
+
   (moldParts || []).slice(0, 8).forEach((item, i) => {
     const r = 10 + i;
     setVal(ws, r, 3,  item.eng_name || item.description || '');
-    setVal(ws, r, 4,  item.part_no || '');
+    // 重置描述列字体颜色（模板可能有红色字体）
+    const descCell = ws.getCell(r, 3);
+    if (descCell.font) descCell.font = { ...descCell.font, color: { argb: 'FF000000' } };
+    setVal(ws, r, 4,  item.mold_no || '');
+    setVal(ws, r, 5,  item.part_no || '');
     setVal(ws, r, 6,  item.cavity_count || null);
-    setVal(ws, r, 8,  item.sets_per_toy || null);
+    setVal(ws, r, 7,  item.sets_per_toy || null);
     setVal(ws, r, 9,  item.material || '');
-    // unit_price_hkd_g → USD/kg: (hkd/g * 1000) / hkd_usd
-    const hkd_usd = parseFloat(params.hkd_usd) || 7.75;
-    const resinUsdKg = r2((parseFloat(item.unit_price_hkd_g) || 0) * 1000 / hkd_usd);
-    setVal(ws, r, 10, resinUsdKg);
-    setVal(ws, r, 11, item.weight_g || null);
-    // molding_labor HKD → USD
-    const moldingCostUsd = r2((parseFloat(item.molding_labor) || 0) / hkd_usd);
-    setVal(ws, r, 14, moldingCostUsd);
+
+    // 料价：优先用 resin_price_usd_kg，为 0 则查参考表
+    let resin = parseFloat(item.resin_price_usd_kg) || 0;
+    if (!resin) {
+      const matRef = findMatRef(item.material);
+      if (matRef) resin = parseFloat(matRef.client_spin_usd_kg) || parseFloat(matRef.spin_usd_kg) || 0;
+    }
+    setVal(ws, r, 10, resin || null);
+
+    const wt = parseFloat(item.weight_g) || 0;
+    setVal(ws, r, 11, wt || null);
+
+    // US$ per toy = resin × weight / 1000
+    const usdToy = resin && wt ? r2(resin * wt / 1000) : null;
+    setVal(ws, r, 12, usdToy);
+
+    // 机台参考
+    const machRef = findMachRef(item.machine_type);
+    const cycle   = parseFloat(item.cycle_time_sec) || 0;
+    const sets    = parseFloat(item.sets_per_toy) || 1;
+    const rate    = machRef ? (parseFloat(machRef.rate_rmb_24h) || 0) : 0;
+
+    // Molding Cost = 费率 × 周期 ÷ 3600 ÷ 套数
+    const moldCost = (rate && cycle) ? r2(rate * cycle / 3600 / sets) : (parseFloat(item.molding_cost_usd) || null);
+    setVal(ws, r, 14, moldCost);
+    setVal(ws, r, 15, cycle || null);
+    setVal(ws, r, 16, machRef ? (machRef.tonnage || item.machine_type || null) : (item.machine_type || null));
+    setVal(ws, r, 17, rate || null);
   });
 
   // ── Metal Parts Cost (R38-R45): HardwareItem where part_category != 'electronic' ─
@@ -318,8 +372,8 @@ function fillCharacterSheet(ws, d) {
   setVal(ws, 135, 11, parseFloat(params.markup_material || params.markup_body) || 0.15);
   // R137 Packaging markup
   setVal(ws, 137, 11, parseFloat(params.markup_packaging) || 0.10);
-  // R138 Labor markup (hardcoded)
-  setVal(ws, 138, 11, 0.15);
+  // R138 Labor markup
+  setVal(ws, 138, 11, parseFloat(params.markup_labor) || 0.15);
 }
 
 // ─── Fill Summary Sheet ───────────────────────────────────────────────────────
@@ -360,19 +414,13 @@ async function exportSpinVersion(versionId) {
   const charKeys = Object.keys(d.sewingByChar).filter(k => k !== '__default__');
   if (summaryWs) fillSummary(summaryWs, d, charKeys);
 
-  // Fill each character sheet by matching eng_name; remove sheets with no data
+  // Fill each character sheet
+  const templateCharSheets = wb.worksheets.filter(ws => ws.name !== 'Summary');
+
   if (charKeys.length > 0) {
-    // Remove all non-Summary sheets that have no data
-    const sheetsToRemove = wb.worksheets
-      .filter(ws => ws.name !== 'Summary' && !charKeys.includes(ws.name))
-      .map(ws => ws.name);
-    for (const name of sheetsToRemove) {
-      wb.removeWorksheet(wb.getWorksheet(name).id);
-    }
-    // Fill each remaining sheet
-    for (const charName of charKeys) {
-      const charWs = wb.getWorksheet(charName);
-      if (!charWs) continue;
+    // Match charKeys to template sheets by index; reuse template sheets in order
+    for (let i = 0; i < charKeys.length; i++) {
+      const charName = charKeys[i];
       const rows = d.sewingByChar[charName];
       const charData = {
         ...d,
@@ -381,15 +429,23 @@ async function exportSpinVersion(versionId) {
         otherItems:  rows.filter(r => r.position !== '__fabric__' && r.position !== '__labor__' && !(r.fabric_name || '').includes('人工')),
         laborItems:  rows.filter(r => r.position === '__labor__'),
       };
+      // Try exact name match first, then fall back to template sheet by index
+      let charWs = wb.getWorksheet(charName);
+      if (!charWs) charWs = templateCharSheets[i];
+      if (!charWs) continue;
+      charWs.name = charName;
       fillCharacterSheet(charWs, charData);
+    }
+    // Remove unused template sheets (those beyond the number of charKeys)
+    for (let i = charKeys.length; i < templateCharSheets.length; i++) {
+      wb.removeWorksheet(templateCharSheets[i].id);
     }
   } else {
     // Single-product: fill first non-Summary sheet, remove the rest
-    const allCharSheets = wb.worksheets.filter(ws => ws.name !== 'Summary');
-    const charWs = allCharSheets[0];
+    const charWs = templateCharSheets[0];
     if (charWs) fillCharacterSheet(charWs, d);
-    for (let i = 1; i < allCharSheets.length; i++) {
-      wb.removeWorksheet(allCharSheets[i].id);
+    for (let i = 1; i < templateCharSheets.length; i++) {
+      wb.removeWorksheet(templateCharSheets[i].id);
     }
   }
 

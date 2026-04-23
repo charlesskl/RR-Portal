@@ -22,6 +22,7 @@ app.use('/api/products', require('./routes/products'));
 app.use('/api/versions', require('./routes/versions'));
 app.use('/api/import', require('./routes/import'));
 app.use('/api/export', require('./routes/export'));
+app.use('/api/reference', require('./routes/reference'));
 
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);

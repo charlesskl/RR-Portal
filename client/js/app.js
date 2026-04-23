@@ -28,6 +28,7 @@ const app = (() => {
     'spin-fabric':   typeof tab_spin_fabric !== 'undefined' ? tab_spin_fabric : null,
     'spin-packaging':typeof tab_spin_packaging !== 'undefined' ? tab_spin_packaging : null,
     'spin-labor':    typeof tab_spin_labor !== 'undefined' ? tab_spin_labor : null,
+    'spin-molding':  typeof tab_spin_molding !== 'undefined' ? tab_spin_molding : null,
     'spin-markup':   typeof tab_spin_markup !== 'undefined' ? tab_spin_markup : null,
     'spin-summary':  typeof tab_spin_summary !== 'undefined' ? tab_spin_summary : null,
   };
@@ -337,7 +338,7 @@ const app = (() => {
       if (isSpin) {
         if (spinNav) spinNav.style.display = '';
         if (spinRow1) spinRow1.style.display = 'flex';
-        currentTab = 'spin-fabric';
+        currentTab = 'spin-molding';
         currentLevel = 'spin';
         spinNav && spinNav.querySelectorAll('.tab-sub').forEach((btn, i) => {
           btn.classList.toggle('active', i === 0);

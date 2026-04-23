@@ -6,123 +6,483 @@
     <title>ZURU 河源排期入单</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css" rel="stylesheet">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
     <style>
-        body { background: #f5f7fa; font-family: -apple-system, 'Microsoft YaHei', sans-serif; }
-        .main-card { max-width: 900px; margin: 30px auto; }
-        .drop-zone { border: 2px dashed #ccc; border-radius: 12px; padding: 50px 20px;
-                     text-align: center; cursor: pointer; transition: all 0.3s; background: #fff; }
-        .drop-zone:hover, .drop-zone.dragover { border-color: #0d6efd; background: #f0f7ff; }
-        .drop-zone-sm { border: 2px dashed #ccc; border-radius: 8px; padding: 20px 15px;
-                        text-align: center; cursor: pointer; transition: all 0.3s; background: #fff; }
-        .drop-zone-sm:hover, .drop-zone-sm.dragover { border-color: #198754; background: #f0fff4; }
-        .result-box { max-height: 500px; overflow-y: auto; }
-        .file-tag { display: inline-block; background: #e8f5e9; color: #2e7d32; border-radius: 4px;
-                    padding: 2px 8px; margin: 2px; font-size: 0.8rem; }
-        .schedule-file-item { display: flex; align-items: center; justify-content: space-between;
-                              padding: 4px 8px; border-bottom: 1px solid #eee; font-size: 0.85rem; }
-        .schedule-file-item:hover { background: #f8f9fa; }
-        .mod-badge { display: inline-block; background: #fff3cd; color: #664d03; border-radius: 3px;
-                     padding: 1px 6px; margin: 1px; font-size: 0.75rem; }
-        .new-badge { display: inline-block; background: #d1e7dd; color: #0f5132; border-radius: 3px;
-                     padding: 1px 6px; margin: 1px; font-size: 0.75rem; }
-        .candidate-card { border: 1px solid #dee2e6; border-radius: 6px; padding: 10px; margin: 5px;
-                          cursor: pointer; transition: all 0.2s; }
-        .candidate-card:hover { border-color: #0d6efd; background: #f0f7ff; }
-        .candidate-card.selected { border-color: #0d6efd; background: #cfe2ff; }
+        :root {
+            /* 一套暖色调灰阶 */
+            --ink: #1a1a18;
+            --ink-2: #3a3934;
+            --muted: #6b6a65;
+            --border: #e8e6e1;
+            --border-strong: #d6d4ce;
+            --surface: #ffffff;
+            --canvas: #faf9f5;
+            --canvas-2: #f3f1ea;
+
+            /* 一个主色：深青绿 */
+            --accent: #0d7c66;
+            --accent-2: #0a6453;
+            --accent-soft: #e5f1ee;
+            --accent-tint: rgba(13, 124, 102, 0.08);
+
+            /* 功能色：保留语义但降饱和度 */
+            --warn: #b8750d;
+            --warn-soft: #fdf4e3;
+            --danger: #a83e3e;
+            --danger-soft: #faeaea;
+            --info: #2f5d8f;
+            --info-soft: #e8effa;
+
+            /* Bootstrap override — 所有 alert/btn/badge/table-* 会随之变 */
+            --bs-body-bg: var(--canvas);
+            --bs-body-color: var(--ink);
+            --bs-body-font-family: 'Geist', -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', 'Helvetica Neue', sans-serif;
+            --bs-body-font-size: 0.9375rem;
+            --bs-border-color: var(--border);
+            --bs-border-radius: 10px;
+            --bs-border-radius-sm: 6px;
+            --bs-primary: var(--info);
+            --bs-success: var(--accent);
+            --bs-warning: var(--warn);
+            --bs-danger: var(--danger);
+            --bs-info: var(--info);
+            --bs-secondary: var(--muted);
+        }
+
+        * { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+
+        body {
+            background: var(--canvas);
+            color: var(--ink);
+            font-feature-settings: "ss01", "cv11";
+        }
+
+        code, .mono, .file-tag {
+            font-family: 'Geist Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+            font-variant-numeric: tabular-nums;
+        }
+
+        /* ─── Page header ─── */
+        main { max-width: 960px; margin: 0 auto; padding: 48px 28px 80px; }
+        .page-head { margin-bottom: 32px; }
+        .page-head .eyebrow {
+            font-size: 0.75rem; font-weight: 500; color: var(--muted);
+            letter-spacing: 0.04em; margin-bottom: 6px;
+        }
+        .page-head h1 {
+            font-family: 'Geist', sans-serif;
+            font-weight: 600; font-size: 1.875rem;
+            letter-spacing: -0.02em; line-height: 1.15;
+            color: var(--ink); margin: 0 0 4px 0;
+        }
+        .page-head .subtitle { font-size: 0.9375rem; color: var(--muted); }
+
+        /* ─── Status bar ─── */
+        .status-bar {
+            display: grid; grid-template-columns: auto 1fr auto auto;
+            gap: 10px; align-items: center;
+            background: var(--surface); border: 1px solid var(--border);
+            border-radius: 10px; padding: 10px 14px;
+            box-shadow: 0 1px 2px rgba(26, 26, 24, 0.03);
+        }
+        .status-bar .label {
+            font-size: 0.78rem; font-weight: 500; color: var(--muted);
+        }
+        .status-chip {
+            display: inline-flex; align-items: center; gap: 5px;
+            font-size: 0.78rem; font-weight: 500; padding: 5px 11px;
+            border-radius: 999px; white-space: nowrap;
+            border: 1px solid transparent;
+        }
+        .status-chip.ok { background: var(--accent-soft); color: var(--accent-2); border-color: rgba(13, 124, 102, 0.15); }
+        .status-chip.warn { background: var(--warn-soft); color: var(--warn); border-color: rgba(184, 117, 13, 0.15); }
+        .status-chip.err { background: var(--danger-soft); color: var(--danger); border-color: rgba(168, 62, 62, 0.15); }
+        .status-chip.neutral { background: var(--canvas-2); color: var(--muted); border-color: var(--border); }
+        .status-chip::before {
+            content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor;
+        }
+
+        /* ─── Btn overrides — restrained but responsive ─── */
+        .btn {
+            font-weight: 500; letter-spacing: -0.005em;
+            transition: background-color 160ms ease, transform 140ms ease,
+                        box-shadow 160ms ease, border-color 160ms ease;
+        }
+        .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; box-shadow: none; }
+        .btn:active { transform: translateY(1px); }
+        .btn-success {
+            background: var(--accent); border-color: var(--accent); color: #fff;
+            box-shadow: 0 1px 2px rgba(13, 124, 102, 0.2);
+        }
+        .btn-success:hover:not(:disabled) {
+            background: var(--accent-2); border-color: var(--accent-2);
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(13, 124, 102, 0.25);
+        }
+        .btn-outline-success {
+            color: var(--accent-2); border-color: var(--border-strong); background: var(--surface);
+        }
+        .btn-outline-success:hover:not(:disabled) {
+            background: var(--accent-soft); color: var(--accent-2); border-color: var(--accent);
+        }
+        .btn-outline-warning {
+            color: var(--warn); border-color: var(--border-strong); background: var(--surface);
+        }
+        .btn-outline-warning:hover:not(:disabled) {
+            background: var(--warn-soft); color: var(--warn); border-color: var(--warn);
+        }
+        .btn-outline-primary {
+            color: var(--info); border-color: var(--border-strong); background: var(--surface);
+        }
+        .btn-outline-primary:hover:not(:disabled) {
+            background: var(--info-soft); color: var(--info); border-color: var(--info);
+        }
+        .btn-outline-info {
+            color: var(--muted); border-color: var(--border-strong); background: var(--surface);
+        }
+        .btn-outline-info:hover:not(:disabled) {
+            background: var(--canvas-2); color: var(--ink-2); border-color: var(--border-strong);
+        }
+        .btn-outline-secondary {
+            color: var(--muted); border-color: var(--border); background: var(--surface);
+        }
+        .btn-outline-secondary:hover:not(:disabled) {
+            background: var(--canvas-2); color: var(--ink); border-color: var(--border-strong);
+        }
+        .btn-outline-danger {
+            color: var(--danger); border-color: var(--border-strong); background: var(--surface);
+        }
+        .btn-outline-danger:hover:not(:disabled) {
+            background: var(--danger-soft); color: var(--danger); border-color: var(--danger);
+        }
+        .btn-primary {
+            background: var(--info); border-color: var(--info); color: #fff;
+        }
+        .btn-primary:hover:not(:disabled) {
+            background: #254c76; border-color: #254c76;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(47, 93, 143, 0.25);
+        }
+
+        /* ─── Drop zone ─── */
+        .drop-zone {
+            border: 1.5px dashed var(--border-strong); border-radius: 12px;
+            padding: 48px 20px; text-align: center; cursor: pointer;
+            background: var(--surface);
+            transition: border-color 160ms ease, background-color 160ms ease, transform 160ms ease;
+        }
+        .drop-zone:hover, .drop-zone.dragover {
+            border-color: var(--accent); background: var(--accent-soft);
+            border-style: solid;
+        }
+        .drop-zone.dragover { transform: scale(1.005); }
+        .drop-zone .bi-cloud-arrow-up {
+            font-size: 2rem; color: var(--accent);
+            display: inline-block;
+            transition: transform 200ms ease;
+        }
+        .drop-zone:hover .bi-cloud-arrow-up { transform: translateY(-2px); }
+        .drop-zone p { margin: 12px 0 0; }
+        .drop-zone .title { font-weight: 600; color: var(--ink); font-size: 0.95rem; }
+        .drop-zone .hint { font-size: 0.82rem; color: var(--muted); margin-top: 4px; }
+
+        /* Small drop zone — for schedule file upload */
+        .drop-zone-sm {
+            border: 1.5px dashed var(--border-strong); border-radius: 10px;
+            padding: 22px 14px; text-align: center; cursor: pointer;
+            background: var(--surface);
+            transition: border-color 160ms ease, background-color 160ms ease;
+        }
+        .drop-zone-sm:hover, .drop-zone-sm.dragover {
+            border-color: var(--accent); background: var(--accent-soft);
+            border-style: solid;
+        }
+        .drop-zone-sm .bi-cloud-arrow-up {
+            font-size: 1.4rem; color: var(--accent);
+        }
+        .drop-zone-sm p { margin: 6px 0 0; }
+        .drop-zone-sm .title { font-weight: 600; color: var(--ink); font-size: 0.85rem; }
+        .drop-zone-sm .hint { font-size: 0.76rem; color: var(--muted); margin-top: 2px; }
+
+        /* File tag chips */
+        .file-tag {
+            display: inline-flex; align-items: center; gap: 4px;
+            background: var(--accent-soft); color: var(--accent-2);
+            border: 1px solid rgba(13, 124, 102, 0.15);
+            border-radius: 6px; padding: 3px 9px; margin: 2px 3px 2px 0;
+            font-size: 0.76rem; font-weight: 500;
+            max-width: 240px; overflow: hidden; text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        /* Schedule file list (under schedule drop zone) */
+        .schedule-file-item {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 7px 12px; border-bottom: 1px solid var(--border);
+            font-size: 0.85rem; color: var(--ink-2);
+        }
+        .schedule-file-item:last-child { border-bottom: 0; }
+        .schedule-file-item:hover { background: var(--canvas-2); }
+        .schedule-file-item .fname {
+            font-family: 'Geist Mono', ui-monospace, monospace;
+            font-size: 0.8rem;
+        }
+        .schedule-file-item .bi-file-earmark-excel { color: var(--accent); }
+
+        /* ─── Card override ─── */
+        .card {
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            background: var(--surface);
+            box-shadow: 0 1px 2px rgba(26, 26, 24, 0.03);
+        }
+        .card-body { padding: 20px; }
+
+        /* Section headings */
+        .section-label {
+            display: flex; align-items: center; gap: 8px;
+            font-size: 0.74rem; font-weight: 500; color: var(--muted);
+            letter-spacing: 0.04em;
+            margin: 0 0 10px 2px;
+        }
+        .section-label::before {
+            content: ''; display: inline-block;
+            width: 18px; height: 1px; background: var(--border-strong);
+        }
+
+        /* ─── Inline error banner (replaces alert()) ─── */
+        #inlineError {
+            position: fixed; top: 20px; right: 20px; z-index: 1080;
+            background: var(--danger); color: #fff;
+            padding: 11px 16px; border-radius: 10px;
+            font-size: 0.87rem; font-weight: 500;
+            box-shadow: 0 8px 24px rgba(168, 62, 62, 0.3);
+            display: none; max-width: 360px;
+            animation: slideInRight 180ms ease;
+            cursor: pointer;
+        }
+        @keyframes slideInRight {
+            from { transform: translateX(8px); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+
+        /* ─── Processing overlay ─── */
+        .processing-bar {
+            display: flex; align-items: center; gap: 10px;
+            background: var(--canvas-2); border: 1px solid var(--border);
+            border-radius: 10px; padding: 12px 16px;
+            font-size: 0.875rem; color: var(--ink-2);
+            margin-top: 18px;
+        }
+        .processing-bar .spinner-border {
+            color: var(--accent); width: 1.1rem; height: 1.1rem;
+        }
+
+        /* ─── Alerts inside results ─── */
+        .alert {
+            border-radius: 10px; border: 1px solid transparent;
+            padding: 11px 14px; font-size: 0.875rem;
+        }
+        .alert-success { background: var(--accent-soft); color: var(--accent-2); border-color: rgba(13, 124, 102, 0.15); }
+        .alert-warning { background: var(--warn-soft); color: var(--warn); border-color: rgba(184, 117, 13, 0.18); }
+        .alert-danger { background: var(--danger-soft); color: var(--danger); border-color: rgba(168, 62, 62, 0.18); }
+        .alert-info { background: var(--info-soft); color: var(--info); border-color: rgba(47, 93, 143, 0.15); }
+        .alert-secondary { background: var(--canvas-2); color: var(--ink-2); border-color: var(--border); }
+
+        /* ─── Badges — tighter ─── */
+        .badge {
+            font-weight: 500; padding: 3px 7px; border-radius: 5px;
+            font-size: 0.72rem; letter-spacing: 0;
+        }
+        .bg-success { background: var(--accent) !important; }
+        .bg-warning { background: var(--warn) !important; }
+        .bg-primary { background: var(--info) !important; }
+        .bg-danger { background: var(--danger) !important; }
+        .bg-info { background: var(--info) !important; color: #fff !important; }
+        .bg-secondary { background: var(--canvas-2) !important; color: var(--muted) !important; }
+
+        /* hy-specific result badges */
+        .mod-badge {
+            display: inline-block; background: var(--warn-soft); color: var(--warn);
+            border: 1px solid rgba(184, 117, 13, 0.18);
+            border-radius: 5px; padding: 2px 8px; margin: 1px 2px;
+            font-size: 0.72rem; font-weight: 500;
+            font-family: 'Geist Mono', ui-monospace, monospace;
+        }
+        .new-badge {
+            display: inline-block; background: var(--accent-soft); color: var(--accent-2);
+            border: 1px solid rgba(13, 124, 102, 0.18);
+            border-radius: 5px; padding: 2px 8px; margin: 1px 2px;
+            font-size: 0.72rem; font-weight: 500;
+            font-family: 'Geist Mono', ui-monospace, monospace;
+        }
+
+        /* ─── Spinner ─── */
+        .spinner-border { border-width: 0.15em; }
+
+        /* ─── Candidate cards inside ambiguous modal ─── */
+        .candidate-card {
+            border: 1px solid var(--border); border-radius: 8px;
+            padding: 10px 12px; margin: 4px 6px 4px 0;
+            cursor: pointer; background: var(--surface);
+            transition: all 160ms ease;
+            min-width: 180px;
+        }
+        .candidate-card:hover {
+            border-color: var(--accent); background: var(--accent-soft);
+        }
+        .candidate-card.selected {
+            border-color: var(--accent); background: var(--accent-soft);
+            box-shadow: 0 0 0 2px var(--accent-tint);
+        }
+        .candidate-card .cfile {
+            font-size: 0.82rem; font-weight: 600; color: var(--ink);
+            font-family: 'Geist Mono', ui-monospace, monospace;
+        }
+        .candidate-card .csheet {
+            font-size: 0.76rem; color: var(--muted); margin-top: 2px;
+        }
+
+        /* Modal tweaks */
+        .modal-content {
+            border: 1px solid var(--border); border-radius: 14px;
+            background: var(--surface);
+        }
+        .modal-header { border-bottom: 1px solid var(--border); padding: 16px 20px; }
+        .modal-body { padding: 18px 20px; }
+        .modal-footer { border-top: 1px solid var(--border); padding: 14px 20px; }
+        .modal-title {
+            font-family: 'Geist', sans-serif; font-weight: 600;
+            font-size: 1.05rem; color: var(--ink);
+        }
+
+        hr { border: 0; height: 1px; background: var(--border); margin: 18px 0; }
+
+        @media (max-width: 640px) {
+            main { padding: 28px 16px 60px; }
+            .status-bar { grid-template-columns: 1fr; gap: 8px; }
+            .status-bar .label { font-size: 0.74rem; }
+        }
     </style>
 </head>
 <body>
-<div class="container main-card">
-    <div class="text-center mb-4">
-        <h3 class="fw-bold text-primary"><i class="bi bi-folder-symlink me-2"></i>ZURU 河源排期入单</h3>
-        <div class="mt-1 small text-muted">
-            <span id="file-status">检查中...</span>
-        </div>
-    </div>
 
-    <!-- 排期文件管理区 -->
-    <div class="card mb-3">
-        <div class="card-header d-flex justify-content-between align-items-center py-2">
-            <span class="fw-bold small"><i class="bi bi-folder2-open me-1"></i>排期文件管理</span>
-            <div class="d-flex gap-1">
-                <button class="btn btn-outline-info btn-sm py-0" style="font-size:0.75rem;" onclick="rescan()"><i class="bi bi-arrow-repeat"></i> 重建映射表</button>
-                <button class="btn btn-sm py-0" style="font-size:0.75rem;" data-bs-toggle="collapse" data-bs-target="#schedulePanel">
-                    <i class="bi bi-chevron-down"></i>
-                </button>
+<!-- Toast-style error banner (replaces alert()) -->
+<div id="inlineError" role="alert" aria-live="assertive"></div>
+
+<main>
+    <header class="page-head">
+        <div class="eyebrow">业务部 · ZURU · 河源</div>
+        <h1>河源排期入单</h1>
+        <p class="subtitle">上传河源排期文件，解析 PO Excel 后自动分类为修改单 / 新单 / 未识别</p>
+    </header>
+
+    <!-- 排期文件管理 -->
+    <section aria-label="排期文件">
+        <div class="section-label">排期文件</div>
+
+        <div class="status-bar">
+            <span class="label">状态</span>
+            <span id="file-status" class="status-chip neutral">检查中</span>
+            <label class="btn btn-outline-success btn-sm py-1" style="font-size:0.78rem;white-space:nowrap;">
+                <i class="bi bi-upload"></i> 上传排期
+                <input type="file" id="scheduleInput" multiple accept=".xlsx,.xls"
+                       style="display:none" onchange="uploadSchedules(this.files)">
+            </label>
+            <button class="btn btn-outline-info btn-sm py-1" style="font-size:0.78rem;white-space:nowrap;" onclick="rescan()">
+                <i class="bi bi-arrow-clockwise"></i> 重建
+            </button>
+        </div>
+
+        <div class="card mt-2" id="scheduleDropZone"
+             onclick="document.getElementById('scheduleInput').click()"
+             style="cursor:pointer;"
+             role="button" tabindex="0" aria-label="拖拽或点击上传排期 Excel">
+            <div class="card-body drop-zone-sm" style="padding: 16px;">
+                <i class="bi bi-cloud-arrow-up" aria-hidden="true"></i>
+                <p class="title">拖拽或点击上传排期 .xlsx</p>
+                <p class="hint">支持多文件 · 上传后自动重建货号映射表</p>
             </div>
         </div>
-        <div class="collapse show" id="schedulePanel">
-            <div class="card-body py-2">
-                <div class="drop-zone-sm" id="scheduleDropZone" onclick="document.getElementById('scheduleInput').click()">
-                    <i class="bi bi-cloud-arrow-up" style="font-size:1.5rem;color:#198754;"></i>
-                    <p class="mt-1 mb-0 small fw-bold">拖放或点击上传排期文件（.xlsx）</p>
-                    <p class="text-muted small mb-0">支持多文件，上传后自动重建货号映射表</p>
+
+        <div id="scheduleFileList" class="card mt-2" style="display:none;">
+            <div class="card-body" style="padding: 4px 0;"></div>
+        </div>
+    </section>
+
+    <!-- PO 文件上传 -->
+    <section aria-label="PO 文件导入" style="margin-top: 28px;">
+        <div class="section-label">PO 文件导入</div>
+        <div class="card">
+            <div class="card-body">
+                <div class="drop-zone" id="dropZone"
+                     onclick="document.getElementById('fileInput').click()"
+                     role="button" tabindex="0" aria-label="拖拽或点击选择 PO Excel 文件">
+                    <i class="bi bi-cloud-arrow-up" aria-hidden="true"></i>
+                    <p class="title">把 Excel PO 文件拖到这里</p>
+                    <p class="hint">或点击选择文件 · 支持多选 .xlsx / .xls</p>
                 </div>
-                <input type="file" id="scheduleInput" multiple accept=".xlsx,.xls" style="display:none"
-                       onchange="uploadSchedules(this.files)">
-                <div id="scheduleFileList" class="mt-2" style="max-height:200px;overflow-y:auto;"></div>
-            </div>
-        </div>
-    </div>
+                <input type="file" id="fileInput" multiple accept=".xlsx,.xls" style="display:none"
+                       onchange="showFiles(this.files)">
 
-    <!-- PO拖拽上传区 -->
-    <div class="card mb-3">
-        <div class="card-body">
-            <div class="drop-zone" id="dropZone" onclick="document.getElementById('fileInput').click()">
-                <i class="bi bi-cloud-arrow-up" style="font-size:2.5rem;color:#0d6efd;"></i>
-                <p class="mt-2 mb-0 fw-bold">拖放Excel PO文件到此处</p>
-                <p class="text-muted small">或点击选择文件（支持多个.xlsx）</p>
-            </div>
-            <input type="file" id="fileInput" multiple accept=".xlsx,.xls" style="display:none"
-                   onchange="showFiles(this.files)">
-            <div id="fileList" class="mt-2" style="display:none;">
-                <div class="d-flex justify-content-between align-items-center mb-1">
-                    <span class="fw-bold small"><i class="bi bi-files me-1"></i>已选文件：<span id="fileCount">0</span>个</span>
-                    <button class="btn btn-outline-secondary btn-sm py-0" onclick="clearFiles()">清除</button>
-                </div>
-                <div id="fileTags" style="max-height:100px;overflow-y:auto;"></div>
-                <div class="d-grid mt-2">
-                    <button class="btn btn-primary" onclick="submitFiles()">
-                        <i class="bi bi-upload me-1"></i>上传并分析
-                    </button>
+                <div id="fileList" class="mt-3" style="display:none;">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <span class="fw-semibold" style="font-size:0.82rem;color:var(--ink-2);">
+                            <i class="bi bi-files me-1"></i>已选 <span id="fileCount">0</span> 个
+                        </span>
+                        <button class="btn btn-outline-secondary btn-sm py-0" onclick="clearFiles()">清空</button>
+                    </div>
+                    <div id="fileTags" style="max-height:110px;overflow-y:auto;"></div>
+                    <div class="d-grid mt-3">
+                        <button class="btn btn-success" onclick="submitFiles()" id="btnSubmit">
+                            <i class="bi bi-upload me-1"></i>上传并分析
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>
+    </section>
+
+    <!-- Processing bar -->
+    <div id="processing" class="processing-bar" style="display:none;">
+        <span class="spinner-border" role="status"></span>
+        <span id="processingMsg">正在处理...</span>
     </div>
 
-    <div id="processing" class="text-center my-3" style="display:none;">
-        <div class="spinner-border text-primary" role="status"></div>
-        <p class="mt-2 mb-0 small text-muted" id="processingMsg">正在处理...</p>
-    </div>
-
-    <div id="resultBox" class="card mb-3" style="display:none;">
-        <div class="card-body result-box">
-            <div id="resultContent"></div>
+    <!-- 结果 -->
+    <section aria-label="处理结果" id="resultSection" style="margin-top: 24px; display:none;">
+        <div class="section-label">处理结果</div>
+        <div class="card">
+            <div class="card-body" style="max-height:600px;overflow-y:auto;">
+                <div id="resultContent"></div>
+            </div>
         </div>
-    </div>
-</div>
+    </section>
+</main>
 
-<!-- 重复货号选择Modal -->
+<!-- 重复货号选择 Modal -->
 <div class="modal fade" id="ambiguousModal" tabindex="-1" data-bs-backdrop="static">
     <div class="modal-dialog modal-lg modal-dialog-scrollable">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title"><i class="bi bi-exclamation-triangle text-warning me-2"></i>货号重复，请选择目标文件</h5>
+                <h5 class="modal-title"><i class="bi bi-exclamation-triangle me-2" style="color:var(--warn);"></i>货号重复，请选择目标文件</h5>
             </div>
             <div class="modal-body">
-                <div class="alert alert-info small mb-3">
-                    以下货号在多个排期文件中都存在，请选择要写入的目标文件。<br>
-                    或点击<b>「生成分类Excel」</b>将所有匹配的排期都放入Excel。
+                <div class="alert alert-info mb-3">
+                    以下货号在多个排期文件中都存在，请为每一项选择要写入的目标文件。<br>
+                    或点击<b>「生成分类 Excel」</b>将所有匹配排期都放入同一个 Excel。
                 </div>
                 <div id="ambiguousList"></div>
             </div>
             <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" onclick="cancelSelection()">取消</button>
-                <button type="button" class="btn btn-success" onclick="exportOnly()">
-                    <i class="bi bi-file-earmark-spreadsheet me-1"></i>生成分类Excel
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal" onclick="cancelSelection()">取消</button>
+                <button type="button" class="btn btn-outline-success" onclick="exportOnly()">
+                    <i class="bi bi-file-earmark-spreadsheet me-1"></i>生成分类 Excel
                 </button>
                 <button type="button" class="btn btn-primary" onclick="submitSelection()">
-                    <i class="bi bi-check-circle me-1"></i>确认选择并生成Excel
+                    <i class="bi bi-check-circle me-1"></i>确认选择
                 </button>
             </div>
         </div>
@@ -134,6 +494,7 @@
 let selectedFiles = [];
 let currentSession = null;
 let currentAmbiguous = [];
+let errorTimer = null;
 
 function getCsrfToken() {
     const m = document.cookie.match(/hy_csrf_token=([^;]+)/);
@@ -141,7 +502,33 @@ function getCsrfToken() {
 }
 
 function escHtml(s) {
-    return String(s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    const d = document.createElement('div');
+    d.textContent = s == null ? '' : String(s);
+    return d.innerHTML;
+}
+
+// Non-blocking error toast (replaces alert())
+function showError(msg) {
+    const el = document.getElementById('inlineError');
+    el.textContent = msg;
+    el.style.display = 'block';
+    clearTimeout(errorTimer);
+    errorTimer = setTimeout(() => el.style.display = 'none', 4500);
+}
+document.getElementById('inlineError').addEventListener('click', () => {
+    document.getElementById('inlineError').style.display = 'none';
+});
+
+function setProcessing(on, msg) {
+    document.getElementById('processing').style.display = on ? 'flex' : 'none';
+    if (msg) document.getElementById('processingMsg').textContent = msg;
+}
+
+function revealResult() {
+    document.getElementById('resultSection').style.display = '';
+}
+function hideResult() {
+    document.getElementById('resultSection').style.display = 'none';
 }
 
 // ── 排期文件管理 ──
@@ -149,28 +536,35 @@ async function checkStatus() {
     try {
         const r = await fetch('api/hy-info');
         const data = await r.json();
-        const status = document.getElementById('file-status');
+        const chip = document.getElementById('file-status');
         if (data.exists) {
-            status.innerHTML = `<span class="text-success"><i class="bi bi-check-circle"></i> ${data.file_count}个排期文件 | ${data.item_count}个货号已索引</span>`;
+            chip.className = 'status-chip ok';
+            chip.textContent = `${data.file_count} 个排期 · ${data.item_count} 个货号`;
         } else {
-            status.innerHTML = `<span class="text-warning"><i class="bi bi-exclamation-triangle"></i> 尚未上传排期文件，请先上传</span>`;
+            chip.className = 'status-chip warn';
+            chip.textContent = '尚未上传排期';
         }
         renderScheduleFiles(data.files || []);
     } catch (e) {
-        document.getElementById('file-status').innerHTML = `<span class="text-danger">连接失败</span>`;
+        const chip = document.getElementById('file-status');
+        chip.className = 'status-chip err';
+        chip.textContent = '连接失败';
     }
 }
 
 function renderScheduleFiles(files) {
-    const container = document.getElementById('scheduleFileList');
+    const wrapper = document.getElementById('scheduleFileList');
+    const container = wrapper.querySelector('.card-body');
     if (!files.length) {
-        container.innerHTML = '<div class="text-muted small text-center py-2">暂无排期文件</div>';
+        wrapper.style.display = 'none';
+        container.innerHTML = '';
         return;
     }
+    wrapper.style.display = '';
     container.innerHTML = files.map(f => `
         <div class="schedule-file-item">
-            <span><i class="bi bi-file-earmark-excel text-success me-1"></i>${escHtml(f)}</span>
-            <button class="btn btn-outline-danger btn-sm py-0 px-1" style="font-size:0.7rem;" onclick="deleteSchedule('${escHtml(f)}')">
+            <span><i class="bi bi-file-earmark-excel me-2"></i><span class="fname">${escHtml(f)}</span></span>
+            <button class="btn btn-outline-danger btn-sm py-0 px-2" style="font-size:0.72rem;" onclick="deleteSchedule('${escHtml(f)}')">
                 <i class="bi bi-trash"></i>
             </button>
         </div>
@@ -178,28 +572,34 @@ function renderScheduleFiles(files) {
 }
 
 const scheduleDropZone = document.getElementById('scheduleDropZone');
-scheduleDropZone.addEventListener('dragover', e => { e.preventDefault(); scheduleDropZone.classList.add('dragover'); });
-scheduleDropZone.addEventListener('dragleave', () => scheduleDropZone.classList.remove('dragover'));
-scheduleDropZone.addEventListener('drop', e => { e.preventDefault(); scheduleDropZone.classList.remove('dragover'); uploadSchedules(e.dataTransfer.files); });
+scheduleDropZone.addEventListener('dragover', e => { e.preventDefault(); scheduleDropZone.querySelector('.drop-zone-sm').classList.add('dragover'); });
+scheduleDropZone.addEventListener('dragleave', () => scheduleDropZone.querySelector('.drop-zone-sm').classList.remove('dragover'));
+scheduleDropZone.addEventListener('drop', e => {
+    e.preventDefault();
+    scheduleDropZone.querySelector('.drop-zone-sm').classList.remove('dragover');
+    uploadSchedules(e.dataTransfer.files);
+});
+scheduleDropZone.addEventListener('keydown', e => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); document.getElementById('scheduleInput').click(); }
+});
 
 async function uploadSchedules(files) {
     const valid = [...files].filter(f => f.name.match(/\.(xlsx|xls)$/i));
     if (!valid.length) return;
     const fd = new FormData();
     valid.forEach(f => fd.append('files', f));
-    document.getElementById('processing').style.display = 'block';
-    document.getElementById('processingMsg').textContent = '正在上传排期文件并重建映射表...';
+    setProcessing(true, '正在上传排期文件并重建映射表...');
     try {
         const r = await fetch('api/hy-upload-schedules', {method: 'POST', headers: {'X-CSRF-Token': getCsrfToken()}, body: fd});
         const data = await r.json();
-        document.getElementById('processing').style.display = 'none';
         if (data.ok) checkStatus();
-        else alert('上传失败: ' + (data.error || '未知错误'));
+        else showError('上传失败: ' + (data.error || '未知错误'));
     } catch (e) {
-        document.getElementById('processing').style.display = 'none';
-        alert('上传失败: ' + e.message);
+        showError('上传失败: ' + e.message);
+    } finally {
+        setProcessing(false);
+        document.getElementById('scheduleInput').value = '';
     }
-    document.getElementById('scheduleInput').value = '';
 }
 
 async function deleteSchedule(filename) {
@@ -211,27 +611,44 @@ async function deleteSchedule(filename) {
         });
         const data = await r.json();
         if (data.ok) checkStatus();
-        else alert('删除失败: ' + (data.error || ''));
-    } catch (e) { alert('删除失败: ' + e.message); }
+        else showError('删除失败: ' + (data.error || ''));
+    } catch (e) { showError('删除失败: ' + e.message); }
 }
 
 async function rescan() {
     if (!confirm('重建货号映射表？')) return;
-    document.getElementById('processing').style.display = 'block';
-    document.getElementById('processingMsg').textContent = '正在扫描排期文件...';
+    setProcessing(true, '正在扫描排期文件...');
     try {
         const r = await fetch('api/hy-rescan', {method: 'POST', headers: {'X-CSRF-Token': getCsrfToken()}});
         const data = await r.json();
-        alert(data.ok ? `映射表已重建，${data.item_count}个货号` : '失败');
-        checkStatus();
-    } finally { document.getElementById('processing').style.display = 'none'; }
+        if (data.ok) {
+            // Quick inline confirm, non-blocking
+            const chip = document.getElementById('file-status');
+            const prev = chip.textContent;
+            chip.textContent = `已重建 · ${data.item_count} 个货号`;
+            setTimeout(() => checkStatus(), 1400);
+        } else {
+            showError('重建失败');
+        }
+    } catch (e) {
+        showError('重建失败: ' + e.message);
+    } finally {
+        setProcessing(false);
+    }
 }
 
-// ── PO文件上传 ──
+// ── PO 文件上传 ──
 const dropZone = document.getElementById('dropZone');
+const fileInput = document.getElementById('fileInput');
 dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
 dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
-dropZone.addEventListener('drop', e => { e.preventDefault(); dropZone.classList.remove('dragover'); showFiles(e.dataTransfer.files); });
+dropZone.addEventListener('drop', e => {
+    e.preventDefault(); dropZone.classList.remove('dragover');
+    showFiles(e.dataTransfer.files);
+});
+dropZone.addEventListener('keydown', e => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInput.click(); }
+});
 
 function showFiles(files) {
     const valid = [...files].filter(f => f.name.match(/\.(xlsx|xls)$/i));
@@ -239,49 +656,56 @@ function showFiles(files) {
     selectedFiles = valid;
     document.getElementById('fileCount').textContent = valid.length;
     document.getElementById('fileTags').innerHTML = valid.map(f =>
-        `<span class="file-tag"><i class="bi bi-file-earmark-excel"></i> ${escHtml(f.name)}</span>`
+        `<span class="file-tag" title="${escHtml(f.name)}"><i class="bi bi-file-earmark-excel"></i> ${escHtml(f.name)}</span>`
     ).join('');
-    document.getElementById('fileList').style.display = 'block';
+    document.getElementById('fileList').style.display = '';
 }
 
 function clearFiles() {
     selectedFiles = [];
-    document.getElementById('fileInput').value = '';
+    fileInput.value = '';
     document.getElementById('fileList').style.display = 'none';
-    document.getElementById('resultBox').style.display = 'none';
+    hideResult();
 }
 
 async function submitFiles() {
     if (!selectedFiles.length) return;
+    const btn = document.getElementById('btnSubmit');
+    btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>分析中...';
     const fd = new FormData();
     selectedFiles.forEach(f => fd.append('files', f));
-    document.getElementById('processing').style.display = 'block';
-    document.getElementById('processingMsg').textContent = '正在分析PO文件...';
-    document.getElementById('resultBox').style.display = 'none';
+    setProcessing(true, '正在分析 PO 文件...');
+    hideResult();
     try {
         const r = await fetch('api/hy-upload', {method: 'POST', headers: {'X-CSRF-Token': getCsrfToken()}, body: fd});
         const data = await r.json();
-        document.getElementById('processing').style.display = 'none';
         if (!data.ok) { showError(data.error || '处理失败'); return; }
         currentSession = data.session_id;
         currentAmbiguous = data.ambiguous || [];
-        if (currentAmbiguous.length > 0) showAmbiguousModal(currentAmbiguous, data);
+        if (currentAmbiguous.length > 0) showAmbiguousModal(currentAmbiguous);
         else showActionChoice(data);
     } catch (e) {
-        document.getElementById('processing').style.display = 'none';
         showError('请求失败: ' + e.message);
+    } finally {
+        setProcessing(false);
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-upload me-1"></i>上传并分析';
     }
 }
 
 function showAmbiguousModal(ambiguous) {
     document.getElementById('ambiguousList').innerHTML = ambiguous.map(amb => `
-        <div class="mb-3 border-bottom pb-3" data-key="${amb.key}">
-            <div class="fw-bold mb-2"><i class="bi bi-box text-warning"></i> 货号 <code>${escHtml(amb.item)}</code> <span class="text-muted small">(PO: ${escHtml(amb.po)})</span></div>
+        <div class="mb-3 pb-3" style="border-bottom: 1px solid var(--border);" data-key="${amb.key}">
+            <div class="mb-2" style="font-size:0.9rem;">
+                <i class="bi bi-box me-1" style="color:var(--warn);"></i>
+                货号 <code style="color:var(--ink); font-size:0.85rem;">${escHtml(amb.item)}</code>
+                <span class="text-muted" style="font-size:0.78rem; margin-left:6px;">PO: ${escHtml(amb.po)}</span>
+            </div>
             <div class="d-flex flex-wrap">
                 ${amb.candidates.map((c, ci) => `
                     <div class="candidate-card" onclick="selectCandidate('${amb.key}', ${ci}, this)">
-                        <div class="small fw-bold">${escHtml(c.file)}</div>
-                        <div class="text-muted small">[${escHtml(c.sheet)}]</div>
+                        <div class="cfile">${escHtml(c.file)}</div>
+                        <div class="csheet">${escHtml(c.sheet)}</div>
                     </div>
                 `).join('')}
             </div>
@@ -299,25 +723,39 @@ function selectCandidate(key, ci, el) {
 async function exportOnly() {
     const modal = bootstrap.Modal.getInstance(document.getElementById('ambiguousModal'));
     if (modal) modal.hide();
-    document.getElementById('processing').style.display = 'block';
-    document.getElementById('processingMsg').textContent = '正在生成分类Excel...';
+    setProcessing(true, '正在生成分类 Excel...');
     try {
         const r = await fetch('api/hy-export-only', {
             method: 'POST', headers: {'Content-Type': 'application/json', 'X-CSRF-Token': getCsrfToken()},
             body: JSON.stringify({session_id: currentSession})
         });
         const data = await r.json();
-        document.getElementById('processing').style.display = 'none';
         if (data.ok) {
-            let html = `<div class="alert alert-success"><i class="bi bi-check-circle-fill me-2"></i>${escHtml(data.msg)}</div>`;
-            html += `<div class="small text-muted mb-2">新单: ${data.new_count||0} | 修改单: ${data.mod_count||0} | 重复货号: ${data.ambiguous_count||0}(已放入所有匹配sheet) | 未识别: ${data.unknown_count||0}</div>`;
-            if (data.export_file) html += `<div class="mt-2"><a href="api/hy-export-download/${encodeURIComponent(data.export_file)}" class="btn btn-success"><i class="bi bi-download me-1"></i>下载分类Excel</a></div>`;
+            let html = `<div class="alert alert-success mb-3"><i class="bi bi-check-circle me-1"></i>${escHtml(data.msg)}</div>`;
+            html += `<div class="mb-3" style="font-size:0.85rem; color:var(--muted);">`;
+            html += `新单 <b style="color:var(--accent-2);">${data.new_count||0}</b> · `;
+            html += `修改单 <b style="color:var(--warn);">${data.mod_count||0}</b> · `;
+            html += `重复 <b style="color:var(--info);">${data.ambiguous_count||0}</b>（已全放入匹配 sheet）· `;
+            html += `未识别 <b style="color:var(--danger);">${data.unknown_count||0}</b>`;
+            html += `</div>`;
+            if (data.export_file) {
+                html += `<a href="api/hy-export-download/${encodeURIComponent(data.export_file)}" class="btn btn-success">
+                    <i class="bi bi-download me-1"></i>下载分类 Excel
+                </a>`;
+            }
             document.getElementById('resultContent').innerHTML = html;
-            document.getElementById('resultBox').style.display = 'block';
-            document.getElementById('resultBox').scrollIntoView({behavior:'smooth'});
-        } else showError(data.error || '生成失败');
-    } catch (e) { document.getElementById('processing').style.display = 'none'; showError('请求失败: ' + e.message); }
-    currentSession = null; currentAmbiguous = [];
+            revealResult();
+            document.getElementById('resultSection').scrollIntoView({behavior:'smooth'});
+        } else {
+            showError(data.error || '生成失败');
+        }
+    } catch (e) {
+        showError('请求失败: ' + e.message);
+    } finally {
+        setProcessing(false);
+        currentSession = null;
+        currentAmbiguous = [];
+    }
 }
 
 async function submitSelection() {
@@ -325,69 +763,105 @@ async function submitSelection() {
     let allSelected = true;
     document.querySelectorAll('#ambiguousList > div[data-key]').forEach(el => {
         const key = el.dataset.key, sel = el.querySelector('.candidate-card.selected');
-        if (sel) { const ci = parseInt(sel.dataset.selectedIdx); selections[key] = currentAmbiguous.find(a => a.key === key).candidates[ci]; }
-        else allSelected = false;
+        if (sel) {
+            const ci = parseInt(sel.dataset.selectedIdx);
+            selections[key] = currentAmbiguous.find(a => a.key === key).candidates[ci];
+        } else {
+            allSelected = false;
+        }
     });
-    if (!allSelected) { alert('请为每个重复货号选择目标文件'); return; }
+    if (!allSelected) { showError('请为每个重复货号选择目标文件'); return; }
     bootstrap.Modal.getInstance(document.getElementById('ambiguousModal')).hide();
-    document.getElementById('processing').style.display = 'block';
-    document.getElementById('processingMsg').textContent = '正在生成分类Excel...';
+    setProcessing(true, '正在生成分类 Excel...');
     try {
         const r = await fetch('api/hy-submit-selection', {
             method: 'POST', headers: {'Content-Type': 'application/json', 'X-CSRF-Token': getCsrfToken()},
             body: JSON.stringify({session_id: currentSession, selections})
         });
         const data = await r.json();
-        document.getElementById('processing').style.display = 'none';
         if (data.ok) showResult(data);
         else showError(data.error || '处理失败');
-    } catch (e) { document.getElementById('processing').style.display = 'none'; showError('请求失败: ' + e.message); }
+    } catch (e) {
+        showError('请求失败: ' + e.message);
+    } finally {
+        setProcessing(false);
+    }
 }
 
 function cancelSelection() { currentSession = null; currentAmbiguous = []; }
 
 function showActionChoice(data) {
-    let html = `<div class="alert alert-info mb-3"><i class="bi bi-info-circle-fill me-2"></i>分析完成，请选择操作方式</div>`;
-    html += `<div class="small mb-3">`;
-    if (data.modifications_count) html += `<span class="mod-badge">修改单 ${data.modifications_count} 条</span> `;
-    if (data.new_count) html += `<span class="new-badge">新单 ${data.new_count} 条</span> `;
-    if (data.unknown_count) html += `<span class="badge bg-danger">未识别 ${data.unknown_count} 条</span> `;
-    html += `</div><div class="d-grid"><button class="btn btn-success" onclick="exportOnly()"><i class="bi bi-file-earmark-spreadsheet me-1"></i>生成分类Excel（含修改单/新单/未识别）</button></div>`;
+    let html = `<div class="alert alert-info mb-3"><i class="bi bi-info-circle me-1"></i>分析完成</div>`;
+    html += `<div class="mb-3" style="font-size:0.88rem;">`;
+    if (data.modifications_count) html += `<span class="mod-badge">修改单 ${data.modifications_count}</span> `;
+    if (data.new_count) html += `<span class="new-badge">新单 ${data.new_count}</span> `;
+    if (data.unknown_count) html += `<span class="badge bg-danger">未识别 ${data.unknown_count}</span> `;
+    html += `</div>`;
+    html += `<div class="d-grid">
+        <button class="btn btn-success" onclick="exportOnly()">
+            <i class="bi bi-file-earmark-spreadsheet me-1"></i>生成分类 Excel（含修改单 / 新单 / 未识别）
+        </button>
+    </div>`;
     document.getElementById('resultContent').innerHTML = html;
-    document.getElementById('resultBox').style.display = 'block';
-    document.getElementById('resultBox').scrollIntoView({behavior:'smooth'});
+    revealResult();
+    document.getElementById('resultSection').scrollIntoView({behavior:'smooth'});
 }
 
 function showResult(data) {
-    let html = `<div class="alert alert-success mb-3"><i class="bi bi-check-circle-fill me-2"></i>${escHtml(data.msg)}</div>`;
+    let html = `<div class="alert alert-success mb-3"><i class="bi bi-check-circle me-1"></i>${escHtml(data.msg)}</div>`;
     if (data.mod_details && data.mod_details.length) {
-        html += `<h6 class="text-primary"><i class="bi bi-pencil-square"></i> 修改单 (${data.mod_details.length})</h6><ul class="list-unstyled small">`;
-        data.mod_details.forEach(m => { html += `<li class="mb-2"><strong>${escHtml(m.item)}</strong> <span class="text-muted">(PO: ${escHtml(m.po)} | ${escHtml(m.file)} / ${escHtml(m.sheet)} R${m.row})</span><br>`; if (m.changes) m.changes.forEach(c => { html += `<span class="mod-badge">${escHtml(c)}</span>`; }); html += `</li>`; });
-        html += `</ul>`;
+        html += `<div class="mb-3">
+            <div style="font-size:0.85rem; font-weight:600; color:var(--warn); margin-bottom:8px;">
+                <i class="bi bi-pencil-square me-1"></i>修改单 (${data.mod_details.length})
+            </div>
+            <ul class="list-unstyled" style="font-size:0.85rem;">`;
+        data.mod_details.forEach(m => {
+            html += `<li class="mb-2" style="padding:8px 10px; background:var(--canvas-2); border-radius:6px;">
+                <strong style="font-family:'Geist Mono', monospace;">${escHtml(m.item)}</strong>
+                <span class="text-muted" style="font-size:0.78rem;">
+                    · PO: ${escHtml(m.po)} · ${escHtml(m.file)} / ${escHtml(m.sheet)} · R${m.row}
+                </span>`;
+            if (m.changes) {
+                html += `<br>`;
+                m.changes.forEach(c => { html += `<span class="mod-badge">${escHtml(c)}</span>`; });
+            }
+            html += `</li>`;
+        });
+        html += `</ul></div>`;
     }
     if (data.new_details && data.new_details.length) {
-        html += `<h6 class="text-success mt-3"><i class="bi bi-plus-square"></i> 新单 (${data.new_details.length})</h6><div class="small">`;
-        data.new_details.forEach(n => { html += `<span class="new-badge">${escHtml(n)}</span> `; });
-        html += `</div>`;
+        html += `<div class="mb-3">
+            <div style="font-size:0.85rem; font-weight:600; color:var(--accent-2); margin-bottom:8px;">
+                <i class="bi bi-plus-square me-1"></i>新单 (${data.new_details.length})
+            </div>
+            <div>`;
+        data.new_details.forEach(n => { html += `<span class="new-badge">${escHtml(n)}</span>`; });
+        html += `</div></div>`;
     }
     if (data.unknown && data.unknown.length) {
-        html += `<h6 class="text-danger mt-3"><i class="bi bi-question-circle"></i> 未知货号 (${data.unknown.length})</h6>`;
-        html += `<div class="small text-danger mb-1">已追加到 Excel 的 <strong>红色标签 sheet "未识别货号"</strong>，请手动核对</div><ul class="small text-danger">`;
-        data.unknown.forEach(u => { html += `<li>${escHtml(u.item)} (PO: ${escHtml(u.po)})</li>`; });
-        html += `</ul>`;
+        html += `<div class="mb-3">
+            <div style="font-size:0.85rem; font-weight:600; color:var(--danger); margin-bottom:8px;">
+                <i class="bi bi-question-circle me-1"></i>未识别货号 (${data.unknown.length})
+            </div>
+            <div class="alert alert-danger" style="font-size:0.83rem;">
+                已追加到 Excel 的 <b>"未识别货号"</b> sheet（红色标签），请手动核对
+            </div>
+            <ul style="font-size:0.85rem; color:var(--danger);">`;
+        data.unknown.forEach(u => { html += `<li>${escHtml(u.item)} <span class="text-muted">· PO: ${escHtml(u.po)}</span></li>`; });
+        html += `</ul></div>`;
     }
-    if (data.export_file) html += `<div class="mt-3"><a href="api/hy-export-download/${encodeURIComponent(data.export_file)}" class="btn btn-success btn-sm"><i class="bi bi-download"></i> 下载分类Excel</a></div>`;
+    if (data.export_file) {
+        html += `<a href="api/hy-export-download/${encodeURIComponent(data.export_file)}" class="btn btn-success">
+            <i class="bi bi-download me-1"></i>下载分类 Excel
+        </a>`;
+    }
     document.getElementById('resultContent').innerHTML = html;
-    document.getElementById('resultBox').style.display = 'block';
-    document.getElementById('resultBox').scrollIntoView({behavior:'smooth'});
-}
-
-function showError(msg) {
-    document.getElementById('resultContent').innerHTML = `<div class="alert alert-danger"><i class="bi bi-x-circle-fill me-2"></i>${escHtml(msg)}</div>`;
-    document.getElementById('resultBox').style.display = 'block';
+    revealResult();
+    document.getElementById('resultSection').scrollIntoView({behavior:'smooth'});
 }
 
 checkStatus();
+setInterval(checkStatus, 30000);
 </script>
 </body>
 </html>

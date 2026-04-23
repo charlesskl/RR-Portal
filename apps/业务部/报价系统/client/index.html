@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>报价管理系统</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<!-- ─── Sidebar ──────────────────────────────────────────────────────────── -->
+<aside class="sidebar">
+  <div class="sidebar-header">
+    <div class="sidebar-title">报价管理系统</div>
+    <div class="sidebar-actions">
+      <button class="btn-sidebar btn-import" id="btnImport" title="导入报价明细Excel">导入</button>
+      <button class="btn-sidebar btn-new" id="btnNew" title="新建产品">新建</button>
+    </div>
+    <div class="sidebar-search">
+      <input type="text" id="searchInput" placeholder="搜索产品号/描述…" autocomplete="off">
+    </div>
+  </div>
+  <div class="sidebar-products" id="productList">
+    <div class="sidebar-empty">暂无产品，请导入报价明细</div>
+  </div>
+</aside>
+
+<!-- ─── Main Content ──────────────────────────────────────────────────────── -->
+<main class="main-content" id="mainContent">
+
+  <!-- Info bar -->
+  <div class="info-bar" id="infoBar">
+    <div class="info-bar-empty">← 从左侧选择产品版本开始</div>
+  </div>
+
+  <!-- Params panel -->
+  <div class="params-panel" id="paramsPanel" style="display:none">
+    <div class="params-toggle" id="paramsToggle">
+      <span>参数设置</span>
+      <span class="params-arrow">▼</span>
+    </div>
+    <div class="params-body" id="paramsBody" style="display:none"></div>
+  </div>
+
+  <!-- Header Info panel -->
+  <div class="header-info-panel" id="headerInfoPanel" style="display:none">
+    <div class="header-info-toggle" id="headerInfoToggle">
+      <span>表头信息</span>
+      <span class="header-info-arrow">▼</span>
+    </div>
+    <div class="header-info-body" id="headerInfoBody" style="display:none"></div>
+  </div>
+
+  <!-- Two-level tab navigation -->
+  <div class="tab-nav-wrapper" id="tabNavWrapper" style="display:none">
+    <!-- Top-level tabs -->
+    <div class="tab-nav-top">
+      <button class="tab-top active" data-level="vq">Vendor Quotation</button>
+      <button class="tab-top" data-level="bd">Body Cost Breakdown</button>
+    </div>
+    <!-- VQ sub-tabs -->
+    <div class="tab-nav-sub" id="tabsVq">
+      <button class="tab-sub active" data-tab="vq-body-cost">A. Body Cost</button>
+      <button class="tab-sub" data-tab="vq-packaging">B. Packaging</button>
+      <button class="tab-sub" data-tab="vq-purchase">C. Purchase Parts</button>
+      <button class="tab-sub" data-tab="vq-carton">D. Master Carton</button>
+      <button class="tab-sub" data-tab="vq-transport">E. Transport</button>
+      <button class="tab-sub" data-tab="vq-summary">Cost Summary</button>
+    </div>
+    <!-- Breakdown sub-tabs -->
+    <div class="tab-nav-sub" id="tabsBd" style="display:none">
+      <button class="tab-sub active" data-tab="bd-material">A. Raw Material</button>
+      <button class="tab-sub" data-tab="bd-molding">B. Molding Labour</button>
+      <button class="tab-sub" data-tab="bd-purchase">C. Purchase Parts</button>
+      <button class="tab-sub" data-tab="bd-decoration">D. Decoration</button>
+      <button class="tab-sub" data-tab="bd-others">E. Others</button>
+    </div>
+    <!-- SPIN sub-tabs row 1: character switcher + Cost Summary -->
+    <div class="tab-nav-sub" id="tabsSpinRow1" style="display:none;align-items:center;gap:0">
+      <div id="spinCharSwitcher" style="display:none;flex:1;align-items:center;gap:6px;flex-wrap:wrap"></div>
+      <button class="btn-spin-summary tab-sub" data-tab="spin-summary">Cost Summary</button>
+    </div>
+    <!-- SPIN sub-tabs row 2: main tabs -->
+    <div class="tab-nav-sub" id="tabsSpin" style="display:none">
+      <button class="tab-sub active" data-tab="spin-molding">In-Housed Molding</button>
+      <button class="tab-sub" data-tab="spin-fabric">Purchased Part</button>
+      <button class="tab-sub" data-tab="spin-packaging">Packaging</button>
+      <button class="tab-sub" data-tab="spin-labor">Labor Misc</button>
+      <button class="tab-sub" data-tab="spin-markup">Markup</button>
+    </div>
+  </div>
+
+  <!-- Tab content -->
+  <div class="tab-content" id="tabContent">
+    <div class="tab-content-empty" id="tabContentEmpty">请从左侧选择产品版本</div>
+  </div>
+
+  <!-- Summary bar -->
+  <div class="summary-bar" id="summaryBar" style="display:none">
+    <div class="summary-item">
+      <span class="summary-label">Body Cost</span>
+      <span class="summary-value" id="sumBodyCost">—</span>
+    </div>
+    <div class="summary-divider"></div>
+    <div class="summary-item">
+      <span class="summary-label">总报价 HK$</span>
+      <span class="summary-value" id="sumTotalHkd">—</span>
+    </div>
+    <div class="summary-divider"></div>
+    <div class="summary-item">
+      <span class="summary-label">总报价 USD</span>
+      <span class="summary-value" id="sumTotalUsd">—</span>
+    </div>
+    <div class="summary-divider"></div>
+    <div class="summary-item">
+      <span class="summary-label">包装合计</span>
+      <span class="summary-value" id="sumPackaging">—</span>
+    </div>
+  </div>
+</main>
+
+<!-- ─── Import Modal ─────────────────────────────────────────────────────── -->
+<div class="modal-overlay" id="importModal" style="display:none">
+  <div class="modal import-wizard-modal">
+    <div class="modal-header">
+      <span id="importWizardTitle">选择客户</span>
+      <div class="import-steps">
+        <span class="import-step active" id="importStep1Dot">1</span>
+        <span class="import-step-line"></span>
+        <span class="import-step" id="importStep2Dot">2</span>
+      </div>
+    </div>
+    <div class="modal-body" id="importModalBody">
+
+      <!-- Step 1: Client selection -->
+      <div id="importStep1" class="import-step-panel">
+        <p class="import-step-hint">请先选择要导入的客户</p>
+        <div class="import-client-cards">
+          <div class="import-client-card" data-client="Spin Master">
+            <div class="import-client-icon">🎯</div>
+            <div class="import-client-label">Spin Master</div>
+          </div>
+          <div class="import-client-card" data-client="TOMY">
+            <div class="import-client-icon">🧸</div>
+            <div class="import-client-label">TOMY</div>
+          </div>
+        </div>
+        <!-- Hidden select kept for JS compatibility -->
+        <select id="importClientSelect" style="display:none">
+          <option value="Spin Master">Spin Master</option>
+          <option value="TOMY">TOMY</option>
+        </select>
+      </div>
+
+      <!-- Step 2: File upload -->
+      <div id="importStep2" class="import-step-panel" style="display:none">
+        <div class="import-step2-header">
+          <span class="import-selected-client" id="importSelectedClientLabel"></span>
+          <button class="import-change-client" id="importChangeClient">更换客户</button>
+        </div>
+        <div id="importFormatRow" style="margin-bottom:10px">
+          <label style="font-size:12px;color:#6a8aaa;display:block;margin-bottom:5px">格式</label>
+          <select id="importFormatSelect" style="width:100%;padding:6px 10px;background:#1e2a3a;border:1px solid #2d4a6a;border-radius:6px;color:#c8d6e5;font-size:13px">
+            <option value="injection">注塑</option>
+            <option value="plush">毛绒</option>
+          </select>
+        </div>
+        <div class="import-drop-zone" id="importDropZone">
+          <div class="drop-icon">📂</div>
+          <div>拖入 Excel 文件，或点击选择</div>
+          <div class="drop-hint">支持 本厂报价明细*.xlsx</div>
+        </div>
+        <div class="import-progress" id="importProgress" style="display:none">
+          <div class="spinner"></div>
+          <div id="importStatus">正在解析…</div>
+        </div>
+      </div>
+
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-cancel" id="importCancel">取消</button>
+    </div>
+  </div>
+</div>
+
+<!-- ─── New Product Modal ─────────────────────────────────────────────────── -->
+<div class="modal-overlay" id="newProductModal" style="display:none">
+  <div class="modal">
+    <div class="modal-header">新建产品</div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label>产品编号 *</label>
+        <input type="text" id="npItemNo" class="form-input" placeholder="例如: 47712">
+      </div>
+      <div class="form-group">
+        <label>产品名称</label>
+        <input type="text" id="npItemDesc" class="form-input" placeholder="例如: Big Farm Tractor">
+      </div>
+      <div class="form-group">
+        <label>客户</label>
+        <select id="npClient" class="form-input">
+          <option value="Spin Master">Spin Master</option>
+          <option value="TOMY">TOMY</option>
+          <option value="">其他</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>厂商</label>
+        <input type="text" id="npVendor" class="form-input" placeholder="例如: ROYAL REGENT">
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-cancel" id="npCancel">取消</button>
+      <button class="btn btn-primary" id="npConfirm">创建</button>
+    </div>
+  </div>
+</div>
+
+<!-- Hidden file input -->
+<input type="file" id="fileInput" accept=".xlsx,.xls" style="display:none">
+
+<!-- ─── Scripts ──────────────────────────────────────────────────────────── -->
+<script src="js/utils.js"></script>
+<script src="js/api.js"></script>
+<script src="js/tabs/vq-body-cost.js"></script>
+<script src="js/tabs/vq-packaging.js"></script>
+<script src="js/tabs/vq-purchase.js"></script>
+<script src="js/tabs/vq-carton.js"></script>
+<script src="js/tabs/vq-transport.js"></script>
+<script src="js/tabs/vq-summary.js"></script>
+<script src="js/tabs/bd-material.js"></script>
+<script src="js/tabs/bd-molding.js"></script>
+<script src="js/tabs/bd-purchase.js"></script>
+<script src="js/tabs/bd-decoration.js"></script>
+<script src="js/tabs/bd-others.js"></script>
+<script src="js/tabs/bd-sewing.js"></script>
+<script src="js/tabs/bd-rotocast.js"></script>
+<script src="js/tabs/spin-fabric.js"></script>
+<script src="js/tabs/spin-packaging.js"></script>
+<script src="js/tabs/spin-labor.js"></script>
+<script src="js/tabs/spin-molding.js"></script>
+<script src="js/tabs/spin-markup.js"></script>
+<script src="js/tabs/spin-summary.js"></script>
+<script src="js/header-info.js"></script>
+<script src="js/params.js"></script>
+<script src="js/app.js"></script>
+
+</body>
+</html>

@@ -307,12 +307,6 @@
             </div>
             <div class="plugin-item">
               <div class="plugin-info">
-                <div class="plugin-dot gray" id="quotationDot"></div>
-                <span class="plugin-name">套客表系统</span>
-              </div>
-            </div>
-            <div class="plugin-item">
-              <div class="plugin-info">
                 <div class="plugin-dot gray" id="baojiaDot"></div>
                 <span class="plugin-name">报价系统</span>
               </div>
@@ -507,26 +501,6 @@
 
     <div class="detail-plugin-card">
       <div class="detail-plugin-left">
-        <div class="detail-plugin-icon" style="background:linear-gradient(135deg,#f59e0b,#ef4444);">&#128176;</div>
-        <div>
-          <div class="detail-plugin-name">套客表系统</div>
-          <div class="detail-plugin-desc">套客表管理，支持Excel导入导出、多版本报价对比、MOQ阶梯价格、RMB/HKD汇率换算</div>
-          <div class="feature-grid">
-            <div class="feature-tag">&#128196; Excel导入</div>
-            <div class="feature-tag">&#128202; 报价对比</div>
-            <div class="feature-tag">&#128176; MOQ阶梯价</div>
-            <div class="feature-tag">&#128230; 报价导出</div>
-          </div>
-        </div>
-      </div>
-      <div class="detail-plugin-right">
-        <div class="detail-plugin-status"><div class="plugin-dot gray" id="quotationDetailDot"></div> 检查中...</div>
-        <a href="/quotation/" target="_blank" class="btn btn-primary">打开系统</a>
-      </div>
-    </div>
-
-    <div class="detail-plugin-card">
-      <div class="detail-plugin-left">
         <div class="detail-plugin-icon" style="background:linear-gradient(135deg,#8b5cf6,#6366f1);">&#128200;</div>
         <div>
           <div class="detail-plugin-name">报价系统</div>
@@ -716,7 +690,6 @@ async function checkHealth() {
       { name: 'paiji', url: '/paiji/health', dot: 'paijiDot', detailDot: 'paijiDetailDot' },
       { name: 'zuruOrder', url: '/zuru-order-system/health', dot: 'zuruOrderDot', detailDot: 'zuruOrderDetailDot' },
       { name: 'liwenjuan', url: '/liwenjuan/health', dot: 'liwenjuanDot', detailDot: 'liwenjuanDetailDot' },
-      { name: 'quotation', url: '/quotation/health', dot: 'quotationDot', detailDot: 'quotationDetailDot' },
       { name: 'baojia', url: '/baojia/health', dot: 'baojiaDot', detailDot: 'baojiaDetailDot' },
       { name: 'tomy', url: '/tomy-paiqi/health', dot: 'tomyDot', detailDot: 'tomyDetailDot' },
       { name: 'zuruMaster', url: '/zuru-master/health', dot: 'zuruMasterDot', detailDot: 'zuruMasterDetailDot' },

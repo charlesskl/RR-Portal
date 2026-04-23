@@ -1,5 +1,5 @@
 {
-  "_nextPort": 3005,
+  "_nextPort": 3008,
   "task-api": { "port": 8080 },
   "zouhuo": { "port": 3002 },
   "rr-production": { "port": 3000 },
@@ -7,6 +7,6 @@
   "paiji": { "port": 3000 },
   "new-product-schedule": { "port": 3000 },
   "figure-mold-cost-system": { "port": 3001 },
-  "quotation": { "port": 3004 },
+  "baojia": { "port": 3007 },
   "liwenjuan": { "port": 5004 }
 }

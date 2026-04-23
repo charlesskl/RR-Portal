@@ -37,7 +37,6 @@ RR-Portal/
 │   ├── 业务部/
 │   │   ├── ZURU接单表入单系统/      — zuru-order-system (Flask)
 │   │   ├── ZURU总排期入单/          — zuru-master-schedule (Flask)
-│   │   ├── 套客表系统/              — quotation (Node.js)
 │   │   ├── 报价系统/                — baojia (Node.js, SPIN/TOMY 供应商报价)
 │   │   └── TOMY排期核对系统/        — tomy-paiqi (Node.js + React)
 │   └── task-api/                  — 任务 API (Node.js，仅本地 compose，无部门)
@@ -171,7 +170,6 @@ curl http://localhost:<port>/health
 | paiji | Node.js | 3000 | /paiji/ |
 | zuru-master-schedule (ZURU总排期入单) | Flask | 5003 | /zuru-master/ |
 | zuru-order-system (ZURU接单表入单系统) | Flask | 5005 | /zuru-order-system/ |
-| quotation 套客表系统 | Node.js | 3004 | /quotation/ |
 | tomy-paiqi TOMY排期核对系统 | Node.js/React | 3006 | /tomy-paiqi/ |
 | liwenjuan 成品核对系统 | Flask | 5004 | /liwenjuan/ |
 | peise 配色库存管理 | Flask | 5006 | /peise/ |
@@ -409,7 +407,6 @@ const data = JSON.parse(fs.readFileSync('data/data.json'));
 | paiji | AI注塑啤机排产系统 | 生产部 | Standalone (Node.js) | /paiji/ | https://github.com/duanlei10/234 |
 | zuru-master-schedule | ZURU总排期入单 | 业务部 | Standalone (Python/Flask) | /zuru-master/ | (PR #59) |
 | zuru-order-system | ZURU接单表入单系统 | 业务部 | Standalone (Python/Flask) | /zuru-order-system/ | https://github.com/hanson678/zuru-order-system |
-| quotation | 套客表系统 | 业务部 | Standalone (Node.js) | /quotation/ | — |
 | tomy-paiqi | TOMY排期核对系统 | 业务部 | Standalone (Node.js/React) | /tomy-paiqi/ | — |
 | liwenjuan | 成品核对系统 | PMC跟仓管 | Standalone (Python/Flask) | /liwenjuan/ | — |
 | peise | 配色库存管理 | PMC跟仓管 | Standalone (Python/Flask) | /peise/ | https://github.com/fxxaxxx/peisecangku |
@@ -429,6 +426,7 @@ const data = JSON.parse(fs.readFileSync('data/data.json'));
 - 新产品开发进度表 / new-product-schedule (Engineering) — 2026-04-22 完全下线（git rm 源码 + 删服务器 data/uploads；数据备份至 `~/rr-backups/new-product-schedule-20260422-*.tar.gz`）
 - quotation-system (旧版) — 2026-04-22（git rm；已被 apps/quotation/ 完全取代）
 - product-library — 2026-04-22（git rm；从未实现过，只有占位 README）
+- 套客表系统 quotation (业务部) — 2026-04-23（源码已归档到 archived/套客表系统/，需要恢复时 git mv 回来；服务器数据备份至 `~/rr-backups/quotation-data-20260423-*/`；已被 apps/业务部/报价系统/ (baojia) 取代）
 
 ---
 

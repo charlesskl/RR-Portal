@@ -65,7 +65,7 @@ jobs:
             echo "[FAIL] ${ep} (HTTP $status after 3 attempts)"
             return 1
           }
-          for ENDPOINT in /nginx-health /health /hy-schedule/health /rr/health /zouhuo/health /jiangping/health /paiji/health /figure-mold-cost-system/health /quotation/health /liwenjuan/health; do
+          for ENDPOINT in /nginx-health /health /hy-schedule/health /rr/health /zouhuo/health /jiangping/health /paiji/health /figure-mold-cost-system/health /baojia/health /liwenjuan/health; do
             check_endpoint "$ENDPOINT" || FAILED=$((FAILED + 1))
           done
           if [ "$FAILED" -gt 0 ]; then

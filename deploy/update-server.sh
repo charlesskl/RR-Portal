@@ -262,16 +262,15 @@ elif [[ "${#AFFECTED_SERVICES[@]}" -gt 0 ]]; then
   echo "  [INFO] nginx 用动态 resolver，无需 restart（10 秒内自动感知新 IP）"
 fi
 
-# nginx 配置变动 → hot reload（零停机）
+# nginx 配置/前端文件变动 → recreate 容器（文件级 bind mount inode 必换）+ reload
+# nginx.cloud.conf / frontend/*.html / logo.png 都是文件级 bind mount，绑定的是 inode。
+# git pull 会删旧文件新建（新 inode），容器内 mount 仍指向旧 inode，
+# nginx -s reload 读的是旧内容 → 必须 recreate 容器刷新 mount 再 reload。
 if [[ "$NGINX_CHANGED" -eq 1 ]] || [[ "$FRONTEND_CHANGED" -eq 1 ]]; then
-  # 前端文件变更时，文件级 bind mount 会指向旧 inode（git pull 删旧建新）。
-  # 必须 recreate 容器才能让 Docker 重新绑定到新文件的 inode。
-  if [[ "$FRONTEND_CHANGED" -eq 1 ]]; then
-    echo "  [NGINX] 前端文件变动，recreate 容器以刷新 bind mount（约 3s 停机）"
-    docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --force-recreate --no-deps nginx
-  fi
+  echo "  [NGINX] config/frontend 文件变动，recreate 容器以刷新 bind mount inode（约 3s 停机）"
+  docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --force-recreate --no-deps nginx
 
-  echo "  [NGINX] 配置/前端变动，hot reload（零停机）"
+  echo "  [NGINX] hot reload（零停机）"
   _NGINX_TEST=$(docker exec rr-portal-nginx-1 nginx -t 2>&1 || true)
   if echo "$_NGINX_TEST" | grep -q "syntax is ok"; then
     docker exec rr-portal-nginx-1 nginx -s reload

@@ -1,29 +1,50 @@
-# 排期扫描同步系统
+# 生产计划管理系统
 
-端口: **8080**
+端口：**8080**
 
-## 启动方式
+A/B/华登三个车间的生产计划管理系统，支持排期 Excel 上传解析、自动排拉、实时编辑（Luckysheet 工具栏）、导出 Excel。
 
-双击 `start.bat` 或运行：
-```
+## 启动
+
+```bash
 cd server
-node index.js
+npm install
+node app.js
 ```
 
-然后打开浏览器访问：http://localhost:8080
+前端：
 
-## 配置金山文档 API
-
-编辑 `server/.env`：
-```
-KINGSOFT_APP_ID=你的AppID
-KINGSOFT_ACCESS_TOKEN=你的AccessToken
-KINGSOFT_FILE_ID=目标文档ID
+```bash
+cd client
+npm install
+npm run build
 ```
 
-## 功能说明
+打开 http://localhost:8080
 
-- 点击「开始扫描 Z 盘」扫描所有客户排期文件（约1-3分钟）
-- 黄色 = 新单，蓝色 = 修改单
-- 勾选订单后点击「确认已选」标记为已处理（下次不再显示）
-- 配置金山文档 API 后可自动写入文档
+## 核心功能
+
+- **上传排期** — 拖拽或点击上传，XML 解析颜色检测新单（黄色）
+- **自动排拉** — 同货号分同一拉，按走货期排序，各拉数量均衡
+- **Luckysheet 编辑** — 完整 Excel 工具栏（字体、颜色、对齐、合并、边框、筛选）
+- **合计/汇总** — 同货号合计列 + 底部汇总行
+- **拉 tab 切换** — 按 A1~A4/B1~B3/C1~C5 筛选
+- **导出 Excel** — 按车间导出，格式对齐金山文档
+
+## 车间配置
+
+| 车间 | 厂区 | 主管 | 拉 |
+|------|------|------|---|
+| A | 兴信A | 吴其雄 | A1~A4 |
+| B | 兴信B | 吴敏敏 | B1~B3 |
+| 华登 | 华登 | 刘荣华 | C1~C5 |
+
+## 数据去重
+
+导入时按 **合同 + 货号 + 车间** 去重，重复订单自动跳过。
+
+## 技术栈
+
+- 前端：React + Vite + Ant Design + Luckysheet
+- 后端：Express + better-sqlite3 + JSZip + ExcelJS
+- 颜色检测：直接解析 xlsx 的 XML（ExcelJS 读不到间接样式）

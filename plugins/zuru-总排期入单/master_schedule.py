@@ -366,11 +366,11 @@ def write_orders(filepath, orders, export_dir=None):
             # 检测备注字段缺失（可能是图片/文本框格式）
             _fname = order.get('filename', '')
             if not pi and not rm:
-                warnings.append(f'{_fname}(PO={po}): 包装信息和备注均为空，可能是图片格式，请手动检查PO原文')
+                warnings.append(f'{_fname}(PO={po}): 包装信息和备注均为空，可能是PDF转Excel时丢失或图片格式，请核对原始PO')
             elif not pi:
-                warnings.append(f'{_fname}(PO={po}): 包装信息为空，可能是图片格式，请手动检查')
+                warnings.append(f'{_fname}(PO={po}): 包装信息为空，可能是PDF转Excel时丢失或图片格式，请核对原始PO')
             elif not rm:
-                warnings.append(f'{_fname}(PO={po}): 备注(Remark)为空，可能是图片格式，请手动检查')
+                warnings.append(f'{_fname}(PO={po}): 备注(Remark)为空，可能是PDF转Excel时丢失或PO原文未填，请核对原始PO')
 
             ship_dt = None
             if ship_date_str:
@@ -635,11 +635,11 @@ def _analyze_orders_readonly(orders, index, cn_names, max_row, export_dir):
 
         _fname = order.get('filename', '')
         if not pi and not rm:
-            warnings.append(f'{_fname}(PO={po}): 包装信息和备注均为空，可能是图片格式，请手动检查PO原文')
+            warnings.append(f'{_fname}(PO={po}): 包装信息和备注均为空，可能是PDF转Excel时丢失或图片格式，请核对原始PO')
         elif not pi:
-            warnings.append(f'{_fname}(PO={po}): 包装信息为空，可能是图片格式，请手动检查')
+            warnings.append(f'{_fname}(PO={po}): 包装信息为空，可能是PDF转Excel时丢失或图片格式，请核对原始PO')
         elif not rm:
-            warnings.append(f'{_fname}(PO={po}): 备注(Remark)为空，可能是图片格式，请手动检查')
+            warnings.append(f'{_fname}(PO={po}): 备注(Remark)为空，可能是PDF转Excel时丢失或PO原文未填，请核对原始PO')
 
         ship_dt = None
         if ship_date_str:

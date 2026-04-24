@@ -116,8 +116,8 @@ export default function OrderImport({ workshop = 'B' }) {
     <div>
       <Card size="small" style={{ marginBottom: 16 }}>
         <Space>
-          <Upload beforeUpload={handleUpload} showUploadList={false} accept=".pdf,.xlsx,.xls" multiple>
-            <Button icon={<UploadOutlined />} type="primary">导入订单 (PDF/Excel)</Button>
+          <Upload beforeUpload={handleUpload} showUploadList={false} accept=".pdf,.xlsx,.xls,.png,.jpg,.jpeg,.webp" multiple>
+            <Button icon={<UploadOutlined />} type="primary">导入订单 (PDF/Excel/图片)</Button>
           </Upload>
           <Button icon={<DownloadOutlined />} onClick={() => window.open(apiUrl('/api/orders/template'))}>下载导入模板</Button>
           <Popconfirm title="确定清空所有订单?" onConfirm={handleClearAll}>

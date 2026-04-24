@@ -1,9 +1,25 @@
 from datetime import datetime
 
 from flask import Blueprint, render_template, request, redirect, url_for, flash, current_app
+from sqlalchemy import func
 from app.extensions import db
-from app.models import Pigment, Stock, Transaction
+from app.models import Pigment, Stock, Transaction, PendingReview
 from app.services.inventory import stock_in, stock_out, InsufficientStock
+from app.services.exchange import rmb_to_hkd, hkd_to_rmb, get_rate
+
+
+def _find_pigment_by_code(code: str) -> Pigment | None:
+    """case-insensitive 查已有色粉;code 在 code 或 purchase_code 命中即算。"""
+    if not code:
+        return None
+    low = code.strip().lower()
+    if not low:
+        return None
+    return (Pigment.query
+            .filter_by(is_archived=False)
+            .filter((func.lower(Pigment.code) == low) |
+                    (func.lower(Pigment.purchase_code) == low))
+            .first())
 
 bp = Blueprint("transactions", __name__)
 
@@ -36,18 +52,124 @@ def out_list():
 def in_new():
     if request.method == "POST":
         try:
-            pid = int(request.form["pigment_id"])
+            pid_raw = (request.form.get("pigment_id") or "").strip()
             qty = float(request.form["quantity"])
-            price = request.form.get("unit_price")
+            price_raw = (request.form.get("unit_price") or "").strip()
+            price_rmb = float(price_raw) if price_raw else None
+            price = rmb_to_hkd(price_rmb)  # 用户输入 RMB,存 HKD
             note = request.form.get("note", "")
-            stock_in(pid, qty, unit_price=float(price) if price else None, note=note)
-            flash("已入库", "success")
+            purchase_code = (request.form.get("purchase_code") or "").strip()
+            name = (request.form.get("name") or "").strip()
+            if pid_raw:
+                stock_in(int(pid_raw), qty, unit_price=price, note=note)
+                flash("已入库", "success")
+            else:
+                if not purchase_code and not name:
+                    raise ValueError("未选色粉时,进货编号和商品名至少填一个")
+                pr = PendingReview(
+                    type="in", pigment_code="",
+                    purchase_code=purchase_code, name=name,
+                    quantity=qty, unit_price=price,
+                    reason="未填色粉编号,只有进货编号",
+                    note=note,
+                )
+                db.session.add(pr)
+                db.session.commit()
+                flash("已加入待审核,请到「待审核」页补填色粉编号", "info")
             return redirect(url_for("transactions.in_list"))
         except Exception as e:
             flash(f"失败:{e}", "danger")
     return render_template("transactions/in_form.html",
                            pigments=_pigments(),
                            preselect=request.args.get("pigment_id", type=int))
+
+
+@bp.route("/in/<int:tx_id>/edit", methods=["GET", "POST"])
+def in_edit(tx_id):
+    tx = Transaction.query.get_or_404(tx_id)
+    if tx.type != "in":
+        flash("该交易不是入库,无法用此页面编辑", "danger")
+        return redirect(url_for("transactions.in_list"))
+
+    if request.method == "POST":
+        try:
+            new_pid = int(request.form["pigment_id"])
+            new_qty = float(request.form["quantity"])
+            new_price_raw = (request.form.get("unit_price") or "").strip()
+            new_price_rmb = float(new_price_raw) if new_price_raw else None
+            new_price = rmb_to_hkd(new_price_rmb)  # 表单 RMB → 存 HKD
+            new_note = request.form.get("note", "")
+            new_time_raw = (request.form.get("occurred_at") or "").strip()
+            new_time = datetime.strptime(new_time_raw, "%Y-%m-%dT%H:%M") if new_time_raw else tx.occurred_at
+
+            old_pid = tx.pigment_id
+            old_qty = tx.quantity
+            old_stock = Stock.query.get(old_pid)
+            old_cur = old_stock.quantity if old_stock else 0
+
+            if new_pid == old_pid:
+                # 同色粉:差值直接加到库存
+                delta = round(new_qty - old_qty, 6)
+                new_balance = round(old_cur + delta, 6)
+                if new_balance < 0:
+                    _create_edit_in_pending(tx, new_pid, new_qty, new_price, new_note,
+                                            f"库存不足以回退差额(当前 {old_cur}kg,差额 {delta}kg)")
+                    flash("库存不足,已加入待审核", "info")
+                else:
+                    old_stock.quantity = new_balance
+                    _apply_tx_fields(tx, new_pid, new_qty, new_price, new_note, new_time)
+                    db.session.commit()
+                    flash("已修改", "success")
+            else:
+                # 换色粉:旧色粉扣回 old_qty,新色粉加 new_qty
+                if old_cur < old_qty:
+                    _create_edit_in_pending(tx, new_pid, new_qty, new_price, new_note,
+                                            f"旧色粉库存 {old_cur}kg 不足以扣回原入库 {old_qty}kg")
+                    flash("旧色粉库存不足以回退,已加入待审核", "info")
+                else:
+                    old_stock.quantity = round(old_cur - old_qty, 6)
+                    new_stock = Stock.query.get(new_pid) or Stock(pigment_id=new_pid, quantity=0)
+                    if new_stock not in db.session:
+                        db.session.add(new_stock)
+                    new_stock.quantity = round(new_stock.quantity + new_qty, 6)
+                    _apply_tx_fields(tx, new_pid, new_qty, new_price, new_note, new_time)
+                    db.session.commit()
+                    flash("已修改", "success")
+            return redirect(url_for("transactions.in_list"))
+        except Exception as e:
+            db.session.rollback()
+            flash(f"失败:{e}", "danger")
+
+    return render_template("transactions/in_edit.html", tx=tx, pigments=_pigments(),
+                           unit_price_rmb=hkd_to_rmb(tx.unit_price))
+
+
+def _apply_tx_fields(tx, pid, qty, price, note, when):
+    tx.pigment_id = pid
+    tx.quantity = qty
+    tx.unit_price = price
+    tx.note = note
+    tx.occurred_at = when
+
+
+def _create_edit_in_pending(tx, new_pid, new_qty, new_price, new_note, reason):
+    """入库编辑因库存不足无法直接应用,落入待审核;resolve 时强制应用(允许负库存)。"""
+    p = Pigment.query.get(new_pid)
+    old_p = tx.pigment
+    pr = PendingReview(
+        type="edit_in",
+        ref_tx_id=tx.id,
+        pigment_code=p.code if p else "",
+        purchase_code=p.purchase_code if p else "",
+        name=p.name if p else "",
+        quantity=new_qty,
+        unit_price=new_price,
+        reason=reason,
+        note=(f"原: {old_p.code or '?'} {tx.quantity}kg @ {tx.occurred_at:%m-%d %H:%M} / "
+              f"新: {p.code if p else '?'} {new_qty}kg / 备注: {new_note or '—'}"),
+    )
+    db.session.add(pr)
+    db.session.commit()
 
 
 @bp.route("/out/new", methods=["GET", "POST"])
@@ -57,13 +179,27 @@ def out_new():
             pid = int(request.form["pigment_id"])
             qty_g = float(request.form["quantity"])  # 输入克
             qty = round(qty_g / 1000.0, 6)
-            note = request.form.get("note", "")
-            if note:
-                note = f"{qty_g}g / {note}"
+            note_raw = request.form.get("note", "")
+            note_full = f"{qty_g}g / {note_raw}" if note_raw else f"{qty_g}g"
+            stock = Stock.query.get(pid)
+            if stock is None or stock.quantity < qty:
+                p = Pigment.query.get(pid)
+                cur = stock.quantity if stock else 0
+                pr = PendingReview(
+                    type="out",
+                    pigment_code=p.code if p else "",
+                    purchase_code=p.purchase_code if p else "",
+                    name=p.name if p else "",
+                    quantity=qty_g,
+                    reason=f"库存不足,扣减后会变负(当前 {cur}kg,需 {qty}kg)",
+                    note=note_full,
+                )
+                db.session.add(pr)
+                db.session.commit()
+                flash("库存不足,已加入待审核", "info")
             else:
-                note = f"{qty_g}g"
-            stock_out(pid, qty, note=note)
-            flash("已出库", "success")
+                stock_out(pid, qty, note=note_full)
+                flash("已出库", "success")
             return redirect(url_for("transactions.out_list"))
         except InsufficientStock as e:
             flash(str(e), "danger")
@@ -99,10 +235,58 @@ def _ocr_upload(tx_type: str):
         code_map = {p.id: p.code for p in Pigment.query.filter_by(is_archived=False).all()}
         for r in rows:
             r["pigment_code"] = code_map.get(r.get("pigment_id"), "")
+        if tx_type == "out":
+            _apply_out_dilution(rows, lookup, code_map)
         if fallback_used:
             flash("LLM 识别不可用,已用本地 OCR 兜底(可能精度较低)", "warning")
         return render_template(template, rows=rows, pigments=_pigments())
     return render_template(template, rows=None, pigments=_pigments())
+
+
+# 出库 OCR 的 A/B 冲淡公式:
+# - B 前缀: 实际 = 数量 × 1%, 余量 (99%) 合并到 33A
+# - A 前缀: 实际 = 数量 × 10%, 余量 (90%) 合并到 33A
+# 前缀检测: 原码不在色粉表 + 去掉首字母后在色粉表 (避免 ABS740 这类编号误判)
+_DILUTION_BASE_CODE = "33A"
+_DILUTION_FACTORS = {"a": 0.1, "b": 0.01}
+
+
+def _apply_out_dilution(rows: list[dict], lookup: dict[str, int], code_map: dict[int, str]) -> None:
+    base_remainder = 0.0
+    for r in rows:
+        code = (r.get("purchase_code") or "").strip()
+        if len(code) < 2:
+            continue
+        first = code[0].lower()
+        factor = _DILUTION_FACTORS.get(first)
+        if factor is None:
+            continue
+        low = code.lower()
+        # 只在 "原码查不到 + 去前缀能查到" 时判定为儿子
+        if low in lookup or low[1:] not in lookup:
+            continue
+        qty = float(r.get("quantity") or 0)
+        if qty <= 0:
+            continue
+        actual = round(qty * factor, 2)
+        base_remainder += qty - actual
+        r["quantity"] = actual
+    if base_remainder <= 0:
+        return
+    base_id = lookup.get(_DILUTION_BASE_CODE.lower())
+    for r in rows:
+        if (r.get("pigment_code") or "").upper() == _DILUTION_BASE_CODE \
+                or (r.get("purchase_code") or "").upper() == _DILUTION_BASE_CODE:
+            r["quantity"] = round(float(r.get("quantity") or 0) + base_remainder, 2)
+            return
+    rows.append({
+        "raw": f"(自动合成) {_DILUTION_BASE_CODE} 余量 {base_remainder:.2f}",
+        "pigment_id": base_id,
+        "pigment_code": code_map.get(base_id, _DILUTION_BASE_CODE) if base_id else _DILUTION_BASE_CODE,
+        "purchase_code": _DILUTION_BASE_CODE,
+        "quantity": round(base_remainder, 2),
+        "unit_price": 0,
+    })
 
 
 @bp.route("/in/ocr", methods=["GET", "POST"])
@@ -127,122 +311,115 @@ def out_ocr_submit():
 
 def _ocr_submit(tx_type: str):
     qtys = request.form.getlist("quantity[]")
-    success = failed = 0
+    success = 0
+    pending_count = 0
     errors = []
-    # 出库:用 pigment_code[] 搜索/手动输入模式;未匹配的自动新建占位色粉,允许负库存
+    # 出库:pigment_code[] 找不到色粉 → 待审核;找到但库存不够 → 待审核
     if tx_type == "out":
         codes = request.form.getlist("pigment_code[]")
-        auto_created = 0
         for i, (code_text, qty) in enumerate(zip(codes, qtys)):
             code_text = (code_text or "").strip()
             if not code_text or not qty or float(qty) <= 0:
                 continue
-            pigment = (Pigment.query
-                       .filter_by(is_archived=False)
-                       .filter((Pigment.code == code_text) | (Pigment.purchase_code == code_text))
-                       .first())
-            auto_new = False
+            qty_g = float(qty)
+            qty_kg = round(qty_g / 1000.0, 6)
+            pigment = _find_pigment_by_code(code_text)
             if pigment is None:
-                # 未匹配:自动新建占位,code 留空待复核,code_text 写入 purchase_code
-                pigment = Pigment(
-                    brand="未分类", code="", name=code_text[:128] or "待填",
-                    purchase_code=code_text,
-                    notes="OCR 自动新建,待复核",
-                )
-                db.session.add(pigment)
-                db.session.flush()
-                auto_new = True
-                auto_created += 1
+                db.session.add(PendingReview(
+                    type="out", pigment_code=code_text, purchase_code="", name="",
+                    quantity=qty_g,
+                    reason="色粉编号未在库存中找到",
+                    note="拍照识别",
+                ))
+                pending_count += 1
+                continue
+            stock = Stock.query.get(pigment.id)
+            cur = stock.quantity if stock else 0
+            if cur < qty_kg:
+                db.session.add(PendingReview(
+                    type="out",
+                    pigment_code=pigment.code, purchase_code=pigment.purchase_code,
+                    name=pigment.name,
+                    quantity=qty_g,
+                    reason=f"库存不足,扣减后会变负(当前 {cur}kg,需 {qty_kg}kg)",
+                    note="拍照识别",
+                ))
+                pending_count += 1
+                continue
             try:
-                qty_g = float(qty)
-                stock_out(pigment.id, round(qty_g / 1000.0, 6),
-                          note=f"拍照识别 {qty_g}g" + ("(自动新建待复核)" if auto_new else ""),
-                          allow_negative=auto_new)
+                stock_out(pigment.id, qty_kg, note=f"拍照识别 {qty_g}g")
                 success += 1
             except Exception as e:
-                db.session.rollback()
-                failed += 1
                 errors.append(f"第{i+1}行:{e}")
-        msg = f"已记录 {success} 条"
-        if auto_created:
-            msg += f"(其中 {auto_created} 条自动新建待复核)"
+        db.session.commit()
+        parts = []
+        if success:
+            parts.append(f"已出库 {success} 条")
+        if pending_count:
+            parts.append(f"{pending_count} 条进待审核")
+        msg = ",".join(parts) if parts else "无有效数据"
         if errors:
-            flash(f"{msg},失败 {failed}:{'; '.join(errors[:5])}", "warning")
+            flash(f"{msg},失败 {len(errors)}:{'; '.join(errors[:5])}", "warning")
         else:
-            flash(msg, "success")
+            flash(msg, "info" if pending_count else "success")
         return redirect(url_for("transactions.out_list"))
-    # 入库:pigment_id[] 非空且为有效整数 → 已匹配,直接入库;否则按 new_code/purchase_code 自动新建
+
+    # 入库: 用户填的 new_code 优先(覆盖 OCR 的 pigment_id);匹到 → 入库;匹不到 / 都空 → 待审核
     pids = request.form.getlist("pigment_id[]")
     prices = request.form.getlist("unit_price[]")
     new_codes = request.form.getlist("new_code[]")
     purchase_codes = request.form.getlist("purchase_code[]")
-    auto_created = 0
+    # 批量入库共用同一个汇率,避免每行重新查 Setting 表
+    batch_rate = get_rate()
     for i, (pid, qty) in enumerate(zip(pids, qtys)):
         if not qty or float(qty) <= 0:
             continue
-        price = prices[i] if i < len(prices) else ""
-        matched_id = None
-        if pid and pid.strip().isdigit():
-            matched_id = int(pid.strip())
-        if matched_id is not None:
-            try:
-                stock_in(matched_id, float(qty),
-                         unit_price=float(price) if price else None,
-                         note="拍照识别")
-                success += 1
-            except Exception as e:
-                failed += 1
-                errors.append(f"第{i+1}行:{e}")
-            continue
-        # 未匹配:先按 (new_code 填了优先,否则 purchase_code) 二次精确匹配已有色粉;
-        # 找到 → 累加到已有色粉;找不到 → 新建 brand="未分类" 待复核
+        price_raw = prices[i] if i < len(prices) else ""
+        price_rmb = float(price_raw) if price_raw else None
+        price = rmb_to_hkd(price_rmb, rate=batch_rate)  # OCR 表单 RMB → 存 HKD
         new_code = new_codes[i].strip() if i < len(new_codes) else ""
         purchase_code = purchase_codes[i].strip() if i < len(purchase_codes) else ""
-        code = new_code or purchase_code
-        if code:
-            # 二次匹配:先按 code 精确匹配(对应用户原话"色粉编号相同=一致"),
-            # 没找到再按 purchase_code 匹配(对应"进货编号相同也视为同一色粉")
-            existing = Pigment.query.filter_by(code=code, is_archived=False).first()
-            if existing is None:
-                existing = Pigment.query.filter_by(purchase_code=code, is_archived=False).first()
-            if existing:
-                try:
-                    stock_in(existing.id, float(qty),
-                             unit_price=float(price) if price else None,
-                             note="拍照识别(进货编号精确匹配)")
-                    success += 1
-                except Exception as e:
-                    failed += 1
-                    errors.append(f"第{i+1}行:{e}")
-                continue
-        display_name = code or f"待填-{datetime.now():%H%M%S}"
-        try:
-            pigment = Pigment(
-                brand="未分类",
-                code=code,
-                name=display_name,
-                purchase_code=purchase_code,
-                unit_price=float(price) if price else 0,
-                notes="OCR 自动新建,待复核" if not new_code else "",
-            )
-            db.session.add(pigment)
-            db.session.flush()
-            stock_in(pigment.id, float(qty),
-                     unit_price=float(price) if price else None,
-                     note="拍照识别(自动新建)")
-            success += 1
-            auto_created += 1
-        except Exception as e:
-            db.session.rollback()
-            failed += 1
-            errors.append(f"第{i+1}行:{e}")
-    msg = f"已记录 {success} 条"
-    if auto_created:
-        msg += f"(其中 {auto_created} 条自动新建待复核)"
+
+        matched_id = None
+        # 用户填了色粉编号 → 以用户填的为准,重新查 DB
+        if new_code or purchase_code:
+            p = _find_pigment_by_code(new_code) or _find_pigment_by_code(purchase_code)
+            if p:
+                matched_id = p.id
+        else:
+            # 用户没填,用 OCR 识别时已匹到的 pigment_id
+            matched_id = int(pid.strip()) if pid and pid.strip().isdigit() else None
+
+        if matched_id is not None:
+            try:
+                stock_in(matched_id, float(qty), unit_price=price, note="拍照识别")
+                success += 1
+            except Exception as e:
+                errors.append(f"第{i+1}行:{e}")
+            continue
+        # 填了但 DB 没这条色粉,或啥都没填 → 待审核
+        db.session.add(PendingReview(
+            type="in",
+            pigment_code=new_code,
+            purchase_code=purchase_code,
+            name=new_code or purchase_code,
+            quantity=float(qty),
+            unit_price=price,
+            reason="色粉编号未在库存中找到" if (new_code or purchase_code) else "未填色粉编号,只有进货编号",
+            note="拍照识别",
+        ))
+        pending_count += 1
+    db.session.commit()
+    parts = []
+    if success:
+        parts.append(f"已入库 {success} 条")
+    if pending_count:
+        parts.append(f"{pending_count} 条进待审核")
+    msg = ",".join(parts) if parts else "无有效数据"
     if errors:
-        flash(f"{msg},失败 {failed}:{'; '.join(errors[:5])}", "warning")
+        flash(f"{msg},失败 {len(errors)}:{'; '.join(errors[:5])}", "warning")
     else:
-        flash(msg, "success")
+        flash(msg, "info" if pending_count else "success")
     return redirect(url_for(f"transactions.{tx_type}_list"))
 
 

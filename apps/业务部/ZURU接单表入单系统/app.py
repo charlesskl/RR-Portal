@@ -134,14 +134,32 @@ def _save_config(cfg):
         json.dump(cfg, f, ensure_ascii=False, indent=2)
 
 
+# 接单表 PO 缓存：(mtime, size) → set[str]。openpyxl read_only 下 ws.cell(r,c) 是 O(N²)，
+# 对 2500+ 行接单表相当于每次请求 30+ 分钟；改用 iter_rows 流式读 + mtime-key 缓存
+_pos_cache_lock = threading.Lock()
+_pos_cache = {'key': None, 'pos': set()}
+
+
 def _read_existing_pos(filepath):
-    """读取接单表B列所有PO号，返回set"""
+    """读取接单表B列所有PO号，返回set。mtime 没变则命中缓存。"""
+    try:
+        st = os.stat(filepath)
+        key = (filepath, st.st_mtime, st.st_size)
+    except OSError as e:
+        logging.error(f'读取接单表 stat 失败: {filepath} - {e}')
+        return set()
+
+    with _pos_cache_lock:
+        if _pos_cache['key'] == key:
+            return _pos_cache['pos']
+
     pos = set()
     try:
         wb = openpyxl.load_workbook(filepath, data_only=True, read_only=True)
         ws = wb.active
-        for r in range(3, ws.max_row + 1):
-            v = ws.cell(r, 2).value
+        # iter_rows 流式读取：对 2500+ 行比 ws.cell(r,c) 快 ~200×
+        for row in ws.iter_rows(min_row=3, min_col=2, max_col=2, values_only=True):
+            v = row[0]
             if v:
                 s = str(v).strip().replace('.0', '')
                 if s:
@@ -149,6 +167,11 @@ def _read_existing_pos(filepath):
         wb.close()
     except Exception as e:
         logging.error(f'读取接单表失败: {filepath} - {e}')
+        return set()
+
+    with _pos_cache_lock:
+        _pos_cache['key'] = key
+        _pos_cache['pos'] = pos
     return pos
 
 

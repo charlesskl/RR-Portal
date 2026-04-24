@@ -227,6 +227,10 @@ services:
     environment:
       - PORT=3000
       - DATA_PATH=/app/data
+      # 阿里云百炼 (Bailian/Qwen-VL) —— 图片订单识别用
+      - BAILIAN_API_KEY=${PAIJI_BAILIAN_API_KEY:-}
+      - BAILIAN_BASE_URL=${PAIJI_BAILIAN_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}
+      - BAILIAN_VISION_MODEL=${PAIJI_BAILIAN_VISION_MODEL:-qwen-vl-max}
     volumes:
       - ./apps/生产部/注塑啤机排产系统/data:/app/data
       - ./apps/生产部/注塑啤机排产系统/uploads:/app/uploads
@@ -297,6 +301,32 @@ services:
     networks:
       - platform-net
 
+  hy-schedule-system:
+    build:
+      context: ./apps/业务部/ZURU河源排期入单
+      dockerfile: Dockerfile
+    environment:
+      - APP_PORT=5008
+    volumes:
+      - ./apps/业务部/ZURU河源排期入单/data:/app/data
+      - ./apps/业务部/ZURU河源排期入单/uploads:/app/uploads
+      - ./apps/业务部/ZURU河源排期入单/exports:/app/exports
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5008/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    mem_limit: 512m
+    memswap_limit: 512m
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - platform-net
+
   zuru-order-system:
     build:
       context: ./apps/业务部/ZURU接单表入单系统
@@ -326,19 +356,21 @@ services:
     networks:
       - platform-net
 
-  quotation:
+  baojia:
     build:
-      context: ./apps/业务部/套客表系统
+      context: ./apps/业务部/报价系统
       dockerfile: Dockerfile
     environment:
-      - PORT=3004
+      - PORT=3007
       - NODE_ENV=production
-      - CORS_ORIGIN=${QUOTATION_CORS_ORIGIN:-http://8.148.146.194}
+      # 阿里云百炼 (Bailian/Qwen) —— 翻译按钮用，和 peise 共用同一把 API key
+      - BAILIAN_API_KEY=${BAOJIA_BAILIAN_API_KEY:-}
+      - BAILIAN_BASE_URL=${BAOJIA_BAILIAN_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}
+      - BAILIAN_TEXT_MODEL=${BAOJIA_BAILIAN_TEXT_MODEL:-qwen-turbo}
     volumes:
-      - ./apps/业务部/套客表系统/server/data:/app/server/data
+      - ./apps/业务部/报价系统/server/data:/app/server/data
     healthcheck:
-      # node:20-alpine 没有 wget/curl，用 node 内置 http 模块做健康检查
-      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:3004/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:3007/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -409,10 +441,15 @@ services:
       dockerfile: Dockerfile
     environment:
       - BASE_PATH=/peise
+      - TZ=Asia/Shanghai
       # OCR 走阿里云百炼 (Bailian) OpenAI 兼容端点 + 通义千问 VL
       - BAILIAN_API_KEY=${PEISE_BAILIAN_API_KEY:-}
       - BAILIAN_MODEL=${PEISE_BAILIAN_MODEL:-qwen-vl-max-latest}
       - BAILIAN_BASE_URL=${PEISE_BAILIAN_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}
+      # 登录凭据(默认 ps/ps123456,改要改 .env.cloud 的 PEISE_AUTH_*)
+      # SECRET_KEY 不传,app 会在 instance/.secret_key 自建并持久化
+      - AUTH_USERNAME=${PEISE_AUTH_USERNAME:-ps}
+      - AUTH_PASSWORD=${PEISE_AUTH_PASSWORD:-ps123456}
     volumes:
       - ./apps/PMC跟仓管/配色库存管理/instance:/app/instance
     healthcheck:
@@ -437,6 +474,14 @@ services:
       dockerfile: Dockerfile
     environment:
       - DATA_PATH=/app/data
+      # Session login (PR #82) — secrets live in .env.cloud.production only
+      - HUADENG_SECRET_KEY=${HUADENG_SECRET_KEY:?HUADENG_SECRET_KEY is required}
+      - HUADENG_SEC1_USER=${HUADENG_SEC1_USER:?HUADENG_SEC1_USER is required}
+      - HUADENG_SEC1_PASSWORD=${HUADENG_SEC1_PASSWORD:?HUADENG_SEC1_PASSWORD is required}
+      - HUADENG_SEC2_USER=${HUADENG_SEC2_USER:?HUADENG_SEC2_USER is required}
+      - HUADENG_SEC2_PASSWORD=${HUADENG_SEC2_PASSWORD:?HUADENG_SEC2_PASSWORD is required}
+      - HUADENG_SEC3_USER=${HUADENG_SEC3_USER:?HUADENG_SEC3_USER is required}
+      - HUADENG_SEC3_PASSWORD=${HUADENG_SEC3_PASSWORD:?HUADENG_SEC3_PASSWORD is required}
     volumes:
       - ./apps/PMC跟仓管/华登包材管理/data:/app/data
     healthcheck:

@@ -93,10 +93,11 @@ declare -A PATH_TO_SERVICE=(
   ["apps/PMC跟仓管/华登包材管理/"]="huadeng"
   ["apps/PMC跟仓管/采购订单管理系统/"]="jiangping"
   ["apps/PMC跟仓管/成品核对系统/"]="liwenjuan"
-  ["apps/业务部/套客表系统/"]="quotation"
+  ["apps/业务部/报价系统/"]="baojia"
   ["apps/业务部/TOMY排期核对系统/"]="tomy-paiqi"
   ["apps/业务部/ZURU接单表入单系统/"]="zuru-order-system"
   ["apps/业务部/ZURU总排期入单/"]="zuru-master-schedule"
+  ["apps/业务部/ZURU河源排期入单/"]="hy-schedule-system"
   ["apps/工程部/A-doc生成系統/"]="zouhuo"
   ["apps/工程部/工程啤办单/"]="rr-production"
   ["apps/工程部/模具手办采购订单系统/"]="figure-mold-cost-system"
@@ -261,15 +262,22 @@ elif [[ "${#AFFECTED_SERVICES[@]}" -gt 0 ]]; then
   echo "  [INFO] nginx 用动态 resolver，无需 restart（10 秒内自动感知新 IP）"
 fi
 
-# nginx 配置变动 → hot reload（零停机）
+# nginx 配置/前端文件变动 → recreate 容器（文件级 bind mount inode 必换）+ reload
+# nginx.cloud.conf / frontend/*.html / logo.png 都是文件级 bind mount，绑定的是 inode。
+# git pull 会删旧文件新建（新 inode），容器内 mount 仍指向旧 inode，
+# nginx -s reload 读的是旧内容 → 必须 recreate 容器刷新 mount 再 reload。
 if [[ "$NGINX_CHANGED" -eq 1 ]] || [[ "$FRONTEND_CHANGED" -eq 1 ]]; then
-  echo "  [NGINX] 配置/前端变动，hot reload（零停机）"
-  if docker exec rr-portal-nginx-1 nginx -t 2>&1 | grep -q "syntax is ok"; then
+  echo "  [NGINX] config/frontend 文件变动，recreate 容器以刷新 bind mount inode（约 3s 停机）"
+  docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --force-recreate --no-deps nginx
+
+  echo "  [NGINX] hot reload（零停机）"
+  _NGINX_TEST=$(docker exec rr-portal-nginx-1 nginx -t 2>&1 || true)
+  if echo "$_NGINX_TEST" | grep -q "syntax is ok"; then
     docker exec rr-portal-nginx-1 nginx -s reload
     echo "  [OK] nginx reloaded"
   else
     echo "  [ERROR] nginx -t 失败，拒绝 reload（保持旧配置运行）"
-    docker exec rr-portal-nginx-1 nginx -t 2>&1
+    echo "$_NGINX_TEST"
     exit 1
   fi
 fi

@@ -3,6 +3,10 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+<!-- portal v2.1 -->
 <title>Royal Regent 华登 - 企业管理平台</title>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -173,7 +177,7 @@
 
     <div class="stats-bar">
       <div class="stat-card">
-        <div class="stat-value" id="statDepts">5</div>
+        <div class="stat-value" id="statDepts">4</div>
         <div class="stat-label">部门数量</div>
       </div>
       <div class="stat-card">
@@ -309,14 +313,20 @@
             </div>
             <div class="plugin-item">
               <div class="plugin-info">
-                <div class="plugin-dot gray" id="quotationDot"></div>
-                <span class="plugin-name">套客表系统</span>
+                <div class="plugin-dot gray" id="baojiaDot"></div>
+                <span class="plugin-name">报价系统</span>
               </div>
             </div>
             <div class="plugin-item">
               <div class="plugin-info">
                 <div class="plugin-dot gray" id="tomyDot"></div>
                 <span class="plugin-name">TOMY排期核对系统</span>
+              </div>
+            </div>
+            <div class="plugin-item">
+              <div class="plugin-info">
+                <div class="plugin-dot gray" id="hyScheduleDot"></div>
+                <span class="plugin-name">河源排期入单</span>
               </div>
             </div>
           </div>
@@ -475,7 +485,7 @@
       <div class="dept-icon business" style="width:40px;height:40px;font-size:18px;">&#128176;</div>
       业务部
     </div>
-    <div class="page-subtitle">ZURU接单表入单 · ZURU总排期入单 · 报价管理 · TOMY排期核对</div>
+    <div class="page-subtitle">ZURU接单表入单 · ZURU总排期入单 · 河源排期入单 · 报价管理 · TOMY排期核对</div>
 
     <div class="detail-plugin-card">
       <div class="detail-plugin-left">
@@ -519,21 +529,21 @@
 
     <div class="detail-plugin-card">
       <div class="detail-plugin-left">
-        <div class="detail-plugin-icon" style="background:linear-gradient(135deg,#f59e0b,#ef4444);">&#128176;</div>
+        <div class="detail-plugin-icon" style="background:linear-gradient(135deg,#8b5cf6,#6366f1);">&#128200;</div>
         <div>
-          <div class="detail-plugin-name">套客表系统</div>
-          <div class="detail-plugin-desc">套客表管理，支持Excel导入导出、多版本报价对比、MOQ阶梯价格、RMB/HKD汇率换算</div>
+          <div class="detail-plugin-name">报价系统</div>
+          <div class="detail-plugin-desc">SPIN / TOMY 供应商报价管理，Excel 导入解析（模具/车缝/包装/五金/人工），参考价格库，SPIN 报价单导出</div>
           <div class="feature-grid">
             <div class="feature-tag">&#128196; Excel导入</div>
-            <div class="feature-tag">&#128202; 报价对比</div>
-            <div class="feature-tag">&#128176; MOQ阶梯价</div>
-            <div class="feature-tag">&#128230; 报价导出</div>
+            <div class="feature-tag">&#128295; 模具/车缝/包装</div>
+            <div class="feature-tag">&#128200; 多版本报价</div>
+            <div class="feature-tag">&#128230; SPIN VQ 导出</div>
           </div>
         </div>
       </div>
       <div class="detail-plugin-right">
-        <div class="detail-plugin-status"><div class="plugin-dot gray" id="quotationDetailDot"></div> 检查中...</div>
-        <a href="/quotation/" target="_blank" class="btn btn-primary">打开系统</a>
+        <div class="detail-plugin-status"><div class="plugin-dot gray" id="baojiaDetailDot"></div> 检查中...</div>
+        <a href="/baojia/" target="_blank" class="btn btn-primary">打开系统</a>
       </div>
     </div>
 
@@ -554,6 +564,26 @@
       <div class="detail-plugin-right">
         <div class="detail-plugin-status"><div class="plugin-dot gray" id="tomyDetailDot"></div> 检查中...</div>
         <a href="/tomy-paiqi/" target="_blank" class="btn btn-primary">打开系统</a>
+      </div>
+    </div>
+
+    <div class="detail-plugin-card">
+      <div class="detail-plugin-left">
+        <div class="detail-plugin-icon" style="background:linear-gradient(135deg,#10b981,#059669);">&#128203;</div>
+        <div>
+          <div class="detail-plugin-name">河源排期入单</div>
+          <div class="detail-plugin-desc">解析PO Excel，匹配河源多文件排期，生成修改单/新单/未识别分类Excel</div>
+          <div class="feature-grid">
+            <div class="feature-tag">&#128196; PO解析</div>
+            <div class="feature-tag">&#128269; 货号匹配</div>
+            <div class="feature-tag">&#128230; 分类Excel</div>
+            <div class="feature-tag">&#128194; 多文件排期</div>
+          </div>
+        </div>
+      </div>
+      <div class="detail-plugin-right">
+        <div class="detail-plugin-status"><div class="plugin-dot gray" id="hyScheduleDetailDot"></div> 检查中...</div>
+        <a href="/hy-schedule/" target="_blank" class="btn btn-primary">打开系统</a>
       </div>
     </div>
   </div>
@@ -689,9 +719,10 @@ async function checkHealth() {
       { name: 'productionPlan', url: '/production-plan/health', dot: 'productionPlanDot', detailDot: 'productionPlanDetailDot' },
       { name: 'zuruOrder', url: '/zuru-order-system/health', dot: 'zuruOrderDot', detailDot: 'zuruOrderDetailDot' },
       { name: 'liwenjuan', url: '/liwenjuan/health', dot: 'liwenjuanDot', detailDot: 'liwenjuanDetailDot' },
-      { name: 'quotation', url: '/quotation/health', dot: 'quotationDot', detailDot: 'quotationDetailDot' },
+      { name: 'baojia', url: '/baojia/health', dot: 'baojiaDot', detailDot: 'baojiaDetailDot' },
       { name: 'tomy', url: '/tomy-paiqi/health', dot: 'tomyDot', detailDot: 'tomyDetailDot' },
       { name: 'zuruMaster', url: '/zuru-master/health', dot: 'zuruMasterDot', detailDot: 'zuruMasterDetailDot' },
+      { name: 'hySchedule', url: '/hy-schedule/health', dot: 'hyScheduleDot', detailDot: 'hyScheduleDetailDot' },
       { name: 'peise', url: '/peise/health', dot: 'peiseDot', detailDot: 'peiseDetailDot' },
       { name: 'huadeng', url: '/huadeng/health', dot: 'huadengDot', detailDot: 'huadengDetailDot' },
     ];

@@ -105,8 +105,8 @@ export default function Orders() {
     <div>
       <Space style={{ marginBottom: 16 }} wrap>
         <Button type="primary" icon={<PlusOutlined />} onClick={openAdd}>新增订单</Button>
-        <Upload beforeUpload={handleImport} showUploadList={false} accept=".xlsx,.xls,.pdf">
-          <Button icon={<UploadOutlined />}>导入 Excel / PDF</Button>
+        <Upload beforeUpload={handleImport} showUploadList={false} accept=".xlsx,.xls,.pdf,.png,.jpg,.jpeg,.webp">
+          <Button icon={<UploadOutlined />}>导入 Excel / PDF / 图片</Button>
         </Upload>
         <Tag color="geekblue">共 {orders.length} 条订单</Tag>
       </Space>

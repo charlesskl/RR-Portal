@@ -38,7 +38,7 @@ RR-Portal/
 │   ├── 业务部/
 │   │   ├── ZURU接单表入单系统/      — zuru-order-system (Flask)
 │   │   ├── ZURU总排期入单/          — zuru-master-schedule (Flask)
-│   │   ├── 套客表系统/              — quotation (Node.js)
+│   │   ├── 报价系统/                — baojia (Node.js, SPIN/TOMY 供应商报价)
 │   │   └── TOMY排期核对系统/        — tomy-paiqi (Node.js + React)
 │   └── task-api/                  — 任务 API (Node.js，仅本地 compose，无部门)
 ├── archived/                      — 下线 / 历史代码，不参与部署
@@ -63,6 +63,23 @@ RR-Portal/
 - URL 路径 = 英文（`/paiji/`, `/peise/`, `/rr/` 等），外部书签/链接稳定
 
 **历史**：`apps/` 和 `plugins/` 的分类原意区分 standalone vs plugin_sdk，2026-04-22 合并到单一 `apps/` 并按部门分组。`plugin_sdk/` 保留占位，将来真的用再说。
+
+## Deployment Workflow
+- Handle the full fix → merge → deploy → verify flow autonomously; do NOT instruct the user to SSH and run commands manually.
+- Use the existing deploy pipeline: `git push main` → GitHub Actions → `deploy/update-server.sh` on ECS. The script is diff-based (2026-04-22+): only rebuilds changed services, one at a time, handles orphan cleanup + nginx reload + bind-mount recreate. Do NOT manually SSH + `docker compose up` — race conditions with GHA, container name collisions.
+- Single-service builds on ECS are safe. The OOM history was the OLD bare `docker compose up --build` rebuilding all 15+ services in parallel — that pattern is gone. If a specific service is ever known to OOM on its own (very heavy React/webpack), document it here and build that one locally with `docker save | ssh | docker load`.
+- After deploys, always smoke-test the live URL and check container health before declaring success.
+
+## Scope Discipline
+- Only fix the specific app/PR the user requested. Do NOT expand scope to sibling apps, propose SQL backfills, or touch unrelated WIP changes without explicit approval.
+- When in doubt, ask before broadening scope.
+
+## Editing Rules
+- Always Read a file before Edit (avoid sed regex misses).
+- Before committing, review `git status` and stage only the intended files — never `git add .` during a rename/migration.
+
+## Cache & Verification
+- Before attributing a bug to 'browser cache', verify by checking the deployed asset hash/content directly (curl) and confirming no JS parse errors in the served bundle.
 
 ## 常用命令
 
@@ -172,11 +189,12 @@ curl http://localhost:<port>/health
 | production-plan 生产计划管理系统 | Node.js | 8080 | /production-plan/ |
 | zuru-master-schedule (ZURU总排期入单) | Flask | 5003 | /zuru-master/ |
 | zuru-order-system (ZURU接单表入单系统) | Flask | 5005 | /zuru-order-system/ |
-| quotation 套客表系统 | Node.js | 3004 | /quotation/ |
 | tomy-paiqi TOMY排期核对系统 | Node.js/React | 3006 | /tomy-paiqi/ |
 | liwenjuan 成品核对系统 | Flask | 5004 | /liwenjuan/ |
 | peise 配色库存管理 | Flask | 5006 | /peise/ |
 | huadeng 华登包材管理 | Flask | 5007 | /huadeng/ |
+| hy-schedule-system ZURU河源排期入单 | Flask | 5008 | /hy-schedule/ |
+| baojia 报价系统 | Node.js | 3007 | /baojia/ |
 
 ## 插件类型
 
@@ -409,11 +427,12 @@ const data = JSON.parse(fs.readFileSync('data/data.json'));
 | production-plan | 生产计划管理系统 | 生产部 | Standalone (Node.js/React + Luckysheet) | /production-plan/ | (PR #63) |
 | zuru-master-schedule | ZURU总排期入单 | 业务部 | Standalone (Python/Flask) | /zuru-master/ | (PR #59) |
 | zuru-order-system | ZURU接单表入单系统 | 业务部 | Standalone (Python/Flask) | /zuru-order-system/ | https://github.com/hanson678/zuru-order-system |
-| quotation | 套客表系统 | 业务部 | Standalone (Node.js) | /quotation/ | — |
 | tomy-paiqi | TOMY排期核对系统 | 业务部 | Standalone (Node.js/React) | /tomy-paiqi/ | — |
 | liwenjuan | 成品核对系统 | PMC跟仓管 | Standalone (Python/Flask) | /liwenjuan/ | — |
 | peise | 配色库存管理 | PMC跟仓管 | Standalone (Python/Flask) | /peise/ | https://github.com/fxxaxxx/peisecangku |
 | huadeng | 华登包材管理 | PMC跟仓管 | Standalone (Python/Flask) | /huadeng/ | — |
+| hy-schedule-system | ZURU河源排期入单 | 业务部 | Standalone (Python/Flask) | /hy-schedule/ | https://github.com/hanson678/hy-schedule-system |
+| baojia | 报价系统 | 业务部 | Standalone (Node.js) | /baojia/ | — |
 
 ### 旧插件（已删除）
 
@@ -427,3 +446,45 @@ const data = JSON.parse(fs.readFileSync('data/data.json'));
 - 新产品开发进度表 / new-product-schedule (Engineering) — 2026-04-22 完全下线（git rm 源码 + 删服务器 data/uploads；数据备份至 `~/rr-backups/new-product-schedule-20260422-*.tar.gz`）
 - quotation-system (旧版) — 2026-04-22（git rm；已被 apps/quotation/ 完全取代）
 - product-library — 2026-04-22（git rm；从未实现过，只有占位 README）
+- 套客表系统 quotation (业务部) — 2026-04-23（完全下线：git rm 源码 + 删除服务器数据备份；已被 apps/业务部/报价系统/ (baojia) 取代。需要恢复时可从 git history commit 26faed8 之前找回源码）
+
+---
+
+## Learnings (2026-04-23)
+
+### Debugging: Portal Content Not Visible After Deploy
+
+**Scenario:** User reported "portal 上还是看不到" after PR #86 deployed. The issue involved multiple layers of misdiagnosis.
+
+#### Mistake 1: Did not verify the most basic assumption first
+The original PR only modified `frontend/index.html`, but the cloud portal uses `frontend/index.cloud.html` (mounted in the nginx container via docker-compose). I spent time debugging before checking which file the cloud deployment actually serves.
+
+**Lesson:** Always verify "which file is actually served" before debugging content issues. Check docker-compose mounts and nginx root config first.
+
+#### Mistake 2: Misunderstood Linux file-level bind mount behavior
+After fixing `index.cloud.html`, the container still served old content. The root cause: Linux bind mounts bind to **inodes**, not paths. When `git pull` replaces a file (unlink old inode + create new inode), the container's bind mount still points to the old inode.
+
+**Lesson:** File-level bind mounts in Docker are inode-bound. Any file replacement (git pull, mv, rm+touch) requires container recreate (`--force-recreate`) to refresh the mount. Prefer directory-level mounts for files that change frequently.
+
+**Fix applied:** `deploy/update-server.sh` now `--force-recreate`s the nginx container when frontend files change.
+
+#### Mistake 3: CI verification was fundamentally broken
+I kept trying to verify by `curl -sf http://localhost/` in CI. I missed that nginx `location = /` inherits `auth_basic` from the server block, so curl without credentials returns 401. The `-f` flag suppresses output on error, so `grep` always failed. Burned ~6 CI cycles on this false negative.
+
+**Lesson:** Before adding CI verification, trace the request path: check auth, check redirects, run `curl -v`. Never assume a simple HTTP 200.
+
+**Fix applied:** CI now verifies via `docker exec` directly on the container file, bypassing HTTP entirely.
+
+#### Mistake 4: Wasted CI cycles with workflow-only changes
+Multiple commits only modified `.github/workflows/deploy.yml`. The deploy script treats `.github/*` as non-runtime changes and skips deployment entirely. I was running CI to verify changes that never deployed.
+
+**Lesson:** If testing deployment changes, ensure the diff includes at least one runtime file (frontend, nginx config, app code) to trigger the actual deploy path.
+
+#### Diagnostic Checklist (for future similar issues)
+
+When a deployed file change is not visible, check in this order:
+
+1. **Is the correct file being modified?** Check docker-compose mounts and nginx root.
+2. **Is the container using a file-level bind mount?** If so, does it need recreate after git pull?
+3. **Is the verification method actually valid?** Check auth, run `curl -v`, inspect response body.
+4. **Only then suspect browser/CDN cache.**

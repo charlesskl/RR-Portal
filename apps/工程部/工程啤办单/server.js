@@ -408,6 +408,20 @@ app.use('/api', (req, res, next) => {
         return res.json({ success: true });
       }
     }
+    // 啤办单标记为已完成前校验：每条明细的实际领料必须 > 0（发至模厂/湖南订单除外）
+    if (status === '已完成' && type === 'injection') {
+      const data = loadData();
+      const order = data.injection_orders.find(o => o.id === +req.params.id);
+      if (order && !isSendToExternal(order)) {
+        const items = (data.injection_items || []).filter(i => i.order_id === +req.params.id);
+        const missing = items.filter(it => !(+(it.actual_weight_kg || 0) > 0));
+        if (missing.length) {
+          return res.status(400).json({
+            error: `有 ${missing.length} 条明细未填写实际用料，无法标记完成。请先补录：${missing.map(m => m.mold_id || m.mold_name || '未命名').slice(0, 3).join('、')}${missing.length > 3 ? '…' : ''}`
+          });
+        }
+      }
+    }
     updateStatus(type, req.params.id, status);
     res.json({ success: true });
   });
@@ -649,6 +663,7 @@ app.get('/api/injection-costs', (req, res) => {
         product_name: o.product_name || '',
         client_name: o.client_name || '',
         date: o.date || '',
+        completed_date: o.completed_date || '',
         workshop: o.workshop || '',
         mold_id: it.mold_id || '',
         mold_name: it.mold_name || '',
@@ -686,8 +701,8 @@ app.get('/api/injection-total-costs', (req, res) => {
       const inj = Number.isFinite(injHkdNum) ? injHkdNum : 0;
       totalMat += mat;
       if (!skipInjCost) totalInj += inj;
-      // 料价缺：有材料名但模糊解析找不到价格
-      if (it.material && resolvePrice(it.material, priceMap) <= 0) hasMissingPrice = true;
+      // 料价缺：有材料名但明细料费为 0（材料不在价格表 / 实际领料未填 等）
+      if (it.material && mat <= 0) hasMissingPrice = true;
       // 啤办费缺：没有填写（null/undefined/空字符串），发至订单除外
       if (!skipInjCost && !hasRaw && !hasHkd) hasMissingInj = true;
       return {
@@ -705,6 +720,7 @@ app.get('/api/injection-total-costs', (req, res) => {
       client_name: o.client_name || '',
       doc_number: o.doc_number || '',
       date: o.date || '',
+      completed_date: o.completed_date || '',
       workshop: o.workshop || '',
       send_to: o.send_to || '',
       skip_inj: skipInjCost,

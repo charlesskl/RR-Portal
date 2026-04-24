@@ -1,9 +1,9 @@
-import { List, Tag, Typography, Space, Descriptions } from 'antd'
-import { CheckCircleOutlined, CloseCircleOutlined } from '@ant-design/icons'
+import { List, Typography, Space, Descriptions } from 'antd'
 
 const { Text } = Typography
 
-// Frontend-local type definitions (mirrors server/types/index.ts)
+// ─── Types (mirrors server/types/index.ts) ────────────────────────────────
+
 interface POItem {
   货号: string
   PO走货期: string
@@ -41,86 +41,106 @@ interface FileStatusListProps {
   schedules: ScheduleResult[]
 }
 
-function StatusTag({ status }: { status: 'done' | 'error' }) {
-  if (status === 'done') {
-    return (
-      <Tag icon={<CheckCircleOutlined />} color="success">
-        成功
-      </Tag>
-    )
-  }
+function StatusChip({ status }: { status: 'done' | 'error' }) {
+  if (status === 'done') return <span className="status-chip ok">成功</span>
+  return <span className="status-chip err">失败</span>
+}
+
+function SectionList<T extends { filename: string; status: 'done' | 'error' }>({
+  header,
+  dataSource,
+  renderBody,
+}: {
+  header: string
+  dataSource: T[]
+  renderBody: (item: T) => React.ReactNode
+}) {
+  if (dataSource.length === 0) return null
   return (
-    <Tag icon={<CloseCircleOutlined />} color="error">
-      失败
-    </Tag>
+    <div>
+      <div className="section-label" style={{ marginBottom: 8 }}>
+        {header}
+      </div>
+      <List
+        size="small"
+        bordered
+        dataSource={dataSource}
+        renderItem={(item) => (
+          <List.Item style={{ display: 'block' }}>
+            <Space direction="vertical" size={6} style={{ width: '100%' }}>
+              <Space size="small" wrap>
+                <StatusChip status={item.status} />
+                <Text strong className="num" style={{ fontSize: 13 }}>
+                  {item.filename}
+                </Text>
+              </Space>
+              {renderBody(item)}
+            </Space>
+          </List.Item>
+        )}
+      />
+    </div>
   )
 }
 
 export default function FileStatusList({ files, schedules }: FileStatusListProps) {
   return (
-    <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-      {files.length > 0 && (
-        <List
-          header={<Text strong>PO 文件解析结果</Text>}
-          bordered
-          dataSource={files}
-          renderItem={(item) => (
-            <List.Item>
-              <Space direction="vertical" style={{ width: '100%' }}>
-                <Space>
-                  <StatusTag status={item.status} />
-                  <Text strong>{item.filename}</Text>
-                </Space>
-                {item.status === 'done' && item.data ? (
-                  <Descriptions size="small" column={2} style={{ marginLeft: 16 }}>
-                    <Descriptions.Item label="TOMY PO">{item.data.tomyPO}</Descriptions.Item>
-                    <Descriptions.Item label="客户 PO">{item.data.customerPO}</Descriptions.Item>
-                    <Descriptions.Item label="跟单员">{item.data.handleBy}</Descriptions.Item>
-                    <Descriptions.Item label="目的国">{item.data.destCountry}</Descriptions.Item>
-                    <Descriptions.Item label="品项数">
-                      {item.data.items.length} 项
-                    </Descriptions.Item>
-                    <Descriptions.Item label="工厂代码">
-                      {[...new Set(item.data.items.map((i) => i.factoryCode))].join(', ')}
-                    </Descriptions.Item>
-                  </Descriptions>
-                ) : (
-                  <Text type="danger" style={{ marginLeft: 16 }}>
-                    {item.error ?? '解析失败'}
-                  </Text>
-                )}
-              </Space>
-            </List.Item>
-          )}
-        />
-      )}
+    <Space direction="vertical" size="large" style={{ width: '100%' }}>
+      <SectionList
+        header="PO 文件解析详情"
+        dataSource={files}
+        renderBody={(item) => {
+          if (item.status === 'done' && item.data) {
+            const factoryCodes = [...new Set(item.data.items.map((i) => i.factoryCode))]
+            return (
+              <Descriptions size="small" column={2} style={{ marginLeft: 8 }} colon={false}>
+                <Descriptions.Item label="TOMY PO">
+                  <span className="num">{item.data.tomyPO}</span>
+                </Descriptions.Item>
+                <Descriptions.Item label="客户 PO">
+                  <span className="num">{item.data.customerPO}</span>
+                </Descriptions.Item>
+                <Descriptions.Item label="跟单员">{item.data.handleBy}</Descriptions.Item>
+                <Descriptions.Item label="目的国">{item.data.destCountry}</Descriptions.Item>
+                <Descriptions.Item label="品项数">
+                  <span className="num">{item.data.items.length}</span> 项
+                </Descriptions.Item>
+                <Descriptions.Item label="工厂代码">
+                  <span className="num">{factoryCodes.join(', ')}</span>
+                </Descriptions.Item>
+              </Descriptions>
+            )
+          }
+          return (
+            <Text type="danger" style={{ marginLeft: 8, fontSize: 12 }}>
+              {item.error ?? '解析失败'}
+            </Text>
+          )
+        }}
+      />
 
-      {schedules.length > 0 && (
-        <List
-          header={<Text strong>排期表解析结果</Text>}
-          bordered
-          dataSource={schedules}
-          renderItem={(item) => (
-            <List.Item>
-              <Space direction="vertical" style={{ width: '100%' }}>
-                <Space>
-                  <StatusTag status={item.status} />
-                  <Text strong>{item.filename}</Text>
-                </Space>
-                {item.status === 'done' ? (
-                  <Text style={{ marginLeft: 16 }}>
-                    共解析 <Text strong>{item.rowCount}</Text> 行数据
-                  </Text>
-                ) : (
-                  <Text type="danger" style={{ marginLeft: 16 }}>
-                    {item.error ?? '解析失败'}
-                  </Text>
-                )}
-              </Space>
-            </List.Item>
-          )}
-        />
-      )}
+      <SectionList
+        header="排期表解析详情"
+        dataSource={schedules}
+        renderBody={(item) => {
+          if (item.status === 'done') {
+            return (
+              <Text style={{ marginLeft: 8, fontSize: 13 }}>
+                共解析{' '}
+                <span className="num stat-num" style={{ fontSize: 15 }}>
+                  {item.rowCount}
+                </span>{' '}
+                行数据
+              </Text>
+            )
+          }
+          return (
+            <Text type="danger" style={{ marginLeft: 8, fontSize: 12 }}>
+              {item.error ?? '解析失败'}
+            </Text>
+          )
+        }}
+      />
     </Space>
   )
 }

@@ -93,6 +93,33 @@ def master_schedule_info():
     })
 
 
+@app.route('/api/master-schedule-download')
+def master_schedule_download():
+    """下载当前总排期文件（上传的副本）"""
+    mp = _get_master_path()
+    if not mp or not os.path.exists(mp):
+        return jsonify({'error': '总排期文件不存在，请先上传'}), 404
+    return send_file(mp, as_attachment=True, download_name=os.path.basename(mp))
+
+
+@app.route('/api/master-schedule-set-path', methods=['POST'])
+def master_schedule_set_path():
+    """切换当前总排期路径（必须在 MASTER_FOLDER 内，防路径穿越）"""
+    new_path = (request.json or {}).get('path', '').strip()
+    if not new_path:
+        _set_master_path('')
+        return jsonify({'ok': True, 'path': '(未上传总排期文件)', 'msg': '已清除，请重新上传总排期'})
+    # 防路径穿越：必须在 MASTER_FOLDER 内
+    master_folder = os.path.abspath(app.config['MASTER_FOLDER'])
+    abs_path = os.path.abspath(new_path)
+    if not abs_path.startswith(master_folder + os.sep) and abs_path != master_folder:
+        return jsonify({'error': '路径非法，必须在上传目录下'}), 403
+    if not os.path.exists(abs_path):
+        return jsonify({'error': f'路径不存在: {new_path}'}), 400
+    _set_master_path(abs_path)
+    return jsonify({'ok': True, 'path': abs_path, 'msg': f'已切换到: {os.path.basename(abs_path)}'})
+
+
 # ── 黑名单 ──
 
 _ignore_cache = {'mtime': 0, 'items': set()}
@@ -233,6 +260,19 @@ def master_schedule_upload():
             'errors': errors, 'warnings': [],
         })
 
+    # 数据异常检测：PDF转Excel可能丢数据，qty/outer=0 的行提示用户核对原始PO
+    data_warnings = []
+    for od in orders:
+        fname = od.get('filename', '')
+        for ln in od.get('lines', []):
+            sku = ln.get('sku_spec') or ln.get('sku', '')
+            qty = ln.get('qty', 0) or 0
+            outer = ln.get('outer_qty', 0) or 0
+            if qty <= 0:
+                data_warnings.append(f'{fname}: {sku} 数量=0，可能是PDF转Excel时数据丢失，请核对原始PO')
+            elif outer <= 0:
+                data_warnings.append(f'{fname}: {sku} 外箱装箱数=0，可能是PDF转Excel时数据丢失，请核对原始PO')
+
     export_dir = app.config['EXPORT_FOLDER']
     try:
         result = write_orders(master_path, orders, export_dir=export_dir)
@@ -249,6 +289,8 @@ def master_schedule_upload():
             'dedup_report': dedup_report,
             'ignored_report': ignored_report,
         }
+        if data_warnings:
+            resp['data_warnings'] = data_warnings
         if result.get('export_file'):
             resp['export_file'] = result['export_file']
         try:

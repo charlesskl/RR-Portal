@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block content %}
+<h3>待审核</h3>
+<p class="text-muted">
+  入库只有进货编号没填色粉编号、出库色粉查不到、或出库会导致库存变负,都会进到这里。
+  手动补全色粉编号后点"确认",系统会自动找对应色粉做入/出库。
+</p>
+
+{% if not items %}
+<div class="alert alert-secondary">暂无待审核项。</div>
+{% else %}
+
+{# 每行有两个 form(resolve + reject),用 form="id" 属性关联,避免 <form> 跨 <td> 的 HTML 兼容性问题 #}
+{% for it in items %}
+  <form id="resolve-{{ it.id }}" method="post" action="{{ url_for('pending.resolve', rid=it.id) }}"></form>
+  <form id="reject-{{ it.id }}" method="post" action="{{ url_for('pending.reject', rid=it.id) }}"
+        onsubmit="return confirm('确定驳回?不会改动库存')"></form>
+{% endfor %}
+
+<table class="table table-sm align-middle">
+  <thead>
+    <tr>
+      <th>类型</th>
+      <th>色粉编号</th>
+      <th>进货编号</th>
+      <th>数量</th>
+      <th>单价(HK$)</th>
+      <th>原因</th>
+      <th>备注</th>
+      <th>创建时间</th>
+      <th style="width:210px">操作</th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for it in items %}
+    <tr>
+      <td>
+        {% if it.type == 'in' %}
+          <span class="badge bg-success">入库</span>
+        {% elif it.type == 'edit_in' %}
+          <span class="badge bg-warning text-dark">修改入库 #{{ it.ref_tx_id }}</span>
+        {% else %}
+          <span class="badge bg-danger">出库</span>
+        {% endif %}
+      </td>
+      <td><input form="resolve-{{ it.id }}" name="pigment_code" value="{{ it.pigment_code }}"
+                 class="form-control form-control-sm" placeholder="色粉编号" required></td>
+      <td><input form="resolve-{{ it.id }}" name="purchase_code" value="{{ it.purchase_code }}"
+                 class="form-control form-control-sm" placeholder="进货编号"></td>
+      <td>
+        <div class="input-group input-group-sm" style="width:140px">
+          <input form="resolve-{{ it.id }}" type="number" name="quantity" step="0.0001" min="0.0001"
+                 value="{{ ('%.4f'|format(it.quantity)).rstrip('0').rstrip('.') }}" class="form-control form-control-sm" required>
+          <span class="input-group-text">{{ 'g' if it.type == 'out' else 'kg' }}</span>
+        </div>
+      </td>
+      <td>
+        {% if it.type in ('in', 'edit_in') %}
+          <input form="resolve-{{ it.id }}" type="number" name="unit_price" step="0.1"
+                 value="{% if it.unit_price is not none %}{{ '%.1f'|format(it.unit_price) }}{% endif %}"
+                 class="form-control form-control-sm" style="width:100px">
+        {% else %}—{% endif %}
+      </td>
+      <td><small class="text-danger">{{ it.reason }}</small></td>
+      <td><small class="text-muted">{{ it.note or '—' }}</small></td>
+      <td><small class="text-muted">{{ it.created_at.strftime('%m-%d %H:%M') if it.created_at else '—' }}</small></td>
+      <td>
+        <button form="resolve-{{ it.id }}" class="btn btn-sm btn-primary" type="submit">
+          <i class="bi bi-check2"></i>
+          {% if it.type == 'in' %}确认入库
+          {% elif it.type == 'edit_in' %}强制修改
+          {% else %}确认出库{% endif %}
+        </button>
+        <button form="reject-{{ it.id }}" class="btn btn-sm btn-outline-secondary" type="submit">驳回</button>
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% endblock %}

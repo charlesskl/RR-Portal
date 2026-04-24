@@ -1,9 +1,11 @@
-from flask import Flask, render_template, request, redirect, url_for, jsonify, send_file
+from flask import Flask, render_template, request, redirect, url_for, jsonify, send_file, session, flash
 import sqlite3
 import os
 import io
 import sys
 import xlsxwriter
+from datetime import timedelta
+from functools import wraps
 
 # 兼容 PyInstaller exe 和普通 Python 运行
 if getattr(sys, 'frozen', False):
@@ -20,6 +22,27 @@ app = Flask(__name__, template_folder=TEMPLATE_DIR, static_folder=STATIC_DIR)
 DATA_PATH = os.environ.get('DATA_PATH', BASE_DIR)
 os.makedirs(DATA_PATH, exist_ok=True)
 DATABASE = os.path.join(DATA_PATH, 'huadeng.db')
+
+app.secret_key = os.environ.get('HUADENG_SECRET_KEY', 'dev-change-me-in-prod')
+app.permanent_session_lifetime = timedelta(hours=8)
+
+SECTION_ACCOUNTS = {
+    1: {
+        'username': os.environ.get('HUADENG_SEC1_USER', 'hd'),
+        'password': os.environ.get('HUADENG_SEC1_PASSWORD', 'hd123456'),
+    },
+    2: {
+        'username': os.environ.get('HUADENG_SEC2_USER', 'xx'),
+        'password': os.environ.get('HUADENG_SEC2_PASSWORD', 'xx123456'),
+    },
+    3: {
+        'username': os.environ.get('HUADENG_SEC3_USER', 'sy'),
+        'password': os.environ.get('HUADENG_SEC3_PASSWORD', 'sy123456'),
+    },
+}
+for _sid, _acc in SECTION_ACCOUNTS.items():
+    if not _acc['password']:
+        print(f'[WARN] section {_sid} password empty', file=sys.stderr)
 
 
 @app.route('/health')
@@ -60,6 +83,58 @@ SECTIONS = {
     3: {'name': '邵阳华登和兴信包材往来', 'channels': [5, 6],
         'a': '邵阳华登', 'b': '兴信'},
 }
+
+
+# ==================== 板块登录权限 ====================
+
+def require_section(get_sec):
+    """装饰器工厂:get_sec(kwargs) 返回 section id 或 None。未登录该 section 则跳登录页。"""
+    def deco(f):
+        @wraps(f)
+        def wrapped(*args, **kwargs):
+            sec = get_sec(kwargs)
+            if sec is None or sec not in SECTIONS:
+                return redirect(url_for('index'))
+            if sec not in session.get('unlocked_sections', []):
+                return redirect(url_for('section_login', sec=sec))
+            return f(*args, **kwargs)
+        return wrapped
+    return deco
+
+
+_sec_required = require_section(lambda kw: kw.get('sec'))
+_ch_required = require_section(lambda kw: _ch_to_sec(kw['ch']) if kw.get('ch') in CHANNELS else None)
+
+
+@app.route('/section/<int:sec>/login', methods=['GET', 'POST'])
+def section_login(sec):
+    if sec not in SECTIONS:
+        return redirect(url_for('index'))
+    if request.method == 'POST':
+        acc = SECTION_ACCOUNTS.get(sec) or {}
+        username = request.form.get('username', '')
+        password = request.form.get('password', '')
+        if acc.get('password') and username == acc.get('username') and password == acc['password']:
+            session.permanent = True
+            unlocked = list(session.get('unlocked_sections', []))
+            if sec not in unlocked:
+                unlocked.append(sec)
+            session['unlocked_sections'] = unlocked
+            session.modified = True
+            return redirect(url_for('section', sec=sec))
+        flash('账号或密码错误')
+        return redirect(url_for('section_login', sec=sec))
+    return render_template('section_login.html', sec=sec, sec_info=SECTIONS[sec])
+
+
+@app.route('/section/<int:sec>/logout')
+def section_logout(sec):
+    unlocked = list(session.get('unlocked_sections', []))
+    if sec in unlocked:
+        unlocked.remove(sec)
+        session['unlocked_sections'] = unlocked
+        session.modified = True
+    return redirect(url_for('index'))
 
 
 def get_db():
@@ -215,6 +290,7 @@ def index():
 
 
 @app.route('/section/<int:sec>')
+@_sec_required
 def section(sec):
     if sec not in SECTIONS:
         return redirect(url_for('index'))
@@ -259,6 +335,7 @@ def section(sec):
 # ==================== 记录增删改 ====================
 
 @app.route('/channel/<int:ch>/add', methods=['POST'])
+@_ch_required
 def add_record(ch):
     if ch not in CHANNELS:
         return redirect(url_for('index'))
@@ -282,6 +359,7 @@ def add_record(ch):
 
 
 @app.route('/channel/<int:ch>/edit/<int:record_id>', methods=['POST'])
+@_ch_required
 def edit_record(ch, record_id):
     if ch not in CHANNELS:
         return redirect(url_for('index'))
@@ -305,6 +383,7 @@ def edit_record(ch, record_id):
 
 
 @app.route('/channel/<int:ch>/delete/<int:record_id>', methods=['POST'])
+@_ch_required
 def delete_record(ch, record_id):
     if ch not in CHANNELS:
         return redirect(url_for('index'))
@@ -326,6 +405,7 @@ def _ch_to_sec(ch):
 # ==================== 盘点实存数 ====================
 
 @app.route('/channel/<int:ch>/inventory', methods=['POST'])
+@_ch_required
 def save_inventory(ch):
     if ch not in CHANNELS:
         return redirect(url_for('index'))
@@ -358,6 +438,7 @@ def save_inventory(ch):
 # ==================== 投资记录 ====================
 
 @app.route('/channel/<int:ch>/add-investment', methods=['POST'])
+@_ch_required
 def add_investment_record(ch):
     if ch not in CHANNELS:
         return redirect(url_for('index'))
@@ -394,6 +475,7 @@ def add_investment_record(ch):
 
 
 @app.route('/channel/<int:ch>/delete-investment/<int:inv_id>', methods=['POST'])
+@_ch_required
 def delete_investment_record(ch, inv_id):
     if ch not in CHANNELS:
         return redirect(url_for('index'))
@@ -406,6 +488,7 @@ def delete_investment_record(ch, inv_id):
 
 
 @app.route('/channel/<int:ch>/month/<year_month>/delete', methods=['POST'])
+@_ch_required
 def delete_month(ch, year_month):
     if ch not in CHANNELS:
         return redirect(url_for('index'))
@@ -419,6 +502,7 @@ def delete_month(ch, year_month):
 
 
 @app.route('/channel/<int:ch>/month/<year_month>/update', methods=['POST'])
+@_ch_required
 def update_month(ch, year_month):
     if ch not in CHANNELS:
         return redirect(url_for('index'))
@@ -696,6 +780,7 @@ def reports():
 # ==================== 导出 Excel ====================
 
 @app.route('/export/channel/<int:ch>')
+@_ch_required
 def export_channel(ch):
     if ch not in CHANNELS:
         return redirect(url_for('index'))
@@ -1039,6 +1124,7 @@ def export_triangle():
 
 
 @app.route('/export/monthly/<int:ch>')
+@_ch_required
 def export_monthly(ch):
     if ch not in CHANNELS:
         return redirect(url_for('index'))

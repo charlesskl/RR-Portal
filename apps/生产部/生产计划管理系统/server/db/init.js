@@ -1,3 +1,5 @@
+const fs = require('fs');
+const path = require('path');
 const db = require('./connection');
 
 function initDatabase() {
@@ -114,6 +116,30 @@ function initDatabase() {
       remark TEXT
     )
   `);
+
+  // 首次启动时从 seed.json 填充初始数据
+  const orderCount = db.prepare('SELECT COUNT(*) as c FROM orders').get().c;
+  if (orderCount === 0) {
+    const seedPath = path.join(__dirname, '../data/seed.json');
+    if (fs.existsSync(seedPath)) {
+      try {
+        const seed = JSON.parse(fs.readFileSync(seedPath, 'utf8'));
+        const cols = db.prepare('PRAGMA table_info(orders)').all().map(c => c.name);
+        const keys = cols.filter(c => c !== 'id');
+        const placeholders = keys.map(() => '?').join(',');
+        const stmt = db.prepare(`INSERT INTO orders (${keys.join(',')}) VALUES (${placeholders})`);
+        const insertMany = db.transaction((rows) => {
+          for (const r of rows) {
+            stmt.run(...keys.map(k => r[k] ?? null));
+          }
+        });
+        insertMany(seed);
+        console.log(`已从 seed.json 导入 ${seed.length} 条初始数据`);
+      } catch (e) {
+        console.error('seed.json 加载失败:', e.message);
+      }
+    }
+  }
 
   console.log('数据库初始化完成');
 }

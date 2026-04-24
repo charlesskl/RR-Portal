@@ -6,7 +6,10 @@ const multer = require('multer');
 const ExcelJS = require('exceljs');
 const db = require('../db/connection');
 
-const upload = multer({ dest: path.join(__dirname, '..', 'uploads') });
+const upload = multer({
+  dest: path.join(__dirname, '..', 'uploads'),
+  limits: { fileSize: 20 * 1024 * 1024 },  // 20MB，订单截图最高也就几 MB
+});
 
 // ========== 延迟编译SQL（表在initDatabase后才存在）==========
 let _stmts;
@@ -202,6 +205,11 @@ router.post('/import', upload.single('file'), async (req, res) => {
     if (ext === '.pdf') {
       const { parsePdf } = require('../services/pdfParser');
       parsed = await parsePdf(req.file.path);
+    } else if (['.png', '.jpg', '.jpeg', '.webp'].includes(ext)) {
+      const { parseImageOrders } = require('../services/imageParser');
+      const result = await parseImageOrders(req.file.path);
+      parsed = result.orders;
+      console.log('[图片导入] 解析结果:', parsed.length, '条');
     } else if (['.xlsx', '.xls'].includes(ext)) {
       const { parseOrderExcel, parseXingxinOrderExcel } = require('../services/excelParser');
       // 检测是否为兴信生产单格式（含"啤净重"或"出模数"）
@@ -224,7 +232,7 @@ router.post('/import', upload.single('file'), async (req, res) => {
         }
       }
     } else {
-      return res.status(400).json({ message: '不支持的文件格式，仅支持PDF/Excel' });
+      return res.status(400).json({ message: '不支持的文件格式，仅支持 PDF / Excel / 图片(PNG/JPG/WebP)' });
     }
 
     const workshop = req.body.workshop || 'B';

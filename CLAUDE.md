@@ -65,7 +65,8 @@ RR-Portal/
 
 ## Deployment Workflow
 - Handle the full fix → merge → deploy → verify flow autonomously; do NOT instruct the user to SSH and run commands manually.
-- Build Docker images LOCALLY, never on the resource-constrained ECS server (prior builds caused OOM crashes).
+- Use the existing deploy pipeline: `git push main` → GitHub Actions → `deploy/update-server.sh` on ECS. The script is diff-based (2026-04-22+): only rebuilds changed services, one at a time, handles orphan cleanup + nginx reload + bind-mount recreate. Do NOT manually SSH + `docker compose up` — race conditions with GHA, container name collisions.
+- Single-service builds on ECS are safe. The OOM history was the OLD bare `docker compose up --build` rebuilding all 15+ services in parallel — that pattern is gone. If a specific service is ever known to OOM on its own (very heavy React/webpack), document it here and build that one locally with `docker save | ssh | docker load`.
 - After deploys, always smoke-test the live URL and check container health before declaring success.
 
 ## Scope Discipline

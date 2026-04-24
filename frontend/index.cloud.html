@@ -279,6 +279,12 @@
                 <span class="plugin-name">注塑啤机排产系统</span>
               </div>
             </div>
+            <div class="plugin-item">
+              <div class="plugin-info">
+                <div class="plugin-dot gray" id="productionPlanDot"></div>
+                <span class="plugin-name">生产计划管理系统</span>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -420,7 +426,7 @@
       <div class="dept-icon production" style="width:40px;height:40px;font-size:18px;">&#9881;</div>
       生产部
     </div>
-    <div class="page-subtitle">注塑啤机排产管理</div>
+    <div class="page-subtitle">注塑啤机排产 + 生产计划管理</div>
 
     <div class="detail-plugin-card">
       <div class="detail-plugin-left">
@@ -441,6 +447,28 @@
       <div class="detail-plugin-right">
         <div class="detail-plugin-status"><div class="plugin-dot gray" id="paijiDetailDot"></div> 检查中...</div>
         <a href="/paiji/" target="_blank" class="btn btn-primary">打开系统</a>
+      </div>
+    </div>
+
+    <div class="detail-plugin-card">
+      <div class="detail-plugin-left">
+        <div class="detail-plugin-icon" style="background:linear-gradient(135deg,#fb923c,#f97316);">&#128197;</div>
+        <div>
+          <div class="detail-plugin-name">生产计划管理系统</div>
+          <div class="detail-plugin-desc">Luckysheet 表格 UI，三车间（A/B/华登）生产计划管理，按货号+走货期自动排拉、合计与底部汇总、Excel 导入导出</div>
+          <div class="feature-grid">
+            <div class="feature-tag">&#128196; Excel 导入</div>
+            <div class="feature-tag">&#128202; 自动排拉</div>
+            <div class="feature-tag">&#128209; 合计列</div>
+            <div class="feature-tag">&#127912; 颜色检测</div>
+            <div class="feature-tag">&#128221; 拉名编辑</div>
+            <div class="feature-tag">&#128230; Excel 导出</div>
+          </div>
+        </div>
+      </div>
+      <div class="detail-plugin-right">
+        <div class="detail-plugin-status"><div class="plugin-dot gray" id="productionPlanDetailDot"></div> 检查中...</div>
+        <a href="/production-plan/" target="_blank" class="btn btn-primary">打开系统</a>
       </div>
     </div>
   </div>
@@ -688,6 +716,7 @@ async function checkHealth() {
       { name: 'figureMold', url: '/figure-mold-cost-system/health', dot: 'figureMoldDot', detailDot: 'figureMoldDetailDot' },
       { name: 'jiangping', url: '/jiangping/health', dot: 'jiangpingDot', detailDot: 'jiangpingDetailDot' },
       { name: 'paiji', url: '/paiji/health', dot: 'paijiDot', detailDot: 'paijiDetailDot' },
+      { name: 'productionPlan', url: '/production-plan/health', dot: 'productionPlanDot', detailDot: 'productionPlanDetailDot' },
       { name: 'zuruOrder', url: '/zuru-order-system/health', dot: 'zuruOrderDot', detailDot: 'zuruOrderDetailDot' },
       { name: 'liwenjuan', url: '/liwenjuan/health', dot: 'liwenjuanDot', detailDot: 'liwenjuanDetailDot' },
       { name: 'baojia', url: '/baojia/health', dot: 'baojiaDot', detailDot: 'baojiaDetailDot' },

@@ -136,6 +136,29 @@ services:
       timeout: 10s
       retries: 3
 
+  production-plan:
+    build:
+      context: ./apps/生产部/生产计划管理系统
+      dockerfile: Dockerfile
+      args:
+        BASE_PATH: /production-plan/
+    environment:
+      - PORT=8080
+      - NODE_ENV=production
+    volumes:
+      - "./apps/生产部/生产计划管理系统/server/data:/app/server/data"
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
   tomy-paiqi:
     build:
       context: ./apps/业务部/TOMY排期核对系统

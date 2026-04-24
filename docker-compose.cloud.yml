@@ -248,6 +248,33 @@ services:
     networks:
       - platform-net
 
+  production-plan:
+    build:
+      context: ./apps/生产部/生产计划管理系统
+      dockerfile: Dockerfile
+      args:
+        BASE_PATH: /production-plan/
+    environment:
+      - PORT=8080
+      - NODE_ENV=production
+    volumes:
+      - ./apps/生产部/生产计划管理系统/server/data:/app/server/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    mem_limit: 768m
+    memswap_limit: 768m
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - platform-net
+
   zuru-master-schedule:
     build:
       context: ./apps/业务部/ZURU总排期入单

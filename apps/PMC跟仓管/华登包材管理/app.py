@@ -144,61 +144,94 @@ def get_db():
 
 
 def init_db():
-    db = get_db()
-    item_cols = []
-    for key, _ in ITEMS:
-        item_cols.append(f'{key}_qty REAL DEFAULT 0')
-        item_cols.append(f'{key}_price REAL DEFAULT 0')
-        item_cols.append(f'{key}_amount REAL DEFAULT 0')
+    """初始化所有新 schema 表。幂等。"""
+    con = sqlite3.connect(DATABASE)
+    cur = con.cursor()
 
-    db.execute(f'''CREATE TABLE IF NOT EXISTS records (
+    # flow_records 主流水表
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS flow_records (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        channel INTEGER NOT NULL,
-        date TEXT NOT NULL,
-        order_no TEXT DEFAULT '',
-        {", ".join(item_cols)},
-        remarks TEXT DEFAULT '',
+        recorded_by TEXT NOT NULL,
+        from_party  TEXT NOT NULL,
+        to_party    TEXT NOT NULL,
+        date        TEXT NOT NULL,
+        order_no    TEXT,
+        remark      TEXT,
+        jx_qty REAL DEFAULT 0, gx_qty REAL DEFAULT 0, zx_qty REAL DEFAULT 0,
+        jkb_qty REAL DEFAULT 0, mkb_qty REAL DEFAULT 0, xb_qty REAL DEFAULT 0,
+        dz_qty REAL DEFAULT 0, wb_qty REAL DEFAULT 0, pk_qty REAL DEFAULT 0,
+        xzx_qty REAL DEFAULT 0, dgb_qty REAL DEFAULT 0, xjp_qty REAL DEFAULT 0,
+        dk_qty REAL DEFAULT 0,
+        xs_qty REAL DEFAULT 0, gsb_qty REAL DEFAULT 0,
+        djx_qty REAL DEFAULT 0, zb_qty REAL DEFAULT 0,
+        reconciliation_id INTEGER,
+        locked INTEGER DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (reconciliation_id) REFERENCES reconciliations(id)
+    )
+    """)
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_flow_recorded_by ON flow_records(recorded_by, from_party, to_party)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_flow_pair_date ON flow_records(from_party, to_party, date)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_flow_reconc ON flow_records(reconciliation_id)")
+
+    # reconciliations 核对批次
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS reconciliations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        initiator_party TEXT NOT NULL,
+        approver_party  TEXT NOT NULL,
+        pair_low  TEXT NOT NULL,
+        pair_high TEXT NOT NULL,
+        date_from TEXT NOT NULL,
+        date_to   TEXT NOT NULL,
+        status    TEXT NOT NULL,
+        snapshot_json TEXT,
+        notes     TEXT,
+        created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        approved_at TIMESTAMP
+    )
+    """)
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_reconc_approver ON reconciliations(approver_party, status)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_reconc_pair ON reconciliations(pair_low, pair_high, status)")
+
+    # investment_records 投资记录（按 pair）
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS investment_records (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        recorded_by TEXT NOT NULL,
+        counterparty TEXT NOT NULL,
+        year_month TEXT NOT NULL,
+        mkb_qty REAL DEFAULT 0, jkb_qty REAL DEFAULT 0,
+        jx_qty REAL DEFAULT 0, gx_qty REAL DEFAULT 0,
+        remark TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )''')
+    )
+    """)
 
-    db.execute('''CREATE TABLE IF NOT EXISTS default_prices (
+    # monthly_inventory 月份实存数
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS monthly_inventory (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        recorded_by TEXT NOT NULL,
+        counterparty TEXT NOT NULL,
+        year_month TEXT NOT NULL,
+        mkb_qty REAL, jkb_qty REAL, jx_qty REAL, gx_qty REAL,
+        UNIQUE (recorded_by, counterparty, year_month)
+    )
+    """)
+
+    # default_prices 单价表
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS default_prices (
         item_key TEXT PRIMARY KEY,
-        price REAL DEFAULT 0
-    )''')
+        price    REAL DEFAULT 0
+    )
+    """)
 
-    db.execute('''CREATE TABLE IF NOT EXISTS inventory_counts (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        channel INTEGER NOT NULL,
-        year_month TEXT NOT NULL,
-        mkb_actual REAL DEFAULT 0,
-        jkb_actual REAL DEFAULT 0,
-        jx_actual REAL DEFAULT 0,
-        gx_actual REAL DEFAULT 0,
-        mkb_expected REAL DEFAULT NULL,
-        jkb_expected REAL DEFAULT NULL,
-        jx_expected REAL DEFAULT NULL,
-        gx_expected REAL DEFAULT NULL,
-        remarks TEXT DEFAULT '',
-        UNIQUE(channel, year_month)
-    )''')
-
-    db.execute('''CREATE TABLE IF NOT EXISTS investment_records (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        channel INTEGER NOT NULL,
-        year_month TEXT NOT NULL,
-        mkb_qty REAL DEFAULT 0, mkb_price REAL DEFAULT 0, mkb_amount REAL DEFAULT 0,
-        jkb_qty REAL DEFAULT 0, jkb_price REAL DEFAULT 0, jkb_amount REAL DEFAULT 0,
-        jx_qty REAL DEFAULT 0,  jx_price REAL DEFAULT 0,  jx_amount REAL DEFAULT 0,
-        gx_qty REAL DEFAULT 0,  gx_price REAL DEFAULT 0,  gx_amount REAL DEFAULT 0,
-        UNIQUE(channel, year_month)
-    )''')
-    # 兼容旧 DB: 若 investment_records 表已存在但没有 UNIQUE 约束，这里补一个索引
-    db.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_inv_ch_ym ON investment_records(channel, year_month)')
-
-    for key, _ in ITEMS:
-        db.execute('INSERT OR IGNORE INTO default_prices (item_key, price) VALUES (?, 10)', (key,))
-    db.commit()
-    db.close()
+    con.commit()
+    con.close()
 
 
 # ==================== 辅助函数 ====================

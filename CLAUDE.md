@@ -63,6 +63,22 @@ RR-Portal/
 
 **历史**：`apps/` 和 `plugins/` 的分类原意区分 standalone vs plugin_sdk，2026-04-22 合并到单一 `apps/` 并按部门分组。`plugin_sdk/` 保留占位，将来真的用再说。
 
+## Deployment Workflow
+- Handle the full fix → merge → deploy → verify flow autonomously; do NOT instruct the user to SSH and run commands manually.
+- Build Docker images LOCALLY, never on the resource-constrained ECS server (prior builds caused OOM crashes).
+- After deploys, always smoke-test the live URL and check container health before declaring success.
+
+## Scope Discipline
+- Only fix the specific app/PR the user requested. Do NOT expand scope to sibling apps, propose SQL backfills, or touch unrelated WIP changes without explicit approval.
+- When in doubt, ask before broadening scope.
+
+## Editing Rules
+- Always Read a file before Edit (avoid sed regex misses).
+- Before committing, review `git status` and stage only the intended files — never `git add .` during a rename/migration.
+
+## Cache & Verification
+- Before attributing a bug to 'browser cache', verify by checking the deployed asset hash/content directly (curl) and confirming no JS parse errors in the served bundle.
+
 ## 常用命令
 
 ### 单服务安全部署（**首选**，强烈推荐）

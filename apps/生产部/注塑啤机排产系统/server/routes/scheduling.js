@@ -140,7 +140,7 @@ router.put('/:id/items/:itemId', (req, res) => {
     }
   }
 
-  // 目标数更新时自动计算天数
+  // 目标数更新时自动计算天数，并同步到 mold_targets（永久保存，下次排机默认取）
   if (req.body.target_24h !== undefined) {
     const currentItem = db.prepare('SELECT * FROM schedule_items WHERE id = ?').get(itemId);
     if (!currentItem) return res.status(404).json({ message: '记录不存在' });
@@ -150,6 +150,27 @@ router.put('/:id/items/:itemId', (req, res) => {
     const daysNeeded = t24h > 0 ? Math.round((shortage / t24h) * 100) / 100 : 0;
     updates.push('target_24h = ?', 'target_11h = ?', 'days_needed = ?');
     values.push(t24h, t11h, daysNeeded);
+
+    // 同步到 mold_targets：从 mold_name 提取模具编号（首段，去掉中文），存或更新
+    if (t24h > 0 && currentItem.mold_name) {
+      try {
+        const moldCode = currentItem.mold_name.split(' ')[0].replace(/[一-龥].*$/, '').trim();
+        if (moldCode) {
+          const sched = db.prepare('SELECT workshop FROM schedules WHERE id = ?').get(currentItem.schedule_id);
+          const ws = sched?.workshop || 'B';
+          const exists = db.prepare('SELECT id FROM mold_targets WHERE mold_no = ? AND workshop = ?').get(moldCode, ws);
+          if (exists) {
+            db.prepare('UPDATE mold_targets SET target_24h=?, target_11h=?, mold_name=?, updated_at=CURRENT_TIMESTAMP WHERE id=?')
+              .run(t24h, t11h, currentItem.mold_name, exists.id);
+          } else {
+            db.prepare("INSERT INTO mold_targets (mold_no, mold_name, target_24h, target_11h, notes, workshop) VALUES (?, ?, ?, ?, '', ?)")
+              .run(moldCode, currentItem.mold_name, t24h, t11h, ws);
+          }
+        }
+      } catch (e) {
+        console.log('[同步 mold_targets 失败]', e.message);
+      }
+    }
   }
 
   if (updates.length === 0) return res.status(400).json({ message: '没有要更新的字段' });

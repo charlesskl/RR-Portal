@@ -110,6 +110,23 @@ function generateSchedule({ orderIds, date, shift, workshop }) {
     const codeOnly = mt.mold_no.replace(/[\u4e00-\u9fa5].*$/, '').trim();
     if (codeOnly && codeOnly !== mt.mold_no) moldTargetMap[codeOnly] = mt;
   }
+
+  // 2c. \u4ece\u5386\u53f2\u8bb0\u5f55\u6784\u5efa \u515c\u5e95\u76ee\u6807\u6570 \u7d22\u5f15\uff08\u7cbe\u786e\u5339\u914d\u6a21\u5177\u7f16\u53f7\uff0c\u53d6\u4f17\u6570 target_24h\uff09
+  // \u540c\u6a21\u5177\u53f7\u5728\u4e0d\u540c\u65f6\u671f\u53ef\u80fd\u6709\u4e0d\u540c\u76ee\u6807\u503c\uff0c\u53d6\u51fa\u73b0\u6700\u591a\u7684\u90a3\u4e2a\u6700\u53ef\u9760
+  const histTargetRows = db.prepare(`
+    SELECT mold_name, target_24h, COUNT(*) as cnt
+    FROM history_records
+    WHERE workshop = ? AND target_24h > 0 AND mold_name IS NOT NULL AND mold_name != ''
+    GROUP BY mold_name, target_24h
+  `).all(ws);
+  const histTargetMap = {}; // code \u2192 { target_24h, cnt }
+  for (const h of histTargetRows) {
+    const code = (h.mold_name || '').split(' ')[0].replace(/[\u4e00-\u9fa5].*$/, '').trim();
+    if (!code) continue;
+    const cur = histTargetMap[code];
+    if (!cur || h.cnt > cur.cnt) histTargetMap[code] = { target_24h: h.target_24h, cnt: h.cnt };
+  }
+
   const findMoldTarget = (moldNo) => {
     if (!moldNo) return null;
     // 去掉订单模具号末尾中文
@@ -124,6 +141,9 @@ function generateSchedule({ orderIds, date, shift, workshop }) {
     if (noMA !== code && moldTargetMap[noMA]) return moldTargetMap[noMA];
     const noMAparent = noMA.replace(/-\d+$/, '');
     if (noMAparent !== noMA && moldTargetMap[noMAparent]) return moldTargetMap[noMAparent];
+    // 4) 兜底：从历史记录精确匹配（取众数）— 精确 code + 同套模 parentCode
+    if (histTargetMap[code]) return { target_24h: histTargetMap[code].target_24h, target_11h: 0 };
+    if (parentCode !== code && histTargetMap[parentCode]) return { target_24h: histTargetMap[parentCode].target_24h, target_11h: 0 };
     return null;
   };
 

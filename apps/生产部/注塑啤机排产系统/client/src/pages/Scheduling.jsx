@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Card, Button, DatePicker, Radio, Table, message, Steps, Tag, Space, Alert } from 'antd';
+import { Card, Button, DatePicker, Radio, Table, message, Steps, Tag, Space, Alert, Input } from 'antd';
 import { ThunderboltOutlined, InfoCircleOutlined } from '@ant-design/icons';
 import axios from 'axios';
 import dayjs from 'dayjs';
@@ -15,6 +15,7 @@ export default function Scheduling({ onDone, workshop = 'B' }) {
   const [shift, setShift] = useState('白班');
   const [loading, setLoading] = useState(false);
   const [carryOverInfo, setCarryOverInfo] = useState(null);
+  const [searchText, setSearchText] = useState('');
 
   useEffect(() => {
     axios.get(ORDERS_API, { params: { status: 'pending', workshop } })
@@ -64,10 +65,21 @@ export default function Scheduling({ onDone, workshop = 'B' }) {
     { title: '产品货号', dataIndex: 'product_code', width: 120 },
     { title: '模号名称', dataIndex: 'mold_name', width: 150 },
     { title: '颜色', dataIndex: 'color', width: 80 },
-    { title: '料型', dataIndex: 'material_type', width: 80 },
+    { title: '色粉', dataIndex: 'color_powder_no', width: 80 },
+    { title: '料型', dataIndex: 'material_type', width: 100 },
     { title: '啤重G', dataIndex: 'shot_weight', width: 80 },
     { title: '需啤数', dataIndex: 'quantity_needed', width: 80 },
+    { title: '下单单号', dataIndex: 'order_no', width: 130 },
   ];
+
+  // 按搜索词过滤订单
+  const filteredOrders = searchText.trim()
+    ? orders.filter(o => {
+        const q = searchText.toLowerCase();
+        return ['product_code', 'mold_name', 'color', 'color_powder_no', 'material_type', 'order_no']
+          .some(k => String(o[k] || '').toLowerCase().includes(q));
+      })
+    : orders;
 
   const carryOverColumns = [
     { title: '机台', dataIndex: 'machine_no', width: 70 },
@@ -90,13 +102,28 @@ export default function Scheduling({ onDone, workshop = 'B' }) {
 
       {step === 0 && (
         <div>
+          <Space style={{ marginBottom: 12 }}>
+            <Input.Search
+              placeholder="搜索货号/模号/颜色/色粉/料型/单号"
+              value={searchText}
+              onChange={e => setSearchText(e.target.value)}
+              onSearch={setSearchText}
+              allowClear
+              style={{ width: 360 }}
+            />
+            <span style={{ color: '#999' }}>
+              共 {filteredOrders.length} 条{searchText ? ` / 总 ${orders.length}` : ''}
+              {selectedIds.length > 0 && ` · 已选 ${selectedIds.length}`}
+            </span>
+          </Space>
           <Table
             rowSelection={{
               selectedRowKeys: selectedIds,
               onChange: setSelectedIds,
+              preserveSelectedRowKeys: true,
             }}
             columns={orderColumns}
-            dataSource={orders}
+            dataSource={filteredOrders}
             rowKey="id"
             size="small"
             pagination={{ pageSize: 50 }}

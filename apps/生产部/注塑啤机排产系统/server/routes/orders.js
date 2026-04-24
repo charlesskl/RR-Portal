@@ -28,7 +28,7 @@ function stmts() {
         UPDATE orders SET product_code=?, mold_no=?, mold_name=?, color=?, color_powder_no=?,
           material_type=?, shot_weight=?, material_kg=?, sprue_pct=?, ratio_pct=?,
           quantity_needed=?, accumulated=?, cavity=?, cycle_time=?, order_no=?,
-          is_three_plate=?, packing_qty=?, status=?
+          is_three_plate=?, packing_qty=?, status=?, order_notes=?
         WHERE id=?
       `),
       deleteOne: db.prepare('DELETE FROM orders WHERE id = ?'),
@@ -97,6 +97,7 @@ router.put('/:id', (req, res) => {
       o.is_three_plate ?? existing.is_three_plate,
       o.packing_qty ?? existing.packing_qty,
       o.status ?? existing.status,
+      o.order_notes ?? existing.order_notes,
       req.params.id
     );
     res.json({ id: Number(req.params.id), ...o });
@@ -112,6 +113,17 @@ router.delete('/:id', (req, res) => {
     res.json({ message: '已删除' });
   } catch (err) {
     res.status(500).json({ message: '删除失败：' + err.message });
+  }
+});
+
+// 清空当前车间所有订单
+router.delete('/', (req, res) => {
+  try {
+    const workshop = req.query.workshop || req.body.workshop || 'B';
+    const result = db.prepare('DELETE FROM orders WHERE workshop = ?').run(workshop);
+    res.json({ message: `已清空 ${result.changes} 条订单`, count: result.changes });
+  } catch (err) {
+    res.status(500).json({ message: '清空失败：' + err.message });
   }
 });
 
@@ -205,7 +217,7 @@ router.post('/import', upload.single('file'), async (req, res) => {
     if (ext === '.pdf') {
       const { parsePdf } = require('../services/pdfParser');
       parsed = await parsePdf(req.file.path);
-    } else if (['.png', '.jpg', '.jpeg', '.webp'].includes(ext)) {
+    } else if (['.png', '.jpg', '.jpeg', '.bmp', '.webp'].includes(ext)) {
       const { parseImageOrders } = require('../services/imageParser');
       const result = await parseImageOrders(req.file.path);
       parsed = result.orders;

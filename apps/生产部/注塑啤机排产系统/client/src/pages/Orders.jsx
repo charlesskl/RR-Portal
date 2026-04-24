@@ -5,7 +5,7 @@ import {
 } from 'antd';
 import {
   UploadOutlined, PlusOutlined, DeleteOutlined,
-  EditOutlined, InboxOutlined,
+  EditOutlined, ClearOutlined, InboxOutlined,
 } from '@ant-design/icons';
 import axios from 'axios';
 
@@ -65,6 +65,12 @@ export default function Orders() {
     load();
   };
 
+  const handleClearAll = async () => {
+    await axios.delete('/api/orders');
+    message.success('已清空所有订单');
+    load();
+  };
+
   const handleImport = async (file) => {
     const formData = new FormData();
     formData.append('file', file);
@@ -105,9 +111,12 @@ export default function Orders() {
     <div>
       <Space style={{ marginBottom: 16 }} wrap>
         <Button type="primary" icon={<PlusOutlined />} onClick={openAdd}>新增订单</Button>
-        <Upload beforeUpload={handleImport} showUploadList={false} accept=".xlsx,.xls,.pdf,.png,.jpg,.jpeg,.webp">
+        <Upload beforeUpload={handleImport} showUploadList={false} accept=".xlsx,.xls,.pdf,.png,.jpg,.jpeg,.webp,.bmp">
           <Button icon={<UploadOutlined />}>导入 Excel / PDF / 图片</Button>
         </Upload>
+        <Popconfirm title="确认清空所有订单？" onConfirm={handleClearAll}>
+          <Button danger icon={<ClearOutlined />}>清空订单</Button>
+        </Popconfirm>
         <Tag color="geekblue">共 {orders.length} 条订单</Tag>
       </Space>
 

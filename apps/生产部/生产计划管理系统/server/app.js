@@ -16,8 +16,6 @@ app.use('/api/upload', require('./routes/upload'));
 app.use('/api/orders', require('./routes/orders'));
 app.use('/api/export', require('./routes/export'));
 app.use('/api/summary', require('./routes/summary'));
-app.use('/api/scan', require('./routes/scan'));
-app.use('/api/kingsoft', require('./routes/kingsoft'));
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok', port: PORT }));
 app.get('/health', (req, res) => res.json({ status: 'ok', port: PORT }));

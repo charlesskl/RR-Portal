@@ -215,6 +215,7 @@
                 <th>客名</th>
                 <th title="筛选按完成月份">完成日期</th>
                 <th>车间</th>
+                <th>跟进工程师</th>
                 <th style="width:130px">啤办费用合计<br><small>(HKD)</small></th>
               </tr>
             </thead>
@@ -288,13 +289,14 @@
                 <th>客名</th>
                 <th title="筛选按完成月份">完成日期</th>
                 <th>车间</th>
+                <th>跟进工程师</th>
                 <th style="width:120px">料费合计<br><small>(HKD)</small></th>
                 <th style="width:120px">啤办费合计<br><small>(HKD)</small></th>
                 <th style="width:130px">总合计<br><small>(HKD)</small></th>
               </tr>
             </thead>
             <tbody id="totalBody">
-              <tr><td colspan="9" class="text-center text-muted p-3">加载中...</td></tr>
+              <tr><td colspan="10" class="text-center text-muted p-3">加载中...</td></tr>
             </tbody>
           </table>
         </div>
@@ -884,7 +886,7 @@ function loadTotalData() {
     renderTotalData();
   }).catch(e => {
     document.getElementById('totalBody').innerHTML =
-      `<tr><td colspan="9" class="text-center text-danger p-3"><i class="bi bi-exclamation-triangle"></i> 加载失败：${esc(e.message || String(e))}</td></tr>`;
+      `<tr><td colspan="10" class="text-center text-danger p-3"><i class="bi bi-exclamation-triangle"></i> 加载失败：${esc(e.message || String(e))}</td></tr>`;
   });
 }
 
@@ -904,7 +906,7 @@ function renderTotalData() {
   const hasFilter = ws || pq || oq || cq || onlyMissing;
   const body = document.getElementById('totalBody');
   if (!filtered.length) {
-    body.innerHTML = `<tr><td colspan="9" class="text-center text-muted p-3">${hasFilter ? '没有匹配的订单' : '暂无数据'}</td></tr>`;
+    body.innerHTML = `<tr><td colspan="10" class="text-center text-muted p-3">${hasFilter ? '没有匹配的订单' : '暂无数据'}</td></tr>`;
     return;
   }
 
@@ -933,7 +935,7 @@ function renderTotalData() {
         <td></td>
         <td class="text-muted ps-3">${esc(it.mold_id || '-')}</td>
         <td>${esc(it.mold_name || '-')}</td>
-        <td class="text-muted" colspan="3">${esc(it.material || '-')}</td>
+        <td class="text-muted" colspan="4">${esc(it.material || '-')}</td>
         <td class="text-end ${matCls}">${matTxt}</td>
         <td class="text-end ${injCls}">${injTxt}</td>
         <td class="text-end fw-bold">${itemTotal ? itemTotal.toFixed(2) : '0.00'}</td>
@@ -947,6 +949,7 @@ function renderTotalData() {
         <td>${esc(o.client_name || '-')}</td>
         <td title="完成日期：${esc(o.completed_date || '-')}${o.date ? '&#10;接单日期：' + esc(o.date) : ''}">${esc(o.completed_date ? o.completed_date.slice(5) : (o.date ? o.date.slice(5) : '-'))}</td>
         <td>${esc(o.workshop || '-')}</td>
+        <td>${esc(o.eng_name || '-')}</td>
         <td class="text-end fw-bold" style="color:${o.total_material_cost ? '#1a6e3a' : '#aaa'}">${o.total_material_cost.toFixed(2)}</td>
         <td class="text-end fw-bold" style="color:${o.total_injection_cost ? '#1a6e3a' : '#aaa'}">${o.skip_inj ? '<span class="text-muted" title="发至外厂订单不计啤办费">—</span>' : o.total_injection_cost.toFixed(2)}</td>
         <td class="text-end fw-bold" style="color:${o.total_cost ? '#0d6efd' : '#aaa'};font-size:.95rem">${o.total_cost.toFixed(2)}</td>
@@ -958,7 +961,7 @@ function renderTotalData() {
   const hint = hasFilter ? `（匹配 ${filtered.length} 个订单${missing ? '，其中 ' + missing + ' 个有缺项' : ''}）` : `（共 ${filtered.length} 个订单${missing ? '，其中 ' + missing + ' 个有缺项' : ''}）`;
   body.innerHTML = rows.join('') + `
     <tr style="font-weight:700;background:#f0f7f0">
-      <td colspan="6" class="text-end">合计${hint}</td>
+      <td colspan="7" class="text-end">合计${hint}</td>
       <td class="text-end" style="color:#1a6e3a">${gMat.toFixed(2)}</td>
       <td class="text-end" style="color:#1a6e3a">${gInj.toFixed(2)}</td>
       <td class="text-end" style="color:#0d6efd">${gTotal.toFixed(2)}</td>
@@ -1000,7 +1003,7 @@ function renderCostData() {
 
   const hasFilter = q || pq || cq || ws;
   if (!filtered.length) {
-    document.getElementById('costBody').innerHTML = `<tr><td colspan="7" class="text-center text-muted p-3">${hasFilter ? '没有匹配的订单' : '暂无数据'}</td></tr>`;
+    document.getElementById('costBody').innerHTML = `<tr><td colspan="8" class="text-center text-muted p-3">${hasFilter ? '没有匹配的订单' : '暂无数据'}</td></tr>`;
     return;
   }
 
@@ -1010,7 +1013,7 @@ function renderCostData() {
   filtered.forEach(it => {
     const key = it.order_number || '-';
     if (!groupMap[key]) {
-      groupMap[key] = { order_number: key, product_name: it.product_name, client_name: it.client_name, date: it.date, completed_date: it.completed_date, workshop: it.workshop, items: [], totalCost: 0 };
+      groupMap[key] = { order_number: key, product_name: it.product_name, client_name: it.client_name, date: it.date, completed_date: it.completed_date, workshop: it.workshop, eng_name: it.eng_name, items: [], totalCost: 0 };
       groups.push(groupMap[key]);
     }
     groupMap[key].items.push(it);
@@ -1028,7 +1031,7 @@ function renderCostData() {
         <td class="text-muted ps-3">${esc(it.doc_number || '-')}</td>
         <td>${esc(it.mold_id || '-')}</td>
         <td>${esc(it.mold_name || '-')}</td>
-        <td></td><td></td>
+        <td></td><td></td><td></td>
         <td class="text-end fw-bold" style="color:${cost ? '#1a6e3a' : '#aaa'}">${cost ? cost.toFixed(2) : '0.00'}</td>
       </tr>`;
     }).join('');
@@ -1040,6 +1043,7 @@ function renderCostData() {
         <td>${esc(g.client_name || '-')}</td>
         <td title="完成日期：${esc(g.completed_date || '-')}${g.date ? '&#10;接单日期：' + esc(g.date) : ''}">${esc(g.completed_date ? g.completed_date.slice(5) : (g.date ? g.date.slice(5) : '-'))}</td>
         <td>${esc(g.workshop || '-')}</td>
+        <td>${esc(g.eng_name || '-')}</td>
         <td class="text-end fw-bold" style="color:${g.totalCost ? '#1a6e3a' : '#aaa'}">${g.totalCost.toFixed(2)}</td>
       </tr>
       ${detailRows}`;
@@ -1048,7 +1052,7 @@ function renderCostData() {
   const hint = hasFilter ? `（匹配 ${groups.length} 个产品 / ${filtered.length} 条）` : `（共 ${groups.length} 个产品）`;
   document.getElementById('costBody').innerHTML = rows.join('') + `
     <tr style="font-weight:700;background:#f0f7f0">
-      <td colspan="6" class="text-end">合计${hint}</td>
+      <td colspan="7" class="text-end">合计${hint}</td>
       <td class="text-end" style="color:#1a6e3a">${grandTotal.toFixed(2)}</td>
     </tr>`;
 }

@@ -2,6 +2,10 @@
 
 用法: python scripts/migrate_to_v2.py <path/to/huadeng.db>
 
+⚠️ 运行前停掉 Flask 服务，避免：
+  1) shutil.copy2 拷不到 -wal/-shm 变更（如果是 WAL 模式）
+  2) 并发写入导致 schema 不一致
+
 流程:
 1. cp huadeng.db huadeng.db.bak-YYYYMMDD-HHMMSS
 2. 建 v2 表 (flow_records, reconciliations, investment_records[v2], monthly_inventory)
@@ -12,7 +16,6 @@
 
 draft / pending_approval 记录全部丢弃（用户用 Excel 重新导入）。
 """
-import os
 import shutil
 import sqlite3
 import sys
@@ -33,6 +36,18 @@ QTY_COLS = [
 
 
 def migrate(db_path):
+    # Guard: detect already-migrated DB (no legacy records table + has v2 flow_records)
+    con_check = sqlite3.connect(db_path)
+    try:
+        has_records = _table_exists(con_check, 'records')
+        has_flow = _table_exists(con_check, 'flow_records')
+    finally:
+        con_check.close()
+    if not has_records and has_flow:
+        print('[ABORT] already migrated — flow_records exists and records is gone. '
+              'Restore from backup if you need to re-run.', file=sys.stderr)
+        sys.exit(2)
+
     # 1. 备份
     ts = datetime.now().strftime('%Y%m%d-%H%M%S')
     bak = f'{db_path}.bak-{ts}'
@@ -55,9 +70,10 @@ def migrate(db_path):
     print(f'[OK] investment_records 迁入 {inv_migrated} 条')
 
     # 5. drop 旧表（如果存在）
+    # investment_records_v1 已在 _migrate_investment 里 rename+drop 过，
+    # 列在这里只是防御：万一 _migrate_investment 中途失败留下 _v1 残留。
     for t in ['records', 'investment_records_v1', 'reconciliations_v1', 'reconciliation_items']:
         con.execute(f'DROP TABLE IF EXISTS {t}')
-    # 因 step 4 里已把旧 investment_records rename 过
     print('[OK] 旧表已 drop')
 
     con.commit()
@@ -129,9 +145,11 @@ def _migrate_records(con):
     """).fetchall()
     qty_cols_str = ', '.join(QTY_COLS)
     qty_placeholders = ', '.join(['?'] * len(QTY_COLS))
+    ct = 0
     for r in rows:
         from_p, to_p = CHANNEL_MAP.get(r['channel'], (None, None))
         if from_p is None:
+            print(f'[WARN] skip records.id={r["id"]} unknown channel={r["channel"]}', file=sys.stderr)
             continue
         recorded_by = r['source_party'] if r['source_party'] else from_p
         con.execute(f"""
@@ -145,7 +163,8 @@ def _migrate_records(con):
             *[r[c] or 0 for c in QTY_COLS],
             r['created_at'],
         ])
-    return len(rows)
+        ct += 1
+    return ct
 
 
 def _migrate_investment(con):
@@ -171,6 +190,7 @@ def _migrate_investment(con):
     for r in rows:
         from_p, to_p = CHANNEL_MAP.get(r['channel'], (None, None))
         if from_p is None:
+            print(f'[WARN] skip investment_records.id={r["id"]} unknown channel={r["channel"]}', file=sys.stderr)
             continue
         con.execute("""
             INSERT INTO investment_records (

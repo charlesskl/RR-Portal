@@ -120,3 +120,64 @@ def test_migration_drops_old_tables(old_db):
     assert 'records' not in tables  # 旧表应 drop
     assert 'flow_records' in tables
     con.close()
+
+
+def test_migration_refuses_rerun(old_db):
+    """Running migrate twice should abort the second run with exit 2, not wipe data."""
+    # First run: should succeed
+    r1 = subprocess.run(
+        [sys.executable, 'scripts/migrate_to_v2.py', old_db],
+        capture_output=True, text=True,
+    )
+    assert r1.returncode == 0, r1.stderr
+
+    # Second run: should abort with exit 2, flow_records data still intact
+    r2 = subprocess.run(
+        [sys.executable, 'scripts/migrate_to_v2.py', old_db],
+        capture_output=True, text=True,
+    )
+    assert r2.returncode == 2, f'expected abort (exit 2), got {r2.returncode}: {r2.stderr}'
+    assert 'already migrated' in r2.stderr.lower()
+
+    # Data still present
+    con = sqlite3.connect(old_db)
+    ct = con.execute('SELECT COUNT(*) FROM flow_records').fetchone()[0]
+    con.close()
+    assert ct == 3  # same 3 rows as test_migration_maps_records
+
+
+def test_migration_warns_on_unmapped_channel(tmp_data_dir):
+    """Rows with channel not in 1-6 should be skipped with stderr warning, not crash."""
+    db_path = os.path.join(tmp_data_dir, 'huadeng.db')
+    con = sqlite3.connect(db_path)
+    # Minimal records schema (copy from old_db fixture — simplify)
+    con.execute("""
+    CREATE TABLE records (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        channel INTEGER NOT NULL,
+        date TEXT, order_no TEXT, remark TEXT,
+        jx_qty REAL DEFAULT 0, gx_qty REAL DEFAULT 0, zx_qty REAL DEFAULT 0,
+        jkb_qty REAL DEFAULT 0, mkb_qty REAL DEFAULT 0, xb_qty REAL DEFAULT 0,
+        dz_qty REAL DEFAULT 0, wb_qty REAL DEFAULT 0, pk_qty REAL DEFAULT 0,
+        xzx_qty REAL DEFAULT 0, dgb_qty REAL DEFAULT 0, xjp_qty REAL DEFAULT 0,
+        dk_qty REAL DEFAULT 0, xs_qty REAL DEFAULT 0, gsb_qty REAL DEFAULT 0,
+        djx_qty REAL DEFAULT 0, zb_qty REAL DEFAULT 0,
+        status TEXT, source_party TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )""")
+    con.execute("""INSERT INTO records (channel, date, order_no, status) VALUES (99, '2026-01-01', 'BAD1', 'legacy')""")
+    con.execute("""INSERT INTO records (channel, date, order_no, status) VALUES (1,  '2026-01-01', 'OK1',  'legacy')""")
+    con.commit()
+    con.close()
+
+    r = subprocess.run(
+        [sys.executable, 'scripts/migrate_to_v2.py', db_path],
+        capture_output=True, text=True,
+    )
+    assert r.returncode == 0, r.stderr
+    assert 'unknown channel=99' in r.stderr
+
+    con = sqlite3.connect(db_path)
+    rows = con.execute("SELECT order_no FROM flow_records").fetchall()
+    con.close()
+    assert rows == [('OK1',)]

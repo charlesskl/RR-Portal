@@ -16,5 +16,6 @@ def test_index_shows_3_cards(client):
 
 def test_index_has_reports_link(client):
     rv = client.get('/')
+    assert rv.status_code == 200
     html = rv.data.decode('utf-8')
     assert '/reports' in html

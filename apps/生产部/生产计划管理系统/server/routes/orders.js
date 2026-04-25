@@ -13,6 +13,15 @@ function saveLineConfig(config) {
   fs.writeFileSync(LINE_CONFIG_PATH, JSON.stringify(config, null, 2));
 }
 
+// 表格布局配置（列宽、行高、冻结位置）
+const SHEET_SETTINGS_PATH = path.join(__dirname, '../data/sheet-settings.json');
+function loadSheetSettings() {
+  try { return JSON.parse(fs.readFileSync(SHEET_SETTINGS_PATH, 'utf8')); } catch { return {}; }
+}
+function saveSheetSettings(s) {
+  fs.writeFileSync(SHEET_SETTINGS_PATH, JSON.stringify(s, null, 2));
+}
+
 const ORDER_COLUMNS = [
   'workshop','status','supervisor','line_name','worker_count','factory_area',
   'client','order_date','third_party','country','contract','item_no',
@@ -81,6 +90,24 @@ router.get('/lines', (req, res) => {
     name: (custom[workshop] && custom[workshop][l.key]) || l.name,
   }));
   res.json({ lines });
+});
+
+// GET /api/orders/sheet-settings?workshop=B
+router.get('/sheet-settings', (req, res) => {
+  const { workshop } = req.query;
+  if (!workshop) return res.status(400).json({ message: 'workshop required' });
+  const all = loadSheetSettings();
+  res.json(all[workshop] || {});
+});
+
+// PUT /api/orders/sheet-settings — 保存列宽/行高/冻结
+router.put('/sheet-settings', (req, res) => {
+  const { workshop, settings } = req.body;
+  if (!workshop || !settings) return res.status(400).json({ message: 'workshop, settings required' });
+  const all = loadSheetSettings();
+  all[workshop] = { ...(all[workshop] || {}), ...settings };
+  saveSheetSettings(all);
+  res.json({ success: true });
 });
 
 // PUT /api/orders/line-config — 更新拉名

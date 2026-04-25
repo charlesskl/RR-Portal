@@ -4,4 +4,5 @@ data/confirmed.json
 data/*.db
 data/*.db-*
 data/line-config.json
+data/sheet-settings.json
 uploads/

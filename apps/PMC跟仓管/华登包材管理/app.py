@@ -1,4 +1,4 @@
-from flask import Flask, request, redirect, url_for, jsonify, session, flash
+from flask import Flask, request, redirect, url_for, jsonify, session, flash, render_template
 import sqlite3
 import os
 import sys
@@ -218,9 +218,45 @@ def index():
     return ''  # filled in Task 6
 
 
+@app.route('/party/<party>/login', methods=['GET', 'POST'])
+def party_login(party):
+    if party not in PARTIES:
+        return redirect(url_for('index'))
+    if request.method == 'POST':
+        username = request.form.get('username', '').strip()
+        password = request.form.get('password', '')
+        # 1. username 必须存在
+        user_party = PARTY_BY_USERNAME.get(username)
+        if not user_party:
+            flash('账号或密码错误')
+            return redirect(url_for('party_login', party=party))
+        # 2. 与 URL 里的 party 必须一致
+        if user_party != party:
+            flash('账号与登录入口不符')
+            return redirect(url_for('party_login', party=party))
+        # 3. 密码校验
+        expected = PARTY_ACCOUNTS[party]['password']
+        if password != expected:
+            flash('账号或密码错误')
+            return redirect(url_for('party_login', party=party))
+        session.permanent = True
+        session['party'] = party
+        session.modified = True
+        return redirect(url_for('party_page', party=party))
+    return render_template('party_login.html', party=party)
+
+
+@app.route('/party/<party>/logout')
+def party_logout(party):
+    session.pop('party', None)
+    session.modified = True
+    return redirect(url_for('index'))
+
+
 @app.route('/party/<party>')
-def party(party):
-    return ''  # filled in Task 7
+@party_required
+def party_page(party):
+    return f'TODO: party page for {party}'
 
 
 # ==================== 默认单价 API ====================

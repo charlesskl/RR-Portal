@@ -167,7 +167,9 @@ TRIANGLE_ITEMS = [('mkb', '木卡板'), ('jkb', '胶卡板'), ('jx', '胶箱'), 
 
 
 def current_party():
-    return session.get('party')
+    """Return the validated party from session, or None if absent / tampered."""
+    p = session.get('party')
+    return p if p in PARTIES else None
 
 
 app.jinja_env.globals['current_party'] = current_party
@@ -205,6 +207,7 @@ def inject_pending_count():
         con.close()
         return {'pending_approval_count': row[0] if row else 0}
     except Exception:
+        app.logger.exception('inject_pending_count failed')
         return {'pending_approval_count': 0}
 
 

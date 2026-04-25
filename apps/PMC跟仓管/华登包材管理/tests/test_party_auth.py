@@ -27,6 +27,16 @@ def test_current_party_when_not_logged(client):
         assert app_module.current_party() is None
 
 
+def test_current_party_rejects_invalid():
+    import app as app_module
+    with app_module.app.test_request_context():
+        from flask import session
+        session['party'] = 'admin'
+        assert app_module.current_party() is None
+        session['party'] = 'hd'
+        assert app_module.current_party() == 'hd'
+
+
 @pytest.mark.skip(reason="party_login route created in Task 5")
 def test_party_required_redirects_when_not_logged(client):
     rv = client.get('/party/hd', follow_redirects=False)

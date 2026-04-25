@@ -9,7 +9,6 @@ import {
   PrinterOutlined, EditOutlined, SaveOutlined,
 } from '@ant-design/icons';
 import axios from 'axios';
-import { apiUrl } from '../api';
 
 const { Text } = Typography;
 
@@ -48,7 +47,7 @@ export default function ScheduleList() {
   };
 
   const handleExport = (id) => {
-    window.open(apiUrl(`/api/schedule/${id}/export`));
+    window.open(`/api/schedule/${id}/export`);
   };
 
   const handlePrint = () => {

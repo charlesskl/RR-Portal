@@ -2,7 +2,6 @@ import { useState, useEffect, useRef } from 'react';
 import { Upload, Button, Table, message, Card, Space, Tag, Popconfirm, Input, InputNumber } from 'antd';
 import { UploadOutlined, DeleteOutlined, ClearOutlined, DownloadOutlined } from '@ant-design/icons';
 import axios from 'axios';
-import { apiUrl } from '../api';
 
 const API = '/api/orders';
 
@@ -160,6 +159,8 @@ export default function OrderImport({ workshop = 'B' }) {
       render: (v, r) => renderEditable('order_no', r, v) },
     { title: '备注', dataIndex: 'order_notes', width: 120,
       render: (v, r) => renderEditable('order_notes', r, v, { color: '#d46b08' }) },
+    { title: '单号', dataIndex: 'serial_no', width: 100,
+      render: (v, r) => renderEditable('serial_no', r, v) },
     { title: '状态', dataIndex: 'status', width: 80,
       render: (s, record) => (
         <Tag
@@ -184,7 +185,7 @@ export default function OrderImport({ workshop = 'B' }) {
           <Upload beforeUpload={handleUpload} showUploadList={false} accept=".pdf,.xlsx,.xls,.png,.jpg,.jpeg,.bmp,.webp" multiple>
             <Button icon={<UploadOutlined />} type="primary">导入订单 (PDF/Excel/图片)</Button>
           </Upload>
-          <Button icon={<DownloadOutlined />} onClick={() => window.open(apiUrl('/api/orders/template'))}>下载导入模板</Button>
+          <Button icon={<DownloadOutlined />} onClick={() => window.open('/api/orders/template')}>下载导入模板</Button>
           <Popconfirm title="确定清空所有订单?" onConfirm={handleClearAll}>
             <Button icon={<ClearOutlined />} danger>清空全部</Button>
           </Popconfirm>

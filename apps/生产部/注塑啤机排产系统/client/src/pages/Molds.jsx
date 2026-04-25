@@ -8,7 +8,6 @@ import {
   EditOutlined, InboxOutlined, DownloadOutlined,
 } from '@ant-design/icons';
 import axios from 'axios';
-import { apiUrl } from '../api';
 
 export default function Molds() {
   const [molds, setMolds] = useState([]);
@@ -124,7 +123,7 @@ export default function Molds() {
         <Upload beforeUpload={handleImport} showUploadList={false} accept=".xlsx,.xls">
           <Button icon={<UploadOutlined />}>导入 Excel</Button>
         </Upload>
-        <Button icon={<DownloadOutlined />} onClick={() => window.open(apiUrl('/api/molds/template'))}>下载模板</Button>
+        <Button icon={<DownloadOutlined />} onClick={() => window.open('/api/molds/template')}>下载模板</Button>
         <Tag color="geekblue">共 {molds.length} 条排模数据</Tag>
       </Space>
 

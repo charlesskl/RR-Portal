@@ -111,8 +111,8 @@ export default function Orders() {
     <div>
       <Space style={{ marginBottom: 16 }} wrap>
         <Button type="primary" icon={<PlusOutlined />} onClick={openAdd}>新增订单</Button>
-        <Upload beforeUpload={handleImport} showUploadList={false} accept=".xlsx,.xls,.pdf,.png,.jpg,.jpeg,.webp,.bmp">
-          <Button icon={<UploadOutlined />}>导入 Excel / PDF / 图片</Button>
+        <Upload beforeUpload={handleImport} showUploadList={false} accept=".xlsx,.xls,.pdf">
+          <Button icon={<UploadOutlined />}>导入 Excel / PDF</Button>
         </Upload>
         <Popconfirm title="确认清空所有订单？" onConfirm={handleClearAll}>
           <Button danger icon={<ClearOutlined />}>清空订单</Button>

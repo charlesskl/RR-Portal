@@ -36,16 +36,6 @@ function needsFiveAxis(order) {
 }
 
 /**
- * 按机台吨位估算合理啤重区间（g）— 新机台无历史数据时 fallback
- * 经验法则：每吨锁模力对应约 0.5~3g 塑料（视产品薄厚而定）
- */
-function tonnageShotWeightRange(tonnage) {
-  const t = Number(tonnage) || 0;
-  if (t <= 0) return null;
-  return { min: t * 0.3, max: t * 3.0 };
-}
-
-/**
  * 获取上一班次
  * 夜班 → 同日白班
  * 白班 → 前一天夜班
@@ -111,16 +101,16 @@ function generateSchedule({ orderIds, date, shift, workshop }) {
     if (codeOnly && codeOnly !== mt.mold_no) moldTargetMap[codeOnly] = mt;
   }
 
-  // 2c. \u4ece\u5386\u53f2\u8bb0\u5f55\u6784\u5efa \u515c\u5e95\u76ee\u6807\u6570 \u7d22\u5f15\uff08\u7cbe\u786e\u5339\u914d\u6a21\u5177\u7f16\u53f7\uff0c\u53d6\u4f17\u6570 target_24h\uff09
-  // \u540c\u6a21\u5177\u53f7\u5728\u4e0d\u540c\u65f6\u671f\u53ef\u80fd\u6709\u4e0d\u540c\u76ee\u6807\u503c\uff0c\u53d6\u51fa\u73b0\u6700\u591a\u7684\u90a3\u4e2a\u6700\u53ef\u9760
-  const histTargetRows = db.prepare(`
+  // 2c. 从历史记录构建 兜底目标数 索引（精确匹配模具编号，取众数 target_24h）
+  // 同模具号在不同时期可能有不同目标值，取出现最多的那个最可靠
+  const histTargets = db.prepare(`
     SELECT mold_name, target_24h, COUNT(*) as cnt
     FROM history_records
     WHERE workshop = ? AND target_24h > 0 AND mold_name IS NOT NULL AND mold_name != ''
     GROUP BY mold_name, target_24h
   `).all(ws);
-  const histTargetMap = {}; // code \u2192 { target_24h, cnt }
-  for (const h of histTargetRows) {
+  const histTargetMap = {}; // code → { target_24h, cnt }
+  for (const h of histTargets) {
     const code = (h.mold_name || '').split(' ')[0].replace(/[\u4e00-\u9fa5].*$/, '').trim();
     if (!code) continue;
     const cur = histTargetMap[code];
@@ -131,17 +121,17 @@ function generateSchedule({ orderIds, date, shift, workshop }) {
     if (!moldNo) return null;
     // 去掉订单模具号末尾中文
     const code = moldNo.replace(/[\u4e00-\u9fa5].*$/, '').trim();
-    // 1) 精确匹配
+    // 1) 精确匹配 mold_targets
     if (moldTargetMap[code]) return moldTargetMap[code];
     // 2) 同套模匹配：去掉末尾 "-数字"（如 FUGG-05M-01-1 → FUGG-05M-01）
     const parentCode = code.replace(/-\d+$/, '');
     if (parentCode !== code && moldTargetMap[parentCode]) return moldTargetMap[parentCode];
-    // 3) 工厂前缀匹配：MAMNVN / MARBCEZ 等带 MA 前缀的去掉 MA（MAMNVN-17M-01 → MNVN-17M-01）
+    // 3) 工厂前缀匹配：MAMNVN / MARBCEZ 等带 MA 前缀的去掉 MA
     const noMA = code.replace(/^MA(?=[A-Z]{3,})/, '');
     if (noMA !== code && moldTargetMap[noMA]) return moldTargetMap[noMA];
     const noMAparent = noMA.replace(/-\d+$/, '');
     if (noMAparent !== noMA && moldTargetMap[noMAparent]) return moldTargetMap[noMAparent];
-    // 4) 兜底：从历史记录精确匹配（取众数）— 精确 code + 同套模 parentCode
+    // 4) 兜底：从历史记录精确匹配（取众数）
     if (histTargetMap[code]) return { target_24h: histTargetMap[code].target_24h, target_11h: 0 };
     if (parentCode !== code && histTargetMap[parentCode]) return { target_24h: histTargetMap[parentCode].target_24h, target_11h: 0 };
     return null;
@@ -303,16 +293,6 @@ function generateSchedule({ orderIds, date, shift, workshop }) {
             : (shotWeight - ms.max_w) / ms.max_w;
           score -= Math.min(distance * 20, 20);
         }
-      } else if (shotWeight > 0) {
-        // 新机台无历史 → 用吨位估算合理啤重区间，避免大件排到小机
-        const range = tonnageShotWeightRange(m.tonnage);
-        if (range) {
-          if (shotWeight < range.min || shotWeight > range.max) {
-            continue; // 吨位与啤重差距过大，跳过
-          }
-          score += 5; // 吨位匹配，小幅加分
-          reasons.push('吨位匹配');
-        }
       }
 
       // Step 3: 啤重越接近均值越好 → 0~10分
@@ -361,16 +341,9 @@ function generateSchedule({ orderIds, date, shift, workshop }) {
         a.machine_no === m.machine_no &&
         isSameMold(a.order.mold_no, order.mold_no)
       );
-      // 结转项的 mold_name 可能包含模号（如 "MNVN-17M-01 XX玩具"），
-      // 用 moldBase 提取核心编号比较，而不是只做 includes 子串匹配
-      const orderMoldBase = moldBase(order.mold_no || '');
-      const sameMoldCarryOver = (carryOverByMachine[m.machine_no] || []).some(item => {
-        if (!item.mold_name) return false;
-        const itemMoldBase = moldBase(item.mold_name);
-        if (orderMoldBase && itemMoldBase && orderMoldBase === itemMoldBase) return true;
-        // 兜底：旧逻辑的 includes，以防 moldBase 未识别格式
-        return order.mold_no && item.mold_name.includes(order.mold_no);
-      });
+      const sameMoldCarryOver = (carryOverByMachine[m.machine_no] || []).some(item =>
+        order.mold_no && item.mold_name && item.mold_name.includes(order.mold_no)
+      );
       if (sameMoldNew || sameMoldCarryOver) {
         score += 100;
         reasons.push('同套模');
@@ -446,8 +419,8 @@ function generateSchedule({ orderIds, date, shift, workshop }) {
     INSERT INTO schedule_items (schedule_id, machine_no, product_code, mold_name, color,
       color_powder_no, material_type, shot_weight, material_kg, sprue_pct, ratio_pct,
       accumulated, quantity_needed, shortage, order_no, target_24h, target_11h,
-      days_needed, packing_qty, notes, sort_order, order_id, is_carry_over, robot_arm)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      days_needed, packing_qty, notes, sort_order, order_id, is_carry_over, robot_arm, serial_no)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   // 机台臂型映射
@@ -487,11 +460,8 @@ function generateSchedule({ orderIds, date, shift, workshop }) {
     let sortOrder = (maxSort?.m ?? -1) + 1;
 
     // 先写结转项（is_carry_over=1，仅限机台正常的）
-    // 使用 DB 存储的 shortage（权威值），因为调机人手动调过的 accumulated 可能已偏离简单累加
     for (const item of filteredCarryOver) {
-      const shortage = item.shortage !== null && item.shortage !== undefined
-        ? item.shortage
-        : Math.max(0, (item.quantity_needed || 0) - (item.accumulated || 0));
+      const shortage = Math.max(0, (item.quantity_needed || 0) - (item.accumulated || 0));
       insertItem.run(
         scheduleId, item.machine_no,
         item.product_code || '', item.mold_name || '', item.color || '',
@@ -502,7 +472,8 @@ function generateSchedule({ orderIds, date, shift, workshop }) {
         item.order_no || '', item.target_24h || 0, item.target_11h || 0,
         item.days_needed || 0, item.packing_qty || 0,
         `[结转]${(item.notes || '').replace(/^\[结转\]+/, '')}`, sortOrder++,
-        item.order_id || null, 1, machineArmMap[item.machine_no] || item.robot_arm || ''
+        item.order_id || null, 1, machineArmMap[item.machine_no] || item.robot_arm || '',
+        item.serial_no || ''
       );
     }
 
@@ -529,7 +500,8 @@ function generateSchedule({ orderIds, date, shift, workshop }) {
         o.shot_weight || 0, materialKg, o.sprue_pct || 0, o.ratio_pct || 0,
         o.accumulated || 0, o.quantity_needed || 0, shortage,
         o.order_no || '', target24h, target11h, daysNeeded,
-        o.packing_qty || 0, notes, sortOrder++, o.id, 0, machineArmMap[a.machine_no] || ''
+        o.packing_qty || 0, notes, sortOrder++, o.id, 0, machineArmMap[a.machine_no] || '',
+        o.serial_no || ''
       );
 
       updateOrderStatus.run(o.id);

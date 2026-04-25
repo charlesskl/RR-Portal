@@ -341,6 +341,8 @@ export default function SchedulingSheet({ workshop, tab, lineName = 'all', lines
       <LuckysheetEditor
         data={data}
         onCellChange={handleCellChange}
+        onRefreshData={fetchData}
+        workshop={workshop}
         height={600}
         newImportedIds={newImportedIds}
       />

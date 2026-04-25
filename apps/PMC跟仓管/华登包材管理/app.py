@@ -215,7 +215,7 @@ def inject_pending_count():
 
 @app.route('/')
 def index():
-    return ''  # filled in Task 6
+    return render_template('index.html')
 
 
 @app.route('/party/<party>/login', methods=['GET', 'POST'])

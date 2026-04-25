@@ -27,6 +27,15 @@
             </div>
         </div>
     </nav>
+    {% with messages = get_flashed_messages() %}
+      {% if messages %}
+        <div class="max-w-7xl mx-auto px-4 mt-3">
+          {% for m in messages %}
+            <div class="bg-red-50 border border-red-200 text-red-700 text-sm rounded px-3 py-2 mb-2">{{ m }}</div>
+          {% endfor %}
+        </div>
+      {% endif %}
+    {% endwith %}
     <main class="max-w-full mx-auto px-4 py-6">
         {% block content %}{% endblock %}
     </main>

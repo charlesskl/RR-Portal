@@ -65,6 +65,7 @@ def test_login_wrong_password(client):
                      data={'username': 'hd', 'password': 'WRONG'},
                      follow_redirects=False)
     assert rv.status_code == 302  # 回登录页
+    assert '/party/hd/login' in rv.location
     with client.session_transaction() as sess:
         assert sess.get('party') is None
 
@@ -74,6 +75,7 @@ def test_login_wrong_party(client):
     rv = client.post('/party/hd/login', data={'username': 'sy', 'password': 'sy123456'},
                      follow_redirects=False)
     assert rv.status_code == 302
+    assert '/party/hd/login' in rv.location
     with client.session_transaction() as sess:
         assert sess.get('party') is None
 
@@ -84,3 +86,11 @@ def test_logout_clears_session(client):
     client.get('/party/hd/logout')
     with client.session_transaction() as sess:
         assert sess.get('party') is None
+
+
+def test_party_page_authed_returns_ok(client):
+    """Once logged in, /party/<p> returns 200 (currently a TODO stub from Task 5)."""
+    with client.session_transaction() as sess:
+        sess['party'] = 'hd'
+    rv = client.get('/party/hd')
+    assert rv.status_code == 200

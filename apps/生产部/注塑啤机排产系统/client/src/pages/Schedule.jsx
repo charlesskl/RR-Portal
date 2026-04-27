@@ -6,6 +6,7 @@ import {
 import { RobotOutlined, ThunderboltOutlined } from '@ant-design/icons';
 import axios from 'axios';
 import dayjs from 'dayjs';
+import { apiUrl } from '../api';
 
 export default function Schedule({ onDone }) {
   const [date, setDate] = useState(dayjs());
@@ -174,8 +175,7 @@ export default function Schedule({ onDone }) {
           <div style={{ marginTop: 16, textAlign: 'right' }}>
             <Space>
               <Button onClick={() => {
-                const url = `/api/schedule/${result.id}/export`;
-                window.open(url);
+                window.open(apiUrl(`/api/schedule/${result.id}/export`));
               }}>导出 Excel</Button>
               <Button type="primary" onClick={onDone}>查看所有排机表</Button>
             </Space>

@@ -82,3 +82,56 @@ def test_cancel_confirmed_unlocks(client):
     row = con.execute("SELECT status FROM reconciliations WHERE id=?", (rid,)).fetchone()
     assert row[0] == 'withdrawn'
     assert con.execute("SELECT COUNT(*) FROM flow_records WHERE locked=1").fetchone()[0] == 0
+
+
+# ========== status-guard 负面测试（锁住状态机，防 Task 14+ 改坏）==========
+
+def test_approve_rejects_confirmed(client):
+    """已 confirmed 再 approve → status 守卫拒，状态不变。"""
+    rid = _create_pending()
+    con = sqlite3.connect(app_module.DATABASE)
+    con.execute("UPDATE reconciliations SET status='confirmed' WHERE id=?", (rid,))
+    con.commit(); con.close()
+    _login(client, 'sy')
+    rv = client.post(f'/reconcile/{rid}/approve', follow_redirects=False)
+    assert rv.status_code == 302
+    con = sqlite3.connect(app_module.DATABASE)
+    assert con.execute("SELECT status FROM reconciliations WHERE id=?", (rid,)).fetchone()[0] == 'confirmed'
+
+
+def test_withdraw_rejects_confirmed(client):
+    """已 confirmed 再 withdraw → 拒，状态不变。"""
+    rid = _create_pending()
+    con = sqlite3.connect(app_module.DATABASE)
+    con.execute("UPDATE reconciliations SET status='confirmed' WHERE id=?", (rid,))
+    con.commit(); con.close()
+    _login(client, 'hd')
+    rv = client.post(f'/reconcile/{rid}/withdraw', follow_redirects=False)
+    assert rv.status_code == 302
+    con = sqlite3.connect(app_module.DATABASE)
+    assert con.execute("SELECT status FROM reconciliations WHERE id=?", (rid,)).fetchone()[0] == 'confirmed'
+
+
+def test_cancel_rejects_pending(client):
+    """pending_approval 不能 cancel（cancel 仅限 confirmed），状态不变。"""
+    rid = _create_pending()
+    _login(client, 'hd')
+    rv = client.post(f'/reconcile/{rid}/cancel', follow_redirects=False)
+    assert rv.status_code == 302
+    con = sqlite3.connect(app_module.DATABASE)
+    assert con.execute("SELECT status FROM reconciliations WHERE id=?", (rid,)).fetchone()[0] == 'pending_approval'
+
+
+def test_cancel_by_outsider(client):
+    """xx 不在 hd-sy pair → cancel 被拒，confirmed 状态保留，records 仍 locked。"""
+    rid = _create_pending()
+    con = sqlite3.connect(app_module.DATABASE)
+    con.execute("UPDATE reconciliations SET status='confirmed' WHERE id=?", (rid,))
+    con.execute("UPDATE flow_records SET locked=1 WHERE reconciliation_id=?", (rid,))
+    con.commit(); con.close()
+    _login(client, 'xx')
+    rv = client.post(f'/reconcile/{rid}/cancel', follow_redirects=False)
+    assert rv.status_code == 302
+    con = sqlite3.connect(app_module.DATABASE)
+    assert con.execute("SELECT status FROM reconciliations WHERE id=?", (rid,)).fetchone()[0] == 'confirmed'
+    assert con.execute("SELECT COUNT(*) FROM flow_records WHERE locked=1").fetchone()[0] == 1

@@ -34,6 +34,7 @@ const ORDER_COLUMNS = [
   'cell_format',
   ...Array.from({length: 31}, (_, i) => `day_${i + 1}`)
 ];
+const ALLOWED_COLUMNS = new Set(ORDER_COLUMNS);
 
 // GET /api/orders?workshop=A&status=active
 router.get('/', (req, res) => {
@@ -110,6 +111,28 @@ router.put('/sheet-settings', (req, res) => {
   res.json({ success: true });
 });
 
+// POST /api/orders/batch-update — 批量更新多条订单字段，避免 syncFormats 一次过拆成 N 个 PUT 撞 nginx 限流
+// body: { updates: [{ id: 1, fields: { cell_format: '...', status: '...' } }, ...] }
+router.post('/batch-update', (req, res) => {
+  const { updates } = req.body;
+  if (!Array.isArray(updates)) return res.status(400).json({ message: 'updates must be array' });
+  let n = 0;
+  const tx = db.transaction(() => {
+    for (const u of updates) {
+      if (!u || !u.id || !u.fields || typeof u.fields !== 'object') continue;
+      const keys = Object.keys(u.fields).filter(k => ALLOWED_COLUMNS.has(k));
+      if (keys.length === 0) continue;
+      const sets = keys.map(k => `${k} = ?`).join(', ');
+      const values = keys.map(k => u.fields[k]);
+      values.push(u.id);
+      db.prepare(`UPDATE orders SET ${sets}, updated_at = datetime('now') WHERE id = ?`).run(...values);
+      n++;
+    }
+  });
+  tx();
+  res.json({ success: true, updated: n });
+});
+
 // PUT /api/orders/line-config — 更新拉名
 router.put('/line-config', (req, res) => {
   const { workshop, lineKey, name } = req.body;
@@ -156,7 +179,6 @@ router.post('/', (req, res) => {
 });
 
 // PUT /api/orders/:id
-const ALLOWED_COLUMNS = new Set(ORDER_COLUMNS);
 router.put('/:id', (req, res) => {
   const data = req.body;
   const keys = Object.keys(data).filter(k => ALLOWED_COLUMNS.has(k));

@@ -156,6 +156,8 @@ export default function LuckysheetEditor({
   };
 
   // 同步当前整张表的单元格格式到后端
+  // 收集所有变化后用一次 batch-update POST 提交，避免 N 个 PUT 撞 nginx 限流
+  // 失败静默（轮询会重试），不弹「保存失败」toast（toast 仅用于用户主动编辑）
   const syncFormats = () => {
     if (!initializedRef.current) return;
     const ls = getLuckysheet();
@@ -165,6 +167,7 @@ export default function LuckysheetEditor({
     const sheet = sheets && sheets[0];
     if (!sheet || !sheet.data) return;
 
+    const updates = [];
     let rowsCompleted = 0;
     for (let r = 1; r < sheet.data.length; r++) {
       const orderId = rowMapRef.current[r - 1];
@@ -188,19 +191,25 @@ export default function LuckysheetEditor({
 
       const newFmtStr = Object.keys(newFmt).length > 0 ? JSON.stringify(newFmt) : null;
       const oldFmtStr = order.cell_format || null;
-      if (newFmtStr !== oldFmtStr && onCellChange) {
-        onCellChange(orderId, 'cell_format', newFmtStr);
+      const fields = {};
+      if (newFmtStr !== oldFmtStr) {
+        fields.cell_format = newFmtStr;
         order.cell_format = newFmtStr;
       }
-
       // 任意非空单元格字体蓝色 → 自动转完成
-      if (order.status === 'active' && blueCount >= 1 && onCellChange) {
-        onCellChange(orderId, 'status', 'completed');
+      if (order.status === 'active' && blueCount >= 1) {
+        fields.status = 'completed';
         order.status = 'completed';
         rowsCompleted++;
       }
+      if (Object.keys(fields).length > 0) {
+        updates.push({ id: orderId, fields });
+      }
     }
 
+    if (updates.length > 0) {
+      axios.post('/api/orders/batch-update', { updates }).catch(() => {});
+    }
     if (rowsCompleted > 0 && onRefreshData) onRefreshData();
   };
 

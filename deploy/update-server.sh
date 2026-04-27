@@ -89,6 +89,7 @@ declare -A PATH_TO_SERVICE=(
   ["core/"]="core"
   # 业务 app：按部门 nested。service 名保持英文（DNS/nginx 依赖）
   ["apps/生产部/注塑啤机排产系统/"]="paiji"
+  ["apps/生产部/生产计划管理系统/"]="production-plan"
   ["apps/PMC跟仓管/配色库存管理/"]="peise"
   ["apps/PMC跟仓管/华登包材管理/"]="huadeng"
   ["apps/PMC跟仓管/采购订单管理系统/"]="jiangping"

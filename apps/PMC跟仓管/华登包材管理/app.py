@@ -168,18 +168,44 @@ STAT_ITEMS = [('mkb', '木卡板'), ('jkb', '胶卡板'), ('jx', '胶箱'), ('gx
 TRIANGLE_ITEMS = [('mkb', '木卡板'), ('jkb', '胶卡板'), ('jx', '胶箱'), ('gx', '钙塑箱'), ('zx', '纸箱')]
 PAIRS = [('hd', 'sy'), ('hd', 'xx'), ('sy', 'xx')]
 
-# 导入配置占位骨架。Task 19 手工导入真实文件时按实际列调校 5 种 entry。
+# 导入模板。每个 entry 描述一个 Excel 文件的所有方向列映射，用户选模板 + sheet 即可批量导入。
+# 模板按 sheet 字典格式：sheets 内可逐 sheet 自定义；如果无对应 sheet，用 'default' 兜底。
 IMPORT_CONFIGS = {
     'huadeng_qingxi_shaoyang': {
-        # 26年清溪华登与邵阳华登包材对数表.xlsx
+        'label': '清溪华登 ↔ 邵阳华登（hd↔sy 双方向）',
         'filename_pattern': '清溪华登',
-        'sheets': {
-            # '1月': {'direction': 'hd_to_sy', 'start_row': 3,
-            #         'columns': {0: 'date', 1: 'order_no', 2: 'jx_qty', ...}},
-            # 实际列等 Task 19 拿到 xlsx 后填
-        },
+        'recorded_by_party': 'hd',  # 必须用 hd 账号导入
+        'allowed_sheets': ['1月', '2月', '3月', '4月'],  # 其它 sheet 不导
+        'directions': [
+            {
+                'direction': 'hd_to_sy',
+                'start_row': 3,
+                # 左半：清溪华登发邵阳华登
+                'columns': {
+                    0: 'date', 1: 'order_no',
+                    2: 'jx_qty', 3: 'gx_qty', 4: 'zx_qty',
+                    5: 'jkb_qty', 6: 'mkb_qty', 7: 'xb_qty',
+                    8: 'dz_qty', 9: 'wb_qty', 10: 'pk_qty',
+                    11: 'xzx_qty', 12: 'dgb_qty', 13: 'xjp_qty',
+                    14: 'dk_qty', 15: 'remark',
+                },
+            },
+            {
+                'direction': 'sy_to_hd',
+                'start_row': 3,
+                # 右半：清溪华登收邵阳华登（即 sy 发的，hd 收）
+                'columns': {
+                    17: 'date', 18: 'order_no',
+                    19: 'jx_qty', 20: 'gx_qty', 21: 'zx_qty',
+                    22: 'jkb_qty', 23: 'mkb_qty',
+                    24: 'dz_qty', 25: 'xb_qty',
+                    26: 'xzx_qty', 27: 'wb_qty', 28: 'pk_qty',
+                    # col 29 '专用卡' 无 ITEMS 映射，跳过
+                },
+            },
+        ],
     },
-    # 其余 4 种 (邵阳-兴信 / 清溪-兴信 / 兴信-清溪 / 兴信-邵阳) 待 Task 19 补
+    # 其余 4 种 (邵阳-兴信 / 清溪-兴信 / 兴信-清溪 / 兴信-邵阳) 拿到 xlsx 后按相同结构补
 }
 
 ALLOWED_DIRECTIONS = {
@@ -913,9 +939,11 @@ def import_page():
         sheets = wb.sheetnames
         wb.close()
         return render_template('import_preview.html', party=party, sheets=sheets,
-                               filename=f.filename, ALLOWED_DIRECTIONS=ALLOWED_DIRECTIONS)
+                               filename=f.filename, ALLOWED_DIRECTIONS=ALLOWED_DIRECTIONS,
+                               IMPORT_CONFIGS=IMPORT_CONFIGS)
     return render_template('import_preview.html', party=party,
-                           ALLOWED_DIRECTIONS=ALLOWED_DIRECTIONS)
+                           ALLOWED_DIRECTIONS=ALLOWED_DIRECTIONS,
+                           IMPORT_CONFIGS=IMPORT_CONFIGS)
 
 
 @app.route('/import/commit', methods=['POST'])
@@ -969,6 +997,58 @@ def import_commit():
         """, args)
     con.commit(); con.close()
     flash(f'导入 {len(rows)} 条')
+    return redirect(url_for('party_page', party=party))
+
+
+@app.route('/import/preset', methods=['POST'])
+def import_preset():
+    """按预定模板批量导入：上传 file + 选 preset key + sheet 名 → 一次导多个方向。"""
+    party = current_party()
+    if not party:
+        return redirect(url_for('index'))
+
+    preset_key = request.form.get('preset', '')
+    cfg = IMPORT_CONFIGS.get(preset_key)
+    if not cfg:
+        flash('无效模板'); return redirect(url_for('import_page'))
+    if cfg.get('recorded_by_party') and party != cfg['recorded_by_party']:
+        flash(f'此模板需用 {cfg["recorded_by_party"]} 账号导入'); return redirect(url_for('import_page'))
+
+    file = request.files.get('file')
+    if not file or not file.filename:
+        flash('未上传文件'); return redirect(url_for('import_page'))
+    tmp_path = os.path.join(DATA_PATH, 'upload_tmp.xlsx')
+    file.save(tmp_path)
+
+    sheet_name = request.form.get('sheet_name', '').strip()
+    allowed_sheets = cfg.get('allowed_sheets')
+    if allowed_sheets and sheet_name not in allowed_sheets:
+        flash(f'此模板仅支持 sheet：{", ".join(allowed_sheets)}'); return redirect(url_for('import_page'))
+
+    qty_cols = [f'{k}_qty' for k, _ in ITEMS]
+    total = 0
+    for dir_cfg in cfg.get('directions', []):
+        direction = dir_cfg['direction']
+        if direction not in ALLOWED_DIRECTIONS:
+            continue
+        from_p, to_p = ALLOWED_DIRECTIONS[direction]
+        rows = parse_excel_sheet(tmp_path, sheet_name, dir_cfg['start_row'], dir_cfg['columns'])
+        if not rows:
+            continue
+        con = sqlite3.connect(DATABASE)
+        for r in rows:
+            args = [party, from_p, to_p, r.get('date'), r.get('order_no'), r.get('remark')]
+            args += [r.get(c, 0) for c in qty_cols]
+            placeholders = ', '.join(['?'] * len(args))
+            con.execute(f"""
+                INSERT INTO flow_records (recorded_by, from_party, to_party, date, order_no, remark,
+                                          {', '.join(qty_cols)})
+                VALUES ({placeholders})
+            """, args)
+        con.commit(); con.close()
+        total += len(rows)
+
+    flash(f'模板 [{cfg["label"]}] sheet [{sheet_name}] 导入完成，共 {total} 条')
     return redirect(url_for('party_page', party=party))
 
 

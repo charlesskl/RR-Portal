@@ -1,8 +1,30 @@
 {% extends "base.html" %}
 {% block title %}导入 Excel{% endblock %}
 {% block content %}
+<div class="max-w-3xl mx-auto bg-white rounded p-4 mb-4">
+    <h2 class="text-base font-bold mb-2 text-blue-700">用模板一键导入（推荐）</h2>
+    <p class="text-xs text-gray-500 mb-2">已知文件结构的模板可一键导入双向流水，无需手填列号。</p>
+    <form method="POST" action="/import/preset" enctype="multipart/form-data" class="space-y-2 text-sm">
+        <input type="file" name="file" accept=".xlsx" required class="block">
+        <label class="block">
+            模板：
+            <select name="preset" required class="border rounded px-2 py-1">
+                <option value="">-- 选模板 --</option>
+                {% for key, cfg in IMPORT_CONFIGS.items() %}
+                <option value="{{ key }}">{{ cfg.label }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <label class="block">
+            Sheet 名（如 1月 / 2月 / 3月 / 4月）：
+            <input type="text" name="sheet_name" required class="border rounded px-2 py-1 w-32">
+        </label>
+        <button class="px-3 py-1.5 bg-blue-600 text-white rounded">用模板导入</button>
+    </form>
+</div>
+
 <div class="max-w-3xl mx-auto bg-white rounded p-4">
-    <h1 class="text-xl font-bold mb-4">导入 Excel 流水</h1>
+    <h1 class="text-xl font-bold mb-4">手动导入（自定义列映射）</h1>
     {% if not sheets %}
     <form method="POST" enctype="multipart/form-data" class="space-y-3">
         <input type="file" name="file" accept=".xlsx" required class="block">

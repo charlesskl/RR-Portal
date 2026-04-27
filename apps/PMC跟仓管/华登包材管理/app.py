@@ -165,6 +165,7 @@ ITEMS = [
 ]
 STAT_ITEMS = [('mkb', '木卡板'), ('jkb', '胶卡板'), ('jx', '胶箱'), ('gx', '钙塑箱')]
 TRIANGLE_ITEMS = [('mkb', '木卡板'), ('jkb', '胶卡板'), ('jx', '胶箱'), ('gx', '钙塑箱'), ('zx', '纸箱')]
+PAIRS = [('hd', 'sy'), ('hd', 'xx'), ('sy', 'xx')]
 
 
 def current_party():
@@ -176,6 +177,7 @@ def current_party():
 app.jinja_env.globals['current_party'] = current_party
 app.jinja_env.globals['PARTIES'] = PARTIES
 app.jinja_env.globals['ITEMS'] = ITEMS
+app.jinja_env.globals['STAT_ITEMS'] = STAT_ITEMS
 
 
 def party_required(fn):
@@ -570,6 +572,83 @@ def reconcile_cancel(rid):
     con.execute("UPDATE flow_records SET locked=0, reconciliation_id=NULL WHERE reconciliation_id=?", (rid,))
     con.commit(); con.close()
     flash('已撤销对账，记录解锁'); return redirect(url_for('reconcile_detail', rid=rid))
+
+
+@app.route('/reports')
+def reports():
+    date_from = request.args.get('date_from', '')
+    date_to = request.args.get('date_to', '')
+    only_confirmed = request.args.get('only_confirmed') == '1'
+
+    con = sqlite3.connect(DATABASE)
+    con.row_factory = sqlite3.Row
+
+    prices = {r['item_key']: r['price']
+              for r in con.execute('SELECT * FROM default_prices').fetchall()}
+
+    # 每个方向的汇总（仅发方记录）
+    direction_summaries = {}
+    for a, b in PAIRS:
+        for from_p, to_p in [(a, b), (b, a)]:
+            direction_summaries[f'{from_p}_to_{to_p}'] = _sum_flow_records(
+                con, from_party=from_p, to_party=to_p,
+                only_sender=True, date_from=date_from, date_to=date_to,
+                only_confirmed=only_confirmed,
+            )
+
+    # 三角债净欠
+    triangle_rows = _build_triangle(direction_summaries, prices)
+    pair_summary = _build_pair_summary(direction_summaries)
+
+    con.close()
+    return render_template('reports.html',
+                           direction_summaries=direction_summaries,
+                           triangle_rows=triangle_rows,
+                           pair_summary=pair_summary,
+                           date_from=date_from, date_to=date_to,
+                           only_confirmed=only_confirmed,
+                           PAIRS=PAIRS)
+
+
+def _sum_flow_records(con, *, from_party, to_party, only_sender, date_from, date_to, only_confirmed):
+    qty_cols_sql = ', '.join([f'COALESCE(SUM({k}_qty), 0) AS {k}_sum' for k, _ in ITEMS])
+    sql = f"SELECT {qty_cols_sql} FROM flow_records WHERE from_party=? AND to_party=?"
+    args = [from_party, to_party]
+    if only_sender:
+        sql += ' AND recorded_by=?'
+        args.append(from_party)
+    if date_from:
+        sql += ' AND date >= ?'; args.append(date_from)
+    if date_to:
+        sql += ' AND date <= ?'; args.append(date_to)
+    if only_confirmed:
+        sql += " AND locked=1"
+    row = con.execute(sql, args).fetchone()
+    return {k: float(row[f'{k}_sum']) for k, _ in ITEMS}
+
+
+def _build_triangle(direction_summaries, prices):
+    """按 5 种三角债包材，构造三方互欠表。"""
+    rows = []
+    for idx, (a, b) in enumerate(PAIRS, 1):
+        a_to_b = direction_summaries[f'{a}_to_{b}']
+        b_to_a = direction_summaries[f'{b}_to_{a}']
+        row = {'idx': idx, 'label': f'{PARTIES[a]["name"]}↔{PARTIES[b]["name"]}'}
+        for k, _ in TRIANGLE_ITEMS:
+            row[k] = int(a_to_b[k] - b_to_a[k])
+        rows.append(row)
+    return rows
+
+
+def _build_pair_summary(direction_summaries):
+    """按 pair 汇总净欠，生成'X 欠 Y 多少 item'文案。"""
+    out = []
+    for a, b in PAIRS:
+        a_to_b = direction_summaries[f'{a}_to_{b}']
+        b_to_a = direction_summaries[f'{b}_to_{a}']
+        nets = {k: a_to_b[k] - b_to_a[k] for k, _ in TRIANGLE_ITEMS}
+        out.append({'a': PARTIES[a]['name'], 'b': PARTIES[b]['name'], 'nets': nets})
+    return out
 
 
 def _query_flow(con, *, recorded_by, from_party, to_party, date_from=None, date_to=None):

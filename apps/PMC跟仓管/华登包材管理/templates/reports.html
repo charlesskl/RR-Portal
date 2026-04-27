@@ -1,349 +1,81 @@
 {% extends "base.html" %}
-{% block title %}汇总报表{% endblock %}
 {% block content %}
 <div class="max-w-6xl mx-auto">
-    <div class="flex items-center justify-between mb-6 flex-wrap gap-2">
-        <h1 class="text-xl font-bold text-gray-800">汇总报表</h1>
-        <div class="flex gap-2">
-            <a href="/export/reports" class="px-3 py-1.5 bg-green-600 text-white text-sm rounded hover:bg-green-700">导出汇总</a>
-            <a href="/export/triangle" class="px-3 py-1.5 bg-green-600 text-white text-sm rounded hover:bg-green-700">导出三角债</a>
-        </div>
-    </div>
-
-    <!-- 日期筛选 -->
-    <form class="bg-white rounded-lg shadow-sm p-4 mb-6 flex items-end gap-3 flex-wrap" method="GET">
-        <div>
-            <label class="block text-xs text-gray-500 mb-1">开始日期</label>
-            <input type="date" name="date_from" value="{{ date_from }}" class="border rounded px-2 py-1 text-sm">
-        </div>
-        <div>
-            <label class="block text-xs text-gray-500 mb-1">结束日期</label>
-            <input type="date" name="date_to" value="{{ date_to }}" class="border rounded px-2 py-1 text-sm">
-        </div>
-        <button type="submit" class="px-3 py-1.5 bg-blue-600 text-white text-sm rounded hover:bg-blue-700">筛选</button>
-        <a href="/reports" class="px-3 py-1.5 bg-gray-200 text-gray-700 text-sm rounded hover:bg-gray-300">重置</a>
+    <h1 class="text-xl font-bold mb-4">汇总报表</h1>
+    <form method="GET" class="bg-white rounded p-3 mb-4 flex gap-3 items-end flex-wrap">
+        <div><label class="block text-xs">开始</label>
+            <input type="date" name="date_from" value="{{ date_from }}" class="border rounded px-2 py-1 text-sm"></div>
+        <div><label class="block text-xs">结束</label>
+            <input type="date" name="date_to" value="{{ date_to }}" class="border rounded px-2 py-1 text-sm"></div>
+        <label class="flex items-center gap-1 text-sm">
+            <input type="checkbox" name="only_confirmed" value="1" {{ 'checked' if only_confirmed else '' }}>
+            仅已核对
+        </label>
+        <button class="px-3 py-1.5 bg-blue-600 text-white text-sm rounded">筛选</button>
     </form>
 
-    <!-- 各板块汇总 -->
-    {% for sec_id, sec in sections.items() %}
-    <div class="bg-white rounded-lg shadow-sm mb-6">
-        <h2 class="px-4 py-3 font-semibold text-gray-700 border-b">{{ sec.name }}</h2>
-        {% for ch_id in sec.channels %}
-        {% set info = channels[ch_id] %}
-        <div class="px-4 py-2">
-            <h3 class="text-sm font-medium text-gray-600 mb-2">
-                {{ info['from'] }} → {{ info['to'] }}
-                <a href="/section/{{ sec_id }}?tab={{ ch_id }}" class="ml-2 text-xs text-blue-600 hover:underline">查看流水 →</a>
-            </h3>
-            <div class="table-scroll">
-                <table class="text-sm border-collapse w-full mb-4">
-                    <thead>
-                        <tr class="bg-gray-50">
-                            <th class="border px-3 py-1.5 text-left">包材</th>
-                            <th class="border px-3 py-1.5 text-right">总数量</th>
-                            <th class="border px-3 py-1.5 text-right">总金额</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for key, name in items %}
-                        {% set s = channel_summaries[ch_id].summary[key] %}
-                        {% if s.qty or s.amount %}
-                        <tr class="hover:bg-gray-50">
-                            <td class="border px-3 py-1">{{ name }}</td>
-                            <td class="border px-3 py-1 text-right">{{ s.qty|int }}</td>
-                            <td class="border px-3 py-1 text-right">{{ '%.2f' % s.amount }}</td>
-                        </tr>
-                        {% endif %}
-                        {% endfor %}
-                    </tbody>
-                    <tfoot>
-                        <tr class="bg-blue-50 font-semibold">
-                            <td class="border px-3 py-1.5">合计</td>
-                            <td class="border px-3 py-1.5"></td>
-                            <td class="border px-3 py-1.5 text-right">{{ '%.2f' % channel_summaries[ch_id].total }}</td>
-                        </tr>
-                    </tfoot>
-                </table>
-            </div>
-        </div>
+    <!-- 方向汇总表 -->
+    {% for p in PAIRS %}
+    <div class="bg-white rounded p-4 mb-4">
+        <h2 class="font-semibold mb-2">{{ PARTIES[p[0]].name }} ↔ {{ PARTIES[p[1]].name }}</h2>
+        {% for from_p, to_p in [(p[0], p[1]), (p[1], p[0])] %}
+        {% set s = direction_summaries[from_p + '_to_' + to_p] %}
+        <h3 class="text-sm font-medium mt-2">{{ PARTIES[from_p].name }} → {{ PARTIES[to_p].name }}</h3>
+        <table class="text-sm w-full border-collapse mb-2">
+            <thead class="bg-gray-50"><tr>
+                <th class="border px-2 py-1">包材</th><th class="border px-2 py-1">数量</th></tr>
+            </thead>
+            <tbody>
+                {% for key, name in ITEMS %}
+                {% if s[key] %}
+                <tr><td class="border px-2 py-1">{{ name }}</td>
+                    <td class="border px-2 py-1 text-right">{{ s[key]|int }}</td></tr>
+                {% endif %}
+                {% endfor %}
+            </tbody>
+        </table>
         {% endfor %}
     </div>
     {% endfor %}
 
-    <!-- 三角债净欠汇总表 -->
+    <!-- 三角债 -->
     <div class="mb-6 border-2 border-gray-800">
-        <!-- 标题 -->
-        <div class="bg-yellow-300 text-center py-4 border-b-2 border-gray-800">
-            <div class="text-xl font-bold text-gray-900 tracking-wide">各车间包材相互往来数量统计表</div>
-            {% if tri_date_from or tri_date_to %}
-            <div class="text-sm text-gray-700 mt-1">
-                （{{ tri_date_from if tri_date_from else '全部' }} 至 {{ tri_date_to if tri_date_to else today }}）
-            </div>
-            {% else %}
-            <div class="text-sm text-gray-700 mt-1">（截止到{{ today.replace('/', '年', 1).replace('/', '月', 1) }}日）</div>
-            {% endif %}
-            <!-- 日期范围选择 -->
-            <form method="GET" class="mt-2 flex items-center justify-center gap-2 flex-wrap">
-                <input type="hidden" name="date_from" value="{{ date_from }}">
-                <input type="hidden" name="date_to" value="{{ date_to }}">
-                <label class="text-xs text-gray-700 font-normal">开始：</label>
-                <input type="date" name="tri_date_from" value="{{ tri_date_from }}"
-                       class="border border-gray-400 rounded px-2 py-0.5 text-xs bg-white text-gray-800">
-                <label class="text-xs text-gray-700 font-normal">截止：</label>
-                <input type="date" name="tri_date_to" value="{{ tri_date_to }}"
-                       class="border border-gray-400 rounded px-2 py-0.5 text-xs bg-white text-gray-800">
-                <button type="submit" class="px-2 py-0.5 text-xs bg-gray-800 text-white rounded hover:bg-gray-700">确定</button>
-                {% if tri_date_from or tri_date_to %}
-                <a href="?date_from={{ date_from }}&date_to={{ date_to }}"
-                   class="text-xs text-gray-600 underline hover:text-gray-800">重置</a>
-                {% endif %}
-            </form>
-        </div>
-        <!-- 表格 -->
-        <table class="w-full border-collapse text-center text-sm">
-            <thead>
-                <tr class="bg-white">
-                    <th class="border border-gray-500 px-4 py-3 font-bold text-gray-800 w-16">序号</th>
-                    <th class="border border-gray-500 px-6 py-3 font-bold text-gray-800">车间</th>
-                    {% for key, name in stat_items %}
-                    <th class="border border-gray-500 px-4 py-3 font-bold text-gray-800">{{ name }}</th>
-                    {% endfor %}
-                    <th class="border border-gray-500 px-4 py-3 font-bold text-gray-800">备注</th>
-                </tr>
-            </thead>
+        <div class="bg-yellow-300 py-3 text-center font-bold">三方包材往来净欠表</div>
+        <table class="w-full text-center text-sm">
+            <thead><tr>
+                <th class="border px-3 py-2">车间</th>
+                {% for k, n in STAT_ITEMS %}<th class="border px-3 py-2">{{ n }}</th>{% endfor %}
+            </tr></thead>
             <tbody>
-                {% for row in triangle_display %}
-                <tr class="{{ 'border-b-2 border-gray-400' if loop.index % 2 == 0 else '' }}">
-                    <td class="border border-gray-400 px-4 py-4 text-gray-700">{{ row.idx }}</td>
-                    <td class="border border-gray-400 px-4 py-4 font-medium text-gray-800">{{ row.label }}</td>
-                    {% for key, name in stat_items %}
-                    <td class="border border-gray-400 px-4 py-4 text-gray-800 font-medium">
-                        {{ row[key] if row[key] else '' }}
-                    </td>
+                {% for row in triangle_rows %}
+                <tr>
+                    <td class="border px-3 py-2 font-medium">{{ row.label }}</td>
+                    {% for k, n in STAT_ITEMS %}
+                    <td class="border px-3 py-2">{{ row[k] if row[k] else '' }}</td>
                     {% endfor %}
-                    <td class="border border-gray-400 px-4 py-4"></td>
                 </tr>
                 {% endfor %}
             </tbody>
         </table>
-        <!-- 底部说明 -->
-        {% if all_cleared %}
-        <div class="bg-yellow-300 text-center py-3 border-t-2 border-gray-800">
-            <span class="font-bold text-gray-900">各车间往来三角债数据已相互清数</span>
-        </div>
-        {% else %}
-        <div class="bg-red-100 text-center py-3 border-t-2 border-gray-800">
-            <span class="font-bold text-red-700">各车间往来三角债尚有未清数据，请核查上表</span>
-        </div>
-        {% endif %}
-        <!-- 日期 -->
-        <div class="text-right px-4 py-2 text-sm text-gray-600 bg-white">{{ tri_date_to if tri_date_to else today }}</div>
     </div>
 
-    <!-- 三角债总结 -->
-    <div class="mb-6 bg-white rounded-lg shadow-sm border border-gray-200">
-        <div class="px-4 py-3 border-b font-semibold text-gray-700 text-sm flex items-center justify-between">
-            <span>债务往来总结</span>
-            <a href="/export/triangle-display?tri_date_from={{ tri_date_from }}&tri_date_to={{ tri_date_to }}"
-               class="px-3 py-1 bg-green-600 text-white text-xs rounded hover:bg-green-700 font-normal">导出往来统计表</a>
-        </div>
-        <div class="p-4 grid grid-cols-1 md:grid-cols-3 gap-4">
-            {% for p in tri_pair_summary %}
-            {% set ns = namespace(all_zero=true) %}
-            {% for k, _ in stat_items %}
-                {% if p.total_net[k] != 0 %}{% set ns.all_zero = false %}{% endif %}
-            {% endfor %}
-            <div class="border rounded-lg p-3 {{ 'border-green-300 bg-green-50' if ns.all_zero else 'border-red-200 bg-red-50' }}">
-                <div class="font-semibold text-sm mb-2 text-gray-800">{{ p.a }} ↔ {{ p.b }}</div>
-                {% if ns.all_zero %}
-                <div class="text-green-700 text-sm font-medium">✓ 已结清</div>
-                {% else %}
-                <ul class="text-sm space-y-1">
-                    {% for k, name in stat_items %}
-                    {% set n = p.total_net[k] %}
-                    {% if n > 0 %}
-                    <li class="text-red-700">{{ p.b }}欠{{ p.a }} <span class="font-medium">{{ name }}</span> {{ n|int }} 个</li>
-                    {% elif n < 0 %}
-                    <li class="text-red-700">{{ p.a }}欠{{ p.b }} <span class="font-medium">{{ name }}</span> {{ (-n)|int }} 个</li>
-                    {% endif %}
-                    {% endfor %}
-                </ul>
-                {% endif %}
-            </div>
+    <!-- 债务总结 -->
+    <div class="bg-white rounded p-4 mb-4">
+        <h2 class="font-semibold mb-2">两两净额</h2>
+        {% for p in pair_summary %}
+        <div class="mb-2">
+            <b>{{ p.a }} ↔ {{ p.b }}：</b>
+            {% set has_debt = false %}
+            {% for k, n in STAT_ITEMS %}
+            {% set v = p.nets[k] %}
+            {% if v > 0 %}
+                <span class="text-red-600">{{ p.b }} 欠 {{ p.a }} {{ n }} {{ v|int }} 个</span>.
+            {% elif v < 0 %}
+                <span class="text-red-600">{{ p.a }} 欠 {{ p.b }} {{ n }} {{ (-v)|int }} 个</span>.
+            {% endif %}
             {% endfor %}
         </div>
-    </div>
-
-    <!-- 月度明细（可折叠） -->
-    <div class="mb-4">
-        <button onclick="this.nextElementSibling.classList.toggle('hidden')"
-                class="w-full text-left px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded text-sm font-medium text-gray-600">
-            ▶ 查看各月份往来明细
-        </button>
-        <div class="hidden mt-3 space-y-4">
-        {% for p in pair_stats %}
-        {% if p.months %}
-        <div class="bg-white rounded-lg shadow-sm">
-            <div class="px-4 py-2 border-b bg-gray-50 font-semibold text-sm text-gray-700">{{ p.a }} ↔ {{ p.b }}</div>
-            <div class="overflow-x-auto">
-            <table class="text-xs w-full border-collapse">
-                <thead>
-                    <tr class="bg-gray-50 text-gray-500">
-                        <th class="border border-gray-200 px-2 py-1.5 whitespace-nowrap" rowspan="2">月份</th>
-                        {% for key, name in stat_items %}
-                        <th class="border border-gray-200 px-2 py-1 text-center" colspan="3">{{ name }}</th>
-                        {% endfor %}
-                    </tr>
-                    <tr class="bg-gray-50 text-gray-400">
-                        {% for key, name in stat_items %}
-                        <th class="border border-gray-200 px-2 py-1">{{ p.a }}发</th>
-                        <th class="border border-gray-200 px-2 py-1">{{ p.b }}发</th>
-                        <th class="border border-gray-200 px-2 py-1 text-gray-600">净欠</th>
-                        {% endfor %}
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for row in p.months %}
-                    <tr class="hover:bg-gray-50">
-                        <td class="border border-gray-200 px-2 py-1.5 font-medium text-gray-700 whitespace-nowrap">{{ row.ym }}</td>
-                        {% for key, name in stat_items %}
-                        {% set it = row.data[key] %}
-                        <td class="border border-gray-200 px-2 py-1.5 text-right">{{ it.a|int if it.a else '' }}</td>
-                        <td class="border border-gray-200 px-2 py-1.5 text-right">{{ it.b|int if it.b else '' }}</td>
-                        <td class="border border-gray-200 px-2 py-1.5 text-right font-semibold
-                            {{ 'text-red-500' if it.net < 0 else 'text-blue-600' if it.net > 0 else 'text-gray-300' }}">
-                            {% if it.net > 0 %}+{{ it.net|int }}{% elif it.net < 0 %}{{ it.net|int }}{% else %}—{% endif %}
-                        </td>
-                        {% endfor %}
-                    </tr>
-                    {% endfor %}
-                </tbody>
-                <tfoot>
-                    <tr class="bg-gray-100 font-semibold">
-                        <td class="border border-gray-200 px-2 py-1.5 text-gray-700">合计</td>
-                        {% for key, name in stat_items %}
-                        <td class="border border-gray-200 px-2 py-1.5 text-right">{{ p.total_a[key]|int if p.total_a[key] else '' }}</td>
-                        <td class="border border-gray-200 px-2 py-1.5 text-right">{{ p.total_b[key]|int if p.total_b[key] else '' }}</td>
-                        <td class="border border-gray-200 px-2 py-1.5 text-right
-                            {{ 'text-red-500' if p.total_net[key] < 0 else 'text-blue-600' if p.total_net[key] > 0 else 'text-gray-300' }}">
-                            {% if p.total_net[key] > 0 %}+{{ p.total_net[key]|int }}{% elif p.total_net[key] < 0 %}{{ p.total_net[key]|int }}{% else %}—{% endif %}
-                        </td>
-                        {% endfor %}
-                    </tr>
-                </tfoot>
-            </table>
-            </div>
-        </div>
-        {% endif %}
         {% endfor %}
-        </div>
     </div>
-    <!-- 三角债数量统计 -->
-    <div class="bg-white rounded-lg shadow-sm mb-6">
-        <div class="px-4 py-3 border-b flex items-center justify-between">
-            <h2 class="font-semibold text-gray-700">三角债数量统计</h2>
-            <a href="/export/triangle-qty" class="px-3 py-1.5 bg-green-600 text-white text-sm rounded hover:bg-green-700">导出</a>
-        </div>
-        <div class="table-scroll p-4">
-            <table class="text-sm border-collapse w-full">
-                <thead>
-                    <tr class="bg-gray-50">
-                        <th class="border px-3 py-2 text-center">序号</th>
-                        <th class="border px-3 py-2 text-left">车间</th>
-                        {% for key, name in triangle_items %}
-                        <th class="border px-3 py-2 text-right">{{ name }}</th>
-                        {% endfor %}
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for row in triangle_qty %}
-                    <tr class="hover:bg-gray-50">
-                        <td class="border px-3 py-1.5 text-center">{{ row.idx }}</td>
-                        <td class="border px-3 py-1.5 font-medium">{{ row.label }}</td>
-                        {% for key, name in triangle_items %}
-                        <td class="border px-3 py-1.5 text-right">{{ row[key]|int if row[key] else '' }}</td>
-                        {% endfor %}
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-    </div>
-
-    <!-- 三角债金额报表 -->
-    <div class="bg-white rounded-lg shadow-sm mb-6">
-        <h2 class="px-4 py-3 font-semibold text-gray-700 border-b">三角债金额报表</h2>
-        <div class="p-4">
-            <!-- 往来流向 -->
-            <h3 class="text-sm font-semibold text-gray-600 mb-3">往来流向</h3>
-            <div class="grid grid-cols-2 md:grid-cols-3 gap-3 mb-6">
-                {% for flow in triangle.flows %}
-                <div class="bg-gray-50 rounded-lg p-3 text-center">
-                    <div class="text-xs text-gray-500">{{ flow.label }}</div>
-                    <div class="text-lg font-bold text-gray-700 mt-1">{{ '%.2f' % flow.amount }}</div>
-                </div>
-                {% endfor %}
-            </div>
-            <!-- 两两净额 -->
-            <h3 class="text-sm font-semibold text-gray-600 mb-3">两两净额</h3>
-            <table class="text-sm border-collapse w-full max-w-lg mb-6">
-                <thead>
-                    <tr class="bg-gray-50">
-                        <th class="border px-3 py-2 text-left">关系</th>
-                        <th class="border px-3 py-2 text-right">净额</th>
-                        <th class="border px-3 py-2 text-center">说明</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for pair in triangle.pair_net %}
-                    <tr class="hover:bg-gray-50">
-                        <td class="border px-3 py-2">{{ pair.a }} ↔ {{ pair.b }}</td>
-                        <td class="border px-3 py-2 text-right font-mono
-                            {{ 'text-green-600' if pair.net > 0 else 'text-red-600' if pair.net < 0 else 'text-gray-500' }}">
-                            {{ '%.2f' % pair.net }}
-                        </td>
-                        <td class="border px-3 py-2 text-center text-xs">
-                            {% if pair.net > 0 %}{{ pair.a }}应收{{ pair.b }}
-                            {% elif pair.net < 0 %}{{ pair.a }}应付{{ pair.b }}
-                            {% else %}平衡{% endif %}
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-            <!-- 各方总净额 -->
-            <h3 class="text-sm font-semibold text-gray-600 mb-3">各方总净额（正=应收，负=应付）</h3>
-            <table class="text-sm border-collapse w-full max-w-lg">
-                <thead>
-                    <tr class="bg-gray-50">
-                        <th class="border px-3 py-2 text-left">公司</th>
-                        <th class="border px-3 py-2 text-right">净额</th>
-                        <th class="border px-3 py-2 text-center">状态</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for company, amount in triangle.net.items() %}
-                    <tr class="hover:bg-gray-50">
-                        <td class="border px-3 py-2 font-medium">{{ company }}</td>
-                        <td class="border px-3 py-2 text-right font-mono
-                            {{ 'text-green-600' if amount > 0 else 'text-red-600' if amount < 0 else 'text-gray-500' }}">
-                            {{ '%.2f' % amount }}
-                        </td>
-                        <td class="border px-3 py-2 text-center">
-                            {% if amount > 0 %}
-                            <span class="px-2 py-0.5 bg-green-100 text-green-700 rounded text-xs">应收</span>
-                            {% elif amount < 0 %}
-                            <span class="px-2 py-0.5 bg-red-100 text-red-700 rounded text-xs">应付</span>
-                            {% else %}
-                            <span class="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs">平衡</span>
-                            {% endif %}
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-    </div>
-
 </div>
 {% endblock %}

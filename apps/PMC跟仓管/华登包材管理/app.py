@@ -1,5 +1,6 @@
 from flask import Flask, request, redirect, url_for, jsonify, session, flash, render_template
 import sqlite3
+import json
 import os
 import sys
 from datetime import timedelta
@@ -404,6 +405,62 @@ def record_delete(rid):
     con.execute("DELETE FROM flow_records WHERE id=?", (rid,))
     con.commit(); con.close()
     return redirect(url_for('party_page', party=party))
+
+
+@app.route('/reconcile/start', methods=['POST'])
+def reconcile_start():
+    party = current_party()
+    if not party:
+        return redirect(url_for('index'))
+    cp = request.form.get('counterparty')
+    date_from = request.form.get('date_from', '').strip()
+    date_to = request.form.get('date_to', '').strip()
+    if cp not in PARTIES or cp == party or cp not in PARTIES[party]['counterparties']:
+        flash('无效对方'); return redirect(url_for('party_page', party=party))
+    if not date_from or not date_to:
+        flash('日期必填'); return redirect(url_for('party_page', party=party))
+
+    pair_low, pair_high = sorted([party, cp])
+
+    con = sqlite3.connect(DATABASE)
+    # 检查 pending overlap
+    overlap = con.execute("""
+        SELECT id FROM reconciliations
+        WHERE pair_low=? AND pair_high=? AND status='pending_approval'
+          AND NOT (date_to < ? OR date_from > ?)
+    """, (pair_low, pair_high, date_from, date_to)).fetchone()
+    if overlap:
+        con.close()
+        flash('已存在待审批的核对，范围重叠'); return redirect(url_for('party_page', party=party))
+
+    snapshot = compare_pair(party, cp, date_from, date_to)
+    cur = con.execute("""
+        INSERT INTO reconciliations (initiator_party, approver_party, pair_low, pair_high,
+                                     date_from, date_to, status, snapshot_json)
+        VALUES (?, ?, ?, ?, ?, ?, 'pending_approval', ?)
+    """, (party, cp, pair_low, pair_high, date_from, date_to, json.dumps(snapshot)))
+    reconc_id = cur.lastrowid
+    # 绑定 flow_records（未锁）
+    con.execute("""
+        UPDATE flow_records SET reconciliation_id=?
+        WHERE date BETWEEN ? AND ?
+          AND ((from_party=? AND to_party=?) OR (from_party=? AND to_party=?))
+          AND reconciliation_id IS NULL
+    """, (reconc_id, date_from, date_to, party, cp, cp, party))
+    con.commit(); con.close()
+    flash('核对已发起，等待对方审批'); return redirect(url_for('reconcile_detail', rid=reconc_id))
+
+
+@app.route('/reconcile/<int:rid>')
+def reconcile_detail(rid):
+    # 具体 UI 在 Task 14 做。这里仅 stub 避免 404。
+    con = sqlite3.connect(DATABASE)
+    con.row_factory = sqlite3.Row
+    r = con.execute("SELECT * FROM reconciliations WHERE id=?", (rid,)).fetchone()
+    con.close()
+    if not r:
+        flash('核对不存在'); return redirect(url_for('index'))
+    return f'TODO detail rid={rid}'
 
 
 def _query_flow(con, *, recorded_by, from_party, to_party, date_from=None, date_to=None):

@@ -618,11 +618,12 @@ def reports():
                 key = 'a_sent' if from_p == a else 'b_sent'
                 for k, _ in STAT_ITEMS:
                     bucket[key][k] = float(r[f'{k}_sum'])
-        # 计算 net per month
+        # 计算 net per month + 补齐缺失 key（防 Jinja strict mode 下 KeyError）
         for ym, d in by_month.items():
-            d['net'] = {}
             for k, _ in STAT_ITEMS:
-                d['net'][k] = d.get('a_sent', {}).get(k, 0) - d.get('b_sent', {}).get(k, 0)
+                d['a_sent'].setdefault(k, 0)
+                d['b_sent'].setdefault(k, 0)
+            d['net'] = {k: d['a_sent'][k] - d['b_sent'][k] for k, _ in STAT_ITEMS}
         monthly_by_pair[(a, b)] = {'a': PARTIES[a]['name'], 'b': PARTIES[b]['name'],
                                    'months': sorted(by_month.items())}
 

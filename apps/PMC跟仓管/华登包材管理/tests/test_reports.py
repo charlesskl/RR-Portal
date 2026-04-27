@@ -62,3 +62,7 @@ def test_reports_monthly_detail(client):
     html = rv.data.decode('utf-8')
     assert '2026-05' in html
     assert '2026-06' in html
+    # 5 月：hd 发 100 - sy 发 30 → +70 净欠（华登多发）
+    assert '+70' in html
+    # 6 月：hd 发 50 - sy 发 0 → +50
+    assert '+50' in html

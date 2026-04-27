@@ -80,7 +80,7 @@
     </div>
 
     <details class="bg-white rounded p-3 mb-4">
-        <summary class="cursor-pointer font-semibold">▶ 各月份往来明细</summary>
+        <summary class="cursor-pointer font-semibold">▶ 各月份往来明细 <span class="text-xs text-gray-500 font-normal">（全部历史，不受上方筛选影响）</span></summary>
         {% for pair_key, p in monthly_by_pair.items() %}
         <div class="mt-3">
             <h3 class="text-sm font-medium">{{ p.a }} ↔ {{ p.b }}</h3>

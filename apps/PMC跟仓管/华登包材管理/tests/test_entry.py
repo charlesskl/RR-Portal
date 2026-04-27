@@ -47,12 +47,18 @@ def test_entry_create_received(client):
 
 
 def test_entry_rejects_wrong_counterparty(client):
-    """hd 录对 hd（自己）的条 → 400 或 redirect。"""
+    """hd 录对 hd（自己）的条 → 400 或 redirect，且数据库不应有任何 row。"""
     _login(client, 'hd')
     rv = client.post('/party/hd/entry', data={
         'direction': 'sent', 'counterparty': 'hd', 'date': '2026-05-01', 'jx_qty': '1',
     }, follow_redirects=False)
     assert rv.status_code in (400, 302)  # 400 or redirect back with flash error
+
+    import app as app_module
+    import sqlite3
+    con = sqlite3.connect(app_module.DATABASE)
+    count = con.execute("SELECT COUNT(*) FROM flow_records").fetchone()[0]
+    assert count == 0, '被拒绝的提交不应写入 flow_records'
 
 
 def test_entry_requires_login(client):

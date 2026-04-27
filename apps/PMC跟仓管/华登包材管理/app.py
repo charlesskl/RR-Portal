@@ -429,6 +429,37 @@ def _calc_summary(records):
     return summary
 
 
+def compare_pair(party_a, party_b, date_from, date_to):
+    """对两方做汇总对比。返回 {'a_to_b': {...}, 'b_to_a': {...}}。"""
+    con = sqlite3.connect(DATABASE)
+    con.row_factory = sqlite3.Row
+    result = {}
+    for sender, receiver in [(party_a, party_b), (party_b, party_a)]:
+        sender_sum = _sum_items(con, recorded_by=sender, from_party=sender, to_party=receiver,
+                                date_from=date_from, date_to=date_to)
+        receiver_sum = _sum_items(con, recorded_by=receiver, from_party=sender, to_party=receiver,
+                                  date_from=date_from, date_to=date_to)
+        diffs = {k: round(sender_sum[k] - receiver_sum[k], 4)
+                 for k, _ in ITEMS
+                 if abs(sender_sum[k] - receiver_sum[k]) > 1e-9}
+        result[f'{sender}_to_{receiver}'] = {
+            'sender_recorded': sender_sum,
+            'receiver_recorded': receiver_sum,
+            'diffs': diffs,
+        }
+    con.close()
+    return result
+
+
+def _sum_items(con, *, recorded_by, from_party, to_party, date_from, date_to):
+    qty_cols_sql = ', '.join([f'COALESCE(SUM({k}_qty), 0) AS {k}_sum' for k, _ in ITEMS])
+    row = con.execute(f"""
+        SELECT {qty_cols_sql} FROM flow_records
+        WHERE recorded_by=? AND from_party=? AND to_party=? AND date BETWEEN ? AND ?
+    """, (recorded_by, from_party, to_party, date_from, date_to)).fetchone()
+    return {k: float(row[f'{k}_sum']) for k, _ in ITEMS}
+
+
 # ==================== 默认单价 API ====================
 
 @app.route('/api/prices', methods=['GET', 'POST'])

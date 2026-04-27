@@ -57,3 +57,25 @@ def test_reconcile_detail_hides_approve_for_initiator(client):
     html = rv.data.decode('utf-8')
     # initiator 看到 withdraw 不看到 approve 按钮
     assert '撤回' in html
+    assert '同意' not in html
+
+
+def test_reconcile_list_requires_login(client):
+    """未登录访问 /reconcile → redirect。"""
+    rv = client.get('/reconcile', follow_redirects=False)
+    assert rv.status_code == 302
+
+
+def test_reconcile_detail_requires_login(client):
+    """未登录访问 /reconcile/<rid> → redirect。"""
+    rid = _create('hd', 'sy')
+    rv = client.get(f'/reconcile/{rid}', follow_redirects=False)
+    assert rv.status_code == 302
+
+
+def test_reconcile_detail_bad_rid(client):
+    """不存在的 rid → flash + redirect 到 list。"""
+    _login(client, 'hd')
+    rv = client.get('/reconcile/99999', follow_redirects=False)
+    assert rv.status_code == 302
+    assert '/reconcile' in rv.location

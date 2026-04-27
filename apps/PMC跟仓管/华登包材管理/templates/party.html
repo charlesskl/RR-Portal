@@ -95,11 +95,14 @@ function openReconcileModal(party, cp) {
     const form = document.createElement('form');
     form.method = 'POST';
     form.action = '/reconcile/start';
-    form.innerHTML = `
-        <input name="counterparty" value="${cp}">
-        <input name="date_from" value="${df}">
-        <input name="date_to" value="${dt}">
-    `;
+    const mk = (name, value) => {
+        const i = document.createElement('input');
+        i.name = name; i.value = value;
+        form.appendChild(i);
+    };
+    mk('counterparty', cp);
+    mk('date_from', df);
+    mk('date_to', dt);
     document.body.appendChild(form);
     form.submit();
 }

@@ -910,7 +910,13 @@ def parse_excel_sheet(filepath, sheet_name, start_row, columns):
                     if isinstance(v, (datetime, date_cls)):
                         row[field] = v.strftime('%Y-%m-%d')
                     else:
-                        row[field] = str(v).strip()[:10]
+                        s = str(v).strip()[:10]
+                        try:
+                            datetime.strptime(s, '%Y-%m-%d')
+                            row[field] = s
+                        except ValueError:
+                            # 不是合法日期（如夹在数据中的标题行）→ 不设 date，行被丢
+                            pass
                 elif field.endswith('_qty'):
                     try:
                         row[field] = float(v)

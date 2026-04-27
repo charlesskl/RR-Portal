@@ -3,13 +3,9 @@ const router = express.Router();
 const path = require('path');
 const fs = require('fs');
 const multer = require('multer');
-const ExcelJS = require('exceljs');
 const db = require('../db/connection');
 
-const upload = multer({
-  dest: path.join(__dirname, '..', 'uploads'),
-  limits: { fileSize: 20 * 1024 * 1024 },  // 20MB，订单截图最高也就几 MB
-});
+const upload = multer({ dest: path.join(__dirname, '..', 'uploads') });
 
 // ========== 延迟编译SQL（表在initDatabase后才存在）==========
 let _stmts;
@@ -28,7 +24,7 @@ function stmts() {
         UPDATE orders SET product_code=?, mold_no=?, mold_name=?, color=?, color_powder_no=?,
           material_type=?, shot_weight=?, material_kg=?, sprue_pct=?, ratio_pct=?,
           quantity_needed=?, accumulated=?, cavity=?, cycle_time=?, order_no=?,
-          is_three_plate=?, packing_qty=?, status=?, order_notes=?
+          is_three_plate=?, packing_qty=?, status=?, order_notes=?, serial_no=?
         WHERE id=?
       `),
       deleteOne: db.prepare('DELETE FROM orders WHERE id = ?'),
@@ -98,6 +94,7 @@ router.put('/:id', (req, res) => {
       o.packing_qty ?? existing.packing_qty,
       o.status ?? existing.status,
       o.order_notes ?? existing.order_notes,
+      o.serial_no ?? existing.serial_no,
       req.params.id
     );
     res.json({ id: Number(req.params.id), ...o });
@@ -116,12 +113,12 @@ router.delete('/:id', (req, res) => {
   }
 });
 
-// 清空当前车间所有订单
+// 清空所有订单（仅当前车间）
 router.delete('/', (req, res) => {
   try {
     const workshop = req.query.workshop || req.body.workshop || 'B';
-    const result = db.prepare('DELETE FROM orders WHERE workshop = ?').run(workshop);
-    res.json({ message: `已清空 ${result.changes} 条订单`, count: result.changes });
+    db.prepare('DELETE FROM orders WHERE workshop = ?').run(workshop);
+    res.json({ message: '已清空' });
   } catch (err) {
     res.status(500).json({ message: '清空失败：' + err.message });
   }
@@ -129,6 +126,7 @@ router.delete('/', (req, res) => {
 
 // 下载订单导入模板
 router.get('/template', async (req, res) => {
+  const ExcelJS = require('exceljs');
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet('订单模板');
 
@@ -215,13 +213,35 @@ router.post('/import', upload.single('file'), async (req, res) => {
 
     console.log('[导入] 文件:', req.file.originalname, '类型:', ext);
     if (ext === '.pdf') {
-      const { parsePdf } = require('../services/pdfParser');
-      parsed = await parsePdf(req.file.path);
-    } else if (['.png', '.jpg', '.jpeg', '.bmp', '.webp'].includes(ext)) {
-      const { parseImageOrders } = require('../services/imageParser');
-      const result = await parseImageOrders(req.file.path);
-      parsed = result.orders;
-      console.log('[图片导入] 解析结果:', parsed.length, '条');
+      // PDF 处理优先级：
+      // 1) 用 pdftoppm 把 PDF 转 PNG，每页发给百炼识别（需服务器装 poppler-utils）
+      // 2) 失败时回退本地 XY 坐标解析器
+      let useFallback = false;
+      try {
+        const { pdfToImages, cleanupTmp } = require('../services/pdfToImages');
+        const { parseImageWithQwen } = require('../services/qwenOcr');
+        const { tmpDir, files } = pdfToImages(req.file.path);
+        console.log('[PDF转PNG] 共', files.length, '页');
+        try {
+          for (let i = 0; i < files.length; i++) {
+            console.log('[PDF→百炼] 处理第', i + 1, '/', files.length, '页');
+            const pageOrders = await parseImageWithQwen(files[i]);
+            parsed = parsed.concat(pageOrders);
+          }
+          console.log('[百炼PDF导入] 共解析', parsed.length, '条');
+        } finally {
+          cleanupTmp(tmpDir);
+        }
+      } catch (e) {
+        console.log('[百炼PDF失败，回退本地]:', e.message);
+        useFallback = true;
+      }
+
+      if (useFallback || parsed.length === 0) {
+        const { parsePdf } = require('../services/pdfParser');
+        parsed = await parsePdf(req.file.path);
+        console.log('[本地PDF解析] 结果:', parsed.length, '条');
+      }
     } else if (['.xlsx', '.xls'].includes(ext)) {
       const { parseOrderExcel, parseXingxinOrderExcel } = require('../services/excelParser');
       // 检测是否为兴信生产单格式（含"啤净重"或"出模数"）
@@ -243,26 +263,16 @@ router.post('/import', upload.single('file'), async (req, res) => {
           console.log('[Excel] Row', i, ':', JSON.stringify(rowsCheck[i]).substring(0, 200));
         }
       }
+    } else if (['.png', '.jpg', '.jpeg', '.bmp', '.webp'].includes(ext)) {
+      // 图片走阿里百炼 qwen-vl-max
+      const { parseImageWithQwen } = require('../services/qwenOcr');
+      parsed = await parseImageWithQwen(req.file.path);
+      console.log('[百炼图片OCR] 解析结果:', parsed.length, '条');
     } else {
-      return res.status(400).json({ message: '不支持的文件格式，仅支持 PDF / Excel / 图片(PNG/JPG/WebP)' });
+      return res.status(400).json({ message: '不支持的文件格式，仅支持PDF/Excel/图片' });
     }
 
     const workshop = req.body.workshop || 'B';
-
-    // 批内去重：同一份文件如果有完全相同的 (order_no + product_code + mold_no) 只保留第一条
-    const seen = new Set();
-    const dedup = [];
-    let dupeCount = 0;
-    for (const o of parsed) {
-      const key = [o.order_no || '', o.product_code || '', o.mold_no || ''].join('|');
-      if (key === '||' || !seen.has(key)) {
-        seen.add(key);
-        dedup.push(o);
-      } else {
-        dupeCount++;
-      }
-    }
-
     const insertMany = db.transaction((rows) => {
       for (const o of rows) {
         stmts().insert.run(
@@ -276,11 +286,8 @@ router.post('/import', upload.single('file'), async (req, res) => {
       }
     });
 
-    insertMany(dedup);
-    const msg = dupeCount > 0
-      ? `导入 ${dedup.length} 条订单（跳过 ${dupeCount} 条文件内重复）`
-      : `成功导入 ${dedup.length} 条订单`;
-    res.json({ message: msg, count: dedup.length, added: dedup.length, dupeCount });
+    insertMany(parsed);
+    res.json({ message: `成功导入 ${parsed.length} 条订单`, count: parsed.length, added: parsed.length });
   } catch (err) {
     res.status(500).json({ message: '导入失败：' + err.message });
   } finally {

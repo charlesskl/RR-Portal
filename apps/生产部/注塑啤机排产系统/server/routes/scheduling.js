@@ -53,28 +53,18 @@ router.get('/carry-over', (req, res) => {
 });
 
 // 执行智能排机 — 必须在 /:id 之前
-// 同车间+日期+班次并发锁：防止快速双击创建两张草稿
-const generateLocks = new Set();
 router.post('/generate', (req, res) => {
-  const { date, shift, orderIds, workshop } = req.body;
-  if (!date || !shift || !Array.isArray(orderIds)) {
-    return res.status(400).json({ message: '请提供date、shift和orderIds' });
-  }
-  const ws = workshop || 'B';
-  const lockKey = `${ws}|${date}|${shift}`;
-  if (generateLocks.has(lockKey)) {
-    return res.status(429).json({ message: '排机进行中，请稍候再试' });
-  }
-  generateLocks.add(lockKey);
   try {
+    const { date, shift, orderIds, workshop } = req.body;
+    if (!date || !shift || !Array.isArray(orderIds)) {
+      return res.status(400).json({ message: '请提供date、shift和orderIds' });
+    }
     const { generateSchedule } = require('../services/schedulingEngine');
-    const result = generateSchedule({ orderIds, date, shift, workshop: ws });
+    const result = generateSchedule({ orderIds, date, shift, workshop: workshop || 'B' });
     res.json(result);
   } catch (err) {
     console.error('排机失败:', err);
     res.status(500).json({ message: '排机失败: ' + err.message });
-  } finally {
-    generateLocks.delete(lockKey);
   }
 });
 
@@ -118,29 +108,24 @@ router.put('/:id/items/:itemId', (req, res) => {
     values.push(accumulated, shortage);
 
     // 同步更新订单表，若欠数为0则标记完成
-    // 只同步到未确认的草稿排机单，不覆盖历史已确认班次的数据
     if (currentItem.order_id) {
       if (shortage <= 0) {
         db.prepare("UPDATE orders SET accumulated = ?, status = 'completed' WHERE id = ?")
           .run(accumulated, currentItem.order_id);
-        db.prepare(`
-          UPDATE schedule_items SET accumulated = ?, shortage = 0
-          WHERE order_id = ? AND id != ?
-            AND schedule_id IN (SELECT id FROM schedules WHERE status != 'confirmed')
-        `).run(accumulated, currentItem.order_id, itemId);
+        // 同步所有排单里相同订单的条目，欠数全部归零
+        db.prepare("UPDATE schedule_items SET accumulated = ?, shortage = 0 WHERE order_id = ? AND id != ?")
+          .run(accumulated, currentItem.order_id, itemId);
       } else {
         db.prepare('UPDATE orders SET accumulated = ? WHERE id = ?')
           .run(accumulated, currentItem.order_id);
-        db.prepare(`
-          UPDATE schedule_items SET accumulated = ?, shortage = ?
-          WHERE order_id = ? AND id != ?
-            AND schedule_id IN (SELECT id FROM schedules WHERE status != 'confirmed')
-        `).run(accumulated, shortage, currentItem.order_id, itemId);
+        // 同步其他排单里相同订单的条目的累计数
+        db.prepare("UPDATE schedule_items SET accumulated = ?, shortage = ? WHERE order_id = ? AND id != ?")
+          .run(accumulated, shortage, currentItem.order_id, itemId);
       }
     }
   }
 
-  // 目标数更新时自动计算天数，并同步到 mold_targets（永久保存，下次排机默认取）
+  // 目标数更新时自动计算天数，并同步到 mold_targets 表（永久保存，下次自动用）
   if (req.body.target_24h !== undefined) {
     const currentItem = db.prepare('SELECT * FROM schedule_items WHERE id = ?').get(itemId);
     if (!currentItem) return res.status(404).json({ message: '记录不存在' });
@@ -151,16 +136,16 @@ router.put('/:id/items/:itemId', (req, res) => {
     updates.push('target_24h = ?', 'target_11h = ?', 'days_needed = ?');
     values.push(t24h, t11h, daysNeeded);
 
-    // 同步到 mold_targets：从 mold_name 提取模具编号（首段，去掉中文），存或更新
+    // 同步到 mold_targets：从 mold_name 提取模具编号，存或更新
     if (t24h > 0 && currentItem.mold_name) {
       try {
-        const moldCode = currentItem.mold_name.split(' ')[0].replace(/[一-龥].*$/, '').trim();
+        const moldCode = currentItem.mold_name.split(' ')[0].replace(/[\u4e00-\u9fa5].*$/, '').trim();
         if (moldCode) {
           const sched = db.prepare('SELECT workshop FROM schedules WHERE id = ?').get(currentItem.schedule_id);
           const ws = sched?.workshop || 'B';
-          const exists = db.prepare('SELECT id FROM mold_targets WHERE mold_no = ? AND workshop = ?').get(moldCode, ws);
+          const exists = db.prepare("SELECT id FROM mold_targets WHERE mold_no = ? AND workshop = ?").get(moldCode, ws);
           if (exists) {
-            db.prepare('UPDATE mold_targets SET target_24h=?, target_11h=?, mold_name=?, updated_at=CURRENT_TIMESTAMP WHERE id=?')
+            db.prepare("UPDATE mold_targets SET target_24h=?, target_11h=?, mold_name=?, updated_at=CURRENT_TIMESTAMP WHERE id=?")
               .run(t24h, t11h, currentItem.mold_name, exists.id);
           } else {
             db.prepare("INSERT INTO mold_targets (mold_no, mold_name, target_24h, target_11h, notes, workshop) VALUES (?, ?, ?, ?, '', ?)")
@@ -168,7 +153,7 @@ router.put('/:id/items/:itemId', (req, res) => {
           }
         }
       } catch (e) {
-        console.log('[同步 mold_targets 失败]', e.message);
+        console.log('[同步mold_targets失败]', e.message);
       }
     }
   }
@@ -219,10 +204,6 @@ router.post('/:id/confirm', (req, res) => {
     const schedule = db.prepare('SELECT * FROM schedules WHERE id = ?').get(req.params.id);
     if (!schedule) return res.status(404).json({ message: '排机单不存在' });
 
-    if (schedule.status === 'confirmed') {
-      return res.status(409).json({ message: '排机单已确认，不能重复确认' });
-    }
-
     const items = db.prepare('SELECT * FROM schedule_items WHERE schedule_id = ?').all(req.params.id);
     if (items.length === 0) return res.status(400).json({ message: '排机单无明细' });
 
@@ -238,13 +219,6 @@ router.post('/:id/confirm', (req, res) => {
     const scheduleWorkshop = schedule.workshop || 'B';
 
     const writeAll = db.transaction(() => {
-      // 事务内重新检查状态，防止竞态（并发两个 confirm 请求）
-      const fresh = db.prepare('SELECT status FROM schedules WHERE id = ?').get(req.params.id);
-      if (fresh.status === 'confirmed') {
-        throw new Error('ALREADY_CONFIRMED');
-      }
-      db.prepare('UPDATE schedules SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
-        .run('confirmed', req.params.id);
       for (const item of items) {
         insertHistory.run(
           item.machine_no, item.product_code, item.mold_name, item.color,
@@ -254,6 +228,8 @@ router.post('/:id/confirm', (req, res) => {
           item.packing_qty, item.notes, schedule.schedule_date, batch, scheduleWorkshop
         );
       }
+      db.prepare('UPDATE schedules SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+        .run('confirmed', req.params.id);
       for (const item of items) {
         if (item.order_id) {
           db.prepare('UPDATE orders SET status = ? WHERE id = ?').run('scheduled', item.order_id);
@@ -261,14 +237,7 @@ router.post('/:id/confirm', (req, res) => {
       }
     });
 
-    try {
-      writeAll();
-    } catch (e) {
-      if (e.message === 'ALREADY_CONFIRMED') {
-        return res.status(409).json({ message: '排机单已确认，不能重复确认' });
-      }
-      throw e;
-    }
+    writeAll();
 
     // 刷新机台统计
     const machines = db.prepare('SELECT DISTINCT machine_no FROM schedule_items WHERE schedule_id = ?').all(req.params.id);

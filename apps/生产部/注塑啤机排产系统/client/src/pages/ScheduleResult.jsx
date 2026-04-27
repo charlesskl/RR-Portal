@@ -62,7 +62,7 @@ export default function ScheduleResult({ workshop = 'B' }) {
       const { data } = await axios.get('/api/machines', { params: { workshop } });
       setMachines(data.sort((a, b) => getMachineNum(a.machine_no) - getMachineNum(b.machine_no)));
     } catch (e) {
-      message.error('机台列表加载失败，机械手/机台切换功能不可用');
+      // 静默失败
     }
   };
 
@@ -354,6 +354,9 @@ export default function ScheduleResult({ workshop = 'B' }) {
         if (v === 0) return <Tag color="success">已完成</Tag>;
         return v;
       }
+    },
+    { title: '单号', dataIndex: 'serial_no', width: 100,
+      render: v => v || ''
     },
     { title: '24H目标', dataIndex: 'target_24h', width: 100,
       render: (v, record) => {

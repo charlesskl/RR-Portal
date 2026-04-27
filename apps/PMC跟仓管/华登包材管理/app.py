@@ -649,13 +649,17 @@ def reports():
                                    'months': sorted(by_month.items())}
 
     con.close()
+    today = datetime.now().strftime('%Y/%m/%d')
+    today_cn = datetime.now().strftime('%Y年%m月%d日')
     return render_template('reports.html',
                            direction_summaries=direction_summaries,
                            triangle_rows=triangle_rows,
+                           has_outstanding_debt=_has_outstanding_debt(triangle_rows),
                            pair_summary=pair_summary,
                            monthly_by_pair=monthly_by_pair,
                            date_from=date_from, date_to=date_to,
                            only_confirmed=only_confirmed,
+                           today=today, today_cn=today_cn,
                            PAIRS=PAIRS)
 
 
@@ -677,19 +681,39 @@ def _sum_flow_records(con, *, from_party, to_party, only_sender, date_from, date
 
 
 def _build_triangle(direction_summaries, prices):
-    """按 5 种三角债包材，构造三方互欠表。
+    """构造 6 行单向欠款表（3 个 pair × 2 个方向）。
 
-    Note: prices 参数 spec literal 保留，当前未使用（spec defect, plan Task 15）。
+    每行表示 "X 欠 Y"：显示 (Y_to_X - X_to_Y) > 0 的差额，否则空。
+    Y 多发了 → X 多收了 → X 欠 Y。
+    Note: prices 参数 spec literal 保留，当前未使用。
     """
+    # (debtor, creditor) 行序模仿旧 UI
+    DEBT_ROWS = [
+        ('sy', 'xx'), ('xx', 'sy'),
+        ('hd', 'xx'), ('xx', 'hd'),
+        ('sy', 'hd'), ('hd', 'sy'),
+    ]
     rows = []
-    for idx, (a, b) in enumerate(PAIRS, 1):
-        a_to_b = direction_summaries[f'{a}_to_{b}']
-        b_to_a = direction_summaries[f'{b}_to_{a}']
-        row = {'idx': idx, 'label': f'{PARTIES[a]["name"]}↔{PARTIES[b]["name"]}'}
-        for k, _ in TRIANGLE_ITEMS:
-            row[k] = int(a_to_b[k] - b_to_a[k])
+    for idx, (debtor, creditor) in enumerate(DEBT_ROWS, 1):
+        creditor_sent = direction_summaries[f'{creditor}_to_{debtor}']
+        debtor_sent = direction_summaries[f'{debtor}_to_{creditor}']
+        row = {
+            'idx': idx,
+            'label': f'{PARTIES[debtor]["name"]}欠{PARTIES[creditor]["name"]}',
+            'has_any': False,
+        }
+        for k, _ in STAT_ITEMS:
+            diff = creditor_sent[k] - debtor_sent[k]
+            row[k] = int(diff) if diff > 0 else 0
+            if row[k]:
+                row['has_any'] = True
         rows.append(row)
     return rows
+
+
+def _has_outstanding_debt(triangle_rows):
+    """是否有任意未清三角债（用于底部红色提示）。"""
+    return any(row['has_any'] for row in triangle_rows)
 
 
 def _build_pair_summary(direction_summaries):

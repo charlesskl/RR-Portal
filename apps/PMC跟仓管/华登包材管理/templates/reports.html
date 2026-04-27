@@ -2,19 +2,8 @@
 {% block content %}
 <div class="max-w-6xl mx-auto">
     <h1 class="text-xl font-bold mb-4">汇总报表</h1>
-    <form method="GET" class="bg-white rounded p-3 mb-4 flex gap-3 items-end flex-wrap">
-        <div><label class="block text-xs">开始</label>
-            <input type="date" name="date_from" value="{{ date_from }}" class="border rounded px-2 py-1 text-sm"></div>
-        <div><label class="block text-xs">结束</label>
-            <input type="date" name="date_to" value="{{ date_to }}" class="border rounded px-2 py-1 text-sm"></div>
-        <label class="flex items-center gap-1 text-sm">
-            <input type="checkbox" name="only_confirmed" value="1" {{ 'checked' if only_confirmed else '' }}>
-            仅已核对
-        </label>
-        <button class="px-3 py-1.5 bg-blue-600 text-white text-sm rounded">筛选</button>
-    </form>
 
-    <!-- 方向汇总表 -->
+    <!-- 方向汇总表（细节，按 pair 分块） -->
     {% for p in PAIRS %}
     <div class="bg-white rounded p-4 mb-4">
         <h2 class="font-semibold mb-2">{{ PARTIES[p[0]].name }} ↔ {{ PARTIES[p[1]].name }}</h2>
@@ -38,45 +27,79 @@
     </div>
     {% endfor %}
 
-    <!-- 三角债 -->
-    <div class="mb-6 border-2 border-gray-800">
-        <div class="bg-yellow-300 py-3 text-center font-bold">三方包材往来净欠表</div>
+    <!-- 三角债（黄色 banner + 日期筛选 + 6 行单向欠款表） -->
+    <div class="mb-6 border-2 border-gray-800 bg-white">
+        <div class="bg-yellow-300 py-3 text-center">
+            <div class="text-lg font-bold">各车间包材相互往来数量统计表</div>
+            <div class="text-sm">（截止到{{ today_cn }}）</div>
+            <form method="GET" class="mt-2 flex gap-3 items-center justify-center text-sm flex-wrap">
+                <label>开始：<input type="date" name="date_from" value="{{ date_from }}" class="border rounded px-2 py-1"></label>
+                <label>截止：<input type="date" name="date_to" value="{{ date_to }}" class="border rounded px-2 py-1"></label>
+                {% if only_confirmed %}<input type="hidden" name="only_confirmed" value="1">{% endif %}
+                <button class="px-3 py-1 bg-black text-white rounded">确定</button>
+            </form>
+            <label class="mt-1 inline-flex items-center gap-1 text-xs">
+                <form method="GET" class="inline-flex items-center gap-1">
+                    {% if date_from %}<input type="hidden" name="date_from" value="{{ date_from }}">{% endif %}
+                    {% if date_to %}<input type="hidden" name="date_to" value="{{ date_to }}">{% endif %}
+                    <input type="checkbox" name="only_confirmed" value="1" onchange="this.form.submit()" {{ 'checked' if only_confirmed else '' }}>
+                    仅已核对
+                </form>
+            </label>
+        </div>
+
         <table class="w-full text-center text-sm">
-            <thead><tr>
+            <thead class="bg-gray-50"><tr>
+                <th class="border px-3 py-2">序号</th>
                 <th class="border px-3 py-2">车间</th>
                 {% for k, n in STAT_ITEMS %}<th class="border px-3 py-2">{{ n }}</th>{% endfor %}
+                <th class="border px-3 py-2">备注</th>
             </tr></thead>
             <tbody>
                 {% for row in triangle_rows %}
                 <tr>
+                    <td class="border px-3 py-2">{{ row.idx }}</td>
                     <td class="border px-3 py-2 font-medium">{{ row.label }}</td>
                     {% for k, n in STAT_ITEMS %}
                     <td class="border px-3 py-2">{{ row[k] if row[k] else '' }}</td>
                     {% endfor %}
+                    <td class="border px-3 py-2"></td>
                 </tr>
                 {% endfor %}
             </tbody>
         </table>
+
+        {% if has_outstanding_debt %}
+        <div class="bg-red-50 text-red-700 text-center py-3 font-semibold border-t border-gray-800">
+            各车间往来三角债尚有未清数据，请核查上表
+        </div>
+        {% endif %}
+
+        <div class="text-right text-sm text-gray-500 px-3 py-2">{{ today }}</div>
     </div>
 
-    <!-- 债务总结 -->
+    <!-- 债务往来总结（3 列 grid，每个 pair 一张卡片） -->
     <div class="bg-white rounded p-4 mb-4">
-        <h2 class="font-semibold mb-2">两两净额</h2>
-        {% for p in pair_summary %}
-        <div class="mb-2">
-            <b>{{ p.a }} ↔ {{ p.b }}：</b>
-            {# has_debt set 但未引用，spec literal, plan Task 15 #}
-            {% set has_debt = false %}
-            {% for k, n in STAT_ITEMS %}
-            {% set v = p.nets[k] %}
-            {% if v > 0 %}
-                <span class="text-red-600">{{ p.b }} 欠 {{ p.a }} {{ n }} {{ v|int }} 个</span>.
-            {% elif v < 0 %}
-                <span class="text-red-600">{{ p.a }} 欠 {{ p.b }} {{ n }} {{ (-v)|int }} 个</span>.
-            {% endif %}
+        <h2 class="font-semibold mb-3">债务往来总结</h2>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+            {% for p in pair_summary %}
+            <div class="bg-red-50 rounded p-3">
+                <div class="font-semibold mb-2">{{ p.a }} ↔ {{ p.b }}</div>
+                {% set ns = namespace(any=false) %}
+                {% for k, n in STAT_ITEMS %}
+                {% set v = p.nets[k] %}
+                {% if v > 0 %}
+                <div class="text-red-600 text-sm">{{ p.b }} 欠 {{ p.a }} {{ n }} {{ v|int }} 个</div>
+                {% set ns.any = true %}
+                {% elif v < 0 %}
+                <div class="text-red-600 text-sm">{{ p.a }} 欠 {{ p.b }} {{ n }} {{ (-v)|int }} 个</div>
+                {% set ns.any = true %}
+                {% endif %}
+                {% endfor %}
+                {% if not ns.any %}<div class="text-gray-500 text-sm">无未清数据</div>{% endif %}
+            </div>
             {% endfor %}
         </div>
-        {% endfor %}
     </div>
 
     <details class="bg-white rounded p-3 mb-4">

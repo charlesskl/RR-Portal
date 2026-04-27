@@ -24,6 +24,14 @@
     <div class="flex items-center justify-between px-4 py-3 border-b">
         <h2 class="text-lg font-semibold">对{{ panel.cp_name }}</h2>
         <div class="flex gap-2">
+            <a href="/import"
+               class="px-3 py-1 bg-blue-600 text-white text-sm rounded hover:bg-blue-700">
+                导入
+            </a>
+            <a href="/party/{{ party }}/export?cp={{ panel.cp }}"
+               class="px-3 py-1 bg-green-600 text-white text-sm rounded hover:bg-green-700">
+                导出
+            </a>
             <button onclick="openReconcileModal('{{ party }}', '{{ panel.cp }}')"
                     class="px-3 py-1 bg-purple-600 text-white text-sm rounded hover:bg-purple-700">
                 发起对账

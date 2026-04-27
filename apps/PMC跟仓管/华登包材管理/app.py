@@ -373,6 +373,54 @@ def party_entry(party):
     return redirect(url_for('party_page', party=party))
 
 
+@app.route('/party/<party>/export')
+@party_required
+def party_export(party):
+    """导出 party↔cp 双方向 records 为 xlsx，含日期筛选。"""
+    cp = request.args.get('cp', '')
+    if cp not in PARTIES or cp == party or cp not in PARTIES[party]['counterparties']:
+        flash('无效对方'); return redirect(url_for('party_page', party=party))
+    date_from = request.args.get('date_from', '').strip()
+    date_to = request.args.get('date_to', '').strip()
+
+    con = sqlite3.connect(DATABASE)
+    con.row_factory = sqlite3.Row
+    sent = _query_flow(con, recorded_by=party, from_party=party, to_party=cp,
+                       date_from=date_from or None, date_to=date_to or None)
+    received = _query_flow(con, recorded_by=party, from_party=cp, to_party=party,
+                           date_from=date_from or None, date_to=date_to or None)
+    con.close()
+
+    import io
+    import xlsxwriter
+    buf = io.BytesIO()
+    wb = xlsxwriter.Workbook(buf, {'in_memory': True})
+    headers = ['日期', '订单号'] + [name for _, name in ITEMS] + ['备注']
+    qty_keys = [k for k, _ in ITEMS]
+
+    for sheet_name, records in [(f'发→{PARTIES[cp]["name"]}', sent),
+                                 (f'收自{PARTIES[cp]["name"]}', received)]:
+        ws = wb.add_worksheet(sheet_name)
+        for col, h in enumerate(headers):
+            ws.write(0, col, h)
+        for i, r in enumerate(records, start=1):
+            ws.write(i, 0, r.get('date') or '')
+            ws.write(i, 1, r.get('order_no') or '')
+            for j, k in enumerate(qty_keys, start=2):
+                v = r.get(f'{k}_qty') or 0
+                if v:
+                    ws.write_number(i, j, v)
+            ws.write(i, 2 + len(qty_keys), r.get('remark') or '')
+    wb.close()
+    buf.seek(0)
+
+    from flask import send_file
+    today = datetime.now().strftime('%Y%m%d')
+    filename = f'{PARTIES[party]["name"]}-{PARTIES[cp]["name"]}-{today}.xlsx'
+    return send_file(buf, as_attachment=True, download_name=filename,
+                     mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+
+
 @app.route('/record/<int:rid>/edit', methods=['POST'])
 def record_edit(rid):
     party = current_party()

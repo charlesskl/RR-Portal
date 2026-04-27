@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, forwardRef, useImperativeHandle } from 'react';
 import axios from 'axios';
+import { message } from 'antd';
 import { ORDER_COLUMNS } from '../constants/columns';
 
 // Luckysheet 从 window.luckysheet（CDN 加载）获取
@@ -95,21 +96,18 @@ function extractCellFormat(cell) {
   return Object.keys(fmt).length > 0 ? fmt : null;
 }
 
-export default function LuckysheetEditor({
+function LuckysheetEditor({
   data,
-  onCellChange,
   onRefreshData,
   workshop,
   height = 600,
   containerId = 'luckysheet-container',
   newImportedIds,
-}) {
+}, ref) {
   const rowMapRef = useRef([]);
   const initializedRef = useRef(false);
   const dataRef = useRef(data);
   dataRef.current = data;
-  const syncTimerRef = useRef(null);
-  const settingsTimerRef = useRef(null);
   const [sheetSettings, setSheetSettings] = useState(null);
   const settingsLoadedRef = useRef(false);
   const loadedIdsRef = useRef('');
@@ -122,28 +120,6 @@ export default function LuckysheetEditor({
       .catch(() => { setSheetSettings({}); settingsLoadedRef.current = true; });
   }, [workshop]);
 
-  // 保存布局（列宽/行高/冻结）— 防抖
-  const saveSheetSettings = () => {
-    if (!workshop || !initializedRef.current) return;
-    const ls = getLuckysheet();
-    if (!ls || !ls.getAllSheets) return;
-    let sheets;
-    try { sheets = ls.getAllSheets(); } catch { return; }
-    const sheet = sheets && sheets[0];
-    if (!sheet) return;
-    const cfg = sheet.config || {};
-    const settings = {
-      columnlen: cfg.columnlen || {},
-      rowlen: cfg.rowlen || {},
-      frozen: sheet.frozen || null,
-    };
-    axios.put('/api/orders/sheet-settings', { workshop, settings }).catch(() => {});
-  };
-  const scheduleSaveSettings = () => {
-    clearTimeout(settingsTimerRef.current);
-    settingsTimerRef.current = setTimeout(saveSheetSettings, 1000);
-  };
-
   // 判断是否为蓝色字体：R<100, G<150, B>150
   const isBlueFont = (fc) => {
     if (!fc) return false;
@@ -155,17 +131,32 @@ export default function LuckysheetEditor({
     return r < 100 && g < 150 && b > 150;
   };
 
-  // 同步当前整张表的单元格格式到后端
-  // 收集所有变化后用一次 batch-update POST 提交，避免 N 个 PUT 撞 nginx 限流
-  // 失败静默（轮询会重试），不弹「保存失败」toast（toast 仅用于用户主动编辑）
-  const syncFormats = () => {
-    if (!initializedRef.current) return;
+  // 手动保存：用户点「保存」按钮才触发。一次过把整张表的:
+  //   - 单元格值（与 DB 不一致的字段）
+  //   - 单元格格式（cell_format JSON）
+  //   - 蓝色字体 → 自动转完成
+  // 写到 batch-update；列宽/行高/冻结写到 sheet-settings。
+  // 没有任何 polling/auto-save，避免 nginx 限流 + toast 风暴。
+  const saveAll = async () => {
+    if (!initializedRef.current) {
+      message.warning('表格未初始化');
+      return { saved: 0 };
+    }
     const ls = getLuckysheet();
-    if (!ls || !ls.getAllSheets) return;
+    if (!ls || !ls.getAllSheets) {
+      message.error('Luckysheet 未加载');
+      return null;
+    }
     let sheets;
-    try { sheets = ls.getAllSheets(); } catch { return; }
+    try { sheets = ls.getAllSheets(); } catch (e) {
+      message.error('读取表格失败：' + e.message);
+      return null;
+    }
     const sheet = sheets && sheets[0];
-    if (!sheet || !sheet.data) return;
+    if (!sheet || !sheet.data) {
+      message.warning('表格无数据');
+      return { saved: 0 };
+    }
 
     const updates = [];
     let rowsCompleted = 0;
@@ -176,30 +167,41 @@ export default function LuckysheetEditor({
       if (!order) continue;
       const rowCells = sheet.data[r];
       if (!rowCells) continue;
+
+      const fields = {};
       const newFmt = {};
       let blueCount = 0;
-      let nonEmptyCount = 0;
       for (let c = 0; c < ORDER_COLUMNS.length; c++) {
         const cell = rowCells[c];
+        const colData = ORDER_COLUMNS[c].data;
         const fmt = extractCellFormat(cell);
-        if (fmt) newFmt[ORDER_COLUMNS[c].data] = fmt;
-        if (cell && cell.v != null && cell.v !== '') {
-          nonEmptyCount++;
-          if (fmt && isBlueFont(fmt.fc)) blueCount++;
+        if (fmt) newFmt[colData] = fmt;
+
+        // 收集值变化（跳过只读的合计列）
+        if (colData !== 'quantity_sum') {
+          let newVal;
+          if (cell == null) newVal = null;
+          else if (typeof cell === 'object') newVal = cell.v ?? null;
+          else newVal = cell;
+          if (newVal === '') newVal = null;
+          const oldVal = order[colData] ?? null;
+          if (newVal !== oldVal) {
+            fields[colData] = newVal;
+          }
+        }
+
+        if (cell && cell.v != null && cell.v !== '' && fmt && isBlueFont(fmt.fc)) {
+          blueCount++;
         }
       }
 
       const newFmtStr = Object.keys(newFmt).length > 0 ? JSON.stringify(newFmt) : null;
       const oldFmtStr = order.cell_format || null;
-      const fields = {};
       if (newFmtStr !== oldFmtStr) {
         fields.cell_format = newFmtStr;
-        order.cell_format = newFmtStr;
       }
-      // 任意非空单元格字体蓝色 → 自动转完成
       if (order.status === 'active' && blueCount >= 1) {
         fields.status = 'completed';
-        order.status = 'completed';
         rowsCompleted++;
       }
       if (Object.keys(fields).length > 0) {
@@ -207,27 +209,40 @@ export default function LuckysheetEditor({
       }
     }
 
-    if (updates.length > 0) {
-      axios.post('/api/orders/batch-update', { updates }).catch(() => {});
-    }
-    if (rowsCompleted > 0 && onRefreshData) onRefreshData();
-  };
+    // 列宽/行高/冻结
+    const cfg = sheet.config || {};
+    const settings = {
+      columnlen: cfg.columnlen || {},
+      rowlen: cfg.rowlen || {},
+      frozen: sheet.frozen || null,
+    };
 
-  const scheduleSyncFormats = () => {
-    clearTimeout(syncTimerRef.current);
-    syncTimerRef.current = setTimeout(syncFormats, 800);
-  };
-
-  // 定时轮询同步（每 2 秒检查一次格式变化 + 蓝色自动完成）
-  useEffect(() => {
-    const id = setInterval(() => {
-      if (initializedRef.current) {
-        syncFormats();
-        saveSheetSettings();
+    try {
+      const calls = [axios.put('/api/orders/sheet-settings', { workshop, settings })];
+      if (updates.length > 0) {
+        calls.push(axios.post('/api/orders/batch-update', { updates }));
       }
-    }, 2000);
-    return () => clearInterval(id);
-  }, [workshop]);
+      await Promise.all(calls);
+      // 更新 dataRef，下次 saveAll 比较时不会重复 push
+      for (const u of updates) {
+        const o = dataRef.current.find(x => x.id === u.id);
+        if (o) Object.assign(o, u.fields);
+      }
+      if (updates.length === 0) {
+        message.success('布局已保存（无单元格变化）');
+      } else {
+        message.success(`已保存 ${updates.length} 条订单`);
+      }
+      if (rowsCompleted > 0 && onRefreshData) onRefreshData();
+      return { saved: updates.length };
+    } catch (e) {
+      message.error('保存失败：' + (e.response?.data?.message || e.message));
+      return null;
+    }
+  };
+
+  // 暴露 saveAll 给父组件（保存按钮调用）
+  useImperativeHandle(ref, () => ({ saveAll }), [workshop, data]);
 
   useEffect(() => {
     // 等待 sheetSettings 加载完成后才初始化
@@ -277,30 +292,14 @@ export default function LuckysheetEditor({
       showConfigWindowResize: false,
       enableShortcutKey: true,
       data: [sheetConfig],
-      hook: {
-        cellUpdated: (r, c, oldValue, newValue) => {
-          if (r === 0) return;
-          const orderId = rowMapRef.current[r - 1];
-          if (!orderId) return;
-          const field = ORDER_COLUMNS[c]?.data;
-          if (!field || field === 'quantity_sum') return;
-          let val;
-          if (newValue == null) val = null;
-          else if (typeof newValue === 'object') val = newValue.v ?? newValue.m ?? '';
-          else val = newValue;
-          if (onCellChange) onCellChange(orderId, field, val);
-        },
-        rangeUpdated: () => { scheduleSyncFormats(); scheduleSaveSettings(); },
-        updated: () => { scheduleSyncFormats(); scheduleSaveSettings(); },
-      },
+      // 不再挂 cellUpdated / rangeUpdated / updated 钩子触发自动保存。
+      // 用户改完点上方「保存」按钮才提交。
     });
 
     initializedRef.current = true;
 
     return () => {
       initializedRef.current = false;
-      clearTimeout(syncTimerRef.current);
-      clearTimeout(settingsTimerRef.current);
       const ls = getLuckysheet();
       if (ls && ls.destroy) {
         try { ls.destroy(); } catch {}
@@ -352,22 +351,7 @@ export default function LuckysheetEditor({
           config: { columnlen: colWidths, rowlen: rowLen },
           ...(savedFrozen ? { frozen: savedFrozen } : {}),
         }],
-        hook: {
-          cellUpdated: (r, c, oldValue, newValue) => {
-            if (r === 0) return;
-            const orderId = rowMapRef.current[r - 1];
-            if (!orderId) return;
-            const field = ORDER_COLUMNS[c]?.data;
-            if (!field || field === 'quantity_sum') return;
-            let val;
-            if (newValue == null) val = null;
-            else if (typeof newValue === 'object') val = newValue.v ?? newValue.m ?? '';
-            else val = newValue;
-            if (onCellChange) onCellChange(orderId, field, val);
-          },
-          rangeUpdated: () => { scheduleSyncFormats(); },
-          updated: () => { scheduleSyncFormats(); },
-        },
+        // 不再挂自动保存钩子，由「保存」按钮统一触发 saveAll
       });
     } catch (e) {
       console.error('Luckysheet 更新失败', e);
@@ -381,3 +365,5 @@ export default function LuckysheetEditor({
     />
   );
 }
+
+export default forwardRef(LuckysheetEditor);

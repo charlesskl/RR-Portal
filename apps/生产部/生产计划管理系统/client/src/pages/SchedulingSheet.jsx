@@ -1,6 +1,6 @@
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { Button, Space, message, Modal, Table, Tag, Alert, Popconfirm } from 'antd';
-import { DownloadOutlined, PlusOutlined, UploadOutlined, DeleteOutlined, BranchesOutlined, SearchOutlined } from '@ant-design/icons';
+import { DownloadOutlined, PlusOutlined, UploadOutlined, DeleteOutlined, BranchesOutlined, SearchOutlined, SaveOutlined } from '@ant-design/icons';
 import { Input } from 'antd';
 import axios from 'axios';
 import LuckysheetEditor from './LuckysheetEditor';
@@ -152,13 +152,18 @@ export default function SchedulingSheet({ workshop, tab, lineName = 'all', lines
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  const handleCellChange = useCallback(async (orderId, field, value) => {
+  // 编辑器 ref — 父组件通过它触发 saveAll
+  const editorRef = useRef(null);
+  const [saving, setSaving] = useState(false);
+  const handleSave = async () => {
+    if (saving || !editorRef.current?.saveAll) return;
+    setSaving(true);
     try {
-      await axios.put(`/api/orders/${orderId}`, { [field]: value });
-    } catch {
-      message.error('保存失败');
+      await editorRef.current.saveAll();
+    } finally {
+      setSaving(false);
     }
-  }, [data]);
+  };
 
   // 添加文件到待导入列表（支持拖拽和逐个选择）
   const addFiles = (files) => {
@@ -310,6 +315,7 @@ export default function SchedulingSheet({ workshop, tab, lineName = 'all', lines
               导入排期
             </Button>
           )}
+          <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={handleSave}>保存</Button>
           <Button icon={<PlusOutlined />} onClick={handleAddRow}>新增行</Button>
           {tab === 'active' && lineName === 'all' && (
             <Popconfirm title="按货号分组、走货期排序，自动分配到各拉？" onConfirm={handleAutoAssign} okText="开始排拉" cancelText="取消">
@@ -339,8 +345,8 @@ export default function SchedulingSheet({ workshop, tab, lineName = 'all', lines
       </div>
 
       <LuckysheetEditor
+        ref={editorRef}
         data={data}
-        onCellChange={handleCellChange}
         onRefreshData={fetchData}
         workshop={workshop}
         height={600}

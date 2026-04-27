@@ -276,7 +276,10 @@ def party_page(party):
             all_r = _query_flow(con, recorded_by=party, from_party=from_p, to_party=to_p,
                                 date_from=date_from, date_to=date_to)
             page_key = f'page_{cp}_{direction}'
-            page = max(1, int(request.args.get(page_key, 1) or 1))
+            try:
+                page = max(1, int(request.args.get(page_key, 1) or 1))
+            except ValueError:
+                page = 1
             total = len(all_r)
             pages = max(1, (total + page_size - 1) // page_size)
             page = min(page, pages)

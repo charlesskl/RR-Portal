@@ -37,3 +37,11 @@ def test_pagination(client):
     # 第一页 20 条
     assert '共 <b>60</b> 条' in html or '60 条' in html
     assert '第 <b>1</b>' in html or '/ 3 页' in html
+
+
+def test_pagination_rejects_garbage_page(client):
+    """非数字 page 参数不应 500，而是回退到 page=1。"""
+    _login(client, 'hd')
+    _insert_many(3)
+    rv = client.get('/party/hd?page_sy_sent=abc')
+    assert rv.status_code == 200

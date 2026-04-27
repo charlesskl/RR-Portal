@@ -329,6 +329,63 @@ def party_entry(party):
     return redirect(url_for('party_page', party=party))
 
 
+@app.route('/record/<int:rid>/edit', methods=['POST'])
+def record_edit(rid):
+    party = current_party()
+    if not party:
+        return redirect(url_for('index'))
+    con = sqlite3.connect(DATABASE)
+    con.row_factory = sqlite3.Row
+    r = con.execute("SELECT * FROM flow_records WHERE id=?", (rid,)).fetchone()
+    if not r:
+        con.close(); flash('记录不存在'); return redirect(url_for('party_page', party=party))
+    if r['recorded_by'] != party:
+        con.close(); flash('无权编辑他人记录'); return redirect(url_for('party_page', party=party))
+    if r['locked']:
+        con.close(); flash('记录已锁定，不能修改'); return redirect(url_for('party_page', party=party))
+
+    date = request.form.get('date', '').strip() or r['date']
+    order_no = request.form.get('order_no', '').strip() or None
+    remark = request.form.get('remark', '').strip() or None
+    qty_cols = [f'{k}_qty' for k, _ in ITEMS]
+    qty_vals = []
+    for col in qty_cols:
+        v = request.form.get(col, '').strip()
+        if v == '':
+            qty_vals.append(r[col] or 0)
+        else:
+            try:
+                qty_vals.append(float(v))
+            except ValueError:
+                qty_vals.append(r[col] or 0)
+    set_clause = ', '.join([f'{c}=?' for c in ['date', 'order_no', 'remark'] + qty_cols])
+    con.execute(
+        f"UPDATE flow_records SET {set_clause}, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+        [date, order_no, remark, *qty_vals, rid]
+    )
+    con.commit(); con.close()
+    return redirect(url_for('party_page', party=party))
+
+
+@app.route('/record/<int:rid>/delete', methods=['POST'])
+def record_delete(rid):
+    party = current_party()
+    if not party:
+        return redirect(url_for('index'))
+    con = sqlite3.connect(DATABASE)
+    con.row_factory = sqlite3.Row
+    r = con.execute("SELECT recorded_by, locked FROM flow_records WHERE id=?", (rid,)).fetchone()
+    if not r:
+        con.close(); flash('记录不存在'); return redirect(url_for('party_page', party=party))
+    if r['recorded_by'] != party:
+        con.close(); flash('无权删除'); return redirect(url_for('party_page', party=party))
+    if r['locked']:
+        con.close(); flash('记录已锁定'); return redirect(url_for('party_page', party=party))
+    con.execute("DELETE FROM flow_records WHERE id=?", (rid,))
+    con.commit(); con.close()
+    return redirect(url_for('party_page', party=party))
+
+
 def _query_flow(con, *, recorded_by, from_party, to_party, date_from=None, date_to=None):
     """查 flow_records。"""
     sql = """SELECT * FROM flow_records

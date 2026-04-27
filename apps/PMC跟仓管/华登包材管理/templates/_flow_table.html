@@ -20,8 +20,16 @@
                 <td class="border px-1 py-1 text-right">{{ r[key + '_qty']|int if r[key + '_qty'] else '' }}</td>
                 {% endfor %}
                 <td class="border px-2 py-1 text-xs">{{ r.remark or '' }}</td>
-                <td class="border px-2 py-1">
-                    {% if r.locked %}<span class="text-xs text-gray-400">🔒 已锁</span>{% endif %}
+                <td class="border px-2 py-1 whitespace-nowrap">
+                    {% if r.locked %}
+                        <span class="text-xs text-gray-400">🔒 已锁</span>
+                    {% else %}
+                        <button onclick="openEditModal({{ r.id }})" class="text-xs text-blue-600 hover:underline">编辑</button>
+                        <form method="POST" action="/record/{{ r.id }}/delete" class="inline"
+                              onsubmit="return confirm('确认删除？')">
+                            <button class="text-xs text-red-600 hover:underline ml-1">删除</button>
+                        </form>
+                    {% endif %}
                 </td>
             </tr>
             {% endfor %}

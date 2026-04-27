@@ -600,11 +600,38 @@ def reports():
     triangle_rows = _build_triangle(direction_summaries, prices)
     pair_summary = _build_pair_summary(direction_summaries)
 
+    # 月度明细
+    monthly_by_pair = {}
+    for a, b in PAIRS:
+        by_month = {}  # ym -> {'a_sent': {...}, 'b_sent': {...}}
+        for from_p, to_p in [(a, b), (b, a)]:
+            rows = con.execute(f"""
+                SELECT substr(date, 1, 7) AS ym,
+                       {', '.join(['COALESCE(SUM(' + k + '_qty), 0) AS ' + k + '_sum' for k, _ in STAT_ITEMS])}
+                FROM flow_records
+                WHERE from_party=? AND to_party=? AND recorded_by=?
+                GROUP BY ym ORDER BY ym
+            """, (from_p, to_p, from_p)).fetchall()
+            for r in rows:
+                ym = r['ym']
+                bucket = by_month.setdefault(ym, {'a_sent': {}, 'b_sent': {}})
+                key = 'a_sent' if from_p == a else 'b_sent'
+                for k, _ in STAT_ITEMS:
+                    bucket[key][k] = float(r[f'{k}_sum'])
+        # 计算 net per month
+        for ym, d in by_month.items():
+            d['net'] = {}
+            for k, _ in STAT_ITEMS:
+                d['net'][k] = d.get('a_sent', {}).get(k, 0) - d.get('b_sent', {}).get(k, 0)
+        monthly_by_pair[(a, b)] = {'a': PARTIES[a]['name'], 'b': PARTIES[b]['name'],
+                                   'months': sorted(by_month.items())}
+
     con.close()
     return render_template('reports.html',
                            direction_summaries=direction_summaries,
                            triangle_rows=triangle_rows,
                            pair_summary=pair_summary,
+                           monthly_by_pair=monthly_by_pair,
                            date_from=date_from, date_to=date_to,
                            only_confirmed=only_confirmed,
                            PAIRS=PAIRS)

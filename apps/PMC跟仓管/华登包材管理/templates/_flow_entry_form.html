@@ -1,0 +1,41 @@
+<details class="border rounded mb-3">
+    <summary class="cursor-pointer px-3 py-2 bg-blue-50 text-blue-700 font-medium text-sm">
+        ➕ 新增 {{ '发→' if direction == 'sent' else '收自' }}{{ cp_name }}
+    </summary>
+    <form method="POST" action="/party/{{ party }}/entry" class="p-3 border-t">
+        <input type="hidden" name="direction" value="{{ direction }}">
+        <input type="hidden" name="counterparty" value="{{ cp }}">
+        <div class="flex gap-3 mb-2 flex-wrap items-end">
+            <div>
+                <label class="block text-xs text-gray-500 mb-1">日期</label>
+                <input type="date" name="date" required class="border rounded px-2 py-1 text-sm">
+            </div>
+            <div>
+                <label class="block text-xs text-gray-500 mb-1">订单号</label>
+                <input type="text" name="order_no" class="border rounded px-2 py-1 text-sm w-32">
+            </div>
+            <div class="flex-1">
+                <label class="block text-xs text-gray-500 mb-1">备注</label>
+                <input type="text" name="remark" class="border rounded px-2 py-1 text-sm w-full">
+            </div>
+        </div>
+        <div class="table-scroll">
+            <table class="text-sm border-collapse w-full">
+                <thead><tr class="bg-gray-50">
+                    {% for key, name in ITEMS %}<th class="border px-1 py-1">{{ name }}</th>{% endfor %}
+                </tr></thead>
+                <tbody><tr>
+                    {% for key, name in ITEMS %}
+                    <td class="border px-1 py-1">
+                        <input type="number" step="any" name="{{ key }}_qty" value="0"
+                               class="w-16 border rounded px-1 py-0.5 text-right text-sm">
+                    </td>
+                    {% endfor %}
+                </tr></tbody>
+            </table>
+        </div>
+        <button type="submit" class="mt-2 px-3 py-1.5 bg-blue-600 text-white text-sm rounded hover:bg-blue-700">
+            提交
+        </button>
+    </form>
+</details>

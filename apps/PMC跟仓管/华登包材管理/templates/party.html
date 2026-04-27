@@ -33,6 +33,10 @@
 
         <!-- 发表 -->
         <div id="tab-sent-{{ panel.cp }}" class="tab-content py-3">
+            {% set direction = 'sent' %}
+            {% set cp = panel.cp %}
+            {% set cp_name = panel.cp_name %}
+            {% include "_flow_entry_form.html" %}
             {% set records = panel.sent_records %}
             {% set summary = panel.sent_summary %}
             {% include "_flow_table.html" with context %}
@@ -40,6 +44,10 @@
 
         <!-- 收表 -->
         <div id="tab-received-{{ panel.cp }}" class="tab-content hidden py-3">
+            {% set direction = 'received' %}
+            {% set cp = panel.cp %}
+            {% set cp_name = panel.cp_name %}
+            {% include "_flow_entry_form.html" %}
             {% set records = panel.received_records %}
             {% set summary = panel.received_summary %}
             {% include "_flow_table.html" with context %}

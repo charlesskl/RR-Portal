@@ -281,6 +281,54 @@ def party_page(party):
                            panels=panels, prices=prices)
 
 
+@app.route('/party/<party>/entry', methods=['POST'])
+@party_required
+def party_entry(party):
+    direction = request.form.get('direction')  # 'sent' | 'received'
+    cp = request.form.get('counterparty')
+    if cp not in PARTIES or cp == party:
+        flash('无效的对方')
+        return redirect(url_for('party_page', party=party))
+    if cp not in PARTIES[party]['counterparties']:
+        flash('无权对此 party 录入')
+        return redirect(url_for('party_page', party=party))
+
+    if direction == 'sent':
+        from_p, to_p = party, cp
+    elif direction == 'received':
+        from_p, to_p = cp, party
+    else:
+        flash('无效 direction')
+        return redirect(url_for('party_page', party=party))
+
+    date = request.form.get('date', '').strip()
+    order_no = request.form.get('order_no', '').strip() or None
+    remark = request.form.get('remark', '').strip() or None
+    if not date:
+        flash('日期必填')
+        return redirect(url_for('party_page', party=party))
+
+    qty_cols = [f'{k}_qty' for k, _ in ITEMS]
+    qty_vals = []
+    for col in qty_cols:
+        v = request.form.get(col, '0').strip()
+        try:
+            qty_vals.append(float(v) if v else 0)
+        except ValueError:
+            qty_vals.append(0)
+
+    con = sqlite3.connect(DATABASE)
+    placeholders = ', '.join(['?'] * len(qty_cols))
+    con.execute(f"""
+        INSERT INTO flow_records (recorded_by, from_party, to_party, date, order_no, remark,
+                                  {', '.join(qty_cols)})
+        VALUES (?, ?, ?, ?, ?, ?, {placeholders})
+    """, [party, from_p, to_p, date, order_no, remark, *qty_vals])
+    con.commit()
+    con.close()
+    return redirect(url_for('party_page', party=party))
+
+
 def _query_flow(con, *, recorded_by, from_party, to_party, date_from=None, date_to=None):
     """查 flow_records。"""
     sql = """SELECT * FROM flow_records

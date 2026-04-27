@@ -88,7 +88,20 @@ function switchTab(tabId, cpKey) {
 }
 
 function openReconcileModal(party, cp) {
-    alert('TODO: open reconcile modal for ' + party + ' vs ' + cp);
+    const df = prompt('开始日期 (YYYY-MM-DD)');
+    if (!df) return;
+    const dt = prompt('结束日期 (YYYY-MM-DD)');
+    if (!dt) return;
+    const form = document.createElement('form');
+    form.method = 'POST';
+    form.action = '/reconcile/start';
+    form.innerHTML = `
+        <input name="counterparty" value="${cp}">
+        <input name="date_from" value="${df}">
+        <input name="date_to" value="${dt}">
+    `;
+    document.body.appendChild(form);
+    form.submit();
 }
 </script>
 {% endblock %}

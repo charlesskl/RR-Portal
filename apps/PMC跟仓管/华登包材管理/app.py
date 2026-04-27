@@ -453,17 +453,37 @@ def reconcile_start():
     flash('核对已发起，等待对方审批'); return redirect(url_for('reconcile_detail', rid=reconc_id))
 
 
+@app.route('/reconcile')
+def reconcile_list():
+    party = current_party()
+    if not party:
+        return redirect(url_for('index'))
+    con = sqlite3.connect(DATABASE)
+    con.row_factory = sqlite3.Row
+    rows = con.execute("""
+        SELECT * FROM reconciliations
+        WHERE initiator_party=? OR approver_party=?
+        ORDER BY
+            CASE status WHEN 'pending_approval' THEN 0 ELSE 1 END,
+            created_at DESC
+    """, (party, party)).fetchall()
+    con.close()
+    return render_template('reconcile_list.html', items=[dict(r) for r in rows], party=party)
+
+
 @app.route('/reconcile/<int:rid>')
 def reconcile_detail(rid):
-    # 具体 UI 在 Task 14 做。这里仅 stub 避免 404。
-    # TODO Task 14: enforce party in (initiator_party, approver_party) 防越权访问
+    party = current_party()
+    if not party:
+        return redirect(url_for('index'))
     con = sqlite3.connect(DATABASE)
     con.row_factory = sqlite3.Row
     r = con.execute("SELECT * FROM reconciliations WHERE id=?", (rid,)).fetchone()
     con.close()
     if not r:
-        flash('核对不存在'); return redirect(url_for('index'))
-    return f'TODO detail rid={rid}'
+        flash('核对不存在'); return redirect(url_for('reconcile_list'))
+    snapshot = json.loads(r['snapshot_json']) if r['snapshot_json'] else {}
+    return render_template('reconcile_detail.html', r=dict(r), snapshot=snapshot, party=party)
 
 
 @app.route('/reconcile/<int:rid>/approve', methods=['POST'])

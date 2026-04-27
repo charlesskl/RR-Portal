@@ -852,16 +852,17 @@ def import_commit():
     if not party:
         return redirect(url_for('index'))
 
-    # 从 form 或 file 拿
+    # 从 form 或 file 拿（共享 tmp，3 LAN 用户可接受并发覆盖）
+    tmp_path = os.path.join(DATA_PATH, 'upload_tmp.xlsx')
     file = request.files.get('file')
-    if file:
-        tmp_path = os.path.join(DATA_PATH, 'upload_tmp.xlsx')
+    if file and file.filename:
         file.save(tmp_path)
-    else:
-        tmp_path = os.path.join(DATA_PATH, 'upload_tmp.xlsx')
 
     sheet_name = request.form.get('sheet_name')
-    start_row = int(request.form.get('start_row', 3))
+    try:
+        start_row = int(request.form.get('start_row', '3') or '3')
+    except ValueError:
+        flash('起始行必须是数字'); return redirect(url_for('import_page'))
     direction = request.form.get('direction')
     if direction not in ALLOWED_DIRECTIONS:
         flash('无效方向'); return redirect(url_for('import_page'))

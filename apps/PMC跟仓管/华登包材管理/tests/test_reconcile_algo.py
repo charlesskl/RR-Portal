@@ -54,3 +54,11 @@ def test_compare_pair_date_range(client):
     _insert('hd', 'hd', 'sy', '2026-05-01', jx_qty=100)
     result = app_module.compare_pair('hd', 'sy', '2026-05-01', '2026-05-31')
     assert result['hd_to_sy']['sender_recorded']['jx'] == 100
+
+
+def test_compare_pair_negative_diff(client):
+    """收方录得比发方多 → diff 为负（锁住 Task 14 UI 契约）。"""
+    _insert('hd', 'hd', 'sy', '2026-05-01', jx_qty=98)
+    _insert('sy', 'hd', 'sy', '2026-05-01', jx_qty=100)
+    result = app_module.compare_pair('hd', 'sy', '2026-05-01', '2026-05-01')
+    assert result['hd_to_sy']['diffs'] == {'jx': -2}

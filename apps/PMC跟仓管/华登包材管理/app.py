@@ -430,7 +430,11 @@ def _calc_summary(records):
 
 
 def compare_pair(party_a, party_b, date_from, date_to):
-    """对两方做汇总对比。返回 {'a_to_b': {...}, 'b_to_a': {...}}。"""
+    """对两方做汇总对比。返回 {'a_to_b': {...}, 'b_to_a': {...}}。
+
+    diffs[k] = sender_sum[k] - receiver_sum[k]，正数表示发方录入 > 收方录入
+    （发方虚报或收方漏收）。Task 14 UI 按此约定显示。
+    """
     con = sqlite3.connect(DATABASE)
     con.row_factory = sqlite3.Row
     result = {}
@@ -452,6 +456,7 @@ def compare_pair(party_a, party_b, date_from, date_to):
 
 
 def _sum_items(con, *, recorded_by, from_party, to_party, date_from, date_to):
+    """SUM 17 包材列，返回 {item_key: float}。"""
     qty_cols_sql = ', '.join([f'COALESCE(SUM({k}_qty), 0) AS {k}_sum' for k, _ in ITEMS])
     row = con.execute(f"""
         SELECT {qty_cols_sql} FROM flow_records

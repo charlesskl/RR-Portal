@@ -3,7 +3,8 @@ import sqlite3
 import json
 import os
 import sys
-from datetime import timedelta
+import openpyxl
+from datetime import timedelta, datetime, date as date_cls
 from functools import wraps
 
 # 兼容 PyInstaller exe 和普通 Python 运行
@@ -166,6 +167,20 @@ ITEMS = [
 STAT_ITEMS = [('mkb', '木卡板'), ('jkb', '胶卡板'), ('jx', '胶箱'), ('gx', '钙塑箱')]
 TRIANGLE_ITEMS = [('mkb', '木卡板'), ('jkb', '胶卡板'), ('jx', '胶箱'), ('gx', '钙塑箱'), ('zx', '纸箱')]
 PAIRS = [('hd', 'sy'), ('hd', 'xx'), ('sy', 'xx')]
+
+# 导入配置占位骨架。Task 19 手工导入真实文件时按实际列调校 5 种 entry。
+IMPORT_CONFIGS = {
+    'huadeng_qingxi_shaoyang': {
+        # 26年清溪华登与邵阳华登包材对数表.xlsx
+        'filename_pattern': '清溪华登',
+        'sheets': {
+            # '1月': {'direction': 'hd_to_sy', 'start_row': 3,
+            #         'columns': {0: 'date', 1: 'order_no', 2: 'jx_qty', ...}},
+            # 实际列等 Task 19 拿到 xlsx 后填
+        },
+    },
+    # 其余 4 种 (邵阳-兴信 / 清溪-兴信 / 兴信-清溪 / 兴信-邵阳) 待 Task 19 补
+}
 
 
 def current_party():
@@ -761,6 +776,44 @@ def api_prices():
               for row in db.execute('SELECT * FROM default_prices').fetchall()}
     db.close()
     return jsonify(prices)
+
+
+def parse_excel_sheet(filepath, sheet_name, start_row, columns):
+    """读一个 sheet 按 columns 配置提取行。
+
+    columns: {excel_col_index(0-based): target_field_name}
+    start_row: 1-based 数据起始行
+    """
+    wb = openpyxl.load_workbook(filepath, data_only=True, read_only=True)
+    ws = wb[sheet_name]
+    rows = []
+    for i, excel_row in enumerate(ws.iter_rows(values_only=True), start=1):
+        if i < start_row:
+            continue
+        if all(v is None for v in excel_row):
+            continue
+        row = {}
+        for idx, field in columns.items():
+            if idx >= len(excel_row):
+                continue
+            v = excel_row[idx]
+            if v is None:
+                continue
+            if field == 'date':
+                if isinstance(v, (datetime, date_cls)):
+                    row[field] = v.strftime('%Y-%m-%d')
+                else:
+                    row[field] = str(v).strip()[:10]
+            elif field.endswith('_qty'):
+                try:
+                    row[field] = float(v)
+                except (ValueError, TypeError):
+                    row[field] = 0
+            else:
+                row[field] = str(v).strip()
+        if 'date' in row:
+            rows.append(row)
+    return rows
 
 
 init_db()

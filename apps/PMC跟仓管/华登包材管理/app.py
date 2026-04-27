@@ -783,37 +783,42 @@ def parse_excel_sheet(filepath, sheet_name, start_row, columns):
 
     columns: {excel_col_index(0-based): target_field_name}
     start_row: 1-based 数据起始行
+
+    缺 date 字段的行会被丢弃（date 是 flow_records 必填）。
     """
     wb = openpyxl.load_workbook(filepath, data_only=True, read_only=True)
-    ws = wb[sheet_name]
-    rows = []
-    for i, excel_row in enumerate(ws.iter_rows(values_only=True), start=1):
-        if i < start_row:
-            continue
-        if all(v is None for v in excel_row):
-            continue
-        row = {}
-        for idx, field in columns.items():
-            if idx >= len(excel_row):
+    try:
+        ws = wb[sheet_name]
+        rows = []
+        for i, excel_row in enumerate(ws.iter_rows(values_only=True), start=1):
+            if i < start_row:
                 continue
-            v = excel_row[idx]
-            if v is None:
+            if all(v is None for v in excel_row):
                 continue
-            if field == 'date':
-                if isinstance(v, (datetime, date_cls)):
-                    row[field] = v.strftime('%Y-%m-%d')
+            row = {}
+            for idx, field in columns.items():
+                if idx >= len(excel_row):
+                    continue
+                v = excel_row[idx]
+                if v is None:
+                    continue
+                if field == 'date':
+                    if isinstance(v, (datetime, date_cls)):
+                        row[field] = v.strftime('%Y-%m-%d')
+                    else:
+                        row[field] = str(v).strip()[:10]
+                elif field.endswith('_qty'):
+                    try:
+                        row[field] = float(v)
+                    except (ValueError, TypeError):
+                        row[field] = 0
                 else:
-                    row[field] = str(v).strip()[:10]
-            elif field.endswith('_qty'):
-                try:
-                    row[field] = float(v)
-                except (ValueError, TypeError):
-                    row[field] = 0
-            else:
-                row[field] = str(v).strip()
-        if 'date' in row:
-            rows.append(row)
-    return rows
+                    row[field] = str(v).strip()
+            if 'date' in row:
+                rows.append(row)
+        return rows
+    finally:
+        wb.close()  # 防 Windows 文件锁残留
 
 
 init_db()

@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}{{ party_name }} · 包材管理{% endblock %}
+{% block content %}
+<div class="flex items-center justify-between mb-4">
+    <h1 class="text-xl font-bold">{{ party_name }}</h1>
+    <a href="/party/{{ party }}/logout" class="px-3 py-1.5 bg-orange-500 text-white text-sm rounded hover:bg-orange-600">退出</a>
+</div>
+
+{% for panel in panels %}
+<div class="bg-white rounded-lg shadow-sm mb-6" data-cp="{{ panel.cp }}">
+    <div class="flex items-center justify-between px-4 py-3 border-b">
+        <h2 class="text-lg font-semibold">对{{ panel.cp_name }}</h2>
+        <div class="flex gap-2">
+            <button onclick="openReconcileModal('{{ party }}', '{{ panel.cp }}')"
+                    class="px-3 py-1 bg-purple-600 text-white text-sm rounded hover:bg-purple-700">
+                发起对账
+            </button>
+        </div>
+    </div>
+
+    <div class="px-4">
+        <!-- Tab 切换 -->
+        <div class="flex border-b">
+            <button class="tab-btn px-4 py-2 border-b-2 border-blue-600 text-blue-600 font-medium text-sm"
+                    data-tab="sent-{{ panel.cp }}" onclick="switchTab('sent-{{ panel.cp }}', '{{ panel.cp }}')">
+                发→{{ panel.cp_name }}
+            </button>
+            <button class="tab-btn px-4 py-2 border-b-2 border-transparent text-gray-500 text-sm"
+                    data-tab="received-{{ panel.cp }}" onclick="switchTab('received-{{ panel.cp }}', '{{ panel.cp }}')">
+                收自{{ panel.cp_name }}
+            </button>
+        </div>
+
+        <!-- 发表 -->
+        <div id="tab-sent-{{ panel.cp }}" class="tab-content py-3">
+            {% set records = panel.sent_records %}
+            {% set summary = panel.sent_summary %}
+            {% include "_flow_table.html" with context %}
+        </div>
+
+        <!-- 收表 -->
+        <div id="tab-received-{{ panel.cp }}" class="tab-content hidden py-3">
+            {% set records = panel.received_records %}
+            {% set summary = panel.received_summary %}
+            {% include "_flow_table.html" with context %}
+        </div>
+    </div>
+</div>
+{% endfor %}
+
+<script>
+function switchTab(tabId, cpKey) {
+    const panel = document.querySelector(`[data-cp="${cpKey}"]`);
+    panel.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
+    panel.querySelector('#tab-' + tabId).classList.remove('hidden');
+    panel.querySelectorAll('.tab-btn').forEach(btn => {
+        if (btn.dataset.tab === tabId) {
+            btn.classList.add('border-blue-600', 'text-blue-600', 'font-medium');
+            btn.classList.remove('border-transparent', 'text-gray-500');
+        } else {
+            btn.classList.remove('border-blue-600', 'text-blue-600', 'font-medium');
+            btn.classList.add('border-transparent', 'text-gray-500');
+        }
+    });
+}
+
+function openReconcileModal(party, cp) {
+    alert('TODO: open reconcile modal for ' + party + ' vs ' + cp);
+}
+</script>
+{% endblock %}

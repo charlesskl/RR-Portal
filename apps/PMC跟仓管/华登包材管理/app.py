@@ -256,7 +256,52 @@ def party_logout(party):
 @app.route('/party/<party>')
 @party_required
 def party_page(party):
-    return f'TODO: party page for {party}'
+    con = sqlite3.connect(DATABASE)
+    con.row_factory = sqlite3.Row
+
+    counterparties = PARTIES[party]['counterparties']
+    panels = []
+    for cp in counterparties:
+        # 4 个方向：发/收 ×（对 cp）
+        sent = _query_flow(con, recorded_by=party, from_party=party, to_party=cp)
+        received = _query_flow(con, recorded_by=party, from_party=cp, to_party=party)
+        panels.append({
+            'cp': cp,
+            'cp_name': PARTIES[cp]['name'],
+            'sent_records': sent,
+            'received_records': received,
+            'sent_summary': _calc_summary(sent),
+            'received_summary': _calc_summary(received),
+        })
+
+    prices = {r['item_key']: r['price']
+              for r in con.execute('SELECT * FROM default_prices').fetchall()}
+    con.close()
+    return render_template('party.html', party=party, party_name=PARTIES[party]['name'],
+                           panels=panels, prices=prices)
+
+
+def _query_flow(con, *, recorded_by, from_party, to_party, date_from=None, date_to=None):
+    """查 flow_records。"""
+    sql = """SELECT * FROM flow_records
+             WHERE recorded_by=? AND from_party=? AND to_party=?"""
+    args = [recorded_by, from_party, to_party]
+    if date_from:
+        sql += ' AND date >= ?'; args.append(date_from)
+    if date_to:
+        sql += ' AND date <= ?'; args.append(date_to)
+    sql += ' ORDER BY date DESC, id DESC'
+    return [dict(r) for r in con.execute(sql, args).fetchall()]
+
+
+def _calc_summary(records):
+    """累加 17 包材 qty + 金额。"""
+    summary = {k: {'qty': 0, 'amount': 0} for k, _ in ITEMS}
+    for r in records:
+        for k, _ in ITEMS:
+            qty = r.get(f'{k}_qty') or 0
+            summary[k]['qty'] += qty
+    return summary
 
 
 # ==================== 默认单价 API ====================

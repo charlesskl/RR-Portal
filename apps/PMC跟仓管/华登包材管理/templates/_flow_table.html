@@ -1,0 +1,42 @@
+<div class="table-scroll">
+    <table class="text-sm border-collapse w-full">
+        <thead>
+            <tr class="bg-gray-50">
+                <th class="border px-2 py-1.5">日期</th>
+                <th class="border px-2 py-1.5">订单号</th>
+                {% for key, name in ITEMS %}
+                <th class="border px-2 py-1.5 text-right">{{ name }}</th>
+                {% endfor %}
+                <th class="border px-2 py-1.5">备注</th>
+                <th class="border px-2 py-1.5">操作</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for r in records %}
+            <tr class="hover:bg-gray-50 {{ 'bg-yellow-50' if r.locked else '' }}">
+                <td class="border px-2 py-1">{{ r.date }}</td>
+                <td class="border px-2 py-1">{{ r.order_no or '' }}</td>
+                {% for key, name in ITEMS %}
+                <td class="border px-1 py-1 text-right">{{ r[key + '_qty']|int if r[key + '_qty'] else '' }}</td>
+                {% endfor %}
+                <td class="border px-2 py-1 text-xs">{{ r.remark or '' }}</td>
+                <td class="border px-2 py-1">
+                    {% if r.locked %}<span class="text-xs text-gray-400">🔒 已锁</span>{% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+            {% if not records %}
+            <tr><td colspan="100" class="border px-4 py-8 text-center text-gray-400">暂无记录</td></tr>
+            {% endif %}
+        </tbody>
+        <tfoot>
+            <tr class="bg-blue-50 font-semibold">
+                <td class="border px-2 py-1" colspan="2">合计</td>
+                {% for key, name in ITEMS %}
+                <td class="border px-1 py-1 text-right">{{ summary[key].qty|int if summary[key].qty else '' }}</td>
+                {% endfor %}
+                <td class="border px-2 py-1" colspan="2"></td>
+            </tr>
+        </tfoot>
+    </table>
+</div>

@@ -182,6 +182,12 @@ IMPORT_CONFIGS = {
     # 其余 4 种 (邵阳-兴信 / 清溪-兴信 / 兴信-清溪 / 兴信-邵阳) 待 Task 19 补
 }
 
+ALLOWED_DIRECTIONS = {
+    'hd_to_sy': ('hd', 'sy'), 'sy_to_hd': ('sy', 'hd'),
+    'hd_to_xx': ('hd', 'xx'), 'xx_to_hd': ('xx', 'hd'),
+    'sy_to_xx': ('sy', 'xx'), 'xx_to_sy': ('xx', 'sy'),
+}
+
 
 def current_party():
     """Return the validated party from session, or None if absent / tampered."""
@@ -819,6 +825,78 @@ def parse_excel_sheet(filepath, sheet_name, start_row, columns):
         return rows
     finally:
         wb.close()  # 防 Windows 文件锁残留
+
+
+@app.route('/import', methods=['GET', 'POST'])
+def import_page():
+    party = current_party()
+    if not party:
+        return redirect(url_for('index'))
+    if request.method == 'POST' and 'file' in request.files:
+        # 上传 → 存 tmp → 读 sheet names → render preview
+        f = request.files['file']
+        tmp_path = os.path.join(DATA_PATH, 'upload_tmp.xlsx')
+        f.save(tmp_path)
+        wb = openpyxl.load_workbook(tmp_path, read_only=True)
+        sheets = wb.sheetnames
+        wb.close()
+        return render_template('import_preview.html', party=party, sheets=sheets,
+                               filename=f.filename, ALLOWED_DIRECTIONS=ALLOWED_DIRECTIONS)
+    return render_template('import_preview.html', party=party,
+                           ALLOWED_DIRECTIONS=ALLOWED_DIRECTIONS)
+
+
+@app.route('/import/commit', methods=['POST'])
+def import_commit():
+    party = current_party()
+    if not party:
+        return redirect(url_for('index'))
+
+    # 从 form 或 file 拿
+    file = request.files.get('file')
+    if file:
+        tmp_path = os.path.join(DATA_PATH, 'upload_tmp.xlsx')
+        file.save(tmp_path)
+    else:
+        tmp_path = os.path.join(DATA_PATH, 'upload_tmp.xlsx')
+
+    sheet_name = request.form.get('sheet_name')
+    start_row = int(request.form.get('start_row', 3))
+    direction = request.form.get('direction')
+    if direction not in ALLOWED_DIRECTIONS:
+        flash('无效方向'); return redirect(url_for('import_page'))
+    from_p, to_p = ALLOWED_DIRECTIONS[direction]
+
+    # party 必须能录这个方向
+    if party not in (from_p, to_p):
+        flash('无权导入此方向'); return redirect(url_for('import_page'))
+
+    # 列映射（从 form 里读每个字段的列号）
+    columns = {}
+    for key in ['date', 'order_no', 'remark'] + [f'{k}_qty' for k, _ in ITEMS]:
+        col = request.form.get(f'col_{key}')
+        if col is not None and col != '':
+            try:
+                columns[int(col)] = key
+            except ValueError:
+                pass
+
+    rows = parse_excel_sheet(tmp_path, sheet_name, start_row, columns)
+
+    qty_cols = [f'{k}_qty' for k, _ in ITEMS]
+    con = sqlite3.connect(DATABASE)
+    for r in rows:
+        args = [party, from_p, to_p, r.get('date'), r.get('order_no'), r.get('remark')]
+        args += [r.get(c, 0) for c in qty_cols]
+        placeholders = ', '.join(['?'] * len(args))
+        con.execute(f"""
+            INSERT INTO flow_records (recorded_by, from_party, to_party, date, order_no, remark,
+                                      {', '.join(qty_cols)})
+            VALUES ({placeholders})
+        """, args)
+    con.commit(); con.close()
+    flash(f'导入 {len(rows)} 条')
+    return redirect(url_for('party_page', party=party))
 
 
 init_db()

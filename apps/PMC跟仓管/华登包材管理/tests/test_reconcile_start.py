@@ -77,3 +77,36 @@ def test_reconcile_start_rejects_overlap_pending(client):
     con = sqlite3.connect(app_module.DATABASE)
     ct = con.execute("SELECT COUNT(*) FROM reconciliations").fetchone()[0]
     assert ct == 1  # 没新增
+
+
+def test_reconcile_start_requires_login(client):
+    """未登录直接 POST → redirect 到 index，不应新增。"""
+    rv = client.post('/reconcile/start', data={
+        'counterparty': 'sy', 'date_from': '2026-05-01', 'date_to': '2026-05-01'
+    }, follow_redirects=False)
+    assert rv.status_code == 302
+    con = sqlite3.connect(app_module.DATABASE)
+    assert con.execute("SELECT COUNT(*) FROM reconciliations").fetchone()[0] == 0
+
+
+def test_reconcile_start_rejects_invalid_counterparty(client):
+    """对自己 / 不存在的 cp / 非 counterparty → 拒，不新增。"""
+    _login(client, 'hd')
+    for bad_cp in ('hd', 'zz', ''):
+        rv = client.post('/reconcile/start', data={
+            'counterparty': bad_cp, 'date_from': '2026-05-01', 'date_to': '2026-05-01'
+        }, follow_redirects=False)
+        assert rv.status_code == 302
+    con = sqlite3.connect(app_module.DATABASE)
+    assert con.execute("SELECT COUNT(*) FROM reconciliations").fetchone()[0] == 0
+
+
+def test_reconcile_start_rejects_missing_date(client):
+    """缺日期 → 拒，不新增。"""
+    _login(client, 'hd')
+    rv = client.post('/reconcile/start', data={
+        'counterparty': 'sy', 'date_from': '', 'date_to': ''
+    }, follow_redirects=False)
+    assert rv.status_code == 302
+    con = sqlite3.connect(app_module.DATABASE)
+    assert con.execute("SELECT COUNT(*) FROM reconciliations").fetchone()[0] == 0

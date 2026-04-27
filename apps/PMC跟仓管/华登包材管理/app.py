@@ -433,6 +433,8 @@ def reconcile_start():
         con.close()
         flash('已存在待审批的核对，范围重叠'); return redirect(url_for('party_page', party=party))
 
+    # TOCTOU: overlap 检查与 INSERT 之间存在窗口；snapshot 与 UPDATE 之间也是。
+    # 3 LAN 用户场景下并发概率可忽略，故意不加 BEGIN IMMEDIATE。
     snapshot = compare_pair(party, cp, date_from, date_to)
     cur = con.execute("""
         INSERT INTO reconciliations (initiator_party, approver_party, pair_low, pair_high,
@@ -454,6 +456,7 @@ def reconcile_start():
 @app.route('/reconcile/<int:rid>')
 def reconcile_detail(rid):
     # 具体 UI 在 Task 14 做。这里仅 stub 避免 404。
+    # TODO Task 14: enforce party in (initiator_party, approver_party) 防越权访问
     con = sqlite3.connect(DATABASE)
     con.row_factory = sqlite3.Row
     r = con.execute("SELECT * FROM reconciliations WHERE id=?", (rid,)).fetchone()

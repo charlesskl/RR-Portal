@@ -628,7 +628,10 @@ def _sum_flow_records(con, *, from_party, to_party, only_sender, date_from, date
 
 
 def _build_triangle(direction_summaries, prices):
-    """按 5 种三角债包材，构造三方互欠表。"""
+    """按 5 种三角债包材，构造三方互欠表。
+
+    Note: prices 参数 spec literal 保留，当前未使用（spec defect, plan Task 15）。
+    """
     rows = []
     for idx, (a, b) in enumerate(PAIRS, 1):
         a_to_b = direction_summaries[f'{a}_to_{b}']
@@ -641,7 +644,11 @@ def _build_triangle(direction_summaries, prices):
 
 
 def _build_pair_summary(direction_summaries):
-    """按 pair 汇总净欠，生成'X 欠 Y 多少 item'文案。"""
+    """按 pair 汇总净欠，生成'X 欠 Y 多少 item'文案。
+
+    Note: nets 按 TRIANGLE_ITEMS (5 项) 算，但模板只展示 STAT_ITEMS (4 项)；
+    zx 永远不显示。spec literal, plan Task 15.
+    """
     out = []
     for a, b in PAIRS:
         a_to_b = direction_summaries[f'{a}_to_{b}']

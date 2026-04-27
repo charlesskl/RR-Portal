@@ -65,6 +65,7 @@
         {% for p in pair_summary %}
         <div class="mb-2">
             <b>{{ p.a }} ↔ {{ p.b }}：</b>
+            {# has_debt set 但未引用，spec literal, plan Task 15 #}
             {% set has_debt = false %}
             {% for k, n in STAT_ITEMS %}
             {% set v = p.nets[k] %}

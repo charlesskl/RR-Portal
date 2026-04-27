@@ -36,6 +36,16 @@ function needsFiveAxis(order) {
 }
 
 /**
+ * 按机台吨位估算合理啤重区间（g）— 新机台无历史数据时 fallback
+ * 经验法则：每吨锁模力对应约 0.5~3g 塑料（视产品薄厚而定）
+ */
+function tonnageShotWeightRange(tonnage) {
+  const t = Number(tonnage) || 0;
+  if (t <= 0) return null;
+  return { min: t * 0.3, max: t * 3.0 };
+}
+
+/**
  * 获取上一班次
  * 夜班 → 同日白班
  * 白班 → 前一天夜班
@@ -293,6 +303,16 @@ function generateSchedule({ orderIds, date, shift, workshop }) {
             : (shotWeight - ms.max_w) / ms.max_w;
           score -= Math.min(distance * 20, 20);
         }
+      } else if (shotWeight > 0) {
+        // 新机台无历史 → 用吨位估算合理啤重区间，避免大件排到小机
+        const range = tonnageShotWeightRange(m.tonnage);
+        if (range) {
+          if (shotWeight < range.min || shotWeight > range.max) {
+            continue; // 吨位与啤重差距过大，跳过
+          }
+          score += 5; // 吨位匹配，小幅加分
+          reasons.push('吨位匹配');
+        }
       }
 
       // Step 3: 啤重越接近均值越好 → 0~10分
@@ -341,9 +361,16 @@ function generateSchedule({ orderIds, date, shift, workshop }) {
         a.machine_no === m.machine_no &&
         isSameMold(a.order.mold_no, order.mold_no)
       );
-      const sameMoldCarryOver = (carryOverByMachine[m.machine_no] || []).some(item =>
-        order.mold_no && item.mold_name && item.mold_name.includes(order.mold_no)
-      );
+      // 结转项的 mold_name 可能包含模号（如 "MNVN-17M-01 XX玩具"），
+      // 用 moldBase 提取核心编号比较，而不是只做 includes 子串匹配
+      const orderMoldBase = moldBase(order.mold_no || '');
+      const sameMoldCarryOver = (carryOverByMachine[m.machine_no] || []).some(item => {
+        if (!item.mold_name) return false;
+        const itemMoldBase = moldBase(item.mold_name);
+        if (orderMoldBase && itemMoldBase && orderMoldBase === itemMoldBase) return true;
+        // 兜底：旧逻辑的 includes，以防 moldBase 未识别格式
+        return order.mold_no && item.mold_name.includes(order.mold_no);
+      });
       if (sameMoldNew || sameMoldCarryOver) {
         score += 100;
         reasons.push('同套模');
@@ -460,8 +487,11 @@ function generateSchedule({ orderIds, date, shift, workshop }) {
     let sortOrder = (maxSort?.m ?? -1) + 1;
 
     // 先写结转项（is_carry_over=1，仅限机台正常的）
+    // 使用 DB 存储的 shortage（权威值），因为调机人手动调过的 accumulated 可能已偏离简单累加
     for (const item of filteredCarryOver) {
-      const shortage = Math.max(0, (item.quantity_needed || 0) - (item.accumulated || 0));
+      const shortage = item.shortage !== null && item.shortage !== undefined
+        ? item.shortage
+        : Math.max(0, (item.quantity_needed || 0) - (item.accumulated || 0));
       insertItem.run(
         scheduleId, item.machine_no,
         item.product_code || '', item.mold_name || '', item.color || '',

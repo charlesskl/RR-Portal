@@ -7,13 +7,18 @@ const WEEKDAYS = ['星期日', '星期一', '星期二', '星期三', '星期四
  * 格式化日期为中文: "2026年3月10日星期二"
  */
 function formatDateChinese(dateStr) {
-  const d = new Date(dateStr);
+  // dateStr 期望 "YYYY-MM-DD"。用手动解析避免 new Date('YYYY-MM-DD') 被当成 UTC 午夜，
+  // 在容器 TZ 未设置时偏移一天。
+  const m = String(dateStr || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return dateStr;
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  const day = Number(m[3]);
+  // 本地时间构造 Date 用于算 weekday（不依赖时区）
+  const d = new Date(y, mo - 1, day);
   if (isNaN(d)) return dateStr;
-  const y = d.getFullYear();
-  const m = d.getMonth() + 1;
-  const day = d.getDate();
   const weekday = WEEKDAYS[d.getDay()];
-  return `${y}年${m}月${day}日${weekday}`;
+  return `${y}年${mo}月${day}日${weekday}`;
 }
 
 /**
@@ -186,7 +191,7 @@ async function exportScheduleExcel(scheduleId) {
       item.order_no || '',               // N 下单单号
       item.serial_no || '',              // O 单号
       item.target_24h || 0,              // P 24H目标
-      item.target_24h ? Math.round((item.target_24h)/24*11) : 0,     // Q 11H
+      item.target_11h || (item.target_24h ? Math.round((item.target_24h)/24*11) : 0),     // Q 11H — 优先用 DB 值，回退计算
       item.target_24h ? Math.round(Math.max(0,(item.quantity_needed||0)-(item.accumulated||0))/(item.target_24h)*100)/100 : '', // R 天数
       item.notes || '',                  // S 备注
       item.robot_arm || '',              // T 机械手
@@ -410,7 +415,7 @@ function writeScheduleSheet(ws, schedule, items, machineMap, wsName) {
       Math.max(0, (item.quantity_needed||0) - (item.accumulated||0)),
       item.order_no || '', item.serial_no || '',
       item.target_24h || 0,
-      item.target_24h ? Math.round((item.target_24h)/24*11) : 0,
+      item.target_11h || (item.target_24h ? Math.round((item.target_24h)/24*11) : 0),
       item.target_24h ? Math.round(Math.max(0,(item.quantity_needed||0)-(item.accumulated||0))/(item.target_24h)*100)/100 : '',
       item.notes || '', item.robot_arm || '', item.clamp || '',
       item.mold_change_time || '', item.adjuster || '', armLabel, machine.tonnage || '',

@@ -466,6 +466,92 @@ def reconcile_detail(rid):
     return f'TODO detail rid={rid}'
 
 
+@app.route('/reconcile/<int:rid>/approve', methods=['POST'])
+def reconcile_approve(rid):
+    party = current_party()
+    if not party:
+        return redirect(url_for('index'))
+    con = sqlite3.connect(DATABASE)
+    con.row_factory = sqlite3.Row
+    r = con.execute("SELECT * FROM reconciliations WHERE id=?", (rid,)).fetchone()
+    if not r:
+        con.close(); flash('核对不存在'); return redirect(url_for('index'))
+    if r['approver_party'] != party:
+        con.close(); flash('只有对方才能同意'); return redirect(url_for('reconcile_detail', rid=rid))
+    if r['status'] != 'pending_approval':
+        con.close(); flash('当前状态不允许操作'); return redirect(url_for('reconcile_detail', rid=rid))
+
+    con.execute("""UPDATE reconciliations SET status='confirmed', approved_at=CURRENT_TIMESTAMP WHERE id=?""", (rid,))
+    con.execute("UPDATE flow_records SET locked=1 WHERE reconciliation_id=?", (rid,))
+    con.commit(); con.close()
+    flash('已确认'); return redirect(url_for('reconcile_detail', rid=rid))
+
+
+@app.route('/reconcile/<int:rid>/reject', methods=['POST'])
+def reconcile_reject(rid):
+    party = current_party()
+    if not party:
+        return redirect(url_for('index'))
+    notes = request.form.get('notes', '').strip()
+    con = sqlite3.connect(DATABASE)
+    con.row_factory = sqlite3.Row
+    r = con.execute("SELECT * FROM reconciliations WHERE id=?", (rid,)).fetchone()
+    if not r:
+        con.close(); flash('核对不存在'); return redirect(url_for('index'))
+    if r['approver_party'] != party:
+        con.close(); flash('只有对方才能打回'); return redirect(url_for('reconcile_detail', rid=rid))
+    if r['status'] != 'pending_approval':
+        con.close(); flash('当前状态不允许操作'); return redirect(url_for('reconcile_detail', rid=rid))
+
+    con.execute("UPDATE reconciliations SET status='disputed', notes=? WHERE id=?", (notes, rid))
+    con.execute("UPDATE flow_records SET reconciliation_id=NULL WHERE reconciliation_id=?", (rid,))
+    con.commit(); con.close()
+    flash('已打回'); return redirect(url_for('reconcile_detail', rid=rid))
+
+
+@app.route('/reconcile/<int:rid>/withdraw', methods=['POST'])
+def reconcile_withdraw(rid):
+    party = current_party()
+    if not party:
+        return redirect(url_for('index'))
+    con = sqlite3.connect(DATABASE)
+    con.row_factory = sqlite3.Row
+    r = con.execute("SELECT * FROM reconciliations WHERE id=?", (rid,)).fetchone()
+    if not r:
+        con.close(); flash('核对不存在'); return redirect(url_for('index'))
+    if r['initiator_party'] != party:
+        con.close(); flash('只有发起方能撤回'); return redirect(url_for('reconcile_detail', rid=rid))
+    if r['status'] != 'pending_approval':
+        con.close(); flash('当前状态不允许撤回'); return redirect(url_for('reconcile_detail', rid=rid))
+
+    con.execute("UPDATE reconciliations SET status='withdrawn' WHERE id=?", (rid,))
+    con.execute("UPDATE flow_records SET reconciliation_id=NULL WHERE reconciliation_id=?", (rid,))
+    con.commit(); con.close()
+    flash('已撤回'); return redirect(url_for('reconcile_detail', rid=rid))
+
+
+@app.route('/reconcile/<int:rid>/cancel', methods=['POST'])
+def reconcile_cancel(rid):
+    """撤销已 confirmed 的核对（任一方都可）。"""
+    party = current_party()
+    if not party:
+        return redirect(url_for('index'))
+    con = sqlite3.connect(DATABASE)
+    con.row_factory = sqlite3.Row
+    r = con.execute("SELECT * FROM reconciliations WHERE id=?", (rid,)).fetchone()
+    if not r:
+        con.close(); flash('核对不存在'); return redirect(url_for('index'))
+    if party not in (r['initiator_party'], r['approver_party']):
+        con.close(); flash('无权'); return redirect(url_for('index'))
+    if r['status'] != 'confirmed':
+        con.close(); flash('仅 confirmed 状态可撤销'); return redirect(url_for('reconcile_detail', rid=rid))
+
+    con.execute("UPDATE reconciliations SET status='withdrawn' WHERE id=?", (rid,))
+    con.execute("UPDATE flow_records SET locked=0, reconciliation_id=NULL WHERE reconciliation_id=?", (rid,))
+    con.commit(); con.close()
+    flash('已撤销对账，记录解锁'); return redirect(url_for('reconcile_detail', rid=rid))
+
+
 def _query_flow(con, *, recorded_by, from_party, to_party, date_from=None, date_to=None):
     """查 flow_records。"""
     sql = """SELECT * FROM flow_records

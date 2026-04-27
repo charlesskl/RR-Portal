@@ -1,9 +1,15 @@
 const fs = require('fs');
 const path = require('path');
 
-const API_KEY = process.env.DASHSCOPE_API_KEY || 'sk-0d651dff943546b092179b9da9f4a659';
-const MODEL = 'qwen-vl-max-latest';
-const API_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions';
+// API key 必须由 .env.cloud.production 经 docker-compose 注入为 BAILIAN_API_KEY。
+// 不再保留硬编码 fallback —— 历史泄露的 key 必须在阿里云 revoke。
+const API_KEY = process.env.BAILIAN_API_KEY;
+if (!API_KEY) {
+  throw new Error('BAILIAN_API_KEY 环境变量缺失。请在 .env.cloud.production 设置 PAIJI_BAILIAN_API_KEY');
+}
+const MODEL = process.env.BAILIAN_VISION_MODEL || 'qwen-vl-max-latest';
+const BASE_URL = process.env.BAILIAN_BASE_URL || 'https://dashscope.aliyuncs.com/compatible-mode/v1';
+const API_URL = `${BASE_URL}/chat/completions`;
 
 const PROMPT = `你是一个订单识别助手。请识别这张图片里的生产订单/啤货表/排单表格，把每一行订单数据提取出来。
 

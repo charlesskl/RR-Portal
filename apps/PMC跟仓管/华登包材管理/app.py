@@ -1002,7 +1002,10 @@ def import_commit():
 
 @app.route('/import/preset', methods=['POST'])
 def import_preset():
-    """按预定模板批量导入：上传 file + 选 preset key + sheet 名 → 一次导多个方向。"""
+    """按预定模板批量导入：上传 file + 选 preset → 自动扫描 allowed_sheets 全部导入。
+
+    可选：传 sheet_name 限定单个 sheet（向后兼容）；不传则自动扫描所有 allowed。
+    """
     party = current_party()
     if not party:
         return redirect(url_for('index'))
@@ -1020,35 +1023,55 @@ def import_preset():
     tmp_path = os.path.join(DATA_PATH, 'upload_tmp.xlsx')
     file.save(tmp_path)
 
-    sheet_name = request.form.get('sheet_name', '').strip()
-    allowed_sheets = cfg.get('allowed_sheets')
-    if allowed_sheets and sheet_name not in allowed_sheets:
-        flash(f'此模板仅支持 sheet：{", ".join(allowed_sheets)}'); return redirect(url_for('import_page'))
+    # 决定要导哪些 sheet
+    requested_sheet = request.form.get('sheet_name', '').strip()
+    allowed_sheets = cfg.get('allowed_sheets') or []
+    wb = openpyxl.load_workbook(tmp_path, read_only=True)
+    try:
+        existing_sheets = set(wb.sheetnames)
+    finally:
+        wb.close()
+
+    if requested_sheet:
+        if allowed_sheets and requested_sheet not in allowed_sheets:
+            flash(f'此模板仅支持 sheet：{", ".join(allowed_sheets)}'); return redirect(url_for('import_page'))
+        targets = [requested_sheet] if requested_sheet in existing_sheets else []
+    else:
+        targets = [s for s in allowed_sheets if s in existing_sheets]
+
+    if not targets:
+        flash(f'文件中找不到任何模板支持的 sheet（{", ".join(allowed_sheets)}）')
+        return redirect(url_for('import_page'))
 
     qty_cols = [f'{k}_qty' for k, _ in ITEMS]
-    total = 0
-    for dir_cfg in cfg.get('directions', []):
-        direction = dir_cfg['direction']
-        if direction not in ALLOWED_DIRECTIONS:
-            continue
-        from_p, to_p = ALLOWED_DIRECTIONS[direction]
-        rows = parse_excel_sheet(tmp_path, sheet_name, dir_cfg['start_row'], dir_cfg['columns'])
-        if not rows:
-            continue
-        con = sqlite3.connect(DATABASE)
-        for r in rows:
-            args = [party, from_p, to_p, r.get('date'), r.get('order_no'), r.get('remark')]
-            args += [r.get(c, 0) for c in qty_cols]
-            placeholders = ', '.join(['?'] * len(args))
-            con.execute(f"""
-                INSERT INTO flow_records (recorded_by, from_party, to_party, date, order_no, remark,
-                                          {', '.join(qty_cols)})
-                VALUES ({placeholders})
-            """, args)
-        con.commit(); con.close()
-        total += len(rows)
+    per_sheet = []
+    grand_total = 0
+    for sheet_name in targets:
+        sheet_total = 0
+        for dir_cfg in cfg.get('directions', []):
+            direction = dir_cfg['direction']
+            if direction not in ALLOWED_DIRECTIONS:
+                continue
+            from_p, to_p = ALLOWED_DIRECTIONS[direction]
+            rows = parse_excel_sheet(tmp_path, sheet_name, dir_cfg['start_row'], dir_cfg['columns'])
+            if not rows:
+                continue
+            con = sqlite3.connect(DATABASE)
+            for r in rows:
+                args = [party, from_p, to_p, r.get('date'), r.get('order_no'), r.get('remark')]
+                args += [r.get(c, 0) for c in qty_cols]
+                placeholders = ', '.join(['?'] * len(args))
+                con.execute(f"""
+                    INSERT INTO flow_records (recorded_by, from_party, to_party, date, order_no, remark,
+                                              {', '.join(qty_cols)})
+                    VALUES ({placeholders})
+                """, args)
+            con.commit(); con.close()
+            sheet_total += len(rows)
+        per_sheet.append(f'{sheet_name}({sheet_total})')
+        grand_total += sheet_total
 
-    flash(f'模板 [{cfg["label"]}] sheet [{sheet_name}] 导入完成，共 {total} 条')
+    flash(f'模板 [{cfg["label"]}] 导入 {grand_total} 条 — 明细：{", ".join(per_sheet)}')
     return redirect(url_for('party_page', party=party))
 
 

@@ -136,3 +136,34 @@ def test_import_preset_rejects_disallowed_sheet(client, tmp_path):
     assert rv.status_code == 302
     con = sqlite3.connect(app_module.DATABASE)
     assert con.execute("SELECT COUNT(*) FROM flow_records").fetchone()[0] == 0
+
+
+def test_import_preset_auto_scan_all_months(client, tmp_path):
+    """不传 sheet_name → 自动扫 allowed_sheets 中存在的 sheet 全部导入。"""
+    _login(client, 'hd')
+    path = tmp_path / 'multi.xlsx'
+    wb = openpyxl.Workbook()
+    # 删默认 sheet
+    wb.remove(wb.active)
+    # 建 4 个月份 sheet 各放 1 行（仅左半 hd→sy）
+    for month, qty in [('1月', 11), ('2月', 22), ('3月', 33), ('4月', 44)]:
+        ws = wb.create_sheet(month)
+        ws.cell(3, 1, '2026-01-01')
+        ws.cell(3, 2, f'O-{month}')
+        ws.cell(3, 3, qty)
+    # 加一个 unsupported sheet 不应被导
+    ws_extra = wb.create_sheet('总表')
+    ws_extra.cell(3, 1, '2026-01-01'); ws_extra.cell(3, 2, 'X'); ws_extra.cell(3, 3, 999)
+    wb.save(path)
+
+    with open(path, 'rb') as f:
+        rv = client.post('/import/preset',
+                         data={'preset': 'huadeng_qingxi_shaoyang',
+                               'file': (f, 'multi.xlsx')},  # 不传 sheet_name
+                         content_type='multipart/form-data',
+                         follow_redirects=False)
+    assert rv.status_code == 302
+    con = sqlite3.connect(app_module.DATABASE)
+    qtys = sorted(r[0] for r in con.execute("SELECT jx_qty FROM flow_records").fetchall())
+    # 4 个月份各 1 条 = 4 条；总表的 999 不导
+    assert qtys == [11.0, 22.0, 33.0, 44.0]

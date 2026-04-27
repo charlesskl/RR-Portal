@@ -256,29 +256,46 @@ def party_logout(party):
 @app.route('/party/<party>')
 @party_required
 def party_page(party):
+    date_from = request.args.get('date_from', '')
+    date_to = request.args.get('date_to', '')
+    try:
+        page_size = int(request.args.get('page_size', 50))
+    except ValueError:
+        page_size = 50
+    if page_size not in (20, 50, 100, 200):
+        page_size = 50
+
     con = sqlite3.connect(DATABASE)
     con.row_factory = sqlite3.Row
 
     counterparties = PARTIES[party]['counterparties']
     panels = []
     for cp in counterparties:
-        # 4 个方向：发/收 ×（对 cp）
-        sent = _query_flow(con, recorded_by=party, from_party=party, to_party=cp)
-        received = _query_flow(con, recorded_by=party, from_party=cp, to_party=party)
-        panels.append({
-            'cp': cp,
-            'cp_name': PARTIES[cp]['name'],
-            'sent_records': sent,
-            'received_records': received,
-            'sent_summary': _calc_summary(sent),
-            'received_summary': _calc_summary(received),
-        })
+        panel = {'cp': cp, 'cp_name': PARTIES[cp]['name']}
+        for direction, from_p, to_p in [('sent', party, cp), ('received', cp, party)]:
+            all_r = _query_flow(con, recorded_by=party, from_party=from_p, to_party=to_p,
+                                date_from=date_from, date_to=date_to)
+            page_key = f'page_{cp}_{direction}'
+            page = max(1, int(request.args.get(page_key, 1) or 1))
+            total = len(all_r)
+            pages = max(1, (total + page_size - 1) // page_size)
+            page = min(page, pages)
+            start = (page - 1) * page_size
+            panel[f'{direction}_records'] = all_r[start:start + page_size]
+            panel[f'{direction}_summary'] = _calc_summary(all_r)
+            panel[f'{direction}_pagination'] = {
+                'page': page, 'pages': pages, 'total': total, 'page_size': page_size,
+                'start': start + 1 if total else 0,
+                'end': start + len(all_r[start:start + page_size]),
+                'page_key': page_key,
+            }
+        panels.append(panel)
 
-    prices = {r['item_key']: r['price']
-              for r in con.execute('SELECT * FROM default_prices').fetchall()}
+    prices = {r['item_key']: r['price'] for r in con.execute('SELECT * FROM default_prices').fetchall()}
     con.close()
     return render_template('party.html', party=party, party_name=PARTIES[party]['name'],
-                           panels=panels, prices=prices)
+                           panels=panels, prices=prices,
+                           date_from=date_from, date_to=date_to, page_size=page_size)
 
 
 @app.route('/party/<party>/entry', methods=['POST'])

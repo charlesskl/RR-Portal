@@ -47,4 +47,19 @@
             </tr>
         </tfoot>
     </table>
+{% if pagination and pagination.total > 0 %}
+<div class="flex items-center justify-between text-xs px-2 py-2 bg-gray-50 border-t">
+    <span>共 <b>{{ pagination.total }}</b> 条，{{ pagination.start }}–{{ pagination.end }}，第 <b>{{ pagination.page }}</b> / {{ pagination.pages }} 页</span>
+    <div class="flex gap-1">
+        {% if pagination.page > 1 %}
+        <a href="?{{ pagination.page_key }}=1&date_from={{ date_from }}&date_to={{ date_to }}&page_size={{ pagination.page_size }}" class="px-2 py-0.5 bg-white border rounded">首页</a>
+        <a href="?{{ pagination.page_key }}={{ pagination.page - 1 }}&date_from={{ date_from }}&date_to={{ date_to }}&page_size={{ pagination.page_size }}" class="px-2 py-0.5 bg-white border rounded">上一页</a>
+        {% endif %}
+        {% if pagination.page < pagination.pages %}
+        <a href="?{{ pagination.page_key }}={{ pagination.page + 1 }}&date_from={{ date_from }}&date_to={{ date_to }}&page_size={{ pagination.page_size }}" class="px-2 py-0.5 bg-white border rounded">下一页</a>
+        <a href="?{{ pagination.page_key }}={{ pagination.pages }}&date_from={{ date_from }}&date_to={{ date_to }}&page_size={{ pagination.page_size }}" class="px-2 py-0.5 bg-white border rounded">末页</a>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
 </div>

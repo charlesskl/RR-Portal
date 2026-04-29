@@ -124,24 +124,34 @@ function parseHeader(ws, format, workbook) {
     product_no = strVal(ws.getCell('C1'));
   }
 
-  // SPIN: product_no from 总表 sheet, Row 8, Col 2, format "货号：#29090"
+  let item_desc = null;
+
+  // SPIN: product_no from 总表 sheet
   if (format === 'spin' && workbook) {
     const summarySheet = workbook.worksheets.find(ws => ws.name.includes('总表'));
     if (summarySheet) {
+      // Row 8 Col 2: "货号：#29837"
       const raw = strVal(summarySheet.getCell(8, 2)) || '';
       const m = raw.match(/\d+/);
       if (m) product_no = m[0];
     }
   }
 
-  // item_desc: scan for row containing "货号" in col B, take col B of next row
-  let item_desc = null;
+  // item_desc: scan main sheet for row containing "货号" in col A or B, take next row same col
+  // e.g. A51="货号", A52="欧姆灯健康产品"; or B51="货号", B52="#29837 ..."
   for (let r = 1; r <= Math.min(ws.rowCount, 60); r++) {
-    const b = strVal(ws.getCell(r, 2));
-    if (b && b.includes('货号')) {
-      item_desc = strVal(ws.getCell(r + 1, 2)) || null;
-      break;
+    for (const c of [1, 2]) {
+      const v = strVal(ws.getCell(r, c));
+      if (v && /^货号/.test(v.trim())) {
+        const next = strVal(ws.getCell(r + 1, c));
+        // Skip pure numeric values (e.g. 货价 50.11)
+        if (next && !/^\d+\.?\d*$/.test(next.trim())) {
+          item_desc = next;
+          break;
+        }
+      }
     }
+    if (item_desc) break;
   }
 
   // R2-R6: Material price table
@@ -182,19 +192,37 @@ function parseHeader(ws, format, workbook) {
   const hkd_rmb_check = numVal(ws.getCell('C12')) || numVal(ws.getCell('D12'));
   const rmb_hkd = numVal(ws.getCell('C13')) || numVal(ws.getCell('D13'));
   const hkd_usd = numVal(ws.getCell('C14')) || numVal(ws.getCell('D14'));
-  // Labor: F13 (injection) or G13 (plush); Box: F14 (injection) or G14 (plush, may be string)
-  const labor_hkd = numVal(ws.getCell('G13')) || numVal(ws.getCell('F13'));
+  // Labor: F13 (injection) or G13 (plush); SPIN: scan R9 for "人工" label, value in next col
+  let labor_hkd = numVal(ws.getCell('G13')) || numVal(ws.getCell('F13'));
+  if (!labor_hkd) {
+    for (let c = 1; c <= 15; c++) {
+      const v = strVal(ws.getCell(9, c));
+      if (v && /^人工$/.test(v.trim())) { labor_hkd = numVal(ws.getCell(9, c + 1)); break; }
+    }
+  }
   const box_price_hkd = numVal(ws.getCell('G14')) || numVal(ws.getCell('F14'));
 
   // R15: date_code, R16: reference number
   const date_code = strVal(ws.getCell('A15')) || strVal(ws.getCell('B15')) || strVal(ws.getCell('C15'));
   const ref_no = strVal(ws.getCell('A16')) || strVal(ws.getCell('B16')) || strVal(ws.getCell('C16'));
 
+  // Testing fee: scan for "测试费" in col B, take HKD value (c4) and convert to USD
+  let testing_fee_usd = null;
+  for (let r = 1; r <= Math.min(ws.rowCount, 60); r++) {
+    const b = strVal(ws.getCell(r, 2));
+    if (b && /测试费/.test(b)) {
+      const hkdVal = numVal(ws.getCell(r, 4));
+      const rate = hkd_usd || 7.75;
+      testing_fee_usd = hkdVal ? hkdVal / rate : null;
+      break;
+    }
+  }
+
   return {
     product_no,
     materialPrices,
     machinePrices,
-    params: { hkd_rmb_quote, hkd_rmb_check, rmb_hkd, hkd_usd, labor_hkd, box_price_hkd },
+    params: { hkd_rmb_quote, hkd_rmb_check, rmb_hkd, hkd_usd, labor_hkd, box_price_hkd, testing_fee_usd },
     date_code,
     ref_no,
     item_desc,
@@ -406,7 +434,7 @@ function parseSewingDetails(workbook) {
     let dataStartRow = 0; // 0 = not found
     let usageCol = 6;  // default col F
     let priceCol = 7;  // default col G
-    for (let r = 1; r <= 10; r++) {
+    for (let r = 1; r <= Math.min(30, ws.rowCount); r++) {
       const b = strVal(ws.getCell(r, 2));
       const c = strVal(ws.getCell(r, 3));
       if ((b && b.includes('物料名称')) || (c && c.includes('裁片部位'))) {
@@ -492,8 +520,9 @@ function parseSewingDetails(workbook) {
       const isEmbroidery = colA && colA.includes('电绣');
       const position = isLabor ? '__labor__' : isEmbroidery ? '__embroidery__' : (colC || '__other__');
 
-      // Skip __other__ items with no price
-      if (position === '__other__' && !numVal(ws.getCell(row, priceCol))) continue;
+      // Skip __other__ items with no price (but keep PP胶粒 — price comes from main sheet)
+      const isPP = /PP胶/.test(fabricName || '');
+      if (position === '__other__' && !numVal(ws.getCell(row, priceCol)) && !isPP) continue;
 
       allItems.push({
         product_name: currentProductName,
@@ -532,14 +561,17 @@ function parseCostItems(ws, format) {
       const new_price = numVal(ws.getCell(r, 5));
       const difference = numVal(ws.getCell(r, 6));
       const tax_type = strVal(ws.getCell(r, 9));
-      items.push({ name, quantity, old_price, new_price, difference, tax_type });
+      items.push({ name, quantity, old_price, new_price: new_price ?? old_price, difference, tax_type });
     }
     return items;
   }
 
-  // R44-R47: Labor items (装配人工, 包装人工, 喷油人工, 油漆) — injection format fixed rows
-  // Plush format: scan full sheet for rows where col B contains 人工
+  // Labor items (装配人工, 包装人工, 喷油人工, 油漆)
+  // Dynamically find the section boundaries instead of hardcoded row numbers
   let laborItems = [];
+  let hardwareItems = [];
+  let packagingItems = [];
+
   if (format === 'plush' || format === 'spin') {
     for (let r = 1; r <= ws.rowCount; r++) {
       const colA = strVal(ws.getCell(r, 1));
@@ -550,15 +582,36 @@ function parseCostItems(ws, format) {
       const new_price = numVal(ws.getCell(r, 4));
       laborItems.push({ name, quantity, old_price: null, new_price, difference: null, tax_type: null });
     }
+    hardwareItems = parseItemRange(48, 76);
+    packagingItems = parseItemRange(77, 93);
   } else {
-    laborItems = parseItemRange(44, 47);
+    // Injection: find labor/hardware/packaging boundaries dynamically
+    // Scan for the section after summary rows (料价/啤工) — labor starts with 人工/油漆
+    // Hardware starts with 窝钉/螺丝/T钉/弹簧/电池 etc.
+    // Packaging starts with items like Window Box, 彩盒, 纸绳 etc.
+    const LABOR_RE = /人工|油漆|查货/;
+    const PKG_RE = /^(window|insert|master|inner|outer|scotch|tissue|divider|tray|彩盒|纸绳|包装扣|包装片|防割|隔板|吸塑|泡壳|说明书|贴纸$|标签$|胶袋|气泡袋|珍珠棉|拷贝纸|封箱胶)/i;
+
+    // Find the start of cost items section (after header/mold rows, typically after row 35)
+    let laborStart = -1, hwStart = -1, pkgStart = -1;
+    for (let r = 35; r <= Math.min(120, ws.rowCount); r++) {
+      const name = strVal(ws.getCell(r, 2));
+      if (!name) continue;
+      const colA = strVal(ws.getCell(r, 1));
+      if (laborStart === -1 && !colA && LABOR_RE.test(name)) { laborStart = r; }
+      if (laborStart > 0 && hwStart === -1 && !LABOR_RE.test(name) && !PKG_RE.test(name)) { hwStart = r; }
+      if (hwStart > 0 && pkgStart === -1 && PKG_RE.test(name)) { pkgStart = r; }
+    }
+
+    // Fallback to fixed rows if detection fails
+    if (laborStart === -1) laborStart = 44;
+    if (hwStart === -1) hwStart = laborStart + 4;
+    if (pkgStart === -1) pkgStart = hwStart + 29;
+
+    laborItems = parseItemRange(laborStart, hwStart - 1);
+    hardwareItems = parseItemRange(hwStart, pkgStart - 1);
+    packagingItems = parseItemRange(pkgStart, pkgStart + 20);
   }
-
-  // R48-R76: Hardware items (五金件, 电镀件, 贴纸, IC, PCBA, 电池)
-  const hardwareItems = parseItemRange(48, 76);
-
-  // R77-R93: Packaging items (Window Box, Insert card, etc.)
-  const packagingItems = parseItemRange(77, 93);
 
   return { laborItems, hardwareItems, packagingItems };
 }
@@ -580,25 +633,33 @@ function parseSummary(ws) {
 
   // Dynamically locate dimension rows by scanning all columns for keyword labels
   let productDimRow = 0, cartonDimRow = 0, cuftRow = 0;
+  let inOuterSection = false;
   for (let r = 1; r <= ws.rowCount; r++) {
     let rowText = '';
-    for (let c = 1; c <= 16; c++) rowText += strVal(ws.getCell(r, c));
+    for (let c = 1; c <= 20; c++) rowText += strVal(ws.getCell(r, c));
+    if (/外箱/.test(rowText)) inOuterSection = true;
     if (!productDimRow && /产品尺寸/.test(rowText)) { productDimRow = r; }
-    if (!cartonDimRow  && /纸箱尺寸|外箱尺寸/.test(rowText)) { cartonDimRow = r; }
-    if (!cuftRow       && /CU\.?FT/i.test(rowText)) { cuftRow = r; break; }
+    // Prefer 外箱 section's 纸箱尺寸; fallback to first occurrence
+    if (/纸箱尺寸|外箱尺寸/.test(rowText)) {
+      if (inOuterSection || !cartonDimRow) cartonDimRow = r;
+    }
+    // CU.FT row: must be right after cartonDimRow (within 2 rows)
+    if (/CU\.?FT/i.test(rowText) && cartonDimRow && r <= cartonDimRow + 2) {
+      cuftRow = r;
+    }
   }
 
-  // Find L/W/H header row (a row that contains L, W, H as separate cells)
-  // Usually one row above productDimRow
-  let lwh_header_row = productDimRow > 1 ? productDimRow - 1 : 0;
+  // Find L/W/H header row (search up to 3 rows above cartonDimRow or productDimRow)
   let lCol = 0, wCol = 0, hCol = 0;
-  if (lwh_header_row) {
-    for (let c = 1; c <= 16; c++) {
-      const v = strVal(ws.getCell(lwh_header_row, c)) || '';
+  const searchStart = Math.max(1, (cartonDimRow || productDimRow || 10) - 3);
+  for (let r = searchStart; r <= (cartonDimRow || productDimRow || 10); r++) {
+    for (let c = 1; c <= 20; c++) {
+      const v = strVal(ws.getCell(r, c)) || '';
       if (v === 'L' && !lCol) lCol = c;
       else if (v === 'W' && !wCol) wCol = c;
       else if (v === 'H' && !hCol) hCol = c;
     }
+    if (lCol && wCol && hCol) break;
   }
   // Fallback column positions (injection default)
   if (!lCol) lCol = 8;
@@ -857,6 +918,116 @@ function parsePainting(ws) {
 
 // Known non-hardware item name patterns — stop collecting when encountered
 const NON_HW_PATTERN = /搪胶|车缝|吊咭|留言纸|镭射|PE袋|胶针|扎带|平咭|外箱|印尼运费|包装辅料|生产夹具|拆货|围膜|合计|总计/;
+
+// ─── SPIN Transportation Parser ──────────────────────────────────────────────
+// Supports Chinese format main sheet: FCL (盐田/HK柜货) + LCL (盐田散货) sections
+// Parse transport rows from 报价明细 sheet.
+// Structure (fixed layout observed in internal quote files):
+//   FCL header row: col 16 = "实际报客数量", col 10 = USD/toy (formula)
+//   FCL data rows immediately follow: col 1 = category (盐田/HK柜货), col 2 = container (40HQ/20HQ)
+//   LCL header row (further down): col 14 = "实际报客数量", col 10 = USD/toy (formula)
+//   LCL data rows immediately follow: col 1 = category (盐田散货), col 2 = size (3吨/5吨/8吨)
+// Confirmed layout from cell dump of 报价明细 sheet:
+//   FCL header row (e.g. row 91): col 15 = "实际报客数量"
+//     data rows: col 1 = category (盐田/HK柜货), col 2 = 柜型 (40HQ/20HQ)
+//                col 10 = HKD/toy (formula), col 14 = qty (pcs)
+//   LCL header row (e.g. row 108): col 13 = "实际报客数量"
+//     data rows: col 1 = category (盐田散货), col 2 = 吨数 (3吨/5吨/8吨)
+//                col 10 = HKD/toy (formula), col 12 = qty (pcs)
+// hkdUsd is used to convert HKD/toy → USD/toy
+function parseSpinTransport(ws) {
+  if (!ws) return [];
+  const items = [];
+
+  // Find header rows by scanning for "实际报客" text
+  // First occurrence = FCL table header, second = LCL table header
+  const headerRows = [];
+  for (let r = 60; r <= 200; r++) {
+    for (let c = 1; c <= 20; c++) {
+      const v = strVal(ws.getCell(r, c)) || '';
+      if (/实际报客/.test(v)) {
+        headerRows.push({ row: r, qtyCol: c });
+        break;
+      }
+    }
+    if (headerRows.length >= 2) break;
+  }
+
+  const [fclHdr, lclHdr] = headerRows;
+
+  // ── FCL (盐田/HK柜货) ──
+  // col 2 = category (盐田 / HK柜货), col 3 = 柜型 (40HQ/20HQ)
+  // col 10 = 产品运费USD (already USD per toy, formula result)
+  // col 16 = 实际报客数量 (only present for 盐田 rows)
+  // HK柜货 rows share the same 实际报客数量 as 盐田 (per business rule)
+  if (fclHdr) {
+    const usdCol = 10;
+    const qtyCol = fclHdr.qtyCol; // col 16 = 实际报客数量
+
+    let qty40 = null; // 盐田 40HQ qty — shared with HK柜货 40HQ
+    let qty20 = null; // 盐田 20HQ qty — shared with HK柜货 20HQ
+    let currentCat = '';
+
+    // First pass: collect 盐田 qtys (category spans multiple rows, track with currentCat)
+    let firstPassCat = '';
+    for (let r = fclHdr.row + 1; r <= fclHdr.row + 10; r++) {
+      const cat = strVal(ws.getCell(r, 2)) || '';
+      const col3 = strVal(ws.getCell(r, 3)) || '';
+      if (cat) firstPassCat = cat;
+      if (/盐田|YT/.test(firstPassCat) && !/散货/.test(firstPassCat)) {
+        const qty = numVal(ws.getCell(r, qtyCol));
+        if (/40/.test(col3) && qty) qty40 = qty;
+        if (/20/.test(col3) && qty) qty20 = qty;
+      }
+    }
+
+    // Second pass: build items
+    for (let r = fclHdr.row + 1; r <= fclHdr.row + 10; r++) {
+      const cat  = strVal(ws.getCell(r, 2)) || '';
+      const col3 = strVal(ws.getCell(r, 3)) || '';
+      if (/盐田|HK柜|YT/.test(cat) && !/散货/.test(cat)) currentCat = cat;
+      if (!col3 || !/HQ/i.test(col3)) continue;
+      const usdPerToy = numVal(ws.getCell(r, usdCol));
+      if (usdPerToy == null) continue;
+      const is40 = /40/.test(col3);
+      items.push({
+        description: `${currentCat} ${col3}`.trim(),
+        qty_20: is40 ? null : qty20,
+        qty_40: is40 ? qty40 : null,
+        usd_per_toy: +usdPerToy.toFixed(4),
+        sort_order: items.length,
+      });
+    }
+  }
+
+  // ── LCL (盐田散货 3吨/5吨/8吨) ──
+  // col 2 = category (盐田散货), col 3 = 吨数 (3吨/5吨/8吨)
+  // col 10 = 产品运费USD (already USD per toy)
+  // col 14 = 实际报客数量
+  if (lclHdr) {
+    const usdCol = 10;
+    const qtyCol = lclHdr.qtyCol; // col 14 = 实际报客数量
+    let currentCat = '';
+    for (let r = lclHdr.row + 1; r <= lclHdr.row + 8; r++) {
+      const cat  = strVal(ws.getCell(r, 2)) || '';
+      const col3 = strVal(ws.getCell(r, 3)) || '';
+      if (/散货/.test(cat)) currentCat = cat;
+      if (!col3 || !/吨/.test(col3)) continue;
+      const usdPerToy = numVal(ws.getCell(r, usdCol));
+      const qty       = numVal(ws.getCell(r, qtyCol));
+      if (usdPerToy == null || !qty) continue;
+      items.push({
+        description: `${currentCat} ${col3}`.trim(),
+        qty_20: null,
+        qty_40: qty,
+        usd_per_toy: +usdPerToy.toFixed(4),
+        sort_order: items.length,
+      });
+    }
+  }
+
+  return items;
+}
 
 function parseSpinHardwareFromMain(mainWs) {
   if (!mainWs) return [];
@@ -1259,18 +1430,21 @@ function parseSpinPackaging(mainWs, hkdUsd = 7.75) {
     if (!name) continue;
 
     let qty, unitPrice;
+    const amountHkd = numVal(mainWs.getCell(r, 4)) || 0; // col D = 金额 HKD (total)
+    const rawQty = numVal(mainWs.getCell(r, 3)) ?? 1;     // col C = 数量
+
     if (isMaster && /外箱/.test(name) && pcsPerBox) {
-      // 外箱: qty = 1/pcsPerBox, unit price = col D (HKD) / hkdUsd * pcsPerBox
+      // 外箱: col D = 每toy金额HKD, qty = 1/pcsPerBox, 单价 = 金额/toy / qty = 金额 * pcsPerBox / hkdUsd
       qty = 1 / pcsPerBox;
-      unitPrice = (numVal(mainWs.getCell(r, 4)) || 0) / hkdUsd * pcsPerBox;
+      unitPrice = amountHkd * pcsPerBox / hkdUsd;
     } else if (isMaster) {
-      // Other master carton items: qty from col C (default 1), price from col D (HKD) / hkdUsd
-      qty = numVal(mainWs.getCell(r, 3)) ?? 1;
-      unitPrice = (numVal(mainWs.getCell(r, 4)) || 0) / hkdUsd;
+      // Other master carton items: 单价 = 金额 / 数量 / hkdUsd
+      qty = rawQty;
+      unitPrice = rawQty ? amountHkd / rawQty / hkdUsd : 0;
     } else {
-      // Retail box items: qty from col C (default 1), price from col D (HKD) → USD * 1.06
-      qty = numVal(mainWs.getCell(r, 3)) ?? 1;
-      unitPrice = (numVal(mainWs.getCell(r, 4)) || 0) / hkdUsd * 1.06;
+      // Retail box items: 单价 = 金额 / 数量 / hkdUsd * 1.06
+      qty = rawQty;
+      unitPrice = rawQty ? amountHkd / rawQty / hkdUsd * 1.06 : 0;
     }
 
     items.push({
@@ -1381,7 +1555,7 @@ function parsePackagingFromMainSheet(mainWs, skipFixed = false) {
 
 // ─── Main Parse Function ─────────────────────────────────────────────────────
 
-async function parseWorkbook(filePath) {
+async function parseWorkbook(filePath, forceFormat) {
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.readFile(filePath);
 
@@ -1392,7 +1566,9 @@ async function parseWorkbook(filePath) {
     throw new Error(`Sheet "${sheetName}" not found in workbook`);
   }
 
-  const format = detectFormat(workbook);
+  const format = (forceFormat && ['injection', 'plush', 'spin'].includes(forceFormat))
+    ? forceFormat
+    : detectFormat(workbook);
   const header = parseHeader(ws, format, workbook);
 
   // Fall back to sheet name only if B1 is empty
@@ -1432,6 +1608,33 @@ async function parseWorkbook(filePath) {
       ];
     }
   }
+  // SPIN: fill PP胶粒 price from main sheet (PP胶料 row)
+  // SPIN: fill PP胶粒 price from main sheet (PP胶料 row)
+  // The price in main sheet c6 is HKD/g, need to convert to match Other Cost USD formula:
+  // UI: usd = material_price_rmb / rmb_hkd / hkd_usd * 1.06
+  // PP actual: usd = hkd_price / hkd_usd * 1.06
+  // So store as: material_price_rmb = hkd_price * rmb_hkd (so the division cancels out)
+  if (format === 'spin') {
+    let ppPriceHkd = 0;
+    for (let r = 1; r <= 60; r++) {
+      const b = strVal(ws.getCell(r, 2));
+      if (b && /PP胶/.test(b)) {
+        ppPriceHkd = numVal(ws.getCell(r, 6)) || 0;
+        break;
+      }
+    }
+    if (ppPriceHkd) {
+      const rmbHkd = parseFloat(header.params && header.params.rmb_hkd) || 0.85;
+      const ppAsRmb = ppPriceHkd * rmbHkd; // store as pseudo-RMB so UI formula gives correct USD
+      sewingDetails = sewingDetails.map(d => {
+        if (/PP胶/.test(d.fabric_name || '') && !d.material_price_rmb) {
+          return { ...d, material_price_rmb: ppAsRmb };
+        }
+        return d;
+      });
+    }
+  }
+
   if (format === 'spin') {
     bodyAccessories = parseSpinHardwareFromMain(ws);
   } else {
@@ -1444,6 +1647,7 @@ async function parseWorkbook(filePath) {
   const costItems = parseCostItems(ws, format);
   const summary = parseSummary(ws);
   const transport = parseTransport(ws);
+  const spinTransportRows = format === 'spin' ? parseSpinTransport(ws) : [];
   const { electronicItems, electronicSummary } = parseElectronics(workbook, ws);
   const paintingDetail = parsePainting(ws);
 
@@ -1477,6 +1681,7 @@ async function parseWorkbook(filePath) {
     electronicItems,
     electronicSummary,
     paintingDetail,
+    spinTransportRows,
     transportConfig: transport,
     productDimension: summary.dimensions,
     moldCost: summary.moldCost,

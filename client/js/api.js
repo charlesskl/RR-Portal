@@ -67,6 +67,13 @@ const api = (() => {
       URL.revokeObjectURL(url);
     },
 
+    // Sewing merge
+    getMergeGroups: (versionId) => request('GET', `/api/versions/${versionId}/merge-sewing`),
+    mergeSewing: (versionId, product_names, group_name) =>
+      request('POST', `/api/versions/${versionId}/merge-sewing`, { product_names, group_name }),
+    unmergeSewing: (versionId, merge_group) =>
+      request('DELETE', `/api/versions/${versionId}/merge-sewing`, { merge_group }),
+
     // Calculate
     calculate: (versionId) => request('GET', `/api/versions/${versionId}/calculate`),
   };

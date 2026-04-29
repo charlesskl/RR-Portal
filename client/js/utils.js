@@ -110,3 +110,14 @@ function showToast(msg, type = 'info') {
   container.appendChild(toast);
   setTimeout(() => toast.remove(), 3000);
 }
+
+/**
+ * 获取车缝明细的分组键列表和过滤函数
+ * 始终按 sub_product 分组（用于 switcher 切换）
+ * 当同一 sub_product 下有多个 product_name 时，由表格显示层自动增加款式列
+ */
+function getSewingGroups(all) {
+  const keyFn = d => d.sub_product || d.product_name || '';
+  const keys = [...new Set(all.map(keyFn).filter(Boolean))];
+  return { keys, keyFn };
+}

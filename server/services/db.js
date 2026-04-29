@@ -268,6 +268,16 @@ function initDb() {
       sort_order INTEGER DEFAULT 0
     );
 
+    CREATE TABLE IF NOT EXISTS SpinTransportRow (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      version_id INTEGER NOT NULL REFERENCES QuoteVersion(id) ON DELETE CASCADE,
+      description TEXT,
+      qty_20 REAL,
+      qty_40 REAL,
+      usd_per_toy REAL,
+      sort_order INTEGER DEFAULT 0
+    );
+
     CREATE TABLE IF NOT EXISTS RefMaterialPrice (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       material_name TEXT NOT NULL,
@@ -341,6 +351,9 @@ function initDb() {
   }
   if (!sewCols.includes('sub_product')) {
     db.exec("ALTER TABLE SewingDetail ADD COLUMN sub_product TEXT");
+  }
+  if (!sewCols.includes('merge_group')) {
+    db.exec("ALTER TABLE SewingDetail ADD COLUMN merge_group TEXT");
   }
 
   // Migrate: add eng_name and SPIN molding fields to MoldPart
@@ -431,6 +444,7 @@ function initDb() {
   // Migrate: add markup_labor to QuoteParams
   const qpCols = db.prepare('PRAGMA table_info(QuoteParams)').all().map(c => c.name);
   if (!qpCols.includes('markup_labor')) db.exec("ALTER TABLE QuoteParams ADD COLUMN markup_labor REAL DEFAULT 0.15");
+  if (!qpCols.includes('testing_fee_usd')) db.exec("ALTER TABLE QuoteParams ADD COLUMN testing_fee_usd REAL");
 
   // Migrate: add client quote columns to RefMaterialPrice
   const refMatCols = db.prepare('PRAGMA table_info(RefMaterialPrice)').all().map(c => c.name);

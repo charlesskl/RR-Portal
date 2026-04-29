@@ -14,6 +14,7 @@ const LIST_SECTIONS = {
   'raw-material': 'RawMaterial',
   'sewing-detail': 'SewingDetail',
   'rotocast': 'RotocastItem',
+  'spin-transport': 'SpinTransportRow',
 };
 
 // Singleton sections (one record per version)
@@ -43,6 +44,7 @@ const ALL_SECTION_TABLES = {
   raw_materials: 'RawMaterial',
   sewing_details: 'SewingDetail',
   rotocast_items: 'RotocastItem',
+  spin_transport_rows: 'SpinTransportRow',
 };
 
 // Helper: get columns for a table (excluding id and version_id)
@@ -79,6 +81,10 @@ router.get('/:id', (req, res) => {
       } else {
         result[key] = rows;
       }
+    }
+    // Ensure spin_transport_rows is always included (explicit fallback)
+    if (!('spin_transport_rows' in result)) {
+      result.spin_transport_rows = db.prepare('SELECT * FROM SpinTransportRow WHERE version_id = ?').all(req.params.id);
     }
     res.json(result);
   } catch (err) {
@@ -571,6 +577,50 @@ router.post('/:id/translate-all', async (req, res) => {
 router.post('/:id/translate-sewing', async (req, res) => {
   req.url = `/${req.params.id}/translate-all`;
   res.redirect(307, `/api/versions/${req.params.id}/translate-all`);
+});
+
+// ─── Merge / Unmerge sewing product segments ────────────────────────────────
+router.post('/:id/merge-sewing', (req, res) => {
+  const db = getDb();
+  const versionId = req.params.id;
+  const { product_names, group_name } = req.body;
+  if (!Array.isArray(product_names) || product_names.length < 2) {
+    return res.status(400).json({ error: 'Need at least 2 product_names to merge' });
+  }
+  const gn = group_name || product_names.join(' + ');
+  const placeholders = product_names.map(() => '?').join(',');
+  db.prepare(
+    `UPDATE SewingDetail SET merge_group = ? WHERE version_id = ? AND (product_name IN (${placeholders}) OR sub_product IN (${placeholders}))`
+  ).run(gn, versionId, ...product_names, ...product_names);
+  res.json({ ok: true, merge_group: gn });
+});
+
+router.delete('/:id/merge-sewing', (req, res) => {
+  const db = getDb();
+  const versionId = req.params.id;
+  const { merge_group } = req.body || {};
+  if (merge_group) {
+    db.prepare('UPDATE SewingDetail SET merge_group = NULL WHERE version_id = ? AND merge_group = ?').run(versionId, merge_group);
+  } else {
+    db.prepare('UPDATE SewingDetail SET merge_group = NULL WHERE version_id = ?').run(versionId);
+  }
+  res.json({ ok: true });
+});
+
+// GET merge groups for a version
+router.get('/:id/merge-sewing', (req, res) => {
+  const db = getDb();
+  const rows = db.prepare(
+    'SELECT DISTINCT merge_group, product_name, sub_product FROM SewingDetail WHERE version_id = ? AND merge_group IS NOT NULL ORDER BY merge_group'
+  ).all(req.params.id);
+  // Group by merge_group
+  const groups = {};
+  for (const r of rows) {
+    const key = r.sub_product || r.product_name;
+    if (!groups[r.merge_group]) groups[r.merge_group] = [];
+    if (!groups[r.merge_group].includes(key)) groups[r.merge_group].push(key);
+  }
+  res.json(groups);
 });
 
 module.exports = router;

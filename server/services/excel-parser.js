@@ -1137,9 +1137,10 @@ function parseSpinLaborFromMain(ws) {
       if (costHkd == null || costHkd <= 0) return;
       // Store labor rate as RMB equivalent (display recovers: rateUsd = material_price_rmb / rmbUsdRate)
       const laborRateRmb = laborRateUsd * 0.85 * 7.75;
-      // Store HKD cost in price_rmb field; display converts: usdPerToy = price_rmb / hkd_usd
+      // Store RMB cost in price_rmb field; display converts: usdPerToy = price_rmb / rmb_hkd / hkd_usd
+      const costRmb = costHkd * 0.85;    // HKD → RMB (consistent with 车缝明细 H column)
       const defaultHkdUsd = 7.75;
-      const usdPerToy = costHkd / defaultHkdUsd;
+      const usdPerToy = costRmb / 0.85 / defaultHkdUsd;
       const stdHour = laborRateUsd > 0 ? usdPerToy / laborRateUsd : 0;
       items.push({
         fabric_name: label,
@@ -1147,9 +1148,9 @@ function parseSpinLaborFromMain(ws) {
         sub_product: charName,
         product_name: charName,
         product_eng: charName,
-        usage_amount: stdHour,            // Standard Hour (approximate; display recomputes using actual hkd_usd)
-        material_price_rmb: laborRateRmb, // Labor rate encoded as RMB-equivalent
-        price_rmb: costHkd,              // HKD cost from col D
+        usage_amount: stdHour,
+        material_price_rmb: laborRateRmb,
+        price_rmb: costRmb,              // RMB cost (HKD × 0.85)
         sort_order: items.length,
       });
     });
@@ -1598,34 +1599,24 @@ async function parseWorkbook(filePath, forceFormat) {
   try { rotocastItems = format === 'plush' ? parseRotocastItems(ws) : []; } catch(e) { throw new Error('parseRotocastItems: ' + e.message); }
   // plush(TOMY) 用旧版单 sheet 解析；spin 用多 sheet 版本
   try { sewingDetails = format === 'spin' ? parseSewingDetails(workbook) : format === 'plush' ? parseSewingDetailsPlush(workbook) : []; } catch(e) { throw new Error('parseSewingDetails: ' + e.message); }
-  // For SPIN: replace labor items with values from main sheet
-  if (format === 'spin') {
-    const mainLaborItems = parseSpinLaborFromMain(ws);
-    if (mainLaborItems.length > 0) {
-      sewingDetails = [
-        ...sewingDetails.filter(d => !/人工/.test(d.fabric_name || '')),
-        ...mainLaborItems,
-      ];
-    }
-  }
+  // SPIN: labor items come from 车缝明细 (unified RMB source)
   // SPIN: fill PP胶粒 price from main sheet (PP胶料 row)
   // SPIN: fill PP胶粒 price from main sheet (PP胶料 row)
-  // The price in main sheet c6 is HKD/g, need to convert to match Other Cost USD formula:
-  // UI: usd = material_price_rmb / rmb_hkd / hkd_usd * 1.06
-  // PP actual: usd = hkd_price / hkd_usd * 1.06
-  // So store as: material_price_rmb = hkd_price * rmb_hkd (so the division cancels out)
+  // PP胶粒 price: find "PP" column in material table (row 1), read 料单价 (row 4) as HKD/g
+  // Store as pseudo-RMB so UI formula (material_price_rmb / rmb_hkd / hkd_usd * 1.06) gives correct USD
   if (format === 'spin') {
-    let ppPriceHkd = 0;
-    for (let r = 1; r <= 60; r++) {
-      const b = strVal(ws.getCell(r, 2));
-      if (b && /PP胶/.test(b)) {
-        ppPriceHkd = numVal(ws.getCell(r, 6)) || 0;
+    let ppPriceHkdPerG = 0;
+    // Find PP column in row 1 material headers
+    for (let col = 2; col <= 22; col++) {
+      const matType = strVal(ws.getCell(1, col));
+      if (matType && /^PP$/i.test(matType.trim())) {
+        ppPriceHkdPerG = numVal(ws.getCell(4, col)) || 0;
         break;
       }
     }
-    if (ppPriceHkd) {
+    if (ppPriceHkdPerG) {
       const rmbHkd = parseFloat(header.params && header.params.rmb_hkd) || 0.85;
-      const ppAsRmb = ppPriceHkd * rmbHkd; // store as pseudo-RMB so UI formula gives correct USD
+      const ppAsRmb = ppPriceHkdPerG * rmbHkd;
       sewingDetails = sewingDetails.map(d => {
         if (/PP胶/.test(d.fabric_name || '') && !d.material_price_rmb) {
           return { ...d, material_price_rmb: ppAsRmb };

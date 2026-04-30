@@ -17,18 +17,18 @@ const tab_spin_labor = {
     const LABOR_NAMES = /^(裁床人工|车缝人工|手工人工)/;
     const laborItems = filtered.filter(d => d.position === '__labor__' && LABOR_NAMES.test(d.fabric_name || ''));
     const laborTotal = laborItems.reduce((s, d) => {
-      // US$/toy = price_rmb (HKD from col D) / hkd_usd
-      const usdPerToy = (parseFloat(d.price_rmb) || 0) / hkd_usd;
+      // US$/toy = price_rmb (stored as HKD) × rmb_hkd / hkd_usd
+      const usdPerToy = (parseFloat(d.price_rmb) || 0) / rmb_hkd / hkd_usd;
       return s + usdPerToy;
     }, 0);
 
     // Fixed labor rate from params: labor_hkd / 11hr / hkd_usd (e.g. 275/11/7.75 = 3.226)
     const laborHkd = parseFloat(params.labor_hkd) || 0;
-    const LABOR_RATE_USD = laborHkd ? laborHkd / 11 / hkd_usd : 3.226;
+    const LABOR_RATE_USD = laborHkd ? Math.round(laborHkd / 11 / hkd_usd * 1000) / 1000 : 3.226;
 
     const laborRows = laborItems.map(d => {
       const rateUsd = LABOR_RATE_USD;
-      const usdPerToy = (parseFloat(d.price_rmb) || 0) / hkd_usd;           // col D HKD → USD
+      const usdPerToy = (parseFloat(d.price_rmb) || 0) / rmb_hkd / hkd_usd;
       const stdHour = rateUsd > 0 ? usdPerToy / rateUsd : 0;                // standard hour
       return `
         <tr>

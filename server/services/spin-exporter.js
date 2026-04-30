@@ -188,12 +188,57 @@ function fillCharacterSheet(ws, d) {
   const hkd_usd = parseFloat(params.hkd_usd) || 7.75;
   const rmbUsdRate = rmb_hkd * hkd_usd;
 
+  // ── Fabric Cost: merge & sort data ──────────────────────────────────────────
+  const mergedFabrics = [];
+  for (const item of fabricItems) {
+    const name = item.fabric_name || '';
+    const pn = item.product_name || '';
+    const existing = mergedFabrics.find(m => m.fabric_name === name && (m.product_name || '') === pn);
+    if (existing) {
+      existing.usage_amount = (parseFloat(existing.usage_amount) || 0) + (parseFloat(item.usage_amount) || 0);
+    } else {
+      mergedFabrics.push({ ...item, usage_amount: parseFloat(item.usage_amount) || 0 });
+    }
+  }
+  const productNames = [...new Set(fabricItems.map(d => d.product_name || '').filter(Boolean))];
+  const showProductCol = productNames.length > 1;
+  const sortedFabrics = showProductCol
+    ? [...mergedFabrics].sort((a, b) => (a.product_name || '').localeCompare(b.product_name || ''))
+    : mergedFabrics;
+
+  // ── Others Cost: sort data ────────────────────────────────────────────────────
+  const otherProductNames = [...new Set(otherItems.map(d => d.product_name || '').filter(Boolean))];
+  const showOtherProductCol = otherProductNames.length > 1;
+  const sortedOthers = showOtherProductCol
+    ? [...otherItems].sort((a, b) => (a.product_name || '').localeCompare(b.product_name || ''))
+    : otherItems;
+
+  // ── Row expansion: Fabric Cost, Electronic, Others Cost ─────────────────────
+  // Process bottom-up so earlier expansions don't invalidate later row numbers.
+  // Each expansion uses duplicateRow + shiftFormulas, same pattern as Electronic.
+
+  const FABRIC_SLOTS = 13;   // rows 23-35
+  const FABRIC_START = 23;
+  const fabricOverflow = Math.max(0, sortedFabrics.length - FABRIC_SLOTS);
+
   const elecList = electronicItems || [];
   const ELEC_SLOTS = 10;
-  const S = Math.max(0, elecList.length - ELEC_SLOTS);
-  if (S > 0) {
-    ws.duplicateRow(48 + ELEC_SLOTS - 1, S, true);
-    // Fix formula references: rows >= 58 shift by S
+  const ELEC_START = 48;
+  const elecOverflow = Math.max(0, elecList.length - ELEC_SLOTS);
+
+  // Others Cost: find header row first (before any expansion)
+  let othersHeaderRow = 60;
+  for (let r = 55; r <= 80; r++) {
+    const c = ws.getCell(r, 3).value;
+    if (c && /Others Cost/i.test(String(c))) { othersHeaderRow = r; break; }
+  }
+  const OTHERS_SLOTS = 11;
+  const othersOverflow = Math.max(0, sortedOthers.length - OTHERS_SLOTS);
+
+  // Helper: duplicate rows and shift formulas at/after threshold
+  function expandSection(startRow, slots, overflow) {
+    if (overflow <= 0) return;
+    ws.duplicateRow(startRow + slots - 1, overflow, true);
     const re = /([A-Z]+)(\d+)/g;
     ws.eachRow({ includeEmpty: false }, row => {
       row.eachCell({ includeEmpty: false }, cell => {
@@ -201,12 +246,17 @@ function fillCharacterSheet(ws, d) {
         if (!v || typeof v !== 'object' || !v.formula) return;
         const newF = v.formula.replace(re, (match, col, rowStr) => {
           const rn = parseInt(rowStr, 10);
-          return rn >= 48 + ELEC_SLOTS ? col + (rn + S) : match;
+          return rn >= startRow + slots ? col + (rn + overflow) : match;
         });
         if (newF !== v.formula) cell.value = { formula: newF, result: v.result };
       });
     });
   }
+
+  // Expand bottom-up: Others → Electronic → Fabric
+  expandSection(othersHeaderRow + 1, OTHERS_SLOTS, othersOverflow);
+  expandSection(ELEC_START, ELEC_SLOTS, elecOverflow);
+  expandSection(FABRIC_START, FABRIC_SLOTS, fabricOverflow);
 
   // ── Header (force-write to bypass formula cells) ────────────────────────────
   ws.getCell(3, 3).value = 'ROYAL REGENT PRODUCTS INDUSTRIES LIMITED';
@@ -219,42 +269,16 @@ function fillCharacterSheet(ws, d) {
   const charSuffix = d.charName ? `--${d.charName}` : '';
   ws.getCell(7, 3).value = product ? ((product.item_desc || '') + charSuffix) : '';
 
-  // ── Fabric Cost (R23-R35): cols C=3 eng desc, D=4 cn desc, J=10 USD price, K=11 qty ──
-  // Merge rows with the same fabric_name + product_name: sum usage_amount
-  const mergedFabrics = [];
-  for (const item of fabricItems) {
-    const name = item.fabric_name || '';
-    const pn = item.product_name || '';
-    const existing = mergedFabrics.find(m => m.fabric_name === name && (m.product_name || '') === pn);
-    if (existing) {
-      existing.usage_amount = (parseFloat(existing.usage_amount) || 0) + (parseFloat(item.usage_amount) || 0);
-    } else {
-      mergedFabrics.push({ ...item, usage_amount: parseFloat(item.usage_amount) || 0 });
-    }
-  }
-
-  // Check if multiple product_names exist (need to show 款式 column)
-  const productNames = [...new Set(fabricItems.map(d => d.product_name || '').filter(Boolean))];
-  const showProductCol = productNames.length > 1;
-
-  // Sort by product_name for grouped display
-  const sortedFabrics = showProductCol
-    ? [...mergedFabrics].sort((a, b) => (a.product_name || '').localeCompare(b.product_name || ''))
-    : mergedFabrics;
-
-  clearRows(ws, 23, 35, [3, 4, 5, 10, 11, 12]);
-  sortedFabrics.slice(0, 13).forEach((item, i) => {
+  // ── Fabric Cost (R23+): cols C=3 eng desc, D=4 cn desc, J=10 USD price, K=11 qty ──
+  const fabricEndRow = FABRIC_START + Math.max(FABRIC_SLOTS, sortedFabrics.length) - 1;
+  clearRows(ws, FABRIC_START, fabricEndRow, [3, 4, 5, 10, 11, 12]);
+  sortedFabrics.forEach((item, i) => {
     const r = 23 + i;
     const engName = item.eng_name || '';
     const cnName = item.fabric_name || '';
-    // C = eng + cn combined when multi-product, otherwise eng in C, cn in D
-    if (showProductCol) {
-      setVal(ws, r, 3, engName && cnName && engName !== cnName ? `${engName}\n${cnName}` : (cnName || engName));
-      setVal(ws, r, 4, item.product_name || '');
-    } else {
-      setVal(ws, r, 3, engName || cnName);
-      setVal(ws, r, 4, engName ? cnName : '');
-    }
+    setVal(ws, r, 3, engName || cnName);
+    setVal(ws, r, 4, engName ? cnName : '');
+    if (showProductCol) setVal(ws, r, 5, item.product_name || '');
     const unitPriceUsd = r2((parseFloat(item.material_price_rmb) || 0) / 0.85 / 7.75 * 1.06);
     const usage = r2(item.usage_amount);
     setVal(ws, r, 10, unitPriceUsd);
@@ -268,30 +292,21 @@ function fillCharacterSheet(ws, d) {
     ws.getCell(r, 12).alignment = { horizontal: 'right' };
   });
 
-  // ── Others Cost: find dynamically ────────────────────────────────────────────
+  // ── Others Cost: find dynamically (post-expansion) ─────────────────────────
   let othersRow = 60;
-  for (let r = 55; r <= 80; r++) {
+  for (let r = 55; r <= 100; r++) {
     const c = ws.getCell(r, 3).value;
     if (c && /Others Cost/i.test(String(c))) { othersRow = r + 1; break; }
   }
-  const otherProductNames = [...new Set(otherItems.map(d => d.product_name || '').filter(Boolean))];
-  const showOtherProductCol = otherProductNames.length > 1;
-  const sortedOthers = showOtherProductCol
-    ? [...otherItems].sort((a, b) => (a.product_name || '').localeCompare(b.product_name || ''))
-    : otherItems;
-
-  clearRows(ws, othersRow, othersRow + 10, [3, 4, 10, 11, 12]);
-  sortedOthers.slice(0, 11).forEach((item, i) => {
+  const othersEndRow = othersRow + Math.max(OTHERS_SLOTS, sortedOthers.length) - 1;
+  clearRows(ws, othersRow, othersEndRow, [3, 4, 10, 11, 12]);
+  sortedOthers.forEach((item, i) => {
     const r = othersRow + i;
     const oEngName = item.eng_name || '';
     const oCnName = item.fabric_name || '';
-    if (showOtherProductCol) {
-      setVal(ws, r, 3, oEngName && oCnName && oEngName !== oCnName ? `${oEngName}\n${oCnName}` : (oCnName || oEngName));
-      setVal(ws, r, 4, item.product_name || '');
-    } else {
-      setVal(ws, r, 3, oEngName || oCnName);
-      setVal(ws, r, 4, oEngName ? oCnName : '');
-    }
+    setVal(ws, r, 3, oEngName || oCnName);
+    setVal(ws, r, 4, oEngName ? oCnName : '');
+    if (showOtherProductCol) setVal(ws, r, 5, item.product_name || '');
     const rmb = parseFloat(item.material_price_rmb) || 0;
     const unitPriceUsd = item.position === '__embroidery__'
       ? r2(rmb / 0.85 / 7.75)
@@ -313,7 +328,7 @@ function fillCharacterSheet(ws, d) {
   const cartonPkgs = packagingItems.filter(p => p.pkg_section === 'carton');
 
   let retailRow = 86, masterRow = 92;
-  for (let r = 80; r <= 110; r++) {
+  for (let r = 80; r <= 130; r++) {
     const c = ws.getCell(r, 3).value;
     if (c && /^Retail box$/i.test(String(c).trim())) retailRow = r + 1;
     if (c && /^Master carton$/i.test(String(c).trim())) masterRow = r + 1;
@@ -380,7 +395,7 @@ function fillCharacterSheet(ws, d) {
 
   // Fixed labor rate from params: labor_hkd / 11hr / hkd_usd (e.g. 275/11/7.75 = 3.226)
   const laborHkd = parseFloat(params.labor_hkd) || 0;
-  const laborRate = laborHkd ? r2(laborHkd / 11 / hkd_usd) : 3.226;
+  const laborRate = laborHkd ? Math.round(laborHkd / 11 / hkd_usd * 1000) / 1000 : 3.226;
   const sewLabor = findLabor(['车缝', 'sew']);
   const cutLabor = findLabor(['裁床', 'cut']);
   const stuffLabor = findLabor(['手工', 'stuff']);
@@ -399,7 +414,7 @@ function fillCharacterSheet(ws, d) {
       const elecHrs = laborRate ? r2(elecLaborUsd / laborRate) : 0;
       // Find Electronics Assembly row dynamically
       let elecAssyRow = 124;
-      for (let r = 120; r <= 140; r++) {
+      for (let r = 120; r <= 170; r++) {
         const c = ws.getCell(r, 3).value;
         if (c && /Electronics Assembly/i.test(String(c))) { elecAssyRow = r; break; }
       }
@@ -409,13 +424,13 @@ function fillCharacterSheet(ws, d) {
 
   // Find Sewing row dynamically
   let sewingRow = 126;
-  for (let r = 120; r <= 140; r++) {
+  for (let r = 120; r <= 170; r++) {
     const c = ws.getCell(r, 3).value;
     if (c && /^Sewing$/i.test(String(c).trim())) { sewingRow = r; break; }
   }
-  // Standard Hour = price_rmb (HKD) / hkd_usd / laborRate (same as UI)
+  // Standard Hour = price_rmb / rmb_hkd / hkd_usd / laborRate
   function laborHrs(item) {
-    const usdPerToy = (parseFloat(item.price_rmb) || 0) / hkd_usd;
+    const usdPerToy = (parseFloat(item.price_rmb) || 0) / rmb_hkd / hkd_usd;
     return laborRate > 0 ? r2(usdPerToy / laborRate) : 0;
   }
   if (sewLabor)   writeLaborRow(sewingRow, laborRate, laborHrs(sewLabor));
@@ -512,11 +527,12 @@ function fillCharacterSheet(ws, d) {
   const metalItems = (d.hardwareItems || []).filter(
     h => !h.part_category || !['electronic', 'labor_assembly'].includes(h.part_category.toLowerCase())
   );
-  // Metal: clear all data + L col formulas
-  clearRows(ws, 38, 45, [3, 4, 10, 11]);
-  for (let r = 38; r <= 45; r++) { const c = ws.getCell(r, 12); delete c._sharedFormula; c.value = null; }
+  // Metal: clear all data + L col formulas (shifted by fabric expansion)
+  const metalStart = 38 + fabricOverflow;
+  clearRows(ws, metalStart, metalStart + 7, [3, 4, 10, 11]);
+  for (let r = metalStart; r <= metalStart + 7; r++) { const c = ws.getCell(r, 12); delete c._sharedFormula; c.value = null; }
   metalItems.slice(0, 8).forEach((item, i) => {
-    const r = 38 + i;
+    const r = metalStart + i;
     ws.getCell(r, 3).value = item.eng_name || item.name || '';
     ws.getCell(r, 4).value = item.eng_name ? (item.name || '') : '';
     const unitUsd = r2((parseFloat(item.new_price) || 0) / rmb_hkd / hkd_usd * 1.06);
@@ -534,10 +550,11 @@ function fillCharacterSheet(ws, d) {
     mCell.alignment = { horizontal: 'right' };
   });
 
-  // ── Electronic Parts Cost (R48+) ─────────────────────────────────────────────
-  clearRows(ws, 48, 48 + Math.max(ELEC_SLOTS, elecList.length) - 1, [3, 4, 10, 11]);
+  // ── Electronic Parts Cost (post-expansion) ──────────────────────────────────
+  const elecStart = ELEC_START + fabricOverflow;
+  clearRows(ws, elecStart, elecStart + Math.max(ELEC_SLOTS, elecList.length) - 1, [3, 4, 10, 11]);
   elecList.forEach((item, i) => {
-    const r = 48 + i;
+    const r = elecStart + i;
     setVal(ws, r, 3,  item.eng_name || item.part_name || '');
     setVal(ws, r, 4,  item.part_name || item.spec || '');
     const unitUsd = r2(parseFloat(item.unit_price_usd) || 0);
@@ -561,7 +578,7 @@ function fillCharacterSheet(ws, d) {
   const spinTr = d.spinTransport || [];
   // Find actual CHINA FCL row dynamically (in case of row shifts)
   let fclRow = 162;
-  for (let r = 160; r <= 200; r++) {
+  for (let r = 160; r <= 230; r++) {
     const b = ws.getCell(r, 2).value;
     if (b && /CHINA FCL/i.test(String(b))) { fclRow = r; break; }
   }
@@ -609,7 +626,7 @@ function fillCharacterSheet(ws, d) {
 
   // ── Markup: find dynamically ──────────────────────────────────────────────────
   let markupRow = 135;
-  for (let r = 130; r <= 160; r++) {
+  for (let r = 130; r <= 190; r++) {
     const b = ws.getCell(r, 2).value;
     if (b && /Material.*EXCLUDING/i.test(String(b))) { markupRow = r; break; }
   }
@@ -742,7 +759,7 @@ async function exportSpinVersion(versionId) {
     let rowShift = 0;
     if (actualSheets.length > 0) {
       const cs = actualSheets[0];
-      for (let r = 175; r <= 210; r++) {
+      for (let r = 175; r <= 240; r++) {
         const a = cs.getCell(r, 1).value;
         if (a && /Ex-Factory/i.test(String(a))) {
           rowShift = r - 179; // template Ex-Factory is at R179

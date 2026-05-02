@@ -17,7 +17,7 @@ const tab_spin_labor = {
     const LABOR_NAMES = /^(裁床人工|车缝人工|手工人工)/;
     const laborItems = filtered.filter(d => d.position === '__labor__' && LABOR_NAMES.test(d.fabric_name || ''));
     const laborTotal = laborItems.reduce((s, d) => {
-      // US$/toy = price_rmb (stored as HKD) × rmb_hkd / hkd_usd
+      // US$/toy = price_rmb (RMB) / rmb_hkd / hkd_usd
       const usdPerToy = (parseFloat(d.price_rmb) || 0) / rmb_hkd / hkd_usd;
       return s + usdPerToy;
     }, 0);

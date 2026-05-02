@@ -1114,50 +1114,6 @@ function parseHardwareSheet(workbook, mainWs) {
   return items;
 }
 
-// ─── SPIN Labor Parser (reads 人工 rows from main 报价明细 sheet) ──────────────
-
-function parseSpinLaborFromMain(ws) {
-  if (!ws) return [];
-  // Row 15: English character names in cols 4–9 (Rocky, Skye, Marshall, Rex, Chase, Rubble)
-  const chars = [];
-  for (let c = 4; c <= 9; c++) {
-    const name = strVal(ws.getCell(15, c));
-    if (name) chars.push({ col: c, name });
-  }
-  if (!chars.length) return [];
-
-  const LABOR_WHITELIST = /^(半成品人工|裁床人工|车缝人工|手工人工)/;
-  const items = [];
-  for (let r = 1; r <= ws.rowCount; r++) {
-    const label = strVal(ws.getCell(r, 2));
-    if (!label || !LABOR_WHITELIST.test(label)) continue;
-    const laborRateUsd = numVal(ws.getCell(r, 6)) || 0; // col F = labor rate USD/hr (3.226)
-    chars.forEach(({ col, name: charName }) => {
-      const costHkd = numVal(ws.getCell(r, col)); // col D = HKD cost per toy
-      if (costHkd == null || costHkd <= 0) return;
-      // Store labor rate as RMB equivalent (display recovers: rateUsd = material_price_rmb / rmbUsdRate)
-      const laborRateRmb = laborRateUsd * 0.85 * 7.75;
-      // Store RMB cost in price_rmb field; display converts: usdPerToy = price_rmb / rmb_hkd / hkd_usd
-      const costRmb = costHkd * 0.85;    // HKD → RMB (consistent with 车缝明细 H column)
-      const defaultHkdUsd = 7.75;
-      const usdPerToy = costRmb / 0.85 / defaultHkdUsd;
-      const stdHour = laborRateUsd > 0 ? usdPerToy / laborRateUsd : 0;
-      items.push({
-        fabric_name: label,
-        position: '__labor__',
-        sub_product: charName,
-        product_name: charName,
-        product_eng: charName,
-        usage_amount: stdHour,
-        material_price_rmb: laborRateRmb,
-        price_rmb: costRmb,              // RMB cost (HKD × 0.85)
-        sort_order: items.length,
-      });
-    });
-  }
-  return items;
-}
-
 // ─── SPIN In-Housed Molding Parser ───────────────────────────────────────────
 // Supports two layouts:
 //   Chinese: 模号|名称|料型|料重(G)|料价(G)|机型(A)|件数|套数|目标数|工|料金额|模费人民币|...|实际秒数|报客秒数|报客模费
@@ -1600,16 +1556,17 @@ async function parseWorkbook(filePath, forceFormat) {
   // plush(TOMY) 用旧版单 sheet 解析；spin 用多 sheet 版本
   try { sewingDetails = format === 'spin' ? parseSewingDetails(workbook) : format === 'plush' ? parseSewingDetailsPlush(workbook) : []; } catch(e) { throw new Error('parseSewingDetails: ' + e.message); }
   // SPIN: labor items come from 车缝明细 (unified RMB source)
-  // SPIN: fill PP胶粒 price from main sheet (PP胶料 row)
-  // SPIN: fill PP胶粒 price from main sheet (PP胶料 row)
-  // PP胶粒 price: find "PP" column in material table (row 1), read 料单价 (row 4) as HKD/g
-  // Store as pseudo-RMB so UI formula (material_price_rmb / rmb_hkd / hkd_usd * 1.06) gives correct USD
+  // SPIN: fill PP胶粒 price from material table — find "PP" column in row 1, read 料单价 (row 4) as HKD/g.
+  // Store as pseudo-RMB so UI formula (material_price_rmb / rmb_hkd / hkd_usd * 1.06) gives correct USD.
+  // Header regex matches PP / PP料 / PP胶 / PP胶料 / PP-1 / PP（白）but rejects sibling plastics
+  // (PPS / PPE / PPA / PPO) which would otherwise be silently mis-priced as PP.
+  const PP_HEADER_RE = /^PP(?![A-Za-z])/i;
   if (format === 'spin') {
     let ppPriceHkdPerG = 0;
     // Find PP column in row 1 material headers
     for (let col = 2; col <= 22; col++) {
       const matType = strVal(ws.getCell(1, col));
-      if (matType && /^PP$/i.test(matType.trim())) {
+      if (matType && PP_HEADER_RE.test(matType.trim())) {
         ppPriceHkdPerG = numVal(ws.getCell(4, col)) || 0;
         break;
       }

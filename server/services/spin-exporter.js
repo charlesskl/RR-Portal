@@ -235,20 +235,54 @@ function fillCharacterSheet(ws, d) {
   const OTHERS_SLOTS = 11;
   const othersOverflow = Math.max(0, sortedOthers.length - OTHERS_SLOTS);
 
-  // Helper: duplicate rows and shift formulas at/after threshold
+  // Helper: duplicate rows and shift formulas with range awareness.
+  // Three cases handled per formula reference:
+  //   (a) Range END equals lastSlotRow      → grow end (subtotal SUM picks up overflow rows)
+  //   (b) Row reference >= threshold         → shift by overflow (rows physically moved down)
+  //   (c) Row reference  < threshold (and != lastSlotRow as range end) → unchanged
   function expandSection(startRow, slots, overflow) {
     if (overflow <= 0) return;
-    ws.duplicateRow(startRow + slots - 1, overflow, true);
-    const re = /([A-Z]+)(\d+)/g;
+    const lastSlotRow = startRow + slots - 1;   // template's last data slot before duplication
+    const threshold   = startRow + slots;        // first row PHYSICALLY shifted by duplicateRow
+    ws.duplicateRow(lastSlotRow, overflow, true);
+
+    // Range pattern: A23:A35, $A$23:$A$35 — capture column+row pairs
+    const rangeRe = /(\$?[A-Z]+\$?)(\d+):(\$?[A-Z]+\$?)(\d+)/g;
+    const cellRe  = /(\$?[A-Z]+\$?)(\d+)/g;
+    // Placeholder uses control chars only (no [A-Z]) so cellRe cannot match it
+    const placeholder = i => `\x01\x02${i}\x02\x01`;
+    const placeholderRe = /\x01\x02(\d+)\x02\x01/g;
+
     ws.eachRow({ includeEmpty: false }, row => {
       row.eachCell({ includeEmpty: false }, cell => {
         const v = cell.value;
         if (!v || typeof v !== 'object' || !v.formula) return;
-        const newF = v.formula.replace(re, (match, col, rowStr) => {
-          const rn = parseInt(rowStr, 10);
-          return rn >= startRow + slots ? col + (rn + overflow) : match;
+
+        // Step 1: replace ranges with placeholders carrying the rewritten ref,
+        // so the single-cell pass below doesn't double-shift their endpoints.
+        const ranges = [];
+        let f = v.formula.replace(rangeRe, (_m, c1, r1, c2, r2) => {
+          const rn1 = parseInt(r1, 10);
+          const rn2 = parseInt(r2, 10);
+          const new1 = rn1 >= threshold ? rn1 + overflow : rn1;
+          let   new2;
+          if (rn2 === lastSlotRow)   new2 = rn2 + overflow;   // grow end (case a)
+          else if (rn2 >= threshold) new2 = rn2 + overflow;   // shift end (case b)
+          else                       new2 = rn2;              // unchanged (case c)
+          ranges.push(`${c1}${new1}:${c2}${new2}`);
+          return placeholder(ranges.length - 1);
         });
-        if (newF !== v.formula) cell.value = { formula: newF, result: v.result };
+
+        // Step 2: shift remaining single-cell refs (those outside any range)
+        f = f.replace(cellRe, (m, col, rowStr) => {
+          const rn = parseInt(rowStr, 10);
+          return rn >= threshold ? col + (rn + overflow) : m;
+        });
+
+        // Step 3: restore ranges
+        f = f.replace(placeholderRe, (_, idx) => ranges[parseInt(idx, 10)]);
+
+        if (f !== v.formula) cell.value = { formula: f, result: v.result };
       });
     });
   }

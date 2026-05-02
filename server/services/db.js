@@ -356,6 +356,30 @@ function initDb() {
     db.exec("ALTER TABLE SewingDetail ADD COLUMN merge_group TEXT");
   }
 
+  // ── One-time migration: SPIN labor price_rmb stored unit changes from HKD to RMB.
+  // Pre-fix code (parseSpinLaborFromMain override) wrote col-D HKD into price_rmb.
+  // Post-fix code reads 车缝明细 col H which is RMB. The display formula now
+  // assumes RMB (price_rmb / rmb_hkd / hkd_usd). Without conversion, legacy rows
+  // would show ~17.6% inflated US$/toy — silently wrong on every old SPIN export.
+  //
+  // Gate column `price_rmb_unit` (default 'rmb') ensures the conversion runs once.
+  // Convert price_rmb = HKD × 0.85 → RMB on rows that match the legacy labor signature
+  // (position='__labor__' and fabric_name contains 人工).
+  if (!sewCols.includes('price_rmb_unit')) {
+    db.exec("ALTER TABLE SewingDetail ADD COLUMN price_rmb_unit TEXT DEFAULT 'rmb'");
+    const result = db.prepare(`
+      UPDATE SewingDetail
+      SET price_rmb = ROUND(price_rmb * 0.85, 4)
+      WHERE position = '__labor__'
+        AND fabric_name LIKE '%人工%'
+        AND price_rmb IS NOT NULL
+        AND price_rmb > 0
+    `).run();
+    if (result.changes > 0) {
+      console.log(`[migration] spin_labor_hkd_to_rmb: converted ${result.changes} legacy labor rows (price_rmb × 0.85)`);
+    }
+  }
+
   // Migrate: add eng_name and SPIN molding fields to MoldPart
   const moldCols = db.prepare('PRAGMA table_info(MoldPart)').all().map(c => c.name);
   if (!moldCols.includes('eng_name'))           db.exec("ALTER TABLE MoldPart ADD COLUMN eng_name TEXT");

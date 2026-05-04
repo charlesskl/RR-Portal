@@ -24,7 +24,7 @@ const tab_spin_molding = {
             data-material="${escapeHtml(m.material || '')}"
             data-weight="${wt}"
             data-resin="${resin}">
-          <td>${escapeHtml(m.description || '')}</td>
+          <td>${escapeHtml(m.description || '')}${m.eng_name ? ' <span style="color:#1976d2;font-size:11px">/ ' + escapeHtml(m.eng_name) + '</span>' : ''}</td>
           <td>${escapeHtml(m.mold_no || '')}</td>
           <td>${escapeHtml(m.part_no || '')}</td>
           <td class="num">${(m.cavity_count != null || m.sets_per_toy != null) ? [m.cavity_count, m.sets_per_toy].filter(v => v != null).join('/') : '—'}</td>

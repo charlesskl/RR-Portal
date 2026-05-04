@@ -28,8 +28,9 @@ const app = (() => {
     'spin-fabric':   typeof tab_spin_fabric !== 'undefined' ? tab_spin_fabric : null,
     'spin-packaging':typeof tab_spin_packaging !== 'undefined' ? tab_spin_packaging : null,
     'spin-labor':    typeof tab_spin_labor !== 'undefined' ? tab_spin_labor : null,
-    'spin-molding':  typeof tab_spin_molding !== 'undefined' ? tab_spin_molding : null,
-    'spin-markup':   typeof tab_spin_markup !== 'undefined' ? tab_spin_markup : null,
+    'spin-molding':    typeof tab_spin_molding !== 'undefined' ? tab_spin_molding : null,
+    'spin-transport':  typeof tab_spin_transport !== 'undefined' ? tab_spin_transport : null,
+    'spin-markup':     typeof tab_spin_markup !== 'undefined' ? tab_spin_markup : null,
     'spin-summary':  typeof tab_spin_summary !== 'undefined' ? tab_spin_summary : null,
   };
 
@@ -504,7 +505,9 @@ const app = (() => {
     const switcher = document.getElementById('spinCharSwitcher');
     if (!switcher) return;
     const all = (data && data.sewing_details) || [];
-    const subProducts = [...new Set(all.map(d => d.sub_product || d.product_name || '').filter(Boolean))];
+    const { keys: subProducts, keyFn: sewingKeyFn } = getSewingGroups(all);
+    // Store keyFn on versionData so tabs can reuse it
+    if (data) data._sewingKeyFn = sewingKeyFn;
     if (subProducts.length === 0) {
       switcher.style.display = 'none';
       return;
@@ -519,6 +522,7 @@ const app = (() => {
       return;
     }
     if (!spinActiveSub || !subProducts.includes(spinActiveSub)) spinActiveSub = subProducts[0];
+
     switcher.innerHTML = `
       <span class="spin-char-label">款式</span>
       ${subProducts.map(sp => `
@@ -560,22 +564,23 @@ const app = (() => {
     const modal = document.getElementById('importModal');
     modal.style.display = 'flex';
 
+    // Client card selection (always bind so "更换客户" works)
+    modal.querySelectorAll('.import-client-card').forEach(card => {
+      card.onclick = () => {
+        const client = card.dataset.client;
+        document.getElementById('importClientSelect').value = client;
+        modal.querySelectorAll('.import-client-card').forEach(c => c.classList.remove('selected'));
+        card.classList.add('selected');
+        setTimeout(() => showImportStep(2, client), 180);
+      };
+    });
+
     // If already in a client context, skip to step 2 directly
     if (currentClient) {
       document.getElementById('importClientSelect').value = currentClient;
       showImportStep(2, currentClient);
     } else {
       showImportStep(1, null);
-      // Client card selection
-      modal.querySelectorAll('.import-client-card').forEach(card => {
-        card.onclick = () => {
-          const client = card.dataset.client;
-          document.getElementById('importClientSelect').value = client;
-          modal.querySelectorAll('.import-client-card').forEach(c => c.classList.remove('selected'));
-          card.classList.add('selected');
-          setTimeout(() => showImportStep(2, client), 180);
-        };
-      });
     }
 
     document.getElementById('importChangeClient').onclick = () => showImportStep(1, null);
@@ -643,7 +648,10 @@ const app = (() => {
       fd.append('file', file);
       const forceClient = document.getElementById('importClientSelect')?.value;
       if (forceClient) fd.append('client', forceClient);
-      const forceFormat = document.getElementById('importFormatSelect')?.value;
+      // Spin Master → always 'spin'; TOMY → use format select (injection/plush)
+      const forceFormat = forceClient === 'Spin Master'
+        ? 'spin'
+        : (document.getElementById('importFormatSelect')?.value || '');
       if (forceFormat) fd.append('force_format', forceFormat);
       const result = await api.importFile(fd);
       status.textContent = `导入成功！产品 #${result.productId} 版本 #${result.versionId}`;

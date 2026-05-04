@@ -5,12 +5,17 @@ const tab_spin_fabric = {
     const all = versionData.sewing_details || [];
     const activeSub = versionData._activeSub;
 
-    const subProducts = [...new Set(all.map(d => d.sub_product || d.product_name || '').filter(Boolean))];
+    const { keys: subProducts, keyFn } = getSewingGroups(all);
     const hasMultiple = subProducts.length > 1;
 
     const filtered = hasMultiple && activeSub
-      ? all.filter(d => (d.sub_product || d.product_name || '') === activeSub)
+      ? all.filter(d => keyFn(d) === activeSub)
       : all;
+
+    // 检查同一 sub_product 下是否有多个 product_name（需要显示产品名列）
+    const productNames = [...new Set(filtered.map(d => d.product_name || '').filter(Boolean))];
+    const showProductCol = productNames.length > 1;
+    const colSpan = showProductCol ? 7 : 6;
 
     const fabricItems = filtered.filter(d => d.position === '__fabric__');
     const otherItems  = filtered.filter(d =>
@@ -28,15 +33,22 @@ const tab_spin_fabric = {
       return list.reduce((s, d) => s + (parseFloat(d.usage_amount) || 0) * toUsd(d.material_price_rmb, d.position), 0);
     }
 
+    // 按 product_name 分组排序
+    function sortByProduct(list) {
+      if (!showProductCol) return list;
+      return [...list].sort((a, b) => (a.product_name || '').localeCompare(b.product_name || ''));
+    }
+
     function renderRows(list) {
-      if (!list.length) return `<tr><td colspan="6" style="text-align:center;color:#aaa;padding:12px">暂无数据，点击 + 添加</td></tr>`;
-      return list.map(d => {
+      if (!list.length) return `<tr><td colspan="${colSpan}" style="text-align:center;color:#aaa;padding:12px">暂无数据，点击 + 添加</td></tr>`;
+      return sortByProduct(list).map(d => {
         const unitUsd = toUsd(d.material_price_rmb, d.position);
         const amount = (parseFloat(d.usage_amount) || 0) * unitUsd;
         return `
           <tr>
             <td class="center"><input type="checkbox" class="row-check" data-id="${d.id}"></td>
             <td class="editable" data-id="${d.id}" data-field="fabric_name" data-type="text">${escapeHtml(d.fabric_name || '')}</td>
+            ${showProductCol ? `<td style="color:#8e44ad;font-size:11px">${escapeHtml(d.product_name || '')}</td>` : ''}
             <td class="editable" data-id="${d.id}" data-field="eng_name" data-type="text" style="color:#1976d2">${escapeHtml(d.eng_name || '')}</td>
             <td class="editable num" data-id="${d.id}" data-field="usage_amount" data-type="number">${formatNumber(d.usage_amount, 4)}</td>
             <td class="num">${formatNumber(unitUsd, 4)}</td>
@@ -110,7 +122,7 @@ const tab_spin_fabric = {
             <table class="data-table">
               <thead><tr>
                 <th style="width:30px"><input type="checkbox" id="spinFabricAll"></th>
-                <th>布料名称</th><th>英文名</th><th>用量/toy</th><th>单价(USD)</th><th>金额(USD)</th>
+                <th>布料名称</th>${showProductCol ? '<th>款式</th>' : ''}<th>英文名</th><th>用量/toy</th><th>单价(USD)</th><th>金额(USD)</th>
               </tr></thead>
               <tbody>${renderRows(fabricItems)}</tbody>
             </table>
@@ -131,7 +143,7 @@ const tab_spin_fabric = {
             <table class="data-table">
               <thead><tr>
                 <th style="width:30px"><input type="checkbox" id="spinOtherAll"></th>
-                <th>名称</th><th>英文名</th><th>用量/toy</th><th>单价(USD)</th><th>金额(USD)</th>
+                <th>名称</th>${showProductCol ? '<th>款式</th>' : ''}<th>英文名</th><th>用量/toy</th><th>单价(USD)</th><th>金额(USD)</th>
               </tr></thead>
               <tbody>${renderRows(otherItems)}</tbody>
             </table>
@@ -186,9 +198,9 @@ const tab_spin_fabric = {
   init(container, versionData, versionId) {
     const all = versionData.sewing_details || [];
     const activeSub = versionData._activeSub;
-    const subProducts = [...new Set(all.map(d => d.sub_product || d.product_name || '').filter(Boolean))];
+    const { keys: subProducts, keyFn } = getSewingGroups(all);
     const filtered = subProducts.length > 1 && activeSub
-      ? all.filter(d => (d.sub_product || d.product_name || '') === activeSub)
+      ? all.filter(d => keyFn(d) === activeSub)
       : all;
 
     const fabricItems = filtered.filter(d => d.position === '__fabric__');

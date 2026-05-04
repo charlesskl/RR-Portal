@@ -6,10 +6,7 @@ const os = require('os');
 const { getDb } = require('../services/db');
 const { parseWorkbook } = require('../services/excel-parser');
 
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 50 * 1024 * 1024 }, // 50MB
-});
+const upload = multer({ storage: multer.memoryStorage() });
 
 // POST /api/import — upload and parse 本厂报价明细 Excel
 router.post('/', upload.single('file'), async (req, res) => {
@@ -22,12 +19,7 @@ router.post('/', upload.single('file'), async (req, res) => {
   fs.writeFileSync(tmpPath, req.file.buffer);
 
   try {
-    const data = await parseWorkbook(tmpPath);
-
-    // Allow frontend to override auto-detected format
-    if (req.body.force_format && ['injection', 'plush', 'spin'].includes(req.body.force_format)) {
-      data.format_type = req.body.force_format;
-    }
+    const data = await parseWorkbook(tmpPath, req.body.force_format);
 
     const db = getDb();
     const now = new Date().toISOString();
@@ -36,9 +28,8 @@ router.post('/', upload.single('file'), async (req, res) => {
     const productNo = data.product.product_no || req.body.item_no || 'UNKNOWN';
     const itemDesc = data.product.item_desc || req.body.item_desc || null;
     const vendor = req.body.vendor || null;
-    // Client is always determined by actual file format — SPIN files → Spin Master, others → TOMY
     const formatType = data.format_type || 'injection';
-    const clientName = formatType === 'spin' ? 'Spin Master' : 'TOMY';
+    const clientName = req.body.client || (formatType === 'spin' ? 'Spin Master' : 'TOMY');
 
     let product = db.prepare('SELECT * FROM Product WHERE item_no = ?').get(productNo);
     if (!product) {
@@ -47,11 +38,10 @@ router.post('/', upload.single('file'), async (req, res) => {
       ).run(productNo, itemDesc, vendor, clientName, now, now);
       product = { id: r.lastInsertRowid, item_no: productNo };
     } else {
-      // Always update client (user explicitly chose it during import)
-      // Update item_desc only if currently empty
+      // Always update client and item_desc on re-import
       const updates = ['client = ?', "updated_at = ?"];
       const uvals = [clientName, now];
-      if (itemDesc && !product.item_desc) {
+      if (itemDesc) {
         updates.unshift('item_desc = ?');
         uvals.unshift(itemDesc);
       }
@@ -74,7 +64,8 @@ router.post('/', upload.single('file'), async (req, res) => {
       versionId = existingVersion.id;
       const tables = ['QuoteParams','MaterialPrice','MachinePrice','MoldPart','HardwareItem',
         'PackagingItem','ElectronicItem','ElectronicSummary','PaintingDetail','TransportConfig',
-        'MoldCost','RawMaterial','BodyAccessory','SewingDetail','RotocastItem','ProductDimension'];
+        'MoldCost','RawMaterial','BodyAccessory','SewingDetail','RotocastItem','ProductDimension',
+        'SpinTransportRow'];
       for (const t of tables) {
         db.prepare(`DELETE FROM ${t} WHERE version_id = ?`).run(versionId);
       }
@@ -95,10 +86,10 @@ router.post('/', upload.single('file'), async (req, res) => {
       // QuoteParams
       const p = data.params || {};
       db.prepare(
-        `INSERT INTO QuoteParams (version_id, hkd_rmb_quote, hkd_rmb_check, rmb_hkd, hkd_usd, labor_hkd, box_price_hkd, markup_body, markup_packaging, markup_labor)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO QuoteParams (version_id, hkd_rmb_quote, hkd_rmb_check, rmb_hkd, hkd_usd, labor_hkd, box_price_hkd, markup_body, markup_packaging, markup_labor, testing_fee_usd)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(versionId, p.hkd_rmb_quote, p.hkd_rmb_check, p.rmb_hkd, p.hkd_usd, p.labor_hkd, p.box_price_hkd,
-        p.markup_body ?? 0.15, p.markup_packaging ?? 0.10, p.markup_labor ?? 0.15);
+        p.markup_body ?? 0.15, p.markup_packaging ?? 0.10, p.markup_labor ?? 0.15, p.testing_fee_usd ?? null);
 
       // MaterialPrice
       const insertMat = db.prepare(
@@ -197,6 +188,17 @@ router.post('/', upload.single('file'), async (req, res) => {
           versionId, pd.labor_cost_hkd, pd.paint_cost_hkd, pd.clamp_count, pd.print_count,
           pd.wipe_count, pd.edge_count, pd.spray_count, pd.total_operations, pd.quoted_price_hkd
         );
+      }
+
+      // SpinTransportRow
+      if (data.spinTransportRows && data.spinTransportRows.length > 0) {
+        const insertTr = db.prepare(
+          `INSERT INTO SpinTransportRow (version_id, description, qty_20, qty_40, usd_per_toy, sort_order)
+           VALUES (?, ?, ?, ?, ?, ?)`
+        );
+        for (const t of data.spinTransportRows) {
+          insertTr.run(versionId, t.description, t.qty_20 ?? null, t.qty_40 ?? null, t.usd_per_toy ?? null, t.sort_order);
+        }
       }
 
       // TransportConfig

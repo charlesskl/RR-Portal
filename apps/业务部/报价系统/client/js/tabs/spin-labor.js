@@ -3,9 +3,9 @@ const tab_spin_labor = {
   render(versionData) {
     const all = versionData.sewing_details || [];
     const activeSub = versionData._activeSub;
-    const subProducts = [...new Set(all.map(d => d.sub_product || d.product_name || '').filter(Boolean))];
+    const { keys: subProducts, keyFn } = getSewingGroups(all);
     const filtered = subProducts.length > 1 && activeSub
-      ? all.filter(d => (d.sub_product || d.product_name || '') === activeSub)
+      ? all.filter(d => keyFn(d) === activeSub)
       : all;
 
     const params  = versionData.params || {};
@@ -17,14 +17,18 @@ const tab_spin_labor = {
     const LABOR_NAMES = /^(裁床人工|车缝人工|手工人工)/;
     const laborItems = filtered.filter(d => d.position === '__labor__' && LABOR_NAMES.test(d.fabric_name || ''));
     const laborTotal = laborItems.reduce((s, d) => {
-      // US$/toy = price_rmb (HKD from col D) / hkd_usd
-      const usdPerToy = (parseFloat(d.price_rmb) || 0) / hkd_usd;
+      // US$/toy = price_rmb (RMB) / rmb_hkd / hkd_usd
+      const usdPerToy = (parseFloat(d.price_rmb) || 0) / rmb_hkd / hkd_usd;
       return s + usdPerToy;
     }, 0);
 
+    // Fixed labor rate from params: labor_hkd / 11hr / hkd_usd (e.g. 275/11/7.75 = 3.226)
+    const laborHkd = parseFloat(params.labor_hkd) || 0;
+    const LABOR_RATE_USD = laborHkd ? Math.round(laborHkd / 11 / hkd_usd * 1000) / 1000 : 3.226;
+
     const laborRows = laborItems.map(d => {
-      const rateUsd = (parseFloat(d.material_price_rmb) || 0) / rmbUsdRate; // labor rate USD/hr
-      const usdPerToy = (parseFloat(d.price_rmb) || 0) / hkd_usd;           // col D HKD → USD
+      const rateUsd = LABOR_RATE_USD;
+      const usdPerToy = (parseFloat(d.price_rmb) || 0) / rmb_hkd / hkd_usd;
       const stdHour = rateUsd > 0 ? usdPerToy / rateUsd : 0;                // standard hour
       return `
         <tr>
@@ -102,7 +106,7 @@ const tab_spin_labor = {
                 <th>Description</th><th>Labor rate (US$/hr)</th><th>Standard Hour</th><th>US$ per toy</th>
               </tr></thead>
               <tbody>${(() => {
-                const PACKING_LABOR_RATE = 3.226;
+                const PACKING_LABOR_RATE = LABOR_RATE_USD;
                 const hkdUsd = parseFloat((versionData.params || {}).hkd_usd) || 7.75;
                 const NAMES = /半成品人工|包装人工|查货/;
                 const items = (versionData.hardware_items || [])
@@ -146,7 +150,7 @@ const tab_spin_labor = {
               </tr></thead>
               <tbody>
                 ${(() => {
-                  const ELEC_RATE = 3.226;
+                  const ELEC_RATE = LABOR_RATE_USD;
                   const items = [
                     { label: 'SMT (贴片成本)',         rmb: parseFloat(elecSummary.smt_cost) || 0 },
                     { label: 'Labor (人工成本)',        rmb: parseFloat(elecSummary.labor_cost) || 0 },
@@ -182,9 +186,9 @@ const tab_spin_labor = {
   init(container, versionData, versionId) {
     const all = versionData.sewing_details || [];
     const activeSub = versionData._activeSub;
-    const subProducts = [...new Set(all.map(d => d.sub_product || d.product_name || '').filter(Boolean))];
+    const { keys: subProducts, keyFn } = getSewingGroups(all);
     const filtered = subProducts.length > 1 && activeSub
-      ? all.filter(d => (d.sub_product || d.product_name || '') === activeSub)
+      ? all.filter(d => keyFn(d) === activeSub)
       : all;
     const LABOR_NAMES = /^(裁床人工|车缝人工|手工人工)/;
     const laborItems = filtered.filter(d => d.position === '__labor__' && LABOR_NAMES.test(d.fabric_name || ''));

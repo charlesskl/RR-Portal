@@ -14,6 +14,7 @@ const LIST_SECTIONS = {
   'raw-material': 'RawMaterial',
   'sewing-detail': 'SewingDetail',
   'rotocast': 'RotocastItem',
+  'spin-transport': 'SpinTransportRow',
 };
 
 // Singleton sections (one record per version)
@@ -43,6 +44,7 @@ const ALL_SECTION_TABLES = {
   raw_materials: 'RawMaterial',
   sewing_details: 'SewingDetail',
   rotocast_items: 'RotocastItem',
+  spin_transport_rows: 'SpinTransportRow',
 };
 
 // Helper: get columns for a table (excluding id and version_id)
@@ -79,6 +81,10 @@ router.get('/:id', (req, res) => {
       } else {
         result[key] = rows;
       }
+    }
+    // Ensure spin_transport_rows is always included (explicit fallback)
+    if (!('spin_transport_rows' in result)) {
+      result.spin_transport_rows = db.prepare('SELECT * FROM SpinTransportRow WHERE version_id = ?').all(req.params.id);
     }
     res.json(result);
   } catch (err) {
@@ -491,33 +497,16 @@ router.post('/:id/translate-all', async (req, res) => {
     if (!version) return res.status(404).json({ error: 'Version not found' });
     const vid = req.params.id;
 
-    // 用阿里云百炼（Bailian）OpenAI 兼容端点 + Qwen 文本模型做翻译。
-    // 走文本模型（qwen-turbo 便宜够用，几分之一秒/行），不是视觉 VL。
-    async function bailianTranslate(text) {
-      const apiKey = process.env.BAILIAN_API_KEY;
-      if (!apiKey) throw new Error('BAILIAN_API_KEY 未配置');
-      const baseUrl = (process.env.BAILIAN_BASE_URL || 'https://dashscope.aliyuncs.com/compatible-mode/v1').replace(/\/$/, '');
-      const model = process.env.BAILIAN_TEXT_MODEL || 'qwen-turbo';
-      const resp = await fetch(`${baseUrl}/chat/completions`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model,
-          messages: [
-            { role: 'system', content: '你是玩具/模具/包装制造业术语专业翻译。把中文短语译成简洁的英文物料名。只输出翻译结果，不要加引号、解释、前缀。' },
-            { role: 'user', content: text },
-          ],
-          temperature: 0,
-        }),
-      });
-      if (!resp.ok) {
-        const body = await resp.text().catch(() => '');
-        throw new Error(`Bailian ${resp.status}: ${body.slice(0, 200)}`);
-      }
+    async function myMemoryTranslate(text) {
+      const appid = process.env.BAIDU_APPID;
+      const key = process.env.BAIDU_KEY;
+      const salt = Date.now().toString();
+      const sign = crypto.createHash('md5').update(appid + text + salt + key).digest('hex');
+      const url = `https://fanyi-api.baidu.com/api/trans/vip/translate?q=${encodeURIComponent(text)}&from=zh&to=en&appid=${appid}&salt=${salt}&sign=${sign}`;
+      const resp = await fetch(url);
       const data = await resp.json();
-      const out = data?.choices?.[0]?.message?.content?.trim();
-      if (!out) throw new Error('Bailian returned empty translation');
-      return out;
+      if (data.trans_result && data.trans_result[0]) return data.trans_result[0].dst;
+      throw new Error(data.error_msg || 'Translation failed');
     }
 
     const EMPTY = "(eng_name IS NULL OR eng_name = '')";
@@ -570,7 +559,7 @@ router.post('/:id/translate-all', async (req, res) => {
         }
         try {
           if (cache[text] === undefined) {
-            cache[text] = await bailianTranslate(text);
+            cache[text] = await myMemoryTranslate(text);
           }
           update.run(cache[text], row.id);
           total++;
@@ -588,6 +577,50 @@ router.post('/:id/translate-all', async (req, res) => {
 router.post('/:id/translate-sewing', async (req, res) => {
   req.url = `/${req.params.id}/translate-all`;
   res.redirect(307, `/api/versions/${req.params.id}/translate-all`);
+});
+
+// ─── Merge / Unmerge sewing product segments ────────────────────────────────
+router.post('/:id/merge-sewing', (req, res) => {
+  const db = getDb();
+  const versionId = req.params.id;
+  const { product_names, group_name } = req.body;
+  if (!Array.isArray(product_names) || product_names.length < 2) {
+    return res.status(400).json({ error: 'Need at least 2 product_names to merge' });
+  }
+  const gn = group_name || product_names.join(' + ');
+  const placeholders = product_names.map(() => '?').join(',');
+  db.prepare(
+    `UPDATE SewingDetail SET merge_group = ? WHERE version_id = ? AND (product_name IN (${placeholders}) OR sub_product IN (${placeholders}))`
+  ).run(gn, versionId, ...product_names, ...product_names);
+  res.json({ ok: true, merge_group: gn });
+});
+
+router.delete('/:id/merge-sewing', (req, res) => {
+  const db = getDb();
+  const versionId = req.params.id;
+  const { merge_group } = req.body || {};
+  if (merge_group) {
+    db.prepare('UPDATE SewingDetail SET merge_group = NULL WHERE version_id = ? AND merge_group = ?').run(versionId, merge_group);
+  } else {
+    db.prepare('UPDATE SewingDetail SET merge_group = NULL WHERE version_id = ?').run(versionId);
+  }
+  res.json({ ok: true });
+});
+
+// GET merge groups for a version
+router.get('/:id/merge-sewing', (req, res) => {
+  const db = getDb();
+  const rows = db.prepare(
+    'SELECT DISTINCT merge_group, product_name, sub_product FROM SewingDetail WHERE version_id = ? AND merge_group IS NOT NULL ORDER BY merge_group'
+  ).all(req.params.id);
+  // Group by merge_group
+  const groups = {};
+  for (const r of rows) {
+    const key = r.sub_product || r.product_name;
+    if (!groups[r.merge_group]) groups[r.merge_group] = [];
+    if (!groups[r.merge_group].includes(key)) groups[r.merge_group].push(key);
+  }
+  res.json(groups);
 });
 
 module.exports = router;

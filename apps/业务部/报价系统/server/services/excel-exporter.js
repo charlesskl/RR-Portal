@@ -8,6 +8,7 @@ const { getDb } = require('./db');
 
 const TEMPLATE_PATH       = path.join(__dirname, '../templates/VQ-template.xlsx');
 const TEMPLATE_PATH_PLUSH = path.join(__dirname, '../templates/VQ-template-plush.xlsx');
+const TEMPLATE_PATH_SPIN  = path.join(__dirname, '../templates/VQ-template-spin.xlsx');
 
 // ─── Load all version data from DB ───────────────────────────────────────────
 
@@ -36,14 +37,17 @@ function loadData(versionId) {
     sewingLaborItems: db.prepare("SELECT * FROM SewingDetail WHERE version_id = ? AND position = '__labor__' ORDER BY sort_order").all(versionId),
     assemblyLaborItems: db.prepare("SELECT * FROM HardwareItem WHERE version_id = ? AND part_category = 'labor_assembly' ORDER BY sort_order").all(versionId),
     rotocastItems:  db.prepare('SELECT * FROM RotocastItem WHERE version_id = ? ORDER BY sort_order').all(versionId),
+    sewingFabric:   db.prepare("SELECT * FROM SewingDetail WHERE version_id = ? AND position = '__fabric__' ORDER BY sort_order").all(versionId),
+    sewingOther:    db.prepare("SELECT * FROM SewingDetail WHERE version_id = ? AND position IN ('__other__', '__embroidery__') ORDER BY sort_order").all(versionId),
+    spinTransport:  db.prepare('SELECT * FROM SpinTransportRow WHERE version_id = ? ORDER BY sort_order').all(versionId),
   };
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-// Bilingual name: "中文 / English" when eng_name exists, otherwise just Chinese
+// Bilingual name: "English 中文" when eng_name exists, otherwise just Chinese
 function biName(zh, eng) {
-  if (eng && eng.trim()) return `${zh || ''} / ${eng.trim()}`;
+  if (eng && eng.trim()) return `${eng.trim()} ${zh || ''}`;
   return zh || '';
 }
 
@@ -537,8 +541,8 @@ function fillBCD(ws, d) {
     const r = C3_DATA_START + i;
     const usage = parseFloat(item.usage_qty) || 1;
     const unitPrice = r2(parseFloat(item.unit_price) || 0);
-    ws.getCell(r, 2).value = biName(item.description, item.eng_name);
-    ws.getCell(r, 3).value = usage > 1 ? 'pcs' : 'pc';
+    ws.getCell(r, 2).value = item.eng_name || item.description || '';
+    ws.getCell(r, 3).value = item.eng_name ? (item.description || '') : '';
     ws.getCell(r, 4).value = usage;
     ws.getCell(r, 5).value = unitPrice;
     forceWriteFormula(r, 6, `D${r}*E${r}`, r2(usage * unitPrice));
@@ -810,17 +814,361 @@ function fixSharedFormulas(wb) {
   });
 }
 
+// ─── Fill merged sewing detail sheets ─────────────────────────────────────────
+
+function fillSewingSheets(wb, versionId) {
+  const db = getDb();
+  const allSewing = db.prepare(
+    "SELECT * FROM SewingDetail WHERE version_id = ? AND position IN ('__fabric__', '__other__', '__embroidery__') ORDER BY sort_order"
+  ).all(versionId);
+
+  if (!allSewing.length) return;
+
+  // Group by merge_group
+  const groups = {};
+  for (const item of allSewing) {
+    const key = item.merge_group || item.sub_product || item.product_name || 'default';
+    if (!groups[key]) groups[key] = [];
+    groups[key].push(item);
+  }
+
+  const FONT = { size: 9, name: '宋体' };
+  const FONT_BOLD = { size: 9, name: '宋体', bold: true };
+  const HEADER_FILL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFFCC' } };
+  const TITLE_FILL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFF00' } };
+  const BORDER_THIN = { top: { style: 'thin' }, bottom: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' } };
+
+  for (const [groupName, items] of Object.entries(groups)) {
+    if (!items[0].merge_group) continue;
+
+    const sheetName = `车缝明细_${groupName}`.slice(0, 31);
+    const ws = wb.addWorksheet(sheetName);
+
+    ws.columns = [
+      { width: 4 },   // A
+      { width: 28 },  // B 物料名称
+      { width: 18 },  // C 裁片部位
+      { width: 12 },  // D 供应商
+      { width: 12 },  // E 布料MOQ/Y
+      { width: 10 },  // F 用量/码
+      { width: 10 },  // G 单价
+      { width: 8 },   // H 成本
+      { width: 8 },   // I 码点
+      { width: 10 },  // J 价钱
+    ];
+
+    // Group items by product_name
+    const byProduct = {};
+    for (const item of items) {
+      const pn = item.product_name || '';
+      if (!byProduct[pn]) byProduct[pn] = [];
+      byProduct[pn].push(item);
+    }
+
+    // Get common eng name (sub_product or first item's eng_name)
+    const engName = items[0].sub_product || '';
+
+    let row = 1;
+    for (const [productName, productItems] of Object.entries(byProduct)) {
+      // ── Product title row (yellow background, like original Excel) ──
+      const titleRow = ws.getRow(row);
+      ws.mergeCells(row, 2, row, 3);
+      titleRow.getCell(2).value = productName;
+      titleRow.getCell(2).font = { size: 12, name: '宋体', bold: true };
+      titleRow.getCell(2).fill = TITLE_FILL;
+      titleRow.getCell(4).value = engName;
+      titleRow.getCell(4).font = { size: 10, name: 'Arial', bold: true };
+      titleRow.getCell(4).fill = TITLE_FILL;
+      for (let c = 2; c <= 10; c++) titleRow.getCell(c).border = BORDER_THIN;
+      row++;
+
+      // ── Header row ──
+      const headers = ['', '物料名称', '裁片部位', '供应商', '布料MOQ/Y', '用量/码', '单价', '成本', '码点', '价钱'];
+      const hdrRow = ws.getRow(row);
+      headers.forEach((h, i) => {
+        const cell = hdrRow.getCell(i + 1);
+        cell.value = h;
+        cell.font = FONT_BOLD;
+        cell.fill = HEADER_FILL;
+        cell.border = BORDER_THIN;
+        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+      });
+      row++;
+
+      // Separate fabric and other items
+      const fabricItems = productItems.filter(d => d.position === '__fabric__');
+      const otherItems = productItems.filter(d => d.position !== '__fabric__');
+
+      // ── Fabric rows ──
+      for (const item of fabricItems) {
+        const r = ws.getRow(row);
+        r.getCell(2).value = biName(item.fabric_name, item.eng_name);
+        r.getCell(3).value = item.position === '__fabric__' ? '' : item.position;
+        r.getCell(6).value = parseFloat(item.usage_amount) || null;
+        r.getCell(7).value = parseFloat(item.material_price_rmb) || null;
+        const total = (parseFloat(item.usage_amount) || 0) * (parseFloat(item.material_price_rmb) || 0);
+        r.getCell(8).value = total || null;
+        r.getCell(9).value = parseFloat(item.markup_point) || 1.15;
+        r.getCell(10).value = total * (parseFloat(item.markup_point) || 1.15) || null;
+        for (let c = 2; c <= 10; c++) { r.getCell(c).font = FONT; r.getCell(c).border = BORDER_THIN; }
+        row++;
+      }
+
+      // ── Other Cost header ──
+      if (otherItems.length) {
+        row++; // blank separator
+        const othHdr = ws.getRow(row);
+        othHdr.getCell(2).value = 'Others Cost';
+        othHdr.getCell(2).font = FONT_BOLD;
+        row++;
+
+        for (const item of otherItems) {
+          const r = ws.getRow(row);
+          r.getCell(2).value = biName(item.fabric_name, item.eng_name);
+          r.getCell(3).value = productName; // 中文名称标注
+          r.getCell(6).value = parseFloat(item.usage_amount) || null;
+          r.getCell(7).value = parseFloat(item.material_price_rmb) || null;
+          const total = (parseFloat(item.usage_amount) || 0) * (parseFloat(item.material_price_rmb) || 0);
+          r.getCell(8).value = total || null;
+          r.getCell(9).value = parseFloat(item.markup_point) || 1.15;
+          r.getCell(10).value = total * (parseFloat(item.markup_point) || 1.15) || null;
+          for (let c = 2; c <= 10; c++) { r.getCell(c).font = FONT; r.getCell(c).border = BORDER_THIN; }
+          row++;
+        }
+      }
+
+      row++; // blank row between product sections
+    }
+
+    // ── Grand total ──
+    const totalRow = ws.getRow(row);
+    totalRow.getCell(2).value = '合计';
+    totalRow.getCell(2).font = FONT_BOLD;
+    totalRow.getCell(10).value = { formula: `SUM(J1:J${row - 1})`, result: null };
+    totalRow.getCell(10).font = FONT_BOLD;
+    for (let c = 2; c <= 10; c++) totalRow.getCell(c).border = BORDER_THIN;
+  }
+}
+
+// ─── SPIN: Fill a character sheet ─────────────────────────────────────────────
+
+function fillSpinCharSheet(ws, d, subProduct) {
+  const { version, product, params, moldParts, bodyAccessories, electronicItems,
+          packagingItems, sewingFabric, sewingOther, sewingLaborItems, spinTransport } = d;
+
+  // ── Header ──
+  setVal(ws, 5, 3, product?.item_no || '');
+  setVal(ws, 7, 3, product?.item_desc || '');
+  setVal(ws, 3, 14, version.prepared_by || '');
+  setVal(ws, 5, 14, version.quote_date || new Date());
+
+  // Filter data by sub_product if applicable
+  const filterBySub = (items) => {
+    if (!subProduct) return items;
+    const filtered = items.filter(i => (i.sub_product || i.product_name || '') === subProduct);
+    return filtered.length ? filtered : items;
+  };
+
+  // ── In-Housed Molding (R10-R17, 8 slots) ──
+  const molds = moldParts || [];
+  molds.forEach((m, i) => {
+    if (i >= 8) return;
+    const r = 10 + i;
+    ws.getCell(r, 3).value = m.eng_name && m.description ? `${m.eng_name} ${m.description}` : (m.description || '');
+    ws.getCell(r, 4).value = m.mold_no || '';
+    setVal(ws, r, 5, m.part_no || '');
+    if (m.cavity_count) setVal(ws, r, 6, m.cavity_count);
+    if (m.sets_per_toy) setVal(ws, r, 8, m.sets_per_toy);
+    setVal(ws, r, 9, m.material || '');
+    if (m.resin_price_usd_kg) setVal(ws, r, 10, m.resin_price_usd_kg);
+    if (m.weight_g) setVal(ws, r, 11, m.weight_g);
+    const usd = m.usd_per_toy || (m.resin_price_usd_kg && m.weight_g ? m.resin_price_usd_kg * m.weight_g / 1000 : null);
+    if (usd) setVal(ws, r, 12, usd);
+    if (m.molding_cost_usd) setVal(ws, r, 14, m.molding_cost_usd);
+    if (m.cycle_time_sec) setVal(ws, r, 15, m.cycle_time_sec);
+    if (m.machine_type) setVal(ws, r, 16, m.machine_type);
+  });
+
+  // ── Purchased Part: Fabric Cost (R23-R35, 13 slots) ──
+  const fabrics = filterBySub(sewingFabric || []);
+  fabrics.forEach((item, i) => {
+    if (i >= 13) return;
+    const r = 23 + i;
+    setVal(ws, r, 3, item.eng_name || item.fabric_name || '');
+    setVal(ws, r, 4, item.fabric_name || '');
+    if (item.material_price_rmb) setVal(ws, r, 10, item.material_price_rmb);
+    if (item.usage_amount) setVal(ws, r, 11, item.usage_amount);
+    const amt = (parseFloat(item.usage_amount) || 0) * (parseFloat(item.material_price_rmb) || 0);
+    if (amt) setVal(ws, r, 12, amt);
+  });
+
+  // ── Metal Parts Cost (R38-R45, 8 slots) — C=英文, D=中文 ──
+  const metals = (bodyAccessories || []).filter(b => (b.category || '五金') === '五金');
+  metals.forEach((item, i) => {
+    if (i >= 8) return;
+    const r = 38 + i;
+    ws.getCell(r, 3).value = item.eng_name || item.description || '';
+    ws.getCell(r, 4).value = item.eng_name ? (item.description || '') : '';
+    if (item.unit_price) setVal(ws, r, 10, item.unit_price);
+    if (item.usage_qty) setVal(ws, r, 11, item.usage_qty);
+    const amt = (parseFloat(item.usage_qty) || 0) * (parseFloat(item.unit_price) || 0);
+    if (amt) setVal(ws, r, 12, amt);
+  });
+
+  // ── Electronic Parts Cost (R48-R57, 10 slots) ──
+  (electronicItems || []).forEach((item, i) => {
+    if (i >= 10) return;
+    const r = 48 + i;
+    setVal(ws, r, 3, item.eng_name || item.part_name || '');
+    setVal(ws, r, 4, item.part_name || '');
+    if (item.unit_price) setVal(ws, r, 10, item.unit_price);
+    if (item.quantity) setVal(ws, r, 11, item.quantity);
+    const amt = (parseFloat(item.quantity) || 0) * (parseFloat(item.unit_price) || 0);
+    if (amt) setVal(ws, r, 12, amt);
+  });
+
+  // ── Others Cost (R60-R70, 11 slots) ──
+  const others = filterBySub(sewingOther || []);
+  others.forEach((item, i) => {
+    if (i >= 11) return;
+    const r = 60 + i;
+    setVal(ws, r, 3, item.eng_name || item.fabric_name || '');
+    setVal(ws, r, 4, item.fabric_name || '');
+    if (item.material_price_rmb) setVal(ws, r, 10, item.material_price_rmb);
+    if (item.usage_amount) setVal(ws, r, 11, item.usage_amount);
+    const amt = (parseFloat(item.usage_amount) || 0) * (parseFloat(item.material_price_rmb) || 0);
+    if (amt) setVal(ws, r, 12, amt);
+  });
+
+  // ── Packaging (R86-R96, 11 slots) ──
+  (packagingItems || []).forEach((item, i) => {
+    if (i >= 11) return;
+    const r = 86 + i;
+    setVal(ws, r, 3, item.eng_name || item.name || '');
+    setVal(ws, r, 4, item.name || '');
+    if (item.new_price) setVal(ws, r, 10, item.new_price);
+    const qty = item.quantity || 1;
+    setVal(ws, r, 11, qty);
+    const amt = (parseFloat(qty) || 0) * (parseFloat(item.new_price) || 0);
+    if (amt) setVal(ws, r, 12, amt);
+  });
+
+  // ── Labor Misc (R123-R130) ──
+  const laborItems = filterBySub(sewingLaborItems || []);
+  // Map labor items to template rows by keyword
+  const laborMap = {
+    '车缝': 126, // Sewing
+    '包装': 128, // Packing
+    '裁床': 129, // Cutting
+    '手工': 130, // Stuffing and manual
+  };
+  for (const item of laborItems) {
+    const name = item.fabric_name || '';
+    for (const [keyword, row] of Object.entries(laborMap)) {
+      if (name.includes(keyword)) {
+        const rate = parseFloat(item.material_price_rmb) || 0;
+        const hrs = parseFloat(item.usage_amount) || 0;
+        if (rate) setVal(ws, row, 10, rate);
+        if (hrs) setVal(ws, row, 11, hrs);
+        if (rate && hrs) setVal(ws, row, 12, rate * hrs);
+        break;
+      }
+    }
+  }
+
+  // ── Transportation (R162-R172) ──
+  const transport = spinTransport || [];
+  const trMap = {
+    'CHINA FCL': 162, 'HK FCL': 164,
+    'CHINA LCL 1': 166, 'CHINA LCL 2': 167, 'CHINA LCL 3': 168,
+    'HK LCL 1': 170, 'HK LCL 2': 171, 'HK LCL 3': 172,
+  };
+  for (const tr of transport) {
+    const desc = (tr.description || '').toUpperCase();
+    for (const [key, row] of Object.entries(trMap)) {
+      if (desc.includes(key) || (key === 'CHINA FCL' && desc.includes('盐田') && desc.includes('40'))
+        || (key === 'HK FCL' && desc.includes('HK') && desc.includes('40'))) {
+        if (tr.qty_20) setVal(ws, row, 3, tr.qty_20);
+        if (tr.qty_40) setVal(ws, row, 9, tr.qty_40);
+        if (tr.usd_per_toy) setVal(ws, row, 12, tr.usd_per_toy);
+        break;
+      }
+    }
+  }
+
+  // ── Misc Cost: testing fee (R147) ──
+  // Use params if available
+  if (params.testing_fee) {
+    setVal(ws, 147, 10, parseFloat(params.testing_fee));
+    setVal(ws, 147, 11, 1);
+  }
+}
+
+function fillSpinSummary(ws, d) {
+  const { version, product, params } = d;
+  // Header
+  setVal(ws, 6, 3, product?.item_no || '');
+  setVal(ws, 8, 3, product?.item_desc || '');
+  setVal(ws, 4, 14, version.prepared_by || '');
+  setVal(ws, 8, 14, version.quote_date || new Date());
+}
+
 async function exportVersion(versionId) {
   const d = loadData(versionId);
+  const isSpin = d.version.format_type === 'spin';
+
+  const templatePath = isSpin ? TEMPLATE_PATH_SPIN : TEMPLATE_PATH;
   const wb = new ExcelJS.Workbook();
-  await wb.xlsx.readFile(TEMPLATE_PATH);
+  await wb.xlsx.readFile(templatePath);
 
   // Force Excel to recalculate all formulas on open
   wb.calcProperties = { fullCalcOnLoad: true };
 
-  fixSharedFormulas(wb);
+  // Remove all images and external references from template
+  wb.worksheets.forEach(ws => { if (ws._media) ws._media = []; });
+  if (wb.media) wb.media = [];
+  if (wb._definedNames) {
+    wb._definedNames.model = (wb._definedNames.model || []).filter(d => !d.ranges?.some(r => /\[/.test(r)));
+  }
 
-  {
+  if (isSpin) {
+    // SPIN export: fill Summary + character sheets
+    const summaryWs = wb.getWorksheet('Summary');
+    if (summaryWs) fillSpinSummary(summaryWs, d);
+
+    // Get distinct sub_products from sewing data
+    const allSewing = [...(d.sewingFabric || []), ...(d.sewingOther || []), ...(d.sewingLaborItems || [])];
+    const subProducts = [...new Set(allSewing.map(s => s.sub_product || s.product_name || '').filter(Boolean))];
+
+    // Template has pre-existing character sheets — use first one as template, clone for others
+    const templateSheets = wb.worksheets.filter(ws => ws.name !== 'Summary');
+
+    if (subProducts.length <= 1) {
+      // Single product: fill the first character sheet, rename it, remove extras
+      const firstSheet = templateSheets[0];
+      if (firstSheet) {
+        const sheetName = subProducts[0] || product?.item_desc || 'Product';
+        firstSheet.name = sheetName.slice(0, 31);
+        fillSpinCharSheet(firstSheet, d, subProducts[0] || null);
+      }
+      // Remove extra template sheets
+      for (let i = 1; i < templateSheets.length; i++) {
+        wb.removeWorksheet(templateSheets[i].id);
+      }
+    } else {
+      // Multiple sub_products: fill each template sheet, rename
+      for (let i = 0; i < subProducts.length && i < templateSheets.length; i++) {
+        templateSheets[i].name = subProducts[i].slice(0, 31);
+        fillSpinCharSheet(templateSheets[i], d, subProducts[i]);
+      }
+      // Remove unused template sheets
+      for (let i = subProducts.length; i < templateSheets.length; i++) {
+        wb.removeWorksheet(templateSheets[i].id);
+      }
+    }
+  } else {
+    // TOMY export
+    fixSharedFormulas(wb);
     const vqWs  = wb.getWorksheet('Vendor Quotation');
     const bcdWs = wb.getWorksheet('Body Cost Breakdown');
     if (!vqWs)  throw new Error('Template missing "Vendor Quotation" sheet');
@@ -828,6 +1176,9 @@ async function exportVersion(versionId) {
     fillVQ(vqWs, d);
     fillBCD(bcdWs, d);
   }
+
+  // Add merged sewing detail sheets
+  fillSewingSheets(wb, versionId);
 
   return wb.xlsx.writeBuffer();
 }

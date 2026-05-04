@@ -268,6 +268,16 @@ function initDb() {
       sort_order INTEGER DEFAULT 0
     );
 
+    CREATE TABLE IF NOT EXISTS SpinTransportRow (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      version_id INTEGER NOT NULL REFERENCES QuoteVersion(id) ON DELETE CASCADE,
+      description TEXT,
+      qty_20 REAL,
+      qty_40 REAL,
+      usd_per_toy REAL,
+      sort_order INTEGER DEFAULT 0
+    );
+
     CREATE TABLE IF NOT EXISTS RefMaterialPrice (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       material_name TEXT NOT NULL,
@@ -341,6 +351,33 @@ function initDb() {
   }
   if (!sewCols.includes('sub_product')) {
     db.exec("ALTER TABLE SewingDetail ADD COLUMN sub_product TEXT");
+  }
+  if (!sewCols.includes('merge_group')) {
+    db.exec("ALTER TABLE SewingDetail ADD COLUMN merge_group TEXT");
+  }
+
+  // ── One-time migration: SPIN labor price_rmb stored unit changes from HKD to RMB.
+  // Pre-fix code (parseSpinLaborFromMain override) wrote col-D HKD into price_rmb.
+  // Post-fix code reads 车缝明细 col H which is RMB. The display formula now
+  // assumes RMB (price_rmb / rmb_hkd / hkd_usd). Without conversion, legacy rows
+  // would show ~17.6% inflated US$/toy — silently wrong on every old SPIN export.
+  //
+  // Gate column `price_rmb_unit` (default 'rmb') ensures the conversion runs once.
+  // Convert price_rmb = HKD × 0.85 → RMB on rows that match the legacy labor signature
+  // (position='__labor__' and fabric_name contains 人工).
+  if (!sewCols.includes('price_rmb_unit')) {
+    db.exec("ALTER TABLE SewingDetail ADD COLUMN price_rmb_unit TEXT DEFAULT 'rmb'");
+    const result = db.prepare(`
+      UPDATE SewingDetail
+      SET price_rmb = ROUND(price_rmb * 0.85, 4)
+      WHERE position = '__labor__'
+        AND fabric_name LIKE '%人工%'
+        AND price_rmb IS NOT NULL
+        AND price_rmb > 0
+    `).run();
+    if (result.changes > 0) {
+      console.log(`[migration] spin_labor_hkd_to_rmb: converted ${result.changes} legacy labor rows (price_rmb × 0.85)`);
+    }
   }
 
   // Migrate: add eng_name and SPIN molding fields to MoldPart
@@ -431,6 +468,7 @@ function initDb() {
   // Migrate: add markup_labor to QuoteParams
   const qpCols = db.prepare('PRAGMA table_info(QuoteParams)').all().map(c => c.name);
   if (!qpCols.includes('markup_labor')) db.exec("ALTER TABLE QuoteParams ADD COLUMN markup_labor REAL DEFAULT 0.15");
+  if (!qpCols.includes('testing_fee_usd')) db.exec("ALTER TABLE QuoteParams ADD COLUMN testing_fee_usd REAL");
 
   // Migrate: add client quote columns to RefMaterialPrice
   const refMatCols = db.prepare('PRAGMA table_info(RefMaterialPrice)').all().map(c => c.name);

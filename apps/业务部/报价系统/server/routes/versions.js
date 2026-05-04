@@ -497,16 +497,34 @@ router.post('/:id/translate-all', async (req, res) => {
     if (!version) return res.status(404).json({ error: 'Version not found' });
     const vid = req.params.id;
 
-    async function myMemoryTranslate(text) {
-      const appid = process.env.BAIDU_APPID;
-      const key = process.env.BAIDU_KEY;
-      const salt = Date.now().toString();
-      const sign = crypto.createHash('md5').update(appid + text + salt + key).digest('hex');
-      const url = `https://fanyi-api.baidu.com/api/trans/vip/translate?q=${encodeURIComponent(text)}&from=zh&to=en&appid=${appid}&salt=${salt}&sign=${sign}`;
-      const resp = await fetch(url);
+    // 用阿里云百炼（Bailian）OpenAI 兼容端点 + Qwen 文本模型做翻译。
+    // API key 由 docker-compose 注入（BAOJIA_BAILIAN_API_KEY → 容器内 BAILIAN_API_KEY），
+    // 与 paiji / peise 共用同一把 key 的 per-app 前缀惯例。
+    async function bailianTranslate(text) {
+      const apiKey = process.env.BAILIAN_API_KEY;
+      if (!apiKey) throw new Error('BAILIAN_API_KEY 未配置');
+      const baseUrl = (process.env.BAILIAN_BASE_URL || 'https://dashscope.aliyuncs.com/compatible-mode/v1').replace(/\/$/, '');
+      const model = process.env.BAILIAN_TEXT_MODEL || 'qwen-turbo';
+      const resp = await fetch(`${baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model,
+          messages: [
+            { role: 'system', content: '你是玩具/模具/包装制造业术语专业翻译。把中文短语译成简洁的英文物料名。只输出翻译结果，不要加引号、解释、前缀。' },
+            { role: 'user', content: text },
+          ],
+          temperature: 0,
+        }),
+      });
+      if (!resp.ok) {
+        const body = await resp.text().catch(() => '');
+        throw new Error(`Bailian ${resp.status}: ${body.slice(0, 200)}`);
+      }
       const data = await resp.json();
-      if (data.trans_result && data.trans_result[0]) return data.trans_result[0].dst;
-      throw new Error(data.error_msg || 'Translation failed');
+      const out = data?.choices?.[0]?.message?.content?.trim();
+      if (!out) throw new Error('Bailian returned empty translation');
+      return out;
     }
 
     const EMPTY = "(eng_name IS NULL OR eng_name = '')";
@@ -559,7 +577,7 @@ router.post('/:id/translate-all', async (req, res) => {
         }
         try {
           if (cache[text] === undefined) {
-            cache[text] = await myMemoryTranslate(text);
+            cache[text] = await bailianTranslate(text);
           }
           update.run(cache[text], row.id);
           total++;

@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block title %}导入 Excel{% endblock %}
+{% block content %}
+<div class="max-w-3xl mx-auto bg-white rounded p-4 mb-4">
+    <h2 class="text-base font-bold mb-2 text-blue-700">用模板一键导入（推荐）</h2>
+    <p class="text-xs text-gray-500 mb-2">选模板后自动识别该模板支持的所有月份 sheet，一键导入双向流水。</p>
+    <form method="POST" action="/import/preset" enctype="multipart/form-data" class="space-y-2 text-sm">
+        <input type="file" name="file" accept=".xlsx" required class="block">
+        <label class="block">
+            模板：
+            <select name="preset" required class="border rounded px-2 py-1">
+                <option value="">-- 选模板 --</option>
+                {% for key, cfg in IMPORT_CONFIGS.items() %}
+                <option value="{{ key }}">{{ cfg.label }}（自动扫 {{ cfg.allowed_sheets|join('/') if cfg.allowed_sheets else '所有' }}）</option>
+                {% endfor %}
+            </select>
+        </label>
+        <label class="block text-xs text-gray-500">
+            指定单个 sheet（可选，留空 = 自动扫所有支持的月份）:
+            <input type="text" name="sheet_name" placeholder="如 1月（留空全导）" class="border rounded px-2 py-1 w-32">
+        </label>
+        <button class="px-3 py-1.5 bg-blue-600 text-white rounded">用模板导入</button>
+    </form>
+</div>
+
+<div class="max-w-3xl mx-auto bg-white rounded p-4">
+    <h1 class="text-xl font-bold mb-4">手动导入（自定义列映射）</h1>
+    {% if not sheets %}
+    <form method="POST" enctype="multipart/form-data" class="space-y-3">
+        <input type="file" name="file" accept=".xlsx" required class="block">
+        <button class="px-3 py-1.5 bg-blue-600 text-white rounded">上传 → 读 sheet</button>
+    </form>
+    {% else %}
+    <form method="POST" action="/import/commit" enctype="multipart/form-data" class="space-y-3">
+        <!-- 重新带一次 file，让 commit 能重新读 -->
+        <input type="file" name="file" accept=".xlsx" required class="block">
+        <label class="block">
+            Sheet:
+            <select name="sheet_name" class="border rounded px-2 py-1 text-sm">
+                {% for s in sheets %}<option value="{{ s }}">{{ s }}</option>{% endfor %}
+            </select>
+        </label>
+        <label class="block">
+            起始行 (1-based):
+            <input type="number" name="start_row" value="3" class="border rounded px-2 py-1 text-sm w-20">
+        </label>
+        <label class="block">
+            方向:
+            <select name="direction" class="border rounded px-2 py-1 text-sm">
+                {% for key, (f, t) in ALLOWED_DIRECTIONS.items() %}
+                <option value="{{ key }}">{{ PARTIES[f].name }} → {{ PARTIES[t].name }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <details>
+            <summary class="cursor-pointer">列映射（0-based Excel 列号）</summary>
+            <div class="grid grid-cols-3 gap-2 mt-2 text-sm">
+                <label>date <input type="number" name="col_date" class="border rounded w-16"></label>
+                <label>order_no <input type="number" name="col_order_no" class="border rounded w-16"></label>
+                <label>remark <input type="number" name="col_remark" class="border rounded w-16"></label>
+                {% for k, name in ITEMS %}
+                <label>{{ name }}({{ k }}) <input type="number" name="col_{{ k }}_qty" class="border rounded w-16"></label>
+                {% endfor %}
+            </div>
+        </details>
+        <button class="px-3 py-1.5 bg-green-600 text-white rounded">提交入库</button>
+    </form>
+    {% endif %}
+</div>
+
+{% if current_party() %}
+<div class="max-w-3xl mx-auto bg-red-50 border border-red-200 rounded p-4 mt-4">
+    <h2 class="text-base font-bold mb-2 text-red-700">⚠ 清空我录入的记录</h2>
+    <p class="text-xs text-gray-600 mb-2">仅删除 <b>{{ PARTIES[current_party()].name }}</b> 录入的、未锁定的 flow_records。已锁定的（已批准对账数据）不删。</p>
+    <form method="POST" action="/clear-my-records" class="space-y-2 text-sm"
+          onsubmit="return confirm('确定执行清空？此操作不可恢复！');">
+        <label class="block">
+            范围（对方）：
+            <select name="counterparty" class="border rounded px-2 py-1">
+                <option value="">全部 — 清空我录入的所有记录</option>
+                {% for cp in PARTIES[current_party()].counterparties %}
+                <option value="{{ cp }}">仅清我对 {{ PARTIES[cp].name }} 的记录</option>
+                {% endfor %}
+            </select>
+        </label>
+        <label class="block">
+            输入"清空"二字确认：
+            <input type="text" name="confirm" required pattern="清空" class="border rounded px-2 py-1" placeholder="清空">
+        </label>
+        <button class="px-3 py-1.5 bg-red-600 text-white rounded hover:bg-red-700">执行清空</button>
+    </form>
+</div>
+{% endif %}
+{% endblock %}

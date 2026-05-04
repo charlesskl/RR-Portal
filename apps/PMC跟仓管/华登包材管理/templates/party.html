@@ -1,0 +1,349 @@
+{% extends "base.html" %}
+{% block title %}{{ party_name }} · 包材管理{% endblock %}
+{% block content %}
+<div class="flex items-center justify-between mb-4">
+    <h1 class="text-xl font-bold">{{ party_name }}</h1>
+    <a href="/party/{{ party }}/logout" class="px-3 py-1.5 bg-orange-500 text-white text-sm rounded hover:bg-orange-600">退出</a>
+</div>
+
+<form class="bg-white rounded-lg shadow-sm p-3 mb-4 flex items-end gap-3 flex-wrap" method="GET">
+    <div>
+        <label class="block text-xs text-gray-500 mb-1">开始日期</label>
+        <input type="date" name="date_from" value="{{ date_from }}" class="border rounded px-2 py-1 text-sm">
+    </div>
+    <div>
+        <label class="block text-xs text-gray-500 mb-1">结束日期</label>
+        <input type="date" name="date_to" value="{{ date_to }}" class="border rounded px-2 py-1 text-sm">
+    </div>
+    <button class="px-3 py-1.5 bg-blue-600 text-white text-sm rounded">筛选</button>
+    <a href="/party/{{ party }}" class="px-3 py-1.5 bg-gray-200 text-sm rounded">重置</a>
+</form>
+
+{% include "_monthly_stats.html" with context %}
+
+{% for panel in panels %}
+<div class="bg-white rounded-lg shadow-sm mb-6" data-cp="{{ panel.cp }}">
+    <div class="flex items-center justify-between px-4 py-3 border-b">
+        <h2 class="text-lg font-semibold">对{{ panel.cp_name }}</h2>
+        <div class="flex gap-2">
+            <a href="/import"
+               class="px-3 py-1 bg-blue-600 text-white text-sm rounded hover:bg-blue-700">
+                导入
+            </a>
+            <a href="/party/{{ party }}/export?cp={{ panel.cp }}"
+               class="px-3 py-1 bg-green-600 text-white text-sm rounded hover:bg-green-700">
+                导出
+            </a>
+            <button onclick="openReconcileModal('{{ party }}', '{{ panel.cp }}')"
+                    class="px-3 py-1 bg-purple-600 text-white text-sm rounded hover:bg-purple-700">
+                发起对账
+            </button>
+            <form method="POST" action="/party/{{ party }}/clear/{{ panel.cp }}" class="inline"
+                  onsubmit="return confirm('一键清空对{{ panel.cp_name }}的所有未锁记录（收+发都会删）？此操作不可撤销。')">
+                <button type="submit" class="px-3 py-1 bg-red-600 text-white text-sm rounded hover:bg-red-700">
+                    一键清除
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <div class="px-4">
+        <!-- Tab 切换 -->
+        <div class="flex border-b">
+            <button class="tab-btn px-4 py-2 border-b-2 border-blue-600 text-blue-600 font-medium text-sm"
+                    data-tab="sent-{{ panel.cp }}" onclick="switchTab('sent-{{ panel.cp }}', '{{ panel.cp }}')">
+                发→{{ panel.cp_name }}
+            </button>
+            <button class="tab-btn px-4 py-2 border-b-2 border-transparent text-gray-500 text-sm"
+                    data-tab="received-{{ panel.cp }}" onclick="switchTab('received-{{ panel.cp }}', '{{ panel.cp }}')">
+                收自{{ panel.cp_name }}
+            </button>
+        </div>
+
+        <!-- 发表 -->
+        <div id="tab-sent-{{ panel.cp }}" class="tab-content py-3">
+            {% set direction = 'sent' %}
+            {% set cp = panel.cp %}
+            {% set cp_name = panel.cp_name %}
+            {% include "_flow_entry_form.html" %}
+            {% set records = panel.sent_records %}
+            {% set summary = panel.sent_summary %}
+            {% set pagination = panel.sent_pagination %}
+            {% include "_flow_table.html" with context %}
+        </div>
+
+        <!-- 收表 -->
+        <div id="tab-received-{{ panel.cp }}" class="tab-content hidden py-3">
+            {% set direction = 'received' %}
+            {% set cp = panel.cp %}
+            {% set cp_name = panel.cp_name %}
+            {% include "_flow_entry_form.html" %}
+            {% set records = panel.received_records %}
+            {% set summary = panel.received_summary %}
+            {% set pagination = panel.received_pagination %}
+            {% include "_flow_table.html" with context %}
+        </div>
+    </div>
+</div>
+{% endfor %}
+
+{% macro monthly_qty_modal(modal_id, action, title, btn_color, with_price=False) %}
+<div id="{{ modal_id }}" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+    <div class="bg-white rounded-lg shadow-xl p-6 w-[600px] max-h-[90vh] overflow-y-auto">
+        <h3 class="text-lg font-bold mb-4">{{ title }}</h3>
+        <form method="POST" action="{{ action }}" {% if with_price %}oninput="recalcModalAmount('{{ modal_id }}')"{% endif %}>
+            <div class="mb-3">
+                <label class="block text-xs text-gray-500 mb-1">月份 (YYYY-MM)</label>
+                <input type="month" name="year_month" required class="border rounded px-2 py-1 text-sm">
+            </div>
+            <table class="text-sm border-collapse w-full">
+                <thead><tr class="bg-gray-50">
+                    <th class="border px-2 py-1 text-left w-16"></th>
+                    {% for k, name in STAT_ITEMS %}<th class="border px-2 py-1">{{ name }}</th>{% endfor %}
+                    {% if with_price %}<th class="border px-2 py-1">小计</th>{% endif %}
+                </tr></thead>
+                <tbody>
+                    <tr>
+                        <td class="border px-2 py-1 text-gray-600">数量</td>
+                        {% for k, name in STAT_ITEMS %}
+                        <td class="border px-1 py-1">
+                            <input type="number" step="any" name="{{ k }}_qty" value="0"
+                                   class="w-20 border rounded px-1 py-0.5 text-right text-sm">
+                        </td>
+                        {% endfor %}
+                        {% if with_price %}<td class="border px-1 py-1 text-right text-xs text-gray-400" rowspan="2"><span data-amount-total>0.00</span> 元</td>{% endif %}
+                    </tr>
+                    {% if with_price %}
+                    <tr>
+                        <td class="border px-2 py-1 text-gray-600">单价</td>
+                        {% for k, name in STAT_ITEMS %}
+                        <td class="border px-1 py-1">
+                            <input type="number" step="any" name="{{ k }}_price" value="0"
+                                   class="w-20 border rounded px-1 py-0.5 text-right text-sm">
+                        </td>
+                        {% endfor %}
+                    </tr>
+                    <tr class="bg-gray-50">
+                        <td class="border px-2 py-1 text-gray-600">金额</td>
+                        {% for k, name in STAT_ITEMS %}
+                        <td class="border px-1 py-1 text-right text-xs text-gray-500" data-amount-cell="{{ k }}">0.00</td>
+                        {% endfor %}
+                        <td class="border"></td>
+                    </tr>
+                    {% endif %}
+                </tbody>
+            </table>
+            <div class="mt-3">
+                <label class="block text-xs text-gray-500 mb-1">备注（如车间报废明细）</label>
+                <input type="text" name="remark" class="border rounded px-2 py-1 text-sm w-full">
+            </div>
+            <p class="text-xs text-gray-500 mt-2">同月再次录入会覆盖旧值。</p>
+            <div class="flex justify-end gap-2 mt-4">
+                <button type="button" onclick="document.getElementById('{{ modal_id }}').classList.add('hidden')"
+                        class="px-4 py-2 bg-gray-200 rounded text-sm">取消</button>
+                <button type="submit" class="px-4 py-2 bg-{{ btn_color }}-600 text-white rounded text-sm">保存</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endmacro %}
+
+{{ monthly_qty_modal('inventoryModal', '/party/' ~ party ~ '/inventory', '月度实存录入', 'amber') }}
+{{ monthly_qty_modal('purchaseModal', '/party/' ~ party ~ '/purchase', '月度采购录入', 'emerald', with_price=True) }}
+
+<!-- 编辑记录弹窗 -->
+<div id="editModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+    <div class="bg-white rounded-lg shadow-xl p-6 w-[560px] max-h-[90vh] overflow-y-auto">
+        <h3 class="text-lg font-bold mb-4">编辑记录</h3>
+        <form id="editForm" method="POST">
+            <div class="flex gap-3 mb-3 flex-wrap items-end">
+                <div>
+                    <label class="block text-xs text-gray-500 mb-1">日期</label>
+                    <input type="date" name="date" id="edit_date" required class="border rounded px-2 py-1 text-sm">
+                </div>
+                <div>
+                    <label class="block text-xs text-gray-500 mb-1">订单号</label>
+                    <input type="text" name="order_no" id="edit_order_no" class="border rounded px-2 py-1 text-sm w-32">
+                </div>
+                <div class="flex-1 min-w-[200px]">
+                    <label class="block text-xs text-gray-500 mb-1">备注</label>
+                    <input type="text" name="remark" id="edit_remark" class="border rounded px-2 py-1 text-sm w-full">
+                </div>
+            </div>
+            <div class="table-scroll">
+                <table class="text-sm border-collapse w-full">
+                    <thead><tr class="bg-gray-50">
+                        {% for key, name in ITEMS %}<th class="border px-1 py-1">{{ name }}</th>{% endfor %}
+                    </tr></thead>
+                    <tbody><tr>
+                        {% for key, name in ITEMS %}
+                        <td class="border px-1 py-1">
+                            <input type="number" step="any" name="{{ key }}_qty" id="edit_{{ key }}_qty" value="0"
+                                   class="w-16 border rounded px-1 py-0.5 text-right text-sm">
+                        </td>
+                        {% endfor %}
+                    </tr></tbody>
+                </table>
+            </div>
+            <div class="flex justify-end gap-2 mt-4">
+                <button type="button" onclick="document.getElementById('editModal').classList.add('hidden')"
+                        class="px-4 py-2 bg-gray-200 rounded text-sm">取消</button>
+                <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded text-sm">保存</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+const ITEM_KEYS = {{ ITEMS|map(attribute=0)|list|tojson }};
+const RECORDS = {
+    {% for panel in panels %}
+    {% for r in panel.sent_records + panel.received_records %}{% if not r.locked %}
+    {{ r.id }}: {
+        date: "{{ r.date }}",
+        order_no: {{ (r.order_no or '')|tojson }},
+        remark: {{ (r.remark or '')|tojson }},
+        {% for key, name in ITEMS %}{{ key }}_qty: {{ r[key + '_qty'] or 0 }},{% endfor %}
+    },
+    {% endif %}{% endfor %}
+    {% endfor %}
+};
+
+const MONTHLY_DATA = {
+    {% for row in monthly %}
+    "{{ row.ym }}": {
+        inv: {qtys: {{ row.inv_qtys|tojson }}, remark: {{ row.inv_remark|tojson }}, has: {{ row.has_inv|tojson }}},
+        pur: {qtys: {{ row.pur_qtys|tojson }}, prices: {{ row.pur_prices|tojson }}, remark: {{ row.pur_remark|tojson }}, has: {{ row.has_pur|tojson }}},
+    },
+    {% endfor %}
+};
+const STAT_KEYS = {{ STAT_ITEMS|map(attribute=0)|list|tojson }};
+const DEFAULT_PRICES = {{ prices|tojson }};
+
+function _resetForm(form) {
+    form.reset();
+    STAT_KEYS.forEach(k => {
+        ['qty', 'price'].forEach(sfx => {
+            const el = form.querySelector(`[name="${k}_${sfx}"]`);
+            if (el) el.value = 0;
+        });
+    });
+}
+
+function recalcModalAmount(modalId) {
+    const modal = document.getElementById(modalId);
+    let total = 0;
+    STAT_KEYS.forEach(k => {
+        const q = parseFloat(modal.querySelector(`[name="${k}_qty"]`)?.value || 0);
+        const p = parseFloat(modal.querySelector(`[name="${k}_price"]`)?.value || 0);
+        const amt = q * p;
+        total += amt;
+        const cell = modal.querySelector(`[data-amount-cell="${k}"]`);
+        if (cell) cell.textContent = amt.toFixed(2);
+    });
+    const totalEl = modal.querySelector('[data-amount-total]');
+    if (totalEl) totalEl.textContent = total.toFixed(2);
+}
+
+function _fillModal(modalId, ym, data, kind) {
+    const modal = document.getElementById(modalId);
+    const form = modal.querySelector('form');
+    _resetForm(form);
+    if (ym) {
+        form.querySelector('[name="year_month"]').value = ym;
+    } else {
+        const today = new Date();
+        const cur = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
+        form.querySelector('[name="year_month"]').value = cur;
+    }
+    if (data && data.has) {
+        // 既存月份：用历史值预填
+        STAT_KEYS.forEach(k => {
+            const qtyEl = form.querySelector(`[name="${k}_qty"]`);
+            if (qtyEl) qtyEl.value = data.qtys[k] || 0;
+            if (kind === 'pur') {
+                const priceEl = form.querySelector(`[name="${k}_price"]`);
+                if (priceEl) priceEl.value = (data.prices && data.prices[k]) || 0;
+            }
+        });
+        form.querySelector('[name="remark"]').value = data.remark || '';
+    } else if (kind === 'pur') {
+        // 新月份采购：单价用 default_prices 预填
+        STAT_KEYS.forEach(k => {
+            const priceEl = form.querySelector(`[name="${k}_price"]`);
+            if (priceEl) priceEl.value = DEFAULT_PRICES[k] || 0;
+        });
+    }
+    if (kind === 'pur') recalcModalAmount(modalId);
+    modal.classList.remove('hidden');
+}
+
+function openInventoryModal(ym) {
+    _fillModal('inventoryModal', ym, ym ? (MONTHLY_DATA[ym] || {}).inv : null, 'inv');
+}
+function openPurchaseModal(ym) {
+    _fillModal('purchaseModal', ym, ym ? (MONTHLY_DATA[ym] || {}).pur : null, 'pur');
+}
+
+function openEditModal(id) {
+    const rec = RECORDS[id];
+    if (!rec) { alert('记录不存在或已锁定'); return; }
+    document.getElementById('editForm').action = `/record/${id}/edit`;
+    document.getElementById('edit_date').value = rec.date;
+    document.getElementById('edit_order_no').value = rec.order_no || '';
+    document.getElementById('edit_remark').value = rec.remark || '';
+    ITEM_KEYS.forEach(key => {
+        document.getElementById(`edit_${key}_qty`).value = rec[`${key}_qty`] || 0;
+    });
+    document.getElementById('editModal').classList.remove('hidden');
+}
+
+function switchTab(tabId, cpKey) {
+    const panel = document.querySelector(`[data-cp="${cpKey}"]`);
+    panel.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
+    panel.querySelector('#tab-' + tabId).classList.remove('hidden');
+    panel.querySelectorAll('.tab-btn').forEach(btn => {
+        if (btn.dataset.tab === tabId) {
+            btn.classList.add('border-blue-600', 'text-blue-600', 'font-medium');
+            btn.classList.remove('border-transparent', 'text-gray-500');
+        } else {
+            btn.classList.remove('border-blue-600', 'text-blue-600', 'font-medium');
+            btn.classList.add('border-transparent', 'text-gray-500');
+        }
+    });
+}
+
+// 从 URL hash 恢复 tab + 滚动（pagination 跳转后用）
+(function restoreTabFromHash() {
+    const m = (location.hash || '').match(/^#tab-(sent|received)-([a-z0-9_]+)$/i);
+    if (!m) return;
+    const tabId = `${m[1]}-${m[2]}`;
+    const cpKey = m[2];
+    const panel = document.querySelector(`[data-cp="${cpKey}"]`);
+    if (!panel) return;
+    switchTab(tabId, cpKey);
+    const target = panel.querySelector('#tab-' + tabId);
+    if (target) target.scrollIntoView({block: 'start'});
+})();
+
+function openReconcileModal(party, cp) {
+    const df = prompt('开始日期 (YYYY-MM-DD)');
+    if (!df) return;
+    const dt = prompt('结束日期 (YYYY-MM-DD)');
+    if (!dt) return;
+    const form = document.createElement('form');
+    form.method = 'POST';
+    form.action = '/reconcile/start';
+    const mk = (name, value) => {
+        const i = document.createElement('input');
+        i.name = name; i.value = value;
+        form.appendChild(i);
+    };
+    mk('counterparty', cp);
+    mk('date_from', df);
+    mk('date_to', dt);
+    document.body.appendChild(form);
+    form.submit();
+}
+</script>
+{% endblock %}

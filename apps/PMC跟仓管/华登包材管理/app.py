@@ -1,11 +1,12 @@
-from flask import Flask, render_template, request, redirect, url_for, jsonify, send_file, session, flash
+from flask import Flask, request, redirect, url_for, jsonify, session, flash, render_template
 import sqlite3
+import json
 import os
-import io
 import sys
-import xlsxwriter
-from datetime import timedelta
+import openpyxl
+from datetime import timedelta, datetime, date as date_cls
 from functools import wraps
+from urllib.parse import urlencode
 
 # 兼容 PyInstaller exe 和普通 Python 运行
 if getattr(sys, 'frozen', False):
@@ -26,115 +27,10 @@ DATABASE = os.path.join(DATA_PATH, 'huadeng.db')
 app.secret_key = os.environ.get('HUADENG_SECRET_KEY', 'dev-change-me-in-prod')
 app.permanent_session_lifetime = timedelta(hours=8)
 
-SECTION_ACCOUNTS = {
-    1: {
-        'username': os.environ.get('HUADENG_SEC1_USER', 'hd'),
-        'password': os.environ.get('HUADENG_SEC1_PASSWORD', 'hd123456'),
-    },
-    2: {
-        'username': os.environ.get('HUADENG_SEC2_USER', 'xx'),
-        'password': os.environ.get('HUADENG_SEC2_PASSWORD', 'xx123456'),
-    },
-    3: {
-        'username': os.environ.get('HUADENG_SEC3_USER', 'sy'),
-        'password': os.environ.get('HUADENG_SEC3_PASSWORD', 'sy123456'),
-    },
-}
-for _sid, _acc in SECTION_ACCOUNTS.items():
-    if not _acc['password']:
-        print(f'[WARN] section {_sid} password empty', file=sys.stderr)
-
 
 @app.route('/health')
 def health():
     return {'status': 'ok'}
-
-# 13种包材
-ITEMS = [
-    ('jx', '胶箱'), ('gx', '钙箱'), ('zx', '纸箱'),
-    ('jkb', '胶卡板'), ('mkb', '木卡板'), ('xb', '小板'),
-    ('dz', '袋子'), ('wb', '围布'), ('pk', '平卡'),
-    ('xzx', '小纸箱'), ('dgb', '大盖板'), ('xjp', '小胶盆'),
-    ('dk', '刀卡'),
-]
-
-# 月份统计的4种包材
-STAT_ITEMS = [('mkb', '木卡板'), ('jkb', '胶卡板'), ('jx', '胶箱'), ('gx', '钙塑箱')]
-
-# 三角债数量统计的5种包材
-TRIANGLE_ITEMS = [('mkb', '木卡板'), ('jkb', '胶卡板'), ('jx', '胶箱'), ('gx', '钙塑箱'), ('zx', '纸箱')]
-
-# 6个channel，每个板块双向
-CHANNELS = {
-    1: {'name': '华登 → 邵阳华登', 'from': '华登', 'to': '邵阳华登'},
-    2: {'name': '邵阳华登 → 华登', 'from': '邵阳华登', 'to': '华登'},
-    3: {'name': '华登 → 兴信', 'from': '华登', 'to': '兴信'},
-    4: {'name': '兴信 → 华登', 'from': '兴信', 'to': '华登'},
-    5: {'name': '邵阳华登 → 兴信', 'from': '邵阳华登', 'to': '兴信'},
-    6: {'name': '兴信 → 邵阳华登', 'from': '兴信', 'to': '邵阳华登'},
-}
-
-# 3个板块，每个包含2个channel
-SECTIONS = {
-    1: {'name': '华登和邵阳华登包材往来', 'channels': [1, 2],
-        'a': '华登', 'b': '邵阳华登'},
-    2: {'name': '兴信和华登包材往来', 'channels': [4, 3],
-        'a': '兴信', 'b': '华登'},
-    3: {'name': '邵阳华登和兴信包材往来', 'channels': [5, 6],
-        'a': '邵阳华登', 'b': '兴信'},
-}
-
-
-# ==================== 板块登录权限 ====================
-
-def require_section(get_sec):
-    """装饰器工厂:get_sec(kwargs) 返回 section id 或 None。未登录该 section 则跳登录页。"""
-    def deco(f):
-        @wraps(f)
-        def wrapped(*args, **kwargs):
-            sec = get_sec(kwargs)
-            if sec is None or sec not in SECTIONS:
-                return redirect(url_for('index'))
-            if sec not in session.get('unlocked_sections', []):
-                return redirect(url_for('section_login', sec=sec))
-            return f(*args, **kwargs)
-        return wrapped
-    return deco
-
-
-_sec_required = require_section(lambda kw: kw.get('sec'))
-_ch_required = require_section(lambda kw: _ch_to_sec(kw['ch']) if kw.get('ch') in CHANNELS else None)
-
-
-@app.route('/section/<int:sec>/login', methods=['GET', 'POST'])
-def section_login(sec):
-    if sec not in SECTIONS:
-        return redirect(url_for('index'))
-    if request.method == 'POST':
-        acc = SECTION_ACCOUNTS.get(sec) or {}
-        username = request.form.get('username', '')
-        password = request.form.get('password', '')
-        if acc.get('password') and username == acc.get('username') and password == acc['password']:
-            session.permanent = True
-            unlocked = list(session.get('unlocked_sections', []))
-            if sec not in unlocked:
-                unlocked.append(sec)
-            session['unlocked_sections'] = unlocked
-            session.modified = True
-            return redirect(url_for('section', sec=sec))
-        flash('账号或密码错误')
-        return redirect(url_for('section_login', sec=sec))
-    return render_template('section_login.html', sec=sec, sec_info=SECTIONS[sec])
-
-
-@app.route('/section/<int:sec>/logout')
-def section_logout(sec):
-    unlocked = list(session.get('unlocked_sections', []))
-    if sec in unlocked:
-        unlocked.remove(sec)
-        session['unlocked_sections'] = unlocked
-        session.modified = True
-    return redirect(url_for('index'))
 
 
 def get_db():
@@ -144,440 +40,1246 @@ def get_db():
 
 
 def init_db():
-    db = get_db()
-    item_cols = []
-    for key, _ in ITEMS:
-        item_cols.append(f'{key}_qty REAL DEFAULT 0')
-        item_cols.append(f'{key}_price REAL DEFAULT 0')
-        item_cols.append(f'{key}_amount REAL DEFAULT 0')
+    """初始化所有新 schema 表。幂等。"""
+    con = sqlite3.connect(DATABASE)
+    cur = con.cursor()
 
-    db.execute(f'''CREATE TABLE IF NOT EXISTS records (
+    # flow_records 主流水表
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS flow_records (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        channel INTEGER NOT NULL,
-        date TEXT NOT NULL,
-        order_no TEXT DEFAULT '',
-        {", ".join(item_cols)},
-        remarks TEXT DEFAULT '',
+        recorded_by TEXT NOT NULL,
+        from_party  TEXT NOT NULL,
+        to_party    TEXT NOT NULL,
+        date        TEXT NOT NULL,
+        order_no    TEXT,
+        remark      TEXT,
+        jx_qty REAL DEFAULT 0, gx_qty REAL DEFAULT 0, zx_qty REAL DEFAULT 0,
+        jkb_qty REAL DEFAULT 0, mkb_qty REAL DEFAULT 0, xb_qty REAL DEFAULT 0,
+        dz_qty REAL DEFAULT 0, wb_qty REAL DEFAULT 0, pk_qty REAL DEFAULT 0,
+        xzx_qty REAL DEFAULT 0, dgb_qty REAL DEFAULT 0, xjp_qty REAL DEFAULT 0,
+        dk_qty REAL DEFAULT 0,
+        xs_qty REAL DEFAULT 0, gsb_qty REAL DEFAULT 0,
+        djx_qty REAL DEFAULT 0, zb_qty REAL DEFAULT 0,
+        reconciliation_id INTEGER,
+        locked INTEGER DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (reconciliation_id) REFERENCES reconciliations(id)
+    )
+    """)
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_flow_recorded_by ON flow_records(recorded_by, from_party, to_party)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_flow_pair_date ON flow_records(from_party, to_party, date)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_flow_reconc ON flow_records(reconciliation_id)")
+
+    # reconciliations 核对批次
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS reconciliations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        initiator_party TEXT NOT NULL,
+        approver_party  TEXT NOT NULL,
+        pair_low  TEXT NOT NULL,
+        pair_high TEXT NOT NULL,
+        date_from TEXT NOT NULL,
+        date_to   TEXT NOT NULL,
+        status    TEXT NOT NULL,
+        snapshot_json TEXT,
+        notes     TEXT,
+        created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        approved_at TIMESTAMP
+    )
+    """)
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_reconc_approver ON reconciliations(approver_party, status)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_reconc_pair ON reconciliations(pair_low, pair_high, status)")
+
+    # investment_records 投资记录（按 pair）
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS investment_records (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        recorded_by TEXT NOT NULL,
+        counterparty TEXT NOT NULL,
+        year_month TEXT NOT NULL,
+        mkb_qty REAL DEFAULT 0, jkb_qty REAL DEFAULT 0,
+        jx_qty REAL DEFAULT 0, gx_qty REAL DEFAULT 0,
+        remark TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )''')
+    )
+    """)
 
-    db.execute('''CREATE TABLE IF NOT EXISTS default_prices (
+    # monthly_inventory 月份实存数（每 party 一行/月，不分对方/方向，对应"该厂区当月物理盘点"）
+    # 旧 schema 含 counterparty/direction 列 → 检测后重建（v2 暂无生产数据，重建安全）
+    existing = cur.execute(
+        "SELECT sql FROM sqlite_master WHERE name='monthly_inventory'"
+    ).fetchone()
+    if existing and 'counterparty' in (existing[0] or '').lower():
+        cur.execute("DROP TABLE monthly_inventory")
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS monthly_inventory (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        recorded_by TEXT NOT NULL,
+        year_month TEXT NOT NULL,
+        mkb_qty REAL, jkb_qty REAL, jx_qty REAL, gx_qty REAL,
+        remark TEXT,
+        UNIQUE (recorded_by, year_month)
+    )
+    """)
+
+    # monthly_purchases 月度采购投入（每 party 一行/月，对应 Excel 的"投资"列）
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS monthly_purchases (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        recorded_by TEXT NOT NULL,
+        year_month TEXT NOT NULL,
+        mkb_qty REAL, jkb_qty REAL, jx_qty REAL, gx_qty REAL,
+        mkb_price REAL DEFAULT 0, jkb_price REAL DEFAULT 0,
+        jx_price REAL DEFAULT 0, gx_price REAL DEFAULT 0,
+        remark TEXT,
+        UNIQUE (recorded_by, year_month)
+    )
+    """)
+    # 兼容旧 schema：缺 price 列则补
+    pur_cols = {r[1] for r in cur.execute("PRAGMA table_info(monthly_purchases)").fetchall()}
+    for k, _ in [('mkb', '木卡板'), ('jkb', '胶卡板'), ('jx', '胶箱'), ('gx', '钙塑箱')]:
+        if f'{k}_price' not in pur_cols:
+            cur.execute(f"ALTER TABLE monthly_purchases ADD COLUMN {k}_price REAL DEFAULT 0")
+
+    # default_prices 单价表（采购弹窗的"上次单价"，初始 15）
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS default_prices (
         item_key TEXT PRIMARY KEY,
-        price REAL DEFAULT 0
-    )''')
+        price    REAL DEFAULT 0
+    )
+    """)
+    for k, _ in STAT_ITEMS:
+        cur.execute("INSERT OR IGNORE INTO default_prices (item_key, price) VALUES (?, 15)", (k,))
 
-    db.execute('''CREATE TABLE IF NOT EXISTS inventory_counts (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        channel INTEGER NOT NULL,
-        year_month TEXT NOT NULL,
-        mkb_actual REAL DEFAULT 0,
-        jkb_actual REAL DEFAULT 0,
-        jx_actual REAL DEFAULT 0,
-        gx_actual REAL DEFAULT 0,
-        mkb_expected REAL DEFAULT NULL,
-        jkb_expected REAL DEFAULT NULL,
-        jx_expected REAL DEFAULT NULL,
-        gx_expected REAL DEFAULT NULL,
-        remarks TEXT DEFAULT '',
-        UNIQUE(channel, year_month)
-    )''')
-
-    db.execute('''CREATE TABLE IF NOT EXISTS investment_records (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        channel INTEGER NOT NULL,
-        year_month TEXT NOT NULL,
-        mkb_qty REAL DEFAULT 0, mkb_price REAL DEFAULT 0, mkb_amount REAL DEFAULT 0,
-        jkb_qty REAL DEFAULT 0, jkb_price REAL DEFAULT 0, jkb_amount REAL DEFAULT 0,
-        jx_qty REAL DEFAULT 0,  jx_price REAL DEFAULT 0,  jx_amount REAL DEFAULT 0,
-        gx_qty REAL DEFAULT 0,  gx_price REAL DEFAULT 0,  gx_amount REAL DEFAULT 0,
-        UNIQUE(channel, year_month)
-    )''')
-    # 兼容旧 DB: 若 investment_records 表已存在但没有 UNIQUE 约束，这里补一个索引
-    db.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_inv_ch_ym ON investment_records(channel, year_month)')
-
-    for key, _ in ITEMS:
-        db.execute('INSERT OR IGNORE INTO default_prices (item_key, price) VALUES (?, 10)', (key,))
-    db.commit()
-    db.close()
+    con.commit()
+    con.close()
 
 
-# ==================== 辅助函数 ====================
+# ==================== Party 常量与认证 ====================
 
-def _get_records(db, ch, date_from='', date_to=''):
-    query = 'SELECT * FROM records WHERE channel = ?'
-    params = [ch]
-    if date_from:
-        query += ' AND date >= ?'
-        params.append(date_from)
-    if date_to:
-        query += ' AND date <= ?'
-        params.append(date_to)
-    query += ' ORDER BY date DESC, id DESC'
-    return [dict(r) for r in db.execute(query, params).fetchall()]
+PARTIES = {
+    'hd': {'name': '华登',     'counterparties': ['sy', 'xx']},
+    'sy': {'name': '邵阳华登', 'counterparties': ['hd', 'xx']},
+    'xx': {'name': '兴信',     'counterparties': ['hd', 'sy']},
+}
+
+PARTY_ACCOUNTS = {
+    'hd': {
+        'username': os.environ.get('HUADENG_HD_USER', 'hd'),
+        'password': os.environ.get('HUADENG_HD_PASSWORD', 'hd123456'),
+    },
+    'sy': {
+        'username': os.environ.get('HUADENG_SY_USER', 'sy'),
+        'password': os.environ.get('HUADENG_SY_PASSWORD', 'sy123456'),
+    },
+    'xx': {
+        'username': os.environ.get('HUADENG_XX_USER', 'xx'),
+        'password': os.environ.get('HUADENG_XX_PASSWORD', 'xx123456'),
+    },
+}
+
+PARTY_BY_USERNAME = {acc['username']: p for p, acc in PARTY_ACCOUNTS.items()}
+assert len(PARTY_BY_USERNAME) == 3, 'username 必须 3 个都唯一'
+
+ITEMS = [
+    ('jx', '胶箱'), ('gx', '钙塑箱'), ('zx', '纸箱'),
+    ('jkb', '胶卡板'), ('mkb', '木卡板'), ('xb', '小板'),
+    ('dz', '胶袋'), ('wb', '围布'), ('pk', '平卡'),
+    ('xzx', '小纸箱'), ('dgb', '大盖板'), ('xjp', '小胶盆'),
+    ('dk', '刀卡'),
+    ('xs', '吸塑'), ('gsb', '钙塑板'),
+    ('djx', '大胶箱'), ('zb', '纸板'),
+]
+STAT_ITEMS = [('mkb', '木卡板'), ('jkb', '胶卡板'), ('jx', '胶箱'), ('gx', '钙塑箱')]
+TRIANGLE_ITEMS = [('mkb', '木卡板'), ('jkb', '胶卡板'), ('jx', '胶箱'), ('gx', '钙塑箱'), ('zx', '纸箱')]
+PAIRS = [('hd', 'sy'), ('hd', 'xx'), ('sy', 'xx')]
+
+# 导入模板。每个 entry 描述一个 Excel 文件的所有方向列映射，用户选模板 + sheet 即可批量导入。
+# 模板按 sheet 字典格式：sheets 内可逐 sheet 自定义；如果无对应 sheet，用 'default' 兜底。
+IMPORT_CONFIGS = {
+    'huadeng_qingxi_shaoyang': {
+        'label': '清溪华登 ↔ 邵阳华登（hd↔sy 双方向）',
+        'filename_pattern': '清溪华登',
+        'recorded_by_party': 'hd',  # 必须用 hd 账号导入
+        'allowed_sheets': ['1月', '2月', '3月', '4月'],  # 其它 sheet 不导
+        'directions': [
+            {
+                'direction': 'hd_to_sy',
+                'start_row': 3,
+                # 左半：清溪华登发邵阳华登
+                'columns': {
+                    0: 'date', 1: 'order_no',
+                    2: 'jx_qty', 3: 'gx_qty', 4: 'zx_qty',
+                    5: 'jkb_qty', 6: 'mkb_qty', 7: 'xb_qty',
+                    8: 'dz_qty', 9: 'wb_qty', 10: 'pk_qty',
+                    11: 'xzx_qty', 12: 'dgb_qty', 13: 'xjp_qty',
+                    14: 'dk_qty', 15: 'remark',
+                },
+            },
+            {
+                'direction': 'sy_to_hd',
+                'start_row': 3,
+                # 右半：清溪华登收邵阳华登（即 sy 发的，hd 收）
+                'columns': {
+                    17: 'date', 18: 'order_no',
+                    19: 'jx_qty', 20: 'gx_qty', 21: 'zx_qty',
+                    22: 'jkb_qty', 23: 'mkb_qty',
+                    24: 'dz_qty', 25: 'xb_qty',
+                    26: 'xzx_qty', 27: 'wb_qty', 28: 'pk_qty',
+                    # col 29 '专用卡' 无 ITEMS 映射，跳过
+                },
+            },
+        ],
+    },
+    'huadeng_qingxi_xinxin': {
+        'label': '清溪华登 ↔ 兴信（hd↔xx 双方向，清三与清二）',
+        'filename_pattern': '清三与清二',
+        'recorded_by_party': 'hd',
+        'allowed_sheets': ['1月', '2月', '3月', '4月'],
+        'directions': [
+            {
+                # 右半：三车间送二车间 = 华登发兴信
+                'direction': 'hd_to_xx',
+                'start_row': 3,
+                'columns': {
+                    16: 'date', 17: 'order_no',
+                    18: 'jx_qty',    # 胶箱
+                    19: 'pk_qty',    # 平卡
+                    20: 'zx_qty',    # 纸箱
+                    21: 'mkb_qty',   # 木卡板
+                    22: 'jkb_qty',   # 胶卡板
+                    23: 'gx_qty',    # 钙塑箱
+                    24: 'xs_qty',    # 吸塑
+                    25: 'gsb_qty',   # 钙塑板
+                    26: 'xjp_qty',   # 小胶盆
+                    27: 'djx_qty',   # 大胶箱
+                    28: 'dz_qty',    # 胶袋
+                    29: 'zb_qty',    # 纸板
+                    30: 'remark',
+                },
+            },
+            {
+                # 左半：二车间送三车间 = 兴信发华登
+                'direction': 'xx_to_hd',
+                'start_row': 3,
+                'columns': {
+                    0: 'date', 1: 'order_no',
+                    2: 'jx_qty',
+                    3: 'pk_qty',
+                    4: 'zx_qty',
+                    5: 'mkb_qty',
+                    6: 'jkb_qty',
+                    7: 'gx_qty',
+                    8: 'xs_qty',
+                    9: 'gsb_qty',
+                    10: 'xjp_qty',
+                    11: 'djx_qty',
+                    12: 'dz_qty',
+                    13: 'zb_qty',
+                    14: 'remark',
+                },
+            },
+        ],
+    },
+    'shaoyang_dongguan_huadeng': {
+        'label': '邵阳华登 ↔ 清溪华登（sy↔hd，东莞华登 sheet）',
+        'filename_pattern': '东莞',
+        'recorded_by_party': 'sy',
+        'allowed_sheets': ['东莞华登'],
+        'directions': [
+            {
+                # 左半："收东莞华登" = 清溪华登(hd)发邵阳华登(sy)
+                'direction': 'hd_to_sy',
+                'start_row': 5,
+                'columns': {
+                    0: 'date', 1: 'order_no',
+                    2: 'jx_qty',     # 胶箱
+                    3: 'gx_qty',     # 钙箱 = 钙塑箱
+                    4: 'zx_qty',     # 纸箱
+                    5: 'jkb_qty',    # 胶卡板
+                    6: 'mkb_qty',    # 木卡板
+                    7: 'xb_qty',     # 小板
+                    # 8: 铁卡板 → 跳过
+                    9: 'xs_qty',     # 吸塑
+                    10: 'wb_qty',    # 围布
+                    11: 'pk_qty',    # 平卡
+                    12: 'dz_qty',    # 袋子 = 胶袋
+                    13: 'xzx_qty',   # 小纸箱
+                    14: 'xjp_qty',   # 小胶盆
+                    15: 'remark',
+                },
+            },
+            {
+                # 右半："送东莞华登" = 邵阳华登(sy)发清溪华登(hd)
+                'direction': 'sy_to_hd',
+                'start_row': 5,
+                'columns': {
+                    16: 'date', 17: 'order_no',
+                    18: 'jx_qty',
+                    19: 'gx_qty',
+                    20: 'zx_qty',
+                    21: 'jkb_qty',
+                    22: 'mkb_qty',
+                    23: 'xb_qty',
+                    # 24: 铁卡板 → 跳过
+                    25: 'xs_qty',
+                    26: 'wb_qty',
+                    27: 'pk_qty',
+                    28: 'dz_qty',
+                    29: 'xzx_qty',
+                    30: 'xjp_qty',
+                    31: 'remark',
+                    # col 32-44: 相差数（系统自动算，不导）
+                },
+            },
+        ],
+    },
+    'shaoyang_dongguan_xinxin': {
+        'label': '邵阳华登 ↔ 兴信（sy↔xx，东莞兴信 sheet）',
+        'filename_pattern': '东莞',
+        'recorded_by_party': 'sy',
+        'allowed_sheets': ['东莞兴信'],
+        'directions': [
+            {
+                # 左半："东莞兴信发邵阳华登" = 兴信(xx)发邵阳华登(sy)
+                'direction': 'xx_to_sy',
+                'start_row': 5,
+                'columns': {
+                    0: 'date', 1: 'order_no',
+                    2: 'jx_qty',
+                    3: 'gx_qty',
+                    4: 'zx_qty',
+                    5: 'jkb_qty',
+                    6: 'mkb_qty',
+                    7: 'xb_qty',
+                    # 8: 铁卡板 → 跳过
+                    9: 'xs_qty',
+                    10: 'wb_qty',
+                    11: 'pk_qty',
+                    12: 'dz_qty',
+                    13: 'xjp_qty',   # 胶盆 = 小胶盆
+                    14: 'remark',
+                },
+            },
+            {
+                # 右半："邵阳华登发东莞兴信" = 邵阳华登(sy)发兴信(xx)
+                'direction': 'sy_to_xx',
+                'start_row': 5,
+                'columns': {
+                    15: 'date', 16: 'order_no',
+                    17: 'jx_qty',
+                    18: 'gx_qty',
+                    19: 'zx_qty',
+                    20: 'jkb_qty',
+                    21: 'mkb_qty',
+                    22: 'xb_qty',
+                    # 23: 铁卡板 → 跳过
+                    24: 'xs_qty',
+                    25: 'wb_qty',
+                    26: 'pk_qty',
+                    27: 'dz_qty',
+                    28: 'xjp_qty',
+                    # col 29-41: 相差数 / 备注（不导）
+                },
+            },
+        ],
+    },
+    'xinxin_from_sy': {
+        'label': '兴信收邵阳华登（sy→xx，邵阳每天发兴信包装成品登记表）',
+        'filename_pattern': '邵阳每天发兴信',
+        'recorded_by_party': 'xx',
+        'allowed_sheets': ['2026.1', '2026.2', '2026.3', '2026.4'],
+        'directions': [
+            {
+                'direction': 'sy_to_xx',
+                'start_row': 4,
+                'columns': {
+                    0: 'date', 3: 'order_no',
+                    4: 'mkb_qty',    # 木卡板
+                    5: 'jkb_qty',    # 胶卡板
+                    6: 'xb_qty',     # 小卡板 = 小板
+                    # 7: 铁卡板 / 8: 原料专用卡板 / 10: 卡绑带 / 14: 小纸平卡 / 16: 胶头 → 跳过
+                    9: 'jx_qty',     # 胶箱
+                    11: 'xjp_qty',   # 胶盆
+                    12: 'zx_qty',    # 纸箱
+                    13: 'gx_qty',    # 钙塑箱
+                    15: 'xs_qty',    # 吸塑
+                    17: 'remark',
+                },
+            },
+        ],
+    },
+    'xinxin_to_sy': {
+        'label': '兴信发邵阳华登（xx→sy，兴信每天发邵阳包装物料登记表）',
+        'filename_pattern': '兴信送邵阳',
+        'recorded_by_party': 'xx',
+        # 注意：2/4 月份 sheet 名带尾随空格，必须原样保留
+        'allowed_sheets': ['2026年1月份', '2026年2月份 ', '2026年3月份', '2026年4月份 '],
+        'directions': [
+            {
+                'direction': 'xx_to_sy',
+                'start_row': 4,
+                'columns': {
+                    0: 'date', 3: 'order_no',
+                    4: 'mkb_qty',
+                    5: 'jkb_qty',
+                    # 6: 铁卡板 → 跳过
+                    7: 'xb_qty',     # 小卡板 = 小板
+                    # 8: 专用卡板 / 13: 小纸平卡 → 跳过
+                    9: 'jx_qty',
+                    10: 'xjp_qty',   # 胶盆
+                    11: 'zx_qty',
+                    12: 'gx_qty',
+                    14: 'xs_qty',
+                    15: 'remark',
+                },
+            },
+        ],
+    },
+}
+
+ALLOWED_DIRECTIONS = {
+    'hd_to_sy': ('hd', 'sy'), 'sy_to_hd': ('sy', 'hd'),
+    'hd_to_xx': ('hd', 'xx'), 'xx_to_hd': ('xx', 'hd'),
+    'sy_to_xx': ('sy', 'xx'), 'xx_to_sy': ('xx', 'sy'),
+}
 
 
-def _calc_summary(records):
-    summary = {}
-    grand_total = 0
-    for key, name in ITEMS:
-        total_qty = sum(r[f'{key}_qty'] or 0 for r in records)
-        total_amount = sum(r[f'{key}_amount'] or 0 for r in records)
-        summary[key] = {'qty': total_qty, 'amount': total_amount}
-        grand_total += total_amount
-    return summary, grand_total
+def current_party():
+    """Return the validated party from session, or None if absent / tampered."""
+    p = session.get('party')
+    return p if p in PARTIES else None
 
 
-def _build_stats(db, ch):
-    inv_rows = db.execute(
-        'SELECT * FROM inventory_counts WHERE channel = ? ORDER BY year_month', (ch,)
-    ).fetchall()
-    inv_dict = {row['year_month']: dict(row) for row in inv_rows}
+def page_link(page_key, page_value):
+    """复制当前 query args 并覆盖 page_key，返回完整 querystring。
+    保住其它 panel 的 page 参数与所有筛选条件不丢。"""
+    args = request.args.to_dict()
+    args[page_key] = str(page_value)
+    return urlencode(args)
 
-    invest_rows = db.execute('''
-        SELECT substr(year_month, 1, 7) as ym,
-            SUM(mkb_qty) as mkb_total,
-            SUM(jkb_qty) as jkb_total,
-            SUM(jx_qty) as jx_total,
-            SUM(gx_qty) as gx_total
-        FROM investment_records WHERE channel = ?
-        GROUP BY substr(year_month, 1, 7)
-        ORDER BY substr(year_month, 1, 7)
-    ''', (ch,)).fetchall()
-    mt_dict = {row['ym']: dict(row) for row in invest_rows}
 
-    # 只从 inventory_counts + investment_records 取月份:
-    # records (流水订单) 不驱动月份统计行,避免单独一条订单产生幽灵行
-    # (用户删除该月后,records 里的订单仍在会重建行,造成"删不掉")
-    all_months = sorted(set(list(inv_dict.keys()) + list(mt_dict.keys())))
+app.jinja_env.globals['current_party'] = current_party
+app.jinja_env.globals['PARTIES'] = PARTIES
+app.jinja_env.globals['page_link'] = page_link
+app.jinja_env.globals['ITEMS'] = ITEMS
+app.jinja_env.globals['STAT_ITEMS'] = STAT_ITEMS
 
-    stats_data = []
-    for ym in all_months:
-        inv = inv_dict.get(ym, {})
-        totals = mt_dict.get(ym, {})
 
-        year, month = int(ym[:4]), int(ym[5:7])
-        prev_ym = f'{year - 1}-12' if month == 1 else f'{year}-{month - 1:02d}'
-        prev_inv = inv_dict.get(prev_ym, {})
+def party_required(fn):
+    """装饰器：要求当前 session 有 party，且 URL 里的 party 与之匹配。"""
+    @wraps(fn)
+    def wrapped(*args, **kwargs):
+        url_party = kwargs.get('party')
+        sess_party = session.get('party')
+        if not sess_party:
+            return redirect(url_for('party_login', party=url_party or 'hd'))
+        if url_party and url_party != sess_party:
+            flash('无权访问其他 party 页面')
+            return redirect(url_for('index'))
+        return fn(*args, **kwargs)
+    return wrapped
 
-        stat = {'year_month': ym, 'item_data': {}, 'remarks': inv.get('remarks', '')}
-        for key, _ in STAT_ITEMS:
-            prev_actual = prev_inv.get(f'{key}_actual', 0) or 0
-            investment = totals.get(f'{key}_total', 0) or 0
-            calc_expected = prev_actual + investment
-            override_expected = inv.get(f'{key}_expected')
-            expected = override_expected if override_expected is not None else calc_expected
-            actual = inv.get(f'{key}_actual', 0) or 0
-            loss = actual - expected
-            loss_pct = round(loss / expected * 100, 1) if expected else 0
-            stat['item_data'][key] = {
-                'prev_actual': prev_actual,
-                'investment': investment,
-                'expected': expected,
-                'expected_override': override_expected is not None,
-                'actual': actual,
-                'loss': loss,
-                'loss_pct': loss_pct,
-            }
-        stats_data.append(stat)
-    return stats_data
+
+@app.context_processor
+def inject_pending_count():
+    """顶部 nav badge：当前 party 作为 approver 的待处理核对数。"""
+    party = session.get('party')
+    if not party:
+        return {'pending_approval_count': 0}
+    try:
+        con = sqlite3.connect(DATABASE)
+        row = con.execute(
+            "SELECT COUNT(*) FROM reconciliations WHERE approver_party=? AND status='pending_approval'",
+            (party,)
+        ).fetchone()
+        con.close()
+        return {'pending_approval_count': row[0] if row else 0}
+    except Exception:
+        app.logger.exception('inject_pending_count failed')
+        return {'pending_approval_count': 0}
 
 
 # ==================== 页面路由 ====================
 
 @app.route('/')
 def index():
-    return render_template('index.html', sections=SECTIONS)
+    return render_template('index.html')
 
 
-@app.route('/section/<int:sec>')
-@_sec_required
-def section(sec):
-    if sec not in SECTIONS:
+@app.route('/party/<party>/login', methods=['GET', 'POST'])
+def party_login(party):
+    if party not in PARTIES:
         return redirect(url_for('index'))
-    db = get_db()
-    sec_info = SECTIONS[sec]
+    if request.method == 'POST':
+        username = request.form.get('username', '').strip()
+        password = request.form.get('password', '')
+        # 1. username 必须存在
+        user_party = PARTY_BY_USERNAME.get(username)
+        if not user_party:
+            flash('账号或密码错误')
+            return redirect(url_for('party_login', party=party))
+        # 2. 与 URL 里的 party 必须一致
+        if user_party != party:
+            flash('账号与登录入口不符')
+            return redirect(url_for('party_login', party=party))
+        # 3. 密码校验
+        expected = PARTY_ACCOUNTS[party]['password']
+        if password != expected:
+            flash('账号或密码错误')
+            return redirect(url_for('party_login', party=party))
+        session.permanent = True
+        session['party'] = party
+        session.modified = True
+        return redirect(url_for('party_page', party=party))
+    return render_template('party_login.html', party=party)
+
+
+@app.route('/party/<party>/logout')
+def party_logout(party):
+    session.pop('party', None)
+    session.modified = True
+    return redirect(url_for('index'))
+
+
+@app.route('/party/<party>')
+@party_required
+def party_page(party):
     date_from = request.args.get('date_from', '')
     date_to = request.args.get('date_to', '')
-    active_tab = request.args.get('tab', str(sec_info['channels'][0]))
+    try:
+        page_size = int(request.args.get('page_size', 50))
+    except ValueError:
+        page_size = 50
+    if page_size not in (20, 50, 100, 200):
+        page_size = 50
 
-    prices = {row['item_key']: row['price']
-              for row in db.execute('SELECT * FROM default_prices').fetchall()}
+    con = sqlite3.connect(DATABASE)
+    con.row_factory = sqlite3.Row
 
-    # 为每个方向构建数据
-    directions = []
-    for ch in sec_info['channels']:
-        records = _get_records(db, ch, date_from, date_to)
-        summary, grand_total = _calc_summary(records)
-        stats_data = _build_stats(db, ch)
-        inv_recs = [dict(r) for r in db.execute(
-            'SELECT * FROM investment_records WHERE channel = ? ORDER BY year_month DESC, id DESC', (ch,)
-        ).fetchall()]
-        directions.append({
-            'ch': ch,
-            'channel': CHANNELS[ch],
-            'records': records,
-            'summary': summary,
-            'grand_total': grand_total,
-            'stats_data': stats_data,
-            'investment_records': inv_recs,
-        })
+    counterparties = PARTIES[party]['counterparties']
+    panels = []
+    for cp in counterparties:
+        panel = {'cp': cp, 'cp_name': PARTIES[cp]['name']}
+        for direction, from_p, to_p in [('sent', party, cp), ('received', cp, party)]:
+            all_r = _query_flow(con, recorded_by=party, from_party=from_p, to_party=to_p,
+                                date_from=date_from, date_to=date_to)
+            page_key = f'page_{cp}_{direction}'
+            try:
+                page = max(1, int(request.args.get(page_key, 1) or 1))
+            except ValueError:
+                page = 1
+            total = len(all_r)
+            pages = max(1, (total + page_size - 1) // page_size)
+            page = min(page, pages)
+            start = (page - 1) * page_size
+            panel[f'{direction}_records'] = all_r[start:start + page_size]
+            panel[f'{direction}_summary'] = _calc_summary(all_r)
+            panel[f'{direction}_pagination'] = {
+                'page': page, 'pages': pages, 'total': total, 'page_size': page_size,
+                'start': start + 1 if total else 0,
+                'end': start + len(all_r[start:start + page_size]),
+                'page_key': page_key,
+            }
+        panels.append(panel)
 
-    db.close()
-    return render_template('section.html',
-                           sec=sec, sec_info=sec_info,
-                           directions=directions,
-                           items=ITEMS, stat_items=STAT_ITEMS,
-                           prices=prices,
-                           date_from=date_from, date_to=date_to,
-                           active_tab=active_tab)
+    prices = {r['item_key']: r['price'] for r in con.execute('SELECT * FROM default_prices').fetchall()}
+    con.close()
+    monthly = _build_monthly_stats(party)
+    return render_template('party.html', party=party, party_name=PARTIES[party]['name'],
+                           panels=panels, prices=prices, monthly=monthly,
+                           date_from=date_from, date_to=date_to, page_size=page_size)
 
 
-# ==================== 记录增删改 ====================
+@app.route('/party/<party>/entry', methods=['POST'])
+@party_required
+def party_entry(party):
+    direction = request.form.get('direction')  # 'sent' | 'received'
+    cp = request.form.get('counterparty')
+    if cp not in PARTIES or cp == party:
+        flash('无效的对方')
+        return redirect(url_for('party_page', party=party))
+    if cp not in PARTIES[party]['counterparties']:
+        flash('无权对此 party 录入')
+        return redirect(url_for('party_page', party=party))
 
-@app.route('/channel/<int:ch>/add', methods=['POST'])
-@_ch_required
-def add_record(ch):
-    if ch not in CHANNELS:
+    if direction == 'sent':
+        from_p, to_p = party, cp
+    elif direction == 'received':
+        from_p, to_p = cp, party
+    else:
+        flash('无效 direction')
+        return redirect(url_for('party_page', party=party))
+
+    date = request.form.get('date', '').strip()
+    order_no = request.form.get('order_no', '').strip() or None
+    remark = request.form.get('remark', '').strip() or None
+    if not date:
+        flash('日期必填')
+        return redirect(url_for('party_page', party=party))
+
+    qty_cols = [f'{k}_qty' for k, _ in ITEMS]
+    qty_vals = []
+    for col in qty_cols:
+        v = request.form.get(col, '0').strip()
+        try:
+            qty_vals.append(float(v) if v else 0)
+        except ValueError:
+            qty_vals.append(0)
+
+    con = sqlite3.connect(DATABASE)
+    placeholders = ', '.join(['?'] * len(qty_cols))
+    con.execute(f"""
+        INSERT INTO flow_records (recorded_by, from_party, to_party, date, order_no, remark,
+                                  {', '.join(qty_cols)})
+        VALUES (?, ?, ?, ?, ?, ?, {placeholders})
+    """, [party, from_p, to_p, date, order_no, remark, *qty_vals])
+    con.commit()
+    con.close()
+    return redirect(url_for('party_page', party=party))
+
+
+@app.route('/party/<party>/export')
+@party_required
+def party_export(party):
+    """导出 party↔cp 双方向 records 为 xlsx，含日期筛选。"""
+    cp = request.args.get('cp', '')
+    if cp not in PARTIES or cp == party or cp not in PARTIES[party]['counterparties']:
+        flash('无效对方'); return redirect(url_for('party_page', party=party))
+    date_from = request.args.get('date_from', '').strip()
+    date_to = request.args.get('date_to', '').strip()
+
+    con = sqlite3.connect(DATABASE)
+    con.row_factory = sqlite3.Row
+    sent = _query_flow(con, recorded_by=party, from_party=party, to_party=cp,
+                       date_from=date_from or None, date_to=date_to or None)
+    received = _query_flow(con, recorded_by=party, from_party=cp, to_party=party,
+                           date_from=date_from or None, date_to=date_to or None)
+    con.close()
+
+    import io
+    import xlsxwriter
+    buf = io.BytesIO()
+    wb = xlsxwriter.Workbook(buf, {'in_memory': True})
+    headers = ['日期', '订单号'] + [name for _, name in ITEMS] + ['备注']
+    qty_keys = [k for k, _ in ITEMS]
+
+    for sheet_name, records in [(f'发→{PARTIES[cp]["name"]}', sent),
+                                 (f'收自{PARTIES[cp]["name"]}', received)]:
+        ws = wb.add_worksheet(sheet_name)
+        for col, h in enumerate(headers):
+            ws.write(0, col, h)
+        for i, r in enumerate(records, start=1):
+            ws.write(i, 0, r.get('date') or '')
+            ws.write(i, 1, r.get('order_no') or '')
+            for j, k in enumerate(qty_keys, start=2):
+                v = r.get(f'{k}_qty') or 0
+                if v:
+                    ws.write_number(i, j, v)
+            ws.write(i, 2 + len(qty_keys), r.get('remark') or '')
+    wb.close()
+    buf.seek(0)
+
+    from flask import send_file
+    today = datetime.now().strftime('%Y%m%d')
+    filename = f'{PARTIES[party]["name"]}-{PARTIES[cp]["name"]}-{today}.xlsx'
+    return send_file(buf, as_attachment=True, download_name=filename,
+                     mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+
+
+@app.route('/record/<int:rid>/edit', methods=['POST'])
+def record_edit(rid):
+    party = current_party()
+    if not party:
         return redirect(url_for('index'))
-    sec = _ch_to_sec(ch)
-    db = get_db()
-    cols = ['channel', 'date', 'order_no']
-    vals = [ch, request.form.get('date', ''), request.form.get('order_no', '')]
-    for key, _ in ITEMS:
-        qty = float(request.form.get(f'{key}_qty', 0) or 0)
-        price = float(request.form.get(f'{key}_price', 0) or 0)
-        amount = round(qty * price, 2)
-        cols.extend([f'{key}_qty', f'{key}_price', f'{key}_amount'])
-        vals.extend([qty, price, amount])
-    cols.append('remarks')
-    vals.append(request.form.get('remarks', ''))
-    placeholders = ', '.join(['?'] * len(vals))
-    db.execute(f'INSERT INTO records ({", ".join(cols)}) VALUES ({placeholders})', vals)
-    db.commit()
-    db.close()
-    return redirect(url_for('section', sec=sec, tab=ch))
+    con = sqlite3.connect(DATABASE)
+    con.row_factory = sqlite3.Row
+    r = con.execute("SELECT * FROM flow_records WHERE id=?", (rid,)).fetchone()
+    if not r:
+        con.close(); flash('记录不存在'); return redirect(url_for('party_page', party=party))
+    if r['recorded_by'] != party:
+        con.close(); flash('无权编辑他人记录'); return redirect(url_for('party_page', party=party))
+    if r['locked']:
+        con.close(); flash('记录已锁定，不能修改'); return redirect(url_for('party_page', party=party))
+
+    date = request.form.get('date', '').strip() or r['date']
+    order_no = request.form.get('order_no', '').strip() or None
+    remark = request.form.get('remark', '').strip() or None
+    qty_cols = [f'{k}_qty' for k, _ in ITEMS]
+    qty_vals = []
+    for col in qty_cols:
+        v = request.form.get(col, '').strip()
+        if v == '':
+            qty_vals.append(r[col] or 0)
+        else:
+            try:
+                qty_vals.append(float(v))
+            except ValueError:
+                qty_vals.append(r[col] or 0)
+    set_clause = ', '.join([f'{c}=?' for c in ['date', 'order_no', 'remark'] + qty_cols])
+    con.execute(
+        f"UPDATE flow_records SET {set_clause}, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+        [date, order_no, remark, *qty_vals, rid]
+    )
+    con.commit(); con.close()
+    return redirect(url_for('party_page', party=party))
 
 
-@app.route('/channel/<int:ch>/edit/<int:record_id>', methods=['POST'])
-@_ch_required
-def edit_record(ch, record_id):
-    if ch not in CHANNELS:
+@app.route('/record/<int:rid>/delete', methods=['POST'])
+def record_delete(rid):
+    party = current_party()
+    if not party:
         return redirect(url_for('index'))
-    sec = _ch_to_sec(ch)
-    db = get_db()
-    sets = ['date = ?', 'order_no = ?']
-    vals = [request.form.get('date', ''), request.form.get('order_no', '')]
-    for key, _ in ITEMS:
-        qty = float(request.form.get(f'{key}_qty', 0) or 0)
-        price = float(request.form.get(f'{key}_price', 0) or 0)
-        amount = round(qty * price, 2)
-        sets.extend([f'{key}_qty = ?', f'{key}_price = ?', f'{key}_amount = ?'])
-        vals.extend([qty, price, amount])
-    sets.append('remarks = ?')
-    vals.append(request.form.get('remarks', ''))
-    vals.append(record_id)
-    db.execute(f'UPDATE records SET {", ".join(sets)} WHERE id = ?', vals)
-    db.commit()
-    db.close()
-    return redirect(url_for('section', sec=sec, tab=ch))
+    con = sqlite3.connect(DATABASE)
+    con.row_factory = sqlite3.Row
+    r = con.execute("SELECT recorded_by, locked FROM flow_records WHERE id=?", (rid,)).fetchone()
+    if not r:
+        con.close(); flash('记录不存在'); return redirect(url_for('party_page', party=party))
+    if r['recorded_by'] != party:
+        con.close(); flash('无权删除'); return redirect(url_for('party_page', party=party))
+    if r['locked']:
+        con.close(); flash('记录已锁定'); return redirect(url_for('party_page', party=party))
+    con.execute("DELETE FROM flow_records WHERE id=?", (rid,))
+    con.commit(); con.close()
+    return redirect(url_for('party_page', party=party))
 
 
-@app.route('/channel/<int:ch>/delete/<int:record_id>', methods=['POST'])
-@_ch_required
-def delete_record(ch, record_id):
-    if ch not in CHANNELS:
+def _upsert_monthly(table, party, ym, fields, remark):
+    """UPSERT (recorded_by, year_month) 复用 monthly_inventory / monthly_purchases。
+    fields: {col_name: value}，含 qty 和（可选）price 列。"""
+    con = sqlite3.connect(DATABASE)
+    cols_sql = ', '.join(fields.keys())
+    placeholders = ', '.join(['?'] * len(fields))
+    update_sql = ', '.join(f'{c}=excluded.{c}' for c in fields.keys())
+    con.execute(
+        f"INSERT INTO {table} (recorded_by, year_month, {cols_sql}, remark) "
+        f"VALUES (?, ?, {placeholders}, ?) "
+        f"ON CONFLICT(recorded_by, year_month) DO UPDATE SET {update_sql}, remark=excluded.remark",
+        [party, ym, *fields.values(), remark]
+    )
+    con.commit(); con.close()
+
+
+def _parse_form_floats(suffixes):
+    """从 form 抽 STAT_ITEMS × suffixes 的浮点字段，非法/空 → 0。
+    例 _parse_form_floats(['qty', 'price']) → {'mkb_qty':1, 'mkb_price':2, ...}"""
+    def _f(name):
+        v = request.form.get(name, '').strip()
+        try:
+            return float(v) if v else 0.0
+        except ValueError:
+            return 0.0
+    out = {}
+    for k, _ in STAT_ITEMS:
+        for sfx in suffixes:
+            out[f'{k}_{sfx}'] = _f(f'{k}_{sfx}')
+    return out
+
+
+@app.route('/party/<party>/inventory', methods=['POST'])
+def party_inventory_post(party):
+    sess_party = current_party()
+    if not sess_party or sess_party != party:
         return redirect(url_for('index'))
-    sec = _ch_to_sec(ch)
-    db = get_db()
-    db.execute('DELETE FROM records WHERE id = ? AND channel = ?', (record_id, ch))
-    db.commit()
-    db.close()
-    return redirect(url_for('section', sec=sec, tab=ch))
+    ym = request.form.get('year_month', '').strip()
+    if not ym:
+        flash('请填写月份'); return redirect(url_for('party_page', party=party))
+    remark = request.form.get('remark', '').strip() or None
+    _upsert_monthly('monthly_inventory', party, ym, _parse_form_floats(['qty']), remark)
+    flash(f'{ym} 实存已保存')
+    return redirect(url_for('party_page', party=party))
 
 
-def _ch_to_sec(ch):
-    for sec_id, sec_info in SECTIONS.items():
-        if ch in sec_info['channels']:
-            return sec_id
-    return 1
-
-
-# ==================== 盘点实存数 ====================
-
-@app.route('/channel/<int:ch>/inventory', methods=['POST'])
-@_ch_required
-def save_inventory(ch):
-    if ch not in CHANNELS:
+@app.route('/party/<party>/purchase', methods=['POST'])
+def party_purchase_post(party):
+    sess_party = current_party()
+    if not sess_party or sess_party != party:
         return redirect(url_for('index'))
-    sec = _ch_to_sec(ch)
-    db = get_db()
-    year_month = request.form.get('year_month', '')
-    if year_month:
-        db.execute('''INSERT INTO inventory_counts
-            (channel, year_month, mkb_actual, jkb_actual, jx_actual, gx_actual, remarks)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(channel, year_month) DO UPDATE SET
-                mkb_actual = excluded.mkb_actual,
-                jkb_actual = excluded.jkb_actual,
-                jx_actual = excluded.jx_actual,
-                gx_actual = excluded.gx_actual,
-                remarks = excluded.remarks
-        ''', (
-            ch, year_month,
-            float(request.form.get('mkb_actual', 0) or 0),
-            float(request.form.get('jkb_actual', 0) or 0),
-            float(request.form.get('jx_actual', 0) or 0),
-            float(request.form.get('gx_actual', 0) or 0),
-            request.form.get('inv_remarks', ''),
-        ))
-        db.commit()
-    db.close()
-    return redirect(url_for('section', sec=sec, tab=ch))
-
-
-# ==================== 投资记录 ====================
-
-@app.route('/channel/<int:ch>/add-investment', methods=['POST'])
-@_ch_required
-def add_investment_record(ch):
-    if ch not in CHANNELS:
-        return redirect(url_for('index'))
-    sec = _ch_to_sec(ch)
-    db = get_db()
-    year_month = request.form.get('year_month', '')[:7]
-    if year_month:
-        cols = ['channel', 'year_month']
-        vals = [ch, year_month]
-        set_parts = []
-        for key in ['mkb', 'jkb', 'jx', 'gx']:
-            qty = float(request.form.get(f'{key}_qty', 0) or 0)
-            price = float(request.form.get(f'{key}_price', 0) or 0)
-            amount = round(qty * price, 2)
-            cols += [f'{key}_qty', f'{key}_price', f'{key}_amount']
-            vals += [qty, price, amount]
-            # 同月再录入: qty/amount 累加，price 用加权平均重算
-            set_parts += [
-                f'{key}_qty = {key}_qty + excluded.{key}_qty',
-                f'{key}_amount = {key}_amount + excluded.{key}_amount',
-                f'{key}_price = CASE WHEN ({key}_qty + excluded.{key}_qty) > 0 '
-                f'THEN ROUND(({key}_amount + excluded.{key}_amount) / ({key}_qty + excluded.{key}_qty), 4) '
-                f'ELSE excluded.{key}_price END',
-            ]
-        placeholders = ', '.join(['?'] * len(vals))
-        sql = (
-            f'INSERT INTO investment_records ({", ".join(cols)}) VALUES ({placeholders}) '
-            f'ON CONFLICT(channel, year_month) DO UPDATE SET {", ".join(set_parts)}'
+    ym = request.form.get('year_month', '').strip()
+    if not ym:
+        flash('请填写月份'); return redirect(url_for('party_page', party=party))
+    remark = request.form.get('remark', '').strip() or None
+    fields = _parse_form_floats(['qty', 'price'])
+    _upsert_monthly('monthly_purchases', party, ym, fields, remark)
+    # 同步更新 default_prices：本次输入的单价成为下次默认值
+    con = sqlite3.connect(DATABASE)
+    for k, _ in STAT_ITEMS:
+        con.execute(
+            "INSERT INTO default_prices (item_key, price) VALUES (?, ?) "
+            "ON CONFLICT(item_key) DO UPDATE SET price=excluded.price",
+            (k, fields[f'{k}_price'])
         )
-        db.execute(sql, vals)
-        db.commit()
-    db.close()
-    return redirect(url_for('section', sec=sec, tab=ch))
+    con.commit(); con.close()
+    flash(f'{ym} 采购已保存')
+    return redirect(url_for('party_page', party=party))
 
 
-@app.route('/channel/<int:ch>/delete-investment/<int:inv_id>', methods=['POST'])
-@_ch_required
-def delete_investment_record(ch, inv_id):
-    if ch not in CHANNELS:
+@app.route('/party/<party>/inventory/<ym>/delete', methods=['POST'])
+def party_inventory_delete(party, ym):
+    sess_party = current_party()
+    if not sess_party or sess_party != party:
         return redirect(url_for('index'))
-    sec = _ch_to_sec(ch)
-    db = get_db()
-    db.execute('DELETE FROM investment_records WHERE id = ? AND channel = ?', (inv_id, ch))
-    db.commit()
-    db.close()
-    return redirect(url_for('section', sec=sec, tab=ch))
+    con = sqlite3.connect(DATABASE)
+    con.execute("DELETE FROM monthly_inventory WHERE recorded_by=? AND year_month=?", (party, ym))
+    con.commit(); con.close()
+    flash(f'{ym} 实盘已删除')
+    return redirect(url_for('party_page', party=party))
 
 
-@app.route('/channel/<int:ch>/month/<year_month>/delete', methods=['POST'])
-@_ch_required
-def delete_month(ch, year_month):
-    if ch not in CHANNELS:
+@app.route('/party/<party>/purchase/<ym>/delete', methods=['POST'])
+def party_purchase_delete(party, ym):
+    sess_party = current_party()
+    if not sess_party or sess_party != party:
         return redirect(url_for('index'))
-    sec = _ch_to_sec(ch)
-    db = get_db()
-    db.execute('DELETE FROM inventory_counts WHERE channel = ? AND year_month = ?', (ch, year_month))
-    db.execute('DELETE FROM investment_records WHERE channel = ? AND year_month = ?', (ch, year_month))
-    db.commit()
-    db.close()
-    return redirect(url_for('section', sec=sec, tab=ch))
+    con = sqlite3.connect(DATABASE)
+    con.execute("DELETE FROM monthly_purchases WHERE recorded_by=? AND year_month=?", (party, ym))
+    con.commit(); con.close()
+    flash(f'{ym} 采购已删除')
+    return redirect(url_for('party_page', party=party))
 
 
-@app.route('/channel/<int:ch>/month/<year_month>/update', methods=['POST'])
-@_ch_required
-def update_month(ch, year_month):
-    if ch not in CHANNELS:
+@app.route('/reconcile/start', methods=['POST'])
+def reconcile_start():
+    party = current_party()
+    if not party:
         return redirect(url_for('index'))
-    sec = _ch_to_sec(ch)
-    db = get_db()
+    cp = request.form.get('counterparty')
+    date_from = request.form.get('date_from', '').strip()
+    date_to = request.form.get('date_to', '').strip()
+    if cp not in PARTIES or cp == party or cp not in PARTIES[party]['counterparties']:
+        flash('无效对方'); return redirect(url_for('party_page', party=party))
+    if not date_from or not date_to:
+        flash('日期必填'); return redirect(url_for('party_page', party=party))
 
-    # 计算上月年月
-    year, month = int(year_month[:4]), int(year_month[5:7])
-    prev_ym = f'{year - 1}-12' if month == 1 else f'{year}-{month - 1:02d}'
+    pair_low, pair_high = sorted([party, cp])
 
-    # 更新上月实存数
-    db.execute('''INSERT INTO inventory_counts
-        (channel, year_month, mkb_actual, jkb_actual, jx_actual, gx_actual, remarks)
-        VALUES (?, ?, ?, ?, ?, ?, '')
-        ON CONFLICT(channel, year_month) DO UPDATE SET
-            mkb_actual = excluded.mkb_actual,
-            jkb_actual = excluded.jkb_actual,
-            jx_actual = excluded.jx_actual,
-            gx_actual = excluded.gx_actual
-    ''', (
-        ch, prev_ym,
-        float(request.form.get('mkb_prev_actual', 0) or 0),
-        float(request.form.get('jkb_prev_actual', 0) or 0),
-        float(request.form.get('jx_prev_actual', 0) or 0),
-        float(request.form.get('gx_prev_actual', 0) or 0),
-    ))
+    con = sqlite3.connect(DATABASE)
+    # 检查 pending overlap
+    overlap = con.execute("""
+        SELECT id FROM reconciliations
+        WHERE pair_low=? AND pair_high=? AND status='pending_approval'
+          AND NOT (date_to < ? OR date_from > ?)
+    """, (pair_low, pair_high, date_from, date_to)).fetchone()
+    if overlap:
+        con.close()
+        flash('已存在待审批的核对，范围重叠'); return redirect(url_for('party_page', party=party))
 
-    # 更新本月实存数和应存数override
-    def _none_or_float(val):
-        return float(val) if val not in ('', None) else None
+    # TOCTOU: overlap 检查与 INSERT 之间存在窗口；snapshot 与 UPDATE 之间也是。
+    # 3 LAN 用户场景下并发概率可忽略，故意不加 BEGIN IMMEDIATE。
+    snapshot = compare_pair(party, cp, date_from, date_to)
+    cur = con.execute("""
+        INSERT INTO reconciliations (initiator_party, approver_party, pair_low, pair_high,
+                                     date_from, date_to, status, snapshot_json)
+        VALUES (?, ?, ?, ?, ?, ?, 'pending_approval', ?)
+    """, (party, cp, pair_low, pair_high, date_from, date_to, json.dumps(snapshot)))
+    reconc_id = cur.lastrowid
+    # 绑定 flow_records（未锁）
+    con.execute("""
+        UPDATE flow_records SET reconciliation_id=?
+        WHERE date BETWEEN ? AND ?
+          AND ((from_party=? AND to_party=?) OR (from_party=? AND to_party=?))
+          AND reconciliation_id IS NULL
+    """, (reconc_id, date_from, date_to, party, cp, cp, party))
+    con.commit(); con.close()
+    flash('核对已发起，等待对方审批'); return redirect(url_for('reconcile_detail', rid=reconc_id))
 
-    mkb_exp = _none_or_float(request.form.get('mkb_expected', ''))
-    jkb_exp = _none_or_float(request.form.get('jkb_expected', ''))
-    jx_exp  = _none_or_float(request.form.get('jx_expected', ''))
-    gx_exp  = _none_or_float(request.form.get('gx_expected', ''))
 
-    db.execute('''INSERT INTO inventory_counts
-        (channel, year_month, mkb_actual, jkb_actual, jx_actual, gx_actual,
-         mkb_expected, jkb_expected, jx_expected, gx_expected, remarks)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(channel, year_month) DO UPDATE SET
-            mkb_actual = excluded.mkb_actual,
-            jkb_actual = excluded.jkb_actual,
-            jx_actual  = excluded.jx_actual,
-            gx_actual  = excluded.gx_actual,
-            mkb_expected = excluded.mkb_expected,
-            jkb_expected = excluded.jkb_expected,
-            jx_expected  = excluded.jx_expected,
-            gx_expected  = excluded.gx_expected,
-            remarks = excluded.remarks
-    ''', (
-        ch, year_month,
-        float(request.form.get('mkb_actual', 0) or 0),
-        float(request.form.get('jkb_actual', 0) or 0),
-        float(request.form.get('jx_actual', 0) or 0),
-        float(request.form.get('gx_actual', 0) or 0),
-        mkb_exp, jkb_exp, jx_exp, gx_exp,
-        request.form.get('remarks', ''),
-    ))
+@app.route('/reconcile')
+def reconcile_list():
+    party = current_party()
+    if not party:
+        return redirect(url_for('index'))
+    con = sqlite3.connect(DATABASE)
+    con.row_factory = sqlite3.Row
+    rows = con.execute("""
+        SELECT * FROM reconciliations
+        WHERE initiator_party=? OR approver_party=?
+        ORDER BY
+            CASE status WHEN 'pending_approval' THEN 0 ELSE 1 END,
+            created_at DESC
+    """, (party, party)).fetchall()
+    con.close()
+    return render_template('reconcile_list.html', items=[dict(r) for r in rows], party=party)
 
-    # 更新投资（删除该月旧记录，重新插入）
-    db.execute('DELETE FROM investment_records WHERE channel = ? AND year_month = ?', (ch, year_month))
-    invest_vals = [ch, year_month]
-    invest_cols = ['channel', 'year_month']
-    for key in ['mkb', 'jkb', 'jx', 'gx']:
-        qty = float(request.form.get(f'{key}_qty', 0) or 0)
-        price = float(request.form.get(f'{key}_price', 0) or 0)
-        amount = round(qty * price, 2)
-        invest_cols += [f'{key}_qty', f'{key}_price', f'{key}_amount']
-        invest_vals += [qty, price, amount]
-    ph = ', '.join(['?'] * len(invest_vals))
-    db.execute(f'INSERT INTO investment_records ({", ".join(invest_cols)}) VALUES ({ph})', invest_vals)
-    db.commit()
-    db.close()
-    return redirect(url_for('section', sec=sec, tab=ch))
+
+@app.route('/reconcile/<int:rid>')
+def reconcile_detail(rid):
+    party = current_party()
+    if not party:
+        return redirect(url_for('index'))
+    con = sqlite3.connect(DATABASE)
+    con.row_factory = sqlite3.Row
+    r = con.execute("SELECT * FROM reconciliations WHERE id=?", (rid,)).fetchone()
+    con.close()
+    if not r:
+        flash('核对不存在'); return redirect(url_for('reconcile_list'))
+    snapshot = json.loads(r['snapshot_json']) if r['snapshot_json'] else {}
+    return render_template('reconcile_detail.html', r=dict(r), snapshot=snapshot, party=party)
+
+
+@app.route('/reconcile/<int:rid>/approve', methods=['POST'])
+def reconcile_approve(rid):
+    party = current_party()
+    if not party:
+        return redirect(url_for('index'))
+    con = sqlite3.connect(DATABASE)
+    con.row_factory = sqlite3.Row
+    r = con.execute("SELECT * FROM reconciliations WHERE id=?", (rid,)).fetchone()
+    if not r:
+        con.close(); flash('核对不存在'); return redirect(url_for('index'))
+    if r['approver_party'] != party:
+        con.close(); flash('只有对方才能同意'); return redirect(url_for('reconcile_detail', rid=rid))
+    if r['status'] != 'pending_approval':
+        con.close(); flash('当前状态不允许操作'); return redirect(url_for('reconcile_detail', rid=rid))
+
+    con.execute("""UPDATE reconciliations SET status='confirmed', approved_at=CURRENT_TIMESTAMP WHERE id=?""", (rid,))
+    con.execute("UPDATE flow_records SET locked=1 WHERE reconciliation_id=?", (rid,))
+    con.commit(); con.close()
+    flash('已确认'); return redirect(url_for('reconcile_detail', rid=rid))
+
+
+@app.route('/reconcile/<int:rid>/reject', methods=['POST'])
+def reconcile_reject(rid):
+    party = current_party()
+    if not party:
+        return redirect(url_for('index'))
+    notes = request.form.get('notes', '').strip()
+    con = sqlite3.connect(DATABASE)
+    con.row_factory = sqlite3.Row
+    r = con.execute("SELECT * FROM reconciliations WHERE id=?", (rid,)).fetchone()
+    if not r:
+        con.close(); flash('核对不存在'); return redirect(url_for('index'))
+    if r['approver_party'] != party:
+        con.close(); flash('只有对方才能打回'); return redirect(url_for('reconcile_detail', rid=rid))
+    if r['status'] != 'pending_approval':
+        con.close(); flash('当前状态不允许操作'); return redirect(url_for('reconcile_detail', rid=rid))
+
+    con.execute("UPDATE reconciliations SET status='disputed', notes=? WHERE id=?", (notes, rid))
+    con.execute("UPDATE flow_records SET reconciliation_id=NULL WHERE reconciliation_id=?", (rid,))
+    con.commit(); con.close()
+    flash('已打回'); return redirect(url_for('reconcile_detail', rid=rid))
+
+
+@app.route('/reconcile/<int:rid>/withdraw', methods=['POST'])
+def reconcile_withdraw(rid):
+    party = current_party()
+    if not party:
+        return redirect(url_for('index'))
+    con = sqlite3.connect(DATABASE)
+    con.row_factory = sqlite3.Row
+    r = con.execute("SELECT * FROM reconciliations WHERE id=?", (rid,)).fetchone()
+    if not r:
+        con.close(); flash('核对不存在'); return redirect(url_for('index'))
+    if r['initiator_party'] != party:
+        con.close(); flash('只有发起方能撤回'); return redirect(url_for('reconcile_detail', rid=rid))
+    if r['status'] != 'pending_approval':
+        con.close(); flash('当前状态不允许撤回'); return redirect(url_for('reconcile_detail', rid=rid))
+
+    con.execute("UPDATE reconciliations SET status='withdrawn' WHERE id=?", (rid,))
+    con.execute("UPDATE flow_records SET reconciliation_id=NULL WHERE reconciliation_id=?", (rid,))
+    con.commit(); con.close()
+    flash('已撤回'); return redirect(url_for('reconcile_detail', rid=rid))
+
+
+@app.route('/reconcile/<int:rid>/cancel', methods=['POST'])
+def reconcile_cancel(rid):
+    """撤销已 confirmed 的核对（任一方都可）。"""
+    party = current_party()
+    if not party:
+        return redirect(url_for('index'))
+    con = sqlite3.connect(DATABASE)
+    con.row_factory = sqlite3.Row
+    r = con.execute("SELECT * FROM reconciliations WHERE id=?", (rid,)).fetchone()
+    if not r:
+        con.close(); flash('核对不存在'); return redirect(url_for('index'))
+    if party not in (r['initiator_party'], r['approver_party']):
+        con.close(); flash('无权'); return redirect(url_for('index'))
+    if r['status'] != 'confirmed':
+        con.close(); flash('仅 confirmed 状态可撤销'); return redirect(url_for('reconcile_detail', rid=rid))
+
+    con.execute("UPDATE reconciliations SET status='withdrawn' WHERE id=?", (rid,))
+    con.execute("UPDATE flow_records SET locked=0, reconciliation_id=NULL WHERE reconciliation_id=?", (rid,))
+    con.commit(); con.close()
+    flash('已撤销对账，记录解锁'); return redirect(url_for('reconcile_detail', rid=rid))
+
+
+@app.route('/reports')
+def reports():
+    date_from = request.args.get('date_from', '')
+    date_to = request.args.get('date_to', '')
+    only_confirmed = request.args.get('only_confirmed') == '1'
+
+    con = sqlite3.connect(DATABASE)
+    con.row_factory = sqlite3.Row
+
+    prices = {r['item_key']: r['price']
+              for r in con.execute('SELECT * FROM default_prices').fetchall()}
+
+    # 每个方向的汇总（仅发方记录）
+    direction_summaries = {}
+    for a, b in PAIRS:
+        for from_p, to_p in [(a, b), (b, a)]:
+            direction_summaries[f'{from_p}_to_{to_p}'] = _sum_flow_records(
+                con, from_party=from_p, to_party=to_p,
+                only_sender=True, date_from=date_from, date_to=date_to,
+                only_confirmed=only_confirmed,
+            )
+
+    # 三角债净欠
+    triangle_rows = _build_triangle(direction_summaries, prices)
+    pair_summary = _build_pair_summary(direction_summaries)
+
+    # 月度明细
+    monthly_by_pair = {}
+    for a, b in PAIRS:
+        by_month = {}  # ym -> {'a_sent': {...}, 'b_sent': {...}}
+        for from_p, to_p in [(a, b), (b, a)]:
+            rows = con.execute(f"""
+                SELECT substr(date, 1, 7) AS ym,
+                       {', '.join(['COALESCE(SUM(' + k + '_qty), 0) AS ' + k + '_sum' for k, _ in STAT_ITEMS])}
+                FROM flow_records
+                WHERE from_party=? AND to_party=? AND recorded_by=?
+                GROUP BY ym ORDER BY ym
+            """, (from_p, to_p, from_p)).fetchall()
+            for r in rows:
+                ym = r['ym']
+                bucket = by_month.setdefault(ym, {'a_sent': {}, 'b_sent': {}})
+                key = 'a_sent' if from_p == a else 'b_sent'
+                for k, _ in STAT_ITEMS:
+                    bucket[key][k] = float(r[f'{k}_sum'])
+        # 计算 net per month + 补齐缺失 key（防 Jinja strict mode 下 KeyError）
+        for ym, d in by_month.items():
+            for k, _ in STAT_ITEMS:
+                d['a_sent'].setdefault(k, 0)
+                d['b_sent'].setdefault(k, 0)
+            d['net'] = {k: d['a_sent'][k] - d['b_sent'][k] for k, _ in STAT_ITEMS}
+        monthly_by_pair[(a, b)] = {'a': PARTIES[a]['name'], 'b': PARTIES[b]['name'],
+                                   'months': sorted(by_month.items())}
+
+    con.close()
+    monthly_by_party = [(p, PARTIES[p]['name'], _build_monthly_stats(p)) for p in ('hd', 'sy', 'xx')]
+    today = datetime.now().strftime('%Y/%m/%d')
+    today_cn = datetime.now().strftime('%Y年%m月%d日')
+    return render_template('reports.html',
+                           direction_summaries=direction_summaries,
+                           triangle_rows=triangle_rows,
+                           has_outstanding_debt=_has_outstanding_debt(triangle_rows),
+                           pair_summary=pair_summary,
+                           monthly_by_pair=monthly_by_pair,
+                           monthly_by_party=monthly_by_party,
+                           date_from=date_from, date_to=date_to,
+                           only_confirmed=only_confirmed,
+                           today=today, today_cn=today_cn,
+                           PAIRS=PAIRS)
+
+
+def _sum_flow_records(con, *, from_party, to_party, only_sender, date_from, date_to, only_confirmed):
+    qty_cols_sql = ', '.join([f'COALESCE(SUM({k}_qty), 0) AS {k}_sum' for k, _ in ITEMS])
+    sql = f"SELECT {qty_cols_sql} FROM flow_records WHERE from_party=? AND to_party=?"
+    args = [from_party, to_party]
+    if only_sender:
+        sql += ' AND recorded_by=?'
+        args.append(from_party)
+    if date_from:
+        sql += ' AND date >= ?'; args.append(date_from)
+    if date_to:
+        sql += ' AND date <= ?'; args.append(date_to)
+    if only_confirmed:
+        sql += " AND locked=1"
+    row = con.execute(sql, args).fetchone()
+    return {k: float(row[f'{k}_sum']) for k, _ in ITEMS}
+
+
+def _build_triangle(direction_summaries, prices):
+    """构造 6 行单向欠款表（3 个 pair × 2 个方向）。
+
+    每行表示 "X 欠 Y"：显示 (Y_to_X - X_to_Y) > 0 的差额，否则空。
+    Y 多发了 → X 多收了 → X 欠 Y。
+    Note: prices 参数 spec literal 保留，当前未使用。
+    """
+    # (debtor, creditor) 行序模仿旧 UI
+    DEBT_ROWS = [
+        ('sy', 'xx'), ('xx', 'sy'),
+        ('hd', 'xx'), ('xx', 'hd'),
+        ('sy', 'hd'), ('hd', 'sy'),
+    ]
+    rows = []
+    for idx, (debtor, creditor) in enumerate(DEBT_ROWS, 1):
+        creditor_sent = direction_summaries[f'{creditor}_to_{debtor}']
+        debtor_sent = direction_summaries[f'{debtor}_to_{creditor}']
+        row = {
+            'idx': idx,
+            'label': f'{PARTIES[debtor]["name"]}欠{PARTIES[creditor]["name"]}',
+            'has_any': False,
+        }
+        for k, _ in STAT_ITEMS:
+            diff = creditor_sent[k] - debtor_sent[k]
+            row[k] = int(diff) if diff > 0 else 0
+            if row[k]:
+                row['has_any'] = True
+        rows.append(row)
+    return rows
+
+
+def _has_outstanding_debt(triangle_rows):
+    """是否有任意未清三角债（用于底部红色提示）。"""
+    return any(row['has_any'] for row in triangle_rows)
+
+
+def _build_pair_summary(direction_summaries):
+    """按 pair 汇总净欠，生成'X 欠 Y 多少 item'文案。
+
+    Note: nets 按 TRIANGLE_ITEMS (5 项) 算，但模板只展示 STAT_ITEMS (4 项)；
+    zx 永远不显示。spec literal, plan Task 15.
+    """
+    out = []
+    for a, b in PAIRS:
+        a_to_b = direction_summaries[f'{a}_to_{b}']
+        b_to_a = direction_summaries[f'{b}_to_{a}']
+        nets = {k: a_to_b[k] - b_to_a[k] for k, _ in TRIANGLE_ITEMS}
+        out.append({'a': PARTIES[a]['name'], 'b': PARTIES[b]['name'], 'nets': nets})
+    return out
+
+
+def _build_monthly_stats(party):
+    """月度盘点统计（per-warehouse 视角）：按月对 mkb/jkb/jx/gx 算 期初/投资/应有/实盘/损耗/损耗率。
+
+    数据来源：
+      - 投资 = monthly_purchases（采购入库的新货数量）
+      - 实盘 = monthly_inventory（厂区物理盘点数）
+      - 期初 = 上一个有 inventory 的月份的 _qty
+    返回 [{ym, items: {jx: {prev, investment, expected, actual, loss, loss_pct}}, remark}]，按月正序。
+    """
+    con = sqlite3.connect(DATABASE)
+    con.row_factory = sqlite3.Row
+
+    inv_cols = ', '.join(f'{k}_qty' for k, _ in STAT_ITEMS)
+    inv_rows = con.execute(
+        f"SELECT year_month AS ym, {inv_cols}, remark FROM monthly_inventory "
+        "WHERE recorded_by=? ORDER BY year_month",
+        (party,)
+    ).fetchall()
+    price_cols = ', '.join(f'{k}_price' for k, _ in STAT_ITEMS)
+    pur_rows = con.execute(
+        f"SELECT year_month AS ym, {inv_cols}, {price_cols}, remark FROM monthly_purchases "
+        "WHERE recorded_by=? ORDER BY year_month",
+        (party,)
+    ).fetchall()
+    con.close()
+
+    inv_by_ym = {r['ym']: {**{k: float(r[f'{k}_qty'] or 0) for k, _ in STAT_ITEMS},
+                           'remark': r['remark']} for r in inv_rows}
+    pur_by_ym = {r['ym']: {**{k: float(r[f'{k}_qty'] or 0) for k, _ in STAT_ITEMS},
+                           **{f'{k}_price': float(r[f'{k}_price'] or 0) for k, _ in STAT_ITEMS},
+                           'remark': r['remark']} for r in pur_rows}
+    yms = sorted(set(inv_by_ym) | set(pur_by_ym))
+
+    # 迭代式：期初 = 上月期末（实存或推算累计）；实存 = 手动盘点值（无则 None 显示 —）
+    # 损耗只有手动盘点的月才计算，未盘月数学链内部仍走推算累计但 actual 不外显
+    rows = []
+    last_effective = {k: 0 for k, _ in STAT_ITEMS}  # 仅用于 prev 链式累加
+    for ym in yms:
+        is_measured = ym in inv_by_ym
+        items = {}
+        for k, _ in STAT_ITEMS:
+            prev_actual = last_effective[k]
+            investment = pur_by_ym.get(ym, {}).get(k, 0)
+            price = pur_by_ym.get(ym, {}).get(f'{k}_price', 0)
+            amount = investment * price
+            expected = prev_actual + investment
+            if is_measured:
+                actual = inv_by_ym[ym][k]
+                loss = actual - expected
+                loss_pct = (loss / expected * 100) if expected else 0
+                last_effective[k] = actual          # 实测重置链
+            else:
+                actual = None                       # 实存留空
+                loss = None
+                loss_pct = None
+                last_effective[k] = expected        # 推算累计向后传
+            items[k] = {
+                'prev': prev_actual, 'investment': investment, 'expected': expected,
+                'actual': actual, 'loss': loss, 'loss_pct': loss_pct,
+                'price': price, 'amount': amount,
+            }
+        year, month = map(int, ym.split('-'))
+        prev_month = 12 if month == 1 else month - 1
+        rows.append({
+            'ym': ym, 'items': items, 'is_measured': is_measured,
+            'month_num': month, 'prev_month_num': prev_month,
+            'remark': inv_by_ym.get(ym, {}).get('remark') or '',
+            'has_inv': ym in inv_by_ym,
+            'has_pur': ym in pur_by_ym,
+            'inv_qtys': {k: inv_by_ym[ym][k] for k, _ in STAT_ITEMS} if ym in inv_by_ym else {k: 0 for k, _ in STAT_ITEMS},
+            'pur_qtys': {k: pur_by_ym[ym][k] for k, _ in STAT_ITEMS} if ym in pur_by_ym else {k: 0 for k, _ in STAT_ITEMS},
+            'pur_prices': {k: pur_by_ym[ym][f'{k}_price'] for k, _ in STAT_ITEMS} if ym in pur_by_ym else {k: 0 for k, _ in STAT_ITEMS},
+            'pur_total_amount': sum(pur_by_ym[ym][k] * pur_by_ym[ym][f'{k}_price'] for k, _ in STAT_ITEMS) if ym in pur_by_ym else 0,
+            'inv_remark': inv_by_ym.get(ym, {}).get('remark') or '',
+            'pur_remark': pur_by_ym.get(ym, {}).get('remark') or '',
+        })
+    rows.reverse()      # 最新月份排最上方
+    return rows
+
+
+def _query_flow(con, *, recorded_by, from_party, to_party, date_from=None, date_to=None):
+    """查 flow_records。"""
+    sql = """SELECT * FROM flow_records
+             WHERE recorded_by=? AND from_party=? AND to_party=?"""
+    args = [recorded_by, from_party, to_party]
+    if date_from:
+        sql += ' AND date >= ?'; args.append(date_from)
+    if date_to:
+        sql += ' AND date <= ?'; args.append(date_to)
+    sql += ' ORDER BY date DESC, id DESC'
+    return [dict(r) for r in con.execute(sql, args).fetchall()]
+
+
+def _calc_summary(records):
+    """累加 17 包材 qty + 金额。"""
+    summary = {k: {'qty': 0, 'amount': 0} for k, _ in ITEMS}
+    for r in records:
+        for k, _ in ITEMS:
+            qty = r.get(f'{k}_qty') or 0
+            summary[k]['qty'] += qty
+    return summary
+
+
+def compare_pair(party_a, party_b, date_from, date_to):
+    """对两方做汇总对比。返回 {'a_to_b': {...}, 'b_to_a': {...}}。
+
+    diffs[k] = sender_sum[k] - receiver_sum[k]，正数表示发方录入 > 收方录入
+    （发方虚报或收方漏收）。Task 14 UI 按此约定显示。
+    """
+    con = sqlite3.connect(DATABASE)
+    con.row_factory = sqlite3.Row
+    result = {}
+    for sender, receiver in [(party_a, party_b), (party_b, party_a)]:
+        sender_sum = _sum_items(con, recorded_by=sender, from_party=sender, to_party=receiver,
+                                date_from=date_from, date_to=date_to)
+        receiver_sum = _sum_items(con, recorded_by=receiver, from_party=sender, to_party=receiver,
+                                  date_from=date_from, date_to=date_to)
+        diffs = {k: round(sender_sum[k] - receiver_sum[k], 4)
+                 for k, _ in ITEMS
+                 if abs(sender_sum[k] - receiver_sum[k]) > 1e-9}
+        result[f'{sender}_to_{receiver}'] = {
+            'sender_recorded': sender_sum,
+            'receiver_recorded': receiver_sum,
+            'diffs': diffs,
+        }
+    con.close()
+    return result
+
+
+def _sum_items(con, *, recorded_by, from_party, to_party, date_from, date_to):
+    """SUM 17 包材列，返回 {item_key: float}。"""
+    qty_cols_sql = ', '.join([f'COALESCE(SUM({k}_qty), 0) AS {k}_sum' for k, _ in ITEMS])
+    row = con.execute(f"""
+        SELECT {qty_cols_sql} FROM flow_records
+        WHERE recorded_by=? AND from_party=? AND to_party=? AND date BETWEEN ? AND ?
+    """, (recorded_by, from_party, to_party, date_from, date_to)).fetchone()
+    return {k: float(row[f'{k}_sum']) for k, _ in ITEMS}
 
 
 # ==================== 默认单价 API ====================
@@ -598,638 +1300,254 @@ def api_prices():
     return jsonify(prices)
 
 
-# ==================== 汇总报表 ====================
-
-@app.route('/reports')
-def reports():
-    db = get_db()
-    date_from = request.args.get('date_from', '')
-    date_to = request.args.get('date_to', '')
-    tri_date_from = request.args.get('tri_date_from', '')  # 三角债表单独开始日期
-    tri_date_to = request.args.get('tri_date_to', '')      # 三角债表单独截止日期
-
-    channel_summaries = {}
-    for ch in CHANNELS:
-        records = _get_records(db, ch, date_from, date_to)
-        summary, total = _calc_summary(records)
-        channel_summaries[ch] = {'summary': summary, 'total': total}
-
-    # 三角债专用channel_summaries（使用独立日期范围）
-    tri_channel_summaries = {}
-    for ch in CHANNELS:
-        records = _get_records(db, ch, tri_date_from, tri_date_to)
-        summary, total = _calc_summary(records)
-        tri_channel_summaries[ch] = {'summary': summary, 'total': total}
-
-    # ── 三角债总结（基于tri_channel_summaries）────────────────
-    TRI_KEYS = [k for k, _ in STAT_ITEMS]  # mkb jkb jx gx
-    PAIRS = [
-        {'a': '华登',     'b': '邵阳华登', 'ch_a': 1, 'ch_b': 2},
-        {'a': '华登',     'b': '兴信',     'ch_a': 3, 'ch_b': 4},
-        {'a': '邵阳华登', 'b': '兴信',     'ch_a': 5, 'ch_b': 6},
-    ]
-    tri_pair_summary = []
-    for p in PAIRS:
-        total_net = {}
-        for k in TRI_KEYS:
-            a_qty = tri_channel_summaries[p['ch_a']]['summary'][k]['qty']
-            b_qty = tri_channel_summaries[p['ch_b']]['summary'][k]['qty']
-            total_net[k] = a_qty - b_qty  # >0: B欠A; <0: A欠B
-        tri_pair_summary.append({'a': p['a'], 'b': p['b'], 'total_net': total_net})
-
-    # ── 三角债净欠量（按月 + 汇总）────────────────────────────
-
-    def _monthly_qty(ch):
-        q = 'SELECT strftime("%Y-%m", date) as ym, SUM(mkb_qty) as mkb, SUM(jkb_qty) as jkb, SUM(jx_qty) as jx, SUM(gx_qty) as gx FROM records WHERE channel=?'
-        params = [ch]
-        if date_from:
-            q += ' AND date >= ?'; params.append(date_from)
-        if date_to:
-            q += ' AND date <= ?'; params.append(date_to)
-        q += ' GROUP BY ym ORDER BY ym'
-        return {r['ym']: dict(r) for r in db.execute(q, params).fetchall()}
-
-    ch_monthly = {ch: _monthly_qty(ch) for ch in CHANNELS}
-
-    # ── 三角债汇总表（6行净欠） ──────────────────────────────
-    DISPLAY_PAIRS = [
-        {'a': '邵阳华登', 'b': '兴信', 'ch_a': 5, 'ch_b': 6},
-        {'a': '华登',     'b': '兴信', 'ch_a': 3, 'ch_b': 4},
-        {'a': '邵阳华登', 'b': '华登', 'ch_a': 2, 'ch_b': 1},
-    ]
-    triangle_display = []
-    idx = 1
-    for dp in DISPLAY_PAIRS:
-        net = {}
-        for k in TRI_KEYS:
-            a_qty = tri_channel_summaries[dp['ch_a']]['summary'][k]['qty']
-            b_qty = tri_channel_summaries[dp['ch_b']]['summary'][k]['qty']
-            net[k] = a_qty - b_qty   # >0: B欠A; <0: A欠B
-        # A欠B行
-        row_ab = {'idx': idx, 'label': f"{dp['a']}欠{dp['b']}"}
-        for k in TRI_KEYS:
-            row_ab[k] = int(-net[k]) if net[k] < 0 else None
-        triangle_display.append(row_ab)
-        idx += 1
-        # B欠A行
-        row_ba = {'idx': idx, 'label': f"{dp['b']}欠{dp['a']}"}
-        for k in TRI_KEYS:
-            row_ba[k] = int(net[k]) if net[k] > 0 else None
-        triangle_display.append(row_ba)
-        idx += 1
-
-    pair_stats = []
-    for p in PAIRS:
-        ca, cb = p['ch_a'], p['ch_b']
-        all_ym = sorted(set(ch_monthly[ca]) | set(ch_monthly[cb]))
-        months = []
-        total_net = {k: 0 for k in TRI_KEYS}
-        total_a   = {k: 0 for k in TRI_KEYS}
-        total_b   = {k: 0 for k in TRI_KEYS}
-        for ym in all_ym:
-            ad = ch_monthly[ca].get(ym, {})
-            bd = ch_monthly[cb].get(ym, {})
-            row = {'ym': ym, 'data': {}}
-            for k in TRI_KEYS:
-                a = ad.get(k, 0) or 0
-                b = bd.get(k, 0) or 0
-                net = a - b          # 正数：B欠A；负数：A欠B
-                row['data'][k] = {'a': a, 'b': b, 'net': net}
-                total_net[k] += net
-                total_a[k]   += a
-                total_b[k]   += b
-            months.append(row)
-
-        # 生成结论文字
-        conclusions = []
-        for k, name in STAT_ITEMS:
-            n = total_net[k]
-            if n > 0:
-                conclusions.append(f'{p["b"]}欠{p["a"]} {name} {int(n)} 个')
-            elif n < 0:
-                conclusions.append(f'{p["a"]}欠{p["b"]} {name} {int(-n)} 个')
-        pair_stats.append({
-            'a': p['a'], 'b': p['b'],
-            'months': months,
-            'total_net': total_net,
-            'total_a': total_a,
-            'total_b': total_b,
-            'conclusions': conclusions,
-        })
-
-    # ── 三角债数量统计（6方向）────────────────────────────────
-    triangle_qty = []
-    for idx, ch in enumerate([1, 2, 3, 4, 5, 6], 1):
-        row = {'idx': idx, 'label': CHANNELS[ch]['from'] + ' → ' + CHANNELS[ch]['to']}
-        s = channel_summaries[ch]['summary']
-        for key, _ in TRIANGLE_ITEMS:
-            row[key] = s[key]['qty']
-        triangle_qty.append(row)
-
-    # ── 三角债金额报表 ────────────────────────────────────────
-    hd_sy_net = channel_summaries[1]['total'] - channel_summaries[2]['total']
-    hd_xx_net = channel_summaries[3]['total'] - channel_summaries[4]['total']
-    sy_xx_net = channel_summaries[5]['total'] - channel_summaries[6]['total']
-    triangle = {
-        'flows': [
-            {'label': '华登 → 邵阳华登', 'amount': channel_summaries[1]['total']},
-            {'label': '邵阳华登 → 华登',  'amount': channel_summaries[2]['total']},
-            {'label': '华登 → 兴信',      'amount': channel_summaries[3]['total']},
-            {'label': '兴信 → 华登',      'amount': channel_summaries[4]['total']},
-            {'label': '邵阳华登 → 兴信',  'amount': channel_summaries[5]['total']},
-            {'label': '兴信 → 邵阳华登',  'amount': channel_summaries[6]['total']},
-        ],
-        'pair_net': [
-            {'a': '华登',     'b': '邵阳华登', 'net': round(hd_sy_net, 2)},
-            {'a': '华登',     'b': '兴信',     'net': round(hd_xx_net, 2)},
-            {'a': '邵阳华登', 'b': '兴信',     'net': round(sy_xx_net, 2)},
-        ],
-        'net': {
-            '华登':     round(hd_sy_net + hd_xx_net, 2),
-            '邵阳华登': round(sy_xx_net - hd_sy_net, 2),
-            '兴信':     round(-(hd_xx_net + sy_xx_net), 2),
-        }
-    }
-
-    # 判断三角债是否全部清零
-    all_cleared = all(
-        row[k] is None or row[k] == 0
-        for row in triangle_display
-        for k in TRI_KEYS
-    )
-
-    from datetime import date as _date
-    today = _date.today().strftime('%Y/%m/%d')
-    db.close()
-    return render_template('reports.html',
-                           sections=SECTIONS, channels=CHANNELS, items=ITEMS,
-                           channel_summaries=channel_summaries,
-                           stat_items=STAT_ITEMS,
-                           pair_stats=pair_stats,
-                           triangle_display=triangle_display,
-                           all_cleared=all_cleared,
-                           triangle_qty=triangle_qty,
-                           triangle_items=TRIANGLE_ITEMS,
-                           triangle=triangle,
-                           today=today,
-                           date_from=date_from, date_to=date_to,
-                           tri_date_from=tri_date_from, tri_date_to=tri_date_to,
-                           tri_pair_summary=tri_pair_summary)
-
-
-# ==================== 导出 Excel ====================
-
-@app.route('/export/channel/<int:ch>')
-@_ch_required
-def export_channel(ch):
-    if ch not in CHANNELS:
-        return redirect(url_for('index'))
-    db = get_db()
-    records = db.execute('SELECT * FROM records WHERE channel = ? ORDER BY date ASC', (ch,)).fetchall()
-
-    from datetime import datetime as _dt
-
-    output = io.BytesIO()
-    wb = xlsxwriter.Workbook(output)
-    ws = wb.add_worksheet('流水记录')
-
-    total_cols = 2 + len(ITEMS) + 1  # 日期+收订单号+13包材+备注
-
-    # 格式定义
-    title_fmt  = wb.add_format({'bold': True, 'font_size': 14,
-                                'bg_color': '#C4D79B', 'border': 0, 'valign': 'vcenter'})
-    header_fmt = wb.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter',
-                                'bg_color': '#C4D79B', 'border': 1, 'font_size': 10})
-    data_fmt   = wb.add_format({'align': 'center', 'valign': 'vcenter',
-                                'bg_color': '#FFFFCC', 'border': 1})
-    data_left  = wb.add_format({'align': 'left', 'valign': 'vcenter',
-                                'bg_color': '#FFFFCC', 'border': 1})
-    num_fmt    = wb.add_format({'align': 'center', 'valign': 'vcenter',
-                                'bg_color': '#FFFFCC', 'border': 1, 'num_format': '0'})
-    total_fmt  = wb.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter',
-                                'bg_color': '#FFFF00', 'border': 1, 'num_format': '0'})
-    total_lbl  = wb.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter',
-                                'bg_color': '#FFFF00', 'border': 1})
-    empty_fmt  = wb.add_format({'bg_color': '#FFFFCC', 'border': 1})
-
-    # 列宽
-    ws.set_column(0, 0, 8)   # 日期
-    ws.set_column(1, 1, 10)  # 收订单号
-    ws.set_column(2, 2 + len(ITEMS) - 1, 6)  # 包材
-    ws.set_column(2 + len(ITEMS), 2 + len(ITEMS), 8)  # 备注
-    ws.set_default_row(15)
-
-    # 行0：标题
-    title = f"{CHANNELS[ch]['from']}发{CHANNELS[ch]['to']}"
-    ws.merge_range(0, 0, 0, total_cols - 1, title, title_fmt)
-    ws.set_row(0, 22)
-
-    # 行1：表头
-    ws.write(1, 0, '日期', header_fmt)
-    ws.write(1, 1, '收订单号', header_fmt)
-    for ci, (_, name) in enumerate(ITEMS, 2):
-        ws.write(1, ci, name, header_fmt)
-    ws.write(1, 2 + len(ITEMS), '备注', header_fmt)
-    ws.set_row(1, 18)
-
-    # 数据行（从行2开始）
-    for r, rec in enumerate(records, 2):
-        # 日期格式：3月2日
-        try:
-            d = _dt.strptime(rec['date'], '%Y-%m-%d')
-            date_str = f'{d.month}月{d.day}日'
-        except Exception:
-            date_str = rec['date'] or ''
-        ws.write(r, 0, date_str, data_fmt)
-        ws.write(r, 1, rec['order_no'] or '', data_fmt)
-        for ci, (key, _) in enumerate(ITEMS, 2):
-            v = rec[f'{key}_qty'] or 0
-            ws.write(r, ci, int(v) if v else '', num_fmt)
-        ws.write(r, 2 + len(ITEMS), rec['remarks'] or '', data_left)
-
-    # 合计行
-    total_row = 2 + len(records)
-    ws.write(total_row, 0, '', total_lbl)
-    ws.write(total_row, 1, '合计：', total_lbl)
-    for ci, (key, _) in enumerate(ITEMS, 2):
-        total = sum(int(rec[f'{key}_qty'] or 0) for rec in records)
-        ws.write(total_row, ci, total, total_fmt)
-    ws.write(total_row, 2 + len(ITEMS), '', total_lbl)
-    ws.set_row(total_row, 18)
-
-    wb.close()
-    output.seek(0)
-    db.close()
-    filename = f"{CHANNELS[ch]['from']}到{CHANNELS[ch]['to']}_流水.xlsx"
-    return send_file(output, as_attachment=True, download_name=filename,
-                     mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-
-
-@app.route('/export/reports')
-def export_reports():
-    db = get_db()
-    output = io.BytesIO()
-    wb = xlsxwriter.Workbook(output)
-    bold = wb.add_format({'bold': True, 'bg_color': '#D9E1F2', 'border': 1})
-    cell_fmt = wb.add_format({'border': 1})
-    num_fmt = wb.add_format({'border': 1, 'num_format': '#,##0.00'})
-
-    for ch, info in CHANNELS.items():
-        ws = wb.add_worksheet(f"{info['from']}到{info['to']}")
-        records = db.execute('SELECT * FROM records WHERE channel = ? ORDER BY date DESC', (ch,)).fetchall()
-        headers = ['包材', '总数量', '总金额']
-        for c, h in enumerate(headers):
-            ws.write(0, c, h, bold)
-        for r, (key, name) in enumerate(ITEMS, 1):
-            total_qty = sum(rec[f'{key}_qty'] or 0 for rec in records)
-            total_amount = sum(rec[f'{key}_amount'] or 0 for rec in records)
-            ws.write(r, 0, name, cell_fmt)
-            ws.write(r, 1, total_qty, num_fmt)
-            ws.write(r, 2, total_amount, num_fmt)
-
-    wb.close()
-    output.seek(0)
-    db.close()
-    return send_file(output, as_attachment=True, download_name='汇总报表.xlsx',
-                     mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-
-
-@app.route('/export/triangle-qty')
-def export_triangle_qty():
-    db = get_db()
-    output = io.BytesIO()
-    wb = xlsxwriter.Workbook(output)
-    bold = wb.add_format({'bold': True, 'bg_color': '#D9E1F2', 'border': 1})
-    cell_fmt = wb.add_format({'border': 1})
-    num_fmt = wb.add_format({'border': 1, 'num_format': '#,##0'})
-
-    ws = wb.add_worksheet('三角债数量统计')
-    headers = ['序号', '车间'] + [name for _, name in TRIANGLE_ITEMS]
-    for c, h in enumerate(headers):
-        ws.write(0, c, h, bold)
-
-    for idx, ch in enumerate([1, 2, 3, 4, 5, 6], 1):
-        records = db.execute('SELECT * FROM records WHERE channel = ?', (ch,)).fetchall()
-        ws.write(idx, 0, idx, cell_fmt)
-        ws.write(idx, 1, CHANNELS[ch]['from'] + ' → ' + CHANNELS[ch]['to'], cell_fmt)
-        for ci, (key, _) in enumerate(TRIANGLE_ITEMS):
-            total_qty = sum(r[f'{key}_qty'] or 0 for r in records)
-            ws.write(idx, 2 + ci, total_qty, num_fmt)
-
-    wb.close()
-    output.seek(0)
-    db.close()
-    return send_file(output, as_attachment=True, download_name='三角债数量统计.xlsx',
-                     mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-
-
-@app.route('/export/triangle-display')
-def export_triangle_display():
-    tri_date_from = request.args.get('tri_date_from', '')
-    tri_date_to   = request.args.get('tri_date_to', '')
-
-    db = get_db()
-    tri_cs = {}
-    for ch in CHANNELS:
-        records = _get_records(db, ch, tri_date_from, tri_date_to)
-        summary, total = _calc_summary(records)
-        tri_cs[ch] = {'summary': summary, 'total': total}
-    db.close()
-
-    TRI_KEYS = [k for k, _ in STAT_ITEMS]
-    DISPLAY_PAIRS = [
-        {'a': '邵阳华登', 'b': '兴信', 'ch_a': 5, 'ch_b': 6},
-        {'a': '华登',     'b': '兴信', 'ch_a': 3, 'ch_b': 4},
-        {'a': '邵阳华登', 'b': '华登', 'ch_a': 2, 'ch_b': 1},
-    ]
-    PAIRS = [
-        {'a': '华登',     'b': '邵阳华登', 'ch_a': 1, 'ch_b': 2},
-        {'a': '华登',     'b': '兴信',     'ch_a': 3, 'ch_b': 4},
-        {'a': '邵阳华登', 'b': '兴信',     'ch_a': 5, 'ch_b': 6},
-    ]
-
-    # 6行净欠表
-    triangle_display = []
-    idx = 1
-    for dp in DISPLAY_PAIRS:
-        net = {}
-        for k in TRI_KEYS:
-            a_qty = tri_cs[dp['ch_a']]['summary'][k]['qty']
-            b_qty = tri_cs[dp['ch_b']]['summary'][k]['qty']
-            net[k] = a_qty - b_qty
-        row_ab = {'idx': idx, 'label': f"{dp['a']}欠{dp['b']}"}
-        for k in TRI_KEYS:
-            row_ab[k] = int(-net[k]) if net[k] < 0 else None
-        triangle_display.append(row_ab)
-        idx += 1
-        row_ba = {'idx': idx, 'label': f"{dp['b']}欠{dp['a']}"}
-        for k in TRI_KEYS:
-            row_ba[k] = int(net[k]) if net[k] > 0 else None
-        triangle_display.append(row_ba)
-        idx += 1
-
-    # 债务往来总结
-    tri_pair_summary = []
-    for p in PAIRS:
-        total_net = {}
-        for k in TRI_KEYS:
-            a_qty = tri_cs[p['ch_a']]['summary'][k]['qty']
-            b_qty = tri_cs[p['ch_b']]['summary'][k]['qty']
-            total_net[k] = a_qty - b_qty
-        tri_pair_summary.append({'a': p['a'], 'b': p['b'], 'total_net': total_net})
-
-    all_cleared = all(
-        row[k] is None or row[k] == 0
-        for row in triangle_display
-        for k in TRI_KEYS
-    )
-
-    from datetime import date as _date
-    cutoff = tri_date_to or _date.today().strftime('%Y/%m/%d')
-
-    output = io.BytesIO()
-    wb = xlsxwriter.Workbook(output)
-
-    title_fmt  = wb.add_format({'bold': True, 'font_size': 14, 'align': 'center', 'valign': 'vcenter', 'bg_color': '#FFD966', 'border': 1})
-    sub_fmt    = wb.add_format({'font_size': 10, 'align': 'center', 'bg_color': '#FFD966', 'border': 1})
-    header_fmt = wb.add_format({'bold': True, 'align': 'center', 'valign': 'vcenter', 'border': 1, 'bg_color': '#F2F2F2'})
-    cell_fmt   = wb.add_format({'align': 'center', 'valign': 'vcenter', 'border': 1})
-    num_fmt    = wb.add_format({'align': 'center', 'valign': 'vcenter', 'border': 1, 'num_format': '#,##0'})
-    red_fmt    = wb.add_format({'bold': True, 'align': 'center', 'font_color': '#CC0000', 'bg_color': '#FFE0E0', 'border': 1})
-    green_fmt  = wb.add_format({'bold': True, 'align': 'center', 'font_color': '#1A7A1A', 'bg_color': '#E2FFE2', 'border': 1})
-    sum_hdr    = wb.add_format({'bold': True, 'font_size': 11, 'border': 1, 'bg_color': '#D9E1F2'})
-    ok_fmt     = wb.add_format({'align': 'center', 'font_color': '#1A7A1A', 'border': 1})
-    debt_fmt   = wb.add_format({'font_color': '#CC0000', 'border': 1})
-
-    ws = wb.add_worksheet('往来统计表')
-    stat_names = [name for _, name in STAT_ITEMS]
-    col_count  = 2 + len(STAT_ITEMS) + 1  # 序号+车间+4包材+备注
-
-    ws.set_column(0, 0, 6)
-    ws.set_column(1, 1, 18)
-    ws.set_column(2, 2 + len(STAT_ITEMS) - 1, 12)
-    ws.set_column(2 + len(STAT_ITEMS), 2 + len(STAT_ITEMS), 10)
-
-    # 标题
-    ws.merge_range(0, 0, 0, col_count - 1, '各车间包材相互往来数量统计表', title_fmt)
-    ws.set_row(0, 28)
-    ws.merge_range(1, 0, 1, col_count - 1, f'截止到 {cutoff}', sub_fmt)
-
-    # 表头
-    headers = ['序号', '车间'] + stat_names + ['备注']
-    for c, h in enumerate(headers):
-        ws.write(2, c, h, header_fmt)
-
-    # 6行数据
-    for r, row in enumerate(triangle_display, 3):
-        ws.write(r, 0, row['idx'], cell_fmt)
-        ws.write(r, 1, row['label'], cell_fmt)
-        for ci, (k, _) in enumerate(STAT_ITEMS):
-            v = row[k]
-            ws.write(r, 2 + ci, v if v else '', num_fmt if v else cell_fmt)
-        ws.write(r, 2 + len(STAT_ITEMS), '', cell_fmt)
-
-    # 底部状态行
-    status_row = 3 + len(triangle_display)
-    status_text = '各车间往来三角债数据已相互清数' if all_cleared else '各车间往来三角债尚有未清数据，请核查上表'
-    ws.merge_range(status_row, 0, status_row, col_count - 1, status_text, green_fmt if all_cleared else red_fmt)
-
-    # 日期行
-    date_row = status_row + 1
-    ws.merge_range(date_row, 0, date_row, col_count - 1, cutoff, wb.add_format({'align': 'right', 'border': 1}))
-
-    # 空行
-    summary_start = date_row + 2
-
-    # 债务往来总结标题
-    ws.merge_range(summary_start, 0, summary_start, col_count - 1, '债务往来总结', sum_hdr)
-    ws.set_row(summary_start, 20)
-
-    r = summary_start + 1
-    for p in tri_pair_summary:
-        all_zero = all(p['total_net'][k] == 0 for k in TRI_KEYS)
-        ws.merge_range(r, 0, r, 1, f"{p['a']} ↔ {p['b']}", wb.add_format({'bold': True, 'border': 1, 'bg_color': '#E8F0FE'}))
-        if all_zero:
-            ws.merge_range(r, 2, r, col_count - 1, '✓ 已结清', ok_fmt)
-        else:
-            debts = []
-            for k, name in STAT_ITEMS:
-                n = p['total_net'][k]
-                if n > 0:
-                    debts.append(f"{p['b']}欠{p['a']} {name} {int(n)} 个")
-                elif n < 0:
-                    debts.append(f"{p['a']}欠{p['b']} {name} {int(-n)} 个")
-            ws.merge_range(r, 2, r, col_count - 1, '；'.join(debts), debt_fmt)
-        r += 1
-
-    wb.close()
-    output.seek(0)
-    return send_file(output, as_attachment=True, download_name='各车间往来统计表.xlsx',
-                     mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-
-
-@app.route('/export/triangle')
-def export_triangle():
-    db = get_db()
-    totals = {}
-    for ch in CHANNELS:
-        records = db.execute('SELECT * FROM records WHERE channel = ?', (ch,)).fetchall()
-        totals[ch] = sum(sum(r[f'{key}_amount'] or 0 for r in records) for key, _ in ITEMS)
-
-    hd_sy = totals[1] - totals[2]
-    hd_xx = totals[3] - totals[4]
-    sy_xx = totals[5] - totals[6]
-
-    output = io.BytesIO()
-    wb = xlsxwriter.Workbook(output)
-    bold = wb.add_format({'bold': True, 'bg_color': '#D9E1F2', 'border': 1})
-    cell_fmt = wb.add_format({'border': 1})
-    num_fmt = wb.add_format({'border': 1, 'num_format': '#,##0.00'})
-
-    ws = wb.add_worksheet('三角债')
-    ws.write(0, 0, '往来方向', bold)
-    ws.write(0, 1, '发出金额', bold)
-    ws.write(0, 2, '收到金额', bold)
-    ws.write(0, 3, '净额', bold)
-
-    pairs = [
-        ('华登 ↔ 邵阳华登', totals[1], totals[2], hd_sy),
-        ('华登 ↔ 兴信', totals[3], totals[4], hd_xx),
-        ('邵阳华登 ↔ 兴信', totals[5], totals[6], sy_xx),
-    ]
-    for i, (label, sent, recv, net) in enumerate(pairs, 1):
-        ws.write(i, 0, label, cell_fmt)
-        ws.write(i, 1, sent, num_fmt)
-        ws.write(i, 2, recv, num_fmt)
-        ws.write(i, 3, net, num_fmt)
-
-    ws.write(5, 0, '公司', bold)
-    ws.write(5, 1, '净额（正=应收，负=应付）', bold)
-    net_data = {
-        '华登': round(hd_sy + hd_xx, 2),
-        '邵阳华登': round(sy_xx - hd_sy, 2),
-        '兴信': round(-(hd_xx + sy_xx), 2),
-    }
-    row = 6
-    for company, amount in net_data.items():
-        ws.write(row, 0, company, cell_fmt)
-        ws.write(row, 1, amount, num_fmt)
-        row += 1
-
-    wb.close()
-    output.seek(0)
-    db.close()
-    return send_file(output, as_attachment=True, download_name='三角债报表.xlsx',
-                     mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-
-
-@app.route('/export/monthly/<int:ch>')
-@_ch_required
-def export_monthly(ch):
-    if ch not in CHANNELS:
-        return redirect(url_for('index'))
-
-    selected = request.args.getlist('months')
-    db = get_db()
-    stats_data = _build_stats(db, ch)
-    db.close()
-
-    if selected:
-        stats_data = [s for s in stats_data if s['year_month'] in selected]
-
-    output = io.BytesIO()
-    wb = xlsxwriter.Workbook(output)
-
-    # 格式
-    def fmt(**kw):
-        base = {'border': 1, 'valign': 'vcenter', 'align': 'center', 'font_size': 10}
-        base.update(kw)
-        return wb.add_format(base)
-
-    title_fmt   = fmt(bold=True, font_size=12, bg_color='#C4D79B', border=0, align='left')
-    header_fmt  = fmt(bold=True, bg_color='#D9D9D9')
-    month_fmt   = fmt(bold=True, bg_color='#F2F2F2', text_wrap=True)
-    prev_fmt    = fmt(bg_color='#F2F2F2')
-    invest_fmt  = fmt(bg_color='#DBEAFE', font_color='#1E40AF')
-    expect_fmt  = fmt(bold=True, bg_color='#DBEAFE', font_color='#1E40AF')
-    actual_fmt  = fmt(bold=True, bg_color='#DCFCE7', font_color='#166534')
-    loss_red    = fmt(bg_color='#FEE2E2', font_color='#DC2626')
-    loss_green  = fmt(bg_color='#D1FAE5', font_color='#065F46')
-    pct_fmt     = fmt(bg_color='#F9FAFB', font_color='#9CA3AF', num_format='0.0"%"')
-    num_prev    = fmt(bg_color='#F2F2F2', num_format='0')
-    num_invest  = fmt(bg_color='#DBEAFE', font_color='#1E40AF', num_format='0')
-    num_expect  = fmt(bold=True, bg_color='#DBEAFE', font_color='#1E40AF', num_format='0')
-    num_actual  = fmt(bold=True, bg_color='#DCFCE7', font_color='#166534', num_format='0')
-    num_lred    = fmt(bg_color='#FEE2E2', font_color='#DC2626', num_format='0')
-    num_lgreen  = fmt(bg_color='#D1FAE5', font_color='#065F46', num_format='0')
-    num_pct     = fmt(bg_color='#F9FAFB', font_color='#9CA3AF', num_format='0.0"%"')
-
-    ws = wb.add_worksheet('月份统计')
-    stat_keys = [k for k, _ in STAT_ITEMS]
-    stat_names = [n for _, n in STAT_ITEMS]
-    total_cols = 2 + len(STAT_ITEMS)
-
-    ws.set_column(0, 0, 12)   # 月份
-    ws.set_column(1, 1, 10)   # 项目
-    ws.set_column(2, total_cols - 1, 9)  # 包材
-
-    # 标题行
-    ws.merge_range(0, 0, 0, total_cols - 1,
-                   f"{CHANNELS[ch]['from']} → {CHANNELS[ch]['to']} 月份包材数量统计", title_fmt)
-    ws.set_row(0, 20)
-
-    # 表头
-    ws.write(1, 0, '月份', header_fmt)
-    ws.write(1, 1, '项目', header_fmt)
-    for ci, name in enumerate(stat_names):
-        ws.write(1, 2 + ci, name, header_fmt)
-    ws.set_row(1, 16)
-
-    row = 2
-    for stat in stats_data:
-        ym = stat['year_month']
-        month = int(ym[5:7])
-        prev_month = 12 if month == 1 else month - 1
-        data = stat['item_data']
-
-        rows_def = [
-            (f'{prev_month}月实存', prev_fmt,   num_prev,   'prev_actual'),
-            ('投资',                invest_fmt, num_invest, 'investment'),
-            (f'{month}月应存',      expect_fmt, num_expect, 'expected'),
-            (f'{month}月实存',      actual_fmt, num_actual, 'actual'),
-            ('损耗',                None,       None,       'loss'),
-            ('损耗占比',            pct_fmt,    num_pct,    'loss_pct'),
-        ]
-
-        # 合并月份列（6行）
-        month_label = ym + (f'\n{stat["remarks"]}' if stat.get('remarks') else '')
-        ws.merge_range(row, 0, row + 5, 0, month_label, month_fmt)
-
-        for i, (label, lbl_fmt, val_fmt, field) in enumerate(rows_def):
-            r = row + i
-            ws.set_row(r, 15)
-
-            # 损耗行颜色按正负
-            if field == 'loss':
-                loss_val = data[stat_keys[0]]['loss']
-                lbl_fmt = loss_red if loss_val < 0 else loss_green
-                val_fmt = num_lred if loss_val < 0 else num_lgreen
-
-            ws.write(r, 1, label, lbl_fmt)
-            for ci, key in enumerate(stat_keys):
-                v = data[key][field]
-                if field == 'loss_pct':
-                    ws.write(r, 2 + ci, v, val_fmt)
+def parse_excel_sheet(filepath, sheet_name, start_row, columns):
+    """读一个 sheet 按 columns 配置提取行。
+
+    columns: {excel_col_index(0-based): target_field_name}
+    start_row: 1-based 数据起始行
+
+    缺 date 字段的行会被丢弃（date 是 flow_records 必填）。
+    """
+    wb = openpyxl.load_workbook(filepath, data_only=True, read_only=True)
+    try:
+        ws = wb[sheet_name]
+        rows = []
+        for i, excel_row in enumerate(ws.iter_rows(values_only=True), start=1):
+            if i < start_row:
+                continue
+            if all(v is None for v in excel_row):
+                continue
+            row = {}
+            for idx, field in columns.items():
+                if idx >= len(excel_row):
+                    continue
+                v = excel_row[idx]
+                if v is None:
+                    continue
+                if field == 'date':
+                    if isinstance(v, (datetime, date_cls)):
+                        row[field] = v.strftime('%Y-%m-%d')
+                    elif isinstance(v, (int, float)) and not isinstance(v, bool) and 30000 <= v <= 80000:
+                        # Excel 日期序列号（用户单元格未格式化为日期时 openpyxl 返回数字）
+                        # 30000 ≈ 1982-03-15, 80000 ≈ 2119-01-22，覆盖业务合理范围
+                        from openpyxl.utils.datetime import from_excel
+                        row[field] = from_excel(v).strftime('%Y-%m-%d')
+                    else:
+                        s = str(v).strip()[:10]
+                        try:
+                            datetime.strptime(s, '%Y-%m-%d')
+                            row[field] = s
+                        except ValueError:
+                            # 不是合法日期（如夹在数据中的标题行）→ 不设 date，行被丢
+                            pass
+                elif field.endswith('_qty'):
+                    try:
+                        row[field] = float(v)
+                    except (ValueError, TypeError):
+                        row[field] = 0
                 else:
-                    ws.write(r, 2 + ci, int(v), val_fmt)
+                    row[field] = str(v).strip()
+            if 'date' in row:
+                rows.append(row)
+        return rows
+    finally:
+        wb.close()  # 防 Windows 文件锁残留
 
-        row += 6
 
-    wb.close()
-    output.seek(0)
-    filename = f"{CHANNELS[ch]['from']}到{CHANNELS[ch]['to']}_月份统计.xlsx"
-    return send_file(output, as_attachment=True, download_name=filename,
-                     mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+@app.route('/import', methods=['GET', 'POST'])
+def import_page():
+    party = current_party()
+    if not party:
+        return redirect(url_for('index'))
+    if request.method == 'POST' and 'file' in request.files:
+        # 上传 → 存 tmp → 读 sheet names → render preview
+        f = request.files['file']
+        tmp_path = os.path.join(DATA_PATH, 'upload_tmp.xlsx')
+        f.save(tmp_path)
+        wb = openpyxl.load_workbook(tmp_path, read_only=True)
+        sheets = wb.sheetnames
+        wb.close()
+        return render_template('import_preview.html', party=party, sheets=sheets,
+                               filename=f.filename, ALLOWED_DIRECTIONS=ALLOWED_DIRECTIONS,
+                               IMPORT_CONFIGS=IMPORT_CONFIGS)
+    return render_template('import_preview.html', party=party,
+                           ALLOWED_DIRECTIONS=ALLOWED_DIRECTIONS,
+                           IMPORT_CONFIGS=IMPORT_CONFIGS)
+
+
+@app.route('/import/commit', methods=['POST'])
+def import_commit():
+    party = current_party()
+    if not party:
+        return redirect(url_for('index'))
+
+    # 从 form 或 file 拿（共享 tmp，3 LAN 用户可接受并发覆盖）
+    tmp_path = os.path.join(DATA_PATH, 'upload_tmp.xlsx')
+    file = request.files.get('file')
+    if file and file.filename:
+        file.save(tmp_path)
+
+    sheet_name = request.form.get('sheet_name')
+    try:
+        start_row = int(request.form.get('start_row', '3') or '3')
+    except ValueError:
+        flash('起始行必须是数字'); return redirect(url_for('import_page'))
+    direction = request.form.get('direction')
+    if direction not in ALLOWED_DIRECTIONS:
+        flash('无效方向'); return redirect(url_for('import_page'))
+    from_p, to_p = ALLOWED_DIRECTIONS[direction]
+
+    # party 必须能录这个方向
+    if party not in (from_p, to_p):
+        flash('无权导入此方向'); return redirect(url_for('import_page'))
+
+    # 列映射（从 form 里读每个字段的列号）
+    columns = {}
+    for key in ['date', 'order_no', 'remark'] + [f'{k}_qty' for k, _ in ITEMS]:
+        col = request.form.get(f'col_{key}')
+        if col is not None and col != '':
+            try:
+                columns[int(col)] = key
+            except ValueError:
+                pass
+
+    rows = parse_excel_sheet(tmp_path, sheet_name, start_row, columns)
+
+    qty_cols = [f'{k}_qty' for k, _ in ITEMS]
+    con = sqlite3.connect(DATABASE)
+    for r in rows:
+        args = [party, from_p, to_p, r.get('date'), r.get('order_no'), r.get('remark')]
+        args += [r.get(c, 0) for c in qty_cols]
+        placeholders = ', '.join(['?'] * len(args))
+        con.execute(f"""
+            INSERT INTO flow_records (recorded_by, from_party, to_party, date, order_no, remark,
+                                      {', '.join(qty_cols)})
+            VALUES ({placeholders})
+        """, args)
+    con.commit(); con.close()
+    flash(f'导入 {len(rows)} 条')
+    return redirect(url_for('party_page', party=party))
+
+
+@app.route('/import/preset', methods=['POST'])
+def import_preset():
+    """按预定模板批量导入：上传 file + 选 preset → 自动扫描 allowed_sheets 全部导入。
+
+    可选：传 sheet_name 限定单个 sheet（向后兼容）；不传则自动扫描所有 allowed。
+    """
+    party = current_party()
+    if not party:
+        return redirect(url_for('index'))
+
+    preset_key = request.form.get('preset', '')
+    cfg = IMPORT_CONFIGS.get(preset_key)
+    if not cfg:
+        flash('无效模板'); return redirect(url_for('import_page'))
+    if cfg.get('recorded_by_party') and party != cfg['recorded_by_party']:
+        flash(f'此模板需用 {cfg["recorded_by_party"]} 账号导入'); return redirect(url_for('import_page'))
+
+    file = request.files.get('file')
+    if not file or not file.filename:
+        flash('未上传文件'); return redirect(url_for('import_page'))
+    tmp_path = os.path.join(DATA_PATH, 'upload_tmp.xlsx')
+    file.save(tmp_path)
+
+    # 决定要导哪些 sheet
+    requested_sheet = request.form.get('sheet_name', '').strip()
+    allowed_sheets = cfg.get('allowed_sheets') or []
+    wb = openpyxl.load_workbook(tmp_path, read_only=True)
+    try:
+        existing_sheets = set(wb.sheetnames)
+    finally:
+        wb.close()
+
+    if requested_sheet:
+        if allowed_sheets and requested_sheet not in allowed_sheets:
+            flash(f'此模板仅支持 sheet：{", ".join(allowed_sheets)}'); return redirect(url_for('import_page'))
+        targets = [requested_sheet] if requested_sheet in existing_sheets else []
+    else:
+        targets = [s for s in allowed_sheets if s in existing_sheets]
+
+    if not targets:
+        flash(f'文件中找不到任何模板支持的 sheet（{", ".join(allowed_sheets)}）')
+        return redirect(url_for('import_page'))
+
+    qty_cols = [f'{k}_qty' for k, _ in ITEMS]
+    per_sheet = []
+    grand_total = 0
+    for sheet_name in targets:
+        sheet_total = 0
+        for dir_cfg in cfg.get('directions', []):
+            direction = dir_cfg['direction']
+            if direction not in ALLOWED_DIRECTIONS:
+                continue
+            from_p, to_p = ALLOWED_DIRECTIONS[direction]
+            rows = parse_excel_sheet(tmp_path, sheet_name, dir_cfg['start_row'], dir_cfg['columns'])
+            if not rows:
+                continue
+            con = sqlite3.connect(DATABASE)
+            for r in rows:
+                args = [party, from_p, to_p, r.get('date'), r.get('order_no'), r.get('remark')]
+                args += [r.get(c, 0) for c in qty_cols]
+                placeholders = ', '.join(['?'] * len(args))
+                con.execute(f"""
+                    INSERT INTO flow_records (recorded_by, from_party, to_party, date, order_no, remark,
+                                              {', '.join(qty_cols)})
+                    VALUES ({placeholders})
+                """, args)
+            con.commit(); con.close()
+            sheet_total += len(rows)
+        per_sheet.append(f'{sheet_name}({sheet_total})')
+        grand_total += sheet_total
+
+    flash(f'模板 [{cfg["label"]}] 导入 {grand_total} 条 — 明细：{", ".join(per_sheet)}')
+    return redirect(url_for('party_page', party=party))
+
+
+@app.route('/party/<party>/clear/<cp>', methods=['POST'])
+def party_clear_panel(party, cp):
+    """一键清空当前 party 对某对方的所有未锁定 flow_records（收+发两方向）。"""
+    sess_party = current_party()
+    if not sess_party or sess_party != party:
+        return redirect(url_for('index'))
+    if cp not in PARTIES or cp == party or cp not in PARTIES[party]['counterparties']:
+        flash('无效对方'); return redirect(url_for('party_page', party=party))
+    con = sqlite3.connect(DATABASE)
+    n = con.execute(
+        "DELETE FROM flow_records WHERE recorded_by=? AND locked=0 "
+        "AND ((from_party=? AND to_party=?) OR (from_party=? AND to_party=?))",
+        (party, party, cp, cp, party)
+    ).rowcount
+    con.commit(); con.close()
+    flash(f'已清空对 {PARTIES[cp]["name"]} 的 {n} 条记录（已锁定的保留）')
+    return redirect(url_for('party_page', party=party))
+
+
+@app.route('/clear-my-records', methods=['POST'])
+def clear_my_records():
+    """清空当前 party 自己录入的、未锁定的 flow_records。可选按对方筛选。"""
+    party = current_party()
+    if not party:
+        return redirect(url_for('index'))
+    if request.form.get('confirm', '').strip() != '清空':
+        flash('请输入"清空"二字确认'); return redirect(url_for('import_page'))
+
+    cp = request.form.get('counterparty', '').strip()
+    sql = "DELETE FROM flow_records WHERE recorded_by=? AND locked=0"
+    args = [party]
+    if cp:
+        if cp not in PARTIES or cp == party or cp not in PARTIES[party]['counterparties']:
+            flash('无效对方'); return redirect(url_for('import_page'))
+        sql += " AND ((from_party=? AND to_party=?) OR (from_party=? AND to_party=?))"
+        args += [party, cp, cp, party]
+
+    con = sqlite3.connect(DATABASE)
+    n = con.execute(sql, args).rowcount
+    con.commit(); con.close()
+
+    scope = f'对 {PARTIES[cp]["name"]}' if cp else '所有对方'
+    flash(f'已清空 {PARTIES[party]["name"]} 录入的{scope}记录 {n} 条（已锁定的不删）')
+    return redirect(url_for('import_page'))
 
 
 init_db()

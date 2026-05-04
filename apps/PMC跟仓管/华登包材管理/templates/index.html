@@ -2,30 +2,27 @@
 {% block title %}华登包材管理系统 - 首页{% endblock %}
 {% block content %}
 <div class="max-w-4xl mx-auto">
-    <h1 class="text-2xl font-bold text-gray-800 mb-8 text-center">包材往来管理</h1>
+    <h1 class="text-2xl font-bold text-gray-800 mb-8 text-center">包材管理 · 选择登录</h1>
     <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {% set colors = {1: 'blue', 2: 'green', 3: 'purple'} %}
-        {% for sec_id, sec in sections.items() %}
-        <a href="/section/{{ sec_id }}"
-           class="block bg-white rounded-xl shadow-md hover:shadow-lg transition-shadow p-8 border border-gray-100 hover:border-{{ colors[sec_id] }}-300 group">
+        {% set colors = {'hd': 'blue', 'sy': 'green', 'xx': 'purple'} %}
+        {% for code, info in PARTIES.items() %}
+        <a href="/party/{{ code }}"
+           class="block bg-white rounded-xl shadow-md hover:shadow-lg transition-shadow p-8 border border-gray-100 hover:border-{{ colors[code] }}-300">
             <div class="text-center">
-                <div class="w-16 h-16 mx-auto mb-4 rounded-full flex items-center justify-center bg-{{ colors[sec_id] }}-100 text-{{ colors[sec_id] }}-600">
+                <div class="w-16 h-16 mx-auto mb-4 rounded-full flex items-center justify-center bg-{{ colors[code] }}-100 text-{{ colors[code] }}-600">
                     <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                              d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/>
+                              d="M3 21v-4a4 4 0 014-4h10a4 4 0 014 4v4M12 11a4 4 0 100-8 4 4 0 000 8z"/>
                     </svg>
                 </div>
-                <h2 class="text-lg font-semibold text-gray-800 group-hover:text-{{ colors[sec_id] }}-600 mb-2">
-                    {{ sec.a }}
-                </h2>
-                <div class="text-gray-400 text-2xl mb-2">&updownarrow;</div>
-                <h2 class="text-lg font-semibold text-gray-800 group-hover:text-{{ colors[sec_id] }}-600">
-                    {{ sec.b }}
-                </h2>
-                <p class="text-sm text-gray-500 mt-3">包材往来</p>
+                <h2 class="text-xl font-semibold text-gray-800">{{ info.name }}</h2>
+                <p class="text-sm text-gray-500 mt-3">登录进入对账系统</p>
             </div>
         </a>
         {% endfor %}
+    </div>
+    <div class="text-center mt-12">
+        <a href="/reports" class="text-blue-600 hover:underline">查看汇总报表 →</a>
     </div>
 </div>
 {% endblock %}

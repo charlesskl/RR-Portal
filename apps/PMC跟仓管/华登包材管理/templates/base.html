@@ -18,6 +18,9 @@
             <a href="/" class="text-xl font-bold text-blue-700">华登包材管理系统</a>
             <div class="flex items-center gap-4 text-sm">
                 <a href="/" class="text-gray-600 hover:text-blue-600">首页</a>
+                {% if current_party() %}
+                <a href="/reconcile" class="text-gray-600 hover:text-blue-600">对账中心</a>
+                {% endif %}
                 <a href="/reports" class="text-gray-600 hover:text-blue-600">汇总报表</a>
                 <span class="text-gray-400 text-xs" id="autoRefreshInfo"></span>
                 <button onclick="toggleAutoRefresh()" id="refreshBtn"
@@ -27,6 +30,15 @@
             </div>
         </div>
     </nav>
+    {% with messages = get_flashed_messages() %}
+      {% if messages %}
+        <div class="max-w-7xl mx-auto px-4 mt-3">
+          {% for m in messages %}
+            <div class="bg-red-50 border border-red-200 text-red-700 text-sm rounded px-3 py-2 mb-2">{{ m }}</div>
+          {% endfor %}
+        </div>
+      {% endif %}
+    {% endwith %}
     <main class="max-w-full mx-auto px-4 py-6">
         {% block content %}{% endblock %}
     </main>
@@ -85,6 +97,15 @@
     }
 
     // 默认关闭，用户可手动开启
+
+    // 月度盘点：展开/收起历史月份（最新月默认显示，其它隐藏）
+    function toggleHistory(p, btn) {
+        const els = document.querySelectorAll(`.party-${p}-history:not(.party-${p}-latest)`);
+        let nowHidden = true;
+        els.forEach(el => { el.classList.toggle('hidden'); if (!el.classList.contains('hidden')) nowHidden = false; });
+        const n = els.length;
+        btn.innerHTML = nowHidden ? `▾ 展开历史月份（${n} 个）` : `▴ 收起历史月份`;
+    }
     </script>
     {% block scripts %}{% endblock %}
 </body>

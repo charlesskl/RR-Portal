@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}核对详情{% endblock %}
+{% block content %}
+<div class="max-w-4xl mx-auto">
+    <h1 class="text-xl font-bold mb-4">
+        核对：{{ PARTIES[r.initiator_party].name }} ↔ {{ PARTIES[r.approver_party].name }}
+    </h1>
+    <div class="bg-white rounded p-4 mb-4">
+        <p><b>范围</b>：{{ r.date_from }} ~ {{ r.date_to }}</p>
+        <p><b>状态</b>：
+            {% if r.status == 'pending_approval' %}<span class="text-amber-600">待审批</span>
+            {% elif r.status == 'confirmed' %}<span class="text-green-600">已确认</span>
+            {% elif r.status == 'disputed' %}<span class="text-red-600">待协商</span>
+            {% elif r.status == 'withdrawn' %}<span class="text-gray-500">已撤回</span>
+            {% endif %}
+        </p>
+        {% if r.notes %}<p class="text-sm text-gray-600 mt-2">备注: {{ r.notes }}</p>{% endif %}
+    </div>
+
+    {% for dir_key, data in snapshot.items() %}
+    <div class="bg-white rounded p-4 mb-4">
+        <h2 class="font-semibold mb-2">{{ dir_key.replace('_', ' → ') }}</h2>
+        <table class="text-sm w-full border-collapse">
+            <thead class="bg-gray-50">
+                <tr><th class="border px-2 py-1">包材</th><th class="border px-2 py-1">发方记的</th><th class="border px-2 py-1">收方记的</th><th class="border px-2 py-1">差</th></tr>
+            </thead>
+            <tbody>
+                {% for key, name in ITEMS %}
+                {% set s = data.sender_recorded[key] %}
+                {% set rc = data.receiver_recorded[key] %}
+                {% if s or rc %}
+                <tr class="{{ 'bg-red-50' if data.diffs.get(key) else '' }}">
+                    <td class="border px-2 py-1">{{ name }}</td>
+                    <td class="border px-2 py-1 text-right">{{ s|int }}</td>
+                    <td class="border px-2 py-1 text-right">{{ rc|int }}</td>
+                    <td class="border px-2 py-1 text-right font-semibold text-red-600">
+                        {{ data.diffs.get(key, '')|int if data.diffs.get(key) else '' }}
+                    </td>
+                </tr>
+                {% endif %}
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endfor %}
+
+    <div class="flex gap-2">
+        {% if r.status == 'pending_approval' %}
+            {% if party == r.approver_party %}
+            <form method="POST" action="/reconcile/{{ r.id }}/approve">
+                <button class="px-4 py-2 bg-green-600 text-white rounded">同意</button>
+            </form>
+            <details class="inline-block">
+                <summary class="px-4 py-2 bg-red-500 text-white rounded cursor-pointer">打回</summary>
+                <form method="POST" action="/reconcile/{{ r.id }}/reject" class="mt-2 p-3 bg-white border rounded">
+                    <textarea name="notes" placeholder="说明原因" required class="w-full border rounded p-2 text-sm"></textarea>
+                    <button class="mt-2 px-3 py-1 bg-red-500 text-white text-sm rounded">提交打回</button>
+                </form>
+            </details>
+            {% endif %}
+            {% if party == r.initiator_party %}
+            <form method="POST" action="/reconcile/{{ r.id }}/withdraw">
+                <button class="px-4 py-2 bg-gray-500 text-white rounded">撤回</button>
+            </form>
+            {% endif %}
+        {% elif r.status == 'confirmed' %}
+            <form method="POST" action="/reconcile/{{ r.id }}/cancel"
+                  onsubmit="return confirm('撤销对账会解锁范围内所有记录，确认？')">
+                <button class="px-4 py-2 bg-orange-500 text-white rounded">撤销对账</button>
+            </form>
+        {% endif %}
+        <a href="/reconcile" class="px-4 py-2 bg-gray-200 text-gray-700 rounded">返回</a>
+    </div>
+</div>
+{% endblock %}

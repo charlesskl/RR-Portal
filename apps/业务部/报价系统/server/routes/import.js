@@ -6,7 +6,10 @@ const os = require('os');
 const { getDb } = require('../services/db');
 const { parseWorkbook } = require('../services/excel-parser');
 
-const upload = multer({ storage: multer.memoryStorage() });
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 50 * 1024 * 1024 }, // 50MB — guard against OOM via large uploads
+});
 
 // POST /api/import — upload and parse 本厂报价明细 Excel
 router.post('/', upload.single('file'), async (req, res) => {

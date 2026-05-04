@@ -6,6 +6,7 @@ import sys
 import openpyxl
 from datetime import timedelta, datetime, date as date_cls
 from functools import wraps
+from urllib.parse import urlencode
 
 # 兼容 PyInstaller exe 和普通 Python 运行
 if getattr(sys, 'frozen', False):
@@ -105,25 +106,52 @@ def init_db():
     )
     """)
 
-    # monthly_inventory 月份实存数
+    # monthly_inventory 月份实存数（每 party 一行/月，不分对方/方向，对应"该厂区当月物理盘点"）
+    # 旧 schema 含 counterparty/direction 列 → 检测后重建（v2 暂无生产数据，重建安全）
+    existing = cur.execute(
+        "SELECT sql FROM sqlite_master WHERE name='monthly_inventory'"
+    ).fetchone()
+    if existing and 'counterparty' in (existing[0] or '').lower():
+        cur.execute("DROP TABLE monthly_inventory")
     cur.execute("""
     CREATE TABLE IF NOT EXISTS monthly_inventory (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         recorded_by TEXT NOT NULL,
-        counterparty TEXT NOT NULL,
         year_month TEXT NOT NULL,
         mkb_qty REAL, jkb_qty REAL, jx_qty REAL, gx_qty REAL,
-        UNIQUE (recorded_by, counterparty, year_month)
+        remark TEXT,
+        UNIQUE (recorded_by, year_month)
     )
     """)
 
-    # default_prices 单价表
+    # monthly_purchases 月度采购投入（每 party 一行/月，对应 Excel 的"投资"列）
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS monthly_purchases (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        recorded_by TEXT NOT NULL,
+        year_month TEXT NOT NULL,
+        mkb_qty REAL, jkb_qty REAL, jx_qty REAL, gx_qty REAL,
+        mkb_price REAL DEFAULT 0, jkb_price REAL DEFAULT 0,
+        jx_price REAL DEFAULT 0, gx_price REAL DEFAULT 0,
+        remark TEXT,
+        UNIQUE (recorded_by, year_month)
+    )
+    """)
+    # 兼容旧 schema：缺 price 列则补
+    pur_cols = {r[1] for r in cur.execute("PRAGMA table_info(monthly_purchases)").fetchall()}
+    for k, _ in [('mkb', '木卡板'), ('jkb', '胶卡板'), ('jx', '胶箱'), ('gx', '钙塑箱')]:
+        if f'{k}_price' not in pur_cols:
+            cur.execute(f"ALTER TABLE monthly_purchases ADD COLUMN {k}_price REAL DEFAULT 0")
+
+    # default_prices 单价表（采购弹窗的"上次单价"，初始 15）
     cur.execute("""
     CREATE TABLE IF NOT EXISTS default_prices (
         item_key TEXT PRIMARY KEY,
         price    REAL DEFAULT 0
     )
     """)
+    for k, _ in STAT_ITEMS:
+        cur.execute("INSERT OR IGNORE INTO default_prices (item_key, price) VALUES (?, 15)", (k,))
 
     con.commit()
     con.close()
@@ -205,7 +233,211 @@ IMPORT_CONFIGS = {
             },
         ],
     },
-    # 其余 4 种 (邵阳-兴信 / 清溪-兴信 / 兴信-清溪 / 兴信-邵阳) 拿到 xlsx 后按相同结构补
+    'huadeng_qingxi_xinxin': {
+        'label': '清溪华登 ↔ 兴信（hd↔xx 双方向，清三与清二）',
+        'filename_pattern': '清三与清二',
+        'recorded_by_party': 'hd',
+        'allowed_sheets': ['1月', '2月', '3月', '4月'],
+        'directions': [
+            {
+                # 右半：三车间送二车间 = 华登发兴信
+                'direction': 'hd_to_xx',
+                'start_row': 3,
+                'columns': {
+                    16: 'date', 17: 'order_no',
+                    18: 'jx_qty',    # 胶箱
+                    19: 'pk_qty',    # 平卡
+                    20: 'zx_qty',    # 纸箱
+                    21: 'mkb_qty',   # 木卡板
+                    22: 'jkb_qty',   # 胶卡板
+                    23: 'gx_qty',    # 钙塑箱
+                    24: 'xs_qty',    # 吸塑
+                    25: 'gsb_qty',   # 钙塑板
+                    26: 'xjp_qty',   # 小胶盆
+                    27: 'djx_qty',   # 大胶箱
+                    28: 'dz_qty',    # 胶袋
+                    29: 'zb_qty',    # 纸板
+                    30: 'remark',
+                },
+            },
+            {
+                # 左半：二车间送三车间 = 兴信发华登
+                'direction': 'xx_to_hd',
+                'start_row': 3,
+                'columns': {
+                    0: 'date', 1: 'order_no',
+                    2: 'jx_qty',
+                    3: 'pk_qty',
+                    4: 'zx_qty',
+                    5: 'mkb_qty',
+                    6: 'jkb_qty',
+                    7: 'gx_qty',
+                    8: 'xs_qty',
+                    9: 'gsb_qty',
+                    10: 'xjp_qty',
+                    11: 'djx_qty',
+                    12: 'dz_qty',
+                    13: 'zb_qty',
+                    14: 'remark',
+                },
+            },
+        ],
+    },
+    'shaoyang_dongguan_huadeng': {
+        'label': '邵阳华登 ↔ 清溪华登（sy↔hd，东莞华登 sheet）',
+        'filename_pattern': '东莞',
+        'recorded_by_party': 'sy',
+        'allowed_sheets': ['东莞华登'],
+        'directions': [
+            {
+                # 左半："收东莞华登" = 清溪华登(hd)发邵阳华登(sy)
+                'direction': 'hd_to_sy',
+                'start_row': 5,
+                'columns': {
+                    0: 'date', 1: 'order_no',
+                    2: 'jx_qty',     # 胶箱
+                    3: 'gx_qty',     # 钙箱 = 钙塑箱
+                    4: 'zx_qty',     # 纸箱
+                    5: 'jkb_qty',    # 胶卡板
+                    6: 'mkb_qty',    # 木卡板
+                    7: 'xb_qty',     # 小板
+                    # 8: 铁卡板 → 跳过
+                    9: 'xs_qty',     # 吸塑
+                    10: 'wb_qty',    # 围布
+                    11: 'pk_qty',    # 平卡
+                    12: 'dz_qty',    # 袋子 = 胶袋
+                    13: 'xzx_qty',   # 小纸箱
+                    14: 'xjp_qty',   # 小胶盆
+                    15: 'remark',
+                },
+            },
+            {
+                # 右半："送东莞华登" = 邵阳华登(sy)发清溪华登(hd)
+                'direction': 'sy_to_hd',
+                'start_row': 5,
+                'columns': {
+                    16: 'date', 17: 'order_no',
+                    18: 'jx_qty',
+                    19: 'gx_qty',
+                    20: 'zx_qty',
+                    21: 'jkb_qty',
+                    22: 'mkb_qty',
+                    23: 'xb_qty',
+                    # 24: 铁卡板 → 跳过
+                    25: 'xs_qty',
+                    26: 'wb_qty',
+                    27: 'pk_qty',
+                    28: 'dz_qty',
+                    29: 'xzx_qty',
+                    30: 'xjp_qty',
+                    31: 'remark',
+                    # col 32-44: 相差数（系统自动算，不导）
+                },
+            },
+        ],
+    },
+    'shaoyang_dongguan_xinxin': {
+        'label': '邵阳华登 ↔ 兴信（sy↔xx，东莞兴信 sheet）',
+        'filename_pattern': '东莞',
+        'recorded_by_party': 'sy',
+        'allowed_sheets': ['东莞兴信'],
+        'directions': [
+            {
+                # 左半："东莞兴信发邵阳华登" = 兴信(xx)发邵阳华登(sy)
+                'direction': 'xx_to_sy',
+                'start_row': 5,
+                'columns': {
+                    0: 'date', 1: 'order_no',
+                    2: 'jx_qty',
+                    3: 'gx_qty',
+                    4: 'zx_qty',
+                    5: 'jkb_qty',
+                    6: 'mkb_qty',
+                    7: 'xb_qty',
+                    # 8: 铁卡板 → 跳过
+                    9: 'xs_qty',
+                    10: 'wb_qty',
+                    11: 'pk_qty',
+                    12: 'dz_qty',
+                    13: 'xjp_qty',   # 胶盆 = 小胶盆
+                    14: 'remark',
+                },
+            },
+            {
+                # 右半："邵阳华登发东莞兴信" = 邵阳华登(sy)发兴信(xx)
+                'direction': 'sy_to_xx',
+                'start_row': 5,
+                'columns': {
+                    15: 'date', 16: 'order_no',
+                    17: 'jx_qty',
+                    18: 'gx_qty',
+                    19: 'zx_qty',
+                    20: 'jkb_qty',
+                    21: 'mkb_qty',
+                    22: 'xb_qty',
+                    # 23: 铁卡板 → 跳过
+                    24: 'xs_qty',
+                    25: 'wb_qty',
+                    26: 'pk_qty',
+                    27: 'dz_qty',
+                    28: 'xjp_qty',
+                    # col 29-41: 相差数 / 备注（不导）
+                },
+            },
+        ],
+    },
+    'xinxin_from_sy': {
+        'label': '兴信收邵阳华登（sy→xx，邵阳每天发兴信包装成品登记表）',
+        'filename_pattern': '邵阳每天发兴信',
+        'recorded_by_party': 'xx',
+        'allowed_sheets': ['2026.1', '2026.2', '2026.3', '2026.4'],
+        'directions': [
+            {
+                'direction': 'sy_to_xx',
+                'start_row': 4,
+                'columns': {
+                    0: 'date', 3: 'order_no',
+                    4: 'mkb_qty',    # 木卡板
+                    5: 'jkb_qty',    # 胶卡板
+                    6: 'xb_qty',     # 小卡板 = 小板
+                    # 7: 铁卡板 / 8: 原料专用卡板 / 10: 卡绑带 / 14: 小纸平卡 / 16: 胶头 → 跳过
+                    9: 'jx_qty',     # 胶箱
+                    11: 'xjp_qty',   # 胶盆
+                    12: 'zx_qty',    # 纸箱
+                    13: 'gx_qty',    # 钙塑箱
+                    15: 'xs_qty',    # 吸塑
+                    17: 'remark',
+                },
+            },
+        ],
+    },
+    'xinxin_to_sy': {
+        'label': '兴信发邵阳华登（xx→sy，兴信每天发邵阳包装物料登记表）',
+        'filename_pattern': '兴信送邵阳',
+        'recorded_by_party': 'xx',
+        # 注意：2/4 月份 sheet 名带尾随空格，必须原样保留
+        'allowed_sheets': ['2026年1月份', '2026年2月份 ', '2026年3月份', '2026年4月份 '],
+        'directions': [
+            {
+                'direction': 'xx_to_sy',
+                'start_row': 4,
+                'columns': {
+                    0: 'date', 3: 'order_no',
+                    4: 'mkb_qty',
+                    5: 'jkb_qty',
+                    # 6: 铁卡板 → 跳过
+                    7: 'xb_qty',     # 小卡板 = 小板
+                    # 8: 专用卡板 / 13: 小纸平卡 → 跳过
+                    9: 'jx_qty',
+                    10: 'xjp_qty',   # 胶盆
+                    11: 'zx_qty',
+                    12: 'gx_qty',
+                    14: 'xs_qty',
+                    15: 'remark',
+                },
+            },
+        ],
+    },
 }
 
 ALLOWED_DIRECTIONS = {
@@ -221,8 +453,17 @@ def current_party():
     return p if p in PARTIES else None
 
 
+def page_link(page_key, page_value):
+    """复制当前 query args 并覆盖 page_key，返回完整 querystring。
+    保住其它 panel 的 page 参数与所有筛选条件不丢。"""
+    args = request.args.to_dict()
+    args[page_key] = str(page_value)
+    return urlencode(args)
+
+
 app.jinja_env.globals['current_party'] = current_party
 app.jinja_env.globals['PARTIES'] = PARTIES
+app.jinja_env.globals['page_link'] = page_link
 app.jinja_env.globals['ITEMS'] = ITEMS
 app.jinja_env.globals['STAT_ITEMS'] = STAT_ITEMS
 
@@ -346,8 +587,9 @@ def party_page(party):
 
     prices = {r['item_key']: r['price'] for r in con.execute('SELECT * FROM default_prices').fetchall()}
     con.close()
+    monthly = _build_monthly_stats(party)
     return render_template('party.html', party=party, party_name=PARTIES[party]['name'],
-                           panels=panels, prices=prices,
+                           panels=panels, prices=prices, monthly=monthly,
                            date_from=date_from, date_to=date_to, page_size=page_size)
 
 
@@ -501,6 +743,100 @@ def record_delete(rid):
         con.close(); flash('记录已锁定'); return redirect(url_for('party_page', party=party))
     con.execute("DELETE FROM flow_records WHERE id=?", (rid,))
     con.commit(); con.close()
+    return redirect(url_for('party_page', party=party))
+
+
+def _upsert_monthly(table, party, ym, fields, remark):
+    """UPSERT (recorded_by, year_month) 复用 monthly_inventory / monthly_purchases。
+    fields: {col_name: value}，含 qty 和（可选）price 列。"""
+    con = sqlite3.connect(DATABASE)
+    cols_sql = ', '.join(fields.keys())
+    placeholders = ', '.join(['?'] * len(fields))
+    update_sql = ', '.join(f'{c}=excluded.{c}' for c in fields.keys())
+    con.execute(
+        f"INSERT INTO {table} (recorded_by, year_month, {cols_sql}, remark) "
+        f"VALUES (?, ?, {placeholders}, ?) "
+        f"ON CONFLICT(recorded_by, year_month) DO UPDATE SET {update_sql}, remark=excluded.remark",
+        [party, ym, *fields.values(), remark]
+    )
+    con.commit(); con.close()
+
+
+def _parse_form_floats(suffixes):
+    """从 form 抽 STAT_ITEMS × suffixes 的浮点字段，非法/空 → 0。
+    例 _parse_form_floats(['qty', 'price']) → {'mkb_qty':1, 'mkb_price':2, ...}"""
+    def _f(name):
+        v = request.form.get(name, '').strip()
+        try:
+            return float(v) if v else 0.0
+        except ValueError:
+            return 0.0
+    out = {}
+    for k, _ in STAT_ITEMS:
+        for sfx in suffixes:
+            out[f'{k}_{sfx}'] = _f(f'{k}_{sfx}')
+    return out
+
+
+@app.route('/party/<party>/inventory', methods=['POST'])
+def party_inventory_post(party):
+    sess_party = current_party()
+    if not sess_party or sess_party != party:
+        return redirect(url_for('index'))
+    ym = request.form.get('year_month', '').strip()
+    if not ym:
+        flash('请填写月份'); return redirect(url_for('party_page', party=party))
+    remark = request.form.get('remark', '').strip() or None
+    _upsert_monthly('monthly_inventory', party, ym, _parse_form_floats(['qty']), remark)
+    flash(f'{ym} 实存已保存')
+    return redirect(url_for('party_page', party=party))
+
+
+@app.route('/party/<party>/purchase', methods=['POST'])
+def party_purchase_post(party):
+    sess_party = current_party()
+    if not sess_party or sess_party != party:
+        return redirect(url_for('index'))
+    ym = request.form.get('year_month', '').strip()
+    if not ym:
+        flash('请填写月份'); return redirect(url_for('party_page', party=party))
+    remark = request.form.get('remark', '').strip() or None
+    fields = _parse_form_floats(['qty', 'price'])
+    _upsert_monthly('monthly_purchases', party, ym, fields, remark)
+    # 同步更新 default_prices：本次输入的单价成为下次默认值
+    con = sqlite3.connect(DATABASE)
+    for k, _ in STAT_ITEMS:
+        con.execute(
+            "INSERT INTO default_prices (item_key, price) VALUES (?, ?) "
+            "ON CONFLICT(item_key) DO UPDATE SET price=excluded.price",
+            (k, fields[f'{k}_price'])
+        )
+    con.commit(); con.close()
+    flash(f'{ym} 采购已保存')
+    return redirect(url_for('party_page', party=party))
+
+
+@app.route('/party/<party>/inventory/<ym>/delete', methods=['POST'])
+def party_inventory_delete(party, ym):
+    sess_party = current_party()
+    if not sess_party or sess_party != party:
+        return redirect(url_for('index'))
+    con = sqlite3.connect(DATABASE)
+    con.execute("DELETE FROM monthly_inventory WHERE recorded_by=? AND year_month=?", (party, ym))
+    con.commit(); con.close()
+    flash(f'{ym} 实盘已删除')
+    return redirect(url_for('party_page', party=party))
+
+
+@app.route('/party/<party>/purchase/<ym>/delete', methods=['POST'])
+def party_purchase_delete(party, ym):
+    sess_party = current_party()
+    if not sess_party or sess_party != party:
+        return redirect(url_for('index'))
+    con = sqlite3.connect(DATABASE)
+    con.execute("DELETE FROM monthly_purchases WHERE recorded_by=? AND year_month=?", (party, ym))
+    con.commit(); con.close()
+    flash(f'{ym} 采购已删除')
     return redirect(url_for('party_page', party=party))
 
 
@@ -723,6 +1059,7 @@ def reports():
                                    'months': sorted(by_month.items())}
 
     con.close()
+    monthly_by_party = [(p, PARTIES[p]['name'], _build_monthly_stats(p)) for p in ('hd', 'sy', 'xx')]
     today = datetime.now().strftime('%Y/%m/%d')
     today_cn = datetime.now().strftime('%Y年%m月%d日')
     return render_template('reports.html',
@@ -731,6 +1068,7 @@ def reports():
                            has_outstanding_debt=_has_outstanding_debt(triangle_rows),
                            pair_summary=pair_summary,
                            monthly_by_pair=monthly_by_pair,
+                           monthly_by_party=monthly_by_party,
                            date_from=date_from, date_to=date_to,
                            only_confirmed=only_confirmed,
                            today=today, today_cn=today_cn,
@@ -803,6 +1141,86 @@ def _build_pair_summary(direction_summaries):
         nets = {k: a_to_b[k] - b_to_a[k] for k, _ in TRIANGLE_ITEMS}
         out.append({'a': PARTIES[a]['name'], 'b': PARTIES[b]['name'], 'nets': nets})
     return out
+
+
+def _build_monthly_stats(party):
+    """月度盘点统计（per-warehouse 视角）：按月对 mkb/jkb/jx/gx 算 期初/投资/应有/实盘/损耗/损耗率。
+
+    数据来源：
+      - 投资 = monthly_purchases（采购入库的新货数量）
+      - 实盘 = monthly_inventory（厂区物理盘点数）
+      - 期初 = 上一个有 inventory 的月份的 _qty
+    返回 [{ym, items: {jx: {prev, investment, expected, actual, loss, loss_pct}}, remark}]，按月正序。
+    """
+    con = sqlite3.connect(DATABASE)
+    con.row_factory = sqlite3.Row
+
+    inv_cols = ', '.join(f'{k}_qty' for k, _ in STAT_ITEMS)
+    inv_rows = con.execute(
+        f"SELECT year_month AS ym, {inv_cols}, remark FROM monthly_inventory "
+        "WHERE recorded_by=? ORDER BY year_month",
+        (party,)
+    ).fetchall()
+    price_cols = ', '.join(f'{k}_price' for k, _ in STAT_ITEMS)
+    pur_rows = con.execute(
+        f"SELECT year_month AS ym, {inv_cols}, {price_cols}, remark FROM monthly_purchases "
+        "WHERE recorded_by=? ORDER BY year_month",
+        (party,)
+    ).fetchall()
+    con.close()
+
+    inv_by_ym = {r['ym']: {**{k: float(r[f'{k}_qty'] or 0) for k, _ in STAT_ITEMS},
+                           'remark': r['remark']} for r in inv_rows}
+    pur_by_ym = {r['ym']: {**{k: float(r[f'{k}_qty'] or 0) for k, _ in STAT_ITEMS},
+                           **{f'{k}_price': float(r[f'{k}_price'] or 0) for k, _ in STAT_ITEMS},
+                           'remark': r['remark']} for r in pur_rows}
+    yms = sorted(set(inv_by_ym) | set(pur_by_ym))
+
+    # 迭代式：期初 = 上月期末（实存或推算累计）；实存 = 手动盘点值（无则 None 显示 —）
+    # 损耗只有手动盘点的月才计算，未盘月数学链内部仍走推算累计但 actual 不外显
+    rows = []
+    last_effective = {k: 0 for k, _ in STAT_ITEMS}  # 仅用于 prev 链式累加
+    for ym in yms:
+        is_measured = ym in inv_by_ym
+        items = {}
+        for k, _ in STAT_ITEMS:
+            prev_actual = last_effective[k]
+            investment = pur_by_ym.get(ym, {}).get(k, 0)
+            price = pur_by_ym.get(ym, {}).get(f'{k}_price', 0)
+            amount = investment * price
+            expected = prev_actual + investment
+            if is_measured:
+                actual = inv_by_ym[ym][k]
+                loss = actual - expected
+                loss_pct = (loss / expected * 100) if expected else 0
+                last_effective[k] = actual          # 实测重置链
+            else:
+                actual = None                       # 实存留空
+                loss = None
+                loss_pct = None
+                last_effective[k] = expected        # 推算累计向后传
+            items[k] = {
+                'prev': prev_actual, 'investment': investment, 'expected': expected,
+                'actual': actual, 'loss': loss, 'loss_pct': loss_pct,
+                'price': price, 'amount': amount,
+            }
+        year, month = map(int, ym.split('-'))
+        prev_month = 12 if month == 1 else month - 1
+        rows.append({
+            'ym': ym, 'items': items, 'is_measured': is_measured,
+            'month_num': month, 'prev_month_num': prev_month,
+            'remark': inv_by_ym.get(ym, {}).get('remark') or '',
+            'has_inv': ym in inv_by_ym,
+            'has_pur': ym in pur_by_ym,
+            'inv_qtys': {k: inv_by_ym[ym][k] for k, _ in STAT_ITEMS} if ym in inv_by_ym else {k: 0 for k, _ in STAT_ITEMS},
+            'pur_qtys': {k: pur_by_ym[ym][k] for k, _ in STAT_ITEMS} if ym in pur_by_ym else {k: 0 for k, _ in STAT_ITEMS},
+            'pur_prices': {k: pur_by_ym[ym][f'{k}_price'] for k, _ in STAT_ITEMS} if ym in pur_by_ym else {k: 0 for k, _ in STAT_ITEMS},
+            'pur_total_amount': sum(pur_by_ym[ym][k] * pur_by_ym[ym][f'{k}_price'] for k, _ in STAT_ITEMS) if ym in pur_by_ym else 0,
+            'inv_remark': inv_by_ym.get(ym, {}).get('remark') or '',
+            'pur_remark': pur_by_ym.get(ym, {}).get('remark') or '',
+        })
+    rows.reverse()      # 最新月份排最上方
+    return rows
 
 
 def _query_flow(con, *, recorded_by, from_party, to_party, date_from=None, date_to=None):
@@ -909,6 +1327,11 @@ def parse_excel_sheet(filepath, sheet_name, start_row, columns):
                 if field == 'date':
                     if isinstance(v, (datetime, date_cls)):
                         row[field] = v.strftime('%Y-%m-%d')
+                    elif isinstance(v, (int, float)) and not isinstance(v, bool) and 30000 <= v <= 80000:
+                        # Excel 日期序列号（用户单元格未格式化为日期时 openpyxl 返回数字）
+                        # 30000 ≈ 1982-03-15, 80000 ≈ 2119-01-22，覆盖业务合理范围
+                        from openpyxl.utils.datetime import from_excel
+                        row[field] = from_excel(v).strftime('%Y-%m-%d')
                     else:
                         s = str(v).strip()[:10]
                         try:
@@ -1079,6 +1502,52 @@ def import_preset():
 
     flash(f'模板 [{cfg["label"]}] 导入 {grand_total} 条 — 明细：{", ".join(per_sheet)}')
     return redirect(url_for('party_page', party=party))
+
+
+@app.route('/party/<party>/clear/<cp>', methods=['POST'])
+def party_clear_panel(party, cp):
+    """一键清空当前 party 对某对方的所有未锁定 flow_records（收+发两方向）。"""
+    sess_party = current_party()
+    if not sess_party or sess_party != party:
+        return redirect(url_for('index'))
+    if cp not in PARTIES or cp == party or cp not in PARTIES[party]['counterparties']:
+        flash('无效对方'); return redirect(url_for('party_page', party=party))
+    con = sqlite3.connect(DATABASE)
+    n = con.execute(
+        "DELETE FROM flow_records WHERE recorded_by=? AND locked=0 "
+        "AND ((from_party=? AND to_party=?) OR (from_party=? AND to_party=?))",
+        (party, party, cp, cp, party)
+    ).rowcount
+    con.commit(); con.close()
+    flash(f'已清空对 {PARTIES[cp]["name"]} 的 {n} 条记录（已锁定的保留）')
+    return redirect(url_for('party_page', party=party))
+
+
+@app.route('/clear-my-records', methods=['POST'])
+def clear_my_records():
+    """清空当前 party 自己录入的、未锁定的 flow_records。可选按对方筛选。"""
+    party = current_party()
+    if not party:
+        return redirect(url_for('index'))
+    if request.form.get('confirm', '').strip() != '清空':
+        flash('请输入"清空"二字确认'); return redirect(url_for('import_page'))
+
+    cp = request.form.get('counterparty', '').strip()
+    sql = "DELETE FROM flow_records WHERE recorded_by=? AND locked=0"
+    args = [party]
+    if cp:
+        if cp not in PARTIES or cp == party or cp not in PARTIES[party]['counterparties']:
+            flash('无效对方'); return redirect(url_for('import_page'))
+        sql += " AND ((from_party=? AND to_party=?) OR (from_party=? AND to_party=?))"
+        args += [party, cp, cp, party]
+
+    con = sqlite3.connect(DATABASE)
+    n = con.execute(sql, args).rowcount
+    con.commit(); con.close()
+
+    scope = f'对 {PARTIES[cp]["name"]}' if cp else '所有对方'
+    flash(f'已清空 {PARTIES[party]["name"]} 录入的{scope}记录 {n} 条（已锁定的不删）')
+    return redirect(url_for('import_page'))
 
 
 init_db()

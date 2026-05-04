@@ -67,4 +67,28 @@
     </form>
     {% endif %}
 </div>
+
+{% if current_party() %}
+<div class="max-w-3xl mx-auto bg-red-50 border border-red-200 rounded p-4 mt-4">
+    <h2 class="text-base font-bold mb-2 text-red-700">⚠ 清空我录入的记录</h2>
+    <p class="text-xs text-gray-600 mb-2">仅删除 <b>{{ PARTIES[current_party()].name }}</b> 录入的、未锁定的 flow_records。已锁定的（已批准对账数据）不删。</p>
+    <form method="POST" action="/clear-my-records" class="space-y-2 text-sm"
+          onsubmit="return confirm('确定执行清空？此操作不可恢复！');">
+        <label class="block">
+            范围（对方）：
+            <select name="counterparty" class="border rounded px-2 py-1">
+                <option value="">全部 — 清空我录入的所有记录</option>
+                {% for cp in PARTIES[current_party()].counterparties %}
+                <option value="{{ cp }}">仅清我对 {{ PARTIES[cp].name }} 的记录</option>
+                {% endfor %}
+            </select>
+        </label>
+        <label class="block">
+            输入"清空"二字确认：
+            <input type="text" name="confirm" required pattern="清空" class="border rounded px-2 py-1" placeholder="清空">
+        </label>
+        <button class="px-3 py-1.5 bg-red-600 text-white rounded hover:bg-red-700">执行清空</button>
+    </form>
+</div>
+{% endif %}
 {% endblock %}

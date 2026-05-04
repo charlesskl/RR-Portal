@@ -42,8 +42,19 @@ def test_monthly_inventory_schema(client):
     import app as app_module
     with sqlite3.connect(app_module.DATABASE) as db:
         cols = {r[1] for r in db.execute("PRAGMA table_info(monthly_inventory)")}
-    expected = {'id', 'recorded_by', 'counterparty', 'year_month',
-                'mkb_qty', 'jkb_qty', 'jx_qty', 'gx_qty'}
+    expected = {'id', 'recorded_by', 'year_month',
+                'mkb_qty', 'jkb_qty', 'jx_qty', 'gx_qty', 'remark'}
+    assert expected.issubset(cols)
+
+
+def test_monthly_purchases_schema(client):
+    import app as app_module
+    with sqlite3.connect(app_module.DATABASE) as db:
+        cols = {r[1] for r in db.execute("PRAGMA table_info(monthly_purchases)")}
+    expected = {'id', 'recorded_by', 'year_month',
+                'mkb_qty', 'jkb_qty', 'jx_qty', 'gx_qty',
+                'mkb_price', 'jkb_price', 'jx_price', 'gx_price',
+                'remark'}
     assert expected.issubset(cols)
 
 

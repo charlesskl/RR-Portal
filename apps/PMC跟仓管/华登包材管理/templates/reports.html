@@ -138,4 +138,12 @@
         {% endfor %}
     </details>
 </div>
+
+<!-- 各 party 月度盘点统计（公开只读视图，最新月份在最上方）-->
+{% set read_only = True %}
+{% for p, p_name, monthly in monthly_by_party %}
+{% set party = p %}
+{% set party_name = p_name %}
+{% include "_monthly_stats.html" with context %}
+{% endfor %}
 {% endblock %}

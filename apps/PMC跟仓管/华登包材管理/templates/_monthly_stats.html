@@ -1,0 +1,120 @@
+{# 月度盘点统计：单 party 视角，每月 6 行 × 4 物料，含备注。
+   传入：monthly, party_name；可选 read_only=True 隐藏录入/编辑/删除按钮（用于汇总页公开展示）。 #}
+<div class="bg-white rounded-lg shadow-sm mb-6">
+    <div class="flex items-center justify-between px-4 py-3 border-b">
+        <h2 class="text-lg font-semibold">📊 {{ party_name }} 月度盘点统计</h2>
+        {% if not read_only %}
+        <div class="flex gap-2">
+            <button type="button" onclick="openInventoryModal()"
+                    class="px-3 py-1 bg-amber-600 text-white text-sm rounded hover:bg-amber-700">
+                录入实存
+            </button>
+            <button type="button" onclick="openPurchaseModal()"
+                    class="px-3 py-1 bg-emerald-600 text-white text-sm rounded hover:bg-emerald-700">
+                录入采购
+            </button>
+        </div>
+        {% endif %}
+    </div>
+    {% if not monthly %}
+    <div class="px-4 py-8 text-center text-gray-400 text-sm">
+        暂无数据。先点「录入采购」记录本月新购入数量，再点「录入实盘」记录月底实际盘点数。
+    </div>
+    {% else %}
+    <div class="table-scroll p-2">
+        <table class="text-xs border-collapse w-full">
+            <thead>
+                <tr class="bg-gray-100">
+                    <th class="border px-2 py-1 text-left w-20">月份</th>
+                    <th class="border px-2 py-1 text-left w-24">指标</th>
+                    {% for k, name in STAT_ITEMS %}
+                    <th class="border px-2 py-1 text-right">{{ name }}</th>
+                    {% endfor %}
+                    <th class="border px-2 py-1 text-left">备注</th>
+                </tr>
+            </thead>
+                {% for row in monthly %}
+                {# 每月一个 tbody；除最新月外加 history-month 类，默认隐藏 #}
+                {% set _row_count = 7 if row.has_pur else 6 %}
+                <tbody class="party-{{ party }}-history{% if loop.first %} party-{{ party }}-latest{% else %} hidden{% endif %}">
+                <tr class="border-t-2 border-gray-300">
+                    <td rowspan="{{ _row_count }}" class="border px-2 py-1 align-top font-medium bg-white">{{ row.ym }}</td>
+                    <td class="border px-2 py-1 text-gray-600">{{ row.prev_month_num }}月实存数</td>
+                    {% for k, _ in STAT_ITEMS %}<td class="border px-2 py-1 text-right">{{ row['items'][k].prev|round(0)|int if row['items'][k].prev else '' }}</td>{% endfor %}
+                    <td rowspan="{{ _row_count }}" class="border px-2 py-1 align-top text-xs text-amber-700 bg-amber-50">{{ row.remark }}</td>
+                </tr>
+                <tr class="hover:bg-emerald-50">
+                    <td class="border px-2 py-1 text-gray-600 flex items-center gap-1">
+                        投资
+                        {% if not read_only %}
+                        <button type="button" title="编辑投资"
+                                onclick="openPurchaseModal('{{ row.ym }}')"
+                                class="text-emerald-600 hover:text-emerald-800 text-xs">✎</button>
+                        {% if row.has_pur %}
+                        <form method="POST" action="/party/{{ party }}/purchase/{{ row.ym }}/delete"
+                              onsubmit="return confirm('删除 {{ row.ym }} 的采购记录？')" class="inline">
+                            <button type="submit" title="删除采购" class="text-red-500 hover:text-red-700 text-xs">🗑</button>
+                        </form>
+                        {% endif %}
+                        {% endif %}
+                    </td>
+                    {% for k, _ in STAT_ITEMS %}<td class="border px-2 py-1 text-right">{{ row['items'][k].investment|round(0)|int if row['items'][k].investment else '' }}</td>{% endfor %}
+                </tr>
+                {% if row.has_pur %}
+                <tr class="text-xs text-gray-500">
+                    <td class="border px-2 py-1">金额</td>
+                    {% for k, _ in STAT_ITEMS %}<td class="border px-2 py-1 text-right">{{ '%.0f'|format(row['items'][k].amount) if row['items'][k].amount else '' }}</td>{% endfor %}
+                </tr>
+                {% endif %}
+                <tr>
+                    <td class="border px-2 py-1 text-gray-600">{{ row.month_num }}月应存数</td>
+                    {% for k, _ in STAT_ITEMS %}<td class="border px-2 py-1 text-right font-medium">{{ row['items'][k].expected|round(0)|int if row['items'][k].expected else '' }}</td>{% endfor %}
+                </tr>
+                <tr class="hover:bg-amber-50">
+                    <td class="border px-2 py-1 text-gray-600 flex items-center gap-1">
+                        {{ row.month_num }}月实存数
+                        {% if not read_only %}
+                        <button type="button" title="编辑实存"
+                                onclick="openInventoryModal('{{ row.ym }}')"
+                                class="text-amber-600 hover:text-amber-800 text-xs">✎</button>
+                        {% if row.has_inv %}
+                        <form method="POST" action="/party/{{ party }}/inventory/{{ row.ym }}/delete"
+                              onsubmit="return confirm('删除 {{ row.ym }} 的实存记录？')" class="inline">
+                            <button type="submit" title="删除实存" class="text-red-500 hover:text-red-700 text-xs">🗑</button>
+                        </form>
+                        {% endif %}
+                        {% endif %}
+                    </td>
+                    {% for k, _ in STAT_ITEMS %}<td class="border px-2 py-1 text-right">{{ row['items'][k].actual|round(0)|int if row['items'][k].actual is not none else '—' }}</td>{% endfor %}
+                </tr>
+                <tr class="bg-yellow-50">
+                    <td class="border px-2 py-1 text-gray-700 font-medium">损耗</td>{# 损耗 = 当月实存 - 当月应存 #}
+                    {% for k, _ in STAT_ITEMS %}
+                    <td class="border px-2 py-1 text-right font-medium {{ 'text-red-600' if row['items'][k].loss is not none and row['items'][k].loss < 0 else ('text-green-600' if row['items'][k].loss is not none and row['items'][k].loss > 0 else '') }}">
+                        {{ row['items'][k].loss|round(0)|int if row['items'][k].loss is not none else '—' }}
+                    </td>
+                    {% endfor %}
+                </tr>
+                <tr>
+                    <td class="border px-2 py-1 text-gray-600">损耗占比</td>
+                    {% for k, _ in STAT_ITEMS %}
+                    <td class="border px-2 py-1 text-right text-xs {{ 'text-red-600' if row['items'][k].loss_pct is not none and row['items'][k].loss_pct < 0 else ('text-green-600' if row['items'][k].loss_pct is not none and row['items'][k].loss_pct > 0 else '') }}">
+                        {% if row['items'][k].loss_pct is not none %}{{ '%.1f'|format(row['items'][k].loss_pct) }}%{% else %}—{% endif %}
+                    </td>
+                    {% endfor %}
+                </tr>
+                </tbody>
+                {% endfor %}
+        </table>
+    </div>
+    {% if monthly|length > 1 %}
+    <div class="px-4 py-2 border-t bg-gray-50 text-right">
+        <button type="button"
+                onclick="toggleHistory('{{ party }}', this)"
+                class="text-xs text-blue-600 hover:underline">
+            ▾ 展开历史月份（{{ monthly|length - 1 }} 个）
+        </button>
+    </div>
+    {% endif %}
+    {% endif %}
+</div>

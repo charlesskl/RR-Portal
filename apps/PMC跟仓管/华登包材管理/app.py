@@ -8,6 +8,8 @@ from datetime import timedelta, datetime, date as date_cls
 from functools import wraps
 from urllib.parse import urlencode
 
+from _migration import needs_v1_to_v2_migration, run_v1_to_v2_migration
+
 # 兼容 PyInstaller exe 和普通 Python 运行
 if getattr(sys, 'frozen', False):
     BASE_DIR = os.path.dirname(sys.executable)
@@ -40,7 +42,16 @@ def get_db():
 
 
 def init_db():
-    """初始化所有新 schema 表。幂等。"""
+    """初始化所有新 schema 表。幂等。
+
+    容器启动时自动检测 v1 schema：若发现 records 旧表，先备份 → 跑迁移
+    （records→flow_records, investment_records v1→v2）→ 再继续建 v2 表。
+    迁移失败抛错，由 Flask 启动失败暴露给运维（不会带病上线）。
+    """
+    # 容器启动时 auto-migrate v1 → v2（含备份；幂等）
+    if needs_v1_to_v2_migration(DATABASE):
+        run_v1_to_v2_migration(DATABASE, log=app.logger.info)
+
     con = sqlite3.connect(DATABASE)
     cur = con.cursor()
 

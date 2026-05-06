@@ -200,10 +200,10 @@ const RECORDS = {
     {% for panel in panels %}
     {% for r in panel.sent_records + panel.received_records %}{% if not r.locked %}
     {{ r.id }}: {
-        date: "{{ r.date }}",
+        date: {{ (r.date or '')|tojson }},
         order_no: {{ (r.order_no or '')|tojson }},
         remark: {{ (r.remark or '')|tojson }},
-        {% for key, name in ITEMS %}{{ key }}_qty: {{ r[key + '_qty'] or 0 }},{% endfor %}
+        {% for key, name in ITEMS %}{{ key }}_qty: {{ (r[key + '_qty'] or 0)|tojson }},{% endfor %}
     },
     {% endif %}{% endfor %}
     {% endfor %}
@@ -211,7 +211,7 @@ const RECORDS = {
 
 const MONTHLY_DATA = {
     {% for row in monthly %}
-    "{{ row.ym }}": {
+    {{ (row.ym or '')|tojson }}: {
         inv: {qtys: {{ row.inv_qtys|tojson }}, remark: {{ row.inv_remark|tojson }}, has: {{ row.has_inv|tojson }}},
         pur: {qtys: {{ row.pur_qtys|tojson }}, prices: {{ row.pur_prices|tojson }}, remark: {{ row.pur_remark|tojson }}, has: {{ row.has_pur|tojson }}},
     },

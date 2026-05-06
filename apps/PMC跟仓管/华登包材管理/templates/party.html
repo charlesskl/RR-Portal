@@ -285,13 +285,18 @@ function openPurchaseModal(ym) {
     _fillModal('purchaseModal', ym, ym ? (MONTHLY_DATA[ym] || {}).pur : null, 'pur');
 }
 
+// 从当前页面 URL 推断 app 前缀（云端 "/huadeng"，本地 ""）— 不依赖 nginx sub_filter
+function _huadengPrefix() {
+    const m = window.location.pathname.match(/^(.*?)\/party\/[^/]+/);
+    return m ? m[1] : '';
+}
+
 function openEditModal(id) {
+    console.log('[huadeng] openEditModal v3', id);
     const rec = RECORDS[id];
     if (!rec) { alert('记录不存在或已锁定'); return; }
-    // 不要直接覆盖 action — 否则会丢失 nginx sub_filter 加上的 /huadeng/ 前缀。
-    // form.action 实际值类似 ".../record/0/edit"（本地）或 ".../huadeng/record/0/edit"（云端），只替换 id 段。
     const form = document.getElementById('editForm');
-    form.action = form.action.replace(/\/record\/\d+\/edit(\?.*)?$/, `/record/${id}/edit`);
+    form.action = `${_huadengPrefix()}/record/${id}/edit`;
     document.getElementById('edit_date').value = rec.date;
     document.getElementById('edit_order_no').value = rec.order_no || '';
     document.getElementById('edit_remark').value = rec.remark || '';

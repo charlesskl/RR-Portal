@@ -155,7 +155,7 @@
 <div id="editModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
     <div class="bg-white rounded-lg shadow-xl p-6 w-[560px] max-h-[90vh] overflow-y-auto">
         <h3 class="text-lg font-bold mb-4">编辑记录</h3>
-        <form id="editForm" method="POST">
+        <form id="editForm" method="POST" action="/record/0/edit">
             <div class="flex gap-3 mb-3 flex-wrap items-end">
                 <div>
                     <label class="block text-xs text-gray-500 mb-1">日期</label>
@@ -288,7 +288,10 @@ function openPurchaseModal(ym) {
 function openEditModal(id) {
     const rec = RECORDS[id];
     if (!rec) { alert('记录不存在或已锁定'); return; }
-    document.getElementById('editForm').action = `/record/${id}/edit`;
+    // 不要直接覆盖 action — 否则会丢失 nginx sub_filter 加上的 /huadeng/ 前缀。
+    // form.action 实际值类似 ".../record/0/edit"（本地）或 ".../huadeng/record/0/edit"（云端），只替换 id 段。
+    const form = document.getElementById('editForm');
+    form.action = form.action.replace(/\/record\/\d+\/edit(\?.*)?$/, `/record/${id}/edit`);
     document.getElementById('edit_date').value = rec.date;
     document.getElementById('edit_order_no').value = rec.order_no || '';
     document.getElementById('edit_remark').value = rec.remark || '';

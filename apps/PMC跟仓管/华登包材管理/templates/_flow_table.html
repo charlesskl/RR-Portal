@@ -13,7 +13,12 @@
         </thead>
         <tbody>
             {% for r in records %}
-            <tr class="hover:bg-gray-50 {{ 'bg-yellow-50' if r.locked else '' }}">
+            <tr class="hover:bg-gray-50 {{ 'bg-yellow-50' if r.locked else '' }}"
+                data-record-id="{{ r.id }}"
+                data-date="{{ r.date }}"
+                data-order-no="{{ r.order_no or '' }}"
+                data-remark="{{ r.remark or '' }}"
+                {% for key, name in ITEMS %}data-{{ key }}-qty="{{ r[key + '_qty'] or 0 }}" {% endfor %}>
                 <td class="border px-2 py-1">{{ r.date }}</td>
                 <td class="border px-2 py-1">{{ r.order_no or '' }}</td>
                 {% for key, name in ITEMS %}
@@ -24,7 +29,7 @@
                     {% if r.locked %}
                         <span class="text-xs text-gray-400">🔒 已锁</span>
                     {% else %}
-                        <button onclick="openEditModal({{ r.id }})" class="text-xs text-blue-600 hover:underline">编辑</button>
+                        <button type="button" onclick="openEditModal({{ r.id }})" class="text-xs text-blue-600 hover:underline">编辑</button>
                         <form method="POST" action="/record/{{ r.id }}/delete" class="inline"
                               onsubmit="return confirm('确认删除？')">
                             <button class="text-xs text-red-600 hover:underline ml-1">删除</button>

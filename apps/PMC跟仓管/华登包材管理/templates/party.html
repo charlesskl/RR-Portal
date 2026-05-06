@@ -71,7 +71,60 @@
 </div>
 {% endfor %}
 
+<!-- 编辑记录 Modal -->
+<div id="editModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+    <div class="bg-white rounded-lg p-5 max-w-3xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+        <h3 class="text-lg font-bold mb-4">编辑记录</h3>
+        <!-- action 故意使用根路径字面量，nginx sub_filter 会把 "/record" 重写为 "/huadeng/record"；JS 只替换 record id 段 -->
+        <form id="editForm" method="POST" action="/record/0/edit">
+            <div class="flex gap-3 mb-3 flex-wrap items-end">
+                <div>
+                    <label class="block text-xs text-gray-500 mb-1">日期</label>
+                    <input type="date" name="date" id="edit_date" required class="border rounded px-2 py-1 text-sm">
+                </div>
+                <div>
+                    <label class="block text-xs text-gray-500 mb-1">订单号</label>
+                    <input type="text" name="order_no" id="edit_order_no" class="border rounded px-2 py-1 text-sm w-32">
+                </div>
+                <div class="flex-1">
+                    <label class="block text-xs text-gray-500 mb-1">备注</label>
+                    <input type="text" name="remark" id="edit_remark" class="border rounded px-2 py-1 text-sm w-full">
+                </div>
+            </div>
+            <div class="table-scroll mb-3">
+                <table class="text-sm border-collapse w-full">
+                    <thead><tr class="bg-gray-50">
+                        {% for key, name in ITEMS %}<th class="border px-1 py-1">{{ name }}</th>{% endfor %}
+                    </tr></thead>
+                    <tbody><tr>
+                        {% for key, name in ITEMS %}
+                        <td class="border px-1 py-1">
+                            <input type="number" step="any" name="{{ key }}_qty" id="edit_{{ key }}_qty" value="0"
+                                   class="w-16 border rounded px-1 py-0.5 text-right text-sm">
+                        </td>
+                        {% endfor %}
+                    </tr></tbody>
+                </table>
+            </div>
+            <div class="flex justify-end gap-2">
+                <button type="button" onclick="document.getElementById('editModal').classList.add('hidden')"
+                        class="px-3 py-1.5 bg-gray-200 text-sm rounded">取消</button>
+                <button type="submit" class="px-3 py-1.5 bg-blue-600 text-white text-sm rounded hover:bg-blue-700">保存</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- 发起对账 隐藏表单：action 用 HTML literal 让 nginx sub_filter 重写前缀 -->
+<form id="reconcileForm" method="POST" action="/reconcile/start" class="hidden">
+    <input type="hidden" name="counterparty" id="reconcile_cp">
+    <input type="hidden" name="date_from" id="reconcile_from">
+    <input type="hidden" name="date_to" id="reconcile_to">
+</form>
+
 <script>
+const ITEM_KEYS = [{% for key, name in ITEMS %}'{{ key }}'{% if not loop.last %}, {% endif %}{% endfor %}];
+
 function switchTab(tabId, cpKey) {
     const panel = document.querySelector(`[data-cp="${cpKey}"]`);
     panel.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
@@ -87,24 +140,32 @@ function switchTab(tabId, cpKey) {
     });
 }
 
+function openEditModal(id) {
+    const tr = document.querySelector(`tr[data-record-id="${id}"]`);
+    if (!tr) { alert('找不到记录数据'); return; }
+    const form = document.getElementById('editForm');
+    // 替换 form.action 中的 record id 段：本地 "/record/0/edit"，nginx 改写后 "/huadeng/record/0/edit"
+    form.action = form.action.replace(/\/record\/\d+\/edit(\?.*)?$/, `/record/${id}/edit`);
+    document.getElementById('edit_date').value = tr.dataset.date || '';
+    document.getElementById('edit_order_no').value = tr.dataset.orderNo || '';
+    document.getElementById('edit_remark').value = tr.dataset.remark || '';
+    ITEM_KEYS.forEach(k => {
+        // dataset 把 data-jx-qty 转为 jxQty
+        const camel = k + 'Qty';
+        document.getElementById(`edit_${k}_qty`).value = tr.dataset[camel] || 0;
+    });
+    document.getElementById('editModal').classList.remove('hidden');
+}
+
 function openReconcileModal(party, cp) {
     const df = prompt('开始日期 (YYYY-MM-DD)');
     if (!df) return;
     const dt = prompt('结束日期 (YYYY-MM-DD)');
     if (!dt) return;
-    const form = document.createElement('form');
-    form.method = 'POST';
-    form.action = '/reconcile/start';
-    const mk = (name, value) => {
-        const i = document.createElement('input');
-        i.name = name; i.value = value;
-        form.appendChild(i);
-    };
-    mk('counterparty', cp);
-    mk('date_from', df);
-    mk('date_to', dt);
-    document.body.appendChild(form);
-    form.submit();
+    document.getElementById('reconcile_cp').value = cp;
+    document.getElementById('reconcile_from').value = df;
+    document.getElementById('reconcile_to').value = dt;
+    document.getElementById('reconcileForm').submit();
 }
 </script>
 {% endblock %}

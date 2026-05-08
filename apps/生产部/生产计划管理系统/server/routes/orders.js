@@ -31,7 +31,7 @@ const ORDER_COLUMNS = [
   'start_date','complete_date','ship_date',
   'target_time','daily_target','days','unit_price','process_value',
   'inspection_date','month','warehouse_record','output_value','process_price','remark',
-  'cell_format',
+  'cell_format','row_color',
   ...Array.from({length: 31}, (_, i) => `day_${i + 1}`)
 ];
 
@@ -133,16 +133,31 @@ router.post('/', (req, res) => {
   const orders = Array.isArray(req.body) ? req.body : [req.body];
   const placeholders = ORDER_COLUMNS.map(() => '?').join(',');
   const stmt = db.prepare(`INSERT INTO orders (${ORDER_COLUMNS.join(',')}) VALUES (${placeholders})`);
-  const checkDup = db.prepare('SELECT id FROM orders WHERE contract = ? AND item_no = ? AND workshop = ? LIMIT 1');
+
+  // 归一化函数：去空格、转大写
+  const norm = (v) => v == null ? '' : String(v).replace(/\s+/g, '').toUpperCase();
+
+  // 一次性加载该车间所有现存订单的 (contract|item_no|work_type) 做指纹
+  function loadExisting(workshop) {
+    const rows = db.prepare('SELECT contract, item_no, work_type FROM orders WHERE workshop = ?').all(workshop);
+    const set = new Set();
+    for (const r of rows) {
+      set.add(`${norm(r.contract)}|${norm(r.item_no)}|${norm(r.work_type)}`);
+    }
+    return set;
+  }
 
   const insertMany = db.transaction((list) => {
     const ids = [];
     let skipped = 0;
+    // 按车间缓存指纹集
+    const cache = {};
     for (const o of list) {
-      // 去重：合同号+货号+车间 已存在则跳过
-      if (o.contract && o.item_no && o.workshop) {
-        const existing = checkDup.get(o.contract, o.item_no, o.workshop);
-        if (existing) { skipped++; continue; }
+      if (o.workshop && o.contract && o.item_no) {
+        if (!cache[o.workshop]) cache[o.workshop] = loadExisting(o.workshop);
+        const fp = `${norm(o.contract)}|${norm(o.item_no)}|${norm(o.work_type)}`;
+        if (cache[o.workshop].has(fp)) { skipped++; continue; }
+        cache[o.workshop].add(fp);  // 防止本次批量内重复
       }
       const values = ORDER_COLUMNS.map(c => o[c] ?? null);
       const info = stmt.run(...values);

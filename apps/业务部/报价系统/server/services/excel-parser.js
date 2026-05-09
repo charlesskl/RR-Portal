@@ -187,11 +187,21 @@ function parseHeader(ws, format, workbook) {
 
   // R11-R14: Exchange rates and params
   // Injection: values at C11-C14; Plush: labels at C11-C14, values at D11-D14
-  // Try C first; if null try D (plush layout)
-  const hkd_rmb_quote = numVal(ws.getCell('C11')) || numVal(ws.getCell('D11'));
-  const hkd_rmb_check = numVal(ws.getCell('C12')) || numVal(ws.getCell('D12'));
-  const rmb_hkd = numVal(ws.getCell('C13')) || numVal(ws.getCell('D13'));
-  const hkd_usd = numVal(ws.getCell('C14')) || numVal(ws.getCell('D14'));
+  // SPIN: R11+ are mold parts, no exchange rate cells — skip to avoid false matches
+  // (e.g. D14="11in Pusheen..." → parseFloat returns 11, wrong hkd_usd)
+  // Helper: only accept value if cell is purely numeric (not a string-with-leading-digits)
+  function pureNum(cell) {
+    const raw = cell.value;
+    if (typeof raw === 'number') return raw;
+    if (raw && typeof raw === 'object' && typeof raw.result === 'number') return raw.result;
+    return null;
+  }
+  const hkd_rmb_quote = pureNum(ws.getCell('C11')) || pureNum(ws.getCell('D11'));
+  const hkd_rmb_check = pureNum(ws.getCell('C12')) || pureNum(ws.getCell('D12'));
+  const rmb_hkd = format === 'spin'
+    ? (pureNum(ws.getCell('C9')) || pureNum(ws.getCell('D9')) || 0.85) // SPIN: 汇率 in R9 c3
+    : (pureNum(ws.getCell('C13')) || pureNum(ws.getCell('D13')));
+  const hkd_usd = pureNum(ws.getCell('C14')) || pureNum(ws.getCell('D14')) || (format === 'spin' ? 7.75 : null);
   // Labor: F13 (injection) or G13 (plush); SPIN: scan R9 for "人工" label, value in next col
   let labor_hkd = numVal(ws.getCell('G13')) || numVal(ws.getCell('F13'));
   if (!labor_hkd) {
@@ -573,13 +583,28 @@ function parseCostItems(ws, format) {
   let packagingItems = [];
 
   if (format === 'plush' || format === 'spin') {
+    // Detect 用量/报价 columns by header row (e.g. row containing "用量(pcs)" and "2026年报价")
+    let qtyCol = 3, priceCol = 4;
+    for (let r = 1; r <= Math.min(40, ws.rowCount); r++) {
+      let foundQty = -1, foundPrice = -1;
+      for (let c = 2; c <= 10; c++) {
+        const v = strVal(ws.getCell(r, c)) || '';
+        if (foundQty === -1 && /用量/.test(v)) foundQty = c;
+        if (foundPrice === -1 && /报价|单价/.test(v)) foundPrice = c;
+      }
+      if (foundQty > 0 && foundPrice > 0 && foundPrice > foundQty) {
+        qtyCol = foundQty;
+        priceCol = foundPrice;
+        break;
+      }
+    }
     for (let r = 1; r <= ws.rowCount; r++) {
       const colA = strVal(ws.getCell(r, 1));
       const name = strVal(ws.getCell(r, 2));
       if (!name || colA) continue;
       if (!name.includes('人工') && !name.includes('查货')) continue;
-      const quantity = numVal(ws.getCell(r, 3));
-      const new_price = numVal(ws.getCell(r, 4));
+      const quantity = numVal(ws.getCell(r, qtyCol));
+      const new_price = numVal(ws.getCell(r, priceCol));
       laborItems.push({ name, quantity, old_price: null, new_price, difference: null, tax_type: null });
     }
     hardwareItems = parseItemRange(48, 76);
@@ -1526,6 +1551,8 @@ async function parseWorkbook(filePath, forceFormat) {
   const format = (forceFormat && ['injection', 'plush', 'spin'].includes(forceFormat))
     ? forceFormat
     : detectFormat(workbook);
+  console.log('[PARSE-DEBUG] sheetNames:', workbook.worksheets.map(w => w.name));
+  console.log('[PARSE-DEBUG] forceFormat=%s, detected format=%s', forceFormat, format);
   const header = parseHeader(ws, format, workbook);
 
   // Fall back to sheet name only if B1 is empty
@@ -1596,7 +1623,9 @@ async function parseWorkbook(filePath, forceFormat) {
   const summary = parseSummary(ws);
   const transport = parseTransport(ws);
   const spinTransportRows = format === 'spin' ? parseSpinTransport(ws) : [];
-  const { electronicItems, electronicSummary } = parseElectronics(workbook, ws);
+  const { electronicItems, electronicSummary } = format === 'spin'
+    ? parseElectronics(workbook, ws)
+    : { electronicItems: [], electronicSummary: null };
   const paintingDetail = parsePainting(ws);
 
   return {

@@ -1,12 +1,18 @@
 import { useState } from 'react'
-import { Button, Upload, message, Card, Typography, Space, Alert, Table, Tag } from 'antd'
-import { UploadOutlined, FileExcelOutlined, FilePdfOutlined, DownloadOutlined } from '@ant-design/icons'
+import { Button, Upload, App as AntApp, Card, Alert, Table, Space, Typography } from 'antd'
+import {
+  UploadOutlined,
+  InboxOutlined,
+  DownloadOutlined,
+  FileTextOutlined,
+} from '@ant-design/icons'
 import type { UploadFile } from 'antd'
+import { colors } from './theme'
 import FileStatusList from './components/FileStatusList'
 
-const { Title, Text } = Typography
+const { Text } = Typography
 
-// Frontend-local type definitions (project convention: no shared package)
+// ─── Types (mirrors server/types/index.ts) ────────────────────────────────
 
 interface POItem {
   货号: string
@@ -75,6 +81,25 @@ interface ProcessResponse {
   sessionId?: string
 }
 
+// ─── Section container with eyebrow label ─────────────────────────────────
+
+function Section({
+  label,
+  children,
+}: {
+  label: string
+  children: React.ReactNode
+}) {
+  return (
+    <section>
+      <div className="section-label">{label}</div>
+      {children}
+    </section>
+  )
+}
+
+// ─── Reconciliation result card ───────────────────────────────────────────
+
 function ReconciliationCard({
   title,
   reconciliation,
@@ -84,14 +109,13 @@ function ReconciliationCard({
 }) {
   const { details } = reconciliation
 
-  // Build table data: matched items (with/without mismatches) + unmatched items
   const tableData = [
     ...details.matched.map((m, i) => ({
       key: `m-${i}`,
       tomyPO: m.tomyPO,
       货号: m.货号,
       sourceFile: m.sourceFile,
-      status: m.mismatches.length > 0 ? 'mismatch' as const : 'ok' as const,
+      status: (m.mismatches.length > 0 ? 'mismatch' : 'ok') as 'mismatch' | 'ok',
       mismatches: m.mismatches,
     })),
     ...details.unmatched.map((u, i) => ({
@@ -105,28 +129,56 @@ function ReconciliationCard({
   ]
 
   const columns = [
-    { title: 'TOMY PO', dataIndex: 'tomyPO', key: 'tomyPO', width: 120 },
-    { title: '货号', dataIndex: '货号', key: '货号', width: 100 },
+    {
+      title: 'TOMY PO',
+      dataIndex: 'tomyPO',
+      key: 'tomyPO',
+      width: 130,
+      render: (v: string) => <span className="num">{v}</span>,
+    },
+    {
+      title: '货号',
+      dataIndex: '货号',
+      key: '货号',
+      width: 110,
+      render: (v: string) => <span className="num">{v}</span>,
+    },
     {
       title: '状态',
       key: 'status',
       width: 100,
       render: (_: unknown, record: (typeof tableData)[0]) => {
-        if (record.status === 'ok') return <Tag color="green">匹配</Tag>
-        if (record.status === 'mismatch') return <Tag color="orange">有差异</Tag>
-        return <Tag color="red">未找到</Tag>
+        if (record.status === 'ok') return <span className="status-chip ok">匹配</span>
+        if (record.status === 'mismatch') return <span className="status-chip warn">有差异</span>
+        return <span className="status-chip err">未找到</span>
       },
     },
     {
       title: '差异详情',
       key: 'mismatches',
       render: (_: unknown, record: (typeof tableData)[0]) => {
-        if (record.mismatches.length === 0) return record.status === 'unmatched' ? '排期表中无对应行' : '—'
+        if (record.mismatches.length === 0) {
+          return record.status === 'unmatched' ? (
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              排期表中无对应行
+            </Text>
+          ) : (
+            <Text type="secondary">—</Text>
+          )
+        }
         return (
-          <Space direction="vertical" size={0}>
+          <Space direction="vertical" size={2} style={{ lineHeight: 1.5 }}>
             {record.mismatches.map((mm, i) => (
               <Text key={i} style={{ fontSize: 12 }}>
-                <Text strong>{mm.field}</Text>: 排期=<Text code>{String(mm.scheduleValue ?? '空')}</Text> PO=<Text code>{String(mm.poValue ?? '空')}</Text>
+                <Text strong style={{ color: colors.ink2 }}>{mm.field}</Text>
+                ：排期
+                <Text code style={{ fontSize: 11, padding: '1px 5px' }}>
+                  {String(mm.scheduleValue ?? '空')}
+                </Text>
+                　PO
+                <Text code style={{ fontSize: 11, padding: '1px 5px' }}>
+                  {String(mm.poValue ?? '空')}
+                </Text>
               </Text>
             ))}
           </Space>
@@ -135,29 +187,47 @@ function ReconciliationCard({
     },
   ]
 
+  const hasIssues = reconciliation.unmatchedCount > 0 || reconciliation.mismatchedFieldCount > 0
+
   return (
-    <Card size="small" title={title}>
-      <Space direction="vertical" size="small" style={{ width: '100%' }}>
-        <Text>
-          核对完成:{' '}
-          <Text strong style={{ color: '#52c41a' }}>{reconciliation.matchedCount}</Text> 项匹配，{' '}
-          <Text strong style={{ color: reconciliation.mismatchedFieldCount > 0 ? '#fa8c16' : undefined }}>
-            {reconciliation.mismatchedFieldCount}
-          </Text> 个字段不匹配，{' '}
-          <Text strong style={{ color: reconciliation.unmatchedCount > 0 ? '#ff4d4f' : undefined }}>
-            {reconciliation.unmatchedCount}
-          </Text> 项未找到
-        </Text>
-        {reconciliation.errors.map((e, i) => (
-          <Text key={i} type="danger">{e}</Text>
-        ))}
+    <Card title={title} size="small">
+      <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+        <Space size="large" wrap>
+          <span className="stat">
+            <span className={`stat-num ${hasIssues ? '' : 'ok'}`}>
+              {reconciliation.matchedCount}
+            </span>
+            <span className="stat-label">项匹配</span>
+          </span>
+          <span className="stat">
+            <span className={`stat-num ${reconciliation.mismatchedFieldCount > 0 ? 'warn' : ''}`}>
+              {reconciliation.mismatchedFieldCount}
+            </span>
+            <span className="stat-label">字段不匹配</span>
+          </span>
+          <span className="stat">
+            <span className={`stat-num ${reconciliation.unmatchedCount > 0 ? 'err' : ''}`}>
+              {reconciliation.unmatchedCount}
+            </span>
+            <span className="stat-label">项未找到</span>
+          </span>
+        </Space>
+
+        {reconciliation.errors.length > 0 && (
+          <Space direction="vertical" size={4} style={{ width: '100%' }}>
+            {reconciliation.errors.map((e, i) => (
+              <Alert key={i} message={e} type="error" showIcon />
+            ))}
+          </Space>
+        )}
+
         {tableData.length > 0 && (
           <Table
             dataSource={tableData}
             columns={columns}
             size="small"
             pagination={false}
-            scroll={{ x: 600 }}
+            scroll={{ x: 640 }}
           />
         )}
       </Space>
@@ -165,7 +235,98 @@ function ReconciliationCard({
   )
 }
 
+// ─── PO classification + stats card ───────────────────────────────────────
+
+function PoClassificationCard({
+  result,
+}: {
+  result: ProcessResponse
+}) {
+  const totalCount = result.files.length
+  const successCount = result.files.filter((f) => f.status === 'done').length
+  const errorCount = result.files.filter((f) => f.status === 'error').length
+
+  const dgPOs = result.files.filter((f) => f.data?.items[0]?.factoryCode === 'RR01')
+  const idPOs = result.files.filter((f) => f.data?.items[0]?.factoryCode === 'RR02')
+  const unknownPOs = result.files.filter((f) => {
+    if (f.status === 'error') return true
+    const fc = f.data?.items[0]?.factoryCode
+    return fc !== 'RR01' && fc !== 'RR02'
+  })
+
+  return (
+    <Card size="small" title="PO 文件分类">
+      <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+        <Space size="large" wrap>
+          <span className="stat">
+            <span className="stat-num">{totalCount}</span>
+            <span className="stat-label">总数</span>
+          </span>
+          <span className="stat">
+            <span className="stat-num ok">{successCount}</span>
+            <span className="stat-label">解析成功</span>
+          </span>
+          {errorCount > 0 && (
+            <span className="stat">
+              <span className="stat-num err">{errorCount}</span>
+              <span className="stat-label">失败</span>
+            </span>
+          )}
+        </Space>
+
+        {dgPOs.length > 0 && (
+          <div>
+            <div style={{ fontSize: 13, color: colors.info, fontWeight: 500, marginBottom: 6 }}>
+              东莞 RR01 · {dgPOs.length} 个
+            </div>
+            <div>
+              {dgPOs.map((f, i) => (
+                <span key={i} className="file-tag dg" title={f.filename}>
+                  {f.filename}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {idPOs.length > 0 && (
+          <div>
+            <div style={{ fontSize: 13, color: colors.purple, fontWeight: 500, marginBottom: 6 }}>
+              印尼 RR02 · {idPOs.length} 个
+            </div>
+            <div>
+              {idPOs.map((f, i) => (
+                <span key={i} className="file-tag id" title={f.filename}>
+                  {f.filename}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {unknownPOs.length > 0 && (
+          <div>
+            <div style={{ fontSize: 13, color: colors.warn, fontWeight: 500, marginBottom: 6 }}>
+              未分类 · {unknownPOs.length} 个
+            </div>
+            <div>
+              {unknownPOs.map((f, i) => (
+                <span key={i} className="file-tag warn" title={f.filename}>
+                  {f.filename}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+      </Space>
+    </Card>
+  )
+}
+
+// ─── Main ─────────────────────────────────────────────────────────────────
+
 function App() {
+  const { message } = AntApp.useApp()
   const [poFiles, setPoFiles] = useState<UploadFile[]>([])
   const [scheduleDgFile, setScheduleDgFile] = useState<UploadFile[]>([])
   const [scheduleIdFile, setScheduleIdFile] = useState<UploadFile[]>([])
@@ -176,7 +337,7 @@ function App() {
 
   const handleSubmit = async () => {
     if (poFiles.length === 0) {
-      message.warning('请选择PO PDF文件')
+      message.warning('请选择 PO PDF 文件')
       return
     }
     if (scheduleDgFile.length === 0 && scheduleIdFile.length === 0) {
@@ -246,45 +407,43 @@ function App() {
     }
   }
 
-  // Compute summary stats
-  const successCount = result?.files.filter((f) => f.status === 'done').length ?? 0
-  const errorCount = result?.files.filter((f) => f.status === 'error').length ?? 0
-  const totalCount = result?.files.length ?? 0
-
-  // Group POs by factory code
-  const dgPOs = result?.files.filter((f) => f.data?.items[0]?.factoryCode === 'RR01') ?? []
-  const idPOs = result?.files.filter((f) => f.data?.items[0]?.factoryCode === 'RR02') ?? []
-  const unknownPOs = result?.files.filter((f) => {
-    if (f.status === 'error') return true
-    const fc = f.data?.items[0]?.factoryCode
-    return fc !== 'RR01' && fc !== 'RR02'
-  }) ?? []
-
-  // Build schedules array for FileStatusList
-  const schedules: Array<{ filename: string; status: 'done' | 'error'; rowCount: number; error?: string }> = []
+  const schedules: ScheduleResult[] = []
   if (result?.scheduleDg) schedules.push(result.scheduleDg)
   if (result?.scheduleId) schedules.push(result.scheduleId)
 
   return (
-    <div style={{ maxWidth: 800, margin: '40px auto', padding: '0 20px' }}>
-      <Title level={2} style={{ textAlign: 'center' }}>
-        TOMY 排期核对系统
-      </Title>
+    <main className="page stack">
+      <header className="page-head">
+        <div className="eyebrow">业务部 · TOMY</div>
+        <h1>排期核对</h1>
+        <p className="subtitle">
+          上传 TOMY PO PDF 与东莞／印尼排期 Excel，自动匹配出货记录、输出差异报告及日期码。
+        </p>
+      </header>
 
-      <Space direction="vertical" size="large" style={{ width: '100%' }}>
-        <Card title="PO 文件 (PDF)" size="small">
-          <Upload
-            multiple
-            accept=".pdf"
-            beforeUpload={() => false}
-            fileList={poFiles}
-            onChange={({ fileList }) => setPoFiles(fileList)}
-          >
-            <Button icon={<FilePdfOutlined />}>选择 PO 文件</Button>
-          </Upload>
+      <Section label="PO 文件">
+        <Card size="small">
+          <div className="drop-zone">
+            <Upload.Dragger
+              multiple
+              accept=".pdf"
+              beforeUpload={() => false}
+              fileList={poFiles}
+              onChange={({ fileList }) => setPoFiles(fileList)}
+              showUploadList={{ showPreviewIcon: false }}
+            >
+              <p className="ant-upload-drag-icon">
+                <InboxOutlined />
+              </p>
+              <p className="ant-upload-text">把 PO PDF 文件拖到这里</p>
+              <p className="ant-upload-hint">或点击选择文件 · 支持多选 .pdf</p>
+            </Upload.Dragger>
+          </div>
         </Card>
+      </Section>
 
-        <Card title="东莞排期表 (Excel)" size="small">
+      <Section label="东莞排期表">
+        <Card size="small">
           <Upload
             accept=".xlsx,.xls"
             maxCount={1}
@@ -292,11 +451,14 @@ function App() {
             fileList={scheduleDgFile}
             onChange={({ fileList }) => setScheduleDgFile(fileList)}
           >
-            <Button icon={<FileExcelOutlined />}>选择东莞排期表</Button>
+            <Button icon={<FileTextOutlined />}>选择东莞排期表 Excel</Button>
           </Upload>
+          <p className="meta">单文件 · .xlsx 或 .xls · 对应工厂代码 RR01</p>
         </Card>
+      </Section>
 
-        <Card title="印尼排期表 (Excel)" size="small">
+      <Section label="印尼排期表">
+        <Card size="small">
           <Upload
             accept=".xlsx,.xls"
             maxCount={1}
@@ -304,45 +466,39 @@ function App() {
             fileList={scheduleIdFile}
             onChange={({ fileList }) => setScheduleIdFile(fileList)}
           >
-            <Button icon={<FileExcelOutlined />}>选择印尼排期表</Button>
+            <Button icon={<FileTextOutlined />}>选择印尼排期表 Excel</Button>
           </Upload>
+          <p className="meta">单文件 · .xlsx 或 .xls · 对应工厂代码 RR02</p>
         </Card>
+      </Section>
 
-        <Button
-          type="primary"
-          icon={<UploadOutlined />}
-          onClick={handleSubmit}
-          loading={loading}
-          size="large"
-          block
-        >
-          上传并核对
-        </Button>
+      <Button
+        type="primary"
+        icon={<UploadOutlined />}
+        onClick={handleSubmit}
+        loading={loading}
+        size="large"
+        block
+        style={{ height: 44 }}
+      >
+        上传并核对
+      </Button>
 
-        {result && (
+      {error && (
+        <Alert
+          message="请求失败"
+          description={error}
+          type="error"
+          showIcon
+          closable
+          onClose={() => setError(null)}
+        />
+      )}
+
+      {result && (
+        <Section label="核对结果">
           <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-            <Card size="small" title={`PO 文件分类 (共 ${totalCount} 个，成功 ${successCount} 个，失败 ${errorCount} 个)`}>
-              <Space direction="vertical" size="small" style={{ width: '100%' }}>
-                {dgPOs.length > 0 && (
-                  <div>
-                    <Text strong style={{ color: '#1677ff' }}>东莞 RR01 ({dgPOs.length} 个)：</Text>
-                    <Text>{dgPOs.map(f => f.filename).join('、')}</Text>
-                  </div>
-                )}
-                {idPOs.length > 0 && (
-                  <div>
-                    <Text strong style={{ color: '#722ed1' }}>印尼 RR02 ({idPOs.length} 个)：</Text>
-                    <Text>{idPOs.map(f => f.filename).join('、')}</Text>
-                  </div>
-                )}
-                {unknownPOs.length > 0 && (
-                  <div>
-                    <Text strong type="warning">未分类 ({unknownPOs.length} 个)：</Text>
-                    <Text>{unknownPOs.map(f => f.filename).join('、')}</Text>
-                  </div>
-                )}
-              </Space>
-            </Card>
+            <PoClassificationCard result={result} />
 
             {result.reconciliationDg && (
               <ReconciliationCard
@@ -366,18 +522,17 @@ function App() {
                 loading={downloading}
                 size="large"
                 block
+                style={{ height: 44 }}
               >
-                下载核对结果
+                下载核对结果 ZIP
               </Button>
             )}
 
             <FileStatusList files={result.files} schedules={schedules} />
           </Space>
-        )}
-
-        {error && <Alert message="错误" description={error} type="error" />}
-      </Space>
-    </div>
+        </Section>
+      )}
+    </main>
   )
 }
 

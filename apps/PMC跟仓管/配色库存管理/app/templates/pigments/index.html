@@ -10,7 +10,7 @@
   </div>
 </div>
 <table class="table table-hover dt">
-  <thead><tr><th>色粉编号</th><th>进货编号</th><th>库存KG</th><th>单价</th><th>金额</th><th>操作</th></tr></thead>
+  <thead><tr><th>色粉编号</th><th>进货编号</th><th>库存KG</th><th>单价(HK$)</th><th>金额(HK$)</th><th>操作</th></tr></thead>
   <tbody>
     {% for p in pigments %}
       {% set qty = p.stock.quantity if p.stock else 0 %}
@@ -18,8 +18,8 @@
         <td>{{ p.code }}</td>
         <td>{{ p.purchase_code }}</td>
         <td>{{ qty }}</td>
-        <td>{{ "%.2f"|format(p.unit_price) }}</td>
-        <td>{{ "%.2f"|format(qty * p.unit_price) }}</td>
+        <td>{{ "%.1f"|format(p.unit_price) }}</td>
+        <td>{{ "%.1f"|format(qty * p.unit_price) }}</td>
         <td>
           <a href="{{ url_for('pigments.edit', pid=p.id) }}" class="btn btn-sm btn-outline-primary"><i class="bi bi-pencil"></i></a>
           <form action="{{ url_for('pigments.delete', pid=p.id) }}" method="post" class="d-inline" onsubmit="return confirm('确认删除?')">

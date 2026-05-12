@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, forwardRef, useImperativeHandle } from 'react';
 import axios from 'axios';
-import { DatePicker, ConfigProvider } from 'antd';
+import { DatePicker, ConfigProvider, message } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import dayjs from 'dayjs';
 import 'dayjs/locale/zh-cn';
@@ -20,7 +20,7 @@ const NUMERIC_SUM_FIELDS = new Set([
   'unit_price', 'process_value', 'output_value',
 ]);
 
-// 日期类字段（显示成 X月X日）
+// 日期类字段（显示成 X月X日，点击弹出 DatePicker）
 const DATE_FIELDS = new Set([
   'order_date', 'ship_date', 'start_date', 'complete_date', 'inspection_date',
   'plastic_due', 'material_due', 'carton_due', 'packaging_due',
@@ -59,11 +59,20 @@ function ordersToCelldata(orders, columns, newImportedIds) {
     })() : {};
     const isNewImport = newImportedIds && newImportedIds.has(order.id);
 
+    // row_color：导入时记录的行颜色（24 小时内有效）
+    let showRowColor = false;
+    if (order.row_color && order.created_at) {
+      const created = new Date(order.created_at + 'Z');
+      const hours = (Date.now() - created.getTime()) / 3600000;
+      if (hours < 24) showRowColor = true;
+    }
+
     columns.forEach((col, c) => {
       const val = order[col.data];
       const cellFmt = format[col.data] || {};
       const isSumCol = col.data === 'quantity_sum';
       const isDateCol = DATE_FIELDS.has(col.data);
+
       let displayVal, valueToStore, ct;
       if (isDateCol) {
         displayVal = formatDateShort(val);
@@ -93,20 +102,15 @@ function ordersToCelldata(orders, columns, newImportedIds) {
       } else {
         displayVal = val == null ? '' : String(val);
         valueToStore = val ?? '';
-        ct = { t: col.type === 'numeric' ? 'n' : 's', fa: 'General' };
+        ct = { t: col.type === 'numeric' ? 'n' : 's' };
       }
+
       const cellValue = {
         v: valueToStore,
         m: displayVal,
         ct,
       };
-      // row_color：导入时记录的行颜色（24 小时内有效）
-      let showRowColor = false;
-      if (order.row_color && order.created_at) {
-        const created = new Date(order.created_at + 'Z');
-        const hours = (Date.now() - created.getTime()) / 3600000;
-        if (hours < 24) showRowColor = true;
-      }
+
       if (showRowColor) {
         if (order.row_color === 'blue') cellValue.bg = '#E3F2FD';
         else if (order.row_color === 'yellow') cellValue.bg = '#FFF9C4';
@@ -123,7 +127,7 @@ function ordersToCelldata(orders, columns, newImportedIds) {
       if (cellFmt.fs) cellValue.fs = cellFmt.fs;
       if (cellFmt.bs) cellValue.bs = cellFmt.bs;
 
-      if (cellValue.v === '' && !cellFmt.bg && !cellFmt.fc && !cellFmt.bl && !isNewImport && !isSumCol && !order.row_color) {
+      if (cellValue.v === '' && !cellFmt.bg && !cellFmt.fc && !cellFmt.bl && !isNewImport && !isSumCol && !showRowColor) {
         return;
       }
       celldata.push({ r, c, v: cellValue });
@@ -148,11 +152,10 @@ function ordersToCelldata(orders, columns, newImportedIds) {
   return celldata;
 }
 
-// 从 Luckysheet 单元格对象提取所有格式属性
+// 从 Luckysheet 单元格对象提取格式
 function extractCellFormat(cell) {
   if (!cell) return null;
   const fmt = {};
-  // 颜色 / 字体
   if (cell.bg) fmt.bg = cell.bg;
   if (cell.fc) fmt.fc = cell.fc;
   if (cell.bl) fmt.bl = cell.bl;
@@ -161,40 +164,31 @@ function extractCellFormat(cell) {
   if (cell.cl) fmt.cl = cell.cl;
   if (cell.ff) fmt.ff = cell.ff;
   if (cell.fs) fmt.fs = cell.fs;
-  // 对齐 / 换行
   if (cell.ht != null) fmt.ht = cell.ht;
   if (cell.vt != null) fmt.vt = cell.vt;
   if (cell.tb != null) fmt.tb = cell.tb;
   if (cell.tr != null) fmt.tr = cell.tr;
   if (cell.rt != null) fmt.rt = cell.rt;
-  // 合并单元格
   if (cell.mc) fmt.mc = cell.mc;
-  // 单元格类型 / 格式（数字/日期/文本格式）
   if (cell.ct) fmt.ct = cell.ct;
-  // 公式
   if (cell.f) fmt.f = cell.f;
-  // 注释
   if (cell.ps) fmt.ps = cell.ps;
-  // 缩进
   if (cell.qp != null) fmt.qp = cell.qp;
   return Object.keys(fmt).length > 0 ? fmt : null;
 }
 
-export default function LuckysheetEditor({
+function LuckysheetEditor({
   data,
-  onCellChange,
   onRefreshData,
   workshop,
   height = 600,
   containerId = 'luckysheet-container',
   newImportedIds,
-}) {
+}, ref) {
   const rowMapRef = useRef([]);
   const initializedRef = useRef(false);
   const dataRef = useRef(data);
   dataRef.current = data;
-  const syncTimerRef = useRef(null);
-  const settingsTimerRef = useRef(null);
   const [sheetSettings, setSheetSettings] = useState(null);
   const settingsLoadedRef = useRef(false);
   const loadedIdsRef = useRef('');
@@ -208,39 +202,6 @@ export default function LuckysheetEditor({
       .catch(() => { setSheetSettings({}); settingsLoadedRef.current = true; });
   }, [workshop]);
 
-  // 保存布局（列宽/行高/冻结）— 防抖
-  const saveSheetSettings = () => {
-    if (!workshop || !initializedRef.current) return;
-    const ls = getLuckysheet();
-    if (!ls || !ls.getAllSheets) return;
-    let sheets;
-    try { sheets = ls.getAllSheets(); } catch { return; }
-    const sheet = sheets && sheets[0];
-    if (!sheet) return;
-    const cfg = sheet.config || {};
-    const settings = {
-      columnlen: cfg.columnlen || {},
-      rowlen: cfg.rowlen || {},
-      frozen: sheet.frozen || null,
-      // 合并单元格（sheet 级别）
-      merge: cfg.merge || {},
-      // 边框信息
-      borderInfo: cfg.borderInfo || [],
-      // 隐藏行/列
-      rowhidden: cfg.rowhidden || {},
-      colhidden: cfg.colhidden || {},
-      // 自动筛选
-      autoFilter: sheet.luckysheet_autoFilter || null,
-      // 条件格式
-      luckysheet_conditionformat_save: sheet.luckysheet_conditionformat_save || [],
-    };
-    axios.put('/api/orders/sheet-settings', { workshop, settings }).catch(() => {});
-  };
-  const scheduleSaveSettings = () => {
-    clearTimeout(settingsTimerRef.current);
-    settingsTimerRef.current = setTimeout(saveSheetSettings, 1000);
-  };
-
   // 判断是否为蓝色字体：R<100, G<150, B>150
   const isBlueFont = (fc) => {
     if (!fc) return false;
@@ -252,16 +213,35 @@ export default function LuckysheetEditor({
     return r < 100 && g < 150 && b > 150;
   };
 
-  // 同步当前整张表的格式 + 值 + 蓝色自动完成
-  const syncFormats = () => {
-    if (!initializedRef.current) return;
+  // 手动保存：用户点「保存」按钮才触发。一次过把整张表的:
+  //   - 单元格值（与 DB 不一致的字段）
+  //   - 单元格格式（cell_format JSON）
+  //   - 蓝色字体 → 自动转完成
+  //   - DatePicker 选的日期（通过 _pendingFields 暂存）
+  // 写到 batch-update；列宽/行高/冻结/合并/边框写到 sheet-settings。
+  // 没有任何 polling/auto-save，避免 nginx 限流 + toast 风暴。
+  const saveAll = async () => {
+    if (!initializedRef.current) {
+      message.warning('表格未初始化');
+      return { saved: 0 };
+    }
     const ls = getLuckysheet();
-    if (!ls || !ls.getAllSheets) return;
+    if (!ls || !ls.getAllSheets) {
+      message.error('Luckysheet 未加载');
+      return null;
+    }
     let sheets;
-    try { sheets = ls.getAllSheets(); } catch { return; }
+    try { sheets = ls.getAllSheets(); } catch (e) {
+      message.error('读取表格失败：' + e.message);
+      return null;
+    }
     const sheet = sheets && sheets[0];
-    if (!sheet || !sheet.data) return;
+    if (!sheet || !sheet.data) {
+      message.warning('表格无数据');
+      return { saved: 0 };
+    }
 
+    const updates = [];
     let rowsCompleted = 0;
     for (let r = 1; r < sheet.data.length; r++) {
       const orderId = rowMapRef.current[r - 1];
@@ -270,66 +250,93 @@ export default function LuckysheetEditor({
       if (!order) continue;
       const rowCells = sheet.data[r];
       if (!rowCells) continue;
+
+      const fields = {};
       const newFmt = {};
       let blueCount = 0;
-      let nonEmptyCount = 0;
       for (let c = 0; c < ORDER_COLUMNS.length; c++) {
-        const col = ORDER_COLUMNS[c];
         const cell = rowCells[c];
+        const colData = ORDER_COLUMNS[c].data;
         const fmt = extractCellFormat(cell);
-        if (fmt) newFmt[col.data] = fmt;
+        if (fmt) newFmt[colData] = fmt;
 
-        // 安全模式：只把"非空显示"同步到数据库（不会用空值覆盖已有数据）
-        if (col.data !== 'quantity_sum' && !DATE_FIELDS.has(col.data) && onCellChange) {
-          const cellVal = cell ? cell.v : null;
-          if (cellVal != null && String(cellVal).trim() !== '') {
-            const dbVal = order[col.data];
-            if (String(cellVal) !== String(dbVal ?? '')) {
-              onCellChange(orderId, col.data, cellVal);
-              order[col.data] = cellVal;
-            }
+        // 收集值变化（跳过只读的合计列；日期列由 DatePicker 的 _pendingFields 处理）
+        if (colData !== 'quantity_sum' && !DATE_FIELDS.has(colData)) {
+          let newVal;
+          if (cell == null) newVal = null;
+          else if (typeof cell === 'object') newVal = cell.v ?? null;
+          else newVal = cell;
+          if (newVal === '') newVal = null;
+          const oldVal = order[colData] ?? null;
+          if (newVal !== oldVal) {
+            fields[colData] = newVal;
           }
         }
 
-        if (cell && cell.v != null && cell.v !== '') {
-          nonEmptyCount++;
-          if (fmt && isBlueFont(fmt.fc)) blueCount++;
+        if (cell && cell.v != null && cell.v !== '' && fmt && isBlueFont(fmt.fc)) {
+          blueCount++;
         }
+      }
+
+      // 合并 DatePicker 已写入 dataRef 但尚未入库的日期字段变化
+      // DatePicker onChange 将变化标记到 order._pendingFields
+      if (order._pendingFields) {
+        Object.assign(fields, order._pendingFields);
+        delete order._pendingFields;
       }
 
       const newFmtStr = Object.keys(newFmt).length > 0 ? JSON.stringify(newFmt) : null;
       const oldFmtStr = order.cell_format || null;
-      if (newFmtStr !== oldFmtStr && onCellChange) {
-        onCellChange(orderId, 'cell_format', newFmtStr);
-        order.cell_format = newFmtStr;
+      if (newFmtStr !== oldFmtStr) {
+        fields.cell_format = newFmtStr;
       }
-
-      // 任意非空单元格字体蓝色 → 自动转完成
-      if (order.status === 'active' && blueCount >= 1 && onCellChange) {
-        onCellChange(orderId, 'status', 'completed');
-        order.status = 'completed';
+      if (order.status === 'active' && blueCount >= 1) {
+        fields.status = 'completed';
         rowsCompleted++;
+      }
+      if (Object.keys(fields).length > 0) {
+        updates.push({ id: orderId, fields });
       }
     }
 
-    if (rowsCompleted > 0 && onRefreshData) onRefreshData();
-  };
+    // 列宽/行高/冻结/合并/边框/隐藏行列
+    const cfg = sheet.config || {};
+    const settings = {
+      columnlen: cfg.columnlen || {},
+      rowlen: cfg.rowlen || {},
+      frozen: sheet.frozen || null,
+      merge: cfg.merge || {},
+      borderInfo: cfg.borderInfo || [],
+      rowhidden: cfg.rowhidden || {},
+      colhidden: cfg.colhidden || {},
+    };
 
-  const scheduleSyncFormats = () => {
-    clearTimeout(syncTimerRef.current);
-    syncTimerRef.current = setTimeout(syncFormats, 800);
-  };
-
-  // 定时轮询同步（每 2 秒检查一次格式变化 + 蓝色自动完成）
-  useEffect(() => {
-    const id = setInterval(() => {
-      if (initializedRef.current) {
-        syncFormats();
-        saveSheetSettings();
+    try {
+      const calls = [axios.put('/api/orders/sheet-settings', { workshop, settings })];
+      if (updates.length > 0) {
+        calls.push(axios.post('/api/orders/batch-update', { updates }));
       }
-    }, 2000);
-    return () => clearInterval(id);
-  }, [workshop]);
+      await Promise.all(calls);
+      // 更新 dataRef，下次 saveAll 比较时不会重复 push
+      for (const u of updates) {
+        const o = dataRef.current.find(x => x.id === u.id);
+        if (o) Object.assign(o, u.fields);
+      }
+      if (updates.length === 0) {
+        message.success('布局已保存（无单元格变化）');
+      } else {
+        message.success(`已保存 ${updates.length} 条订单`);
+      }
+      if (rowsCompleted > 0 && onRefreshData) onRefreshData();
+      return { saved: updates.length };
+    } catch (e) {
+      message.error('保存失败：' + (e.response?.data?.message || e.message));
+      return null;
+    }
+  };
+
+  // 暴露 saveAll 给父组件（保存按钮调用）
+  useImperativeHandle(ref, () => ({ saveAll }), [workshop, data]);
 
   useEffect(() => {
     // 等待 sheetSettings 加载完成后才初始化
@@ -386,23 +393,11 @@ export default function LuckysheetEditor({
       showConfigWindowResize: false,
       enableShortcutKey: true,
       data: [sheetConfig],
+      // 不再挂 cellUpdated / rangeUpdated / updated 钩子触发自动保存。
+      // 用户改完点上方「保存」按钮才提交。
+      // 只保留 cellEditBefore 用于日期字段弹出 DatePicker。
       hook: {
-        cellUpdated: (r, c, oldValue, newValue) => {
-          if (r === 0) return;
-          const orderId = rowMapRef.current[r - 1];
-          if (!orderId) return;
-          const field = ORDER_COLUMNS[c]?.data;
-          if (!field || field === 'quantity_sum') return;
-          let val;
-          if (newValue == null) val = null;
-          else if (typeof newValue === 'object') val = newValue.v ?? newValue.m ?? '';
-          else val = newValue;
-          if (onCellChange) onCellChange(orderId, field, val);
-        },
-        rangeUpdated: () => { scheduleSyncFormats(); scheduleSaveSettings(); },
-        updated: () => { scheduleSyncFormats(); scheduleSaveSettings(); },
         cellEditBefore: function(range) {
-          console.log('[cellEditBefore]', range);
           if (!range || !range[0]) return;
           const r = range[0].row?.[0];
           const c = range[0].column?.[0];
@@ -432,20 +427,70 @@ export default function LuckysheetEditor({
 
     return () => {
       initializedRef.current = false;
-      clearTimeout(syncTimerRef.current);
-      clearTimeout(settingsTimerRef.current);
       const ls = getLuckysheet();
       if (ls && ls.destroy) {
         try { ls.destroy(); } catch {}
       }
     };
-  }, [containerId, sheetSettings, data.map(o => o.id).join(',')]);
+  }, [containerId, sheetSettings]);
 
-  // data 变化时只更新 rowMapRef 用于编辑映射，不重建表格
+  // 数据变化时刷新（仅当订单集合/顺序变化时才重建，避免用户编辑被覆盖）
   useEffect(() => {
     if (!initializedRef.current) return;
+    const luckysheet = getLuckysheet();
+    if (!luckysheet) return;
+
+    const newIds = data.map(o => o.id).join(',');
+    if (newIds === loadedIdsRef.current) {
+      // 订单集合没变，不重建，避免覆盖用户编辑
+      return;
+    }
+    loadedIdsRef.current = newIds;
     rowMapRef.current = data.map(o => o.id);
-  }, [data]);
+    const celldata = ordersToCelldata(data, ORDER_COLUMNS, newImportedIds);
+
+    try {
+      const defaultColWidths = {};
+      ORDER_COLUMNS.forEach((c, i) => { defaultColWidths[i] = c.width || 80; });
+      const savedColWidths = (sheetSettings && sheetSettings.columnlen) || {};
+      const colWidths = { ...defaultColWidths, ...savedColWidths };
+      const rowLen = (sheetSettings && sheetSettings.rowlen) || {};
+      const savedFrozen = sheetSettings && sheetSettings.frozen;
+      luckysheet.destroy && luckysheet.destroy();
+      luckysheet.create({
+        container: containerId,
+        title: '生产计划',
+        lang: 'zh',
+        allowCopy: true,
+        showtoolbar: true,
+        showinfobar: false,
+        showsheetbar: false,
+        showstatisticBar: true,
+        sheetFormulaBar: true,
+        enableAddRow: false,
+        enableAddBackTop: false,
+        showConfigWindowResize: false,
+        data: [{
+          name: '生产计划',
+          celldata,
+          row: Math.max(data.length + 1, 50),
+          column: ORDER_COLUMNS.length,
+          config: {
+            columnlen: colWidths,
+            rowlen: rowLen,
+            merge: (sheetSettings && sheetSettings.merge) || {},
+            borderInfo: (sheetSettings && sheetSettings.borderInfo) || [],
+            rowhidden: (sheetSettings && sheetSettings.rowhidden) || {},
+            colhidden: (sheetSettings && sheetSettings.colhidden) || {},
+          },
+          ...(savedFrozen ? { frozen: savedFrozen } : {}),
+        }],
+        // 不再挂自动保存钩子，由「保存」按钮统一触发 saveAll
+      });
+    } catch (e) {
+      console.error('Luckysheet 更新失败', e);
+    }
+  }, [data, newImportedIds]);
 
   // ISO 字符串或 Excel 序列号 → dayjs
   const toDayjs = (val) => {
@@ -461,44 +506,54 @@ export default function LuckysheetEditor({
 
   return (
     <>
-      <div id={containerId} style={{ width: '100%', height, position: 'relative' }} />
+      <div
+        id={containerId}
+        style={{ width: '100%', height, position: 'relative' }}
+      />
       {datePicker && (
         <ConfigProvider locale={zhCN}>
-        <div
-          style={{
-            position: 'fixed', left: datePicker.x, top: datePicker.y,
-            zIndex: 10000, background: '#fff',
-            boxShadow: '0 4px 12px rgba(0,0,0,0.15)', borderRadius: 4,
-          }}
-          onMouseDown={e => e.stopPropagation()}
-        >
-          <DatePicker
-            open
-            value={toDayjs(datePicker.value)}
-            onChange={(d) => {
-              const iso = d ? d.format('YYYY-MM-DD') : null;
-              const display = d ? `${d.month() + 1}月${d.date()}日` : '';
-              if (onCellChange) onCellChange(datePicker.orderId, datePicker.field, iso);
-              const order = dataRef.current.find(o => o.id === datePicker.orderId);
-              if (order) order[datePicker.field] = iso;
-              // 直接更新 Luckysheet 单元格显示
-              const ls = getLuckysheet();
-              const rowIdx = rowMapRef.current.indexOf(datePicker.orderId);
-              const colIdx = ORDER_COLUMNS.findIndex(col => col.data === datePicker.field);
-              if (ls && ls.setCellValue && rowIdx >= 0 && colIdx >= 0) {
-                try { ls.setCellValue(rowIdx + 1, colIdx, display); } catch {}
-              }
-              setDatePicker(null);
+          <div
+            style={{
+              position: 'fixed', left: datePicker.x, top: datePicker.y,
+              zIndex: 10000, background: '#fff',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.15)', borderRadius: 4,
             }}
-            onOpenChange={(open) => { if (!open) setDatePicker(null); }}
-            format="YYYY-MM-DD"
-            placeholder="选择日期"
-            style={{ visibility: 'hidden', position: 'absolute' }}
-            popupStyle={{ zIndex: 10001 }}
-          />
-        </div>
+            onMouseDown={e => e.stopPropagation()}
+          >
+            <DatePicker
+              open
+              value={toDayjs(datePicker.value)}
+              onChange={(d) => {
+                const iso = d ? d.format('YYYY-MM-DD') : null;
+                const display = d ? `${d.month() + 1}月${d.date()}日` : '';
+                // 把日期变化写入 order._pendingFields，下次 saveAll 时一并提交
+                // 不立即发送 axios 请求，与 saveAll 的 batch-update 架构保持一致
+                const order = dataRef.current.find(o => o.id === datePicker.orderId);
+                if (order) {
+                  if (!order._pendingFields) order._pendingFields = {};
+                  order._pendingFields[datePicker.field] = iso;
+                  order[datePicker.field] = iso; // 同步 dataRef 以供下次 toDayjs 使用
+                }
+                // 直接更新 Luckysheet 单元格显示（不触发任何 axios 请求）
+                const ls = getLuckysheet();
+                const rowIdx = rowMapRef.current.indexOf(datePicker.orderId);
+                const colIdx = ORDER_COLUMNS.findIndex(col => col.data === datePicker.field);
+                if (ls && ls.setCellValue && rowIdx >= 0 && colIdx >= 0) {
+                  try { ls.setCellValue(rowIdx + 1, colIdx, display); } catch {}
+                }
+                setDatePicker(null);
+              }}
+              onOpenChange={(open) => { if (!open) setDatePicker(null); }}
+              format="YYYY-MM-DD"
+              placeholder="选择日期"
+              style={{ visibility: 'hidden', position: 'absolute' }}
+              popupStyle={{ zIndex: 10001 }}
+            />
+          </div>
         </ConfigProvider>
       )}
     </>
   );
 }
+
+export default forwardRef(LuckysheetEditor);

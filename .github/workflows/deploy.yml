@@ -33,7 +33,18 @@ jobs:
             export BEFORE_COMMIT="${{ github.event.before }}"
             export AFTER_COMMIT="${{ github.event.after }}"
             cd /opt/rr-portal
+            echo "=== Script version check ==="
+            grep -c "recreate" deploy/update-server.sh && echo "[OK] update-server.sh contains recreate logic" || echo "[WARN] update-server.sh MISSING recreate logic"
             bash deploy/update-server.sh
+            echo ""
+            echo "=== Verify Portal Content (container file) ==="
+            sleep 2
+            if docker exec rr-portal-nginx-1 grep -q "河源排期" /usr/share/nginx/html/index.html; then
+              echo "[OK] nginx container index.html contains 河源排期"
+            else
+              echo "[FAIL] nginx container index.html missing 河源排期"
+              exit 1
+            fi
 
       - name: Health Check
         run: |
@@ -54,7 +65,7 @@ jobs:
             echo "[FAIL] ${ep} (HTTP $status after 3 attempts)"
             return 1
           }
-          for ENDPOINT in /nginx-health /health /rr/health /zouhuo/health /jiangping/health /paiji/health /figure-mold-cost-system/health /quotation/health /liwenjuan/health; do
+          for ENDPOINT in /nginx-health /health /hy-schedule/health /rr/health /zouhuo/health /jiangping/health /paiji/health /figure-mold-cost-system/health /baojia/health /liwenjuan/health; do
             check_endpoint "$ENDPOINT" || FAILED=$((FAILED + 1))
           done
           if [ "$FAILED" -gt 0 ]; then

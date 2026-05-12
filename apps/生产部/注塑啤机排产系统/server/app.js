@@ -6,7 +6,7 @@ const fs = require('fs');
 const app = express();
 
 // CORS: restrict to same-origin by default; override with CORS_ORIGIN env var
-const corsOrigin = process.env.CORS_ORIGIN || false;  // false = same-origin only
+const corsOrigin = process.env.CORS_ORIGIN || false;
 app.use(cors({ origin: corsOrigin }));
 app.use(express.json({ limit: '10mb' }));
 

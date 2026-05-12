@@ -50,3 +50,30 @@ class Transaction(db.Model):
     note = db.Column(db.Text, default="")
     pigment = db.relationship("Pigment", back_populates="transactions")
 
+
+class Setting(db.Model):
+    """简单 key-value 配置表;目前只放汇率。"""
+    __tablename__ = "setting"
+    key = db.Column(db.String(64), primary_key=True)
+    value = db.Column(db.String(255), nullable=False, default="")
+    updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
+
+
+class PendingReview(db.Model):
+    """待审核:入库未填色粉编号、出库找不到色粉或库存不足,都进这里等人工处理。
+    quantity 单位跟随 type: in=kg, out=克, edit_in=kg (和表单输入一致,resolve 时再换算)。
+    """
+    __tablename__ = "pending_review"
+    id = db.Column(db.Integer, primary_key=True)
+    type = db.Column(db.String(16), nullable=False)  # 'in' / 'out' / 'edit_in'
+    pigment_code = db.Column(db.String(64), nullable=False, default="")
+    purchase_code = db.Column(db.String(64), nullable=False, default="")
+    name = db.Column(db.String(128), nullable=False, default="")
+    quantity = db.Column(db.Float, nullable=False)
+    unit_price = db.Column(db.Float, nullable=True)
+    reason = db.Column(db.String(256), nullable=False)
+    note = db.Column(db.Text, default="")
+    # type='edit_in' 时,指向要改的原交易 id;其他 type 留空
+    ref_tx_id = db.Column(db.Integer, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.now)
+

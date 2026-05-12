@@ -110,20 +110,40 @@ function generateSchedule({ orderIds, date, shift, workshop }) {
     const codeOnly = mt.mold_no.replace(/[\u4e00-\u9fa5].*$/, '').trim();
     if (codeOnly && codeOnly !== mt.mold_no) moldTargetMap[codeOnly] = mt;
   }
+
+  // 2c. 从历史记录构建 兜底目标数 索引（精确匹配模具编号，取众数 target_24h）
+  // 同模具号在不同时期可能有不同目标值，取出现最多的那个最可靠
+  const histTargets = db.prepare(`
+    SELECT mold_name, target_24h, COUNT(*) as cnt
+    FROM history_records
+    WHERE workshop = ? AND target_24h > 0 AND mold_name IS NOT NULL AND mold_name != ''
+    GROUP BY mold_name, target_24h
+  `).all(ws);
+  const histTargetMap = {}; // code → { target_24h, cnt }
+  for (const h of histTargets) {
+    const code = (h.mold_name || '').split(' ')[0].replace(/[\u4e00-\u9fa5].*$/, '').trim();
+    if (!code) continue;
+    const cur = histTargetMap[code];
+    if (!cur || h.cnt > cur.cnt) histTargetMap[code] = { target_24h: h.target_24h, cnt: h.cnt };
+  }
+
   const findMoldTarget = (moldNo) => {
     if (!moldNo) return null;
     // 去掉订单模具号末尾中文
     const code = moldNo.replace(/[\u4e00-\u9fa5].*$/, '').trim();
-    // 1) 精确匹配
+    // 1) 精确匹配 mold_targets
     if (moldTargetMap[code]) return moldTargetMap[code];
     // 2) 同套模匹配：去掉末尾 "-数字"（如 FUGG-05M-01-1 → FUGG-05M-01）
     const parentCode = code.replace(/-\d+$/, '');
     if (parentCode !== code && moldTargetMap[parentCode]) return moldTargetMap[parentCode];
-    // 3) 工厂前缀匹配：MAMNVN / MARBCEZ 等带 MA 前缀的去掉 MA（MAMNVN-17M-01 → MNVN-17M-01）
+    // 3) 工厂前缀匹配：MAMNVN / MARBCEZ 等带 MA 前缀的去掉 MA
     const noMA = code.replace(/^MA(?=[A-Z]{3,})/, '');
     if (noMA !== code && moldTargetMap[noMA]) return moldTargetMap[noMA];
     const noMAparent = noMA.replace(/-\d+$/, '');
     if (noMAparent !== noMA && moldTargetMap[noMAparent]) return moldTargetMap[noMAparent];
+    // 4) 兜底：从历史记录精确匹配（取众数）
+    if (histTargetMap[code]) return { target_24h: histTargetMap[code].target_24h, target_11h: 0 };
+    if (parentCode !== code && histTargetMap[parentCode]) return { target_24h: histTargetMap[parentCode].target_24h, target_11h: 0 };
     return null;
   };
 
@@ -426,8 +446,8 @@ function generateSchedule({ orderIds, date, shift, workshop }) {
     INSERT INTO schedule_items (schedule_id, machine_no, product_code, mold_name, color,
       color_powder_no, material_type, shot_weight, material_kg, sprue_pct, ratio_pct,
       accumulated, quantity_needed, shortage, order_no, target_24h, target_11h,
-      days_needed, packing_qty, notes, sort_order, order_id, is_carry_over, robot_arm)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      days_needed, packing_qty, notes, sort_order, order_id, is_carry_over, robot_arm, serial_no)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   // 机台臂型映射
@@ -482,7 +502,8 @@ function generateSchedule({ orderIds, date, shift, workshop }) {
         item.order_no || '', item.target_24h || 0, item.target_11h || 0,
         item.days_needed || 0, item.packing_qty || 0,
         `[结转]${(item.notes || '').replace(/^\[结转\]+/, '')}`, sortOrder++,
-        item.order_id || null, 1, machineArmMap[item.machine_no] || item.robot_arm || ''
+        item.order_id || null, 1, machineArmMap[item.machine_no] || item.robot_arm || '',
+        item.serial_no || ''
       );
     }
 
@@ -509,7 +530,8 @@ function generateSchedule({ orderIds, date, shift, workshop }) {
         o.shot_weight || 0, materialKg, o.sprue_pct || 0, o.ratio_pct || 0,
         o.accumulated || 0, o.quantity_needed || 0, shortage,
         o.order_no || '', target24h, target11h, daysNeeded,
-        o.packing_qty || 0, notes, sortOrder++, o.id, 0, machineArmMap[a.machine_no] || ''
+        o.packing_qty || 0, notes, sortOrder++, o.id, 0, machineArmMap[a.machine_no] || '',
+        o.serial_no || ''
       );
 
       updateOrderStatus.run(o.id);

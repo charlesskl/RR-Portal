@@ -672,11 +672,16 @@ function renderOrderList(orders) {
   } else {
     const priceMapEng = (currentTab === 'injection') ? buildPriceMap(_matPrices) : null;
     rows = orders.map(o => {
+      // 料价缺：已完成订单检查明细 actual_amount_hkd；其他状态检查材料是否在价格表
       const hasMissingPrice = priceMapEng
-        ? (o.items || []).some(it => it.material && !resolvePrice(it.material, priceMapEng))
+        ? (o.items || []).some(it => {
+            if (!it.material) return false;
+            if (o.status === '已完成') return !(+(it.actual_amount_hkd || 0) > 0);
+            return !resolvePrice(it.material, priceMapEng);
+          })
         : false;
       const matBadge = hasMissingPrice
-        ? ' <span class="badge bg-warning text-dark ms-1" title="部分原料未录入价格"><i class="bi bi-exclamation-circle me-1"></i>料价缺</span>'
+        ? ' <span class="badge bg-warning text-dark ms-1" title="部分原料料费为 0（可能未录入价格或未填实际领料）"><i class="bi bi-exclamation-circle me-1"></i>料价缺</span>'
         : '';
       return `
     <tr class="order-row" style="cursor:pointer" onclick="viewOrderDetail(${o.id},'${(o.order_number||'').replace(/'/g,'')}')">

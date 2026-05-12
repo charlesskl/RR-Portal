@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block content %}
+<h3>设置</h3>
+
+<div class="card" style="max-width:500px">
+  <div class="card-body">
+    <h5 class="card-title">汇率 (RMB → HKD)</h5>
+    <p class="text-muted small mb-3">
+      入库表单里输入的 RMB 单价,会按这个汇率换算成 HKD 存进库存。<br>
+      公式: <code>HKD = RMB ÷ 汇率</code>,比如 1 HKD = 0.88 RMB 时,100 RMB = 113.64 HKD。<br>
+      <strong>改汇率只影响新入库;已有流水里的 HKD 不会重算。</strong>
+    </p>
+    <form method="post">
+      <div class="mb-3">
+        <label class="form-label">1 HKD 等于多少 RMB</label>
+        <input type="number" step="0.0001" min="0.0001" name="rate" value="{{ rate }}"
+               class="form-control" required>
+        <small class="text-muted">常见值: 0.88 / 0.90 / 0.92 (依当月实际汇率)</small>
+      </div>
+      <button class="btn btn-primary"><i class="bi bi-check2"></i> 保存</button>
+    </form>
+  </div>
+</div>
+{% endblock %}

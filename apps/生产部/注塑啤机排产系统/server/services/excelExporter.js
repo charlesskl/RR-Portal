@@ -189,7 +189,7 @@ async function exportScheduleExcel(scheduleId) {
       item.quantity_needed || 0,          // L 需啤数
       Math.max(0, (item.quantity_needed||0) - (item.accumulated||0)),  // M 欠数
       item.order_no || '',               // N 下单单号
-      '',                                 // O 单号（留空手填）
+      item.serial_no || '',              // O 单号
       item.target_24h || 0,              // P 24H目标
       item.target_11h || (item.target_24h ? Math.round((item.target_24h)/24*11) : 0),     // Q 11H — 优先用 DB 值，回退计算
       item.target_24h ? Math.round(Math.max(0,(item.quantity_needed||0)-(item.accumulated||0))/(item.target_24h)*100)/100 : '', // R 天数
@@ -413,7 +413,7 @@ function writeScheduleSheet(ws, schedule, items, machineMap, wsName) {
       item.shot_weight || 0, item.material_kg || 0, item.sprue_pct || 0, item.ratio_pct || 0,
       item.accumulated || 0, item.quantity_needed || 0,
       Math.max(0, (item.quantity_needed||0) - (item.accumulated||0)),
-      item.order_no || '', '',
+      item.order_no || '', item.serial_no || '',
       item.target_24h || 0,
       item.target_11h || (item.target_24h ? Math.round((item.target_24h)/24*11) : 0),
       item.target_24h ? Math.round(Math.max(0,(item.quantity_needed||0)-(item.accumulated||0))/(item.target_24h)*100)/100 : '',

@@ -10,8 +10,8 @@ RUN npx vite build --base ${BASE_PATH}
 
 FROM node:20-alpine AS production
 
-# Install tini for proper signal handling + curl for healthcheck + build tools for native modules
-RUN apk add --no-cache tini curl python3 make g++
+# 系统工具：tini(信号处理) + curl(健康检查) + 编译工具(原生模块) + poppler-utils(PDF转图片)
+RUN apk add --no-cache tini curl python3 make g++ poppler-utils
 
 # Non-root user
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup

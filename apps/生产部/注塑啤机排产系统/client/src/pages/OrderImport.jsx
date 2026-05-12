@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Upload, Button, Table, message, Card, Space, Tag, Popconfirm } from 'antd';
+import { Upload, Button, Table, message, Card, Space, Tag, Popconfirm, Input, InputNumber } from 'antd';
 import { UploadOutlined, DeleteOutlined, ClearOutlined, DownloadOutlined } from '@ant-design/icons';
 import axios from 'axios';
 import { apiUrl } from '../api';
@@ -45,7 +45,7 @@ export default function OrderImport({ workshop = 'B' }) {
       formData.append('file', f);
       formData.append('workshop', workshop);
       try {
-        const { data } = await axios.post(`${API}/import`, formData);
+        const { data } = await axios.post(`${API}/import`, formData, { timeout: 120000 });
         const cnt = data.count || 0;
         totalCount += cnt;
         if (cnt === 0) failNames.push(f.name);
@@ -87,14 +87,95 @@ export default function OrderImport({ workshop = 'B' }) {
     }
   };
 
+  // 单元格编辑状态
+  const [editCell, setEditCell] = useState(null); // { id, field }
+  const [editValue, setEditValue] = useState('');
+
+  const startEdit = (record, field) => {
+    setEditCell({ id: record.id, field });
+    setEditValue(record[field] ?? '');
+  };
+
+  const saveEdit = async (record) => {
+    if (!editCell) return;
+    const field = editCell.field;
+    let value = editValue;
+    // 数字字段转换
+    if (['shot_weight', 'quantity_needed', 'material_kg', 'accumulated', 'cavity', 'cycle_time', 'sprue_pct', 'ratio_pct', 'packing_qty'].includes(field)) {
+      value = parseFloat(value) || 0;
+    }
+    if (value === record[field]) { setEditCell(null); return; }
+    try {
+      await axios.put(`${API}/${record.id}`, { [field]: value });
+      // 编辑「单号」时自动同步所有相同「下单单号」的订单
+      if (field === 'serial_no' && record.order_no) {
+        const sameOrderNo = orders.filter(o =>
+          o.id !== record.id &&
+          o.order_no === record.order_no &&
+          (!o.serial_no || o.serial_no === '')
+        );
+        if (sameOrderNo.length > 0) {
+          await Promise.all(sameOrderNo.map(o =>
+            axios.put(`${API}/${o.id}`, { serial_no: value }).catch(() => null)
+          ));
+          message.success(`已同步 ${sameOrderNo.length} 条相同下单单号的订单`);
+        }
+      }
+      setEditCell(null);
+      fetchOrders();
+    } catch (e) {
+      message.error('保存失败：' + (e.response?.data?.message || e.message));
+    }
+  };
+
+  const renderEditable = (field, record, value, options = {}) => {
+    const isEditing = editCell && editCell.id === record.id && editCell.field === field;
+    if (isEditing) {
+      const InputCmp = options.number ? InputNumber : Input;
+      return (
+        <InputCmp
+          size="small"
+          autoFocus
+          value={editValue}
+          onChange={e => setEditValue(options.number ? e : e.target.value)}
+          onPressEnter={() => saveEdit(record)}
+          onBlur={() => saveEdit(record)}
+          style={{ width: '100%' }}
+        />
+      );
+    }
+    return (
+      <span
+        style={{ cursor: 'pointer', display: 'inline-block', minWidth: '100%', minHeight: 20, color: options.color }}
+        onClick={() => startEdit(record, field)}
+        title="点击编辑"
+      >
+        {value || <span style={{ color: '#ccc' }}>-</span>}
+      </span>
+    );
+  };
+
   const columns = [
-    { title: '产品货号', dataIndex: 'product_code', width: 120 },
-    { title: '模号名称', dataIndex: 'mold_name', width: 150 },
-    { title: '颜色', dataIndex: 'color', width: 80 },
-    { title: '料型', dataIndex: 'material_type', width: 80 },
-    { title: '啤重G', dataIndex: 'shot_weight', width: 80 },
-    { title: '需啤数', dataIndex: 'quantity_needed', width: 80 },
-    { title: '下单单号', dataIndex: 'order_no', width: 120 },
+    { title: '产品货号', dataIndex: 'product_code', width: 120,
+      render: (v, r) => renderEditable('product_code', r, v) },
+    { title: '模号名称', dataIndex: 'mold_name', width: 150,
+      render: (v, r) => renderEditable('mold_name', r, v) },
+    { title: '颜色', dataIndex: 'color', width: 80,
+      render: (v, r) => renderEditable('color', r, v) },
+    { title: '色粉', dataIndex: 'color_powder_no', width: 80,
+      render: (v, r) => renderEditable('color_powder_no', r, v) },
+    { title: '料型', dataIndex: 'material_type', width: 100,
+      render: (v, r) => renderEditable('material_type', r, v) },
+    { title: '啤重G', dataIndex: 'shot_weight', width: 80,
+      render: (v, r) => renderEditable('shot_weight', r, v, { number: true }) },
+    { title: '需啤数', dataIndex: 'quantity_needed', width: 80,
+      render: (v, r) => renderEditable('quantity_needed', r, v, { number: true }) },
+    { title: '下单单号', dataIndex: 'order_no', width: 120,
+      render: (v, r) => renderEditable('order_no', r, v) },
+    { title: '备注', dataIndex: 'order_notes', width: 120,
+      render: (v, r) => renderEditable('order_notes', r, v, { color: '#d46b08' }) },
+    { title: '单号', dataIndex: 'serial_no', width: 100,
+      render: (v, r) => renderEditable('serial_no', r, v) },
     { title: '状态', dataIndex: 'status', width: 80,
       render: (s, record) => (
         <Tag
@@ -116,8 +197,8 @@ export default function OrderImport({ workshop = 'B' }) {
     <div>
       <Card size="small" style={{ marginBottom: 16 }}>
         <Space>
-          <Upload beforeUpload={handleUpload} showUploadList={false} accept=".pdf,.xlsx,.xls" multiple>
-            <Button icon={<UploadOutlined />} type="primary">导入订单 (PDF/Excel)</Button>
+          <Upload beforeUpload={handleUpload} showUploadList={false} accept=".pdf,.xlsx,.xls,.png,.jpg,.jpeg,.bmp,.webp" multiple>
+            <Button icon={<UploadOutlined />} type="primary">导入订单 (PDF/Excel/图片)</Button>
           </Upload>
           <Button icon={<DownloadOutlined />} onClick={() => window.open(apiUrl('/api/orders/template'))}>下载导入模板</Button>
           <Popconfirm title="确定清空所有订单?" onConfirm={handleClearAll}>

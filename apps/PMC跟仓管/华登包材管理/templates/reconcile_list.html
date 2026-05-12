@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}核对中心{% endblock %}
+{% block content %}
+<div class="max-w-5xl mx-auto">
+    <h1 class="text-xl font-bold mb-4">核对中心</h1>
+    <div class="bg-white rounded-lg shadow-sm">
+        <table class="w-full text-sm">
+            <thead class="bg-gray-50">
+                <tr>
+                    <th class="px-3 py-2 text-left">发起方</th>
+                    <th class="px-3 py-2 text-left">对方</th>
+                    <th class="px-3 py-2 text-left">日期范围</th>
+                    <th class="px-3 py-2 text-left">状态</th>
+                    <th class="px-3 py-2 text-left">操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for i in items %}
+                <tr class="border-t hover:bg-gray-50">
+                    <td class="px-3 py-2">{{ PARTIES[i.initiator_party].name }}</td>
+                    <td class="px-3 py-2">{{ PARTIES[i.approver_party].name }}</td>
+                    <td class="px-3 py-2">{{ i.date_from }} ~ {{ i.date_to }}</td>
+                    <td class="px-3 py-2">
+                        {% if i.status == 'pending_approval' %}<span class="text-amber-600">待审批</span>
+                        {% elif i.status == 'confirmed' %}<span class="text-green-600">已确认</span>
+                        {% elif i.status == 'disputed' %}<span class="text-red-600">待协商</span>
+                        {% elif i.status == 'withdrawn' %}<span class="text-gray-500">已撤回</span>
+                        {% endif %}
+                    </td>
+                    <td class="px-3 py-2">
+                        <a href="/reconcile/{{ i.id }}" class="text-blue-600 hover:underline">查看</a>
+                    </td>
+                </tr>
+                {% else %}
+                <tr><td colspan="5" class="px-4 py-8 text-center text-gray-400">暂无核对</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

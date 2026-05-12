@@ -16,7 +16,7 @@ def index():
 def _form_to_pigment(p):
     p.code = request.form["code"].strip()
     p.purchase_code = request.form.get("purchase_code", "").strip()
-    p.unit_price = float(request.form.get("unit_price", 0) or 0)
+    p.unit_price = round(float(request.form.get("unit_price", 0) or 0), 1)
     # 确保必填字段有默认值(品牌、色名等已不再从表单传入)
     if not p.name:
         p.name = p.code

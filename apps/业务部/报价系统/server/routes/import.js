@@ -86,13 +86,24 @@ router.post('/', upload.single('file'), async (req, res) => {
     // ── Insert all data in a transaction ──────────────────────────────────
     const insertAll = db.transaction(() => {
 
-      // QuoteParams
+      // QuoteParams — inherit markup defaults from latest prior version of same client
       const p = data.params || {};
+      const clientDefaults = db.prepare(
+        `SELECT qp.markup_body, qp.markup_packaging, qp.markup_labor
+         FROM QuoteParams qp
+         JOIN QuoteVersion qv ON qv.id = qp.version_id
+         JOIN Product pr ON pr.id = qv.product_id
+         WHERE pr.client = ? AND qp.version_id != ?
+         ORDER BY qv.id DESC LIMIT 1`
+      ).get(clientName, versionId) || {};
       db.prepare(
         `INSERT INTO QuoteParams (version_id, hkd_rmb_quote, hkd_rmb_check, rmb_hkd, hkd_usd, labor_hkd, box_price_hkd, markup_body, markup_packaging, markup_labor, testing_fee_usd)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      ).run(versionId, p.hkd_rmb_quote, p.hkd_rmb_check, p.rmb_hkd, p.hkd_usd, p.labor_hkd, p.box_price_hkd,
-        p.markup_body ?? 0.15, p.markup_packaging ?? 0.10, p.markup_labor ?? 0.15, p.testing_fee_usd ?? null);
+      ).run(versionId, 0.85, p.hkd_rmb_check, 0.85, p.hkd_usd, p.labor_hkd, p.box_price_hkd,
+        p.markup_body ?? clientDefaults.markup_body ?? 0.15,
+        p.markup_packaging ?? clientDefaults.markup_packaging ?? 0.10,
+        p.markup_labor ?? clientDefaults.markup_labor ?? 0.15,
+        p.testing_fee_usd ?? null);
 
       // MaterialPrice
       const insertMat = db.prepare(
@@ -272,7 +283,7 @@ router.post('/', upload.single('file'), async (req, res) => {
 
         // Fabric from sewingDetails: only rows with both fabric_name and position
         // Formula: HK$/YD = 物料价(RMB) × 码点 × 1.05 ÷ 港币兑人民币
-        const hkdRmb = (p.hkd_rmb_quote && p.hkd_rmb_quote > 0) ? p.hkd_rmb_quote : 0.85;
+        const hkdRmb = 0.85;
         console.log('[import] sewingDetails count:', (data.sewingDetails || []).length, 'hkd_rmb_quote:', p.hkd_rmb_quote, '=> hkdRmb:', hkdRmb);
         for (const s of (data.sewingDetails || [])) {
           if (!s.fabric_name || !s.position) continue;

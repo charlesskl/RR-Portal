@@ -25,8 +25,10 @@ const tab_spin_fabric = {
 
     function toUsd(priceRmb, position) {
       const rmb = parseFloat(priceRmb) || 0;
-      if (position === '__embroidery__') return rmb / 0.85 / 7.75;
-      return rmb / 0.85 / 7.75 * 1.06;
+      // 毛绒: 单价 / 6.8 * 1.06 / 1.1
+      // 电绣: 单价 / 6.8 / 1.1
+      if (position === '__embroidery__') return rmb / 6.8 / 1.1;
+      return rmb / 6.8 * 1.06 / 1.1;
     }
 
     function calcTotal(list) {

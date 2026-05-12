@@ -126,16 +126,26 @@ function parseHeader(ws, format, workbook) {
 
   let item_desc = null;
 
-  // SPIN: product_no from 总表 sheet
-  if (format === 'spin' && workbook) {
-    const summarySheet = workbook.worksheets.find(ws => ws.name.includes('总表'));
-    if (summarySheet) {
-      // Row 8 Col 2: "货号：#29837"
-      const raw = strVal(summarySheet.getCell(8, 2)) || '';
-      const m = raw.match(/\d+/);
-      if (m) product_no = m[0];
+  // SPIN: product_no from 报价明细 sheet — scan for "货号" cell, take first number from next row
+  // e.g. R48 c2="货号", R49 c2="29485-Official Kick-Off-GPW..." → product_no = 29485
+  if (format === 'spin') {
+    let found = null;
+    for (let r = 1; r <= Math.min(ws.rowCount, 80) && !found; r++) {
+      for (const c of [1, 2]) {
+        const v = strVal(ws.getCell(r, c));
+        if (v && /^货号$/.test(v.trim())) {
+          const nextVal = strVal(ws.getCell(r + 1, c)) || strVal(ws.getCell(r + 1, 2));
+          if (nextVal) {
+            const m = nextVal.match(/\d+/);
+            if (m) { found = m[0]; break; }
+          }
+        }
+      }
     }
+    if (found) product_no = found;
   }
+  // Reset "料型" placeholder (R1 c2 of SPIN main sheet) — not a product no
+  if (product_no === '料型') product_no = null;
 
   // item_desc: scan main sheet for row containing "货号" in col A or B, take next row same col
   // e.g. A51="货号", A52="欧姆灯健康产品"; or B51="货号", B52="#29837 ..."
@@ -202,8 +212,11 @@ function parseHeader(ws, format, workbook) {
     ? (pureNum(ws.getCell('C9')) || pureNum(ws.getCell('D9')) || 0.85) // SPIN: 汇率 in R9 c3
     : (pureNum(ws.getCell('C13')) || pureNum(ws.getCell('D13')));
   const hkd_usd = pureNum(ws.getCell('C14')) || pureNum(ws.getCell('D14')) || (format === 'spin' ? 7.75 : null);
-  // Labor: F13 (injection) or G13 (plush); SPIN: scan R9 for "人工" label, value in next col
-  let labor_hkd = numVal(ws.getCell('G13')) || numVal(ws.getCell('F13'));
+  // Labor: SPIN format has mold data in R13 (G13="10A" machine type → parseFloat returns 10, wrong)
+  // For SPIN: scan R9 for "人工" label only. For others: use F13/G13 with pureNum (no leading-digit strings).
+  let labor_hkd = format === 'spin'
+    ? null
+    : (pureNum(ws.getCell('G13')) || pureNum(ws.getCell('F13')));
   if (!labor_hkd) {
     for (let c = 1; c <= 15; c++) {
       const v = strVal(ws.getCell(9, c));
@@ -285,7 +298,7 @@ function parseMoldParts(ws, startRow = 18) {
     }
 
     // Stop when hitting cost summary rows (not mold parts)
-    const COST_ROW_PATTERN = /料价|啤工|人工|油漆|喷油|搪胶|车缝|拆货|包装|吊咭|合计|总计|利润|运费/;
+    const COST_ROW_PATTERN = /料价|啤工|人工|油漆|喷油|搪胶|车缝|拆查货|包装|吊咭|合计|总计|利润|运费/;
     if (COST_ROW_PATTERN.test(part_no) || COST_ROW_PATTERN.test(description)) {
       break;
     }
@@ -717,11 +730,18 @@ function parseSummary(ws) {
       carton_price_raw += numVal(row.getCell(mainPriceCol)) || 0;
     }
     if (case_pack == null && /外箱|纸箱/.test(colB)) {
-      const cp = strVal(row.getCell(3));
-      if (cp) case_pack = cp;
+      // Scan cols 3-6 for numeric or fraction value (e.g. "1/6", 0.167, 6)
+      for (let c = 3; c <= 6; c++) {
+        const v = strVal(row.getCell(c));
+        if (!v) continue;
+        if (/^\s*\d+(\.\d+)?\s*\/\s*\d+(\.\d+)?\s*$/.test(v) || /^\s*-?\d+(\.\d+)?\s*$/.test(v)) {
+          case_pack = v.trim();
+          break;
+        }
+      }
     }
   }
-  const carton_price = Math.round(carton_price_raw * 1.08 * 100) / 100;
+  const carton_price = Math.round(carton_price_raw * 100) / 100;
 
   // R129-R136: Mold costs
   // R129-R130: section headers
@@ -942,7 +962,7 @@ function parsePainting(ws) {
 // ─── Hardware Sheet Parser (五金 sheet or main sheet section → BodyAccessory) ──
 
 // Known non-hardware item name patterns — stop collecting when encountered
-const NON_HW_PATTERN = /搪胶|车缝|吊咭|留言纸|镭射|PE袋|胶针|扎带|平咭|外箱|印尼运费|包装辅料|生产夹具|拆货|围膜|合计|总计/;
+const NON_HW_PATTERN = /搪胶|车缝|吊咭|留言纸|镭射|PE袋|胶针|扎带|平咭|外箱|印尼运费|包装辅料|生产夹具|拆查货|围膜|合计|总计/;
 
 // ─── SPIN Transportation Parser ──────────────────────────────────────────────
 // Supports Chinese format main sheet: FCL (盐田/HK柜货) + LCL (盐田散货) sections
@@ -1459,7 +1479,7 @@ function parseSpinPackaging(mainWs, hkdUsd = 7.75) {
 const PKG_LABEL_PATTERN = /^(彩盒|吸塑|胶袋|杂项|纸箱)$/;
 
 const ACCESSORIES_PATTERN   = /包装辅料/;
-const PACKING_LABOUR_PATTERN = /拆货|包装人工/;
+const PACKING_LABOUR_PATTERN = /拆查货|包装人工/;
 
 function parsePackagingFromMainSheet(mainWs, skipFixed = false) {
   if (!mainWs) return [];
@@ -1480,7 +1500,7 @@ function parsePackagingFromMainSheet(mainWs, skipFixed = false) {
       continue;
     }
 
-    // Collect 拆货 + 包装人工 → Packing Labour
+    // Collect 拆查货 + 包装人工 → Packing Labour
     if (colB && PACKING_LABOUR_PATTERN.test(colB)) {
       packingLabourTotal += numVal(row.getCell(priceCol)) || 0;
       continue;
@@ -1490,9 +1510,18 @@ function parsePackagingFromMainSheet(mainWs, skipFixed = false) {
     if (colA === '纸箱') continue;  // 纸箱单独作为 carton_price，不进包装列表
     const rawName = colB;
     if (!rawName) continue;
-    const splitM = rawName.match(/^(.+?)\s+([\d"'*].+)$/);
-    const name   = splitM ? splitM[1].trim() : rawName;
-    const spec   = splitM ? splitM[2].trim() : '';
+    // Prefer parenthesized spec: "吊牌(250gsm...)" → name="吊牌", spec="250gsm..."
+    // Fall back to whitespace + digit/quote/asterisk split
+    let name, spec;
+    const parenM = rawName.match(/^(.+?)\s*[\(（](.+?)[\)）]?\s*$/);
+    if (parenM) {
+      name = parenM[1].trim();
+      spec = parenM[2].trim();
+    } else {
+      const splitM = rawName.match(/^(.+?)\s+([\d"'*].+)$/);
+      name = splitM ? splitM[1].trim() : rawName;
+      spec = splitM ? splitM[2].trim() : '';
+    }
     const usageQty = numVal(row.getCell(3)) ?? 1;
     const rawTotal = numVal(row.getCell(priceCol)) || 0;
     const totalWithMarkup = Math.round(rawTotal * 1.08 * 10000) / 10000;

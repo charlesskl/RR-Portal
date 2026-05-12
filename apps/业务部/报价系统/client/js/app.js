@@ -47,7 +47,32 @@ const app = (() => {
   // ─── Refresh (reload current version in place) ────────────────────────────
   async function refresh() {
     if (currentProductId && currentVersionId) {
+      const savedTab = currentTab;
+      const savedLevel = currentLevel;
       await selectVersion(currentProductId, currentVersionId);
+      if (savedTab && (savedTab !== currentTab || savedLevel !== currentLevel)) {
+        currentTab = savedTab;
+        currentLevel = savedLevel;
+        if (savedLevel === 'bd' || savedLevel === 'vq') {
+          document.querySelectorAll('.tab-top').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.level === savedLevel);
+          });
+          document.getElementById('tabsVq').style.display = savedLevel === 'vq' ? '' : 'none';
+          document.getElementById('tabsBd').style.display = savedLevel === 'bd' ? '' : 'none';
+          if (versionData) headerInfoModule.render(currentVersionId, versionData, savedLevel);
+        }
+        const navId = savedLevel === 'spin' ? 'tabsSpin' : (savedLevel === 'bd' ? 'tabsBd' : 'tabsVq');
+        document.querySelectorAll('#' + navId + ' .tab-sub').forEach(btn => {
+          btn.classList.toggle('active', btn.dataset.tab === savedTab);
+        });
+        const spinRow1 = document.getElementById('tabsSpinRow1');
+        if (spinRow1) {
+          spinRow1.querySelectorAll('.tab-sub').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.tab === savedTab);
+          });
+        }
+        renderCurrentTab();
+      }
     }
   }
 

@@ -313,7 +313,8 @@ function fillCharacterSheet(ws, d) {
     setVal(ws, r, 3, engName || cnName);
     setVal(ws, r, 4, engName ? cnName : '');
     if (showProductCol) setVal(ws, r, 5, item.product_name || '');
-    const unitPriceUsd = r2((parseFloat(item.material_price_rmb) || 0) / 0.85 / 7.75 * 1.06);
+    // 毛绒: 单价 / 6.8 * 1.06 / 1.1
+    const unitPriceUsd = r2((parseFloat(item.material_price_rmb) || 0) / 6.8 * 1.06 / 1.1);
     const usage = r2(item.usage_amount);
     setVal(ws, r, 10, unitPriceUsd);
     ws.getCell(r, 10).numFmt = '0.0000';
@@ -342,9 +343,10 @@ function fillCharacterSheet(ws, d) {
     setVal(ws, r, 4, oEngName ? oCnName : '');
     if (showOtherProductCol) setVal(ws, r, 5, item.product_name || '');
     const rmb = parseFloat(item.material_price_rmb) || 0;
+    // 电绣: 单价 / 6.8 / 1.1; 毛绒(其他): 单价 / 6.8 * 1.06 / 1.1
     const unitPriceUsd = item.position === '__embroidery__'
-      ? r2(rmb / 0.85 / 7.75)
-      : r2(rmb / rmbUsdRate * 1.06);
+      ? r2(rmb / 6.8 / 1.1)
+      : r2(rmb / 6.8 * 1.06 / 1.1);
     const usage = r2(parseFloat(item.usage_amount) || 0);
     setVal(ws, r, 10, unitPriceUsd);
     ws.getCell(r, 10).numFmt = '0.0000';

@@ -70,11 +70,11 @@ const tab_vq_body_cost = {
       { label: 'E. Others',            sub: othSub,  amt: othAmt,  pct: pct(othAmt) },
     ];
 
-    const sectionRows = sections.map(s => `
+    const sectionRows = sections.map((s, i) => `
       <tr>
         <td>${s.label}</td>
         <td class="num">${formatNumber(s.sub, 2)}</td>
-        <td class="num">${(markup * 100).toFixed(1)}%</td>
+        <td class="num editable" data-field="markup_body" data-type="number" data-row="${i}">${(markup * 100).toFixed(1)}%</td>
         <td class="num">${formatNumber(s.amt, 2)}</td>
         <td class="num">${s.pct}</td>
       </tr>
@@ -176,7 +176,24 @@ const tab_vq_body_cost = {
       } catch (e) { showToast('删除失败: ' + e.message, 'error'); }
     });
 
-    container.querySelectorAll('td.editable').forEach(td => {
+    // Mark Up cells — edit any row to update params.markup_body globally
+    container.querySelectorAll('td.editable[data-field="markup_body"]').forEach(td => {
+      const currentPct = parseFloat(versionData.params?.markup_body) || 0;
+      makeEditable(td, {
+        type: 'number',
+        value: (currentPct * 100).toFixed(1),
+        onSave: async (val) => {
+          const pct = parseFloat(val);
+          if (isNaN(pct)) return showToast('请输入数字', 'error');
+          try {
+            await api.updateParams(versionId, { markup_body: pct / 100 });
+            app.refresh();
+          } catch (e) { showToast('保存失败: ' + e.message, 'error'); }
+        },
+      });
+    });
+
+    container.querySelectorAll('td.editable[data-id]').forEach(td => {
       const id = td.dataset.id;
       const field = td.dataset.field;
       const type = td.dataset.type;

@@ -11,7 +11,7 @@ const os = require('os');
  *   - macOS: brew install poppler
  * 返回 { tmpDir, files } - PNG 文件路径数组
  */
-function pdfToImages(pdfPath, dpi = 150) {
+function pdfToImages(pdfPath, dpi = 250) {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pdf2img-'));
   const prefix = path.join(tmpDir, 'page');
 

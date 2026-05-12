@@ -70,13 +70,14 @@ export default function Scheduling({ onDone, workshop = 'B' }) {
     { title: '啤重G', dataIndex: 'shot_weight', width: 80 },
     { title: '需啤数', dataIndex: 'quantity_needed', width: 80 },
     { title: '下单单号', dataIndex: 'order_no', width: 130 },
+    { title: '单号', dataIndex: 'serial_no', width: 100 },
   ];
 
   // 按搜索词过滤订单
   const filteredOrders = searchText.trim()
     ? orders.filter(o => {
         const q = searchText.toLowerCase();
-        return ['product_code', 'mold_name', 'color', 'color_powder_no', 'material_type', 'order_no']
+        return ['product_code', 'mold_name', 'color', 'color_powder_no', 'material_type', 'order_no', 'serial_no']
           .some(k => String(o[k] || '').toLowerCase().includes(q));
       })
     : orders;
@@ -104,7 +105,7 @@ export default function Scheduling({ onDone, workshop = 'B' }) {
         <div>
           <Space style={{ marginBottom: 12 }}>
             <Input.Search
-              placeholder="搜索货号/模号/颜色/色粉/料型/单号"
+              placeholder="搜索货号/模号/颜色/色粉/料型/下单单号/单号"
               value={searchText}
               onChange={e => setSearchText(e.target.value)}
               onSearch={setSearchText}

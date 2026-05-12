@@ -1,10 +1,13 @@
 const express = require('express');
+const fs = require('fs');
 const path = require('path');
 const multer = require('multer');
 const db = require('../db');
 const { parsePDFOrder } = require('../services/pdf-order-parser');
 const router = express.Router();
-const upload = multer({ dest: path.join(__dirname, '..', 'uploads') });
+const UPLOAD_DIR = path.join(process.env.DATA_PATH || path.join(__dirname, '..'), 'uploads');
+fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+const upload = multer({ dest: UPLOAD_DIR });
 
 function ceilDiv(a, b) { return b > 0 ? Math.ceil(a / b) : 0; }
 function addDays(yyyymmdd, days) {

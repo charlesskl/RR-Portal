@@ -248,6 +248,34 @@ services:
     networks:
       - platform-net
 
+  penyou:
+    build:
+      context: ./apps/生产部/喷油部生产管理系统
+      dockerfile: Dockerfile
+      args:
+        BASE_PATH: /penyou/
+    environment:
+      - PORT=3100
+      - DATA_PATH=/app/data
+      - NODE_ENV=production
+    volumes:
+      - ./apps/生产部/喷油部生产管理系统/data:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3100/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    mem_limit: 512m
+    memswap_limit: 512m
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - platform-net
+
   production-plan:
     build:
       context: ./apps/生产部/生产计划管理系统

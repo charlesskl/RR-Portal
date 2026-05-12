@@ -1,0 +1,17 @@
+**/node_modules
+**/.git
+**/.env
+**/.env.local
+**/.env.*.local
+**/dist
+**/build
+**/.DS_Store
+**/.vscode
+**/.idea
+**/coverage
+**/*.log
+data/
+deploy-first.bat
+start.bat
+update.bat
+docs/

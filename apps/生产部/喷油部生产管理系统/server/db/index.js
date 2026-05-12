@@ -2,7 +2,10 @@ const Database = require('better-sqlite3');
 const fs = require('fs');
 const path = require('path');
 
-const DB_PATH = path.join(__dirname, 'penyou.db');
+// DB 文件落在 DATA_PATH（容器内 bind-mount 到 host），不在镜像层 — 重建容器不丢数据
+const DATA_DIR = process.env.DATA_PATH || __dirname;
+if (process.env.DATA_PATH) fs.mkdirSync(DATA_DIR, { recursive: true });
+const DB_PATH = path.join(DATA_DIR, 'penyou.db');
 const INIT_SQL = fs.readFileSync(path.join(__dirname, 'init.sql'), 'utf-8');
 
 const db = new Database(DB_PATH);

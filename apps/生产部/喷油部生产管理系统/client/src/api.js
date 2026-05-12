@@ -1,6 +1,9 @@
 import axios from 'axios';
 
-const api = axios.create({ baseURL: '/api' });
+// 子路径部署: vite --base /penyou/ 时 BASE_URL = '/penyou/'。
+// 浏览器调用 axios `/orders` → 实际请求 `/penyou/api/orders`，命中 nginx 的 /penyou/api/ location。
+const basePrefix = (import.meta.env.BASE_URL || '/').replace(/\/$/, '');
+const api = axios.create({ baseURL: basePrefix + '/api' });
 
 api.interceptors.request.use(config => {
   const id = localStorage.getItem('workshop_id');

@@ -186,6 +186,7 @@ curl http://localhost:<port>/health
 | zouhuo | Node.js | 3002 | /zouhuo/ |
 | jiangping | Flask | 5001 | /jiangping/ |
 | paiji | Node.js | 3000 | /paiji/ |
+| penyou 喷油部生产管理系统 | Node.js/React | 3100 | /penyou/ |
 | production-plan 生产计划管理系统 | Node.js | 8080 | /production-plan/ |
 | zuru-master-schedule (ZURU总排期入单) | Flask | 5003 | /zuru-master/ |
 | zuru-order-system (ZURU接单表入单系统) | Flask | 5005 | /zuru-order-system/ |
@@ -424,6 +425,7 @@ const data = JSON.parse(fs.readFileSync('data/data.json'));
 | figure-mold-cost-system | 模具手办采购订单 | Engineering | Standalone (Node.js) | /figure-mold-cost-system/ | https://github.com/hufan4308-blip/figure-mold-cost-system |
 | jiangping | 采购订单管理系统 | PMC跟仓管 | Standalone (Python/Flask) | /jiangping/ | https://github.com/fxxaxxx/jiangping |
 | paiji | AI注塑啤机排产系统 | 生产部 | Standalone (Node.js) | /paiji/ | https://github.com/duanlei10/234 |
+| penyou | 喷油部生产管理系统 | 生产部 | Standalone (Node.js/React) | /penyou/ | (PR #100) |
 | production-plan | 生产计划管理系统 | 生产部 | Standalone (Node.js/React + Luckysheet) | /production-plan/ | (PR #63) |
 | zuru-master-schedule | ZURU总排期入单 | 业务部 | Standalone (Python/Flask) | /zuru-master/ | (PR #59) |
 | zuru-order-system | ZURU接单表入单系统 | 业务部 | Standalone (Python/Flask) | /zuru-order-system/ | https://github.com/hanson678/zuru-order-system |

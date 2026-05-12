@@ -403,6 +403,14 @@ const data = JSON.parse(fs.readFileSync('data/data.json'));
 - [ ] 添加 `networks: platform-net`（除非用 host 模式）
 - [ ] 如需通过 nginx 访问：更新 nginx.conf（upstream + location）
 
+### 6.5. Portal 首页注册（frontend/index.cloud.html）
+**容易漏掉但必做** —— PR #58/#59/#100 都翻车在这步。容器跑起来 + nginx 路由 OK 不代表用户能看到，因为首页是个静态卡片列表。
+
+- [ ] **部门 plugin-list 区块**：在所属部门的 `<div class="plugin-list">` 里加一项 `<div class="plugin-item">`，含 `<div class="plugin-dot gray" id="<svc>Dot">` + `<span class="plugin-name">中文名</span>`
+- [ ] **详情卡片**：在主体加一个 `<div class="detail-plugin-card">` 块（参考已有的 paiji/baojia 写法），含 icon、名称、描述、feature-grid、状态点 `id="<svc>DetailDot"`、`<a href="/<svc>/" target="_blank">打开系统</a>` 按钮
+- [ ] **健康检查 JS 数组**：在 `var checks = [ ... ]` 里加一条 `{ name: '<svc>', url: '/<svc>/health' 或 '/<svc>/api/health', dot: '<svc>Dot', detailDot: '<svc>DetailDot' }`。**先 curl 确认 health URL 是 /health 还是 /api/health**（不同 app 不一样，penyou 是 /api/health，多数其他 app 是 /health）
+- [ ] 部署后用 `curl -sfu 'rr:leo123456' http://8.148.146.194/ | grep <svc>` 确认实际服务的 HTML 里有新内容（不要只信本地文件 —— bind-mount inode 坑见 Learnings 2026-04-23）
+
 ### 7. 数据库 Schema（plugin_sdk 插件）
 - [ ] 确认 PostgreSQL 中存在对应 schema：`CREATE SCHEMA IF NOT EXISTS plugin_xxx`
 - [ ] 或在 `init-db.sql` 中添加

@@ -107,6 +107,20 @@ export default function OrderImport({ workshop = 'B' }) {
     if (value === record[field]) { setEditCell(null); return; }
     try {
       await axios.put(`${API}/${record.id}`, { [field]: value });
+      // 编辑「单号」时自动同步所有相同「下单单号」的订单
+      if (field === 'serial_no' && record.order_no) {
+        const sameOrderNo = orders.filter(o =>
+          o.id !== record.id &&
+          o.order_no === record.order_no &&
+          (!o.serial_no || o.serial_no === '')
+        );
+        if (sameOrderNo.length > 0) {
+          await Promise.all(sameOrderNo.map(o =>
+            axios.put(`${API}/${o.id}`, { serial_no: value }).catch(() => null)
+          ));
+          message.success(`已同步 ${sameOrderNo.length} 条相同下单单号的订单`);
+        }
+      }
       setEditCell(null);
       fetchOrders();
     } catch (e) {

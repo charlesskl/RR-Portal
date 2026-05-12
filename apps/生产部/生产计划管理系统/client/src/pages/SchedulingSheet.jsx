@@ -221,7 +221,12 @@ export default function SchedulingSheet({ workshop, tab, lineName = 'all', lines
         if (!order.client && r.clientFromFile) {
           order.client = r.clientFromFile;
         }
-        return { ...order, workshop, status: 'active' };
+        return {
+          ...order,
+          workshop,
+          status: 'active',
+          row_color: r.type === 'modified' ? 'blue' : (r.type === 'new' ? 'yellow' : null),
+        };
       });
       const res2 = await axios.post('/api/orders', orders);
       const ids = res2.data.ids || [];

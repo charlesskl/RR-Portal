@@ -175,6 +175,7 @@ function parseSheetData(sheetXml, styleColorMap, sharedStrings) {
       }
     }
     if (yellowCount >= 3) rowColor = 'yellow';
+    else if (blueCount >= 3) rowColor = 'blue';
 
     // 只处理表头候选行(前5行)和有颜色的行
     if (rowNum > 5 && !rowColor) continue;

@@ -615,11 +615,16 @@ const app = (() => {
       dropZone.style.display = '';
       progress.style.display = 'none';
 
-      // Format: Spin Master → 'spin'; TOMY → 'injection' (plush uses same format)
+      // Format: Spin Master → 'spin' (hidden); TOMY → user picks plush/injection
       const formatRow = document.getElementById('importFormatRow');
       const formatSel = document.getElementById('importFormatSelect');
-      formatSel.value = client === 'Spin Master' ? 'spin' : 'injection';
-      if (formatRow) formatRow.style.display = 'none';
+      if (client === 'Spin Master') {
+        formatSel.value = 'spin';
+        if (formatRow) formatRow.style.display = 'none';
+      } else {
+        formatSel.value = 'plush';
+        if (formatRow) formatRow.style.display = '';
+      }
 
       // File pick
       dropZone.onclick = () => fileInput.click();

@@ -776,9 +776,13 @@ async function exportSpinVersion(versionId) {
       wb.removeWorksheet(templateCharSheets[i].id);
     }
   } else {
-    // Single-product: fill first non-Summary sheet, remove the rest
+    // Single-product: fill first non-Summary sheet, rename to product name, remove the rest
     const charWs = templateCharSheets[0];
-    if (charWs) fillCharacterSheet(charWs, d);
+    if (charWs) {
+      const productName = (d.product?.item_desc || d.product?.item_no || 'Product').slice(0, 31);
+      charWs.name = productName;
+      fillCharacterSheet(charWs, d);
+    }
     for (let i = 1; i < templateCharSheets.length; i++) {
       wb.removeWorksheet(templateCharSheets[i].id);
     }

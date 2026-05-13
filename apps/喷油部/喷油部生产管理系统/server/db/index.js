@@ -19,6 +19,8 @@ addColumnIfMissing('dispatches', 'completed_at', 'DATETIME');
 addColumnIfMissing('order_schedule_lines', 'actual_capacity', 'INTEGER');
 db.exec(`UPDATE order_schedule_lines SET actual_capacity = daily_capacity WHERE actual_capacity IS NULL`);
 addColumnIfMissing('product_processes', 'default_line_id', 'INTEGER');
+addColumnIfMissing('order_schedule_lines', 'sort_order', 'INTEGER');
+db.exec(`UPDATE order_schedule_lines SET sort_order = id WHERE sort_order IS NULL`);
 
 const { seedLines, seedLineDefaults, seedWorkshops, seedLinesPerWorkshop } = require('./seed');
 seedWorkshops(db);

@@ -3,6 +3,8 @@ const path = require('path');
 const multer = require('multer');
 const db = require('../db');
 const { parsePDFOrder } = require('../services/pdf-order-parser');
+const { parseImageOrder } = require('../services/image-order-parser');
+const { calcPrices } = require('../lib/pricing');
 const router = express.Router();
 const upload = multer({ dest: path.join(__dirname, '..', 'uploads') });
 
@@ -11,6 +13,17 @@ function addDays(yyyymmdd, days) {
   const d = new Date(yyyymmdd + 'T00:00:00Z');
   d.setUTCDate(d.getUTCDate() + days);
   return d.toISOString().slice(0, 10);
+}
+
+function nextSortOrder(dbi, workshop_id) {
+  // 新行排到最末:取该车间下当前最大 sort_order + 1
+  const row = dbi.prepare(`
+    SELECT COALESCE(MAX(osl.sort_order), 0) AS m
+    FROM order_schedule_lines osl
+    JOIN production_orders po ON po.id = osl.order_id
+    WHERE po.workshop_id = ?
+  `).get(workshop_id);
+  return (row.m || 0) + 1;
 }
 
 function createOrder(dbi, { order_name, product_id, total_qty, start_date, remarks, workshop_id }) {
@@ -26,9 +39,10 @@ function createOrder(dbi, { order_name, product_id, total_qty, start_date, remar
     ).all(product_id);
     const insertLine = dbi.prepare(`
       INSERT INTO order_schedule_lines
-      (order_id, product_process_id, line_id, qty, daily_capacity, actual_capacity, est_days, start_date, end_date)
-      VALUES (?,?,?,?,?,?,?,?,?)
+      (order_id, product_process_id, line_id, qty, daily_capacity, actual_capacity, est_days, start_date, end_date, sort_order)
+      VALUES (?,?,?,?,?,?,?,?,?,?)
     `);
+    let sortOrder = nextSortOrder(dbi, workshop_id);
     for (const pp of procs) {
       // 优先用产品工序级记忆(上次为该具体工序选的拉),没有再用车间级默认映射
       let line_id = pp.default_line_id || null;
@@ -39,7 +53,7 @@ function createOrder(dbi, { order_name, product_id, total_qty, start_date, remar
       const capacity = pp.target_qty || 1;
       const est_days = ceilDiv(total_qty, capacity);
       const end_date = addDays(start_date, Math.max(est_days - 1, 0));
-      insertLine.run(oid, pp.id, line_id, total_qty, capacity, capacity, est_days, start_date, end_date);
+      insertLine.run(oid, pp.id, line_id, total_qty, capacity, capacity, est_days, start_date, end_date, sortOrder++);
     }
     return oid;
   })();
@@ -110,7 +124,7 @@ function updateScheduleLine(dbi, slId, patch) {
   }
 }
 
-function listActiveScheduleLines(dbi, date, workshop_id) {
+function listActiveScheduleLines(dbi, workshop_id) {
   return dbi.prepare(`
     SELECT
       osl.id AS schedule_line_id,
@@ -137,19 +151,18 @@ function listActiveScheduleLines(dbi, date, workshop_id) {
     JOIN product_processes pp ON pp.id = osl.product_process_id
     WHERE po.deleted = 0
       AND po.workshop_id = ?
-      AND osl.start_date <= ? AND osl.end_date >= ?
+      AND osl.started_at IS NOT NULL
       AND osl.completed_at IS NULL
-    ORDER BY po.id, pp.technique, osl.id
-  `).all(workshop_id, date, date);
+    ORDER BY osl.sort_order, osl.id
+  `).all(workshop_id);
 }
 
 router.get('/', (req, res) =>
   res.json(listOrders(db, { workshop_id: req.workshopId, month: req.query.month, q: req.query.q })));
 
 router.get('/active', (req, res) => {
-  const date = req.query.date;
-  if (!date) return res.status(400).json({ error: 'date required' });
-  res.json(listActiveScheduleLines(db, date, req.workshopId));
+  // 改:不再按日期过滤,只要「已排单 + 未完成」就返回,跨日存在
+  res.json(listActiveScheduleLines(db, req.workshopId));
 });
 
 router.get('/:id', (req, res) => {
@@ -169,6 +182,88 @@ router.post('/', (req, res) => {
   res.json({ id });
 });
 
+// 拿 parsed = {header, code, items:[{part_name,qty}]} 做款号/工序匹配 + alias 查找
+// 返回 preview 响应体(写不写 res 由调用者决定)
+function buildOrderPreview(parsed, workshopId) {
+  if (!parsed.code) return { status: 400, body: { error: '无法提取款号' } };
+
+  const codeVariants = [parsed.code, parsed.code.replace(/[-\s].*$/, '')];
+  let product = null;
+  for (const v of codeVariants) {
+    product = db.prepare('SELECT * FROM products WHERE code=? AND deleted=0 AND workshop_id=?')
+      .get(v, workshopId);
+    if (product) break;
+  }
+  if (!product) {
+    return {
+      status: 200,
+      body: {
+        header: parsed.header,
+        code: parsed.code,
+        items: parsed.items,
+        matched: false,
+        error: `核价表里没有款号 ${parsed.code}(去尾后试 ${codeVariants[1]} 也没有),请先去核价表新建产品`,
+      },
+    };
+  }
+
+  const processes = db.prepare(
+    'SELECT * FROM product_processes WHERE product_id=? AND deleted=0 ORDER BY id'
+  ).all(product.id);
+  const procById = new Map(processes.map(pp => [pp.id, pp]));
+
+  const aliasRows = db.prepare(
+    'SELECT pdf_part_name, product_process_id FROM pdf_part_alias WHERE product_id=? AND workshop_id=?'
+  ).all(product.id, workshopId);
+  const aliasMap = new Map();
+  for (const a of aliasRows) {
+    if (!aliasMap.has(a.pdf_part_name)) aliasMap.set(a.pdf_part_name, []);
+    aliasMap.get(a.pdf_part_name).push(a.product_process_id);
+  }
+
+  const normalize = s => String(s || '').replace(/\s|\(印喷件\)|（印喷件）/g, '').toLowerCase();
+  const matchedItems = parsed.items.map(it => {
+    let matched = [];
+    let from_alias = false;
+    const aliasIds = aliasMap.get(it.part_name);
+    if (aliasIds && aliasIds.length) {
+      matched = aliasIds.map(id => procById.get(id)).filter(Boolean);
+      from_alias = true;
+    } else {
+      const k = normalize(it.part_name);
+      matched = processes.filter(pp => {
+        const pk = normalize(pp.part_name);
+        return pk === k || pk.includes(k) || k.includes(pk);
+      });
+    }
+    return {
+      pdf_part_name: it.part_name,
+      pdf_qty: it.qty,
+      from_alias,
+      matched_processes: matched.map(pp => ({
+        id: pp.id, part_name: pp.part_name, technique: pp.technique,
+        target_qty: pp.target_qty, unit_wage: pp.unit_wage,
+      })),
+    };
+  });
+
+  return {
+    status: 200,
+    body: {
+      header: parsed.header,
+      code: parsed.code,
+      product: { id: product.id, code: product.code, name: product.name },
+      items: matchedItems,
+      matched: true,
+      unmatched_count: matchedItems.filter(x => x.matched_processes.length === 0).length,
+      all_processes: processes.map(pp => ({
+        id: pp.id, part_name: pp.part_name, technique: pp.technique,
+        target_qty: pp.target_qty, unit_wage: pp.unit_wage,
+      })),
+    },
+  };
+}
+
 // PDF 导入 - 预览(不写库,返回匹配结果让用户确认)
 router.post('/import-pdf', upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'file required' });
@@ -177,60 +272,26 @@ router.post('/import-pdf', upload.single('file'), async (req, res) => {
     const buf = fs.readFileSync(req.file.path);
     const parsed = await parsePDFOrder(buf);
     fs.unlinkSync(req.file.path);
-
-    if (!parsed.code) return res.status(400).json({ error: '无法从 PDF 提取款号' });
-
-    // 款号匹配:先按完整 code,然后剥后缀(去掉 -总MA 等)再匹配
-    const codeVariants = [parsed.code, parsed.code.replace(/[-\s].*$/, '')];
-    let product = null;
-    for (const v of codeVariants) {
-      product = db.prepare('SELECT * FROM products WHERE code=? AND deleted=0 AND workshop_id=?')
-        .get(v, req.workshopId);
-      if (product) break;
-    }
-
-    if (!product) {
-      return res.json({
-        header: parsed.header,
-        code: parsed.code,
-        items: parsed.items,
-        matched: false,
-        error: `核价表里没有款号 ${parsed.code}(去尾后试 ${codeVariants[1]} 也没有),请先去核价表新建产品`,
-      });
-    }
-
-    // 拿产品的所有工序
-    const processes = db.prepare(
-      'SELECT * FROM product_processes WHERE product_id=? AND deleted=0 ORDER BY id'
-    ).all(product.id);
-
-    // 模糊匹配:PDF 部位 ↔ 核价表 part_name
-    const normalize = s => String(s || '').replace(/\s|\(印喷件\)|（印喷件）/g, '').toLowerCase();
-    const matchedItems = parsed.items.map(it => {
-      const pdfKey = normalize(it.part_name);
-      const matched = processes.filter(pp => {
-        const pk = normalize(pp.part_name);
-        return pk === pdfKey || pk.includes(pdfKey) || pdfKey.includes(pk);
-      });
-      return {
-        pdf_part_name: it.part_name,
-        pdf_qty: it.qty,
-        matched_processes: matched.map(pp => ({
-          id: pp.id, part_name: pp.part_name, technique: pp.technique,
-          target_qty: pp.target_qty, unit_wage: pp.unit_wage,
-        })),
-      };
-    });
-
-    res.json({
-      header: parsed.header,
-      code: parsed.code,
-      product: { id: product.id, code: product.code, name: product.name },
-      items: matchedItems,
-      matched: true,
-      unmatched_count: matchedItems.filter(x => x.matched_processes.length === 0).length,
-    });
+    const { status, body } = buildOrderPreview(parsed, req.workshopId);
+    res.status(status).json(body);
   } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// 图片导入 - 用百炼视觉模型抽订单结构,然后走和 PDF 一样的匹配流程
+router.post('/import-image', upload.single('file'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'file required' });
+  const fs = require('fs');
+  try {
+    const buf = fs.readFileSync(req.file.path);
+    const mime = req.file.mimetype || 'image/jpeg';
+    const parsed = await parseImageOrder(buf, mime);
+    fs.unlinkSync(req.file.path);
+    const { status, body } = buildOrderPreview(parsed, req.workshopId);
+    res.status(status).json(body);
+  } catch (e) {
+    try { fs.unlinkSync(req.file.path); } catch (_) {}
     res.status(500).json({ error: e.message });
   }
 });
@@ -241,15 +302,16 @@ router.post('/import-pdf/confirm', (req, res) => {
   if (!product_id || !order_name || !start_date || !Array.isArray(items)) {
     return res.status(400).json({ error: 'product_id, order_name, start_date, items required' });
   }
-  // items: [{ product_process_id, qty }, ...] (可来自多 PDF 部位 × 多工序的展开)
-  // 注:total_qty 不再是单一值;我们按 items 里最大 qty 当 total_qty(只是展示用)
+  // items 形态:
+  //   { product_process_id, qty, pdf_part_name?, learn_alias? }  — 用已有工序;learn_alias=true 时把 pdf_part_name → product_process_id 存映射
+  //   { new_process: {part_name,technique,unit_wage,target_qty}, qty, pdf_part_name?, learn_alias? } — 新建工序,也可顺手记 alias
   const totalQty = Math.max(...items.map(i => Number(i.qty) || 0), 0);
   const product = db.prepare('SELECT id FROM products WHERE id=? AND deleted=0 AND workshop_id=?')
     .get(product_id, req.workshopId);
   if (!product) return res.status(404).json({ error: 'product not found' });
 
   try {
-    const oid = db.transaction(() => {
+    const result = db.transaction(() => {
       const { lastInsertRowid: oid } = db.prepare(
         'INSERT INTO production_orders(order_name, product_id, total_qty, start_date, remarks, workshop_id) VALUES (?,?,?,?,?,?)'
       ).run(order_name, product_id, totalQty, start_date, 'PDF 导入', req.workshopId);
@@ -258,15 +320,55 @@ router.post('/import-pdf/confirm', (req, res) => {
         'SELECT line_id FROM technique_line_defaults WHERE workshop_id=? AND technique=?'
       );
       const ppStmt = db.prepare('SELECT * FROM product_processes WHERE id=?');
+      const insertProc = db.prepare(`
+        INSERT INTO product_processes
+        (product_id,part_name,technique,target_qty,worker_count,unit_wage,calc_price,paint_price,total_price,remarks)
+        VALUES (?,?,?,?,?,?,?,?,?,?)
+      `);
       const insertLine = db.prepare(`
         INSERT INTO order_schedule_lines
-        (order_id, product_process_id, line_id, qty, daily_capacity, actual_capacity, est_days, start_date, end_date)
-        VALUES (?,?,?,?,?,?,?,?,?)
+        (order_id, product_process_id, line_id, qty, daily_capacity, actual_capacity, est_days, start_date, end_date, sort_order)
+        VALUES (?,?,?,?,?,?,?,?,?,?)
+      `);
+      let sortOrder = nextSortOrder(db, req.workshopId);
+      const insertAlias = db.prepare(`
+        INSERT OR IGNORE INTO pdf_part_alias
+        (product_id, pdf_part_name, product_process_id, workshop_id)
+        VALUES (?,?,?,?)
       `);
 
+      let createdProcCount = 0;
+      let learnedAliasCount = 0;
       for (const it of items) {
-        const pp = ppStmt.get(it.product_process_id);
+        let pp = null;
+        if (it.new_process && it.new_process.part_name && it.new_process.technique) {
+          const np = it.new_process;
+          const unit_wage = Number(np.unit_wage) || 0;
+          const target_qty = Number(np.target_qty) || 0;
+          const { calc_price, paint_price, total_price } = calcPrices({ unit_wage });
+          const { lastInsertRowid: ppId } = insertProc.run(
+            product_id,
+            String(np.part_name).trim(),
+            String(np.technique).trim(),
+            target_qty,
+            1,
+            unit_wage,
+            calc_price,
+            paint_price,
+            total_price,
+            ''
+          );
+          pp = ppStmt.get(ppId);
+          createdProcCount++;
+        } else if (it.product_process_id) {
+          pp = ppStmt.get(it.product_process_id);
+        }
         if (!pp) continue;
+        // 记 alias:前端传了 learn_alias 才记(避免把自动模糊匹配的也写进去)
+        if (it.learn_alias && it.pdf_part_name) {
+          const info = insertAlias.run(product_id, String(it.pdf_part_name).trim(), pp.id, req.workshopId);
+          if (info.changes) learnedAliasCount++;
+        }
         // 优先工序级记忆,再车间级默认
         let line_id = pp.default_line_id || null;
         if (!line_id) {
@@ -277,14 +379,69 @@ router.post('/import-pdf/confirm', (req, res) => {
         const capacity = pp.target_qty || 1;
         const est_days = ceilDiv(qty, capacity);
         const end_date = addDays(start_date, Math.max(est_days - 1, 0));
-        insertLine.run(oid, pp.id, line_id, qty, capacity, capacity, est_days, start_date, end_date);
+        insertLine.run(oid, pp.id, line_id, qty, capacity, capacity, est_days, start_date, end_date, sortOrder++);
       }
-      return oid;
+      return { oid, createdProcCount, learnedAliasCount };
     })();
-    res.json({ ok: true, order_id: oid });
+    res.json({
+      ok: true,
+      order_id: result.oid,
+      created_processes: result.createdProcCount,
+      learned_aliases: result.learnedAliasCount,
+    });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
+});
+
+// 平铺所有件:按 sort_order 排,可选月份/关键字过滤,这是新版主页要用的接口
+router.get('/schedule-lines/flat', (req, res) => {
+  const { month, q } = req.query;
+  const params = [req.workshopId];
+  let where = 'po.deleted=0 AND po.workshop_id=?';
+  if (month) { where += " AND strftime('%Y-%m', po.start_date) = ?"; params.push(month); }
+  if (q) {
+    where += ' AND (po.order_name LIKE ? OR p.code LIKE ? OR p.name LIKE ? OR pp.part_name LIKE ?)';
+    params.push(`%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`);
+  }
+  const rows = db.prepare(`
+    SELECT osl.id, osl.order_id, po.order_name, po.start_date AS order_start_date,
+           p.id AS product_id, p.code AS product_code, p.name AS product_name, p.quote_price,
+           osl.product_process_id, pp.part_name, pp.technique, pp.unit_wage,
+           osl.line_id, l.name AS line_name,
+           osl.qty, osl.daily_capacity,
+           COALESCE(osl.actual_capacity, osl.daily_capacity) AS actual_capacity,
+           osl.est_days, osl.start_date, osl.end_date,
+           osl.started_at, osl.completed_at, osl.sort_order,
+           (SELECT COALESCE(SUM(dr.produced_qty), 0)
+             FROM daily_records dr
+             WHERE dr.product_process_id = osl.product_process_id
+               AND dr.record_date >= osl.start_date
+               AND (osl.line_id IS NULL OR dr.line_id = osl.line_id)
+           ) AS produced_total
+    FROM order_schedule_lines osl
+    JOIN production_orders po ON po.id = osl.order_id
+    LEFT JOIN lines l ON l.id = osl.line_id
+    JOIN products p ON p.id = po.product_id
+    JOIN product_processes pp ON pp.id = osl.product_process_id
+    WHERE ${where}
+    ORDER BY osl.sort_order, osl.id
+  `).all(...params);
+  res.json(rows);
+});
+
+// 拖拽重排:前端传 {ids:[id1,id2,...]} 按数组顺序重写 sort_order
+router.put('/schedule-lines/reorder', (req, res) => {
+  const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(Number).filter(Boolean) : [];
+  if (!ids.length) return res.status(400).json({ error: 'ids required' });
+  const upd = db.prepare(`
+    UPDATE order_schedule_lines SET sort_order=?
+    WHERE id=? AND order_id IN (SELECT id FROM production_orders WHERE workshop_id=?)
+  `);
+  db.transaction(() => {
+    ids.forEach((id, i) => upd.run(i + 1, id, req.workshopId));
+  })();
+  res.json({ ok: true });
 });
 
 router.put('/:id/schedule-lines/:slId', (req, res) => {

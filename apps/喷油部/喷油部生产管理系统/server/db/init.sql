@@ -126,6 +126,19 @@ CREATE TABLE IF NOT EXISTS order_schedule_lines (
 );
 CREATE INDEX IF NOT EXISTS idx_schedule_order ON order_schedule_lines(order_id);
 
+CREATE TABLE IF NOT EXISTS pdf_part_alias (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  product_id INTEGER NOT NULL,
+  pdf_part_name TEXT NOT NULL,
+  product_process_id INTEGER NOT NULL,
+  workshop_id INTEGER NOT NULL DEFAULT 2,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(product_id, pdf_part_name, product_process_id),
+  FOREIGN KEY(product_id) REFERENCES products(id),
+  FOREIGN KEY(product_process_id) REFERENCES product_processes(id)
+);
+CREATE INDEX IF NOT EXISTS idx_pdf_alias_lookup ON pdf_part_alias(product_id, pdf_part_name);
+
 CREATE TABLE IF NOT EXISTS daily_records (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   record_date DATE NOT NULL,

@@ -1,0 +1,38 @@
+[
+  {
+    "id": "ht60v8y7bm",
+    "seq": "1",
+    "factory": "坤茂",
+    "item_code": "唱片机",
+    "mold": "MNVN-18M-01         透明包装盒",
+    "mold_sets": "2套透明盖",
+    "remark": ""
+  },
+  {
+    "id": "asidcnjvtw",
+    "seq": "2",
+    "factory": "合成",
+    "item_code": "唱片机",
+    "mold": "MNVN-18M-01         透明包装盒",
+    "mold_sets": "1套透明盖",
+    "remark": ""
+  },
+  {
+    "id": "t4cj74jgvs",
+    "seq": "3",
+    "factory": "俊豪",
+    "item_code": "唱片机",
+    "mold": "MNVN-18M-01         透明包装盒",
+    "mold_sets": "1套透明盖",
+    "remark": ""
+  },
+  {
+    "id": "pzomd1frb4",
+    "seq": "4",
+    "factory": "稳当",
+    "item_code": "大脑内外桶",
+    "mold": "RABTB-11M-01（热流道)  RABTB-12M-01 (热流道)",
+    "mold_sets": "外桶内桶各1套",
+    "remark": ""
+  }
+]

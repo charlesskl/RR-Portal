@@ -4,3 +4,4 @@ db/*.db-journal
 db/*.db-shm
 db/*.db-wal
 uploads/
+.env

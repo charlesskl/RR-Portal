@@ -291,7 +291,9 @@ services:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 10s
       timeout: 5s
-      retries: 3
+      # Excel 上传/解析最长 ~60s 会阻塞 event loop（即使有 yield，单 sheet 内 regex 仍较重）
+      # retries=10 ≈ 100s 容忍窗口，避免 autoheal 杀掉正在上传的容器
+      retries: 10
     mem_limit: 768m
     memswap_limit: 768m
     restart: unless-stopped

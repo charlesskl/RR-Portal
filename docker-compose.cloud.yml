@@ -259,6 +259,8 @@ services:
       - PORT=3100
       - DATA_PATH=/app/data
       - NODE_ENV=production
+      # 阿里云百炼 (DashScope/Qwen-VL) — AI 订单图片识别用；和 paiji 共用同一把 Bailian key
+      - DASHSCOPE_API_KEY=${PENYOU_BAILIAN_API_KEY:-}
     volumes:
       - ./apps/生产部/喷油部生产管理系统/data:/app/data
     healthcheck:

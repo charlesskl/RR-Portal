@@ -91,7 +91,12 @@ async function parsePricingSheet(filePath) {
     const fallbackCode = codeFromSheetName(sheet.name);
     const fallbackName = sheet.name.replace(/^[A-Za-z]?\d+[A-Za-z]?\d*\s*/, '').trim();
 
+    // 嵌套结构:同时有 cols.name(货名)+ cols.part_name(位置)+ cols.technique(工序),
+    // 此时「货名」列实为「款」(sub-product),需要拼到 part_name 前
+    const hasSubproduct = cols.name !== undefined && cols.part_name !== undefined && cols.technique !== undefined;
+
     let lastPartName = '';
+    let lastSubproduct = '';
 
     for (let r = headerRowIdx + 1; r <= sheet.rowCount; r++) {
       const row = sheet.getRow(r);
@@ -135,6 +140,19 @@ async function parsePricingSheet(filePath) {
       if (/^(合计|小计|总计)[\s:：]*$/.test(part_name)) continue;
       if (/^(货号|货名|位置|工序|工艺|目标数|人数|工价|核价|油漆价|总核价|报价|备注|图片)$/.test(part_name)) continue;
       lastPartName = part_name;
+
+      // 嵌套结构(货名+位置+工序):读 货名 列作 款,合并单元格则继承
+      if (hasSubproduct) {
+        const nameRaw = rowCellVal(row.getCell(cols.name + 1));
+        let sub = nameRaw ? String(nameRaw).trim() : '';
+        if (sub) lastSubproduct = sub;
+        else sub = lastSubproduct;
+        // 跳过把 货名 当 part_name 的伪行(没有真位置时,partRaw 等于 货名)
+        if (sub && part_name === sub) continue;
+        if (sub && !part_name.startsWith(sub + '·')) {
+          part_name = `${sub}·${part_name}`;
+        }
+      }
 
       const key = idPair.code;
       if (!productsMap.has(key)) {

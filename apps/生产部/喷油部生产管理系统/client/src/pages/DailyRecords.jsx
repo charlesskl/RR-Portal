@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { DatePicker, Select, InputNumber, Input, Button, Space, Card, Table, Popconfirm, message, Tabs, Modal } from 'antd';
-import { PlayCircleOutlined, CheckCircleOutlined, RedoOutlined, HistoryOutlined } from '@ant-design/icons';
+import { PlayCircleOutlined, CheckCircleOutlined, RedoOutlined, HistoryOutlined, DownloadOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import api from '../api';
 
@@ -317,6 +317,25 @@ export default function DailyRecords() {
     load();
   };
 
+  const onExport = async () => {
+    try {
+      const resp = await api.get('/daily-records/export', {
+        params: { date: dateStr },
+        responseType: 'blob',
+      });
+      const url = URL.createObjectURL(new Blob([resp.data]));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `daily_${dateStr}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      message.error('导出失败: ' + (e?.message || e));
+    }
+  };
+
   const openHistory = async (sl) => {
     const params = { product_process_id: sl.product_process_id };
     if (sl.line_id) params.line_id = sl.line_id;
@@ -348,6 +367,7 @@ export default function DailyRecords() {
           <Input.Search placeholder="搜索货号 / 货名" allowClear
             value={q} onChange={e => setQ(e.target.value)}
             style={{ width: 240 }} />
+          <Button icon={<DownloadOutlined />} onClick={onExport}>导出 Excel</Button>
         </Space>
         <Card size="small" styles={{ body: { padding: 8 } }}>
           今日排产 <b>{active.length}</b> 条 · 已录 <b>{recordCount}</b> 条 |

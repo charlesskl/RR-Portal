@@ -36,6 +36,11 @@ const ORDER_COLUMNS = [
 ];
 const ALLOWED_COLUMNS = new Set(ORDER_COLUMNS);
 
+// 单事务条数上限。better-sqlite3 是同步的，一次性 5000 条会卡 event loop。
+// 拆成小批后用 setImmediate 在批之间让出主线程，HTTP 仍能响应别的请求。
+const CHUNK_SIZE = 500;
+const yieldToEventLoop = () => new Promise(resolve => setImmediate(resolve));
+
 // GET /api/orders?workshop=A&status=active
 router.get('/', (req, res) => {
   const { workshop, status } = req.query;
@@ -113,23 +118,27 @@ router.put('/sheet-settings', (req, res) => {
 
 // POST /api/orders/batch-update — 批量更新多条订单字段，避免 syncFormats 一次过拆成 N 个 PUT 撞 nginx 限流
 // body: { updates: [{ id: 1, fields: { cell_format: '...', status: '...' } }, ...] }
-router.post('/batch-update', (req, res) => {
+router.post('/batch-update', async (req, res) => {
   const { updates } = req.body;
   if (!Array.isArray(updates)) return res.status(400).json({ message: 'updates must be array' });
   let n = 0;
-  const tx = db.transaction(() => {
-    for (const u of updates) {
-      if (!u || !u.id || !u.fields || typeof u.fields !== 'object') continue;
-      const keys = Object.keys(u.fields).filter(k => ALLOWED_COLUMNS.has(k));
-      if (keys.length === 0) continue;
-      const sets = keys.map(k => `${k} = ?`).join(', ');
-      const values = keys.map(k => u.fields[k]);
-      values.push(u.id);
-      db.prepare(`UPDATE orders SET ${sets}, updated_at = datetime('now') WHERE id = ?`).run(...values);
-      n++;
-    }
-  });
-  tx();
+  for (let i = 0; i < updates.length; i += CHUNK_SIZE) {
+    const chunk = updates.slice(i, i + CHUNK_SIZE);
+    const tx = db.transaction(() => {
+      for (const u of chunk) {
+        if (!u || !u.id || !u.fields || typeof u.fields !== 'object') continue;
+        const keys = Object.keys(u.fields).filter(k => ALLOWED_COLUMNS.has(k));
+        if (keys.length === 0) continue;
+        const sets = keys.map(k => `${k} = ?`).join(', ');
+        const values = keys.map(k => u.fields[k]);
+        values.push(u.id);
+        db.prepare(`UPDATE orders SET ${sets}, updated_at = datetime('now') WHERE id = ?`).run(...values);
+        n++;
+      }
+    });
+    tx();
+    if (i + CHUNK_SIZE < updates.length) await yieldToEventLoop();
+  }
   res.json({ success: true, updated: n });
 });
 
@@ -152,7 +161,7 @@ router.get('/:id', (req, res) => {
 });
 
 // POST /api/orders (single or batch)
-router.post('/', (req, res) => {
+router.post('/', async (req, res) => {
   const orders = Array.isArray(req.body) ? req.body : [req.body];
   const placeholders = ORDER_COLUMNS.map(() => '?').join(',');
   const stmt = db.prepare(`INSERT INTO orders (${ORDER_COLUMNS.join(',')}) VALUES (${placeholders})`);
@@ -170,26 +179,30 @@ router.post('/', (req, res) => {
     return set;
   }
 
-  const insertMany = db.transaction((list) => {
-    const ids = [];
-    let skipped = 0;
-    // 按车间缓存指纹集，单次导入只查一次 DB
-    const cache = {};
-    for (const o of list) {
-      if (o.workshop && o.contract && o.item_no) {
-        if (!cache[o.workshop]) cache[o.workshop] = loadExisting(o.workshop);
-        const fp = `${norm(o.contract)}|${norm(o.item_no)}|${norm(o.work_type)}`;
-        if (cache[o.workshop].has(fp)) { skipped++; continue; }
-        cache[o.workshop].add(fp);  // 防止本次批量内重复
-      }
-      const values = ORDER_COLUMNS.map(c => o[c] ?? null);
-      const info = stmt.run(...values);
-      ids.push(info.lastInsertRowid);
-    }
-    return { ids, skipped };
-  });
+  // 指纹缓存放到 chunk 循环外，保证整批导入只查一次现存数据 + 跨 chunk 自去重
+  const cache = {};
+  const ids = [];
+  let skipped = 0;
 
-  const { ids, skipped } = insertMany(orders);
+  for (let i = 0; i < orders.length; i += CHUNK_SIZE) {
+    const chunk = orders.slice(i, i + CHUNK_SIZE);
+    const tx = db.transaction(() => {
+      for (const o of chunk) {
+        if (o.workshop && o.contract && o.item_no) {
+          if (!cache[o.workshop]) cache[o.workshop] = loadExisting(o.workshop);
+          const fp = `${norm(o.contract)}|${norm(o.item_no)}|${norm(o.work_type)}`;
+          if (cache[o.workshop].has(fp)) { skipped++; continue; }
+          cache[o.workshop].add(fp);
+        }
+        const values = ORDER_COLUMNS.map(c => o[c] ?? null);
+        const info = stmt.run(...values);
+        ids.push(info.lastInsertRowid);
+      }
+    });
+    tx();
+    if (i + CHUNK_SIZE < orders.length) await yieldToEventLoop();
+  }
+
   res.json({ inserted: ids.length, skipped, ids });
 });
 
@@ -224,30 +237,39 @@ router.delete('/:id', (req, res) => {
 });
 
 // POST /api/orders/batch-status  { ids: [1,2,3], status: 'completed' }
-router.post('/batch-status', (req, res) => {
+router.post('/batch-status', async (req, res) => {
   const { ids, status } = req.body;
   if (!ids?.length || !['active', 'completed', 'cancelled'].includes(status)) {
     return res.status(400).json({ message: 'Invalid request' });
   }
-  const placeholders = ids.map(() => '?').join(',');
-  db.prepare(`UPDATE orders SET status = ?, updated_at = datetime('now') WHERE id IN (${placeholders})`).run(status, ...ids);
+  // SQLite IN(...) 默认 999 参数上限；按 CHUNK_SIZE 拆批顺便让出 event loop
+  for (let i = 0; i < ids.length; i += CHUNK_SIZE) {
+    const chunk = ids.slice(i, i + CHUNK_SIZE);
+    const placeholders = chunk.map(() => '?').join(',');
+    db.prepare(`UPDATE orders SET status = ?, updated_at = datetime('now') WHERE id IN (${placeholders})`).run(status, ...chunk);
+    if (i + CHUNK_SIZE < ids.length) await yieldToEventLoop();
+  }
   res.json({ success: true, updated: ids.length });
 });
 
 // POST /api/orders/batch-delete  { ids: [1,2,3] }
-router.post('/batch-delete', (req, res) => {
+router.post('/batch-delete', async (req, res) => {
   const { ids } = req.body;
   if (!ids?.length) {
     return res.status(400).json({ message: 'ids required' });
   }
-  const placeholders = ids.map(() => '?').join(',');
-  db.prepare(`DELETE FROM orders WHERE id IN (${placeholders})`).run(...ids);
+  for (let i = 0; i < ids.length; i += CHUNK_SIZE) {
+    const chunk = ids.slice(i, i + CHUNK_SIZE);
+    const placeholders = chunk.map(() => '?').join(',');
+    db.prepare(`DELETE FROM orders WHERE id IN (${placeholders})`).run(...chunk);
+    if (i + CHUNK_SIZE < ids.length) await yieldToEventLoop();
+  }
   res.json({ success: true, deleted: ids.length });
 });
 
 // POST /api/orders/auto-assign — 自动排拉
 // 规则：同货号放同一拉，各拉按总数量均衡分配，每拉内按走货期排序
-router.post('/auto-assign', (req, res) => {
+router.post('/auto-assign', async (req, res) => {
   const { workshop } = req.body;
   if (!workshop) return res.status(400).json({ message: 'workshop required' });
 
@@ -299,20 +321,27 @@ router.post('/auto-assign', (req, res) => {
   const updateStmt = db.prepare(
     'UPDATE orders SET line_name = ?, supervisor = ?, factory_area = ?, worker_count = ?, updated_at = datetime(\'now\') WHERE id = ?'
   );
-  const assignMany = db.transaction(() => {
-    for (const [line, groups] of Object.entries(lineAssign)) {
-      const allOrders = groups.flatMap(g => g.orders);
-      allOrders.sort((a, b) => {
-        const da = a.ship_date || '9999';
-        const db2 = b.ship_date || '9999';
-        return da.localeCompare(db2);
-      });
-      for (const order of allOrders) {
-        updateStmt.run(line, config.supervisor, config.factory_area, config.worker_count, order.id);
+  // 先在内存里收齐所有 (line, orderId) 对，再分批写库，避免一次大事务卡 event loop
+  const toAssign = [];
+  for (const [line, groups] of Object.entries(lineAssign)) {
+    const allOrders = groups.flatMap(g => g.orders);
+    allOrders.sort((a, b) => {
+      const da = a.ship_date || '9999';
+      const db2 = b.ship_date || '9999';
+      return da.localeCompare(db2);
+    });
+    for (const order of allOrders) toAssign.push([line, order.id]);
+  }
+  for (let i = 0; i < toAssign.length; i += CHUNK_SIZE) {
+    const chunk = toAssign.slice(i, i + CHUNK_SIZE);
+    const tx = db.transaction(() => {
+      for (const [line, orderId] of chunk) {
+        updateStmt.run(line, config.supervisor, config.factory_area, config.worker_count, orderId);
       }
-    }
-  });
-  assignMany();
+    });
+    tx();
+    if (i + CHUNK_SIZE < toAssign.length) await yieldToEventLoop();
+  }
 
   // 返回分配结果
   const result = {};

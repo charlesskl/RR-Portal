@@ -23,7 +23,8 @@ router.post('/', upload.array('files', 50), async (req, res) => {
   }
   const allResults = [];
   const errors = [];
-  for (const file of req.files) {
+  for (let i = 0; i < req.files.length; i++) {
+    const file = req.files[i];
     try {
       // 解码文件名（浏览器可能编码中文）
       let fileName = file.originalname;
@@ -44,6 +45,8 @@ router.post('/', upload.array('files', 50), async (req, res) => {
     } catch (err) {
       errors.push({ file: file.originalname, error: err.message });
     }
+    // 多文件上传时，每个文件之间让出主线程，让 healthcheck / 别的请求能跑
+    if (i + 1 < req.files.length) await new Promise(resolve => setImmediate(resolve));
   }
   res.json({
     total: allResults.length,

@@ -331,7 +331,8 @@ async function parseExcelWithColors(fileBuffer, fileName) {
   }
 
   // 逐个 sheet 解析
-  for (const sheet of sheets) {
+  for (let sheetIdx = 0; sheetIdx < sheets.length; sheetIdx++) {
+    const sheet = sheets[sheetIdx];
     const target = rels[sheet.rId];
     if (!target) continue;
     const sheetPath = 'xl/' + target.replace(/^\//, '');
@@ -339,6 +340,8 @@ async function parseExcelWithColors(fileBuffer, fileName) {
     if (!sheetFile) continue;
 
     const sheetXml = await sheetFile.async('string');
+    // 每个 sheet 之前让出 event loop，避免多 sheet 大文件把主线程卡住
+    if (sheetIdx > 0) await new Promise(resolve => setImmediate(resolve));
     const { headerData, coloredRows } = parseSheetData(sheetXml, styleColorMap, sharedStrings);
 
     if (coloredRows.length === 0) continue;

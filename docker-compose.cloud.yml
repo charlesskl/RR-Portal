@@ -295,6 +295,8 @@ services:
     mem_limit: 768m
     memswap_limit: 768m
     restart: unless-stopped
+    labels:
+      - "autoheal=true"
     logging:
       driver: json-file
       options:
@@ -302,6 +304,24 @@ services:
         max-file: "3"
     networks:
       - platform-net
+
+  # 监控所有带 label=autoheal=true 的容器，连续 unhealthy 时自动 restart
+  # 避免再发生「node 进程未退出但事件循环卡死」这种 unless-stopped 接不住的场景
+  autoheal:
+    image: willfarrell/autoheal:1.2.0
+    restart: always
+    environment:
+      - AUTOHEAL_CONTAINER_LABEL=autoheal
+      - AUTOHEAL_INTERVAL=30
+      - AUTOHEAL_START_PERIOD=60
+      - CURL_TIMEOUT=30
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
 
   zuru-master-schedule:
     build:

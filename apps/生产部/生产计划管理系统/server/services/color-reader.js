@@ -143,13 +143,18 @@ function colLetterToIndex(letters) {
 /**
  * 从 sheet XML 中提取行数据和颜色
  * 只解析有颜色的行 + 第一行(表头)
+ * async — 每 500 行 yield 一次 event loop，让 /health 等请求能跑（防 autoheal 误杀）
  */
-function parseSheetData(sheetXml, styleColorMap, sharedStrings) {
+async function parseSheetData(sheetXml, styleColorMap, sharedStrings) {
   const rows = sheetXml.match(/<row[^>]*>[\s\S]*?<\/row>/g) || [];
   const headerCandidates = []; // { rowNum, cellData, score }
   const coloredRows = []; // { rowNum, color, cells: {colIndex: value} }
 
-  for (const row of rows) {
+  for (let rowIdx = 0; rowIdx < rows.length; rowIdx++) {
+    if (rowIdx > 0 && rowIdx % 500 === 0) {
+      await new Promise(resolve => setImmediate(resolve));
+    }
+    const row = rows[rowIdx];
     const rowNumMatch = row.match(/r="(\d+)"/);
     if (!rowNumMatch) continue;
     const rowNum = parseInt(rowNumMatch[1]);
@@ -342,7 +347,7 @@ async function parseExcelWithColors(fileBuffer, fileName) {
     const sheetXml = await sheetFile.async('string');
     // 每个 sheet 之前让出 event loop，避免多 sheet 大文件把主线程卡住
     if (sheetIdx > 0) await new Promise(resolve => setImmediate(resolve));
-    const { headerData, coloredRows } = parseSheetData(sheetXml, styleColorMap, sharedStrings);
+    const { headerData, coloredRows } = await parseSheetData(sheetXml, styleColorMap, sharedStrings);
 
     if (coloredRows.length === 0) continue;
 

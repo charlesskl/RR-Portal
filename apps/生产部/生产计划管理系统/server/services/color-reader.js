@@ -141,62 +141,113 @@ function colLetterToIndex(letters) {
 }
 
 /**
- * 从 sheet XML 中提取行数据和颜色
- * 只解析有颜色的行 + 第一行(表头)
+ * 从 sheet XML 中提取行数据和颜色（优化版：快速跳过无颜色无表头的行）
  * async — 每 500 行 yield 一次 event loop，让 /health 等请求能跑（防 autoheal 误杀）
  */
 async function parseSheetData(sheetXml, styleColorMap, sharedStrings) {
-  const rows = sheetXml.match(/<row[^>]*>[\s\S]*?<\/row>/g) || [];
   const headerCandidates = []; // { rowNum, cellData, score }
   const coloredRows = []; // { rowNum, color, cells: {colIndex: value} }
 
-  for (let rowIdx = 0; rowIdx < rows.length; rowIdx++) {
+  // 预先把样式映射按颜色类型分组（用于快速检测）
+  const yellowStyleIds = new Set();
+  const blueStyleIds = new Set();
+  for (const [sId, color] of Object.entries(styleColorMap)) {
+    if (isYellowColor(color)) yellowStyleIds.add(sId);
+    else if (isBlueColor(color)) blueStyleIds.add(sId);
+  }
+
+  // 用索引手动遍历，避免大正则的回溯开销
+  let pos = 0;
+  let rowIdx = 0;
+  while (true) {
     if (rowIdx > 0 && rowIdx % 500 === 0) {
       await new Promise(resolve => setImmediate(resolve));
     }
-    const row = rows[rowIdx];
-    const rowNumMatch = row.match(/r="(\d+)"/);
+    rowIdx++;
+    const rowStart = sheetXml.indexOf('<row ', pos);
+    if (rowStart === -1) break;
+    const tagEnd = sheetXml.indexOf('>', rowStart);
+    if (tagEnd === -1) break;
+    // 查找 </row>
+    const rowEnd = sheetXml.indexOf('</row>', tagEnd);
+    if (rowEnd === -1) break;
+    const rowOpenTag = sheetXml.substring(rowStart, tagEnd + 1);
+    const row = sheetXml.substring(rowStart, rowEnd + 6);
+    pos = rowEnd + 6;
+
+    const rowNumMatch = rowOpenTag.match(/ r="(\d+)"/);
     if (!rowNumMatch) continue;
     const rowNum = parseInt(rowNumMatch[1]);
+    const isHeaderRow = rowNum <= 6;
 
-    // 检测行颜色 — 需要前10列中至少3个单元格是同一颜色才算整行涂色
-    let rowColor = null;
-    const cells = row.match(/<c[^>]*(?:\/>|>[\s\S]*?<\/c>)/g) || [];
+    // 快速跳过：非表头行 + 不含任何颜色样式 ID 的行
+    if (!isHeaderRow) {
+      // 检查是否包含任何 colored style id
+      let hasColor = false;
+      // 用简单 indexOf 快速检测
+      for (const sId of yellowStyleIds) {
+        if (row.indexOf(`s="${sId}"`) !== -1) { hasColor = true; break; }
+      }
+      if (!hasColor) {
+        for (const sId of blueStyleIds) {
+          if (row.indexOf(`s="${sId}"`) !== -1) { hasColor = true; break; }
+        }
+      }
+      if (!hasColor) continue;
+    }
+
+    // 用 indexOf 手动遍历单元格（避免正则回溯）
+    const cells = [];
+    let cp = 0;
+    while (true) {
+      const cs = row.indexOf('<c ', cp);
+      if (cs === -1) break;
+      // 找到属性区结束（`/>` 或 `>`）
+      const gtIdx = row.indexOf('>', cs);
+      if (gtIdx === -1) break;
+      if (row[gtIdx - 1] === '/') {
+        // 自闭合，无内容
+        cells.push(row.substring(cs, gtIdx + 1));
+        cp = gtIdx + 1;
+      } else {
+        const ce = row.indexOf('</c>', gtIdx);
+        if (ce === -1) break;
+        cells.push(row.substring(cs, ce + 4));
+        cp = ce + 4;
+      }
+    }
+
     let yellowCount = 0;
     let blueCount = 0;
+    let rowColor = null;
 
     for (const cell of cells) {
-      // 只检查前10列
       const refMatch = cell.match(/r="([A-Z]+)\d+"/);
       if (refMatch && colLetterToIndex(refMatch[1]) >= 10) continue;
-
       const sMatch = cell.match(/ s="(\d+)"/);
       if (sMatch) {
-        const color = styleColorMap[parseInt(sMatch[1])];
-        if (color) {
-          if (isYellowColor(color)) yellowCount++;
-          else if (isBlueColor(color)) blueCount++;
-        }
+        if (yellowStyleIds.has(sMatch[1])) yellowCount++;
+        else if (blueStyleIds.has(sMatch[1])) blueCount++;
       }
     }
     if (yellowCount >= 3) rowColor = 'yellow';
     else if (blueCount >= 3) rowColor = 'blue';
 
-    // 只处理表头候选行(前5行)和有颜色的行
-    if (rowNum > 5 && !rowColor) continue;
+    if (!isHeaderRow && !rowColor) continue;
 
     const cellData = {};
     for (const cell of cells) {
       const refMatch = cell.match(/r="([A-Z]+)(\d+)"/);
       if (!refMatch) continue;
       const colIdx = colLetterToIndex(refMatch[1]);
+      // 自闭合单元格无值
+      if (cell.endsWith('/>')) continue;
       const typeMatch = cell.match(/ t="([^"]+)"/);
       const valMatch = cell.match(/<v>([^<]*)<\/v>/);
 
       let value = '';
       if (valMatch) {
         if (typeMatch && typeMatch[1] === 's') {
-          // 共享字符串
           const ssIdx = parseInt(valMatch[1]);
           value = sharedStrings[ssIdx] || '';
         } else if (typeMatch && typeMatch[1] === 'inlineStr') {
@@ -206,7 +257,6 @@ async function parseSheetData(sheetXml, styleColorMap, sharedStrings) {
           value = valMatch[1];
         }
       } else {
-        // inline string without <v>
         const isMatch = cell.match(/<is>\s*<t[^>]*>([^<]*)<\/t>\s*<\/is>/);
         if (isMatch) value = isMatch[1];
       }
@@ -214,7 +264,7 @@ async function parseSheetData(sheetXml, styleColorMap, sharedStrings) {
       cellData[colIdx] = value;
     }
 
-    if (rowNum <= 6) {
+    if (isHeaderRow) {
       // 收集表头候选行：前10列中有多个短中文值（连续的、非括号开头的）
       const frontCols = Object.entries(cellData).filter(([k]) => parseInt(k) < 10);
       const headerLikeCols = frontCols.filter(([, v]) =>

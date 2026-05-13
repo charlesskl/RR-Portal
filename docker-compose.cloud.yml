@@ -17,6 +17,7 @@ services:
       - ./nginx/.htpasswd:/etc/nginx/.htpasswd:ro
       - ./frontend/index.cloud.html:/usr/share/nginx/html/index.html:ro
       - ./frontend/logo.png:/usr/share/nginx/html/logo.png:ro
+      - ./frontend/favicon.png:/usr/share/nginx/html/favicon.png:ro
       # Uncomment for HTTPS after running setup-ssl.sh:
       # - ./ssl:/etc/nginx/ssl:ro
     depends_on:

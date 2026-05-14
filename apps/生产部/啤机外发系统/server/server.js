@@ -25,9 +25,9 @@ for (const f of [ORDERS_FILE, SUPPLIERS_FILE, PC_FILE]) {
 }
 if (!fs.existsSync(MOLD_MAP_FILE)) fs.writeFileSync(MOLD_MAP_FILE, '{}', 'utf8');
 
-const readJson = (f) => JSON.parse(fs.readFileSync(f, 'utf8') || '[]');
+const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8') || '[]'); } catch(e) { console.error('readJson failed:', f, e); return []; } };
 const writeJson = (f, data) => fs.writeFileSync(f, JSON.stringify(data, null, 2), 'utf8');
-const readObj = (f) => JSON.parse(fs.readFileSync(f, 'utf8') || '{}');
+const readObj = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8') || '{}'); } catch(e) { console.error('readObj failed:', f, e); return {}; } };
 
 const round2 = (n) => (typeof n === 'number' && isFinite(n)) ? Math.round(n * 100) / 100 : null;
 

@@ -2,7 +2,7 @@
 // Uses pdfjs-dist for positional text extraction (x/y per fragment).
 
 const { PDFParse } = require('pdf-parse');
-const pdfjsLib = require('pdfjs-dist/legacy/build/pdf.mjs');
+const pdfjsLib = require('pdfjs-dist/build/pdf.mjs');
 
 // ---------- helpers ----------
 function pad2(n) { return String(n).padStart(2, '0'); }

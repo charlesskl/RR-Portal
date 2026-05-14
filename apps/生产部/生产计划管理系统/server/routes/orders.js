@@ -134,30 +134,27 @@ router.post('/', (req, res) => {
   const placeholders = ORDER_COLUMNS.map(() => '?').join(',');
   const stmt = db.prepare(`INSERT INTO orders (${ORDER_COLUMNS.join(',')}) VALUES (${placeholders})`);
 
-  // 归一化函数：去空格、转大写
+  // 归一化：去空格大小写统一
   const norm = (v) => v == null ? '' : String(v).replace(/\s+/g, '').toUpperCase();
 
-  // 一次性加载该车间所有现存订单的 (contract|item_no|work_type) 做指纹
-  function loadExisting(workshop) {
+  // 预先加载该车间所有指纹做去重（合同+货号+做工 → 半成品/成品视为不同订单）
+  function loadFingerprints(workshop) {
     const rows = db.prepare('SELECT contract, item_no, work_type FROM orders WHERE workshop = ?').all(workshop);
     const set = new Set();
-    for (const r of rows) {
-      set.add(`${norm(r.contract)}|${norm(r.item_no)}|${norm(r.work_type)}`);
-    }
+    for (const r of rows) set.add(`${norm(r.contract)}|${norm(r.item_no)}|${norm(r.work_type)}`);
     return set;
   }
 
   const insertMany = db.transaction((list) => {
     const ids = [];
     let skipped = 0;
-    // 按车间缓存指纹集
     const cache = {};
     for (const o of list) {
       if (o.workshop && o.contract && o.item_no) {
-        if (!cache[o.workshop]) cache[o.workshop] = loadExisting(o.workshop);
+        if (!cache[o.workshop]) cache[o.workshop] = loadFingerprints(o.workshop);
         const fp = `${norm(o.contract)}|${norm(o.item_no)}|${norm(o.work_type)}`;
         if (cache[o.workshop].has(fp)) { skipped++; continue; }
-        cache[o.workshop].add(fp);  // 防止本次批量内重复
+        cache[o.workshop].add(fp); // 本批次内也去重
       }
       const values = ORDER_COLUMNS.map(c => o[c] ?? null);
       const info = stmt.run(...values);

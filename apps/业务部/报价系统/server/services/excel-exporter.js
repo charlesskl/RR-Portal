@@ -47,8 +47,11 @@ function loadData(versionId) {
 
 // Bilingual name: "English 中文" when eng_name exists, otherwise just Chinese
 function biName(zh, eng) {
-  if (eng && eng.trim()) return `${eng.trim()} ${zh || ''}`;
-  return zh || '';
+  const z = (zh || '').trim();
+  const e = (eng || '').trim();
+  if (!e) return z;
+  if (!z || z === e || z.includes(e) || e.includes(z)) return e || z;
+  return `${e} ${z}`;
 }
 
 // Round a numeric value to 2 decimal places (for monetary amounts)
@@ -85,7 +88,7 @@ function fillVQ(ws, d) {
 
   // ── Header (rows 2–5) ──────────────────────────────────────────────────────
   setVal(ws, 2, 3, 'ROYAL REGENT PRODUCTS (H.K.) LIMITED');
-  setVal(ws, 2, 8, version.prepared_by || '');
+  setVal(ws, 2, 8, version.prepared_by || (product?.client === 'TOMY' ? 'Michelle' : ''));
   setVal(ws, 3, 3, product?.item_no || '');
   setVal(ws, 3, 8, new Date());
   setVal(ws, 4, 3, product?.item_desc || '');
@@ -141,10 +144,14 @@ function fillVQ(ws, d) {
   const ACC_ROW    = PKG_END - 2; // row 33
   const LABOUR_ROW = PKG_END - 1; // row 34
 
+  const PKG_FONT = { size: 12, name: 'Arial', charset: 134 };
   function writePkgRow(r, item) {
     setVal(ws, r, 1, item.pm_no || '');
     setVal(ws, r, 2, biName(item.name, item.eng_name));
     setVal(ws, r, 3, item.remark || '');
+    for (const c of [1, 2, 3, 5, 6, 7, 8]) {
+      ws.getCell(r, c).font = PKG_FONT;
+    }
     setVal(ws, r, 5, item.moq != null ? item.moq : null);
     setVal(ws, r, 6, item.quantity || 1);
     setVal(ws, r, 7, r2(item.new_price) || 0);
@@ -207,8 +214,8 @@ function fillVQ(ws, d) {
   // ── Vendor Cost Summary (rows 68–75): fix lost formulas ───────────────────
   // Row 68 (5K):  HKD = $I$17+$I$36+$I$44+$I$52+F59  (base + transport)
   // Row 70 (10K): HKD = F68*0.995
-  // Row 72 (15K): HKD = F70*0.995
-  // Row 74 (20K): HKD = F72*0.995
+  // Row 72 (15K): HKD = F68*0.99
+  // Row 74 (20K): HKD = F68*0.985
   // USD rows = ROUND(HKD/7.76, 3)
   const hkdUsdRate = 7.76;
   const colLetters = { 6: 'F', 7: 'G', 8: 'H' };
@@ -236,8 +243,8 @@ function fillVQ(ws, d) {
       if (idx === 0) {
         hCell.value = moq ? { formula: `$I$17+$I$36+$I$44+$I$52+${L}59`, result: 0 } : null;
       } else {
-        const prevHkdRow = summaryHkdRows[idx - 1];
-        hCell.value = moq ? { formula: `${L}${prevHkdRow}*0.995`, result: 0 } : null;
+        const mult = (1 - 0.005 * idx).toFixed(3);
+        hCell.value = moq ? { formula: `${L}68*${mult}`, result: 0 } : null;
       }
       const uCell = ws.getCell(hkdRow + 1, col);
       delete uCell._sharedFormula;
@@ -259,11 +266,11 @@ function fillBCD(ws, d) {
           paintingDetail, materialPrices, rawMaterials, bodyAccessories, sewingItems, sewingLaborItems, assemblyLaborItems, rotocastItems } = d;
 
   // ── Header (row 7) ─────────────────────────────────────────────────────────
-  setVal(ws, 7, 1, version.body_no || '');
+  setVal(ws, 7, 1, version.body_no || (product?.item_no ? product.item_no + '-00' : ''));
   setVal(ws, 7, 2, product?.item_desc || '');
   setVal(ws, 7, 3, version.body_cost_revision || '');
   setVal(ws, 7, 4, 'ROYAL REGENT PRODUCTS (H.K.) LIMITED');
-  setVal(ws, 7, 6, version.prepared_by || '');
+  setVal(ws, 7, 6, version.prepared_by || (product?.client === 'TOMY' ? 'Michelle' : ''));
   setVal(ws, 7, 8, new Date());
 
   // ── Summary section markup % (rows 14–22, col E) ──────────────────────────
@@ -959,7 +966,7 @@ function fillSpinCharSheet(ws, d, subProduct) {
   // ── Header ──
   setVal(ws, 5, 3, product?.item_no || '');
   setVal(ws, 7, 3, product?.item_desc || '');
-  setVal(ws, 3, 14, version.prepared_by || '');
+  setVal(ws, 3, 14, version.prepared_by || (product?.client === 'TOMY' ? 'Michelle' : ''));
   setVal(ws, 5, 14, version.quote_date || new Date());
 
   // Filter data by sub_product if applicable
@@ -1109,7 +1116,7 @@ function fillSpinSummary(ws, d) {
   // Header
   setVal(ws, 6, 3, product?.item_no || '');
   setVal(ws, 8, 3, product?.item_desc || '');
-  setVal(ws, 4, 14, version.prepared_by || '');
+  setVal(ws, 4, 14, version.prepared_by || (product?.client === 'TOMY' ? 'Michelle' : ''));
   setVal(ws, 8, 14, version.quote_date || new Date());
 }
 
@@ -1124,9 +1131,7 @@ async function exportVersion(versionId) {
   // Force Excel to recalculate all formulas on open
   wb.calcProperties = { fullCalcOnLoad: true };
 
-  // Remove all images and external references from template
-  wb.worksheets.forEach(ws => { if (ws._media) ws._media = []; });
-  if (wb.media) wb.media = [];
+  // Remove only external references (keep template images like TAKARA TOMY logo)
   if (wb._definedNames) {
     wb._definedNames.model = (wb._definedNames.model || []).filter(d => !d.ranges?.some(r => /\[/.test(r)));
   }

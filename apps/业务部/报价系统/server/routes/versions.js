@@ -500,7 +500,8 @@ router.post('/:id/translate-all', async (req, res) => {
     // 用阿里云百炼（Bailian）OpenAI 兼容端点 + Qwen 文本模型做翻译。
     // API key 由 docker-compose 注入（BAOJIA_BAILIAN_API_KEY → 容器内 BAILIAN_API_KEY），
     // 与 paiji / peise 共用同一把 key 的 per-app 前缀惯例。
-    async function bailianTranslate(text) {
+    // 注: PR #97 / #108 两次 sync 把这块退回成百度 API,但 ECS 从未配过 BAIDU 凭据,导致翻译静默失败。
+    async function translate(text) {
       const apiKey = process.env.BAILIAN_API_KEY;
       if (!apiKey) throw new Error('BAILIAN_API_KEY 未配置');
       const baseUrl = (process.env.BAILIAN_BASE_URL || 'https://dashscope.aliyuncs.com/compatible-mode/v1').replace(/\/$/, '');
@@ -577,7 +578,7 @@ router.post('/:id/translate-all', async (req, res) => {
         }
         try {
           if (cache[text] === undefined) {
-            cache[text] = await bailianTranslate(text);
+            cache[text] = await translate(text);
           }
           update.run(cache[text], row.id);
           total++;

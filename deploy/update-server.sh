@@ -199,18 +199,34 @@ if [[ "$NONRUNTIME_ONLY" -eq 1 ]] && [[ "${#AFFECTED_SERVICES[@]}" -eq 0 ]]; the
   exit 0
 fi
 
-# ─── Step 4: 确保 data 目录存在 ───
+# ─── Step 4: 确保 data 目录存在 + 权限 ───
+# Host 端 bind-mount 目录会覆盖镜像内的 chown。多数 app 用 non-root 用户（uid 100），
+# 如果 host dir 是 git 创建的 root:root 755，容器内 appuser 写不进去 → SQLite 崩、上传崩。
+# 沿用 paiji 一贯的 777 惯例。idempotent — 已是 777 就不再 chmod。
+# 见 CLAUDE.md Learnings (PR #63 / #100 都因为这个崩过)。
 save_state "directories"
-echo "[4/6] Ensuring data directories..."
+echo "[4/6] Ensuring data/uploads directories + perms..."
 python3 -c "
-import re, os
+import re, os, stat, sys
 with open('${COMPOSE_FILE}') as f:
     content = f.read()
 for match in re.findall(r'^\s*-\s+\./([^:]+):', content, re.MULTILINE):
     path = match.strip()
-    if any(seg in path for seg in ['data', 'uploads', 'instance']):
-        os.makedirs(path, exist_ok=True)
-" 2>/dev/null || true
+    if not any(seg in path for seg in ['data', 'uploads', 'instance']):
+        continue
+    os.makedirs(path, exist_ok=True)
+    # 只 chmod apps/ 下的 bind-mount。data/postgres 等基础设施 dir 跳过：
+    # postgres 启动要求 data dir 是 700/750，给 777 会被拒绝。
+    if not path.startswith('apps/'):
+        continue
+    try:
+        cur = stat.S_IMODE(os.stat(path).st_mode)
+        if cur != 0o777:
+            os.chmod(path, 0o777)
+            print(f'  [chmod 777] {path} (was {oct(cur)})')
+    except OSError as e:
+        print(f'  [WARN] chmod {path}: {e}', file=sys.stderr)
+" || true
 
 # ─── Step 5: 备份数据库（只在影响 db 或全量时）───
 if [[ "$COMPOSE_CHANGED" -eq 1 ]] || [[ " ${AFFECTED_SERVICES[*]} " =~ " core " ]] || [[ "$DB_INIT_CHANGED" -eq 1 ]]; then

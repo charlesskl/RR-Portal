@@ -17,7 +17,7 @@ RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 WORKDIR /app
 
 COPY server/package.json server/
-RUN cd server && npm ci --omit=dev
+RUN cd server && npm install --omit=dev
 
 COPY server/ /app/server/
 COPY --from=frontend-build /build/client/dist /app/client/dist

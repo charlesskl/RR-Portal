@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { api } from '../api.js';
+import { api, BASE } from '../api.js';
 import Modal from '../components/Modal.jsx';
 
 const EMPTY = {
@@ -80,12 +80,12 @@ export default function OrdersPage() {
   };
 
   const exportAllExcel = () => {
-    window.location.href = '/api/orders/export.xlsx';
+    window.location.href = BASE + '/api/orders/export.xlsx';
   };
 
   const exportFilteredExcel = async () => {
     if (filtered.length === 0) { alert('当前筛选结果为空'); return; }
-    const resp = await fetch('/api/orders/export.xlsx', {
+    const resp = await fetch(BASE + '/api/orders/export.xlsx', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ rows: filtered }),

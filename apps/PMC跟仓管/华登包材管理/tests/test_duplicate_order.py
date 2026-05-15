@@ -200,3 +200,47 @@ def test_entry_empty_order_no_skips_dedup_and_inserts(client):
     # 不应有 dup_warning
     with client.session_transaction() as s:
         assert 'dup_warning' not in s
+
+
+def test_party_page_renders_dup_warning_in_matching_panel(client):
+    """触发 dup 后再 GET /party/hd,应该看到警告横幅 + 回填的 order_no + confirm_dup hidden。"""
+    import app as app_module
+    con = sqlite3.connect(app_module.DATABASE)
+    _insert(con, recorded_by='hd', from_party='hd', to_party='xx', order_no='RENDER-1')
+    con.close()
+
+    _login(client, 'hd')
+    # 触发 dup
+    client.post('/party/hd/entry', data={
+        'direction': 'sent', 'counterparty': 'xx',
+        'date': '2026-05-06', 'order_no': 'RENDER-1', 'jx_qty': '4',
+    }, follow_redirects=False)
+
+    # GET party 页面
+    rv = client.get('/party/hd')
+    assert rv.status_code == 200
+    html = rv.data.decode('utf-8')
+    # 警告横幅
+    assert '订单号 RENDER-1 已在你的台账里出现过' in html
+    # 回填的 order_no
+    assert 'value="RENDER-1"' in html
+    # confirm_dup hidden field 出现
+    assert 'name="confirm_dup"' in html
+    assert 'value="1"' in html
+
+
+def test_party_page_clears_dup_warning_after_render(client):
+    """渲染过一次,session 中 dup_warning 应已被 pop;再 GET 不再显示。"""
+    import app as app_module
+    con = sqlite3.connect(app_module.DATABASE)
+    _insert(con, recorded_by='hd', from_party='hd', to_party='xx', order_no='ONCE-1')
+    con.close()
+
+    _login(client, 'hd')
+    client.post('/party/hd/entry', data={
+        'direction': 'sent', 'counterparty': 'xx',
+        'date': '2026-05-07', 'order_no': 'ONCE-1', 'jx_qty': '2',
+    }, follow_redirects=False)
+    client.get('/party/hd')  # 第一次 GET,看到警告
+    rv2 = client.get('/party/hd')  # 第二次 GET,不应再看到
+    assert '订单号 ONCE-1 已在你的台账里出现过' not in rv2.data.decode('utf-8')

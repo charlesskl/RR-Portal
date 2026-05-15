@@ -555,6 +555,35 @@ def party_logout(party):
     return redirect(url_for('index'))
 
 
+def _find_duplicate_order(con, *, order_no, party, cp):
+    """查 party 自己在 party↔cp 对里、order_no 完全相等的已存在记录。
+
+    Args:
+        con: 已打开的 sqlite3.Connection。
+        order_no: 待检查的订单号 (会先 strip)。
+        party: 当前登录方 (recorded_by 必须匹配)。
+        cp: 对方 party。
+
+    Returns:
+        list[dict]: 命中记录的 (id, date, from_party, to_party, order_no);
+                    空字符串/纯空白/None 直接返回 []。
+    """
+    order_no = (order_no or '').strip()
+    if not order_no:
+        return []
+    rows = con.execute("""
+        SELECT id, date, from_party, to_party, order_no
+        FROM flow_records
+        WHERE order_no = ?
+          AND recorded_by = ?
+          AND ((from_party = ? AND to_party = ?) OR (from_party = ? AND to_party = ?))
+        ORDER BY id
+    """, (order_no, party, party, cp, cp, party)).fetchall()
+    # con.row_factory 可能未设,显式构 dict
+    cols = ('id', 'date', 'from_party', 'to_party', 'order_no')
+    return [dict(zip(cols, r)) for r in rows]
+
+
 @app.route('/party/<party>')
 @party_required
 def party_page(party):

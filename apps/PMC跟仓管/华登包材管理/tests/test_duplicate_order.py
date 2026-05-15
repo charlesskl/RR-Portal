@@ -260,8 +260,8 @@ def test_party_page_includes_tab_switch_js_when_warning(client):
     }, follow_redirects=False)
     rv = client.get('/party/hd')
     html = rv.data.decode('utf-8')
-    # JS 里有正确的 direction 和 cp 字符串
-    assert '"received"' in html
-    assert '"xx"' in html
-    # 包含 switchTab 调用
-    assert 'switchTab' in html
+    # 必须有 dup-warning IIFE 注释 (区分 form 里 hidden value="received" 的误报)
+    assert 'dup warning 自动切到对应 tab' in html
+    # IIFE 里 JSON-encoded direction/cp 字面量
+    assert 'const direction = "received";' in html
+    assert 'const cp = "xx";' in html

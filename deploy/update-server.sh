@@ -74,6 +74,16 @@ if [[ "$BEFORE_HEAD" == "$AFTER_HEAD" ]]; then
   exit 0
 fi
 
+# Bash holds the old file inode after git pull replaces deploy/update-server.sh.
+# If the script itself changed, re-exec from the new inode so PATH_TO_SERVICE etc.
+# reflect the updated code. Guard with REEXECED=1 to prevent an infinite loop.
+if [[ "${REEXECED:-0}" != "1" ]]; then
+  if git diff --name-only "$BEFORE_HEAD" "$AFTER_HEAD" | grep -q '^deploy/update-server\.sh$'; then
+    echo "  [INFO] deploy script updated — re-executing from new inode..."
+    exec env REEXECED=1 BEFORE_COMMIT="$BEFORE_HEAD" bash "$0" "$@"
+  fi
+fi
+
 # core.quotePath=false 让中文/非 ASCII 路径不被 \xxx 转义，否则 PATH_TO_SERVICE 前缀匹配会 fail
 CHANGED_FILES=$(git -c core.quotePath=false diff --name-only "$BEFORE_HEAD" "$AFTER_HEAD")
 echo "  Changed files (${BEFORE_HEAD:0:7} → ${AFTER_HEAD:0:7}):"

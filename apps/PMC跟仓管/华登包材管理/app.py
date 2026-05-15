@@ -628,9 +628,11 @@ def party_page(party):
     prices = {r['item_key']: r['price'] for r in con.execute('SELECT * FROM default_prices').fetchall()}
     con.close()
     monthly = _build_monthly_stats(party)
+    dup_warning = session.pop('dup_warning', None)
     return render_template('party.html', party=party, party_name=PARTIES[party]['name'],
                            panels=panels, prices=prices, monthly=monthly,
-                           date_from=date_from, date_to=date_to, page_size=page_size)
+                           date_from=date_from, date_to=date_to, page_size=page_size,
+                           dup_warning=dup_warning)
 
 
 @app.route('/party/<party>/entry', methods=['POST'])

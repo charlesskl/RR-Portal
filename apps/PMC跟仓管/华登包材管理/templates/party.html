@@ -353,5 +353,19 @@ function openReconcileModal(party, cp) {
     document.body.appendChild(form);
     form.submit();
 }
+
+{% if dup_warning %}
+// dup warning 自动切到对应 tab + 滚到 form
+(function () {
+    const cp = {{ dup_warning.cp|tojson }};
+    const direction = {{ dup_warning.direction|tojson }};
+    const tabId = direction + '-' + cp;  // 'sent-xx' / 'received-xx'
+    if (typeof switchTab === 'function') {
+        switchTab(tabId, cp);
+    }
+    const target = document.getElementById('tab-' + tabId);
+    if (target) target.scrollIntoView({block: 'start'});
+})();
+{% endif %}
 </script>
 {% endblock %}

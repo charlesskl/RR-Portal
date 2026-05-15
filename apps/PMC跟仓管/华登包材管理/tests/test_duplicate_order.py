@@ -244,3 +244,24 @@ def test_party_page_clears_dup_warning_after_render(client):
     client.get('/party/hd')  # 第一次 GET,看到警告
     rv2 = client.get('/party/hd')  # 第二次 GET,不应再看到
     assert '订单号 ONCE-1 已在你的台账里出现过' not in rv2.data.decode('utf-8')
+
+
+def test_party_page_includes_tab_switch_js_when_warning(client):
+    """触发 dup 后,party.html 应包含切 tab 的 JS,direction/cp 嵌进去。"""
+    import app as app_module
+    con = sqlite3.connect(app_module.DATABASE)
+    _insert(con, recorded_by='hd', from_party='hd', to_party='xx', order_no='TAB-1')
+    con.close()
+
+    _login(client, 'hd')
+    client.post('/party/hd/entry', data={
+        'direction': 'received', 'counterparty': 'xx',
+        'date': '2026-05-08', 'order_no': 'TAB-1', 'jx_qty': '2',
+    }, follow_redirects=False)
+    rv = client.get('/party/hd')
+    html = rv.data.decode('utf-8')
+    # JS 里有正确的 direction 和 cp 字符串
+    assert '"received"' in html
+    assert '"xx"' in html
+    # 包含 switchTab 调用
+    assert 'switchTab' in html

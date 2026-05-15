@@ -669,7 +669,22 @@ def party_entry(party):
         except ValueError:
             qty_vals.append(0)
 
+    confirm_dup = request.form.get('confirm_dup') == '1'
+
     con = sqlite3.connect(DATABASE)
+    if order_no and not confirm_dup:
+        dups = _find_duplicate_order(con, order_no=order_no, party=party, cp=cp)
+        if dups:
+            con.close()
+            session['dup_warning'] = {
+                'cp': cp,
+                'direction': direction,
+                'form': {k: v for k, v in request.form.items()},
+                'dups': dups,
+            }
+            flash(f'订单号 {order_no} 已在你的台账里出现过 {len(dups)} 次,确认无误后可强制保存')
+            return redirect(url_for('party_page', party=party))
+
     placeholders = ', '.join(['?'] * len(qty_cols))
     con.execute(f"""
         INSERT INTO flow_records (recorded_by, from_party, to_party, date, order_no, remark,

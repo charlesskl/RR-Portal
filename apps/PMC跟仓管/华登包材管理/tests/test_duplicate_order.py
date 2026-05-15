@@ -75,3 +75,128 @@ def test_helper_empty_or_whitespace_returns_empty(client):
     assert app_module._find_duplicate_order(con, order_no='   ', party='hd', cp='xx') == []
     assert app_module._find_duplicate_order(con, order_no=None, party='hd', cp='xx') == []
     con.close()
+
+
+def test_entry_first_submit_unique_order_inserts(client):
+    """新订单号 → 直接 INSERT,无警告。"""
+    _login(client, 'hd')
+    rv = client.post('/party/hd/entry', data={
+        'direction': 'sent', 'counterparty': 'xx',
+        'date': '2026-05-01', 'order_no': 'UNIQ-1', 'jx_qty': '10',
+    }, follow_redirects=False)
+    assert rv.status_code == 302
+
+    import app as app_module
+    con = sqlite3.connect(app_module.DATABASE)
+    cnt = con.execute(
+        "SELECT COUNT(*) FROM flow_records WHERE order_no='UNIQ-1'"
+    ).fetchone()[0]
+    con.close()
+    assert cnt == 1
+
+
+def test_entry_duplicate_blocks_insert_and_sets_session_warning(client):
+    """hd 已有 hd→xx ORD-X,hd 再录 hd→xx ORD-X → 不 INSERT,session 有 dup_warning。"""
+    import app as app_module
+    con = sqlite3.connect(app_module.DATABASE)
+    _insert(con, recorded_by='hd', from_party='hd', to_party='xx', order_no='ORD-X')
+    con.close()
+
+    _login(client, 'hd')
+    rv = client.post('/party/hd/entry', data={
+        'direction': 'sent', 'counterparty': 'xx',
+        'date': '2026-05-02', 'order_no': 'ORD-X', 'jx_qty': '5',
+    }, follow_redirects=False)
+    assert rv.status_code == 302
+    assert rv.location.endswith('/party/hd')
+
+    # 数据库应该只有原来那 1 条,新提交未落库
+    con = sqlite3.connect(app_module.DATABASE)
+    cnt = con.execute(
+        "SELECT COUNT(*) FROM flow_records WHERE order_no='ORD-X'"
+    ).fetchone()[0]
+    con.close()
+    assert cnt == 1
+
+    # session 里有 dup_warning
+    with client.session_transaction() as s:
+        assert 'dup_warning' in s
+        w = s['dup_warning']
+        assert w['cp'] == 'xx'
+        assert w['direction'] == 'sent'
+        assert w['form']['order_no'] == 'ORD-X'
+        assert w['form']['date'] == '2026-05-02'
+        assert w['form']['jx_qty'] == '5'
+        assert len(w['dups']) == 1
+        assert w['dups'][0]['order_no'] == 'ORD-X'
+
+
+def test_entry_duplicate_reverse_direction_also_blocks(client):
+    """hd 已有 hd→xx ORD-Y,hd 在'收自xx' tab 录 ORD-Y (即 xx→hd) → 也命中。"""
+    import app as app_module
+    con = sqlite3.connect(app_module.DATABASE)
+    _insert(con, recorded_by='hd', from_party='hd', to_party='xx', order_no='ORD-Y')
+    con.close()
+
+    _login(client, 'hd')
+    rv = client.post('/party/hd/entry', data={
+        'direction': 'received', 'counterparty': 'xx',
+        'date': '2026-05-03', 'order_no': 'ORD-Y', 'jx_qty': '7',
+    }, follow_redirects=False)
+    assert rv.status_code == 302
+
+    con = sqlite3.connect(app_module.DATABASE)
+    cnt = con.execute(
+        "SELECT COUNT(*) FROM flow_records WHERE order_no='ORD-Y'"
+    ).fetchone()[0]
+    con.close()
+    assert cnt == 1  # 没新增
+
+
+def test_entry_confirm_dup_force_inserts(client):
+    """带 confirm_dup=1 → 跳过检查,直接 INSERT。"""
+    import app as app_module
+    con = sqlite3.connect(app_module.DATABASE)
+    _insert(con, recorded_by='hd', from_party='hd', to_party='xx', order_no='ORD-Z')
+    con.close()
+
+    _login(client, 'hd')
+    rv = client.post('/party/hd/entry', data={
+        'direction': 'sent', 'counterparty': 'xx',
+        'date': '2026-05-04', 'order_no': 'ORD-Z', 'jx_qty': '3',
+        'confirm_dup': '1',
+    }, follow_redirects=False)
+    assert rv.status_code == 302
+
+    con = sqlite3.connect(app_module.DATABASE)
+    cnt = con.execute(
+        "SELECT COUNT(*) FROM flow_records WHERE order_no='ORD-Z'"
+    ).fetchone()[0]
+    con.close()
+    assert cnt == 2  # 原来的 + 强制新增
+
+
+def test_entry_empty_order_no_skips_dedup_and_inserts(client):
+    """order_no 留空 → 不查重,直接落库 (即使其它字段有冲突也无所谓)。"""
+    import app as app_module
+    con = sqlite3.connect(app_module.DATABASE)
+    _insert(con, recorded_by='hd', from_party='hd', to_party='xx', order_no=None)
+    con.close()
+
+    _login(client, 'hd')
+    rv = client.post('/party/hd/entry', data={
+        'direction': 'sent', 'counterparty': 'xx',
+        'date': '2026-05-05', 'order_no': '   ', 'jx_qty': '1',  # 纯空白
+    }, follow_redirects=False)
+    assert rv.status_code == 302
+
+    con = sqlite3.connect(app_module.DATABASE)
+    cnt = con.execute(
+        "SELECT COUNT(*) FROM flow_records WHERE order_no IS NULL"
+    ).fetchone()[0]
+    con.close()
+    assert cnt == 2
+
+    # 不应有 dup_warning
+    with client.session_transaction() as s:
+        assert 'dup_warning' not in s

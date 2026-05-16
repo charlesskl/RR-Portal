@@ -104,6 +104,7 @@ declare -A PATH_TO_SERVICE=(
   ["apps/生产部/啤机外发系统/"]="pi-outsource"
   ["apps/PMC跟仓管/配色库存管理/"]="peise"
   ["apps/PMC跟仓管/华登包材管理/"]="huadeng"
+  ["apps/PMC跟仓管/华登毛绒仓库/"]="huadeng-maorong"
   ["apps/PMC跟仓管/采购订单管理系统/"]="jiangping"
   ["apps/PMC跟仓管/成品核对系统/"]="liwenjuan"
   ["apps/业务部/报价系统/"]="baojia"

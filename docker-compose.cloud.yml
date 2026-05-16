@@ -582,6 +582,32 @@ services:
     networks:
       - platform-net
 
+  huadeng-maorong:
+    build:
+      context: ./apps/PMC跟仓管/华登毛绒仓库
+      dockerfile: Dockerfile
+    environment:
+      - DATA_PATH=/app/data
+      # Secret 强制从 env 注入；admin 默认密码请上线后立即从前台修改
+      - HUADENG_MAORONG_SECRET_KEY=${HUADENG_MAORONG_SECRET_KEY:?HUADENG_MAORONG_SECRET_KEY is required}
+    volumes:
+      - ./apps/PMC跟仓管/华登毛绒仓库/data:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5009/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    mem_limit: 512m
+    memswap_limit: 512m
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - platform-net
+
 networks:
   platform-net:
     driver: bridge

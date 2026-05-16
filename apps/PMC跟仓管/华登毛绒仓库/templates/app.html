@@ -350,6 +350,13 @@ let selectedType = null;
 
 // ==================== API 封装 ====================
 
+// 子路径部署：当前 URL 第一段如果是已知前缀，所有 fetch / redirect 都加上
+// 例如 nginx 把 /huadeng-maorong/ → 容器内 / 的情况下，前端必须保留前缀
+const BASE_URL = (function() {
+  const first = window.location.pathname.split('/').filter(Boolean)[0] || '';
+  return first === 'huadeng-maorong' ? '/' + first : '';
+})();
+
 async function api(path, options = {}) {
   const opts = {
     headers: {'Content-Type': 'application/json'},
@@ -359,9 +366,9 @@ async function api(path, options = {}) {
   if (opts.body && typeof opts.body !== 'string') {
     opts.body = JSON.stringify(opts.body);
   }
-  const resp = await fetch(path, opts);
+  const resp = await fetch(BASE_URL + path, opts);
   if (resp.status === 401) {
-    window.location.href = '/login';
+    window.location.href = BASE_URL + '/login';
     throw new Error('未登录');
   }
   const data = await resp.json().catch(() => ({}));
@@ -411,7 +418,7 @@ async function logout() {
   if (!confirm('确定要退出登录吗?')) return;
   try {
     await api('/api/logout', { method: 'POST' });
-    window.location.href = '/login';
+    window.location.href = BASE_URL + '/login';
   } catch (err) {
     alert('登出失败');
   }
@@ -1488,7 +1495,7 @@ async function uploadSchedule(input) {
   const fd = new FormData();
   fd.append('file', file);
   try {
-    const resp = await fetch('/api/schedule/upload', { method: 'POST', body: fd, credentials: 'same-origin' });
+    const resp = await fetch(BASE_URL + '/api/schedule/upload', { method: 'POST', body: fd, credentials: 'same-origin' });
     const data = await resp.json();
     if (!resp.ok) { alert('上传失败: ' + (data.error || resp.status)); input.value = ''; return; }
     const s = data.stats;
@@ -2269,7 +2276,7 @@ function openEdit(type, id) {
 
 function exportSku(sku) {
   // 调后端生成多 sheet xlsx(入库 / 出库),矩阵布局:列 = (款式, 布标)
-  window.location.href = '/api/export/sku/' + encodeURIComponent(sku);
+  window.location.href = BASE_URL + '/api/export/sku/' + encodeURIComponent(sku);
 }
 
 function exportAll() {

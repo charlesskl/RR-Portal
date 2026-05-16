@@ -588,6 +588,8 @@ services:
       dockerfile: Dockerfile
     environment:
       - DATA_PATH=/app/data
+      # 子路径部署：让后端构造的绝对 URL（图片等 JSON 字段）带 nginx 子路径前缀
+      - URL_PREFIX=/huadeng-maorong
       # Secret 强制从 env 注入；admin 默认密码请上线后立即从前台修改
       - HUADENG_MAORONG_SECRET_KEY=${HUADENG_MAORONG_SECRET_KEY:?HUADENG_MAORONG_SECRET_KEY is required}
     volumes:

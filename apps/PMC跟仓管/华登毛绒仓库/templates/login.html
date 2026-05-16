@@ -94,6 +94,12 @@ const form = document.getElementById('login-form');
 const errorEl = document.getElementById('error');
 const submitBtn = document.getElementById('submit-btn');
 
+// 子路径部署：跟 app.html 同一逻辑
+const BASE_URL = (function() {
+  const first = window.location.pathname.split('/').filter(Boolean)[0] || '';
+  return first === 'huadeng-maorong' ? '/' + first : '';
+})();
+
 form.addEventListener('submit', async (e) => {
   e.preventDefault();
   errorEl.classList.remove('show');
@@ -101,7 +107,7 @@ form.addEventListener('submit', async (e) => {
   submitBtn.textContent = '登录中...';
 
   try {
-    const resp = await fetch('/api/login', {
+    const resp = await fetch(BASE_URL + '/api/login', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({
@@ -111,7 +117,7 @@ form.addEventListener('submit', async (e) => {
     });
     const data = await resp.json();
     if (resp.ok && data.success) {
-      window.location.href = '/';
+      window.location.href = BASE_URL + '/';
     } else {
       errorEl.textContent = data.error || '登录失败';
       errorEl.classList.add('show');

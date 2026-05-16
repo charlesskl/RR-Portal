@@ -45,6 +45,10 @@ app = Flask(__name__)
 # Session 密钥从环境变量注入；本地开发可不设，云端 compose 强制传入
 app.secret_key = os.environ.get('HUADENG_MAORONG_SECRET_KEY') or 'dev-only-CHANGE-IN-PROD'
 
+# 子路径部署前缀（nginx /huadeng-maorong/ → 容器内 /）
+# 后端构造给前端的绝对 URL（图片等）必须带这个前缀，否则浏览器请求根路径会 404
+URL_PREFIX = os.environ.get('URL_PREFIX', '')
+
 # Session 7 天有效
 app.permanent_session_lifetime = 60 * 60 * 24 * 7
 
@@ -735,7 +739,7 @@ def _save_schedule_images(images):
         if not os.path.exists(path):
             with open(path, 'wb') as f:
                 f.write(data)
-        out[(sheet, letter)] = '/static/schedule_images/' + fname
+        out[(sheet, letter)] = URL_PREFIX + '/static/schedule_images/' + fname
     return out
 
 

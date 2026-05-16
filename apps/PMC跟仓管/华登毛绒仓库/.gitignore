@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+*.pyo
+flask_session/
+backup/
+*.stackdump
+*.log
+# 运行时上传的排期表
+uploads/
+# 根目录野生 db 文件(正式 db 在 data/inventory.db)
+/inventory.db

@@ -261,6 +261,12 @@
                 <span class="plugin-name">华登包材管理</span>
               </div>
             </div>
+            <div class="plugin-item">
+              <div class="plugin-info">
+                <div class="plugin-dot gray" id="huadengMaorongDot"></div>
+                <span class="plugin-name">华登毛绒仓库</span>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -658,7 +664,7 @@
       <div class="dept-icon pmc" style="width:40px;height:40px;font-size:18px;">&#128230;</div>
       PMC跟仓管
     </div>
-    <div class="page-subtitle">采购订单 · 成品核对 · 配色库存 · 华登包材</div>
+    <div class="page-subtitle">采购订单 · 成品核对 · 配色库存 · 华登包材 · 华登毛绒仓库</div>
 
     <div class="detail-plugin-card">
       <div class="detail-plugin-left">
@@ -742,6 +748,28 @@
         <a href="/huadeng/" target="_blank" class="btn btn-primary">打开系统</a>
       </div>
     </div>
+
+    <div class="detail-plugin-card">
+      <div class="detail-plugin-left">
+        <div class="detail-plugin-icon" style="background:linear-gradient(135deg,#f59e0b,#d97706);">&#129505;</div>
+        <div>
+          <div class="detail-plugin-name">华登毛绒仓库</div>
+          <div class="detail-plugin-desc">毛绒 + 戏服双品类库存系统，出入库流水、字母绑定 / 布标维护、ZURU 排期对比、一键出库</div>
+          <div class="feature-grid">
+            <div class="feature-tag">&#129505; 毛绒 + 戏服</div>
+            <div class="feature-tag">&#128202; 实时库存</div>
+            <div class="feature-tag">&#128194; 字母绑定</div>
+            <div class="feature-tag">&#128203; 布标映射</div>
+            <div class="feature-tag">&#128229; ZURU 排期对比</div>
+            <div class="feature-tag">&#128274; 角色权限</div>
+          </div>
+        </div>
+      </div>
+      <div class="detail-plugin-right">
+        <div class="detail-plugin-status"><div class="plugin-dot gray" id="huadengMaorongDetailDot"></div> 检查中...</div>
+        <a href="/huadeng-maorong/" target="_blank" class="btn btn-primary">打开系统</a>
+      </div>
+    </div>
   </div>
 
 </div>
@@ -785,6 +813,7 @@ async function checkHealth() {
       { name: 'hySchedule', url: '/hy-schedule/health', dot: 'hyScheduleDot', detailDot: 'hyScheduleDetailDot' },
       { name: 'peise', url: '/peise/health', dot: 'peiseDot', detailDot: 'peiseDetailDot' },
       { name: 'huadeng', url: '/huadeng/health', dot: 'huadengDot', detailDot: 'huadengDetailDot' },
+      { name: 'huadengMaorong', url: '/huadeng-maorong/health', dot: 'huadengMaorongDot', detailDot: 'huadengMaorongDetailDot' },
     ];
     var healthy = 0;
     var total = checks.length;

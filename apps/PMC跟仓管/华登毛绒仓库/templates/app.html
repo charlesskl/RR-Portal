@@ -1,0 +1,2405 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>华登塑胶 · 毛绒库存管理 v3</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #FAFAF7;
+    --surface: #FFFFFF;
+    --surface-2: #F5F4EF;
+    --border: #E5E3DD;
+    --border-strong: #D1CFC7;
+    --text: #1A1A17;
+    --text-2: #5F5E58;
+    --text-3: #8A8880;
+    --accent: #1A4D8F;
+    --accent-2: #143E72;
+    --accent-light: #E8EFF8;
+    --in: #2D6A3E;
+    --in-light: #E4EFE7;
+    --out: #A03830;
+    --out-light: #F5E5E3;
+    --warn: #8B5F08;
+    --warn-light: #FDF4E1;
+    --rare: #6B3B8A;
+    --rare-light: #EFE5F5;
+  }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 14px;
+    line-height: 1.5;
+    min-height: 100vh;
+  }
+  .app { display: flex; min-height: 100vh; }
+
+  .sidebar {
+    width: 250px;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    padding: 18px 0;
+    overflow-y: auto;
+    max-height: 100vh;
+    position: sticky;
+    top: 0;
+    flex-shrink: 0;
+  }
+  .brand { padding: 0 18px 16px; border-bottom: 1px solid var(--border); margin-bottom: 8px; }
+  .brand-title { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
+  .brand-sub { font-size: 11px; color: var(--text-3); margin-top: 2px; letter-spacing: 0.04em; }
+  .nav-section {
+    padding: 14px 18px 6px;
+    font-size: 11px;
+    color: var(--text-3);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .nav-section .auto-hint {
+    text-transform: none;
+    letter-spacing: 0;
+    color: var(--in);
+    font-size: 10px;
+    background: var(--in-light);
+    padding: 1px 6px;
+    border-radius: 3px;
+  }
+  .nav-item {
+    padding: 9px 18px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 14px;
+    border-left: 2px solid transparent;
+    transition: background 0.12s;
+  }
+  .nav-item:hover { background: var(--bg); }
+  .nav-item.active { background: var(--accent-light); border-left-color: var(--accent); color: var(--accent); font-weight: 500; }
+  .nav-icon { font-size: 13px; width: 16px; text-align: center; color: var(--text-3); }
+  .nav-item.active .nav-icon { color: var(--accent); }
+
+  .sku-nav-item {
+    padding: 7px 18px 7px 36px;
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 13px;
+    border-left: 2px solid transparent;
+    transition: background 0.12s;
+  }
+  .sku-nav-item:hover { background: var(--bg); }
+  .sku-nav-item.active { background: var(--accent-light); border-left-color: var(--accent); color: var(--accent); font-weight: 500; }
+  .sku-nav-code { font-weight: 500; }
+  .sku-nav-qty { font-variant-numeric: tabular-nums; font-size: 12px; color: var(--text-2); }
+  .sku-nav-item.active .sku-nav-qty { color: var(--accent); }
+  .sku-nav-item.low .sku-nav-qty { color: var(--out); }
+
+  .sku-search { margin: 6px 16px 8px; padding: 7px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; font-size: 12.5px; width: calc(100% - 32px); font-family: inherit; color: var(--text); }
+  .sku-search:focus { outline: none; border-color: var(--accent); background: var(--surface); }
+
+  .main { flex: 1; padding: 28px 36px; overflow-x: auto; min-width: 0; }
+  .page-header { margin-bottom: 22px; display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; flex-wrap: wrap; }
+  .page-title { font-size: 22px; font-weight: 600; letter-spacing: -0.02em; }
+  .page-sub { font-size: 13px; color: var(--text-2); margin-top: 4px; }
+  .breadcrumb { font-size: 12px; color: var(--text-3); margin-bottom: 6px; }
+  .breadcrumb a { color: var(--accent); text-decoration: none; cursor: pointer; }
+  .breadcrumb a:hover { text-decoration: underline; }
+
+  .info-banner { background: var(--warn-light); color: var(--warn); padding: 10px 14px; border-radius: 6px; font-size: 12.5px; margin-bottom: 16px; border-left: 3px solid var(--warn); }
+
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 22px; }
+  .stats.three { grid-template-columns: repeat(3, 1fr); }
+  .stat { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; }
+  .stat-label { font-size: 12px; color: var(--text-2); margin-bottom: 4px; }
+  .stat-value { font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+  .stat-sub { font-size: 11px; color: var(--text-3); margin-top: 4px; }
+
+  .toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 14px; flex-wrap: wrap; }
+  .btn {
+    padding: 8px 14px;
+    background: var(--surface);
+    border: 1px solid var(--border-strong);
+    border-radius: 6px;
+    font-size: 13px;
+    cursor: pointer;
+    font-family: inherit;
+    color: var(--text);
+    transition: all 0.12s;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+  }
+  .btn:hover { background: var(--bg); border-color: var(--text-3); }
+  .btn-primary { background: var(--accent); color: white; border-color: var(--accent); }
+  .btn-primary:hover { background: var(--accent-2); border-color: var(--accent-2); }
+  .btn-in { background: var(--in); color: white; border-color: var(--in); }
+  .btn-in:hover { opacity: 0.9; }
+  .btn-out { background: var(--out); color: white; border-color: var(--out); }
+  .btn-out:hover { opacity: 0.9; }
+  .btn-sm { padding: 4px 10px; font-size: 12px; }
+  .btn-danger { color: var(--out); }
+  .btn-danger:hover { background: var(--out-light); border-color: var(--out); }
+  .btn-ghost { background: transparent; border: none; color: var(--accent); padding: 4px 8px; cursor: pointer; font-size: 13px; font-family: inherit; }
+  .btn-ghost:hover { text-decoration: underline; }
+
+  /* 角色权限:按 body[data-role] 动态隐藏对应按钮和入口 */
+  body[data-role="viewer"] .btn-in,
+  body[data-role="viewer"] .btn-out,
+  body[data-role="viewer"] .btn-edit,
+  body[data-role="viewer"] .btn-danger { display: none !important; }
+  body[data-role="operator"] .btn-danger { display: none !important; }
+  body:not([data-role="admin"]) .admin-only { display: none !important; }
+  body[data-role="viewer"] .viewer-hide { display: none !important; }
+
+  input, select { padding: 8px 10px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: 6px; font-size: 13px; font-family: inherit; color: var(--text); }
+  input:focus, select:focus { outline: none; border-color: var(--accent); }
+
+  .view-toggle { display: inline-flex; background: var(--surface-2); padding: 3px; border-radius: 7px; }
+  .view-toggle button { padding: 6px 14px; background: transparent; border: none; font-size: 13px; cursor: pointer; color: var(--text-2); font-family: inherit; border-radius: 5px; transition: all 0.12s; }
+  .view-toggle button.active { background: var(--surface); color: var(--text); box-shadow: 0 1px 2px rgba(0,0,0,0.06); font-weight: 500; }
+
+  .table-wrap { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; margin-bottom: 16px; }
+  .table-header { padding: 12px 16px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; background: var(--surface-2); }
+  .table-header-title { font-size: 13.5px; font-weight: 500; }
+  .table-header-count { font-size: 12px; color: var(--text-2); }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { padding: 10px 14px; text-align: left; border-bottom: 1px solid var(--border); font-size: 13px; vertical-align: middle; }
+  th { background: var(--surface-2); font-size: 12px; font-weight: 500; color: var(--text-2); text-transform: uppercase; letter-spacing: 0.04em; white-space: nowrap; }
+  tbody tr:hover { background: var(--bg); }
+  tbody tr.row-selected { background: var(--in-light); }
+  tbody tr.row-selected:hover { background: var(--in-light); }
+  tbody tr:last-child td { border-bottom: none; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  th.num { text-align: right; }
+  .row-clickable { cursor: pointer; }
+  .row-expanded { background: var(--surface-2) !important; }
+  .sku-link { color: var(--accent); cursor: pointer; font-weight: 500; }
+  .sku-link:hover { text-decoration: underline; }
+
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 500; line-height: 1.5; }
+  .badge-in { background: var(--in-light); color: var(--in); }
+  .badge-out { background: var(--out-light); color: var(--out); }
+  .badge-normal { background: var(--surface-2); color: var(--text-2); }
+  .badge-rare { background: var(--rare-light); color: var(--rare); }
+  .badge-flag { background: var(--accent-light); color: var(--accent); }
+  .badge-warn { background: var(--warn-light); color: var(--warn); }
+  .badge-low { background: var(--out-light); color: var(--out); }
+  .badge-ok { background: var(--in-light); color: var(--in); }
+
+  .modal-mask { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; z-index: 100; padding: 20px; }
+  .modal { background: var(--surface); border-radius: 12px; padding: 24px 28px; width: 100%; max-width: 520px; max-height: 90vh; overflow-y: auto; box-shadow: 0 20px 50px rgba(0,0,0,0.18); }
+  .modal-title { font-size: 16px; font-weight: 600; margin-bottom: 4px; }
+  .modal-sub { font-size: 12px; color: var(--text-3); margin-bottom: 16px; }
+  .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 14px; }
+  .form-row { margin-bottom: 0; }
+  .form-row.full { grid-column: 1 / -1; }
+  .form-label { display: block; font-size: 12px; color: var(--text-2); margin-bottom: 5px; font-weight: 500; }
+  .form-label .req { color: var(--out); margin-left: 2px; }
+  .form-row input, .form-row select { width: 100%; }
+  .form-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border); }
+
+  .empty { text-align: center; padding: 50px 20px; color: var(--text-3); background: var(--surface); border: 1px dashed var(--border); border-radius: 8px; }
+  .empty-title { font-size: 15px; margin-bottom: 6px; color: var(--text-2); }
+
+  .flag-manage { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px 18px; }
+  .flag-list { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+  .flag-tag { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 999px; font-size: 13px; }
+  .flag-tag button { background: none; border: none; cursor: pointer; color: var(--text-3); padding: 0 0 0 2px; font-size: 14px; line-height: 1; }
+  .flag-tag button:hover { color: var(--out); }
+  .flag-add { display: flex; gap: 6px; margin-top: 10px; }
+  .flag-add input { flex: 1; }
+
+  .expand-icon { display: inline-block; width: 16px; transition: transform 0.15s; color: var(--text-3); }
+  .expand-icon.open { transform: rotate(90deg); }
+
+  .sku-detail-rows td { background: var(--bg); padding-left: 28px; font-size: 12.5px; }
+
+  .filter-bar { display: flex; gap: 8px; flex-wrap: wrap; padding: 12px 16px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; margin-bottom: 12px; align-items: center; }
+  .filter-bar label { font-size: 12px; color: var(--text-2); }
+
+  .sku-card-header { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 18px 22px; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; }
+  .sku-card-info .sku-code { font-size: 20px; font-weight: 600; letter-spacing: -0.01em; margin-bottom: 4px; }
+  .sku-card-info .sku-name { font-size: 13px; color: var(--text-2); }
+  .sku-card-stock { text-align: right; }
+  .sku-card-stock-label { font-size: 11px; color: var(--text-3); margin-bottom: 2px; }
+  .sku-card-stock-value { font-size: 28px; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+  .variant-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; margin-bottom: 20px; }
+  .variant-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; }
+  .variant-card-head { display: flex; gap: 6px; margin-bottom: 8px; flex-wrap: wrap; }
+  .variant-card-stock { font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .variant-card-meta { font-size: 11px; color: var(--text-3); margin-top: 4px; }
+
+  .section-title { font-size: 14px; font-weight: 500; margin: 20px 0 10px; color: var(--text); display: flex; align-items: center; gap: 8px; }
+  .section-title .auto-tag { font-size: 11px; background: var(--in-light); color: var(--in); padding: 1px 7px; border-radius: 3px; font-weight: 400; }
+
+  @media (max-width: 1100px) { .stats { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 700px) {
+    .app { flex-direction: column; }
+    .sidebar { width: 100%; max-height: none; position: relative; }
+    .main { padding: 20px 16px; }
+    .form-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-title">华登库存</div>
+      <div class="brand-sub">毛绒 · 戏服 · v1</div>
+      <div style="margin-top: 10px; padding-top: 10px; border-top: 0.5px solid var(--border); font-size: 11.5px; color: var(--text-2);">
+        <div id="user-name">{{ user.display_name }}</div>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 4px;">
+          <span id="user-role" style="color: var(--text-3); font-size: 10.5px;">{{ user.role }}</span>
+          <a onclick="logout()" style="color: var(--accent); cursor: pointer; font-size: 11px;">退出</a>
+        </div>
+      </div>
+    </div>
+
+    <div class="nav-section">品类切换</div>
+    <div style="padding: 0 16px 8px; display: flex; gap: 4px;">
+      <button id="cat-btn-plush" onclick="switchCategory('plush')" style="flex:1; padding:6px 0; border:1px solid var(--border-strong); background:var(--surface); border-radius:6px; font-size:12.5px; cursor:pointer; font-family:inherit;">毛绒</button>
+      <button id="cat-btn-costume" onclick="switchCategory('costume')" style="flex:1; padding:6px 0; border:1px solid var(--border-strong); background:var(--surface); border-radius:6px; font-size:12.5px; cursor:pointer; font-family:inherit;">戏服</button>
+      <button id="cat-btn-all" onclick="switchCategory('all')" style="flex:1; padding:6px 0; border:1px solid var(--border-strong); background:var(--surface); border-radius:6px; font-size:12.5px; cursor:pointer; font-family:inherit;">全部</button>
+    </div>
+
+    <div class="nav-section">手动录入</div>
+    <div class="nav-item" data-page="stock" onclick="navigate('stock')">
+      <span class="nav-icon">▤</span><span>库存总览(总表)</span>
+    </div>
+    <div class="nav-item" data-page="in" onclick="navigate('in')">
+      <span class="nav-icon">↓</span><span>入库流水</span>
+    </div>
+    <div class="nav-item" data-page="out" onclick="navigate('out')">
+      <span class="nav-icon">↑</span><span>出库流水</span>
+    </div>
+
+    <div class="nav-section">
+      <span>货号细表</span>
+      <span class="auto-hint">自动生成</span>
+    </div>
+    <input class="sku-search" id="sku-nav-search" placeholder="搜索货号..." oninput="renderSkuNav()">
+    <div id="sku-nav-list"></div>
+
+    <div class="nav-section admin-only">基础数据</div>
+    <div class="nav-item admin-only" data-page="flags" onclick="navigate('flags')">
+      <span class="nav-icon">◇</span><span>布标维护</span>
+    </div>
+    <div class="nav-item admin-only" data-page="users" onclick="navigate('users')">
+      <span class="nav-icon">👤</span><span>用户管理</span>
+    </div>
+    <div class="nav-item" data-page="schedule" onclick="navigate('schedule')">
+      <span class="nav-icon">◷</span><span>排期对比</span>
+    </div>
+    <div class="nav-item viewer-hide" data-page="bindings" onclick="navigate('bindings')">
+      <span class="nav-icon">⇋</span><span>字母绑定</span>
+    </div>
+    <div class="nav-item viewer-hide" data-page="flag-map" onclick="navigate('flag-map')">
+      <span class="nav-icon">⇄</span><span>布标映射</span>
+    </div>
+
+    <div class="nav-section">导出</div>
+    <div class="nav-item" onclick="exportAll()">
+      <span class="nav-icon">⇩</span><span>导出 Excel</span>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div id="page-content"></div>
+  </main>
+
+</div>
+
+<div id="modal-host"></div>
+
+<script>
+// ==================== 状态 ====================
+
+const SAFE_STOCK = 100;
+
+let state = {
+  inRecords: [],
+  outRecords: [],
+  flags: [],
+  users: [],
+  currentUser: null
+};
+let currentPage = 'stock';
+let currentSku = null;
+let currentCategory = 'plush';  // 当前查看的品类:plush / costume / all
+let stockView = 'group';
+let expanded = new Set();
+let filters = { date: '', sku: '', flag: '', po: '' };
+// 编辑模式记录 id(null 表示新增模式)
+let editingInId = null;
+let editingOutId = null;
+// 入/出库流水多选删除:选中的记录 id + 当前所属页面(in/out)
+let selectedRecords = new Set();
+let selectedType = null;
+
+// ==================== API 封装 ====================
+
+// 部署前缀：兼容本地直跑 (5009) 和云端 nginx 反代 /huadeng-maorong/
+const BASE_URL = location.pathname.startsWith('/huadeng-maorong') ? '/huadeng-maorong' : '';
+
+async function api(path, options = {}) {
+  const opts = {
+    headers: {'Content-Type': 'application/json'},
+    credentials: 'same-origin',
+    ...options
+  };
+  if (opts.body && typeof opts.body !== 'string') {
+    opts.body = JSON.stringify(opts.body);
+  }
+  const resp = await fetch(BASE_URL + path, opts);
+  if (resp.status === 401) {
+    window.location.href = BASE_URL + '/login';
+    throw new Error('未登录');
+  }
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) {
+    throw new Error(data.error || `请求失败 (${resp.status})`);
+  }
+  return data;
+}
+
+// 后端 snake_case 转前端 camelCase
+function normalizeRecord(r) {
+  return {
+    id: r.id,
+    category: r.category || 'plush',  // 兼容旧数据
+    date: r.date,
+    billNo: r.bill_no !== undefined ? r.bill_no : r.billNo,
+    po: r.po,
+    picker: r.picker,
+    sku: r.sku,
+    name: r.name,
+    style: r.style,
+    flag: r.flag,
+    qty: r.qty
+  };
+}
+
+async function loadAllData() {
+  try {
+    const [me, inRecords, outRecords, flags] = await Promise.all([
+      api('/api/me'),
+      api('/api/in'),
+      api('/api/out').catch(() => []),  // 后端未实现时容错
+      api('/api/flags').catch(() => ['中国','美国','德国','日本','英国','法国','澳洲','加拿大'])
+    ]);
+    state.currentUser = me;
+    state.inRecords = inRecords.map(normalizeRecord);
+    state.outRecords = outRecords.map(normalizeRecord);
+    state.flags = flags;
+    document.body.dataset.role = me.role || 'viewer';
+  } catch (err) {
+    console.error('数据加载失败:', err);
+    alert('数据加载失败: ' + err.message);
+  }
+}
+
+async function logout() {
+  if (!confirm('确定要退出登录吗?')) return;
+  try {
+    await api('/api/logout', { method: 'POST' });
+    window.location.href = BASE_URL + '/login';
+  } catch (err) {
+    alert('登出失败');
+  }
+}
+
+// 切换品类(毛绒 / 戏服 / 全部)
+function switchCategory(cat) {
+  currentCategory = cat;
+  expanded.clear();
+  // 更新按钮视觉
+  ['plush', 'costume', 'all'].forEach(c => {
+    const btn = document.getElementById('cat-btn-' + c);
+    if (btn) {
+      if (c === cat) {
+        btn.style.background = 'var(--accent)';
+        btn.style.color = 'white';
+        btn.style.borderColor = 'var(--accent)';
+        btn.style.fontWeight = '500';
+      } else {
+        btn.style.background = 'var(--surface)';
+        btn.style.color = 'var(--text)';
+        btn.style.borderColor = 'var(--border-strong)';
+        btn.style.fontWeight = '400';
+      }
+    }
+  });
+  if (currentPage === 'sku') {
+    // 切换品类时,如果当前在某个货号细表,返回总览
+    navigate('stock');
+  } else {
+    render();
+  }
+}
+
+// 按当前品类过滤记录
+function filterByCategory(records) {
+  if (currentCategory === 'all') return records;
+  return records.filter(r => (r.category || 'plush') === currentCategory);
+}
+
+function categoryLabel(c) { return c === 'costume' ? '戏服' : '毛绒'; }
+function categoryBadge(c) {
+  const cls = c === 'costume' ? 'badge-rare' : 'badge-normal';
+  return `<span class="badge ${cls}">${categoryLabel(c)}</span>`;
+}
+
+// 兼容老代码:占位
+function seedIn() { return []; }
+function seedOut() { return []; }
+function loadState() { return state; }
+function saveState() { /* no-op,数据通过 API 保存 */ }
+
+function navigate(page) {
+  currentPage = page;
+  currentSku = null;
+  document.querySelectorAll('.nav-item').forEach(el => {
+    el.classList.toggle('active', el.dataset.page === page);
+  });
+  document.querySelectorAll('.sku-nav-item').forEach(el => el.classList.remove('active'));
+  render();
+}
+
+function openSku(sku) {
+  currentPage = 'sku';
+  currentSku = sku;
+  document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+  document.querySelectorAll('.sku-nav-item').forEach(el => {
+    el.classList.toggle('active', el.dataset.sku === sku);
+  });
+  render();
+}
+
+function styleLabel(s) {
+  // 毛绒款式:normal/rare → 中文;戏服:原样返回
+  if (s === 'normal') return '普通款';
+  if (s === 'rare') return '稀有款';
+  return s || '';  // 戏服直接显示文本
+}
+function styleBadge(s) {
+  // normal/rare 用预设颜色;戏服文本用 normal 颜色
+  const cls = s === 'rare' ? 'badge-rare' : 'badge-normal';
+  return `<span class="badge ${cls}">${styleLabel(s)}</span>`;
+}
+function flagBadge(f) { return `<span class="badge badge-flag">${f}</span>`; }
+
+function getStockMap() {
+  const map = {};
+  const inRecs = filterByCategory(state.inRecords);
+  const outRecs = filterByCategory(state.outRecords);
+  inRecs.forEach(r => {
+    const cat = r.category || 'plush';
+    const name = r.name || '';
+    const key = `${cat}|${r.sku}|${name}|${r.style}|${r.flag}`;
+    if (!map[key]) map[key] = { category: cat, sku: r.sku, name: name, style: r.style, flag: r.flag, stock: 0, inTotal: 0, outTotal: 0, lastIn: '', lastOut: '' };
+    map[key].stock += r.qty;
+    map[key].inTotal += r.qty;
+    if (r.date > map[key].lastIn) map[key].lastIn = r.date;
+  });
+  outRecs.forEach(r => {
+    const cat = r.category || 'plush';
+    const name = r.name || '';
+    const key = `${cat}|${r.sku}|${name}|${r.style}|${r.flag}`;
+    if (!map[key]) map[key] = { category: cat, sku: r.sku, name: name, style: r.style, flag: r.flag, stock: 0, inTotal: 0, outTotal: 0, lastIn: '', lastOut: '' };
+    map[key].stock -= r.qty;
+    map[key].outTotal += r.qty;
+    if (r.date > map[key].lastOut) map[key].lastOut = r.date;
+  });
+  return map;
+}
+
+function getSkuGroups() {
+  const stockMap = getStockMap();
+  const groups = {};
+  Object.values(stockMap).forEach(item => {
+    if (!groups[item.sku]) groups[item.sku] = { sku: item.sku, name: item.name, totalStock: 0, variants: [], lastIn: '', lastOut: '' };
+    groups[item.sku].totalStock += item.stock;
+    groups[item.sku].variants.push(item);
+    if (item.name) groups[item.sku].name = item.name;
+    if (item.lastIn > groups[item.sku].lastIn) groups[item.sku].lastIn = item.lastIn;
+    if (item.lastOut > groups[item.sku].lastOut) groups[item.sku].lastOut = item.lastOut;
+  });
+  Object.values(groups).forEach(g => {
+    g.variants.sort((a,b) => (a.style+(a.name||'')+a.flag).localeCompare(b.style+(b.name||'')+b.flag));
+  });
+  return Object.values(groups).sort((a,b) => a.sku.localeCompare(b.sku));
+}
+
+function renderSkuNav() {
+  const q = (document.getElementById('sku-nav-search')?.value || '').trim().toLowerCase();
+  let groups = getSkuGroups();
+  if (q) groups = groups.filter(g => g.sku.toLowerCase().includes(q) || (g.name||'').toLowerCase().includes(q));
+
+  document.getElementById('sku-nav-list').innerHTML = groups.length ? groups.map(g => {
+    const low = g.totalStock < SAFE_STOCK;
+    const active = currentPage === 'sku' && currentSku === g.sku;
+    return `
+      <div class="sku-nav-item ${active?'active':''} ${low?'low':''}" data-sku="${g.sku}" onclick="openSku('${g.sku}')" title="${g.name||''}">
+        <span class="sku-nav-code">${g.sku}</span>
+        <span class="sku-nav-qty">${g.totalStock}</span>
+      </div>
+    `;
+  }).join('') : '<div style="padding:10px 18px;font-size:12px;color:var(--text-3);">还没有货号</div>';
+}
+
+function render() {
+  renderSkuNav();
+  if (currentPage === 'stock') renderStock();
+  else if (currentPage === 'in') renderInOut('in');
+  else if (currentPage === 'out') renderInOut('out');
+  else if (currentPage === 'flags') renderFlags();
+  else if (currentPage === 'users') renderUsers();
+  else if (currentPage === 'schedule') renderSchedule();
+  else if (currentPage === 'bindings') renderBindings();
+  else if (currentPage === 'flag-map') renderFlagMappings();
+  else if (currentPage === 'sku') renderSkuDetail(currentSku);
+}
+
+function renderStock() {
+  const groups = getSkuGroups();
+  const totalSkus = groups.length;
+  const totalVariants = groups.reduce((s,g) => s + g.variants.length, 0);
+  const totalStock = groups.reduce((s,g) => s + g.totalStock, 0);
+  const lowVariants = Object.values(getStockMap()).filter(v => v.stock < SAFE_STOCK && v.stock > 0).length;
+
+  document.getElementById('page-content').innerHTML = `
+    <div class="page-header">
+      <div>
+        <div class="page-title">库存总览 · 总表</div>
+        <div class="page-sub">所有出入库都在这里录入,左侧"货号细表"自动按货号汇总</div>
+      </div>
+      <div style="display:flex;gap:10px;">
+        <button class="btn btn-in" onclick="openInModal()">+ 录入入库</button>
+        <button class="btn btn-out" onclick="openOutModal()">+ 录入出库</button>
+      </div>
+    </div>
+
+    <div class="stats">
+      <div class="stat"><div class="stat-label">货号总数</div><div class="stat-value">${totalSkus}</div><div class="stat-sub">不同 SKU</div></div>
+      <div class="stat"><div class="stat-label">规格总数</div><div class="stat-value">${totalVariants}</div><div class="stat-sub">货号×款式×布标 组合</div></div>
+      <div class="stat"><div class="stat-label">库存总量</div><div class="stat-value">${totalStock.toLocaleString()}</div><div class="stat-sub">所有规格累计</div></div>
+      <div class="stat"><div class="stat-label">库存预警</div><div class="stat-value" style="color:${lowVariants>0?'var(--out)':'inherit'}">${lowVariants}</div><div class="stat-sub">低于安全库存 ${SAFE_STOCK}</div></div>
+    </div>
+
+    <div class="toolbar">
+      <div class="view-toggle">
+        <button class="${stockView==='group'?'active':''}" onclick="setStockView('group')">按货号汇总</button>
+        <button class="${stockView==='flat'?'active':''}" onclick="setStockView('flat')">全展开明细</button>
+      </div>
+      <div style="margin-left:auto;display:flex;gap:8px;align-items:center;">
+        <input id="stock-search" placeholder="搜索货号/物料名称" style="width:200px;" oninput="renderStockTable()">
+      </div>
+    </div>
+
+    <div id="stock-table-wrap"></div>
+  `;
+
+  renderStockTable();
+}
+
+function renderStockTable() {
+  const q = (document.getElementById('stock-search')?.value || '').trim().toLowerCase();
+  let groups = getSkuGroups();
+  if (q) groups = groups.filter(g => g.sku.toLowerCase().includes(q) || (g.name||'').toLowerCase().includes(q));
+
+  let html = '';
+  if (!groups.length) {
+    html = '<div class="empty"><div class="empty-title">还没有库存数据</div><div>点击上方"录入入库"开始</div></div>';
+  } else if (stockView === 'group') {
+    html = `
+      <div class="table-wrap"><table>
+        <thead><tr>
+          <th style="width:30px;"></th>
+          <th>货号</th>
+          <th>物料名称</th>
+          <th>规格数</th>
+          <th class="num">总库存</th>
+          <th>最近入库</th>
+          <th>最近出库</th>
+          <th>状态</th>
+          <th></th>
+        </tr></thead>
+        <tbody>
+          ${groups.map(g => {
+            const isOpen = expanded.has(g.sku);
+            const status = g.totalStock <= 0 ? `<span class="badge badge-low">缺货</span>` :
+                          g.variants.some(v => v.stock < SAFE_STOCK) ? `<span class="badge badge-warn">部分预警</span>` :
+                          `<span class="badge badge-ok">充足</span>`;
+            return `
+              <tr class="${isOpen?'row-expanded':''}">
+                <td class="row-clickable" onclick="toggleExpand('${g.sku}')"><span class="expand-icon ${isOpen?'open':''}">▸</span></td>
+                <td><span class="sku-link" onclick="openSku('${g.sku}')">${g.sku}</span></td>
+                <td>${g.name||'—'}</td>
+                <td>${g.variants.length}</td>
+                <td class="num"><strong>${g.totalStock.toLocaleString()}</strong></td>
+                <td>${g.lastIn||'—'}</td>
+                <td>${g.lastOut||'—'}</td>
+                <td>${status}</td>
+                <td><button class="btn-ghost" onclick="openSku('${g.sku}')">查看细表 →</button></td>
+              </tr>
+              ${isOpen ? g.variants.map(v => `
+                <tr class="sku-detail-rows">
+                  <td></td>
+                  <td colspan="2">└ ${styleBadge(v.style)} ${flagBadge(v.flag)}</td>
+                  <td></td>
+                  <td class="num" style="color:${v.stock<SAFE_STOCK?'var(--out)':'inherit'};font-weight:500;">${v.stock.toLocaleString()}</td>
+                  <td>${v.lastIn||'—'}</td>
+                  <td>${v.lastOut||'—'}</td>
+                  <td>${v.stock<=0?'<span class="badge badge-low">缺货</span>':v.stock<SAFE_STOCK?'<span class="badge badge-warn">预警</span>':'<span class="badge badge-ok">充足</span>'}</td>
+                  <td></td>
+                </tr>
+              `).join('') : ''}
+            `;
+          }).join('')}
+        </tbody>
+      </table></div>
+    `;
+  } else {
+    const flat = [];
+    groups.forEach(g => g.variants.forEach(v => flat.push(v)));
+    html = `
+      <div class="table-wrap"><table>
+        <thead><tr>
+          <th>货号</th>
+          <th>物料名称</th>
+          <th>款式</th>
+          <th>布标</th>
+          <th class="num">当前库存</th>
+          <th class="num">累计入</th>
+          <th class="num">累计出</th>
+          <th>最近入</th>
+          <th>最近出</th>
+          <th>状态</th>
+        </tr></thead>
+        <tbody>
+          ${flat.map(v => `
+            <tr>
+              <td><span class="sku-link" onclick="openSku('${v.sku}')">${v.sku}</span></td>
+              <td>${v.name||'—'}</td>
+              <td>${styleBadge(v.style)}</td>
+              <td>${flagBadge(v.flag)}</td>
+              <td class="num" style="color:${v.stock<SAFE_STOCK?'var(--out)':'inherit'};font-weight:500;">${v.stock.toLocaleString()}</td>
+              <td class="num" style="color:var(--in);">${v.inTotal.toLocaleString()}</td>
+              <td class="num" style="color:var(--out);">${v.outTotal.toLocaleString()}</td>
+              <td>${v.lastIn||'—'}</td>
+              <td>${v.lastOut||'—'}</td>
+              <td>${v.stock<=0?'<span class="badge badge-low">缺货</span>':v.stock<SAFE_STOCK?'<span class="badge badge-warn">预警</span>':'<span class="badge badge-ok">充足</span>'}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table></div>
+    `;
+  }
+
+  document.getElementById('stock-table-wrap').innerHTML = html;
+}
+
+function setStockView(v) {
+  stockView = v;
+  renderStockTable();
+  document.querySelectorAll('.view-toggle button').forEach((b,i) => b.classList.toggle('active', (i===0&&v==='group')||(i===1&&v==='flat')));
+}
+
+function toggleExpand(sku) {
+  if (expanded.has(sku)) expanded.delete(sku);
+  else expanded.add(sku);
+  renderStockTable();
+}
+
+function renderSkuDetail(sku) {
+  const groups = getSkuGroups();
+  const g = groups.find(x => x.sku === sku);
+
+  if (!g) {
+    document.getElementById('page-content').innerHTML = `
+      <div class="page-header">
+        <div>
+          <div class="breadcrumb"><a onclick="navigate('stock')">库存总览</a> / 未找到</div>
+          <div class="page-title">货号不存在</div>
+        </div>
+      </div>
+      <div class="empty"><div class="empty-title">该货号已被删除或不存在</div></div>
+    `;
+    return;
+  }
+
+  const inRecords = state.inRecords.filter(r => r.sku === sku).sort((a,b) => b.date.localeCompare(a.date) || b.id - a.id);
+  const outRecords = state.outRecords.filter(r => r.sku === sku).sort((a,b) => b.date.localeCompare(a.date) || b.id - a.id);
+  const inTotalQty = inRecords.reduce((s,r) => s + r.qty, 0);
+  const outTotalQty = outRecords.reduce((s,r) => s + r.qty, 0);
+
+  document.getElementById('page-content').innerHTML = `
+    <div class="page-header">
+      <div>
+        <div class="breadcrumb"><a onclick="navigate('stock')">库存总览</a> / 货号细表 / ${sku}</div>
+        <div class="page-title">${sku} · 细表</div>
+        <div class="page-sub">${g.name || '—'} · 数据自动从总表筛选,所有改动在总表完成</div>
+      </div>
+      <div style="display:flex;gap:10px;">
+        <button class="btn btn-in" onclick="openInModal({sku:'${sku}',name:'${(g.name||'').replace(/'/g,'\\\'')}'})">+ 录入此货号入库</button>
+        <button class="btn btn-out" onclick="openOutModal({sku:'${sku}',name:'${(g.name||'').replace(/'/g,'\\\'')}'})">+ 录入此货号出库</button>
+      </div>
+    </div>
+
+    <div class="info-banner">
+      ℹ 此页面所有数据自动从总表生成。需要修改或删除某笔记录,请前往"入库流水"或"出库流水"操作。
+    </div>
+
+    <div class="sku-card-header">
+      <div class="sku-card-info">
+        <div class="sku-code">${sku}</div>
+        <div class="sku-name">${g.name || '—'}</div>
+      </div>
+      <div class="sku-card-stock">
+        <div class="sku-card-stock-label">该货号总库存</div>
+        <div class="sku-card-stock-value" style="color:${g.totalStock<SAFE_STOCK?'var(--out)':'inherit'};">${g.totalStock.toLocaleString()}</div>
+      </div>
+    </div>
+
+    <div class="stats three">
+      <div class="stat"><div class="stat-label">规格数</div><div class="stat-value">${g.variants.length}</div><div class="stat-sub">款式×布标 组合</div></div>
+      <div class="stat"><div class="stat-label">累计入库</div><div class="stat-value" style="color:var(--in);">${inTotalQty.toLocaleString()}</div><div class="stat-sub">${inRecords.length} 笔</div></div>
+      <div class="stat"><div class="stat-label">累计出库</div><div class="stat-value" style="color:var(--out);">${outTotalQty.toLocaleString()}</div><div class="stat-sub">${outRecords.length} 笔</div></div>
+    </div>
+
+    <div class="section-title">各规格库存 <span class="auto-tag">自动汇总</span></div>
+    <div class="variant-grid">
+      ${g.variants.map(v => `
+        <div class="variant-card">
+          <div class="variant-card-head">
+            ${styleBadge(v.style)} ${flagBadge(v.flag)}
+          </div>
+          <div style="font-size:13px;color:var(--text-1);margin-bottom:4px;">${v.name || '<span style="color:var(--text-3);">(未填物料名)</span>'}</div>
+          <div class="variant-card-stock" style="color:${v.stock<SAFE_STOCK?'var(--out)':v.stock<=0?'var(--out)':'inherit'};">${v.stock.toLocaleString()}</div>
+          <div class="variant-card-meta">入 ${v.inTotal.toLocaleString()} / 出 ${v.outTotal.toLocaleString()}</div>
+        </div>
+      `).join('')}
+    </div>
+
+    <div class="section-title">入库流水 <span class="auto-tag">自动筛选</span></div>
+    ${inRecords.length ? `
+      <div class="table-wrap">
+        <div class="table-header">
+          <span class="table-header-title">${sku} 的入库记录</span>
+          <span class="table-header-count">${inRecords.length} 笔 · 合计 ${inTotalQty.toLocaleString()}</span>
+        </div>
+        <table>
+          <thead><tr>
+            <th>日期</th><th>单号</th><th>物料</th><th>款式</th><th>布标</th><th class="num">数量</th>
+          </tr></thead>
+          <tbody>
+            ${inRecords.map(r => `
+              <tr>
+                <td>${r.date}</td>
+                <td><code style="font-size:12px;">${r.billNo||'—'}</code></td>
+                <td>${r.name||'—'}</td>
+                <td>${styleBadge(r.style)}</td>
+                <td>${flagBadge(r.flag)}</td>
+                <td class="num" style="color:var(--in);font-weight:500;">+${r.qty.toLocaleString()}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    ` : '<div class="empty" style="padding:30px;"><div>此货号还没有入库记录</div></div>'}
+
+    <div class="section-title">出库流水 <span class="auto-tag">自动筛选</span></div>
+    ${outRecords.length ? `
+      <div class="table-wrap">
+        <div class="table-header">
+          <span class="table-header-title">${sku} 的出库记录</span>
+          <span class="table-header-count">${outRecords.length} 笔 · 合计 ${outTotalQty.toLocaleString()}</span>
+        </div>
+        <table>
+          <thead><tr>
+            <th>日期</th><th>单号</th><th>PO号</th><th>领货人</th><th>物料</th><th>款式</th><th>布标</th><th class="num">数量</th>
+          </tr></thead>
+          <tbody>
+            ${outRecords.map(r => `
+              <tr>
+                <td>${r.date}</td>
+                <td><code style="font-size:12px;">${r.billNo||'—'}</code></td>
+                <td><code style="font-size:12px;">${r.po||'—'}</code></td>
+                <td>${r.picker||'—'}</td>
+                <td>${r.name||'—'}</td>
+                <td>${styleBadge(r.style)}</td>
+                <td>${flagBadge(r.flag)}</td>
+                <td class="num" style="color:var(--out);font-weight:500;">−${r.qty.toLocaleString()}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    ` : '<div class="empty" style="padding:30px;"><div>此货号还没有出库记录</div></div>'}
+
+    <div style="display:flex;gap:8px;margin-top:16px;">
+      <button class="btn" onclick="exportSku('${sku}')">导出此货号细表</button>
+    </div>
+  `;
+}
+
+function renderInOut(type) {
+  const records = filterByCategory(type === 'in' ? state.inRecords : state.outRecords);
+  const sorted = [...records].sort((a,b) => b.date.localeCompare(a.date) || b.id - a.id);
+
+  let filtered = sorted;
+  if (filters.date) filtered = filtered.filter(r => r.date === filters.date);
+  if (filters.sku) filtered = filtered.filter(r => r.sku.toLowerCase().includes(filters.sku.toLowerCase()));
+  if (filters.flag) filtered = filtered.filter(r => r.flag === filters.flag);
+  if (type === 'out' && filters.po) filtered = filtered.filter(r => (r.po||'').toLowerCase().includes(filters.po.toLowerCase()));
+
+  // 多选删除:切换 in/out 页时清空;只保留当前筛选结果里仍可见的选中项
+  if (selectedType !== type) { selectedRecords.clear(); selectedType = type; }
+  const visibleIds = new Set(filtered.map(r => r.id));
+  for (const id of [...selectedRecords]) if (!visibleIds.has(id)) selectedRecords.delete(id);
+  const selCount = selectedRecords.size;
+  const allChecked = filtered.length > 0 && filtered.every(r => selectedRecords.has(r.id));
+
+  const totalQty = filtered.reduce((s,r) => s + r.qty, 0);
+  const today = new Date().toISOString().slice(0,10);
+  const todayQty = records.filter(r => r.date === today).reduce((s,r) => s + r.qty, 0);
+
+  document.getElementById('page-content').innerHTML = `
+    <div class="page-header">
+      <div>
+        <div class="page-title">${type==='in'?'入库流水':'出库流水'}</div>
+        <div class="page-sub">${type==='in'?'毛绒厂送货 / 补货 / 退货入库':'出货给客户 / 装柜 / 调拨'}</div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;">
+        ${selCount > 0 ? `<button class="btn btn-danger admin-only" onclick="deleteSelected('${type}')">删除选中 (${selCount})</button>` : ''}
+        <button class="btn ${type==='in'?'btn-in':'btn-out'}" onclick="${type==='in'?'openInModal()':'openOutModal()'}">+ 录入${type==='in'?'入库':'出库'}</button>
+      </div>
+    </div>
+
+    <div class="stats">
+      <div class="stat"><div class="stat-label">流水笔数</div><div class="stat-value">${records.length}</div><div class="stat-sub">${type==='in'?'入库':'出库'}记录</div></div>
+      <div class="stat"><div class="stat-label">数量合计</div><div class="stat-value">${records.reduce((s,r)=>s+r.qty,0).toLocaleString()}</div></div>
+      <div class="stat"><div class="stat-label">今日</div><div class="stat-value">${todayQty.toLocaleString()}</div></div>
+      <div class="stat"><div class="stat-label">筛选结果</div><div class="stat-value">${filtered.length}</div><div class="stat-sub">${totalQty.toLocaleString()} 件</div></div>
+    </div>
+
+    <div class="filter-bar">
+      <label>日期</label>
+      <input type="date" value="${filters.date}" onchange="filters.date=this.value;render()">
+      <label>货号</label>
+      <input placeholder="搜索货号" value="${filters.sku}" oninput="filters.sku=this.value;render()" style="width:140px;">
+      <label>布标</label>
+      <select onchange="filters.flag=this.value;render()">
+        <option value="">全部</option>
+        ${state.flags.map(f => `<option ${filters.flag===f?'selected':''}>${f}</option>`).join('')}
+      </select>
+      ${type==='out' ? `
+        <label>PO号</label>
+        <input placeholder="搜索 PO" value="${filters.po}" oninput="filters.po=this.value;render()" style="width:140px;">
+      ` : ''}
+      <button class="btn btn-sm" onclick="filters={date:'',sku:'',flag:'',po:''};render()">清空筛选</button>
+    </div>
+
+    ${filtered.length ? `
+      <div class="table-wrap"><table>
+        <thead><tr>
+          <th class="admin-only" style="width:34px;text-align:center;"><input type="checkbox" ${allChecked?'checked':''} onclick="toggleSelectAll('${type}')" title="全选/取消"></th>
+          <th>日期</th>
+          <th>单号</th>
+          ${type==='out' ? '<th>PO号</th><th>领货人</th>' : ''}
+          <th>货号</th>
+          <th>物料名称</th>
+          <th>款式</th>
+          <th>布标</th>
+          <th class="num">数量</th>
+          <th></th>
+        </tr></thead>
+        <tbody>
+          ${filtered.map(r => `
+            <tr class="${selectedRecords.has(r.id)?'row-selected':''}">
+              <td class="admin-only" style="text-align:center;"><input type="checkbox" ${selectedRecords.has(r.id)?'checked':''} onclick="toggleSelect(${r.id})"></td>
+              <td>${r.date}</td>
+              <td><code style="font-size:12px;">${r.billNo||'—'}</code></td>
+              ${type==='out' ? `<td><code style="font-size:12px;">${r.po||'—'}</code></td><td>${r.picker||'—'}</td>` : ''}
+              <td><span class="sku-link" onclick="openSku('${r.sku}')">${r.sku}</span></td>
+              <td>${r.name||'—'}</td>
+              <td>${styleBadge(r.style)}</td>
+              <td>${flagBadge(r.flag)}</td>
+              <td class="num" style="color:${type==='in'?'var(--in)':'var(--out)'};font-weight:500;">${type==='in'?'+':'−'}${r.qty.toLocaleString()}</td>
+              <td>
+                <button class="btn btn-sm btn-edit" onclick="openEdit('${type}',${r.id})">编辑</button>
+                <button class="btn btn-sm btn-danger" onclick="deleteRecord('${type}',${r.id})">删除</button>
+              </td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table></div>
+    ` : '<div class="empty"><div class="empty-title">没有符合条件的记录</div></div>'}
+  `;
+}
+
+function renderFlags() {
+  document.getElementById('page-content').innerHTML = `
+    <div class="page-header">
+      <div>
+        <div class="page-title">布标维护</div>
+        <div class="page-sub">布标是出入库的必填项,在这里管理可选项</div>
+      </div>
+    </div>
+
+    <div class="flag-manage">
+      <div style="font-size:13px;color:var(--text-2);">当前布标 (共 ${state.flags.length} 个)</div>
+      <div class="flag-list">
+        ${state.flags.map((f,i) => `<span class="flag-tag">${f}<button onclick="deleteFlag(${i})" title="删除">×</button></span>`).join('')}
+      </div>
+      <div class="flag-add">
+        <input id="new-flag" placeholder="输入新布标名称,如:荷兰 / 韩国 / 内销..." onkeydown="if(event.key==='Enter')addFlag()">
+        <button class="btn btn-primary" onclick="addFlag()">+ 添加</button>
+      </div>
+      <div style="font-size:12px;color:var(--text-3);margin-top:14px;line-height:1.7;">
+        提示:删除布标不会影响已经录入的出入库记录,只是新录入时不再出现在下拉选项中。
+      </div>
+    </div>
+  `;
+}
+
+async function addFlag() {
+  const input = document.getElementById('new-flag');
+  const v = input.value.trim();
+  if (!v) return;
+  if (state.flags.includes(v)) { alert('该布标已存在'); return; }
+  try {
+    await api('/api/flags', { method: 'POST', body: { name: v } });
+    await loadAllData();
+    input.value = '';
+    render();
+  } catch (err) {
+    alert('添加失败(可能 /api/flags POST 还没实现): ' + err.message);
+  }
+}
+
+async function deleteFlag(i) {
+  const name = state.flags[i];
+  if (!confirm(`确定删除布标"${name}"吗?`)) return;
+  try {
+    await api(`/api/flags/${encodeURIComponent(name)}`, { method: 'DELETE' });
+    await loadAllData();
+    render();
+  } catch (err) {
+    alert('删除失败: ' + err.message);
+  }
+}
+
+// ==================== 用户管理 ====================
+
+async function loadUsers() {
+  try {
+    state.users = await api('/api/users');
+  } catch (err) {
+    state.users = [];
+    alert('加载用户列表失败: ' + err.message);
+  }
+}
+
+async function renderUsers() {
+  // 进入页面时按需加载(仅 admin 能调,其他角色看不到入口)
+  if (!state.users.length) await loadUsers();
+  const me = state.currentUser || {};
+  document.getElementById('page-content').innerHTML = `
+    <div class="page-header">
+      <div>
+        <div class="page-title">用户管理</div>
+        <div class="page-sub">管理可登录系统的账号(共 ${state.users.length} 个)</div>
+      </div>
+      <div>
+        <button class="btn btn-primary" onclick="openCreateUserModal()">+ 新增用户</button>
+      </div>
+    </div>
+
+    <div class="table-wrap"><table>
+      <thead><tr>
+        <th>用户名</th><th>显示名</th><th>角色</th><th>创建时间</th><th style="width:200px;">操作</th>
+      </tr></thead>
+      <tbody>
+        ${state.users.map(u => `
+          <tr>
+            <td><strong>${u.username}</strong>${u.id===me.id?' <span style="color:var(--text-3);font-size:12px;">(我)</span>':''}</td>
+            <td>${u.display_name || ''}</td>
+            <td>${ROLE_NAMES[u.role] || u.role}</td>
+            <td>${u.created_at || ''}</td>
+            <td>
+              <button class="btn btn-sm" onclick="openChangePasswordModal(${u.id}, '${u.username}')">改密码</button>
+              ${u.id===me.id ? '' : `<button class="btn btn-sm btn-danger" onclick="deleteUserById(${u.id}, '${u.username}')">删除</button>`}
+            </td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table></div>
+  `;
+}
+
+function openCreateUserModal() {
+  document.getElementById('modal-host').innerHTML = `
+    <div class="modal-mask" onclick="if(event.target===this)closeModal()">
+      <div class="modal">
+        <div class="modal-title">新增用户</div>
+        <div class="modal-sub">用户名 4-20 字符,密码至少 4 位</div>
+        <div class="form-grid">
+          <div class="form-row">
+            <label class="form-label">用户名<span class="req">*</span></label>
+            <input id="u-username" placeholder="登录用,4-20 字符">
+          </div>
+          <div class="form-row">
+            <label class="form-label">密码<span class="req">*</span></label>
+            <input id="u-password" type="password" placeholder="至少 4 位">
+          </div>
+          <div class="form-row">
+            <label class="form-label">角色<span class="req">*</span></label>
+            <select id="u-role">
+              <option value="operator">仓管员(录入和查看)</option>
+              <option value="viewer">游客(只读)</option>
+              <option value="admin">主管(全部权限)</option>
+            </select>
+          </div>
+          <div class="form-row">
+            <label class="form-label">显示名</label>
+            <input id="u-display" placeholder="如: 张三">
+          </div>
+        </div>
+        <div class="form-actions">
+          <button class="btn" onclick="closeModal()">取消</button>
+          <button class="btn btn-primary" onclick="saveNewUser()">保存</button>
+        </div>
+      </div>
+    </div>
+  `;
+  setTimeout(() => document.getElementById('u-username').focus(), 50);
+}
+
+async function saveNewUser() {
+  const username = document.getElementById('u-username').value.trim();
+  const password = document.getElementById('u-password').value;
+  const role = document.getElementById('u-role').value;
+  const display_name = document.getElementById('u-display').value.trim();
+
+  if (username.length < 4 || username.length > 20) { alert('用户名长度必须为 4-20 个字符'); return; }
+  if (password.length < 4) { alert('密码至少 4 位'); return; }
+
+  try {
+    await api('/api/users', { method: 'POST', body: { username, password, role, display_name } });
+    await loadUsers();
+    closeModal();
+    render();
+  } catch (err) {
+    alert('新增失败: ' + err.message);
+  }
+}
+
+function openChangePasswordModal(userId, username) {
+  document.getElementById('modal-host').innerHTML = `
+    <div class="modal-mask" onclick="if(event.target===this)closeModal()">
+      <div class="modal">
+        <div class="modal-title">修改密码</div>
+        <div class="modal-sub">为用户 <strong>${username}</strong> 设置新密码(管理员可直接修改,无需旧密码)</div>
+        <div class="form-grid">
+          <div class="form-row full">
+            <label class="form-label">新密码<span class="req">*</span></label>
+            <input id="u-newpwd" type="password" placeholder="至少 4 位">
+          </div>
+        </div>
+        <div class="form-actions">
+          <button class="btn" onclick="closeModal()">取消</button>
+          <button class="btn btn-primary" onclick="saveChangePassword(${userId})">保存</button>
+        </div>
+      </div>
+    </div>
+  `;
+  setTimeout(() => document.getElementById('u-newpwd').focus(), 50);
+}
+
+async function saveChangePassword(userId) {
+  const newPassword = document.getElementById('u-newpwd').value;
+  if (newPassword.length < 4) { alert('密码至少 4 位'); return; }
+  try {
+    await api(`/api/users/${userId}/password`, { method: 'PUT', body: { new_password: newPassword } });
+    closeModal();
+    alert('密码已修改');
+  } catch (err) {
+    alert('修改失败: ' + err.message);
+  }
+}
+
+async function deleteUserById(userId, username) {
+  if (!confirm(`确定删除用户"${username}"吗?此操作不可恢复。`)) return;
+  try {
+    await api(`/api/users/${userId}`, { method: 'DELETE' });
+    await loadUsers();
+    render();
+  } catch (err) {
+    alert('删除失败: ' + err.message);
+  }
+}
+
+// ==================== 布标映射 ====================
+
+let flagMapData = null;
+
+async function renderFlagMappings() {
+  try {
+    flagMapData = await api('/api/flag-mappings');
+  } catch (err) {
+    flagMapData = { mappings: [], unmapped: [], inventory_flags: [] };
+    alert('加载映射失败: ' + err.message);
+  }
+  const { mappings, unmapped, inventory_flags } = flagMapData;
+  const canEdit = state.currentUser?.role !== 'viewer';
+
+  document.getElementById('page-content').innerHTML = `
+    <div class="page-header">
+      <div>
+        <div class="page-title">布标映射</div>
+        <div class="page-sub">把排期里 (布标类型, 国家) 翻译成你库存里实际录的布标名,排期对比才能查到精确库存</div>
+      </div>
+    </div>
+
+    <div class="flag-manage" style="margin-bottom:14px;">
+      <div style="font-size:13px;font-weight:500;margin-bottom:8px;">已映射 (${mappings.length})</div>
+      ${mappings.length ? `
+      <div class="table-wrap"><table>
+        <thead><tr>
+          <th>排期布标类型</th><th>国家</th><th>→ 库存布标</th><th>录入人</th><th>时间</th>
+          ${canEdit ? '<th style="width:140px;">操作</th>' : ''}
+        </tr></thead>
+        <tbody>
+          ${mappings.map(m => `
+            <tr>
+              <td>${m.flag_type}</td>
+              <td>${m.country}</td>
+              <td><code style="font-size:12px;">${m.inventory_flag}</code></td>
+              <td style="font-size:12px;color:var(--text-2);">${m.created_by||'—'}</td>
+              <td style="font-size:12px;color:var(--text-2);">${m.created_at||'—'}</td>
+              ${canEdit ? `<td>
+                <button class="btn btn-sm btn-edit" onclick="openFlagMapModal('${escAttr(m.flag_type)}', '${escAttr(m.country)}', '${escAttr(m.inventory_flag)}')">改</button>
+                <button class="btn btn-sm btn-danger" onclick="deleteFlagMap(${m.id})">删</button>
+              </td>` : ''}
+            </tr>
+          `).join('')}
+        </tbody>
+      </table></div>
+      ` : '<div style="color:var(--text-3);font-size:13px;">还没有映射,下面是排期里需要映射的组合</div>'}
+    </div>
+
+    <div class="flag-manage">
+      <div style="font-size:13px;font-weight:500;margin-bottom:8px;">待映射 (${unmapped.length})</div>
+      ${unmapped.length ? `
+      <div class="table-wrap"><table>
+        <thead><tr>
+          <th>排期布标类型</th><th>国家</th>
+          ${canEdit ? '<th style="width:120px;">操作</th>' : ''}
+        </tr></thead>
+        <tbody>
+          ${unmapped.map(u => `
+            <tr>
+              <td>${u.flag_type}</td>
+              <td>${u.country}</td>
+              ${canEdit ? `<td>
+                <button class="btn btn-sm btn-primary" onclick="openFlagMapModal('${escAttr(u.flag_type)}', '${escAttr(u.country)}', '')">映射</button>
+              </td>` : ''}
+            </tr>
+          `).join('')}
+        </tbody>
+      </table></div>
+      ` : '<div style="color:var(--text-3);font-size:13px;">没有待映射项,所有排期组合都配过了</div>'}
+    </div>
+  `;
+}
+
+function openFlagMapModal(flagType, country, currentInvFlag) {
+  const isEdit = !!(flagType && country && currentInvFlag);
+  const flags = flagMapData?.inventory_flags || [];
+  document.getElementById('modal-host').innerHTML = `
+    <div class="modal-mask" onclick="if(event.target===this)closeModal()">
+      <div class="modal">
+        <div class="modal-title">${isEdit ? '修改映射' : '新增映射'}</div>
+        <div class="modal-sub">排期 ${flagType||''} + ${country||''} → 库存里的实际布标</div>
+        <div class="form-grid">
+          <div class="form-row">
+            <label class="form-label">排期布标类型<span class="req">*</span></label>
+            <input id="fm-type" value="${flagType||''}" placeholder="如: MA布标" ${isEdit?'readonly':''}>
+          </div>
+          <div class="form-row">
+            <label class="form-label">国家<span class="req">*</span></label>
+            <input id="fm-country" value="${country||''}" placeholder="如: 美国" ${isEdit?'readonly':''}>
+          </div>
+          <div class="form-row full">
+            <label class="form-label">→ 库存布标<span class="req">*</span></label>
+            <input id="fm-inv" list="fm-inv-sug" value="${currentInvFlag||''}" placeholder="如: MA标美国版">
+            <datalist id="fm-inv-sug">${flags.map(f => `<option value="${f}">`).join('')}</datalist>
+            ${flags.length ? `<div style="font-size:11px;color:var(--text-3);margin-top:4px;">从你的布标维护列表选(或自由输入):${flags.slice(0,8).join(' / ')}${flags.length>8?'...':''}</div>` : '<div style="font-size:11px;color:var(--out);margin-top:4px;">布标维护页里还没有布标,可以自由输入</div>'}
+          </div>
+        </div>
+        <div class="form-actions">
+          <button class="btn" onclick="closeModal()">取消</button>
+          <button class="btn btn-primary" onclick="saveFlagMap()">保存</button>
+        </div>
+      </div>
+    </div>
+  `;
+  setTimeout(() => document.getElementById(isEdit ? 'fm-inv' : 'fm-type').focus(), 50);
+}
+
+async function saveFlagMap() {
+  const flag_type = document.getElementById('fm-type').value.trim();
+  const country = document.getElementById('fm-country').value.trim();
+  const inventory_flag = document.getElementById('fm-inv').value.trim();
+  if (!flag_type || !country) { alert('请填写排期布标和国家'); return; }
+  if (!inventory_flag) { alert('请填写库存布标'); return; }
+  try {
+    await api('/api/flag-mappings', { method: 'POST', body: { flag_type, country, inventory_flag } });
+    closeModal();
+    await renderFlagMappings();
+  } catch (err) {
+    alert('保存失败: ' + err.message);
+  }
+}
+
+async function deleteFlagMap(id) {
+  if (!confirm('删除该映射?')) return;
+  try {
+    await api(`/api/flag-mappings/${id}`, { method: 'DELETE' });
+    await renderFlagMappings();
+  } catch (err) {
+    alert('删除失败: ' + err.message);
+  }
+}
+
+// ==================== 字母绑定(主数据维护) ====================
+
+let bindingsData = null;
+let aliasesData = [];
+
+async function renderBindings() {
+  try {
+    [bindingsData, aliasesData] = await Promise.all([
+      api('/api/letter-bindings'),
+      api('/api/sku-aliases').catch(() => []),
+    ]);
+  } catch (err) {
+    bindingsData = { bindings: [], materials_by_sku: {} };
+    aliasesData = [];
+    alert('加载绑定失败: ' + err.message);
+  }
+  const { bindings } = bindingsData;
+  const canEdit = state.currentUser?.role !== 'viewer';
+  // 按父货号分组别名
+  const aliasesByPrimary = {};
+  aliasesData.forEach(a => {
+    (aliasesByPrimary[a.primary_prefix] = aliasesByPrimary[a.primary_prefix] || []).push(a);
+  });
+
+  document.getElementById('page-content').innerHTML = `
+    <div class="page-header">
+      <div>
+        <div class="page-title">字母绑定</div>
+        <div class="page-sub">主数据:填写"货号 + 字母 + 物料名称"。排期对比时按 ITEM# 前面的数字找你这里配置的绑定。子货号通过"关联"自动复用父货号的物料。</div>
+      </div>
+      <div>
+        ${canEdit ? '<button class="btn btn-in" onclick="openBindModal()">+ 新增绑定</button>' : ''}
+      </div>
+    </div>
+
+    <div class="flag-manage">
+      <div style="font-size:13px;color:var(--text-2);margin-bottom:8px;">共 ${bindings.length} 条 · ${(() => { const s = new Set(); bindings.forEach(b => s.add(b.sku)); return s.size; })()} 个货号 · ${aliasesData.length} 个子货号别名</div>
+      ${bindings.length ? (() => {
+        const groups = {};
+        bindings.forEach(b => { (groups[b.sku] = groups[b.sku] || []).push(b); });
+        const skuOrder = Object.keys(groups).sort();
+        return skuOrder.map(sku => {
+          const rows = groups[sku].slice().sort((a,b) => a.letter.localeCompare(b.letter));
+          const aliases = aliasesByPrimary[sku] || [];
+          const aliasChips = aliases.map(a => `
+            <span style="display:inline-flex;align-items:center;gap:4px;background:#EEF2FF;border:1px solid #C7D2FE;border-radius:4px;padding:2px 8px;font-size:12px;color:#3730A3;margin-right:4px;">
+              <code style="background:transparent;padding:0;color:inherit;">${a.alias_prefix}</code>
+              ${canEdit ? `<span style="cursor:pointer;color:#6366F1;" onclick="deleteAlias(${a.id}, '${escAttr(a.alias_prefix)}', '${escAttr(sku)}')" title="删除别名">×</span>` : ''}
+            </span>
+          `).join('');
+          return `
+            <div style="margin-bottom:18px;">
+              <div style="display:flex;align-items:center;gap:10px;padding:6px 4px;border-bottom:1px solid var(--border);margin-bottom:6px;flex-wrap:wrap;">
+                <code style="font-size:15px;font-weight:600;color:var(--text-1);">${sku}</code>
+                <span style="font-size:12px;color:var(--text-3);">${rows.length} 条字母 · ${aliases.length} 个子货号</span>
+                <div style="flex:1;"></div>
+                ${aliasChips}
+                ${canEdit ? `<button class="btn btn-sm" onclick="openAliasModal('${escAttr(sku)}')" title="关联子货号 → 自动复用本父货号的物料">+ 关联子货号</button>` : ''}
+              </div>
+              <div class="table-wrap"><table>
+                <thead><tr>
+                  <th style="width:80px;">字母</th><th>物料名称</th>
+                  <th style="width:100px;">录入人</th><th style="width:150px;">时间</th>
+                  ${canEdit ? '<th style="width:140px;">操作</th>' : ''}
+                </tr></thead>
+                <tbody>
+                  ${rows.map(b => `
+                    <tr>
+                      <td><span class="badge badge-flag">${b.letter}</span></td>
+                      <td>${b.material_name}</td>
+                      <td style="font-size:12px;color:var(--text-2);">${b.created_by||'—'}</td>
+                      <td style="font-size:12px;color:var(--text-2);">${b.created_at||'—'}</td>
+                      ${canEdit ? `<td>
+                        <button class="btn btn-sm btn-edit" onclick="openBindModal('${escAttr(b.sku)}', '${b.letter}', '${escAttr(b.material_name)}')">改</button>
+                        <button class="btn btn-sm btn-danger" onclick="deleteBinding(${b.id}, '${escAttr(b.sku)}', '${b.letter}')">删</button>
+                      </td>` : ''}
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table></div>
+            </div>
+          `;
+        }).join('');
+      })() : '<div style="color:var(--text-3);font-size:13px;padding:18px;text-align:center;">还没有绑定。点右上角"+ 新增绑定"开始配置。</div>'}
+    </div>
+  `;
+}
+
+function escAttr(s) {
+  return (s||'').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+}
+
+function openBindModal(presetSku, presetLetter, presetName) {
+  const isEdit = !!(presetSku && presetLetter);
+  // 物料名建议:如果填了 sku,从该 sku 已入库物料名拉建议
+  const sugList = bindingsData?.materials_by_sku?.[presetSku] || [];
+  document.getElementById('modal-host').innerHTML = `
+    <div class="modal-mask" onclick="if(event.target===this)closeModal()">
+      <div class="modal">
+        <div class="modal-title">${isEdit ? '修改绑定' : '新增绑定'}</div>
+        <div class="modal-sub">绑定关系:同一货号 + 字母 唯一,重复会覆盖原绑定</div>
+        <div class="form-grid">
+          <div class="form-row">
+            <label class="form-label">货号(纯数字)<span class="req">*</span></label>
+            <input id="b-sku" placeholder="如: 15758" value="${presetSku||''}" ${isEdit?'readonly':''}>
+          </div>
+          <div class="form-row">
+            <label class="form-label">字母<span class="req">*</span></label>
+            <input id="b-letter" placeholder="如: A" maxlength="2" style="text-transform:uppercase;" value="${presetLetter||''}" ${isEdit?'readonly':''}>
+          </div>
+          <div class="form-row full">
+            <label class="form-label">物料名称<span class="req">*</span></label>
+            <input id="b-mat" list="b-mat-sug" placeholder="如: 小杏怪" value="${presetName||''}">
+            <datalist id="b-mat-sug">${sugList.map(m => `<option value="${m}">`).join('')}</datalist>
+            ${sugList.length ? `<div style="font-size:11px;color:var(--text-3);margin-top:4px;">该货号已入库的物料名:${sugList.join(' / ')}</div>` : ''}
+          </div>
+        </div>
+        <div class="form-actions">
+          <button class="btn" onclick="closeModal()">取消</button>
+          <button class="btn btn-primary" onclick="saveBinding()">保存</button>
+        </div>
+      </div>
+    </div>
+  `;
+  setTimeout(() => document.getElementById(isEdit ? 'b-mat' : 'b-sku').focus(), 50);
+}
+
+async function saveBinding() {
+  const sku = document.getElementById('b-sku').value.trim();
+  const letter = document.getElementById('b-letter').value.trim().toUpperCase();
+  const name = document.getElementById('b-mat').value.trim();
+  if (!sku) { alert('请填写货号'); return; }
+  if (!letter || !/^[A-Z]+$/.test(letter)) { alert('字母只允许 A-Z(大写),长度 1-2'); return; }
+  if (!name) { alert('请填写物料名称'); return; }
+  try {
+    await api('/api/letter-bindings', {
+      method: 'POST',
+      body: { sku, letter, material_name: name }
+    });
+    closeModal();
+    await renderBindings();
+  } catch (err) {
+    alert('保存失败: ' + err.message);
+  }
+}
+
+function openAliasModal(primarySku) {
+  document.getElementById('modal-host').innerHTML = `
+    <div class="modal-mask" onclick="if(event.target===this)closeModal()">
+      <div class="modal">
+        <div class="modal-title">关联子货号 → ${primarySku}</div>
+        <div class="modal-sub">子货号(纯数字前缀)会自动复用父货号 <code>${primarySku}</code> 的全部字母→物料映射。一个子货号只能映射到一个父货号。</div>
+        <div class="form-grid">
+          <div class="form-row full">
+            <label class="form-label">子货号前缀<span class="req">*</span></label>
+            <input id="a-alias" placeholder="如: 157101" autofocus>
+            <div style="font-size:11px;color:var(--text-3);margin-top:4px;">举例:排期里出现 <code>157101-S001-MB</code> 这种,父货号是 <code>${primarySku}</code>,这里填 <code>157101</code></div>
+          </div>
+        </div>
+        <div class="form-actions">
+          <button class="btn" onclick="closeModal()">取消</button>
+          <button class="btn btn-primary" onclick="saveAlias('${escAttr(primarySku)}')">保存</button>
+        </div>
+      </div>
+    </div>
+  `;
+  setTimeout(() => document.getElementById('a-alias').focus(), 50);
+}
+
+async function saveAlias(primarySku) {
+  const alias = document.getElementById('a-alias').value.trim();
+  if (!alias || !/^\d+$/.test(alias)) { alert('子货号必须是纯数字'); return; }
+  try {
+    await api('/api/sku-aliases', {
+      method: 'POST',
+      body: { alias_prefix: alias, primary_prefix: primarySku }
+    });
+    closeModal();
+    await renderBindings();
+  } catch (err) {
+    alert('保存失败: ' + err.message);
+  }
+}
+
+async function deleteAlias(id, alias, primary) {
+  if (!confirm(`解除子货号 ${alias} → 父货号 ${primary} 的关联?\n解除后,排期里的 ${alias} 将不再自动匹配 ${primary} 的物料。`)) return;
+  try {
+    await api(`/api/sku-aliases/${id}`, { method: 'DELETE' });
+    await renderBindings();
+  } catch (err) {
+    alert('删除失败: ' + err.message);
+  }
+}
+
+async function deleteBinding(id, sku, letter) {
+  if (!confirm(`删除货号 ${sku} 字母 ${letter} 的绑定?`)) return;
+  try {
+    await api(`/api/letter-bindings/${id}`, { method: 'DELETE' });
+    await renderBindings();
+  } catch (err) {
+    alert('删除失败: ' + err.message);
+  }
+}
+
+// ==================== 排期对比 ====================
+
+let scheduleInfo = null;
+let scheduleResult = null;
+let scheduleSearch = '';
+
+async function renderSchedule() {
+  // 加载状态(每次进入都刷新)
+  try {
+    scheduleInfo = await api('/api/schedule/info');
+  } catch (err) {
+    scheduleInfo = { count: 0 };
+  }
+  const info = scheduleInfo;
+  const empty = !info.count;
+
+  document.getElementById('page-content').innerHTML = `
+    <div class="page-header">
+      <div>
+        <div class="page-title">排期对比</div>
+        <div class="page-sub">上传排期 xlsx,按 PO 号查需求并比对库存</div>
+      </div>
+      <div>
+        <button class="btn btn-in" onclick="document.getElementById('schedule-file').click()">↑ 上传排期表</button>
+        <input type="file" id="schedule-file" accept=".xlsx" style="display:none" onchange="uploadSchedule(this)">
+      </div>
+    </div>
+
+    <div class="flag-manage" style="margin-bottom:16px;">
+      ${empty
+        ? '<div style="color:var(--text-3);">还没有导入排期数据。点击右上角"上传排期表"。</div>'
+        : `
+          <div style="font-size:13px;color:var(--text-2);">
+            当前已导入:<strong>${info.count}</strong> 行 ·
+            <strong>${info.po_count}</strong> 个 PO ·
+            <strong>${info.item_count}</strong> 个货号
+          </div>
+          <div style="font-size:12px;color:var(--text-3);margin-top:6px;">
+            上次上传:${info.last_uploaded_at}  by  ${info.last_uploaded_by}
+          </div>
+        `}
+    </div>
+
+    <div class="flag-manage" style="margin-bottom:16px;">
+      <div style="display:flex;gap:8px;align-items:center;">
+        <input id="schedule-po" placeholder="输入 PO 号 或 货号,如 4500193080 / 15704UQ1-S001" value="${scheduleSearch}"
+               style="flex:1;" onkeydown="if(event.key==='Enter')querySchedule()">
+        <button class="btn btn-primary" onclick="querySchedule()">搜索</button>
+      </div>
+      <div style="font-size:12px;color:var(--text-3);margin-top:8px;">
+        提示:PO 号 → 看这个 PO 需哪些货号,库存够否;货号 → 看该货号被哪些 PO 需要,合计够否
+      </div>
+    </div>
+
+    <div id="schedule-result"></div>
+  `;
+
+  if (scheduleResult) renderScheduleResult();
+}
+
+async function uploadSchedule(input) {
+  const file = input.files[0];
+  if (!file) return;
+  if (!confirm(`将上传 ${file.name} 并替换现有排期数据(${(scheduleInfo?.count || 0)} 行),继续?`)) {
+    input.value = '';
+    return;
+  }
+  const fd = new FormData();
+  fd.append('file', file);
+  try {
+    const resp = await fetch(BASE_URL + '/api/schedule/upload', { method: 'POST', body: fd, credentials: 'same-origin' });
+    const data = await resp.json();
+    if (!resp.ok) { alert('上传失败: ' + (data.error || resp.status)); input.value = ''; return; }
+    const s = data.stats;
+    alert(`上传成功:\n- 解析 ${s.sheets_processed.length} 个 sheet${s.sheets_skipped.length?(' (跳过 '+s.sheets_skipped.length+')'):''}\n- 导入 ${s.rows_inserted} 行\n- 跳过蓝色已完货 ${s.rows_skipped_blue} 行\n- 跳过无效 ${s.rows_skipped_invalid} 行`);
+    scheduleResult = null;
+    await renderSchedule();
+  } catch (err) {
+    alert('上传失败: ' + err.message);
+  }
+  input.value = '';
+}
+
+async function querySchedule() {
+  const q = document.getElementById('schedule-po').value.trim();
+  if (!q) { alert('请输入 PO 号或货号'); return; }
+  scheduleSearch = q;
+  try {
+    scheduleResult = await api('/api/schedule/query?q=' + encodeURIComponent(q));
+    renderScheduleResult();
+  } catch (err) {
+    alert('查询失败: ' + err.message);
+  }
+}
+
+function letterChip(l) {
+  // 单 letter chip 渲染:[图][字母·数量][绑定状态/库存差]
+  if (!l.letter) return `<span style="color:var(--text-3);">${(l.qty||0).toLocaleString()}</span>`;
+  const img = l.image_url ? `<img src="${BASE_URL}${l.image_url}" style="width:28px;height:28px;object-fit:cover;border-radius:4px;vertical-align:middle;margin-right:4px;" alt="${l.letter}">` : '';
+  let status = '';
+  if (l.bound_name) {
+    if (l.letter_sufficient) {
+      status = `<span style="color:var(--in);font-size:11px;margin-left:4px;">✓ 库${(l.letter_stock||0).toLocaleString()}</span>`;
+    } else {
+      status = `<span style="color:var(--out);font-size:11px;margin-left:4px;">✗ 差${(l.letter_shortage||0).toLocaleString()}</span>`;
+    }
+  } else {
+    status = `<span style="color:var(--text-3);font-size:11px;margin-left:4px;" title="点&quot;字母绑定&quot;页配置">⚠未绑</span>`;
+  }
+  return `<span style="display:inline-flex;align-items:center;margin-right:10px;margin-bottom:3px;">${img}<span class="badge badge-flag">${l.letter}·${l.qty.toLocaleString()}</span>${status}</span>`;
+}
+
+function _banner(ok, leftText, rightText) {
+  const bg = ok ? '#e8f8ee' : '#fdecec';
+  const fg = ok ? '#1f7a3c' : '#a03434';
+  const bd = ok ? '#b8e5c8' : '#f4c2c2';
+  const icon = ok ? '✓' : '✗';
+  return `<div style="padding:10px 14px;background:${bg};color:${fg};border:1px solid ${bd};border-radius:6px;margin-bottom:12px;">
+    ${icon} <strong>${leftText}</strong> · ${rightText}
+  </div>`;
+}
+
+// 一键出库工具栏:viewer 自动隐藏(.btn-out 的全局 CSS 规则)
+let _batchOutPending = [];
+function _batchOutBar(allRows) {
+  const usable = allRows.filter(r => r.sku && r.bound_name);
+  _batchOutPending = usable;
+  if (!usable.length) return '';
+  const totalQty = usable.reduce((s,r) => s + (r.qty||0), 0);
+  const unboundCount = allRows.length - usable.length;
+  const note = unboundCount > 0
+    ? `<span style="color:var(--text-3);font-size:12px;margin-left:8px;">${unboundCount} 行未绑/缺翻译,已跳过</span>`
+    : '';
+  return `<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+    <button class="btn btn-out" onclick="openBatchOutModal()">一键出库</button>
+    <span style="font-size:13px;color:var(--text-2);">将为 ${usable.length} 条记录生成出库流水 · 合计 ${totalQty.toLocaleString()} 件</span>
+    ${note}
+  </div>`;
+}
+
+function renderScheduleResult() {
+  const host = document.getElementById('schedule-result');
+  if (!host) return;
+  const data = scheduleResult;
+
+  if (data.not_found) {
+    host.innerHTML = `
+      <div class="empty">
+        <div class="empty-title">未找到 "${data.query}"</div>
+        <div style="color:var(--text-3);font-size:13px;">既不是已知 PO 号也不是已知货号(ITEM#)。确认输入正确,或检查是否已上传最新排期。</div>
+      </div>`;
+    return;
+  }
+
+  if (data.type === 'po') {
+    const ok = data.all_sufficient;
+    const banner = _banner(ok,
+      ok ? '库存充足' : '库存不足',
+      `PO ${data.po_no} · ${ok ? '计划' : '缺口'} ${(ok?data.total_scheduled:data.total_shortage).toLocaleString()}(计划 ${data.total_scheduled.toLocaleString()} / 库存 ${data.total_stock.toLocaleString()})`
+    );
+
+    // 把每个 item 的字母按"普通 / 稀有"拍平成两个行数组
+    const normalRows = [], rareRows = [];
+    data.items.forEach(it => {
+      (it.letters||[]).forEach(l => {
+        const base = {
+          item_code: it.item_code, sku: l.bound_sku || '',
+          letter: l.letter, image_url: l.image_url || '',
+          bound_name: l.bound_name || '',
+          flag: l.flag || it.flag || '',
+          inventory_flag: l.inventory_flag || '',
+          customer_sku: it.customer_sku || '',
+          name_cn: it.name_cn || '',
+          ratio_normal_text: it.ratio_normal_text || '',
+          ratio_rare_text: it.ratio_rare_text || '',
+        };
+        if (l.normal_qty != null && l.normal_qty > 0) {
+          normalRows.push({...base, _style:'normal', no_letter: l.no_letter, qty: l.normal_qty,
+            stock: l.normal_stock, shortage: l.normal_shortage, sufficient: l.normal_sufficient,
+            ratio_text: l.no_letter ? '(无字母款·按整数)' : (l.ratio_assumed ? '(未识别·默认归普通)' : it.ratio_normal_text)});
+        }
+        if (l.rare_qty != null && l.rare_qty > 0) {
+          rareRows.push({...base, _style:'rare', no_letter: l.no_letter, qty: l.rare_qty,
+            stock: l.rare_stock, shortage: l.rare_shortage, sufficient: l.rare_sufficient,
+            ratio_text: it.ratio_rare_text});
+        }
+      });
+    });
+
+    function renderStyleTable(title, rows, accent) {
+      if (!rows.length) return `<div style="margin-top:14px;color:var(--text-3);font-size:13px;">${title}:无需求</div>`;
+      return `
+        <div style="margin-top:18px;">
+          <div style="font-size:14px;font-weight:500;margin-bottom:8px;color:${accent};">${title} (${rows.length} 行)</div>
+          <div class="table-wrap"><table>
+            <thead><tr>
+              <th>货号</th><th>字母</th><th>物料</th><th>布标</th>
+              <th>比例</th>
+              <th class="num">计划</th><th class="num">库存</th>
+              <th class="num">缺口</th><th>够否</th>
+            </tr></thead>
+            <tbody>
+              ${rows.map(r => {
+                const img = r.image_url ? `<img src="${BASE_URL}${r.image_url}" style="width:24px;height:24px;object-fit:cover;border-radius:3px;vertical-align:middle;margin-right:4px;">` : '';
+                const stockTd = r.stock != null
+                  ? `<td class="num" style="color:${r.sufficient?'var(--in)':'var(--out)'};font-weight:500;">${r.stock.toLocaleString()}</td>`
+                  : `<td class="num" style="color:var(--text-3);">—</td>`;
+                const shortageTd = r.stock != null
+                  ? `<td class="num" style="color:${r.shortage?'var(--out)':'var(--text-3)'};">${r.shortage ? r.shortage.toLocaleString() : '—'}</td>`
+                  : `<td class="num" style="color:var(--text-3);">—</td>`;
+                const statusTd = !r.bound_name
+                  ? `<td><span style="color:var(--text-3);font-size:11px;">⚠ 未绑</span></td>`
+                  : r.sufficient
+                    ? `<td><span style="color:var(--in);">✓ 够</span></td>`
+                    : `<td><span style="color:var(--out);">✗ 差 ${(r.shortage||0).toLocaleString()}</span></td>`;
+                return `
+                  <tr>
+                    <td><code style="font-size:12px;">${r.sku || r.item_code}</code></td>
+                    <td>${img}${r.letter ? `<span class="badge badge-flag">${r.letter}</span>` : '<span style="color:var(--text-3);font-size:11px;">无字母</span>'}</td>
+                    <td>${r.bound_name || '<span style="color:var(--text-3);">未绑定</span>'}</td>
+                    <td style="font-size:12px;">${r.inventory_flag ? r.inventory_flag + (r.inventory_flag !== r.flag ? `<div style="font-size:10px;color:var(--text-3);">排期: ${r.flag}</div>` : '') : (r.flag || '—')}</td>
+                    <td style="font-size:11px;color:var(--text-3);">${r.ratio_text || '—'}</td>
+                    <td class="num">${r.qty.toLocaleString()}</td>
+                    ${stockTd}${shortageTd}${statusTd}
+                  </tr>
+                `;
+              }).join('')}
+            </tbody>
+          </table></div>
+        </div>
+      `;
+    }
+
+    host.innerHTML = banner +
+      _batchOutBar([...normalRows, ...rareRows]) +
+      renderStyleTable('普通款需求', normalRows, 'var(--in)') +
+      renderStyleTable('稀有款需求', rareRows, 'var(--out)');
+    return;
+  }
+
+  if (data.type === 'sku') {
+    const ok = data.sufficient;
+    const matchLabel = data.matched_by === 'customer_sku' ? '客户 SKU(F 列)' : 'ITEM#(G 列)';
+    const banner = _banner(ok,
+      ok ? '库存覆盖全部排期' : '库存不足以覆盖全部排期',
+      `匹配 ${matchLabel} = ${data.item_code} · 排期合计 ${data.total_scheduled.toLocaleString()} · 当前库存 ${data.current_stock.toLocaleString()}` + (ok ? '' : ` · 缺口 ${data.shortage.toLocaleString()}`)
+    );
+
+    // 把 pos.letters 拍平成普通 / 稀有两表
+    const normalRows = [], rareRows = [];
+    data.pos.forEach(p => {
+      (p.letters||[]).forEach(l => {
+        const base = {
+          po_no: p.po_no, item_code: p.item_code, sku: l.bound_sku || '',
+          letter: l.letter, image_url: l.image_url || '',
+          bound_name: l.bound_name || '',
+          flag: l.flag || p.flag || '',
+          inventory_flag: l.inventory_flag || '',
+          customer_sku: p.customer_sku || '',
+          plan_ship_date: p.plan_ship_date || '',
+          customer: p.customer || '',
+        };
+        if (l.normal_qty != null && l.normal_qty > 0) {
+          normalRows.push({...base, _style:'normal', no_letter: l.no_letter, qty: l.normal_qty,
+            stock: l.normal_stock, shortage: l.normal_shortage, sufficient: l.normal_sufficient,
+            ratio_text: l.no_letter ? '(无字母款·按整数)' : (l.ratio_assumed ? '(未识别·默认归普通)' : (p.ratio_normal_text || ''))});
+        }
+        if (l.rare_qty != null && l.rare_qty > 0) {
+          rareRows.push({...base, _style:'rare', no_letter: l.no_letter, qty: l.rare_qty,
+            stock: l.rare_stock, shortage: l.rare_shortage, sufficient: l.rare_sufficient,
+            ratio_text: p.ratio_rare_text || ''});
+        }
+      });
+    });
+
+    function renderSkuStyleTable(title, rows, accent) {
+      if (!rows.length) return `<div style="margin-top:14px;color:var(--text-3);font-size:13px;">${title}:无需求</div>`;
+      return `
+        <div style="margin-top:18px;">
+          <div style="font-size:14px;font-weight:500;margin-bottom:8px;color:${accent};">${title} (${rows.length} 行)</div>
+          <div class="table-wrap"><table>
+            <thead><tr>
+              <th>PO 号</th><th>字母</th><th>物料</th><th>布标</th>
+              <th>客户 SKU</th><th>出货期</th>
+              <th>比例</th>
+              <th class="num">计划</th><th class="num">库存</th>
+              <th class="num">缺口</th><th>够否</th>
+            </tr></thead>
+            <tbody>
+              ${rows.map(r => {
+                const img = r.image_url ? `<img src="${BASE_URL}${r.image_url}" style="width:24px;height:24px;object-fit:cover;border-radius:3px;vertical-align:middle;margin-right:4px;">` : '';
+                const stockTd = r.stock != null
+                  ? `<td class="num" style="color:${r.sufficient?'var(--in)':'var(--out)'};font-weight:500;">${r.stock.toLocaleString()}</td>`
+                  : `<td class="num" style="color:var(--text-3);">—</td>`;
+                const shortageTd = r.stock != null
+                  ? `<td class="num" style="color:${r.shortage?'var(--out)':'var(--text-3)'};">${r.shortage ? r.shortage.toLocaleString() : '—'}</td>`
+                  : `<td class="num" style="color:var(--text-3);">—</td>`;
+                const statusTd = !r.bound_name
+                  ? `<td><span style="color:var(--text-3);font-size:11px;">⚠ 未绑</span></td>`
+                  : r.sufficient
+                    ? `<td><span style="color:var(--in);">✓ 够</span></td>`
+                    : `<td><span style="color:var(--out);">✗ 差 ${(r.shortage||0).toLocaleString()}</span></td>`;
+                return `
+                  <tr>
+                    <td><code style="font-size:12px;">${r.po_no}</code></td>
+                    <td>${img}${r.letter ? `<span class="badge badge-flag">${r.letter}</span>` : '<span style="color:var(--text-3);font-size:11px;">无字母</span>'}</td>
+                    <td>${r.bound_name || '<span style="color:var(--text-3);">未绑定</span>'}</td>
+                    <td style="font-size:12px;">${r.inventory_flag ? r.inventory_flag + (r.inventory_flag !== r.flag ? `<div style="font-size:10px;color:var(--text-3);">排期: ${r.flag}</div>` : '') : (r.flag || '—')}</td>
+                    <td><code style="font-size:11px;color:var(--text-2);">${r.customer_sku||'—'}</code></td>
+                    <td style="font-size:12px;color:var(--text-2);">${r.plan_ship_date||'—'}</td>
+                    <td style="font-size:11px;color:var(--text-3);">${r.ratio_text || '—'}</td>
+                    <td class="num">${r.qty.toLocaleString()}</td>
+                    ${stockTd}${shortageTd}${statusTd}
+                  </tr>
+                `;
+              }).join('')}
+            </tbody>
+          </table></div>
+        </div>
+      `;
+    }
+
+    host.innerHTML = banner +
+      _batchOutBar([...normalRows, ...rareRows]) +
+      renderSkuStyleTable('普通款需求', normalRows, 'var(--in)') +
+      renderSkuStyleTable('稀有款需求', rareRows, 'var(--out)');
+    return;
+  }
+
+  host.innerHTML = '<div class="empty"><div class="empty-title">未知的查询结果</div></div>';
+}
+
+function openInModal(preset) {
+  editingInId = preset?.id || null;
+  const isEditing = !!editingInId;
+  const today = new Date().toISOString().slice(0,10);
+  const presetCat = preset?.category || currentCategory || 'plush';
+  const allNames = getAllSkuNames(presetCat);
+  document.getElementById('modal-host').innerHTML = `
+    <div class="modal-mask" onclick="if(event.target===this)closeModal()">
+      <div class="modal">
+        <div class="modal-title">${isEditing ? '编辑入库' : '录入入库'}</div>
+        <div class="modal-sub">字段:品类 / 日期 / 单号 / 货号 / 物料名称 / 款式 / 布标 / 数量</div>
+        <div class="form-grid">
+          <div class="form-row">
+            <label class="form-label">品类<span class="req">*</span></label>
+            <select id="f-category" onchange="onCategoryChange()">
+              <option value="plush" ${presetCat==='plush'?'selected':''}>毛绒</option>
+              <option value="costume" ${presetCat==='costume'?'selected':''}>戏服</option>
+            </select>
+          </div>
+          <div class="form-row">
+            <label class="form-label">日期<span class="req">*</span></label>
+            <input type="date" id="f-date" value="${preset?.date || today}">
+          </div>
+          <div class="form-row">
+            <label class="form-label">单号<span class="req">*</span></label>
+            <input id="f-bill" value="${preset?.billNo||''}">
+          </div>
+          <div class="form-row">
+            <label class="form-label">货号<span class="req">*</span></label>
+            <input id="f-sku" list="sku-dl" value="${preset?.sku||''}">
+            <datalist id="sku-dl">${Object.keys(allNames).map(s => `<option value="${s}">`).join('')}</datalist>
+          </div>
+          <div class="form-row">
+            <label class="form-label">物料名称</label>
+            <input id="f-name" value="${preset?.name||''}">
+          </div>
+          <div class="form-row" id="style-row">
+            <label class="form-label"><span id="style-label">${presetCat==='costume'?'类型':'款式'}</span><span id="style-req" class="req" style="${presetCat==='costume'?'display:none':''}">*</span></label>
+            ${presetCat==='plush'
+              ? `<select id="f-style">
+                  <option value="normal" ${preset?.style!=='rare'?'selected':''}>普通款</option>
+                  <option value="rare" ${preset?.style==='rare'?'selected':''}>稀有款</option>
+                </select>`
+              : `<input id="f-style" placeholder="如: M 码 / 大号 / 童装" value="${preset?.style||''}">`}
+          </div>
+          <div class="form-row" id="flag-row">
+            <label class="form-label">布标<span class="req">*</span></label>
+            <select id="f-flag">
+              <option value="">请选择</option>
+              ${state.flags.map(f => `<option ${preset?.flag===f?'selected':''}>${f}</option>`).join('')}
+            </select>
+          </div>
+          <div class="form-row full">
+            <label class="form-label">数量<span class="req">*</span></label>
+            <input id="f-qty" type="number" min="1" placeholder="数量" value="${preset?.qty||''}">
+          </div>
+        </div>
+        <div class="form-actions">
+          <button class="btn" onclick="closeModal()">取消</button>
+          ${isEditing ? '' : '<button class="btn" onclick="clearInForm()">清空</button>'}
+          <button class="btn btn-in" onclick="saveIn(false)">保存</button>
+          ${isEditing ? '' : '<button class="btn btn-primary" onclick="saveIn(true)">保存并继续录入</button>'}
+        </div>
+      </div>
+    </div>
+  `;
+  setTimeout(() => {
+    const skuEl = document.getElementById('f-sku');
+    skuEl.addEventListener('change', () => {
+      const name = allNames[skuEl.value];
+      if (name) document.getElementById('f-name').value = name;
+    });
+    // 初始打开时,根据当前品类立即隐藏/显示布标行
+    onCategoryChange();
+    (preset?.sku ? document.getElementById('f-qty') : document.getElementById('f-bill')).focus();
+  }, 50);
+}
+
+// 品类切换时重建款式输入框(毛绒下拉 / 戏服自由文本)
+function onCategoryChange() {
+  const cat = document.getElementById('f-category').value;
+  const styleRow = document.getElementById('style-row');
+  const styleLabel = document.getElementById('style-label');
+  if (styleLabel) styleLabel.textContent = cat === 'costume' ? '类型' : '款式';
+  const styleReq = document.getElementById('style-req');
+  if (styleReq) styleReq.style.display = cat === 'costume' ? 'none' : '';
+
+  // 戏服时隐藏布标行(戏服没有布标这个字段)
+  const flagRow = document.getElementById('flag-row');
+  if (flagRow) {
+    flagRow.style.display = cat === 'costume' ? 'none' : '';
+    // 戏服时清空 flag 值,避免误传
+    const flagEl = document.getElementById('f-flag');
+    if (flagEl && cat === 'costume') flagEl.value = '';
+  }
+
+  if (!styleRow) return;
+  const oldVal = document.getElementById('f-style')?.value || '';
+  const inputs = styleRow.querySelectorAll('select, input');
+  inputs.forEach(el => { if (el.id === 'f-style') el.remove(); });
+  let newEl;
+  if (cat === 'plush') {
+    newEl = document.createElement('select');
+    newEl.id = 'f-style';
+    newEl.innerHTML = '<option value="normal">普通款</option><option value="rare">稀有款</option>';
+    newEl.value = (oldVal === 'rare' ? 'rare' : 'normal');
+  } else {
+    newEl = document.createElement('input');
+    newEl.id = 'f-style';
+    newEl.placeholder = '如: M 码 / 大号 / 童装';
+    newEl.value = (oldVal && oldVal !== 'normal' && oldVal !== 'rare') ? oldVal : '';
+  }
+  styleRow.appendChild(newEl);
+}
+
+function openOutModal(preset) {
+  editingOutId = preset?.id || null;
+  const isEditing = !!editingOutId;
+  const today = new Date().toISOString().slice(0,10);
+  const presetCat = preset?.category || currentCategory || 'plush';
+  const allNames = getAllSkuNames(presetCat);
+  document.getElementById('modal-host').innerHTML = `
+    <div class="modal-mask" onclick="if(event.target===this)closeModal()">
+      <div class="modal">
+        <div class="modal-title">${isEditing ? '编辑出库' : '录入出库'}</div>
+        <div class="modal-sub">字段:品类 / 日期 / 单号 / PO号 / 领货人 / 货号 / 物料名称 / 款式 / 布标 / 数量</div>
+        <div class="form-grid">
+          <div class="form-row">
+            <label class="form-label">品类<span class="req">*</span></label>
+            <select id="f-category" onchange="onCategoryChange()">
+              <option value="plush" ${presetCat==='plush'?'selected':''}>毛绒</option>
+              <option value="costume" ${presetCat==='costume'?'selected':''}>戏服</option>
+            </select>
+          </div>
+          <div class="form-row">
+            <label class="form-label">日期<span class="req">*</span></label>
+            <input type="date" id="f-date" value="${preset?.date || today}">
+          </div>
+          <div class="form-row">
+            <label class="form-label">单号<span class="req">*</span></label>
+            <input id="f-bill" value="${preset?.billNo||''}">
+          </div>
+          <div class="form-row">
+            <label class="form-label">PO号</label>
+            <input id="f-po" value="${preset?.po||''}">
+          </div>
+          <div class="form-row">
+            <label class="form-label">领货人</label>
+            <input id="f-picker" value="${preset?.picker||''}">
+          </div>
+          <div class="form-row">
+            <label class="form-label">货号<span class="req">*</span></label>
+            <input id="f-sku" list="sku-dl" value="${preset?.sku||''}">
+            <datalist id="sku-dl">${Object.keys(allNames).map(s => `<option value="${s}">`).join('')}</datalist>
+          </div>
+          <div class="form-row">
+            <label class="form-label">物料名称</label>
+            <input id="f-name" value="${preset?.name||''}">
+          </div>
+          <div class="form-row" id="style-row">
+            <label class="form-label"><span id="style-label">${presetCat==='costume'?'类型':'款式'}</span><span id="style-req" class="req" style="${presetCat==='costume'?'display:none':''}">*</span></label>
+            ${presetCat==='plush'
+              ? `<select id="f-style">
+                  <option value="normal" ${preset?.style!=='rare'?'selected':''}>普通款</option>
+                  <option value="rare" ${preset?.style==='rare'?'selected':''}>稀有款</option>
+                </select>`
+              : `<input id="f-style" placeholder="如: M 码" value="${preset?.style||''}">`}
+          </div>
+          <div class="form-row" id="flag-row">
+            <label class="form-label">布标<span class="req">*</span></label>
+            <select id="f-flag">
+              <option value="">请选择</option>
+              ${state.flags.map(f => `<option ${preset?.flag===f?'selected':''}>${f}</option>`).join('')}
+            </select>
+          </div>
+          <div class="form-row full">
+            <label class="form-label">数量<span class="req">*</span></label>
+            <input id="f-qty" type="number" min="1" placeholder="数量" value="${preset?.qty||''}">
+            <div id="stock-hint" style="font-size:12px;color:var(--text-3);margin-top:4px;"></div>
+          </div>
+        </div>
+        <div class="form-actions">
+          <button class="btn" onclick="closeModal()">取消</button>
+          ${isEditing ? '' : '<button class="btn" onclick="clearOutForm()">清空</button>'}
+          <button class="btn btn-out" onclick="saveOut(false)">保存</button>
+          ${isEditing ? '' : '<button class="btn btn-primary" onclick="saveOut(true)">保存并继续录入</button>'}
+        </div>
+      </div>
+    </div>
+  `;
+  setTimeout(() => {
+    const skuEl = document.getElementById('f-sku');
+    const flagEl = document.getElementById('f-flag');
+    const updateHint = () => {
+      const cat = document.getElementById('f-category').value;
+      const styleEl = document.getElementById('f-style');
+      const nameEl = document.getElementById('f-name');
+      const sku = skuEl.value, style = styleEl?.value || '';
+      const name = nameEl?.value?.trim() || '';
+      const flag = cat === 'costume' ? '' : (flagEl?.value || '');
+      // 戏服: 只要 sku+style 就能查;毛绒: 需要 sku+style+flag
+      const ready = cat === 'costume' ? (sku && style) : (sku && style && flag);
+      if (ready) {
+        const stockMap = getStockMap();
+        const key = `${cat}|${sku}|${name}|${style}|${flag}`;
+        const stock = stockMap[key]?.stock || 0;
+        document.getElementById('stock-hint').innerHTML = `当前库存: <strong style="color:${stock<100?'var(--out)':'var(--in)'};">${stock.toLocaleString()}</strong>` + (name ? '' : ' <span style="color:var(--text-3);font-size:11px;">(填写物料名后会按 4 维精确查)</span>');
+      } else {
+        document.getElementById('stock-hint').textContent = '';
+      }
+    };
+    skuEl.addEventListener('change', () => {
+      const name = allNames[skuEl.value];
+      if (name) document.getElementById('f-name').value = name;
+      updateHint();
+    });
+    flagEl.addEventListener('change', updateHint);
+    document.getElementById('f-style')?.addEventListener('change', updateHint);
+    document.getElementById('f-name')?.addEventListener('input', updateHint);
+    // 初始打开时,根据当前品类立即隐藏/显示布标行
+    onCategoryChange();
+    updateHint();
+    (preset?.sku ? document.getElementById('f-qty') : document.getElementById('f-bill')).focus();
+  }, 50);
+}
+
+function getAllSkuNames(category) {
+  const map = {};
+  const match = (r) => !category || category === 'all' || (r.category || 'plush') === category;
+  state.inRecords.forEach(r => { if (r.name && match(r)) map[r.sku] = r.name; });
+  state.outRecords.forEach(r => { if (r.name && match(r) && !map[r.sku]) map[r.sku] = r.name; });
+  return map;
+}
+
+function clearInForm() {
+  // 清空除品类、日期外的所有字段,焦点回到单号
+  document.getElementById('f-bill').value = '';
+  document.getElementById('f-sku').value = '';
+  document.getElementById('f-name').value = '';
+  document.getElementById('f-qty').value = '';
+  const flagEl = document.getElementById('f-flag');
+  if (flagEl) flagEl.value = '';
+  const styleEl = document.getElementById('f-style');
+  if (styleEl) styleEl.value = styleEl.tagName === 'SELECT' ? 'normal' : '';
+  document.getElementById('f-bill').focus();
+}
+
+async function saveIn(keepGoing) {
+  const category = document.getElementById('f-category')?.value || currentCategory;
+  const date = document.getElementById('f-date').value;
+  const billNo = document.getElementById('f-bill').value.trim();
+  const sku = document.getElementById('f-sku').value.trim();
+  const name = document.getElementById('f-name').value.trim();
+  const style = document.getElementById('f-style').value.trim();
+  // 戏服没有布标字段,自动设为空字符串
+  const flag = category === 'costume' ? '' : document.getElementById('f-flag').value;
+  const qty = parseInt(document.getElementById('f-qty').value);
+
+  // 校验:戏服 style/flag 都可空,毛绒必须有 style+flag
+  const flagOk = category === 'costume' ? true : !!flag;
+  const styleOk = category === 'costume' ? true : !!style;
+  if (!date || !billNo || !sku || !styleOk || !flagOk || !qty || qty <= 0) {
+    alert('请填写所有必填字段(标 * 的)'); return;
+  }
+
+  try {
+    const body = { category, date, billNo, sku, name, style, flag, qty };
+    if (editingInId) {
+      await api('/api/in/' + editingInId, { method: 'PUT', body });
+    } else {
+      await api('/api/in', { method: 'POST', body });
+    }
+    await loadAllData();
+    if (keepGoing && !editingInId) {
+      openInModal({ category, billNo, sku, name, style, flag });
+    } else {
+      closeModal();
+      if (category !== currentCategory && currentCategory !== 'all') {
+        switchCategory(category);  // 自动切到对应品类,否则记录被过滤挡掉
+      } else {
+        render();
+      }
+    }
+  } catch (err) {
+    alert('保存失败: ' + err.message);
+  }
+}
+
+function clearOutForm() {
+  // 清空除品类、日期外的所有字段,焦点回到单号
+  document.getElementById('f-bill').value = '';
+  document.getElementById('f-po').value = '';
+  document.getElementById('f-picker').value = '';
+  document.getElementById('f-sku').value = '';
+  document.getElementById('f-name').value = '';
+  document.getElementById('f-qty').value = '';
+  const flagEl = document.getElementById('f-flag');
+  if (flagEl) flagEl.value = '';
+  const styleEl = document.getElementById('f-style');
+  if (styleEl) styleEl.value = styleEl.tagName === 'SELECT' ? 'normal' : '';
+  const hintEl = document.getElementById('stock-hint');
+  if (hintEl) hintEl.textContent = '';
+  document.getElementById('f-bill').focus();
+}
+
+async function saveOut(keepGoing) {
+  const category = document.getElementById('f-category')?.value || currentCategory;
+  const date = document.getElementById('f-date').value;
+  const billNo = document.getElementById('f-bill').value.trim();
+  const po = document.getElementById('f-po').value.trim();
+  const picker = document.getElementById('f-picker').value.trim();
+  const sku = document.getElementById('f-sku').value.trim();
+  const name = document.getElementById('f-name').value.trim();
+  const style = document.getElementById('f-style').value.trim();
+  // 戏服没有布标字段,自动设为空字符串
+  const flag = category === 'costume' ? '' : document.getElementById('f-flag').value;
+  const qty = parseInt(document.getElementById('f-qty').value);
+
+  // 校验:戏服 style/flag 都可空,毛绒必须有 style+flag
+  const flagOk = category === 'costume' ? true : !!flag;
+  const styleOk = category === 'costume' ? true : !!style;
+  if (!date || !billNo || !sku || !styleOk || !flagOk || !qty || qty <= 0) {
+    alert('请填写所有必填字段(标 * 的)'); return;
+  }
+
+  const stockMap = getStockMap();
+  const key = `${category}|${sku}|${name||''}|${style}|${flag}`;
+  const currentStock = stockMap[key]?.stock || 0;
+  if (qty > currentStock) {
+    // 戏服没有布标,提示文本不显示布标
+    const nameDesc = name ? `/${name}` : '';
+    const desc = category === 'costume' ? `${sku}${nameDesc} (${style})` : `${sku}${nameDesc} (${style}/${flag})`;
+    if (!confirm(`当前 ${desc} 库存只有 ${currentStock},出库 ${qty} 将变为负数。继续?`)) return;
+  }
+
+  try {
+    const body = { category, date, billNo, po, picker, sku, name, style, flag, qty };
+    if (editingOutId) {
+      await api('/api/out/' + editingOutId, { method: 'PUT', body });
+    } else {
+      await api('/api/out', { method: 'POST', body });
+    }
+    await loadAllData();
+    if (keepGoing && !editingOutId) {
+      openOutModal({ category, billNo, po, picker, sku, name, style, flag });
+    } else {
+      closeModal();
+      if (category !== currentCategory && currentCategory !== 'all') {
+        switchCategory(category);
+      } else {
+        render();
+      }
+    }
+  } catch (err) {
+    alert('保存失败: ' + err.message);
+  }
+}
+
+function openBatchOutModal() {
+  if (!_batchOutPending.length) { alert('没有可出库的记录'); return; }
+  const today = new Date().toISOString().slice(0,10);
+  const fallbackPo = scheduleResult?.type === 'po' ? (scheduleResult.po_no || '') : '';
+  const totalQty = _batchOutPending.reduce((s,r) => s + (r.qty||0), 0);
+  document.getElementById('modal-host').innerHTML = `
+    <div class="modal-mask" onclick="if(event.target===this)closeModal()">
+      <div class="modal" style="max-width:980px;">
+        <div class="modal-title">一键出库</div>
+        <div class="modal-sub">日期固定为今天,所有勾选行同一单号/同一领货人;库存不足的行会标红但仍可勾选(允许出成负库存)</div>
+        <div class="form-grid">
+          <div class="form-row">
+            <label class="form-label">日期</label>
+            <input type="date" id="bo-date" value="${today}" readonly>
+          </div>
+          <div class="form-row">
+            <label class="form-label">出库单号<span class="req">*</span></label>
+            <input id="bo-bill" placeholder="如 OUT-20260514-001">
+          </div>
+          <div class="form-row">
+            <label class="form-label">领货人<span class="req">*</span></label>
+            <input id="bo-picker" placeholder="如 ZURU / 张三">
+          </div>
+        </div>
+        <div style="margin-top:14px;font-size:13px;color:var(--text-2);">勾选要出库的行(默认全勾,合计 ${totalQty.toLocaleString()} 件):</div>
+        <div class="table-wrap" style="margin-top:8px;max-height:400px;overflow:auto;">
+          <table>
+            <thead><tr>
+              <th style="width:36px;"><input type="checkbox" id="bo-all" checked onchange="document.querySelectorAll('.bo-chk').forEach(c=>c.checked=this.checked)"></th>
+              <th>PO 号</th><th>货号</th><th>字母</th><th>物料</th><th>款式</th><th>布标</th>
+              <th class="num">出库</th><th class="num">库存</th><th>状态</th>
+            </tr></thead>
+            <tbody>
+              ${_batchOutPending.map((r,i) => `
+                <tr>
+                  <td><input type="checkbox" class="bo-chk" data-idx="${i}" checked></td>
+                  <td><code style="font-size:12px;">${r.po_no || fallbackPo || '—'}</code></td>
+                  <td><code style="font-size:12px;">${r.sku}</code></td>
+                  <td><span class="badge badge-flag">${r.letter}</span></td>
+                  <td>${r.bound_name}</td>
+                  <td>${r._style === 'rare' ? '稀有款' : '普通款'}</td>
+                  <td style="font-size:12px;">${r.inventory_flag || r.flag || '—'}</td>
+                  <td class="num">${r.qty.toLocaleString()}</td>
+                  <td class="num" style="color:${r.sufficient?'var(--in)':'var(--out)'};">${r.stock != null ? r.stock.toLocaleString() : '—'}</td>
+                  <td>${r.sufficient ? '<span style="color:var(--in);">✓ 够</span>' : `<span style="color:var(--out);">✗ 差 ${(r.shortage||0).toLocaleString()}</span>`}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+        <div class="form-actions">
+          <button class="btn" onclick="closeModal()">取消</button>
+          <button class="btn btn-out" onclick="submitBatchOut()">确认出库</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+async function submitBatchOut() {
+  const date = document.getElementById('bo-date').value;
+  const billNo = document.getElementById('bo-bill').value.trim();
+  const picker = document.getElementById('bo-picker').value.trim();
+  if (!billNo) { alert('请填写出库单号'); return; }
+  if (!picker) { alert('请填写领货人'); return; }
+  const checked = [...document.querySelectorAll('.bo-chk:checked')].map(c => parseInt(c.dataset.idx));
+  if (!checked.length) { alert('请至少勾选一条记录'); return; }
+  const fallbackPo = scheduleResult?.type === 'po' ? (scheduleResult.po_no || '') : '';
+  const records = checked.map(i => {
+    const r = _batchOutPending[i];
+    return {
+      category: 'plush',
+      date, billNo, picker,
+      po: r.po_no || fallbackPo,
+      sku: r.sku,
+      name: r.bound_name,
+      style: r._style || 'normal',
+      flag: r.inventory_flag || r.flag || '',
+      qty: r.qty,
+    };
+  });
+  // 库存不足提醒
+  const shortRows = checked.map(i => _batchOutPending[i]).filter(r => !r.sufficient);
+  if (shortRows.length) {
+    if (!confirm(`有 ${shortRows.length} 条记录库存不足,出库后将变为负库存。确认继续?`)) return;
+  }
+  try {
+    const res = await api('/api/out/batch', { method: 'POST', body: { records } });
+    await loadAllData();
+    closeModal();
+    alert(`成功生成 ${res.count} 条出库流水`);
+    // 重新搜索,刷新库存视图
+    const q = document.getElementById('schedule-po')?.value?.trim();
+    if (q) { querySchedule(); } else { render(); }
+  } catch (err) {
+    alert('批量出库失败: ' + err.message);
+  }
+}
+
+function closeModal() { document.getElementById('modal-host').innerHTML = ''; }
+
+async function deleteRecord(type, id) {
+  if (!confirm('确定删除这条记录吗?库存会自动重算')) return;
+  try {
+    await api(`/api/${type}/${id}`, { method: 'DELETE' });
+    await loadAllData();
+    render();
+  } catch (err) {
+    alert('删除失败: ' + err.message);
+  }
+}
+
+function toggleSelect(id) {
+  if (selectedRecords.has(id)) selectedRecords.delete(id);
+  else selectedRecords.add(id);
+  render();
+}
+
+function toggleSelectAll(type) {
+  let filtered = filterByCategory(type === 'in' ? state.inRecords : state.outRecords);
+  if (filters.date) filtered = filtered.filter(r => r.date === filters.date);
+  if (filters.sku) filtered = filtered.filter(r => r.sku.toLowerCase().includes(filters.sku.toLowerCase()));
+  if (filters.flag) filtered = filtered.filter(r => r.flag === filters.flag);
+  if (type === 'out' && filters.po) filtered = filtered.filter(r => (r.po||'').toLowerCase().includes(filters.po.toLowerCase()));
+  const allChecked = filtered.length > 0 && filtered.every(r => selectedRecords.has(r.id));
+  if (allChecked) filtered.forEach(r => selectedRecords.delete(r.id));
+  else filtered.forEach(r => selectedRecords.add(r.id));
+  render();
+}
+
+async function deleteSelected(type) {
+  const ids = [...selectedRecords];
+  if (!ids.length) return;
+  if (!confirm(`确定删除选中的 ${ids.length} 条${type==='in'?'入库':'出库'}记录吗?库存会自动重算`)) return;
+  try {
+    const res = await api(`/api/${type}/batch-delete`, { method: 'POST', body: { ids } });
+    selectedRecords.clear();
+    await loadAllData();
+    render();
+    alert(`已删除 ${res.count} 条记录`);
+  } catch (err) {
+    alert('批量删除失败: ' + err.message);
+  }
+}
+
+function openEdit(type, id) {
+  // 根据 id 在 state 中找到记录,然后用 preset(含 id)打开对应弹窗触发编辑模式
+  const records = type === 'in' ? state.inRecords : state.outRecords;
+  const r = records.find(x => x.id === id);
+  if (!r) { alert('记录不存在(请刷新页面)'); return; }
+  const preset = {
+    id: r.id, category: r.category, date: r.date,
+    billNo: r.billNo, sku: r.sku, name: r.name,
+    style: r.style, flag: r.flag, qty: r.qty
+  };
+  if (type === 'out') { preset.po = r.po; preset.picker = r.picker; }
+  (type === 'in' ? openInModal : openOutModal)(preset);
+}
+
+function exportSku(sku) {
+  // 调后端生成多 sheet xlsx(入库 / 出库),矩阵布局:列 = (款式, 布标)
+  window.location.href = BASE_URL + '/api/export/sku/' + encodeURIComponent(sku);
+}
+
+function exportAll() {
+  const inRows = [['日期','单号','货号','物料名称','款式','布标','数量']];
+  [...state.inRecords].sort((a,b)=>a.date.localeCompare(b.date)||a.id-b.id).forEach(r => {
+    inRows.push([r.date, r.billNo, r.sku, r.name||'', styleLabel(r.style), r.flag, r.qty]);
+  });
+
+  const outRows = [['日期','单号','PO号','领货人','货号','物料名称','款式','布标','数量']];
+  [...state.outRecords].sort((a,b)=>a.date.localeCompare(b.date)||a.id-b.id).forEach(r => {
+    outRows.push([r.date, r.billNo, r.po||'', r.picker||'', r.sku, r.name||'', styleLabel(r.style), r.flag, r.qty]);
+  });
+
+  const stockRows = [['货号','物料名称','款式','布标','当前库存','累计入库','累计出库','最近入库','最近出库']];
+  Object.values(getStockMap()).sort((a,b)=>(a.sku+(a.name||'')+a.style+a.flag).localeCompare(b.sku+(b.name||'')+b.style+b.flag)).forEach(v => {
+    stockRows.push([v.sku, v.name||'', styleLabel(v.style), v.flag, v.stock, v.inTotal, v.outTotal, v.lastIn||'', v.lastOut||'']);
+  });
+
+  const date = new Date().toISOString().slice(0,10);
+  downloadCsv(stockRows, `华登毛绒_库存总览_${date}.csv`);
+  setTimeout(() => downloadCsv(inRows, `华登毛绒_入库流水_${date}.csv`), 300);
+  setTimeout(() => downloadCsv(outRows, `华登毛绒_出库流水_${date}.csv`), 600);
+}
+
+function downloadCsv(rows, filename) {
+  const BOM = '\uFEFF';
+  const csv = BOM + rows.map(row =>
+    row.map(cell => {
+      const s = String(cell);
+      if (s.includes(',') || s.includes('"') || s.includes('\n')) return '"' + s.replace(/"/g,'""') + '"';
+      return s;
+    }).join(',')
+  ).join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename; a.click();
+  URL.revokeObjectURL(url);
+}
+
+// ==================== 启动 ====================
+
+const ROLE_NAMES = {
+  admin: '主管',
+  operator: '仓管员',
+  viewer: '游客'
+};
+
+(async function init() {
+  await loadAllData();
+  if (state.currentUser) {
+    const roleEl = document.getElementById('user-role');
+    if (roleEl) roleEl.textContent = ROLE_NAMES[state.currentUser.role] || state.currentUser.role;
+    const nameEl = document.getElementById('user-name');
+    if (nameEl) nameEl.textContent = state.currentUser.display_name || state.currentUser.username;
+  }
+  switchCategory('plush');  // 默认毛绒
+  navigate('stock');
+})();
+</script>
+</body>
+</html>

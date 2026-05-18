@@ -238,6 +238,21 @@ for match in re.findall(r'^\s*-\s+\./([^:]+):', content, re.MULTILINE):
             print(f'  [chmod 777] {path} (was {oct(cur)})')
     except OSError as e:
         print(f'  [WARN] chmod {path}: {e}', file=sys.stderr)
+    # 文件级权限：data 目录下的所有文件，确保容器内 appuser (UID 100) 能读写
+    # 之前 huadeng-maorong 初始 db 是 git 跟踪/CI root 拉的，appuser 启动时 CREATE TABLE 直接崩。
+    # 用 OR 加权，不降级。pgsql 等基础设施不在 apps/ 下不会被走到。
+    for root_dir, dirs, files in os.walk(path):
+        for f in files:
+            fp = os.path.join(root_dir, f)
+            try:
+                fst = os.stat(fp)
+                fmode = stat.S_IMODE(fst.st_mode)
+                want = fmode | 0o666
+                if fmode != want:
+                    os.chmod(fp, want)
+                    print(f'  [chmod {oct(want)}] {fp} (was {oct(fmode)})')
+            except OSError as e:
+                print(f'  [WARN] chmod file {fp}: {e}', file=sys.stderr)
 " || true
 
 # ─── Step 5: 备份数据库（只在影响 db 或全量时）───

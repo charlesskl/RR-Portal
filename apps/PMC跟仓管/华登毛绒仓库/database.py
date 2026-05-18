@@ -183,18 +183,6 @@ def init_database():
         ''')
         cur.execute('CREATE INDEX IF NOT EXISTS idx_lb_sku_letter ON letter_bindings(sku, letter)')
 
-        # 货号别名:子货号 → 父货号(自动复用父货号的字母绑定 + 库存)
-        cur.execute('''
-            CREATE TABLE IF NOT EXISTS sku_aliases (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                alias_prefix   TEXT NOT NULL UNIQUE,
-                primary_prefix TEXT NOT NULL,
-                created_by TEXT,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        cur.execute('CREATE INDEX IF NOT EXISTS idx_sa_primary ON sku_aliases(primary_prefix)')
-
         # 布标映射:(排期布标, 国家) → 入库实际布标
         cur.execute('''
             CREATE TABLE IF NOT EXISTS flag_mappings (
@@ -716,38 +704,6 @@ def delete_letter_binding(binding_id):
     """删除绑定"""
     with db_cursor() as cur:
         cur.execute('DELETE FROM letter_bindings WHERE id=?', (binding_id,))
-        return cur.rowcount
-
-
-# ==================== 货号别名 ====================
-
-def query_all_sku_aliases():
-    """列出所有 (子货号 → 父货号) 别名"""
-    with db_cursor() as cur:
-        cur.execute('SELECT * FROM sku_aliases ORDER BY primary_prefix, alias_prefix')
-        return [dict(r) for r in cur.fetchall()]
-
-
-def get_sku_alias_map():
-    """返回 {alias_prefix: primary_prefix} 全表字典"""
-    with db_cursor() as cur:
-        cur.execute('SELECT alias_prefix, primary_prefix FROM sku_aliases')
-        return {r['alias_prefix']: r['primary_prefix'] for r in cur.fetchall()}
-
-
-def insert_sku_alias(alias_prefix, primary_prefix, username):
-    """新增别名,UNIQUE(alias_prefix) 冲突会抛 IntegrityError"""
-    with db_cursor() as cur:
-        cur.execute('''
-            INSERT INTO sku_aliases (alias_prefix, primary_prefix, created_by)
-            VALUES (?, ?, ?)
-        ''', (alias_prefix, primary_prefix, username))
-        return cur.lastrowid
-
-
-def delete_sku_alias(alias_id):
-    with db_cursor() as cur:
-        cur.execute('DELETE FROM sku_aliases WHERE id=?', (alias_id,))
         return cur.rowcount
 
 

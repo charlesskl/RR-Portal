@@ -9,7 +9,3 @@ backup/
 uploads/
 # 根目录野生 db 文件(正式 db 在 data/inventory.db)
 /inventory.db
-# 动态生成的字母款式图片
-static/schedule_images/*.png
-data/*
-!data/.gitkeep

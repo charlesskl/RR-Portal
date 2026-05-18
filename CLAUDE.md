@@ -31,7 +31,8 @@ RR-Portal/
 │   │   ├── 采购订单管理系统/        — jiangping (Flask + EasyOCR)
 │   │   ├── 成品核对系统/            — liwenjuan (Flask)
 │   │   ├── 配色库存管理/            — peise (Flask)
-│   │   └── 华登包材管理/            — huadeng (Flask)
+│   │   ├── 华登包材管理/            — huadeng (Flask)
+│   │   └── 华登毛绒仓库/            — huadeng-maorong (Flask, 毛绒+戏服库存)
 │   ├── 生产部/
 │   │   ├── 注塑啤机排产系统/        — paiji (Node.js + React)
 │   │   ├── 喷油部生产管理系统/      — penyou (Node.js + React)
@@ -200,6 +201,7 @@ curl http://localhost:<port>/health
 | liwenjuan 成品核对系统 | Flask | 5004 | /liwenjuan/ |
 | peise 配色库存管理 | Flask | 5006 | /peise/ |
 | huadeng 华登包材管理 | Flask | 5007 | /huadeng/ |
+| huadeng-maorong 华登毛绒仓库 | Flask | 5009 | /huadeng-maorong/ |
 | hy-schedule-system ZURU河源排期入单 | Flask | 5008 | /hy-schedule/ |
 | baojia 报价系统 | Node.js | 3007 | /baojia/ |
 
@@ -448,6 +450,7 @@ const data = JSON.parse(fs.readFileSync('data/data.json'));
 | liwenjuan | 成品核对系统 | PMC跟仓管 | Standalone (Python/Flask) | /liwenjuan/ | — |
 | peise | 配色库存管理 | PMC跟仓管 | Standalone (Python/Flask) | /peise/ | https://github.com/fxxaxxx/peisecangku |
 | huadeng | 华登包材管理 | PMC跟仓管 | Standalone (Python/Flask) | /huadeng/ | — |
+| huadeng-maorong | 华登毛绒仓库 | PMC跟仓管 | Standalone (Python/Flask) | /huadeng-maorong/ | — |
 | hy-schedule-system | ZURU河源排期入单 | 业务部 | Standalone (Python/Flask) | /hy-schedule/ | https://github.com/hanson678/hy-schedule-system |
 | baojia | 报价系统 | 业务部 | Standalone (Node.js) | /baojia/ | — |
 

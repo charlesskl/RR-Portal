@@ -48,11 +48,20 @@ export default function OrdersPage() {
 
   const filtered = useMemo(() => {
     const kw = q.trim().toLowerCase();
-    return list.filter((x) => {
+    const matched = list.filter((x) => {
       if (supplierFilter && x.supplier !== supplierFilter) return false;
       if (!kw) return true;
       return ['mold', 'item_code', 'supplier', 'pmc_follow', 'workshop', 'remark']
         .some((k) => (x[k] || '').toString().toLowerCase().includes(kw));
+    });
+    // Sort by workshop (non-empty first, alphabetic), then created_at ascending
+    // so newer imports go to the bottom of their workshop group.
+    return matched.sort((a, b) => {
+      const aw = a.workshop || '';
+      const bw = b.workshop || '';
+      if (!!aw !== !!bw) return aw ? -1 : 1;       // non-empty workshops first
+      if (aw !== bw) return aw.localeCompare(bw, 'zh');
+      return (a.created_at || '').localeCompare(b.created_at || '');
     });
   }, [list, q, supplierFilter]);
 
@@ -126,6 +135,7 @@ export default function OrdersPage() {
         <table>
           <thead>
             <tr>
+              <th className="num" style={{ width: 50 }}>序号</th>
               <th>车间</th>
               <th>货号</th>
               <th>模具</th>
@@ -151,10 +161,18 @@ export default function OrdersPage() {
             </tr>
           </thead>
           <tbody>
-            {loading && <tr><td colSpan={22} className="empty">加载中...</td></tr>}
-            {!loading && filtered.length === 0 && <tr><td colSpan={22} className="empty">暂无数据</td></tr>}
-            {!loading && filtered.map((r) => (
-              <tr key={r.id} className={isNewOrder(r.created_at) ? 'order-new' : ''}>
+            {loading && <tr><td colSpan={23} className="empty">加载中...</td></tr>}
+            {!loading && filtered.length === 0 && <tr><td colSpan={23} className="empty">暂无数据</td></tr>}
+            {!loading && filtered.map((r, i) => {
+              const prevWs = i > 0 ? (filtered[i - 1].workshop || '') : null;
+              const isBoundary = i > 0 && (r.workshop || '') !== prevWs;
+              const cls = [
+                isNewOrder(r.created_at) ? 'order-new' : '',
+                isBoundary ? 'workshop-boundary' : '',
+              ].filter(Boolean).join(' ');
+              return (
+              <tr key={r.id} className={cls}>
+                <td className="num">{i + 1}</td>
                 <td>{r.workshop}</td>
                 <td>{r.item_code}</td>
                 <td>{isNewOrder(r.created_at) && <span className="new-badge">新</span>}{r.mold}</td>
@@ -181,7 +199,8 @@ export default function OrdersPage() {
                   <button className="ghost" onClick={() => remove(r)} style={{ color: '#b91c1c' }}>删除</button>
                 </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>

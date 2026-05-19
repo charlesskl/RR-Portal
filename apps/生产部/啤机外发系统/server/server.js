@@ -83,6 +83,57 @@ app.delete('/api/orders/:id', (req, res) => {
   res.json({ ok: true });
 });
 
+// ---- Bulk-rename a supplier across orders, mappings, and the suppliers list ----
+// Body: { from: "鸿徽", to: "鸿薇" }
+// from = "" or "(空)" means: assign currently-empty supplier rows to the new name.
+app.post('/api/suppliers/rename', (req, res) => {
+  const { from = '', to = '' } = req.body || {};
+  const fromName = from === '(空)' ? '' : from;
+  const toName = (to || '').trim();
+  if (toName === '') return res.status(400).json({ error: 'empty_to' });
+  if (fromName === toName) return res.json({ orders_updated: 0, mappings_updated: 0, suppliers_updated: 0 });
+
+  // Orders
+  const orders = readJson(ORDERS_FILE);
+  let ordersUpdated = 0;
+  const now = new Date().toISOString();
+  for (const o of orders) {
+    if ((o.supplier || '') === fromName) {
+      o.supplier = toName;
+      o.updated_at = now;
+      ordersUpdated += 1;
+    }
+  }
+  writeJson(ORDERS_FILE, orders);
+
+  // Mold mappings
+  const mappings = readObj(MOLD_MAP_FILE);
+  let mappingsUpdated = 0;
+  for (const m of Object.values(mappings)) {
+    if ((m.supplier || '') === fromName) {
+      m.supplier = toName;
+      m.updated_at = now;
+      mappingsUpdated += 1;
+    }
+  }
+  writeJson(MOLD_MAP_FILE, mappings);
+
+  // Suppliers list
+  const suppliers = readJson(SUPPLIERS_FILE);
+  let suppliersUpdated = 0;
+  if (fromName) {
+    for (const s of suppliers) {
+      if (s.name === fromName) {
+        s.name = toName;
+        suppliersUpdated += 1;
+      }
+    }
+    writeJson(SUPPLIERS_FILE, suppliers);
+  }
+
+  res.json({ orders_updated: ordersUpdated, mappings_updated: mappingsUpdated, suppliers_updated: suppliersUpdated });
+});
+
 // ---- Suppliers (加工厂) ----
 app.get('/api/suppliers', (req, res) => res.json(readJson(SUPPLIERS_FILE)));
 app.post('/api/suppliers', (req, res) => {
@@ -425,9 +476,19 @@ async function exportOrdersXlsx(orders, res, filenamePrefix = '外发明细') {
   res.send(Buffer.from(buf));
 }
 
+function sortByWorkshopThenAge(orders) {
+  return [...orders].sort((a, b) => {
+    const aw = a.workshop || '';
+    const bw = b.workshop || '';
+    if (!!aw !== !!bw) return aw ? -1 : 1;
+    if (aw !== bw) return aw.localeCompare(bw, 'zh');
+    return (a.created_at || '').localeCompare(b.created_at || '');
+  });
+}
+
 app.get('/api/orders/export.xlsx', async (req, res) => {
   try {
-    const orders = readJson(ORDERS_FILE).map(enrich);
+    const orders = sortByWorkshopThenAge(readJson(ORDERS_FILE).map(enrich));
     await exportOrdersXlsx(orders, res, '外发明细');
   } catch (e) {
     console.error('export-all error:', e);

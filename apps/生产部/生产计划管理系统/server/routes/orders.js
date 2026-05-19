@@ -169,12 +169,12 @@ router.post('/', async (req, res) => {
   // 归一化函数：去空格、转大写
   const norm = (v) => v == null ? '' : String(v).replace(/\s+/g, '').toUpperCase();
 
-  // 一次性加载该车间所有现存订单的 (contract|item_no|work_type) 做指纹
+  // 指纹：合同+货号+做工+走货期。同一 PO 拆多批次（不同走货期）算不同订单不该合并。
   function loadExisting(workshop) {
-    const rows = db.prepare('SELECT contract, item_no, work_type FROM orders WHERE workshop = ?').all(workshop);
+    const rows = db.prepare('SELECT contract, item_no, work_type, ship_date FROM orders WHERE workshop = ?').all(workshop);
     const set = new Set();
     for (const r of rows) {
-      set.add(`${norm(r.contract)}|${norm(r.item_no)}|${norm(r.work_type)}`);
+      set.add(`${norm(r.contract)}|${norm(r.item_no)}|${norm(r.work_type)}|${norm(r.ship_date)}`);
     }
     return set;
   }
@@ -190,7 +190,7 @@ router.post('/', async (req, res) => {
       for (const o of chunk) {
         if (o.workshop && o.contract && o.item_no) {
           if (!cache[o.workshop]) cache[o.workshop] = loadExisting(o.workshop);
-          const fp = `${norm(o.contract)}|${norm(o.item_no)}|${norm(o.work_type)}`;
+          const fp = `${norm(o.contract)}|${norm(o.item_no)}|${norm(o.work_type)}|${norm(o.ship_date)}`;
           if (cache[o.workshop].has(fp)) { skipped++; continue; }
           cache[o.workshop].add(fp);
         }

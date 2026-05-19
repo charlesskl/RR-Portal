@@ -299,7 +299,8 @@ async function parseSheetData(sheetXml, styleColorMap, sharedStrings) {
 }
 
 // 不需要读的 sheet 名关键词
-const SKIP_SHEET_KEYWORDS = ['MA', '包装', '包裝', '半成品', '车缝', '布料', '取消', '转', '樣板', '样板', 'Sheet', '_xlnm', 'microsoft'];
+// 半成品 sheet 要读：同一 PO 的半成品 + 成品 是两条独立订单，半成品早一周完成，必须排进生产计划
+const SKIP_SHEET_KEYWORDS = ['MA', '包装', '包裝', '车缝', '布料', '取消', '转', '樣板', '样板', 'Sheet', '_xlnm', 'microsoft'];
 
 function shouldSkipSheet(name) {
   return SKIP_SHEET_KEYWORDS.some(kw => name.includes(kw));

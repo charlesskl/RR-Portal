@@ -92,8 +92,9 @@ function ordersToCelldata(orders, columns, newImportedIds) {
           }
           if (serial != null) {
             valueToStore = serial;
-            // 用标准 yyyy-MM-dd 触发日期选择器，m 字段控制显示成 "5月8日"
-            ct = { t: 'd', fa: 'yyyy-MM-dd' };
+            // Excel 自定义日期格式 m"月"d"日" — Luckysheet 按 fa 渲染才显示 "5月8日"，
+            // 不能用 yyyy-MM-dd（会被重写覆盖 m 字段）
+            ct = { t: 'd', fa: 'm"月"d"日"' };
           } else {
             valueToStore = displayVal;
             ct = { t: 'g', fa: 'General' };

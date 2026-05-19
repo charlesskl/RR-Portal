@@ -90,6 +90,9 @@
   </div>
 
 <script>
+// 部署前缀：兼容本地直跑 (5009) 和云端 nginx 反代 /huadeng-maorong/
+const BASE_URL = location.pathname.startsWith('/huadeng-maorong') ? '/huadeng-maorong' : '';
+
 const form = document.getElementById('login-form');
 const errorEl = document.getElementById('error');
 const submitBtn = document.getElementById('submit-btn');
@@ -101,7 +104,7 @@ form.addEventListener('submit', async (e) => {
   submitBtn.textContent = '登录中...';
 
   try {
-    const resp = await fetch('/api/login', {
+    const resp = await fetch(BASE_URL + '/api/login', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({
@@ -111,7 +114,7 @@ form.addEventListener('submit', async (e) => {
     });
     const data = await resp.json();
     if (resp.ok && data.success) {
-      window.location.href = '/';
+      window.location.href = BASE_URL + '/';
     } else {
       errorEl.textContent = data.error || '登录失败';
       errorEl.classList.add('show');

@@ -1039,6 +1039,28 @@ def _extract_sku_prefix(item_code):
     return m.group(1) if m else ''
 
 
+# 货号别名缓存:子货号 → 父货号。CUD 后置空触发重载。
+_alias_cache = None
+
+def _invalidate_alias_cache():
+    global _alias_cache
+    _alias_cache = None
+
+def _resolve_sku_prefix(prefix):
+    """如果 prefix 是别名,返回 primary;否则返回原值。"""
+    global _alias_cache
+    if not prefix:
+        return prefix
+    if _alias_cache is None:
+        _alias_cache = db.get_sku_alias_map()
+    return _alias_cache.get(prefix, prefix)
+
+
+def _match_sku_prefix(item_code):
+    """提取 + 别名解析,业务匹配字母绑定/库存时用这个。"""
+    return _resolve_sku_prefix(_extract_sku_prefix(item_code))
+
+
 def _resolve_inventory_flag(flag_type, country, fallback):
     """
     把排期里的 (布标类型, 国家) 用 flag_mappings 翻译成入库布标
@@ -1071,7 +1093,7 @@ def _enrich_letters_with_binding(item_code, letters, row_flag='', row_flag_type=
     特殊情况:letter['letter'] == '' 表示"无字母款"(如 15789),不查 letter_bindings,
     直接用 letter['_name_cn'] 清洗后的中文当物料名,整 qty 当普通款。
     """
-    sku_prefix = _extract_sku_prefix(item_code)
+    sku_prefix = _match_sku_prefix(item_code)
     # 翻译入库布标
     inventory_flag = _resolve_inventory_flag(row_flag_type, row_country, row_flag)
     out = []
@@ -1146,7 +1168,7 @@ def _build_po_view(po, rows):
             row_flag_type=r.get('flag_type') or '',
             row_country=r.get('country') or '',
         )
-        sku_prefix = _extract_sku_prefix(r['item_code'])
+        sku_prefix = _match_sku_prefix(r['item_code'])
         stock = db.get_sku_total_stock(sku_prefix) if sku_prefix else 0
         # 行级"是否够做":有绑定的字母都 sufficient;无绑定的字母按 total 模式判断
         bound_letters = [l for l in letters if l['bound_name']]
@@ -1309,6 +1331,49 @@ def api_letter_bindings_delete(binding_id):
     affected = db.delete_letter_binding(binding_id)
     if affected == 0:
         return jsonify({'error': '绑定不存在'}), 404
+    return jsonify({'success': True})
+
+
+# ---- 货号别名 (子货号 → 父货号) ----
+
+@app.route('/api/sku-aliases', methods=['GET'])
+@login_required
+def api_sku_aliases_list():
+    return jsonify(db.query_all_sku_aliases())
+
+
+@app.route('/api/sku-aliases', methods=['POST'])
+@role_required('admin', 'operator')
+def api_sku_aliases_create():
+    """新增子货号→父货号映射。body: {alias_prefix, primary_prefix}"""
+    data = request.get_json() or {}
+    alias = (data.get('alias_prefix') or '').strip()
+    primary = (data.get('primary_prefix') or '').strip()
+    if not alias or not primary:
+        return jsonify({'error': '缺少 alias_prefix 或 primary_prefix'}), 400
+    if alias == primary:
+        return jsonify({'error': '子货号不能跟父货号相同'}), 400
+    # 防止链式别名(alias→primary→primary2)
+    existing_map = db.get_sku_alias_map()
+    if primary in existing_map:
+        return jsonify({'error': f'父货号 {primary} 自己已经是子货号(映射到 {existing_map[primary]}),不能再当父货号'}), 400
+    if alias in existing_map:
+        return jsonify({'error': f'子货号 {alias} 已经映射到 {existing_map[alias]},先删除再加'}), 400
+    try:
+        aid = db.insert_sku_alias(alias, primary, session.get('username'))
+    except Exception as e:
+        return jsonify({'error': f'新增失败: {e}'}), 400
+    _invalidate_alias_cache()
+    return jsonify({'success': True, 'id': aid})
+
+
+@app.route('/api/sku-aliases/<int:alias_id>', methods=['DELETE'])
+@role_required('admin', 'operator')
+def api_sku_aliases_delete(alias_id):
+    affected = db.delete_sku_alias(alias_id)
+    if affected == 0:
+        return jsonify({'error': '别名不存在'}), 404
+    _invalidate_alias_cache()
     return jsonify({'success': True})
 
 

@@ -229,7 +229,7 @@ export default function ScheduleResult({ workshop = 'B' }) {
         {s === 'draft' ? '草稿' : s === 'confirmed' ? '已保存' : s}
       </Tag>
     },
-    { title: '结转说明', dataIndex: 'notes', ellipsis: true,
+    { title: '说明', dataIndex: 'notes', ellipsis: true,
       render: v => v ? <span style={{ color: '#d46b08', fontSize: 12 }}>{v}</span> : ''
     },
     { title: '操作', width: 320,

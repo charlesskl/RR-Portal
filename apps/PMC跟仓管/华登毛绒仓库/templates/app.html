@@ -350,6 +350,9 @@ let selectedType = null;
 
 // ==================== API 封装 ====================
 
+// 部署前缀：兼容本地直跑 (5009) 和云端 nginx 反代 /huadeng-maorong/
+const BASE_URL = location.pathname.startsWith('/huadeng-maorong') ? '/huadeng-maorong' : '';
+
 async function api(path, options = {}) {
   const opts = {
     headers: {'Content-Type': 'application/json'},
@@ -359,9 +362,9 @@ async function api(path, options = {}) {
   if (opts.body && typeof opts.body !== 'string') {
     opts.body = JSON.stringify(opts.body);
   }
-  const resp = await fetch(path, opts);
+  const resp = await fetch(BASE_URL + path, opts);
   if (resp.status === 401) {
-    window.location.href = '/login';
+    window.location.href = BASE_URL + '/login';
     throw new Error('未登录');
   }
   const data = await resp.json().catch(() => ({}));
@@ -411,7 +414,7 @@ async function logout() {
   if (!confirm('确定要退出登录吗?')) return;
   try {
     await api('/api/logout', { method: 'POST' });
-    window.location.href = '/login';
+    window.location.href = BASE_URL + '/login';
   } catch (err) {
     alert('登出失败');
   }
@@ -1285,22 +1288,32 @@ async function deleteFlagMap(id) {
 // ==================== 字母绑定(主数据维护) ====================
 
 let bindingsData = null;
+let aliasesData = [];
 
 async function renderBindings() {
   try {
-    bindingsData = await api('/api/letter-bindings');
+    [bindingsData, aliasesData] = await Promise.all([
+      api('/api/letter-bindings'),
+      api('/api/sku-aliases').catch(() => []),
+    ]);
   } catch (err) {
     bindingsData = { bindings: [], materials_by_sku: {} };
+    aliasesData = [];
     alert('加载绑定失败: ' + err.message);
   }
   const { bindings } = bindingsData;
   const canEdit = state.currentUser?.role !== 'viewer';
+  // 按父货号分组别名
+  const aliasesByPrimary = {};
+  aliasesData.forEach(a => {
+    (aliasesByPrimary[a.primary_prefix] = aliasesByPrimary[a.primary_prefix] || []).push(a);
+  });
 
   document.getElementById('page-content').innerHTML = `
     <div class="page-header">
       <div>
         <div class="page-title">字母绑定</div>
-        <div class="page-sub">主数据:填写"货号 + 字母 + 物料名称"。排期对比时按 ITEM# 前面的数字找你这里配置的绑定。</div>
+        <div class="page-sub">主数据:填写"货号 + 字母 + 物料名称"。排期对比时按 ITEM# 前面的数字找你这里配置的绑定。子货号通过"关联"自动复用父货号的物料。</div>
       </div>
       <div>
         ${canEdit ? '<button class="btn btn-in" onclick="openBindModal()">+ 新增绑定</button>' : ''}
@@ -1308,18 +1321,28 @@ async function renderBindings() {
     </div>
 
     <div class="flag-manage">
-      <div style="font-size:13px;color:var(--text-2);margin-bottom:8px;">共 ${bindings.length} 条 · ${(() => { const s = new Set(); bindings.forEach(b => s.add(b.sku)); return s.size; })()} 个货号</div>
+      <div style="font-size:13px;color:var(--text-2);margin-bottom:8px;">共 ${bindings.length} 条 · ${(() => { const s = new Set(); bindings.forEach(b => s.add(b.sku)); return s.size; })()} 个货号 · ${aliasesData.length} 个子货号别名</div>
       ${bindings.length ? (() => {
         const groups = {};
         bindings.forEach(b => { (groups[b.sku] = groups[b.sku] || []).push(b); });
         const skuOrder = Object.keys(groups).sort();
         return skuOrder.map(sku => {
           const rows = groups[sku].slice().sort((a,b) => a.letter.localeCompare(b.letter));
+          const aliases = aliasesByPrimary[sku] || [];
+          const aliasChips = aliases.map(a => `
+            <span style="display:inline-flex;align-items:center;gap:4px;background:#EEF2FF;border:1px solid #C7D2FE;border-radius:4px;padding:2px 8px;font-size:12px;color:#3730A3;margin-right:4px;">
+              <code style="background:transparent;padding:0;color:inherit;">${a.alias_prefix}</code>
+              ${canEdit ? `<span style="cursor:pointer;color:#6366F1;" onclick="deleteAlias(${a.id}, '${escAttr(a.alias_prefix)}', '${escAttr(sku)}')" title="删除别名">×</span>` : ''}
+            </span>
+          `).join('');
           return `
             <div style="margin-bottom:18px;">
-              <div style="display:flex;align-items:center;gap:10px;padding:6px 4px;border-bottom:1px solid var(--border);margin-bottom:6px;">
+              <div style="display:flex;align-items:center;gap:10px;padding:6px 4px;border-bottom:1px solid var(--border);margin-bottom:6px;flex-wrap:wrap;">
                 <code style="font-size:15px;font-weight:600;color:var(--text-1);">${sku}</code>
-                <span style="font-size:12px;color:var(--text-3);">${rows.length} 条</span>
+                <span style="font-size:12px;color:var(--text-3);">${rows.length} 条字母 · ${aliases.length} 个子货号</span>
+                <div style="flex:1;"></div>
+                ${aliasChips}
+                ${canEdit ? `<button class="btn btn-sm" onclick="openAliasModal('${escAttr(sku)}')" title="关联子货号 → 自动复用本父货号的物料">+ 关联子货号</button>` : ''}
               </div>
               <div class="table-wrap"><table>
                 <thead><tr>
@@ -1408,6 +1431,54 @@ async function saveBinding() {
   }
 }
 
+function openAliasModal(primarySku) {
+  document.getElementById('modal-host').innerHTML = `
+    <div class="modal-mask" onclick="if(event.target===this)closeModal()">
+      <div class="modal">
+        <div class="modal-title">关联子货号 → ${primarySku}</div>
+        <div class="modal-sub">子货号(纯数字前缀)会自动复用父货号 <code>${primarySku}</code> 的全部字母→物料映射。一个子货号只能映射到一个父货号。</div>
+        <div class="form-grid">
+          <div class="form-row full">
+            <label class="form-label">子货号前缀<span class="req">*</span></label>
+            <input id="a-alias" placeholder="如: 157101" autofocus>
+            <div style="font-size:11px;color:var(--text-3);margin-top:4px;">举例:排期里出现 <code>157101-S001-MB</code> 这种,父货号是 <code>${primarySku}</code>,这里填 <code>157101</code></div>
+          </div>
+        </div>
+        <div class="form-actions">
+          <button class="btn" onclick="closeModal()">取消</button>
+          <button class="btn btn-primary" onclick="saveAlias('${escAttr(primarySku)}')">保存</button>
+        </div>
+      </div>
+    </div>
+  `;
+  setTimeout(() => document.getElementById('a-alias').focus(), 50);
+}
+
+async function saveAlias(primarySku) {
+  const alias = document.getElementById('a-alias').value.trim();
+  if (!alias || !/^\d+$/.test(alias)) { alert('子货号必须是纯数字'); return; }
+  try {
+    await api('/api/sku-aliases', {
+      method: 'POST',
+      body: { alias_prefix: alias, primary_prefix: primarySku }
+    });
+    closeModal();
+    await renderBindings();
+  } catch (err) {
+    alert('保存失败: ' + err.message);
+  }
+}
+
+async function deleteAlias(id, alias, primary) {
+  if (!confirm(`解除子货号 ${alias} → 父货号 ${primary} 的关联?\n解除后,排期里的 ${alias} 将不再自动匹配 ${primary} 的物料。`)) return;
+  try {
+    await api(`/api/sku-aliases/${id}`, { method: 'DELETE' });
+    await renderBindings();
+  } catch (err) {
+    alert('删除失败: ' + err.message);
+  }
+}
+
 async function deleteBinding(id, sku, letter) {
   if (!confirm(`删除货号 ${sku} 字母 ${letter} 的绑定?`)) return;
   try {
@@ -1488,7 +1559,7 @@ async function uploadSchedule(input) {
   const fd = new FormData();
   fd.append('file', file);
   try {
-    const resp = await fetch('/api/schedule/upload', { method: 'POST', body: fd, credentials: 'same-origin' });
+    const resp = await fetch(BASE_URL + '/api/schedule/upload', { method: 'POST', body: fd, credentials: 'same-origin' });
     const data = await resp.json();
     if (!resp.ok) { alert('上传失败: ' + (data.error || resp.status)); input.value = ''; return; }
     const s = data.stats;
@@ -1516,7 +1587,7 @@ async function querySchedule() {
 function letterChip(l) {
   // 单 letter chip 渲染:[图][字母·数量][绑定状态/库存差]
   if (!l.letter) return `<span style="color:var(--text-3);">${(l.qty||0).toLocaleString()}</span>`;
-  const img = l.image_url ? `<img src="${l.image_url}" style="width:28px;height:28px;object-fit:cover;border-radius:4px;vertical-align:middle;margin-right:4px;" alt="${l.letter}">` : '';
+  const img = l.image_url ? `<img src="${BASE_URL}${l.image_url}" style="width:28px;height:28px;object-fit:cover;border-radius:4px;vertical-align:middle;margin-right:4px;" alt="${l.letter}">` : '';
   let status = '';
   if (l.bound_name) {
     if (l.letter_sufficient) {
@@ -1621,7 +1692,7 @@ function renderScheduleResult() {
             </tr></thead>
             <tbody>
               ${rows.map(r => {
-                const img = r.image_url ? `<img src="${r.image_url}" style="width:24px;height:24px;object-fit:cover;border-radius:3px;vertical-align:middle;margin-right:4px;">` : '';
+                const img = r.image_url ? `<img src="${BASE_URL}${r.image_url}" style="width:24px;height:24px;object-fit:cover;border-radius:3px;vertical-align:middle;margin-right:4px;">` : '';
                 const stockTd = r.stock != null
                   ? `<td class="num" style="color:${r.sufficient?'var(--in)':'var(--out)'};font-weight:500;">${r.stock.toLocaleString()}</td>`
                   : `<td class="num" style="color:var(--text-3);">—</td>`;
@@ -1708,7 +1779,7 @@ function renderScheduleResult() {
             </tr></thead>
             <tbody>
               ${rows.map(r => {
-                const img = r.image_url ? `<img src="${r.image_url}" style="width:24px;height:24px;object-fit:cover;border-radius:3px;vertical-align:middle;margin-right:4px;">` : '';
+                const img = r.image_url ? `<img src="${BASE_URL}${r.image_url}" style="width:24px;height:24px;object-fit:cover;border-radius:3px;vertical-align:middle;margin-right:4px;">` : '';
                 const stockTd = r.stock != null
                   ? `<td class="num" style="color:${r.sufficient?'var(--in)':'var(--out)'};font-weight:500;">${r.stock.toLocaleString()}</td>`
                   : `<td class="num" style="color:var(--text-3);">—</td>`;
@@ -2269,7 +2340,7 @@ function openEdit(type, id) {
 
 function exportSku(sku) {
   // 调后端生成多 sheet xlsx(入库 / 出库),矩阵布局:列 = (款式, 布标)
-  window.location.href = '/api/export/sku/' + encodeURIComponent(sku);
+  window.location.href = BASE_URL + '/api/export/sku/' + encodeURIComponent(sku);
 }
 
 function exportAll() {

@@ -91,6 +91,8 @@ td.num { text-align: right; font-variant-numeric: tabular-nums; }
 /* New-order row highlight: rows created within the last 24h glow yellow */
 tr.order-new td { background: #fef9c3 !important; }
 tr.order-new:hover td { background: #fde68a !important; }
+/* Thick top border separating different 车间 groups */
+tr.workshop-boundary > td { border-top: 3px solid #1f2937 !important; }
 .new-badge {
   display: inline-block; padding: 1px 6px; border-radius: 4px;
   background: #f59e0b; color: #fff; font-size: 10px; font-weight: 600;

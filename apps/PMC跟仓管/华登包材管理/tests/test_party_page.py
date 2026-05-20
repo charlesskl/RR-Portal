@@ -28,3 +28,16 @@ def test_party_page_empty_state(client):
     html = rv.data.decode('utf-8')
     # 4 张表都应是空的
     assert html.count('暂无记录') >= 4
+
+
+def test_filter_form_preserves_active_tab(client):
+    """筛选表单提交时保留当前 tab,过滤后不跳回默认 tab。"""
+    _login(client, 'hd')
+    rv = client.get('/party/hd')
+    html = rv.data.decode('utf-8')
+    # 筛选表单有 id,供 JS 拦截提交
+    assert 'id="filterForm"' in html
+    # 提交拦截器:把当前 tab 锚点带上
+    assert 'preserveTabOnFilter' in html
+    # switchTab 把当前 tab 写进 URL hash
+    assert 'history.replaceState' in html

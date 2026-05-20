@@ -98,8 +98,8 @@ jobs:
               /huadeng-maorong/health \
               /huadeng/health \
               /peise/health \
-              /penyou/health \
-              /pi-outsource/health \
+              /penyou/api/health \
+              /pi-outsource/api/health \
               /production-plan/health \
               /tomy-paiqi/health \
               /zuru-order-system/health \

@@ -6,7 +6,7 @@
     <a href="/party/{{ party }}/logout" class="px-3 py-1.5 bg-orange-500 text-white text-sm rounded hover:bg-orange-600">退出</a>
 </div>
 
-<form class="bg-white rounded-lg shadow-sm p-3 mb-4 flex items-end gap-3 flex-wrap" method="GET">
+<form id="filterForm" class="bg-white rounded-lg shadow-sm p-3 mb-4 flex items-end gap-3 flex-wrap" method="GET">
     <div>
         <label class="block text-xs text-gray-500 mb-1">开始日期</label>
         <input type="date" name="date_from" value="{{ date_from }}" class="border rounded px-2 py-1 text-sm">
@@ -323,6 +323,8 @@ function switchTab(tabId, cpKey) {
             btn.classList.add('border-transparent', 'text-gray-500');
         }
     });
+    // 记录当前 tab 到 URL hash,供筛选/刷新后 restoreTabFromHash 恢复(replaceState 不触发滚动)
+    history.replaceState(null, '', '#tab-' + tabId);
 }
 
 // 从 URL hash 恢复 tab + 滚动（pagination 跳转后用）
@@ -336,6 +338,18 @@ function switchTab(tabId, cpKey) {
     switchTab(tabId, cpKey);
     const target = panel.querySelector('#tab-' + tabId);
     if (target) target.scrollIntoView({block: 'start'});
+})();
+
+// 筛选表单提交时把当前 tab 锚点一起带上,过滤后不跳回默认 tab
+(function preserveTabOnFilter() {
+    const form = document.getElementById('filterForm');
+    if (!form) return;
+    form.addEventListener('submit', function (e) {
+        if (!location.hash) return;  // 没切过 tab,走默认提交
+        e.preventDefault();
+        const params = new URLSearchParams(new FormData(form));
+        window.location.href = location.pathname + '?' + params.toString() + location.hash;
+    });
 })();
 
 function openReconcileModal(party, cp) {

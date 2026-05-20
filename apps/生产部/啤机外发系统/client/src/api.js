@@ -56,6 +56,12 @@ export const api = {
 
   // workshops (autocomplete options for 车间)
   listWorkshops: () => f('/api/workshops'),
+
+  // Bulk-rename a supplier across orders + mappings + suppliers list
+  renameSupplier: (from, to) => f('/api/suppliers/rename', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ from, to }),
+  }),
   importPdfRows: (body)  => f('/api/import-pdf-rows', {
     method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
   }),

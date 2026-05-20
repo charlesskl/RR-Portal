@@ -589,6 +589,7 @@ def _find_duplicate_order(con, *, order_no, party, cp):
 def party_page(party):
     date_from = request.args.get('date_from', '')
     date_to = request.args.get('date_to', '')
+    order_no = request.args.get('order_no', '').strip()
     try:
         page_size = int(request.args.get('page_size', 50))
     except ValueError:
@@ -605,7 +606,7 @@ def party_page(party):
         panel = {'cp': cp, 'cp_name': PARTIES[cp]['name']}
         for direction, from_p, to_p in [('sent', party, cp), ('received', cp, party)]:
             all_r = _query_flow(con, recorded_by=party, from_party=from_p, to_party=to_p,
-                                date_from=date_from, date_to=date_to)
+                                date_from=date_from, date_to=date_to, order_no=order_no)
             page_key = f'page_{cp}_{direction}'
             try:
                 page = max(1, int(request.args.get(page_key, 1) or 1))
@@ -632,7 +633,7 @@ def party_page(party):
     return render_template('party.html', party=party, party_name=PARTIES[party]['name'],
                            panels=panels, prices=prices, monthly=monthly,
                            date_from=date_from, date_to=date_to, page_size=page_size,
-                           dup_warning=dup_warning)
+                           dup_warning=dup_warning, order_no=order_no)
 
 
 @app.route('/party/<party>/entry', methods=['POST'])
@@ -1280,7 +1281,7 @@ def _build_monthly_stats(party):
     return rows
 
 
-def _query_flow(con, *, recorded_by, from_party, to_party, date_from=None, date_to=None):
+def _query_flow(con, *, recorded_by, from_party, to_party, date_from=None, date_to=None, order_no=None):
     """查 flow_records。"""
     sql = """SELECT * FROM flow_records
              WHERE recorded_by=? AND from_party=? AND to_party=?"""
@@ -1289,6 +1290,8 @@ def _query_flow(con, *, recorded_by, from_party, to_party, date_from=None, date_
         sql += ' AND date >= ?'; args.append(date_from)
     if date_to:
         sql += ' AND date <= ?'; args.append(date_to)
+    if order_no:
+        sql += ' AND order_no LIKE ?'; args.append(f'%{order_no}%')
     sql += ' ORDER BY date DESC, id DESC'
     return [dict(r) for r in con.execute(sql, args).fetchall()]
 

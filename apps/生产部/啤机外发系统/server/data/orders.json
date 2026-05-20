@@ -15546,5 +15546,32 @@
     "status": "open",
     "created_at": "2025-01-01T00:00:00.000Z",
     "updated_at": "2025-01-01T00:00:00.000Z"
+  },
+  {
+    "id": "uf1TJjfaYe",
+    "created_at": "2026-05-19T00:12:37.335Z",
+    "updated_at": "2026-05-19T00:12:37.335Z",
+    "workshop": "兴信A",
+    "item_code": "7132-MA/7132-MA",
+    "mold": "TREX-02M-01 恐龙炮弹底座面罩",
+    "order_qty_pcs": 50000,
+    "order_qty_shots": 25000,
+    "target_qty": 3300,
+    "quoted_capacity": null,
+    "actual_capacity": null,
+    "quote_price_usd": null,
+    "supplier_price_rmb": null,
+    "supplier_price_usd": null,
+    "supplier": "意鑫隆",
+    "pmc_follow": "陈鑫花",
+    "order_date": "2026-05-13",
+    "production_start": "",
+    "estimated_delivery": "2026-05-22",
+    "remark": "颜色:银色/SIlVERC / 色粉:84481 / 料:1#PPEP332K",
+    "status": "open",
+    "source_bill_no": "CMC260283",
+    "source_customer": "东莞兴信塑胶制品有限公司",
+    "source_production_no": "MA_RR_2279-3",
+    "source_mold_code": "TREX-02M-01"
   }
 ]

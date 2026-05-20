@@ -17,6 +17,7 @@ services:
       - ./nginx/.htpasswd:/etc/nginx/.htpasswd:ro
       - ./frontend/index.cloud.html:/usr/share/nginx/html/index.html:ro
       - ./frontend/logo.png:/usr/share/nginx/html/logo.png:ro
+      - ./frontend/favicon.png:/usr/share/nginx/html/favicon.png:ro
       # Uncomment for HTTPS after running setup-ssl.sh:
       # - ./ssl:/etc/nginx/ssl:ro
     depends_on:
@@ -248,6 +249,65 @@ services:
     networks:
       - platform-net
 
+  penyou:
+    build:
+      context: ./apps/生产部/喷油部生产管理系统
+      dockerfile: Dockerfile
+      args:
+        BASE_PATH: /penyou/
+    environment:
+      - PORT=3100
+      - DATA_PATH=/app/data
+      - NODE_ENV=production
+      # 阿里云百炼 (DashScope/Qwen-VL) — AI 订单图片识别用；和 paiji 共用同一把 Bailian key
+      - DASHSCOPE_API_KEY=${PENYOU_BAILIAN_API_KEY:-}
+    volumes:
+      - ./apps/生产部/喷油部生产管理系统/data:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3100/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    mem_limit: 512m
+    memswap_limit: 512m
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - platform-net
+
+  pi-outsource:
+    build:
+      context: ./apps/生产部/啤机外发系统
+      dockerfile: Dockerfile
+      args:
+        BASE_PATH: /pi-outsource/
+    environment:
+      - PORT=3010
+      - DATA_PATH=/app/data
+      - NODE_ENV=production
+      - BAILIAN_API_KEY=${PI_OUTSOURCE_BAILIAN_API_KEY:-}
+    volumes:
+      - ./apps/生产部/啤机外发系统/server/data:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3010/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    mem_limit: 512m
+    memswap_limit: 512m
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - platform-net
+
   production-plan:
     build:
       context: ./apps/生产部/生产计划管理系统
@@ -263,10 +323,14 @@ services:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 10s
       timeout: 5s
-      retries: 3
+      # Excel 上传/解析最长 ~60s 会阻塞 event loop（即使有 yield，单 sheet 内 regex 仍较重）
+      # retries=10 ≈ 100s 容忍窗口，避免 autoheal 杀掉正在上传的容器
+      retries: 10
     mem_limit: 768m
     memswap_limit: 768m
     restart: unless-stopped
+    labels:
+      - "autoheal=true"
     logging:
       driver: json-file
       options:
@@ -274,6 +338,24 @@ services:
         max-file: "3"
     networks:
       - platform-net
+
+  # 监控所有带 label=autoheal=true 的容器，连续 unhealthy 时自动 restart
+  # 避免再发生「node 进程未退出但事件循环卡死」这种 unless-stopped 接不住的场景
+  autoheal:
+    image: willfarrell/autoheal:1.2.0
+    restart: always
+    environment:
+      - AUTOHEAL_CONTAINER_LABEL=autoheal
+      - AUTOHEAL_INTERVAL=30
+      - AUTOHEAL_START_PERIOD=60
+      - CURL_TIMEOUT=30
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
 
   zuru-master-schedule:
     build:
@@ -486,6 +568,32 @@ services:
       - ./apps/PMC跟仓管/华登包材管理/data:/app/data
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5007/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    mem_limit: 512m
+    memswap_limit: 512m
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - platform-net
+
+  huadeng-maorong:
+    build:
+      context: ./apps/PMC跟仓管/华登毛绒仓库
+      dockerfile: Dockerfile
+    environment:
+      - DATA_PATH=/app/data
+      # Secret 强制从 env 注入；admin 默认密码请上线后立即从前台修改
+      - HUADENG_MAORONG_SECRET_KEY=${HUADENG_MAORONG_SECRET_KEY:?HUADENG_MAORONG_SECRET_KEY is required}
+    volumes:
+      - ./apps/PMC跟仓管/华登毛绒仓库/data:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5009/health"]
       interval: 10s
       timeout: 5s
       retries: 3

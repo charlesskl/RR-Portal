@@ -7,6 +7,8 @@ class TestConfig:
     SQLALCHEMY_DATABASE_URI = "sqlite:///:memory:"
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     TESTING = True
+    AUTH_USERNAME = "test"
+    AUTH_PASSWORD = "test"
 
 @pytest.fixture
 def app():

@@ -74,6 +74,16 @@ if [[ "$BEFORE_HEAD" == "$AFTER_HEAD" ]]; then
   exit 0
 fi
 
+# Bash holds the old file inode after git pull replaces deploy/update-server.sh.
+# If the script itself changed, re-exec from the new inode so PATH_TO_SERVICE etc.
+# reflect the updated code. Guard with REEXECED=1 to prevent an infinite loop.
+if [[ "${REEXECED:-0}" != "1" ]]; then
+  if git diff --name-only "$BEFORE_HEAD" "$AFTER_HEAD" | grep -q '^deploy/update-server\.sh$'; then
+    echo "  [INFO] deploy script updated — re-executing from new inode..."
+    exec env REEXECED=1 BEFORE_COMMIT="$BEFORE_HEAD" bash "$0" "$@"
+  fi
+fi
+
 # core.quotePath=false 让中文/非 ASCII 路径不被 \xxx 转义，否则 PATH_TO_SERVICE 前缀匹配会 fail
 CHANGED_FILES=$(git -c core.quotePath=false diff --name-only "$BEFORE_HEAD" "$AFTER_HEAD")
 echo "  Changed files (${BEFORE_HEAD:0:7} → ${AFTER_HEAD:0:7}):"
@@ -90,8 +100,11 @@ declare -A PATH_TO_SERVICE=(
   # 业务 app：按部门 nested。service 名保持英文（DNS/nginx 依赖）
   ["apps/生产部/注塑啤机排产系统/"]="paiji"
   ["apps/生产部/生产计划管理系统/"]="production-plan"
+  ["apps/生产部/喷油部生产管理系统/"]="penyou"
+  ["apps/生产部/啤机外发系统/"]="pi-outsource"
   ["apps/PMC跟仓管/配色库存管理/"]="peise"
   ["apps/PMC跟仓管/华登包材管理/"]="huadeng"
+  ["apps/PMC跟仓管/华登毛绒仓库/"]="huadeng-maorong"
   ["apps/PMC跟仓管/采购订单管理系统/"]="jiangping"
   ["apps/PMC跟仓管/成品核对系统/"]="liwenjuan"
   ["apps/业务部/报价系统/"]="baojia"
@@ -199,18 +212,49 @@ if [[ "$NONRUNTIME_ONLY" -eq 1 ]] && [[ "${#AFFECTED_SERVICES[@]}" -eq 0 ]]; the
   exit 0
 fi
 
-# ─── Step 4: 确保 data 目录存在 ───
+# ─── Step 4: 确保 data 目录存在 + 权限 ───
+# Host 端 bind-mount 目录会覆盖镜像内的 chown。多数 app 用 non-root 用户（uid 100），
+# 如果 host dir 是 git 创建的 root:root 755，容器内 appuser 写不进去 → SQLite 崩、上传崩。
+# 沿用 paiji 一贯的 777 惯例。idempotent — 已是 777 就不再 chmod。
+# 见 CLAUDE.md Learnings (PR #63 / #100 都因为这个崩过)。
 save_state "directories"
-echo "[4/6] Ensuring data directories..."
+echo "[4/6] Ensuring data/uploads directories + perms..."
 python3 -c "
-import re, os
+import re, os, stat, sys
 with open('${COMPOSE_FILE}') as f:
     content = f.read()
 for match in re.findall(r'^\s*-\s+\./([^:]+):', content, re.MULTILINE):
     path = match.strip()
-    if any(seg in path for seg in ['data', 'uploads', 'instance']):
-        os.makedirs(path, exist_ok=True)
-" 2>/dev/null || true
+    if not any(seg in path for seg in ['data', 'uploads', 'instance']):
+        continue
+    os.makedirs(path, exist_ok=True)
+    # 只 chmod apps/ 下的 bind-mount。data/postgres 等基础设施 dir 跳过：
+    # postgres 启动要求 data dir 是 700/750，给 777 会被拒绝。
+    if not path.startswith('apps/'):
+        continue
+    try:
+        cur = stat.S_IMODE(os.stat(path).st_mode)
+        if cur != 0o777:
+            os.chmod(path, 0o777)
+            print(f'  [chmod 777] {path} (was {oct(cur)})')
+    except OSError as e:
+        print(f'  [WARN] chmod {path}: {e}', file=sys.stderr)
+    # 文件级权限：data 目录下的所有文件，确保容器内 appuser (UID 100) 能读写
+    # 之前 huadeng-maorong 初始 db 是 git 跟踪/CI root 拉的，appuser 启动时 CREATE TABLE 直接崩。
+    # 用 OR 加权，不降级。pgsql 等基础设施不在 apps/ 下不会被走到。
+    for root_dir, dirs, files in os.walk(path):
+        for f in files:
+            fp = os.path.join(root_dir, f)
+            try:
+                fst = os.stat(fp)
+                fmode = stat.S_IMODE(fst.st_mode)
+                want = fmode | 0o666
+                if fmode != want:
+                    os.chmod(fp, want)
+                    print(f'  [chmod {oct(want)}] {fp} (was {oct(fmode)})')
+            except OSError as e:
+                print(f'  [WARN] chmod file {fp}: {e}', file=sys.stderr)
+" || true
 
 # ─── Step 5: 备份数据库（只在影响 db 或全量时）───
 if [[ "$COMPOSE_CHANGED" -eq 1 ]] || [[ " ${AFFECTED_SERVICES[*]} " =~ " core " ]] || [[ "$DB_INIT_CHANGED" -eq 1 ]]; then

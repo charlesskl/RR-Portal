@@ -1,6 +1,6 @@
 [
   {
-    "id": "iw9bs99ngw",
+    "id": "1mg2spiffw",
     "seq": "1",
     "name": "俊豪",
     "total_machines": 14,
@@ -14,7 +14,7 @@
     "remark": ""
   },
   {
-    "id": "w4jlxywpvk",
+    "id": "n22v5p21wq",
     "seq": "2",
     "name": "鸿徽",
     "total_machines": 9,
@@ -28,7 +28,7 @@
     "remark": ""
   },
   {
-    "id": "mn81zknsyo",
+    "id": "0n0tl6cn77",
     "seq": "3",
     "name": "华盛源",
     "total_machines": 11,
@@ -42,7 +42,7 @@
     "remark": ""
   },
   {
-    "id": "kozdqa1ztv",
+    "id": "e4dto6kcqi",
     "seq": "4",
     "name": "稳当",
     "total_machines": 10,
@@ -56,7 +56,7 @@
     "remark": ""
   },
   {
-    "id": "6npelvjtl8",
+    "id": "n8ywgplam1",
     "seq": "5",
     "name": "壹嘉亿",
     "total_machines": 6,
@@ -70,7 +70,7 @@
     "remark": ""
   },
   {
-    "id": "bmbx2mlj6q",
+    "id": "2gluxl8106",
     "seq": "6",
     "name": "旭凯",
     "total_machines": 10,
@@ -84,7 +84,7 @@
     "remark": ""
   },
   {
-    "id": "dsf599dl5g",
+    "id": "uzezimgox2",
     "seq": "7",
     "name": "合成",
     "total_machines": 13,
@@ -98,7 +98,7 @@
     "remark": ""
   },
   {
-    "id": "lacjxahj27",
+    "id": "r1stucdhtv",
     "seq": "8",
     "name": "鸿深",
     "total_machines": 15,
@@ -112,7 +112,7 @@
     "remark": ""
   },
   {
-    "id": "xiacop2e4n",
+    "id": "pnodaq6m5t",
     "seq": "9",
     "name": "恒致博",
     "total_machines": 4,
@@ -126,7 +126,7 @@
     "remark": ""
   },
   {
-    "id": "v52ef8pub0",
+    "id": "ayg07tzpm7",
     "seq": "10",
     "name": "欢享",
     "total_machines": 12,
@@ -136,35 +136,21 @@
     "running_rate": null,
     "contact": "方生 13509816602",
     "address": "东莞市清溪镇三中村中坑路北一街9号欢享厂",
-    "mold_count": 4,
-    "remark": ""
-  },
-  {
-    "id": "gfc88fklpa",
-    "seq": "11",
-    "name": "意鑫隆",
-    "total_machines": 26,
-    "machines_for_xx": null,
-    "xx_ratio": null,
-    "actual_running": null,
-    "running_rate": null,
-    "contact": "庄生 13763241727",
-    "address": "广东省东莞市清溪镇上元路36号2号楼102室",
     "mold_count": 2,
     "remark": ""
   },
   {
-    "id": "3op2wn6nyo",
-    "seq": "备注：以上有11家供应商可为兴信生产产品，预计130台机可调配啤货生产。",
-    "name": "备注：以上有11家供应商可为兴信生产产品，预计130台机可调配啤货生产。",
+    "id": "gckr91xvo9",
+    "seq": "备注：以上有10家供应商可为兴信生产产品，预计100台机可调配啤货生产。",
+    "name": "备注：以上有10家供应商可为兴信生产产品，预计100台机可调配啤货生产。",
     "total_machines": null,
     "machines_for_xx": null,
     "xx_ratio": null,
     "actual_running": null,
     "running_rate": null,
-    "contact": "备注：以上有11家供应商可为兴信生产产品，预计130台机可调配啤货生产。",
-    "address": "备注：以上有11家供应商可为兴信生产产品，预计130台机可调配啤货生产。",
+    "contact": "备注：以上有10家供应商可为兴信生产产品，预计100台机可调配啤货生产。",
+    "address": "备注：以上有10家供应商可为兴信生产产品，预计100台机可调配啤货生产。",
     "mold_count": null,
-    "remark": "备注：以上有11家供应商可为兴信生产产品，预计130台机可调配啤货生产。"
+    "remark": "备注：以上有10家供应商可为兴信生产产品，预计100台机可调配啤货生产。"
   }
 ]

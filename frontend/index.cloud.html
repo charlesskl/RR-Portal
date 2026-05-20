@@ -8,6 +8,8 @@
 <meta http-equiv="Expires" content="0">
 <!-- portal v2.1 -->
 <title>Royal Regent 华登 - 企业管理平台</title>
+<link rel="icon" type="image/png" href="/favicon.png?v=2">
+<link rel="apple-touch-icon" href="/favicon.png?v=2">
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   body {
@@ -259,6 +261,12 @@
                 <span class="plugin-name">华登包材管理</span>
               </div>
             </div>
+            <div class="plugin-item">
+              <div class="plugin-info">
+                <div class="plugin-dot gray" id="huadengMaorongDot"></div>
+                <span class="plugin-name">华登毛绒仓库</span>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -277,6 +285,18 @@
               <div class="plugin-info">
                 <div class="plugin-dot gray" id="paijiDot"></div>
                 <span class="plugin-name">注塑啤机排产系统</span>
+              </div>
+            </div>
+            <div class="plugin-item">
+              <div class="plugin-info">
+                <div class="plugin-dot gray" id="penyouDot"></div>
+                <span class="plugin-name">喷油部生产管理系统</span>
+              </div>
+            </div>
+            <div class="plugin-item">
+              <div class="plugin-info">
+                <div class="plugin-dot gray" id="piOutsourceDot"></div>
+                <span class="plugin-name">啤机外发系统</span>
               </div>
             </div>
             <div class="plugin-item">
@@ -452,6 +472,50 @@
 
     <div class="detail-plugin-card">
       <div class="detail-plugin-left">
+        <div class="detail-plugin-icon" style="background:linear-gradient(135deg,#f97316,#c2410c);">&#127912;</div>
+        <div>
+          <div class="detail-plugin-name">喷油部生产管理系统</div>
+          <div class="detail-plugin-desc">喷油部生产管理 — 产品核价、工资标准、排产、每日产量录入、收支表汇总</div>
+          <div class="feature-grid">
+            <div class="feature-tag">&#128202; 产品核价</div>
+            <div class="feature-tag">&#128176; 工资标准</div>
+            <div class="feature-tag">&#128197; 排产</div>
+            <div class="feature-tag">&#128221; 每日录入</div>
+            <div class="feature-tag">&#128200; 收支表</div>
+            <div class="feature-tag">&#128229; PDF/Excel 导入</div>
+          </div>
+        </div>
+      </div>
+      <div class="detail-plugin-right">
+        <div class="detail-plugin-status"><div class="plugin-dot gray" id="penyouDetailDot"></div> 检查中...</div>
+        <a href="/penyou/" target="_blank" class="btn btn-primary">打开系统</a>
+      </div>
+    </div>
+
+    <div class="detail-plugin-card">
+      <div class="detail-plugin-left">
+        <div class="detail-plugin-icon" style="background:linear-gradient(135deg,#0ea5e9,#0369a1);">&#128295;</div>
+        <div>
+          <div class="detail-plugin-name">啤机外发系统</div>
+          <div class="detail-plugin-desc">啤机外发订单管理 — PDF 导入、模具映射记忆、加工厂分布、Excel 导出</div>
+          <div class="feature-grid">
+            <div class="feature-tag">&#128229; PDF 导入</div>
+            <div class="feature-tag">&#129504; AI 解析</div>
+            <div class="feature-tag">&#128295; 模具映射</div>
+            <div class="feature-tag">&#127981; 加工厂分布</div>
+            <div class="feature-tag">&#128230; Excel 导出</div>
+            <div class="feature-tag">&#128202; 概览统计</div>
+          </div>
+        </div>
+      </div>
+      <div class="detail-plugin-right">
+        <div class="detail-plugin-status"><div class="plugin-dot gray" id="piOutsourceDetailDot"></div> 检查中...</div>
+        <a href="/pi-outsource/" target="_blank" class="btn btn-primary">打开系统</a>
+      </div>
+    </div>
+
+    <div class="detail-plugin-card">
+      <div class="detail-plugin-left">
         <div class="detail-plugin-icon" style="background:linear-gradient(135deg,#fb923c,#f97316);">&#128197;</div>
         <div>
           <div class="detail-plugin-name">生产计划管理系统</div>
@@ -600,7 +664,7 @@
       <div class="dept-icon pmc" style="width:40px;height:40px;font-size:18px;">&#128230;</div>
       PMC跟仓管
     </div>
-    <div class="page-subtitle">采购订单 · 成品核对 · 配色库存 · 华登包材</div>
+    <div class="page-subtitle">采购订单 · 成品核对 · 配色库存 · 华登包材 · 华登毛绒仓库</div>
 
     <div class="detail-plugin-card">
       <div class="detail-plugin-left">
@@ -684,6 +748,28 @@
         <a href="/huadeng/" target="_blank" class="btn btn-primary">打开系统</a>
       </div>
     </div>
+
+    <div class="detail-plugin-card">
+      <div class="detail-plugin-left">
+        <div class="detail-plugin-icon" style="background:linear-gradient(135deg,#f59e0b,#d97706);">&#129505;</div>
+        <div>
+          <div class="detail-plugin-name">华登毛绒仓库</div>
+          <div class="detail-plugin-desc">毛绒 + 戏服双品类库存系统，出入库流水、字母绑定 / 布标维护、ZURU 排期对比、一键出库</div>
+          <div class="feature-grid">
+            <div class="feature-tag">&#129505; 毛绒 + 戏服</div>
+            <div class="feature-tag">&#128202; 实时库存</div>
+            <div class="feature-tag">&#128194; 字母绑定</div>
+            <div class="feature-tag">&#128203; 布标映射</div>
+            <div class="feature-tag">&#128229; ZURU 排期对比</div>
+            <div class="feature-tag">&#128274; 角色权限</div>
+          </div>
+        </div>
+      </div>
+      <div class="detail-plugin-right">
+        <div class="detail-plugin-status"><div class="plugin-dot gray" id="huadengMaorongDetailDot"></div> 检查中...</div>
+        <a href="/huadeng-maorong/" target="_blank" class="btn btn-primary">打开系统</a>
+      </div>
+    </div>
   </div>
 
 </div>
@@ -716,6 +802,8 @@ async function checkHealth() {
       { name: 'figureMold', url: '/figure-mold-cost-system/health', dot: 'figureMoldDot', detailDot: 'figureMoldDetailDot' },
       { name: 'jiangping', url: '/jiangping/health', dot: 'jiangpingDot', detailDot: 'jiangpingDetailDot' },
       { name: 'paiji', url: '/paiji/health', dot: 'paijiDot', detailDot: 'paijiDetailDot' },
+      { name: 'penyou', url: '/penyou/api/health', dot: 'penyouDot', detailDot: 'penyouDetailDot' },
+      { name: 'piOutsource', url: '/pi-outsource/api/health', dot: 'piOutsourceDot', detailDot: 'piOutsourceDetailDot' },
       { name: 'productionPlan', url: '/production-plan/health', dot: 'productionPlanDot', detailDot: 'productionPlanDetailDot' },
       { name: 'zuruOrder', url: '/zuru-order-system/health', dot: 'zuruOrderDot', detailDot: 'zuruOrderDetailDot' },
       { name: 'liwenjuan', url: '/liwenjuan/health', dot: 'liwenjuanDot', detailDot: 'liwenjuanDetailDot' },
@@ -725,6 +813,7 @@ async function checkHealth() {
       { name: 'hySchedule', url: '/hy-schedule/health', dot: 'hyScheduleDot', detailDot: 'hyScheduleDetailDot' },
       { name: 'peise', url: '/peise/health', dot: 'peiseDot', detailDot: 'peiseDetailDot' },
       { name: 'huadeng', url: '/huadeng/health', dot: 'huadengDot', detailDot: 'huadengDetailDot' },
+      { name: 'huadengMaorong', url: '/huadeng-maorong/health', dot: 'huadengMaorongDot', detailDot: 'huadengMaorongDetailDot' },
     ];
     var healthy = 0;
     var total = checks.length;

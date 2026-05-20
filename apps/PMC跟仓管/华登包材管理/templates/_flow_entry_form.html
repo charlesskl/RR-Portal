@@ -1,22 +1,40 @@
-<details class="border rounded mb-3">
+{% set _dw = dup_warning if (dup_warning and dup_warning.cp == cp and dup_warning.direction == direction) else None %}
+{% set _f = _dw.form if _dw else {} %}
+<details class="border rounded mb-3"{% if _dw %} open{% endif %}>
     <summary class="cursor-pointer px-3 py-2 bg-blue-50 text-blue-700 font-medium text-sm">
         ➕ 新增 {{ '发→' if direction == 'sent' else '收自' }}{{ cp_name }}
     </summary>
     <form method="POST" action="/party/{{ party }}/entry" class="p-3 border-t">
         <input type="hidden" name="direction" value="{{ direction }}">
         <input type="hidden" name="counterparty" value="{{ cp }}">
+        {% if _dw %}
+        <div class="mb-3 p-3 border border-yellow-400 bg-yellow-50 rounded">
+            <div class="text-sm font-medium text-yellow-800 mb-2">
+                ⚠ 订单号 {{ _f.order_no }} 已在你的台账里出现过 {{ _dw.dups|length }} 次:
+            </div>
+            <ul class="text-xs text-yellow-900 list-disc list-inside mb-2">
+                {% for d in _dw.dups %}
+                <li>id={{ d.id }}, {{ d.date }}, {{ PARTIES[d.from_party].name }} → {{ PARTIES[d.to_party].name }}</li>
+                {% endfor %}
+            </ul>
+            <div class="text-xs text-yellow-700">
+                检查无误后,点"仍然保存"会强制保存;若改订单号,修改后重新保存会自动重查。
+            </div>
+            <input type="hidden" name="confirm_dup" value="1">
+        </div>
+        {% endif %}
         <div class="flex gap-3 mb-2 flex-wrap items-end">
             <div>
                 <label class="block text-xs text-gray-500 mb-1">日期</label>
-                <input type="date" name="date" required class="border rounded px-2 py-1 text-sm">
+                <input type="date" name="date" value="{{ _f.date or '' }}" required class="border rounded px-2 py-1 text-sm">
             </div>
             <div>
                 <label class="block text-xs text-gray-500 mb-1">订单号</label>
-                <input type="text" name="order_no" class="border rounded px-2 py-1 text-sm w-32">
+                <input type="text" name="order_no" value="{{ _f.order_no or '' }}" class="border rounded px-2 py-1 text-sm w-32">
             </div>
             <div class="flex-1">
                 <label class="block text-xs text-gray-500 mb-1">备注</label>
-                <input type="text" name="remark" class="border rounded px-2 py-1 text-sm w-full">
+                <input type="text" name="remark" value="{{ _f.remark or '' }}" class="border rounded px-2 py-1 text-sm w-full">
             </div>
         </div>
         <div class="table-scroll">
@@ -27,15 +45,15 @@
                 <tbody><tr>
                     {% for key, name in ITEMS %}
                     <td class="border px-1 py-1">
-                        <input type="number" step="any" name="{{ key }}_qty" value="0"
+                        <input type="number" step="any" name="{{ key }}_qty" value="{{ _f.get(key + '_qty', '0') }}"
                                class="w-16 border rounded px-1 py-0.5 text-right text-sm">
                     </td>
                     {% endfor %}
                 </tr></tbody>
             </table>
         </div>
-        <button type="submit" class="mt-2 px-3 py-1.5 bg-blue-600 text-white text-sm rounded hover:bg-blue-700">
-            提交
+        <button type="submit" class="mt-2 px-3 py-1.5 {% if _dw %}bg-red-600 hover:bg-red-700{% else %}bg-blue-600 hover:bg-blue-700{% endif %} text-white text-sm rounded">
+            {{ '仍然保存' if _dw else '提交' }}
         </button>
     </form>
 </details>

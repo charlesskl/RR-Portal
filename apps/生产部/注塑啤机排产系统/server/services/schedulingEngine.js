@@ -46,28 +46,25 @@ function tonnageShotWeightRange(tonnage) {
 }
 
 /**
- * 获取上一班次
- * 夜班 → 同日白班
- * 白班 → 前一天夜班
+ * 获取最近一份排机单（不限制是严格的"上一班次"，因为不是每天都排）
+ * 排序：先按日期倒序，同日再按班次倒序（白班=1, 夜班=2）
  */
 function getPreviousShiftSchedule(date, shift, workshop) {
-  let prevDate = date;
-  let prevShift;
-  if (shift === '夜班') {
-    prevShift = '白班';
-    // 同日白班
-  } else {
-    // 白班 → 前一天夜班
-    const d = new Date(date);
-    d.setDate(d.getDate() - 1);
-    prevDate = d.toISOString().slice(0, 10);
-    prevShift = '夜班';
-  }
-
   const ws = workshop || 'B';
-  const schedule = db.prepare(
-    'SELECT * FROM schedules WHERE schedule_date = ? AND shift = ? AND workshop = ? ORDER BY id DESC LIMIT 1'
-  ).get(prevDate, prevShift, ws);
+  const curOrder = shift === '夜班' ? 2 : 1;
+
+  const schedule = db.prepare(`
+    SELECT * FROM schedules
+    WHERE workshop = ?
+      AND (
+        schedule_date < ?
+        OR (schedule_date = ? AND CASE shift WHEN '白班' THEN 1 ELSE 2 END < ?)
+      )
+    ORDER BY schedule_date DESC,
+             CASE shift WHEN '白班' THEN 1 ELSE 2 END DESC,
+             id DESC
+    LIMIT 1
+  `).get(ws, date, date, curOrder);
 
   if (!schedule) return null;
 
@@ -457,7 +454,7 @@ function generateSchedule({ orderIds, date, shift, workshop }) {
   const updateOrderStatus = db.prepare(`UPDATE orders SET status = 'scheduled' WHERE id = ?`);
 
   const carryOverNote = carryOverItems.length > 0
-    ? `结转自${prevShiftData.schedule.schedule_date} ${prevShiftData.schedule.shift}，共${carryOverItems.length}条`
+    ? `延续自${prevShiftData.schedule.schedule_date} ${prevShiftData.schedule.shift}，共${carryOverItems.length}条`
     : null;
 
   const result = db.transaction(() => {
@@ -501,7 +498,7 @@ function generateSchedule({ orderIds, date, shift, workshop }) {
         item.accumulated || 0, item.quantity_needed || 0, shortage,
         item.order_no || '', item.target_24h || 0, item.target_11h || 0,
         item.days_needed || 0, item.packing_qty || 0,
-        `[结转]${(item.notes || '').replace(/^\[结转\]+/, '')}`, sortOrder++,
+        (item.notes || '').replace(/^\[结转\]+/, ''), sortOrder++,
         item.order_id || null, 1, machineArmMap[item.machine_no] || item.robot_arm || '',
         item.serial_no || ''
       );

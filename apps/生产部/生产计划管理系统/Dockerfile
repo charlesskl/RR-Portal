@@ -36,4 +36,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
   CMD curl -sf http://localhost:8080/health || exit 1
 
 ENTRYPOINT ["tini", "--"]
-CMD ["node", "app.js"]
+CMD ["node", "--max-old-space-size=2048", "app.js"]

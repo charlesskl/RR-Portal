@@ -1,69 +1,68 @@
+// 子路径部署: vite --base /pi-outsource/ 时 BASE_URL = '/pi-outsource/'
+// 所有 API 请求前缀为 /pi-outsource/api/...，命中 nginx 的 /pi-outsource/api/ location
+export const BASE = (import.meta.env.BASE_URL || '/').replace(/\/$/, '');
+
 const json = (r) => r.ok ? r.json() : r.text().then((t) => { throw new Error(t || r.statusText); });
+const f = (path, opts) => fetch(BASE + path, opts).then(json);
 
 export const api = {
   // orders
-  listOrders:    ()      => fetch('/api/orders').then(json),
-  createOrder:   (b)     => fetch('/api/orders', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify(b) }).then(json),
-  updateOrder:   (id, b) => fetch(`/api/orders/${id}`, { method:'PUT', headers:{'content-type':'application/json'}, body: JSON.stringify(b) }).then(json),
-  deleteOrder:   (id)    => fetch(`/api/orders/${id}`, { method:'DELETE' }).then(json),
+  listOrders:    ()      => f('/api/orders'),
+  createOrder:   (b)     => f('/api/orders', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify(b) }),
+  updateOrder:   (id, b) => f(`/api/orders/${id}`, { method:'PUT', headers:{'content-type':'application/json'}, body: JSON.stringify(b) }),
+  deleteOrder:   (id)    => f(`/api/orders/${id}`, { method:'DELETE' }),
 
   // suppliers
-  listSuppliers: ()      => fetch('/api/suppliers').then(json),
-  createSupplier:(b)     => fetch('/api/suppliers', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify(b) }).then(json),
-  updateSupplier:(id, b) => fetch(`/api/suppliers/${id}`, { method:'PUT', headers:{'content-type':'application/json'}, body: JSON.stringify(b) }).then(json),
-  deleteSupplier:(id)    => fetch(`/api/suppliers/${id}`, { method:'DELETE' }).then(json),
+  listSuppliers: ()      => f('/api/suppliers'),
+  createSupplier:(b)     => f('/api/suppliers', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify(b) }),
+  updateSupplier:(id, b) => f(`/api/suppliers/${id}`, { method:'PUT', headers:{'content-type':'application/json'}, body: JSON.stringify(b) }),
+  deleteSupplier:(id)    => f(`/api/suppliers/${id}`, { method:'DELETE' }),
 
   // pc
-  listPc:        ()      => fetch('/api/pc-orders').then(json),
-  createPc:      (b)     => fetch('/api/pc-orders', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify(b) }).then(json),
-  updatePc:      (id, b) => fetch(`/api/pc-orders/${id}`, { method:'PUT', headers:{'content-type':'application/json'}, body: JSON.stringify(b) }).then(json),
-  deletePc:      (id)    => fetch(`/api/pc-orders/${id}`, { method:'DELETE' }).then(json),
+  listPc:        ()      => f('/api/pc-orders'),
+  createPc:      (b)     => f('/api/pc-orders', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify(b) }),
+  updatePc:      (id, b) => f(`/api/pc-orders/${id}`, { method:'PUT', headers:{'content-type':'application/json'}, body: JSON.stringify(b) }),
+  deletePc:      (id)    => f(`/api/pc-orders/${id}`, { method:'DELETE' }),
 
   // stats
-  summary:       ()      => fetch('/api/stats/summary').then(json),
+  summary:       ()      => f('/api/stats/summary'),
 
   // pdf import
   parsePdf:      (file)  => {
     const fd = new FormData();
     fd.append('file', file);
-    return fetch('/api/parse-pdf', { method: 'POST', body: fd }).then(json);
+    return f('/api/parse-pdf', { method: 'POST', body: fd });
   },
   parsePdfAi:    (file)  => {
     const fd = new FormData();
     fd.append('file', file);
-    return fetch('/api/parse-pdf-ai', { method: 'POST', body: fd }).then(json);
+    return f('/api/parse-pdf-ai', { method: 'POST', body: fd });
   },
 
   // mold mappings
-  listMoldMappings: ()           => fetch('/api/mold-mappings').then(json),
-  saveMoldMappings: (mappings)   => fetch('/api/mold-mappings', {
+  listMoldMappings: ()           => f('/api/mold-mappings'),
+  saveMoldMappings: (mappings)   => f('/api/mold-mappings', {
     method: 'POST', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ mappings }),
-  }).then(json),
-  updateMoldMapping: (code, body) => fetch(`/api/mold-mappings/${encodeURIComponent(code)}`, {
+  }),
+  updateMoldMapping: (code, body) => f(`/api/mold-mappings/${encodeURIComponent(code)}`, {
     method: 'PUT', headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
-  }).then(json),
-  deleteMoldMapping: (code) => fetch(`/api/mold-mappings/${encodeURIComponent(code)}`, {
+  }),
+  deleteMoldMapping: (code) => f(`/api/mold-mappings/${encodeURIComponent(code)}`, {
     method: 'DELETE',
-  }).then(json),
-  moldFactoryMap: () => fetch('/api/mold-factory-map').then(json),
+  }),
+  moldFactoryMap: () => f('/api/mold-factory-map'),
 
   // workshops (autocomplete options for 车间)
-  listWorkshops: () => fetch('/api/workshops').then(json),
-
-  // Bulk-rename a supplier across orders + mappings + suppliers list
-  renameSupplier: (from, to) => fetch('/api/suppliers/rename', {
-    method: 'POST', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ from, to }),
-  }).then(json),
-  importPdfRows: (body)  => fetch('/api/import-pdf-rows', {
+  listWorkshops: () => f('/api/workshops'),
+  importPdfRows: (body)  => f('/api/import-pdf-rows', {
     method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
-  }).then(json),
+  }),
 
   // excel export
-  exportAllUrl:  ()      => '/api/orders/export.xlsx',
-  exportRows:    (rows, filename, sheet_name) => fetch('/api/export-excel', {
+  exportAllUrl:  ()      => BASE + '/api/orders/export.xlsx',
+  exportRows:    (rows, filename, sheet_name) => fetch(BASE + '/api/export-excel', {
     method: 'POST', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ rows, filename, sheet_name }),
   }).then((r) => r.ok ? r.blob() : r.text().then((t) => { throw new Error(t); })),

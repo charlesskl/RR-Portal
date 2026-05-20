@@ -9,45 +9,49 @@ router.get('/', (req, res) => {
   res.json(schedules);
 });
 
-// 查询上一班次结转情况（预览用）— 必须在 /:id 之前
+// 查询最近一份排机单的延续项（预览用）— 必须在 /:id 之前
+// 不再要求严格"上一班次"，而是取最新一份（白班=1, 夜班=2 排序）
 router.get('/carry-over', (req, res) => {
   try {
     const { date, shift } = req.query;
     if (!date || !shift) return res.json({ carryOverCount: 0, items: [] });
 
-    let prevDate = date;
-    let prevShift;
-    if (shift === '夜班') {
-      prevShift = '白班';
-    } else {
-      const d = new Date(date);
-      d.setDate(d.getDate() - 1);
-      prevDate = d.toISOString().slice(0, 10);
-      prevShift = '夜班';
-    }
-
     const workshop = req.query.workshop || 'B';
-    const prevSchedule = db.prepare(
-      'SELECT * FROM schedules WHERE schedule_date = ? AND shift = ? AND workshop = ? ORDER BY id DESC LIMIT 1'
-    ).get(prevDate, prevShift, workshop);
+    const curOrder = shift === '夜班' ? 2 : 1;
+
+    const prevSchedule = db.prepare(`
+      SELECT * FROM schedules
+      WHERE workshop = ?
+        AND (
+          schedule_date < ?
+          OR (schedule_date = ? AND CASE shift WHEN '白班' THEN 1 ELSE 2 END < ?)
+        )
+      ORDER BY schedule_date DESC,
+               CASE shift WHEN '白班' THEN 1 ELSE 2 END DESC,
+               id DESC
+      LIMIT 1
+    `).get(workshop, date, date, curOrder);
 
     if (!prevSchedule) {
-      return res.json({ carryOverCount: 0, items: [], prevDate, prevShift });
+      return res.json({ carryOverCount: 0, items: [], prevDate: null, prevShift: null });
     }
 
     const items = db.prepare(
       'SELECT * FROM schedule_items WHERE schedule_id = ? ORDER BY sort_order, id'
     ).all(prevSchedule.id);
 
+    // 仅统计欠数 > 0 的延续项（与 schedulingEngine 行为一致）
+    const pendingItems = items.filter(it => (it.shortage || 0) > 0);
+
     res.json({
-      carryOverCount: items.length,
-      items,
-      prevDate,
-      prevShift,
+      carryOverCount: pendingItems.length,
+      items: pendingItems,
+      prevDate: prevSchedule.schedule_date,
+      prevShift: prevSchedule.shift,
       prevScheduleId: prevSchedule.id,
     });
   } catch (err) {
-    console.error('查询结转失败:', err);
+    console.error('查询延续项失败:', err);
     res.status(500).json({ message: err.message });
   }
 });

@@ -34,7 +34,7 @@ def in_list():
     q = Transaction.query.filter_by(type="in")
     if pid:
         q = q.filter_by(pigment_id=pid)
-    txs = q.order_by(Transaction.occurred_at.desc()).limit(500).all()
+    txs = q.order_by(Transaction.occurred_at.desc()).all()
     return render_template("transactions/in_index.html", transactions=txs)
 
 
@@ -44,7 +44,7 @@ def out_list():
     q = Transaction.query.filter_by(type="out")
     if pid:
         q = q.filter_by(pigment_id=pid)
-    txs = q.order_by(Transaction.occurred_at.desc()).limit(500).all()
+    txs = q.order_by(Transaction.occurred_at.desc()).all()
     return render_template("transactions/out_index.html", transactions=txs)
 
 

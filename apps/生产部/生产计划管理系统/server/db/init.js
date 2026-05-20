@@ -88,11 +88,14 @@ function initDatabase() {
     )
   `);
 
-  // 兼容老数据库：如果 cell_format 字段不存在则添加
+  // 兼容老数据库：如果字段不存在则添加
   try {
     const cols = db.prepare('PRAGMA table_info(orders)').all().map(c => c.name);
     if (!cols.includes('cell_format')) {
       db.exec('ALTER TABLE orders ADD COLUMN cell_format TEXT');
+    }
+    if (!cols.includes('row_color')) {
+      db.exec('ALTER TABLE orders ADD COLUMN row_color TEXT');
     }
   } catch {}
 

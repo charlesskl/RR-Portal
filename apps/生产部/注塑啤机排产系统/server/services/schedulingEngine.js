@@ -150,6 +150,17 @@ function generateSchedule({ orderIds, date, shift, workshop }) {
     ? prevShiftData.items.filter(item => (item.shortage || 0) > 0)
     : [];
 
+  // 模具→机台映射（人工改过一次的永久记住）
+  // 仅当该机台仍 active 时才生效
+  const activeMachineSet = new Set(machines.map(m => m.machine_no));
+  const moldMachineMap = {};  // mold_code → machine_no
+  const allMoldMachineMaps = db.prepare('SELECT mold_code, machine_no FROM mold_machine_map WHERE workshop = ?').all(ws);
+  for (const m of allMoldMachineMaps) {
+    if (activeMachineSet.has(m.machine_no)) {
+      moldMachineMap[m.mold_code] = m.machine_no;
+    }
+  }
+
   // 4. 获取机台历史统计
   const machineStats = {};
   for (const m of machines) {
@@ -247,6 +258,24 @@ function generateSchedule({ orderIds, date, shift, workshop }) {
   });
 
   for (const order of newOrders) {
+    // 0) 最高优先级：查「模具→机台」映射（人工指定过的）
+    const orderMoldCode = (order.mold_no || '').replace(/[一-龥].*$/, '').trim();
+    if (orderMoldCode && moldMachineMap[orderMoldCode]) {
+      const mappedMachine = moldMachineMap[orderMoldCode];
+      newAssignments.push({
+        order,
+        machine_no: mappedMachine,
+        score: 1000,
+        reasons: ['模具→机台映射（人工指定）'],
+        is_carry_over: false,
+      });
+      machineLoad[mappedMachine] = (machineLoad[mappedMachine] || 0) + 1;
+      // 同步登记到 moldGroupMachine，让同套模其他订单也走同一台
+      const orderMoldKey0 = moldBase(order.mold_no || order.mold_name || '');
+      if (orderMoldKey0) moldGroupMachine[orderMoldKey0] = mappedMachine;
+      continue;
+    }
+
     // 若同模号已分配过机台，直接强制分到同一台机
     const orderMoldKey = moldBase(order.mold_no || order.mold_name || '');
     if (orderMoldKey && moldGroupMachine[orderMoldKey]) {

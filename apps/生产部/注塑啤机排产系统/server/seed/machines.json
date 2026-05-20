@@ -1006,5 +1006,32 @@
     "model_desc": "伊之密120T",
     "status": "active",
     "workshop": "B"
+  },
+  {
+    "machine_no": "吹气机台",
+    "brand": "-",
+    "tonnage": 0,
+    "arm_type": "-",
+    "model_desc": null,
+    "status": "active",
+    "workshop": "A"
+  },
+  {
+    "machine_no": "吹气机台",
+    "brand": "-",
+    "tonnage": 0,
+    "arm_type": "-",
+    "model_desc": null,
+    "status": "active",
+    "workshop": "B"
+  },
+  {
+    "machine_no": "吹气机台",
+    "brand": "-",
+    "tonnage": 0,
+    "arm_type": "-",
+    "model_desc": null,
+    "status": "active",
+    "workshop": "C"
   }
 ]

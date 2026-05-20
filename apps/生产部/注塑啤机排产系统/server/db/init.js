@@ -213,6 +213,19 @@ function initDatabase() {
     )
   `);
 
+  // ========== 模具→机台映射表（人工改一次永久生效） ==========
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS mold_machine_map (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      mold_code TEXT NOT NULL,
+      workshop TEXT NOT NULL DEFAULT 'B',
+      machine_no TEXT NOT NULL,
+      mold_name TEXT,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE (mold_code, workshop)
+    )
+  `);
+
   // Migrations
   try { db.prepare("ALTER TABLE orders ADD COLUMN order_notes TEXT DEFAULT ''").run(); } catch(e){}
   try { db.prepare("ALTER TABLE schedule_items ADD COLUMN is_carry_over INTEGER DEFAULT 0").run(); } catch(e){}
@@ -225,6 +238,34 @@ function initDatabase() {
   try { db.prepare("ALTER TABLE mold_targets ADD COLUMN workshop TEXT DEFAULT 'B'").run(); } catch(e){}
   try { db.prepare("ALTER TABLE orders ADD COLUMN serial_no TEXT DEFAULT ''").run(); } catch(e){}
   try { db.prepare("ALTER TABLE schedule_items ADD COLUMN serial_no TEXT DEFAULT ''").run(); } catch(e){}
+
+  // 幂等迁移：确保三个车间都有「其他机台」（用于收纳无明确机台的订单）
+  try {
+    const ensureOtherMachine = db.prepare(`
+      INSERT INTO machines (machine_no, brand, tonnage, arm_type, model_desc, status, workshop)
+      SELECT '其他机台', '-', 0, '-', NULL, 'active', ?
+      WHERE NOT EXISTS (
+        SELECT 1 FROM machines WHERE machine_no = '其他机台' AND workshop = ?
+      )
+    `);
+    for (const ws of ['A', 'B', 'C']) {
+      ensureOtherMachine.run(ws, ws);
+    }
+  } catch(e) { console.log('[其他机台迁移失败]', e.message); }
+
+  // 幂等迁移：确保三个车间都有「吹气机台」（用于收纳吹气类订单）
+  try {
+    const ensureBlowMachine = db.prepare(`
+      INSERT INTO machines (machine_no, brand, tonnage, arm_type, model_desc, status, workshop)
+      SELECT '吹气机台', '-', 0, '-', NULL, 'active', ?
+      WHERE NOT EXISTS (
+        SELECT 1 FROM machines WHERE machine_no = '吹气机台' AND workshop = ?
+      )
+    `);
+    for (const ws of ['A', 'B', 'C']) {
+      ensureBlowMachine.run(ws, ws);
+    }
+  } catch(e) { console.log('[吹气机台迁移失败]', e.message); }
 
   console.log('数据库初始化完成，28台机数据已预置');
 

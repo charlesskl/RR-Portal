@@ -162,6 +162,30 @@ router.put('/:id/items/:itemId', (req, res) => {
     }
   }
 
+  // 机台更新时自动学习「模具→机台」映射（人工改一次，下次智能排机自动用）
+  if (req.body.machine_no !== undefined) {
+    try {
+      const currentItem = db.prepare('SELECT * FROM schedule_items WHERE id = ?').get(itemId);
+      if (currentItem && currentItem.mold_name) {
+        const moldCode = currentItem.mold_name.split(' ')[0].replace(/[一-龥].*$/, '').trim();
+        if (moldCode) {
+          const sched = db.prepare('SELECT workshop FROM schedules WHERE id = ?').get(currentItem.schedule_id);
+          const ws = sched?.workshop || 'B';
+          const exists = db.prepare("SELECT id FROM mold_machine_map WHERE mold_code = ? AND workshop = ?").get(moldCode, ws);
+          if (exists) {
+            db.prepare("UPDATE mold_machine_map SET machine_no=?, mold_name=?, updated_at=CURRENT_TIMESTAMP WHERE id=?")
+              .run(req.body.machine_no, currentItem.mold_name, exists.id);
+          } else {
+            db.prepare("INSERT INTO mold_machine_map (mold_code, workshop, machine_no, mold_name) VALUES (?, ?, ?, ?)")
+              .run(moldCode, ws, req.body.machine_no, currentItem.mold_name);
+          }
+        }
+      }
+    } catch (e) {
+      console.log('[同步mold_machine_map失败]', e.message);
+    }
+  }
+
   if (updates.length === 0) return res.status(400).json({ message: '没有要更新的字段' });
 
   values.push(itemId);
@@ -200,6 +224,29 @@ router.post('/:id/items/:itemId/copy', (req, res) => {
 
   const newItem = db.prepare('SELECT * FROM schedule_items WHERE id = ?').get(result.lastInsertRowid);
   res.json({ message: `已复制到 ${machine_no}`, item: newItem });
+});
+
+// 批量更新 sort_order（拖拽排序）
+router.post('/:id/items/reorder', (req, res) => {
+  const { id } = req.params;
+  const { items } = req.body;
+  if (!Array.isArray(items)) return res.status(400).json({ message: '请传入 items 数组' });
+
+  try {
+    const upd = db.prepare('UPDATE schedule_items SET sort_order = ? WHERE id = ? AND schedule_id = ?');
+    const tx = db.transaction((list) => {
+      for (const it of list) {
+        if (it && Number.isInteger(it.id) && Number.isInteger(it.sort_order)) {
+          upd.run(it.sort_order, it.id, id);
+        }
+      }
+    });
+    tx(items);
+    res.json({ message: '已更新顺序', count: items.length });
+  } catch (e) {
+    console.error('reorder 失败:', e);
+    res.status(500).json({ message: e.message });
+  }
 });
 
 // 确认排机单 → 写入历史数据库

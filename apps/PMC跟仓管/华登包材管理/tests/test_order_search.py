@@ -72,3 +72,17 @@ def test_search_no_match_shows_nothing(client):
     rv = client.get('/party/hd?order_no=ZZZ-NOPE')
     assert rv.status_code == 200
     assert 'ALPHA-001' not in rv.data.decode('utf-8')
+
+
+def test_search_box_renders_on_page(client):
+    """台账页筛选表单含订单号输入框。"""
+    _login(client, 'hd')
+    rv = client.get('/party/hd')
+    assert 'name="order_no"' in rv.data.decode('utf-8')
+
+
+def test_search_term_reflected_in_box(client):
+    """搜索后,输入框回填当前搜索词。"""
+    _login(client, 'hd')
+    rv = client.get('/party/hd?order_no=KEYWORD-XYZ')
+    assert 'value="KEYWORD-XYZ"' in rv.data.decode('utf-8')

@@ -15,6 +15,10 @@
         <label class="block text-xs text-gray-500 mb-1">结束日期</label>
         <input type="date" name="date_to" value="{{ date_to }}" class="border rounded px-2 py-1 text-sm">
     </div>
+    <div>
+        <label class="block text-xs text-gray-500 mb-1">订单号</label>
+        <input type="text" name="order_no" value="{{ order_no }}" placeholder="订单号" class="border rounded px-2 py-1 text-sm">
+    </div>
     <button class="px-3 py-1.5 bg-blue-600 text-white text-sm rounded">筛选</button>
     <a href="/party/{{ party }}" class="px-3 py-1.5 bg-gray-200 text-sm rounded">重置</a>
 </form>

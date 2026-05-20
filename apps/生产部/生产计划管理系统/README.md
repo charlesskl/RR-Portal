@@ -39,10 +39,6 @@ npm run build
 | B | 兴信B | 吴敏敏 | B1~B3 |
 | 华登 | 华登 | 刘荣华 | C1~C5 |
 
-## 数据去重
-
-导入时按 **合同 + 货号 + 车间** 去重，重复订单自动跳过。
-
 ## 技术栈
 
 - 前端：React + Vite + Ant Design + Luckysheet

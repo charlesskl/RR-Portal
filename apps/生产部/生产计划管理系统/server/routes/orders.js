@@ -160,40 +160,17 @@ router.get('/:id', (req, res) => {
   res.json(row);
 });
 
-// POST /api/orders (single or batch)
+// POST /api/orders (single or batch) — 不做任何去重，全部插入
 router.post('/', async (req, res) => {
   const orders = Array.isArray(req.body) ? req.body : [req.body];
   const placeholders = ORDER_COLUMNS.map(() => '?').join(',');
   const stmt = db.prepare(`INSERT INTO orders (${ORDER_COLUMNS.join(',')}) VALUES (${placeholders})`);
 
-  // 归一化函数：去空格、转大写
-  const norm = (v) => v == null ? '' : String(v).replace(/\s+/g, '').toUpperCase();
-
-  // 指纹：合同+货号+做工+走货期。同一 PO 拆多批次（不同走货期）算不同订单不该合并。
-  function loadExisting(workshop) {
-    const rows = db.prepare('SELECT contract, item_no, work_type, ship_date FROM orders WHERE workshop = ?').all(workshop);
-    const set = new Set();
-    for (const r of rows) {
-      set.add(`${norm(r.contract)}|${norm(r.item_no)}|${norm(r.work_type)}|${norm(r.ship_date)}`);
-    }
-    return set;
-  }
-
-  // 指纹缓存放到 chunk 循环外，保证整批导入只查一次现存数据 + 跨 chunk 自去重
-  const cache = {};
   const ids = [];
-  let skipped = 0;
-
   for (let i = 0; i < orders.length; i += CHUNK_SIZE) {
     const chunk = orders.slice(i, i + CHUNK_SIZE);
     const tx = db.transaction(() => {
       for (const o of chunk) {
-        if (o.workshop && o.contract && o.item_no) {
-          if (!cache[o.workshop]) cache[o.workshop] = loadExisting(o.workshop);
-          const fp = `${norm(o.contract)}|${norm(o.item_no)}|${norm(o.work_type)}|${norm(o.ship_date)}`;
-          if (cache[o.workshop].has(fp)) { skipped++; continue; }
-          cache[o.workshop].add(fp);
-        }
         const values = ORDER_COLUMNS.map(c => o[c] ?? null);
         const info = stmt.run(...values);
         ids.push(info.lastInsertRowid);
@@ -203,7 +180,7 @@ router.post('/', async (req, res) => {
     if (i + CHUNK_SIZE < orders.length) await yieldToEventLoop();
   }
 
-  res.json({ inserted: ids.length, skipped, ids });
+  res.json({ inserted: ids.length, skipped: 0, ids });
 });
 
 // PUT /api/orders/:id

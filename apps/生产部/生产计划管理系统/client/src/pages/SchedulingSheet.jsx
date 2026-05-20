@@ -234,12 +234,8 @@ export default function SchedulingSheet({ workshop, tab, lineName = 'all', lines
       });
       const res2 = await axios.post('/api/orders', orders);
       const ids = res2.data.ids || [];
-      const skipped = res2.data.skipped || 0;
       setNewImportedIds(prev => new Set([...prev, ...ids]));
-      const msg = skipped > 0
-        ? `已导入 ${ids.length} 条，跳过 ${skipped} 条重复订单`
-        : `已导入 ${ids.length} 条订单`;
-      message.success(msg);
+      message.success(`已导入 ${ids.length} 条订单`);
       setPreviewVisible(false);
       setPreviewData([]);
       fetchData();

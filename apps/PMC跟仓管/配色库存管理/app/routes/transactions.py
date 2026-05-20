@@ -237,6 +237,7 @@ def _ocr_upload(tx_type: str):
             r["pigment_code"] = code_map.get(r.get("pigment_id"), "")
         if tx_type == "out":
             _apply_out_dilution(rows, lookup, code_map)
+            _attach_archive_prices(rows)
         if fallback_used:
             flash("LLM 识别不可用,已用本地 OCR 兜底(可能精度较低)", "warning")
         return render_template(template, rows=rows, pigments=_pigments())
@@ -287,6 +288,15 @@ def _apply_out_dilution(rows: list[dict], lookup: dict[str, int], code_map: dict
         "quantity": round(base_remainder, 2),
         "unit_price": 0,
     })
+
+
+def _attach_archive_prices(rows: list[dict]) -> None:
+    """给出库 OCR 行带上颜料档案单价(按 pigment_id 匹配),核对页显示金额用。
+    pigment_id 为空(OCR 未匹到)的行单价填 0,由操作员手填。"""
+    price_map = {p.id: p.unit_price
+                 for p in Pigment.query.filter_by(is_archived=False).all()}
+    for r in rows:
+        r["unit_price"] = price_map.get(r.get("pigment_id"), 0)
 
 
 @bp.route("/in/ocr", methods=["GET", "POST"])

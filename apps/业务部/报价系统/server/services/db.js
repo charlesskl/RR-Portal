@@ -397,6 +397,7 @@ function initDb() {
   if (!pkgCols.includes('eng_name')) db.exec("ALTER TABLE PackagingItem ADD COLUMN eng_name TEXT");
   if (!pkgCols.includes('pm_no'))    db.exec("ALTER TABLE PackagingItem ADD COLUMN pm_no TEXT");
   if (!pkgCols.includes('moq'))      db.exec("ALTER TABLE PackagingItem ADD COLUMN moq INTEGER DEFAULT 2500");
+  if (!pkgCols.includes('remark_eng')) db.exec("ALTER TABLE PackagingItem ADD COLUMN remark_eng TEXT");
 
   const elecItemCols = db.prepare('PRAGMA table_info(ElectronicItem)').all().map(c => c.name);
   if (!elecItemCols.includes('eng_name')) db.exec("ALTER TABLE ElectronicItem ADD COLUMN eng_name TEXT");

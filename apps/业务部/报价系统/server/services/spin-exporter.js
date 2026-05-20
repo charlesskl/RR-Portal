@@ -415,18 +415,37 @@ function fillCharacterSheet(ws, d) {
   function writeLaborRow(row, rateUsd, hours) {
     if (!rateUsd && !hours) return;
     // Force write (bypass setVal's formula guard)
-    ws.getCell(row, 10).value = r2(rateUsd) || 0;
-    ws.getCell(row, 10).numFmt = '0.0000';
-    ws.getCell(row, 10).alignment = { horizontal: 'right' };
-    ws.getCell(row, 11).value = r2(hours) || 0;
-    ws.getCell(row, 11).numFmt = '0.0000';
-    ws.getCell(row, 11).alignment = { horizontal: 'right' };
-    // Write L col formula
+    const jCell = ws.getCell(row, 10);
+    delete jCell._sharedFormula;
+    jCell.value = r2(rateUsd) || 0;
+    jCell.numFmt = '0.0000';
+    jCell.alignment = { horizontal: 'right' };
+    const kCell = ws.getCell(row, 11);
+    delete kCell._sharedFormula;
+    kCell.value = r2(hours) || 0;
+    kCell.numFmt = '0.0000';
+    kCell.alignment = { horizontal: 'right' };
+    // Write L col as literal value (avoid shared-formula override)
     const lCell = ws.getCell(row, 12);
     delete lCell._sharedFormula;
-    lCell.value = { formula: `J${row}*K${row}`, result: r2((r2(rateUsd)||0) * (r2(hours)||0)) };
+    lCell.value = null;
+    const rateNum = parseFloat(rateUsd) || 0;
+    const hoursNum = parseFloat(hours) || 0;
+    lCell.value = Math.round(rateNum * hoursNum * 10000) / 10000;
     lCell.numFmt = '0.0000';
     lCell.alignment = { horizontal: 'right' };
+  }
+
+  // Clear shared formulas in labor section (L123:L130) BEFORE any writes —
+  // otherwise child cells keep inheriting from L123's formula even after
+  // we overwrite their value with a literal.
+  for (let r = 123; r <= 132; r++) {
+    for (const c of [10, 11, 12]) {
+      const cell = ws.getCell(r, c);
+      delete cell._sharedFormula;
+      if (cell._value && cell._value.model) cell._value.model.formula = undefined;
+      cell.value = null;
+    }
   }
 
   // Fixed labor rate from params: labor_hkd / 11hr / hkd_usd (e.g. 275/11/7.75 = 3.226)
@@ -764,7 +783,10 @@ async function exportSpinVersion(versionId) {
         charName: charName,
         fabricItems: rows.filter(r => r.position === '__fabric__'),
         otherItems:  rows.filter(r => r.position !== '__fabric__' && r.position !== '__labor__' && !(r.fabric_name || '').includes('人工')),
-        laborItems:  rows.filter(r => r.position === '__labor__'),
+        laborItems:  (() => {
+          const charLabor = rows.filter(r => r.position === '__labor__');
+          return charLabor.length ? charLabor : d.laborItems;
+        })(),
       };
       // Try exact name match first, then fall back to template sheet by index
       let charWs = wb.getWorksheet(charName);

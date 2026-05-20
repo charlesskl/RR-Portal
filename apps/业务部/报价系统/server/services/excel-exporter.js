@@ -548,8 +548,9 @@ function fillBCD(ws, d) {
     const r = C3_DATA_START + i;
     const usage = parseFloat(item.usage_qty) || 1;
     const unitPrice = r2(parseFloat(item.unit_price) || 0);
-    ws.getCell(r, 2).value = item.eng_name || item.description || '';
-    ws.getCell(r, 3).value = item.eng_name ? (item.description || '') : '';
+    ws.getCell(r, 2).value = biName(item.description, item.eng_name);
+    ws.getCell(r, 3).value = usage > 1 ? 'pcs' : 'pc';
+    ws.getCell(r, 3).alignment = { horizontal: 'center' };
     ws.getCell(r, 4).value = usage;
     ws.getCell(r, 5).value = unitPrice;
     forceWriteFormula(r, 6, `D${r}*E${r}`, r2(usage * unitPrice));
@@ -660,7 +661,7 @@ function fillBCD(ws, d) {
   forceWriteFormula(sewRow, 7, `SUM(F${sewDataRow}:F${sewDataRow})`, sewAmount);
 
   // 5. OTHERS — Assembly labour
-  const asmList = (assemblyLaborItems || []).filter(h => !/(喷油|油漆|包装人工)/.test(h.name || ''));
+  const asmList = (assemblyLaborItems || []).filter(h => !/(喷油|油漆|包装人工|拆查货|拆货)/.test(h.name || ''));
   const asmItem = asmList.find(h => (h.name || '').includes('装配')) || asmList[0];
   let asmAmount = 0;
   if (asmItem) {

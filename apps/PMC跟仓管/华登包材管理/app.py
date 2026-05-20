@@ -555,6 +555,35 @@ def party_logout(party):
     return redirect(url_for('index'))
 
 
+def _find_duplicate_order(con, *, order_no, party, cp):
+    """查 party 自己在 party↔cp 对里、order_no 完全相等的已存在记录。
+
+    Args:
+        con: 已打开的 sqlite3.Connection。
+        order_no: 待检查的订单号 (会先 strip)。
+        party: 当前登录方 (recorded_by 必须匹配)。
+        cp: 对方 party。
+
+    Returns:
+        list[dict]: 命中记录的 (id, date, from_party, to_party, order_no);
+                    空字符串/纯空白/None 直接返回 []。
+    """
+    order_no = (order_no or '').strip()
+    if not order_no:
+        return []
+    rows = con.execute("""
+        SELECT id, date, from_party, to_party, order_no
+        FROM flow_records
+        WHERE order_no = ?
+          AND recorded_by = ?
+          AND ((from_party = ? AND to_party = ?) OR (from_party = ? AND to_party = ?))
+        ORDER BY id
+    """, (order_no, party, party, cp, cp, party)).fetchall()
+    # con.row_factory 可能未设,显式构 dict
+    cols = ('id', 'date', 'from_party', 'to_party', 'order_no')
+    return [dict(zip(cols, r)) for r in rows]
+
+
 @app.route('/party/<party>')
 @party_required
 def party_page(party):
@@ -599,9 +628,11 @@ def party_page(party):
     prices = {r['item_key']: r['price'] for r in con.execute('SELECT * FROM default_prices').fetchall()}
     con.close()
     monthly = _build_monthly_stats(party)
+    dup_warning = session.pop('dup_warning', None)
     return render_template('party.html', party=party, party_name=PARTIES[party]['name'],
                            panels=panels, prices=prices, monthly=monthly,
-                           date_from=date_from, date_to=date_to, page_size=page_size)
+                           date_from=date_from, date_to=date_to, page_size=page_size,
+                           dup_warning=dup_warning)
 
 
 @app.route('/party/<party>/entry', methods=['POST'])
@@ -640,7 +671,22 @@ def party_entry(party):
         except ValueError:
             qty_vals.append(0)
 
+    confirm_dup = request.form.get('confirm_dup') == '1'
+
     con = sqlite3.connect(DATABASE)
+    if order_no and not confirm_dup:
+        dups = _find_duplicate_order(con, order_no=order_no, party=party, cp=cp)
+        if dups:
+            con.close()
+            session['dup_warning'] = {
+                'cp': cp,
+                'direction': direction,
+                'form': {k: v for k, v in request.form.items()},
+                'dups': dups,
+            }
+            flash(f'订单号 {order_no} 已在你的台账里出现过 {len(dups)} 次,确认无误后可强制保存')
+            return redirect(url_for('party_page', party=party))
+
     placeholders = ', '.join(['?'] * len(qty_cols))
     con.execute(f"""
         INSERT INTO flow_records (recorded_by, from_party, to_party, date, order_no, remark,

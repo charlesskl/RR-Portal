@@ -2,10 +2,11 @@ import { useEffect, useState } from 'react';
 import { Card, Button, Spin } from 'antd';
 import { ShopOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
-import axios from 'axios';
+import api from '../api';
 
-// 不走全局 api(避免被拦截器加 workshop_id;此页本身就是没选 workshop)
-const api = axios.create({ baseURL: '/api' });
+// 注: 原本这里自建一个 axios 实例避开全局 api 的 workshop_id 拦截器，
+// 但 baseURL 写死 '/api' 没带 '/penyou/' 前缀 → 子路径部署下 404 → 车间列表永远是空。
+// 全局 api.js 已经判断 '/workshops' 路径不注入 workshop_id，直接用即可。
 
 export default function WorkshopHome() {
   const [list, setList] = useState([]);

@@ -55,12 +55,14 @@ def test_empty_search_returns_all(client):
 def test_search_combines_with_date_filter_as_and(client):
     """order_no + 日期同时筛选 → AND:只显示两个条件都满足的记录。"""
     _login(client, 'hd')
-    _insert('ALPHA-001', date='2026-03-01')
-    _insert('ALPHA-002', date='2026-03-10')
+    _insert('ALPHA-001', date='2026-03-01')   # date 在范围外 → 被日期排除
+    _insert('ALPHA-002', date='2026-03-10')   # date 在范围内 + order_no 匹配 → 应显示
+    _insert('GAMMA-005', date='2026-03-08')   # date 在范围内,但 order_no 不匹配 → 应被 order_no 排除
     rv = client.get('/party/hd?order_no=ALPHA&date_from=2026-03-05&date_to=2026-03-15')
     html = rv.data.decode('utf-8')
     assert 'ALPHA-002' in html
     assert 'ALPHA-001' not in html
+    assert 'GAMMA-005' not in html   # 这一行真正证明 order_no 过滤参与了 AND
 
 
 def test_search_no_match_shows_nothing(client):

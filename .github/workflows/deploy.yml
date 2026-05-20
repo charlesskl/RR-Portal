@@ -13,7 +13,13 @@ on:
 
 concurrency:
   group: deploy-cloud
-  cancel-in-progress: true
+  # cancel-in-progress: false (默认)，让并发 deploy 排队而非取消。
+  # 2026-05-20 review-open-prs 踩坑：cancel-in-progress=true 时，
+  # PR A merge 触发 deploy A 在 build peise，PR B merge 来了 cancel 掉 A，
+  # B 的 BEFORE_COMMIT = A 的 after，导致 B 只 build 自己的 diff (huadeng)，
+  # peise 永远没 build → 容器停在老 code，但 GHA 显示 SUCCESS。
+  # 排队比快慢更重要 — 单次 deploy 47s~24min，等就等。
+  cancel-in-progress: false
 
 jobs:
   deploy:
@@ -43,17 +49,22 @@ jobs:
             bash deploy/update-server.sh
             echo ""
             echo "=== Verify deploy actually landed ==="
-            # Critical：git HEAD must equal AFTER_COMMIT。任何 git pull 静默 abort
-            # （如 ECS local-mod 文件冲突）都会被这一步 catch，而不是假阳性 SUCCESS。
+            # Critical：AFTER_COMMIT 必须是 HEAD 的 ancestor（HEAD == AFTER_COMMIT 或 HEAD 更新）。
+            # 这比 == 更稳健：手动 rerun 旧 workflow 时 HEAD 已经领先，但只要不是落后就行。
+            # 任何 git pull 静默 abort（HEAD 没追上 AFTER_COMMIT）都会被这一步 catch。
             ACTUAL_HEAD=$(git rev-parse HEAD)
-            if [ "$ACTUAL_HEAD" != "$AFTER_COMMIT" ]; then
-              echo "[FAIL] git HEAD ($ACTUAL_HEAD) != expected AFTER_COMMIT ($AFTER_COMMIT)"
+            if ! git merge-base --is-ancestor "$AFTER_COMMIT" "$ACTUAL_HEAD"; then
+              echo "[FAIL] AFTER_COMMIT ($AFTER_COMMIT) 不是当前 HEAD ($ACTUAL_HEAD) 的 ancestor"
               echo "       update-server.sh 大概率 git pull 静默失败。检查上面日志找 'Aborting' 或 'error:'。"
               echo "       常见根因：ECS 上有 runtime modified data 文件卡住 pull。"
               echo "       恢复 sequence：ssh ECS → git stash 那些 M 文件 → git pull → 重 trigger 部署。"
               exit 1
             fi
-            echo "[OK] git HEAD = $AFTER_COMMIT"
+            if [ "$ACTUAL_HEAD" = "$AFTER_COMMIT" ]; then
+              echo "[OK] git HEAD = $AFTER_COMMIT"
+            else
+              echo "[OK] git HEAD ($ACTUAL_HEAD) 是 $AFTER_COMMIT 的 descendant（main 已往前走，正常）"
+            fi
             # 长寿字符串 sanity（nginx html 没被破坏）
             if docker exec rr-portal-nginx-1 grep -q "河源排期" /usr/share/nginx/html/index.html; then
               echo "[OK] nginx container index.html contains 河源排期"

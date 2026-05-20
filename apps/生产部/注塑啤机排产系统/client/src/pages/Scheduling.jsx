@@ -52,7 +52,7 @@ export default function Scheduling({ onDone, workshop = 'B' }) {
       });
       message.success(
         `排机完成！新订单 ${data.itemCount || 0} 条` +
-        (data.carryOverCount > 0 ? `，结转上班次 ${data.carryOverCount} 条` : '')
+        (data.carryOverCount > 0 ? `，延续未完成 ${data.carryOverCount} 条` : '')
       );
       if (onDone) onDone();
     } catch (e) {
@@ -150,7 +150,7 @@ export default function Scheduling({ onDone, workshop = 'B' }) {
               </Radio.Group>
             </div>
 
-            {/* 结转预览 */}
+            {/* 延续上次排单预览 */}
             {carryOverInfo && carryOverInfo.carryOverCount > 0 && (
               <Alert
                 type="warning"
@@ -158,9 +158,9 @@ export default function Scheduling({ onDone, workshop = 'B' }) {
                 showIcon
                 message={
                   <span>
-                    检测到上班次（{carryOverInfo.prevDate} {carryOverInfo.prevShift}）有
+                    最近一份排单（{carryOverInfo.prevDate} {carryOverInfo.prevShift}）有
                     <strong style={{ color: '#d46b08' }}> {carryOverInfo.carryOverCount} </strong>
-                    条订单将自动结转到本班次，排机时会优先延续这些机台的生产
+                    条未完成订单将延续到本班次，排机时会优先延续这些机台的生产
                   </span>
                 }
                 description={
@@ -177,7 +177,7 @@ export default function Scheduling({ onDone, workshop = 'B' }) {
             )}
 
             {carryOverInfo && carryOverInfo.carryOverCount === 0 && (
-              <Alert type="info" showIcon message="无上班次结转记录，将全部安排新订单" />
+              <Alert type="info" showIcon message="无未完成的延续订单，将全部安排新订单" />
             )}
 
             <div>
@@ -198,7 +198,7 @@ export default function Scheduling({ onDone, workshop = 'B' }) {
               <p>日期：<strong>{date.format('YYYY-MM-DD')}</strong>，班次：<strong>{shift}</strong></p>
               <p>新订单：<strong>{selectedIds.length}</strong> 条</p>
               {carryOverInfo && carryOverInfo.carryOverCount > 0 && (
-                <p>结转上班次：<strong style={{ color: '#d46b08' }}>{carryOverInfo.carryOverCount}</strong> 条</p>
+                <p>延续未完成：<strong style={{ color: '#d46b08' }}>{carryOverInfo.carryOverCount}</strong> 条</p>
               )}
             </div>
             <Space>

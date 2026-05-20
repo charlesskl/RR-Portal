@@ -221,6 +221,10 @@ export default function SchedulingSheet({ workshop, tab, lineName = 'all', lines
         if (!order.client && r.clientFromFile) {
           order.client = r.clientFromFile;
         }
+        // 半成品 sheet 上的行强制打上 work_type=半成品，跟同 PO 的成品区分开
+        if (r.sheet && r.sheet.includes('半成品')) {
+          order.work_type = '半成品';
+        }
         return {
           ...order,
           workshop,

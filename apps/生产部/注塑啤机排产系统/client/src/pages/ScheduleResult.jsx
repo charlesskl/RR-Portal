@@ -1,13 +1,43 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Table, Button, Card, Space, Tag, message, Popconfirm, Input, InputNumber, Switch, Select, Modal } from 'antd';
-import { DownloadOutlined, DeleteOutlined, CheckCircleOutlined, SaveOutlined, EditOutlined, CopyOutlined, SwapOutlined } from '@ant-design/icons';
+import { DownloadOutlined, DeleteOutlined, CheckCircleOutlined, SaveOutlined, EditOutlined, CopyOutlined, SwapOutlined, HolderOutlined } from '@ant-design/icons';
 import axios from 'axios';
+import { DndContext, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
+import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 
 const API = '/api/scheduling';
 const EXPORT_API = '/api/export';
 
 // 从机台名提取数字用于排序（支持 C-1#、A-12# 等格式）
 const getMachineNum = (mno) => { const m = String(mno).match(/(\d+)/); return m ? parseInt(m[1]) : 99; };
+
+// 拖拽行 —— 整行接收 sortable，但只有手柄列触发拖拽（其它列保留原有点击）
+function DraggableRow({ children, ...props }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: props['data-row-key'] });
+  const style = {
+    ...props.style,
+    transform: CSS.Transform.toString(transform && { ...transform, scaleY: 1 }),
+    transition,
+    ...(isDragging ? { position: 'relative', zIndex: 9999, background: '#fafafa' } : {}),
+  };
+  return (
+    <tr {...props} ref={setNodeRef} style={style} {...attributes}>
+      {React.Children.map(children, child => {
+        if (child && child.key === 'sort') {
+          return React.cloneElement(child, {
+            children: (
+              <span {...listeners} style={{ cursor: 'grab', color: '#999', display: 'inline-flex', padding: '4px' }}>
+                <HolderOutlined />
+              </span>
+            ),
+          });
+        }
+        return child;
+      })}
+    </tr>
+  );
+}
 
 export default function ScheduleResult({ workshop = 'B' }) {
   const [schedules, setSchedules] = useState([]);
@@ -219,6 +249,41 @@ export default function ScheduleResult({ workshop = 'B' }) {
 
   useEffect(() => { fetchSchedules(); fetchMachines(); }, [workshop]);
 
+  // 拖拽传感器（轻拖才生效，避免点击编辑误触）
+  const dndSensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
+
+  // 表格数据：sort_order 优先，未拖过的按机台号 fallback
+  const tableDataSource = useMemo(() => {
+    let data = showCompleted ? items : items.filter(r => r.shortage > 0);
+    if (showDayShift && dayShiftItems.length > 0) {
+      const dayItems = showCompleted ? dayShiftItems : dayShiftItems.filter(r => r.shortage > 0);
+      data = [...dayItems, ...data];
+    }
+    data.sort((a, b) => {
+      const so = (a.sort_order ?? 0) - (b.sort_order ?? 0);
+      if (so !== 0) return so;
+      return getMachineNum(a.machine_no) - getMachineNum(b.machine_no);
+    });
+    return data;
+  }, [items, dayShiftItems, showCompleted, showDayShift]);
+
+  // 拖完一行的处理：仅对当前 items 生效（day-shift 行不可拖）
+  const handleDragEnd = async ({ active, over }) => {
+    if (!over || active.id === over.id || !selectedSchedule) return;
+    const oldIdx = items.findIndex(it => it.id === active.id);
+    const newIdx = items.findIndex(it => it.id === over.id);
+    if (oldIdx === -1 || newIdx === -1) return;
+    const reordered = arrayMove(items, oldIdx, newIdx).map((it, i) => ({ ...it, sort_order: i }));
+    setItems(reordered);
+    try {
+      await axios.post(`${API}/${selectedSchedule.id}/items/reorder`, {
+        items: reordered.map(it => ({ id: it.id, sort_order: it.sort_order })),
+      });
+    } catch (e) {
+      message.error('保存顺序失败：' + (e.response?.data?.message || e.message));
+    }
+  };
+
   const scheduleColumns = [
     { title: '日期', dataIndex: 'schedule_date', width: 110 },
     { title: '班次', dataIndex: 'shift', width: 80,
@@ -229,7 +294,7 @@ export default function ScheduleResult({ workshop = 'B' }) {
         {s === 'draft' ? '草稿' : s === 'confirmed' ? '已保存' : s}
       </Tag>
     },
-    { title: '结转说明', dataIndex: 'notes', ellipsis: true,
+    { title: '说明', dataIndex: 'notes', ellipsis: true,
       render: v => v ? <span style={{ color: '#d46b08', fontSize: 12 }}>{v}</span> : ''
     },
     { title: '操作', width: 320,
@@ -249,6 +314,7 @@ export default function ScheduleResult({ workshop = 'B' }) {
   const isConfirmed = selectedSchedule?.status === 'confirmed';
 
   const itemColumns = [
+    { key: 'sort', title: '', width: 32, fixed: 'left', render: () => null },
     { title: '机台', dataIndex: 'machine_no', width: 90, fixed: 'left',
       render: (v, record) => {
         if (record._isDayShift || isConfirmed) return <strong>{v}</strong>;
@@ -474,24 +540,20 @@ export default function ScheduleResult({ workshop = 'B' }) {
           size="small"
           extra={null}
         >
-          <Table
-            columns={itemColumns}
-            dataSource={(() => {
-              let data = showCompleted ? items : items.filter(r => r.shortage > 0);
-              if (showDayShift && dayShiftItems.length > 0) {
-                const dayItems = showCompleted ? dayShiftItems : dayShiftItems.filter(r => r.shortage > 0);
-                data = [...dayItems, ...data];
-              }
-              // 按机台号排序（支持 C-1#、A-12# 等格式）
-              data.sort((a, b) => getMachineNum(a.machine_no) - getMachineNum(b.machine_no));
-              return data;
-            })()}
-            rowKey={r => r._isDayShift ? `day_${r.id}` : r.id}
-            size="small"
-            pagination={false}
-            scroll={{ x: 2000 }}
-            rowClassName={record => record._isDayShift ? 'day-shift-row' : ''}
-          />
+          <DndContext sensors={dndSensors} onDragEnd={handleDragEnd}>
+            <SortableContext items={items.map(i => i.id)} strategy={verticalListSortingStrategy}>
+              <Table
+                components={{ body: { row: DraggableRow } }}
+                columns={itemColumns}
+                dataSource={tableDataSource}
+                rowKey={r => r._isDayShift ? `day_${r.id}` : r.id}
+                size="small"
+                pagination={false}
+                scroll={{ x: 2000 }}
+                rowClassName={record => record._isDayShift ? 'day-shift-row' : ''}
+              />
+            </SortableContext>
+          </DndContext>
         </Card>
       )}
 

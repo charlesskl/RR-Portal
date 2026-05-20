@@ -74,6 +74,16 @@ if [[ "$BEFORE_HEAD" == "$AFTER_HEAD" ]]; then
   exit 0
 fi
 
+# Bash holds the old file inode after git pull replaces deploy/update-server.sh.
+# If the script itself changed, re-exec from the new inode so PATH_TO_SERVICE etc.
+# reflect the updated code. Guard with REEXECED=1 to prevent an infinite loop.
+if [[ "${REEXECED:-0}" != "1" ]]; then
+  if git diff --name-only "$BEFORE_HEAD" "$AFTER_HEAD" | grep -q '^deploy/update-server\.sh$'; then
+    echo "  [INFO] deploy script updated — re-executing from new inode..."
+    exec env REEXECED=1 BEFORE_COMMIT="$BEFORE_HEAD" bash "$0" "$@"
+  fi
+fi
+
 # core.quotePath=false 让中文/非 ASCII 路径不被 \xxx 转义，否则 PATH_TO_SERVICE 前缀匹配会 fail
 CHANGED_FILES=$(git -c core.quotePath=false diff --name-only "$BEFORE_HEAD" "$AFTER_HEAD")
 echo "  Changed files (${BEFORE_HEAD:0:7} → ${AFTER_HEAD:0:7}):"
@@ -94,6 +104,7 @@ declare -A PATH_TO_SERVICE=(
   ["apps/生产部/啤机外发系统/"]="pi-outsource"
   ["apps/PMC跟仓管/配色库存管理/"]="peise"
   ["apps/PMC跟仓管/华登包材管理/"]="huadeng"
+  ["apps/PMC跟仓管/华登毛绒仓库/"]="huadeng-maorong"
   ["apps/PMC跟仓管/采购订单管理系统/"]="jiangping"
   ["apps/PMC跟仓管/成品核对系统/"]="liwenjuan"
   ["apps/业务部/报价系统/"]="baojia"
@@ -228,6 +239,21 @@ for match in re.findall(r'^\s*-\s+\./([^:]+):', content, re.MULTILINE):
             print(f'  [chmod 777] {path} (was {oct(cur)})')
     except OSError as e:
         print(f'  [WARN] chmod {path}: {e}', file=sys.stderr)
+    # 文件级权限：data 目录下的所有文件，确保容器内 appuser (UID 100) 能读写
+    # 之前 huadeng-maorong 初始 db 是 git 跟踪/CI root 拉的，appuser 启动时 CREATE TABLE 直接崩。
+    # 用 OR 加权，不降级。pgsql 等基础设施不在 apps/ 下不会被走到。
+    for root_dir, dirs, files in os.walk(path):
+        for f in files:
+            fp = os.path.join(root_dir, f)
+            try:
+                fst = os.stat(fp)
+                fmode = stat.S_IMODE(fst.st_mode)
+                want = fmode | 0o666
+                if fmode != want:
+                    os.chmod(fp, want)
+                    print(f'  [chmod {oct(want)}] {fp} (was {oct(fmode)})')
+            except OSError as e:
+                print(f'  [WARN] chmod file {fp}: {e}', file=sys.stderr)
 " || true
 
 # ─── Step 5: 备份数据库（只在影响 db 或全量时）───

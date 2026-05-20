@@ -359,7 +359,7 @@ function openReconcileModal(party, cp) {
     if (!dt) return;
     const form = document.createElement('form');
     form.method = 'POST';
-    form.action = '/reconcile/start';
+    form.action = _huadengPrefix() + '/reconcile/start';
     const mk = (name, value) => {
         const i = document.createElement('input');
         i.name = name; i.value = value;

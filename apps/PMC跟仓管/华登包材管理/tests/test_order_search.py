@@ -78,7 +78,7 @@ def test_search_box_renders_on_page(client):
     """台账页筛选表单含订单号输入框。"""
     _login(client, 'hd')
     rv = client.get('/party/hd')
-    assert 'name="order_no"' in rv.data.decode('utf-8')
+    assert 'placeholder="订单号"' in rv.data.decode('utf-8')
 
 
 def test_search_term_reflected_in_box(client):

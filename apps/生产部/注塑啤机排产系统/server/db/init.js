@@ -252,32 +252,39 @@ function initDatabase() {
     const needsRebuild = tableInfo && tableInfo.sql && /machine_no\s+TEXT\s+NOT\s+NULL\s+UNIQUE/i.test(tableInfo.sql);
     if (needsRebuild) {
       console.log('[迁移] machines 表升级：machine_no 单 UNIQUE → (machine_no, workshop) 复合 UNIQUE');
-      db.exec(`
-        BEGIN TRANSACTION;
-        CREATE TABLE machines_new (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          machine_no TEXT NOT NULL,
-          brand TEXT NOT NULL,
-          tonnage INTEGER NOT NULL,
-          arm_type TEXT NOT NULL,
-          model_desc TEXT,
-          min_shot_weight REAL DEFAULT 0,
-          max_shot_weight REAL DEFAULT 0,
-          avg_shot_weight REAL DEFAULT 0,
-          record_count INTEGER DEFAULT 0,
-          status TEXT DEFAULT 'active',
-          notes TEXT,
-          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-          workshop TEXT DEFAULT 'B',
-          UNIQUE(machine_no, workshop)
-        );
-        INSERT INTO machines_new (id, machine_no, brand, tonnage, arm_type, model_desc, min_shot_weight, max_shot_weight, avg_shot_weight, record_count, status, notes, created_at, updated_at, workshop)
-          SELECT id, machine_no, brand, tonnage, arm_type, model_desc, min_shot_weight, max_shot_weight, avg_shot_weight, record_count, status, notes, created_at, updated_at, COALESCE(workshop, 'B') FROM machines;
-        DROP TABLE machines;
-        ALTER TABLE machines_new RENAME TO machines;
-        COMMIT;
-      `);
+      // 清掉之前迁移失败可能留下的残留临时表（在事务外做，保证幂等）
+      db.exec('DROP TABLE IF EXISTS machines_new');
+      // 用 better-sqlite3 原生 transaction wrapper —— SQL 失败时自动 ROLLBACK，
+      // 不会把事务停在 errored state 拖累后面的 ensureOtherMachine / ensureBlowMachine
+      const rebuild = db.transaction(() => {
+        db.exec(`
+          CREATE TABLE machines_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            machine_no TEXT NOT NULL,
+            brand TEXT NOT NULL,
+            tonnage INTEGER NOT NULL,
+            arm_type TEXT NOT NULL,
+            model_desc TEXT,
+            min_shot_weight REAL DEFAULT 0,
+            max_shot_weight REAL DEFAULT 0,
+            avg_shot_weight REAL DEFAULT 0,
+            record_count INTEGER DEFAULT 0,
+            status TEXT DEFAULT 'active',
+            notes TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            workshop TEXT DEFAULT 'B',
+            UNIQUE(machine_no, workshop)
+          )
+        `);
+        db.exec(`
+          INSERT INTO machines_new (id, machine_no, brand, tonnage, arm_type, model_desc, min_shot_weight, max_shot_weight, avg_shot_weight, record_count, status, notes, created_at, updated_at, workshop)
+            SELECT id, machine_no, brand, tonnage, arm_type, model_desc, min_shot_weight, max_shot_weight, avg_shot_weight, record_count, status, notes, created_at, updated_at, COALESCE(workshop, 'B') FROM machines
+        `);
+        db.exec('DROP TABLE machines');
+        db.exec('ALTER TABLE machines_new RENAME TO machines');
+      });
+      rebuild();
       console.log('[迁移] machines 表升级完成');
     }
   } catch(e) { console.log('[machines schema 迁移失败]', e.message); }

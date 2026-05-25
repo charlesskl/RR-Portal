@@ -45,7 +45,7 @@ const tab_vq_body_cost = {
     const decSub = parseFloat(pd.quoted_price_hkd) || ((parseFloat(pd.labor_cost_hkd) || 0) + (parseFloat(pd.paint_cost_hkd) || 0)) * 1.08;
 
     // E. Others — assembly quoted (×1.08) + sewing labor
-    const assemblyItems = hw.filter(h => h.part_category === 'labor_assembly' && !/(喷油|油漆|包装人工)/.test(h.name || ''));
+    const assemblyItems = hw.filter(h => h.part_category === 'labor_assembly' && !/(喷油|油漆|包装人工|拆查货|拆货)/.test(h.name || ''));
     const assemblySub = assemblyItems.reduce((s, h) => s + (parseFloat(h.new_price) || 0), 0);
     const sewingLaborItems = sewingDetails.filter(s => s.position === '__labor__');
     const sewingLaborSub = sewingLaborItems.reduce((s, sl) => s + (rmb_hkd > 0 ? (parseFloat(sl.total_price_rmb) || 0) / rmb_hkd : 0), 0);

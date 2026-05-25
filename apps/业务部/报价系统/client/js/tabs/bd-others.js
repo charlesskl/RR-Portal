@@ -9,7 +9,7 @@ const tab_bd_others = {
     const hwItems = versionData.hardware_items || [];
     const assemblyItems = hwItems.filter(h =>
       h.part_category === 'labor_assembly' &&
-      !/(喷油|油漆|包装人工)/.test(h.name || '')
+      !/(喷油|油漆|包装人工|拆查货|拆货)/.test(h.name || '')
     );
     const assemblyRows = assemblyItems.map(h => `
       <tr>
@@ -85,7 +85,7 @@ const tab_bd_others = {
     const hwItems = versionData.hardware_items || [];
     const assemblyItems = hwItems.filter(h =>
       h.part_category === 'labor_assembly' &&
-      !/(喷油|油漆|包装人工)/.test(h.name || '')
+      !/(喷油|油漆|包装人工|拆查货|拆货)/.test(h.name || '')
     );
     container.querySelectorAll('td.editable[data-table="hardware-labor"]').forEach(td => {
       const id    = td.dataset.id;

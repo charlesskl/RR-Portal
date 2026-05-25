@@ -548,8 +548,9 @@ function parseSewingDetails(workbook) {
       if (position === '__other__' && !numVal(ws.getCell(row, priceCol)) && !isPP) continue;
 
       allItems.push({
-        product_name: currentProductName,
-        product_eng: currentProductEng,
+        // labor 行不继承 section 标题（如"机芯（兴信提供）"），避免被当成款式 chip
+        product_name: isLabor ? null : currentProductName,
+        product_eng: isLabor ? null : currentProductEng,
         fabric_name: fabricName,
         position,
         sub_product,

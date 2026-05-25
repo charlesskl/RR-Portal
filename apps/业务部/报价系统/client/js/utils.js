@@ -117,7 +117,9 @@ function showToast(msg, type = 'info') {
  * 当同一 sub_product 下有多个 product_name 时，由表格显示层自动增加款式列
  */
 function getSewingGroups(all) {
+  // 排除明显不是款式的 section 标题（解析时可能误识别成 sub_product）
+  const NOISE = /^(机芯|外购件|电子件|配件|包装|测试|运输)[（(]|^(机芯|外购件|电子件|配件)$/;
   const keyFn = d => d.sub_product || d.product_name || '';
-  const keys = [...new Set(all.map(keyFn).filter(Boolean))];
+  const keys = [...new Set(all.map(keyFn).filter(k => k && !NOISE.test(k)))];
   return { keys, keyFn };
 }

@@ -533,6 +533,7 @@ router.post('/:id/translate-all', async (req, res) => {
       { table: 'MoldPart',       field: 'description', sql: `SELECT id, description FROM MoldPart       WHERE version_id=? AND ${EMPTY} ORDER BY sort_order` },
       { table: 'HardwareItem',   field: 'name',        sql: `SELECT id, name        FROM HardwareItem   WHERE version_id=? AND ${EMPTY} ORDER BY sort_order` },
       { table: 'PackagingItem',  field: 'name',        sql: `SELECT id, name        FROM PackagingItem  WHERE version_id=? AND ${EMPTY} ORDER BY sort_order` },
+      { table: 'PackagingItem',  field: 'remark',      engField: 'remark_eng', sql: `SELECT id, remark FROM PackagingItem WHERE version_id=? AND remark IS NOT NULL AND remark != '' AND (remark_eng IS NULL OR remark_eng = '') ORDER BY sort_order` },
       { table: 'ElectronicItem', field: 'part_name',   sql: `SELECT id, part_name   FROM ElectronicItem WHERE version_id=? AND ${EMPTY} ORDER BY sort_order` },
       { table: 'SewingDetail',   field: 'fabric_name', sql: `SELECT id, fabric_name FROM SewingDetail   WHERE version_id=? AND ${EMPTY} ORDER BY sort_order` },
       { table: 'RawMaterial',    field: 'material_name', sql: `SELECT id, material_name FROM RawMaterial WHERE version_id=? AND ${EMPTY} ORDER BY sort_order` },

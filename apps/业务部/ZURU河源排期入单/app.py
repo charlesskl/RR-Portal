@@ -20,6 +20,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 
 from excel_po_parser import ExcelPOParser
 from hy_schedule import analyze_orders, write_orders
+from fy_schedule import generate_fy_export
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(APP_DIR, 'data')
@@ -436,6 +437,7 @@ def hy_export_only():
                 'line_idx': amb['line_idx'],
                 'item': amb['item'], 'po': amb['po'],
                 'file': cand['file'], 'sheet': cand['sheet'],
+                'type': cand.get('type', 'hy'),
             })
 
     cn_names = dict(analysis.get('cn_names', {}))
@@ -463,6 +465,7 @@ def hy_export_only():
         _has_price = bool(ln_data['price'])
         new_rows.append({
             'target_file': nl['file'], 'target_sheet': nl['sheet'],
+            'type': nl.get('type', 'hy'),
             'po_date': hdr['po_date_dt'], 'customer': hdr['customer'], 'dest': hdr['dest'],
             'po': hdr['po'], 'cpo': ln_data['customer_po'], 'sku_line': ln_data['f_sku'],
             'item': ln_data['sku_spec'], 'cn_name': cn_name,
@@ -529,22 +532,47 @@ def hy_export_only():
     if not new_rows:
         return jsonify({'error': '没有可导出的数据'}), 400
 
-    export_file = _generate_new_excel(new_rows, EXPORT_DIR, schedule_dir=SCHEDULE_DIR)
+    # 按排期类型分流导出
+    hy_rows = [r for r in new_rows if r.get('type', 'hy') != 'fy']
+    fy_rows_export = [r for r in new_rows if r.get('type') == 'fy']
+
+    export_file = None
+    fy_export_file = None
+
+    if hy_rows:
+        export_file = _generate_new_excel(hy_rows, EXPORT_DIR, schedule_dir=SCHEDULE_DIR)
+    if fy_rows_export:
+        fy_export_file = generate_fy_export(fy_rows_export, EXPORT_DIR, SCHEDULE_DIR)
+
+    if not export_file and fy_export_file:
+        export_file = fy_export_file
+        fy_export_file = None
+
     if not export_file:
         return jsonify({'error': '生成Excel失败'}), 500
 
     _delete_session(session_id)
 
-    logger.info(f'[河源] 仅导出分类Excel: {len(new_rows)}行, 文件={export_file}')
-    return jsonify({
+    msg_parts = []
+    if hy_rows:
+        msg_parts.append(f'河源{len(hy_rows)}行')
+    if fy_rows_export:
+        msg_parts.append(f'翻译{len(fy_rows_export)}行')
+    msg = f'已生成分类Excel（{"+".join(msg_parts) or str(len(new_rows))+"行"}）'
+
+    logger.info(f'[导出] {msg}, 文件={export_file}, fy={fy_export_file}')
+    resp = {
         'ok': True,
-        'msg': f'已生成分类Excel（{len(new_rows)}行，不写入排期）',
+        'msg': msg,
         'export_file': export_file,
         'new_count': len(analysis['new_lines']),
         'mod_count': len(analysis['modifications']),
         'unknown_count': len(analysis['unknown']),
         'ambiguous_count': len(analysis['ambiguous']),
-    })
+    }
+    if fy_export_file:
+        resp['fy_export_file'] = fy_export_file
+    return jsonify(resp)
 
 
 @app.route('/api/hy-export-download/<filename>')

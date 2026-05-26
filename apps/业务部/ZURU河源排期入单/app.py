@@ -77,10 +77,15 @@ def _get_schedule_info():
 def _run_scan():
     """运行 scan_hy_items.py 重建货号映射表"""
     script = os.path.join(APP_DIR, 'scan_hy_items.py')
+    # Windows上隐藏CMD窗口
+    kwargs = {}
+    if os.name == 'nt':
+        kwargs['creationflags'] = subprocess.CREATE_NO_WINDOW
     try:
         result = subprocess.run(
             [sys.executable, script, SCHEDULE_DIR],
-            capture_output=True, text=True, timeout=600, encoding='utf-8'
+            capture_output=True, text=True, timeout=600, encoding='utf-8',
+            **kwargs
         )
         logger.info(f'[河源] 重建映射表: rc={result.returncode}')
         return result.returncode == 0, result.stdout, result.stderr

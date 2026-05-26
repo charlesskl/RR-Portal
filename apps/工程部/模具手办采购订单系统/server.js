@@ -84,6 +84,7 @@ function verifyToken(req) {
 
 // Auth middleware: optional — allow all requests, populate req.user when token present
 app.use('/api', (req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store');
   if (req.path === '/login') return next();
   const payload = verifyToken(req);
   req.user = payload ? payload.name : '管理员';

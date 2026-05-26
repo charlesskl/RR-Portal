@@ -579,7 +579,20 @@ router.post('/:id/translate-all', async (req, res) => {
         }
         try {
           if (cache[text] === undefined) {
-            cache[text] = await translate(text);
+            // Preserve "/" separators: split, translate each part, rejoin
+            if (text.includes('/')) {
+              const parts = text.split('/').map(s => s.trim());
+              const translated = await Promise.all(parts.map(async p => {
+                if (!p) return '';
+                if (!/[一-鿿]/.test(p)) return p;
+                if (cache[p] !== undefined) return cache[p];
+                cache[p] = await translate(p);
+                return cache[p];
+              }));
+              cache[text] = translated.join('/');
+            } else {
+              cache[text] = await translate(text);
+            }
           }
           update.run(cache[text], row.id);
           total++;

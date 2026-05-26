@@ -512,9 +512,24 @@ function generateSchedule({ orderIds, date, shift, workshop }) {
     const maxSort = db.prepare(`SELECT MAX(sort_order) as m FROM schedule_items WHERE schedule_id = ?`).get(scheduleId);
     let sortOrder = (maxSort?.m ?? -1) + 1;
 
-    // 先写结转项（is_carry_over=1，仅限机台正常的）
+    // 合并进已有 draft 时，查现存条目 key 集合，避免重复写入延续项/新订单
+    // 同一订单在同一机台只应该有一条
+    const existingKeys = new Set();
+    if (existingDraft) {
+      const existing = db.prepare(
+        `SELECT order_id, machine_no, mold_name FROM schedule_items WHERE schedule_id = ?`
+      ).all(scheduleId);
+      for (const it of existing) {
+        existingKeys.add(`${it.order_id || ''}|${it.machine_no}|${it.mold_name || ''}`);
+      }
+    }
+
+    // 先写结转项（is_carry_over=1，仅限机台正常的、且不与现存条目重复）
     // 使用 DB 存储的 shortage（权威值），因为调机人手动调过的 accumulated 可能已偏离简单累加
     for (const item of filteredCarryOver) {
+      const dedupKey = `${item.order_id || ''}|${item.machine_no}|${item.mold_name || ''}`;
+      if (existingKeys.has(dedupKey)) continue;  // 已存在，跳过避免重复
+      existingKeys.add(dedupKey);
       const shortage = item.shortage !== null && item.shortage !== undefined
         ? item.shortage
         : Math.max(0, (item.quantity_needed || 0) - (item.accumulated || 0));
@@ -533,9 +548,12 @@ function generateSchedule({ orderIds, date, shift, workshop }) {
       );
     }
 
-    // 再写新订单
+    // 再写新订单（同样按 dedupKey 去重，防止用户重复选同一订单）
     for (const a of newAssignments) {
       const o = a.order;
+      const dedupKey = `${o.id || ''}|${a.machine_no}|${o.mold_name || ''}`;
+      if (existingKeys.has(dedupKey)) continue;
+      existingKeys.add(dedupKey);
       const shortage = Math.max(0, (o.quantity_needed || 0) - (o.accumulated || 0));
       // 从模具目标表查找，找不到则留空（0）
       const moldTarget = findMoldTarget(o.mold_no);

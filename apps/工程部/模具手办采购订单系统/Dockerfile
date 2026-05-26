@@ -2,6 +2,9 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
+# Use Aliyun alpine mirror — ECS in China; default dl-cdn (fastly/IPv6) throughput is unreliable
+RUN sed -i 's#dl-cdn.alpinelinux.org#mirrors.aliyun.com#g' /etc/apk/repositories
+
 # Build deps for better-sqlite3 native compile
 RUN apk add --no-cache python3 make g++
 
@@ -12,6 +15,9 @@ RUN npm ci --omit=dev
 FROM node:20-alpine
 
 WORKDIR /app
+
+# Use Aliyun alpine mirror — ECS in China; default dl-cdn (fastly/IPv6) throughput is unreliable
+RUN sed -i 's#dl-cdn.alpinelinux.org#mirrors.aliyun.com#g' /etc/apk/repositories
 
 RUN apk add --no-cache tini curl
 

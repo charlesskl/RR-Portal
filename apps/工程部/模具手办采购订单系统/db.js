@@ -300,6 +300,121 @@ function getMoldFactories() {
 function getFigureFactories() {
   return db.prepare('SELECT name FROM figure_factories ORDER BY name').all().map(r => r.name);
 }
+
+// ─── Figure Factory CRUD ─────────────────────────────────────────────────
+function getFigureFactoriesWithCount() {
+  return db.prepare(`
+    SELECT f.name, COUNT(o.id) AS ref_count
+    FROM figure_factories f
+    LEFT JOIN figure_orders o ON o.figure_factory = f.name
+    GROUP BY f.name
+    ORDER BY f.name
+  `).all();
+}
+function addFigureFactory(name) {
+  name = String(name || '').trim();
+  if (!name) { const e = new Error('EMPTY'); e.code = 'EMPTY'; throw e; }
+  const exists = db.prepare('SELECT 1 FROM figure_factories WHERE name = ?').get(name);
+  if (exists) { const e = new Error('CONFLICT'); e.code = 'CONFLICT'; throw e; }
+  db.prepare('INSERT INTO figure_factories (name) VALUES (?)').run(name);
+}
+const renameFigureFactory = db.transaction((oldName, newName) => {
+  newName = String(newName || '').trim();
+  if (!newName) { const e = new Error('EMPTY'); e.code = 'EMPTY'; throw e; }
+  if (oldName === newName) return;
+  const exists = db.prepare('SELECT 1 FROM figure_factories WHERE name = ?').get(newName);
+  if (exists) { const e = new Error('CONFLICT'); e.code = 'CONFLICT'; throw e; }
+  const found = db.prepare('SELECT 1 FROM figure_factories WHERE name = ?').get(oldName);
+  if (!found) { const e = new Error('NOT_FOUND'); e.code = 'NOT_FOUND'; throw e; }
+  db.prepare('UPDATE figure_factories SET name = ? WHERE name = ?').run(newName, oldName);
+  db.prepare('UPDATE figure_orders SET figure_factory = ? WHERE figure_factory = ?').run(newName, oldName);
+});
+const deleteFigureFactory = db.transaction((name, force) => {
+  const refCount = db.prepare('SELECT COUNT(*) AS c FROM figure_orders WHERE figure_factory = ?').get(name).c;
+  if (refCount > 0 && !force) {
+    const e = new Error('IN_USE'); e.code = 'IN_USE'; e.ref_count = refCount; throw e;
+  }
+  if (refCount > 0 && force) {
+    db.prepare("UPDATE figure_orders SET figure_factory = '' WHERE figure_factory = ?").run(name);
+  }
+  db.prepare('DELETE FROM figure_factories WHERE name = ?').run(name);
+});
+
+// ─── Mold Factory CRUD ───────────────────────────────────────────────────
+function getMoldFactoriesWithCount() {
+  return db.prepare(`
+    SELECT f.name, COUNT(o.id) AS ref_count
+    FROM mold_factories f
+    LEFT JOIN mold_orders o ON o.mold_factory = f.name
+    GROUP BY f.name
+    ORDER BY f.name
+  `).all();
+}
+function addMoldFactory(name) {
+  name = String(name || '').trim();
+  if (!name) { const e = new Error('EMPTY'); e.code = 'EMPTY'; throw e; }
+  const exists = db.prepare('SELECT 1 FROM mold_factories WHERE name = ?').get(name);
+  if (exists) { const e = new Error('CONFLICT'); e.code = 'CONFLICT'; throw e; }
+  db.prepare('INSERT INTO mold_factories (name) VALUES (?)').run(name);
+}
+const renameMoldFactory = db.transaction((oldName, newName) => {
+  newName = String(newName || '').trim();
+  if (!newName) { const e = new Error('EMPTY'); e.code = 'EMPTY'; throw e; }
+  if (oldName === newName) return;
+  const exists = db.prepare('SELECT 1 FROM mold_factories WHERE name = ?').get(newName);
+  if (exists) { const e = new Error('CONFLICT'); e.code = 'CONFLICT'; throw e; }
+  const found = db.prepare('SELECT 1 FROM mold_factories WHERE name = ?').get(oldName);
+  if (!found) { const e = new Error('NOT_FOUND'); e.code = 'NOT_FOUND'; throw e; }
+  db.prepare('UPDATE mold_factories SET name = ? WHERE name = ?').run(newName, oldName);
+  db.prepare('UPDATE mold_orders SET mold_factory = ? WHERE mold_factory = ?').run(newName, oldName);
+});
+const deleteMoldFactory = db.transaction((name, force) => {
+  const refCount = db.prepare('SELECT COUNT(*) AS c FROM mold_orders WHERE mold_factory = ?').get(name).c;
+  if (refCount > 0 && !force) {
+    const e = new Error('IN_USE'); e.code = 'IN_USE'; e.ref_count = refCount; throw e;
+  }
+  if (refCount > 0 && force) {
+    db.prepare("UPDATE mold_orders SET mold_factory = '' WHERE mold_factory = ?").run(name);
+  }
+  db.prepare('DELETE FROM mold_factories WHERE name = ?').run(name);
+});
+
+// ─── Customer CRUD (dual cascade: figure_orders + mold_orders) ──────────
+function getCustomersWithCount() {
+  return db.prepare(`
+    SELECT c.name,
+           (SELECT COUNT(*) FROM figure_orders WHERE customer = c.name)
+         + (SELECT COUNT(*) FROM mold_orders   WHERE customer = c.name) AS ref_count
+    FROM customers c
+    ORDER BY c.name
+  `).all();
+}
+const renameCustomer = db.transaction((oldName, newName) => {
+  newName = String(newName || '').trim();
+  if (!newName) { const e = new Error('EMPTY'); e.code = 'EMPTY'; throw e; }
+  if (oldName === newName) return;
+  const exists = db.prepare('SELECT 1 FROM customers WHERE name = ?').get(newName);
+  if (exists) { const e = new Error('CONFLICT'); e.code = 'CONFLICT'; throw e; }
+  const found = db.prepare('SELECT 1 FROM customers WHERE name = ?').get(oldName);
+  if (!found) { const e = new Error('NOT_FOUND'); e.code = 'NOT_FOUND'; throw e; }
+  db.prepare('UPDATE customers SET name = ? WHERE name = ?').run(newName, oldName);
+  db.prepare('UPDATE figure_orders SET customer = ? WHERE customer = ?').run(newName, oldName);
+  db.prepare('UPDATE mold_orders   SET customer = ? WHERE customer = ?').run(newName, oldName);
+});
+const deleteCustomer = db.transaction((name, force) => {
+  const f = db.prepare('SELECT COUNT(*) AS c FROM figure_orders WHERE customer = ?').get(name).c;
+  const m = db.prepare('SELECT COUNT(*) AS c FROM mold_orders   WHERE customer = ?').get(name).c;
+  const refCount = f + m;
+  if (refCount > 0 && !force) {
+    const e = new Error('IN_USE'); e.code = 'IN_USE'; e.ref_count = refCount; throw e;
+  }
+  if (refCount > 0 && force) {
+    db.prepare("UPDATE figure_orders SET customer = '' WHERE customer = ?").run(name);
+    db.prepare("UPDATE mold_orders   SET customer = '' WHERE customer = ?").run(name);
+  }
+  db.prepare('DELETE FROM customers WHERE name = ?').run(name);
+});
+
 function getUser(name) {
   return db.prepare('SELECT name, pin FROM eng_users WHERE name = ?').get(name);
 }
@@ -314,6 +429,9 @@ module.exports = {
   listFigureOrders, getFigureOrder, createFigureOrder, updateFigureOrder, deleteFigureOrder,
   listPurchaseOrders, getPurchaseOrder, createPurchaseOrder, updatePurchaseOrder, deletePurchaseOrder,
   getCustomers, addCustomer,
+  getCustomersWithCount, renameCustomer, deleteCustomer,
   getMoldFactories, getFigureFactories,
+  getFigureFactoriesWithCount, addFigureFactory, renameFigureFactory, deleteFigureFactory,
+  getMoldFactoriesWithCount, addMoldFactory, renameMoldFactory, deleteMoldFactory,
   getUser, updateUserPin,
 };

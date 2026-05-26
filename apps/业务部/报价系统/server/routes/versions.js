@@ -533,6 +533,7 @@ router.post('/:id/translate-all', async (req, res) => {
       { table: 'MoldPart',       field: 'description', sql: `SELECT id, description FROM MoldPart       WHERE version_id=? AND ${EMPTY} ORDER BY sort_order` },
       { table: 'HardwareItem',   field: 'name',        sql: `SELECT id, name        FROM HardwareItem   WHERE version_id=? AND ${EMPTY} ORDER BY sort_order` },
       { table: 'PackagingItem',  field: 'name',        sql: `SELECT id, name        FROM PackagingItem  WHERE version_id=? AND ${EMPTY} ORDER BY sort_order` },
+      { table: 'PackagingItem',  field: 'remark',      engField: 'remark_eng', sql: `SELECT id, remark FROM PackagingItem WHERE version_id=? AND remark IS NOT NULL AND remark != '' AND (remark_eng IS NULL OR remark_eng = '') ORDER BY sort_order` },
       { table: 'ElectronicItem', field: 'part_name',   sql: `SELECT id, part_name   FROM ElectronicItem WHERE version_id=? AND ${EMPTY} ORDER BY sort_order` },
       { table: 'SewingDetail',   field: 'fabric_name', sql: `SELECT id, fabric_name FROM SewingDetail   WHERE version_id=? AND ${EMPTY} ORDER BY sort_order` },
       { table: 'RawMaterial',    field: 'material_name', sql: `SELECT id, material_name FROM RawMaterial WHERE version_id=? AND ${EMPTY} ORDER BY sort_order` },
@@ -578,7 +579,20 @@ router.post('/:id/translate-all', async (req, res) => {
         }
         try {
           if (cache[text] === undefined) {
-            cache[text] = await translate(text);
+            // Preserve "/" separators: split, translate each part, rejoin
+            if (text.includes('/')) {
+              const parts = text.split('/').map(s => s.trim());
+              const translated = await Promise.all(parts.map(async p => {
+                if (!p) return '';
+                if (!/[一-鿿]/.test(p)) return p;
+                if (cache[p] !== undefined) return cache[p];
+                cache[p] = await translate(p);
+                return cache[p];
+              }));
+              cache[text] = translated.join('/');
+            } else {
+              cache[text] = await translate(text);
+            }
           }
           update.run(cache[text], row.id);
           total++;

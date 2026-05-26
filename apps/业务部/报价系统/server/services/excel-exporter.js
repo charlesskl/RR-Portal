@@ -371,8 +371,8 @@ function fillBCD(ws, d) {
     const c = ws.getCell(14, 4); delete c._sharedFormula; c.value = { formula: `$G$${aTotalRow}`, result: null };
   }
 
-  // ── Section B1: Injection Molding (rows 67–86) ──────────────────────────────
-  const MOLD_START = 67 + fabricShift, MOLD_END = 86 + fabricShift;
+  // ── Section B1: Injection Molding (rows 71–90 in new template) ─────────────
+  const MOLD_START = 71 + fabricShift, MOLD_END = 90 + fabricShift;
   // Clear ALL cells — must splice shared formula metadata to prevent ExcelJS
   // from re-expanding F68:F86 shared formula over E column on file open
   for (let r = MOLD_START; r <= MOLD_END; r++) {
@@ -409,8 +409,8 @@ function fillBCD(ws, d) {
   const injShift = injDeleteCount > 0 ? injDeleteCount : 0;
 
   // ── Section B2: Blow Molding / Rotocast (row 90 shifted up by deleted rows) ──
-  const BLOW_TEMPLATE_ROW = 90 + fabricShift - injShift;
-  const BLOW_SUBTOTAL_ROW = 91 + fabricShift - injShift;
+  const BLOW_TEMPLATE_ROW = 94 + fabricShift - injShift;
+  const BLOW_SUBTOTAL_ROW = 95 + fabricShift - injShift;
   const rotoList = (rotocastItems || []).filter(r =>
     r.mold_no && /^[A-Za-z]+\d+/.test(r.mold_no.trim())
   );
@@ -445,8 +445,8 @@ function fillBCD(ws, d) {
 
   // ── Rewrite B subtotal and B TOTAL formulas after row shifts ─────────────────
   // Template: Blow subtotal at row 91, B TOTAL at row 94 (both shift by blowShift)
-  const BLOW_SUB_ROW  = 91 + blowShift;
-  const B_TOTAL_ROW   = 94 + blowShift;
+  const BLOW_SUB_ROW  = 95 + blowShift;
+  const B_TOTAL_ROW   = 98 + blowShift;
   const injSectionStart = MOLD_START; // row 67 (fixed)
   const blowSectionEnd  = BLOW_TEMPLATE_ROW + Math.max(0, rotoList.length - 1); // last roto row
   // Blow subtotal: SUM of G column from injection start to end of blow section
@@ -456,7 +456,7 @@ function fillBCD(ws, d) {
   forceWriteFormula(B_TOTAL_ROW, 7, `G${BLOW_SUB_ROW}`, null);
 
   // ── Section C: Electronics (rows 101–103) ──────────────────────────────────
-  const ELEC_START = 101 + blowShift, ELEC_END = 103 + blowShift;
+  const ELEC_START = 105 + blowShift, ELEC_END = 107 + blowShift;
   // Clear cols 2-6 including F col formula to prevent stale template formulas
   for (let r = ELEC_START; r <= ELEC_END; r++) {
     for (let c = 2; c <= 6; c++) {
@@ -482,8 +482,8 @@ function fillBCD(ws, d) {
   forceWriteFormula(ELEC_SUBTOTAL_ROW, 7, `SUM(F${ELEC_START}:F${ELEC_END})`, null);
 
   // ── Section C2: Sewing Accessories (rows 106–109 data, row 110 sub-total) ──
-  const SEW_START = 106 + blowShift, SEW_DATA_TEMPLATE_END = 109 + blowShift;
-  const SEW_SUBTOTAL_TEMPLATE = 110 + blowShift; // sub-total row in template
+  const SEW_START = 110 + blowShift, SEW_DATA_TEMPLATE_END = 113 + blowShift;
+  const SEW_SUBTOTAL_TEMPLATE = 114 + blowShift; // sub-total row in template
   const hkdRmb = parseFloat(params.rmb_hkd) || 0.85;
   const sewList = sewingItems || [];
   const baList  = bodyAccessories || [];
@@ -516,11 +516,11 @@ function fillBCD(ws, d) {
   forceWriteFormula(SEW_SUBTOTAL_ROW, 7, `SUM(F${SEW_START}:F${SEW_END})`, null);
 
   // ── Section C3: Other Components (body accessories) ──────────────────────────
-  // Template: data rows 113-134 (22 slots), Sub Total (SUM) at row 135, gap 136-138, C.TOTAL at 140
+  // Template: data rows 117-138 (22 slots), Sub Total (SUM) at row 139, gap 140-142, C.TOTAL at 141
   const totalShift = blowShift + sewExtra;
-  const C3_DATA_START = 113 + totalShift;
-  const C3_SLOTS = 22;     // data rows 113-134 in original template
-  const C3_SUBTOTAL_ROW = C3_DATA_START + C3_SLOTS; // row 135 (+ shift)
+  const C3_DATA_START = 117 + totalShift;
+  const C3_SLOTS = 22;     // data rows 117-138 in new template
+  const C3_SUBTOTAL_ROW = C3_DATA_START + C3_SLOTS; // row 139 (+ shift)
   const C3_GAP = 4;        // always leave 4 empty rows after data before subtotal
   const c3Need = baList.length + C3_GAP; // total rows needed (data + gap)
   const c3Extra = Math.max(0, c3Need - C3_SLOTS); // extra rows to insert
@@ -548,8 +548,9 @@ function fillBCD(ws, d) {
     const r = C3_DATA_START + i;
     const usage = parseFloat(item.usage_qty) || 1;
     const unitPrice = r2(parseFloat(item.unit_price) || 0);
-    ws.getCell(r, 2).value = item.eng_name || item.description || '';
-    ws.getCell(r, 3).value = item.eng_name ? (item.description || '') : '';
+    ws.getCell(r, 2).value = biName(item.description, item.eng_name);
+    ws.getCell(r, 3).value = usage > 1 ? 'pcs' : 'pc';
+    ws.getCell(r, 3).alignment = { horizontal: 'center' };
     ws.getCell(r, 4).value = usage;
     ws.getCell(r, 5).value = unitPrice;
     forceWriteFormula(r, 6, `D${r}*E${r}`, r2(usage * unitPrice));
@@ -573,24 +574,28 @@ function fillBCD(ws, d) {
   forceWriteFormula(C_TOTAL_ROW, 7, `SUM(G${C_SUM_START}:G${C_SUM_END})`, null);
 
   // ── Section E: E. OTHER LABOUR & PROCESS ─────────────────────────────────────
-  // Anchor all Section D/E rows relative to c3SubTotalRow (template row 135).
-  // This avoids eShift arithmetic errors from mixed insertions/deletions above.
-  // Template offsets from c3SubTotalRow=135:
-  //   D data: +6..+8 (rows 141-143)   D.SUB: +9 (144)   D.TOTAL: +10 (145)
-  //   Ransburg: +17 (152)   Spraying: +18 (153)   Vacuum: +19 (154)
-  //   DECO subtotal: +20 (155)
-  //   Trimming: +22 (157)   Polishing: +23 (158)   TRIM subtotal: +24 (159)
-  //   WOOD CUTTING: +25 (160)   WOOD subtotal: +26 (161)
-  //   SEWING data: +27 (162)   SEWING subtotal: +28 (163)
-  //   ASSEMBLY: +30 (165)   E.TOTAL: +35 (170)
+  // Anchor all Section D/E rows relative to c3SubTotalRow (logical template row 135).
+  // E0 = real c3SubTotalRow - 135. In new template c3SubTotalRow=139 → E0=4 → +4 applied to all 135-anchored literals below.
+  // 135-anchored offsets (do NOT change literals when template shifts; let E0 absorb the shift):
+  //   D data: +6..+8 (141-143→145-147)   D.SUB: +9 (144→148)   D.TOTAL: +10 (145→149)
+  //   Ransburg: +17 (152→156)   Spraying: +18 (153→157)   Vacuum: +19 (154→158)
+  //   DECO subtotal: +20 (155→159)
+  //   Trimming: +22 (157→161)   Polishing: +23 (158→162)   TRIM subtotal: +24 (159→163)
+  //   WOOD CUTTING: +25 (160→164)   WOOD subtotal: +26 (161→165)
+  //   SEWING data: +27 (162→166)   SEWING subtotal: +28 (163→167)
+  //   ASSEMBLY: +30 (165→169)   E.TOTAL: +35 (170→174)
   const E0 = c3SubTotalRow - 135; // net shift applied to all template row numbers
 
   // Clear stale data columns D-G in section D+E range
+  // Preserve: formulas + string labels (header text like "Usage/Toy" / "Unit Cost (HK$)")
   for (let r = 141 + E0; r <= 175 + E0; r++) {
     for (const c of [4, 5, 6, 7]) {
       const cell = ws.getCell(r, c);
       delete cell._sharedFormula;
-      if (!(cell.value && typeof cell.value === 'object' && cell.value.formula)) cell.value = null;
+      const v = cell.value;
+      const isFormula = v && typeof v === 'object' && v.formula;
+      const isLabel = typeof v === 'string' && v.trim();
+      if (!isFormula && !isLabel) cell.value = null;
     }
   }
 
@@ -660,7 +665,7 @@ function fillBCD(ws, d) {
   forceWriteFormula(sewRow, 7, `SUM(F${sewDataRow}:F${sewDataRow})`, sewAmount);
 
   // 5. OTHERS — Assembly labour
-  const asmList = (assemblyLaborItems || []).filter(h => !/(喷油|油漆|包装人工)/.test(h.name || ''));
+  const asmList = (assemblyLaborItems || []).filter(h => !/(喷油|油漆|包装人工|拆查货|拆货)/.test(h.name || ''));
   const asmItem = asmList.find(h => (h.name || '').includes('装配')) || asmList[0];
   let asmAmount = 0;
   if (asmItem) {

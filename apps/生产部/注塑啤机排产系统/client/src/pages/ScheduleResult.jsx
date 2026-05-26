@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Table, Button, Card, Space, Tag, message, Popconfirm, Input, InputNumber, Switch, Select, Modal } from 'antd';
-import { DownloadOutlined, DeleteOutlined, CheckCircleOutlined, SaveOutlined, EditOutlined, CopyOutlined, SwapOutlined, HolderOutlined } from '@ant-design/icons';
+import { DownloadOutlined, DeleteOutlined, CheckCircleOutlined, SaveOutlined, EditOutlined, CopyOutlined, SwapOutlined, HolderOutlined, SortAscendingOutlined } from '@ant-design/icons';
 import axios from 'axios';
 import { DndContext, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from '@dnd-kit/sortable';
@@ -266,6 +266,26 @@ export default function ScheduleResult({ workshop = 'B' }) {
     });
     return data;
   }, [items, dayShiftItems, showCompleted, showDayShift]);
+
+  // 按机台号升序重排当前排机单（A-6# → A-12# → A-26# → A-40#）
+  const handleSortByMachine = async () => {
+    if (!selectedSchedule || items.length === 0) return;
+    const sorted = [...items].sort((a, b) => {
+      const mn = getMachineNum(a.machine_no) - getMachineNum(b.machine_no);
+      if (mn !== 0) return mn;
+      return (a.sort_order ?? 0) - (b.sort_order ?? 0);
+    });
+    const reordered = sorted.map((it, i) => ({ ...it, sort_order: i }));
+    setItems(reordered);
+    try {
+      await axios.post(`${API}/${selectedSchedule.id}/items/reorder`, {
+        items: reordered.map(it => ({ id: it.id, sort_order: it.sort_order })),
+      });
+      message.success('已按机台号排序');
+    } catch (e) {
+      message.error('保存顺序失败：' + (e.response?.data?.message || e.message));
+    }
+  };
 
   // 拖完一行的处理：仅对当前 items 生效（day-shift 行不可拖）
   const handleDragEnd = async ({ active, over }) => {
@@ -538,7 +558,19 @@ export default function ScheduleResult({ workshop = 'B' }) {
             </Space>
           }
           size="small"
-          extra={null}
+          extra={
+            !isConfirmed && (
+              <Popconfirm
+                title="按机台号升序重排当前排机单？"
+                description="A-6# → A-12# → A-26# → A-40# 这样升序排列，同机台多行保留现有顺序。"
+                onConfirm={handleSortByMachine}
+                okText="确定排序"
+                cancelText="取消"
+              >
+                <Button size="small" icon={<SortAscendingOutlined />}>按机台号排序</Button>
+              </Popconfirm>
+            )
+          }
         >
           <DndContext sensors={dndSensors} onDragEnd={handleDragEnd}>
             <SortableContext items={items.map(i => i.id)} strategy={verticalListSortingStrategy}>

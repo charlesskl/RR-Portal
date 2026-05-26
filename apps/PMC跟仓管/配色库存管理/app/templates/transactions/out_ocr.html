@@ -9,22 +9,31 @@
   <a href="{{ url_for('transactions.out_list') }}" class="btn btn-secondary">取消</a>
 </form>
 {% else %}
-<p>共识别出 <strong>{{ rows|length }}</strong> 行。<strong>数量按克填写,系统会自动 ÷1000 转成 kg 扣减库存。</strong>色粉编号可点开下拉搜索或直接手动输入。<br><small class="text-muted">编号若在库存里找不到,会自动新建占位色粉(允许负库存),之后可去「颜料档案」修改名称/品牌并补入库。</small></p>
+<p>共识别出 <strong>{{ rows|length }}</strong> 行。<strong>数量按克填写,系统会自动 ÷1000 转成 kg 扣减库存。</strong>色粉编号可点开下拉搜索或直接手动输入。<br><small class="text-muted">编号若在库存里找不到,会自动新建占位色粉(允许负库存),之后可去「颜料档案」修改名称/品牌并补入库。单价默认取自颜料档案(按 kg),可手动改;金额 = 数量 ÷ 1000 × 单价,仅作核对参考,不写入出库记录。</small></p>
 <form method="post" action="{{ url_for('transactions.out_ocr_submit') }}">
   <table class="table table-sm" id="ocrTable">
-    <thead><tr><th style="width:30%">识别文本</th><th>色粉编号(搜索/手动输入)</th><th>数量(克)</th><th></th></tr></thead>
+    <thead><tr><th style="width:26%">识别文本</th><th>色粉编号(搜索/手动输入)</th><th>数量(克)</th><th>单价(元/kg)</th><th>金额(元)</th><th></th></tr></thead>
     <tbody>
       {% for r in rows %}
       <tr>
         <td><small class="text-muted">{{ r.raw }}</small></td>
         <td><input name="pigment_code[]" list="pigmentCodes" autocomplete="off"
-                   class="form-control form-control-sm" placeholder="色粉编号"
+                   class="form-control form-control-sm code-input" placeholder="色粉编号"
                    value="{{ r.pigment_code or r.purchase_code or '' }}"></td>
-        <td><input type="number" name="quantity[]" value="{{ '%.2f'|format(r.quantity) }}" step="0.01" class="form-control form-control-sm" min="0"></td>
-        <td><button type="button" class="btn btn-sm btn-outline-danger" onclick="this.closest('tr').remove()">删</button></td>
+        <td><input type="number" name="quantity[]" value="{{ '%.2f'|format(r.quantity) }}" step="0.01" class="form-control form-control-sm qty-input" min="0"></td>
+        <td><input type="number" name="unit_price[]" value="{{ '%.2f'|format(r.unit_price or 0) }}" step="0.01" class="form-control form-control-sm price-input" min="0"></td>
+        <td class="amount-cell text-end align-middle">0.0</td>
+        <td><button type="button" class="btn btn-sm btn-outline-danger" onclick="this.closest('tr').remove();recalcOut()">删</button></td>
       </tr>
       {% endfor %}
     </tbody>
+    <tfoot>
+      <tr>
+        <th colspan="4" class="text-end">合计金额</th>
+        <th id="outTotal" class="text-end">0.0</th>
+        <th></th>
+      </tr>
+    </tfoot>
   </table>
   <button type="button" class="btn btn-outline-secondary mb-3" onclick="addOutRow()">+ 添加行</button>
   <div>
@@ -36,9 +45,11 @@
 <template id="outRowTpl">
   <tr>
     <td><small class="text-muted">手动</small></td>
-    <td><input name="pigment_code[]" list="pigmentCodes" autocomplete="off" class="form-control form-control-sm" placeholder="色粉编号"></td>
-    <td><input type="number" step="0.01" name="quantity[]" value="0" class="form-control form-control-sm" min="0"></td>
-    <td><button type="button" class="btn btn-sm btn-outline-danger" onclick="this.closest('tr').remove()">删</button></td>
+    <td><input name="pigment_code[]" list="pigmentCodes" autocomplete="off" class="form-control form-control-sm code-input" placeholder="色粉编号"></td>
+    <td><input type="number" step="0.01" name="quantity[]" value="0" class="form-control form-control-sm qty-input" min="0"></td>
+    <td><input type="number" step="0.01" name="unit_price[]" value="0" class="form-control form-control-sm price-input" min="0"></td>
+    <td class="amount-cell text-end align-middle">0.0</td>
+    <td><button type="button" class="btn btn-sm btn-outline-danger" onclick="this.closest('tr').remove();recalcOut()">删</button></td>
   </tr>
 </template>
 <datalist id="pigmentCodes">
@@ -48,10 +59,53 @@
   {% endfor %}
 </datalist>
 <script>
+// 色粉编号(小写) → 颜料档案单价(按 kg)。改色粉编号时用来回填单价。
+var PRICE_MAP = {
+  {%- for p in pigments %}
+    {%- if p.code %}{{ p.code|lower|tojson }}: {{ p.unit_price or 0 }},{% endif %}
+    {%- if p.purchase_code %}{{ p.purchase_code|lower|tojson }}: {{ p.unit_price or 0 }},{% endif %}
+  {%- endfor %}
+};
+function rowAmount(tr){
+  var qtyEl = tr.querySelector('.qty-input');
+  var priceEl = tr.querySelector('.price-input');
+  var qty = qtyEl ? parseFloat(qtyEl.value) || 0 : 0;
+  var price = priceEl ? parseFloat(priceEl.value) || 0 : 0;
+  return qty / 1000 * price;
+}
+function recalcOut(){
+  var total = 0;
+  document.querySelectorAll('#ocrTable tbody tr').forEach(function(tr){
+    var amt = rowAmount(tr);
+    total += amt;
+    var cell = tr.querySelector('.amount-cell');
+    if (cell) cell.textContent = amt.toFixed(1);
+  });
+  document.getElementById('outTotal').textContent = total.toFixed(1);
+}
+function fillPriceFromCode(input){
+  var code = (input.value || '').trim().toLowerCase();
+  var price = PRICE_MAP[code];
+  if (price === undefined && (code[0] === 'a' || code[0] === 'b') && code.length > 1){
+    price = PRICE_MAP[code.slice(1)];  // A/B 前缀兜底,与 OCR 匹配逻辑一致
+  }
+  if (price !== undefined){
+    var priceEl = input.closest('tr').querySelector('.price-input');
+    if (priceEl) priceEl.value = Number(price).toFixed(2);
+  }
+  recalcOut();
+}
 function addOutRow(){
-  const t = document.getElementById('outRowTpl');
+  var t = document.getElementById('outRowTpl');
   document.querySelector('#ocrTable tbody').appendChild(t.content.cloneNode(true));
 }
+document.getElementById('ocrTable').addEventListener('input', function(e){
+  if (e.target.classList.contains('qty-input') || e.target.classList.contains('price-input')) recalcOut();
+});
+document.getElementById('ocrTable').addEventListener('change', function(e){
+  if (e.target.classList.contains('code-input')) fillPriceFromCode(e.target);
+});
+recalcOut();
 </script>
 {% endif %}
 {% endblock %}

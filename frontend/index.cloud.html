@@ -76,6 +76,7 @@
   .dept-icon.production { background: linear-gradient(135deg, #f97316, #ea580c); }
   .dept-icon.pmc { background: linear-gradient(135deg, #10b981, #059669); }
   .dept-icon.business { background: linear-gradient(135deg, #f59e0b, #ef4444); }
+  .dept-icon.qa { background: linear-gradient(135deg, #8b5cf6, #ec4899); }
   .dept-name { font-size: 20px; font-weight: 600; color: #f1f5f9; }
   .dept-desc { font-size: 13px; color: #94a3b8; margin-top: 2px; }
   .dept-card-body { padding: 0 28px 24px; }
@@ -303,6 +304,26 @@
               <div class="plugin-info">
                 <div class="plugin-dot gray" id="productionPlanDot"></div>
                 <span class="plugin-name">生产计划管理系统</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- QA 部 -->
+      <div class="dept-card" onclick="showDept('qa')">
+        <div class="dept-card-header">
+          <div class="dept-icon qa">&#128269;</div>
+          <div>
+            <div class="dept-name">QA 部</div>
+          </div>
+        </div>
+        <div class="dept-card-body">
+          <div class="plugin-list" id="qaPluginList">
+            <div class="plugin-item">
+              <div class="plugin-info">
+                <div class="plugin-dot gray" id="qaWeeklyDot"></div>
+                <span class="plugin-name">QA 测试报告周结系统</span>
               </div>
             </div>
           </div>
@@ -772,10 +793,50 @@
     </div>
   </div>
 
+
+  <!-- ===== QA 部详情 ===== -->
+  <div class="detail-view" id="qaDetail">
+    <div class="back-btn" onclick="goHome()">&larr; 返回部门总览</div>
+    <div class="breadcrumb">
+      <a href="#" onclick="goHome()">控制台</a>
+      <span class="sep">/</span>
+      <span style="color:#8b5cf6">QA 部</span>
+    </div>
+    <div class="page-title" style="display:flex;align-items:center;gap:14px;">
+      <div class="dept-icon qa" style="width:40px;height:40px;font-size:18px;">&#128269;</div>
+      QA 部
+    </div>
+    <div class="page-subtitle">QA 测试报告周结 · 不合格项识别 · 按客户/周维度统计</div>
+
+    <div class="detail-plugin-card">
+      <div class="detail-plugin-left">
+        <div class="detail-plugin-icon" style="background:linear-gradient(135deg,#8b5cf6,#ec4899);">&#128269;</div>
+        <div>
+          <div class="detail-plugin-name">QA 测试报告周结系统</div>
+          <div class="detail-plugin-desc">上传 QA 测试 Excel 报告，自动识别红色字体不合格项与嵌入图片，按客户和 ISO 周聚合，支持周报 Excel 一键导出（含原图）</div>
+          <div class="feature-grid">
+            <div class="feature-tag">&#128229; Excel 上传</div>
+            <div class="feature-tag">&#128269; 红字识别</div>
+            <div class="feature-tag">&#127919; 合并单元格去重</div>
+            <div class="feature-tag">&#128247; 原图提取归组</div>
+            <div class="feature-tag">&#128197; 按周自动归档</div>
+            <div class="feature-tag">&#128101; 多客户分维度</div>
+            <div class="feature-tag">&#128202; 客户 × 周交叉表</div>
+            <div class="feature-tag">&#128228; 周报 Excel 导出</div>
+          </div>
+        </div>
+      </div>
+      <div class="detail-plugin-right">
+        <div class="detail-plugin-status"><div class="plugin-dot gray" id="qaWeeklyDetailDot"></div> 检查中...</div>
+        <a href="/qa-weekly-report/" target="_blank" class="btn btn-primary">打开系统</a>
+      </div>
+    </div>
+  </div>
+
 </div>
 
 <script>
-var allDepts = ['engineering', 'pmc', 'production', 'business'];
+var allDepts = ['engineering', 'pmc', 'production', 'business', 'qa'];
 
 function showDept(dept) {
   document.getElementById('homeView').classList.add('hidden');
@@ -814,6 +875,7 @@ async function checkHealth() {
       { name: 'peise', url: '/peise/health', dot: 'peiseDot', detailDot: 'peiseDetailDot' },
       { name: 'huadeng', url: '/huadeng/health', dot: 'huadengDot', detailDot: 'huadengDetailDot' },
       { name: 'huadengMaorong', url: '/huadeng-maorong/health', dot: 'huadengMaorongDot', detailDot: 'huadengMaorongDetailDot' },
+      { name: 'qaWeekly', url: '/qa-weekly-report/api/health', dot: 'qaWeeklyDot', detailDot: 'qaWeeklyDetailDot' },
     ];
     var healthy = 0;
     var total = checks.length;

@@ -18,7 +18,7 @@ const tab_vq_packaging = {
           <td class="center"><input type="checkbox" class="row-check" data-id="${item.id}"></td>
           <td class="editable" data-id="${item.id}" data-field="pm_no" data-type="text">${escapeHtml(item.pm_no || '')}</td>
           <td class="editable" data-id="${item.id}" data-field="name" data-type="text">${escapeHtml(item.name || '')}${item.eng_name && item.eng_name.toLowerCase() !== (item.name || '').toLowerCase() ? `<br><span style="color:#888;font-size:11px">${escapeHtml(item.eng_name)}</span>` : ''}</td>
-          <td class="editable" data-id="${item.id}" data-field="remark" data-type="text">${escapeHtml(item.remark || '')}</td>
+          <td class="editable" data-id="${item.id}" data-field="remark" data-type="text">${escapeHtml(item.remark || '')}${item.remark_eng && item.remark_eng.toLowerCase() !== (item.remark || '').toLowerCase() ? `<br><span style="color:#888;font-size:11px">${escapeHtml(item.remark_eng)}</span>` : ''}</td>
           <td class="editable num" data-id="${item.id}" data-field="moq" data-type="number">${item.moq != null ? item.moq : ''}</td>
           <td class="editable num" data-id="${item.id}" data-field="quantity" data-type="number">${formatNumber(item.quantity, 3)}</td>
           <td class="editable num" data-id="${item.id}" data-field="new_price" data-type="number">${formatNumber(item.new_price, 3)}</td>

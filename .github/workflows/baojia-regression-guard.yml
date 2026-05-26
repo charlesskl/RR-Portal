@@ -1,0 +1,51 @@
+name: Baojia regression guard
+
+# 为什么需要这道 gate：
+# 报价系统已经撞过 3 次同一个坑 — PR #97 / #108 / #143 都把 versions.js 的
+# translate-all 从 Bailian/Qwen 退回成 Baidu API。ECS 服务器从未配过 BAIDU 凭据，
+# 每次都导致 translate 静默失败。main 里的警告 comment 抵不过 stale-base 自动重写。
+# 加 mechanical gate 拦在 PR 阶段，不依赖 reviewer 注意力。
+#
+# 同时防 quotation.db 被 PR 覆盖（PR #108 / #143 都试图把 dev DB 提进 git，
+# 覆盖线上 bind-mounted 业务数据库）。
+
+on:
+  pull_request:
+    paths:
+      - 'apps/业务部/报价系统/**'
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 防 translate-all 退回百度 API
+        run: |
+          # 检查 PR diff 是否引入 BAIDU_APPID / BAIDU_KEY / fanyi-api.baidu.com
+          if git diff "origin/${{ github.base_ref }}..HEAD" -- 'apps/业务部/报价系统/' \
+              | grep -E '^\+.*(BAIDU_APPID|BAIDU_KEY|fanyi-api\.baidu\.com)'; then
+            echo "::error::报价系统 PR 引入了百度翻译 API 调用"
+            echo "::error::ECS 服务器从未配过 BAIDU_APPID / BAIDU_KEY 凭据"
+            echo "::error::translate-all 应该用阿里云百炼 (Bailian/Qwen, env: BAILIAN_API_KEY)"
+            echo "::error::PR #97 / #108 / #143 都因为同样原因被 reject/revert"
+            echo "::error::修复方法：本地 git fetch origin && git rebase origin/main，让 #116 的 Bailian fix 进来"
+            exit 1
+          fi
+          echo "[OK] 没有引入 Baidu API"
+
+      - name: 防 quotation.db 被 PR 覆盖
+        run: |
+          # quotation.db 是 ECS bind-mounted 业务 SQLite，PR 改它会覆盖线上数据
+          # PR #108 时已经踩过一次，需要 revert 才能合
+          if git diff --name-only "origin/${{ github.base_ref }}..HEAD" \
+              | grep -q 'apps/业务部/报价系统/server/data/quotation.db'; then
+            echo "::error::PR 修改了 quotation.db（线上 SQLite 业务数据库）"
+            echo "::error::这文件 ECS bind-mount 着实时业务数据 (~364KB)，PR 改会覆盖"
+            echo "::error::Schema 由 db/init.js 管理，PR 不需要更新 seed"
+            echo "::error::修复：git restore apps/业务部/报价系统/server/data/quotation.db && git commit --amend"
+            exit 1
+          fi
+          echo "[OK] quotation.db 未改"

@@ -2,10 +2,13 @@ const db = require('./connection');
 
 function initDatabase() {
   // ========== 机台配置表 ==========
+  // machine_no 不再单字段 UNIQUE — 用 (machine_no, workshop) 复合 UNIQUE，
+  // 这样不同车间可以重名机台（如「其他机台」「吹气机台」每个车间各一台）。
+  // 老 DB 的 schema 还是单 UNIQUE，下方迁移代码会一次性重建。
   db.exec(`
     CREATE TABLE IF NOT EXISTS machines (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      machine_no TEXT NOT NULL UNIQUE,
+      machine_no TEXT NOT NULL,
       brand TEXT NOT NULL,
       tonnage INTEGER NOT NULL,
       arm_type TEXT NOT NULL,
@@ -17,7 +20,9 @@ function initDatabase() {
       status TEXT DEFAULT 'active',
       notes TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      workshop TEXT DEFAULT 'B',
+      UNIQUE(machine_no, workshop)
     )
   `);
 
@@ -238,6 +243,51 @@ function initDatabase() {
   try { db.prepare("ALTER TABLE mold_targets ADD COLUMN workshop TEXT DEFAULT 'B'").run(); } catch(e){}
   try { db.prepare("ALTER TABLE orders ADD COLUMN serial_no TEXT DEFAULT ''").run(); } catch(e){}
   try { db.prepare("ALTER TABLE schedule_items ADD COLUMN serial_no TEXT DEFAULT ''").run(); } catch(e){}
+
+  // 一次性 schema 迁移：machine_no 单字段 UNIQUE → (machine_no, workshop) 复合 UNIQUE
+  // PR #145 的「其他机台 / 吹气机台」幂等迁移之前对 B/C 车间静默失败，根因就是
+  // 老 schema 的全表 UNIQUE(machine_no) 拦了「同名跨车间」的插入。
+  try {
+    const tableInfo = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='machines'").get();
+    const needsRebuild = tableInfo && tableInfo.sql && /machine_no\s+TEXT\s+NOT\s+NULL\s+UNIQUE/i.test(tableInfo.sql);
+    if (needsRebuild) {
+      console.log('[迁移] machines 表升级：machine_no 单 UNIQUE → (machine_no, workshop) 复合 UNIQUE');
+      // 清掉之前迁移失败可能留下的残留临时表（在事务外做，保证幂等）
+      db.exec('DROP TABLE IF EXISTS machines_new');
+      // 用 better-sqlite3 原生 transaction wrapper —— SQL 失败时自动 ROLLBACK，
+      // 不会把事务停在 errored state 拖累后面的 ensureOtherMachine / ensureBlowMachine
+      const rebuild = db.transaction(() => {
+        db.exec(`
+          CREATE TABLE machines_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            machine_no TEXT NOT NULL,
+            brand TEXT NOT NULL,
+            tonnage INTEGER NOT NULL,
+            arm_type TEXT NOT NULL,
+            model_desc TEXT,
+            min_shot_weight REAL DEFAULT 0,
+            max_shot_weight REAL DEFAULT 0,
+            avg_shot_weight REAL DEFAULT 0,
+            record_count INTEGER DEFAULT 0,
+            status TEXT DEFAULT 'active',
+            notes TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            workshop TEXT DEFAULT 'B',
+            UNIQUE(machine_no, workshop)
+          )
+        `);
+        db.exec(`
+          INSERT INTO machines_new (id, machine_no, brand, tonnage, arm_type, model_desc, min_shot_weight, max_shot_weight, avg_shot_weight, record_count, status, notes, created_at, updated_at, workshop)
+            SELECT id, machine_no, brand, tonnage, arm_type, model_desc, min_shot_weight, max_shot_weight, avg_shot_weight, record_count, status, notes, created_at, updated_at, COALESCE(workshop, 'B') FROM machines
+        `);
+        db.exec('DROP TABLE machines');
+        db.exec('ALTER TABLE machines_new RENAME TO machines');
+      });
+      rebuild();
+      console.log('[迁移] machines 表升级完成');
+    }
+  } catch(e) { console.log('[machines schema 迁移失败]', e.message); }
 
   // 幂等迁移：确保三个车间都有「其他机台」（用于收纳无明确机台的订单）
   try {

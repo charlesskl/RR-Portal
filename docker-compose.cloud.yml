@@ -608,6 +608,36 @@ services:
     networks:
       - platform-net
 
+  qa-weekly-report:
+    build:
+      context: ./apps/QA部/QA测试报告周结系统
+      dockerfile: Dockerfile
+      args:
+        BASE_PATH: /qa-weekly-report/
+    environment:
+      - PORT=3210
+      - DATA_PATH=/app/data
+      - BASE_PATH=/qa-weekly-report
+      - NODE_ENV=production
+    volumes:
+      - ./apps/QA部/QA测试报告周结系统/server/data:/app/data
+      - ./apps/QA部/QA测试报告周结系统/server/uploads:/app/server/uploads
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3210/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    mem_limit: 512m
+    memswap_limit: 512m
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - platform-net
+
 networks:
   platform-net:
     driver: bridge

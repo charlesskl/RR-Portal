@@ -226,6 +226,26 @@ router.post('/:id/items/:itemId/copy', (req, res) => {
   res.json({ message: `已复制到 ${machine_no}`, item: newItem });
 });
 
+// 清除该排机单的重复条目（按 order_id+machine_no+mold_name 去重，保留 id 最小的）
+// 修复历史 bug：合并 draft 时重复写入延续项
+router.post('/:id/dedupe', (req, res) => {
+  const { id } = req.params;
+  try {
+    const result = db.prepare(`
+      DELETE FROM schedule_items
+      WHERE schedule_id = ? AND id NOT IN (
+        SELECT MIN(id) FROM schedule_items
+        WHERE schedule_id = ?
+        GROUP BY COALESCE(order_id, -1), machine_no, COALESCE(mold_name, '')
+      )
+    `).run(id, id);
+    res.json({ message: '已去重', removed: result.changes });
+  } catch (e) {
+    console.error('dedupe 失败:', e);
+    res.status(500).json({ message: e.message });
+  }
+});
+
 // 批量更新 sort_order（拖拽排序）
 router.post('/:id/items/reorder', (req, res) => {
   const { id } = req.params;

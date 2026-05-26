@@ -587,11 +587,15 @@ function fillBCD(ws, d) {
   const E0 = c3SubTotalRow - 135; // net shift applied to all template row numbers
 
   // Clear stale data columns D-G in section D+E range
+  // Preserve: formulas + string labels (header text like "Usage/Toy" / "Unit Cost (HK$)")
   for (let r = 141 + E0; r <= 175 + E0; r++) {
     for (const c of [4, 5, 6, 7]) {
       const cell = ws.getCell(r, c);
       delete cell._sharedFormula;
-      if (!(cell.value && typeof cell.value === 'object' && cell.value.formula)) cell.value = null;
+      const v = cell.value;
+      const isFormula = v && typeof v === 'object' && v.formula;
+      const isLabel = typeof v === 'string' && v.trim();
+      if (!isFormula && !isLabel) cell.value = null;
     }
   }
 

@@ -118,8 +118,124 @@ app.get('/api/factories', (req, res) => {
   res.json({ mold_factories: d.getMoldFactories(), figure_factories: d.getFigureFactories() });
 });
 
+// ─── Figure Factory management ─────────────────────────────────────────
+app.get('/api/figure-factories', (req, res) => {
+  if (req.query.with_count === '1') {
+    res.json(d.getFigureFactoriesWithCount());
+  } else {
+    res.json(d.getFigureFactories().map(name => ({ name })));
+  }
+});
+app.post('/api/figure-factories', (req, res) => {
+  try {
+    d.addFigureFactory(req.body.name);
+    res.json({ success: true });
+  } catch (e) {
+    if (e.code === 'EMPTY') return res.status(400).json({ error: '名称不能为空' });
+    if (e.code === 'CONFLICT') return res.status(409).json({ error: '名称已存在' });
+    res.status(500).json({ error: e.message });
+  }
+});
+app.put('/api/figure-factories/:oldName', (req, res) => {
+  try {
+    d.renameFigureFactory(req.params.oldName, req.body.name);
+    res.json({ success: true });
+  } catch (e) {
+    if (e.code === 'EMPTY') return res.status(400).json({ error: '新名称不能为空' });
+    if (e.code === 'CONFLICT') return res.status(409).json({ error: '新名称已存在' });
+    if (e.code === 'NOT_FOUND') return res.status(404).json({ error: '原名称不存在' });
+    res.status(500).json({ error: e.message });
+  }
+});
+app.delete('/api/figure-factories/:name', (req, res) => {
+  try {
+    d.deleteFigureFactory(req.params.name, req.query.force === '1');
+    res.json({ success: true });
+  } catch (e) {
+    if (e.code === 'IN_USE') return res.status(409).json({ error: '有订单引用', ref_count: e.ref_count });
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── Mold Factory management ───────────────────────────────────────────
+app.get('/api/mold-factories', (req, res) => {
+  if (req.query.with_count === '1') {
+    res.json(d.getMoldFactoriesWithCount());
+  } else {
+    res.json(d.getMoldFactories().map(name => ({ name })));
+  }
+});
+app.post('/api/mold-factories', (req, res) => {
+  try {
+    d.addMoldFactory(req.body.name);
+    res.json({ success: true });
+  } catch (e) {
+    if (e.code === 'EMPTY') return res.status(400).json({ error: '名称不能为空' });
+    if (e.code === 'CONFLICT') return res.status(409).json({ error: '名称已存在' });
+    res.status(500).json({ error: e.message });
+  }
+});
+app.put('/api/mold-factories/:oldName', (req, res) => {
+  try {
+    d.renameMoldFactory(req.params.oldName, req.body.name);
+    res.json({ success: true });
+  } catch (e) {
+    if (e.code === 'EMPTY') return res.status(400).json({ error: '新名称不能为空' });
+    if (e.code === 'CONFLICT') return res.status(409).json({ error: '新名称已存在' });
+    if (e.code === 'NOT_FOUND') return res.status(404).json({ error: '原名称不存在' });
+    res.status(500).json({ error: e.message });
+  }
+});
+app.delete('/api/mold-factories/:name', (req, res) => {
+  try {
+    d.deleteMoldFactory(req.params.name, req.query.force === '1');
+    res.json({ success: true });
+  } catch (e) {
+    if (e.code === 'IN_USE') return res.status(409).json({ error: '有订单引用', ref_count: e.ref_count });
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── Customer management ───────────────────────────────────────────────
 app.get('/api/customers', (req, res) => {
-  res.json(d.getCustomers());
+  if (req.query.with_count === '1') {
+    res.json(d.getCustomersWithCount());
+  } else {
+    // 保持向后兼容：默认返回字符串数组
+    res.json(d.getCustomers());
+  }
+});
+app.post('/api/customers', (req, res) => {
+  try {
+    const name = String(req.body.name || '').trim();
+    if (!name) return res.status(400).json({ error: '名称不能为空' });
+    const exists = d.getCustomers().includes(name);
+    if (exists) return res.status(409).json({ error: '名称已存在' });
+    d.addCustomer(name);
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+app.put('/api/customers/:oldName', (req, res) => {
+  try {
+    d.renameCustomer(req.params.oldName, req.body.name);
+    res.json({ success: true });
+  } catch (e) {
+    if (e.code === 'EMPTY') return res.status(400).json({ error: '新名称不能为空' });
+    if (e.code === 'CONFLICT') return res.status(409).json({ error: '新名称已存在' });
+    if (e.code === 'NOT_FOUND') return res.status(404).json({ error: '原名称不存在' });
+    res.status(500).json({ error: e.message });
+  }
+});
+app.delete('/api/customers/:name', (req, res) => {
+  try {
+    d.deleteCustomer(req.params.name, req.query.force === '1');
+    res.json({ success: true });
+  } catch (e) {
+    if (e.code === 'IN_USE') return res.status(409).json({ error: '有订单引用', ref_count: e.ref_count });
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // ═══════════════════════════════════════════════════════════════════════

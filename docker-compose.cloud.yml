@@ -279,6 +279,35 @@ services:
     networks:
       - platform-net
 
+  pi-outsource:
+    build:
+      context: ./apps/生产部/啤机外发系统
+      dockerfile: Dockerfile
+      args:
+        BASE_PATH: /pi-outsource/
+    environment:
+      - PORT=3010
+      - DATA_PATH=/app/data
+      - NODE_ENV=production
+      - BAILIAN_API_KEY=${PI_OUTSOURCE_BAILIAN_API_KEY:-}
+    volumes:
+      - ./apps/生产部/啤机外发系统/server/data:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3010/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    mem_limit: 512m
+    memswap_limit: 512m
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - platform-net
+
   production-plan:
     build:
       context: ./apps/生产部/生产计划管理系统

@@ -36,6 +36,7 @@ RR-Portal/
 │   ├── 生产部/
 │   │   ├── 注塑啤机排产系统/        — paiji (Node.js + React)
 │   │   ├── 喷油部生产管理系统/      — penyou (Node.js + React)
+│   │   ├── 啤机外发系统/            — pi-outsource (Node.js + React)
 │   │   └── 生产计划管理系统/        — production-plan (Node.js + React + Luckysheet)
 │   ├── 业务部/
 │   │   ├── ZURU接单表入单系统/      — zuru-order-system (Flask)
@@ -194,6 +195,7 @@ curl http://localhost:<port>/health
 | jiangping | Flask | 5001 | /jiangping/ |
 | paiji | Node.js | 3000 | /paiji/ |
 | penyou 喷油部生产管理系统 | Node.js/React | 3100 | /penyou/ |
+| pi-outsource 啤机外发系统 | Node.js/React | 3010 | /pi-outsource/ |
 | production-plan 生产计划管理系统 | Node.js | 8080 | /production-plan/ |
 | zuru-master-schedule (ZURU总排期入单) | Flask | 5003 | /zuru-master/ |
 | zuru-order-system (ZURU接单表入单系统) | Flask | 5005 | /zuru-order-system/ |
@@ -443,6 +445,7 @@ const data = JSON.parse(fs.readFileSync('data/data.json'));
 | jiangping | 采购订单管理系统 | PMC跟仓管 | Standalone (Python/Flask) | /jiangping/ | https://github.com/fxxaxxx/jiangping |
 | paiji | AI注塑啤机排产系统 | 生产部 | Standalone (Node.js) | /paiji/ | https://github.com/duanlei10/234 |
 | penyou | 喷油部生产管理系统 | 生产部 | Standalone (Node.js/React) | /penyou/ | (PR #100) |
+| pi-outsource | 啤机外发系统 | 生产部 | Standalone (Node.js/React) | /pi-outsource/ | (PR #124) |
 | production-plan | 生产计划管理系统 | 生产部 | Standalone (Node.js/React + Luckysheet) | /production-plan/ | (PR #63) |
 | zuru-master-schedule | ZURU总排期入单 | 业务部 | Standalone (Python/Flask) | /zuru-master/ | (PR #59) |
 | zuru-order-system | ZURU接单表入单系统 | 业务部 | Standalone (Python/Flask) | /zuru-order-system/ | https://github.com/hanson678/zuru-order-system |
@@ -468,7 +471,6 @@ const data = JSON.parse(fs.readFileSync('data/data.json'));
 - quotation-system (旧版) — 2026-04-22（git rm；已被 apps/quotation/ 完全取代）
 - product-library — 2026-04-22（git rm；从未实现过，只有占位 README）
 - 套客表系统 quotation (业务部) — 2026-04-23（完全下线：git rm 源码 + 删除服务器数据备份；已被 apps/业务部/报价系统/ (baojia) 取代。需要恢复时可从 git history commit 26faed8 之前找回源码）
-- 啤机外发系统 pi-outsource (生产部) — 2026-05-27 完全下线（git rm 源码 + 移除 compose/nginx/frontend/update-server/deploy.yml/safe-redeploy 全部注册 + 停删容器 + 删服务器 data；数据备份至 `~/rr-backups/pi-outsource-data-20260527-090251.tar.gz`。需要恢复时从 git history 找回源码）
 
 ---
 

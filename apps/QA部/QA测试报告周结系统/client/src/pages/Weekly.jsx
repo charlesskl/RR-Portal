@@ -8,7 +8,7 @@ export default function Weekly() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [matrix, setMatrix] = useState(null);
-  const [matrixWeeks, setMatrixWeeks] = useState(8);
+  const [matrixWeeks, setMatrixWeeks] = useState(1);
   const [customers, setCustomers] = useState([]);
   const [filterCustomer, setFilterCustomer] = useState('');
 
@@ -48,6 +48,8 @@ export default function Weekly() {
       <div className="form-row">
         <label>显示最近：</label>
         <select value={matrixWeeks} onChange={e => setMatrixWeeks(parseInt(e.target.value, 10))}>
+          <option value={1}>1 周（只看本周）</option>
+          <option value={2}>2 周</option>
           <option value={4}>4 周</option>
           <option value={8}>8 周</option>
           <option value={12}>12 周</option>

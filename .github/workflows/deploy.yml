@@ -110,7 +110,6 @@ jobs:
               /huadeng/health \
               /peise/health \
               /penyou/api/health \
-              /pi-outsource/api/health \
               /production-plan/health \
               /tomy-paiqi/health \
               /zuru-order-system/health \

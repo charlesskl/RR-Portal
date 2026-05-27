@@ -296,12 +296,6 @@
             </div>
             <div class="plugin-item">
               <div class="plugin-info">
-                <div class="plugin-dot gray" id="piOutsourceDot"></div>
-                <span class="plugin-name">啤机外发系统</span>
-              </div>
-            </div>
-            <div class="plugin-item">
-              <div class="plugin-info">
                 <div class="plugin-dot gray" id="productionPlanDot"></div>
                 <span class="plugin-name">生产计划管理系统</span>
               </div>
@@ -510,28 +504,6 @@
       <div class="detail-plugin-right">
         <div class="detail-plugin-status"><div class="plugin-dot gray" id="penyouDetailDot"></div> 检查中...</div>
         <a href="/penyou/" target="_blank" class="btn btn-primary">打开系统</a>
-      </div>
-    </div>
-
-    <div class="detail-plugin-card">
-      <div class="detail-plugin-left">
-        <div class="detail-plugin-icon" style="background:linear-gradient(135deg,#0ea5e9,#0369a1);">&#128295;</div>
-        <div>
-          <div class="detail-plugin-name">啤机外发系统</div>
-          <div class="detail-plugin-desc">啤机外发订单管理 — PDF 导入、模具映射记忆、加工厂分布、Excel 导出</div>
-          <div class="feature-grid">
-            <div class="feature-tag">&#128229; PDF 导入</div>
-            <div class="feature-tag">&#129504; AI 解析</div>
-            <div class="feature-tag">&#128295; 模具映射</div>
-            <div class="feature-tag">&#127981; 加工厂分布</div>
-            <div class="feature-tag">&#128230; Excel 导出</div>
-            <div class="feature-tag">&#128202; 概览统计</div>
-          </div>
-        </div>
-      </div>
-      <div class="detail-plugin-right">
-        <div class="detail-plugin-status"><div class="plugin-dot gray" id="piOutsourceDetailDot"></div> 检查中...</div>
-        <a href="/pi-outsource/" target="_blank" class="btn btn-primary">打开系统</a>
       </div>
     </div>
 
@@ -864,7 +836,6 @@ async function checkHealth() {
       { name: 'jiangping', url: '/jiangping/health', dot: 'jiangpingDot', detailDot: 'jiangpingDetailDot' },
       { name: 'paiji', url: '/paiji/health', dot: 'paijiDot', detailDot: 'paijiDetailDot' },
       { name: 'penyou', url: '/penyou/api/health', dot: 'penyouDot', detailDot: 'penyouDetailDot' },
-      { name: 'piOutsource', url: '/pi-outsource/api/health', dot: 'piOutsourceDot', detailDot: 'piOutsourceDetailDot' },
       { name: 'productionPlan', url: '/production-plan/health', dot: 'productionPlanDot', detailDot: 'productionPlanDetailDot' },
       { name: 'zuruOrder', url: '/zuru-order-system/health', dot: 'zuruOrderDot', detailDot: 'zuruOrderDetailDot' },
       { name: 'liwenjuan', url: '/liwenjuan/health', dot: 'liwenjuanDot', detailDot: 'liwenjuanDetailDot' },

@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import ExcelJS from 'exceljs';
-import { copySheet, copySheetImages } from '../lib/sheet-copy.js';
+import { appendSheetSection } from '../lib/sheet-copy.js';
 import { extractAnnotatedImages } from '../lib/xlsx-images.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -195,14 +195,22 @@ router.get('/weekly/:weekKey/export', async (req, res) => {
     destWb.created = new Date();
     destWb.creator = 'QA Weekly Report System';
 
-    // ===== 1. 周报汇总 sheet =====
-    const sum = destWb.addWorksheet('周报汇总');
-    sum.columns = [{ width: 50 }, { width: 14 }, { width: 14 }, { width: 14 }, { width: 14 }];
-    const titleRow = sum.addRow([`QA 测试周报 — ${req.params.weekKey}`]);
-    titleRow.font = { bold: true, size: 14 };
-    sum.mergeCells(titleRow.number, 1, titleRow.number, 5);
-    sum.addRow([`导出时间：${new Date().toLocaleString('zh-CN')}`]).font = { color: { argb: 'FF6B7280' } };
-    sum.addRow([]);
+    // ===== 单个 sheet 容纳所有内容 =====
+    const sheet = destWb.addWorksheet(`QA周报 ${req.params.weekKey}`);
+
+    // ===== 1. 顶部周报汇总块 =====
+    let curRow = 0; // 当前写到第几行（0-based 行号）
+    const titleRow = sheet.addRow([`QA 测试周报 — ${req.params.weekKey}`]);
+    titleRow.font = { bold: true, size: 16, color: { argb: 'FF1F2937' } };
+    sheet.mergeCells(titleRow.number, 1, titleRow.number, 9);
+    titleRow.alignment = { horizontal: 'center' };
+    curRow = titleRow.number;
+
+    const tsRow = sheet.addRow([`导出时间：${new Date().toLocaleString('zh-CN')}`]);
+    tsRow.font = { color: { argb: 'FF6B7280' } };
+    sheet.mergeCells(tsRow.number, 1, tsRow.number, 9);
+    curRow = tsRow.number;
+    sheet.addRow([]); curRow++;
 
     const totalFail = list.reduce((s, r) => s + r.failCount, 0);
     const totalRows = list.reduce((s, r) => s + r.totalRows, 0);
@@ -212,10 +220,12 @@ router.get('/weekly/:weekKey/export', async (req, res) => {
      ['不合格行数总计', totalFail],
      ['合格率', passRate]
     ].forEach(([k, v]) => {
-      const row = sum.addRow([k, v]);
+      const row = sheet.addRow([k, v]);
       row.getCell(1).font = { bold: true };
+      row.getCell(1).width = 20;
+      curRow = row.number;
     });
-    sum.addRow([]);
+    sheet.addRow([]); curRow++;
 
     // 按客户聚合
     const byCust = new Map();
@@ -226,28 +236,24 @@ router.get('/weekly/:weekKey/export', async (req, res) => {
       b.reports++; b.totalFail += r.failCount; b.totalRows += r.totalRows;
     });
     if (byCust.size > 0) {
-      sum.addRow(['按客户聚合']).getCell(1).font = { bold: true, size: 12 };
-      const hr = sum.addRow(['客户', '报告数', '不合格数', '有效行', '合格率']);
+      const t = sheet.addRow(['按客户聚合']);
+      t.getCell(1).font = { bold: true, size: 12 };
+      curRow = t.number;
+      const hr = sheet.addRow(['客户', '报告数', '不合格数', '有效行', '合格率']);
       hr.font = { bold: true };
       hr.eachCell(c => { c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF3F4F6' } }; });
+      curRow = hr.number;
       for (const c of byCust.values()) {
         const rate = c.totalRows > 0 ? (((c.totalRows - c.totalFail) / c.totalRows) * 100).toFixed(2) + '%' : '—';
-        sum.addRow([c.name, c.reports, c.totalFail, c.totalRows, rate]);
+        const row = sheet.addRow([c.name, c.reports, c.totalFail, c.totalRows, rate]);
+        row.getCell(3).font = { color: { argb: 'FFDC2626' }, bold: true };
+        curRow = row.number;
       }
-      sum.addRow([]);
+      sheet.addRow([]); curRow++;
     }
+    sheet.addRow([]); curRow++;
 
-    // 报告索引
-    sum.addRow(['本周报告（详细内容见后续 sheet）']).getCell(1).font = { bold: true, size: 12 };
-    const idxHr = sum.addRow(['原文件名', '客户', '不合格数', '有效行', '上传时间']);
-    idxHr.font = { bold: true };
-    idxHr.eachCell(c => { c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF3F4F6' } }; });
-    list.forEach(r => {
-      const row = sum.addRow([r.originalName, r.customerName, r.failCount, r.totalRows, new Date(r.uploadedAt).toLocaleString('zh-CN')]);
-      row.getCell(3).font = { color: { argb: 'FFDC2626' }, bold: true };
-    });
-
-    // ===== 2. 每份原报告：深复制其所有 sheet（含图片+椭圆标注） =====
+    // ===== 2. 依次拼接每份原 QA 报告（按 rowOffset，保留原布局） =====
     let reportIdx = 0;
     for (const r of list) {
       reportIdx++;
@@ -255,14 +261,12 @@ router.get('/weekly/:weekKey/export', async (req, res) => {
       if (!r.storedName || !fs.existsSync(srcPath)) continue;
       const buf = fs.readFileSync(srcPath);
 
-      // 提取该 xlsx 的图片（含椭圆覆盖）
       let annotated = [];
       try { annotated = await extractAnnotatedImages(buf); } catch (e) {
         console.warn('[export] annotate failed for', r.originalName, e.message);
       }
       const annotatedByAnchor = new Map();
       annotated.forEach(im => {
-        // xlsx-images 给的 fromRow 是 1-based + Math.floor(row)+1，对应 Math.floor(tl.row) 是 row-1
         const key = `${(im.sheetName || '').trim()}|${im.fromRow - 1}|${im.fromCol - 1}`;
         annotatedByAnchor.set(key, im);
       });
@@ -273,26 +277,41 @@ router.get('/weekly/:weekKey/export', async (req, res) => {
         continue;
       }
 
+      // 报告分隔标题行
+      const sectionTitle = sheet.addRow([`【${reportIdx}】${r.customerName} — ${r.originalName}`]);
+      sectionTitle.font = { bold: true, size: 13, color: { argb: 'FFFFFFFF' } };
+      sectionTitle.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2563EB' } };
+      sectionTitle.alignment = { vertical: 'middle' };
+      sheet.mergeCells(sectionTitle.number, 1, sectionTitle.number, 14);
+      sectionTitle.height = 22;
+      curRow = sectionTitle.number;
+      sheet.addRow([]); curRow++;
+
       srcWb.eachSheet((srcSheet) => {
         if (srcSheet.state === 'hidden' || srcSheet.state === 'veryHidden') return;
-        const destName = safeSheetName(`${reportIdx}.${(r.customerName || '').slice(0, 6)}-${srcSheet.name}`, 31);
-        // 同名再补 reportIdx 后缀避免冲突
-        const finalName = destWb.getWorksheet(destName)
-          ? safeSheetName(`${destName}_${reportIdx}`, 31)
-          : destName;
-        const destSheet = destWb.addWorksheet(finalName);
+
+        // 子 sheet 小标题
+        const subTitle = sheet.addRow([`  — ${srcSheet.name} —`]);
+        subTitle.font = { bold: true, color: { argb: 'FF6B7280' } };
+        sheet.mergeCells(subTitle.number, 1, subTitle.number, 14);
+        curRow = subTitle.number;
+
+        const rowOffset = curRow; // 后续每一行 = src 行号 + rowOffset
+
+        const annoForThisSheet = new Map();
+        annotatedByAnchor.forEach((v, k) => {
+          if (k.startsWith(`${srcSheet.name.trim()}|`)) annoForThisSheet.set(k, v);
+        });
 
         try {
-          copySheet(srcSheet, destSheet);
-          // 用 trim 匹配（fast-xml-parser 会去 trailing 空格）
-          const annoForThisSheet = new Map();
-          annotatedByAnchor.forEach((v, k) => {
-            if (k.startsWith(`${srcSheet.name.trim()}|`)) annoForThisSheet.set(k, v);
-          });
-          copySheetImages(srcWb, srcSheet, destWb, destSheet, annoForThisSheet);
+          const consumed = appendSheetSection(srcWb, srcSheet, destWb, sheet, rowOffset, annoForThisSheet);
+          curRow += consumed;
         } catch (e) {
-          console.warn(`[export] copy sheet '${srcSheet.name}' failed:`, e.message);
+          console.warn(`[export] append sheet '${srcSheet.name}' failed:`, e.message);
         }
+        // sheet 之间留 2 行空白
+        sheet.addRow([]); curRow++;
+        sheet.addRow([]); curRow++;
       });
     }
 

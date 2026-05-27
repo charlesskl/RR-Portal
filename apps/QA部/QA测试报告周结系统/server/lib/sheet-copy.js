@@ -1,39 +1,54 @@
-// 深复制 ExcelJS Worksheet：cell value/style + 合并单元格 + 行高列宽 + 图片（可替换为带椭圆的标注版）
-// 用于周报导出 —— 把每份原始 QA 报告的 sheet 完整搬到汇总 xlsx，保留原布局
+// 深复制 ExcelJS Worksheet：cell value/style + 合并单元格 + 行高列宽 + 图片（含椭圆标注）
+// 支持把多个 source sheet 按 rowOffset 拼接到同一个 dest sheet（保留原布局）
 
 function deepClone(o) {
   if (o == null || typeof o !== 'object') return o;
   return JSON.parse(JSON.stringify(o));
 }
 
-export function copySheet(srcSheet, destSheet) {
-  // 1. 列宽 + 列默认样式
+// 把 ExcelJS 合并范围字符串 "A1:N3" 整体下移 rowOffset 行
+function shiftRangeRows(rangeStr, rowOffset) {
+  if (rowOffset === 0) return rangeStr;
+  return String(rangeStr).replace(/([A-Z]+)(\d+)/g, (_, col, row) => col + (parseInt(row, 10) + rowOffset));
+}
+
+// 把 srcSheet 整段追加到 destSheet 的 rowOffset 之后
+// annotatedByAnchor: Map<`${srcSheetName.trim()}|${floor(tl.row)}|${floor(tl.col)}`, { buffer, extension }>
+// 返回该 section 占用的行数（srcSheet 的最大行号）
+export function appendSheetSection(srcWb, srcSheet, destWb, destSheet, rowOffset, annotatedByAnchor) {
+  // 1. 列宽：取最大值
   if (Array.isArray(srcSheet.columns)) {
     srcSheet.columns.forEach((col, i) => {
+      if (!col || !col.width) return;
       const destCol = destSheet.getColumn(i + 1);
-      if (col.width) destCol.width = col.width;
-      if (col.hidden) destCol.hidden = col.hidden;
-      if (col.style) destCol.style = deepClone(col.style);
+      if (!destCol.width || destCol.width < col.width) destCol.width = col.width;
     });
   }
 
-  // 2. 遍历所有行：行高 + 每个 cell 的 value 和 style
+  // 2. 每个 cell 的 value + style + 行高
+  let maxRowSeen = 0;
   srcSheet.eachRow({ includeEmpty: true }, (row, rowNum) => {
-    const destRow = destSheet.getRow(rowNum);
+    maxRowSeen = Math.max(maxRowSeen, rowNum);
+    const destRow = destSheet.getRow(rowNum + rowOffset);
     if (row.height) destRow.height = row.height;
-    if (row.hidden) destRow.hidden = row.hidden;
 
     row.eachCell({ includeEmpty: true }, (cell, colNum) => {
       const destCell = destRow.getCell(colNum);
-      // 合并单元格的 slave 不写 value（master 会处理）；slave 拷贝 style 即可
       const isSlave = cell.master && cell.master !== cell;
       if (!isSlave) {
         try {
-          let value = cell.value;
-          // richText 等复杂结构需要克隆
-          if (value && typeof value === 'object') value = deepClone(value);
-          destCell.value = value;
-        } catch { /* MergeValue 边界异常 */ }
+          let v = cell.value;
+          if (v && typeof v === 'object') {
+            // 共享公式/普通公式：只取结果值，丢弃 formula/sharedFormula 引用
+            // 否则 row shift 后 master 位置错乱会报错 "Shared Formula master must exist..."
+            if (v.formula != null || v.sharedFormula != null) {
+              v = v.result != null ? v.result : '';
+            } else {
+              v = deepClone(v);
+            }
+          }
+          destCell.value = v;
+        } catch { /* MergeValue 边界 */ }
       }
       if (cell.style) {
         try { destCell.style = deepClone(cell.style); } catch {}
@@ -42,36 +57,22 @@ export function copySheet(srcSheet, destSheet) {
     destRow.commit();
   });
 
-  // 3. 合并单元格
+  // 3. 合并单元格：整体下移
   const merges = srcSheet.model && srcSheet.model.merges;
   if (Array.isArray(merges)) {
     for (const m of merges) {
-      try { destSheet.mergeCells(m); } catch { /* 已合并或冲突，跳过 */ }
+      try { destSheet.mergeCells(shiftRangeRows(m, rowOffset)); } catch { /* 跳过冲突 */ }
     }
   }
 
-  // 4. 视图/冻结/缩放
-  if (Array.isArray(srcSheet.views) && srcSheet.views.length > 0) {
-    destSheet.views = srcSheet.views.map(v => deepClone(v));
-  }
-
-  // 5. 打印设置（pageSetup）
-  if (srcSheet.pageSetup) {
-    destSheet.pageSetup = deepClone(srcSheet.pageSetup);
-  }
-}
-
-// 把原 sheet 的图片搬到 dest sheet，可选用"标注覆盖映射"替换为带椭圆的版本
-//   annotatedByAnchor: Map<key, { buffer, extension }>
-//   key = `${sheetName}|${Math.floor(tl.row)}|${Math.floor(tl.col)}`
-export function copySheetImages(srcWb, srcSheet, destWb, destSheet, annotatedByAnchor) {
+  // 4. 图片：anchor 的 row 加 rowOffset；优先用 annotated buffer（带椭圆）
   let imgs = [];
-  try { imgs = srcSheet.getImages() || []; } catch { imgs = []; }
+  try { imgs = srcSheet.getImages() || []; } catch {}
   for (const img of imgs) {
     try {
       const range = img.range;
       if (!range || !range.tl) continue;
-      const key = `${srcSheet.name}|${Math.floor(range.tl.row)}|${Math.floor(range.tl.col)}`;
+      const key = `${(srcSheet.name || '').trim()}|${Math.floor(range.tl.row)}|${Math.floor(range.tl.col)}`;
       const annotated = annotatedByAnchor && annotatedByAnchor.get(key);
 
       let buffer, extension;
@@ -85,17 +86,16 @@ export function copySheetImages(srcWb, srcSheet, destWb, destSheet, annotatedByA
         extension = (data.extension || 'png').toLowerCase();
         if (extension === 'jpg') extension = 'jpeg';
       }
-
       const newImgId = destWb.addImage({ buffer, extension });
-      // ExcelJS 接受 { tl, br, editAs } 直接传
-      const addRange = {
-        tl: { col: range.tl.col, row: range.tl.row },
-        br: { col: range.br.col, row: range.br.row }
-      };
-      if (range.editAs) addRange.editAs = range.editAs;
-      destSheet.addImage(newImgId, addRange);
+      destSheet.addImage(newImgId, {
+        tl: { col: range.tl.col, row: range.tl.row + rowOffset },
+        br: { col: range.br.col, row: range.br.row + rowOffset },
+        ...(range.editAs ? { editAs: range.editAs } : {})
+      });
     } catch (e) {
-      console.warn('[copySheetImages] skip image:', e.message);
+      console.warn('[appendSheetSection] skip image:', e.message);
     }
   }
+
+  return maxRowSeen;
 }

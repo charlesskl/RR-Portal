@@ -120,7 +120,7 @@ export default function Weekly() {
               target="_blank"
               rel="noreferrer"
             >
-              ⬇ 导出周报（ZIP，含原始报告 .xlsx）
+              ⬇ 导出 Excel（保留原报告布局）
             </a>
           )}
         </div>

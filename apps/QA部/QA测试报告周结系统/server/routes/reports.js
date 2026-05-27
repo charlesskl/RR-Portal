@@ -3,7 +3,8 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import ExcelJS from 'exceljs';
-import JSZip from 'jszip';
+import { copySheet, copySheetImages } from '../lib/sheet-copy.js';
+import { extractAnnotatedImages } from '../lib/xlsx-images.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -180,8 +181,8 @@ router.get('/weekly/:weekKey', (req, res) => {
   });
 });
 
-// 导出整周为 ZIP：含一份汇总 xlsx + 每份原始 QA 报告 xlsx（按客户分目录）
-// 原始报告保留 100% 原格式（公司 header / 样板图 / 产品参数 / 测试表 / 产品照含圈 / Conclusion）
+// 导出整周为单个 xlsx：第一个 sheet 是"周报汇总"，后面把每份原 QA 报告的所有 sheet 深复制过来
+// 保留原 QA 报告布局：公司 header / 产品信息表 / 样板图 / 测试结果表（红字不合格）/ 产品照含黄圈 / Conclusion
 router.get('/weekly/:weekKey/export', async (req, res) => {
   try {
     const wantedCustomer = req.query.customerId;
@@ -190,15 +191,13 @@ router.get('/weekly/:weekKey/export', async (req, res) => {
       list = list.filter(r => (r.customerId || '') === wantedCustomer);
     }
 
-    const zip = new JSZip();
+    const destWb = new ExcelJS.Workbook();
+    destWb.created = new Date();
+    destWb.creator = 'QA Weekly Report System';
 
-    // ===== 1. 周报汇总 xlsx（精简）：标题 + 统计 + 客户聚合 + 文件索引 =====
-    const wb = new ExcelJS.Workbook();
-    wb.created = new Date();
-    wb.creator = 'QA Weekly Report System';
-    const sum = wb.addWorksheet('周报汇总');
-    sum.columns = [{ width: 50 }, { width: 14 }, { width: 14 }, { width: 14 }, { width: 12 }];
-
+    // ===== 1. 周报汇总 sheet =====
+    const sum = destWb.addWorksheet('周报汇总');
+    sum.columns = [{ width: 50 }, { width: 14 }, { width: 14 }, { width: 14 }, { width: 14 }];
     const titleRow = sum.addRow([`QA 测试周报 — ${req.params.weekKey}`]);
     titleRow.font = { bold: true, size: 14 };
     sum.mergeCells(titleRow.number, 1, titleRow.number, 5);
@@ -213,8 +212,8 @@ router.get('/weekly/:weekKey/export', async (req, res) => {
      ['不合格行数总计', totalFail],
      ['合格率', passRate]
     ].forEach(([k, v]) => {
-      const r = sum.addRow([k, v]);
-      r.getCell(1).font = { bold: true };
+      const row = sum.addRow([k, v]);
+      row.getCell(1).font = { bold: true };
     });
     sum.addRow([]);
 
@@ -238,46 +237,70 @@ router.get('/weekly/:weekKey/export', async (req, res) => {
       sum.addRow([]);
     }
 
-    // 报告列表 + zip 内文件路径索引
-    sum.addRow(['本周报告（原始文件已附在压缩包内）']).getCell(1).font = { bold: true, size: 12 };
-    const idxHr = sum.addRow(['ZIP 内路径', '客户', '不合格数', '有效行', '上传时间']);
+    // 报告索引
+    sum.addRow(['本周报告（详细内容见后续 sheet）']).getCell(1).font = { bold: true, size: 12 };
+    const idxHr = sum.addRow(['原文件名', '客户', '不合格数', '有效行', '上传时间']);
     idxHr.font = { bold: true };
     idxHr.eachCell(c => { c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF3F4F6' } }; });
+    list.forEach(r => {
+      const row = sum.addRow([r.originalName, r.customerName, r.failCount, r.totalRows, new Date(r.uploadedAt).toLocaleString('zh-CN')]);
+      row.getCell(3).font = { color: { argb: 'FFDC2626' }, bold: true };
+    });
 
-    // ===== 2. 把原始 xlsx 文件附到 zip（按客户分目录，处理同名冲突） =====
-    const nameCounter = new Map();
+    // ===== 2. 每份原报告：深复制其所有 sheet（含图片+椭圆标注） =====
+    let reportIdx = 0;
     for (const r of list) {
+      reportIdx++;
       const srcPath = path.join(UPLOAD_PATH, r.storedName || '');
-      if (!r.storedName || !fs.existsSync(srcPath)) {
-        sum.addRow(['(原始文件不存在)', r.customerName, r.failCount, r.totalRows, new Date(r.uploadedAt).toLocaleString('zh-CN')]);
+      if (!r.storedName || !fs.existsSync(srcPath)) continue;
+      const buf = fs.readFileSync(srcPath);
+
+      // 提取该 xlsx 的图片（含椭圆覆盖）
+      let annotated = [];
+      try { annotated = await extractAnnotatedImages(buf); } catch (e) {
+        console.warn('[export] annotate failed for', r.originalName, e.message);
+      }
+      const annotatedByAnchor = new Map();
+      annotated.forEach(im => {
+        // xlsx-images 给的 fromRow 是 1-based + Math.floor(row)+1，对应 Math.floor(tl.row) 是 row-1
+        const key = `${(im.sheetName || '').trim()}|${im.fromRow - 1}|${im.fromCol - 1}`;
+        annotatedByAnchor.set(key, im);
+      });
+
+      const srcWb = new ExcelJS.Workbook();
+      try { await srcWb.xlsx.load(buf); } catch (e) {
+        console.warn('[export] xlsx.load failed for', r.originalName, e.message);
         continue;
       }
-      const buf = fs.readFileSync(srcPath);
-      const folderName = (r.customerName || '未分类').replace(/[\\/:*?"<>|]/g, '_');
-      let fname = (r.originalName || 'report.xlsx').replace(/[\\/:*?"<>|]/g, '_');
-      const dupKey = `${folderName}/${fname}`;
-      const dupCount = nameCounter.get(dupKey) || 0;
-      if (dupCount > 0) {
-        const ext = path.extname(fname);
-        const base = fname.slice(0, fname.length - ext.length);
-        fname = `${base} (${dupCount + 1})${ext}`;
-      }
-      nameCounter.set(dupKey, dupCount + 1);
-      const zipPath = `${folderName}/${fname}`;
-      zip.file(zipPath, buf);
-      sum.addRow([zipPath, r.customerName, r.failCount, r.totalRows, new Date(r.uploadedAt).toLocaleString('zh-CN')])
-        .getCell(3).font = { color: { argb: 'FFDC2626' }, bold: true };
+
+      srcWb.eachSheet((srcSheet) => {
+        if (srcSheet.state === 'hidden' || srcSheet.state === 'veryHidden') return;
+        const destName = safeSheetName(`${reportIdx}.${(r.customerName || '').slice(0, 6)}-${srcSheet.name}`, 31);
+        // 同名再补 reportIdx 后缀避免冲突
+        const finalName = destWb.getWorksheet(destName)
+          ? safeSheetName(`${destName}_${reportIdx}`, 31)
+          : destName;
+        const destSheet = destWb.addWorksheet(finalName);
+
+        try {
+          copySheet(srcSheet, destSheet);
+          // 用 trim 匹配（fast-xml-parser 会去 trailing 空格）
+          const annoForThisSheet = new Map();
+          annotatedByAnchor.forEach((v, k) => {
+            if (k.startsWith(`${srcSheet.name.trim()}|`)) annoForThisSheet.set(k, v);
+          });
+          copySheetImages(srcWb, srcSheet, destWb, destSheet, annoForThisSheet);
+        } catch (e) {
+          console.warn(`[export] copy sheet '${srcSheet.name}' failed:`, e.message);
+        }
+      });
     }
 
-    const sumBuf = await wb.xlsx.writeBuffer();
-    zip.file(`周报汇总-${req.params.weekKey}.xlsx`, sumBuf);
-
-    // ===== 3. 输出 zip =====
-    const zipBuf = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE', compressionOptions: { level: 6 } });
-    const fileName = `QA周报-${req.params.weekKey}${wantedCustomer ? '-客户筛选' : ''}.zip`;
-    res.setHeader('Content-Type', 'application/zip');
+    const fileName = `QA周报-${req.params.weekKey}${wantedCustomer ? '-客户筛选' : ''}.xlsx`;
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(fileName)}`);
-    res.send(zipBuf);
+    await destWb.xlsx.write(res);
+    res.end();
   } catch (err) {
     console.error('[export weekly] error:', err);
     if (!res.headersSent) {

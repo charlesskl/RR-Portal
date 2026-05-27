@@ -21,6 +21,38 @@ function safeSheetName(name, maxLen = 28) {
   return String(name).replace(/[\\/:*?\[\]]/g, '_').slice(0, maxLen);
 }
 
+function getISOWeekKey(date) {
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const dayNum = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  const week = Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+  return {
+    key: `${d.getUTCFullYear()}-W${String(week).padStart(2, '0')}`,
+    year: d.getUTCFullYear(),
+    week
+  };
+}
+
+// 从今天往前倒推，生成最近 N 个 ISO 周的 key 列表（新 → 旧）
+function recentWeekKeys(n) {
+  const keys = [];
+  const seen = new Set();
+  const today = new Date();
+  let i = 0;
+  while (keys.length < n && i < n * 2 + 7) {
+    const d = new Date(today);
+    d.setDate(d.getDate() - i * 7);
+    const { key } = getISOWeekKey(d);
+    if (!seen.has(key)) {
+      seen.add(key);
+      keys.push(key);
+    }
+    i++;
+  }
+  return keys;
+}
+
 const router = Router();
 
 function readAll() {
@@ -75,13 +107,12 @@ router.get('/weeks/all', (_req, res) => {
 });
 
 // 客户 × 周 交叉表（默认最近 8 周；可 ?weeks=12）
+// 周列表按"今天往前倒推 N 周"生成，没数据的周也显示空列
 router.get('/matrix', (req, res) => {
   const limit = Math.max(1, Math.min(52, parseInt(req.query.weeks, 10) || 8));
   const list = readAll();
 
-  const weekSet = new Set();
-  list.forEach(r => weekSet.add(r.weekKey));
-  const allWeeks = Array.from(weekSet).sort((a, b) => b.localeCompare(a)).slice(0, limit);
+  const allWeeks = recentWeekKeys(limit);
   const weekIdx = new Set(allWeeks);
 
   const customerMap = new Map();

@@ -1,7 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { api } from '../api.js';
 
 export default function PdfImportPage() {
+  const navigate = useNavigate();
   const fileRef = useRef(null);
   const [busy, setBusy] = useState(false);
   const [busyAi, setBusyAi] = useState(false);
@@ -12,22 +14,31 @@ export default function PdfImportPage() {
   const [moldMap, setMoldMap] = useState({});
   const [suppliers, setSuppliers] = useState([]);
   const [workshops, setWorkshops] = useState([]);
+  const [pmcs, setPmcs] = useState([]);  // [{ name, workshop }]
 
   useEffect(() => {
     api.listMoldMappings().then(setMoldMap).catch(() => {});
     api.listSuppliers().then((arr) => setSuppliers(arr.map((s) => s.name).filter(Boolean))).catch(() => {});
     api.listWorkshops().then(setWorkshops).catch(() => {});
+    api.listPmcs().then(setPmcs).catch(() => {});
   }, []);
 
-  const applyMappings = (rows, map) => rows.map((r) => {
+  const applyMappings = (rows, map, headerPlacer) => rows.map((r) => {
     const m = r.mold_code ? map[r.mold_code] : null;
-    if (!m) return r;
-    return {
-      ...r,
-      supplier: r.supplier || m.supplier || '',
-      target_qty: r.target_qty ?? m.target_qty ?? null,
-      workshop: r.workshop || m.workshop || '',
-    };
+    const enriched = { ...r };
+    // Default per-row PMC from PDF header (下单人) if row doesn't have its own
+    if (!enriched.pmc_follow) enriched.pmc_follow = headerPlacer || '';
+    if (m) {
+      enriched.supplier   = enriched.supplier || m.supplier || '';
+      enriched.target_qty = enriched.target_qty ?? m.target_qty ?? null;
+      enriched.workshop   = enriched.workshop || m.workshop || '';
+    }
+    // Auto-fill workshop from PMC via known mapping
+    if (!enriched.workshop && enriched.pmc_follow) {
+      const hit = pmcs.find((p) => p.name === enriched.pmc_follow);
+      if (hit && hit.workshop) enriched.workshop = hit.workshop;
+    }
+    return enriched;
   });
 
   const onPick = () => fileRef.current?.click();
@@ -37,8 +48,8 @@ export default function PdfImportPage() {
     if (useAi) setBusyAi(true); else setBusy(true);
     try {
       const parsed = useAi ? await api.parsePdfAi(file) : await api.parsePdf(file);
-      // Apply mold→supplier/target mappings to rows
-      const enriched = { ...parsed, rows: applyMappings(parsed.rows || [], moldMap) };
+      // Apply mold→supplier/target mappings + default PMC from PDF header
+      const enriched = { ...parsed, rows: applyMappings(parsed.rows || [], moldMap, parsed.header?.placer) };
       setResult(enriched);
       setLastFile(file);
       setExtra({ workshop: parsed.header?.supplier || '', supplier: '' });
@@ -130,8 +141,9 @@ export default function PdfImportPage() {
       // Refresh local mapping cache so subsequent imports auto-fill
       const fresh = await api.listMoldMappings();
       setMoldMap(fresh);
-      alert(`已导入 ${r.inserted} 条记录\n已记忆模具映射：共 ${r.mappings_total} 套模`);
       setResult(null);
+      // Jump to 外发明细 and ask it to scroll to the first newly-inserted row
+      navigate('/orders', { state: { focusIds: r.inserted_ids || [] } });
     } catch (err) {
       alert('导入失败：' + err.message);
     }
@@ -200,9 +212,10 @@ export default function PdfImportPage() {
                   <th>款号/货号</th>
                   <th>模具编号</th>
                   <th>品名</th>
+                  <th style={{ background: '#fef3c7' }}>PMC ★</th>
                   <th style={{ background: '#fef3c7' }}>车间 ★</th>
                   <th style={{ background: '#fef3c7' }}>加工厂 ★</th>
-                  <th style={{ background: '#fef3c7' }}>目标数 ★</th>
+                  <th style={{ background: '#fef3c7' }} title="入库时同时写入 报价产能 + 实际产能">目标数 ★<br /><span style={{ fontSize: 10, fontWeight: 400, color: '#92400e' }}>= 日产能</span></th>
                   <th>总套数</th>
                   <th>啤数</th>
                   <th>颜色</th>
@@ -226,15 +239,44 @@ export default function PdfImportPage() {
                     <td><input value={r.order_no || ''} onChange={(e) => updateRow(i, 'order_no', e.target.value)} style={{ width: 90 }} /></td>
                     <td><input value={r.mold_code || ''} onChange={(e) => updateRow(i, 'mold_code', e.target.value)} style={{ width: 130 }} /></td>
                     <td><input value={r.mold_name || ''} onChange={(e) => updateRow(i, 'mold_name', e.target.value)} style={{ width: 110 }} /></td>
+                    <td style={{ background: r.pmc_follow ? '#ecfdf5' : '#fffbeb' }}>
+                      <select
+                        value={r.pmc_follow || ''}
+                        onChange={(e) => {
+                          const newPmc = e.target.value;
+                          // When PMC changes, auto-fill workshop from PMC→workshop mapping
+                          const hit = pmcs.find((p) => p.name === newPmc);
+                          setResult((res) => {
+                            const rows = [...res.rows];
+                            rows[i] = {
+                              ...rows[i],
+                              pmc_follow: newPmc,
+                              workshop: hit?.workshop || rows[i].workshop || '',
+                            };
+                            return { ...res, rows };
+                          });
+                        }}
+                        style={{ width: 90 }}
+                        title={r.pmc_follow ? `从 PDF 抓到：${r.pmc_follow}` : '选择 PMC（会自动带出车间）'}
+                      >
+                        <option value="">请选择</option>
+                        {pmcs.map((p) => (
+                          <option key={p.name} value={p.name}>
+                            {p.name}{p.workshop ? `（${p.workshop}）` : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
                     <td style={{ background: mapped?.workshop ? '#ecfdf5' : '#fffbeb' }}>
-                      <input
-                        list="workshop-options"
+                      <select
                         value={r.workshop || ''}
-                        placeholder="选/输入车间"
                         onChange={(e) => updateRow(i, 'workshop', e.target.value)}
                         style={{ width: 90 }}
-                        title={mapped?.workshop ? `已记忆映射：${mapped.workshop}` : ''}
-                      />
+                        title={mapped?.workshop ? `已记忆映射：${mapped.workshop}` : '选择车间'}
+                      >
+                        <option value="">请选择</option>
+                        {workshops.map((w) => <option key={w} value={w}>{w}</option>)}
+                      </select>
                     </td>
                     <td style={{ background: mapped?.supplier ? '#ecfdf5' : '#fffbeb' }}>
                       <input

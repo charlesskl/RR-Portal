@@ -1,6 +1,426 @@
 {
   "FUGGE-04M-01": {
     "supplier": "俊豪",
+    "target_qty": 3400,
+    "mold_name": "眼睛扣模",
+    "workshop": "兴信B",
+    "updated_at": "2026-05-26T08:02:09.237Z"
+  },
+  "BS060-M03-01-1": {
+    "mold_name": "耳朵工模",
+    "workshop": "兴信B",
+    "updated_at": "2026-05-20T12:11:07.730Z"
+  },
+  "BS074-M04-01": {
+    "mold_name": "头发工模",
+    "workshop": "兴信B",
+    "updated_at": "2026-05-20T12:11:07.730Z"
+  },
+  "BS085-M05-01": {
+    "mold_name": "耳朵工模",
+    "workshop": "兴信B",
+    "updated_at": "2026-05-20T12:11:07.730Z"
+  },
+  "BS074-M02-01": {
+    "mold_name": "耳朵工模",
+    "workshop": "兴信B",
+    "updated_at": "2026-05-20T12:11:07.730Z"
+  },
+  "MNVN-05M-01-6": {
+    "supplier": "鸿徽",
+    "target_qty": 4000,
+    "mold_name": "唱片模",
+    "workshop": "兴信B",
+    "updated_at": "2026-05-21T07:02:29.902Z"
+  },
+  "MNVN-05M-01": {
+    "supplier": "鸿徽",
+    "target_qty": 4000,
+    "mold_name": "唱片模",
+    "workshop": "兴信B",
+    "updated_at": "2026-05-21T07:02:45.162Z"
+  },
+  "JC阿克西R11": {
+    "supplier": "俊豪",
+    "target_qty": 3000,
+    "mold_name": "Jelly Cakes_Rings_01&02",
+    "workshop": "华登",
+    "updated_at": "2026-05-21T08:18:10.126Z"
+  },
+  "JC贝瑞R10": {
+    "supplier": "俊豪",
+    "target_qty": 3000,
+    "mold_name": "Jelly Cakes_Rings_01&02",
+    "workshop": "华登",
+    "updated_at": "2026-05-21T08:18:10.126Z"
+  },
+  "JC波巴R8": {
+    "supplier": "俊豪",
+    "target_qty": 3000,
+    "mold_name": "Jelly Cakes_Rings_03&04",
+    "workshop": "华登",
+    "updated_at": "2026-05-21T08:18:10.126Z"
+  },
+  "JC菠利R16": {
+    "supplier": "俊豪",
+    "target_qty": 3000,
+    "mold_name": "Jelly Cakes_Rings_03&04",
+    "workshop": "华登",
+    "updated_at": "2026-05-21T08:18:10.126Z"
+  },
+  "JC沃利R9": {
+    "supplier": "俊豪",
+    "target_qty": 3000,
+    "mold_name": "Jelly Cakes_Rings_05&06",
+    "workshop": "华登",
+    "updated_at": "2026-05-21T08:18:10.126Z"
+  },
+  "JC皮皮R7": {
+    "target_qty": 3000,
+    "mold_name": "Jelly Cakes_Rings_05&06",
+    "workshop": "华登",
+    "updated_at": "2026-05-21T08:18:10.126Z"
+  },
+  "JC糖果雪糕R20": {
+    "target_qty": 3000,
+    "mold_name": "Jelly Cakes_Rings_07&08",
+    "workshop": "华登",
+    "updated_at": "2026-05-21T08:18:10.126Z"
+  },
+  "JC萨莉R6": {
+    "target_qty": 3000,
+    "mold_name": "Jelly Cakes_Rings_07&08",
+    "workshop": "华登",
+    "updated_at": "2026-05-21T08:18:10.126Z"
+  },
+  "JC斯库普斯R5": {
+    "target_qty": 3000,
+    "mold_name": "Jelly Cakes_Rings_09&10",
+    "workshop": "华登",
+    "updated_at": "2026-05-21T08:18:10.126Z"
+  },
+  "JC花朵R3": {
+    "target_qty": 3000,
+    "mold_name": "Jelly Cakes_Rings_09&10",
+    "workshop": "华登",
+    "updated_at": "2026-05-21T08:18:10.126Z"
+  },
+  "JC小狐R18": {
+    "target_qty": 3000,
+    "mold_name": "Jelly Cakes_Rings_11&12",
+    "workshop": "华登",
+    "updated_at": "2026-05-21T08:18:10.126Z"
+  },
+  "JC薯片R2": {
+    "target_qty": 3000,
+    "mold_name": "Jelly Cakes_Rings_11&12",
+    "workshop": "华登",
+    "updated_at": "2026-05-21T08:18:10.126Z"
+  },
+  "JC小熊R21": {
+    "target_qty": 3000,
+    "mold_name": "Jelly Cakes_Rings_13&14",
+    "workshop": "华登",
+    "updated_at": "2026-05-21T08:18:10.126Z"
+  },
+  "JC瓦莱丽R23": {
+    "target_qty": 3000,
+    "mold_name": "Jelly Cakes_Rings_13&14",
+    "workshop": "华登",
+    "updated_at": "2026-05-21T08:18:10.126Z"
+  },
+  "JC莱米R4": {
+    "target_qty": 3000,
+    "mold_name": "Jelly Cakes_Rings_15&16",
+    "workshop": "华登",
+    "updated_at": "2026-05-21T08:18:10.126Z"
+  },
+  "JC枫叶R17": {
+    "target_qty": 3000,
+    "mold_name": "Jelly Cakes_Rings_15&16",
+    "workshop": "华登",
+    "updated_at": "2026-05-21T08:18:10.126Z"
+  },
+  "JC月亮R19": {
+    "target_qty": 3000,
+    "mold_name": "Jelly Cakes_Rings_17&18",
+    "workshop": "华登",
+    "updated_at": "2026-05-21T08:18:10.126Z"
+  },
+  "JC朱西R12": {
+    "target_qty": 3000,
+    "mold_name": "Jelly Cakes_Rings_17&18",
+    "workshop": "华登",
+    "updated_at": "2026-05-21T08:18:10.126Z"
+  },
+  "JC彩虹R22": {
+    "target_qty": 3000,
+    "mold_name": "Jelly Cakes_Rings_19&20",
+    "workshop": "华登",
+    "updated_at": "2026-05-21T08:18:10.126Z"
+  },
+  "JC雪花R20": {
+    "target_qty": 3000,
+    "mold_name": "Jelly Cakes_Rings_19&20",
+    "workshop": "华登",
+    "updated_at": "2026-05-21T08:18:10.126Z"
+  },
+  "JC酥饼R15": {
+    "target_qty": 3000,
+    "mold_name": "Jelly Cakes_Rings_21&22",
+    "workshop": "华登",
+    "updated_at": "2026-05-21T08:18:10.126Z"
+  },
+  "JC雷雷R1": {
+    "target_qty": 3000,
+    "mold_name": "Jelly Cakes_Rings_21&22",
+    "workshop": "华登",
+    "updated_at": "2026-05-21T08:18:10.126Z"
+  },
+  "JC莉莉R13": {
+    "target_qty": 3000,
+    "mold_name": "Jelly Cakes_Rings_23&24",
+    "workshop": "华登",
+    "updated_at": "2026-05-21T08:18:10.126Z"
+  },
+  "JC金色莱米R24": {
+    "target_qty": 3000,
+    "mold_name": "Jelly Cakes_Rings_23&24",
+    "workshop": "华登",
+    "updated_at": "2026-05-21T08:18:10.126Z"
+  },
+  "1126168-M01": {
+    "supplier": "欢享",
+    "target_qty": 3400,
+    "mold_name": "面壳",
+    "workshop": "兴信B",
+    "updated_at": "2026-05-25T00:40:25.781Z"
+  },
+  "1126168-M02": {
+    "supplier": "欢享",
+    "target_qty": 3200,
+    "mold_name": "底壳",
+    "workshop": "兴信B",
+    "updated_at": "2026-05-25T00:40:25.781Z"
+  },
+  "TEST-M01": {
+    "supplier": "测试厂",
+    "mold_name": "测试模具",
+    "workshop": "兴信A",
+    "updated_at": "2026-05-23T01:17:57.055Z"
+  },
+  "MNKK-07M-01": {
+    "supplier": "俊豪",
+    "target_qty": 3600,
+    "mold_name": "挤嘴模",
+    "workshop": "兴信A",
+    "updated_at": "2026-05-23T02:48:13.212Z"
+  },
+  "FNT-0425-001-01": {
+    "supplier": "俊豪",
+    "mold_name": "航行者大身",
+    "workshop": "华登",
+    "updated_at": "2026-05-23T02:51:50.185Z"
+  },
+  "FNT-0425-002-01": {
+    "supplier": "俊豪",
+    "mold_name": "航行者左右手臂",
+    "workshop": "华登",
+    "updated_at": "2026-05-23T02:51:50.185Z"
+  },
+  "FNT-0425-003-01": {
+    "supplier": "俊豪",
+    "mold_name": "航行者左右脚",
+    "workshop": "华登",
+    "updated_at": "2026-05-23T02:51:50.185Z"
+  },
+  "FNT-0425-004-01": {
+    "supplier": "俊豪",
+    "mold_name": "航行者头",
+    "workshop": "华登",
+    "updated_at": "2026-05-23T02:51:50.185Z"
+  },
+  "FNT-0425-005-01": {
+    "supplier": "俊豪",
+    "mold_name": "航行者左右手掌",
+    "workshop": "华登",
+    "updated_at": "2026-05-23T02:51:50.185Z"
+  },
+  "FNT-0428-001-01": {
+    "supplier": "俊豪",
+    "mold_name": "冰冻鸦大身",
+    "workshop": "华登",
+    "updated_at": "2026-05-23T02:51:50.185Z"
+  },
+  "FNT-0428-002-01": {
+    "supplier": "俊豪",
+    "mold_name": "冰冻鸦左右手臂",
+    "workshop": "华登",
+    "updated_at": "2026-05-23T02:51:50.185Z"
+  },
+  "FNT-0428-003-01": {
+    "supplier": "俊豪",
+    "mold_name": "冰冻鸦左右脚",
+    "workshop": "华登",
+    "updated_at": "2026-05-23T02:51:50.185Z"
+  },
+  "FNT-0428-004-01": {
+    "supplier": "俊豪",
+    "mold_name": "冰冻鸦头",
+    "workshop": "华登",
+    "updated_at": "2026-05-23T02:51:50.185Z"
+  },
+  "FNT-0428-005-01": {
+    "supplier": "俊豪",
+    "mold_name": "冰冻鸦左右手掌",
+    "workshop": "华登",
+    "updated_at": "2026-05-23T02:51:50.185Z"
+  },
+  "FNT-0428-006-01": {
+    "supplier": "俊豪",
+    "mold_name": "冰冻鸦围巾/围裙",
+    "workshop": "华登",
+    "updated_at": "2026-05-23T02:51:50.185Z"
+  },
+  "FNT-0082-001-01": {
+    "supplier": "鸿薇",
+    "mold_name": "骷颅骑兵B身",
+    "workshop": "华登",
+    "updated_at": "2026-05-23T02:52:52.755Z"
+  },
+  "FNT-0082-002-01": {
+    "supplier": "鸿薇",
+    "mold_name": "骷颅骑兵B左手臂",
+    "workshop": "华登",
+    "updated_at": "2026-05-23T02:52:52.755Z"
+  },
+  "FNT-0082-003-01": {
+    "supplier": "鸿薇",
+    "mold_name": "骷颅骑兵B右手臂",
+    "workshop": "华登",
+    "updated_at": "2026-05-23T02:52:52.755Z"
+  },
+  "FNT-0082-004-01": {
+    "supplier": "鸿薇",
+    "mold_name": "骷颅骑兵B左脚",
+    "workshop": "华登",
+    "updated_at": "2026-05-23T02:52:52.755Z"
+  },
+  "FNT-0082-005-01": {
+    "supplier": "鸿薇",
+    "mold_name": "骷颅骑兵B右脚",
+    "workshop": "华登",
+    "updated_at": "2026-05-23T02:52:52.755Z"
+  },
+  "FNT-0082-008-01": {
+    "supplier": "鸿薇",
+    "mold_name": "骷颅骑兵B左右手掌",
+    "workshop": "华登",
+    "updated_at": "2026-05-23T02:52:52.755Z"
+  },
+  "FNT-0082-009-01": {
+    "supplier": "鸿薇",
+    "mold_name": "骷颅骑兵B头",
+    "workshop": "华登",
+    "updated_at": "2026-05-23T02:52:52.755Z"
+  },
+  "RAINB- M03-06": {
+    "supplier": "华盛源",
+    "mold_name": "小蛋壳模",
+    "workshop": "华登",
+    "updated_at": "2026-05-25T01:46:46.273Z"
+  },
+  "SR800-M02": {
+    "supplier": "华盛源",
+    "mold_name": "I企鹅",
+    "workshop": "华登",
+    "updated_at": "2026-05-25T01:50:48.827Z"
+  },
+  "SR800-M03": {
+    "supplier": "华盛源",
+    "mold_name": "E兔子",
+    "workshop": "华登",
+    "updated_at": "2026-05-25T01:50:48.827Z"
+  },
+  "SR800-M04": {
+    "supplier": "华盛源",
+    "mold_name": "F蝾螈",
+    "workshop": "华登",
+    "updated_at": "2026-05-25T01:50:48.827Z"
+  },
+  "SR800-M05": {
+    "supplier": "华盛源",
+    "mold_name": "F蝾螈耳朵",
+    "workshop": "华登",
+    "updated_at": "2026-05-25T01:50:48.827Z"
+  },
+  "SR800-M16": {
+    "supplier": "华盛源",
+    "mold_name": "B熊猫公仔手",
+    "workshop": "华登",
+    "updated_at": "2026-05-25T01:50:48.827Z"
+  },
+  "9680-P01": {
+    "supplier": "俊豪",
+    "target_qty": 3200,
+    "mold_name": "主体",
+    "workshop": "兴信A",
+    "updated_at": "2026-05-26T00:36:13.999Z"
+  },
+  "9680-P02": {
+    "supplier": "俊豪",
+    "target_qty": 3200,
+    "mold_name": "旗子",
+    "workshop": "兴信A",
+    "updated_at": "2026-05-26T00:36:13.999Z"
+  },
+  "TEST-CAP": {
+    "target_qty": 3400,
+    "mold_name": "测试",
+    "workshop": "兴信A",
+    "updated_at": "2026-05-26T03:12:08.593Z"
+  },
+  "MNVN-02M-01": {
+    "supplier": "旭凯",
+    "mold_name": "锁扣模",
+    "workshop": "兴信B",
+    "updated_at": "2026-05-26T05:58:50.373Z"
+  },
+  "MNVN-03M-01": {
+    "supplier": "旭凯",
+    "mold_name": "唱片机壳模",
+    "workshop": "兴信B",
+    "updated_at": "2026-05-26T05:58:50.373Z"
+  },
+  "MNVN-06M-01": {
+    "supplier": "俊豪",
+    "mold_name": "配件模",
+    "workshop": "兴信B",
+    "updated_at": "2026-05-26T05:59:03.904Z"
+  },
+  "RABTB-07M-01": {
+    "supplier": "华盛源",
+    "mold_name": "底座配件",
+    "workshop": "兴信A",
+    "updated_at": "2026-05-26T13:02:57.154Z",
     "target_qty": 3400
+  },
+  "TEST-A": {
+    "target_qty": 2000,
+    "mold_name": "A",
+    "workshop": "兴信A",
+    "updated_at": "2026-05-26T08:12:47.737Z"
+  },
+  "TEST-B": {
+    "target_qty": 2500,
+    "mold_name": "B",
+    "workshop": "兴信A",
+    "updated_at": "2026-05-26T08:12:47.737Z"
+  },
+  "MCKP-30M-01": {
+    "supplier": "俊豪",
+    "mold_name": "包装扣模",
+    "workshop": "兴信A",
+    "updated_at": "2026-05-26T09:15:06.677Z"
   }
 }

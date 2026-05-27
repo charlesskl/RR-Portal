@@ -338,8 +338,12 @@ function parseC_header(items, text) {
     supplier: grab(/^供應商[：:]/, /^供應商[：:]?$/),
     customer: '东莞兴信塑胶制品有限公司',
     deliver_to: (text.match(/前交货货送\s+(\S+?)\s+处/) || [, ''])[1].trim(),
-    placer: grab(/聯繫人/, /聯繫人/),
-    receiver: grab(/系\s*人/, /系\s*人/),
+    // 委托加工合同 上方"聯繫人" = 加工厂联系人 (e.g. 毛小姐, 一个完整 item)
+    // 下方"聯 系 人" = 兴信内部 PMC (e.g. 陈梦楚) — 被拆成 ["聯","系","人："] 3 个独立 item，
+    //   值"陈梦楚"在同行右侧。所以唯一独立的 "人：" 一定指 PMC 那一行
+    placer: grab(/^人[：:]$/, /^人[：:]$/),
+    supplier_contact: grab(/聯繫人/, /聯繫人/),
+    receiver: '',
     accept_date: '',
     operator: '',
     goods_receiver: '',

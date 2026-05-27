@@ -9,6 +9,7 @@ const XLSX = require('xlsx');
 const { parsePdfBuffer } = require('./pdf-parser');
 const { aiParsePdfBuffer } = require('./ai-parser');
 const { buildOrdersWorkbook } = require('./excel-exporter');
+const { workshopFromPmc, workshopRank, WORKSHOP_ORDER } = require('./pmc-workshop-map');
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 
@@ -31,6 +32,17 @@ const readObj = (f) => JSON.parse(fs.readFileSync(f, 'utf8') || '{}');
 
 const round2 = (n) => (typeof n === 'number' && isFinite(n)) ? Math.round(n * 100) / 100 : null;
 
+// 供应商外发价 $ (港币) = 供应商外发价 ¥ / HKD_RATE
+const HKD_RATE = 0.88;
+function deriveSupplierUsd(o) {
+  if (!o) return o;
+  const rmb = Number(o.supplier_price_rmb);
+  if (isFinite(rmb) && rmb > 0) {
+    o.supplier_price_usd = rmb / HKD_RATE;
+  }
+  return o;
+}
+
 function enrich(order) {
   const shots = Number(order.order_qty_shots) || 0;
   const cap = Number(order.actual_capacity) || 0;
@@ -41,7 +53,12 @@ function enrich(order) {
   const in_house_output = round2(shots * quoteUsd);
   const outsource_output = round2(shots * supUsd);
   const supplier_tax_output = round2(shots * supUsd * 0.13);
-  const net_outsource_output = round2((shots * supUsd) - (shots * supUsd * 0.13));
+  // 扣税后外发产值: PDF-imported orders leave it blank for manual entry;
+  // Excel-seed / manually-created orders auto-compute as before.
+  const isPdfImport = !!order.source_bill_no;
+  const net_outsource_output = isPdfImport
+    ? (order.net_outsource_output ?? null)
+    : round2((shots * supUsd) - (shots * supUsd * 0.13));
   return { ...order, estimated_days, in_house_output, outsource_output, supplier_tax_output, net_outsource_output };
 }
 
@@ -60,7 +77,7 @@ app.get('/api/orders', (req, res) => {
 app.post('/api/orders', (req, res) => {
   const list = readJson(ORDERS_FILE);
   const now = new Date().toISOString();
-  const item = { id: nanoid(10), created_at: now, updated_at: now, ...req.body };
+  const item = deriveSupplierUsd({ id: nanoid(10), created_at: now, updated_at: now, ...req.body });
   list.push(item);
   writeJson(ORDERS_FILE, list);
   res.json(enrich(item));
@@ -70,7 +87,7 @@ app.put('/api/orders/:id', (req, res) => {
   const list = readJson(ORDERS_FILE);
   const idx = list.findIndex((x) => x.id === req.params.id);
   if (idx < 0) return res.status(404).json({ error: 'not_found' });
-  list[idx] = { ...list[idx], ...req.body, id: list[idx].id, updated_at: new Date().toISOString() };
+  list[idx] = deriveSupplierUsd({ ...list[idx], ...req.body, id: list[idx].id, updated_at: new Date().toISOString() });
   writeJson(ORDERS_FILE, list);
   res.json(enrich(list[idx]));
 });
@@ -242,10 +259,25 @@ app.post('/api/parse-pdf-ai', upload.single('file'), async (req, res) => {
 app.get('/api/workshops', (req, res) => {
   const orders = readJson(ORDERS_FILE);
   const mappings = readObj(MOLD_MAP_FILE);
-  const set = new Set();
+  const set = new Set(Object.keys(WORKSHOP_ORDER));
   for (const o of orders) if (o.workshop) set.add(o.workshop);
   for (const m of Object.values(mappings)) if (m.workshop) set.add(m.workshop);
-  res.json([...set].sort());
+  res.json([...set].sort((a, b) => workshopRank(a) - workshopRank(b)));
+});
+
+// Workshop display order (used by frontend sort)
+app.get('/api/workshop-order', (req, res) => res.json(WORKSHOP_ORDER));
+
+// All known PMC names — used by PDF import to populate the PMC column
+const { PMC_TO_WORKSHOP } = require('./pmc-workshop-map');
+app.get('/api/pmcs', (req, res) => {
+  const orders = readJson(ORDERS_FILE);
+  const set = new Set(Object.keys(PMC_TO_WORKSHOP));
+  for (const o of orders) if (o.pmc_follow) set.add(o.pmc_follow);
+  // Return as [{ name, workshop }] so frontend can group/style
+  const list = [...set].map((name) => ({ name, workshop: PMC_TO_WORKSHOP[name] || '' }));
+  list.sort((a, b) => (workshopRank(a.workshop) - workshopRank(b.workshop)) || a.name.localeCompare(b.name, 'zh'));
+  res.json(list);
 });
 
 // ---- Mold mappings (mold_code → { supplier, target_qty, workshop }) ----
@@ -398,7 +430,9 @@ app.post('/api/import-pdf-rows', (req, res) => {
   const created = rows.map((r) => {
     const supplier = r.supplier || default_supplier || '';
     const target_qty = r.target_qty ?? null;
-    const rowWorkshop = r.workshop || defaultWorkshop || '';
+    const rowPmc = r.pmc_follow || header.placer || '';
+    // Derive workshop from per-row PMC first, fall back to header PMC
+    const rowWorkshop = r.workshop || defaultWorkshop || workshopFromPmc(rowPmc) || '';
     // Persist mapping when any of supplier/target/name/workshop is meaningful
     if (r.mold_code && (supplier || target_qty !== null || r.mold_name || rowWorkshop)) {
       const prev = moldMap[r.mold_code] || {};
@@ -417,7 +451,9 @@ app.post('/api/import-pdf-rows', (req, res) => {
       r.row_note,
       header.note,
     ].filter(Boolean);
-    const item = {
+    // 目标数 = 报价产能 = 实际产能 (same number, three fields)
+    const capacity = target_qty;
+    const item = deriveSupplierUsd({
       id: nanoid(10),
       created_at: now,
       updated_at: now,
@@ -427,13 +463,13 @@ app.post('/api/import-pdf-rows', (req, res) => {
       order_qty_pcs: r.total_sets ?? null,
       order_qty_shots: r.shots ?? null,
       target_qty,
-      quoted_capacity: null,
-      actual_capacity: null,
+      quoted_capacity: capacity,
+      actual_capacity: capacity,
       quote_price_usd: null,
       supplier_price_rmb: r.unit_price ?? null,
-      supplier_price_usd: null,
+      supplier_price_usd: null,   // auto-derived in deriveSupplierUsd
       supplier,
-      pmc_follow: header.placer || '',
+      pmc_follow: rowPmc,
       order_date: header.place_date || '',
       production_start: '',
       estimated_delivery: r.delivery_date || header.delivery_date || '',
@@ -443,13 +479,18 @@ app.post('/api/import-pdf-rows', (req, res) => {
       source_customer: header.customer || '',
       source_production_no: r.production_no || '',
       source_mold_code: r.mold_code || '',
-    };
+      net_outsource_output: null,   // PDF imports leave 扣税后产值 blank for manual entry
+    });
     list.push(item);
     return item;
   });
   writeJson(ORDERS_FILE, list);
   writeJson(MOLD_MAP_FILE, moldMap);
-  res.json({ inserted: created.length, mappings_total: Object.keys(moldMap).length });
+  res.json({
+    inserted: created.length,
+    inserted_ids: created.map((x) => x.id),
+    mappings_total: Object.keys(moldMap).length,
+  });
 });
 
 // ---- Excel export of arbitrary rows ----
@@ -478,10 +519,9 @@ async function exportOrdersXlsx(orders, res, filenamePrefix = '外发明细') {
 
 function sortByWorkshopThenAge(orders) {
   return [...orders].sort((a, b) => {
-    const aw = a.workshop || '';
-    const bw = b.workshop || '';
-    if (!!aw !== !!bw) return aw ? -1 : 1;
-    if (aw !== bw) return aw.localeCompare(bw, 'zh');
+    const ra = workshopRank(a.workshop);
+    const rb = workshopRank(b.workshop);
+    if (ra !== rb) return ra - rb;
     return (a.created_at || '').localeCompare(b.created_at || '');
   });
 }

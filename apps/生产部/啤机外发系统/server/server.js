@@ -9,26 +9,16 @@ const XLSX = require('xlsx');
 const { parsePdfBuffer } = require('./pdf-parser');
 const { aiParsePdfBuffer } = require('./ai-parser');
 const { buildOrdersWorkbook } = require('./excel-exporter');
-const { workshopFromPmc, workshopRank, WORKSHOP_ORDER } = require('./pmc-workshop-map');
+const { workshopFromPmc, workshopRank, WORKSHOP_ORDER, PMC_TO_WORKSHOP } = require('./pmc-workshop-map');
+const db = require('./db/connection');
+const { init: initDb } = require('./db/init');
+
+initDb();
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 
 const PORT = process.env.PORT || 3010;
 const DATA_DIR = process.env.DATA_PATH || path.join(__dirname, 'data');
-const ORDERS_FILE = path.join(DATA_DIR, 'orders.json');
-const SUPPLIERS_FILE = path.join(DATA_DIR, 'suppliers.json');
-const PC_FILE = path.join(DATA_DIR, 'pc_orders.json');
-const MOLD_MAP_FILE = path.join(DATA_DIR, 'mold_mappings.json');
-
-if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-for (const f of [ORDERS_FILE, SUPPLIERS_FILE, PC_FILE]) {
-  if (!fs.existsSync(f)) fs.writeFileSync(f, '[]', 'utf8');
-}
-if (!fs.existsSync(MOLD_MAP_FILE)) fs.writeFileSync(MOLD_MAP_FILE, '{}', 'utf8');
-
-const readJson = (f) => JSON.parse(fs.readFileSync(f, 'utf8') || '[]');
-const writeJson = (f, data) => fs.writeFileSync(f, JSON.stringify(data, null, 2), 'utf8');
-const readObj = (f) => JSON.parse(fs.readFileSync(f, 'utf8') || '{}');
 
 const round2 = (n) => (typeof n === 'number' && isFinite(n)) ? Math.round(n * 100) / 100 : null;
 
@@ -44,17 +34,15 @@ function deriveSupplierUsd(o) {
 }
 
 function enrich(order) {
+  if (!order) return order;
   const shots = Number(order.order_qty_shots) || 0;
   const cap = Number(order.actual_capacity) || 0;
   const quoteUsd = Number(order.quote_price_usd) || 0;
-  const supRmb = Number(order.supplier_price_rmb) || 0;
   const supUsd = Number(order.supplier_price_usd) || 0;
   const estimated_days = cap > 0 ? round2(shots / cap) : null;
   const in_house_output = round2(shots * quoteUsd);
   const outsource_output = round2(shots * supUsd);
   const supplier_tax_output = round2(shots * supUsd * 0.13);
-  // 扣税后外发产值: PDF-imported orders leave it blank for manual entry;
-  // Excel-seed / manually-created orders auto-compute as before.
   const isPdfImport = !!order.source_bill_no;
   const net_outsource_output = isPdfImport
     ? (order.net_outsource_output ?? null)
@@ -62,6 +50,76 @@ function enrich(order) {
   return { ...order, estimated_days, in_house_output, outsource_output, supplier_tax_output, net_outsource_output };
 }
 
+// ============== SQL prepared statements (compiled once) ==============
+const ORDER_COLS = [
+  'id', 'seq', 'workshop', 'item_code', 'mold',
+  'order_qty_pcs', 'order_qty_shots', 'target_qty', 'quoted_capacity', 'actual_capacity',
+  'quote_price_usd', 'supplier_price_rmb', 'supplier_price_usd',
+  'supplier', 'pmc_follow',
+  'order_date', 'production_start', 'estimated_delivery',
+  'remark', 'status', 'net_outsource_output',
+  'source_bill_no', 'source_customer', 'source_production_no', 'source_mold_code',
+  'created_at', 'updated_at',
+];
+function normalizeOrder(o) {
+  const out = {};
+  for (const c of ORDER_COLS) out[c] = (o[c] === undefined) ? null : o[c];
+  return out;
+}
+const ORDER_INSERT_SQL = `INSERT INTO orders (${ORDER_COLS.join(',')}) VALUES (${ORDER_COLS.map((c) => '@' + c).join(',')})`;
+const ORDER_UPDATE_SQL = `UPDATE orders SET ${ORDER_COLS.filter((c) => c !== 'id').map((c) => `${c}=@${c}`).join(',')} WHERE id=@id`;
+
+const ordersAll = db.prepare('SELECT * FROM orders');
+const orderById = db.prepare('SELECT * FROM orders WHERE id = ?');
+const orderInsert = db.prepare(ORDER_INSERT_SQL);
+const orderUpdate = db.prepare(ORDER_UPDATE_SQL);
+const orderDelete = db.prepare('DELETE FROM orders WHERE id = ?');
+
+const suppliersAll = db.prepare('SELECT * FROM suppliers');
+const supplierInsert = db.prepare(`INSERT INTO suppliers (id, seq, name, total_machines, machines_for_xx, xx_ratio, actual_running, running_rate, contact, address, mold_count, remark) VALUES (@id, @seq, @name, @total_machines, @machines_for_xx, @xx_ratio, @actual_running, @running_rate, @contact, @address, @mold_count, @remark)`);
+const supplierUpdate = db.prepare(`UPDATE suppliers SET seq=@seq, name=@name, total_machines=@total_machines, machines_for_xx=@machines_for_xx, xx_ratio=@xx_ratio, actual_running=@actual_running, running_rate=@running_rate, contact=@contact, address=@address, mold_count=@mold_count, remark=@remark WHERE id=@id`);
+const supplierDelete = db.prepare('DELETE FROM suppliers WHERE id = ?');
+const supplierExists = db.prepare('SELECT 1 FROM suppliers WHERE id = ?');
+
+const mappingsAll = db.prepare('SELECT * FROM mold_mappings');
+const mappingByCode = db.prepare('SELECT * FROM mold_mappings WHERE mold_code = ?');
+const mappingUpsert = db.prepare(`INSERT INTO mold_mappings (mold_code, supplier, target_qty, workshop, mold_name, updated_at)
+  VALUES (@mold_code, @supplier, @target_qty, @workshop, @mold_name, @updated_at)
+  ON CONFLICT(mold_code) DO UPDATE SET
+    supplier   = COALESCE(excluded.supplier,   mold_mappings.supplier),
+    target_qty = COALESCE(excluded.target_qty, mold_mappings.target_qty),
+    workshop   = COALESCE(excluded.workshop,   mold_mappings.workshop),
+    mold_name  = COALESCE(excluded.mold_name,  mold_mappings.mold_name),
+    updated_at = excluded.updated_at`);
+const mappingDelete = db.prepare('DELETE FROM mold_mappings WHERE mold_code = ?');
+
+const pcAll = db.prepare('SELECT * FROM pc_orders');
+const pcInsert = db.prepare('INSERT INTO pc_orders (id, seq, factory, item_code, mold, mold_sets, remark) VALUES (@id, @seq, @factory, @item_code, @mold, @mold_sets, @remark)');
+const pcUpdate = db.prepare('UPDATE pc_orders SET seq=@seq, factory=@factory, item_code=@item_code, mold=@mold, mold_sets=@mold_sets, remark=@remark WHERE id=@id');
+const pcDelete = db.prepare('DELETE FROM pc_orders WHERE id = ?');
+const pcExists = db.prepare('SELECT 1 FROM pc_orders WHERE id = ?');
+
+const renameOrdersStmt   = db.prepare(`UPDATE orders        SET supplier=?, updated_at=? WHERE COALESCE(supplier, '') = ?`);
+const renameMappingsStmt = db.prepare(`UPDATE mold_mappings SET supplier=?, updated_at=? WHERE COALESCE(supplier, '') = ?`);
+const renameSuppliersStmt= db.prepare(`UPDATE suppliers     SET name=?                  WHERE name = ?`);
+
+// Helper: list all mappings as a { mold_code: { ...fields } } object
+function getAllMappings() {
+  const rows = mappingsAll.all();
+  const out = {};
+  for (const r of rows) {
+    out[r.mold_code] = {
+      supplier: r.supplier || '',
+      target_qty: r.target_qty,
+      workshop: r.workshop || '',
+      mold_name: r.mold_name || '',
+      updated_at: r.updated_at || '',
+    };
+  }
+  return out;
+}
+
+// ============== Express app ==============
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
@@ -70,39 +128,31 @@ app.get('/api/health', (req, res) => res.json({ ok: true, ts: Date.now() }));
 
 // ---- Orders ----
 app.get('/api/orders', (req, res) => {
-  const list = readJson(ORDERS_FILE).map(enrich);
-  res.json(list);
+  res.json(ordersAll.all().map(enrich));
 });
 
 app.post('/api/orders', (req, res) => {
-  const list = readJson(ORDERS_FILE);
   const now = new Date().toISOString();
   const item = deriveSupplierUsd({ id: nanoid(10), created_at: now, updated_at: now, ...req.body });
-  list.push(item);
-  writeJson(ORDERS_FILE, list);
-  res.json(enrich(item));
+  orderInsert.run(normalizeOrder(item));
+  res.json(enrich(orderById.get(item.id)));
 });
 
 app.put('/api/orders/:id', (req, res) => {
-  const list = readJson(ORDERS_FILE);
-  const idx = list.findIndex((x) => x.id === req.params.id);
-  if (idx < 0) return res.status(404).json({ error: 'not_found' });
-  list[idx] = deriveSupplierUsd({ ...list[idx], ...req.body, id: list[idx].id, updated_at: new Date().toISOString() });
-  writeJson(ORDERS_FILE, list);
-  res.json(enrich(list[idx]));
+  const prev = orderById.get(req.params.id);
+  if (!prev) return res.status(404).json({ error: 'not_found' });
+  const merged = deriveSupplierUsd({ ...prev, ...req.body, id: prev.id, updated_at: new Date().toISOString() });
+  orderUpdate.run(normalizeOrder(merged));
+  res.json(enrich(orderById.get(prev.id)));
 });
 
 app.delete('/api/orders/:id', (req, res) => {
-  const list = readJson(ORDERS_FILE);
-  const next = list.filter((x) => x.id !== req.params.id);
-  if (next.length === list.length) return res.status(404).json({ error: 'not_found' });
-  writeJson(ORDERS_FILE, next);
+  const info = orderDelete.run(req.params.id);
+  if (info.changes === 0) return res.status(404).json({ error: 'not_found' });
   res.json({ ok: true });
 });
 
 // ---- Bulk-rename a supplier across orders, mappings, and the suppliers list ----
-// Body: { from: "鸿徽", to: "鸿薇" }
-// from = "" or "(空)" means: assign currently-empty supplier rows to the new name.
 app.post('/api/suppliers/rename', (req, res) => {
   const { from = '', to = '' } = req.body || {};
   const fromName = from === '(空)' ? '' : from;
@@ -110,100 +160,66 @@ app.post('/api/suppliers/rename', (req, res) => {
   if (toName === '') return res.status(400).json({ error: 'empty_to' });
   if (fromName === toName) return res.json({ orders_updated: 0, mappings_updated: 0, suppliers_updated: 0 });
 
-  // Orders
-  const orders = readJson(ORDERS_FILE);
-  let ordersUpdated = 0;
   const now = new Date().toISOString();
-  for (const o of orders) {
-    if ((o.supplier || '') === fromName) {
-      o.supplier = toName;
-      o.updated_at = now;
-      ordersUpdated += 1;
-    }
-  }
-  writeJson(ORDERS_FILE, orders);
-
-  // Mold mappings
-  const mappings = readObj(MOLD_MAP_FILE);
-  let mappingsUpdated = 0;
-  for (const m of Object.values(mappings)) {
-    if ((m.supplier || '') === fromName) {
-      m.supplier = toName;
-      m.updated_at = now;
-      mappingsUpdated += 1;
-    }
-  }
-  writeJson(MOLD_MAP_FILE, mappings);
-
-  // Suppliers list
-  const suppliers = readJson(SUPPLIERS_FILE);
-  let suppliersUpdated = 0;
-  if (fromName) {
-    for (const s of suppliers) {
-      if (s.name === fromName) {
-        s.name = toName;
-        suppliersUpdated += 1;
-      }
-    }
-    writeJson(SUPPLIERS_FILE, suppliers);
-  }
-
-  res.json({ orders_updated: ordersUpdated, mappings_updated: mappingsUpdated, suppliers_updated: suppliersUpdated });
+  const tx = db.transaction(() => {
+    const r1 = renameOrdersStmt.run(toName, now, fromName);
+    const r2 = renameMappingsStmt.run(toName, now, fromName);
+    const r3 = fromName ? renameSuppliersStmt.run(toName, fromName) : { changes: 0 };
+    return { o: r1.changes, m: r2.changes, s: r3.changes };
+  });
+  const r = tx();
+  res.json({ orders_updated: r.o, mappings_updated: r.m, suppliers_updated: r.s });
 });
 
-// ---- Suppliers (加工厂) ----
-app.get('/api/suppliers', (req, res) => res.json(readJson(SUPPLIERS_FILE)));
+// ---- Suppliers ----
+app.get('/api/suppliers', (req, res) => res.json(suppliersAll.all()));
 app.post('/api/suppliers', (req, res) => {
-  const list = readJson(SUPPLIERS_FILE);
-  const item = { id: nanoid(10), ...req.body };
-  list.push(item);
-  writeJson(SUPPLIERS_FILE, list);
+  const item = {
+    id: nanoid(10), seq: null, name: '',
+    total_machines: null, machines_for_xx: null, xx_ratio: null,
+    actual_running: null, running_rate: null, contact: '', address: '',
+    mold_count: null, remark: '',
+    ...req.body,
+  };
+  supplierInsert.run(item);
   res.json(item);
 });
 app.put('/api/suppliers/:id', (req, res) => {
-  const list = readJson(SUPPLIERS_FILE);
-  const idx = list.findIndex((x) => x.id === req.params.id);
-  if (idx < 0) return res.status(404).json({ error: 'not_found' });
-  list[idx] = { ...list[idx], ...req.body, id: list[idx].id };
-  writeJson(SUPPLIERS_FILE, list);
-  res.json(list[idx]);
+  if (!supplierExists.get(req.params.id)) return res.status(404).json({ error: 'not_found' });
+  const cur = db.prepare('SELECT * FROM suppliers WHERE id=?').get(req.params.id);
+  const merged = { ...cur, ...req.body, id: cur.id };
+  supplierUpdate.run(merged);
+  res.json(merged);
 });
 app.delete('/api/suppliers/:id', (req, res) => {
-  const list = readJson(SUPPLIERS_FILE);
-  const next = list.filter((x) => x.id !== req.params.id);
-  if (next.length === list.length) return res.status(404).json({ error: 'not_found' });
-  writeJson(SUPPLIERS_FILE, next);
+  const info = supplierDelete.run(req.params.id);
+  if (info.changes === 0) return res.status(404).json({ error: 'not_found' });
   res.json({ ok: true });
 });
 
 // ---- PC Orders ----
-app.get('/api/pc-orders', (req, res) => res.json(readJson(PC_FILE)));
+app.get('/api/pc-orders', (req, res) => res.json(pcAll.all()));
 app.post('/api/pc-orders', (req, res) => {
-  const list = readJson(PC_FILE);
-  const item = { id: nanoid(10), ...req.body };
-  list.push(item);
-  writeJson(PC_FILE, list);
+  const item = { id: nanoid(10), seq: null, factory: '', item_code: '', mold: '', mold_sets: '', remark: '', ...req.body };
+  pcInsert.run(item);
   res.json(item);
 });
 app.put('/api/pc-orders/:id', (req, res) => {
-  const list = readJson(PC_FILE);
-  const idx = list.findIndex((x) => x.id === req.params.id);
-  if (idx < 0) return res.status(404).json({ error: 'not_found' });
-  list[idx] = { ...list[idx], ...req.body, id: list[idx].id };
-  writeJson(PC_FILE, list);
-  res.json(list[idx]);
+  if (!pcExists.get(req.params.id)) return res.status(404).json({ error: 'not_found' });
+  const cur = db.prepare('SELECT * FROM pc_orders WHERE id=?').get(req.params.id);
+  const merged = { ...cur, ...req.body, id: cur.id };
+  pcUpdate.run(merged);
+  res.json(merged);
 });
 app.delete('/api/pc-orders/:id', (req, res) => {
-  const list = readJson(PC_FILE);
-  const next = list.filter((x) => x.id !== req.params.id);
-  if (next.length === list.length) return res.status(404).json({ error: 'not_found' });
-  writeJson(PC_FILE, next);
+  const info = pcDelete.run(req.params.id);
+  if (info.changes === 0) return res.status(404).json({ error: 'not_found' });
   res.json({ ok: true });
 });
 
 // ---- Stats summary ----
 app.get('/api/stats/summary', (req, res) => {
-  const orders = readJson(ORDERS_FILE).map(enrich);
+  const orders = ordersAll.all().map(enrich);
   const total = orders.length;
   const sum = (k) => orders.reduce((a, x) => a + (Number(x[k]) || 0), 0);
   res.json({
@@ -224,130 +240,97 @@ app.post('/api/parse-pdf', upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'no_file' });
   try {
     const parsed = await parsePdfBuffer(req.file.buffer);
-    res.json({
-      filename: req.file.originalname,
-      template: parsed.template,
-      header: parsed.header,
-      rows: parsed.rows,
-    });
+    res.json({ filename: req.file.originalname, template: parsed.template, header: parsed.header, rows: parsed.rows });
   } catch (e) {
     console.error('parse-pdf error:', e);
     res.status(500).json({ error: 'parse_failed', message: e.message });
   }
 });
 
-// AI 智能解析 — 调用阿里百炼（Qwen），用于规则解析失败/未知模板
 app.post('/api/parse-pdf-ai', upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'no_file' });
   try {
     const parsed = await aiParsePdfBuffer(req.file.buffer);
-    res.json({
-      filename: req.file.originalname,
-      template: parsed.template,
-      header: parsed.header,
-      rows: parsed.rows,
-      model_used: parsed.model_used,
-      usage: parsed.usage,
-    });
+    res.json({ filename: req.file.originalname, template: parsed.template, header: parsed.header, rows: parsed.rows, model_used: parsed.model_used, usage: parsed.usage });
   } catch (e) {
     console.error('parse-pdf-ai error:', e);
     res.status(500).json({ error: 'ai_parse_failed', message: e.message });
   }
 });
 
-// ---- Workshop options (autocomplete source) ----
+// ---- Workshop options ----
 app.get('/api/workshops', (req, res) => {
-  const orders = readJson(ORDERS_FILE);
-  const mappings = readObj(MOLD_MAP_FILE);
   const set = new Set(Object.keys(WORKSHOP_ORDER));
-  for (const o of orders) if (o.workshop) set.add(o.workshop);
-  for (const m of Object.values(mappings)) if (m.workshop) set.add(m.workshop);
+  for (const r of db.prepare(`SELECT DISTINCT workshop FROM orders WHERE workshop IS NOT NULL AND workshop != ''`).all()) set.add(r.workshop);
+  for (const r of db.prepare(`SELECT DISTINCT workshop FROM mold_mappings WHERE workshop IS NOT NULL AND workshop != ''`).all()) set.add(r.workshop);
   res.json([...set].sort((a, b) => workshopRank(a) - workshopRank(b)));
 });
 
-// Workshop display order (used by frontend sort)
 app.get('/api/workshop-order', (req, res) => res.json(WORKSHOP_ORDER));
 
-// All known PMC names — used by PDF import to populate the PMC column
-const { PMC_TO_WORKSHOP } = require('./pmc-workshop-map');
 app.get('/api/pmcs', (req, res) => {
-  const orders = readJson(ORDERS_FILE);
   const set = new Set(Object.keys(PMC_TO_WORKSHOP));
-  for (const o of orders) if (o.pmc_follow) set.add(o.pmc_follow);
-  // Return as [{ name, workshop }] so frontend can group/style
+  for (const r of db.prepare(`SELECT DISTINCT pmc_follow FROM orders WHERE pmc_follow IS NOT NULL AND pmc_follow != ''`).all()) set.add(r.pmc_follow);
   const list = [...set].map((name) => ({ name, workshop: PMC_TO_WORKSHOP[name] || '' }));
   list.sort((a, b) => (workshopRank(a.workshop) - workshopRank(b.workshop)) || a.name.localeCompare(b.name, 'zh'));
   res.json(list);
 });
 
-// ---- Mold mappings (mold_code → { supplier, target_qty, workshop }) ----
-// Used by PDF import: filling a mold's supplier/target once makes the system
-// remember it for next time.
-app.get('/api/mold-mappings', (req, res) => res.json(readObj(MOLD_MAP_FILE)));
+// ---- Mold mappings ----
+app.get('/api/mold-mappings', (req, res) => res.json(getAllMappings()));
 
 app.post('/api/mold-mappings', (req, res) => {
   const { mappings = {} } = req.body || {};
   if (typeof mappings !== 'object') return res.status(400).json({ error: 'bad_body' });
-  const current = readObj(MOLD_MAP_FILE);
+  const now = new Date().toISOString();
   let updated = 0;
-  for (const [k, v] of Object.entries(mappings)) {
-    if (!k || !v) continue;
-    const prev = current[k] || {};
-    const next = { ...prev };
-    if (v.supplier !== undefined && v.supplier !== '') next.supplier = v.supplier;
-    if (v.target_qty !== undefined && v.target_qty !== null && v.target_qty !== '') {
-      next.target_qty = Number(v.target_qty);
+  const tx = db.transaction((items) => {
+    for (const [k, v] of Object.entries(items)) {
+      if (!k || !v) continue;
+      mappingUpsert.run({
+        mold_code: k,
+        supplier: (v.supplier !== undefined && v.supplier !== '') ? v.supplier : null,
+        target_qty: (v.target_qty !== undefined && v.target_qty !== null && v.target_qty !== '') ? Number(v.target_qty) : null,
+        workshop: v.workshop !== undefined ? v.workshop : null,
+        mold_name: (v.mold_name !== undefined && v.mold_name !== '') ? v.mold_name : null,
+        updated_at: now,
+      });
+      updated++;
     }
-    if (v.mold_name !== undefined && v.mold_name !== '') next.mold_name = v.mold_name;
-    if (v.workshop !== undefined) next.workshop = v.workshop;
-    next.updated_at = new Date().toISOString();
-    if (JSON.stringify(next) !== JSON.stringify(prev)) {
-      current[k] = next;
-      updated += 1;
-    }
-  }
-  writeJson(MOLD_MAP_FILE, current);
-  res.json({ updated, total: Object.keys(current).length });
+  });
+  tx(mappings);
+  const total = db.prepare('SELECT COUNT(*) c FROM mold_mappings').get().c;
+  res.json({ updated, total });
 });
 
-// Update / reassign a single mold's mapping (used by the mold-factory page)
-// Body: { supplier?, target_qty?, mold_name? }
 app.put('/api/mold-mappings/:mold_code', (req, res) => {
   const key = req.params.mold_code;
   if (!key) return res.status(400).json({ error: 'bad_key' });
-  const current = readObj(MOLD_MAP_FILE);
-  const prev = current[key] || {};
-  const next = { ...prev };
   const { supplier, target_qty, mold_name, workshop } = req.body || {};
-  if (supplier !== undefined) next.supplier = supplier;
-  if (target_qty !== undefined) {
-    next.target_qty = (target_qty === null || target_qty === '') ? null : Number(target_qty);
-  }
-  if (mold_name !== undefined) next.mold_name = mold_name;
-  if (workshop !== undefined) next.workshop = workshop;
-  next.updated_at = new Date().toISOString();
-  current[key] = next;
-  writeJson(MOLD_MAP_FILE, current);
-  res.json(next);
+  mappingUpsert.run({
+    mold_code: key,
+    supplier: supplier !== undefined ? supplier : null,
+    target_qty: (target_qty === null || target_qty === '' || target_qty === undefined) ? null : Number(target_qty),
+    workshop: workshop !== undefined ? workshop : null,
+    mold_name: mold_name !== undefined ? mold_name : null,
+    updated_at: new Date().toISOString(),
+  });
+  res.json(mappingByCode.get(key) || {});
 });
 
 app.delete('/api/mold-mappings/:mold_code', (req, res) => {
-  const key = req.params.mold_code;
-  const current = readObj(MOLD_MAP_FILE);
-  if (!(key in current)) return res.status(404).json({ error: 'not_found' });
-  delete current[key];
-  writeJson(MOLD_MAP_FILE, current);
+  const info = mappingDelete.run(req.params.mold_code);
+  if (info.changes === 0) return res.status(404).json({ error: 'not_found' });
   res.json({ ok: true });
 });
 
 // Aggregated view: which molds at which factory, with order stats
 app.get('/api/mold-factory-map', (req, res) => {
-  const mappings = readObj(MOLD_MAP_FILE);
-  const orders = readJson(ORDERS_FILE);
+  const mappings = getAllMappings();
+  const orders = ordersAll.all();
 
-  // Build order index by source_mold_code (preferred) or by extracting mold_code from "mold" field
-  const orderStats = {};   // mold_code → { count, latest_date, total_shots, latest_supplier }
-  const namesFromOrders = {}; // mold_code → first non-empty 工模名称 we can derive
+  const orderStats = {};
+  const namesFromOrders = {};
   for (const o of orders) {
     const code = o.source_mold_code || extractMoldCode(o.mold || '');
     if (!code) continue;
@@ -361,38 +344,29 @@ app.get('/api/mold-factory-map', (req, res) => {
     }
     orderStats[code] = s;
     if (!namesFromOrders[code] && o.mold) {
-      // mold is "<code> <name>" — strip the code prefix
       const after = o.mold.replace(code, '').trim();
       if (after) namesFromOrders[code] = after;
     }
   }
 
-  // Merge mappings + orderStats into a unified list
   const allCodes = new Set([...Object.keys(mappings), ...Object.keys(orderStats)]);
   const grouped = {};
   for (const code of allCodes) {
     const m = mappings[code] || {};
     const s = orderStats[code] || { count: 0, latest_date: '', total_shots: 0, latest_supplier: '' };
-    // If no mapping supplier, fall back to latest order supplier
     const supplier = m.supplier || s.latest_supplier || '(未分配)';
     const mold_name = m.mold_name || namesFromOrders[code] || '';
     const row = {
-      mold_code: code,
-      mold_name,
-      supplier,
+      mold_code: code, mold_name, supplier,
       target_qty: m.target_qty ?? null,
       mapped: !!m.supplier,
-      order_count: s.count,
-      total_shots: s.total_shots,
+      order_count: s.count, total_shots: s.total_shots,
       latest_date: s.latest_date,
       updated_at: m.updated_at || '',
     };
     (grouped[supplier] = grouped[supplier] || []).push(row);
   }
-  // Sort molds within each supplier by mold_code
-  for (const arr of Object.values(grouped)) {
-    arr.sort((a, b) => a.mold_code.localeCompare(b.mold_code));
-  }
+  for (const arr of Object.values(grouped)) arr.sort((a, b) => a.mold_code.localeCompare(b.mold_code));
   res.json({
     suppliers: Object.entries(grouped)
       .map(([name, molds]) => ({ name, molds, mold_count: molds.length }))
@@ -407,94 +381,85 @@ app.get('/api/mold-factory-map', (req, res) => {
 });
 
 function extractMoldCode(moldStr) {
-  // mold field is usually "<mold_code> <name>"; pick the first whitespace-separated token
   const t = String(moldStr).trim().split(/\s+/)[0];
   return t || '';
 }
 
 // ---- Import parsed PDF rows into orders ----
-// Body: { header, rows: [{...row, supplier, target_qty}], workshop?: string, default_supplier?: string }
 app.post('/api/import-pdf-rows', (req, res) => {
-  const {
-    header = {},
-    rows = [],
-    workshop: defaultWorkshop = '',
-    default_supplier = '',
-  } = req.body || {};
+  const { header = {}, rows = [], workshop: defaultWorkshop = '', default_supplier = '' } = req.body || {};
   if (!Array.isArray(rows) || rows.length === 0) return res.status(400).json({ error: 'no_rows' });
 
-  const list = readJson(ORDERS_FILE);
-  const moldMap = readObj(MOLD_MAP_FILE);
   const now = new Date().toISOString();
+  const insertedIds = [];
 
-  const created = rows.map((r) => {
-    const supplier = r.supplier || default_supplier || '';
-    const target_qty = r.target_qty ?? null;
-    const rowPmc = r.pmc_follow || header.placer || '';
-    // Derive workshop from per-row PMC first, fall back to header PMC
-    const rowWorkshop = r.workshop || defaultWorkshop || workshopFromPmc(rowPmc) || '';
-    // Persist mapping when any of supplier/target/name/workshop is meaningful
-    if (r.mold_code && (supplier || target_qty !== null || r.mold_name || rowWorkshop)) {
-      const prev = moldMap[r.mold_code] || {};
-      const next = { ...prev };
-      if (supplier) next.supplier = supplier;
-      if (target_qty !== null) next.target_qty = Number(target_qty);
-      if (r.mold_name && !prev.mold_name) next.mold_name = r.mold_name;
-      if (rowWorkshop) next.workshop = rowWorkshop;
-      next.updated_at = now;
-      moldMap[r.mold_code] = next;
+  const tx = db.transaction(() => {
+    for (const r of rows) {
+      const supplier = r.supplier || default_supplier || '';
+      const target_qty = r.target_qty ?? null;
+      const rowPmc = r.pmc_follow || header.placer || '';
+      const rowWorkshop = r.workshop || defaultWorkshop || workshopFromPmc(rowPmc) || '';
+
+      if (r.mold_code && (supplier || target_qty !== null || r.mold_name || rowWorkshop)) {
+        mappingUpsert.run({
+          mold_code: r.mold_code,
+          supplier: supplier || null,
+          target_qty: target_qty !== null ? Number(target_qty) : null,
+          workshop: rowWorkshop || null,
+          mold_name: r.mold_name || null,
+          updated_at: now,
+        });
+      }
+
+      const remarkParts = [
+        r.color && `颜色:${r.color}`,
+        r.color_powder && `色粉:${r.color_powder}`,
+        r.material && `料:${r.material}`,
+        r.row_note,
+        header.note,
+      ].filter(Boolean);
+
+      const capacity = target_qty;
+      const item = deriveSupplierUsd({
+        id: nanoid(10),
+        seq: null,
+        created_at: now,
+        updated_at: now,
+        workshop: rowWorkshop || header.supplier || '',
+        item_code: r.order_no || header.bill_no || '',
+        mold: `${r.mold_code || ''} ${r.mold_name || ''}`.trim(),
+        order_qty_pcs: r.total_sets ?? null,
+        order_qty_shots: r.shots ?? null,
+        target_qty,
+        quoted_capacity: capacity,
+        actual_capacity: capacity,
+        quote_price_usd: null,
+        supplier_price_rmb: r.unit_price ?? null,
+        supplier_price_usd: null,
+        supplier,
+        pmc_follow: rowPmc,
+        order_date: header.place_date || '',
+        production_start: '',
+        estimated_delivery: r.delivery_date || header.delivery_date || '',
+        remark: remarkParts.join(' / '),
+        status: 'open',
+        source_bill_no: header.bill_no || '',
+        source_customer: header.customer || '',
+        source_production_no: r.production_no || '',
+        source_mold_code: r.mold_code || '',
+        net_outsource_output: null,
+      });
+      orderInsert.run(normalizeOrder(item));
+      insertedIds.push(item.id);
     }
-    const remarkParts = [
-      r.color && `颜色:${r.color}`,
-      r.color_powder && `色粉:${r.color_powder}`,
-      r.material && `料:${r.material}`,
-      r.row_note,
-      header.note,
-    ].filter(Boolean);
-    // 目标数 = 报价产能 = 实际产能 (same number, three fields)
-    const capacity = target_qty;
-    const item = deriveSupplierUsd({
-      id: nanoid(10),
-      created_at: now,
-      updated_at: now,
-      workshop: rowWorkshop || header.supplier || '',
-      item_code: r.order_no || header.bill_no || '',
-      mold: `${r.mold_code || ''} ${r.mold_name || ''}`.trim(),
-      order_qty_pcs: r.total_sets ?? null,
-      order_qty_shots: r.shots ?? null,
-      target_qty,
-      quoted_capacity: capacity,
-      actual_capacity: capacity,
-      quote_price_usd: null,
-      supplier_price_rmb: r.unit_price ?? null,
-      supplier_price_usd: null,   // auto-derived in deriveSupplierUsd
-      supplier,
-      pmc_follow: rowPmc,
-      order_date: header.place_date || '',
-      production_start: '',
-      estimated_delivery: r.delivery_date || header.delivery_date || '',
-      remark: remarkParts.join(' / '),
-      status: 'open',
-      source_bill_no: header.bill_no || '',
-      source_customer: header.customer || '',
-      source_production_no: r.production_no || '',
-      source_mold_code: r.mold_code || '',
-      net_outsource_output: null,   // PDF imports leave 扣税后产值 blank for manual entry
-    });
-    list.push(item);
-    return item;
   });
-  writeJson(ORDERS_FILE, list);
-  writeJson(MOLD_MAP_FILE, moldMap);
-  res.json({
-    inserted: created.length,
-    inserted_ids: created.map((x) => x.id),
-    mappings_total: Object.keys(moldMap).length,
-  });
+  tx();
+
+  const mappingsTotal = db.prepare('SELECT COUNT(*) c FROM mold_mappings').get().c;
+  res.json({ inserted: insertedIds.length, inserted_ids: insertedIds, mappings_total: mappingsTotal });
 });
 
-// ---- Excel export of arbitrary rows ----
-// Body: { rows: [...], filename?: string, sheet_name?: string }
+// ---- Excel export of arbitrary rows (legacy plain endpoint) ----
 app.post('/api/export-excel', (req, res) => {
   const { rows = [], filename = 'orders.xlsx', sheet_name = '订单' } = req.body || {};
   if (!Array.isArray(rows) || rows.length === 0) return res.status(400).json({ error: 'no_rows' });
@@ -507,7 +472,7 @@ app.post('/api/export-excel', (req, res) => {
   res.send(buf);
 });
 
-// ---- Excel export (formatted to match 「外发模具计划」 layout) ----
+// ---- Excel export (formatted) ----
 async function exportOrdersXlsx(orders, res, filenamePrefix = '外发明细') {
   const wb = await buildOrdersWorkbook(orders);
   const buf = await wb.xlsx.writeBuffer();
@@ -528,7 +493,7 @@ function sortByWorkshopThenAge(orders) {
 
 app.get('/api/orders/export.xlsx', async (req, res) => {
   try {
-    const orders = sortByWorkshopThenAge(readJson(ORDERS_FILE).map(enrich));
+    const orders = sortByWorkshopThenAge(ordersAll.all().map(enrich));
     await exportOrdersXlsx(orders, res, '外发明细');
   } catch (e) {
     console.error('export-all error:', e);
@@ -536,7 +501,6 @@ app.get('/api/orders/export.xlsx', async (req, res) => {
   }
 });
 
-// POST { rows: [...orders] } — export a specific subset (used by 'export filtered')
 app.post('/api/orders/export.xlsx', async (req, res) => {
   try {
     const { rows = [] } = req.body || {};
@@ -548,7 +512,7 @@ app.post('/api/orders/export.xlsx', async (req, res) => {
   }
 });
 
-// ---- Serve client static (production) ----
+// ---- Serve client static ----
 const clientDist = path.join(__dirname, '..', 'client', 'dist');
 if (fs.existsSync(clientDist)) {
   app.use(express.static(clientDist));
@@ -566,8 +530,8 @@ function getLanIps() {
   return ips;
 }
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`[啤机外发] server listening on:`);
+  console.log(`[啤机外发] SQLite-backed server listening:`);
   console.log(`  - http://localhost:${PORT}`);
   for (const ip of getLanIps()) console.log(`  - http://${ip}:${PORT}  (LAN)`);
-  console.log(`[啤机外发] data dir: ${DATA_DIR}`);
+  console.log(`[啤机外发] DB: ${path.join(DATA_DIR, 'pi-outsource.db')}`);
 });

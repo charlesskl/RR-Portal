@@ -102,6 +102,7 @@ button.btn-ghost:hover:not(:disabled) { background: #f3f4f6; }
 .matrix td.muted { color: #d1d5db; }
 .image-section { margin: 12px 0 4px; }
 .image-group { margin: 14px 0; padding: 12px; background: #fafafa; border-radius: 6px; border-left: 3px solid #2563eb; }
+.image-group.sample-group { border-left-color: #16a34a; background: #f0fdf4; }
 .image-group-title { color: #374151; font-weight: 600; margin: 0 0 10px; font-size: 13px; }
 .image-grid {
   display: grid;

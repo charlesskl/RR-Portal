@@ -204,6 +204,7 @@ function extractSheetImages(wb, sheet) {
 }
 
 // 把连续 fail rows 分组，每组配对该组之后到下一组之前的图片
+// 第一个 fail row 之前的图片视为"样板图"（通常是 sheet 顶部产品参考区），跟"未关联"区分开
 export function groupImagesByFailRows(failRows, images) {
   const sortedFails = [...failRows].sort((a, b) => a.rowNumber - b.rowNumber);
   const groups = [];
@@ -226,8 +227,11 @@ export function groupImagesByFailRows(failRows, images) {
       .filter(img => img.fromRow >= imgStart && img.fromRow <= imgEnd)
       .map(img => { used.add(img); return img; });
   }
-  const orphan = images.filter(img => !used.has(img));
-  return { groups, orphan };
+  const allOrphan = images.filter(img => !used.has(img));
+  const firstFailRow = groups.length > 0 ? groups[0].startRow : Infinity;
+  const sampleImages = allOrphan.filter(img => img.fromRow < firstFailRow);
+  const orphan = allOrphan.filter(img => img.fromRow >= firstFailRow);
+  return { groups, sampleImages, orphan };
 }
 
 export async function parseExcelRedRows(buffer) {

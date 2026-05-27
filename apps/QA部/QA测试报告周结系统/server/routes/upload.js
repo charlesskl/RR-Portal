@@ -96,16 +96,14 @@ router.post('/', upload.single('file'), async (req, res) => {
       });
     }
 
-    // 按 sheet 分组图片，每张图片归到最近的 fail group
+    // 按 sheet 分组图片：每张图片归到最近的 fail group；fail rows 之前的归"样板图"
+    const slimImage = i => ({ url: i.url, fromRow: i.fromRow, toRow: i.toRow, fromCol: i.fromCol, toCol: i.toCol });
     sheets.forEach(sh => {
       const sheetImgs = savedImages.filter(im => im.sheetName === sh.name);
-      const { groups, orphan } = groupImagesByFailRows(sh.failRows, sheetImgs);
-      sh.imageGroups = groups.map(g => ({ rows: g.rows, images: g.images.map(i => ({
-        url: i.url, fromRow: i.fromRow, toRow: i.toRow, fromCol: i.fromCol, toCol: i.toCol
-      })) }));
-      sh.orphanImages = orphan.map(i => ({
-        url: i.url, fromRow: i.fromRow, toRow: i.toRow, fromCol: i.fromCol, toCol: i.toCol
-      }));
+      const { groups, sampleImages, orphan } = groupImagesByFailRows(sh.failRows, sheetImgs);
+      sh.imageGroups = groups.map(g => ({ rows: g.rows, images: g.images.map(slimImage) }));
+      sh.sampleImages = sampleImages.map(slimImage);
+      sh.orphanImages = orphan.map(slimImage);
       sh.imageCount = sheetImgs.length;
     });
 

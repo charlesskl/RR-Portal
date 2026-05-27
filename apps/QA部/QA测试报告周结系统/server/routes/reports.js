@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import ExcelJS from 'exceljs';
+import JSZip from 'jszip';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -11,7 +12,7 @@ const REPORTS_FILE = path.join(DATA_PATH, 'reports.json');
 const UPLOAD_PATH = path.join(__dirname, '..', 'uploads');
 
 function urlToLocal(url) {
-  // 匹配可能带子路径前缀的 URL: /uploads/images/<id>/<file> 或 /qa-weekly-report/uploads/images/...
+  // 兼容子路径前缀: /uploads/images/<id>/<file> 或 /qa-weekly-report/uploads/images/...
   const m = url && url.match(/\/uploads\/images\/([^/]+)\/([^/]+)$/);
   if (!m) return null;
   return path.join(UPLOAD_PATH, 'images', m[1], m[2]);
@@ -179,7 +180,8 @@ router.get('/weekly/:weekKey', (req, res) => {
   });
 });
 
-// 导出整周为 Excel（含嵌入图片）
+// 导出整周为 ZIP：含一份汇总 xlsx + 每份原始 QA 报告 xlsx（按客户分目录）
+// 原始报告保留 100% 原格式（公司 header / 样板图 / 产品参数 / 测试表 / 产品照含圈 / Conclusion）
 router.get('/weekly/:weekKey/export', async (req, res) => {
   try {
     const wantedCustomer = req.query.customerId;
@@ -188,13 +190,14 @@ router.get('/weekly/:weekKey/export', async (req, res) => {
       list = list.filter(r => (r.customerId || '') === wantedCustomer);
     }
 
+    const zip = new JSZip();
+
+    // ===== 1. 周报汇总 xlsx（精简）：标题 + 统计 + 客户聚合 + 文件索引 =====
     const wb = new ExcelJS.Workbook();
     wb.created = new Date();
     wb.creator = 'QA Weekly Report System';
-
-    // ===== 周报汇总 sheet =====
     const sum = wb.addWorksheet('周报汇总');
-    sum.columns = [{ width: 18 }, { width: 14 }, { width: 14 }, { width: 14 }, { width: 12 }];
+    sum.columns = [{ width: 50 }, { width: 14 }, { width: 14 }, { width: 14 }, { width: 12 }];
 
     const titleRow = sum.addRow([`QA 测试周报 — ${req.params.weekKey}`]);
     titleRow.font = { bold: true, size: 14 };
@@ -205,7 +208,6 @@ router.get('/weekly/:weekKey/export', async (req, res) => {
     const totalFail = list.reduce((s, r) => s + r.failCount, 0);
     const totalRows = list.reduce((s, r) => s + r.totalRows, 0);
     const passRate = totalRows > 0 ? (((totalRows - totalFail) / totalRows) * 100).toFixed(2) + '%' : '—';
-
     [['报告数', list.length],
      ['有效行数总计', totalRows],
      ['不合格行数总计', totalFail],
@@ -233,110 +235,49 @@ router.get('/weekly/:weekKey/export', async (req, res) => {
         const rate = c.totalRows > 0 ? (((c.totalRows - c.totalFail) / c.totalRows) * 100).toFixed(2) + '%' : '—';
         sum.addRow([c.name, c.reports, c.totalFail, c.totalRows, rate]);
       }
+      sum.addRow([]);
     }
 
-    // ===== 每份报告一个 sheet =====
-    let reportIdx = 0;
+    // 报告列表 + zip 内文件路径索引
+    sum.addRow(['本周报告（原始文件已附在压缩包内）']).getCell(1).font = { bold: true, size: 12 };
+    const idxHr = sum.addRow(['ZIP 内路径', '客户', '不合格数', '有效行', '上传时间']);
+    idxHr.font = { bold: true };
+    idxHr.eachCell(c => { c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF3F4F6' } }; });
+
+    // ===== 2. 把原始 xlsx 文件附到 zip（按客户分目录，处理同名冲突） =====
+    const nameCounter = new Map();
     for (const r of list) {
-      reportIdx++;
-      const name = safeSheetName(`${reportIdx}-${r.customerName || '未分类'}`, 28);
-      const ws = wb.addWorksheet(name);
-      ws.columns = [{ width: 8 }, { width: 18 }, { width: 14 }, { width: 8 }, { width: 8 }, { width: 8 }, { width: 50 }];
-
-      const t = ws.addRow([r.originalName]);
-      t.font = { bold: true, size: 13 };
-      ws.mergeCells(t.number, 1, t.number, 7);
-      [['客户', r.customerName],
-       ['归属周', r.weekKey],
-       ['不合格数', r.failCount],
-       ['有效行数', r.totalRows],
-       ['上传时间', new Date(r.uploadedAt).toLocaleString('zh-CN')]
-      ].forEach(([k, v]) => {
-        const row = ws.addRow([k, v]);
-        row.getCell(1).font = { bold: true, color: { argb: 'FF6B7280' } };
-      });
-      ws.addRow([]);
-
-      for (const sh of r.sheets) {
-        if (!sh.failRows || sh.failRows.length === 0) continue;
-        const shTitle = ws.addRow([`Sheet: ${sh.name}（${sh.totalRows} 行 / 不合格 ${sh.failRows.length} 行）`]);
-        shTitle.font = { bold: true, size: 12, color: { argb: 'FF1F2937' } };
-        ws.mergeCells(shTitle.number, 1, shTitle.number, 7);
-
-        const hr = ws.addRow(['行号', ...sh.headers]);
-        hr.font = { bold: true };
-        hr.eachCell(c => {
-          c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF3F4F6' } };
-          c.border = { bottom: { style: 'thin', color: { argb: 'FF9CA3AF' } } };
-        });
-
-        for (const fr of sh.failRows) {
-          const row = ws.addRow([fr.rowNumber, ...fr.cells.map(c => c.value)]);
-          fr.cells.forEach((c, i) => {
-            if (c.isRed) {
-              const cell = row.getCell(i + 2);
-              cell.font = { color: { argb: 'FFDC2626' }, bold: true };
-              cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEF2F2' } };
-            }
-            row.getCell(i + 2).alignment = { wrapText: true, vertical: 'top' };
-          });
-        }
-        ws.addRow([]);
-
-        // 嵌入图片
-        const allImgs = [
-          ...(sh.imageGroups || []).flatMap(g => g.images.map(img => ({ ...img, label: `不合格行 ${g.rows.join('、')}` }))),
-          ...(sh.orphanImages || []).map(img => ({ ...img, label: '其他附图' }))
-        ];
-        if (allImgs.length > 0) {
-          // 按 label 分组
-          const labelMap = new Map();
-          for (const img of allImgs) {
-            if (!labelMap.has(img.label)) labelMap.set(img.label, []);
-            labelMap.get(img.label).push(img);
-          }
-          for (const [label, imgs] of labelMap) {
-            const labelRow = ws.addRow([label + `（${imgs.length} 张）`]);
-            labelRow.font = { bold: true, color: { argb: 'FF2563EB' } };
-            ws.mergeCells(labelRow.number, 1, labelRow.number, 7);
-
-            // 每行放 3 张图，每张占 2.5 列 × 12 行（约 200×160 px）
-            const imgsPerRow = 3;
-            const cellsWide = 2.5;
-            const cellsTall = 12;
-            const startRow = ws.rowCount; // 当前行下方开始（0-based row = rowCount）
-            for (let i = 0; i < imgs.length; i++) {
-              const localPath = urlToLocal(imgs[i].url);
-              if (!localPath || !fs.existsSync(localPath)) continue;
-              const ext = path.extname(localPath).slice(1).toLowerCase();
-              const imageId = wb.addImage({
-                filename: localPath,
-                extension: ext === 'jpg' ? 'jpeg' : (ext || 'png')
-              });
-              const gridRow = Math.floor(i / imgsPerRow);
-              const gridCol = i % imgsPerRow;
-              const tlRow = startRow + gridRow * cellsTall;
-              const tlCol = gridCol * cellsWide;
-              ws.addImage(imageId, {
-                tl: { col: tlCol, row: tlRow },
-                ext: { width: 220, height: 180 }
-              });
-            }
-            // 留出图片需要的空间
-            const totalImgRows = Math.ceil(imgs.length / imgsPerRow) * cellsTall;
-            for (let i = 0; i < totalImgRows; i++) ws.addRow([]);
-            ws.addRow([]);
-          }
-        }
-        ws.addRow([]);
+      const srcPath = path.join(UPLOAD_PATH, r.storedName || '');
+      if (!r.storedName || !fs.existsSync(srcPath)) {
+        sum.addRow(['(原始文件不存在)', r.customerName, r.failCount, r.totalRows, new Date(r.uploadedAt).toLocaleString('zh-CN')]);
+        continue;
       }
+      const buf = fs.readFileSync(srcPath);
+      const folderName = (r.customerName || '未分类').replace(/[\\/:*?"<>|]/g, '_');
+      let fname = (r.originalName || 'report.xlsx').replace(/[\\/:*?"<>|]/g, '_');
+      const dupKey = `${folderName}/${fname}`;
+      const dupCount = nameCounter.get(dupKey) || 0;
+      if (dupCount > 0) {
+        const ext = path.extname(fname);
+        const base = fname.slice(0, fname.length - ext.length);
+        fname = `${base} (${dupCount + 1})${ext}`;
+      }
+      nameCounter.set(dupKey, dupCount + 1);
+      const zipPath = `${folderName}/${fname}`;
+      zip.file(zipPath, buf);
+      sum.addRow([zipPath, r.customerName, r.failCount, r.totalRows, new Date(r.uploadedAt).toLocaleString('zh-CN')])
+        .getCell(3).font = { color: { argb: 'FFDC2626' }, bold: true };
     }
 
-    const fileName = `QA周报-${req.params.weekKey}${wantedCustomer ? '-客户筛选' : ''}.xlsx`;
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    const sumBuf = await wb.xlsx.writeBuffer();
+    zip.file(`周报汇总-${req.params.weekKey}.xlsx`, sumBuf);
+
+    // ===== 3. 输出 zip =====
+    const zipBuf = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE', compressionOptions: { level: 6 } });
+    const fileName = `QA周报-${req.params.weekKey}${wantedCustomer ? '-客户筛选' : ''}.zip`;
+    res.setHeader('Content-Type', 'application/zip');
     res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(fileName)}`);
-    await wb.xlsx.write(res);
-    res.end();
+    res.send(zipBuf);
   } catch (err) {
     console.error('[export weekly] error:', err);
     if (!res.headersSent) {

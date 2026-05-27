@@ -3,3 +3,9 @@ node_modules/
 *.log
 client/dist/
 .DS_Store
+
+# SQLite runtime files (the .db itself is committed as starter data, the side files aren't)
+server/data/*.db-shm
+server/data/*.db-wal
+server/data/*.backup-*.json
+server/data/legacy-json-backup/

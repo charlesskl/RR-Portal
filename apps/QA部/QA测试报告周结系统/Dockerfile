@@ -10,12 +10,14 @@ RUN npx vite build --base ${BASE_PATH}
 
 FROM node:20-alpine AS production
 
-RUN apk add --no-cache tini curl
+# tini: 信号处理; curl: healthcheck; vips: sharp 图像合成（Excel 椭圆/箭头叠加到产品照）
+RUN apk add --no-cache tini curl vips
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 
 WORKDIR /app
 
 COPY server/package.json server/package-lock.json server/
+# sharp 安装时需要 vips；npm ci 会拉 sharp 的 linuxmusl prebuilt
 RUN cd server && npm ci --omit=dev
 
 COPY server/ /app/server/

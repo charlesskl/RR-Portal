@@ -1,4 +1,5 @@
 import ExcelJS from 'exceljs';
+import { extractAnnotatedImages } from './xlsx-images.js';
 
 function argbToRgb(argb) {
   if (!argb) return null;
@@ -177,31 +178,7 @@ function compactCellsByGroups(headerGroups, snapByCol, redColSet) {
   });
 }
 
-function extractSheetImages(wb, sheet) {
-  const out = [];
-  let raw = [];
-  try { raw = sheet.getImages() || []; } catch { raw = []; }
-  for (const img of raw) {
-    try {
-      const data = wb.getImage(img.imageId);
-      if (!data || !data.buffer) continue;
-      const r = img.range || {};
-      const tl = r.tl || { col: 0, row: 0 };
-      const br = r.br || tl;
-      out.push({
-        sheetName: sheet.name,
-        imageId: img.imageId,
-        extension: (data.extension || 'png').toLowerCase(),
-        buffer: data.buffer,
-        fromRow: Math.floor(tl.row) + 1,
-        toRow: Math.ceil(br.row) + 1,
-        fromCol: Math.floor(tl.col) + 1,
-        toCol: Math.ceil(br.col) + 1
-      });
-    } catch { /* skip broken image */ }
-  }
-  return out;
-}
+// 图片提取改用 xlsx-images 模块：直接从 zip 解 drawing.xml，把椭圆/标注合成到图片 buffer 上
 
 // 把连续 fail rows 分组，每组配对该组之后到下一组之前的图片
 // 第一个 fail row 之前的图片视为"样板图"（通常是 sheet 顶部产品参考区），跟"未关联"区分开
@@ -238,12 +215,25 @@ export async function parseExcelRedRows(buffer) {
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.load(buffer);
 
+  // 提前解析图片 + 标注（一次性，按 sheet 名归类后供主循环使用）
+  let allAnnotated = [];
+  try {
+    allAnnotated = await extractAnnotatedImages(buffer);
+  } catch (e) {
+    console.warn('[parser] extractAnnotatedImages failed, images will be missing:', e.message);
+  }
+
   const sheets = [];
   const rawImages = [];
   wb.eachSheet((sheet, sheetId) => {
     // 跳过隐藏 sheet
     if (sheet.state === 'hidden' || sheet.state === 'veryHidden') return;
-    rawImages.push(...extractSheetImages(wb, sheet));
+    // xlsx-images 使用的 fast-xml-parser 会 trim attribute 值末尾空格，sheet name 用 trim 比对
+    const targetName = (sheet.name || '').trim();
+    const sheetImgs = allAnnotated
+      .filter(im => (im.sheetName || '').trim() === targetName)
+      .map(im => ({ ...im, sheetName: sheet.name })); // 修正回 ExcelJS 视角的 sheet name 用于后续 group
+    rawImages.push(...sheetImgs);
 
     const maxCol = sheet.actualColumnCount || sheet.columnCount || 0;
     const { rowNumber: headerRowNumber, headers: rawHeaders } = detectHeaderRow(sheet, maxCol);

@@ -528,18 +528,22 @@ router.post('/:id/translate-all', async (req, res) => {
       return out;
     }
 
-    const EMPTY = "(eng_name IS NULL OR eng_name = '')";
+    // 需要翻译的行：eng 为空，或「中文含 '/' 但 eng 丢了斜杠」——
+    // 后者自愈 PR #160 之前翻译、整串发给 LLM 被合并掉斜杠的旧数据（eng 非空会被永久跳过）。
+    // 含 '/' 的行在下方 per-row 逻辑会走拆分/逐段翻译/重拼，重译后即带回斜杠（幂等：下次不再命中）。
+    const need = (src, eng = 'eng_name') =>
+      `(${eng} IS NULL OR ${eng} = '' OR (${src} LIKE '%/%' AND ${eng} NOT LIKE '%/%'))`;
     const batches = [
-      { table: 'MoldPart',       field: 'description', sql: `SELECT id, description FROM MoldPart       WHERE version_id=? AND ${EMPTY} ORDER BY sort_order` },
-      { table: 'HardwareItem',   field: 'name',        sql: `SELECT id, name        FROM HardwareItem   WHERE version_id=? AND ${EMPTY} ORDER BY sort_order` },
-      { table: 'PackagingItem',  field: 'name',        sql: `SELECT id, name        FROM PackagingItem  WHERE version_id=? AND ${EMPTY} ORDER BY sort_order` },
-      { table: 'PackagingItem',  field: 'remark',      engField: 'remark_eng', sql: `SELECT id, remark FROM PackagingItem WHERE version_id=? AND remark IS NOT NULL AND remark != '' AND (remark_eng IS NULL OR remark_eng = '') ORDER BY sort_order` },
-      { table: 'ElectronicItem', field: 'part_name',   sql: `SELECT id, part_name   FROM ElectronicItem WHERE version_id=? AND ${EMPTY} ORDER BY sort_order` },
-      { table: 'SewingDetail',   field: 'fabric_name', sql: `SELECT id, fabric_name FROM SewingDetail   WHERE version_id=? AND ${EMPTY} ORDER BY sort_order` },
-      { table: 'RawMaterial',    field: 'material_name', sql: `SELECT id, material_name FROM RawMaterial WHERE version_id=? AND ${EMPTY} ORDER BY sort_order` },
-      { table: 'RawMaterial',    field: 'spec',          engField: 'spec_eng', sql: `SELECT id, spec FROM RawMaterial WHERE version_id=? AND category='fabric' AND spec IS NOT NULL AND spec != '' AND (spec_eng IS NULL OR spec_eng = '') ORDER BY sort_order` },
-      { table: 'RotocastItem',   field: 'name',          sql: `SELECT id, name FROM RotocastItem WHERE version_id=? AND ${EMPTY} ORDER BY sort_order` },
-      { table: 'BodyAccessory',  field: 'description',   sql: `SELECT id, description FROM BodyAccessory WHERE version_id=? AND ${EMPTY} ORDER BY sort_order` },
+      { table: 'MoldPart',       field: 'description', sql: `SELECT id, description FROM MoldPart       WHERE version_id=? AND ${need('description')} ORDER BY sort_order` },
+      { table: 'HardwareItem',   field: 'name',        sql: `SELECT id, name        FROM HardwareItem   WHERE version_id=? AND ${need('name')} ORDER BY sort_order` },
+      { table: 'PackagingItem',  field: 'name',        sql: `SELECT id, name        FROM PackagingItem  WHERE version_id=? AND ${need('name')} ORDER BY sort_order` },
+      { table: 'PackagingItem',  field: 'remark',      engField: 'remark_eng', sql: `SELECT id, remark FROM PackagingItem WHERE version_id=? AND remark IS NOT NULL AND remark != '' AND ${need('remark', 'remark_eng')} ORDER BY sort_order` },
+      { table: 'ElectronicItem', field: 'part_name',   sql: `SELECT id, part_name   FROM ElectronicItem WHERE version_id=? AND ${need('part_name')} ORDER BY sort_order` },
+      { table: 'SewingDetail',   field: 'fabric_name', sql: `SELECT id, fabric_name FROM SewingDetail   WHERE version_id=? AND ${need('fabric_name')} ORDER BY sort_order` },
+      { table: 'RawMaterial',    field: 'material_name', sql: `SELECT id, material_name FROM RawMaterial WHERE version_id=? AND ${need('material_name')} ORDER BY sort_order` },
+      { table: 'RawMaterial',    field: 'spec',          engField: 'spec_eng', sql: `SELECT id, spec FROM RawMaterial WHERE version_id=? AND category='fabric' AND spec IS NOT NULL AND spec != '' AND ${need('spec', 'spec_eng')} ORDER BY sort_order` },
+      { table: 'RotocastItem',   field: 'name',          sql: `SELECT id, name FROM RotocastItem WHERE version_id=? AND ${need('name')} ORDER BY sort_order` },
+      { table: 'BodyAccessory',  field: 'description',   sql: `SELECT id, description FROM BodyAccessory WHERE version_id=? AND ${need('description')} ORDER BY sort_order` },
     ];
 
     // Fixed translation overrides (Chinese keyword → fixed English)

@@ -10,6 +10,8 @@ import {
   ImportOutlined,
   AimOutlined,
   SwapOutlined,
+  ShopOutlined,
+  ApartmentOutlined,
 } from '@ant-design/icons';
 import OrderImport from './pages/OrderImport';
 import HistoryData from './pages/HistoryData';
@@ -18,6 +20,8 @@ import MoldTargets from './pages/MoldTargets';
 import Scheduling from './pages/Scheduling';
 import ScheduleResult from './pages/ScheduleResult';
 import WorkshopPortal from './pages/WorkshopPortal';
+import OutsourceOrders from './pages/OutsourceOrders';
+import Suppliers from './pages/Suppliers';
 
 const { Sider, Content, Header } = Layout;
 const { Text } = Typography;
@@ -32,6 +36,9 @@ const menuItems = [
   { key: 'historyData',    icon: <DatabaseOutlined />,      label: '历史数据库' },
   { key: 'machineProfile', icon: <DesktopOutlined />,       label: '机台档案' },
   { key: 'moldTargets',    icon: <AimOutlined />,           label: '模具目标' },
+  { type: 'divider' },
+  { key: 'outsourceOrders', icon: <ApartmentOutlined />,    label: '外发订单' },
+  { key: 'suppliers',       icon: <ShopOutlined />,         label: '加工厂管理' },
 ];
 
 const titles = {
@@ -41,16 +48,31 @@ const titles = {
   moldTargets:    '模具目标',
   scheduling:     '智能排机',
   scheduleResult: '排机结果',
+  outsourceOrders: '外发订单',
+  suppliers:       '加工厂管理',
 };
+
+// 从 URL ?page=xxx 读初始 page（合法 key 才生效），便于其他系统深链跳转过来。
+function getInitialPageFromUrl() {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const p = params.get('page');
+    if (p && Object.prototype.hasOwnProperty.call({
+      orderImport: 1, scheduling: 1, scheduleResult: 1, historyData: 1,
+      machineProfile: 1, moldTargets: 1, outsourceOrders: 1, suppliers: 1,
+    }, p)) return p;
+  } catch (e) { /* SSR / 安全降级 */ }
+  return 'orderImport';
+}
 
 export default function App() {
   const [workshop, setWorkshop] = useState(() => localStorage.getItem('workshop') || null);
-  const [page, setPage] = useState('orderImport');
+  const [page, setPage] = useState(getInitialPageFromUrl);
 
   const handleEnter = (ws) => {
     localStorage.setItem('workshop', ws);
     setWorkshop(ws);
-    setPage('orderImport');
+    setPage(getInitialPageFromUrl());
   };
 
   const handleSwitch = () => {
@@ -115,6 +137,8 @@ export default function App() {
           {page === 'moldTargets'    && <MoldTargets workshop={workshop} />}
           {page === 'scheduling'     && <Scheduling workshop={workshop} onDone={() => setPage('scheduleResult')} />}
           {page === 'scheduleResult' && <ScheduleResult workshop={workshop} />}
+          {page === 'outsourceOrders' && <OutsourceOrders />}
+          {page === 'suppliers'       && <Suppliers />}
         </Content>
       </Layout>
     </Layout>

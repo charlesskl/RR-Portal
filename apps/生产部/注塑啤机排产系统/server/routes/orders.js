@@ -17,14 +17,21 @@ function stmts() {
         INSERT INTO orders (product_code, mold_no, mold_name, color, color_powder_no,
           material_type, shot_weight, material_kg, sprue_pct, ratio_pct,
           quantity_needed, accumulated, cavity, cycle_time, order_no,
-          is_three_plate, packing_qty, import_batch, source_file, status, order_notes, workshop)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          is_three_plate, packing_qty, import_batch, source_file, status, order_notes, workshop,
+          destination, supplier, pmc_follow, quote_price_usd, supplier_price_rmb, supplier_price_usd,
+          capacity_per_day, order_date, production_start, estimated_delivery, actual_delivery,
+          outsource_status, source_system, source_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `),
       update: db.prepare(`
         UPDATE orders SET product_code=?, mold_no=?, mold_name=?, color=?, color_powder_no=?,
           material_type=?, shot_weight=?, material_kg=?, sprue_pct=?, ratio_pct=?,
           quantity_needed=?, accumulated=?, cavity=?, cycle_time=?, order_no=?,
-          is_three_plate=?, packing_qty=?, status=?, order_notes=?, serial_no=?
+          is_three_plate=?, packing_qty=?, status=?, order_notes=?, serial_no=?,
+          destination=?, supplier=?, pmc_follow=?, quote_price_usd=?, supplier_price_rmb=?, supplier_price_usd=?,
+          capacity_per_day=?, order_date=?, production_start=?, estimated_delivery=?, actual_delivery=?,
+          outsource_status=?
         WHERE id=?
       `),
       deleteOne: db.prepare('DELETE FROM orders WHERE id = ?'),
@@ -33,15 +40,37 @@ function stmts() {
   return _stmts;
 }
 
-// 获取所有订单
+// 获取订单列表
+// 兼容旧用法：默认按 workshop（A/B/C）过滤、只返回内部排产订单
+// 新用法：
+//   ?destination=outsource → 外发订单（忽略 workshop）
+//   ?destination=all       → 不区分内部/外发，按 workshop 过滤（NULL workshop 也包含）
+//   ?destination=internal  → 显式只要内部
+//   ?supplier=兴信A        → 外发场景下按加工厂过滤
 router.get('/', (req, res) => {
   try {
-    const { status, workshop } = req.query;
-    const ws = workshop || 'B';
-    let sql = 'SELECT * FROM orders WHERE workshop = ?';
-    const params = [ws];
-    if (status) { sql += ' AND status = ?'; params.push(status); }
-    sql += ' ORDER BY created_at DESC';
+    const { status, workshop, destination, supplier } = req.query;
+    const conditions = [];
+    const params = [];
+
+    if (destination === 'outsource') {
+      conditions.push("destination = 'outsource'");
+      if (supplier) { conditions.push('supplier = ?'); params.push(supplier); }
+    } else if (destination === 'all') {
+      const ws = workshop || 'B';
+      conditions.push('(workshop = ? OR workshop IS NULL)');
+      params.push(ws);
+    } else {
+      // 默认 / destination=internal：维持旧行为
+      const ws = workshop || 'B';
+      conditions.push('workshop = ?');
+      params.push(ws);
+      conditions.push("(destination = 'internal' OR destination IS NULL)");
+    }
+
+    if (status) { conditions.push('status = ?'); params.push(status); }
+
+    const sql = 'SELECT * FROM orders WHERE ' + conditions.join(' AND ') + ' ORDER BY created_at DESC';
     const orders = db.prepare(sql).all(...params);
     res.json(orders);
   } catch (err) {
@@ -53,6 +82,9 @@ router.get('/', (req, res) => {
 router.post('/', (req, res) => {
   try {
     const o = req.body;
+    const dest = o.destination || 'internal';
+    // 外发订单 workshop 默认 NULL（不进 A/B/C 视图）；内部订单 workshop 默认 B
+    const ws = dest === 'outsource' ? (o.workshop || null) : (o.workshop || 'B');
     const result = stmts().insert.run(
       o.product_code || '', o.mold_no || '', o.mold_name || '',
       o.color || '', o.color_powder_no || '', o.material_type || '',
@@ -60,7 +92,12 @@ router.post('/', (req, res) => {
       o.quantity_needed || 0, o.accumulated || 0, o.cavity || 1, o.cycle_time || 0,
       o.order_no || '', o.is_three_plate || 0, o.packing_qty || 0,
       o.import_batch || '', o.source_file || '', o.status || 'pending', o.order_notes || '',
-      o.workshop || 'B'
+      ws,
+      dest, o.supplier || null, o.pmc_follow || null,
+      o.quote_price_usd ?? null, o.supplier_price_rmb ?? null, o.supplier_price_usd ?? null,
+      o.capacity_per_day ?? null,
+      o.order_date || null, o.production_start || null, o.estimated_delivery || null, o.actual_delivery || null,
+      o.outsource_status || null, o.source_system || 'paiji', o.source_id || null
     );
     res.json({ id: result.lastInsertRowid, ...o });
   } catch (err) {
@@ -95,6 +132,18 @@ router.put('/:id', (req, res) => {
       o.status ?? existing.status,
       o.order_notes ?? existing.order_notes,
       o.serial_no ?? existing.serial_no,
+      o.destination ?? existing.destination,
+      o.supplier ?? existing.supplier,
+      o.pmc_follow ?? existing.pmc_follow,
+      o.quote_price_usd ?? existing.quote_price_usd,
+      o.supplier_price_rmb ?? existing.supplier_price_rmb,
+      o.supplier_price_usd ?? existing.supplier_price_usd,
+      o.capacity_per_day ?? existing.capacity_per_day,
+      o.order_date ?? existing.order_date,
+      o.production_start ?? existing.production_start,
+      o.estimated_delivery ?? existing.estimated_delivery,
+      o.actual_delivery ?? existing.actual_delivery,
+      o.outsource_status ?? existing.outsource_status,
       req.params.id
     );
     res.json({ id: Number(req.params.id), ...o });
@@ -110,6 +159,68 @@ router.delete('/:id', (req, res) => {
     res.json({ message: '已删除' });
   } catch (err) {
     res.status(500).json({ message: '删除失败：' + err.message });
+  }
+});
+
+// ========== 外发订单：AI PDF 解析（预览，不入库）==========
+router.post('/parse-pdf-ai', upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ message: '请上传 PDF 文件' });
+    const { aiParsePdfBuffer, aiRowsToOrders } = require('../services/aiPdfParser');
+    const buf = fs.readFileSync(req.file.path);
+    const parsed = await aiParsePdfBuffer(buf);
+    const mappedOrders = aiRowsToOrders(parsed.rows, parsed.header);
+    res.json({
+      filename: req.file.originalname,
+      header: parsed.header,
+      rows: parsed.rows,
+      orders_preview: mappedOrders,
+      model_used: parsed.model_used,
+      usage: parsed.usage,
+    });
+  } catch (err) {
+    console.error('[parse-pdf-ai]', err);
+    res.status(500).json({ message: 'AI 解析失败：' + err.message });
+  } finally {
+    if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+  }
+});
+
+// ========== 外发订单：批量入库（接受 parse-pdf-ai 的 orders_preview，或前端编辑后的 rows）==========
+router.post('/import-outsource', (req, res) => {
+  try {
+    const rows = Array.isArray(req.body?.rows) ? req.body.rows : null;
+    if (!rows || rows.length === 0) return res.status(400).json({ message: 'rows 必填且不能为空' });
+
+    const batch = new Date().toISOString();
+    let inserted = 0;
+    const insertMany = db.transaction(() => {
+      for (const o of rows) {
+        stmts().insert.run(
+          o.product_code || '', o.mold_no || '', o.mold_name || '',
+          o.color || '', o.color_powder_no || '', o.material_type || '',
+          o.shot_weight || 0, o.material_kg || 0, o.sprue_pct || 0, o.ratio_pct || 0,
+          o.quantity_needed || 0, o.accumulated || 0, o.cavity || 1, o.cycle_time || 0,
+          o.order_no || '', o.is_three_plate || 0, o.packing_qty || 0,
+          batch, o.source_file || 'ai-pdf', o.status || 'pending', o.order_notes || '',
+          null, // workshop = NULL 外发不占 A/B/C 视图
+          'outsource',
+          o.supplier || null, o.pmc_follow || null,
+          o.quote_price_usd ?? null, o.supplier_price_rmb ?? null, o.supplier_price_usd ?? null,
+          o.capacity_per_day ?? null,
+          o.order_date || null, o.production_start || null, o.estimated_delivery || null, o.actual_delivery || null,
+          o.outsource_status || 'open',
+          o.source_system || 'ai-pdf',
+          o.source_id || null
+        );
+        inserted++;
+      }
+    });
+    insertMany();
+    res.json({ message: `已导入 ${inserted} 条外发订单`, count: inserted });
+  } catch (err) {
+    console.error('[import-outsource]', err);
+    res.status(500).json({ message: '导入失败：' + err.message });
   }
 });
 
@@ -281,7 +392,9 @@ router.post('/import', upload.single('file'), async (req, res) => {
           o.shot_weight || 0, o.material_kg || 0, o.sprue_pct || 0, o.ratio_pct || 0,
           o.quantity_needed || 0, o.accumulated || 0, o.cavity || 1, o.cycle_time || 0,
           o.order_no || '', o.is_three_plate || 0, o.packing_qty || 0,
-          batch, req.file.originalname, 'pending', o.notes || '', workshop
+          batch, req.file.originalname, 'pending', o.notes || '', workshop,
+          // 导入流程默认是内部排产订单，外发字段全部 NULL
+          'internal', null, null, null, null, null, null, null, null, null, null, null, 'paiji', null
         );
       }
     });

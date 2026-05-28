@@ -30,6 +30,9 @@ app.use('/api/orders', require('./routes/orders'));
 app.use('/api/scheduling', require('./routes/scheduling'));
 app.use('/api/export', require('./routes/export'));
 app.use('/api/mold-targets', require('./routes/moldTargets'));
+// 啤机部整合：吸收原 pi-outsource 的能力
+app.use('/api/suppliers', require('./routes/suppliers'));
+app.use('/api/supplier-mold-mappings', require('./routes/moldMappings'));
 
 // 托管前端 (Docker 中从 client-dist 读取，本地从 client/dist)
 const clientDist = fs.existsSync(path.join(__dirname, 'client-dist'))

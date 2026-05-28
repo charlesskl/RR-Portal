@@ -34,10 +34,11 @@ RR-Portal/
 │   │   ├── 华登包材管理/            — huadeng (Flask)
 │   │   └── 华登毛绒仓库/            — huadeng-maorong (Flask, 毛绒+戏服库存)
 │   ├── 生产部/
-│   │   ├── 注塑啤机排产系统/        — paiji (Node.js + React)
+│   │   ├── 注塑啤机排产系统/        — paiji (Node.js + React，已吸收外发能力，orders.destination 字段分流内/外)
 │   │   ├── 喷油部生产管理系统/      — penyou (Node.js + React)
-│   │   ├── 啤机外发系统/            — pi-outsource (Node.js + React)
-│   │   └── 生产计划管理系统/        — production-plan (Node.js + React + Luckysheet)
+│   │   ├── 啤机外发系统/            — pi-outsource (Node.js + React，仍在跑，paiji 已并行支持外发)
+│   │   ├── 生产计划管理系统/        — production-plan (Node.js + React + Luckysheet)
+│   │   └── 生产管控中心/            — production-control (Node.js, 车间分密码登录入口 + 统一数据底座)
 │   ├── 业务部/
 │   │   ├── ZURU接单表入单系统/      — zuru-order-system (Flask)
 │   │   ├── ZURU总排期入单/          — zuru-master-schedule (Flask)
@@ -207,6 +208,7 @@ curl http://localhost:<port>/health
 | hy-schedule-system ZURU河源排期入单 | Flask | 5008 | /hy-schedule/ |
 | baojia 报价系统 | Node.js | 3007 | /baojia/ |
 | qa-weekly-report QA测试报告周结系统 | Node.js/React | 3210 | /qa-weekly-report/ |
+| production-control 生产管控中心 | Node.js | 3300 | /production-control/ |
 
 ## 插件类型
 
@@ -457,6 +459,7 @@ const data = JSON.parse(fs.readFileSync('data/data.json'));
 | hy-schedule-system | ZURU河源排期入单 | 业务部 | Standalone (Python/Flask) | /hy-schedule/ | https://github.com/hanson678/hy-schedule-system |
 | baojia | 报价系统 | 业务部 | Standalone (Node.js) | /baojia/ | — |
 | qa-weekly-report | QA测试报告周结系统 | QA部 | Standalone (Node.js/React + exceljs) | /qa-weekly-report/ | — |
+| production-control | 生产管控中心（车间登录入口 + 数据底座） | 生产部 | Standalone (Node.js, better-sqlite3 + bcrypt + JWT) | /production-control/ | — |
 
 ### 旧插件（已删除）
 

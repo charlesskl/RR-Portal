@@ -1,0 +1,17 @@
+{
+  "name": "production-control-server",
+  "version": "0.1.0",
+  "description": "生产管控中心 - 多车间登录入口 + 统一数据底座",
+  "main": "app.js",
+  "scripts": {
+    "start": "node app.js",
+    "dev": "node --watch app.js"
+  },
+  "dependencies": {
+    "bcrypt": "^5.1.1",
+    "better-sqlite3": "^12.6.2",
+    "cors": "^2.8.5",
+    "express": "^4.18.2",
+    "jsonwebtoken": "^9.0.2"
+  }
+}

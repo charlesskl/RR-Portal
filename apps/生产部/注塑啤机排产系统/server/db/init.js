@@ -244,6 +244,55 @@ function initDatabase() {
   try { db.prepare("ALTER TABLE orders ADD COLUMN serial_no TEXT DEFAULT ''").run(); } catch(e){}
   try { db.prepare("ALTER TABLE schedule_items ADD COLUMN serial_no TEXT DEFAULT ''").run(); } catch(e){}
 
+  // ========== 啤机部整合：吸收 pi-outsource 的外发能力 ==========
+  // orders 表加外发相关字段（destination 默认 internal，老订单全部归内部排产）
+  try { db.prepare("ALTER TABLE orders ADD COLUMN destination TEXT DEFAULT 'internal'").run(); } catch(e){}
+  try { db.prepare("ALTER TABLE orders ADD COLUMN supplier TEXT").run(); } catch(e){}
+  try { db.prepare("ALTER TABLE orders ADD COLUMN pmc_follow TEXT").run(); } catch(e){}
+  try { db.prepare("ALTER TABLE orders ADD COLUMN quote_price_usd REAL").run(); } catch(e){}
+  try { db.prepare("ALTER TABLE orders ADD COLUMN supplier_price_rmb REAL").run(); } catch(e){}
+  try { db.prepare("ALTER TABLE orders ADD COLUMN supplier_price_usd REAL").run(); } catch(e){}
+  try { db.prepare("ALTER TABLE orders ADD COLUMN capacity_per_day INTEGER").run(); } catch(e){}
+  try { db.prepare("ALTER TABLE orders ADD COLUMN order_date TEXT").run(); } catch(e){}
+  try { db.prepare("ALTER TABLE orders ADD COLUMN production_start TEXT").run(); } catch(e){}
+  try { db.prepare("ALTER TABLE orders ADD COLUMN estimated_delivery TEXT").run(); } catch(e){}
+  try { db.prepare("ALTER TABLE orders ADD COLUMN actual_delivery TEXT").run(); } catch(e){}
+  try { db.prepare("ALTER TABLE orders ADD COLUMN outsource_status TEXT").run(); } catch(e){}
+  try { db.prepare("ALTER TABLE orders ADD COLUMN source_system TEXT DEFAULT 'paiji'").run(); } catch(e){}
+  try { db.prepare("ALTER TABLE orders ADD COLUMN source_id TEXT").run(); } catch(e){}
+  try { db.exec("CREATE INDEX IF NOT EXISTS idx_orders_destination ON orders(destination)"); } catch(e){}
+  try { db.exec("CREATE INDEX IF NOT EXISTS idx_orders_supplier ON orders(supplier)"); } catch(e){}
+  try { db.exec("CREATE INDEX IF NOT EXISTS idx_orders_source ON orders(source_system, source_id)"); } catch(e){}
+
+  // 加工厂（供应商）表 —— 从 pi-outsource 的 suppliers.json 迁过来
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS suppliers (
+      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      name            TEXT    NOT NULL UNIQUE,
+      total_machines  INTEGER DEFAULT 0,
+      running_rate    REAL    DEFAULT 0,
+      machines_for    TEXT,
+      data_json       TEXT,
+      active          INTEGER NOT NULL DEFAULT 1,
+      created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at      DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // 模具 → 加工厂 / 目标产量映射 —— 从 pi-outsource 的 mold_mappings.json 迁过来
+  // 注意：和已有的 mold_machine_map（模具→内部机台）不冲突，分别用于内/外两条线
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS supplier_mold_mappings (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      mold_code   TEXT    NOT NULL UNIQUE,
+      mold_name   TEXT,
+      supplier    TEXT,
+      target_qty  INTEGER,
+      workshop    TEXT,
+      updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
   // 一次性 schema 迁移：machine_no 单字段 UNIQUE → (machine_no, workshop) 复合 UNIQUE
   // PR #145 的「其他机台 / 吹气机台」幂等迁移之前对 B/C 车间静默失败，根因就是
   // 老 schema 的全表 UNIQUE(machine_no) 拦了「同名跨车间」的插入。

@@ -228,15 +228,41 @@ services:
     environment:
       - PORT=3000
       - DATA_PATH=/app/data
-      # 阿里云百炼 (Bailian/Qwen-VL) —— 图片订单识别用
+      # 阿里云百炼 (Bailian/Qwen-VL) —— 图片订单识别 + 外发 PDF AI 解析共用
       - BAILIAN_API_KEY=${PAIJI_BAILIAN_API_KEY:-}
       - BAILIAN_BASE_URL=${PAIJI_BAILIAN_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}
       - BAILIAN_VISION_MODEL=${PAIJI_BAILIAN_VISION_MODEL:-qwen-vl-max}
+      - BAILIAN_TEXT_MODEL=${PAIJI_BAILIAN_TEXT_MODEL:-qwen-plus}
     volumes:
       - ./apps/生产部/注塑啤机排产系统/data:/app/data
       - ./apps/生产部/注塑啤机排产系统/uploads:/app/uploads
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - platform-net
+
+  production-control:
+    build:
+      context: ./apps/生产部/生产管控中心
+      dockerfile: Dockerfile
+    environment:
+      - PORT=3300
+      - DATA_PATH=/app/data
+      - JWT_SECRET=${PRODUCTION_CONTROL_JWT_SECRET:-change-me-in-env}
+      - JWT_EXPIRES=${PRODUCTION_CONTROL_JWT_EXPIRES:-8h}
+    volumes:
+      - ./apps/生产部/生产管控中心/data:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3300/health"]
       interval: 10s
       timeout: 5s
       retries: 3

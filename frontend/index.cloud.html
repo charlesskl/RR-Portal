@@ -306,6 +306,12 @@
                 <span class="plugin-name">生产计划管理系统</span>
               </div>
             </div>
+            <div class="plugin-item">
+              <div class="plugin-info">
+                <div class="plugin-dot gray" id="productionControlDot"></div>
+                <span class="plugin-name">生产管控中心</span>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -554,6 +560,28 @@
       <div class="detail-plugin-right">
         <div class="detail-plugin-status"><div class="plugin-dot gray" id="productionPlanDetailDot"></div> 检查中...</div>
         <a href="/production-plan/" target="_blank" class="btn btn-primary">打开系统</a>
+      </div>
+    </div>
+
+    <div class="detail-plugin-card">
+      <div class="detail-plugin-left">
+        <div class="detail-plugin-icon" style="background:linear-gradient(135deg,#0ea5e9,#0369a1);">&#127939;</div>
+        <div>
+          <div class="detail-plugin-name">生产管控中心</div>
+          <div class="detail-plugin-desc">车间分密码登录入口 + 统一数据底座 + 跨车间总览（生产计划/啤机/喷油）。多车间共用一个数据库，按角色分发到对应工作界面</div>
+          <div class="feature-grid">
+            <div class="feature-tag">&#128272; 车间登录</div>
+            <div class="feature-tag">&#128279; 统一订单池</div>
+            <div class="feature-tag">&#128202; 跨车间总览</div>
+            <div class="feature-tag">&#128274; JWT 鉴权</div>
+            <div class="feature-tag">&#127912; 角色分发</div>
+            <div class="feature-tag">&#128202; 流水审计</div>
+          </div>
+        </div>
+      </div>
+      <div class="detail-plugin-right">
+        <div class="detail-plugin-status"><div class="plugin-dot gray" id="productionControlDetailDot"></div> 检查中...</div>
+        <a href="/production-control/" target="_blank" class="btn btn-primary">打开系统</a>
       </div>
     </div>
   </div>
@@ -876,6 +904,7 @@ async function checkHealth() {
       { name: 'huadeng', url: '/huadeng/health', dot: 'huadengDot', detailDot: 'huadengDetailDot' },
       { name: 'huadengMaorong', url: '/huadeng-maorong/health', dot: 'huadengMaorongDot', detailDot: 'huadengMaorongDetailDot' },
       { name: 'qaWeekly', url: '/qa-weekly-report/api/health', dot: 'qaWeeklyDot', detailDot: 'qaWeeklyDetailDot' },
+      { name: 'productionControl', url: '/production-control/health', dot: 'productionControlDot', detailDot: 'productionControlDetailDot' },
     ];
     var healthy = 0;
     var total = checks.length;

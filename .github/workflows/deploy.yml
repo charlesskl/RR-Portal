@@ -44,9 +44,52 @@ jobs:
             export BEFORE_COMMIT="${{ github.event.before }}"
             export AFTER_COMMIT="${{ github.event.after }}"
             cd /opt/rr-portal
+
+            # === peise Bailian env guard (2026-06-02) ===
+            # 背景: 服务器 .env.cloud.production 缺 PEISE_BAILIAN_API_KEY → 容器里 key 为空 → OCR 不可用。
+            # GitHub secret PEISE_BAILIAN_API_KEY 是唯一可信来源,每次部署确保服务器与其一致。
+            # 同时修正历史遗留的 -latest 模型名(阿里云已关闭 -latest 别名访问,返回 403)。
+            echo "=== peise Bailian env guard ==="
+            PEISE_ENV_CHANGED=0
+            PEISE_KEY='${{ secrets.PEISE_BAILIAN_API_KEY }}'
+            if [ -n "$PEISE_KEY" ]; then
+              if grep -q '^PEISE_BAILIAN_API_KEY=' .env.cloud.production; then
+                CURRENT_KEY=$(grep '^PEISE_BAILIAN_API_KEY=' .env.cloud.production | head -1 | cut -d= -f2-)
+                if [ "$CURRENT_KEY" != "$PEISE_KEY" ]; then
+                  sed -i "s|^PEISE_BAILIAN_API_KEY=.*|PEISE_BAILIAN_API_KEY=$PEISE_KEY|" .env.cloud.production
+                  PEISE_ENV_CHANGED=1
+                  echo "[GUARD] PEISE_BAILIAN_API_KEY 与 secret 不一致 → 已更新"
+                else
+                  echo "[GUARD] PEISE_BAILIAN_API_KEY 已存在且一致"
+                fi
+              else
+                echo "PEISE_BAILIAN_API_KEY=$PEISE_KEY" >> .env.cloud.production
+                PEISE_ENV_CHANGED=1
+                echo "[GUARD] PEISE_BAILIAN_API_KEY 不存在 → 已写入"
+              fi
+            else
+              echo "[GUARD][WARN] GitHub secret PEISE_BAILIAN_API_KEY 为空,跳过"
+            fi
+            if grep -q '^PEISE_BAILIAN_MODEL=.*-latest' .env.cloud.production; then
+              sed -i 's|^PEISE_BAILIAN_MODEL=.*|PEISE_BAILIAN_MODEL=qwen-vl-max|' .env.cloud.production
+              PEISE_ENV_CHANGED=1
+              echo "[GUARD] PEISE_BAILIAN_MODEL 含 -latest → 已改为 qwen-vl-max"
+            fi
+            echo "=== 诊断: peise 容器近期 LLM OCR 日志 ==="
+            docker logs rr-portal-peise-1 --tail 200 2>&1 | grep "LLM OCR" | tail -5 || echo "(无相关日志)"
+
             echo "=== Script version check ==="
             grep -c "recreate" deploy/update-server.sh && echo "[OK] update-server.sh contains recreate logic" || echo "[WARN] update-server.sh MISSING recreate logic"
             bash deploy/update-server.sh
+
+            # peise env guard 改了 .env.cloud.production → 必须 recreate 容器才能注入新 env
+            if [ "$PEISE_ENV_CHANGED" = "1" ]; then
+              echo "=== peise env 已修正 → force-recreate peise ==="
+              docker compose -f docker-compose.cloud.yml --env-file .env.cloud.production up -d --no-deps --force-recreate peise
+              echo "=== 验证容器内 BAILIAN env (key 打码) ==="
+              docker exec rr-portal-peise-1 printenv | grep '^BAILIAN' | sed 's|\(BAILIAN_API_KEY=sk-....\).*|\1***|' || echo "[WARN] 容器内未找到 BAILIAN env"
+            fi
+
             echo ""
             echo "=== Verify deploy actually landed ==="
             # Critical：AFTER_COMMIT 必须是 HEAD 的 ancestor（HEAD == AFTER_COMMIT 或 HEAD 更新）。

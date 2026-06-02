@@ -526,7 +526,8 @@ services:
       - TZ=Asia/Shanghai
       # OCR 走阿里云百炼 (Bailian) OpenAI 兼容端点 + 通义千问 VL
       - BAILIAN_API_KEY=${PEISE_BAILIAN_API_KEY:-}
-      - BAILIAN_MODEL=${PEISE_BAILIAN_MODEL:-qwen-vl-max-latest}
+      # 注意: 阿里云已关闭 -latest 别名模型的访问权限(403 access_denied), 必须用稳定版模型名
+      - BAILIAN_MODEL=${PEISE_BAILIAN_MODEL:-qwen-vl-max}
       - BAILIAN_BASE_URL=${PEISE_BAILIAN_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}
       # 登录凭据(默认 ps/ps123456,改要改 .env.cloud 的 PEISE_AUTH_*)
       # SECRET_KEY 不传,app 会在 instance/.secret_key 自建并持久化

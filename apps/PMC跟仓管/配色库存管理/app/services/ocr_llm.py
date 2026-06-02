@@ -5,7 +5,8 @@
 环境变量:
   BAILIAN_API_KEY     必填, 阿里云百炼 API key
                        (https://bailian.console.aliyun.com/?tab=model#/api-key)
-  BAILIAN_MODEL       可选, 默认 qwen-vl-max-latest
+  BAILIAN_MODEL       可选, 默认 qwen-vl-max
+                       (不要用 -latest 别名, 阿里云已对其关闭访问权限, 会报 403)
   BAILIAN_BASE_URL    可选, 默认 https://dashscope.aliyuncs.com/compatible-mode/v1
 """
 from __future__ import annotations
@@ -18,7 +19,7 @@ import re
 import requests
 
 DEFAULT_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-DEFAULT_MODEL = "qwen-vl-max-latest"
+DEFAULT_MODEL = "qwen-vl-max"
 
 SYSTEM_PROMPT = """你是一个送货单/出入库单识别助手。
 给你一张图片,请只返回 JSON 数组,格式:

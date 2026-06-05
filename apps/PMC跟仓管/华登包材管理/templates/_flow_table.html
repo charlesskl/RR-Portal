@@ -1,3 +1,7 @@
+<details open class="border rounded mb-2">
+    <summary class="cursor-pointer select-none px-3 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium text-sm">
+        流水记录{% if pagination and pagination.total %}（共 {{ pagination.total }} 条）{% endif %}
+    </summary>
 <div class="table-scroll">
     <table class="text-sm border-collapse w-full">
         <thead>
@@ -64,3 +68,4 @@
 </div>
 {% endif %}
 </div>
+</details>

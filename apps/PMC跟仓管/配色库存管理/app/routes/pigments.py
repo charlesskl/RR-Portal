@@ -22,10 +22,21 @@ def _find_duplicate_code(code, brand="", exclude_id=None):
     code = (code or "").strip()
     if not code:
         return None
-    q = Pigment.query.filter(Pigment.brand == brand, Pigment.code == code)
+    # 只和「未归档」色粉查重:归档色粉对入/出库匹配、下拉等都不可见,不占用编号。
+    q = Pigment.query.filter(
+        Pigment.brand == brand,
+        Pigment.code == code,
+        Pigment.is_archived == False,  # noqa: E712 (SQLAlchemy 需要 == False)
+    )
     if exclude_id is not None:
         q = q.filter(Pigment.id != exclude_id)
     return q.first()
+
+
+def _dup_code_message(code, dup):
+    """撞重提示:点名冲突的是哪条(带进货编号),比只说「已存在」更好排查。"""
+    hint = f"(进货编号 {dup.purchase_code})" if dup and dup.purchase_code else ""
+    return f"色粉编号「{code}」已存在{hint},请换一个"
 
 
 def _form_to_pigment(p):
@@ -42,8 +53,9 @@ def _form_to_pigment(p):
 def new():
     if request.method == "POST":
         new_code = request.form["code"].strip()
-        if _find_duplicate_code(new_code, brand="") is not None:
-            flash(f"色粉编号「{new_code}」已存在,请换一个", "danger")
+        dup = _find_duplicate_code(new_code, brand="")
+        if dup is not None:
+            flash(_dup_code_message(new_code, dup), "danger")
             return render_template("pigments/form.html", pigment=None)
         p = Pigment(brand="")
         _form_to_pigment(p)
@@ -71,8 +83,9 @@ def edit(pid):
     p = Pigment.query.get_or_404(pid)
     if request.method == "POST":
         new_code = request.form["code"].strip()
-        if _find_duplicate_code(new_code, brand=p.brand, exclude_id=p.id) is not None:
-            flash(f"色粉编号「{new_code}」已存在,请换一个", "danger")
+        dup = _find_duplicate_code(new_code, brand=p.brand, exclude_id=p.id)
+        if dup is not None:
+            flash(_dup_code_message(new_code, dup), "danger")
             return render_template("pigments/form.html", pigment=p)
         _form_to_pigment(p)
         qty = round(float(request.form.get("quantity", 0) or 0), 6)

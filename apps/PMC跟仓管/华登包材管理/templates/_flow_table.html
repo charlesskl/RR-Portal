@@ -28,9 +28,13 @@
                     {% if r.locked %}
                         <span class="text-xs text-gray-400">🔒 已锁</span>
                     {% else %}
-                        <button onclick="openEditModal({{ r.id }})" class="text-xs text-blue-600 hover:underline">编辑</button>
+                        <button onclick="openEditModal({{ r.id }}, '{{ direction }}-{{ cp }}')" class="text-xs text-blue-600 hover:underline">编辑</button>
                         <form method="POST" action="/record/{{ r.id }}/delete" class="inline"
                               onsubmit="return confirm('确认删除？')">
+                            <input type="hidden" name="_f_date_from" value="{{ date_from }}">
+                            <input type="hidden" name="_f_date_to" value="{{ date_to }}">
+                            <input type="hidden" name="_f_order_no" value="{{ order_no }}">
+                            <input type="hidden" name="_tab" value="{{ direction }}-{{ cp }}">
                             <button class="text-xs text-red-600 hover:underline ml-1">删除</button>
                         </form>
                     {% endif %}

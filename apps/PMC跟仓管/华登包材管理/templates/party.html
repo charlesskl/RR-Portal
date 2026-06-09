@@ -34,10 +34,10 @@
                class="px-3 py-1 bg-blue-600 text-white text-sm rounded hover:bg-blue-700">
                 导入
             </a>
-            <a href="/party/{{ party }}/export?cp={{ panel.cp }}"
+            <button type="button" onclick="openExportModal('{{ panel.cp }}', '{{ panel.cp_name }}')"
                class="px-3 py-1 bg-green-600 text-white text-sm rounded hover:bg-green-700">
                 导出
-            </a>
+            </button>
             <button onclick="openReconcileModal('{{ party }}', '{{ panel.cp }}')"
                     class="px-3 py-1 bg-purple-600 text-white text-sm rounded hover:bg-purple-700">
                 发起对账
@@ -155,11 +155,40 @@
 {{ monthly_qty_modal('inventoryModal', '/party/' ~ party ~ '/inventory', '月度实存录入', 'amber') }}
 {{ monthly_qty_modal('purchaseModal', '/party/' ~ party ~ '/purchase', '月度采购录入', 'emerald', with_price=True) }}
 
+<!-- 导出弹窗:单独选日期范围 -->
+<div id="exportModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+    <div class="bg-white rounded-lg shadow-xl p-6 w-96">
+        <h3 class="text-lg font-bold mb-1">导出流水</h3>
+        <p class="text-sm text-gray-500 mb-4">对 <span id="export_cp_name" class="font-medium text-gray-700"></span>(发→ / 收自 两个 sheet)</p>
+        <div class="flex gap-3 mb-3">
+            <div class="flex-1">
+                <label class="block text-xs text-gray-500 mb-1">开始日期</label>
+                <input type="date" id="export_date_from" class="border rounded px-2 py-1 text-sm w-full">
+            </div>
+            <div class="flex-1">
+                <label class="block text-xs text-gray-500 mb-1">结束日期</label>
+                <input type="date" id="export_date_to" class="border rounded px-2 py-1 text-sm w-full">
+            </div>
+        </div>
+        <p class="text-xs text-gray-400 mb-4">留空 = 不限,导出全部。默认已填入页面当前筛选的日期。</p>
+        <div class="flex justify-end gap-2">
+            <button type="button" onclick="document.getElementById('exportModal').classList.add('hidden')"
+                    class="px-4 py-2 bg-gray-200 rounded text-sm">取消</button>
+            <button type="button" onclick="doExport()" class="px-4 py-2 bg-green-600 text-white rounded text-sm">确定导出</button>
+        </div>
+    </div>
+</div>
+
 <!-- 编辑记录弹窗 -->
 <div id="editModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
     <div class="bg-white rounded-lg shadow-xl p-6 w-[560px] max-h-[90vh] overflow-y-auto">
         <h3 class="text-lg font-bold mb-4">编辑记录</h3>
         <form id="editForm" method="POST" action="/record/0/edit">
+            <!-- 保留筛选 + 所在 tab,保存后不跳回未筛选全部(_f_ 前缀避免和记录的 order_no 撞名) -->
+            <input type="hidden" name="_f_date_from" value="{{ date_from }}">
+            <input type="hidden" name="_f_date_to" value="{{ date_to }}">
+            <input type="hidden" name="_f_order_no" value="{{ order_no }}">
+            <input type="hidden" name="_tab" id="edit_tab" value="">
             <div class="flex gap-3 mb-3 flex-wrap items-end">
                 <div>
                     <label class="block text-xs text-gray-500 mb-1">日期</label>
@@ -295,12 +324,13 @@ function _huadengPrefix() {
     return m ? m[1] : '';
 }
 
-function openEditModal(id) {
-    console.log('[huadeng] openEditModal v3', id);
+function openEditModal(id, tab) {
+    console.log('[huadeng] openEditModal v4', id, tab);
     const rec = RECORDS[id];
     if (!rec) { alert('记录不存在或已锁定'); return; }
     const form = document.getElementById('editForm');
     form.action = `${_huadengPrefix()}/record/${id}/edit`;
+    document.getElementById('edit_tab').value = tab || '';
     document.getElementById('edit_date').value = rec.date;
     document.getElementById('edit_order_no').value = rec.order_no || '';
     document.getElementById('edit_remark').value = rec.remark || '';
@@ -351,6 +381,28 @@ function switchTab(tabId, cpKey) {
         window.location.href = location.pathname + '?' + params.toString() + location.hash;
     });
 })();
+
+const PARTY = {{ party|tojson }};
+
+let _exportCp = '';
+function openExportModal(cp, cpName) {
+    _exportCp = cp;
+    document.getElementById('export_cp_name').textContent = cpName;
+    // 预填页面当前筛选的日期
+    const ff = document.getElementById('filterForm');
+    document.getElementById('export_date_from').value = ff ? (ff.querySelector('[name="date_from"]').value || '') : '';
+    document.getElementById('export_date_to').value = ff ? (ff.querySelector('[name="date_to"]').value || '') : '';
+    document.getElementById('exportModal').classList.remove('hidden');
+}
+function doExport() {
+    const df = document.getElementById('export_date_from').value;
+    const dt = document.getElementById('export_date_to').value;
+    const params = new URLSearchParams({cp: _exportCp});
+    if (df) params.set('date_from', df);
+    if (dt) params.set('date_to', dt);
+    window.location.href = `${_huadengPrefix()}/party/${PARTY}/export?` + params.toString();
+    document.getElementById('exportModal').classList.add('hidden');
+}
 
 function openReconcileModal(party, cp) {
     const df = prompt('开始日期 (YYYY-MM-DD)');

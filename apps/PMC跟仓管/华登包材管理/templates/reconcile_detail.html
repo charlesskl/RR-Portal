@@ -18,8 +18,11 @@
     </div>
 
     {% for dir_key, data in snapshot.items() %}
+    {% set _p = dir_key.split('_to_') %}
+    {% set sname = PARTIES[_p[0]].name if _p[0] in PARTIES else _p[0] %}
+    {% set rname = (PARTIES[_p[1]].name if _p[1] in PARTIES else _p[1]) if _p|length > 1 else '?' %}
     <div class="bg-white rounded p-4 mb-4">
-        <h2 class="font-semibold mb-2">{{ dir_key.replace('_', ' → ') }}</h2>
+        <h2 class="font-semibold mb-2">{{ sname }} 发 → {{ rname }} 收</h2>
         <table class="text-sm w-full border-collapse">
             <thead class="bg-gray-50">
                 <tr><th class="border px-2 py-1">包材</th><th class="border px-2 py-1">发方记的</th><th class="border px-2 py-1">收方记的</th><th class="border px-2 py-1">差</th></tr>
@@ -41,6 +44,59 @@
                 {% endfor %}
             </tbody>
         </table>
+
+        {# ── 单号级自动核对差异明细 ── #}
+        {% set oc = data.order_check %}
+        {% if oc %}
+        <div class="mt-4 border-t pt-3">
+            <h3 class="font-semibold text-sm mb-2">差异明细（按单号自动核对）</h3>
+            {% set _has = oc.missing_in_receiver or oc.missing_in_sender or oc.item_mismatches %}
+            {% if not _has %}
+                <p class="text-sm text-green-600">✓ 单号与包材数量完全一致，无差异。</p>
+            {% else %}
+                {% if oc.missing_in_receiver %}
+                <div class="mb-2 text-sm">
+                    <span class="text-red-600 font-medium">{{ sname }} 有、{{ rname }} 没有的单号（{{ oc.missing_in_receiver|length }}）：</span>
+                    <span class="text-gray-700">{{ oc.missing_in_receiver|join('、') }}</span>
+                </div>
+                {% endif %}
+                {% if oc.missing_in_sender %}
+                <div class="mb-2 text-sm">
+                    <span class="text-red-600 font-medium">{{ rname }} 有、{{ sname }} 没有的单号（{{ oc.missing_in_sender|length }}）：</span>
+                    <span class="text-gray-700">{{ oc.missing_in_sender|join('、') }}</span>
+                </div>
+                {% endif %}
+                {% if oc.item_mismatches %}
+                <div class="text-sm">
+                    <div class="text-red-600 font-medium mb-1">同单号包材数量对不上（{{ oc.item_mismatches|length }} 处）：</div>
+                    <table class="text-xs w-full border-collapse">
+                        <thead class="bg-gray-50"><tr>
+                            <th class="border px-2 py-1 text-left">单号</th>
+                            <th class="border px-2 py-1 text-left">包材</th>
+                            <th class="border px-2 py-1 text-right">{{ sname }} 记的</th>
+                            <th class="border px-2 py-1 text-right">{{ rname }} 记的</th>
+                        </tr></thead>
+                        <tbody>
+                        {% for m in oc.item_mismatches %}
+                            <tr class="bg-red-50">
+                                <td class="border px-2 py-1">{{ m.order_no }}</td>
+                                <td class="border px-2 py-1">{{ m.item_name }}</td>
+                                <td class="border px-2 py-1 text-right">{{ '%g'|format(m.sender) }}</td>
+                                <td class="border px-2 py-1 text-right">{{ '%g'|format(m.receiver) }}</td>
+                            </tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% endif %}
+            {% endif %}
+            {% if oc.no_orderno_sender or oc.no_orderno_receiver %}
+                <p class="text-xs text-gray-400 mt-2">注：{{ sname }} 有 {{ oc.no_orderno_sender }} 条、{{ rname }} 有 {{ oc.no_orderno_receiver }} 条无单号记录，未参与单号核对（仍计入上方包材汇总差异）。</p>
+            {% endif %}
+        </div>
+        {% else %}
+        <p class="text-xs text-gray-400 mt-3 border-t pt-3">本次对账创建时未生成单号明细（旧版对账，重新发起对账即可生成）。</p>
+        {% endif %}
     </div>
     {% endfor %}
 

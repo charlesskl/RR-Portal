@@ -268,6 +268,12 @@
                 <span class="plugin-name">华登毛绒仓库</span>
               </div>
             </div>
+            <div class="plugin-item">
+              <div class="plugin-info">
+                <div class="plugin-dot gray" id="cStoreDot"></div>
+                <span class="plugin-name">华登C仓库</span>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -685,7 +691,7 @@
       <div class="dept-icon pmc" style="width:40px;height:40px;font-size:18px;">&#128230;</div>
       PMC跟仓管
     </div>
-    <div class="page-subtitle">采购订单 · 成品核对 · 配色库存 · 华登包材 · 华登毛绒仓库</div>
+    <div class="page-subtitle">采购订单 · 成品核对 · 配色库存 · 华登包材 · 华登毛绒仓库 · 华登C仓库</div>
 
     <div class="detail-plugin-card">
       <div class="detail-plugin-left">
@@ -791,6 +797,26 @@
         <a href="/huadeng-maorong/" target="_blank" class="btn btn-primary">打开系统</a>
       </div>
     </div>
+
+    <div class="detail-plugin-card">
+      <div class="detail-plugin-left">
+        <div class="detail-plugin-icon" style="background:linear-gradient(135deg,#8b5cf6,#6b3b8a);">&#127991;</div>
+        <div>
+          <div class="detail-plugin-name">华登C仓库</div>
+          <div class="detail-plugin-desc">SR3703 贴纸卷配比工具：选货号 + 输入总套数，即时算出固定款 / 随机款各 SR 货号需要量，支持上传货号 Excel</div>
+          <div class="feature-grid">
+            <div class="feature-tag">&#127991; 贴纸卷配比</div>
+            <div class="feature-tag">&#128202; 固定 / 随机款</div>
+            <div class="feature-tag">&#128229; 货号 Excel 导入</div>
+            <div class="feature-tag">&#129518; 即时计算</div>
+          </div>
+        </div>
+      </div>
+      <div class="detail-plugin-right">
+        <div class="detail-plugin-status"><div class="plugin-dot gray" id="cStoreDetailDot"></div> 检查中...</div>
+        <a href="/c-store/" target="_blank" class="btn btn-primary">打开系统</a>
+      </div>
+    </div>
   </div>
 
 
@@ -875,6 +901,7 @@ async function checkHealth() {
       { name: 'peise', url: '/peise/health', dot: 'peiseDot', detailDot: 'peiseDetailDot' },
       { name: 'huadeng', url: '/huadeng/health', dot: 'huadengDot', detailDot: 'huadengDetailDot' },
       { name: 'huadengMaorong', url: '/huadeng-maorong/health', dot: 'huadengMaorongDot', detailDot: 'huadengMaorongDetailDot' },
+      { name: 'cStore', url: '/c-store/health', dot: 'cStoreDot', detailDot: 'cStoreDetailDot' },
       { name: 'qaWeekly', url: '/qa-weekly-report/api/health', dot: 'qaWeeklyDot', detailDot: 'qaWeeklyDetailDot' },
     ];
     var healthy = 0;

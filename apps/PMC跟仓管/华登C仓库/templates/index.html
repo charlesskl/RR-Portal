@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>华登 C 仓 · SR3703 贴纸卷配比</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: #FAFAF7; color: #1A1A17; -webkit-font-smoothing: antialiased;
+  }
+  .page { max-width: 1500px; margin: 0 auto; padding: 28px 32px 80px; }
+  .head { display: flex; align-items: flex-end; justify-content: space-between;
+          border-bottom: 1px solid #E5E3DD; padding-bottom: 18px; margin-bottom: 24px; }
+  .head h1 { font-size: 22px; font-weight: 600; letter-spacing: -0.015em; }
+  .head .sub { color: #5F5E58; font-size: 13px; margin-top: 4px; }
+  .userbar { font-size: 13px; color: #5F5E58; }
+  .userbar b { color: #1A1A17; }
+  .logout-btn {
+    margin-left: 10px; padding: 4px 12px;
+    background: #fff; border: 1px solid #d1cfc7; border-radius: 6px;
+    color: #5F5E58; text-decoration: none; font-size: 12px; display: inline-block;
+  }
+  .logout-btn:hover { background: #f5e5e3; border-color: #a03830; color: #a03830; }
+
+  .input-card {
+    background: #fff; border: 1px solid #E5E3DD; border-radius: 10px;
+    padding: 18px 22px; margin-bottom: 20px;
+    display: flex; align-items: center; gap: 18px;
+  }
+  .input-card label { font-size: 13px; color: #5F5E58; font-weight: 500; }
+  .input-card input[type=number] {
+    width: 200px; padding: 10px 14px; font-size: 16px;
+    border: 1px solid #D1CFC7; border-radius: 6px; font-variant-numeric: tabular-nums;
+  }
+  .input-card input[type=number]:focus { outline: none; border-color: #6b3b8a; box-shadow: 0 0 0 3px rgba(107,59,138,0.12); }
+  .input-card .hint { color: #8a8880; font-size: 12px; margin-left: auto; }
+
+  .section-title {
+    font-size: 15px; font-weight: 600; color: #1A1A17;
+    margin: 28px 0 12px; display: flex; align-items: center; gap: 8px;
+  }
+  .section-title::before {
+    content: ''; display: inline-block; width: 3px; height: 14px;
+    background: #6b3b8a; border-radius: 2px;
+  }
+  .section-title .count { color: #8a8880; font-size: 12px; font-weight: 400; }
+
+  .table-card {
+    background: #fff; border: 1px solid #E5E3DD; border-radius: 10px; overflow: hidden;
+  }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  thead th {
+    background: #f5f4ef; color: #5F5E58; font-weight: 600;
+    padding: 10px 12px; text-align: left; border-bottom: 1px solid #d1cfc7;
+    font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; white-space: nowrap;
+  }
+  tbody td { padding: 9px 12px; border-bottom: 1px solid #eef0f6; vertical-align: middle; }
+  tbody tr:last-child td { border-bottom: none; }
+  td.num { font-variant-numeric: tabular-nums; text-align: right; font-weight: 500; padding-right: 16px; }
+  td.label { white-space: nowrap; font-weight: 500; }
+  td.sr_no { font-family: ui-monospace, "Cascadia Code", monospace; font-size: 12.5px; color: #4a5568; }
+  .badge { display: inline-block; padding: 1px 7px; font-size: 11px; border-radius: 4px; font-weight: 500; }
+  .badge-rare { background: #FEEBC8; color: #8B5F08; }
+  .total-need { color: #6b3b8a; font-weight: 600; }
+  td.zero { color: #cbd5e1; }
+
+  /* 随机组卡片 — 每组一张带色卡 */
+  .rnd-group {
+    background: #fff; border: 1px solid #E5E3DD; border-radius: 10px;
+    margin-bottom: 16px; overflow: hidden;
+  }
+  .rnd-group__head {
+    padding: 12px 18px; font-weight: 600; font-size: 13.5px;
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  }
+  .rnd-group__head .cat { font-size: 14.5px; }
+  .rnd-group__head .meta { color: #4a5568; font-weight: 500; font-size: 12.5px; }
+  .rnd-group__head .formula {
+    color: #6b3b8a; font-weight: 600; font-size: 12.5px;
+    background: rgba(255,255,255,0.7); padding: 2px 10px; border-radius: 12px;
+    font-variant-numeric: tabular-nums;
+  }
+  .rnd-group__body { padding: 0; }
+  .rnd-group__body table { width: 100%; }
+  .rnd-group__body thead th { background: rgba(255,255,255,0.6); font-size: 11px; }
+  .rnd-group__body tbody td { padding: 7px 12px; font-size: 12.5px; }
+  .rnd-group__body tbody tr:nth-child(even) td { background: rgba(255,255,255,0.4); }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="head">
+    <div>
+      <h1>{{ current or '贴纸卷配比' }}</h1>
+      <div class="sub">C仓库 · 选货号 → 输总套数 → 即时算各 SR 需要量</div>
+    </div>
+  </div>
+
+  {# 上传(货号自动从表格 R0 / 文件名识别) #}
+  <div class="input-card" style="margin-bottom:14px;">
+    <span style="font-size:13px;color:#5F5E58;">
+      当前货号:<b style="color:#1A1A17;font-size:14px;">{{ current or '(无)' }}</b>
+    </span>
+    {% if current and user.role == 'admin' %}
+    <button type="button"
+            onclick="if(confirm('删除当前货号 {{ current }} 的生产资料?')){fetch('delete/{{ current }}',{method:'POST'}).then(()=>location.href='?');}"
+            style="padding:6px 12px;background:#fff;color:#a03830;border:1px solid #d1cfc7;border-radius:6px;font-size:12px;cursor:pointer;">
+      删除当前
+    </button>
+    {% endif %}
+    <form method="POST" action="upload" enctype="multipart/form-data"
+          style="margin-left:auto;display:flex;align-items:center;gap:8px;">
+      <input type="file" name="file" accept=".xlsx,.xls" required style="font-size:13px;">
+      <button type="submit"
+              style="padding:9px 18px;background:#1A4D8F;color:#fff;border:none;border-radius:6px;font-size:13px;font-weight:500;cursor:pointer;">
+        📥 导入新货号
+      </button>
+    </form>
+  </div>
+  {% with msgs = get_flashed_messages(with_categories=true) %}
+    {% for cat, msg in msgs %}
+    <div style="margin-bottom:14px;padding:10px 16px;border-radius:6px;font-size:13px;
+                background:{{ '#E4EFE7' if cat=='success' else '#F5E5E3' }};
+                color:{{ '#2D6A3E' if cat=='success' else '#A03830' }};
+                border:1px solid {{ '#86efac' if cat=='success' else '#f5b5b0' }};">
+      {{ msg }}
+    </div>
+    {% endfor %}
+  {% endwith %}
+
+  {% if not current %}
+  <div style="background:#fff;border:1px dashed #D1CFC7;border-radius:10px;padding:60px 30px;text-align:center;color:#8a8880;">
+    <p style="font-size:16px;margin-bottom:8px;">还没有生产资料</p>
+    <p style="font-size:13px;">点上方"📥 导入新货号"上传 SR3703 那种格式的 xlsx,系统会自动按 R0 单元格的货号命名。</p>
+  </div>
+  {% else %}
+
+  <div class="input-card">
+    <label for="total-sets">总套数</label>
+    <input type="number" id="total-sets" min="0" step="1" value="1000" autofocus>
+    <button type="button" id="btn-roll"
+            style="margin-left:8px;padding:9px 18px;background:#6b3b8a;color:#fff;border:none;border-radius:6px;font-size:13px;font-weight:500;cursor:pointer;">
+      🎲 重新模拟随机
+    </button>
+    <span class="hint">固定款 {{ rows.fixed|length }} 条 · 随机款 {{ rows.random_groups|length }} 组 · 每次模拟结果不同</span>
+  </div>
+
+  {# ========== 固定款 ========== #}
+  <div class="section-title">
+    固定款 <span class="count">每款 = 总套数 × 每套用量</span>
+  </div>
+  <div class="table-card">
+    <table>
+      <thead>
+        <tr>
+          <th>贴卷纸</th>
+          <th>SR 编号</th>
+          <th>每套</th>
+          <th>规格</th>
+          <th>款式</th>
+          <th>需要数量</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows.fixed %}
+        <tr data-per-set="{{ r.per_set }}">
+          <td class="label">{{ r.label }}</td>
+          <td class="sr_no">{{ r.sr_no }}</td>
+          <td class="num">{{ r.per_set }}</td>
+          <td>{{ r.spec }}</td>
+          <td>
+            {% if r.is_rare %}<span class="badge badge-rare">稀有</span>
+            {% else %}<span style="color:#8a8880;font-size:12px;">普通</span>{% endif %}
+          </td>
+          <td class="num total-need" data-need-cell>—</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {# ========== 随机款 ========== #}
+  <div class="section-title">
+    随机款 <span class="count">每套从 N 个候选 SR 里真随机抽 M 个不重复 · 数字按实际模拟结果显示,改总套数或点🎲会重新模拟</span>
+  </div>
+  {% for g in rows.random_groups %}
+  <div class="rnd-group" data-group-idx="{{ loop.index0 }}" data-pool="{{ g.pool }}" data-pick="{{ g.pick }}"
+       style="border-left: 5px solid {{ g.group_color }};">
+    <div class="rnd-group__head" style="background: {{ g.group_color }};">
+      <span class="cat">{{ g.category }}</span>
+      <span class="meta">候选 {{ g.pool }} 款 · 每套随机抽 {{ g.pick }} 个不重复</span>
+      <span class="formula">该组总用量 = 总套数 × {{ g.pick }} (确定值)</span>
+    </div>
+    <div class="rnd-group__body">
+      <table>
+        <thead>
+          <tr>
+            <th style="width:80px;">序号</th>
+            <th>SR 编号</th>
+            <th style="width:120px;text-align:right;">需要数量</th>
+            <th style="width:80px;text-align:right;color:#8a8880;">占比</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for sr in g.sr_list %}
+          <tr data-sr-row data-sr="{{ sr }}">
+            <td>{{ loop.index }}</td>
+            <td class="sr_no">{{ sr }}</td>
+            <td class="num total-need" data-need-cell>—</td>
+            <td class="num" data-pct-cell style="color:#8a8880;font-size:12px;">—</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+        <tfoot>
+          <tr style="background: rgba(255,255,255,0.6); border-top: 2px solid {{ g.group_color }};">
+            <td colspan="2" style="padding:9px 12px;font-weight:600;font-size:12px;color:#4a5568;">
+              该组总用量(= 总套数 × {{ g.pick }})
+            </td>
+            <td class="num total-need" data-group-total style="padding:9px 12px;font-weight:700;">—</td>
+            <td style="padding:9px 12px;color:#8a8880;font-size:12px;text-align:right;">100%</td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+  </div>
+  {% endfor %}
+  {% endif %}
+</div>
+
+<script>
+function recalcFixed() {
+  const total = parseInt(document.getElementById('total-sets').value || '0', 10);
+  document.querySelectorAll('.table-card tbody tr').forEach(tr => {
+    const perSet = parseInt(tr.dataset.perSet || '0', 10);
+    const need = total * perSet;
+    const cell = tr.querySelector('[data-need-cell]');
+    cell.textContent = need > 0 ? String(need) : '—';
+    cell.classList.toggle('zero', need <= 0);
+  });
+}
+
+// Fisher-Yates 洗牌取前 K 个
+function sampleK(arr, k) {
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a.slice(0, k);
+}
+
+function rollRandom() {
+  const total = parseInt(document.getElementById('total-sets').value || '0', 10);
+  document.querySelectorAll('.rnd-group').forEach(grp => {
+    const pool = parseInt(grp.dataset.pool || '0', 10);
+    const pick = parseInt(grp.dataset.pick || '0', 10);
+    const trs = grp.querySelectorAll('tbody tr[data-sr-row]');
+    // 初始化每个 SR 计数为 0
+    const counts = new Array(trs.length).fill(0);
+    if (total > 0 && pick > 0 && pool > 0) {
+      const indices = Array.from({length: pool}, (_, i) => i);
+      // 真模拟 N 套,每套独立 sample K 个
+      for (let s = 0; s < total; s++) {
+        const picked = sampleK(indices, pick);
+        for (const idx of picked) counts[idx]++;
+      }
+    }
+    const groupTotal = total * pick;
+    trs.forEach((tr, i) => {
+      const cell = tr.querySelector('[data-need-cell]');
+      const pctCell = tr.querySelector('[data-pct-cell]');
+      const n = counts[i];
+      if (n <= 0) {
+        cell.textContent = '—'; cell.classList.add('zero');
+        pctCell.textContent = '—';
+      } else {
+        cell.textContent = String(n);
+        cell.classList.remove('zero');
+        pctCell.textContent = groupTotal > 0 ? (n / groupTotal * 100).toFixed(1) + '%' : '—';
+      }
+    });
+    const totalCell = grp.querySelector('[data-group-total]');
+    if (totalCell) totalCell.textContent = groupTotal > 0 ? String(groupTotal) : '—';
+  });
+}
+
+function recalcAll() { recalcFixed(); rollRandom(); }
+
+const totalInput = document.getElementById('total-sets');
+const rollBtn = document.getElementById('btn-roll');
+if (totalInput) totalInput.addEventListener('input', recalcAll);
+if (rollBtn) rollBtn.addEventListener('click', rollRandom);
+if (totalInput) recalcAll();
+</script>
+</body>
+</html>

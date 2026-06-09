@@ -551,6 +551,33 @@ services:
     networks:
       - platform-net
 
+  c-store:
+    build:
+      context: ./apps/PMC跟仓管/华登C仓库
+      dockerfile: Dockerfile
+    environment:
+      - DATA_PATH=/app/data
+      - TZ=Asia/Shanghai
+      # SECRET_KEY 不传也能跑(仅用于 flash 闪现消息,无登录);要固定可在 .env.cloud 加 C_STORE_SECRET_KEY
+      - SECRET_KEY=${C_STORE_SECRET_KEY:-c_store_local_dev}
+    volumes:
+      - ./apps/PMC跟仓管/华登C仓库/data:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5010/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    mem_limit: 512m
+    memswap_limit: 512m
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - platform-net
+
   huadeng:
     build:
       context: ./apps/PMC跟仓管/华登包材管理

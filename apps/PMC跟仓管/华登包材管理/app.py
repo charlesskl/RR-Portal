@@ -1136,6 +1136,7 @@ def reports():
 
     con.close()
     monthly_by_party = [(p, PARTIES[p]['name'], _build_monthly_stats(p)) for p in ('hd', 'sy', 'xx')]
+    inv_grand_total = _build_inventory_grand_total(monthly_by_party)
     today = datetime.now().strftime('%Y/%m/%d')
     today_cn = datetime.now().strftime('%Y年%m月%d日')
     return render_template('reports.html',
@@ -1145,6 +1146,7 @@ def reports():
                            pair_summary=pair_summary,
                            monthly_by_pair=monthly_by_pair,
                            monthly_by_party=monthly_by_party,
+                           inv_grand_total=inv_grand_total,
                            date_from=date_from, date_to=date_to,
                            only_confirmed=only_confirmed,
                            today=today, today_cn=today_cn,
@@ -1297,6 +1299,54 @@ def _build_monthly_stats(party):
         })
     rows.reverse()      # 最新月份排最上方
     return rows
+
+
+def _build_inventory_grand_total(monthly_by_party):
+    """跨厂区合计(汇总报表底部):取三厂区中最新有盘点的那个月,把各厂区该月的
+    基线实存/损耗/当月实存/当月应存按物料(STAT_ITEMS)加总,并算总损耗占比。
+
+    monthly_by_party: [(party_code, party_name, rows), ...]，rows 来自 _build_monthly_stats(最新在前)。
+    返回 None 表示三厂区都没有可合计的盘点数据。
+    """
+    # 目标月 = 三厂区里"最新已盘点(is_measured)"月份的最大值
+    target_ym = None
+    for _p, _name, rows in monthly_by_party:
+        for r in rows:                      # rows 已最新在前,取该厂区最新已盘月
+            if r['is_measured']:
+                if target_ym is None or r['ym'] > target_ym:
+                    target_ym = r['ym']
+                break
+    if not target_ym:
+        return None
+
+    base = {k: 0.0 for k, _ in STAT_ITEMS}
+    loss = {k: 0.0 for k, _ in STAT_ITEMS}
+    actual = {k: 0.0 for k, _ in STAT_ITEMS}
+    expected = {k: 0.0 for k, _ in STAT_ITEMS}
+    included, missing = [], []
+    prev_month_num = month_num = None
+
+    for _p, name, rows in monthly_by_party:
+        row = next((r for r in rows if r['ym'] == target_ym and r['is_measured']), None)
+        if not row:
+            missing.append(name)
+            continue
+        included.append(name)
+        prev_month_num = row['prev_month_num']
+        month_num = row['month_num']
+        for k, _ in STAT_ITEMS:
+            it = row['items'][k]
+            base[k] += it['prev'] or 0
+            loss[k] += it['loss'] or 0
+            actual[k] += it['actual'] or 0
+            expected[k] += it['expected'] or 0
+
+    loss_pct = {k: (loss[k] / expected[k] * 100 if expected[k] else 0) for k, _ in STAT_ITEMS}
+    return {
+        'ym': target_ym, 'prev_month_num': prev_month_num, 'month_num': month_num,
+        'base': base, 'loss': loss, 'actual': actual, 'expected': expected,
+        'loss_pct': loss_pct, 'included': included, 'missing': missing,
+    }
 
 
 def _query_flow(con, *, recorded_by, from_party, to_party, date_from=None, date_to=None, order_no=None):

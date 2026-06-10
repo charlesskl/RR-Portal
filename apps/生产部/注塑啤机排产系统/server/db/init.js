@@ -2,13 +2,10 @@ const db = require('./connection');
 
 function initDatabase() {
   // ========== 机台配置表 ==========
-  // machine_no 不再单字段 UNIQUE — 用 (machine_no, workshop) 复合 UNIQUE，
-  // 这样不同车间可以重名机台（如「其他机台」「吹气机台」每个车间各一台）。
-  // 老 DB 的 schema 还是单 UNIQUE，下方迁移代码会一次性重建。
   db.exec(`
     CREATE TABLE IF NOT EXISTS machines (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      machine_no TEXT NOT NULL,
+      machine_no TEXT NOT NULL UNIQUE,
       brand TEXT NOT NULL,
       tonnage INTEGER NOT NULL,
       arm_type TEXT NOT NULL,
@@ -20,9 +17,7 @@ function initDatabase() {
       status TEXT DEFAULT 'active',
       notes TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      workshop TEXT DEFAULT 'B',
-      UNIQUE(machine_no, workshop)
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `);
 
@@ -231,6 +226,179 @@ function initDatabase() {
     )
   `);
 
+  // ========== 外发模块（合并自原 pi-outsource 系统） ==========
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS outsource_orders (
+      id                     TEXT PRIMARY KEY,
+      seq                    TEXT,
+      workshop               TEXT,
+      item_code              TEXT,
+      mold                   TEXT,
+      order_qty_pcs          INTEGER,
+      order_qty_shots        INTEGER,
+      target_qty             INTEGER,
+      quoted_capacity        INTEGER,
+      actual_capacity        INTEGER,
+      quote_price_usd        REAL,
+      supplier_price_rmb     REAL,
+      supplier_price_usd     REAL,
+      supplier               TEXT,
+      pmc_follow             TEXT,
+      order_date             TEXT,
+      production_start       TEXT,
+      estimated_delivery     TEXT,
+      remark                 TEXT,
+      status                 TEXT DEFAULT 'open',
+      net_outsource_output   REAL,
+      source_bill_no         TEXT,
+      source_customer        TEXT,
+      source_production_no   TEXT,
+      source_mold_code       TEXT,
+      created_at             TEXT NOT NULL,
+      updated_at             TEXT NOT NULL
+    )
+  `);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_outsource_orders_workshop    ON outsource_orders(workshop)`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_outsource_orders_supplier    ON outsource_orders(supplier)`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_outsource_orders_pmc         ON outsource_orders(pmc_follow)`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_outsource_orders_source_bill ON outsource_orders(source_bill_no)`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_outsource_orders_source_mold ON outsource_orders(source_mold_code)`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_outsource_orders_created     ON outsource_orders(created_at)`);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS outsource_suppliers (
+      id              TEXT PRIMARY KEY,
+      seq             TEXT,
+      name            TEXT,
+      total_machines  INTEGER,
+      machines_for_xx INTEGER,
+      xx_ratio        REAL,
+      actual_running  INTEGER,
+      running_rate    REAL,
+      contact         TEXT,
+      address         TEXT,
+      mold_count      INTEGER,
+      remark          TEXT
+    )
+  `);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_outsource_suppliers_name ON outsource_suppliers(name)`);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS outsource_mold_mappings (
+      mold_code   TEXT PRIMARY KEY,
+      supplier    TEXT,
+      target_qty  INTEGER,
+      workshop    TEXT,
+      mold_name   TEXT,
+      updated_at  TEXT
+    )
+  `);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS outsource_pc_orders (
+      id         TEXT PRIMARY KEY,
+      seq        TEXT,
+      factory    TEXT,
+      item_code  TEXT,
+      mold       TEXT,
+      mold_sets  TEXT,
+      remark     TEXT
+    )
+  `);
+
+  // ========== 月计划 ==========
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS monthly_plans (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      year_month  TEXT NOT NULL,
+      workshop    TEXT NOT NULL DEFAULT 'B',
+      title       TEXT,
+      source_file TEXT,
+      notes       TEXT,
+      created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_monthly_plans_ym ON monthly_plans(year_month, workshop)`);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS monthly_plan_items (
+      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      plan_id         INTEGER NOT NULL,
+      machine_no      TEXT,
+      machine_type    TEXT,
+      robot_arm       TEXT,
+      product_code    TEXT,
+      mold_name       TEXT,
+      order_no        TEXT,
+      material_type   TEXT,
+      color           TEXT,
+      quantity        INTEGER,
+      daily_qty       INTEGER,
+      days_needed     REAL,
+      est_finish      TEXT,
+      order_delivery  TEXT,
+      notes           TEXT,
+      sort_order      INTEGER DEFAULT 0,
+      created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (plan_id) REFERENCES monthly_plans(id) ON DELETE CASCADE
+    )
+  `);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_monthly_plan_items_plan ON monthly_plan_items(plan_id)`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_monthly_plan_items_machine ON monthly_plan_items(plan_id, machine_no)`);
+
+  // ========== 啤机入库单（送 PMC 入库 → 月底自动生成月结表） ==========
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS pi_warehouse_orders (
+      id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+      delivery_date       TEXT,                          -- 送货日期 YYYY-MM-DD
+      delivery_code       TEXT,                          -- 送货单编号 (如 2642425)
+      order_no            TEXT,                          -- 下单号 (CMC260234 / ZWZ20260021)
+      mold_no             TEXT,                          -- 模具号 / 产品货号 (如 77858)
+      part_name           TEXT,                          -- 部件名称 (如 MCKP-17M-01 喷水)
+      color               TEXT,                          -- 颜色
+      order_qty           INTEGER,                       -- 下单啤数
+      delivery_pcs        INTEGER,                       -- 送货数 PCS
+      cavity              TEXT,                          -- 出模数 "1/2" "1/8"
+      delivery_shots      INTEGER,                       -- 送货啤数
+      shot_weight         REAL,                          -- 啤重 g
+      material_kg         REAL,                          -- 料重 kg
+      material_type       TEXT,                          -- 料型 (ABS KF-740 等)
+      unit_price          REAL,                          -- 单价 ¥/啤
+      amount              REAL,                          -- 金额 = 送货啤数 × 单价
+      box_glue            INTEGER,                       -- 胶箱
+      box_paper           INTEGER,                       -- 纸箱
+      pallet              INTEGER,                       -- 卡板
+      notes               TEXT,                          -- 备注
+      pmc_follow          TEXT,                          -- 跟单 PMC（陈梦楚/罗良庆等）
+      workshop            TEXT DEFAULT 'B',
+      status              TEXT DEFAULT 'pending',        -- pending / checked-in / settled
+      schedule_item_id    INTEGER,                       -- 可选：关联到 paiji 排单项
+      checked_in_at       DATETIME,                      -- PMC 入库时间
+      created_at          DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at          DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_piwh_date ON pi_warehouse_orders(delivery_date, workshop)`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_piwh_pmc  ON pi_warehouse_orders(pmc_follow, workshop)`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_piwh_order ON pi_warehouse_orders(order_no)`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_piwh_status ON pi_warehouse_orders(status, workshop)`);
+
+  // 入库单实物单上的扩展字段（参考兴信入库单 NO:A2511514）
+  const piWhExtras = [
+    ['color_powder_no',          'TEXT'],  // 色粉编号
+    ['color_powder_batch',       'TEXT'],  // 色粉生产批号
+    ['shift',                    'TEXT'],  // 班次 白/夜
+    ['material_pickup_no',       'TEXT'],  // 胶料提货单号
+    ['color_powder_pickup_no',   'TEXT'],  // 色粉提货单号
+    ['applicant',                'TEXT'],  // 入仓申请人
+    ['dept_supervisor',          'TEXT'],  // 部门主管
+    ['warehouse_keeper',         'TEXT'],  // 仓管
+  ];
+  for (const [col, type] of piWhExtras) {
+    try { db.prepare(`ALTER TABLE pi_warehouse_orders ADD COLUMN ${col} ${type}`).run(); } catch(e){}
+  }
+
   // Migrations
   try { db.prepare("ALTER TABLE orders ADD COLUMN order_notes TEXT DEFAULT ''").run(); } catch(e){}
   try { db.prepare("ALTER TABLE schedule_items ADD COLUMN is_carry_over INTEGER DEFAULT 0").run(); } catch(e){}
@@ -244,50 +412,27 @@ function initDatabase() {
   try { db.prepare("ALTER TABLE orders ADD COLUMN serial_no TEXT DEFAULT ''").run(); } catch(e){}
   try { db.prepare("ALTER TABLE schedule_items ADD COLUMN serial_no TEXT DEFAULT ''").run(); } catch(e){}
 
-  // 一次性 schema 迁移：machine_no 单字段 UNIQUE → (machine_no, workshop) 复合 UNIQUE
-  // PR #145 的「其他机台 / 吹气机台」幂等迁移之前对 B/C 车间静默失败，根因就是
-  // 老 schema 的全表 UNIQUE(machine_no) 拦了「同名跨车间」的插入。
-  try {
-    const tableInfo = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='machines'").get();
-    const needsRebuild = tableInfo && tableInfo.sql && /machine_no\s+TEXT\s+NOT\s+NULL\s+UNIQUE/i.test(tableInfo.sql);
-    if (needsRebuild) {
-      console.log('[迁移] machines 表升级：machine_no 单 UNIQUE → (machine_no, workshop) 复合 UNIQUE');
-      // 清掉之前迁移失败可能留下的残留临时表（在事务外做，保证幂等）
-      db.exec('DROP TABLE IF EXISTS machines_new');
-      // 用 better-sqlite3 原生 transaction wrapper —— SQL 失败时自动 ROLLBACK，
-      // 不会把事务停在 errored state 拖累后面的 ensureOtherMachine / ensureBlowMachine
-      const rebuild = db.transaction(() => {
-        db.exec(`
-          CREATE TABLE machines_new (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            machine_no TEXT NOT NULL,
-            brand TEXT NOT NULL,
-            tonnage INTEGER NOT NULL,
-            arm_type TEXT NOT NULL,
-            model_desc TEXT,
-            min_shot_weight REAL DEFAULT 0,
-            max_shot_weight REAL DEFAULT 0,
-            avg_shot_weight REAL DEFAULT 0,
-            record_count INTEGER DEFAULT 0,
-            status TEXT DEFAULT 'active',
-            notes TEXT,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            workshop TEXT DEFAULT 'B',
-            UNIQUE(machine_no, workshop)
-          )
-        `);
-        db.exec(`
-          INSERT INTO machines_new (id, machine_no, brand, tonnage, arm_type, model_desc, min_shot_weight, max_shot_weight, avg_shot_weight, record_count, status, notes, created_at, updated_at, workshop)
-            SELECT id, machine_no, brand, tonnage, arm_type, model_desc, min_shot_weight, max_shot_weight, avg_shot_weight, record_count, status, notes, created_at, updated_at, COALESCE(workshop, 'B') FROM machines
-        `);
-        db.exec('DROP TABLE machines');
-        db.exec('ALTER TABLE machines_new RENAME TO machines');
-      });
-      rebuild();
-      console.log('[迁移] machines 表升级完成');
-    }
-  } catch(e) { console.log('[machines schema 迁移失败]', e.message); }
+  // 日报表扩展字段（每行 = 一个 schedule_item）
+  const dailyReportCols = [
+    ['worker_name',         'TEXT'],
+    ['piece_rate',          'REAL'],
+    ['approved_piece_rate', 'REAL'],
+    ['output_value',        'REAL'],
+    ['actual_hours',        'REAL'],
+    ['piece_wage',          'REAL'],
+    ['hour_wage',           'REAL'],
+    ['day_regular_wage',    'REAL'],
+    ['ot_wage_12h',         'REAL'],
+    ['encouragement',       'REAL'],
+    ['supper_fee',          'REAL'],
+    ['overtime_wage',       'REAL'],
+    ['total_wage',          'REAL'],
+    ['downtime_reason',     'TEXT'],
+    ['pi_ban',              'TEXT'],
+  ];
+  for (const [col, type] of dailyReportCols) {
+    try { db.prepare(`ALTER TABLE schedule_items ADD COLUMN ${col} ${type}`).run(); } catch(e){}
+  }
 
   // 幂等迁移：确保三个车间都有「其他机台」（用于收纳无明确机台的订单）
   try {

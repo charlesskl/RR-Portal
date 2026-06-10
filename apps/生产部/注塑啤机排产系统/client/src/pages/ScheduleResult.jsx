@@ -96,6 +96,24 @@ export default function ScheduleResult({ workshop = 'B' }) {
     }
   };
 
+  const handleExportDailyReport = async (date) => {
+    try {
+      const res = await axios.get(`${EXPORT_API}/daily-report/${date}`, {
+        params: { workshop },
+        responseType: 'blob',
+      });
+      const url = window.URL.createObjectURL(new Blob([res.data]));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${workshop}车间日报表_${date}.xlsx`;
+      a.click();
+      window.URL.revokeObjectURL(url);
+      message.success('日报表已导出');
+    } catch (e) {
+      message.error('日报表导出失败：' + (e.response?.data?.message || e.message));
+    }
+  };
+
   const handleExport = async (id, shift) => {
     try {
       const res = await axios.get(`${EXPORT_API}/${id}`, {
@@ -317,11 +335,12 @@ export default function ScheduleResult({ workshop = 'B' }) {
     { title: '说明', dataIndex: 'notes', ellipsis: true,
       render: v => v ? <span style={{ color: '#d46b08', fontSize: 12 }}>{v}</span> : ''
     },
-    { title: '操作', width: 320,
+    { title: '操作', width: 420,
       render: (_, r) => (
         <Space>
           <Button size="small" onClick={() => fetchDetail(r.id)}>查看明细</Button>
-          <Button size="small" icon={<DownloadOutlined />} onClick={() => handleExport(r.id, r.shift)}>导出Excel</Button>
+          <Button size="small" icon={<DownloadOutlined />} onClick={() => handleExport(r.id, r.shift)}>排机单</Button>
+          <Button size="small" icon={<DownloadOutlined />} onClick={() => handleExportDailyReport(r.schedule_date)}>日报表(夜+白)</Button>
           <Popconfirm title="确定删除此排机单?" onConfirm={() => handleDelete(r.id)} okText="确定" cancelText="取消">
             <Button size="small" danger icon={<DeleteOutlined />}>删除</Button>
           </Popconfirm>

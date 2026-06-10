@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Layout, Menu, Typography, Button, Tag } from 'antd';
+import { Layout, Menu, Typography, Button, Tag, Segmented } from 'antd';
 import {
   UnorderedListOutlined,
   ToolOutlined,
@@ -10,6 +10,9 @@ import {
   ImportOutlined,
   AimOutlined,
   SwapOutlined,
+  CalendarOutlined,
+  ProfileOutlined,
+  InboxOutlined,
 } from '@ant-design/icons';
 import OrderImport from './pages/OrderImport';
 import HistoryData from './pages/HistoryData';
@@ -17,7 +20,11 @@ import MachineProfile from './pages/MachineProfile';
 import MoldTargets from './pages/MoldTargets';
 import Scheduling from './pages/Scheduling';
 import ScheduleResult from './pages/ScheduleResult';
+import MonthlyPlan from './pages/MonthlyPlan';
+import DailyReport from './pages/DailyReport';
+import WarehouseOrders from './pages/WarehouseOrders';
 import WorkshopPortal from './pages/WorkshopPortal';
+import OutsourceModule from './pages/outsource/OutsourceModule.jsx';
 
 const { Sider, Content, Header } = Layout;
 const { Text } = Typography;
@@ -26,26 +33,43 @@ const WORKSHOP_COLORS = { A: '#1565c0', B: '#e65100', C: '#2e7d32' };
 const WORKSHOP_LABELS = { A: 'A车间', B: 'B车间', C: '华登' };
 
 const menuItems = [
+  { key: 'monthlyPlan',    icon: <CalendarOutlined />,      label: '月计划' },
   { key: 'orderImport',    icon: <ImportOutlined />,        label: '订单导入' },
   { key: 'scheduling',     icon: <RobotOutlined />,         label: '智能排机' },
   { key: 'scheduleResult', icon: <FileTextOutlined />,      label: '排机结果' },
+  { key: 'dailyReport',    icon: <ProfileOutlined />,       label: '日报表' },
+  { key: 'warehouseOrders',icon: <InboxOutlined />,         label: '入库单' },
   { key: 'historyData',    icon: <DatabaseOutlined />,      label: '历史数据库' },
   { key: 'machineProfile', icon: <DesktopOutlined />,       label: '机台档案' },
   { key: 'moldTargets',    icon: <AimOutlined />,           label: '模具目标' },
 ];
 
 const titles = {
+  monthlyPlan:    '月计划',
   orderImport:    '订单导入',
   historyData:    '历史数据库',
   machineProfile: '机台档案',
   moldTargets:    '模具目标',
   scheduling:     '智能排机',
   scheduleResult: '排机结果',
+  dailyReport:    '日报表',
+  warehouseOrders: '入库单',
 };
 
 export default function App() {
-  const [workshop, setWorkshop] = useState(() => localStorage.getItem('workshop') || null);
+  const [workshop, setWorkshop] = useState(() => {
+    // 启动时校验：有 token 且匹配 workshop 才保留登录态
+    const ws = localStorage.getItem('workshop');
+    const tk = localStorage.getItem('paiji_token');
+    if (!ws || !tk) {
+      localStorage.removeItem('workshop');
+      localStorage.removeItem('paiji_token');
+      return null;
+    }
+    return ws;
+  });
   const [page, setPage] = useState('orderImport');
+  const [topModule, setTopModule] = useState('paiji'); // 'paiji' | 'outsource'
 
   const handleEnter = (ws) => {
     localStorage.setItem('workshop', ws);
@@ -55,6 +79,7 @@ export default function App() {
 
   const handleSwitch = () => {
     localStorage.removeItem('workshop');
+    localStorage.removeItem('paiji_token');
     setWorkshop(null);
     setPage('orderImport');
   };
@@ -68,28 +93,30 @@ export default function App() {
 
   return (
     <Layout style={{ minHeight: '100vh' }}>
-      <Sider theme="dark" width={200}>
-        <div style={{
-          height: 64,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          borderBottom: '1px solid rgba(255,255,255,0.1)',
-          padding: '0 12px',
-          flexDirection: 'column', gap: 4,
-        }}>
-          <Text style={{ color: '#fff', fontSize: 13, fontWeight: 'bold', textAlign: 'center', lineHeight: 1.4 }}>
-            AI注塑啤机<br/>排产系统
-          </Text>
-          <Tag color={wsColor} style={{ margin: 0, fontSize: 11 }}>{WORKSHOP_LABELS[workshop] || workshop}</Tag>
-        </div>
-        <Menu
-          theme="dark"
-          mode="inline"
-          selectedKeys={[page]}
-          items={menuItems}
-          onClick={({ key }) => setPage(key)}
-          style={{ marginTop: 8 }}
-        />
-      </Sider>
+      {topModule === 'paiji' && (
+        <Sider theme="dark" width={200}>
+          <div style={{
+            height: 64,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            borderBottom: '1px solid rgba(255,255,255,0.1)',
+            padding: '0 12px',
+            flexDirection: 'column', gap: 4,
+          }}>
+            <Text style={{ color: '#fff', fontSize: 13, fontWeight: 'bold', textAlign: 'center', lineHeight: 1.4 }}>
+              AI注塑啤机<br/>排产系统
+            </Text>
+            <Tag color={wsColor} style={{ margin: 0, fontSize: 11 }}>{WORKSHOP_LABELS[workshop] || workshop}</Tag>
+          </div>
+          <Menu
+            theme="dark"
+            mode="inline"
+            selectedKeys={[page]}
+            items={menuItems}
+            onClick={({ key }) => setPage(key)}
+            style={{ marginTop: 8 }}
+          />
+        </Sider>
+      )}
       <Layout>
         <Header style={{
           background: '#fff', padding: '0 24px',
@@ -97,8 +124,16 @@ export default function App() {
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         }}>
           <Text style={{ fontSize: 16, fontWeight: 600, color: '#333' }}>
-            {titles[page]}
+            {topModule === 'paiji' ? titles[page] : '外发管理'}
           </Text>
+          <Segmented
+            value={topModule}
+            onChange={setTopModule}
+            options={[
+              { label: '排产', value: 'paiji' },
+              { label: '外发', value: 'outsource' },
+            ]}
+          />
           <Button
             icon={<SwapOutlined />}
             size="small"
@@ -108,14 +143,20 @@ export default function App() {
             切换车间（当前：{WORKSHOP_LABELS[workshop] || workshop}）
           </Button>
         </Header>
-        <Content style={{ margin: 24, padding: 24, background: '#fff', borderRadius: 8 }}>
-          {page === 'orderImport'    && <OrderImport workshop={workshop} />}
-          {page === 'historyData'    && <HistoryData workshop={workshop} />}
-          {page === 'machineProfile' && <MachineProfile workshop={workshop} />}
-          {page === 'moldTargets'    && <MoldTargets workshop={workshop} />}
-          {page === 'scheduling'     && <Scheduling workshop={workshop} onDone={() => setPage('scheduleResult')} />}
-          {page === 'scheduleResult' && <ScheduleResult workshop={workshop} />}
-        </Content>
+        {topModule === 'paiji' && (
+          <Content style={{ margin: 24, padding: 24, background: '#fff', borderRadius: 8 }}>
+            {page === 'monthlyPlan'    && <MonthlyPlan workshop={workshop} />}
+            {page === 'orderImport'    && <OrderImport workshop={workshop} />}
+            {page === 'historyData'    && <HistoryData workshop={workshop} />}
+            {page === 'machineProfile' && <MachineProfile workshop={workshop} />}
+            {page === 'moldTargets'    && <MoldTargets workshop={workshop} />}
+            {page === 'scheduling'     && <Scheduling workshop={workshop} onDone={() => setPage('scheduleResult')} />}
+            {page === 'scheduleResult' && <ScheduleResult workshop={workshop} />}
+            {page === 'dailyReport'    && <DailyReport workshop={workshop} />}
+            {page === 'warehouseOrders' && <WarehouseOrders workshop={workshop} />}
+          </Content>
+        )}
+        {topModule === 'outsource' && <OutsourceModule />}
       </Layout>
     </Layout>
   );

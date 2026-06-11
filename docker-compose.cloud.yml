@@ -526,7 +526,8 @@ services:
       - TZ=Asia/Shanghai
       # OCR 走阿里云百炼 (Bailian) OpenAI 兼容端点 + 通义千问 VL
       - BAILIAN_API_KEY=${PEISE_BAILIAN_API_KEY:-}
-      - BAILIAN_MODEL=${PEISE_BAILIAN_MODEL:-qwen-vl-max-latest}
+      # 注意: 阿里云已关闭 -latest 别名模型的访问权限(403 access_denied), 必须用稳定版模型名
+      - BAILIAN_MODEL=${PEISE_BAILIAN_MODEL:-qwen-vl-max}
       - BAILIAN_BASE_URL=${PEISE_BAILIAN_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}
       # 登录凭据(默认 ps/ps123456,改要改 .env.cloud 的 PEISE_AUTH_*)
       # SECRET_KEY 不传,app 会在 instance/.secret_key 自建并持久化
@@ -536,6 +537,33 @@ services:
       - ./apps/PMC跟仓管/配色库存管理/instance:/app/instance
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5006/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    mem_limit: 512m
+    memswap_limit: 512m
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - platform-net
+
+  c-store:
+    build:
+      context: ./apps/PMC跟仓管/华登C仓库
+      dockerfile: Dockerfile
+    environment:
+      - DATA_PATH=/app/data
+      - TZ=Asia/Shanghai
+      # SECRET_KEY 不传也能跑(仅用于 flash 闪现消息,无登录);要固定可在 .env.cloud 加 C_STORE_SECRET_KEY
+      - SECRET_KEY=${C_STORE_SECRET_KEY:-c_store_local_dev}
+    volumes:
+      - ./apps/PMC跟仓管/华登C仓库/data:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5010/health"]
       interval: 10s
       timeout: 5s
       retries: 3

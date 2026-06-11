@@ -24,12 +24,16 @@ const { initDatabase } = require('./db/init');
 initDatabase();
 
 // 路由
+app.use('/api/auth', require('./routes/auth'));
 app.use('/api/machines', require('./routes/machines'));
 app.use('/api/history', require('./routes/history'));
 app.use('/api/orders', require('./routes/orders'));
 app.use('/api/scheduling', require('./routes/scheduling'));
 app.use('/api/export', require('./routes/export'));
 app.use('/api/mold-targets', require('./routes/moldTargets'));
+app.use('/api/outsource', require('./routes/outsource'));
+app.use('/api/monthly-plans', require('./routes/monthlyPlans'));
+app.use('/api/warehouse-orders', require('./routes/warehouseOrders'));
 
 // 托管前端 (Docker 中从 client-dist 读取，本地从 client/dist)
 const clientDist = fs.existsSync(path.join(__dirname, 'client-dist'))

@@ -9,6 +9,35 @@ router.get('/', (req, res) => {
   res.json(schedules);
 });
 
+// 日报表：返回某日的夜班 + 白班排单 + 全部 items（按 shift 夜→白，机号升序）
+router.get('/daily-report', (req, res) => {
+  try {
+    const { date } = req.query;
+    if (!date) return res.status(400).json({ message: '缺少 date 参数' });
+    const workshop = req.query.workshop || 'B';
+    const schedules = db.prepare(`
+      SELECT * FROM schedules
+      WHERE schedule_date = ? AND workshop = ?
+      ORDER BY CASE shift WHEN '夜班' THEN 0 ELSE 1 END, id
+    `).all(date, workshop);
+    const result = schedules.map(s => ({
+      schedule: s,
+      items: db.prepare(`
+        SELECT * FROM schedule_items WHERE schedule_id = ?
+        ORDER BY
+          CASE WHEN machine_no IN ('吹气机台', '其他机台') THEN 999999
+               ELSE CAST(REPLACE(REPLACE(REPLACE(machine_no, 'A-', ''), 'C-', ''), '#', '') AS INTEGER)
+          END,
+          machine_no, sort_order, id
+      `).all(s.id),
+    }));
+    res.json(result);
+  } catch (e) {
+    console.error('daily-report 查询失败:', e);
+    res.status(500).json({ message: e.message });
+  }
+});
+
 // 查询最近一份排机单的延续项（预览用）— 必须在 /:id 之前
 // 不再要求严格"上一班次"，而是取最新一份（白班=1, 夜班=2 排序）
 router.get('/carry-over', (req, res) => {
@@ -89,7 +118,13 @@ router.delete('/:id', (req, res) => {
 // 更新明细行
 router.put('/:id/items/:itemId', (req, res) => {
   const { itemId } = req.params;
-  const fields = ['notes', 'robot_arm', 'clamp', 'mold_change_time', 'adjuster', 'machine_no'];
+  const fields = [
+    'notes', 'robot_arm', 'clamp', 'mold_change_time', 'adjuster', 'machine_no',
+    // 日报表扩展字段
+    'worker_name', 'piece_rate', 'approved_piece_rate', 'output_value', 'actual_hours',
+    'piece_wage', 'hour_wage', 'day_regular_wage', 'ot_wage_12h', 'encouragement',
+    'supper_fee', 'overtime_wage', 'total_wage', 'downtime_reason', 'pi_ban',
+  ];
   const updates = [];
   const values = [];
 

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Modal, Input, message } from 'antd';
 import axios from 'axios';
 
 const WORKSHOPS = [
@@ -9,6 +10,25 @@ const WORKSHOPS = [
 
 export default function WorkshopPortal({ onEnter }) {
   const [stats, setStats] = useState({});
+  const [loginWs, setLoginWs] = useState(null);     // 正在登录的车间 key
+  const [password, setPassword] = useState('');
+  const [logging, setLogging] = useState(false);
+
+  const tryLogin = async () => {
+    if (!loginWs) return;
+    setLogging(true);
+    try {
+      const { data } = await axios.post('/api/auth/login', { workshop: loginWs, password });
+      localStorage.setItem('paiji_token', data.token);
+      localStorage.setItem('workshop', data.workshop);
+      message.success('登录成功');
+      setLoginWs(null); setPassword('');
+      onEnter(data.workshop);
+    } catch (e) {
+      message.error(e.response?.data?.message || '登录失败');
+    }
+    setLogging(false);
+  };
 
   useEffect(() => {
     WORKSHOPS.forEach(async (ws) => {
@@ -89,10 +109,10 @@ export default function WorkshopPortal({ onEnter }) {
                 </div>
               </div>
 
-              {/* 进入按钮 */}
+              {/* 进入按钮（点击 → 弹密码框） */}
               <div style={{ padding: '0 24px 24px' }}>
                 <button
-                  onClick={() => onEnter(ws.key)}
+                  onClick={() => { setLoginWs(ws.key); setPassword(''); }}
                   style={{
                     width: '100%',
                     padding: '12px 0',
@@ -115,8 +135,34 @@ export default function WorkshopPortal({ onEnter }) {
       </div>
 
       <div style={{ marginTop: 48, color: '#aaa', fontSize: 13 }}>
-        数据按车间独立隔离 · 局域网内任意设备均可访问
+        数据按车间独立隔离 · 每个车间需密码登录
       </div>
+
+      <Modal
+        title={loginWs ? `登录 ${WORKSHOPS.find(w => w.key === loginWs)?.label}` : ''}
+        open={!!loginWs}
+        onCancel={() => { setLoginWs(null); setPassword(''); }}
+        onOk={tryLogin}
+        okText="登录"
+        cancelText="取消"
+        confirmLoading={logging}
+        destroyOnClose
+        afterOpenChange={(open) => {
+          if (open) setTimeout(() => document.getElementById('ws-pwd')?.focus(), 100);
+        }}
+      >
+        <Input.Password
+          id="ws-pwd"
+          placeholder="请输入车间密码"
+          value={password}
+          onChange={e => setPassword(e.target.value)}
+          onPressEnter={tryLogin}
+          size="large"
+        />
+        <div style={{ marginTop: 8, color: '#999', fontSize: 12 }}>
+          忘记密码请联系系统管理员
+        </div>
+      </Modal>
     </div>
   );
 }

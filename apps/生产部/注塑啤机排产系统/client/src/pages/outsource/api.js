@@ -1,3 +1,10 @@
+// nginx 子路径部署 (vite --base /paiji/)。这些调用用原生 fetch，不走 main.jsx 的
+// axios 拦截器，所以必须自己加 /paiji 前缀，否则请求会打到根路径 /api/* → core/FastAPI → 404。
+const BASE = import.meta.env.BASE_URL.replace(/\/$/, '');
+export const apiUrl = (p) => (typeof p === 'string' && p.startsWith('/') ? BASE + p : p);
+// 在本模块内遮蔽全局 fetch，自动为以 / 开头的路径加 BASE 前缀。
+const fetch = (url, opts) => window.fetch(apiUrl(url), opts);
+
 const json = (r) => r.ok ? r.json() : r.text().then((t) => { throw new Error(t || r.statusText); });
 
 export const api = {
@@ -64,7 +71,7 @@ export const api = {
   }).then(json),
 
   // excel export
-  exportAllUrl:  ()      => '/api/outsource/orders/export.xlsx',
+  exportAllUrl:  ()      => apiUrl('/api/outsource/orders/export.xlsx'),
   exportRows:    (rows, filename, sheet_name) => fetch('/api/outsource/export-excel', {
     method: 'POST', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ rows, filename, sheet_name }),

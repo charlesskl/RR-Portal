@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useLocation } from 'react-router-dom';
-import { api } from './api.js';
+import { api, apiUrl } from './api.js';
 import Modal from './components/Modal.jsx';
 
 const EMPTY = {
@@ -153,12 +153,12 @@ export default function OrdersPage() {
   };
 
   const exportAllExcel = () => {
-    window.location.href = '/api/outsource/orders/export.xlsx';
+    window.location.href = api.exportAllUrl();
   };
 
   const exportFilteredExcel = async () => {
     if (filtered.length === 0) { alert('当前筛选结果为空'); return; }
-    const resp = await fetch('/api/orders/export.xlsx', {
+    const resp = await fetch(apiUrl('/api/outsource/orders/export.xlsx'), {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ rows: filtered }),

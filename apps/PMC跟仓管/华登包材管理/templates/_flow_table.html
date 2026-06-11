@@ -1,3 +1,7 @@
+<details open class="border rounded mb-2">
+    <summary class="cursor-pointer select-none px-3 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium text-sm">
+        流水记录{% if pagination and pagination.total %}（共 {{ pagination.total }} 条）{% endif %}
+    </summary>
 <div class="table-scroll">
     <table class="text-sm border-collapse w-full">
         <thead>
@@ -24,9 +28,13 @@
                     {% if r.locked %}
                         <span class="text-xs text-gray-400">🔒 已锁</span>
                     {% else %}
-                        <button onclick="openEditModal({{ r.id }})" class="text-xs text-blue-600 hover:underline">编辑</button>
+                        <button onclick="openEditModal({{ r.id }}, '{{ direction }}-{{ cp }}')" class="text-xs text-blue-600 hover:underline">编辑</button>
                         <form method="POST" action="/record/{{ r.id }}/delete" class="inline"
                               onsubmit="return confirm('确认删除？')">
+                            <input type="hidden" name="_f_date_from" value="{{ date_from }}">
+                            <input type="hidden" name="_f_date_to" value="{{ date_to }}">
+                            <input type="hidden" name="_f_order_no" value="{{ order_no }}">
+                            <input type="hidden" name="_tab" value="{{ direction }}-{{ cp }}">
                             <button class="text-xs text-red-600 hover:underline ml-1">删除</button>
                         </form>
                     {% endif %}
@@ -64,3 +72,4 @@
 </div>
 {% endif %}
 </div>
+</details>

@@ -3,3 +3,11 @@ node_modules/
 *.log
 client/dist/
 .DS_Store
+
+# SQLite runtime DB — NOT committed. 部署后由 db/init 建表 + migrate-json-to-db.js
+# 从线上 JSON 迁移填充（避免开发者快照覆盖生产数据）。
+server/data/*.db
+server/data/*.db-shm
+server/data/*.db-wal
+server/data/*.backup-*.json
+server/data/legacy-json-backup/

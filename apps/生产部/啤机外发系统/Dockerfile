@@ -10,7 +10,11 @@ RUN npx vite build --base ${BASE_PATH}
 
 FROM node:20-alpine AS production
 
-RUN apk add --no-cache tini curl
+# 阿里云 Alpine 镜像源（dl-cdn fastly/IPv6 从 ECS 出站不稳，apk 会卡死）
+RUN sed -i 's#dl-cdn.alpinelinux.org#mirrors.aliyun.com#g' /etc/apk/repositories
+
+# python3/make/g++ 供 better-sqlite3 原生编译（alpine/musl 无预编译二进制）
+RUN apk add --no-cache tini curl python3 make g++
 
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 

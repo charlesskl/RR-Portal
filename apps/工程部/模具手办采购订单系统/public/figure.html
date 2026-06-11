@@ -176,11 +176,23 @@
           </div>
           <div class="col-md-4">
             <label class="form-label">客户 *</label>
-            <select class="form-select" id="m-customer"><option value="">请选择客户</option></select>
+            <div class="input-group">
+              <select class="form-select" id="m-customer"><option value="">请选择客户</option></select>
+              <button class="btn btn-outline-secondary" type="button"
+                      onclick="openListManager('customer')" title="管理客户">
+                <i class="bi bi-gear"></i>
+              </button>
+            </div>
           </div>
           <div class="col-md-4">
             <label class="form-label">手办厂 *</label>
-            <select class="form-select" id="m-figure_factory"><option value="">请选择</option></select>
+            <div class="input-group">
+              <select class="form-select" id="m-figure_factory"><option value="">请选择</option></select>
+              <button class="btn btn-outline-secondary" type="button"
+                      onclick="openListManager('figure-factory')" title="管理手办厂">
+                <i class="bi bi-gear"></i>
+              </button>
+            </div>
           </div>
           <div class="col-md-4">
             <label class="form-label">产品名称/编号</label>
@@ -211,6 +223,27 @@
       <div class="modal-footer">
         <button class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
         <button class="btn btn-primary" onclick="saveOrder()">保存</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ─── Shared List Manager Modal (figure-factory / customer) ──────── -->
+<div class="modal fade" id="listMgrModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="listMgrTitle">管理</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="input-group mb-3">
+          <input type="text" class="form-control" id="listMgrNewName" placeholder="新名称">
+          <button class="btn btn-success" onclick="listMgrAdd()">
+            <i class="bi bi-plus-lg"></i> 添加
+          </button>
+        </div>
+        <div id="listMgrItems"></div>
       </div>
     </div>
   </div>
@@ -485,6 +518,132 @@ function switchTab(tab) {
   document.getElementById('tabList').style.display = tab === 'list' ? '' : 'none';
   document.getElementById('tabStats').style.display = tab === 'stats' ? '' : 'none';
   if (tab === 'stats') loadStats();
+}
+
+// ─── List Manager (shared modal for figure-factory + customer) ──────
+var LIST_MGR_CONFIG = {
+  'figure-factory': { title: '管理手办厂', api: 'api/figure-factories' },
+  'customer':       { title: '管理客户',   api: 'api/customers'        }
+};
+var listMgrType = null;
+
+function openListManager(type) {
+  listMgrType = type;
+  var cfg = LIST_MGR_CONFIG[type];
+  if (!cfg) return;
+  document.getElementById('listMgrTitle').textContent = cfg.title;
+  document.getElementById('listMgrNewName').value = '';
+  listMgrReload();
+  new bootstrap.Modal(document.getElementById('listMgrModal')).show();
+}
+
+function listMgrReload() {
+  var cfg = LIST_MGR_CONFIG[listMgrType];
+  authFetch(cfg.api + '?with_count=1')
+    .then(function(r) { return r.json(); })
+    .then(function(items) {
+      var html = items.map(function(item) {
+        var refBadge = item.ref_count > 0
+          ? '<span class="badge bg-warning text-dark ms-2">' + item.ref_count + ' 引用</span>'
+          : '<span class="badge bg-light text-muted ms-2">0 引用</span>';
+        return '<div class="d-flex justify-content-between align-items-center border rounded p-2 mb-2" data-name="' + esc(item.name) + '">' +
+          '<div class="lm-name">' + esc(item.name) + refBadge + '</div>' +
+          '<div>' +
+            '<button class="btn btn-sm btn-outline-primary me-1" onclick="listMgrStartRename(this)"><i class="bi bi-pencil"></i></button>' +
+            '<button class="btn btn-sm btn-outline-danger" onclick="listMgrDelete(this)"><i class="bi bi-trash"></i></button>' +
+          '</div>' +
+        '</div>';
+      }).join('');
+      document.getElementById('listMgrItems').innerHTML = html || '<div class="text-muted text-center py-3">暂无数据</div>';
+    });
+}
+
+function listMgrAdd() {
+  var name = document.getElementById('listMgrNewName').value.trim();
+  if (!name) { showToast('请输入名称', 'danger'); return; }
+  var cfg = LIST_MGR_CONFIG[listMgrType];
+  authFetch(cfg.api, { method: 'POST', headers: authHeaders(), body: JSON.stringify({ name: name }) })
+    .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, data: d }; }); })
+    .then(function(res) {
+      if (!res.ok) { showToast(res.data.error || '添加失败', 'danger'); return; }
+      document.getElementById('listMgrNewName').value = '';
+      showToast('已添加');
+      listMgrReload();
+    });
+}
+
+function listMgrStartRename(btn) {
+  var row = btn.closest('[data-name]');
+  var oldName = row.getAttribute('data-name');
+  var nameDiv = row.querySelector('.lm-name');
+  nameDiv.innerHTML = '<input type="text" class="form-control form-control-sm" value="' + esc(oldName) + '">';
+  var input = nameDiv.querySelector('input');
+  input.focus();
+  input.select();
+  var actionDiv = btn.parentElement;
+  actionDiv.innerHTML =
+    '<button class="btn btn-sm btn-success me-1" onclick="listMgrConfirmRename(this, \'' + esc(oldName).replace(/'/g, "\\'") + '\')"><i class="bi bi-check-lg"></i></button>' +
+    '<button class="btn btn-sm btn-secondary" onclick="listMgrReload()"><i class="bi bi-x-lg"></i></button>';
+}
+
+function listMgrConfirmRename(btn, oldName) {
+  var row = btn.closest('[data-name]');
+  var newName = row.querySelector('input').value.trim();
+  if (!newName) { showToast('新名称不能为空', 'danger'); return; }
+  if (newName === oldName) { listMgrReload(); return; }
+  var cfg = LIST_MGR_CONFIG[listMgrType];
+  authFetch(cfg.api + '/' + encodeURIComponent(oldName), {
+    method: 'PUT', headers: authHeaders(), body: JSON.stringify({ name: newName })
+  }).then(function(r) { return r.json().then(function(d) { return { ok: r.ok, data: d }; }); })
+    .then(function(res) {
+      if (!res.ok) { showToast(res.data.error || '改名失败', 'danger'); return; }
+      showToast('已改名');
+      listMgrReload();
+    });
+}
+
+function listMgrDelete(btn) {
+  var row = btn.closest('[data-name]');
+  var name = row.getAttribute('data-name');
+  var cfg = LIST_MGR_CONFIG[listMgrType];
+  authFetch(cfg.api + '/' + encodeURIComponent(name), { method: 'DELETE', headers: authHeaders() })
+    .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, status: r.status, data: d }; }); })
+    .then(function(res) {
+      if (res.ok) { showToast('已删除'); listMgrReload(); return; }
+      if (res.status === 409 && res.data.ref_count > 0) {
+        if (!confirm('「' + name + '」已被 ' + res.data.ref_count + ' 条订单引用。\n确定要强制删除吗？这些订单对应字段将被清空（订单本身保留）。')) return;
+        return authFetch(cfg.api + '/' + encodeURIComponent(name) + '?force=1', { method: 'DELETE', headers: authHeaders() })
+          .then(function(r2) { return r2.json().then(function(d2) { return { ok: r2.ok, data: d2 }; }); })
+          .then(function(res2) {
+            if (res2.ok) { showToast('已强制删除'); listMgrReload(); }
+            else showToast(res2.data.error || '删除失败', 'danger');
+          });
+      }
+      showToast(res.data.error || '删除失败', 'danger');
+    });
+}
+
+// 关 modal 时刷新主页面下拉
+document.addEventListener('DOMContentLoaded', function() {
+  var mgr = document.getElementById('listMgrModal');
+  if (mgr) {
+    mgr.addEventListener('hidden.bs.modal', function() {
+      loadFactoriesAndCustomers();
+      loadOrders();
+    });
+  }
+});
+
+function loadFactoriesAndCustomers() {
+  authFetch('api/factories').then(function(r) { return r.json(); }).then(function(d) {
+    factoryOrder = d.figure_factories || [];
+    var mSel = document.getElementById('m-figure_factory');
+    var current = mSel.value;
+    mSel.innerHTML = '<option value="">请选择</option>' + factoryOrder.map(function(f) {
+      return '<option' + (f === current ? ' selected' : '') + '>' + esc(f) + '</option>';
+    }).join('');
+  });
+  loadCustomers();
 }
 
 // ─── Order List (grouped by factory) ─────────────────────────────────

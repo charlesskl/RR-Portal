@@ -24,12 +24,14 @@ class Pigment(db.Model):
     transactions = db.relationship("Transaction", back_populates="pigment",
                                    cascade="all, delete-orphan")
 
-    # 部分唯一索引:仅当 code 非空时才强制 (brand, code) 唯一,
-    # 允许多条 OCR 自动新建的待填色粉(code='')共存。
+    # 部分唯一索引:仅当 code 非空 *且未归档* 时才强制 (brand, code) 唯一。
+    # - code='' 允许多条共存(OCR 自动新建的待填色粉)
+    # - 已归档(软删)色粉不占用编号:它对入/出库匹配、下拉等所有在用逻辑都不可见,
+    #   归档后应能把同一编号重新启用。
     __table_args__ = (
         Index("uq_brand_code", "brand", "code",
               unique=True,
-              sqlite_where=_sa_text("code != ''")),
+              sqlite_where=_sa_text("code != '' AND is_archived = 0")),
     )
 
 class Stock(db.Model):

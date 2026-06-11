@@ -1,74 +1,71 @@
-// 子路径部署: vite --base /pi-outsource/ 时 BASE_URL = '/pi-outsource/'
-// 所有 API 请求前缀为 /pi-outsource/api/...，命中 nginx 的 /pi-outsource/api/ location
-export const BASE = (import.meta.env.BASE_URL || '/').replace(/\/$/, '');
-
 const json = (r) => r.ok ? r.json() : r.text().then((t) => { throw new Error(t || r.statusText); });
-const f = (path, opts) => fetch(BASE + path, opts).then(json);
 
 export const api = {
   // orders
-  listOrders:    ()      => f('/api/orders'),
-  createOrder:   (b)     => f('/api/orders', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify(b) }),
-  updateOrder:   (id, b) => f(`/api/orders/${id}`, { method:'PUT', headers:{'content-type':'application/json'}, body: JSON.stringify(b) }),
-  deleteOrder:   (id)    => f(`/api/orders/${id}`, { method:'DELETE' }),
+  listOrders:    ()      => fetch('/api/orders').then(json),
+  createOrder:   (b)     => fetch('/api/orders', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify(b) }).then(json),
+  updateOrder:   (id, b) => fetch(`/api/orders/${id}`, { method:'PUT', headers:{'content-type':'application/json'}, body: JSON.stringify(b) }).then(json),
+  deleteOrder:   (id)    => fetch(`/api/orders/${id}`, { method:'DELETE' }).then(json),
 
   // suppliers
-  listSuppliers: ()      => f('/api/suppliers'),
-  createSupplier:(b)     => f('/api/suppliers', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify(b) }),
-  updateSupplier:(id, b) => f(`/api/suppliers/${id}`, { method:'PUT', headers:{'content-type':'application/json'}, body: JSON.stringify(b) }),
-  deleteSupplier:(id)    => f(`/api/suppliers/${id}`, { method:'DELETE' }),
+  listSuppliers: ()      => fetch('/api/suppliers').then(json),
+  createSupplier:(b)     => fetch('/api/suppliers', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify(b) }).then(json),
+  updateSupplier:(id, b) => fetch(`/api/suppliers/${id}`, { method:'PUT', headers:{'content-type':'application/json'}, body: JSON.stringify(b) }).then(json),
+  deleteSupplier:(id)    => fetch(`/api/suppliers/${id}`, { method:'DELETE' }).then(json),
 
   // pc
-  listPc:        ()      => f('/api/pc-orders'),
-  createPc:      (b)     => f('/api/pc-orders', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify(b) }),
-  updatePc:      (id, b) => f(`/api/pc-orders/${id}`, { method:'PUT', headers:{'content-type':'application/json'}, body: JSON.stringify(b) }),
-  deletePc:      (id)    => f(`/api/pc-orders/${id}`, { method:'DELETE' }),
+  listPc:        ()      => fetch('/api/pc-orders').then(json),
+  createPc:      (b)     => fetch('/api/pc-orders', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify(b) }).then(json),
+  updatePc:      (id, b) => fetch(`/api/pc-orders/${id}`, { method:'PUT', headers:{'content-type':'application/json'}, body: JSON.stringify(b) }).then(json),
+  deletePc:      (id)    => fetch(`/api/pc-orders/${id}`, { method:'DELETE' }).then(json),
 
   // stats
-  summary:       ()      => f('/api/stats/summary'),
+  summary:       ()      => fetch('/api/stats/summary').then(json),
 
   // pdf import
   parsePdf:      (file)  => {
     const fd = new FormData();
     fd.append('file', file);
-    return f('/api/parse-pdf', { method: 'POST', body: fd });
+    return fetch('/api/parse-pdf', { method: 'POST', body: fd }).then(json);
   },
   parsePdfAi:    (file)  => {
     const fd = new FormData();
     fd.append('file', file);
-    return f('/api/parse-pdf-ai', { method: 'POST', body: fd });
+    return fetch('/api/parse-pdf-ai', { method: 'POST', body: fd }).then(json);
   },
 
   // mold mappings
-  listMoldMappings: ()           => f('/api/mold-mappings'),
-  saveMoldMappings: (mappings)   => f('/api/mold-mappings', {
+  listMoldMappings: ()           => fetch('/api/mold-mappings').then(json),
+  saveMoldMappings: (mappings)   => fetch('/api/mold-mappings', {
     method: 'POST', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ mappings }),
-  }),
-  updateMoldMapping: (code, body) => f(`/api/mold-mappings/${encodeURIComponent(code)}`, {
+  }).then(json),
+  updateMoldMapping: (code, body) => fetch(`/api/mold-mappings/${encodeURIComponent(code)}`, {
     method: 'PUT', headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
-  }),
-  deleteMoldMapping: (code) => f(`/api/mold-mappings/${encodeURIComponent(code)}`, {
+  }).then(json),
+  deleteMoldMapping: (code) => fetch(`/api/mold-mappings/${encodeURIComponent(code)}`, {
     method: 'DELETE',
-  }),
-  moldFactoryMap: () => f('/api/mold-factory-map'),
+  }).then(json),
+  moldFactoryMap: () => fetch('/api/mold-factory-map').then(json),
 
   // workshops (autocomplete options for 车间)
-  listWorkshops: () => f('/api/workshops'),
+  listWorkshops: () => fetch('/api/workshops').then(json),
+  workshopOrder: () => fetch('/api/workshop-order').then(json),
+  listPmcs: () => fetch('/api/pmcs').then(json),
 
   // Bulk-rename a supplier across orders + mappings + suppliers list
-  renameSupplier: (from, to) => f('/api/suppliers/rename', {
+  renameSupplier: (from, to) => fetch('/api/suppliers/rename', {
     method: 'POST', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ from, to }),
-  }),
-  importPdfRows: (body)  => f('/api/import-pdf-rows', {
+  }).then(json),
+  importPdfRows: (body)  => fetch('/api/import-pdf-rows', {
     method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
-  }),
+  }).then(json),
 
   // excel export
-  exportAllUrl:  ()      => BASE + '/api/orders/export.xlsx',
-  exportRows:    (rows, filename, sheet_name) => fetch(BASE + '/api/export-excel', {
+  exportAllUrl:  ()      => '/api/orders/export.xlsx',
+  exportRows:    (rows, filename, sheet_name) => fetch('/api/export-excel', {
     method: 'POST', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ rows, filename, sheet_name }),
   }).then((r) => r.ok ? r.blob() : r.text().then((t) => { throw new Error(t); })),

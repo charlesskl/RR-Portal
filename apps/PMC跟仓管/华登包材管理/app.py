@@ -696,7 +696,7 @@ def party_entry(party):
     """, [party, from_p, to_p, date, order_no, remark, *qty_vals])
     con.commit()
     con.close()
-    return redirect(url_for('party_page', party=party))
+    return _party_redirect(party)
 
 
 @app.route('/party/<party>/export')
@@ -747,6 +747,24 @@ def party_export(party):
                      mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
 
+def _party_redirect(party):
+    """重定向回 party 页面,保留筛选(date_from/date_to/order_no)和所在 tab。
+    筛选值用 _f_* 前缀的隐藏字段传(避免和记录自身的 date/order_no 字段撞名);
+    _tab 形如 'sent-syhd'。没有这些字段时退化为普通跳转,行为不变。"""
+    args = {}
+    for form_key, arg_key in (('_f_date_from', 'date_from'),
+                              ('_f_date_to', 'date_to'),
+                              ('_f_order_no', 'order_no')):
+        v = (request.form.get(form_key) or '').strip()
+        if v:
+            args[arg_key] = v
+    url = url_for('party_page', party=party, **args)
+    tab = (request.form.get('_tab') or '').strip()  # 形如 'sent-syhd' / 'received-syhd'
+    if tab:
+        url += '#tab-' + tab
+    return redirect(url)
+
+
 @app.route('/record/<int:rid>/edit', methods=['POST'])
 def record_edit(rid):
     party = current_party()
@@ -782,7 +800,7 @@ def record_edit(rid):
         [date, order_no, remark, *qty_vals, rid]
     )
     con.commit(); con.close()
-    return redirect(url_for('party_page', party=party))
+    return _party_redirect(party)
 
 
 @app.route('/record/<int:rid>/delete', methods=['POST'])
@@ -801,7 +819,7 @@ def record_delete(rid):
         con.close(); flash('记录已锁定'); return redirect(url_for('party_page', party=party))
     con.execute("DELETE FROM flow_records WHERE id=?", (rid,))
     con.commit(); con.close()
-    return redirect(url_for('party_page', party=party))
+    return _party_redirect(party)
 
 
 def _upsert_monthly(table, party, ym, fields, remark):
@@ -1118,6 +1136,7 @@ def reports():
 
     con.close()
     monthly_by_party = [(p, PARTIES[p]['name'], _build_monthly_stats(p)) for p in ('hd', 'sy', 'xx')]
+    inv_grand_total = _build_inventory_grand_total(monthly_by_party)
     today = datetime.now().strftime('%Y/%m/%d')
     today_cn = datetime.now().strftime('%Y年%m月%d日')
     return render_template('reports.html',
@@ -1127,6 +1146,7 @@ def reports():
                            pair_summary=pair_summary,
                            monthly_by_pair=monthly_by_pair,
                            monthly_by_party=monthly_by_party,
+                           inv_grand_total=inv_grand_total,
                            date_from=date_from, date_to=date_to,
                            only_confirmed=only_confirmed,
                            today=today, today_cn=today_cn,
@@ -1281,6 +1301,54 @@ def _build_monthly_stats(party):
     return rows
 
 
+def _build_inventory_grand_total(monthly_by_party):
+    """跨厂区合计(汇总报表底部):取三厂区中最新有盘点的那个月,把各厂区该月的
+    基线实存/损耗/当月实存/当月应存按物料(STAT_ITEMS)加总,并算总损耗占比。
+
+    monthly_by_party: [(party_code, party_name, rows), ...]，rows 来自 _build_monthly_stats(最新在前)。
+    返回 None 表示三厂区都没有可合计的盘点数据。
+    """
+    # 目标月 = 三厂区里"最新已盘点(is_measured)"月份的最大值
+    target_ym = None
+    for _p, _name, rows in monthly_by_party:
+        for r in rows:                      # rows 已最新在前,取该厂区最新已盘月
+            if r['is_measured']:
+                if target_ym is None or r['ym'] > target_ym:
+                    target_ym = r['ym']
+                break
+    if not target_ym:
+        return None
+
+    base = {k: 0.0 for k, _ in STAT_ITEMS}
+    loss = {k: 0.0 for k, _ in STAT_ITEMS}
+    actual = {k: 0.0 for k, _ in STAT_ITEMS}
+    expected = {k: 0.0 for k, _ in STAT_ITEMS}
+    included, missing = [], []
+    prev_month_num = month_num = None
+
+    for _p, name, rows in monthly_by_party:
+        row = next((r for r in rows if r['ym'] == target_ym and r['is_measured']), None)
+        if not row:
+            missing.append(name)
+            continue
+        included.append(name)
+        prev_month_num = row['prev_month_num']
+        month_num = row['month_num']
+        for k, _ in STAT_ITEMS:
+            it = row['items'][k]
+            base[k] += it['prev'] or 0
+            loss[k] += it['loss'] or 0
+            actual[k] += it['actual'] or 0
+            expected[k] += it['expected'] or 0
+
+    loss_pct = {k: (loss[k] / expected[k] * 100 if expected[k] else 0) for k, _ in STAT_ITEMS}
+    return {
+        'ym': target_ym, 'prev_month_num': prev_month_num, 'month_num': month_num,
+        'base': base, 'loss': loss, 'actual': actual, 'expected': expected,
+        'loss_pct': loss_pct, 'included': included, 'missing': missing,
+    }
+
+
 def _query_flow(con, *, recorded_by, from_party, to_party, date_from=None, date_to=None, order_no=None):
     """查 flow_records。"""
     sql = """SELECT * FROM flow_records
@@ -1327,9 +1395,68 @@ def compare_pair(party_a, party_b, date_from, date_to):
             'sender_recorded': sender_sum,
             'receiver_recorded': receiver_sum,
             'diffs': diffs,
+            'order_check': _compare_by_order(con, sender=sender, receiver=receiver,
+                                             date_from=date_from, date_to=date_to),
         }
     con.close()
     return result
+
+
+def _sum_items_by_order(con, *, recorded_by, from_party, to_party, date_from, date_to):
+    """按 order_no 汇总各包材数量。返回 (by_order, no_orderno_count)。
+    by_order = {order_no: {item_key: float}}，只含非空 order_no；
+    no_orderno_count = 该方向下 order_no 为空的记录条数（不参与单号级核对）。"""
+    qty_cols_sql = ', '.join([f'COALESCE(SUM({k}_qty), 0) AS {k}_sum' for k, _ in ITEMS])
+    rows = con.execute(f"""
+        SELECT order_no, {qty_cols_sql} FROM flow_records
+        WHERE recorded_by=? AND from_party=? AND to_party=? AND date BETWEEN ? AND ?
+        GROUP BY order_no
+    """, (recorded_by, from_party, to_party, date_from, date_to)).fetchall()
+    by_order = {}
+    for r in rows:
+        on = (r['order_no'] or '').strip()
+        if not on:
+            continue
+        by_order[on] = {k: float(r[f'{k}_sum']) for k, _ in ITEMS}
+    no_cnt = con.execute("""
+        SELECT COUNT(*) FROM flow_records
+        WHERE recorded_by=? AND from_party=? AND to_party=? AND date BETWEEN ? AND ?
+          AND (order_no IS NULL OR TRIM(order_no) = '')
+    """, (recorded_by, from_party, to_party, date_from, date_to)).fetchone()[0]
+    return by_order, no_cnt
+
+
+def _compare_by_order(con, *, sender, receiver, date_from, date_to):
+    """单号级核对（一个方向 sender→receiver）：
+    - missing_in_receiver：发方录了、收方没有的单号
+    - missing_in_sender：收方录了、发方没有的单号
+    - item_mismatches：双方都有的同一单号，逐包材比数量，列出对不上的
+    - no_orderno_sender / no_orderno_receiver：各方无单号记录条数
+    """
+    sender_by_order, sender_no = _sum_items_by_order(
+        con, recorded_by=sender, from_party=sender, to_party=receiver,
+        date_from=date_from, date_to=date_to)
+    receiver_by_order, receiver_no = _sum_items_by_order(
+        con, recorded_by=receiver, from_party=sender, to_party=receiver,
+        date_from=date_from, date_to=date_to)
+    sset, rset = set(sender_by_order), set(receiver_by_order)
+    item_mismatches = []
+    for on in sorted(sset & rset):
+        s_items, r_items = sender_by_order[on], receiver_by_order[on]
+        for k, name in ITEMS:
+            sv, rv = s_items.get(k, 0), r_items.get(k, 0)
+            if abs(sv - rv) > 1e-9:
+                item_mismatches.append({
+                    'order_no': on, 'item': k, 'item_name': name,
+                    'sender': round(sv, 4), 'receiver': round(rv, 4),
+                })
+    return {
+        'missing_in_receiver': sorted(sset - rset),
+        'missing_in_sender': sorted(rset - sset),
+        'item_mismatches': item_mismatches,
+        'no_orderno_sender': sender_no,
+        'no_orderno_receiver': receiver_no,
+    }
 
 
 def _sum_items(con, *, recorded_by, from_party, to_party, date_from, date_to):

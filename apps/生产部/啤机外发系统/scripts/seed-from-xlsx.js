@@ -5,6 +5,7 @@ const path = require('path');
 
 const XLSX_PATH = process.argv[2] || 'C:\\DL\\啤机外发\\2026年啤机外发模具表.2026-4-27最新更新.xlsx';
 const DATA_DIR = path.join(__dirname, '..', 'server', 'data');
+const { workshopFromPmc } = require('../server/pmc-workshop-map');
 
 let XLSX;
 try { XLSX = require('xlsx'); } catch (e) {
@@ -72,10 +73,14 @@ for (const name of wb.SheetNames) fillMergedCells(wb.Sheets[name]);
     if (!r || r.length < 5) continue;
     const mold = (r[4] || '').toString().trim();
     if (!mold) continue;
+    const pmcRaw = (r[14] || '').toString().trim();
+    const workshopFromExcel = (r[2] || '').toString().trim();
+    // Derive workshop from PMC; fall back to Excel column 车间 if PMC isn't mapped
+    const derivedWorkshop = workshopFromPmc(pmcRaw) || workshopFromExcel;
     out.push({
       id: nid(),
       seq: (r[1] || '').toString().trim() || null,
-      workshop: (r[2] || '').toString().trim() || '',
+      workshop: derivedWorkshop,
       item_code: (r[3] || '').toString().trim() || '',
       mold,
       order_qty_pcs: toNum(r[5]),
@@ -87,7 +92,7 @@ for (const name of wb.SheetNames) fillMergedCells(wb.Sheets[name]);
       supplier_price_rmb: toNum(r[11]),
       supplier_price_usd: toNum(r[12]),
       supplier: (r[13] || '').toString().trim() || '',
-      pmc_follow: (r[14] || '').toString().trim() || '',
+      pmc_follow: pmcRaw,
       order_date: toISO(r[15]),
       production_start: toISO(r[16]),
       estimated_delivery: toISO(r[17]),

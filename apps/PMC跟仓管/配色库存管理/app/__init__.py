@@ -85,20 +85,26 @@ def _validate_auth_config(app):
 
 
 def _migrate_uq_brand_code_partial():
-    """把旧版全行唯一的 uq_brand_code 迁移成部分唯一索引(WHERE code != '')。
+    """uq_brand_code 部分唯一索引迁移,幂等。目标定义:
+        WHERE code != '' AND is_archived = 0
+    演进历程:
+      1) 早期 UniqueConstraint → 无 WHERE 的全行 UNIQUE INDEX;
+      2) 改成 WHERE code != '' (支持多条待填色粉 code='' 共存);
+      3) 再加 AND is_archived = 0 (归档软删色粉不占用编号,可重新启用)。
 
-    早期版本定义为 UniqueConstraint,SQLite 实际落成无 WHERE 的 UNIQUE INDEX;
-    支持多个待填色粉(code='')共存就得改成部分索引。幂等。"""
+    重建是旧索引的严格子集(约束更少的行):原数据若已满足全行唯一,
+    必定能创建成功,不会因已有数据冲突而失败。"""
     from sqlalchemy import text
     conn = db.session.connection()
     row = conn.execute(text(
         "SELECT sql FROM sqlite_master WHERE type='index' AND name='uq_brand_code'"
     )).fetchone()
     current_sql = (row[0] if row else "") or ""
-    if " WHERE " in current_sql.upper():
-        return  # 已经是部分索引
+    if "is_archived" in current_sql.lower():
+        return  # 已是目标定义
     conn.execute(text("DROP INDEX IF EXISTS uq_brand_code"))
     conn.execute(text(
-        "CREATE UNIQUE INDEX uq_brand_code ON pigment(brand, code) WHERE code != ''"
+        "CREATE UNIQUE INDEX uq_brand_code ON pigment(brand, code) "
+        "WHERE code != '' AND is_archived = 0"
     ))
     db.session.commit()

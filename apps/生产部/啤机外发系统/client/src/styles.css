@@ -91,8 +91,21 @@ td.num { text-align: right; font-variant-numeric: tabular-nums; }
 /* New-order row highlight: rows created within the last 24h glow yellow */
 tr.order-new td { background: #fef9c3 !important; }
 tr.order-new:hover td { background: #fde68a !important; }
-/* Thick top border separating different 车间 groups */
-tr.workshop-boundary > td { border-top: 3px solid #1f2937 !important; }
+/* Brief blue flash on the row just saved, so the user spots where it landed */
+@keyframes row-flash-kf {
+  0%   { background: #bfdbfe; }
+  100% { background: transparent; }
+}
+tr.row-flash td { animation: row-flash-kf 1.6s ease-out; }
+
+/* Workshop separator: a blank yellow band between different 车间 groups */
+tr.workshop-separator td {
+  background: #fde68a !important;
+  height: 14px;
+  padding: 0;
+  border-top: 1px solid #d97706;
+  border-bottom: 1px solid #d97706;
+}
 .new-badge {
   display: inline-block; padding: 1px 6px; border-radius: 4px;
   background: #f59e0b; color: #fff; font-size: 10px; font-weight: 600;

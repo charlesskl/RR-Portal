@@ -394,6 +394,9 @@
             <button class="btn btn-outline-info btn-sm py-1" style="font-size:0.78rem;white-space:nowrap;" onclick="rescan()">
                 <i class="bi bi-arrow-clockwise"></i> 重建
             </button>
+            <button class="btn btn-outline-danger btn-sm py-1" style="font-size:0.78rem;white-space:nowrap;" onclick="deleteAllSchedules()">
+                <i class="bi bi-trash"></i> 全部清空
+            </button>
         </div>
 
         <div class="card mt-2" id="scheduleDropZone"
@@ -611,8 +614,22 @@ async function deleteSchedule(filename) {
         });
         const data = await r.json();
         if (data.ok) checkStatus();
-        else showError('删除失败: ' + (data.error || ''));
-    } catch (e) { showError('删除失败: ' + e.message); }
+        else { showError('删除失败: ' + (data.error || '')); checkStatus(); }
+    } catch (e) { showError('删除失败: ' + e.message); checkStatus(); }
+}
+
+async function deleteAllSchedules() {
+    if (!confirm('确定清空所有排期文件？此操作不可撤销！')) return;
+    setProcessing(true, '正在清空排期文件...');
+    try {
+        const r = await fetch('api/hy-delete-all-schedules', {
+            method: 'POST', headers: {'X-CSRF-Token': getCsrfToken()}
+        });
+        const data = await r.json();
+        if (data.ok) checkStatus();
+        else showError('清空失败: ' + (data.error || ''));
+    } catch (e) { showError('清空失败: ' + e.message); }
+    finally { setProcessing(false); }
 }
 
 async function rescan() {

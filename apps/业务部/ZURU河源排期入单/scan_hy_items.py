@@ -34,6 +34,7 @@ def _openpyxl_autofilter_patch():
 # 复用 hy_schedule.py 的 sheet 筛选逻辑，保持唯一事实源
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from hy_schedule import _pick_target_sheets
+from fy_schedule import detect_fy_file, scan_fy_items
 
 
 def scan(schedule_dir):
@@ -44,6 +45,24 @@ def scan(schedule_dir):
 
     for fn in files:
         fpath = os.path.join(schedule_dir, fn)
+
+        # 翻译排期（MA扣数表）→ 用fy扫描逻辑
+        if detect_fy_file(fpath):
+            try:
+                fy_map = scan_fy_items(fpath)
+                fy_keys = 0
+                for k, entries in fy_map.items():
+                    for entry in entries:
+                        mapping.setdefault(k, [])
+                        if entry not in mapping[k]:
+                            mapping[k].append(entry)
+                    fy_keys += 1
+                print(f'  [翻译排期] {fn}: {fy_keys}个货号key')
+            except Exception as e:
+                print(f'  [翻译排期 ERR] {fn}: {e}')
+            continue
+
+        # 河源排期 → 原有逻辑
         try:
             wb = openpyxl.load_workbook(fpath, read_only=True, data_only=True)
         except Exception as e:
@@ -93,6 +112,58 @@ def scan(schedule_dir):
             print(f'  [{sn}] {items_count}个货号')
         wb.close()
 
+    return mapping
+
+
+def scan_single(fpath):
+    """扫描单个排期文件，返回 {item_key: [{file, sheet, ...}]}"""
+    fn = os.path.basename(fpath)
+    mapping = {}
+
+    if detect_fy_file(fpath):
+        return scan_fy_items(fpath)
+
+    try:
+        with _openpyxl_autofilter_patch():
+            wb = openpyxl.load_workbook(fpath, read_only=True, data_only=True)
+    except Exception as e:
+        print(f'[ERR] {fn}: {e}')
+        return {}
+
+    targets = _pick_target_sheets(wb.sheetnames)
+    if not targets:
+        wb.close()
+        return {}
+
+    for sn in targets:
+        ws = wb[sn]
+        header_row = None
+        for r in range(1, 8):
+            for c in range(1, 20):
+                if '产品货号' in str(ws.cell(r, c).value or ''):
+                    header_row = r
+                    break
+            if header_row:
+                break
+        if not header_row:
+            continue
+        empty = 0
+        for r in range(header_row + 1, 5000):
+            v = ws.cell(r, 7).value
+            if not v:
+                empty += 1
+                if empty > 30:
+                    break
+                continue
+            empty = 0
+            s = re.sub(r'[\s\n]+', '', str(v)).strip().upper()
+            if not s or not re.match(r'\d', s):
+                continue
+            entry = {'file': fn, 'sheet': sn}
+            mapping.setdefault(s, [])
+            if entry not in mapping[s]:
+                mapping[s].append(entry)
+    wb.close()
     return mapping
 
 

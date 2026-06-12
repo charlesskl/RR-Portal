@@ -11,47 +11,6 @@ import openpyxl
 
 logger = logging.getLogger(__name__)
 
-
-class _CellShim:
-    __slots__ = ('value',)
-
-    def __init__(self, value):
-        self.value = value
-
-
-_EMPTY_CELL = _CellShim(None)
-
-
-class _RowGrid:
-    """openpyxl worksheet 的 drop-in 替代：流式一次读完成 2D list，
-    之后 ws.cell(r,c).value / ws.max_row 访问都是 O(1)。
-
-    read_only=True 下原始 ws.cell(r,c) 每次从头 scan，循环读 N 行就是 O(N²)，
-    对 200+ 行的 PO 要几十秒。iter_rows 一次流式只要不到 1s。
-    """
-    __slots__ = ('_rows', '_max_row', '_max_col')
-
-    def __init__(self, ws):
-        self._rows = list(ws.iter_rows(values_only=True))
-        self._max_row = len(self._rows)
-        self._max_col = max((len(r) for r in self._rows), default=0)
-
-    def cell(self, r, c):
-        if 1 <= r <= self._max_row:
-            row = self._rows[r - 1]
-            if 1 <= c <= len(row):
-                return _CellShim(row[c - 1])
-        return _EMPTY_CELL
-
-    @property
-    def max_row(self):
-        return self._max_row
-
-    @property
-    def max_col(self):
-        return self._max_col
-
-
 # 修改单识别正则：文件名含Rev/R1/R2/R3/R4/Rev./.rev./Rev2.等
 _REV_RE = re.compile(r'(?:Rev\d*\.?|(?:^|\W)R\d\b|\.rev\.)', re.I)
 
@@ -231,9 +190,7 @@ def parse(filepath):
     }
     """
     wb = openpyxl.load_workbook(filepath, data_only=True, read_only=True)
-    # 流式读成 2D 数组后立刻关闭，后续所有 ws.cell(r,c).value 访问都是 O(1)
-    ws = _RowGrid(wb.active)
-    wb.close()
+    ws = wb.active
     result = {
         'po_number': '', 'po_date': None, 'customer': '',
         'customer_po': '', 'destination': '', 'from_person': '',
@@ -367,8 +324,13 @@ def parse(filepath):
 
     logger.info(f'[PO解析] {os.path.basename(filepath)} 表头行={header_row} 列映射={col_map}')
 
-    # 数据起始行 = 表头行 + 2（跳过子表头行如PCS/SIZE）
-    data_start_row = header_row + 2
+    # 数据起始行：通常 header_row + 2（跳过子表头行如PCS/SIZE）
+    # 但如果 header_row+1 已经是数据行（第1列有数字line_no），则不跳过
+    _maybe_data = ws.cell(header_row + 1, 1).value
+    if _maybe_data is not None and str(_maybe_data).strip().replace('.0', '').isdigit():
+        data_start_row = header_row + 1
+    else:
+        data_start_row = header_row + 2
 
     # === 先收集所有原始行，再做跨页合并 ===
     raw_rows = []
@@ -460,6 +422,8 @@ def parse(filepath):
             merged_rows.append(cur)
 
     # 转换为最终lines
+    # 记录每个line_no主行的delivery，子行继承
+    _line_delivery = {}
     for rd in merged_rows:
         if not rd['sku'] and not rd['spec']:
             continue
@@ -480,6 +444,13 @@ def parse(filepath):
             'total_ctns': rd['total_ctns'],
             'customer_po': rd['customer_po'],
         }
+        # 同一line_no组：主行(首次出现)记录delivery，子行继承主行delivery
+        ln_no = line['line_no']
+        if ln_no:
+            if ln_no not in _line_delivery and line['delivery']:
+                _line_delivery[ln_no] = line['delivery']
+            elif not line['delivery'] and ln_no in _line_delivery:
+                line['delivery'] = _line_delivery[ln_no]
         if not line['delivery'] and result['ship_date']:
             line['delivery'] = result['ship_date']
         result['lines'].append(line)
@@ -536,6 +507,7 @@ def parse(filepath):
     result['remark'] = '\n'.join(rm_parts)
     result['revision_records'] = '\n'.join(rev_parts)
 
+    wb.close()
     logger.info(f'[PO解析] PO={result["po_number"]} 客户={result["customer"]} '
                 f'{len(result["lines"])}行数据 目的国={result["destination"]}')
     return result

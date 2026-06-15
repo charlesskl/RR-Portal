@@ -87,6 +87,9 @@ def _load_json(name):
 
 COUNTRY_MAP = _load_json('country_map.json')
 ITEM_MAP = _load_json('item_map.json')
+# 黑名单货号（河源等独立排期，不入总排期接单表）
+_ignore_data = _load_json('ignore_items.json')
+IGNORE_ITEMS = set(_ignore_data.get('ignore_items', []) if isinstance(_ignore_data, dict) else [])
 
 # 任务管理：每个 process 请求一个 task_id，避免并发互相覆盖
 _tasks = {}
@@ -281,6 +284,11 @@ def _generate_excel(parsed_orders, custom_date=None):
             simple_no = ln['simple_no']
             sku_full = ln['sku_spec'] or ln['sku'] or ''
 
+            # 黑名单货号（河源等独立排期）→ 跳过
+            if simple_no and simple_no in IGNORE_ITEMS:
+                skipped_items.append(f'{simple_no}({sku_full})[黑名单]')
+                continue
+
             # 货号不在映射表：纯数字→跳过，M开头→照写只警告
             if simple_no and simple_no not in ITEM_MAP:
                 if simple_no[0].upper() != 'M':
@@ -308,9 +316,12 @@ def _generate_excel(parsed_orders, custom_date=None):
                 except (ValueError, TypeError):
                     ws.cell(r, 3, simple_no)
 
-            # D 货号：去掉第一个-及之后的内容
+            # D 货号：含SLB的卡板货号统一写 简货号+SLB，普通格式取第一个-前
             raw_item = ln['sku_spec'] or ln['sku'] or ''
-            ws.cell(r, 4, raw_item.split('-')[0] if '-' in raw_item else raw_item)
+            if 'SLB' in raw_item and simple_no:
+                ws.cell(r, 4, simple_no + 'SLB')
+            else:
+                ws.cell(r, 4, raw_item.split('-')[0] if '-' in raw_item else raw_item)
 
             # E 走货期
             delivery_serial = _date_serial(ln['delivery'])

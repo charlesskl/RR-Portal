@@ -367,8 +367,13 @@ def parse(filepath):
 
     logger.info(f'[PO解析] {os.path.basename(filepath)} 表头行={header_row} 列映射={col_map}')
 
-    # 数据起始行 = 表头行 + 2（跳过子表头行如PCS/SIZE）
-    data_start_row = header_row + 2
+    # 数据起始行：通常 header_row + 2（跳过子表头行如PCS/SIZE）
+    # 但如果 header_row+1 已经是数据行（第1列有数字line_no），则不跳过
+    _maybe_data = ws.cell(header_row + 1, 1).value
+    if _maybe_data is not None and str(_maybe_data).strip().replace('.0', '').isdigit():
+        data_start_row = header_row + 1
+    else:
+        data_start_row = header_row + 2
 
     # === 先收集所有原始行，再做跨页合并 ===
     raw_rows = []
@@ -460,6 +465,8 @@ def parse(filepath):
             merged_rows.append(cur)
 
     # 转换为最终lines
+    # 记录每个line_no主行的delivery，子行继承
+    _line_delivery = {}
     for rd in merged_rows:
         if not rd['sku'] and not rd['spec']:
             continue
@@ -480,6 +487,13 @@ def parse(filepath):
             'total_ctns': rd['total_ctns'],
             'customer_po': rd['customer_po'],
         }
+        # 同一line_no组：主行(首次出现)记录delivery，子行继承主行delivery
+        ln_no = line['line_no']
+        if ln_no:
+            if ln_no not in _line_delivery and line['delivery']:
+                _line_delivery[ln_no] = line['delivery']
+            elif not line['delivery'] and ln_no in _line_delivery:
+                line['delivery'] = _line_delivery[ln_no]
         if not line['delivery'] and result['ship_date']:
             line['delivery'] = result['ship_date']
         result['lines'].append(line)

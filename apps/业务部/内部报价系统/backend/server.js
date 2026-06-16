@@ -32,5 +32,5 @@ app.use('/api/admin', require('./routes/admin'));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 app.use(express.static(path.join(__dirname, '..', 'frontend')));
 
-const PORT = process.env.PORT || 3210;
+const PORT = process.env.PORT || 3211;
 app.listen(PORT, () => console.log(`内部报价系统 listening on http://localhost:${PORT}`));

@@ -472,7 +472,7 @@ services:
       context: ./apps/业务部/内部报价系统
       dockerfile: Dockerfile
     environment:
-      - PORT=3210
+      - PORT=3211
       - NODE_ENV=production
       - SESSION_SECRET=${INTERNAL_QUOTE_SESSION_SECRET:-}
       - ADMIN_INITIAL_PASSWORD=${INTERNAL_QUOTE_ADMIN_PASSWORD:-}
@@ -480,7 +480,7 @@ services:
       - ./apps/业务部/内部报价系统/backend/data:/app/backend/data
       - ./apps/业务部/内部报价系统/backend/uploads:/app/backend/uploads
     healthcheck:
-      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:3210/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:3211/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
       interval: 10s
       timeout: 5s
       retries: 3

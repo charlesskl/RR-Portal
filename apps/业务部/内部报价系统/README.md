@@ -15,7 +15,7 @@
 ## 关键参数
 - **service 名**: `internal-quote`（容器/DNS/nginx upstream 用，保持不变）
 - **URL 路径**: `/internal-quote/`
-- **端口**: 容器内 `3210`（`PORT` 可改）
+- **端口**: 容器内 `3211`（`PORT` 可改）
 - **持久化（bind-mount 两个目录）**:
   - `backend/data/`  — SQLite 数据库（`DB_FILE=/app/backend/data/data.db`）
   - `backend/uploads/` — 上传的模具图
@@ -28,5 +28,5 @@
 ## 本地运行
 ```bash
 npm install
-npm run dev   # node --watch backend/server.js → http://localhost:3210
+npm run dev   # node --watch backend/server.js → http://localhost:3211
 ```

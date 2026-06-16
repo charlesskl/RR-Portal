@@ -290,7 +290,9 @@ if [[ "$COMPOSE_CHANGED" -eq 1 ]]; then
   # 策略：先 up -d（无 --build），让 docker 用现有 image 只 recreate 容器
   # 这样纯 rename 几乎零成本；如果有新服务或 Dockerfile 变了再用 AFFECTED_SERVICES 做增量 build
   echo "  [COMPOSE] Compose 变动，recreate 容器（不强制 rebuild，避免 OOM 风险）"
-  docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d
+  # --remove-orphans: 删除已从 compose 移除的服务遗留的孤儿容器，
+  # 否则被下线/重命名的服务容器会继续运行（crash-loop 时甚至拖垮内存导致全站 OOM）
+  docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --remove-orphans
   # 还要 rebuild 那些真的动了源码的服务（incremental）
   for svc in "${AFFECTED_SERVICES[@]}"; do
     echo "  [INCR] Rebuilding $svc (--no-deps)..."

@@ -3,6 +3,7 @@
 #
 # Includes: core + db + redis + nginx + rr-production
 # Excludes: 3D打印 (hardware), schedule-system (SMB/Windows), zuru-ma (deferred), indonesia-export (deleted)
+# 2026-06-16: 触发 COMPOSE_CHANGED 走 --remove-orphans 路径，清除 internal-quote (#181) 遗留孤儿容器
 
 services:
   # ──────────────────────────────────────

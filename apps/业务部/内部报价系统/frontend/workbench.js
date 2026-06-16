@@ -299,9 +299,9 @@ function renderImageCell(td, m, canEdit, onChange) {
   const wrap = document.createElement('div'); wrap.className = 'cell-imgs';
   (m.images || []).forEach((u, i) => {
     const box = document.createElement('div'); box.className = 'cell-img';
-    box.innerHTML = `<img src="/${u}" />${canEdit ? `<button class="mini danger img-del">×</button>` : ''}`;
+    box.innerHTML = `<img src="${u}" />${canEdit ? `<button class="mini danger img-del">×</button>` : ''}`;
     if (canEdit) box.querySelector('.img-del').onclick = () => { m.images.splice(i, 1); renderImageCell(td, m, canEdit, onChange); onChange(); };
-    box.querySelector('img').onclick = () => window.open('/' + u, '_blank');
+    box.querySelector('img').onclick = () => window.open(u, '_blank');
     wrap.appendChild(box);
   });
   if (canEdit) {

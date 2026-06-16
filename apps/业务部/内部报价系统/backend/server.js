@@ -17,6 +17,9 @@ app.use(cookieSession({
   secure: process.env.NODE_ENV === 'production',  // 生产(HTTPS)下仅经加密连接发送；本地 http 开发不受影响
 }));
 
+// 健康检查（门户状态点 + 容器 healthcheck 用；无需鉴权）
+app.get('/health', (_req, res) => res.json({ status: 'ok' }));
+
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/quotes', require('./routes/quotes'));
 app.use('/api/quotes', require('./routes/export')); // GET /:id/export

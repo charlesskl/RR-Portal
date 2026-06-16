@@ -5,12 +5,16 @@
 - **技术栈**: Node.js + Express，`node:sqlite`（内置，需 Node 22.5+），cookie-session 鉴权，ExcelJS 导出
 - **自包含**: 不依赖 core/FastAPI，自带 SQLite 库与登录（与 `报价系统/baojia` 同类自包含 Node 应用）
 
-## 本 PR 范围
-仅新增本 app 文件夹。**未**接入 `docker-compose.cloud.yml` / nginx / 门户入口，需后续接线 PR 完成上线。
+## 接线状态（本 PR 已完成）
+- ✅ `docker-compose.cloud.yml`: service `internal-quote`（bind-mount `backend/data` + `backend/uploads`，healthcheck `/health`）
+- ✅ `nginx/nginx.cloud.conf`: 路由 `/internal-quote/`（api/静态/health，子路径前缀重写）
+- ✅ `frontend/index.cloud.html`: 门户磁贴 + 详情卡 + 状态点
+- ✅ `.env.cloud`: `INTERNAL_QUOTE_SESSION_SECRET`（必填）/ `INTERNAL_QUOTE_ADMIN_PASSWORD`（可选）
+- ✅ 前端已做子路径适配（fetch 前缀 shim + 图片相对路径），`/internal-quote/` 与根路径都能跑
 
-## 接线建议（给后续 PR / 维护者）
+## 关键参数
 - **service 名**: `internal-quote`（容器/DNS/nginx upstream 用，保持不变）
-- **URL 路径**: 建议 `/internal-quote/`
+- **URL 路径**: `/internal-quote/`
 - **端口**: 容器内 `3210`（`PORT` 可改）
 - **持久化（bind-mount 两个目录）**:
   - `backend/data/`  — SQLite 数据库（`DB_FILE=/app/backend/data/data.db`）

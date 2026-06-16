@@ -366,6 +366,12 @@
             </div>
             <div class="plugin-item">
               <div class="plugin-info">
+                <div class="plugin-dot gray" id="internalQuoteDot"></div>
+                <span class="plugin-name">内部报价系统</span>
+              </div>
+            </div>
+            <div class="plugin-item">
+              <div class="plugin-info">
                 <div class="plugin-dot gray" id="tomyDot"></div>
                 <span class="plugin-name">TOMY排期核对系统</span>
               </div>
@@ -640,6 +646,26 @@
 
     <div class="detail-plugin-card">
       <div class="detail-plugin-left">
+        <div class="detail-plugin-icon" style="background:linear-gradient(135deg,#0ea5e9,#2563eb);">&#128221;</div>
+        <div>
+          <div class="detail-plugin-name">内部报价系统</div>
+          <div class="detail-plugin-desc">多部门分工填写(业务/工程/电子/啤机/喷油/搪胶/车缝/装配) + 主管审核 + 受控导出内部报价明细 xlsx</div>
+          <div class="feature-grid">
+            <div class="feature-tag">&#128101; 多部门协作</div>
+            <div class="feature-tag">&#9989; 主管审核</div>
+            <div class="feature-tag">&#128202; 减税明细/成本汇总</div>
+            <div class="feature-tag">&#128229; Excel 导出</div>
+          </div>
+        </div>
+      </div>
+      <div class="detail-plugin-right">
+        <div class="detail-plugin-status"><div class="plugin-dot gray" id="internalQuoteDetailDot"></div> 检查中...</div>
+        <a href="/internal-quote/" target="_blank" class="btn btn-primary">打开系统</a>
+      </div>
+    </div>
+
+    <div class="detail-plugin-card">
+      <div class="detail-plugin-left">
         <div class="detail-plugin-icon" style="background:linear-gradient(135deg,#f59e0b,#ef4444);">&#128197;</div>
         <div>
           <div class="detail-plugin-name">TOMY排期核对系统</div>
@@ -895,6 +921,7 @@ async function checkHealth() {
       { name: 'zuruOrder', url: '/zuru-order-system/health', dot: 'zuruOrderDot', detailDot: 'zuruOrderDetailDot' },
       { name: 'liwenjuan', url: '/liwenjuan/health', dot: 'liwenjuanDot', detailDot: 'liwenjuanDetailDot' },
       { name: 'baojia', url: '/baojia/health', dot: 'baojiaDot', detailDot: 'baojiaDetailDot' },
+      { name: 'internalQuote', url: '/internal-quote/health', dot: 'internalQuoteDot', detailDot: 'internalQuoteDetailDot' },
       { name: 'tomy', url: '/tomy-paiqi/health', dot: 'tomyDot', detailDot: 'tomyDetailDot' },
       { name: 'zuruMaster', url: '/zuru-master/health', dot: 'zuruMasterDot', detailDot: 'zuruMasterDetailDot' },
       { name: 'hySchedule', url: '/hy-schedule/health', dot: 'hyScheduleDot', detailDot: 'hyScheduleDetailDot' },

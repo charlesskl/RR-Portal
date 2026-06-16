@@ -76,6 +76,18 @@
       </div>
     </section>
   </div>
+  <script>
+    // nginx 子路径部署适配：绝对 /api 请求自动加当前页面路径前缀（如 /internal-quote）；根路径部署无副作用
+    (function () {
+      var base = location.pathname.replace(/\/[^/]*$/, '');
+      if (!base) return;
+      var origFetch = window.fetch.bind(window);
+      window.fetch = function (url, opts) {
+        if (typeof url === 'string' && url.indexOf('/api/') === 0) url = base + url;
+        return origFetch(url, opts);
+      };
+    })();
+  </script>
   <script src="./main.js"></script>
 </body>
 </html>

@@ -43,8 +43,7 @@ RR-Portal/
 │   │   ├── ZURU接单表入单系统/      — zuru-order-system (Flask)
 │   │   ├── ZURU总排期入单/          — zuru-master-schedule (Flask)
 │   │   ├── 报价系统/                — baojia (Node.js, SPIN/TOMY 供应商报价)
-│   │   ├── TOMY排期核对系统/        — tomy-paiqi (Node.js + React)
-│   │   └── 内部报价系统/            — internal-quote (Node.js + node:sqlite, 多部门分工报价)
+│   │   └── TOMY排期核对系统/        — tomy-paiqi (Node.js + React)
 │   ├── QA部/
 │   │   └── QA测试报告周结系统/      — qa-weekly-report (Node.js + React + exceljs)
 │   └── task-api/                  — 任务 API (Node.js，仅本地 compose，无部门)
@@ -210,7 +209,6 @@ curl http://localhost:<port>/health
 | hy-schedule-system ZURU河源排期入单 | Flask | 5008 | /hy-schedule/ |
 | baojia 报价系统 | Node.js | 3007 | /baojia/ |
 | qa-weekly-report QA测试报告周结系统 | Node.js/React | 3210 | /qa-weekly-report/ |
-| internal-quote 内部报价系统 | Node.js | 3211 | /internal-quote/ |
 
 ## 插件类型
 
@@ -462,7 +460,6 @@ const data = JSON.parse(fs.readFileSync('data/data.json'));
 | hy-schedule-system | ZURU河源排期入单 | 业务部 | Standalone (Python/Flask) | /hy-schedule/ | https://github.com/hanson678/hy-schedule-system |
 | baojia | 报价系统 | 业务部 | Standalone (Node.js) | /baojia/ | — |
 | qa-weekly-report | QA测试报告周结系统 | QA部 | Standalone (Node.js/React + exceljs) | /qa-weekly-report/ | — |
-| internal-quote | 内部报价系统 | 业务部 | Standalone (Node.js + node:sqlite) | /internal-quote/ | — |
 
 ### 旧插件（已删除）
 

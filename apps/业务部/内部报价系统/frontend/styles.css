@@ -1,0 +1,476 @@
+/* ========== 设计令牌 ========== */
+:root {
+  --bg: #f5f7fb;
+  --surface: #ffffff;
+  --surface-soft: #f9fafb;
+  --border: #e5e7eb;
+  --border-soft: #f1f3f5;
+  --text: #1f2937;
+  --text-dim: #6b7280;
+  --text-light: #9ca3af;
+  --primary: #2563eb;
+  --primary-hover: #1d4ed8;
+  --primary-soft: #eff6ff;
+  --danger: #dc2626;
+  --danger-hover: #b91c1c;
+  --success: #16a34a;
+  --warning: #d97706;
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, .04), 0 1px 3px rgba(15, 23, 42, .06);
+  --shadow-md: 0 4px 12px rgba(15, 23, 42, .06), 0 2px 4px rgba(15, 23, 42, .04);
+  --radius: 10px;
+  --radius-sm: 6px;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.5;
+  padding: 0;
+}
+
+.topbar {
+  background: linear-gradient(135deg, #1e40af 0%, #2563eb 100%);
+  color: #fff;
+  padding: 14px 32px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, .08);
+}
+.topbar .brand { font-weight: 700; font-size: 18px; letter-spacing: 0.02em; }
+.topbar .brand small { font-weight: 400; opacity: 0.75; margin-left: 8px; font-size: 13px; }
+.topbar a { color: rgba(255,255,255,.85); text-decoration: none; margin-left: 16px; font-size: 13px; }
+.topbar a:hover { color: #fff; text-decoration: underline; }
+
+#app { max-width: 1560px; margin: 0 auto; padding: 24px; }
+/* 宽表（模具/注塑等）在卡片内横向滚动，避免内容溢出板块 */
+#wb-molds, #wb-inj, #wb-mold-costs, #wb-aux, #wb-pkmat, #wb-hw, #wb-elec, #wb-pp { overflow-x: auto; max-width: 100%; }
+
+h1 { margin: 0 0 12px; font-size: 26px; font-weight: 700; letter-spacing: -0.01em; }
+h2 { margin: 0 0 14px; font-size: 20px; font-weight: 600; }
+h3 { margin: 18px 0 10px; font-size: 16px; font-weight: 600; color: #374151; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+h3 > small { font-weight: 400; font-size: 13px; color: var(--text-dim); }
+
+.muted { color: var(--text-dim); }
+
+/* ========== Card ========== */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 22px 24px;
+  margin: 14px 0;
+  box-shadow: var(--shadow-sm);
+}
+.card:first-child { margin-top: 0; }
+
+.hidden { display: none !important; }
+
+/* ========== 表单元素 ========== */
+label { display: block; margin: 8px 0; font-size: 13px; color: #374151; }
+input, select, textarea {
+  padding: 7px 11px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-family: inherit;
+  font-size: 13px;
+  background: #fff;
+  color: var(--text);
+  transition: border .15s, box-shadow .15s;
+}
+input:hover, select:hover, textarea:hover { border-color: #cbd5e1; }
+input:focus, select:focus, textarea:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, .15);
+}
+input:disabled, select:disabled, textarea:disabled {
+  background: #f3f4f6;
+  color: var(--text-dim);
+  cursor: not-allowed;
+}
+
+/* ========== 按钮 ========== */
+button {
+  padding: 8px 18px;
+  border: none;
+  background: var(--primary);
+  color: #fff;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  transition: background .15s, transform .05s, box-shadow .15s;
+}
+button:hover { background: var(--primary-hover); box-shadow: var(--shadow-sm); }
+button:active { transform: translateY(1px); }
+button:disabled { background: #d1d5db; cursor: not-allowed; box-shadow: none; }
+
+button.mini { padding: 5px 12px; font-size: 12px; background: #6b7280; }
+button.mini:hover { background: #4b5563; }
+
+button.danger { background: var(--danger); }
+button.danger:hover { background: var(--danger-hover); }
+
+button.ghost { background: transparent; color: var(--primary); border: 1px solid var(--primary); }
+button.ghost:hover { background: var(--primary-soft); }
+
+.msg { color: var(--danger); min-height: 1em; font-size: 13px; }
+
+/* ========== Badge ========== */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  vertical-align: middle;
+}
+.b-empty    { background: #f3f4f6; color: #6b7280; }
+.b-filled   { background: #fef3c7; color: #92400e; }
+.b-approved { background: #dcfce7; color: #166534; }
+.b-rejected { background: #fee2e2; color: #991b1b; }
+
+/* ========== 状态条 ========== */
+#status-bar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+#status-bar .badge { padding: 6px 14px; font-size: 13px; }
+
+/* ========== 工作台表格 ========== */
+.wb-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  background: var(--surface);
+  margin: 10px 0;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.wb-table thead th {
+  background: #f8fafc;
+  padding: 11px 12px;
+  border-bottom: 2px solid #e2e8f0;
+  font-size: 12px;
+  font-weight: 600;
+  color: #475569;
+  text-align: left;
+  white-space: nowrap;
+  letter-spacing: 0.02em;
+}
+.wb-table tbody td {
+  padding: 8px 10px;
+  border-bottom: 1px solid #f1f5f9;
+  vertical-align: middle;
+}
+.wb-table tbody tr:nth-child(even) { background: #fcfdfe; }
+.wb-table tbody tr:hover { background: #f0f7ff; transition: background .15s; }
+.wb-table tbody tr:last-child td { border-bottom: none; }
+.wb-table td.ro {
+  background: #fafbfc;
+  color: #374151;
+  padding: 8px 12px;
+}
+.wb-table td.hi, .wb-table tr.hi td {
+  background: #eff6ff;
+  font-weight: 600;
+  color: #1e40af;
+}
+.wb-table input, .wb-table textarea {
+  width: 100%;
+  min-width: 0;
+  padding: 6px 9px;
+  font-size: 13px;
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  border-radius: 5px;
+  color: #1f2937;
+  transition: border-color .15s, box-shadow .15s;
+}
+.wb-table input:hover, .wb-table textarea:hover { border-color: #cbd5e1; }
+.wb-table input:focus, .wb-table textarea:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, .12);
+  outline: none;
+}
+/* 出货价算价表 */
+.ship-table { max-width: 900px; }
+.ship-table tbody tr.hi td { background: #eff6ff; font-weight: 600; }
+.ship-table td.ro { background: #fafafa; color: #374151; }
+.ship-foot { display: flex; gap: 16px; flex-wrap: wrap; align-items: center; margin: 10px 0; }
+.ship-foot label { display: flex; align-items: center; gap: 8px; margin: 0; }
+
+/* 按产品分组的人工表 */
+.labor-group { border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; margin: 10px 0; background: #fcfdfe; }
+.labor-group-head { display: flex; gap: 10px; align-items: center; margin-bottom: 8px; }
+.labor-group-head .lg-name { flex: 0 0 220px; font-weight: 600; font-size: 14px; padding: 6px 10px; }
+.labor-total { display: flex; justify-content: space-between; gap: 12px; padding: 10px 16px; margin: 10px 0; background: #dcfce7; color: #166534; font-weight: 600; border-radius: 6px; }
+
+/* 参考表（料价/机型价） */
+.ref-tables { border: 1px solid var(--border); border-radius: 8px; background: var(--surface-soft); padding: 10px 14px; }
+.ref-tables summary.ref-summary { cursor: pointer; font-weight: 600; font-size: 13px; color: #374151; padding: 4px 0; user-select: none; }
+.ref-tables summary.ref-summary:hover { color: var(--primary); }
+.ref-tables .wb-table { font-size: 12px; }
+.ref-tables .wb-table thead th { padding: 6px 8px; font-size: 11px; }
+.ref-tables .wb-table tbody td { padding: 4px 6px; }
+
+/* 行操作按钮（上移/下移/复制/删除） */
+.wb-table td.row-actions { white-space: nowrap; padding: 4px 6px; }
+.wb-table td.row-actions button { line-height: 1.2; }
+
+/* 隐掉 number input 的上下箭头 */
+.wb-table input[type="number"]::-webkit-outer-spin-button,
+.wb-table input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.wb-table input[type="number"] { -moz-appearance: textfield; }
+
+.wb-table input[disabled], .wb-table textarea[disabled] {
+  background: transparent;
+  border-color: transparent;
+  color: #374151;
+  padding-left: 0;
+}
+.wb-footer { margin: 6px 0; font-size: 13px; color: #374151; text-align: right; }
+
+/* ========== 两列网格表单（业务工作台） ========== */
+.wb-grid2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 22px;
+  background: var(--surface-soft);
+  padding: 14px 18px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-soft);
+}
+.wb-grid2 label { display: flex; align-items: center; gap: 10px; margin: 4px 0; }
+.wb-grid2 label > span { flex: 0 0 140px; color: var(--text-dim); font-size: 13px; }
+.wb-grid2 input, .wb-grid2 select { flex: 1; }
+
+/* ========== 工作台底部操作栏 ========== */
+.wb-bar {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+.wb-bar .muted { font-size: 13px; }
+
+/* ========== 模具表格 ========== */
+.mold-table tbody tr { min-height: 70px; }
+.mold-table tbody td { vertical-align: top; padding-top: 10px; padding-bottom: 10px; }
+.mold-table textarea {
+  width: 100%;
+  min-height: 40px;
+  font-size: 13px;
+  line-height: 1.4;
+  padding: 5px 8px;
+}
+
+/* ========== 模具图片单元 ========== */
+.mold-img-cell { padding: 6px !important; }
+.cell-imgs { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; justify-content: center; }
+.cell-img {
+  position: relative;
+  width: 52px; height: 52px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+  background: #fff;
+  transition: transform .15s, box-shadow .15s;
+}
+.cell-img:hover { transform: scale(1.05); box-shadow: var(--shadow-sm); z-index: 2; }
+.cell-img img { width: 100%; height: 100%; object-fit: cover; cursor: zoom-in; }
+.cell-img .img-del {
+  position: absolute; top: 0; right: 0;
+  padding: 0 6px; font-size: 11px; line-height: 16px;
+  border-bottom-left-radius: 4px;
+}
+.cell-img.add {
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; color: var(--text-dim); font-size: 16px;
+  background: var(--surface-soft);
+  border-style: dashed;
+}
+.cell-img.add:hover { color: var(--primary); border-color: var(--primary); background: var(--primary-soft); }
+
+/* ========== 修改记录时间线 ========== */
+.audit-list { font-size: 13px; }
+.audit-row {
+  display: grid;
+  grid-template-columns: 160px 80px 100px 130px 1fr;
+  gap: 14px;
+  padding: 8px 4px;
+  border-bottom: 1px solid var(--border-soft);
+  align-items: center;
+}
+.audit-row:hover { background: var(--surface-soft); }
+.audit-row:last-child { border-bottom: none; }
+.audit-at { color: var(--text-dim); font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; }
+.audit-dept { color: #374151; font-weight: 500; }
+.audit-actor { color: var(--primary); }
+.audit-action { color: #111827; }
+.audit-detail { font-size: 12px; color: var(--text-dim); }
+.audit-search { margin-left: auto; width: 260px; padding: 6px 12px; border-radius: 999px; font-size: 13px; }
+.audit-pager { display: flex; justify-content: center; align-items: center; gap: 16px; padding: 12px 0 4px; font-size: 13px; color: var(--text-dim); }
+
+/* ========== 上传模具报价单按钮 ========== */
+h3 .upload-mold-sheet button { background: #475569; }
+h3 .upload-mold-sheet button:hover { background: #334155; }
+
+/* ========== 登录卡片（首页） ========== */
+.login-card {
+  max-width: 420px;
+  margin: 60px auto;
+  padding: 32px 36px;
+}
+.login-card h2 { text-align: center; margin: 0 0 4px; }
+.login-card label { font-weight: 500; color: #374151; margin-top: 12px; }
+.login-card input, .login-card select { width: 100%; margin-top: 4px; padding: 9px 11px; }
+
+/* ========== 用户胶囊（顶栏右侧） ========== */
+#user-chip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(255,255,255,.12);
+  padding: 6px 14px;
+  border-radius: 999px;
+  font-size: 13px;
+}
+#user-chip #who-chip { color: #fff; font-weight: 500; margin-right: 8px; }
+#user-chip a { margin-left: 4px; padding: 2px 8px; border-radius: 6px; }
+#user-chip a:hover { background: rgba(255,255,255,.18); text-decoration: none; }
+
+/* ========== 报价单列表 ========== */
+.list-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.new-quote-form {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.new-quote-form input { padding: 7px 10px; font-size: 13px; min-width: 110px; }
+.new-quote-form input:nth-child(2) { min-width: 140px; }
+
+/* 进度条 */
+.progress {
+  width: 80px;
+  height: 6px;
+  background: var(--border-soft);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.progress-bar {
+  height: 100%;
+  background: linear-gradient(90deg, #34d399, #10b981);
+  transition: width .25s;
+}
+
+/* 部门 tab 切换 */
+.dept-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 6px;
+  margin-bottom: 16px;
+  box-shadow: var(--shadow-sm);
+}
+.dept-tab {
+  padding: 8px 18px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-dim);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: background .15s, color .15s;
+}
+.dept-tab:hover { background: var(--surface-soft); color: var(--text); }
+.dept-tab.active {
+  background: var(--primary);
+  color: #fff;
+}
+.dept-tab.active .badge { background: rgba(255,255,255,.2); color: #fff; }
+
+/* 紧凑成本汇总（小计/损耗/合计 纵向） */
+.loss-summary {
+  display: inline-flex;
+  flex-direction: column;
+  margin: 6px 0 14px auto;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 13px;
+  min-width: 280px;
+  box-shadow: var(--shadow-sm);
+}
+.loss-summary .ls-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 14px;
+  border-bottom: 1px solid var(--border-soft);
+}
+.loss-summary .ls-row:last-child { border-bottom: none; }
+.loss-summary .ls-row.hi { background: #dcfce7; color: #166534; font-weight: 600; }
+.loss-summary .ls-label { color: var(--text-dim); }
+.loss-summary .ls-row.hi .ls-label { color: #166534; }
+.loss-summary .ls-val { font-family: ui-monospace, monospace; }
+.loss-summary .ls-title { padding: 6px 14px; background: #f1f5f9; color: #334155; font-weight: 600; font-size: 12px; border-bottom: 1px solid var(--border-soft); }
+
+/* 电子两级表 */
+.hier-table .hier-parent td { font-weight: 500; }
+.hier-child-row > td { background: #f9fafb !important; padding: 8px 16px 12px !important; border-left: 3px solid var(--primary) !important; }
+.hier-children { padding-left: 4px; }
+.hier-children .wb-table { background: #fff; }
+
+/* 其他部门状态概览 */
+.other-dept-list { display: flex; flex-direction: column; gap: 6px; }
+.other-dept-row { display: grid; grid-template-columns: 90px 80px 1fr; gap: 12px; padding: 8px 4px; border-bottom: 1px solid var(--border-soft); align-items: center; font-size: 13px; }
+.other-dept-row:last-child { border-bottom: none; }
+.other-dept-row .dept-name { font-weight: 500; color: #374151; }
+
+/* 搜索框 */
+.search-box { display: flex; align-items: center; gap: 8px; }
+.search-box input {
+  width: 280px;
+  padding: 7px 12px;
+  font-size: 13px;
+  background: #fff;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+}
+.search-box input:focus { border-color: var(--primary); }
+.search-box small { font-size: 12px; white-space: nowrap; }
+
+/* 打开按钮 */
+.open-btn {
+  display: inline-block;
+  padding: 4px 12px;
+  background: var(--primary-soft);
+  color: var(--primary);
+  border-radius: 6px;
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 500;
+  transition: background .15s;
+}
+.open-btn:hover { background: var(--primary); color: #fff; }

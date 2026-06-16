@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>公司内部报价明细系统</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div class="topbar">
+    <div class="brand">📋 内部报价明细系统 <small>多部门协同 · 主管审核 · 受控导出</small></div>
+    <div id="user-chip" class="hidden">
+      <span id="who-chip"></span>
+      <a href="#" id="btn-change-pwd">修改密码</a>
+      <a href="./admin.html" id="btn-admin" class="hidden">⚙️ 管理后台</a>
+      <a href="#" id="btn-logout">登出</a>
+    </div>
+  </div>
+
+  <div id="app">
+
+    <section id="login-card" class="card login-card">
+      <h2>欢迎登录</h2>
+      <p class="muted" style="margin-top:-6px">请输入用户名和密码</p>
+      <label>用户名 <input id="username" type="text" autocomplete="username" placeholder="如 admin" /></label>
+      <label>密码 <input id="password" type="password" autocomplete="current-password" /></label>
+      <button id="btn-login" style="margin-top:6px;width:100%">登 录</button>
+      <p id="login-msg" class="msg"></p>
+    </section>
+
+    <section id="main-card" class="hidden">
+      <div id="pwd-card" class="card hidden">
+        <h3>修改密码</h3>
+        <label>当前密码 <input id="pwd-current" type="password" autocomplete="current-password" /></label>
+        <label>新密码（≥6 位）<input id="pwd-new" type="password" autocomplete="new-password" /></label>
+        <label>确认新密码 <input id="pwd-new2" type="password" autocomplete="new-password" /></label>
+        <div style="margin-top:10px;display:flex;gap:8px">
+          <button id="btn-pwd-submit">确认</button>
+          <button id="btn-pwd-cancel" class="mini">取消</button>
+        </div>
+        <p id="pwd-msg" class="msg"></p>
+      </div>
+
+      <div class="card">
+        <div class="list-head">
+          <h2 style="margin:0">报价单列表</h2>
+          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+            <div class="search-box">
+              <input id="search-input" type="text" placeholder="🔍 搜索 货号 / 产品 / 客户…" />
+              <small id="search-count" class="muted"></small>
+            </div>
+            <div id="new-quote-form" class="hidden new-quote-form">
+              <input id="q-no" placeholder="货号" />
+              <input id="q-product" placeholder="产品名" />
+              <input id="q-version" placeholder="版本(可选)" />
+              <input id="q-customer" placeholder="客户" />
+              <input id="q-qty" placeholder="数量" type="number" />
+              <button id="btn-create">＋ 新建报价单</button>
+            </div>
+          </div>
+        </div>
+        <table id="quotes-table" class="wb-table" style="margin-top:14px">
+          <thead><tr>
+            <th style="width:50px">#</th>
+            <th style="width:140px">货号</th>
+            <th>产品</th>
+            <th style="width:120px">版本</th>
+            <th style="width:140px">客户</th>
+            <th style="width:90px">进度</th>
+            <th style="width:100px">状态</th>
+            <th style="width:140px">创建时间</th>
+            <th style="width:80px"></th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+  <script src="./main.js"></script>
+</body>
+</html>

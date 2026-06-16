@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>报价单详情</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div class="topbar">
+    <div class="brand">📋 内部报价明细系统 <small>报价单详情</small></div>
+    <div id="user-chip" style="display:flex;align-items:center;gap:4px;background:rgba(255,255,255,.12);padding:6px 14px;border-radius:999px;font-size:13px">
+      <span id="who-chip" style="color:#fff;font-weight:500;margin-right:8px"></span>
+      <a href="./index.html" style="color:rgba(255,255,255,.85);text-decoration:none;margin-left:4px;padding:2px 8px;border-radius:6px">← 列表</a>
+      <a href="./index.html" id="btn-switch" style="color:rgba(255,255,255,.85);text-decoration:none;margin-left:4px;padding:2px 8px;border-radius:6px">🔄 切换账号</a>
+    </div>
+  </div>
+  <div id="app">
+    <h1>报价单 #<span id="qid"></span></h1>
+    <div id="status-bar"></div>
+    <div id="sections"></div>
+  </div>
+  <script src="./workbench.js"></script>
+</body>
+</html>

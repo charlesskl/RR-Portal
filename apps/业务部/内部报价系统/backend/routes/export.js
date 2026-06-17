@@ -1,6 +1,6 @@
 const express = require('express');
 const db = require('../db');
-const { requireAuth } = require('../middleware/auth');
+const { requireAuth, quoteAccess } = require('../middleware/auth');
 const { buildWorkbook } = require('../services/exportXlsx');
 
 const router = express.Router();
@@ -11,6 +11,9 @@ router.get('/:id/export', async (req, res) => {
   const id = Number(req.params.id);
   const quote = db.prepare('SELECT * FROM quotes WHERE id = ?').get(id);
   if (!quote) return res.status(404).json({ error: '不存在' });
+  // 客户可见范围校验
+  const acc = quoteAccess(req.user, id);
+  if (acc.status !== 200) return res.status(acc.status).json({ error: acc.status === 404 ? '不存在' : '无权导出该客户的报价单' });
 
   const approvedCount = db.prepare(
     `SELECT COUNT(*) AS n FROM quote_sections WHERE quote_id = ? AND status = 'approved'`

@@ -1,6 +1,6 @@
 const express = require('express');
 const db = require('../db');
-const { requireAuth } = require('../middleware/auth');
+const { requireAuth, quoteAccess } = require('../middleware/auth');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -111,6 +111,8 @@ router.put('/:id/header', (req, res) => {
     return res.status(403).json({ error: '只有业务或工程可改表头' });
   }
   const id = Number(req.params.id);
+  const acc = quoteAccess(req.user, id);
+  if (acc.status !== 200) return res.status(acc.status).json({ error: acc.status === 404 ? '不存在' : '无权修改该客户的报价单' });
   const { product_name, customer, qty, version } = req.body || {};
   const fields = []; const vals = [];
   if (product_name !== undefined) { fields.push('product_name = ?'); vals.push(product_name); }
@@ -130,12 +132,9 @@ router.get('/:id', (req, res) => {
   const id = Number(req.params.id);
   const quote = db.prepare('SELECT * FROM quotes WHERE id = ?').get(id);
   if (!quote) return res.status(404).json({ error: '不存在' });
-  // 客户范围检查（admin 跳过）
-  const isAdminQ = req.user.perms && req.user.perms['账号管理'] && req.user.perms['账号管理'].can_admin;
-  if (!isAdminQ) {
-    const ok = db.prepare('SELECT 1 FROM user_customers WHERE user_id = ? AND customer = ?').get(req.user.id, quote.customer || '');
-    if (!ok) return res.status(403).json({ error: '无权查看该客户的报价单' });
-  }
+  // 客户范围检查（admin 跳过；无客户单仅 admin）
+  const acc = quoteAccess(req.user, id);
+  if (acc.status !== 200) return res.status(acc.status).json({ error: acc.status === 404 ? '不存在' : '无权查看该客户的报价单' });
 
   // 浏览记录：同一用户 5 分钟内重复打开 不重复记
   const last = db.prepare(`
@@ -191,6 +190,8 @@ router.get('/:id', (req, res) => {
 // GET /api/quotes/:id/audit-log  返回该报价单全部动作时间线（最新在前）
 router.get('/:id/audit-log', (req, res) => {
   const id = Number(req.params.id);
+  const acc = quoteAccess(req.user, id);
+  if (acc.status !== 200) return res.status(acc.status).json({ error: acc.status === 404 ? '不存在' : '无权查看该客户的报价单' });
   const rows = db.prepare(`
     SELECT al.*, d.name_cn AS dept_name
     FROM audit_log al

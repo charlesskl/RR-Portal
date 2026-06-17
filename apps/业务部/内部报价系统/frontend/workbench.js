@@ -25,6 +25,20 @@ async function api(p, opts = {}) {
   return r.json();
 }
 
+// 保存 section（带轻量并发提醒）：带上加载时的 filled_at；后端若发现被别人改过会回 conflict
+// 不挡保存，仅弹一次提示；成功后更新本地 filled_at 作为新基线（避免自己的后续保存误报）
+async function putSection(sec, payload, submit) {
+  const r = await api('/sections/' + sec.id, {
+    method: 'PUT',
+    body: JSON.stringify({ payload, submit: !!submit, base_filled_at: sec.filled_at || null }),
+  });
+  if (r) {
+    if (r.filled_at) sec.filled_at = r.filled_at;
+    if (r.conflict) alert(`⚠️ 该部分在你打开后已被「${r.last_by || '他人'}」修改过（${r.last_at || ''}），你的保存已覆盖它。\n请刷新核对，必要时让对方重填。`);
+  }
+  return r;
+}
+
 // ==================== 通用可编辑表格 ====================
 // columns: [{key, label, type?: 'text'|'number'|'textarea', readonly?: bool|fn, calc?: row => number, width?: string}]
 // rows:    数组（直接 mutate 本数组）
@@ -856,30 +870,27 @@ function renderSummaryPane(host, sections, quote, me) {
   // 九、合计 中的 附加税 + 模具分摊 (都已是 RMB，转 HKD)
   const surtaxHkd = num(surtaxManual) / fxRH;
   const moldShareHkd = num(moldShare) / fxRH;
-  renderShipping(host.querySelector('#wb-shipping-sum'), sales, salesHeader, canEditShip, () => {
-    // 自动保存出货价算价到业务 section
+  // 统一保存业务 section（同步本地缓存，避免重渲染按旧 payload 还原）
+  const saveSales = () => {
     if (canEditShip && salesSec) {
-      // 同步本地 sections 缓存，避免汇总重渲染时按旧 payload 还原（如 目标价 被重置回 0）
       salesSec.payload_json = JSON.stringify(sales);
-      api('/sections/' + salesSec.id, { method: 'PUT', body: JSON.stringify({ payload: sales, submit: false }) }).catch(() => {});
+      putSection(salesSec, sales, false).catch(() => {});
     }
-  }, freightMapSum, afterMarkupHkd, surtaxHkd, moldShareHkd);
+  };
+  renderShipping(host.querySelector('#wb-shipping-sum'), sales, salesHeader, canEditShip, saveSales,
+    freightMapSum, afterMarkupHkd, surtaxHkd, moldShareHkd);
   const surtaxInp = host.querySelector('#tot-surtax');
-  if (surtaxInp && (me?.dept === 'sales' || me?.dept === 'engineering')) {
-    surtaxInp.oninput = () => {
-      sales.pricing_summary.surtax = surtaxInp.value === '' ? null : Number(surtaxInp.value);
-    };
+  if (surtaxInp && canEditShip) {
+    surtaxInp.oninput = () => { sales.pricing_summary.surtax = surtaxInp.value === '' ? null : Number(surtaxInp.value); };
+    surtaxInp.onchange = () => { saveSales(); renderSummaryPane(host, sections, quote, me); };  // 失焦持久化 + 刷新显示
   } else if (surtaxInp) {
     surtaxInp.disabled = true;
   }
   // 码点 可编辑（业务/工程）
   const markupInp = host.querySelector('#tot-markup');
-  if (markupInp && (me?.dept === 'sales' || me?.dept === 'engineering')) {
-    markupInp.oninput = () => {
-      sales.shipping = sales.shipping || {};
-      sales.shipping.markup_x = Number(markupInp.value) || 1.2;
-      renderSummaryPane(host, sections, quote, me);
-    };
+  if (markupInp && canEditShip) {
+    markupInp.oninput = () => { sales.shipping = sales.shipping || {}; sales.shipping.markup_x = Number(markupInp.value) || 1.2; };
+    markupInp.onchange = () => { saveSales(); renderSummaryPane(host, sections, quote, me); };  // 失焦持久化+刷新(避免每键重渲染丢焦/录错)
   } else if (markupInp) {
     markupInp.disabled = true;
   }
@@ -964,6 +975,7 @@ function renderSummaryPane(host, sections, quote, me) {
     })(),
     // 杂项 = 印尼运费(手填 HKD) + 附加税 HKD
     misc: num(sales.pricing_summary?.indo_freight) + surtaxHkd,
+    surtax_hkd: surtaxHkd,  // 供减税明细里印尼运费输入框重算 misc 用（避免丢附加税）
     hardware: (hwRaw - _sumByMatch(eng.hardware, isMotor)),  // 五金 HKD（剔除马达项；五金表已 HKD）
     electronic: (elecRaw - _sumByMatch(elecSrc, isMotor)),  // 电子 HKD（剔除马达项；电子表已 HKD）
     injection_labor: sum(mold.injection || [], r => num(r.shot_price)),  // 啤工 = Σ啤价 HKD（只算机时人工，不含原料）
@@ -984,8 +996,8 @@ function renderTaxDeductionBlock(host, salesPayload, salesSec, me, autoFill) {
   // 自动同步前面部门的金额（每次进汇总都覆盖；用户后续可手填覆盖项放 ps.overrides）
   ps.overrides = ps.overrides || {};
   const applyAuto = (tbl, key, val) => {
-    if (val == null || val === 0) return;
-    if (ps.overrides[tbl + '.' + key]) return; // 用户已手动改过
+    if (val == null) return;                    // 仅未计算(undefined/null)时跳过；0 要写回以清掉旧残留值
+    if (ps.overrides[tbl + '.' + key]) return;  // 用户已手动改过
     ps[tbl] = ps[tbl] || {};
     ps[tbl][key] = +val.toFixed(4);
   };
@@ -1219,12 +1231,9 @@ function renderTaxDeductionBlock(host, salesPayload, salesSec, me, autoFill) {
     const indoInp = host.querySelector('#tk-indo-freight');
     if (indoInp) indoInp.oninput = () => {
       ps.indo_freight = Number(indoInp.value) || 0;
-      // 杂项 = 印尼运费 + 附加税；把它写回 t2.misc 并触发 recalc
-      // surtax 自动算时已从外面带进来，这里更新印尼部分 + 触发 recalc
-      const surtax = num(ps.t1.base_price) ? 0 : 0; // 占位 — 附加税值在 autoFill 阶段写入 ps.t2.misc，这里需手动加印尼
-      // 让 misc 反映 = 印尼运费 + 附加税：保留 (misc - 上一次印尼) + 当前印尼
-      ps.t2.misc = (num(ps.t2.misc) - num(ps._last_indo || 0)) + Number(indoInp.value || 0);
-      ps._last_indo = Number(indoInp.value || 0);
+      // 杂项 = 印尼运费 + 附加税(HKD)，单一公式重算，避免之前增量法丢掉附加税
+      // 不设 override：重渲染时 autoFill 会用 indo_freight+surtax 同公式重算，保持一致
+      ps.t2.misc = +((Number(indoInp.value) || 0) + num(autoFill.surtax_hkd)).toFixed(4);
       recalc();
     };
     host.querySelectorAll('input.tk-edit').forEach(inp => {
@@ -1244,7 +1253,7 @@ function renderTaxDeductionBlock(host, salesPayload, salesSec, me, autoFill) {
       const msg = host.querySelector('#tk-msg');
       msg.textContent = '保存中...';
       try {
-        await api('/sections/' + salesSec.id, { method: 'PUT', body: JSON.stringify({ payload: salesPayload, submit: false }) });
+        await putSection(salesSec, salesPayload, false);
         if (salesSec) salesSec.payload_json = JSON.stringify(salesPayload);  // 同步本地缓存
         msg.textContent = '✓ 已保存 ' + new Date().toLocaleTimeString();
       } catch (e) { msg.textContent = '✗ ' + e.message; }
@@ -1339,7 +1348,7 @@ function renderSewing(host, payload, canEdit, onChange, fxRmbHkd) {
       card.innerHTML = `
         <div style="display:flex;gap:10px;align-items:center;margin-bottom:8px">
           <strong style="color:#16a34a">📦 产品：</strong>
-          <input class="sw-gname" data-gi="${gi}" value="${g.name || ''}" placeholder="如：6寸小蜥蜴 / 盾牌" style="flex:1;max-width:300px" ${canEdit ? '' : 'disabled'}/>
+          <input class="sw-gname" data-gi="${gi}" value="${escapeHtml(g.name || '')}" placeholder="如：6寸小蜥蜴 / 盾牌" style="flex:1;max-width:300px" ${canEdit ? '' : 'disabled'}/>
           <label style="font-size:13px">类型
             <select class="sw-gcat" data-gi="${gi}" ${canEdit ? '' : 'disabled'}>
               <option value="车衣" ${cat==='车衣'?'selected':''}>车衣</option>
@@ -1405,9 +1414,9 @@ function renderSewing(host, payload, canEdit, onChange, fxRmbHkd) {
           if (!r.ok) throw new Error(j.error || '解析失败');
           impPreview.innerHTML = `
             <div class="card" style="background:#f0fdf4;border:1px solid #86efac;margin-top:10px">
-              <p>从 <b>${j.sheet_used}</b> 解析到 <b>${j.count}</b> 个产品分组：</p>
+              <p>从 <b>${escapeHtml(j.sheet_used || '')}</b> 解析到 <b>${j.count}</b> 个产品分组：</p>
               <ul style="margin:6px 0;padding-left:22px">
-                ${j.groups.map(g => `<li><b>${g.name}</b> — ${g.items.length} 行 / 人工 ¥${(g.labor_amount||0).toFixed(2)}</li>`).join('')}
+                ${j.groups.map(g => `<li><b>${escapeHtml(g.name)}</b> — ${g.items.length} 行 / 人工 ¥${(g.labor_amount||0).toFixed(2)}</li>`).join('')}
               </ul>
               <div style="margin-top:10px;display:flex;gap:8px">
                 <button id="sw-imp-replace">应用（替换所有产品组）</button>
@@ -1640,15 +1649,15 @@ function renderEngineering(host, payload, canEdit, onChange, fxRmbHkd, fxRmbUsd)
       if (!r.ok) throw new Error(j.error || '解析失败');
       preview.innerHTML = `
         <div class="card" style="background:#f0fdf4;border:1px solid #86efac;">
-          <p>从 <b>${j.sheet_used}</b> 解析到 <b>${j.molds.length}</b> 副模具：</p>
+          <p>从 <b>${escapeHtml(j.sheet_used || '')}</b> 解析到 <b>${j.molds.length}</b> 副模具：</p>
           <table class="wb-table"><thead><tr>
             <th>模号</th><th>名称</th><th>类型</th><th>材质</th>
             <th>出模数</th><th>套数</th><th>周期(秒)</th><th>模具尺寸</th><th>价格RMB</th><th>备注</th>
           </tr></thead><tbody>
           ${j.molds.map(m => `<tr>
-            <td>${m.mold_no || ''}</td><td>${m.name}</td><td>${m.mold_type}</td>
-            <td>${m.material}</td><td>${m.cavity}</td>
-            <td>${m.sets}</td><td>${m.cycle_sec ?? ''}</td><td>${(m.detail && m.detail.mold_size) || ''}</td><td>${m.price_rmb ?? ''}</td><td>${m.note || ''}</td>
+            <td>${escapeHtml(m.mold_no || '')}</td><td>${escapeHtml(m.name || '')}</td><td>${escapeHtml(m.mold_type || '')}</td>
+            <td>${escapeHtml(m.material || '')}</td><td>${escapeHtml(m.cavity || '')}</td>
+            <td>${escapeHtml(m.sets ?? '')}</td><td>${escapeHtml(m.cycle_sec ?? '')}</td><td>${escapeHtml((m.detail && m.detail.mold_size) || '')}</td><td>${escapeHtml(m.price_rmb ?? '')}</td><td>${escapeHtml(m.note || '')}</td>
           </tr>`).join('')}
           </tbody></table>
           <div style="margin-top:10px">
@@ -1883,8 +1892,8 @@ function renderElectronic(host, payload, canEdit, onChange, fxRmbHkd) {
           if (!r.ok) throw new Error(j.error || '解析失败');
           impPreview.innerHTML = `
             <div class="card" style="background:#f0fdf4;border:1px solid #86efac;margin-top:10px">
-              <p>从 <b>${j.sheet_used}</b> 解析到 <b>${j.count}</b> 个零件（${(j.parts || []).reduce((a, p) => a + 1 + (p.children || []).length, 0)} 行明细）</p>
-              ${j.meta && j.meta.product ? `<p class="muted">产品: ${j.meta.product}${j.meta.customer ? ' · 客户: ' + j.meta.customer : ''}${j.meta.date ? ' · 日期: ' + j.meta.date : ''}</p>` : ''}
+              <p>从 <b>${escapeHtml(j.sheet_used || '')}</b> 解析到 <b>${j.count}</b> 个零件（${(j.parts || []).reduce((a, p) => a + 1 + (p.children || []).length, 0)} 行明细）</p>
+              ${j.meta && j.meta.product ? `<p class="muted">产品: ${escapeHtml(j.meta.product)}${j.meta.customer ? ' · 客户: ' + escapeHtml(j.meta.customer) : ''}${j.meta.date ? ' · 日期: ' + escapeHtml(j.meta.date) : ''}</p>` : ''}
               <p class="muted">导入后：会替换电子表 + 自动填充 测试费用 / 包装运输 / 利润% / 抵税差额；导出 Excel 时会附加"电子明细"分表。</p>
               <div style="margin-top:10px;display:flex;gap:8px">
                 <button id="el-imp-apply">应用</button>
@@ -2632,10 +2641,10 @@ function renderAssembly(host, payload, canEdit, onChange, fxRmbHkd) {
         impPreview.innerHTML = `
           <div class="card" style="background:#f0fdf4;border:1px solid #86efac;margin-top:10px">
             <p>解析到 <b>${j.count}</b> 个工序<br>
-            ${m.customer ? `客名: ${m.customer} · ` : ''}${m.quote_no ? `货号: ${m.quote_no} · ` : ''}${m.target_qty ? `目标数: ${m.target_qty}` : ''}</p>
+            ${m.customer ? `客名: ${escapeHtml(m.customer)} · ` : ''}${m.quote_no ? `货号: ${escapeHtml(m.quote_no)} · ` : ''}${m.target_qty ? `目标数: ${escapeHtml(m.target_qty)}` : ''}</p>
             <div style="margin-top:10px;display:flex;gap:8px;align-items:center">
               <label>归到产品组：
-                <input id="asm-imp-name" type="text" value="${m.customer ? '货号 ' + (m.quote_no || '') : '排拉工序'}" style="width:200px"/>
+                <input id="asm-imp-name" type="text" value="${escapeHtml(m.customer ? '货号 ' + (m.quote_no || '') : '排拉工序')}" style="width:200px"/>
               </label>
               <button id="asm-imp-add">作为新组添加</button>
               <button id="asm-imp-cancel" class="mini danger">取消</button>
@@ -2751,9 +2760,9 @@ function renderAssembly(host, payload, canEdit, onChange, fxRmbHkd) {
         impPreview.innerHTML = `
           <div class="card" style="background:#f0fdf4;border:1px solid #86efac;margin-top:10px">
             <p>解析到 <b>${j.count}</b> 个工序<br>
-            ${m.customer ? `客名: ${m.customer} · ` : ''}${m.quote_no ? `货号: ${m.quote_no} · ` : ''}${m.target_qty ? `目标数: ${m.target_qty}` : ''}</p>
+            ${m.customer ? `客名: ${escapeHtml(m.customer)} · ` : ''}${m.quote_no ? `货号: ${escapeHtml(m.quote_no)} · ` : ''}${m.target_qty ? `目标数: ${escapeHtml(m.target_qty)}` : ''}</p>
             <div style="margin-top:10px;display:flex;gap:8px;align-items:center">
-              <label>归到产品组：<input id="pkg-imp-name" type="text" value="${m.quote_no ? '货号 ' + m.quote_no : '排拉工序'}" style="width:200px"/></label>
+              <label>归到产品组：<input id="pkg-imp-name" type="text" value="${escapeHtml(m.quote_no ? '货号 ' + m.quote_no : '排拉工序')}" style="width:200px"/></label>
               <button id="pkg-imp-add">作为新组添加</button>
               <button id="pkg-imp-cancel" class="mini danger">取消</button>
             </div>
@@ -3113,7 +3122,7 @@ function renderShipping(host, payload, header, canEdit, onChange, freightMap, pr
       <table class="wb-table ship-table">
         <thead><tr>
           <th style="width:200px">项</th>
-          ${sc.map((x, i) => `<th>${canEdit ? `<div style="display:flex;gap:4px;align-items:center"><input class="sc-name" data-i="${i}" value="${x.name || ''}" style="flex:1" ${x.is_factory?'disabled':''}>${x.is_factory ? '' : `<button class="mini danger sc-del" data-i="${i}" title="删除该场景" style="padding:2px 7px">×</button>`}</div>` : (x.name || '场景' + (i+1))}</th>`).join('')}
+          ${sc.map((x, i) => `<th>${canEdit ? `<div style="display:flex;gap:4px;align-items:center"><input class="sc-name" data-i="${i}" value="${escapeHtml(x.name || '')}" style="flex:1" ${x.is_factory?'disabled':''}>${x.is_factory ? '' : `<button class="mini danger sc-del" data-i="${i}" title="删除该场景" style="padding:2px 7px">×</button>`}</div>` : escapeHtml(x.name || ('场景' + (i+1)))}</th>`).join('')}
           ${canEdit ? '<th style="width:30px"></th>' : ''}
         </tr></thead>
         <tbody>
@@ -3191,10 +3200,10 @@ function renderSales(host, payload, quote, canEditHeader, canEditPricing, allSec
   host.innerHTML = `
     <h3>报价单表头</h3>
     <div class="wb-grid2">
-      <label>货号 <input id="h-no" value="${quote.quote_no}" disabled /></label>
-      <label>产品名称 <input id="h-pn" value="${quote.product_name || ''}" ${canEditHeader ? '' : 'disabled'} /></label>
-      <label>版本 <input id="h-ver" value="${quote.version || ''}" placeholder="如 V1/改色版" ${canEditHeader ? '' : 'disabled'} /></label>
-      <label>客户 <input id="h-cu" value="${quote.customer || ''}" ${canEditHeader ? '' : 'disabled'} /></label>
+      <label>货号 <input id="h-no" value="${escapeHtml(quote.quote_no)}" disabled /></label>
+      <label>产品名称 <input id="h-pn" value="${escapeHtml(quote.product_name || '')}" ${canEditHeader ? '' : 'disabled'} /></label>
+      <label>版本 <input id="h-ver" value="${escapeHtml(quote.version || '')}" placeholder="如 V1/改色版" ${canEditHeader ? '' : 'disabled'} /></label>
+      <label>客户 <input id="h-cu" value="${escapeHtml(quote.customer || '')}" ${canEditHeader ? '' : 'disabled'} /></label>
       <label>出货数量 <input id="h-qty" type="number" value="${quote.qty || ''}" ${canEditHeader ? '' : 'disabled'} /></label>
       <label>币种
         <select id="h-cy" ${canEditPricing ? '' : 'disabled'}>
@@ -3489,7 +3498,7 @@ async function renderQuotePage() {
             try {
               if (act === 'save' || act === 'submit') {
                 if (!confirm(`确认保存到 ${s.dept_name} section？该部门已有数据会被覆盖。`)) return;
-                await api('/sections/' + s.id, { method: 'PUT', body: JSON.stringify({ payload: sectionPayload, submit: act === 'submit' }) });
+                await putSection(s, sectionPayload, act === 'submit');
               } else if (act === 'approve') {
                 await api('/reviews/' + s.id, { method: 'POST', body: JSON.stringify({ action: 'approve' }) });
               } else if (act === 'reject') {
@@ -3529,7 +3538,7 @@ async function renderQuotePage() {
   // 行为绑定
   const saveSection = async (submit) => {
     try {
-      await api('/sections/' + mySec.id, { method: 'PUT', body: JSON.stringify({ payload, submit }) });
+      await putSection(mySec, payload, submit);
       renderQuotePage();
     } catch (e) { alert(e.message); }
   };

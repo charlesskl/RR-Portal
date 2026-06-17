@@ -120,8 +120,10 @@ async function buildWorkbook({ quote, sections }) {
 
   const get = (dept) => {
     const s = sections.find(x => x.dept === dept);
-    if (!s) return {};
-    return s.payload_json ? JSON.parse(s.payload_json) : {};
+    if (!s || !s.payload_json) return {};
+    // 单个 section 的 payload 若损坏，当空处理，避免整单导出 500
+    try { return JSON.parse(s.payload_json); }
+    catch (e) { console.error(`[export] ${dept} payload_json 解析失败，按空处理:`, e.message); return {}; }
   };
   const eng = get('engineering');
   const mold = get('molding');

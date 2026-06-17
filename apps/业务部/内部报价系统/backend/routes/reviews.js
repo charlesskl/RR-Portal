@@ -1,6 +1,6 @@
 const express = require('express');
 const db = require('../db');
-const { requireAuth } = require('../middleware/auth');
+const { requireAuth, quoteAccess } = require('../middleware/auth');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -14,6 +14,8 @@ router.post('/:section_id', (req, res) => {
 
   const sec = db.prepare('SELECT * FROM quote_sections WHERE id = ?').get(id);
   if (!sec) return res.status(404).json({ error: '不存在' });
+  const acc = quoteAccess(req.user, sec.quote_id);
+  if (acc.status !== 200) return res.status(acc.status).json({ error: acc.status === 404 ? '不存在' : '无权审核该客户的报价单' });
   if (sec.dept !== req.user.dept && !['sales', 'engineering'].includes(req.user.dept)) {
     return res.status(403).json({ error: '只能审核本部门' });
   }
@@ -52,6 +54,8 @@ router.post('/:section_id/reopen', (req, res) => {
 
   const sec = db.prepare('SELECT * FROM quote_sections WHERE id = ?').get(id);
   if (!sec) return res.status(404).json({ error: '不存在' });
+  const acc = quoteAccess(req.user, sec.quote_id);
+  if (acc.status !== 200) return res.status(acc.status).json({ error: acc.status === 404 ? '不存在' : '无权操作该客户的报价单' });
   if (sec.dept !== req.user.dept && !['sales', 'engineering'].includes(req.user.dept)) {
     return res.status(403).json({ error: '只能操作本部门' });
   }

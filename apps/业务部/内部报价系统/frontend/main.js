@@ -11,6 +11,11 @@ async function api(path, opts = {}) {
   return r.json();
 }
 
+// HTML 转义：用户可控字段(货号/产品名/客户/版本)插入 innerHTML 前必须过它，防存储型 XSS
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+}
+
 // 权限检查工具
 function hasPerm(me, menu, action) {
   if (!me || !me.perms) return false;
@@ -88,14 +93,14 @@ function renderQuotes() {
     const total = q.total_depts || 7;
     const pct = Math.round((q.approved_count / total) * 100);
     const nVer = prodCount[String(q.product_name || '').trim()] || 1;
-    const verCell = `${q.version ? `<span class="badge b-filled">${q.version}</span>` : '<span class="muted">—</span>'}`
+    const verCell = `${q.version ? `<span class="badge b-filled">${esc(q.version)}</span>` : '<span class="muted">—</span>'}`
       + (nVer > 1 ? ` <small class="muted" title="该产品共有 ${nVer} 个报价版本">·同产品${nVer}版</small>` : '');
     tr.innerHTML = `
       <td class="ro">${q.id}</td>
-      <td><b>${q.quote_no}</b></td>
-      <td>${q.product_name}</td>
+      <td><b>${esc(q.quote_no)}</b></td>
+      <td>${esc(q.product_name)}</td>
       <td>${verCell}</td>
-      <td>${q.customer || '<span class="muted">—</span>'}</td>
+      <td>${q.customer ? esc(q.customer) : '<span class="muted">—</span>'}</td>
       <td>
         <div class="progress"><div class="progress-bar" style="width:${pct}%"></div></div>
         <small class="muted">${q.approved_count} / ${total}</small>
@@ -104,7 +109,7 @@ function renderQuotes() {
       <td class="ro" style="font-family:ui-monospace,monospace;font-size:12px">${fmtTime(q.created_at)}</td>
       <td style="display:flex;gap:6px">
         <a href="./quote.html?id=${q.id}" class="open-btn">打开 →</a>
-        ${window.__me && window.__me.dept === 'sales' ? `<button class="mini btn-clone" data-id="${q.id}" data-no="${q.quote_no}" data-name="${q.product_name}">📋 复制</button>` : ''}
+        ${window.__me && window.__me.dept === 'sales' ? `<button class="mini btn-clone" data-id="${q.id}" data-no="${esc(q.quote_no)}" data-name="${esc(q.product_name)}">📋 复制</button>` : ''}
       </td>
     `;
     tbody.appendChild(tr);

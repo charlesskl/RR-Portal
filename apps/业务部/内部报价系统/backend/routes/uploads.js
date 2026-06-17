@@ -30,12 +30,32 @@ const upload = multer({
   },
 });
 
+// 按文件头(magic bytes)校验真实类型：防止伪造 Content-Type 上传非图片
+function isRealImage(buf) {
+  if (!buf || buf.length < 12) return false;
+  if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4E && buf[3] === 0x47) return true;            // PNG
+  if (buf[0] === 0xFF && buf[1] === 0xD8 && buf[2] === 0xFF) return true;                                // JPEG
+  if (buf.toString('ascii', 0, 4) === 'RIFF' && buf.toString('ascii', 8, 12) === 'WEBP') return true;   // WEBP
+  return false;
+}
+
 // POST /api/uploads/mold-image  multipart field "file" — 工程上传模具图（同时被喷油/装配复用）
 router.post('/mold-image', requireAuth, upload.single('file'), (req, res) => {
   if (!['engineering', 'painting', 'assembly', 'molding', 'sales'].includes(req.user.dept) && req.user.role !== 'admin') {
+    if (req.file) { try { fs.unlinkSync(req.file.path); } catch {} }
     return res.status(403).json({ error: '无权上传' });
   }
   if (!req.file) return res.status(400).json({ error: '缺少文件' });
+  // 文件头校验：不是真图片就删掉并拒绝（伪造 mimetype 防线）
+  try {
+    const head = fs.readFileSync(req.file.path).subarray(0, 12);
+    if (!isRealImage(head)) {
+      try { fs.unlinkSync(req.file.path); } catch {}
+      return res.status(400).json({ error: '文件不是有效图片(png/jpg/webp)' });
+    }
+  } catch {
+    return res.status(400).json({ error: '文件读取失败' });
+  }
   res.json({ url: 'uploads/mold/' + req.file.filename });
 });
 

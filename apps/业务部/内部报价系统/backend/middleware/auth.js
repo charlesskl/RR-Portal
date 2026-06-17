@@ -32,4 +32,16 @@ function requireAuth(req, res, next) {
   next();
 }
 
-module.exports = { requireAuth, loadUserAndPerms };
+// 客户可见范围校验：返回 { status: 200|403|404 }
+// admin 跳过；无客户(customer 空)的单仅 admin 可访问；否则该单 customer 必须在用户 user_customers 内
+function quoteAccess(user, quoteId) {
+  const q = db.prepare('SELECT customer FROM quotes WHERE id = ?').get(quoteId);
+  if (!q) return { status: 404 };
+  const isAdmin = user.perms && user.perms['账号管理'] && user.perms['账号管理'].can_admin;
+  if (isAdmin) return { status: 200 };
+  if (!q.customer) return { status: 403 };
+  const ok = db.prepare('SELECT 1 FROM user_customers WHERE user_id = ? AND customer = ?').get(user.id, q.customer);
+  return { status: ok ? 200 : 403 };
+}
+
+module.exports = { requireAuth, loadUserAndPerms, quoteAccess };

@@ -12,6 +12,11 @@ async function api(path, opts = {}) {
 
 const ROLE_ZH = { admin: '管理员', supervisor: '主管', staff: '员工' };
 
+// HTML 转义：用户可控字段(用户名/姓名/客户名)插入 innerHTML 前必须过它，防 XSS
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+}
+
 async function init() {
   let me;
   try {
@@ -39,20 +44,20 @@ async function loadUsers() {
     const last = u.last_login ? new Date(u.last_login.includes('T') ? u.last_login : u.last_login.replace(' ', 'T') + 'Z').toLocaleString() : '—';
     tr.innerHTML = `
       <td>${u.id}</td>
-      <td><b>${u.username}</b></td>
-      <td>${u.display_name}</td>
-      <td>${u.dept_name || u.dept}</td>
+      <td><b>${esc(u.username)}</b></td>
+      <td>${esc(u.display_name)}</td>
+      <td>${esc(u.dept_name || u.dept)}</td>
       <td>${ROLE_ZH[u.role] || u.role}</td>
       <td>${isLocked ? '<span class="badge b-empty">已锁定</span>' : '<span class="badge b-approved">正常</span>'}</td>
       <td class="ro" style="font-size:12px">${last}</td>
       <td>
-        <button class="mini btn-perms" data-id="${u.id}" data-username="${u.username}">✏️ 权限</button>
-        <button class="mini btn-cust" data-id="${u.id}" data-username="${u.username}">🎯 客户范围</button>
-        <button class="mini btn-reset" data-id="${u.id}" data-username="${u.username}">重置密码</button>
+        <button class="mini btn-perms" data-id="${u.id}" data-username="${esc(u.username)}">✏️ 权限</button>
+        <button class="mini btn-cust" data-id="${u.id}" data-username="${esc(u.username)}">🎯 客户范围</button>
+        <button class="mini btn-reset" data-id="${u.id}" data-username="${esc(u.username)}">重置密码</button>
         ${isLocked
           ? `<button class="mini btn-unlock" data-id="${u.id}">解锁</button>`
-          : `<button class="mini btn-lock" data-id="${u.id}" data-username="${u.username}">锁定</button>`}
-        <button class="mini danger btn-del" data-id="${u.id}" data-username="${u.username}">删除</button>
+          : `<button class="mini btn-lock" data-id="${u.id}" data-username="${esc(u.username)}">锁定</button>`}
+        <button class="mini danger btn-del" data-id="${u.id}" data-username="${esc(u.username)}">删除</button>
       </td>`;
     tbody.appendChild(tr);
   }
@@ -256,7 +261,7 @@ function renderCustList() {
   for (const c of __custState.all) {
     const checked = __custState.selected.has(c) ? 'checked' : '';
     const div = document.createElement('div');
-    div.innerHTML = `<label><input type="checkbox" data-cust="${c.replace(/"/g, '&quot;')}" ${checked}/> ${c}</label>`;
+    div.innerHTML = `<label><input type="checkbox" data-cust="${esc(c)}" ${checked}/> ${esc(c)}</label>`;
     div.querySelector('input').onchange = (e) => {
       if (e.target.checked) __custState.selected.add(c);
       else __custState.selected.delete(c);

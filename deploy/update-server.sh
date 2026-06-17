@@ -48,6 +48,22 @@ if [[ -n "$ORPHANS" ]]; then
   docker ps -a --filter status=created --filter status=restarting -q | xargs -r docker rm -f
 fi
 
+# ─── internal-quote SESSION_SECRET 守卫（2026-06-17）───
+# internal-quote 生产环境强制要求 SESSION_SECRET，缺失即拒绝启动(crash-loop 502)。
+# 服务器 .env.cloud.production 若没有该值，自动生成一个持久随机值并 force-recreate 注入。
+# 与上方 peise Bailian env guard 同思路。idempotent：已有值则跳过。
+if ! grep -qE '^INTERNAL_QUOTE_SESSION_SECRET=.+' "$ENV_FILE" 2>/dev/null; then
+  sed -i '/^INTERNAL_QUOTE_SESSION_SECRET=/d' "$ENV_FILE" 2>/dev/null || true
+  echo "INTERNAL_QUOTE_SESSION_SECRET=$(openssl rand -hex 32)" >> "$ENV_FILE"
+  echo "[GUARD] INTERNAL_QUOTE_SESSION_SECRET 缺失 → 已生成持久随机值并写入"
+  if docker ps -a --format '{{.Names}}' | grep -q '^rr-portal-internal-quote-1$'; then
+    docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --no-deps --force-recreate internal-quote || true
+    echo "[GUARD] internal-quote 已 force-recreate 注入 SESSION_SECRET"
+  fi
+else
+  echo "[GUARD] INTERNAL_QUOTE_SESSION_SECRET 已存在"
+fi
+
 # ─── Step 2: Pull latest + 算出变动文件 ───
 save_state "pulling"
 echo "[2/6] Pulling latest code..."
@@ -340,16 +356,6 @@ fi
 if [[ "$DB_INIT_CHANGED" -eq 1 ]]; then
   echo "  [WARN] scripts/init-db.sql 变动。不自动执行（数据风险），需人工检查后手动 psql -f。"
 fi
-
-# ─── [临时诊断] dump 受影响服务的容器状态+日志（排查 internal-quote 启动崩溃）───
-# 排查完会移除。无 SSH 时靠这个把容器 stderr 带到 GHA 日志里。
-sleep 5
-for svc in "${AFFECTED_SERVICES[@]}"; do
-  cname="rr-portal-${svc}-1"
-  echo "=== [DIAG] ${cname} ==="
-  docker ps -a --filter "name=${cname}" --format '  status: {{.Status}}' 2>&1 || true
-  docker logs "${cname}" --tail 60 2>&1 | sed 's/^/  [log] /' || true
-done
 
 # ─── Health check (等 nginx) ───
 echo "  Waiting for nginx health..."

@@ -58,5 +58,3 @@ process.on('unhandledRejection', (reason) => {
 
 const PORT = process.env.PORT || 3211;
 app.listen(PORT, () => console.log(`内部报价系统 listening on http://localhost:${PORT}`));
-
-# 2026-06-17 诊断部署触发（捕获启动日志）

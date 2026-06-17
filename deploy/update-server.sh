@@ -341,6 +341,16 @@ if [[ "$DB_INIT_CHANGED" -eq 1 ]]; then
   echo "  [WARN] scripts/init-db.sql 变动。不自动执行（数据风险），需人工检查后手动 psql -f。"
 fi
 
+# ─── [临时诊断] dump 受影响服务的容器状态+日志（排查 internal-quote 启动崩溃）───
+# 排查完会移除。无 SSH 时靠这个把容器 stderr 带到 GHA 日志里。
+sleep 5
+for svc in "${AFFECTED_SERVICES[@]}"; do
+  cname="rr-portal-${svc}-1"
+  echo "=== [DIAG] ${cname} ==="
+  docker ps -a --filter "name=${cname}" --format '  status: {{.Status}}' 2>&1 || true
+  docker logs "${cname}" --tail 60 2>&1 | sed 's/^/  [log] /' || true
+done
+
 # ─── Health check (等 nginx) ───
 echo "  Waiting for nginx health..."
 for i in $(seq 1 15); do

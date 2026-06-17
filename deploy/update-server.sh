@@ -56,12 +56,14 @@ if ! grep -qE '^INTERNAL_QUOTE_SESSION_SECRET=.+' "$ENV_FILE" 2>/dev/null; then
   sed -i '/^INTERNAL_QUOTE_SESSION_SECRET=/d' "$ENV_FILE" 2>/dev/null || true
   echo "INTERNAL_QUOTE_SESSION_SECRET=$(openssl rand -hex 32)" >> "$ENV_FILE"
   echo "[GUARD] INTERNAL_QUOTE_SESSION_SECRET 缺失 → 已生成持久随机值并写入"
-  if docker ps -a --format '{{.Names}}' | grep -q '^rr-portal-internal-quote-1$'; then
-    docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --no-deps --force-recreate internal-quote || true
-    echo "[GUARD] internal-quote 已 force-recreate 注入 SESSION_SECRET"
-  fi
 else
   echo "[GUARD] INTERNAL_QUOTE_SESSION_SECRET 已存在"
+fi
+# 确保 internal-quote 在运行：上面 Step 1 会把 crash-loop(restarting) 容器删掉，
+# 或之前因缺 secret 没起来。不在运行就用当前 env(含 secret) 拉起。
+if ! docker ps --format '{{.Names}}' | grep -q '^rr-portal-internal-quote-1$'; then
+  echo "[GUARD] internal-quote 未在运行 → up -d --force-recreate 拉起（注入 SESSION_SECRET）"
+  docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --no-deps --force-recreate internal-quote || true
 fi
 
 # ─── Step 2: Pull latest + 算出变动文件 ───

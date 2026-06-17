@@ -7,11 +7,20 @@ const bcrypt = require('bcryptjs');
 const DB_PATH = process.env.DB_FILE || path.join(__dirname, '..', 'data.db');
 const SCHEMA_PATH = path.join(__dirname, 'schema.sql');
 
-const db = new DatabaseSync(DB_PATH);
-db.exec('PRAGMA journal_mode = WAL');
-db.exec('PRAGMA foreign_keys = ON');
-
-db.exec(fs.readFileSync(SCHEMA_PATH, 'utf8'));
+// 打开 DB + schema 是最容易因环境（node:sqlite 版本 / WAL 文件系统不支持 / bind-mount 不可写）
+// 而抛错的一段。包 try/catch 打清晰 [FATAL] 日志再退出，避免静默 crash-loop 让人无从排查。
+let db;
+try {
+  db = new DatabaseSync(DB_PATH);
+  db.exec('PRAGMA journal_mode = WAL');
+  db.exec('PRAGMA foreign_keys = ON');
+  db.exec(fs.readFileSync(SCHEMA_PATH, 'utf8'));
+} catch (e) {
+  console.error('[FATAL][db-init] SQLite 初始化失败 (DB_PATH=' + DB_PATH + ')。'
+    + '排查方向：node:sqlite 版本、WAL 是否被该文件系统支持、bind-mount 目录是否可写。');
+  console.error('[FATAL][db-init]', (e && e.stack) || e);
+  process.exit(1);
+}
 
 // 迁移：给已有库的 quotes 补 version 列（幂等）
 const _quoteCols = db.prepare('PRAGMA table_info(quotes)').all().map(c => c.name);

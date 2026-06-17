@@ -1,6 +1,8 @@
 # 内部报价系统 — RR-Portal app
-# Node/Express + node:sqlite（内置，需 Node 22.5+；无需 better-sqlite3 编译）
-FROM node:22-alpine
+# Node/Express + node:sqlite（内置，无需 better-sqlite3 编译）
+# 用 node:24-alpine（现行 LTS）：node:sqlite 已转正、无需 --experimental-sqlite flag，
+# 与本地验证通过的环境一致。22.x 上 node:sqlite 行为有差异，曾导致容器启动崩溃。
+FROM node:24-alpine
 
 # 阿里云 Alpine + npm 镜像（国内 ECS 加速）
 RUN sed -i 's|https\?://dl-cdn.alpinelinux.org|https://mirrors.aliyun.com|g' /etc/apk/repositories

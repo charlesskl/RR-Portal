@@ -34,10 +34,28 @@ async function init() {
   await loadUsers();
 }
 
+let __allUsers = [];
 async function loadUsers() {
-  const rows = await api('/admin/users');
+  __allUsers = await api('/admin/users');
+  const box = $('user-search');
+  if (box && !box.__wired) { box.oninput = renderUsers; box.__wired = true; }
+  renderUsers();
+}
+
+function renderUsers() {
+  const q = ($('user-search')?.value || '').trim().toLowerCase();
+  const rows = q
+    ? __allUsers.filter(u => [u.username, u.display_name, u.dept_name, u.dept]
+        .some(v => String(v || '').toLowerCase().includes(q)))
+    : __allUsers;
+  const cnt = $('user-count');
+  if (cnt) cnt.textContent = q ? `匹配 ${rows.length} / ${__allUsers.length}` : `共 ${__allUsers.length} 个账号`;
   const tbody = $('users-tbody');
   tbody.innerHTML = '';
+  if (!rows.length) {
+    tbody.innerHTML = `<tr><td colspan="8" class="muted" style="text-align:center;padding:18px">无匹配账号</td></tr>`;
+    return;
+  }
   for (const u of rows) {
     const tr = document.createElement('tr');
     const isLocked = !!u.is_locked;

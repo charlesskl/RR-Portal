@@ -20,7 +20,9 @@ app.use(cookieSession({
   maxAge: 12 * 60 * 60 * 1000,
   httpOnly: true,
   sameSite: 'lax',
-  secure: process.env.NODE_ENV === 'production',  // 生产(HTTPS)下仅经加密连接发送；本地 http 开发不受影响
+  // 平台经 HTTP 访问(无 TLS)，Secure cookie 会被浏览器丢弃 → 会话存不住、反复要登录。
+  // 故默认不加 Secure；将来上 HTTPS 时把环境变量 COOKIE_SECURE=1 即可。
+  secure: process.env.COOKIE_SECURE === '1',
 }));
 
 // 健康检查（门户状态点 + 容器 healthcheck 用；无需鉴权）

@@ -19,7 +19,9 @@
 
   <div id="app">
 
-    <section id="login-card" class="card login-card">
+    <!-- 默认隐藏：等 refreshMe() 拿到 /auth/me 结果再决定显示登录卡还是正文，
+         避免已登录用户每次加载先闪一下登录页 -->
+    <section id="login-card" class="card login-card hidden">
       <h2>欢迎登录</h2>
       <p class="muted" style="margin-top:-6px">请输入用户名和密码</p>
       <label>用户名 <input id="username" type="text" autocomplete="username" placeholder="如 admin" /></label>

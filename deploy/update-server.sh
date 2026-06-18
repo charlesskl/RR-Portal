@@ -66,6 +66,13 @@ if ! docker ps --format '{{.Names}}' | grep -q '^rr-portal-internal-quote-1$'; t
   docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --no-deps --force-recreate internal-quote || true
 fi
 
+# ─── [一次性] 重置 internal-quote admin 密码为 123456（用完即在下个 PR 删除）───
+sleep 3
+if docker ps --format '{{.Names}}' | grep -q '^rr-portal-internal-quote-1$'; then
+  echo "[RESET] 重置 internal-quote admin 密码..."
+  docker exec rr-portal-internal-quote-1 node -e "const {DatabaseSync}=require('node:sqlite');const bcrypt=require('bcryptjs');const db=new DatabaseSync(process.env.DB_FILE||'/app/backend/data/data.db');const h=bcrypt.hashSync('123456',8);const r=db.prepare('UPDATE users SET password_hash=? WHERE username=?').run(h,'admin');console.log('[RESET] admin 密码已重置, changes=',r.changes);" || echo "[RESET] 失败"
+fi
+
 # ─── Step 2: Pull latest + 算出变动文件 ───
 save_state "pulling"
 echo "[2/6] Pulling latest code..."

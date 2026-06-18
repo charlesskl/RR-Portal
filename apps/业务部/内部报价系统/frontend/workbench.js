@@ -102,7 +102,7 @@ function renderTable(container, columns, rows, opts = {}) {
             op.value = val; op.textContent = val; op.selected = true;
             sel.appendChild(op);
           }
-          sel.onchange = () => { row[c.key] = sel.value; refreshCalcs(); onChange(); };
+          sel.onchange = () => { row[c.key] = sel.value; refreshCalcs(); onChange(); if (c.affectsOptions) rebuild(); };
           td.appendChild(sel);
         } else {
           const inp = document.createElement('input');
@@ -114,6 +114,8 @@ function renderTable(container, columns, rows, opts = {}) {
             refreshCalcs();
             onChange();
           };
+          // 该列影响同行下拉的选项(如 材质→料型)：失焦后重建表格刷新依赖下拉
+          if (c.affectsOptions) inp.onchange = () => rebuild();
           td.appendChild(inp);
         }
         tr.appendChild(td);
@@ -2239,8 +2241,14 @@ function renderMolding(host, payload, canEdit, onChange, refMolds, fxRmbHkd, use
   const cols = [
     { key: 'name', label: '模具名称', type: 'textarea', width: '220px' },
     { key: 'mold_no', label: '模号', width: '70px' },
-    { key: 'material', label: '材质', width: '70px' },
-    { key: 'material_grade', label: '料型', width: '120px', type: 'select',
+    { key: 'material', label: '材质', width: '110px', type: 'select', affectsOptions: true,
+      options: () => {
+        const names = (payload.material_prices || [])
+          .map(p => String(p.name || '').trim()).filter(Boolean);
+        return [...new Set(names)];
+      }
+    },
+    { key: 'material_grade', label: '料型', width: '150px', type: 'select',
       options: (row) => {
         const mat = String(row.material || '').trim().toUpperCase();
         if (!mat) return [];

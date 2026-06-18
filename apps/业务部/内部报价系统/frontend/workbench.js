@@ -1543,21 +1543,24 @@ function renderCartonCalc(host, c, canEdit, onChange) {
       const el = host.querySelector('#cc-' + k);
       el.oninput = () => { c[k] = Number(el.value) || 0; onChange(); };
     });
-    // 纸箱字段
+    // 纸箱字段：输入时只更新数据(不 render，否则每敲一下就重建输入框→丢焦点只能输一位)，
+    // 失焦(onchange)时再 render 刷新 CU.FT/箱价
     host.querySelectorAll('input[data-bi]:not([data-fj])').forEach(el => {
       el.oninput = () => {
         const i = +el.dataset.bi, k = el.dataset.k;
         c.cartons[i][k] = el.type === 'number' ? (el.value === '' ? 0 : Number(el.value)) : el.value;
-        onChange(); render();
+        onChange();
       };
+      el.onchange = () => render();
     });
-    // 平卡字段
+    // 平卡字段：同上
     host.querySelectorAll('input[data-fj]').forEach(el => {
       el.oninput = () => {
         const i = +el.dataset.bi, j = +el.dataset.fj, k = el.dataset.k;
         c.cartons[i].flat_cards[j][k] = el.type === 'number' ? (el.value === '' ? 0 : Number(el.value)) : el.value;
-        onChange(); render();
+        onChange();
       };
+      el.onchange = () => render();
     });
     // 删纸箱
     host.querySelectorAll('[data-del-b]').forEach(btn => btn.onclick = () => {

@@ -38,7 +38,8 @@ RR-Portal/
 │   │   ├── 注塑啤机排产系统/        — paiji (Node.js + React)
 │   │   ├── 喷油部生产管理系统/      — penyou (Node.js + React)
 │   │   ├── 啤机外发系统/            — pi-outsource (Node.js + React)
-│   │   └── 生产计划管理系统/        — production-plan (Node.js + React + Luckysheet)
+│   │   ├── 生产计划管理系统/        — production-plan (Node.js + React + Luckysheet)
+│   │   └── 品质管理系统/            — qc (Node.js, 兴信 QMS 来料/成品验货 + AQL + 阿里百炼AI识别, node:sqlite)
 │   ├── 业务部/
 │   │   ├── ZURU接单表入单系统/      — zuru-order-system (Flask)
 │   │   ├── ZURU总排期入单/          — zuru-master-schedule (Flask)
@@ -199,6 +200,7 @@ curl http://localhost:<port>/health
 | penyou 喷油部生产管理系统 | Node.js/React | 3100 | /penyou/ |
 | pi-outsource 啤机外发系统 | Node.js/React | 3010 | /pi-outsource/ |
 | production-plan 生产计划管理系统 | Node.js | 8080 | /production-plan/ |
+| qc 品质管理系统 | Node.js (node:sqlite) | 3400 | /qc/ |
 | zuru-master-schedule (ZURU总排期入单) | Flask | 5003 | /zuru-master/ |
 | zuru-order-system (ZURU接单表入单系统) | Flask | 5005 | /zuru-order-system/ |
 | tomy-paiqi TOMY排期核对系统 | Node.js/React | 3006 | /tomy-paiqi/ |
@@ -451,6 +453,7 @@ const data = JSON.parse(fs.readFileSync('data/data.json'));
 | penyou | 喷油部生产管理系统 | 生产部 | Standalone (Node.js/React) | /penyou/ | (PR #100) |
 | pi-outsource | 啤机外发系统 | 生产部 | Standalone (Node.js/React) | /pi-outsource/ | (PR #124) |
 | production-plan | 生产计划管理系统 | 生产部 | Standalone (Node.js/React + Luckysheet) | /production-plan/ | (PR #63) |
+| qc | 品质管理系统 (兴信 QMS) | 生产部 | Standalone (Node.js, 内置 node:sqlite + 阿里百炼 qwen-vl AI 识别) | /qc/ | — |
 | zuru-master-schedule | ZURU总排期入单 | 业务部 | Standalone (Python/Flask) | /zuru-master/ | (PR #59) |
 | zuru-order-system | ZURU接单表入单系统 | 业务部 | Standalone (Python/Flask) | /zuru-order-system/ | https://github.com/hanson678/zuru-order-system |
 | tomy-paiqi | TOMY排期核对系统 | 业务部 | Standalone (Node.js/React) | /tomy-paiqi/ | — |

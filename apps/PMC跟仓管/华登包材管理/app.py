@@ -1402,9 +1402,16 @@ def compare_pair(party_a, party_b, date_from, date_to):
     return result
 
 
+def _norm_order_no(raw):
+    """单号归一化：去掉首尾空白和星号(*)，使 1402710 与 *1402710 视为同一单号。
+    某些录入方会给单号加 * 前缀，核对时应忽略，避免假性不匹配。"""
+    return (raw or '').strip().strip('*').strip()
+
+
 def _sum_items_by_order(con, *, recorded_by, from_party, to_party, date_from, date_to):
     """按 order_no 汇总各包材数量。返回 (by_order, no_orderno_count)。
-    by_order = {order_no: {item_key: float}}，只含非空 order_no；
+    by_order = {归一化 order_no: {item_key: float}}，只含非空 order_no；
+    单号先经 _norm_order_no 归一化（去 * 和空白），归一化后相同的单号合并相加；
     no_orderno_count = 该方向下 order_no 为空的记录条数（不参与单号级核对）。"""
     qty_cols_sql = ', '.join([f'COALESCE(SUM({k}_qty), 0) AS {k}_sum' for k, _ in ITEMS])
     rows = con.execute(f"""
@@ -1414,10 +1421,12 @@ def _sum_items_by_order(con, *, recorded_by, from_party, to_party, date_from, da
     """, (recorded_by, from_party, to_party, date_from, date_to)).fetchall()
     by_order = {}
     for r in rows:
-        on = (r['order_no'] or '').strip()
+        on = _norm_order_no(r['order_no'])
         if not on:
             continue
-        by_order[on] = {k: float(r[f'{k}_sum']) for k, _ in ITEMS}
+        acc = by_order.setdefault(on, {k: 0.0 for k, _ in ITEMS})
+        for k, _ in ITEMS:
+            acc[k] += float(r[f'{k}_sum'])
     no_cnt = con.execute("""
         SELECT COUNT(*) FROM flow_records
         WHERE recorded_by=? AND from_party=? AND to_party=? AND date BETWEEN ? AND ?

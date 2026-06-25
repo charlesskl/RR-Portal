@@ -91,7 +91,7 @@
     var applyBtn = document.getElementById('btnApplyOcrToForm');
     if (applyBtn) {
       applyBtn.textContent = items.length > 1
-        ? ('✓ 应用 ' + items.length + ' 条到批量录入')
+        ? ('✓ 应用 ' + items.length + ' 条（逐条录入）')
         : '✓ 应用到单条录入';
     }
     return items.length;
@@ -139,22 +139,77 @@
   }
 
   /* 劫持：AI 就绪走 AI，否则走原 Tesseract */
+  /* ── 多行货品「逐条录入」队列 ──
+     把每行货品依次填进单条录入表单，由用户逐条判定合格/不合格 + 不良明细后保存，
+     保存成功后自动加载下一条，直到全部录完。整单共用 日期/供应商/送货单号/类型。 */
+  function loadQueueItem(q) {
+    if (!q || q.idx >= q.items.length) return;
+    var it = q.items[q.idx], c = q.common || {};
+    if (typeof window.openAddModal === 'function') window.openAddModal(); // 开/重置单条表单(会切到单条、清表单、填今天)
+    setV('f_date', c.date || '');               // 用送货单日期覆盖"今天"
+    setV('f_supplier', c.supplier || '');
+    setV('f_deliveryNo', c.deliveryNo || '');
+    if (c.type) setV('f_type', c.type);
+    setV('f_productNo', it.productNo || '');
+    setV('f_productName', it.productName || '');
+    setV('f_qty', String(it.qty == null ? '' : it.qty).replace(/[^\d.]/g, ''));
+    if (typeof window.onQtyChange === 'function') window.onQtyChange();          // 触发 AQL 抽样自动计算
+    if (typeof window.onProductNoChange === 'function') window.onProductNoChange();
+    setT('modalTitle', '新增验货记录（第 ' + (q.idx + 1) + '/' + q.items.length + ' 条）');
+  }
+
+  function startQueue(common, items) {
+    window.__qcQueue = { common: common, items: items, idx: 0 };
+    loadQueueItem(window.__qcQueue);
+    if (typeof window.showToast === 'function') {
+      window.showToast('共 ' + items.length + ' 条货品，逐条录入：判定合格/不合格后保存，自动跳下一条', 'info');
+    }
+  }
+
+  /* 劫持：AI 就绪走 AI，否则走原 Tesseract；应用/保存/关闭挂队列逻辑 */
   function patch() {
     if (typeof window.startOcr === 'function' && window.startOcr !== aiDispatch) {
       window.__origStartOcr = window.startOcr;
       window.startOcr = aiDispatch;
     }
-    // 应用按钮：多行货品(AI识别)时改走批量创建，单行/Tesseract 仍走原单条录入
+    // 应用按钮：多行(AI识别)→逐条录入队列；单行/Tesseract→原单条录入
     if (typeof window.applyOcrToForm === 'function' && !window.applyOcrToForm.__qcWrapped) {
       var origApply = window.applyOcrToForm;
       window.applyOcrToForm = function () {
         var r = window.__qcAiResult;
-        if (r && r.items && r.items.length > 1 && typeof window.applyAiOcrItems === 'function') {
-          return window.applyAiOcrItems(r.common, r.items);
-        }
+        if (r && r.items && r.items.length > 1) return startQueue(r.common, r.items);
         return origApply.apply(this, arguments);
       };
       window.applyOcrToForm.__qcWrapped = true;
+    }
+    // 保存成功(弹窗被关)后，若队列还有剩余→自动加载下一条
+    if (typeof window.saveRecord === 'function' && !window.saveRecord.__qcQueueWrapped) {
+      var origSave = window.saveRecord;
+      window.saveRecord = function () {
+        var q = window.__qcQueue;
+        var overlay = document.getElementById('modalOverlay');
+        var ret = origSave.apply(this, arguments);
+        if (q && overlay && !overlay.classList.contains('show')) {  // 关掉了=保存成功；校验失败弹窗仍在
+          q.idx++;
+          if (q.idx < q.items.length) { window.__qcQueue = q; loadQueueItem(q); }
+          else {
+            window.__qcQueue = null;
+            if (typeof window.showToast === 'function') window.showToast('✓ ' + q.items.length + ' 条货品已全部录入完成', 'success');
+          }
+        }
+        return ret;
+      };
+      window.saveRecord.__qcQueueWrapped = true;
+    }
+    // 取消/关闭弹窗→清空队列，避免之后误触发
+    if (typeof window.closeModalDirect === 'function' && !window.closeModalDirect.__qcQueueWrapped) {
+      var origClose = window.closeModalDirect;
+      window.closeModalDirect = function () {
+        var ret = origClose.apply(this, arguments);
+        window.__qcQueue = null;
+        return ret;
+      };
+      window.closeModalDirect.__qcQueueWrapped = true;
     }
   }
   function aiDispatch() {

@@ -78,6 +78,22 @@
       });
     }
     setV('ocrRawText', lines.join('\n'));
+
+    // 暂存结构化结果，供"应用"按钮判断走单条还是多行批量
+    window.__qcAiResult = {
+      common: {
+        date: fields.date || '', supplier: fields.supplier || '',
+        deliveryNo: fields.deliveryNo || '', orderNo: fields.orderNo || '',
+        type: fields.type || '来料',
+      },
+      items: items,
+    };
+    var applyBtn = document.getElementById('btnApplyOcrToForm');
+    if (applyBtn) {
+      applyBtn.textContent = items.length > 1
+        ? ('✓ 应用 ' + items.length + ' 条到批量录入')
+        : '✓ 应用到单条录入';
+    }
     return items.length;
   }
 
@@ -91,6 +107,7 @@
     var btn = document.getElementById('btnStartOcr');
     if (btn) btn.disabled = true;
     setT('ocrStatus', 'AI 识别中，请稍候…');
+    window.__qcAiResult = null;   // 清掉上一次结果
 
     shrinkDataUrl(dataUrl, 2000).then(function (small) {
       return fetch(API_BASE + '/api/ai/ocr-extract', {
@@ -126,6 +143,18 @@
     if (typeof window.startOcr === 'function' && window.startOcr !== aiDispatch) {
       window.__origStartOcr = window.startOcr;
       window.startOcr = aiDispatch;
+    }
+    // 应用按钮：多行货品(AI识别)时改走批量创建，单行/Tesseract 仍走原单条录入
+    if (typeof window.applyOcrToForm === 'function' && !window.applyOcrToForm.__qcWrapped) {
+      var origApply = window.applyOcrToForm;
+      window.applyOcrToForm = function () {
+        var r = window.__qcAiResult;
+        if (r && r.items && r.items.length > 1 && typeof window.applyAiOcrItems === 'function') {
+          return window.applyAiOcrItems(r.common, r.items);
+        }
+        return origApply.apply(this, arguments);
+      };
+      window.applyOcrToForm.__qcWrapped = true;
     }
   }
   function aiDispatch() {

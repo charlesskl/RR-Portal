@@ -2363,6 +2363,52 @@ function applyOcrToForm() {
   showToast('已将识别结果应用到单条录入，请确认后保存', 'success');
 }
 
+/* 应用 AI 识别的多行货品 → 一次性创建多条验货记录
+   common: { date, supplier, deliveryNo, orderNo, type }（整单共用字段）
+   items:  [{ productNo, productName, qty, unit }, ...]（逐行货品）
+   每行按 AQL Level II 自动算抽样数、默认 fail=0/PASS，入库后可逐条编辑不良 */
+function applyAiOcrItems(common, items) {
+  common = common || {};
+  if (!Array.isArray(items) || !items.length) return false;
+  const today = todayStr();
+  const rows = items.map(function (it) {
+    const qty = parseInt(String(it.qty == null ? '' : it.qty).replace(/[^\d]/g, '')) || 0;
+    const smp = qty > 0 ? getAqlSampleSize(qty) : 0;
+    const result = aqlJudge(qty, smp, 0);
+    return {
+      date: common.date || today,
+      inspDate: today,
+      supplier: common.supplier || '',
+      client: '',                       /* 客户因人/单而异，留空人工填 */
+      productNo: it.productNo || '',
+      productName: it.productName || '',
+      deliveryNo: common.deliveryNo || '',
+      orderNo: common.orderNo || '',
+      type: common.type || '来料',
+      qty: qty,
+      sampleQty: smp || null,
+      pass: smp, fail: 0,
+      defectRate: '0.00%', result: result,
+      defect: '', qc: '', remark: '',    /* 检验员留空人工填 */
+    };
+  });
+
+  if (!confirm('识别到 ' + rows.length + ' 行货品，将创建 ' + rows.length +
+    ' 条验货记录（默认判定 PASS，可稍后逐条编辑不良明细），是否继续？')) return false;
+
+  rows.forEach(function (r) { r.id = state.nextId++; state.records.push(r); });
+  persist();
+  closeModalDirect();
+  showToast('✓ 已创建 ' + rows.length + ' 条验货记录', 'success');
+
+  renderRecordsTable();
+  updateTopKpis();
+  if (currentPage === 'dashboard') renderDashboard();
+  if (currentPage === 'analysis')  renderAnalysis();
+  return true;
+}
+window.applyAiOcrItems = applyAiOcrItems;
+
 function switchModalMode(mode) {
   const isBatch = mode === 'batch';
   const panelS  = document.getElementById('panelSingle');

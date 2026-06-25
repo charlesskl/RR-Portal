@@ -210,8 +210,11 @@ export default function OrderImport({ workshop = 'B' }) {
     { title: '用料KG', dataIndex: 'material_kg', width: 80,
       render: (v, r) => renderEditable('material_kg', r, v, { number: true }) },
     { title: '下单单号', dataIndex: 'order_no', width: 160,
-      onCell: () => ({ style: { wordBreak: 'break-all', whiteSpace: 'normal' } }),
-      render: (v, r) => renderEditable('order_no', r, v) },
+      render: (v, r) => (
+        <div style={{ wordBreak: 'break-all', whiteSpace: 'normal', lineHeight: '20px' }}>
+          {renderEditable('order_no', r, v)}
+        </div>
+      ) },
     { title: '备注', dataIndex: 'order_notes', width: 120,
       render: (v, r) => renderEditable('order_notes', r, v, { color: '#d46b08' }) },
     { title: '单号', dataIndex: 'serial_no', width: 100,

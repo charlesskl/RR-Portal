@@ -214,27 +214,42 @@ router.post('/import', upload.single('file'), async (req, res) => {
     console.log('[导入] 文件:', req.file.originalname, '类型:', ext);
     if (ext === '.pdf') {
       // PDF 处理优先级：
-      // 1) 用 pdftoppm 把 PDF 转 PNG，每页发给百炼识别（需服务器装 poppler-utils）
-      // 2) 失败时回退本地 XY 坐标解析器
+      // 0) 模板规则解析（兴信生产单 / 华登CMC外发）— 精度 95%+，快
+      // 1) PDF → PNG → 百炼 VLM 识别（兜底，跨模板通用）
+      // 2) 本地 XY 坐标解析器（最后兜底）
       let useFallback = false;
       try {
-        const { pdfToImages, cleanupTmp } = require('../services/pdfToImages');
-        const { parseImageWithQwen } = require('../services/qwenOcr');
-        const { tmpDir, files } = pdfToImages(req.file.path);
-        console.log('[PDF转PNG] 共', files.length, '页');
-        try {
-          for (let i = 0; i < files.length; i++) {
-            console.log('[PDF→百炼] 处理第', i + 1, '/', files.length, '页');
-            const pageOrders = await parseImageWithQwen(files[i]);
-            parsed = parsed.concat(pageOrders);
-          }
-          console.log('[百炼PDF导入] 共解析', parsed.length, '条');
-        } finally {
-          cleanupTmp(tmpDir);
+        const { parsePdfByTemplate } = require('../services/pdfTemplateParser');
+        const fs = require('fs');
+        const tplResult = await parsePdfByTemplate(fs.readFileSync(req.file.path));
+        if (tplResult && tplResult.orders.length > 0) {
+          parsed = tplResult.orders;
+          console.log('[模板解析命中]', tplResult.template, '→', parsed.length, '条');
         }
       } catch (e) {
-        console.log('[百炼PDF失败，回退本地]:', e.message);
-        useFallback = true;
+        console.log('[模板解析异常]:', e.message);
+      }
+
+      if (parsed.length === 0) {
+        try {
+          const { pdfToImages, cleanupTmp } = require('../services/pdfToImages');
+          const { parseImageWithQwen } = require('../services/qwenOcr');
+          const { tmpDir, files } = pdfToImages(req.file.path);
+          console.log('[PDF转PNG] 共', files.length, '页');
+          try {
+            for (let i = 0; i < files.length; i++) {
+              console.log('[PDF→百炼] 处理第', i + 1, '/', files.length, '页');
+              const pageOrders = await parseImageWithQwen(files[i]);
+              parsed = parsed.concat(pageOrders);
+            }
+            console.log('[百炼PDF导入] 共解析', parsed.length, '条');
+          } finally {
+            cleanupTmp(tmpDir);
+          }
+        } catch (e) {
+          console.log('[百炼PDF失败，回退本地]:', e.message);
+          useFallback = true;
+        }
       }
 
       if (useFallback || parsed.length === 0) {

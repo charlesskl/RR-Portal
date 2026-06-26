@@ -193,8 +193,12 @@ export default function OrderImport({ workshop = 'B' }) {
   };
 
   const columns = [
-    { title: '产品货号', dataIndex: 'product_code', width: 120,
-      render: (v, r) => renderEditable('product_code', r, v) },
+    { title: '产品货号', dataIndex: 'product_code', width: 140,
+      render: (v, r) => (
+        <div style={{ wordBreak: 'break-all', whiteSpace: 'normal', lineHeight: '20px' }}>
+          {renderEditable('product_code', r, v)}
+        </div>
+      ) },
     { title: '模号名称', dataIndex: 'mold_name', width: 150,
       render: (v, r) => renderEditable('mold_name', r, v) },
     { title: '颜色', dataIndex: 'color', width: 80,
@@ -210,8 +214,11 @@ export default function OrderImport({ workshop = 'B' }) {
     { title: '用料KG', dataIndex: 'material_kg', width: 80,
       render: (v, r) => renderEditable('material_kg', r, v, { number: true }) },
     { title: '下单单号', dataIndex: 'order_no', width: 160,
-      onCell: () => ({ style: { wordBreak: 'break-all', whiteSpace: 'normal' } }),
-      render: (v, r) => renderEditable('order_no', r, v) },
+      render: (v, r) => (
+        <div style={{ wordBreak: 'break-all', whiteSpace: 'normal', lineHeight: '20px' }}>
+          {renderEditable('order_no', r, v)}
+        </div>
+      ) },
     { title: '备注', dataIndex: 'order_notes', width: 120,
       render: (v, r) => renderEditable('order_notes', r, v, { color: '#d46b08' }) },
     { title: '单号', dataIndex: 'serial_no', width: 100,

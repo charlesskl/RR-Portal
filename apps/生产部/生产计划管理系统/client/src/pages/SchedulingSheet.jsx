@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
-import { Button, Space, message, Modal, Table, Tag, Alert, Popconfirm } from 'antd';
+import { Button, Space, message, Modal, Table, Tag, Alert, Popconfirm, Select } from 'antd';
 import { DownloadOutlined, PlusOutlined, UploadOutlined, DeleteOutlined, BranchesOutlined, SearchOutlined, SaveOutlined } from '@ant-design/icons';
 import { Input } from 'antd';
 import axios from 'axios';
@@ -100,6 +100,33 @@ function mapRowToOrder(rowData) {
   return order;
 }
 
+// 从一行 data 里解析「货号」：优先级 货号 > ITEM# > 系统货号，取第一个非空。
+// 不能直接用 mapRowToOrder.item_no —— 它遍历表头时「系统货号」会覆盖「ITEM#」，
+// 导致同一 ITEM# 的行（一个有系统货号列、一个没有）算出不同货号。
+function resolveItemNo(data) {
+  const d = data || {};
+  const buckets = { '货号': '', 'ITEM#': '', '系统货号': '' };
+  for (const k of Object.keys(d)) {
+    const ck = cleanHeader(k);
+    if (ck in buckets && !buckets[ck]) {
+      const val = d[k] == null ? '' : String(d[k]).trim();
+      if (val) buckets[ck] = val;
+    }
+  }
+  return buckets['货号'] || buckets['ITEM#'] || buckets['系统货号'] || '';
+}
+
+// 从预览行取货号（用于做工 / 拉 映射的 key）
+function getItemNo(r) {
+  return resolveItemNo(r.data || {});
+}
+
+// 货号 key：用完整货号（去空格），与后端 getItemGroup 一致
+function itemGroup(itemNo) {
+  if (itemNo == null || String(itemNo).trim() === '') return 'unknown';
+  return String(itemNo).trim();
+}
+
 export default function SchedulingSheet({ workshop, tab, lineName = 'all', lines = [] }) {
   const [allData, setAllData] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -112,6 +139,12 @@ export default function SchedulingSheet({ workshop, tab, lineName = 'all', lines
   const [uploadVisible, setUploadVisible] = useState(false);
   const [fileList, setFileList] = useState([]);
   const [parsing, setParsing] = useState(false);
+  // 导入预览里每行选的做工：{ [_key]: '成品' | '半成品' }
+  const [previewWorkType, setPreviewWorkType] = useState({});
+  // 导入预览里每行选的拉：{ [_key]: 拉编号 }
+  const [previewLine, setPreviewLine] = useState({});
+  // (货号组+做工)→拉 记忆映射，用于预览里预填拉
+  const [itemLineMap, setItemLineMap] = useState({});
 
   // 按货号主编号计算数量合计
   const quantitySums = useMemo(() => {
@@ -196,6 +229,31 @@ export default function SchedulingSheet({ workshop, tab, lineName = 'all', lines
         return;
       }
       const withKeys = results.map((r, i) => ({ ...r, _key: i }));
+
+      // 取货号→做工映射，给每行预填做工：半成品 sheet → 半成品；映射命中 → 映射值；否则 → 成品
+      let wtMap = {};
+      try {
+        const mapRes = await axios.get('/api/orders/work-type-map');
+        wtMap = mapRes.data || {};
+      } catch { /* 映射拉取失败不阻断导入 */ }
+      const wtDefaults = {};
+      for (const r of withKeys) {
+        if (r.sheet && r.sheet.includes('半成品')) {
+          wtDefaults[r._key] = '半成品';
+        } else {
+          const itemNo = getItemNo(r);
+          wtDefaults[r._key] = (itemNo && wtMap[itemNo]) || '成品';
+        }
+      }
+      setPreviewWorkType(wtDefaults);
+
+      // 取 (货号组+做工)→拉 记忆映射，预览里据此预填拉
+      try {
+        const lineMapRes = await axios.get('/api/orders/item-line-map', { params: { workshop } });
+        setItemLineMap(lineMapRes.data || {});
+      } catch { setItemLineMap({}); }
+      setPreviewLine({});
+
       setPreviewData(withKeys);
       setSelectedRowKeys(withKeys.map(r => r._key));
       setUploadVisible(false);
@@ -215,31 +273,62 @@ export default function SchedulingSheet({ workshop, tab, lineName = 'all', lines
     }
     setImporting(true);
     try {
-      const orders = selected.map(r => {
-        const order = mapRowToOrder(r.data);
+      // 每条订单展开：成品 → 1 条；半成品 → 2 条（半成品 + 自动配对的成品）
+      const orders = [];
+      const lineEntries = [];   // 货号→拉 映射，导入后存盘
+      for (const r of selected) {
+        const base = mapRowToOrder(r.data);
         // 从服务端提取的客名
-        if (!order.client && r.clientFromFile) {
-          order.client = r.clientFromFile;
+        if (!base.client && r.clientFromFile) {
+          base.client = r.clientFromFile;
         }
-        // 半成品 sheet 上的行强制打上 work_type=半成品，跟同 PO 的成品区分开
-        if (r.sheet && r.sheet.includes('半成品')) {
-          order.work_type = '半成品';
-        }
-        return {
-          ...order,
+        const itemNo = getItemNo(r);
+        // 用统一口径的货号覆盖 mapRowToOrder 的结果（避免系统货号盖掉 ITEM#）
+        if (itemNo) base.item_no = itemNo;
+        const wt = previewWorkType[r._key] || '成品';
+        const makeOrder = (work_type, line) => ({
+          ...base,
+          work_type,
+          line_name: line || base.line_name || '',
           workshop,
           status: 'active',
           row_color: r.type === 'modified' ? 'blue' : (r.type === 'new' ? 'yellow' : null),
-        };
-      });
+        });
+        // 主订单：用预览里选的拉
+        const mainLine = rowLine(r);
+        orders.push(makeOrder(wt, mainLine));
+        if (mainLine) lineEntries.push({ item_no: itemNo, work_type: wt, line: mainLine });
+        // 半成品自动配一条一样的成品订单（拉用配对成品行选的）
+        if (wt === '半成品') {
+          const pairLine = rowLine({ ...r, _key: r._key + '__pair', _pairOf: r._key });
+          orders.push(makeOrder('成品', pairLine));
+          if (pairLine) lineEntries.push({ item_no: itemNo, work_type: '成品', line: pairLine });
+        }
+      }
       const res2 = await axios.post('/api/orders', orders);
       const ids = res2.data.ids || [];
-      const skipped = res2.data.skipped || 0;
       setNewImportedIds(prev => new Set([...prev, ...ids]));
-      const msg = skipped > 0
-        ? `已导入 ${ids.length} 条，跳过 ${skipped} 条重复订单`
-        : `已导入 ${ids.length} 条订单`;
-      message.success(msg);
+
+      // 保存货号→做工映射，下次同货号自动带出
+      const entries = [];
+      const seen = new Set();
+      for (const r of selected) {
+        const itemNo = getItemNo(r);
+        const wt = previewWorkType[r._key];
+        if (itemNo && wt && !seen.has(itemNo)) {
+          seen.add(itemNo);
+          entries.push({ item_no: itemNo, work_type: wt });
+        }
+      }
+      if (entries.length > 0) {
+        axios.put('/api/orders/work-type-map', { entries }).catch(() => { /* 映射保存失败不影响导入 */ });
+      }
+      // 保存 (货号+做工)→拉 映射，下次导入自动带出
+      if (lineEntries.length > 0) {
+        axios.put('/api/orders/item-line-map', { workshop, entries: lineEntries }).catch(() => { /* 不影响导入 */ });
+      }
+
+      message.success(`已导入 ${ids.length} 条订单`);
       setPreviewVisible(false);
       setPreviewData([]);
       fetchData();
@@ -264,12 +353,62 @@ export default function SchedulingSheet({ workshop, tab, lineName = 'all', lines
     }
   };
 
+  // 删除「当前选中」的行（按 Luckysheet 范围选择）
+  // 这绕开 Luckysheet 自带的「删除行」（这版本 deleteRowOrColumn API 是坏的，删不掉行也不触发钩子）
+  const handleDeleteSelectedRows = async () => {
+    const ls = window.luckysheet;
+    if (!ls || !ls.getRange) { message.warning('表格未加载'); return; }
+    const range = ls.getRange();
+    if (!range || !range[0]) { message.warning('请先在表格里选中要删除的行'); return; }
+    // 收集选中行对应的 orderId（每个 range 段）
+    const ids = [];
+    for (const seg of range) {
+      const [r0, r1] = seg.row || [];
+      if (r0 == null) continue;
+      for (let r = r0; r <= r1; r++) {
+        if (r === 0) continue;  // 表头
+        const idx = r - 1;
+        if (idx < data.length) {
+          const o = data[idx];
+          if (o && o.id) ids.push(o.id);
+        }
+      }
+    }
+    const uniqIds = [...new Set(ids)];
+    if (uniqIds.length === 0) { message.warning('选中范围里没有可删除的订单（可能是合计行或空行）'); return; }
+    Modal.confirm({
+      title: `确认删除 ${uniqIds.length} 条订单？`,
+      content: '此操作不可恢复，订单会从数据库里彻底移除',
+      okText: '确认删除',
+      cancelText: '取消',
+      okType: 'danger',
+      onOk: async () => {
+        try {
+          await axios.post('/api/orders/batch-delete', { ids: uniqIds });
+          message.success(`已删除 ${uniqIds.length} 条订单`);
+          fetchData();
+        } catch (e) {
+          message.error('删除失败: ' + (e.response?.data?.message || e.message));
+        }
+      },
+    });
+  };
+
   const handleAutoAssign = async () => {
     try {
       const res = await axios.post('/api/orders/auto-assign', { workshop });
       const assignment = res.data.assignment || {};
+      const unmapped = res.data.unmapped || 0;
       const summary = Object.entries(assignment).map(([line, info]) => `${line}: ${info.count}单/${info.totalQty}只`).join('、');
-      message.success(`排拉完成：${summary}`);
+      if (summary) {
+        message.success(
+          unmapped > 0
+            ? `排拉完成：${summary}；另有 ${unmapped} 单的货号还没排过、未分配（手动排好后再点一次会记住）`
+            : `排拉完成：${summary}`
+        );
+      } else {
+        message.warning(`没有货号排过拉，${unmapped} 单全部未分配。请先手动把订单分到拉、保存，再点自动排拉记忆。`);
+      }
       fetchData();
     } catch (e) {
       message.error('排拉失败: ' + (e.response?.data?.message || e.message));
@@ -290,18 +429,117 @@ export default function SchedulingSheet({ workshop, tab, lineName = 'all', lines
     window.open(`${basePrefix}/api/export?workshop=${workshop}`, '_blank');
   };
 
+  // 展开显示：原始行 + 半成品的配对成品行（配对行 key = 原 key + '__pair'）
+  const displayRows = useMemo(() => {
+    const out = [];
+    for (const r of previewData) {
+      out.push(r);
+      if (previewWorkType[r._key] === '半成品') {
+        out.push({ ...r, _key: r._key + '__pair', _pairOf: r._key });
+      }
+    }
+    return out;
+  }, [previewData, previewWorkType]);
+
+  // 显示用选中键：选中的原始行 + 它们的配对成品行
+  const displaySelectedKeys = useMemo(() => {
+    const out = [];
+    for (const k of selectedRowKeys) {
+      out.push(k);
+      if (previewWorkType[k] === '半成品') out.push(k + '__pair');
+    }
+    return out;
+  }, [selectedRowKeys, previewWorkType]);
+
+  // 取某预览行的做工（原始行用选的，配对成品行固定成品）
+  const rowWorkType = (r) => (r._pairOf != null ? '成品' : (previewWorkType[r._key] || '成品'));
+  // 取某预览行的拉：用户选过用选的，否则按 (货号+做工) 查记忆映射
+  const rowLine = (r) => {
+    if (previewLine[r._key] !== undefined) return previewLine[r._key];
+    const key = itemGroup(getItemNo(r)) + '|' + rowWorkType(r);
+    return itemLineMap[key] || '';
+  };
+
+  // 选拉联动：同 Sheet + 同做工 的行一起跟着跳（成品和半成品分开，可去不同拉）
+  const handleLineChange = (row, value) => {
+    const sheet = row.sheet;
+    const targetWt = rowWorkType(row);   // 配对成品行 → 成品
+    const v = value || '';
+    setPreviewLine(prev => {
+      const next = { ...prev };
+      for (const r of previewData) {
+        if (r.sheet !== sheet) continue;
+        const rWt = previewWorkType[r._key] || '成品';
+        if (rWt === targetWt) next[r._key] = v;
+        // 半成品原始行的「配对成品行」做工是成品：目标是成品时跟跳
+        if (rWt === '半成品' && targetWt === '成品') next[r._key + '__pair'] = v;
+      }
+      return next;
+    });
+  };
+
+  // 选做工联动：同一个 Excel Sheet 的所有行一起改成同样的做工
+  const handleWorkTypeChange = (row, value) => {
+    const sheet = row.sheet;
+    setPreviewWorkType(prev => {
+      const next = { ...prev };
+      for (const r of previewData) {
+        if (r.sheet === sheet) next[r._key] = value;
+      }
+      return next;
+    });
+  };
+
   const previewColumns = [
     {
-      title: '类型', dataIndex: 'type', width: 80,
-      render: t => t === 'new'
-        ? <Tag color="gold">新单</Tag>
-        : t === 'modified'
-          ? <Tag color="blue">修改单</Tag>
-          : <Tag>未知</Tag>,
+      title: '类型', dataIndex: 'type', width: 90,
+      render: (t, r) => {
+        if (r._pairOf != null) return <Tag color="green">配对成品</Tag>;
+        return t === 'new'
+          ? <Tag color="gold">新单</Tag>
+          : t === 'modified'
+            ? <Tag color="blue">修改单</Tag>
+            : <Tag>未知</Tag>;
+      },
     },
-    { title: '文件', dataIndex: 'file', width: 200, ellipsis: true },
-    { title: 'Sheet', dataIndex: 'sheet', width: 120 },
+    { title: '文件', dataIndex: 'file', width: 180, ellipsis: true },
+    { title: 'Sheet', dataIndex: 'sheet', width: 110 },
     { title: '行号', dataIndex: 'row', width: 60 },
+    {
+      title: '做工', key: 'work_type', width: 110,
+      render: (_, r) => {
+        // 配对成品行：固定成品，不可改（它是半成品行自动带出来的）
+        if (r._pairOf != null) {
+          return <Tag color="green">成品</Tag>;
+        }
+        return (
+          <Select
+            size="small"
+            style={{ width: 90 }}
+            value={previewWorkType[r._key] || '成品'}
+            onChange={v => handleWorkTypeChange(r, v)}
+            options={[
+              { value: '成品', label: '成品' },
+              { value: '半成品', label: '半成品' },
+            ]}
+          />
+        );
+      },
+    },
+    {
+      title: '拉', key: 'line', width: 130,
+      render: (_, r) => (
+        <Select
+          size="small"
+          style={{ width: 112 }}
+          allowClear
+          placeholder="选拉"
+          value={rowLine(r) || undefined}
+          onChange={v => handleLineChange(r, v)}
+          options={lines.map(l => ({ value: l.key, label: `${l.key}(${l.name})` }))}
+        />
+      ),
+    },
     {
       title: '主要信息', key: 'info',
       render: (_, r) => {
@@ -315,6 +553,26 @@ export default function SchedulingSheet({ workshop, tab, lineName = 'all', lines
     },
   ];
 
+  // 批量把选中行（无选中则全部）的做工设为指定值（只针对原始行）
+  const setAllWorkType = (wt) => {
+    const keys = selectedRowKeys.length > 0 ? selectedRowKeys : previewData.map(r => r._key);
+    setPreviewWorkType(prev => {
+      const next = { ...prev };
+      for (const k of keys) next[k] = wt;
+      return next;
+    });
+  };
+
+  // 批量把选中行（无选中则全部）的拉设为指定值
+  const setAllLine = (line) => {
+    const keys = selectedRowKeys.length > 0 ? selectedRowKeys : previewData.map(r => r._key);
+    setPreviewLine(prev => {
+      const next = { ...prev };
+      for (const k of keys) next[k] = line;
+      return next;
+    });
+  };
+
   return (
     <div style={{ padding: '8px 0' }}>
       <div style={{ marginBottom: 8, display: 'flex', justifyContent: 'space-between' }}>
@@ -327,13 +585,16 @@ export default function SchedulingSheet({ workshop, tab, lineName = 'all', lines
           <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={handleSave}>保存</Button>
           <Button icon={<PlusOutlined />} onClick={handleAddRow}>新增行</Button>
           {tab === 'active' && lineName === 'all' && (
-            <Popconfirm title="按货号分组、走货期排序，自动分配到各拉？" onConfirm={handleAutoAssign} okText="开始排拉" cancelText="取消">
+            <Popconfirm title="按货号记忆分拉：排过的货号自动进原拉，没排过的保持不动。确定？" onConfirm={handleAutoAssign} okText="开始排拉" cancelText="取消">
               <Button icon={<BranchesOutlined />} style={{ color: '#fa8c16', borderColor: '#fa8c16' }}
                 disabled={allData.length === 0}>
                 自动排拉
               </Button>
             </Popconfirm>
           )}
+          <Button icon={<DeleteOutlined />} danger onClick={handleDeleteSelectedRows}>
+            删除选中行
+          </Button>
           <Popconfirm title={`确定清空当前全部 ${data.length} 条数据吗？`} onConfirm={handleDeleteAll} okText="确定清空" cancelText="取消">
             <Button icon={<DeleteOutlined />} danger disabled={data.length === 0}>
               清空全部{data.length > 0 ? ` (${data.length})` : ''}
@@ -424,26 +685,43 @@ export default function SchedulingSheet({ workshop, tab, lineName = 'all', lines
         open={previewVisible}
         onCancel={() => setPreviewVisible(false)}
         width={1000}
-        okText={`导入选中 (${selectedRowKeys.length})`}
+        okText={`导入选中 (${displaySelectedKeys.length})`}
         onOk={handleImport}
         confirmLoading={importing}
       >
         <Alert
           style={{ marginBottom: 12 }}
-          message={`新单: ${previewData.filter(r => r.type === 'new').length} 条, 修改单: ${previewData.filter(r => r.type === 'modified').length} 条`}
+          message={`新单: ${previewData.filter(r => r.type === 'new').length} 条, 修改单: ${previewData.filter(r => r.type === 'modified').length} 条 · 选半成品会自动配一条成品（共导入 ${displaySelectedKeys.length} 条）`}
           type="info"
           showIcon
         />
+        <div style={{ marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 13, color: '#666' }}>批量（{selectedRowKeys.length > 0 ? `选中 ${selectedRowKeys.length} 行` : '全部'}）：</span>
+          <Button size="small" onClick={() => setAllWorkType('成品')}>全设成品</Button>
+          <Button size="small" onClick={() => setAllWorkType('半成品')}>全设半成品</Button>
+          <Select
+            size="small"
+            style={{ width: 140 }}
+            placeholder="批量设拉"
+            value={undefined}
+            onChange={v => setAllLine(v)}
+            options={lines.map(l => ({ value: l.key, label: `全设 ${l.key}(${l.name})` }))}
+          />
+        </div>
+        <div style={{ marginBottom: 12 }}>
+          <span style={{ fontSize: 12, color: '#999' }}>选做工：同 Sheet 全部联动 · 选拉：同 Sheet 同做工联动（成品/半成品分开选拉）· 选半成品自动配「成品」行</span>
+        </div>
         <Table
           rowKey="_key"
           columns={previewColumns}
-          dataSource={previewData}
+          dataSource={displayRows}
           size="small"
           scroll={{ y: 400 }}
           pagination={false}
           rowSelection={{
-            selectedRowKeys,
-            onChange: setSelectedRowKeys,
+            selectedRowKeys: displaySelectedKeys,
+            onChange: (keys) => setSelectedRowKeys(keys.filter(k => !String(k).endsWith('__pair'))),
+            getCheckboxProps: (r) => ({ disabled: r._pairOf != null }),
           }}
         />
       </Modal>

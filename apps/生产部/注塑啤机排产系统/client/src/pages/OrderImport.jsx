@@ -193,8 +193,12 @@ export default function OrderImport({ workshop = 'B' }) {
   };
 
   const columns = [
-    { title: '产品货号', dataIndex: 'product_code', width: 120,
-      render: (v, r) => renderEditable('product_code', r, v) },
+    { title: '产品货号', dataIndex: 'product_code', width: 140,
+      render: (v, r) => (
+        <div style={{ wordBreak: 'break-all', whiteSpace: 'normal', lineHeight: '20px' }}>
+          {renderEditable('product_code', r, v)}
+        </div>
+      ) },
     { title: '模号名称', dataIndex: 'mold_name', width: 150,
       render: (v, r) => renderEditable('mold_name', r, v) },
     { title: '颜色', dataIndex: 'color', width: 80,

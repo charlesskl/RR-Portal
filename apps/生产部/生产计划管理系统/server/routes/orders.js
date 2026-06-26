@@ -22,6 +22,24 @@ function saveSheetSettings(s) {
   fs.writeFileSync(SHEET_SETTINGS_PATH, JSON.stringify(s, null, 2));
 }
 
+// 货号 → 做工（成品/半成品）映射。导入时分好的类型记下来，下次同货号自动带出。
+const WORK_TYPE_MAP_PATH = path.join(__dirname, '../data/work-type-map.json');
+function loadWorkTypeMap() {
+  try { return JSON.parse(fs.readFileSync(WORK_TYPE_MAP_PATH, 'utf8')); } catch { return {}; }
+}
+function saveWorkTypeMap(m) {
+  fs.writeFileSync(WORK_TYPE_MAP_PATH, JSON.stringify(m, null, 2));
+}
+
+// 货号组 → 拉 的记忆映射 { workshop: { 货号组: 拉编号 } }。自动排拉据此分拉。
+const ITEM_LINE_MAP_PATH = path.join(__dirname, '../data/item-line-map.json');
+function loadItemLineMap() {
+  try { return JSON.parse(fs.readFileSync(ITEM_LINE_MAP_PATH, 'utf8')); } catch { return {}; }
+}
+function saveItemLineMap(m) {
+  fs.writeFileSync(ITEM_LINE_MAP_PATH, JSON.stringify(m, null, 2));
+}
+
 const ORDER_COLUMNS = [
   'workshop','status','supervisor','line_name','worker_count','factory_area',
   'client','order_date','third_party','country','contract','item_no',
@@ -53,28 +71,32 @@ router.get('/', (req, res) => {
   res.json(rows);
 });
 
-// 车间拉配置
+// 车间拉配置（2026-05-22 更新：key=拉名/编号，name=拉长，worker_count=人数）
 const WORKSHOP_CONFIG = {
   A: { supervisor: '吴其雄', factory_area: '兴信A', worker_count: 50,
     lines: [
-      { key: 'A1', name: 'A1' },
-      { key: 'A2', name: 'A2' },
-      { key: 'A3', name: 'A3' },
-      { key: 'A4', name: 'A4' },
+      { key: 'A1', name: '杨胜去', worker_count: 70 },
+      { key: 'A2', name: '贾帅傅', worker_count: 55 },
+      { key: 'A3', name: '李腾', worker_count: 33 },
+      { key: 'A5', name: '杨轮', worker_count: 47 },
+      { key: '新拉', name: '新拉', worker_count: 20, note: '预计6月份开拉' },
     ]},
   B: { supervisor: '吴敏敏', factory_area: '兴信B', worker_count: 50,
     lines: [
-      { key: 'B1', name: '庞贵成' },
-      { key: 'B2', name: '张宝财' },
-      { key: 'B3', name: '杨春田' },
+      { key: 'B1', name: '张宝财', worker_count: 53 },
+      { key: 'B2', name: '杨春田', worker_count: 40 },
+      { key: 'B3', name: '庞贵成', worker_count: 48 },
+      { key: 'B5', name: '骆志凯', worker_count: 35 },
+      { key: '新拉', name: '新拉', worker_count: 20, note: '预计6月份开拉' },
     ]},
   C: { supervisor: '刘荣华', factory_area: '华登', worker_count: 50,
     lines: [
-      { key: 'C1', name: '肖雄' },
-      { key: 'C2', name: '王飞' },
-      { key: 'C3', name: '王航' },
-      { key: 'C4', name: '容东' },
-      { key: 'C5', name: '王飞飞' },
+      { key: 'C01', name: '黄磊峰', worker_count: 34 },
+      { key: 'C02', name: '吴志锋', worker_count: 22 },
+      { key: 'C04', name: '容东', worker_count: 54 },
+      { key: 'C08', name: '肖雄', worker_count: 49 },
+      { key: 'C12', name: '梁泽文', worker_count: 62 },
+      { key: '二楼蛋糕机器拉', name: '王飞飞', worker_count: 33 },
     ]},
 };
 const WORKSHOP_LINES = {
@@ -82,6 +104,30 @@ const WORKSHOP_LINES = {
   B: WORKSHOP_CONFIG.B.lines.map(l => l.key),
   C: WORKSHOP_CONFIG.C.lines.map(l => l.key),
 };
+
+// 把订单的 line_name（可能是拉编号 B1、拉长名 张宝财、或 "B1(张宝财)"）归一成拉编号
+function resolveLineKey(workshop, raw) {
+  if (raw == null) return null;
+  const v = String(raw).trim();
+  if (!v) return null;
+  const cfg = WORKSHOP_CONFIG[workshop];
+  if (!cfg) return null;
+  for (const l of cfg.lines) {
+    if (v === l.key || v === l.name) return l.key;
+  }
+  const m = v.match(/^(.+?)[（(]/);   // 形如 "B1(张宝财)"
+  if (m) {
+    const head = m[1].trim();
+    for (const l of cfg.lines) if (head === l.key || head === l.name) return l.key;
+  }
+  return null;
+}
+
+// 货号 key：用完整货号（去空格）。同货号才算同一组，不按开头数字归并。
+function getItemGroup(itemNo) {
+  if (itemNo == null || String(itemNo).trim() === '') return 'unknown';
+  return String(itemNo).trim();
+}
 
 // GET /api/orders/lines?workshop=B
 router.get('/lines', (req, res) => {
@@ -153,6 +199,55 @@ router.put('/line-config', (req, res) => {
   res.json({ success: true });
 });
 
+// GET /api/orders/work-type-map — 取货号→做工映射
+router.get('/work-type-map', (req, res) => {
+  res.json(loadWorkTypeMap());
+});
+
+// PUT /api/orders/work-type-map — 批量保存货号→做工映射
+// body: { entries: [{ item_no, work_type }, ...] }
+router.put('/work-type-map', (req, res) => {
+  const { entries } = req.body;
+  if (!Array.isArray(entries)) return res.status(400).json({ message: 'entries must be array' });
+  const map = loadWorkTypeMap();
+  let n = 0;
+  for (const e of entries) {
+    if (!e || !e.item_no || !e.work_type) continue;
+    const key = String(e.item_no).trim();
+    if (!key) continue;
+    map[key] = String(e.work_type).trim();
+    n++;
+  }
+  saveWorkTypeMap(map);
+  res.json({ success: true, saved: n });
+});
+
+// GET /api/orders/item-line-map?workshop=B — 查看货号→拉记忆映射（须在 /:id 之前注册）
+router.get('/item-line-map', (req, res) => {
+  const { workshop } = req.query;
+  const full = loadItemLineMap();
+  res.json(workshop ? (full[workshop] || {}) : full);
+});
+
+// PUT /api/orders/item-line-map — 批量保存 (货号组+做工)→拉 映射
+// body: { workshop, entries: [{ item_no, work_type, line }, ...] }
+router.put('/item-line-map', (req, res) => {
+  const { workshop, entries } = req.body;
+  if (!workshop || !Array.isArray(entries)) return res.status(400).json({ message: 'workshop, entries required' });
+  const full = loadItemLineMap();
+  const map = full[workshop] || {};
+  let n = 0;
+  for (const e of entries) {
+    if (!e || !e.item_no || !e.line) continue;
+    const key = getItemGroup(e.item_no) + '|' + String(e.work_type == null ? '' : e.work_type).trim();
+    map[key] = String(e.line).trim();
+    n++;
+  }
+  full[workshop] = map;
+  saveItemLineMap(full);
+  res.json({ success: true, saved: n });
+});
+
 // GET /api/orders/:id
 router.get('/:id', (req, res) => {
   const row = db.prepare('SELECT * FROM orders WHERE id = ?').get(req.params.id);
@@ -160,40 +255,17 @@ router.get('/:id', (req, res) => {
   res.json(row);
 });
 
-// POST /api/orders (single or batch)
+// POST /api/orders (single or batch) — 不做任何去重，全部插入
 router.post('/', async (req, res) => {
   const orders = Array.isArray(req.body) ? req.body : [req.body];
   const placeholders = ORDER_COLUMNS.map(() => '?').join(',');
   const stmt = db.prepare(`INSERT INTO orders (${ORDER_COLUMNS.join(',')}) VALUES (${placeholders})`);
 
-  // 归一化函数：去空格、转大写
-  const norm = (v) => v == null ? '' : String(v).replace(/\s+/g, '').toUpperCase();
-
-  // 指纹：合同+货号+做工+走货期。同一 PO 拆多批次（不同走货期）算不同订单不该合并。
-  function loadExisting(workshop) {
-    const rows = db.prepare('SELECT contract, item_no, work_type, ship_date FROM orders WHERE workshop = ?').all(workshop);
-    const set = new Set();
-    for (const r of rows) {
-      set.add(`${norm(r.contract)}|${norm(r.item_no)}|${norm(r.work_type)}|${norm(r.ship_date)}`);
-    }
-    return set;
-  }
-
-  // 指纹缓存放到 chunk 循环外，保证整批导入只查一次现存数据 + 跨 chunk 自去重
-  const cache = {};
   const ids = [];
-  let skipped = 0;
-
   for (let i = 0; i < orders.length; i += CHUNK_SIZE) {
     const chunk = orders.slice(i, i + CHUNK_SIZE);
     const tx = db.transaction(() => {
       for (const o of chunk) {
-        if (o.workshop && o.contract && o.item_no) {
-          if (!cache[o.workshop]) cache[o.workshop] = loadExisting(o.workshop);
-          const fp = `${norm(o.contract)}|${norm(o.item_no)}|${norm(o.work_type)}|${norm(o.ship_date)}`;
-          if (cache[o.workshop].has(fp)) { skipped++; continue; }
-          cache[o.workshop].add(fp);
-        }
         const values = ORDER_COLUMNS.map(c => o[c] ?? null);
         const info = stmt.run(...values);
         ids.push(info.lastInsertRowid);
@@ -203,7 +275,7 @@ router.post('/', async (req, res) => {
     if (i + CHUNK_SIZE < orders.length) await yieldToEventLoop();
   }
 
-  res.json({ inserted: ids.length, skipped, ids });
+  res.json({ inserted: ids.length, skipped: 0, ids });
 });
 
 // PUT /api/orders/:id
@@ -267,88 +339,77 @@ router.post('/batch-delete', async (req, res) => {
   res.json({ success: true, deleted: ids.length });
 });
 
-// POST /api/orders/auto-assign — 自动排拉
-// 规则：同货号放同一拉，各拉按总数量均衡分配，每拉内按走货期排序
+// POST /api/orders/auto-assign — 自动排拉（纯货号记忆映射，不做数量均衡）
+// 规则：同（货号组+做工）进同一条拉；成品/半成品各记各的拉，不混在一起。
+//   1. 学习：(货号组|做工) 若当前订单已落在某条已知拉上 → 记进映射（多数票，最新手工排拉为准）
+//   2. 应用：(货号组|做工) 在映射里 → 整组订单设到该拉；不在映射里 → 不动，计入「未分配」
+//   3. 保存映射，供下次（含重新导入后）自动带出
 router.post('/auto-assign', async (req, res) => {
   const { workshop } = req.body;
   if (!workshop) return res.status(400).json({ message: 'workshop required' });
 
-  const lines = WORKSHOP_LINES[workshop];
-  if (!lines) return res.status(400).json({ message: 'invalid workshop' });
+  const cfg = WORKSHOP_CONFIG[workshop];
+  if (!cfg) return res.status(400).json({ message: 'invalid workshop' });
 
-  // 获取该车间所有 active 订单
   const orders = db.prepare('SELECT * FROM orders WHERE workshop = ? AND status = ?').all(workshop, 'active');
-  if (orders.length === 0) return res.json({ success: true, message: '没有待排订单' });
+  if (orders.length === 0) return res.json({ success: true, message: '没有待排订单', assignment: {}, unmapped: 0 });
 
-  // 按货号主编号分组（提取数字部分，如 92119-S001 → 92119，92125H-S001 → 92125）
-  function getItemGroup(itemNo) {
-    if (!itemNo) return 'unknown';
-    const match = itemNo.match(/^(\d+)/);
-    return match ? match[1] : itemNo;
-  }
-
+  // 按 (货号组 + 做工) 分组 —— 成品和半成品即使同货号也算不同组，可去不同拉
   const groups = {};
-  for (const order of orders) {
-    const key = getItemGroup(order.item_no);
-    if (!groups[key]) groups[key] = { item_no: key, orders: [], totalQty: 0 };
-    groups[key].orders.push(order);
-    groups[key].totalQty += (order.quantity || 0);
+  for (const o of orders) {
+    const g = getItemGroup(o.item_no) + '|' + String(o.work_type == null ? '' : o.work_type).trim();
+    (groups[g] = groups[g] || []).push(o);
   }
 
-  // 按总数量从大到小排序（大的先分，更均衡）
-  const sortedGroups = Object.values(groups).sort((a, b) => b.totalQty - a.totalQty);
-
-  // 贪心分配：每次把货号组分给当前总量最小的拉
-  const lineLoads = {};
-  const lineAssign = {};
-  for (const line of lines) {
-    lineLoads[line] = 0;
-    lineAssign[line] = [];
-  }
-
-  for (const group of sortedGroups) {
-    // 找当前负载最小的拉
-    let minLine = lines[0];
-    for (const line of lines) {
-      if (lineLoads[line] < lineLoads[minLine]) minLine = line;
+  // 加载并学习映射：每个货号组按当前订单落在哪条已知拉做多数票
+  const fullMap = loadItemLineMap();
+  const map = fullMap[workshop] || {};
+  for (const [g, list] of Object.entries(groups)) {
+    const votes = {};
+    for (const o of list) {
+      const key = resolveLineKey(workshop, o.line_name);
+      if (key) votes[key] = (votes[key] || 0) + 1;
     }
-    lineAssign[minLine].push(group);
-    lineLoads[minLine] += group.totalQty;
+    const best = Object.entries(votes).sort((a, b) => b[1] - a[1])[0];
+    if (best) map[g] = best[0];   // 学到的覆盖旧的（最新手工排拉为准）
   }
 
-  // 更新数据库：设置 line_name、主管、厂区、人数，每拉内按走货期排序
-  const config = WORKSHOP_CONFIG[workshop];
+  // 应用：映射命中的货号组 → 整组订单设到该拉；拉内按走货期排序
   const updateStmt = db.prepare(
     'UPDATE orders SET line_name = ?, supervisor = ?, factory_area = ?, worker_count = ?, updated_at = datetime(\'now\') WHERE id = ?'
   );
-  // 先在内存里收齐所有 (line, orderId) 对，再分批写库，避免一次大事务卡 event loop
   const toAssign = [];
-  for (const [line, groups] of Object.entries(lineAssign)) {
-    const allOrders = groups.flatMap(g => g.orders);
-    allOrders.sort((a, b) => {
-      const da = a.ship_date || '9999';
-      const db2 = b.ship_date || '9999';
-      return da.localeCompare(db2);
-    });
-    for (const order of allOrders) toAssign.push([line, order.id]);
+  const assignment = {};
+  let unmapped = 0;
+  for (const [g, list] of Object.entries(groups)) {
+    const line = map[g];
+    if (!line) { unmapped += list.length; continue; }
+    const lineCfg = cfg.lines.find(l => l.key === line);
+    const wc = (lineCfg && lineCfg.worker_count) || cfg.worker_count;
+    const sorted = [...list].sort((a, b) => (a.ship_date || '9999').localeCompare(b.ship_date || '9999'));
+    for (const o of sorted) toAssign.push([line, wc, o.id]);
+    if (!assignment[line]) assignment[line] = { count: 0, totalQty: 0 };
+    assignment[line].count += list.length;
+    assignment[line].totalQty += list.reduce((s, o) => s + (Number(o.quantity) || 0), 0);
   }
+
+  // 分批写库，避免一次大事务卡 event loop
   for (let i = 0; i < toAssign.length; i += CHUNK_SIZE) {
     const chunk = toAssign.slice(i, i + CHUNK_SIZE);
     const tx = db.transaction(() => {
-      for (const [line, orderId] of chunk) {
-        updateStmt.run(line, config.supervisor, config.factory_area, config.worker_count, orderId);
+      for (const [line, wc, orderId] of chunk) {
+        updateStmt.run(line, cfg.supervisor, cfg.factory_area, wc, orderId);
       }
     });
     tx();
     if (i + CHUNK_SIZE < toAssign.length) await yieldToEventLoop();
   }
 
-  // 返回分配结果
-  const result = {};
-  for (const [line, groups] of Object.entries(lineAssign)) {
-    result[line] = { count: groups.reduce((s, g) => s + g.orders.length, 0), totalQty: lineLoads[line] };
-  }
-  res.json({ success: true, assignment: result });
+  // 保存映射
+  fullMap[workshop] = map;
+  saveItemLineMap(fullMap);
+
+  res.json({ success: true, assignment, unmapped, mappedGroups: Object.keys(map).length });
 });
 
 module.exports = router;

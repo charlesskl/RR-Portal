@@ -48,6 +48,24 @@ if [[ -n "$ORPHANS" ]]; then
   docker ps -a --filter status=created --filter status=restarting -q | xargs -r docker rm -f
 fi
 
+# ─── internal-quote SESSION_SECRET 守卫（2026-06-17）───
+# internal-quote 生产环境强制要求 SESSION_SECRET，缺失即拒绝启动(crash-loop 502)。
+# 服务器 .env.cloud.production 若没有该值，自动生成一个持久随机值并 force-recreate 注入。
+# 与上方 peise Bailian env guard 同思路。idempotent：已有值则跳过。
+if ! grep -qE '^INTERNAL_QUOTE_SESSION_SECRET=.+' "$ENV_FILE" 2>/dev/null; then
+  sed -i '/^INTERNAL_QUOTE_SESSION_SECRET=/d' "$ENV_FILE" 2>/dev/null || true
+  echo "INTERNAL_QUOTE_SESSION_SECRET=$(openssl rand -hex 32)" >> "$ENV_FILE"
+  echo "[GUARD] INTERNAL_QUOTE_SESSION_SECRET 缺失 → 已生成持久随机值并写入"
+else
+  echo "[GUARD] INTERNAL_QUOTE_SESSION_SECRET 已存在"
+fi
+# 确保 internal-quote 在运行：上面 Step 1 会把 crash-loop(restarting) 容器删掉，
+# 或之前因缺 secret 没起来。不在运行就用当前 env(含 secret) 拉起。
+if ! docker ps --format '{{.Names}}' | grep -q '^rr-portal-internal-quote-1$'; then
+  echo "[GUARD] internal-quote 未在运行 → up -d --force-recreate 拉起（注入 SESSION_SECRET）"
+  docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --no-deps --force-recreate internal-quote || true
+fi
+
 # ─── Step 2: Pull latest + 算出变动文件 ───
 save_state "pulling"
 echo "[2/6] Pulling latest code..."
@@ -112,6 +130,7 @@ declare -A PATH_TO_SERVICE=(
   ["apps/业务部/ZURU接单表入单系统/"]="zuru-order-system"
   ["apps/业务部/ZURU总排期入单/"]="zuru-master-schedule"
   ["apps/业务部/ZURU河源排期入单/"]="hy-schedule-system"
+  ["apps/业务部/内部报价系统/"]="internal-quote"
   ["apps/工程部/A-doc生成系統/"]="zouhuo"
   ["apps/工程部/工程啤办单/"]="rr-production"
   ["apps/工程部/模具手办采购订单系统/"]="figure-mold-cost-system"
@@ -290,7 +309,9 @@ if [[ "$COMPOSE_CHANGED" -eq 1 ]]; then
   # 策略：先 up -d（无 --build），让 docker 用现有 image 只 recreate 容器
   # 这样纯 rename 几乎零成本；如果有新服务或 Dockerfile 变了再用 AFFECTED_SERVICES 做增量 build
   echo "  [COMPOSE] Compose 变动，recreate 容器（不强制 rebuild，避免 OOM 风险）"
-  docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d
+  # --remove-orphans: 删除已从 compose 移除的服务遗留的孤儿容器，
+  # 否则被下线/重命名的服务容器会继续运行（crash-loop 时甚至拖垮内存导致全站 OOM）
+  docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --remove-orphans
   # 还要 rebuild 那些真的动了源码的服务（incremental）
   for svc in "${AFFECTED_SERVICES[@]}"; do
     echo "  [INCR] Rebuilding $svc (--no-deps)..."

@@ -3,6 +3,8 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import ExcelJS from 'exceljs';
+import { appendSheetSection } from '../lib/sheet-copy.js';
+import { extractAnnotatedImages } from '../lib/xlsx-images.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -11,7 +13,7 @@ const REPORTS_FILE = path.join(DATA_PATH, 'reports.json');
 const UPLOAD_PATH = path.join(__dirname, '..', 'uploads');
 
 function urlToLocal(url) {
-  // 匹配可能带子路径前缀的 URL: /uploads/images/<id>/<file> 或 /qa-weekly-report/uploads/images/...
+  // 兼容子路径前缀: /uploads/images/<id>/<file> 或 /qa-weekly-report/uploads/images/...
   const m = url && url.match(/\/uploads\/images\/([^/]+)\/([^/]+)$/);
   if (!m) return null;
   return path.join(UPLOAD_PATH, 'images', m[1], m[2]);
@@ -19,6 +21,38 @@ function urlToLocal(url) {
 
 function safeSheetName(name, maxLen = 28) {
   return String(name).replace(/[\\/:*?\[\]]/g, '_').slice(0, maxLen);
+}
+
+function getISOWeekKey(date) {
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const dayNum = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  const week = Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+  return {
+    key: `${d.getUTCFullYear()}-W${String(week).padStart(2, '0')}`,
+    year: d.getUTCFullYear(),
+    week
+  };
+}
+
+// 从今天往前倒推，生成最近 N 个 ISO 周的 key 列表（新 → 旧）
+function recentWeekKeys(n) {
+  const keys = [];
+  const seen = new Set();
+  const today = new Date();
+  let i = 0;
+  while (keys.length < n && i < n * 2 + 7) {
+    const d = new Date(today);
+    d.setDate(d.getDate() - i * 7);
+    const { key } = getISOWeekKey(d);
+    if (!seen.has(key)) {
+      seen.add(key);
+      keys.push(key);
+    }
+    i++;
+  }
+  return keys;
 }
 
 const router = Router();
@@ -75,13 +109,12 @@ router.get('/weeks/all', (_req, res) => {
 });
 
 // 客户 × 周 交叉表（默认最近 8 周；可 ?weeks=12）
+// 周列表按"今天往前倒推 N 周"生成，没数据的周也显示空列
 router.get('/matrix', (req, res) => {
   const limit = Math.max(1, Math.min(52, parseInt(req.query.weeks, 10) || 8));
   const list = readAll();
 
-  const weekSet = new Set();
-  list.forEach(r => weekSet.add(r.weekKey));
-  const allWeeks = Array.from(weekSet).sort((a, b) => b.localeCompare(a)).slice(0, limit);
+  const allWeeks = recentWeekKeys(limit);
   const weekIdx = new Set(allWeeks);
 
   const customerMap = new Map();
@@ -148,7 +181,8 @@ router.get('/weekly/:weekKey', (req, res) => {
   });
 });
 
-// 导出整周为 Excel（含嵌入图片）
+// 导出整周为单个 xlsx：第一个 sheet 是"周报汇总"，后面把每份原 QA 报告的所有 sheet 深复制过来
+// 保留原 QA 报告布局：公司 header / 产品信息表 / 样板图 / 测试结果表（红字不合格）/ 产品照含黄圈 / Conclusion
 router.get('/weekly/:weekKey/export', async (req, res) => {
   try {
     const wantedCustomer = req.query.customerId;
@@ -157,33 +191,41 @@ router.get('/weekly/:weekKey/export', async (req, res) => {
       list = list.filter(r => (r.customerId || '') === wantedCustomer);
     }
 
-    const wb = new ExcelJS.Workbook();
-    wb.created = new Date();
-    wb.creator = 'QA Weekly Report System';
+    const destWb = new ExcelJS.Workbook();
+    destWb.created = new Date();
+    destWb.creator = 'QA Weekly Report System';
 
-    // ===== 周报汇总 sheet =====
-    const sum = wb.addWorksheet('周报汇总');
-    sum.columns = [{ width: 18 }, { width: 14 }, { width: 14 }, { width: 14 }, { width: 12 }];
+    // ===== 单个 sheet 容纳所有内容 =====
+    const sheet = destWb.addWorksheet(`QA周报 ${req.params.weekKey}`);
 
-    const titleRow = sum.addRow([`QA 测试周报 — ${req.params.weekKey}`]);
-    titleRow.font = { bold: true, size: 14 };
-    sum.mergeCells(titleRow.number, 1, titleRow.number, 5);
-    sum.addRow([`导出时间：${new Date().toLocaleString('zh-CN')}`]).font = { color: { argb: 'FF6B7280' } };
-    sum.addRow([]);
+    // ===== 1. 顶部周报汇总块 =====
+    let curRow = 0; // 当前写到第几行（0-based 行号）
+    const titleRow = sheet.addRow([`QA 测试周报 — ${req.params.weekKey}`]);
+    titleRow.font = { bold: true, size: 16, color: { argb: 'FF1F2937' } };
+    sheet.mergeCells(titleRow.number, 1, titleRow.number, 9);
+    titleRow.alignment = { horizontal: 'center' };
+    curRow = titleRow.number;
+
+    const tsRow = sheet.addRow([`导出时间：${new Date().toLocaleString('zh-CN')}`]);
+    tsRow.font = { color: { argb: 'FF6B7280' } };
+    sheet.mergeCells(tsRow.number, 1, tsRow.number, 9);
+    curRow = tsRow.number;
+    sheet.addRow([]); curRow++;
 
     const totalFail = list.reduce((s, r) => s + r.failCount, 0);
     const totalRows = list.reduce((s, r) => s + r.totalRows, 0);
     const passRate = totalRows > 0 ? (((totalRows - totalFail) / totalRows) * 100).toFixed(2) + '%' : '—';
-
     [['报告数', list.length],
      ['有效行数总计', totalRows],
      ['不合格行数总计', totalFail],
      ['合格率', passRate]
     ].forEach(([k, v]) => {
-      const r = sum.addRow([k, v]);
-      r.getCell(1).font = { bold: true };
+      const row = sheet.addRow([k, v]);
+      row.getCell(1).font = { bold: true };
+      row.getCell(1).width = 20;
+      curRow = row.number;
     });
-    sum.addRow([]);
+    sheet.addRow([]); curRow++;
 
     // 按客户聚合
     const byCust = new Map();
@@ -194,117 +236,89 @@ router.get('/weekly/:weekKey/export', async (req, res) => {
       b.reports++; b.totalFail += r.failCount; b.totalRows += r.totalRows;
     });
     if (byCust.size > 0) {
-      sum.addRow(['按客户聚合']).getCell(1).font = { bold: true, size: 12 };
-      const hr = sum.addRow(['客户', '报告数', '不合格数', '有效行', '合格率']);
+      const t = sheet.addRow(['按客户聚合']);
+      t.getCell(1).font = { bold: true, size: 12 };
+      curRow = t.number;
+      const hr = sheet.addRow(['客户', '报告数', '不合格数', '有效行', '合格率']);
       hr.font = { bold: true };
       hr.eachCell(c => { c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF3F4F6' } }; });
+      curRow = hr.number;
       for (const c of byCust.values()) {
         const rate = c.totalRows > 0 ? (((c.totalRows - c.totalFail) / c.totalRows) * 100).toFixed(2) + '%' : '—';
-        sum.addRow([c.name, c.reports, c.totalFail, c.totalRows, rate]);
+        const row = sheet.addRow([c.name, c.reports, c.totalFail, c.totalRows, rate]);
+        row.getCell(3).font = { color: { argb: 'FFDC2626' }, bold: true };
+        curRow = row.number;
       }
+      sheet.addRow([]); curRow++;
     }
+    sheet.addRow([]); curRow++;
 
-    // ===== 每份报告一个 sheet =====
+    // ===== 2. 依次拼接每份原 QA 报告（按 rowOffset，保留原布局） =====
     let reportIdx = 0;
     for (const r of list) {
       reportIdx++;
-      const name = safeSheetName(`${reportIdx}-${r.customerName || '未分类'}`, 28);
-      const ws = wb.addWorksheet(name);
-      ws.columns = [{ width: 8 }, { width: 18 }, { width: 14 }, { width: 8 }, { width: 8 }, { width: 8 }, { width: 50 }];
+      const srcPath = path.join(UPLOAD_PATH, r.storedName || '');
+      if (!r.storedName || !fs.existsSync(srcPath)) continue;
+      const buf = fs.readFileSync(srcPath);
 
-      const t = ws.addRow([r.originalName]);
-      t.font = { bold: true, size: 13 };
-      ws.mergeCells(t.number, 1, t.number, 7);
-      [['客户', r.customerName],
-       ['归属周', r.weekKey],
-       ['不合格数', r.failCount],
-       ['有效行数', r.totalRows],
-       ['上传时间', new Date(r.uploadedAt).toLocaleString('zh-CN')]
-      ].forEach(([k, v]) => {
-        const row = ws.addRow([k, v]);
-        row.getCell(1).font = { bold: true, color: { argb: 'FF6B7280' } };
+      let annotated = [];
+      try { annotated = await extractAnnotatedImages(buf); } catch (e) {
+        console.warn('[export] annotate failed for', r.originalName, e.message);
+      }
+      const annotatedByAnchor = new Map();
+      annotated.forEach(im => {
+        const key = `${(im.sheetName || '').trim()}|${im.fromRow - 1}|${im.fromCol - 1}`;
+        annotatedByAnchor.set(key, im);
       });
-      ws.addRow([]);
 
-      for (const sh of r.sheets) {
-        if (!sh.failRows || sh.failRows.length === 0) continue;
-        const shTitle = ws.addRow([`Sheet: ${sh.name}（${sh.totalRows} 行 / 不合格 ${sh.failRows.length} 行）`]);
-        shTitle.font = { bold: true, size: 12, color: { argb: 'FF1F2937' } };
-        ws.mergeCells(shTitle.number, 1, shTitle.number, 7);
+      const srcWb = new ExcelJS.Workbook();
+      try { await srcWb.xlsx.load(buf); } catch (e) {
+        console.warn('[export] xlsx.load failed for', r.originalName, e.message);
+        continue;
+      }
 
-        const hr = ws.addRow(['行号', ...sh.headers]);
-        hr.font = { bold: true };
-        hr.eachCell(c => {
-          c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF3F4F6' } };
-          c.border = { bottom: { style: 'thin', color: { argb: 'FF9CA3AF' } } };
+      // 报告分隔标题行
+      const sectionTitle = sheet.addRow([`【${reportIdx}】${r.customerName} — ${r.originalName}`]);
+      sectionTitle.font = { bold: true, size: 13, color: { argb: 'FFFFFFFF' } };
+      sectionTitle.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2563EB' } };
+      sectionTitle.alignment = { vertical: 'middle' };
+      sheet.mergeCells(sectionTitle.number, 1, sectionTitle.number, 14);
+      sectionTitle.height = 22;
+      curRow = sectionTitle.number;
+      sheet.addRow([]); curRow++;
+
+      srcWb.eachSheet((srcSheet) => {
+        if (srcSheet.state === 'hidden' || srcSheet.state === 'veryHidden') return;
+
+        // 子 sheet 小标题
+        const subTitle = sheet.addRow([`  — ${srcSheet.name} —`]);
+        subTitle.font = { bold: true, color: { argb: 'FF6B7280' } };
+        sheet.mergeCells(subTitle.number, 1, subTitle.number, 14);
+        curRow = subTitle.number;
+
+        const rowOffset = curRow; // 后续每一行 = src 行号 + rowOffset
+
+        const annoForThisSheet = new Map();
+        annotatedByAnchor.forEach((v, k) => {
+          if (k.startsWith(`${srcSheet.name.trim()}|`)) annoForThisSheet.set(k, v);
         });
 
-        for (const fr of sh.failRows) {
-          const row = ws.addRow([fr.rowNumber, ...fr.cells.map(c => c.value)]);
-          fr.cells.forEach((c, i) => {
-            if (c.isRed) {
-              const cell = row.getCell(i + 2);
-              cell.font = { color: { argb: 'FFDC2626' }, bold: true };
-              cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEF2F2' } };
-            }
-            row.getCell(i + 2).alignment = { wrapText: true, vertical: 'top' };
-          });
+        try {
+          const consumed = appendSheetSection(srcWb, srcSheet, destWb, sheet, rowOffset, annoForThisSheet);
+          curRow += consumed;
+        } catch (e) {
+          console.warn(`[export] append sheet '${srcSheet.name}' failed:`, e.message);
         }
-        ws.addRow([]);
-
-        // 嵌入图片
-        const allImgs = [
-          ...(sh.imageGroups || []).flatMap(g => g.images.map(img => ({ ...img, label: `不合格行 ${g.rows.join('、')}` }))),
-          ...(sh.orphanImages || []).map(img => ({ ...img, label: '其他附图' }))
-        ];
-        if (allImgs.length > 0) {
-          // 按 label 分组
-          const labelMap = new Map();
-          for (const img of allImgs) {
-            if (!labelMap.has(img.label)) labelMap.set(img.label, []);
-            labelMap.get(img.label).push(img);
-          }
-          for (const [label, imgs] of labelMap) {
-            const labelRow = ws.addRow([label + `（${imgs.length} 张）`]);
-            labelRow.font = { bold: true, color: { argb: 'FF2563EB' } };
-            ws.mergeCells(labelRow.number, 1, labelRow.number, 7);
-
-            // 每行放 3 张图，每张占 2.5 列 × 12 行（约 200×160 px）
-            const imgsPerRow = 3;
-            const cellsWide = 2.5;
-            const cellsTall = 12;
-            const startRow = ws.rowCount; // 当前行下方开始（0-based row = rowCount）
-            for (let i = 0; i < imgs.length; i++) {
-              const localPath = urlToLocal(imgs[i].url);
-              if (!localPath || !fs.existsSync(localPath)) continue;
-              const ext = path.extname(localPath).slice(1).toLowerCase();
-              const imageId = wb.addImage({
-                filename: localPath,
-                extension: ext === 'jpg' ? 'jpeg' : (ext || 'png')
-              });
-              const gridRow = Math.floor(i / imgsPerRow);
-              const gridCol = i % imgsPerRow;
-              const tlRow = startRow + gridRow * cellsTall;
-              const tlCol = gridCol * cellsWide;
-              ws.addImage(imageId, {
-                tl: { col: tlCol, row: tlRow },
-                ext: { width: 220, height: 180 }
-              });
-            }
-            // 留出图片需要的空间
-            const totalImgRows = Math.ceil(imgs.length / imgsPerRow) * cellsTall;
-            for (let i = 0; i < totalImgRows; i++) ws.addRow([]);
-            ws.addRow([]);
-          }
-        }
-        ws.addRow([]);
-      }
+        // sheet 之间留 2 行空白
+        sheet.addRow([]); curRow++;
+        sheet.addRow([]); curRow++;
+      });
     }
 
     const fileName = `QA周报-${req.params.weekKey}${wantedCustomer ? '-客户筛选' : ''}.xlsx`;
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(fileName)}`);
-    await wb.xlsx.write(res);
+    await destWb.xlsx.write(res);
     res.end();
   } catch (err) {
     console.error('[export weekly] error:', err);

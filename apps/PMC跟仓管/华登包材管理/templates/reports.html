@@ -146,4 +146,50 @@
 {% set party_name = p_name %}
 {% include "_monthly_stats.html" with context %}
 {% endfor %}
+
+<!-- 跨厂区合计（各厂区盘点之和，对应手工 Excel 底部黄框）-->
+{% if inv_grand_total %}
+{% set gt = inv_grand_total %}
+<div class="bg-white rounded-lg shadow-sm mb-6 border-2 border-amber-300">
+    <div class="px-4 py-3 border-b bg-amber-50">
+        <h2 class="text-lg font-semibold">📦 跨厂区合计（{{ gt.ym }}）</h2>
+        <p class="text-xs text-gray-500 mt-1">
+            合计范围：{{ gt.included|join('、') }}
+            {% if gt.missing %}<span class="text-red-500">（{{ gt.missing|join('、') }} 缺 {{ gt.ym }} 盘点，按 0 计）</span>{% endif %}
+        </p>
+    </div>
+    <div class="table-scroll p-2">
+        <table class="text-sm border-collapse w-full">
+            <thead>
+                <tr class="bg-amber-100">
+                    <th class="border px-2 py-1 text-left w-44">指标</th>
+                    {% for k, name in STAT_ITEMS %}<th class="border px-2 py-1 text-right">{{ name }}</th>{% endfor %}
+                </tr>
+            </thead>
+            <tbody>
+                <tr class="bg-amber-50">
+                    <td class="border px-2 py-1 font-medium">{{ gt.prev_month_num }}月合计总数量</td>
+                    {% for k, _ in STAT_ITEMS %}<td class="border px-2 py-1 text-right">{{ gt.base[k]|round(0)|int }}</td>{% endfor %}
+                </tr>
+                <tr class="bg-yellow-100">
+                    <td class="border px-2 py-1 font-medium">总损耗（已减投资数）</td>
+                    {% for k, _ in STAT_ITEMS %}
+                    <td class="border px-2 py-1 text-right font-medium {{ 'text-red-600' if gt.loss[k] < 0 else ('text-green-600' if gt.loss[k] > 0 else '') }}">{{ gt.loss[k]|round(0)|int }}</td>
+                    {% endfor %}
+                </tr>
+                <tr class="bg-amber-50">
+                    <td class="border px-2 py-1 font-medium">{{ gt.month_num }}月合计总数量</td>
+                    {% for k, _ in STAT_ITEMS %}<td class="border px-2 py-1 text-right">{{ gt.actual[k]|round(0)|int }}</td>{% endfor %}
+                </tr>
+                <tr class="bg-yellow-100">
+                    <td class="border px-2 py-1 font-medium">总损耗占比</td>
+                    {% for k, _ in STAT_ITEMS %}
+                    <td class="border px-2 py-1 text-right {{ 'text-red-600' if gt.loss_pct[k] < 0 else ('text-green-600' if gt.loss_pct[k] > 0 else '') }}">{{ '%.1f'|format(gt.loss_pct[k]) }}%</td>
+                    {% endfor %}
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
 {% endblock %}

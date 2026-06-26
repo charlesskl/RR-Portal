@@ -486,6 +486,7 @@ def analyze_orders(schedule_dir, orders):
                     'order_idx': oi, 'line_idx': li,
                     'item': sku_spec, 'po': po,
                     'file': candidates[0]['file'], 'sheet': candidates[0]['sheet'],
+                    'type': candidates[0].get('type', 'hy'),
                 })
             else:
                 # 多候选 → 先尝试用货号前缀自动匹配sheet名
@@ -503,6 +504,7 @@ def analyze_orders(schedule_dir, orders):
                         'order_idx': oi, 'line_idx': li,
                         'item': sku_spec, 'po': po,
                         'file': auto_match['file'], 'sheet': auto_match['sheet'],
+                        'type': auto_match.get('type', 'hy'),
                     })
                 else:
                     ambiguous.append({
@@ -548,6 +550,7 @@ def write_orders(schedule_dir, orders, ambiguous_selections=None, export_dir=Non
                 'line_idx': amb['line_idx'],
                 'item': amb['item'], 'po': amb['po'],
                 'file': sel['file'], 'sheet': sel['sheet'],
+                'type': sel.get('type', 'hy'),
             })
 
     # Step 2: 按文件分组修改单

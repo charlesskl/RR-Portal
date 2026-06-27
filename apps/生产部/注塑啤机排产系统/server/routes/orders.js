@@ -17,8 +17,8 @@ function stmts() {
         INSERT INTO orders (product_code, mold_no, mold_name, color, color_powder_no,
           material_type, shot_weight, material_kg, sprue_pct, ratio_pct,
           quantity_needed, accumulated, cavity, cycle_time, order_no,
-          is_three_plate, packing_qty, import_batch, source_file, status, order_notes, workshop)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          is_three_plate, packing_qty, import_batch, source_file, status, order_notes, serial_no, workshop)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `),
       update: db.prepare(`
         UPDATE orders SET product_code=?, mold_no=?, mold_name=?, color=?, color_powder_no=?,
@@ -60,7 +60,7 @@ router.post('/', (req, res) => {
       o.quantity_needed || 0, o.accumulated || 0, o.cavity || 1, o.cycle_time || 0,
       o.order_no || '', o.is_three_plate || 0, o.packing_qty || 0,
       o.import_batch || '', o.source_file || '', o.status || 'pending', o.order_notes || '',
-      o.workshop || 'B'
+      o.serial_no || '', o.workshop || 'B'
     );
     res.json({ id: result.lastInsertRowid, ...o });
   } catch (err) {

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
-import { Upload, Button, Table, message, Card, Space, Tag, Popconfirm, Input, InputNumber } from 'antd';
-import { UploadOutlined, DeleteOutlined, ClearOutlined, DownloadOutlined } from '@ant-design/icons';
+import { Upload, Button, Table, message, Card, Space, Tag, Popconfirm, Input, InputNumber, Drawer, Form } from 'antd';
+import { UploadOutlined, DeleteOutlined, ClearOutlined, DownloadOutlined, PlusOutlined } from '@ant-design/icons';
 import axios from 'axios';
 import { apiUrl } from '../api';
 
@@ -125,6 +125,27 @@ export default function OrderImport({ workshop = 'B' }) {
   };
 
   // 单元格编辑状态
+  // 手动添加订单
+  const [addOpen, setAddOpen] = useState(false);
+  const [addForm] = Form.useForm();
+  const openAdd = () => {
+    addForm.resetFields();
+    addForm.setFieldsValue({ workshop, status: 'pending' });
+    setAddOpen(true);
+  };
+  const handleAddSave = async () => {
+    try {
+      const v = await addForm.validateFields();
+      await axios.post(API, { ...v, workshop });
+      message.success('已添加');
+      setAddOpen(false);
+      fetchOrders();
+    } catch (e) {
+      if (e?.errorFields) return;
+      message.error('添加失败：' + (e.response?.data?.message || e.message));
+    }
+  };
+
   const [editCell, setEditCell] = useState(null); // { id, field }
   const [editValue, setEditValue] = useState('');
 
@@ -247,6 +268,7 @@ export default function OrderImport({ workshop = 'B' }) {
           <Upload beforeUpload={handleUpload} showUploadList={false} accept=".pdf,.xlsx,.xls,.png,.jpg,.jpeg,.bmp,.webp" multiple>
             <Button icon={<UploadOutlined />} type="primary">导入订单 (PDF/Excel/图片)</Button>
           </Upload>
+          <Button icon={<PlusOutlined />} onClick={openAdd}>手动添加</Button>
           <Button icon={<DownloadOutlined />} onClick={() => window.open(apiUrl('/api/orders/template'))}>下载导入模板</Button>
           <Popconfirm title="合并相同模号+颜色+色粉+料型的订单？需啤数累加，单号合并" onConfirm={handleMergeOrders}>
             <Button>合并相同订单</Button>
@@ -266,6 +288,67 @@ export default function OrderImport({ workshop = 'B' }) {
         pagination={{ pageSize: 50 }}
         scroll={{ x: 900 }}
       />
+
+      <Drawer
+        title="手动添加订单"
+        width={520}
+        open={addOpen}
+        onClose={() => setAddOpen(false)}
+        extra={<Space><Button onClick={() => setAddOpen(false)}>取消</Button><Button type="primary" onClick={handleAddSave}>保存</Button></Space>}
+      >
+        <Form form={addForm} layout="vertical" size="small">
+          <Space.Compact style={{ width: '100%' }}>
+            <Form.Item name="product_code" label="产品货号" style={{ width: '50%' }}>
+              <Input placeholder="如 77858" />
+            </Form.Item>
+            <Form.Item name="order_no" label="下单单号" style={{ width: '50%' }}>
+              <Input placeholder="如 CMC260397" />
+            </Form.Item>
+          </Space.Compact>
+
+          <Form.Item name="mold_name" label="模号名称" rules={[{ required: true, message: '请填写模号名称' }]}>
+            <Input placeholder="如 MCKP-01M-01 洗手盆模" />
+          </Form.Item>
+
+          <Space.Compact style={{ width: '100%' }}>
+            <Form.Item name="color" label="颜色" style={{ width: '50%' }}>
+              <Input placeholder="如 米黄/9064C" />
+            </Form.Item>
+            <Form.Item name="color_powder_no" label="色粉号" style={{ width: '50%' }}>
+              <Input placeholder="如 89956" />
+            </Form.Item>
+          </Space.Compact>
+
+          <Form.Item name="material_type" label="料型">
+            <Input placeholder="如 ABS KF-740" />
+          </Form.Item>
+
+          <Space.Compact style={{ width: '100%' }}>
+            <Form.Item name="shot_weight" label="啤重 G" style={{ width: '33%' }}>
+              <InputNumber step={0.1} style={{ width: '100%' }} />
+            </Form.Item>
+            <Form.Item name="material_kg" label="用料 KG" style={{ width: '34%' }}>
+              <InputNumber step={0.01} style={{ width: '100%' }} />
+            </Form.Item>
+            <Form.Item name="quantity_needed" label="需啤数" rules={[{ required: true, message: '请填写需啤数' }]} style={{ width: '33%' }}>
+              <InputNumber style={{ width: '100%' }} />
+            </Form.Item>
+          </Space.Compact>
+
+          <Space.Compact style={{ width: '100%' }}>
+            <Form.Item name="serial_no" label="单号" style={{ width: '50%' }}>
+              <Input placeholder="如 B186" />
+            </Form.Item>
+            <Form.Item name="packing_qty" label="装箱量" style={{ width: '50%' }}>
+              <InputNumber style={{ width: '100%' }} />
+            </Form.Item>
+          </Space.Compact>
+
+          <Form.Item name="order_notes" label="备注">
+            <Input.TextArea rows={2} placeholder="如 喷油" />
+          </Form.Item>
+        </Form>
+      </Drawer>
     </div>
   );
 }

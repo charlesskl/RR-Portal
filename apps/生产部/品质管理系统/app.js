@@ -742,8 +742,9 @@ function setText(id, val) {
 /* ════════════════════════════════════════
    §6  DASHBOARD
 ════════════════════════════════════════ */
-/* 仪表板「数据月份」筛选：'' = 全部月份，'YYYY-MM' = 指定月 */
-let _dashMonth = '';
+/* 仪表板「数据月份」筛选：
+   null = 未初始化(首次默认选最近有数据的月)，'' = 用户主动选了全部月份，'YYYY-MM' = 指定月 */
+let _dashMonth = null;
 
 /* 在概要卡上方注入/刷新月份选择器；选项来自记录中实际出现的月份（倒序） */
 function ensureDashMonthFilter() {
@@ -765,6 +766,8 @@ function ensureDashMonthFilter() {
     });
   }
   const months = Array.from(new Set(recs().map(r => (r.date || '').slice(0, 7)).filter(Boolean))).sort().reverse();
+  /* 首次进入默认选「最近有数据的月份」；用户主动选过(含全部)后不再覆盖 */
+  if (_dashMonth === null) _dashMonth = months[0] || '';
   const sel = document.getElementById('dashMonthSel');
   if (sel) {
     sel.innerHTML = '<option value="">全部月份</option>' +

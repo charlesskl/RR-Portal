@@ -742,13 +742,48 @@ function setText(id, val) {
 /* ════════════════════════════════════════
    §6  DASHBOARD
 ════════════════════════════════════════ */
+/* 仪表板「数据月份」筛选：'' = 全部月份，'YYYY-MM' = 指定月 */
+let _dashMonth = '';
+
+/* 在概要卡上方注入/刷新月份选择器；选项来自记录中实际出现的月份（倒序） */
+function ensureDashMonthFilter() {
+  const cards = document.getElementById('summaryCards');
+  if (!cards || !cards.parentNode) return;
+  let bar = document.getElementById('dashMonthBar');
+  if (!bar) {
+    bar = document.createElement('div');
+    bar.id = 'dashMonthBar';
+    bar.style.cssText = 'display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap;';
+    bar.innerHTML =
+      '<span style="font-size:13px;color:var(--text-dim)">数据月份</span>' +
+      '<select id="dashMonthSel" class="filter-select" style="width:auto;min-width:130px"></select>' +
+      '<span id="dashMonthHint" style="font-size:12px;color:var(--text-muted)"></span>';
+    cards.parentNode.insertBefore(bar, cards);
+    bar.querySelector('#dashMonthSel').addEventListener('change', function () {
+      _dashMonth = this.value;
+      renderDashboard();
+    });
+  }
+  const months = Array.from(new Set(recs().map(r => (r.date || '').slice(0, 7)).filter(Boolean))).sort().reverse();
+  const sel = document.getElementById('dashMonthSel');
+  if (sel) {
+    sel.innerHTML = '<option value="">全部月份</option>' +
+      months.map(m => `<option value="${m}">${m.slice(0,4)}年${m.slice(5,7)}月</option>`).join('');
+    sel.value = _dashMonth;
+  }
+}
+
 function renderDashboard() {
-  const data = recs();
+  ensureDashMonthFilter();
+  let data = recs();
+  if (_dashMonth) data = data.filter(r => r.date && r.date.startsWith(_dashMonth));
+  const hint = document.getElementById('dashMonthHint');
+  if (hint) hint.textContent = _dashMonth ? ('· 本月 ' + data.length + ' 条记录') : ('· 全部 ' + data.length + ' 条记录');
   updateTopKpis();
   renderSummaryCards(data);
   renderRiskTable(data);
   renderRiskMatrix(data);
-  /* 图表统一在 initCharts() 中初始化 */
+  /* 图表统一在 initCharts() 中初始化（接收已按月过滤的 data） */
   initCharts(data);
 }
 

@@ -1,0 +1,755 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>兴信 QMS · 品质管理系统</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="mobile.css" /><!-- 移动端适配，必须在 style.css 之后 -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Noto+Sans+SC:wght@300;400;500;700&family=Share+Tech+Mono&display=swap" rel="stylesheet" />
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+  <!-- SheetJS：读取 .xlsx / .xls / .csv -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <!-- PDF 导出：jsPDF + html2canvas -->
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+</head>
+<body>
+<div id="loginScreen" style="display:flex;align-items:center;justify-content:center;
+  min-height:100vh;background:var(--bg-body);padding:20px;box-sizing:border-box">
+  <div style="width:380px;max-width:100%">
+    <div style="text-align:center;margin-bottom:32px">
+      <div style="font-size:28px;font-weight:800;color:var(--text-hi);letter-spacing:2px">兴信 QMS</div>
+      <div style="font-size:13px;color:var(--text-dim);margin-top:6px">品质管理系统</div>
+    </div>
+    <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:32px">
+      <h3 style="margin:0 0 24px;font-size:16px;color:var(--text-hi);text-align:center">账号登录</h3>
+      <div style="margin-bottom:16px">
+        <label class="form-label">用户名</label>
+        <input id="loginUsername" class="form-input" placeholder="请输入用户名"
+               autocomplete="username" onkeydown="loginOnEnter(event)"/>
+      </div>
+      <div style="margin-bottom:20px">
+        <label class="form-label">密码</label>
+        <input id="loginPassword" type="password" class="form-input" placeholder="请输入密码"
+               autocomplete="current-password" onkeydown="loginOnEnter(event)"/>
+      </div>
+      <div id="loginError" style="display:none;color:var(--red);font-size:12px;
+           margin-bottom:12px;padding:8px 12px;background:rgba(255,61,90,.08);border-radius:6px"></div>
+      <button class="btn-primary" style="width:100%;padding:11px;font-size:15px"
+              onclick="login()">登 录</button>
+    </div>
+    <div style="text-align:center;margin-top:16px;font-size:11px;color:var(--text-muted)">
+      东莞兴信塑胶制品有限公司 · 品质管理部
+    </div>
+  </div>
+</div>
+<div id="appWrapper" style="display:none">
+
+<!-- ───────────── SIDEBAR ───────────── -->
+<aside class="sidebar" id="sidebar">
+  <div class="sidebar-logo">
+    <span class="logo-icon">⬡</span>
+    <div class="logo-text">
+      <div class="logo-main">兴信 QMS</div>
+      <div class="logo-sub">品质管理系统</div>
+    </div>
+  </div>
+
+  <nav class="sidebar-nav">
+    <div class="nav-group-label">主要功能</div>
+    <a class="nav-item active" data-page="dashboard" onclick="showPage('dashboard')">
+      <span class="nav-icon">▣</span><span>质量仪表板</span>
+    </a>
+    <a class="nav-item" data-page="records" onclick="showPage('records')">
+      <span class="nav-icon">☰</span><span>验货明细</span>
+    </a>
+    <a class="nav-item" data-page="analysis" onclick="showPage('analysis')">
+      <span class="nav-icon">◈</span><span>统计分析</span>
+    </a>
+    <a class="nav-item" data-page="suppliers" onclick="showPage('suppliers')">
+      <span class="nav-icon">◉</span><span>供应商管理</span>
+    </a>
+    <div class="nav-group-label">报告中心</div>
+    <a class="nav-item" data-page="daily" onclick="showPage('daily')">
+      <span class="nav-icon">◫</span><span>品质日报</span>
+    </a>
+    <a class="nav-item" data-page="weekly" onclick="showPage('weekly')">
+      <span class="nav-icon">◪</span><span>品质周报</span>
+    </a>
+    <a class="nav-item" data-page="monthly" onclick="showPage('monthly')">
+      <span class="nav-icon">◧</span><span>品质月报</span>
+    </a>
+    <a class="nav-item" data-page="yearly" onclick="showPage('yearly')">
+      <span class="nav-icon">◮</span><span>品质年报</span>
+    </a>
+    <a class="nav-item" data-page="supplier-report" onclick="showPage('supplier-report')">
+      <span class="nav-icon">◬</span><span>供应商质量报告</span>
+    </a>
+    <div class="nav-group-label">数据管理</div>
+    <!-- 不良描述库 -->
+    <a class="nav-item" data-page="defectlib" onclick="showPage('defectlib')">
+      <span class="nav-icon">📋</span><span class="nav-label">不良描述库</span>
+    </a>
+    <!-- 账号管理（仅 admin 可见，applyPermissions 控制显示）-->
+    <a class="nav-item" data-page="users" onclick="showPage('users')" style="display:none">
+      <span class="nav-icon">👤</span><span class="nav-label">账号管理</span>
+    </a>
+    <a class="nav-item" data-page="import" onclick="showPage('import')">
+      <span class="nav-icon">⊕</span><span>数据导入</span>
+    </a>
+  </nav>
+
+  <div class="sidebar-footer">
+    <div class="footer-time" id="sidebarTime">--:--:--</div>
+    <div class="footer-date" id="sidebarDate">----/--/--</div>
+    <div class="footer-ver">v1.0 · 兴信塑胶</div>
+  </div>
+</aside>
+
+<!-- ───────────── MAIN ───────────── -->
+<main class="main-wrap">
+
+  <!-- TOP BAR -->
+  <header class="topbar">
+    <div class="topbar-left">
+      <button class="menu-toggle" onclick="toggleSidebar()">☰</button>
+      <div class="topbar-title" id="pageTitle">质量仪表板</div>
+    </div>
+    <div class="topbar-kpis" id="topbarKpis">
+      <div class="kpi-chip green"><span class="kpi-label">今日通过率</span><span class="kpi-val" id="kpiPassRate">--%</span></div>
+      <div class="kpi-chip red"><span class="kpi-label">本周FAIL数</span><span class="kpi-val" id="kpiWeekFail">--</span></div>
+      <div class="kpi-chip yellow"><span class="kpi-label">高风险供应商</span><span class="kpi-val" id="kpiHighRisk">--</span></div>
+      <div class="kpi-chip blue"><span class="kpi-label">本周验货批次</span><span class="kpi-val" id="kpiWeekBatch">--</span></div>
+    </div>
+    <div class="topbar-right">
+      <label class="theme-switch" title="切换主题">
+        <select id="themeSelect" onchange="applyTheme(this.value)">
+          <option value="dark">🌙 深色</option>
+          <option value="light">☀ 浅色</option>
+        </select>
+      </label>
+      <button class="btn-icon" onclick="exportPDF()" title="导出PDF">⬇ PDF</button>
+      <div id="userBadge" style="display:inline-flex;align-items:center;gap:6px;margin-right:4px"></div>
+      <button class="btn-icon btn-add" onclick="openAddModal()" title="新增记录">＋ 新增验货</button>
+    </div>
+  </header>
+
+  <!-- ═══════════════ PAGES ═══════════════ -->
+
+  <!-- PAGE: DASHBOARD -->
+  <div class="page active" id="page-dashboard">
+    <div class="page-inner">
+
+      <!-- Summary Cards Row -->
+      <div class="cards-row" id="summaryCards"></div>
+
+      <!-- Charts Row 1 -->
+      <div class="charts-row">
+        <div class="chart-card wide">
+          <div class="chart-header"><span class="chart-title">每日验货数量 &amp; 合格率趋势</span><span class="chart-badge">折线/柱状</span></div>
+          <div class="chart-body" id="chartDailyTrend"></div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-header"><span class="chart-title">判定结果分布</span><span class="chart-badge">饼图</span></div>
+          <div class="chart-body" id="chartResultPie"></div>
+        </div>
+      </div>
+
+      <!-- Charts Row 2 -->
+      <div class="charts-row">
+        <div class="chart-card">
+          <div class="chart-header"><span class="chart-title">供应商批次不良率 TOP10</span><span class="chart-badge">横向柱图</span></div>
+          <div class="chart-body" id="chartSupplierRank"></div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-header"><span class="chart-title">不良类型 TOP 排名</span><span class="chart-badge">横向柱图</span></div>
+          <div class="chart-body" id="chartDefectTop"></div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-header"><span class="chart-title">客户占比分析</span><span class="chart-badge">环形图</span></div>
+          <div class="chart-body" id="chartClientPie"></div>
+        </div>
+      </div>
+
+      <!-- Risk Matrix + Issue Analysis -->
+      <div class="charts-row">
+        <div class="chart-card wide">
+          <div class="chart-header"><span class="chart-title">重点问题分析</span><span class="chart-badge">风险矩阵</span></div>
+          <div class="chart-body" id="chartRiskMatrix"></div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-header"><span class="chart-title">本周批次不良率趋势</span><span class="chart-badge">折线图</span></div>
+          <div class="chart-body" id="chartWeeklyTrend"></div>
+        </div>
+      </div>
+
+      <!-- Risk Table -->
+      <div class="section-card">
+        <div class="section-header">
+          <span class="section-title">⚠ 近期高风险批次</span>
+        </div>
+        <div id="riskTableWrap"></div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- PAGE: RECORDS -->
+  <div class="page" id="page-records">
+    <div class="page-inner">
+      <div class="toolbar">
+        <div class="toolbar-left">
+          <input type="text" class="search-input" id="searchInput" placeholder="🔍 搜索供应商/货号/款式..." oninput="filterRecords()" />
+          <select class="filter-select" id="filterResult" onchange="filterRecords()">
+            <option value="">全部判定</option>
+            <option value="PASS">PASS</option>
+            <option value="REJ">REJ / FAIL</option>
+          </select>
+          <input type="date" class="filter-date" id="filterDateFrom" onchange="filterRecords()" />
+          <span class="date-sep">—</span>
+          <input type="date" class="filter-date" id="filterDateTo" onchange="filterRecords()" />
+        </div>
+        <div class="toolbar-right">
+          <span class="record-count" id="recordCount">共 0 条</span>
+          <span class="selected-count" id="selectedCount" style="display:none"></span>
+          <span id="batchDelWrap" style="display:inline-flex;align-items:center;gap:6px">
+          <button class="btn-secondary btn-batch-del" id="btnBatchDel"
+                  onclick="batchDelete()" disabled>批量删除</button>
+          </span>
+          <button class="btn-secondary" onclick="exportCSV()">导出 CSV</button>
+          <button id="btnAddRecord" class="btn-primary" onclick="openAddModal()">＋ 新增记录</button>
+        </div>
+      </div>
+
+      <div class="table-wrap" id="recordsTableWrap"></div>
+    </div>
+  </div>
+
+  <!-- PAGE: ANALYSIS -->
+  <div class="page" id="page-analysis">
+    <div class="page-inner">
+      <div class="cards-row" id="analysisSummary"></div>
+      <div class="charts-row">
+        <div class="chart-card wide">
+          <div class="chart-header"><span class="chart-title">每周供应商批次不良率趋势</span></div>
+          <div class="chart-body" id="chartWeeklySupplier"></div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-header"><span class="chart-title">成品 vs 半成品 占比</span></div>
+          <div class="chart-body" id="chartProductType"></div>
+        </div>
+      </div>
+      <div class="charts-row">
+        <div class="chart-card">
+          <div class="chart-header"><span class="chart-title">FAIL批次月度汇总</span></div>
+          <div class="chart-body" id="chartFailMonth"></div>
+        </div>
+        <div class="chart-card wide">
+          <div class="chart-header"><span class="chart-title">不良现象频率热力图</span></div>
+          <div class="chart-body tall" id="chartDefectHeatmap"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- PAGE: SUPPLIERS -->
+  <div class="page" id="page-suppliers">
+    <div class="page-inner">
+      <div class="section-header mb16">
+        <span class="section-title">供应商质量档案</span>
+      </div>
+      <div id="supplierCards"></div>
+    </div>
+  </div>
+
+  <!-- PAGE: DAILY REPORT -->
+  <div class="page" id="page-daily">
+    <div class="page-inner report-page" id="dailyReportContent">
+      <div class="report-toolbar">
+        <label>选择日期：<input type="date" id="dailyDate" onchange="renderDailyReport()" /></label>
+        <div style="display:flex;gap:8px;align-items:center">
+          <button class="btn-secondary" onclick="window.print()" title="浏览器打印">🖨 打印</button>
+          <button class="btn-primary" id="btnExportDaily" onclick="exportReportPDF('daily')">⬇ 导出 PDF</button>
+        </div>
+      </div>
+      <div id="dailyReportBody"></div>
+    </div>
+  </div>
+
+  <!-- PAGE: WEEKLY REPORT -->
+  <div class="page" id="page-weekly">
+    <div class="page-inner report-page" id="weeklyReportContent">
+      <div class="report-toolbar">
+        <label>选择周起始日：<input type="date" id="weeklyDate" onchange="renderWeeklyReport()" /></label>
+        <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-dim);cursor:pointer;user-select:none">
+            <input type="checkbox" id="weeklyAppendix" style="accent-color:var(--accent);width:14px;height:14px" />
+            附录：全部验货明细
+          </label>
+          <button class="btn-secondary" onclick="window.print()" title="浏览器打印">🖨 打印</button>
+          <button class="btn-primary" id="btnExportWeekly" onclick="exportReportPDF('weekly')">⬇ 导出 PDF</button>
+        </div>
+      </div>
+      <div id="weeklyReportBody"></div>
+    </div>
+  </div>
+
+  <!-- PAGE: SUPPLIER REPORT -->
+  <div class="page" id="page-supplier-report">
+    <div class="page-inner report-page">
+      <div class="report-toolbar">
+        <label>选择供应商：
+          <select id="supplierSelect" onchange="renderSupplierReport()">
+            <option value="">-- 请选择供应商 --</option>
+          </select>
+        </label>
+        <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-dim);cursor:pointer;user-select:none">
+            <input type="checkbox" id="supplierAppendix"
+                   style="accent-color:var(--accent);width:14px;height:14px" />
+            包含全部明细附录
+          </label>
+          <button class="btn-secondary" onclick="window.print()" title="浏览器打印">🖨 打印</button>
+          <button class="btn-primary" id="btnExportSupplier"
+                  onclick="exportReportPDF('supplier')">⬇ 导出 PDF</button>
+        </div>
+      </div>
+      <div id="supplierReportBody"></div>
+    </div>
+  </div>
+
+  <!-- PAGE: MONTHLY REPORT -->
+  <div class="page" id="page-monthly">
+    <div class="page-inner report-page">
+      <div class="report-toolbar">
+        <label>选择月份：
+          <input type="month" id="monthlyMonth" onchange="renderMonthlyReport()" />
+        </label>
+        <div style="display:flex;gap:8px;align-items:center">
+          <button class="btn-primary" onclick="exportMonthlyReportPDF()">⬇ 导出 PDF</button>
+        </div>
+      </div>
+      <div id="monthlyReportBody"></div>
+    </div>
+  </div>
+
+  <!-- PAGE: YEARLY REPORT -->
+  <div class="page" id="page-yearly">
+    <div class="page-inner report-page">
+      <div class="report-toolbar">
+        <label>选择年份：
+          <input type="number" id="yearlyYear" min="2020" max="2099" step="1"
+                 onchange="renderYearlyReport()"
+                 style="width:90px;padding:4px 8px;background:var(--bg-input);
+                        color:var(--text-main);border:1px solid var(--border-hi);
+                        border-radius:var(--radius)" />
+        </label>
+        <div style="display:flex;gap:8px;align-items:center">
+          <button class="btn-primary" onclick="exportYearlyReportPDF()">⬇ 导出 PDF</button>
+        </div>
+      </div>
+      <div id="yearlyReportBody"></div>
+    </div>
+  </div>
+
+
+  <div class="page" id="page-import">
+    <div class="page-inner">
+
+      <!-- 顶部说明栏 -->
+      <div class="import-info-bar">
+        <div class="import-info-item">
+          <span class="import-info-icon">📄</span>
+          <div><div class="import-info-title">支持格式</div><div class="import-info-desc">.xlsx · .xls · .csv</div></div>
+        </div>
+        <div class="import-info-item">
+          <span class="import-info-icon">🔗</span>
+          <div><div class="import-info-title">自动识别</div><div class="import-info-desc">兴信验货表 · 明细/汇总表头</div></div>
+        </div>
+        <div class="import-info-item">
+          <span class="import-info-icon">🛡</span>
+          <div><div class="import-info-title">安全导入</div><div class="import-info-desc">本地解析，不上传服务器</div></div>
+        </div>
+        <div class="import-info-item">
+          <span class="import-info-icon">⚡</span>
+          <div><div class="import-info-title">即时生效</div><div class="import-info-desc">导入后自动更新仪表板</div></div>
+        </div>
+      </div>
+
+      <!-- 拖拽区 -->
+      <div class="import-zone" id="importZone"
+           ondragover="importDragOver(event)"
+           ondragleave="importDragLeave(event)"
+           ondrop="handleDrop(event)">
+        <div class="import-zone-inner">
+          <div class="import-icon" id="importZoneIcon">⬆</div>
+          <div class="import-title">将 Excel / CSV 文件拖到此处</div>
+          <div class="import-sub">或点击下方按钮选择文件 · 支持兴信验货明细表格式</div>
+          <label class="btn-import-pick mt16">
+            <span>📂 选择文件</span>
+            <input type="file" id="importFileInput" accept=".csv,.xls,.xlsx"
+                   style="display:none" onchange="handleFileImport(event)" />
+          </label>
+        </div>
+      </div>
+
+      <!-- 进度条（导入中显示） -->
+      <div class="import-progress-wrap" id="importProgressWrap" style="display:none">
+        <div class="import-progress-label" id="importProgressLabel">正在解析文件…</div>
+        <div class="import-progress-track"><div class="import-progress-bar" id="importProgressBar"></div></div>
+      </div>
+
+      <!-- 字段映射面板（解析完弹出） -->
+      <div id="importMapPanel" style="display:none">
+        <div class="section-card">
+          <div class="section-header">
+            <span class="section-title">🔗 字段映射确认</span>
+            <span class="import-sheet-tag" id="importSheetTag"></span>
+          </div>
+          <div class="import-map-grid" id="importMapGrid"></div>
+        </div>
+      </div>
+
+      <!-- 错误面板 -->
+      <div id="importErrorPanel" style="display:none">
+        <div class="import-error-box">
+          <div class="import-error-title">⚠ 导入问题</div>
+          <ul class="import-error-list" id="importErrorList"></ul>
+        </div>
+      </div>
+
+      <!-- 数据预览表格 -->
+      <div id="importPreview"></div>
+
+      <!-- 操作按钮行（预览后显示） -->
+      <div class="import-action-row" id="importActionRow" style="display:none">
+        <div class="import-action-stats" id="importActionStats"></div>
+        <div style="display:flex;gap:10px">
+          <button class="btn-secondary" onclick="importReset()">重新选择</button>
+          <select class="filter-select" id="importModeSelect">
+            <option value="append">追加到现有数据</option>
+            <option value="replace">替换全部数据</option>
+          </select>
+          <button class="btn-primary" id="importConfirmBtn" onclick="confirmImport()">✓ 确认导入</button>
+        </div>
+      </div>
+
+      <!-- ═══════ 数据备份与恢复区域 ═══════ -->
+      <div class="backup-section">
+
+        <!-- 标题行 -->
+        <div class="backup-header">
+          <div class="backup-header-left">
+            <span class="backup-icon">🗄</span>
+            <div>
+              <div class="backup-title">数据备份与恢复</div>
+              <div class="backup-subtitle">防止 localStorage 数据丢失 · 建议定期备份</div>
+            </div>
+          </div>
+          <div class="backup-stats" id="backupStats"></div>
+        </div>
+
+        <!-- 四个操作卡 -->
+        <div class="backup-cards">
+
+          <!-- 导出备份 -->
+          <div class="backup-card green">
+            <div class="backup-card-icon">⬇</div>
+            <div class="backup-card-body">
+              <div class="backup-card-title">导出数据备份</div>
+              <div class="backup-card-desc">将当前全部验货记录导出为 JSON 文件，可随时恢复</div>
+            </div>
+            <button class="backup-btn green" onclick="backupExportJSON()">导出 JSON</button>
+          </div>
+
+          <!-- 导入备份 -->
+          <div class="backup-card blue">
+            <div class="backup-card-icon">⬆</div>
+            <div class="backup-card-body">
+              <div class="backup-card-title">导入数据备份</div>
+              <div class="backup-card-desc">从之前导出的 JSON 备份文件恢复数据，支持覆盖或追加</div>
+            </div>
+            <label class="backup-btn blue" style="cursor:pointer">
+              导入 JSON
+              <input type="file" accept=".json" style="display:none"
+                     onchange="backupImportJSON(event)" />
+            </label>
+          </div>
+
+          <!-- 恢复示例数据 -->
+          <div class="backup-card yellow">
+            <div class="backup-card-icon">↺</div>
+            <div class="backup-card-body">
+              <div class="backup-card-title">恢复示例数据</div>
+              <div class="backup-card-desc">重新加载系统内置的30条模拟验货记录（当前数据将被覆盖）</div>
+            </div>
+            <button class="backup-btn yellow" onclick="backupRestoreSeed()">恢复示例</button>
+          </div>
+
+          <!-- 清空数据 -->
+          <div class="backup-card red">
+            <div class="backup-card-icon">⊗</div>
+            <div class="backup-card-body">
+              <div class="backup-card-title">清空当前数据</div>
+              <div class="backup-card-desc">删除所有验货记录并重置系统，此操作不可撤销，请先备份</div>
+            </div>
+            <button class="backup-btn red" onclick="backupClearAll()">清空数据</button>
+          </div>
+
+        </div>
+
+        <!-- 操作日志 -->
+        <div class="backup-log" id="backupLog" style="display:none">
+          <div class="backup-log-title">操作记录</div>
+          <div class="backup-log-body" id="backupLogBody"></div>
+        </div>
+
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ════ PAGE: 不良描述库 ════ -->
+  <div class="page" id="page-defectlib"></div>
+
+  <!-- ════ PAGE: 账号管理 ════ -->
+  <div class="page" id="page-users"></div>
+
+</main>
+
+<!-- ═══════════════ MODAL: ADD/EDIT RECORD ═══════════════ -->
+<div class="modal-overlay" id="modalOverlay" onclick="closeModal(event)">
+  <div class="modal" id="modal">
+    <div class="modal-header">
+      <span id="modalTitle">新增验货记录</span>
+      <button class="modal-close" onclick="closeModalDirect()">✕</button>
+    </div>
+
+    <!-- 模式切换（仅新增时显示，编辑时隐藏） -->
+    <div class="modal-mode-tabs" id="modalModeTabs">
+      <button class="mode-tab active" id="tabSingle" onclick="switchModalMode('single')">单条录入</button>
+      <button class="mode-tab" id="tabBatch" onclick="switchModalMode('batch')">图片识别</button>
+    </div>
+
+    <!-- ─── 单条录入面板 ─── -->
+    <div id="panelSingle">
+      <div class="modal-body">
+        <div class="form-grid">
+          <div class="form-group">
+            <label>来料日期 *</label>
+            <input type="date" id="f_date" />
+          </div>
+          <div class="form-group">
+            <label>检验日期</label>
+            <input type="date" id="f_inspDate" />
+          </div>
+          <div class="form-group">
+            <label>供应商 *</label>
+            <input type="text" id="f_supplier" list="supplierList" placeholder="如：嘉乐、名发" autocomplete="off" />
+            <datalist id="supplierList"></datalist>
+          </div>
+          <div class="form-group">
+            <label>客户</label>
+            <input type="text" id="f_client" list="customerList" placeholder="如：ZURU、Goliath" autocomplete="off" />
+            <datalist id="customerList"></datalist>
+          </div>
+          <div class="form-group">
+            <label>货号</label>
+            <input type="text" id="f_productNo" placeholder="如：15784" oninput="onProductNoChange()" autocomplete="off" />
+          </div>
+          <div class="form-group">
+            <label>款式名称</label>
+            <input type="text" id="f_productName" placeholder="如：橙色怪" list="materialNameList" autocomplete="off" />
+            <datalist id="materialNameList"></datalist>
+          </div>
+          <div class="form-group">
+            <label>送货编号</label>
+            <input type="text" id="f_deliveryNo" />
+          </div>
+          <div class="form-group">
+            <label>类型</label>
+            <select id="f_type" onchange="onTypeChange()">
+              <option>成品</option>
+              <option>半成品</option>
+              <option>来料</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>来料数量 *</label>
+            <input type="number" id="f_qty" min="0" oninput="onQtyChange()" />
+          </div>
+          <div class="form-group">
+            <label>抽查数量
+              <span id="aqlSampleHint" style="font-size:10px;color:var(--text-dim)"></span>
+              <button type="button" id="btnApplyAql"
+                      onclick="applyAqlSuggest()"
+                      style="margin-left:6px;font-size:10px;padding:1px 6px;
+                             border:1px solid var(--accent);border-radius:3px;
+                             background:transparent;color:var(--accent);cursor:pointer;display:none">
+                应用推荐值
+              </button>
+            </label>
+            <input type="number" id="f_sampleQty" min="0" oninput="onSampleQtyChange()" />
+          </div>
+          <div class="form-group">
+            <label>PASS 数量 <span style="font-size:10px;color:var(--text-dim)">（自动）</span></label>
+            <input type="number" id="f_pass" min="0" readonly placeholder="抽查 - 不良" style="background:var(--bg-card)" />
+          </div>
+          <div class="form-group">
+            <label>不良数量 <span style="font-size:10px;color:var(--text-dim)">（自动）</span></label>
+            <input type="number" id="f_fail" min="0" readonly placeholder="不良明细合计" style="background:var(--bg-card)" />
+          </div>
+          <div class="form-group">
+            <label>不良率 <span style="font-size:10px;color:var(--text-dim)">（自动）</span></label>
+            <input type="text" id="f_defectRate" readonly placeholder="自动计算" style="background:var(--bg-card)" />
+          </div>
+          <div class="form-group">
+            <label>判定结果 *</label>
+            <select id="f_result">
+              <option value="PASS">PASS</option>
+              <option value="REJ">REJ</option>
+              <option value="COND">有条件接收</option>
+              <option value="HOLD">待定</option>
+            </select>
+          </div>
+          <!-- f_defect 隐藏字段，保存时由系统自动生成 -->
+          <input type="hidden" id="f_defect" />
+          <!-- 不良明细结构化录入区 -->
+          <div class="form-group full" id="defectsPanel">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+              <label style="margin:0">不良明细 <span style="font-size:10px;color:var(--text-dim)">（用于 IQC 报告自动填充 CR/MAJ/MIN 栏位）</span></label>
+              <button type="button" class="btn-secondary btn-sm" id="btnAddDefectRow">＋ 添加一行</button>
+            </div>
+            <div id="defectsRowsWrap"
+                 style="border:1px solid var(--border);border-radius:6px;padding:8px;
+                        background:var(--bg-input);max-height:240px;overflow-y:auto">
+              <div id="defectsRows"></div>
+              <datalist id="defectDescList"></datalist>
+              <div id="defectsEmptyHint" style="text-align:center;color:var(--text-muted);
+                   font-size:11px;padding:14px 0">尚未添加不良明细，点击「添加一行」开始录入</div>
+            </div>
+            <!-- 自动计算汇总条 -->
+            <div id="defectsSummary" style="font-size:11px;color:var(--text-dim);margin-top:6px;
+                 padding:8px 10px;background:var(--bg-card);border-radius:5px">
+              <div style="display:flex;justify-content:space-between;align-items:center">
+                <span>AQL推荐抽查：<strong id="dsAqlSuggest">—</strong></span>
+                <span>不良合计：<strong id="dsFail" style="color:var(--red)">0</strong></span>
+                <span>PASS：<strong id="dsPass" style="color:var(--green)">0</strong></span>
+                <span>不良率：<strong id="dsRate">0.00%</strong></span>
+                <span>抽查：<strong id="dsSample">0</strong></span>
+              </div>
+              <div style="margin-top:5px">
+                AQL判定：<strong id="dsAqlResult">—</strong>
+                <span id="dsAqlReasons" style="margin-left:8px;font-size:10px"></span>
+              </div>
+            </div>
+          </div>
+          <!-- 测量数据区 -->
+          <div class="form-group full" id="measPanel">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+              <label style="margin:0">尺寸 / 测量数据 <span style="font-size:10px;color:var(--text-dim)">（选填，用于 IQC 报告测量项目栏）</span></label>
+              <button type="button" class="btn-secondary btn-sm" id="btnAddMeasRow">＋ 添加一行</button>
+            </div>
+            <div id="measRowsWrap" style="border:1px solid var(--border);border-radius:6px;padding:8px;background:var(--bg-input);max-height:200px;overflow-y:auto">
+              <div id="measRows"></div>
+              <div id="measEmptyHint" style="text-align:center;color:var(--text-muted);font-size:11px;padding:10px 0">尚未添加测量数据（选填）</div>
+            </div>
+          </div>
+          <div class="form-group">
+            <label>检验员</label>
+            <input type="text" id="f_qc" placeholder="如：颜丽莎" list="inspectorList" autocomplete="off" />
+            <datalist id="inspectorList"></datalist>
+          </div>
+          <div class="form-group">
+            <label>备注</label>
+            <input type="text" id="f_remark" />
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" onclick="closeModalDirect()">取消</button>
+        <button class="btn-primary" onclick="saveRecord()">保存记录</button>
+      </div>
+    </div>
+
+    <!-- ─── 图片识别面板（原批量录入，原 textarea/table 隐藏保留）─── -->
+    <div id="panelBatch" style="display:none">
+      <div class="modal-body">
+        <!-- 1. 图片上传区域 -->
+        <div id="ocrDropZone" class="ocr-drop-zone">
+          <input type="file" id="ocrImageInput" accept="image/jpeg,image/jpg,image/png,image/webp" style="display:none"/>
+          <div class="ocr-drop-hint">
+            <span class="ocr-drop-icon">📷</span>
+            <div>点击或拖拽图片到此处上传</div>
+            <div style="font-size:11px;color:var(--text-dim);margin-top:4px">支持 jpg / png / webp，建议清晰拍摄送货单 / 来料单</div>
+          </div>
+          <img id="ocrPreview" style="display:none;max-height:220px;max-width:100%;margin:8px auto;border-radius:6px"/>
+        </div>
+
+        <!-- 2. 操作按钮 -->
+        <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;align-items:center">
+          <button class="btn-primary" id="btnStartOcr" onclick="startOcr()">🔍 开始识别</button>
+          <button class="btn-secondary" id="btnClearOcr" onclick="clearOcr()">清空图片</button>
+          <button class="btn-secondary" id="btnApplyOcrToForm" onclick="applyOcrToForm()">✓ 应用到单条录入</button>
+          <span class="batch-status" id="ocrStatus">未上传图片</span>
+        </div>
+
+        <!-- 3. OCR 原文 -->
+        <div style="margin-top:12px">
+          <label class="form-label">识别原文（可手动修改后重新提取）</label>
+          <textarea id="ocrRawText" class="batch-textarea" style="height:120px"
+            placeholder="识别结果将显示在这里，可手动编辑后点击下方字段重新匹配"
+            oninput="extractFieldsFromOcrText(this.value)"></textarea>
+        </div>
+
+        <!-- 4. 字段提取预览（两列）-->
+        <div style="margin-top:10px;font-size:11px;color:var(--text-dim)">
+          ⚠ 识别结果仅供参考，请人工确认后再应用到单条录入。
+        </div>
+        <div class="ocr-field-grid">
+          <div><label class="form-label">来货日期</label><input type="text" id="ocrDate" class="form-input"/></div>
+          <div><label class="form-label">检验日期</label><input type="text" id="ocrInspDate" class="form-input"/></div>
+          <div><label class="form-label">供应商</label><input type="text" id="ocrSupplier" class="form-input"/></div>
+          <div><label class="form-label">客户</label><input type="text" id="ocrClient" class="form-input"/></div>
+          <div><label class="form-label">货号</label><input type="text" id="ocrProductNo" class="form-input"/></div>
+          <div><label class="form-label">物料名称</label><input type="text" id="ocrProductName" class="form-input"/></div>
+          <div><label class="form-label">送货单号</label><input type="text" id="ocrDeliveryNo" class="form-input"/></div>
+          <div><label class="form-label">来货数量</label><input type="text" id="ocrQty" class="form-input"/></div>
+          <div><label class="form-label">类型</label><input type="text" id="ocrType" class="form-input"/></div>
+          <div style="grid-column:1/-1"><label class="form-label">备注</label><input type="text" id="ocrRemark" class="form-input"/></div>
+        </div>
+
+        <!-- 原批量录入：隐藏保留，避免误删导致 confirmBatchImport 等函数报错 -->
+        <div id="legacyBatchUI" style="display:none">
+          <textarea id="batchInput" class="batch-textarea"></textarea>
+          <span class="batch-status" id="batchStatus"></span>
+          <div id="batchPreviewWrap" style="display:none">
+            <table class="batch-preview-table" id="batchPreviewTable"></table>
+          </div>
+          <div id="batchErrors" class="batch-errors" style="display:none"></div>
+          <button id="btnBatchConfirm" onclick="confirmBatchImport()" disabled></button>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" onclick="closeModalDirect()">取消</button>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- TOAST -->
+<div class="toast" id="toast"></div>
+
+<script src="report_export.js"></script>
+<script src="qc-backend.js"></script><!-- 后端同步层：必须在 app.js 之前 -->
+<script src="app.js"></script>
+<script src="ai-ocr.js"></script><!-- AI(百炼)识别，劫持 startOcr -->
+<script src="mobile.js"></script><!-- 移动端侧栏抽屉交互 -->
+</div><!-- /appWrapper -->
+
+</body>
+</html>

@@ -312,6 +312,12 @@
                 <span class="plugin-name">生产计划管理系统</span>
               </div>
             </div>
+            <div class="plugin-item">
+              <div class="plugin-info">
+                <div class="plugin-dot gray" id="qcDot"></div>
+                <span class="plugin-name">品质管理系统</span>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -522,6 +528,28 @@
       <div class="detail-plugin-right">
         <div class="detail-plugin-status"><div class="plugin-dot gray" id="penyouDetailDot"></div> 检查中...</div>
         <a href="/penyou/" target="_blank" class="btn btn-primary">打开系统</a>
+      </div>
+    </div>
+
+    <div class="detail-plugin-card">
+      <div class="detail-plugin-left">
+        <div class="detail-plugin-icon" style="background:linear-gradient(135deg,#00c8ff,#0090bb);">&#128270;</div>
+        <div>
+          <div class="detail-plugin-name">品质管理系统</div>
+          <div class="detail-plugin-desc">兴信 QMS 来料/成品验货 — AQL 抽样判定、不良统计、日/周/月/年报、AI 送货单识别（阿里百炼）</div>
+          <div class="feature-grid">
+            <div class="feature-tag">&#128202; 质量仪表板</div>
+            <div class="feature-tag">&#128203; AQL 判定</div>
+            <div class="feature-tag">&#128247; AI 识别录入</div>
+            <div class="feature-tag">&#128196; IQC 报告</div>
+            <div class="feature-tag">&#128200; 供应商分析</div>
+            <div class="feature-tag">&#128241; 手机适配</div>
+          </div>
+        </div>
+      </div>
+      <div class="detail-plugin-right">
+        <div class="detail-plugin-status"><div class="plugin-dot gray" id="qcDetailDot"></div> 检查中...</div>
+        <a href="/qc/" target="_blank" class="btn btn-primary">打开系统</a>
       </div>
     </div>
 
@@ -918,6 +946,7 @@ async function checkHealth() {
       { name: 'penyou', url: '/penyou/api/health', dot: 'penyouDot', detailDot: 'penyouDetailDot' },
       { name: 'piOutsource', url: '/pi-outsource/api/health', dot: 'piOutsourceDot', detailDot: 'piOutsourceDetailDot' },
       { name: 'productionPlan', url: '/production-plan/health', dot: 'productionPlanDot', detailDot: 'productionPlanDetailDot' },
+      { name: 'qc', url: '/qc/api/health', dot: 'qcDot', detailDot: 'qcDetailDot' },
       { name: 'zuruOrder', url: '/zuru-order-system/health', dot: 'zuruOrderDot', detailDot: 'zuruOrderDetailDot' },
       { name: 'liwenjuan', url: '/liwenjuan/health', dot: 'liwenjuanDot', detailDot: 'liwenjuanDetailDot' },
       { name: 'baojia', url: '/baojia/health', dot: 'baojiaDot', detailDot: 'baojiaDetailDot' },

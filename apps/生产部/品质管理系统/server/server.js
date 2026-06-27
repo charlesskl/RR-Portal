@@ -237,8 +237,8 @@ function serveStatic(req, res, pathname) {
   let rel = decodeURIComponent(pathname);
   if (rel === '/' || rel === '') rel = '/index.html';
   const norm = rel.replace(/\\/g, '/').toLowerCase();
-  // 安全：禁止访问后端目录、上级目录
-  if (norm.includes('..') || norm.startsWith('/server/')) {
+  // 安全：禁止访问后端目录、数据目录(qc.db)、上级目录
+  if (norm.includes('..') || norm.startsWith('/server/') || norm.startsWith('/data/')) {
     res.writeHead(403); return res.end('forbidden');
   }
   const filePath = path.join(ROOT, rel);

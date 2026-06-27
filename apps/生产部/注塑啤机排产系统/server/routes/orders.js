@@ -17,8 +17,8 @@ function stmts() {
         INSERT INTO orders (product_code, mold_no, mold_name, color, color_powder_no,
           material_type, shot_weight, material_kg, sprue_pct, ratio_pct,
           quantity_needed, accumulated, cavity, cycle_time, order_no,
-          is_three_plate, packing_qty, import_batch, source_file, status, order_notes, workshop)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          is_three_plate, packing_qty, import_batch, source_file, status, order_notes, serial_no, workshop)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `),
       update: db.prepare(`
         UPDATE orders SET product_code=?, mold_no=?, mold_name=?, color=?, color_powder_no=?,
@@ -60,7 +60,7 @@ router.post('/', (req, res) => {
       o.quantity_needed || 0, o.accumulated || 0, o.cavity || 1, o.cycle_time || 0,
       o.order_no || '', o.is_three_plate || 0, o.packing_qty || 0,
       o.import_batch || '', o.source_file || '', o.status || 'pending', o.order_notes || '',
-      o.workshop || 'B'
+      o.serial_no || '', o.workshop || 'B'
     );
     res.json({ id: result.lastInsertRowid, ...o });
   } catch (err) {
@@ -214,27 +214,75 @@ router.post('/import', upload.single('file'), async (req, res) => {
     console.log('[导入] 文件:', req.file.originalname, '类型:', ext);
     if (ext === '.pdf') {
       // PDF 处理优先级：
-      // 1) 用 pdftoppm 把 PDF 转 PNG，每页发给百炼识别（需服务器装 poppler-utils）
-      // 2) 失败时回退本地 XY 坐标解析器
+      // 0) paiji 自带 pdfTemplateParser（华登CMC外发 + B车间生产单，已端到端测准）
+      // 1) 外发 pdf-parser 的 A_xinxin（兴信内部生产单的另一种格式，如 71172 按钮）
+      // 2) PDF → PNG → 百炼 VLM 识别（兜底）
+      // 3) 本地 XY 坐标解析器（最后兜底）
       let useFallback = false;
+      const fs = require('fs');
+
+      // Step 0: paiji 自带模板规则（华登CMC + B车间内部生产单两种已验准）
       try {
-        const { pdfToImages, cleanupTmp } = require('../services/pdfToImages');
-        const { parseImageWithQwen } = require('../services/qwenOcr');
-        const { tmpDir, files } = pdfToImages(req.file.path);
-        console.log('[PDF转PNG] 共', files.length, '页');
-        try {
-          for (let i = 0; i < files.length; i++) {
-            console.log('[PDF→百炼] 处理第', i + 1, '/', files.length, '页');
-            const pageOrders = await parseImageWithQwen(files[i]);
-            parsed = parsed.concat(pageOrders);
-          }
-          console.log('[百炼PDF导入] 共解析', parsed.length, '条');
-        } finally {
-          cleanupTmp(tmpDir);
+        const { parsePdfByTemplate } = require('../services/pdfTemplateParser');
+        const tplResult = await parsePdfByTemplate(fs.readFileSync(req.file.path));
+        if (tplResult && tplResult.orders.length > 0) {
+          parsed = tplResult.orders;
+          console.log('[模板解析命中]', tplResult.template, '→', parsed.length, '条');
         }
       } catch (e) {
-        console.log('[百炼PDF失败，回退本地]:', e.message);
-        useFallback = true;
+        console.log('[模板解析异常]:', e.message);
+      }
+
+      // Step 1: 外发 pdf-parser 兜底（兴信 A_xinxin 等其他模板）
+      if (parsed.length === 0) try {
+        const { parsePdfBuffer } = require('../services/outsource/pdf-parser');
+        const r = await parsePdfBuffer(fs.readFileSync(req.file.path));
+        if (r && r.template === 'A_xinxin' && r.rows && r.rows.length > 0) {
+          const header = r.header || {};
+          parsed = r.rows.map(row => ({
+            product_code: '',
+            mold_no: row.mold_code || '',
+            mold_name: [row.mold_code, row.mold_name].filter(Boolean).join(' ').trim() || row.mold_name || '',
+            color: row.color || '',
+            color_powder_no: row.color_powder || '',
+            material_type: row.material || '',
+            quantity_needed: parseInt(row.shots) || 0,   // ⚠️ 严格取啤数
+            shot_weight: parseFloat(row.shot_weight_g) || 0,
+            material_kg: parseFloat(row.total_weight_kg) || 0,
+            order_no: header.bill_no || '',
+            notes: [row.row_note, row.delivery_date && ('交期 ' + row.delivery_date)].filter(Boolean).join(' '),
+            accumulated: 0, cavity: 1, cycle_time: 0,
+            sprue_pct: 0, ratio_pct: 0,
+            is_three_plate: 0, packing_qty: 0,
+          })).filter(o => o.mold_no || o.mold_name);
+          console.log('[外发A_xinxin命中] →', parsed.length, '条');
+        } else if (r && r.template !== 'unknown') {
+          console.log('[外发识别为', r.template, '但字段映射未做，跳过让 VLM 接]');
+        }
+      } catch (e) {
+        console.log('[模板解析异常]:', e.message);
+      }
+
+      if (parsed.length === 0) {
+        try {
+          const { pdfToImages, cleanupTmp } = require('../services/pdfToImages');
+          const { parseImageWithQwen } = require('../services/qwenOcr');
+          const { tmpDir, files } = pdfToImages(req.file.path);
+          console.log('[PDF转PNG] 共', files.length, '页');
+          try {
+            for (let i = 0; i < files.length; i++) {
+              console.log('[PDF→百炼] 处理第', i + 1, '/', files.length, '页');
+              const pageOrders = await parseImageWithQwen(files[i]);
+              parsed = parsed.concat(pageOrders);
+            }
+            console.log('[百炼PDF导入] 共解析', parsed.length, '条');
+          } finally {
+            cleanupTmp(tmpDir);
+          }
+        } catch (e) {
+          console.log('[百炼PDF失败，回退本地]:', e.message);
+          useFallback = true;
+        }
       }
 
       if (useFallback || parsed.length === 0) {

@@ -56,6 +56,17 @@ def test_compare_pair_date_range(client):
     assert result['hd_to_sy']['sender_recorded']['jx'] == 100
 
 
+def test_compare_pair_star_prefix_order_no(client):
+    """一方单号带 * 前缀（*1402710），另一方不带（1402710）→ 应视为同一单号，不进 missing 列表。"""
+    _insert('hd', 'hd', 'sy', '2026-05-01', order_no='1402710', jx_qty=100)
+    _insert('sy', 'hd', 'sy', '2026-05-01', order_no='*1402710', jx_qty=100)
+    result = app_module.compare_pair('hd', 'sy', '2026-05-01', '2026-05-01')
+    oc = result['hd_to_sy']['order_check']
+    assert oc['missing_in_receiver'] == []
+    assert oc['missing_in_sender'] == []
+    assert oc['item_mismatches'] == []
+
+
 def test_compare_pair_negative_diff(client):
     """收方录得比发方多 → diff 为负（锁住 Task 14 UI 契约）。"""
     _insert('hd', 'hd', 'sy', '2026-05-01', jx_qty=98)

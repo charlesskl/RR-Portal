@@ -184,7 +184,7 @@ button.ghost:hover { background: var(--primary-soft); }
 .wb-table input, .wb-table textarea {
   width: 100%;
   min-width: 0;
-  padding: 6px 9px;
+  padding: 6px 7px;
   font-size: 13px;
   border: 1px solid #e2e8f0;
   background: #ffffff;
@@ -192,6 +192,8 @@ button.ghost:hover { background: var(--primary-soft); }
   color: #1f2937;
   transition: border-color .15s, box-shadow .15s;
 }
+/* 文本/数字输入至少能看到几个字符，避免窄列里被挤没（配合表格横向滚动） */
+.wb-table input[type="text"], .wb-table input[type="number"] { min-width: 3.4em; }
 .wb-table input:hover, .wb-table textarea:hover { border-color: #cbd5e1; }
 .wb-table input:focus, .wb-table textarea:focus {
   border-color: var(--primary);

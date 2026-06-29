@@ -102,7 +102,7 @@ function renderTable(container, columns, rows, opts = {}) {
             op.value = val; op.textContent = val; op.selected = true;
             sel.appendChild(op);
           }
-          sel.onchange = () => { row[c.key] = sel.value; refreshCalcs(); onChange(); };
+          sel.onchange = () => { row[c.key] = sel.value; refreshCalcs(); onChange(); if (c.affectsOptions) rebuild(); };
           td.appendChild(sel);
         } else {
           const inp = document.createElement('input');
@@ -114,6 +114,8 @@ function renderTable(container, columns, rows, opts = {}) {
             refreshCalcs();
             onChange();
           };
+          // 该列影响同行下拉的选项(如 材质→料型)：失焦后重建表格刷新依赖下拉
+          if (c.affectsOptions) inp.onchange = () => rebuild();
           td.appendChild(inp);
         }
         tr.appendChild(td);
@@ -150,7 +152,13 @@ function renderTable(container, columns, rows, opts = {}) {
   }
   rebuild();
   table.appendChild(tbody);
-  container.appendChild(table);
+  // 列多时不再压缩每列(导致输入框看不到值)，改为表格按列宽撑开 + 横向滚动
+  table.style.width = 'auto';
+  table.style.minWidth = '100%';
+  const scrollWrap = document.createElement('div');
+  scrollWrap.style.overflowX = 'auto';
+  scrollWrap.appendChild(table);
+  container.appendChild(scrollWrap);
 
   if (footer) {
     const f = document.createElement('div'); f.className = 'wb-footer'; f.innerHTML = footer();
@@ -167,7 +175,7 @@ function renderTable(container, columns, rows, opts = {}) {
 }
 
 // 辅助/包装材料 类别 — 减税明细各外购项按此类别统计
-const MAT_CATEGORIES = ['吸塑', '彩盒/内咭', '电池', '利宝', '电镀', '其他外购'];
+const MAT_CATEGORIES = ['吸塑', '胶袋', '彩盒/内咭', '电池', '利宝', '电镀', '其他外购'];
 
 function formatNum(v) {
   if (typeof v === 'number' && !Number.isNaN(v)) return v.toFixed(Math.abs(v) < 1 ? 4 : 2);
@@ -270,8 +278,14 @@ function renderMolds(container, molds, onChange, canEdit, fxRmbHkd) {
           inp.type = type === 'number' ? 'number' : 'text';
           if (type === 'number') inp.step = 'any';
           inp.value = get() ?? '';
+          // 净重必填：空时红底提示
+          const markRequired = k === 'weight_g'
+            ? () => { const empty = !num(inp.value); inp.style.background = empty ? '#fee2e2' : ''; inp.placeholder = empty ? '必填' : ''; }
+            : null;
+          if (markRequired) markRequired();
           inp.oninput = () => {
             set(type === 'number' ? (inp.value === '' ? null : Number(inp.value)) : inp.value);
+            if (markRequired) markRequired();
             onChange();
           };
           td.appendChild(inp);
@@ -343,6 +357,38 @@ function elecRowAmount(r) {
     return sum(r.children, ch => num(ch.qty) * num(ch.unit_price));
   }
   return num(r.qty) * num(r.unit_price);
+}
+
+// 电子「含税核价 / 含利润价」逐行重算（与成本汇总 renderElecExtra 同一公式）
+// 含税核价 = (零件成本 + 邦定 + 贴片 + 人工 + 测试 + 包装) ×(1+利润%) + 抵税差额 + 抵税差额×10%
+function elecTaxedCore(parts, ex) {
+  ex = ex || {};
+  const partsRaw = sum(parts || [], p => num(p.qty) * num(p.unit_price)
+    + sum(p.children || [], c => num(c.qty) * num(c.unit_price)));
+  const cost = partsRaw + num(ex.bonding_cost) + num(ex.smt_cost) + num(ex.labor_cost)
+    + num(ex.test_repair) + num(ex.packing_shipping);
+  const profitPrice = cost * (1 + num(ex.profit_pct) / 100);
+  const taxed = profitPrice + num(ex.tax_diff) + num(ex.tax_diff) * 0.1;
+  return { profitPrice, taxed };
+}
+
+// 由细表汇总成 IC + PACB电子 两行：含税核价按各自在细表的占比分摊到两行，
+// 合计 = 两行之和 = 含税核价；不含税 = 含税 ×(含利润价÷含税核价)。
+function elecSplitRows(parts, ex, fx) {
+  fx = num(fx) || 0.85;
+  const { profitPrice, taxed } = elecTaxedCore(parts, ex);
+  const detailTotal = sum(parts || [], p => num(p.qty) * num(p.unit_price)
+    + sum(p.children || [], c => num(c.qty) * num(c.unit_price)));
+  const icPart = (parts || []).find(p => /IC/i.test(p.name || ''));
+  const icAmt = icPart ? num(icPart.qty) * num(icPart.unit_price) : 0;
+  const icRatio = detailTotal > 0 ? icAmt / detailTotal : 0;
+  const pretaxRatio = taxed > 0 ? profitPrice / taxed : 1;
+  const mk = (taxedRMB) => ({
+    unit_price: +(taxedRMB / fx).toFixed(6),
+    _unit_price_taxed: +taxedRMB.toFixed(6),
+    _unit_price_pretax: +(taxedRMB * pretaxRatio).toFixed(6),
+  });
+  return { icPart, ic: mk(taxed * icRatio), pacb: mk(taxed * (1 - icRatio)) };
 }
 
 function renderHierElectronics(container, rows, onChange, canEdit, fxRmbHkd) {
@@ -733,14 +779,14 @@ function renderSummaryPane(host, sections, quote, me) {
     const mat = num(r.weight_g)*num(r.material_price_lb)/454;
     return (mat + num(r.blow_labor) + num(r.flash)) * (num(r.profit_x) || 1);
   });
-  const ppTotal = sum(pnt.painting_items || [], r => ['clamp','pad','spray','edge','oil'].reduce((s,k)=>s+num(r[k+'_qty'])*num(r[k+'_unit']),0));  // 不计损耗
+  const ppTotal = sum(pnt.painting_items || [], paintingRowAmount);  // 不计损耗（含七工序）
   const slushTotal = sum(slush.slush_items || [], r => num(r.unit_price_hkd)*num(r.qty));
   const asmLaborTotal = sum(asm.assembly_labor || [], r => num(r.unit_price)*num(r.qty));
   const pkLaborTotal = sum(asm.packaging_labor || [], r => num(r.unit_price)*num(r.qty));
   // 新版 排拉工序 组装 + 包装 — 每组合计 = 基数 × 人数 ÷ 该组生产量
   const _asmBase = num(asm.assembly_base_rate ?? 310);
   const stepGroupTotal = (groups) => sum(groups || [], g =>
-    sum(g.steps || [], s => _asmBase * num(s.count) / Math.max(num(g.qty), 1)));
+    sum(g.steps || [], s => _asmBase * num(s.count) * (num(g.team ?? 1) || 1) / Math.max(num(g.qty), 1)));
   const asmStepTotal = stepGroupTotal(asm.assembly_step_groups);
   const pkgStepTotal = stepGroupTotal(asm.packaging_step_groups);
   const combinedAsmHkd = asmLaborTotal + pkLaborTotal + asmStepTotal + pkgStepTotal;  // 装配人工为港币(基数310 HKD)
@@ -784,9 +830,10 @@ function renderSummaryPane(host, sections, quote, me) {
     cl: ccc.cl, cw: ccc.cw, ch: ccc.ch, qty: ccc.qty,
     flat_cards: ccc.flat_card ? [{ l: ccc.cl, w: ccc.cw }] : [],
   }] : []);
+  const cartonRate = num(ccc.paper_rate) || 2.75;
   const cartonRmb = cartonList.reduce((s, b) => {
-    const boxPrice = (num(b.cl) + num(b.cw) + 2) * (num(b.cw) + num(b.ch) + 1) * 2 * 2.8 / 1000;
-    const flatSum = (b.flat_cards || []).reduce((a, f) => a + (num(f.l) + 1) * (num(f.w) + 1) * 2 / 1000, 0);
+    const boxPrice = (num(b.cl) + num(b.cw) + 2) * (num(b.cw) + num(b.ch) + 1) * 2 * cartonRate / 1000;
+    const flatSum = (b.flat_cards || []).reduce((a, f) => a + ((num(f.l) || num(b.cl)) + 1) * ((num(f.w) || num(b.cw)) + 1) * 2 / 1000, 0);
     const q = Math.max(num(b.qty), 1);
     return s + (boxPrice + flatSum) / q;
   }, 0) * fxRH;
@@ -809,7 +856,7 @@ function renderSummaryPane(host, sections, quote, me) {
   // 九、合计 整行换成 HKD（RMB ÷ 汇率）
   const fxH = fxRH || 0.85;
   const toHkd = (rmb) => num(rmb) / fxH;
-  const markupX = num(sales.shipping?.markup_x) || 1.2;
+  const markupX = (sales.shipping?.markup_x == null) ? 1.2 : num(sales.shipping.markup_x);  // 允许 0；仅空/未设时默认 1.2
   const afterMarkupHkd = factoryHkd * markupX;
   // 出货底价 改为基于 码点后价（HKD）+ 模具分摊 + 附加税
   const priceHkdMarked = afterMarkupHkd + toHkd(moldShare) + toHkd(surtaxManual);
@@ -855,7 +902,14 @@ function renderSummaryPane(host, sections, quote, me) {
   // 出货价算价（来自业务 section）
   const salesSec = sections.find(x => x.dept === 'sales');
   const salesHeader = sales.header || {};
-  sales.shipping = sales.shipping || { scenarios: [], freight_pct: 48, lifting_pct: 52, markup_x: 1.2, divisor: 0.98, target_usd: 0 };
+  sales.shipping = sales.shipping || {
+    // 新单默认场景：盐田40柜 / 盐田5吨车（渲染时会在最前自动补"出厂价"）
+    scenarios: [
+      { name: '盐田40柜', base_rmb: 0, mold_share_rmb: 0 },
+      { name: '盐田5吨车', base_rmb: 0, mold_share_rmb: 0 },
+    ],
+    freight_pct: 48, lifting_pct: 52, markup_x: 1.2, divisor: 0.98, target_usd: 0,
+  };
   const engPayloadSum = sections.find(s => s.dept === 'engineering');
   const engPayloadObj = engPayloadSum && engPayloadSum.payload_json ? JSON.parse(engPayloadSum.payload_json) : {};
   const eCartonSum = engPayloadObj.carton_calc || {};
@@ -889,7 +943,7 @@ function renderSummaryPane(host, sections, quote, me) {
   // 码点 可编辑（业务/工程）
   const markupInp = host.querySelector('#tot-markup');
   if (markupInp && canEditShip) {
-    markupInp.oninput = () => { sales.shipping = sales.shipping || {}; sales.shipping.markup_x = Number(markupInp.value) || 1.2; };
+    markupInp.oninput = () => { sales.shipping = sales.shipping || {}; sales.shipping.markup_x = markupInp.value === '' ? null : Number(markupInp.value); };  // 允许 0；空才回退默认
     markupInp.onchange = () => { saveSales(); renderSummaryPane(host, sections, quote, me); };  // 失焦持久化+刷新(避免每键重渲染丢焦/录错)
   } else if (markupInp) {
     markupInp.disabled = true;
@@ -913,6 +967,7 @@ function renderSummaryPane(host, sections, quote, me) {
   // 马达：电子/五金里含 "马达" / "motor" 的行（电子/五金表不设类别下拉，仍按关键字）
   const isMotor = (s) => /马达|motor/i.test(String(s || ''));
   const isBlister = (s) => /吸塑|blister/i.test(String(s || ''));
+  const isGlueBag = (s) => /胶袋|胶代|poly\s?bag|pe\s?bag|opp\s?bag/i.test(String(s || ''));
   const _sumByMatch = (rows, matchFn) => sum(rows || [], r =>
     (matchFn(r.name) || matchFn(r.spec)) ? num(r.qty) * num(r.unit_price) : 0);
   // 马达：电子部分用 elecSrc（电子部优先），与导出同源
@@ -926,6 +981,7 @@ function renderSummaryPane(host, sections, quote, me) {
     if (r.category && MAT_CATEGORIES.includes(r.category)) return r.category;
     const a = r.name, b = r.spec;
     if (isBlister(a) || isBlister(b)) return '吸塑';
+    if (isGlueBag(a) || isGlueBag(b)) return '胶袋';
     if (_isBat(a) || _isBat(b)) return '电池';
     if (_isLib(a) || _isLib(b)) return '利宝';
     if (_isPlate(a) || _isPlate(b)) return '电镀';
@@ -937,6 +993,7 @@ function renderSummaryPane(host, sections, quote, me) {
     + sum(auxRows.filter(r => _catOf(r, 'aux') === cat), _amt);
   // 吸塑：辅助/包装按类别 + 电子/五金里关键字命中的吸塑行
   const blisterRmb = _catSum('吸塑') + _sumByMatch(elecSrc, isBlister) + _sumByMatch(eng.hardware, isBlister);
+  const glueBagRmb = _catSum('胶袋');
   const batteryRmb = _catSum('电池');
   const libaoRmb = _catSum('利宝');
   const platingRmb = _catSum('电镀');
@@ -953,6 +1010,7 @@ function renderSummaryPane(host, sections, quote, me) {
     sewing_cloth: sewingClothRmb / fxRH,     // 车衣 HKD
     motor: motorRmb,                         // 马达 HKD（电子/五金已 HKD，不除汇率）
     suction: blisterRmb,                     // 吸塑 HKD（包装已 HKD）
+    glue_bag: glueBagRmb,                    // 胶袋 HKD（辅助/包装已 HKD）
     code_before: markupX,                    // 未减税前码数 = 九、合计 码点
     color_box: colorBoxRmb,                  // 彩盒/内咭/内卡 HKD（包装已 HKD）
     other_buy: otherBuyRmb,                  // 其他外购 = 辅助材料剩余 HKD（辅助已 HKD）
@@ -1012,6 +1070,7 @@ function renderTaxDeductionBlock(host, salesPayload, salesSec, me, autoFill) {
   applyAuto('t1', 'electronic', autoFill.electronic);
   applyAuto('t1', 'motor', autoFill.motor);
   applyAuto('t1', 'suction', autoFill.suction);
+  applyAuto('t1', 'glue_bag', autoFill.glue_bag);
   applyAuto('t2', 'code_before', autoFill.code_before);
   applyAuto('t2', 'color_box', autoFill.color_box);
   applyAuto('t2', 'battery', autoFill.battery);
@@ -1027,7 +1086,7 @@ function renderTaxDeductionBlock(host, salesPayload, salesSec, me, autoFill) {
   applyAuto('t3', 'paint_material', autoFill.paint_material);
   applyAuto('t3', 'assembly_labor', autoFill.assembly_labor);
   // 表1 出厂货价核
-  ps.t1 = ps.t1 || { base_price: 0, imp_mat: 0, dom_mat: 0, blow: 0, slush: 0, sewing_hair: 0, sewing_cloth: 0, hardware: 0, electronic: 0, motor: 0, suction: 0 };
+  ps.t1 = ps.t1 || { base_price: 0, imp_mat: 0, dom_mat: 0, blow: 0, slush: 0, sewing_hair: 0, sewing_cloth: 0, hardware: 0, electronic: 0, motor: 0, suction: 0, glue_bag: 0 };
   // 表2 包装/外购
   ps.t2 = ps.t2 || { color_box: 0, inner_card: 0, code_before: 0, code_after: 0, battery: 0, libao: 0, plating: 0, other_buy: 0, carton: 0, freight: 0, cabinet: 0, misc: 0 };
   // 旧数据迁移：彩盒 + 内咭 合并到 color_box，inner_card 清零
@@ -1063,7 +1122,7 @@ function renderTaxDeductionBlock(host, salesPayload, salesSec, me, autoFill) {
 
   const t1Cols = [
     ['base_price', '货价'], ['imp_mat', '进口料'], ['dom_mat', '国内料'], ['blow', '吹气'], ['slush', '搪胶'],
-    ['sewing_hair', '车发'], ['sewing_cloth', '车衣'], ['hardware', '五金'], ['electronic', '电子'], ['motor', '马达'], ['suction', '吸塑'],
+    ['sewing_hair', '车发'], ['sewing_cloth', '车衣'], ['hardware', '五金'], ['electronic', '电子'], ['motor', '马达'], ['suction', '吸塑'], ['glue_bag', '胶袋'],
   ];
   const t2Cols = [
     ['color_box', '彩盒/内咭'], ['code_before', '未减税前码数'], ['code_after', '减税后码数'],
@@ -1071,12 +1130,12 @@ function renderTaxDeductionBlock(host, salesPayload, salesSec, me, autoFill) {
     ['carton', '纸箱'], ['freight', '运费'], ['cabinet', '吊柜费'], ['misc', '杂项'],
   ];
   const t4Cols = [
-    ['rmb_buy', '人民币外购件成本'], ['tax13', '含税13%类成本'], ['labor13', '人工类13%'], ['carton', '纸箱类'],
+    ['tax13', '含税13%类成本'], ['labor13', '人工类13%'], ['carton', '纸箱类'],
     ['tax1', '含税1%'], ['slush3', '搪胶类3%'], ['sewhair13', '车发类13%'], ['sewcloth13', '车衣类13%'],
     ['suction6', '吸塑类6%'], ['freight9', '运费类9%'], ['tax13b', '含税13%类'],
   ];
   // 参考列：只显示成本金额，无税率、不参与减税（避免与明细列重复）
-  const T4_NO_RATE = new Set(['rmb_buy', 'tax13']);
+  const T4_NO_RATE = new Set(['rmb_buy', 'tax13', 'labor13']);
 
   const ro = canEdit ? '' : 'readonly';
   const cls = canEdit ? 'tk-edit' : 'tk-edit tk-ro';
@@ -1172,6 +1231,7 @@ function renderTaxDeductionBlock(host, salesPayload, salesSec, me, autoFill) {
       + num(ps.t1.hardware) + num(ps.t1.electronic) + num(ps.t1.motor)
       + num(ps.t2.color_box) + num(ps.t2.battery) + num(ps.t2.libao)
       + num(ps.t2.plating) + num(ps.t2.other_buy) + num(ps.t2.carton) + num(ps.t2.misc)
+      + num(ps.t1.glue_bag)
       + num(ps.t3.paint_material);
     const laborCost = num(ps.t3.painting_labor) + num(ps.t3.paint_material) + num(ps.t3.assembly_labor);
     const totalCost = noLaborCost + laborCost;
@@ -1189,7 +1249,11 @@ function renderTaxDeductionBlock(host, salesPayload, salesSec, me, autoFill) {
       if (inp && document.activeElement !== inp) inp.value = ps.t4[key].amt || '';
     };
     setT4Amt('rmb_buy', rmbBuyCost);                                           // 人民币外购件成本
-    setT4Amt('tax13', num(ps.t2.libao) + num(ps.t2.other_buy));                 // 含税13%类成本 = 利宝 + 其他外购
+    // 含税13%类成本 = 国内料 + 五金 + 马达 + 彩盒/内咭 + 电池 + 利宝 + 其他外购 + 油漆 + 胶袋
+    const tax13Cost = num(ps.t1.dom_mat) + num(ps.t1.hardware) + num(ps.t1.motor)
+      + num(ps.t2.color_box) + num(ps.t2.battery) + num(ps.t2.libao) + num(ps.t2.other_buy)
+      + num(ps.t3.paint_material) + num(ps.t1.glue_bag);
+    setT4Amt('tax13', tax13Cost);
     setT4Amt('carton', num(ps.t2.carton));                                     // 纸箱类 = 纸箱
     setT4Amt('slush3', num(ps.t1.slush));                                      // 搪胶类3% = 搪胶
     setT4Amt('sewhair13', num(ps.t1.sewing_hair));                             // 车发类13% = 车发
@@ -1198,7 +1262,7 @@ function renderTaxDeductionBlock(host, salesPayload, salesSec, me, autoFill) {
     setT4Amt('freight9', num(ps.t2.freight));                                  // 运费含税9% = 运费
     setT4Amt('labor13', num(ps.t3.injection_labor) + num(ps.t3.painting_labor) + num(ps.t3.assembly_labor));// 人工类13% = 啤工 + 喷油工 + 装配工
     setT4Amt('tax1', num(ps.t2.plating));                                      // 含税1% = 电镀
-    setT4Amt('tax13b', num(ps.t2.libao) + num(ps.t2.other_buy));               // 含税13%类 = 含税13%类成本
+    setT4Amt('tax13b', tax13Cost);                                             // 含税13%类 = 同含税13%类成本
     // 表4：每行 减税额 = 金额 × 税率%；参考列(无税率)不计；填入减税额行 + 合计
     const totalDed = t4Cols.reduce((s, [k]) => {
       if (T4_NO_RATE.has(k)) return s;  // 人民币外购件成本/含税13%类成本：参考列，不参与减税
@@ -1469,10 +1533,13 @@ function renderCartonCalc(host, c, canEdit, onChange) {
   c.cartons.forEach(b => { if (!b.flat_cards) b.flat_cards = []; });
   // 删除老的顶层 flat_cards
   delete c.flat_cards;
+  c.paper_rate = c.paper_rate ?? 2.75;  // 纸价系数（可调）
 
+  const rate = () => num(c.paper_rate) || 2.75;
   const cuftOf = (b) => num(b.cl) * num(b.cw) * num(b.ch) / 1728;
-  const boxPriceOf = (b) => (num(b.cl) + num(b.cw) + 2) * (num(b.cw) + num(b.ch) + 1) * 2 * 2.8 / 1000;
-  const flatPriceOf = (f) => (num(f.l) + 1) * (num(f.w) + 1) * 2 / 1000;
+  const boxPriceOf = (b) => (num(b.cl) + num(b.cw) + 2) * (num(b.cw) + num(b.ch) + 1) * 2 * rate() / 1000;
+  // 平卡 L/W 留空时对应所在纸箱的长/宽
+  const flatPriceOf = (f, b) => ((num(f.l) || num((b||{}).cl)) + 1) * ((num(f.w) || num((b||{}).cw)) + 1) * 2 / 1000;
 
   function render() {
     // 同步首个纸箱回旧字段（运费计算/出口表使用）
@@ -1481,16 +1548,16 @@ function renderCartonCalc(host, c, canEdit, onChange) {
       c.cl = b0.cl; c.cw = b0.cw; c.ch = b0.ch; c.qty = b0.qty;
       c.cuft = cuftOf(b0);
       c.box_price = +boxPriceOf(b0).toFixed(4);
-      c.flat_card = b0.flat_cards[0] ? +flatPriceOf(b0.flat_cards[0]).toFixed(4) : 0;
+      c.flat_card = b0.flat_cards[0] ? +flatPriceOf(b0.flat_cards[0], b0).toFixed(4) : 0;
     }
 
     const cartonsHtml = c.cartons.map((b, i) => {
       const fcRows = b.flat_cards.map((f, j) => `
         <tr>
           <td><input data-bi="${i}" data-fj="${j}" data-k="name" type="text" value="${f.name || ''}" ${canEdit?'':'disabled'} style="width:90px"/></td>
-          <td><input data-bi="${i}" data-fj="${j}" data-k="l" type="number" step="any" value="${f.l || ''}" ${canEdit?'':'disabled'} style="width:80px"/></td>
-          <td><input data-bi="${i}" data-fj="${j}" data-k="w" type="number" step="any" value="${f.w || ''}" ${canEdit?'':'disabled'} style="width:80px"/></td>
-          <td style="text-align:right;color:#0f766e;font-weight:600">${flatPriceOf(f).toFixed(2)}</td>
+          <td><input data-bi="${i}" data-fj="${j}" data-k="l" type="number" step="any" value="${f.l || ''}" placeholder="${b.cl || ''}" title="留空=纸箱长 ${b.cl || ''}" ${canEdit?'':'disabled'} style="width:80px"/></td>
+          <td><input data-bi="${i}" data-fj="${j}" data-k="w" type="number" step="any" value="${f.w || ''}" placeholder="${b.cw || ''}" title="留空=纸箱宽 ${b.cw || ''}" ${canEdit?'':'disabled'} style="width:80px"/></td>
+          <td style="text-align:right;color:#0f766e;font-weight:600">${flatPriceOf(f, b).toFixed(2)}</td>
           ${canEdit ? `<td><button class="mini danger" data-del-f="${i}-${j}">×</button></td>` : ''}
         </tr>`).join('');
 
@@ -1521,7 +1588,13 @@ function renderCartonCalc(host, c, canEdit, onChange) {
 
     host.innerHTML = `
       <div style="border:1px solid #e7e5e4;border-radius:8px;padding:12px;background:#fafaf9;max-width:980px">
-        <div style="font-weight:600;margin-bottom:10px;color:#44403c">📦 纸箱计算</div>
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">
+          <span style="font-weight:600;color:#44403c">📦 纸箱计算</span>
+          <span class="muted" style="font-size:12px">纸价系数
+            <input id="cc-rate" type="number" step="any" value="${c.paper_rate}" ${canEdit?'':'disabled'} style="width:64px"/>
+            <span title="箱价 = (L+W+2)×(W+H+1)×2×系数÷1000">ⓘ</span>
+          </span>
+        </div>
 
         <div style="margin-bottom:6px;color:#78716c;font-size:13px">产品尺寸 CM</div>
         <table class="wb-table" style="font-size:13px;margin-bottom:14px;max-width:340px">
@@ -1538,26 +1611,35 @@ function renderCartonCalc(host, c, canEdit, onChange) {
       </div>`;
 
     if (!canEdit) return;
+    // 纸价系数：输入时更新数据，失焦时重算箱价
+    const rateEl = host.querySelector('#cc-rate');
+    if (rateEl) {
+      rateEl.oninput = () => { c.paper_rate = rateEl.value === '' ? 2.75 : Number(rateEl.value); onChange(); };
+      rateEl.onchange = () => render();
+    }
     // 产品尺寸
     ['pl','pw','ph'].forEach(k => {
       const el = host.querySelector('#cc-' + k);
       el.oninput = () => { c[k] = Number(el.value) || 0; onChange(); };
     });
-    // 纸箱字段
+    // 纸箱字段：输入时只更新数据(不 render，否则每敲一下就重建输入框→丢焦点只能输一位)，
+    // 失焦(onchange)时再 render 刷新 CU.FT/箱价
     host.querySelectorAll('input[data-bi]:not([data-fj])').forEach(el => {
       el.oninput = () => {
         const i = +el.dataset.bi, k = el.dataset.k;
         c.cartons[i][k] = el.type === 'number' ? (el.value === '' ? 0 : Number(el.value)) : el.value;
-        onChange(); render();
+        onChange();
       };
+      el.onchange = () => render();
     });
-    // 平卡字段
+    // 平卡字段：同上
     host.querySelectorAll('input[data-fj]').forEach(el => {
       el.oninput = () => {
         const i = +el.dataset.bi, j = +el.dataset.fj, k = el.dataset.k;
         c.cartons[i].flat_cards[j][k] = el.type === 'number' ? (el.value === '' ? 0 : Number(el.value)) : el.value;
-        onChange(); render();
+        onChange();
       };
+      el.onchange = () => render();
     });
     // 删纸箱
     host.querySelectorAll('[data-del-b]').forEach(btn => btn.onclick = () => {
@@ -1832,13 +1914,34 @@ function renderElectronic(host, payload, canEdit, onChange, fxRmbHkd) {
       });
     });
     if (canEdit) {
+      // 总表仍是「IC + PACB电子」两行（由明细汇总出来的）时，细表改动自动联动
+      const isDerivedSummary = () => Array.isArray(payload.electronics) && payload.electronics.length === 2
+        && /^IC$/i.test(payload.electronics[0].name || '') && /PACB/i.test(payload.electronics[1].name || '');
+      const autoResummarize = () => {
+        if (!isDerivedSummary()) return;
+        const fxH = num((payload._fx_rmb_hkd) || fxRmbHkd) || 0.85;
+        const sp = elecSplitRows(doc.parts, payload.electronics_extra || doc.extras || {}, fxH);
+        Object.assign(payload.electronics[0], sp.ic);
+        Object.assign(payload.electronics[1], sp.pacb);
+        paintSummarySubtotal();
+      };
       tbody.querySelectorAll('input').forEach(inp => {
         inp.oninput = (e) => {
           const pi = +inp.dataset.pi, ci = inp.dataset.ci, k = inp.dataset.k;
           const target = ci != null ? doc.parts[pi].children[+ci] : doc.parts[pi];
           target[k] = (k === 'qty' || k === 'unit_price') ? num(e.target.value) : e.target.value;
+          // 用量/单价改动 → 刷新本行「合计 RMB」格（第 6 列，index 5）+ 总表小计联动
+          if (k === 'qty' || k === 'unit_price') {
+            const tr = inp.closest('tr');
+            if (tr && tr.children[5]) tr.children[5].textContent = formatNum(num(target.qty) * num(target.unit_price));
+            autoResummarize();
+          }
           onChange();
         };
+        // 失焦时整表重渲染，同步总表行单价/金额 + 成本汇总
+        if (inp.dataset.k === 'qty' || inp.dataset.k === 'unit_price') {
+          inp.onchange = () => { if (isDerivedSummary()) renderElectronic(host, payload, canEdit, onChange, fxRmbHkd); };
+        }
       });
       // 展开折叠状态记忆
       detailHost.querySelector('details').ontoggle = (e) => { doc._open = e.target.open; };
@@ -1854,23 +1957,12 @@ function renderElectronic(host, payload, canEdit, onChange, fxRmbHkd) {
       const doc = payload.electronics_doc;
       if (!doc || !doc.parts) { alert('没有导入的明细数据'); return; }
       if (payload.electronics && payload.electronics.length > 2 && !confirm('当前总表有 ' + payload.electronics.length + ' 行，确认重置为 IC + PACB电子 两行（手填数据会丢失）？')) return;
-      const ex = doc.extras || {};
-      const taxedPrice = num(ex.taxed_price) || 0;
-      const profitPrice = num(ex.profit_price) || 0;
-      const icPart = (doc.parts || []).find(p => /IC/i.test(p.name || ''));
-      const icPrice = icPart ? num(icPart.qty) * num(icPart.unit_price) : 0;
+      // 总表行按细表占比分摊含税核价：合计=两行之和=含税核价，每行带各自那份加工/利润/税
       const fxHere = num((payload._fx_rmb_hkd) || fxRmbHkd) || 0.85;
-      const pacbTaxedRMB = Math.max(0, taxedPrice - icPrice);
+      const sp = elecSplitRows(doc.parts, payload.electronics_extra || doc.extras || {}, fxHere);
       payload.electronics = [
-        { name: 'IC', spec: icPart ? icPart.spec : '', qty: 1,
-          unit_price: +(icPrice / fxHere).toFixed(6),
-          _unit_price_taxed: icPrice, _unit_price_pretax: icPrice,
-          tax_label: '含税', note: '' },
-        { name: 'PACB电子', spec: '含 PCB+电阻+电容+人工 等其余明细汇总', qty: 1,
-          unit_price: +(pacbTaxedRMB / fxHere).toFixed(6),
-          _unit_price_taxed: pacbTaxedRMB,
-          _unit_price_pretax: Math.max(0, profitPrice - icPrice),
-          tax_label: '含税', note: '' },
+        { name: 'IC', spec: sp.icPart ? sp.icPart.spec : '', qty: 1, ...sp.ic, tax_label: '含税', note: '' },
+        { name: 'PACB电子', spec: '含 PCB+电阻+电容+人工 等其余明细汇总', qty: 1, ...sp.pacb, tax_label: '含税', note: '' },
       ];
       onChange();
       renderElectronic(host, payload, canEdit, onChange, fxRmbHkd);
@@ -1902,21 +1994,13 @@ function renderElectronic(host, payload, canEdit, onChange, fxRmbHkd) {
             </div>`;
           impPreview.querySelector('#el-imp-apply').onclick = () => {
             // 导入应用后总表重置为 IC + PACB电子 两行（值从明细汇总，导入后可手改）
-            const ex2 = j.extras || {};
-            const taxedPrice = num(ex2.taxed_price) || 0;
-            const profitPrice = num(ex2.profit_price) || 0;
-            const icPart = (j.parts || []).find(p => /IC/i.test(p.name || ''));
-            const icPrice = icPart ? num(icPart.qty) * num(icPart.unit_price) : 0;
+            // 明细是 RMB，总表单价是 HKD：单价 HKD = RMB ÷ 汇率（与税点下拉/由明细汇总按钮口径一致）
+            const fx = num(fxRmbHkd) || 0.85;
+            // 总表行按细表占比分摊含税核价：合计=两行之和=含税核价，每行带各自那份加工/利润/税
+            const sp = elecSplitRows(j.parts, j.extras || {}, fx);
             payload.electronics = [
-              { name: 'IC', spec: icPart ? icPart.spec : '', qty: 1,
-                unit_price: icPrice,
-                _unit_price_taxed: icPrice, _unit_price_pretax: icPrice,
-                note: '含税' },
-              { name: 'PACB电子', spec: '含 PCB+电阻+电容+人工 等其余明细汇总', qty: 1,
-                unit_price: Math.max(0, taxedPrice - icPrice),
-                _unit_price_taxed: Math.max(0, taxedPrice - icPrice),
-                _unit_price_pretax: Math.max(0, profitPrice - icPrice),
-                note: '含税' },
+              { name: 'IC', spec: sp.icPart ? sp.icPart.spec : '', qty: 1, ...sp.ic, note: '' },
+              { name: 'PACB电子', spec: '含 PCB+电阻+电容+人工 等其余明细汇总', qty: 1, ...sp.pacb, note: '' },
             ];
             if (j.extras) {
               payload.electronics_extra = payload.electronics_extra || {};
@@ -1951,7 +2035,7 @@ const DEFAULT_MACHINE_PRICES = [
   { model: '14A-16A',   normal: '150T',   price: 1490 },
   { model: '20A',       normal: '200T',   price: 1920 },
   { model: '24A',       normal: '260T',   price: 1920 },
-  { model: '30-32A',    normal: '320T',   price: 2220 },
+  { model: '30A-32A',   normal: '320T',   price: 2220 },
   { model: '44A',       normal: '490T',   price: 2500 },
   { model: '46A-49.9A', normal: '',       price: 2800 },
   { model: '60A-65A',   normal: '500T',   price: 3090 },
@@ -1968,7 +2052,7 @@ function lookupMachinePrice(model, prices) {
   const tNum = parseFloat(t);
   for (const p of prices) {
     const m = String(p.model).toUpperCase().replace(/\s+/g, '');
-    const rangeMatch = m.match(/^([\d.]+)A-([\d.]+)A$/);
+    const rangeMatch = m.match(/^([\d.]+)A?-([\d.]+)A?$/);  // 兼容 "4A-6A" 与 "30-32A"
     if (rangeMatch) {
       const lo = +rangeMatch[1], hi = +rangeMatch[2];
       if (!isNaN(tNum) && tNum >= lo && tNum <= hi) return p;
@@ -2016,22 +2100,25 @@ function lookupMaterialPrice(material, grade, prices) {
 
 function renderMolding(host, payload, canEdit, onChange, refMolds, fxRmbHkd, userRole) {
   payload.injection = payload.injection || [];
-  payload.injection_loss_pct = payload.injection_loss_pct ?? 1;
+  payload.injection_loss_pct = payload.injection_loss_pct ?? 3;
   payload.blow_items = payload.blow_items || [];
   // 参考表：先用本报价单已存的；没有则用全局缓存；都没有用 hardcoded 默认
   // 全局缓存：window.__refs.material_prices / .machine_prices
   window.__refs = window.__refs || {};
-  payload.material_prices = payload.material_prices && payload.material_prices.length
+  // 该报价单是否已存了自己的价格表副本（旧单冻结；新单为空时才用全局/默认兜底）
+  const ownMaterial = !!(payload.material_prices && payload.material_prices.length);
+  const ownMachine = !!(payload.machine_prices && payload.machine_prices.length);
+  payload.material_prices = ownMaterial
     ? payload.material_prices
     : (window.__refs.material_prices && window.__refs.material_prices.length
        ? JSON.parse(JSON.stringify(window.__refs.material_prices))
        : JSON.parse(JSON.stringify(DEFAULT_MATERIAL_PRICES)));
-  payload.machine_prices = payload.machine_prices && payload.machine_prices.length
+  payload.machine_prices = ownMachine
     ? payload.machine_prices
     : (window.__refs.machine_prices && window.__refs.machine_prices.length
        ? JSON.parse(JSON.stringify(window.__refs.machine_prices))
        : JSON.parse(JSON.stringify(DEFAULT_MACHINE_PRICES)));
-  // 后台异步拉全局参考表，若本地为空（hardcoded fallback）则替换并刷新
+  // 后台异步拉全局参考表：本单没有自己的副本时（新单），用最新全局表替换兜底值并刷新
   if (!window.__refs._loaded) {
     window.__refs._loaded = true;
     Promise.all([
@@ -2040,7 +2127,20 @@ function renderMolding(host, payload, canEdit, onChange, refMolds, fxRmbHkd, use
     ]).then(([mat, mac]) => {
       if (mat.length) window.__refs.material_prices = mat;
       if (mac.length) window.__refs.machine_prices = mac;
+      // 新单（无自有副本）：把刚加载的全局表填进去并重渲染，避免停留在写死的默认值
+      let changed = false;
+      if (!ownMaterial && mat.length) { payload.material_prices = JSON.parse(JSON.stringify(mat)); changed = true; }
+      if (!ownMachine && mac.length) { payload.machine_prices = JSON.parse(JSON.stringify(mac)); changed = true; }
+      if (changed) renderMolding(host, payload, canEdit, onChange, refMolds, fxRmbHkd, userRole);
     });
+  } else {
+    // 缓存已加载过：新单直接用最新全局表（上面兜底可能用了默认值，这里纠正）
+    if (!ownMaterial && window.__refs.material_prices && window.__refs.material_prices.length) {
+      payload.material_prices = JSON.parse(JSON.stringify(window.__refs.material_prices));
+    }
+    if (!ownMachine && window.__refs.machine_prices && window.__refs.machine_prices.length) {
+      payload.machine_prices = JSON.parse(JSON.stringify(window.__refs.machine_prices));
+    }
   }
   // 回填"普通机"列：若已有数据但 normal 字段缺失，按 DEFAULT_MACHINE_PRICES 同机型填上
   payload.machine_prices.forEach(row => {
@@ -2236,8 +2336,14 @@ function renderMolding(host, payload, canEdit, onChange, refMolds, fxRmbHkd, use
   const cols = [
     { key: 'name', label: '模具名称', type: 'textarea', width: '220px' },
     { key: 'mold_no', label: '模号', width: '70px' },
-    { key: 'material', label: '材质', width: '70px' },
-    { key: 'material_grade', label: '料型', width: '120px', type: 'select',
+    { key: 'material', label: '材质', width: '110px', type: 'select', affectsOptions: true,
+      options: () => {
+        const names = (payload.material_prices || [])
+          .map(p => String(p.name || '').trim()).filter(Boolean);
+        return [...new Set(names)];
+      }
+    },
+    { key: 'material_grade', label: '料型', width: '150px', type: 'select',
       options: (row) => {
         const mat = String(row.material || '').trim().toUpperCase();
         if (!mat) return [];
@@ -2246,19 +2352,19 @@ function renderMolding(host, payload, canEdit, onChange, refMolds, fxRmbHkd, use
           .map(p => p.model).filter(Boolean);
       }
     },
-    { key: 'color', label: '颜色', width: '70px' },
-    { key: 'weight_g', label: '啤净重(g)', type: 'number', width: '90px' },
+    { key: 'color', label: '颜色', width: '90px' },
+    { key: 'weight_g', label: '啤净重(g)', type: 'number', width: '100px' },
     { key: 'weight_loss_g', label: `料损耗 ${num(payload.injection_loss_pct ?? 3)}%`, readonly: true, width: '90px',
       calc: r => num(r.weight_g) * (1 + num(payload.injection_loss_pct ?? 3)/100) },
     { key: 'material_unit_price', label: '料价 HK$/g', type: 'number', width: '110px' },
     { key: 'raw_unit', label: '原料单价 HK$', readonly: true, width: '100px',
       calc: r => num(r.weight_g) * (1 + num(payload.injection_loss_pct ?? 3)/100) * num(r.material_unit_price) },
-    { key: 'machine', label: '机台', width: '70px' },
+    { key: 'machine', label: '机台', width: '90px' },
     { key: 'shot_price', label: '啤价(HK$/啤)', type: 'number', width: '100px' },
     { key: 'cavity', label: '出模数', width: '80px' },
-    { key: 'sets', label: '套数', type: 'number', width: '60px' },
-    { key: 'machine_model', label: '机型', width: '70px' },
-    { key: 'target', label: '目标数', type: 'number', width: '80px' },
+    { key: 'sets', label: '套数', type: 'number', width: '70px' },
+    { key: 'machine_model', label: '机型', width: '90px' },
+    { key: 'target', label: '目标数', type: 'number', width: '85px' },
     { key: 'cycle_sec', label: '周期(秒)', type: 'number', width: '80px' },
     { key: 'finished_amt', label: '成品金额 HK$', readonly: true, width: '100px',
       calc: r => num(r.weight_g) * (1 + num(payload.injection_loss_pct ?? 3)/100) * num(r.material_unit_price) + num(r.shot_price) },
@@ -2401,7 +2507,11 @@ function renderPainting(host, payload, canEdit, onChange, fxRmbHkd) {
   // 旧数据 second_proc 已废弃，不再迁移；首次进入空表
 
   host.innerHTML = `
-    <h3>三、二次加工（印喷报价）</h3>
+    <h3 style="display:flex;align-items:center;gap:10px">三、二次加工（印喷报价）
+      ${canEdit ? `<button class="mini" id="pp-import" type="button">📄 导入喷油核价表</button>
+      <input id="pp-file" type="file" accept=".xls,.xlsx" style="display:none"/>` : ''}
+    </h3>
+    <div id="pp-import-preview"></div>
     <div id="wb-pp"></div>
   `;
 
@@ -2410,6 +2520,45 @@ function renderPainting(host, payload, canEdit, onChange, fxRmbHkd) {
   wrappedOnChange._fns.push(renderLossSummary(host, '三、二次加工 成本汇总',
     () => sum(payload.painting_items || [], paintingRowAmount),
     () => 0, fxRmbHkd, 'HKD'));  // 不计损耗；喷油报价为港币
+
+  if (canEdit) {
+    const impBtn = host.querySelector('#pp-import');
+    const impFile = host.querySelector('#pp-file');
+    const impPreview = host.querySelector('#pp-import-preview');
+    impBtn.onclick = () => impFile.click();
+    impFile.onchange = async (e) => {
+      const f = e.target.files[0]; if (!f) return;
+      impPreview.innerHTML = '<i class="muted" style="padding:8px;display:block">正在解析…</i>';
+      try {
+        const fd = new FormData(); fd.append('file', f);
+        const r = await fetch('/api/uploads/painting-sheet', { method: 'POST', credentials: 'include', body: fd });
+        const j = await r.json();
+        if (!r.ok) throw new Error(j.error || '解析失败');
+        const imgInfo = j.images_extracted ? ` · 含 <b>${j.images_extracted}</b> 张图片` : '';
+        impPreview.innerHTML = `
+          <div class="card" style="background:#f0fdf4;border:1px solid #86efac;margin-top:10px">
+            <p>从 <b>${escapeHtml(j.sheet_used || '')}</b> 解析到 <b>${j.count}</b> 行喷油工序${imgInfo}${j.meta && j.meta.title ? ' · ' + escapeHtml(j.meta.title) : ''}</p>
+            ${j.images_hint ? `<p class="muted">⚠️ ${escapeHtml(j.images_hint)}</p>` : ''}
+            <p class="muted">应用后会替换当前喷油明细（夹模/移印/散枪/边模/油色/浸油/抹油 七道工序）。</p>
+            <div style="margin-top:10px;display:flex;gap:8px">
+              <button id="pp-imp-apply">应用</button>
+              <button id="pp-imp-cancel" class="mini danger">取消</button>
+            </div>
+          </div>`;
+        impPreview.querySelector('#pp-imp-apply').onclick = () => {
+          const has = (payload.painting_items || []).some(it => it && (it.position || paintingRowAmount(it)));
+          if (has && !confirm('将替换现有 ' + payload.painting_items.length + ' 行喷油明细，确认？')) return;
+          payload.painting_items = (j.items || []).map(it => ({ ...it, images: it.images || [] }));
+          impPreview.innerHTML = ''; impFile.value = '';
+          onChange();
+          renderPainting(host, payload, canEdit, onChange, fxRmbHkd);
+        };
+        impPreview.querySelector('#pp-imp-cancel').onclick = () => { impPreview.innerHTML = ''; impFile.value = ''; };
+      } catch (err) {
+        impPreview.innerHTML = `<div class="card" style="background:#fef2f2;border:1px solid #fecaca;margin-top:10px">解析失败：${escapeHtml(err.message)}</div>`;
+      }
+    };
+  }
 }
 
 const PAINTING_PROCS = [
@@ -2417,6 +2566,8 @@ const PAINTING_PROCS = [
   { key: 'pad',    label: '移印' },
   { key: 'spray',  label: '散枪' },
   { key: 'edge',   label: '边模' },
+  { key: 'color',  label: '油色' },
+  { key: 'dip',    label: '浸油' },
   { key: 'oil',    label: '抹油' },
 ];
 
@@ -2434,7 +2585,6 @@ function renderPaintingTable(container, rows, onChange, canEdit) {
     <tr>
       <th rowspan="2" style="width:40px">#</th>
       <th rowspan="2" style="width:120px">图片</th>
-      <th rowspan="2" style="width:130px">货号</th>
       <th rowspan="2" style="width:180px">位置</th>
       ${procHeader}
       <th rowspan="2" style="width:90px">报价 HKD</th>
@@ -2453,8 +2603,6 @@ function renderPaintingTable(container, rows, onChange, canEdit) {
     const tdImg = document.createElement('td'); tdImg.className = 'mold-img-cell';
     renderImageCell(tdImg, row, canEdit, onChange);
     tr.appendChild(tdImg);
-    // 货号
-    tr.appendChild(makePCell('item_code', 'text', row, canEdit, onChange));
     // 位置
     tr.appendChild(makePCell('position', 'text', row, canEdit, onChange));
     // 五工序
@@ -2487,7 +2635,7 @@ function renderPaintingTable(container, rows, onChange, canEdit) {
   const totals = PAINTING_PROCS.map(p => sum(rows, r => num(r[p.key + '_qty'])));
   const totalAmt = sum(rows, paintingRowAmount);
   const tr = document.createElement('tr'); tr.className = 'hi';
-  let html = `<td colspan="4" style="text-align:right">合计</td>`;
+  let html = `<td colspan="3" style="text-align:right">合计</td>`;
   PAINTING_PROCS.forEach((p, i) => { html += `<td>${formatNum(totals[i])}</td><td></td>`; });
   html += `<td>${formatNum(totalAmt)}</td><td></td>${canEdit ? '<td></td>' : ''}`;
   tr.innerHTML = html;
@@ -2503,13 +2651,15 @@ function renderPaintingTable(container, rows, onChange, canEdit) {
 
 function makePCell(key, type, row, canEdit, onChange) {
   const td = document.createElement('td');
+  // 数量/单价为 0 或空 → 显示空白（不显示 0.0000）
+  const blankIfZero = type === 'number' && !num(row[key]);
   if (!canEdit) {
-    td.className = 'ro'; td.textContent = formatNum(row[key] ?? '');
+    td.className = 'ro'; td.textContent = blankIfZero ? '-' : formatNum(row[key] ?? '');
   } else {
     const inp = document.createElement('input');
     inp.type = type === 'number' ? 'number' : 'text';
     if (type === 'number') inp.step = 'any';
-    inp.value = row[key] ?? '';
+    inp.value = blankIfZero ? '' : (row[key] ?? '');
     inp.oninput = () => { row[key] = type === 'number' ? (inp.value === '' ? null : Number(inp.value)) : inp.value; onChange(); };
     td.appendChild(inp);
   }
@@ -2525,21 +2675,26 @@ function renderAssembly(host, payload, canEdit, onChange, fxRmbHkd) {
 
   const ro = canEdit ? '' : 'disabled';
   host.innerHTML = `
-    <h3>七、组装人工 — 排拉工序（按产品分组）</h3>
-    <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center;margin-bottom:10px;padding:10px;background:#fef9c3;border-radius:6px">
+    <h3>📊 总表（各产品 人工/PCS 汇总）</h3>
+    <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center;margin-bottom:8px;padding:10px;background:#fef9c3;border-radius:6px">
       <label>基数 (HKD/人) <input id="asm-rate" type="number" step="any" value="${payload.assembly_base_rate}" style="width:80px" ${ro}/></label>
       <label>标准工时 (H) <input id="asm-time" type="number" step="any" value="${payload.assembly_std_time}" style="width:60px" ${ro}/></label>
-      <small class="muted">人工/PCS = 基数 × 人数 ÷ 该组生产量</small>
-      ${canEdit ? '<button class="mini" id="asm-add-group" style="margin-left:auto">+ 新增产品组</button>' : ''}
-      ${canEdit ? '<button class="mini" id="asm-import" type="button">📄 导入排拉工序表</button><input id="asm-file" type="file" accept=".xls,.xlsx" style="display:none"/>' : ''}
+      <small class="muted">人工/PCS = 基数 × 人数 × 小组 ÷ 该组生产量</small>
     </div>
+    <div id="wb-asm-summary"></div>
+
+    <h3 style="margin-top:24px">七、组装人工 — 排拉工序（按产品分组）</h3>
+    ${canEdit ? `<div style="display:flex;gap:10px;align-items:center;margin-bottom:10px">
+      <button class="mini" id="asm-add-group">+ 新增产品组</button>
+      <button class="mini" id="asm-import" type="button">📄 导入排拉工序表</button><input id="asm-file" type="file" accept=".xls,.xlsx" style="display:none"/>
+    </div>` : ''}
     <div id="asm-import-preview"></div>
     <div id="wb-asm-groups"></div>
     <div id="wb-asm-grand"></div>
 
     <h3 style="margin-top:24px">八、包装/混装人工 — 排拉工序（按产品分组）</h3>
     <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center;margin-bottom:10px;padding:10px;background:#fef9c3;border-radius:6px">
-      <small class="muted">人工/PCS = 基数 × 人数 ÷ 该组生产量（共享上方 基数 / 标准工时）</small>
+      <small class="muted">人工/PCS = 基数 × 人数 × 小组 ÷ 该组生产量（共享上方 基数 / 标准工时）</small>
       ${canEdit ? '<button class="mini" id="pkg-add-group" style="margin-left:auto">+ 新增产品组</button>' : ''}
       ${canEdit ? '<button class="mini" id="pkg-import" type="button">📄 导入排拉工序表</button><input id="pkg-file" type="file" accept=".xls,.xlsx" style="display:none"/>' : ''}
     </div>
@@ -2548,6 +2703,37 @@ function renderAssembly(host, payload, canEdit, onChange, fxRmbHkd) {
     <div id="wb-pkg-grand"></div>
   `;
   payload.packaging_step_groups = payload.packaging_step_groups || [];
+
+  // 总表：组装+包装 各产品的 总人数 / 合计人工PCS 汇总（明细在下方各段工序细表）
+  const paintSummary = () => {
+    const sumHost = host.querySelector('#wb-asm-summary');
+    if (!sumHost) return;
+    const base = num(payload.assembly_base_rate);
+    const stdTime = num(payload.assembly_std_time);
+    const rowFor = (g, type) => {
+      const team = num(g.team ?? 1) || 1;
+      const people = (g.steps || []).reduce((s, x) => s + num(x.count), 0);
+      const total = (g.steps || []).reduce((s, x) => s + base * num(x.count) * team / Math.max(num(g.qty), 1), 0);
+      return { type, product: g.product || '未命名', qty: num(g.qty), team, people, total };
+    };
+    const asm = (payload.assembly_step_groups || []).map(g => rowFor(g, '组装'));
+    const pkg = (payload.packaging_step_groups || []).map(g => rowFor(g, '包装/混装'));
+    const all = asm.concat(pkg);
+    const asmTotal = asm.reduce((s, r) => s + r.total, 0);
+    const pkgTotal = pkg.reduce((s, r) => s + r.total, 0);
+    const grand = asmTotal + pkgTotal;
+    sumHost.innerHTML = `
+      <table class="wb-table" style="max-width:940px">
+        <thead><tr><th style="width:80px">类型</th><th>产品</th><th style="width:80px">标准工时</th><th style="width:90px">基数 HKD</th><th style="width:90px">生产量</th><th style="width:60px">小组</th><th style="width:80px">总人数</th><th style="width:140px">合计 人工/PCS HKD</th></tr></thead>
+        <tbody>
+          ${all.length ? all.map(r => `<tr><td>${r.type}</td><td>${escapeHtml(r.product)}</td><td>${formatNum(stdTime)}</td><td>${formatNum(base)}</td><td>${formatNum(r.qty)}</td><td>${r.team}</td><td>${r.people}</td><td style="font-weight:600;color:#0369a1">${formatNum(r.total)}</td></tr>`).join('')
+            : `<tr><td colspan="8" class="ro" style="text-align:center;color:#9ca3af;padding:14px">暂无数据，下方导入排拉工序表或新增产品组</td></tr>`}
+          ${asm.length ? `<tr class="hi"><td colspan="7" style="text-align:right">组装人工 合计</td><td style="font-weight:700">${formatNum(asmTotal)}</td></tr>` : ''}
+          ${pkg.length ? `<tr class="hi"><td colspan="7" style="text-align:right">包装/混装人工 合计</td><td style="font-weight:700">${formatNum(pkgTotal)}</td></tr>` : ''}
+          <tr class="hi"><td colspan="7" style="text-align:right;color:#16a34a">所有产品 总合计 人工/PCS</td><td style="font-weight:800;color:#16a34a">${formatNum(grand)} HKD</td></tr>
+        </tbody>
+      </table>`;
+  };
 
   const renderGroups = () => {
     const groupsHost = host.querySelector('#wb-asm-groups');
@@ -2558,6 +2744,7 @@ function renderAssembly(host, payload, canEdit, onChange, fxRmbHkd) {
     payload.assembly_step_groups.forEach((g, gi) => {
       g.steps = g.steps || [];
       g.qty = g.qty || 1;
+      g.team = g.team == null ? 1 : g.team;  // 小组数（默认1，可改）
       const card = document.createElement('div');
       card.className = 'labor-group';
       card.style.cssText = 'border:1px solid #e7e5e4;border-radius:8px;padding:12px;margin-top:10px;background:#fafaf9';
@@ -2566,14 +2753,12 @@ function renderAssembly(host, payload, canEdit, onChange, fxRmbHkd) {
           <td class="ro" style="width:40px">${i+1}</td>
           <td><input class="asg-step-name" data-gi="${gi}" data-i="${i}" type="text" value="${(s.name||'').replace(/"/g,'&quot;')}" ${ro}/></td>
           <td><input class="asg-step-count" data-gi="${gi}" data-i="${i}" type="number" step="1" value="${num(s.count)}" style="width:70px" ${ro}/></td>
-          <td class="ro" style="width:80px">${formatNum(stdT)}</td>
-          <td class="ro" style="width:80px">${formatNum(baseRate)}</td>
-          <td class="ro" style="width:120px;font-weight:600;color:#0369a1">${formatNum(baseRate * num(s.count) / Math.max(num(g.qty), 1))}</td>
           <td><input class="asg-step-note" data-gi="${gi}" data-i="${i}" type="text" value="${(s.note||'').replace(/"/g,'&quot;')}" ${ro}/></td>
           ${canEdit ? `<td style="width:50px"><button class="mini danger asg-step-del" data-gi="${gi}" data-i="${i}">×</button></td>` : ''}
         </tr>
       `).join('');
-      const groupTotal = g.steps.reduce((s, x) => s + baseRate * num(x.count) / Math.max(num(g.qty), 1), 0);
+      const team = num(g.team ?? 1) || 1;
+      const groupTotal = g.steps.reduce((s, x) => s + baseRate * num(x.count) * team / Math.max(num(g.qty), 1), 0);
       const totalPeople = g.steps.reduce((s, x) => s + num(x.count), 0);
       grand += groupTotal;
       card.innerHTML = `
@@ -2581,34 +2766,38 @@ function renderAssembly(host, payload, canEdit, onChange, fxRmbHkd) {
           <strong style="color:#16a34a">📦 产品：</strong>
           <input class="asg-name" data-gi="${gi}" value="${(g.product||'').replace(/"/g,'&quot;')}" placeholder="如：6寸小蜥蜴" style="width:200px" ${ro}/>
           <label>生产量 <input class="asg-qty" data-gi="${gi}" type="number" step="any" value="${g.qty}" style="width:90px" ${ro}/></label>
+          <label>小组 <input class="asg-team" data-gi="${gi}" type="number" step="1" min="1" value="${g.team ?? 1}" style="width:60px" ${ro}/></label>
           <span class="muted">总人数：${totalPeople} · 合计 人工/PCS：<b style="color:#0369a1">${formatNum(groupTotal)} HKD</b></span>
           ${canEdit ? `<button class="mini asg-add-step" data-gi="${gi}">+ 增加工序</button>` : ''}
           ${canEdit ? `<button class="mini danger asg-del" data-gi="${gi}" style="margin-left:auto">删除整组</button>` : ''}
         </div>
+        <details ${g._open ? 'open' : ''} data-gi="${gi}">
+        <summary style="cursor:pointer;color:#475569;font-weight:600;padding:4px 0">📋 工序明细（${(g.steps||[]).length} 步，点击展开）</summary>
         <table class="wb-table"><thead><tr>
           <th style="width:40px">#</th>
           <th>工序名称</th>
           <th style="width:80px">人数</th>
-          <th style="width:80px">标准工时</th>
-          <th style="width:80px">基数 HKD</th>
-          <th style="width:120px">人工/PCS</th>
           <th>备注</th>
           ${canEdit ? '<th style="width:50px"></th>' : ''}
-        </tr></thead><tbody>${stepsHtml || `<tr><td colspan="${canEdit?8:7}" class="ro" style="text-align:center;padding:20px;color:#9ca3af">+ 增加工序</td></tr>`}</tbody></table>
+        </tr></thead><tbody>${stepsHtml || `<tr><td colspan="${canEdit?5:4}" class="ro" style="text-align:center;padding:20px;color:#9ca3af">+ 增加工序</td></tr>`}</tbody></table>
+        </details>
       `;
       groupsHost.appendChild(card);
     });
     host.querySelector('#wb-asm-grand').innerHTML = `
       <div class="labor-total" style="margin-top:10px"><span>所有产品 合计 人工/PCS</span><span style="font-weight:700;color:#16a34a">${formatNum(grand)} HKD</span></div>
     `;
+    paintSummary();
 
     if (!canEdit) return;
     // 绑定
     host.querySelectorAll('.asg-name').forEach(i => i.oninput = (e) => { payload.assembly_step_groups[+i.dataset.gi].product = e.target.value; onChange(); });
-    host.querySelectorAll('.asg-qty').forEach(i => i.oninput = (e) => { payload.assembly_step_groups[+i.dataset.gi].qty = Number(e.target.value) || 1; onChange(); renderGroups(); });
+    host.querySelectorAll('.asg-qty').forEach(i => { i.oninput = (e) => { payload.assembly_step_groups[+i.dataset.gi].qty = Number(e.target.value) || 1; onChange(); paintSummary(); }; i.onchange = () => renderGroups(); });
+    host.querySelectorAll('.asg-team').forEach(i => { i.oninput = (e) => { payload.assembly_step_groups[+i.dataset.gi].team = Number(e.target.value) || 1; onChange(); paintSummary(); }; i.onchange = () => renderGroups(); });
     host.querySelectorAll('.asg-step-name').forEach(i => i.oninput = (e) => { payload.assembly_step_groups[+i.dataset.gi].steps[+i.dataset.i].name = e.target.value; onChange(); });
-    host.querySelectorAll('.asg-step-count').forEach(i => i.oninput = (e) => { payload.assembly_step_groups[+i.dataset.gi].steps[+i.dataset.i].count = e.target.value === '' ? null : Number(e.target.value); onChange(); renderGroups(); });
+    host.querySelectorAll('.asg-step-count').forEach(i => { i.oninput = (e) => { payload.assembly_step_groups[+i.dataset.gi].steps[+i.dataset.i].count = e.target.value === '' ? null : Number(e.target.value); onChange(); paintSummary(); }; i.onchange = () => renderGroups(); });
     host.querySelectorAll('.asg-step-note').forEach(i => i.oninput = (e) => { payload.assembly_step_groups[+i.dataset.gi].steps[+i.dataset.i].note = e.target.value; onChange(); });
+    host.querySelector('#wb-asm-groups').querySelectorAll('details[data-gi]').forEach(d => d.ontoggle = () => { payload.assembly_step_groups[+d.dataset.gi]._open = d.open; });
     host.querySelectorAll('.asg-step-del').forEach(b => b.onclick = () => { payload.assembly_step_groups[+b.dataset.gi].steps.splice(+b.dataset.i, 1); onChange(); renderGroups(); });
     host.querySelectorAll('.asg-add-step').forEach(b => b.onclick = () => { payload.assembly_step_groups[+b.dataset.gi].steps.push({ name: '', count: 1, note: '' }); onChange(); renderGroups(); });
     host.querySelectorAll('.asg-del').forEach(b => b.onclick = () => {
@@ -2677,6 +2866,7 @@ function renderAssembly(host, payload, canEdit, onChange, fxRmbHkd) {
     payload.packaging_step_groups.forEach((g, gi) => {
       g.steps = g.steps || [];
       g.qty = g.qty || 1;
+      g.team = g.team == null ? 1 : g.team;  // 小组数（默认1，可改）
       const card = document.createElement('div');
       card.className = 'labor-group';
       card.style.cssText = 'border:1px solid #e7e5e4;border-radius:8px;padding:12px;margin-top:10px;background:#fafaf9';
@@ -2685,14 +2875,12 @@ function renderAssembly(host, payload, canEdit, onChange, fxRmbHkd) {
           <td class="ro" style="width:40px">${i+1}</td>
           <td><input class="pkg-step-name" data-gi="${gi}" data-i="${i}" type="text" value="${(s.name||'').replace(/"/g,'&quot;')}" ${ro}/></td>
           <td><input class="pkg-step-count" data-gi="${gi}" data-i="${i}" type="number" step="1" value="${num(s.count)}" style="width:70px" ${ro}/></td>
-          <td class="ro" style="width:80px">${formatNum(stdT)}</td>
-          <td class="ro" style="width:80px">${formatNum(baseRate)}</td>
-          <td class="ro" style="width:120px;font-weight:600;color:#0369a1">${formatNum(baseRate * num(s.count) / Math.max(num(g.qty), 1))}</td>
           <td><input class="pkg-step-note" data-gi="${gi}" data-i="${i}" type="text" value="${(s.note||'').replace(/"/g,'&quot;')}" ${ro}/></td>
           ${canEdit ? `<td style="width:50px"><button class="mini danger pkg-step-del" data-gi="${gi}" data-i="${i}">×</button></td>` : ''}
         </tr>
       `).join('');
-      const groupTotal = g.steps.reduce((s, x) => s + baseRate * num(x.count) / Math.max(num(g.qty), 1), 0);
+      const team = num(g.team ?? 1) || 1;
+      const groupTotal = g.steps.reduce((s, x) => s + baseRate * num(x.count) * team / Math.max(num(g.qty), 1), 0);
       const totalPeople = g.steps.reduce((s, x) => s + num(x.count), 0);
       grand += groupTotal;
       card.innerHTML = `
@@ -2700,32 +2888,36 @@ function renderAssembly(host, payload, canEdit, onChange, fxRmbHkd) {
           <strong style="color:#16a34a">📦 产品：</strong>
           <input class="pkg-name" data-gi="${gi}" value="${(g.product||'').replace(/"/g,'&quot;')}" placeholder="如：6寸小蜥蜴" style="width:200px" ${ro}/>
           <label>生产量 <input class="pkg-qty" data-gi="${gi}" type="number" step="any" value="${g.qty}" style="width:90px" ${ro}/></label>
+          <label>小组 <input class="pkg-team" data-gi="${gi}" type="number" step="1" min="1" value="${g.team ?? 1}" style="width:60px" ${ro}/></label>
           <span class="muted">总人数：${totalPeople} · 合计 人工/PCS：<b style="color:#0369a1">${formatNum(groupTotal)} HKD</b></span>
           ${canEdit ? `<button class="mini pkg-add-step" data-gi="${gi}">+ 增加工序</button>` : ''}
           ${canEdit ? `<button class="mini danger pkg-del" data-gi="${gi}" style="margin-left:auto">删除整组</button>` : ''}
         </div>
+        <details ${g._open ? 'open' : ''} data-gi="${gi}">
+        <summary style="cursor:pointer;color:#475569;font-weight:600;padding:4px 0">📋 工序明细（${(g.steps||[]).length} 步，点击展开）</summary>
         <table class="wb-table"><thead><tr>
           <th style="width:40px">#</th>
           <th>工序名称</th>
           <th style="width:80px">人数</th>
-          <th style="width:80px">标准工时</th>
-          <th style="width:80px">基数 HKD</th>
-          <th style="width:120px">人工/PCS</th>
           <th>备注</th>
           ${canEdit ? '<th style="width:50px"></th>' : ''}
-        </tr></thead><tbody>${stepsHtml || `<tr><td colspan="${canEdit?8:7}" class="ro" style="text-align:center;padding:20px;color:#9ca3af">+ 增加工序</td></tr>`}</tbody></table>
+        </tr></thead><tbody>${stepsHtml || `<tr><td colspan="${canEdit?5:4}" class="ro" style="text-align:center;padding:20px;color:#9ca3af">+ 增加工序</td></tr>`}</tbody></table>
+        </details>
       `;
       groupsHost.appendChild(card);
     });
     host.querySelector('#wb-pkg-grand').innerHTML = `
       <div class="labor-total" style="margin-top:10px"><span>所有产品 合计 人工/PCS</span><span style="font-weight:700;color:#16a34a">${formatNum(grand)} HKD</span></div>
     `;
+    paintSummary();
     if (!canEdit) return;
     host.querySelectorAll('.pkg-name').forEach(i => i.oninput = (e) => { payload.packaging_step_groups[+i.dataset.gi].product = e.target.value; onChange(); });
-    host.querySelectorAll('.pkg-qty').forEach(i => i.oninput = (e) => { payload.packaging_step_groups[+i.dataset.gi].qty = Number(e.target.value) || 1; onChange(); renderPkgGroups(); });
+    host.querySelectorAll('.pkg-qty').forEach(i => { i.oninput = (e) => { payload.packaging_step_groups[+i.dataset.gi].qty = Number(e.target.value) || 1; onChange(); paintSummary(); }; i.onchange = () => renderPkgGroups(); });
+    host.querySelectorAll('.pkg-team').forEach(i => { i.oninput = (e) => { payload.packaging_step_groups[+i.dataset.gi].team = Number(e.target.value) || 1; onChange(); paintSummary(); }; i.onchange = () => renderPkgGroups(); });
     host.querySelectorAll('.pkg-step-name').forEach(i => i.oninput = (e) => { payload.packaging_step_groups[+i.dataset.gi].steps[+i.dataset.i].name = e.target.value; onChange(); });
-    host.querySelectorAll('.pkg-step-count').forEach(i => i.oninput = (e) => { payload.packaging_step_groups[+i.dataset.gi].steps[+i.dataset.i].count = e.target.value === '' ? null : Number(e.target.value); onChange(); renderPkgGroups(); });
+    host.querySelectorAll('.pkg-step-count').forEach(i => { i.oninput = (e) => { payload.packaging_step_groups[+i.dataset.gi].steps[+i.dataset.i].count = e.target.value === '' ? null : Number(e.target.value); onChange(); paintSummary(); }; i.onchange = () => renderPkgGroups(); });
     host.querySelectorAll('.pkg-step-note').forEach(i => i.oninput = (e) => { payload.packaging_step_groups[+i.dataset.gi].steps[+i.dataset.i].note = e.target.value; onChange(); });
+    host.querySelector('#wb-pkg-groups').querySelectorAll('details[data-gi]').forEach(d => d.ontoggle = () => { payload.packaging_step_groups[+d.dataset.gi]._open = d.open; });
     host.querySelectorAll('.pkg-step-del').forEach(b => b.onclick = () => { payload.packaging_step_groups[+b.dataset.gi].steps.splice(+b.dataset.i, 1); onChange(); renderPkgGroups(); });
     host.querySelectorAll('.pkg-add-step').forEach(b => b.onclick = () => { payload.packaging_step_groups[+b.dataset.gi].steps.push({ name: '', count: 1, note: '' }); onChange(); renderPkgGroups(); });
     host.querySelectorAll('.pkg-del').forEach(b => b.onclick = () => {
@@ -3269,7 +3461,7 @@ function computeTotals(sections, p) {
 
   // 电子/五金/辅助/包装/二次加工(喷油) 均为 HKD，换算回 RMB（×汇率）以与其余 RMB 项相加
   const _salesFx = num((get('sales') || {}).header?.fx_rmb_hkd) || 0.85;
-  const injection = applyLoss(sum(mold.injection || [], r => num(r.shot_price) / Math.max(num(r.sets), 1)), mold.injection_loss_pct ?? 1);
+  const injection = applyLoss(sum(mold.injection || [], r => num(r.shot_price) / Math.max(num(r.sets), 1)), mold.injection_loss_pct ?? 3);
   // 注：模板里"成品金额"列其实是 啤价/套数 之类，这里先按 shot_price/sets 估算，导出时严格按模板填回。
   const second_proc = applyLoss(sum(pnt.second_proc || [], r => num(r.price) * num(r.qty)), pnt.second_proc_loss_pct ?? 1) * _salesFx;
   const electronics = (freeTableSubtotal(elecSrc)  // 电子部优先，与导出一致
@@ -3434,9 +3626,11 @@ async function renderQuotePage() {
 
     others.forEach(s => {
       const sectionPayload = s.payload_json ? JSON.parse(s.payload_json) : {};
-      // 默认只读，避免业务/工程不小心点保存覆盖其他部门数据
-      // 点"✏️ 进入编辑"切换为可写
-      let inEdit = false;
+      // 默认只读，避免业务/工程不小心点保存覆盖其他部门数据；点"✏️ 进入编辑"切换为可写。
+      // 例外：工程/业务部门由业务查看时直接可编辑（两者同属，免点按钮）；其他部门仍只读。
+      // 工程/业务直接可编辑：仅在「未提交审核」(status=empty) 时自动进入编辑；
+      // 已提交(filled) 则退出编辑、露出 审核通过/驳回 按钮（否则跳不出审核界面）
+      let inEdit = (s.dept === 'engineering' && (me.dept === 'sales' || me.dept === 'engineering') && s.status === 'empty');
       const c = document.createElement('div'); c.className = 'card section-pane';
       c.dataset.dept = s.dept;
       c.style.display = 'none';

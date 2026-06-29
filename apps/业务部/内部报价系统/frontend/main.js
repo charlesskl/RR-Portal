@@ -109,12 +109,22 @@ function renderQuotes() {
       <td class="ro" style="font-family:ui-monospace,monospace;font-size:12px">${fmtTime(q.created_at)}</td>
       <td style="display:flex;gap:6px">
         <a href="./quote.html?id=${q.id}" class="open-btn">打开 →</a>
-        ${window.__me && window.__me.dept === 'sales' ? `<button class="mini btn-clone" data-id="${q.id}" data-no="${esc(q.quote_no)}" data-name="${esc(q.product_name)}">📋 复制</button>` : ''}
+        ${window.__me && (window.__me.dept === 'sales' || window.__me.role === 'admin') ? `<button class="mini btn-clone" data-id="${q.id}" data-no="${esc(q.quote_no)}" data-name="${esc(q.product_name)}">📋 复制</button>
+        <button class="mini danger btn-del" data-id="${q.id}" data-no="${esc(q.quote_no)}">🗑 删除</button>` : ''}
       </td>
     `;
     tbody.appendChild(tr);
   }
   document.querySelectorAll('.btn-clone').forEach(b => b.onclick = () => cloneQuote(b.dataset.id, b.dataset.no, b.dataset.name));
+  document.querySelectorAll('.btn-del').forEach(b => b.onclick = () => deleteQuote(b.dataset.id, b.dataset.no));
+}
+
+async function deleteQuote(id, no) {
+  if (!confirm(`确认删除报价单 #${id}（货号 ${no || '—'}）？\n\n该操作不可恢复，将连同各部门明细一并删除。`)) return;
+  try {
+    await api('/quotes/' + id, { method: 'DELETE' });
+    await loadQuotes();
+  } catch (e) { alert(e.message); }
 }
 
 async function cloneQuote(srcId, srcNo, srcName) {

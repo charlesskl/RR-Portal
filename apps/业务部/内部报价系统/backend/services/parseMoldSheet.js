@@ -185,9 +185,13 @@ function tryParseSheet(wb, sheetName) {
   if (current) groups.push(current);
 
   const molds = groups.filter(g => g.names.length > 0 || g.mold_no).map(g => {
-    const firstCav = g.cavities[0] || '';
-    const allOne = g.cavities.length === g.names.length && g.cavities.length > 1 && g.cavities.every(c => /^1$/.test(c));
-    const cavity = allOne ? `${g.names.length}*1` : firstCav;
+    // 出模数 = 组内各件 CAV 相加（总穴数）。CAV 形如 "2" 或 "2*1" 时取乘积，空则 0
+    const cavSum = g.cavities.reduce((a, c) => {
+      const nums = String(c).match(/[\d.]+/g);
+      if (!nums) return a;
+      return a + nums.map(Number).reduce((x, y) => x * y, 1);
+    }, 0);
+    const cavity = cavSum > 0 ? String(cavSum) : (g.cavities[0] || '');
     return {
       mold_no: g.mold_no,
       name: g.names.join('/') || g.mold_no,

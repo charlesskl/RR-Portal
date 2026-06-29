@@ -55,6 +55,13 @@ def init_db():
     con = sqlite3.connect(DATABASE)
     cur = con.cursor()
 
+    # 并发加固：gunicorn 多 worker/thread 下 SQLite 默认 DELETE journal 读写抢锁，
+    # 偶发 "database is locked" → 500（如对账撤回）。WAL 模式持久化写入库文件，
+    # 一次设置对之后所有连接生效：读不再阻塞写，仅写-写互斥，配 busy_timeout 等待重试。
+    cur.execute("PRAGMA journal_mode=WAL")
+    cur.execute("PRAGMA synchronous=NORMAL")
+    cur.execute("PRAGMA busy_timeout=10000")
+
     # flow_records 主流水表
     cur.execute("""
     CREATE TABLE IF NOT EXISTS flow_records (

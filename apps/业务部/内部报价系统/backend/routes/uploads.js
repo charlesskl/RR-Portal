@@ -166,4 +166,47 @@ router.post('/assembly-sheet', requireAuth, memUpload.single('file'), async (req
   }
 });
 
+// POST /api/uploads/painting-sheet  喷油核价表 xlsx → 返回 { meta, items }
+const { parseWorkbook: parsePaintingWorkbook } = require('../services/parsePaintingSheet');
+router.post('/painting-sheet', requireAuth, memUpload.single('file'), async (req, res) => {
+  if (!['painting', 'sales', 'engineering'].includes(req.user.dept) && req.user.role !== 'admin') {
+    return res.status(403).json({ error: '仅 喷油部/业务/工程/超级管理员 可上传' });
+  }
+  if (!req.file) return res.status(400).json({ error: '缺少文件' });
+  if (!/\.(xls|xlsx)$/i.test(req.file.originalname)) return res.status(400).json({ error: '只支持 .xls/.xlsx' });
+  try {
+    const result = await parsePaintingWorkbook(req.file.buffer);
+    if (result.error) return res.status(422).json(result);
+
+    // xlsx 才抽内嵌图，按锚点行号归到对应工序行（_row=0-based 源行号）
+    if (/\.xlsx$/i.test(req.file.originalname)) {
+      try {
+        const moldImgDir = path.join(UPLOAD_ROOT, 'mold');
+        const anchored = await extractImagesByRow(req.file.buffer, moldImgDir);
+        let assigned = 0;
+        for (const img of anchored) {
+          // 先精确匹配同一行，否则归到锚点行上方最近的工序行（差 ≤2 行）
+          let it = result.items.find(x => x._row === img.row);
+          if (!it) {
+            it = result.items
+              .filter(x => x._row <= img.row && img.row - x._row <= 2)
+              .sort((a, b) => b._row - a._row)[0];
+          }
+          if (it) { (it.images = it.images || []).push('uploads/mold/' + img.file); assigned++; }
+        }
+        result.images_extracted = anchored.length;
+        if (anchored.length && !assigned) result.images_hint = `抽取到 ${anchored.length} 张图片但未能按行归位（锚点行=${anchored.map(a => a.row).join(',')}）。`;
+      } catch (e) {
+        result.images_extract_error = e.message;
+      }
+    } else {
+      result.images_hint = '当前是 .xls 旧二进制格式，图片无法自动抽取。请另存为 .xlsx 后重新上传。';
+    }
+    result.items.forEach(it => { delete it._row; });
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ error: '解析失败: ' + e.message });
+  }
+});
+
 module.exports = router;

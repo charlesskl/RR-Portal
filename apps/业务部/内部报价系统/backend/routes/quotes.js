@@ -105,6 +105,23 @@ router.post('/:id/clone', (req, res) => {
   }
 });
 
+// DELETE /api/quotes/:id  删除报价单（连带 section 级联删除）— 仅业务/超级管理员
+router.delete('/:id', (req, res) => {
+  if (req.user.dept !== 'sales' && req.user.role !== 'admin') {
+    return res.status(403).json({ error: '只有业务或超级管理员可以删除报价单' });
+  }
+  const id = Number(req.params.id);
+  const acc = quoteAccess(req.user, id);
+  if (acc.status !== 200) return res.status(acc.status).json({ error: acc.status === 404 ? '报价单不存在' : '无权删除该客户的报价单' });
+  const q = db.prepare('SELECT quote_no FROM quotes WHERE id = ?').get(id);
+  const tx = db.transaction(() => {
+    db.prepare('DELETE FROM audit_log WHERE quote_id = ?').run(id);
+    db.prepare('DELETE FROM quotes WHERE id = ?').run(id);  // quote_sections 经 ON DELETE CASCADE 一并删除
+  });
+  tx();
+  res.json({ ok: true, deleted: id, quote_no: q ? q.quote_no : null });
+});
+
 // PUT /api/quotes/:id/header  修改表头（产品名/客户/数量）— 业务+工程可改
 router.put('/:id/header', (req, res) => {
   if (!['sales', 'engineering'].includes(req.user.dept)) {

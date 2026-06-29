@@ -279,10 +279,10 @@ def _generate_excel(parsed_orders, custom_date=None):
                 ws.cell(r, 11, country_cn)
 
             # L 车间 = VLOOKUP
-            ws.cell(r, 12).value = f'=VLOOKUP(C{r},货号!A$1:C$660,3,0)'
+            ws.cell(r, 12).value = f'=VLOOKUP(C{r},货号!A:C,3,0)'
 
             # M 排期品名 = VLOOKUP
-            ws.cell(r, 13).value = f'=VLOOKUP(C{r},货号!A$1:D$660,4,0)'
+            ws.cell(r, 13).value = f'=VLOOKUP(C{r},货号!A:D,4,0)'
 
             # 统一格式：绿色填充标记新数据
             for c in range(1, 15):

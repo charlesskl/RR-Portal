@@ -67,7 +67,7 @@ router.post('/', (req, res) => {
 
 // POST /api/quotes/:id/clone  复制一张报价单（含 payload，状态全 empty）
 router.post('/:id/clone', (req, res) => {
-  if (req.user.dept !== 'sales') return res.status(403).json({ error: '只有业务可以复制报价单' });
+  if (req.user.dept !== 'sales' && req.user.role !== 'admin') return res.status(403).json({ error: '只有业务或超级管理员可以复制报价单' });
   const srcId = Number(req.params.id);
   const { quote_no, product_name, customer, qty, version } = req.body || {};
   if (!quote_no) return res.status(400).json({ error: '缺少 quote_no' });

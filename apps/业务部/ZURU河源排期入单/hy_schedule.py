@@ -600,7 +600,7 @@ def write_orders(schedule_dir, orders, ambiguous_selections=None, export_dir=Non
                                      wb_name=nl['file'])
 
         item_base = re.match(r'(\d+[A-Za-z]*\d*)', _item_upper(nl['item']))
-        cn_name = (cn_names.get(item_base.group(1).upper(), '') if item_base else '').split('\n')[0].strip()
+        cn_name = _clean_cn_name(cn_names.get(item_base.group(1).upper(), '') if item_base else '')
 
         # 只有当 outer 和 price 有效值时才生成公式占位符，否则留空避免 #DIV/0! / #VALUE!
         _has_outer = bool(ln_data['outer_qty'])
@@ -630,7 +630,7 @@ def write_orders(schedule_dir, orders, ambiguous_selections=None, export_dir=Non
         ln_data = _prepare_line_data(order, order['lines'][li], hdr['ship_dt'], hdr['full_note'],
                                      wb_name=m['file'])
         item_base = re.match(r'(\d+[A-Za-z]*\d*)', _item_upper(m['item']))
-        cn_name = (cn_names.get(item_base.group(1).upper(), '') if item_base else '').split('\n')[0].strip()
+        cn_name = _clean_cn_name(cn_names.get(item_base.group(1).upper(), '') if item_base else '')
         _has_outer = bool(ln_data['outer_qty'])
         _has_price = bool(ln_data['price'])
         new_rows.append({
@@ -659,7 +659,7 @@ def write_orders(schedule_dir, orders, ambiguous_selections=None, export_dir=Non
                                      wb_name='')
 
         item_base = re.match(r'(\d+[A-Za-z]*\d*)', _item_upper(uk['item']))
-        cn_name = (cn_names.get(item_base.group(1).upper(), '') if item_base else '').split('\n')[0].strip()
+        cn_name = _clean_cn_name(cn_names.get(item_base.group(1).upper(), '') if item_base else '')
 
         _has_outer = bool(ln_data['outer_qty'])
         _has_price = bool(ln_data['price'])

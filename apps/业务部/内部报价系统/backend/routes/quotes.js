@@ -60,7 +60,11 @@ router.post('/', (req, res) => {
     const id = tx();
     res.json({ id });
   } catch (e) {
-    if (String(e.message).includes('UNIQUE')) return res.status(409).json({ error: '报价单号已存在' });
+    if (String(e.message).includes('UNIQUE')) {
+      const _exist = db.prepare('SELECT customer FROM quotes WHERE quote_no = ?').get(quote_no);
+      const _cust = _exist && _exist.customer ? `客户「${_exist.customer}」` : '一张无客户的单';
+      return res.status(409).json({ error: `货号「${quote_no}」已被占用（在${_cust}名下），请换一个货号` });
+    }
     throw e;
   }
 });
@@ -100,7 +104,11 @@ router.post('/:id/clone', (req, res) => {
     const id = tx();
     res.json({ id });
   } catch (e) {
-    if (String(e.message).includes('UNIQUE')) return res.status(409).json({ error: '报价单号已存在' });
+    if (String(e.message).includes('UNIQUE')) {
+      const _exist = db.prepare('SELECT customer FROM quotes WHERE quote_no = ?').get(quote_no);
+      const _cust = _exist && _exist.customer ? `客户「${_exist.customer}」` : '一张无客户的单';
+      return res.status(409).json({ error: `货号「${quote_no}」已被占用（在${_cust}名下），请换一个货号` });
+    }
     throw e;
   }
 });

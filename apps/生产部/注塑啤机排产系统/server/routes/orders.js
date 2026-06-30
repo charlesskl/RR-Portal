@@ -329,7 +329,7 @@ router.post('/import', upload.single('file'), async (req, res) => {
           o.shot_weight || 0, o.material_kg || 0, o.sprue_pct || 0, o.ratio_pct || 0,
           o.quantity_needed || 0, o.accumulated || 0, o.cavity || 1, o.cycle_time || 0,
           o.order_no || '', o.is_three_plate || 0, o.packing_qty || 0,
-          batch, req.file.originalname, 'pending', o.notes || '', workshop
+          batch, req.file.originalname, 'pending', o.notes || '', o.serial_no || '', workshop
         );
       }
     });

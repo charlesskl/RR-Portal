@@ -117,7 +117,10 @@ async function parseWorkbook(buffer) {
       const count = toNum(r[countCol]);
       if (!name) continue;
       if (/序号|工序名称|^生产拉线$/.test(name)) continue;
-      if (count == null) continue;
+      // 跳过说明/表头类行（非工序），如「功能及要求事项描述:」「注意事项」等
+      if (/功能.*要求.*事项|要求事项描述|功能及要求|注意事项|^备注|^说明|描述[：:]\s*$/.test(name)) continue;
+      // 工序必须有人数(>0)；人数 0/空 多为说明行或空行
+      if (count == null || count <= 0) continue;
       steps.push({ name, count });
     }
   }

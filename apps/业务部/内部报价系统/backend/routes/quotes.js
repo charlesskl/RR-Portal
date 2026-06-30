@@ -60,14 +60,18 @@ router.post('/', (req, res) => {
     const id = tx();
     res.json({ id });
   } catch (e) {
-    if (String(e.message).includes('UNIQUE')) return res.status(409).json({ error: '报价单号已存在' });
+    if (String(e.message).includes('UNIQUE')) {
+      const _exist = db.prepare('SELECT customer FROM quotes WHERE quote_no = ?').get(quote_no);
+      const _cust = _exist && _exist.customer ? `客户「${_exist.customer}」` : '一张无客户的单';
+      return res.status(409).json({ error: `货号「${quote_no}」已被占用（在${_cust}名下），请换一个货号` });
+    }
     throw e;
   }
 });
 
 // POST /api/quotes/:id/clone  复制一张报价单（含 payload，状态全 empty）
 router.post('/:id/clone', (req, res) => {
-  if (req.user.dept !== 'sales') return res.status(403).json({ error: '只有业务可以复制报价单' });
+  if (req.user.dept !== 'sales' && req.user.role !== 'admin') return res.status(403).json({ error: '只有业务或超级管理员可以复制报价单' });
   const srcId = Number(req.params.id);
   const { quote_no, product_name, customer, qty, version } = req.body || {};
   if (!quote_no) return res.status(400).json({ error: '缺少 quote_no' });
@@ -100,9 +104,30 @@ router.post('/:id/clone', (req, res) => {
     const id = tx();
     res.json({ id });
   } catch (e) {
-    if (String(e.message).includes('UNIQUE')) return res.status(409).json({ error: '报价单号已存在' });
+    if (String(e.message).includes('UNIQUE')) {
+      const _exist = db.prepare('SELECT customer FROM quotes WHERE quote_no = ?').get(quote_no);
+      const _cust = _exist && _exist.customer ? `客户「${_exist.customer}」` : '一张无客户的单';
+      return res.status(409).json({ error: `货号「${quote_no}」已被占用（在${_cust}名下），请换一个货号` });
+    }
     throw e;
   }
+});
+
+// DELETE /api/quotes/:id  删除报价单（连带 section 级联删除）— 仅业务/超级管理员
+router.delete('/:id', (req, res) => {
+  if (req.user.dept !== 'sales' && req.user.role !== 'admin') {
+    return res.status(403).json({ error: '只有业务或超级管理员可以删除报价单' });
+  }
+  const id = Number(req.params.id);
+  const acc = quoteAccess(req.user, id);
+  if (acc.status !== 200) return res.status(acc.status).json({ error: acc.status === 404 ? '报价单不存在' : '无权删除该客户的报价单' });
+  const q = db.prepare('SELECT quote_no FROM quotes WHERE id = ?').get(id);
+  const tx = db.transaction(() => {
+    db.prepare('DELETE FROM audit_log WHERE quote_id = ?').run(id);
+    db.prepare('DELETE FROM quotes WHERE id = ?').run(id);  // quote_sections 经 ON DELETE CASCADE 一并删除
+  });
+  tx();
+  res.json({ ok: true, deleted: id, quote_no: q ? q.quote_no : null });
 });
 
 // PUT /api/quotes/:id/header  修改表头（产品名/客户/数量）— 业务+工程可改

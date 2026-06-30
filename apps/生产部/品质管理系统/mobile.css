@@ -1,0 +1,119 @@
+/* ══════════════════════════════════════════════════════════════
+   兴信 QMS · 移动端适配  mobile.css
+   ────────────────────────────────────────────────────────────
+   关键：所有规则由 <html> 上的 .qc-mobile / .qc-narrow 类触发，
+   这两个类由 mobile.js 用「触摸能力 + 物理屏幕尺寸 + matchMedia」
+   综合判断后添加，**不依赖 viewport 宽度**——这样即便浏览器开了
+   「电脑版网站/桌面模式」（会伪装宽屏，让 @media 失效）也能正确适配。
+   桌面 PC（无触摸、大屏）不会加这些类，桌面布局完全不受影响。
+══════════════════════════════════════════════════════════════ */
+
+/* 遮罩元素：默认隐藏，仅手机端打开抽屉时显示 */
+.qc-mobile-backdrop { display: none; }
+
+/* ════════ 手机 / 平板：html.qc-mobile ════════ */
+
+/* ── 侧边栏改为覆盖式抽屉 ── */
+html.qc-mobile .main-wrap { margin-left: 0 !important; }
+
+html.qc-mobile .sidebar {
+  width: 78vw;
+  max-width: 300px;
+  z-index: 300;
+  box-shadow: 4px 0 28px rgba(0, 0, 0, .55);
+  transform: translateX(-105%);              /* 默认隐藏到屏幕外 */
+}
+html.qc-mobile .sidebar:not(.collapsed) { transform: translateX(0); }  /* 打开滑入 */
+
+html.qc-mobile .qc-mobile-backdrop {
+  position: fixed; inset: 0;
+  background: rgba(0, 0, 0, .5);
+  z-index: 250;
+}
+html.qc-mobile body.qc-sidebar-open .qc-mobile-backdrop { display: block; }
+
+/* ── 顶栏 ── */
+html.qc-mobile .topbar { padding: 0 12px; gap: 8px; }
+html.qc-mobile .topbar-title { font-size: 14px; }
+html.qc-mobile .menu-toggle { display: inline-flex; }
+
+html.qc-mobile .topbar-kpis {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  gap: 8px;
+}
+html.qc-mobile .topbar-kpis::-webkit-scrollbar { display: none; }
+html.qc-mobile .kpi-chip { flex: 0 0 auto; min-width: 86px; padding-left: 10px; padding-right: 10px; }
+
+html.qc-mobile .topbar-right { gap: 6px; }
+html.qc-mobile .topbar-right .btn-icon,
+html.qc-mobile .topbar-right .btn-add { padding: 6px 9px; font-size: 12px; }
+
+/* ── 正文内边距收紧 ── */
+html.qc-mobile .page-inner { padding: 12px; gap: 12px; }
+
+/* ── 概要卡 / 图表堆叠 ── */
+html.qc-mobile .cards-row { grid-template-columns: 1fr 1fr; gap: 10px; }
+html.qc-mobile .charts-row { grid-template-columns: 1fr; gap: 12px; }
+html.qc-mobile .chart-card.wide,
+html.qc-mobile .chart-card.full-width { grid-column: span 1; }
+html.qc-mobile .chart-body { height: 220px; }
+html.qc-mobile .chart-body.tall,
+html.qc-mobile .chart-body.risk-body { height: 260px; }
+
+/* ── 工具栏堆叠，搜索框占满 ── */
+html.qc-mobile .toolbar { flex-direction: column; align-items: stretch; gap: 8px; }
+html.qc-mobile .toolbar-left,
+html.qc-mobile .toolbar-right { width: 100%; flex-wrap: wrap; }
+html.qc-mobile .toolbar-right { justify-content: space-between; }
+html.qc-mobile .search-input { width: 100%; flex: 1 1 100%; }
+html.qc-mobile .filter-select,
+html.qc-mobile .filter-date { flex: 1 1 auto; }
+
+/* ── 表格横向滚动 + 触摸惯性 ── */
+html.qc-mobile .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+html.qc-mobile .action-btn { padding: 7px 11px; font-size: 12px; }
+
+/* ── 弹窗近全屏，表单单列 ── */
+html.qc-mobile .modal {
+  width: 100vw; max-width: 100vw;
+  height: 100vh; max-height: 100vh;
+  border-radius: 0;
+}
+html.qc-mobile .modal-body { padding: 14px; }
+html.qc-mobile .form-grid { grid-template-columns: 1fr; gap: 12px; }
+html.qc-mobile .form-group.full { grid-column: span 1; }
+
+/* OCR 区 */
+html.qc-mobile .ocr-drop-zone { padding: 18px 12px; }
+html.qc-mobile .ocr-field-grid { grid-template-columns: 1fr; }
+
+/* 报告页工具栏堆叠 */
+html.qc-mobile .report-toolbar { flex-direction: column; align-items: stretch; gap: 8px; }
+
+/* 防 iOS 聚焦输入框自动放大（字号需 ≥16px） */
+html.qc-mobile .form-input,
+html.qc-mobile .modal input,
+html.qc-mobile .modal select,
+html.qc-mobile .modal textarea,
+html.qc-mobile .search-input,
+html.qc-mobile .filter-select,
+html.qc-mobile .filter-date,
+html.qc-mobile input[type="text"],
+html.qc-mobile input[type="number"],
+html.qc-mobile input[type="date"],
+html.qc-mobile input[type="month"],
+html.qc-mobile input[type="password"],
+html.qc-mobile select,
+html.qc-mobile textarea {
+  font-size: 16px;
+}
+
+/* ════════ 窄屏手机进一步精简：html.qc-narrow ════════ */
+html.qc-narrow .cards-row { grid-template-columns: 1fr; }
+/* 顶栏太窄：隐藏不常用的 PDF / 主题按钮，保留 ☰/标题/KPI/账号/新增 */
+html.qc-narrow .topbar-right .theme-switch,
+html.qc-narrow .topbar-right .btn-icon:not(.btn-add) { display: none; }
+html.qc-narrow .topbar-title { font-size: 13px; }
+html.qc-narrow .chart-body { height: 200px; }

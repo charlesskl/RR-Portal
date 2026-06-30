@@ -67,14 +67,32 @@ function getCellValue(row: ExcelJS.Row, colIndex: number | undefined): unknown {
  * - Formula cells (外箱, 总箱数, 数量) returning { formula, result } — unwrapped to number
  * - Date cells (PO走货期, 接单期) returning JS Date objects — kept as Date
  * - Empty rows (no tomyPO value) are skipped
+ *
+ * @param buffer - Workbook file bytes
+ * @param sheetName - Optional sheet selector. When given, the worksheet is
+ *   resolved by exact name first, then by substring match (e.g. 'KIK' →
+ *   'KIK总排期', 'RRM' → 'RRM总排期'). Throws if no sheet matches.
+ *   When omitted, falls back to the 总排期 / TOMY-PO-column auto-detection.
  */
-export async function parseScheduleExcel(buffer: Buffer): Promise<ScheduleRow[]> {
+export async function parseScheduleExcel(buffer: Buffer, sheetName?: string): Promise<ScheduleRow[]> {
   const workbook = new ExcelJS.Workbook()
   await workbook.xlsx.load(buffer)
 
+  let ws: ExcelJS.Worksheet | undefined
+
+  // Explicit sheet selection: exact name, then substring match
+  if (sheetName) {
+    ws = workbook.getWorksheet(sheetName)
+      ?? workbook.worksheets.find((s) => s.name.includes(sheetName))
+    if (!ws) {
+      const sheetNames = workbook.worksheets.map(s => s.name).join(', ')
+      throw new Error(`Sheet "${sheetName}" not found in workbook (available: ${sheetNames})`)
+    }
+  }
+
   // Try known sheet name aliases in order
   const SHEET_CANDIDATES = ['总排期', '排期', 'Schedule', 'Sheet1']
-  let ws = workbook.getWorksheet('总排期')
+  if (!ws) ws = workbook.getWorksheet('总排期')
   if (!ws) {
     for (const name of SHEET_CANDIDATES) {
       ws = workbook.getWorksheet(name)

@@ -147,19 +147,23 @@ router.post(
       }
     }
 
-    // Process 印尼 schedule Excel
+    // Process 印尼 schedule Excel.
+    // The 印尼 workbook holds two sheets: KIK总排期 (RR02/RRI) and RRM总排期 (RR03/RRM).
     let scheduleIdResult: ProcessResponse['scheduleId'] = null
     let idBuffer: Buffer | null = null
     let idScheduleRows = null
+    let rrmScheduleRows = null
 
     if (scheduleIdFiles.length > 0) {
       const file = scheduleIdFiles[0]
       const displayName = scheduleIdName || fixFilename(file.originalname)
       try {
-        const rows = await parseScheduleExcel(file.buffer)
-        scheduleIdResult = { filename: displayName, status: 'done', rowCount: rows.length }
+        const kikRows = await parseScheduleExcel(file.buffer, 'KIK总排期')
+        const rrmRows = await parseScheduleExcel(file.buffer, 'RRM总排期')
+        scheduleIdResult = { filename: displayName, status: 'done', rowCount: kikRows.length + rrmRows.length }
         idBuffer = file.buffer
-        idScheduleRows = rows
+        idScheduleRows = kikRows
+        rrmScheduleRows = rrmRows
       } catch (err) {
         scheduleIdResult = {
           filename: displayName,
@@ -184,14 +188,21 @@ router.post(
 
       // CRITICAL: Filter POs by factory code BEFORE reconciling (Pitfall 3)
       // All items in a real PO share the same factory code — use items[0]
+      // RR01 = 东莞 (DG); RR02 = 印尼RRI (ID); RR03 = 印尼RRM (RRM).
+      // RRI and RRM share the same 印尼排期 workbook but live on separate sheets
+      // (KIK总排期 / RRM总排期); each reconciles against its own sheet and gets
+      // its own annotated output in its own ZIP folder.
       const dgPOs = poDataList.filter((po) => po.items[0]?.factoryCode === 'RR01')
       const idPOs = poDataList.filter((po) => po.items[0]?.factoryCode === 'RR02')
+      const rrmPOs = poDataList.filter((po) => po.items[0]?.factoryCode === 'RR03')
 
       try {
         let dgResult: ReconciliationResult | null = null
         let idResult: ReconciliationResult | null = null
+        let rrmResult: ReconciliationResult | null = null
         let dgExcel: Buffer | null = null
         let idExcel: Buffer | null = null
+        let rrmExcel: Buffer | null = null
 
         if (dgBuffer !== null && dgScheduleRows !== null) {
           dgResult = reconcile(dgPOs, dgScheduleRows)
@@ -200,17 +211,30 @@ router.post(
         }
 
         if (idBuffer !== null && idScheduleRows !== null) {
+          // RR02 (RRI) → KIK总排期 sheet
           idResult = reconcile(idPOs, idScheduleRows)
-          idExcel = await writeAnnotatedSchedule(idBuffer, idResult, idScheduleRows)
+          idExcel = await writeAnnotatedSchedule(idBuffer, idResult, idScheduleRows, 'KIK总排期')
           response.reconciliationId = buildReconciliationSummary(idResult)
+
+          // RR03 (RRM) → RRM总排期 sheet, separate annotated output
+          if (rrmScheduleRows !== null) {
+            rrmResult = reconcile(rrmPOs, rrmScheduleRows)
+            rrmExcel = await writeAnnotatedSchedule(idBuffer, rrmResult, rrmScheduleRows, 'RRM总排期')
+            response.reconciliationRrm = buildReconciliationSummary(rrmResult)
+          }
         }
 
         // Build summary report and ZIP
-        const summaryText = buildSummaryReport(dgResult ?? emptyResult, idResult ?? emptyResult)
+        const summaryText = buildSummaryReport(
+          dgResult ?? emptyResult,
+          idResult ?? emptyResult,
+          rrmResult ?? emptyResult,
+        )
 
         const zipEntries: Array<{ name: string; buffer: Buffer }> = []
         if (dgExcel) zipEntries.push({ name: 'DG/东莞排期核对结果.xlsx', buffer: dgExcel })
         if (idExcel) zipEntries.push({ name: 'ID/印尼排期核对结果.xlsx', buffer: idExcel })
+        if (rrmExcel) zipEntries.push({ name: 'RRM/印尼排期核对结果.xlsx', buffer: rrmExcel })
 
         // Add original PO PDFs to their factory folders
         for (const po of poBuffers) {
@@ -218,6 +242,8 @@ router.post(
             zipEntries.push({ name: `DG/PO/${po.filename}`, buffer: po.buffer })
           } else if (po.factoryCode === 'RR02') {
             zipEntries.push({ name: `ID/PO/${po.filename}`, buffer: po.buffer })
+          } else if (po.factoryCode === 'RR03') {
+            zipEntries.push({ name: `RRM/PO/${po.filename}`, buffer: po.buffer })
           }
         }
 
@@ -237,6 +263,7 @@ router.post(
         }
         if (dgBuffer !== null) response.reconciliationDg = { ...emptyErrorSummary }
         if (idBuffer !== null) response.reconciliationId = { ...emptyErrorSummary }
+        if (idBuffer !== null) response.reconciliationRrm = { ...emptyErrorSummary }
         response.outputReady = false
       }
     }

@@ -77,6 +77,7 @@ interface ProcessResponse {
   scheduleId: ScheduleResult | null
   reconciliationDg?: ReconciliationSummary
   reconciliationId?: ReconciliationSummary
+  reconciliationRrm?: ReconciliationSummary
   outputReady?: boolean
   sessionId?: string
 }
@@ -248,10 +249,11 @@ function PoClassificationCard({
 
   const dgPOs = result.files.filter((f) => f.data?.items[0]?.factoryCode === 'RR01')
   const idPOs = result.files.filter((f) => f.data?.items[0]?.factoryCode === 'RR02')
+  const rrmPOs = result.files.filter((f) => f.data?.items[0]?.factoryCode === 'RR03')
   const unknownPOs = result.files.filter((f) => {
     if (f.status === 'error') return true
     const fc = f.data?.items[0]?.factoryCode
-    return fc !== 'RR01' && fc !== 'RR02'
+    return fc !== 'RR01' && fc !== 'RR02' && fc !== 'RR03'
   })
 
   return (
@@ -292,10 +294,25 @@ function PoClassificationCard({
         {idPOs.length > 0 && (
           <div>
             <div style={{ fontSize: 13, color: colors.purple, fontWeight: 500, marginBottom: 6 }}>
-              印尼 RR02 · {idPOs.length} 个
+              印尼RRI RR02 · {idPOs.length} 个
             </div>
             <div>
               {idPOs.map((f, i) => (
+                <span key={i} className="file-tag id" title={f.filename}>
+                  {f.filename}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {rrmPOs.length > 0 && (
+          <div>
+            <div style={{ fontSize: 13, color: colors.pink, fontWeight: 500, marginBottom: 6 }}>
+              印尼RRM RR03 · {rrmPOs.length} 个
+            </div>
+            <div>
+              {rrmPOs.map((f, i) => (
                 <span key={i} className="file-tag id" title={f.filename}>
                   {f.filename}
                 </span>
@@ -468,7 +485,7 @@ function App() {
           >
             <Button icon={<FileTextOutlined />}>选择印尼排期表 Excel</Button>
           </Upload>
-          <p className="meta">单文件 · .xlsx 或 .xls · 对应工厂代码 RR02</p>
+          <p className="meta">单文件 · .xlsx 或 .xls · 含两个 sheet：KIK总排期(RR02/RRI)、RRM总排期(RR03/RRM)</p>
         </Card>
       </Section>
 
@@ -509,8 +526,15 @@ function App() {
 
             {result.reconciliationId && (
               <ReconciliationCard
-                title="印尼 (RR02) 核对结果"
+                title="印尼RRI (RR02) 核对结果"
                 reconciliation={result.reconciliationId}
+              />
+            )}
+
+            {result.reconciliationRrm && (
+              <ReconciliationCard
+                title="印尼RRM (RR03) 核对结果"
+                reconciliation={result.reconciliationRrm}
               />
             )}
 

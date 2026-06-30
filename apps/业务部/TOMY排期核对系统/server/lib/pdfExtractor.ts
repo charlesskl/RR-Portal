@@ -128,7 +128,7 @@ function extractCustomerName(text: string): string {
  * Each item block in the text stream looks like:
  *   PARTNO\n \n00-RR\n \nDD Mon YYYY\n \nNNNN\n \nEA
  *
- * After the item block, factory code (RR01/RR02) appears on its own line.
+ * After the item block, factory code (RR01/RR02/RR03) appears on its own line.
  * Carton packing appears as "N EA / MASTER CARTON" or "N SET / MASTER CARTON".
  */
 function extractItems(text: string): POItem[] {
@@ -159,8 +159,8 @@ function extractItems(text: string): POItem[] {
     const segmentEnd = i + 1 < matches.length ? matches[i + 1].index : text.length
     const segment = text.slice(segmentStart, segmentEnd)
 
-    // Extract factory code (RR01 or RR02) from segment
-    const factoryMatch = segment.match(/\n(RR0[12])\n/)
+    // Extract factory code (RR01 东莞 / RR02 印尼RRI / RR03 印尼RRM) from segment
+    const factoryMatch = segment.match(/\n(RR0[123])\n/)
     const factoryCode = factoryMatch ? factoryMatch[1] : 'RR01'
 
     // Extract carton packing from "N EA / MASTER CARTON" or "N SET / MASTER CARTON" pattern

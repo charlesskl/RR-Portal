@@ -1907,6 +1907,12 @@ function _buildIQCCanvas(r) {
           if (!items.length) return '&nbsp;';
           return items.map(v=>`<div style="line-height:7.8px;font-size:6.0px">${v}</div>`).join('');
         }
+        /* 横排 * 连接显示（长*宽*高，带公差），只连非空值 */
+        function _star(...vals) {
+          const items = vals.filter(v=>v!==null&&v!==undefined&&v!=='');
+          if (!items.length) return '&nbsp;';
+          return `<span style="font-size:6.0px">${items.join('*')}</span>`;
+        }
         /* 通用 td 样式：padding 0，自然高度，white-space:normal */
         const BR  = 'border-right:1px solid #222;border-bottom:1px solid #222;';
         const TDB = 'vertical-align:middle;box-sizing:border-box;padding:2px 3px;text-align:center;'+BR;
@@ -1930,17 +1936,17 @@ function _buildIQCCanvas(r) {
           if (mt==='LW') {
             const L=m.lValues||[],W=m.wValues||[];
             return {
-              stdLines: _lines(_stdTol(m.standardL,m.toleranceL),_stdTol(m.standardW,m.toleranceW)),
-              valLines: Array.from({length:8},(_,j)=>_lines(_fmt(L[j]||''),_fmt(W[j]||''))),
-              avgLines: _lines(_ra(L)||'—', _ra(W)||'—'),
+              stdLines: _star(_stdTol(m.standardL,m.toleranceL),_stdTol(m.standardW,m.toleranceW)),
+              valLines: Array.from({length:8},(_,j)=>_star(_fmt(L[j]||''),_fmt(W[j]||''))),
+              avgLines: _star(_ra(L)||'', _ra(W)||''),
             };
           }
           if (mt==='LWH') {
             const L=m.lValues||[],W=m.wValues||[],H=m.hValues||[];
             return {
-              stdLines: _lines(_stdTol(m.standardL,m.toleranceL),_stdTol(m.standardW,m.toleranceW),_stdTol(m.standardH,m.toleranceH)),
-              valLines: Array.from({length:8},(_,j)=>_lines(_fmt(L[j]||''),_fmt(W[j]||''),_fmt(H[j]||''))),
-              avgLines: _lines(_ra(L)||'—', _ra(W)||'—', _ra(H)||'—'),
+              stdLines: _star(_stdTol(m.standardL,m.toleranceL),_stdTol(m.standardW,m.toleranceW),_stdTol(m.standardH,m.toleranceH)),
+              valLines: Array.from({length:8},(_,j)=>_star(_fmt(L[j]||''),_fmt(W[j]||''),_fmt(H[j]||''))),
+              avgLines: _star(_ra(L)||'', _ra(W)||'', _ra(H)||''),
             };
           }
           /* single */
@@ -1956,12 +1962,13 @@ function _buildIQCCanvas(r) {
         const meas=Array.isArray(r.measurements)
           ?r.measurements.filter(m=>m.item||(m.lValues||m.values)?.some(v=>v!==''))
           :[];
-        /* 长/宽/高 同一行内竖排显示（每个测量项目占一行）*/
+        /* 每个测量项目占一行；多维(长宽高)在各单元格内用 * 横排连接，带公差 */
         const rd=meas.slice(0,2).map(m=>{
           const {stdLines,valLines,avgLines}=_dvLines(m);
           const rc=m.result==='FAIL'?'#dc2626':m.result==='PASS'?'#059669':'#000';
+          const _itemLbl = m.item || ((m.measureType==='LW'||m.measureType==='LWH') ? '尺寸' : '&nbsp;');
           return `<tr class="meas-row">
-            <td style="${TDBL}font-size:5.8px">${m.item||'&nbsp;'}</td>
+            <td style="${TDBL}font-size:5.8px">${_itemLbl}</td>
             <td style="${TDB}">${stdLines}</td>
             ${valLines.map(v=>`<td style="${TDB}">${v}</td>`).join('')}
             <td style="${TDB}">${avgLines}</td>

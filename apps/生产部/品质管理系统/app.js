@@ -4275,6 +4275,42 @@ function exportCSV() {
   } catch(e) { showToast('导出失败: ' + e.message, 'error'); }
 }
 
+/* 按「加工厂品质检验明细统计表」格式导出 Excel（沿用验货明细页的日期/搜索筛选）*/
+function exportFactoryExcel() {
+  if (!can('exportData')) { showToast('当前账号无权限执行此操作', 'error'); return; }
+  if (typeof XLSX === 'undefined') { showToast('Excel 引擎未加载，请刷新后重试', 'error'); return; }
+  try {
+    const data = (filteredRecs.length ? filteredRecs : recs())
+      .slice().sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+    if (!data.length) { showToast('当前筛选无数据可导出', 'error'); return; }
+
+    const title   = '加工厂品质检验明细统计表';
+    const headers = ['序号','来货日期','供应商','加工类型','客户','送货单号','货号','产品名称','数量','单数','检验\n结果','不良描述','检验人','备注'];
+    const aoa = [[title], headers];
+    data.forEach((r, i) => {
+      aoa.push([
+        i + 1, r.date || '', r.supplier || '', r.type || '', r.client || '',
+        r.deliveryNo || '', r.productNo || '', r.productName || '',
+        (r.qty != null && r.qty !== '' ? Number(r.qty) : ''), '',
+        r.result || '', r.defect || '', r.qc || '', r.remark || '',
+      ]);
+    });
+
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 13 } }];  /* 标题 A1:N1 */
+    ws['!cols']   = [5.3,9.7,7.8,10.3,10.3,11.5,12,27,7.5,7,7.2,19.3,13,15.5].map(w => ({ wch: w }));
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, '加工厂品质检验明细统计表');
+
+    const from = getVal('filterDateFrom'), to = getVal('filterDateTo');
+    const span = (from || to) ? `_${from || '起始'}至${to || '今'}` : '_全部';
+    XLSX.writeFile(wb, `加工厂品质检验明细统计表${span}.xlsx`);
+    showToast(`✓ 已导出 ${data.length} 条到 Excel`, 'success');
+  } catch (e) { showToast('导出失败: ' + e.message, 'error'); }
+}
+window.exportFactoryExcel = exportFactoryExcel;
+
 /* ════════════════════════════════════════
    §14.5  数据备份与恢复
    ① backupExportJSON   — 导出 JSON 备份

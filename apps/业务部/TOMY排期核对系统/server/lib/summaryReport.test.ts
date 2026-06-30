@@ -107,6 +107,37 @@ describe('buildSummaryReport', () => {
     expect(report).toContain('RR02/印尼')
   })
 
+  it('RR03 (印尼RRM) mismatches and unmatched items appear under the RRM factory label', () => {
+    const rrmResult: ReconciliationResult = {
+      matched: [
+        makeMatchResult({
+          tomyPO: 'T-RRM-003',
+          货号: 'ITEM003',
+          mismatches: [
+            { field: '数量', scheduleValue: 1000, poValue: 999 },
+          ],
+        }),
+      ],
+      unmatchedPOItems: [
+        {
+          tomyPO: 'T-RRM-004',
+          货号: 'ITEM004',
+          sourceFile: 'po-rrm.pdf',
+          poItem: makePOItem({ factoryCode: 'RR03' }),
+          poData: makePOData({ tomyPO: 'T-RRM-004', sourceFile: 'po-rrm.pdf' }),
+        },
+      ],
+      ambiguousPOItems: [],
+      errors: [],
+    }
+    const report = buildSummaryReport(emptyResult(), emptyResult(), rrmResult)
+    expect(report).toContain('T-RRM-003')
+    expect(report).toContain('ITEM003')
+    expect(report).toContain('T-RRM-004')
+    expect(report).toContain('po-rrm.pdf')
+    expect(report).toContain('RR03/印尼RRM')
+  })
+
   it('when both results have zero mismatches and zero unmatched, report shows 共 0 条 for both sections', () => {
     const report = buildSummaryReport(emptyResult(), emptyResult())
     // Should appear twice (once for mismatches section, once for unmatched section)

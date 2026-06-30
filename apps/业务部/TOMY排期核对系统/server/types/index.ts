@@ -2,7 +2,7 @@ export interface POItem {
   货号: string          // Part No.
   PO走货期: string      // Due Date (raw string "18 Mar 2026")
   数量: number          // Quantity
-  factoryCode: string   // "RR01" or "RR02"
+  factoryCode: string   // "RR01" (东莞), "RR02" (印尼RRI) or "RR03" (印尼RRM)
   外箱: number | null   // Carton packing (N EA/SET per MASTER CARTON)
   hasJDLabel: boolean   // true if item segment contains <FC>JDHL-0PL
 }
@@ -60,6 +60,7 @@ export interface ProcessResponse {
   } | null
   reconciliationDg?: ReconciliationSummary
   reconciliationId?: ReconciliationSummary
+  reconciliationRrm?: ReconciliationSummary
   outputReady?: boolean
   sessionId?: string
 }

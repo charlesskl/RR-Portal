@@ -20,9 +20,12 @@ export const colors = {
   dangerSoft: '#faeaea',
   info: '#2f5d8f',
   infoSoft: '#e8effa',
-  // Accent purple for 印尼 RR02 category (distinct from teal primary)
+  // Accent purple for 印尼RRI RR02 category (distinct from teal primary)
   purple: '#6e4a9e',
   purpleSoft: '#f1ebf8',
+  // Accent pink for 印尼RRM RR03 category
+  pink: '#b03a7a',
+  pinkSoft: '#f8ebf2',
 } as const
 
 // AntD 6 ConfigProvider theme — tokens drive the entire component library.

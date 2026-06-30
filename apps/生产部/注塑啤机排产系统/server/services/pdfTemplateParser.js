@@ -203,6 +203,14 @@ function buildColRanges(anchors) {
 // 思路：优先用表头 label 的 x 动态识别列位置（耐 PDF 变种），
 // 失败时回落到经验硬编码（这套已经端到端测准 6 份 PDF）
 function parseTemplateB(items, fullText) {
+  // 多页 PDF：每页单独解析（避免不同页同 y 的 items 被合并）
+  const pages = [...new Set(items.map(it => it.page))];
+  if (pages.length > 1) {
+    const all = [];
+    for (const p of pages) all.push(...parseTemplateB(items.filter(it => it.page === p), fullText));
+    return all;
+  }
+
   // 表头部分提取生产单号（fullText 拼接顺序乱，用宽松 regex 跳过中间字符）
   const orderNoMatch = fullText.match(/生产单号[：:][^A-Z]{0,30}([A-Z]{2,4}\d{4,})/);
   const order_no = orderNoMatch ? orderNoMatch[1] : '';

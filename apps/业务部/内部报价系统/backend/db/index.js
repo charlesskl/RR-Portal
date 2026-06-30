@@ -68,6 +68,9 @@ for (const d of upgradeDepts) {
   }
 }
 
+// 部门显示名修正（幂等）：工程 → 工程/业务
+db.prepare("UPDATE departments SET name_cn = '工程/业务' WHERE code = 'engineering' AND name_cn = '工程'").run();
+
 // 给所有现有报价单补缺失的 section（电子部）
 const allDeptCodes = db.prepare('SELECT code FROM departments').all().map(r => r.code);
 const quotesAll = db.prepare('SELECT id FROM quotes').all();

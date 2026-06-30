@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>单价表次表生成工具</title>
+    <script src="/static/tailwind.js"></script>
+    <style>
+        body { font-family: 'Microsoft YaHei', sans-serif; background: #f0f2f5; }
+        .card { background: white; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+        .val { font-weight: bold; color: #1a73e8; }
+        .drag-area { border: 2px dashed #dadce0; transition: all 0.3s; cursor: pointer; }
+        .drag-area.dragover { border-color: #1a73e8; background: #e8f0fe; }
+        .scan-row { display: flex; align-items: center; gap: 8px; padding: 3px 0; font-size: 13px; }
+        .scan-row label { min-width: 130px; color: #5f6368; }
+        .scan-row .row-num { font-weight: bold; color: #1a73e8; min-width: 50px; }
+        .section { border-left: 3px solid #1a73e8; padding-left: 16px; margin-bottom: 20px; }
+        .section-title { font-size: 14px; font-weight: bold; color: #1a73e8; margin-bottom: 8px; }
+        input[type="number"] { -moz-appearance: textfield; }
+        input::-webkit-outer-spin-button, input::-webkit-inner-spin-button { -webkit-appearance: none; }
+        .result-bar { background: #f8f9fa; border-radius: 8px; padding: 12px 16px; display: flex; flex-wrap: wrap; gap: 16px; align-items: center; }
+        .result-item { display: flex; flex-direction: column; }
+        .result-item .label { font-size: 11px; color: #80868b; }
+        .result-item .value { font-size: 15px; font-weight: bold; color: #1a73e8; }
+        .material-position-sel { max-width: 220px; flex-shrink: 0; }
+    </style>
+</head>
+<body class="min-h-screen p-4">
+    <div class="max-w-3xl mx-auto">
+        <div class="text-center mb-4">
+            <h1 class="text-xl font-bold text-gray-800">单价表次表生成工具</h1>
+        </div>
+
+        <div class="card p-6">
+            <!-- ===== Step 1: 上传Excel ===== -->
+            <div class="section" id="sec1">
+                <div class="section-title">1. 上传主表Excel</div>
+                <div class="drag-area rounded-lg p-4 text-center" id="dropZone" onclick="document.getElementById('fileInput').click()">
+                    <input type="file" id="fileInput" accept=".xls,.xlsx" class="hidden" onchange="uploadFile(this)">
+                    <p class="text-gray-500 text-sm" id="uploadText">拖拽 .xls/.xlsx 文件到此处，或点击选择</p>
+                    <p class="text-xs text-gray-400 mt-1" id="uploadStatus"></p>
+                </div>
+                <!-- Sheet选择 + 识别结果（上传后显示） -->
+                <div id="sheetArea" class="mt-3 hidden">
+                    <div>
+                        <div class="flex items-center justify-between mb-1">
+                            <label class="text-xs text-gray-500">选择Sheet（可多选）</label>
+                            <div class="flex gap-2">
+                                <button onclick="toggleAllSheets(true)" class="text-xs text-blue-500 hover:underline">全选</button>
+                                <button onclick="toggleAllSheets(false)" class="text-xs text-blue-500 hover:underline">取消</button>
+                                <button onclick="toggleScan()" class="text-xs text-blue-500 hover:underline">识别详情</button>
+                            </div>
+                        </div>
+                        <div id="sheetCheckboxList" class="border rounded-lg px-3 py-1 max-h-32 overflow-y-auto"></div>
+                    </div>
+                    <div id="scanResult" class="bg-gray-50 rounded-lg p-3 mt-2 hidden">
+                        <div id="scanRows"></div>
+                    </div>
+                    <div id="autoValuesBar" class="bg-blue-50 rounded-lg p-2 mt-2 text-xs text-gray-600 hidden">
+                        <span class="font-medium text-blue-600">主表信息：</span>
+                        <span id="avInfo"></span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ===== 历史记录 ===== -->
+            <div class="mb-3">
+                <button onclick="toggleHistory()" class="text-xs text-gray-500 hover:text-blue-500" id="historyToggle">历史记录 (0条)</button>
+                <div id="historyPanel" class="hidden bg-gray-50 rounded-lg p-3 mt-1 max-h-48 overflow-y-auto">
+                    <div id="historyList"></div>
+                </div>
+            </div>
+
+            <!-- ===== Sheet标签栏 ===== -->
+            <div class="hidden mb-1" id="sheetTabContainer">
+                <div class="flex items-center gap-1 border-b border-green-200" id="sheetTabBar">
+                </div>
+            </div>
+
+            <!-- ===== 多组标签栏 ===== -->
+            <div class="hidden mb-2" id="groupTabContainer">
+                <div class="flex items-center gap-1 border-b border-gray-200" id="groupTabBar">
+                </div>
+            </div>
+
+            <!-- ===== Step 2: 次表信息 ===== -->
+            <div class="section hidden" id="sec2">
+                <div class="section-title">2. 次表信息</div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="text-xs text-gray-500">新货号名称</label>
+                        <input type="text" id="itemName" class="w-full border rounded-lg px-3 py-2 text-sm" placeholder="如 15780-S002 6PCS/CTN">
+                    </div>
+                    <div>
+                        <label class="text-xs text-gray-500">每箱PCS数</label>
+                        <input type="number" id="pcsPerCarton" step="1" class="w-full border rounded-lg px-3 py-2 text-sm" placeholder="6">
+                    </div>
+                </div>
+                <!-- 行选择：可跳过不需要的标准行 -->
+                <div class="mt-2">
+                    <button onclick="document.getElementById('rowTogglePanel').classList.toggle('hidden')" class="text-xs text-gray-400 hover:text-blue-500">行选择（跳过不需要的行）▾</button>
+                    <div id="rowTogglePanel" class="hidden bg-gray-50 rounded-lg p-2 mt-1 text-xs">
+                        <div id="midRowSkips" class="grid grid-cols-3 gap-1 hidden"></div>
+                        <hr id="midRowDivider" class="my-1 border-gray-300 hidden">
+                        <div class="grid grid-cols-3 gap-1">
+                        <label class="flex items-center gap-1"><input type="checkbox" id="skipTape" class="skip-row-cb"> <span>跳过 Tape Cost</span></label>
+                        <label class="flex items-center gap-1"><input type="checkbox" id="skipLabor" class="skip-row-cb"> <span>跳过 Packing Labor</span></label>
+                        <label class="flex items-center gap-1"><input type="checkbox" id="skipFob40f" class="skip-row-cb"> <span>跳过 40F FOB</span></label>
+                        <label class="flex items-center gap-1"><input type="checkbox" id="skipShipping40f" class="skip-row-cb"> <span>跳过 Shipping 40F</span></label>
+                        <label class="flex items-center gap-1"><input type="checkbox" id="skipFob20f" class="skip-row-cb"> <span>跳过 20F FOB</span></label>
+                        <label class="flex items-center gap-1"><input type="checkbox" id="skipShipping20f" class="skip-row-cb"> <span>跳过 Shipping 20F</span></label>
+                        <label class="flex items-center gap-1"><input type="checkbox" id="skipLcl" class="skip-row-cb"> <span>跳过 LCL</span></label>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ===== Step 3: 纸箱参数 ===== -->
+            <div class="section hidden" id="sec3">
+                <div class="section-title">3. 纸箱</div>
+                <div class="mb-2">
+                    <label class="text-xs text-gray-500">箱型（可多选组合，如天地盖+围板）</label>
+                    <div class="flex flex-wrap gap-x-4 gap-y-1 mt-1">
+                        <label class="flex items-center gap-1 text-sm"><input type="checkbox" class="box-type-cb" value="normal" checked onchange="calculate()"> 普通箱</label>
+                        <label class="flex items-center gap-1 text-sm"><input type="checkbox" class="box-type-cb" value="tiandi" onchange="calculate()"> 天地盖</label>
+                        <label class="flex items-center gap-1 text-sm"><input type="checkbox" class="box-type-cb" value="banyi" onchange="calculate()"> 半亦箱</label>
+                        <label class="flex items-center gap-1 text-sm"><input type="checkbox" class="box-type-cb" value="weiboard" onchange="calculate()"> 围板</label>
+                        <label class="flex items-center gap-1 text-sm"><input type="checkbox" class="box-type-cb" value="mailbox_lr" onchange="calculate()"> 邮包盒</label>
+                    </div>
+                </div>
+                <div class="grid grid-cols-6 gap-2">
+                    <div>
+                        <label class="text-xs text-gray-500">长(cm)</label>
+                        <input type="number" id="boxLength" step="0.1" oninput="calculate()" class="w-full border rounded-lg px-2 py-2 text-sm">
+                    </div>
+                    <div>
+                        <label class="text-xs text-gray-500">宽(cm)</label>
+                        <input type="number" id="boxWidth" step="0.1" oninput="calculate()" class="w-full border rounded-lg px-2 py-2 text-sm">
+                    </div>
+                    <div>
+                        <label class="text-xs text-gray-500">高(cm)</label>
+                        <input type="number" id="boxHeight" step="0.1" oninput="calculate()" class="w-full border rounded-lg px-2 py-2 text-sm">
+                    </div>
+                    <div>
+                        <label class="text-xs text-gray-500">纸种</label>
+                        <input type="text" id="paperName" class="w-full border rounded-lg px-2 py-2 text-sm" placeholder="K3K">
+                    </div>
+                    <div class="col-span-2">
+                        <label class="text-xs text-gray-500">纸价
+                            <select id="paperPriceSelect" onchange="selectPaperPrice()" class="text-xs text-blue-500 border-0 bg-transparent cursor-pointer"><option value="">快选</option></select>
+                        </label>
+                        <div class="flex gap-1">
+                            <input type="number" id="paperPrice" step="0.01" oninput="calculate()" class="flex-1 border rounded-lg px-2 py-2 text-sm" placeholder="1.80">
+                            <button onclick="saveCustomPaperPreset()" class="px-2 py-1 bg-blue-50 text-blue-500 rounded-lg text-xs hover:bg-blue-100 whitespace-nowrap" title="保存当前纸价为常用">保存</button>
+                        </div>
+                        <div id="paperPresetTags" class="flex flex-wrap gap-1 mt-1"></div>
+                    </div>
+                </div>
+                <div class="grid grid-cols-3 gap-2 mt-2">
+                    <div>
+                        <label class="text-xs text-gray-500">胶纸单价(¥)</label>
+                        <input type="number" id="tapePrice" step="0.001" value="0.045" oninput="calculate()" class="w-full border rounded-lg px-2 py-2 text-sm">
+                    </div>
+                    <div>
+                        <label class="text-xs text-gray-500">装箱人工(¥/箱)
+                            <select id="laborPresetSelect" onchange="selectLaborPreset()" class="text-xs text-blue-500 border-0 bg-transparent cursor-pointer"><option value="">快选</option></select>
+                        </label>
+                        <div class="flex gap-0.5">
+                            <input type="number" id="laborCost" step="0.001" oninput="calculate()" class="flex-1 min-w-0 border rounded-lg px-2 py-2 text-sm" placeholder="手动填">
+                            <button onclick="saveLaborPreset()" class="px-1.5 py-1 bg-blue-50 text-blue-500 rounded text-xs hover:bg-blue-100 whitespace-nowrap" title="保存当前值为常用">存</button>
+                            <button onclick="deleteSelectedLaborPreset()" class="px-1.5 py-1 bg-red-50 text-red-400 rounded text-xs hover:bg-red-100 whitespace-nowrap" title="删除快选中选中的项">删</button>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="text-xs text-gray-500">纸箱尺寸描述</label>
+                        <input type="text" id="cartonDesc" class="w-full border rounded-lg px-2 py-2 text-sm" placeholder="46.5*28.5*32.5cm, K3K">
+                    </div>
+                </div>
+                <!-- 纸箱计算结果 -->
+                <div class="result-bar mt-3" id="boxResult">
+                    <div class="result-item"><span class="label">纸箱¥</span><span class="value" id="resBox">--</span></div>
+                    <div class="result-item"><span class="label">胶纸¥</span><span class="value" id="resTape">--</span></div>
+                    <div class="result-item"><span class="label">CBM</span><span class="value" id="resCbm">--</span></div>
+                </div>
+            </div>
+
+            <!-- ===== Step 4: 附加物料 ===== -->
+            <div class="section hidden" id="sec4">
+                <div class="section-title">4. 附加物料（选填）</div>
+
+                <!-- 邮包盒 -->
+                <div class="bg-gray-50 rounded-lg p-3 text-sm mb-2">
+                    <div class="flex items-center gap-3 mb-2 flex-wrap">
+                        <label class="flex items-center gap-1">
+                            <input type="checkbox" id="mailboxEnabled" onchange="calculate()">
+                            <span class="font-medium">邮包盒（普通箱公式）</span>
+                        </label>
+                        <input type="text" id="mailboxName" class="border rounded px-2 py-1 text-xs" value="MAILBOX(1pcs)" placeholder="英文名称(Excel显示)">
+                        <input type="number" id="mailboxQty" value="1" min="1" step="1" class="border rounded px-2 py-1 text-xs w-16" oninput="calculate()">
+                        <span class="text-xs text-gray-400">个/箱</span>
+                        <select id="mailboxPosition" class="material-position-sel border rounded px-1 py-1 text-xs ml-auto"></select>
+                    </div>
+                    <div class="grid grid-cols-4 gap-2">
+                        <div>
+                            <label class="text-xs text-gray-400">长(cm)</label>
+                            <input type="number" id="mailboxL" step="0.1" oninput="calculate()" class="w-full border rounded px-2 py-1 text-xs" placeholder="31">
+                        </div>
+                        <div>
+                            <label class="text-xs text-gray-400">宽(cm)</label>
+                            <input type="number" id="mailboxW" step="0.1" oninput="calculate()" class="w-full border rounded px-2 py-1 text-xs" placeholder="17">
+                        </div>
+                        <div>
+                            <label class="text-xs text-gray-400">高(cm)</label>
+                            <input type="number" id="mailboxH" step="0.1" oninput="calculate()" class="w-full border rounded px-2 py-1 text-xs" placeholder="17">
+                        </div>
+                        <div>
+                            <label class="text-xs text-gray-400">纸价
+                                <select id="mailboxPaperSel" onchange="applyPaperSel(this,'mailboxPaperPrice')" class="text-xs text-blue-500 border-0 bg-transparent cursor-pointer paper-price-sel"><option value="">快选</option></select>
+                            </label>
+                            <input type="number" id="mailboxPaperPrice" step="0.01" oninput="calculate()" class="w-full border rounded px-2 py-1 text-xs" placeholder="1.61">
+                        </div>
+                    </div>
+                    <div class="flex justify-between mt-2">
+                        <input type="text" id="mailboxRemark" class="border rounded px-2 py-1 text-xs flex-1 mr-2" placeholder="备注 如：邮包盒尺寸：31*17*17CM，单坑 *4">
+                        <span class="text-xs font-bold text-blue-600" id="resMailbox">--</span>
+                    </div>
+                </div>
+
+                <!-- 保护卡/平卡 -->
+                <div class="bg-gray-50 rounded-lg p-3 text-sm mb-2">
+                    <div class="flex items-center gap-3 mb-2 flex-wrap">
+                        <label class="flex items-center gap-1">
+                            <input type="checkbox" id="cardEnabled" onchange="calculate()">
+                            <span class="font-medium">保护卡/平卡</span>
+                        </label>
+                        <input type="text" id="cardName" class="border rounded px-2 py-1 text-xs" value="Protection Card" placeholder="英文名称(Excel显示)">
+                        <input type="number" id="cardQty" value="1" min="1" step="1" class="border rounded px-2 py-1 text-xs w-16" oninput="calculate()">
+                        <span class="text-xs text-gray-400">pcs</span>
+                        <select id="cardPosition" class="material-position-sel border rounded px-1 py-1 text-xs ml-auto"></select>
+                    </div>
+                    <div class="grid grid-cols-4 gap-2">
+                        <div>
+                            <label class="text-xs text-gray-400">长(cm)</label>
+                            <input type="number" id="cardL" step="0.1" oninput="calculate()" class="w-full border rounded px-2 py-1 text-xs">
+                        </div>
+                        <div>
+                            <label class="text-xs text-gray-400">宽(cm)</label>
+                            <input type="number" id="cardW" step="0.1" oninput="calculate()" class="w-full border rounded px-2 py-1 text-xs">
+                        </div>
+                        <div>
+                            <label class="text-xs text-gray-400">纸价
+                                <select id="cardPaperSel" onchange="applyPaperSel(this,'cardPaperPrice')" class="text-xs text-blue-500 border-0 bg-transparent cursor-pointer paper-price-sel"><option value="">快选</option></select>
+                            </label>
+                            <input type="number" id="cardPaperPrice" step="0.01" oninput="calculate()" class="w-full border rounded px-2 py-1 text-xs" placeholder="1.3">
+                        </div>
+                        <div class="flex items-end">
+                            <span class="text-xs font-bold text-blue-600" id="resCard">--</span>
+                        </div>
+                    </div>
+                    <input type="text" id="cardRemark" class="border rounded px-2 py-1 text-xs w-full mt-2" placeholder="备注 如：保护卡 31*19cm K3K">
+                </div>
+
+                <!-- 护角 -->
+                <div class="bg-gray-50 rounded-lg p-3 text-sm mb-2">
+                    <div class="flex items-center gap-3 mb-2 flex-wrap">
+                        <label class="flex items-center gap-1">
+                            <input type="checkbox" id="cornerEnabled" onchange="calculate()">
+                            <span class="font-medium">护角</span>
+                        </label>
+                        <input type="text" id="cornerName" class="border rounded px-2 py-1 text-xs" value="Corner Protector" placeholder="英文名称(Excel显示)">
+                        <select id="cornerPosition" class="material-position-sel border rounded px-1 py-1 text-xs ml-auto"></select>
+                    </div>
+                    <div class="grid grid-cols-4 gap-2">
+                        <div>
+                            <label class="text-xs text-gray-400">长(cm)</label>
+                            <input type="number" id="cornerL" step="0.1" oninput="calculate()" class="w-full border rounded px-2 py-1 text-xs">
+                        </div>
+                        <div>
+                            <label class="text-xs text-gray-400">宽(cm)</label>
+                            <input type="number" id="cornerW" step="0.1" oninput="calculate()" class="w-full border rounded px-2 py-1 text-xs">
+                        </div>
+                        <div>
+                            <label class="text-xs text-gray-400">纸价
+                                <select id="cornerPaperSel" onchange="applyPaperSel(this,'cornerPaperPrice')" class="text-xs text-blue-500 border-0 bg-transparent cursor-pointer paper-price-sel"><option value="">快选</option></select>
+                            </label>
+                            <input type="number" id="cornerPaperPrice" step="0.01" oninput="calculate()" class="w-full border rounded px-2 py-1 text-xs" placeholder="1.61">
+                        </div>
+                        <div class="flex items-end">
+                            <span class="text-xs font-bold text-blue-600" id="resCorner">--</span>
+                        </div>
+                    </div>
+                    <input type="text" id="cornerRemark" class="border rounded px-2 py-1 text-xs w-full mt-2" placeholder="备注 如：护角 51*35cm">
+                </div>
+
+                <!-- 打包带 -->
+                <div class="bg-gray-50 rounded-lg p-3 text-sm mb-2">
+                    <div class="flex items-center gap-3 mb-2 flex-wrap">
+                        <label class="flex items-center gap-1">
+                            <input type="checkbox" id="strappingEnabled" onchange="calculate()">
+                            <span class="font-medium">打包带</span>
+                        </label>
+                        <input type="text" id="strappingName" class="border rounded px-2 py-1 text-xs" value="Strapping" placeholder="英文名称(Excel显示)">
+                        <select id="strappingPosition" class="material-position-sel border rounded px-1 py-1 text-xs ml-auto"></select>
+                    </div>
+                    <div class="grid grid-cols-4 gap-2">
+                        <div>
+                            <label class="text-xs text-gray-400">米数</label>
+                            <input type="number" id="strappingMeters" step="0.1" oninput="calculate()" class="w-full border rounded px-2 py-1 text-xs" placeholder="7">
+                        </div>
+                        <div>
+                            <label class="text-xs text-gray-400">单价(¥/米)</label>
+                            <input type="number" id="strappingPrice" step="0.01" value="0.13" oninput="calculate()" class="w-full border rounded px-2 py-1 text-xs">
+                        </div>
+                        <div class="flex items-end col-span-2">
+                            <span class="text-xs font-bold text-blue-600" id="resStrapping">--</span>
+                        </div>
+                    </div>
+                    <input type="text" id="strappingRemark" class="border rounded px-2 py-1 text-xs w-full mt-2" placeholder="备注">
+                </div>
+
+                <!-- 纸滑板 -->
+                <div class="bg-gray-50 rounded-lg p-3 text-sm mb-2">
+                    <div class="flex items-center gap-3 mb-2 flex-wrap">
+                        <label class="flex items-center gap-1">
+                            <input type="checkbox" id="palletEnabled" onchange="calculate()">
+                            <span class="font-medium">纸滑板 (Slip Sheet)</span>
+                        </label>
+                        <input type="text" id="palletName" class="border rounded px-2 py-1 text-xs" value="Slip Sheet" placeholder="英文名称(Excel显示)">
+                        <select id="palletPosition" class="material-position-sel border rounded px-1 py-1 text-xs ml-auto"></select>
+                    </div>
+                    <div class="grid grid-cols-5 gap-2">
+                        <div>
+                            <label class="text-xs text-gray-400">长(cm)</label>
+                            <input type="number" id="palletL" step="0.1" oninput="calculate()" class="w-full border rounded px-2 py-1 text-xs">
+                        </div>
+                        <div>
+                            <label class="text-xs text-gray-400">宽(cm)</label>
+                            <input type="number" id="palletW" step="0.1" oninput="calculate()" class="w-full border rounded px-2 py-1 text-xs">
+                        </div>
+                        <div>
+                            <label class="text-xs text-gray-400">边距(cm)</label>
+                            <input type="number" id="palletMargin" step="0.1" oninput="calculate()" class="w-full border rounded px-2 py-1 text-xs" placeholder="15">
+                        </div>
+                        <div>
+                            <label class="text-xs text-gray-400">单价(¥/m2)</label>
+                            <input type="number" id="palletPrice" step="0.1" value="7.2" oninput="calculate()" class="w-full border rounded px-2 py-1 text-xs">
+                        </div>
+                        <div class="flex items-end">
+                            <span class="text-xs font-bold text-blue-600" id="resPallet">--</span>
+                        </div>
+                    </div>
+                    <input type="text" id="palletRemark" class="border rounded px-2 py-1 text-xs w-full mt-2" placeholder="备注 如：纸滑板 120.5*47.5cm 边距15cm">
+                </div>
+
+                <!-- 通用自定义物料（胶袋、胶钉、吊牌等） -->
+                <div class="bg-yellow-50 rounded-lg p-3 text-sm mb-2">
+                    <div class="flex items-center justify-between mb-2">
+                        <span class="font-medium">其他物料（胶袋/胶钉/吊牌等）</span>
+                        <button onclick="addCustomMaterial()" class="text-xs text-blue-500 hover:underline">+ 添加</button>
+                    </div>
+                    <div id="customMaterialList"></div>
+                    <div class="text-xs text-gray-400 mt-1">💡 位置：选择物料插入次表的位置（默认Carton Cost下方）</div>
+                </div>
+            </div>
+
+            <!-- ===== Step 5: 输出 ===== -->
+            <div class="section hidden" id="sec5">
+                <div class="section-title">5. 生成</div>
+                <div class="flex gap-3 items-end">
+                    <div class="flex-1">
+                        <label class="text-xs text-gray-500">输出方式</label>
+                        <select id="outputMode" class="w-full border rounded-lg px-3 py-2 text-sm" onchange="onOutputModeChange()">
+                            <option value="new_sheet" title="在原文件中创建新Sheet写入次表，可选复制表头行，公式跨Sheet引用主表">新增Sheet — 原文件新tab，跨Sheet引用</option>
+                            <option value="new_file" selected title="生成全新xlsx文件，含目标Sheet及引用Sheet+次表，不修改原文件">改装箱用 — 新文件，保留原表完整</option>
+                            <option value="clone_sheet" title="完整克隆主表全部行和格式到新Sheet，只替换纸箱/胶纸/人工参数，适合同结构不同货号">克隆表 — 完整复制+替换参数</option>
+                            <option value="extract_columns" title="从多列主表中选择部分产品列，直接复制并删除未选中列，公式自动调整">提取列 — 多列表选产品，复制+删列</option>
+                        </select>
+                    </div>
+                    <button onclick="generateSubtable()" id="generateBtn" class="bg-green-600 text-white px-8 py-2 rounded-lg font-bold hover:bg-green-700 transition">
+                        生成次表
+                    </button>
+                </div>
+                <!-- 新Sheet表头行选择（仅new_sheet模式显示） -->
+                <div id="headerRowPanel" class="hidden mt-2 bg-orange-50 rounded-lg p-3">
+                    <div class="flex items-center justify-between mb-1">
+                        <span class="text-xs font-medium text-orange-700">新Sheet表头行（勾选要包含的行）</span>
+                        <div class="flex gap-2">
+                            <button onclick="toggleHeaderRows(true)" class="text-xs text-blue-500 hover:underline">全选</button>
+                            <button onclick="toggleHeaderRows(false)" class="text-xs text-blue-500 hover:underline">全不选</button>
+                        </div>
+                    </div>
+                    <div id="headerRowList" class="space-y-0.5"></div>
+                </div>
+                <!-- 克隆表行选择+名称编辑（仅clone_sheet模式显示） -->
+                <div id="cloneRowPanel" class="hidden mt-2 bg-blue-50 rounded-lg p-3">
+                    <div class="flex items-center justify-between mb-2">
+                        <span class="text-xs font-medium text-blue-700">克隆行选择（勾选要克隆的行，可修改名称）</span>
+                        <div class="flex gap-2">
+                            <button onclick="cloneRowSelectAll(true)" class="text-xs text-blue-500 hover:underline">全选</button>
+                            <button onclick="cloneRowSelectAll(false)" class="text-xs text-blue-500 hover:underline">全不选</button>
+                        </div>
+                    </div>
+                    <div id="cloneRowList" class="space-y-0.5 max-h-64 overflow-y-auto"></div>
+                </div>
+                <!-- 产品列选择（仅extract_columns模式显示） -->
+                <div id="productColPanel" class="hidden mt-2 bg-teal-50 rounded-lg p-3">
+                    <div class="flex items-center justify-between mb-2">
+                        <span class="text-xs font-medium text-teal-700">产品列选择（勾选要保留的产品列）</span>
+                        <div class="flex gap-2">
+                            <button onclick="productColSelectAll(true)" class="text-xs text-blue-500 hover:underline">全选</button>
+                            <button onclick="productColSelectAll(false)" class="text-xs text-blue-500 hover:underline">全不选</button>
+                        </div>
+                    </div>
+                    <div id="productColList" class="space-y-0.5"></div>
+                    <!-- 提取后的参数编辑 -->
+                    <div class="mt-3 pt-3 border-t border-teal-200">
+                        <label class="text-xs font-medium text-teal-700">PRODUCT ITEM# 名称（留空不改）</label>
+                        <input type="text" id="extractItemName" class="w-full border rounded px-2 py-1 text-sm mt-1" placeholder="如 15758D+E+G-S001">
+                    </div>
+                    <div class="text-xs text-gray-400 mt-2">提示：未勾选的产品列将被删除，公式引用自动调整。生成的文件包含所有Sheet。</div>
+                </div>
+                <!-- 克隆表公式编辑器（仅clone_sheet模式显示） -->
+                <div id="formulaEditorPanel" class="hidden mt-2 bg-purple-50 rounded-lg p-3">
+                    <div class="flex items-center justify-between mb-2">
+                        <span class="text-xs font-medium text-purple-700">公式参数编辑（修改数字后实时预览）</span>
+                        <button onclick="resetFormulaEditor()" class="text-xs text-gray-400 hover:text-red-500">重置全部</button>
+                    </div>
+                    <div id="formulaEditorList" class="space-y-2"></div>
+                    <div class="text-xs text-gray-400 mt-2">提示：只需修改要变更的数字，留空或不改则保持原值。纸箱/胶纸/人工行已由上方参数控制。</div>
+                </div>
+            </div>
+
+            <!-- ===== 预览确认 ===== -->
+            <div id="previewArea" class="hidden mt-4">
+                <div class="bg-blue-50 rounded-lg p-4">
+                    <h3 class="font-bold text-blue-700 mb-3">生成预览 - 请确认参数</h3>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-xs border-collapse">
+                            <thead>
+                                <tr class="bg-blue-100">
+                                    <th class="border px-2 py-1 text-left">#</th>
+                                    <th class="border px-2 py-1 text-left">货号名</th>
+                                    <th class="border px-2 py-1 text-right">PCS</th>
+                                    <th class="border px-2 py-1 text-right">箱价(¥)</th>
+                                    <th class="border px-2 py-1 text-right">胶纸(¥)</th>
+                                    <th class="border px-2 py-1 text-right">人工(¥)</th>
+                                    <th class="border px-2 py-1 text-left">物料</th>
+                                    <th class="border px-2 py-1 text-right">CBM</th>
+                                </tr>
+                            </thead>
+                            <tbody id="previewTableBody"></tbody>
+                        </table>
+                    </div>
+                    <div class="mt-2 text-xs text-gray-500" id="previewOutputMode"></div>
+                    <div class="flex gap-3 mt-3 justify-end">
+                        <button onclick="hidePreview()" class="px-4 py-2 border rounded-lg text-sm hover:bg-gray-100">返回修改</button>
+                        <button onclick="confirmGenerate()" id="confirmBtn" class="bg-green-600 text-white px-6 py-2 rounded-lg font-bold hover:bg-green-700 text-sm">确认生成</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ===== 复制参数弹窗 ===== -->
+            <div id="copyDialog" class="hidden fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
+                <div class="bg-white rounded-lg p-5 shadow-xl max-w-sm w-full mx-4">
+                    <h3 class="font-bold text-sm mb-2">复制参数</h3>
+                    <p class="text-xs text-gray-500 mb-3">将 <span id="copyDialogSrc" class="font-bold text-blue-600"></span> 的参数复制到：</p>
+                    <div id="copyDialogTargets" class="space-y-1 mb-4 text-sm"></div>
+                    <div class="flex gap-2 justify-end">
+                        <button onclick="hideCopyDialog()" class="px-3 py-1.5 border rounded text-sm hover:bg-gray-100">取消</button>
+                        <button onclick="executeCopy()" class="px-3 py-1.5 bg-orange-500 text-white rounded text-sm hover:bg-orange-600">确认复制</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ===== 下载成功 ===== -->
+            <div id="successArea" class="hidden mt-4">
+                <div class="bg-green-50 rounded-lg p-4 text-center">
+                    <p class="text-green-700 font-bold mb-2">次表生成成功！</p>
+                    <a id="downloadLink" href="#" class="inline-block bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700">下载Excel</a>
+                    <button onclick="location.reload()" class="block mx-auto mt-2 text-sm text-gray-500 hover:text-gray-700">重新开始</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>

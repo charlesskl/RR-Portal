@@ -1905,13 +1905,13 @@ function _buildIQCCanvas(r) {
         function _lines(...vals) {
           const items = vals.filter(v=>v!==null&&v!==undefined&&v!=='');
           if (!items.length) return '&nbsp;';
-          return items.map(v=>`<div style="line-height:7.8px;font-size:6.0px">${v}</div>`).join('');
+          return items.map(v=>`<div style="line-height:11px;font-size:9px">${v}</div>`).join('');
         }
         /* 横排 * 连接显示（长*宽*高，带公差），只连非空值 */
         function _star(...vals) {
           const items = vals.filter(v=>v!==null&&v!==undefined&&v!=='');
           if (!items.length) return '&nbsp;';
-          return `<span style="font-size:6.0px">${items.join('*')}</span>`;
+          return `<span style="font-size:9px">${items.join('*')}</span>`;
         }
         /* 通用 td 样式：padding 0，自然高度，white-space:normal */
         const BR  = 'border-right:1px solid #222;border-bottom:1px solid #222;';
@@ -1929,7 +1929,7 @@ function _buildIQCCanvas(r) {
             const vs=[...(m.values||[]),...Array(8).fill('')].slice(0,8);
             return {
               stdLines: _lines(m.standard||'P/F'),
-              valLines: vs.map(v=>v?`<div style="line-height:7.8px;font-size:6.0px">${v}</div>`:'&nbsp;'),
+              valLines: vs.map(v=>v?`<div style="line-height:11px;font-size:9px">${v}</div>`:'&nbsp;'),
               avgLines: _lines('—'),
             };
           }
@@ -1954,7 +1954,7 @@ function _buildIQCCanvas(r) {
           const rawAvg=m.avg||_ra(m.values||[])||'—';
           return {
             stdLines: _lines(_stdTol(m.standard,m.tolerance)||m.standard||''),
-            valLines: vs.map(v=>v?`<div style="line-height:7.8px;font-size:6.0px">${v}</div>`:'&nbsp;'),
+            valLines: vs.map(v=>v?`<div style="line-height:11px;font-size:9px">${v}</div>`:'&nbsp;'),
             avgLines: _lines(rawAvg==='—'?'—':_fmt(rawAvg)),
           };
         }
@@ -1968,11 +1968,11 @@ function _buildIQCCanvas(r) {
           const rc=m.result==='FAIL'?'#dc2626':m.result==='PASS'?'#059669':'#000';
           const _itemLbl = m.item || ((m.measureType==='LW'||m.measureType==='LWH') ? '尺寸' : '&nbsp;');
           return `<tr class="meas-row">
-            <td style="${TDBL}font-size:5.8px">${_itemLbl}</td>
+            <td style="${TDBL}font-size:9px">${_itemLbl}</td>
             <td style="${TDB}">${stdLines}</td>
             ${valLines.map(v=>`<td style="${TDB}">${v}</td>`).join('')}
             <td style="${TDB}">${avgLines}</td>
-            <td style="${TDB}font-size:6.5px;font-weight:700;color:${rc}">${m.result||'&nbsp;'}</td>
+            <td style="${TDB}font-size:9.5px;font-weight:700;color:${rc}">${m.result||'&nbsp;'}</td>
           </tr>`;
         });
         while(rd.length<2) rd.push(emptyRow);

@@ -1956,40 +1956,18 @@ function _buildIQCCanvas(r) {
         const meas=Array.isArray(r.measurements)
           ?r.measurements.filter(m=>m.item||(m.lValues||m.values)?.some(v=>v!==''))
           :[];
-        /* 每个测量项目按维度拆成独立行：LWH→长/宽/高 三行，LW→长/宽 两行，single/PF→一行
-           不再把多维值竖排堆进同一格 */
-        const DTD = TDB+'height:16px;';
-        function _measRows(m){
-          const mt=m.measureType||'single';
+        /* 长/宽/高 同一行内竖排显示（每个测量项目占一行）*/
+        const rd=meas.slice(0,2).map(m=>{
+          const {stdLines,valLines,avgLines}=_dvLines(m);
           const rc=m.result==='FAIL'?'#dc2626':m.result==='PASS'?'#059669':'#000';
-          const cell=v=>(v===''||v==null)?'&nbsp;':`<span style="font-size:6.0px">${v}</span>`;
-          const mk=(label,std,vals,avg,showRes)=>{
-            const vs=[...(vals||[]),...Array(8).fill('')].slice(0,8).map(v=>v!==''?_fmt(v):'');
-            return `<tr class="meas-row">
-              <td style="${DTD}font-size:5.8px">${label||'&nbsp;'}</td>
-              <td style="${DTD}">${cell(std)}</td>
-              ${vs.map(v=>`<td style="${DTD}">${cell(v)}</td>`).join('')}
-              <td style="${DTD}">${cell(avg)}</td>
-              <td style="${DTD}font-size:6.5px;font-weight:700;color:${rc}">${showRes?(m.result||'&nbsp;'):'&nbsp;'}</td>
-            </tr>`;
-          };
-          if(mt==='LW'||mt==='LWH'){
-            const dims=[['长 L',m.standardL,m.toleranceL,m.lValues],['宽 W',m.standardW,m.toleranceW,m.wValues]];
-            if(mt==='LWH') dims.push(['高 H',m.standardH,m.toleranceH,m.hValues]);
-            return dims.map((d,i)=>{
-              const lbl=(m.item?m.item+' ':'')+d[0];
-              const a=_ra(d[3]||[]);
-              return mk(lbl,_stdTol(d[1],d[2]),d[3],a==null?'—':a,i===0);
-            });
-          }
-          if(mt==='PF'){
-            return [mk(m.item||'',m.standard||'P/F',(m.values||[]).map(v=>v||''),'—',true)];
-          }
-          const avg=m.avg||_ra(m.values||[])||'—';
-          return [mk(m.item||'',_stdTol(m.standard,m.tolerance)||m.standard||'',(m.values||[]),avg==='—'?'—':_fmt(avg),true)];
-        }
-        let rd=[];
-        meas.forEach(m=>{ rd=rd.concat(_measRows(m)); });
+          return `<tr class="meas-row">
+            <td style="${TDBL}font-size:5.8px">${m.item||'&nbsp;'}</td>
+            <td style="${TDB}">${stdLines}</td>
+            ${valLines.map(v=>`<td style="${TDB}">${v}</td>`).join('')}
+            <td style="${TDB}">${avgLines}</td>
+            <td style="${TDB}font-size:6.5px;font-weight:700;color:${rc}">${m.result||'&nbsp;'}</td>
+          </tr>`;
+        });
         while(rd.length<2) rd.push(emptyRow);
         return rd.join('');
       })()}

@@ -543,7 +543,7 @@ def hy_submit_selection():
 def hy_export_only():
     """仅生成分类Excel，不写入排期。ambiguous货号放入所有匹配sheet。"""
     from hy_schedule import _extract_header, _prepare_line_data, \
-        _item_upper, _generate_new_excel
+        _item_upper, _generate_new_excel, _clean_cn_name
 
     data = request.json or {}
     session_id = data.get('session_id')
@@ -593,7 +593,7 @@ def hy_export_only():
         ln_data = _prepare_line_data(order, order['lines'][li], hdr['ship_dt'], hdr['full_note'],
                                      wb_name=nl['file'])
         item_base = re.match(r'(\d+[A-Za-z]*\d*)', _item_upper(nl['item']))
-        cn_name = cn_names.get(item_base.group(1).upper(), '') if item_base else ''
+        cn_name = _clean_cn_name(cn_names.get(item_base.group(1).upper(), '') if item_base else '')
         _has_outer = bool(ln_data['outer_qty'])
         _has_price = bool(ln_data['price'])
         new_rows.append({
@@ -619,7 +619,7 @@ def hy_export_only():
         ln_data = _prepare_line_data(order, order['lines'][li], hdr['ship_dt'], hdr['full_note'],
                                      wb_name=m['file'])
         item_base = re.match(r'(\d+[A-Za-z]*\d*)', _item_upper(m['item']))
-        cn_name = cn_names.get(item_base.group(1).upper(), '') if item_base else ''
+        cn_name = _clean_cn_name(cn_names.get(item_base.group(1).upper(), '') if item_base else '')
         _has_outer = bool(ln_data['outer_qty'])
         _has_price = bool(ln_data['price'])
         new_rows.append({
@@ -644,7 +644,7 @@ def hy_export_only():
         ln_data = _prepare_line_data(order, order['lines'][li], hdr['ship_dt'], hdr['full_note'],
                                      wb_name='')
         item_base = re.match(r'(\d+[A-Za-z]*\d*)', _item_upper(uk['item']))
-        cn_name = cn_names.get(item_base.group(1).upper(), '') if item_base else ''
+        cn_name = _clean_cn_name(cn_names.get(item_base.group(1).upper(), '') if item_base else '')
         _has_outer = bool(ln_data['outer_qty'])
         _has_price = bool(ln_data['price'])
         new_rows.append({

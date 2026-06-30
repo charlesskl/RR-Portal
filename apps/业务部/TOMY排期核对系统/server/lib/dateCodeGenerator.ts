@@ -8,22 +8,22 @@ const MONTH_LETTERS = 'ABCDEFGHIJKL'
  * Generates a production date code for a PO item.
  *
  * Algorithm:
- * 1. Validate factoryCode matches RR01 or RR02; return null otherwise
+ * 1. Validate factoryCode matches RR01, RR02 or RR03; return null otherwise
  * 2. Parse the PO走货期 string (e.g., "15 May 2026") using date-fns
  * 3. Subtract one calendar month (subMonths handles end-of-month clamping)
  * 4. Roll back to nearest prior workday if date falls on weekend/public holiday
  * 5. Format as: monthLetter + day + 2-digit-year + factoryCode
  *
  * @param poZouHuoQiStr - PO走货期 string in "d MMM yyyy" format, e.g. "15 May 2026"
- * @param factoryCode - Factory code, must be "RR01" or "RR02"
+ * @param factoryCode - Factory code, must be "RR01", "RR02" or "RR03"
  * @returns Date code string (e.g., "D1526RR02") or null if inputs are invalid
  */
 export function generateDateCode(
   poZouHuoQiStr: string,
   factoryCode: string
 ): string | null {
-  // Validate factory code — only RR01 and RR02 are recognized
-  if (!factoryCode.match(/^RR0[12]$/)) return null
+  // Validate factory code — only RR01 (东莞), RR02 (印尼RRI) and RR03 (印尼RRM) are recognized
+  if (!factoryCode.match(/^RR0[123]$/)) return null
 
   // Parse date string — return null for empty or unparseable input
   if (!poZouHuoQiStr) return null

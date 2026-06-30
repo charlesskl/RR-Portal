@@ -53,6 +53,12 @@ describe('generateDateCode', () => {
     expect(generateDateCode('01 Nov 2026', 'RR02')).toBe('I3026RR02')
   })
 
+  // RR03 (印尼RRM) is a recognized factory code
+  it('returns D1526RR03 for 15 May 2026 with RR03', () => {
+    // Apr 15, 2026 is a Wednesday → workday → use as-is; D = April, factory=RR03
+    expect(generateDateCode('15 May 2026', 'RR03')).toBe('D1526RR03')
+  })
+
   // DATE-01: Unknown factory code returns null
   it('returns null for unknown factory code', () => {
     expect(generateDateCode('15 May 2026', 'XX99')).toBeNull()

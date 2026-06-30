@@ -69,14 +69,26 @@ const YELLOW_FILL: ExcelJS.FillPattern = {
 export async function writeAnnotatedSchedule(
   scheduleBuffer: Buffer,
   result: ReconciliationResult,
-  scheduleRows: ScheduleRow[]
+  scheduleRows: ScheduleRow[],
+  sheetName?: string
 ): Promise<Buffer> {
   // Load the original workbook
   const workbook = new ExcelJS.Workbook()
   await workbook.xlsx.load(scheduleBuffer)
 
-  const ws = workbook.getWorksheet('总排期')
-  if (!ws) throw new Error('Sheet 总排期 not found in workbook')
+  // Resolve target sheet: explicit selector (exact, then substring), else 总排期
+  let ws: ExcelJS.Worksheet | undefined
+  if (sheetName) {
+    ws = workbook.getWorksheet(sheetName)
+      ?? workbook.worksheets.find((s) => s.name.includes(sheetName))
+    if (!ws) {
+      const sheetNames = workbook.worksheets.map(s => s.name).join(', ')
+      throw new Error(`Sheet "${sheetName}" not found in workbook (available: ${sheetNames})`)
+    }
+  } else {
+    ws = workbook.getWorksheet('总排期')
+    if (!ws) throw new Error('Sheet 总排期 not found in workbook')
+  }
 
   // Build column map from header row
   const headerRow = ws.getRow(1)

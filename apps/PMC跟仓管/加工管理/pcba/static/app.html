@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>77794 PCBA 系统</title>
+<link rel="stylesheet" href="/static/style.css?v=2">
+</head>
+<body>
+<header>
+  <span class="title">77794 PCBA 主板系统</span>
+  <span class="spacer"></span>
+  <span id="who"></span>
+  <button id="logoutBtn" onclick="logout()">退出</button>
+</header>
+<nav>
+  <button class="tab-btn" data-tab="entry" onclick="showTab('entry')">录入</button>
+  <button class="tab-btn" data-tab="summary" onclick="showTab('summary')">汇总</button>
+  <button class="tab-btn" id="matTabBtn" data-tab="materials" onclick="showTab('materials')" style="display:none">物料管理</button>
+  <button class="tab-btn" id="usersTabBtn" data-tab="users" onclick="showTab('users')" style="display:none">用户管理</button>
+</nav>
+
+<section id="entry" class="tab">
+  <h3>录入流水</h3>
+  <div class="form-row">
+    <select id="recType" onchange="onTypeChange()">
+      <option value="inbound_raw">来料入仓（登信）</option>
+      <option value="issue">领料</option>
+      <option value="finished">成品入仓</option>
+    </select>
+    <select id="locationId"></select>
+    <select id="material" title="物料名称"></select>
+    <input id="recDate" type="date" title="日期">
+    <input id="docNo" placeholder="单据编号">
+    <input id="qty" type="number" placeholder="数量">
+    <input id="remark" placeholder="备注">
+    <button id="submitBtn" class="btn-primary" onclick="saveRecord()">提交</button>
+    <button id="cancelBtn" class="btn-ghost" onclick="cancelEdit()" style="display:none">取消修改</button>
+    <span id="editBanner" class="edit-banner"></span>
+  </div>
+  <p id="entryErr" class="err"></p>
+  <table id="recTable"><thead><tr>
+    <th>类型</th><th>物料名称</th><th>日期</th><th>单据编号</th>
+    <th>数量</th><th>备注</th><th>录入人</th><th>操作</th>
+  </tr></thead><tbody></tbody></table>
+</section>
+
+<section id="summary" class="tab" style="display:none">
+  <h3>汇总 <button class="btn-primary btn-sm" onclick="exportExcel()">导出 Excel</button></h3>
+  <table id="sumTable"></table>
+</section>
+
+<section id="materials" class="tab" style="display:none">
+  <h3>物料管理</h3>
+  <div class="form-row">
+    <input id="newMaterial" placeholder="物料名称">
+    <button class="btn-primary" onclick="createMaterial()">新增物料</button>
+  </div>
+  <p id="matErr" class="err"></p>
+  <table id="matTable"><thead><tr><th>物料名称</th><th>操作</th></tr></thead><tbody></tbody></table>
+</section>
+
+<section id="users" class="tab" style="display:none">
+  <h3>用户管理</h3>
+  <div class="form-row">
+    <input id="newUser" placeholder="账号">
+    <input id="newPw" placeholder="密码(≥6位)">
+    <select id="newRole"><option value="operator">录入员</option><option value="admin">管理员</option></select>
+    <button class="btn-primary" onclick="createUser()">新增用户</button>
+  </div>
+  <p id="userErr" class="err"></p>
+  <table id="userTable"><thead><tr><th>账号</th><th>角色</th><th>创建时间</th></tr></thead><tbody></tbody></table>
+</section>
+
+<script src="/static/app.js?v=5"></script>
+</body>
+</html>

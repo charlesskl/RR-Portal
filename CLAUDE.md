@@ -209,6 +209,7 @@ curl http://localhost:<port>/health
 | huadeng 华登包材管理 | Flask | 5007 | /huadeng/ |
 | huadeng-maorong 华登毛绒仓库 | Flask | 5009 | /huadeng-maorong/ |
 | c-store 华登C仓库 | Flask | 5010 | /c-store/ |
+| cpg 加工管理 (77794 PCBA) | FastAPI | 5011 | /cpg/ |
 | hy-schedule-system ZURU河源排期入单 | Flask | 5008 | /hy-schedule/ |
 | baojia 报价系统 | Node.js | 3007 | /baojia/ |
 | qa-weekly-report QA测试报告周结系统 | Node.js/React | 3210 | /qa-weekly-report/ |
@@ -462,6 +463,7 @@ const data = JSON.parse(fs.readFileSync('data/data.json'));
 | huadeng | 华登包材管理 | PMC跟仓管 | Standalone (Python/Flask) | /huadeng/ | — |
 | huadeng-maorong | 华登毛绒仓库 | PMC跟仓管 | Standalone (Python/Flask) | /huadeng-maorong/ | — |
 | c-store | 华登C仓库 | PMC跟仓管 | Standalone (Python/Flask) | /c-store/ | — |
+| cpg | 加工管理 (77794 PCBA) | PMC跟仓管 | Standalone (Python/FastAPI, SQLite + 自有账号登录) | /cpg/ | — |
 | hy-schedule-system | ZURU河源排期入单 | 业务部 | Standalone (Python/Flask) | /hy-schedule/ | https://github.com/hanson678/hy-schedule-system |
 | baojia | 报价系统 | 业务部 | Standalone (Node.js) | /baojia/ | — |
 | qa-weekly-report | QA测试报告周结系统 | QA部 | Standalone (Node.js/React + exceljs) | /qa-weekly-report/ | — |

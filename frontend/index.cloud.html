@@ -274,6 +274,12 @@
                 <span class="plugin-name">华登C仓库</span>
               </div>
             </div>
+            <div class="plugin-item">
+              <div class="plugin-info">
+                <div class="plugin-dot gray" id="cpgDot"></div>
+                <span class="plugin-name">加工管理</span>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -745,7 +751,7 @@
       <div class="dept-icon pmc" style="width:40px;height:40px;font-size:18px;">&#128230;</div>
       PMC跟仓管
     </div>
-    <div class="page-subtitle">采购订单 · 成品核对 · 配色库存 · 华登包材 · 华登毛绒仓库 · 华登C仓库</div>
+    <div class="page-subtitle">采购订单 · 成品核对 · 配色库存 · 华登包材 · 华登毛绒仓库 · 华登C仓库 · 加工管理</div>
 
     <div class="detail-plugin-card">
       <div class="detail-plugin-left">
@@ -871,6 +877,26 @@
         <a href="/c-store/" target="_blank" class="btn btn-primary">打开系统</a>
       </div>
     </div>
+
+    <div class="detail-plugin-card">
+      <div class="detail-plugin-left">
+        <div class="detail-plugin-icon" style="background:linear-gradient(135deg,#0ea5e9,#0369a1);">&#128268;</div>
+        <div>
+          <div class="detail-plugin-name">加工管理</div>
+          <div class="detail-plugin-desc">77794 唱机 PCBA 主板物料流转：录入来料入仓 / 领料 / 成品入仓流水，自动汇总各加工点应存与来料仓余额，支持导出 Excel（目前仅限 77794）</div>
+          <div class="feature-grid">
+            <div class="feature-tag">&#128230; 来料 / 领料 / 成品</div>
+            <div class="feature-tag">&#128202; 加工点应存汇总</div>
+            <div class="feature-tag">&#128229; Excel 导出</div>
+            <div class="feature-tag">&#128274; 账号 + 角色权限</div>
+          </div>
+        </div>
+      </div>
+      <div class="detail-plugin-right">
+        <div class="detail-plugin-status"><div class="plugin-dot gray" id="cpgDetailDot"></div> 检查中...</div>
+        <a href="/cpg/" target="_blank" class="btn btn-primary">打开系统</a>
+      </div>
+    </div>
   </div>
 
 
@@ -958,6 +984,7 @@ async function checkHealth() {
       { name: 'huadeng', url: '/huadeng/health', dot: 'huadengDot', detailDot: 'huadengDetailDot' },
       { name: 'huadengMaorong', url: '/huadeng-maorong/health', dot: 'huadengMaorongDot', detailDot: 'huadengMaorongDetailDot' },
       { name: 'cStore', url: '/c-store/health', dot: 'cStoreDot', detailDot: 'cStoreDetailDot' },
+      { name: 'cpg', url: '/cpg/health', dot: 'cpgDot', detailDot: 'cpgDetailDot' },
       { name: 'qaWeekly', url: '/qa-weekly-report/api/health', dot: 'qaWeeklyDot', detailDot: 'qaWeeklyDetailDot' },
     ];
     var healthy = 0;

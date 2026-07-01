@@ -1,0 +1,167 @@
+:root {
+  --primary: #2563eb;
+  --primary-dark: #1d4ed8;
+  --danger: #dc2626;
+  --bg: #f1f5f9;
+  --card: #ffffff;
+  --border: #e2e8f0;
+  --text: #1e293b;
+  --muted: #64748b;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  font-family: "Microsoft YaHei", "Segoe UI", system-ui, sans-serif;
+  margin: 0;
+  color: var(--text);
+  background: var(--bg);
+}
+
+/* ---------- Header ---------- */
+header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: linear-gradient(90deg, #1e3a8a, #2563eb);
+  color: #fff;
+  padding: 14px 24px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .12);
+}
+header .title { font-size: 18px; font-weight: 700; letter-spacing: .5px; }
+header .spacer { flex: 1; }
+header #who { opacity: .95; font-size: 14px; }
+
+/* ---------- Nav tabs ---------- */
+nav {
+  display: flex;
+  gap: 6px;
+  padding: 12px 24px 0;
+  background: var(--bg);
+}
+.tab-btn {
+  border: none;
+  background: #e2e8f0;
+  color: var(--muted);
+  padding: 9px 18px;
+  border-radius: 8px 8px 0 0;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  transition: background .15s, color .15s;
+}
+.tab-btn:hover { background: #cbd5e1; }
+.tab-btn.active { background: var(--card); color: var(--primary); box-shadow: 0 -2px 6px rgba(0,0,0,.05); }
+
+/* ---------- Section cards ---------- */
+.tab {
+  margin: 0 24px 24px;
+  padding: 20px 24px;
+  background: var(--card);
+  border-radius: 0 10px 10px 10px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, .06);
+}
+.tab h3 {
+  margin: 0 0 16px;
+  font-size: 17px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* ---------- Forms ---------- */
+.form-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 16px;
+  align-items: center;
+}
+.form-row input,
+.form-row select {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 14px;
+  outline: none;
+  transition: border-color .15s, box-shadow .15s;
+  background: #fff;
+}
+.form-row input:focus,
+.form-row select:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, .15);
+}
+
+/* ---------- Buttons ---------- */
+button {
+  cursor: pointer;
+  font-size: 14px;
+  border: none;
+  border-radius: 6px;
+  padding: 8px 16px;
+  font-weight: 600;
+  transition: background .15s, opacity .15s;
+}
+.btn-primary { background: var(--primary); color: #fff; }
+.btn-primary:hover { background: var(--primary-dark); }
+.btn-ghost { background: #e2e8f0; color: var(--text); }
+.btn-ghost:hover { background: #cbd5e1; }
+.btn-sm { padding: 5px 12px; font-size: 13px; }
+.btn-danger { background: #fee2e2; color: var(--danger); }
+.btn-danger:hover { background: #fecaca; }
+.btn-edit { background: #dbeafe; color: var(--primary-dark); margin-right: 6px; }
+.btn-edit:hover { background: #bfdbfe; }
+#logoutBtn { background: rgba(255,255,255,.18); color: #fff; }
+#logoutBtn:hover { background: rgba(255,255,255,.3); }
+
+/* ---------- Tables ---------- */
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th, td {
+  border-bottom: 1px solid var(--border);
+  padding: 10px 12px;
+  text-align: right;
+}
+th:first-child, td:first-child { text-align: left; }
+th {
+  background: #f8fafc;
+  color: var(--muted);
+  font-weight: 600;
+  border-bottom: 2px solid var(--border);
+  white-space: nowrap;
+}
+tbody tr:hover { background: #f8fafc; }
+tr.subtotal { font-weight: 700; background: #fefce8; }
+tr.subtotal:hover { background: #fef9c3; }
+
+.err { color: var(--danger); font-size: 13px; min-height: 18px; margin: 4px 0; }
+.edit-banner { color: var(--primary-dark); font-weight: 600; font-size: 13px; }
+
+/* ---------- Login ---------- */
+.login-box {
+  max-width: 320px;
+  margin: 120px auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 32px;
+  background: var(--card);
+  border-radius: 12px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .12);
+}
+.login-box h2 { margin: 0 0 8px; text-align: center; color: var(--primary); }
+.login-box input {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 15px;
+  outline: none;
+}
+.login-box input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(37,99,235,.15); }
+.login-box button {
+  padding: 11px;
+  background: var(--primary);
+  color: #fff;
+  font-size: 15px;
+}
+.login-box button:hover { background: var(--primary-dark); }

@@ -4299,6 +4299,26 @@ function exportFactoryExcel() {
     const ws = XLSX.utils.aoa_to_sheet(aoa);
     ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 13 } }];  /* 标题 A1:N1 */
     ws['!cols']   = [5.3,9.7,7.8,10.3,10.3,11.5,12,27,7.5,7,7.2,19.3,13,15.5].map(w => ({ wch: w }));
+    ws['!rows']   = [{ hpt: 24 }, { hpt: 22 }];  /* 标题行 / 表头行高 */
+
+    /* ── 样式：全单元格黑框 + 标题居中加粗 + 表头加粗底色（需 xlsx-js-style）── */
+    const thin   = { style: 'thin', color: { rgb: '000000' } };
+    const border = { top: thin, bottom: thin, left: thin, right: thin };
+    const leftCols = { 7: 1, 11: 1 };  /* 产品名称(H)、不良描述(L) 左对齐，其余居中 */
+    for (let R = 0; R < aoa.length; R++) {
+      for (let C = 0; C < 14; C++) {
+        const addr = XLSX.utils.encode_cell({ r: R, c: C });
+        let cell = ws[addr];
+        if (!cell) cell = ws[addr] = { t: 's', v: '' };
+        if (R === 0) {
+          cell.s = { font: { bold: true, sz: 14 }, alignment: { horizontal: 'center', vertical: 'center' }, border: border };
+        } else if (R === 1) {
+          cell.s = { font: { bold: true, sz: 10 }, alignment: { horizontal: 'center', vertical: 'center', wrapText: true }, fill: { patternType: 'solid', fgColor: { rgb: 'D9E1F2' } }, border: border };
+        } else {
+          cell.s = { font: { sz: 10 }, alignment: { horizontal: leftCols[C] ? 'left' : 'center', vertical: 'center' }, border: border };
+        }
+      }
+    }
 
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, '加工厂品质检验明细统计表');

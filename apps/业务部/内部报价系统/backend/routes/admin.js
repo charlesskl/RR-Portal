@@ -63,6 +63,20 @@ router.post('/users', (req, res) => {
   }
 });
 
+// PUT /api/admin/users/:id/role  { role } — 改角色并按新角色模板重置权限
+router.put('/users/:id/role', (req, res) => {
+  const id = Number(req.params.id);
+  const { role } = req.body || {};
+  if (!['staff', 'supervisor', 'admin'].includes(role)) return res.status(400).json({ error: 'role 非法' });
+  const u = db.prepare('SELECT dept, username FROM users WHERE id = ?').get(id);
+  if (!u) return res.status(404).json({ error: '用户不存在' });
+  db.prepare('UPDATE users SET role = ? WHERE id = ?').run(role, id);
+  applyTemplate(id, u.dept, role);  // 按新角色模板重置权限
+  db.prepare(`INSERT INTO audit_log (dept, actor, action, detail) VALUES (?, ?, 'change_role', ?)`)
+    .run(u.dept, req.user.username, `${u.username} -> ${role}`);
+  res.json({ ok: true });
+});
+
 // POST /api/admin/users/:id/reset-password  { password }
 router.post('/users/:id/reset-password', (req, res) => {
   const id = Number(req.params.id);

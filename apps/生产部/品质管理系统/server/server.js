@@ -231,6 +231,8 @@ const MIME = {
   '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
   '.gif': 'image/gif', '.svg': 'image/svg+xml', '.ico': 'image/x-icon',
   '.woff': 'font/woff', '.woff2': 'font/woff2', '.ttf': 'font/ttf',
+  '.wasm': 'application/wasm',
+  '.gz': 'application/gzip',
 };
 
 function serveStatic(req, res, pathname) {
@@ -248,7 +250,7 @@ function serveStatic(req, res, pathname) {
     const ext = path.extname(filePath).toLowerCase();
     const headers = { 'Content-Type': MIME[ext] || 'application/octet-stream' };
     // 前端代码类资源禁用缓存，避免手机/浏览器缓存旧版（适配、逻辑改了不生效）
-    if (['.html', '.js', '.css', '.json'].includes(ext)) {
+    if (['.html', '.js', '.css', '.json', '.wasm', '.gz'].includes(ext)) {
       headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0';
       headers['Pragma'] = 'no-cache';
       headers['Expires'] = '0';

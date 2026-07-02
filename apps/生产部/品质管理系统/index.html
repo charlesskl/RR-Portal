@@ -11,11 +11,11 @@
   <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Noto+Sans+SC:wght@300;400;500;700&family=Share+Tech+Mono&display=swap" rel="stylesheet" />
   <script src="vendor/echarts.min.js"></script><!-- 本地自带，避免国内 jsdelivr 加载失败 -->
   <!-- SheetJS：读取 .xlsx / .xls / .csv -->
-  <script src="vendor/xlsx.full.min.js"></script>
+  <script src="vendor/xlsx-js-style.min.js"></script><!-- SheetJS 带样式分支：读写兼容 + 导出可写边框/加粗 -->
   <!-- PDF 导出：jsPDF + html2canvas -->
   <script src="vendor/jspdf.umd.min.js"></script>
   <script src="vendor/html2canvas.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+  <script src="vendor/tesseract/tesseract.min.js"></script>
 </head>
 <body>
 <div id="loginScreen" style="display:flex;align-items:center;justify-content:center;
@@ -221,6 +221,7 @@
                   onclick="batchDelete()" disabled>批量删除</button>
           </span>
           <button class="btn-secondary" onclick="exportCSV()">导出 CSV</button>
+          <button class="btn-secondary" onclick="exportFactoryExcel()" title="按上方日期范围导出「加工厂品质检验明细统计表」格式 Excel">导出加工厂Excel</button>
           <button id="btnAddRecord" class="btn-primary" onclick="openAddModal()">＋ 新增记录</button>
         </div>
       </div>
@@ -747,7 +748,7 @@
 
 <script src="report_export.js"></script>
 <script src="qc-backend.js"></script><!-- 后端同步层：必须在 app.js 之前 -->
-<script src="app.js"></script>
+<script src="app.js?v=20260702-heatmap"></script>
 <script src="ai-ocr.js"></script><!-- AI(百炼)识别，劫持 startOcr -->
 <script src="mobile.js"></script><!-- 移动端侧栏抽屉交互 -->
 </div><!-- /appWrapper -->

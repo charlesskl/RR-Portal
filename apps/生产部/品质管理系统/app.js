@@ -1502,23 +1502,55 @@ function chartDefectHeatmap(data) {
   const c = makeChart('chartDefectHeatmap');
   if (!c) return;
 
-  const suppliers = [...new Set(data.map(r=>r.supplier))].slice(0,8);
-  const defTypes = new Set();
+  const matrix = {};
+  const supplierTotals = {};
+  const defectTotals = {};
+  const addDefect = (supplier, defect, qty) => {
+    const s = supplier || '未知供应商';
+    const d = String(defect || '').trim();
+    if (!_isValidDefect(d)) return;
+    const n = Math.max(1, Number(qty) || 1);
+    if (!matrix[s]) matrix[s] = {};
+    matrix[s][d] = (matrix[s][d] || 0) + n;
+    supplierTotals[s] = (supplierTotals[s] || 0) + n;
+    defectTotals[d] = (defectTotals[d] || 0) + n;
+  };
+
   data.forEach(r => {
-    _splitDefect(r.defect).forEach(d => defTypes.add(d));
+    let usedStructured = false;
+    if (Array.isArray(r.defects)) {
+      r.defects.forEach(d => {
+        if (d && d.desc) {
+          addDefect(r.supplier, d.desc, d.qty);
+          usedStructured = true;
+        }
+      });
+    }
+    if (!usedStructured) {
+      _splitDefect(r.defect).forEach(d => addDefect(r.supplier, d, 1));
+    }
   });
-  const dList = [...defTypes].slice(0,8);
+
+  const suppliers = Object.keys(supplierTotals)
+    .sort((a,b)=>(supplierTotals[b]||0)-(supplierTotals[a]||0))
+    .slice(0,8);
+  const dList = Object.keys(defectTotals)
+    .sort((a,b)=>(defectTotals[b]||0)-(defectTotals[a]||0))
+    .slice(0,8);
 
   /* 如果没有不良数据，放假数据避免空白 */
   if (!dList.length) dList.push('暂无不良');
 
+  if (!suppliers.length) suppliers.push('暂无供应商');
+
   const heatData = [];
   suppliers.forEach((s,si) => {
     dList.forEach((d,di) => {
-      const cnt = data.filter(r=>r.supplier===s&&r.defect&&r.defect.includes(d)).length;
+      const cnt = (matrix[s] && matrix[s][d]) || 0;
       heatData.push([di, si, cnt]);
     });
   });
+  const maxVal = Math.max(5, ...heatData.map(x => x[2]));
 
   c.setOption({
     backgroundColor:'transparent',
@@ -1532,7 +1564,7 @@ function chartDefectHeatmap(data) {
       axisLabel:{ color:_cc().text, fontSize:11 },
       splitArea:{ show:true, areaStyle:{ color:_cc().heatArea } } },
     visualMap:{
-      min:0, max:5, calculable:true, orient:'horizontal',
+      min:0, max:maxVal, calculable:true, orient:'horizontal',
       left:'center', bottom:4,
       textStyle:{ color:_cc().text, fontSize:10 },
       inRange:{ color:_cc().heatRange },
@@ -2119,6 +2151,9 @@ async function startOcr() {
     /* 图片预处理：放大2倍+灰度+对比度增强，提高识别准确率（不改变预览，只改变OCR输入）*/
     const ocrInput = await preprocessImageForOcr(_ocrImageFile);
     const result = await Tesseract.recognize(ocrInput, 'chi_sim+eng', {
+      workerPath: 'vendor/tesseract/worker.min.js',
+      corePath: 'vendor/tesseract/core/tesseract-core-simd-lstm.wasm.js',
+      langPath: 'vendor/tesseract/lang',
       logger: () => {} /* 静默，不输出进度日志 */
     });
     const text = (result?.data?.text || '').trim();
@@ -4274,6 +4309,69 @@ function exportCSV() {
     showToast('CSV 导出成功 ✓', 'success');
   } catch(e) { showToast('导出失败: ' + e.message, 'error'); }
 }
+
+/* 按「加工厂品质检验明细统计表」格式导出 Excel（沿用验货明细页的日期/搜索筛选）*/
+function exportFactoryExcel() {
+  if (!can('exportData')) { showToast('当前账号无权限执行此操作', 'error'); return; }
+  if (typeof XLSX === 'undefined') { showToast('Excel 引擎未加载，请刷新后重试', 'error'); return; }
+  try {
+    if (currentPage === 'records') filterRecords();
+    const hasActiveFilter = !!(
+      getVal('searchInput') ||
+      getVal('filterResult') ||
+      getVal('filterDateFrom') ||
+      getVal('filterDateTo')
+    );
+    const source = currentPage === 'records' || hasActiveFilter ? filteredRecs : recs();
+    const data = source.slice().sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+    if (!data.length) { showToast('当前筛选无数据可导出', 'error'); return; }
+
+    const title   = '加工厂品质检验明细统计表';
+    const headers = ['序号','来货日期','供应商','加工类型','客户','送货单号','货号','产品名称','数量','单数','检验\n结果','不良描述','检验人','备注'];
+    const aoa = [[title], headers];
+    data.forEach((r, i) => {
+      aoa.push([
+        i + 1, r.date || '', r.supplier || '', r.type || '', r.client || '',
+        r.deliveryNo || '', r.productNo || '', r.productName || '',
+        (r.qty != null && r.qty !== '' ? Number(r.qty) : ''), '',
+        r.result || '', r.defect || '', r.qc || '', r.remark || '',
+      ]);
+    });
+
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 13 } }];  /* 标题 A1:N1 */
+    ws['!cols']   = [5.3,9.7,7.8,10.3,10.3,11.5,12,27,7.5,7,7.2,19.3,13,15.5].map(w => ({ wch: w }));
+    ws['!rows']   = [{ hpt: 24 }, { hpt: 22 }];  /* 标题行 / 表头行高 */
+
+    /* ── 样式：全单元格黑框 + 标题居中加粗 + 表头加粗底色（需 xlsx-js-style）── */
+    const thin   = { style: 'thin', color: { rgb: '000000' } };
+    const border = { top: thin, bottom: thin, left: thin, right: thin };
+    const leftCols = { 7: 1, 11: 1 };  /* 产品名称(H)、不良描述(L) 左对齐，其余居中 */
+    for (let R = 0; R < aoa.length; R++) {
+      for (let C = 0; C < 14; C++) {
+        const addr = XLSX.utils.encode_cell({ r: R, c: C });
+        let cell = ws[addr];
+        if (!cell) cell = ws[addr] = { t: 's', v: '' };
+        if (R === 0) {
+          cell.s = { font: { bold: true, sz: 14 }, alignment: { horizontal: 'center', vertical: 'center' }, border: border };
+        } else if (R === 1) {
+          cell.s = { font: { bold: true, sz: 10 }, alignment: { horizontal: 'center', vertical: 'center', wrapText: true }, fill: { patternType: 'solid', fgColor: { rgb: 'D9E1F2' } }, border: border };
+        } else {
+          cell.s = { font: { sz: 10 }, alignment: { horizontal: leftCols[C] ? 'left' : 'center', vertical: 'center' }, border: border };
+        }
+      }
+    }
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, '加工厂品质检验明细统计表');
+
+    const from = getVal('filterDateFrom'), to = getVal('filterDateTo');
+    const span = (from || to) ? `_${from || '起始'}至${to || '今'}` : '_全部';
+    XLSX.writeFile(wb, `加工厂品质检验明细统计表${span}.xlsx`);
+    showToast(`✓ 已导出 ${data.length} 条到 Excel`, 'success');
+  } catch (e) { showToast('导出失败: ' + e.message, 'error'); }
+}
+window.exportFactoryExcel = exportFactoryExcel;
 
 /* ════════════════════════════════════════
    §14.5  数据备份与恢复

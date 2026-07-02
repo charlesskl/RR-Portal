@@ -1502,23 +1502,55 @@ function chartDefectHeatmap(data) {
   const c = makeChart('chartDefectHeatmap');
   if (!c) return;
 
-  const suppliers = [...new Set(data.map(r=>r.supplier))].slice(0,8);
-  const defTypes = new Set();
+  const matrix = {};
+  const supplierTotals = {};
+  const defectTotals = {};
+  const addDefect = (supplier, defect, qty) => {
+    const s = supplier || '未知供应商';
+    const d = String(defect || '').trim();
+    if (!_isValidDefect(d)) return;
+    const n = Math.max(1, Number(qty) || 1);
+    if (!matrix[s]) matrix[s] = {};
+    matrix[s][d] = (matrix[s][d] || 0) + n;
+    supplierTotals[s] = (supplierTotals[s] || 0) + n;
+    defectTotals[d] = (defectTotals[d] || 0) + n;
+  };
+
   data.forEach(r => {
-    _splitDefect(r.defect).forEach(d => defTypes.add(d));
+    let usedStructured = false;
+    if (Array.isArray(r.defects)) {
+      r.defects.forEach(d => {
+        if (d && d.desc) {
+          addDefect(r.supplier, d.desc, d.qty);
+          usedStructured = true;
+        }
+      });
+    }
+    if (!usedStructured) {
+      _splitDefect(r.defect).forEach(d => addDefect(r.supplier, d, 1));
+    }
   });
-  const dList = [...defTypes].slice(0,8);
+
+  const suppliers = Object.keys(supplierTotals)
+    .sort((a,b)=>(supplierTotals[b]||0)-(supplierTotals[a]||0))
+    .slice(0,8);
+  const dList = Object.keys(defectTotals)
+    .sort((a,b)=>(defectTotals[b]||0)-(defectTotals[a]||0))
+    .slice(0,8);
 
   /* 如果没有不良数据，放假数据避免空白 */
   if (!dList.length) dList.push('暂无不良');
 
+  if (!suppliers.length) suppliers.push('暂无供应商');
+
   const heatData = [];
   suppliers.forEach((s,si) => {
     dList.forEach((d,di) => {
-      const cnt = data.filter(r=>r.supplier===s&&r.defect&&r.defect.includes(d)).length;
+      const cnt = (matrix[s] && matrix[s][d]) || 0;
       heatData.push([di, si, cnt]);
     });
   });
+  const maxVal = Math.max(5, ...heatData.map(x => x[2]));
 
   c.setOption({
     backgroundColor:'transparent',
@@ -1532,7 +1564,7 @@ function chartDefectHeatmap(data) {
       axisLabel:{ color:_cc().text, fontSize:11 },
       splitArea:{ show:true, areaStyle:{ color:_cc().heatArea } } },
     visualMap:{
-      min:0, max:5, calculable:true, orient:'horizontal',
+      min:0, max:maxVal, calculable:true, orient:'horizontal',
       left:'center', bottom:4,
       textStyle:{ color:_cc().text, fontSize:10 },
       inRange:{ color:_cc().heatRange },
@@ -2119,6 +2151,9 @@ async function startOcr() {
     /* 图片预处理：放大2倍+灰度+对比度增强，提高识别准确率（不改变预览，只改变OCR输入）*/
     const ocrInput = await preprocessImageForOcr(_ocrImageFile);
     const result = await Tesseract.recognize(ocrInput, 'chi_sim+eng', {
+      workerPath: 'vendor/tesseract/worker.min.js',
+      corePath: 'vendor/tesseract/core/tesseract-core-simd-lstm.wasm.js',
+      langPath: 'vendor/tesseract/lang',
       logger: () => {} /* 静默，不输出进度日志 */
     });
     const text = (result?.data?.text || '').trim();

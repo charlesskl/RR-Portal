@@ -574,24 +574,28 @@ function fillBCD(ws, d) {
   forceWriteFormula(C_TOTAL_ROW, 7, `SUM(G${C_SUM_START}:G${C_SUM_END})`, null);
 
   // ── Section E: E. OTHER LABOUR & PROCESS ─────────────────────────────────────
-  // Anchor all Section D/E rows relative to c3SubTotalRow (template row 139, was 135).
-  // This avoids eShift arithmetic errors from mixed insertions/deletions above.
-  // Template offsets from c3SubTotalRow=139:
-  //   D data: +6..+8 (rows 145-147)   D.SUB: +9 (148)   D.TOTAL: +10 (149)
-  //   Ransburg: +17 (156)   Spraying: +18 (157)   Vacuum: +19 (158)
-  //   DECO subtotal: +20 (159)
-  //   Trimming: +22 (161)   Polishing: +23 (162)   TRIM subtotal: +24 (163)
-  //   WOOD CUTTING: +25 (164)   WOOD subtotal: +26 (165)
-  //   SEWING data: +27 (166)   SEWING subtotal: +28 (167)
-  //   ASSEMBLY: +30 (169)   E.TOTAL: +35 (174)
-  const E0 = c3SubTotalRow - 139; // net shift applied to all template row numbers
+  // Anchor all Section D/E rows relative to c3SubTotalRow (logical template row 135).
+  // E0 = real c3SubTotalRow - 135. In new template c3SubTotalRow=139 → E0=4 → +4 applied to all 135-anchored literals below.
+  // 135-anchored offsets (do NOT change literals when template shifts; let E0 absorb the shift):
+  //   D data: +6..+8 (141-143→145-147)   D.SUB: +9 (144→148)   D.TOTAL: +10 (145→149)
+  //   Ransburg: +17 (152→156)   Spraying: +18 (153→157)   Vacuum: +19 (154→158)
+  //   DECO subtotal: +20 (155→159)
+  //   Trimming: +22 (157→161)   Polishing: +23 (158→162)   TRIM subtotal: +24 (159→163)
+  //   WOOD CUTTING: +25 (160→164)   WOOD subtotal: +26 (161→165)
+  //   SEWING data: +27 (162→166)   SEWING subtotal: +28 (163→167)
+  //   ASSEMBLY: +30 (165→169)   E.TOTAL: +35 (170→174)
+  const E0 = c3SubTotalRow - 135; // net shift applied to all template row numbers
 
   // Clear stale data columns D-G in section D+E range
+  // Preserve: formulas + string labels (header text like "Usage/Toy" / "Unit Cost (HK$)")
   for (let r = 141 + E0; r <= 175 + E0; r++) {
     for (const c of [4, 5, 6, 7]) {
       const cell = ws.getCell(r, c);
       delete cell._sharedFormula;
-      if (!(cell.value && typeof cell.value === 'object' && cell.value.formula)) cell.value = null;
+      const v = cell.value;
+      const isFormula = v && typeof v === 'object' && v.formula;
+      const isLabel = typeof v === 'string' && v.trim();
+      if (!isFormula && !isLabel) cell.value = null;
     }
   }
 

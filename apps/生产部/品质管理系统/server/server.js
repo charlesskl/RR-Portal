@@ -30,9 +30,10 @@ function loadAiConfig() {
     textModel: 'qwen-plus',
   };
   try { Object.assign(cfg, JSON.parse(fs.readFileSync(AI_CONFIG_PATH, 'utf8'))); }
-  catch (e) { /* 无配置文件时保持禁用 */ }
+  catch (e) { console.warn('[AI] config not loaded:', e.message); }
   // 环境变量可覆盖密钥
-  if (process.env.DASHSCOPE_API_KEY) cfg.apiKey = process.env.DASHSCOPE_API_KEY;
+  const envApiKey = process.env.DASHSCOPE_API_KEY || process.env.QC_BAILIAN_API_KEY;
+  if (envApiKey) cfg.apiKey = envApiKey;
   // 仅当密钥已填写真实值（非占位）才算可用
   const placeholder = !cfg.apiKey || /粘贴|你的|YOUR|xxxx|sk-xxx/i.test(cfg.apiKey) || cfg.apiKey.includes('****');
   cfg.ready = cfg.enabled !== false && !placeholder;

@@ -1789,13 +1789,13 @@ function renderEngineering(host, payload, canEdit, onChange, fxRmbHkd, fxRmbUsd)
       preview.querySelector('#btn-apply-replace').onclick = () => {
         payload.molds = j.molds.map(m => ({ ...m, images: m.images || [] }));
         preview.innerHTML = ''; fileInp.value = '';
-        renderEngineering(host, payload, canEdit, onChange, undefined, fxRmbUsd);
+        renderEngineering(host, payload, canEdit, onChange, fxRmbHkd, fxRmbUsd);
         onChange();
       };
       preview.querySelector('#btn-apply-append').onclick = () => {
         payload.molds = (payload.molds || []).concat(j.molds.map(m => ({ ...m, images: m.images || [] })));
         preview.innerHTML = ''; fileInp.value = '';
-        renderEngineering(host, payload, canEdit, onChange, undefined, fxRmbUsd);
+        renderEngineering(host, payload, canEdit, onChange, fxRmbHkd, fxRmbUsd);
         onChange();
       };
       preview.querySelector('#btn-apply-cancel').onclick = () => { preview.innerHTML = ''; fileInp.value = ''; };

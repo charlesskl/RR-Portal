@@ -635,6 +635,36 @@ services:
     networks:
       - platform-net
 
+  cpg:
+    build:
+      context: ./apps/PMC跟仓管/加工管理
+      dockerfile: Dockerfile
+    environment:
+      - PCBA_DB=/app/data/pcba.db
+      - PCBA_BASE_PATH=/cpg
+      - PCBA_COOKIE_NAME=cpg_session
+      - PCBA_COOKIE_PATH=/cpg
+      - TZ=Asia/Shanghai
+      # Session 签名密钥；固定值让重启后登录态不失效，可在 .env.cloud.production 覆盖
+      - PCBA_SECRET=${PCBA_SECRET:-cpg-session-secret-77794-change-me}
+    volumes:
+      - ./apps/PMC跟仓管/加工管理/data:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5011/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    mem_limit: 512m
+    memswap_limit: 512m
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - platform-net
+
   huadeng:
     build:
       context: ./apps/PMC跟仓管/华登包材管理

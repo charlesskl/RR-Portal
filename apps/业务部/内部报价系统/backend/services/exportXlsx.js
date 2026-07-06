@@ -15,6 +15,21 @@ const MAT_CATEGORIES = ['吸塑', '胶袋', '彩盒/内咭', '电池', '利宝',
 // 工具
 const num = (v) => Number(v) || 0;
 const sum = (arr, fn) => arr.reduce((a, r) => a + (fn(r) || 0), 0);
+function hasFreeRmbPrice(row) {
+  return row && row.unit_price_rmb !== undefined && row.unit_price_rmb !== null && row.unit_price_rmb !== '';
+}
+function freeUnitRmb(row, fxRH) {
+  const fx = num(fxRH) || 0.85;
+  return hasFreeRmbPrice(row) ? num(row.unit_price_rmb) : num(row.unit_price) * fx;
+}
+function freeUnitHkd(row, fxRH) {
+  const fx = num(fxRH) || 0.85;
+  return hasFreeRmbPrice(row) ? num(row.unit_price_rmb) / fx : num(row.unit_price);
+}
+function freeAmountHkd(row, fxRH) {
+  if (row && row.is_subtotal) return num(row.amount);
+  return num(row && row.qty) * freeUnitHkd(row, fxRH);
+}
 // 车缝：人工若已作为明细行(名称含"人工")计入，则不再额外加 labor_amount，避免双算
 function sewLaborToAdd(g) {
   const items = (g && g.items) || [];
@@ -270,16 +285,16 @@ async function buildWorkbook({ quote, sections }) {
   const elecRows = (electronic.electronics && electronic.electronics.length) ? electronic.electronics : (eng.electronics || []);
   const elecLoss = 0;  // 电子 不计算损耗
   row = renderFreeTable(ws, row, '四、电子', elecRows, elecLoss, fxRH, subRefs, 'electronic', { isHkd: true, skipLoss: true });
-  row = renderFreeTable(ws, row, '五、五金', eng.hardware   || [], 0, fxRH, subRefs, 'hardware', { skipLoss: true, isHkd: true });  // 五金不计损耗、按港币
-  const elecSubtotal = freeSubtotal(elecRows) + freeSubtotal(eng.hardware || []);  // 均不计损耗（HKD）
+  row = renderFreeTable(ws, row, '五、五金', eng.hardware   || [], 0, fxRH, subRefs, 'hardware', { skipLoss: true, isHkd: true, rmbPrice: true });  // 五金不计损耗、按港币
+  const elecSubtotal = freeSubtotal(elecRows, fxRH) + freeSubtotal(eng.hardware || [], fxRH);  // 均不计损耗（HKD）
 
   // ---------- 五、辅助材料 ----------
-  row = renderFreeTable(ws, row, '六、辅助材料', eng.aux_materials || [], 0, fxRH, subRefs, 'aux', { skipLoss: true, isHkd: true });  // 不计损耗、按港币
-  const auxSubtotal = freeSubtotal(eng.aux_materials || []);
+  row = renderFreeTable(ws, row, '六、辅助材料', eng.aux_materials || [], 0, fxRH, subRefs, 'aux', { skipLoss: true, isHkd: true, rmbPrice: true });  // 不计损耗、按港币
+  const auxSubtotal = freeSubtotal(eng.aux_materials || [], fxRH);
 
   // ---------- 六、包装材料 ----------
-  row = renderFreeTable(ws, row, '七、包装材料', eng.packaging_materials || [], 0, fxRH, subRefs, 'packaging', { skipLoss: true, isHkd: true });  // 不计损耗、按港币
-  const pkSubtotal = freeSubtotal(eng.packaging_materials || []);
+  row = renderFreeTable(ws, row, '七、包装材料', eng.packaging_materials || [], 0, fxRH, subRefs, 'packaging', { skipLoss: true, isHkd: true, rmbPrice: true });  // 不计损耗、按港币
+  const pkSubtotal = freeSubtotal(eng.packaging_materials || [], fxRH);
 
   // ---------- 八/九、组装+包装人工 — 排拉工序：明细拆到「装配明细」分表，主表只留汇总 ----------
   const _asmBase = num(asm.assembly_base_rate ?? 310);
@@ -1109,14 +1124,18 @@ function secondProcSubtotal(p) {
 function renderFreeTable(ws, row, title, rows, lossPct, fxRH, refs, refKey, opts) {
   const isHkd = !!(opts && opts.isHkd);
   const skipLoss = !!(opts && opts.skipLoss);
+  const rmbPrice = !!(opts && opts.rmbPrice);
+  const fx = num(fxRH) || 0.85;
   ws.mergeCells(row, 1, row, 13); styleSection(ws.getCell(row, 1));
   ws.getCell(row, 1).value = title;
   row += 1;
   const priceLabel = isHkd ? '单价 HKD' : '单价';
   const amtLabel   = isHkd ? '金额 HKD' : '成品金额';
-  const h = ['序号', '零件名称', '规格要求', '', '', '', '', '用量', priceLabel, amtLabel, '税点 %', '备注'];
+  const h = rmbPrice
+    ? ['序号', '零件名称', '规格要求', '', '', '', '用量', '单价 RMB', '单价 HKD', amtLabel, '税点 %', '备注']
+    : ['序号', '零件名称', '规格要求', '', '', '', '', '用量', priceLabel, amtLabel, '税点 %', '备注'];
   h.forEach((v, i) => { ws.getCell(row, i + 1).value = v; styleHeader(ws.getCell(row, i + 1)); });
-  ws.mergeCells(row, 3, row, 7);
+  ws.mergeCells(row, 3, row, rmbPrice ? 6 : 7);
   row += 1;
   const dataStart = row;
   const fmt = isHkd ? HKD4 : RMB;
@@ -1125,15 +1144,28 @@ function renderFreeTable(ws, row, title, rows, lossPct, fxRH, refs, refKey, opts
     if (!r.is_subtotal) partRows.push({ name: r.name || '', spec: r.spec || '', category: r.category || '', cell: `J${row}` });
     ws.getCell(row, 1).value = i + 1;
     ws.getCell(row, 2).value = r.name || '';
-    ws.mergeCells(row, 3, row, 7);
+    ws.mergeCells(row, 3, row, rmbPrice ? 6 : 7);
     ws.getCell(row, 3).value = r.spec || '';
-    ws.getCell(row, 8).value = num(r.qty);
-    ws.getCell(row, 9).value = num(r.unit_price);
-    ws.getCell(row, 9).numFmt = fmt;
-    if (r.is_subtotal) {
-      ws.getCell(row, 10).value = num(r.amount);
+    if (rmbPrice) {
+      ws.getCell(row, 7).value = num(r.qty);
+      ws.getCell(row, 8).value = freeUnitRmb(r, fx);
+      ws.getCell(row, 8).numFmt = RMB;
+      ws.getCell(row, 9).value = { formula: `H${row}/${fx}`, result: freeUnitHkd(r, fx) };
+      ws.getCell(row, 9).numFmt = HKD4;
+      if (r.is_subtotal) {
+        ws.getCell(row, 10).value = num(r.amount);
+      } else {
+        ws.getCell(row, 10).value = { formula: `G${row}*I${row}`, result: freeAmountHkd(r, fx) };
+      }
     } else {
-      ws.getCell(row, 10).value = { formula: `H${row}*I${row}`, result: num(r.qty) * num(r.unit_price) };
+      ws.getCell(row, 8).value = num(r.qty);
+      ws.getCell(row, 9).value = num(r.unit_price);
+      ws.getCell(row, 9).numFmt = fmt;
+      if (r.is_subtotal) {
+        ws.getCell(row, 10).value = num(r.amount);
+      } else {
+        ws.getCell(row, 10).value = { formula: `H${row}*I${row}`, result: num(r.qty) * num(r.unit_price) };
+      }
     }
     ws.getCell(row, 10).numFmt = fmt;
     ws.getCell(row, 11).value = r.tax_pct == null || r.tax_pct === '' ? '' : num(r.tax_pct);
@@ -1145,7 +1177,7 @@ function renderFreeTable(ws, row, title, rows, lossPct, fxRH, refs, refKey, opts
   const dataEnd = row - 1;
   // 小计 / 损耗 / 合计
   row = appendThreeRowSubtotal(ws, row, {
-    rawSum: freeRaw(rows),
+    rawSum: freeRaw(rows, fxRH),
     lossPct: num(lossPct),
     fxRH,
     valueCol: 10,
@@ -1157,11 +1189,11 @@ function renderFreeTable(ws, row, title, rows, lossPct, fxRH, refs, refKey, opts
   if (refs && refKey) { refs.partRows = refs.partRows || {}; refs.partRows[refKey] = partRows; }
   return row;
 }
-function freeRaw(rows) {
-  return sum(rows.filter(r => !r.is_subtotal), r => num(r.qty) * num(r.unit_price));
+function freeRaw(rows, fxRH) {
+  return sum(rows.filter(r => !r.is_subtotal), r => freeAmountHkd(r, fxRH));
 }
-function freeSubtotal(rows) {
-  return freeRaw(rows);  // 不计损耗
+function freeSubtotal(rows, fxRH) {
+  return freeRaw(rows, fxRH);  // 不计损耗
 }
 
 // 通用四行小计区块（带公式）：小计 / 损耗 / 合计 RMB / 合计 HKD

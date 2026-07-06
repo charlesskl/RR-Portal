@@ -272,6 +272,28 @@ services:
       timeout: 10s
       retries: 3
 
+  cpg:
+    build:
+      context: ./apps/PMC跟仓管/加工管理
+      dockerfile: Dockerfile
+    environment:
+      - PCBA_DB=/app/data/pcba.db
+    volumes:
+      - "./apps/PMC跟仓管/加工管理/data:/app/data"
+    mem_limit: 512m
+    memswap_limit: 512m
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5011/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
   huadeng:
     build:
       context: ./apps/PMC跟仓管/华登包材管理

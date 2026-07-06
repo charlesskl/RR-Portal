@@ -6,7 +6,8 @@
 // 多个产品在同一工作表里堆叠。
 const ExcelJS = require('exceljs');
 
-const HEADER_KEYS = ['物料名称', '裁片部位', '用量', '单价', '价钱'];
+// 表头必含项（放宽「单价」：有的表用「物料价」而非「单价」，故不强求）
+const HEADER_KEYS = ['物料名称', '裁片部位', '用量', '价钱'];
 
 function toStr(v) {
   if (v == null) return '';
@@ -42,7 +43,7 @@ function buildHeaderIndex(headerCells) {
     else if (s.includes('裁片部位')) setOnce('part', i);
     else if (s.includes('供应商')) setOnce('supplier', i);
     else if (s.includes('用量')) setOnce('qty', i);
-    else if (s === '单价' || s.includes('单价')) setOnce('unit_price', i);
+    else if (s.includes('单价') || s.includes('物料价')) setOnce('unit_price', i);
     else if (s.includes('成本')) setOnce('cost', i);
     else if (s.includes('码点')) setOnce('markup', i);
     else if (s.includes('价钱')) setOnce('price', i);
@@ -87,7 +88,9 @@ async function parseWorkbook(buffer) {
 
     // 全行只有 1 个 cell + 不是 header → 视为下一分组的标题
     if (joined.length <= 2 && !isHeaderRow(r) && !headerIdx) {
-      pendingTitle = joined.join(' ');
+      const t = joined.join(' ').trim();
+      // 跳过「明细表 / DATE:xxx / 日期 / 纯年月日」等表头噪音，别当成产品名
+      if (t && !/^明细表|^DATE|日期|^\s*20\d\d[.\-/]/i.test(t)) pendingTitle = t;
       continue;
     }
 
@@ -103,6 +106,13 @@ async function parseWorkbook(buffer) {
     if (matName.includes('合计') || (part === '' && matName === '' && price != null && qty == null)) {
       // 重置 header 等待下一个产品
       headerIdx = null;
+      continue;
+    }
+
+    // 产品标题行：物料名称列有文字、但无用量/单价/价钱（如 "18寸 超级机器人…"，表头下方分节标题）
+    if (matName && qty == null && price == null && unitPrice == null && part === '') {
+      if (cur && cur.items.length === 0) cur.name = matName;  // 当前空组直接命名
+      else { cur = { name: matName, items: [], labor_amount: 0, sub_parts: [] }; groups.push(cur); }
       continue;
     }
 
@@ -136,9 +146,11 @@ async function parseWorkbook(buffer) {
     });
   }
 
-  if (!groups.length) return { error: '没有解析到任何产品分组（请确认表头含 物料名称/裁片部位/用量/单价/价钱）' };
+  // 去掉没有任何物料行的空组（如仅由 DATE/表头噪音生成的组）
+  const nonEmpty = groups.filter(g => (g.items || []).length > 0);
+  if (!nonEmpty.length) return { error: '没有解析到任何产品分组（请确认表头含 物料名称/裁片部位/用量/价钱）' };
 
-  return { groups, count: groups.length, sheet_used: ws.name };
+  return { groups: nonEmpty, count: nonEmpty.length, sheet_used: ws.name };
 }
 
 module.exports = { parseWorkbook };

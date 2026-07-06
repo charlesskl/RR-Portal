@@ -211,7 +211,7 @@
   }
 
   function aiDispatch() {
-    return checkAiStatus(false).then(function (ready) {
+    return checkAiStatus(true).then(function (ready) {
       if (ready) return aiStartOcr();
       setT('ocrStatus', 'AI OCR 未就绪，正在改用本地 OCR...');
       return runOriginalOcr();

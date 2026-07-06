@@ -4315,8 +4315,15 @@ function exportFactoryExcel() {
   if (!can('exportData')) { showToast('当前账号无权限执行此操作', 'error'); return; }
   if (typeof XLSX === 'undefined') { showToast('Excel 引擎未加载，请刷新后重试', 'error'); return; }
   try {
-    const data = (filteredRecs.length ? filteredRecs : recs())
-      .slice().sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+    if (currentPage === 'records') filterRecords();
+    const hasActiveFilter = !!(
+      getVal('searchInput') ||
+      getVal('filterResult') ||
+      getVal('filterDateFrom') ||
+      getVal('filterDateTo')
+    );
+    const source = currentPage === 'records' || hasActiveFilter ? filteredRecs : recs();
+    const data = source.slice().sort((a, b) => (a.date || '').localeCompare(b.date || ''));
     if (!data.length) { showToast('当前筛选无数据可导出', 'error'); return; }
 
     const title   = '加工厂品质检验明细统计表';

@@ -192,17 +192,39 @@ function formatNum(v) {
 }
 function num(v) { return Number(v) || 0; }
 function sum(arr, fn) { return arr.reduce((a, r) => a + (fn(r) || 0), 0); }
+function hasFreeRmbPrice(row) {
+  return row && row.unit_price_rmb !== undefined && row.unit_price_rmb !== null && row.unit_price_rmb !== '';
+}
+function freeUnitRmb(row, fxRmbHkd) {
+  const fx = num(fxRmbHkd) || 0.85;
+  return hasFreeRmbPrice(row) ? num(row.unit_price_rmb) : num(row.unit_price) * fx;
+}
+function freeUnitHkd(row, fxRmbHkd) {
+  const fx = num(fxRmbHkd) || 0.85;
+  return hasFreeRmbPrice(row) ? num(row.unit_price_rmb) / fx : num(row.unit_price);
+}
+function freeAmountHkd(row, fxRmbHkd) {
+  if (row && row.is_subtotal) return num(row.amount);
+  return num(row && row.qty) * freeUnitHkd(row, fxRmbHkd);
+}
+function ensureFreeRmbPrices(rows, fxRmbHkd) {
+  (rows || []).forEach(row => {
+    if (!hasFreeRmbPrice(row) && row.unit_price !== undefined && row.unit_price !== null && row.unit_price !== '') {
+      row.unit_price_rmb = +freeUnitRmb(row, fxRmbHkd).toFixed(6);
+    }
+  });
+}
 
 // ==================== 子小计计算 ====================
 // 自由表（electronics / aux_materials）：行 amount = qty × unit_price；
 // 子小计行（is_subtotal=true）不参与父级再加；普通行参与
-function computeRow(row) {
+function computeRow(row, fxRmbHkd) {
   if (row.is_subtotal) return num(row.amount);
-  return num(row.qty) * num(row.unit_price);
+  return freeAmountHkd(row, fxRmbHkd);
 }
-function freeTableSubtotal(rows) {
+function freeTableSubtotal(rows, fxRmbHkd) {
   // 非 is_subtotal 行才计入
-  return sum(rows.filter(r => !r.is_subtotal), computeRow);
+  return sum(rows.filter(r => !r.is_subtotal), r => computeRow(r, fxRmbHkd));
 }
 function applyLoss(subtotal, pct) {
   return subtotal;  // 已全面取消损耗
@@ -694,7 +716,7 @@ function renderLossSummary(host, title, getRawSum, getLossPct, fxRmbHkd, currenc
 function renderHwExtra(host, payload, onChange, canEdit, fxRmbHkd) {
   host.innerHTML = '';
   return renderLossSummary(host, '五金 成本汇总',
-    () => sum(payload.hardware || [], r => num(r.qty) * num(r.unit_price)),
+    () => sum(payload.hardware || [], r => freeAmountHkd(r, fxRmbHkd)),
     () => 0, fxRmbHkd, 'HKD');  // 五金不计损耗；五金表为港币
 }
 
@@ -778,9 +800,9 @@ function renderSummaryPane(host, sections, quote, me) {
   // 各部门关键合计
   const moldTotal = sum(eng.molds || [], m => num(m.price_rmb));
   const elecRaw = sum(elecSrc, elecRowAmount);  // 不算损耗（与导出同源：电子部优先）
-  const hwRaw = sum(eng.hardware || [], r => num(r.qty)*num(r.unit_price));  // 五金不计损耗（与导出一致）
-  const auxRaw = sum(eng.aux_materials || [], r => num(r.qty)*num(r.unit_price));  // 不计损耗
-  const pkmatRaw = sum(eng.packaging_materials || [], r => num(r.qty)*num(r.unit_price));  // 不计损耗
+  const hwRaw = sum(eng.hardware || [], r => freeAmountHkd(r, fxRH));  // 五金不计损耗（与导出一致）
+  const auxRaw = sum(eng.aux_materials || [], r => freeAmountHkd(r, fxRH));  // 不计损耗
+  const pkmatRaw = sum(eng.packaging_materials || [], r => freeAmountHkd(r, fxRH));  // 不计损耗
   const _injLossM = 1 + num(mold.injection_loss_pct ?? 3) / 100;  // 注塑料损耗（默认3%）
   const injTotal = sum(mold.injection || [], r => num(r.weight_g) * _injLossM * num(r.material_unit_price) + num(r.shot_price));
   const injRaw = injTotal / _injLossM; // 留作兼容（部分老逻辑可能引用）
@@ -982,7 +1004,7 @@ function renderSummaryPane(host, sections, quote, me) {
   const isBlister = (s) => /吸塑|blister/i.test(String(s || ''));
   const isGlueBag = (s) => /胶袋|胶代|poly\s?bag|pe\s?bag|opp\s?bag/i.test(String(s || ''));
   const _sumByMatch = (rows, matchFn) => sum(rows || [], r =>
-    (matchFn(r.name) || matchFn(r.spec)) ? num(r.qty) * num(r.unit_price) : 0);
+    (matchFn(r.name) || matchFn(r.spec)) ? freeAmountHkd(r, fxRH) : 0);
   // 马达：电子部分用 elecSrc（电子部优先），与导出同源
   const motorRmb = _sumByMatch(elecSrc, isMotor) + _sumByMatch(eng.hardware, isMotor);
 
@@ -1001,7 +1023,7 @@ function renderSummaryPane(host, sections, quote, me) {
     if (_isCarton(a) || _isCarton(b)) return null;  // 纸箱另算
     return tbl === 'aux' ? '其他外购' : '彩盒/内咭';
   };
-  const _amt = (r) => num(r.qty) * num(r.unit_price);
+  const _amt = (r) => freeAmountHkd(r, fxRH);
   const _catSum = (cat) => sum(pkmatRows.filter(r => _catOf(r, 'pk') === cat), _amt)
     + sum(auxRows.filter(r => _catOf(r, 'aux') === cat), _amt);
   // 吸塑：辅助/包装按类别 + 电子/五金里关键字命中的吸塑行
@@ -1767,13 +1789,13 @@ function renderEngineering(host, payload, canEdit, onChange, fxRmbHkd, fxRmbUsd)
       preview.querySelector('#btn-apply-replace').onclick = () => {
         payload.molds = j.molds.map(m => ({ ...m, images: m.images || [] }));
         preview.innerHTML = ''; fileInp.value = '';
-        renderEngineering(host, payload, canEdit, onChange, undefined, fxRmbUsd);
+        renderEngineering(host, payload, canEdit, onChange, fxRmbHkd, fxRmbUsd);
         onChange();
       };
       preview.querySelector('#btn-apply-append').onclick = () => {
         payload.molds = (payload.molds || []).concat(j.molds.map(m => ({ ...m, images: m.images || [] })));
         preview.innerHTML = ''; fileInp.value = '';
-        renderEngineering(host, payload, canEdit, onChange, undefined, fxRmbUsd);
+        renderEngineering(host, payload, canEdit, onChange, fxRmbHkd, fxRmbUsd);
         onChange();
       };
       preview.querySelector('#btn-apply-cancel').onclick = () => { preview.innerHTML = ''; fileInp.value = ''; };
@@ -1786,8 +1808,9 @@ function renderEngineering(host, payload, canEdit, onChange, fxRmbHkd, fxRmbUsd)
     { key: 'name', label: '零件名称' },
     { key: 'spec', label: '规格' },
     { key: 'qty', label: '用量', type: 'number', width: '80px' },
-    { key: 'unit_price', label: '单价 HKD', type: 'number', width: '100px' },
-    { key: 'amount', label: '金额 HKD', readonly: true, calc: r => num(r.qty) * num(r.unit_price), width: '90px' },
+    { key: 'unit_price_rmb', label: '单价 RMB', type: 'number', width: '100px' },
+    { key: 'unit_price_hkd', label: '单价 HKD', readonly: true, calc: r => freeUnitHkd(r, fxRmbHkd), width: '100px' },
+    { key: 'amount', label: '金额 HKD', readonly: true, calc: r => freeAmountHkd(r, fxRmbHkd), width: '90px' },
     { key: 'tax_pct', label: '税点 %', type: 'number', width: '90px' },
     { key: 'note', label: '备注' },
   ];
@@ -1797,8 +1820,9 @@ function renderEngineering(host, payload, canEdit, onChange, fxRmbHkd, fxRmbUsd)
     { key: 'spec', label: '规格' },
     { key: 'category', label: '类别', type: 'select', options: MAT_CATEGORIES, width: '120px' },
     { key: 'qty', label: '用量', type: 'number', width: '80px' },
-    { key: 'unit_price', label: '单价 HKD', type: 'number', width: '100px' },
-    { key: 'amount', label: '金额 HKD', readonly: true, calc: r => num(r.qty) * num(r.unit_price), width: '90px' },
+    { key: 'unit_price_rmb', label: '单价 RMB', type: 'number', width: '100px' },
+    { key: 'unit_price_hkd', label: '单价 HKD', readonly: true, calc: r => freeUnitHkd(r, fxRmbHkd), width: '100px' },
+    { key: 'amount', label: '金额 HKD', readonly: true, calc: r => freeAmountHkd(r, fxRmbHkd), width: '90px' },
     { key: 'tax_pct', label: '税点 %', type: 'number', width: '90px' },
     { key: 'note', label: '备注' },
   ];
@@ -1806,11 +1830,14 @@ function renderEngineering(host, payload, canEdit, onChange, fxRmbHkd, fxRmbUsd)
   const wrappedOnChange = () => { refreshes.forEach(f => f()); onChange(); };
 
   // 电子部分已移到 电子部 tab（renderElectronic）
+  ensureFreeRmbPrices(payload.hardware, fxRmbHkd);
+  ensureFreeRmbPrices(payload.aux_materials, fxRmbHkd);
+  ensureFreeRmbPrices(payload.packaging_materials, fxRmbHkd);
   renderTable(host.querySelector('#wb-hw'), freeCols, payload.hardware, { readonly: !canEdit, onChange: wrappedOnChange });
   refreshes.push(renderHwExtra(host.querySelector('#wb-hw-extra'), payload, wrappedOnChange, canEdit, fxRmbHkd));
   renderTable(host.querySelector('#wb-aux'), auxCols, payload.aux_materials, { readonly: !canEdit, onChange: wrappedOnChange });
   refreshes.push(renderLossSummary(host.querySelector('#wb-aux'), '辅助材料 成本汇总',
-    () => sum(payload.aux_materials || [], r => num(r.qty) * num(r.unit_price)),
+    () => sum(payload.aux_materials || [], r => freeAmountHkd(r, fxRmbHkd)),
     () => 0, fxRmbHkd, 'HKD'));  // 不计损耗；辅助材料为港币
 
   // 六、包装材料
@@ -1819,14 +1846,15 @@ function renderEngineering(host, payload, canEdit, onChange, fxRmbHkd, fxRmbUsd)
     { key: 'spec', label: '规格', type: 'textarea' },
     { key: 'category', label: '类别', type: 'select', options: MAT_CATEGORIES, width: '120px' },
     { key: 'qty', label: '用量', type: 'number', width: '80px' },
-    { key: 'unit_price', label: '单价 HKD', type: 'number', width: '100px' },
-    { key: 'amount', label: '成品金额 HKD', readonly: true, calc: r => num(r.qty) * num(r.unit_price), width: '90px' },
+    { key: 'unit_price_rmb', label: '单价 RMB', type: 'number', width: '100px' },
+    { key: 'unit_price_hkd', label: '单价 HKD', readonly: true, calc: r => freeUnitHkd(r, fxRmbHkd), width: '100px' },
+    { key: 'amount', label: '成品金额 HKD', readonly: true, calc: r => freeAmountHkd(r, fxRmbHkd), width: '90px' },
     { key: 'tax_pct', label: '税点 %', type: 'number', width: '90px' },
     { key: 'note', label: '备注' },
   ];
   renderTable(host.querySelector('#wb-pkmat'), pkCols, payload.packaging_materials, { readonly: !canEdit, onChange: wrappedOnChange });
   refreshes.push(renderLossSummary(host.querySelector('#wb-pkmat'), '六、包装材料 成本汇总',
-    () => sum(payload.packaging_materials || [], r => num(r.qty) * num(r.unit_price)),
+    () => sum(payload.packaging_materials || [], r => freeAmountHkd(r, fxRmbHkd)),
     () => 0, fxRmbHkd, 'HKD'));  // 不计损耗；包装材料为港币
   payload.carton_calc = payload.carton_calc || { pl: 0, pw: 0, ph: 0, cl: 0, cw: 0, ch: 0, box_price: 0, qty: 1, ka_label: 'K=A', flat_card: 0 };
   renderCartonCalc(host.querySelector('#wb-carton-calc'), payload.carton_calc, canEdit, wrappedOnChange);
@@ -3480,10 +3508,10 @@ function computeTotals(sections, p) {
   const injection = applyLoss(sum(mold.injection || [], r => num(r.shot_price) / Math.max(num(r.sets), 1)), mold.injection_loss_pct ?? 3);
   // 注：模板里"成品金额"列其实是 啤价/套数 之类，这里先按 shot_price/sets 估算，导出时严格按模板填回。
   const second_proc = applyLoss(sum(pnt.second_proc || [], r => num(r.price) * num(r.qty)), pnt.second_proc_loss_pct ?? 1) * _salesFx;
-  const electronics = (freeTableSubtotal(elecSrc)  // 电子部优先，与导出一致
-                    + freeTableSubtotal(eng.hardware || [])) * _salesFx;  // 五金不计损耗
-  const aux = applyLoss(freeTableSubtotal(eng.aux_materials || []), eng.aux_loss_pct ?? 1) * _salesFx;
-  const packaging_mat = applyLoss(sum(eng.packaging_materials || [], r => num(r.qty) * num(r.unit_price)), eng.packaging_loss_pct ?? 1) * _salesFx;
+  const electronics = (freeTableSubtotal(elecSrc, _salesFx)  // 电子部优先，与导出一致
+                    + freeTableSubtotal(eng.hardware || [], _salesFx)) * _salesFx;  // 五金不计损耗
+  const aux = applyLoss(freeTableSubtotal(eng.aux_materials || [], _salesFx), eng.aux_loss_pct ?? 1) * _salesFx;
+  const packaging_mat = applyLoss(freeTableSubtotal(eng.packaging_materials || [], _salesFx), eng.packaging_loss_pct ?? 1) * _salesFx;
   const asm_labor = sum(asm.assembly_labor || [], r => num(r.unit_price) * num(r.qty)) * _salesFx;  // 装配人工港币 → RMB
   const pkg_labor = sum(asm.packaging_labor || [], r => num(r.unit_price) * num(r.qty)) * _salesFx;
   const shipping = num(p.shipping_per_pcs);

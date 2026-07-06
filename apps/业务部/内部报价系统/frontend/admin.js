@@ -65,7 +65,11 @@ function renderUsers() {
       <td><b>${esc(u.username)}</b></td>
       <td>${esc(u.display_name)}</td>
       <td>${esc(u.dept_name || u.dept)}</td>
-      <td>${ROLE_ZH[u.role] || u.role}</td>
+      <td><select class="role-sel" data-id="${u.id}" data-username="${esc(u.username)}" data-cur="${u.role}" style="padding:3px 6px">
+        <option value="staff" ${u.role==='staff'?'selected':''}>员工</option>
+        <option value="supervisor" ${u.role==='supervisor'?'selected':''}>主管</option>
+        <option value="admin" ${u.role==='admin'?'selected':''}>管理员</option>
+      </select></td>
       <td>${isLocked ? '<span class="badge b-empty">已锁定</span>' : '<span class="badge b-approved">正常</span>'}</td>
       <td class="ro" style="font-size:12px">${last}</td>
       <td>
@@ -86,6 +90,19 @@ function renderUsers() {
   document.querySelectorAll('.btn-lock').forEach(b => b.onclick = () => lockUser(b.dataset.id, b.dataset.username));
   document.querySelectorAll('.btn-unlock').forEach(b => b.onclick = () => unlockUser(b.dataset.id));
   document.querySelectorAll('.btn-del').forEach(b => b.onclick = () => delUser(b.dataset.id, b.dataset.username));
+  document.querySelectorAll('.role-sel').forEach(s => s.onchange = () => changeRole(s.dataset.id, s.dataset.username, s.value, s.dataset.cur));
+}
+
+async function changeRole(id, username, role, cur) {
+  if (role === cur) return;
+  if (!confirm(`把「${username}」的角色改为「${ROLE_ZH[role] || role}」？\n会按新角色模板重置该用户权限（之前手动改的权限会被覆盖）。`)) {
+    loadUsers();  // 取消则还原下拉
+    return;
+  }
+  try {
+    await api('/admin/users/' + id + '/role', { method: 'PUT', body: JSON.stringify({ role }) });
+    await loadUsers();
+  } catch (e) { alert(e.message); loadUsers(); }
 }
 
 // ============== 权限矩阵抽屉 ==============

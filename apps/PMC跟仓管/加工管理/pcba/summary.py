@@ -1,3 +1,87 @@
+INBOUND_TYPES = {"inbound_raw", "finished", "semi_finished", "semi_inbound"}
+OUTBOUND_TYPES = {"issue", "semi_outbound"}
+
+
+def _qty(record):
+    return int(record.get("qty") or 0)
+
+
+def _name(record, key, fallback):
+    value = record.get(key)
+    return value if value else fallback
+
+
+def _new_total(**extra):
+    return {**extra, "inbound": 0, "outbound": 0, "balance": 0}
+
+
+def _apply_flow(total, rec_type, qty):
+    if rec_type in INBOUND_TYPES:
+        total["inbound"] += qty
+    elif rec_type in OUTBOUND_TYPES:
+        total["outbound"] += qty
+    total["balance"] = total["inbound"] - total["outbound"]
+
+
+def compute_material_totals(records):
+    totals = {}
+    for record in records:
+        material = _name(record, "material", "未分类")
+        total = totals.setdefault(material, _new_total(material=material))
+        _apply_flow(total, record.get("rec_type"), _qty(record))
+    return [totals[name] for name in sorted(totals)]
+
+
+def compute_department_totals(records, departments):
+    totals = {
+        department: _new_total(department=department)
+        for department in departments
+    }
+    for record in records:
+        department = _name(record, "department", "未分部门")
+        total = totals.setdefault(department, _new_total(department=department))
+        _apply_flow(total, record.get("rec_type"), _qty(record))
+    ordered = [totals[department] for department in departments if department in totals]
+    ordered.extend(
+        totals[department]
+        for department in sorted(totals)
+        if department not in departments
+    )
+    return ordered
+
+
+def compute_material_department_totals(records):
+    totals = {}
+    for record in records:
+        material = _name(record, "material", "未分类")
+        department = _name(record, "department", "未分部门")
+        key = (material, department)
+        total = totals.setdefault(
+            key,
+            _new_total(material=material, department=department),
+        )
+        _apply_flow(total, record.get("rec_type"), _qty(record))
+    return [totals[key] for key in sorted(totals)]
+
+
+def compute_public_summary(records, departments, filters=None):
+    materials = compute_material_totals(records)
+    department_totals = compute_department_totals(records, departments)
+    totals = _new_total()
+    for row in materials:
+        totals["inbound"] += row["inbound"]
+        totals["outbound"] += row["outbound"]
+    totals["balance"] = totals["inbound"] - totals["outbound"]
+    return {
+        "filters": filters or {},
+        "record_count": len(records),
+        "totals": totals,
+        "materials": materials,
+        "department_totals": department_totals,
+        "material_department": compute_material_department_totals(records),
+    }
+
+
 def compute_summary(records, location_names):
     """汇总计算（纯函数）。
 
@@ -19,7 +103,7 @@ def compute_summary(records, location_names):
         elif t == "issue":
             if r["location"] in issue:
                 issue[r["location"]] += qty
-        elif t == "finished":
+        elif t in ("finished", "semi_finished"):
             if r["location"] in finished:
                 finished[r["location"]] += qty
 

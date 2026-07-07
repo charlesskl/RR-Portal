@@ -4,8 +4,10 @@ import sqlite3
 from pcba.auth import hash_password
 
 DEFAULT_DB = os.path.join("data", "pcba.db")
-LOCATIONS = ["东莞车间", "东莞加工厂利鸿", "邵阳华登", "河源华兴"]
-DEFAULT_MATERIALS = ["77794-PCBA板"]
+LOCATIONS = ["东莞车间", "东莞加工厂利鸿", "邵阳华登", "河源华兴", "新邵"]
+DEFAULT_MATERIALS = ["NFC贴纸", "PCBA板"]
+DEPARTMENTS = ["兴信B来料仓", "装配", "半成品", "外发", "河源华兴", "邵阳", "新邵"]
+DEFAULT_DEPARTMENT = DEPARTMENTS[0]
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -13,6 +15,7 @@ CREATE TABLE IF NOT EXISTS users (
     username TEXT UNIQUE NOT NULL,
     password_hash TEXT NOT NULL,
     role TEXT NOT NULL,
+    department TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE TABLE IF NOT EXISTS locations (
@@ -24,15 +27,24 @@ CREATE TABLE IF NOT EXISTS materials (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT UNIQUE NOT NULL
 );
+CREATE TABLE IF NOT EXISTS suppliers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT UNIQUE NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 CREATE TABLE IF NOT EXISTS records (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     rec_type TEXT NOT NULL,
     location_id INTEGER,
     rec_date TEXT,
     doc_no TEXT,
-    material TEXT NOT NULL DEFAULT '77794-PCBA板',
+    material TEXT NOT NULL DEFAULT 'PCBA板',
     qty INTEGER NOT NULL,
     remark TEXT,
+    department TEXT NOT NULL DEFAULT '兴信B来料仓',
+    supplier TEXT,
+    po_no TEXT,
+    customer_name TEXT,
     created_by INTEGER,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     FOREIGN KEY (location_id) REFERENCES locations(id),
@@ -50,19 +62,41 @@ def get_conn():
     folder = os.path.dirname(path)
     if folder:
         os.makedirs(folder, exist_ok=True)
-    conn = sqlite3.connect(path, timeout=10)
+    conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
-    # 多线程/多请求并发下减少 "database is locked"：WAL + 忙等重试
-    conn.execute("PRAGMA journal_mode = WAL")
-    conn.execute("PRAGMA busy_timeout = 5000")
     return conn
+
+
+def _column_exists(conn, table, column):
+    rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
+    return any(row["name"] == column for row in rows)
+
+
+def _migrate_schema(conn):
+    if not _column_exists(conn, "users", "department"):
+        conn.execute("ALTER TABLE users ADD COLUMN department TEXT")
+    conn.execute(
+        "UPDATE users SET department=? WHERE department IS NULL AND role != 'admin'",
+        (DEFAULT_DEPARTMENT,),
+    )
+    if not _column_exists(conn, "records", "department"):
+        conn.execute(
+            "ALTER TABLE records ADD COLUMN department TEXT NOT NULL DEFAULT '兴信B来料仓'"
+        )
+    if not _column_exists(conn, "records", "supplier"):
+        conn.execute("ALTER TABLE records ADD COLUMN supplier TEXT")
+    if not _column_exists(conn, "records", "po_no"):
+        conn.execute("ALTER TABLE records ADD COLUMN po_no TEXT")
+    if not _column_exists(conn, "records", "customer_name"):
+        conn.execute("ALTER TABLE records ADD COLUMN customer_name TEXT")
 
 
 def init_db():
     conn = get_conn()
     try:
         conn.executescript(SCHEMA)
+        _migrate_schema(conn)
         # 预置加工点
         for i, name in enumerate(LOCATIONS, start=1):
             conn.execute(

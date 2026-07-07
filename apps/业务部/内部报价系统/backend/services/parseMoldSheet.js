@@ -94,7 +94,8 @@ function formatStructure(v) {
   const s = String(v || '').trim();
   if (!s || s === '无') return '';
   const n = parseNumber(s);
-  return n != null ? `${n}个行位` : s;
+  if (n != null) return n > 0 ? `${n}个行位` : '';
+  return s;
 }
 
 function parseWorkbook(buf) {

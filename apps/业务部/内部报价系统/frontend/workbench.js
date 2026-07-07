@@ -389,6 +389,9 @@ function elecRowAmount(r) {
   }
   return num(r.qty) * num(r.unit_price);
 }
+function elecDetailRowCount(parts) {
+  return (parts || []).reduce((a, p) => a + 1 + ((p.children || []).length), 0);
+}
 
 // 电子「含税核价 / 含利润价」逐行重算（与成本汇总 renderElecExtra 同一公式）
 // 含税核价 = (零件成本 + 邦定 + 贴片 + 人工 + 测试 + 包装) ×(1+利润%) + 抵税差额 + 抵税差额×10%
@@ -1766,15 +1769,15 @@ function renderEngineering(host, payload, canEdit, onChange, fxRmbHkd, fxRmbUsd)
       if (!r.ok) throw new Error(j.error || '解析失败');
       preview.innerHTML = `
         <div class="card" style="background:#f0fdf4;border:1px solid #86efac;">
-          <p>从 <b>${escapeHtml(j.sheet_used || '')}</b> 解析到 <b>${j.molds.length}</b> 副模具：</p>
+          <p>从 <b>${escapeHtml(j.sheet_used || '')}</b> 解析到 <b>${j.molds.length}</b> 行明细：</p>
           <table class="wb-table"><thead><tr>
             <th>模号</th><th>名称</th><th>类型</th><th>材质</th>
-            <th>出模数</th><th>套数</th><th>周期(秒)</th><th>模具尺寸</th><th>价格RMB</th><th>备注</th>
+            <th>出模数</th><th>套数</th><th>净重(g)</th><th>周期(秒)</th><th>机型</th><th>目标数</th><th>图片</th><th>模具尺寸</th><th>价格RMB</th><th>备注</th>
           </tr></thead><tbody>
           ${j.molds.map(m => `<tr>
             <td>${escapeHtml(m.mold_no || '')}</td><td>${escapeHtml(m.name || '')}</td><td>${escapeHtml(m.mold_type || '')}</td>
             <td>${escapeHtml(m.material || '')}</td><td>${escapeHtml(m.cavity || '')}</td>
-            <td>${escapeHtml(m.sets ?? '')}</td><td>${escapeHtml(m.cycle_sec ?? '')}</td><td>${escapeHtml((m.detail && m.detail.mold_size) || '')}</td><td>${escapeHtml(m.price_rmb ?? '')}</td><td>${escapeHtml(m.note || '')}</td>
+            <td>${escapeHtml(m.sets ?? '')}</td><td>${escapeHtml(m.weight_g ?? '')}</td><td>${escapeHtml(m.cycle_sec ?? '')}</td><td>${escapeHtml(m.machine_model || '')}</td><td>${escapeHtml(m.target ?? '')}</td><td>${escapeHtml((m.images || []).length)}</td><td>${escapeHtml((m.detail && m.detail.mold_size) || '')}</td><td>${escapeHtml(m.price_rmb ?? '')}</td><td>${escapeHtml(m.note || '')}</td>
           </tr>`).join('')}
           </tbody></table>
           <div style="margin-top:10px">
@@ -1867,6 +1870,9 @@ function renderElectronic(host, payload, canEdit, onChange, fxRmbHkd) {
   payload.electronics_loss_pct = payload.electronics_loss_pct ?? 1;
   payload.electronics_extra = payload.electronics_extra || { test_repair: 0, packing_shipping: 0, profit_pct: 10, tax_diff: 0, tax_payable: 0 };
   ['profit_pct', 'tax_diff', 'tax_payable'].forEach(k => { if (payload.electronics_extra[k] == null) payload.electronics_extra[k] = k === 'profit_pct' ? 10 : 0; });
+  if (payload.electronics_doc && payload.electronics_doc.parts) {
+    payload.electronics_doc.parts_count = elecDetailRowCount(payload.electronics_doc.parts);
+  }
 
   host.innerHTML = `
     <h3>电子部分
@@ -1914,6 +1920,7 @@ function renderElectronic(host, payload, canEdit, onChange, fxRmbHkd) {
             <th style="width:90px">单价 RMB</th>
             <th style="width:90px">合计 RMB</th>
             <th style="width:120px">备注</th>
+            ${canEdit ? '<th style="width:48px"></th>' : ''}
           </tr></thead>
           <tbody id="elec-detail-tbody"></tbody>
         </table>
@@ -1931,7 +1938,8 @@ function renderElectronic(host, payload, canEdit, onChange, fxRmbHkd) {
         <td><input type="number" step="any" value="${num(p.qty)}" data-pi="${i}" data-k="qty" ${ro} style="width:75px"/></td>
         <td><input type="number" step="any" value="${num(p.unit_price)}" data-pi="${i}" data-k="unit_price" ${ro} style="width:85px"/></td>
         <td class="ro">${formatNum(num(p.qty) * num(p.unit_price))}</td>
-        <td><input value="${(p.note || '').replace(/"/g, '&quot;')}" data-pi="${i}" data-k="note" ${ro} /></td>`;
+        <td><input value="${(p.note || '').replace(/"/g, '&quot;')}" data-pi="${i}" data-k="note" ${ro} /></td>
+        ${canEdit ? `<td class="row-actions"><button class="mini danger el-detail-del" type="button" data-pi="${i}" title="删除">×</button></td>` : ''}`;
       if (isChild) tr.style.background = '#f8fafc';
       tbody.appendChild(tr);
     };
@@ -1950,7 +1958,8 @@ function renderElectronic(host, payload, canEdit, onChange, fxRmbHkd) {
           <td><input type="number" step="any" value="${num(c.qty)}" data-pi="${i}" data-ci="${ci}" data-k="qty" ${ro} style="width:75px"/></td>
           <td><input type="number" step="any" value="${num(c.unit_price)}" data-pi="${i}" data-ci="${ci}" data-k="unit_price" ${ro} style="width:85px"/></td>
           <td class="ro">${formatNum(num(c.qty) * num(c.unit_price))}</td>
-          <td><input value="${(c.note || '').replace(/"/g, '&quot;')}" data-pi="${i}" data-ci="${ci}" data-k="note" ${ro} /></td>`;
+          <td><input value="${(c.note || '').replace(/"/g, '&quot;')}" data-pi="${i}" data-ci="${ci}" data-k="note" ${ro} /></td>
+          ${canEdit ? `<td class="row-actions"><button class="mini danger el-detail-del" type="button" data-pi="${i}" data-ci="${ci}" title="删除">×</button></td>` : ''}`;
         tbody.appendChild(tr);
       });
     });
@@ -1983,6 +1992,24 @@ function renderElectronic(host, payload, canEdit, onChange, fxRmbHkd) {
         if (inp.dataset.k === 'qty' || inp.dataset.k === 'unit_price') {
           inp.onchange = () => { if (isDerivedSummary()) renderElectronic(host, payload, canEdit, onChange, fxRmbHkd); };
         }
+      });
+      tbody.querySelectorAll('.el-detail-del').forEach(btn => {
+        btn.onclick = () => {
+          const pi = +btn.dataset.pi;
+          const ci = btn.dataset.ci;
+          const part = doc.parts[pi];
+          if (!part) return;
+          if (ci != null) {
+            part.children.splice(+ci, 1);
+          } else {
+            if ((part.children || []).length && !confirm(`删除「${part.name || '该零件'}」及其子项？`)) return;
+            doc.parts.splice(pi, 1);
+          }
+          doc.parts_count = elecDetailRowCount(doc.parts);
+          autoResummarize();
+          onChange();
+          renderElectronic(host, payload, canEdit, onChange, fxRmbHkd);
+        };
       });
       // 展开折叠状态记忆
       detailHost.querySelector('details').ontoggle = (e) => { doc._open = e.target.open; };
@@ -2052,7 +2079,7 @@ function renderElectronic(host, payload, canEdit, onChange, fxRmbHkd) {
             // 保存原始 parts/extras 供导出
             payload.electronics_doc = {
               parts: j.parts, extras: j.extras, meta: j.meta || {},
-              parts_count: j.count,
+              parts_count: elecDetailRowCount(j.parts || []),
               imported_at: new Date().toISOString().slice(0, 10),
             };
             impPreview.innerHTML = ''; impFile.value = '';
@@ -2196,16 +2223,22 @@ function renderMolding(host, payload, canEdit, onChange, refMolds, fxRmbHkd, use
     payload.injection = refMolds.map(m => ({
       mold_no: m.mold_no || '', name: m.name,
       material: m.material || '',
-      material_grade: '',
+      material_grade: m.material_grade || '',
       color: m.color || '',
       cavity: m.cavity || '',
       weight_g: m.weight_g ?? null,
       cycle_sec: m.cycle_sec ?? null,
       sets: m.sets || 1,
+      machine: m.machine || '',
+      machine_model: m.machine_model || '',
+      target: m.target ?? null,
+      material_unit_price: m.material_unit_price ?? null,
+      shot_price: m.shot_price ?? null,
+      note: m.note || '',
     }));
   }
 
-  const canEditPrices = canEdit && (userRole === 'supervisor' || userRole === 'admin');
+  const canEditPrices = canEdit;
   host.innerHTML = `
     <h3>二、注塑部分 <small>料损耗 %
       <input id="inj-loss" type="number" step="any" style="width:60px" value="${payload.injection_loss_pct ?? 3}" ${canEdit ? '' : 'disabled'} />
@@ -2221,7 +2254,7 @@ function renderMolding(host, payload, canEdit, onChange, refMolds, fxRmbHkd, use
     <div id="wb-blow"></div>
 
     <details class="ref-tables" style="margin-top:18px">
-      <summary class="ref-summary">📋 参考表（料价 / 机型价）${canEditPrices ? ' · 主管可改' : ''}</summary>
+      <summary class="ref-summary">📋 参考表（料价 / 机型价）${canEditPrices ? ' · 本单可改' : ''}</summary>
       ${canEditPrices ? '<div style="margin-top:8px"><button id="btn-pull-refs" class="mini" type="button">🔄 同步全局参考表到本单</button> <small class="muted">用最新的全局参考表覆盖本单</small></div>' : ''}
       <div style="margin-top:10px;display:grid;grid-template-columns:1fr 1fr;gap:16px">
         <div>
@@ -2243,17 +2276,9 @@ function renderMolding(host, payload, canEdit, onChange, refMolds, fxRmbHkd, use
     { key: 'price', label: 'HK$/Lb', type: 'number', width: '100px' },
     { key: 'price_per_g', label: 'HK$/g', readonly: true, calc: r => num(r.price) / 454, width: '100px' },
   ];
-  // 参考表改动：同步到全局 (debounced)
-  let refSaveTimer = null;
-  const saveRefDebounced = (key, data) => {
-    clearTimeout(refSaveTimer);
-    refSaveTimer = setTimeout(() => {
-      api('/refs/' + key, { method: 'PUT', body: JSON.stringify({ data }) }).catch(() => {});
-      window.__refs[key] = JSON.parse(JSON.stringify(data));
-    }, 500);
-  };
-  const onMatChange = () => { onChange(); saveRefDebounced('material_prices', payload.material_prices); };
-  const onMachChange = () => { onChange(); saveRefDebounced('machine_prices', payload.machine_prices); };
+  // 参考表改动仅保存到当前报价单，不反向覆盖全局参考表。
+  const onMatChange = () => { onChange(); };
+  const onMachChange = () => { onChange(); };
   renderTable(host.querySelector('#wb-material-prices'), mpCols, payload.material_prices, { readonly: !canEditPrices, onChange: onMatChange });
 
   // 机型价表
@@ -2293,12 +2318,18 @@ function renderMolding(host, payload, canEdit, onChange, refMolds, fxRmbHkd, use
           mold_no: m.mold_no || existing.mold_no || '',
           name: m.name,
           material: m.material || existing.material || '',
-          material_grade: existing.material_grade || '',
+          material_grade: m.material_grade || existing.material_grade || '',
           color: m.color || existing.color || '',
           cavity: m.cavity || existing.cavity || '',
           weight_g: m.weight_g ?? existing.weight_g ?? null,
           cycle_sec: m.cycle_sec ?? existing.cycle_sec ?? null,
           sets: existing.sets ?? (m.sets || 1),
+          machine: m.machine || existing.machine || '',
+          machine_model: m.machine_model || existing.machine_model || '',
+          target: m.target ?? existing.target ?? null,
+          material_unit_price: m.material_unit_price ?? existing.material_unit_price ?? null,
+          shot_price: m.shot_price ?? existing.shot_price ?? null,
+          note: m.note || existing.note || '',
         };
       });
       onChange(); renderMolding(host, payload, canEdit, onChange, refMolds, fxRmbHkd, userRole);
@@ -2345,8 +2376,21 @@ function renderMolding(host, payload, canEdit, onChange, refMolds, fxRmbHkd, use
     };
   }
 
-  // 颜色判断：Pantone (如 675C / 231C / 7547C) 或含 色/白/黑/灰 等
-  const isColorToken = (s) => /^\d{2,4}[A-Z]{1,2}$/.test(s) || /色|白|黑|灰|红|蓝|绿|黄|紫|棕|金|银/.test(s);
+  // 颜色判断：Pantone (如 675C / 231C / 7547C) 或含 色/白/黑/灰 等。
+  // 注意不要把 ABS 750SW、PP 7032 E3 这类料型号误判成颜色。
+  const isColorToken = (s) => {
+    const t = String(s || '').replace(/\s+/g, '').toUpperCase();
+    return /^(?:PANTONE)?\d{2,4}(?:C|U|TCX|TPX)$/.test(t) || /色|白|黑|灰|红|蓝|绿|黄|紫|棕|金|银/.test(String(s || ''));
+  };
+  const isMaterialGrade = (material, model) => {
+    const mat = String(material || '').replace(/\s+/g, '').toUpperCase();
+    const mod = String(model || '').replace(/\s+/g, '').toUpperCase();
+    if (!mat || !mod) return false;
+    return (payload.material_prices || []).some(p =>
+      String(p.name || '').replace(/\s+/g, '').toUpperCase() === mat &&
+      String(p.model || '').replace(/\s+/g, '').toUpperCase() === mod
+    );
+  };
 
   // 旧数据迁移：material_color → material / material_grade / color
   (payload.injection || []).forEach(r => {
@@ -2361,7 +2405,8 @@ function renderMolding(host, payload, canEdit, onChange, refMolds, fxRmbHkd, use
         else { r.material_grade = parts.slice(1).join(' '); r.color = ''; }
       } else if (parts.length === 2) {
         r.material = parts[0];
-        if (isColorToken(parts[1])) r.color = parts[1];
+        if (isMaterialGrade(r.material, parts[1])) r.material_grade = parts[1];
+        else if (isColorToken(parts[1])) r.color = parts[1];
         else r.material_grade = parts[1];
       } else if (parts.length === 1) {
         r.material = parts[0];
@@ -2371,6 +2416,11 @@ function renderMolding(host, payload, canEdit, onChange, refMolds, fxRmbHkd, use
     if (r.material_grade && !r.color && isColorToken(r.material_grade)) {
       r.color = r.material_grade;
       r.material_grade = '';
+    }
+    // 修正旧数据：曾经会把 ABS 750SW 这类料型号误塞到 color。
+    if (!r.material_grade && r.color && isMaterialGrade(r.material, r.color)) {
+      r.material_grade = r.color;
+      r.color = '';
     }
   });
 

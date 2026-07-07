@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>公开汇总 - 唱片机管理系统</title>
+<link rel="stylesheet" href="/static/style.css?v=11">
+</head>
+<body class="summary-page">
+<main class="summary-shell">
+  <section class="panel public-summary-page-panel">
+    <div class="section-head">
+      <div>
+        <h1>公开汇总</h1>
+        <p>未登录也可查看，只显示数量汇总</p>
+      </div>
+      <div class="summary-actions">
+        <span class="status-pill">只读</span>
+        <a class="ghost-btn summary-back" href="/">返回登录</a>
+      </div>
+    </div>
+
+    <div class="filter-bar public-summary-filter">
+      <input id="publicDateFrom" type="date" aria-label="开始日期">
+      <input id="publicDateTo" type="date" aria-label="结束日期">
+      <button class="primary-btn slim" onclick="loadPublicSummary()">筛选</button>
+      <button class="ghost-btn" onclick="clearPublicDates()">清空</button>
+    </div>
+
+    <div id="publicCards" class="metric-grid"></div>
+
+    <div class="split-grid">
+      <div>
+        <div class="mini-title">物料分类</div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>物料</th><th>入库</th><th>出库/领料</th><th>结余</th></tr>
+            </thead>
+            <tbody id="publicMaterialRows"></tbody>
+          </table>
+        </div>
+      </div>
+      <div>
+        <div class="mini-title">部门汇总</div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>部门</th><th>入库</th><th>出库/领料</th><th>结余</th></tr>
+            </thead>
+            <tbody id="publicDepartmentRows"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script>
+const APP_BASE = window.APP_BASE || (() => {
+  const marker = '/static/';
+  const index = window.location.pathname.indexOf(marker);
+  return index > 0 ? window.location.pathname.slice(0, index) : '';
+})();
+
+function appPath(path) {
+  return `${APP_BASE}${path}`;
+}
+
+function esc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function fmt(n) {
+  return Number(n || 0).toLocaleString('zh-CN');
+}
+
+function publicQuery() {
+  const params = new URLSearchParams();
+  const from = document.getElementById('publicDateFrom').value;
+  const to = document.getElementById('publicDateTo').value;
+  if (from) params.set('date_from', from);
+  if (to) params.set('date_to', to);
+  return params.toString();
+}
+
+async function loadPublicSummary() {
+  const query = publicQuery();
+  const r = await fetch(appPath('/api/public-summary' + (query ? '?' + query : '')));
+  const data = await r.json();
+  if (!r.ok) {
+    document.getElementById('publicCards').innerHTML =
+      `<div class="metric-card danger"><span>筛选错误</span><strong>${esc(data.detail || '加载失败')}</strong></div>`;
+    return;
+  }
+  const totals = data.totals || {};
+  document.getElementById('publicCards').innerHTML = [
+    ['记录数', data.record_count || 0],
+    ['入库合计', totals.inbound || 0],
+    ['出库/领料', totals.outbound || 0],
+    ['当前结余', totals.balance || 0],
+  ].map(([label, value]) =>
+    `<div class="metric-card"><span>${label}</span><strong>${fmt(value)}</strong></div>`
+  ).join('');
+
+  document.getElementById('publicMaterialRows').innerHTML =
+    (data.materials || []).map(row => `<tr>
+      <td>${esc(row.material)}</td>
+      <td>${fmt(row.inbound)}</td>
+      <td>${fmt(row.outbound)}</td>
+      <td>${fmt(row.balance)}</td>
+    </tr>`).join('') || '<tr><td colspan="4">暂无数据</td></tr>';
+
+  document.getElementById('publicDepartmentRows').innerHTML =
+    (data.department_totals || []).map(row => `<tr>
+      <td>${esc(row.department)}</td>
+      <td>${fmt(row.inbound)}</td>
+      <td>${fmt(row.outbound)}</td>
+      <td>${fmt(row.balance)}</td>
+    </tr>`).join('') || '<tr><td colspan="4">暂无数据</td></tr>';
+}
+
+function clearPublicDates() {
+  document.getElementById('publicDateFrom').value = '';
+  document.getElementById('publicDateTo').value = '';
+  loadPublicSummary();
+}
+
+document.querySelector('.summary-back').href = appPath('/');
+loadPublicSummary();
+</script>
+</body>
+</html>

@@ -2,75 +2,189 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<title>77794 PCBA 系统</title>
-<link rel="stylesheet" href="/static/style.css?v=2">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>唱片机管理系统</title>
+<link rel="stylesheet" href="/static/style.css?v=10">
 </head>
-<body>
-<header>
-  <span class="title">77794 PCBA 主板系统</span>
-  <span class="spacer"></span>
-  <span id="who"></span>
-  <button id="logoutBtn" onclick="logout()">退出</button>
+<body class="app-page">
+<header class="app-header">
+  <div class="brand-row">
+    <div class="brand-mark logo-mark"><img src="/static/royal-regent-logo-transparent.png" alt="Royal Regent"></div>
+    <div>
+      <h1>唱片机管理系统</h1>
+      <p id="who"></p>
+    </div>
+  </div>
+  <button id="logoutBtn" class="ghost-btn inverted" onclick="logout()">退出</button>
 </header>
-<nav>
+
+<nav class="app-nav">
   <button class="tab-btn" data-tab="entry" onclick="showTab('entry')">录入</button>
   <button class="tab-btn" data-tab="summary" onclick="showTab('summary')">汇总</button>
   <button class="tab-btn" id="matTabBtn" data-tab="materials" onclick="showTab('materials')" style="display:none">物料管理</button>
+  <button class="tab-btn" id="supTabBtn" data-tab="suppliers" onclick="showTab('suppliers')" style="display:none">供应商管理</button>
   <button class="tab-btn" id="usersTabBtn" data-tab="users" onclick="showTab('users')" style="display:none">用户管理</button>
+  <button class="tab-btn" data-tab="password" onclick="showTab('password')">修改密码</button>
 </nav>
 
-<section id="entry" class="tab">
-  <h3>录入流水</h3>
-  <div class="form-row">
-    <select id="recType" onchange="onTypeChange()">
-      <option value="inbound_raw">来料入仓（登信）</option>
-      <option value="issue">领料</option>
-      <option value="finished">成品入仓</option>
-    </select>
-    <select id="locationId"></select>
-    <select id="material" title="物料名称"></select>
-    <input id="recDate" type="date" title="日期">
-    <input id="docNo" placeholder="单据编号">
-    <input id="qty" type="number" placeholder="数量">
-    <input id="remark" placeholder="备注">
-    <button id="submitBtn" class="btn-primary" onclick="saveRecord()">提交</button>
-    <button id="cancelBtn" class="btn-ghost" onclick="cancelEdit()" style="display:none">取消修改</button>
-    <span id="editBanner" class="edit-banner"></span>
-  </div>
-  <p id="entryErr" class="err"></p>
-  <table id="recTable"><thead><tr>
-    <th>类型</th><th>物料名称</th><th>日期</th><th>单据编号</th>
-    <th>数量</th><th>备注</th><th>录入人</th><th>操作</th>
-  </tr></thead><tbody></tbody></table>
-</section>
+<main class="app-shell">
+  <section class="panel filter-panel">
+    <div>
+      <h2 id="deptTitle">部门工作台</h2>
+      <p id="currentFilterText">当前显示全部日期</p>
+    </div>
+    <div class="filter-bar">
+      <input id="filterFrom" type="date" aria-label="开始日期">
+      <input id="filterTo" type="date" aria-label="结束日期">
+      <input id="filterDocNo" placeholder="单据编号">
+      <button class="primary-btn slim" onclick="applyFilters()">筛选</button>
+      <button class="ghost-btn" onclick="clearFilters()">清空</button>
+    </div>
+  </section>
 
-<section id="summary" class="tab" style="display:none">
-  <h3>汇总 <button class="btn-primary btn-sm" onclick="exportExcel()">导出 Excel</button></h3>
-  <table id="sumTable"></table>
-</section>
+  <section id="entry" class="tab panel">
+    <div class="section-head">
+      <div>
+        <h2>录入流水</h2>
+        <p>当前部门只能新增和修改本部门记录</p>
+      </div>
+      <span id="editBanner" class="status-pill subtle"></span>
+    </div>
 
-<section id="materials" class="tab" style="display:none">
-  <h3>物料管理</h3>
-  <div class="form-row">
-    <input id="newMaterial" placeholder="物料名称">
-    <button class="btn-primary" onclick="createMaterial()">新增物料</button>
-  </div>
-  <p id="matErr" class="err"></p>
-  <table id="matTable"><thead><tr><th>物料名称</th><th>操作</th></tr></thead><tbody></tbody></table>
-</section>
+    <div class="form-grid">
+      <select id="recType" onchange="onTypeChange()"></select>
+      <select id="locationId"></select>
+      <select id="material" title="物料名称"></select>
+      <select id="supplier" title="供应商" style="display:none"></select>
+      <input id="recDate" type="date" title="日期">
+      <input id="docNo" placeholder="单据编号">
+      <input id="poNo" placeholder="PO" style="display:none">
+      <input id="customerName" placeholder="客名" style="display:none">
+      <input id="qty" type="number" placeholder="数量">
+      <input id="remark" placeholder="备注">
+      <button id="submitBtn" class="primary-btn" onclick="saveRecord()">提交</button>
+      <button id="cancelBtn" class="ghost-btn" onclick="cancelEdit()" style="display:none">取消修改</button>
+    </div>
+    <p id="entryErr" class="err"></p>
+    <div class="table-wrap">
+      <table id="recTable"><thead></thead><tbody></tbody></table>
+    </div>
+  </section>
 
-<section id="users" class="tab" style="display:none">
-  <h3>用户管理</h3>
-  <div class="form-row">
-    <input id="newUser" placeholder="账号">
-    <input id="newPw" placeholder="密码(≥6位)">
-    <select id="newRole"><option value="operator">录入员</option><option value="admin">管理员</option></select>
-    <button class="btn-primary" onclick="createUser()">新增用户</button>
-  </div>
-  <p id="userErr" class="err"></p>
-  <table id="userTable"><thead><tr><th>账号</th><th>角色</th><th>创建时间</th></tr></thead><tbody></tbody></table>
-</section>
+  <section id="summary" class="tab panel" style="display:none">
+    <div class="section-head">
+      <div>
+        <h2>汇总看板</h2>
+        <p>按当前日期筛选范围统计</p>
+      </div>
+      <button class="primary-btn slim" onclick="exportExcel()">导出 Excel</button>
+    </div>
+    <div id="summaryCards" class="metric-grid"></div>
+    <div class="split-grid">
+      <div>
+        <div class="mini-title">物料分类汇总</div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>物料</th><th>入库</th><th>出库/领料</th><th>结余</th></tr>
+            </thead>
+            <tbody id="materialSummaryRows"></tbody>
+          </table>
+        </div>
+      </div>
+      <div>
+        <div class="mini-title">部门业务汇总</div>
+        <div class="table-wrap">
+          <table id="sumTable"></table>
+        </div>
+      </div>
+    </div>
+  </section>
 
-<script src="/static/app.js?v=5"></script>
+  <section id="suppliers" class="tab panel" style="display:none">
+    <div class="section-head">
+      <div>
+        <h2>供应商管理</h2>
+        <p>仅兴信B来料仓维护供应商基础数据</p>
+      </div>
+    </div>
+    <div id="supplierForm" class="form-grid compact-form">
+      <input id="newSupplier" placeholder="供应商名称">
+      <button id="supplierSubmitBtn" class="primary-btn" onclick="saveSupplier()">新增供应商</button>
+      <button id="supplierCancelBtn" class="ghost-btn" onclick="cancelSupplierEdit()" style="display:none">取消修改</button>
+    </div>
+    <p id="supErr" class="err"></p>
+    <div class="table-wrap">
+      <table id="supTable">
+        <thead><tr><th>供应商名称</th><th>创建时间</th><th>操作</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="materials" class="tab panel" style="display:none">
+    <div class="section-head">
+      <div>
+        <h2>物料管理</h2>
+        <p>系统默认物料为 NFC贴纸 和 PCBA板</p>
+      </div>
+    </div>
+    <div id="materialForm" class="form-grid compact-form">
+      <input id="newMaterial" placeholder="物料名称">
+      <button id="materialSubmitBtn" class="primary-btn" onclick="saveMaterial()">新增物料</button>
+      <button id="materialCancelBtn" class="ghost-btn" onclick="cancelMaterialEdit()" style="display:none">取消修改</button>
+    </div>
+    <p id="matErr" class="err"></p>
+    <div class="table-wrap">
+      <table id="matTable">
+        <thead><tr><th>物料名称</th><th>操作</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="users" class="tab panel" style="display:none">
+    <div class="section-head">
+      <div>
+        <h2>用户管理</h2>
+        <p>管理员创建部门账号</p>
+      </div>
+    </div>
+    <div class="form-grid compact-form">
+      <input id="newUser" placeholder="账号">
+      <input id="newPw" placeholder="密码(至少6位)">
+      <select id="newRole">
+        <option value="operator">录入员</option>
+        <option value="admin">管理员</option>
+      </select>
+      <select id="newDepartment" title="所属部门"></select>
+      <button class="primary-btn" onclick="createUser()">新增用户</button>
+    </div>
+    <p id="userErr" class="err"></p>
+    <div class="table-wrap">
+      <table id="userTable">
+        <thead><tr><th>账号</th><th>角色</th><th>部门</th><th>创建时间</th><th>操作</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="password" class="tab panel" style="display:none">
+    <div class="section-head">
+      <div>
+        <h2>修改密码</h2>
+        <p>所有账号都可以修改自己的登录密码</p>
+      </div>
+    </div>
+    <div class="form-grid compact-form">
+      <input id="myNewPassword" type="password" placeholder="新密码(至少6位)">
+      <input id="myConfirmPassword" type="password" placeholder="确认新密码">
+      <button class="primary-btn" onclick="changeMyPassword()">保存新密码</button>
+    </div>
+    <p id="passwordErr" class="err"></p>
+  </section>
+</main>
+
+<script src="/static/app.js?v=10"></script>
 </body>
 </html>

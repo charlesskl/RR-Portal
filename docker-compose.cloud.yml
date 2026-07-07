@@ -646,7 +646,7 @@ services:
       - PCBA_COOKIE_PATH=/cpg
       - TZ=Asia/Shanghai
       # Session 签名密钥；固定值让重启后登录态不失效，可在 .env.cloud.production 覆盖
-      - PCBA_SECRET=${PCBA_SECRET:-cpg-session-secret-77794-change-me}
+      - PCBA_SECRET=${PCBA_SECRET:-cpg-session-secret-record-player-change-me}
     volumes:
       - ./apps/PMC跟仓管/加工管理/data:/app/data
     healthcheck:

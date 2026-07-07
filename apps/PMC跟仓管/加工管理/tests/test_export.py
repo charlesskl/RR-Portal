@@ -2,8 +2,14 @@ import io
 import openpyxl
 
 
-def admin_login(client):
-    client.post("/api/login", json={"username": "admin", "password": "admin123"})
+DEFAULT_DEPARTMENT = "兴信B来料仓"
+
+
+def admin_login(client, department=DEFAULT_DEPARTMENT):
+    client.post(
+        "/api/login",
+        json={"username": "admin", "password": "admin123", "department": department},
+    )
 
 
 def loc_id(client, name):
@@ -12,7 +18,7 @@ def loc_id(client, name):
 
 
 def test_export_returns_xlsx_with_summary(client):
-    admin_login(client)
+    admin_login(client, "装配")
     sy = loc_id(client, "邵阳华登")
     client.post("/api/records", json={"rec_type": "inbound_raw", "qty": 1000000})
     client.post("/api/records", json={
@@ -34,3 +40,169 @@ def test_export_returns_xlsx_with_summary(client):
             assert row[3] == 762129
             found = True
     assert found
+
+
+def test_export_is_scoped_to_current_department(client):
+    admin_login(client, "装配")
+    sy = loc_id(client, "邵阳华登")
+    client.post("/api/records", json={"rec_type": "inbound_raw", "qty": 1000000})
+    client.post("/api/records", json={
+        "rec_type": "issue", "location_id": sy, "qty": 1690242})
+
+    client.post("/api/logout")
+    admin_login(client, "兴信B来料仓")
+    client.post("/api/records", json={"rec_type": "inbound_raw", "qty": 5})
+
+    r = client.get("/api/export")
+    wb = openpyxl.load_workbook(io.BytesIO(r.content), data_only=True)
+    rows = list(wb["总表"].iter_rows(values_only=True))
+    header_index = next(i for i, row in enumerate(rows) if row and row[0] == "来料仓入仓总数")
+    raw_row = rows[header_index + 1]
+    assert raw_row[0] == 5
+    assert raw_row[1] == 0
+
+
+def test_export_can_filter_by_date_range(client):
+    admin_login(client, "兴信B来料仓")
+    client.post("/api/records", json={
+        "rec_type": "inbound_raw", "rec_date": "2026-07-01", "qty": 10})
+    client.post("/api/records", json={
+        "rec_type": "inbound_raw", "rec_date": "2026-07-05", "qty": 20})
+
+    r = client.get("/api/export?date_from=2026-07-02&date_to=2026-07-31")
+    wb = openpyxl.load_workbook(io.BytesIO(r.content), data_only=True)
+    rows = list(wb["总表"].iter_rows(values_only=True))
+    header_index = next(i for i, row in enumerate(rows) if row and row[0] == "来料仓入仓总数")
+    raw_row = rows[header_index + 1]
+
+    assert raw_row[0] == 20
+
+
+def test_export_can_filter_by_doc_no(client):
+    admin_login(client, "兴信B来料仓")
+    client.post("/api/records", json={
+        "rec_type": "inbound_raw", "doc_no": "KEEP-001", "qty": 12})
+    client.post("/api/records", json={
+        "rec_type": "inbound_raw", "doc_no": "DROP-001", "qty": 88})
+
+    r = client.get("/api/export?doc_no=KEEP")
+    wb = openpyxl.load_workbook(io.BytesIO(r.content), data_only=True)
+    rows = list(wb["总表"].iter_rows(values_only=True))
+    header_index = next(i for i, row in enumerate(rows) if row and row[0] == "来料仓入仓总数")
+    raw_row = rows[header_index + 1]
+
+    assert raw_row[0] == 12
+
+
+def test_xingxin_export_detail_includes_supplier_column(client):
+    admin_login(client, "兴信B来料仓")
+    client.post("/api/suppliers", json={"name": "供应商A"})
+    client.post("/api/records", json={
+        "rec_type": "inbound_raw", "material": "NFC贴纸",
+        "qty": 100, "supplier": "供应商A"})
+
+    r = client.get("/api/export")
+    wb = openpyxl.load_workbook(io.BytesIO(r.content), data_only=True)
+    ws = wb["登信入仓"]
+    headers = [cell.value for cell in ws[1]]
+    assert headers == ["日期", "单据编号", "物料名称", "供应商", "入仓数", "备注"]
+    assert ws.cell(row=2, column=4).value == "供应商A"
+
+
+def test_non_xingxin_export_detail_omits_supplier_column(client):
+    admin_login(client, "装配")
+    dg = loc_id(client, "东莞加工厂利鸿")
+    client.post("/api/records", json={
+        "rec_type": "issue", "location_id": dg, "material": "PCBA板",
+        "qty": 100, "supplier": "供应商A"})
+
+    r = client.get("/api/export")
+    wb = openpyxl.load_workbook(io.BytesIO(r.content), data_only=True)
+    ws = wb["东莞加工厂利鸿领料"]
+    headers = [cell.value for cell in ws[1]]
+    assert headers == ["日期", "单据编号", "物料名称", "领料数", "备注"]
+
+
+def test_export_includes_semi_finished_detail_sheet(client):
+    admin_login(client, "装配")
+    dg = loc_id(client, "东莞加工厂利鸿")
+    client.post("/api/records", json={
+        "rec_type": "semi_finished", "location_id": dg,
+        "material": "PCBA板", "qty": 20})
+
+    r = client.get("/api/export")
+    wb = openpyxl.load_workbook(io.BytesIO(r.content), data_only=True)
+    assert "东莞加工厂利鸿半成品入库" in wb.sheetnames
+    ws = wb["东莞加工厂利鸿半成品入库"]
+    assert [cell.value for cell in ws[1]] == ["日期", "单据编号", "物料名称", "入仓数", "备注"]
+    assert ws.cell(row=2, column=4).value == 20
+
+
+def test_semi_finished_department_export_has_inbound_and_outbound_sheets(client):
+    admin_login(client, "半成品")
+    client.post("/api/records", json={
+        "rec_type": "semi_inbound", "material": "PCBA板", "qty": 80})
+    client.post("/api/records", json={
+        "rec_type": "semi_outbound", "material": "PCBA板", "qty": 30})
+
+    r = client.get("/api/export")
+    wb = openpyxl.load_workbook(io.BytesIO(r.content), data_only=True)
+    assert "半成品入库" in wb.sheetnames
+    assert "半成品出库" in wb.sheetnames
+    inbound = wb["半成品入库"]
+    outbound = wb["半成品出库"]
+    assert inbound.cell(row=2, column=4).value == 80
+    assert outbound.cell(row=2, column=4).value == 30
+
+
+def test_outsource_export_has_finished_and_semi_finished_sheets(client):
+    admin_login(client, "外发")
+    client.post("/api/records", json={
+        "rec_type": "finished", "material": "PCBA板", "qty": 70})
+    client.post("/api/records", json={
+        "rec_type": "semi_finished", "material": "NFC贴纸", "qty": 30})
+
+    r = client.get("/api/export")
+    wb = openpyxl.load_workbook(io.BytesIO(r.content), data_only=True)
+    rows = list(wb["总表"].iter_rows(values_only=True))
+    header_index = next(i for i, row in enumerate(rows) if row and row[0] == "成品入库总数")
+    total_row = rows[header_index + 1]
+    assert total_row == (70, 30, 100)
+    assert "外发成品入库" in wb.sheetnames
+    assert "外发半成品入库" in wb.sheetnames
+    assert wb["外发成品入库"].cell(row=2, column=4).value == 70
+    assert wb["外发半成品入库"].cell(row=2, column=4).value == 30
+
+
+def test_shaoyang_finished_export_includes_po_and_customer_columns(client):
+    admin_login(client, "邵阳")
+    sy = loc_id(client, "邵阳华登")
+    client.post("/api/records", json={
+        "rec_type": "finished", "location_id": sy, "material": "PCBA板",
+        "qty": 45, "po_no": "PO-001", "customer_name": "客户A"})
+
+    r = client.get("/api/export")
+    wb = openpyxl.load_workbook(io.BytesIO(r.content), data_only=True)
+    ws = wb["邵阳华登成品入仓"]
+    assert [cell.value for cell in ws[1]] == [
+        "日期", "单据编号", "物料名称", "PO", "客名", "入仓数", "备注"]
+    assert ws.cell(row=2, column=4).value == "PO-001"
+    assert ws.cell(row=2, column=5).value == "客户A"
+    assert ws.cell(row=2, column=6).value == 45
+
+
+def test_xinshao_finished_export_includes_po_and_customer_columns(client):
+    admin_login(client, "新邵")
+    lid = loc_id(client, "新邵")
+    client.post("/api/records", json={
+        "rec_type": "finished", "location_id": lid, "material": "PCBA板",
+        "qty": 45, "po_no": "PO-X01", "customer_name": "客户X"})
+
+    r = client.get("/api/export")
+    wb = openpyxl.load_workbook(io.BytesIO(r.content), data_only=True)
+    ws = wb["新邵成品入仓"]
+    assert [cell.value for cell in ws[1]] == [
+        "日期", "单据编号", "物料名称", "PO", "客名", "入仓数", "备注"]
+    assert ws.cell(row=2, column=4).value == "PO-X01"
+    assert ws.cell(row=2, column=5).value == "客户X"
+    assert ws.cell(row=2, column=6).value == 45

@@ -2,7 +2,10 @@ import io
 from openpyxl import Workbook
 
 
-def build_workbook(summary, detail_records, location_names):
+def build_workbook(
+    summary, detail_records, location_names, include_supplier=False,
+    warehouse_mode=False, outsource_mode=False, shaoyang_mode=False,
+):
     """summary: compute_summary 的返回；detail_records: 全部记录 dict 列表
     （含 rec_type/location_name/rec_date/doc_no/material/qty/remark）。"""
     wb = Workbook()
@@ -10,26 +13,77 @@ def build_workbook(summary, detail_records, location_names):
     # ---- 总表 ----
     ws = wb.active
     ws.title = "总表"
-    ws.append(["77794唱机PCBA主板明细"])
-    ws.append(["范围", "领料数", "成品完成数", "应存数", "备注"])
-    for row in summary["locations"]:
-        ws.append([row["location"], row["issue"], row["finished"], row["balance"], ""])
-    st = summary["subtotal"]
-    ws.append(["小计：", st["issue"], st["finished"], st["balance"], ""])
+    ws.append(["唱片机管理系统明细"])
     raw = summary["raw"]
-    ws.append(["来料仓入仓总数", "来料仓出库总数", "货仓应存"])
-    ws.append([raw["inbound"], raw["outbound"], raw["balance"]])
+    if outsource_mode:
+        ws.append(["成品入库总数", "半成品入库总数", "入库合计"])
+    else:
+        ws.append(["范围", "领料数", "成品完成数", "应存数", "备注"])
+        for row in summary["locations"]:
+            ws.append([row["location"], row["issue"], row["finished"], row["balance"], ""])
+        st = summary["subtotal"]
+        ws.append(["小计：", st["issue"], st["finished"], st["balance"], ""])
+    if outsource_mode:
+        ws.append([
+            raw.get("finished_inbound", 0),
+            raw.get("semi_finished_inbound", 0),
+            raw["inbound"],
+        ])
+    elif warehouse_mode:
+        ws.append(["半成品入库总数", "半成品出库总数", "半成品应存"])
+        ws.append([raw["inbound"], raw["outbound"], raw["balance"]])
+    else:
+        ws.append(["来料仓入仓总数", "来料仓出库总数", "货仓应存"])
+        ws.append([raw["inbound"], raw["outbound"], raw["balance"]])
 
     # ---- 明细分页 ----
-    def detail_sheet(title, recs, qty_header):
+    def detail_sheet(title, recs, qty_header, include_po_customer=False):
         s = wb.create_sheet(title=title[:31])
-        s.append(["日期", "单据编号", "物料名称", qty_header, "备注"])
+        if include_po_customer:
+            s.append(["日期", "单据编号", "物料名称", "PO", "客名", qty_header, "备注"])
+        elif include_supplier:
+            s.append(["日期", "单据编号", "物料名称", "供应商", qty_header, "备注"])
+        else:
+            s.append(["日期", "单据编号", "物料名称", qty_header, "备注"])
         total = 0
         for r in recs:
-            s.append([r.get("rec_date"), r.get("doc_no"), r.get("material"),
-                      r.get("qty"), r.get("remark")])
+            if include_po_customer:
+                s.append([r.get("rec_date"), r.get("doc_no"), r.get("material"),
+                          r.get("po_no"), r.get("customer_name"), r.get("qty"),
+                          r.get("remark")])
+            elif include_supplier:
+                s.append([r.get("rec_date"), r.get("doc_no"), r.get("material"),
+                          r.get("supplier"), r.get("qty"), r.get("remark")])
+            else:
+                s.append([r.get("rec_date"), r.get("doc_no"), r.get("material"),
+                          r.get("qty"), r.get("remark")])
             total += int(r.get("qty") or 0)
-        s.append([None, None, "小计：", total, None])
+        if include_po_customer:
+            s.append([None, None, None, None, "小计：", total, None])
+        elif include_supplier:
+            s.append([None, None, None, "小计：", total, None])
+        else:
+            s.append([None, None, "小计：", total, None])
+
+    if warehouse_mode:
+        semi_inbound = [r for r in detail_records if r["rec_type"] == "semi_inbound"]
+        semi_outbound = [r for r in detail_records if r["rec_type"] == "semi_outbound"]
+        detail_sheet("半成品入库", semi_inbound, "入仓数")
+        detail_sheet("半成品出库", semi_outbound, "出库数")
+        buf = io.BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+        return buf
+
+    if outsource_mode:
+        finished = [r for r in detail_records if r["rec_type"] == "finished"]
+        semi_finished = [r for r in detail_records if r["rec_type"] == "semi_finished"]
+        detail_sheet("外发成品入库", finished, "入仓数")
+        detail_sheet("外发半成品入库", semi_finished, "入仓数")
+        buf = io.BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+        return buf
 
     inbound = [r for r in detail_records if r["rec_type"] == "inbound_raw"]
     detail_sheet("登信入仓", inbound, "入仓数")
@@ -38,8 +92,15 @@ def build_workbook(summary, detail_records, location_names):
                   if r["rec_type"] == "issue" and r.get("location_name") == name]
         finished = [r for r in detail_records
                     if r["rec_type"] == "finished" and r.get("location_name") == name]
+        semi_finished = [r for r in detail_records
+                         if r["rec_type"] == "semi_finished"
+                         and r.get("location_name") == name]
         detail_sheet(f"{name}领料", issues, "领料数")
-        detail_sheet(f"{name}成品入仓", finished, "入仓数")
+        detail_sheet(
+            f"{name}成品入仓", finished, "入仓数",
+            include_po_customer=shaoyang_mode,
+        )
+        detail_sheet(f"{name}半成品入库", semi_finished, "入仓数")
 
     buf = io.BytesIO()
     wb.save(buf)

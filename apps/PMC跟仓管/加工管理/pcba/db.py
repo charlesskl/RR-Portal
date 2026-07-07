@@ -8,6 +8,7 @@ LOCATIONS = ["东莞车间", "东莞加工厂利鸿", "邵阳华登", "河源华
 DEFAULT_MATERIALS = ["NFC贴纸", "PCBA板"]
 DEPARTMENTS = ["兴信B来料仓", "装配", "半成品", "外发", "河源华兴", "邵阳", "新邵"]
 DEFAULT_DEPARTMENT = DEPARTMENTS[0]
+DEFAULT_DEPARTMENT_PASSWORD = "123456"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -113,6 +114,21 @@ def init_db():
                 "INSERT INTO users(username, password_hash, role) VALUES (?,?,?)",
                 ("admin", hash_password("admin123"), "admin"),
             )
+        for department in DEPARTMENTS:
+            exists = conn.execute(
+                "SELECT 1 FROM users WHERE username=?", (department,)
+            ).fetchone()
+            if not exists:
+                conn.execute(
+                    "INSERT INTO users(username, password_hash, role, department) "
+                    "VALUES (?,?,?,?)",
+                    (
+                        department,
+                        hash_password(DEFAULT_DEPARTMENT_PASSWORD),
+                        "operator",
+                        department,
+                    ),
+                )
         conn.commit()
     finally:
         conn.close()

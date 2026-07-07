@@ -2,6 +2,7 @@ FROM node:20-alpine AS frontend-build
 
 WORKDIR /frontend
 COPY frontend/package*.json ./
+RUN npm config set registry https://registry.npmmirror.com
 RUN npm ci
 COPY frontend/ ./
 ARG VITE_BASE_PATH=/shipping/
@@ -24,6 +25,12 @@ WORKDIR /app
 RUN apt-get update \
     && apt-get install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/*
+
+ENV PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/ \
+    PIP_TRUSTED_HOST=mirrors.aliyun.com \
+    PIP_DEFAULT_TIMEOUT=120 \
+    PIP_RETRIES=10 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
 
 COPY backend/requirements.txt /app/backend/requirements.txt
 RUN pip install --no-cache-dir -r /app/backend/requirements.txt

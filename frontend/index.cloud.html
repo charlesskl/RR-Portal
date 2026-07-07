@@ -77,6 +77,7 @@
   .dept-icon.pmc { background: linear-gradient(135deg, #10b981, #059669); }
   .dept-icon.business { background: linear-gradient(135deg, #f59e0b, #ef4444); }
   .dept-icon.qa { background: linear-gradient(135deg, #8b5cf6, #ec4899); }
+  .dept-icon.shipping { background: linear-gradient(135deg, #0ea5e9, #2563eb); }
   .dept-name { font-size: 20px; font-weight: 600; color: #f1f5f9; }
   .dept-desc { font-size: 13px; color: #94a3b8; margin-top: 2px; }
   .dept-card-body { padding: 0 28px 24px; }
@@ -180,11 +181,11 @@
 
     <div class="stats-bar">
       <div class="stat-card">
-        <div class="stat-value" id="statDepts">4</div>
+        <div class="stat-value" id="statDepts">6</div>
         <div class="stat-label">部门数量</div>
       </div>
       <div class="stat-card">
-        <div class="stat-value" id="statPlugins">12</div>
+        <div class="stat-value" id="statPlugins">23</div>
         <div class="stat-label">应用数量</div>
       </div>
       <div class="stat-card">
@@ -392,6 +393,26 @@
               <div class="plugin-info">
                 <div class="plugin-dot gray" id="hyScheduleDot"></div>
                 <span class="plugin-name">河源排期入单</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 船务部 -->
+      <div class="dept-card" onclick="showDept('shipping')">
+        <div class="dept-card-header">
+          <div class="dept-icon shipping">&#128674;</div>
+          <div>
+            <div class="dept-name">船务部</div>
+          </div>
+        </div>
+        <div class="dept-card-body">
+          <div class="plugin-list" id="shippingPluginList">
+            <div class="plugin-item">
+              <div class="plugin-info">
+                <div class="plugin-dot gray" id="shippingManagementDot"></div>
+                <span class="plugin-name">船务管理系统</span>
               </div>
             </div>
           </div>
@@ -900,6 +921,43 @@
   </div>
 
 
+  <!-- ===== 船务部详情 ===== -->
+  <div class="detail-view" id="shippingDetail">
+    <div class="back-btn" onclick="goHome()">&larr; 返回部门总览</div>
+    <div class="breadcrumb">
+      <a href="#" onclick="goHome()">控制台</a>
+      <span class="sep">/</span>
+      <span style="color:#38bdf8">船务部</span>
+    </div>
+    <div class="page-title" style="display:flex;align-items:center;gap:14px;">
+      <div class="dept-icon shipping" style="width:40px;height:40px;font-size:18px;">&#128674;</div>
+      船务部
+    </div>
+    <div class="page-subtitle">邮件导入 · 出货单管理 · 柜单生成 · 提单核对 · 卡板统计</div>
+
+    <div class="detail-plugin-card">
+      <div class="detail-plugin-left">
+        <div class="detail-plugin-icon" style="background:linear-gradient(135deg,#0ea5e9,#2563eb);">&#128674;</div>
+        <div>
+          <div class="detail-plugin-name">船务管理系统</div>
+          <div class="detail-plugin-desc">船务邮件解析、出货单流转、柜单 Excel 生成、提单核对与卡板统计，支持 AI 辅助解析和多角色协作</div>
+          <div class="feature-grid">
+            <div class="feature-tag">&#128231; 邮件导入</div>
+            <div class="feature-tag">&#128203; 出货单管理</div>
+            <div class="feature-tag">&#128230; 柜单生成</div>
+            <div class="feature-tag">&#128269; 提单核对</div>
+            <div class="feature-tag">&#128202; 卡板统计</div>
+            <div class="feature-tag">&#129302; AI 解析</div>
+          </div>
+        </div>
+      </div>
+      <div class="detail-plugin-right">
+        <div class="detail-plugin-status"><div class="plugin-dot gray" id="shippingManagementDetailDot"></div> 检查中...</div>
+        <a href="/shipping/" target="_blank" class="btn btn-primary">打开系统</a>
+      </div>
+    </div>
+  </div>
+
   <!-- ===== QA 部详情 ===== -->
   <div class="detail-view" id="qaDetail">
     <div class="back-btn" onclick="goHome()">&larr; 返回部门总览</div>
@@ -942,7 +1000,7 @@
 </div>
 
 <script>
-var allDepts = ['engineering', 'pmc', 'production', 'business', 'qa'];
+var allDepts = ['engineering', 'pmc', 'production', 'business', 'shipping', 'qa'];
 
 function showDept(dept) {
   document.getElementById('homeView').classList.add('hidden');
@@ -985,6 +1043,7 @@ async function checkHealth() {
       { name: 'huadengMaorong', url: '/huadeng-maorong/health', dot: 'huadengMaorongDot', detailDot: 'huadengMaorongDetailDot' },
       { name: 'cStore', url: '/c-store/health', dot: 'cStoreDot', detailDot: 'cStoreDetailDot' },
       { name: 'cpg', url: '/cpg/health', dot: 'cpgDot', detailDot: 'cpgDetailDot' },
+      { name: 'shippingManagement', url: '/shipping/health', dot: 'shippingManagementDot', detailDot: 'shippingManagementDetailDot' },
       { name: 'qaWeekly', url: '/qa-weekly-report/api/health', dot: 'qaWeeklyDot', detailDot: 'qaWeeklyDetailDot' },
     ];
     var healthy = 0;

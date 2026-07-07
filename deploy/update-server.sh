@@ -136,6 +136,7 @@ declare -A PATH_TO_SERVICE=(
   ["apps/工程部/A-doc生成系統/"]="zouhuo"
   ["apps/工程部/工程啤办单/"]="rr-production"
   ["apps/工程部/模具手办采购订单系统/"]="figure-mold-cost-system"
+  ["apps/船务部/船务管理系统/"]="shipping-management"
   ["apps/QA部/QA测试报告周结系统/"]="qa-weekly-report"
   ["apps/task-api/"]="task-api"
 )

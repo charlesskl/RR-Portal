@@ -35,6 +35,10 @@ python -m uvicorn pcba.main:app --host 0.0.0.0 --port 8000
 
 数据默认存放在 `data/pcba.db`，定期复制该文件即可备份。
 
+## 部署
+
+云端服务名保持 `cpg`，部署脚本通过 `apps/PMC跟仓管/加工管理/` 路径识别并增量重建该服务。
+
 ## 测试
 
 ```bash

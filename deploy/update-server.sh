@@ -126,6 +126,7 @@ declare -A PATH_TO_SERVICE=(
   ["apps/PMC跟仓管/华登毛绒仓库/"]="huadeng-maorong"
   ["apps/PMC跟仓管/采购订单管理系统/"]="jiangping"
   ["apps/PMC跟仓管/成品核对系统/"]="liwenjuan"
+  ["apps/PMC跟仓管/加工管理/"]="cpg"
   ["apps/业务部/报价系统/"]="baojia"
   ["apps/业务部/TOMY排期核对系统/"]="tomy-paiqi"
   ["apps/业务部/ZURU接单表入单系统/"]="zuru-order-system"

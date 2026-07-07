@@ -78,6 +78,9 @@ def test_init_migrates_existing_records_to_default_department(db_path):
         created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
     INSERT INTO records(rec_type, qty) VALUES ('inbound_raw', 10);
+    INSERT INTO users(username, password_hash, role)
+    VALUES ('legacy_operator', 'legacy-hash', 'operator');
+    INSERT INTO users(username, password_hash, role) VALUES ('legacy_admin', 'legacy-hash', 'admin');
     """)
     conn.commit()
     conn.close()
@@ -87,6 +90,12 @@ def test_init_migrates_existing_records_to_default_department(db_path):
     conn = db.get_conn()
     row = conn.execute("SELECT department FROM records").fetchone()
     assert row["department"] == "兴信B来料仓"
+    legacy_operator = conn.execute(
+        "SELECT department FROM users WHERE username='legacy_operator'"
+    ).fetchone()
+    legacy_admin = conn.execute("SELECT department FROM users WHERE username='legacy_admin'").fetchone()
+    assert legacy_operator["department"] == "兴信B来料仓"
+    assert legacy_admin["department"] is None
     names = [r["name"] for r in conn.execute("SELECT name FROM locations ORDER BY sort").fetchall()]
     assert names == ["东莞车间", "东莞加工厂利鸿", "邵阳华登", "河源华兴", "新邵"]
     record_columns = [r["name"] for r in conn.execute("PRAGMA table_info(records)").fetchall()]

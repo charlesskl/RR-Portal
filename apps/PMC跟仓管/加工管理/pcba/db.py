@@ -76,6 +76,10 @@ def _column_exists(conn, table, column):
 def _migrate_schema(conn):
     if not _column_exists(conn, "users", "department"):
         conn.execute("ALTER TABLE users ADD COLUMN department TEXT")
+    conn.execute(
+        "UPDATE users SET department=? WHERE department IS NULL AND role != 'admin'",
+        (DEFAULT_DEPARTMENT,),
+    )
     if not _column_exists(conn, "records", "department"):
         conn.execute(
             "ALTER TABLE records ADD COLUMN department TEXT NOT NULL DEFAULT '兴信B来料仓'"

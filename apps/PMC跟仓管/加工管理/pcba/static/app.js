@@ -29,6 +29,7 @@ let ME = null;
 let RECORDS = [];
 let DEPARTMENTS = [];
 let SUPPLIERS = [];
+let MATERIALS = [];
 let editingId = null;
 let editingMaterialId = null;
 let editingSupplierId = null;
@@ -211,6 +212,7 @@ async function loadMaterials() {
     if (ai !== -1 || bi !== -1) return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
     return a.id - b.id;
   });
+  MATERIALS = mats;
 
   el('material').innerHTML = mats
     .map(m => `<option value="${esc(m.name)}">${esc(m.name)}</option>`)
@@ -222,7 +224,7 @@ async function loadMaterials() {
   if (tb) {
     tb.innerHTML = mats.map(m => {
       const ops = ME && ME.role === 'admin'
-        ? `<button class="btn-edit btn-sm" onclick="startMaterialEdit(${m.id}, '${esc(m.name)}')">修改</button>` +
+        ? `<button class="btn-edit btn-sm" onclick="startMaterialEdit(${m.id})">修改</button>` +
           `<button class="btn-danger btn-sm" onclick="delMaterial(${m.id})">删除</button>`
         : '<span class="readonly-text">只读</span>';
       return `<tr><td>${esc(m.name)}</td><td>${ops}</td></tr>`;
@@ -245,16 +247,17 @@ async function loadSuppliers() {
     tb.innerHTML = SUPPLIERS.map(s =>
       `<tr><td>${esc(s.name)}</td><td>${esc(s.created_at)}</td><td>${
         ME && ME.role === 'admin'
-          ? `<button class="btn-edit btn-sm" onclick="startSupplierEdit(${s.id}, '${esc(s.name)}')">修改</button><button class="btn-danger btn-sm" onclick="delSupplier(${s.id})">删除</button>`
+          ? `<button class="btn-edit btn-sm" onclick="startSupplierEdit(${s.id})">修改</button><button class="btn-danger btn-sm" onclick="delSupplier(${s.id})">删除</button>`
           : '<span class="readonly-text">只读</span>'
       }</td></tr>`
     ).join('');
   }
 }
 
-function startSupplierEdit(id, name) {
+function startSupplierEdit(id) {
+  const item = SUPPLIERS.find(s => s.id === id);
   editingSupplierId = id;
-  el('newSupplier').value = name;
+  el('newSupplier').value = item ? item.name : '';
   el('supplierSubmitBtn').textContent = '保存修改';
   el('supplierCancelBtn').style.display = '';
 }
@@ -295,9 +298,10 @@ async function delSupplier(id) {
   }
 }
 
-function startMaterialEdit(id, name) {
+function startMaterialEdit(id) {
+  const item = MATERIALS.find(m => m.id === id);
   editingMaterialId = id;
-  el('newMaterial').value = name;
+  el('newMaterial').value = item ? item.name : '';
   el('materialSubmitBtn').textContent = '保存修改';
   el('materialCancelBtn').style.display = '';
 }

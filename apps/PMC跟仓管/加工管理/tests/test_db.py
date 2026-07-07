@@ -32,6 +32,12 @@ def test_init_creates_locations_and_admin(db_path):
     assert supplier_columns == ["id", "name", "created_at"]
     mats = conn.execute("SELECT name FROM materials ORDER BY id").fetchall()
     assert [r["name"] for r in mats] == ["NFC贴纸", "PCBA板"]
+    sticker_types = conn.execute(
+        "SELECT name FROM sticker_types ORDER BY sort"
+    ).fetchall()
+    assert len(sticker_types) == 40
+    assert sticker_types[0]["name"] == "贴纸01"
+    assert sticker_types[-1]["name"] == "贴纸40"
     conn.close()
 
 

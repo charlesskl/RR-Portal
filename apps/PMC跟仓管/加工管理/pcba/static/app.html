@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>唱片机管理系统</title>
-<link rel="stylesheet" href="/static/style.css?v=10">
+<link rel="stylesheet" href="/static/style.css?v=12">
 </head>
 <body class="app-page">
 <header class="app-header">
@@ -54,7 +54,7 @@
     <div class="form-grid">
       <select id="recType" onchange="onTypeChange()"></select>
       <select id="locationId"></select>
-      <select id="material" title="物料名称"></select>
+      <select id="material" title="物料名称" onchange="onMaterialChange()"></select>
       <select id="supplier" title="供应商" style="display:none"></select>
       <input id="recDate" type="date" title="日期">
       <input id="docNo" placeholder="单据编号">
@@ -64,6 +64,10 @@
       <input id="remark" placeholder="备注">
       <button id="submitBtn" class="primary-btn" onclick="saveRecord()">提交</button>
       <button id="cancelBtn" class="ghost-btn" onclick="cancelEdit()" style="display:none">取消修改</button>
+    </div>
+    <div id="stickerPicker" class="sticker-picker" style="display:none">
+      <div class="mini-title">贴纸类型与数量</div>
+      <div id="stickerTypeGrid" class="sticker-grid"></div>
     </div>
     <p id="entryErr" class="err"></p>
     <div class="table-wrap">
@@ -97,6 +101,17 @@
         <div class="table-wrap">
           <table id="sumTable"></table>
         </div>
+      </div>
+    </div>
+    <div id="stickerSummaryBlock" class="summary-subsection" style="display:none">
+      <div class="mini-title">贴纸类型汇总</div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>贴纸类型</th><th>入库</th><th>出库/领料</th><th>结余</th></tr>
+          </thead>
+          <tbody id="stickerSummaryRows"></tbody>
+        </table>
       </div>
     </div>
   </section>
@@ -138,6 +153,24 @@
     <div class="table-wrap">
       <table id="matTable">
         <thead><tr><th>物料名称</th><th>操作</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <div class="section-head inner-head">
+      <div>
+        <h2>贴纸类型管理</h2>
+        <p>NFC贴纸可维护 40 种贴纸类型，录入时按类型分别填写数量</p>
+      </div>
+    </div>
+    <div id="stickerTypeForm" class="form-grid compact-form">
+      <input id="newStickerType" placeholder="贴纸类型名称">
+      <button id="stickerTypeSubmitBtn" class="primary-btn" onclick="saveStickerType()">新增贴纸类型</button>
+      <button id="stickerTypeCancelBtn" class="ghost-btn" onclick="cancelStickerTypeEdit()" style="display:none">取消修改</button>
+    </div>
+    <p id="stickerTypeErr" class="err"></p>
+    <div class="table-wrap">
+      <table id="stickerTypeTable">
+        <thead><tr><th>贴纸类型</th><th>排序</th><th>操作</th></tr></thead>
         <tbody></tbody>
       </table>
     </div>
@@ -185,6 +218,6 @@
   </section>
 </main>
 
-<script src="/static/app.js?v=10"></script>
+<script src="/static/app.js?v=12"></script>
 </body>
 </html>

@@ -78,6 +78,58 @@ def test_records_reject_invalid_date_filter(client):
     assert r.status_code == 400
 
 
+def test_batch_create_nfc_sticker_records_with_each_quantity(client):
+    admin_login(client)
+    r = client.post("/api/records/batch", json={
+        "rec_type": "inbound_raw",
+        "rec_date": "2026-07-08",
+        "doc_no": "NFC-001",
+        "material": "NFC贴纸",
+        "remark": "首批贴纸",
+        "items": [
+            {"sticker_type": "贴纸01", "qty": 100},
+            {"sticker_type": "贴纸02", "qty": 250},
+        ],
+    })
+
+    assert r.status_code == 200
+    assert len(r.json()["ids"]) == 2
+
+    rows = client.get("/api/records?doc_no=NFC-001").json()
+    by_type = {row["sticker_type"]: row for row in rows}
+    assert by_type["贴纸01"]["material"] == "NFC贴纸"
+    assert by_type["贴纸01"]["qty"] == 100
+    assert by_type["贴纸02"]["qty"] == 250
+    assert all(row["doc_no"] == "NFC-001" for row in rows)
+
+
+def test_batch_create_nfc_stickers_rejects_duplicate_type(client):
+    admin_login(client)
+    r = client.post("/api/records/batch", json={
+        "rec_type": "inbound_raw",
+        "material": "NFC贴纸",
+        "items": [
+            {"sticker_type": "贴纸01", "qty": 100},
+            {"sticker_type": "贴纸01", "qty": 250},
+        ],
+    })
+
+    assert r.status_code == 400
+
+
+def test_batch_create_nfc_stickers_rejects_blank_type(client):
+    admin_login(client)
+    r = client.post("/api/records/batch", json={
+        "rec_type": "inbound_raw",
+        "material": "NFC贴纸",
+        "items": [
+            {"sticker_type": " ", "qty": 100},
+        ],
+    })
+
+    assert r.status_code == 400
+
+
 def test_inbound_raw_needs_no_location(client):
     admin_login(client)
     r = client.post("/api/records", json={

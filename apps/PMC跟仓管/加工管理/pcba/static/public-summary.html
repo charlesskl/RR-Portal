@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>公开汇总 - 唱片机管理系统</title>
-<link rel="stylesheet" href="/static/style.css?v=11">
+<link rel="stylesheet" href="/static/style.css?v=12">
 </head>
 <body class="summary-page">
 <main class="summary-shell">
@@ -51,6 +51,17 @@
             <tbody id="publicDepartmentRows"></tbody>
           </table>
         </div>
+      </div>
+    </div>
+    <div id="publicStickerBlock" class="summary-subsection" style="display:none">
+      <div class="mini-title">贴纸类型汇总</div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>贴纸类型</th><th>入库</th><th>出库/领料</th><th>结余</th></tr>
+          </thead>
+          <tbody id="publicStickerRows"></tbody>
+        </table>
       </div>
     </div>
   </section>
@@ -119,6 +130,16 @@ async function loadPublicSummary() {
   document.getElementById('publicDepartmentRows').innerHTML =
     (data.department_totals || []).map(row => `<tr>
       <td>${esc(row.department)}</td>
+      <td>${fmt(row.inbound)}</td>
+      <td>${fmt(row.outbound)}</td>
+      <td>${fmt(row.balance)}</td>
+    </tr>`).join('') || '<tr><td colspan="4">暂无数据</td></tr>';
+
+  const stickerTypes = data.sticker_types || [];
+  document.getElementById('publicStickerBlock').style.display = stickerTypes.length ? '' : 'none';
+  document.getElementById('publicStickerRows').innerHTML =
+    stickerTypes.map(row => `<tr>
+      <td>${esc(row.sticker_type)}</td>
       <td>${fmt(row.inbound)}</td>
       <td>${fmt(row.outbound)}</td>
       <td>${fmt(row.balance)}</td>

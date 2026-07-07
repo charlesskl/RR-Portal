@@ -32,6 +32,20 @@ def compute_material_totals(records):
     return [totals[name] for name in sorted(totals)]
 
 
+def compute_sticker_type_totals(records):
+    totals = {}
+    for record in records:
+        sticker_type = record.get("sticker_type")
+        if not sticker_type:
+            continue
+        total = totals.setdefault(
+            sticker_type,
+            _new_total(sticker_type=sticker_type),
+        )
+        _apply_flow(total, record.get("rec_type"), _qty(record))
+    return [totals[name] for name in sorted(totals)]
+
+
 def compute_department_totals(records, departments):
     totals = {
         department: _new_total(department=department)
@@ -77,6 +91,7 @@ def compute_public_summary(records, departments, filters=None):
         "record_count": len(records),
         "totals": totals,
         "materials": materials,
+        "sticker_types": compute_sticker_type_totals(records),
         "department_totals": department_totals,
         "material_department": compute_material_department_totals(records),
     }

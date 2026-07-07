@@ -6,6 +6,7 @@ from pcba.auth import hash_password
 DEFAULT_DB = os.path.join("data", "pcba.db")
 LOCATIONS = ["东莞车间", "东莞加工厂利鸿", "邵阳华登", "河源华兴", "新邵"]
 DEFAULT_MATERIALS = ["NFC贴纸", "PCBA板"]
+DEFAULT_STICKER_TYPES = [f"贴纸{i:02d}" for i in range(1, 41)]
 DEPARTMENTS = ["兴信B来料仓", "装配", "半成品", "外发", "河源华兴", "邵阳", "新邵"]
 DEFAULT_DEPARTMENT = DEPARTMENTS[0]
 DEFAULT_DEPARTMENT_PASSWORD = "123456"
@@ -33,6 +34,11 @@ CREATE TABLE IF NOT EXISTS suppliers (
     name TEXT UNIQUE NOT NULL,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+CREATE TABLE IF NOT EXISTS sticker_types (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT UNIQUE NOT NULL,
+    sort INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS records (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     rec_type TEXT NOT NULL,
@@ -40,6 +46,7 @@ CREATE TABLE IF NOT EXISTS records (
     rec_date TEXT,
     doc_no TEXT,
     material TEXT NOT NULL DEFAULT 'PCBA板',
+    sticker_type TEXT,
     qty INTEGER NOT NULL,
     remark TEXT,
     department TEXT NOT NULL DEFAULT '兴信B来料仓',
@@ -87,6 +94,8 @@ def _migrate_schema(conn):
         )
     if not _column_exists(conn, "records", "supplier"):
         conn.execute("ALTER TABLE records ADD COLUMN supplier TEXT")
+    if not _column_exists(conn, "records", "sticker_type"):
+        conn.execute("ALTER TABLE records ADD COLUMN sticker_type TEXT")
     if not _column_exists(conn, "records", "po_no"):
         conn.execute("ALTER TABLE records ADD COLUMN po_no TEXT")
     if not _column_exists(conn, "records", "customer_name"):
@@ -108,6 +117,12 @@ def init_db():
         for name in DEFAULT_MATERIALS:
             conn.execute(
                 "INSERT OR IGNORE INTO materials(name) VALUES (?)", (name,)
+            )
+        # 预置 NFC 贴纸类型，可在前端继续维护真实名称
+        for i, name in enumerate(DEFAULT_STICKER_TYPES, start=1):
+            conn.execute(
+                "INSERT OR IGNORE INTO sticker_types(name, sort) VALUES (?, ?)",
+                (name, i),
             )
         # 预置默认管理员 admin/admin123
         exists = conn.execute(

@@ -7,7 +7,7 @@ def build_workbook(
     warehouse_mode=False, outsource_mode=False, shaoyang_mode=False,
 ):
     """summary: compute_summary 的返回；detail_records: 全部记录 dict 列表
-    （含 rec_type/location_name/rec_date/doc_no/material/qty/remark）。"""
+    （含 rec_type/location_name/rec_date/doc_no/material/sticker_type/qty/remark）。"""
     wb = Workbook()
 
     # ---- 总表 ----
@@ -39,31 +39,33 @@ def build_workbook(
     # ---- 明细分页 ----
     def detail_sheet(title, recs, qty_header, include_po_customer=False):
         s = wb.create_sheet(title=title[:31])
+        has_sticker_type = any(r.get("sticker_type") for r in recs)
+        headers = ["日期", "单据编号", "物料名称"]
+        if has_sticker_type:
+            headers.append("贴纸类型")
         if include_po_customer:
-            s.append(["日期", "单据编号", "物料名称", "PO", "客名", qty_header, "备注"])
+            headers.extend(["PO", "客名", qty_header, "备注"])
         elif include_supplier:
-            s.append(["日期", "单据编号", "物料名称", "供应商", qty_header, "备注"])
+            headers.extend(["供应商", qty_header, "备注"])
         else:
-            s.append(["日期", "单据编号", "物料名称", qty_header, "备注"])
+            headers.extend([qty_header, "备注"])
+        s.append(headers)
         total = 0
         for r in recs:
+            row = [r.get("rec_date"), r.get("doc_no"), r.get("material")]
+            if has_sticker_type:
+                row.append(r.get("sticker_type"))
             if include_po_customer:
-                s.append([r.get("rec_date"), r.get("doc_no"), r.get("material"),
-                          r.get("po_no"), r.get("customer_name"), r.get("qty"),
-                          r.get("remark")])
+                row.extend([r.get("po_no"), r.get("customer_name")])
             elif include_supplier:
-                s.append([r.get("rec_date"), r.get("doc_no"), r.get("material"),
-                          r.get("supplier"), r.get("qty"), r.get("remark")])
-            else:
-                s.append([r.get("rec_date"), r.get("doc_no"), r.get("material"),
-                          r.get("qty"), r.get("remark")])
+                row.append(r.get("supplier"))
+            row.extend([r.get("qty"), r.get("remark")])
+            s.append(row)
             total += int(r.get("qty") or 0)
-        if include_po_customer:
-            s.append([None, None, None, None, "小计：", total, None])
-        elif include_supplier:
-            s.append([None, None, None, "小计：", total, None])
-        else:
-            s.append([None, None, "小计：", total, None])
+        subtotal = [None] * len(headers)
+        subtotal[-3] = "小计："
+        subtotal[-2] = total
+        s.append(subtotal)
 
     if warehouse_mode:
         semi_inbound = [r for r in detail_records if r["rec_type"] == "semi_inbound"]

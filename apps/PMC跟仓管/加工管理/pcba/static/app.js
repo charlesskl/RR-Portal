@@ -24,15 +24,18 @@ const OUTSOURCE_DEPARTMENT = '外发';
 const HEYUAN_DEPARTMENT = '河源华兴';
 const SHAOYANG_DEPARTMENT = '邵阳';
 const XINSHAO_DEPARTMENT = '新邵';
+const NFC_MATERIAL = 'NFC贴纸';
 
 let ME = null;
 let RECORDS = [];
 let DEPARTMENTS = [];
 let SUPPLIERS = [];
 let MATERIALS = [];
+let STICKER_TYPES = [];
 let editingId = null;
 let editingMaterialId = null;
 let editingSupplierId = null;
+let editingStickerTypeId = null;
 
 function el(id) {
   return document.getElementById(id);
@@ -158,6 +161,7 @@ async function init() {
 
   await loadLocations();
   await loadMaterials();
+  await loadStickerTypes();
   await loadSuppliers();
   configureEntryForDepartment();
   onTypeChange();
@@ -205,7 +209,7 @@ async function loadLocations() {
 async function loadMaterials() {
   const r = await api('/api/materials');
   const allMats = await r.json();
-  const preferred = ['NFC贴纸', 'PCBA板'];
+  const preferred = [NFC_MATERIAL, 'PCBA板'];
   const mats = allMats.slice().sort((a, b) => {
     const ai = preferred.indexOf(a.name);
     const bi = preferred.indexOf(b.name);
@@ -229,6 +233,140 @@ async function loadMaterials() {
         : '<span class="readonly-text">只读</span>';
       return `<tr><td>${esc(m.name)}</td><td>${ops}</td></tr>`;
     }).join('');
+  }
+  onMaterialChange();
+}
+
+async function loadStickerTypes() {
+  const r = await api('/api/sticker-types');
+  STICKER_TYPES = await r.json();
+  renderStickerPicker();
+  renderStickerTypeTable();
+}
+
+function renderStickerPicker() {
+  const grid = el('stickerTypeGrid');
+  if (!grid) return;
+  grid.innerHTML = STICKER_TYPES.map(s => `<div class="sticker-item">
+    <label>
+      <input id="stickerCheck-${s.id}" type="checkbox" class="sticker-check" data-id="${s.id}" data-name="${esc(s.name)}" onchange="onStickerCheckChange(${s.id})">
+      <span>${esc(s.name)}</span>
+    </label>
+    <input id="stickerQty-${s.id}" type="number" min="0" placeholder="数量" disabled>
+  </div>`).join('');
+}
+
+function onStickerCheckChange(id) {
+  const checked = el('stickerCheck-' + id).checked;
+  const qty = el('stickerQty-' + id);
+  qty.disabled = !checked;
+  if (!checked) {
+    qty.value = '';
+  } else {
+    qty.focus();
+  }
+}
+
+function getSelectedStickerItems() {
+  const items = [];
+  let invalid = false;
+  document.querySelectorAll('.sticker-check:checked').forEach(box => {
+    const qtyEl = el('stickerQty-' + box.dataset.id);
+    const qty = Number(qtyEl.value);
+    if (!qty || qty <= 0) {
+      invalid = true;
+      return;
+    }
+    items.push({sticker_type: box.dataset.name, qty});
+  });
+  return {items, invalid};
+}
+
+function clearStickerSelection() {
+  document.querySelectorAll('.sticker-check').forEach(box => {
+    box.checked = false;
+    const qty = el('stickerQty-' + box.dataset.id);
+    if (qty) {
+      qty.value = '';
+      qty.disabled = true;
+    }
+  });
+}
+
+function setStickerSelection(stickerType, qty) {
+  clearStickerSelection();
+  const item = STICKER_TYPES.find(s => s.name === stickerType);
+  if (!item) return;
+  const box = el('stickerCheck-' + item.id);
+  const qtyEl = el('stickerQty-' + item.id);
+  box.checked = true;
+  qtyEl.disabled = false;
+  qtyEl.value = qty || '';
+}
+
+function onMaterialChange() {
+  const isSticker = el('material').value === NFC_MATERIAL;
+  const picker = el('stickerPicker');
+  if (picker) picker.style.display = isSticker ? '' : 'none';
+  el('qty').style.display = isSticker ? 'none' : '';
+  if (!isSticker) clearStickerSelection();
+}
+
+function renderStickerTypeTable() {
+  const form = el('stickerTypeForm');
+  if (form) form.style.display = ME && ME.role === 'admin' ? '' : 'none';
+  const tb = document.querySelector('#stickerTypeTable tbody');
+  if (!tb) return;
+  tb.innerHTML = STICKER_TYPES.map(s => {
+    const ops = ME && ME.role === 'admin'
+      ? `<button class="btn-edit btn-sm" onclick="startStickerTypeEdit(${s.id})">修改</button>` +
+        `<button class="btn-danger btn-sm" onclick="delStickerType(${s.id})">删除</button>`
+      : '<span class="readonly-text">只读</span>';
+    return `<tr><td>${esc(s.name)}</td><td>${fmt(s.sort)}</td><td>${ops}</td></tr>`;
+  }).join('') || '<tr><td colspan="3">暂无贴纸类型</td></tr>';
+}
+
+function startStickerTypeEdit(id) {
+  const item = STICKER_TYPES.find(s => s.id === id);
+  editingStickerTypeId = id;
+  el('newStickerType').value = item ? item.name : '';
+  el('stickerTypeSubmitBtn').textContent = '保存修改';
+  el('stickerTypeCancelBtn').style.display = '';
+}
+
+function cancelStickerTypeEdit() {
+  editingStickerTypeId = null;
+  el('newStickerType').value = '';
+  el('stickerTypeSubmitBtn').textContent = '新增贴纸类型';
+  el('stickerTypeCancelBtn').style.display = 'none';
+}
+
+async function saveStickerType() {
+  const name = el('newStickerType').value.trim();
+  const path = editingStickerTypeId ? '/api/sticker-types/' + editingStickerTypeId : '/api/sticker-types';
+  const method = editingStickerTypeId ? 'PUT' : 'POST';
+  const r = await api(path, {
+    method,
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({name}),
+  });
+  if (r.ok) {
+    cancelStickerTypeEdit();
+    el('stickerTypeErr').textContent = '';
+    await loadStickerTypes();
+  } else {
+    const e = await r.json();
+    el('stickerTypeErr').textContent = e.detail || '保存失败';
+  }
+}
+
+async function delStickerType(id) {
+  if (!confirm('确定删除这个贴纸类型？已录入的历史记录不受影响。')) return;
+  const r = await api('/api/sticker-types/' + id, {method: 'DELETE'});
+  if (r.ok) await loadStickerTypes();
+  else {
+    const e = await r.json();
+    alert(e.detail || '删除失败');
   }
 }
 
@@ -355,18 +493,20 @@ function onTypeChange() {
     el('poNo').value = '';
     el('customerName').value = '';
   }
+  onMaterialChange();
 }
 
 async function saveRecord() {
   const t = el('recType').value;
   const hideLocation = t === 'inbound_raw' || (ME && ME.department === SEMI_FINISHED_DEPARTMENT) || isOutsource();
+  const material = el('material').value || 'PCBA板';
+  const isSticker = material === NFC_MATERIAL;
   const body = {
     rec_type: t,
     location_id: hideLocation ? null : Number(el('locationId').value),
-    material: el('material').value || 'PCBA板',
+    material,
     rec_date: el('recDate').value || null,
     doc_no: el('docNo').value,
-    qty: Number(el('qty').value),
     remark: el('remark').value,
   };
   if (isXingxin()) body.supplier = el('supplier').value;
@@ -375,8 +515,34 @@ async function saveRecord() {
     body.customer_name = el('customerName').value;
   }
 
-  const path = editingId ? '/api/records/' + editingId : '/api/records';
-  const method = editingId ? 'PUT' : 'POST';
+  let path = editingId ? '/api/records/' + editingId : '/api/records';
+  let method = editingId ? 'PUT' : 'POST';
+  if (isSticker) {
+    const selected = getSelectedStickerItems();
+    if (selected.invalid) {
+      el('entryErr').textContent = '已选择的贴纸类型必须填写大于 0 的数量';
+      return;
+    }
+    if (!selected.items.length) {
+      el('entryErr').textContent = '请选择贴纸类型并填写数量';
+      return;
+    }
+    if (editingId && selected.items.length !== 1) {
+      el('entryErr').textContent = '修改单条记录时只能选择一种贴纸类型';
+      return;
+    }
+    if (editingId) {
+      body.qty = selected.items[0].qty;
+      body.sticker_type = selected.items[0].sticker_type;
+    } else {
+      body.items = selected.items;
+      path = '/api/records/batch';
+      method = 'POST';
+    }
+  } else {
+    body.qty = Number(el('qty').value);
+  }
+
   const r = await api(path, {
     method,
     headers: {'Content-Type': 'application/json'},
@@ -400,6 +566,7 @@ function startEdit(id) {
   onTypeChange();
   if (rec.location_id) el('locationId').value = rec.location_id;
   el('material').value = rec.material || 'PCBA板';
+  onMaterialChange();
   if (isXingxin()) el('supplier').value = rec.supplier || '';
   if (supportsPoCustomer() && rec.rec_type === 'finished') {
     el('poNo').value = rec.po_no || '';
@@ -407,7 +574,11 @@ function startEdit(id) {
   }
   el('recDate').value = rec.rec_date || '';
   el('docNo').value = rec.doc_no || '';
-  el('qty').value = rec.qty;
+  if (rec.material === NFC_MATERIAL) {
+    setStickerSelection(rec.sticker_type, rec.qty);
+  } else {
+    el('qty').value = rec.qty;
+  }
   el('remark').value = rec.remark || '';
   editingId = id;
   el('submitBtn').textContent = '保存修改';
@@ -419,6 +590,7 @@ function startEdit(id) {
 function cancelEdit() {
   editingId = null;
   el('qty').value = '';
+  clearStickerSelection();
   el('docNo').value = '';
   el('poNo').value = '';
   el('customerName').value = '';
@@ -435,6 +607,7 @@ async function loadRecords() {
   RECORDS = await r.json();
   renderRecordHeader();
   const tb = document.querySelector('#recTable tbody');
+  const emptyColspan = 10 + (isXingxin() ? 1 : 0) + (supportsPoCustomer() ? 2 : 0);
   tb.innerHTML = RECORDS.map(x => {
     const canEdit = ME.role === 'admin' || x.created_by === ME.id;
     const ops = canEdit
@@ -444,6 +617,7 @@ async function loadRecords() {
     return `<tr>
       <td>${esc(typeLabel(x.rec_type))}</td>
       <td>${esc(x.material)}</td>
+      <td>${esc(x.sticker_type)}</td>
       <td>${esc(x.location_name)}</td>
       ${isXingxin() ? `<td>${esc(x.supplier)}</td>` : ''}
       <td>${esc(x.rec_date)}</td>
@@ -454,14 +628,14 @@ async function loadRecords() {
       <td>${esc(x.created_by_name)}</td>
       <td>${ops}</td>
     </tr>`;
-  }).join('') || '<tr><td colspan="12">暂无记录</td></tr>';
+  }).join('') || `<tr><td colspan="${emptyColspan}">暂无记录</td></tr>`;
 }
 
 function renderRecordHeader() {
   const supplierHead = isXingxin() ? '<th>供应商</th>' : '';
   const poCustomerHead = supportsPoCustomer() ? '<th>PO</th><th>客名</th>' : '';
   document.querySelector('#recTable thead').innerHTML = `<tr>
-    <th>类型</th><th>物料名称</th><th>加工点</th>${supplierHead}<th>日期</th><th>单据编号</th>${poCustomerHead}
+    <th>类型</th><th>物料名称</th><th>贴纸类型</th><th>加工点</th>${supplierHead}<th>日期</th><th>单据编号</th>${poCustomerHead}
     <th>数量</th><th>备注</th><th>录入人</th><th>操作</th>
   </tr>`;
 }
@@ -484,6 +658,7 @@ async function loadSummary() {
   const s = await r.json();
   renderSummaryCards(s);
   renderMaterialSummary(s.materials || []);
+  renderStickerSummary(s.sticker_types || []);
 
   if (ME && ME.department === SEMI_FINISHED_DEPARTMENT) {
     el('sumTable').innerHTML =
@@ -525,6 +700,18 @@ function renderSummaryCards(s) {
 function renderMaterialSummary(materials) {
   el('materialSummaryRows').innerHTML = materials.map(row => `<tr>
     <td>${esc(row.material)}</td>
+    <td>${fmt(row.inbound)}</td>
+    <td>${fmt(row.outbound)}</td>
+    <td>${fmt(row.balance)}</td>
+  </tr>`).join('') || '<tr><td colspan="4">暂无数据</td></tr>';
+}
+
+function renderStickerSummary(stickerTypes) {
+  const block = el('stickerSummaryBlock');
+  if (!block) return;
+  block.style.display = stickerTypes.length ? '' : 'none';
+  el('stickerSummaryRows').innerHTML = stickerTypes.map(row => `<tr>
+    <td>${esc(row.sticker_type)}</td>
     <td>${fmt(row.inbound)}</td>
     <td>${fmt(row.outbound)}</td>
     <td>${fmt(row.balance)}</td>
@@ -664,7 +851,10 @@ function showTab(name) {
     btn.classList.toggle('active', btn.dataset.tab === name)
   );
   if (name === 'summary') loadSummary();
-  if (name === 'materials') loadMaterials();
+  if (name === 'materials') {
+    loadMaterials();
+    loadStickerTypes();
+  }
   if (name === 'suppliers') loadSuppliers();
   if (name === 'users') loadUsers();
 }

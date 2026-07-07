@@ -73,6 +73,36 @@ def test_summary_can_filter_by_doc_no_fuzzy(client):
     assert set(materials) == {"NFC贴纸"}
 
 
+def test_summary_groups_nfc_stickers_by_type(client):
+    admin_login(client, "兴信B来料仓")
+    lid = loc_id(client, "东莞车间")
+    client.post("/api/records/batch", json={
+        "rec_type": "inbound_raw",
+        "material": "NFC贴纸",
+        "items": [
+            {"sticker_type": "贴纸01", "qty": 100},
+            {"sticker_type": "贴纸02", "qty": 60},
+        ],
+    })
+    client.post("/api/records/batch", json={
+        "rec_type": "issue",
+        "location_id": lid,
+        "material": "NFC贴纸",
+        "items": [
+            {"sticker_type": "贴纸01", "qty": 30},
+        ],
+    })
+
+    s = client.get("/api/summary").json()
+    sticker_types = {row["sticker_type"]: row for row in s["sticker_types"]}
+
+    assert sticker_types["贴纸01"]["inbound"] == 100
+    assert sticker_types["贴纸01"]["outbound"] == 30
+    assert sticker_types["贴纸01"]["balance"] == 70
+    assert sticker_types["贴纸02"]["inbound"] == 60
+    assert sticker_types["贴纸02"]["balance"] == 60
+
+
 def test_summary_is_scoped_to_current_department(client):
     admin_login(client, "装配")
     dg = loc_id(client, "东莞加工厂利鸿")

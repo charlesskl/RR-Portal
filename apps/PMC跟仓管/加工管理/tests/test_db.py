@@ -32,7 +32,32 @@ def test_init_creates_locations_and_admin(db_path):
     assert supplier_columns == ["id", "name", "created_at"]
     mats = conn.execute("SELECT name FROM materials ORDER BY id").fetchall()
     assert [r["name"] for r in mats] == ["NFC贴纸", "PCBA板"]
+    sticker_types = conn.execute(
+        "SELECT name FROM sticker_types ORDER BY sort"
+    ).fetchall()
+    assert len(sticker_types) == 40
+    assert sticker_types[0]["name"] == "贴纸01"
+    assert sticker_types[-1]["name"] == "贴纸40"
     conn.close()
+
+
+def test_init_creates_department_accounts(db_path):
+    from pcba import db
+    from pcba.auth import verify_password
+
+    db.init_db()
+    conn = db.get_conn()
+    rows = conn.execute(
+        "SELECT username, role, department, password_hash FROM users ORDER BY id"
+    ).fetchall()
+    users = {row["username"]: dict(row) for row in rows}
+    conn.close()
+
+    for department in db.DEPARTMENTS:
+        assert department in users
+        assert users[department]["role"] == "operator"
+        assert users[department]["department"] == department
+        assert verify_password("123456", users[department]["password_hash"])
 
 
 def test_init_is_idempotent(db_path):

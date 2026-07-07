@@ -1,6 +1,6 @@
 import os
 from datetime import date
-from typing import Optional
+from typing import List, Optional
 
 from fastapi import FastAPI, HTTPException, Request, Depends
 from fastapi.responses import HTMLResponse, StreamingResponse
@@ -10,7 +10,12 @@ from pydantic import BaseModel
 
 from pcba import db
 from pcba.auth import hash_password, verify_password
-from pcba.summary import compute_material_totals, compute_public_summary, compute_summary
+from pcba.summary import (
+    compute_material_totals,
+    compute_public_summary,
+    compute_sticker_type_totals,
+    compute_summary,
+)
 from pcba.db import DEPARTMENTS, LOCATIONS
 from pcba.export import build_workbook
 
@@ -330,6 +335,7 @@ HEYUAN_DEPARTMENT = "河源华兴"
 SHAOYANG_DEPARTMENT = "邵阳"
 XINSHAO_DEPARTMENT = "新邵"
 PO_CUSTOMER_DEPARTMENTS = (SHAOYANG_DEPARTMENT, XINSHAO_DEPARTMENT)
+NFC_MATERIAL = "NFC贴纸"
 
 
 @app.get("/api/locations")
@@ -361,6 +367,10 @@ class MaterialIn(BaseModel):
 
 
 class SupplierIn(BaseModel):
+    name: str
+
+
+class StickerTypeIn(BaseModel):
     name: str
 
 
@@ -435,6 +445,88 @@ def delete_supplier(supplier_id: int, _admin=Depends(require_admin)):
     return {"ok": True}
 
 
+@app.get("/api/sticker-types")
+def list_sticker_types(_user=Depends(current_user)):
+    conn = db.get_conn()
+    try:
+        rows = conn.execute(
+            "SELECT id, name, sort FROM sticker_types ORDER BY sort, id"
+        ).fetchall()
+    finally:
+        conn.close()
+    return [dict(r) for r in rows]
+
+
+@app.post("/api/sticker-types")
+def create_sticker_type(body: StickerTypeIn, _admin=Depends(require_admin)):
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="贴纸类型不能为空")
+    conn = db.get_conn()
+    try:
+        exists = conn.execute(
+            "SELECT 1 FROM sticker_types WHERE name=?", (name,)
+        ).fetchone()
+        if exists:
+            raise HTTPException(status_code=400, detail="贴纸类型已存在")
+        next_sort = conn.execute(
+            "SELECT COALESCE(MAX(sort), 0) + 1 AS next_sort FROM sticker_types"
+        ).fetchone()["next_sort"]
+        cur = conn.execute(
+            "INSERT INTO sticker_types(name, sort) VALUES (?, ?)",
+            (name, next_sort),
+        )
+        conn.commit()
+        new_id = cur.lastrowid
+    finally:
+        conn.close()
+    return {"id": new_id, "name": name, "sort": next_sort}
+
+
+@app.put("/api/sticker-types/{sticker_type_id}")
+def update_sticker_type(
+    sticker_type_id: int,
+    body: StickerTypeIn,
+    _admin=Depends(require_admin),
+):
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="贴纸类型不能为空")
+    conn = db.get_conn()
+    try:
+        row = conn.execute(
+            "SELECT id, sort FROM sticker_types WHERE id=?", (sticker_type_id,)
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="贴纸类型不存在")
+        exists = conn.execute(
+            "SELECT 1 FROM sticker_types WHERE name=? AND id<>?",
+            (name, sticker_type_id),
+        ).fetchone()
+        if exists:
+            raise HTTPException(status_code=400, detail="贴纸类型已存在")
+        conn.execute(
+            "UPDATE sticker_types SET name=? WHERE id=?",
+            (name, sticker_type_id),
+        )
+        conn.commit()
+        sort = row["sort"]
+    finally:
+        conn.close()
+    return {"id": sticker_type_id, "name": name, "sort": sort}
+
+
+@app.delete("/api/sticker-types/{sticker_type_id}")
+def delete_sticker_type(sticker_type_id: int, _admin=Depends(require_admin)):
+    conn = db.get_conn()
+    try:
+        conn.execute("DELETE FROM sticker_types WHERE id=?", (sticker_type_id,))
+        conn.commit()
+    finally:
+        conn.close()
+    return {"ok": True}
+
+
 @app.post("/api/materials")
 def create_material(body: MaterialIn, _admin=Depends(require_admin)):
     name = body.name.strip()
@@ -500,6 +592,7 @@ class RecordIn(BaseModel):
     rec_date: Optional[str] = None
     doc_no: Optional[str] = None
     material: str = "PCBA板"
+    sticker_type: Optional[str] = None
     qty: int
     remark: Optional[str] = None
     supplier: Optional[str] = None
@@ -536,6 +629,50 @@ def _validate_record(body: RecordIn, department: Optional[str] = None):
         body.location_id = None
 
 
+class StickerRecordItemIn(BaseModel):
+    sticker_type: str
+    qty: int
+
+
+class RecordBatchIn(BaseModel):
+    rec_type: str
+    location_id: Optional[int] = None
+    rec_date: Optional[str] = None
+    doc_no: Optional[str] = None
+    material: str = NFC_MATERIAL
+    remark: Optional[str] = None
+    supplier: Optional[str] = None
+    po_no: Optional[str] = None
+    customer_name: Optional[str] = None
+    items: List[StickerRecordItemIn]
+
+
+def _record_extras(body, department):
+    supplier = (body.supplier or "").strip() or None
+    if department != SUPPLIER_DEPARTMENT:
+        supplier = None
+    po_no = (body.po_no or "").strip() or None
+    customer_name = (body.customer_name or "").strip() or None
+    if department not in PO_CUSTOMER_DEPARTMENTS or body.rec_type != "finished":
+        po_no = None
+        customer_name = None
+    return supplier, po_no, customer_name
+
+
+def _normalize_sticker_type(conn, material, sticker_type):
+    if material != NFC_MATERIAL:
+        return None
+    sticker_type = _clean_optional(sticker_type)
+    if not sticker_type:
+        return None
+    row = conn.execute(
+        "SELECT name FROM sticker_types WHERE name=?", (sticker_type,)
+    ).fetchone()
+    if not row:
+        raise HTTPException(status_code=400, detail="贴纸类型无效")
+    return row["name"]
+
+
 @app.get("/api/records")
 def list_records(
     user=Depends(current_user),
@@ -569,22 +706,16 @@ def list_records(
 @app.post("/api/records")
 def create_record(body: RecordIn, user=Depends(current_user)):
     _validate_record(body, user["department"])
-    supplier = (body.supplier or "").strip() or None
-    if user["department"] != SUPPLIER_DEPARTMENT:
-        supplier = None
-    po_no = (body.po_no or "").strip() or None
-    customer_name = (body.customer_name or "").strip() or None
-    if user["department"] not in PO_CUSTOMER_DEPARTMENTS or body.rec_type != "finished":
-        po_no = None
-        customer_name = None
     conn = db.get_conn()
     try:
+        supplier, po_no, customer_name = _record_extras(body, user["department"])
+        sticker_type = _normalize_sticker_type(conn, body.material, body.sticker_type)
         cur = conn.execute(
             "INSERT INTO records(rec_type, location_id, rec_date, doc_no, "
-            "material, qty, remark, supplier, po_no, customer_name, department, created_by) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            "material, sticker_type, qty, remark, supplier, po_no, customer_name, department, created_by) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (body.rec_type, body.location_id, body.rec_date, body.doc_no,
-             body.material, body.qty, body.remark, supplier, po_no, customer_name,
+             body.material, sticker_type, body.qty, body.remark, supplier, po_no, customer_name,
              user["department"], user["id"]),
         )
         conn.commit()
@@ -592,6 +723,57 @@ def create_record(body: RecordIn, user=Depends(current_user)):
     finally:
         conn.close()
     return {"id": new_id}
+
+
+@app.post("/api/records/batch")
+def create_records_batch(body: RecordBatchIn, user=Depends(current_user)):
+    if body.material != NFC_MATERIAL:
+        raise HTTPException(status_code=400, detail="批量录入仅支持 NFC贴纸")
+    if not body.items:
+        raise HTTPException(status_code=400, detail="请选择至少一种贴纸")
+    common = RecordIn(
+        rec_type=body.rec_type,
+        location_id=body.location_id,
+        rec_date=body.rec_date,
+        doc_no=body.doc_no,
+        material=body.material,
+        qty=sum(int(item.qty or 0) for item in body.items),
+        remark=body.remark,
+        supplier=body.supplier,
+        po_no=body.po_no,
+        customer_name=body.customer_name,
+    )
+    _validate_record(common, user["department"])
+    conn = db.get_conn()
+    try:
+        supplier, po_no, customer_name = _record_extras(common, user["department"])
+        seen = set()
+        valid_items = []
+        for item in body.items:
+            if item.qty is None or item.qty <= 0:
+                raise HTTPException(status_code=400, detail="贴纸数量必须大于 0")
+            sticker_type = _normalize_sticker_type(conn, NFC_MATERIAL, item.sticker_type)
+            if not sticker_type:
+                raise HTTPException(status_code=400, detail="贴纸类型不能为空")
+            if sticker_type in seen:
+                raise HTTPException(status_code=400, detail="贴纸类型不能重复")
+            seen.add(sticker_type)
+            valid_items.append((sticker_type, item.qty))
+        ids = []
+        for sticker_type, qty in valid_items:
+            cur = conn.execute(
+                "INSERT INTO records(rec_type, location_id, rec_date, doc_no, "
+                "material, sticker_type, qty, remark, supplier, po_no, customer_name, department, created_by) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (common.rec_type, common.location_id, common.rec_date, common.doc_no,
+                 NFC_MATERIAL, sticker_type, qty, common.remark, supplier, po_no, customer_name,
+                 user["department"], user["id"]),
+            )
+            ids.append(cur.lastrowid)
+        conn.commit()
+    finally:
+        conn.close()
+    return {"ids": ids}
 
 
 def _get_record_or_404(conn, record_id, department):
@@ -612,23 +794,17 @@ def _check_owner(row, user):
 @app.put("/api/records/{record_id}")
 def update_record(record_id: int, body: RecordIn, user=Depends(current_user)):
     _validate_record(body, user["department"])
-    supplier = (body.supplier or "").strip() or None
-    if user["department"] != SUPPLIER_DEPARTMENT:
-        supplier = None
-    po_no = (body.po_no or "").strip() or None
-    customer_name = (body.customer_name or "").strip() or None
-    if user["department"] not in PO_CUSTOMER_DEPARTMENTS or body.rec_type != "finished":
-        po_no = None
-        customer_name = None
     conn = db.get_conn()
     try:
+        supplier, po_no, customer_name = _record_extras(body, user["department"])
+        sticker_type = _normalize_sticker_type(conn, body.material, body.sticker_type)
         row = _get_record_or_404(conn, record_id, user["department"])
         _check_owner(row, user)
         conn.execute(
             "UPDATE records SET rec_type=?, location_id=?, rec_date=?, doc_no=?, "
-            "material=?, qty=?, remark=?, supplier=?, po_no=?, customer_name=? WHERE id=?",
+            "material=?, sticker_type=?, qty=?, remark=?, supplier=?, po_no=?, customer_name=? WHERE id=?",
             (body.rec_type, body.location_id, body.rec_date, body.doc_no,
-             body.material, body.qty, body.remark, supplier, po_no, customer_name,
+             body.material, sticker_type, body.qty, body.remark, supplier, po_no, customer_name,
              record_id),
         )
         conn.commit()
@@ -653,7 +829,7 @@ def delete_record(record_id: int, user=Depends(current_user)):
 def _all_records_for_summary(conn, department, filters=None):
     sql = (
         "SELECT r.rec_type AS rec_type, l.name AS location, r.qty AS qty, "
-        "r.material AS material, r.department AS department "
+        "r.material AS material, r.sticker_type AS sticker_type, r.department AS department "
         "FROM records r LEFT JOIN locations l ON r.location_id = l.id "
         "WHERE r.department=?"
     )
@@ -666,7 +842,7 @@ def _all_records_for_summary(conn, department, filters=None):
 def _public_records_for_summary(conn, filters=None, material=None, department=None):
     sql = (
         "SELECT r.rec_type AS rec_type, r.qty AS qty, "
-        "r.material AS material, r.department AS department "
+        "r.material AS material, r.sticker_type AS sticker_type, r.department AS department "
         "FROM records r WHERE 1=1"
     )
     params = []
@@ -685,6 +861,7 @@ def _public_records_for_summary(conn, filters=None, material=None, department=No
 def _with_common_summary_fields(summary, records, filters):
     result = dict(summary)
     result["materials"] = compute_material_totals(records)
+    result["sticker_types"] = compute_sticker_type_totals(records)
     result["filters"] = filters
     return result
 
@@ -785,7 +962,7 @@ def export(
         summary_records = _all_records_for_summary(conn, user["department"], filters)
         sql = (
             "SELECT r.rec_type, l.name AS location_name, r.rec_date, r.doc_no, "
-            "r.material, r.supplier, r.po_no, r.customer_name, r.qty, r.remark FROM records r "
+            "r.material, r.sticker_type, r.supplier, r.po_no, r.customer_name, r.qty, r.remark FROM records r "
             "LEFT JOIN locations l ON r.location_id = l.id "
             "WHERE r.department=?"
         )

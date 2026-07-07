@@ -67,14 +67,24 @@ def current_user(request: Request):
     conn = db.get_conn()
     try:
         row = conn.execute(
-            "SELECT id, username, role FROM users WHERE id=?", (uid,)
+            "SELECT id, username, role, department FROM users WHERE id=?", (uid,)
         ).fetchone()
     finally:
         conn.close()
     if not row:
         raise HTTPException(status_code=401, detail="未登录")
+    if department not in DEPARTMENTS:
+        raise HTTPException(status_code=401, detail="未登录")
     user = dict(row)
-    user["department"] = department
+    if user["role"] == "admin":
+        user["department"] = department
+        return user
+    db_department = user.get("department")
+    if db_department not in DEPARTMENTS:
+        raise HTTPException(status_code=403, detail="账号未分配有效部门")
+    user["department"] = db_department
+    if department != db_department:
+        request.session["department"] = db_department
     return user
 
 

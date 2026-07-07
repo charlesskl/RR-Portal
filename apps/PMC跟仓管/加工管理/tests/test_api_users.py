@@ -148,6 +148,34 @@ def test_admin_can_update_user_role_and_department(client):
     assert row["department"] == "装配"
 
 
+def test_operator_session_uses_current_database_department(client):
+    login(client, "admin", "admin123")
+    client.post("/api/users", json={
+        "username": "op_session_department", "password": "pw123456",
+        "role": "operator", "department": DEFAULT_DEPARTMENT})
+    user_id = next(
+        u["id"] for u in client.get("/api/users").json()
+        if u["username"] == "op_session_department"
+    )
+    client.post("/api/logout")
+    login(client, "op_session_department", "pw123456", DEFAULT_DEPARTMENT)
+
+    from fastapi.testclient import TestClient
+    from pcba.main import app
+
+    with TestClient(app) as admin_client:
+        login(admin_client, "admin", "admin123")
+        r = admin_client.put(f"/api/users/{user_id}", json={
+            "role": "operator",
+            "department": "装配",
+        })
+        assert r.status_code == 200
+
+    r = client.get("/api/me")
+    assert r.status_code == 200
+    assert r.json()["department"] == "装配"
+
+
 def test_operator_cannot_update_other_user(client):
     login(client, "admin", "admin123")
     client.post("/api/users", json={

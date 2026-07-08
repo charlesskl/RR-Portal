@@ -78,9 +78,13 @@ jobs:
             echo "=== 诊断: peise 容器近期 LLM OCR 日志 ==="
             docker logs rr-portal-peise-1 --tail 200 2>&1 | grep "LLM OCR" | tail -5 || echo "(无相关日志)"
 
+            export SHIPPING_HISTORY_SEED_PASSPHRASE='${{ secrets.SHIPPING_HISTORY_SEED_PASSPHRASE }}'
+
             echo "=== Script version check ==="
             grep -c "recreate" deploy/update-server.sh && echo "[OK] update-server.sh contains recreate logic" || echo "[WARN] update-server.sh MISSING recreate logic"
             bash deploy/update-server.sh
+            bash deploy/install-shipping-history-seed.sh
+            unset SHIPPING_HISTORY_SEED_PASSPHRASE
 
             # peise env guard 改了 .env.cloud.production → 必须 recreate 容器才能注入新 env
             if [ "$PEISE_ENV_CHANGED" = "1" ]; then
@@ -155,6 +159,7 @@ jobs:
               /penyou/api/health \
               /pi-outsource/api/health \
               /production-plan/health \
+              /shipping/health \
               /tomy-paiqi/health \
               /zuru-order-system/health \
               /zuru-master/health; do

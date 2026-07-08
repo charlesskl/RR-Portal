@@ -5,8 +5,11 @@ from pcba.auth import hash_password
 
 DEFAULT_DB = os.path.join("data", "pcba.db")
 LOCATIONS = ["东莞车间", "东莞加工厂利鸿", "邵阳华登", "河源华兴", "新邵"]
-DEFAULT_MATERIALS = ["NFC贴纸", "PCBA板"]
-DEFAULT_STICKER_TYPES = [f"贴纸{i:02d}" for i in range(1, 41)]
+PCBA_MATERIAL = "77794-PCBA板"
+LEGACY_PCBA_MATERIAL = "PCBA板"
+DEFAULT_MATERIALS = ["NFC贴纸", PCBA_MATERIAL]
+LEGACY_STICKER_TYPES = [f"贴纸{i:02d}" for i in range(1, 41)]
+DEFAULT_STICKER_TYPES = [f"{i}#NFC贴纸" for i in range(1, 46)]
 DEPARTMENTS = ["兴信B来料仓", "装配", "半成品", "外发", "河源华兴", "邵阳", "新邵"]
 DEFAULT_DEPARTMENT = DEPARTMENTS[0]
 DEFAULT_DEPARTMENT_PASSWORD = "123456"
@@ -45,7 +48,7 @@ CREATE TABLE IF NOT EXISTS records (
     location_id INTEGER,
     rec_date TEXT,
     doc_no TEXT,
-    material TEXT NOT NULL DEFAULT 'PCBA板',
+    material TEXT NOT NULL DEFAULT '77794-PCBA板',
     sticker_type TEXT,
     qty INTEGER NOT NULL,
     remark TEXT,
@@ -57,6 +60,18 @@ CREATE TABLE IF NOT EXISTS records (
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     FOREIGN KEY (location_id) REFERENCES locations(id),
     FOREIGN KEY (created_by) REFERENCES users(id)
+);
+CREATE TABLE IF NOT EXISTS semi_finished_monthly_totals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    department TEXT NOT NULL,
+    material TEXT NOT NULL,
+    sticker_type TEXT NOT NULL,
+    opening_stock INTEGER NOT NULL DEFAULT 0,
+    monthly_inbound INTEGER NOT NULL DEFAULT 0,
+    monthly_outbound INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(department, material, sticker_type)
 );
 """
 
@@ -100,6 +115,48 @@ def _migrate_schema(conn):
         conn.execute("ALTER TABLE records ADD COLUMN po_no TEXT")
     if not _column_exists(conn, "records", "customer_name"):
         conn.execute("ALTER TABLE records ADD COLUMN customer_name TEXT")
+    if not _column_exists(conn, "semi_finished_monthly_totals", "opening_stock"):
+        conn.execute(
+            "ALTER TABLE semi_finished_monthly_totals "
+            "ADD COLUMN opening_stock INTEGER NOT NULL DEFAULT 0"
+        )
+
+
+def _seed_sticker_types(conn):
+    for i, name in enumerate(DEFAULT_STICKER_TYPES, start=1):
+        legacy_name = LEGACY_STICKER_TYPES[i - 1] if i <= len(LEGACY_STICKER_TYPES) else None
+        current = conn.execute(
+            "SELECT id FROM sticker_types WHERE name=?", (name,)
+        ).fetchone()
+        legacy = None
+        if legacy_name:
+            legacy = conn.execute(
+                "SELECT id FROM sticker_types WHERE name=?", (legacy_name,)
+            ).fetchone()
+
+        if legacy and current:
+            conn.execute(
+                "UPDATE records SET sticker_type=? WHERE sticker_type=?",
+                (name, legacy_name),
+            )
+            conn.execute("DELETE FROM sticker_types WHERE id=?", (legacy["id"],))
+            conn.execute("UPDATE sticker_types SET sort=? WHERE id=?", (i, current["id"]))
+        elif legacy:
+            conn.execute(
+                "UPDATE sticker_types SET name=?, sort=? WHERE id=?",
+                (name, i, legacy["id"]),
+            )
+            conn.execute(
+                "UPDATE records SET sticker_type=? WHERE sticker_type=?",
+                (name, legacy_name),
+            )
+        elif current:
+            conn.execute("UPDATE sticker_types SET sort=? WHERE id=?", (i, current["id"]))
+        else:
+            conn.execute(
+                "INSERT INTO sticker_types(name, sort) VALUES (?, ?)",
+                (name, i),
+            )
 
 
 def init_db():
@@ -118,12 +175,17 @@ def init_db():
             conn.execute(
                 "INSERT OR IGNORE INTO materials(name) VALUES (?)", (name,)
             )
+        conn.execute("DELETE FROM materials WHERE name=?", (LEGACY_PCBA_MATERIAL,))
+        conn.execute(
+            "UPDATE records SET material=? WHERE material=?",
+            (PCBA_MATERIAL, LEGACY_PCBA_MATERIAL),
+        )
+        conn.execute(
+            "UPDATE semi_finished_monthly_totals SET material=? WHERE material=?",
+            (PCBA_MATERIAL, LEGACY_PCBA_MATERIAL),
+        )
         # 预置 NFC 贴纸类型，可在前端继续维护真实名称
-        for i, name in enumerate(DEFAULT_STICKER_TYPES, start=1):
-            conn.execute(
-                "INSERT OR IGNORE INTO sticker_types(name, sort) VALUES (?, ?)",
-                (name, i),
-            )
+        _seed_sticker_types(conn)
         # 预置默认管理员 admin/admin123
         exists = conn.execute(
             "SELECT 1 FROM users WHERE username='admin'"

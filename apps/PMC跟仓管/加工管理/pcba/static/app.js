@@ -25,9 +25,12 @@ const HEYUAN_DEPARTMENT = '河源华兴';
 const SHAOYANG_DEPARTMENT = '邵阳';
 const XINSHAO_DEPARTMENT = '新邵';
 const NFC_MATERIAL = 'NFC贴纸';
+const PCBA_MATERIAL = '77794-PCBA板';
 
 let ME = null;
 let RECORDS = [];
+let ENTRY_TYPE_OPTIONS = [];
+let ACTIVE_ENTRY_TYPE = '';
 let DEPARTMENTS = [];
 let SUPPLIERS = [];
 let MATERIALS = [];
@@ -103,6 +106,65 @@ function typeLabel(type) {
     if (type === 'finished') return '成品入库';
   }
   return TYPE_LABEL[type] || type;
+}
+
+function entryTypeOptionsForDepartment() {
+  if (isXingxin()) {
+    return [
+      {value: 'inbound_raw', label: '入库'},
+      {value: 'issue', label: '出库'},
+    ];
+  }
+  if (ME && ME.department === ASSEMBLY_DEPARTMENT) {
+    return [
+      {value: 'issue', label: '领料'},
+      {value: 'finished', label: '成品入库'},
+      {value: 'semi_finished', label: '半成品入库'},
+    ];
+  }
+  if (ME && ME.department === SEMI_FINISHED_DEPARTMENT) {
+    return [
+      {value: 'semi_inbound', label: '入库'},
+      {value: 'semi_outbound', label: '出库'},
+    ];
+  }
+  if (isOutsource()) {
+    return [
+      {value: 'issue', label: '领料'},
+      {value: 'finished', label: '成品入库'},
+      {value: 'semi_finished', label: '半成品入库'},
+    ];
+  }
+  if (isHeyuan() || isShaoyang() || isXinshao()) {
+    return [
+      {value: 'issue', label: '领料'},
+      {value: 'finished', label: '成品入库'},
+    ];
+  }
+  return [
+    {value: 'inbound_raw', label: '来料入库'},
+    {value: 'issue', label: '领料'},
+    {value: 'finished', label: '成品入库'},
+  ];
+}
+
+function renderEntryTypeTabs() {
+  const tabs = el('entryTypeTabs');
+  if (!tabs) return;
+  tabs.innerHTML = ENTRY_TYPE_OPTIONS.map(opt => {
+    const active = opt.value === ACTIVE_ENTRY_TYPE ? ' active' : '';
+    return `<button type="button" class="entry-type-tab${active}" onclick="setEntryType('${esc(opt.value)}')">${esc(opt.label)}</button>`;
+  }).join('');
+}
+
+function setEntryType(type) {
+  if (!ENTRY_TYPE_OPTIONS.some(opt => opt.value === type)) return;
+  if (editingId && ACTIVE_ENTRY_TYPE !== type) cancelEdit();
+  ACTIVE_ENTRY_TYPE = type;
+  el('recType').value = type;
+  onTypeChange();
+  renderEntryTypeTabs();
+  renderRecordsTable();
 }
 
 async function api(path, opts) {
@@ -183,19 +245,15 @@ async function loadDepartments() {
 
 function configureEntryForDepartment() {
   const recType = el('recType');
-  if (isXingxin()) {
-    recType.innerHTML = '<option value="inbound_raw">入库</option><option value="issue">出库</option>';
-  } else if (ME && ME.department === ASSEMBLY_DEPARTMENT) {
-    recType.innerHTML = '<option value="issue">领料</option><option value="finished">成品入库</option><option value="semi_finished">半成品入库</option>';
-  } else if (ME && ME.department === SEMI_FINISHED_DEPARTMENT) {
-    recType.innerHTML = '<option value="semi_inbound">入库</option><option value="semi_outbound">出库</option>';
-  } else if (isOutsource()) {
-    recType.innerHTML = '<option value="finished">成品入库</option><option value="semi_finished">半成品入库</option>';
-  } else if (isHeyuan() || isShaoyang() || isXinshao()) {
-    recType.innerHTML = '<option value="issue">领料</option><option value="finished">成品入库</option>';
-  } else {
-    recType.innerHTML = '<option value="inbound_raw">来料入库</option><option value="issue">领料</option><option value="finished">成品入库</option>';
+  ENTRY_TYPE_OPTIONS = entryTypeOptionsForDepartment();
+  recType.innerHTML = ENTRY_TYPE_OPTIONS
+    .map(opt => `<option value="${esc(opt.value)}">${esc(opt.label)}</option>`)
+    .join('');
+  if (!ENTRY_TYPE_OPTIONS.some(opt => opt.value === ACTIVE_ENTRY_TYPE)) {
+    ACTIVE_ENTRY_TYPE = ENTRY_TYPE_OPTIONS[0] ? ENTRY_TYPE_OPTIONS[0].value : '';
   }
+  recType.value = ACTIVE_ENTRY_TYPE;
+  renderEntryTypeTabs();
 }
 
 async function loadLocations() {
@@ -209,7 +267,7 @@ async function loadLocations() {
 async function loadMaterials() {
   const r = await api('/api/materials');
   const allMats = await r.json();
-  const preferred = [NFC_MATERIAL, 'PCBA板'];
+  const preferred = [NFC_MATERIAL, PCBA_MATERIAL, 'PCBA板'];
   const mats = allMats.slice().sort((a, b) => {
     const ai = preferred.indexOf(a.name);
     const bi = preferred.indexOf(b.name);
@@ -223,14 +281,12 @@ async function loadMaterials() {
     .join('');
 
   const form = el('materialForm');
-  if (form) form.style.display = ME && ME.role === 'admin' ? '' : 'none';
+  if (form) form.style.display = '';
   const tb = document.querySelector('#matTable tbody');
   if (tb) {
     tb.innerHTML = mats.map(m => {
-      const ops = ME && ME.role === 'admin'
-        ? `<button class="btn-edit btn-sm" onclick="startMaterialEdit(${m.id})">修改</button>` +
-          `<button class="btn-danger btn-sm" onclick="delMaterial(${m.id})">删除</button>`
-        : '<span class="readonly-text">只读</span>';
+      const ops = `<button class="btn-edit btn-sm" onclick="startMaterialEdit(${m.id})">修改</button>` +
+        `<button class="btn-danger btn-sm" onclick="delMaterial(${m.id})">删除</button>`;
       return `<tr><td>${esc(m.name)}</td><td>${ops}</td></tr>`;
     }).join('');
   }
@@ -247,7 +303,7 @@ async function loadStickerTypes() {
 function renderStickerPicker() {
   const grid = el('stickerTypeGrid');
   if (!grid) return;
-  grid.innerHTML = STICKER_TYPES.map(s => `<div class="sticker-item">
+  grid.innerHTML = STICKER_TYPES.map(s => `<div id="stickerItem-${s.id}" class="sticker-item">
     <label>
       <input id="stickerCheck-${s.id}" type="checkbox" class="sticker-check" data-id="${s.id}" data-name="${esc(s.name)}" onchange="onStickerCheckChange(${s.id})">
       <span>${esc(s.name)}</span>
@@ -259,7 +315,9 @@ function renderStickerPicker() {
 function onStickerCheckChange(id) {
   const checked = el('stickerCheck-' + id).checked;
   const qty = el('stickerQty-' + id);
+  const item = el('stickerItem-' + id);
   qty.disabled = !checked;
+  if (item) item.classList.toggle('selected', checked);
   if (!checked) {
     qty.value = '';
   } else {
@@ -286,10 +344,12 @@ function clearStickerSelection() {
   document.querySelectorAll('.sticker-check').forEach(box => {
     box.checked = false;
     const qty = el('stickerQty-' + box.dataset.id);
+    const item = el('stickerItem-' + box.dataset.id);
     if (qty) {
       qty.value = '';
       qty.disabled = true;
     }
+    if (item) item.classList.remove('selected');
   });
 }
 
@@ -299,9 +359,11 @@ function setStickerSelection(stickerType, qty) {
   if (!item) return;
   const box = el('stickerCheck-' + item.id);
   const qtyEl = el('stickerQty-' + item.id);
+  const itemEl = el('stickerItem-' + item.id);
   box.checked = true;
   qtyEl.disabled = false;
   qtyEl.value = qty || '';
+  if (itemEl) itemEl.classList.add('selected');
 }
 
 function onMaterialChange() {
@@ -314,14 +376,12 @@ function onMaterialChange() {
 
 function renderStickerTypeTable() {
   const form = el('stickerTypeForm');
-  if (form) form.style.display = ME && ME.role === 'admin' ? '' : 'none';
+  if (form) form.style.display = '';
   const tb = document.querySelector('#stickerTypeTable tbody');
   if (!tb) return;
   tb.innerHTML = STICKER_TYPES.map(s => {
-    const ops = ME && ME.role === 'admin'
-      ? `<button class="btn-edit btn-sm" onclick="startStickerTypeEdit(${s.id})">修改</button>` +
-        `<button class="btn-danger btn-sm" onclick="delStickerType(${s.id})">删除</button>`
-      : '<span class="readonly-text">只读</span>';
+    const ops = `<button class="btn-edit btn-sm" onclick="startStickerTypeEdit(${s.id})">修改</button>` +
+      `<button class="btn-danger btn-sm" onclick="delStickerType(${s.id})">删除</button>`;
     return `<tr><td>${esc(s.name)}</td><td>${fmt(s.sort)}</td><td>${ops}</td></tr>`;
   }).join('') || '<tr><td colspan="3">暂无贴纸类型</td></tr>';
 }
@@ -352,11 +412,11 @@ async function saveStickerType() {
   });
   if (r.ok) {
     cancelStickerTypeEdit();
-    el('stickerTypeErr').textContent = '';
+    setMessage('stickerTypeErr', '', false);
     await loadStickerTypes();
   } else {
     const e = await r.json();
-    el('stickerTypeErr').textContent = e.detail || '保存失败';
+    setMessage('stickerTypeErr', e.detail || '保存失败', false);
   }
 }
 
@@ -379,14 +439,12 @@ async function loadSuppliers() {
       SUPPLIERS.map(s => `<option value="${esc(s.name)}">${esc(s.name)}</option>`).join('');
   }
   const form = el('supplierForm');
-  if (form) form.style.display = ME && ME.role === 'admin' ? '' : 'none';
+  if (form) form.style.display = '';
   const tb = document.querySelector('#supTable tbody');
   if (tb) {
     tb.innerHTML = SUPPLIERS.map(s =>
       `<tr><td>${esc(s.name)}</td><td>${esc(s.created_at)}</td><td>${
-        ME && ME.role === 'admin'
-          ? `<button class="btn-edit btn-sm" onclick="startSupplierEdit(${s.id})">修改</button><button class="btn-danger btn-sm" onclick="delSupplier(${s.id})">删除</button>`
-          : '<span class="readonly-text">只读</span>'
+        `<button class="btn-edit btn-sm" onclick="startSupplierEdit(${s.id})">修改</button><button class="btn-danger btn-sm" onclick="delSupplier(${s.id})">删除</button>`
       }</td></tr>`
     ).join('');
   }
@@ -418,11 +476,11 @@ async function saveSupplier() {
   });
   if (r.ok) {
     cancelSupplierEdit();
-    el('supErr').textContent = '';
+    setMessage('supErr', '', false);
     await loadSuppliers();
   } else {
     const e = await r.json();
-    el('supErr').textContent = e.detail || '新增失败';
+    setMessage('supErr', e.detail || '新增失败', false);
   }
 }
 
@@ -462,11 +520,11 @@ async function saveMaterial() {
   });
   if (r.ok) {
     cancelMaterialEdit();
-    el('matErr').textContent = '';
+    setMessage('matErr', '', false);
     await loadMaterials();
   } else {
     const e = await r.json();
-    el('matErr').textContent = e.detail || '新增失败';
+    setMessage('matErr', e.detail || '新增失败', false);
   }
 }
 
@@ -499,7 +557,7 @@ function onTypeChange() {
 async function saveRecord() {
   const t = el('recType').value;
   const hideLocation = t === 'inbound_raw' || (ME && ME.department === SEMI_FINISHED_DEPARTMENT) || isOutsource();
-  const material = el('material').value || 'PCBA板';
+  const material = el('material').value || PCBA_MATERIAL;
   const isSticker = material === NFC_MATERIAL;
   const body = {
     rec_type: t,
@@ -520,15 +578,15 @@ async function saveRecord() {
   if (isSticker) {
     const selected = getSelectedStickerItems();
     if (selected.invalid) {
-      el('entryErr').textContent = '已选择的贴纸类型必须填写大于 0 的数量';
+      setMessage('entryErr', '已选择的贴纸类型必须填写大于 0 的数量', false);
       return;
     }
     if (!selected.items.length) {
-      el('entryErr').textContent = '请选择贴纸类型并填写数量';
+      setMessage('entryErr', '请选择贴纸类型并填写数量', false);
       return;
     }
     if (editingId && selected.items.length !== 1) {
-      el('entryErr').textContent = '修改单条记录时只能选择一种贴纸类型';
+      setMessage('entryErr', '修改单条记录时只能选择一种贴纸类型', false);
       return;
     }
     if (editingId) {
@@ -549,23 +607,27 @@ async function saveRecord() {
     body: JSON.stringify(body),
   });
   if (r.ok) {
-    el('entryErr').textContent = '';
+    setMessage('entryErr', '', false);
     cancelEdit();
     await loadRecords();
     if (el('summary').style.display !== 'none') await loadSummary();
   } else {
     const e = await r.json();
-    el('entryErr').textContent = e.detail || '提交失败';
+    setMessage('entryErr', e.detail || '提交失败', false);
   }
 }
 
 function startEdit(id) {
   const rec = RECORDS.find(x => x.id === id);
   if (!rec) return;
+  if (ENTRY_TYPE_OPTIONS.some(opt => opt.value === rec.rec_type)) {
+    ACTIVE_ENTRY_TYPE = rec.rec_type;
+    renderEntryTypeTabs();
+  }
   el('recType').value = rec.rec_type;
   onTypeChange();
   if (rec.location_id) el('locationId').value = rec.location_id;
-  el('material').value = rec.material || 'PCBA板';
+  el('material').value = rec.material || PCBA_MATERIAL;
   onMaterialChange();
   if (isXingxin()) el('supplier').value = rec.supplier || '';
   if (supportsPoCustomer() && rec.rec_type === 'finished') {
@@ -605,10 +667,15 @@ function cancelEdit() {
 async function loadRecords() {
   const r = await api(withFilters('/api/records'));
   RECORDS = await r.json();
+  renderRecordsTable();
+}
+
+function renderRecordsTable() {
   renderRecordHeader();
   const tb = document.querySelector('#recTable tbody');
   const emptyColspan = 10 + (isXingxin() ? 1 : 0) + (supportsPoCustomer() ? 2 : 0);
-  tb.innerHTML = RECORDS.map(x => {
+  const visibleRecords = RECORDS.filter(x => !ACTIVE_ENTRY_TYPE || x.rec_type === ACTIVE_ENTRY_TYPE);
+  tb.innerHTML = visibleRecords.map(x => {
     const canEdit = ME.role === 'admin' || x.created_by === ME.id;
     const ops = canEdit
       ? `<button class="btn-edit btn-sm" onclick="startEdit(${x.id})">修改</button>` +
@@ -628,7 +695,7 @@ async function loadRecords() {
       <td>${esc(x.created_by_name)}</td>
       <td>${ops}</td>
     </tr>`;
-  }).join('') || `<tr><td colspan="${emptyColspan}">暂无记录</td></tr>`;
+  }).join('') || `<tr><td colspan="${emptyColspan}">当前页面暂无记录</td></tr>`;
 }
 
 function renderRecordHeader() {
@@ -668,8 +735,8 @@ async function loadSummary() {
   }
   if (isOutsource()) {
     el('sumTable').innerHTML =
-      '<thead><tr><th>成品入库总数</th><th>半成品入库总数</th><th>入库合计</th></tr></thead>' +
-      `<tbody><tr><td>${fmt(s.raw.finished_inbound)}</td><td>${fmt(s.raw.semi_finished_inbound)}</td><td>${fmt(s.raw.inbound)}</td></tr></tbody>`;
+      '<thead><tr><th>领料总数</th><th>成品入库总数</th><th>半成品入库总数</th><th>应存数</th></tr></thead>' +
+      `<tbody><tr><td>${fmt(s.raw.issue)}</td><td>${fmt(s.raw.finished_inbound)}</td><td>${fmt(s.raw.semi_finished_inbound)}</td><td>${fmt(s.raw.balance)}</td></tr></tbody>`;
     return;
   }
 
@@ -733,6 +800,77 @@ async function clearFilters() {
 
 function exportExcel() {
   location.href = appPath(withFilters('/api/export'));
+}
+
+function setMessage(id, message, ok) {
+  const node = el(id);
+  node.textContent = message;
+  node.classList.toggle('ok', !!ok);
+}
+
+function chooseImportFile(id) {
+  const input = el(id);
+  input.value = '';
+  input.click();
+}
+
+function downloadRecordTemplate() {
+  location.href = appPath('/api/records/import-template');
+}
+
+async function importFile(input, endpoint, errId, afterImport) {
+  const file = input.files && input.files[0];
+  if (!file) return;
+  const form = new FormData();
+  form.append('file', file);
+  const r = await api(endpoint, {
+    method: 'POST',
+    body: form,
+  });
+  if (r.ok) {
+    const data = await r.json();
+    const count = data.created == null ? data.imported : data.created;
+    const parts = [`导入成功：${fmt(count)} 条`];
+    if (data.monthly_totals) parts.push(`更新当月汇总 ${fmt(data.monthly_totals)} 项`);
+    if (data.skipped) parts.push(`跳过 ${fmt(data.skipped)} 条重复数据`);
+    setMessage(errId, parts.join('，'), true);
+    if (afterImport) await afterImport();
+  } else {
+    const e = await r.json().catch(() => ({}));
+    setMessage(errId, e.detail || '导入失败', false);
+  }
+}
+
+async function importRecords(input) {
+  await importFile(input, '/api/records/import', 'entryErr', async () => {
+    cancelEdit();
+    await loadRecords();
+    if (el('summary').style.display !== 'none') await loadSummary();
+  });
+}
+
+function exportMaterials() {
+  location.href = appPath('/api/materials/export');
+}
+
+async function importMaterials(input) {
+  await importFile(input, '/api/materials/import', 'matErr', loadMaterials);
+}
+
+function exportSuppliers() {
+  location.href = appPath('/api/suppliers/export');
+}
+
+async function importSuppliers(input) {
+  await importFile(input, '/api/suppliers/import', 'supErr', loadSuppliers);
+}
+
+function exportStickerTypes() {
+  location.href = appPath('/api/sticker-types/export');
+}
+
+async function importStickerTypes(input) {
+  await importFile(input, '/api/sticker-types/import', 'stickerTypeErr', loadStickerTypes);
 }
 
 async function loadUsers() {

@@ -1,4 +1,4 @@
-import io
+﻿import io
 import openpyxl
 
 
@@ -114,7 +114,7 @@ def test_export_includes_sticker_type_column_when_present(client):
     client.post("/api/records/batch", json={
         "rec_type": "inbound_raw",
         "material": "NFC贴纸",
-        "items": [{"sticker_type": "贴纸01", "qty": 12}],
+        "items": [{"sticker_type": "1#NFC贴纸", "qty": 12}],
     })
 
     r = client.get("/api/export")
@@ -122,7 +122,7 @@ def test_export_includes_sticker_type_column_when_present(client):
     ws = wb["登信入仓"]
     headers = [cell.value for cell in ws[1]]
     assert headers == ["日期", "单据编号", "物料名称", "贴纸类型", "供应商", "入仓数", "备注"]
-    assert ws.cell(row=2, column=4).value == "贴纸01"
+    assert ws.cell(row=2, column=4).value == "1#NFC贴纸"
     assert ws.cell(row=2, column=6).value == 12
 
 
@@ -223,3 +223,4 @@ def test_xinshao_finished_export_includes_po_and_customer_columns(client):
     assert ws.cell(row=2, column=4).value == "PO-X01"
     assert ws.cell(row=2, column=5).value == "客户X"
     assert ws.cell(row=2, column=6).value == 45
+

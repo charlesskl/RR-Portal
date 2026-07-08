@@ -1,3 +1,5 @@
+from decimal import Decimal, InvalidOperation
+
 from rest_framework import serializers
 from .models import Shipment, ShipmentItem, ShipmentSubItem
 
@@ -25,6 +27,50 @@ class ShipmentSerializer(serializers.ModelSerializer):
     class Meta:
         model = Shipment
         fields = '__all__'
+
+
+class ShipmentListSerializer(serializers.ModelSerializer):
+    items_count = serializers.IntegerField(read_only=True)
+    total_cbm = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Shipment
+        fields = [
+            'id',
+            'shipment_type',
+            'status',
+            'customer',
+            'si_deadline',
+            'so_number',
+            'cutoff_date',
+            'container_type',
+            'port',
+            'ship_date',
+            'container_number',
+            'seal_number',
+            'container_weight',
+            'main_factory',
+            'customs_broker',
+            'delivery_address',
+            'special_requirements',
+            'remarks',
+            'warehouse',
+            'customs_cutoff',
+            'source_email_id',
+            'created_by',
+            'created_at',
+            'items_count',
+            'total_cbm',
+        ]
+
+    def get_total_cbm(self, obj):
+        value = getattr(obj, 'total_cbm', None)
+        if value in (None, ''):
+            return '0.000'
+        try:
+            return f'{Decimal(value):.3f}'
+        except (InvalidOperation, TypeError, ValueError):
+            return '0.000'
 
 
 class ShipmentItemCreateSerializer(serializers.ModelSerializer):

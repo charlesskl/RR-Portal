@@ -130,7 +130,7 @@
           <el-icon style="vertical-align: middle; margin-right: 4px;">
             <ArrowRight v-if="!showRecords" /><ArrowDown v-else />
           </el-icon>
-          解析记录 ({{ emailRecords.length }})
+          解析记录 ({{ emailPagination.total }})
         </span>
         <el-button size="small" @click.stop="loadRecords" :loading="loadingRecords">刷新</el-button>
       </div>
@@ -146,7 +146,7 @@
           </el-table-column>
           <el-table-column label="PL项数" width="70">
             <template #default="{ row }">
-              {{ row.parsed_data?.packing_list_items?.length || 0 }}
+              {{ row.parsed_items_count ?? (row.parsed_data?.packing_list_items?.length || 0) }}
             </template>
           </el-table-column>
           <el-table-column label="时间" width="150">
@@ -160,6 +160,19 @@
             </template>
           </el-table-column>
         </el-table>
+        <div class="email-pagination">
+          <el-pagination
+            v-model:current-page="emailPagination.page"
+            v-model:page-size="emailPagination.pageSize"
+            :page-sizes="[20, 50, 100, 200]"
+            :total="emailPagination.total"
+            layout="total, sizes, prev, pager, next"
+            small
+            background
+            @size-change="handleEmailPageSizeChange"
+            @current-change="loadRecords"
+          />
+        </div>
       </div>
     </el-card>
 
@@ -313,9 +326,9 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, reactive, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { importEmail, listEmails, getMailboxConfig, saveMailboxConfigApi, searchMailboxApi, importMailboxApi } from '../../api/emails'
+import { importEmail, listEmails, getEmail, getMailboxConfig, saveMailboxConfigApi, searchMailboxApi, importMailboxApi } from '../../api/emails'
 import { createShipmentFromEmail } from '../../api/shipments'
 import { ElMessage } from 'element-plus'
 import AiParseReviewPanel from '../../components/AiParseReviewPanel.vue'
@@ -383,11 +396,21 @@ function clearParsed() {
 const emailRecords = ref([])
 const loadingRecords = ref(false)
 const showRecords = ref(false)
+const emailPagination = reactive({
+  page: 1,
+  pageSize: 50,
+  total: 0,
+})
 
 async function loadRecords() {
   loadingRecords.value = true
   try {
-    emailRecords.value = await listEmails()
+    const data = await listEmails({
+      page: emailPagination.page,
+      page_size: emailPagination.pageSize,
+    })
+    emailRecords.value = data.results || data
+    emailPagination.total = data.count ?? emailRecords.value.length
   } catch (e) {
     console.error(e)
   } finally {
@@ -395,12 +418,29 @@ async function loadRecords() {
   }
 }
 
-function viewRecord(row) {
+function handleEmailPageSizeChange() {
+  emailPagination.page = 1
+  loadRecords()
+}
+
+async function viewRecord(row) {
   // 点击记录直接预览解析结果
+  let record = row
+  if (!record.parsed_data) {
+    loadingRecords.value = true
+    try {
+      record = await getEmail(row.id)
+    } catch (e) {
+      ElMessage.error('加载解析记录失败')
+      return
+    } finally {
+      loadingRecords.value = false
+    }
+  }
   parsedResults.value = [{
-    email_record_id: row.id,
-    subject: row.subject,
-    parsed: row.parsed_data,
+    email_record_id: record.id,
+    subject: record.subject,
+    parsed: record.parsed_data,
   }]
   selectedGroupIdx.value = 0
   saveParsed()
@@ -819,3 +859,11 @@ async function confirmCreate() {
   }
 }
 </script>
+
+<style scoped>
+.email-pagination {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+</style>

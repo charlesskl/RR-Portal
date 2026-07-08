@@ -22,13 +22,14 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeou
 from django.conf import settings
 from rest_framework import status
 from rest_framework.decorators import api_view, parser_classes, permission_classes
+from rest_framework.pagination import PageNumberPagination
 from rest_framework.parsers import MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.generics import ListAPIView
 
 from .models import EmailRecord
-from .serializers import EmailRecordSerializer
+from .serializers import EmailRecordListSerializer, EmailRecordSerializer
 from .parsers.eml_parser import parse_eml_file
 from .parsers.body_parser import (
     parse_email_body, _normalize_date, _adjust_sunday,
@@ -2305,16 +2306,25 @@ def import_email(request):
             os.unlink(tmp_path)
 
 
+class EmailRecordPagination(PageNumberPagination):
+    page_size = 50
+    page_size_query_param = 'page_size'
+    max_page_size = 200
+
+
 class EmailRecordListView(ListAPIView):
     queryset = EmailRecord.objects.all().order_by('-created_at')
-    serializer_class = EmailRecordSerializer
+    serializer_class = EmailRecordListSerializer
+    pagination_class = EmailRecordPagination
 
 
-@api_view(['DELETE'])
+@api_view(['GET', 'DELETE'])
 def delete_email(request, pk):
     """删除邮件记录。"""
     try:
         record = EmailRecord.objects.get(pk=pk)
+        if request.method == 'GET':
+            return Response(EmailRecordSerializer(record).data)
         record.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
     except EmailRecord.DoesNotExist:

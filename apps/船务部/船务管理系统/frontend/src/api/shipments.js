@@ -5,9 +5,9 @@ export async function createShipmentFromEmail(emailRecordId, parsedData) {
   return data
 }
 
-export async function listShipments() {
-  const { data } = await api.get('/shipments/')
-  return data.results || data
+export async function listShipments(params = {}) {
+  const { data } = await api.get('/shipments/', { params })
+  return data
 }
 
 export async function getShipment(id) {

@@ -1,6 +1,7 @@
 from django.db import models as db_models
 from rest_framework import viewsets, status as http_status
 from rest_framework.decorators import api_view, permission_classes
+from rest_framework.pagination import PageNumberPagination
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from apps.emails.models import EmailRecord
@@ -9,6 +10,7 @@ from apps.master_data.brand_rules import get_brand_for_product_code
 from .calculations import calculate_total_pieces_per_order
 from .models import Shipment, ShipmentItem, ShipmentSubItem
 from .serializers import (
+    ShipmentListSerializer,
     ShipmentSerializer,
     ShipmentCreateSerializer,
     ShipmentItemSerializer,
@@ -16,12 +18,63 @@ from .serializers import (
 )
 
 
+class ShipmentPagination(PageNumberPagination):
+    page_size = 50
+    page_size_query_param = 'page_size'
+    max_page_size = 200
+
+
 class ShipmentViewSet(viewsets.ModelViewSet):
-    queryset = Shipment.objects.prefetch_related('items', 'items__sub_items').all()
+    queryset = Shipment.objects.all()
+    pagination_class = ShipmentPagination
+
+    def get_queryset(self):
+        if self.action == 'list':
+            queryset = (
+                Shipment.objects
+                .select_related('customer', 'created_by')
+                .annotate(
+                    items_count=db_models.Count('items', distinct=True),
+                    total_cbm=db_models.Sum('items__volume'),
+                )
+                .order_by('-created_at')
+            )
+            params = self.request.query_params
+            so = (params.get('so') or '').strip()
+            port = (params.get('port') or '').strip()
+            country = (params.get('country') or '').strip()
+            container_type = (
+                params.get('container_type')
+                or params.get('containerType')
+                or ''
+            ).strip()
+            status_value = (params.get('status') or '').strip()
+            date_from = (params.get('date_from') or '').strip()
+            date_to = (params.get('date_to') or '').strip()
+
+            if so:
+                queryset = queryset.filter(so_number__icontains=so)
+            if port:
+                queryset = queryset.filter(port__icontains=port)
+            if country:
+                queryset = queryset.filter(delivery_address__icontains=country)
+            if container_type:
+                queryset = queryset.filter(container_type__icontains=container_type)
+            if status_value:
+                queryset = queryset.filter(status=status_value)
+            if date_from:
+                queryset = queryset.filter(created_at__date__gte=date_from)
+            if date_to:
+                queryset = queryset.filter(created_at__date__lte=date_to)
+            return queryset
+
+        return Shipment.objects.prefetch_related('items', 'items__sub_items').all()
 
     def get_serializer_class(self):
         if self.action in ('create', 'update', 'partial_update'):
             return ShipmentCreateSerializer
+        if self.action == 'list':
+            return ShipmentListSerializer
         return ShipmentSerializer
 
     def perform_create(self, serializer):

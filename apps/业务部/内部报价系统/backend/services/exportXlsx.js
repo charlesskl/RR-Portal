@@ -284,7 +284,7 @@ async function buildWorkbook({ quote, sections }) {
   // 电子 总表：优先用 电子部 section 的 payload；回退用 工程的（兼容旧数据）
   const elecRows = (electronic.electronics && electronic.electronics.length) ? electronic.electronics : (eng.electronics || []);
   const elecLoss = 0;  // 电子 不计算损耗
-  row = renderFreeTable(ws, row, '四、电子', elecRows, elecLoss, fxRH, subRefs, 'electronic', { isHkd: true, skipLoss: true });
+  row = renderFreeTable(ws, row, '四、电子', elecRows, elecLoss, fxRH, subRefs, 'electronic', { isHkd: true, skipLoss: true, rmbPrice: true });
   row = renderFreeTable(ws, row, '五、五金', eng.hardware   || [], 0, fxRH, subRefs, 'hardware', { skipLoss: true, isHkd: true, rmbPrice: true });  // 五金不计损耗、按港币
   const elecSubtotal = freeSubtotal(elecRows, fxRH) + freeSubtotal(eng.hardware || [], fxRH);  // 均不计损耗（HKD）
 

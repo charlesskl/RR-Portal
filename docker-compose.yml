@@ -294,6 +294,53 @@ services:
       timeout: 10s
       retries: 3
 
+  shipping-management:
+    build:
+      context: ./apps/船务部/船务管理系统
+      dockerfile: Dockerfile
+      args:
+        VITE_BASE_PATH: /
+    ports:
+      - "3420:8000"
+    environment:
+      - PORT=8000
+      - BASE_PATH=
+      - DATA_DIR=/app/data
+      - DB_PATH=/app/data/shipping.db
+      - MEDIA_ROOT=/app/data/media
+      - FRONTEND_DIST_DIR=/app/frontend-dist
+      - DJANGO_DEBUG=false
+      - DJANGO_ALLOWED_HOSTS=*
+      - DJANGO_SECRET_KEY=${SHIPPING_DJANGO_SECRET_KEY:-}
+      - DJANGO_SECRET_KEY_FILE=/app/data/.django_secret_key
+      - SHIPPING_ADMIN_USERNAME=${SHIPPING_ADMIN_USERNAME:-admin}
+      - SHIPPING_ADMIN_PASSWORD=${SHIPPING_ADMIN_PASSWORD:-RRShipping@2026}
+      - SHIPPING_ADMIN_PASSWORD_FILE=/app/data/.admin_password
+      - SHIPPING_ADMIN_DISPLAY_NAME=${SHIPPING_ADMIN_DISPLAY_NAME:-管理员}
+      - DEEPSEEK_API_KEY=${SHIPPING_DEEPSEEK_API_KEY:-}
+      - IMAP_HOST=${SHIPPING_IMAP_HOST:-imaphz.qiye.163.com}
+      - IMAP_PORT=${SHIPPING_IMAP_PORT:-993}
+      - IMAP_USER=${SHIPPING_IMAP_USER:-}
+      - IMAP_PASSWORD=${SHIPPING_IMAP_PASSWORD:-}
+      - FOXMAIL_STORAGE_PATH=${SHIPPING_FOXMAIL_STORAGE_PATH:-}
+      - SHIPPING_SHARE_PATH=${SHIPPING_SHARE_PATH:-}
+      - BUSINESS_SHARE_PATH=${SHIPPING_BUSINESS_SHARE_PATH:-}
+    volumes:
+      - "./apps/船务部/船务管理系统/data:/app/data"
+    mem_limit: 1g
+    memswap_limit: 1g
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
   huadeng:
     build:
       context: ./apps/PMC跟仓管/华登包材管理

@@ -1,4 +1,4 @@
-from django.db import models as db_models
+from django.db import models as db_models, transaction
 from rest_framework import viewsets, status as http_status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.pagination import PageNumberPagination
@@ -89,6 +89,88 @@ class ShipmentItemViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save(shipment_id=self.kwargs['shipment_pk'])
+
+
+@api_view(['PATCH'])
+@permission_classes([IsAuthenticated])
+def bulk_update_items(request, shipment_pk):
+    """Update many existing shipment items in one request.
+
+    The cabinet-review page can contain dozens of rows. Sending one PATCH per
+    row in parallel trips the nginx API rate limit, so this endpoint keeps a
+    single user save as a single API request.
+    """
+    items_data = request.data.get('items')
+    if not isinstance(items_data, list):
+        return Response(
+            {'detail': 'items must be a list'},
+            status=http_status.HTTP_400_BAD_REQUEST,
+        )
+    if not items_data:
+        return Response({'updated': 0, 'items': []})
+
+    item_ids = []
+    seen_ids = set()
+    for index, item_data in enumerate(items_data, start=1):
+        if not isinstance(item_data, dict):
+            return Response(
+                {'detail': f'items[{index}] must be an object'},
+                status=http_status.HTTP_400_BAD_REQUEST,
+            )
+        item_id = item_data.get('id')
+        if not item_id:
+            return Response(
+                {'detail': f'items[{index}].id is required'},
+                status=http_status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            item_id = int(item_id)
+        except (TypeError, ValueError):
+            return Response(
+                {'detail': f'items[{index}].id must be an integer'},
+                status=http_status.HTTP_400_BAD_REQUEST,
+            )
+        if item_id in seen_ids:
+            return Response(
+                {'detail': f'duplicate item id: {item_id}'},
+                status=http_status.HTTP_400_BAD_REQUEST,
+            )
+        seen_ids.add(item_id)
+        item_ids.append(item_id)
+
+    existing = {
+        item.id: item
+        for item in ShipmentItem.objects.filter(
+            shipment_id=shipment_pk,
+            id__in=item_ids,
+        )
+    }
+    missing_ids = [item_id for item_id in item_ids if item_id not in existing]
+    if missing_ids:
+        return Response(
+            {'detail': 'some items do not belong to this shipment', 'ids': missing_ids},
+            status=http_status.HTTP_400_BAD_REQUEST,
+        )
+
+    updated_items = []
+    with transaction.atomic():
+        for item_data in items_data:
+            item_id = int(item_data['id'])
+            payload = dict(item_data)
+            payload.pop('id', None)
+            payload.pop('shipment', None)
+            serializer = ShipmentItemSerializer(
+                existing[item_id],
+                data=payload,
+                partial=True,
+            )
+            serializer.is_valid(raise_exception=True)
+            updated_items.append(serializer.save())
+
+    return Response({
+        'updated': len(updated_items),
+        'items': ShipmentItemSerializer(updated_items, many=True).data,
+    })
 
 
 @api_view(['POST'])

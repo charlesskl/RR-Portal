@@ -96,3 +96,67 @@ class LargeListApiTest(APITestCase):
             detail_response.data["parsed_data"]["packing_list_items"][0]["product_code"],
             "SKU-1",
         )
+
+    def test_bulk_update_shipment_items_saves_large_review_without_many_requests(self):
+        shipment = self._create_shipment(1)
+        ShipmentItem.objects.all().delete()
+        items = [
+            ShipmentItem.objects.create(
+                shipment=shipment,
+                seq_number=idx + 1,
+                product_code=f"SKU-{idx:02d}",
+                pieces=1,
+                volume=Decimal("0.1000"),
+            )
+            for idx in range(75)
+        ]
+
+        payload = {
+            "items": [
+                {
+                    "id": item.id,
+                    "product_code": item.product_code,
+                    "contract_number": f"4500{idx:04d}",
+                    "customer_po": f"PO-{idx:04d}",
+                    "quantity": idx + 10,
+                    "pieces": idx + 1,
+                    "pallet_count": idx % 5,
+                    "volume": "0.3050",
+                    "factory_remark": "兴信",
+                    "spec": "52",
+                    "box_dimensions": "10x20x30",
+                }
+                for idx, item in enumerate(items)
+            ]
+        }
+
+        response = self.client.patch(
+            f"/api/shipments/{shipment.id}/items/bulk-update/",
+            payload,
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["updated"], 75)
+        first = ShipmentItem.objects.get(id=items[0].id)
+        last = ShipmentItem.objects.get(id=items[-1].id)
+        self.assertEqual(first.contract_number, "45000000")
+        self.assertEqual(first.quantity, 10)
+        self.assertEqual(first.volume, Decimal("0.3050"))
+        self.assertEqual(last.contract_number, "45000074")
+        self.assertEqual(last.pieces, 75)
+
+    def test_bulk_update_rejects_item_from_another_shipment(self):
+        shipment = self._create_shipment(1)
+        other = self._create_shipment(2)
+        foreign_item = other.items.first()
+
+        response = self.client.patch(
+            f"/api/shipments/{shipment.id}/items/bulk-update/",
+            {"items": [{"id": foreign_item.id, "pieces": 99}]},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        foreign_item.refresh_from_db()
+        self.assertNotEqual(foreign_item.pieces, 99)

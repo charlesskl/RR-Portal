@@ -49,6 +49,11 @@ export async function updateShipmentItem(shipmentId, itemId, payload) {
   return data
 }
 
+export async function bulkUpdateShipmentItems(shipmentId, items) {
+  const { data } = await api.patch(`/shipments/${shipmentId}/items/bulk-update/`, { items })
+  return data
+}
+
 export async function deleteShipmentItem(shipmentId, itemId) {
   await api.delete(`/shipments/${shipmentId}/items/${itemId}/`)
 }

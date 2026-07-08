@@ -166,7 +166,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import api from '../../api/auth'
 import { apiPath } from '../../api/request'
-import { updateShipment, updateShipmentItem, deleteShipmentItem } from '../../api/shipments'
+import { updateShipment, bulkUpdateShipmentItems, deleteShipmentItem } from '../../api/shipments'
 import { ElMessage } from 'element-plus'
 import { Download } from '@element-plus/icons-vue'
 
@@ -311,8 +311,8 @@ async function doSave() {
   const itemsToSave = form.value.items.filter(it => it.id && it.id > 0)
   console.log('[doSave] items to save:', itemsToSave.map(it => it.id))
   if (itemsToSave.length) {
-    await Promise.all(itemsToSave.map(it =>
-      updateShipmentItem(shipmentId, it.id, {
+    await bulkUpdateShipmentItems(shipmentId, itemsToSave.map(it => ({
+        id: it.id,
         product_code: it.product_code,
         contract_number: it.contract_number,
         customer_po: it.customer_po,
@@ -323,8 +323,7 @@ async function doSave() {
         factory_remark: it.factory_remark || '',
         spec: it.spec || '',
         box_dimensions: it.box_dimensions || '',
-      })
-    ))
+      })))
   }
 }
 

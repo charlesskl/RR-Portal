@@ -1,0 +1,4 @@
+data/*
+!data/.gitkeep
+seed/*.sqlite3
+seed/*.sqlite3.gz

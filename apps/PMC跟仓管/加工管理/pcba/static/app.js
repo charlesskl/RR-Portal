@@ -31,6 +31,7 @@ let ME = null;
 let RECORDS = [];
 let ENTRY_TYPE_OPTIONS = [];
 let ACTIVE_ENTRY_TYPE = '';
+let ACTIVE_ENTRY_MATERIAL = '';
 let DEPARTMENTS = [];
 let SUPPLIERS = [];
 let MATERIALS = [];
@@ -167,6 +168,38 @@ function setEntryType(type) {
   renderRecordsTable();
 }
 
+function entryMaterialOptions() {
+  const preferred = [NFC_MATERIAL, PCBA_MATERIAL];
+  const byName = new Map(MATERIALS.map(m => [m.name, m]));
+  const ordered = preferred
+    .filter(name => byName.has(name))
+    .map(name => byName.get(name));
+  MATERIALS.forEach(m => {
+    if (!preferred.includes(m.name)) ordered.push(m);
+  });
+  return ordered;
+}
+
+function renderEntryMaterialTabs() {
+  const tabs = el('entryMaterialTabs');
+  if (!tabs) return;
+  const materials = entryMaterialOptions();
+  tabs.innerHTML = materials.map(mat => {
+    const active = mat.name === ACTIVE_ENTRY_MATERIAL ? ' active' : '';
+    return `<button type="button" class="entry-type-tab${active}" onclick="setEntryMaterial('${esc(mat.name)}')">${esc(mat.name)}</button>`;
+  }).join('');
+}
+
+function setEntryMaterial(material) {
+  if (!entryMaterialOptions().some(mat => mat.name === material)) return;
+  if (editingId && ACTIVE_ENTRY_MATERIAL !== material) cancelEdit();
+  ACTIVE_ENTRY_MATERIAL = material;
+  el('material').value = material;
+  onMaterialChange();
+  renderEntryMaterialTabs();
+  renderRecordsTable();
+}
+
 async function api(path, opts) {
   const r = await fetch(appPath(path), opts);
   if (r.status === 401) {
@@ -279,6 +312,11 @@ async function loadMaterials() {
   el('material').innerHTML = mats
     .map(m => `<option value="${esc(m.name)}">${esc(m.name)}</option>`)
     .join('');
+  if (!mats.some(m => m.name === ACTIVE_ENTRY_MATERIAL)) {
+    ACTIVE_ENTRY_MATERIAL = mats[0] ? mats[0].name : '';
+  }
+  el('material').value = ACTIVE_ENTRY_MATERIAL;
+  renderEntryMaterialTabs();
 
   const form = el('materialForm');
   if (form) form.style.display = '';
@@ -624,6 +662,10 @@ function startEdit(id) {
     ACTIVE_ENTRY_TYPE = rec.rec_type;
     renderEntryTypeTabs();
   }
+  if (entryMaterialOptions().some(mat => mat.name === rec.material)) {
+    ACTIVE_ENTRY_MATERIAL = rec.material;
+    renderEntryMaterialTabs();
+  }
   el('recType').value = rec.rec_type;
   onTypeChange();
   if (rec.location_id) el('locationId').value = rec.location_id;
@@ -674,7 +716,10 @@ function renderRecordsTable() {
   renderRecordHeader();
   const tb = document.querySelector('#recTable tbody');
   const emptyColspan = 10 + (isXingxin() ? 1 : 0) + (supportsPoCustomer() ? 2 : 0);
-  const visibleRecords = RECORDS.filter(x => !ACTIVE_ENTRY_TYPE || x.rec_type === ACTIVE_ENTRY_TYPE);
+  const visibleRecords = RECORDS.filter(x =>
+    (!ACTIVE_ENTRY_TYPE || x.rec_type === ACTIVE_ENTRY_TYPE) &&
+    (!ACTIVE_ENTRY_MATERIAL || x.material === ACTIVE_ENTRY_MATERIAL)
+  );
   tb.innerHTML = visibleRecords.map(x => {
     const canEdit = ME.role === 'admin' || x.created_by === ME.id;
     const ops = canEdit

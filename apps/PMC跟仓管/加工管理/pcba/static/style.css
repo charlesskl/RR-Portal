@@ -604,6 +604,11 @@ tr.subtotal {
   background: rgba(241, 245, 249, 0.78);
 }
 
+.entry-type-tabs.material-tabs {
+  margin-top: -6px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
 .entry-type-tab {
   min-height: 38px;
   padding: 0 18px;

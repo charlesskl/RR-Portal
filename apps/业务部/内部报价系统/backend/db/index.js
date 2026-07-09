@@ -3,7 +3,11 @@ const { DatabaseSync } = require('node:sqlite');
 const path = require('path');
 const fs = require('fs');
 const bcrypt = require('bcryptjs');
-const { refSeedUpgrades, appendMissingRefDefaults } = require('./ref-defaults');
+const {
+  appendMissingRefDefaults,
+  appendMissingRefDefaultsToSectionPayloads,
+  refSeedUpgrades,
+} = require('./ref-defaults');
 
 const DB_PATH = process.env.DB_FILE || path.join(__dirname, '..', 'data.db');
 const SCHEMA_PATH = path.join(__dirname, 'schema.sql');
@@ -133,6 +137,13 @@ for (const [key, data] of Object.entries(refSeedUpgrades)) {
   const added = appendMissingRefDefaults(db, key, data);
   if (added > 0) {
     console.log('[seed-upgrade] global ref table ' + key + ' appended ' + added + ' default item(s)');
+  }
+  if (key === 'material_prices') {
+    const sectionAdded = appendMissingRefDefaultsToSectionPayloads(db, 'molding', key, data);
+    if (sectionAdded.itemsAdded > 0) {
+      console.log('[seed-upgrade] molding quote payload ' + key + ' appended '
+        + sectionAdded.itemsAdded + ' default item(s) in ' + sectionAdded.rowsChanged + ' section(s)');
+    }
   }
 }
 

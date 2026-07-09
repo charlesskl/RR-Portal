@@ -56,7 +56,41 @@ function appendMissingRefDefaults(db, tableKey, defaults) {
   return added;
 }
 
+function parseSectionPayload(raw) {
+  try {
+    const payload = JSON.parse(raw || '{}');
+    return payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : {};
+  } catch {
+    return {};
+  }
+}
+
+function appendMissingRefDefaultsToSectionPayloads(db, dept, tableKey, defaults) {
+  const rows = db.prepare('SELECT id, payload_json FROM quote_sections WHERE dept = ?').all(dept);
+  const update = db.prepare('UPDATE quote_sections SET payload_json = ? WHERE id = ?');
+  let rowsChanged = 0;
+  let itemsAdded = 0;
+
+  for (const row of rows) {
+    const payload = parseSectionPayload(row.payload_json);
+    const existing = payload[tableKey];
+    if (!Array.isArray(existing) || existing.length === 0) continue;
+
+    const merged = mergeMissingRefDefaults(existing, defaults, tableKey);
+    const added = merged.length - existing.length;
+    if (added > 0) {
+      payload[tableKey] = merged;
+      update.run(JSON.stringify(payload), row.id);
+      rowsChanged += 1;
+      itemsAdded += added;
+    }
+  }
+
+  return { rowsChanged, itemsAdded };
+}
+
 module.exports = {
+  appendMissingRefDefaultsToSectionPayloads,
   refSeedUpgrades,
   mergeMissingRefDefaults,
   appendMissingRefDefaults,

@@ -31,8 +31,33 @@ def test_init_creates_locations_and_admin(db_path):
     assert "customer_name" in record_columns
     assert supplier_columns == ["id", "name", "created_at"]
     mats = conn.execute("SELECT name FROM materials ORDER BY id").fetchall()
-    assert [r["name"] for r in mats] == ["NFC贴纸", "PCBA板"]
+    assert [r["name"] for r in mats] == ["NFC贴纸", "77794-PCBA板"]
+    sticker_types = conn.execute(
+        "SELECT name FROM sticker_types ORDER BY sort"
+    ).fetchall()
+    assert len(sticker_types) == 45
+    assert sticker_types[0]["name"] == "1#NFC贴纸"
+    assert sticker_types[-1]["name"] == "45#NFC贴纸"
     conn.close()
+
+
+def test_init_creates_department_accounts(db_path):
+    from pcba import db
+    from pcba.auth import verify_password
+
+    db.init_db()
+    conn = db.get_conn()
+    rows = conn.execute(
+        "SELECT username, role, department, password_hash FROM users ORDER BY id"
+    ).fetchall()
+    users = {row["username"]: dict(row) for row in rows}
+    conn.close()
+
+    for department in db.DEPARTMENTS:
+        assert department in users
+        assert users[department]["role"] == "operator"
+        assert users[department]["department"] == department
+        assert verify_password("123456", users[department]["password_hash"])
 
 
 def test_init_is_idempotent(db_path):
@@ -42,6 +67,61 @@ def test_init_is_idempotent(db_path):
     conn = db.get_conn()
     count = conn.execute("SELECT COUNT(*) AS c FROM locations").fetchone()["c"]
     assert count == 5
+    conn.close()
+
+
+def test_init_migrates_legacy_pcba_material_name(db_path):
+    from pcba import db
+
+    db.init_db()
+    conn = db.get_conn()
+    conn.execute("INSERT INTO materials(name) VALUES ('PCBA板')")
+    conn.execute(
+        "INSERT INTO records(rec_type, material, qty, department) "
+        "VALUES ('inbound_raw', 'PCBA板', 10, '兴信B来料仓')"
+    )
+    conn.execute(
+        "INSERT INTO semi_finished_monthly_totals(department, material, sticker_type, opening_stock) "
+        "VALUES ('半成品', 'PCBA板', '', 20)"
+    )
+    conn.commit()
+    conn.close()
+
+    db.init_db()
+    conn = db.get_conn()
+    materials = [r["name"] for r in conn.execute("SELECT name FROM materials").fetchall()]
+    record = conn.execute("SELECT material FROM records").fetchone()
+    monthly = conn.execute("SELECT material FROM semi_finished_monthly_totals").fetchone()
+    assert "PCBA板" not in materials
+    assert "77794-PCBA板" in materials
+    assert record["material"] == "77794-PCBA板"
+    assert monthly["material"] == "77794-PCBA板"
+    conn.close()
+
+
+def test_init_migrates_legacy_sticker_type_names(db_path):
+    from pcba import db
+
+    db.init_db()
+    conn = db.get_conn()
+    conn.execute("UPDATE sticker_types SET name='贴纸01' WHERE sort=1")
+    conn.execute(
+        "INSERT INTO records(rec_type, material, sticker_type, qty, department) "
+        "VALUES ('inbound_raw', 'NFC贴纸', '贴纸01', 10, '兴信B来料仓')"
+    )
+    conn.commit()
+    conn.close()
+
+    db.init_db()
+    conn = db.get_conn()
+    sticker_types = conn.execute(
+        "SELECT name FROM sticker_types ORDER BY sort"
+    ).fetchall()
+    record = conn.execute("SELECT sticker_type FROM records").fetchone()
+    assert len(sticker_types) == 45
+    assert sticker_types[0]["name"] == "1#NFC贴纸"
+    assert sticker_types[-1]["name"] == "45#NFC贴纸"
+    assert record["sticker_type"] == "1#NFC贴纸"
     conn.close()
 
 
@@ -103,3 +183,4 @@ def test_init_migrates_existing_records_to_default_department(db_path):
     assert "po_no" in record_columns
     assert "customer_name" in record_columns
     conn.close()
+

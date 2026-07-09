@@ -12,27 +12,90 @@ def _name(record, key, fallback):
 
 
 def _new_total(**extra):
-    return {**extra, "inbound": 0, "outbound": 0, "balance": 0}
+    return {
+        **extra,
+        "inbound": 0,
+        "outbound": 0,
+        "balance": 0,
+        "_normal_balance": 0,
+        "_reverse_inbound": 0,
+        "_reverse_outbound": 0,
+    }
 
 
-def _apply_flow(total, rec_type, qty):
+def _apply_flow(total, rec_type, qty, reverse_balance=False):
     if rec_type in INBOUND_TYPES:
         total["inbound"] += qty
+        if reverse_balance:
+            total["_reverse_inbound"] += qty
+        else:
+            total["_normal_balance"] += qty
     elif rec_type in OUTBOUND_TYPES:
         total["outbound"] += qty
-    total["balance"] = total["inbound"] - total["outbound"]
+        if reverse_balance:
+            total["_reverse_outbound"] += qty
+        else:
+            total["_normal_balance"] -= qty
 
 
-def compute_material_totals(records):
+def _finalize_total(total):
+    normal_balance = total.pop("_normal_balance", 0)
+    reverse_inbound = total.pop("_reverse_inbound", 0)
+    reverse_outbound = total.pop("_reverse_outbound", 0)
+    reverse_balance = (
+        reverse_outbound - reverse_inbound
+        if reverse_outbound
+        else reverse_inbound
+    )
+    total["balance"] = normal_balance + reverse_balance
+    return total
+
+
+def _finalize_totals(totals):
+    return [_finalize_total(total) for total in totals]
+
+
+def _reverse_balance(record, reverse_departments):
+    return _name(record, "department", "未分部门") in reverse_departments
+
+
+def compute_material_totals(records, reverse_departments=()):
+    reverse_departments = set(reverse_departments or ())
     totals = {}
     for record in records:
         material = _name(record, "material", "未分类")
         total = totals.setdefault(material, _new_total(material=material))
-        _apply_flow(total, record.get("rec_type"), _qty(record))
-    return [totals[name] for name in sorted(totals)]
+        _apply_flow(
+            total,
+            record.get("rec_type"),
+            _qty(record),
+            _reverse_balance(record, reverse_departments),
+        )
+    return _finalize_totals(totals[name] for name in sorted(totals))
 
 
-def compute_department_totals(records, departments):
+def compute_sticker_type_totals(records, reverse_departments=()):
+    reverse_departments = set(reverse_departments or ())
+    totals = {}
+    for record in records:
+        sticker_type = record.get("sticker_type")
+        if not sticker_type:
+            continue
+        total = totals.setdefault(
+            sticker_type,
+            _new_total(sticker_type=sticker_type),
+        )
+        _apply_flow(
+            total,
+            record.get("rec_type"),
+            _qty(record),
+            _reverse_balance(record, reverse_departments),
+        )
+    return _finalize_totals(totals[name] for name in sorted(totals))
+
+
+def compute_department_totals(records, departments, reverse_departments=()):
+    reverse_departments = set(reverse_departments or ())
     totals = {
         department: _new_total(department=department)
         for department in departments
@@ -40,17 +103,23 @@ def compute_department_totals(records, departments):
     for record in records:
         department = _name(record, "department", "未分部门")
         total = totals.setdefault(department, _new_total(department=department))
-        _apply_flow(total, record.get("rec_type"), _qty(record))
+        _apply_flow(
+            total,
+            record.get("rec_type"),
+            _qty(record),
+            department in reverse_departments,
+        )
     ordered = [totals[department] for department in departments if department in totals]
     ordered.extend(
         totals[department]
         for department in sorted(totals)
         if department not in departments
     )
-    return ordered
+    return _finalize_totals(ordered)
 
 
-def compute_material_department_totals(records):
+def compute_material_department_totals(records, reverse_departments=()):
+    reverse_departments = set(reverse_departments or ())
     totals = {}
     for record in records:
         material = _name(record, "material", "未分类")
@@ -60,25 +129,35 @@ def compute_material_department_totals(records):
             key,
             _new_total(material=material, department=department),
         )
-        _apply_flow(total, record.get("rec_type"), _qty(record))
-    return [totals[key] for key in sorted(totals)]
+        _apply_flow(
+            total,
+            record.get("rec_type"),
+            _qty(record),
+            department in reverse_departments,
+        )
+    return _finalize_totals(totals[key] for key in sorted(totals))
 
 
-def compute_public_summary(records, departments, filters=None):
-    materials = compute_material_totals(records)
-    department_totals = compute_department_totals(records, departments)
-    totals = _new_total()
+def compute_public_summary(records, departments, filters=None, reverse_departments=()):
+    materials = compute_material_totals(records, reverse_departments)
+    department_totals = compute_department_totals(
+        records, departments, reverse_departments
+    )
+    totals = {"inbound": 0, "outbound": 0, "balance": 0}
     for row in materials:
         totals["inbound"] += row["inbound"]
         totals["outbound"] += row["outbound"]
-    totals["balance"] = totals["inbound"] - totals["outbound"]
+        totals["balance"] += row["balance"]
     return {
         "filters": filters or {},
         "record_count": len(records),
         "totals": totals,
         "materials": materials,
+        "sticker_types": compute_sticker_type_totals(records, reverse_departments),
         "department_totals": department_totals,
-        "material_department": compute_material_department_totals(records),
+        "material_department": compute_material_department_totals(
+            records, reverse_departments
+        ),
     }
 
 

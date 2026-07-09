@@ -204,7 +204,13 @@ router.get('/:id', (req, res) => {
       engineering_molds = (p.molds || []).map(m => ({
         mold_no: m.mold_no || '', name: m.name || '', cavity: m.cavity || '',
         sets: m.sets ?? 1, material: m.material || '', color: m.color || '',
+        material_grade: m.material_grade || '', machine: m.machine || '',
+        machine_model: m.machine_model || (m.detail && m.detail.machine_model) || '',
+        target: m.target ?? (m.detail && m.detail.target) ?? null,
+        material_unit_price: m.material_unit_price ?? null,
+        shot_price: m.shot_price ?? null,
         weight_g: m.weight_g ?? null, cycle_sec: m.cycle_sec ?? null,
+        note: m.note || '',
       }));
     } catch {}
   }

@@ -1,4 +1,4 @@
-DEFAULT_DEPARTMENT = "兴信B来料仓"
+﻿DEFAULT_DEPARTMENT = "兴信B来料仓"
 
 
 def admin_login(client, department=DEFAULT_DEPARTMENT):
@@ -74,6 +74,58 @@ def test_records_can_filter_by_doc_no_fuzzy(client):
 def test_records_reject_invalid_date_filter(client):
     admin_login(client)
     r = client.get("/api/records?date_from=2026/07/01")
+
+    assert r.status_code == 400
+
+
+def test_batch_create_nfc_sticker_records_with_each_quantity(client):
+    admin_login(client)
+    r = client.post("/api/records/batch", json={
+        "rec_type": "inbound_raw",
+        "rec_date": "2026-07-08",
+        "doc_no": "NFC-001",
+        "material": "NFC贴纸",
+        "remark": "首批贴纸",
+        "items": [
+            {"sticker_type": "1#NFC贴纸", "qty": 100},
+            {"sticker_type": "2#NFC贴纸", "qty": 250},
+        ],
+    })
+
+    assert r.status_code == 200
+    assert len(r.json()["ids"]) == 2
+
+    rows = client.get("/api/records?doc_no=NFC-001").json()
+    by_type = {row["sticker_type"]: row for row in rows}
+    assert by_type["1#NFC贴纸"]["material"] == "NFC贴纸"
+    assert by_type["1#NFC贴纸"]["qty"] == 100
+    assert by_type["2#NFC贴纸"]["qty"] == 250
+    assert all(row["doc_no"] == "NFC-001" for row in rows)
+
+
+def test_batch_create_nfc_stickers_rejects_duplicate_type(client):
+    admin_login(client)
+    r = client.post("/api/records/batch", json={
+        "rec_type": "inbound_raw",
+        "material": "NFC贴纸",
+        "items": [
+            {"sticker_type": "1#NFC贴纸", "qty": 100},
+            {"sticker_type": "1#NFC贴纸", "qty": 250},
+        ],
+    })
+
+    assert r.status_code == 400
+
+
+def test_batch_create_nfc_stickers_rejects_blank_type(client):
+    admin_login(client)
+    r = client.post("/api/records/batch", json={
+        "rec_type": "inbound_raw",
+        "material": "NFC贴纸",
+        "items": [
+            {"sticker_type": " ", "qty": 100},
+        ],
+    })
 
     assert r.status_code == 400
 
@@ -366,9 +418,16 @@ def test_outsource_can_create_finished_and_semi_finished_without_location(client
     assert by_type["semi_finished"]["location_id"] is None
 
 
-def test_outsource_rejects_non_inbound_record_types(client):
+def test_outsource_can_create_issue_finished_and_semi_finished_without_location(client):
     admin_login(client, "外发")
-    for rec_type in ("inbound_raw", "issue", "semi_inbound", "semi_outbound"):
+    issue = client.post("/api/records", json={
+        "rec_type": "issue", "material": "PCBA板", "qty": 20})
+    assert issue.status_code == 200
+
+
+def test_outsource_rejects_other_warehouse_record_types(client):
+    admin_login(client, "外发")
+    for rec_type in ("inbound_raw", "semi_inbound", "semi_outbound"):
         r = client.post("/api/records", json={
             "rec_type": rec_type, "material": "PCBA板", "qty": 10})
         assert r.status_code == 400
@@ -397,3 +456,4 @@ def test_non_semi_finished_department_rejects_warehouse_types(client):
         r = client.post("/api/records", json={
             "rec_type": rec_type, "material": "PCBA板", "qty": 10})
         assert r.status_code == 400
+

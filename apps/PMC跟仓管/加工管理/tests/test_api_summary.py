@@ -1,4 +1,4 @@
-DEFAULT_DEPARTMENT = "兴信B来料仓"
+﻿DEFAULT_DEPARTMENT = "兴信B来料仓"
 
 
 def admin_login(client, department=DEFAULT_DEPARTMENT):
@@ -71,6 +71,36 @@ def test_summary_can_filter_by_doc_no_fuzzy(client):
     assert s["raw"]["balance"] == 100
     assert s["filters"]["doc_no"] == "ABC"
     assert set(materials) == {"NFC贴纸"}
+
+
+def test_summary_groups_nfc_stickers_by_type(client):
+    admin_login(client, "兴信B来料仓")
+    lid = loc_id(client, "东莞车间")
+    client.post("/api/records/batch", json={
+        "rec_type": "inbound_raw",
+        "material": "NFC贴纸",
+        "items": [
+            {"sticker_type": "1#NFC贴纸", "qty": 100},
+            {"sticker_type": "2#NFC贴纸", "qty": 60},
+        ],
+    })
+    client.post("/api/records/batch", json={
+        "rec_type": "issue",
+        "location_id": lid,
+        "material": "NFC贴纸",
+        "items": [
+            {"sticker_type": "1#NFC贴纸", "qty": 30},
+        ],
+    })
+
+    s = client.get("/api/summary").json()
+    sticker_types = {row["sticker_type"]: row for row in s["sticker_types"]}
+
+    assert sticker_types["1#NFC贴纸"]["inbound"] == 100
+    assert sticker_types["1#NFC贴纸"]["outbound"] == 30
+    assert sticker_types["1#NFC贴纸"]["balance"] == 70
+    assert sticker_types["2#NFC贴纸"]["inbound"] == 60
+    assert sticker_types["2#NFC贴纸"]["balance"] == 60
 
 
 def test_summary_is_scoped_to_current_department(client):
@@ -156,6 +186,10 @@ def test_heyuan_summary_uses_issue_minus_finished_balance(client):
     assert s["subtotal"]["issue"] == 100
     assert s["subtotal"]["finished"] == 45
     assert s["subtotal"]["balance"] == 55
+    assert s["raw"] == {"inbound": 45, "outbound": 100, "balance": 55}
+    assert s["materials"] == [
+        {"material": "PCBA板", "inbound": 45, "outbound": 100, "balance": 55}
+    ]
 
 
 def test_shaoyang_summary_uses_issue_minus_finished_balance(client):
@@ -193,3 +227,4 @@ def test_xinshao_summary_uses_issue_minus_finished_balance(client):
 def test_summary_requires_login(client):
     r = client.get("/api/summary")
     assert r.status_code == 401
+

@@ -1,12 +1,15 @@
 import os
 import io
+import re
 from datetime import date, datetime
 from typing import List, Optional
+from urllib.parse import quote
 
-from fastapi import FastAPI, HTTPException, Request, Depends, File, UploadFile
+from fastapi import FastAPI, HTTPException, Request, Depends, File, Form, UploadFile
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from openpyxl import Workbook, load_workbook
+from openpyxl.styles import Alignment, Border, PatternFill, Side
 from openpyxl.utils.datetime import from_excel
 from starlette.middleware.sessions import SessionMiddleware
 from pydantic import BaseModel
@@ -21,6 +24,10 @@ from pcba.summary import (
 )
 from pcba.db import DEPARTMENTS, LOCATIONS
 from pcba.export import build_workbook
+from pcba.shaoyang_reconcile import (
+    build_shaoyang_cd_reconcile,
+    build_shaoyang_issue_export_workbook,
+)
 
 app = FastAPI(title="唱片机管理系统")
 BASE_PATH = os.environ.get("PCBA_BASE_PATH", "").rstrip("/")
@@ -359,7 +366,7 @@ def _xlsx_response(wb: Workbook, filename: str):
     return StreamingResponse(
         buf,
         media_type=XLSX_MEDIA_TYPE,
-        headers={"Content-Disposition": f"attachment; filename={filename}"},
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}"},
     )
 
 
@@ -521,6 +528,40 @@ def _legacy_excel_date(value):
         except ValueError:
             pass
     return None
+
+
+def _legacy_cutoff_date(value, default_year=None):
+    rec_date = _legacy_excel_date(value)
+    if rec_date:
+        return rec_date
+    text = _cell_text(value)
+    if not text:
+        return None
+    match = re.search(
+        r"(?:(19\d{2}|20\d{2})\s*[年/-])?(\d{1,2})\s*(?:月|/|-)\s*(\d{1,2})\s*(?:日|号)?",
+        text,
+    )
+    if not match:
+        return None
+    year = int(match.group(1) or default_year or date.today().year)
+    month = int(match.group(2))
+    day = int(match.group(3))
+    try:
+        return date(year, month, day).isoformat()
+    except ValueError:
+        return None
+
+
+def _legacy_workbook_year(wb):
+    for ws in wb.worksheets:
+        for row in ws.iter_rows():
+            for cell in row:
+                rec_date = _legacy_excel_date(cell.value)
+                if rec_date:
+                    year = date.fromisoformat(rec_date).year
+                    if 2000 <= year <= 2100:
+                        return year
+    return date.today().year
 
 
 def _find_legacy_item_header_row(ws):
@@ -917,8 +958,90 @@ def _parse_legacy_heyuan_workbook(conn, wb, department):
     return bodies
 
 
+def _pcba_summary_key_from_label(label):
+    text = _cell_text(label)
+    if not text:
+        return None
+    compact = re.sub(r"\s+", "", text)
+    if "入仓" in compact or "入库" in compact:
+        return ("inbound_raw", None)
+    if "邵阳" in compact:
+        return ("issue", "邵阳华登")
+    if "河源" in compact:
+        return ("issue", "河源华兴")
+    if "利鸿" in compact or "加工厂" in compact:
+        return ("issue", "东莞加工厂利鸿")
+    if "东莞车间" in compact or "车间领料" in compact:
+        return ("issue", "东莞车间")
+    return None
+
+
+def _pcba_summary_month_from_header(value):
+    text = _cell_text(value)
+    match = re.search(r"(\d{1,2})月", text)
+    if not match:
+        return None
+    month = int(match.group(1))
+    return month if month in SUMMARY_MONTHS else None
+
+
+def _pcba_summary_month_totals(wb):
+    if "总表" not in wb.sheetnames:
+        return {}
+    ws = wb["总表"]
+    month_columns = []
+    for col_no in range(1, ws.max_column + 1):
+        month = _pcba_summary_month_from_header(ws.cell(1, col_no).value)
+        if month:
+            month_columns.append((month, col_no))
+    if not month_columns:
+        return {}
+
+    totals = {}
+    for row_no in range(2, ws.max_row + 1):
+        key = _pcba_summary_key_from_label(
+            ws.cell(row_no, 2).value or ws.cell(row_no, 1).value
+        )
+        if not key:
+            continue
+        month_values = {}
+        for month, col_no in month_columns:
+            month_values[month] = _legacy_int(
+                ws.cell(row_no, col_no).value,
+                row_no,
+                f"{month}月",
+            ) or 0
+        totals[key] = month_values
+    return totals
+
+
+def _assign_pcba_summary_months(groups, totals):
+    for key, bodies in groups.items():
+        month_totals = totals.get(key)
+        if not month_totals:
+            continue
+        months = [
+            month for month in SUMMARY_MONTHS
+            if int(month_totals.get(month) or 0) != 0
+        ]
+        if not months:
+            continue
+        month_index = 0
+        remaining = int(month_totals[months[month_index]] or 0)
+        for body in bodies:
+            while month_index < len(months) and remaining == 0:
+                month_index += 1
+                if month_index < len(months):
+                    remaining = int(month_totals[months[month_index]] or 0)
+            if month_index >= len(months):
+                break
+            body.summary_month = months[month_index]
+            remaining -= int(body.qty or 0)
+
+
 def _parse_legacy_supplier_pcba_workbook(conn, wb, department):
     bodies = []
+    groups = {}
     inbound_ws = wb["入仓明细"] if "入仓明细" in wb.sheetnames else None
     if inbound_ws:
         headers = _legacy_header_map(inbound_ws)
@@ -952,13 +1075,13 @@ def _parse_legacy_supplier_pcba_workbook(conn, wb, department):
                 ) or f"{inbound_ws.title}导入",
             )
             _add_record_body(bodies, body, department, validate_positive=False)
+            groups.setdefault(("inbound_raw", None), []).append(body)
 
     for ws in wb.worksheets:
         if "领料" not in ws.title:
             continue
-        location_id = _location_id_from_name(
-            conn, _legacy_location_from_sheet(ws.title), 1
-        )
+        location_name = _legacy_location_from_sheet(ws.title)
+        location_id = _location_id_from_name(conn, location_name, 1)
         headers = _legacy_header_map(ws)
         for row_no in range(2, ws.max_row + 1):
             material = _cell_text(_legacy_header_value(ws, headers, row_no, "物料名称"))
@@ -992,6 +1115,8 @@ def _parse_legacy_supplier_pcba_workbook(conn, wb, department):
                 ) or f"{ws.title}导入",
             )
             _add_record_body(bodies, body, department, validate_positive=False)
+            groups.setdefault(("issue", location_name), []).append(body)
+    _assign_pcba_summary_months(groups, _pcba_summary_month_totals(wb))
     return bodies
 
 
@@ -1018,6 +1143,14 @@ def _parse_supplier_nfc_total_rows(conn, wb, department):
     if "总表" not in wb.sheetnames:
         return bodies
     ws = wb["总表"]
+    workbook_year = _legacy_workbook_year(wb)
+    opening_inbound_date = _legacy_cutoff_date(ws.cell(2, 3).value, workbook_year)
+    dongguan_opening_date = _legacy_cutoff_date(ws.cell(2, 13).value, workbook_year)
+    shaoyang_opening_date = (
+        _legacy_cutoff_date(ws.cell(2, 14).value, workbook_year)
+        or dongguan_opening_date
+        or opening_inbound_date
+    )
     dongguan_id = _location_id_from_name(conn, "东莞车间", 1)
     shaoyang_id = _location_id_from_name(conn, "邵阳华登", 1)
     for row_no in range(3, ws.max_row + 1):
@@ -1034,6 +1167,7 @@ def _parse_supplier_nfc_total_rows(conn, wb, department):
                     rec_type="inbound_raw",
                     material=NFC_MATERIAL,
                     sticker_type=sticker_type,
+                    rec_date=opening_inbound_date,
                     doc_no=f"{sticker_type}-期初入仓",
                     qty=values["opening_inbound"],
                     remark="总表期初入仓导入",
@@ -1048,6 +1182,7 @@ def _parse_supplier_nfc_total_rows(conn, wb, department):
                     location_id=dongguan_id,
                     material=NFC_MATERIAL,
                     sticker_type=sticker_type,
+                    rec_date=dongguan_opening_date,
                     doc_no=f"{sticker_type}-东莞期初出仓",
                     qty=values["dongguan_opening_outbound"],
                     remark="总表东莞期初出仓导入",
@@ -1062,6 +1197,7 @@ def _parse_supplier_nfc_total_rows(conn, wb, department):
                     location_id=shaoyang_id,
                     material=NFC_MATERIAL,
                     sticker_type=sticker_type,
+                    rec_date=shaoyang_opening_date,
                     doc_no=f"{sticker_type}-邵阳期初领料",
                     qty=values["shaoyang_opening_outbound"],
                     remark="总表邵阳期初领料导入",
@@ -1133,8 +1269,8 @@ def _parse_legacy_supplier_workbook(conn, wb, department):
     return bodies
 
 
-def _record_duplicate_exists(conn, body, user):
-    return conn.execute(
+def _record_duplicate_id(conn, body, user):
+    row = conn.execute(
         "SELECT id FROM records WHERE department=? AND rec_type=? "
         "AND COALESCE(rec_date, '')=? AND COALESCE(doc_no, '')=? "
         "AND material=? AND COALESCE(sticker_type, '')=? AND qty=? "
@@ -1150,20 +1286,50 @@ def _record_duplicate_exists(conn, body, user):
             body.location_id or 0,
             body.remark or "",
         ),
-    ).fetchone() is not None
+    ).fetchone()
+    if row:
+        return row["id"]
+    if body.rec_date is None and body.doc_no:
+        legacy_row = conn.execute(
+            "SELECT id FROM records WHERE department=? AND rec_type=? "
+            "AND COALESCE(rec_date, '')='' AND COALESCE(doc_no, '')='' "
+            "AND material=? AND COALESCE(sticker_type, '')=? AND qty=? "
+            "AND COALESCE(location_id, 0)=? AND COALESCE(remark, '')=?",
+            (
+                user["department"],
+                body.rec_type,
+                body.material,
+                body.sticker_type or "",
+                body.qty,
+                body.location_id or 0,
+                body.remark or "",
+            ),
+        ).fetchone()
+        if legacy_row:
+            return legacy_row["id"]
+    return None
 
 
 def _insert_record_body(conn, body, user, skip_duplicate=False):
-    if skip_duplicate and _record_duplicate_exists(conn, body, user):
-        return None
+    if skip_duplicate:
+        duplicate_id = _record_duplicate_id(conn, body, user)
+        if duplicate_id:
+            if body.summary_month is not None:
+                conn.execute(
+                    "UPDATE records SET summary_month=? WHERE id=?",
+                    (body.summary_month, duplicate_id),
+                )
+            return None
     supplier, po_no, customer_name = _record_extras(body, user["department"])
     sticker_type = _normalize_sticker_type(conn, body.material, body.sticker_type)
     cur = conn.execute(
         "INSERT INTO records(rec_type, location_id, rec_date, doc_no, "
-        "material, sticker_type, qty, remark, supplier, po_no, customer_name, department, created_by) "
-        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "material, sticker_type, qty, remark, supplier, po_no, customer_name, "
+        "summary_month, department, created_by) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (body.rec_type, body.location_id, body.rec_date, body.doc_no,
          body.material, sticker_type, body.qty, body.remark, supplier, po_no, customer_name,
+         body.summary_month,
          user["department"], user["id"]),
     )
     return cur.lastrowid
@@ -1577,6 +1743,7 @@ class RecordIn(BaseModel):
     supplier: Optional[str] = None
     po_no: Optional[str] = None
     customer_name: Optional[str] = None
+    summary_month: Optional[int] = None
 
 
 def _validate_record(body: RecordIn, department: Optional[str] = None):
@@ -1691,10 +1858,12 @@ def create_record(body: RecordIn, user=Depends(current_user)):
         sticker_type = _normalize_sticker_type(conn, body.material, body.sticker_type)
         cur = conn.execute(
             "INSERT INTO records(rec_type, location_id, rec_date, doc_no, "
-            "material, sticker_type, qty, remark, supplier, po_no, customer_name, department, created_by) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "material, sticker_type, qty, remark, supplier, po_no, customer_name, "
+            "summary_month, department, created_by) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (body.rec_type, body.location_id, body.rec_date, body.doc_no,
              body.material, sticker_type, body.qty, body.remark, supplier, po_no, customer_name,
+             body.summary_month,
              user["department"], user["id"]),
         )
         conn.commit()
@@ -1742,10 +1911,12 @@ def create_records_batch(body: RecordBatchIn, user=Depends(current_user)):
         for sticker_type, qty in valid_items:
             cur = conn.execute(
                 "INSERT INTO records(rec_type, location_id, rec_date, doc_no, "
-                "material, sticker_type, qty, remark, supplier, po_no, customer_name, department, created_by) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "material, sticker_type, qty, remark, supplier, po_no, customer_name, "
+                "summary_month, department, created_by) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (common.rec_type, common.location_id, common.rec_date, common.doc_no,
                  NFC_MATERIAL, sticker_type, qty, common.remark, supplier, po_no, customer_name,
+                 common.summary_month,
                  user["department"], user["id"]),
             )
             ids.append(cur.lastrowid)
@@ -1766,6 +1937,708 @@ def record_import_template(_user=Depends(current_user)):
         "2026-07-08", "示例单号001", 100, "示例行，可删除", "", "",
     ])
     return _xlsx_response(wb, "records_import_template.xlsx")
+
+
+def _record_export_type_label(rec_type, department):
+    if rec_type == "issue":
+        return "出库" if department == SUPPLIER_DEPARTMENT else "领料"
+    labels = {
+        "inbound_raw": "入库",
+        "finished": "成品入库",
+        "semi_finished": "半成品入库",
+        "semi_inbound": "入库",
+        "semi_outbound": "出库",
+    }
+    return labels.get(rec_type, rec_type)
+
+
+def _records_export_workbook(records, department):
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "流水导出"
+    ws.append(RECORD_IMPORT_HEADERS)
+    for row in records:
+        ws.append([
+            _record_export_type_label(row["rec_type"], department),
+            row["material"],
+            row["sticker_type"],
+            row["location_name"],
+            row["supplier"],
+            _record_export_date(row),
+            row["doc_no"],
+            row["qty"],
+            row["remark"],
+            row["po_no"],
+            row["customer_name"],
+        ])
+    return wb
+
+
+EXPORT_MONTHS = tuple(range(7, 13))
+SUMMARY_MONTHS = (6, *EXPORT_MONTHS)
+SUMMARY_MONTH_LABELS = {
+    6: "6月月结",
+    **{month: f"{month}月" for month in EXPORT_MONTHS},
+}
+
+
+def _export_date(value):
+    if not value:
+        return None
+    try:
+        return date.fromisoformat(str(value))
+    except ValueError:
+        return value
+
+
+def _legacy_opening_record_date(row):
+    if row.get("rec_date"):
+        return None
+    text = f"{row.get('doc_no') or ''} {row.get('remark') or ''}"
+    if "期初" in text:
+        return date(date.today().year, 6, 27).isoformat()
+    return None
+
+
+def _record_export_date(row):
+    return row.get("rec_date") or _legacy_opening_record_date(row)
+
+
+def _export_month(value):
+    if not value:
+        return 6
+    try:
+        return date.fromisoformat(str(value)).month
+    except ValueError:
+        return 6
+
+
+def _sum_qty(records):
+    return sum(int(row.get("qty") or 0) for row in records)
+
+
+def _month_sum(records, month):
+    return _sum_qty([row for row in records if _record_month(row) == month])
+
+
+def _record_month(row):
+    summary_month = row.get("summary_month")
+    if summary_month:
+        try:
+            month = int(summary_month)
+            if month in SUMMARY_MONTHS:
+                return month
+        except (TypeError, ValueError):
+            pass
+    return _export_month(_record_export_date(row))
+
+
+def _monthly_flow_values(records):
+    values = []
+    for month in SUMMARY_MONTHS:
+        issue = _sum_qty([
+            row for row in records
+            if row["rec_type"] == "issue" and _record_month(row) == month
+        ])
+        finished = _sum_qty([
+            row for row in records
+            if row["rec_type"] in ("finished", "semi_finished")
+            and _record_month(row) == month
+        ])
+        values.append({
+            "issue": issue,
+            "finished": finished,
+            "balance": issue - finished,
+        })
+    return values
+
+
+def _monthly_raw_values(records):
+    values = []
+    for month in SUMMARY_MONTHS:
+        inbound = _sum_qty([
+            row for row in records
+            if row["rec_type"] == "inbound_raw" and _record_month(row) == month
+        ])
+        outbound = _sum_qty([
+            row for row in records
+            if row["rec_type"] == "issue" and _record_month(row) == month
+        ])
+        values.append({
+            "inbound": inbound,
+            "outbound": outbound,
+            "balance": inbound - outbound,
+        })
+    return values
+
+
+def _sum_month_values(values, key):
+    return sum(int(row.get(key) or 0) for row in values)
+
+
+def _summary_material(row):
+    material = (row.get("material") or PCBA_MATERIAL).strip()
+    return NFC_MATERIAL if material == NFC_MATERIAL else material
+
+
+def _summary_materials(records):
+    preferred = [NFC_MATERIAL, PCBA_MATERIAL]
+    names = sorted({_summary_material(row) for row in records})
+    return sorted(
+        names,
+        key=lambda name: (
+            preferred.index(name) if name in preferred else len(preferred),
+            name,
+        ),
+    )
+
+
+def _monthly_location_summary(records, location_names):
+    locations = []
+    for location in location_names:
+        location_records = [
+            row for row in records if row.get("location") == location
+        ]
+        for material in _summary_materials(location_records):
+            material_records = [
+                row for row in location_records
+                if _summary_material(row) == material
+            ]
+            values = _monthly_flow_values(material_records)
+            locations.append({
+                "location": location,
+                "material": material,
+                "issue": _sum_month_values(values, "issue"),
+                "finished": _sum_month_values(values, "finished"),
+                "balance": _sum_month_values(values, "balance"),
+                "values": values,
+            })
+    subtotal_values = []
+    for index, _month in enumerate(SUMMARY_MONTHS):
+        issue = sum(row["values"][index]["issue"] for row in locations)
+        finished = sum(row["values"][index]["finished"] for row in locations)
+        subtotal_values.append({
+            "issue": issue,
+            "finished": finished,
+            "balance": issue - finished,
+        })
+    raw_values = _monthly_raw_values(records)
+    return {
+        "months": [
+            {"month": month, "label": SUMMARY_MONTH_LABELS[month]}
+            for month in SUMMARY_MONTHS
+        ],
+        "locations": locations,
+        "subtotal": {
+            "issue": _sum_month_values(subtotal_values, "issue"),
+            "finished": _sum_month_values(subtotal_values, "finished"),
+            "balance": _sum_month_values(subtotal_values, "balance"),
+            "values": subtotal_values,
+        },
+        "raw": {
+            "inbound": _sum_month_values(raw_values, "inbound"),
+            "outbound": _sum_month_values(raw_values, "outbound"),
+            "balance": _sum_month_values(raw_values, "balance"),
+            "values": raw_values,
+        },
+    }
+
+
+def _format_nfc_sticker_name(name):
+    name = name or ""
+    return name.replace("NFC贴纸", "NFC\n贴纸")
+
+
+def _apply_legacy_sheet_style(ws, max_row=None, max_col=None):
+    max_row = max_row or ws.max_row
+    max_col = max_col or ws.max_column
+    thin = Side(style="thin", color="000000")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    for row in ws.iter_rows(min_row=1, max_row=max_row, min_col=1, max_col=max_col):
+        for cell in row:
+            cell.alignment = alignment
+            cell.border = border
+    for col_no in range(1, max_col + 1):
+        letter = ws.cell(1, col_no).column_letter
+        ws.column_dimensions[letter].width = 13
+    ws.column_dimensions["A"].width = 14
+    ws.column_dimensions["B"].width = 16
+
+
+SUPPLIER_PCBA_SUMMARY_ROWS = (
+    ("邵阳华登", "邵阳华登领料总数", "PCB主板", "邵阳华登领料"),
+    ("河源华兴", "河源华兴领料总数", "PCB主板", "河源华兴领料"),
+    ("东莞加工厂利鸿", "加工厂利鸿领料总数", "PCB主板", "加工厂利鸿领料"),
+    ("东莞车间", "东莞车间领料", None, "东莞车间领料"),
+)
+
+
+def _supplier_pcba_month_sums(records):
+    return [_month_sum(records, month) for month in (6, *EXPORT_MONTHS)]
+
+
+def _supplier_pcba_activity_row(material_label, label, records):
+    month_sums = _supplier_pcba_month_sums(records)
+    month_values = [value or None for value in month_sums]
+    return [material_label, label, sum(month_sums), *month_values, None]
+
+
+def _supplier_pcba_detail_sheet(wb, title, records, doc_header, qty_header):
+    ws = wb.create_sheet(title[:31])
+    ws.append(["日期", doc_header, "物料名称", qty_header, "备注"])
+    for row in records:
+        ws.append([
+            _record_export_date(row),
+            row.get("doc_no"),
+            PCBA_MATERIAL,
+            row.get("qty"),
+            row.get("remark"),
+        ])
+    ws.append([None, None, "小计：", _sum_qty(records), None])
+    _apply_legacy_sheet_style(ws, ws.max_row, 5)
+    ws.column_dimensions["A"].width = 20
+    ws.column_dimensions["E"].width = 20
+
+
+def _pcba_inbound_detail_sheet(wb, title, records):
+    ws = wb.create_sheet(title[:31])
+    ws.append(["日期", "送货单号", "合同号", "货号", "品名/规格", "数量（pcs）", "备注"])
+    for row in records:
+        ws.append([
+            _record_export_date(row),
+            row.get("doc_no"),
+            None,
+            "77794",
+            row.get("material") or PCBA_MATERIAL,
+            row.get("qty"),
+            row.get("remark"),
+        ])
+    ws.append([None, None, None, None, "小计：", _sum_qty(records), None])
+    _apply_legacy_sheet_style(ws, ws.max_row, 7)
+    ws.column_dimensions["A"].width = 20
+    ws.column_dimensions["B"].width = 18
+    ws.column_dimensions["E"].width = 18
+    ws.column_dimensions["G"].width = 22
+
+
+def _outsource_pcba_export_workbook(records):
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "总表"
+    issue = [row for row in records if row["rec_type"] == "issue"]
+    finished = [row for row in records if row["rec_type"] == "finished"]
+    semi_finished = [row for row in records if row["rec_type"] == "semi_finished"]
+    headers = ["物料名称", None, "累计出入数", "截6月月结"]
+    headers += [f"{month}月" for month in EXPORT_MONTHS]
+    headers.append("备注")
+    ws.append(headers)
+    ws.append(["PCBA主板", "领料总数", _sum_qty(issue), *_supplier_pcba_month_sums(issue), None])
+    ws.append([
+        None, "半成品入仓总数", _sum_qty(semi_finished),
+        *_supplier_pcba_month_sums(semi_finished), None,
+    ])
+    if finished:
+        ws.append([
+            None, "成品入仓总数", _sum_qty(finished),
+            *_supplier_pcba_month_sums(finished), None,
+        ])
+    _apply_legacy_sheet_style(ws, ws.max_row, len(headers))
+    ws.column_dimensions["A"].width = 14
+    ws.column_dimensions["B"].width = 18
+
+    _supplier_pcba_detail_sheet(wb, "领料明细", issue, "领料编号", "领料数")
+    _pcba_inbound_detail_sheet(wb, "半成品入仓明细", semi_finished)
+    if finished:
+        _pcba_inbound_detail_sheet(wb, "成品入仓明细", finished)
+    return wb
+
+
+def _heyuan_pcba_export_workbook(records):
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "总表"
+    issue = [row for row in records if row["rec_type"] == "issue"]
+    finished = [row for row in records if row["rec_type"] == "finished"]
+    headers = ["物料名称", "领料总数", "截6月月结"]
+    headers += [f"{month}月" for month in EXPORT_MONTHS]
+    headers.append("备注")
+    ws.append(headers)
+    ws.append(["PCBA主板", _sum_qty(issue), *_supplier_pcba_month_sums(issue), None])
+    if finished:
+        ws.append(["成品入仓总数", _sum_qty(finished), *_supplier_pcba_month_sums(finished), None])
+    _apply_legacy_sheet_style(ws, ws.max_row, len(headers))
+    ws.column_dimensions["A"].width = 14
+    ws.column_dimensions["B"].width = 14
+
+    _supplier_pcba_detail_sheet(wb, "36#CD领料明细", [], "领料编号", "领料数")
+    _supplier_pcba_detail_sheet(wb, "PCB板领料明细", issue, "领料编号", "领料数")
+    _pcba_inbound_detail_sheet(wb, "成品入仓明细", finished)
+    return wb
+
+
+def _supplier_pcba_export_workbook(records):
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "总表"
+    inbound = [row for row in records if row["rec_type"] == "inbound_raw"]
+    issues = [row for row in records if row["rec_type"] == "issue"]
+    headers = ["物料名称", None, "累计出入总数", "6月月结"]
+    headers += [f"{month}月" for month in EXPORT_MONTHS]
+    headers.append("备注")
+    ws.append(headers)
+    ws.append(_supplier_pcba_activity_row("PCB主板", "入仓总数", inbound))
+    issue_month_sums = [0] * 7
+    for row_no, (location, label, material_label, _sheet_title) in enumerate(
+        SUPPLIER_PCBA_SUMMARY_ROWS, start=3
+    ):
+        location_rows = [row for row in issues if row.get("location_name") == location]
+        ws.append(_supplier_pcba_activity_row(material_label, label, location_rows))
+        issue_month_sums = [
+            current + value
+            for current, value in zip(issue_month_sums, _supplier_pcba_month_sums(location_rows))
+        ]
+    ws.append([None] * len(headers))
+    balance_rows = [
+        inbound_value - issue_value
+        for inbound_value, issue_value in zip(_supplier_pcba_month_sums(inbound), issue_month_sums)
+    ]
+    ws.append([None, "应存数", sum(balance_rows), *balance_rows, None])
+    _apply_legacy_sheet_style(ws, 8, len(headers))
+    ws["C8"].fill = PatternFill(fill_type="solid", fgColor="FFFFFF00")
+    ws.column_dimensions["A"].width = 14.625
+    ws.column_dimensions["B"].width = 17.25
+    ws.column_dimensions["C"].width = 15.5
+    ws.column_dimensions["D"].width = 14.75
+    ws.column_dimensions["K"].width = 9
+
+    _supplier_pcba_detail_sheet(wb, "入仓明细", inbound, "入仓单号", "入仓数")
+    for location, _label, _material_label, sheet_title in SUPPLIER_PCBA_SUMMARY_ROWS:
+        location_rows = [row for row in issues if row.get("location_name") == location]
+        _supplier_pcba_detail_sheet(
+            wb, sheet_title, location_rows, "领料单号", "领料数"
+        )
+    wb.create_sheet("Sheet2")
+    return wb
+
+
+def _supplier_nfc_sticker_names(records, sticker_types):
+    names = list(sticker_types)
+    for row in records:
+        name = row.get("sticker_type")
+        if name and name not in names:
+            names.append(name)
+    return names
+
+
+def _supplier_nfc_detail_sheet(wb, title, records, sticker_names, total_header):
+    ws = wb.create_sheet(title)
+    records = [
+        row for row in records
+        if _export_month(_record_export_date(row)) in (6, *EXPORT_MONTHS)
+    ]
+    ws.cell(1, 2).value = total_header
+    ws.cell(2, 1).value = "物料名称"
+    for offset, row in enumerate(records, start=3):
+        ws.cell(1, offset).value = _record_export_date(row)
+        ws.cell(2, offset).value = row.get("doc_no")
+    for row_no, sticker_type in enumerate(sticker_names, start=3):
+        ws.cell(row_no, 1).value = _format_nfc_sticker_name(sticker_type)
+        sticker_records = [
+            row for row in records if row.get("sticker_type") == sticker_type
+        ]
+        ws.cell(row_no, 2).value = _sum_qty(sticker_records) or 0
+        for col_no, record in enumerate(records, start=3):
+            if record.get("sticker_type") == sticker_type:
+                ws.cell(row_no, col_no).value = record.get("qty")
+    total_row = len(sticker_names) + 3
+    ws.cell(total_row, 1).value = "小计："
+    ws.cell(total_row, 2).value = _sum_qty(records) or 0
+    for col_no, row in enumerate(records, start=3):
+        ws.cell(total_row, col_no).value = row.get("qty")
+    _apply_legacy_sheet_style(ws, total_row, max(2, len(records) + 2))
+    return ws
+
+
+def _supplier_nfc_export_workbook(records, sticker_types):
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "总表"
+    inbound = [row for row in records if row["rec_type"] == "inbound_raw"]
+    outbound = [row for row in records if row["rec_type"] == "issue"]
+    sticker_names = _supplier_nfc_sticker_names(records, sticker_types)
+    ws.cell(1, 2).value = "累计入仓总数"
+    ws.cell(2, 1).value = "物料名称"
+    ws.cell(2, 3).value = "截止6月27号"
+    for i, month in enumerate(EXPORT_MONTHS, start=4):
+        ws.cell(1, i).value = f"{month}月入仓\n总数"
+    ws.cell(1, 11).value = "应存数"
+    ws.cell(1, 12).value = "累计出仓总数"
+    ws.cell(1, 13).value = "东莞"
+    ws.cell(2, 13).value = "截止6月27号"
+    ws.cell(1, 14).value = "邵阳领料"
+    for i, month in enumerate(EXPORT_MONTHS, start=15):
+        ws.cell(1, i).value = f"{month}月出仓\n总数"
+
+    for row_no, sticker_type in enumerate(sticker_names, start=3):
+        sticker_inbound = [row for row in inbound if row.get("sticker_type") == sticker_type]
+        sticker_outbound = [row for row in outbound if row.get("sticker_type") == sticker_type]
+        ws.cell(row_no, 1).value = _format_nfc_sticker_name(sticker_type)
+        ws.cell(row_no, 2).value = _sum_qty(sticker_inbound) or 0
+        ws.cell(row_no, 3).value = _month_sum(sticker_inbound, 6) or 0
+        for col_no, month in enumerate(EXPORT_MONTHS, start=4):
+            ws.cell(row_no, col_no).value = _month_sum(sticker_inbound, month) or None
+        ws.cell(row_no, 11).value = _sum_qty(sticker_inbound) - _sum_qty(sticker_outbound)
+        ws.cell(row_no, 12).value = _sum_qty(sticker_outbound) or 0
+        dongguan_opening = [
+            row for row in sticker_outbound
+            if row.get("location_name") == "东莞车间" and _export_month(row.get("rec_date")) == 6
+        ]
+        shaoyang_opening = [
+            row for row in sticker_outbound
+            if row.get("location_name") == "邵阳华登" and _export_month(row.get("rec_date")) == 6
+        ]
+        ws.cell(row_no, 13).value = _sum_qty(dongguan_opening) or 0
+        ws.cell(row_no, 14).value = _sum_qty(shaoyang_opening) or 0
+        for col_no, month in enumerate(EXPORT_MONTHS, start=15):
+            ws.cell(row_no, col_no).value = _month_sum(sticker_outbound, month) or None
+    _apply_legacy_sheet_style(ws, len(sticker_names) + 2, 20)
+    ws.column_dimensions["A"].width = 13
+    ws.column_dimensions["B"].width = 11
+    ws.column_dimensions["C"].width = 12
+
+    _supplier_nfc_detail_sheet(wb, "入库明细", inbound, sticker_names, "当月入仓总数")
+    _supplier_nfc_detail_sheet(wb, "出库明细", outbound, sticker_names, "当月出仓总数")
+    return wb
+
+
+def _monthly_totals_map(monthly_totals):
+    return {
+        row["sticker_type"]: {
+            "opening_stock": int(row.get("opening_stock") or 0),
+            "monthly_inbound": int(row.get("monthly_inbound") or 0),
+            "monthly_outbound": int(row.get("monthly_outbound") or 0),
+        }
+        for row in monthly_totals
+    }
+
+
+def _semi_finished_sticker_names(records, sticker_types, monthly_totals):
+    names = list(sticker_types)
+    for row in monthly_totals:
+        name = row.get("sticker_type")
+        if name and name not in names:
+            names.append(name)
+    for row in records:
+        name = row.get("sticker_type")
+        if name and name not in names:
+            names.append(name)
+    return names
+
+
+def _semi_month_total(total_row, records, key, rec_type):
+    value = int((total_row or {}).get(key) or 0)
+    if value:
+        return value
+    return _sum_qty([row for row in records if row["rec_type"] == rec_type])
+
+
+def _semi_finished_detail_sheet(
+    wb, title, records, sticker_names, totals_by_sticker, is_inbound
+):
+    ws = wb.create_sheet(title)
+    rec_type = "semi_inbound" if is_inbound else "semi_outbound"
+    total_key = "monthly_inbound" if is_inbound else "monthly_outbound"
+    total_header = "当月入仓总数" if is_inbound else "当月出仓总数"
+    sheet_records = [row for row in records if row["rec_type"] == rec_type]
+    start_col = 5 if is_inbound else 4
+    header_row = 3 if is_inbound else 5
+    data_row_start = header_row + 1
+
+    if is_inbound:
+        ws.cell(1, 4).value = "日期"
+        ws.cell(2, 4).value = "入库单号"
+        ws.cell(3, 1).value = "物料名称"
+        ws.cell(3, 2).value = total_header
+        ws.cell(3, 3).value = "6/24\n装配入库截数"
+        ws.cell(3, 4).value = "6/24\n鸿亚入库截数"
+    else:
+        ws.cell(5, 1).value = "物料名称"
+        ws.cell(5, 2).value = total_header
+        ws.cell(5, 3).value = "6/24盘点截数"
+
+    for offset, row in enumerate(sheet_records, start=start_col):
+        ws.cell(1, offset).value = _record_export_date(row)
+        ws.cell(2, offset).value = row.get("doc_no")
+
+    for row_no, sticker_type in enumerate(sticker_names, start=data_row_start):
+        sticker_records = [
+            row for row in sheet_records if row.get("sticker_type") == sticker_type
+        ]
+        total_row = totals_by_sticker.get(sticker_type, {})
+        ws.cell(row_no, 1).value = _format_nfc_sticker_name(sticker_type)
+        ws.cell(row_no, 2).value = _semi_month_total(
+            total_row, sticker_records, total_key, rec_type
+        ) or 0
+        ws.cell(row_no, 3).value = int(total_row.get("opening_stock") or 0) or None
+        for col_no, record in enumerate(sheet_records, start=start_col):
+            if record.get("sticker_type") == sticker_type:
+                ws.cell(row_no, col_no).value = record.get("qty")
+
+    total_row_no = data_row_start + len(sticker_names)
+    ws.cell(total_row_no, 1).value = "小计："
+    ws.cell(total_row_no, 2).value = sum(
+        ws.cell(row_no, 2).value or 0
+        for row_no in range(data_row_start, total_row_no)
+    )
+    ws.cell(total_row_no, 3).value = sum(
+        ws.cell(row_no, 3).value or 0
+        for row_no in range(data_row_start, total_row_no)
+    ) or None
+    for col_no, record in enumerate(sheet_records, start=start_col):
+        ws.cell(total_row_no, col_no).value = record.get("qty")
+
+    _apply_legacy_sheet_style(
+        ws, total_row_no, max(start_col - 1, len(sheet_records) + start_col - 1)
+    )
+    ws.column_dimensions["A"].width = 13
+    ws.column_dimensions["B"].width = 12
+    ws.column_dimensions["C"].width = 13
+    return ws
+
+
+def _semi_finished_export_workbook(records, sticker_types, monthly_totals):
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "总表"
+    sticker_names = _semi_finished_sticker_names(records, sticker_types, monthly_totals)
+    totals_by_sticker = _monthly_totals_map(monthly_totals)
+    inbound = [row for row in records if row["rec_type"] == "semi_inbound"]
+    outbound = [row for row in records if row["rec_type"] == "semi_outbound"]
+
+    ws.cell(1, 2).value = "累计入仓总数"
+    ws.cell(2, 1).value = "物料名称"
+    ws.cell(2, 3).value = "截止6月27号"
+    for col_no, month in enumerate(EXPORT_MONTHS, start=4):
+        ws.cell(1, col_no).value = f"{month}月入仓\n总数"
+    ws.cell(1, 11).value = "应存数"
+    ws.cell(1, 12).value = "累计出仓总数"
+    ws.cell(1, 13).value = "东莞"
+    ws.cell(2, 13).value = "截止6月27号"
+    ws.cell(1, 14).value = "邵阳生产"
+    for col_no, month in enumerate(EXPORT_MONTHS, start=15):
+        ws.cell(1, col_no).value = f"{month}月出仓\n总数"
+
+    for row_no, sticker_type in enumerate(sticker_names, start=3):
+        total_row = totals_by_sticker.get(sticker_type, {})
+        sticker_inbound = [row for row in inbound if row.get("sticker_type") == sticker_type]
+        sticker_outbound = [row for row in outbound if row.get("sticker_type") == sticker_type]
+        inbound_total = _semi_month_total(
+            total_row, sticker_inbound, "monthly_inbound", "semi_inbound"
+        )
+        outbound_total = _semi_month_total(
+            total_row, sticker_outbound, "monthly_outbound", "semi_outbound"
+        )
+        ws.cell(row_no, 1).value = _format_nfc_sticker_name(sticker_type)
+        ws.cell(row_no, 2).value = inbound_total or 0
+        ws.cell(row_no, 3).value = int(total_row.get("opening_stock") or 0) or None
+        ws.cell(row_no, 4).value = inbound_total or None
+        ws.cell(row_no, 11).value = inbound_total - outbound_total
+        ws.cell(row_no, 12).value = outbound_total or 0
+        ws.cell(row_no, 14).value = int(total_row.get("opening_stock") or 0) or None
+        ws.cell(row_no, 15).value = outbound_total or None
+
+    _apply_legacy_sheet_style(ws, len(sticker_names) + 2, 20)
+    ws.column_dimensions["A"].width = 13
+    ws.column_dimensions["B"].width = 11
+    ws.column_dimensions["C"].width = 12
+
+    _semi_finished_detail_sheet(
+        wb, "入库明细", records, sticker_names, totals_by_sticker, True
+    )
+    _semi_finished_detail_sheet(
+        wb, "邵阳领料", records, sticker_names, totals_by_sticker, False
+    )
+    wb.create_sheet("河源华兴36#CD领料")
+    wb.create_sheet("车间36#CD领料")
+    return wb
+
+
+@app.get("/api/records/export")
+def export_records(
+    user=Depends(current_user),
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    doc_no: Optional[str] = None,
+    material: Optional[str] = None,
+):
+    filters = _date_filter(date_from, date_to, doc_no)
+    material = _clean_optional(material)
+    conn = db.get_conn()
+    try:
+        sql = (
+            "SELECT r.id, r.rec_type, l.name AS location_name, r.rec_date, r.doc_no, "
+            "r.material, r.sticker_type, r.supplier, r.po_no, r.customer_name, "
+            "r.qty, r.remark, r.summary_month "
+            "FROM records r "
+            "LEFT JOIN locations l ON r.location_id = l.id "
+            "WHERE r.department=?"
+        )
+        params = [user["department"]]
+        sql, params = _append_date_filter(sql, params, filters)
+        if material:
+            sql += " AND r.material=?"
+            params.append(material)
+        sql += " ORDER BY r.id"
+        rows = conn.execute(sql, params).fetchall()
+        sticker_types = [
+            row["name"] for row in conn.execute(
+                "SELECT name FROM sticker_types ORDER BY sort, id"
+            ).fetchall()
+        ]
+        totals_sql = (
+            "SELECT material, sticker_type, opening_stock, "
+            "monthly_inbound, monthly_outbound "
+            "FROM semi_finished_monthly_totals WHERE department=?"
+        )
+        totals_params = [user["department"]]
+        if material:
+            totals_sql += " AND material=?"
+            totals_params.append(material)
+        monthly_totals = conn.execute(totals_sql, totals_params).fetchall()
+    finally:
+        conn.close()
+    records = [dict(r) for r in rows]
+    monthly_totals = [dict(r) for r in monthly_totals]
+    if user["department"] == SEMI_FINISHED_DEPARTMENT and material in (None, NFC_MATERIAL):
+        return _xlsx_response(
+            _semi_finished_export_workbook(records, sticker_types, monthly_totals),
+            "塑胶仓77772#CD半成品出入明细.xlsx",
+        )
+    if user["department"] == SUPPLIER_DEPARTMENT and material == PCBA_MATERIAL:
+        return _xlsx_response(
+            _supplier_pcba_export_workbook(records),
+            "来料仓77794PCB主板出入明细.xlsx",
+        )
+    if user["department"] == SUPPLIER_DEPARTMENT and material == NFC_MATERIAL:
+        return _xlsx_response(
+            _supplier_nfc_export_workbook(records, sticker_types),
+            "来料仓77772#NFC出入明细.xlsx",
+        )
+    if user["department"] == OUTSOURCE_DEPARTMENT and material == PCBA_MATERIAL:
+        return _xlsx_response(
+            _outsource_pcba_export_workbook(records),
+            "东莞加工厂利鸿77794PCB主板出入明细.xlsx",
+        )
+    if user["department"] == HEYUAN_DEPARTMENT and material == PCBA_MATERIAL:
+        return _xlsx_response(
+            _heyuan_pcba_export_workbook(records),
+            "河源华兴77794PCB主板出入明细.xlsx",
+        )
+    return _xlsx_response(
+        _records_export_workbook(records, user["department"]),
+        "records_export.xlsx",
+    )
 
 
 def _record_body_from_import_row(conn, row_no, row, department):
@@ -1860,6 +2733,45 @@ def import_records(file: UploadFile = File(...), user=Depends(current_user)):
     }
 
 
+@app.post("/api/shaoyang-cd/reconcile")
+def shaoyang_cd_reconcile(
+    month: int = Form(7),
+    issue_file: UploadFile = File(...),
+    finished_file: UploadFile = File(...),
+    _user=Depends(current_user),
+):
+    try:
+        return build_shaoyang_cd_reconcile(
+            issue_file.file.read(),
+            issue_file.filename or "",
+            finished_file.file.read(),
+            finished_file.filename or "",
+            month,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.post("/api/shaoyang-cd/export-issue")
+def shaoyang_cd_export_issue(
+    month: int = Form(7),
+    issue_file: UploadFile = File(...),
+    finished_file: UploadFile = File(...),
+    _user=Depends(current_user),
+):
+    try:
+        wb = build_shaoyang_issue_export_workbook(
+            issue_file.file.read(),
+            issue_file.filename or "",
+            finished_file.file.read(),
+            finished_file.filename or "",
+            month,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return _xlsx_response(wb, "邵阳77772#CD领料明细-已填成品入仓.xlsx")
+
+
 def _get_record_or_404(conn, record_id, department):
     row = conn.execute(
         "SELECT * FROM records WHERE id=? AND department=?",
@@ -1886,9 +2798,11 @@ def update_record(record_id: int, body: RecordIn, user=Depends(current_user)):
         _check_owner(row, user)
         conn.execute(
             "UPDATE records SET rec_type=?, location_id=?, rec_date=?, doc_no=?, "
-            "material=?, sticker_type=?, qty=?, remark=?, supplier=?, po_no=?, customer_name=? WHERE id=?",
+            "material=?, sticker_type=?, qty=?, remark=?, supplier=?, po_no=?, "
+            "customer_name=?, summary_month=? WHERE id=?",
             (body.rec_type, body.location_id, body.rec_date, body.doc_no,
              body.material, sticker_type, body.qty, body.remark, supplier, po_no, customer_name,
+             body.summary_month,
              record_id),
         )
         conn.commit()
@@ -1913,7 +2827,9 @@ def delete_record(record_id: int, user=Depends(current_user)):
 def _all_records_for_summary(conn, department, filters=None):
     sql = (
         "SELECT r.rec_type AS rec_type, l.name AS location, r.qty AS qty, "
-        "r.material AS material, r.sticker_type AS sticker_type, r.department AS department "
+        "r.material AS material, r.sticker_type AS sticker_type, "
+        "r.rec_date AS rec_date, r.doc_no AS doc_no, r.remark AS remark, "
+        "r.summary_month AS summary_month, r.department AS department "
         "FROM records r LEFT JOIN locations l ON r.location_id = l.id "
         "WHERE r.department=?"
     )
@@ -1966,6 +2882,7 @@ def _with_common_summary_fields(summary, records, filters, reverse_departments=(
     result["sticker_types"] = compute_sticker_type_totals(
         records, reverse_departments
     )
+    result["monthly_locations"] = _monthly_location_summary(records, LOCATIONS)
     result["filters"] = filters
     return result
 
@@ -2101,7 +3018,8 @@ def export(
         summary_records = _all_records_for_summary(conn, user["department"], filters)
         sql = (
             "SELECT r.rec_type, l.name AS location_name, r.rec_date, r.doc_no, "
-            "r.material, r.sticker_type, r.supplier, r.po_no, r.customer_name, r.qty, r.remark FROM records r "
+            "r.material, r.sticker_type, r.supplier, r.po_no, r.customer_name, "
+            "r.qty, r.remark, r.summary_month FROM records r "
             "LEFT JOIN locations l ON r.location_id = l.id "
             "WHERE r.department=?"
         )

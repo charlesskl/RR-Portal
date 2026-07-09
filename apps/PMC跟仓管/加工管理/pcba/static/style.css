@@ -531,6 +531,14 @@ tr.subtotal {
   background: #fefce8;
 }
 
+tr.reconcile-ok {
+  background: rgba(5, 150, 105, 0.07);
+}
+
+tr.reconcile-diff {
+  background: rgba(220, 38, 38, 0.07);
+}
+
 .app-page {
   min-height: 100vh;
 }
@@ -642,6 +650,46 @@ tr.subtotal {
 .form-grid.compact-form {
   grid-template-columns: repeat(5, minmax(150px, 1fr));
   max-width: 900px;
+}
+
+.reconcile-form {
+  max-width: 980px;
+}
+
+.file-upload-card {
+  height: 42px;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px;
+  border: 1px solid #cfd8e5;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.file-upload-trigger {
+  height: 32px;
+  flex: 0 0 auto;
+  padding: 0 13px;
+  border-radius: 7px;
+  color: #fff;
+  font-weight: 800;
+  background: linear-gradient(135deg, var(--primary), var(--cyan));
+  box-shadow: 0 8px 18px rgba(37, 99, 235, 0.18);
+}
+
+.file-upload-trigger:hover {
+  filter: brightness(0.98);
+}
+
+.file-upload-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: 13px;
 }
 
 .btn-sm {

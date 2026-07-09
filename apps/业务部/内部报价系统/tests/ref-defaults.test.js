@@ -28,6 +28,41 @@ test('mergeMissingRefDefaults appends missing material defaults without replacin
   ]);
 });
 
+test('mergeMissingRefDefaults reuses the first blank material row for missing defaults', () => {
+  const existing = [
+    { name: 'ABS', model: '750SW', price: 8.5 },
+    {},
+  ];
+  const defaults = [
+    { name: 'ABS', model: recycledAbsModel, price: 4.6 },
+  ];
+
+  const merged = mergeMissingRefDefaults(existing, defaults);
+
+  assert.deepEqual(merged, [
+    { name: 'ABS', model: '750SW', price: 8.5 },
+    { name: 'ABS', model: recycledAbsModel, price: 4.6 },
+  ]);
+});
+
+test('mergeMissingRefDefaults moves an appended default into an earlier blank material row', () => {
+  const existing = [
+    { name: 'ABS', model: '750SW', price: 8.5 },
+    {},
+    { name: 'ABS', model: recycledAbsModel, price: 4.6 },
+  ];
+  const defaults = [
+    { name: 'ABS', model: recycledAbsModel, price: 4.6 },
+  ];
+
+  const merged = mergeMissingRefDefaults(existing, defaults);
+
+  assert.deepEqual(merged, [
+    { name: 'ABS', model: '750SW', price: 8.5 },
+    { name: 'ABS', model: recycledAbsModel, price: 4.6 },
+  ]);
+});
+
 test('mergeMissingRefDefaults is idempotent', () => {
   const existing = [
     { name: 'ABS', model: '750SW', price: 8.5 },
@@ -84,4 +119,65 @@ test('appendMissingRefDefaultsToSectionPayloads upgrades existing molding quote 
 
   const sales = JSON.parse(db.prepare("SELECT payload_json FROM quote_sections WHERE dept = 'sales'").get().payload_json);
   assert.deepEqual(sales, otherDeptPayload);
+});
+
+test('appendMissingRefDefaultsToSectionPayloads persists defaults into blank material rows', () => {
+  const db = new DatabaseSync(':memory:');
+  db.exec(`
+    CREATE TABLE quote_sections (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      dept TEXT NOT NULL,
+      payload_json TEXT NOT NULL DEFAULT '{}'
+    )
+  `);
+
+  db.prepare('INSERT INTO quote_sections (dept, payload_json) VALUES (?, ?)').run('molding', JSON.stringify({
+    material_prices: [
+      { name: 'ABS', model: '750SW', price: 8.5 },
+      {},
+    ],
+  }));
+
+  const result = appendMissingRefDefaultsToSectionPayloads(db, 'molding', 'material_prices', [
+    { name: 'ABS', model: recycledAbsModel, price: 4.6 },
+  ]);
+
+  assert.deepEqual(result, { rowsChanged: 1, itemsAdded: 1 });
+
+  const molding = JSON.parse(db.prepare("SELECT payload_json FROM quote_sections WHERE dept = 'molding'").get().payload_json);
+  assert.deepEqual(molding.material_prices, [
+    { name: 'ABS', model: '750SW', price: 8.5 },
+    { name: 'ABS', model: recycledAbsModel, price: 4.6 },
+  ]);
+});
+
+test('appendMissingRefDefaultsToSectionPayloads persists moving appended defaults into earlier blank rows', () => {
+  const db = new DatabaseSync(':memory:');
+  db.exec(`
+    CREATE TABLE quote_sections (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      dept TEXT NOT NULL,
+      payload_json TEXT NOT NULL DEFAULT '{}'
+    )
+  `);
+
+  db.prepare('INSERT INTO quote_sections (dept, payload_json) VALUES (?, ?)').run('molding', JSON.stringify({
+    material_prices: [
+      { name: 'ABS', model: '750SW', price: 8.5 },
+      {},
+      { name: 'ABS', model: recycledAbsModel, price: 4.6 },
+    ],
+  }));
+
+  const result = appendMissingRefDefaultsToSectionPayloads(db, 'molding', 'material_prices', [
+    { name: 'ABS', model: recycledAbsModel, price: 4.6 },
+  ]);
+
+  assert.deepEqual(result, { rowsChanged: 1, itemsAdded: 0 });
+
+  const molding = JSON.parse(db.prepare("SELECT payload_json FROM quote_sections WHERE dept = 'molding'").get().payload_json);
+  assert.deepEqual(molding.material_prices, [
+    { name: 'ABS', model: '750SW', price: 8.5 },
+    { name: 'ABS', model: recycledAbsModel, price: 4.6 },
+  ]);
 });

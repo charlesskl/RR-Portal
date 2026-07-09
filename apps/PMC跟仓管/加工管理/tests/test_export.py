@@ -17,6 +17,10 @@ def loc_id(client, name):
     return next(l["id"] for l in locs if l["name"] == name)
 
 
+def summary_row(rows, scope, item):
+    return next(row for row in rows if row and row[0] == scope and row[1] == item)
+
+
 def test_export_returns_xlsx_with_summary(client):
     admin_login(client, "装配")
     sy = loc_id(client, "邵阳华登")
@@ -56,10 +60,42 @@ def test_export_is_scoped_to_current_department(client):
     r = client.get("/api/export")
     wb = openpyxl.load_workbook(io.BytesIO(r.content), data_only=True)
     rows = list(wb["总表"].iter_rows(values_only=True))
-    header_index = next(i for i, row in enumerate(rows) if row and row[0] == "来料仓入仓总数")
-    raw_row = rows[header_index + 1]
-    assert raw_row[0] == 5
-    assert raw_row[1] == 0
+    inbound_row = summary_row(rows, "来料仓", "入仓总数")
+    outbound_row = summary_row(rows, "来料仓", "出库总数")
+    assert inbound_row[2] == 5
+    assert inbound_row[3] == 5
+    assert outbound_row[2] == 0
+
+
+def test_xingxin_export_summary_is_split_by_month(client):
+    admin_login(client, "兴信B来料仓")
+    dg = loc_id(client, "东莞车间")
+    client.post("/api/records", json={
+        "rec_type": "inbound_raw", "rec_date": "2026-06-27", "qty": 40})
+    client.post("/api/records", json={
+        "rec_type": "inbound_raw", "rec_date": "2026-07-05", "qty": 60})
+    client.post("/api/records", json={
+        "rec_type": "issue", "location_id": dg, "rec_date": "2026-06-27", "qty": 10})
+    client.post("/api/records", json={
+        "rec_type": "issue", "location_id": dg, "rec_date": "2026-07-06", "qty": 20})
+
+    r = client.get("/api/export")
+    wb = openpyxl.load_workbook(io.BytesIO(r.content), data_only=True)
+    ws = wb["总表"]
+    rows = list(ws.iter_rows(values_only=True))
+    keyed = {(row[0], row[1]): row for row in rows if row and row[1]}
+
+    assert [ws.cell(row=2, column=col).value for col in range(1, 12)] == [
+        "范围", "项目", "累计总数", "6月月结", "7月", "8月",
+        "9月", "10月", "11月", "12月", "备注",
+    ]
+    assert keyed[("东莞车间", "领料数")][2:5] == (30, 10, 20)
+    assert keyed[("东莞车间", "成品完成数")][2:5] == (0, 0, 0)
+    assert keyed[("东莞车间", "应存数")][2:5] == (30, 10, 20)
+    assert keyed[("小计", "领料数")][2:5] == (30, 10, 20)
+    assert keyed[("来料仓", "入仓总数")][2:5] == (100, 40, 60)
+    assert keyed[("来料仓", "出库总数")][2:5] == (30, 10, 20)
+    assert keyed[("货仓", "应存")][2:5] == (70, 30, 40)
 
 
 def test_export_can_filter_by_date_range(client):
@@ -72,10 +108,10 @@ def test_export_can_filter_by_date_range(client):
     r = client.get("/api/export?date_from=2026-07-02&date_to=2026-07-31")
     wb = openpyxl.load_workbook(io.BytesIO(r.content), data_only=True)
     rows = list(wb["总表"].iter_rows(values_only=True))
-    header_index = next(i for i, row in enumerate(rows) if row and row[0] == "来料仓入仓总数")
-    raw_row = rows[header_index + 1]
+    raw_row = summary_row(rows, "来料仓", "入仓总数")
 
-    assert raw_row[0] == 20
+    assert raw_row[2] == 20
+    assert raw_row[4] == 20
 
 
 def test_export_can_filter_by_doc_no(client):
@@ -88,10 +124,10 @@ def test_export_can_filter_by_doc_no(client):
     r = client.get("/api/export?doc_no=KEEP")
     wb = openpyxl.load_workbook(io.BytesIO(r.content), data_only=True)
     rows = list(wb["总表"].iter_rows(values_only=True))
-    header_index = next(i for i, row in enumerate(rows) if row and row[0] == "来料仓入仓总数")
-    raw_row = rows[header_index + 1]
+    raw_row = summary_row(rows, "来料仓", "入仓总数")
 
-    assert raw_row[0] == 12
+    assert raw_row[2] == 12
+    assert raw_row[3] == 12
 
 
 def test_xingxin_export_detail_includes_supplier_column(client):
@@ -124,6 +160,26 @@ def test_export_includes_sticker_type_column_when_present(client):
     assert headers == ["日期", "单据编号", "物料名称", "贴纸类型", "供应商", "入仓数", "备注"]
     assert ws.cell(row=2, column=4).value == "1#NFC贴纸"
     assert ws.cell(row=2, column=6).value == 12
+
+
+def test_export_fills_legacy_opening_date_when_record_date_is_blank(client):
+    admin_login(client, "兴信B来料仓")
+    dg = loc_id(client, "东莞车间")
+    client.post("/api/records", json={
+        "rec_type": "issue",
+        "location_id": dg,
+        "material": "NFC贴纸",
+        "sticker_type": "1#NFC贴纸",
+        "doc_no": "1#NFC贴纸-东莞期初出仓",
+        "qty": 60,
+        "remark": "总表东莞期初出仓导入",
+    })
+
+    r = client.get("/api/export")
+    wb = openpyxl.load_workbook(io.BytesIO(r.content), data_only=True)
+    ws = wb["东莞车间领料"]
+
+    assert ws.cell(row=2, column=1).value == "2026-06-27"
 
 
 def test_non_xingxin_export_detail_omits_supplier_column(client):

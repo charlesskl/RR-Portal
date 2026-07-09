@@ -31,6 +31,7 @@ let ME = null;
 let RECORDS = [];
 let ENTRY_TYPE_OPTIONS = [];
 let ACTIVE_ENTRY_TYPE = '';
+let ACTIVE_ENTRY_MATERIAL = '';
 let DEPARTMENTS = [];
 let SUPPLIERS = [];
 let MATERIALS = [];
@@ -55,6 +56,16 @@ function esc(s) {
 
 function fmt(n) {
   return Number(n || 0).toLocaleString('zh-CN');
+}
+
+function fmtNonZero(n) {
+  const value = Number(n || 0);
+  return value ? fmt(value) : '';
+}
+
+function hasMonthlyQuantity(total, values, key) {
+  if (Number(total || 0) !== 0) return true;
+  return (values || []).some(value => Number(((value || {})[key]) || 0) !== 0);
 }
 
 function isXingxin() {
@@ -153,8 +164,11 @@ function renderEntryTypeTabs() {
   if (!tabs) return;
   tabs.innerHTML = ENTRY_TYPE_OPTIONS.map(opt => {
     const active = opt.value === ACTIVE_ENTRY_TYPE ? ' active' : '';
-    return `<button type="button" class="entry-type-tab${active}" onclick="setEntryType('${esc(opt.value)}')">${esc(opt.label)}</button>`;
+    return `<button type="button" class="entry-type-tab${active}" data-entry-type="${esc(opt.value)}">${esc(opt.label)}</button>`;
   }).join('');
+  tabs.querySelectorAll('[data-entry-type]').forEach(btn => {
+    btn.addEventListener('click', () => setEntryType(btn.dataset.entryType || ''));
+  });
 }
 
 function setEntryType(type) {
@@ -164,6 +178,41 @@ function setEntryType(type) {
   el('recType').value = type;
   onTypeChange();
   renderEntryTypeTabs();
+  renderRecordsTable();
+}
+
+function entryMaterialOptions() {
+  const preferred = [NFC_MATERIAL, PCBA_MATERIAL];
+  const byName = new Map(MATERIALS.map(m => [m.name, m]));
+  const ordered = preferred
+    .filter(name => byName.has(name))
+    .map(name => byName.get(name));
+  MATERIALS.forEach(m => {
+    if (!preferred.includes(m.name)) ordered.push(m);
+  });
+  return ordered;
+}
+
+function renderEntryMaterialTabs() {
+  const tabs = el('entryMaterialTabs');
+  if (!tabs) return;
+  const materials = entryMaterialOptions();
+  tabs.innerHTML = materials.map(mat => {
+    const active = mat.name === ACTIVE_ENTRY_MATERIAL ? ' active' : '';
+    return `<button type="button" class="entry-type-tab${active}" data-entry-material="${esc(mat.name)}">${esc(mat.name)}</button>`;
+  }).join('');
+  tabs.querySelectorAll('[data-entry-material]').forEach(btn => {
+    btn.addEventListener('click', () => setEntryMaterial(btn.dataset.entryMaterial || ''));
+  });
+}
+
+function setEntryMaterial(material) {
+  if (!entryMaterialOptions().some(mat => mat.name === material)) return;
+  if (editingId && ACTIVE_ENTRY_MATERIAL !== material) cancelEdit();
+  ACTIVE_ENTRY_MATERIAL = material;
+  el('material').value = material;
+  onMaterialChange();
+  renderEntryMaterialTabs();
   renderRecordsTable();
 }
 
@@ -189,6 +238,13 @@ function filterQuery() {
 
 function withFilters(path) {
   const query = filterQuery();
+  return path + (query ? '?' + query : '');
+}
+
+function withEntryExportFilters(path) {
+  const params = new URLSearchParams(filterQuery());
+  if (ACTIVE_ENTRY_MATERIAL) params.set('material', ACTIVE_ENTRY_MATERIAL);
+  const query = params.toString();
   return path + (query ? '?' + query : '');
 }
 
@@ -279,6 +335,11 @@ async function loadMaterials() {
   el('material').innerHTML = mats
     .map(m => `<option value="${esc(m.name)}">${esc(m.name)}</option>`)
     .join('');
+  if (!mats.some(m => m.name === ACTIVE_ENTRY_MATERIAL)) {
+    ACTIVE_ENTRY_MATERIAL = mats[0] ? mats[0].name : '';
+  }
+  el('material').value = ACTIVE_ENTRY_MATERIAL;
+  renderEntryMaterialTabs();
 
   const form = el('materialForm');
   if (form) form.style.display = '';
@@ -624,6 +685,10 @@ function startEdit(id) {
     ACTIVE_ENTRY_TYPE = rec.rec_type;
     renderEntryTypeTabs();
   }
+  if (entryMaterialOptions().some(mat => mat.name === rec.material)) {
+    ACTIVE_ENTRY_MATERIAL = rec.material;
+    renderEntryMaterialTabs();
+  }
   el('recType').value = rec.rec_type;
   onTypeChange();
   if (rec.location_id) el('locationId').value = rec.location_id;
@@ -674,7 +739,10 @@ function renderRecordsTable() {
   renderRecordHeader();
   const tb = document.querySelector('#recTable tbody');
   const emptyColspan = 10 + (isXingxin() ? 1 : 0) + (supportsPoCustomer() ? 2 : 0);
-  const visibleRecords = RECORDS.filter(x => !ACTIVE_ENTRY_TYPE || x.rec_type === ACTIVE_ENTRY_TYPE);
+  const visibleRecords = RECORDS.filter(x =>
+    (!ACTIVE_ENTRY_TYPE || x.rec_type === ACTIVE_ENTRY_TYPE) &&
+    (!ACTIVE_ENTRY_MATERIAL || x.material === ACTIVE_ENTRY_MATERIAL)
+  );
   tb.innerHTML = visibleRecords.map(x => {
     const canEdit = ME.role === 'admin' || x.created_by === ME.id;
     const ops = canEdit
@@ -739,6 +807,10 @@ async function loadSummary() {
       `<tbody><tr><td>${fmt(s.raw.issue)}</td><td>${fmt(s.raw.finished_inbound)}</td><td>${fmt(s.raw.semi_finished_inbound)}</td><td>${fmt(s.raw.balance)}</td></tr></tbody>`;
     return;
   }
+  if (s.monthly_locations) {
+    el('sumTable').innerHTML = renderMonthlyLocationSummary(s.monthly_locations);
+    return;
+  }
 
   let html = '<thead><tr><th>范围</th><th>领料数</th><th>成品完成数</th><th>应存数</th></tr></thead><tbody>';
   for (const row of s.locations) {
@@ -749,6 +821,39 @@ async function loadSummary() {
   html += `<tr><td>${fmt(s.raw.inbound)}</td><td>${fmt(s.raw.outbound)}</td><td>${fmt(s.raw.balance)}</td><td></td></tr>`;
   html += '</tbody>';
   el('sumTable').innerHTML = html;
+}
+
+function renderMonthlyLocationSummary(summary) {
+  const months = summary.months || [
+    {label: '6月月结'}, {label: '7月'}, {label: '8月'}, {label: '9月'},
+    {label: '10月'}, {label: '11月'}, {label: '12月'},
+  ];
+  const monthHeads = months.map(month => `<th>${esc(month.label)}</th>`).join('');
+  const monthCells = (values, key) => months.map((_, index) =>
+    `<td>${fmtNonZero((values[index] || {})[key])}</td>`
+  ).join('');
+  const dataRow = (scope, material, item, total, values, key, className = '') => {
+    if (!hasMonthlyQuantity(total, values, key)) return '';
+    return `<tr class="${className}"><td>${esc(scope)}</td><td>${esc(material || '')}</td><td>${esc(item)}</td><td>${fmtNonZero(total)}</td>${monthCells(values || [], key)}<td></td></tr>`;
+  };
+
+  let html = `<thead><tr><th>范围</th><th>物料名称</th><th>项目</th><th>累计总数</th>${monthHeads}<th>备注</th></tr></thead><tbody>`;
+  for (const row of summary.locations || []) {
+    html += dataRow(row.location, row.material, '领料数', row.issue, row.values, 'issue');
+    html += dataRow(row.location, row.material, '成品完成数', row.finished, row.values, 'finished');
+    html += dataRow(row.location, row.material, '应存数', row.balance, row.values, 'balance');
+  }
+  const subtotal = summary.subtotal || {};
+  html += dataRow('小计', '全部物料', '领料数', subtotal.issue, subtotal.values, 'issue', 'subtotal');
+  html += dataRow('小计', '全部物料', '成品完成数', subtotal.finished, subtotal.values, 'finished', 'subtotal');
+  html += dataRow('小计', '全部物料', '应存数', subtotal.balance, subtotal.values, 'balance', 'subtotal');
+  const raw = summary.raw || {};
+  html += '<tr class="summary-spacer"><td colspan="12"></td></tr>';
+  html += dataRow('来料仓', '全部物料', '入仓总数', raw.inbound, raw.values, 'inbound');
+  html += dataRow('来料仓', '全部物料', '出库总数', raw.outbound, raw.values, 'outbound');
+  html += dataRow('货仓', '全部物料', '应存', raw.balance, raw.values, 'balance');
+  html += '</tbody>';
+  return html;
 }
 
 function renderSummaryCards(s) {
@@ -814,8 +919,103 @@ function chooseImportFile(id) {
   input.click();
 }
 
+function updateFileName(inputId, labelId) {
+  const input = el(inputId);
+  const label = el(labelId);
+  const file = input.files && input.files[0];
+  if (label) label.textContent = file ? file.name : '未选择文件';
+}
+
 function downloadRecordTemplate() {
   location.href = appPath('/api/records/import-template');
+}
+
+function exportRecords() {
+  location.href = appPath(withEntryExportFilters('/api/records/export'));
+}
+
+function shaoyangReconcileFormData() {
+  const issueFile = el('shaoyangIssueFile').files && el('shaoyangIssueFile').files[0];
+  const finishedFile = el('shaoyangFinishedFile').files && el('shaoyangFinishedFile').files[0];
+  if (!issueFile || !finishedFile) {
+    setMessage('shaoyangReconcileErr', '请先选择两个表格文件', false);
+    return null;
+  }
+  const form = new FormData();
+  form.append('month', el('shaoyangReconcileMonth').value || '7');
+  form.append('issue_file', issueFile);
+  form.append('finished_file', finishedFile);
+  return form;
+}
+
+async function reconcileShaoyangCd() {
+  const form = shaoyangReconcileFormData();
+  if (!form) return;
+  const r = await api('/api/shaoyang-cd/reconcile', {
+    method: 'POST',
+    body: form,
+  });
+  if (!r.ok) {
+    const e = await r.json();
+    setMessage('shaoyangReconcileErr', e.detail || '核对失败', false);
+    return;
+  }
+  const data = await r.json();
+  setMessage('shaoyangReconcileErr', `已完成 ${data.month} 月核对`, true);
+  renderShaoyangReconcile(data);
+}
+
+async function exportShaoyangIssueWorkbook() {
+  const form = shaoyangReconcileFormData();
+  if (!form) return;
+  const r = await api('/api/shaoyang-cd/export-issue', {
+    method: 'POST',
+    body: form,
+  });
+  if (!r.ok) {
+    const e = await r.json().catch(() => ({}));
+    setMessage('shaoyangReconcileErr', e.detail || '导出领料表失败', false);
+    return;
+  }
+  const blob = await r.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = '邵阳77772#CD领料明细-已填成品入仓.xlsx';
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+  setMessage('shaoyangReconcileErr', '已生成导出领料表', true);
+}
+
+function renderShaoyangReconcile(data) {
+  const totals = data.totals || {};
+  const cards = [
+    [`${data.month}月成品入仓数`, totals.issue_month_inbound || 0],
+    ['第二表小计', totals.finished_total || 0],
+    ['差异', totals.difference || 0],
+    ['核对行数', (data.rows || []).length],
+  ];
+  el('shaoyangReconcileCards').innerHTML = cards.map(([label, value]) =>
+    `<div class="metric-card"><span>${esc(label)}</span><strong>${fmt(value)}</strong></div>`
+  ).join('');
+
+  const rows = data.rows || [];
+  const body = el('shaoyangReconcileTable').querySelector('tbody');
+  body.innerHTML = rows.map(row => {
+    const diff = Number(row.difference || 0);
+    const cls = diff === 0 ? 'reconcile-ok' : 'reconcile-diff';
+    return `<tr class="${cls}">
+      <td>${fmt(row.sticker_no)}</td>
+      <td>${esc(row.sticker_name)}</td>
+      <td>${esc(row.item_no)}</td>
+      <td>${esc(row.minis_name)}</td>
+      <td>${fmt(row.issue_month_inbound)}</td>
+      <td>${fmt(row.finished_total)}</td>
+      <td>${fmt(diff)}</td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="7">没有读取到可核对的数据</td></tr>';
 }
 
 async function importFile(input, endpoint, errId, afterImport) {
@@ -982,7 +1182,7 @@ async function changeMyPassword() {
 }
 
 function showTab(name) {
-  for (const id of ['entry', 'summary', 'materials', 'suppliers', 'users', 'password']) {
+  for (const id of ['entry', 'summary', 'shaoyangReconcile', 'materials', 'suppliers', 'users', 'password']) {
     el(id).style.display = id === name ? '' : 'none';
   }
   document.querySelectorAll('.tab-btn').forEach(btn =>

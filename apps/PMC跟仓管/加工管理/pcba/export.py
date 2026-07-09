@@ -1,5 +1,96 @@
 import io
+from datetime import date, datetime
 from openpyxl import Workbook
+
+SUMMARY_MONTHS = (6, 7, 8, 9, 10, 11, 12)
+
+
+def _record_export_date(record):
+    rec_date = record.get("rec_date")
+    if rec_date:
+        return rec_date
+    text = f"{record.get('doc_no') or ''} {record.get('remark') or ''}"
+    if "期初" in text:
+        return date(date.today().year, 6, 27).isoformat()
+    return None
+
+
+def _record_month(record):
+    summary_month = record.get("summary_month")
+    if summary_month:
+        try:
+            month = int(summary_month)
+            if month in SUMMARY_MONTHS:
+                return month
+        except (TypeError, ValueError):
+            pass
+    value = _record_export_date(record)
+    if not value:
+        return 6
+    if isinstance(value, datetime):
+        return value.month
+    if isinstance(value, date):
+        return value.month
+    try:
+        return date.fromisoformat(str(value)).month
+    except ValueError:
+        return 6
+
+
+def _record_qty(record):
+    return int(record.get("qty") or 0)
+
+
+def _month_values(records):
+    values = []
+    for month in SUMMARY_MONTHS:
+        values.append(sum(_record_qty(row) for row in records if _record_month(row) == month))
+    return values
+
+
+def _summary_month_row(scope, item, records, remark=""):
+    values = _month_values(records)
+    return [scope, item, sum(values), *values, remark]
+
+
+def _balance_month_row(scope, item, inbound_records, outbound_records, remark=""):
+    inbound_values = _month_values(inbound_records)
+    outbound_values = _month_values(outbound_records)
+    values = [
+        inbound_value - outbound_value
+        for inbound_value, outbound_value in zip(inbound_values, outbound_values)
+    ]
+    return [scope, item, sum(values), *values, remark]
+
+
+def _build_supplier_monthly_summary(ws, detail_records, location_names):
+    ws.append(["范围", "项目", "累计总数", "6月月结", "7月", "8月", "9月", "10月", "11月", "12月", "备注"])
+    all_issues = []
+    all_finished = []
+    for name in location_names:
+        issues = [
+            row for row in detail_records
+            if row["rec_type"] == "issue" and row.get("location_name") == name
+        ]
+        finished = [
+            row for row in detail_records
+            if row["rec_type"] in ("finished", "semi_finished")
+            and row.get("location_name") == name
+        ]
+        all_issues.extend(issues)
+        all_finished.extend(finished)
+        ws.append(_summary_month_row(name, "领料数", issues))
+        ws.append(_summary_month_row(name, "成品完成数", finished))
+        ws.append(_balance_month_row(name, "应存数", issues, finished))
+    ws.append(_summary_month_row("小计", "领料数", all_issues))
+    ws.append(_summary_month_row("小计", "成品完成数", all_finished))
+    ws.append(_balance_month_row("小计", "应存数", all_issues, all_finished))
+    ws.append([])
+
+    inbound = [row for row in detail_records if row["rec_type"] == "inbound_raw"]
+    ws.append(_summary_month_row("来料仓", "入仓总数", inbound))
+    ws.append(_summary_month_row("来料仓", "出库总数", all_issues))
+    ws.append(_balance_month_row("货仓", "应存", inbound, all_issues))
 
 
 def build_workbook(
@@ -17,6 +108,8 @@ def build_workbook(
     raw = summary["raw"]
     if outsource_mode:
         ws.append(["成品入库总数", "半成品入库总数", "入库合计"])
+    elif include_supplier:
+        _build_supplier_monthly_summary(ws, detail_records, location_names)
     else:
         ws.append(["范围", "领料数", "成品完成数", "应存数", "备注"])
         for row in summary["locations"]:
@@ -32,7 +125,7 @@ def build_workbook(
     elif warehouse_mode:
         ws.append(["半成品入库总数", "半成品出库总数", "半成品应存"])
         ws.append([raw["inbound"], raw["outbound"], raw["balance"]])
-    else:
+    elif not include_supplier:
         ws.append(["来料仓入仓总数", "来料仓出库总数", "货仓应存"])
         ws.append([raw["inbound"], raw["outbound"], raw["balance"]])
 
@@ -52,7 +145,7 @@ def build_workbook(
         s.append(headers)
         total = 0
         for r in recs:
-            row = [r.get("rec_date"), r.get("doc_no"), r.get("material")]
+            row = [_record_export_date(r), r.get("doc_no"), r.get("material")]
             if has_sticker_type:
                 row.append(r.get("sticker_type"))
             if include_po_customer:

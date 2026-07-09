@@ -13,6 +13,11 @@ def login(client, username="admin", password="admin123", department=DEFAULT_DEPA
     )
 
 
+def loc_id(client, name):
+    locations = client.get("/api/locations").json()
+    return next(item["id"] for item in locations if item["name"] == name)
+
+
 def workbook_bytes(headers, rows):
     wb = openpyxl.Workbook()
     ws = wb.active
@@ -146,13 +151,15 @@ def legacy_supplier_pcba_workbook_bytes():
 
     issue_ws = wb.create_sheet("河源华兴领料")
     issue_ws.append(["日期", "领料单号", "物料名称", "领料数", "备注"])
+    issue_ws.append(["2026-06-30", 2518000, "77794-PCBA板", 18, None])
     issue_ws.append(["2026-07-02", 2518791, "77794-PCBA板", 30, None])
     issue_ws.append(["2026-07-03", "退不良品", "77794-PCBA板", -5, None])
-    issue_ws.append([None, None, "7月小计：", 25, None])
+    issue_ws.append([None, None, "7月小计：", 43, None])
 
     total_ws = wb.create_sheet("总表")
-    total_ws.append(["物料名称", None, "累计出入总数"])
-    total_ws.append(["PCB主板", "入仓总数", 180])
+    total_ws.append(["物料名称", None, "累计出入总数", "6月月结", "7月"])
+    total_ws.append(["PCB主板", "入仓总数", 175, 100, 75])
+    total_ws.append(["PCB主板", "河源华兴领料总数", 43, None, 43])
 
     buf = io.BytesIO()
     wb.save(buf)
@@ -236,6 +243,270 @@ def test_record_import_template_exports_expected_headers(client):
         "类型", "物料名称", "贴纸类型", "加工点", "供应商",
         "日期", "单据编号", "数量", "备注", "PO", "客名",
     ]
+
+
+def test_non_supplier_record_export_matches_import_template_headers(client):
+    login(client, "装配", "123456", "装配")
+    dongguan = loc_id(client, "东莞加工厂利鸿")
+    client.post("/api/records", json={
+        "rec_type": "issue",
+        "location_id": dongguan,
+        "material": "77794-PCBA板",
+        "rec_date": "2026-07-08",
+        "doc_no": "EXP-001",
+        "qty": 18,
+        "remark": "导出测试",
+    })
+
+    r = client.get("/api/records/export")
+    wb = openpyxl.load_workbook(io.BytesIO(r.content), data_only=True)
+    ws = wb.active
+    headers = [cell.value for cell in ws[1]]
+    first_row = [cell.value for cell in ws[2]]
+
+    assert r.status_code == 200
+    assert headers == [
+        "类型", "物料名称", "贴纸类型", "加工点", "供应商",
+        "日期", "单据编号", "数量", "备注", "PO", "客名",
+    ]
+    assert first_row == [
+        "领料", "77794-PCBA板", None, "东莞加工厂利鸿", None,
+        "2026-07-08", "EXP-001", 18, "导出测试", None, None,
+    ]
+
+
+def test_xingxin_pcba_export_uses_legacy_warehouse_workbook(client):
+    login(client, "兴信B来料仓", "123456", DEFAULT_DEPARTMENT)
+    heyuan = loc_id(client, "河源华兴")
+    client.post("/api/records", json={
+        "rec_type": "inbound_raw",
+        "material": "77794-PCBA板",
+        "rec_date": "2026-07-01",
+        "doc_no": "RK-PCBA-1",
+        "qty": 40,
+        "remark": "入仓测试",
+    })
+    client.post("/api/records", json={
+        "rec_type": "issue",
+        "location_id": heyuan,
+        "material": "77794-PCBA板",
+        "rec_date": "2026-07-02",
+        "doc_no": "LL-PCBA-1",
+        "qty": 25,
+        "remark": "领料测试",
+    })
+
+    r = client.get("/api/records/export?material=77794-PCBA板")
+    wb = openpyxl.load_workbook(io.BytesIO(r.content), data_only=True)
+
+    assert r.status_code == 200
+    assert wb.sheetnames[:7] == [
+        "总表", "入仓明细", "邵阳华登领料", "河源华兴领料",
+        "加工厂利鸿领料", "东莞车间领料", "Sheet2",
+    ]
+    assert [cell.value for cell in wb["入仓明细"][1]] == [
+        "日期", "入仓单号", "物料名称", "入仓数", "备注"]
+    assert [cell.value for cell in wb["河源华兴领料"][1]] == [
+        "日期", "领料单号", "物料名称", "领料数", "备注"]
+    assert wb["入仓明细"].cell(2, 2).value == "RK-PCBA-1"
+    assert wb["入仓明细"].cell(2, 4).value == 40
+    assert wb["河源华兴领料"].cell(2, 2).value == "LL-PCBA-1"
+    assert wb["河源华兴领料"].cell(2, 4).value == 25
+    total = wb["总表"]
+    assert [total.cell(1, col).value for col in range(1, 12)] == [
+        "物料名称", None, "累计出入总数", "6月月结", "7月", "8月",
+        "9月", "10月", "11月", "12月", "备注",
+    ]
+    assert [total.cell(row, 2).value for row in range(2, 9)] == [
+        "入仓总数", "邵阳华登领料总数", "河源华兴领料总数",
+        "加工厂利鸿领料总数", "东莞车间领料", None, "应存数",
+    ]
+    assert total.cell(2, 1).value == "PCB主板"
+    assert total.cell(2, 3).value == 40
+    assert total.cell(2, 5).value == 40
+    assert total.cell(4, 3).value == 25
+    assert total.cell(4, 5).value == 25
+    assert total.cell(8, 3).value == 15
+    assert total.cell(8, 4).value == 0
+    assert total.cell(8, 5).value == 15
+
+
+def test_xingxin_nfc_export_uses_legacy_matrix_workbook(client):
+    login(client, "兴信B来料仓", "123456", DEFAULT_DEPARTMENT)
+    dongguan = loc_id(client, "东莞车间")
+    client.post("/api/records/batch", json={
+        "rec_type": "inbound_raw",
+        "material": "NFC贴纸",
+        "rec_date": "2026-07-01",
+        "doc_no": "RK-NFC-1",
+        "items": [{"sticker_type": "1#NFC贴纸", "qty": 50}],
+    })
+    client.post("/api/records/batch", json={
+        "rec_type": "issue",
+        "location_id": dongguan,
+        "material": "NFC贴纸",
+        "rec_date": "2026-07-02",
+        "doc_no": "CK-NFC-1",
+        "items": [{"sticker_type": "1#NFC贴纸", "qty": 20}],
+    })
+
+    r = client.get("/api/records/export?material=NFC贴纸")
+    wb = openpyxl.load_workbook(io.BytesIO(r.content), data_only=True)
+
+    assert r.status_code == 200
+    assert wb.sheetnames[:3] == ["总表", "入库明细", "出库明细"]
+    assert wb["总表"].cell(1, 2).value == "累计入仓总数"
+    assert wb["总表"].cell(2, 1).value == "物料名称"
+    assert wb["总表"].cell(3, 1).value == "1#NFC\n贴纸"
+    assert wb["总表"].cell(3, 2).value == 50
+    assert wb["总表"].cell(3, 11).value == 30
+    assert wb["总表"].cell(3, 12).value == 20
+    assert wb["入库明细"].cell(1, 2).value == "当月入仓总数"
+    assert wb["入库明细"].cell(2, 1).value == "物料名称"
+    assert wb["入库明细"].cell(2, 3).value == "RK-NFC-1"
+    assert wb["入库明细"].cell(3, 2).value == 50
+    assert wb["入库明细"].cell(3, 3).value == 50
+    assert wb["出库明细"].cell(1, 2).value == "当月出仓总数"
+    assert wb["出库明细"].cell(2, 3).value == "CK-NFC-1"
+    assert wb["出库明细"].cell(3, 2).value == 20
+    assert wb["出库明细"].cell(3, 3).value == 20
+
+
+def test_xingxin_nfc_record_export_fills_legacy_opening_date(client):
+    login(client, "兴信B来料仓", "123456", DEFAULT_DEPARTMENT)
+    dongguan = loc_id(client, "东莞车间")
+    client.post("/api/records", json={
+        "rec_type": "issue",
+        "location_id": dongguan,
+        "material": "NFC贴纸",
+        "sticker_type": "1#NFC贴纸",
+        "doc_no": "1#NFC贴纸-东莞期初出仓",
+        "qty": 60,
+        "remark": "总表东莞期初出仓导入",
+    })
+
+    r = client.get("/api/records/export?material=NFC贴纸")
+    wb = openpyxl.load_workbook(io.BytesIO(r.content), data_only=True)
+
+    assert r.status_code == 200
+    assert wb["出库明细"].cell(1, 3).value == "2026-06-27"
+
+
+def test_semi_finished_export_uses_legacy_matrix_workbook(client):
+    login(client, "半成品", "123456", "半成品")
+    upload = upload_bytes(client, "/api/records/import", legacy_semi_finished_workbook_bytes())
+    assert upload.status_code == 200
+
+    r = client.get("/api/records/export?material=NFC贴纸")
+    wb = openpyxl.load_workbook(io.BytesIO(r.content), data_only=True)
+
+    assert r.status_code == 200
+    assert wb.sheetnames[:5] == [
+        "总表", "入库明细", "邵阳领料", "河源华兴36#CD领料", "车间36#CD领料"]
+    assert wb["总表"].cell(1, 2).value == "累计入仓总数"
+    assert wb["总表"].cell(1, 11).value == "应存数"
+    assert wb["总表"].cell(3, 1).value == "1#NFC\n贴纸"
+    assert wb["总表"].cell(3, 2).value == 100
+    assert wb["总表"].cell(3, 11).value == 60
+    assert wb["总表"].cell(3, 12).value == 40
+
+    inbound = wb["入库明细"]
+    assert inbound.cell(1, 4).value == "日期"
+    assert inbound.cell(2, 4).value == "入库单号"
+    assert inbound.cell(3, 1).value == "物料名称"
+    assert inbound.cell(3, 2).value == "当月入仓总数"
+    assert inbound.cell(3, 3).value == "6/24\n装配入库截数"
+    assert inbound.cell(4, 1).value == "1#NFC\n贴纸"
+    assert inbound.cell(4, 2).value == 100
+    assert inbound.cell(4, 3).value == 25
+    assert inbound.cell(1, 5).value == "2026-07-01"
+    assert inbound.cell(2, 5).value == "RK-001"
+    assert inbound.cell(4, 5).value == 30
+
+    outbound = wb["邵阳领料"]
+    assert outbound.cell(5, 1).value == "物料名称"
+    assert outbound.cell(5, 2).value == "当月出仓总数"
+    assert outbound.cell(6, 1).value == "1#NFC\n贴纸"
+    assert outbound.cell(6, 2).value == 40
+    assert outbound.cell(6, 3).value == 25
+    assert outbound.cell(1, 4).value == "2026-07-03"
+    assert outbound.cell(2, 4).value == "LL-001"
+    assert outbound.cell(6, 4).value == 35
+
+
+def test_outsource_record_export_uses_legacy_pcba_workbook(client):
+    login(client, "外发", "123456", "外发")
+    client.post("/api/records", json={
+        "rec_type": "issue",
+        "material": "77794-PCBA板",
+        "rec_date": "2026-07-01",
+        "doc_no": "LL-LH-001",
+        "qty": 100,
+    })
+    client.post("/api/records", json={
+        "rec_type": "semi_finished",
+        "material": "77794-PCBA板",
+        "rec_date": "2026-07-02",
+        "doc_no": "BS-LH-001",
+        "qty": 35,
+        "remark": "LH202607 77794 光身唱机",
+    })
+
+    r = client.get("/api/records/export?material=77794-PCBA板")
+    wb = openpyxl.load_workbook(io.BytesIO(r.content), data_only=True)
+
+    assert r.status_code == 200
+    assert wb.sheetnames[:3] == ["总表", "领料明细", "半成品入仓明细"]
+    assert [cell.value for cell in wb["领料明细"][1][:5]] == [
+        "日期", "领料编号", "物料名称", "领料数", "备注"]
+    assert [cell.value for cell in wb["半成品入仓明细"][1][:7]] == [
+        "日期", "送货单号", "合同号", "货号", "品名/规格", "数量（pcs）", "备注"]
+    assert wb["领料明细"].cell(2, 2).value == "LL-LH-001"
+    assert wb["领料明细"].cell(2, 4).value == 100
+    assert wb["半成品入仓明细"].cell(2, 2).value == "BS-LH-001"
+    assert wb["半成品入仓明细"].cell(2, 6).value == 35
+    assert wb["总表"].cell(2, 2).value == "领料总数"
+    assert wb["总表"].cell(2, 3).value == 100
+    assert wb["总表"].cell(3, 2).value == "半成品入仓总数"
+    assert wb["总表"].cell(3, 3).value == 35
+
+
+def test_heyuan_record_export_uses_legacy_pcba_workbook(client):
+    login(client, "河源华兴", "123456", "河源华兴")
+    heyuan = loc_id(client, "河源华兴")
+    client.post("/api/records", json={
+        "rec_type": "issue",
+        "location_id": heyuan,
+        "material": "77794-PCBA板",
+        "rec_date": "2026-07-03",
+        "doc_no": "LL-HY-001",
+        "qty": 88,
+    })
+    client.post("/api/records", json={
+        "rec_type": "finished",
+        "location_id": heyuan,
+        "material": "77794-PCBA板",
+        "rec_date": "2026-07-04",
+        "doc_no": "BS-HY-001",
+        "qty": 66,
+        "remark": "HY202607 77794 光身唱机",
+    })
+
+    r = client.get("/api/records/export?material=77794-PCBA板")
+    wb = openpyxl.load_workbook(io.BytesIO(r.content), data_only=True)
+
+    assert r.status_code == 200
+    assert wb.sheetnames[:4] == ["总表", "36#CD领料明细", "PCB板领料明细", "成品入仓明细"]
+    assert [cell.value for cell in wb["PCB板领料明细"][1][:5]] == [
+        "日期", "领料编号", "物料名称", "领料数", "备注"]
+    assert [cell.value for cell in wb["成品入仓明细"][1][:7]] == [
+        "日期", "送货单号", "合同号", "货号", "品名/规格", "数量（pcs）", "备注"]
+    assert wb["PCB板领料明细"].cell(2, 2).value == "LL-HY-001"
+    assert wb["PCB板领料明细"].cell(2, 4).value == 88
+    assert wb["成品入仓明细"].cell(2, 2).value == "BS-HY-001"
+    assert wb["成品入仓明细"].cell(2, 6).value == 66
+    assert wb["总表"].cell(2, 1).value == "PCBA主板"
+    assert wb["总表"].cell(2, 2).value == 88
 
 
 def test_operator_can_import_record_rows_from_xlsx(client):
@@ -365,7 +636,7 @@ def test_supplier_pcba_legacy_workbook_imports_inbound_and_issue_rows(client):
     records = client.get("/api/records").json()
 
     assert r.status_code == 200
-    assert r.json()["created"] == 6
+    assert r.json()["created"] == 7
     assert [row["qty"] for row in records if row["doc_no"] == "2534693"] == [40, 40]
     by_type_doc = {(row["rec_type"], row["doc_no"]): row for row in records}
     assert by_type_doc[("inbound_raw", "截止到6月17号")]["qty"] == 100
@@ -374,16 +645,22 @@ def test_supplier_pcba_legacy_workbook_imports_inbound_and_issue_rows(client):
     assert by_type_doc[("issue", "退不良品")]["qty"] == -5
 
     summary = client.get("/api/summary").json()
-    assert summary["raw"] == {"inbound": 175, "outbound": 25, "balance": 150}
+    assert summary["raw"] == {"inbound": 175, "outbound": 43, "balance": 132}
     assert summary["materials"] == [
-        {"material": "77794-PCBA板", "inbound": 175, "outbound": 25, "balance": 150}
+        {"material": "77794-PCBA板", "inbound": 175, "outbound": 43, "balance": 132}
     ]
+    monthly_rows = {
+        (row["location"], row["material"]): row
+        for row in summary["monthly_locations"]["locations"]
+    }
+    assert monthly_rows[("河源华兴", "77794-PCBA板")]["values"][0]["issue"] == 0
+    assert monthly_rows[("河源华兴", "77794-PCBA板")]["values"][1]["issue"] == 43
 
     second = upload_bytes(client, "/api/records/import", legacy_supplier_pcba_workbook_bytes())
     assert second.status_code == 200
     assert second.json()["created"] == 0
-    assert second.json()["skipped"] == 6
-    assert len(client.get("/api/records").json()) == 6
+    assert second.json()["skipped"] == 7
+    assert len(client.get("/api/records").json()) == 7
 
 
 def test_supplier_nfc_legacy_workbook_imports_opening_and_detail_rows(client):
@@ -398,6 +675,9 @@ def test_supplier_nfc_legacy_workbook_imports_opening_and_detail_rows(client):
     assert rows[("inbound_raw", "1#NFC贴纸-期初入仓")]["qty"] == 100
     assert rows[("issue", "1#NFC贴纸-东莞期初出仓")]["qty"] == 60
     assert rows[("issue", "1#NFC贴纸-邵阳期初领料")]["qty"] == 15
+    assert rows[("inbound_raw", "1#NFC贴纸-期初入仓")]["rec_date"] == "2026-06-27"
+    assert rows[("issue", "1#NFC贴纸-东莞期初出仓")]["rec_date"] == "2026-06-27"
+    assert rows[("issue", "1#NFC贴纸-邵阳期初领料")]["rec_date"] == "2026-06-27"
     assert rows[("issue", "CK-1")]["location_name"] == "东莞车间"
     assert all(row["sticker_type"] == "1#NFC贴纸" for row in records)
 

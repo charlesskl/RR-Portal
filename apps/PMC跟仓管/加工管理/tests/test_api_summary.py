@@ -120,6 +120,63 @@ def test_summary_is_scoped_to_current_department(client):
     assert s["subtotal"]["issue"] == 0
 
 
+def test_summary_includes_monthly_location_totals(client):
+    admin_login(client, "兴信B来料仓")
+    dg = loc_id(client, "东莞车间")
+    client.post("/api/records", json={
+        "rec_type": "inbound_raw", "rec_date": "2026-06-27", "qty": 40})
+    client.post("/api/records", json={
+        "rec_type": "inbound_raw", "rec_date": "2026-07-05", "qty": 60})
+    client.post("/api/records", json={
+        "rec_type": "issue", "location_id": dg, "rec_date": "2026-06-27", "qty": 10})
+    client.post("/api/records", json={
+        "rec_type": "issue", "location_id": dg, "rec_date": "2026-07-06", "qty": 20})
+
+    s = client.get("/api/summary").json()
+    monthly = s["monthly_locations"]
+    by_location = {row["location"]: row for row in monthly["locations"]}
+
+    assert [row["label"] for row in monthly["months"]] == [
+        "6月月结", "7月", "8月", "9月", "10月", "11月", "12月"]
+    assert by_location["东莞车间"]["issue"] == 30
+    assert by_location["东莞车间"]["values"][0] == {
+        "issue": 10, "finished": 0, "balance": 10}
+    assert by_location["东莞车间"]["values"][1] == {
+        "issue": 20, "finished": 0, "balance": 20}
+    assert monthly["subtotal"]["values"][0]["issue"] == 10
+    assert monthly["subtotal"]["values"][1]["issue"] == 20
+    assert monthly["raw"]["values"][0] == {
+        "inbound": 40, "outbound": 10, "balance": 30}
+    assert monthly["raw"]["values"][1] == {
+        "inbound": 60, "outbound": 20, "balance": 40}
+
+
+def test_monthly_location_summary_groups_by_material(client):
+    admin_login(client, "兴信B来料仓")
+    dg = loc_id(client, "东莞车间")
+    client.post("/api/records", json={
+        "rec_type": "issue", "location_id": dg, "rec_date": "2026-07-06",
+        "material": "77794-PCBA板", "qty": 20})
+    client.post("/api/records/batch", json={
+        "rec_type": "issue", "location_id": dg, "rec_date": "2026-07-06",
+        "material": "NFC贴纸",
+        "items": [
+            {"sticker_type": "1#NFC贴纸", "qty": 10},
+            {"sticker_type": "2#NFC贴纸", "qty": 15},
+        ],
+    })
+
+    s = client.get("/api/summary").json()
+    rows = {
+        (row["location"], row["material"]): row
+        for row in s["monthly_locations"]["locations"]
+    }
+
+    assert rows[("东莞车间", "77794-PCBA板")]["issue"] == 20
+    assert rows[("东莞车间", "NFC贴纸")]["issue"] == 25
+    assert rows[("东莞车间", "NFC贴纸")]["values"][1]["issue"] == 25
+
+
 def test_assembly_summary_subtracts_semi_finished(client):
     admin_login(client, "装配")
     dg = loc_id(client, "东莞加工厂利鸿")

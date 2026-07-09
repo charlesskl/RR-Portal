@@ -18,17 +18,38 @@ function refItemKey(tableKey, item) {
   return JSON.stringify(item);
 }
 
-function mergeMissingRefDefaults(existing, defaults, tableKey = 'material_prices') {
+function isBlankRefItem(item) {
+  if (!item || typeof item !== 'object' || Array.isArray(item)) return false;
+  const values = Object.values(item);
+  return values.length === 0 || values.every((value) => value === '' || value === null || value === undefined);
+}
+
+function mergeMissingRefDefaultsWithStats(existing, defaults, tableKey = 'material_prices') {
   const rows = Array.isArray(existing) ? existing.slice() : [];
-  const seen = new Set(rows.map((item) => refItemKey(tableKey, item)));
+  let added = 0;
+  let changed = false;
   for (const item of defaults || []) {
     const key = refItemKey(tableKey, item);
-    if (!seen.has(key)) {
-      rows.push({ ...item });
-      seen.add(key);
+    const existingIndex = rows.findIndex((row) => !isBlankRefItem(row) && refItemKey(tableKey, row) === key);
+    const blankIndex = rows.findIndex(isBlankRefItem);
+    if (existingIndex >= 0) {
+      if (blankIndex >= 0 && blankIndex < existingIndex) {
+        rows[blankIndex] = rows[existingIndex];
+        rows.splice(existingIndex, 1);
+        changed = true;
+      }
+    } else {
+      if (blankIndex >= 0) rows[blankIndex] = { ...item };
+      else rows.push({ ...item });
+      added += 1;
+      changed = true;
     }
   }
-  return rows;
+  return { rows, added, changed };
+}
+
+function mergeMissingRefDefaults(existing, defaults, tableKey = 'material_prices') {
+  return mergeMissingRefDefaultsWithStats(existing, defaults, tableKey).rows;
 }
 
 function parseRefRows(raw) {
@@ -44,9 +65,8 @@ function appendMissingRefDefaults(db, tableKey, defaults) {
   const row = db.prepare('SELECT data_json FROM ref_tables WHERE key = ?').get(tableKey);
   if (!row) return 0;
   const existing = parseRefRows(row.data_json);
-  const merged = mergeMissingRefDefaults(existing, defaults, tableKey);
-  const added = merged.length - existing.length;
-  if (added > 0) {
+  const { rows: merged, added, changed } = mergeMissingRefDefaultsWithStats(existing, defaults, tableKey);
+  if (changed) {
     db.prepare(`
       UPDATE ref_tables
       SET data_json = ?, updated_at = datetime('now'), updated_by = ?
@@ -76,9 +96,8 @@ function appendMissingRefDefaultsToSectionPayloads(db, dept, tableKey, defaults)
     const existing = payload[tableKey];
     if (!Array.isArray(existing) || existing.length === 0) continue;
 
-    const merged = mergeMissingRefDefaults(existing, defaults, tableKey);
-    const added = merged.length - existing.length;
-    if (added > 0) {
+    const { rows: merged, added, changed } = mergeMissingRefDefaultsWithStats(existing, defaults, tableKey);
+    if (changed) {
       payload[tableKey] = merged;
       update.run(JSON.stringify(payload), row.id);
       rowsChanged += 1;

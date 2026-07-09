@@ -87,6 +87,7 @@ for (const q of quotesAll) {
 const refSeeds = {
   material_prices: [
     { name: 'ABS', model: '750SW', price: 8.50 },
+    { name: 'ABS', model: '抽粒料', price: 4.60 },
     { name: 'C-ABS', model: 'TR558/920', price: 12.50 },
     { name: 'HIPS', model: 'HI425', price: 7.80 },
     { name: 'GP', model: 'MW-1', price: 7.80 },

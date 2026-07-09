@@ -2946,6 +2946,42 @@ function renderAssembly(host, payload, canEdit, onChange, fxRmbHkd) {
   };
   renderGroups();
 
+  const buildImportedStepGroups = (j, fallbackKind = 'assembly') => {
+    const m = j.meta || {};
+    const rawGroups = Array.isArray(j.groups) && j.groups.length
+      ? j.groups
+      : [{
+          product: m.quote_no ? `货号 ${m.quote_no}` : '排拉工序',
+          name: m.quote_no ? `货号 ${m.quote_no}` : '排拉工序',
+          kind: fallbackKind,
+          qty: Number(m.target_qty) || 1,
+          steps: j.steps || [],
+        }];
+    return rawGroups.map(g => ({
+      product: g.product || g.name || '排拉工序',
+      kind: g.kind === 'packaging' ? 'packaging' : 'assembly',
+      qty: Number(g.qty || m.target_qty) || 1,
+      team: Number(g.team) || 1,
+      steps: (g.steps || []).map(s => ({ name: s.name, count: s.count, note: s.note || '' })),
+    })).filter(g => g.steps.length);
+  };
+
+  const addImportedStepGroups = (j) => {
+    const groups = buildImportedStepGroups(j);
+    const asmGroups = groups.filter(g => g.kind !== 'packaging');
+    const pkgGroups = groups.filter(g => g.kind === 'packaging');
+    payload.assembly_step_groups.push(...asmGroups.map(({ kind, ...g }) => g));
+    payload.packaging_step_groups.push(...pkgGroups.map(({ kind, ...g }) => g));
+  };
+
+  const importGroupSummary = (j) => {
+    const groups = buildImportedStepGroups(j);
+    const asmGroups = groups.filter(g => g.kind !== 'packaging');
+    const pkgGroups = groups.filter(g => g.kind === 'packaging');
+    const rows = groups.map(g => `<li>${g.kind === 'packaging' ? '包装/混装' : '组装'}：${escapeHtml(g.product)}（${g.steps.length} 个工序，生产量 ${formatNum(g.qty)}）</li>`).join('');
+    return { asmGroups, pkgGroups, rows };
+  };
+
   if (canEdit) {
     host.querySelector('#asm-rate').oninput = (e) => { payload.assembly_base_rate = Number(e.target.value) || 0; onChange(); renderGroups(); };
     host.querySelector('#asm-time').oninput = (e) => { payload.assembly_std_time = Number(e.target.value) || 0; onChange(); renderGroups(); };
@@ -2965,27 +3001,21 @@ function renderAssembly(host, payload, canEdit, onChange, fxRmbHkd) {
         const j = await r.json();
         if (!r.ok) throw new Error(j.error || '解析失败');
         const m = j.meta || {};
+        const info = importGroupSummary(j);
         impPreview.innerHTML = `
           <div class="card" style="background:#f0fdf4;border:1px solid #86efac;margin-top:10px">
-            <p>解析到 <b>${j.count}</b> 个工序<br>
+            <p>解析到 <b>${j.group_count || (info.asmGroups.length + info.pkgGroups.length) || 1}</b> 个分组、<b>${j.count}</b> 个工序<br>
             ${m.customer ? `客名: ${escapeHtml(m.customer)} · ` : ''}${m.quote_no ? `货号: ${escapeHtml(m.quote_no)} · ` : ''}${m.target_qty ? `目标数: ${escapeHtml(m.target_qty)}` : ''}</p>
+            <ul style="margin:8px 0 0 18px">${info.rows}</ul>
             <div style="margin-top:10px;display:flex;gap:8px;align-items:center">
-              <label>归到产品组：
-                <input id="asm-imp-name" type="text" value="${escapeHtml(m.customer ? '货号 ' + (m.quote_no || '') : '排拉工序')}" style="width:200px"/>
-              </label>
-              <button id="asm-imp-add">作为新组添加</button>
+              <button id="asm-imp-add">按识别分组导入</button>
               <button id="asm-imp-cancel" class="mini danger">取消</button>
             </div>
           </div>`;
         impPreview.querySelector('#asm-imp-add').onclick = () => {
-          const grpName = impPreview.querySelector('#asm-imp-name').value.trim() || '排拉工序';
-          payload.assembly_step_groups.push({
-            product: grpName,
-            qty: Number(m.target_qty) || 1,
-            steps: j.steps.map(s => ({ name: s.name, count: s.count, note: '' })),
-          });
+          addImportedStepGroups(j);
           impPreview.innerHTML = ''; impFile.value = '';
-          onChange(); renderGroups();
+          onChange(); renderGroups(); renderPkgGroups();
         };
         impPreview.querySelector('#asm-imp-cancel').onclick = () => { impPreview.innerHTML = ''; impFile.value = ''; };
       } catch (err) {
@@ -3087,24 +3117,21 @@ function renderAssembly(host, payload, canEdit, onChange, fxRmbHkd) {
         const j = await r.json();
         if (!r.ok) throw new Error(j.error || '解析失败');
         const m = j.meta || {};
+        const info = importGroupSummary(j);
         impPreview.innerHTML = `
           <div class="card" style="background:#f0fdf4;border:1px solid #86efac;margin-top:10px">
-            <p>解析到 <b>${j.count}</b> 个工序<br>
+            <p>解析到 <b>${j.group_count || (info.asmGroups.length + info.pkgGroups.length) || 1}</b> 个分组、<b>${j.count}</b> 个工序<br>
             ${m.customer ? `客名: ${escapeHtml(m.customer)} · ` : ''}${m.quote_no ? `货号: ${escapeHtml(m.quote_no)} · ` : ''}${m.target_qty ? `目标数: ${escapeHtml(m.target_qty)}` : ''}</p>
+            <ul style="margin:8px 0 0 18px">${info.rows}</ul>
             <div style="margin-top:10px;display:flex;gap:8px;align-items:center">
-              <label>归到产品组：<input id="pkg-imp-name" type="text" value="${escapeHtml(m.quote_no ? '货号 ' + m.quote_no : '排拉工序')}" style="width:200px"/></label>
-              <button id="pkg-imp-add">作为新组添加</button>
+              <button id="pkg-imp-add">按识别分组导入</button>
               <button id="pkg-imp-cancel" class="mini danger">取消</button>
             </div>
           </div>`;
         impPreview.querySelector('#pkg-imp-add').onclick = () => {
-          const grpName = impPreview.querySelector('#pkg-imp-name').value.trim() || '排拉工序';
-          payload.packaging_step_groups.push({
-            product: grpName, qty: Number(m.target_qty) || 1,
-            steps: j.steps.map(s => ({ name: s.name, count: s.count, note: '' })),
-          });
+          addImportedStepGroups(j);
           impPreview.innerHTML = ''; impFile.value = '';
-          onChange(); renderPkgGroups();
+          onChange(); renderGroups(); renderPkgGroups();
         };
         impPreview.querySelector('#pkg-imp-cancel').onclick = () => { impPreview.innerHTML = ''; impFile.value = ''; };
       } catch (err) {

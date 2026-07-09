@@ -164,8 +164,11 @@ function renderEntryTypeTabs() {
   if (!tabs) return;
   tabs.innerHTML = ENTRY_TYPE_OPTIONS.map(opt => {
     const active = opt.value === ACTIVE_ENTRY_TYPE ? ' active' : '';
-    return `<button type="button" class="entry-type-tab${active}" onclick="setEntryType('${esc(opt.value)}')">${esc(opt.label)}</button>`;
+    return `<button type="button" class="entry-type-tab${active}" data-entry-type="${esc(opt.value)}">${esc(opt.label)}</button>`;
   }).join('');
+  tabs.querySelectorAll('[data-entry-type]').forEach(btn => {
+    btn.addEventListener('click', () => setEntryType(btn.dataset.entryType || ''));
+  });
 }
 
 function setEntryType(type) {
@@ -196,8 +199,11 @@ function renderEntryMaterialTabs() {
   const materials = entryMaterialOptions();
   tabs.innerHTML = materials.map(mat => {
     const active = mat.name === ACTIVE_ENTRY_MATERIAL ? ' active' : '';
-    return `<button type="button" class="entry-type-tab${active}" onclick="setEntryMaterial('${esc(mat.name)}')">${esc(mat.name)}</button>`;
+    return `<button type="button" class="entry-type-tab${active}" data-entry-material="${esc(mat.name)}">${esc(mat.name)}</button>`;
   }).join('');
+  tabs.querySelectorAll('[data-entry-material]').forEach(btn => {
+    btn.addEventListener('click', () => setEntryMaterial(btn.dataset.entryMaterial || ''));
+  });
 }
 
 function setEntryMaterial(material) {

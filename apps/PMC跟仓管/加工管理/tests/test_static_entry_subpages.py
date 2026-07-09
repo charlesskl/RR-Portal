@@ -59,6 +59,16 @@ def test_entry_records_are_filtered_by_active_type():
     assert "x.material === ACTIVE_ENTRY_MATERIAL" in js
 
 
+def test_entry_tabs_bind_clicks_without_inline_material_arguments():
+    js = (ROOT / "pcba/static/app.js").read_text(encoding="utf-8")
+
+    assert 'data-entry-type="${esc(opt.value)}"' in js
+    assert "addEventListener('click', () => setEntryType" in js
+    assert 'data-entry-material="${esc(mat.name)}"' in js
+    assert "addEventListener('click', () => setEntryMaterial" in js
+    assert "onclick=\"setEntryMaterial('${esc(mat.name)}')\"" not in js
+
+
 def test_summary_page_prefers_monthly_location_totals():
     js = (ROOT / "pcba/static/app.js").read_text(encoding="utf-8")
 

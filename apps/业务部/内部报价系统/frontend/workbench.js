@@ -2966,16 +2966,16 @@ function renderAssembly(host, payload, canEdit, onChange, fxRmbHkd) {
     })).filter(g => g.steps.length);
   };
 
-  const addImportedStepGroups = (j) => {
-    const groups = buildImportedStepGroups(j);
+  const addImportedStepGroups = (j, fallbackKind = 'assembly') => {
+    const groups = buildImportedStepGroups(j, fallbackKind);
     const asmGroups = groups.filter(g => g.kind !== 'packaging');
     const pkgGroups = groups.filter(g => g.kind === 'packaging');
     payload.assembly_step_groups.push(...asmGroups.map(({ kind, ...g }) => g));
     payload.packaging_step_groups.push(...pkgGroups.map(({ kind, ...g }) => g));
   };
 
-  const importGroupSummary = (j) => {
-    const groups = buildImportedStepGroups(j);
+  const importGroupSummary = (j, fallbackKind = 'assembly') => {
+    const groups = buildImportedStepGroups(j, fallbackKind);
     const asmGroups = groups.filter(g => g.kind !== 'packaging');
     const pkgGroups = groups.filter(g => g.kind === 'packaging');
     const rows = groups.map(g => `<li>${g.kind === 'packaging' ? '包装/混装' : '组装'}：${escapeHtml(g.product)}（${g.steps.length} 个工序，生产量 ${formatNum(g.qty)}）</li>`).join('');
@@ -3117,7 +3117,7 @@ function renderAssembly(host, payload, canEdit, onChange, fxRmbHkd) {
         const j = await r.json();
         if (!r.ok) throw new Error(j.error || '解析失败');
         const m = j.meta || {};
-        const info = importGroupSummary(j);
+        const info = importGroupSummary(j, 'packaging');
         impPreview.innerHTML = `
           <div class="card" style="background:#f0fdf4;border:1px solid #86efac;margin-top:10px">
             <p>解析到 <b>${j.group_count || (info.asmGroups.length + info.pkgGroups.length) || 1}</b> 个分组、<b>${j.count}</b> 个工序<br>
@@ -3129,7 +3129,7 @@ function renderAssembly(host, payload, canEdit, onChange, fxRmbHkd) {
             </div>
           </div>`;
         impPreview.querySelector('#pkg-imp-add').onclick = () => {
-          addImportedStepGroups(j);
+          addImportedStepGroups(j, 'packaging');
           impPreview.innerHTML = ''; impFile.value = '';
           onChange(); renderGroups(); renderPkgGroups();
         };

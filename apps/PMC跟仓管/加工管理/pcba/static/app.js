@@ -18,9 +18,9 @@ const TYPE_LABEL = {
 };
 
 const XINGXIN_DEPARTMENT = '兴信B来料仓';
-const ASSEMBLY_DEPARTMENT = '装配';
-const SEMI_FINISHED_DEPARTMENT = '半成品';
-const OUTSOURCE_DEPARTMENT = '外发';
+const ASSEMBLY_DEPARTMENT = '东莞车间';
+const SEMI_FINISHED_DEPARTMENT = '碟片半成品';
+const OUTSOURCE_DEPARTMENT = '东莞加工厂利鸿';
 const HEYUAN_DEPARTMENT = '河源华兴';
 const SHAOYANG_DEPARTMENT = '邵阳';
 const XINSHAO_DEPARTMENT = '新邵';
@@ -1012,7 +1012,7 @@ function renderShaoyangReconcile(data) {
       <td>${esc(row.item_no)}</td>
       <td>${esc(row.minis_name)}</td>
       <td>${fmt(row.issue_month_inbound)}</td>
-      <td>${fmt(row.finished_total)}</td>
+      <td>${row.finished_total == null ? '' : fmt(row.finished_total)}</td>
       <td>${fmt(diff)}</td>
     </tr>`;
   }).join('') || '<tr><td colspan="7">没有读取到可核对的数据</td></tr>';

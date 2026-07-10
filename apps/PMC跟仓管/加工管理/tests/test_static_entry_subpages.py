@@ -101,3 +101,13 @@ def test_monthly_summary_shows_material_name():
     assert "<td>${esc(material || '')}</td>" in js
     assert "6月月结" in js
     assert "累计总数" in js
+
+
+def test_public_summary_shows_material_quantity_by_department():
+    html = (ROOT / "pcba/static/public-summary.html").read_text(encoding="utf-8")
+
+    assert "部门物料数量" in html
+    assert 'id="publicMaterialDepartmentRows"' in html
+    assert "data.material_department" in html
+    assert "<td>${esc(row.department)}</td>" in html
+    assert "<td>${esc(row.material)}</td>" in html

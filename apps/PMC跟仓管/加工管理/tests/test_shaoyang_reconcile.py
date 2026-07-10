@@ -44,6 +44,31 @@ def _shaoyang_finished_workbook():
     return _workbook_bytes(wb)
 
 
+def _shaoyang_issue_workbook_with_35_36():
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "总表"
+    ws.cell(1, 15).value = "7月成品\n入仓总数"
+    ws.cell(2, 1).value = "物料名称"
+    ws.cell(3, 1).value = "35#NFC\n贴纸"
+    ws.cell(3, 15).value = 15
+    ws.cell(4, 1).value = "36#NFC\n贴纸"
+    ws.cell(4, 15).value = None
+    ws.cell(5, 1).value = "小计："
+    ws.cell(5, 15).value = 15
+    return _workbook_bytes(wb)
+
+
+def _shaoyang_finished_workbook_with_duplicate_35():
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "总表"
+    ws.append(["Sku No.", "Item No.", "Minis Name", "Catalogue", "小计"])
+    ws.append([77772, "VINYL-S1-035", "Song 35-A", "C1", 6])
+    ws.append([77772, "VINYL-S1-035", "Song 35-B", "C1", 9])
+    return _workbook_bytes(wb)
+
+
 def test_shaoyang_reconcile_maps_sticker_number_to_vinyl_item(client):
     admin_login(client)
 
@@ -86,6 +111,38 @@ def test_shaoyang_reconcile_maps_sticker_number_to_vinyl_item(client):
     assert rows[2]["difference"] == 2
 
 
+def test_shaoyang_reconcile_sums_duplicate_vinyl_35_and_leaves_36_blank(client):
+    admin_login(client)
+
+    r = client.post(
+        "/api/shaoyang-cd/reconcile",
+        data={"month": "7"},
+        files={
+            "issue_file": (
+                "issue.xlsx",
+                _shaoyang_issue_workbook_with_35_36(),
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            ),
+            "finished_file": (
+                "finished.xlsx",
+                _shaoyang_finished_workbook_with_duplicate_35(),
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            ),
+        },
+    )
+
+    assert r.status_code == 200
+    rows = {row["sticker_no"]: row for row in r.json()["rows"]}
+    assert rows[35]["item_no"] == "VINYL-S1-035"
+    assert rows[35]["minis_name"] == "Song 35-A"
+    assert rows[35]["finished_total"] == 15
+    assert rows[35]["difference"] == 0
+    assert rows[36]["item_no"] == ""
+    assert rows[36]["minis_name"] == ""
+    assert rows[36]["finished_total"] is None
+    assert rows[36]["difference"] == 0
+
+
 def test_shaoyang_export_issue_workbook_fills_month_inbound_from_finished_subtotal(client):
     admin_login(client)
 
@@ -115,3 +172,31 @@ def test_shaoyang_export_issue_workbook_fills_month_inbound_from_finished_subtot
     assert ws.cell(3, 15).value == 12
     assert ws.cell(4, 15).value == 7
     assert ws.cell(5, 15).value == 19
+
+
+def test_shaoyang_export_issue_workbook_sums_duplicate_35_and_leaves_36_blank(client):
+    admin_login(client)
+
+    r = client.post(
+        "/api/shaoyang-cd/export-issue",
+        data={"month": "7"},
+        files={
+            "issue_file": (
+                "issue.xlsx",
+                _shaoyang_issue_workbook_with_35_36(),
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            ),
+            "finished_file": (
+                "finished.xlsx",
+                _shaoyang_finished_workbook_with_duplicate_35(),
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            ),
+        },
+    )
+
+    assert r.status_code == 200
+    wb = openpyxl.load_workbook(io.BytesIO(r.content), data_only=True)
+    ws = wb["总表"]
+    assert ws.cell(3, 15).value == 15
+    assert ws.cell(4, 15).value is None
+    assert ws.cell(5, 15).value == 15

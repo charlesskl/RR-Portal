@@ -96,6 +96,7 @@ def _build_supplier_monthly_summary(ws, detail_records, location_names):
 def build_workbook(
     summary, detail_records, location_names, include_supplier=False,
     warehouse_mode=False, outsource_mode=False, shaoyang_mode=False,
+    outsource_label="东莞加工厂利鸿",
 ):
     """summary: compute_summary 的返回；detail_records: 全部记录 dict 列表
     （含 rec_type/location_name/rec_date/doc_no/material/sticker_type/qty/remark）。"""
@@ -173,8 +174,8 @@ def build_workbook(
     if outsource_mode:
         finished = [r for r in detail_records if r["rec_type"] == "finished"]
         semi_finished = [r for r in detail_records if r["rec_type"] == "semi_finished"]
-        detail_sheet("外发成品入库", finished, "入仓数")
-        detail_sheet("外发半成品入库", semi_finished, "入仓数")
+        detail_sheet(f"{outsource_label}成品入库", finished, "入仓数")
+        detail_sheet(f"{outsource_label}半成品入库", semi_finished, "入仓数")
         buf = io.BytesIO()
         wb.save(buf)
         buf.seek(0)

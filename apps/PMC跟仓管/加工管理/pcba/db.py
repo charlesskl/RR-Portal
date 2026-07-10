@@ -10,7 +10,12 @@ LEGACY_PCBA_MATERIAL = "PCBA板"
 DEFAULT_MATERIALS = ["NFC贴纸", PCBA_MATERIAL]
 LEGACY_STICKER_TYPES = [f"贴纸{i:02d}" for i in range(1, 41)]
 DEFAULT_STICKER_TYPES = [f"{i}#NFC贴纸" for i in range(1, 46)]
-DEPARTMENTS = ["兴信B来料仓", "装配", "半成品", "外发", "河源华兴", "邵阳", "新邵"]
+DEPARTMENTS = ["兴信B来料仓", "东莞车间", "碟片半成品", "东莞加工厂利鸿", "河源华兴", "邵阳", "新邵"]
+DEPARTMENT_RENAMES = {
+    "装配": "东莞车间",
+    "半成品": "碟片半成品",
+    "外发": "东莞加工厂利鸿",
+}
 DEFAULT_DEPARTMENT = DEPARTMENTS[0]
 DEFAULT_DEPARTMENT_PASSWORD = "123456"
 
@@ -97,6 +102,47 @@ def _column_exists(conn, table, column):
     return any(row["name"] == column for row in rows)
 
 
+def _migrate_department_names(conn):
+    for old_name, new_name in DEPARTMENT_RENAMES.items():
+        conn.execute(
+            "UPDATE records SET department=? WHERE department=?",
+            (new_name, old_name),
+        )
+        conn.execute(
+            "UPDATE semi_finished_monthly_totals SET department=? WHERE department=?",
+            (new_name, old_name),
+        )
+        conn.execute(
+            "UPDATE users SET department=? WHERE department=?",
+            (new_name, old_name),
+        )
+
+        old_user = conn.execute(
+            "SELECT id, role, password_hash FROM users WHERE username=?",
+            (old_name,),
+        ).fetchone()
+        new_user = conn.execute(
+            "SELECT id FROM users WHERE username=?",
+            (new_name,),
+        ).fetchone()
+        if old_user and new_user:
+            conn.execute(
+                "UPDATE users SET password_hash=?, role=?, department=? WHERE id=?",
+                (old_user["password_hash"], old_user["role"], new_name, new_user["id"]),
+            )
+            if _column_exists(conn, "records", "created_by"):
+                conn.execute(
+                    "UPDATE records SET created_by=? WHERE created_by=?",
+                    (new_user["id"], old_user["id"]),
+                )
+            conn.execute("DELETE FROM users WHERE id=?", (old_user["id"],))
+        elif old_user:
+            conn.execute(
+                "UPDATE users SET username=?, department=? WHERE id=?",
+                (new_name, new_name, old_user["id"]),
+            )
+
+
 def _migrate_schema(conn):
     if not _column_exists(conn, "users", "department"):
         conn.execute("ALTER TABLE users ADD COLUMN department TEXT")
@@ -123,6 +169,7 @@ def _migrate_schema(conn):
             "ALTER TABLE semi_finished_monthly_totals "
             "ADD COLUMN opening_stock INTEGER NOT NULL DEFAULT 0"
         )
+    _migrate_department_names(conn)
 
 
 def _seed_sticker_types(conn):

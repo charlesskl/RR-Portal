@@ -1,4 +1,4 @@
-﻿DEFAULT_DEPARTMENT = "兴信B来料仓"
+DEFAULT_DEPARTMENT = "兴信B来料仓"
 
 
 def admin_login(client, department=DEFAULT_DEPARTMENT):
@@ -190,7 +190,7 @@ def test_admin_can_delete_any(client):
 
 
 def test_records_are_isolated_by_department(client):
-    admin_login(client, "装配")
+    admin_login(client, "东莞车间")
     lid = loc_id(client, "东莞车间")
     rid = client.post("/api/records", json={
         "rec_type": "issue", "location_id": lid, "qty": 100}).json()["id"]
@@ -203,7 +203,7 @@ def test_records_are_isolated_by_department(client):
 
 
 def test_cross_department_record_update_and_delete_return_404(client):
-    admin_login(client, "装配")
+    admin_login(client, "东莞车间")
     lid = loc_id(client, "东莞车间")
     rid = client.post("/api/records", json={
         "rec_type": "issue", "location_id": lid, "qty": 100}).json()["id"]
@@ -231,7 +231,7 @@ def test_xingxin_record_saves_supplier(client):
 
 
 def test_non_xingxin_record_clears_supplier(client):
-    admin_login(client, "装配")
+    admin_login(client, "东莞车间")
     lid = loc_id(client, "东莞车间")
     r = client.post("/api/records", json={
         "rec_type": "issue", "location_id": lid, "material": "PCBA板",
@@ -253,7 +253,7 @@ def test_xingxin_rejects_finished_records(client):
 
 
 def test_assembly_can_create_semi_finished_record(client):
-    admin_login(client, "装配")
+    admin_login(client, "东莞车间")
     lid = loc_id(client, "东莞车间")
     r = client.post("/api/records", json={
         "rec_type": "semi_finished", "location_id": lid,
@@ -388,7 +388,7 @@ def test_xinshao_issue_and_finished_require_location(client):
 
 
 def test_non_shaoyang_record_clears_po_customer(client):
-    admin_login(client, "装配")
+    admin_login(client, "东莞车间")
     lid = loc_id(client, "邵阳华登")
     r = client.post("/api/records", json={
         "rec_type": "finished", "location_id": lid,
@@ -402,7 +402,7 @@ def test_non_shaoyang_record_clears_po_customer(client):
 
 
 def test_outsource_can_create_finished_and_semi_finished_without_location(client):
-    admin_login(client, "外发")
+    admin_login(client, "东莞加工厂利鸿")
     finished = client.post("/api/records", json={
         "rec_type": "finished", "material": "PCBA板", "qty": 40})
     assert finished.status_code == 200
@@ -419,14 +419,14 @@ def test_outsource_can_create_finished_and_semi_finished_without_location(client
 
 
 def test_outsource_can_create_issue_finished_and_semi_finished_without_location(client):
-    admin_login(client, "外发")
+    admin_login(client, "东莞加工厂利鸿")
     issue = client.post("/api/records", json={
         "rec_type": "issue", "material": "PCBA板", "qty": 20})
     assert issue.status_code == 200
 
 
 def test_outsource_rejects_other_warehouse_record_types(client):
-    admin_login(client, "外发")
+    admin_login(client, "东莞加工厂利鸿")
     for rec_type in ("inbound_raw", "semi_inbound", "semi_outbound"):
         r = client.post("/api/records", json={
             "rec_type": rec_type, "material": "PCBA板", "qty": 10})
@@ -434,7 +434,7 @@ def test_outsource_rejects_other_warehouse_record_types(client):
 
 
 def test_semi_finished_department_can_create_inbound_and_outbound(client):
-    admin_login(client, "半成品")
+    admin_login(client, "碟片半成品")
     inbound = client.post("/api/records", json={
         "rec_type": "semi_inbound", "material": "PCBA板", "qty": 80})
     assert inbound.status_code == 200
@@ -451,7 +451,7 @@ def test_semi_finished_department_can_create_inbound_and_outbound(client):
 
 
 def test_non_semi_finished_department_rejects_warehouse_types(client):
-    admin_login(client, "装配")
+    admin_login(client, "东莞车间")
     for rec_type in ("semi_inbound", "semi_outbound"):
         r = client.post("/api/records", json={
             "rec_type": rec_type, "material": "PCBA板", "qty": 10})

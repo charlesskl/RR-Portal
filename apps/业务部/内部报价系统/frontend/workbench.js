@@ -176,7 +176,7 @@ function renderTable(container, columns, rows, opts = {}) {
 }
 
 // 辅助/包装材料 类别 — 减税明细各外购项按此类别统计
-const MAT_CATEGORIES = ['吸塑', '胶袋', '彩盒/内咭', '电池', '利宝', '电镀', '其他外购'];
+const MAT_CATEGORIES = ['吸塑', '胶袋', '彩盒/内咭', '电池', '产品利宝', '彩盒利宝', '电镀', '其他外购'];
 
 // 车缝：人工若已作为明细行(名称含"人工")计入，则不再额外加 labor_amount，避免双算
 function sewLaborToAdd(g) {
@@ -1046,6 +1046,7 @@ function renderSummaryPane(host, sections, quote, me) {
   // 分类关键字（用于无显式类别时兜底）
   const _isBat = (s) => /电池|battery/i.test(String(s || ''));
   const _isLib = (s) => /利宝|贴纸|libao|sticker/i.test(String(s || ''));
+  const _isColorBoxLib = (r) => /彩盒|彩卡|内咭|内卡|背卡|包装|package|box/i.test(String((r.name || '') + ' ' + (r.spec || '')));
   const _isPlate = (s) => /电镀|plating/i.test(String(s || ''));
   const _isCarton = (s) => /纸箱|carton/i.test(String(s || ''));
   // 马达：电子/五金里含 "马达" / "motor" 的行（电子/五金表不设类别下拉，仍按关键字）
@@ -1063,11 +1064,12 @@ function renderSummaryPane(host, sections, quote, me) {
   // tbl='aux'|'pk'：返回行所属类别（合法 MAT_CATEGORIES 之一），纸箱返回 null（单独计），否则按表默认兜底
   const _catOf = (r, tbl) => {
     if (r.category && MAT_CATEGORIES.includes(r.category)) return r.category;
+    if (r.category === '利宝') return '产品利宝';
     const a = r.name, b = r.spec;
     if (isBlister(a) || isBlister(b)) return '吸塑';
     if (isGlueBag(a) || isGlueBag(b)) return '胶袋';
     if (_isBat(a) || _isBat(b)) return '电池';
-    if (_isLib(a) || _isLib(b)) return '利宝';
+    if (_isLib(a) || _isLib(b)) return _isColorBoxLib(r) ? '彩盒利宝' : '产品利宝';
     if (_isPlate(a) || _isPlate(b)) return '电镀';
     if (_isCarton(a) || _isCarton(b)) return null;  // 纸箱另算
     return tbl === 'aux' ? '其他外购' : '彩盒/内咭';
@@ -1079,7 +1081,7 @@ function renderSummaryPane(host, sections, quote, me) {
   const blisterRmb = _catSum('吸塑') + _sumByMatch(elecSrc, isBlister) + _sumByMatch(eng.hardware, isBlister);
   const glueBagRmb = _catSum('胶袋');
   const batteryRmb = _catSum('电池');
-  const libaoRmb = _catSum('利宝');
+  const libaoRmb = _catSum('产品利宝') + _catSum('彩盒利宝');
   const platingRmb = _catSum('电镀');
   const colorBoxRmb = _catSum('彩盒/内咭');
   const otherBuyRmb = _catSum('其他外购');
@@ -1757,6 +1759,11 @@ function renderEngineering(host, payload, canEdit, onChange, fxRmbHkd, fxRmbUsd)
   payload.hardware = payload.hardware || [];
   payload.aux_materials = payload.aux_materials || [];
   payload.packaging_materials = payload.packaging_materials || [];
+  const migrateLibaoCategory = rows => (rows || []).forEach(r => {
+    if (r && r.category === '利宝') r.category = '产品利宝';
+  });
+  migrateLibaoCategory(payload.aux_materials);
+  migrateLibaoCategory(payload.packaging_materials);
   payload.packaging_loss_pct = payload.packaging_loss_pct ?? 1;
   payload.electronics_loss_pct = payload.electronics_loss_pct ?? 1;
   payload.hardware_loss_pct = payload.hardware_loss_pct ?? 1;

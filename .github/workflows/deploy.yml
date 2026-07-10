@@ -80,6 +80,28 @@ jobs:
 
             export SHIPPING_HISTORY_SEED_PASSPHRASE='${{ secrets.SHIPPING_HISTORY_SEED_PASSPHRASE }}'
 
+            echo "=== qc Bailian env guard ==="
+            QC_ENV_CHANGED=0
+            QC_KEY='${{ secrets.QC_BAILIAN_API_KEY }}'
+            if [ -n "$QC_KEY" ]; then
+              if grep -q '^QC_BAILIAN_API_KEY=' .env.cloud.production; then
+                CURRENT_QC_KEY=$(grep '^QC_BAILIAN_API_KEY=' .env.cloud.production | head -1 | cut -d= -f2-)
+                if [ "$CURRENT_QC_KEY" != "$QC_KEY" ]; then
+                  sed -i "s|^QC_BAILIAN_API_KEY=.*|QC_BAILIAN_API_KEY=$QC_KEY|" .env.cloud.production
+                  QC_ENV_CHANGED=1
+                  echo "[GUARD] QC_BAILIAN_API_KEY updated from GitHub secret"
+                else
+                  echo "[GUARD] QC_BAILIAN_API_KEY already matches GitHub secret"
+                fi
+              else
+                echo "QC_BAILIAN_API_KEY=$QC_KEY" >> .env.cloud.production
+                QC_ENV_CHANGED=1
+                echo "[GUARD] QC_BAILIAN_API_KEY added from GitHub secret"
+              fi
+            else
+              echo "[GUARD][WARN] GitHub secret QC_BAILIAN_API_KEY is empty, skipping"
+            fi
+
             echo "=== Script version check ==="
             grep -c "recreate" deploy/update-server.sh && echo "[OK] update-server.sh contains recreate logic" || echo "[WARN] update-server.sh MISSING recreate logic"
             bash deploy/update-server.sh
@@ -92,6 +114,14 @@ jobs:
               docker compose -f docker-compose.cloud.yml --env-file .env.cloud.production up -d --no-deps --force-recreate peise
               echo "=== 验证容器内 BAILIAN env (key 打码) ==="
               docker exec rr-portal-peise-1 printenv | grep '^BAILIAN' | sed 's|\(BAILIAN_API_KEY=sk-....\).*|\1***|' || echo "[WARN] 容器内未找到 BAILIAN env"
+            fi
+
+            # qc env guard 改了 .env.cloud.production,必须 recreate 容器才能注入新 env
+            if [ "$QC_ENV_CHANGED" = "1" ]; then
+              echo "=== qc env changed -> force-recreate qc ==="
+              docker compose -f docker-compose.cloud.yml --env-file .env.cloud.production up -d --no-deps --force-recreate qc
+              echo "=== Verify qc container DASHSCOPE env (masked) ==="
+              docker exec rr-portal-qc-1 printenv | grep '^DASHSCOPE_API_KEY=' | sed 's|\(DASHSCOPE_API_KEY=sk-....\).*|\1***|' || echo "[WARN] qc container DASHSCOPE_API_KEY env missing"
             fi
 
             echo ""
@@ -156,6 +186,7 @@ jobs:
               /huadeng-maorong/health \
               /huadeng/health \
               /peise/health \
+              /qc/api/health \
               /penyou/api/health \
               /pi-outsource/api/health \
               /production-plan/health \

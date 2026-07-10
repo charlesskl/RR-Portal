@@ -18,7 +18,10 @@ def test_init_creates_locations_and_admin(db_path):
     conn = db.get_conn()
     locs = conn.execute("SELECT name FROM locations ORDER BY sort").fetchall()
     names = [r["name"] for r in locs]
-    assert names == ["东莞车间", "东莞加工厂利鸿", "邵阳华登", "河源华兴", "新邵"]
+    assert names == [
+        "兴信B来料仓", "东莞车间", "碟片半成品", "东莞加工厂利鸿",
+        "东莞加工厂鸿亚", "河源华兴", "邵阳华登", "新邵",
+    ]
     admin = conn.execute("SELECT role FROM users WHERE username='admin'").fetchone()
     assert admin["role"] == "admin"
     user_columns = [r["name"] for r in conn.execute("PRAGMA table_info(users)").fetchall()]
@@ -136,13 +139,59 @@ def test_init_migrates_renamed_department_accounts_and_records(db_path):
     assert monthly_department == "东莞车间"
 
 
+def test_init_migrates_shaoyang_department_to_huadeng(db_path):
+    from pcba import db
+
+    db.init_db()
+    conn = db.get_conn()
+    conn.execute("DELETE FROM users WHERE username IN ('邵阳', '邵阳华登')")
+    conn.execute(
+        "INSERT INTO users(username, password_hash, role, department) VALUES (?,?,?,?)",
+        ("邵阳", "shaoyang-hash", "operator", "邵阳"),
+    )
+    conn.execute(
+        "INSERT INTO records(rec_type, material, qty, department) VALUES (?,?,?,?)",
+        ("issue", "NFC贴纸", 10, "邵阳"),
+    )
+    conn.execute(
+        "INSERT INTO semi_finished_monthly_totals(department, material, sticker_type) "
+        "VALUES (?,?,?)",
+        ("邵阳", "NFC贴纸", "36#NFC贴纸"),
+    )
+    conn.commit()
+    conn.close()
+
+    db.init_db()
+    conn = db.get_conn()
+    old_user = conn.execute("SELECT 1 FROM users WHERE username='邵阳'").fetchone()
+    new_user = conn.execute(
+        "SELECT username, department, password_hash FROM users WHERE username='邵阳华登'"
+    ).fetchone()
+    record_department = conn.execute(
+        "SELECT department FROM records WHERE qty=10"
+    ).fetchone()["department"]
+    monthly_department = conn.execute(
+        "SELECT department FROM semi_finished_monthly_totals WHERE sticker_type='36#NFC贴纸'"
+    ).fetchone()["department"]
+    conn.close()
+
+    assert old_user is None
+    assert dict(new_user) == {
+        "username": "邵阳华登",
+        "department": "邵阳华登",
+        "password_hash": "shaoyang-hash",
+    }
+    assert record_department == "邵阳华登"
+    assert monthly_department == "邵阳华登"
+
+
 def test_init_is_idempotent(db_path):
     from pcba import db
     db.init_db()
     db.init_db()  # 再次调用不应报错或重复插入
     conn = db.get_conn()
     count = conn.execute("SELECT COUNT(*) AS c FROM locations").fetchone()["c"]
-    assert count == 5
+    assert count == 8
     conn.close()
 
 
@@ -253,7 +302,10 @@ def test_init_migrates_existing_records_to_default_department(db_path):
     assert legacy_operator["department"] == "兴信B来料仓"
     assert legacy_admin["department"] is None
     names = [r["name"] for r in conn.execute("SELECT name FROM locations ORDER BY sort").fetchall()]
-    assert names == ["东莞车间", "东莞加工厂利鸿", "邵阳华登", "河源华兴", "新邵"]
+    assert names == [
+        "兴信B来料仓", "东莞车间", "碟片半成品", "东莞加工厂利鸿",
+        "东莞加工厂鸿亚", "河源华兴", "邵阳华登", "新邵",
+    ]
     record_columns = [r["name"] for r in conn.execute("PRAGMA table_info(records)").fetchall()]
     assert "supplier" in record_columns
     assert "po_no" in record_columns

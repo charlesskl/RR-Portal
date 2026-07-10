@@ -4,17 +4,24 @@ import sqlite3
 from pcba.auth import hash_password
 
 DEFAULT_DB = os.path.join("data", "pcba.db")
-LOCATIONS = ["东莞车间", "东莞加工厂利鸿", "邵阳华登", "河源华兴", "新邵"]
+LOCATIONS = [
+    "兴信B来料仓", "东莞车间", "碟片半成品", "东莞加工厂利鸿",
+    "东莞加工厂鸿亚", "河源华兴", "邵阳华登", "新邵",
+]
 PCBA_MATERIAL = "77794-PCBA板"
 LEGACY_PCBA_MATERIAL = "PCBA板"
 DEFAULT_MATERIALS = ["NFC贴纸", PCBA_MATERIAL]
 LEGACY_STICKER_TYPES = [f"贴纸{i:02d}" for i in range(1, 41)]
 DEFAULT_STICKER_TYPES = [f"{i}#NFC贴纸" for i in range(1, 46)]
-DEPARTMENTS = ["兴信B来料仓", "东莞车间", "碟片半成品", "东莞加工厂利鸿", "河源华兴", "邵阳", "新邵"]
+DEPARTMENTS = [
+    "兴信B来料仓", "东莞车间", "碟片半成品", "东莞加工厂利鸿",
+    "东莞加工厂鸿亚", "河源华兴", "邵阳华登", "新邵",
+]
 DEPARTMENT_RENAMES = {
     "装配": "东莞车间",
     "半成品": "碟片半成品",
     "外发": "东莞加工厂利鸿",
+    "邵阳": "邵阳华登",
 }
 DEFAULT_DEPARTMENT = DEPARTMENTS[0]
 DEFAULT_DEPARTMENT_PASSWORD = "123456"
@@ -62,9 +69,12 @@ CREATE TABLE IF NOT EXISTS records (
     po_no TEXT,
     customer_name TEXT,
     summary_month INTEGER,
+    source_record_id INTEGER,
+    source_flow TEXT,
     created_by INTEGER,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     FOREIGN KEY (location_id) REFERENCES locations(id),
+    FOREIGN KEY (source_record_id) REFERENCES records(id) ON DELETE CASCADE,
     FOREIGN KEY (created_by) REFERENCES users(id)
 );
 CREATE TABLE IF NOT EXISTS semi_finished_monthly_totals (
@@ -164,6 +174,10 @@ def _migrate_schema(conn):
         conn.execute("ALTER TABLE records ADD COLUMN customer_name TEXT")
     if not _column_exists(conn, "records", "summary_month"):
         conn.execute("ALTER TABLE records ADD COLUMN summary_month INTEGER")
+    if not _column_exists(conn, "records", "source_record_id"):
+        conn.execute("ALTER TABLE records ADD COLUMN source_record_id INTEGER")
+    if not _column_exists(conn, "records", "source_flow"):
+        conn.execute("ALTER TABLE records ADD COLUMN source_flow TEXT")
     if not _column_exists(conn, "semi_finished_monthly_totals", "opening_stock"):
         conn.execute(
             "ALTER TABLE semi_finished_monthly_totals "
@@ -219,6 +233,10 @@ def init_db():
             conn.execute(
                 "INSERT OR IGNORE INTO locations(name, sort) VALUES (?, ?)",
                 (name, i),
+            )
+            conn.execute(
+                "UPDATE locations SET sort=? WHERE name=?",
+                (i, name),
             )
         # 预置默认物料名称
         for name in DEFAULT_MATERIALS:

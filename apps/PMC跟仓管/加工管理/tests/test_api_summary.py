@@ -250,7 +250,7 @@ def test_heyuan_summary_uses_issue_minus_finished_balance(client):
 
 
 def test_shaoyang_summary_uses_issue_minus_finished_balance(client):
-    admin_login(client, "邵阳")
+    admin_login(client, "邵阳华登")
     lid = loc_id(client, "邵阳华登")
     client.post("/api/records", json={
         "rec_type": "issue", "location_id": lid, "material": "PCBA板", "qty": 100})

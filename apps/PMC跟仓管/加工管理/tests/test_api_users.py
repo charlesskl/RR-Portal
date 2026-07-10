@@ -37,7 +37,15 @@ def test_list_departments(client):
     r = client.get("/api/departments")
     assert r.status_code == 200
     assert r.json() == [
-        "兴信B来料仓", "东莞车间", "碟片半成品", "东莞加工厂利鸿", "河源华兴", "邵阳", "新邵"]
+        "兴信B来料仓", "东莞车间", "碟片半成品", "东莞加工厂利鸿",
+        "东莞加工厂鸿亚", "河源华兴", "邵阳华登", "新邵"]
+
+
+def test_default_hongya_operator_can_login(client):
+    r = login(client, "东莞加工厂鸿亚", "123456", "东莞加工厂鸿亚")
+    assert r.status_code == 200
+    assert r.json()["role"] == "operator"
+    assert r.json()["department"] == "东莞加工厂鸿亚"
 
 
 def test_admin_can_create_operator(client):

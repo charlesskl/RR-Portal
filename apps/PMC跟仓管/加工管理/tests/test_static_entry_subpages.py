@@ -69,6 +69,14 @@ def test_entry_tabs_bind_clicks_without_inline_material_arguments():
     assert "onclick=\"setEntryMaterial('${esc(mat.name)}')\"" not in js
 
 
+def test_location_dropdown_hides_current_department():
+    js = (ROOT / "pcba/static/app.js").read_text(encoding="utf-8")
+
+    assert "function entryLocationOptions(locs)" in js
+    assert "loc.name !== ME.department" in js
+    assert "entryLocationOptions(locs)" in js
+
+
 def test_summary_page_prefers_monthly_location_totals():
     js = (ROOT / "pcba/static/app.js").read_text(encoding="utf-8")
 

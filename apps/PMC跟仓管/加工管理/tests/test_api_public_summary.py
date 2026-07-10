@@ -54,7 +54,7 @@ def test_public_summary_groups_materials_departments_and_filters_dates(client):
     })
 
     client.post("/api/logout")
-    admin_login(client, "邵阳")
+    admin_login(client, "邵阳华登")
     lid = loc_id(client, "邵阳华登")
     client.post("/api/records", json={
         "rec_type": "finished",
@@ -81,7 +81,7 @@ def test_public_summary_groups_materials_departments_and_filters_dates(client):
     assert materials["NFC贴纸"]["inbound"] == 100
     assert materials["PCBA板"]["inbound"] == 40
     assert departments["兴信B来料仓"]["inbound"] == 100
-    assert departments["邵阳"]["inbound"] == 40
+    assert departments["邵阳华登"]["inbound"] == 40
     assert "供应商A" not in text
     assert "DOC-SECRET" not in text
     assert "内部备注" not in text

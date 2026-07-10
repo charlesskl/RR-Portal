@@ -342,8 +342,10 @@ ASSEMBLY_DEPARTMENT = "东莞车间"
 SEMI_FINISHED_DEPARTMENT = "碟片半成品"
 SEMI_FINISHED_FILENAME_KEYWORD = "半成品"
 OUTSOURCE_DEPARTMENT = "东莞加工厂利鸿"
+HONGYA_DEPARTMENT = "东莞加工厂鸿亚"
+OUTSOURCE_DEPARTMENTS = (OUTSOURCE_DEPARTMENT, HONGYA_DEPARTMENT)
 HEYUAN_DEPARTMENT = "河源华兴"
-SHAOYANG_DEPARTMENT = "邵阳"
+SHAOYANG_DEPARTMENT = "邵阳华登"
 XINSHAO_DEPARTMENT = "新邵"
 PO_CUSTOMER_DEPARTMENTS = (SHAOYANG_DEPARTMENT, XINSHAO_DEPARTMENT)
 PROCESSING_BALANCE_DEPARTMENTS = (
@@ -358,6 +360,10 @@ RECORD_IMPORT_HEADERS = [
     "类型", "物料名称", "贴纸类型", "加工点", "供应商",
     "日期", "单据编号", "数量", "备注", "PO", "客名",
 ]
+
+
+def _is_outsource_department(department):
+    return department in OUTSOURCE_DEPARTMENTS
 
 
 def _xlsx_response(wb: Workbook, filename: str):
@@ -456,6 +462,7 @@ def _record_type_from_import(value, department):
         SEMI_FINISHED_DEPARTMENT: {"入库": "semi_inbound", "半成品入库": "semi_inbound", "出库": "semi_outbound", "半成品出库": "semi_outbound"},
         ASSEMBLY_DEPARTMENT: {"领料": "issue", "成品入库": "finished", "半成品入库": "semi_finished"},
         OUTSOURCE_DEPARTMENT: {"领料": "issue", "成品入库": "finished", "半成品入库": "semi_finished"},
+        HONGYA_DEPARTMENT: {"领料": "issue", "成品入库": "finished", "半成品入库": "semi_finished"},
         HEYUAN_DEPARTMENT: {"领料": "issue", "成品入库": "finished"},
         SHAOYANG_DEPARTMENT: {"领料": "issue", "成品入库": "finished"},
         XINSHAO_DEPARTMENT: {"领料": "issue", "成品入库": "finished"},
@@ -663,6 +670,16 @@ def _is_legacy_outsource_workbook(wb):
         wb["领料明细"], "日期", "领料编号", "物料名称", "领料数"
     ) and _legacy_sheet_has_headers(
         wb["半成品入仓明细"], "日期", "送货单号", "品名/规格"
+    )
+
+
+def _is_legacy_outsource_nfc_workbook(wb):
+    sheet_names = set(wb.sheetnames)
+    if not {"总表", "领料明细", "入仓明细"}.issubset(sheet_names):
+        return False
+    return bool(
+        _find_legacy_item_header_row(wb["领料明细"])
+        and _find_legacy_item_header_row(wb["入仓明细"])
     )
 
 
@@ -896,6 +913,8 @@ def _legacy_location_from_sheet(sheet_name):
         return "邵阳华登"
     if "新邵" in sheet_name:
         return XINSHAO_DEPARTMENT
+    if "鸿亚" in sheet_name:
+        return HONGYA_DEPARTMENT
     if "利鸿" in sheet_name or "加工厂" in sheet_name:
         return "东莞加工厂利鸿"
     if "东莞" in sheet_name or "车间" in sheet_name:
@@ -910,8 +929,8 @@ def _add_record_body(bodies, body, department, validate_positive=True):
 
 
 def _parse_legacy_outsource_workbook(wb, department):
-    if department != OUTSOURCE_DEPARTMENT:
-        raise HTTPException(status_code=400, detail="东莞加工厂利鸿台账只能在东莞加工厂利鸿部门导入")
+    if not _is_outsource_department(department):
+        raise HTTPException(status_code=400, detail="东莞加工厂台账只能在对应加工厂部门导入")
 
     bodies = []
     issue_ws = wb["领料明细"] if "领料明细" in wb.sheetnames else None
@@ -980,7 +999,65 @@ def _parse_legacy_outsource_workbook(wb, department):
             bodies.append(body)
 
     if not bodies:
-        raise HTTPException(status_code=400, detail="东莞加工厂利鸿台账没有可导入的数据")
+        raise HTTPException(status_code=400, detail=f"{department}台账没有可导入的数据")
+    return bodies
+
+
+def _legacy_outsource_nfc_detail_columns(ws, default_year=None):
+    header_row = _find_legacy_item_header_row(ws)
+    if not header_row:
+        return []
+    columns = []
+    for col_no in range(1, ws.max_column + 1):
+        rec_date = _legacy_cutoff_date(ws.cell(1, col_no).value, default_year)
+        if not rec_date:
+            continue
+        doc_no = _cell_text(ws.cell(header_row, col_no).value) or rec_date
+        columns.append((col_no, rec_date, doc_no))
+    return columns
+
+
+def _parse_legacy_outsource_nfc_workbook(conn, wb, department):
+    if not _is_outsource_department(department):
+        raise HTTPException(status_code=400, detail="加工厂贴纸台账只能在对应加工厂部门导入")
+
+    bodies = []
+    workbook_year = _legacy_workbook_year(wb)
+    sheet_types = {
+        "领料明细": "issue",
+        "入仓明细": "finished",
+    }
+    for sheet_name, rec_type in sheet_types.items():
+        if sheet_name not in wb.sheetnames:
+            continue
+        ws = wb[sheet_name]
+        header_row = _find_legacy_item_header_row(ws)
+        if not header_row:
+            continue
+        detail_columns = _legacy_outsource_nfc_detail_columns(ws, workbook_year)
+        for row_no in range(header_row + 1, ws.max_row + 1):
+            sticker_type = _cell_text(ws.cell(row_no, 1).value)
+            if not sticker_type or "#NFC" not in sticker_type:
+                continue
+            sticker_type = _normalize_sticker_type(conn, NFC_MATERIAL, sticker_type)
+            for col_no, rec_date, doc_no in detail_columns:
+                qty = _legacy_int(ws.cell(row_no, col_no).value, row_no, "数量")
+                if qty is None or qty <= 0:
+                    continue
+                body = RecordIn(
+                    rec_type=rec_type,
+                    rec_date=rec_date,
+                    doc_no=doc_no,
+                    material=NFC_MATERIAL,
+                    sticker_type=sticker_type,
+                    qty=qty,
+                    remark=f"{ws.title}导入",
+                )
+                _validate_record(body, department)
+                bodies.append(body)
+
+    if not bodies:
+        raise HTTPException(status_code=400, detail=f"{department}贴纸台账没有可导入的数据")
     return bodies
 
 
@@ -1076,6 +1153,8 @@ def _pcba_summary_key_from_label(label):
         return ("issue", "邵阳华登")
     if "河源" in compact:
         return ("issue", "河源华兴")
+    if "鸿亚" in compact:
+        return ("issue", HONGYA_DEPARTMENT)
     if "利鸿" in compact or "加工厂" in compact:
         return ("issue", "东莞加工厂利鸿")
     if "东莞车间" in compact or "车间领料" in compact:
@@ -1856,29 +1935,29 @@ class RecordIn(BaseModel):
 def _validate_record(body: RecordIn, department: Optional[str] = None):
     if body.rec_type not in VALID_TYPES:
         raise HTTPException(status_code=400, detail="类型无效")
-    if department == OUTSOURCE_DEPARTMENT and body.rec_type not in ("issue", "finished", "semi_finished"):
-        raise HTTPException(status_code=400, detail="东莞加工厂利鸿只能录入领料/成品/半成品入库")
+    if _is_outsource_department(department) and body.rec_type not in ("issue", "finished", "semi_finished"):
+        raise HTTPException(status_code=400, detail="东莞加工厂只能录入领料/成品/半成品入库")
     if department == HEYUAN_DEPARTMENT and body.rec_type not in ("issue", "finished"):
         raise HTTPException(status_code=400, detail="河源华兴只能录入领料/成品入库")
     if department == SHAOYANG_DEPARTMENT and body.rec_type not in ("issue", "finished"):
-        raise HTTPException(status_code=400, detail="邵阳只能录入领料/成品入库")
+        raise HTTPException(status_code=400, detail="邵阳华登只能录入领料/成品入库")
     if department == XINSHAO_DEPARTMENT and body.rec_type not in ("issue", "finished"):
         raise HTTPException(status_code=400, detail="新邵只能录入领料/成品入库")
     if department == SUPPLIER_DEPARTMENT and body.rec_type == "finished":
         raise HTTPException(status_code=400, detail="兴信B来料仓只能录入入库/出库")
-    if body.rec_type == "semi_finished" and department not in (ASSEMBLY_DEPARTMENT, OUTSOURCE_DEPARTMENT):
-        raise HTTPException(status_code=400, detail="半成品入库仅限东莞车间/东莞加工厂利鸿部门")
+    if body.rec_type == "semi_finished" and department not in (ASSEMBLY_DEPARTMENT, *OUTSOURCE_DEPARTMENTS):
+        raise HTTPException(status_code=400, detail="半成品入库仅限东莞车间/东莞加工厂部门")
     if body.rec_type in ("semi_inbound", "semi_outbound") and department != SEMI_FINISHED_DEPARTMENT:
         raise HTTPException(status_code=400, detail="半成品仓出入库仅限碟片半成品部门")
     if body.qty is None or body.qty < 0:
         raise HTTPException(status_code=400, detail="数量必须为非负整数")
     if (
         body.rec_type in ("issue", "finished", "semi_finished")
-        and department != OUTSOURCE_DEPARTMENT
+        and not _is_outsource_department(department)
         and not body.location_id
     ):
         raise HTTPException(status_code=400, detail="领料/入库必须选择加工点")
-    if body.rec_type in ("inbound_raw", "semi_inbound", "semi_outbound") or department == OUTSOURCE_DEPARTMENT:
+    if body.rec_type in ("inbound_raw", "semi_inbound") or _is_outsource_department(department):
         body.location_id = None
 
 
@@ -1926,6 +2005,191 @@ def _normalize_sticker_type(conn, material, sticker_type):
     return row["name"]
 
 
+def _location_name_from_id(conn, location_id):
+    if not location_id:
+        return None
+    row = conn.execute(
+        "SELECT name FROM locations WHERE id=?", (location_id,)
+    ).fetchone()
+    return row["name"] if row else None
+
+
+def _auto_record_remark(source_department, target_department, original_remark):
+    prefix = f"自动联动：{source_department}->{target_department}"
+    original_remark = _clean_optional(original_remark)
+    return f"{prefix}；{original_remark}" if original_remark else prefix
+
+
+def _auto_flow_record_body(
+    source_body,
+    source_department,
+    target_department,
+    rec_type,
+    location_id=None,
+):
+    body = RecordIn(
+        rec_type=rec_type,
+        location_id=location_id,
+        rec_date=source_body.rec_date,
+        doc_no=source_body.doc_no,
+        material=source_body.material,
+        sticker_type=source_body.sticker_type,
+        qty=source_body.qty,
+        remark=_auto_record_remark(
+            source_department, target_department, source_body.remark
+        ),
+        summary_month=source_body.summary_month,
+    )
+    return body
+
+
+def _auto_flow_targets(conn, source_body, source_department):
+    if (
+        source_body.material != NFC_MATERIAL
+        or not source_body.sticker_type
+        or source_body.qty is None
+        or source_body.qty <= 0
+    ):
+        return []
+
+    sticker_type = _normalize_sticker_type(
+        conn, source_body.material, source_body.sticker_type
+    )
+    source_location = _location_name_from_id(conn, source_body.location_id)
+    targets = []
+
+    if (
+        source_department == SUPPLIER_DEPARTMENT
+        and source_body.rec_type == "issue"
+        and source_location == ASSEMBLY_DEPARTMENT
+    ):
+        targets.append((
+            ASSEMBLY_DEPARTMENT,
+            _auto_flow_record_body(
+                source_body,
+                source_department,
+                ASSEMBLY_DEPARTMENT,
+                "issue",
+                _location_id_from_name(conn, ASSEMBLY_DEPARTMENT, 1),
+            ),
+            "supplier_to_assembly",
+        ))
+
+    if source_department == ASSEMBLY_DEPARTMENT and source_body.rec_type == "semi_finished":
+        targets.append((
+            SEMI_FINISHED_DEPARTMENT,
+            _auto_flow_record_body(
+                source_body,
+                source_department,
+                SEMI_FINISHED_DEPARTMENT,
+                "semi_inbound",
+            ),
+            "assembly_to_semi_finished",
+        ))
+
+    if source_department == SEMI_FINISHED_DEPARTMENT and source_body.rec_type == "semi_outbound":
+        if source_location == HONGYA_DEPARTMENT:
+            targets.append((
+                HONGYA_DEPARTMENT,
+                _auto_flow_record_body(
+                    source_body,
+                    source_department,
+                    HONGYA_DEPARTMENT,
+                    "issue",
+                ),
+                "semi_finished_to_hongya",
+            ))
+        elif sticker_type == "36#NFC贴纸":
+            destination_departments = {
+                ASSEMBLY_DEPARTMENT: ASSEMBLY_DEPARTMENT,
+                "邵阳华登": SHAOYANG_DEPARTMENT,
+                HEYUAN_DEPARTMENT: HEYUAN_DEPARTMENT,
+            }
+            target_department = destination_departments.get(source_location)
+            if target_department:
+                targets.append((
+                    target_department,
+                    _auto_flow_record_body(
+                        source_body,
+                        source_department,
+                        target_department,
+                        "issue",
+                        _location_id_from_name(conn, source_location, 1),
+                    ),
+                    "semi_finished_36_to_processing",
+                ))
+
+    if (
+        source_department == HONGYA_DEPARTMENT
+        and source_body.rec_type in ("finished", "semi_finished")
+    ):
+        targets.append((
+            SEMI_FINISHED_DEPARTMENT,
+            _auto_flow_record_body(
+                source_body,
+                source_department,
+                SEMI_FINISHED_DEPARTMENT,
+                "semi_inbound",
+            ),
+            "hongya_to_semi_finished",
+        ))
+
+    return targets
+
+
+def _insert_auto_record(conn, target_department, body, source_record_id, source_flow, created_by):
+    _validate_record(body, target_department)
+    supplier, po_no, customer_name = _record_extras(body, target_department)
+    sticker_type = _normalize_sticker_type(conn, body.material, body.sticker_type)
+    conn.execute(
+        "INSERT INTO records(rec_type, location_id, rec_date, doc_no, "
+        "material, sticker_type, qty, remark, supplier, po_no, customer_name, "
+        "summary_month, department, created_by, source_record_id, source_flow) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        (
+            body.rec_type,
+            body.location_id,
+            body.rec_date,
+            body.doc_no,
+            body.material,
+            sticker_type,
+            body.qty,
+            body.remark,
+            supplier,
+            po_no,
+            customer_name,
+            body.summary_month,
+            target_department,
+            created_by,
+            source_record_id,
+            source_flow,
+        ),
+    )
+
+
+def _sync_auto_linked_records(conn, source_record_id, source_body, user):
+    conn.execute("DELETE FROM records WHERE source_record_id=?", (source_record_id,))
+    for target_department, target_body, source_flow in _auto_flow_targets(
+        conn, source_body, user["department"]
+    ):
+        _insert_auto_record(
+            conn,
+            target_department,
+            target_body,
+            source_record_id,
+            source_flow,
+            user["id"],
+        )
+
+
+def _reject_auto_record_direct_edit(row):
+    if row["source_record_id"]:
+        raise HTTPException(
+            status_code=400,
+            detail="自动生成记录不能直接修改或删除，请修改原始记录",
+        )
+
+
 @app.get("/api/records")
 def list_records(
     user=Depends(current_user),
@@ -1971,10 +2235,11 @@ def create_record(body: RecordIn, user=Depends(current_user)):
             (body.rec_type, body.location_id, body.rec_date, body.doc_no,
              body.material, sticker_type, body.qty, body.remark, supplier, po_no, customer_name,
              body.summary_month,
-             user["department"], user["id"]),
+            user["department"], user["id"]),
         )
-        conn.commit()
         new_id = cur.lastrowid
+        _sync_auto_linked_records(conn, new_id, body, user)
+        conn.commit()
     finally:
         conn.close()
     return {"id": new_id}
@@ -2016,17 +2281,33 @@ def create_records_batch(body: RecordBatchIn, user=Depends(current_user)):
             valid_items.append((sticker_type, item.qty))
         ids = []
         for sticker_type, qty in valid_items:
+            item_body = RecordIn(
+                rec_type=common.rec_type,
+                location_id=common.location_id,
+                rec_date=common.rec_date,
+                doc_no=common.doc_no,
+                material=NFC_MATERIAL,
+                sticker_type=sticker_type,
+                qty=qty,
+                remark=common.remark,
+                supplier=common.supplier,
+                po_no=common.po_no,
+                customer_name=common.customer_name,
+                summary_month=common.summary_month,
+            )
             cur = conn.execute(
                 "INSERT INTO records(rec_type, location_id, rec_date, doc_no, "
                 "material, sticker_type, qty, remark, supplier, po_no, customer_name, "
                 "summary_month, department, created_by) "
                 "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                (common.rec_type, common.location_id, common.rec_date, common.doc_no,
-                 NFC_MATERIAL, sticker_type, qty, common.remark, supplier, po_no, customer_name,
-                 common.summary_month,
+                (item_body.rec_type, item_body.location_id, item_body.rec_date, item_body.doc_no,
+                 NFC_MATERIAL, sticker_type, qty, item_body.remark, supplier, po_no, customer_name,
+                 item_body.summary_month,
                  user["department"], user["id"]),
             )
-            ids.append(cur.lastrowid)
+            record_id = cur.lastrowid
+            ids.append(record_id)
+            _sync_auto_linked_records(conn, record_id, item_body, user)
         conn.commit()
     finally:
         conn.close()
@@ -2277,6 +2558,7 @@ SUPPLIER_PCBA_SUMMARY_ROWS = (
     ("邵阳华登", "邵阳华登领料总数", "PCB主板", "邵阳华登领料"),
     ("河源华兴", "河源华兴领料总数", "PCB主板", "河源华兴领料"),
     ("东莞加工厂利鸿", "加工厂利鸿领料总数", "PCB主板", "加工厂利鸿领料"),
+    ("东莞加工厂鸿亚", "加工厂鸿亚领料总数", "PCB主板", "加工厂鸿亚领料"),
     ("东莞车间", "东莞车间领料", None, "东莞车间领料"),
 )
 
@@ -2438,32 +2720,65 @@ def _supplier_nfc_sticker_names(records, sticker_types):
     return names
 
 
+def _supplier_nfc_export_doc_no(row):
+    text = f"{row.get('doc_no') or ''} {row.get('remark') or ''}"
+    if "东莞期初出仓" in text:
+        return "东莞期初出仓"
+    if "邵阳期初领料" in text:
+        return "邵阳期初领料"
+    if "期初入仓" in text:
+        return "期初入仓"
+    if "期初出仓" in text:
+        return "期初出仓"
+    return row.get("doc_no")
+
+
+def _supplier_nfc_detail_groups(records):
+    groups = {}
+    for row in records:
+        key = (_record_export_date(row), _supplier_nfc_export_doc_no(row))
+        if key not in groups:
+            groups[key] = {
+                "rec_date": key[0],
+                "doc_no": key[1],
+                "records": [],
+            }
+        groups[key]["records"].append(row)
+    return list(groups.values())
+
+
 def _supplier_nfc_detail_sheet(wb, title, records, sticker_names, total_header):
     ws = wb.create_sheet(title)
     records = [
         row for row in records
         if _export_month(_record_export_date(row)) in (6, *EXPORT_MONTHS)
     ]
+    groups = _supplier_nfc_detail_groups(records)
     ws.cell(1, 2).value = total_header
     ws.cell(2, 1).value = "物料名称"
-    for offset, row in enumerate(records, start=3):
-        ws.cell(1, offset).value = _record_export_date(row)
-        ws.cell(2, offset).value = row.get("doc_no")
+    for offset, group in enumerate(groups, start=3):
+        ws.cell(1, offset).value = group["rec_date"]
+        ws.cell(2, offset).value = group["doc_no"]
     for row_no, sticker_type in enumerate(sticker_names, start=3):
         ws.cell(row_no, 1).value = _format_nfc_sticker_name(sticker_type)
         sticker_records = [
             row for row in records if row.get("sticker_type") == sticker_type
         ]
         ws.cell(row_no, 2).value = _sum_qty(sticker_records) or 0
-        for col_no, record in enumerate(records, start=3):
-            if record.get("sticker_type") == sticker_type:
-                ws.cell(row_no, col_no).value = record.get("qty")
+        for col_no, group in enumerate(groups, start=3):
+            group_sticker_records = [
+                row for row in group["records"]
+                if row.get("sticker_type") == sticker_type
+            ]
+            qty = _sum_qty(group_sticker_records)
+            if qty:
+                ws.cell(row_no, col_no).value = qty
     total_row = len(sticker_names) + 3
     ws.cell(total_row, 1).value = "小计："
     ws.cell(total_row, 2).value = _sum_qty(records) or 0
-    for col_no, row in enumerate(records, start=3):
-        ws.cell(total_row, col_no).value = row.get("qty")
-    _apply_legacy_sheet_style(ws, total_row, max(2, len(records) + 2))
+    for col_no, group in enumerate(groups, start=3):
+        ws.cell(total_row, col_no).value = _sum_qty(group["records"]) or None
+    _apply_legacy_sheet_style(ws, total_row, max(2, len(groups) + 2))
     return ws
 
 
@@ -2732,10 +3047,10 @@ def export_records(
             _supplier_nfc_export_workbook(records, sticker_types),
             "来料仓77772#NFC出入明细.xlsx",
         )
-    if user["department"] == OUTSOURCE_DEPARTMENT and material == PCBA_MATERIAL:
+    if _is_outsource_department(user["department"]) and material == PCBA_MATERIAL:
         return _xlsx_response(
             _outsource_pcba_export_workbook(records),
-            "东莞加工厂利鸿77794PCB主板出入明细.xlsx",
+            f"{user['department']}77794PCB主板出入明细.xlsx",
         )
     if user["department"] == HEYUAN_DEPARTMENT and material == PCBA_MATERIAL:
         return _xlsx_response(
@@ -2783,12 +3098,17 @@ def import_records(file: UploadFile = File(...), user=Depends(current_user)):
         legacy_semi_finished_import = _is_legacy_semi_finished_workbook(wb)
         legacy_assembly_import = _is_legacy_assembly_workbook(wb)
         legacy_outsource_import = _is_legacy_outsource_workbook(wb)
+        legacy_outsource_nfc_import = (
+            _is_outsource_department(user["department"])
+            and _is_legacy_outsource_nfc_workbook(wb)
+        )
         legacy_heyuan_import = _is_legacy_heyuan_workbook(wb)
         legacy_supplier_import = _is_legacy_supplier_workbook(wb)
         legacy_import = (
             legacy_semi_finished_import
             or legacy_assembly_import
             or legacy_outsource_import
+            or legacy_outsource_nfc_import
             or legacy_heyuan_import
             or legacy_supplier_import
         )
@@ -2802,8 +3122,14 @@ def import_records(file: UploadFile = File(...), user=Depends(current_user)):
             bodies = _parse_legacy_assembly_workbook(conn, wb, user["department"])
             monthly_totals = []
         elif legacy_outsource_import:
-            _require_filename_contains(file, OUTSOURCE_DEPARTMENT)
+            _require_filename_contains(file, user["department"])
             bodies = _parse_legacy_outsource_workbook(wb, user["department"])
+            monthly_totals = []
+        elif legacy_outsource_nfc_import:
+            _require_filename_contains(file, user["department"])
+            bodies = _parse_legacy_outsource_nfc_workbook(
+                conn, wb, user["department"]
+            )
             monthly_totals = []
         elif legacy_heyuan_import:
             bodies = _parse_legacy_heyuan_workbook(conn, wb, user["department"])
@@ -2833,6 +3159,7 @@ def import_records(file: UploadFile = File(...), user=Depends(current_user)):
                 skipped += 1
             else:
                 ids.append(record_id)
+                _sync_auto_linked_records(conn, record_id, body, user)
         if monthly_totals:
             _upsert_semi_finished_monthly_totals(
                 conn, user["department"], monthly_totals
@@ -2904,13 +3231,14 @@ def _check_owner(row, user):
 
 @app.put("/api/records/{record_id}")
 def update_record(record_id: int, body: RecordIn, user=Depends(current_user)):
-    _validate_record(body, user["department"])
     conn = db.get_conn()
     try:
+        row = _get_record_or_404(conn, record_id, user["department"])
+        _reject_auto_record_direct_edit(row)
+        _check_owner(row, user)
+        _validate_record(body, user["department"])
         supplier, po_no, customer_name = _record_extras(body, user["department"])
         sticker_type = _normalize_sticker_type(conn, body.material, body.sticker_type)
-        row = _get_record_or_404(conn, record_id, user["department"])
-        _check_owner(row, user)
         conn.execute(
             "UPDATE records SET rec_type=?, location_id=?, rec_date=?, doc_no=?, "
             "material=?, sticker_type=?, qty=?, remark=?, supplier=?, po_no=?, "
@@ -2920,6 +3248,7 @@ def update_record(record_id: int, body: RecordIn, user=Depends(current_user)):
              body.summary_month,
              record_id),
         )
+        _sync_auto_linked_records(conn, record_id, body, user)
         conn.commit()
     finally:
         conn.close()
@@ -2931,7 +3260,9 @@ def delete_record(record_id: int, user=Depends(current_user)):
     conn = db.get_conn()
     try:
         row = _get_record_or_404(conn, record_id, user["department"])
+        _reject_auto_record_direct_edit(row)
         _check_owner(row, user)
+        conn.execute("DELETE FROM records WHERE source_record_id=?", (record_id,))
         conn.execute("DELETE FROM records WHERE id=?", (record_id,))
         conn.commit()
     finally:
@@ -3083,7 +3414,7 @@ def public_summary(
         DEPARTMENTS,
         public_filters,
         reverse_departments={
-            OUTSOURCE_DEPARTMENT,
+            *OUTSOURCE_DEPARTMENTS,
             *PROCESSING_BALANCE_DEPARTMENTS,
         },
     )
@@ -3107,10 +3438,10 @@ def summary(
     if user["department"] == SEMI_FINISHED_DEPARTMENT:
         summary_data = _compute_semi_finished_warehouse_summary(records)
         return _with_common_summary_fields(summary_data, records, filters)
-    if user["department"] == OUTSOURCE_DEPARTMENT:
+    if _is_outsource_department(user["department"]):
         summary_data = _compute_outsource_inbound_summary(records)
         return _with_common_summary_fields(
-            summary_data, records, filters, {OUTSOURCE_DEPARTMENT}
+            summary_data, records, filters, {user["department"]}
         )
     if user["department"] in PROCESSING_BALANCE_DEPARTMENTS:
         summary_data = _compute_processing_department_summary(records)
@@ -3146,7 +3477,7 @@ def export(
         conn.close()
     if user["department"] == SEMI_FINISHED_DEPARTMENT:
         summary = _compute_semi_finished_warehouse_summary(summary_records)
-    elif user["department"] == OUTSOURCE_DEPARTMENT:
+    elif _is_outsource_department(user["department"]):
         summary = _compute_outsource_inbound_summary(summary_records)
     elif user["department"] in PROCESSING_BALANCE_DEPARTMENTS:
         summary = _compute_processing_department_summary(summary_records)
@@ -3159,7 +3490,7 @@ def export(
         LOCATIONS,
         include_supplier=(user["department"] == SUPPLIER_DEPARTMENT),
         warehouse_mode=(user["department"] == SEMI_FINISHED_DEPARTMENT),
-        outsource_mode=(user["department"] == OUTSOURCE_DEPARTMENT),
+        outsource_mode=_is_outsource_department(user["department"]),
         outsource_label=user["department"],
         shaoyang_mode=(user["department"] in PO_CUSTOMER_DEPARTMENTS),
     )

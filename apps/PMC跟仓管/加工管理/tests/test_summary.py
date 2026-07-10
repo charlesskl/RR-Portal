@@ -100,7 +100,7 @@ def test_material_totals_group_by_material_name():
     records = [
         _flow("inbound_raw", "NFC贴纸", "兴信B来料仓", 100),
         _flow("issue", "NFC贴纸", "兴信B来料仓", 30),
-        _flow("finished", "PCBA板", "装配", 80),
+        _flow("finished", "PCBA板", "东莞车间", 80),
         _flow("semi_outbound", "PCBA板", "半成品", 20),
     ]
 
@@ -121,19 +121,19 @@ def test_material_totals_group_by_material_name():
 
 
 def test_department_totals_include_zero_departments_in_order():
-    departments = ["兴信B来料仓", "装配", "外发"]
+    departments = ["兴信B来料仓", "东莞车间", "东莞加工厂利鸿"]
     records = [
         _flow("inbound_raw", "NFC贴纸", "兴信B来料仓", 100),
         _flow("issue", "NFC贴纸", "兴信B来料仓", 30),
-        _flow("semi_finished", "PCBA板", "装配", 40),
+        _flow("semi_finished", "PCBA板", "东莞车间", 40),
     ]
 
     totals = compute_department_totals(records, departments)
 
     assert totals == [
         {"department": "兴信B来料仓", "inbound": 100, "outbound": 30, "balance": 70},
-        {"department": "装配", "inbound": 40, "outbound": 0, "balance": 40},
-        {"department": "外发", "inbound": 0, "outbound": 0, "balance": 0},
+        {"department": "东莞车间", "inbound": 40, "outbound": 0, "balance": 40},
+        {"department": "东莞加工厂利鸿", "inbound": 0, "outbound": 0, "balance": 0},
     ]
 
 
@@ -141,23 +141,23 @@ def test_material_department_totals_group_by_material_and_department():
     records = [
         _flow("inbound_raw", "NFC贴纸", "兴信B来料仓", 100),
         _flow("issue", "NFC贴纸", "兴信B来料仓", 30),
-        _flow("finished", "NFC贴纸", "装配", 25),
+        _flow("finished", "NFC贴纸", "东莞车间", 25),
     ]
 
     totals = compute_material_department_totals(records)
 
     assert totals == [
         {"material": "NFC贴纸", "department": "兴信B来料仓", "inbound": 100, "outbound": 30, "balance": 70},
-        {"material": "NFC贴纸", "department": "装配", "inbound": 25, "outbound": 0, "balance": 25},
+        {"material": "NFC贴纸", "department": "东莞车间", "inbound": 25, "outbound": 0, "balance": 25},
     ]
 
 
 def test_public_summary_contains_safe_aggregates():
-    departments = ["兴信B来料仓", "装配"]
+    departments = ["兴信B来料仓", "东莞车间"]
     records = [
         _flow("inbound_raw", "NFC贴纸", "兴信B来料仓", 100),
         _flow("issue", "NFC贴纸", "兴信B来料仓", 30),
-        _flow("finished", "PCBA板", "装配", 80),
+        _flow("finished", "PCBA板", "东莞车间", 80),
     ]
 
     summary = compute_public_summary(

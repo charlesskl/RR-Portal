@@ -1,4 +1,4 @@
-﻿DEFAULT_DEPARTMENT = "兴信B来料仓"
+DEFAULT_DEPARTMENT = "兴信B来料仓"
 
 
 def admin_login(client, department=DEFAULT_DEPARTMENT):
@@ -14,7 +14,7 @@ def loc_id(client, name):
 
 
 def test_summary_reflects_records(client):
-    admin_login(client, "装配")
+    admin_login(client, "东莞车间")
     dg = loc_id(client, "东莞加工厂利鸿")
     client.post("/api/records", json={"rec_type": "inbound_raw", "qty": 200000})
     client.post("/api/records", json={
@@ -104,7 +104,7 @@ def test_summary_groups_nfc_stickers_by_type(client):
 
 
 def test_summary_is_scoped_to_current_department(client):
-    admin_login(client, "装配")
+    admin_login(client, "东莞车间")
     dg = loc_id(client, "东莞加工厂利鸿")
     client.post("/api/records", json={"rec_type": "inbound_raw", "qty": 1000})
     client.post("/api/records", json={
@@ -178,7 +178,7 @@ def test_monthly_location_summary_groups_by_material(client):
 
 
 def test_assembly_summary_subtracts_semi_finished(client):
-    admin_login(client, "装配")
+    admin_login(client, "东莞车间")
     dg = loc_id(client, "东莞加工厂利鸿")
     client.post("/api/records", json={
         "rec_type": "issue", "location_id": dg, "qty": 100})
@@ -211,7 +211,7 @@ def test_semi_finished_department_summary_uses_warehouse_balance(client):
 
 
 def test_outsource_summary_counts_finished_and_semi_finished_inbound(client):
-    admin_login(client, "外发")
+    admin_login(client, "东莞加工厂利鸿")
     client.post("/api/records", json={
         "rec_type": "finished", "material": "PCBA板", "qty": 70})
     client.post("/api/records", json={

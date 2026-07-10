@@ -127,11 +127,19 @@ def _finished_totals(content, filename):
                 no = _vinyl_no(item_no)
                 if no is None:
                     continue
-                result[no] = {
-                    "item_no": item_no,
-                    "minis_name": _cell_text(_value_at(values, name_col)),
-                    "finished_total": _number(_value_at(values, subtotal_col)),
-                }
+                current = result.setdefault(
+                    no,
+                    {
+                        "item_no": item_no,
+                        "minis_name": _cell_text(_value_at(values, name_col)),
+                        "finished_total": 0,
+                    },
+                )
+                if not current.get("item_no"):
+                    current["item_no"] = item_no
+                if not current.get("minis_name"):
+                    current["minis_name"] = _cell_text(_value_at(values, name_col))
+                current["finished_total"] += _number(_value_at(values, subtotal_col))
             if result:
                 return result
     raise ValueError("成品入仓表总表里找不到 Item No. 和小计")
@@ -183,7 +191,11 @@ def build_shaoyang_issue_export_workbook(
         no = _sticker_no(ws.cell(row_no, 1).value)
         if no is None:
             continue
-        qty = int((finished_rows.get(no) or {}).get("finished_total") or 0)
+        finished = finished_rows.get(no)
+        if not finished:
+            ws.cell(row_no, month_col).value = None
+            continue
+        qty = int(finished.get("finished_total") or 0)
         ws.cell(row_no, month_col).value = qty
         written_total += qty
 
@@ -205,20 +217,21 @@ def build_shaoyang_cd_reconcile(issue_content, issue_filename, finished_content,
         issue = issue_rows.get(no, {})
         finished = finished_rows.get(no, {})
         issue_qty = int(issue.get("issue_month_inbound") or 0)
+        has_finished = no in finished_rows
         finished_qty = int(finished.get("finished_total") or 0)
         rows.append({
             "sticker_no": no,
             "sticker_name": issue.get("sticker_name") or f"{no}#NFC贴纸",
-            "item_no": finished.get("item_no") or f"VINYL-S1-{no:03d}",
+            "item_no": finished.get("item_no") or "",
             "minis_name": finished.get("minis_name") or "",
             "issue_month_inbound": issue_qty,
-            "finished_total": finished_qty,
+            "finished_total": finished_qty if has_finished else None,
             "difference": finished_qty - issue_qty,
         })
 
     totals = {
         "issue_month_inbound": sum(row["issue_month_inbound"] for row in rows),
-        "finished_total": sum(row["finished_total"] for row in rows),
+        "finished_total": sum(row["finished_total"] or 0 for row in rows),
     }
     totals["difference"] = totals["finished_total"] - totals["issue_month_inbound"]
     return {"month": month, "rows": rows, "totals": totals}

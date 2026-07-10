@@ -1,5 +1,14 @@
 INBOUND_TYPES = {"inbound_raw", "finished", "semi_finished", "semi_inbound"}
 OUTBOUND_TYPES = {"issue", "semi_outbound"}
+DEFAULT_DEPARTMENT_ORDER = (
+    "兴信B来料仓",
+    "东莞车间",
+    "半成品",
+    "东莞加工厂利鸿",
+    "河源华兴",
+    "邵阳",
+    "新邵",
+)
 
 
 def _qty(record):
@@ -135,7 +144,18 @@ def compute_material_department_totals(records, reverse_departments=()):
             _qty(record),
             department in reverse_departments,
         )
-    return _finalize_totals(totals[key] for key in sorted(totals))
+    department_order = {
+        department: index for index, department in enumerate(DEFAULT_DEPARTMENT_ORDER)
+    }
+    ordered_keys = sorted(
+        totals,
+        key=lambda key: (
+            key[0],
+            department_order.get(key[1], len(department_order)),
+            key[1],
+        ),
+    )
+    return _finalize_totals(totals[key] for key in ordered_keys)
 
 
 def compute_public_summary(records, departments, filters=None, reverse_departments=()):

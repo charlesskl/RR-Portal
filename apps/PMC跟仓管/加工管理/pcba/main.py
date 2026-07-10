@@ -338,9 +338,9 @@ VALID_TYPES = (
     "semi_inbound", "semi_outbound",
 )
 SUPPLIER_DEPARTMENT = "兴信B来料仓"
-ASSEMBLY_DEPARTMENT = "装配"
+ASSEMBLY_DEPARTMENT = "东莞车间"
 SEMI_FINISHED_DEPARTMENT = "半成品"
-OUTSOURCE_DEPARTMENT = "外发"
+OUTSOURCE_DEPARTMENT = "东莞加工厂利鸿"
 HEYUAN_DEPARTMENT = "河源华兴"
 SHAOYANG_DEPARTMENT = "邵阳"
 XINSHAO_DEPARTMENT = "新邵"
@@ -381,6 +381,15 @@ def _load_upload_workbook(file: UploadFile):
         return load_workbook(file.file, data_only=True)
     except Exception:
         raise HTTPException(status_code=400, detail="Excel 文件无法读取")
+
+
+def _require_filename_contains(file: UploadFile, required_text: str):
+    filename = _cell_text(getattr(file, "filename", ""))
+    if required_text not in filename:
+        raise HTTPException(
+            status_code=400,
+            detail=f"导入文件名必须包含{required_text}",
+        )
 
 
 def _worksheet_rows(ws):
@@ -601,6 +610,36 @@ def _legacy_detail_columns(ws):
     return columns
 
 
+def _legacy_matrix_detail_columns(ws, default_year=None):
+    columns = []
+    for col_no in range(1, ws.max_column + 1):
+        rec_date = _legacy_cutoff_date(ws.cell(1, col_no).value, default_year)
+        doc_no = _cell_text(ws.cell(2, col_no).value)
+        if rec_date and doc_no:
+            columns.append((col_no, rec_date, doc_no))
+    return columns
+
+
+def _legacy_row_headers(ws, row_no=1):
+    return {
+        _cell_text(ws.cell(row_no, col_no).value)
+        for col_no in range(1, ws.max_column + 1)
+        if _cell_text(ws.cell(row_no, col_no).value)
+    }
+
+
+def _legacy_sheet_has_headers(ws, *headers):
+    actual_headers = _legacy_row_headers(ws)
+    return all(header in actual_headers for header in headers)
+
+
+def _legacy_sheet_has_top_header(ws, header):
+    for col_no in range(1, ws.max_column + 1):
+        if _cell_text(ws.cell(1, col_no).value) == header:
+            return True
+    return False
+
+
 def _is_legacy_semi_finished_workbook(wb):
     for ws in wb.worksheets:
         header_row = _find_legacy_item_header_row(ws)
@@ -617,7 +656,27 @@ def _is_legacy_semi_finished_workbook(wb):
 
 def _is_legacy_outsource_workbook(wb):
     sheet_names = set(wb.sheetnames)
-    return "领料明细" in sheet_names and "半成品入仓明细" in sheet_names
+    if "领料明细" not in sheet_names or "半成品入仓明细" not in sheet_names:
+        return False
+    return _legacy_sheet_has_headers(
+        wb["领料明细"], "日期", "领料编号", "物料名称", "领料数"
+    ) and _legacy_sheet_has_headers(
+        wb["半成品入仓明细"], "日期", "送货单号", "品名/规格"
+    )
+
+
+def _is_legacy_assembly_workbook(wb):
+    sheet_names = set(wb.sheetnames)
+    if "领料明细" not in sheet_names or "半成品入仓明细" not in sheet_names:
+        return False
+    issue_ws = wb["领料明细"]
+    semi_ws = wb["半成品入仓明细"]
+    return bool(
+        _find_legacy_item_header_row(issue_ws)
+        and _find_legacy_item_header_row(semi_ws)
+        and _legacy_sheet_has_top_header(issue_ws, "当月领料总数")
+        and _legacy_sheet_has_top_header(semi_ws, "当月入仓总数")
+    )
 
 
 def _is_legacy_heyuan_workbook(wb):
@@ -746,6 +805,53 @@ def _parse_legacy_semi_finished_workbook(conn, wb, department):
     return bodies, list(monthly_totals.values())
 
 
+def _parse_legacy_assembly_workbook(conn, wb, department):
+    if department != ASSEMBLY_DEPARTMENT:
+        raise HTTPException(status_code=400, detail="东莞车间台账只能在东莞车间部门导入")
+
+    bodies = []
+    location_id = _location_id_from_name(conn, "东莞车间", 1)
+    workbook_year = _legacy_workbook_year(wb)
+    sheet_types = {
+        "领料明细": "issue",
+        "半成品入仓明细": "semi_finished",
+    }
+
+    for sheet_name, rec_type in sheet_types.items():
+        if sheet_name not in wb.sheetnames:
+            continue
+        ws = wb[sheet_name]
+        header_row = _find_legacy_item_header_row(ws)
+        if not header_row:
+            continue
+        detail_columns = _legacy_matrix_detail_columns(ws, workbook_year)
+        for row_no in range(header_row + 1, ws.max_row + 1):
+            sticker_type = _cell_text(ws.cell(row_no, 1).value)
+            if not sticker_type or "#NFC" not in sticker_type:
+                continue
+            sticker_type = _normalize_sticker_type(conn, NFC_MATERIAL, sticker_type)
+            for col_no, rec_date, doc_no in detail_columns:
+                qty = _legacy_int(ws.cell(row_no, col_no).value, row_no, "数量")
+                if qty is None or qty <= 0:
+                    continue
+                body = RecordIn(
+                    rec_type=rec_type,
+                    location_id=location_id,
+                    rec_date=rec_date,
+                    doc_no=doc_no,
+                    material=NFC_MATERIAL,
+                    sticker_type=sticker_type,
+                    qty=qty,
+                    remark=f"{ws.title}导入",
+                )
+                _validate_record(body, department)
+                bodies.append(body)
+
+    if not bodies:
+        raise HTTPException(status_code=400, detail="东莞车间台账没有可导入的数据")
+    return bodies
+
+
 def _legacy_header_map(ws):
     headers = {}
     for col_no in range(1, ws.max_column + 1):
@@ -804,7 +910,7 @@ def _add_record_body(bodies, body, department, validate_positive=True):
 
 def _parse_legacy_outsource_workbook(wb, department):
     if department != OUTSOURCE_DEPARTMENT:
-        raise HTTPException(status_code=400, detail="外发台账只能在外发部门导入")
+        raise HTTPException(status_code=400, detail="东莞加工厂利鸿台账只能在东莞加工厂利鸿部门导入")
 
     bodies = []
     issue_ws = wb["领料明细"] if "领料明细" in wb.sheetnames else None
@@ -873,7 +979,7 @@ def _parse_legacy_outsource_workbook(wb, department):
             bodies.append(body)
 
     if not bodies:
-        raise HTTPException(status_code=400, detail="外发台账没有可导入的数据")
+        raise HTTPException(status_code=400, detail="东莞加工厂利鸿台账没有可导入的数据")
     return bodies
 
 
@@ -1750,7 +1856,7 @@ def _validate_record(body: RecordIn, department: Optional[str] = None):
     if body.rec_type not in VALID_TYPES:
         raise HTTPException(status_code=400, detail="类型无效")
     if department == OUTSOURCE_DEPARTMENT and body.rec_type not in ("issue", "finished", "semi_finished"):
-        raise HTTPException(status_code=400, detail="外发只能录入领料/成品/半成品入库")
+        raise HTTPException(status_code=400, detail="东莞加工厂利鸿只能录入领料/成品/半成品入库")
     if department == HEYUAN_DEPARTMENT and body.rec_type not in ("issue", "finished"):
         raise HTTPException(status_code=400, detail="河源华兴只能录入领料/成品入库")
     if department == SHAOYANG_DEPARTMENT and body.rec_type not in ("issue", "finished"):
@@ -1760,7 +1866,7 @@ def _validate_record(body: RecordIn, department: Optional[str] = None):
     if department == SUPPLIER_DEPARTMENT and body.rec_type == "finished":
         raise HTTPException(status_code=400, detail="兴信B来料仓只能录入入库/出库")
     if body.rec_type == "semi_finished" and department not in (ASSEMBLY_DEPARTMENT, OUTSOURCE_DEPARTMENT):
-        raise HTTPException(status_code=400, detail="半成品入库仅限装配/外发部门")
+        raise HTTPException(status_code=400, detail="半成品入库仅限东莞车间/东莞加工厂利鸿部门")
     if body.rec_type in ("semi_inbound", "semi_outbound") and department != SEMI_FINISHED_DEPARTMENT:
         raise HTTPException(status_code=400, detail="半成品仓出入库仅限半成品部门")
     if body.qty is None or body.qty < 0:
@@ -2460,7 +2566,7 @@ def _semi_finished_detail_sheet(
         ws.cell(2, 4).value = "入库单号"
         ws.cell(3, 1).value = "物料名称"
         ws.cell(3, 2).value = total_header
-        ws.cell(3, 3).value = "6/24\n装配入库截数"
+        ws.cell(3, 3).value = "6/24\n东莞车间入库截数"
         ws.cell(3, 4).value = "6/24\n鸿亚入库截数"
     else:
         ws.cell(5, 1).value = "物料名称"
@@ -2674,20 +2780,28 @@ def import_records(file: UploadFile = File(...), user=Depends(current_user)):
     conn = db.get_conn()
     try:
         legacy_semi_finished_import = _is_legacy_semi_finished_workbook(wb)
+        legacy_assembly_import = _is_legacy_assembly_workbook(wb)
         legacy_outsource_import = _is_legacy_outsource_workbook(wb)
         legacy_heyuan_import = _is_legacy_heyuan_workbook(wb)
         legacy_supplier_import = _is_legacy_supplier_workbook(wb)
         legacy_import = (
             legacy_semi_finished_import
+            or legacy_assembly_import
             or legacy_outsource_import
             or legacy_heyuan_import
             or legacy_supplier_import
         )
         if legacy_semi_finished_import:
+            _require_filename_contains(file, SEMI_FINISHED_DEPARTMENT)
             bodies, monthly_totals = _parse_legacy_semi_finished_workbook(
                 conn, wb, user["department"]
             )
+        elif legacy_assembly_import:
+            _require_filename_contains(file, ASSEMBLY_DEPARTMENT)
+            bodies = _parse_legacy_assembly_workbook(conn, wb, user["department"])
+            monthly_totals = []
         elif legacy_outsource_import:
+            _require_filename_contains(file, OUTSOURCE_DEPARTMENT)
             bodies = _parse_legacy_outsource_workbook(wb, user["department"])
             monthly_totals = []
         elif legacy_heyuan_import:
@@ -3045,6 +3159,7 @@ def export(
         include_supplier=(user["department"] == SUPPLIER_DEPARTMENT),
         warehouse_mode=(user["department"] == SEMI_FINISHED_DEPARTMENT),
         outsource_mode=(user["department"] == OUTSOURCE_DEPARTMENT),
+        outsource_label=user["department"],
         shaoyang_mode=(user["department"] in PO_CUSTOMER_DEPARTMENTS),
     )
     headers = {"Content-Disposition": "attachment; filename=record_player_summary.xlsx"}

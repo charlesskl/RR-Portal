@@ -1,4 +1,4 @@
-﻿import io
+import io
 import openpyxl
 
 
@@ -22,7 +22,7 @@ def summary_row(rows, scope, item):
 
 
 def test_export_returns_xlsx_with_summary(client):
-    admin_login(client, "装配")
+    admin_login(client, "东莞车间")
     sy = loc_id(client, "邵阳华登")
     client.post("/api/records", json={"rec_type": "inbound_raw", "qty": 1000000})
     client.post("/api/records", json={
@@ -47,7 +47,7 @@ def test_export_returns_xlsx_with_summary(client):
 
 
 def test_export_is_scoped_to_current_department(client):
-    admin_login(client, "装配")
+    admin_login(client, "东莞车间")
     sy = loc_id(client, "邵阳华登")
     client.post("/api/records", json={"rec_type": "inbound_raw", "qty": 1000000})
     client.post("/api/records", json={
@@ -183,7 +183,7 @@ def test_export_fills_legacy_opening_date_when_record_date_is_blank(client):
 
 
 def test_non_xingxin_export_detail_omits_supplier_column(client):
-    admin_login(client, "装配")
+    admin_login(client, "东莞车间")
     dg = loc_id(client, "东莞加工厂利鸿")
     client.post("/api/records", json={
         "rec_type": "issue", "location_id": dg, "material": "PCBA板",
@@ -197,7 +197,7 @@ def test_non_xingxin_export_detail_omits_supplier_column(client):
 
 
 def test_export_includes_semi_finished_detail_sheet(client):
-    admin_login(client, "装配")
+    admin_login(client, "东莞车间")
     dg = loc_id(client, "东莞加工厂利鸿")
     client.post("/api/records", json={
         "rec_type": "semi_finished", "location_id": dg,
@@ -229,7 +229,7 @@ def test_semi_finished_department_export_has_inbound_and_outbound_sheets(client)
 
 
 def test_outsource_export_has_finished_and_semi_finished_sheets(client):
-    admin_login(client, "外发")
+    admin_login(client, "东莞加工厂利鸿")
     client.post("/api/records", json={
         "rec_type": "finished", "material": "PCBA板", "qty": 70})
     client.post("/api/records", json={
@@ -241,10 +241,10 @@ def test_outsource_export_has_finished_and_semi_finished_sheets(client):
     header_index = next(i for i, row in enumerate(rows) if row and row[0] == "成品入库总数")
     total_row = rows[header_index + 1]
     assert total_row == (70, 30, 100)
-    assert "外发成品入库" in wb.sheetnames
-    assert "外发半成品入库" in wb.sheetnames
-    assert wb["外发成品入库"].cell(row=2, column=4).value == 70
-    assert wb["外发半成品入库"].cell(row=2, column=4).value == 30
+    assert "东莞加工厂利鸿成品入库" in wb.sheetnames
+    assert "东莞加工厂利鸿半成品入库" in wb.sheetnames
+    assert wb["东莞加工厂利鸿成品入库"].cell(row=2, column=4).value == 70
+    assert wb["东莞加工厂利鸿半成品入库"].cell(row=2, column=4).value == 30
 
 
 def test_shaoyang_finished_export_includes_po_and_customer_columns(client):

@@ -60,6 +60,65 @@ def test_init_creates_department_accounts(db_path):
         assert verify_password("123456", users[department]["password_hash"])
 
 
+def test_init_migrates_renamed_department_accounts_and_records(db_path):
+    from pcba import db
+
+    db.init_db()
+    conn = db.get_conn()
+    conn.execute("DELETE FROM users WHERE username IN ('东莞车间', '东莞加工厂利鸿')")
+    conn.execute(
+        "INSERT INTO users(username, password_hash, role, department) VALUES (?,?,?,?)",
+        ("装配", "assembly-hash", "operator", "装配"),
+    )
+    conn.execute(
+        "INSERT INTO users(username, password_hash, role, department) VALUES (?,?,?,?)",
+        ("外发", "outsource-hash", "operator", "外发"),
+    )
+    conn.execute(
+        "INSERT INTO records(rec_type, material, qty, department) VALUES (?,?,?,?)",
+        ("issue", "NFC贴纸", 10, "装配"),
+    )
+    conn.execute(
+        "INSERT INTO records(rec_type, material, qty, department) VALUES (?,?,?,?)",
+        ("issue", "77794-PCBA板", 20, "外发"),
+    )
+    conn.execute(
+        "INSERT INTO semi_finished_monthly_totals(department, material, sticker_type) "
+        "VALUES (?,?,?)",
+        ("装配", "NFC贴纸", "1#NFC贴纸"),
+    )
+    conn.commit()
+    conn.close()
+
+    db.init_db()
+    conn = db.get_conn()
+    users = {
+        row["username"]: dict(row)
+        for row in conn.execute(
+            "SELECT username, department, password_hash FROM users"
+        ).fetchall()
+    }
+    record_departments = [
+        row["department"]
+        for row in conn.execute("SELECT department FROM records ORDER BY qty").fetchall()
+    ]
+    monthly_department = conn.execute(
+        "SELECT department FROM semi_finished_monthly_totals WHERE material='NFC贴纸'"
+    ).fetchone()["department"]
+    old_users = conn.execute(
+        "SELECT COUNT(*) AS c FROM users WHERE username IN ('装配', '外发')"
+    ).fetchone()["c"]
+    conn.close()
+
+    assert old_users == 0
+    assert users["东莞车间"]["department"] == "东莞车间"
+    assert users["东莞车间"]["password_hash"] == "assembly-hash"
+    assert users["东莞加工厂利鸿"]["department"] == "东莞加工厂利鸿"
+    assert users["东莞加工厂利鸿"]["password_hash"] == "outsource-hash"
+    assert record_departments == ["东莞车间", "东莞加工厂利鸿"]
+    assert monthly_department == "东莞车间"
+
+
 def test_init_is_idempotent(db_path):
     from pcba import db
     db.init_db()

@@ -55,7 +55,7 @@ def legacy_semi_finished_workbook_bytes():
     ws["F2"] = "RK-002"
     ws["A3"] = "物料名称"
     ws["B3"] = "当月入仓总数"
-    ws["C3"] = "6/24装配入库截数"
+    ws["C3"] = "6/24东莞车间入库截数"
     ws["D3"] = "6/24鸿亚入库截数"
     ws["A4"] = "1#NFC\n贴纸"
     ws["B4"] = 100
@@ -83,6 +83,43 @@ def legacy_semi_finished_workbook_bytes():
 
     total_ws = wb.create_sheet("总表")
     total_ws["A1"] = "总表不用导入"
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def legacy_assembly_nfc_workbook_bytes():
+    wb = openpyxl.Workbook()
+    total_ws = wb.active
+    total_ws.title = "总表"
+    total_ws["A2"] = "物料名称"
+    total_ws["B1"] = "累计入仓总数"
+    total_ws["C1"] = "东莞"
+    total_ws["D1"] = "7月领料\n总数"
+    total_ws["E1"] = "2026-07-01"
+    total_ws["A3"] = "1#NFC\n贴纸"
+    total_ws["B3"] = 100
+    total_ws["C3"] = 40
+    total_ws["D3"] = 60
+
+    issue_ws = wb.create_sheet("领料明细")
+    issue_ws["B1"] = "当月领料总数"
+    issue_ws["C1"] = "7月1日"
+    issue_ws["A2"] = "物料名称"
+    issue_ws["C2"] = "DG-LL-001"
+    issue_ws["A3"] = "1#NFC\n贴纸"
+    issue_ws["B3"] = 60
+    issue_ws["C3"] = 60
+
+    semi_ws = wb.create_sheet("半成品入仓明细")
+    semi_ws["B1"] = "当月入仓总数"
+    semi_ws["C1"] = "7月2日"
+    semi_ws["A2"] = "物料名称"
+    semi_ws["C2"] = "DG-RK-001"
+    semi_ws["A3"] = "1#NFC\n贴纸"
+    semi_ws["B3"] = 25
+    semi_ws["C3"] = 25
 
     buf = io.BytesIO()
     wb.save(buf)
@@ -218,12 +255,12 @@ def legacy_supplier_nfc_workbook_bytes():
     return buf.getvalue()
 
 
-def upload_bytes(client, path, content):
+def upload_bytes(client, path, content, filename="legacy.xlsx"):
     return client.post(
         path,
         files={
             "file": (
-                "legacy.xlsx",
+                filename,
                 content,
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             )
@@ -246,7 +283,7 @@ def test_record_import_template_exports_expected_headers(client):
 
 
 def test_non_supplier_record_export_matches_import_template_headers(client):
-    login(client, "装配", "123456", "装配")
+    login(client, "东莞车间", "123456", "东莞车间")
     dongguan = loc_id(client, "东莞加工厂利鸿")
     client.post("/api/records", json={
         "rec_type": "issue",
@@ -394,7 +431,12 @@ def test_xingxin_nfc_record_export_fills_legacy_opening_date(client):
 
 def test_semi_finished_export_uses_legacy_matrix_workbook(client):
     login(client, "半成品", "123456", "半成品")
-    upload = upload_bytes(client, "/api/records/import", legacy_semi_finished_workbook_bytes())
+    upload = upload_bytes(
+        client,
+        "/api/records/import",
+        legacy_semi_finished_workbook_bytes(),
+        "塑胶仓77772#CD半成品出入明细.xlsx",
+    )
     assert upload.status_code == 200
 
     r = client.get("/api/records/export?material=NFC贴纸")
@@ -415,7 +457,7 @@ def test_semi_finished_export_uses_legacy_matrix_workbook(client):
     assert inbound.cell(2, 4).value == "入库单号"
     assert inbound.cell(3, 1).value == "物料名称"
     assert inbound.cell(3, 2).value == "当月入仓总数"
-    assert inbound.cell(3, 3).value == "6/24\n装配入库截数"
+    assert inbound.cell(3, 3).value == "6/24\n东莞车间入库截数"
     assert inbound.cell(4, 1).value == "1#NFC\n贴纸"
     assert inbound.cell(4, 2).value == 100
     assert inbound.cell(4, 3).value == 25
@@ -435,7 +477,7 @@ def test_semi_finished_export_uses_legacy_matrix_workbook(client):
 
 
 def test_outsource_record_export_uses_legacy_pcba_workbook(client):
-    login(client, "外发", "123456", "外发")
+    login(client, "东莞加工厂利鸿", "123456", "东莞加工厂利鸿")
     client.post("/api/records", json={
         "rec_type": "issue",
         "material": "77794-PCBA板",
@@ -544,7 +586,12 @@ def test_record_import_rejects_nfc_without_sticker_type(client):
 def test_semi_finished_legacy_workbook_imports_detail_rows_and_monthly_totals(client):
     login(client, "半成品", "123456", "半成品")
 
-    r = upload_bytes(client, "/api/records/import", legacy_semi_finished_workbook_bytes())
+    r = upload_bytes(
+        client,
+        "/api/records/import",
+        legacy_semi_finished_workbook_bytes(),
+        "塑胶仓77772#CD半成品出入明细.xlsx",
+    )
     records = client.get("/api/records").json()
 
     assert r.status_code == 200
@@ -568,17 +615,94 @@ def test_semi_finished_legacy_workbook_imports_detail_rows_and_monthly_totals(cl
         "monthly_balance": 85,
     }]
 
-    second = upload_bytes(client, "/api/records/import", legacy_semi_finished_workbook_bytes())
+    second = upload_bytes(
+        client,
+        "/api/records/import",
+        legacy_semi_finished_workbook_bytes(),
+        "塑胶仓77772#CD半成品出入明细.xlsx",
+    )
     assert second.status_code == 200
     assert second.json()["created"] == 0
     assert second.json()["skipped"] == 3
     assert len(client.get("/api/records").json()) == 3
 
 
-def test_outsource_legacy_workbook_imports_issue_and_semi_finished_rows(client):
-    login(client, "外发", "123456", "外发")
+def test_semi_finished_legacy_workbook_rejects_filename_without_department(client):
+    login(client, "半成品", "123456", "半成品")
 
-    r = upload_bytes(client, "/api/records/import", legacy_outsource_workbook_bytes())
+    r = upload_bytes(
+        client,
+        "/api/records/import",
+        legacy_semi_finished_workbook_bytes(),
+        "legacy.xlsx",
+    )
+
+    assert r.status_code == 400
+    assert "半成品" in r.json()["detail"]
+
+
+def test_assembly_nfc_legacy_workbook_rejects_filename_without_department(client):
+    login(client, "东莞车间", "123456", "东莞车间")
+
+    r = upload_bytes(
+        client,
+        "/api/records/import",
+        legacy_assembly_nfc_workbook_bytes(),
+        "legacy.xlsx",
+    )
+
+    assert r.status_code == 400
+    assert "东莞车间" in r.json()["detail"]
+
+
+def test_assembly_nfc_legacy_workbook_imports_matrix_rows(client):
+    login(client, "东莞车间", "123456", "东莞车间")
+
+    r = upload_bytes(
+        client,
+        "/api/records/import",
+        legacy_assembly_nfc_workbook_bytes(),
+        "东莞车间77772#NFC贴纸出入明细.xlsx",
+    )
+    records = client.get("/api/records").json()
+
+    assert r.status_code == 200
+    assert r.json()["created"] == 2
+    assert r.json()["monthly_totals"] == 0
+    rows = {(row["rec_type"], row["doc_no"]): row for row in records}
+    assert rows[("issue", "DG-LL-001")]["qty"] == 60
+    assert rows[("issue", "DG-LL-001")]["rec_date"] == "2026-07-01"
+    assert rows[("issue", "DG-LL-001")]["material"] == "NFC贴纸"
+    assert rows[("issue", "DG-LL-001")]["sticker_type"] == "1#NFC贴纸"
+    assert rows[("issue", "DG-LL-001")]["location_name"] == "东莞车间"
+    assert rows[("semi_finished", "DG-RK-001")]["qty"] == 25
+    assert rows[("semi_finished", "DG-RK-001")]["rec_date"] == "2026-07-02"
+    assert rows[("semi_finished", "DG-RK-001")]["location_name"] == "东莞车间"
+
+
+def test_outsource_legacy_workbook_rejects_filename_without_department(client):
+    login(client, "东莞加工厂利鸿", "123456", "东莞加工厂利鸿")
+
+    r = upload_bytes(
+        client,
+        "/api/records/import",
+        legacy_outsource_workbook_bytes(),
+        "legacy.xlsx",
+    )
+
+    assert r.status_code == 400
+    assert "东莞加工厂利鸿" in r.json()["detail"]
+
+
+def test_outsource_legacy_workbook_imports_issue_and_semi_finished_rows(client):
+    login(client, "东莞加工厂利鸿", "123456", "东莞加工厂利鸿")
+
+    r = upload_bytes(
+        client,
+        "/api/records/import",
+        legacy_outsource_workbook_bytes(),
+        "东莞加工厂利鸿77794PCB主板出入明细.xlsx",
+    )
     records = client.get("/api/records").json()
 
     assert r.status_code == 200
@@ -594,7 +718,12 @@ def test_outsource_legacy_workbook_imports_issue_and_semi_finished_rows(client):
     assert summary["raw"]["semi_finished_inbound"] == 8
     assert summary["raw"]["balance"] == 92
 
-    second = upload_bytes(client, "/api/records/import", legacy_outsource_workbook_bytes())
+    second = upload_bytes(
+        client,
+        "/api/records/import",
+        legacy_outsource_workbook_bytes(),
+        "东莞加工厂利鸿77794PCB主板出入明细.xlsx",
+    )
     assert second.status_code == 200
     assert second.json()["created"] == 0
     assert second.json()["skipped"] == 3

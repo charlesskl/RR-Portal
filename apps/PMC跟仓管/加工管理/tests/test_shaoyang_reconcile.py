@@ -3,7 +3,7 @@ import io
 import openpyxl
 
 
-def admin_login(client, department="邵阳"):
+def admin_login(client, department="邵阳华登"):
     client.post(
         "/api/login",
         json={"username": "admin", "password": "admin123", "department": department},

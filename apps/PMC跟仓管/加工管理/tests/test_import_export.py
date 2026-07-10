@@ -255,6 +255,44 @@ def legacy_supplier_nfc_workbook_bytes():
     return buf.getvalue()
 
 
+def legacy_hongya_nfc_workbook_bytes():
+    wb = openpyxl.Workbook()
+    total_ws = wb.active
+    total_ws.title = "总表"
+    total_ws.cell(1, 2).value = "累计领料总数"
+    total_ws.cell(1, 4).value = "7月领料\n总数"
+    total_ws.cell(1, 11).value = "应存数"
+    total_ws.cell(1, 12).value = "累计入仓总数"
+    total_ws.cell(1, 14).value = "7月入仓\n总数"
+    total_ws.cell(2, 1).value = "物料名称"
+    total_ws.cell(3, 1).value = "1#NFC\n贴纸"
+    total_ws.cell(3, 2).value = 30
+    total_ws.cell(3, 4).value = 30
+    total_ws.cell(3, 11).value = 10
+    total_ws.cell(3, 12).value = 20
+    total_ws.cell(3, 14).value = 20
+
+    issue_ws = wb.create_sheet("领料明细")
+    issue_ws.cell(1, 2).value = "当月领料总数"
+    issue_ws.cell(1, 3).value = "2026-07-01"
+    issue_ws.cell(2, 1).value = "物料名称"
+    issue_ws.cell(3, 1).value = "1#NFC\n贴纸"
+    issue_ws.cell(3, 2).value = 30
+    issue_ws.cell(3, 3).value = 30
+
+    inbound_ws = wb.create_sheet("入仓明细")
+    inbound_ws.cell(1, 2).value = "当月入仓总数"
+    inbound_ws.cell(1, 3).value = "2026-07-02"
+    inbound_ws.cell(2, 1).value = "物料名称"
+    inbound_ws.cell(3, 1).value = "1#NFC\n贴纸"
+    inbound_ws.cell(3, 2).value = 20
+    inbound_ws.cell(3, 3).value = 20
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
 def upload_bytes(client, path, content, filename="legacy.xlsx"):
     return client.post(
         path,
@@ -337,9 +375,9 @@ def test_xingxin_pcba_export_uses_legacy_warehouse_workbook(client):
     wb = openpyxl.load_workbook(io.BytesIO(r.content), data_only=True)
 
     assert r.status_code == 200
-    assert wb.sheetnames[:7] == [
+    assert wb.sheetnames[:8] == [
         "总表", "入仓明细", "邵阳华登领料", "河源华兴领料",
-        "加工厂利鸿领料", "东莞车间领料", "Sheet2",
+        "加工厂利鸿领料", "加工厂鸿亚领料", "东莞车间领料", "Sheet2",
     ]
     assert [cell.value for cell in wb["入仓明细"][1]] == [
         "日期", "入仓单号", "物料名称", "入仓数", "备注"]
@@ -354,18 +392,19 @@ def test_xingxin_pcba_export_uses_legacy_warehouse_workbook(client):
         "物料名称", None, "累计出入总数", "6月月结", "7月", "8月",
         "9月", "10月", "11月", "12月", "备注",
     ]
-    assert [total.cell(row, 2).value for row in range(2, 9)] == [
+    assert [total.cell(row, 2).value for row in range(2, 10)] == [
         "入仓总数", "邵阳华登领料总数", "河源华兴领料总数",
-        "加工厂利鸿领料总数", "东莞车间领料", None, "应存数",
+        "加工厂利鸿领料总数", "加工厂鸿亚领料总数", "东莞车间领料",
+        None, "应存数",
     ]
     assert total.cell(2, 1).value == "PCB主板"
     assert total.cell(2, 3).value == 40
     assert total.cell(2, 5).value == 40
     assert total.cell(4, 3).value == 25
     assert total.cell(4, 5).value == 25
-    assert total.cell(8, 3).value == 15
-    assert total.cell(8, 4).value == 0
-    assert total.cell(8, 5).value == 15
+    assert total.cell(9, 3).value == 15
+    assert total.cell(9, 4).value == 0
+    assert total.cell(9, 5).value == 15
 
 
 def test_xingxin_nfc_export_uses_legacy_matrix_workbook(client):
@@ -427,6 +466,40 @@ def test_xingxin_nfc_record_export_fills_legacy_opening_date(client):
 
     assert r.status_code == 200
     assert wb["出库明细"].cell(1, 3).value == "2026-06-27"
+
+
+def test_xingxin_nfc_export_groups_opening_stock_by_document_column(client):
+    login(client, "兴信B来料仓", "123456", DEFAULT_DEPARTMENT)
+    client.post("/api/records", json={
+        "rec_type": "inbound_raw",
+        "material": "NFC贴纸",
+        "sticker_type": "1#NFC贴纸",
+        "rec_date": "2026-06-27",
+        "doc_no": "1#NFC贴纸-期初入仓",
+        "qty": 846669,
+        "remark": "总表期初入仓导入",
+    })
+    client.post("/api/records", json={
+        "rec_type": "inbound_raw",
+        "material": "NFC贴纸",
+        "sticker_type": "2#NFC贴纸",
+        "rec_date": "2026-06-27",
+        "doc_no": "2#NFC贴纸-期初入仓",
+        "qty": 865000,
+        "remark": "总表期初入仓导入",
+    })
+
+    r = client.get("/api/records/export?material=NFC贴纸")
+    wb = openpyxl.load_workbook(io.BytesIO(r.content), data_only=True)
+    ws = wb["入库明细"]
+
+    assert r.status_code == 200
+    assert ws.cell(1, 3).value == "2026-06-27"
+    assert ws.cell(2, 3).value == "期初入仓"
+    assert ws.cell(3, 3).value == 846669
+    assert ws.cell(4, 3).value == 865000
+    assert ws.cell(1, 4).value is None
+    assert ws.cell(2, 4).value is None
 
 
 def test_semi_finished_export_uses_legacy_matrix_workbook(client):
@@ -728,6 +801,58 @@ def test_outsource_legacy_workbook_imports_issue_and_semi_finished_rows(client):
     assert second.json()["created"] == 0
     assert second.json()["skipped"] == 3
     assert len(client.get("/api/records").json()) == 3
+
+
+def test_hongya_nfc_legacy_workbook_rejects_filename_without_department(client):
+    login(client, "东莞加工厂鸿亚", "123456", "东莞加工厂鸿亚")
+
+    r = upload_bytes(
+        client,
+        "/api/records/import",
+        legacy_hongya_nfc_workbook_bytes(),
+        "legacy.xlsx",
+    )
+
+    assert r.status_code == 400
+    assert "东莞加工厂鸿亚" in r.json()["detail"]
+
+
+def test_hongya_nfc_legacy_workbook_imports_issue_and_finished_rows(client):
+    login(client, "东莞加工厂鸿亚", "123456", "东莞加工厂鸿亚")
+
+    r = upload_bytes(
+        client,
+        "/api/records/import",
+        legacy_hongya_nfc_workbook_bytes(),
+        "东莞加工厂鸿亚77772#NFC贴纸出入明细.xlsx",
+    )
+    records = client.get("/api/records").json()
+
+    assert r.status_code == 200
+    assert r.json()["created"] == 2
+    rows = {(row["rec_type"], row["doc_no"]): row for row in records}
+    assert rows[("issue", "2026-07-01")]["qty"] == 30
+    assert rows[("finished", "2026-07-02")]["qty"] == 20
+    assert rows[("issue", "2026-07-01")]["material"] == "NFC贴纸"
+    assert rows[("issue", "2026-07-01")]["sticker_type"] == "1#NFC贴纸"
+    assert rows[("issue", "2026-07-01")]["location_name"] is None
+    assert rows[("finished", "2026-07-02")]["location_name"] is None
+
+    summary = client.get("/api/summary").json()
+    assert summary["raw"]["issue"] == 30
+    assert summary["raw"]["finished_inbound"] == 20
+    assert summary["raw"]["balance"] == 10
+
+    second = upload_bytes(
+        client,
+        "/api/records/import",
+        legacy_hongya_nfc_workbook_bytes(),
+        "东莞加工厂鸿亚77772#NFC贴纸出入明细.xlsx",
+    )
+    assert second.status_code == 200
+    assert second.json()["created"] == 0
+    assert second.json()["skipped"] == 2
+    assert len(client.get("/api/records").json()) == 2
 
 
 def test_heyuan_legacy_workbook_imports_issue_corrections_and_finished_rows(client):

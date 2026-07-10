@@ -248,7 +248,7 @@ def test_outsource_export_has_finished_and_semi_finished_sheets(client):
 
 
 def test_shaoyang_finished_export_includes_po_and_customer_columns(client):
-    admin_login(client, "邵阳")
+    admin_login(client, "邵阳华登")
     sy = loc_id(client, "邵阳华登")
     client.post("/api/records", json={
         "rec_type": "finished", "location_id": sy, "material": "PCBA板",

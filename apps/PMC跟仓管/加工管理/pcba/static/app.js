@@ -21,8 +21,10 @@ const XINGXIN_DEPARTMENT = '兴信B来料仓';
 const ASSEMBLY_DEPARTMENT = '东莞车间';
 const SEMI_FINISHED_DEPARTMENT = '碟片半成品';
 const OUTSOURCE_DEPARTMENT = '东莞加工厂利鸿';
+const HONGYA_DEPARTMENT = '东莞加工厂鸿亚';
+const OUTSOURCE_DEPARTMENTS = [OUTSOURCE_DEPARTMENT, HONGYA_DEPARTMENT];
 const HEYUAN_DEPARTMENT = '河源华兴';
-const SHAOYANG_DEPARTMENT = '邵阳';
+const SHAOYANG_DEPARTMENT = '邵阳华登';
 const XINSHAO_DEPARTMENT = '新邵';
 const NFC_MATERIAL = 'NFC贴纸';
 const PCBA_MATERIAL = '77794-PCBA板';
@@ -73,7 +75,13 @@ function isXingxin() {
 }
 
 function isOutsource() {
-  return ME && ME.department === OUTSOURCE_DEPARTMENT;
+  return ME && OUTSOURCE_DEPARTMENTS.includes(ME.department);
+}
+
+function shouldHideLocationForType(type) {
+  return type === 'inbound_raw'
+    || (ME && ME.department === SEMI_FINISHED_DEPARTMENT && type !== 'semi_outbound')
+    || isOutsource();
 }
 
 function isHeyuan() {
@@ -315,9 +323,14 @@ function configureEntryForDepartment() {
 async function loadLocations() {
   const r = await api('/api/locations');
   const locs = await r.json();
-  el('locationId').innerHTML = locs
+  el('locationId').innerHTML = entryLocationOptions(locs)
     .map(l => `<option value="${l.id}">${esc(l.name)}</option>`)
     .join('');
+}
+
+function entryLocationOptions(locs) {
+  if (!ME || !ME.department) return locs;
+  return locs.filter(loc => loc.name !== ME.department);
 }
 
 async function loadMaterials() {
@@ -601,7 +614,7 @@ async function delMaterial(id) {
 
 function onTypeChange() {
   const t = el('recType').value;
-  const hideLocation = t === 'inbound_raw' || (ME && ME.department === SEMI_FINISHED_DEPARTMENT) || isOutsource();
+  const hideLocation = shouldHideLocationForType(t);
   el('locationId').style.display = hideLocation ? 'none' : '';
   el('supplier').style.display = isXingxin() ? '' : 'none';
 
@@ -617,7 +630,7 @@ function onTypeChange() {
 
 async function saveRecord() {
   const t = el('recType').value;
-  const hideLocation = t === 'inbound_raw' || (ME && ME.department === SEMI_FINISHED_DEPARTMENT) || isOutsource();
+  const hideLocation = shouldHideLocationForType(t);
   const material = el('material').value || PCBA_MATERIAL;
   const isSticker = material === NFC_MATERIAL;
   const body = {

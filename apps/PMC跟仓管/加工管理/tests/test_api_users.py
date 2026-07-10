@@ -37,7 +37,7 @@ def test_list_departments(client):
     r = client.get("/api/departments")
     assert r.status_code == 200
     assert r.json() == [
-        "兴信B来料仓", "东莞车间", "半成品", "东莞加工厂利鸿", "河源华兴", "邵阳", "新邵"]
+        "兴信B来料仓", "东莞车间", "碟片半成品", "东莞加工厂利鸿", "河源华兴", "邵阳", "新邵"]
 
 
 def test_admin_can_create_operator(client):
@@ -80,10 +80,10 @@ def test_users_include_department(client):
     login(client, "admin", "admin123")
     client.post("/api/users", json={
         "username": "op_list_dept", "password": "pw123456",
-        "role": "operator", "department": "半成品"})
+        "role": "operator", "department": "碟片半成品"})
     rows = client.get("/api/users").json()
     user = next(u for u in rows if u["username"] == "op_list_dept")
-    assert user["department"] == "半成品"
+    assert user["department"] == "碟片半成品"
 
 
 def test_operator_cannot_create_user(client):

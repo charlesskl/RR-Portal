@@ -196,7 +196,7 @@ def test_assembly_summary_subtracts_semi_finished(client):
 
 
 def test_semi_finished_department_summary_uses_warehouse_balance(client):
-    admin_login(client, "半成品")
+    admin_login(client, "碟片半成品")
     client.post("/api/records", json={
         "rec_type": "semi_inbound", "material": "PCBA板", "qty": 80})
     client.post("/api/records", json={

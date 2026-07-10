@@ -430,7 +430,7 @@ def test_xingxin_nfc_record_export_fills_legacy_opening_date(client):
 
 
 def test_semi_finished_export_uses_legacy_matrix_workbook(client):
-    login(client, "半成品", "123456", "半成品")
+    login(client, "碟片半成品", "123456", "碟片半成品")
     upload = upload_bytes(
         client,
         "/api/records/import",
@@ -584,7 +584,7 @@ def test_record_import_rejects_nfc_without_sticker_type(client):
 
 
 def test_semi_finished_legacy_workbook_imports_detail_rows_and_monthly_totals(client):
-    login(client, "半成品", "123456", "半成品")
+    login(client, "碟片半成品", "123456", "碟片半成品")
 
     r = upload_bytes(
         client,
@@ -606,7 +606,7 @@ def test_semi_finished_legacy_workbook_imports_detail_rows_and_monthly_totals(cl
     public = client.get("/api/public-summary").json()
     semi_rows = public["semi_finished_monthly_totals"]
     assert semi_rows == [{
-        "department": "半成品",
+        "department": "碟片半成品",
         "material": "NFC贴纸",
         "sticker_type": "1#NFC贴纸",
         "opening_stock": 25,
@@ -628,7 +628,7 @@ def test_semi_finished_legacy_workbook_imports_detail_rows_and_monthly_totals(cl
 
 
 def test_semi_finished_legacy_workbook_rejects_filename_without_department(client):
-    login(client, "半成品", "123456", "半成品")
+    login(client, "碟片半成品", "123456", "碟片半成品")
 
     r = upload_bytes(
         client,

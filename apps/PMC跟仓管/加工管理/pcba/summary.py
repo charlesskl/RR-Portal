@@ -3,12 +3,17 @@ OUTBOUND_TYPES = {"issue", "semi_outbound"}
 DEFAULT_DEPARTMENT_ORDER = (
     "兴信B来料仓",
     "东莞车间",
-    "半成品",
+    "碟片半成品",
     "东莞加工厂利鸿",
     "河源华兴",
     "邵阳",
     "新邵",
 )
+DEPARTMENT_ALIASES = {
+    "装配": "东莞车间",
+    "半成品": "碟片半成品",
+    "外发": "东莞加工厂利鸿",
+}
 
 
 def _qty(record):
@@ -18,6 +23,11 @@ def _qty(record):
 def _name(record, key, fallback):
     value = record.get(key)
     return value if value else fallback
+
+
+def _department(record):
+    name = _name(record, "department", "未分部门")
+    return DEPARTMENT_ALIASES.get(name, name)
 
 
 def _new_total(**extra):
@@ -65,7 +75,7 @@ def _finalize_totals(totals):
 
 
 def _reverse_balance(record, reverse_departments):
-    return _name(record, "department", "未分部门") in reverse_departments
+    return _department(record) in reverse_departments
 
 
 def compute_material_totals(records, reverse_departments=()):
@@ -110,7 +120,7 @@ def compute_department_totals(records, departments, reverse_departments=()):
         for department in departments
     }
     for record in records:
-        department = _name(record, "department", "未分部门")
+        department = _department(record)
         total = totals.setdefault(department, _new_total(department=department))
         _apply_flow(
             total,
@@ -132,7 +142,7 @@ def compute_material_department_totals(records, reverse_departments=()):
     totals = {}
     for record in records:
         material = _name(record, "material", "未分类")
-        department = _name(record, "department", "未分部门")
+        department = _department(record)
         key = (material, department)
         total = totals.setdefault(
             key,
@@ -150,9 +160,9 @@ def compute_material_department_totals(records, reverse_departments=()):
     ordered_keys = sorted(
         totals,
         key=lambda key: (
-            key[0],
             department_order.get(key[1], len(department_order)),
             key[1],
+            key[0],
         ),
     )
     return _finalize_totals(totals[key] for key in ordered_keys)

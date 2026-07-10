@@ -65,7 +65,9 @@ def test_init_migrates_renamed_department_accounts_and_records(db_path):
 
     db.init_db()
     conn = db.get_conn()
-    conn.execute("DELETE FROM users WHERE username IN ('东莞车间', '东莞加工厂利鸿')")
+    conn.execute(
+        "DELETE FROM users WHERE username IN ('东莞车间', '东莞加工厂利鸿', '半成品', '碟片半成品')"
+    )
     conn.execute(
         "INSERT INTO users(username, password_hash, role, department) VALUES (?,?,?,?)",
         ("装配", "assembly-hash", "operator", "装配"),
@@ -73,6 +75,10 @@ def test_init_migrates_renamed_department_accounts_and_records(db_path):
     conn.execute(
         "INSERT INTO users(username, password_hash, role, department) VALUES (?,?,?,?)",
         ("外发", "outsource-hash", "operator", "外发"),
+    )
+    conn.execute(
+        "INSERT INTO users(username, password_hash, role, department) VALUES (?,?,?,?)",
+        ("半成品", "semi-finished-hash", "operator", "半成品"),
     )
     conn.execute(
         "INSERT INTO records(rec_type, material, qty, department) VALUES (?,?,?,?)",
@@ -83,9 +89,18 @@ def test_init_migrates_renamed_department_accounts_and_records(db_path):
         ("issue", "77794-PCBA板", 20, "外发"),
     )
     conn.execute(
+        "INSERT INTO records(rec_type, material, qty, department) VALUES (?,?,?,?)",
+        ("semi_inbound", "77794-PCBA板", 30, "半成品"),
+    )
+    conn.execute(
         "INSERT INTO semi_finished_monthly_totals(department, material, sticker_type) "
         "VALUES (?,?,?)",
         ("装配", "NFC贴纸", "1#NFC贴纸"),
+    )
+    conn.execute(
+        "INSERT INTO semi_finished_monthly_totals(department, material, sticker_type) "
+        "VALUES (?,?,?)",
+        ("半成品", "77794-PCBA板", ""),
     )
     conn.commit()
     conn.close()
@@ -106,7 +121,7 @@ def test_init_migrates_renamed_department_accounts_and_records(db_path):
         "SELECT department FROM semi_finished_monthly_totals WHERE material='NFC贴纸'"
     ).fetchone()["department"]
     old_users = conn.execute(
-        "SELECT COUNT(*) AS c FROM users WHERE username IN ('装配', '外发')"
+        "SELECT COUNT(*) AS c FROM users WHERE username IN ('装配', '外发', '半成品')"
     ).fetchone()["c"]
     conn.close()
 
@@ -115,7 +130,9 @@ def test_init_migrates_renamed_department_accounts_and_records(db_path):
     assert users["东莞车间"]["password_hash"] == "assembly-hash"
     assert users["东莞加工厂利鸿"]["department"] == "东莞加工厂利鸿"
     assert users["东莞加工厂利鸿"]["password_hash"] == "outsource-hash"
-    assert record_departments == ["东莞车间", "东莞加工厂利鸿"]
+    assert users["碟片半成品"]["department"] == "碟片半成品"
+    assert users["碟片半成品"]["password_hash"] == "semi-finished-hash"
+    assert record_departments == ["东莞车间", "东莞加工厂利鸿", "碟片半成品"]
     assert monthly_department == "东莞车间"
 
 
@@ -141,7 +158,7 @@ def test_init_migrates_legacy_pcba_material_name(db_path):
     )
     conn.execute(
         "INSERT INTO semi_finished_monthly_totals(department, material, sticker_type, opening_stock) "
-        "VALUES ('半成品', 'PCBA板', '', 20)"
+        "VALUES ('碟片半成品', 'PCBA板', '', 20)"
     )
     conn.commit()
     conn.close()

@@ -339,7 +339,8 @@ VALID_TYPES = (
 )
 SUPPLIER_DEPARTMENT = "兴信B来料仓"
 ASSEMBLY_DEPARTMENT = "东莞车间"
-SEMI_FINISHED_DEPARTMENT = "半成品"
+SEMI_FINISHED_DEPARTMENT = "碟片半成品"
+SEMI_FINISHED_FILENAME_KEYWORD = "半成品"
 OUTSOURCE_DEPARTMENT = "东莞加工厂利鸿"
 HEYUAN_DEPARTMENT = "河源华兴"
 SHAOYANG_DEPARTMENT = "邵阳"
@@ -712,7 +713,7 @@ def _legacy_int(value, row_no, field, allow_blank=True):
 
 def _parse_legacy_semi_finished_workbook(conn, wb, department):
     if department != SEMI_FINISHED_DEPARTMENT:
-        raise HTTPException(status_code=400, detail="半成品台账只能在半成品部门导入")
+        raise HTTPException(status_code=400, detail="半成品台账只能在碟片半成品部门导入")
 
     bodies = []
     monthly_totals = {}
@@ -1868,7 +1869,7 @@ def _validate_record(body: RecordIn, department: Optional[str] = None):
     if body.rec_type == "semi_finished" and department not in (ASSEMBLY_DEPARTMENT, OUTSOURCE_DEPARTMENT):
         raise HTTPException(status_code=400, detail="半成品入库仅限东莞车间/东莞加工厂利鸿部门")
     if body.rec_type in ("semi_inbound", "semi_outbound") and department != SEMI_FINISHED_DEPARTMENT:
-        raise HTTPException(status_code=400, detail="半成品仓出入库仅限半成品部门")
+        raise HTTPException(status_code=400, detail="半成品仓出入库仅限碟片半成品部门")
     if body.qty is None or body.qty < 0:
         raise HTTPException(status_code=400, detail="数量必须为非负整数")
     if (
@@ -2792,7 +2793,7 @@ def import_records(file: UploadFile = File(...), user=Depends(current_user)):
             or legacy_supplier_import
         )
         if legacy_semi_finished_import:
-            _require_filename_contains(file, SEMI_FINISHED_DEPARTMENT)
+            _require_filename_contains(file, SEMI_FINISHED_FILENAME_KEYWORD)
             bodies, monthly_totals = _parse_legacy_semi_finished_workbook(
                 conn, wb, user["department"]
             )

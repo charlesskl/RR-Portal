@@ -434,7 +434,7 @@ def test_outsource_rejects_other_warehouse_record_types(client):
 
 
 def test_semi_finished_department_can_create_inbound_and_outbound(client):
-    admin_login(client, "半成品")
+    admin_login(client, "碟片半成品")
     inbound = client.post("/api/records", json={
         "rec_type": "semi_inbound", "material": "PCBA板", "qty": 80})
     assert inbound.status_code == 200

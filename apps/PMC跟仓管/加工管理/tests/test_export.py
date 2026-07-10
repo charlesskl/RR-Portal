@@ -212,7 +212,7 @@ def test_export_includes_semi_finished_detail_sheet(client):
 
 
 def test_semi_finished_department_export_has_inbound_and_outbound_sheets(client):
-    admin_login(client, "半成品")
+    admin_login(client, "碟片半成品")
     client.post("/api/records", json={
         "rec_type": "semi_inbound", "material": "PCBA板", "qty": 80})
     client.post("/api/records", json={

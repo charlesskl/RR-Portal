@@ -10,9 +10,10 @@ LEGACY_PCBA_MATERIAL = "PCBA板"
 DEFAULT_MATERIALS = ["NFC贴纸", PCBA_MATERIAL]
 LEGACY_STICKER_TYPES = [f"贴纸{i:02d}" for i in range(1, 41)]
 DEFAULT_STICKER_TYPES = [f"{i}#NFC贴纸" for i in range(1, 46)]
-DEPARTMENTS = ["兴信B来料仓", "东莞车间", "半成品", "东莞加工厂利鸿", "河源华兴", "邵阳", "新邵"]
+DEPARTMENTS = ["兴信B来料仓", "东莞车间", "碟片半成品", "东莞加工厂利鸿", "河源华兴", "邵阳", "新邵"]
 DEPARTMENT_RENAMES = {
     "装配": "东莞车间",
+    "半成品": "碟片半成品",
     "外发": "东莞加工厂利鸿",
 }
 DEFAULT_DEPARTMENT = DEPARTMENTS[0]

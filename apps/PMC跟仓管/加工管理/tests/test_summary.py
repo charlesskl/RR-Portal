@@ -101,7 +101,7 @@ def test_material_totals_group_by_material_name():
         _flow("inbound_raw", "NFC贴纸", "兴信B来料仓", 100),
         _flow("issue", "NFC贴纸", "兴信B来料仓", 30),
         _flow("finished", "PCBA板", "东莞车间", 80),
-        _flow("semi_outbound", "PCBA板", "半成品", 20),
+        _flow("semi_outbound", "PCBA板", "碟片半成品", 20),
     ]
 
     totals = {row["material"]: row for row in compute_material_totals(records)}
@@ -137,6 +137,32 @@ def test_department_totals_include_zero_departments_in_order():
     ]
 
 
+def test_department_totals_normalize_legacy_semi_finished_department():
+    departments = ["兴信B来料仓", "东莞车间", "碟片半成品"]
+    records = [
+        _flow("semi_inbound", "77794-PCBA板", "半成品", 80),
+        _flow("semi_outbound", "77794-PCBA板", "半成品", 30),
+    ]
+
+    department_totals = compute_department_totals(records, departments)
+    material_department_totals = compute_material_department_totals(records)
+
+    assert department_totals == [
+        {"department": "兴信B来料仓", "inbound": 0, "outbound": 0, "balance": 0},
+        {"department": "东莞车间", "inbound": 0, "outbound": 0, "balance": 0},
+        {"department": "碟片半成品", "inbound": 80, "outbound": 30, "balance": 50},
+    ]
+    assert material_department_totals == [
+        {
+            "material": "77794-PCBA板",
+            "department": "碟片半成品",
+            "inbound": 80,
+            "outbound": 30,
+            "balance": 50,
+        }
+    ]
+
+
 def test_material_department_totals_group_by_material_and_department():
     records = [
         _flow("inbound_raw", "NFC贴纸", "兴信B来料仓", 100),
@@ -149,6 +175,24 @@ def test_material_department_totals_group_by_material_and_department():
     assert totals == [
         {"material": "NFC贴纸", "department": "兴信B来料仓", "inbound": 100, "outbound": 30, "balance": 70},
         {"material": "NFC贴纸", "department": "东莞车间", "inbound": 25, "outbound": 0, "balance": 25},
+    ]
+
+
+def test_material_department_totals_order_by_department_then_material():
+    records = [
+        _flow("finished", "77794-PCBA板", "东莞车间", 10),
+        _flow("finished", "NFC贴纸", "东莞车间", 7),
+        _flow("inbound_raw", "77794-PCBA板", "兴信B来料仓", 20),
+        _flow("inbound_raw", "NFC贴纸", "兴信B来料仓", 30),
+    ]
+
+    totals = compute_material_department_totals(records)
+
+    assert [(row["department"], row["material"]) for row in totals] == [
+        ("兴信B来料仓", "77794-PCBA板"),
+        ("兴信B来料仓", "NFC贴纸"),
+        ("东莞车间", "77794-PCBA板"),
+        ("东莞车间", "NFC贴纸"),
     ]
 
 

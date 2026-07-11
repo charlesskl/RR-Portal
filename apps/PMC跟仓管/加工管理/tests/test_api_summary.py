@@ -197,10 +197,12 @@ def test_assembly_summary_subtracts_semi_finished(client):
 
 def test_semi_finished_department_summary_uses_warehouse_balance(client):
     admin_login(client, "碟片半成品")
+    hongya = loc_id(client, "东莞加工厂鸿亚")
     client.post("/api/records", json={
         "rec_type": "semi_inbound", "material": "PCBA板", "qty": 80})
     client.post("/api/records", json={
-        "rec_type": "semi_outbound", "material": "PCBA板", "qty": 30})
+        "rec_type": "semi_outbound", "location_id": hongya,
+        "material": "PCBA板", "qty": 30})
 
     s = client.get("/api/summary").json()
     assert s["raw"]["inbound"] == 80

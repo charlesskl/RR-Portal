@@ -213,10 +213,12 @@ def test_export_includes_semi_finished_detail_sheet(client):
 
 def test_semi_finished_department_export_has_inbound_and_outbound_sheets(client):
     admin_login(client, "碟片半成品")
+    hongya = loc_id(client, "东莞加工厂鸿亚")
     client.post("/api/records", json={
         "rec_type": "semi_inbound", "material": "PCBA板", "qty": 80})
     client.post("/api/records", json={
-        "rec_type": "semi_outbound", "material": "PCBA板", "qty": 30})
+        "rec_type": "semi_outbound", "location_id": hongya,
+        "material": "PCBA板", "qty": 30})
 
     r = client.get("/api/export")
     wb = openpyxl.load_workbook(io.BytesIO(r.content), data_only=True)

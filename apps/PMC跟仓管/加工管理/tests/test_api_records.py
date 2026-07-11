@@ -419,18 +419,23 @@ def test_outsource_can_create_finished_and_semi_finished_without_location(client
     assert by_type["semi_finished"]["location_id"] is None
 
 
-def test_outsource_can_create_issue_finished_and_semi_finished_without_location(client):
+def test_outsource_can_create_issue_with_target_department(client):
     admin_login(client, "东莞加工厂利鸿")
+    semi = loc_id(client, "碟片半成品")
     issue = client.post("/api/records", json={
-        "rec_type": "issue", "material": "PCBA板", "qty": 20})
+        "rec_type": "issue", "location_id": semi,
+        "material": "PCBA板", "qty": 20})
     assert issue.status_code == 200
+    row = client.get("/api/records").json()[0]
+    assert row["location_id"] == semi
 
 
-def test_hongya_outsource_can_create_all_outsource_types_without_location(client):
+def test_hongya_outsource_can_create_all_outsource_types(client):
     admin_login(client, "东莞加工厂鸿亚")
+    semi = loc_id(client, "碟片半成品")
 
     issue = client.post("/api/records", json={
-        "rec_type": "issue", "material": "NFC贴纸",
+        "rec_type": "issue", "location_id": semi, "material": "NFC贴纸",
         "sticker_type": "1#NFC贴纸", "qty": 120})
     finished = client.post("/api/records", json={
         "rec_type": "finished", "material": "NFC贴纸",
@@ -443,7 +448,7 @@ def test_hongya_outsource_can_create_all_outsource_types_without_location(client
     assert semi_finished.status_code == 200
     rows = client.get("/api/records").json()
     by_type = {row["rec_type"]: row for row in rows}
-    assert by_type["issue"]["location_id"] is None
+    assert by_type["issue"]["location_id"] == semi
     assert by_type["finished"]["location_id"] is None
     assert by_type["semi_finished"]["location_id"] is None
 
@@ -458,11 +463,13 @@ def test_outsource_rejects_other_warehouse_record_types(client):
 
 def test_semi_finished_department_can_create_inbound_and_outbound(client):
     admin_login(client, "碟片半成品")
+    hongya = loc_id(client, "东莞加工厂鸿亚")
     inbound = client.post("/api/records", json={
         "rec_type": "semi_inbound", "material": "PCBA板", "qty": 80})
     assert inbound.status_code == 200
     outbound = client.post("/api/records", json={
-        "rec_type": "semi_outbound", "material": "PCBA板", "qty": 30})
+        "rec_type": "semi_outbound", "location_id": hongya,
+        "material": "PCBA板", "qty": 30})
     assert outbound.status_code == 200
 
     rows = client.get("/api/records").json()
@@ -470,7 +477,15 @@ def test_semi_finished_department_can_create_inbound_and_outbound(client):
     assert by_type["semi_inbound"]["qty"] == 80
     assert by_type["semi_outbound"]["qty"] == 30
     assert by_type["semi_inbound"]["location_id"] is None
-    assert by_type["semi_outbound"]["location_id"] is None
+    assert by_type["semi_outbound"]["location_id"] == hongya
+
+
+def test_semi_finished_outbound_requires_target_department(client):
+    admin_login(client, "碟片半成品")
+    r = client.post("/api/records", json={
+        "rec_type": "semi_outbound", "material": "PCBA板", "qty": 30})
+
+    assert r.status_code == 400
 
 
 def test_non_semi_finished_department_rejects_warehouse_types(client):
@@ -536,6 +551,32 @@ def test_xingxin_nfc_issue_auto_syncs_dongguan_issue_record(client):
     assert client.get("/api/records?doc_no=FLOW-XD-001").json() == []
 
 
+def test_xingxin_pcba_issue_auto_syncs_dongguan_issue_record(client):
+    admin_login(client, "兴信B来料仓")
+    dongguan = loc_id(client, "东莞车间")
+    created = client.post("/api/records", json={
+        "rec_type": "issue",
+        "location_id": dongguan,
+        "material": "77794-PCBA板",
+        "rec_date": "2026-07-10",
+        "doc_no": "FLOW-PCBA-XD-001",
+        "qty": 88,
+    })
+    assert created.status_code == 200
+    source_id = created.json()["id"]
+
+    client.post("/api/logout")
+    admin_login(client, "东莞车间")
+    rows = client.get("/api/records?doc_no=FLOW-PCBA-XD-001").json()
+    assert len(rows) == 1
+    assert rows[0]["rec_type"] == "issue"
+    assert rows[0]["location_name"] == "东莞车间"
+    assert rows[0]["material"] == "77794-PCBA板"
+    assert rows[0]["sticker_type"] is None
+    assert rows[0]["qty"] == 88
+    assert rows[0]["source_record_id"] == source_id
+
+
 def test_auto_linked_records_cannot_be_edited_or_deleted_directly(client):
     admin_login(client, "兴信B来料仓")
     dongguan = loc_id(client, "东莞车间")
@@ -591,7 +632,47 @@ def test_semifinished_outbound_to_hongya_auto_creates_hongya_issue(client):
     assert rows[0]["material"] == "NFC贴纸"
     assert rows[0]["sticker_type"] == "1#NFC贴纸"
     assert rows[0]["qty"] == 70
-    assert rows[0]["location_id"] is None
+    assert rows[0]["location_id"] == hongya
+
+
+def test_outsource_issue_requires_target_department(client):
+    admin_login(client, "东莞加工厂鸿亚")
+
+    r = client.post("/api/records", json={
+        "rec_type": "issue",
+        "material": "NFC贴纸",
+        "sticker_type": "1#NFC贴纸",
+        "doc_no": "FLOW-HY-NO-TARGET-001",
+        "qty": 22,
+    })
+
+    assert r.status_code == 400
+
+
+def test_outsource_issue_auto_syncs_target_department_inbound(client):
+    admin_login(client, "东莞加工厂鸿亚")
+    semi = loc_id(client, "碟片半成品")
+
+    created = client.post("/api/records", json={
+        "rec_type": "issue",
+        "location_id": semi,
+        "material": "NFC贴纸",
+        "sticker_type": "1#NFC贴纸",
+        "doc_no": "FLOW-HY-TO-SEMI-001",
+        "qty": 22,
+    })
+    assert created.status_code == 200
+    source_id = created.json()["id"]
+
+    client.post("/api/logout")
+    admin_login(client, "碟片半成品")
+    rows = client.get("/api/records?doc_no=FLOW-HY-TO-SEMI-001").json()
+    assert len(rows) == 1
+    assert rows[0]["rec_type"] == "semi_inbound"
+    assert rows[0]["material"] == "NFC贴纸"
+    assert rows[0]["sticker_type"] == "1#NFC贴纸"
+    assert rows[0]["qty"] == 22
+    assert rows[0]["source_record_id"] == source_id
 
 
 def test_hongya_return_auto_creates_semifinished_inbound(client):
@@ -616,7 +697,7 @@ def test_hongya_return_auto_creates_semifinished_inbound(client):
     assert rows[0]["qty"] == 55
 
 
-def test_semifinished_36_nfc_to_heyuan_auto_creates_heyuan_issue(client):
+def test_semifinished_nfc_to_heyuan_auto_creates_heyuan_issue(client):
     admin_login(client, "碟片半成品")
     heyuan = loc_id(client, "河源华兴")
 
@@ -648,7 +729,11 @@ def test_semifinished_36_nfc_to_heyuan_auto_creates_heyuan_issue(client):
     assert rows_36[0]["location_name"] == "河源华兴"
     assert rows_36[0]["sticker_type"] == "36#NFC贴纸"
     assert rows_36[0]["qty"] == 36
-    assert rows_other == []
+    assert len(rows_other) == 1
+    assert rows_other[0]["rec_type"] == "issue"
+    assert rows_other[0]["location_name"] == "河源华兴"
+    assert rows_other[0]["sticker_type"] == "35#NFC贴纸"
+    assert rows_other[0]["qty"] == 35
 
 
 def test_semifinished_36_nfc_to_shaoyang_huadeng_auto_creates_shaoyang_issue(client):

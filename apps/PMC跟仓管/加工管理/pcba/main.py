@@ -744,6 +744,11 @@ def _parse_legacy_semi_finished_workbook(conn, wb, department):
         if not header_row:
             continue
 
+        location_id = None
+        if rec_type == "semi_outbound":
+            location_id = _location_id_from_name(
+                conn, _legacy_location_from_sheet(ws.title), 1
+            )
         detail_columns = _legacy_detail_columns(ws)
         monthly_col = _legacy_monthly_column(ws, header_row, monthly_header)
         opening_stock_columns = _legacy_opening_stock_columns(ws, header_row)
@@ -812,6 +817,7 @@ def _parse_legacy_semi_finished_workbook(conn, wb, department):
                     doc_no=doc_no,
                     material=NFC_MATERIAL,
                     sticker_type=sticker_type,
+                    location_id=location_id,
                     qty=qty,
                     remark=f"{ws.title}导入",
                 )
@@ -928,7 +934,7 @@ def _add_record_body(bodies, body, department, validate_positive=True):
     bodies.append(body)
 
 
-def _parse_legacy_outsource_workbook(wb, department):
+def _parse_legacy_outsource_workbook(conn, wb, department):
     if not _is_outsource_department(department):
         raise HTTPException(status_code=400, detail="东莞加工厂台账只能在对应加工厂部门导入")
 
@@ -953,6 +959,7 @@ def _parse_legacy_outsource_workbook(wb, department):
                 doc_no = _cell_text(date_value)
             body = RecordIn(
                 rec_type="issue",
+                location_id=_location_id_from_name(conn, department, 1),
                 rec_date=_outsource_date_value(date_value),
                 doc_no=doc_no,
                 material=_normalize_pcba_material(material),
@@ -1027,6 +1034,7 @@ def _parse_legacy_outsource_nfc_workbook(conn, wb, department):
         "领料明细": "issue",
         "入仓明细": "finished",
     }
+    issue_location_id = _location_id_from_name(conn, department, 1)
     for sheet_name, rec_type in sheet_types.items():
         if sheet_name not in wb.sheetnames:
             continue
@@ -1046,6 +1054,7 @@ def _parse_legacy_outsource_nfc_workbook(conn, wb, department):
                     continue
                 body = RecordIn(
                     rec_type=rec_type,
+                    location_id=issue_location_id if rec_type == "issue" else None,
                     rec_date=rec_date,
                     doc_no=doc_no,
                     material=NFC_MATERIAL,
@@ -1951,13 +1960,18 @@ def _validate_record(body: RecordIn, department: Optional[str] = None):
         raise HTTPException(status_code=400, detail="半成品仓出入库仅限碟片半成品部门")
     if body.qty is None or body.qty < 0:
         raise HTTPException(status_code=400, detail="数量必须为非负整数")
+    if body.rec_type in ("issue", "semi_outbound") and not body.location_id:
+        raise HTTPException(status_code=400, detail="出库必须选择目标部门")
     if (
-        body.rec_type in ("issue", "finished", "semi_finished")
+        body.rec_type in ("finished", "semi_finished")
         and not _is_outsource_department(department)
         and not body.location_id
     ):
         raise HTTPException(status_code=400, detail="领料/入库必须选择加工点")
-    if body.rec_type in ("inbound_raw", "semi_inbound") or _is_outsource_department(department):
+    if body.rec_type in ("inbound_raw", "semi_inbound") or (
+        _is_outsource_department(department)
+        and body.rec_type in ("finished", "semi_finished")
+    ):
         body.location_id = None
 
 
@@ -2043,37 +2057,57 @@ def _auto_flow_record_body(
     return body
 
 
+def _auto_receive_record_type(target_department):
+    if target_department == SUPPLIER_DEPARTMENT:
+        return "inbound_raw"
+    if target_department == SEMI_FINISHED_DEPARTMENT:
+        return "semi_inbound"
+    return "issue"
+
+
+def _auto_receive_location_id(conn, target_department, rec_type):
+    if rec_type != "issue":
+        return None
+    return _location_id_from_name(conn, target_department, 1)
+
+
+def _append_department_transfer_target(
+    conn,
+    targets,
+    source_body,
+    source_department,
+    source_location,
+):
+    if source_body.rec_type not in ("issue", "semi_outbound"):
+        return
+    if source_location not in DEPARTMENTS or source_location == source_department:
+        return
+    rec_type = _auto_receive_record_type(source_location)
+    targets.append((
+        source_location,
+        _auto_flow_record_body(
+            source_body,
+            source_department,
+            source_location,
+            rec_type,
+            _auto_receive_location_id(conn, source_location, rec_type),
+        ),
+        "department_transfer",
+    ))
+
+
 def _auto_flow_targets(conn, source_body, source_department):
-    if (
-        source_body.material != NFC_MATERIAL
-        or not source_body.sticker_type
-        or source_body.qty is None
-        or source_body.qty <= 0
-    ):
+    if source_body.qty is None or source_body.qty <= 0:
         return []
 
-    sticker_type = _normalize_sticker_type(
-        conn, source_body.material, source_body.sticker_type
-    )
+    if source_body.material == NFC_MATERIAL and source_body.sticker_type:
+        _normalize_sticker_type(conn, source_body.material, source_body.sticker_type)
     source_location = _location_name_from_id(conn, source_body.location_id)
     targets = []
 
-    if (
-        source_department == SUPPLIER_DEPARTMENT
-        and source_body.rec_type == "issue"
-        and source_location == ASSEMBLY_DEPARTMENT
-    ):
-        targets.append((
-            ASSEMBLY_DEPARTMENT,
-            _auto_flow_record_body(
-                source_body,
-                source_department,
-                ASSEMBLY_DEPARTMENT,
-                "issue",
-                _location_id_from_name(conn, ASSEMBLY_DEPARTMENT, 1),
-            ),
-            "supplier_to_assembly",
-        ))
+    _append_department_transfer_target(
+        conn, targets, source_body, source_department, source_location
+    )
 
     if source_department == ASSEMBLY_DEPARTMENT and source_body.rec_type == "semi_finished":
         targets.append((
@@ -2086,38 +2120,6 @@ def _auto_flow_targets(conn, source_body, source_department):
             ),
             "assembly_to_semi_finished",
         ))
-
-    if source_department == SEMI_FINISHED_DEPARTMENT and source_body.rec_type == "semi_outbound":
-        if source_location == HONGYA_DEPARTMENT:
-            targets.append((
-                HONGYA_DEPARTMENT,
-                _auto_flow_record_body(
-                    source_body,
-                    source_department,
-                    HONGYA_DEPARTMENT,
-                    "issue",
-                ),
-                "semi_finished_to_hongya",
-            ))
-        elif sticker_type == "36#NFC贴纸":
-            destination_departments = {
-                ASSEMBLY_DEPARTMENT: ASSEMBLY_DEPARTMENT,
-                "邵阳华登": SHAOYANG_DEPARTMENT,
-                HEYUAN_DEPARTMENT: HEYUAN_DEPARTMENT,
-            }
-            target_department = destination_departments.get(source_location)
-            if target_department:
-                targets.append((
-                    target_department,
-                    _auto_flow_record_body(
-                        source_body,
-                        source_department,
-                        target_department,
-                        "issue",
-                        _location_id_from_name(conn, source_location, 1),
-                    ),
-                    "semi_finished_36_to_processing",
-                ))
 
     if (
         source_department == HONGYA_DEPARTMENT
@@ -3123,7 +3125,7 @@ def import_records(file: UploadFile = File(...), user=Depends(current_user)):
             monthly_totals = []
         elif legacy_outsource_import:
             _require_filename_contains(file, user["department"])
-            bodies = _parse_legacy_outsource_workbook(wb, user["department"])
+            bodies = _parse_legacy_outsource_workbook(conn, wb, user["department"])
             monthly_totals = []
         elif legacy_outsource_nfc_import:
             _require_filename_contains(file, user["department"])

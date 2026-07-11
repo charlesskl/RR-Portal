@@ -115,8 +115,9 @@ def test_public_summary_can_filter_by_material_and_department(client):
 
 def test_public_summary_uses_outsource_balance_direction(client):
     admin_login(client, "东莞加工厂利鸿")
+    semi = loc_id(client, "碟片半成品")
     client.post("/api/records", json={
-        "rec_type": "issue", "rec_date": "2026-07-01",
+        "rec_type": "issue", "location_id": semi, "rec_date": "2026-07-01",
         "material": "PCBA板", "qty": 100})
     client.post("/api/records", json={
         "rec_type": "semi_finished", "rec_date": "2026-07-02",

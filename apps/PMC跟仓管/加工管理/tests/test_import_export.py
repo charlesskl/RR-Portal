@@ -551,8 +551,10 @@ def test_semi_finished_export_uses_legacy_matrix_workbook(client):
 
 def test_outsource_record_export_uses_legacy_pcba_workbook(client):
     login(client, "东莞加工厂利鸿", "123456", "东莞加工厂利鸿")
+    semi = loc_id(client, "碟片半成品")
     client.post("/api/records", json={
         "rec_type": "issue",
+        "location_id": semi,
         "material": "77794-PCBA板",
         "rec_date": "2026-07-01",
         "doc_no": "LL-LH-001",
@@ -835,7 +837,7 @@ def test_hongya_nfc_legacy_workbook_imports_issue_and_finished_rows(client):
     assert rows[("finished", "2026-07-02")]["qty"] == 20
     assert rows[("issue", "2026-07-01")]["material"] == "NFC贴纸"
     assert rows[("issue", "2026-07-01")]["sticker_type"] == "1#NFC贴纸"
-    assert rows[("issue", "2026-07-01")]["location_name"] is None
+    assert rows[("issue", "2026-07-01")]["location_name"] == "东莞加工厂鸿亚"
     assert rows[("finished", "2026-07-02")]["location_name"] is None
 
     summary = client.get("/api/summary").json()

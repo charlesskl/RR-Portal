@@ -82,6 +82,25 @@ def test_records_are_ordered_by_newest_date_first(client):
     ]
 
 
+def test_same_date_nfc_records_are_ordered_by_sticker_number(client):
+    admin_login(client)
+    for sticker_type in ["45#NFC贴纸", "1#NFC贴纸", "10#NFC贴纸"]:
+        client.post("/api/records", json={
+            "rec_type": "inbound_raw",
+            "rec_date": "2036-06-27",
+            "material": "NFC贴纸",
+            "sticker_type": sticker_type,
+            "doc_no": f"{sticker_type}-SORT-SAME-DATE",
+            "qty": 10,
+        })
+
+    rows = client.get("/api/records?doc_no=SORT-SAME-DATE").json()
+
+    assert [r["sticker_type"] for r in rows] == [
+        "1#NFC贴纸", "10#NFC贴纸", "45#NFC贴纸"
+    ]
+
+
 def test_records_can_filter_by_doc_no_fuzzy(client):
     admin_login(client)
     client.post("/api/records", json={

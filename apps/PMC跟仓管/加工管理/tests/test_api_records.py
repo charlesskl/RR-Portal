@@ -60,6 +60,28 @@ def test_records_can_filter_by_date_range(client):
     assert [r["qty"] for r in rows] == [10]
 
 
+def test_records_are_ordered_by_newest_date_first(client):
+    admin_login(client)
+    client.post("/api/records", json={
+        "rec_type": "inbound_raw", "rec_date": "2026-07-01",
+        "doc_no": "SORT-OLD", "qty": 10})
+    client.post("/api/records", json={
+        "rec_type": "inbound_raw", "rec_date": "2026-07-05",
+        "doc_no": "SORT-NEW-1", "qty": 20})
+    client.post("/api/records", json={
+        "rec_type": "inbound_raw", "rec_date": "2026-07-03",
+        "doc_no": "SORT-MID", "qty": 30})
+    client.post("/api/records", json={
+        "rec_type": "inbound_raw", "rec_date": "2026-07-05",
+        "doc_no": "SORT-NEW-2", "qty": 40})
+
+    rows = client.get("/api/records?doc_no=SORT-").json()
+
+    assert [r["doc_no"] for r in rows] == [
+        "SORT-NEW-2", "SORT-NEW-1", "SORT-MID", "SORT-OLD"
+    ]
+
+
 def test_records_can_filter_by_doc_no_fuzzy(client):
     admin_login(client)
     client.post("/api/records", json={

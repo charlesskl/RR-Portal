@@ -190,6 +190,94 @@ def test_admin_can_delete_any(client):
     assert r.status_code == 200
 
 
+def test_bulk_delete_removes_selected_records_and_linked_records(client):
+    admin_login(client, "兴信B来料仓")
+    dongguan = loc_id(client, "东莞车间")
+    source = client.post("/api/records", json={
+        "rec_type": "issue", "location_id": dongguan,
+        "material": "NFC贴纸", "sticker_type": "1#NFC贴纸",
+        "doc_no": "BULK-LINK-001", "qty": 12}).json()["id"]
+    inbound = client.post("/api/records", json={
+        "rec_type": "inbound_raw", "material": "77794-PCBA板",
+        "doc_no": "BULK-IN-001", "qty": 20}).json()["id"]
+
+    r = client.post("/api/records/bulk-delete", json={"ids": [source, inbound]})
+
+    assert r.status_code == 200
+    assert r.json()["deleted"] == 3
+    assert client.get("/api/records?doc_no=BULK-LINK-001").json() == []
+    assert client.get("/api/records?doc_no=BULK-IN-001").json() == []
+    client.post("/api/logout")
+    admin_login(client, "东莞车间")
+    assert client.get("/api/records?doc_no=BULK-LINK-001").json() == []
+
+
+def test_bulk_delete_rejects_auto_linked_record(client):
+    admin_login(client, "兴信B来料仓")
+    dongguan = loc_id(client, "东莞车间")
+    client.post("/api/records", json={
+        "rec_type": "issue", "location_id": dongguan,
+        "material": "NFC贴纸", "sticker_type": "1#NFC贴纸",
+        "doc_no": "BULK-AUTO-001", "qty": 12})
+    client.post("/api/logout")
+    admin_login(client, "东莞车间")
+    linked_id = client.get("/api/records?doc_no=BULK-AUTO-001").json()[0]["id"]
+
+    r = client.post("/api/records/bulk-delete", json={"ids": [linked_id]})
+
+    assert r.status_code == 400
+
+
+def test_operator_bulk_delete_rejects_other_users_records(client):
+    admin_login(client)
+    lid = loc_id(client, "东莞车间")
+    rid_admin = client.post("/api/records", json={
+        "rec_type": "issue", "location_id": lid, "qty": 100}).json()["id"]
+    client.post("/api/logout")
+    make_operator(client)
+
+    r = client.post("/api/records/bulk-delete", json={"ids": [rid_admin]})
+
+    assert r.status_code == 403
+
+
+def test_admin_can_clear_records_by_department_and_material(client):
+    admin_login(client, "兴信B来料仓")
+    dongguan = loc_id(client, "东莞车间")
+    source_id = client.post("/api/records", json={
+        "rec_type": "issue", "location_id": dongguan,
+        "material": "77794-PCBA板", "doc_no": "CLEAR-PCBA-001", "qty": 18}).json()["id"]
+    keep_id = client.post("/api/records", json={
+        "rec_type": "inbound_raw", "material": "NFC贴纸",
+        "doc_no": "CLEAR-NFC-KEEP", "qty": 30}).json()["id"]
+
+    r = client.post("/api/records/clear", json={
+        "department": "兴信B来料仓",
+        "material": "77794-PCBA板",
+    })
+
+    assert r.status_code == 200
+    assert r.json()["matched"] == 1
+    assert r.json()["deleted"] == 2
+    rows = client.get("/api/records").json()
+    assert all(row["id"] != source_id for row in rows)
+    assert any(row["id"] == keep_id for row in rows)
+    client.post("/api/logout")
+    admin_login(client, "东莞车间")
+    assert client.get("/api/records?doc_no=CLEAR-PCBA-001").json() == []
+
+
+def test_clear_records_requires_admin(client):
+    make_operator(client)
+
+    r = client.post("/api/records/clear", json={
+        "department": "兴信B来料仓",
+        "material": "NFC贴纸",
+    })
+
+    assert r.status_code == 403
+
+
 def test_records_are_isolated_by_department(client):
     admin_login(client, "东莞车间")
     lid = loc_id(client, "东莞车间")

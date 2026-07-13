@@ -1993,6 +1993,15 @@ class RecordBatchIn(BaseModel):
     items: List[StickerRecordItemIn]
 
 
+class RecordBulkDeleteIn(BaseModel):
+    ids: List[int]
+
+
+class RecordClearIn(BaseModel):
+    department: str
+    material: str
+
+
 def _record_extras(body, department):
     supplier = (body.supplier or "").strip() or None
     if department != SUPPLIER_DEPARTMENT:
@@ -3231,6 +3240,52 @@ def _check_owner(row, user):
         raise HTTPException(status_code=403, detail="只能修改自己录入的记录")
 
 
+def _normalized_record_ids(ids):
+    result = []
+    seen = set()
+    for value in ids or []:
+        try:
+            record_id = int(value)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="记录 ID 无效")
+        if record_id <= 0:
+            raise HTTPException(status_code=400, detail="记录 ID 无效")
+        if record_id not in seen:
+            seen.add(record_id)
+            result.append(record_id)
+    if not result:
+        raise HTTPException(status_code=400, detail="请选择要删除的记录")
+    return result
+
+
+def _delete_record_ids_with_links(conn, record_ids):
+    if not record_ids:
+        return 0
+    deleted = 0
+    chunk_size = 500
+    for start in range(0, len(record_ids), chunk_size):
+        chunk = record_ids[start:start + chunk_size]
+        placeholders = ",".join("?" for _ in chunk)
+        linked_count = conn.execute(
+            f"SELECT COUNT(*) AS c FROM records WHERE source_record_id IN ({placeholders})",
+            chunk,
+        ).fetchone()["c"]
+        conn.execute(
+            f"DELETE FROM records WHERE source_record_id IN ({placeholders})",
+            chunk,
+        )
+        deleted += int(linked_count or 0)
+    for start in range(0, len(record_ids), chunk_size):
+        chunk = record_ids[start:start + chunk_size]
+        placeholders = ",".join("?" for _ in chunk)
+        cur = conn.execute(
+            f"DELETE FROM records WHERE id IN ({placeholders})",
+            chunk,
+        )
+        deleted += int(cur.rowcount or 0)
+    return deleted
+
+
 @app.put("/api/records/{record_id}")
 def update_record(record_id: int, body: RecordIn, user=Depends(current_user)):
     conn = db.get_conn()
@@ -3264,12 +3319,55 @@ def delete_record(record_id: int, user=Depends(current_user)):
         row = _get_record_or_404(conn, record_id, user["department"])
         _reject_auto_record_direct_edit(row)
         _check_owner(row, user)
-        conn.execute("DELETE FROM records WHERE source_record_id=?", (record_id,))
-        conn.execute("DELETE FROM records WHERE id=?", (record_id,))
+        deleted = _delete_record_ids_with_links(conn, [record_id])
         conn.commit()
     finally:
         conn.close()
-    return {"ok": True}
+    return {"ok": True, "deleted": deleted}
+
+
+@app.post("/api/records/bulk-delete")
+def bulk_delete_records(body: RecordBulkDeleteIn, user=Depends(current_user)):
+    record_ids = _normalized_record_ids(body.ids)
+    placeholders = ",".join("?" for _ in record_ids)
+    conn = db.get_conn()
+    try:
+        rows = conn.execute(
+            f"SELECT * FROM records WHERE department=? AND id IN ({placeholders})",
+            [user["department"], *record_ids],
+        ).fetchall()
+        rows_by_id = {row["id"]: row for row in rows}
+        if len(rows_by_id) != len(record_ids):
+            raise HTTPException(status_code=404, detail="部分记录不存在")
+        for record_id in record_ids:
+            row = rows_by_id[record_id]
+            _reject_auto_record_direct_edit(row)
+            _check_owner(row, user)
+        deleted = _delete_record_ids_with_links(conn, record_ids)
+        conn.commit()
+    finally:
+        conn.close()
+    return {"ok": True, "deleted": deleted}
+
+
+@app.post("/api/records/clear")
+def clear_records(body: RecordClearIn, _admin=Depends(require_admin)):
+    department = _validate_department(body.department)
+    material = (body.material or "").strip()
+    if not material:
+        raise HTTPException(status_code=400, detail="请选择物料")
+    conn = db.get_conn()
+    try:
+        rows = conn.execute(
+            "SELECT id FROM records WHERE department=? AND material=?",
+            (department, material),
+        ).fetchall()
+        record_ids = [row["id"] for row in rows]
+        deleted = _delete_record_ids_with_links(conn, record_ids)
+        conn.commit()
+    finally:
+        conn.close()
+    return {"ok": True, "matched": len(record_ids), "deleted": deleted}
 
 
 def _all_records_for_summary(conn, department, filters=None):

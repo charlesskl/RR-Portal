@@ -38,6 +38,7 @@ let DEPARTMENTS = [];
 let SUPPLIERS = [];
 let MATERIALS = [];
 let STICKER_TYPES = [];
+let SELECTED_RECORD_IDS = new Set();
 let editingId = null;
 let editingMaterialId = null;
 let editingSupplierId = null;
@@ -305,6 +306,7 @@ async function loadDepartments() {
       .map(name => `<option value="${esc(name)}">${esc(name)}</option>`)
       .join('');
   }
+  configureClearDataPanel();
 }
 
 function configureEntryForDepartment() {
@@ -353,6 +355,7 @@ async function loadMaterials() {
   }
   el('material').value = ACTIVE_ENTRY_MATERIAL;
   renderEntryMaterialTabs();
+  configureClearDataPanel();
 
   const form = el('materialForm');
   if (form) form.style.display = '';
@@ -745,24 +748,70 @@ function cancelEdit() {
 async function loadRecords() {
   const r = await api(withFilters('/api/records'));
   RECORDS = await r.json();
+  SELECTED_RECORD_IDS.clear();
+  renderRecordsTable();
+}
+
+function visibleEntryRecords() {
+  return RECORDS.filter(x =>
+    (!ACTIVE_ENTRY_TYPE || x.rec_type === ACTIVE_ENTRY_TYPE) &&
+    (!ACTIVE_ENTRY_MATERIAL || x.material === ACTIVE_ENTRY_MATERIAL)
+  );
+}
+
+function canDeleteRecord(rec) {
+  return !!rec && !rec.source_record_id && (ME.role === 'admin' || rec.created_by === ME.id);
+}
+
+function updateRecordSelectionUi(visibleRecords = null) {
+  const records = visibleRecords || visibleEntryRecords();
+  const deletable = records.filter(canDeleteRecord);
+  const deletableIds = new Set(deletable.map(x => x.id));
+  SELECTED_RECORD_IDS = new Set([...SELECTED_RECORD_IDS].filter(id => deletableIds.has(id)));
+  const selectedCount = SELECTED_RECORD_IDS.size;
+  const text = el('recordSelectedText');
+  if (text) text.textContent = `已选择 ${selectedCount} 条`;
+  const bulkBtn = el('bulkDeleteBtn');
+  if (bulkBtn) bulkBtn.disabled = selectedCount === 0;
+  const all = document.getElementById('recordSelectAll');
+  if (all) {
+    all.disabled = deletable.length === 0;
+    all.checked = deletable.length > 0 && selectedCount === deletable.length;
+    all.indeterminate = selectedCount > 0 && selectedCount < deletable.length;
+  }
+}
+
+function onRecordSelectChange(id, checked) {
+  if (checked) SELECTED_RECORD_IDS.add(id);
+  else SELECTED_RECORD_IDS.delete(id);
+  updateRecordSelectionUi();
+}
+
+function toggleRecordSelectionAll(checked) {
+  visibleEntryRecords().forEach(x => {
+    if (!canDeleteRecord(x)) return;
+    if (checked) SELECTED_RECORD_IDS.add(x.id);
+    else SELECTED_RECORD_IDS.delete(x.id);
+  });
   renderRecordsTable();
 }
 
 function renderRecordsTable() {
   renderRecordHeader();
   const tb = document.querySelector('#recTable tbody');
-  const emptyColspan = 10 + (isXingxin() ? 1 : 0) + (supportsPoCustomer() ? 2 : 0);
-  const visibleRecords = RECORDS.filter(x =>
-    (!ACTIVE_ENTRY_TYPE || x.rec_type === ACTIVE_ENTRY_TYPE) &&
-    (!ACTIVE_ENTRY_MATERIAL || x.material === ACTIVE_ENTRY_MATERIAL)
-  );
+  const emptyColspan = 11 + (isXingxin() ? 1 : 0) + (supportsPoCustomer() ? 2 : 0);
+  const visibleRecords = visibleEntryRecords();
+  updateRecordSelectionUi(visibleRecords);
   tb.innerHTML = visibleRecords.map(x => {
     const canEdit = ME.role === 'admin' || x.created_by === ME.id;
+    const canDelete = canDeleteRecord(x);
+    const checkTitle = x.source_record_id ? '自动生成记录不能直接删除' : '选择删除';
     const ops = canEdit
       ? `<button class="btn-edit btn-sm" onclick="startEdit(${x.id})">修改</button>` +
         `<button class="btn-danger btn-sm" onclick="delRecord(${x.id})">删除</button>`
       : '';
     return `<tr>
+      <td class="select-col"><input type="checkbox" class="record-check" title="${checkTitle}" onchange="onRecordSelectChange(${x.id}, this.checked)" ${SELECTED_RECORD_IDS.has(x.id) ? 'checked' : ''} ${canDelete ? '' : 'disabled'}></td>
       <td>${esc(typeLabel(x.rec_type))}</td>
       <td>${esc(x.material)}</td>
       <td>${esc(x.sticker_type)}</td>
@@ -777,12 +826,14 @@ function renderRecordsTable() {
       <td>${ops}</td>
     </tr>`;
   }).join('') || `<tr><td colspan="${emptyColspan}">当前页面暂无记录</td></tr>`;
+  updateRecordSelectionUi(visibleRecords);
 }
 
 function renderRecordHeader() {
   const supplierHead = isXingxin() ? '<th>供应商</th>' : '';
   const poCustomerHead = supportsPoCustomer() ? '<th>PO</th><th>客名</th>' : '';
   document.querySelector('#recTable thead').innerHTML = `<tr>
+    <th class="select-col"><input id="recordSelectAll" type="checkbox" title="全选可删除记录" onchange="toggleRecordSelectionAll(this.checked)"></th>
     <th>类型</th><th>物料名称</th><th>贴纸类型</th><th>加工点</th>${supplierHead}<th>日期</th><th>单据编号</th>${poCustomerHead}
     <th>数量</th><th>备注</th><th>录入人</th><th>操作</th>
   </tr>`;
@@ -798,6 +849,79 @@ async function delRecord(id) {
   } else {
     const e = await r.json();
     alert(e.detail || '删除失败');
+  }
+}
+
+async function deleteSelectedRecords() {
+  const ids = [...SELECTED_RECORD_IDS];
+  if (!ids.length) return;
+  if (!confirm(`确定删除选中的 ${ids.length} 条记录？源记录的自动联动记录会一并删除。`)) return;
+  const r = await api('/api/records/bulk-delete', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ids}),
+  });
+  if (r.ok) {
+    const data = await r.json();
+    SELECTED_RECORD_IDS.clear();
+    if (ids.includes(editingId)) cancelEdit();
+    await loadRecords();
+    if (el('summary').style.display !== 'none') await loadSummary();
+    setMessage('entryErr', `已删除 ${data.deleted || ids.length} 条记录`, true);
+  } else {
+    const e = await r.json();
+    alert(e.detail || '批量删除失败');
+  }
+}
+
+function configureClearDataPanel() {
+  const panel = document.getElementById('clearDataPanel');
+  if (!panel) return;
+  if (!ME || ME.role !== 'admin') {
+    panel.style.display = 'none';
+    return;
+  }
+  panel.style.display = '';
+  const dept = el('clearDepartment');
+  const material = el('clearMaterial');
+  if (DEPARTMENTS.length) {
+    const current = dept.value || ME.department;
+    dept.innerHTML = DEPARTMENTS.map(name =>
+      `<option value="${esc(name)}" ${name === current ? 'selected' : ''}>${esc(name)}</option>`
+    ).join('');
+  }
+  if (MATERIALS.length) {
+    const currentMaterial = material.value || ACTIVE_ENTRY_MATERIAL;
+    material.innerHTML = MATERIALS.map(m =>
+      `<option value="${esc(m.name)}" ${m.name === currentMaterial ? 'selected' : ''}>${esc(m.name)}</option>`
+    ).join('');
+  }
+}
+
+async function clearRecordsByDepartmentMaterial() {
+  const department = el('clearDepartment').value;
+  const material = el('clearMaterial').value;
+  if (!department || !material) {
+    setMessage('entryErr', '请选择要清空的部门和物料', false);
+    return;
+  }
+  const ok = confirm(`确定清空「${department} / ${material}」的所有流水数据？此操作不可撤销。`);
+  if (!ok) return;
+  const r = await api('/api/records/clear', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({department, material}),
+  });
+  if (r.ok) {
+    const data = await r.json();
+    SELECTED_RECORD_IDS.clear();
+    cancelEdit();
+    await loadRecords();
+    if (el('summary').style.display !== 'none') await loadSummary();
+    setMessage('entryErr', `已清空 ${department} / ${material}，删除 ${data.deleted || 0} 条记录`, true);
+  } else {
+    const e = await r.json();
+    setMessage('entryErr', e.detail || '清空失败', false);
   }
 }
 

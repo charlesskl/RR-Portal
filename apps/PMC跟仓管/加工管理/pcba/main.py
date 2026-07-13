@@ -116,6 +116,10 @@ class LoginIn(BaseModel):
     department: str
 
 
+class DepartmentSwitchIn(BaseModel):
+    department: str
+
+
 def _validate_department(department: Optional[str], required=True):
     if not department:
         if required:
@@ -204,6 +208,19 @@ def logout(request: Request):
 @app.get("/api/me")
 def me(user=Depends(current_user)):
     return user
+
+
+@app.post("/api/me/department")
+def switch_current_department(
+    body: DepartmentSwitchIn,
+    request: Request,
+    user=Depends(require_admin),
+):
+    department = _validate_department(body.department)
+    request.session["department"] = department
+    result = dict(user)
+    result["department"] = department
+    return result
 
 
 # ---------- 用户管理（仅 admin） ----------

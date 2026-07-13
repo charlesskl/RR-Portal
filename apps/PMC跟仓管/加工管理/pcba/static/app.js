@@ -273,17 +273,76 @@ function updateFilterText() {
   el('currentFilterText').textContent = parts.length ? parts.join('，') : '当前显示全部日期';
 }
 
+function renderCurrentUser() {
+  el('who').textContent = `${ME.username}（${ME.role === 'admin' ? '管理员' : '录入员'}） - ${ME.department}`;
+  el('deptTitle').textContent = `${ME.department}工作台`;
+}
+
+function configureAdminDepartmentSwitcher() {
+  const panel = document.getElementById('adminDepartmentSwitcher');
+  if (!panel) return;
+  if (!ME || ME.role !== 'admin') {
+    panel.style.display = 'none';
+    return;
+  }
+  panel.style.display = '';
+  const select = el('currentDepartmentSelect');
+  select.innerHTML = DEPARTMENTS.map(name =>
+    `<option value="${esc(name)}" ${name === ME.department ? 'selected' : ''}>${esc(name)}</option>`
+  ).join('');
+}
+
+async function reloadWorkspaceAfterDepartmentSwitch() {
+  SELECTED_RECORD_IDS.clear();
+  cancelEdit();
+  ACTIVE_ENTRY_TYPE = '';
+  ACTIVE_ENTRY_MATERIAL = '';
+  await loadLocations();
+  await loadMaterials();
+  await loadStickerTypes();
+  await loadSuppliers();
+  configureEntryForDepartment();
+  onTypeChange();
+  await loadRecords();
+  if (el('summary').style.display !== 'none') await loadSummary();
+  if (el('users').style.display !== 'none') await loadUsers();
+}
+
+async function switchCurrentDepartment() {
+  const select = el('currentDepartmentSelect');
+  const department = select.value;
+  if (!department || department === ME.department) return;
+  const previousDepartment = ME.department;
+  const r = await api('/api/me/department', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({department}),
+  });
+  if (r.ok) {
+    ME = await r.json();
+    renderCurrentUser();
+    configureAdminDepartmentSwitcher();
+    await reloadWorkspaceAfterDepartmentSwitch();
+    setMessage('entryErr', `已切换到 ${ME.department}`, true);
+  } else {
+    select.value = previousDepartment;
+    const e = await r.json();
+    alert(e.detail || '切换部门失败');
+  }
+}
+
 async function init() {
   const r = await api('/api/me');
   ME = await r.json();
-  el('who').textContent = `${ME.username}（${ME.role === 'admin' ? '管理员' : '录入员'}） - ${ME.department}`;
-  el('deptTitle').textContent = `${ME.department}工作台`;
+  renderCurrentUser();
 
   el('matTabBtn').style.display = '';
   el('supTabBtn').style.display = '';
   if (ME.role === 'admin') {
     el('usersTabBtn').style.display = '';
     await loadDepartments();
+  } else {
+    configureAdminDepartmentSwitcher();
   }
 
   await loadLocations();
@@ -306,6 +365,7 @@ async function loadDepartments() {
       .map(name => `<option value="${esc(name)}">${esc(name)}</option>`)
       .join('');
   }
+  configureAdminDepartmentSwitcher();
   configureClearDataPanel();
 }
 

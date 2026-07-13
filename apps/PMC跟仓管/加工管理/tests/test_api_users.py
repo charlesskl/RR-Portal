@@ -77,6 +77,49 @@ def test_admin_can_login_to_any_department(client):
     assert r.json()["department"] == "新邵"
 
 
+def test_admin_can_switch_department_without_relogin(client):
+    login(client, "admin", "admin123")
+    departments = client.get("/api/departments").json()
+    target_department = departments[1]
+
+    client.post("/api/records", json={
+        "rec_type": "inbound_raw", "doc_no": "SWITCH-DEFAULT", "qty": 5})
+
+    r = client.post("/api/me/department", json={"department": target_department})
+
+    assert r.status_code == 200
+    assert r.json()["department"] == target_department
+    assert client.get("/api/me").json()["department"] == target_department
+
+    client.post("/api/records", json={
+        "rec_type": "inbound_raw", "doc_no": "SWITCH-TARGET", "qty": 7})
+    rows = client.get("/api/records").json()
+    assert any(row["doc_no"] == "SWITCH-TARGET" for row in rows)
+    assert all(row["doc_no"] != "SWITCH-DEFAULT" for row in rows)
+
+    r = client.post("/api/me/department", json={"department": DEFAULT_DEPARTMENT})
+
+    assert r.status_code == 200
+    rows = client.get("/api/records").json()
+    assert any(row["doc_no"] == "SWITCH-DEFAULT" for row in rows)
+    assert all(row["doc_no"] != "SWITCH-TARGET" for row in rows)
+
+
+def test_operator_cannot_switch_department(client):
+    login(client, "admin", "admin123")
+    client.post("/api/users", json={
+        "username": "op_switch_department", "password": "pw123456",
+        "role": "operator", "department": DEFAULT_DEPARTMENT})
+    target_department = client.get("/api/departments").json()[1]
+    client.post("/api/logout")
+    login(client, "op_switch_department", "pw123456")
+
+    r = client.post("/api/me/department", json={"department": target_department})
+
+    assert r.status_code == 403
+    assert client.get("/api/me").json()["department"] == DEFAULT_DEPARTMENT
+
+
 def test_operator_requires_department_when_created(client):
     login(client, "admin", "admin123")
     r = client.post("/api/users", json={

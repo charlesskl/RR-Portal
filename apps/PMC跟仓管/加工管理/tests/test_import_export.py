@@ -919,7 +919,7 @@ def test_supplier_pcba_legacy_workbook_imports_inbound_and_issue_rows(client):
     assert len(client.get("/api/records").json()) == 7
 
 
-def test_supplier_nfc_legacy_workbook_imports_opening_and_detail_rows(client):
+def test_supplier_nfc_legacy_workbook_keeps_summary_rows_out_of_record_list(client):
     login(client, "兴信B来料仓", "123456", DEFAULT_DEPARTMENT)
 
     r = upload_bytes(client, "/api/records/import", legacy_supplier_nfc_workbook_bytes())
@@ -928,12 +928,10 @@ def test_supplier_nfc_legacy_workbook_imports_opening_and_detail_rows(client):
     assert r.status_code == 200
     assert r.json()["created"] == 6
     rows = {(row["rec_type"], row["doc_no"]): row for row in records}
-    assert rows[("inbound_raw", "1#NFC贴纸-期初入仓")]["qty"] == 100
-    assert rows[("issue", "1#NFC贴纸-东莞期初出仓")]["qty"] == 60
-    assert rows[("issue", "1#NFC贴纸-邵阳期初领料")]["qty"] == 15
-    assert rows[("inbound_raw", "1#NFC贴纸-期初入仓")]["rec_date"] == "2026-06-27"
-    assert rows[("issue", "1#NFC贴纸-东莞期初出仓")]["rec_date"] == "2026-06-27"
-    assert rows[("issue", "1#NFC贴纸-邵阳期初领料")]["rec_date"] == "2026-06-27"
+    assert sorted(row["doc_no"] for row in records) == ["CK-1", "RK-1", "RK-2"]
+    assert rows[("inbound_raw", "RK-1")]["qty"] == 50
+    assert rows[("inbound_raw", "RK-2")]["qty"] == 30
+    assert rows[("issue", "CK-1")]["qty"] == 30
     assert rows[("issue", "CK-1")]["location_name"] == "东莞车间"
     assert all(row["sticker_type"] == "1#NFC贴纸" for row in records)
 
@@ -950,7 +948,7 @@ def test_supplier_nfc_legacy_workbook_imports_opening_and_detail_rows(client):
     assert second.status_code == 200
     assert second.json()["created"] == 0
     assert second.json()["skipped"] == 6
-    assert len(client.get("/api/records").json()) == 6
+    assert len(client.get("/api/records").json()) == 3
 
 
 def test_operator_can_import_and_export_materials(client):

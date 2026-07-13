@@ -2240,6 +2240,8 @@ def list_records(
         if rec_type:
             sql += " AND r.rec_type = ?"
             params.append(rec_type)
+        sql += " AND COALESCE(r.remark, '') NOT LIKE ?"
+        params.append("总表%导入")
         sql, params = _append_date_filter(sql, params, filters)
         sql += (
             " ORDER BY r.rec_date IS NULL, r.rec_date DESC, "

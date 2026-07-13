@@ -2241,7 +2241,12 @@ def list_records(
             sql += " AND r.rec_type = ?"
             params.append(rec_type)
         sql, params = _append_date_filter(sql, params, filters)
-        sql += " ORDER BY r.rec_date IS NULL, r.rec_date DESC, r.id DESC"
+        sql += (
+            " ORDER BY r.rec_date IS NULL, r.rec_date DESC, "
+            "CASE WHEN r.sticker_type GLOB '[0-9]*#*' THEN 0 ELSE 1 END, "
+            "CASE WHEN r.sticker_type GLOB '[0-9]*#*' THEN CAST(r.sticker_type AS INTEGER) END, "
+            "r.id DESC"
+        )
         rows = conn.execute(sql, params).fetchall()
     finally:
         conn.close()

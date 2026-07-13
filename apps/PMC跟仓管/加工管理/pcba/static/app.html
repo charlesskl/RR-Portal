@@ -61,6 +61,16 @@
     <div id="entryTypeTabs" class="entry-type-tabs"></div>
     <div id="entryMaterialTabs" class="entry-type-tabs material-tabs"></div>
 
+    <div id="clearDataPanel" class="danger-panel clear-data-panel" style="display:none">
+      <div>
+        <div class="mini-title">清空数据</div>
+        <p>按部门和物料清空流水，源记录的自动联动记录会一并删除。</p>
+      </div>
+      <select id="clearDepartment" title="清空部门"></select>
+      <select id="clearMaterial" title="清空物料"></select>
+      <button class="btn-danger" onclick="clearRecordsByDepartmentMaterial()">清空数据</button>
+    </div>
+
     <div class="form-grid">
       <select id="recType" style="display:none"></select>
       <select id="locationId"></select>
@@ -80,6 +90,10 @@
       <div id="stickerTypeGrid" class="sticker-grid"></div>
     </div>
     <p id="entryErr" class="err"></p>
+    <div id="recordBulkBar" class="record-bulk-bar">
+      <span id="recordSelectedText">已选择 0 条</span>
+      <button id="bulkDeleteBtn" class="btn-danger btn-sm" onclick="deleteSelectedRecords()" disabled>删除所选</button>
+    </div>
     <div class="table-wrap">
       <table id="recTable"><thead></thead><tbody></tbody></table>
     </div>

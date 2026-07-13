@@ -44,6 +44,22 @@ def test_entry_page_exposes_type_subpage_container():
     assert 'onclick="exportRecords()"' in html
 
 
+def test_entry_page_exposes_clear_and_bulk_delete_controls():
+    html = (ROOT / "pcba/static/app.html").read_text(encoding="utf-8")
+    js = (ROOT / "pcba/static/app.js").read_text(encoding="utf-8")
+
+    assert 'id="clearDataPanel"' in html
+    assert 'id="clearDepartment"' in html
+    assert 'id="clearMaterial"' in html
+    assert 'onclick="clearRecordsByDepartmentMaterial()"' in html
+    assert 'id="recordBulkBar"' in html
+    assert 'id="recordSelectAll"' in js
+    assert "function deleteSelectedRecords()" in js
+    assert "function clearRecordsByDepartmentMaterial()" in js
+    assert "/api/records/bulk-delete" in js
+    assert "/api/records/clear" in js
+
+
 def test_entry_records_are_filtered_by_active_type():
     js = (ROOT / "pcba/static/app.js").read_text(encoding="utf-8")
 

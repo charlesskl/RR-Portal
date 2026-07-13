@@ -1,14 +1,68 @@
 import { useState, useEffect, useRef } from 'react';
 import { Upload, Button, Table, message, Card, Space, Tag, Popconfirm, Input, InputNumber, Drawer, Form } from 'antd';
-import { UploadOutlined, DeleteOutlined, ClearOutlined, DownloadOutlined, PlusOutlined } from '@ant-design/icons';
+import {
+  DeleteOutlined,
+  ClearOutlined,
+  DownloadOutlined,
+  PlusOutlined,
+  InboxOutlined,
+  CheckCircleOutlined,
+} from '@ant-design/icons';
 import axios from 'axios';
 import { apiUrl } from '../api';
 
 const API = '/api/orders';
 
+const PARSER_LABELS = {
+  'beihuo-fixed-table': '啤货表坐标规则',
+  'beihuo-image-grid': '啤货表图片网格',
+  'beihuo-excel': '啤货表 Excel',
+  'xingxin-excel': '兴信生产单 Excel',
+  'generic-excel': '通用 Excel',
+  'outsource-A_xinxin': '兴信外发规则',
+  'qwen-pdf-vision': 'PDF 视觉识别',
+  'qwen-image-vision': '图片视觉识别',
+  'local-pdf': '本地 PDF 规则',
+  'local-image-ocr': '本地图片 OCR',
+};
+
+function validatePreviewOrder(row) {
+  const errors = [];
+  const warnings = [];
+  const quantity = Number(row.quantity_needed) || 0;
+  const shotWeight = Number(row.shot_weight) || 0;
+  const materialKg = Number(row.material_kg) || 0;
+
+  if (!String(row.mold_no || '').trim() && !String(row.mold_name || '').trim()) {
+    errors.push('缺少模具编号或模具名称');
+  }
+  if (!(quantity > 0)) errors.push('需啤数必须大于 0');
+  if (!String(row.product_code || '').trim()) warnings.push('产品货号为空');
+  if (!String(row.material_type || '').trim()) warnings.push('料型为空');
+  if (!(shotWeight > 0)) warnings.push('啤重为空或为 0');
+  if (!(materialKg > 0)) warnings.push('用料KG为空或为 0');
+
+  if (shotWeight > 0 && quantity > 0 && materialKg > 0) {
+    const expected = shotWeight * quantity / 1000;
+    const difference = Math.abs(expected - materialKg) / Math.max(expected, materialKg, 1);
+    if (difference > 0.1) {
+      warnings.push(
+        '重量偏差 ' + Math.round(difference * 100)
+        + '%，按啤重和啤数应约 ' + expected.toFixed(2) + 'KG'
+      );
+    }
+  }
+  return { errors, warnings };
+}
+
 export default function OrderImport({ workshop = 'B' }) {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [parsing, setParsing] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewRows, setPreviewRows] = useState([]);
+  const [previewFiles, setPreviewFiles] = useState([]);
+  const [confirming, setConfirming] = useState(false);
 
   const fetchOrders = async () => {
     setLoading(true);
@@ -21,10 +75,16 @@ export default function OrderImport({ workshop = 'B' }) {
     setLoading(false);
   };
 
-  useEffect(() => { fetchOrders(); }, [workshop]);
+  useEffect(() => {
+    fetchOrders();
+    setPreviewOpen(false);
+    setPreviewRows([]);
+    setPreviewFiles([]);
+  }, [workshop]);
 
   const uploadQueue = useRef([]);
   const uploadTimer = useRef(null);
+  const previewSequence = useRef(0);
 
   const handleUpload = (file) => {
     uploadQueue.current.push(file);
@@ -37,31 +97,112 @@ export default function OrderImport({ workshop = 'B' }) {
   const processUploadQueue = async () => {
     const files = [...uploadQueue.current];
     uploadQueue.current = [];
-    let totalCount = 0;
-    let failCount = 0;
-    let failNames = [];
-    for (const f of files) {
-      const formData = new FormData();
-      formData.append('file', f);
-      formData.append('workshop', workshop);
-      try {
-        const { data } = await axios.post(`${API}/import`, formData, { timeout: 120000 });
-        const cnt = data.count || 0;
-        totalCount += cnt;
-        if (cnt === 0) failNames.push(f.name);
-      } catch (e) {
-        failCount++;
-        failNames.push(f.name);
+    if (files.length === 0) return;
+    setParsing(true);
+    const nextRows = [];
+    const parsedFiles = [];
+    const failMessages = [];
+
+    try {
+      for (const file of files) {
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('workshop', workshop);
+        formData.append('preview', '1');
+        try {
+          const { data } = await axios.post(API + '/import', formData, { timeout: 120000 });
+          const fileRows = Array.isArray(data.orders) ? data.orders : [];
+          parsedFiles.push({
+            name: data.source_file || file.name,
+            parser: data.parser || 'unknown',
+            count: fileRows.length,
+          });
+          for (const row of fileRows) {
+            previewSequence.current += 1;
+            nextRows.push({
+              ...row,
+              preview_id: 'preview-' + previewSequence.current,
+              source_file: data.source_file || file.name,
+              parser: data.parser || row.parser || 'unknown',
+            });
+          }
+        } catch (error) {
+          failMessages.push(
+            file.name + '：' + (error.response?.data?.message || error.message)
+          );
+        }
       }
+
+      if (nextRows.length > 0) {
+        setPreviewRows(nextRows);
+        setPreviewFiles(parsedFiles);
+        setPreviewOpen(true);
+        message.success('成功解析 ' + nextRows.length + ' 条订单，请核对后确认导入');
+        if (failMessages.length > 0) message.warning(failMessages.join('；'), 8);
+      } else if (failMessages.length > 0) {
+        message.error(failMessages.join('；'), 10);
+      } else {
+        message.warning('未解析出订单数据');
+      }
+    } finally {
+      setParsing(false);
     }
-    if (totalCount > 0) {
-      let msg = `成功导入 ${totalCount} 条订单`;
-      if (failNames.length > 0) msg += `（${failNames.length}个文件未解析：${failNames.join('、')}）`;
-      message.success(msg);
-    } else {
-      message.warning('未解析出订单数据');
+  };
+
+  const updatePreviewRow = (previewId, field, value) => {
+    setPreviewRows((rows) => rows.map((row) => (
+      row.preview_id === previewId ? { ...row, [field]: value } : row
+    )));
+  };
+
+  const removePreviewRow = (previewId) => {
+    setPreviewRows((rows) => rows.filter((row) => row.preview_id !== previewId));
+  };
+
+  const closePreview = () => {
+    if (confirming) return;
+    setPreviewOpen(false);
+    setPreviewRows([]);
+    setPreviewFiles([]);
+  };
+
+  const previewSummary = previewRows.reduce((summary, row) => {
+    const result = validatePreviewOrder(row);
+    if (result.errors.length > 0) summary.errors += 1;
+    summary.warnings += result.warnings.length;
+    return summary;
+  }, { errors: 0, warnings: 0 });
+
+  const confirmPreviewImport = async () => {
+    if (previewRows.length === 0) {
+      message.warning('没有可导入的订单');
+      return;
     }
-    fetchOrders();
+    if (previewSummary.errors > 0) {
+      message.error('还有 ' + previewSummary.errors + ' 条错误订单，请先修正');
+      return;
+    }
+
+    setConfirming(true);
+    try {
+      const ordersToImport = previewRows.map((row) => {
+        const { preview_id, validation, ...order } = row;
+        return order;
+      });
+      const { data } = await axios.post(API + '/import-confirm', {
+        workshop,
+        orders: ordersToImport,
+      }, { timeout: 120000 });
+      message.success(data.message || ('成功导入 ' + ordersToImport.length + ' 条订单'));
+      setPreviewOpen(false);
+      setPreviewRows([]);
+      setPreviewFiles([]);
+      fetchOrders();
+    } catch (error) {
+      message.error(error.response?.data?.message || ('确认导入失败：' + error.message), 8);
+    } finally {
+      setConfirming(false);
+    }
   };
 
   const handleDelete = async (id) => {
@@ -261,13 +402,113 @@ export default function OrderImport({ workshop = 'B' }) {
     },
   ];
 
+  const previewTextColumn = (title, field, width) => ({
+    title,
+    dataIndex: field,
+    width,
+    render: (value, record) => (
+      <Input
+        size="small"
+        value={value || ''}
+        onChange={(event) => updatePreviewRow(record.preview_id, field, event.target.value)}
+      />
+    ),
+  });
+
+  const previewNumberColumn = (title, field, width, options = {}) => ({
+    title,
+    dataIndex: field,
+    width,
+    render: (value, record) => (
+      <InputNumber
+        size="small"
+        value={value ?? null}
+        min={options.min ?? 0}
+        precision={options.precision}
+        step={options.step || 1}
+        controls={false}
+        onChange={(nextValue) => updatePreviewRow(record.preview_id, field, nextValue ?? 0)}
+        style={{ width: '100%' }}
+      />
+    ),
+  });
+
+  const previewColumns = [
+    {
+      title: '#',
+      key: 'preview_index',
+      width: 48,
+      fixed: 'left',
+      render: (_, record, index) => index + 1,
+    },
+    previewTextColumn('产品货号', 'product_code', 115),
+    previewTextColumn('模具编号', 'mold_no', 145),
+    previewTextColumn('模具名称', 'mold_name', 190),
+    previewTextColumn('颜色', 'color', 105),
+    previewTextColumn('色粉号', 'color_powder_no', 90),
+    previewTextColumn('料型', 'material_type', 150),
+    previewNumberColumn('啤重G', 'shot_weight', 90, { step: 0.01 }),
+    previewNumberColumn('需啤数', 'quantity_needed', 100, { precision: 0 }),
+    previewNumberColumn('用料KG', 'material_kg', 100, { step: 0.01 }),
+    previewNumberColumn('出模数', 'cavity', 80, { min: 1, precision: 0 }),
+    previewTextColumn('下单单号', 'order_no', 150),
+    previewTextColumn('备注', 'order_notes', 170),
+    {
+      title: '校验',
+      key: 'preview_validation',
+      width: 190,
+      fixed: 'right',
+      render: (_, record) => {
+        const result = validatePreviewOrder(record);
+        if (result.errors.length > 0) {
+          return <Tag color="error" title={result.errors.join('；')}>错误：{result.errors[0]}</Tag>;
+        }
+        if (result.warnings.length > 0) {
+          return <Tag color="warning" title={result.warnings.join('；')}>提示：{result.warnings[0]}</Tag>;
+        }
+        return <Tag color="success">校验通过</Tag>;
+      },
+    },
+    {
+      title: '',
+      key: 'preview_delete',
+      width: 52,
+      fixed: 'right',
+      render: (_, record) => (
+        <Button
+          type="text"
+          danger
+          icon={<DeleteOutlined />}
+          title="删除这一行"
+          onClick={() => removePreviewRow(record.preview_id)}
+        />
+      ),
+    },
+  ];
+
   return (
     <div>
       <Card size="small" style={{ marginBottom: 16 }}>
+        <Upload.Dragger
+          beforeUpload={handleUpload}
+          showUploadList={false}
+          accept=".pdf,.xlsx,.xls,.png,.jpg,.jpeg,.bmp,.webp"
+          multiple
+          disabled={parsing}
+          style={{
+            marginBottom: 12,
+            padding: '10px 16px',
+            borderRadius: 8,
+            background: '#f8fbff',
+          }}
+        >
+          <Space size={12} style={{ width: '100%', justifyContent: 'center' }}>
+            <InboxOutlined style={{ color: '#1677ff', fontSize: 22 }} />
+            <strong>{parsing ? '正在按规则解析订单…' : '拖入订单文件，或点击选择'}</strong>
+            <span style={{ color: '#8c8c8c' }}>PDF / Excel / 图片</span>
+          </Space>
+        </Upload.Dragger>
         <Space>
-          <Upload beforeUpload={handleUpload} showUploadList={false} accept=".pdf,.xlsx,.xls,.png,.jpg,.jpeg,.bmp,.webp" multiple>
-            <Button icon={<UploadOutlined />} type="primary">导入订单 (PDF/Excel/图片)</Button>
-          </Upload>
           <Button icon={<PlusOutlined />} onClick={openAdd}>手动添加</Button>
           <Button icon={<DownloadOutlined />} onClick={() => window.open(apiUrl('/api/orders/template'))}>下载导入模板</Button>
           <Popconfirm title="合并相同模号+颜色+色粉+料型的订单？需啤数累加，单号合并" onConfirm={handleMergeOrders}>
@@ -288,6 +529,52 @@ export default function OrderImport({ workshop = 'B' }) {
         pagination={{ pageSize: 50 }}
         scroll={{ x: 900 }}
       />
+
+      <Drawer
+        title="订单解析预览"
+        width="96vw"
+        open={previewOpen}
+        onClose={closePreview}
+        maskClosable={!confirming}
+        extra={(
+          <Space>
+            <Button onClick={closePreview} disabled={confirming}>取消</Button>
+            <Button
+              type="primary"
+              icon={<CheckCircleOutlined />}
+              loading={confirming}
+              disabled={previewRows.length === 0 || previewSummary.errors > 0}
+              onClick={confirmPreviewImport}
+            >
+              确认导入（{previewRows.length} 条）
+            </Button>
+          </Space>
+        )}
+      >
+        <Space wrap size={[8, 8]} style={{ marginBottom: 12 }}>
+          <Tag color="blue">当前车间：{workshop}</Tag>
+          <Tag>共 {previewRows.length} 条</Tag>
+          <Tag color={previewSummary.errors > 0 ? 'error' : 'success'}>
+            错误 {previewSummary.errors} 条
+          </Tag>
+          <Tag color={previewSummary.warnings > 0 ? 'warning' : 'default'}>
+            提示 {previewSummary.warnings} 项
+          </Tag>
+          {previewFiles.map((file, index) => (
+            <Tag key={file.name + '-' + index}>
+              {file.name} · {PARSER_LABELS[file.parser] || file.parser} · {file.count} 条
+            </Tag>
+          ))}
+        </Space>
+        <Table
+          columns={previewColumns}
+          dataSource={previewRows}
+          rowKey="preview_id"
+          size="small"
+          pagination={false}
+          scroll={{ x: 1750, y: 'calc(100vh - 220px)' }}
+        />
+      </Drawer>
 
       <Drawer
         title="手动添加订单"

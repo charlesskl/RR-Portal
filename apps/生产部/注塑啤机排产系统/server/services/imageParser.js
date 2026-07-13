@@ -5,7 +5,12 @@ let worker = null;
 
 async function getWorker() {
   if (!worker) {
-    worker = await createWorker('chi_sim+eng');
+    const tessdataDir = path.join(__dirname, '..');
+    worker = await createWorker('chi_sim', undefined, {
+      langPath: tessdataDir,
+      cachePath: tessdataDir,
+      gzip: false,
+    });
   }
   return worker;
 }

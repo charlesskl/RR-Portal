@@ -170,6 +170,28 @@ label {
   margin-top: 4px;
 }
 
+.admin-switcher {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  color: #e0ecff;
+  font-size: 13px;
+}
+
+.admin-switcher select {
+  width: 180px;
+  height: 34px;
+  border-color: rgba(255, 255, 255, 0.32);
+  color: #fff;
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.admin-switcher select option {
+  color: var(--text);
+  background: #fff;
+}
+
 .section-head {
   display: flex;
   align-items: flex-start;

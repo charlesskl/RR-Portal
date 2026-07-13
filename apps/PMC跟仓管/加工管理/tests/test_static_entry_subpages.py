@@ -60,6 +60,18 @@ def test_entry_page_exposes_clear_and_bulk_delete_controls():
     assert "/api/records/clear" in js
 
 
+def test_admin_department_switcher_controls_exist():
+    html = (ROOT / "pcba/static/app.html").read_text(encoding="utf-8")
+    js = (ROOT / "pcba/static/app.js").read_text(encoding="utf-8")
+
+    assert 'id="adminDepartmentSwitcher"' in html
+    assert 'id="currentDepartmentSelect"' in html
+    assert 'onchange="switchCurrentDepartment()"' in html
+    assert "function configureAdminDepartmentSwitcher()" in js
+    assert "async function switchCurrentDepartment()" in js
+    assert "/api/me/department" in js
+
+
 def test_entry_records_are_filtered_by_active_type():
     js = (ROOT / "pcba/static/app.js").read_text(encoding="utf-8")
 

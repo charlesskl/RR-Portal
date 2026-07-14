@@ -463,6 +463,59 @@ label {
   background: rgba(248, 250, 252, 0.72);
 }
 
+.record-import-panel {
+  display: grid;
+  grid-template-columns: auto minmax(160px, 1fr) 150px auto auto;
+  gap: 10px;
+  align-items: center;
+  margin: 0 0 14px;
+  padding: 12px;
+  border: 1px solid var(--soft-line);
+  border-radius: 8px;
+  background: rgba(248, 250, 252, 0.78);
+}
+
+.record-import-panel .file-name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.record-import-panel select {
+  min-height: 42px;
+}
+
+.import-check-result {
+  margin: -4px 0 14px;
+  padding: 12px;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  background: #eff6ff;
+}
+
+.import-check-summary,
+.duplicate-doc-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  align-items: center;
+}
+
+.duplicate-doc-list {
+  margin-top: 10px;
+}
+
+.duplicate-doc-list span {
+  padding: 5px 8px;
+  border: 1px solid #fecaca;
+  border-radius: 6px;
+  color: #991b1b;
+  background: #fff;
+  font-size: 13px;
+}
+
 .sticker-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));

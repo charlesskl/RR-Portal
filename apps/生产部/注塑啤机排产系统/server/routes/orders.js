@@ -41,6 +41,18 @@ function cleanText(value, maxLength = 500) {
   return String(value == null ? '' : value).trim().slice(0, maxLength);
 }
 
+function normalizeUploadFilename(value) {
+  const original = cleanText(value, 255);
+  if (!original || [...original].some(char => char.charCodeAt(0) > 255)) return original;
+  try {
+    const decoded = Buffer.from(original, 'latin1').toString('utf8');
+    if (!decoded.includes('\uFFFD') && /[^\x00-\x7F]/.test(decoded)) return decoded;
+  } catch {
+    // Keep the multipart filename when it was not Latin-1 encoded UTF-8.
+  }
+  return original;
+}
+
 function finiteNumber(value, fallback = 0) {
   const number = Number(value);
   return Number.isFinite(number) ? number : fallback;
@@ -350,12 +362,20 @@ router.post('/import', upload.single('file'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ message: '请上传文件' });
 
-    const ext = path.extname(req.file.originalname).toLowerCase();
+    const sourceFile = normalizeUploadFilename(req.file.originalname);
+    const ext = path.extname(sourceFile).toLowerCase();
     const batch = new Date().toISOString();
     let parsed = [];
     let parser = 'unknown';
+    let aiReview = {
+      available: Boolean(process.env.BAILIAN_API_KEY),
+      status: 'not_needed',
+      suspect_rows: 0,
+      reviewed_rows: 0,
+      corrected_fields: 0,
+    };
 
-    console.log('[导入] 文件:', req.file.originalname, '类型:', ext);
+    console.log('[导入] 文件:', sourceFile, '类型:', ext);
     if (ext === '.pdf') {
       // PDF 处理优先级：
       // -1) 啤货表固定表格解析（表头坐标 + 重量/啤数校验）
@@ -482,60 +502,16 @@ router.post('/import', upload.single('file'), async (req, res) => {
         }
       }
     } else if (['.png', '.jpg', '.jpeg', '.bmp', '.webp'].includes(ext)) {
-      // 固定啤货表先走本地网格识别，无需云端 API。
-      let fixedError = null;
-      let qwenError = null;
-      let localError = null;
       try {
-        const { parseBeihuoImage } = require('../services/beihuoImageParser');
-        const fixedResult = await parseBeihuoImage(req.file.path);
-        if (fixedResult && fixedResult.orders.length > 0) {
-          parsed = fixedResult.orders;
-          parser = fixedResult.template || 'beihuo-image-grid';
-          console.log('[啤货表图片解析命中]', fixedResult.template, '→', parsed.length, '条');
-        }
-      } catch (e) {
-        fixedError = e;
-        console.log('[啤货表图片解析异常]:', e.message);
-      }
-
-      // 其他图片在配置了百炼密钥时优先用视觉模型。
-      if (parsed.length === 0) {
-        if (process.env.BAILIAN_API_KEY) {
-          try {
-            const { parseImageWithQwen } = require('../services/qwenOcr');
-            parsed = await parseImageWithQwen(req.file.path);
-            if (parsed.length > 0) parser = 'qwen-image-vision';
-            console.log('[百炼图片OCR] 解析结果:', parsed.length, '条');
-          } catch (e) {
-            qwenError = e;
-            console.log('[百炼图片OCR失败]:', e.message);
-          }
-        } else {
-          qwenError = new Error('未配置云端图片识别密钥');
-        }
-      }
-
-      if (parsed.length === 0) {
-        try {
-          const { parseImageOrders } = require('../services/imageParser');
-          const localResult = await parseImageOrders(req.file.path);
-          parsed = localResult.orders || [];
-          if (parsed.length > 0) parser = 'local-image-ocr';
-          console.log('[本地通用图片OCR] 解析结果:', parsed.length, '条');
-        } catch (e) {
-          localError = e;
-          console.log('[本地通用图片OCR失败]:', e.message);
-        }
-      }
-
-      if (parsed.length === 0) {
-        const reason = localError || fixedError || qwenError;
-        return res.status(400).json({
-          message: '图片未解析出订单数据'
-            + (reason ? '：' + reason.message : '')
-            + '。建议上传完整、清晰且未裁掉表头的原图。',
+        const { parseImageOrderWithFallback } = require('../services/imageOrderPipeline');
+        const imageResult = await parseImageOrderWithFallback(req.file.path, {
+          recognitionMode: req.body.recognition_mode,
         });
+        parsed = imageResult.orders;
+        parser = imageResult.parser;
+        aiReview = imageResult.aiReview;
+      } catch (error) {
+        return res.status(error.statusCode || 400).json({ message: error.message });
       }
     } else {
       return res.status(400).json({ message: '不支持的文件格式，仅支持PDF/Excel/图片' });
@@ -548,7 +524,7 @@ router.post('/import', upload.single('file'), async (req, res) => {
     const workshop = req.body.workshop || 'B';
     const defaults = {
       workshop,
-      source_file: req.file.originalname,
+      source_file: sourceFile,
       parser,
     };
     const previewRows = buildPreviewRows(parsed, defaults);
@@ -565,7 +541,9 @@ router.post('/import', upload.single('file'), async (req, res) => {
         message: '成功解析 ' + previewRows.length + ' 条订单，请核对后确认导入',
         count: previewRows.length,
         parser,
-        source_file: req.file.originalname,
+        source_file: sourceFile,
+        ai_recheck_supported: ['.png', '.jpg', '.jpeg', '.bmp', '.webp'].includes(ext),
+        ai_review: aiReview,
         orders: previewRows,
         summary: {
           errors: errorCount,

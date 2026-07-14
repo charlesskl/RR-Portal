@@ -7,6 +7,7 @@ import {
   PlusOutlined,
   InboxOutlined,
   CheckCircleOutlined,
+  RobotOutlined,
 } from '@ant-design/icons';
 import axios from 'axios';
 import { apiUrl } from '../api';
@@ -25,6 +26,15 @@ const PARSER_LABELS = {
   'local-pdf': '本地 PDF 规则',
   'local-image-ocr': '本地图片 OCR',
 };
+
+function parserLabel(parser) {
+  const value = String(parser || 'unknown');
+  if (value.endsWith('+qwen-review')) {
+    const ruleParser = value.slice(0, -'+qwen-review'.length);
+    return (PARSER_LABELS[ruleParser] || ruleParser) + ' + AI复核';
+  }
+  return PARSER_LABELS[value] || value;
+}
 
 function validatePreviewOrder(row) {
   const errors = [];
@@ -63,6 +73,7 @@ export default function OrderImport({ workshop = 'B' }) {
   const [previewRows, setPreviewRows] = useState([]);
   const [previewFiles, setPreviewFiles] = useState([]);
   const [confirming, setConfirming] = useState(false);
+  const [recheckingAi, setRecheckingAi] = useState(false);
 
   const fetchOrders = async () => {
     setLoading(true);
@@ -105,6 +116,7 @@ export default function OrderImport({ workshop = 'B' }) {
 
     try {
       for (const file of files) {
+        const fileId = 'file-' + Date.now() + '-' + parsedFiles.length;
         const formData = new FormData();
         formData.append('file', file);
         formData.append('workshop', workshop);
@@ -113,15 +125,20 @@ export default function OrderImport({ workshop = 'B' }) {
           const { data } = await axios.post(API + '/import', formData, { timeout: 120000 });
           const fileRows = Array.isArray(data.orders) ? data.orders : [];
           parsedFiles.push({
+            id: fileId,
+            file,
             name: data.source_file || file.name,
             parser: data.parser || 'unknown',
             count: fileRows.length,
+            aiReview: data.ai_review,
+            aiRecheckSupported: Boolean(data.ai_recheck_supported),
           });
           for (const row of fileRows) {
             previewSequence.current += 1;
             nextRows.push({
               ...row,
               preview_id: 'preview-' + previewSequence.current,
+              preview_file_id: fileId,
               source_file: data.source_file || file.name,
               parser: data.parser || row.parser || 'unknown',
             });
@@ -160,7 +177,7 @@ export default function OrderImport({ workshop = 'B' }) {
   };
 
   const closePreview = () => {
-    if (confirming) return;
+    if (confirming || recheckingAi) return;
     setPreviewOpen(false);
     setPreviewRows([]);
     setPreviewFiles([]);
@@ -172,6 +189,84 @@ export default function OrderImport({ workshop = 'B' }) {
     summary.warnings += result.warnings.length;
     return summary;
   }, { errors: 0, warnings: 0 });
+
+  const aiRecheckSupported = previewFiles.some((file) => (
+    file.file && file.aiRecheckSupported
+  ));
+  const canRunAiRecheck = previewFiles.some((file) => (
+    file.file
+      && file.aiRecheckSupported
+      && file.aiReview?.available !== false
+  ));
+
+  const recheckWithAi = async () => {
+    const candidates = previewFiles.filter((file) => file.file && file.aiRecheckSupported);
+    if (candidates.length === 0) {
+      message.warning('当前预览没有可重新上传的图片文件');
+      return;
+    }
+    if (!canRunAiRecheck) {
+      message.warning('本机尚未配置百炼视觉识别密钥，暂时不能使用AI重新识别');
+      return;
+    }
+
+    setRecheckingAi(true);
+    let workingRows = [...previewRows];
+    let workingFiles = [...previewFiles];
+    let successCount = 0;
+    const failures = [];
+
+    try {
+      for (const entry of candidates) {
+        const formData = new FormData();
+        formData.append('file', entry.file);
+        formData.append('workshop', workshop);
+        formData.append('preview', '1');
+        formData.append('recognition_mode', 'ai');
+        try {
+          const { data } = await axios.post(API + '/import', formData, { timeout: 180000 });
+          const fileRows = Array.isArray(data.orders) ? data.orders : [];
+          const replacementRows = fileRows.map((row) => {
+            previewSequence.current += 1;
+            return {
+              ...row,
+              preview_id: 'preview-' + previewSequence.current,
+              preview_file_id: entry.id,
+              source_file: data.source_file || entry.name,
+              parser: data.parser || row.parser || 'qwen-image-vision',
+            };
+          });
+          workingRows = [
+            ...workingRows.filter((row) => row.preview_file_id !== entry.id),
+            ...replacementRows,
+          ];
+          workingFiles = workingFiles.map((file) => (
+            file.id === entry.id
+              ? {
+                  ...file,
+                  name: data.source_file || file.name,
+                  parser: data.parser || 'qwen-image-vision',
+                  count: replacementRows.length,
+                  aiReview: data.ai_review,
+                }
+              : file
+          ));
+          successCount += 1;
+        } catch (error) {
+          failures.push(entry.name + '：' + (error.response?.data?.message || error.message));
+        }
+      }
+
+      if (successCount > 0) {
+        setPreviewRows(workingRows);
+        setPreviewFiles(workingFiles);
+        message.success('AI重新识别完成，请再次核对订单字段');
+      }
+      if (failures.length > 0) message.error(failures.join('；'), 10);
+    } finally {
+      setRecheckingAi(false);
+    }
+  };
 
   const confirmPreviewImport = async () => {
     if (previewRows.length === 0) {
@@ -186,7 +281,7 @@ export default function OrderImport({ workshop = 'B' }) {
     setConfirming(true);
     try {
       const ordersToImport = previewRows.map((row) => {
-        const { preview_id, validation, ...order } = row;
+        const { preview_id, preview_file_id, validation, ...order } = row;
         return order;
       });
       const { data } = await axios.post(API + '/import-confirm', {
@@ -504,7 +599,7 @@ export default function OrderImport({ workshop = 'B' }) {
         >
           <Space size={12} style={{ width: '100%', justifyContent: 'center' }}>
             <InboxOutlined style={{ color: '#1677ff', fontSize: 22 }} />
-            <strong>{parsing ? '正在按规则解析订单…' : '拖入订单文件，或点击选择'}</strong>
+            <strong>{parsing ? '正在识别并校验订单…' : '拖入订单文件，或点击选择'}</strong>
             <span style={{ color: '#8c8c8c' }}>PDF / Excel / 图片</span>
           </Space>
         </Upload.Dragger>
@@ -535,15 +630,28 @@ export default function OrderImport({ workshop = 'B' }) {
         width="96vw"
         open={previewOpen}
         onClose={closePreview}
-        maskClosable={!confirming}
+        maskClosable={!confirming && !recheckingAi}
         extra={(
           <Space>
-            <Button onClick={closePreview} disabled={confirming}>取消</Button>
+            <Button
+              icon={<RobotOutlined />}
+              loading={recheckingAi}
+              disabled={confirming || !aiRecheckSupported || !canRunAiRecheck}
+              title={!aiRecheckSupported
+                ? '当前预览没有图片文件'
+                : !canRunAiRecheck
+                  ? '本机未配置百炼视觉识别密钥'
+                  : '整份图片改用AI视觉模型重新识别'}
+              onClick={recheckWithAi}
+            >
+              AI重新识别
+            </Button>
+            <Button onClick={closePreview} disabled={confirming || recheckingAi}>取消</Button>
             <Button
               type="primary"
               icon={<CheckCircleOutlined />}
               loading={confirming}
-              disabled={previewRows.length === 0 || previewSummary.errors > 0}
+              disabled={recheckingAi || previewRows.length === 0 || previewSummary.errors > 0}
               onClick={confirmPreviewImport}
             >
               确认导入（{previewRows.length} 条）
@@ -560,11 +668,34 @@ export default function OrderImport({ workshop = 'B' }) {
           <Tag color={previewSummary.warnings > 0 ? 'warning' : 'default'}>
             提示 {previewSummary.warnings} 项
           </Tag>
-          {previewFiles.map((file, index) => (
-            <Tag key={file.name + '-' + index}>
-              {file.name} · {PARSER_LABELS[file.parser] || file.parser} · {file.count} 条
-            </Tag>
-          ))}
+          {previewFiles.map((file, index) => {
+            const review = file.aiReview || {};
+            let reviewText = '';
+            let color;
+            if (review.status === 'applied') {
+              reviewText = ' · AI修正 ' + review.corrected_fields + ' 项';
+              color = 'cyan';
+            } else if (review.status === 'fallback' || review.status === 'forced') {
+              reviewText = ' · AI识别';
+              color = 'purple';
+            } else if (review.status === 'failed') {
+              reviewText = ' · AI复核失败';
+              color = 'error';
+            } else if (review.status === 'not_configured'
+                || (file.aiRecheckSupported && review.available === false)) {
+              reviewText = ' · AI未配置';
+              color = 'warning';
+            }
+            return (
+              <Tag
+                key={(file.id || file.name) + '-' + index}
+                color={color}
+                title={review.message}
+              >
+                {file.name} · {parserLabel(file.parser)} · {file.count} 条{reviewText}
+              </Tag>
+            );
+          })}
         </Space>
         <Table
           columns={previewColumns}

@@ -3,7 +3,7 @@ const path = require('path');
 
 // API key 必须由 .env.cloud.production 经 docker-compose 注入为 BAILIAN_API_KEY。
 // 不再保留硬编码 fallback —— 历史泄露的 key 必须在阿里云 revoke。
-const MODEL = process.env.BAILIAN_VISION_MODEL || 'qwen-vl-max-latest';
+const MODEL = process.env.BAILIAN_VISION_MODEL || 'qwen-vl-max';
 const BASE_URL = process.env.BAILIAN_BASE_URL || 'https://dashscope.aliyuncs.com/compatible-mode/v1';
 const API_URL = `${BASE_URL}/chat/completions`;
 
@@ -103,6 +103,13 @@ async function parseImageWithQwen(imagePath) {
   const orders = parsed.map(o => {
     const moldNo = String(o.mold_no || '').trim();
     const moldName = String(o.mold_name || '').trim();
+    const quantity = Math.round(Number(o.quantity_needed)) || 0;
+    const totalSets = Math.round(Number(o.total_sets)) || 0;
+    const cavityRatio = quantity > 0 ? totalSets / quantity : 0;
+    const roundedCavity = Math.round(cavityRatio);
+    const cavity = roundedCavity >= 1 && Math.abs(cavityRatio - roundedCavity) < 0.05
+      ? roundedCavity
+      : 1;
     const fullMoldName = moldNo && moldName ? `${moldNo} ${moldName}` : moldName || moldNo;
     return {
       product_code: String(o.product_code || '').trim(),
@@ -115,9 +122,9 @@ async function parseImageWithQwen(imagePath) {
       material_kg: parseFloat(o.material_kg) || 0,
       sprue_pct: 0,
       ratio_pct: 0,
-      quantity_needed: parseInt(o.quantity_needed) || 0,
+      quantity_needed: quantity,
       accumulated: 0,
-      cavity: 1,
+      cavity,
       cycle_time: 0,
       order_no: String(o.order_no || '').trim(),
       is_three_plate: 0,
@@ -130,4 +137,152 @@ async function parseImageWithQwen(imagePath) {
   return orders;
 }
 
-module.exports = { parseImageWithQwen };
+const REVIEW_TEXT_FIELDS = [
+  'product_code',
+  'mold_no',
+  'mold_name',
+  'color',
+  'color_powder_no',
+  'material_type',
+  'order_no',
+  'notes',
+];
+const REVIEW_NUMBER_FIELDS = ['shot_weight', 'quantity_needed', 'material_kg'];
+
+function reviewText(value) {
+  return String(value == null ? '' : value).trim();
+}
+
+function reviewNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : 0;
+}
+
+function matchToken(value) {
+  return reviewText(value).toUpperCase().replace(/[^A-Z0-9\u4E00-\u9FFF]/g, '');
+}
+
+function materialDeviation(row = {}) {
+  const shotWeight = reviewNumber(row.shot_weight);
+  const quantity = reviewNumber(row.quantity_needed);
+  const materialKg = reviewNumber(row.material_kg);
+  if (!(shotWeight > 0 && quantity > 0 && materialKg > 0)) return null;
+  const expected = shotWeight * quantity / 1000;
+  return Math.abs(expected - materialKg) / Math.max(expected, materialKg, 1);
+}
+
+function getAiReviewReasons(row = {}) {
+  const reasons = [];
+  if (!reviewText(row.product_code)) reasons.push('产品货号为空');
+  if (!reviewText(row.mold_no) && !reviewText(row.mold_name)) reasons.push('模具信息为空');
+  if (!reviewText(row.material_type)) reasons.push('料型为空');
+  if (!(reviewNumber(row.shot_weight) > 0)) reasons.push('啤重无效');
+  if (!(reviewNumber(row.quantity_needed) > 0)) reasons.push('需啤数无效');
+  if (!(reviewNumber(row.material_kg) > 0)) reasons.push('用料KG无效');
+  const deviation = materialDeviation(row);
+  if (deviation != null && deviation > 0.1) reasons.push('重量校验偏差过大');
+  return reasons;
+}
+
+function matchScore(ruleRow, aiRow, ruleIndex, aiIndex, sameLength) {
+  let score = sameLength && ruleIndex === aiIndex ? 4 : 0;
+  const weightedFields = [
+    ['mold_no', 10],
+    ['color_powder_no', 7],
+    ['product_code', 5],
+    ['color', 3],
+    ['material_type', 2],
+    ['order_no', 2],
+  ];
+  for (const [field, weight] of weightedFields) {
+    const left = matchToken(ruleRow[field]);
+    const right = matchToken(aiRow[field]);
+    if (left && right && left === right) score += weight;
+  }
+  const ruleQuantity = Math.round(reviewNumber(ruleRow.quantity_needed));
+  const aiQuantity = Math.round(reviewNumber(aiRow.quantity_needed));
+  if (ruleQuantity > 0 && aiQuantity > 0 && ruleQuantity === aiQuantity) score += 7;
+  return score;
+}
+
+function findAiMatch(ruleRow, ruleIndex, aiOrders, usedIndexes, sameLength) {
+  let bestIndex = -1;
+  let bestScore = -1;
+  for (let aiIndex = 0; aiIndex < aiOrders.length; aiIndex += 1) {
+    if (usedIndexes.has(aiIndex)) continue;
+    const score = matchScore(ruleRow, aiOrders[aiIndex], ruleIndex, aiIndex, sameLength);
+    if (score > bestScore) {
+      bestScore = score;
+      bestIndex = aiIndex;
+    }
+  }
+  if (bestScore >= 5) return bestIndex;
+  if (sameLength && !usedIndexes.has(ruleIndex)) return ruleIndex;
+  return -1;
+}
+
+function mergeRuleAndAiOrders(ruleOrders = [], aiOrders = []) {
+  const usedIndexes = new Set();
+  const corrections = [];
+  const sameLength = ruleOrders.length === aiOrders.length;
+
+  const orders = ruleOrders.map((ruleRow, ruleIndex) => {
+    const aiIndex = findAiMatch(ruleRow, ruleIndex, aiOrders, usedIndexes, sameLength);
+    if (aiIndex < 0) return ruleRow;
+    usedIndexes.add(aiIndex);
+
+    const aiRow = aiOrders[aiIndex];
+    const merged = { ...ruleRow };
+    const fields = [];
+
+    for (const field of REVIEW_TEXT_FIELDS) {
+      const aiValue = reviewText(aiRow[field]);
+      if (!reviewText(merged[field]) && aiValue) {
+        merged[field] = aiValue;
+        fields.push(field);
+      }
+    }
+    for (const field of REVIEW_NUMBER_FIELDS) {
+      const aiValue = reviewNumber(aiRow[field]);
+      if (!(reviewNumber(merged[field]) > 0) && aiValue > 0) {
+        merged[field] = aiValue;
+        fields.push(field);
+      }
+    }
+    if (!(reviewNumber(merged.cavity) > 1) && reviewNumber(aiRow.cavity) > 1) {
+      merged.cavity = Math.round(reviewNumber(aiRow.cavity));
+      fields.push('cavity');
+    }
+
+    const ruleDeviation = materialDeviation(ruleRow);
+    const aiDeviation = materialDeviation(aiRow);
+    if (ruleDeviation != null && ruleDeviation > 0.1 && aiDeviation != null && aiDeviation <= 0.1) {
+      for (const field of REVIEW_NUMBER_FIELDS) {
+        const aiValue = reviewNumber(aiRow[field]);
+        if (aiValue > 0 && reviewNumber(merged[field]) !== aiValue) {
+          merged[field] = aiValue;
+          fields.push(field);
+        }
+      }
+    }
+
+    const uniqueFields = [...new Set(fields)];
+    if (uniqueFields.length > 0) {
+      corrections.push({ row: ruleIndex + 1, fields: uniqueFields });
+    }
+    return merged;
+  });
+
+  return {
+    orders,
+    corrections,
+    corrected_fields: corrections.reduce((sum, item) => sum + item.fields.length, 0),
+    matched_rows: usedIndexes.size,
+  };
+}
+
+module.exports = {
+  parseImageWithQwen,
+  getAiReviewReasons,
+  mergeRuleAndAiOrders,
+};

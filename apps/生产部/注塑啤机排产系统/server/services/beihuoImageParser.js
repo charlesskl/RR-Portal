@@ -515,6 +515,16 @@ async function parseBeihuoImageInternal(imagePath) {
     notes: cleanNotes(chineseValues[rowIndex][13]),
   }));
 
+  // A vertically merged product-code cell is often OCR'd on the middle row.
+  // Backfill only the leading blank rows; normal downward inheritance remains unchanged.
+  const firstProductIndex = rawRows.findIndex(row => row.product_code);
+  if (firstProductIndex > 0) {
+    const leadingProductCode = rawRows[firstProductIndex].product_code;
+    for (let index = 0; index < firstProductIndex; index += 1) {
+      rawRows[index].product_code = leadingProductCode;
+    }
+  }
+
   const orders = parseBeihuoRawRows(rawRows, extractHeaderInfo(headerText));
   if (orders.length === 0) return null;
 

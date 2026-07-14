@@ -39,7 +39,7 @@ export default function ReportList() {
       </div>
       {loading && <p className="hint">加载中…</p>}
       {!loading && list.length === 0 && (
-        <p className="hint">暂无记录，去 <Link to="/">上传</Link> 一份吧。</p>
+        <p className="hint">暂无记录，去 <Link to="/upload">上传</Link> 一份吧。</p>
       )}
       {!loading && list.length > 0 && (
         <div className="table-wrap">
@@ -47,6 +47,8 @@ export default function ReportList() {
             <thead>
               <tr>
                 <th>客户</th>
+                <th>货号</th>
+                <th>阶段</th>
                 <th>文件名</th>
                 <th>归属周</th>
                 <th>上传时间</th>
@@ -59,6 +61,8 @@ export default function ReportList() {
               {list.map(r => (
                 <tr key={r.id}>
                   <td><b>{r.customerName}</b></td>
+                  <td>{r.productNo ? <Link to={`/products/${encodeURIComponent(r.productNo)}`}><b>{r.productNo}</b></Link> : '—'}</td>
+                  <td><span className="stage-badge">{r.stage || '—'}</span></td>
                   <td><Link to={`/reports/${r.id}`}>{r.originalName}</Link></td>
                   <td>{r.weekKey}</td>
                   <td>{new Date(r.uploadedAt).toLocaleString('zh-CN')}</td>

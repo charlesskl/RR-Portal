@@ -3,6 +3,11 @@ const { DatabaseSync } = require('node:sqlite');
 const path = require('path');
 const fs = require('fs');
 const bcrypt = require('bcryptjs');
+const {
+  appendMissingRefDefaults,
+  appendMissingRefDefaultsToSectionPayloads,
+  refSeedUpgrades,
+} = require('./ref-defaults');
 
 const DB_PATH = process.env.DB_FILE || path.join(__dirname, '..', 'data.db');
 const SCHEMA_PATH = path.join(__dirname, 'schema.sql');
@@ -87,6 +92,7 @@ for (const q of quotesAll) {
 const refSeeds = {
   material_prices: [
     { name: 'ABS', model: '750SW', price: 8.50 },
+    { name: 'ABS', model: '抽粒料', price: 4.60 },
     { name: 'C-ABS', model: 'TR558/920', price: 12.50 },
     { name: 'HIPS', model: 'HI425', price: 7.80 },
     { name: 'GP', model: 'MW-1', price: 7.80 },
@@ -125,6 +131,19 @@ for (const [key, data] of Object.entries(refSeeds)) {
   if (!exists) {
     db.prepare('INSERT INTO ref_tables (key, data_json, updated_by) VALUES (?, ?, ?)').run(key, JSON.stringify(data), '[seed]');
     console.log('[seed] 全局参考表 ' + key + ' 已种入 ' + data.length + ' 条');
+  }
+}
+for (const [key, data] of Object.entries(refSeedUpgrades)) {
+  const added = appendMissingRefDefaults(db, key, data);
+  if (added > 0) {
+    console.log('[seed-upgrade] global ref table ' + key + ' appended ' + added + ' default item(s)');
+  }
+  if (key === 'material_prices') {
+    const sectionAdded = appendMissingRefDefaultsToSectionPayloads(db, 'molding', key, data);
+    if (sectionAdded.itemsAdded > 0) {
+      console.log('[seed-upgrade] molding quote payload ' + key + ' appended '
+        + sectionAdded.itemsAdded + ' default item(s) in ' + sectionAdded.rowsChanged + ' section(s)');
+    }
   }
 }
 

@@ -1,5 +1,5 @@
 const { createWorker } = require('tesseract.js');
-const path = require('path');
+const { normalizeMaterialKg } = require('./beihuoOrderParser');
 
 let worker = null;
 
@@ -63,20 +63,30 @@ async function parseImageOrders(imagePath) {
  * 从管道符分隔的行提取订单
  * 表格列顺序: 货号 | 模具编号 | 模具名称 | 颜色/编号 | 用料 | 啤净重 | 订单数量 | 出模数 | 需啤数量 | 用料KG | ...
  */
+function looksLikeMoldCode(value) {
+  const code = String(value || '').toUpperCase().replace(/[^A-Z0-9-]/g, '');
+  if (!code) return false;
+  if (/^(?:ABS|PP|PVC|POM|PC|PA|PE|HDPE|LDPE|TPE|TPR)(?:[-#]?\d|$)/.test(code)) {
+    return false;
+  }
+  return /^(?=.*[A-Z])(?=.*\d)[A-Z0-9]+(?:-[A-Z0-9]+)*$/.test(code)
+    || /^\d{3,}(?:-[A-Z0-9]+)+$/.test(code);
+}
+
 function extractFromPipeLine(parts) {
   // 过滤空列
   const cols = parts.filter(p => p.length > 0);
   if (cols.length < 6) return null;
 
-  // 找模具编号列（RC/PASR/MNVN/字母+数字+连字符 模式）
+  // 找模具编号列，并排除 PP3015 / ABS 等常见料号被错当成模具。
   let moldIdx = -1;
   for (let i = 0; i < cols.length; i++) {
-    if (/[A-Z]{2,}\d+|[A-Z]+-\d+|\d{4}-\d{4,5}/.test(cols[i].replace(/[^A-Za-z0-9-]/g, ''))) {
+    if (looksLikeMoldCode(cols[i])) {
       moldIdx = i;
       break;
     }
   }
-  if (moldIdx < 0) return null;
+  if (moldIdx < 1 || moldIdx > 2) return null;
 
   // 货号在模具编号之前
   const product_code = moldIdx > 0 ? extractDigits(cols[moldIdx - 1]) : '';
@@ -103,6 +113,7 @@ function extractFromPipeLine(parts) {
   if (moldIdx + 3 < cols.length) {
     material_type = cols[moldIdx + 3];
   }
+  if (/^\d+(?:\.\d+)?$/.test(material_type)) return null;
 
   // 从剩余列中提取数字字段
   const numbers = [];
@@ -127,6 +138,12 @@ function extractFromPipeLine(parts) {
   }
 
   if (!quantity_needed || quantity_needed < 10) return null;
+  material_kg = normalizeMaterialKg(
+    material_kg,
+    shot_weight,
+    numbers[1] || 0,
+    quantity_needed,
+  );
 
   const fullMoldName = mold_name_raw ? `${mold_no_raw} ${mold_name_raw}` : mold_no_raw;
 

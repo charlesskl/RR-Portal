@@ -31,9 +31,14 @@ export async function importEmail(uploadFile) {
   return data
 }
 
-export async function listEmails() {
-  const { data } = await api.get('/emails/')
-  return data.results || data
+export async function listEmails(params = {}) {
+  const { data } = await api.get('/emails/', { params })
+  return data
+}
+
+export async function getEmail(id) {
+  const { data } = await api.get(`/emails/${id}/`)
+  return data
 }
 
 export async function deleteEmail(id) {

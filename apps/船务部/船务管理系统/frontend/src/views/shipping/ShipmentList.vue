@@ -27,8 +27,8 @@
           value-format="YYYY-MM-DD" />
         <el-input v-model="filters.cbm" placeholder="CBM" clearable size="small" style="width:90px" />
         <el-button size="small" @click="resetFilters">重置</el-button>
-        <span v-if="filteredRecords.length" style="color:#909399;font-size:13px;margin-left:4px">
-          共 {{ filteredRecords.length }} 条
+        <span v-if="pagination.total" style="color:#909399;font-size:13px;margin-left:4px">
+          共 {{ pagination.total }} 条
         </span>
       </div>
 
@@ -78,7 +78,7 @@
         </el-table-column>
         <el-table-column label="PL项数" width="65" align="center">
           <template #default="{ row }">
-            <el-badge v-if="row.items?.length" :value="row.items.length" type="primary" />
+            <el-badge v-if="row.items_count || row.items?.length" :value="row.items_count || row.items.length" type="primary" />
             <span v-else>0</span>
           </template>
         </el-table-column>
@@ -112,6 +112,20 @@
           </template>
         </el-table-column>
       </el-table>
+
+      <div class="pagination-bar">
+        <el-pagination
+          v-model:current-page="pagination.page"
+          v-model:page-size="pagination.pageSize"
+          :page-sizes="[20, 50, 100, 200]"
+          :total="pagination.total"
+          layout="total, sizes, prev, pager, next"
+          small
+          background
+          @size-change="handlePageSizeChange"
+          @current-change="loadData"
+        />
+      </div>
 
       <!-- 批量操作 -->
       <div v-if="selectedRows.length" class="batch-bar">
@@ -221,7 +235,7 @@
 </template>
 
 <script setup>
-import { ref, computed, reactive, onMounted } from 'vue'
+import { ref, computed, reactive, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { listShipments, getShipment, deleteShipment, updateShipmentItem } from '../../api/shipments'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -234,6 +248,11 @@ const loading = ref(false)
 const showDetail = ref(false)
 const selected = ref(null)
 const selectedRows = ref([])
+const pagination = reactive({
+  page: 1,
+  pageSize: 50,
+  total: 0,
+})
 
 // 体积编辑
 const showVolume = ref(false)
@@ -289,6 +308,7 @@ function resetFilters() {
     so: '', port: '', country: '', containerType: '', status: '', dateRange: null,
     cbm: '',
   })
+  pagination.page = 1
 }
 
 function handleSelectionChange(rows) { selectedRows.value = rows }
@@ -299,15 +319,31 @@ function formatDatetime(val) {
 }
 
 function calcCbm(row) {
-  const items = row.items || []
-  const sum = items.reduce((acc, item) => acc + (parseFloat(item.volume) || 0), 0)
+  if (row.items) {
+    const sum = row.items.reduce((acc, item) => acc + (parseFloat(item.volume) || 0), 0)
+    return sum > 0 ? sum.toFixed(3) : '-'
+  }
+  const sum = parseFloat(row.total_cbm)
   return sum > 0 ? sum.toFixed(3) : '-'
 }
 
 async function loadData() {
   loading.value = true
   try {
-    records.value = await listShipments()
+    const params = {
+      page: pagination.page,
+      page_size: pagination.pageSize,
+      so: filters.so || undefined,
+      port: filters.port || undefined,
+      country: filters.country || undefined,
+      container_type: filters.containerType || undefined,
+      status: filters.status || undefined,
+      date_from: filters.dateRange?.[0] || undefined,
+      date_to: filters.dateRange?.[1] || undefined,
+    }
+    const data = await listShipments(params)
+    records.value = data.results || data
+    pagination.total = data.count ?? records.value.length
   } catch {
     ElMessage.error('加载数据失败')
   } finally {
@@ -315,9 +351,30 @@ async function loadData() {
   }
 }
 
-function viewDetail(row) {
-  selected.value = row
-  showDetail.value = true
+function handlePageSizeChange() {
+  pagination.page = 1
+  loadData()
+}
+
+let filterTimer = null
+watch(filters, () => {
+  clearTimeout(filterTimer)
+  filterTimer = setTimeout(() => {
+    pagination.page = 1
+    loadData()
+  }, 300)
+}, { deep: true })
+
+async function viewDetail(row) {
+  loading.value = true
+  try {
+    selected.value = await getShipment(row.id)
+    showDetail.value = true
+  } catch {
+    ElMessage.error('加载详情失败')
+  } finally {
+    loading.value = false
+  }
 }
 
 async function openVolume(row) {
@@ -448,6 +505,12 @@ onMounted(loadData)
   background: #fef9f0;
   border-radius: 4px;
   border: 1px solid #faecd8;
+}
+
+.pagination-bar {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12px;
 }
 
 .batch-hint { color: #e6a23c; font-size: 13px; }

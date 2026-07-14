@@ -13,6 +13,8 @@ if [ -z "${DJANGO_SECRET_KEY:-}" ]; then
 fi
 
 python manage.py migrate --noinput
+python manage.py seed_history_data
+python manage.py migrate --noinput
 python manage.py seed_admin
 
 exec gunicorn config.wsgi:application \

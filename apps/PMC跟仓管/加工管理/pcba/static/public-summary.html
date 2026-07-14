@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>公开汇总 - 唱片机管理系统</title>
-<link rel="stylesheet" href="/static/style.css?v=12">
+<link rel="stylesheet" href="/static/style.css?v=15">
 </head>
 <body class="summary-page">
 <main class="summary-shell">
@@ -53,6 +53,17 @@
         </div>
       </div>
     </div>
+    <div class="summary-subsection">
+      <div class="mini-title">部门物料数量</div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>部门</th><th>物料</th><th>入库</th><th>出库/领料</th><th>结余</th></tr>
+          </thead>
+          <tbody id="publicMaterialDepartmentRows"></tbody>
+        </table>
+      </div>
+    </div>
     <div id="publicStickerBlock" class="summary-subsection" style="display:none">
       <div class="mini-title">贴纸类型汇总</div>
       <div class="table-wrap">
@@ -61,6 +72,17 @@
             <tr><th>贴纸类型</th><th>入库</th><th>出库/领料</th><th>结余</th></tr>
           </thead>
           <tbody id="publicStickerRows"></tbody>
+        </table>
+      </div>
+    </div>
+    <div id="publicSemiMonthlyBlock" class="summary-subsection" style="display:none">
+      <div class="mini-title">碟片半成品当月汇总</div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>贴纸类型</th><th>上月库存数</th><th>当月入仓总数</th><th>当月出仓总数</th><th>当前结余</th></tr>
+          </thead>
+          <tbody id="publicSemiMonthlyRows"></tbody>
         </table>
       </div>
     </div>
@@ -135,6 +157,16 @@ async function loadPublicSummary() {
       <td>${fmt(row.balance)}</td>
     </tr>`).join('') || '<tr><td colspan="4">暂无数据</td></tr>';
 
+  const materialDepartments = data.material_department || [];
+  document.getElementById('publicMaterialDepartmentRows').innerHTML =
+    materialDepartments.map(row => `<tr>
+      <td>${esc(row.department)}</td>
+      <td>${esc(row.material)}</td>
+      <td>${fmt(row.inbound)}</td>
+      <td>${fmt(row.outbound)}</td>
+      <td>${fmt(row.balance)}</td>
+    </tr>`).join('') || '<tr><td colspan="5">暂无数据</td></tr>';
+
   const stickerTypes = data.sticker_types || [];
   document.getElementById('publicStickerBlock').style.display = stickerTypes.length ? '' : 'none';
   document.getElementById('publicStickerRows').innerHTML =
@@ -144,6 +176,17 @@ async function loadPublicSummary() {
       <td>${fmt(row.outbound)}</td>
       <td>${fmt(row.balance)}</td>
     </tr>`).join('') || '<tr><td colspan="4">暂无数据</td></tr>';
+
+  const semiMonthly = data.semi_finished_monthly_totals || [];
+  document.getElementById('publicSemiMonthlyBlock').style.display = semiMonthly.length ? '' : 'none';
+  document.getElementById('publicSemiMonthlyRows').innerHTML =
+    semiMonthly.map(row => `<tr>
+      <td>${esc(row.sticker_type)}</td>
+      <td>${fmt(row.opening_stock)}</td>
+      <td>${fmt(row.monthly_inbound)}</td>
+      <td>${fmt(row.monthly_outbound)}</td>
+      <td>${fmt(row.monthly_balance)}</td>
+    </tr>`).join('') || '<tr><td colspan="5">暂无数据</td></tr>';
 }
 
 function clearPublicDates() {

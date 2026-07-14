@@ -5,9 +5,9 @@ export async function createShipmentFromEmail(emailRecordId, parsedData) {
   return data
 }
 
-export async function listShipments() {
-  const { data } = await api.get('/shipments/')
-  return data.results || data
+export async function listShipments(params = {}) {
+  const { data } = await api.get('/shipments/', { params })
+  return data
 }
 
 export async function getShipment(id) {
@@ -46,6 +46,11 @@ export async function deleteShipment(id) {
 
 export async function updateShipmentItem(shipmentId, itemId, payload) {
   const { data } = await api.patch(`/shipments/${shipmentId}/items/${itemId}/`, payload)
+  return data
+}
+
+export async function bulkUpdateShipmentItems(shipmentId, items) {
+  const { data } = await api.patch(`/shipments/${shipmentId}/items/bulk-update/`, { items })
   return data
 }
 

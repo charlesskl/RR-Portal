@@ -1,6 +1,7 @@
-from django.db import models as db_models
+from django.db import models as db_models, transaction
 from rest_framework import viewsets, status as http_status
 from rest_framework.decorators import api_view, permission_classes
+from rest_framework.pagination import PageNumberPagination
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from apps.emails.models import EmailRecord
@@ -9,6 +10,7 @@ from apps.master_data.brand_rules import get_brand_for_product_code
 from .calculations import calculate_total_pieces_per_order
 from .models import Shipment, ShipmentItem, ShipmentSubItem
 from .serializers import (
+    ShipmentListSerializer,
     ShipmentSerializer,
     ShipmentCreateSerializer,
     ShipmentItemSerializer,
@@ -16,12 +18,63 @@ from .serializers import (
 )
 
 
+class ShipmentPagination(PageNumberPagination):
+    page_size = 50
+    page_size_query_param = 'page_size'
+    max_page_size = 200
+
+
 class ShipmentViewSet(viewsets.ModelViewSet):
-    queryset = Shipment.objects.prefetch_related('items', 'items__sub_items').all()
+    queryset = Shipment.objects.all()
+    pagination_class = ShipmentPagination
+
+    def get_queryset(self):
+        if self.action == 'list':
+            queryset = (
+                Shipment.objects
+                .select_related('customer', 'created_by')
+                .annotate(
+                    items_count=db_models.Count('items', distinct=True),
+                    total_cbm=db_models.Sum('items__volume'),
+                )
+                .order_by('-created_at')
+            )
+            params = self.request.query_params
+            so = (params.get('so') or '').strip()
+            port = (params.get('port') or '').strip()
+            country = (params.get('country') or '').strip()
+            container_type = (
+                params.get('container_type')
+                or params.get('containerType')
+                or ''
+            ).strip()
+            status_value = (params.get('status') or '').strip()
+            date_from = (params.get('date_from') or '').strip()
+            date_to = (params.get('date_to') or '').strip()
+
+            if so:
+                queryset = queryset.filter(so_number__icontains=so)
+            if port:
+                queryset = queryset.filter(port__icontains=port)
+            if country:
+                queryset = queryset.filter(delivery_address__icontains=country)
+            if container_type:
+                queryset = queryset.filter(container_type__icontains=container_type)
+            if status_value:
+                queryset = queryset.filter(status=status_value)
+            if date_from:
+                queryset = queryset.filter(created_at__date__gte=date_from)
+            if date_to:
+                queryset = queryset.filter(created_at__date__lte=date_to)
+            return queryset
+
+        return Shipment.objects.prefetch_related('items', 'items__sub_items').all()
 
     def get_serializer_class(self):
         if self.action in ('create', 'update', 'partial_update'):
             return ShipmentCreateSerializer
+        if self.action == 'list':
+            return ShipmentListSerializer
         return ShipmentSerializer
 
     def perform_create(self, serializer):
@@ -36,6 +89,88 @@ class ShipmentItemViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save(shipment_id=self.kwargs['shipment_pk'])
+
+
+@api_view(['PATCH'])
+@permission_classes([IsAuthenticated])
+def bulk_update_items(request, shipment_pk):
+    """Update many existing shipment items in one request.
+
+    The cabinet-review page can contain dozens of rows. Sending one PATCH per
+    row in parallel trips the nginx API rate limit, so this endpoint keeps a
+    single user save as a single API request.
+    """
+    items_data = request.data.get('items')
+    if not isinstance(items_data, list):
+        return Response(
+            {'detail': 'items must be a list'},
+            status=http_status.HTTP_400_BAD_REQUEST,
+        )
+    if not items_data:
+        return Response({'updated': 0, 'items': []})
+
+    item_ids = []
+    seen_ids = set()
+    for index, item_data in enumerate(items_data, start=1):
+        if not isinstance(item_data, dict):
+            return Response(
+                {'detail': f'items[{index}] must be an object'},
+                status=http_status.HTTP_400_BAD_REQUEST,
+            )
+        item_id = item_data.get('id')
+        if not item_id:
+            return Response(
+                {'detail': f'items[{index}].id is required'},
+                status=http_status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            item_id = int(item_id)
+        except (TypeError, ValueError):
+            return Response(
+                {'detail': f'items[{index}].id must be an integer'},
+                status=http_status.HTTP_400_BAD_REQUEST,
+            )
+        if item_id in seen_ids:
+            return Response(
+                {'detail': f'duplicate item id: {item_id}'},
+                status=http_status.HTTP_400_BAD_REQUEST,
+            )
+        seen_ids.add(item_id)
+        item_ids.append(item_id)
+
+    existing = {
+        item.id: item
+        for item in ShipmentItem.objects.filter(
+            shipment_id=shipment_pk,
+            id__in=item_ids,
+        )
+    }
+    missing_ids = [item_id for item_id in item_ids if item_id not in existing]
+    if missing_ids:
+        return Response(
+            {'detail': 'some items do not belong to this shipment', 'ids': missing_ids},
+            status=http_status.HTTP_400_BAD_REQUEST,
+        )
+
+    updated_items = []
+    with transaction.atomic():
+        for item_data in items_data:
+            item_id = int(item_data['id'])
+            payload = dict(item_data)
+            payload.pop('id', None)
+            payload.pop('shipment', None)
+            serializer = ShipmentItemSerializer(
+                existing[item_id],
+                data=payload,
+                partial=True,
+            )
+            serializer.is_valid(raise_exception=True)
+            updated_items.append(serializer.save())
+
+    return Response({
+        'updated': len(updated_items),
+        'items': ShipmentItemSerializer(updated_items, many=True).data,
+    })
 
 
 @api_view(['POST'])

@@ -10,7 +10,7 @@ const HKD4 = '"HK$"#,##0.0000';
 const PCT = '0.00%';
 const FONT = 'Microsoft YaHei';  // 全表统一字体
 // 辅助/包装材料 类别 — 减税明细各外购项按此类别统计（须与前端 workbench.js MAT_CATEGORIES 一致）
-const MAT_CATEGORIES = ['吸塑', '胶袋', '彩盒/内咭', '电池', '利宝', '电镀', '其他外购'];
+const MAT_CATEGORIES = ['吸塑', '胶袋', '彩盒/内咭', '电池', '产品利宝', '彩盒利宝', '电镀', '其他外购'];
 
 // 工具
 const num = (v) => Number(v) || 0;
@@ -1802,6 +1802,7 @@ function renderTaxSummary(ws, row, sales, extra = {}) {
   const _isGlueBag = s => /胶袋|胶代|poly\s?bag|pe\s?bag|opp\s?bag/i.test(String(s || ''));
   const _isBat     = s => /电池|battery/i.test(String(s || ''));
   const _isLib     = s => /利宝|贴纸|libao|sticker/i.test(String(s || ''));
+  const _isColorBoxLib = r => /彩盒|彩卡|内咭|内卡|背卡|包装|package|box/i.test(String((r.name || '') + ' ' + (r.spec || '')));
   const _isPlate   = s => /电镀|plating/i.test(String(s || ''));
   const _isCarton  = s => /纸箱|carton/i.test(String(s || ''));
   const _row = (fn, r) => fn(r.name) || fn(r.spec);
@@ -1811,10 +1812,11 @@ function renderTaxSummary(ws, row, sales, extra = {}) {
   // 辅助/包装 行的类别：显式 category 优先，否则关键字兜底（纸箱 → null 单独计），与前端 _catOf 一致
   const _catOf = (r, tbl) => {
     if (r.category && MAT_CATEGORIES.includes(r.category)) return r.category;
+    if (r.category === '利宝') return '产品利宝';
     if (_row(_isBlister, r)) return '吸塑';
     if (_row(_isGlueBag, r)) return '胶袋';
     if (_row(_isBat, r))     return '电池';
-    if (_row(_isLib, r))     return '利宝';
+    if (_row(_isLib, r))     return _isColorBoxLib(r) ? '彩盒利宝' : '产品利宝';
     if (_row(_isPlate, r))   return '电镀';
     if (_row(_isCarton, r))  return null;  // 纸箱另算
     return tbl === 'aux' ? '其他外购' : '彩盒/内咭';
@@ -1830,7 +1832,7 @@ function renderTaxSummary(ws, row, sales, extra = {}) {
   const blisterCells = [...byCat('吸塑'), ..._pick('electronic', _isBlister), ..._pick('hardware', _isBlister)];
   const glueBagCells  = byCat('胶袋');
   const batteryCells  = byCat('电池');
-  const libaoCells    = byCat('利宝');
+  const libaoCells    = [...byCat('产品利宝'), ...byCat('彩盒利宝')];
   const platingCells  = byCat('电镀');
   const colorBoxCells = byCat('彩盒/内咭');
   const otherBuyCells = byCat('其他外购');
@@ -2114,10 +2116,12 @@ function renderTaxSummary(ws, row, sales, extra = {}) {
 
 // ============ 模具费用 (eng.mold_costs) ============
 function renderMoldCosts(ws, row, mc, quote, refs, amortQty) {
-  if (!mc || !mc.items || !mc.items.length) return row;
+  if (!mc) return row;
+  const items = Array.isArray(mc.items) ? mc.items : [];
   const fx = num(mc.fx_rmb_usd) || 7.75;
   const prototypeFeeUsd = num(mc.prototype_fee_usd ?? mc.prototype_fee_rmb);
   const testingFeeUsd = num(mc.testing_fee_usd ?? mc.testing_fee_rmb);
+  if (!items.length && prototypeFeeUsd <= 0 && testingFeeUsd <= 0) return row;
   const prototypeAmortQty = Math.max(num(mc.prototype_amortization_qty) || 50000, 1);
   const testingAmortQty = Math.max(num(mc.testing_amortization_qty) || 2000, 1);
   ws.mergeCells(row, 1, row, 13); styleSection(ws.getCell(row, 1));
@@ -2130,7 +2134,7 @@ function renderMoldCosts(ws, row, mc, quote, refs, amortQty) {
   ws.mergeCells(row, 11, row, 12);
   row += 1;
   const dataStart = row;
-  mc.items.forEach(r => {
+  items.forEach(r => {
     ws.mergeCells(row, 1, row, 10);
     ws.getCell(row, 1).value = r.name || '';
     ws.mergeCells(row, 11, row, 12);
@@ -2143,13 +2147,15 @@ function renderMoldCosts(ws, row, mc, quote, refs, amortQty) {
     row += 1;
   });
   const dataEnd = row - 1;
-  const sumRmb = sum(mc.items, r => num(r.price_rmb));
+  const sumRmb = sum(items, r => num(r.price_rmb));
   // 模具总计
   ws.mergeCells(row, 1, row, 10);
   ws.getCell(row, 1).value = '模具总计';
   ws.getCell(row, 1).alignment = { horizontal: 'right', vertical: 'middle' };
   ws.mergeCells(row, 11, row, 12);
-  ws.getCell(row, 11).value = { formula: `SUM(K${dataStart}:K${dataEnd})`, result: sumRmb };
+  ws.getCell(row, 11).value = items.length
+    ? { formula: `SUM(K${dataStart}:K${dataEnd})`, result: sumRmb }
+    : 0;
   ws.getCell(row, 11).numFmt = RMB;
   ws.getCell(row, 13).value = { formula: `K${row}/${fx}`, result: sumRmb / fx };
   ws.getCell(row, 13).numFmt = '"$"#,##0.0000';

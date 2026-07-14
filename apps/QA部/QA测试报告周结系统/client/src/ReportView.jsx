@@ -9,9 +9,12 @@ export default function ReportView({ report, showSummary = true, headingLevel = 
       {showSummary && (
         <div className="summary">
           <span>客户：<b>{report.customerName}</b></span>
+          {report.productNo && <span>货号：<b>{report.productNo}</b></span>}
+          {report.stage && <span>阶段：<b>{report.stage}</b></span>}
           <span>归属周：<b>{report.weekKey}</b></span>
           <span>有效行数：{report.totalRows}</span>
           <span>不合格行数：<b style={{ color: '#dc2626' }}>{report.failCount}</b></span>
+          <span>明确 PASS：<b style={{ color: '#16a34a' }}>{report.passCount || 0}</b></span>
           {report.totalImages > 0 && <span>附图：<b>{report.totalImages}</b> 张</span>}
           <span>上传时间：{new Date(report.uploadedAt).toLocaleString('zh-CN')}</span>
         </div>

@@ -30,6 +30,7 @@ urlpatterns = [
     path('items/<int:item_pk>/sub-items/', views.ShipmentSubItemViewSet.as_view({'get': 'list', 'post': 'create'})),
     path('items/<int:item_pk>/sub-items/<int:pk>/', views.ShipmentSubItemViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'})),
     path('<int:shipment_pk>/items/', views.ShipmentItemViewSet.as_view({'get': 'list', 'post': 'create'})),
+    path('<int:shipment_pk>/items/bulk-update/', views.bulk_update_items, name='bulk-update-items'),
     path('<int:shipment_pk>/items/<int:pk>/', views.ShipmentItemViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'})),
     path('', include(router.urls)),
 ]

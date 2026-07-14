@@ -131,6 +131,43 @@ function buildPreviewRows(rows, defaults = {}) {
   });
 }
 
+function mapOutsourceParserRows(result) {
+  const header = result.header || {};
+  return (result.rows || []).map((row) => {
+    const shots = Math.round(finiteNumber(row.shots));
+    const totalSets = Math.round(finiteNumber(row.total_sets));
+    const cavityRatio = shots > 0 ? totalSets / shots : 0;
+    const roundedCavity = Math.round(cavityRatio);
+    const cavity = roundedCavity >= 1 && Math.abs(cavityRatio - roundedCavity) < 0.05
+      ? roundedCavity
+      : 1;
+    return {
+      product_code: result.template === 'A_xinxin' ? '' : row.order_no || '',
+      mold_no: row.mold_code || '',
+      mold_name: [row.mold_code, row.mold_name].filter(Boolean).join(' ').trim()
+        || row.mold_name
+        || '',
+      color: row.color || '',
+      color_powder_no: row.color_powder || '',
+      material_type: row.material || '',
+      quantity_needed: shots,
+      shot_weight: finiteNumber(row.shot_weight_g),
+      material_kg: finiteNumber(row.total_weight_kg),
+      order_no: row.production_no || header.bill_no || '',
+      notes: [row.row_note, row.delivery_date && ('交期 ' + row.delivery_date)]
+        .filter(Boolean)
+        .join(' '),
+      accumulated: 0,
+      cavity,
+      cycle_time: 0,
+      sprue_pct: 0,
+      ratio_pct: 0,
+      is_three_plate: 0,
+      packing_qty: 0,
+    };
+  }).filter(order => order.mold_no || order.mold_name);
+}
+
 function insertImportRows(rows, defaults = {}) {
   const batch = defaults.batch || new Date().toISOString();
   const insertedIds = [];
@@ -385,9 +422,23 @@ router.post('/import', upload.single('file'), async (req, res) => {
       // 3) 本地 XY 坐标解析器（最后兜底）
       let useFallback = false;
       const fs = require('fs');
+      const recognitionMode = String(req.body.recognition_mode || 'auto').trim().toLowerCase();
+      const forceAi = recognitionMode === 'ai';
+
+      if (forceAi) {
+        try {
+          const { forcePdfAiRecognition } = require('../services/pdfOrderPipeline');
+          const aiResult = await forcePdfAiRecognition(req.file.path);
+          parsed = aiResult.orders;
+          parser = aiResult.parser;
+          aiReview = aiResult.aiReview;
+        } catch (error) {
+          return res.status(error.statusCode || 502).json({ message: error.message });
+        }
+      }
 
       // Step -1: 优先走固定啤货表解析，不命中才交给后续解析器。
-      try {
+      if (!forceAi) try {
         const { parseBeihuoPdfBuffer } = require('../services/beihuoOrderParser');
         const beihuoResult = await parseBeihuoPdfBuffer(fs.readFileSync(req.file.path));
         if (beihuoResult && beihuoResult.orders.length > 0) {
@@ -400,7 +451,7 @@ router.post('/import', upload.single('file'), async (req, res) => {
       }
 
       // Step 0: paiji 自带模板规则（华登CMC + B车间内部生产单两种已验准）
-      if (parsed.length === 0) try {
+      if (!forceAi && parsed.length === 0) try {
         const { parsePdfByTemplate } = require('../services/pdfTemplateParser');
         const tplResult = await parsePdfByTemplate(fs.readFileSync(req.file.path));
         if (tplResult && tplResult.orders.length > 0) {
@@ -412,53 +463,35 @@ router.post('/import', upload.single('file'), async (req, res) => {
         console.log('[模板解析异常]:', e.message);
       }
 
-      // Step 1: 外发 pdf-parser 兜底（兴信 A_xinxin 等其他模板）
-      if (parsed.length === 0) try {
+      // Step 1: 外发多模板解析器兜底（兴信、华登、委托加工合同）
+      if (!forceAi && parsed.length === 0) try {
         const { parsePdfBuffer } = require('../services/outsource/pdf-parser');
         const r = await parsePdfBuffer(fs.readFileSync(req.file.path));
-        if (r && r.template === 'A_xinxin' && r.rows && r.rows.length > 0) {
-          const header = r.header || {};
-          parsed = r.rows.map(row => ({
-            product_code: '',
-            mold_no: row.mold_code || '',
-            mold_name: [row.mold_code, row.mold_name].filter(Boolean).join(' ').trim() || row.mold_name || '',
-            color: row.color || '',
-            color_powder_no: row.color_powder || '',
-            material_type: row.material || '',
-            quantity_needed: parseInt(row.shots) || 0,   // ⚠️ 严格取啤数
-            shot_weight: parseFloat(row.shot_weight_g) || 0,
-            material_kg: parseFloat(row.total_weight_kg) || 0,
-            order_no: header.bill_no || '',
-            notes: [row.row_note, row.delivery_date && ('交期 ' + row.delivery_date)].filter(Boolean).join(' '),
-            accumulated: 0, cavity: 1, cycle_time: 0,
-            sprue_pct: 0, ratio_pct: 0,
-            is_three_plate: 0, packing_qty: 0,
-          })).filter(o => o.mold_no || o.mold_name);
-          parser = 'outsource-A_xinxin';
-          console.log('[外发A_xinxin命中] →', parsed.length, '条');
+        if (r && r.template !== 'unknown' && r.rows && r.rows.length > 0) {
+          parsed = mapOutsourceParserRows(r);
+          parser = 'outsource-' + r.template;
+          console.log('[外发解析命中]', r.template, '→', parsed.length, '条');
         } else if (r && r.template !== 'unknown') {
-          console.log('[外发识别为', r.template, '但字段映射未做，跳过让 VLM 接]');
+          console.log('[外发识别为', r.template, '但未解析出数据，继续兜底]');
         }
       } catch (e) {
         console.log('[模板解析异常]:', e.message);
       }
 
-      if (parsed.length === 0) {
+      if (!forceAi && parsed.length === 0) {
         try {
-          const { pdfToImages, cleanupTmp } = require('../services/pdfToImages');
-          const { parseImageWithQwen } = require('../services/qwenOcr');
-          const { tmpDir, files } = pdfToImages(req.file.path);
-          console.log('[PDF转PNG] 共', files.length, '页');
-          try {
-            for (let i = 0; i < files.length; i++) {
-              console.log('[PDF→百炼] 处理第', i + 1, '/', files.length, '页');
-              const pageOrders = await parseImageWithQwen(files[i]);
-              parsed = parsed.concat(pageOrders);
-            }
-            if (parsed.length > 0) parser = 'qwen-pdf-vision';
-            console.log('[百炼PDF导入] 共解析', parsed.length, '条');
-          } finally {
-            cleanupTmp(tmpDir);
+          const { parsePdfWithQwen } = require('../services/pdfOrderPipeline');
+          parsed = await parsePdfWithQwen(req.file.path);
+          if (parsed.length > 0) {
+            parser = 'qwen-pdf-vision';
+            aiReview = {
+              available: true,
+              status: 'fallback',
+              suspect_rows: 0,
+              reviewed_rows: parsed.length,
+              corrected_fields: 0,
+              message: '规则未识别到PDF订单，已自动切换AI识别',
+            };
           }
         } catch (e) {
           console.log('[百炼PDF失败，回退本地]:', e.message);
@@ -466,11 +499,19 @@ router.post('/import', upload.single('file'), async (req, res) => {
         }
       }
 
-      if (useFallback || parsed.length === 0) {
+      if (!forceAi && (useFallback || parsed.length === 0)) {
         const { parsePdf } = require('../services/pdfParser');
         parsed = await parsePdf(req.file.path);
         if (parsed.length > 0) parser = 'local-pdf';
         console.log('[本地PDF解析] 结果:', parsed.length, '条');
+      }
+
+      if (!forceAi && parsed.length > 0 && parser !== 'qwen-pdf-vision') {
+        const { reviewPdfOrders } = require('../services/pdfOrderPipeline');
+        const reviewed = await reviewPdfOrders(req.file.path, parsed, parser);
+        parsed = reviewed.orders;
+        parser = reviewed.parser;
+        aiReview = reviewed.aiReview;
       }
     } else if (['.xlsx', '.xls'].includes(ext)) {
       const { parseOrderExcel, parseXingxinOrderExcel } = require('../services/excelParser');
@@ -542,7 +583,7 @@ router.post('/import', upload.single('file'), async (req, res) => {
         count: previewRows.length,
         parser,
         source_file: sourceFile,
-        ai_recheck_supported: ['.png', '.jpg', '.jpeg', '.bmp', '.webp'].includes(ext),
+        ai_recheck_supported: ['.pdf', '.png', '.jpg', '.jpeg', '.bmp', '.webp'].includes(ext),
         ai_review: aiReview,
         orders: previewRows,
         summary: {

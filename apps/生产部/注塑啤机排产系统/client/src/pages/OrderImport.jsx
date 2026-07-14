@@ -21,6 +21,8 @@ const PARSER_LABELS = {
   'xingxin-excel': '兴信生产单 Excel',
   'generic-excel': '通用 Excel',
   'outsource-A_xinxin': '兴信外发规则',
+  'outsource-B_huadeng': '华登外发规则',
+  'outsource-C_purchase': '委托加工合同规则',
   'qwen-pdf-vision': 'PDF 视觉识别',
   'qwen-image-vision': '图片视觉识别',
   'local-pdf': '本地 PDF 规则',
@@ -202,7 +204,7 @@ export default function OrderImport({ workshop = 'B' }) {
   const recheckWithAi = async () => {
     const candidates = previewFiles.filter((file) => file.file && file.aiRecheckSupported);
     if (candidates.length === 0) {
-      message.warning('当前预览没有可重新上传的图片文件');
+      message.warning('当前预览没有可重新上传的 PDF 或图片文件');
       return;
     }
     if (!canRunAiRecheck) {
@@ -233,7 +235,7 @@ export default function OrderImport({ workshop = 'B' }) {
               preview_id: 'preview-' + previewSequence.current,
               preview_file_id: entry.id,
               source_file: data.source_file || entry.name,
-              parser: data.parser || row.parser || 'qwen-image-vision',
+              parser: data.parser || row.parser || 'qwen-vision',
             };
           });
           workingRows = [
@@ -245,7 +247,7 @@ export default function OrderImport({ workshop = 'B' }) {
               ? {
                   ...file,
                   name: data.source_file || file.name,
-                  parser: data.parser || 'qwen-image-vision',
+                  parser: data.parser || 'qwen-vision',
                   count: replacementRows.length,
                   aiReview: data.ai_review,
                 }
@@ -636,12 +638,12 @@ export default function OrderImport({ workshop = 'B' }) {
             <Button
               icon={<RobotOutlined />}
               loading={recheckingAi}
-              disabled={confirming || !aiRecheckSupported || !canRunAiRecheck}
+              disabled={confirming || !aiRecheckSupported}
               title={!aiRecheckSupported
-                ? '当前预览没有图片文件'
+                ? '当前预览没有 PDF 或图片文件'
                 : !canRunAiRecheck
-                  ? '本机未配置百炼视觉识别密钥'
-                  : '整份图片改用AI视觉模型重新识别'}
+                  ? '本机未配置百炼视觉识别密钥，点击可查看原因'
+                  : '整份 PDF 或图片改用AI视觉模型重新识别'}
               onClick={recheckWithAi}
             >
               AI重新识别

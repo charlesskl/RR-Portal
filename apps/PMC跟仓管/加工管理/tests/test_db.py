@@ -191,8 +191,21 @@ def test_init_is_idempotent(db_path):
     db.init_db()  # 再次调用不应报错或重复插入
     conn = db.get_conn()
     count = conn.execute("SELECT COUNT(*) AS c FROM locations").fetchone()["c"]
-    assert count == 8
     conn.close()
+    assert count == 8
+
+
+def test_records_schema_stores_lihong_delivery_fields(db_path):
+    from pcba import db
+
+    db.init_db()
+    conn = db.get_conn()
+    columns = {
+        row["name"] for row in conn.execute("PRAGMA table_info(records)").fetchall()
+    }
+    conn.close()
+
+    assert {"contract_no", "item_no", "product_name"}.issubset(columns)
 
 
 def test_init_migrates_legacy_pcba_material_name(db_path):

@@ -531,20 +531,18 @@ def test_non_shaoyang_record_clears_po_customer(client):
     assert rec["customer_name"] is None
 
 
-def test_outsource_can_create_finished_and_semi_finished_without_location(client):
+def test_lihong_rejects_finished_and_accepts_semifinished_outbound(client):
     admin_login(client, "东莞加工厂利鸿")
     finished = client.post("/api/records", json={
         "rec_type": "finished", "material": "PCBA板", "qty": 40})
-    assert finished.status_code == 200
+    assert finished.status_code == 400
     semi_finished = client.post("/api/records", json={
         "rec_type": "semi_finished", "material": "NFC贴纸", "qty": 15})
     assert semi_finished.status_code == 200
 
     rows = client.get("/api/records").json()
     by_type = {r["rec_type"]: r for r in rows}
-    assert by_type["finished"]["qty"] == 40
     assert by_type["semi_finished"]["qty"] == 15
-    assert by_type["finished"]["location_id"] is None
     assert by_type["semi_finished"]["location_id"] is None
 
 

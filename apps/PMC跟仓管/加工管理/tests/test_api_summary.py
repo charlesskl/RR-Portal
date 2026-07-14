@@ -212,19 +212,21 @@ def test_semi_finished_department_summary_uses_warehouse_balance(client):
     assert s["subtotal"]["finished"] == 0
 
 
-def test_outsource_summary_counts_finished_and_semi_finished_inbound(client):
+def test_lihong_summary_uses_issue_minus_semifinished_outbound(client):
     admin_login(client, "东莞加工厂利鸿")
+    lid = loc_id(client, "碟片半成品")
     client.post("/api/records", json={
-        "rec_type": "finished", "material": "PCBA板", "qty": 70})
+        "rec_type": "issue", "location_id": lid, "material": "PCBA板", "qty": 70})
     client.post("/api/records", json={
         "rec_type": "semi_finished", "material": "NFC贴纸", "qty": 30})
 
     s = client.get("/api/summary").json()
-    assert s["raw"]["finished_inbound"] == 70
+    assert s["raw"]["issue"] == 70
+    assert s["raw"]["finished_inbound"] == 0
     assert s["raw"]["semi_finished_inbound"] == 30
-    assert s["raw"]["inbound"] == 100
-    assert s["raw"]["outbound"] == 0
-    assert s["raw"]["balance"] == 100
+    assert s["raw"]["inbound"] == 30
+    assert s["raw"]["outbound"] == 70
+    assert s["raw"]["balance"] == 40
     assert s["subtotal"]["issue"] == 0
     assert s["subtotal"]["finished"] == 0
 

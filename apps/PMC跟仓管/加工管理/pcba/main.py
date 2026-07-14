@@ -478,7 +478,7 @@ def _record_type_from_import(value, department):
         SUPPLIER_DEPARTMENT: {"入库": "inbound_raw", "来料入库": "inbound_raw", "出库": "issue", "领料": "issue"},
         SEMI_FINISHED_DEPARTMENT: {"入库": "semi_inbound", "半成品入库": "semi_inbound", "出库": "semi_outbound", "半成品出库": "semi_outbound"},
         ASSEMBLY_DEPARTMENT: {"领料": "issue", "成品入库": "finished", "半成品入库": "semi_finished"},
-        OUTSOURCE_DEPARTMENT: {"领料": "issue", "成品入库": "finished", "半成品入库": "semi_finished"},
+        OUTSOURCE_DEPARTMENT: {"领料": "issue", "半成品出库": "semi_finished", "半成品入库": "semi_finished"},
         HONGYA_DEPARTMENT: {"领料": "issue", "成品入库": "finished", "半成品入库": "semi_finished"},
         HEYUAN_DEPARTMENT: {"领料": "issue", "成品入库": "finished"},
         SHAOYANG_DEPARTMENT: {"领料": "issue", "成品入库": "finished"},
@@ -1015,9 +1015,13 @@ def _parse_legacy_outsource_workbook(conn, wb, department):
                 ),
                 material=PCBA_MATERIAL,
                 qty=qty,
-                remark=" ".join(
-                    part for part in [contract, item_no, name, "半成品入仓明细导入"] if part
-                ),
+                remark=_first_value(
+                    {"备注": _legacy_header_value(inbound_ws, headers, row_no, "备注")},
+                    "备注",
+                ) or None,
+                contract_no=contract or None,
+                item_no=item_no or None,
+                product_name=name or None,
             )
             _validate_record(body, department)
             bodies.append(body)
@@ -1486,7 +1490,9 @@ def _record_duplicate_id(conn, body, user):
         "SELECT id FROM records WHERE department=? AND rec_type=? "
         "AND COALESCE(rec_date, '')=? AND COALESCE(doc_no, '')=? "
         "AND material=? AND COALESCE(sticker_type, '')=? AND qty=? "
-        "AND COALESCE(location_id, 0)=? AND COALESCE(remark, '')=?",
+        "AND COALESCE(location_id, 0)=? AND COALESCE(remark, '')=? "
+        "AND COALESCE(contract_no, '')=? AND COALESCE(item_no, '')=? "
+        "AND COALESCE(product_name, '')=?",
         (
             user["department"],
             body.rec_type,
@@ -1497,6 +1503,9 @@ def _record_duplicate_id(conn, body, user):
             body.qty,
             body.location_id or 0,
             body.remark or "",
+            body.contract_no or "",
+            body.item_no or "",
+            body.product_name or "",
         ),
     ).fetchone()
     if row:
@@ -1506,7 +1515,9 @@ def _record_duplicate_id(conn, body, user):
             "SELECT id FROM records WHERE department=? AND rec_type=? "
             "AND COALESCE(rec_date, '')='' AND COALESCE(doc_no, '')='' "
             "AND material=? AND COALESCE(sticker_type, '')=? AND qty=? "
-            "AND COALESCE(location_id, 0)=? AND COALESCE(remark, '')=?",
+            "AND COALESCE(location_id, 0)=? AND COALESCE(remark, '')=? "
+            "AND COALESCE(contract_no, '')=? AND COALESCE(item_no, '')=? "
+            "AND COALESCE(product_name, '')=?",
             (
                 user["department"],
                 body.rec_type,
@@ -1515,6 +1526,9 @@ def _record_duplicate_id(conn, body, user):
                 body.qty,
                 body.location_id or 0,
                 body.remark or "",
+                body.contract_no or "",
+                body.item_no or "",
+                body.product_name or "",
             ),
         ).fetchone()
         if legacy_row:
@@ -1537,11 +1551,11 @@ def _insert_record_body(conn, body, user, skip_duplicate=False):
     cur = conn.execute(
         "INSERT INTO records(rec_type, location_id, rec_date, doc_no, "
         "material, sticker_type, qty, remark, supplier, po_no, customer_name, "
-        "summary_month, department, created_by) "
-        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "contract_no, item_no, product_name, summary_month, department, created_by) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (body.rec_type, body.location_id, body.rec_date, body.doc_no,
          body.material, sticker_type, body.qty, body.remark, supplier, po_no, customer_name,
-         body.summary_month,
+         body.contract_no, body.item_no, body.product_name, body.summary_month,
          user["department"], user["id"]),
     )
     return cur.lastrowid
@@ -1955,12 +1969,17 @@ class RecordIn(BaseModel):
     supplier: Optional[str] = None
     po_no: Optional[str] = None
     customer_name: Optional[str] = None
+    contract_no: Optional[str] = None
+    item_no: Optional[str] = None
+    product_name: Optional[str] = None
     summary_month: Optional[int] = None
 
 
 def _validate_record(body: RecordIn, department: Optional[str] = None):
     if body.rec_type not in VALID_TYPES:
         raise HTTPException(status_code=400, detail="类型无效")
+    if department == OUTSOURCE_DEPARTMENT and body.rec_type == "finished":
+        raise HTTPException(status_code=400, detail="利鸿只能录入领料/半成品出库")
     if _is_outsource_department(department) and body.rec_type not in ("issue", "finished", "semi_finished"):
         raise HTTPException(status_code=400, detail="东莞加工厂只能录入领料/成品/半成品入库")
     if department == HEYUAN_DEPARTMENT and body.rec_type not in ("issue", "finished"):
@@ -2365,6 +2384,8 @@ def record_import_template(_user=Depends(current_user)):
 def _record_export_type_label(rec_type, department):
     if rec_type == "issue":
         return "出库" if department == SUPPLIER_DEPARTMENT else "领料"
+    if department == OUTSOURCE_DEPARTMENT and rec_type == "semi_finished":
+        return "半成品出库"
     labels = {
         "inbound_raw": "入库",
         "finished": "成品入库",
@@ -2632,9 +2653,9 @@ def _pcba_inbound_detail_sheet(wb, title, records):
         ws.append([
             _record_export_date(row),
             row.get("doc_no"),
-            None,
-            "77794",
-            row.get("material") or PCBA_MATERIAL,
+            row.get("contract_no"),
+            row.get("item_no") or "77794",
+            row.get("product_name") or row.get("material") or PCBA_MATERIAL,
             row.get("qty"),
             row.get("remark"),
         ])
@@ -2646,12 +2667,15 @@ def _pcba_inbound_detail_sheet(wb, title, records):
     ws.column_dimensions["G"].width = 22
 
 
-def _outsource_pcba_export_workbook(records):
+def _outsource_pcba_export_workbook(records, department=None):
     wb = Workbook()
     ws = wb.active
     ws.title = "总表"
     issue = [row for row in records if row["rec_type"] == "issue"]
-    finished = [row for row in records if row["rec_type"] == "finished"]
+    finished = [
+        row for row in records
+        if row["rec_type"] == "finished" and department != OUTSOURCE_DEPARTMENT
+    ]
     semi_finished = [row for row in records if row["rec_type"] == "semi_finished"]
     headers = ["物料名称", None, "累计出入数", "截6月月结"]
     headers += [f"{month}月" for month in EXPORT_MONTHS]
@@ -3036,6 +3060,7 @@ def export_records(
         sql = (
             "SELECT r.id, r.rec_type, l.name AS location_name, r.rec_date, r.doc_no, "
             "r.material, r.sticker_type, r.supplier, r.po_no, r.customer_name, "
+            "r.contract_no, r.item_no, r.product_name, "
             "r.qty, r.remark, r.summary_month "
             "FROM records r "
             "LEFT JOIN locations l ON r.location_id = l.id "
@@ -3084,7 +3109,7 @@ def export_records(
         )
     if _is_outsource_department(user["department"]) and material == PCBA_MATERIAL:
         return _xlsx_response(
-            _outsource_pcba_export_workbook(records),
+            _outsource_pcba_export_workbook(records, user["department"]),
             f"{user['department']}77794PCB主板出入明细.xlsx",
         )
     if user["department"] == HEYUAN_DEPARTMENT and material == PCBA_MATERIAL:

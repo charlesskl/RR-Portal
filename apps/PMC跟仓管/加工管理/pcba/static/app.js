@@ -79,6 +79,10 @@ function isOutsource() {
   return ME && OUTSOURCE_DEPARTMENTS.includes(ME.department);
 }
 
+function isLihong() {
+  return ME && ME.department === OUTSOURCE_DEPARTMENT;
+}
+
 function shouldHideLocationForType(type) {
   return type === 'inbound_raw'
     || (ME && ME.department === SEMI_FINISHED_DEPARTMENT && type !== 'semi_outbound')
@@ -118,6 +122,9 @@ function typeLabel(type) {
     if (type === 'semi_inbound') return '入库';
     if (type === 'semi_outbound') return '出库';
   }
+  if (isLihong()) {
+    if (type === 'semi_finished') return '半成品出库';
+  }
   if (isOutsource()) {
     if (type === 'finished') return '成品入库';
     if (type === 'semi_finished') return '半成品入库';
@@ -146,6 +153,12 @@ function entryTypeOptionsForDepartment() {
     return [
       {value: 'semi_inbound', label: '入库'},
       {value: 'semi_outbound', label: '出库'},
+    ];
+  }
+  if (isLihong()) {
+    return [
+      {value: 'issue', label: '领料'},
+      {value: 'semi_finished', label: '半成品出库'},
     ];
   }
   if (isOutsource()) {
@@ -996,6 +1009,12 @@ async function loadSummary() {
     el('sumTable').innerHTML =
       '<thead><tr><th>半成品入库总数</th><th>半成品出库总数</th><th>半成品应存</th></tr></thead>' +
       `<tbody><tr><td>${fmt(s.raw.inbound)}</td><td>${fmt(s.raw.outbound)}</td><td>${fmt(s.raw.balance)}</td></tr></tbody>`;
+    return;
+  }
+  if (isLihong()) {
+    el('sumTable').innerHTML =
+      '<thead><tr><th>领料总数</th><th>半成品出库总数</th><th>应存数</th></tr></thead>' +
+      `<tbody><tr><td>${fmt(s.raw.issue)}</td><td>${fmt(s.raw.semi_finished_inbound)}</td><td>${fmt(s.raw.balance)}</td></tr></tbody>`;
     return;
   }
   if (isOutsource()) {

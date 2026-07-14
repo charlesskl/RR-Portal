@@ -68,6 +68,9 @@ CREATE TABLE IF NOT EXISTS records (
     supplier TEXT,
     po_no TEXT,
     customer_name TEXT,
+    contract_no TEXT,
+    item_no TEXT,
+    product_name TEXT,
     summary_month INTEGER,
     source_record_id INTEGER,
     source_flow TEXT,
@@ -172,6 +175,12 @@ def _migrate_schema(conn):
         conn.execute("ALTER TABLE records ADD COLUMN po_no TEXT")
     if not _column_exists(conn, "records", "customer_name"):
         conn.execute("ALTER TABLE records ADD COLUMN customer_name TEXT")
+    if not _column_exists(conn, "records", "contract_no"):
+        conn.execute("ALTER TABLE records ADD COLUMN contract_no TEXT")
+    if not _column_exists(conn, "records", "item_no"):
+        conn.execute("ALTER TABLE records ADD COLUMN item_no TEXT")
+    if not _column_exists(conn, "records", "product_name"):
+        conn.execute("ALTER TABLE records ADD COLUMN product_name TEXT")
     if not _column_exists(conn, "records", "summary_month"):
         conn.execute("ALTER TABLE records ADD COLUMN summary_month INTEGER")
     if not _column_exists(conn, "records", "source_record_id"):

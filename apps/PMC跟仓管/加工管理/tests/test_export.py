@@ -230,23 +230,23 @@ def test_semi_finished_department_export_has_inbound_and_outbound_sheets(client)
     assert outbound.cell(row=2, column=4).value == 30
 
 
-def test_outsource_export_has_finished_and_semi_finished_sheets(client):
+def test_lihong_summary_export_uses_semifinished_outbound_only(client):
     admin_login(client, "东莞加工厂利鸿")
+    lid = loc_id(client, "碟片半成品")
     client.post("/api/records", json={
-        "rec_type": "finished", "material": "PCBA板", "qty": 70})
+        "rec_type": "issue", "location_id": lid, "material": "PCBA板", "qty": 70})
     client.post("/api/records", json={
         "rec_type": "semi_finished", "material": "NFC贴纸", "qty": 30})
 
     r = client.get("/api/export")
     wb = openpyxl.load_workbook(io.BytesIO(r.content), data_only=True)
     rows = list(wb["总表"].iter_rows(values_only=True))
-    header_index = next(i for i, row in enumerate(rows) if row and row[0] == "成品入库总数")
+    header_index = next(i for i, row in enumerate(rows) if row and row[0] == "领料总数")
     total_row = rows[header_index + 1]
-    assert total_row == (70, 30, 100)
-    assert "东莞加工厂利鸿成品入库" in wb.sheetnames
-    assert "东莞加工厂利鸿半成品入库" in wb.sheetnames
-    assert wb["东莞加工厂利鸿成品入库"].cell(row=2, column=4).value == 70
-    assert wb["东莞加工厂利鸿半成品入库"].cell(row=2, column=4).value == 30
+    assert total_row == (70, 30, 40)
+    assert "东莞加工厂利鸿成品入库" not in wb.sheetnames
+    assert "东莞加工厂利鸿半成品出库" in wb.sheetnames
+    assert wb["东莞加工厂利鸿半成品出库"].cell(row=2, column=4).value == 30
 
 
 def test_shaoyang_finished_export_includes_po_and_customer_columns(client):

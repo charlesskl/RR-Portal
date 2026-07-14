@@ -137,7 +137,7 @@ def legacy_outsource_workbook_bytes():
 
     inbound_ws = wb.create_sheet("半成品入仓明细")
     inbound_ws.append(["日期", "送货单号", "合同号", "货号", "品名/规格", "数量（pcs）", "备注"])
-    inbound_ws.append(["2026-07-03", "BS2026070301", "LH202607", 77794, "光身唱机", 8, None])
+    inbound_ws.append(["2026-07-03", "BS2026070301", "LH202607", 77794, "光身唱机", 8, "返仓备注"])
     inbound_ws.append([None, None, None, None, "7月小计：", 8, None])
 
     total_ws = wb.create_sheet("总表")
@@ -786,6 +786,10 @@ def test_outsource_legacy_workbook_imports_issue_and_semi_finished_rows(client):
     assert by_type_doc[("issue", "截止到6月17号")]["qty"] == 90
     assert by_type_doc[("issue", "2518831")]["qty"] == 10
     assert by_type_doc[("semi_finished", "BS2026070301")]["qty"] == 8
+    assert by_type_doc[("semi_finished", "BS2026070301")]["contract_no"] == "LH202607"
+    assert by_type_doc[("semi_finished", "BS2026070301")]["item_no"] == "77794"
+    assert by_type_doc[("semi_finished", "BS2026070301")]["product_name"] == "光身唱机"
+    assert by_type_doc[("semi_finished", "BS2026070301")]["remark"] == "返仓备注"
     assert by_type_doc[("issue", "2518831")]["material"] == "77794-PCBA板"
 
     summary = client.get("/api/summary").json()
@@ -799,6 +803,38 @@ def test_outsource_legacy_workbook_imports_issue_and_semi_finished_rows(client):
         legacy_outsource_workbook_bytes(),
         "东莞加工厂利鸿77794PCB主板出入明细.xlsx",
     )
+    assert second.status_code == 200
+    assert second.json()["created"] == 0
+    assert second.json()["skipped"] == 3
+    assert len(client.get("/api/records").json()) == 3
+
+
+def test_lihong_legacy_workbook_round_trip_preserves_fields_and_skips_duplicates(client):
+    login(client, "东莞加工厂利鸿", "123456", "东莞加工厂利鸿")
+    filename = "东莞加工厂利鸿77794PCB主板出入明细.xlsx"
+    first = upload_bytes(
+        client,
+        "/api/records/import",
+        legacy_outsource_workbook_bytes(),
+        filename,
+    )
+
+    exported = client.get("/api/records/export?material=77794-PCBA板")
+    wb = openpyxl.load_workbook(io.BytesIO(exported.content), data_only=True)
+    inbound = wb["半成品入仓明细"]
+
+    assert first.status_code == 200
+    assert first.json()["created"] == 3
+    assert exported.status_code == 200
+    assert wb.sheetnames == ["总表", "领料明细", "半成品入仓明细"]
+    assert inbound.cell(2, 2).value == "BS2026070301"
+    assert inbound.cell(2, 3).value == "LH202607"
+    assert str(inbound.cell(2, 4).value) == "77794"
+    assert inbound.cell(2, 5).value == "光身唱机"
+    assert inbound.cell(2, 7).value == "返仓备注"
+
+    second = upload_bytes(client, "/api/records/import", exported.content, filename)
+
     assert second.status_code == 200
     assert second.json()["created"] == 0
     assert second.json()["skipped"] == 3

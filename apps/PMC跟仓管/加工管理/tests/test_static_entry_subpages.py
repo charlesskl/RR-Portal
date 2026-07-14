@@ -97,6 +97,22 @@ def test_entry_tabs_bind_clicks_without_inline_material_arguments():
     assert "onclick=\"setEntryMaterial('${esc(mat.name)}')\"" not in js
 
 
+def test_lihong_entry_uses_semifinished_outbound_without_finished_entry():
+    js = (ROOT / "pcba/static/app.js").read_text(encoding="utf-8")
+
+    assert "function isLihong()" in js
+    assert "if (isLihong()) {\n    if (type === 'semi_finished') return '半成品出库';\n  }" in js
+    assert (
+        "if (isLihong()) {\n"
+        "    return [\n"
+        "      {value: 'issue', label: '领料'},\n"
+        "      {value: 'semi_finished', label: '半成品出库'},\n"
+        "    ];\n"
+        "  }"
+    ) in js
+    assert "<th>领料总数</th><th>半成品出库总数</th><th>应存数</th>" in js
+
+
 def test_location_dropdown_hides_current_department():
     js = (ROOT / "pcba/static/app.js").read_text(encoding="utf-8")
 

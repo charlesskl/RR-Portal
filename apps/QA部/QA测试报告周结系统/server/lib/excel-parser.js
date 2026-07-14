@@ -1,5 +1,6 @@
 import ExcelJS from 'exceljs';
 import { extractAnnotatedImages } from './xlsx-images.js';
+import { normalizeIssueKey, normalizeStage } from './lifecycle.js';
 
 function argbToRgb(argb) {
   if (!argb) return null;
@@ -98,6 +99,8 @@ function cellIsRed(cell) {
 const CHECK_MARK_RE = /^[■□☐✓×√◇◆▲△○●—\-_\s]+$/;
 const STRONG_FAIL_RE = /FAIL|NG\b|不合格|不通过|异常|超差|超标|缺陷|损坏|破损|裂|起锈|划痕|磨花|擦花|脱漆|偏差/i;
 const WEAK_PASS_RE = /\b(PASS(ED)?|OK|TRUE)\b|合\s*格|通\s*过|完\s*成/i;
+const EXPLICIT_PASS_RE = /\bPASS(?:ED)?\b|合\s*格|通\s*过|通\s*過/i;
+const NEGATED_PASS_RE = /\bNOT\s+PASS(?:ED)?\b|不\s*合\s*格|不\s*通\s*过|未\s*通\s*过|不\s*通\s*過|未\s*通\s*過/i;
 // 整体结论模板行 —— "Conclusion 結論：□PASSED ■FAILED □INF.ONLY" 这种带选项框的行，不计入条目
 const CONCLUSION_LINE_RE = /Conclusion|結\s*論|结\s*论|INF\.?ONLY|僅\s*供\s*參\s*考|仅供参考/i;
 
@@ -211,16 +214,141 @@ export function groupImagesByFailRows(failRows, images) {
   return { groups, sampleImages, orphan };
 }
 
-export async function parseExcelRedRows(buffer) {
+function normalizeHeader(value) {
+  return String(value || '').toUpperCase().replace(/\s+/g, '');
+}
+
+function isResultTable(headers) {
+  return headers.some(header => {
+    const h = normalizeHeader(header);
+    return h.includes('TESTITEM') || h.includes('試驗項目') || h.includes('试验项目') ||
+      h.includes('SAMPLESNO') || h.includes('样板编号') || h.includes('樣板編號') ||
+      h.includes('TESTDESCRIPTION') || h.includes('試驗描述') || h.includes('试验描述');
+  });
+}
+
+function findHeaderIndex(headers, patterns) {
+  return headers.findIndex(header => {
+    const h = normalizeHeader(header);
+    return patterns.some(pattern => h.includes(pattern));
+  });
+}
+
+function looksLikeCondition(value) {
+  const text = String(value || '').trim();
+  return /(?:RPM|R\/MIN|HRS?|MIN|SEC|℃|°C|CM|MM|KG|\d+\s*[X×*]\s*\d+)/i.test(text);
+}
+
+function uniqueRowTexts(sheet, rowNumber, maxCol) {
+  const values = [];
+  for (let col = 1; col <= maxCol; col++) {
+    const value = safeText(sheet.getRow(rowNumber).getCell(col)).trim();
+    if (value && values[values.length - 1] !== value && !values.includes(value)) values.push(value);
+  }
+  return values;
+}
+
+function valueAfterLabel(values, labelRe) {
+  const index = values.findIndex(value => labelRe.test(value));
+  if (index < 0) return '';
+  for (let i = index + 1; i < values.length; i++) {
+    if (!labelRe.test(values[i])) return values[i].trim();
+  }
+  return '';
+}
+
+function extractReportMetadata(wb, fileName = '') {
+  let productNo = '';
+  let productName = '';
+  let stage = '';
+  let stageSource = '';
+  const productNoLabel = /Product\s*(?:No|Number)|產品編號|产品编号|貨號|货号/i;
+  const productNameLabel = /Product\s*Name|產品名稱|产品名称/i;
+
+  for (const sheet of wb.worksheets) {
+    if (sheet.state === 'hidden' || sheet.state === 'veryHidden') continue;
+    const maxCol = sheet.actualColumnCount || sheet.columnCount || 0;
+    for (let rowNumber = 1; rowNumber <= Math.min(15, sheet.rowCount); rowNumber++) {
+      const values = uniqueRowTexts(sheet, rowNumber, maxCol);
+      const joined = values.join(' | ');
+
+      if (!stage) {
+        const checked = joined.match(/[■☑✓]\s*(FEP1|FEP2|EP1|EP2|PE2|FEP|FS|PP|PS|EP)(?=\s|$|□|■|☐|☑)/i);
+        if (checked) {
+          stage = normalizeStage(checked[1]);
+          stageSource = 'report';
+        }
+      }
+
+      if (!productNo) {
+        const inline = joined.match(/(?:Product\s*(?:No|Number)(?:\/Name)?|產品編號|产品编号|貨號|货号)[^：:|]*[：:]\s*([A-Z0-9][A-Z0-9._/-]{1,})/i);
+        if (inline) productNo = inline[1].trim();
+        if (!productNo) {
+          const after = valueAfterLabel(values, productNoLabel);
+          const token = after.match(/[A-Z0-9][A-Z0-9._/-]{1,}/i);
+          if (token && !/^(PRODUCT|REPORT)$/i.test(token[0])) productNo = token[0];
+        }
+      }
+
+      if (!productName) {
+        const after = valueAfterLabel(values, productNameLabel);
+        if (after && !productNoLabel.test(after)) productName = after;
+        const combined = joined.match(/Product\s*No\/Name[^：:|]*[：:]\s*[A-Z0-9._/-]+\s*\/\s*(.+?)(?:\s+Report\s*No|\||$)/i);
+        if (!productName && combined) productName = combined[1].trim();
+      }
+    }
+  }
+
+  if (!productNo && fileName) {
+    const match = String(fileName).match(/^\s*([A-Z0-9][A-Z0-9._/-]{2,})/i);
+    if (match) productNo = match[1];
+  }
+  if (!stage && fileName) {
+    const match = String(fileName).toUpperCase().match(/(?:^|[^A-Z0-9])(FEP1|FEP2|EP1|EP2|PE2|FEP|FS|PP|PS|EP)(?:[^A-Z0-9]|$)/);
+    if (match) {
+      stage = normalizeStage(match[1]);
+      stageSource = 'filename';
+    }
+  }
+
+  let reportDate = '';
+  const dateMatch = String(fileName).match(/(20\d{2})(\d{2})(\d{2})(?!\d)/);
+  if (dateMatch) reportDate = `${dateMatch[1]}-${dateMatch[2]}-${dateMatch[3]}T00:00:00.000Z`;
+
+  return {
+    productNo: String(productNo || '').trim().toUpperCase(),
+    productName: String(productName || '').trim(),
+    stage,
+    stageSource,
+    reportDate
+  };
+}
+
+function buildDescription(cells, descriptionIndex, redCols, fallback = '') {
+  const description = descriptionIndex >= 0 ? String(cells[descriptionIndex]?.value || '').trim() : '';
+  if (description) return description;
+  const redDescription = (redCols || [])
+    .map(col => `${col.header}=${col.value}`)
+    .filter(Boolean)
+    .join('；');
+  return redDescription || fallback;
+}
+
+export async function parseExcelRedRows(buffer, options = {}) {
+  const { includeImages = true, fileName = '' } = options;
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.load(buffer);
 
+  const metadata = extractReportMetadata(wb, fileName);
+
   // 提前解析图片 + 标注（一次性，按 sheet 名归类后供主循环使用）
   let allAnnotated = [];
-  try {
-    allAnnotated = await extractAnnotatedImages(buffer);
-  } catch (e) {
-    console.warn('[parser] extractAnnotatedImages failed, images will be missing:', e.message);
+  if (includeImages) {
+    try {
+      allAnnotated = await extractAnnotatedImages(buffer);
+    } catch (e) {
+      console.warn('[parser] extractAnnotatedImages failed, images will be missing:', e.message);
+    }
   }
 
   const sheets = [];
@@ -239,9 +367,15 @@ export async function parseExcelRedRows(buffer) {
     const { rowNumber: headerRowNumber, headers: rawHeaders } = detectHeaderRow(sheet, maxCol);
     const headerGroups = computeHeaderGroups(rawHeaders);
     const headers = headerGroups.map(g => g.header);
+    const resultTable = isResultTable(headers);
+    const itemIndex = Math.max(0, findHeaderIndex(headers, ['TESTITEM', '試驗項目', '试验项目', 'SAMPLESNO', '样板编号', '樣板編號']));
+    const sampleSizeIndex = findHeaderIndex(headers, ['S/S', 'SAMPLESIZE', '樣板數量', '样板数量']);
+    const descriptionIndex = findHeaderIndex(headers, ['TESTDESCRIPTION', '試驗描述', '试验描述', 'DESCRIPTION', '描述']);
 
     const failRows = [];
+    const testResults = [];
     let dataRowCount = 0;
+    let currentTestItem = '';
     sheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
       if (rowNumber <= headerRowNumber) return;
       dataRowCount++;
@@ -256,7 +390,18 @@ export async function parseExcelRedRows(buffer) {
         if (isRedRaw) redCellsRaw.push({ colNumber, text });
       });
 
-      if (redCellsRaw.length === 0) return;
+      const snapByCol = new Map(cellSnapshots.map(s => [s.colNumber, s]));
+      const rawRedColSet = new Set(redCellsRaw.map(c => c.colNumber));
+      const compactCells = compactCellsByGroups(headerGroups, snapByCol, rawRedColSet);
+      const rowText = compactCells.map(cell => cell.value).filter(Boolean).join(' ');
+      const candidateItem = String(compactCells[itemIndex]?.value || '').trim();
+      const sampleSize = sampleSizeIndex >= 0 ? String(compactCells[sampleSizeIndex]?.value || '').trim() : '';
+      if (resultTable && candidateItem) {
+        if (!currentTestItem || sampleSize || !looksLikeCondition(candidateItem)) currentTestItem = candidateItem;
+      }
+      const testItem = currentTestItem || candidateItem;
+
+      let failRow = null;
 
       // 行级判定：拼起来所有红字内容看是否包含强不合格信号 vs 弱通过信号
       const seenForAggregate = new Set();
@@ -270,33 +415,49 @@ export async function parseExcelRedRows(buffer) {
       }
       const aggregate = uniqueRedTexts.join(' ');
       const verdict = classifyRow(aggregate);
-      if (verdict !== 'fail') return;
+      if (redCellsRaw.length > 0 && verdict === 'fail') {
+        // 构造去重后的 redCols（按 cell 文本去重，已经把合并区里的重复消掉）
+        const seen = new Set();
+        const redCols = [];
+        const colToHeader = (col) => {
+          const g = headerGroups.find(hg => hg.cols.includes(col));
+          return g ? g.header : `第${col}列`;
+        };
+        for (const c of redCellsRaw) {
+          const key = c.text.trim();
+          if (!key || isCheckmarkOnly(key)) continue;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          redCols.push({ col: c.colNumber, header: colToHeader(c.colNumber), value: c.text });
+        }
+        if (redCols.length > 0) {
+          failRow = { rowNumber, redCols, cells: compactCells };
+          failRows.push(failRow);
+          if (resultTable && testItem) {
+            const description = buildDescription(compactCells, descriptionIndex, redCols, aggregate);
+            testResults.push({
+              rowNumber,
+              testItem,
+              issueKey: normalizeIssueKey(testItem),
+              status: 'fail',
+              description,
+              cells: compactCells
+            });
+          }
+        }
+      }
 
-      // 构造去重后的 redCols（按 cell 文本去重，已经把合并区里的重复消掉）
-      const seen = new Set();
-      const redCols = [];
-      const colToHeader = (col) => {
-        const g = headerGroups.find(hg => hg.cols.includes(col));
-        return g ? g.header : `第${col}列`;
-      };
-      for (const c of redCellsRaw) {
-        const key = c.text.trim();
-        if (!key || isCheckmarkOnly(key)) continue;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        redCols.push({
-          col: c.colNumber,
-          header: colToHeader(c.colNumber),
-          value: c.text
+      if (!failRow && resultTable && testItem && !CONCLUSION_LINE_RE.test(rowText) &&
+          EXPLICIT_PASS_RE.test(rowText) && !NEGATED_PASS_RE.test(rowText) && !STRONG_FAIL_RE.test(rowText)) {
+        testResults.push({
+          rowNumber,
+          testItem,
+          issueKey: normalizeIssueKey(testItem),
+          status: 'pass',
+          description: buildDescription(compactCells, descriptionIndex, [], 'PASS'),
+          cells: compactCells
         });
       }
-      if (redCols.length === 0) return;
-
-      const redColSet = new Set(redCellsRaw.map(c => c.colNumber));
-      const snapByCol = new Map(cellSnapshots.map(s => [s.colNumber, s]));
-      const cells = compactCellsByGroups(headerGroups, snapByCol, redColSet);
-
-      failRows.push({ rowNumber, redCols, cells });
     });
 
     sheets.push({
@@ -305,10 +466,12 @@ export async function parseExcelRedRows(buffer) {
       headerRowNumber,
       headers,
       failRows,
+      testResults,
+      passCount: testResults.filter(result => result.status === 'pass').length,
       totalRows: dataRowCount,
       failCount: failRows.length
     });
   });
 
-  return { sheets, rawImages };
+  return { sheets, rawImages, metadata };
 }

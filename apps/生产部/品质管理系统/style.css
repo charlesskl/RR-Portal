@@ -1751,32 +1751,32 @@ tbody tr:hover { background: var(--bg-hover); }
   width: 100%;
 }
 /* 数字列统一右对齐 */
-#recordsTable th:nth-child(9),   /* 来料数 */
-#recordsTable td:nth-child(9),
-#recordsTable th:nth-child(10),  /* 抽查数 */
+#recordsTable th:nth-child(10),  /* 来料数 */
 #recordsTable td:nth-child(10),
-#recordsTable th:nth-child(11),  /* FAIL数 */
+#recordsTable th:nth-child(11),  /* 抽查数 */
 #recordsTable td:nth-child(11),
-#recordsTable th:nth-child(12) { /* 不良率 */
+#recordsTable th:nth-child(12),  /* FAIL数 */
+#recordsTable td:nth-child(12),
+#recordsTable th:nth-child(13) { /* 不良率 */
   text-align: right;
 }
-#recordsTable td:nth-child(12) {
+#recordsTable td:nth-child(13) {
   text-align: right;
 }
 /* 判定/检验员/操作列居中 */
-#recordsTable th:nth-child(14),
-#recordsTable td:nth-child(14),
 #recordsTable th:nth-child(15),
 #recordsTable td:nth-child(15),
 #recordsTable th:nth-child(16),
-#recordsTable td:nth-child(16) {
+#recordsTable td:nth-child(16),
+#recordsTable th:nth-child(17),
+#recordsTable td:nth-child(17) {
   text-align: center;
 }
 /* 长文本溢出省略 */
 #recordsTable td:nth-child(4),   /* 供应商 */
 #recordsTable td:nth-child(5),   /* 客户 */
 #recordsTable td:nth-child(7),   /* 款式名称 */
-#recordsTable td:nth-child(13) { /* 不良现象 */
+#recordsTable td:nth-child(14) { /* 不良现象 */
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

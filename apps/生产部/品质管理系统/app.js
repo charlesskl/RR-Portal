@@ -1760,7 +1760,7 @@ function filterRecords() {
 
     filteredRecs = data.filter(r => {
       if (search) {
-        const haystack = [r.supplier, r.productNo, r.productName, r.client, r.defect]
+        const haystack = [r.supplier, r.productNo, r.productName, r.client, r.orderNo, r.deliveryNo, r.defect]
           .filter(Boolean).join(' ').toLowerCase();
         if (!haystack.includes(search)) return false;
       }
@@ -1800,6 +1800,7 @@ function filterRecords() {
         <col style="width:80px"/>   <!-- 客户 -->
         <col style="width:92px"/>   <!-- 货号 -->
         <col style="width:auto"/>   <!-- 款式名称 -->
+        <col style="width:102px"/>  <!-- PO号 -->
         <col style="width:60px"/>   <!-- 类型 -->
         <col style="width:86px"/>   <!-- 来料数 -->
         <col style="width:72px"/>   <!-- 抽查数 -->
@@ -1821,6 +1822,7 @@ function filterRecords() {
         <th style="text-align:left">客户</th>
         <th style="text-align:left">货号</th>
         <th style="text-align:left">款式名称</th>
+        <th style="text-align:left">PO号</th>
         <th style="text-align:center">类型</th>
         <th style="text-align:right">来料数</th>
         <th style="text-align:right">抽查数</th>
@@ -1847,6 +1849,7 @@ function filterRecords() {
           <td style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${r.client||''}">${r.client||'-'}</td>
           <td style="font-family:var(--font-mono);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${r.productNo||''}">${r.productNo||'-'}</td>
           <td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${r.productName||''}">${r.productName||'-'}</td>
+          <td style="font-family:var(--font-mono);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${r.orderNo||''}">${r.orderNo||'-'}</td>
           <td style="text-align:center"><span class="badge ${r.type==='成品'?'badge-pass':'badge-hold'}">${r.type||'-'}</span></td>
           <td style="text-align:right;font-variant-numeric:tabular-nums">${(r.qty||0).toLocaleString()}</td>
           <td style="text-align:right;font-variant-numeric:tabular-nums">${r.sampleQty != null ? r.sampleQty : '<span style="color:var(--text-muted)">—</span>'}</td>
@@ -2450,8 +2453,11 @@ function extractFieldsFromOcrText(text) {
 
   /* ── 送货单号：优先送货单号，其次客户单号；排除手机号 ── */
   let deliveryNo = findByKeywords(['送货单号','送货编号','送货单','单号','Delivery No','DN No'], _OCR_CUTOFF_KEYWORDS);
-  if (!deliveryNo) deliveryNo = findByKeywords(['客户单号','客户订单'], _OCR_CUTOFF_KEYWORDS);
   if (deliveryNo && !isPhoneNumberLike(deliveryNo)) setVal('ocrDeliveryNo', deliveryNo);
+
+  /* ── PO号 / 订单号：独立保存，不再混入送货单号 ── */
+  const orderNo = findByKeywords(['PO号','PO#','P/O','订单号','订单编号','客户单号','客户订单'], _OCR_CUTOFF_KEYWORDS);
+  if (orderNo && !isPhoneNumberLike(orderNo)) setVal('ocrOrderNo', orderNo);
 
   /* 类型：文本包含"来料/原料/物料/配件/包材"，或已识别到货号+数量+PCS的送货单明细，则设为"来料" */
   if (/来料|原料|物料|配件|包材/.test(text) || (productNo && qty)) {
@@ -2466,6 +2472,7 @@ function applyOcrToForm() {
   const ocrProductNo   = document.getElementById('ocrProductNo')?.value || '';
   const ocrProductName = document.getElementById('ocrProductName')?.value || '';
   const ocrDeliveryNo  = document.getElementById('ocrDeliveryNo')?.value || '';
+  const ocrOrderNo     = document.getElementById('ocrOrderNo')?.value || '';
   const ocrQty         = document.getElementById('ocrQty')?.value || '';
   const ocrType        = document.getElementById('ocrType')?.value || '';
   const ocrRemark      = document.getElementById('ocrRemark')?.value || '';
@@ -2476,6 +2483,7 @@ function applyOcrToForm() {
   if (ocrProductNo)   setVal('f_productNo', ocrProductNo);
   if (ocrProductName) setVal('f_productName', ocrProductName);
   if (ocrDeliveryNo)  setVal('f_deliveryNo', ocrDeliveryNo);
+  if (ocrOrderNo)     setVal('f_orderNo', ocrOrderNo);
   if (ocrQty)         setVal('f_qty', ocrQty);
   if (ocrType)        setVal('f_type', ocrType);
   if (ocrRemark)      setVal('f_remark', ocrRemark);
@@ -2784,6 +2792,7 @@ function openEditModal(id) {
   setVal('f_productNo',   r.productNo || '');
   setVal('f_productName', r.productName || '');
   setVal('f_deliveryNo',  r.deliveryNo || '');
+  setVal('f_orderNo',     r.orderNo || '');
   setVal('f_type',        r.type || '成品');
   setVal('f_qty',         r.qty || '');
   /* 编辑旧记录：sampleQty 已有值时设 manualEdit 标记，防止被自动覆盖 */
@@ -2813,7 +2822,7 @@ function getVal(id)     { return (document.getElementById(id)?.value || '').trim
 
 function clearForm() {
   ['f_date','f_inspDate','f_supplier','f_client','f_productNo','f_productName',
-   'f_deliveryNo','f_qty','f_sampleQty','f_pass','f_fail','f_defectRate','f_defect','f_qc','f_remark']
+   'f_deliveryNo','f_orderNo','f_qty','f_sampleQty','f_pass','f_fail','f_defectRate','f_defect','f_qc','f_remark']
     .forEach(id => setVal(id, ''));
   setVal('f_type',   '成品');
   setVal('f_result', 'PASS');
@@ -4038,6 +4047,7 @@ function saveRecord() {
     date, inspDate: getVal('f_inspDate') || date,
     supplier, client: getVal('f_client'), productNo: getVal('f_productNo'),
     productName: getVal('f_productName'), deliveryNo: getVal('f_deliveryNo'),
+    orderNo: getVal('f_orderNo'),
     type: getVal('f_type'), qty, sampleQty: sample, pass, fail,
     defectRate: sample > 0 ? (fail/sample*100).toFixed(2)+'%' : (getVal('f_defectRate') || '0.00%'),
     result: getFinalRecordResult(
@@ -4377,11 +4387,11 @@ function exportCSV() {
   if (_downloadServerExport('records.csv', 'CSV')) return;
   try {
     const data = filteredRecs.length ? filteredRecs : recs();
-    const HDR  = ['ID','来料日期','检验日期','供应商','客户','货号','款式名称','类型',
+    const HDR  = ['ID','来料日期','检验日期','供应商','客户','货号','款式名称','PO号','类型',
                   '来料数量','抽查数量','PASS数','FAIL数','不良率','不良现象','判定结果','检验员','备注'];
     const rows = data.map(r => [
       r.id, r.date, r.inspDate, r.supplier, r.client, r.productNo, r.productName,
-      r.type, r.qty, r.sampleQty, r.pass, r.fail, r.defectRate, r.defect, r.result, r.qc, r.remark,
+      r.orderNo, r.type, r.qty, r.sampleQty, r.pass, r.fail, r.defectRate, r.defect, r.result, r.qc, r.remark,
     ].map(v => `"${String(v==null?'':v).replace(/"/g,'""')}"`));
     const csv  = '\uFEFF' + [HDR, ...rows].map(r=>r.join(',')).join('\n');
     const blob = new Blob([csv], { type:'text/csv;charset=utf-8;' });
@@ -4415,28 +4425,28 @@ function exportFactoryExcel() {
     if (!data.length) { showToast('当前筛选无数据可导出', 'error'); return; }
 
     const title   = '加工厂品质检验明细统计表';
-    const headers = ['序号','来货日期','供应商','加工类型','客户','送货单号','货号','产品名称','数量','单数','检验\n结果','不良描述','检验人','备注'];
+    const headers = ['序号','来货日期','供应商','加工类型','客户','送货单号','PO号','货号','产品名称','数量','单数','检验\n结果','不良描述','检验人','备注'];
     const aoa = [[title], headers];
     data.forEach((r, i) => {
       aoa.push([
         i + 1, r.date || '', r.supplier || '', r.type || '', r.client || '',
-        r.deliveryNo || '', r.productNo || '', r.productName || '',
+        r.deliveryNo || '', r.orderNo || '', r.productNo || '', r.productName || '',
         (r.qty != null && r.qty !== '' ? Number(r.qty) : ''), '',
         r.result || '', r.defect || '', r.qc || '', r.remark || '',
       ]);
     });
 
     const ws = XLSX.utils.aoa_to_sheet(aoa);
-    ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 13 } }];  /* 标题 A1:N1 */
-    ws['!cols']   = [5.3,9.7,7.8,10.3,10.3,11.5,12,27,7.5,7,7.2,19.3,13,15.5].map(w => ({ wch: w }));
+    ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 14 } }];  /* 标题 A1:O1 */
+    ws['!cols']   = [5.3,9.7,7.8,10.3,10.3,11.5,13,12,27,7.5,7,7.2,19.3,13,15.5].map(w => ({ wch: w }));
     ws['!rows']   = [{ hpt: 24 }, { hpt: 22 }];  /* 标题行 / 表头行高 */
 
     /* ── 样式：全单元格黑框 + 标题居中加粗 + 表头加粗底色（需 xlsx-js-style）── */
     const thin   = { style: 'thin', color: { rgb: '000000' } };
     const border = { top: thin, bottom: thin, left: thin, right: thin };
-    const leftCols = { 7: 1, 11: 1 };  /* 产品名称(H)、不良描述(L) 左对齐，其余居中 */
+    const leftCols = { 8: 1, 12: 1 };  /* 产品名称(I)、不良描述(M) 左对齐，其余居中 */
     for (let R = 0; R < aoa.length; R++) {
-      for (let C = 0; C < 14; C++) {
+      for (let C = 0; C < 15; C++) {
         const addr = XLSX.utils.encode_cell({ r: R, c: C });
         let cell = ws[addr];
         if (!cell) cell = ws[addr] = { t: 's', v: '' };
@@ -4668,6 +4678,7 @@ function _backupDoImport(incoming, mode) {
       productNo:   r.productNo   || r.款号 || '',
       productName: r.productName || r.款式 || '',
       deliveryNo:  r.deliveryNo  || r.单号 || '',
+      orderNo:     r.orderNo     || r.PO || r.PO号 || r.订单号 || '',
       type:        r.type        || '成品',
       qty:         r.qty         || 0,
       sampleQty:   r.sampleQty != null ? r.sampleQty : null,

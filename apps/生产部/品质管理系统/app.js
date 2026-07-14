@@ -82,7 +82,7 @@ const ROLE_PERMS = {
     importData:true,   exportData:true,  exportPdf:true,    manageUsers:false,
   },
   viewer: {
-    createRecord:false, editRecord:false, deleteRecord:false, batchDelete:false,
+    createRecord:true,  editRecord:true,  deleteRecord:false, batchDelete:false,
     importData:false,   exportData:true,  exportPdf:true,    manageUsers:false,
   },
 };
@@ -1838,6 +1838,12 @@ function filterRecords() {
         const rt       = parseRate(r.defectRate) ?? 0;
         const checked  = _selectedIds.has(r.id) ? 'checked' : '';
         const selCls   = _selectedIds.has(r.id) ? 'row-selected' : '';
+        const editBtn = can('editRecord')
+          ? `<button class="action-btn" onclick="openEditModal(${r.id})">编辑</button>`
+          : '';
+        const delBtn = can('deleteRecord')
+          ? `<button class="action-btn del" onclick="deleteRecord(${r.id})">删除</button>`
+          : '';
         return `<tr class="${selCls}" data-id="${r.id}">
           <td class="col-check">
             <input type="checkbox" class="row-check" ${checked}
@@ -1860,8 +1866,8 @@ function filterRecords() {
           <td style="text-align:center"><span class="badge ${bc}">${r.result}</span></td>
           <td style="text-align:center">${r.qc||'-'}</td>
           <td style="text-align:center">
-            <button class="action-btn" onclick="openEditModal(${r.id})">编辑</button>
-            <button class="action-btn del" onclick="deleteRecord(${r.id})">删除</button>
+            ${editBtn}
+            ${delBtn}
             <button class="action-btn iqc" onclick="exportIQCReport(${r.id})" title="导出IQC检验报告">IQC</button>
           </td>
         </tr>`;

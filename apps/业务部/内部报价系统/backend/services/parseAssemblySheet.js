@@ -23,6 +23,92 @@ function isHeaderRow(values) {
   return /工序名称/.test(j) && /人数/.test(j);
 }
 
+function findLaborQuoteHeader(rows) {
+  for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
+    const row = rows[rowIndex] || [];
+    const cols = { product: null, step: null, qty: null, count: null, note: null };
+    row.forEach((v, i) => {
+      const s = toStr(v).replace(/\s+/g, '');
+      if (/^(货号或图片|产品名称|货号)$/.test(s)) cols.product = i;
+      else if (/^(做工名称|工序名称)$/.test(s)) cols.step = i;
+      else if (/^(总目标数量|目标数量|生产量)$/.test(s)) cols.qty = i;
+      else if (s === '人数') cols.count = i;
+      else if (/^备注/.test(s)) cols.note = i;
+    });
+    if (cols.product != null && cols.step != null && cols.qty != null && cols.count != null) {
+      return { rowIndex, cols };
+    }
+  }
+  return null;
+}
+
+function parseLaborQuoteSheet(sheet) {
+  const found = findLaborQuoteHeader(sheet.rows);
+  if (!found) return null;
+
+  const assemblyGroups = [];
+  const packagingGroups = [];
+  let currentKind = 'assembly';
+  let currentGroup = null;
+
+  for (let i = found.rowIndex + 1; i < sheet.rows.length; i++) {
+    const row = sheet.rows[i] || [];
+    const product = toStr(row[found.cols.product]);
+    const stepName = toStr(row[found.cols.step]);
+    const qty = toNum(row[found.cols.qty]);
+    const count = toNum(row[found.cols.count]);
+    const note = found.cols.note != null ? toStr(row[found.cols.note]) : '';
+
+    if (product && !/车间填写|货号或图片|合计|总计/.test(product)) {
+      if (/包装|混装/.test(product)) currentKind = 'packaging';
+      else if (/组装/.test(product)) currentKind = 'assembly';
+
+      currentGroup = {
+        product,
+        qty: qty && qty > 0 ? qty : 1,
+        team: 1,
+        steps: [],
+      };
+      (currentKind === 'packaging' ? packagingGroups : assemblyGroups).push(currentGroup);
+    }
+
+    if (!currentGroup || !stepName || count == null || count <= 0) continue;
+    if (/做工名称|工序名称|合计|总计/.test(stepName)) continue;
+    if (qty && qty > 0) currentGroup.qty = qty;
+    currentGroup.steps.push({ name: stepName, count, note });
+  }
+
+  const clean = groups => groups.filter(g => g.steps.length > 0);
+  const assembly = clean(assemblyGroups);
+  const packaging = clean(packagingGroups);
+  const people = groups => groups.reduce(
+    (total, group) => total + group.steps.reduce((sum, step) => sum + (toNum(step.count) || 0), 0),
+    0,
+  );
+  const count = assembly.reduce((sum, g) => sum + g.steps.length, 0)
+    + packaging.reduce((sum, g) => sum + g.steps.length, 0);
+
+  if (!count) return { error: '识别到装工报价格式，但未解析到有效的做工名称和人数' };
+  const groups = [
+    ...assembly.map(group => ({ ...group, kind: 'assembly' })),
+    ...packaging.map(group => ({ ...group, kind: 'packaging' })),
+  ];
+  return {
+    format: 'labor_quote',
+    meta: {
+      assembly_people: people(assembly),
+      packaging_people: people(packaging),
+      total_people: people(assembly) + people(packaging),
+    },
+    assembly_groups: assembly,
+    packaging_groups: packaging,
+    groups,
+    group_count: groups.length,
+    count,
+    sheet_used: sheet.name,
+  };
+}
+
 // 找出表头里所有 "工序名称" 和 "人数" 的列位置（可能有 2 套）
 function indexHeader(values) {
   const cols = []; // [{ nameCol, countCol }]
@@ -80,6 +166,12 @@ async function parseWorkbook(buffer) {
     }
   }
   if (!sheets.length) return { error: '工作簿为空' };
+
+  // 新版装工报价表：按产品分组，一次识别组装与包装人数。
+  for (const sheet of sheets) {
+    const grouped = parseLaborQuoteSheet(sheet);
+    if (grouped) return grouped;
+  }
 
   // 找出有"工序名称"+"人数"表头的 sheet
   let pickedSheet = null;

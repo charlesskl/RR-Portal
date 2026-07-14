@@ -1,9 +1,7 @@
-const path = require('path');
 const zlib = require('zlib');
 const { createWorker, PSM } = require('tesseract.js');
 const { parseBeihuoRawRows } = require('./beihuoOrderParser');
 
-const TESSDATA_DIR = path.join(__dirname, '..');
 const TABLE_TEMPLATES = [
   {
     name: 'beihuo-grid-v1',
@@ -57,17 +55,13 @@ let chiWorkerPromise;
 let engWorkerPromise;
 let ocrQueue = Promise.resolve();
 
-function createLocalWorker(lang) {
-  return createWorker(lang, undefined, {
-    langPath: TESSDATA_DIR,
-    cachePath: TESSDATA_DIR,
-    gzip: false,
-  });
+function createOcrWorker(lang) {
+  return createWorker(lang);
 }
 
 function getChiWorker() {
   if (!chiWorkerPromise) {
-    chiWorkerPromise = createLocalWorker('chi_sim').catch((error) => {
+    chiWorkerPromise = createOcrWorker('chi_sim').catch((error) => {
       chiWorkerPromise = null;
       throw error;
     });
@@ -77,7 +71,7 @@ function getChiWorker() {
 
 function getEngWorker() {
   if (!engWorkerPromise) {
-    engWorkerPromise = createLocalWorker('eng').catch((error) => {
+    engWorkerPromise = createOcrWorker('eng').catch((error) => {
       engWorkerPromise = null;
       throw error;
     });

@@ -1,17 +1,11 @@
 const { createWorker } = require('tesseract.js');
-const path = require('path');
 const { normalizeMaterialKg } = require('./beihuoOrderParser');
 
 let worker = null;
 
 async function getWorker() {
   if (!worker) {
-    const tessdataDir = path.join(__dirname, '..');
-    worker = await createWorker('chi_sim', undefined, {
-      langPath: tessdataDir,
-      cachePath: tessdataDir,
-      gzip: false,
-    });
+    worker = await createWorker('chi_sim+eng');
   }
   return worker;
 }

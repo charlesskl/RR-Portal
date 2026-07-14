@@ -330,3 +330,27 @@ def test_init_migrates_existing_records_to_default_department(db_path):
     assert "assembly_opening_stock" in monthly_columns
     assert "hongya_opening_stock" in monthly_columns
     conn.close()
+
+
+def test_init_normalizes_existing_lihong_pcba_material_alias(db_path):
+    from pcba import db
+
+    db.init_db()
+    conn = db.get_conn()
+    conn.execute(
+        "INSERT INTO records(rec_type, material, qty, department, created_by) "
+        "VALUES (?, ?, ?, ?, ?)",
+        ("semi_finished", "PCBA板", 10, "东莞加工厂利鸿", 1),
+    )
+    conn.commit()
+    conn.close()
+
+    db.init_db()
+    conn = db.get_conn()
+    material = conn.execute(
+        "SELECT material FROM records WHERE department=?",
+        ("东莞加工厂利鸿",),
+    ).fetchone()["material"]
+    conn.close()
+
+    assert material == "77794-PCBA板"

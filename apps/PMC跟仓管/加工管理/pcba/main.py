@@ -1102,6 +1102,17 @@ def _normalize_pcba_material(value=None):
     return text
 
 
+def _normalize_material_filter(material, department):
+    material = _clean_optional(material)
+    if (
+        department == OUTSOURCE_DEPARTMENT
+        and material
+        and _normalize_pcba_material(material) == PCBA_MATERIAL
+    ):
+        return PCBA_MATERIAL
+    return material
+
+
 def _outsource_date_value(value):
     rec_date = _legacy_excel_date(value)
     return rec_date
@@ -2217,11 +2228,11 @@ class RecordIn(BaseModel):
 def _validate_record(body: RecordIn, department: Optional[str] = None):
     if body.rec_type not in VALID_TYPES:
         raise HTTPException(status_code=400, detail="类型无效")
-    if (
-        department == OUTSOURCE_DEPARTMENT
-        and _normalize_pcba_material(body.material) != PCBA_MATERIAL
-    ):
-        raise HTTPException(status_code=400, detail="利鸿只允许使用77794-PCBA板")
+    if department == OUTSOURCE_DEPARTMENT:
+        normalized_material = _normalize_pcba_material(body.material)
+        if normalized_material != PCBA_MATERIAL:
+            raise HTTPException(status_code=400, detail="利鸿只允许使用77794-PCBA板")
+        body.material = normalized_material
     if department == HONGYA_DEPARTMENT and body.material != NFC_MATERIAL:
         raise HTTPException(status_code=400, detail="鸿亚只允许使用NFC贴纸")
     if department == OUTSOURCE_DEPARTMENT and body.rec_type == "finished":
@@ -2956,7 +2967,7 @@ def _heyuan_issue_detail_sheet(wb, title, records, material_label, month_slots):
         key=lambda row: (
             _record_month(row),
             _record_export_date(row) or "",
-            _cell_text(row.get("doc_no")),
+            _natural_text_sort_key(row.get("doc_no")),
         ),
     )
     row_no = 2
@@ -3025,7 +3036,7 @@ def _heyuan_finished_detail_sheet(wb, records):
         key=lambda row: (
             _record_month(row),
             _record_export_date(row) or "",
-            _cell_text(row.get("doc_no")),
+            _natural_text_sort_key(row.get("doc_no")),
         ),
     )
     for row in records:
@@ -3765,7 +3776,6 @@ def _semi_finished_export_workbook(records, sticker_types, monthly_totals):
     outbound_locations = {
         row.get("location_name") for row in outbound if row.get("location_name")
     }
-    use_stored_outbound_totals = len(outbound_locations) <= 1
     for sheet_name, location_name in (
         ("邵阳领料", SHAOYANG_DEPARTMENT),
         ("河源华兴36#CD领料", HEYUAN_DEPARTMENT),
@@ -3779,7 +3789,7 @@ def _semi_finished_export_workbook(records, sticker_types, monthly_totals):
             totals_by_sticker,
             False,
             location_name=location_name,
-            use_stored_totals=use_stored_outbound_totals,
+            use_stored_totals=(outbound_locations == {location_name}),
         )
     return wb
 
@@ -3793,7 +3803,7 @@ def export_records(
     material: Optional[str] = None,
 ):
     filters = _date_filter(date_from, date_to, doc_no)
-    material = _clean_optional(material)
+    material = _normalize_material_filter(material, user["department"])
     conn = db.get_conn()
     try:
         sql = (
@@ -3979,7 +3989,12 @@ def _import_document_key(body):
     doc_no = _cell_text(body.doc_no)
     if not doc_no:
         return None
-    return body.rec_type, body.location_id or 0, doc_no.casefold()
+    return (
+        body.rec_type,
+        body.location_id or 0,
+        body.rec_date or "",
+        doc_no.casefold(),
+    )
 
 
 def _group_import_documents(bodies):
@@ -3995,12 +4010,13 @@ def _group_import_documents(bodies):
 
 
 def _existing_document_ids(conn, department, key):
-    rec_type, location_id, doc_no = key
+    rec_type, location_id, rec_date, doc_no = key
     rows = conn.execute(
         "SELECT id FROM records WHERE department=? AND source_record_id IS NULL "
         "AND rec_type=? AND COALESCE(location_id, 0)=? "
+        "AND COALESCE(rec_date, '')=? "
         "AND LOWER(TRIM(COALESCE(doc_no, '')))=? ORDER BY id",
-        (department, rec_type, location_id, doc_no),
+        (department, rec_type, location_id, rec_date, doc_no),
     ).fetchall()
     return [row["id"] for row in rows]
 
@@ -4069,6 +4085,12 @@ def import_records(
         skipped_documents = 0
         skipped_document_rows = 0
         if mode == "replace":
+            for existing_ids in duplicate_keys.values():
+                for record_id in existing_ids:
+                    row = _get_record_or_404(
+                        conn, record_id, user["department"]
+                    )
+                    _check_owner(row, user)
             for existing_ids in duplicate_keys.values():
                 _delete_record_ids_with_links(conn, existing_ids)
                 replaced_documents += 1
@@ -4419,8 +4441,8 @@ def public_summary(
     department: Optional[str] = None,
 ):
     filters = _date_filter(date_from, date_to)
-    material = _clean_optional(material)
     department = _validate_department(_clean_optional(department), required=False)
+    material = _normalize_material_filter(material, department)
     public_filters = {
         **filters,
         "material": material,

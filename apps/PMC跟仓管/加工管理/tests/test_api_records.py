@@ -562,6 +562,21 @@ def test_lihong_rejects_nfc_material(client):
     assert "利鸿只允许使用77794-PCBA板" in issue.json()["detail"]
 
 
+def test_lihong_normalizes_pcba_alias_before_saving(client):
+    admin_login(client, "东莞加工厂利鸿")
+
+    created = client.post("/api/records", json={
+        "rec_type": "semi_finished",
+        "material": "PCBA板",
+        "doc_no": "LIHONG-ALIAS-001",
+        "qty": 15,
+    })
+
+    assert created.status_code == 200
+    row = client.get("/api/records?doc_no=LIHONG-ALIAS-001").json()[0]
+    assert row["material"] == "77794-PCBA板"
+
+
 def test_outsource_can_create_issue_with_target_department(client):
     admin_login(client, "东莞加工厂利鸿")
     semi = loc_id(client, "碟片半成品")

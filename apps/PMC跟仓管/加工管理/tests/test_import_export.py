@@ -772,6 +772,66 @@ def test_record_import_replace_mode_replaces_document_and_auto_records(client):
     assert target_rows[0]["source_record_id"] is not None
 
 
+def test_record_import_replace_rejects_records_owned_by_another_user(client):
+    login(client)
+    created = client.post("/api/records", json={
+        "rec_type": "inbound_raw",
+        "material": "77794-PCBA板",
+        "rec_date": "2026-07-01",
+        "doc_no": "ADMIN-OWNED-001",
+        "qty": 10,
+    })
+    assert created.status_code == 200
+
+    client.post("/api/logout")
+    login(client, "兴信B来料仓", "123456", DEFAULT_DEPARTMENT)
+    replacing = workbook_bytes(
+        ["类型", "物料名称", "日期", "单据编号", "数量"],
+        [["入库", "77794-PCBA板", "2026-07-01", "ADMIN-OWNED-001", 20]],
+    )
+    replaced = upload_bytes(
+        client,
+        "/api/records/import",
+        replacing,
+        data={"mode": "replace"},
+    )
+
+    assert replaced.status_code == 403
+    rows = client.get("/api/records?doc_no=ADMIN-OWNED-001").json()
+    assert len(rows) == 1
+    assert rows[0]["qty"] == 10
+
+
+def test_record_import_same_document_number_on_different_dates_is_not_duplicate(client):
+    login(client, "兴信B来料仓", "123456", DEFAULT_DEPARTMENT)
+    headers = ["类型", "物料名称", "日期", "单据编号", "数量"]
+    first = upload_xlsx(
+        client,
+        "/api/records/import",
+        headers,
+        [["入库", "77794-PCBA板", "2026-07-01", "PERIODIC-001", 10]],
+    )
+    second_content = workbook_bytes(
+        headers,
+        [["入库", "77794-PCBA板", "2026-08-01", "PERIODIC-001", 20]],
+    )
+    second = upload_bytes(
+        client,
+        "/api/records/import",
+        second_content,
+        data={"mode": "skip"},
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert second.json()["created"] == 1
+    rows = client.get("/api/records?doc_no=PERIODIC-001").json()
+    assert {(row["rec_date"], row["qty"]) for row in rows} == {
+        ("2026-07-01", 10),
+        ("2026-08-01", 20),
+    }
+
+
 def test_semi_finished_export_splits_outbound_by_target_department(client):
     login(client, "碟片半成品", "123456", "碟片半成品")
     locations = {
@@ -940,6 +1000,47 @@ def test_heyuan_record_export_uses_legacy_pcba_workbook(client):
     assert wb["总表"].cell(11, 2).value == 75
 
 
+def test_heyuan_export_naturally_sorts_same_day_document_numbers(client):
+    login(client, "河源华兴", "123456", "河源华兴")
+    heyuan = loc_id(client, "河源华兴")
+    for doc_no in ("LL-10", "LL-2"):
+        response = client.post("/api/records", json={
+            "rec_type": "issue",
+            "location_id": heyuan,
+            "material": "77794-PCBA板",
+            "rec_date": "2026-07-08",
+            "doc_no": doc_no,
+            "qty": 10,
+        })
+        assert response.status_code == 200
+    for doc_no in ("BS-10", "BS-2"):
+        response = client.post("/api/records", json={
+            "rec_type": "finished",
+            "location_id": heyuan,
+            "material": "77794-PCBA板",
+            "rec_date": "2026-07-09",
+            "doc_no": doc_no,
+            "qty": 5,
+        })
+        assert response.status_code == 200
+
+    exported = client.get("/api/records/export?material=77794-PCBA板")
+    wb = openpyxl.load_workbook(io.BytesIO(exported.content), data_only=True)
+    issue_docs = [
+        row[1]
+        for row in wb["PCB板领料明细"].iter_rows(min_row=2, values_only=True)
+        if isinstance(row[1], str) and row[1].startswith("LL-")
+    ]
+    finished_docs = [
+        row[1]
+        for row in wb["成品入仓明细"].iter_rows(min_row=2, values_only=True)
+        if isinstance(row[1], str) and row[1].startswith("BS-")
+    ]
+
+    assert issue_docs == ["LL-2", "LL-10"]
+    assert finished_docs == ["BS-2", "BS-10"]
+
+
 def test_heyuan_empty_finished_export_keeps_header_only(client):
     login(client, "河源华兴", "123456", "河源华兴")
 
@@ -1024,6 +1125,24 @@ def test_semi_finished_legacy_workbook_imports_detail_rows_and_monthly_totals(cl
     assert second.json()["created"] == 0
     assert second.json()["skipped"] == 3
     assert len(client.get("/api/records").json()) == 3
+
+
+def test_semi_finished_export_keeps_stored_total_on_matching_outbound_sheet(client):
+    login(client, "碟片半成品", "123456", "碟片半成品")
+    imported = upload_bytes(
+        client,
+        "/api/records/import",
+        legacy_semi_finished_workbook_bytes(),
+        "塑胶仓77772#CD半成品出入明细.xlsx",
+    )
+    exported = client.get("/api/records/export?material=NFC贴纸")
+    wb = openpyxl.load_workbook(io.BytesIO(exported.content), data_only=True)
+
+    assert imported.status_code == 200
+    assert exported.status_code == 200
+    assert wb["邵阳领料"].cell(6, 2).value == 40
+    assert wb["河源华兴36#CD领料"].cell(6, 2).value == 0
+    assert wb["车间36#CD领料"].cell(6, 2).value == 0
 
 
 def test_semi_finished_legacy_workbook_rejects_filename_without_department(client):

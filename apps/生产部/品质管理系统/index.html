@@ -216,6 +216,8 @@
         <div class="toolbar-right">
           <span class="record-count" id="recordCount">共 0 条</span>
           <span class="selected-count" id="selectedCount" style="display:none"></span>
+          <button class="btn-secondary btn-refresh-records" id="btnRefreshRecords"
+                  onclick="refreshRecordsPage()" title="从服务器重新加载验货明细">↻ 刷新</button>
           <span id="batchDelWrap" style="display:inline-flex;align-items:center;gap:6px">
           <button class="btn-secondary btn-batch-del" id="btnBatchDel"
                   onclick="batchDelete()" disabled>批量删除</button>

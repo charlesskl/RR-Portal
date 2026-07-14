@@ -3495,9 +3495,13 @@ def _compute_semi_finished_warehouse_summary(records):
     }
 
 
-def _compute_outsource_inbound_summary(records):
+def _compute_outsource_inbound_summary(records, department=None):
     issue = sum(int(r["qty"] or 0) for r in records if r["rec_type"] == "issue")
-    finished = sum(int(r["qty"] or 0) for r in records if r["rec_type"] == "finished")
+    finished = sum(
+        int(r["qty"] or 0)
+        for r in records
+        if r["rec_type"] == "finished" and department != OUTSOURCE_DEPARTMENT
+    )
     semi_finished = sum(int(r["qty"] or 0) for r in records if r["rec_type"] == "semi_finished")
     inbound = finished + semi_finished
     balance = issue - inbound if issue else inbound
@@ -3588,7 +3592,7 @@ def summary(
         summary_data = _compute_semi_finished_warehouse_summary(records)
         return _with_common_summary_fields(summary_data, records, filters)
     if _is_outsource_department(user["department"]):
-        summary_data = _compute_outsource_inbound_summary(records)
+        summary_data = _compute_outsource_inbound_summary(records, user["department"])
         return _with_common_summary_fields(
             summary_data, records, filters, {user["department"]}
         )
@@ -3627,7 +3631,7 @@ def export(
     if user["department"] == SEMI_FINISHED_DEPARTMENT:
         summary = _compute_semi_finished_warehouse_summary(summary_records)
     elif _is_outsource_department(user["department"]):
-        summary = _compute_outsource_inbound_summary(summary_records)
+        summary = _compute_outsource_inbound_summary(summary_records, user["department"])
     elif user["department"] in PROCESSING_BALANCE_DEPARTMENTS:
         summary = _compute_processing_department_summary(summary_records)
     else:

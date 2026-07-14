@@ -215,6 +215,16 @@ def test_semi_finished_department_summary_uses_warehouse_balance(client):
 def test_lihong_summary_uses_issue_minus_semifinished_outbound(client):
     admin_login(client, "东莞加工厂利鸿")
     lid = loc_id(client, "碟片半成品")
+    from pcba import db
+
+    conn = db.get_conn()
+    conn.execute(
+        "INSERT INTO records(rec_type, material, qty, department, created_by) "
+        "VALUES (?, ?, ?, ?, ?)",
+        ("finished", "PCBA板", 999, "东莞加工厂利鸿", 1),
+    )
+    conn.commit()
+    conn.close()
     client.post("/api/records", json={
         "rec_type": "issue", "location_id": lid, "material": "PCBA板", "qty": 70})
     client.post("/api/records", json={

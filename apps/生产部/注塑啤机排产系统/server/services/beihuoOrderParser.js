@@ -79,6 +79,31 @@ function toInt(value) {
   return Number.isFinite(n) ? Math.round(n) : 0;
 }
 
+function normalizeMaterialKg(value, shotWeight, totalSets, shots) {
+  const materialKg = toNumber(value);
+  const quantity = shots > 0 ? shots : totalSets;
+  if (!(materialKg > 0 && shotWeight > 0 && quantity > 0)) return materialKg;
+
+  const expectedKg = shotWeight * quantity / 1000;
+  const deviation = (candidate) => Math.abs(candidate - expectedKg) / Math.max(expectedKg, 1);
+  const originalDeviation = deviation(materialKg);
+  if (originalDeviation <= 0.25) return materialKg;
+
+  let best = { value: materialKg, scale: 1, deviation: originalDeviation };
+  for (const scale of [10, 100, 1000, 10000]) {
+    const candidate = materialKg / scale;
+    const candidateDeviation = deviation(candidate);
+    if (candidateDeviation < best.deviation) {
+      best = { value: candidate, scale, deviation: candidateDeviation };
+    }
+  }
+
+  if (best.scale > 1 && best.deviation <= 0.12) {
+    return Number(best.value.toFixed(2));
+  }
+  return materialKg;
+}
+
 function cleanProductCode(value) {
   const s = plain(value);
   const match = s.match(/[A-Z0-9][A-Z0-9-]{2,}/i);
@@ -140,14 +165,17 @@ function normalizeOrder(raw, inherited, headerInfo = {}) {
   const totalSets = toInt(raw.total_sets);
   const shots = toInt(raw.quantity_needed);
   const shotWeight = toNumber(raw.shot_weight);
-  const materialKg = toNumber(raw.material_kg);
+  const materialKg = normalizeMaterialKg(raw.material_kg, shotWeight, totalSets, shots);
   const quantity = pickQuantity(totalSets, shots, shotWeight, materialKg);
 
   const productCode = cleanProductCode(raw.product_code || inherited.product_code || '');
   const moldNo = cleanMoldNo(raw.mold_no || '');
   const moldNamePart = plain(raw.mold_name_part || '');
   const color = plain(raw.color || inherited.color || '');
-  const colorPowder = cleanColorPowder(raw.color_powder_no || inherited.color_powder_no || '');
+  const ownColor = plain(raw.color || '');
+  const colorPowder = cleanColorPowder(
+    raw.color_powder_no || (ownColor ? '' : inherited.color_powder_no) || '',
+  );
   const materialType = plain(raw.material_type || inherited.material_type || '');
   const deliveryDate = plain(raw.delivery_date || '');
   const orderNo = plain(raw.order_no || headerInfo.order_no || inherited.order_no || '');
@@ -379,6 +407,7 @@ async function parseBeihuoPdfBuffer(buffer) {
 
 module.exports = {
   detectBeihuoText,
+  normalizeMaterialKg,
   parseBeihuoExcel,
   parseBeihuoPdfBuffer,
   parseBeihuoRawRows,

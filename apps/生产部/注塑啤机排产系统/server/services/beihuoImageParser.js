@@ -4,10 +4,53 @@ const { createWorker, PSM } = require('tesseract.js');
 const { parseBeihuoRawRows } = require('./beihuoOrderParser');
 
 const TESSDATA_DIR = path.join(__dirname, '..');
-const COLUMN_RATIOS = [
-  0, 0.0637, 0.1534, 0.2918, 0.3685,
-  0.4275, 0.4817, 0.5282, 0.6044, 0.6592,
-  0.7250, 0.7813, 0.8575, 0.9134, 1,
+const TABLE_TEMPLATES = [
+  {
+    name: 'beihuo-grid-v1',
+    ratios: [
+      0, 0.0637, 0.1534, 0.2918, 0.3685,
+      0.4275, 0.4817, 0.5282, 0.6044, 0.6592,
+      0.7250, 0.7813, 0.8575, 0.9134, 1,
+    ],
+    columns: {
+      product_code: 0,
+      mold_no: 1,
+      mold_name_part: 2,
+      total_sets: 3,
+      quantity_needed: 4,
+      color: 5,
+      color_powder_no: 6,
+      material_type: 7,
+      shot_weight: 8,
+      material_kg: 9,
+      delivery_date: 12,
+      notes: 13,
+    },
+  },
+  {
+    name: 'production-order-grid-v1',
+    ratios: [
+      0, 0.0525, 0.1436, 0.3169, 0.3943, 0.4913,
+      0.5469, 0.5935, 0.6317, 0.6820, 0.7393, 0.7769,
+      0.8373, 0.8755, 0.9136, 1,
+    ],
+    columns: {
+      product_code: 0,
+      mold_no: 1,
+      mold_name_part: 2,
+      color: 3,
+      color_powder_no: 3,
+      material_type: 4,
+      shot_weight: 5,
+      total_sets: 6,
+      quantity_needed: 8,
+      material_kg: 9,
+      notes: 14,
+    },
+    combinedColorColumn: true,
+    dataStartLineIndex: 3,
+    headerBottomLineIndex: 2,
+  },
 ];
 
 let chiWorkerPromise;
@@ -200,12 +243,12 @@ function findVerticalLines(image, tableLines) {
   return groupPositions(positions);
 }
 
-function matchColumns(lines, width) {
+function matchColumns(lines, width, ratios) {
   const maxX = width - 1;
   const tolerance = Math.max(5, width * 0.018);
   const matched = [];
 
-  for (const ratio of COLUMN_RATIOS) {
+  for (const ratio of ratios) {
     const expected = ratio * maxX;
     let best = null;
     let bestDistance = Infinity;
@@ -220,6 +263,14 @@ function matchColumns(lines, width) {
     matched.push(best);
   }
   return matched;
+}
+
+function matchTableTemplate(lines, width) {
+  for (const template of TABLE_TEMPLATES) {
+    const columns = matchColumns(lines, width, template.ratios);
+    if (columns.length === template.ratios.length) return { ...template, matchedColumns: columns };
+  }
+  return null;
 }
 
 function hasInk(image, rectangle) {
@@ -257,10 +308,10 @@ function makeRectangle(columns, row, columnIndex, padding = 2) {
   };
 }
 
-function findDataRows(image, tableLines, columns) {
+function findDataRows(image, tableLines, columns, startIndex = 1) {
   const rows = [];
   const contentColumns = [0, 1, 2, 3, 4, 7, 8, 9];
-  for (let index = 1; index + 1 < tableLines.length && rows.length < 100; index += 1) {
+  for (let index = startIndex; index + 1 < tableLines.length && rows.length < 100; index += 1) {
     const row = { top: tableLines[index], bottom: tableLines[index + 1] };
     if (row.bottom - row.top < 12) continue;
 
@@ -304,6 +355,15 @@ function normalizeDigitLike(value) {
 
 function cleanMoldNo(value) {
   const code = cleanProductCode(value);
+  const rcMatch = code.match(/^RC([A-Z0-9]{5,6})$/);
+  if (rcMatch) {
+    let digits = rcMatch[1]
+      .replace(/[OQ]/g, '0')
+      .replace(/[IL]/g, '1')
+      .replace(/T/g, '7');
+    if (/^00\d{4}$/.test(digits)) digits = digits.slice(1);
+    if (/^\d{5}$/.test(digits)) return 'RC' + digits;
+  }
   return code.split('-').map((segment) => {
     if (/^[0-9OQIL]+$/.test(segment)) return normalizeDigitLike(segment);
     const mixed = segment.match(/^([A-Z]+?)([0-9OQIL]+)$/);
@@ -327,20 +387,50 @@ function cleanColor(value) {
     .replace(/桔色/g, '橙色');
 }
 
+function cleanCombinedColor(value) {
+  return cleanColor(value)
+    .replace(/[0-9OQIL]{4,6}[A-Z]{0,2}/gi, '')
+    .replace(/\s+/g, '')
+    .trim();
+}
+
 function cleanName(value) {
-  return cleanCell(value).replace(/^[“”"'|]+/g, '').replace(/[，。,.]+$/g, '');
+  return cleanCell(value)
+    .replace(/^[“”"'|]+/g, '')
+    .replace(/[，。,.]+$/g, '')
+    .replace(/^叶尺转动轴$/, '咬尺转动轴')
+    .replace(/^后轮(?:区|忆|臣)$/, '后轮芯')
+    .replace(/^收割机[站部]荷钻$/, '收割机卸荷钻')
+    .replace(/^收割机驾驶室左(?:和镇|镜.*)$/, '收割机驾驶室左镜')
+    .replace(/^收割机前指示(?:简|得)$/, '收割机前指示镜')
+    .replace(/^前轮(?:区|忆|臣|忌|达辣)$/, '前轮芯');
 }
 
 function cleanMaterial(chineseValue, englishValue) {
-  const chineseText = cleanCell(chineseValue).replace(/[，。,.]+$/g, '');
+  const chineseText = cleanCell(chineseValue)
+    .replace(/[，。,.]+$/g, '')
+    .replace(/本和白/g, '本白');
   let englishText = cleanCell(englishValue)
     .toUpperCase()
     .replace(/\s*#\s*/g, '# ')
     .replace(/\s+/g, ' ')
     .trim();
-  englishText = englishText.replace(/^1\s+PP\b/, '1# PP');
+  englishText = englishText
+    .replace(/^1\s+PP\b/, '1# PP')
+    .replace(/\b557A1\b/g, '557AI');
 
   const chineseParts = chineseText.match(/[\u4e00-\u9fff]+/g) || [];
+  const chineseWords = chineseParts.join('');
+  if (englishText && /(?:ABS|PP|PVC|PA|PE|POM|TPE|TPR)/i.test(englishText)) {
+    const meaningfulPrefix = chineseWords.match(/本白|透明|原色|尼龙|加纤/);
+    if (meaningfulPrefix?.[0] === '本白' && /PVC/i.test(englishText)) {
+      const degree = (englishText.match(/\d{2,3}/g) || [])
+        .map(Number)
+        .find(value => value >= 40 && value <= 100);
+      return ['本白', 'PVC', degree ? degree + '度' : ''].filter(Boolean).join(' ');
+    }
+    return [meaningfulPrefix ? meaningfulPrefix[0] : '', englishText].filter(Boolean).join(' ');
+  }
   if (chineseParts.length > 0 && /[A-Z]{2,}/i.test(chineseText)) {
     return chineseText
       .toUpperCase()
@@ -364,10 +454,40 @@ function cleanNotes(value) {
   return cleanCell(value).replace(/[，。,.]+$/g, '');
 }
 
+function looksLikeDataRow(row) {
+  const moldNo = cleanProductCode(row.mold_no);
+  const quantity = Number(cleanNumber(row.quantity_needed));
+  const shotWeight = Number(cleanNumber(row.shot_weight));
+  return Boolean(cleanProductCode(row.product_code))
+    && /^(?=.*[A-Z])(?=.*\d)[A-Z0-9]+(?:-[A-Z0-9]+)*$/.test(moldNo)
+    && quantity >= 10
+    && shotWeight > 0;
+}
+
+function normalizeColorsByPowder(rows) {
+  const knownColor = /^(?:黑|白|红|蓝|绿|黄|灰|棕|橙|紫|粉|银|透明|啡|咖|本白|浅|深)/;
+  const counts = new Map();
+  for (const row of rows) {
+    if (!row.color_powder_no || !knownColor.test(row.color)) continue;
+    const key = row.color_powder_no;
+    const values = counts.get(key) || new Map();
+    values.set(row.color, (values.get(row.color) || 0) + 1);
+    counts.set(key, values);
+  }
+  for (const row of rows) {
+    if (!row.color_powder_no || knownColor.test(row.color)) continue;
+    const values = counts.get(row.color_powder_no);
+    if (!values) continue;
+    row.color = [...values.entries()].sort((a, b) => b[1] - a[1])[0][0];
+  }
+  return rows;
+}
+
 function extractHeaderInfo(text) {
   const compact = cleanCell(text).replace(/\s+/g, '');
-  const labelled = compact.match(/(?:生产单号|单号)[：:,，]?([A-Z0-9/-]{6,})/i);
-  const fallback = compact.match(/\d{8,}\/[A-Z]/i);
+  const labelled = compact.match(/(?:生产单号|单号|编号)[：:,，]?([A-Z0-9/-]{6,})/i);
+  const fallback = compact.match(/[A-Z]{1,6}\d{6,}\/[A-Z]/i)
+    || compact.match(/\d{8,}\/[A-Z]/i);
   return {
     order_no: (labelled ? labelled[1] : fallback ? fallback[0] : '').toUpperCase(),
   };
@@ -377,14 +497,89 @@ function isBeihuoHeader(text) {
   const compact = cleanCell(text).replace(/\s+/g, '');
   return compact.includes('啤机部生产啤货表')
     || compact.includes('生产啤货表')
-    || compact.includes('啤货表');
+    || compact.includes('啤货表')
+    || compact.includes('啤机生产单');
+}
+
+async function recognizeCellWithConfidence(worker, imagePath, image, columns, row, columnIndex) {
+  const rectangle = makeRectangle(columns, row, columnIndex);
+  if (!hasInk(image, rectangle)) return { text: '', confidence: 0 };
+  const result = await worker.recognize(imagePath, { rectangle });
+  return {
+    text: cleanCell(result.data.text),
+    confidence: Number(result.data.confidence) || 0,
+  };
 }
 
 async function recognizeCell(worker, imagePath, image, columns, row, columnIndex) {
-  const rectangle = makeRectangle(columns, row, columnIndex);
-  if (!hasInk(image, rectangle)) return '';
-  const result = await worker.recognize(imagePath, { rectangle });
-  return cleanCell(result.data.text);
+  const result = await recognizeCellWithConfidence(
+    worker,
+    imagePath,
+    image,
+    columns,
+    row,
+    columnIndex,
+  );
+  return result.text;
+}
+
+function makeUpscaledPgm(image, rectangle, scale = 4) {
+  const padding = 12;
+  const sourceWidth = rectangle.width;
+  const sourceHeight = rectangle.height;
+  const width = sourceWidth * scale + padding * 2;
+  const height = sourceHeight * scale + padding * 2;
+  const pixels = Buffer.alloc(width * height, 255);
+
+  for (let targetY = 0; targetY < sourceHeight * scale; targetY += 1) {
+    const sourceY = Math.max(0, Math.min(sourceHeight - 1, (targetY + 0.5) / scale - 0.5));
+    const y0 = Math.floor(sourceY);
+    const y1 = Math.min(sourceHeight - 1, y0 + 1);
+    const yWeight = sourceY - y0;
+    for (let targetX = 0; targetX < sourceWidth * scale; targetX += 1) {
+      const sourceX = Math.max(0, Math.min(sourceWidth - 1, (targetX + 0.5) / scale - 0.5));
+      const x0 = Math.floor(sourceX);
+      const x1 = Math.min(sourceWidth - 1, x0 + 1);
+      const xWeight = sourceX - x0;
+      const top = image.pixels[(rectangle.top + y0) * image.width + rectangle.left + x0]
+        * (1 - xWeight)
+        + image.pixels[(rectangle.top + y0) * image.width + rectangle.left + x1] * xWeight;
+      const bottom = image.pixels[(rectangle.top + y1) * image.width + rectangle.left + x0]
+        * (1 - xWeight)
+        + image.pixels[(rectangle.top + y1) * image.width + rectangle.left + x1] * xWeight;
+      pixels[(padding + targetY) * width + padding + targetX] = Math.round(
+        top * (1 - yWeight) + bottom * yWeight,
+      );
+    }
+  }
+
+  return Buffer.concat([
+    Buffer.from(`P5\n${width} ${height}\n255\n`, 'ascii'),
+    pixels,
+  ]);
+}
+
+async function recognizeUpscaledCell(worker, image, columns, row, columnIndex) {
+  const rectangle = makeRectangle(columns, row, columnIndex, 3);
+  if (!hasInk(image, rectangle)) return { text: '', confidence: 0 };
+  const result = await worker.recognize(makeUpscaledPgm(image, rectangle));
+  return {
+    text: cleanCell(result.data.text),
+    confidence: Number(result.data.confidence) || 0,
+  };
+}
+
+async function recognizeBestMoldName(worker, imagePath, image, columns, row, columnIndex) {
+  const regular = await recognizeCellWithConfidence(
+    worker,
+    imagePath,
+    image,
+    columns,
+    row,
+    columnIndex,
+  );
+  const upscaled = await recognizeUpscaledCell(worker, image, columns, row, columnIndex);
+  return upscaled.confidence >= regular.confidence + 2 ? upscaled.text : regular.text;
 }
 
 async function parseBeihuoImageInternal(imagePath) {
@@ -403,17 +598,30 @@ async function parseBeihuoImageInternal(imagePath) {
   }
 
   const verticalLines = findVerticalLines(image, tableLines);
-  const columns = matchColumns(verticalLines, image.width);
-  if (columns.length !== COLUMN_RATIOS.length) {
+  const tableTemplate = matchTableTemplate(verticalLines, image.width);
+  if (!tableTemplate) {
     console.log('[啤货表图片] 竖线未匹配:', verticalLines);
     return null;
   }
+  const columns = tableTemplate.matchedColumns;
 
   await chiWorker.setParameters({
     tessedit_pageseg_mode: PSM.SINGLE_BLOCK,
     preserve_interword_spaces: '1',
   });
-  const headerHeight = Math.max(30, Math.floor(tableLines[0] * 0.63));
+  const engWorker = await getEngWorker();
+  const headerBottom = Number.isInteger(tableTemplate.headerBottomLineIndex)
+    ? tableLines[tableTemplate.headerBottomLineIndex]
+    : tableLines[0];
+  const headerHeight = Math.max(30, headerBottom - 2);
+  const leftHeaderResult = await chiWorker.recognize(imagePath, {
+    rectangle: {
+      left: 0,
+      top: 0,
+      width: Math.floor(image.width * 0.36),
+      height: headerHeight,
+    },
+  });
   const titleResult = await chiWorker.recognize(imagePath, {
     rectangle: {
       left: Math.floor(image.width * 0.28),
@@ -430,13 +638,37 @@ async function parseBeihuoImageInternal(imagePath) {
       height: headerHeight,
     },
   });
-  const headerText = cleanCell(titleResult.data.text + ' ' + orderNoResult.data.text);
+  await engWorker.setParameters({
+    tessedit_pageseg_mode: PSM.SPARSE_TEXT,
+    preserve_interword_spaces: '1',
+    tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-/: ',
+  });
+  const headerCodeResult = await engWorker.recognize(imagePath, {
+    rectangle: {
+      left: 0,
+      top: 0,
+      width: image.width,
+      height: headerHeight,
+    },
+  });
+  const headerText = cleanCell(
+    leftHeaderResult.data.text + ' ' + titleResult.data.text + ' '
+      + orderNoResult.data.text + ' ' + headerCodeResult.data.text,
+  );
   if (!isBeihuoHeader(headerText)) {
-    console.log('[啤货表图片] 表头未命中:', headerText);
-    return null;
+    if (tableTemplate.name !== 'production-order-grid-v1') {
+      console.log('[啤货表图片] 表头未命中:', headerText);
+      return null;
+    }
+    console.log('[啤货表图片] 中文表头未命中，按生产单网格继续:', headerText);
   }
 
-  const rows = findDataRows(image, tableLines, columns);
+  const rows = findDataRows(
+    image,
+    tableLines,
+    columns,
+    tableTemplate.dataStartLineIndex || 1,
+  );
   if (rows.length === 0) {
     console.log('[啤货表图片] 未找到有内容的数据行');
     return null;
@@ -444,14 +676,23 @@ async function parseBeihuoImageInternal(imagePath) {
 
   const englishValues = rows.map(() => ({}));
   const chineseValues = rows.map(() => ({}));
-  const engWorker = await getEngWorker();
+  const fieldColumns = tableTemplate.columns;
 
   await engWorker.setParameters({
     tessedit_pageseg_mode: PSM.SINGLE_LINE,
     preserve_interword_spaces: '1',
-    tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-/.# ',
+    tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-/.#%+ ',
   });
-  const englishColumns = [0, 1, 3, 4, 6, 7, 8, 9];
+  const englishColumns = [...new Set([
+    fieldColumns.product_code,
+    fieldColumns.mold_no,
+    fieldColumns.total_sets,
+    fieldColumns.quantity_needed,
+    fieldColumns.color_powder_no,
+    fieldColumns.material_type,
+    fieldColumns.shot_weight,
+    fieldColumns.material_kg,
+  ].filter(Number.isInteger))];
   for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
     for (const columnIndex of englishColumns) {
       englishValues[rowIndex][columnIndex] = await recognizeCell(
@@ -464,22 +705,52 @@ async function parseBeihuoImageInternal(imagePath) {
       );
     }
   }
+  await engWorker.setParameters({
+    tessedit_pageseg_mode: PSM.SINGLE_BLOCK,
+    preserve_interword_spaces: '1',
+    tessedit_char_whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-/.#%+ ',
+  });
+  for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
+    if (rows[rowIndex].bottom - rows[rowIndex].top <= 32) continue;
+    englishValues[rowIndex][fieldColumns.material_type] = await recognizeCell(
+      engWorker,
+      imagePath,
+      image,
+      columns,
+      rows[rowIndex],
+      fieldColumns.material_type,
+    );
+  }
 
   await chiWorker.setParameters({
     tessedit_pageseg_mode: PSM.SINGLE_LINE,
     preserve_interword_spaces: '1',
   });
-  const chineseColumns = [2, 5, 12, 13];
+  const chineseColumns = [...new Set([
+    fieldColumns.mold_name_part,
+    fieldColumns.color,
+    fieldColumns.delivery_date,
+    fieldColumns.notes,
+  ].filter(Number.isInteger))];
   for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
     for (const columnIndex of chineseColumns) {
-      chineseValues[rowIndex][columnIndex] = await recognizeCell(
-        chiWorker,
-        imagePath,
-        image,
-        columns,
-        rows[rowIndex],
-        columnIndex,
-      );
+      chineseValues[rowIndex][columnIndex] = columnIndex === fieldColumns.mold_name_part
+        ? await recognizeBestMoldName(
+          chiWorker,
+          imagePath,
+          image,
+          columns,
+          rows[rowIndex],
+          columnIndex,
+        )
+        : await recognizeCell(
+          chiWorker,
+          imagePath,
+          image,
+          columns,
+          rows[rowIndex],
+          columnIndex,
+        );
     }
   }
   await chiWorker.setParameters({
@@ -487,33 +758,43 @@ async function parseBeihuoImageInternal(imagePath) {
     preserve_interword_spaces: '1',
   });
   for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
-    chineseValues[rowIndex][7] = await recognizeCell(
+    chineseValues[rowIndex][fieldColumns.material_type] = await recognizeCell(
       chiWorker,
       imagePath,
       image,
       columns,
       rows[rowIndex],
-      7,
+      fieldColumns.material_type,
     );
   }
 
-  const rawRows = rows.map((row, rowIndex) => ({
-    product_code: cleanProductCode(englishValues[rowIndex][0]),
-    mold_no: cleanMoldNo(englishValues[rowIndex][1]),
-    mold_name_part: cleanName(chineseValues[rowIndex][2]),
-    total_sets: cleanNumber(englishValues[rowIndex][3]),
-    quantity_needed: cleanNumber(englishValues[rowIndex][4]),
-    color: cleanColor(chineseValues[rowIndex][5]),
-    color_powder_no: cleanColorPowder(englishValues[rowIndex][6]),
-    material_type: cleanMaterial(
-      chineseValues[rowIndex][7],
-      englishValues[rowIndex][7],
-    ),
-    shot_weight: cleanNumber(englishValues[rowIndex][8]),
-    material_kg: cleanNumber(englishValues[rowIndex][9]),
-    delivery_date: cleanDeliveryDate(chineseValues[rowIndex][12]),
-    notes: cleanNotes(chineseValues[rowIndex][13]),
-  }));
+  const rawRows = rows.map((row, rowIndex) => {
+    const englishAt = (field) => englishValues[rowIndex][fieldColumns[field]];
+    const chineseAt = (field) => chineseValues[rowIndex][fieldColumns[field]];
+    const colorText = chineseAt('color');
+    const powderFromColor = tableTemplate.combinedColorColumn
+      ? cleanColorPowder(colorText)
+      : '';
+    return {
+      product_code: cleanProductCode(englishAt('product_code')),
+      mold_no: cleanMoldNo(englishAt('mold_no')),
+      mold_name_part: cleanName(chineseAt('mold_name_part')),
+      total_sets: cleanNumber(englishAt('total_sets')),
+      quantity_needed: cleanNumber(englishAt('quantity_needed')),
+      color: tableTemplate.combinedColorColumn
+        ? cleanCombinedColor(colorText)
+        : cleanColor(colorText),
+      color_powder_no: powderFromColor || cleanColorPowder(englishAt('color_powder_no')),
+      material_type: cleanMaterial(
+        chineseAt('material_type'),
+        englishAt('material_type'),
+      ),
+      shot_weight: cleanNumber(englishAt('shot_weight')),
+      material_kg: cleanNumber(englishAt('material_kg')),
+      delivery_date: cleanDeliveryDate(chineseAt('delivery_date')),
+      notes: cleanNotes(chineseAt('notes')),
+    };
+  });
 
   // A vertically merged product-code cell is often OCR'd on the middle row.
   // Backfill only the leading blank rows; normal downward inheritance remains unchanged.
@@ -525,7 +806,11 @@ async function parseBeihuoImageInternal(imagePath) {
     }
   }
 
-  const orders = parseBeihuoRawRows(rawRows, extractHeaderInfo(headerText));
+  const filteredRows = tableTemplate.name === 'production-order-grid-v1'
+    ? rawRows.filter(looksLikeDataRow)
+    : rawRows;
+  const dataRows = normalizeColorsByPowder(filteredRows);
+  const orders = parseBeihuoRawRows(dataRows, extractHeaderInfo(headerText));
   if (orders.length === 0) return null;
 
   return {
@@ -535,6 +820,7 @@ async function parseBeihuoImageInternal(imagePath) {
     diagnostics: {
       imageSize: [image.width, image.height],
       rows: rows.length,
+      layout: tableTemplate.name,
     },
   };
 }

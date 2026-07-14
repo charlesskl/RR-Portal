@@ -217,6 +217,20 @@ function sendJson(res, code, obj) {
   res.end(body);
 }
 
+function sendDownload(req, res, contentType, filename, body) {
+  const safeName = String(filename || 'download').replace(/[\\/:*?"<>|]/g, '_');
+  const fallbackName = safeName.replace(/[^\x20-\x7E]/g, '_') || 'download';
+  const encoded = encodeURIComponent(safeName);
+  res.writeHead(200, {
+    'Content-Type': contentType,
+    'Content-Disposition': `attachment; filename="${fallbackName}"; filename*=UTF-8''${encoded}`,
+    'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
+    'Pragma': 'no-cache',
+    'Expires': '0',
+  });
+  res.end(req.method === 'HEAD' ? undefined : body);
+}
+
 function readBody(req) {
   return new Promise((resolve, reject) => {
     let data = '';
@@ -224,6 +238,105 @@ function readBody(req) {
     req.on('end', () => { try { resolve(data ? JSON.parse(data) : {}); } catch (e) { reject(e); } });
     req.on('error', reject);
   });
+}
+
+function todayStr() {
+  const d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+
+function csvCell(v) {
+  return '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
+}
+
+function htmlCell(v) {
+  return String(v == null ? '' : v)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function isPassRecord(r) {
+  return String(r.result || '').toUpperCase() === 'PASS';
+}
+
+function isFailRecord(r) {
+  const v = String(r.result || '').toUpperCase();
+  return v === 'REJ' || v === 'FAIL';
+}
+
+function getFilteredExportRecords(searchParams) {
+  const search = String(searchParams.get('search') || '').trim().toLowerCase();
+  const result = String(searchParams.get('result') || '').trim().toUpperCase();
+  const from = String(searchParams.get('dateFrom') || '').trim();
+  const to = String(searchParams.get('dateTo') || '').trim();
+  return getBootstrap().records.filter(r => {
+    if (search) {
+      const haystack = [r.supplier, r.productNo, r.productName, r.client, r.defect]
+        .filter(Boolean).join(' ').toLowerCase();
+      if (!haystack.includes(search)) return false;
+    }
+    if (result === 'PASS' && !isPassRecord(r)) return false;
+    if (result === 'REJ' && !isFailRecord(r)) return false;
+    if (from && String(r.date || '') < from) return false;
+    if (to && String(r.date || '') > to) return false;
+    return true;
+  });
+}
+
+function buildRecordsCsv(records) {
+  const hdr = ['ID','来料日期','检验日期','供应商','客户','货号','款式名称','类型',
+    '来料数量','抽查数量','PASS数','FAIL数','不良率','不良现象','判定结果','检验员','备注'];
+  const rows = records
+    .slice()
+    .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')))
+    .map(r => [
+      r.id, r.date, r.inspDate, r.supplier, r.client, r.productNo, r.productName,
+      r.type, r.qty, r.sampleQty, r.pass, r.fail, r.defectRate, r.defect, r.result, r.qc, r.remark,
+    ].map(csvCell));
+  return '\uFEFF' + [hdr.map(csvCell), ...rows].map(r => r.join(',')).join('\n');
+}
+
+function buildFactoryExcelHtml(records) {
+  const headers = ['序号','来货日期','供应商','加工类型','客户','送货单号','货号','产品名称','数量','单数','检验结果','不良描述','检验人','备注'];
+  const rows = records.slice().sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')));
+  return `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  table { border-collapse: collapse; font-family: "Microsoft YaHei", Arial, sans-serif; font-size: 10pt; }
+  th, td { border: 1px solid #000; padding: 4px 6px; text-align: center; mso-number-format:"\\@"; }
+  .title { font-size: 14pt; font-weight: 700; text-align: center; height: 26px; }
+  .head { background: #d9e1f2; font-weight: 700; }
+  .left { text-align: left; }
+</style>
+</head>
+<body>
+<table>
+  <tr><td class="title" colspan="14">加工厂品质检验明细统计表</td></tr>
+  <tr>${headers.map(h => `<th class="head">${htmlCell(h)}</th>`).join('')}</tr>
+  ${rows.map((r, i) => `<tr>
+    <td>${i + 1}</td>
+    <td>${htmlCell(r.date || '')}</td>
+    <td>${htmlCell(r.supplier || '')}</td>
+    <td>${htmlCell(r.type || '')}</td>
+    <td>${htmlCell(r.client || '')}</td>
+    <td>${htmlCell(r.deliveryNo || '')}</td>
+    <td>${htmlCell(r.productNo || '')}</td>
+    <td class="left">${htmlCell(r.productName || '')}</td>
+    <td>${htmlCell(r.qty != null && r.qty !== '' ? r.qty : '')}</td>
+    <td></td>
+    <td>${htmlCell(r.result || '')}</td>
+    <td class="left">${htmlCell(r.defect || '')}</td>
+    <td>${htmlCell(r.qc || '')}</td>
+    <td>${htmlCell(r.remark || '')}</td>
+  </tr>`).join('')}
+</table>
+</body>
+</html>`;
 }
 
 const MIME = {
@@ -274,6 +387,19 @@ const server = http.createServer(async (req, res) => {
     }
     if (p === '/api/bootstrap' && req.method === 'GET') {
       return sendJson(res, 200, getBootstrap());
+    }
+    if (p === '/api/export/records.csv' && (req.method === 'GET' || req.method === 'HEAD')) {
+      const records = getFilteredExportRecords(url.searchParams);
+      const body = buildRecordsCsv(records);
+      return sendDownload(req, res, 'text/csv; charset=utf-8', `东莞兴信验货明细_${todayStr()}.csv`, body);
+    }
+    if (p === '/api/export/factory-excel.xls' && (req.method === 'GET' || req.method === 'HEAD')) {
+      const records = getFilteredExportRecords(url.searchParams);
+      const from = String(url.searchParams.get('dateFrom') || '').trim();
+      const to = String(url.searchParams.get('dateTo') || '').trim();
+      const span = (from || to) ? `_${from || '起始'}至${to || '今'}` : '_全部';
+      const body = '\uFEFF' + buildFactoryExcelHtml(records);
+      return sendDownload(req, res, 'application/vnd.ms-excel; charset=utf-8', `加工厂品质检验明细统计表${span}.xls`, body);
     }
     if (p === '/api/records' && req.method === 'POST') {
       const body = await readBody(req);

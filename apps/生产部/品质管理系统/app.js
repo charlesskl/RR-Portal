@@ -4324,8 +4324,41 @@ function exportPDF(type) {
   setTimeout(() => window.print(), 400);
 }
 
+function _qcApiBase() {
+  const p = location.pathname.replace(/[^/]*$/, '');
+  return p.replace(/\/$/, '');
+}
+
+function _recordsExportQuery() {
+  const params = new URLSearchParams();
+  const search = getVal('searchInput');
+  const result = getVal('filterResult');
+  const from = getVal('filterDateFrom');
+  const to = getVal('filterDateTo');
+  if (search) params.set('search', search);
+  if (result) params.set('result', result);
+  if (from) params.set('dateFrom', from);
+  if (to) params.set('dateTo', to);
+  const qs = params.toString();
+  return qs ? '?' + qs : '';
+}
+
+function _downloadServerExport(pathname, label) {
+  if (window.__QC_BACKEND_OK !== true) return false;
+  const a = document.createElement('a');
+  a.href = _qcApiBase() + '/api/export/' + pathname + _recordsExportQuery();
+  a.rel = 'noopener';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  showToast(label + ' 下载已开始', 'success');
+  return true;
+}
+
 function exportCSV() {
   if (!can('exportData')) { showToast('当前账号无权限执行此操作', 'error'); return; }
+  if (currentPage === 'records') filterRecords();
+  if (_downloadServerExport('records.csv', 'CSV')) return;
   try {
     const data = filteredRecs.length ? filteredRecs : recs();
     const HDR  = ['ID','来料日期','检验日期','供应商','客户','货号','款式名称','类型',
@@ -4351,9 +4384,10 @@ function exportCSV() {
 /* 按「加工厂品质检验明细统计表」格式导出 Excel（沿用验货明细页的日期/搜索筛选）*/
 function exportFactoryExcel() {
   if (!can('exportData')) { showToast('当前账号无权限执行此操作', 'error'); return; }
+  if (currentPage === 'records') filterRecords();
+  if (_downloadServerExport('factory-excel.xls', '加工厂 Excel')) return;
   if (typeof XLSX === 'undefined') { showToast('Excel 引擎未加载，请刷新后重试', 'error'); return; }
   try {
-    if (currentPage === 'records') filterRecords();
     const hasActiveFilter = !!(
       getVal('searchInput') ||
       getVal('filterResult') ||

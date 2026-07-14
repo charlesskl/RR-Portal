@@ -1696,6 +1696,12 @@ let _selectedIds = new Set();
 
 function renderRecordsTable() { filterRecords(); }
 
+function _recordsSnapshotsDiffer(localRecords, serverRecords) {
+  const local = Array.isArray(localRecords) ? localRecords : [];
+  const server = Array.isArray(serverRecords) ? serverRecords : [];
+  return JSON.stringify(local) !== JSON.stringify(server);
+}
+
 async function refreshRecordsPage() {
   const btn = document.getElementById('btnRefreshRecords');
   const oldText = btn ? btn.textContent : '';
@@ -1710,6 +1716,16 @@ async function refreshRecordsPage() {
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const data = await res.json();
     if (!Array.isArray(data.records)) throw new Error('服务器返回数据格式不正确');
+    if (_recordsSnapshotsDiffer(state.records, data.records)) {
+      const syncFailed = window.__QC_BACKEND_OK !== true || (window.__QC_LAST_SYNC && window.__QC_LAST_SYNC.ok === false);
+      const warning = syncFailed
+        ? '检测到本地数据可能尚未成功同步。继续刷新会用服务器数据覆盖当前页面，未同步的修改将丢失。确定继续吗？'
+        : '服务器数据与当前页面不同。继续刷新会用服务器最新数据覆盖当前页面，确定继续吗？';
+      if (!window.confirm(warning)) {
+        showToast('已取消刷新，当前数据保持不变', 'info');
+        return;
+      }
+    }
 
     state = {
       records: data.records,
@@ -1737,7 +1753,7 @@ async function refreshRecordsPage() {
 function filterRecords() {
   try {
     const data   = recs();
-    const search = (document.getElementById('searchInput')?.value || '').toLowerCase();
+    const search = (document.getElementById('searchInput')?.value || '').trim().toLowerCase();
     const resF   = document.getElementById('filterResult')?.value || '';
     const dfrom  = document.getElementById('filterDateFrom')?.value || '';
     const dto    = document.getElementById('filterDateTo')?.value   || '';

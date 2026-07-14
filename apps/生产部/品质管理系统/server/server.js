@@ -245,8 +245,13 @@ function todayStr() {
   return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 }
 
+function neutralizeSpreadsheetFormula(v) {
+  const value = String(v == null ? '' : v);
+  return /^[=+\-@\t\r]/.test(value) ? "'" + value : value;
+}
+
 function csvCell(v) {
-  return '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
+  return '"' + neutralizeSpreadsheetFormula(v).replace(/"/g, '""') + '"';
 }
 
 function htmlCell(v) {

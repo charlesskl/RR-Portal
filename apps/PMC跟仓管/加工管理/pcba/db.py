@@ -86,6 +86,8 @@ CREATE TABLE IF NOT EXISTS semi_finished_monthly_totals (
     material TEXT NOT NULL,
     sticker_type TEXT NOT NULL,
     opening_stock INTEGER NOT NULL DEFAULT 0,
+    assembly_opening_stock INTEGER NOT NULL DEFAULT 0,
+    hongya_opening_stock INTEGER NOT NULL DEFAULT 0,
     monthly_inbound INTEGER NOT NULL DEFAULT 0,
     monthly_outbound INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -191,6 +193,16 @@ def _migrate_schema(conn):
         conn.execute(
             "ALTER TABLE semi_finished_monthly_totals "
             "ADD COLUMN opening_stock INTEGER NOT NULL DEFAULT 0"
+        )
+    if not _column_exists(conn, "semi_finished_monthly_totals", "assembly_opening_stock"):
+        conn.execute(
+            "ALTER TABLE semi_finished_monthly_totals "
+            "ADD COLUMN assembly_opening_stock INTEGER NOT NULL DEFAULT 0"
+        )
+    if not _column_exists(conn, "semi_finished_monthly_totals", "hongya_opening_stock"):
+        conn.execute(
+            "ALTER TABLE semi_finished_monthly_totals "
+            "ADD COLUMN hongya_opening_stock INTEGER NOT NULL DEFAULT 0"
         )
     _migrate_department_names(conn)
 

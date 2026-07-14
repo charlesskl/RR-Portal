@@ -213,11 +213,11 @@ def test_export_includes_semi_finished_detail_sheet(client):
 
 def test_semi_finished_department_export_has_inbound_and_outbound_sheets(client):
     admin_login(client, "碟片半成品")
-    hongya = loc_id(client, "东莞加工厂鸿亚")
+    lihong = loc_id(client, "东莞加工厂利鸿")
     client.post("/api/records", json={
         "rec_type": "semi_inbound", "material": "PCBA板", "qty": 80})
     client.post("/api/records", json={
-        "rec_type": "semi_outbound", "location_id": hongya,
+        "rec_type": "semi_outbound", "location_id": lihong,
         "material": "PCBA板", "qty": 30})
 
     r = client.get("/api/export")
@@ -236,7 +236,7 @@ def test_lihong_summary_export_uses_semifinished_outbound_only(client):
     client.post("/api/records", json={
         "rec_type": "issue", "location_id": lid, "material": "PCBA板", "qty": 70})
     client.post("/api/records", json={
-        "rec_type": "semi_finished", "material": "NFC贴纸", "qty": 30})
+        "rec_type": "semi_finished", "material": "77794-PCBA板", "qty": 30})
 
     r = client.get("/api/export")
     wb = openpyxl.load_workbook(io.BytesIO(r.content), data_only=True)
@@ -264,8 +264,6 @@ def test_shaoyang_finished_export_includes_po_and_customer_columns(client):
     assert ws.cell(row=2, column=4).value == "PO-001"
     assert ws.cell(row=2, column=5).value == "客户A"
     assert ws.cell(row=2, column=6).value == 45
-
-
 def test_xinshao_finished_export_includes_po_and_customer_columns(client):
     admin_login(client, "新邵")
     lid = loc_id(client, "新邵")
@@ -281,4 +279,3 @@ def test_xinshao_finished_export_includes_po_and_customer_columns(client):
     assert ws.cell(row=2, column=4).value == "PO-X01"
     assert ws.cell(row=2, column=5).value == "客户X"
     assert ws.cell(row=2, column=6).value == 45
-

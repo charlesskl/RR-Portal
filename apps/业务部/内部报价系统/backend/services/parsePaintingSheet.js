@@ -1,6 +1,7 @@
 // 解析"喷油核价表"型 xlsx → 返回 { meta, items, count, sheet_used }
 // 常见表头：图片 | 位置 | 夹模 | 夹模单价 | 移印 | 移印单价 | 散枪 | 散枪单价 |
-//           边模 | 边模单价 | 油色 | 油色价格 | 浸油 | 浸油单价 | 抹油 | 抹油单价 | 总报价 | 备注
+//           边模 | 边模单价 | 油色 | 油色价格 | 浸油 | 浸油单价 | 抹油 | 抹油单价 |
+//           擦PP水 | 擦PP水单价 | 总报价 | 备注
 const ExcelJS = require('exceljs');
 const XLSX = require('xlsx');
 
@@ -13,6 +14,7 @@ const PROCS = [
   { key: 'color', label: '油色' },
   { key: 'dip',   label: '浸油' },
   { key: 'oil',   label: '抹油' },
+  { key: 'pp_water', label: '擦PP水' },
 ];
 
 function toStr(v) {
@@ -44,12 +46,13 @@ function sheetjsToRows(sheet) {
   });
 }
 
-// 按表头定位列：位置 / 备注 / 各工序数量列(+右邻单价列)
+// 按表头定位列：名称 / 位置 / 备注 / 各工序数量列(+右邻单价列)
 function indexHeader(values) {
-  const map = { position: null, note: null, procs: {} };
+  const map = { name: null, position: null, note: null, procs: {} };
   values.forEach((v, i) => {
     const s = toStr(v);
-    if (s === '位置') map.position = i;
+    if (s === '名称') map.name = i;
+    else if (s === '位置') map.position = i;
     else if (/^备注/.test(s)) map.note = i;
     else {
       const p = PROCS.find(p => p.label === s);
@@ -110,10 +113,11 @@ async function parseWorkbook(buffer) {
     }
     const first = toStr(r[1]);
     if (/合计|小计|总报价/.test(first)) continue; // 跳过底部合计行（"合计"在首列）
+    const name = cols.name != null ? toStr(r[cols.name]) : '';
     const position = cols.position != null ? toStr(r[cols.position]) : '';
-    if (!position) continue; // 跳过分隔空行
+    if (!name && !position) continue; // 跳过分隔空行
     if (/合计|小计|总报价/.test(position) || /[:：]\s*$/.test(position)) continue; // 跳过合计/图例(如"夹模：")
-    const item = { position, note: cols.note != null ? toStr(r[cols.note]) : '', _row: i };
+    const item = { name, position, note: cols.note != null ? toStr(r[cols.note]) : '', _row: i };
     let hasQty = false;
     for (const p of PROCS) {
       const c = cols.procs[p.key];

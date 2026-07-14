@@ -333,7 +333,12 @@ async function buildWorkbook({ quote, sections }) {
   // 模具分摊：从工程"模具费用"表取 套产品分摊
   const mc = eng.mold_costs || {};
   const moldCostSumRmb = sum(mc.items || [], r => num(r.price_rmb));
-  const moldShare = moldCostSumRmb / moldAmortQty;  // moldAmortQty 已在模具费用表前算好
+  const moldFx = num(mc.fx_rmb_usd) || 7.75;
+  const prototypeAmortQty = Math.max(num(mc.prototype_amortization_qty) || 50000, 1);
+  const testingAmortQty = Math.max(num(mc.testing_amortization_qty) || 2000, 1);
+  const prototypeShareUsd = num(mc.prototype_fee_usd ?? mc.prototype_fee_rmb) / prototypeAmortQty;
+  const testingShareUsd = num(mc.testing_fee_usd ?? mc.testing_fee_rmb) / testingAmortQty;
+  const moldShare = moldCostSumRmb / moldAmortQty + (prototypeShareUsd + testingShareUsd) * moldFx;
   const surtax = sales.pricing_summary?.surtax != null ? num(sales.pricing_summary.surtax) : 0;
   const slushTotalRmb = sum(slush.slush_items || [], r => num(r.qty) * num(r.unit_price_hkd)) * fxRH;
   const sewingGroupSum = sum(sewing.sewing_groups || [], g =>
@@ -414,11 +419,20 @@ async function buildWorkbook({ quote, sections }) {
   row += 2;
 
   // 出货价算价：所有场景底价统一 = 九、合计 出货底价（出厂价 + 附加税），再在那边 ×码点 ÷找数
-  // 模具分摊（美金）：与「生产模具费用」表同口径 = (模具总RMB ÷ fx_rmb_usd − 客补贴USD) ÷ 套数
-  const moldShareUsd = (moldCostSumRmb / (num(mc.fx_rmb_usd) || 7.75) - num(mc.customer_subsidy_usd)) / moldAmortQty;
+  // 模费按 RMB 计算；手板费和测试费直接按 USD 总额分摊。
+  const moldFeeShareUsd = (moldCostSumRmb / moldFx - num(mc.customer_subsidy_usd)) / moldAmortQty;
 
   // ---------- 十、出货价算价（多场景） ----------
-  const shipOpts = { summaryRow, markedHkd: baseHkdMarked, combinedHkd: baseHkdMarked, moldShareUsd, moldShareUsdCell: subRefs.moldShareUsdCell, freightCells: subRefs.freightCells };
+  const shipOpts = {
+    summaryRow, markedHkd: baseHkdMarked, combinedHkd: baseHkdMarked,
+    moldShareUsd: moldFeeShareUsd,
+    prototypeShareUsd,
+    testingShareUsd,
+    moldShareUsdCell: subRefs.moldShareUsdCell,
+    prototypeShareUsdCell: subRefs.prototypeShareUsdCell,
+    testingShareUsdCell: subRefs.testingShareUsdCell,
+    freightCells: subRefs.freightCells,
+  };
   row = renderShippingBlock(ws, row, sales.shipping, header, fxRH, shipOpts);
   // 把"盐田40柜"运费/吊柜费单元格带回 subRefs，供减税明细 表2 直接引用
   subRefs.shipFreightCell = shipOpts.shipFreightCell;
@@ -842,9 +856,11 @@ function renderShippingBlock(ws, row, shipping, header, fxRH, refs = {}) {
     const afterDivisor = afterMarkup / Math.max(num(shipping.divisor), 1e-9);
     const totalHKD = afterDivisor;  // 码点/找数后的港币总额（模具分摊在 USD 层加）
     const totalUSD = totalHKD / fxHU;
-    const moldShareUSD = num(refs.moldShareUsd);  // 模具分摊（美金，已是 USD，与模具费用表同口径）
-    const finalUSD = totalUSD + moldShareUSD;
-    return { base, freight, lifting, afterShip, afterMarkup, afterDivisor, totalHKD, totalUSD, moldShareUSD, finalUSD };
+    const moldShareUSD = num(refs.moldShareUsd);
+    const prototypeShareUSD = num(refs.prototypeShareUsd);
+    const testingShareUSD = num(refs.testingShareUsd);
+    const finalUSD = totalUSD + moldShareUSD + prototypeShareUSD + testingShareUSD;
+    return { base, freight, lifting, afterShip, afterMarkup, afterDivisor, totalHKD, totalUSD, moldShareUSD, prototypeShareUSD, testingShareUSD, finalUSD };
   });
 
   // 记录每行所在的 Excel 行号，构造公式
@@ -914,15 +930,23 @@ function renderShippingBlock(ws, row, shipping, header, fxRH, refs = {}) {
   writeRow(`(USD) = HK$/${fxHU}`,
     i => ({ formula: `${colLetter(i+2)}${rHKD}/${fxHU}`, result: rows[i].totalUSD }),
     { fmt: '0.0000' });
-  // 9. 模具分摊 USD（每PCS，美金）— 引用「生产模具费用」表的套产品分摊USD单元格（活公式）
+  // 9-11. 三项分摊分别显示并引用「生产模具费用」表。
   const rMold = row;
   writeRow('模具分摊 (USD)',
     i => refs.moldShareUsdCell ? { formula: refs.moldShareUsdCell, result: rows[i].moldShareUSD } : rows[i].moldShareUSD,
     { fmt: '0.0000' });
-  // 10. TOTAL USD = USD + 模具分摊USD
+  const rPrototype = row;
+  writeRow('手板费分摊 (USD)',
+    i => refs.prototypeShareUsdCell ? { formula: refs.prototypeShareUsdCell, result: rows[i].prototypeShareUSD } : rows[i].prototypeShareUSD,
+    { fmt: '0.0000' });
+  const rTesting = row;
+  writeRow('测试费分摊 (USD)',
+    i => refs.testingShareUsdCell ? { formula: refs.testingShareUsdCell, result: rows[i].testingShareUSD } : rows[i].testingShareUSD,
+    { fmt: '0.0000' });
+  // TOTAL USD = USD + 模具 + 手板 + 测试分摊
   const rFinal = row;
   writeRow('TOTAL (USD)',
-    i => ({ formula: `${colLetter(i+2)}${rUSD}+${colLetter(i+2)}${rMold}`, result: rows[i].finalUSD }),
+    i => ({ formula: `${colLetter(i+2)}${rUSD}+${colLetter(i+2)}${rMold}+${colLetter(i+2)}${rPrototype}+${colLetter(i+2)}${rTesting}`, result: rows[i].finalUSD }),
     { fmt: '0.0000', bold: true });
 
   // 报客货价 = 第一个非"出厂价"场景的 finalUSD（默认 盐田40柜）
@@ -1041,14 +1065,15 @@ function injectionSubtotal(p) {
 }
 
 function renderSecondProc(ws, row, payload, fxRH, refs) {
-  // 二次加工 = 喷油部 painting_items（夹模/移印/散枪/边模/油色/浸油/抹油 七工序）
+  // 二次加工 = 喷油部 painting_items（夹模/移印/散枪/边模/油色/浸油/抹油/擦PP水 八工序）
   const items = payload.painting_items || payload.second_proc || [];
   const colLetter = (n) => { let s=''; while(n>0){const m=(n-1)%26; s=String.fromCharCode(65+m)+s; n=Math.floor((n-1)/26);} return s; };
-  // 工序列布局：A 序号 | B 位置 | 各工序(数量+单价 两列) | 报价
-  const procs = ['夹模', '移印', '散枪', '边模', '油色', '浸油', '抹油'];
-  const procKeys = ['clamp', 'pad', 'spray', 'edge', 'color', 'dip', 'oil'];
-  const priceCol = 3 + procs.length * 2;      // 报价列号（七工序 = 17）
+  // 工序列布局：A 序号 | B 名称 | C 位置 | 各工序(数量+单价 两列) | 报价
+  const procs = ['夹模', '移印', '散枪', '边模', '油色', '浸油', '抹油', '擦PP水'];
+  const procKeys = ['clamp', 'pad', 'spray', 'edge', 'color', 'dip', 'oil', 'pp_water'];
+  const priceCol = 4 + procs.length * 2;      // 报价列号（八工序 = 20）
   const PRICE = colLetter(priceCol);
+  ws.getColumn(priceCol).width = 16;
   ws.mergeCells(row, 1, row, priceCol); styleSection(ws.getCell(row, 1));
   ws.getCell(row, 1).value = '三、二次加工（印喷报价）';
   row += 1;
@@ -1057,10 +1082,12 @@ function renderSecondProc(ws, row, payload, fxRH, refs) {
   // 第 1 行
   ws.getCell(row, 1).value = '序号'; styleHeader(ws.getCell(row, 1));
   ws.mergeCells(row, 1, row + 1, 1);
-  ws.getCell(row, 2).value = '位置'; styleHeader(ws.getCell(row, 2));
+  ws.getCell(row, 2).value = '名称'; styleHeader(ws.getCell(row, 2));
   ws.mergeCells(row, 2, row + 1, 2);
+  ws.getCell(row, 3).value = '位置'; styleHeader(ws.getCell(row, 3));
+  ws.mergeCells(row, 3, row + 1, 3);
   procs.forEach((p, pi) => {
-    const c = 3 + pi * 2;
+    const c = 4 + pi * 2;
     ws.mergeCells(row, c, row, c + 1);
     ws.getCell(row, c).value = p;
     styleHeader(ws.getCell(row, c));
@@ -1071,7 +1098,7 @@ function renderSecondProc(ws, row, payload, fxRH, refs) {
   row += 1;
   // 第 2 行：数量/单价
   procs.forEach((_, pi) => {
-    const c = 3 + pi * 2;
+    const c = 4 + pi * 2;
     ws.getCell(row, c).value = '数量'; styleHeader(ws.getCell(row, c));
     ws.getCell(row, c + 1).value = '单价'; styleHeader(ws.getCell(row, c + 1));
   });
@@ -1080,16 +1107,17 @@ function renderSecondProc(ws, row, payload, fxRH, refs) {
   const dataStart = row;
   items.forEach((r, i) => {
     ws.getCell(row, 1).value = i + 1;
-    ws.getCell(row, 2).value = r.position || '';
+    ws.getCell(row, 2).value = r.name || '';
+    ws.getCell(row, 3).value = r.position || '';
     procKeys.forEach((k, pi) => {
-      const c = 3 + pi * 2;
+      const c = 4 + pi * 2;
       ws.getCell(row, c).value = num(r[k + '_qty']);
       ws.getCell(row, c + 1).value = num(r[k + '_unit']);
       ws.getCell(row, c + 1).numFmt = '0.0000';
     });
     // 报价 = Σ(数量*单价)
     const parts = procKeys.map((_, pi) => {
-      const c = 3 + pi * 2;
+      const c = 4 + pi * 2;
       return `${colLetter(c)}${row}*${colLetter(c+1)}${row}`;
     });
     const computed = procKeys.reduce((s, k) => s + num(r[k+'_qty']) * num(r[k+'_unit']), 0);
@@ -1112,7 +1140,7 @@ function renderSecondProc(ws, row, payload, fxRH, refs) {
   return row;
 }
 function secondProcSubtotal(p) {
-  const procKeys = ['clamp', 'pad', 'spray', 'edge', 'color', 'dip', 'oil'];
+  const procKeys = ['clamp', 'pad', 'spray', 'edge', 'color', 'dip', 'oil', 'pp_water'];
   const items = p.painting_items || p.second_proc || [];
   const s = sum(items, r => {
     if (r.price !== undefined) return num(r.price) * num(r.qty); // 旧结构兼容
@@ -2088,8 +2116,14 @@ function renderTaxSummary(ws, row, sales, extra = {}) {
 
 // ============ 模具费用 (eng.mold_costs) ============
 function renderMoldCosts(ws, row, mc, quote, refs, amortQty) {
-  if (!mc || !mc.items || !mc.items.length) return row;
+  if (!mc) return row;
+  const items = Array.isArray(mc.items) ? mc.items : [];
   const fx = num(mc.fx_rmb_usd) || 7.75;
+  const prototypeFeeUsd = num(mc.prototype_fee_usd ?? mc.prototype_fee_rmb);
+  const testingFeeUsd = num(mc.testing_fee_usd ?? mc.testing_fee_rmb);
+  if (!items.length && prototypeFeeUsd <= 0 && testingFeeUsd <= 0) return row;
+  const prototypeAmortQty = Math.max(num(mc.prototype_amortization_qty) || 50000, 1);
+  const testingAmortQty = Math.max(num(mc.testing_amortization_qty) || 2000, 1);
   ws.mergeCells(row, 1, row, 13); styleSection(ws.getCell(row, 1));
   ws.getCell(row, 1).value = '生产模具费用';
   row += 1;
@@ -2100,7 +2134,7 @@ function renderMoldCosts(ws, row, mc, quote, refs, amortQty) {
   ws.mergeCells(row, 11, row, 12);
   row += 1;
   const dataStart = row;
-  mc.items.forEach(r => {
+  items.forEach(r => {
     ws.mergeCells(row, 1, row, 10);
     ws.getCell(row, 1).value = r.name || '';
     ws.mergeCells(row, 11, row, 12);
@@ -2113,13 +2147,15 @@ function renderMoldCosts(ws, row, mc, quote, refs, amortQty) {
     row += 1;
   });
   const dataEnd = row - 1;
-  const sumRmb = sum(mc.items, r => num(r.price_rmb));
+  const sumRmb = sum(items, r => num(r.price_rmb));
   // 模具总计
   ws.mergeCells(row, 1, row, 10);
   ws.getCell(row, 1).value = '模具总计';
   ws.getCell(row, 1).alignment = { horizontal: 'right', vertical: 'middle' };
   ws.mergeCells(row, 11, row, 12);
-  ws.getCell(row, 11).value = { formula: `SUM(K${dataStart}:K${dataEnd})`, result: sumRmb };
+  ws.getCell(row, 11).value = items.length
+    ? { formula: `SUM(K${dataStart}:K${dataEnd})`, result: sumRmb }
+    : 0;
   ws.getCell(row, 11).numFmt = RMB;
   ws.getCell(row, 13).value = { formula: `K${row}/${fx}`, result: sumRmb / fx };
   ws.getCell(row, 13).numFmt = '"$"#,##0.0000';
@@ -2146,13 +2182,34 @@ function renderMoldCosts(ws, row, mc, quote, refs, amortQty) {
   ws.mergeCells(row, 11, row, 12);
   ws.getCell(row, 11).value = { formula: `K${totalRow}/${qty}`, result: sumRmb / qty };
   ws.getCell(row, 11).numFmt = RMB;
-  if (refs) refs.moldShareRmbCell = `K${row}`;  // 每PCS模具分摊(RMB)，供 九、合计 模具分摊 引用
-  if (refs) refs.moldShareUsdCell = `M${row}`;  // 每PCS模具分摊(USD)，供 出货价算价 模具分摊 引用
   ws.getCell(row, 13).value = { formula: `(M${totalRow}-M${subsidyRow})/${qty}`, result: (sumRmb / fx - num(mc.customer_subsidy_usd)) / qty };
   ws.getCell(row, 13).numFmt = '"$"#,##0.0000';
   for (let c = 1; c <= 13; c++) styleSubtotal(ws.getCell(row, c), 'total');
   ws.getRow(row).font = { bold: true, color: { argb: 'FF1F2937' }, name: 'Microsoft YaHei' };
-  row += 2;
+  const moldShareRow = row;
+  if (refs) refs.moldShareRmbCell = `K${moldShareRow}`;
+  if (refs) refs.moldShareUsdCell = `M${moldShareRow}`;
+  row += 1;
+
+  const appendExtraShare = (label, totalUsd, shareQty) => {
+    ws.mergeCells(row, 1, row, 10);
+    ws.getCell(row, 1).value = `${label}（总额 USD ${totalUsd}，按 ${shareQty} 套分摊）`;
+    ws.getCell(row, 1).alignment = { horizontal: 'right', vertical: 'middle' };
+    ws.mergeCells(row, 11, row, 12);
+    ws.getCell(row, 11).value = { formula: `${totalUsd}*${fx}/${shareQty}`, result: totalUsd * fx / shareQty };
+    ws.getCell(row, 11).numFmt = RMB;
+    ws.getCell(row, 13).value = { formula: `${totalUsd}/${shareQty}`, result: totalUsd / shareQty };
+    ws.getCell(row, 13).numFmt = '"$"#,##0.0000';
+    for (let c = 1; c <= 13; c++) styleData(ws.getCell(row, c));
+    return row++;
+  };
+  const prototypeShareRow = appendExtraShare('手板费分摊', prototypeFeeUsd, prototypeAmortQty);
+  const testingShareRow = appendExtraShare('测试费分摊', testingFeeUsd, testingAmortQty);
+  if (refs) refs.prototypeShareRmbCell = `K${prototypeShareRow}`;
+  if (refs) refs.prototypeShareUsdCell = `M${prototypeShareRow}`;
+  if (refs) refs.testingShareRmbCell = `K${testingShareRow}`;
+  if (refs) refs.testingShareUsdCell = `M${testingShareRow}`;
+  row += 1;
   return row;
 }
 

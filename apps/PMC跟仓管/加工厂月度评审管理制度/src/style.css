@@ -1,0 +1,108 @@
+/* ============ 设计系统（全局） ============ */
+:root {
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --border: #e9ebf0;
+  --border-strong: #dcdfe6;
+  --text: #1f2533;
+  --text-soft: #6b7280;
+  --text-faint: #9aa1ad;
+  --primary: #4f46e5;
+  --primary-soft: #eef0ff;
+  --primary-border: #c7d2fe;
+  --radius: 14px;
+  --radius-sm: 8px;
+  --shadow: 0 1px 3px rgba(0, 0, 0, .05);
+  --shadow-lg: 0 10px 30px -12px rgba(31, 37, 51, .25);
+
+  --grade-a: #16a34a;
+  --grade-b: #2563eb;
+  --grade-c: #d97706;
+  --grade-d: #dc2626;
+
+  --sans: system-ui, 'PingFang SC', 'Microsoft YaHei', 'Segoe UI', Roboto, sans-serif;
+
+  font: 15px/1.5 var(--sans);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* { box-sizing: border-box; }
+
+body { margin: 0; background: var(--bg); color: var(--text); }
+#app { width: 100%; min-height: 100vh; }
+
+h1, h2, h3 { color: var(--text); font-weight: 600; }
+h2 { font-size: 1.35rem; margin: 0 0 1rem; letter-spacing: -.2px; }
+h3 { font-size: 1.02rem; margin: 0 0 .75rem; }
+p { margin: 0; }
+a { color: var(--primary); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* ---- 按钮 ---- */
+button {
+  font: inherit; cursor: pointer;
+  background: var(--primary); color: #fff; border: 1px solid var(--primary);
+  padding: .5rem .95rem; border-radius: var(--radius-sm);
+  transition: filter .15s ease, box-shadow .15s ease;
+}
+button:hover { filter: brightness(1.07); box-shadow: 0 4px 12px -6px rgba(79, 70, 229, .5); }
+button:active { filter: brightness(.95); }
+/* 次级按钮：加 class="ghost" */
+button.ghost { background: #fff; color: var(--text); border-color: var(--border-strong); box-shadow: none; }
+button.ghost:hover { background: #f3f4f6; filter: none; }
+
+/* ---- 表单控件 ---- */
+input, select, textarea {
+  font: inherit; color: var(--text);
+  background: #fff; border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm); padding: .45rem .6rem;
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+input:focus, select:focus, textarea:focus {
+  outline: none; border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-soft);
+}
+input:disabled, select:disabled { background: #f3f4f6; color: var(--text-faint); cursor: not-allowed; }
+label { font-size: .9rem; color: var(--text); }
+
+/* ---- 表格（卡片化） ---- */
+table {
+  width: 100%; border-collapse: separate; border-spacing: 0;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow);
+  margin-top: .5rem;
+}
+thead th {
+  background: #fafbfc; text-align: left; font-weight: 600; font-size: .82rem;
+  color: var(--text-soft); padding: .7rem .9rem; border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+tbody td { padding: .65rem .9rem; border-bottom: 1px solid var(--border); font-size: .9rem; }
+tbody tr:last-child td { border-bottom: none; }
+tbody tr:hover td { background: #fafbff; }
+
+/* ---- 可复用组件类 ---- */
+.page { max-width: 1100px; margin: 0 auto; }
+.card, .panel {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 1.25rem 1.4rem; box-shadow: var(--shadow);
+}
+.toolbar { display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; margin-bottom: 1rem; }
+.toolbar .spacer { flex: 1; }
+.muted { color: var(--text-soft); }
+.hint { color: var(--text-faint); font-size: .85rem; }
+
+/* 徽章：等级 / 红黄牌 / 状态 */
+.badge { display: inline-block; padding: .15rem .55rem; border-radius: 999px; font-size: .78rem; font-weight: 600; line-height: 1.5; }
+.badge-A { background: #e8f7ee; color: var(--grade-a); }
+.badge-B { background: #eaf1ff; color: var(--grade-b); }
+.badge-C { background: #fdf3e3; color: var(--grade-c); }
+.badge-D { background: #fdeaea; color: var(--grade-d); }
+.flag-red { background: #fdeaea; color: var(--grade-d); }
+.flag-yellow { background: #fdf3e3; color: var(--grade-c); }
+.status-active { background: #e8f7ee; color: var(--grade-a); }
+.status-limited { background: #fdf3e3; color: var(--grade-c); }
+.status-suspended { background: #fdeaea; color: var(--grade-d); }
+.status-eliminated { background: #f1f3f7; color: var(--text-soft); }

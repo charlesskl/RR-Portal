@@ -1714,15 +1714,15 @@ function _buildIQCCanvas(r) {
         <td class="lbl">供&ensp;应&ensp;商</td>
         <td><b>${supplier}</b></td>
         <td class="lbl">货&ensp;号&ensp;/&ensp;名称</td>
-        <td>${productNo}</td>
-        <td class="lbl">PO&ensp;号</td>
-        <td>${orderNo}</td>
+        <td colspan="3">${productNo}</td>
         <td class="lbl">来&ensp;货&ensp;日&ensp;期</td>
         <td>${date}</td>
       </tr>
       <tr>
         <td class="lbl">物&ensp;料&ensp;名&ensp;称</td>
-        <td colspan="5">${productName}</td>
+        <td colspan="3">${productName}</td>
+        <td class="lbl">PO&ensp;号</td>
+        <td>${orderNo}</td>
         <td class="lbl">来&ensp;货&ensp;数&ensp;量</td>
         <td>${typeof qty==='number'?qty.toLocaleString():qty}</td>
       </tr>
@@ -1731,6 +1731,7 @@ function _buildIQCCanvas(r) {
         <td>${deliveryNo}</td>
         <td class="lbl">抽&ensp;查&ensp;数&ensp;量</td>
         <td>${sampleQty}</td>
+        <td colspan="2"></td>
         <td class="lbl">检&ensp;验&ensp;日&ensp;期</td>
         <td>${inspDate}</td>
       </tr>

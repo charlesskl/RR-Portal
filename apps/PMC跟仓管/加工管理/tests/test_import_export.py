@@ -602,6 +602,78 @@ def test_xingxin_nfc_export_groups_opening_stock_by_document_column(client):
     assert ws.cell(2, 4).value is None
 
 
+def test_xingxin_nfc_import_does_not_treat_quantity_as_workbook_year(client):
+    login(client, "兴信B来料仓", "123456", DEFAULT_DEPARTMENT)
+    wb = openpyxl.load_workbook(io.BytesIO(legacy_supplier_nfc_workbook_bytes()))
+    wb["总表"].cell(3, 2).value = 49855
+    wb["总表"].cell(3, 3).value = 49855
+    content = io.BytesIO()
+    wb.save(content)
+
+    imported = upload_bytes(
+        client,
+        "/api/records/import",
+        content.getvalue(),
+        "来料仓77772#NFC出入明细.xlsx",
+    )
+    assert imported.status_code == 200
+
+    exported = client.get("/api/records/export?material=NFC贴纸")
+    exported_wb = openpyxl.load_workbook(
+        io.BytesIO(exported.content), data_only=True
+    )
+    assert exported_wb["入库明细"].cell(1, 3).value == "2026-06-27"
+
+
+def test_xingxin_nfc_export_sorts_columns_by_date_and_document(client):
+    login(client, "兴信B来料仓", "123456", DEFAULT_DEPARTMENT)
+    documents = [
+        ("2026-07-11", "RK-10"),
+        ("2026-06-29", "RK-2"),
+        ("2026-07-04", "RK-1"),
+        ("2026-07-11", "RK-2"),
+    ]
+    for index, (rec_date, doc_no) in enumerate(documents, start=1):
+        response = client.post("/api/records", json={
+            "rec_type": "inbound_raw",
+            "material": "NFC贴纸",
+            "sticker_type": "1#NFC贴纸",
+            "rec_date": rec_date,
+            "doc_no": doc_no,
+            "qty": index,
+        })
+        assert response.status_code == 200
+
+    exported = client.get("/api/records/export?material=NFC贴纸")
+    wb = openpyxl.load_workbook(io.BytesIO(exported.content), data_only=True)
+    ws = wb["入库明细"]
+
+    assert [ws.cell(1, col).value for col in range(3, 7)] == [
+        "2026-06-29", "2026-07-04", "2026-07-11", "2026-07-11",
+    ]
+    assert [ws.cell(2, col).value for col in range(5, 7)] == [
+        "RK-2", "RK-10",
+    ]
+
+
+def test_xingxin_nfc_export_repairs_legacy_future_opening_date(client):
+    login(client, "兴信B来料仓", "123456", DEFAULT_DEPARTMENT)
+    response = client.post("/api/records", json={
+        "rec_type": "inbound_raw",
+        "material": "NFC贴纸",
+        "sticker_type": "1#NFC贴纸",
+        "rec_date": "2036-06-27",
+        "doc_no": "1#NFC贴纸-期初入仓",
+        "qty": 100,
+        "remark": "总表期初入仓导入",
+    })
+    assert response.status_code == 200
+
+    exported = client.get("/api/records/export?material=NFC贴纸")
+    wb = openpyxl.load_workbook(io.BytesIO(exported.content), data_only=True)
+    assert wb["入库明细"].cell(1, 3).value == "2026-06-27"
+
+
 def test_semi_finished_export_uses_legacy_matrix_workbook(client):
     login(client, "碟片半成品", "123456", "碟片半成品")
     upload = upload_bytes(
@@ -620,6 +692,7 @@ def test_semi_finished_export_uses_legacy_matrix_workbook(client):
         "总表", "入库明细", "邵阳领料", "河源华兴36#CD领料", "车间36#CD领料"]
     assert wb["总表"].cell(1, 2).value == "累计入仓总数"
     assert wb["总表"].cell(1, 11).value == "应存数"
+    assert wb["总表"].cell(1, 14).value == "湖南"
     assert wb["总表"].cell(3, 1).value == "1#NFC\n贴纸"
     assert wb["总表"].cell(3, 2).value == 100
     assert wb["总表"].cell(3, 11).value == 60
@@ -772,7 +845,7 @@ def test_record_import_replace_mode_replaces_document_and_auto_records(client):
     assert target_rows[0]["source_record_id"] is not None
 
 
-def test_record_import_replace_rejects_records_owned_by_another_user(client):
+def test_record_import_replace_allows_same_department_records_owned_by_another_user(client):
     login(client)
     created = client.post("/api/records", json={
         "rec_type": "inbound_raw",
@@ -796,13 +869,13 @@ def test_record_import_replace_rejects_records_owned_by_another_user(client):
         data={"mode": "replace"},
     )
 
-    assert replaced.status_code == 403
+    assert replaced.status_code == 200
     rows = client.get("/api/records?doc_no=ADMIN-OWNED-001").json()
     assert len(rows) == 1
-    assert rows[0]["qty"] == 10
+    assert rows[0]["qty"] == 20
 
 
-def test_record_import_same_document_number_on_different_dates_is_not_duplicate(client):
+def test_record_import_same_document_number_on_different_dates_is_duplicate(client):
     login(client, "兴信B来料仓", "123456", DEFAULT_DEPARTMENT)
     headers = ["类型", "物料名称", "日期", "单据编号", "数量"]
     first = upload_xlsx(
@@ -824,12 +897,12 @@ def test_record_import_same_document_number_on_different_dates_is_not_duplicate(
 
     assert first.status_code == 200
     assert second.status_code == 200
-    assert second.json()["created"] == 1
+    assert second.json()["created"] == 0
+    assert second.json()["skipped_documents"] == 1
     rows = client.get("/api/records?doc_no=PERIODIC-001").json()
-    assert {(row["rec_date"], row["qty"]) for row in rows} == {
+    assert [(row["rec_date"], row["qty"]) for row in rows] == [
         ("2026-07-01", 10),
-        ("2026-08-01", 20),
-    }
+    ]
 
 
 def test_semi_finished_export_splits_outbound_by_target_department(client):

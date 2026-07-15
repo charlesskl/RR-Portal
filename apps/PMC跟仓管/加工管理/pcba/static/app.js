@@ -1289,6 +1289,18 @@ function recordImportFormData(includeMode) {
   return form;
 }
 
+function setRecordImportBusy(busy) {
+  const button = el('recordImportBtn');
+  button.disabled = busy;
+  button.textContent = busy ? '导入中...' : '开始导入';
+}
+
+async function refreshAfterRecordImport() {
+  cancelEdit();
+  await loadRecords();
+  if (el('summary').style.display !== 'none') await loadSummary();
+}
+
 async function checkRecordImport() {
   const form = recordImportFormData(false);
   if (!form) return;
@@ -1324,23 +1336,37 @@ async function importSelectedRecords() {
   }
   const form = recordImportFormData(true);
   if (!form) return;
-  const r = await api('/api/records/import', {method: 'POST', body: form});
-  if (!r.ok) {
-    const e = await r.json().catch(() => ({}));
-    setMessage('entryErr', e.detail || '导入失败', false);
-    return;
+  setRecordImportBusy(true);
+  try {
+    const r = await api('/api/records/import', {method: 'POST', body: form});
+    if (!r.ok) {
+      const e = await r.json().catch(() => ({}));
+      setMessage('entryErr', e.detail || '导入失败', false);
+      return;
+    }
+    const data = await r.json();
+    const parts = [`导入成功：${fmt(data.created || 0)} 条`];
+    if (data.monthly_totals) parts.push(`更新当月汇总 ${fmt(data.monthly_totals)} 项`);
+    if (data.skipped_documents) parts.push(`跳过 ${fmt(data.skipped_documents)} 张重复单据`);
+    if (data.replaced_documents) parts.push(`覆盖 ${fmt(data.replaced_documents)} 张单据`);
+    const message = parts.join('，');
+    setMessage('entryErr', message, true);
+    const result = el('recordImportCheckResult');
+    result.style.display = '';
+    result.innerHTML = `<div class="import-check-summary"><strong>导入完成</strong><span>${esc(message)}</span></div>`;
+    try {
+      await refreshAfterRecordImport();
+    } catch (error) {
+      if (error.message === 'unauth') throw error;
+      setMessage('entryErr', `${message}；导入已完成，但列表刷新失败，请手动刷新页面`, false);
+    }
+  } catch (error) {
+    if (error.message !== 'unauth') {
+      setMessage('entryErr', '导入失败，请检查网络后重试', false);
+    }
+  } finally {
+    setRecordImportBusy(false);
   }
-  const data = await r.json();
-  const parts = [`导入成功：${fmt(data.created || 0)} 条`];
-  if (data.monthly_totals) parts.push(`更新当月汇总 ${fmt(data.monthly_totals)} 项`);
-  if (data.skipped_documents) parts.push(`跳过 ${fmt(data.skipped_documents)} 张重复单据`);
-  if (data.replaced_documents) parts.push(`覆盖 ${fmt(data.replaced_documents)} 张单据`);
-  setMessage('entryErr', parts.join('，'), true);
-  await (async () => {
-    cancelEdit();
-    await loadRecords();
-    if (el('summary').style.display !== 'none') await loadSummary();
-  });
 }
 
 async function importRecords(input) {

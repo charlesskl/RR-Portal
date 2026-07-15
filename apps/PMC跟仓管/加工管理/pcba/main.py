@@ -590,6 +590,8 @@ def _legacy_workbook_year(wb):
     for ws in wb.worksheets:
         for row in ws.iter_rows():
             for cell in row:
+                if isinstance(cell.value, (int, float)):
+                    continue
                 rec_date = _legacy_excel_date(cell.value)
                 if rec_date:
                     year = date.fromisoformat(rec_date).year
@@ -2693,16 +2695,23 @@ def _export_date(value):
 
 
 def _legacy_opening_record_date(row):
-    if row.get("rec_date"):
-        return None
     text = f"{row.get('doc_no') or ''} {row.get('remark') or ''}"
-    if "期初" in text:
+    if "期初" not in text:
+        return None
+    rec_date = row.get("rec_date")
+    if not rec_date:
         return date(date.today().year, 6, 27).isoformat()
+    try:
+        parsed = date.fromisoformat(str(rec_date))
+    except ValueError:
+        return None
+    if parsed.year > date.today().year + 1:
+        return parsed.replace(year=date.today().year).isoformat()
     return None
 
 
 def _record_export_date(row):
-    return row.get("rec_date") or _legacy_opening_record_date(row)
+    return _legacy_opening_record_date(row) or row.get("rec_date")
 
 
 def _export_month(value):
@@ -3269,7 +3278,14 @@ def _supplier_nfc_detail_sheet(wb, title, records, sticker_names, total_header):
         row for row in records
         if _export_month(_record_export_date(row)) in (6, *EXPORT_MONTHS)
     ]
-    groups = _supplier_nfc_detail_groups(records)
+    groups = sorted(
+        _supplier_nfc_detail_groups(records),
+        key=lambda group: (
+            group["rec_date"] is None,
+            group["rec_date"] or "",
+            _natural_text_sort_key(group["doc_no"]),
+        ),
+    )
     ws.cell(1, 2).value = total_header
     ws.cell(2, 1).value = "物料名称"
     for offset, group in enumerate(groups, start=3):
@@ -3742,7 +3758,7 @@ def _semi_finished_export_workbook(records, sticker_types, monthly_totals):
     ws.cell(1, 12).value = "累计出仓总数"
     ws.cell(1, 13).value = "东莞"
     ws.cell(2, 13).value = "截止6月27号"
-    ws.cell(1, 14).value = "邵阳生产"
+    ws.cell(1, 14).value = "湖南"
     for col_no, month in enumerate(EXPORT_MONTHS, start=15):
         ws.cell(1, col_no).value = f"{month}月出仓\n总数"
 
@@ -3989,12 +4005,7 @@ def _import_document_key(body):
     doc_no = _cell_text(body.doc_no)
     if not doc_no:
         return None
-    return (
-        body.rec_type,
-        body.location_id or 0,
-        body.rec_date or "",
-        doc_no.casefold(),
-    )
+    return body.rec_type, body.location_id or 0, doc_no.casefold()
 
 
 def _group_import_documents(bodies):
@@ -4010,13 +4021,12 @@ def _group_import_documents(bodies):
 
 
 def _existing_document_ids(conn, department, key):
-    rec_type, location_id, rec_date, doc_no = key
+    rec_type, location_id, doc_no = key
     rows = conn.execute(
         "SELECT id FROM records WHERE department=? AND source_record_id IS NULL "
         "AND rec_type=? AND COALESCE(location_id, 0)=? "
-        "AND COALESCE(rec_date, '')=? "
         "AND LOWER(TRIM(COALESCE(doc_no, '')))=? ORDER BY id",
-        (department, rec_type, location_id, rec_date, doc_no),
+        (department, rec_type, location_id, doc_no),
     ).fetchall()
     return [row["id"] for row in rows]
 
@@ -4085,12 +4095,6 @@ def import_records(
         skipped_documents = 0
         skipped_document_rows = 0
         if mode == "replace":
-            for existing_ids in duplicate_keys.values():
-                for record_id in existing_ids:
-                    row = _get_record_or_404(
-                        conn, record_id, user["department"]
-                    )
-                    _check_owner(row, user)
             for existing_ids in duplicate_keys.values():
                 _delete_record_ids_with_links(conn, existing_ids)
                 replaced_documents += 1

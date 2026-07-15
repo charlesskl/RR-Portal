@@ -60,6 +60,17 @@ def test_entry_page_exposes_clear_and_bulk_delete_controls():
     assert "/api/records/clear" in js
 
 
+def test_record_import_success_refreshes_records_and_shows_busy_state():
+    html = (ROOT / "pcba/static/app.html").read_text(encoding="utf-8")
+    js = (ROOT / "pcba/static/app.js").read_text(encoding="utf-8")
+
+    assert 'id="recordImportBtn"' in html
+    assert "function setRecordImportBusy(busy)" in js
+    assert "async function refreshAfterRecordImport()" in js
+    assert "await refreshAfterRecordImport();" in js
+    assert "await (async () =>" not in js
+
+
 def test_admin_department_switcher_controls_exist():
     html = (ROOT / "pcba/static/app.html").read_text(encoding="utf-8")
     js = (ROOT / "pcba/static/app.js").read_text(encoding="utf-8")

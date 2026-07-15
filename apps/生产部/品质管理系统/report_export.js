@@ -1720,9 +1720,9 @@ function _buildIQCCanvas(r) {
       </tr>
       <tr>
         <td class="lbl">物&ensp;料&ensp;名&ensp;称</td>
-        <td colspan="3">${productName}</td>
+        <td>${productName}</td>
         <td class="lbl">PO&ensp;号</td>
-        <td>${orderNo}</td>
+        <td colspan="3">${orderNo}</td>
         <td class="lbl">来&ensp;货&ensp;数&ensp;量</td>
         <td>${typeof qty==='number'?qty.toLocaleString():qty}</td>
       </tr>

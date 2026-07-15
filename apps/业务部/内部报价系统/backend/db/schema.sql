@@ -3,6 +3,14 @@
 
 PRAGMA foreign_keys = ON;
 
+-- 厂区：账号登录后进入所属厂区；管理员可切换活动厂区
+CREATE TABLE IF NOT EXISTS factories (
+  code       TEXT PRIMARY KEY,
+  name_cn    TEXT NOT NULL,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  active     INTEGER NOT NULL DEFAULT 1
+);
+
 -- 部门表：固定 5 行，启动时若空则种入默认数据
 CREATE TABLE IF NOT EXISTS departments (
   code           TEXT PRIMARY KEY,           -- sales / engineering / molding / painting / assembly
@@ -23,7 +31,8 @@ CREATE TABLE IF NOT EXISTS quotes (
   created_by_name  TEXT,
   created_at       TEXT NOT NULL DEFAULT (datetime('now')),
   status           TEXT NOT NULL DEFAULT 'drafting',  -- drafting / fully_approved / exported
-  version          TEXT  -- 版本标签：同一产品的不同报价版本（如 V1 / 改色版）
+  version          TEXT,  -- 版本标签：同一产品的不同报价版本（如 V1 / 改色版）
+  factory_code     TEXT NOT NULL DEFAULT 'qingxi' REFERENCES factories(code)
 );
 
 -- 每报价单 × 每部门 = 一行 section（创建报价时自动 5 行）
@@ -64,6 +73,21 @@ CREATE TABLE IF NOT EXISTS ref_tables (
   updated_by TEXT
 );
 
+CREATE TABLE IF NOT EXISTS app_migrations (
+  key        TEXT PRIMARY KEY,
+  applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- 厂区参考参数。当前先从全局参数复制，后续清溪/河源可分别维护。
+CREATE TABLE IF NOT EXISTS factory_ref_tables (
+  factory_code TEXT NOT NULL REFERENCES factories(code),
+  key          TEXT NOT NULL,
+  data_json    TEXT NOT NULL DEFAULT '[]',
+  updated_at   TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_by   TEXT,
+  PRIMARY KEY (factory_code, key)
+);
+
 -- 用户账号（替代旧的部门 PIN 登录）
 CREATE TABLE IF NOT EXISTS users (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -72,6 +96,7 @@ CREATE TABLE IF NOT EXISTS users (
   display_name  TEXT NOT NULL,
   dept          TEXT NOT NULL REFERENCES departments(code),
   role          TEXT NOT NULL DEFAULT 'staff',   -- staff / supervisor / admin
+  factory_code  TEXT NOT NULL DEFAULT 'qingxi' REFERENCES factories(code),
   locked_until  TEXT,
   login_fails   INTEGER NOT NULL DEFAULT 0,
   last_login    TEXT,

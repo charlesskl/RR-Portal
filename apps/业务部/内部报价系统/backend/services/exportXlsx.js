@@ -1111,8 +1111,10 @@ function renderSecondProc(ws, row, payload, fxRH, refs) {
     ws.getCell(row, 3).value = r.position || '';
     procKeys.forEach((k, pi) => {
       const c = 4 + pi * 2;
-      ws.getCell(row, c).value = num(r[k + '_qty']);
-      ws.getCell(row, c + 1).value = num(r[k + '_unit']);
+      const qty = num(r[k + '_qty']);
+      const unit = num(r[k + '_unit']);
+      ws.getCell(row, c).value = qty || null;
+      ws.getCell(row, c + 1).value = unit || null;
       ws.getCell(row, c + 1).numFmt = '0.0000';
     });
     // 报价 = Σ(数量*单价)
@@ -1121,7 +1123,7 @@ function renderSecondProc(ws, row, payload, fxRH, refs) {
       return `${colLetter(c)}${row}*${colLetter(c+1)}${row}`;
     });
     const computed = procKeys.reduce((s, k) => s + num(r[k+'_qty']) * num(r[k+'_unit']), 0);
-    ws.getCell(row, priceCol).value = { formula: parts.join('+'), result: computed };
+    ws.getCell(row, priceCol).value = computed ? { formula: parts.join('+'), result: computed } : null;
     ws.getCell(row, priceCol).numFmt = '0.0000';
     for (let c = 1; c <= priceCol; c++) styleData(ws.getCell(row, c));
     row += 1;

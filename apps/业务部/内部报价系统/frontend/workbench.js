@@ -84,26 +84,37 @@ function renderTable(container, columns, rows, opts = {}) {
           td.appendChild(ta);
           setTimeout(autoSize, 0);
         } else if (c.type === 'select') {
-          const sel = document.createElement('select');
-          const opts = typeof c.options === 'function' ? c.options(row) : (c.options || []);
-          // 允许空选项
-          const blank = document.createElement('option');
-          blank.value = ''; blank.textContent = '';
-          sel.appendChild(blank);
-          opts.forEach(o => {
-            const op = document.createElement('option');
-            op.value = o; op.textContent = o;
-            if (val === o) op.selected = true;
-            sel.appendChild(op);
-          });
-          if (!opts.includes(val) && val) {
-            // 当前值不在选项里，仍保留（避免清空）
-            const op = document.createElement('option');
-            op.value = val; op.textContent = val; op.selected = true;
-            sel.appendChild(op);
+          const rawOpts = typeof c.options === 'function' ? c.options(row) : (c.options || []);
+          const selectOpts = [...new Set(rawOpts.filter(v => v !== null && v !== undefined && v !== ''))];
+          if (c.fixedWhenSingle && selectOpts.length === 1) {
+            const fixedValue = selectOpts[0];
+            if (row[c.key] !== fixedValue) {
+              row[c.key] = fixedValue;
+              setTimeout(onChange, 0);
+            }
+            td.className = 'ro';
+            const fixed = document.createElement('input'); fixed.type = 'text'; fixed.value = fixedValue; fixed.readOnly = true;
+            fixed.style.background = '#f8fafc'; fixed.style.cursor = 'default';
+            td.appendChild(fixed);
+          } else {
+            const sel = document.createElement('select');
+            const blank = document.createElement('option');
+            blank.value = ''; blank.textContent = '';
+            sel.appendChild(blank);
+            selectOpts.forEach(o => {
+              const op = document.createElement('option');
+              op.value = o; op.textContent = o;
+              if (val === o) op.selected = true;
+              sel.appendChild(op);
+            });
+            if (!selectOpts.includes(val) && val) {
+              const op = document.createElement('option');
+              op.value = val; op.textContent = val; op.selected = true;
+              sel.appendChild(op);
+            }
+            sel.onchange = () => { row[c.key] = sel.value; refreshCalcs(); onChange(); if (c.affectsOptions) rebuild(); };
+            td.appendChild(sel);
           }
-          sel.onchange = () => { row[c.key] = sel.value; refreshCalcs(); onChange(); if (c.affectsOptions) rebuild(); };
-          td.appendChild(sel);
         } else {
           const inp = document.createElement('input');
           inp.type = c.type === 'number' ? 'number' : 'text';
@@ -231,6 +242,20 @@ function applyLoss(subtotal, pct) {
 }
 
 // ==================== 工程：模具部分（表格布局，对齐 sheet1 / 导出格式） ====================
+function syncMoldFromParts(mold) {
+  const parts = Array.isArray(mold.parts) ? mold.parts : [];
+  if (!parts.length) return;
+  mold.name = [...new Set(parts.map(p => String(p.name || '').trim()).filter(Boolean))].join('/');
+  const cavityTotal = parts.reduce((total, part) => {
+    const nums = String(part.cavity || '').match(/[\d.]+/g);
+    return nums ? total + nums.map(Number).reduce((a, b) => a * b, 1) : total;
+  }, 0);
+  mold.cavity = cavityTotal > 0 ? String(cavityTotal) : '';
+  const weights = parts.map(p => p.weight_g).filter(v => v !== null && v !== '' && Number.isFinite(Number(v)));
+  mold.weight_g = weights.length ? +weights.reduce((a, v) => a + Number(v), 0).toFixed(4) : null;
+  mold.images = [...new Set(parts.flatMap(p => p.images || []).filter(Boolean))];
+}
+
 function renderMolds(container, molds, onChange, canEdit, fxRmbHkd) {
   container.innerHTML = '';
   const table = document.createElement('table'); table.className = 'wb-table mold-table';
@@ -286,13 +311,75 @@ function renderMolds(container, molds, onChange, canEdit, fxRmbHkd) {
       if (f === null) {
         // 图片单元格
         td.className = 'mold-img-cell';
-        renderImageCell(td, m, canEdit, onChange);
+        if (Array.isArray(m.parts) && m.parts.length) {
+          m.parts.forEach(part => {
+            part.images = part.images || [];
+            const imageRow = document.createElement('div');
+            imageRow.style.cssText = 'min-height:66px;padding:4px 0;border-bottom:1px solid #e2e8f0';
+            renderImageCell(imageRow, part, canEdit, () => { syncMoldFromParts(m); onChange(); });
+            td.appendChild(imageRow);
+          });
+        } else {
+          renderImageCell(td, m, canEdit, onChange);
+        }
       } else {
         const [k, type, group] = f;
         const obj = group ? (m[group] = m[group] || {}) : m;
         const get = () => obj[k];
         const set = (v) => { obj[k] = v; };
-        if (type === 'calc_hkd') {
+        const hasPartRows = !group && Array.isArray(m.parts) && m.parts.length;
+        if (hasPartRows && k === 'name') {
+          m.parts.forEach((part, partIndex) => {
+            const nameRow = document.createElement('div');
+            nameRow.style.cssText = 'min-height:66px;display:flex;gap:4px;align-items:center;padding:4px 0;border-bottom:1px solid #e2e8f0';
+            if (canEdit) {
+              const input = document.createElement('textarea'); input.rows = 2; input.value = part.name || ''; input.style.flex = '1';
+              input.oninput = () => { part.name = input.value; syncMoldFromParts(m); onChange(); };
+              const del = document.createElement('button'); del.className = 'mini danger'; del.textContent = '×';
+              del.onclick = () => { m.parts.splice(partIndex, 1); syncMoldFromParts(m); renderMolds(container, molds, onChange, canEdit, fxRmbHkd); onChange(); };
+              nameRow.append(input, del);
+            } else {
+              nameRow.className = 'ro'; nameRow.style.whiteSpace = 'pre-wrap'; nameRow.textContent = part.name || '';
+            }
+            td.appendChild(nameRow);
+          });
+          if (canEdit) {
+            const addPart = document.createElement('button'); addPart.className = 'mini'; addPart.textContent = '+ 配件';
+            addPart.onclick = () => { m.parts.push({ name: '', cavity: '', weight_g: null, images: [] }); renderMolds(container, molds, onChange, canEdit, fxRmbHkd); onChange(); };
+            td.appendChild(addPart);
+          }
+        } else if (hasPartRows && k === 'cavity') {
+          m.parts.forEach(part => {
+            const cavityRow = document.createElement('div');
+            cavityRow.style.cssText = 'min-height:66px;display:flex;align-items:center;padding:4px 0;border-bottom:1px solid #e2e8f0';
+            if (canEdit) {
+              const input = document.createElement('input'); input.type = 'text'; input.value = part.cavity || '';
+              input.oninput = () => { part.cavity = input.value; syncMoldFromParts(m); onChange(); };
+              cavityRow.appendChild(input);
+            } else {
+              cavityRow.className = 'ro'; cavityRow.textContent = part.cavity || '';
+            }
+            td.appendChild(cavityRow);
+          });
+        } else if (hasPartRows && k === 'weight_g') {
+          m.parts.forEach(part => {
+            const weightRow = document.createElement('div');
+            weightRow.style.cssText = 'min-height:66px;display:flex;align-items:center;padding:4px 0;border-bottom:1px solid #e2e8f0';
+            if (canEdit) {
+              const input = document.createElement('input'); input.type = 'number'; input.step = 'any'; input.value = part.weight_g ?? '';
+              input.placeholder = '必填'; input.style.background = num(input.value) ? '' : '#fee2e2';
+              input.oninput = () => {
+                part.weight_g = input.value === '' ? null : Number(input.value);
+                input.style.background = num(input.value) ? '' : '#fee2e2';
+                syncMoldFromParts(m); onChange();
+              };
+              weightRow.appendChild(input);
+            } else {
+              weightRow.className = 'ro'; weightRow.textContent = formatNum(part.weight_g ?? '');
+            }
+            td.appendChild(weightRow);
+          });
+        } else if (type === 'calc_hkd') {
           td.className = 'ro'; td.textContent = formatNum(num(m.price_rmb) / fxv);
         } else if (!canEdit) {
           td.className = 'ro'; td.style.whiteSpace = 'pre-wrap'; td.textContent = formatNum(get() ?? '');
@@ -332,6 +419,7 @@ function renderMolds(container, molds, onChange, canEdit, fxRmbHkd) {
       td.appendChild(b); tr.appendChild(td);
     }
     tbody.appendChild(tr);
+
   });
 
   // 小计：RMB / HKD 同行，分别对齐 价格RMB / 价格HKD 列
@@ -882,7 +970,7 @@ function renderSummaryPane(host, sections, quote, me) {
   const asmLaborTotal = sum(asm.assembly_labor || [], r => num(r.unit_price)*num(r.qty));
   const pkLaborTotal = sum(asm.packaging_labor || [], r => num(r.unit_price)*num(r.qty));
   // 新版 排拉工序 组装 + 包装 — 每组合计 = 基数 × 人数 ÷ 该组生产量
-  const _asmBase = num(asm.assembly_base_rate ?? 310);
+  const _asmBase = num(asm.assembly_base_rate ?? defaultAssemblyBaseRateForFactory());
   const stepGroupTotal = (groups) => sum(groups || [], g =>
     sum(g.steps || [], s => _asmBase * num(s.count) * (num(g.team ?? 1) || 1) / Math.max(num(g.qty), 1)));
   const asmStepTotal = stepGroupTotal(asm.assembly_step_groups);
@@ -2237,10 +2325,10 @@ const DEFAULT_MACHINE_PRICES = [
   { model: '14A-16A',   normal: '150T',   price: 1490 },
   { model: '20A',       normal: '200T',   price: 1920 },
   { model: '24A',       normal: '260T',   price: 1920 },
-  { model: '30A-32A',   normal: '320T',   price: 2220 },
+  { model: '32A',       normal: '320T',   price: 2220 },
   { model: '44A',       normal: '490T',   price: 2500 },
   { model: '46A-49.9A', normal: '',       price: 2800 },
-  { model: '60A-65A',   normal: '500T',   price: 3090 },
+  { model: '60A',       normal: '500T',   price: 3090 },
   { model: '80A',       normal: '',       price: 3590 },
   { model: '81.3A',     normal: '',       price: 3600 },
   { model: '105A',      normal: '800T',   price: 4500 },
@@ -2310,6 +2398,7 @@ function renderMolding(host, payload, canEdit, onChange, refMolds, fxRmbHkd, use
   // 该报价单是否已存了自己的价格表副本（旧单冻结；新单为空时才用全局/默认兜底）
   const ownMaterial = !!(payload.material_prices && payload.material_prices.length);
   const ownMachine = !!(payload.machine_prices && payload.machine_prices.length);
+  const factoryMachineDefaults = defaultMachinePricesForFactory();
   payload.material_prices = ownMaterial
     ? payload.material_prices
     : (window.__refs.material_prices && window.__refs.material_prices.length
@@ -2319,7 +2408,7 @@ function renderMolding(host, payload, canEdit, onChange, refMolds, fxRmbHkd, use
     ? payload.machine_prices
     : (window.__refs.machine_prices && window.__refs.machine_prices.length
        ? JSON.parse(JSON.stringify(window.__refs.machine_prices))
-       : JSON.parse(JSON.stringify(DEFAULT_MACHINE_PRICES)));
+       : JSON.parse(JSON.stringify(factoryMachineDefaults)));
   // 后台异步拉全局参考表：本单没有自己的副本时（新单），用最新全局表替换兜底值并刷新
   if (!window.__refs._loaded) {
     window.__refs._loaded = true;
@@ -2347,7 +2436,7 @@ function renderMolding(host, payload, canEdit, onChange, refMolds, fxRmbHkd, use
   // 回填"普通机"列：若已有数据但 normal 字段缺失，按 DEFAULT_MACHINE_PRICES 同机型填上
   payload.machine_prices.forEach(row => {
     if (row.normal == null || row.normal === '') {
-      const d = DEFAULT_MACHINE_PRICES.find(x => x.model === row.model);
+      const d = factoryMachineDefaults.find(x => x.model === row.model);
       if (d && d.normal) row.normal = d.normal;
     }
   });
@@ -2361,6 +2450,8 @@ function renderMolding(host, payload, canEdit, onChange, refMolds, fxRmbHkd, use
       color: m.color || '',
       cavity: m.cavity || '',
       weight_g: m.weight_g ?? null,
+      mold_part_index: m.mold_part_index ?? 0,
+      mold_part_count: m.mold_part_count ?? 1,
       cycle_sec: m.cycle_sec ?? null,
       sets: m.sets || 1,
       machine: m.machine || '',
@@ -2456,13 +2547,15 @@ function renderMolding(host, payload, canEdit, onChange, refMolds, fxRmbHkd, use
           color: m.color || existing.color || '',
           cavity: m.cavity || existing.cavity || '',
           weight_g: m.weight_g ?? existing.weight_g ?? null,
+          mold_part_index: m.mold_part_index ?? 0,
+          mold_part_count: m.mold_part_count ?? 1,
           cycle_sec: m.cycle_sec ?? existing.cycle_sec ?? null,
           sets: existing.sets ?? (m.sets || 1),
           machine: m.machine || existing.machine || '',
           machine_model: m.machine_model || existing.machine_model || '',
           target: m.target ?? existing.target ?? null,
           material_unit_price: m.material_unit_price ?? existing.material_unit_price ?? null,
-          shot_price: m.shot_price ?? existing.shot_price ?? null,
+          shot_price: num(m.mold_part_index) > 0 ? 0 : (m.shot_price ?? existing.shot_price ?? null),
           note: m.note || existing.note || '',
         };
       });
@@ -2491,7 +2584,9 @@ function renderMolding(host, payload, canEdit, onChange, refMolds, fxRmbHkd, use
         const sets = num(row.sets) || 1;
         const target = num(row.target) || 0;
         if (m && target > 0) {
-          row.shot_price = +(num(m.price) / sets / target).toFixed(4);
+          row.shot_price = num(row.mold_part_index) > 0
+            ? 0
+            : +(num(m.price) / sets / target).toFixed(4);
           if (m.normal) row.machine = m.normal;  // 同步"机台"（=普通机）
           hit++;
         } else if (row.machine_model) {
@@ -2568,13 +2663,13 @@ function renderMolding(host, payload, canEdit, onChange, refMolds, fxRmbHkd, use
         return [...new Set(names)];
       }
     },
-    { key: 'material_grade', label: '料型', width: '150px', type: 'select',
+    { key: 'material_grade', label: '料型', width: '150px', type: 'select', fixedWhenSingle: true,
       options: (row) => {
         const mat = String(row.material || '').trim().toUpperCase();
         if (!mat) return [];
-        return (payload.material_prices || [])
+        return [...new Set((payload.material_prices || [])
           .filter(p => String(p.name || '').trim().toUpperCase() === mat)
-          .map(p => p.model).filter(Boolean);
+          .map(p => p.model).filter(Boolean))];
       }
     },
     { key: 'color', label: '颜色', width: '90px' },
@@ -2797,6 +2892,24 @@ const PAINTING_PROCS = [
   { key: 'pp_water', label: '擦PP水' },
 ];
 
+function currentFactoryCode() {
+  return window.__data?.quote?.factory_code
+    || window.__data?.me?.active_factory_code
+    || window.__me?.active_factory_code
+    || 'qingxi';
+}
+
+function defaultAssemblyBaseRateForFactory() {
+  return currentFactoryCode() === 'heyuan' ? 260 : 310;
+}
+
+function defaultMachinePricesForFactory() {
+  const isHeyuan = currentFactoryCode() === 'heyuan';
+  return DEFAULT_MACHINE_PRICES.map(row => row.model === '20A'
+    ? { ...row, price: isHeyuan ? 1720 : 1920 }
+    : { ...row });
+}
+
 function paintingRowAmount(r) {
   return PAINTING_PROCS.reduce((s, p) => s + num(r[p.key + '_qty']) * num(r[p.key + '_unit']), 0);
 }
@@ -2899,7 +3012,7 @@ function renderAssembly(host, payload, canEdit, onChange, fxRmbHkd) {
   payload.assembly_labor = payload.assembly_labor || [];
   payload.packaging_labor = payload.packaging_labor || [];
   payload.assembly_step_groups = payload.assembly_step_groups || [];
-  payload.assembly_base_rate = payload.assembly_base_rate ?? 310;
+  payload.assembly_base_rate = payload.assembly_base_rate ?? defaultAssemblyBaseRateForFactory();
   payload.assembly_std_time = payload.assembly_std_time ?? 11;
 
   const ro = canEdit ? '' : 'disabled';
@@ -3794,7 +3907,7 @@ async function renderQuotePage() {
   if ($('who-chip')) {
     const roleZh = { admin: '管理员', supervisor: '主管', staff: '员工' }[me.role] || me.role;
     const nm = me.display_name || me.name || me.username || '';
-    $('who-chip').textContent = `${me.dept_name} · ${roleZh}${nm ? ' · ' + nm : ''}`;
+    $('who-chip').textContent = `${me.active_factory_name || me.active_factory_code} · ${me.dept_name} · ${roleZh}${nm ? ' · ' + nm : ''}`;
   }
   if ($('btn-switch')) $('btn-switch').onclick = async (e) => {
     e.preventDefault();

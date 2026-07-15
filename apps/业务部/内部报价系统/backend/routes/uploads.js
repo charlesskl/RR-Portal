@@ -92,6 +92,11 @@ router.post('/mold-sheet', requireAuth, memUpload.single('file'), async (req, re
             if (img.row >= range[0] && img.row <= range[1]) {
               result.molds[mi].images = result.molds[mi].images || [];
               result.molds[mi].images.push('uploads/mold/' + img.file);
+              const part = (result.molds[mi].parts || []).find(p => p._row === img.row);
+              if (part) {
+                part.images = part.images || [];
+                part.images.push('uploads/mold/' + img.file);
+              }
               assigned++;
               break;
             }

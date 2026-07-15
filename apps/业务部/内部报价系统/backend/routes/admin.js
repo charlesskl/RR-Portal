@@ -27,8 +27,11 @@ function applyTemplate(userId, dept, role) {
 router.get('/users', (req, res) => {
   const rows = db.prepare(`
     SELECT u.id, u.username, u.display_name, u.dept, d.name_cn AS dept_name,
+           u.factory_code, f.name_cn AS factory_name,
            u.role, u.locked_until, u.login_fails, u.last_login, u.created_at
-    FROM users u LEFT JOIN departments d ON d.code = u.dept
+    FROM users u
+    LEFT JOIN departments d ON d.code = u.dept
+    LEFT JOIN factories f ON f.code = u.factory_code
     ORDER BY u.id
   `).all();
   const now = new Date();
@@ -36,24 +39,26 @@ router.get('/users', (req, res) => {
   res.json(out);
 });
 
-// POST /api/admin/users  { username, password, display_name, dept, role }
+// POST /api/admin/users  { username, password, display_name, dept, role, factory_code }
 router.post('/users', (req, res) => {
-  const { username, password, display_name, dept, role } = req.body || {};
-  if (!username || !password || !display_name || !dept || !role) {
+  const { username, password, display_name, dept, role, factory_code } = req.body || {};
+  if (!username || !password || !display_name || !dept || !role || !factory_code) {
     return res.status(400).json({ error: '字段缺失' });
   }
   if (!['staff', 'supervisor', 'admin'].includes(role)) return res.status(400).json({ error: 'role 非法' });
   if (String(password).length < 6) return res.status(400).json({ error: '密码至少 6 位' });
   const dept_ok = db.prepare('SELECT 1 FROM departments WHERE code = ?').get(dept);
   if (!dept_ok) return res.status(400).json({ error: '部门不存在' });
+  const factory_ok = db.prepare('SELECT 1 FROM factories WHERE code = ? AND active = 1').get(factory_code);
+  if (!factory_ok) return res.status(400).json({ error: '厂区不存在' });
   const exists = db.prepare('SELECT 1 FROM users WHERE username = ?').get(String(username).trim());
   if (exists) return res.status(409).json({ error: '用户名已存在' });
   try {
     const info = db.prepare(`
-      INSERT INTO users (username, password_hash, display_name, dept, role)
-      VALUES (?, ?, ?, ?, ?)
+      INSERT INTO users (username, password_hash, display_name, dept, role, factory_code)
+      VALUES (?, ?, ?, ?, ?, ?)
     `).run(String(username).trim(), bcrypt.hashSync(String(password), 8),
-           String(display_name).trim().slice(0, 32), dept, role);
+           String(display_name).trim().slice(0, 32), dept, role, factory_code);
     applyTemplate(info.lastInsertRowid, dept, role);
     db.prepare(`INSERT INTO audit_log (dept, actor, action, detail) VALUES (?, ?, 'register_user', ?)`)
       .run(dept, req.user.username, username);
@@ -61,6 +66,20 @@ router.post('/users', (req, res) => {
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
+});
+
+// PUT /api/admin/users/:id/factory { factory_code }
+router.put('/users/:id/factory', (req, res) => {
+  const id = Number(req.params.id);
+  const factoryCode = String((req.body && req.body.factory_code) || '').trim();
+  const factory = db.prepare('SELECT code, name_cn FROM factories WHERE code = ? AND active = 1').get(factoryCode);
+  if (!factory) return res.status(400).json({ error: '厂区不存在' });
+  const u = db.prepare('SELECT username FROM users WHERE id = ?').get(id);
+  if (!u) return res.status(404).json({ error: '用户不存在' });
+  db.prepare('UPDATE users SET factory_code = ? WHERE id = ?').run(factory.code, id);
+  db.prepare(`INSERT INTO audit_log (actor, action, detail) VALUES (?, 'change_user_factory', ?)`)
+    .run(req.user.username, `${u.username} -> ${factory.name_cn}`);
+  res.json({ ok: true });
 });
 
 // PUT /api/admin/users/:id/role  { role } — 改角色并按新角色模板重置权限
@@ -128,7 +147,10 @@ router.delete('/users/:id', (req, res) => {
 
 // GET /api/admin/customers — 现有所有 distinct 客户
 router.get('/customers', (req, res) => {
-  const rows = db.prepare('SELECT DISTINCT customer FROM quotes WHERE customer IS NOT NULL AND customer != \'\' ORDER BY customer').all();
+  const userId = Number(req.query.user_id);
+  const target = userId ? db.prepare('SELECT factory_code FROM users WHERE id = ?').get(userId) : null;
+  const factoryCode = target ? target.factory_code : req.user.active_factory_code;
+  const rows = db.prepare('SELECT DISTINCT customer FROM quotes WHERE factory_code = ? AND customer IS NOT NULL AND customer != \'\' ORDER BY customer').all(factoryCode);
   res.json({ customers: rows.map(r => r.customer) });
 });
 

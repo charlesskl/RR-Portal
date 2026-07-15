@@ -1,19 +1,20 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
 import { RouterLink } from 'vue-router'
-import * as XLSX from 'xlsx'
 import AppLayout from '../components/AppLayout.vue'
 import { useOrdersStore } from '../stores/orders'
 import { useFactoriesStore } from '../stores/factories'
 import { useAuthStore } from '../stores/auth'
 import { allowedCrafts, canEditOrders, allowedRegions } from '../utils/permissions'
 import { CRAFT_LABELS, REGIONS, REGION_LABELS, regionOf, type Craft } from '../constants/roles'
-import { buildDeliveryReport, exportDeliveryExcel, parseDeliveryImport, type ReportRow } from '../utils/deliveryStats'
+import { buildDeliveryReport, exportDeliveryExcel, type ReportRow } from '../utils/deliveryStats'
+import { parseDeliveryExcelFiles } from '../utils/deliveryExcelImport'
 
 const orders = useOrdersStore()
 const factories = useFactoriesStore()
 const auth = useAuthStore()
 const fileInput = ref<HTMLInputElement | null>(null)
+const importingExcel = ref(false)
 
 onMounted(() => Promise.all([orders.fetchAll(), factories.fetchAll()]))
 
@@ -54,22 +55,27 @@ function onExportDept(ev: Event) {
 }
 
 async function importExcel(ev: Event) {
-  const file = (ev.target as HTMLInputElement).files?.[0]
-  if (!file) return
-  const buf = await file.arrayBuffer()
-  const wb = XLSX.read(buf, { cellDates: true })
-  const aoa = XLSX.utils.sheet_to_json<any[]>(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '' })
   const fByName: Record<string, string> = {}
   for (const f of factories.items) fByName[f.name] = f.id
-  const { payloads, failed } = parseDeliveryImport(aoa, fByName)
-  if (!payloads.length && !failed) { alert('未识别到表头(需含「货号/物料名称」)'); return }
-  let ok = 0, fail = failed
-  for (const p of payloads) {
-    try { await orders.create({ ...p, created_by: auth.userId ?? undefined } as any); ok++ } catch { fail++ }
+  const files = Array.from((ev.target as HTMLInputElement).files ?? [])
+  if (!files.length) return
+  importingExcel.value = true
+  try {
+    const parsed = await parseDeliveryExcelFiles(files, fByName)
+    let ok = 0, fail = parsed.failedRows
+    for (const p of parsed.payloads) {
+      try { await orders.create({ ...p, created_by: auth.userId ?? undefined } as any); ok++ } catch { fail++ }
+    }
+    await orders.fetchAll()
+    const issues = [
+      parsed.unrecognizedFiles.length ? `未识别 ${parsed.unrecognizedFiles.length} 个文件` : '',
+      parsed.readFailedFiles.length ? `读取失败 ${parsed.readFailedFiles.length} 个文件` : '',
+    ].filter(Boolean).join('，')
+    alert(`批量导入完成：共 ${parsed.fileCount} 个文件，成功 ${ok} 条，失败 ${fail} 条${issues ? `\n${issues}` : ''}`)
+  } finally {
+    importingExcel.value = false
+    if (fileInput.value) fileInput.value.value = ''
   }
-  if (fileInput.value) fileInput.value.value = ''
-  await orders.fetchAll()
-  alert(`导入完成：成功 ${ok} 条` + (fail ? `，失败 ${fail} 条(工厂名对不上或缺物料名称)` : '') + '\n(小计/合计行已自动跳过;加工厂名称需与系统一致)')
 }
 </script>
 <template>
@@ -84,8 +90,10 @@ async function importExcel(ev: Event) {
           <option value="">按部门导出…</option>
           <option v-for="d in visibleDepts" :key="d.craft" :value="d.craft">{{ d.name }}</option>
         </select>
-        <button v-if="canEdit" class="ghost" @click="fileInput?.click()">导入 Excel</button>
-        <input ref="fileInput" type="file" accept=".xlsx,.xls,.csv" style="display:none" @change="importExcel" />
+        <button v-if="canEdit" class="ghost" :disabled="importingExcel" @click="fileInput?.click()">
+          {{ importingExcel ? '导入中…' : '批量导入 Excel' }}
+        </button>
+        <input ref="fileInput" type="file" accept=".xlsx,.xls,.csv" multiple style="display:none" @change="importExcel" />
         <RouterLink v-if="canEdit" to="/orders/new"><button>+ 新增下单</button></RouterLink>
       </div>
 

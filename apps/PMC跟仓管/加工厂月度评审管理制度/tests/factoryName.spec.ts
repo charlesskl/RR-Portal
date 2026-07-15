@@ -32,6 +32,24 @@ describe('resolveFactoryName', () => {
     })
   })
 
+  it('matches equivalent company and factory suffixes', () => {
+    const result = resolveFactoryName(
+      [make('hongshen', '东莞市清溪鸿深电子厂')],
+      '东莞市清溪鸿深公司',
+    )
+
+    expect(result).toMatchObject({ status: 'matched', id: 'hongshen' })
+  })
+
+  it('matches names that omit the local town segment', () => {
+    const result = resolveFactoryName(
+      [make('junhao', '东莞市清溪俊豪塑胶厂')],
+      '东莞市俊豪塑胶厂',
+    )
+
+    expect(result).toMatchObject({ status: 'matched', id: 'junhao' })
+  })
+
   it('does not match one-character abbreviations', () => {
     expect(resolveFactoryName(factories, '豪')).toMatchObject({ status: 'not_found' })
   })

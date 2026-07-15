@@ -339,6 +339,7 @@ function parsePurchaseOrderImport(
   const deliveryDate = formatImportDate(labeledValue(metaCells, '交货日期', stopLabels))
   const metaNotes = labeledValue(metaCells, '备注', stopLabels)
   const orderNo = labeledValue(metaCells, '单号', stopLabels)
+  const pmc = labeledValues(aoa, '操作员').at(-1) ?? ''
   const factoryId = factoryIdOf(factoryIdByName, factoryName)
 
   const payloads: Record<string, any>[] = []
@@ -356,6 +357,7 @@ function parsePurchaseOrderImport(
     const notes = [metaNotes, rowNotes].filter(Boolean).join(' ')
     const p: Record<string, any> = {
       factory: factoryId,
+      pmc,
       product,
       item_no: itemNo,
       order_no: orderNo,
@@ -458,6 +460,62 @@ function parseSewingPurchaseOrderImport(
   return { payloads, failed }
 }
 
+function parseMoldingContractImport(
+  aoa: any[][],
+  headerIdx: number,
+  header: string[],
+  factoryIdByName: Record<string, string>,
+): { payloads: Record<string, any>[]; failed: number } {
+  const colOf = (...aliases: string[]) => header.findIndex((cell) => aliases.some((alias) => cell === compactText(alias)))
+  const C = {
+    item_no: colOf('款号', '货号'),
+    product: colOf('工模名称', '模具名称'),
+    qty: colOf('数量'),
+    out: colOf('加工单价', '单价'),
+    amount: colOf('加工金额', '金额'),
+    notes: colOf('备注'),
+  }
+  const metaBeforeHeader = aoa.slice(0, headerIdx)
+  const factoryName = labeledValues(metaBeforeHeader, '供应商').at(-1) ?? ''
+  const orderNo = labeledValues(metaBeforeHeader, '单号').at(-1) ?? ''
+  const deliveryDate = formatImportDate(labeledValues(metaBeforeHeader, '交货日期').at(-1) ?? '')
+  const orderDate = formatImportDate(labeledValues(aoa, '下单日期').at(-1) ?? '')
+  const pmc = labeledValues(aoa, '操作员').at(-1) ?? labeledValues(aoa, '下单人').at(-1) ?? ''
+  const factoryId = factoryIdOf(factoryIdByName, factoryName)
+
+  const payloads: Record<string, any>[] = []
+  let failed = 0
+  const cell = (row: any[], i: number) => (i >= 0 ? row[i] : '')
+  for (const row of aoa.slice(headerIdx + 1)) {
+    const itemNo = cleanText(cell(row, C.item_no))
+    const product = cleanText(cell(row, C.product))
+    if (!itemNo || !product || /合计|小计|备注/.test(itemNo)) continue
+    if (!factoryId) { failed++; continue }
+    const qty = parseNumberCell(cell(row, C.qty))
+    const out = parseNumberCell(cell(row, C.out))
+    const amount = parseNumberCell(cell(row, C.amount))
+    const p: Record<string, any> = {
+      factory: factoryId,
+      pmc,
+      product,
+      item_no: itemNo,
+      order_no: orderNo,
+      process_category: '啤机',
+      notes: cleanText(cell(row, C.notes)),
+      status: 'placed',
+      is_delayed: false,
+    }
+    if (qty != null) p.quantity = qty
+    if (out != null) p.unit_price = out
+    if (amount != null) p.amount = amount
+    else if (qty != null && out != null) p.amount = qty * out
+    if (orderDate) p.order_date = orderDate
+    if (deliveryDate) p.delivery_date = deliveryDate
+    payloads.push(p)
+  }
+  return { payloads, failed }
+}
+
 // 解析导入的 Excel(识别表头、跳过小计、加工厂合并向下填充)→ 订单 payload 数组
 export function parseDeliveryImport(
   aoa: any[][],
@@ -473,6 +531,9 @@ export function parseDeliveryImport(
   const colOf = (...al: string[]) => { for (const a of al) { const i = header.indexOf(norm(a)); if (i >= 0) return i } return -1 }
   if (header.some((cell) => cell.includes('合同号/货号')) && header.some((cell) => cell.includes('含税价'))) {
     return parseSewingPurchaseOrderImport(aoa, headerIdx, header, factoryIdByName)
+  }
+  if (header.includes('款号') && header.includes('工模名称') && header.includes('加工单价')) {
+    return parseMoldingContractImport(aoa, headerIdx, header, factoryIdByName)
   }
   if (header.includes('款号') && header.includes('加工内容') && header.includes('单价')) {
     return parsePurchaseOrderImport(aoa, headerIdx, header, factoryIdByName)

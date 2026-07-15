@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, watch } from 'vue'
 import { useRoute, RouterLink } from 'vue-router'
-import * as XLSX from 'xlsx'
 import AppLayout from '../components/AppLayout.vue'
 import { useOrdersStore } from '../stores/orders'
 import { useFactoriesStore } from '../stores/factories'
@@ -10,6 +9,7 @@ import { CRAFT_LABELS, REGION_LABELS, regionOf, type Craft, type Region } from '
 import { canEditOrders, allowedRegions } from '../utils/permissions'
 import { buildDeliveryReport, exportDeliveryExcel, parseDeliveryImport, DELIVERY_HEADERS as HEADERS, type ReportRow, type DetailRow } from '../utils/deliveryStats'
 import { readDeliveryPdfAsAoa } from '../utils/pdfDeliveryImport'
+import { parseDeliveryExcelFiles } from '../utils/deliveryExcelImport'
 import type { Order } from '../types/order'
 
 const route = useRoute()
@@ -17,6 +17,7 @@ const orders = useOrdersStore()
 const factories = useFactoriesStore()
 const auth = useAuthStore()
 const fileInput = ref<HTMLInputElement | null>(null)
+const importingExcel = ref(false)
 const pdfInput = ref<HTMLInputElement | null>(null)
 
 const craft = computed(() => route.params.craft as Craft)
@@ -70,13 +71,27 @@ async function importRows(aoa: any[][]) {
 }
 
 async function importExcel(ev: Event) {
-  const file = (ev.target as HTMLInputElement).files?.[0]
-  if (!file) return
-  const buf = await file.arrayBuffer()
-  const wb = XLSX.read(buf, { cellDates: true })
-  const aoa = XLSX.utils.sheet_to_json<any[]>(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '' })
-  await importRows(aoa)
-  if (fileInput.value) fileInput.value.value = ''
+  const files = Array.from((ev.target as HTMLInputElement).files ?? [])
+  if (!files.length) return
+  const fByName: Record<string, string> = {}
+  for (const f of factories.items) fByName[f.name] = f.id
+  importingExcel.value = true
+  try {
+    const parsed = await parseDeliveryExcelFiles(files, fByName)
+    let ok = 0, fail = parsed.failedRows
+    for (const p of parsed.payloads) {
+      try { await orders.create({ ...p, created_by: auth.userId ?? undefined } as any); ok++ } catch { fail++ }
+    }
+    await orders.fetchAll()
+    const issues = [
+      parsed.unrecognizedFiles.length ? `未识别 ${parsed.unrecognizedFiles.length} 个文件` : '',
+      parsed.readFailedFiles.length ? `读取失败 ${parsed.readFailedFiles.length} 个文件` : '',
+    ].filter(Boolean).join('，')
+    alert(`批量导入完成：共 ${parsed.fileCount} 个文件，成功 ${ok} 条，失败 ${fail} 条${issues ? `\n${issues}` : ''}`)
+  } finally {
+    importingExcel.value = false
+    if (fileInput.value) fileInput.value.value = ''
+  }
 }
 
 async function importPdf(ev: Event) {
@@ -265,8 +280,10 @@ async function removeRow(row: DetailRow) {
         <span class="spacer"></span>
         <button v-if="canEdit" class="ghost" @click="pdfInput?.click()">导入 PDF</button>
         <input ref="pdfInput" type="file" accept=".pdf,application/pdf" multiple style="display:none" @change="importPdf" />
-        <button v-if="canEdit" class="ghost" @click="fileInput?.click()">导入 Excel</button>
-        <input ref="fileInput" type="file" accept=".xlsx,.xls,.csv" style="display:none" @change="importExcel" />
+        <button v-if="canEdit" class="ghost" :disabled="importingExcel" @click="fileInput?.click()">
+          {{ importingExcel ? '导入中…' : '批量导入 Excel' }}
+        </button>
+        <input ref="fileInput" type="file" accept=".xlsx,.xls,.csv" multiple style="display:none" @change="importExcel" />
         <input class="search-box" v-model="search" placeholder="搜索 工厂/PMC/货号/订单号/产品" />
         <button @click="exportExcel">导出 Excel</button>
       </div>
@@ -274,7 +291,7 @@ async function removeRow(row: DetailRow) {
         <table class="report">
           <thead>
             <tr>
-              <th v-for="h in HEADERS" :key="h">{{ h }}</th>
+              <th v-for="h in HEADERS" :key="h" :class="{ 'item-no-col': h === '货号' }">{{ h }}</th>
               <th v-if="canEdit" class="op-col">操作</th>
             </tr>
           </thead>
@@ -288,7 +305,7 @@ async function removeRow(row: DetailRow) {
                   <span v-else>{{ r.pmc || '-' }}</span>
                 </td>
                 <td v-if="r.factorySpan" :rowspan="r.factorySpan" class="grp">{{ r.factory || '-' }}</td>
-                <td>{{ r.item_no || '-' }}</td>
+                <td class="item-no-col" :title="r.item_no || ''">{{ r.item_no || '-' }}</td>
                 <td>{{ r.order_no || '-' }}</td>
                 <td>{{ r.category || '-' }}</td>
                 <td>
@@ -363,6 +380,13 @@ async function removeRow(row: DetailRow) {
 .scroll { overflow-x: auto; }
 .report { min-width: 2720px; }
 .report th, .report td { white-space: nowrap; text-align: center; font-size: .85rem; }
+.report .item-no-col {
+  width: 220px;
+  min-width: 220px;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .report td.grp { font-weight: 600; background: #fafbff; }
 .report tr.subtotal td { background: #fff7e6; font-weight: 600; }
 .date-inp { padding: .25rem .4rem; font-size: .82rem; border: 1px solid var(--border); border-radius: var(--radius-sm); }

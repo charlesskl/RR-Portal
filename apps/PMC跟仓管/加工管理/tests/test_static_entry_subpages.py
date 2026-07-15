@@ -71,6 +71,13 @@ def test_record_import_success_refreshes_records_and_shows_busy_state():
     assert "await (async () =>" not in js
 
 
+def test_record_import_refresh_failure_does_not_report_import_failure():
+    js = (ROOT / "pcba/static/app.js").read_text(encoding="utf-8")
+
+    assert "导入已完成，但列表刷新失败，请手动刷新页面" in js
+    assert "try {\n      await refreshAfterRecordImport();\n    } catch" in js
+
+
 def test_admin_department_switcher_controls_exist():
     html = (ROOT / "pcba/static/app.html").read_text(encoding="utf-8")
     js = (ROOT / "pcba/static/app.js").read_text(encoding="utf-8")

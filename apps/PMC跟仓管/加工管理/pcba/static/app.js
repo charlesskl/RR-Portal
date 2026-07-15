@@ -1354,7 +1354,12 @@ async function importSelectedRecords() {
     const result = el('recordImportCheckResult');
     result.style.display = '';
     result.innerHTML = `<div class="import-check-summary"><strong>导入完成</strong><span>${esc(message)}</span></div>`;
-    await refreshAfterRecordImport();
+    try {
+      await refreshAfterRecordImport();
+    } catch (error) {
+      if (error.message === 'unauth') throw error;
+      setMessage('entryErr', `${message}；导入已完成，但列表刷新失败，请手动刷新页面`, false);
+    }
   } catch (error) {
     if (error.message !== 'unauth') {
       setMessage('entryErr', '导入失败，请检查网络后重试', false);

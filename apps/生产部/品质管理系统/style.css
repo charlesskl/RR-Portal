@@ -1980,7 +1980,9 @@ tbody tr.row-selected td {
 /* ── 基础资料 ── */
 #iqc-canvas .iqc-info { margin-bottom: 3px; }
 #iqc-canvas .iqc-info td { height: 18px; }
-#iqc-canvas .iqc-info col.c-lbl { width: 72px; }
+#iqc-canvas .iqc-info col.c-lbl { width: 68px; }
+#iqc-canvas .iqc-info col.c-po-lbl { width: 54px; }
+#iqc-canvas .iqc-info col.c-po-val { width: 92px; }
 
 /* ── AQL 区域（所有样式改为内联，CSS 只保留兜底）── */
 /* AQL 表格内所有样式已通过内联 style 精确控制，CSS class 仅作备用 */

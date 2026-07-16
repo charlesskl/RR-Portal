@@ -1669,14 +1669,22 @@ def _parse_supplier_nfc_total_rows(conn, wb, department):
     return bodies
 
 
-def _parse_supplier_nfc_detail_sheet(conn, ws, rec_type, department):
+def _parse_supplier_nfc_detail_sheet(
+    conn, ws, rec_type, department, total_opening_keys=None
+):
     bodies = []
+    total_opening_keys = total_opening_keys or set()
     header_row = _find_legacy_item_header_row(ws)
     if not header_row:
         return bodies
     location_id = None
+    opening_locations = {}
     if rec_type == "issue":
         location_id = _location_id_from_name(conn, "东莞车间", 1)
+        opening_locations = {
+            "东莞期初出仓": location_id,
+            "邵阳期初领料": _location_id_from_name(conn, "邵阳华登", 1),
+        }
     for row_no in range(header_row + 1, ws.max_row + 1):
         sticker_type = _cell_text(ws.cell(row_no, 1).value)
         if "#NFC" not in sticker_type:
@@ -1687,6 +1695,16 @@ def _parse_supplier_nfc_detail_sheet(conn, ws, rec_type, department):
             if qty is None or qty == 0:
                 continue
             date_value = ws.cell(1, col_no).value
+            raw_doc_no = _cell_text(ws.cell(header_row, col_no).value)
+            opening_location_id = None
+            if rec_type == "inbound_raw" and raw_doc_no == "期初入仓":
+                opening_location_id = 0
+            elif rec_type == "issue":
+                opening_location_id = opening_locations.get(raw_doc_no)
+            if opening_location_id is not None and (
+                rec_type, opening_location_id, sticker_type
+            ) in total_opening_keys:
+                continue
             body = RecordIn(
                 rec_type=rec_type,
                 location_id=location_id,
@@ -1715,15 +1733,28 @@ def _parse_legacy_supplier_workbook(conn, wb, department):
     if "入仓明细" in wb.sheetnames:
         bodies.extend(_parse_legacy_supplier_pcba_workbook(conn, wb, department))
     if {"总表", "入库明细", "出库明细"}.issubset(set(wb.sheetnames)):
-        bodies.extend(_parse_supplier_nfc_total_rows(conn, wb, department))
+        total_bodies = _parse_supplier_nfc_total_rows(conn, wb, department)
+        bodies.extend(total_bodies)
+        total_opening_keys = {
+            (body.rec_type, body.location_id or 0, body.sticker_type)
+            for body in total_bodies
+        }
         bodies.extend(
             _parse_supplier_nfc_detail_sheet(
-                conn, wb["入库明细"], "inbound_raw", department
+                conn,
+                wb["入库明细"],
+                "inbound_raw",
+                department,
+                total_opening_keys,
             )
         )
         bodies.extend(
             _parse_supplier_nfc_detail_sheet(
-                conn, wb["出库明细"], "issue", department
+                conn,
+                wb["出库明细"],
+                "issue",
+                department,
+                total_opening_keys,
             )
         )
     if not bodies:
@@ -2880,7 +2911,6 @@ SUPPLIER_PCBA_SUMMARY_ROWS = (
     ("邵阳华登", "邵阳华登领料总数", "PCB主板", "邵阳华登领料"),
     ("河源华兴", "河源华兴领料总数", "PCB主板", "河源华兴领料"),
     ("东莞加工厂利鸿", "加工厂利鸿领料总数", "PCB主板", "加工厂利鸿领料"),
-    ("东莞加工厂鸿亚", "加工厂鸿亚领料总数", "PCB主板", "加工厂鸿亚领料"),
     ("东莞车间", "东莞车间领料", None, "东莞车间领料"),
 )
 
@@ -3245,15 +3275,28 @@ def _supplier_nfc_sticker_names(records, sticker_types):
     return names
 
 
-def _supplier_nfc_export_doc_no(row):
+def _supplier_nfc_opening_kind(row):
     text = f"{row.get('doc_no') or ''} {row.get('remark') or ''}"
     if "东莞期初出仓" in text:
-        return "东莞期初出仓"
+        return "dongguan_outbound"
     if "邵阳期初领料" in text:
-        return "邵阳期初领料"
+        return "shaoyang_outbound"
     if "期初入仓" in text:
-        return "期初入仓"
+        return "inbound"
     if "期初出仓" in text:
+        return "outbound"
+    return None
+
+
+def _supplier_nfc_export_doc_no(row):
+    opening_kind = _supplier_nfc_opening_kind(row)
+    if opening_kind == "dongguan_outbound":
+        return "东莞期初出仓"
+    if opening_kind == "shaoyang_outbound":
+        return "邵阳期初领料"
+    if opening_kind == "inbound":
+        return "期初入仓"
+    if opening_kind == "outbound":
         return "期初出仓"
     return row.get("doc_no")
 
@@ -3337,20 +3380,24 @@ def _supplier_nfc_export_workbook(records, sticker_types):
     for row_no, sticker_type in enumerate(sticker_names, start=3):
         sticker_inbound = [row for row in inbound if row.get("sticker_type") == sticker_type]
         sticker_outbound = [row for row in outbound if row.get("sticker_type") == sticker_type]
+        opening_inbound = [
+            row for row in sticker_inbound
+            if _supplier_nfc_opening_kind(row) == "inbound"
+        ]
         ws.cell(row_no, 1).value = _format_nfc_sticker_name(sticker_type)
         ws.cell(row_no, 2).value = _sum_qty(sticker_inbound) or 0
-        ws.cell(row_no, 3).value = _month_sum(sticker_inbound, 6) or 0
+        ws.cell(row_no, 3).value = _sum_qty(opening_inbound) or 0
         for col_no, month in enumerate(EXPORT_MONTHS, start=4):
             ws.cell(row_no, col_no).value = _month_sum(sticker_inbound, month) or None
         ws.cell(row_no, 11).value = _sum_qty(sticker_inbound) - _sum_qty(sticker_outbound)
         ws.cell(row_no, 12).value = _sum_qty(sticker_outbound) or 0
         dongguan_opening = [
             row for row in sticker_outbound
-            if row.get("location_name") == "东莞车间" and _export_month(row.get("rec_date")) == 6
+            if _supplier_nfc_opening_kind(row) == "dongguan_outbound"
         ]
         shaoyang_opening = [
             row for row in sticker_outbound
-            if row.get("location_name") == "邵阳华登" and _export_month(row.get("rec_date")) == 6
+            if _supplier_nfc_opening_kind(row) == "shaoyang_outbound"
         ]
         ws.cell(row_no, 13).value = _sum_qty(dongguan_opening) or 0
         ws.cell(row_no, 14).value = _sum_qty(shaoyang_opening) or 0

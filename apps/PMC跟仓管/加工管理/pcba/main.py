@@ -1705,9 +1705,12 @@ def _parse_supplier_nfc_detail_sheet(
                 rec_type, opening_location_id, sticker_type
             ) in total_opening_keys:
                 continue
+            record_location_id = location_id
+            if rec_type == "issue" and opening_location_id is not None:
+                record_location_id = opening_location_id
             body = RecordIn(
                 rec_type=rec_type,
-                location_id=location_id,
+                location_id=record_location_id,
                 rec_date=_outsource_date_value(date_value),
                 doc_no=_legacy_doc_no(
                     ws.cell(header_row, col_no).value,

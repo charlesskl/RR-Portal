@@ -1762,6 +1762,30 @@ def test_supplier_nfc_legacy_workbook_keeps_summary_rows_out_of_record_list(clie
     assert len(client.get("/api/records").json()) == 3
 
 
+def test_supplier_nfc_detail_only_shaoyang_opening_uses_shaoyang_location(client):
+    login(client, "兴信B来料仓", "123456", DEFAULT_DEPARTMENT)
+    wb = openpyxl.load_workbook(io.BytesIO(legacy_supplier_nfc_workbook_bytes()))
+    wb["总表"].cell(3, 14).value = None
+    outbound = wb["出库明细"]
+    outbound.cell(1, 4).value = "2026-06-27"
+    outbound.cell(2, 4).value = "邵阳期初领料"
+    outbound.cell(3, 4).value = 15
+    content = io.BytesIO()
+    wb.save(content)
+
+    imported = upload_bytes(
+        client,
+        "/api/records/import",
+        content.getvalue(),
+        "来料仓77772#NFC出入明细.xlsx",
+    )
+    records = client.get("/api/records").json()
+    shaoyang = next(row for row in records if row["doc_no"] == "邵阳期初领料")
+
+    assert imported.status_code == 200
+    assert shaoyang["location_name"] == "邵阳华登"
+
+
 def test_supplier_nfc_export_can_be_reimported_without_creating_opening_rows(client):
     login(client, "兴信B来料仓", "123456", DEFAULT_DEPARTMENT)
     first = upload_bytes(

@@ -99,6 +99,7 @@
     if (fields.date) setV('ocrDate', fields.date);
     if (fields.supplier) setV('ocrSupplier', fields.supplier);
     if (fields.deliveryNo) setV('ocrDeliveryNo', fields.deliveryNo);
+    if (fields.orderNo) setV('ocrOrderNo', fields.orderNo);
     if (fields.type) setV('ocrType', fields.type || '来料');
     if (first.productNo) setV('ocrProductNo', first.productNo);
     if (first.productName) setV('ocrProductName', first.productName);
@@ -190,6 +191,7 @@
     setV('f_date', c.date || '');
     setV('f_supplier', c.supplier || '');
     setV('f_deliveryNo', c.deliveryNo || '');
+    setV('f_orderNo', c.orderNo || '');
     if (c.type) setV('f_type', c.type);
     setV('f_productNo', it.productNo || '');
     setV('f_productName', it.productName || '');

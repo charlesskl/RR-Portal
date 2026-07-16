@@ -2138,7 +2138,7 @@ function clearOcr() {
   if (input) input.value = '';
   setVal('ocrRawText', '');
   ['ocrDate','ocrInspDate','ocrSupplier','ocrClient','ocrProductNo',
-   'ocrProductName','ocrDeliveryNo','ocrQty','ocrType','ocrRemark']
+   'ocrProductName','ocrDeliveryNo','ocrOrderNo','ocrQty','ocrType','ocrRemark']
     .forEach(id => setVal(id, ''));
   setText('ocrStatus', '未上传图片');
 }
@@ -5154,17 +5154,16 @@ function _buildFieldMap(headerCells) {
     if (matched) return;
     /* 3. 部分包含匹配 */
     const partials = [
+      /* 单据编号要先于“客户/供应商”等通用词，避免复合表头误分类 */
+      ['送货单', 'deliveryNo'], ['送货号', 'deliveryNo'], ['DN', 'deliveryNo'],
+      ['订单号', 'orderNo'],    ['订单编号', 'orderNo'],  ['PO', 'orderNo'],
+      ['单号', 'deliveryNo'],
       ['来料日', 'date'],       ['到货日', 'date'],       ['来货日', 'date'],
       ['检验日', 'inspDate'],
       ['厂名', 'supplier'],     ['供应商', 'supplier'],
       ['客名', 'client'],       ['客户', 'client'],
       ['款号', 'productNo'],    ['货号', 'productNo'],
       ['款式', 'productName'],  ['名称', 'productName'],
-      /* 送货相关 — deliveryNo */
-      ['送货单', 'deliveryNo'], ['送货号', 'deliveryNo'], ['DN', 'deliveryNo'],
-      ['单号', 'deliveryNo'],
-      /* 订单相关 — orderNo（不与送货单混淆） */
-      ['订单号', 'orderNo'],    ['PO', 'orderNo'],
       ['数量', 'qty'],          ['抽查', 'sampleQty'],
       ['判定', 'result'],       ['不良', 'defect'],
       ['问题', 'defect'],       ['检验员', 'qc'],          ['验货员', 'qc'],

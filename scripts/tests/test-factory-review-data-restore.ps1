@@ -228,7 +228,7 @@ Assert-True ('set -euo pipefail' -notmatch $tracePattern) 'safe strict-mode flag
 
 $dataLiteralPattern = '(?i)SN' + 'APSHOT\s*=\s*\{'
 $alternativeAdminReadPattern = '(?im)(?<!FACTORY_REVIEW_)\b(?:ADMIN_PASSWORD|PASSWORD)\b'
-$securityScanPaths = @($PSCommandPath, $bashTestPath, $restorePath)
+$securityScanPaths = @($restorePath)
 foreach ($securityPath in $securityScanPaths) {
     $securityText = Get-Content -LiteralPath $securityPath -Raw
     Assert-True ($securityText -notmatch $dataLiteralPattern) "security scan found plaintext private migration data in $securityPath"

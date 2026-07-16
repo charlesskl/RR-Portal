@@ -173,7 +173,7 @@ assert_contains "$CALL_LOG" '^docker ' 'verification scenario must invoke Docker
 assert_contains "$CALL_LOG" '^tar .*(-[xc]|--(create|extract))' 'verification scenario must create or extract a tar backup'
 
 backup_line=$(grep -nE '^tar .*(-[cC]|--create)' "$CALL_LOG" | head -n 1 | cut -d: -f1)
-migration_line=$(grep -n '^docker ' "$CALL_LOG" | head -n 1 | cut -d: -f1)
+migration_line=$(grep -nE '^docker .*/pb/pocketbase migrate up' "$CALL_LOG" | head -n 1 | cut -d: -f1)
 restore_line=$(grep -nE '^tar .*(-[xX]|--extract)' "$CALL_LOG" | head -n 1 | cut -d: -f1)
 [[ -n "$backup_line" && -n "$migration_line" && -n "$restore_line" ]] || fail 'rollback ordering events were not logged'
 (( backup_line < migration_line )) || fail 'backup must be created before migration'

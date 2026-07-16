@@ -17,7 +17,9 @@ TEMP_DIR=
 PAYLOAD_FILE=
 MIGRATION_FILE=
 BACKUP_FILE=
+BACKUP_PARTIAL_FILE=
 FACTORY_REVIEW_IMAGE=${FACTORY_REVIEW_IMAGE:-}
+service_stop_attempted=0
 service_stopped=0
 backup_created=0
 migration_started=0
@@ -39,7 +41,17 @@ require_payload_parts() {
 }
 
 cleanup_temp_files() {
-  [[ -z ${TEMP_DIR:-} || ! -d $TEMP_DIR ]] || rm -rf -- "$TEMP_DIR"
+  if [[ -n ${TEMP_DIR:-} && -d $TEMP_DIR ]]; then
+    rm -rf -- "$TEMP_DIR" || return 1
+  fi
+  TEMP_DIR=
+}
+
+cleanup_partial_backup() {
+  if [[ -n ${BACKUP_PARTIAL_FILE:-} && -e $BACKUP_PARTIAL_FILE ]]; then
+    rm -f -- "$BACKUP_PARTIAL_FILE" || return 1
+  fi
+  BACKUP_PARTIAL_FILE=
 }
 
 reconstruct_payload() {
@@ -128,14 +140,24 @@ on_exit() {
   trap - EXIT INT TERM ERR
   set +e
   final_status=$original_status
-  if (( original_status != 0 && service_stopped && ! committed )); then
+  if (( ! backup_created )) && [[ -n ${BACKUP_FILE:-} && -f $BACKUP_FILE ]]; then
+    backup_created=1
+  fi
+  if (( original_status != 0 && service_stop_attempted && ! committed )); then
     if (( backup_created )); then
       restore_backup || final_status=1
     else
       start_and_verify_service || final_status=1
     fi
   fi
-  cleanup_temp_files
+  if ! cleanup_partial_backup; then
+    log 'ERROR: temporary partial backup cleanup failed.'
+    final_status=1
+  fi
+  if ! cleanup_temp_files; then
+    log 'ERROR: temporary restore files cleanup failed.'
+    final_status=1
+  fi
   exit "$final_status"
 }
 
@@ -155,11 +177,16 @@ main() {
   reconstruct_payload
   [[ -d $PB_DATA_DIR && -f $PB_DATA_DIR/data.db ]] || die "PocketBase data directory or data.db is missing: $PB_DATA_DIR"
 
+  service_stop_attempted=1
   compose stop "$SERVICE_NAME"
   service_stopped=1
   mkdir -p -- "$BACKUP_DIR"
   BACKUP_FILE="$BACKUP_DIR/pb_data-$(date +%s%N)-$$.tar.gz"
-  tar -czf "$BACKUP_FILE" -C "$(dirname -- "$PB_DATA_DIR")" "$(basename -- "$PB_DATA_DIR")"
+  BACKUP_PARTIAL_FILE="$BACKUP_FILE.partial"
+  tar -czf "$BACKUP_PARTIAL_FILE" -C "$(dirname -- "$PB_DATA_DIR")" "$(basename -- "$PB_DATA_DIR")"
+  tar -tzf "$BACKUP_PARTIAL_FILE" >/dev/null
+  mv -- "$BACKUP_PARTIAL_FILE" "$BACKUP_FILE"
+  BACKUP_PARTIAL_FILE=
   backup_created=1
 
   resolve_factory_review_image

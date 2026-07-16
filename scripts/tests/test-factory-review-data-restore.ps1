@@ -38,15 +38,28 @@ function Assert-ContentsReadOnlyPermissions {
     param([string]$Text)
 
     $permissionsBlock = Get-TopLevelYamlBlock $Text 'permissions'
-    $entries = @(
-        [regex]::Matches($permissionsBlock, '(?m)^[ ]{2}(?<name>[A-Za-z][A-Za-z_-]*)\s*:\s*(?<value>[^\r\n#]+?)\s*$') |
-            ForEach-Object {
-                [PSCustomObject]@{
-                    Name = $_.Groups['name'].Value
-                    Value = $_.Groups['value'].Value.Trim()
-                }
-            }
-    )
+    $entries = @()
+    foreach ($line in $permissionsBlock -split '\r?\n') {
+        if ($line.Trim().Length -eq 0) {
+            continue
+        }
+
+        if ($line -notmatch '^[ ]{2}(?<content>[^\r\n]*)$') {
+            Assert-True $false 'every permissions block line must have the expected indentation'
+        }
+
+        $content = $Matches['content'].Trim()
+        if ($content.Length -eq 0 -or $content.StartsWith('#')) {
+            continue
+        }
+
+        $entry = [regex]::Match($content, '^(?<name>[A-Za-z][A-Za-z_-]*)\s*:\s*(?<value>[^#\r\n]*?)(?:\s+#.*)?$')
+        Assert-True $entry.Success 'every non-comment permissions line must be parsed as a permission mapping'
+        $entries += [PSCustomObject]@{
+            Name = $entry.Groups['name'].Value
+            Value = $entry.Groups['value'].Value.Trim()
+        }
+    }
 
     Assert-True ($entries.Count -eq 1 -and $entries[0].Name -eq 'contents' -and $entries[0].Value -eq 'read') 'restore workflow permissions must contain only contents: read'
 }
@@ -183,6 +196,13 @@ try {
     $unsafePermissionsRejected = $true
 }
 Assert-True $unsafePermissionsRejected 'permissions parser must reject actions: write'
+$inlineCommentPermissionsRejected = $false
+try {
+    Assert-ContentsReadOnlyPermissions "permissions:`n  contents: read`n  actions: write # comment`n"
+} catch {
+    $inlineCommentPermissionsRejected = $true
+}
+Assert-True $inlineCommentPermissionsRejected 'permissions parser must reject actions: write with an inline comment'
 
 $checkoutActionSha = '11bd71901bbe5b1630ceea73d27597364c9af683'
 Assert-Match $workflowCodeText "(?ms)^\s*-\s*name:\s*Checkout selected ref\s*\r?\n\s*uses:\s*actions/checkout@$checkoutActionSha\s*\r?\n\s*with:\s*\r?\n\s*ref:\s*\$\{\{\s*github\.ref\s*\}\}\s*\r?\n\s*persist-credentials:\s*false\s*$" 'restore workflow must use a pinned selected-ref checkout without persisted credentials'

@@ -132,12 +132,26 @@ Assert-True (Test-Path -LiteralPath $restorePath -PathType Leaf) "restore script
 $scriptText = Get-Content -LiteralPath $restorePath -Raw
 $codeText = [regex]::Replace($scriptText, '(?m)^\s*#.*$', '')
 
-Assert-Match $codeText '(?m)^\s*set\s+-euo\s+pipefail\s*$' 'restore script must enable set -euo pipefail'
+$disableTraceIndex = First-MatchIndex $codeText '(?m)^\s*set\s+\+x\s*$'
+$strictModeIndex = First-MatchIndex $codeText '(?m)^\s*set\s+-Eeuo\s+pipefail\s*$'
+Assert-True ($disableTraceIndex -ge 0) 'restore script must disable inherited tracing before reading payload variables'
+Assert-True ($strictModeIndex -ge 0) 'restore script must enable set -Eeuo pipefail'
+Assert-True ($disableTraceIndex -lt $strictModeIndex) 'restore script must disable tracing before strict mode'
 $tracePattern = '(?im)^\s*set\s+-[A-Za-z]*x[A-Za-z]*\b'
 Assert-True ($codeText -notmatch $tracePattern) 'restore script must never enable shell tracing through combination flags containing x'
 Assert-True ($codeText -notmatch '(?m)^\s*set\s+-o\s+xtrace\b') 'restore script must never enable shell tracing with set -o xtrace'
 Assert-True ($codeText -notmatch '(?m)^\s*PS4\s*=') 'restore script must never configure shell tracing through PS4'
 Assert-Match $codeText '(?im)^\s*trap\b[^\r\n]*\bERR\b' 'restore script must register an ERR trap'
+Assert-Match $codeText '(?im)^\s*trap\b[^\r\n]*\bEXIT\b' 'restore script must register an EXIT transaction handler'
+Assert-Match $codeText '(?im)^\s*trap\b[^\r\n]*\bINT\b' 'restore script must handle INT'
+Assert-Match $codeText '(?im)^\s*trap\b[^\r\n]*\bTERM\b' 'restore script must handle TERM'
+Assert-Match $codeText 'docker\s+compose\s+-f\s+"\$COMPOSE_FILE"\s+--env-file\s+"\$ENV_FILE"' 'Compose calls must use the configured compose and environment files'
+Assert-Match $codeText '(?i)flock\s+-n' 'restore script must use a nonblocking flock'
+Assert-Match $codeText '(?i)docker\s+inspect' 'restore script must inspect container health'
+Assert-Match $codeText '(?i)compose\s+ps\s+-q' 'restore script must resolve the Compose container ID'
+Assert-True ($codeText -notmatch '127\.0\.0\.1:8090') 'restore script must not probe a host-local health endpoint'
+Assert-Match $codeText '(?i)PB_DATA_DIR=.*apps.*pb_data' 'restore script must use the production app pb_data directory'
+Assert-True ($codeText -notmatch '(?im)^\s*PB_DATA_DIR=\$\{PB_DATA_DIR') 'restore script must not guess PB_DATA_DIR layouts'
 
 $requireBody = Get-BashFunctionBody $codeText 'require_payload_parts'
 $mainBody = Get-BashFunctionBody $codeText 'main'
@@ -145,9 +159,9 @@ $reconstructBody = Get-BashFunctionBody $codeText 'reconstruct_payload'
 $verifyBody = Get-BashFunctionBody $codeText 'verify_snapshot_counts'
 Assert-Match $requireBody '(?i)payload|FACTORY_REVIEW_DATA_PART_|part_[123]' 'require_payload_parts must validate payload parts'
 Assert-Match $reconstructBody '(?i)sha-?256|sha256sum' 'reconstruct_payload must verify the payload SHA-256'
-Assert-Match $mainBody '(?i)(?:systemctl|docker\s+compose)[^\r\n]*\bstop\b' 'main must stop the factory-review service'
+Assert-Match $mainBody '(?i)compose\s+stop\s+"\$SERVICE_NAME"' 'main must stop the factory-review service through Compose'
 $reconstructCallIndex = First-MatchIndex $mainBody '(?im)^\s*reconstruct_payload\b'
-$stopIndex = First-MatchIndex $mainBody '(?i)(?:systemctl|docker\s+compose)[^\r\n]*\bstop\b'
+$stopIndex = First-MatchIndex $mainBody '(?i)compose\s+stop\s+"\$SERVICE_NAME"'
 Assert-True ($reconstructCallIndex -ge 0) 'main must call reconstruct_payload'
 Assert-True ($reconstructCallIndex -lt $stopIndex) 'main must verify the payload before stopping the service'
 
@@ -239,9 +253,9 @@ foreach ($securityPath in $securityScanPaths) {
 Assert-True ($codeText -notmatch $alternativeAdminReadPattern) 'restore script must not read alternate ADMIN_PASSWORD or PASSWORD variables'
 
 Assert-True (Test-Path -LiteralPath $bashTestPath -PathType Leaf) "behavior test is missing: $bashTestPath"
-$bash = Get-Command bash -ErrorAction SilentlyContinue
-Assert-True ($null -ne $bash) 'bash is required to run the behavior contract test'
-& $bash.Source --noprofile --norc $bashTestPath
+$bash = 'C:\Program Files\Git\bin\bash.exe'
+Assert-True (Test-Path -LiteralPath $bash -PathType Leaf) 'Git Bash is required to run the behavior contract test'
+& $bash -c 'export PATH=/usr/bin:/bin:$PATH; exec bash --noprofile --norc "$1"' _ $bashTestPath
 Assert-True ($LASTEXITCODE -eq 0) "behavior contract test failed with exit code $LASTEXITCODE"
 
 Write-Output 'PASS: factory review restore static and behavior contracts'

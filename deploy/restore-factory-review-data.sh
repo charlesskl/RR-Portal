@@ -1,60 +1,50 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set +x
+set -Eeuo pipefail
 
 SERVICE_NAME=factory-review
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd -- "$SCRIPT_DIR/.." && pwd)
 INSTALL_DIR=${INSTALL_DIR:-/opt/rr-portal}
 COMPOSE_FILE=${COMPOSE_FILE:-"$INSTALL_DIR/docker-compose.cloud.yml"}
-if [[ -z ${PB_DATA_DIR+x} ]]; then
-  if [[ -d "$INSTALL_DIR/pb_data" ]]; then
-    PB_DATA_DIR="$INSTALL_DIR/pb_data"
-  else
-    PB_DATA_DIR="$INSTALL_DIR/apps/PMC跟仓管/加工厂月度评审管理制度/pb_data"
-  fi
-fi
+ENV_FILE=${ENV_FILE:-"$INSTALL_DIR/.env.cloud.production"}
+PB_DATA_DIR="$INSTALL_DIR/apps/PMC跟仓管/加工厂月度评审管理制度/pb_data"
 BACKUP_DIR=${BACKUP_DIR:-"$INSTALL_DIR/backups/factory-review-data-restore"}
-HEALTH_URL=${FACTORY_REVIEW_HEALTH_URL:-http://127.0.0.1:8090/api/factory-review/health}
+LOCK_FILE=${FACTORY_REVIEW_RESTORE_LOCK_FILE:-/tmp/factory-review-data-restore.lock}
 MIGRATION_NAME=1790000000_restore_factory_data.js
 
-BACKUP_FILE=
-MIGRATION_FILE=
-PAYLOAD_FILE=
 TEMP_DIR=
+PAYLOAD_FILE=
+MIGRATION_FILE=
+BACKUP_FILE=
 FACTORY_REVIEW_IMAGE=${FACTORY_REVIEW_IMAGE:-}
-BACKUP_CREATED=0
+service_stopped=0
+backup_created=0
+migration_started=0
+committed=0
 
-log() {
-  printf '%s\n' "$*" >&2
-}
+log() { printf '%s\n' "$*" >&2; }
+die() { log "ERROR: $*"; return 1; }
 
-die() {
-  log "ERROR: $*"
-  return 1
+compose() {
+  docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" "$@"
 }
 
 require_payload_parts() {
   local name
   for name in FACTORY_REVIEW_DATA_PART_1_B64 FACTORY_REVIEW_DATA_PART_2_B64 FACTORY_REVIEW_DATA_PART_3_B64 FACTORY_REVIEW_DATA_SHA256; do
-    if [[ -z ${!name:-} ]]; then
-      die "missing payload value: $name"
-    fi
+    [[ -n ${!name:-} ]] || die "missing payload value: $name"
   done
-
   [[ $FACTORY_REVIEW_DATA_SHA256 =~ ^[0-9a-f]{64}$ ]] || die 'payload SHA-256 must be a lowercase hexadecimal digest'
 }
 
 cleanup_temp_files() {
-  if [[ -n ${TEMP_DIR:-} && -d $TEMP_DIR ]]; then
-    rm -rf -- "$TEMP_DIR"
-  fi
+  [[ -z ${TEMP_DIR:-} || ! -d $TEMP_DIR ]] || rm -rf -- "$TEMP_DIR"
 }
 
 reconstruct_payload() {
   local encoded_migration
-
   require_payload_parts
-
   TEMP_DIR=$(mktemp -d)
   PAYLOAD_FILE="$TEMP_DIR/restore-data-migration.js.gz"
   MIGRATION_FILE="$TEMP_DIR/$MIGRATION_NAME"
@@ -65,18 +55,32 @@ reconstruct_payload() {
   printf '%s  %s\n' "$FACTORY_REVIEW_DATA_SHA256" "$PAYLOAD_FILE" | sha256sum -c - >/dev/null
   gzip --decompress --stdout "$PAYLOAD_FILE" > "$MIGRATION_FILE"
   chmod 600 "$MIGRATION_FILE"
-
   grep -Fq 'const SNAPSHOT =' "$MIGRATION_FILE" || die 'migration payload has no snapshot declaration'
   grep -Fq 'migrate((app) =>' "$MIGRATION_FILE" || die 'migration payload has no migrate callback'
 }
 
 resolve_factory_review_image() {
   if [[ -z $FACTORY_REVIEW_IMAGE ]]; then
-    FACTORY_REVIEW_IMAGE=$(docker compose -f "$COMPOSE_FILE" images -q "$SERVICE_NAME")
-    if [[ -z $FACTORY_REVIEW_IMAGE ]]; then
-      FACTORY_REVIEW_IMAGE="${COMPOSE_PROJECT_NAME:-$(basename -- "$INSTALL_DIR")}-${SERVICE_NAME}"
-    fi
+    FACTORY_REVIEW_IMAGE=$(compose images -q "$SERVICE_NAME")
+    [[ -n $FACTORY_REVIEW_IMAGE ]] || FACTORY_REVIEW_IMAGE="${COMPOSE_PROJECT_NAME:-$(basename -- "$INSTALL_DIR")}-${SERVICE_NAME}"
   fi
+}
+
+wait_for_health() {
+  local container_id status attempt
+  container_id=$(compose ps -q "$SERVICE_NAME")
+  [[ -n $container_id ]] || die 'factory-review container was not found after start'
+  for attempt in $(seq 1 30); do
+    status=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}unhealthy{{end}}' "$container_id") || status=unhealthy
+    [[ $status == healthy ]] && return 0
+    sleep 2
+  done
+  die 'factory-review container did not become healthy'
+}
+
+start_and_verify_service() {
+  compose start "$SERVICE_NAME"
+  wait_for_health
 }
 
 verify_snapshot_counts() {
@@ -110,67 +114,60 @@ finally:
 PY
 }
 
-wait_for_health() {
-  local attempt
-  for attempt in $(seq 1 30); do
-    if curl --fail --silent --show-error "$HEALTH_URL" >/dev/null; then
-      return 0
-    fi
-    sleep 2
-  done
-  die 'factory-review did not become healthy after rollback'
+restore_backup() {
+  local failed_data_dir
+  compose stop "$SERVICE_NAME" || return 1
+  failed_data_dir="${PB_DATA_DIR}.failed-$(date +%s%N)-$$"
+  mv -- "$PB_DATA_DIR" "$failed_data_dir" || return 1
+  tar -xzf "$BACKUP_FILE" -C "$(dirname -- "$PB_DATA_DIR")" || return 1
+  start_and_verify_service
 }
 
-rollback() {
-  local failed_data_dir
-  local rollback_status=0
-
-  trap - ERR
+on_exit() {
+  local original_status=$? final_status
+  trap - EXIT INT TERM ERR
   set +e
-  if (( BACKUP_CREATED )); then
-    log 'Restore failed; rolling back factory-review data from the transaction backup.'
-    docker compose -f "$COMPOSE_FILE" stop "$SERVICE_NAME" || rollback_status=1
-    if [[ -e $PB_DATA_DIR ]]; then
-      failed_data_dir="${PB_DATA_DIR}.failed-$(date +%Y%m%d_%H%M%S)"
-      mv -- "$PB_DATA_DIR" "$failed_data_dir" || rollback_status=1
+  final_status=$original_status
+  if (( original_status != 0 && service_stopped && ! committed )); then
+    if (( backup_created )); then
+      restore_backup || final_status=1
+    else
+      start_and_verify_service || final_status=1
     fi
-    mkdir -p -- "$(dirname -- "$PB_DATA_DIR")" || rollback_status=1
-    tar -xzf "$BACKUP_FILE" -C "$(dirname -- "$PB_DATA_DIR")" || rollback_status=1
-    docker compose -f "$COMPOSE_FILE" start "$SERVICE_NAME" || rollback_status=1
-    wait_for_health || rollback_status=1
   fi
   cleanup_temp_files
-
-  if (( rollback_status )); then
-    log 'ERROR: rollback did not complete cleanly.'
-  fi
+  exit "$final_status"
 }
 
-handle_error() {
-  local status=$1
-  rollback
-  exit "$status"
+on_signal() {
+  exit "$1"
 }
 
 main() {
-  trap 'handle_error "$?"' ERR
+  trap on_exit EXIT
+  trap 'on_signal 130' INT
+  trap 'on_signal 143' TERM
+  trap 'exit "$?"' ERR
+
+  cd "$INSTALL_DIR"
+  exec 9>"$LOCK_FILE"
+  flock -n 9 || die 'another factory-review restore is already running'
   reconstruct_payload
+  [[ -d $PB_DATA_DIR && -f $PB_DATA_DIR/data.db ]] || die "PocketBase data directory or data.db is missing: $PB_DATA_DIR"
 
-  [[ -d $PB_DATA_DIR ]] || die "PocketBase data directory does not exist: $PB_DATA_DIR"
-  docker compose -f "$COMPOSE_FILE" stop "$SERVICE_NAME"
-
+  compose stop "$SERVICE_NAME"
+  service_stopped=1
   mkdir -p -- "$BACKUP_DIR"
-  BACKUP_FILE="$BACKUP_DIR/pb_data-$(date +%Y%m%d_%H%M%S).tar.gz"
+  BACKUP_FILE="$BACKUP_DIR/pb_data-$(date +%s%N)-$$.tar.gz"
   tar -czf "$BACKUP_FILE" -C "$(dirname -- "$PB_DATA_DIR")" "$(basename -- "$PB_DATA_DIR")"
-  BACKUP_CREATED=1
+  backup_created=1
 
   resolve_factory_review_image
+  migration_started=1
   docker run --rm -v "$PB_DATA_DIR:/pb/pb_data" -v "$MIGRATION_FILE:/pb/private-migrations/$MIGRATION_NAME:ro" "$FACTORY_REVIEW_IMAGE" /pb/pocketbase migrate up --dir=/pb/pb_data --migrationsDir=/pb/private-migrations
   verify_snapshot_counts
-
-  docker compose -f "$COMPOSE_FILE" start "$SERVICE_NAME"
-  wait_for_health
-  cleanup_temp_files
+  start_and_verify_service
+  committed=1
   log 'Factory-review data restore completed successfully.'
 }
 

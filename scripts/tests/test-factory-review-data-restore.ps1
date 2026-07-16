@@ -22,6 +22,43 @@ function Assert-Match {
     Assert-True ($Text -match $Pattern) $Message
 }
 
+function Get-TopLevelYamlBlock {
+    param(
+        [string]$Text,
+        [string]$Key
+    )
+
+    $escapedKey = [regex]::Escape($Key)
+    $block = [regex]::Match($Text, "(?m)^${escapedKey}:\s*\r?\n(?<body>(?:^[ ]{2}[^\r\n]*(?:\r?\n|$))*)")
+    Assert-True $block.Success "workflow must declare a top-level $Key block"
+    return $block.Groups['body'].Value
+}
+
+function Assert-ContentsReadOnlyPermissions {
+    param([string]$Text)
+
+    $permissionsBlock = Get-TopLevelYamlBlock $Text 'permissions'
+    $entries = @(
+        [regex]::Matches($permissionsBlock, '(?m)^[ ]{2}(?<name>[A-Za-z][A-Za-z_-]*)\s*:\s*(?<value>[^\r\n#]+?)\s*$') |
+            ForEach-Object {
+                [PSCustomObject]@{
+                    Name = $_.Groups['name'].Value
+                    Value = $_.Groups['value'].Value.Trim()
+                }
+            }
+    )
+
+    Assert-True ($entries.Count -eq 1 -and $entries[0].Name -eq 'contents' -and $entries[0].Value -eq 'read') 'restore workflow permissions must contain only contents: read'
+}
+
+function Get-RemoteRestoreScript {
+    param([string]$Text)
+
+    $scriptBlock = [regex]::Match($Text, '(?m)^[ ]{10}script:\s*\|\s*\r?\n(?<body>(?:^[ ]{12}[^\r\n]*(?:\r?\n|$))*)')
+    Assert-True $scriptBlock.Success 'restore workflow must define an SSH script block'
+    return [regex]::Replace($scriptBlock.Groups['body'].Value, '(?m)^[ ]{12}', '')
+}
+
 function First-MatchIndex {
     param(
         [string]$Text,
@@ -138,7 +175,14 @@ Assert-True $triggerBlock.Success 'restore workflow must declare an on block'
 $triggerNames = @([regex]::Matches($triggerBlock.Groups['body'].Value, '(?m)^[ \t]+(?<name>[A-Za-z_][A-Za-z0-9_-]*)\s*:') | ForEach-Object { $_.Groups['name'].Value })
 Assert-True ($triggerNames.Count -eq 1 -and $triggerNames[0] -eq 'workflow_dispatch') 'workflow_dispatch must be the only restore workflow trigger'
 Assert-Match $workflowCodeText '(?im)^\s*timeout-minutes\s*:\s*20\s*$' 'restore workflow must have a 20-minute job timeout'
-Assert-Match $workflowCodeText '(?ms)^permissions:\s*\r?\n\s*contents:\s*read\s*$' 'restore workflow must grant only contents read permission'
+Assert-ContentsReadOnlyPermissions $workflowCodeText
+$unsafePermissionsRejected = $false
+try {
+    Assert-ContentsReadOnlyPermissions "permissions:`n  contents: read`n  actions: write`n"
+} catch {
+    $unsafePermissionsRejected = $true
+}
+Assert-True $unsafePermissionsRejected 'permissions parser must reject actions: write'
 
 $checkoutActionSha = '11bd71901bbe5b1630ceea73d27597364c9af683'
 Assert-Match $workflowCodeText "(?ms)^\s*-\s*name:\s*Checkout selected ref\s*\r?\n\s*uses:\s*actions/checkout@$checkoutActionSha\s*\r?\n\s*with:\s*\r?\n\s*ref:\s*\$\{\{\s*github\.ref\s*\}\}\s*\r?\n\s*persist-credentials:\s*false\s*$" 'restore workflow must use a pinned selected-ref checkout without persisted credentials'
@@ -173,6 +217,30 @@ Assert-Match $workflowCodeText '(?im)^\s*test\s+"\$\(git\s+rev-parse\s+HEAD\)"\s
 Assert-Match $workflowCodeText '(?im)^\s*git\s+ls-tree\s+-r\s+--name-only\s+"\$EXPECTED_COMMIT"\s+--\s+deploy/restore-factory-review-data\.sh\s*\|\s*grep\s+-Fx\s+[''\"]deploy/restore-factory-review-data\.sh[''\"]\s*$' 'restore workflow must confirm the dispatched commit tracks the restore script'
 Assert-Match $workflowCodeText '(?im)^\s*git\s+diff\s+--quiet\s+"\$EXPECTED_COMMIT"\s+--\s+deploy/restore-factory-review-data\.sh\s*$' 'restore workflow must refuse a restore script modified relative to the dispatched commit'
 Assert-Match $workflowCodeText '(?im)^\s*bash\s+deploy/restore-factory-review-data\.sh\s*$' 'restore workflow must invoke the restore script'
+$remoteRestoreScript = Get-RemoteRestoreScript $workflowCodeText
+$remoteStepPatterns = [ordered]@{
+    fetch = '(?im)^\s*git\s+fetch\s+origin\s+main\s*$'
+    originCommit = '(?im)^\s*test\s+"\$\(git\s+rev-parse\s+origin/main\)"\s*=\s*"\$EXPECTED_COMMIT"\s*$'
+    dirtyCheck = '(?im)^\s*test\s+-z\s+"\$\(git\s+status\s+--porcelain\)"\s*$'
+    switchMain = '(?im)^\s*git\s+switch\s+main\s*$'
+    ancestor = '(?im)^\s*git\s+merge-base\s+--is-ancestor\s+HEAD\s+"\$EXPECTED_COMMIT"\s*$'
+    fastForward = '(?im)^\s*git\s+merge\s+--ff-only\s+"\$EXPECTED_COMMIT"\s*$'
+    headCheck = '(?im)^\s*test\s+"\$\(git\s+rev-parse\s+HEAD\)"\s*=\s*"\$EXPECTED_COMMIT"\s*$'
+    trackedScript = '(?im)^\s*git\s+ls-tree\s+-r\s+--name-only\s+"\$EXPECTED_COMMIT"\s+--\s+deploy/restore-factory-review-data\.sh\s*\|\s*grep\s+-Fx\s+[''\"]deploy/restore-factory-review-data\.sh[''\"]\s*$'
+    scriptDiff = '(?im)^\s*git\s+diff\s+--quiet\s+"\$EXPECTED_COMMIT"\s+--\s+deploy/restore-factory-review-data\.sh\s*$'
+    restore = '(?im)^\s*bash\s+deploy/restore-factory-review-data\.sh\s*$'
+}
+$remoteStepIndices = [ordered]@{}
+foreach ($stepName in $remoteStepPatterns.Keys) {
+    $remoteStepIndices[$stepName] = First-MatchIndex $remoteRestoreScript $remoteStepPatterns[$stepName]
+    Assert-True ($remoteStepIndices[$stepName] -ge 0) "remote restore script must include $stepName"
+}
+$remoteStepNames = @($remoteStepPatterns.Keys)
+for ($index = 1; $index -lt $remoteStepNames.Count; $index++) {
+    $previousStep = $remoteStepNames[$index - 1]
+    $currentStep = $remoteStepNames[$index]
+    Assert-True ($remoteStepIndices[$previousStep] -lt $remoteStepIndices[$currentStep]) "remote restore script must run $previousStep before $currentStep"
+}
 Assert-True ($workflowCodeText -notmatch '(?im)^\s*git\s+pull\b') 'restore workflow must not use unsafe git pull'
 Assert-True ($workflowCodeText -notmatch '(?im)^\s*git\s+checkout\b') 'restore workflow must not use git checkout to replace local state'
 Assert-True ($workflowCodeText -notmatch '(?im)^\s*git\s+reset\b') 'restore workflow must not reset or overwrite server state'
@@ -183,6 +251,28 @@ $payloadRedirectionPattern = "(?im)^\s*[^\r\n]*$payloadVariablePattern[^\r\n]*(?
 Assert-True ($workflowCodeText -notmatch $payloadSinkPattern) 'restore workflow must not disclose payload variables through shell commands'
 Assert-True ($workflowCodeText -notmatch $payloadRedirectionPattern) 'restore workflow must not disclose payload variables through redirection'
 Assert-True ($workflowCodeText -notmatch '(?im)^\s*(?:export\s+)?FACTORY_REVIEW_DATA_(?:PART_[123]_B64|SHA256)\s*=') 'restore workflow must not persist payload variables through shell assignments'
+
+$workflowUnsafeDisclosurePatterns = @(
+    '(?im)^\s*set\s+-[A-Za-z]*x[A-Za-z]*\b',
+    '(?im)^\s*set\s+-o\s+xtrace\b',
+    '(?im)^\s*bash\b[^\r\n]*\B-x\b',
+    '(?im)^\s*declare\s+-p\b',
+    '\$\{![A-Za-z_][A-Za-z0-9_]*\}'
+)
+foreach ($unsafePattern in $workflowUnsafeDisclosurePatterns) {
+    Assert-True ($workflowCodeText -notmatch $unsafePattern) 'restore workflow must not enable tracing, enumerate variables, or use indirect expansion'
+}
+$workflowUnsafeDisclosureFixtures = @(
+    @{ Pattern = $workflowUnsafeDisclosurePatterns[0]; Text = 'set -x' },
+    @{ Pattern = $workflowUnsafeDisclosurePatterns[0]; Text = 'set -euxo pipefail' },
+    @{ Pattern = $workflowUnsafeDisclosurePatterns[1]; Text = 'set -o xtrace' },
+    @{ Pattern = $workflowUnsafeDisclosurePatterns[2]; Text = 'bash -x deploy/restore-factory-review-data.sh' },
+    @{ Pattern = $workflowUnsafeDisclosurePatterns[3]; Text = 'declare -p FACTORY_REVIEW_DATA_PART_1_B64' },
+    @{ Pattern = $workflowUnsafeDisclosurePatterns[4]; Text = 'printf "%s\\n" "${!payload_name}"' }
+)
+foreach ($fixture in $workflowUnsafeDisclosureFixtures) {
+    Assert-True ($fixture.Text -match $fixture.Pattern) 'workflow disclosure fixture must be rejected'
+}
 
 Assert-True (Test-Path -LiteralPath $restorePath -PathType Leaf) "restore script is missing: $restorePath"
 $scriptText = Get-Content -LiteralPath $restorePath -Raw

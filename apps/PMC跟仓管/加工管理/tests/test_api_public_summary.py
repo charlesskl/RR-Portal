@@ -130,7 +130,7 @@ def test_public_summary_uses_outsource_balance_direction(client):
     departments = {row["department"]: row for row in data["department_totals"]}
 
     assert data["totals"] == {"inbound": 60, "outbound": 100, "balance": 40}
-    assert materials["PCBA板"]["balance"] == 40
+    assert materials["77794-PCBA板"]["balance"] == 40
     assert departments["东莞加工厂利鸿"]["balance"] == 40
 
 

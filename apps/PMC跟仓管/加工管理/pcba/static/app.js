@@ -79,6 +79,14 @@ function isOutsource() {
   return ME && OUTSOURCE_DEPARTMENTS.includes(ME.department);
 }
 
+function isLihong() {
+  return ME && ME.department === OUTSOURCE_DEPARTMENT;
+}
+
+function isHongya() {
+  return ME && ME.department === HONGYA_DEPARTMENT;
+}
+
 function shouldHideLocationForType(type) {
   return type === 'inbound_raw'
     || (ME && ME.department === SEMI_FINISHED_DEPARTMENT && type !== 'semi_outbound')
@@ -118,6 +126,9 @@ function typeLabel(type) {
     if (type === 'semi_inbound') return '入库';
     if (type === 'semi_outbound') return '出库';
   }
+  if (isLihong()) {
+    if (type === 'semi_finished') return '半成品出库';
+  }
   if (isOutsource()) {
     if (type === 'finished') return '成品入库';
     if (type === 'semi_finished') return '半成品入库';
@@ -146,6 +157,12 @@ function entryTypeOptionsForDepartment() {
     return [
       {value: 'semi_inbound', label: '入库'},
       {value: 'semi_outbound', label: '出库'},
+    ];
+  }
+  if (isLihong()) {
+    return [
+      {value: 'issue', label: '领料'},
+      {value: 'semi_finished', label: '半成品出库'},
     ];
   }
   if (isOutsource()) {
@@ -191,6 +208,8 @@ function setEntryType(type) {
 }
 
 function entryMaterialOptions() {
+  if (isLihong()) return MATERIALS.filter(m => m.name === PCBA_MATERIAL);
+  if (isHongya()) return MATERIALS.filter(m => m.name === NFC_MATERIAL);
   const preferred = [NFC_MATERIAL, PCBA_MATERIAL];
   const byName = new Map(MATERIALS.map(m => [m.name, m]));
   const ordered = preferred
@@ -406,12 +425,13 @@ async function loadMaterials() {
     return a.id - b.id;
   });
   MATERIALS = mats;
+  const entryMats = entryMaterialOptions();
 
-  el('material').innerHTML = mats
+  el('material').innerHTML = entryMats
     .map(m => `<option value="${esc(m.name)}">${esc(m.name)}</option>`)
     .join('');
-  if (!mats.some(m => m.name === ACTIVE_ENTRY_MATERIAL)) {
-    ACTIVE_ENTRY_MATERIAL = mats[0] ? mats[0].name : '';
+  if (!entryMats.some(m => m.name === ACTIVE_ENTRY_MATERIAL)) {
+    ACTIVE_ENTRY_MATERIAL = entryMats[0] ? entryMats[0].name : '';
   }
   el('material').value = ACTIVE_ENTRY_MATERIAL;
   renderEntryMaterialTabs();
@@ -998,6 +1018,12 @@ async function loadSummary() {
       `<tbody><tr><td>${fmt(s.raw.inbound)}</td><td>${fmt(s.raw.outbound)}</td><td>${fmt(s.raw.balance)}</td></tr></tbody>`;
     return;
   }
+  if (isLihong()) {
+    el('sumTable').innerHTML =
+      '<thead><tr><th>领料总数</th><th>半成品出库总数</th><th>应存数</th></tr></thead>' +
+      `<tbody><tr><td>${fmt(s.raw.issue)}</td><td>${fmt(s.raw.semi_finished_inbound)}</td><td>${fmt(s.raw.balance)}</td></tr></tbody>`;
+    return;
+  }
   if (isOutsource()) {
     el('sumTable').innerHTML =
       '<thead><tr><th>领料总数</th><th>成品入库总数</th><th>半成品入库总数</th><th>应存数</th></tr></thead>' +
@@ -1230,6 +1256,8 @@ async function importFile(input, endpoint, errId, afterImport) {
     const parts = [`导入成功：${fmt(count)} 条`];
     if (data.monthly_totals) parts.push(`更新当月汇总 ${fmt(data.monthly_totals)} 项`);
     if (data.skipped) parts.push(`跳过 ${fmt(data.skipped)} 条重复数据`);
+    if (data.skipped_documents) parts.push(`跳过 ${fmt(data.skipped_documents)} 张重复单据`);
+    if (data.replaced_documents) parts.push(`覆盖 ${fmt(data.replaced_documents)} 张单据`);
     setMessage(errId, parts.join('，'), true);
     if (afterImport) await afterImport();
   } else {
@@ -1238,12 +1266,112 @@ async function importFile(input, endpoint, errId, afterImport) {
   }
 }
 
+function onRecordImportFileSelected(input) {
+  updateFileName('recordImportFile', 'recordImportFileName');
+  el('recordImportCheckResult').style.display = 'none';
+  el('recordImportCheckResult').innerHTML = '';
+  setMessage('entryErr', '', false);
+}
+
+function selectedRecordImportFile() {
+  return el('recordImportFile').files && el('recordImportFile').files[0];
+}
+
+function recordImportFormData(includeMode) {
+  const file = selectedRecordImportFile();
+  if (!file) {
+    setMessage('entryErr', '请先选择 Excel 文件', false);
+    return null;
+  }
+  const form = new FormData();
+  form.append('file', file);
+  if (includeMode) form.append('mode', el('recordImportMode').value || 'skip');
+  return form;
+}
+
+function setRecordImportBusy(busy) {
+  const button = el('recordImportBtn');
+  button.disabled = busy;
+  button.textContent = busy ? '导入中...' : '开始导入';
+}
+
+async function refreshAfterRecordImport() {
+  cancelEdit();
+  await loadRecords();
+  if (el('summary').style.display !== 'none') await loadSummary();
+}
+
+async function checkRecordImport() {
+  const form = recordImportFormData(false);
+  if (!form) return;
+  const r = await api('/api/records/import-check', {method: 'POST', body: form});
+  if (!r.ok) {
+    const e = await r.json().catch(() => ({}));
+    setMessage('entryErr', e.detail || '查重失败', false);
+    return;
+  }
+  const data = await r.json();
+  const duplicates = data.duplicate_documents || [];
+  const result = el('recordImportCheckResult');
+  result.style.display = '';
+  result.innerHTML = `
+    <div class="import-check-summary">
+      <strong>查重结果</strong>
+      <span>文件单据 ${fmt(data.documents)} 张</span>
+      <span>重复 ${fmt(data.duplicates)} 张</span>
+      ${data.blank_doc_rows ? `<span>无单号明细 ${fmt(data.blank_doc_rows)} 条</span>` : ''}
+    </div>
+    ${duplicates.length ? `<div class="duplicate-doc-list">${duplicates.map(row => `
+      <span title="文件 ${fmt(row.file_rows)} 条，已有 ${fmt(row.existing_rows)} 条">
+        ${esc(row.doc_no)}${row.target_department ? ` · ${esc(row.target_department)}` : ''}
+      </span>`).join('')}</div>` : '<p>没有发现重复单据，可以直接导入。</p>'}
+  `;
+  setMessage('entryErr', duplicates.length ? '查重完成，请选择导入模式' : '查重完成，没有重复单据', true);
+}
+
+async function importSelectedRecords() {
+  const mode = el('recordImportMode').value || 'skip';
+  if (mode === 'replace' && !confirm('覆盖导入会替换文件中同单号的原明细及自动联动记录，确定继续吗？')) {
+    return;
+  }
+  const form = recordImportFormData(true);
+  if (!form) return;
+  setRecordImportBusy(true);
+  try {
+    const r = await api('/api/records/import', {method: 'POST', body: form});
+    if (!r.ok) {
+      const e = await r.json().catch(() => ({}));
+      setMessage('entryErr', e.detail || '导入失败', false);
+      return;
+    }
+    const data = await r.json();
+    const parts = [`导入成功：${fmt(data.created || 0)} 条`];
+    if (data.monthly_totals) parts.push(`更新当月汇总 ${fmt(data.monthly_totals)} 项`);
+    if (data.skipped_documents) parts.push(`跳过 ${fmt(data.skipped_documents)} 张重复单据`);
+    if (data.replaced_documents) parts.push(`覆盖 ${fmt(data.replaced_documents)} 张单据`);
+    const message = parts.join('，');
+    setMessage('entryErr', message, true);
+    const result = el('recordImportCheckResult');
+    result.style.display = '';
+    result.innerHTML = `<div class="import-check-summary"><strong>导入完成</strong><span>${esc(message)}</span></div>`;
+    try {
+      await refreshAfterRecordImport();
+    } catch (error) {
+      if (error.message === 'unauth') throw error;
+      setMessage('entryErr', `${message}；导入已完成，但列表刷新失败，请手动刷新页面`, false);
+    }
+  } catch (error) {
+    if (error.message !== 'unauth') {
+      setMessage('entryErr', '导入失败，请检查网络后重试', false);
+    }
+  } finally {
+    setRecordImportBusy(false);
+  }
+}
+
 async function importRecords(input) {
-  await importFile(input, '/api/records/import', 'entryErr', async () => {
-    cancelEdit();
-    await loadRecords();
-    if (el('summary').style.display !== 'none') await loadSummary();
-  });
+  onRecordImportFileSelected(input);
+  await importSelectedRecords();
 }
 
 function exportMaterials() {

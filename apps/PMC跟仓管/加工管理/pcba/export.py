@@ -101,13 +101,16 @@ def build_workbook(
     """summary: compute_summary 的返回；detail_records: 全部记录 dict 列表
     （含 rec_type/location_name/rec_date/doc_no/material/sticker_type/qty/remark）。"""
     wb = Workbook()
+    lihong_mode = outsource_mode and outsource_label == "东莞加工厂利鸿"
 
     # ---- 总表 ----
     ws = wb.active
     ws.title = "总表"
     ws.append(["唱片机管理系统明细"])
     raw = summary["raw"]
-    if outsource_mode:
+    if lihong_mode:
+        ws.append(["领料总数", "半成品出库总数", "应存数"])
+    elif outsource_mode:
         ws.append(["成品入库总数", "半成品入库总数", "入库合计"])
     elif include_supplier:
         _build_supplier_monthly_summary(ws, detail_records, location_names)
@@ -117,7 +120,13 @@ def build_workbook(
             ws.append([row["location"], row["issue"], row["finished"], row["balance"], ""])
         st = summary["subtotal"]
         ws.append(["小计：", st["issue"], st["finished"], st["balance"], ""])
-    if outsource_mode:
+    if lihong_mode:
+        ws.append([
+            raw.get("issue", 0),
+            raw.get("semi_finished_inbound", 0),
+            raw["balance"],
+        ])
+    elif outsource_mode:
         ws.append([
             raw.get("finished_inbound", 0),
             raw.get("semi_finished_inbound", 0),
@@ -166,6 +175,14 @@ def build_workbook(
         semi_outbound = [r for r in detail_records if r["rec_type"] == "semi_outbound"]
         detail_sheet("半成品入库", semi_inbound, "入仓数")
         detail_sheet("半成品出库", semi_outbound, "出库数")
+        buf = io.BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+        return buf
+
+    if lihong_mode:
+        semi_finished = [r for r in detail_records if r["rec_type"] == "semi_finished"]
+        detail_sheet(f"{outsource_label}半成品出库", semi_finished, "出库数")
         buf = io.BytesIO()
         wb.save(buf)
         buf.seek(0)

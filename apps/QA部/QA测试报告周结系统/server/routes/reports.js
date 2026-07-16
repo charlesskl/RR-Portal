@@ -13,7 +13,7 @@ const REPORTS_FILE = path.join(DATA_PATH, 'reports.json');
 const UPLOAD_PATH = path.join(__dirname, '..', 'uploads');
 
 function urlToLocal(url) {
-  // 兼容子路径前缀: /uploads/images/<id>/<file> 或 /qa-weekly-report/uploads/images/...
+  // 兼容 /uploads/... 与 /qa-weekly-report/uploads/... 等子路径前缀。
   const m = url && url.match(/\/uploads\/images\/([^/]+)\/([^/]+)$/);
   if (!m) return null;
   return path.join(UPLOAD_PATH, 'images', m[1], m[2]);
@@ -87,7 +87,12 @@ router.get('/', (req, res) => {
     year: r.year,
     week: r.week,
     totalRows: r.totalRows,
-    failCount: r.failCount
+    failCount: r.failCount,
+    passCount: r.passCount || 0,
+    productNo: r.productNo || '',
+    productName: r.productName || '',
+    stage: r.stage || '',
+    reportDate: r.reportDate || r.uploadedAt
   }));
   res.json({ ok: true, list: out });
 });

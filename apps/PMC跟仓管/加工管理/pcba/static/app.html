@@ -55,12 +55,23 @@
       </div>
       <div class="section-actions">
         <button class="ghost-btn" onclick="downloadRecordTemplate()">下载模板</button>
-        <button class="primary-btn slim" onclick="chooseImportFile('recordImportFile')">导入Excel</button>
         <button class="ghost-btn" onclick="exportRecords()">导出Excel</button>
-        <input id="recordImportFile" type="file" accept=".xlsx" onchange="importRecords(this)" hidden>
         <span id="editBanner" class="status-pill subtle"></span>
       </div>
     </div>
+
+    <div class="record-import-panel">
+      <input id="recordImportFile" type="file" accept=".xlsx" onchange="onRecordImportFileSelected(this)" hidden>
+      <button class="ghost-btn" onclick="chooseImportFile('recordImportFile')">选择Excel</button>
+      <span id="recordImportFileName" class="file-name">未选择文件</span>
+      <select id="recordImportMode" title="导入模式">
+        <option value="skip">跳过重复</option>
+        <option value="replace">覆盖导入</option>
+      </select>
+      <button class="ghost-btn" onclick="checkRecordImport()">查重</button>
+      <button id="recordImportBtn" class="primary-btn slim" onclick="importSelectedRecords()">开始导入</button>
+    </div>
+    <div id="recordImportCheckResult" class="import-check-result" style="display:none"></div>
 
     <div id="entryTypeTabs" class="entry-type-tabs"></div>
     <div id="entryMaterialTabs" class="entry-type-tabs material-tabs"></div>
@@ -310,6 +321,6 @@
   </section>
 </main>
 
-  <script src="/static/app.js?v=28"></script>
+  <script src="/static/app.js?v=31"></script>
 </body>
 </html>

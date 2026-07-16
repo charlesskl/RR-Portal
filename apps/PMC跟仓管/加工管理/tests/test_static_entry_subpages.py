@@ -60,6 +60,24 @@ def test_entry_page_exposes_clear_and_bulk_delete_controls():
     assert "/api/records/clear" in js
 
 
+def test_record_import_success_refreshes_records_and_shows_busy_state():
+    html = (ROOT / "pcba/static/app.html").read_text(encoding="utf-8")
+    js = (ROOT / "pcba/static/app.js").read_text(encoding="utf-8")
+
+    assert 'id="recordImportBtn"' in html
+    assert "function setRecordImportBusy(busy)" in js
+    assert "async function refreshAfterRecordImport()" in js
+    assert "await refreshAfterRecordImport();" in js
+    assert "await (async () =>" not in js
+
+
+def test_record_import_refresh_failure_does_not_report_import_failure():
+    js = (ROOT / "pcba/static/app.js").read_text(encoding="utf-8")
+
+    assert "导入已完成，但列表刷新失败，请手动刷新页面" in js
+    assert "try {\n      await refreshAfterRecordImport();\n    } catch" in js
+
+
 def test_admin_department_switcher_controls_exist():
     html = (ROOT / "pcba/static/app.html").read_text(encoding="utf-8")
     js = (ROOT / "pcba/static/app.js").read_text(encoding="utf-8")
@@ -95,6 +113,35 @@ def test_entry_tabs_bind_clicks_without_inline_material_arguments():
     assert 'data-entry-material="${esc(mat.name)}"' in js
     assert "addEventListener('click', () => setEntryMaterial" in js
     assert "onclick=\"setEntryMaterial('${esc(mat.name)}')\"" not in js
+
+
+def test_lihong_entry_uses_semifinished_outbound_without_finished_entry():
+    js = (ROOT / "pcba/static/app.js").read_text(encoding="utf-8")
+
+    assert "function isLihong()" in js
+    assert "if (isLihong()) {\n    if (type === 'semi_finished') return '半成品出库';\n  }" in js
+    assert (
+        "if (isLihong()) {\n"
+        "    return [\n"
+        "      {value: 'issue', label: '领料'},\n"
+        "      {value: 'semi_finished', label: '半成品出库'},\n"
+        "    ];\n"
+        "  }"
+    ) in js
+    assert "<th>领料总数</th><th>半成品出库总数</th><th>应存数</th>" in js
+
+
+def test_lihong_entry_only_exposes_pcba_material():
+    js = (ROOT / "pcba/static/app.js").read_text(encoding="utf-8")
+
+    assert "if (isLihong()) return MATERIALS.filter(m => m.name === PCBA_MATERIAL);" in js
+
+
+def test_hongya_entry_only_exposes_nfc_material():
+    js = (ROOT / "pcba/static/app.js").read_text(encoding="utf-8")
+
+    assert "function isHongya()" in js
+    assert "if (isHongya()) return MATERIALS.filter(m => m.name === NFC_MATERIAL);" in js
 
 
 def test_location_dropdown_hides_current_department():

@@ -197,11 +197,11 @@ def test_assembly_summary_subtracts_semi_finished(client):
 
 def test_semi_finished_department_summary_uses_warehouse_balance(client):
     admin_login(client, "碟片半成品")
-    hongya = loc_id(client, "东莞加工厂鸿亚")
+    lihong = loc_id(client, "东莞加工厂利鸿")
     client.post("/api/records", json={
         "rec_type": "semi_inbound", "material": "PCBA板", "qty": 80})
     client.post("/api/records", json={
-        "rec_type": "semi_outbound", "location_id": hongya,
+        "rec_type": "semi_outbound", "location_id": lihong,
         "material": "PCBA板", "qty": 30})
 
     s = client.get("/api/summary").json()
@@ -212,19 +212,31 @@ def test_semi_finished_department_summary_uses_warehouse_balance(client):
     assert s["subtotal"]["finished"] == 0
 
 
-def test_outsource_summary_counts_finished_and_semi_finished_inbound(client):
+def test_lihong_summary_uses_issue_minus_semifinished_outbound(client):
     admin_login(client, "东莞加工厂利鸿")
+    lid = loc_id(client, "碟片半成品")
+    from pcba import db
+
+    conn = db.get_conn()
+    conn.execute(
+        "INSERT INTO records(rec_type, material, qty, department, created_by) "
+        "VALUES (?, ?, ?, ?, ?)",
+        ("finished", "PCBA板", 999, "东莞加工厂利鸿", 1),
+    )
+    conn.commit()
+    conn.close()
     client.post("/api/records", json={
-        "rec_type": "finished", "material": "PCBA板", "qty": 70})
+        "rec_type": "issue", "location_id": lid, "material": "PCBA板", "qty": 70})
     client.post("/api/records", json={
-        "rec_type": "semi_finished", "material": "NFC贴纸", "qty": 30})
+        "rec_type": "semi_finished", "material": "77794-PCBA板", "qty": 30})
 
     s = client.get("/api/summary").json()
-    assert s["raw"]["finished_inbound"] == 70
+    assert s["raw"]["issue"] == 70
+    assert s["raw"]["finished_inbound"] == 0
     assert s["raw"]["semi_finished_inbound"] == 30
-    assert s["raw"]["inbound"] == 100
-    assert s["raw"]["outbound"] == 0
-    assert s["raw"]["balance"] == 100
+    assert s["raw"]["inbound"] == 30
+    assert s["raw"]["outbound"] == 70
+    assert s["raw"]["balance"] == 40
     assert s["subtotal"]["issue"] == 0
     assert s["subtotal"]["finished"] == 0
 
@@ -286,4 +298,3 @@ def test_xinshao_summary_uses_issue_minus_finished_balance(client):
 def test_summary_requires_login(client):
     r = client.get("/api/summary")
     assert r.status_code == 401
-

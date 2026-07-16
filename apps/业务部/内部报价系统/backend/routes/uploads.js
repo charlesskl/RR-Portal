@@ -111,6 +111,25 @@ router.post('/mold-sheet', requireAuth, memUpload.single('file'), async (req, re
   }
 });
 
+// POST /api/uploads/hardware-sheet  五金/外购件报价单 → 返回 items[]
+const { parseWorkbook: parseHardwareWorkbook } = require('../services/parseHardwareSheet');
+router.post('/hardware-sheet', requireAuth, memUpload.single('file'), async (req, res) => {
+  if (!['engineering', 'sales'].includes(req.user.dept) && req.user.role !== 'admin') {
+    return res.status(403).json({ error: '仅 工程/业务/超级管理员 可上传' });
+  }
+  if (!req.file) return res.status(400).json({ error: '缺少文件' });
+  if (!/\.(xls|xlsx)$/i.test(req.file.originalname)) {
+    return res.status(400).json({ error: '当前只支持 .xls/.xlsx' });
+  }
+  try {
+    const result = await parseHardwareWorkbook(req.file.buffer);
+    if (result.error) return res.status(422).json(result);
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ error: '解析失败: ' + e.message });
+  }
+});
+
 // POST /api/uploads/sewing-sheet  车缝报价单 xlsx → 返回 groups[]
 const { parseWorkbook: parseSewingWorkbook } = require('../services/parseSewingSheet');
 router.post('/sewing-sheet', requireAuth, memUpload.single('file'), async (req, res) => {

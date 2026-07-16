@@ -478,7 +478,7 @@ def _record_type_from_import(value, department):
         SUPPLIER_DEPARTMENT: {"入库": "inbound_raw", "来料入库": "inbound_raw", "出库": "issue", "领料": "issue"},
         SEMI_FINISHED_DEPARTMENT: {"入库": "semi_inbound", "半成品入库": "semi_inbound", "出库": "semi_outbound", "半成品出库": "semi_outbound"},
         ASSEMBLY_DEPARTMENT: {"领料": "issue", "成品入库": "finished", "半成品入库": "semi_finished"},
-        OUTSOURCE_DEPARTMENT: {"领料": "issue", "成品入库": "finished", "半成品入库": "semi_finished"},
+        OUTSOURCE_DEPARTMENT: {"领料": "issue", "半成品出库": "semi_finished", "半成品入库": "semi_finished"},
         HONGYA_DEPARTMENT: {"领料": "issue", "成品入库": "finished", "半成品入库": "semi_finished"},
         HEYUAN_DEPARTMENT: {"领料": "issue", "成品入库": "finished"},
         SHAOYANG_DEPARTMENT: {"领料": "issue", "成品入库": "finished"},
@@ -590,6 +590,8 @@ def _legacy_workbook_year(wb):
     for ws in wb.worksheets:
         for row in ws.iter_rows():
             for cell in row:
+                if isinstance(cell.value, (int, float)):
+                    continue
                 rec_date = _legacy_excel_date(cell.value)
                 if rec_date:
                     year = date.fromisoformat(rec_date).year
@@ -714,6 +716,13 @@ def _is_legacy_assembly_workbook(wb):
     )
 
 
+def _is_legacy_assembly_pcba_workbook(wb):
+    return (
+        "成品入仓明细" in wb.sheetnames
+        and any("领料明细" in name for name in wb.sheetnames)
+    )
+
+
 def _is_legacy_heyuan_workbook(wb):
     return (
         "成品入仓明细" in wb.sheetnames
@@ -745,6 +754,27 @@ def _legacy_int(value, row_no, field, allow_blank=True):
         raise HTTPException(status_code=400, detail=f"第{row_no}行：{field}必须是数字")
 
 
+def _legacy_semi_finished_sticker_rows(ws, header_row):
+    if header_row:
+        return [
+            (row_no, _cell_text(ws.cell(row_no, 1).value))
+            for row_no in range(header_row + 1, ws.max_row + 1)
+            if "#NFC" in _cell_text(ws.cell(row_no, 1).value)
+        ]
+    rows = [
+        (row_no, _cell_text(ws.cell(row_no, 1).value))
+        for row_no in range(1, ws.max_row + 1)
+        if "#NFC" in _cell_text(ws.cell(row_no, 1).value)
+    ]
+    if rows:
+        return rows
+    if "36#CD" in ws.title:
+        for row_no in range(1, ws.max_row + 1):
+            if _cell_text(ws.cell(row_no, 1).value) == "数量":
+                return [(row_no, "36#NFC贴纸")]
+    return []
+
+
 def _parse_legacy_semi_finished_workbook(conn, wb, department):
     if department != SEMI_FINISHED_DEPARTMENT:
         raise HTTPException(status_code=400, detail="半成品台账只能在碟片半成品部门导入")
@@ -758,7 +788,8 @@ def _parse_legacy_semi_finished_workbook(conn, wb, department):
         if not rec_type:
             continue
         header_row = _find_legacy_item_header_row(ws)
-        if not header_row:
+        sticker_rows = _legacy_semi_finished_sticker_rows(ws, header_row)
+        if not sticker_rows:
             continue
 
         location_id = None
@@ -767,14 +798,14 @@ def _parse_legacy_semi_finished_workbook(conn, wb, department):
                 conn, _legacy_location_from_sheet(ws.title), 1
             )
         detail_columns = _legacy_detail_columns(ws)
-        monthly_col = _legacy_monthly_column(ws, header_row, monthly_header)
-        opening_stock_columns = _legacy_opening_stock_columns(ws, header_row)
-        for row_no in range(header_row + 1, ws.max_row + 1):
-            sticker_type = _cell_text(ws.cell(row_no, 1).value)
-            if not sticker_type:
-                continue
-            if "#NFC" not in sticker_type:
-                continue
+        monthly_col = (
+            _legacy_monthly_column(ws, header_row, monthly_header)
+            if header_row else 2
+        )
+        opening_stock_columns = (
+            _legacy_opening_stock_columns(ws, header_row) if header_row else []
+        )
+        for row_no, sticker_type in sticker_rows:
             sticker_type = _normalize_sticker_type(conn, NFC_MATERIAL, sticker_type)
             key = (NFC_MATERIAL, sticker_type)
 
@@ -791,14 +822,19 @@ def _parse_legacy_semi_finished_workbook(conn, wb, department):
                             "material": NFC_MATERIAL,
                             "sticker_type": sticker_type,
                             "opening_stock": 0,
+                            "assembly_opening_stock": 0,
+                            "hongya_opening_stock": 0,
                             "monthly_inbound": 0,
                             "monthly_outbound": 0,
                         },
                     )
                     monthly[monthly_key] += monthly_qty
 
-            opening_stock_candidate = 0
-            has_opening_stock = False
+            opening_stock_candidates = {
+                "opening_stock": 0,
+                "assembly_opening_stock": 0,
+                "hongya_opening_stock": 0,
+            }
             for opening_col in opening_stock_columns:
                 opening_qty = _legacy_int(
                     ws.cell(row_no, opening_col).value,
@@ -806,23 +842,38 @@ def _parse_legacy_semi_finished_workbook(conn, wb, department):
                     "上月库存数",
                 )
                 if opening_qty is not None:
-                    has_opening_stock = True
-                    opening_stock_candidate += opening_qty
-            if has_opening_stock:
+                    header_text = _cell_text(ws.cell(header_row, opening_col).value)
+                    opening_key = "opening_stock"
+                    if rec_type == "semi_inbound" and "鸿亚" in header_text:
+                        opening_key = "hongya_opening_stock"
+                    elif rec_type == "semi_inbound" and (
+                        "装配" in header_text or "东莞车间" in header_text
+                    ):
+                        opening_key = "assembly_opening_stock"
+                    opening_stock_candidates[opening_key] += opening_qty
+            if any(opening_stock_candidates.values()):
                 monthly = monthly_totals.setdefault(
                     key,
                     {
                         "material": NFC_MATERIAL,
                         "sticker_type": sticker_type,
                         "opening_stock": 0,
+                        "assembly_opening_stock": 0,
+                        "hongya_opening_stock": 0,
                         "monthly_inbound": 0,
                         "monthly_outbound": 0,
                     },
                 )
-                monthly["opening_stock"] = max(
-                    monthly["opening_stock"],
-                    opening_stock_candidate,
-                )
+                for opening_key, opening_qty in opening_stock_candidates.items():
+                    monthly[opening_key] = max(monthly[opening_key], opening_qty)
+                if rec_type == "semi_inbound":
+                    inbound_opening_stock = (
+                        monthly["assembly_opening_stock"]
+                        + monthly["hongya_opening_stock"]
+                    )
+                    monthly["opening_stock"] = max(
+                        monthly["opening_stock"], inbound_opening_stock
+                    )
 
             for col_no, rec_date, doc_no in detail_columns:
                 qty = _legacy_int(ws.cell(row_no, col_no).value, row_no, "数量")
@@ -853,10 +904,60 @@ def _parse_legacy_assembly_workbook(conn, wb, department):
     bodies = []
     location_id = _location_id_from_name(conn, "东莞车间", 1)
     workbook_year = _legacy_workbook_year(wb)
+    summary_month = None
     sheet_types = {
         "领料明细": "issue",
         "半成品入仓明细": "semi_finished",
     }
+
+    if "总表" in wb.sheetnames:
+        total_ws = wb["总表"]
+        for col_no in range(1, total_ws.max_column + 1):
+            header_text = re.sub(
+                r"\s+", "", _cell_text(total_ws.cell(1, col_no).value)
+            )
+            match = re.search(r"(\d{1,2})月领料", header_text)
+            if match:
+                month = int(match.group(1))
+                if month in SUMMARY_MONTHS:
+                    summary_month = month
+                    break
+        header_row = _find_legacy_item_header_row(total_ws)
+        opening_col = None
+        for col_no in range(1, min(total_ws.max_column, 10) + 1):
+            if "截止" in _cell_text(total_ws.cell(header_row or 2, col_no).value):
+                opening_col = col_no
+                break
+        if header_row and opening_col:
+            opening_label = _cell_text(total_ws.cell(header_row, opening_col).value)
+            opening_date = _legacy_cutoff_date(opening_label, workbook_year)
+            for row_no in range(header_row + 1, total_ws.max_row + 1):
+                sticker_type = _cell_text(total_ws.cell(row_no, 1).value)
+                if not sticker_type or "#NFC" not in sticker_type:
+                    continue
+                qty = _legacy_int(
+                    total_ws.cell(row_no, opening_col).value,
+                    row_no,
+                    opening_label,
+                )
+                if qty is None or qty <= 0:
+                    continue
+                sticker_type = _normalize_sticker_type(
+                    conn, NFC_MATERIAL, sticker_type
+                )
+                body = RecordIn(
+                    rec_type="issue",
+                    location_id=location_id,
+                    rec_date=opening_date,
+                    doc_no=opening_label,
+                    material=NFC_MATERIAL,
+                    sticker_type=sticker_type,
+                    qty=qty,
+                    remark="总表期初领料导入",
+                    summary_month=6,
+                )
+                _validate_record(body, department)
+                bodies.append(body)
 
     for sheet_name, rec_type in sheet_types.items():
         if sheet_name not in wb.sheetnames:
@@ -884,12 +985,98 @@ def _parse_legacy_assembly_workbook(conn, wb, department):
                     sticker_type=sticker_type,
                     qty=qty,
                     remark=f"{ws.title}导入",
+                    summary_month=summary_month,
                 )
                 _validate_record(body, department)
                 bodies.append(body)
 
     if not bodies:
         raise HTTPException(status_code=400, detail="东莞车间台账没有可导入的数据")
+    return bodies
+
+
+def _parse_legacy_assembly_pcba_workbook(conn, wb, department):
+    if department != ASSEMBLY_DEPARTMENT:
+        raise HTTPException(status_code=400, detail="东莞车间台账只能在东莞车间部门导入")
+
+    bodies = []
+    location_id = _location_id_from_name(conn, ASSEMBLY_DEPARTMENT, 1)
+    for ws in wb.worksheets:
+        if "领料明细" not in ws.title:
+            continue
+        headers = _legacy_header_map(ws)
+        for row_no in range(2, ws.max_row + 1):
+            material = _normalize_pcba_material(
+                _legacy_header_value(ws, headers, row_no, "物料名称")
+            )
+            if material != PCBA_MATERIAL:
+                continue
+            qty = _legacy_int(
+                _legacy_header_value(ws, headers, row_no, "领料数"),
+                row_no,
+                "领料数",
+            )
+            if qty is None or qty <= 0:
+                continue
+            date_value = _legacy_header_value(ws, headers, row_no, "日期")
+            body = RecordIn(
+                rec_type="issue",
+                location_id=location_id,
+                rec_date=_outsource_date_value(date_value),
+                doc_no=_legacy_doc_no(
+                    _legacy_header_value(ws, headers, row_no, "领料编号"),
+                    date_value,
+                    f"{ws.title}-{row_no}",
+                ),
+                material=PCBA_MATERIAL,
+                qty=qty,
+                remark=_first_value(
+                    {"备注": _legacy_header_value(ws, headers, row_no, "备注")},
+                    "备注",
+                ) or f"{ws.title}导入",
+            )
+            _validate_record(body, department)
+            bodies.append(body)
+
+    ws = wb["成品入仓明细"]
+    headers = _legacy_header_map(ws)
+    for row_no in range(2, ws.max_row + 1):
+        qty = _legacy_int(
+            _legacy_header_value(ws, headers, row_no, "数量（pcs）", "数量"),
+            row_no,
+            "数量",
+        )
+        if qty is None or qty <= 0:
+            continue
+        contract = _cell_text(_legacy_header_value(ws, headers, row_no, "合同号"))
+        item_no = _cell_text(_legacy_header_value(ws, headers, row_no, "货号"))
+        product_name = _cell_text(
+            _legacy_header_value(ws, headers, row_no, "品名/规格")
+        )
+        body = RecordIn(
+            rec_type="finished",
+            location_id=location_id,
+            rec_date=_outsource_date_value(
+                _legacy_header_value(ws, headers, row_no, "日期")
+            ),
+            doc_no=_cell_text(
+                _legacy_header_value(ws, headers, row_no, "送货单号")
+            ),
+            material=PCBA_MATERIAL,
+            qty=qty,
+            remark=_first_value(
+                {"备注": _legacy_header_value(ws, headers, row_no, "备注")},
+                "备注",
+            ) or "成品入仓明细导入",
+            contract_no=contract or None,
+            item_no=item_no or None,
+            product_name=product_name or None,
+        )
+        _validate_record(body, department)
+        bodies.append(body)
+
+    if not bodies:
+        raise HTTPException(status_code=400, detail="东莞车间PCBA台账没有可导入的数据")
     return bodies
 
 
@@ -915,6 +1102,17 @@ def _normalize_pcba_material(value=None):
     if not text or "PCBA" in text or "PCB" in text or "主板" in text:
         return PCBA_MATERIAL
     return text
+
+
+def _normalize_material_filter(material, department):
+    material = _clean_optional(material)
+    if (
+        department == OUTSOURCE_DEPARTMENT
+        and material
+        and _normalize_pcba_material(material) == PCBA_MATERIAL
+    ):
+        return PCBA_MATERIAL
+    return material
 
 
 def _outsource_date_value(value):
@@ -1015,9 +1213,13 @@ def _parse_legacy_outsource_workbook(conn, wb, department):
                 ),
                 material=PCBA_MATERIAL,
                 qty=qty,
-                remark=" ".join(
-                    part for part in [contract, item_no, name, "半成品入仓明细导入"] if part
-                ),
+                remark=_first_value(
+                    {"备注": _legacy_header_value(inbound_ws, headers, row_no, "备注")},
+                    "备注",
+                ) or None,
+                contract_no=contract or None,
+                item_no=item_no or None,
+                product_name=name or None,
             )
             _validate_record(body, department)
             bodies.append(body)
@@ -1032,11 +1234,16 @@ def _legacy_outsource_nfc_detail_columns(ws, default_year=None):
     if not header_row:
         return []
     columns = []
+    date_occurrences = {}
     for col_no in range(1, ws.max_column + 1):
         rec_date = _legacy_cutoff_date(ws.cell(1, col_no).value, default_year)
         if not rec_date:
             continue
-        doc_no = _cell_text(ws.cell(header_row, col_no).value) or rec_date
+        doc_no = _cell_text(ws.cell(header_row, col_no).value)
+        if not doc_no:
+            occurrence = date_occurrences.get(rec_date, 0) + 1
+            date_occurrences[rec_date] = occurrence
+            doc_no = f"{rec_date}#{occurrence:02d}"
         columns.append((col_no, rec_date, doc_no))
     return columns
 
@@ -1087,22 +1294,46 @@ def _parse_legacy_outsource_nfc_workbook(conn, wb, department):
     return bodies
 
 
+def _legacy_heyuan_workbook_year(wb):
+    for ws in wb.worksheets:
+        if "明细" not in ws.title:
+            continue
+        headers = _legacy_header_map(ws)
+        date_col = headers.get("日期")
+        if not date_col:
+            continue
+        for row_no in range(2, ws.max_row + 1):
+            rec_date = _legacy_excel_date(ws.cell(row_no, date_col).value)
+            if rec_date:
+                return date.fromisoformat(rec_date).year
+    return date.today().year
+
+
 def _parse_legacy_heyuan_workbook(conn, wb, department):
     if department != HEYUAN_DEPARTMENT:
         raise HTTPException(status_code=400, detail="河源华兴台账只能在河源华兴部门导入")
 
     bodies = []
+    workbook_year = _legacy_heyuan_workbook_year(wb)
     location_id = _location_id_from_name(conn, HEYUAN_DEPARTMENT, 1)
     for ws in wb.worksheets:
         if "领料明细" not in ws.title:
             continue
         headers = _legacy_header_map(ws)
+        section_month = None
         for row_no in range(2, ws.max_row + 1):
             material = _cell_text(_legacy_header_value(ws, headers, row_no, "物料名称"))
-            if not material or "小计" in material:
+            if "小计" in material:
+                month_match = re.search(r"(\d{1,2})月", material)
+                if month_match:
+                    month = int(month_match.group(1)) + 1
+                    section_month = month if month in SUMMARY_MONTHS else None
                 continue
-            material = _normalize_pcba_material(material)
-            if material != PCBA_MATERIAL:
+            if not material:
+                continue
+            is_cd = "36#" in material and ("CD" in material.upper() or "唱片" in material)
+            material = NFC_MATERIAL if is_cd else _normalize_pcba_material(material)
+            if material not in (PCBA_MATERIAL, NFC_MATERIAL):
                 continue
             qty = _legacy_int(
                 _legacy_header_value(ws, headers, row_no, "领料数"),
@@ -1115,17 +1346,24 @@ def _parse_legacy_heyuan_workbook(conn, wb, department):
             doc_no = _cell_text(_legacy_header_value(ws, headers, row_no, "领料编号"))
             if not doc_no:
                 doc_no = _cell_text(date_value)
+            rec_date = _outsource_date_value(date_value)
+            summary_month = section_month
+            if is_cd and not rec_date and "6月" in _cell_text(date_value):
+                rec_date = date(workbook_year or date.today().year, 6, 27).isoformat()
+                summary_month = 6
             body = RecordIn(
                 rec_type="issue",
                 location_id=location_id,
-                rec_date=_outsource_date_value(date_value),
+                rec_date=rec_date,
                 doc_no=doc_no,
                 material=material,
+                sticker_type="36#NFC贴纸" if is_cd else None,
                 qty=qty,
                 remark=_first_value(
                     {"备注": _legacy_header_value(ws, headers, row_no, "备注")},
                     "备注",
                 ) or f"{ws.title}导入",
+                summary_month=summary_month,
             )
             if qty > 0:
                 _validate_record(body, department)
@@ -1134,9 +1372,16 @@ def _parse_legacy_heyuan_workbook(conn, wb, department):
     if "成品入仓明细" in wb.sheetnames:
         ws = wb["成品入仓明细"]
         headers = _legacy_header_map(ws)
+        section_month = None
         for row_no in range(2, ws.max_row + 1):
             name = _cell_text(_legacy_header_value(ws, headers, row_no, "品名/规格"))
-            if not name or "小计" in name:
+            if "小计" in name:
+                month_match = re.search(r"(\d{1,2})月", name)
+                if month_match:
+                    month = int(month_match.group(1)) + 1
+                    section_month = month if month in SUMMARY_MONTHS else None
+                continue
+            if not name:
                 continue
             qty = _legacy_int(
                 _legacy_header_value(ws, headers, row_no, "数量（pcs）", "数量"),
@@ -1147,6 +1392,9 @@ def _parse_legacy_heyuan_workbook(conn, wb, department):
                 continue
             contract = _cell_text(_legacy_header_value(ws, headers, row_no, "合同号"))
             item_no = _cell_text(_legacy_header_value(ws, headers, row_no, "货号"))
+            source_remark = _cell_text(
+                _legacy_header_value(ws, headers, row_no, "备注")
+            )
             body = RecordIn(
                 rec_type="finished",
                 location_id=location_id,
@@ -1156,9 +1404,11 @@ def _parse_legacy_heyuan_workbook(conn, wb, department):
                 doc_no=_cell_text(_legacy_header_value(ws, headers, row_no, "送货单号")),
                 material=PCBA_MATERIAL,
                 qty=qty,
-                remark=" ".join(
-                    part for part in [contract, item_no, name, "成品入仓明细导入"] if part
-                ),
+                remark=source_remark or "成品入仓明细导入",
+                contract_no=contract or None,
+                item_no=item_no or None,
+                product_name=name or None,
+                summary_month=section_month,
             )
             _validate_record(body, department)
             bodies.append(body)
@@ -1486,7 +1736,9 @@ def _record_duplicate_id(conn, body, user):
         "SELECT id FROM records WHERE department=? AND rec_type=? "
         "AND COALESCE(rec_date, '')=? AND COALESCE(doc_no, '')=? "
         "AND material=? AND COALESCE(sticker_type, '')=? AND qty=? "
-        "AND COALESCE(location_id, 0)=? AND COALESCE(remark, '')=?",
+        "AND COALESCE(location_id, 0)=? AND COALESCE(remark, '')=? "
+        "AND COALESCE(contract_no, '')=? AND COALESCE(item_no, '')=? "
+        "AND COALESCE(product_name, '')=?",
         (
             user["department"],
             body.rec_type,
@@ -1497,6 +1749,9 @@ def _record_duplicate_id(conn, body, user):
             body.qty,
             body.location_id or 0,
             body.remark or "",
+            body.contract_no or "",
+            body.item_no or "",
+            body.product_name or "",
         ),
     ).fetchone()
     if row:
@@ -1506,7 +1761,9 @@ def _record_duplicate_id(conn, body, user):
             "SELECT id FROM records WHERE department=? AND rec_type=? "
             "AND COALESCE(rec_date, '')='' AND COALESCE(doc_no, '')='' "
             "AND material=? AND COALESCE(sticker_type, '')=? AND qty=? "
-            "AND COALESCE(location_id, 0)=? AND COALESCE(remark, '')=?",
+            "AND COALESCE(location_id, 0)=? AND COALESCE(remark, '')=? "
+            "AND COALESCE(contract_no, '')=? AND COALESCE(item_no, '')=? "
+            "AND COALESCE(product_name, '')=?",
             (
                 user["department"],
                 body.rec_type,
@@ -1515,6 +1772,9 @@ def _record_duplicate_id(conn, body, user):
                 body.qty,
                 body.location_id or 0,
                 body.remark or "",
+                body.contract_no or "",
+                body.item_no or "",
+                body.product_name or "",
             ),
         ).fetchone()
         if legacy_row:
@@ -1537,11 +1797,11 @@ def _insert_record_body(conn, body, user, skip_duplicate=False):
     cur = conn.execute(
         "INSERT INTO records(rec_type, location_id, rec_date, doc_no, "
         "material, sticker_type, qty, remark, supplier, po_no, customer_name, "
-        "summary_month, department, created_by) "
-        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "contract_no, item_no, product_name, summary_month, department, created_by) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (body.rec_type, body.location_id, body.rec_date, body.doc_no,
          body.material, sticker_type, body.qty, body.remark, supplier, po_no, customer_name,
-         body.summary_month,
+         body.contract_no, body.item_no, body.product_name, body.summary_month,
          user["department"], user["id"]),
     )
     return cur.lastrowid
@@ -1551,10 +1811,14 @@ def _upsert_semi_finished_monthly_totals(conn, department, rows):
     for row in rows:
         conn.execute(
             "INSERT INTO semi_finished_monthly_totals("
-            "department, material, sticker_type, opening_stock, monthly_inbound, monthly_outbound"
-            ") VALUES (?,?,?,?,?,?) "
+            "department, material, sticker_type, opening_stock, "
+            "assembly_opening_stock, hongya_opening_stock, "
+            "monthly_inbound, monthly_outbound"
+            ") VALUES (?,?,?,?,?,?,?,?) "
             "ON CONFLICT(department, material, sticker_type) DO UPDATE SET "
             "opening_stock=excluded.opening_stock, "
+            "assembly_opening_stock=excluded.assembly_opening_stock, "
+            "hongya_opening_stock=excluded.hongya_opening_stock, "
             "monthly_inbound=excluded.monthly_inbound, "
             "monthly_outbound=excluded.monthly_outbound, "
             "updated_at=datetime('now')",
@@ -1563,6 +1827,8 @@ def _upsert_semi_finished_monthly_totals(conn, department, rows):
                 row["material"],
                 row["sticker_type"],
                 int(row["opening_stock"] or 0),
+                int(row.get("assembly_opening_stock") or 0),
+                int(row.get("hongya_opening_stock") or 0),
                 int(row["monthly_inbound"] or 0),
                 int(row["monthly_outbound"] or 0),
             ),
@@ -1955,12 +2221,24 @@ class RecordIn(BaseModel):
     supplier: Optional[str] = None
     po_no: Optional[str] = None
     customer_name: Optional[str] = None
+    contract_no: Optional[str] = None
+    item_no: Optional[str] = None
+    product_name: Optional[str] = None
     summary_month: Optional[int] = None
 
 
 def _validate_record(body: RecordIn, department: Optional[str] = None):
     if body.rec_type not in VALID_TYPES:
         raise HTTPException(status_code=400, detail="类型无效")
+    if department == OUTSOURCE_DEPARTMENT:
+        normalized_material = _normalize_pcba_material(body.material)
+        if normalized_material != PCBA_MATERIAL:
+            raise HTTPException(status_code=400, detail="利鸿只允许使用77794-PCBA板")
+        body.material = normalized_material
+    if department == HONGYA_DEPARTMENT and body.material != NFC_MATERIAL:
+        raise HTTPException(status_code=400, detail="鸿亚只允许使用NFC贴纸")
+    if department == OUTSOURCE_DEPARTMENT and body.rec_type == "finished":
+        raise HTTPException(status_code=400, detail="利鸿只能录入领料/半成品出库")
     if _is_outsource_department(department) and body.rec_type not in ("issue", "finished", "semi_finished"):
         raise HTTPException(status_code=400, detail="东莞加工厂只能录入领料/成品/半成品入库")
     if department == HEYUAN_DEPARTMENT and body.rec_type not in ("issue", "finished"):
@@ -2365,6 +2643,8 @@ def record_import_template(_user=Depends(current_user)):
 def _record_export_type_label(rec_type, department):
     if rec_type == "issue":
         return "出库" if department == SUPPLIER_DEPARTMENT else "领料"
+    if department == OUTSOURCE_DEPARTMENT and rec_type == "semi_finished":
+        return "半成品出库"
     labels = {
         "inbound_raw": "入库",
         "finished": "成品入库",
@@ -2415,16 +2695,23 @@ def _export_date(value):
 
 
 def _legacy_opening_record_date(row):
-    if row.get("rec_date"):
-        return None
     text = f"{row.get('doc_no') or ''} {row.get('remark') or ''}"
-    if "期初" in text:
+    if "期初" not in text:
+        return None
+    rec_date = row.get("rec_date")
+    if not rec_date:
         return date(date.today().year, 6, 27).isoformat()
+    try:
+        parsed = date.fromisoformat(str(rec_date))
+    except ValueError:
+        return None
+    if parsed.year > date.today().year + 1:
+        return parsed.replace(year=date.today().year).isoformat()
     return None
 
 
 def _record_export_date(row):
-    return row.get("rec_date") or _legacy_opening_record_date(row)
+    return _legacy_opening_record_date(row) or row.get("rec_date")
 
 
 def _export_month(value):
@@ -2632,9 +2919,9 @@ def _pcba_inbound_detail_sheet(wb, title, records):
         ws.append([
             _record_export_date(row),
             row.get("doc_no"),
-            None,
-            "77794",
-            row.get("material") or PCBA_MATERIAL,
+            row.get("contract_no"),
+            row.get("item_no") or "77794",
+            row.get("product_name") or row.get("material") or PCBA_MATERIAL,
             row.get("qty"),
             row.get("remark"),
         ])
@@ -2646,12 +2933,15 @@ def _pcba_inbound_detail_sheet(wb, title, records):
     ws.column_dimensions["G"].width = 22
 
 
-def _outsource_pcba_export_workbook(records):
+def _outsource_pcba_export_workbook(records, department=None):
     wb = Workbook()
     ws = wb.active
     ws.title = "总表"
     issue = [row for row in records if row["rec_type"] == "issue"]
-    finished = [row for row in records if row["rec_type"] == "finished"]
+    finished = [
+        row for row in records
+        if row["rec_type"] == "finished" and department != OUTSOURCE_DEPARTMENT
+    ]
     semi_finished = [row for row in records if row["rec_type"] == "semi_finished"]
     headers = ["物料名称", None, "累计出入数", "截6月月结"]
     headers += [f"{month}月" for month in EXPORT_MONTHS]
@@ -2678,26 +2968,226 @@ def _outsource_pcba_export_workbook(records):
     return wb
 
 
+def _heyuan_issue_detail_sheet(wb, title, records, material_label, month_slots):
+    ws = wb.create_sheet(title)
+    ws.append(["日期", "领料编号", "物料名称", "领料数", "备注"])
+    records = sorted(
+        records,
+        key=lambda row: (
+            _record_month(row),
+            _record_export_date(row) or "",
+            _natural_text_sort_key(row.get("doc_no")),
+        ),
+    )
+    row_no = 2
+    styled_rows = {1}
+    months = [6, *EXPORT_MONTHS]
+    for month in months:
+        month_records = [row for row in records if _record_month(row) == month]
+        if month not in month_slots and not month_records:
+            continue
+        capacity = max(month_slots.get(month, 0), len(month_records))
+        for row in month_records:
+            display_date = _record_export_date(row)
+            if month == 6 and _cell_text(row.get("doc_no")) == "月结":
+                display_date = "6月"
+            ws.cell(row_no, 1).value = display_date
+            ws.cell(row_no, 2).value = row.get("doc_no")
+            ws.cell(row_no, 3).value = material_label
+            ws.cell(row_no, 4).value = row.get("qty")
+            ws.cell(row_no, 5).value = row.get("remark")
+            styled_rows.add(row_no)
+            row_no += 1
+        row_no += capacity - len(month_records)
+        ws.cell(row_no, 3).value = f"{month}月小计："
+        ws.cell(row_no, 4).value = _sum_qty(month_records) or 0
+        styled_rows.add(row_no)
+        row_no += 1
+
+    max_row = max(1, row_no - 1)
+    _apply_legacy_sheet_style(ws, max_row, 5)
+    for blank_row in set(range(2, max_row + 1)) - styled_rows:
+        for cell in ws[blank_row][:5]:
+            cell.border = Border()
+    ws.column_dimensions["A"].width = 10.5
+    ws.column_dimensions["B"].width = 22.125
+    return ws
+
+
+def _heyuan_summary_section(ws, header_row, label, pcba_records, cd_records):
+    headers = ["物料名称", label, "截6月月结"]
+    headers += [f"{month}月" for month in EXPORT_MONTHS]
+    headers.append("备注")
+    for col_no, value in enumerate(headers, start=1):
+        ws.cell(header_row, col_no).value = value
+    for row_no, material_label, records in (
+        (header_row + 1, "PCBA主板", pcba_records),
+        (header_row + 2, "36#唱片CD", cd_records),
+    ):
+        month_values = _supplier_pcba_month_sums(records)
+        ws.cell(row_no, 1).value = material_label
+        ws.cell(row_no, 2).value = sum(month_values) or 0
+        for col_no, value in enumerate(month_values, start=3):
+            ws.cell(row_no, col_no).value = value or None
+
+
+def _heyuan_balance_records(issue, finished):
+    return issue + [
+        {**row, "qty": -int(row.get("qty") or 0)} for row in finished
+    ]
+
+
+def _heyuan_finished_detail_sheet(wb, records):
+    ws = wb.create_sheet("成品入仓明细")
+    ws.append(["日期", "送货单号", "合同号", "货号", "品名/规格", "数量（pcs）", "备注"])
+    records = sorted(
+        records,
+        key=lambda row: (
+            _record_month(row),
+            _record_export_date(row) or "",
+            _natural_text_sort_key(row.get("doc_no")),
+        ),
+    )
+    for row in records:
+        ws.append([
+            _record_export_date(row),
+            row.get("doc_no"),
+            row.get("contract_no"),
+            row.get("item_no") or "77794",
+            row.get("product_name") or row.get("material") or PCBA_MATERIAL,
+            row.get("qty"),
+            row.get("remark"),
+        ])
+    if records:
+        ws.append([None, None, None, None, "小计：", _sum_qty(records), None])
+    _apply_legacy_sheet_style(ws, ws.max_row, 7)
+    ws.column_dimensions["A"].width = 12.5
+    ws.column_dimensions["C"].width = 17
+    ws.column_dimensions["D"].width = 16
+    ws.column_dimensions["F"].width = 12.5
+    return ws
+
+
 def _heyuan_pcba_export_workbook(records):
     wb = Workbook()
     ws = wb.active
     ws.title = "总表"
     issue = [row for row in records if row["rec_type"] == "issue"]
     finished = [row for row in records if row["rec_type"] == "finished"]
-    headers = ["物料名称", "领料总数", "截6月月结"]
+    pcba_issue = [row for row in issue if row.get("material") != NFC_MATERIAL]
+    cd_issue = [
+        row for row in issue
+        if row.get("material") == NFC_MATERIAL
+        and row.get("sticker_type") == "36#NFC贴纸"
+    ]
+    pcba_finished = [row for row in finished if row.get("material") != NFC_MATERIAL]
+    cd_finished = [
+        row for row in finished
+        if row.get("material") == NFC_MATERIAL
+        and row.get("sticker_type") == "36#NFC贴纸"
+    ]
+
+    _heyuan_summary_section(ws, 1, "领料总数", pcba_issue, cd_issue)
+    _heyuan_summary_section(ws, 5, "成品总数", pcba_finished, cd_finished)
+    _heyuan_summary_section(
+        ws,
+        9,
+        "理论结存数",
+        _heyuan_balance_records(pcba_issue, pcba_finished),
+        _heyuan_balance_records(cd_issue, cd_finished),
+    )
+    _apply_legacy_sheet_style(ws, 11, 10)
+    for blank_row in (4, 8):
+        for cell in ws[blank_row][:10]:
+            cell.border = Border()
+    ws.column_dimensions["A"].width = 11.125
+    ws.column_dimensions["B"].width = 13.375
+    ws.column_dimensions["C"].width = 11.125
+    ws.column_dimensions["D"].width = 18
+
+    _heyuan_issue_detail_sheet(
+        wb, "36#CD领料明细", cd_issue, "36#唱片CD", {6: 1, 7: 14}
+    )
+    _heyuan_issue_detail_sheet(
+        wb, "PCB板领料明细", pcba_issue, PCBA_MATERIAL, {6: 3, 7: 16}
+    )
+    _heyuan_finished_detail_sheet(wb, finished)
+    return wb
+
+
+def _assembly_pcba_summary_section(ws, header_row, label, records):
+    headers = ["物料名称", label, "截6月月结"]
     headers += [f"{month}月" for month in EXPORT_MONTHS]
     headers.append("备注")
-    ws.append(headers)
-    ws.append(["PCBA主板", _sum_qty(issue), *_supplier_pcba_month_sums(issue), None])
-    if finished:
-        ws.append(["成品入仓总数", _sum_qty(finished), *_supplier_pcba_month_sums(finished), None])
-    _apply_legacy_sheet_style(ws, ws.max_row, len(headers))
+    for col_no, value in enumerate(headers, start=1):
+        ws.cell(header_row, col_no).value = value
+
+    month_sums = _supplier_pcba_month_sums(records)
+    ws.cell(header_row + 1, 1).value = "PCBA主板"
+    ws.cell(header_row + 1, 2).value = _sum_qty(records)
+    for col_no, value in enumerate(month_sums, start=3):
+        ws.cell(header_row + 1, col_no).value = value or None
+    ws.cell(header_row + 2, 1).value = "36#唱片CD"
+    ws.cell(header_row + 2, 2).value = 0
+
+
+def _assembly_pcba_issue_sheet(wb, title, records):
+    ws = wb.create_sheet(title)
+    ws.append(["日期", "领料编号", "物料名称", "领料数", "备注"])
+    for row in records:
+        ws.append([
+            _record_export_date(row),
+            row.get("doc_no"),
+            "PCBA主板",
+            row.get("qty"),
+            row.get("remark"),
+        ])
+    ws.append([None, None, "小计：", _sum_qty(records), None])
+    _apply_legacy_sheet_style(ws, ws.max_row, 5)
+    ws.column_dimensions["A"].width = 20
+    ws.column_dimensions["E"].width = 20
+
+
+def _assembly_pcba_finished_sheet(wb, records):
+    ws = wb.create_sheet("成品入仓明细")
+    ws.append(["日期", "送货单号", "合同号", "货号", "品名/规格", "数量（pcs）", "备注"])
+    for row in records:
+        ws.append([
+            _record_export_date(row),
+            row.get("doc_no"),
+            row.get("contract_no"),
+            row.get("item_no"),
+            row.get("product_name"),
+            row.get("qty"),
+            row.get("remark"),
+        ])
+    _apply_legacy_sheet_style(ws, ws.max_row, 7)
+    ws.column_dimensions["A"].width = 20
+    ws.column_dimensions["B"].width = 18
+    ws.column_dimensions["E"].width = 18
+    ws.column_dimensions["G"].width = 22
+
+
+def _assembly_pcba_export_workbook(records):
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "总表"
+    issue = [row for row in records if row["rec_type"] == "issue"]
+    finished = [row for row in records if row["rec_type"] == "finished"]
+
+    _assembly_pcba_summary_section(ws, 1, "领料总数", issue)
+    _assembly_pcba_summary_section(ws, 5, "成品总数", finished)
+    balance_records = [
+        {**row, "qty": -int(row.get("qty") or 0)} for row in finished
+    ] + issue
+    _assembly_pcba_summary_section(ws, 9, "理论结存数", balance_records)
+    _apply_legacy_sheet_style(ws, 11, 10)
     ws.column_dimensions["A"].width = 14
     ws.column_dimensions["B"].width = 14
 
-    _supplier_pcba_detail_sheet(wb, "36#CD领料明细", [], "领料编号", "领料数")
-    _supplier_pcba_detail_sheet(wb, "PCB板领料明细", issue, "领料编号", "领料数")
-    _pcba_inbound_detail_sheet(wb, "成品入仓明细", finished)
+    _assembly_pcba_issue_sheet(wb, "36#CD领料明细", [])
+    _assembly_pcba_issue_sheet(wb, "PCB主板领料明细", issue)
+    _assembly_pcba_finished_sheet(wb, finished)
     return wb
 
 
@@ -2788,7 +3278,14 @@ def _supplier_nfc_detail_sheet(wb, title, records, sticker_names, total_header):
         row for row in records
         if _export_month(_record_export_date(row)) in (6, *EXPORT_MONTHS)
     ]
-    groups = _supplier_nfc_detail_groups(records)
+    groups = sorted(
+        _supplier_nfc_detail_groups(records),
+        key=lambda group: (
+            group["rec_date"] is None,
+            group["rec_date"] or "",
+            _natural_text_sort_key(group["doc_no"]),
+        ),
+    )
     ws.cell(1, 2).value = total_header
     ws.cell(2, 1).value = "物料名称"
     for offset, group in enumerate(groups, start=3):
@@ -2869,10 +3366,256 @@ def _supplier_nfc_export_workbook(records, sticker_types):
     return wb
 
 
+def _natural_text_sort_key(value):
+    text = _cell_text(value)
+    parts = re.split(r"(\d+)", text.casefold())
+    return (
+        not text,
+        tuple(
+            (0, int(part)) if part.isdigit() else (1, part)
+            for part in parts
+            if part
+        ),
+    )
+
+
+def _hongya_nfc_detail_sheet(wb, title, records, sticker_names):
+    ws = wb.create_sheet(title)
+    groups = sorted(
+        _supplier_nfc_detail_groups(records),
+        key=lambda group: (
+            group["rec_date"] is None,
+            group["rec_date"] or "",
+            _natural_text_sort_key(group["doc_no"]),
+        ),
+    )
+    ws.cell(1, 2).value = "当月入仓总数"
+    ws.cell(2, 1).value = "物料名称"
+    for col_no, group in enumerate(groups, start=3):
+        ws.cell(1, col_no).value = group["rec_date"]
+
+    for row_no, sticker_type in enumerate(sticker_names, start=3):
+        sticker_records = [
+            row for row in records if row.get("sticker_type") == sticker_type
+        ]
+        ws.cell(row_no, 1).value = _format_nfc_sticker_name(sticker_type)
+        ws.cell(row_no, 2).value = _sum_qty(sticker_records) or 0
+        for col_no, group in enumerate(groups, start=3):
+            qty = _sum_qty([
+                row for row in group["records"]
+                if row.get("sticker_type") == sticker_type
+            ])
+            if qty:
+                ws.cell(row_no, col_no).value = qty
+
+    subtotal_row = len(sticker_names) + 4
+    ws.cell(subtotal_row, 1).value = "小计："
+    ws.cell(subtotal_row, 2).value = _sum_qty(records) or 0
+    for col_no, group in enumerate(groups, start=3):
+        ws.cell(subtotal_row, col_no).value = _sum_qty(group["records"]) or None
+
+    _apply_legacy_sheet_style(ws, subtotal_row, max(2, len(groups) + 2))
+    ws.column_dimensions["A"].width = 13
+    ws.column_dimensions["B"].width = 11
+    for col_no in range(3, len(groups) + 3):
+        ws.column_dimensions[ws.cell(1, col_no).column_letter].width = 10
+    return ws
+
+
+def _hongya_nfc_export_workbook(records, sticker_types):
+    issue = [row for row in records if row["rec_type"] == "issue"]
+    inbound = [row for row in records if row["rec_type"] == "finished"]
+    sticker_names = _supplier_nfc_sticker_names(records, sticker_types)
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "总表"
+    ws.cell(1, 2).value = "累计领料总数"
+    ws.cell(2, 1).value = "物料名称"
+    ws.cell(2, 3).value = "截至6月27号"
+    for col_no, month in enumerate(EXPORT_MONTHS, start=4):
+        ws.cell(1, col_no).value = f"{month}月领料\n总数"
+    ws.cell(1, 11).value = "应存数"
+    ws.cell(1, 12).value = "累计入仓总数"
+    ws.cell(1, 13).value = "东莞"
+    ws.cell(2, 13).value = "截至6月27号"
+    for col_no, month in enumerate(EXPORT_MONTHS, start=14):
+        ws.cell(1, col_no).value = f"{month}月入仓\n总数"
+
+    for row_no, sticker_type in enumerate(sticker_names, start=3):
+        sticker_issue = [
+            row for row in issue if row.get("sticker_type") == sticker_type
+        ]
+        sticker_inbound = [
+            row for row in inbound if row.get("sticker_type") == sticker_type
+        ]
+        issue_total = _sum_qty(sticker_issue)
+        inbound_total = _sum_qty(sticker_inbound)
+        ws.cell(row_no, 1).value = _format_nfc_sticker_name(sticker_type)
+        ws.cell(row_no, 2).value = issue_total or 0
+        ws.cell(row_no, 3).value = _month_sum(sticker_issue, 6) or None
+        for col_no, month in enumerate(EXPORT_MONTHS, start=4):
+            ws.cell(row_no, col_no).value = _month_sum(sticker_issue, month) or None
+        ws.cell(row_no, 11).value = issue_total - inbound_total
+        ws.cell(row_no, 12).value = inbound_total or 0
+        ws.cell(row_no, 13).value = _month_sum(sticker_inbound, 6) or None
+        for col_no, month in enumerate(EXPORT_MONTHS, start=14):
+            ws.cell(row_no, col_no).value = _month_sum(sticker_inbound, month) or None
+
+    subtotal_row = len(sticker_names) + 4
+    ws.cell(subtotal_row, 1).value = "小计："
+    for col_no in range(2, 20):
+        ws.cell(subtotal_row, col_no).value = sum(
+            int(ws.cell(row_no, col_no).value or 0)
+            for row_no in range(3, subtotal_row - 1)
+        )
+
+    for cell_range in (
+        "B1:B2", "D1:D2", "E1:E2", "F1:F2", "G1:G2", "H1:H2", "I1:I2",
+        "K1:K2", "L1:L2", "N1:N2", "O1:O2", "P1:P2", "Q1:Q2", "R1:R2", "S1:S2",
+    ):
+        ws.merge_cells(cell_range)
+    _apply_legacy_sheet_style(ws, subtotal_row, 19)
+    ws.column_dimensions["A"].width = 13
+    ws.column_dimensions["B"].width = 11
+    ws.column_dimensions["C"].width = 11
+    ws.column_dimensions["D"].width = 12
+    ws.column_dimensions["K"].width = 10
+    ws.column_dimensions["L"].width = 10
+    ws.column_dimensions["M"].width = 10
+
+    _hongya_nfc_detail_sheet(wb, "领料明细", issue, sticker_names)
+    _hongya_nfc_detail_sheet(wb, "入仓明细", inbound, sticker_names)
+    return wb
+
+
+def _assembly_nfc_detail_sheet(wb, title, records, sticker_names, total_header):
+    ws = wb.create_sheet(title)
+    records = [
+        row for row in records
+        if _record_month(row) in EXPORT_MONTHS
+    ]
+    groups = sorted(
+        _supplier_nfc_detail_groups(records),
+        key=lambda group: (
+            group["rec_date"] is None,
+            group["rec_date"] or "",
+            _natural_text_sort_key(group["doc_no"]),
+        ),
+    )
+    ws.cell(1, 2).value = total_header
+    ws.cell(2, 1).value = "物料名称"
+    for col_no, group in enumerate(groups, start=3):
+        ws.cell(1, col_no).value = group["rec_date"]
+        ws.cell(2, col_no).value = group["doc_no"]
+        ws.cell(2, col_no).number_format = "@"
+
+    for row_no, sticker_type in enumerate(sticker_names, start=3):
+        ws.cell(row_no, 1).value = _format_nfc_sticker_name(sticker_type)
+        sticker_records = [
+            row for row in records if row.get("sticker_type") == sticker_type
+        ]
+        ws.cell(row_no, 2).value = _sum_qty(sticker_records) or 0
+        for col_no, group in enumerate(groups, start=3):
+            group_records = [
+                row for row in group["records"]
+                if row.get("sticker_type") == sticker_type
+            ]
+            qty = _sum_qty(group_records)
+            if qty:
+                ws.cell(row_no, col_no).value = qty
+
+    total_row = len(sticker_names) + 4
+    ws.cell(total_row, 1).value = "小计："
+    ws.cell(total_row, 2).value = _sum_qty(records) or 0
+    for col_no, group in enumerate(groups, start=3):
+        ws.cell(total_row, col_no).value = _sum_qty(group["records"]) or None
+    _apply_legacy_sheet_style(ws, total_row, max(2, len(groups) + 2))
+    ws.column_dimensions["A"].width = 13
+    ws.column_dimensions["B"].width = 13
+    return ws
+
+
+def _assembly_nfc_export_workbook(records, sticker_types):
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "总表"
+    issue = [row for row in records if row["rec_type"] == "issue"]
+    semi_finished = [
+        row for row in records if row["rec_type"] == "semi_finished"
+    ]
+    sticker_names = _supplier_nfc_sticker_names(records, sticker_types)
+
+    ws.cell(1, 2).value = "累计入仓总数"
+    ws.cell(1, 3).value = "东莞"
+    ws.cell(2, 1).value = "物料名称"
+    ws.cell(2, 3).value = "截止6月27号"
+    for col_no, month in enumerate(EXPORT_MONTHS, start=4):
+        ws.cell(1, col_no).value = f"{month}月领料\n总数"
+    ws.cell(1, 11).value = "应存数"
+    ws.cell(1, 12).value = "累计出仓总数"
+    ws.cell(1, 13).value = "东莞"
+    ws.cell(1, 14).value = "邵阳"
+    ws.cell(2, 13).value = "截止6月27号"
+    for col_no, month in enumerate(EXPORT_MONTHS, start=15):
+        ws.cell(1, col_no).value = f"{month}月入仓\n总数"
+
+    for row_no, sticker_type in enumerate(sticker_names, start=3):
+        sticker_issue = [
+            row for row in issue if row.get("sticker_type") == sticker_type
+        ]
+        sticker_finished = [
+            row for row in semi_finished
+            if row.get("sticker_type") == sticker_type
+        ]
+        issue_total = _sum_qty(sticker_issue)
+        finished_total = _sum_qty(sticker_finished)
+        ws.cell(row_no, 1).value = _format_nfc_sticker_name(sticker_type)
+        ws.cell(row_no, 2).value = issue_total or 0
+        ws.cell(row_no, 3).value = _month_sum(sticker_issue, 6) or None
+        for col_no, month in enumerate(EXPORT_MONTHS, start=4):
+            ws.cell(row_no, col_no).value = (
+                _month_sum(sticker_issue, month) or None
+            )
+        ws.cell(row_no, 11).value = issue_total - finished_total
+        ws.cell(row_no, 12).value = finished_total or 0
+        ws.cell(row_no, 13).value = _month_sum(sticker_finished, 6) or None
+        for col_no, month in enumerate(EXPORT_MONTHS, start=15):
+            ws.cell(row_no, col_no).value = (
+                _month_sum(sticker_finished, month) or None
+            )
+
+    total_row = len(sticker_names) + 4
+    ws.cell(total_row, 1).value = "小计："
+    for col_no in (2, 3, *range(4, 10), 11, 12, 13, 14, *range(15, 21)):
+        ws.cell(total_row, col_no).value = sum(
+            int(ws.cell(row_no, col_no).value or 0)
+            for row_no in range(3, total_row - 1)
+        )
+    _apply_legacy_sheet_style(ws, total_row, 20)
+    ws.column_dimensions["A"].width = 13
+    ws.column_dimensions["B"].width = 13
+    ws.column_dimensions["C"].width = 13
+
+    _assembly_nfc_detail_sheet(
+        wb, "领料明细", issue, sticker_names, "当月领料总数"
+    )
+    _assembly_nfc_detail_sheet(
+        wb,
+        "半成品入仓明细",
+        semi_finished,
+        sticker_names,
+        "当月入仓总数",
+    )
+    return wb
+
+
 def _monthly_totals_map(monthly_totals):
     return {
         row["sticker_type"]: {
             "opening_stock": int(row.get("opening_stock") or 0),
+            "assembly_opening_stock": int(row.get("assembly_opening_stock") or 0),
+            "hongya_opening_stock": int(row.get("hongya_opening_stock") or 0),
             "monthly_inbound": int(row.get("monthly_inbound") or 0),
             "monthly_outbound": int(row.get("monthly_outbound") or 0),
         }
@@ -2901,13 +3644,26 @@ def _semi_month_total(total_row, records, key, rec_type):
 
 
 def _semi_finished_detail_sheet(
-    wb, title, records, sticker_names, totals_by_sticker, is_inbound
+    wb, title, records, sticker_names, totals_by_sticker, is_inbound,
+    location_name=None, use_stored_totals=True,
 ):
     ws = wb.create_sheet(title)
     rec_type = "semi_inbound" if is_inbound else "semi_outbound"
     total_key = "monthly_inbound" if is_inbound else "monthly_outbound"
     total_header = "当月入仓总数" if is_inbound else "当月出仓总数"
-    sheet_records = [row for row in records if row["rec_type"] == rec_type]
+    sheet_records = [
+        row for row in records
+        if row["rec_type"] == rec_type
+        and (location_name is None or row.get("location_name") == location_name)
+    ]
+    groups = sorted(
+        _supplier_nfc_detail_groups(sheet_records),
+        key=lambda group: (
+            group["rec_date"] is None,
+            group["rec_date"] or "",
+            _natural_text_sort_key(group["doc_no"]),
+        ),
+    )
     start_col = 5 if is_inbound else 4
     header_row = 3 if is_inbound else 5
     data_row_start = header_row + 1
@@ -2924,9 +3680,10 @@ def _semi_finished_detail_sheet(
         ws.cell(5, 2).value = total_header
         ws.cell(5, 3).value = "6/24盘点截数"
 
-    for offset, row in enumerate(sheet_records, start=start_col):
-        ws.cell(1, offset).value = _record_export_date(row)
-        ws.cell(2, offset).value = row.get("doc_no")
+    for offset, group in enumerate(groups, start=start_col):
+        ws.cell(1, offset).value = group["rec_date"]
+        ws.cell(2, offset).value = group["doc_no"]
+        ws.cell(2, offset).number_format = "@"
 
     for row_no, sticker_type in enumerate(sticker_names, start=data_row_start):
         sticker_records = [
@@ -2934,13 +3691,32 @@ def _semi_finished_detail_sheet(
         ]
         total_row = totals_by_sticker.get(sticker_type, {})
         ws.cell(row_no, 1).value = _format_nfc_sticker_name(sticker_type)
-        ws.cell(row_no, 2).value = _semi_month_total(
-            total_row, sticker_records, total_key, rec_type
-        ) or 0
-        ws.cell(row_no, 3).value = int(total_row.get("opening_stock") or 0) or None
-        for col_no, record in enumerate(sheet_records, start=start_col):
-            if record.get("sticker_type") == sticker_type:
-                ws.cell(row_no, col_no).value = record.get("qty")
+        if use_stored_totals:
+            month_total = _semi_month_total(
+                total_row, sticker_records, total_key, rec_type
+            )
+            opening_stock = int(total_row.get("opening_stock") or 0)
+        else:
+            month_total = _sum_qty(sticker_records)
+            opening_stock = 0
+        ws.cell(row_no, 2).value = month_total or 0
+        if is_inbound:
+            ws.cell(row_no, 3).value = (
+                int(total_row.get("assembly_opening_stock") or 0) or None
+            )
+            ws.cell(row_no, 4).value = (
+                int(total_row.get("hongya_opening_stock") or 0) or None
+            )
+        else:
+            ws.cell(row_no, 3).value = opening_stock or None
+        for col_no, group in enumerate(groups, start=start_col):
+            group_records = [
+                row for row in group["records"]
+                if row.get("sticker_type") == sticker_type
+            ]
+            qty = _sum_qty(group_records)
+            if qty:
+                ws.cell(row_no, col_no).value = qty
 
     total_row_no = data_row_start + len(sticker_names)
     ws.cell(total_row_no, 1).value = "小计："
@@ -2952,11 +3728,11 @@ def _semi_finished_detail_sheet(
         ws.cell(row_no, 3).value or 0
         for row_no in range(data_row_start, total_row_no)
     ) or None
-    for col_no, record in enumerate(sheet_records, start=start_col):
-        ws.cell(total_row_no, col_no).value = record.get("qty")
+    for col_no, group in enumerate(groups, start=start_col):
+        ws.cell(total_row_no, col_no).value = _sum_qty(group["records"]) or None
 
     _apply_legacy_sheet_style(
-        ws, total_row_no, max(start_col - 1, len(sheet_records) + start_col - 1)
+        ws, total_row_no, max(start_col - 1, len(groups) + start_col - 1)
     )
     ws.column_dimensions["A"].width = 13
     ws.column_dimensions["B"].width = 12
@@ -2982,7 +3758,7 @@ def _semi_finished_export_workbook(records, sticker_types, monthly_totals):
     ws.cell(1, 12).value = "累计出仓总数"
     ws.cell(1, 13).value = "东莞"
     ws.cell(2, 13).value = "截止6月27号"
-    ws.cell(1, 14).value = "邵阳生产"
+    ws.cell(1, 14).value = "湖南"
     for col_no, month in enumerate(EXPORT_MONTHS, start=15):
         ws.cell(1, col_no).value = f"{month}月出仓\n总数"
 
@@ -3013,11 +3789,24 @@ def _semi_finished_export_workbook(records, sticker_types, monthly_totals):
     _semi_finished_detail_sheet(
         wb, "入库明细", records, sticker_names, totals_by_sticker, True
     )
-    _semi_finished_detail_sheet(
-        wb, "邵阳领料", records, sticker_names, totals_by_sticker, False
-    )
-    wb.create_sheet("河源华兴36#CD领料")
-    wb.create_sheet("车间36#CD领料")
+    outbound_locations = {
+        row.get("location_name") for row in outbound if row.get("location_name")
+    }
+    for sheet_name, location_name in (
+        ("邵阳领料", SHAOYANG_DEPARTMENT),
+        ("河源华兴36#CD领料", HEYUAN_DEPARTMENT),
+        ("车间36#CD领料", ASSEMBLY_DEPARTMENT),
+    ):
+        _semi_finished_detail_sheet(
+            wb,
+            sheet_name,
+            records,
+            sticker_names,
+            totals_by_sticker,
+            False,
+            location_name=location_name,
+            use_stored_totals=(outbound_locations == {location_name}),
+        )
     return wb
 
 
@@ -3030,12 +3819,13 @@ def export_records(
     material: Optional[str] = None,
 ):
     filters = _date_filter(date_from, date_to, doc_no)
-    material = _clean_optional(material)
+    material = _normalize_material_filter(material, user["department"])
     conn = db.get_conn()
     try:
         sql = (
             "SELECT r.id, r.rec_type, l.name AS location_name, r.rec_date, r.doc_no, "
             "r.material, r.sticker_type, r.supplier, r.po_no, r.customer_name, "
+            "r.contract_no, r.item_no, r.product_name, "
             "r.qty, r.remark, r.summary_month "
             "FROM records r "
             "LEFT JOIN locations l ON r.location_id = l.id "
@@ -3043,7 +3833,11 @@ def export_records(
         )
         params = [user["department"]]
         sql, params = _append_date_filter(sql, params, filters)
-        if material:
+        heyuan_combined_export = (
+            user["department"] == HEYUAN_DEPARTMENT
+            and material == PCBA_MATERIAL
+        )
+        if material and not heyuan_combined_export:
             sql += " AND r.material=?"
             params.append(material)
         sql += " ORDER BY r.id"
@@ -3055,6 +3849,7 @@ def export_records(
         ]
         totals_sql = (
             "SELECT material, sticker_type, opening_stock, "
+            "assembly_opening_stock, hongya_opening_stock, "
             "monthly_inbound, monthly_outbound "
             "FROM semi_finished_monthly_totals WHERE department=?"
         )
@@ -3082,9 +3877,24 @@ def export_records(
             _supplier_nfc_export_workbook(records, sticker_types),
             "来料仓77772#NFC出入明细.xlsx",
         )
+    if user["department"] == ASSEMBLY_DEPARTMENT and material == PCBA_MATERIAL:
+        return _xlsx_response(
+            _assembly_pcba_export_workbook(records),
+            "东莞车间77794#PCB主板出入明细.xlsx",
+        )
+    if user["department"] == ASSEMBLY_DEPARTMENT and material == NFC_MATERIAL:
+        return _xlsx_response(
+            _assembly_nfc_export_workbook(records, sticker_types),
+            "东莞车间77772#NFC贴纸出入明细.xlsx",
+        )
+    if user["department"] == HONGYA_DEPARTMENT and material == NFC_MATERIAL:
+        return _xlsx_response(
+            _hongya_nfc_export_workbook(records, sticker_types),
+            "东莞加工厂鸿亚77772#NFC贴纸出入明细.xlsx",
+        )
     if _is_outsource_department(user["department"]) and material == PCBA_MATERIAL:
         return _xlsx_response(
-            _outsource_pcba_export_workbook(records),
+            _outsource_pcba_export_workbook(records, user["department"]),
             f"{user['department']}77794PCB主板出入明细.xlsx",
         )
     if user["department"] == HEYUAN_DEPARTMENT and material == PCBA_MATERIAL:
@@ -3125,70 +3935,188 @@ def _record_body_from_import_row(conn, row_no, row, department):
     return body
 
 
-@app.post("/api/records/import")
-def import_records(file: UploadFile = File(...), user=Depends(current_user)):
+def _parse_record_import_workbook(conn, wb, file, user):
+    legacy_semi_finished_import = _is_legacy_semi_finished_workbook(wb)
+    legacy_assembly_import = _is_legacy_assembly_workbook(wb)
+    legacy_assembly_pcba_import = (
+        user["department"] == ASSEMBLY_DEPARTMENT
+        and _is_legacy_assembly_pcba_workbook(wb)
+    )
+    legacy_outsource_import = _is_legacy_outsource_workbook(wb)
+    legacy_outsource_nfc_import = (
+        _is_outsource_department(user["department"])
+        and _is_legacy_outsource_nfc_workbook(wb)
+    )
+    legacy_heyuan_import = _is_legacy_heyuan_workbook(wb)
+    legacy_supplier_import = _is_legacy_supplier_workbook(wb)
+    legacy_import = (
+        legacy_semi_finished_import
+        or legacy_assembly_import
+        or legacy_assembly_pcba_import
+        or legacy_outsource_import
+        or legacy_outsource_nfc_import
+        or legacy_heyuan_import
+        or legacy_supplier_import
+    )
+    if legacy_semi_finished_import:
+        _require_filename_contains(file, SEMI_FINISHED_FILENAME_KEYWORD)
+        bodies, monthly_totals = _parse_legacy_semi_finished_workbook(
+            conn, wb, user["department"]
+        )
+    elif legacy_assembly_import:
+        _require_filename_contains(file, ASSEMBLY_DEPARTMENT)
+        bodies = _parse_legacy_assembly_workbook(conn, wb, user["department"])
+        monthly_totals = []
+    elif legacy_assembly_pcba_import:
+        _require_filename_contains(file, ASSEMBLY_DEPARTMENT)
+        bodies = _parse_legacy_assembly_pcba_workbook(
+            conn, wb, user["department"]
+        )
+        monthly_totals = []
+    elif legacy_outsource_import:
+        _require_filename_contains(file, user["department"])
+        bodies = _parse_legacy_outsource_workbook(conn, wb, user["department"])
+        monthly_totals = []
+    elif legacy_outsource_nfc_import:
+        _require_filename_contains(file, user["department"])
+        bodies = _parse_legacy_outsource_nfc_workbook(
+            conn, wb, user["department"]
+        )
+        monthly_totals = []
+    elif legacy_heyuan_import:
+        bodies = _parse_legacy_heyuan_workbook(conn, wb, user["department"])
+        monthly_totals = []
+    elif legacy_supplier_import:
+        bodies = _parse_legacy_supplier_workbook(conn, wb, user["department"])
+        monthly_totals = []
+    else:
+        rows = _worksheet_rows(wb.active)
+        if not rows:
+            raise HTTPException(status_code=400, detail="Excel 没有可导入的数据")
+        bodies = [
+            _record_body_from_import_row(conn, row_no, row, user["department"])
+            for row_no, row in rows
+        ]
+        monthly_totals = []
+    return bodies, monthly_totals, legacy_import
+
+
+def _import_document_key(body):
+    doc_no = _cell_text(body.doc_no)
+    if not doc_no:
+        return None
+    return body.rec_type, body.location_id or 0, doc_no.casefold()
+
+
+def _group_import_documents(bodies):
+    documents = {}
+    without_document = []
+    for body in bodies:
+        key = _import_document_key(body)
+        if key is None:
+            without_document.append(body)
+        else:
+            documents.setdefault(key, []).append(body)
+    return documents, without_document
+
+
+def _existing_document_ids(conn, department, key):
+    rec_type, location_id, doc_no = key
+    rows = conn.execute(
+        "SELECT id FROM records WHERE department=? AND source_record_id IS NULL "
+        "AND rec_type=? AND COALESCE(location_id, 0)=? "
+        "AND LOWER(TRIM(COALESCE(doc_no, '')))=? ORDER BY id",
+        (department, rec_type, location_id, doc_no),
+    ).fetchall()
+    return [row["id"] for row in rows]
+
+
+def _document_check_result(conn, department, documents, blank_rows):
+    duplicates = []
+    for key, bodies in documents.items():
+        existing_ids = _existing_document_ids(conn, department, key)
+        if not existing_ids:
+            continue
+        first = bodies[0]
+        duplicates.append({
+            "doc_no": first.doc_no,
+            "rec_type": first.rec_type,
+            "target_department": _location_name_from_id(conn, first.location_id),
+            "file_rows": len(bodies),
+            "existing_rows": len(existing_ids),
+        })
+    return {
+        "documents": len(documents),
+        "duplicates": len(duplicates),
+        "duplicate_documents": duplicates,
+        "blank_doc_rows": len(blank_rows),
+    }
+
+
+@app.post("/api/records/import-check")
+def check_record_import(file: UploadFile = File(...), user=Depends(current_user)):
     wb = _load_upload_workbook(file)
     conn = db.get_conn()
     try:
-        legacy_semi_finished_import = _is_legacy_semi_finished_workbook(wb)
-        legacy_assembly_import = _is_legacy_assembly_workbook(wb)
-        legacy_outsource_import = _is_legacy_outsource_workbook(wb)
-        legacy_outsource_nfc_import = (
-            _is_outsource_department(user["department"])
-            and _is_legacy_outsource_nfc_workbook(wb)
+        bodies, _monthly_totals, _legacy_import = _parse_record_import_workbook(
+            conn, wb, file, user
         )
-        legacy_heyuan_import = _is_legacy_heyuan_workbook(wb)
-        legacy_supplier_import = _is_legacy_supplier_workbook(wb)
-        legacy_import = (
-            legacy_semi_finished_import
-            or legacy_assembly_import
-            or legacy_outsource_import
-            or legacy_outsource_nfc_import
-            or legacy_heyuan_import
-            or legacy_supplier_import
+        documents, blank_rows = _group_import_documents(bodies)
+        return _document_check_result(
+            conn, user["department"], documents, blank_rows
         )
-        if legacy_semi_finished_import:
-            _require_filename_contains(file, SEMI_FINISHED_FILENAME_KEYWORD)
-            bodies, monthly_totals = _parse_legacy_semi_finished_workbook(
-                conn, wb, user["department"]
-            )
-        elif legacy_assembly_import:
-            _require_filename_contains(file, ASSEMBLY_DEPARTMENT)
-            bodies = _parse_legacy_assembly_workbook(conn, wb, user["department"])
-            monthly_totals = []
-        elif legacy_outsource_import:
-            _require_filename_contains(file, user["department"])
-            bodies = _parse_legacy_outsource_workbook(conn, wb, user["department"])
-            monthly_totals = []
-        elif legacy_outsource_nfc_import:
-            _require_filename_contains(file, user["department"])
-            bodies = _parse_legacy_outsource_nfc_workbook(
-                conn, wb, user["department"]
-            )
-            monthly_totals = []
-        elif legacy_heyuan_import:
-            bodies = _parse_legacy_heyuan_workbook(conn, wb, user["department"])
-            monthly_totals = []
-        elif legacy_supplier_import:
-            bodies = _parse_legacy_supplier_workbook(conn, wb, user["department"])
-            monthly_totals = []
+    finally:
+        conn.close()
+
+
+@app.post("/api/records/import")
+def import_records(
+    file: UploadFile = File(...),
+    mode: str = Form("skip"),
+    user=Depends(current_user),
+):
+    if mode not in ("skip", "replace"):
+        raise HTTPException(status_code=400, detail="导入模式无效")
+    wb = _load_upload_workbook(file)
+    conn = db.get_conn()
+    try:
+        bodies, monthly_totals, legacy_import = _parse_record_import_workbook(
+            conn, wb, file, user
+        )
+        documents, blank_rows = _group_import_documents(bodies)
+        duplicate_keys = {
+            key: _existing_document_ids(conn, user["department"], key)
+            for key in documents
+        }
+        duplicate_keys = {
+            key: ids for key, ids in duplicate_keys.items() if ids
+        }
+        replaced_documents = 0
+        skipped_documents = 0
+        skipped_document_rows = 0
+        if mode == "replace":
+            for existing_ids in duplicate_keys.values():
+                _delete_record_ids_with_links(conn, existing_ids)
+                replaced_documents += 1
         else:
-            rows = _worksheet_rows(wb.active)
-            if not rows:
-                raise HTTPException(status_code=400, detail="Excel 没有可导入的数据")
-            bodies = [
-                _record_body_from_import_row(conn, row_no, row, user["department"])
-                for row_no, row in rows
-            ]
-            monthly_totals = []
+            skipped_documents = len(duplicate_keys)
+            skipped_document_rows = sum(
+                len(documents[key]) for key in duplicate_keys
+            )
+
+        import_bodies = list(blank_rows)
+        for key, document_bodies in documents.items():
+            if mode == "skip" and key in duplicate_keys:
+                continue
+            import_bodies.extend(document_bodies)
         ids = []
-        skipped = 0
-        for body in bodies:
+        skipped = skipped_document_rows
+        for body in import_bodies:
             record_id = _insert_record_body(
                 conn,
                 body,
                 user,
-                skip_duplicate=legacy_import,
+                skip_duplicate=(legacy_import or _import_document_key(body) is None),
             )
             if record_id is None:
                 skipped += 1
@@ -3207,6 +4135,8 @@ def import_records(file: UploadFile = File(...), user=Depends(current_user)):
         "ids": ids,
         "monthly_totals": len(monthly_totals),
         "skipped": skipped,
+        "skipped_documents": skipped_documents,
+        "replaced_documents": replaced_documents,
     }
 
 
@@ -3470,9 +4400,13 @@ def _compute_semi_finished_warehouse_summary(records):
     }
 
 
-def _compute_outsource_inbound_summary(records):
+def _compute_outsource_inbound_summary(records, department=None):
     issue = sum(int(r["qty"] or 0) for r in records if r["rec_type"] == "issue")
-    finished = sum(int(r["qty"] or 0) for r in records if r["rec_type"] == "finished")
+    finished = sum(
+        int(r["qty"] or 0)
+        for r in records
+        if r["rec_type"] == "finished" and department != OUTSOURCE_DEPARTMENT
+    )
     semi_finished = sum(int(r["qty"] or 0) for r in records if r["rec_type"] == "semi_finished")
     inbound = finished + semi_finished
     balance = issue - inbound if issue else inbound
@@ -3511,8 +4445,8 @@ def public_summary(
     department: Optional[str] = None,
 ):
     filters = _date_filter(date_from, date_to)
-    material = _clean_optional(material)
     department = _validate_department(_clean_optional(department), required=False)
+    material = _normalize_material_filter(material, department)
     public_filters = {
         **filters,
         "material": material,
@@ -3563,7 +4497,7 @@ def summary(
         summary_data = _compute_semi_finished_warehouse_summary(records)
         return _with_common_summary_fields(summary_data, records, filters)
     if _is_outsource_department(user["department"]):
-        summary_data = _compute_outsource_inbound_summary(records)
+        summary_data = _compute_outsource_inbound_summary(records, user["department"])
         return _with_common_summary_fields(
             summary_data, records, filters, {user["department"]}
         )
@@ -3602,7 +4536,7 @@ def export(
     if user["department"] == SEMI_FINISHED_DEPARTMENT:
         summary = _compute_semi_finished_warehouse_summary(summary_records)
     elif _is_outsource_department(user["department"]):
-        summary = _compute_outsource_inbound_summary(summary_records)
+        summary = _compute_outsource_inbound_summary(summary_records, user["department"])
     elif user["department"] in PROCESSING_BALANCE_DEPARTMENTS:
         summary = _compute_processing_department_summary(summary_records)
     else:

@@ -21,6 +21,7 @@ const FIELD_KEYWORDS = {
   material:       ['胶料类型', '塑胶原料', '塑胶', '产品材质', '产品材料', '材质', '材料', '原料', 'PLASTIC', "MAT'L", 'MATERIAL'],
   color:          ['颜色', 'COLOR'],
   cavity:         ['出模数', '型腔', '模数', 'CAV'],
+  usage:          ['产品用量', '用量', 'USAGE'],
   sets:           ['套数', 'UP', '数量/件', '数量'],
   product_size:   ['产品尺寸'],
   machine:        ['机型(TON)', 'INJECTIONMACHINETYPE', '机型'],
@@ -28,7 +29,7 @@ const FIELD_KEYWORDS = {
   cycle:          ['周期', 'CYCLETIME', 'CYCLE'],   // 注塑生产周期(秒)
   target:         ['模具预计日啤数', '目标数', 'CYCLES/DAY', 'CYCLESDAY'],
   structure:      ['滑块', '斜顶', '模具结构', '加工内容', 'SLIDE', '行位'],
-  price_rmb:      ['含税模价', '总价', '模价', '价格', '单价', 'TOTALAMOUNT', 'AMOUNT'],
+  price_rmb:      ['含税模价', '总价', '模价', '价格', '单价', 'MOLDCOST', 'TOTALAMOUNT', 'AMOUNT'],
   price_usd:      ['USD', '美元'],
   mold_type:      ['进胶方式', '模胚类型', '模胚大约', '模胚型号', '模胚', '水口', 'GATE'],
   note:           ['备注', '说明', 'REMARK'],
@@ -237,7 +238,8 @@ function tryParseSheet(wb, sheetName) {
     const sets = parseNumber(cell(r, 'sets')); if (sets != null && current.sets == null) current.sets = sets;
     const wt = parseNumber(cell(r, 'weight'));
     if (wt != null) {
-      current.weights.push(wt);
+      const usage = parseNumber(cell(r, 'usage')) ?? 1;
+      current.weights.push(wt * usage);
       if (current.weight == null) current.weight = wt;
     }
     const cyc = parseNumber(cell(r, 'cycle')); if (cyc != null && current.cycle == null) current.cycle = cyc;
@@ -278,7 +280,9 @@ function tryParseSheet(wb, sheetName) {
     const uniquePartNames = [...new Set(g.part_names || [])];
     const uniqueNames = [...new Set(g.names || [])];
     const displayNames = uniquePartNames.length ? uniquePartNames : uniqueNames;
-    const weightTotal = uniquePartNames.length && g.weights.length
+    // 同一模号可能由多行零件组成；产品总重量应为组内每行
+    // “净重 × 产品用量”之和，不能只取该模具首行净重。
+    const weightTotal = g.weights.length
       ? +g.weights.reduce((a, n) => a + n, 0).toFixed(4)
       : g.weight;
     return {

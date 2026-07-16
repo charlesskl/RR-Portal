@@ -3,6 +3,24 @@ const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
 
+function loadLocalEnv(filePath) {
+  if (!fs.existsSync(filePath)) return;
+  for (const line of fs.readFileSync(filePath, 'utf8').split(/\r?\n/)) {
+    const match = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/);
+    if (!match || match[1].startsWith('#')) continue;
+    const key = match[1];
+    if (Object.prototype.hasOwnProperty.call(process.env, key)) continue;
+    let value = match[2];
+    if ((value.startsWith('"') && value.endsWith('"'))
+        || (value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1);
+    }
+    process.env[key] = value;
+  }
+}
+
+loadLocalEnv(path.join(__dirname, '..', '.env'));
+
 const app = express();
 
 // CORS: restrict to same-origin by default; override with CORS_ORIGIN env var

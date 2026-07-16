@@ -68,6 +68,9 @@ CREATE TABLE IF NOT EXISTS records (
     supplier TEXT,
     po_no TEXT,
     customer_name TEXT,
+    contract_no TEXT,
+    item_no TEXT,
+    product_name TEXT,
     summary_month INTEGER,
     source_record_id INTEGER,
     source_flow TEXT,
@@ -83,6 +86,8 @@ CREATE TABLE IF NOT EXISTS semi_finished_monthly_totals (
     material TEXT NOT NULL,
     sticker_type TEXT NOT NULL,
     opening_stock INTEGER NOT NULL DEFAULT 0,
+    assembly_opening_stock INTEGER NOT NULL DEFAULT 0,
+    hongya_opening_stock INTEGER NOT NULL DEFAULT 0,
     monthly_inbound INTEGER NOT NULL DEFAULT 0,
     monthly_outbound INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -172,6 +177,12 @@ def _migrate_schema(conn):
         conn.execute("ALTER TABLE records ADD COLUMN po_no TEXT")
     if not _column_exists(conn, "records", "customer_name"):
         conn.execute("ALTER TABLE records ADD COLUMN customer_name TEXT")
+    if not _column_exists(conn, "records", "contract_no"):
+        conn.execute("ALTER TABLE records ADD COLUMN contract_no TEXT")
+    if not _column_exists(conn, "records", "item_no"):
+        conn.execute("ALTER TABLE records ADD COLUMN item_no TEXT")
+    if not _column_exists(conn, "records", "product_name"):
+        conn.execute("ALTER TABLE records ADD COLUMN product_name TEXT")
     if not _column_exists(conn, "records", "summary_month"):
         conn.execute("ALTER TABLE records ADD COLUMN summary_month INTEGER")
     if not _column_exists(conn, "records", "source_record_id"):
@@ -182,6 +193,16 @@ def _migrate_schema(conn):
         conn.execute(
             "ALTER TABLE semi_finished_monthly_totals "
             "ADD COLUMN opening_stock INTEGER NOT NULL DEFAULT 0"
+        )
+    if not _column_exists(conn, "semi_finished_monthly_totals", "assembly_opening_stock"):
+        conn.execute(
+            "ALTER TABLE semi_finished_monthly_totals "
+            "ADD COLUMN assembly_opening_stock INTEGER NOT NULL DEFAULT 0"
+        )
+    if not _column_exists(conn, "semi_finished_monthly_totals", "hongya_opening_stock"):
+        conn.execute(
+            "ALTER TABLE semi_finished_monthly_totals "
+            "ADD COLUMN hongya_opening_stock INTEGER NOT NULL DEFAULT 0"
         )
     _migrate_department_names(conn)
 

@@ -1,0 +1,60 @@
+name: Restore Factory Review Data
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-cloud
+  queue: max
+  cancel-in-progress: false
+
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout selected ref
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.ref }}
+          persist-credentials: false
+
+      - name: Validate SSH host fingerprint
+        shell: bash
+        env:
+          CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]]; then
+            echo 'CLOUD_HOST_FINGERPRINT must be a non-empty OpenSSH SHA256 fingerprint.' >&2
+            exit 1
+          fi
+
+      - name: Restore production data via SSH
+        env:
+          FACTORY_REVIEW_DATA_PART_1_B64: ${{ secrets.FACTORY_REVIEW_DATA_PART_1_B64 }}
+          FACTORY_REVIEW_DATA_PART_2_B64: ${{ secrets.FACTORY_REVIEW_DATA_PART_2_B64 }}
+          FACTORY_REVIEW_DATA_PART_3_B64: ${{ secrets.FACTORY_REVIEW_DATA_PART_3_B64 }}
+          FACTORY_REVIEW_DATA_SHA256: ${{ secrets.FACTORY_REVIEW_DATA_SHA256 }}
+          CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+          EXPECTED_COMMIT: ${{ github.sha }}
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
+        with:
+          host: ${{ secrets.CLOUD_HOST }}
+          username: ${{ secrets.CLOUD_USER }}
+          key: ${{ secrets.CLOUD_SSH_KEY }}
+          fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
+          command_timeout: 20m
+          envs: FACTORY_REVIEW_DATA_PART_1_B64,FACTORY_REVIEW_DATA_PART_2_B64,FACTORY_REVIEW_DATA_PART_3_B64,FACTORY_REVIEW_DATA_SHA256,EXPECTED_COMMIT
+          script: |
+            set -euo pipefail
+            cd /opt/rr-portal
+            git fetch origin main
+            test "$(git rev-parse origin/main)" = "$EXPECTED_COMMIT"
+            test "$(git rev-parse HEAD)" = "$EXPECTED_COMMIT"
+            git ls-files --error-unmatch -- deploy/restore-factory-review-data.sh > /dev/null
+            test -z "$(git status --porcelain --untracked-files=all -- deploy/restore-factory-review-data.sh)"
+            bash deploy/restore-factory-review-data.sh

@@ -671,6 +671,7 @@ services:
       dockerfile: Dockerfile
       args:
         VITE_BASE_PATH: /factory-review/
+        OCI_REVISION: ${AFTER_COMMIT:-local}
     environment:
       - FACTORY_REVIEW_ADMIN_EMAIL=${FACTORY_REVIEW_ADMIN_EMAIL:-admin@rr.local}
       - FACTORY_REVIEW_ADMIN_PASSWORD=${FACTORY_REVIEW_ADMIN_PASSWORD:-}

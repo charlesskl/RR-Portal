@@ -84,7 +84,7 @@ const ROLE_PERMS = {
     manageDefectLib:true,
   },
   viewer: {
-    createRecord:true,  editRecord:true,  deleteRecord:false, batchDelete:false,
+    createRecord:true,  editRecord:false, deleteRecord:false, batchDelete:false,
     importData:false,   exportData:true,  exportPdf:true,    manageUsers:false,
     manageDefectLib:false,
   },

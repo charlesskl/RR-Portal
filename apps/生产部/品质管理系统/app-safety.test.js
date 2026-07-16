@@ -168,6 +168,14 @@ test('basic record entry does not grant defect-library management', () => {
   assert.match(appSource, /const canAdd = can\('manageDefectLib'\)/);
 });
 
+test('viewer account can create records but cannot edit or delete them', () => {
+  const viewerPerms = appSource.match(/viewer:\s*\{(?<body>[\s\S]*?)\n\s*\}/)?.groups?.body;
+  assert.ok(viewerPerms, 'viewer permissions should exist');
+  assert.match(viewerPerms, /createRecord:\s*true/);
+  assert.match(viewerPerms, /editRecord:\s*false/);
+  assert.match(viewerPerms, /deleteRecord:\s*false/);
+});
+
 test('mobile modal controls keep a 16px font to avoid iOS focus zoom', () => {
   assert.match(mobileCss, /html\.qc-mobile \.modal textarea\s*\{[^}]*font-size:\s*16px\s*!important/s);
   assert.match(mobileCss, /html\.qc-narrow \.modal textarea\s*\{[^}]*font-size:\s*16px\s*!important/s);

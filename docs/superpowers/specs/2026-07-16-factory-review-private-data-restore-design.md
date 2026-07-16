@@ -36,4 +36,3 @@
 - 本地解析恢复包，验证 JSON 和迁移脚本一致，且不存在认证秘密字段。
 - 线上验证 `/factory-review/health`、登录页和主要业务表计数。
 - 恢复成功后确认临时 GitHub Secrets 已删除。
-

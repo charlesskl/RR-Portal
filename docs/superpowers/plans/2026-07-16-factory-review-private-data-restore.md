@@ -175,4 +175,3 @@ Dispatch `.github/workflows/restore-factory-review-data.yml` on `main`, monitor 
 - [ ] **Step 5: Verify production and remove temporary Secrets**
 
 Check `/factory-review/health`, the login page, and the workflow's verified row counts. Delete all four temporary payload secrets immediately after success and verify their names no longer appear in `gh secret list`.
-

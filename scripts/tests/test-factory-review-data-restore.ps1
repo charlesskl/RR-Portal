@@ -108,6 +108,22 @@ function Get-BashFunctionBody {
     throw "FAIL: could not find the end of function $FunctionName"
 }
 
+function Assert-NoHardcodedAdminPassword {
+    param(
+        [string]$Text,
+        [string]$Path
+    )
+
+    $assignmentPattern = '(?im)^\s*(?:export\s+)?FACTORY_REVIEW_ADMIN_PASSWORD\s*=(?<value>[^\r\n;#]*)'
+    $allowedValuePattern = '^(?:["''])?(?:\$\{[^}]+\}|\$[A-Za-z_][A-Za-z0-9_]*|\$\((?:env|printenv)\b[^)]*\))(?:["''])?$'
+    foreach ($match in [regex]::Matches($Text, $assignmentPattern)) {
+        $value = $match.Groups['value'].Value.Trim()
+        if ($value -notmatch '^(?:["'']{2})?$' -and $value -notmatch $allowedValuePattern) {
+            throw "FAIL: hardcoded FACTORY_REVIEW_ADMIN_PASSWORD in $Path"
+        }
+    }
+}
+
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $restorePath = Join-Path $repoRoot 'deploy\restore-factory-review-data.sh'
 $bashTestPath = Join-Path $PSScriptRoot 'test-factory-review-data-restore.sh'
@@ -122,9 +138,11 @@ Assert-True ($codeText -notmatch '(?m)^\s*set\s+-o\s+xtrace\b') 'restore script 
 Assert-True ($codeText -notmatch '(?m)^\s*PS4\s*=') 'restore script must never configure shell tracing through PS4'
 Assert-Match $codeText '(?im)^\s*trap\b[^\r\n]*\bERR\b' 'restore script must register an ERR trap'
 
+$requireBody = Get-BashFunctionBody $codeText 'require_payload_parts'
 $mainBody = Get-BashFunctionBody $codeText 'main'
 $reconstructBody = Get-BashFunctionBody $codeText 'reconstruct_payload'
 $verifyBody = Get-BashFunctionBody $codeText 'verify_snapshot_counts'
+Assert-Match $requireBody '(?i)payload|FACTORY_REVIEW_DATA_PART_|part_[123]' 'require_payload_parts must validate payload parts'
 Assert-Match $reconstructBody '(?i)sha-?256|sha256sum' 'reconstruct_payload must verify the payload SHA-256'
 Assert-Match $mainBody '(?i)(?:systemctl|docker\s+compose)[^\r\n]*\bstop\b' 'main must stop the factory-review service'
 $reconstructCallIndex = First-MatchIndex $mainBody '(?im)^\s*reconstruct_payload\b'
@@ -154,17 +172,30 @@ foreach ($table in $requiredCounts.Keys) {
     Assert-Match $verifyText "(?i)\b$($requiredCounts[$table])\b" "verify_snapshot_counts must enforce the minimum count for $table"
 }
 
-$payloadVariablePattern = '(?:FACTORY_REVIEW_DATA_PART_[123]_B64|PAYLOAD_B64|PAYLOAD_PART_[123]_B64)'
-$payloadPrintPattern = "(?im)^\s*(?:(?:echo|logger|cat)\b(?![^\r\n]*>)[^\r\n]*$payloadVariablePattern|printf\b(?![^\r\n]*>)[^\r\n]*$payloadVariablePattern|printf\b[^\r\n]*(?:>&[12]|/dev/stderr)[^\r\n]*$payloadVariablePattern)"
-Assert-True ($codeText -notmatch $payloadPrintPattern) 'restore script must not print payload variables'
+$payloadVariablePattern = '(?:\bFACTORY_REVIEW_DATA_PART_[123]_B64\b|\bPAYLOAD_B64\b|\bPAYLOAD_PART_[123]_B64\b|\bPART_[123](?:_B64)?\b|\bpart[123](?:_b64)?\b|\bpayload_b64\b)'
+$payloadSinkPattern = "(?im)^\s*(?:echo|printf|tee|cat)\b[^\r\n]*$payloadVariablePattern"
+$payloadHeredocPattern = '(?ims)^\s*(?:echo|printf|tee|cat)\b[^\r\n]*<<-?\s*[''\"]?(?<delimiter>[A-Za-z_][A-Za-z0-9_]*)[''\"]?[^\r\n]*\r?\n(?:(?!^\k<delimiter>\s*$).)*?' + $payloadVariablePattern
+$payloadLeakFixtures = @(
+    'echo "$PAYLOAD_B64"',
+    'printf "%s" "$PART_1" >&2',
+    'printf "%s" "$PART_2" > /tmp/output.log',
+    'tee /tmp/output.log <<< "$PART_3"',
+    'cat "$PART_1"'
+    "cat <<'EOF'`n`$PART_2`nEOF"
+)
+foreach ($fixture in $payloadLeakFixtures) {
+    Assert-True (($fixture -match $payloadSinkPattern) -or ($fixture -match $payloadHeredocPattern)) 'payload leak fixture must be rejected'
+}
+Assert-True ('cat "$internal_file" > /tmp/output.log' -notmatch $payloadSinkPattern) 'ordinary internal file output must not be treated as payload leakage'
 
 $dataLiteralPattern = '(?i)SN' + 'APSHOT\s*=\s*\{'
-$adminLiteralPattern = '(?im)(?:FACTORY_REVIEW_ADMIN_PASSWORD|ADMIN_PASSWORD|PASSWORD|PASSWD)\s*(?:=|:)\s*["''][^"'']{8,}["'']'
 $securityScanPaths = @($PSCommandPath, $bashTestPath, $restorePath)
 foreach ($securityPath in $securityScanPaths) {
     $securityText = Get-Content -LiteralPath $securityPath -Raw
     Assert-True ($securityText -notmatch $dataLiteralPattern) "security scan found plaintext private migration data in $securityPath"
-    Assert-True ($securityText -notmatch $adminLiteralPattern) "security scan found a hardcoded admin password in $securityPath"
+    Assert-True ($securityText -notmatch $payloadSinkPattern) "security scan found a payload variable passed to an output command in $securityPath"
+    Assert-True ($securityText -notmatch $payloadHeredocPattern) "security scan found a payload variable in an output heredoc in $securityPath"
+    Assert-NoHardcodedAdminPassword $securityText $securityPath
 }
 
 Assert-True (Test-Path -LiteralPath $bashTestPath -PathType Leaf) "behavior test is missing: $bashTestPath"

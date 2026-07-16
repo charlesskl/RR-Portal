@@ -51,12 +51,12 @@ archive_arg() {
       -f|--file)
         expect_file=1
         ;;
-      -*f*)
-        expect_file=1
-        ;;
       --file=*)
         printf '%s' "${arg#--file=}"
         return 0
+        ;;
+      -*f*)
+        expect_file=1
         ;;
     esac
   done
@@ -104,11 +104,17 @@ missing_output=$(
   RESTORE_FACTORY_REVIEW_SOURCE_ONLY=1 \
   FACTORY_REVIEW_DATA_PART_1_B64=first \
   FACTORY_REVIEW_DATA_PART_3_B64=last \
-  bash -c 'set -euo pipefail; source "$1"; require_payload_parts' _ "$RESTORE_SCRIPT" 2>&1
+  bash -c 'set -euo pipefail; source "$1"; declare -F require_payload_parts >/dev/null || { printf "%s\n" "missing payload validation function" >&2; exit 127; }; require_payload_parts' _ "$RESTORE_SCRIPT" 2>&1
 )
 missing_status=$?
 set -e
 [[ $missing_status -ne 0 ]] || fail 'missing payload parts must fail'
+if ! printf '%s' "$missing_output" | grep -Eqi 'missing[^[:alnum:]]+payload|payload[^[:alnum:]]+missing'; then
+  fail 'missing payload parts must be named in the error output'
+fi
+if printf '%s' "$missing_output" | grep -qi 'command not found'; then
+  fail 'missing payload parts must not fail with command not found'
+fi
 [[ ! -s "$CALL_LOG" ]] || fail 'missing payload parts must fail before external commands'
 
 PAYLOAD_GZ="$TEST_ROOT/payload.gz"

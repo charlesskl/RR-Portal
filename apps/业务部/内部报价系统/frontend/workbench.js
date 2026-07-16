@@ -1268,6 +1268,8 @@ function renderTaxDeductionBlock(host, salesPayload, salesSec, me, autoFill) {
   applyAuto('t1', 'motor', autoFill.motor);
   applyAuto('t1', 'suction', autoFill.suction);
   applyAuto('t1', 'glue_bag', autoFill.glue_bag);
+  // 未减税前码数始终等于上方码点，不允许旧的手工覆盖阻断同步。
+  delete ps.overrides['t2.code_before'];
   applyAuto('t2', 'code_before', autoFill.code_before);
   applyAuto('t2', 'color_box', autoFill.color_box);
   applyAuto('t2', 'battery', autoFill.battery);
@@ -1339,7 +1341,10 @@ function renderTaxDeductionBlock(host, salesPayload, salesSec, me, autoFill) {
 
   function buildTable(title, cols, dataKey) {
     const headRow = cols.map(([k, lbl]) => `<th>${lbl}</th>`).join('');
-    const valRow = cols.map(([k, lbl]) => `<td><input class="${cls}" type="number" step="0.0001" data-tbl="${dataKey}" data-key="${k}" value="${num(ps[dataKey][k]) || ''}" ${ro}/></td>`).join('');
+    const valRow = cols.map(([k, lbl]) => {
+      const synced = dataKey === 't2' && k === 'code_before';
+      return `<td><input class="${synced ? 'tk-ro' : cls}" type="number" step="0.0001" data-tbl="${dataKey}" data-key="${k}" value="${num(ps[dataKey][k]) || ''}" ${synced ? 'readonly' : ro}/></td>`;
+    }).join('');
     return `<div class="tk-block"><div class="tk-title">${title}</div>
       <div class="tk-scroll"><table class="tk-table"><thead><tr>${headRow}</tr></thead><tbody><tr>${valRow}</tr></tbody></table></div></div>`;
   }

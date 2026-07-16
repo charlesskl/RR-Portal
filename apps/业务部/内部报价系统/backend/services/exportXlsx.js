@@ -1881,7 +1881,8 @@ function renderTaxSummary(ws, row, sales, extra = {}) {
     // 表2 引用 九、合计：纸箱=K，杂项=印尼运费H+附加税L（附加税现在在 L 列），未减税前码数=码点(markup 常量)
     carton:      refLink('t2', 'carton',      sumR ? `K${sumR}` : null),
     misc:        refLink('t2', 'misc',        sumR ? `H${sumR}+L${sumR}` : null),
-    code_before: refLink('t2', 'code_before', sumR ? `${_mk}` : null),
+    // 未减税前码数始终取当前码点；忽略旧报价残留的手工覆盖标记。
+    code_before: { ref: `${_mk}` },
     // 运费/吊柜费 = 直接引用 出货价算价 盐田40柜 的 运费/吊柜费 单元格（单一来源）；回退到运费场景率×%
     freight: refLink('t2', 'freight', subRefs.shipFreightCell || (ytRateCell ? `${ytRateCell}*${fPct}/100` : null)),
     cabinet: refLink('t2', 'cabinet', subRefs.shipCabinetCell || (ytRateCell ? `${ytRateCell}*${lPct}/100` : null)),

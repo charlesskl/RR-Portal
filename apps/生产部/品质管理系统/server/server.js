@@ -279,7 +279,7 @@ function getFilteredExportRecords(searchParams) {
   const to = String(searchParams.get('dateTo') || '').trim();
   return getBootstrap().records.filter(r => {
     if (search) {
-      const haystack = [r.supplier, r.productNo, r.productName, r.client, r.defect]
+      const haystack = [r.supplier, r.productNo, r.productName, r.client, r.orderNo, r.deliveryNo, r.defect]
         .filter(Boolean).join(' ').toLowerCase();
       if (!haystack.includes(search)) return false;
     }
@@ -292,20 +292,20 @@ function getFilteredExportRecords(searchParams) {
 }
 
 function buildRecordsCsv(records) {
-  const hdr = ['ID','来料日期','检验日期','供应商','客户','货号','款式名称','类型',
+  const hdr = ['ID','来料日期','检验日期','供应商','客户','货号','款式名称','PO号','类型',
     '来料数量','抽查数量','PASS数','FAIL数','不良率','不良现象','判定结果','检验员','备注'];
   const rows = records
     .slice()
     .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')))
     .map(r => [
       r.id, r.date, r.inspDate, r.supplier, r.client, r.productNo, r.productName,
-      r.type, r.qty, r.sampleQty, r.pass, r.fail, r.defectRate, r.defect, r.result, r.qc, r.remark,
+      r.orderNo, r.type, r.qty, r.sampleQty, r.pass, r.fail, r.defectRate, r.defect, r.result, r.qc, r.remark,
     ].map(csvCell));
   return '\uFEFF' + [hdr.map(csvCell), ...rows].map(r => r.join(',')).join('\n');
 }
 
 function buildFactoryExcelHtml(records) {
-  const headers = ['序号','来货日期','供应商','加工类型','客户','送货单号','货号','产品名称','数量','单数','检验结果','不良描述','检验人','备注'];
+  const headers = ['序号','来货日期','供应商','加工类型','客户','送货单号','PO号','货号','产品名称','数量','单数','检验结果','不良描述','检验人','备注'];
   const rows = records.slice().sort((a, b) => String(a.date || '').localeCompare(String(b.date || '')));
   return `<!doctype html>
 <html>
@@ -321,7 +321,7 @@ function buildFactoryExcelHtml(records) {
 </head>
 <body>
 <table>
-  <tr><td class="title" colspan="14">加工厂品质检验明细统计表</td></tr>
+  <tr><td class="title" colspan="15">加工厂品质检验明细统计表</td></tr>
   <tr>${headers.map(h => `<th class="head">${htmlCell(h)}</th>`).join('')}</tr>
   ${rows.map((r, i) => `<tr>
     <td>${i + 1}</td>
@@ -330,6 +330,7 @@ function buildFactoryExcelHtml(records) {
     <td>${htmlCell(r.type || '')}</td>
     <td>${htmlCell(r.client || '')}</td>
     <td>${htmlCell(r.deliveryNo || '')}</td>
+    <td>${htmlCell(r.orderNo || '')}</td>
     <td>${htmlCell(r.productNo || '')}</td>
     <td class="left">${htmlCell(r.productName || '')}</td>
     <td>${htmlCell(r.qty != null && r.qty !== '' ? r.qty : '')}</td>

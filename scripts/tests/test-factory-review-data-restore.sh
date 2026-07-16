@@ -10,7 +10,7 @@ INSTALL_DIR="$TEST_ROOT/install"
 CALL_LOG="$TEST_ROOT/calls.log"
 RESTORE_MARKER="$TEST_ROOT/restore.marker"
 BACKUP_PATH_FILE="$TEST_ROOT/backup.path"
-BACKUP_TOKEN='factory-review-backup-token'
+BACKUP_MARKER='factory-review-backup-token'
 mkdir -p "$MOCK_BIN" "$INSTALL_DIR/pb_data"
 : > "$CALL_LOG"
 
@@ -68,13 +68,13 @@ archive=$(archive_arg "$@") || exit 2
 case " $* " in
   *-c*|*--create*)
     mkdir -p "$(dirname "$archive")"
-    printf '%s\n' "$BACKUP_TOKEN" > "$archive"
+    printf '%s\n' "$BACKUP_MARKER" > "$archive"
     printf '%s\n' "$archive" > "$BACKUP_PATH_FILE"
     ;;
   *-x*|*--extract*)
     [[ -s "$BACKUP_PATH_FILE" ]] || exit 3
     [[ "$archive" == "$(<"$BACKUP_PATH_FILE")" ]] || exit 4
-    grep -Fqx "$BACKUP_TOKEN" "$archive" || exit 5
+    grep -Fqx "$BACKUP_MARKER" "$archive" || exit 5
     : > "$RESTORE_MARKER"
     ;;
 esac
@@ -94,7 +94,7 @@ exit 0
 MOCK
 
 chmod +x "$MOCK_BIN/docker" "$MOCK_BIN/tar" "$MOCK_BIN/curl" "$MOCK_BIN/systemctl"
-export BACKUP_PATH_FILE BACKUP_TOKEN CALL_LOG RESTORE_MARKER
+export BACKUP_PATH_FILE BACKUP_MARKER CALL_LOG RESTORE_MARKER
 
 [[ -f "$RESTORE_SCRIPT" ]] || fail "restore script is missing: $RESTORE_SCRIPT"
 
@@ -160,7 +160,7 @@ restore_output=$(
   FACTORY_REVIEW_DATA_PART_2_B64="$PART_2" \
   FACTORY_REVIEW_DATA_PART_3_B64="$PART_3" \
   FACTORY_REVIEW_DATA_SHA256="$PAYLOAD_SHA" \
-  BACKUP_TOKEN="$BACKUP_TOKEN" \
+  BACKUP_MARKER="$BACKUP_MARKER" \
   bash -c 'set -euo pipefail; source "$1"; verify_snapshot_counts() { printf "%s\\n" "forced verification failure" >&2; return 73; }; main' _ "$RESTORE_SCRIPT" 2>&1
 )
 restore_status=$?

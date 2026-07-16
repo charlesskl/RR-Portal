@@ -108,18 +108,18 @@ function Get-BashFunctionBody {
     throw "FAIL: could not find the end of function $FunctionName"
 }
 
-function Assert-NoHardcodedAdminPassword {
+function Assert-NoHardcodedSensitiveAssignment {
     param(
         [string]$Text,
         [string]$Path
     )
 
-    $assignmentPattern = '(?im)^\s*(?:export\s+)?FACTORY_REVIEW_ADMIN_PASSWORD\s*=(?<value>[^\r\n;#]*)'
-    $allowedValuePattern = '^(?:["''])?(?:\$\{[^}]+\}|\$[A-Za-z_][A-Za-z0-9_]*|\$\((?:env|printenv)\b[^)]*\))(?:["''])?$'
+    $assignmentPattern = '(?im)^\s*(?:export\s+)?(?<name>[A-Za-z_][A-Za-z0-9_]*?(?:PASSWORD|PASSWD|PASSPHRASE|SECRET|TOKEN|PRIVATE_KEY|ADMIN_PASSWORD[A-Za-z0-9_]*))\s*=(?<value>[^\r\n;#]*)'
+    $allowedValuePattern = '^(?:["''])?\$\{[^}]+\}(?:["''])?$'
     foreach ($match in [regex]::Matches($Text, $assignmentPattern)) {
         $value = $match.Groups['value'].Value.Trim()
-        if ($value -notmatch '^(?:["'']{2})?$' -and $value -notmatch $allowedValuePattern) {
-            throw "FAIL: hardcoded FACTORY_REVIEW_ADMIN_PASSWORD in $Path"
+        if ($value -notmatch '^(?:["'']){0,2}$' -and $value -notmatch $allowedValuePattern) {
+            throw "FAIL: hardcoded sensitive variable $($match.Groups['name'].Value) in $Path"
         }
     }
 }
@@ -133,7 +133,8 @@ $scriptText = Get-Content -LiteralPath $restorePath -Raw
 $codeText = [regex]::Replace($scriptText, '(?m)^\s*#.*$', '')
 
 Assert-Match $codeText '(?m)^\s*set\s+-euo\s+pipefail\s*$' 'restore script must enable set -euo pipefail'
-Assert-True ($codeText -notmatch '(?m)^\s*set\s+-x\b') 'restore script must never enable shell tracing with set -x'
+$tracePattern = '(?im)^\s*set\s+-[A-Za-z]*x[A-Za-z]*\b'
+Assert-True ($codeText -notmatch $tracePattern) 'restore script must never enable shell tracing through combination flags containing x'
 Assert-True ($codeText -notmatch '(?m)^\s*set\s+-o\s+xtrace\b') 'restore script must never enable shell tracing with set -o xtrace'
 Assert-True ($codeText -notmatch '(?m)^\s*PS4\s*=') 'restore script must never configure shell tracing through PS4'
 Assert-Match $codeText '(?im)^\s*trap\b[^\r\n]*\bERR\b' 'restore script must register an ERR trap'
@@ -173,14 +174,16 @@ foreach ($table in $requiredCounts.Keys) {
 }
 
 $payloadVariablePattern = '(?:\bFACTORY_REVIEW_DATA_PART_[123]_B64\b|\bPAYLOAD_B64\b|\bPAYLOAD_PART_[123]_B64\b|\bPART_[123](?:_B64)?\b|\bpart[123](?:_b64)?\b|\bpayload_b64\b)'
-$payloadSinkPattern = "(?im)^\s*(?:echo|printf|tee|cat)\b[^\r\n]*$payloadVariablePattern"
-$payloadHeredocPattern = '(?ims)^\s*(?:echo|printf|tee|cat)\b[^\r\n]*<<-?\s*[''\"]?(?<delimiter>[A-Za-z_][A-Za-z0-9_]*)[''\"]?[^\r\n]*\r?\n(?:(?!^\k<delimiter>\s*$).)*?' + $payloadVariablePattern
+$payloadSinkPattern = "(?im)^\s*(?:echo|printf|tee|cat|logger|systemd-cat)\b[^\r\n]*$payloadVariablePattern"
+$payloadHeredocPattern = '(?ims)^\s*(?:echo|printf|tee|cat|logger|systemd-cat)\b[^\r\n]*<<-?\s*[''\"]?(?<delimiter>[A-Za-z_][A-Za-z0-9_]*)[''\"]?[^\r\n]*\r?\n(?:(?!^\k<delimiter>\s*$).)*?' + $payloadVariablePattern
 $payloadLeakFixtures = @(
     'echo "$PAYLOAD_B64"',
     'printf "%s" "$PART_1" >&2',
     'printf "%s" "$PART_2" > /tmp/output.log',
     'tee /tmp/output.log <<< "$PART_3"',
-    'cat "$PART_1"'
+    'cat "$PART_1"',
+    'logger --tag restore "$PAYLOAD_B64"',
+    'systemd-cat --identifier=restore "$PART_2"',
     "cat <<'EOF'`n`$PART_2`nEOF"
 )
 foreach ($fixture in $payloadLeakFixtures) {
@@ -188,15 +191,52 @@ foreach ($fixture in $payloadLeakFixtures) {
 }
 Assert-True ('cat "$internal_file" > /tmp/output.log' -notmatch $payloadSinkPattern) 'ordinary internal file output must not be treated as payload leakage'
 
+$sensitiveLiteralFixtures = @(
+    'DB_PASSWORD=abc123',
+    'DB_PASSWD=abc123',
+    'KEY_PASSPHRASE=abc123',
+    'API_SECRET=secret',
+    'API_TOKEN=abc123',
+    'TLS_PRIVATE_KEY=private-key',
+    'SERVICE_ADMIN_PASSWORD_VALUE=admin123',
+    'FACTORY_REVIEW_ADMIN_PASSWORD=admin123'
+)
+foreach ($fixture in $sensitiveLiteralFixtures) {
+    $rejected = $false
+    try { Assert-NoHardcodedSensitiveAssignment $fixture '<fixture>' } catch { $rejected = $true }
+    Assert-True $rejected 'non-empty sensitive assignments must be rejected'
+}
+$allowedSensitiveFixtures = @(
+    'API_TOKEN=',
+    'API_TOKEN=""',
+    'DB_PASSWORD=${DB_PASSWORD:-}',
+    'FACTORY_REVIEW_ADMIN_PASSWORD=${FACTORY_REVIEW_ADMIN_PASSWORD:-}'
+)
+foreach ($fixture in $allowedSensitiveFixtures) {
+    Assert-NoHardcodedSensitiveAssignment $fixture '<fixture>'
+}
+
+$traceFixtures = @(
+    'set -euxo pipefail',
+    'set -x',
+    'set -o xtrace'
+)
+foreach ($fixture in $traceFixtures) {
+    Assert-True ($fixture -match $tracePattern -or $fixture -match '(?im)^\s*set\s+-o\s+xtrace\b') 'tracing bypass fixture must be rejected'
+}
+Assert-True ('set -euo pipefail' -notmatch $tracePattern) 'safe strict-mode flags must remain allowed'
+
 $dataLiteralPattern = '(?i)SN' + 'APSHOT\s*=\s*\{'
+$alternativeAdminReadPattern = '(?im)(?<!FACTORY_REVIEW_)\b(?:ADMIN_PASSWORD|PASSWORD)\b'
 $securityScanPaths = @($PSCommandPath, $bashTestPath, $restorePath)
 foreach ($securityPath in $securityScanPaths) {
     $securityText = Get-Content -LiteralPath $securityPath -Raw
     Assert-True ($securityText -notmatch $dataLiteralPattern) "security scan found plaintext private migration data in $securityPath"
     Assert-True ($securityText -notmatch $payloadSinkPattern) "security scan found a payload variable passed to an output command in $securityPath"
     Assert-True ($securityText -notmatch $payloadHeredocPattern) "security scan found a payload variable in an output heredoc in $securityPath"
-    Assert-NoHardcodedAdminPassword $securityText $securityPath
+    Assert-NoHardcodedSensitiveAssignment $securityText $securityPath
 }
+Assert-True ($codeText -notmatch $alternativeAdminReadPattern) 'restore script must not read alternate ADMIN_PASSWORD or PASSWORD variables'
 
 Assert-True (Test-Path -LiteralPath $bashTestPath -PathType Leaf) "behavior test is missing: $bashTestPath"
 $bash = Get-Command bash -ErrorAction SilentlyContinue

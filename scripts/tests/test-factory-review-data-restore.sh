@@ -33,7 +33,15 @@ case "$1" in
     fi
     ;;
   inspect)
-    printf '%s\n' "${MOCK_HEALTH_STATUS:-healthy}"
+    if [[ " $* " == *'{{.Image}}'* ]]; then
+      printf 'sha256:factory-review-image\n'
+    else
+      printf '%s\n' "${MOCK_HEALTH_STATUS:-healthy}"
+    fi
+    ;;
+  image)
+    [[ ${2:-} == inspect ]] || exit 2
+    printf '%s\n' "${MOCK_IMAGE_REVISION:-${EXPECTED_COMMIT:?}}"
     ;;
   run)
     [[ ${FAIL_DOCKER_RUN:-0} != 1 ]] || exit 75
@@ -129,10 +137,22 @@ PAYLOAD_TEXT=$(printf 'const %s%s = {}; migrate((app) => {});\n' 'SN' 'APSHOT')
 printf '%s' "$PAYLOAD_TEXT" | gzip -c > "$PAYLOAD_GZ"
 PAYLOAD_SHA=$(sha256sum "$PAYLOAD_GZ" | awk '{print $1}')
 PAYLOAD_B64=$(base64 < "$PAYLOAD_GZ" | tr -d '\r\n')
-chunk_size=$(( (${#PAYLOAD_B64} + 2) / 3 ))
-PART_1=${PAYLOAD_B64:0:chunk_size}
-PART_2=${PAYLOAD_B64:chunk_size:chunk_size}
-PART_3=${PAYLOAD_B64:chunk_size*2}
+base_size=$(( ${#PAYLOAD_B64} / 3 ))
+remainder=$(( ${#PAYLOAD_B64} % 3 ))
+part_1_size=$(( base_size + (remainder > 0 ? 1 : 0) ))
+part_2_size=$(( base_size + (remainder > 1 ? 1 : 0) ))
+PART_1=${PAYLOAD_B64:0:part_1_size}
+PART_2=${PAYLOAD_B64:part_1_size:part_2_size}
+PART_3=${PAYLOAD_B64:part_1_size+part_2_size}
+[[ -n $PART_1 && -n $PART_2 && -n $PART_3 ]] || fail 'payload fixture must be evenly split into three non-empty parts'
+largest_size=$part_1_size
+(( part_2_size > largest_size )) && largest_size=$part_2_size
+smallest_size=${#PART_3}
+(( part_1_size < smallest_size )) && smallest_size=$part_1_size
+(( part_2_size < smallest_size )) && smallest_size=$part_2_size
+(( largest_size - smallest_size <= 1 )) || fail 'three payload parts must differ in length by at most one character'
+EXPECTED_COMMIT=0123456789abcdef0123456789abcdef01234567
+export EXPECTED_COMMIT
 
 run_main() {
   local command=$1
@@ -145,6 +165,7 @@ run_main() {
   FACTORY_REVIEW_DATA_PART_2_B64="$PART_2" \
   FACTORY_REVIEW_DATA_PART_3_B64="$PART_3" \
   FACTORY_REVIEW_DATA_SHA256="$PAYLOAD_SHA" \
+  EXPECTED_COMMIT="$EXPECTED_COMMIT" \
   PB_DATA_DIR="$INSTALL_DIR/apps/PMC跟仓管/加工厂月度评审管理制度/pb_data" \
   SIGNAL_MARKER="$TEST_ROOT/signal.marker" \
   "$@" \
@@ -165,6 +186,28 @@ set -e
 [[ $missing_status -ne 0 ]] || fail 'missing payload parts must fail'
 [[ $missing_output =~ [Mm]issing.*payload|payload.*[Mm]issing ]] || fail 'missing payload error must name payload'
 [[ ! -s $CALL_LOG ]] || fail 'missing payload parts must fail before external commands'
+
+: > "$CALL_LOG"
+set +e
+invalid_commit_output=$(run_main 'source "$1"; main' EXPECTED_COMMIT=not-a-full-commit 2>&1)
+invalid_commit_status=$?
+set -e
+[[ $invalid_commit_status -ne 0 ]] || fail 'invalid EXPECTED_COMMIT must fail'
+[[ $invalid_commit_output == *'40'* ]] || fail 'invalid EXPECTED_COMMIT must report the exact commit shape'
+if grep -q '^docker ' "$CALL_LOG"; then fail 'invalid EXPECTED_COMMIT must fail before Docker inspection'; fi
+
+: > "$CALL_LOG"
+set +e
+old_image_output=$(run_main 'source "$1"; main' MOCK_IMAGE_REVISION=1111111111111111111111111111111111111111 2>&1)
+old_image_status=$?
+set -e
+[[ $old_image_status -ne 0 ]] || fail 'an old running image must be rejected'
+[[ $old_image_output == *'revision'* || $old_image_output == *'commit'* ]] || fail 'old image rejection must identify the revision mismatch'
+assert_contains "$CALL_LOG" '^docker compose .* ps -q factory-review$' 'old image check must inspect the current Compose container'
+assert_contains "$CALL_LOG" '^docker inspect .*\{\{\.Image\}\}' 'old image check must inspect the current container image ID'
+assert_contains "$CALL_LOG" '^docker image inspect .*org.opencontainers.image.revision' 'old image check must inspect the OCI revision label'
+if grep -Eq '^docker compose .* stop factory-review$|^docker run ' "$CALL_LOG"; then fail 'old image rejection must not stop or migrate the service'; fi
+if grep -q '^tar ' "$CALL_LOG"; then fail 'old image rejection must not touch production data backups'; fi
 
 : > "$CALL_LOG"
 set +e
@@ -211,6 +254,8 @@ cleanup_status=$?
 set -e
 [[ $cleanup_status -ne 0 ]] || fail 'temporary plaintext cleanup failure must make the restore fail'
 [[ $cleanup_output == *'temporary restore files'* ]] || fail 'cleanup failure must report a non-payload error'
+[[ -f $RESTORE_MARKER ]] || fail 'temporary plaintext cleanup failure must restore the same backup'
+assert_restarted_healthy
 
 : > "$CALL_LOG"
 /usr/bin/rm -rf "$INSTALL_DIR/backups"
@@ -226,6 +271,17 @@ if compgen -G "$INSTALL_DIR/backups/factory-review-data-restore/*.partial" >/dev
   fail 'partial backup failure must clean the unfinished archive'
 fi
 assert_restarted_healthy
+
+: > "$CALL_LOG"
+rm -f "$RESTORE_MARKER"
+set +e
+rollback_health_output=$(run_main 'source "$1"; verify_snapshot_counts() { return 73; }; main' MOCK_HEALTH_STATUS=unhealthy 2>&1)
+rollback_health_status=$?
+set -e
+[[ $rollback_health_status -ne 0 ]] || fail 'permanently unhealthy rollback data must fail'
+[[ -f $RESTORE_MARKER ]] || fail 'unhealthy rollback must still extract the same backup before health verification'
+last_service_action=$(grep -E '^docker compose .* (start|stop) factory-review$' "$CALL_LOG" | tail -n 1)
+[[ $last_service_action == *' stop factory-review' ]] || fail 'rollback health failure must leave factory-review stopped'
 
 : > "$CALL_LOG"
 rm -f "$RESTORE_MARKER"

@@ -38,6 +38,7 @@ require_payload_parts() {
     [[ -n ${!name:-} ]] || die "missing payload value: $name"
   done
   [[ $FACTORY_REVIEW_DATA_SHA256 =~ ^[0-9a-f]{64}$ ]] || die 'payload SHA-256 must be a lowercase hexadecimal digest'
+  [[ ${EXPECTED_COMMIT:-} =~ ^[0-9a-f]{40}$ ]] || die 'EXPECTED_COMMIT must be exactly 40 lowercase hexadecimal characters'
 }
 
 cleanup_temp_files() {
@@ -71,11 +72,15 @@ reconstruct_payload() {
   grep -Fq 'migrate((app) =>' "$MIGRATION_FILE" || die 'migration payload has no migrate callback'
 }
 
-resolve_factory_review_image() {
-  if [[ -z $FACTORY_REVIEW_IMAGE ]]; then
-    FACTORY_REVIEW_IMAGE=$(compose images -q "$SERVICE_NAME")
-    [[ -n $FACTORY_REVIEW_IMAGE ]] || FACTORY_REVIEW_IMAGE="${COMPOSE_PROJECT_NAME:-$(basename -- "$INSTALL_DIR")}-${SERVICE_NAME}"
-  fi
+verify_running_revision() {
+  local container_id image_id image_revision
+  container_id=$(compose ps -q "$SERVICE_NAME")
+  [[ -n $container_id ]] || die 'factory-review container is not running'
+  image_id=$(docker inspect -f '{{.Image}}' "$container_id")
+  [[ -n $image_id ]] || die 'factory-review container has no image ID'
+  image_revision=$(docker image inspect -f '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$image_id")
+  [[ $image_revision == "$EXPECTED_COMMIT" ]] || die "factory-review image revision does not match EXPECTED_COMMIT"
+  FACTORY_REVIEW_IMAGE=$image_id
 }
 
 wait_for_health() {
@@ -132,7 +137,10 @@ restore_backup() {
   failed_data_dir="${PB_DATA_DIR}.failed-$(date +%s%N)-$$"
   mv -- "$PB_DATA_DIR" "$failed_data_dir" || return 1
   tar -xzf "$BACKUP_FILE" -C "$(dirname -- "$PB_DATA_DIR")" || return 1
-  start_and_verify_service
+  if ! start_and_verify_service; then
+    compose stop "$SERVICE_NAME" || true
+    return 1
+  fi
 }
 
 on_exit() {
@@ -174,7 +182,9 @@ main() {
   cd "$INSTALL_DIR"
   exec 9>"$LOCK_FILE"
   flock -n 9 || die 'another factory-review restore is already running'
+  require_payload_parts
   reconstruct_payload
+  verify_running_revision
   [[ -d $PB_DATA_DIR && -f $PB_DATA_DIR/data.db ]] || die "PocketBase data directory or data.db is missing: $PB_DATA_DIR"
 
   service_stop_attempted=1
@@ -189,11 +199,13 @@ main() {
   BACKUP_PARTIAL_FILE=
   backup_created=1
 
-  resolve_factory_review_image
   migration_started=1
   docker run --rm -v "$PB_DATA_DIR:/pb/pb_data" -v "$MIGRATION_FILE:/pb/private-migrations/$MIGRATION_NAME:ro" "$FACTORY_REVIEW_IMAGE" /pb/pocketbase migrate up --dir=/pb/pb_data --migrationsDir=/pb/private-migrations
   verify_snapshot_counts
   start_and_verify_service
+  if ! cleanup_temp_files; then
+    die 'temporary restore files cleanup failed'
+  fi
   committed=1
   log 'Factory-review data restore completed successfully.'
 }

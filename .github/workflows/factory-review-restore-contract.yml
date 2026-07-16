@@ -1,0 +1,66 @@
+name: Factory Review Restore Contract
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/deploy.yml'
+      - '.github/workflows/restore-factory-review-data.yml'
+      - '.github/workflows/factory-review-restore-contract.yml'
+      - 'deploy/restore-factory-review-data.sh'
+      - 'scripts/tests/test-factory-review-data-restore.ps1'
+      - 'scripts/tests/test-factory-review-data-restore.sh'
+      - 'apps/PMC跟仓管/加工厂月度评审管理制度/Dockerfile'
+      - 'docker-compose.cloud.yml'
+      - 'docs/superpowers/specs/2026-07-16-factory-review-private-data-restore-design.md'
+      - 'docs/superpowers/plans/2026-07-16-factory-review-private-data-restore.md'
+      - '.superpowers/sdd/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout full branch history
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Run PowerShell contract
+        shell: pwsh
+        run: pwsh -NoProfile -File scripts/tests/test-factory-review-data-restore.ps1
+
+      - name: Run Bash behavior contract
+        shell: bash
+        run: bash scripts/tests/test-factory-review-data-restore.sh
+
+      - name: Check diff and branch-only assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check origin/main...HEAD
+
+          object_list=$(mktemp)
+          git rev-list --objects origin/main..HEAD > "$object_list"
+          if grep -Ei '(^|/)(restore-data-migration[^/]*|factory-review-data-package)(/|$)|\.(zip|gz|tgz|sqlite|sqlite3|db)$' "$object_list"; then
+            echo 'Private restore asset detected in branch-only Git objects.' >&2
+            exit 1
+          fi
+
+          while read -r object path; do
+            [[ -n ${object:-} ]] || continue
+            [[ $(git cat-file -t "$object") == blob ]] || continue
+            size=$(git cat-file -s "$object")
+            if (( size > 50000 )); then
+              echo "Unexpected branch-only blob larger than 50000 bytes: ${path:-<unknown>} ($size bytes)" >&2
+              exit 1
+            fi
+            if git cat-file blob "$object" | perl -0777 -e '$data = <STDIN>; exit($data =~ /const\s+SNAPSHOT\s*=\s*\{(?!\s*\})/s ? 0 : 1)'; then
+              echo "Plaintext non-empty private snapshot object detected: ${path:-<unknown>}" >&2
+              exit 1
+            fi
+          done < "$object_list"

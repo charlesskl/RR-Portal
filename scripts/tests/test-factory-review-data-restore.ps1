@@ -178,10 +178,29 @@ $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $restorePath = Join-Path $repoRoot 'deploy\restore-factory-review-data.sh'
 $bashTestPath = Join-Path $PSScriptRoot 'test-factory-review-data-restore.sh'
 $workflowPath = Join-Path $repoRoot '.github\workflows\restore-factory-review-data.yml'
+$deployWorkflowPath = Join-Path $repoRoot '.github\workflows\deploy.yml'
+$contractWorkflowPath = Join-Path $repoRoot '.github\workflows\factory-review-restore-contract.yml'
+$planPath = Join-Path $repoRoot 'docs\superpowers\plans\2026-07-16-factory-review-private-data-restore.md'
+$factoryReviewDockerfiles = @(Get-ChildItem -LiteralPath (Join-Path $repoRoot 'apps') -Filter Dockerfile -File -Recurse | Where-Object {
+    (Get-Content -LiteralPath $_.FullName -Raw -Encoding UTF8) -match 'ARG\s+PB_VERSION=0\.39\.6'
+})
+Assert-True ($factoryReviewDockerfiles.Count -eq 1) 'exactly one PocketBase 0.39.6 factory-review Dockerfile must exist'
+$dockerfilePath = $factoryReviewDockerfiles[0].FullName
+$composePath = Join-Path $repoRoot 'docker-compose.cloud.yml'
 
 Assert-True (Test-Path -LiteralPath $workflowPath -PathType Leaf) "restore workflow is missing: $workflowPath"
 $workflowText = Get-Content -LiteralPath $workflowPath -Raw
 $workflowCodeText = [regex]::Replace($workflowText, '(?m)^\s*#.*$', '')
+$deployWorkflowText = Get-Content -LiteralPath $deployWorkflowPath -Raw
+
+$restoreConcurrency = Get-TopLevelYamlBlock $workflowCodeText 'concurrency'
+$deployConcurrency = Get-TopLevelYamlBlock $deployWorkflowText 'concurrency'
+$restoreConcurrencyGroup = [regex]::Match($restoreConcurrency, '(?im)^\s*group\s*:\s*(?<value>[^#\r\n]+)')
+$deployConcurrencyGroup = [regex]::Match($deployConcurrency, '(?im)^\s*group\s*:\s*(?<value>[^#\r\n]+)')
+Assert-True ($restoreConcurrencyGroup.Success -and $deployConcurrencyGroup.Success) 'restore and deploy workflows must declare concurrency groups'
+Assert-True ($restoreConcurrencyGroup.Groups['value'].Value.Trim() -eq $deployConcurrencyGroup.Groups['value'].Value.Trim()) 'restore workflow must use the exact deploy workflow concurrency group'
+Assert-True ($restoreConcurrencyGroup.Groups['value'].Value.Trim() -eq 'deploy-cloud') 'production workflow concurrency group must remain deploy-cloud'
+Assert-Match $restoreConcurrency '(?im)^\s*cancel-in-progress\s*:\s*false\s*$' 'restore workflow must queue behind production deploys without cancelling in-progress work'
 
 $triggerBlock = [regex]::Match($workflowCodeText, '(?m)^on:\s*\r?\n(?<body>(?:^[ \t]+[^\r\n]*(?:\r?\n|$))*)')
 Assert-True $triggerBlock.Success 'restore workflow must declare an on block'
@@ -210,6 +229,34 @@ Assert-Match $workflowCodeText 'appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f
 Assert-Match $workflowCodeText '(?im)^\s*command_timeout\s*:\s*20m\s*$' 'restore workflow must have a 20-minute SSH timeout'
 Assert-True ($workflowCodeText -notmatch '(?m)^\s{4}env:\s*$') 'restore workflow must not expose secrets through job-level env'
 
+$preflightStep = [regex]::Match($workflowCodeText, '(?ms)^\s{6}-\s*name:\s*Validate SSH host fingerprint\s*$.*?(?=^\s{6}-\s*name:|\z)')
+Assert-True $preflightStep.Success 'restore workflow must validate the SSH fingerprint in an independent preflight step'
+$preflightText = $preflightStep.Value
+$preflightSecretReferences = @([regex]::Matches($preflightText, '\$\{\{\s*secrets\.(?<name>[A-Za-z0-9_]+)\s*\}\}') | ForEach-Object { $_.Groups['name'].Value } | Select-Object -Unique)
+Assert-True ($preflightSecretReferences.Count -eq 1 -and $preflightSecretReferences[0] -eq 'CLOUD_HOST_FINGERPRINT') 'SSH preflight must read only CLOUD_HOST_FINGERPRINT'
+Assert-Match $preflightText '(?im)^\s*set\s+-euo\s+pipefail\s*$' 'SSH fingerprint preflight must use strict shell mode'
+Assert-Match $preflightText '\^SHA256:\[A-Za-z0-9\+/\]\{43\}=\?\$' 'SSH fingerprint preflight must accept only OpenSSH SHA256 fingerprints with an optional trailing equals sign'
+$fingerprintPattern = '^SHA256:[A-Za-z0-9+/]{43}=?$'
+foreach ($validFingerprint in @(
+    ('SHA256:' + ('A' * 43)),
+    ('SHA256:' + ('A' * 43) + '=')
+)) {
+    Assert-True ($validFingerprint -match $fingerprintPattern) 'fingerprint contract must accept padded and unpadded OpenSSH SHA256 forms'
+}
+foreach ($invalidFingerprint in @(
+    '',
+    ('SHA256:' + ('A' * 42)),
+    ('SHA256:' + ('A' * 43) + '=='),
+    ('SHA256:' + ('*' * 43))
+)) {
+    Assert-True ($invalidFingerprint -notmatch $fingerprintPattern) 'fingerprint contract must fail closed for missing or malformed values before SSH'
+}
+$preflightIndex = $preflightStep.Index
+$sshStep = [regex]::Match($workflowCodeText, '(?ms)^\s{6}-\s*name:\s*Restore production data via SSH\s*$.*?(?=^\s{6}-\s*name:|\z)')
+Assert-True $sshStep.Success 'restore workflow must define a dedicated SSH restore step'
+$sshActionIndex = First-MatchIndex $workflowCodeText 'appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2'
+Assert-True ($preflightIndex -lt $sshStep.Index) 'SSH fingerprint preflight must run before the SSH action'
+
 $payloadSecrets = @(
     'FACTORY_REVIEW_DATA_PART_1_B64',
     'FACTORY_REVIEW_DATA_PART_2_B64',
@@ -219,6 +266,9 @@ $payloadSecrets = @(
 foreach ($payloadSecret in $payloadSecrets) {
     Assert-Match $workflowCodeText "(?im)^\s{10}$payloadSecret\s*:\s*\$\{\{\s*secrets\.$payloadSecret\s*\}\}\s*$" "restore workflow must map $payloadSecret from its repository secret in the SSH step env"
     Assert-Match $workflowCodeText "(?im)^\s*envs\s*:\s*[^\r\n]*\b$payloadSecret\b" "restore workflow must pass $payloadSecret to SSH through envs"
+    $payloadSecretReference = "\$\{\{\s*secrets\.$payloadSecret\s*\}\}"
+    Assert-True ([regex]::Matches($workflowCodeText, $payloadSecretReference).Count -eq 1) "$payloadSecret must be read only by the SSH step"
+    Assert-True ((First-MatchIndex $workflowCodeText $payloadSecretReference) -gt $sshStep.Index) "$payloadSecret must be scoped to the SSH step"
 }
 Assert-Match $workflowCodeText '(?im)^\s{10}CLOUD_HOST_FINGERPRINT\s*:\s*\$\{\{\s*secrets\.CLOUD_HOST_FINGERPRINT\s*\}\}\s*$' 'restore workflow must source the SSH fingerprint from a non-empty repository secret'
 Assert-Match $workflowCodeText '(?im)^\s{10}EXPECTED_COMMIT\s*:\s*\$\{\{\s*github\.sha\s*\}\}\s*$' 'restore workflow must pass the dispatched commit identity'
@@ -229,25 +279,17 @@ Assert-Match $workflowCodeText '(?im)^\s*set\s+-euo\s+pipefail\s*$' 'restore wor
 Assert-Match $workflowCodeText '(?im)^\s*cd\s+/opt/rr-portal\s*$' 'restore workflow must operate in the production repository'
 Assert-Match $workflowCodeText '(?im)^\s*git\s+fetch\s+origin\s+main\s*$' 'restore workflow must fetch origin main before restoring'
 Assert-Match $workflowCodeText '(?im)^\s*test\s+"\$\(git\s+rev-parse\s+origin/main\)"\s*=\s*"\$EXPECTED_COMMIT"\s*$' 'restore workflow must require origin main to equal the dispatched commit'
-Assert-Match $workflowCodeText '(?im)^\s*test\s+-z\s+"\$\(git\s+status\s+--porcelain\)"\s*$' 'restore workflow must refuse a dirty server worktree'
-Assert-Match $workflowCodeText '(?im)^\s*git\s+switch\s+main\s*$' 'restore workflow must switch to main without replacing local state'
-Assert-Match $workflowCodeText '(?im)^\s*git\s+merge-base\s+--is-ancestor\s+HEAD\s+"\$EXPECTED_COMMIT"\s*$' 'restore workflow must refuse a local main branch ahead of the dispatched commit'
-Assert-Match $workflowCodeText '(?im)^\s*git\s+merge\s+--ff-only\s+"\$EXPECTED_COMMIT"\s*$' 'restore workflow must only fast-forward main to the dispatched commit'
 Assert-Match $workflowCodeText '(?im)^\s*test\s+"\$\(git\s+rev-parse\s+HEAD\)"\s*=\s*"\$EXPECTED_COMMIT"\s*$' 'restore workflow must require HEAD to equal the dispatched commit'
-Assert-Match $workflowCodeText '(?im)^\s*git\s+ls-tree\s+-r\s+--name-only\s+"\$EXPECTED_COMMIT"\s+--\s+deploy/restore-factory-review-data\.sh\s*\|\s*grep\s+-Fx\s+[''\"]deploy/restore-factory-review-data\.sh[''\"]\s*$' 'restore workflow must confirm the dispatched commit tracks the restore script'
-Assert-Match $workflowCodeText '(?im)^\s*git\s+diff\s+--quiet\s+"\$EXPECTED_COMMIT"\s+--\s+deploy/restore-factory-review-data\.sh\s*$' 'restore workflow must refuse a restore script modified relative to the dispatched commit'
+Assert-Match $workflowCodeText '(?im)^\s*git\s+ls-files\s+--error-unmatch\s+--\s+deploy/restore-factory-review-data\.sh\s*>\s*/dev/null\s*$' 'restore workflow must require the restore script to be tracked in the current checkout'
+Assert-Match $workflowCodeText '(?im)^\s*test\s+-z\s+"\$\(git\s+status\s+--porcelain\s+--untracked-files=all\s+--\s+deploy/restore-factory-review-data\.sh\)"\s*$' 'restore workflow must require the restore script to be clean, including untracked replacement files'
 Assert-Match $workflowCodeText '(?im)^\s*bash\s+deploy/restore-factory-review-data\.sh\s*$' 'restore workflow must invoke the restore script'
 $remoteRestoreScript = Get-RemoteRestoreScript $workflowCodeText
 $remoteStepPatterns = [ordered]@{
     fetch = '(?im)^\s*git\s+fetch\s+origin\s+main\s*$'
     originCommit = '(?im)^\s*test\s+"\$\(git\s+rev-parse\s+origin/main\)"\s*=\s*"\$EXPECTED_COMMIT"\s*$'
-    dirtyCheck = '(?im)^\s*test\s+-z\s+"\$\(git\s+status\s+--porcelain\)"\s*$'
-    switchMain = '(?im)^\s*git\s+switch\s+main\s*$'
-    ancestor = '(?im)^\s*git\s+merge-base\s+--is-ancestor\s+HEAD\s+"\$EXPECTED_COMMIT"\s*$'
-    fastForward = '(?im)^\s*git\s+merge\s+--ff-only\s+"\$EXPECTED_COMMIT"\s*$'
     headCheck = '(?im)^\s*test\s+"\$\(git\s+rev-parse\s+HEAD\)"\s*=\s*"\$EXPECTED_COMMIT"\s*$'
-    trackedScript = '(?im)^\s*git\s+ls-tree\s+-r\s+--name-only\s+"\$EXPECTED_COMMIT"\s+--\s+deploy/restore-factory-review-data\.sh\s*\|\s*grep\s+-Fx\s+[''\"]deploy/restore-factory-review-data\.sh[''\"]\s*$'
-    scriptDiff = '(?im)^\s*git\s+diff\s+--quiet\s+"\$EXPECTED_COMMIT"\s+--\s+deploy/restore-factory-review-data\.sh\s*$'
+    trackedScript = '(?im)^\s*git\s+ls-files\s+--error-unmatch\s+--\s+deploy/restore-factory-review-data\.sh\s*>\s*/dev/null\s*$'
+    scriptClean = '(?im)^\s*test\s+-z\s+"\$\(git\s+status\s+--porcelain\s+--untracked-files=all\s+--\s+deploy/restore-factory-review-data\.sh\)"\s*$'
     restore = '(?im)^\s*bash\s+deploy/restore-factory-review-data\.sh\s*$'
 }
 $remoteStepIndices = [ordered]@{}
@@ -264,6 +306,7 @@ for ($index = 1; $index -lt $remoteStepNames.Count; $index++) {
 Assert-True ($workflowCodeText -notmatch '(?im)^\s*git\s+pull\b') 'restore workflow must not use unsafe git pull'
 Assert-True ($workflowCodeText -notmatch '(?im)^\s*git\s+checkout\b') 'restore workflow must not use git checkout to replace local state'
 Assert-True ($workflowCodeText -notmatch '(?im)^\s*git\s+reset\b') 'restore workflow must not reset or overwrite server state'
+Assert-True ($workflowCodeText -notmatch '(?im)^\s*git\s+(?:switch|merge|rebase|cherry-pick)\b') 'restore workflow must never advance or mutate the production checkout'
 
 $payloadVariablePattern = '(?:\bFACTORY_REVIEW_DATA_PART_[123]_B64\b|\bFACTORY_REVIEW_DATA_SHA256\b)'
 $payloadSinkPattern = "(?im)^\s*(?:echo|printf|tee|cat|env|printenv|logger|systemd-cat|curl|wget)\b[^\r\n]*$payloadVariablePattern"
@@ -322,14 +365,34 @@ Assert-True ($codeText -notmatch '(?im)^\s*PB_DATA_DIR=\$\{PB_DATA_DIR') 'restor
 $requireBody = Get-BashFunctionBody $codeText 'require_payload_parts'
 $mainBody = Get-BashFunctionBody $codeText 'main'
 $reconstructBody = Get-BashFunctionBody $codeText 'reconstruct_payload'
+$revisionBody = Get-BashFunctionBody $codeText 'verify_running_revision'
+$restoreBackupBody = Get-BashFunctionBody $codeText 'restore_backup'
 $verifyBody = Get-BashFunctionBody $codeText 'verify_snapshot_counts'
 Assert-Match $requireBody '(?i)payload|FACTORY_REVIEW_DATA_PART_|part_[123]' 'require_payload_parts must validate payload parts'
+Assert-Match $requireBody '(?i)EXPECTED_COMMIT' 'require_payload_parts must require the expected deployed commit'
+Assert-Match $requireBody '\^\[0-9a-f\]\{40\}\$' 'EXPECTED_COMMIT must be exactly 40 lowercase hexadecimal characters'
 Assert-Match $reconstructBody '(?i)sha-?256|sha256sum' 'reconstruct_payload must verify the payload SHA-256'
+Assert-Match $revisionBody '(?i)compose\s+ps\s+-q' 'verify_running_revision must resolve the currently running Compose container'
+Assert-Match $revisionBody '(?i)docker\s+inspect' 'verify_running_revision must inspect the current container image ID'
+Assert-Match $revisionBody '(?i)docker\s+image\s+inspect' 'verify_running_revision must inspect the current image labels'
+Assert-Match $revisionBody 'org\.opencontainers\.image\.revision' 'verify_running_revision must read the OCI revision label'
+Assert-Match $revisionBody '(?i)EXPECTED_COMMIT' 'verify_running_revision must compare the OCI revision with EXPECTED_COMMIT'
 Assert-Match $mainBody '(?i)compose\s+stop\s+"\$SERVICE_NAME"' 'main must stop the factory-review service through Compose'
+$requireCallIndex = First-MatchIndex $mainBody '(?im)^\s*require_payload_parts\b'
+$revisionCallIndex = First-MatchIndex $mainBody '(?im)^\s*verify_running_revision\b'
 $reconstructCallIndex = First-MatchIndex $mainBody '(?im)^\s*reconstruct_payload\b'
 $stopIndex = First-MatchIndex $mainBody '(?i)compose\s+stop\s+"\$SERVICE_NAME"'
+$cleanupCallIndex = First-MatchIndex $mainBody '(?im)^\s*(?:if\s+!\s+)?cleanup_temp_files\b'
+$commitIndex = First-MatchIndex $mainBody '(?im)^\s*committed=1\s*$'
+Assert-True ($requireCallIndex -ge 0) 'main must validate EXPECTED_COMMIT before external operations'
+Assert-True ($revisionCallIndex -ge 0) 'main must verify the running image revision'
 Assert-True ($reconstructCallIndex -ge 0) 'main must call reconstruct_payload'
+Assert-True ($requireCallIndex -lt $reconstructCallIndex) 'main must validate EXPECTED_COMMIT before reconstructing plaintext'
+Assert-True ($reconstructCallIndex -lt $revisionCallIndex) 'main must validate payload integrity before Docker inspection'
+Assert-True ($revisionCallIndex -lt $stopIndex) 'main must reject a stale image before stopping the service'
 Assert-True ($reconstructCallIndex -lt $stopIndex) 'main must verify the payload before stopping the service'
+Assert-True ($cleanupCallIndex -ge 0 -and $commitIndex -ge 0 -and $cleanupCallIndex -lt $commitIndex) 'main must strictly clean plaintext temporary files before committing the transaction'
+Assert-Match $restoreBackupBody '(?is)start_and_verify_service.*compose\s+stop\s+"\$SERVICE_NAME"' 'rollback must explicitly stop factory-review when restored data never becomes healthy'
 
 $tarIndex = First-MatchIndex $mainBody '(?im)\btar\b[^\r\n]*(?:-c|--create)'
 $migrateIndex = First-MatchIndex $mainBody '(?im)\bpocketbase\b[^\r\n]*\bmigrate\s+up\b|\bmigrate\s+up\b'
@@ -418,9 +481,60 @@ foreach ($securityPath in $securityScanPaths) {
 }
 Assert-True ($codeText -notmatch $alternativeAdminReadPattern) 'restore script must not read alternate ADMIN_PASSWORD or PASSWORD variables'
 
+Assert-True (Test-Path -LiteralPath $dockerfilePath -PathType Leaf) "factory-review Dockerfile is missing: $dockerfilePath"
+$dockerfileText = Get-Content -LiteralPath $dockerfilePath -Raw
+$finalStage = [regex]::Match($dockerfileText, '(?ms)^FROM\s+alpine:3\.22\s*$.*\z')
+Assert-True $finalStage.Success 'factory-review Dockerfile must retain the Alpine final stage'
+Assert-Match $finalStage.Value '(?im)^ARG\s+OCI_REVISION\s*$' 'factory-review final image must accept OCI_REVISION'
+Assert-Match $finalStage.Value '(?im)^LABEL\s+org\.opencontainers\.image\.revision="\$OCI_REVISION"\s*$' 'factory-review final image must label its exact source revision'
+
+Assert-True (Test-Path -LiteralPath $composePath -PathType Leaf) "cloud Compose file is missing: $composePath"
+$composeText = Get-Content -LiteralPath $composePath -Raw
+$factoryReviewCompose = [regex]::Match($composeText, '(?ms)^\s{2}factory-review:\s*$.*?(?=^\s{2}[A-Za-z0-9_-]+:\s*$|\z)')
+Assert-True $factoryReviewCompose.Success 'cloud Compose must define factory-review'
+Assert-Match $factoryReviewCompose.Value '(?im)^\s{8}OCI_REVISION:\s*\$\{AFTER_COMMIT:-local\}\s*$' 'factory-review build must receive the deployed AFTER_COMMIT with a local fallback'
+
+Assert-True (Test-Path -LiteralPath $contractWorkflowPath -PathType Leaf) "PR contract workflow is missing: $contractWorkflowPath"
+$contractWorkflowText = Get-Content -LiteralPath $contractWorkflowPath -Raw
+$contractWorkflowCode = [regex]::Replace($contractWorkflowText, '(?m)^\s*#.*$', '')
+Assert-ContentsReadOnlyPermissions $contractWorkflowCode
+Assert-True ($contractWorkflowCode -match '(?m)^\s{2}pull_request:\s*$') 'PR contract workflow must trigger automatically for pull requests'
+Assert-True ($contractWorkflowCode -match '(?m)^\s{2}workflow_dispatch:\s*$') 'PR contract workflow must also support manual dispatch'
+Assert-True ($contractWorkflowCode -notmatch '\$\{\{\s*secrets\.') 'PR contract workflow must never read repository Secrets'
+Assert-Match $contractWorkflowCode "actions/checkout@$checkoutActionSha" 'PR contract workflow must pin checkout by commit SHA'
+Assert-Match $contractWorkflowCode '(?im)^\s*fetch-depth\s*:\s*0\s*$' 'PR contract workflow must fetch branch history for object scanning'
+Assert-Match $contractWorkflowCode '(?im)^\s*persist-credentials\s*:\s*false\s*$' 'PR contract workflow must not persist checkout credentials'
+$contractPaths = @(
+    '.github/workflows/deploy.yml',
+    '.github/workflows/restore-factory-review-data.yml',
+    '.github/workflows/factory-review-restore-contract.yml',
+    'deploy/restore-factory-review-data.sh',
+    'scripts/tests/test-factory-review-data-restore.ps1',
+    'scripts/tests/test-factory-review-data-restore.sh',
+    'apps/PMC跟仓管/加工厂月度评审管理制度/Dockerfile',
+    'docker-compose.cloud.yml',
+    'docs/superpowers/specs/2026-07-16-factory-review-private-data-restore-design.md',
+    'docs/superpowers/plans/2026-07-16-factory-review-private-data-restore.md'
+)
+foreach ($contractPath in $contractPaths) {
+    Assert-True ($contractWorkflowCode.Contains("- '$contractPath'") -or $contractWorkflowCode.Contains("- `"$contractPath`"")) "PR contract workflow paths must cover $contractPath"
+}
+Assert-Match $contractWorkflowCode '(?im)pwsh\s+-NoProfile\s+-File\s+scripts/tests/test-factory-review-data-restore\.ps1' 'PR contract workflow must run the PowerShell contract'
+Assert-Match $contractWorkflowCode '(?im)bash\s+scripts/tests/test-factory-review-data-restore\.sh' 'PR contract workflow must run the Bash behavior contract directly'
+Assert-Match $contractWorkflowCode '(?im)git\s+diff\s+--check\s+origin/main\.\.\.HEAD' 'PR contract workflow must check the complete branch diff'
+Assert-Match $contractWorkflowCode '(?i)rev-list\s+--objects\s+origin/main\.\.HEAD' 'PR contract workflow must inspect branch-only Git objects'
+Assert-Match $contractWorkflowCode '(?i)cat-file' 'PR contract workflow must inspect branch-only blob sizes'
+Assert-True ($contractWorkflowCode.Contains('const\s+SNAPSHOT\s*=\s*\{(?!\s*\})')) 'PR contract workflow must scan non-empty snapshot object literals instead of harmless markers or empty test fixtures'
+
+$planText = Get-Content -LiteralPath $planPath -Raw -Encoding UTF8
+Assert-Match $planText '(?i)exactly three non-empty contiguous parts' 'restore plan must always require exactly three non-empty payload parts'
+Assert-Match $planText '(?i)floor\(length / 3\)' 'restore plan must define true quotient-and-remainder splitting'
+Assert-True ($planText -notmatch '(?i)three or fewer') 'restore plan must not permit fewer than three payload parts'
+
 Assert-True (Test-Path -LiteralPath $bashTestPath -PathType Leaf) "behavior test is missing: $bashTestPath"
-$bash = 'C:\Program Files\Git\bin\bash.exe'
-Assert-True (Test-Path -LiteralPath $bash -PathType Leaf) 'Git Bash is required to run the behavior contract test'
+$gitBash = 'C:\Program Files\Git\bin\bash.exe'
+$bash = if (Test-Path -LiteralPath $gitBash -PathType Leaf) { $gitBash } else { (Get-Command bash -ErrorAction Stop).Source }
+Assert-True (Test-Path -LiteralPath $bash -PathType Leaf) 'Bash is required to run the behavior contract test'
 & $bash -c 'export PATH=/usr/bin:/bin:$PATH; exec bash --noprofile --norc "$1"' _ $bashTestPath
 Assert-True ($LASTEXITCODE -eq 0) "behavior contract test failed with exit code $LASTEXITCODE"
 

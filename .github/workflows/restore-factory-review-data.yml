@@ -6,6 +6,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: deploy-cloud
+  cancel-in-progress: false
+
 jobs:
   restore:
     runs-on: ubuntu-latest
@@ -16,6 +20,17 @@ jobs:
         with:
           ref: ${{ github.ref }}
           persist-credentials: false
+
+      - name: Validate SSH host fingerprint
+        shell: bash
+        env:
+          CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]]; then
+            echo 'CLOUD_HOST_FINGERPRINT must be a non-empty OpenSSH SHA256 fingerprint.' >&2
+            exit 1
+          fi
 
       - name: Restore production data via SSH
         env:
@@ -38,11 +53,7 @@ jobs:
             cd /opt/rr-portal
             git fetch origin main
             test "$(git rev-parse origin/main)" = "$EXPECTED_COMMIT"
-            test -z "$(git status --porcelain)"
-            git switch main
-            git merge-base --is-ancestor HEAD "$EXPECTED_COMMIT"
-            git merge --ff-only "$EXPECTED_COMMIT"
             test "$(git rev-parse HEAD)" = "$EXPECTED_COMMIT"
-            git ls-tree -r --name-only "$EXPECTED_COMMIT" -- deploy/restore-factory-review-data.sh | grep -Fx 'deploy/restore-factory-review-data.sh'
-            git diff --quiet "$EXPECTED_COMMIT" -- deploy/restore-factory-review-data.sh
+            git ls-files --error-unmatch -- deploy/restore-factory-review-data.sh > /dev/null
+            test -z "$(git status --porcelain --untracked-files=all -- deploy/restore-factory-review-data.sh)"
             bash deploy/restore-factory-review-data.sh

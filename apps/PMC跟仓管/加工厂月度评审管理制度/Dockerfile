@@ -10,6 +10,9 @@ RUN npm run build
 
 FROM alpine:3.22
 
+ARG OCI_REVISION
+LABEL org.opencontainers.image.revision="$OCI_REVISION"
+
 ARG PB_VERSION=0.39.6
 ARG PB_SHA256=9251d4ebca4fe91771392dc389a6e449e4e00a34182b0316e7a2d9984d34da3d
 RUN apk add --no-cache ca-certificates unzip \

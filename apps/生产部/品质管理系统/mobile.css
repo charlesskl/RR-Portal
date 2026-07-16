@@ -117,3 +117,596 @@ html.qc-narrow .topbar-right .theme-switch,
 html.qc-narrow .topbar-right .btn-icon:not(.btn-add) { display: none; }
 html.qc-narrow .topbar-title { font-size: 13px; }
 html.qc-narrow .chart-body { height: 200px; }
+
+/* Mobile polish pass: compact header, safer scrolling, better touch targets. */
+html.qc-mobile,
+html.qc-mobile body {
+  height: 100%;
+  overscroll-behavior: none;
+}
+
+html.qc-mobile .sidebar {
+  width: min(82vw, 320px);
+  max-width: 320px;
+  padding-bottom: max(14px, env(safe-area-inset-bottom));
+  will-change: transform;
+}
+
+html.qc-mobile .topbar {
+  height: auto;
+  min-height: 54px;
+  padding: 7px 10px;
+  gap: 8px;
+  align-items: center;
+}
+
+html.qc-mobile .topbar-left {
+  min-width: 0;
+  gap: 8px;
+}
+
+html.qc-mobile .topbar-title {
+  max-width: 7em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+html.qc-mobile .menu-toggle {
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  flex: 0 0 38px;
+  padding: 0;
+}
+
+html.qc-mobile .topbar-kpis {
+  scroll-snap-type: x proximity;
+  padding: 2px 2px 4px;
+}
+
+html.qc-mobile .kpi-chip {
+  min-width: 92px;
+  min-height: 38px;
+  padding: 6px 10px;
+  scroll-snap-align: start;
+}
+
+html.qc-mobile .kpi-label { font-size: 10px; }
+html.qc-mobile .kpi-val { font-size: 16px; line-height: 1.05; }
+
+html.qc-mobile .topbar-right .btn-icon,
+html.qc-mobile .topbar-right .btn-add {
+  min-height: 38px;
+  padding: 7px 10px;
+  white-space: nowrap;
+}
+
+html.qc-mobile .page {
+  height: calc(100dvh - 54px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+html.qc-mobile .page-inner {
+  padding: 10px;
+  gap: 10px;
+  padding-bottom: max(18px, env(safe-area-inset-bottom));
+}
+
+html.qc-mobile .summary-card {
+  min-height: 92px;
+  padding: 12px;
+}
+
+html.qc-mobile .card-label {
+  margin-bottom: 4px;
+  font-size: 10px;
+  letter-spacing: 0;
+}
+
+html.qc-mobile .card-value {
+  font-size: 26px;
+  letter-spacing: 0;
+}
+
+html.qc-mobile .card-sub { font-size: 11px; }
+
+html.qc-mobile .chart-card { border-radius: 8px; }
+html.qc-mobile .chart-header {
+  min-height: 40px;
+  padding: 10px 12px;
+}
+html.qc-mobile .chart-title { font-size: 13px; }
+html.qc-mobile .chart-body { height: 230px; }
+html.qc-mobile .chart-body.tall,
+html.qc-mobile .chart-body.risk-body { height: 280px; }
+
+html.qc-mobile .toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  margin: -10px -10px 10px;
+  padding: 10px;
+  background: color-mix(in srgb, var(--bg-panel) 92%, transparent);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--border);
+}
+
+html.qc-mobile .toolbar-right { justify-content: stretch; }
+html.qc-mobile .filter-select,
+html.qc-mobile .filter-date { flex: 1 1 120px; min-width: 0; }
+html.qc-mobile .date-sep { display: none; }
+html.qc-mobile .toolbar .btn-primary,
+html.qc-mobile .toolbar .btn-secondary {
+  flex: 1 1 132px;
+  min-height: 40px;
+  justify-content: center;
+}
+
+html.qc-mobile .table-wrap { border-radius: 8px; }
+html.qc-mobile #recordsTableWrap {
+  max-height: none;
+  height: calc(100dvh - 190px);
+}
+html.qc-mobile table { min-width: 860px; }
+html.qc-mobile th,
+html.qc-mobile td {
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+html.qc-mobile .action-btn {
+  min-height: 34px;
+  padding: 7px 11px;
+}
+
+html.qc-mobile .modal {
+  height: 100dvh;
+  max-height: 100dvh;
+}
+html.qc-mobile .modal-header {
+  min-height: 52px;
+  padding: 12px 14px;
+}
+html.qc-mobile .modal-close {
+  min-width: 40px;
+  min-height: 40px;
+}
+html.qc-mobile .modal-body {
+  padding: 12px;
+  padding-bottom: 18px;
+}
+html.qc-mobile .modal-footer {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  padding: 10px 12px max(10px, env(safe-area-inset-bottom));
+  background: var(--bg-panel);
+}
+html.qc-mobile .modal-footer .btn-primary,
+html.qc-mobile .modal-footer .btn-secondary {
+  flex: 1 1 0;
+  min-height: 42px;
+  justify-content: center;
+}
+html.qc-mobile .modal-mode-tabs {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 10px 12px 0;
+}
+html.qc-mobile .mode-tab {
+  min-height: 40px;
+  flex: 1 0 120px;
+}
+
+html.qc-mobile .ocr-preview-img { max-height: 230px; }
+
+html.qc-narrow .topbar {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+html.qc-narrow .topbar-kpis { min-width: 0; }
+html.qc-narrow .topbar-right .btn-add {
+  width: 40px;
+  min-width: 40px;
+  padding: 0;
+  overflow: hidden;
+  color: transparent;
+  position: relative;
+}
+html.qc-narrow .topbar-right .btn-add::before {
+  content: '+';
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  font-size: 20px;
+  font-weight: 700;
+}
+html.qc-narrow .chart-body { height: 210px; }
+html.qc-narrow .chart-body.tall,
+html.qc-narrow .chart-body.risk-body { height: 250px; }
+html.qc-narrow .summary-card {
+  min-height: 82px;
+  padding: 10px 12px;
+}
+html.qc-narrow .card-value { font-size: 24px; }
+html.qc-narrow .toolbar .btn-primary,
+html.qc-narrow .toolbar .btn-secondary { flex-basis: 100%; }
+
+/* Records page: keep filters useful without swallowing the whole first screen. */
+html.qc-narrow #page-records .toolbar-left {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px;
+}
+
+html.qc-narrow #page-records .search-input {
+  grid-column: 1 / -1;
+}
+
+html.qc-narrow #page-records .filter-select,
+html.qc-narrow #page-records .filter-date {
+  width: 100%;
+  min-width: 0;
+}
+
+html.qc-narrow #page-records .toolbar-right {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px;
+}
+
+html.qc-narrow #page-records .toolbar-right .btn-primary,
+html.qc-narrow #page-records .toolbar-right .btn-secondary {
+  width: 100%;
+  min-width: 0;
+  flex-basis: auto;
+  padding-left: 8px;
+  padding-right: 8px;
+}
+
+html.qc-narrow #page-records .btn-refresh-records {
+  min-width: 0;
+}
+
+html.qc-narrow #page-records #btnAddRecord {
+  grid-column: 1 / -1;
+}
+
+html.qc-narrow #recordsTableWrap {
+  height: calc(100dvh - 300px);
+}
+
+/* Compact phone modal: the data-entry form should feel like a mobile tool, not a tablet page. */
+html.qc-mobile .modal {
+  font-size: 13px;
+}
+
+html.qc-mobile .modal-header {
+  min-height: 44px;
+  padding: 8px 12px;
+  font-size: 15px;
+}
+
+html.qc-mobile .modal-close {
+  min-width: 34px;
+  min-height: 34px;
+  font-size: 18px;
+}
+
+html.qc-mobile .modal-mode-tabs {
+  padding: 7px 10px 0;
+}
+
+html.qc-mobile .mode-tab {
+  min-height: 34px;
+  padding: 7px 10px;
+  font-size: 13px;
+}
+
+html.qc-mobile .modal-body {
+  padding: 8px 10px 12px;
+}
+
+html.qc-mobile .form-grid {
+  gap: 8px;
+}
+
+html.qc-mobile .form-group {
+  gap: 3px;
+}
+
+html.qc-mobile .form-label,
+html.qc-mobile .modal label {
+  font-size: 12px;
+  line-height: 1.25;
+}
+
+html.qc-mobile .form-input,
+html.qc-mobile .modal input,
+html.qc-mobile .modal select,
+html.qc-mobile .modal textarea {
+  min-height: 36px;
+  padding: 7px 9px;
+  border-radius: 7px;
+  font-size: 16px !important;
+  line-height: 1.25;
+}
+
+html.qc-mobile .modal textarea {
+  min-height: 58px;
+}
+
+html.qc-mobile .modal-footer {
+  padding: 8px 10px max(8px, env(safe-area-inset-bottom));
+}
+
+html.qc-mobile .modal-footer .btn-primary,
+html.qc-mobile .modal-footer .btn-secondary {
+  min-height: 38px;
+  font-size: 13px;
+}
+
+html.qc-mobile #defectsRows > div[style*="grid-template-columns"] {
+  grid-template-columns: minmax(0, 1fr) 70px 34px !important;
+  gap: 5px !important;
+  padding: 5px 0 !important;
+  align-items: stretch !important;
+}
+
+html.qc-mobile #defectsRows input,
+html.qc-mobile #defectsRows select {
+  min-width: 0 !important;
+  min-height: 32px !important;
+  padding: 5px 7px !important;
+  font-size: 13px !important;
+  border-radius: 6px !important;
+}
+
+html.qc-mobile #defectsRows input:nth-child(1) {
+  grid-column: 1 / 2;
+}
+
+html.qc-mobile #defectsRows input:nth-child(2) {
+  grid-column: 2 / 3;
+}
+
+html.qc-mobile #defectsRows select:nth-child(3) {
+  grid-column: 1 / 2;
+}
+
+html.qc-mobile #defectsRows select:nth-child(4) {
+  grid-column: 2 / 3;
+}
+
+html.qc-mobile #defectsRows input:nth-child(5) {
+  grid-column: 1 / 3;
+}
+
+html.qc-mobile #defectsRows button {
+  grid-column: 3 / 4;
+  grid-row: 1 / 3;
+  width: 32px !important;
+  height: auto !important;
+  min-height: 32px !important;
+  align-self: stretch !important;
+  font-size: 16px !important;
+  border-radius: 6px !important;
+}
+
+html.qc-mobile #defectSummary {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 6px 10px !important;
+  padding: 8px 10px !important;
+  font-size: 12px !important;
+}
+
+html.qc-mobile #defectSummary > span,
+html.qc-mobile #defectSummary > div {
+  min-width: 0;
+}
+
+html.qc-mobile #measRows,
+html.qc-mobile #measureRows {
+  font-size: 12px;
+}
+
+html.qc-narrow .modal-header {
+  min-height: 42px;
+  padding: 7px 10px;
+}
+
+html.qc-narrow .modal-body {
+  padding: 7px 8px 10px;
+}
+
+html.qc-narrow .form-grid {
+  gap: 7px;
+}
+
+html.qc-narrow .form-input,
+html.qc-narrow .modal input,
+html.qc-narrow .modal select,
+html.qc-narrow .modal textarea {
+  min-height: 34px;
+  padding: 6px 8px;
+  font-size: 13px !important;
+}
+
+/* Extra compact pass for real phone browsers with visible address bars. */
+html.qc-narrow .modal {
+  font-size: 12px;
+}
+
+html.qc-narrow .modal-header {
+  min-height: 38px;
+  padding: 6px 10px;
+}
+
+html.qc-narrow .modal-mode-tabs {
+  padding: 6px 8px 0;
+}
+
+html.qc-narrow .mode-tab {
+  min-height: 31px;
+  padding: 5px 8px;
+  font-size: 12px;
+}
+
+html.qc-narrow .form-label,
+html.qc-narrow .modal label {
+  font-size: 11px;
+}
+
+html.qc-narrow .form-input,
+html.qc-narrow .modal input,
+html.qc-narrow .modal select,
+html.qc-narrow .modal textarea {
+  min-height: 31px;
+  padding: 5px 7px;
+  font-size: 16px !important;
+}
+
+html.qc-narrow .modal textarea {
+  min-height: 48px;
+}
+
+html.qc-narrow #defectsRows > div[style*="grid-template-columns"] {
+  grid-template-columns: minmax(0, 1fr) 58px 30px !important;
+  gap: 4px !important;
+  padding: 4px 0 !important;
+}
+
+html.qc-narrow #defectsRows input,
+html.qc-narrow #defectsRows select {
+  min-height: 29px !important;
+  padding: 4px 6px !important;
+  font-size: 12px !important;
+}
+
+html.qc-narrow #defectsRows button {
+  grid-row: 1 / 2;
+  width: 29px !important;
+  height: 29px !important;
+  min-height: 29px !important;
+  align-self: start !important;
+  font-size: 14px !important;
+}
+
+html.qc-narrow #defectSummary {
+  padding: 7px 9px !important;
+  font-size: 11px !important;
+}
+
+html.qc-narrow .modal-footer {
+  padding: 7px 9px max(7px, env(safe-area-inset-bottom));
+}
+
+html.qc-narrow .modal-footer .btn-primary,
+html.qc-narrow .modal-footer .btn-secondary {
+  min-height: 35px;
+  font-size: 12px;
+}
+
+/* Import confirmation preview: compact enough for phone browsers. */
+html.qc-mobile .import-confirm-overlay,
+html.qc-narrow .import-confirm-overlay {
+  align-items: stretch;
+  padding: 8px;
+}
+
+html.qc-mobile .import-confirm-box,
+html.qc-narrow .import-confirm-box {
+  width: 100%;
+  max-height: calc(100dvh - 16px);
+  border-radius: 8px;
+}
+
+html.qc-mobile .import-confirm-header,
+html.qc-narrow .import-confirm-header {
+  padding: 10px 12px;
+}
+
+html.qc-mobile .import-confirm-title,
+html.qc-narrow .import-confirm-title {
+  font-size: 14px;
+}
+
+html.qc-mobile .import-confirm-sub,
+html.qc-narrow .import-confirm-sub {
+  font-size: 11px;
+}
+
+html.qc-mobile .import-confirm-body,
+html.qc-narrow .import-confirm-body {
+  padding: 10px 12px;
+}
+
+html.qc-mobile .import-confirm-grid,
+html.qc-narrow .import-confirm-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+  margin-bottom: 10px;
+}
+
+html.qc-mobile .import-confirm-chip,
+html.qc-narrow .import-confirm-chip {
+  padding: 8px 9px;
+}
+
+html.qc-mobile .import-confirm-chip.wide,
+html.qc-narrow .import-confirm-chip.wide {
+  grid-column: span 2;
+}
+
+html.qc-mobile .import-confirm-chip b,
+html.qc-narrow .import-confirm-chip b {
+  min-height: 18px;
+  font-size: 15px;
+}
+
+html.qc-mobile .import-confirm-chip span,
+html.qc-narrow .import-confirm-chip span,
+html.qc-mobile .import-confirm-warnings,
+html.qc-narrow .import-confirm-warnings,
+html.qc-mobile .import-confirm-ok,
+html.qc-narrow .import-confirm-ok {
+  font-size: 11px;
+}
+
+html.qc-mobile .import-confirm-table-wrap,
+html.qc-narrow .import-confirm-table-wrap {
+  max-height: 38dvh;
+}
+
+html.qc-mobile .import-confirm-table-wrap table,
+html.qc-narrow .import-confirm-table-wrap table {
+  min-width: 760px;
+}
+
+html.qc-mobile .import-confirm-table-wrap th,
+html.qc-mobile .import-confirm-table-wrap td,
+html.qc-narrow .import-confirm-table-wrap th,
+html.qc-narrow .import-confirm-table-wrap td {
+  padding: 7px 8px;
+  font-size: 11px;
+}
+
+html.qc-mobile .import-confirm-footer,
+html.qc-narrow .import-confirm-footer {
+  padding: 8px 10px max(8px, env(safe-area-inset-bottom));
+}
+
+html.qc-mobile .import-confirm-footer .btn-secondary,
+html.qc-mobile .import-confirm-footer .btn-primary,
+html.qc-narrow .import-confirm-footer .btn-secondary,
+html.qc-narrow .import-confirm-footer .btn-primary {
+  flex: 1;
+  min-height: 36px;
+  font-size: 12px;
+}

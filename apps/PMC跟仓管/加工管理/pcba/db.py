@@ -4,10 +4,25 @@ import sqlite3
 from pcba.auth import hash_password
 
 DEFAULT_DB = os.path.join("data", "pcba.db")
-LOCATIONS = ["东莞车间", "东莞加工厂利鸿", "邵阳华登", "河源华兴", "新邵"]
-DEFAULT_MATERIALS = ["NFC贴纸", "PCBA板"]
-DEFAULT_STICKER_TYPES = [f"贴纸{i:02d}" for i in range(1, 41)]
-DEPARTMENTS = ["兴信B来料仓", "装配", "半成品", "外发", "河源华兴", "邵阳", "新邵"]
+LOCATIONS = [
+    "兴信B来料仓", "东莞车间", "碟片半成品", "东莞加工厂利鸿",
+    "东莞加工厂鸿亚", "河源华兴", "邵阳华登", "新邵",
+]
+PCBA_MATERIAL = "77794-PCBA板"
+LEGACY_PCBA_MATERIAL = "PCBA板"
+DEFAULT_MATERIALS = ["NFC贴纸", PCBA_MATERIAL]
+LEGACY_STICKER_TYPES = [f"贴纸{i:02d}" for i in range(1, 41)]
+DEFAULT_STICKER_TYPES = [f"{i}#NFC贴纸" for i in range(1, 46)]
+DEPARTMENTS = [
+    "兴信B来料仓", "东莞车间", "碟片半成品", "东莞加工厂利鸿",
+    "东莞加工厂鸿亚", "河源华兴", "邵阳华登", "新邵",
+]
+DEPARTMENT_RENAMES = {
+    "装配": "东莞车间",
+    "半成品": "碟片半成品",
+    "外发": "东莞加工厂利鸿",
+    "邵阳": "邵阳华登",
+}
 DEFAULT_DEPARTMENT = DEPARTMENTS[0]
 DEFAULT_DEPARTMENT_PASSWORD = "123456"
 
@@ -45,7 +60,7 @@ CREATE TABLE IF NOT EXISTS records (
     location_id INTEGER,
     rec_date TEXT,
     doc_no TEXT,
-    material TEXT NOT NULL DEFAULT 'PCBA板',
+    material TEXT NOT NULL DEFAULT '77794-PCBA板',
     sticker_type TEXT,
     qty INTEGER NOT NULL,
     remark TEXT,
@@ -53,10 +68,31 @@ CREATE TABLE IF NOT EXISTS records (
     supplier TEXT,
     po_no TEXT,
     customer_name TEXT,
+    contract_no TEXT,
+    item_no TEXT,
+    product_name TEXT,
+    summary_month INTEGER,
+    source_record_id INTEGER,
+    source_flow TEXT,
     created_by INTEGER,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     FOREIGN KEY (location_id) REFERENCES locations(id),
+    FOREIGN KEY (source_record_id) REFERENCES records(id) ON DELETE CASCADE,
     FOREIGN KEY (created_by) REFERENCES users(id)
+);
+CREATE TABLE IF NOT EXISTS semi_finished_monthly_totals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    department TEXT NOT NULL,
+    material TEXT NOT NULL,
+    sticker_type TEXT NOT NULL,
+    opening_stock INTEGER NOT NULL DEFAULT 0,
+    assembly_opening_stock INTEGER NOT NULL DEFAULT 0,
+    hongya_opening_stock INTEGER NOT NULL DEFAULT 0,
+    monthly_inbound INTEGER NOT NULL DEFAULT 0,
+    monthly_outbound INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(department, material, sticker_type)
 );
 """
 
@@ -81,6 +117,47 @@ def _column_exists(conn, table, column):
     return any(row["name"] == column for row in rows)
 
 
+def _migrate_department_names(conn):
+    for old_name, new_name in DEPARTMENT_RENAMES.items():
+        conn.execute(
+            "UPDATE records SET department=? WHERE department=?",
+            (new_name, old_name),
+        )
+        conn.execute(
+            "UPDATE semi_finished_monthly_totals SET department=? WHERE department=?",
+            (new_name, old_name),
+        )
+        conn.execute(
+            "UPDATE users SET department=? WHERE department=?",
+            (new_name, old_name),
+        )
+
+        old_user = conn.execute(
+            "SELECT id, role, password_hash FROM users WHERE username=?",
+            (old_name,),
+        ).fetchone()
+        new_user = conn.execute(
+            "SELECT id FROM users WHERE username=?",
+            (new_name,),
+        ).fetchone()
+        if old_user and new_user:
+            conn.execute(
+                "UPDATE users SET password_hash=?, role=?, department=? WHERE id=?",
+                (old_user["password_hash"], old_user["role"], new_name, new_user["id"]),
+            )
+            if _column_exists(conn, "records", "created_by"):
+                conn.execute(
+                    "UPDATE records SET created_by=? WHERE created_by=?",
+                    (new_user["id"], old_user["id"]),
+                )
+            conn.execute("DELETE FROM users WHERE id=?", (old_user["id"],))
+        elif old_user:
+            conn.execute(
+                "UPDATE users SET username=?, department=? WHERE id=?",
+                (new_name, new_name, old_user["id"]),
+            )
+
+
 def _migrate_schema(conn):
     if not _column_exists(conn, "users", "department"):
         conn.execute("ALTER TABLE users ADD COLUMN department TEXT")
@@ -100,6 +177,71 @@ def _migrate_schema(conn):
         conn.execute("ALTER TABLE records ADD COLUMN po_no TEXT")
     if not _column_exists(conn, "records", "customer_name"):
         conn.execute("ALTER TABLE records ADD COLUMN customer_name TEXT")
+    if not _column_exists(conn, "records", "contract_no"):
+        conn.execute("ALTER TABLE records ADD COLUMN contract_no TEXT")
+    if not _column_exists(conn, "records", "item_no"):
+        conn.execute("ALTER TABLE records ADD COLUMN item_no TEXT")
+    if not _column_exists(conn, "records", "product_name"):
+        conn.execute("ALTER TABLE records ADD COLUMN product_name TEXT")
+    if not _column_exists(conn, "records", "summary_month"):
+        conn.execute("ALTER TABLE records ADD COLUMN summary_month INTEGER")
+    if not _column_exists(conn, "records", "source_record_id"):
+        conn.execute("ALTER TABLE records ADD COLUMN source_record_id INTEGER")
+    if not _column_exists(conn, "records", "source_flow"):
+        conn.execute("ALTER TABLE records ADD COLUMN source_flow TEXT")
+    if not _column_exists(conn, "semi_finished_monthly_totals", "opening_stock"):
+        conn.execute(
+            "ALTER TABLE semi_finished_monthly_totals "
+            "ADD COLUMN opening_stock INTEGER NOT NULL DEFAULT 0"
+        )
+    if not _column_exists(conn, "semi_finished_monthly_totals", "assembly_opening_stock"):
+        conn.execute(
+            "ALTER TABLE semi_finished_monthly_totals "
+            "ADD COLUMN assembly_opening_stock INTEGER NOT NULL DEFAULT 0"
+        )
+    if not _column_exists(conn, "semi_finished_monthly_totals", "hongya_opening_stock"):
+        conn.execute(
+            "ALTER TABLE semi_finished_monthly_totals "
+            "ADD COLUMN hongya_opening_stock INTEGER NOT NULL DEFAULT 0"
+        )
+    _migrate_department_names(conn)
+
+
+def _seed_sticker_types(conn):
+    for i, name in enumerate(DEFAULT_STICKER_TYPES, start=1):
+        legacy_name = LEGACY_STICKER_TYPES[i - 1] if i <= len(LEGACY_STICKER_TYPES) else None
+        current = conn.execute(
+            "SELECT id FROM sticker_types WHERE name=?", (name,)
+        ).fetchone()
+        legacy = None
+        if legacy_name:
+            legacy = conn.execute(
+                "SELECT id FROM sticker_types WHERE name=?", (legacy_name,)
+            ).fetchone()
+
+        if legacy and current:
+            conn.execute(
+                "UPDATE records SET sticker_type=? WHERE sticker_type=?",
+                (name, legacy_name),
+            )
+            conn.execute("DELETE FROM sticker_types WHERE id=?", (legacy["id"],))
+            conn.execute("UPDATE sticker_types SET sort=? WHERE id=?", (i, current["id"]))
+        elif legacy:
+            conn.execute(
+                "UPDATE sticker_types SET name=?, sort=? WHERE id=?",
+                (name, i, legacy["id"]),
+            )
+            conn.execute(
+                "UPDATE records SET sticker_type=? WHERE sticker_type=?",
+                (name, legacy_name),
+            )
+        elif current:
+            conn.execute("UPDATE sticker_types SET sort=? WHERE id=?", (i, current["id"]))
+        else:
+            conn.execute(
+                "INSERT INTO sticker_types(name, sort) VALUES (?, ?)",
+                (name, i),
+            )
 
 
 def init_db():
@@ -113,17 +255,26 @@ def init_db():
                 "INSERT OR IGNORE INTO locations(name, sort) VALUES (?, ?)",
                 (name, i),
             )
+            conn.execute(
+                "UPDATE locations SET sort=? WHERE name=?",
+                (i, name),
+            )
         # 预置默认物料名称
         for name in DEFAULT_MATERIALS:
             conn.execute(
                 "INSERT OR IGNORE INTO materials(name) VALUES (?)", (name,)
             )
+        conn.execute("DELETE FROM materials WHERE name=?", (LEGACY_PCBA_MATERIAL,))
+        conn.execute(
+            "UPDATE records SET material=? WHERE material=?",
+            (PCBA_MATERIAL, LEGACY_PCBA_MATERIAL),
+        )
+        conn.execute(
+            "UPDATE semi_finished_monthly_totals SET material=? WHERE material=?",
+            (PCBA_MATERIAL, LEGACY_PCBA_MATERIAL),
+        )
         # 预置 NFC 贴纸类型，可在前端继续维护真实名称
-        for i, name in enumerate(DEFAULT_STICKER_TYPES, start=1):
-            conn.execute(
-                "INSERT OR IGNORE INTO sticker_types(name, sort) VALUES (?, ?)",
-                (name, i),
-            )
+        _seed_sticker_types(conn)
         # 预置默认管理员 admin/admin123
         exists = conn.execute(
             "SELECT 1 FROM users WHERE username='admin'"

@@ -76,14 +76,17 @@ const ROLE_PERMS = {
   admin: {
     createRecord:true, editRecord:true, deleteRecord:true, batchDelete:true,
     importData:true,   exportData:true,  exportPdf:true,   manageUsers:true,
+    manageDefectLib:true,
   },
   manager: {
     createRecord:true, editRecord:true,  deleteRecord:false, batchDelete:false,
     importData:true,   exportData:true,  exportPdf:true,    manageUsers:false,
+    manageDefectLib:true,
   },
   viewer: {
-    createRecord:false, editRecord:false, deleteRecord:false, batchDelete:false,
+    createRecord:true,  editRecord:true,  deleteRecord:false, batchDelete:false,
     importData:false,   exportData:true,  exportPdf:true,    manageUsers:false,
+    manageDefectLib:false,
   },
 };
 
@@ -1696,17 +1699,71 @@ let _selectedIds = new Set();
 
 function renderRecordsTable() { filterRecords(); }
 
+function _recordsSnapshotsDiffer(localRecords, serverRecords) {
+  const local = Array.isArray(localRecords) ? localRecords : [];
+  const server = Array.isArray(serverRecords) ? serverRecords : [];
+  return JSON.stringify(local) !== JSON.stringify(server);
+}
+
+async function refreshRecordsPage() {
+  const btn = document.getElementById('btnRefreshRecords');
+  const oldText = btn ? btn.textContent : '';
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = '↻ 刷新中…';
+  }
+
+  try {
+    const apiBase = (location.pathname.replace(/[^/]*$/, '') || '/').replace(/\/$/, '');
+    const res = await fetch(apiBase + '/api/bootstrap', { cache: 'no-store' });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    if (!Array.isArray(data.records)) throw new Error('服务器返回数据格式不正确');
+    if (_recordsSnapshotsDiffer(state.records, data.records)) {
+      const syncFailed = window.__QC_BACKEND_OK !== true || (window.__QC_LAST_SYNC && window.__QC_LAST_SYNC.ok === false);
+      const warning = syncFailed
+        ? '检测到本地数据可能尚未成功同步。继续刷新会用服务器数据覆盖当前页面，未同步的修改将丢失。确定继续吗？'
+        : '服务器数据与当前页面不同。继续刷新会用服务器最新数据覆盖当前页面，确定继续吗？';
+      if (!window.confirm(warning)) {
+        showToast('已取消刷新，当前数据保持不变', 'info');
+        return;
+      }
+    }
+
+    state = {
+      records: data.records,
+      nextId: data.nextId || (data.records.reduce((m, r) => Math.max(m, Number(r.id) || 0), 30) + 1),
+    };
+    localStorage.setItem(LS_KEY, JSON.stringify(state));
+    if (Array.isArray(data.users)) localStorage.setItem(STORAGE_KEYS.users, JSON.stringify(data.users));
+    if (Array.isArray(data.defectLib)) localStorage.setItem(STORAGE_KEYS.defectLib, JSON.stringify(data.defectLib));
+
+    _selectedIds.clear();
+    filterRecords();
+    updateTopKpis();
+    showToast('✓ 验货明细已刷新，共 ' + state.records.length + ' 条', 'success');
+  } catch (err) {
+    console.error('[refreshRecordsPage]', err);
+    showToast('刷新失败：' + err.message, 'error');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = oldText || '↻ 刷新';
+    }
+  }
+}
+
 function filterRecords() {
   try {
     const data   = recs();
-    const search = (document.getElementById('searchInput')?.value || '').toLowerCase();
+    const search = (document.getElementById('searchInput')?.value || '').trim().toLowerCase();
     const resF   = document.getElementById('filterResult')?.value || '';
     const dfrom  = document.getElementById('filterDateFrom')?.value || '';
     const dto    = document.getElementById('filterDateTo')?.value   || '';
 
     filteredRecs = data.filter(r => {
       if (search) {
-        const haystack = [r.supplier, r.productNo, r.productName, r.client, r.defect]
+        const haystack = [r.supplier, r.productNo, r.productName, r.client, r.orderNo, r.deliveryNo, r.defect]
           .filter(Boolean).join(' ').toLowerCase();
         if (!haystack.includes(search)) return false;
       }
@@ -1746,6 +1803,7 @@ function filterRecords() {
         <col style="width:80px"/>   <!-- 客户 -->
         <col style="width:92px"/>   <!-- 货号 -->
         <col style="width:auto"/>   <!-- 款式名称 -->
+        <col style="width:102px"/>  <!-- PO号 -->
         <col style="width:60px"/>   <!-- 类型 -->
         <col style="width:86px"/>   <!-- 来料数 -->
         <col style="width:72px"/>   <!-- 抽查数 -->
@@ -1767,6 +1825,7 @@ function filterRecords() {
         <th style="text-align:left">客户</th>
         <th style="text-align:left">货号</th>
         <th style="text-align:left">款式名称</th>
+        <th style="text-align:left">PO号</th>
         <th style="text-align:center">类型</th>
         <th style="text-align:right">来料数</th>
         <th style="text-align:right">抽查数</th>
@@ -1782,6 +1841,12 @@ function filterRecords() {
         const rt       = parseRate(r.defectRate) ?? 0;
         const checked  = _selectedIds.has(r.id) ? 'checked' : '';
         const selCls   = _selectedIds.has(r.id) ? 'row-selected' : '';
+        const editBtn = can('editRecord')
+          ? `<button class="action-btn" onclick="openEditModal(${r.id})">编辑</button>`
+          : '';
+        const delBtn = can('deleteRecord')
+          ? `<button class="action-btn del" onclick="deleteRecord(${r.id})">删除</button>`
+          : '';
         return `<tr class="${selCls}" data-id="${r.id}">
           <td class="col-check">
             <input type="checkbox" class="row-check" ${checked}
@@ -1793,6 +1858,7 @@ function filterRecords() {
           <td style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${r.client||''}">${r.client||'-'}</td>
           <td style="font-family:var(--font-mono);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${r.productNo||''}">${r.productNo||'-'}</td>
           <td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${r.productName||''}">${r.productName||'-'}</td>
+          <td style="font-family:var(--font-mono);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${r.orderNo||''}">${r.orderNo||'-'}</td>
           <td style="text-align:center"><span class="badge ${r.type==='成品'?'badge-pass':'badge-hold'}">${r.type||'-'}</span></td>
           <td style="text-align:right;font-variant-numeric:tabular-nums">${(r.qty||0).toLocaleString()}</td>
           <td style="text-align:right;font-variant-numeric:tabular-nums">${r.sampleQty != null ? r.sampleQty : '<span style="color:var(--text-muted)">—</span>'}</td>
@@ -1803,8 +1869,8 @@ function filterRecords() {
           <td style="text-align:center"><span class="badge ${bc}">${r.result}</span></td>
           <td style="text-align:center">${r.qc||'-'}</td>
           <td style="text-align:center">
-            <button class="action-btn" onclick="openEditModal(${r.id})">编辑</button>
-            <button class="action-btn del" onclick="deleteRecord(${r.id})">删除</button>
+            ${editBtn}
+            ${delBtn}
             <button class="action-btn iqc" onclick="exportIQCReport(${r.id})" title="导出IQC检验报告">IQC</button>
           </td>
         </tr>`;
@@ -2072,7 +2138,7 @@ function clearOcr() {
   if (input) input.value = '';
   setVal('ocrRawText', '');
   ['ocrDate','ocrInspDate','ocrSupplier','ocrClient','ocrProductNo',
-   'ocrProductName','ocrDeliveryNo','ocrQty','ocrType','ocrRemark']
+   'ocrProductName','ocrDeliveryNo','ocrOrderNo','ocrQty','ocrType','ocrRemark']
     .forEach(id => setVal(id, ''));
   setText('ocrStatus', '未上传图片');
 }
@@ -2394,10 +2460,13 @@ function extractFieldsFromOcrText(text) {
   if (productName) setVal('ocrProductName', productName);
   if (qty)         setVal('ocrQty', qty);
 
-  /* ── 送货单号：优先送货单号，其次客户单号；排除手机号 ── */
-  let deliveryNo = findByKeywords(['送货单号','送货编号','送货单','单号','Delivery No','DN No'], _OCR_CUTOFF_KEYWORDS);
-  if (!deliveryNo) deliveryNo = findByKeywords(['客户单号','客户订单'], _OCR_CUTOFF_KEYWORDS);
+  /* ── 送货单号：只匹配送货字段，避免把订单号误填进来 ── */
+  let deliveryNo = findByKeywords(['送货单号','送货编号','送货单','Delivery No','DN No'], _OCR_CUTOFF_KEYWORDS);
   if (deliveryNo && !isPhoneNumberLike(deliveryNo)) setVal('ocrDeliveryNo', deliveryNo);
+
+  /* ── PO号 / 订单号：独立保存，不再混入送货单号 ── */
+  const orderNo = findByKeywords(['PO号','PO#','P/O','订单号','订单编号','客户单号','客户订单'], _OCR_CUTOFF_KEYWORDS);
+  if (orderNo && !isPhoneNumberLike(orderNo)) setVal('ocrOrderNo', orderNo);
 
   /* 类型：文本包含"来料/原料/物料/配件/包材"，或已识别到货号+数量+PCS的送货单明细，则设为"来料" */
   if (/来料|原料|物料|配件|包材/.test(text) || (productNo && qty)) {
@@ -2412,6 +2481,7 @@ function applyOcrToForm() {
   const ocrProductNo   = document.getElementById('ocrProductNo')?.value || '';
   const ocrProductName = document.getElementById('ocrProductName')?.value || '';
   const ocrDeliveryNo  = document.getElementById('ocrDeliveryNo')?.value || '';
+  const ocrOrderNo     = document.getElementById('ocrOrderNo')?.value || '';
   const ocrQty         = document.getElementById('ocrQty')?.value || '';
   const ocrType        = document.getElementById('ocrType')?.value || '';
   const ocrRemark      = document.getElementById('ocrRemark')?.value || '';
@@ -2422,6 +2492,7 @@ function applyOcrToForm() {
   if (ocrProductNo)   setVal('f_productNo', ocrProductNo);
   if (ocrProductName) setVal('f_productName', ocrProductName);
   if (ocrDeliveryNo)  setVal('f_deliveryNo', ocrDeliveryNo);
+  if (ocrOrderNo)     setVal('f_orderNo', ocrOrderNo);
   if (ocrQty)         setVal('f_qty', ocrQty);
   if (ocrType)        setVal('f_type', ocrType);
   if (ocrRemark)      setVal('f_remark', ocrRemark);
@@ -2730,6 +2801,7 @@ function openEditModal(id) {
   setVal('f_productNo',   r.productNo || '');
   setVal('f_productName', r.productName || '');
   setVal('f_deliveryNo',  r.deliveryNo || '');
+  setVal('f_orderNo',     r.orderNo || '');
   setVal('f_type',        r.type || '成品');
   setVal('f_qty',         r.qty || '');
   /* 编辑旧记录：sampleQty 已有值时设 manualEdit 标记，防止被自动覆盖 */
@@ -2759,7 +2831,7 @@ function getVal(id)     { return (document.getElementById(id)?.value || '').trim
 
 function clearForm() {
   ['f_date','f_inspDate','f_supplier','f_client','f_productNo','f_productName',
-   'f_deliveryNo','f_qty','f_sampleQty','f_pass','f_fail','f_defectRate','f_defect','f_qc','f_remark']
+   'f_deliveryNo','f_orderNo','f_qty','f_sampleQty','f_pass','f_fail','f_defectRate','f_defect','f_qc','f_remark']
     .forEach(id => setVal(id, ''));
   setVal('f_type',   '成品');
   setVal('f_result', 'PASS');
@@ -3450,7 +3522,7 @@ function renderDefectLibPage() {
   initDefectLib();
   const lib    = _getDefectLib() || [];
   const canDel = can('deleteRecord');  /* admin 可删除 */
-  const canAdd = can('createRecord'); /* admin + manager 可新增 */
+  const canAdd = can('manageDefectLib'); /* admin + manager 可新增 */
 
   const CATS = ['外观/质量','功能','尺寸/测量','包装','其它'];
   const LVLS = ['CR','MAJ 0.65','MAJ 1.0','MIN 2.5'];
@@ -3498,7 +3570,7 @@ function renderDefectLibPage() {
               <td style="text-align:center">${badge}</td>
               <td style="text-align:center">
                 ${canAdd ? `<button class="action-btn" onclick="_openDefLibModal(${realIdx})">编辑</button>` : ''}
-                <button class="action-btn" onclick="_toggleDefLibItem(${realIdx})">${d.enabled?'停用':'启用'}</button>
+                ${canAdd ? `<button class="action-btn" onclick="_toggleDefLibItem(${realIdx})">${d.enabled?'停用':'启用'}</button>` : ''}
                 ${canDel ? `<button class="action-btn del" onclick="_deleteDefLibItem(${realIdx})">删除</button>` : ''}
               </td>
             </tr>`;
@@ -3546,6 +3618,7 @@ function renderDefectLibPage() {
 let _editingDefLibIdx = null;
 
 function _openDefLibModal(idx) {
+  if (!can('manageDefectLib')) { showToast('当前账号无权限管理不良描述库', 'error'); return; }
   _editingDefLibIdx = idx ?? null;
   const modal = document.getElementById('defLibModal');
   if (!modal) return;
@@ -3578,6 +3651,7 @@ function _closeDefLibModal() {
 }
 
 function _saveDefLibItem() {
+  if (!can('manageDefectLib')) { showToast('当前账号无权限管理不良描述库', 'error'); return; }
   const errEl = document.getElementById('defLibModalErr');
   const show  = msg => { if(errEl){errEl.textContent=msg;errEl.style.display='';} };
   const name     = (document.getElementById('dlName')?.value||'').trim();
@@ -3601,6 +3675,7 @@ function _saveDefLibItem() {
 }
 
 function _toggleDefLibItem(idx) {
+  if (!can('manageDefectLib')) { showToast('当前账号无权限管理不良描述库', 'error'); return; }
   const lib = _getDefectLib() || [];
   if (!lib[idx]) return;
   lib[idx].enabled = !lib[idx].enabled;
@@ -3984,6 +4059,7 @@ function saveRecord() {
     date, inspDate: getVal('f_inspDate') || date,
     supplier, client: getVal('f_client'), productNo: getVal('f_productNo'),
     productName: getVal('f_productName'), deliveryNo: getVal('f_deliveryNo'),
+    orderNo: getVal('f_orderNo'),
     type: getVal('f_type'), qty, sampleQty: sample, pass, fail,
     defectRate: sample > 0 ? (fail/sample*100).toFixed(2)+'%' : (getVal('f_defectRate') || '0.00%'),
     result: getFinalRecordResult(
@@ -4286,15 +4362,48 @@ function exportPDF(type) {
   setTimeout(() => window.print(), 400);
 }
 
+function _qcApiBase() {
+  const p = location.pathname.replace(/[^/]*$/, '');
+  return p.replace(/\/$/, '');
+}
+
+function _recordsExportQuery() {
+  const params = new URLSearchParams();
+  const search = getVal('searchInput');
+  const result = getVal('filterResult');
+  const from = getVal('filterDateFrom');
+  const to = getVal('filterDateTo');
+  if (search) params.set('search', search);
+  if (result) params.set('result', result);
+  if (from) params.set('dateFrom', from);
+  if (to) params.set('dateTo', to);
+  const qs = params.toString();
+  return qs ? '?' + qs : '';
+}
+
+function _downloadServerExport(pathname, label) {
+  if (window.__QC_BACKEND_OK !== true) return false;
+  const a = document.createElement('a');
+  a.href = _qcApiBase() + '/api/export/' + pathname + _recordsExportQuery();
+  a.rel = 'noopener';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  showToast(label + ' 下载已开始', 'success');
+  return true;
+}
+
 function exportCSV() {
   if (!can('exportData')) { showToast('当前账号无权限执行此操作', 'error'); return; }
+  if (currentPage === 'records') filterRecords();
+  if (_downloadServerExport('records.csv', 'CSV')) return;
   try {
     const data = filteredRecs.length ? filteredRecs : recs();
-    const HDR  = ['ID','来料日期','检验日期','供应商','客户','货号','款式名称','类型',
+    const HDR  = ['ID','来料日期','检验日期','供应商','客户','货号','款式名称','PO号','类型',
                   '来料数量','抽查数量','PASS数','FAIL数','不良率','不良现象','判定结果','检验员','备注'];
     const rows = data.map(r => [
       r.id, r.date, r.inspDate, r.supplier, r.client, r.productNo, r.productName,
-      r.type, r.qty, r.sampleQty, r.pass, r.fail, r.defectRate, r.defect, r.result, r.qc, r.remark,
+      r.orderNo, r.type, r.qty, r.sampleQty, r.pass, r.fail, r.defectRate, r.defect, r.result, r.qc, r.remark,
     ].map(v => `"${String(v==null?'':v).replace(/"/g,'""')}"`));
     const csv  = '\uFEFF' + [HDR, ...rows].map(r=>r.join(',')).join('\n');
     const blob = new Blob([csv], { type:'text/csv;charset=utf-8;' });
@@ -4313,9 +4422,10 @@ function exportCSV() {
 /* 按「加工厂品质检验明细统计表」格式导出 Excel（沿用验货明细页的日期/搜索筛选）*/
 function exportFactoryExcel() {
   if (!can('exportData')) { showToast('当前账号无权限执行此操作', 'error'); return; }
+  if (currentPage === 'records') filterRecords();
+  if (_downloadServerExport('factory-excel.xls', '加工厂 Excel')) return;
   if (typeof XLSX === 'undefined') { showToast('Excel 引擎未加载，请刷新后重试', 'error'); return; }
   try {
-    if (currentPage === 'records') filterRecords();
     const hasActiveFilter = !!(
       getVal('searchInput') ||
       getVal('filterResult') ||
@@ -4327,28 +4437,28 @@ function exportFactoryExcel() {
     if (!data.length) { showToast('当前筛选无数据可导出', 'error'); return; }
 
     const title   = '加工厂品质检验明细统计表';
-    const headers = ['序号','来货日期','供应商','加工类型','客户','送货单号','货号','产品名称','数量','单数','检验\n结果','不良描述','检验人','备注'];
+    const headers = ['序号','来货日期','供应商','加工类型','客户','送货单号','PO号','货号','产品名称','数量','单数','检验\n结果','不良描述','检验人','备注'];
     const aoa = [[title], headers];
     data.forEach((r, i) => {
       aoa.push([
         i + 1, r.date || '', r.supplier || '', r.type || '', r.client || '',
-        r.deliveryNo || '', r.productNo || '', r.productName || '',
+        r.deliveryNo || '', r.orderNo || '', r.productNo || '', r.productName || '',
         (r.qty != null && r.qty !== '' ? Number(r.qty) : ''), '',
         r.result || '', r.defect || '', r.qc || '', r.remark || '',
       ]);
     });
 
     const ws = XLSX.utils.aoa_to_sheet(aoa);
-    ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 13 } }];  /* 标题 A1:N1 */
-    ws['!cols']   = [5.3,9.7,7.8,10.3,10.3,11.5,12,27,7.5,7,7.2,19.3,13,15.5].map(w => ({ wch: w }));
+    ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 14 } }];  /* 标题 A1:O1 */
+    ws['!cols']   = [5.3,9.7,7.8,10.3,10.3,11.5,13,12,27,7.5,7,7.2,19.3,13,15.5].map(w => ({ wch: w }));
     ws['!rows']   = [{ hpt: 24 }, { hpt: 22 }];  /* 标题行 / 表头行高 */
 
     /* ── 样式：全单元格黑框 + 标题居中加粗 + 表头加粗底色（需 xlsx-js-style）── */
     const thin   = { style: 'thin', color: { rgb: '000000' } };
     const border = { top: thin, bottom: thin, left: thin, right: thin };
-    const leftCols = { 7: 1, 11: 1 };  /* 产品名称(H)、不良描述(L) 左对齐，其余居中 */
+    const leftCols = { 8: 1, 12: 1 };  /* 产品名称(I)、不良描述(M) 左对齐，其余居中 */
     for (let R = 0; R < aoa.length; R++) {
-      for (let C = 0; C < 14; C++) {
+      for (let C = 0; C < 15; C++) {
         const addr = XLSX.utils.encode_cell({ r: R, c: C });
         let cell = ws[addr];
         if (!cell) cell = ws[addr] = { t: 's', v: '' };
@@ -4580,6 +4690,7 @@ function _backupDoImport(incoming, mode) {
       productNo:   r.productNo   || r.款号 || '',
       productName: r.productName || r.款式 || '',
       deliveryNo:  r.deliveryNo  || r.单号 || '',
+      orderNo:     r.orderNo     || r.PO || r.PO号 || r.订单号 || '',
       type:        r.type        || '成品',
       qty:         r.qty         || 0,
       sampleQty:   r.sampleQty != null ? r.sampleQty : null,
@@ -4798,6 +4909,7 @@ let _importSheetName    = '';
 let _importHeaderRowIdx = -1;   // 识别到的表头行索引
 let _importErrors       = [];   // { fatal:bool, msg:string }
 let _importWarnings     = [];   // { msg:string }
+let _pendingImportPlan  = null; // 用户确认前的导入分析结果（不写入数据）
 
 /* ═══════════════════════════════
    拖拽事件
@@ -4835,6 +4947,8 @@ function importReset() {
   _importHeaderRowIdx = -1;
   _importErrors       = [];
   _importWarnings     = [];
+  _pendingImportPlan  = null;
+  _closeImportConfirmPreview();
   /* 隐藏所有面板 */
   ['importMapPanel','importErrorPanel','importActionRow','importProgressWrap']
     .forEach(id => _setDisplay(id, 'none'));
@@ -5040,17 +5154,16 @@ function _buildFieldMap(headerCells) {
     if (matched) return;
     /* 3. 部分包含匹配 */
     const partials = [
+      /* 单据编号要先于“客户/供应商”等通用词，避免复合表头误分类 */
+      ['送货单', 'deliveryNo'], ['送货号', 'deliveryNo'], ['DN', 'deliveryNo'],
+      ['订单号', 'orderNo'],    ['订单编号', 'orderNo'],  ['PO', 'orderNo'],
+      ['单号', 'deliveryNo'],
       ['来料日', 'date'],       ['到货日', 'date'],       ['来货日', 'date'],
       ['检验日', 'inspDate'],
       ['厂名', 'supplier'],     ['供应商', 'supplier'],
       ['客名', 'client'],       ['客户', 'client'],
       ['款号', 'productNo'],    ['货号', 'productNo'],
       ['款式', 'productName'],  ['名称', 'productName'],
-      /* 送货相关 — deliveryNo */
-      ['送货单', 'deliveryNo'], ['送货号', 'deliveryNo'], ['DN', 'deliveryNo'],
-      ['单号', 'deliveryNo'],
-      /* 订单相关 — orderNo（不与送货单混淆） */
-      ['订单号', 'orderNo'],    ['PO', 'orderNo'],
       ['数量', 'qty'],          ['抽查', 'sampleQty'],
       ['判定', 'result'],       ['不良', 'defect'],
       ['问题', 'defect'],       ['检验员', 'qc'],          ['验货员', 'qc'],
@@ -5292,136 +5405,254 @@ function _renderActionRow() {
 }
 
 /* ═══════════════════════════════
-   §K  确认导入（唯一写入 localStorage 的入口）
+   §K  导入前分析预览 + 最终写入
 ═══════════════════════════════ */
+function _importHtml(v) {
+  return String(v == null ? '' : v)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function _buildImportPlan(mode) {
+  const M      = _importMappedFields;
+  const getCol = f => Object.keys(M).find(k => M[k] === f);
+
+  const dateCol  = getCol('date');
+  const inspCol  = getCol('inspDate');
+  const supCol   = getCol('supplier');
+  const cliCol   = getCol('client');
+  const dlvCol   = getCol('deliveryNo');
+  const ordCol   = getCol('orderNo');
+  const noCol    = getCol('productNo');
+  const nameCol  = getCol('productName');
+  const typeCol  = getCol('type');
+  const qtyCol   = getCol('qty');
+  const smpCol   = getCol('sampleQty');
+  const passCol  = getCol('pass');
+  const failCol  = getCol('fail');
+  const rateCol  = getCol('defectRate');
+  const resCol   = getCol('result');
+  const defCol   = getCol('defect');
+  const qcCol    = getCol('qc');
+  const res2Col  = getCol('result2');
+  const confCol  = getCol('confirmBy');
+  const remCol   = getCol('remark');
+
+  const newRecs = [];
+  let nextId = mode === 'replace' ? 1 : state.nextId;
+  let skipped = 0;
+  let dateWarn = 0;
+
+  _importParsedRows.forEach(row => {
+    const rawDate = dateCol ? String(row[dateCol] ?? '').trim() : '';
+    const rawSup  = supCol  ? String(row[supCol]  ?? '').trim() : '';
+
+    if (!rawDate && !rawSup) { skipped++; return; }
+
+    const parsedDate = _parseDate(rawDate);
+    if (rawDate && !parsedDate) dateWarn++;
+    const date     = parsedDate || '';
+    const inspDate = inspCol ? (_parseDate(String(row[inspCol] ?? '').trim()) || date) : date;
+
+    const qty    = _toInt(qtyCol  ? row[qtyCol]  : '');
+    const smpRaw = smpCol  ? String(row[smpCol] ?? '').trim() : '';
+    const smpQty = smpRaw !== '' ? _toInt(smpRaw) : null;
+    const pass   = _toInt(passCol ? row[passCol] : '');
+    const fail   = _toInt(failCol ? row[failCol] : '');
+
+    const rawRes = resCol ? String(row[resCol] ?? '').trim() : '';
+    const result = _normalizeResult(rawRes) || (fail > 0 ? 'REJ' : 'PASS');
+
+    let defectRate = rateCol ? String(row[rateCol] ?? '').trim() : '';
+    if (!defectRate) {
+      const base = (pass + fail) || (smpQty != null ? smpQty : 0);
+      defectRate = base > 0 ? (fail / base * 100).toFixed(2) + '%' : (smpQty != null ? '0.00%' : '');
+    } else if (!defectRate.includes('%')) {
+      const n = parseFloat(defectRate);
+      defectRate = isNaN(n) ? '' : (n > 1 ? n.toFixed(2) + '%' : (n * 100).toFixed(2) + '%');
+    }
+
+    const passFinal = pass > 0 ? pass : (smpQty != null ? Math.max(0, smpQty - fail) : 0);
+
+    let productNo = noCol ? String(row[noCol] ?? '').trim() : '';
+    if (/^\d+\.0$/.test(productNo)) productNo = productNo.replace(/\.0$/, '');
+
+    newRecs.push({
+      id:          nextId++,
+      date,
+      inspDate,
+      supplier:    rawSup,
+      client:      cliCol   ? String(row[cliCol]   ?? '').trim() : '',
+      deliveryNo:  dlvCol ? String(row[dlvCol] ?? '').trim() : '',
+      orderNo:     ordCol ? String(row[ordCol] ?? '').trim() : '',
+      productNo,
+      productName: nameCol  ? String(row[nameCol]  ?? '').trim() : '',
+      type:        typeCol  ? _normalizeType(String(row[typeCol] ?? '').trim()) : '成品',
+      qty,
+      sampleQty:   smpQty,
+      pass:        passFinal,
+      fail,
+      defectRate,
+      result,
+      defect:      defCol   ? String(row[defCol]   ?? '').trim() : '',
+      qc:          qcCol    ? String(row[qcCol]    ?? '').trim() : '',
+      confirmResult: res2Col ? _normalizeResult(String(row[res2Col] ?? '').trim()) : '',
+      confirmBy:   confCol  ? String(row[confCol]  ?? '').trim() : '',
+      remark:      remCol   ? String(row[remCol]   ?? '').trim() : '',
+    });
+  });
+
+  const suppliers = new Set(newRecs.map(r => r.supplier).filter(Boolean));
+  const dates = newRecs.map(r => r.date).filter(Boolean).sort();
+  const rejCount = newRecs.filter(r => String(r.result || '').toUpperCase() === 'REJ').length;
+  const failQty = newRecs.reduce((sum, r) => sum + _toInt(r.fail), 0);
+  const mappedCount = Object.values(M).filter(Boolean).length;
+  const warningTexts = [
+    ..._importWarnings.map(w => w.msg),
+    ...(dateWarn ? ['有 ' + dateWarn + ' 行日期无法识别，导入后日期会留空，请确认是否继续。'] : []),
+    ...(skipped ? ['有 ' + skipped + ' 行为空行或缺少关键内容，已自动跳过。'] : []),
+    ...(mode === 'replace' ? ['当前选择「替换全部数据」，确认后会覆盖现有 ' + state.records.length + ' 条验货记录。'] : []),
+  ];
+
+  return {
+    mode,
+    modeLabel: mode === 'replace' ? '替换全部数据' : '追加到现有数据',
+    records: newRecs,
+    nextId,
+    skipped,
+    dateWarn,
+    suppliers: suppliers.size,
+    dateRange: dates.length ? (dates[0] + (dates[0] === dates[dates.length - 1] ? '' : ' ~ ' + dates[dates.length - 1])) : '未识别',
+    rejCount,
+    failQty,
+    mappedCount,
+    warningTexts,
+  };
+}
+
+function _closeImportConfirmPreview() {
+  const old = document.getElementById('importConfirmOverlay');
+  if (old) old.remove();
+}
+
+function _showImportConfirmPreview(plan) {
+  _closeImportConfirmPreview();
+  const sampleRows = plan.records.slice(0, 12);
+  const rowsHtml = sampleRows.map((r, i) => `
+    <tr>
+      <td>${i + 1}</td>
+      <td>${_importHtml(r.date || '-')}</td>
+      <td>${_importHtml(r.supplier || '-')}</td>
+      <td>${_importHtml(r.productNo || '-')}</td>
+      <td>${_importHtml(r.productName || '-')}</td>
+      <td class="${String(r.result).toUpperCase() === 'REJ' ? 'rej' : 'pass'}">${_importHtml(r.result || '-')}</td>
+      <td>${_importHtml(r.fail || 0)}</td>
+      <td>${_importHtml(r.defect || '-')}</td>
+    </tr>`).join('');
+  const warnHtml = plan.warningTexts.length
+    ? `<div class="import-confirm-warnings">${plan.warningTexts.map(w => '<div>' + _importHtml(w) + '</div>').join('')}</div>`
+    : `<div class="import-confirm-ok">未发现阻塞问题，可确认导入。</div>`;
+
+  const overlay = document.createElement('div');
+  overlay.id = 'importConfirmOverlay';
+  overlay.className = 'import-confirm-overlay show';
+  overlay.innerHTML = `
+    <div class="import-confirm-box" role="dialog" aria-modal="true" aria-label="导入分析预览">
+      <div class="import-confirm-header">
+        <div>
+          <div class="import-confirm-title">导入分析预览</div>
+          <div class="import-confirm-sub">请核对解析结果，确认后才会写入系统数据</div>
+        </div>
+        <button class="modal-close" type="button" onclick="_closeImportConfirmPreview()">×</button>
+      </div>
+      <div class="import-confirm-body">
+        <div class="import-confirm-grid">
+          <div class="import-confirm-chip"><b>${plan.records.length}</b><span>将导入记录</span></div>
+          <div class="import-confirm-chip"><b>${plan.modeLabel}</b><span>导入方式</span></div>
+          <div class="import-confirm-chip"><b>${plan.suppliers}</b><span>供应商</span></div>
+          <div class="import-confirm-chip"><b>${plan.rejCount}</b><span>REJ 批次</span></div>
+          <div class="import-confirm-chip"><b>${plan.failQty}</b><span>不良数量</span></div>
+          <div class="import-confirm-chip wide"><b>${_importHtml(plan.dateRange)}</b><span>日期范围</span></div>
+        </div>
+        ${warnHtml}
+        <div class="import-confirm-table-title">样本预览（前 ${sampleRows.length} 条）</div>
+        <div class="import-confirm-table-wrap">
+          <table>
+            <thead>
+              <tr><th>#</th><th>日期</th><th>供应商</th><th>货号</th><th>产品</th><th>结果</th><th>不良数</th><th>不良现象</th></tr>
+            </thead>
+            <tbody>${rowsHtml}</tbody>
+          </table>
+        </div>
+      </div>
+      <div class="import-confirm-footer">
+        <button class="btn-secondary" type="button" onclick="_closeImportConfirmPreview()">返回修改</button>
+        <button class="btn-primary" type="button" id="importExecuteBtn" onclick="executeImportConfirm()">确认导入 ${plan.records.length} 条</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+}
+
 function confirmImport() {
   const btn  = document.getElementById('importConfirmBtn');
   const mode = document.getElementById('importModeSelect')?.value || 'append';
 
-  if (btn) { btn.disabled = true; btn.textContent = '导入中…'; }
+  if (btn) { btn.disabled = true; btn.textContent = '分析中…'; }
 
   try {
-    const M      = _importMappedFields;
-    const getCol = f => Object.keys(M).find(k => M[k] === f);
-
-    const dateCol  = getCol('date');
-    const inspCol  = getCol('inspDate');
-    const supCol   = getCol('supplier');
-    const cliCol   = getCol('client');
-    const dlvCol   = getCol('deliveryNo');
-    const ordCol   = getCol('orderNo');
-    const noCol    = getCol('productNo');
-    const nameCol  = getCol('productName');
-    const typeCol  = getCol('type');
-    const qtyCol   = getCol('qty');
-    const smpCol   = getCol('sampleQty');
-    const passCol  = getCol('pass');
-    const failCol  = getCol('fail');
-    const rateCol  = getCol('defectRate');
-    const resCol   = getCol('result');
-    const defCol   = getCol('defect');
-    const qcCol    = getCol('qc');
-    const res2Col  = getCol('result2');
-    const confCol  = getCol('confirmBy');
-    const remCol   = getCol('remark');
-
-    const newRecs = [];
-
-    _importParsedRows.forEach(row => {
-      /* 读原始值 */
-      const rawDate = dateCol ? String(row[dateCol] ?? '').trim() : '';
-      const rawSup  = supCol  ? String(row[supCol]  ?? '').trim() : '';
-
-      /* 跳过完全空行 */
-      if (!rawDate && !rawSup) return;
-
-      /* 日期解析 */
-      const date     = _parseDate(rawDate) || '';
-      const inspDate = inspCol ? (_parseDate(String(row[inspCol] ?? '').trim()) || date) : date;
-
-      /* 数值字段：抽查数量为空时存 null */
-      const qty    = _toInt(qtyCol  ? row[qtyCol]  : '');
-      const smpRaw = smpCol  ? String(row[smpCol] ?? '').trim() : '';
-      const smpQty = smpRaw !== '' ? _toInt(smpRaw) : null;   /* 空→null */
-      const pass   = _toInt(passCol ? row[passCol] : '');
-      const fail   = _toInt(failCol ? row[failCol] : '');
-
-      /* 判定结果 */
-      const rawRes = resCol ? String(row[resCol] ?? '').trim() : '';
-      const result = _normalizeResult(rawRes) || (fail > 0 ? 'REJ' : 'PASS');
-
-      /* 不良率：只在有抽查数量或 pass+fail 时才计算 */
-      let defectRate = rateCol ? String(row[rateCol] ?? '').trim() : '';
-      if (!defectRate) {
-        const base = (pass + fail) || (smpQty != null ? smpQty : 0);
-        /* sampleQty 为 null 且 pass+fail 均为 0 时，不良率留空 */
-        defectRate = base > 0 ? (fail / base * 100).toFixed(2) + '%' : (smpQty != null ? '0.00%' : '');
-      } else if (!defectRate.includes('%')) {
-        const n = parseFloat(defectRate);
-        defectRate = isNaN(n) ? '' : (n > 1 ? n.toFixed(2) + '%' : (n * 100).toFixed(2) + '%');
-      }
-
-      /* PASS 数量自动推断（仅在 sampleQty 有值时） */
-      const passFinal = pass > 0 ? pass : (smpQty != null ? Math.max(0, smpQty - fail) : 0);
-
-      /* 货号：Excel 数值型转整数字符串（去掉 .0） */
-      let productNo = noCol ? String(row[noCol] ?? '').trim() : '';
-      if (/^\d+\.0$/.test(productNo)) productNo = productNo.replace(/\.0$/, '');
-
-      newRecs.push({
-        id:          state.nextId++,
-        date,
-        inspDate,
-        supplier:    rawSup,
-        client:      cliCol   ? String(row[cliCol]   ?? '').trim() : '',
-        deliveryNo:  dlvCol ? String(row[dlvCol] ?? '').trim() : '',
-        orderNo:     ordCol ? String(row[ordCol] ?? '').trim() : '',
-        productNo,
-        productName: nameCol  ? String(row[nameCol]  ?? '').trim() : '',
-        type:        typeCol  ? _normalizeType(String(row[typeCol] ?? '').trim()) : '成品',
-        qty,
-        sampleQty:   smpQty,
-        pass:        passFinal,
-        fail,
-        defectRate,
-        result,
-        defect:      defCol   ? String(row[defCol]   ?? '').trim() : '',
-        qc:          qcCol    ? String(row[qcCol]    ?? '').trim() : '',
-        confirmResult: res2Col ? _normalizeResult(String(row[res2Col] ?? '').trim()) : '',
-        confirmBy:   confCol  ? String(row[confCol]  ?? '').trim() : '',
-        remark:      remCol   ? String(row[remCol]   ?? '').trim() : '',
-      });
-    });
-
-    if (newRecs.length === 0) {
+    const plan = _buildImportPlan(mode);
+    if (plan.records.length === 0) {
       showToast('没有可导入的有效数据，请检查文件内容', 'error');
       if (btn) { btn.disabled = false; btn.textContent = '✓ 确认导入'; }
       return;
     }
 
-    /* ★ 唯一写入 localStorage 的地方 */
-    if (mode === 'replace') {
-      state.records = newRecs;
-      state.nextId  = newRecs.length + 1;
+    _pendingImportPlan = plan;
+    _showImportConfirmPreview(plan);
+    if (btn) { btn.disabled = false; btn.textContent = '✓ 确认导入'; }
+  } catch (err) {
+    console.error('[confirmImport]', err);
+    showToast('分析失败：' + err.message, 'error');
+    if (btn) { btn.disabled = false; btn.textContent = '✓ 确认导入'; }
+  }
+}
+
+function executeImportConfirm() {
+  const plan = _pendingImportPlan;
+  const btn = document.getElementById('importExecuteBtn');
+  if (!plan || !plan.records || plan.records.length === 0) {
+    showToast('没有待确认的导入数据，请重新选择文件', 'error');
+    return;
+  }
+
+  if (btn) { btn.disabled = true; btn.textContent = '导入中…'; }
+
+  try {
+    if (plan.mode === 'replace') {
+      state.records = plan.records;
+      state.nextId  = plan.records.length + 1;
     } else {
-      state.records.push(...newRecs);
+      state.records.push(...plan.records);
+      state.nextId = plan.nextId;
     }
     persist();
 
-    const modeLabel = mode === 'replace' ? '替换' : '追加';
-    showToast('✓ 成功' + modeLabel + '导入 ' + newRecs.length + ' 条记录', 'success');
+    const modeLabel = plan.mode === 'replace' ? '替换' : '追加';
+    showToast('✓ 成功' + modeLabel + '导入 ' + plan.records.length + ' 条记录', 'success');
 
-    /* 重置面板，跳转仪表板 */
     setTimeout(() => {
+      _closeImportConfirmPreview();
       importReset();
       showPage('dashboard');
       updateTopKpis();
     }, 700);
-
   } catch (err) {
-    console.error('[confirmImport]', err);
+    console.error('[executeImportConfirm]', err);
     showToast('导入失败：' + err.message, 'error');
-    if (btn) { btn.disabled = false; btn.textContent = '✓ 确认导入'; }
+    if (btn) { btn.disabled = false; btn.textContent = '确认导入 ' + plan.records.length + ' 条'; }
   }
 }
 
@@ -7450,3 +7681,14 @@ window.applyAqlSuggest       = applyAqlSuggest;
 window.onProductNoChange     = onProductNoChange;
 window.onTypeChange          = onTypeChange;
 window.calcRate              = calcRate;
+window.refreshRecordsPage    = refreshRecordsPage;
+
+/* ── 数据导入确认预览 ── */
+window.importDragOver        = importDragOver;
+window.importDragLeave       = importDragLeave;
+window.handleDrop            = handleDrop;
+window.handleFileImport      = handleFileImport;
+window.importReset           = importReset;
+window.confirmImport         = confirmImport;
+window.executeImportConfirm  = executeImportConfirm;
+window._closeImportConfirmPreview = _closeImportConfirmPreview;

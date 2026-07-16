@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS departments (
 -- 报价单
 CREATE TABLE IF NOT EXISTS quotes (
   id               INTEGER PRIMARY KEY AUTOINCREMENT,
-  quote_no         TEXT UNIQUE NOT NULL,
+  quote_no         TEXT NOT NULL,
   product_name     TEXT NOT NULL,
   customer         TEXT,
   qty              INTEGER,
@@ -32,7 +32,8 @@ CREATE TABLE IF NOT EXISTS quotes (
   created_at       TEXT NOT NULL DEFAULT (datetime('now')),
   status           TEXT NOT NULL DEFAULT 'drafting',  -- drafting / fully_approved / exported
   version          TEXT,  -- 版本标签：同一产品的不同报价版本（如 V1 / 改色版）
-  factory_code     TEXT NOT NULL DEFAULT 'qingxi' REFERENCES factories(code)
+  factory_code     TEXT NOT NULL DEFAULT 'qingxi' REFERENCES factories(code),
+  UNIQUE(factory_code, quote_no)
 );
 
 -- 每报价单 × 每部门 = 一行 section（创建报价时自动 5 行）

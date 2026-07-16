@@ -1531,6 +1531,7 @@ function _buildIQCCanvas(r) {
   const qty         = r.qty         != null ? r.qty    : '—';
   const sampleQty   = r.sampleQty   != null ? r.sampleQty : '—';
   const deliveryNo  = r.deliveryNo  || '—';
+  const orderNo     = r.orderNo     || '—';
   const qc          = r.qc || r.inspector || r.checker || '—';
 
   /* ── 解析不良现象：支持 "描述N个/PCS" 格式 ── */
@@ -1706,19 +1707,22 @@ function _buildIQCCanvas(r) {
       <colgroup>
         <col class="c-lbl"/><col class="c-val"/>
         <col class="c-lbl"/><col class="c-val"/>
+        <col class="c-lbl c-po-lbl"/><col class="c-val c-po-val"/>
         <col class="c-lbl"/><col class="c-val"/>
       </colgroup>
       <tr>
         <td class="lbl">供&ensp;应&ensp;商</td>
         <td><b>${supplier}</b></td>
         <td class="lbl">货&ensp;号&ensp;/&ensp;名称</td>
-        <td>${productNo}</td>
+        <td colspan="3">${productNo}</td>
         <td class="lbl">来&ensp;货&ensp;日&ensp;期</td>
         <td>${date}</td>
       </tr>
       <tr>
         <td class="lbl">物&ensp;料&ensp;名&ensp;称</td>
-        <td colspan="3">${productName}</td>
+        <td>${productName}</td>
+        <td class="lbl">PO&ensp;号</td>
+        <td colspan="3">${orderNo}</td>
         <td class="lbl">来&ensp;货&ensp;数&ensp;量</td>
         <td>${typeof qty==='number'?qty.toLocaleString():qty}</td>
       </tr>
@@ -1727,6 +1731,7 @@ function _buildIQCCanvas(r) {
         <td>${deliveryNo}</td>
         <td class="lbl">抽&ensp;查&ensp;数&ensp;量</td>
         <td>${sampleQty}</td>
+        <td colspan="2"></td>
         <td class="lbl">检&ensp;验&ensp;日&ensp;期</td>
         <td>${inspDate}</td>
       </tr>
@@ -1734,7 +1739,7 @@ function _buildIQCCanvas(r) {
         <td class="lbl">检&ensp;验&ensp;员</td>
         <td>${qc}</td>
         <td class="lbl">PASS&ensp;/&ensp;FAIL</td>
-        <td colspan="3">
+        <td colspan="5">
           PASS:&nbsp;<b>${pass}</b>&nbsp;&nbsp;/&nbsp;&nbsp;FAIL:&nbsp;<b>${fail}</b>
         </td>
       </tr>

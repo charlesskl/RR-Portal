@@ -187,7 +187,7 @@ function renderTable(container, columns, rows, opts = {}) {
 }
 
 // 辅助/包装材料 类别 — 减税明细各外购项按此类别统计
-const MAT_CATEGORIES = ['吸塑', '胶袋', '彩盒/内咭', '电池', '利宝', '电镀', '其他外购'];
+const MAT_CATEGORIES = ['吸塑', '胶袋', '彩盒/内咭', '电池', '产品利宝', '彩盒利宝', '电镀', '其他外购'];
 
 // 车缝：人工若已作为明细行(名称含"人工")计入，则不再额外加 labor_amount，避免双算
 function sewLaborToAdd(g) {
@@ -1159,6 +1159,7 @@ function renderSummaryPane(host, sections, quote, me) {
   // 分类关键字（用于无显式类别时兜底）
   const _isBat = (s) => /电池|battery/i.test(String(s || ''));
   const _isLib = (s) => /利宝|贴纸|libao|sticker/i.test(String(s || ''));
+  const _isColorBoxLib = (r) => /彩盒|彩卡|内咭|内卡|背卡|包装|package|box/i.test(String((r.name || '') + ' ' + (r.spec || '')));
   const _isPlate = (s) => /电镀|plating/i.test(String(s || ''));
   const _isCarton = (s) => /纸箱|carton/i.test(String(s || ''));
   // 马达：电子/五金里含 "马达" / "motor" 的行（电子/五金表不设类别下拉，仍按关键字）
@@ -1176,11 +1177,12 @@ function renderSummaryPane(host, sections, quote, me) {
   // tbl='aux'|'pk'：返回行所属类别（合法 MAT_CATEGORIES 之一），纸箱返回 null（单独计），否则按表默认兜底
   const _catOf = (r, tbl) => {
     if (r.category && MAT_CATEGORIES.includes(r.category)) return r.category;
+    if (r.category === '利宝') return '产品利宝';
     const a = r.name, b = r.spec;
     if (isBlister(a) || isBlister(b)) return '吸塑';
     if (isGlueBag(a) || isGlueBag(b)) return '胶袋';
     if (_isBat(a) || _isBat(b)) return '电池';
-    if (_isLib(a) || _isLib(b)) return '利宝';
+    if (_isLib(a) || _isLib(b)) return _isColorBoxLib(r) ? '彩盒利宝' : '产品利宝';
     if (_isPlate(a) || _isPlate(b)) return '电镀';
     if (_isCarton(a) || _isCarton(b)) return null;  // 纸箱另算
     return tbl === 'aux' ? '其他外购' : '彩盒/内咭';
@@ -1192,7 +1194,7 @@ function renderSummaryPane(host, sections, quote, me) {
   const blisterRmb = _catSum('吸塑') + _sumByMatch(elecSrc, isBlister) + _sumByMatch(eng.hardware, isBlister);
   const glueBagRmb = _catSum('胶袋');
   const batteryRmb = _catSum('电池');
-  const libaoRmb = _catSum('利宝');
+  const libaoRmb = _catSum('产品利宝') + _catSum('彩盒利宝');
   const platingRmb = _catSum('电镀');
   const colorBoxRmb = _catSum('彩盒/内咭');
   const otherBuyRmb = _catSum('其他外购');
@@ -1875,6 +1877,11 @@ function renderEngineering(host, payload, canEdit, onChange, fxRmbHkd, fxRmbUsd)
   payload.hardware = payload.hardware || [];
   payload.aux_materials = payload.aux_materials || [];
   payload.packaging_materials = payload.packaging_materials || [];
+  const migrateLibaoCategory = rows => (rows || []).forEach(r => {
+    if (r && r.category === '利宝') r.category = '产品利宝';
+  });
+  migrateLibaoCategory(payload.aux_materials);
+  migrateLibaoCategory(payload.packaging_materials);
   payload.packaging_loss_pct = payload.packaging_loss_pct ?? 1;
   payload.electronics_loss_pct = payload.electronics_loss_pct ?? 1;
   payload.hardware_loss_pct = payload.hardware_loss_pct ?? 1;
@@ -2361,6 +2368,7 @@ function lookupMachinePrice(model, prices) {
 // 啤机部料价表默认值（HK$/Lb，2026 年）
 const DEFAULT_MATERIAL_PRICES = [
   { name: 'ABS', model: '750SW', price: 8.50 },
+  { name: 'ABS', model: '抽粒料', price: 4.60 },
   { name: '透明ABS', model: 'TR558/920', price: 12.50 },
   { name: 'HIPS', model: 'HI425', price: 7.80 },
   { name: 'GP', model: 'MW-1', price: 7.80 },
@@ -3204,6 +3212,42 @@ function renderAssembly(host, payload, canEdit, onChange, fxRmbHkd) {
     impPreview.querySelector('.labor-quote-cancel').onclick = () => { impPreview.innerHTML = ''; impFile.value = ''; };
   };
 
+  const buildImportedStepGroups = (j, fallbackKind = 'assembly') => {
+    const m = j.meta || {};
+    const rawGroups = Array.isArray(j.groups) && j.groups.length
+      ? j.groups
+      : [{
+          product: m.quote_no ? `货号 ${m.quote_no}` : '排拉工序',
+          name: m.quote_no ? `货号 ${m.quote_no}` : '排拉工序',
+          kind: fallbackKind,
+          qty: Number(m.target_qty) || 1,
+          steps: j.steps || [],
+        }];
+    return rawGroups.map(g => ({
+      product: g.product || g.name || '排拉工序',
+      kind: g.kind === 'packaging' ? 'packaging' : 'assembly',
+      qty: Number(g.qty || m.target_qty) || 1,
+      team: Number(g.team) || 1,
+      steps: (g.steps || []).map(s => ({ name: s.name, count: s.count, note: s.note || '' })),
+    })).filter(g => g.steps.length);
+  };
+
+  const addImportedStepGroups = (j, fallbackKind = 'assembly') => {
+    const groups = buildImportedStepGroups(j, fallbackKind);
+    const asmGroups = groups.filter(g => g.kind !== 'packaging');
+    const pkgGroups = groups.filter(g => g.kind === 'packaging');
+    payload.assembly_step_groups.push(...asmGroups.map(({ kind, ...g }) => g));
+    payload.packaging_step_groups.push(...pkgGroups.map(({ kind, ...g }) => g));
+  };
+
+  const importGroupSummary = (j, fallbackKind = 'assembly') => {
+    const groups = buildImportedStepGroups(j, fallbackKind);
+    const asmGroups = groups.filter(g => g.kind !== 'packaging');
+    const pkgGroups = groups.filter(g => g.kind === 'packaging');
+    const rows = groups.map(g => `<li>${g.kind === 'packaging' ? '包装/混装' : '组装'}：${escapeHtml(g.product)}（${g.steps.length} 个工序，生产量 ${formatNum(g.qty)}）</li>`).join('');
+    return { asmGroups, pkgGroups, rows };
+  };
+
   if (canEdit) {
     host.querySelector('#asm-rate').oninput = (e) => { payload.assembly_base_rate = Number(e.target.value) || 0; onChange(); renderGroups(); };
     host.querySelector('#asm-time').oninput = (e) => { payload.assembly_std_time = Number(e.target.value) || 0; onChange(); renderGroups(); };
@@ -3227,27 +3271,21 @@ function renderAssembly(host, payload, canEdit, onChange, fxRmbHkd) {
           showLaborQuoteImport(j, impPreview, impFile);
           return;
         }
+        const info = importGroupSummary(j);
         impPreview.innerHTML = `
           <div class="card" style="background:#f0fdf4;border:1px solid #86efac;margin-top:10px">
-            <p>解析到 <b>${j.count}</b> 个工序<br>
+            <p>解析到 <b>${j.group_count || (info.asmGroups.length + info.pkgGroups.length) || 1}</b> 个分组、<b>${j.count}</b> 个工序<br>
             ${m.customer ? `客名: ${escapeHtml(m.customer)} · ` : ''}${m.quote_no ? `货号: ${escapeHtml(m.quote_no)} · ` : ''}${m.target_qty ? `目标数: ${escapeHtml(m.target_qty)}` : ''}</p>
+            <ul style="margin:8px 0 0 18px">${info.rows}</ul>
             <div style="margin-top:10px;display:flex;gap:8px;align-items:center">
-              <label>归到产品组：
-                <input id="asm-imp-name" type="text" value="${escapeHtml(m.customer ? '货号 ' + (m.quote_no || '') : '排拉工序')}" style="width:200px"/>
-              </label>
-              <button id="asm-imp-add">作为新组添加</button>
+              <button id="asm-imp-add">按识别分组导入</button>
               <button id="asm-imp-cancel" class="mini danger">取消</button>
             </div>
           </div>`;
         impPreview.querySelector('#asm-imp-add').onclick = () => {
-          const grpName = impPreview.querySelector('#asm-imp-name').value.trim() || '排拉工序';
-          payload.assembly_step_groups.push({
-            product: grpName,
-            qty: Number(m.target_qty) || 1,
-            steps: j.steps.map(s => ({ name: s.name, count: s.count, note: '' })),
-          });
+          addImportedStepGroups(j);
           impPreview.innerHTML = ''; impFile.value = '';
-          onChange(); renderGroups();
+          onChange(); renderGroups(); renderPkgGroups();
         };
         impPreview.querySelector('#asm-imp-cancel').onclick = () => { impPreview.innerHTML = ''; impFile.value = ''; };
       } catch (err) {
@@ -3353,24 +3391,21 @@ function renderAssembly(host, payload, canEdit, onChange, fxRmbHkd) {
           showLaborQuoteImport(j, impPreview, impFile);
           return;
         }
+        const info = importGroupSummary(j, 'packaging');
         impPreview.innerHTML = `
           <div class="card" style="background:#f0fdf4;border:1px solid #86efac;margin-top:10px">
-            <p>解析到 <b>${j.count}</b> 个工序<br>
+            <p>解析到 <b>${j.group_count || (info.asmGroups.length + info.pkgGroups.length) || 1}</b> 个分组、<b>${j.count}</b> 个工序<br>
             ${m.customer ? `客名: ${escapeHtml(m.customer)} · ` : ''}${m.quote_no ? `货号: ${escapeHtml(m.quote_no)} · ` : ''}${m.target_qty ? `目标数: ${escapeHtml(m.target_qty)}` : ''}</p>
+            <ul style="margin:8px 0 0 18px">${info.rows}</ul>
             <div style="margin-top:10px;display:flex;gap:8px;align-items:center">
-              <label>归到产品组：<input id="pkg-imp-name" type="text" value="${escapeHtml(m.quote_no ? '货号 ' + m.quote_no : '排拉工序')}" style="width:200px"/></label>
-              <button id="pkg-imp-add">作为新组添加</button>
+              <button id="pkg-imp-add">按识别分组导入</button>
               <button id="pkg-imp-cancel" class="mini danger">取消</button>
             </div>
           </div>`;
         impPreview.querySelector('#pkg-imp-add').onclick = () => {
-          const grpName = impPreview.querySelector('#pkg-imp-name').value.trim() || '排拉工序';
-          payload.packaging_step_groups.push({
-            product: grpName, qty: Number(m.target_qty) || 1,
-            steps: j.steps.map(s => ({ name: s.name, count: s.count, note: '' })),
-          });
+          addImportedStepGroups(j, 'packaging');
           impPreview.innerHTML = ''; impFile.value = '';
-          onChange(); renderPkgGroups();
+          onChange(); renderGroups(); renderPkgGroups();
         };
         impPreview.querySelector('#pkg-imp-cancel').onclick = () => { impPreview.innerHTML = ''; impFile.value = ''; };
       } catch (err) {

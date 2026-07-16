@@ -10,10 +10,11 @@ async function handle(res) {
   return data;
 }
 
-export async function uploadFile(file, customerId) {
+export async function uploadFile(file, customerId, stage = '') {
   const fd = new FormData();
   fd.append('file', file);
   if (customerId) fd.append('customerId', customerId);
+  if (stage) fd.append('stage', stage);
   return handle(await fetch(`${BASE}/upload`, { method: 'POST', body: fd }));
 }
 
@@ -57,6 +58,18 @@ export async function createCustomer(name) {
 
 export async function deleteCustomer(id) {
   return handle(await fetch(`${BASE}/customers/${id}`, { method: 'DELETE' }));
+}
+
+export async function listProducts(customerId = '', query = '') {
+  const params = new URLSearchParams();
+  if (customerId) params.set('customerId', customerId);
+  if (query) params.set('q', query);
+  const qs = params.toString() ? `?${params.toString()}` : '';
+  return handle(await fetch(`${BASE}/products${qs}`));
+}
+
+export async function getProduct(productNo) {
+  return handle(await fetch(`${BASE}/products/${encodeURIComponent(productNo)}`));
 }
 
 export function exportWeeklyUrl(weekKey, customerId) {

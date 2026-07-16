@@ -1,6 +1,7 @@
 const express = require('express');
 const db = require('../db');
 const { requireAuth, quoteAccess } = require('../middleware/auth');
+const { expandEngineeringMolds } = require('../services/engineeringMolds');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -205,30 +206,7 @@ router.get('/:id', (req, res) => {
   if (engSection && engSection.payload_json) {
     try {
       const p = JSON.parse(engSection.payload_json);
-      engineering_molds = (p.molds || []).flatMap(m => {
-        const common = {
-          mold_no: m.mold_no || '', sets: m.sets ?? 1,
-          material: m.material || '', color: m.color || '',
-          material_grade: m.material_grade || '', machine: m.machine || '',
-          machine_model: m.machine_model || (m.detail && m.detail.machine_model) || '',
-          target: m.target ?? (m.detail && m.detail.target) ?? null,
-          material_unit_price: m.material_unit_price ?? null,
-          shot_price: m.shot_price ?? null, cycle_sec: m.cycle_sec ?? null,
-        };
-        if (Array.isArray(m.parts) && m.parts.length) {
-          return m.parts.map((part, partIndex) => ({
-            ...common,
-            name: part.name || '',
-            cavity: part.cavity || '',
-            weight_g: part.weight_g ?? null,
-            note: part.note || m.note || '',
-            mold_part_index: partIndex,
-            mold_part_count: m.parts.length,
-            shot_price: partIndex === 0 ? common.shot_price : 0,
-          }));
-        }
-        return [{ ...common, name: m.name || '', cavity: m.cavity || '', weight_g: m.weight_g ?? null, note: m.note || '' }];
-      });
+      engineering_molds = expandEngineeringMolds(p.molds);
     } catch {}
   }
 

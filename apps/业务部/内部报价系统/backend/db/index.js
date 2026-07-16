@@ -3,6 +3,11 @@ const { DatabaseSync } = require('node:sqlite');
 const path = require('path');
 const fs = require('fs');
 const bcrypt = require('bcryptjs');
+const {
+  appendMissingRefDefaults,
+  appendMissingRefDefaultsToSectionPayloads,
+  refSeedUpgrades,
+} = require('./ref-defaults');
 
 const DB_PATH = process.env.DB_FILE || path.join(__dirname, '..', 'data.db');
 const SCHEMA_PATH = path.join(__dirname, 'schema.sql');
@@ -44,6 +49,62 @@ const _userCols = db.prepare('PRAGMA table_info(users)').all().map(c => c.name);
 if (!_userCols.includes('factory_code')) {
   db.exec("ALTER TABLE users ADD COLUMN factory_code TEXT NOT NULL DEFAULT 'qingxi'");
   console.log('[migrate] 现有账号默认归入清溪；管理员可跨厂区切换');
+}
+
+const quoteHasGlobalNumberUnique = db.prepare(
+  'SELECT name FROM pragma_index_list(?) WHERE [unique] = 1'
+).all('quotes').some(({ name }) => {
+  const columns = db.prepare(
+    'SELECT name FROM pragma_index_info(?) ORDER BY seqno'
+  ).all(name).map(row => row.name);
+  return columns.length === 1 && columns[0] === 'quote_no';
+});
+if (quoteHasGlobalNumberUnique) {
+  const migrationBackupPath = `${DB_PATH}.pre-factory-scope-${Date.now()}.bak`;
+  db.prepare('VACUUM INTO ?').run(migrationBackupPath);
+  console.log(`[backup] 厂区唯一约束迁移前数据库已备份: ${migrationBackupPath}`);
+
+  db.exec('PRAGMA foreign_keys = OFF');
+  try {
+    db.exec('BEGIN');
+    db.exec(`
+      CREATE TABLE quotes_factory_scope (
+        id               INTEGER PRIMARY KEY AUTOINCREMENT,
+        quote_no         TEXT NOT NULL,
+        product_name     TEXT NOT NULL,
+        customer         TEXT,
+        qty              INTEGER,
+        created_by_dept  TEXT NOT NULL DEFAULT 'sales',
+        created_by_name  TEXT,
+        created_at       TEXT NOT NULL DEFAULT (datetime('now')),
+        status           TEXT NOT NULL DEFAULT 'drafting',
+        version          TEXT,
+        factory_code     TEXT NOT NULL DEFAULT 'qingxi' REFERENCES factories(code),
+        UNIQUE(factory_code, quote_no)
+      );
+      INSERT INTO quotes_factory_scope (
+        id, quote_no, product_name, customer, qty, created_by_dept,
+        created_by_name, created_at, status, version, factory_code
+      )
+      SELECT
+        id, quote_no, product_name, customer, qty, created_by_dept,
+        created_by_name, created_at, status, version, factory_code
+      FROM quotes;
+      DROP TABLE quotes;
+      ALTER TABLE quotes_factory_scope RENAME TO quotes;
+    `);
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  } finally {
+    db.exec('PRAGMA foreign_keys = ON');
+  }
+  const violations = db.prepare('PRAGMA foreign_key_check').all();
+  if (violations.length) {
+    throw new Error(`quotes 厂区唯一约束迁移后发现 ${violations.length} 条外键异常`);
+  }
+  console.log('[migrate] 报价货号唯一约束已调整为按厂区生效');
 }
 db.exec('CREATE INDEX IF NOT EXISTS idx_quotes_factory ON quotes(factory_code)');
 db.exec('CREATE INDEX IF NOT EXISTS idx_users_factory ON users(factory_code)');
@@ -106,6 +167,7 @@ for (const q of quotesAll) {
 const refSeeds = {
   material_prices: [
     { name: 'ABS', model: '750SW', price: 8.50 },
+    { name: 'ABS', model: '抽粒料', price: 4.60 },
     { name: 'C-ABS', model: 'TR558/920', price: 12.50 },
     { name: 'HIPS', model: 'HI425', price: 7.80 },
     { name: 'GP', model: 'MW-1', price: 7.80 },
@@ -146,9 +208,35 @@ for (const [key, data] of Object.entries(refSeeds)) {
     console.log('[seed] 全局参考表 ' + key + ' 已种入 ' + data.length + ' 条');
   }
 }
+for (const [key, data] of Object.entries(refSeedUpgrades)) {
+  const added = appendMissingRefDefaults(db, key, data);
+  if (added > 0) {
+    console.log('[seed-upgrade] global ref table ' + key + ' appended ' + added + ' default item(s)');
+  }
+  if (key === 'material_prices') {
+    const sectionAdded = appendMissingRefDefaultsToSectionPayloads(db, 'molding', key, data);
+    if (sectionAdded.itemsAdded > 0) {
+      console.log('[seed-upgrade] molding quote payload ' + key + ' appended '
+        + sectionAdded.itemsAdded + ' default item(s) in ' + sectionAdded.rowsChanged + ' section(s)');
+    }
+  }
+}
+
+const globalRefData = (key) => {
+  const row = db.prepare('SELECT data_json FROM ref_tables WHERE key = ?').get(key);
+  if (row) {
+    try {
+      const parsed = JSON.parse(row.data_json);
+      if (Array.isArray(parsed)) return parsed;
+    } catch (error) {
+      console.warn(`[factory-seed] 全局参考表 ${key} JSON 无效，回退代码默认值: ${error.message}`);
+    }
+  }
+  return refSeeds[key] || [];
+};
 
 const factoryRefSeedData = (factoryCode, key) => {
-  const base = refSeeds[key] || [];
+  const base = globalRefData(key);
   if (key !== 'machine_prices') return base;
   return base.map(row => row.model === '20A'
     ? { ...row, price: factoryCode === 'heyuan' ? 1720 : 1920 }
@@ -185,6 +273,7 @@ if (!db.prepare('SELECT 1 FROM app_migrations WHERE key = ?').get(machinePriceMi
     for (const section of sections) {
       let payload;
       try { payload = JSON.parse(section.payload_json || '{}'); } catch { continue; }
+      if (!payload || typeof payload !== 'object' || Array.isArray(payload)) continue;
       if (!Array.isArray(payload.machine_prices) || !payload.machine_prices.length) continue;
       payload.machine_prices = payload.machine_prices.map(row => {
         const next = { ...row };
@@ -220,6 +309,7 @@ if (!db.prepare('SELECT 1 FROM app_migrations WHERE key = ?').get(assemblyRateMi
     for (const section of sections) {
       let payload;
       try { payload = JSON.parse(section.payload_json || '{}'); } catch { continue; }
+      if (!payload || typeof payload !== 'object' || Array.isArray(payload)) continue;
       payload.assembly_base_rate = section.factory_code === 'heyuan' ? 260 : 310;
       updateSection.run(JSON.stringify(payload), section.id);
     }
@@ -242,6 +332,7 @@ if (!db.prepare('SELECT 1 FROM app_migrations WHERE key = ?').get(absRegrindMigr
     for (const section of sections) {
       let payload;
       try { payload = JSON.parse(section.payload_json || '{}'); } catch { continue; }
+      if (!payload || typeof payload !== 'object' || Array.isArray(payload)) continue;
       const prices = payload.material_prices;
       if (!Array.isArray(prices) || prices.length === 0) continue;
       const hasRegrind = prices.some((row) =>

@@ -29,6 +29,7 @@
   })();
 
   window.__QC_BACKEND_OK = false;
+  window.__QC_LAST_SYNC = null;
 
   /* ── 开机：同步 XHR 拉全量（必须同步，才能赶在 app.js 的 init 之前写好 localStorage）── */
   function syncBootstrap() {
@@ -58,41 +59,49 @@
 
   /* ── 写穿透：把本地写入推回后端 ── */
   function post(url, body) {
-    if (window.__QC_BACKEND_OK !== true) return; // 后端不可用时不尝试，避免拖慢
+    if (window.__QC_BACKEND_OK !== true) return Promise.resolve(false); // 后端不可用时不尝试，避免拖慢
     try {
-      fetch(url, {
+      return fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       }).then(function (r) {
+        window.__QC_LAST_SYNC = { url: url, ok: r.ok, status: r.status, time: new Date().toISOString() };
         if (!r.ok) console.warn('[QC后端] 写回非200:', url, r.status);
+        return r.ok;
       }).catch(function (err) {
+        window.__QC_LAST_SYNC = { url: url, ok: false, error: err && err.message, time: new Date().toISOString() };
         console.warn('[QC后端] 写回失败:', url, err && err.message);
+        return false;
       });
     } catch (e) {
+      window.__QC_LAST_SYNC = { url: url, ok: false, error: e && e.message, time: new Date().toISOString() };
       console.warn('[QC后端] 写回异常:', url, e && e.message);
+      return Promise.resolve(false);
     }
   }
 
   function pushRecords() {
     try {
       var st = JSON.parse(localStorage.getItem(KEY.records) || '{}');
-      post(API_BASE + '/api/records', { records: st.records || [] });
+      return post(API_BASE + '/api/records', { records: st.records || [] });
     } catch (e) { console.warn('[QC后端] 读本地记录失败', e); }
+    return Promise.resolve(false);
   }
   function pushUsers(users) {
     var u = users;
     if (!Array.isArray(u)) { try { u = JSON.parse(localStorage.getItem(KEY.users) || '[]'); } catch (e) { u = []; } }
-    post(API_BASE + '/api/users', { users: u });
+    return post(API_BASE + '/api/users', { users: u });
   }
   function pushDefects(lib) {
     var l = lib;
     if (!Array.isArray(l)) { try { l = JSON.parse(localStorage.getItem(KEY.defectLib) || '[]'); } catch (e) { l = []; } }
-    post(API_BASE + '/api/defects', { defectLib: l });
+    return post(API_BASE + '/api/defects', { defectLib: l });
   }
 
   /* ── 劫持 app.js 的三个写入函数（此时 app.js 已解析，函数已挂到 window）── */
   function patchWriters() {
+    var patched = false;
     if (typeof window.persist === 'function' && !window.persist.__qcPatched) {
       var origPersist = window.persist;
       window.persist = function () {
@@ -101,6 +110,7 @@
         return ret;
       };
       window.persist.__qcPatched = true;
+      patched = true;
     }
     if (typeof window._saveUsers === 'function' && !window._saveUsers.__qcPatched) {
       var origUsers = window._saveUsers;
@@ -110,6 +120,7 @@
         return ret;
       };
       window._saveUsers.__qcPatched = true;
+      patched = true;
     }
     if (typeof window._saveDefectLib === 'function' && !window._saveDefectLib.__qcPatched) {
       var origDef = window._saveDefectLib;
@@ -119,12 +130,30 @@
         return ret;
       };
       window._saveDefectLib.__qcPatched = true;
+      patched = true;
     }
+    if (patched) console.log('[QC后端] 写入函数已接管');
+    return patched;
   }
 
-  /* 本文件早于 app.js 加载 → 此 handler 早于 app.js 的 init handler 执行 */
+  function schedulePatchWriters() {
+    patchWriters();
+    setTimeout(patchWriters, 0);
+    setTimeout(patchWriters, 300);
+    setTimeout(patchWriters, 1000);
+    setTimeout(patchWriters, 2500);
+  }
+
+  window.__QC_SYNC_NOW = function () {
+    patchWriters();
+    return pushRecords();
+  };
+
+  /* 本文件早于 app.js 加载：立即预加载，确保 app.js 初始化前 localStorage 已是服务器数据 */
+  syncBootstrap();
+
+  /* app.js 解析完成后反复接管写入函数，避免线上脚本时序导致只改本地不写服务器 */
   document.addEventListener('DOMContentLoaded', function () {
-    syncBootstrap();   // 先把服务器数据写进 localStorage
-    patchWriters();    // 再劫持写入函数（app.js 已解析完毕，函数已存在）
+    schedulePatchWriters();
   });
 })();

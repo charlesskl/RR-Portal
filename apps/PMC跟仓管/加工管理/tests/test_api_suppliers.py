@@ -45,7 +45,7 @@ def test_admin_can_delete_supplier_without_deleting_history(client):
     assert all(s["id"] != supplier_id for s in rows)
 
 
-def test_operator_can_list_but_not_create_or_delete_supplier(client):
+def test_operator_can_create_update_and_delete_supplier(client):
     admin_login(client)
     supplier_id = client.post("/api/suppliers", json={"name": "供应商A"}).json()["id"]
     client.post("/api/logout")
@@ -53,11 +53,11 @@ def test_operator_can_list_but_not_create_or_delete_supplier(client):
 
     assert client.get("/api/suppliers").status_code == 200
     r = client.post("/api/suppliers", json={"name": "供应商B"})
-    assert r.status_code == 403
-    r = client.delete(f"/api/suppliers/{supplier_id}")
-    assert r.status_code == 403
+    assert r.status_code == 200
     r = client.put(f"/api/suppliers/{supplier_id}", json={"name": "供应商C"})
-    assert r.status_code == 403
+    assert r.status_code == 200
+    r = client.delete(f"/api/suppliers/{supplier_id}")
+    assert r.status_code == 200
 
 
 def test_admin_can_update_supplier_name(client):

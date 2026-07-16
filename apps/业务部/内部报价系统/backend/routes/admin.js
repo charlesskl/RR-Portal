@@ -5,6 +5,7 @@ const { requireAuth } = require('../middleware/auth');
 const { requirePerm } = require('../middleware/perms');
 const { MENUS } = require('../permissions/menu_catalog');
 const { templateFor } = require('../permissions/role_templates');
+const { changeUserFactory } = require('../services/userFactory');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -76,10 +77,12 @@ router.put('/users/:id/factory', (req, res) => {
   if (!factory) return res.status(400).json({ error: '厂区不存在' });
   const u = db.prepare('SELECT username FROM users WHERE id = ?').get(id);
   if (!u) return res.status(404).json({ error: '用户不存在' });
-  db.prepare('UPDATE users SET factory_code = ? WHERE id = ?').run(factory.code, id);
-  db.prepare(`INSERT INTO audit_log (actor, action, detail) VALUES (?, 'change_user_factory', ?)`)
-    .run(req.user.username, `${u.username} -> ${factory.name_cn}`);
-  res.json({ ok: true });
+  const result = changeUserFactory(db, id, factory.code);
+  if (result.changed) {
+    db.prepare(`INSERT INTO audit_log (actor, action, detail) VALUES (?, 'change_user_factory', ?)`)
+      .run(req.user.username, `${u.username} -> ${factory.name_cn}; cleared customers=${result.clearedCustomers}`);
+  }
+  res.json({ ok: true, changed: result.changed, cleared_customers: result.clearedCustomers });
 });
 
 // PUT /api/admin/users/:id/role  { role } — 改角色并按新角色模板重置权限

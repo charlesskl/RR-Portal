@@ -54,7 +54,7 @@ def test_public_summary_groups_materials_departments_and_filters_dates(client):
     })
 
     client.post("/api/logout")
-    admin_login(client, "邵阳")
+    admin_login(client, "邵阳华登")
     lid = loc_id(client, "邵阳华登")
     client.post("/api/records", json={
         "rec_type": "finished",
@@ -81,7 +81,7 @@ def test_public_summary_groups_materials_departments_and_filters_dates(client):
     assert materials["NFC贴纸"]["inbound"] == 100
     assert materials["PCBA板"]["inbound"] == 40
     assert departments["兴信B来料仓"]["inbound"] == 100
-    assert departments["邵阳"]["inbound"] == 40
+    assert departments["邵阳华登"]["inbound"] == 40
     assert "供应商A" not in text
     assert "DOC-SECRET" not in text
     assert "内部备注" not in text
@@ -96,14 +96,14 @@ def test_public_summary_can_filter_by_material_and_department(client):
         "material": "NFC贴纸", "qty": 100})
 
     client.post("/api/logout")
-    admin_login(client, "装配")
+    admin_login(client, "东莞车间")
     lid = loc_id(client, "东莞车间")
     client.post("/api/records", json={
         "rec_type": "finished", "location_id": lid, "rec_date": "2026-07-01",
         "material": "PCBA板", "qty": 80})
     client.post("/api/logout")
 
-    r = client.get("/api/public-summary?department=装配&material=PCBA板")
+    r = client.get("/api/public-summary?department=东莞车间&material=PCBA板")
     data = r.json()
 
     assert data["record_count"] == 1
@@ -111,6 +111,27 @@ def test_public_summary_can_filter_by_material_and_department(client):
     assert data["materials"] == [
         {"material": "PCBA板", "inbound": 80, "outbound": 0, "balance": 80}
     ]
+
+
+def test_public_summary_uses_outsource_balance_direction(client):
+    admin_login(client, "东莞加工厂利鸿")
+    semi = loc_id(client, "碟片半成品")
+    client.post("/api/records", json={
+        "rec_type": "issue", "location_id": semi, "rec_date": "2026-07-01",
+        "material": "PCBA板", "qty": 100})
+    client.post("/api/records", json={
+        "rec_type": "semi_finished", "rec_date": "2026-07-02",
+        "material": "PCBA板", "qty": 60})
+    client.post("/api/logout")
+
+    r = client.get("/api/public-summary?department=东莞加工厂利鸿&material=PCBA板")
+    data = r.json()
+    materials = {row["material"]: row for row in data["materials"]}
+    departments = {row["department"]: row for row in data["department_totals"]}
+
+    assert data["totals"] == {"inbound": 60, "outbound": 100, "balance": 40}
+    assert materials["77794-PCBA板"]["balance"] == 40
+    assert departments["东莞加工厂利鸿"]["balance"] == 40
 
 
 def test_public_summary_rejects_invalid_department(client):

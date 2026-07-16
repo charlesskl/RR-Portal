@@ -281,6 +281,12 @@
                 <span class="plugin-name">唱片机管理系统</span>
               </div>
             </div>
+            <div class="plugin-item">
+              <div class="plugin-info">
+                <div class="plugin-dot gray" id="factoryReviewDot"></div>
+                <span class="plugin-name">加工厂月度评审管理系统</span>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -918,6 +924,28 @@
         <a href="/cpg/" target="_blank" class="btn btn-primary">打开系统</a>
       </div>
     </div>
+
+    <div class="detail-plugin-card">
+      <div class="detail-plugin-left">
+        <div class="detail-plugin-icon" style="background:linear-gradient(135deg,#16a34a,#0f766e);">&#128203;</div>
+        <div>
+          <div class="detail-plugin-name">加工厂月度评审管理系统</div>
+          <div class="detail-plugin-desc">集中管理外协加工厂资料、订单交付、品质检验、月度产值、评分评审与价格统计，支持按工艺和角色分权协作</div>
+          <div class="feature-grid">
+            <div class="feature-tag">&#127981; 加工厂档案</div>
+            <div class="feature-tag">&#128230; 订单与交付</div>
+            <div class="feature-tag">&#9989; 品质与 5S</div>
+            <div class="feature-tag">&#128202; 月度评分</div>
+            <div class="feature-tag">&#128176; 价格统计</div>
+            <div class="feature-tag">&#128274; 角色权限</div>
+          </div>
+        </div>
+      </div>
+      <div class="detail-plugin-right">
+        <div class="detail-plugin-status"><div class="plugin-dot gray" id="factoryReviewDetailDot"></div> 检查中...</div>
+        <a href="/factory-review/" target="_blank" rel="noopener" class="btn btn-primary">打开系统</a>
+      </div>
+    </div>
   </div>
 
 
@@ -1043,6 +1071,7 @@ async function checkHealth() {
       { name: 'huadengMaorong', url: '/huadeng-maorong/health', dot: 'huadengMaorongDot', detailDot: 'huadengMaorongDetailDot' },
       { name: 'cStore', url: '/c-store/health', dot: 'cStoreDot', detailDot: 'cStoreDetailDot' },
       { name: 'cpg', url: '/cpg/health', dot: 'cpgDot', detailDot: 'cpgDetailDot' },
+      { name: 'factoryReview', url: '/factory-review/health', dot: 'factoryReviewDot', detailDot: 'factoryReviewDetailDot' },
       { name: 'shippingManagement', url: '/shipping/health', dot: 'shippingManagementDot', detailDot: 'shippingManagementDetailDot' },
       { name: 'qaWeekly', url: '/qa-weekly-report/api/health', dot: 'qaWeeklyDot', detailDot: 'qaWeeklyDetailDot' },
     ];

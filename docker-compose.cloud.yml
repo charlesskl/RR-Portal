@@ -665,6 +665,34 @@ services:
     networks:
       - platform-net
 
+  factory-review:
+    build:
+      context: ./apps/PMC跟仓管/加工厂月度评审管理制度
+      dockerfile: Dockerfile
+      args:
+        VITE_BASE_PATH: /factory-review/
+    environment:
+      - FACTORY_REVIEW_ADMIN_EMAIL=${FACTORY_REVIEW_ADMIN_EMAIL:-admin@rr.local}
+      - FACTORY_REVIEW_ADMIN_PASSWORD=${FACTORY_REVIEW_ADMIN_PASSWORD:-}
+      - TZ=Asia/Shanghai
+    volumes:
+      - ./apps/PMC跟仓管/加工厂月度评审管理制度/pb_data:/pb/pb_data
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:8090/api/factory-review/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    mem_limit: 512m
+    memswap_limit: 512m
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - platform-net
+
   huadeng:
     build:
       context: ./apps/PMC跟仓管/华登包材管理

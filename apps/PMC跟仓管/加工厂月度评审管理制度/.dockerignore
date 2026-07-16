@@ -1,0 +1,8 @@
+node_modules
+dist
+pb_data
+.git
+.vscode
+docs
+tests
+*.log

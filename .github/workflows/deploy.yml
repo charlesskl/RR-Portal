@@ -102,6 +102,26 @@ jobs:
               echo "[GUARD][WARN] GitHub secret QC_BAILIAN_API_KEY is empty, skipping"
             fi
 
+            echo "=== factory-review initial admin env guard ==="
+            FACTORY_REVIEW_ENV_CHANGED=0
+            FACTORY_REVIEW_PASSWORD='${{ secrets.FACTORY_REVIEW_ADMIN_PASSWORD }}'
+            if [ -n "$FACTORY_REVIEW_PASSWORD" ]; then
+              if grep -q '^FACTORY_REVIEW_ADMIN_PASSWORD=' .env.cloud.production; then
+                CURRENT_FACTORY_REVIEW_PASSWORD=$(grep '^FACTORY_REVIEW_ADMIN_PASSWORD=' .env.cloud.production | head -1 | cut -d= -f2-)
+                if [ "$CURRENT_FACTORY_REVIEW_PASSWORD" != "$FACTORY_REVIEW_PASSWORD" ]; then
+                  sed -i "s|^FACTORY_REVIEW_ADMIN_PASSWORD=.*|FACTORY_REVIEW_ADMIN_PASSWORD=$FACTORY_REVIEW_PASSWORD|" .env.cloud.production
+                  FACTORY_REVIEW_ENV_CHANGED=1
+                  echo "[GUARD] FACTORY_REVIEW_ADMIN_PASSWORD updated from GitHub secret"
+                fi
+              else
+                echo "FACTORY_REVIEW_ADMIN_PASSWORD=$FACTORY_REVIEW_PASSWORD" >> .env.cloud.production
+                FACTORY_REVIEW_ENV_CHANGED=1
+                echo "[GUARD] FACTORY_REVIEW_ADMIN_PASSWORD added from GitHub secret"
+              fi
+            else
+              echo "[GUARD][WARN] GitHub secret FACTORY_REVIEW_ADMIN_PASSWORD is empty, skipping"
+            fi
+
             echo "=== Script version check ==="
             grep -c "recreate" deploy/update-server.sh && echo "[OK] update-server.sh contains recreate logic" || echo "[WARN] update-server.sh MISSING recreate logic"
             bash deploy/update-server.sh
@@ -122,6 +142,11 @@ jobs:
               docker compose -f docker-compose.cloud.yml --env-file .env.cloud.production up -d --no-deps --force-recreate qc
               echo "=== Verify qc container DASHSCOPE env (masked) ==="
               docker exec rr-portal-qc-1 printenv | grep '^DASHSCOPE_API_KEY=' | sed 's|\(DASHSCOPE_API_KEY=sk-....\).*|\1***|' || echo "[WARN] qc container DASHSCOPE_API_KEY env missing"
+            fi
+
+            if [ "$FACTORY_REVIEW_ENV_CHANGED" = "1" ] && docker ps --format '{{.Names}}' | grep -q '^rr-portal-factory-review-1$'; then
+              echo "=== factory-review admin env changed -> force-recreate service ==="
+              docker compose -f docker-compose.cloud.yml --env-file .env.cloud.production up -d --no-deps --force-recreate factory-review
             fi
 
             echo ""
@@ -191,6 +216,7 @@ jobs:
               /pi-outsource/api/health \
               /production-plan/health \
               /shipping/health \
+              /factory-review/health \
               /tomy-paiqi/health \
               /zuru-order-system/health \
               /zuru-master/health; do

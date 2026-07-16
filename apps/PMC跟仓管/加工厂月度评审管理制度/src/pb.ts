@@ -1,8 +1,12 @@
 import PocketBase from 'pocketbase'
+import { resolvePocketBaseUrl } from './runtimeConfig'
 
-// 本地开发指向 8090；生产由 Nginx 反代到同源 /，此时用相对地址
-// 本项目开发端口用 8091，避开「贴纸机系统管理」占用的 8090
-// 用访问页面时的主机名拼后端地址：本机开发用 localhost，其他电脑用局域网 IP 都能自动指向正确后端
-const baseUrl = import.meta.env.DEV ? `http://${window.location.hostname}:8091` : '/'
+const baseUrl = resolvePocketBaseUrl({
+  basePath: import.meta.env.BASE_URL,
+  dev: import.meta.env.DEV,
+  hostname: window.location.hostname,
+  origin: window.location.origin,
+  override: import.meta.env.VITE_POCKETBASE_URL,
+})
 export const pb = new PocketBase(baseUrl)
 pb.autoCancellation(false)

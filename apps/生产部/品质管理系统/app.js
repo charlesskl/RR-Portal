@@ -76,14 +76,17 @@ const ROLE_PERMS = {
   admin: {
     createRecord:true, editRecord:true, deleteRecord:true, batchDelete:true,
     importData:true,   exportData:true,  exportPdf:true,   manageUsers:true,
+    manageDefectLib:true,
   },
   manager: {
     createRecord:true, editRecord:true,  deleteRecord:false, batchDelete:false,
     importData:true,   exportData:true,  exportPdf:true,    manageUsers:false,
+    manageDefectLib:true,
   },
   viewer: {
     createRecord:true,  editRecord:true,  deleteRecord:false, batchDelete:false,
     importData:false,   exportData:true,  exportPdf:true,    manageUsers:false,
+    manageDefectLib:false,
   },
 };
 
@@ -2457,8 +2460,8 @@ function extractFieldsFromOcrText(text) {
   if (productName) setVal('ocrProductName', productName);
   if (qty)         setVal('ocrQty', qty);
 
-  /* ── 送货单号：优先送货单号，其次客户单号；排除手机号 ── */
-  let deliveryNo = findByKeywords(['送货单号','送货编号','送货单','单号','Delivery No','DN No'], _OCR_CUTOFF_KEYWORDS);
+  /* ── 送货单号：只匹配送货字段，避免把订单号误填进来 ── */
+  let deliveryNo = findByKeywords(['送货单号','送货编号','送货单','Delivery No','DN No'], _OCR_CUTOFF_KEYWORDS);
   if (deliveryNo && !isPhoneNumberLike(deliveryNo)) setVal('ocrDeliveryNo', deliveryNo);
 
   /* ── PO号 / 订单号：独立保存，不再混入送货单号 ── */
@@ -3519,7 +3522,7 @@ function renderDefectLibPage() {
   initDefectLib();
   const lib    = _getDefectLib() || [];
   const canDel = can('deleteRecord');  /* admin 可删除 */
-  const canAdd = can('createRecord'); /* admin + manager 可新增 */
+  const canAdd = can('manageDefectLib'); /* admin + manager 可新增 */
 
   const CATS = ['外观/质量','功能','尺寸/测量','包装','其它'];
   const LVLS = ['CR','MAJ 0.65','MAJ 1.0','MIN 2.5'];
@@ -3567,7 +3570,7 @@ function renderDefectLibPage() {
               <td style="text-align:center">${badge}</td>
               <td style="text-align:center">
                 ${canAdd ? `<button class="action-btn" onclick="_openDefLibModal(${realIdx})">编辑</button>` : ''}
-                <button class="action-btn" onclick="_toggleDefLibItem(${realIdx})">${d.enabled?'停用':'启用'}</button>
+                ${canAdd ? `<button class="action-btn" onclick="_toggleDefLibItem(${realIdx})">${d.enabled?'停用':'启用'}</button>` : ''}
                 ${canDel ? `<button class="action-btn del" onclick="_deleteDefLibItem(${realIdx})">删除</button>` : ''}
               </td>
             </tr>`;
@@ -3615,6 +3618,7 @@ function renderDefectLibPage() {
 let _editingDefLibIdx = null;
 
 function _openDefLibModal(idx) {
+  if (!can('manageDefectLib')) { showToast('当前账号无权限管理不良描述库', 'error'); return; }
   _editingDefLibIdx = idx ?? null;
   const modal = document.getElementById('defLibModal');
   if (!modal) return;
@@ -3647,6 +3651,7 @@ function _closeDefLibModal() {
 }
 
 function _saveDefLibItem() {
+  if (!can('manageDefectLib')) { showToast('当前账号无权限管理不良描述库', 'error'); return; }
   const errEl = document.getElementById('defLibModalErr');
   const show  = msg => { if(errEl){errEl.textContent=msg;errEl.style.display='';} };
   const name     = (document.getElementById('dlName')?.value||'').trim();
@@ -3670,6 +3675,7 @@ function _saveDefLibItem() {
 }
 
 function _toggleDefLibItem(idx) {
+  if (!can('manageDefectLib')) { showToast('当前账号无权限管理不良描述库', 'error'); return; }
   const lib = _getDefectLib() || [];
   if (!lib[idx]) return;
   lib[idx].enabled = !lib[idx].enabled;

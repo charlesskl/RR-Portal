@@ -1,0 +1,32 @@
+name: Restore Factory Review Data
+
+on:
+  workflow_dispatch:
+
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      FACTORY_REVIEW_DATA_PART_1_B64: ${{ secrets.FACTORY_REVIEW_DATA_PART_1_B64 }}
+      FACTORY_REVIEW_DATA_PART_2_B64: ${{ secrets.FACTORY_REVIEW_DATA_PART_2_B64 }}
+      FACTORY_REVIEW_DATA_PART_3_B64: ${{ secrets.FACTORY_REVIEW_DATA_PART_3_B64 }}
+      FACTORY_REVIEW_DATA_SHA256: ${{ secrets.FACTORY_REVIEW_DATA_SHA256 }}
+    steps:
+      - name: Restore production data via SSH
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
+        with:
+          host: ${{ secrets.CLOUD_HOST }}
+          username: ${{ secrets.CLOUD_USER }}
+          key: ${{ secrets.CLOUD_SSH_KEY }}
+          command_timeout: 20m
+          envs: FACTORY_REVIEW_DATA_PART_1_B64,FACTORY_REVIEW_DATA_PART_2_B64,FACTORY_REVIEW_DATA_PART_3_B64,FACTORY_REVIEW_DATA_SHA256
+          script: |
+            set -euo pipefail
+            cd /opt/rr-portal
+            git fetch origin main
+            git checkout main
+            git pull --ff-only origin main
+            git ls-files --error-unmatch deploy/restore-factory-review-data.sh
+            test -f deploy/restore-factory-review-data.sh
+            bash deploy/restore-factory-review-data.sh

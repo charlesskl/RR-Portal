@@ -127,6 +127,41 @@ function Assert-NoHardcodedSensitiveAssignment {
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $restorePath = Join-Path $repoRoot 'deploy\restore-factory-review-data.sh'
 $bashTestPath = Join-Path $PSScriptRoot 'test-factory-review-data-restore.sh'
+$workflowPath = Join-Path $repoRoot '.github\workflows\restore-factory-review-data.yml'
+
+Assert-True (Test-Path -LiteralPath $workflowPath -PathType Leaf) "restore workflow is missing: $workflowPath"
+$workflowText = Get-Content -LiteralPath $workflowPath -Raw
+$workflowCodeText = [regex]::Replace($workflowText, '(?m)^\s*#.*$', '')
+
+Assert-Match $workflowCodeText '(?im)^\s*workflow_dispatch\s*:' 'restore workflow must be manually dispatched'
+Assert-True ($workflowCodeText -notmatch '(?im)^\s*push\s*:') 'restore workflow must not run on push'
+Assert-True ($workflowCodeText -notmatch '(?im)^\s*pull_request(?:_target)?\s*:') 'restore workflow must not run on pull requests'
+Assert-Match $workflowCodeText '(?im)^\s*timeout-minutes\s*:\s*20\s*$' 'restore workflow must have a 20-minute job timeout'
+Assert-Match $workflowCodeText 'appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2' 'restore workflow must pin appleboy SSH action by commit SHA'
+Assert-Match $workflowCodeText '(?im)^\s*command_timeout\s*:\s*20m\s*$' 'restore workflow must have a 20-minute SSH timeout'
+
+$payloadSecrets = @(
+    'FACTORY_REVIEW_DATA_PART_1_B64',
+    'FACTORY_REVIEW_DATA_PART_2_B64',
+    'FACTORY_REVIEW_DATA_PART_3_B64',
+    'FACTORY_REVIEW_DATA_SHA256'
+)
+foreach ($payloadSecret in $payloadSecrets) {
+    Assert-Match $workflowCodeText "(?im)^\s*$payloadSecret\s*:\s*\$\{\{\s*secrets\.$payloadSecret\s*\}\}\s*$" "restore workflow must map $payloadSecret from its repository secret"
+    Assert-Match $workflowCodeText "(?im)^\s*envs\s*:\s*[^\r\n]*\b$payloadSecret\b" "restore workflow must pass $payloadSecret to SSH through envs"
+}
+
+Assert-Match $workflowCodeText '(?im)^\s*set\s+-euo\s+pipefail\s*$' 'restore workflow must enable strict shell mode'
+Assert-Match $workflowCodeText '(?im)^\s*cd\s+/opt/rr-portal\s*$' 'restore workflow must operate in the production repository'
+Assert-Match $workflowCodeText '(?im)^\s*git\s+checkout\s+main\s*$' 'restore workflow must check out main on the server'
+Assert-Match $workflowCodeText '(?im)^\s*git\s+pull\s+--ff-only\s+origin\s+main\s*$' 'restore workflow must fast-forward server main before restoring'
+Assert-Match $workflowCodeText '(?im)^\s*git\s+ls-files\s+--error-unmatch\s+deploy/restore-factory-review-data\.sh\s*$' 'restore workflow must confirm main contains the restore script'
+Assert-Match $workflowCodeText '(?im)^\s*bash\s+deploy/restore-factory-review-data\.sh\s*$' 'restore workflow must invoke the restore script'
+
+$payloadVariablePattern = '(?:\bFACTORY_REVIEW_DATA_PART_[123]_B64\b|\bFACTORY_REVIEW_DATA_SHA256\b)'
+$payloadSinkPattern = "(?im)^\s*(?:echo|printf|tee|cat|logger|systemd-cat)\b[^\r\n]*$payloadVariablePattern"
+Assert-True ($workflowCodeText -notmatch $payloadSinkPattern) 'restore workflow must not print payload variables'
+Assert-True ($workflowCodeText -notmatch '(?im)^\s*(?:export\s+)?FACTORY_REVIEW_DATA_(?:PART_[123]_B64|SHA256)\s*=') 'restore workflow must not persist payload variables through shell assignments'
 
 Assert-True (Test-Path -LiteralPath $restorePath -PathType Leaf) "restore script is missing: $restorePath"
 $scriptText = Get-Content -LiteralPath $restorePath -Raw

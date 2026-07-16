@@ -4,6 +4,8 @@ set -euo pipefail
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd -- "$SCRIPT_DIR/../.." && pwd)
 RESTORE_SCRIPT="$REPO_ROOT/deploy/restore-factory-review-data.sh"
+DEPLOY_WORKFLOW="$REPO_ROOT/.github/workflows/deploy.yml"
+RESTORE_WORKFLOW="$REPO_ROOT/.github/workflows/restore-factory-review-data.yml"
 TEST_ROOT=$(mktemp -d)
 MOCK_BIN="$TEST_ROOT/bin"
 INSTALL_DIR="$TEST_ROOT/install"
@@ -131,6 +133,8 @@ chmod +x "$MOCK_BIN"/*
 export BACKUP_PATH_FILE BACKUP_MARKER CALL_LOG RESTORE_MARKER
 
 [[ -f "$RESTORE_SCRIPT" ]] || fail "restore script is missing: $RESTORE_SCRIPT"
+assert_contains "$DEPLOY_WORKFLOW" '^[[:space:]]*queue:[[:space:]]*max[[:space:]]*$' 'deploy workflow must preserve all queued production operations'
+assert_contains "$RESTORE_WORKFLOW" '^[[:space:]]*queue:[[:space:]]*max[[:space:]]*$' 'restore workflow must preserve all queued production operations'
 
 PAYLOAD_GZ="$TEST_ROOT/payload.gz"
 PAYLOAD_TEXT=$(printf 'const %s%s = {}; migrate((app) => {});\n' 'SN' 'APSHOT')

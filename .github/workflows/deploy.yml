@@ -13,6 +13,7 @@ on:
 
 concurrency:
   group: deploy-cloud
+  queue: max
   # cancel-in-progress: false (默认)，让并发 deploy 排队而非取消。
   # 2026-05-20 review-open-prs 踩坑：cancel-in-progress=true 时，
   # PR A merge 触发 deploy A 在 build peise，PR B merge 来了 cancel 掉 A，

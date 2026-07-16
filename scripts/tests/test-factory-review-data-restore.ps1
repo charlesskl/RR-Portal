@@ -200,6 +200,8 @@ $deployConcurrencyGroup = [regex]::Match($deployConcurrency, '(?im)^\s*group\s*:
 Assert-True ($restoreConcurrencyGroup.Success -and $deployConcurrencyGroup.Success) 'restore and deploy workflows must declare concurrency groups'
 Assert-True ($restoreConcurrencyGroup.Groups['value'].Value.Trim() -eq $deployConcurrencyGroup.Groups['value'].Value.Trim()) 'restore workflow must use the exact deploy workflow concurrency group'
 Assert-True ($restoreConcurrencyGroup.Groups['value'].Value.Trim() -eq 'deploy-cloud') 'production workflow concurrency group must remain deploy-cloud'
+Assert-Match $restoreConcurrency '(?im)^\s*queue\s*:\s*max\s*$' 'restore workflow must preserve all queued production operations'
+Assert-Match $deployConcurrency '(?im)^\s*queue\s*:\s*max\s*$' 'deploy workflow must preserve all queued production operations'
 Assert-Match $restoreConcurrency '(?im)^\s*cancel-in-progress\s*:\s*false\s*$' 'restore workflow must queue behind production deploys without cancelling in-progress work'
 
 $triggerBlock = [regex]::Match($workflowCodeText, '(?m)^on:\s*\r?\n(?<body>(?:^[ \t]+[^\r\n]*(?:\r?\n|$))*)')

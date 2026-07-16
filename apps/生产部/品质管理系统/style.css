@@ -1751,32 +1751,32 @@ tbody tr:hover { background: var(--bg-hover); }
   width: 100%;
 }
 /* 数字列统一右对齐 */
-#recordsTable th:nth-child(10),  /* 来料数 */
-#recordsTable td:nth-child(10),
-#recordsTable th:nth-child(11),  /* 抽查数 */
+#recordsTable th:nth-child(11),  /* 来料数 */
 #recordsTable td:nth-child(11),
-#recordsTable th:nth-child(12),  /* FAIL数 */
+#recordsTable th:nth-child(12),  /* 抽查数 */
 #recordsTable td:nth-child(12),
-#recordsTable th:nth-child(13) { /* 不良率 */
+#recordsTable th:nth-child(13),  /* FAIL数 */
+#recordsTable td:nth-child(13),
+#recordsTable th:nth-child(14) { /* 不良率 */
   text-align: right;
 }
-#recordsTable td:nth-child(13) {
+#recordsTable td:nth-child(14) {
   text-align: right;
 }
 /* 判定/检验员/操作列居中 */
-#recordsTable th:nth-child(15),
-#recordsTable td:nth-child(15),
 #recordsTable th:nth-child(16),
 #recordsTable td:nth-child(16),
 #recordsTable th:nth-child(17),
-#recordsTable td:nth-child(17) {
+#recordsTable td:nth-child(17),
+#recordsTable th:nth-child(18),
+#recordsTable td:nth-child(18) {
   text-align: center;
 }
 /* 长文本溢出省略 */
-#recordsTable td:nth-child(4),   /* 供应商 */
-#recordsTable td:nth-child(5),   /* 客户 */
-#recordsTable td:nth-child(7),   /* 款式名称 */
-#recordsTable td:nth-child(14) { /* 不良现象 */
+#recordsTable td:nth-child(5),   /* 供应商 */
+#recordsTable td:nth-child(6),   /* 客户 */
+#recordsTable td:nth-child(8),   /* 款式名称 */
+#recordsTable td:nth-child(15) { /* 不良现象 */
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2659,7 +2659,7 @@ body.theme-light table td:has(strong),
 body.theme-light .font-medium  { color: #0f172a !important; }
 
 /* ── 验货明细：有 font-weight:500 的供应商列特殊处理 ── */
-body.theme-light #recordsTable td:nth-child(4) {  /* 验货明细 供应商=第4列 */
+body.theme-light #recordsTable td:nth-child(5) {  /* 验货明细 供应商=第5列 */
   color: #0f172a !important;
   font-weight: 600 !important;
 }
@@ -2708,7 +2708,7 @@ body.theme-light table td {
 }
 
 /* ── 验货明细表：供应商列单独加深加粗，但字号与其他列一致 ── */
-body.theme-light #recordsTable td:nth-child(4) {
+body.theme-light #recordsTable td:nth-child(5) {
   color: #0f172a !important;
   font-weight: 700 !important;
   font-size: 12px !important;

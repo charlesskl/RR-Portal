@@ -58,6 +58,7 @@ test('CSV export neutralizes spreadsheet formulas in text fields', async t => {
     deliveryNo: 'DN-2026-001',
     orderNo: 'PO-2026-001',
     result: 'PASS',
+    updatedAt: '2026-07-16T09:30:00.000Z',
   }];
   const saveResponse = await fetch(baseUrl + '/api/records', {
     method: 'POST',
@@ -73,7 +74,13 @@ test('CSV export neutralizes spreadsheet formulas in text fields', async t => {
   assert.match(csv, /"'\+1\+1"/);
   assert.match(csv, /"PO号"/);
   assert.match(csv, /"PO-2026-001"/);
+  assert.match(csv, /"修改日期"/);
+  assert.match(csv, /"2026-07-16"/);
   assert.doesNotMatch(csv, /(?:^|,)"[=+\-@]/m);
+
+  const searchResponse = await fetch(baseUrl + '/api/export/records.csv?search=2026-07-16');
+  assert.equal(searchResponse.status, 200);
+  assert.match(await searchResponse.text(), /"PO-2026-001"/);
 
   const excelResponse = await fetch(baseUrl + '/api/export/factory-excel.xls');
   assert.equal(excelResponse.status, 200);

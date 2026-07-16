@@ -536,6 +536,19 @@ function todayStr() {
 }
 function pad(n) { return String(n).padStart(2, '0'); }
 
+function nowIso() {
+  return new Date().toISOString();
+}
+
+function formatModifiedDate(value) {
+  if (!value) return '';
+  const raw = String(value).trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(raw)) return raw.slice(0, 10);
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) return raw;
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+}
+
 function weekStart(dateStr) {
   const dt = dateStr ? new Date(dateStr) : new Date();
   const day = dt.getDay();
@@ -1763,7 +1776,10 @@ function filterRecords() {
 
     filteredRecs = data.filter(r => {
       if (search) {
-        const haystack = [r.supplier, r.productNo, r.productName, r.client, r.orderNo, r.deliveryNo, r.defect]
+        const haystack = [
+          r.supplier, r.productNo, r.productName, r.client, r.orderNo, r.deliveryNo,
+          r.defect, r.updatedAt, formatModifiedDate(r.updatedAt),
+        ]
           .filter(Boolean).join(' ').toLowerCase();
         if (!haystack.includes(search)) return false;
       }
@@ -1799,6 +1815,7 @@ function filterRecords() {
         <col style="width:36px"/>   <!-- 复选框 -->
         <col style="width:44px"/>   <!-- # -->
         <col style="width:98px"/>   <!-- 来料日期 -->
+        <col style="width:98px"/>   <!-- 修改日期 -->
         <col style="width:110px"/>  <!-- 供应商 -->
         <col style="width:80px"/>   <!-- 客户 -->
         <col style="width:92px"/>   <!-- 货号 -->
@@ -1821,6 +1838,7 @@ function filterRecords() {
         </th>
         <th style="text-align:right">#</th>
         <th style="text-align:left">来料日期</th>
+        <th style="text-align:left">修改日期</th>
         <th style="text-align:left">供应商</th>
         <th style="text-align:left">客户</th>
         <th style="text-align:left">货号</th>
@@ -1854,6 +1872,7 @@ function filterRecords() {
           </td>
           <td style="text-align:right;color:#3a4858">${r.id}</td>
           <td style="font-family:var(--font-mono);font-size:11px;white-space:nowrap">${r.date}</td>
+          <td style="font-family:var(--font-mono);font-size:11px;white-space:nowrap">${formatModifiedDate(r.updatedAt) || '-'}</td>
           <td style="font-weight:500;color:#e8edf5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${r.supplier}">${r.supplier}</td>
           <td style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${r.client||''}">${r.client||'-'}</td>
           <td style="font-family:var(--font-mono);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${r.productNo||''}">${r.productNo||'-'}</td>
@@ -4067,6 +4086,7 @@ function saveRecord() {
       Number(getVal('f_qty')) || 0
     ), defect,
     qc: getVal('f_qc'), remark: getVal('f_remark'),
+    updatedAt: nowIso(),
     ...(defectsArr ? { defects: defectsArr } : {}),
     ...(measArr   ? { measurements: measArr } : {}),
   };
@@ -4399,10 +4419,10 @@ function exportCSV() {
   if (_downloadServerExport('records.csv', 'CSV')) return;
   try {
     const data = filteredRecs.length ? filteredRecs : recs();
-    const HDR  = ['ID','来料日期','检验日期','供应商','客户','货号','款式名称','PO号','类型',
+    const HDR  = ['ID','来料日期','检验日期','修改日期','供应商','客户','货号','款式名称','PO号','类型',
                   '来料数量','抽查数量','PASS数','FAIL数','不良率','不良现象','判定结果','检验员','备注'];
     const rows = data.map(r => [
-      r.id, r.date, r.inspDate, r.supplier, r.client, r.productNo, r.productName,
+      r.id, r.date, r.inspDate, formatModifiedDate(r.updatedAt), r.supplier, r.client, r.productNo, r.productName,
       r.orderNo, r.type, r.qty, r.sampleQty, r.pass, r.fail, r.defectRate, r.defect, r.result, r.qc, r.remark,
     ].map(v => `"${String(v==null?'':v).replace(/"/g,'""')}"`));
     const csv  = '\uFEFF' + [HDR, ...rows].map(r=>r.join(',')).join('\n');
@@ -4701,6 +4721,7 @@ function _backupDoImport(incoming, mode) {
       defect:      r.defect      || '',
       qc:          r.qc          || '',
       remark:      r.remark      || '',
+      updatedAt:   r.updatedAt   || nowIso(),
     }));
 
     if (mode === 'replace') {
@@ -5502,6 +5523,7 @@ function _buildImportPlan(mode) {
       confirmResult: res2Col ? _normalizeResult(String(row[res2Col] ?? '').trim()) : '',
       confirmBy:   confCol  ? String(row[confCol]  ?? '').trim() : '',
       remark:      remCol   ? String(row[remCol]   ?? '').trim() : '',
+      updatedAt:   nowIso(),
     });
   });
 

@@ -176,6 +176,12 @@ test('viewer account can create records but cannot edit or delete them', () => {
   assert.match(viewerPerms, /deleteRecord:\s*false/);
 });
 
+test('records table shows and searches the modified date', () => {
+  assert.match(appSource, /<th style="text-align:left">修改日期<\/th>/);
+  assert.match(appSource, /formatModifiedDate\(r\.updatedAt\)/);
+  assert.match(appSource, /r\.updatedAt,\s*formatModifiedDate\(r\.updatedAt\)/);
+});
+
 test('mobile modal controls keep a 16px font to avoid iOS focus zoom', () => {
   assert.match(mobileCss, /html\.qc-mobile \.modal textarea\s*\{[^}]*font-size:\s*16px\s*!important/s);
   assert.match(mobileCss, /html\.qc-narrow \.modal textarea\s*\{[^}]*font-size:\s*16px\s*!important/s);

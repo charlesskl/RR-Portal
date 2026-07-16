@@ -10,6 +10,8 @@
   <div class="topbar">
     <div class="brand">📋 内部报价明细系统 <small>多部门协同 · 主管审核 · 受控导出</small></div>
     <div id="user-chip" class="hidden">
+      <span id="factory-chip" class="badge b-approved"></span>
+      <select id="factory-switch" class="hidden" aria-label="切换厂区"></select>
       <span id="who-chip"></span>
       <a href="#" id="btn-change-pwd">修改密码</a>
       <a href="./admin.html" id="btn-admin" class="hidden">⚙️ 管理后台</a>
@@ -45,7 +47,7 @@
 
       <div class="card">
         <div class="list-head">
-          <h2 style="margin:0">报价单列表</h2>
+          <h2 style="margin:0">报价单列表 · <span id="factory-list-name"></span></h2>
           <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
             <div class="search-box">
               <input id="search-input" type="text" placeholder="🔍 搜索 货号 / 产品 / 客户…" />
@@ -90,6 +92,6 @@
       };
     })();
   </script>
-  <script src="./main.js"></script>
+  <script src="./main.js?v=20260715-factory-scope"></script>
 </body>
 </html>

@@ -11,7 +11,8 @@ const ALLOWED = new Set(['material_prices', 'machine_prices']);
 router.get('/:key', (req, res) => {
   const key = req.params.key;
   if (!ALLOWED.has(key)) return res.status(400).json({ error: 'invalid key' });
-  const row = db.prepare('SELECT data_json, updated_at, updated_by FROM ref_tables WHERE key = ?').get(key);
+  const row = db.prepare('SELECT data_json, updated_at, updated_by FROM factory_ref_tables WHERE factory_code = ? AND key = ?')
+    .get(req.user.active_factory_code, key);
   if (!row) return res.json({ data: [], updated_at: null, updated_by: null });
   let data = [];
   try { data = JSON.parse(row.data_json); } catch {}
@@ -27,9 +28,9 @@ router.put('/:key', (req, res) => {
   }
   const data = Array.isArray(req.body && req.body.data) ? req.body.data : [];
   db.prepare(`
-    INSERT INTO ref_tables (key, data_json, updated_at, updated_by) VALUES (?, ?, datetime('now'), ?)
-    ON CONFLICT(key) DO UPDATE SET data_json = excluded.data_json, updated_at = excluded.updated_at, updated_by = excluded.updated_by
-  `).run(key, JSON.stringify(data), `[${req.user.dept}] ${req.user.name}`);
+    INSERT INTO factory_ref_tables (factory_code, key, data_json, updated_at, updated_by) VALUES (?, ?, ?, datetime('now'), ?)
+    ON CONFLICT(factory_code, key) DO UPDATE SET data_json = excluded.data_json, updated_at = excluded.updated_at, updated_by = excluded.updated_by
+  `).run(req.user.active_factory_code, key, JSON.stringify(data), `[${req.user.dept}] ${req.user.name}`);
   res.json({ ok: true });
 });
 

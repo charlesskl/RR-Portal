@@ -27,12 +27,87 @@ try {
   process.exit(1);
 }
 
-// 迁移：给已有库的 quotes 补 version 列（幂等）
+const factorySeeds = [
+  { code: 'qingxi', name_cn: '清溪', sort_order: 1 },
+  { code: 'heyuan', name_cn: '河源', sort_order: 2 },
+];
+const insertFactory = db.prepare('INSERT OR IGNORE INTO factories (code, name_cn, sort_order) VALUES (?, ?, ?)');
+for (const f of factorySeeds) insertFactory.run(f.code, f.name_cn, f.sort_order);
+
+// 迁移：给已有库补版本和厂区字段（幂等）
 const _quoteCols = db.prepare('PRAGMA table_info(quotes)').all().map(c => c.name);
 if (!_quoteCols.includes('version')) {
   db.exec('ALTER TABLE quotes ADD COLUMN version TEXT');
   console.log('[migrate] quotes.version 列已添加');
 }
+if (!_quoteCols.includes('factory_code')) {
+  db.exec("ALTER TABLE quotes ADD COLUMN factory_code TEXT NOT NULL DEFAULT 'qingxi'");
+  db.prepare("UPDATE quotes SET factory_code = 'heyuan' WHERE id IN (13, 14, 15, 16)").run();
+  console.log('[migrate] 报价单 13-16 已归入河源，其余归入清溪');
+}
+const _userCols = db.prepare('PRAGMA table_info(users)').all().map(c => c.name);
+if (!_userCols.includes('factory_code')) {
+  db.exec("ALTER TABLE users ADD COLUMN factory_code TEXT NOT NULL DEFAULT 'qingxi'");
+  console.log('[migrate] 现有账号默认归入清溪；管理员可跨厂区切换');
+}
+
+const quoteHasGlobalNumberUnique = db.prepare(
+  'SELECT name FROM pragma_index_list(?) WHERE [unique] = 1'
+).all('quotes').some(({ name }) => {
+  const columns = db.prepare(
+    'SELECT name FROM pragma_index_info(?) ORDER BY seqno'
+  ).all(name).map(row => row.name);
+  return columns.length === 1 && columns[0] === 'quote_no';
+});
+if (quoteHasGlobalNumberUnique) {
+  const migrationBackupPath = `${DB_PATH}.pre-factory-scope-${Date.now()}.bak`;
+  db.prepare('VACUUM INTO ?').run(migrationBackupPath);
+  console.log(`[backup] 厂区唯一约束迁移前数据库已备份: ${migrationBackupPath}`);
+
+  db.exec('PRAGMA foreign_keys = OFF');
+  try {
+    db.exec('BEGIN');
+    db.exec(`
+      CREATE TABLE quotes_factory_scope (
+        id               INTEGER PRIMARY KEY AUTOINCREMENT,
+        quote_no         TEXT NOT NULL,
+        product_name     TEXT NOT NULL,
+        customer         TEXT,
+        qty              INTEGER,
+        created_by_dept  TEXT NOT NULL DEFAULT 'sales',
+        created_by_name  TEXT,
+        created_at       TEXT NOT NULL DEFAULT (datetime('now')),
+        status           TEXT NOT NULL DEFAULT 'drafting',
+        version          TEXT,
+        factory_code     TEXT NOT NULL DEFAULT 'qingxi' REFERENCES factories(code),
+        UNIQUE(factory_code, quote_no)
+      );
+      INSERT INTO quotes_factory_scope (
+        id, quote_no, product_name, customer, qty, created_by_dept,
+        created_by_name, created_at, status, version, factory_code
+      )
+      SELECT
+        id, quote_no, product_name, customer, qty, created_by_dept,
+        created_by_name, created_at, status, version, factory_code
+      FROM quotes;
+      DROP TABLE quotes;
+      ALTER TABLE quotes_factory_scope RENAME TO quotes;
+    `);
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  } finally {
+    db.exec('PRAGMA foreign_keys = ON');
+  }
+  const violations = db.prepare('PRAGMA foreign_key_check').all();
+  if (violations.length) {
+    throw new Error(`quotes 厂区唯一约束迁移后发现 ${violations.length} 条外键异常`);
+  }
+  console.log('[migrate] 报价货号唯一约束已调整为按厂区生效');
+}
+db.exec('CREATE INDEX IF NOT EXISTS idx_quotes_factory ON quotes(factory_code)');
+db.exec('CREATE INDEX IF NOT EXISTS idx_users_factory ON users(factory_code)');
 
 const count = db.prepare('SELECT COUNT(*) AS n FROM departments').get().n;
 if (count === 0) {
@@ -117,10 +192,10 @@ const refSeeds = {
     { model: '14A-16A', normal: '150T', price: 1490 },
     { model: '20A', normal: '200T', price: 1920 },
     { model: '24A', normal: '260T', price: 1920 },
-    { model: '32A', normal: '', price: 2220 },
+    { model: '32A', normal: '320T', price: 2220 },
     { model: '44A', normal: '490T', price: 2500 },
     { model: '46A-49.9A', normal: '', price: 2800 },
-    { model: '60A', normal: '', price: 3090 },
+    { model: '60A', normal: '500T', price: 3090 },
     { model: '80A', normal: '', price: 3590 },
     { model: '81.3A', normal: '', price: 3600 },
     { model: '105A', normal: '800T', price: 4500 },
@@ -145,6 +220,138 @@ for (const [key, data] of Object.entries(refSeedUpgrades)) {
         + sectionAdded.itemsAdded + ' default item(s) in ' + sectionAdded.rowsChanged + ' section(s)');
     }
   }
+}
+
+const globalRefData = (key) => {
+  const row = db.prepare('SELECT data_json FROM ref_tables WHERE key = ?').get(key);
+  if (row) {
+    try {
+      const parsed = JSON.parse(row.data_json);
+      if (Array.isArray(parsed)) return parsed;
+    } catch (error) {
+      console.warn(`[factory-seed] 全局参考表 ${key} JSON 无效，回退代码默认值: ${error.message}`);
+    }
+  }
+  return refSeeds[key] || [];
+};
+
+const factoryRefSeedData = (factoryCode, key) => {
+  const base = globalRefData(key);
+  if (key !== 'machine_prices') return base;
+  return base.map(row => row.model === '20A'
+    ? { ...row, price: factoryCode === 'heyuan' ? 1720 : 1920 }
+    : { ...row });
+};
+
+// 首次为两个厂区复制参考参数；尚未人工修改的种子数据跟随代码更新。
+for (const f of factorySeeds) {
+  for (const key of Object.keys(refSeeds)) {
+    const existing = db.prepare('SELECT updated_by FROM factory_ref_tables WHERE factory_code = ? AND key = ?').get(f.code, key);
+    const data = factoryRefSeedData(f.code, key);
+    if (!existing) {
+      db.prepare('INSERT INTO factory_ref_tables (factory_code, key, data_json, updated_by) VALUES (?, ?, ?, ?)')
+        .run(f.code, key, JSON.stringify(data), '[factory-seed]');
+    } else if (existing.updated_by === '[factory-seed]') {
+      db.prepare("UPDATE factory_ref_tables SET data_json = ?, updated_at = datetime('now') WHERE factory_code = ? AND key = ?")
+        .run(JSON.stringify(data), f.code, key);
+    }
+  }
+}
+
+// 旧报价保存了机型价副本；只迁移一次，按所属厂区统一本次发布的机型名称和 20A 价格。
+const machinePriceMigration = 'normalize_machine_prices_20260715';
+if (!db.prepare('SELECT 1 FROM app_migrations WHERE key = ?').get(machinePriceMigration)) {
+  const sections = db.prepare(`
+    SELECT s.id, s.payload_json, q.factory_code
+    FROM quote_sections s
+    JOIN quotes q ON q.id = s.quote_id
+    WHERE s.dept = 'molding'
+  `).all();
+  const updateSection = db.prepare('UPDATE quote_sections SET payload_json = ? WHERE id = ?');
+  db.exec('BEGIN');
+  try {
+    for (const section of sections) {
+      let payload;
+      try { payload = JSON.parse(section.payload_json || '{}'); } catch { continue; }
+      if (!payload || typeof payload !== 'object' || Array.isArray(payload)) continue;
+      if (!Array.isArray(payload.machine_prices) || !payload.machine_prices.length) continue;
+      payload.machine_prices = payload.machine_prices.map(row => {
+        const next = { ...row };
+        if (['30A-32A', '30-32A'].includes(next.model)) next.model = '32A';
+        if (next.model === '60A-65A') next.model = '60A';
+        if (next.model === '32A' && !next.normal) next.normal = '320T';
+        if (next.model === '60A' && !next.normal) next.normal = '500T';
+        if (next.model === '20A') next.price = section.factory_code === 'heyuan' ? 1720 : 1920;
+        return next;
+      });
+      updateSection.run(JSON.stringify(payload), section.id);
+    }
+    db.prepare('INSERT INTO app_migrations (key) VALUES (?)').run(machinePriceMigration);
+    db.exec('COMMIT');
+  } catch (e) {
+    db.exec('ROLLBACK');
+    throw e;
+  }
+  console.log('[migrate] 旧报价机型价已按厂区更新');
+}
+
+const assemblyRateMigration = 'assembly_base_rate_by_factory_20260715';
+if (!db.prepare('SELECT 1 FROM app_migrations WHERE key = ?').get(assemblyRateMigration)) {
+  const sections = db.prepare(`
+    SELECT s.id, s.payload_json, q.factory_code
+    FROM quote_sections s
+    JOIN quotes q ON q.id = s.quote_id
+    WHERE s.dept = 'assembly'
+  `).all();
+  const updateSection = db.prepare('UPDATE quote_sections SET payload_json = ? WHERE id = ?');
+  db.exec('BEGIN');
+  try {
+    for (const section of sections) {
+      let payload;
+      try { payload = JSON.parse(section.payload_json || '{}'); } catch { continue; }
+      if (!payload || typeof payload !== 'object' || Array.isArray(payload)) continue;
+      payload.assembly_base_rate = section.factory_code === 'heyuan' ? 260 : 310;
+      updateSection.run(JSON.stringify(payload), section.id);
+    }
+    db.prepare('INSERT INTO app_migrations (key) VALUES (?)').run(assemblyRateMigration);
+    db.exec('COMMIT');
+  } catch (e) {
+    db.exec('ROLLBACK');
+    throw e;
+  }
+  console.log('[migrate] 装配基数已按厂区更新');
+}
+
+// 旧报价的材料价副本可能早于“ABS 抽粒料”加入参考表；仅补缺失项，不覆盖原有价格。
+const absRegrindMigration = 'restore_abs_regrind_material_20260715';
+if (!db.prepare('SELECT 1 FROM app_migrations WHERE key = ?').get(absRegrindMigration)) {
+  const sections = db.prepare("SELECT id, payload_json FROM quote_sections WHERE dept = 'molding'").all();
+  const updateSection = db.prepare('UPDATE quote_sections SET payload_json = ? WHERE id = ?');
+  db.exec('BEGIN');
+  try {
+    for (const section of sections) {
+      let payload;
+      try { payload = JSON.parse(section.payload_json || '{}'); } catch { continue; }
+      if (!payload || typeof payload !== 'object' || Array.isArray(payload)) continue;
+      const prices = payload.material_prices;
+      if (!Array.isArray(prices) || prices.length === 0) continue;
+      const hasRegrind = prices.some((row) =>
+        String(row?.name || '').trim().toUpperCase() === 'ABS' &&
+        String(row?.model || '').trim() === '抽粒料'
+      );
+      if (hasRegrind) continue;
+      const absIndex = prices.findIndex((row) => String(row?.name || '').trim().toUpperCase() === 'ABS');
+      const insertAt = absIndex >= 0 ? absIndex + 1 : prices.length;
+      prices.splice(insertAt, 0, { name: 'ABS', model: '抽粒料', price: 4.6 });
+      updateSection.run(JSON.stringify(payload), section.id);
+    }
+    db.prepare('INSERT INTO app_migrations (key) VALUES (?)').run(absRegrindMigration);
+    db.exec('COMMIT');
+  } catch (e) {
+    db.exec('ROLLBACK');
+    throw e;
+  }
+  console.log('[migrate] 已恢复旧报价的 ABS 抽粒料价格');
 }
 
 // seed 初始 admin 账号（仅 users 表为空时）

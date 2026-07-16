@@ -297,7 +297,8 @@ async function buildWorkbook({ quote, sections }) {
   const pkSubtotal = freeSubtotal(eng.packaging_materials || [], fxRH);
 
   // ---------- 八/九、组装+包装人工 — 排拉工序：明细拆到「装配明细」分表，主表只留汇总 ----------
-  const _asmBase = num(asm.assembly_base_rate ?? 310);
+  const defaultAssemblyBase = quote.factory_code === 'heyuan' ? 260 : 310;
+  const _asmBase = num(asm.assembly_base_rate ?? defaultAssemblyBase);
   const _asmStd = num(asm.assembly_std_time ?? 11);
   const asmDetail = addAssemblyDetailSheet(wb, asm, _asmBase, _asmStd);
   row = renderAssemblyMainSummary(ws, row, '八、组装人工 — 排拉工序', asm.assembly_step_groups || [], _asmBase, _asmStd, asmDetail.asmPeopleCells, subRefs, 'asmLabor');
@@ -824,6 +825,7 @@ function renderShippingBlock(ws, row, shipping, header, fxRH, refs = {}) {
   const fxHU = num(header.fx_hkd_usd) || 7.8;
   const sc = shipping.scenarios;
   const cols = sc.length;
+  const markupX = shipping.markup_x == null || shipping.markup_x === '' ? 1 : num(shipping.markup_x);
 
   // 章节标题
   ws.mergeCells(row, 1, row, Math.max(13, cols + 1)); styleSection(ws.getCell(row, 1));
@@ -852,7 +854,7 @@ function renderShippingBlock(ws, row, shipping, header, fxRH, refs = {}) {
     const freight = x.is_factory ? 0 : rate * num(shipping.freight_pct) / 100;
     const lifting = x.is_factory ? 0 : rate * num(shipping.lifting_pct) / 100;
     const afterShip = base + freight + lifting;
-    const afterMarkup = afterShip * num(shipping.markup_x);
+    const afterMarkup = afterShip * markupX;
     const afterDivisor = afterMarkup / Math.max(num(shipping.divisor), 1e-9);
     const totalHKD = afterDivisor;  // 码点/找数后的港币总额（模具分摊在 USD 层加）
     const totalUSD = totalHKD / fxHU;
@@ -912,8 +914,8 @@ function renderShippingBlock(ws, row, shipping, header, fxRH, refs = {}) {
     { fmt: '0.00', bold: true });
   // 5. 码点 ×
   const rMk = row;
-  writeRow(`码点 × ${shipping.markup_x || 1}`,
-    i => ({ formula: `${colLetter(i+2)}${rAS}*${num(shipping.markup_x)}`, result: rows[i].afterMarkup }),
+  writeRow(`码点 × ${markupX}`,
+    i => ({ formula: `${colLetter(i+2)}${rAS}*${markupX}`, result: rows[i].afterMarkup }),
     { fmt: '0.00' });
   // 6. 找数 ÷
   const rDiv = row;
@@ -1111,8 +1113,10 @@ function renderSecondProc(ws, row, payload, fxRH, refs) {
     ws.getCell(row, 3).value = r.position || '';
     procKeys.forEach((k, pi) => {
       const c = 4 + pi * 2;
-      ws.getCell(row, c).value = num(r[k + '_qty']);
-      ws.getCell(row, c + 1).value = num(r[k + '_unit']);
+      const qty = num(r[k + '_qty']);
+      const unit = num(r[k + '_unit']);
+      ws.getCell(row, c).value = qty || null;
+      ws.getCell(row, c + 1).value = unit || null;
       ws.getCell(row, c + 1).numFmt = '0.0000';
     });
     // 报价 = Σ(数量*单价)
@@ -1121,7 +1125,7 @@ function renderSecondProc(ws, row, payload, fxRH, refs) {
       return `${colLetter(c)}${row}*${colLetter(c+1)}${row}`;
     });
     const computed = procKeys.reduce((s, k) => s + num(r[k+'_qty']) * num(r[k+'_unit']), 0);
-    ws.getCell(row, priceCol).value = { formula: parts.join('+'), result: computed };
+    ws.getCell(row, priceCol).value = computed ? { formula: parts.join('+'), result: computed } : null;
     ws.getCell(row, priceCol).numFmt = '0.0000';
     for (let c = 1; c <= priceCol; c++) styleData(ws.getCell(row, c));
     row += 1;
@@ -1855,7 +1859,8 @@ function renderTaxSummary(ws, row, sales, extra = {}) {
   // 直接引用单元格的项（非关键字累加）：被手填覆盖或无来源则回退静态值
   const refLink = (tbl, key, ref) => (ref && !ov[`${tbl}.${key}`]) ? { ref } : null;
 
-  const _mk = num(sales.shipping?.markup_x) || 1.2;
+  const markupValue = sales.shipping?.markup_x;
+  const _mk = markupValue == null || markupValue === '' ? 1.2 : num(markupValue);
   const linkMap = {
     // 货价 = 码点后价 = 出厂价 × 码点；出厂价 = 成本各列之和 SUM(A:K)（九、合计已不单列出厂价/码点后价）
     base_price: sumR ? { ref: `SUM(A${sumR}:K${sumR})*${_mk}` } : null,
@@ -1881,7 +1886,8 @@ function renderTaxSummary(ws, row, sales, extra = {}) {
     // 表2 引用 九、合计：纸箱=K，杂项=印尼运费H+附加税L（附加税现在在 L 列），未减税前码数=码点(markup 常量)
     carton:      refLink('t2', 'carton',      sumR ? `K${sumR}` : null),
     misc:        refLink('t2', 'misc',        sumR ? `H${sumR}+L${sumR}` : null),
-    code_before: refLink('t2', 'code_before', sumR ? `${_mk}` : null),
+    // 未减税前码数始终取当前码点；忽略旧报价残留的手工覆盖标记。
+    code_before: { ref: `${_mk}` },
     // 运费/吊柜费 = 直接引用 出货价算价 盐田40柜 的 运费/吊柜费 单元格（单一来源）；回退到运费场景率×%
     freight: refLink('t2', 'freight', subRefs.shipFreightCell || (ytRateCell ? `${ytRateCell}*${fPct}/100` : null)),
     cabinet: refLink('t2', 'cabinet', subRefs.shipCabinetCell || (ytRateCell ? `${ytRateCell}*${lPct}/100` : null)),

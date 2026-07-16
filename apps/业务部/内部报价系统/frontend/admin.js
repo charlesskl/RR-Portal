@@ -29,7 +29,15 @@ async function init() {
     document.body.innerHTML = '<div style="padding:40px;text-align:center"><h2>无权访问</h2><a href="./index.html">← 返回</a></div>';
     return;
   }
-  $('who-chip').textContent = `${me.display_name || me.username} · 管理员`;
+  $('who-chip').textContent = `${me.active_factory_name} · ${me.display_name || me.username} · 管理员`;
+  const factorySwitch = $('factory-switch');
+  factorySwitch.innerHTML = (me.factories || []).map(f =>
+    `<option value="${esc(f.code)}" ${f.code === me.active_factory_code ? 'selected' : ''}>${esc(f.name_cn)}</option>`
+  ).join('');
+  factorySwitch.onchange = async () => {
+    await api('/auth/factory', { method: 'POST', body: JSON.stringify({ factory_code: factorySwitch.value }) });
+    location.reload();
+  };
   window.__me = me;
   await loadUsers();
 }
@@ -45,7 +53,7 @@ async function loadUsers() {
 function renderUsers() {
   const q = ($('user-search')?.value || '').trim().toLowerCase();
   const rows = q
-    ? __allUsers.filter(u => [u.username, u.display_name, u.dept_name, u.dept]
+    ? __allUsers.filter(u => [u.username, u.display_name, u.dept_name, u.dept, u.factory_name, u.factory_code]
         .some(v => String(v || '').toLowerCase().includes(q)))
     : __allUsers;
   const cnt = $('user-count');
@@ -53,7 +61,7 @@ function renderUsers() {
   const tbody = $('users-tbody');
   tbody.innerHTML = '';
   if (!rows.length) {
-    tbody.innerHTML = `<tr><td colspan="8" class="muted" style="text-align:center;padding:18px">无匹配账号</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="9" class="muted" style="text-align:center;padding:18px">无匹配账号</td></tr>`;
     return;
   }
   for (const u of rows) {
@@ -65,6 +73,10 @@ function renderUsers() {
       <td><b>${esc(u.username)}</b></td>
       <td>${esc(u.display_name)}</td>
       <td>${esc(u.dept_name || u.dept)}</td>
+      <td><select class="factory-sel" data-id="${u.id}" data-username="${esc(u.username)}" data-cur="${u.factory_code}" style="padding:3px 6px">
+        <option value="qingxi" ${u.factory_code==='qingxi'?'selected':''}>清溪</option>
+        <option value="heyuan" ${u.factory_code==='heyuan'?'selected':''}>河源</option>
+      </select></td>
       <td><select class="role-sel" data-id="${u.id}" data-username="${esc(u.username)}" data-cur="${u.role}" style="padding:3px 6px">
         <option value="staff" ${u.role==='staff'?'selected':''}>员工</option>
         <option value="supervisor" ${u.role==='supervisor'?'selected':''}>主管</option>
@@ -91,6 +103,20 @@ function renderUsers() {
   document.querySelectorAll('.btn-unlock').forEach(b => b.onclick = () => unlockUser(b.dataset.id));
   document.querySelectorAll('.btn-del').forEach(b => b.onclick = () => delUser(b.dataset.id, b.dataset.username));
   document.querySelectorAll('.role-sel').forEach(s => s.onchange = () => changeRole(s.dataset.id, s.dataset.username, s.value, s.dataset.cur));
+  document.querySelectorAll('.factory-sel').forEach(s => s.onchange = () => changeFactory(s.dataset.id, s.dataset.username, s.value, s.dataset.cur));
+}
+
+async function changeFactory(id, username, factoryCode, cur) {
+  if (factoryCode === cur) return;
+  const name = factoryCode === 'heyuan' ? '河源' : '清溪';
+  if (!confirm(`把「${username}」的所属厂区改为「${name}」？该账号下次登录后只会进入此厂区。`)) {
+    loadUsers();
+    return;
+  }
+  try {
+    await api('/admin/users/' + id + '/factory', { method: 'PUT', body: JSON.stringify({ factory_code: factoryCode }) });
+    await loadUsers();
+  } catch (e) { alert(e.message); loadUsers(); }
 }
 
 async function changeRole(id, username, role, cur) {
@@ -233,6 +259,7 @@ $('btn-create-user').onclick = async () => {
     display_name: $('nu-display').value.trim(),
     dept: $('nu-dept').value,
     role: $('nu-role').value,
+    factory_code: $('nu-factory').value,
   };
   if (!body.username || !body.password || !body.display_name) {
     $('nu-msg').textContent = '用户名/密码/姓名 必填';
@@ -265,7 +292,7 @@ async function openCust(id, username) {
   $('cd-new-cust').value = '';
   try {
     const [allRes, myRes] = await Promise.all([
-      api('/admin/customers'),
+      api('/admin/customers?user_id=' + id),
       api('/admin/users/' + id + '/customers'),
     ]);
     const all = allRes.customers || [];

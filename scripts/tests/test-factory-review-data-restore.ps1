@@ -133,12 +133,18 @@ Assert-True (Test-Path -LiteralPath $workflowPath -PathType Leaf) "restore workf
 $workflowText = Get-Content -LiteralPath $workflowPath -Raw
 $workflowCodeText = [regex]::Replace($workflowText, '(?m)^\s*#.*$', '')
 
-Assert-Match $workflowCodeText '(?im)^\s*workflow_dispatch\s*:' 'restore workflow must be manually dispatched'
-Assert-True ($workflowCodeText -notmatch '(?im)^\s*push\s*:') 'restore workflow must not run on push'
-Assert-True ($workflowCodeText -notmatch '(?im)^\s*pull_request(?:_target)?\s*:') 'restore workflow must not run on pull requests'
+$triggerBlock = [regex]::Match($workflowCodeText, '(?m)^on:\s*\r?\n(?<body>(?:^[ \t]+[^\r\n]*(?:\r?\n|$))*)')
+Assert-True $triggerBlock.Success 'restore workflow must declare an on block'
+$triggerNames = @([regex]::Matches($triggerBlock.Groups['body'].Value, '(?m)^[ \t]+(?<name>[A-Za-z_][A-Za-z0-9_-]*)\s*:') | ForEach-Object { $_.Groups['name'].Value })
+Assert-True ($triggerNames.Count -eq 1 -and $triggerNames[0] -eq 'workflow_dispatch') 'workflow_dispatch must be the only restore workflow trigger'
 Assert-Match $workflowCodeText '(?im)^\s*timeout-minutes\s*:\s*20\s*$' 'restore workflow must have a 20-minute job timeout'
+Assert-Match $workflowCodeText '(?ms)^permissions:\s*\r?\n\s*contents:\s*read\s*$' 'restore workflow must grant only contents read permission'
+
+$checkoutActionSha = '11bd71901bbe5b1630ceea73d27597364c9af683'
+Assert-Match $workflowCodeText "(?ms)^\s*-\s*name:\s*Checkout selected ref\s*\r?\n\s*uses:\s*actions/checkout@$checkoutActionSha\s*\r?\n\s*with:\s*\r?\n\s*ref:\s*\$\{\{\s*github\.ref\s*\}\}\s*\r?\n\s*persist-credentials:\s*false\s*$" 'restore workflow must use a pinned selected-ref checkout without persisted credentials'
 Assert-Match $workflowCodeText 'appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2' 'restore workflow must pin appleboy SSH action by commit SHA'
 Assert-Match $workflowCodeText '(?im)^\s*command_timeout\s*:\s*20m\s*$' 'restore workflow must have a 20-minute SSH timeout'
+Assert-True ($workflowCodeText -notmatch '(?m)^\s{4}env:\s*$') 'restore workflow must not expose secrets through job-level env'
 
 $payloadSecrets = @(
     'FACTORY_REVIEW_DATA_PART_1_B64',
@@ -147,20 +153,35 @@ $payloadSecrets = @(
     'FACTORY_REVIEW_DATA_SHA256'
 )
 foreach ($payloadSecret in $payloadSecrets) {
-    Assert-Match $workflowCodeText "(?im)^\s*$payloadSecret\s*:\s*\$\{\{\s*secrets\.$payloadSecret\s*\}\}\s*$" "restore workflow must map $payloadSecret from its repository secret"
+    Assert-Match $workflowCodeText "(?im)^\s{10}$payloadSecret\s*:\s*\$\{\{\s*secrets\.$payloadSecret\s*\}\}\s*$" "restore workflow must map $payloadSecret from its repository secret in the SSH step env"
     Assert-Match $workflowCodeText "(?im)^\s*envs\s*:\s*[^\r\n]*\b$payloadSecret\b" "restore workflow must pass $payloadSecret to SSH through envs"
 }
+Assert-Match $workflowCodeText '(?im)^\s{10}CLOUD_HOST_FINGERPRINT\s*:\s*\$\{\{\s*secrets\.CLOUD_HOST_FINGERPRINT\s*\}\}\s*$' 'restore workflow must source the SSH fingerprint from a non-empty repository secret'
+Assert-Match $workflowCodeText '(?im)^\s{10}EXPECTED_COMMIT\s*:\s*\$\{\{\s*github\.sha\s*\}\}\s*$' 'restore workflow must pass the dispatched commit identity'
+Assert-Match $workflowCodeText '(?im)^\s*fingerprint\s*:\s*\$\{\{\s*env\.CLOUD_HOST_FINGERPRINT\s*\}\}\s*$' 'restore workflow must use the configured SSH host fingerprint'
+Assert-Match $workflowCodeText '(?im)^\s*envs\s*:\s*[^\r\n]*\bEXPECTED_COMMIT\b' 'restore workflow must pass EXPECTED_COMMIT to SSH through envs'
 
 Assert-Match $workflowCodeText '(?im)^\s*set\s+-euo\s+pipefail\s*$' 'restore workflow must enable strict shell mode'
 Assert-Match $workflowCodeText '(?im)^\s*cd\s+/opt/rr-portal\s*$' 'restore workflow must operate in the production repository'
-Assert-Match $workflowCodeText '(?im)^\s*git\s+checkout\s+main\s*$' 'restore workflow must check out main on the server'
-Assert-Match $workflowCodeText '(?im)^\s*git\s+pull\s+--ff-only\s+origin\s+main\s*$' 'restore workflow must fast-forward server main before restoring'
-Assert-Match $workflowCodeText '(?im)^\s*git\s+ls-files\s+--error-unmatch\s+deploy/restore-factory-review-data\.sh\s*$' 'restore workflow must confirm main contains the restore script'
+Assert-Match $workflowCodeText '(?im)^\s*git\s+fetch\s+origin\s+main\s*$' 'restore workflow must fetch origin main before restoring'
+Assert-Match $workflowCodeText '(?im)^\s*test\s+"\$\(git\s+rev-parse\s+origin/main\)"\s*=\s*"\$EXPECTED_COMMIT"\s*$' 'restore workflow must require origin main to equal the dispatched commit'
+Assert-Match $workflowCodeText '(?im)^\s*test\s+-z\s+"\$\(git\s+status\s+--porcelain\)"\s*$' 'restore workflow must refuse a dirty server worktree'
+Assert-Match $workflowCodeText '(?im)^\s*git\s+switch\s+main\s*$' 'restore workflow must switch to main without replacing local state'
+Assert-Match $workflowCodeText '(?im)^\s*git\s+merge-base\s+--is-ancestor\s+HEAD\s+"\$EXPECTED_COMMIT"\s*$' 'restore workflow must refuse a local main branch ahead of the dispatched commit'
+Assert-Match $workflowCodeText '(?im)^\s*git\s+merge\s+--ff-only\s+"\$EXPECTED_COMMIT"\s*$' 'restore workflow must only fast-forward main to the dispatched commit'
+Assert-Match $workflowCodeText '(?im)^\s*test\s+"\$\(git\s+rev-parse\s+HEAD\)"\s*=\s*"\$EXPECTED_COMMIT"\s*$' 'restore workflow must require HEAD to equal the dispatched commit'
+Assert-Match $workflowCodeText '(?im)^\s*git\s+ls-tree\s+-r\s+--name-only\s+"\$EXPECTED_COMMIT"\s+--\s+deploy/restore-factory-review-data\.sh\s*\|\s*grep\s+-Fx\s+[''\"]deploy/restore-factory-review-data\.sh[''\"]\s*$' 'restore workflow must confirm the dispatched commit tracks the restore script'
+Assert-Match $workflowCodeText '(?im)^\s*git\s+diff\s+--quiet\s+"\$EXPECTED_COMMIT"\s+--\s+deploy/restore-factory-review-data\.sh\s*$' 'restore workflow must refuse a restore script modified relative to the dispatched commit'
 Assert-Match $workflowCodeText '(?im)^\s*bash\s+deploy/restore-factory-review-data\.sh\s*$' 'restore workflow must invoke the restore script'
+Assert-True ($workflowCodeText -notmatch '(?im)^\s*git\s+pull\b') 'restore workflow must not use unsafe git pull'
+Assert-True ($workflowCodeText -notmatch '(?im)^\s*git\s+checkout\b') 'restore workflow must not use git checkout to replace local state'
+Assert-True ($workflowCodeText -notmatch '(?im)^\s*git\s+reset\b') 'restore workflow must not reset or overwrite server state'
 
 $payloadVariablePattern = '(?:\bFACTORY_REVIEW_DATA_PART_[123]_B64\b|\bFACTORY_REVIEW_DATA_SHA256\b)'
-$payloadSinkPattern = "(?im)^\s*(?:echo|printf|tee|cat|logger|systemd-cat)\b[^\r\n]*$payloadVariablePattern"
-Assert-True ($workflowCodeText -notmatch $payloadSinkPattern) 'restore workflow must not print payload variables'
+$payloadSinkPattern = "(?im)^\s*(?:echo|printf|tee|cat|env|printenv|logger|systemd-cat|curl|wget)\b[^\r\n]*$payloadVariablePattern"
+$payloadRedirectionPattern = "(?im)^\s*[^\r\n]*$payloadVariablePattern[^\r\n]*(?:>>?|<<?)[^\r\n]*$"
+Assert-True ($workflowCodeText -notmatch $payloadSinkPattern) 'restore workflow must not disclose payload variables through shell commands'
+Assert-True ($workflowCodeText -notmatch $payloadRedirectionPattern) 'restore workflow must not disclose payload variables through redirection'
 Assert-True ($workflowCodeText -notmatch '(?im)^\s*(?:export\s+)?FACTORY_REVIEW_DATA_(?:PART_[123]_B64|SHA256)\s*=') 'restore workflow must not persist payload variables through shell assignments'
 
 Assert-True (Test-Path -LiteralPath $restorePath -PathType Leaf) "restore script is missing: $restorePath"

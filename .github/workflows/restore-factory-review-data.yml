@@ -3,30 +3,46 @@ name: Restore Factory Review Data
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   restore:
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    env:
-      FACTORY_REVIEW_DATA_PART_1_B64: ${{ secrets.FACTORY_REVIEW_DATA_PART_1_B64 }}
-      FACTORY_REVIEW_DATA_PART_2_B64: ${{ secrets.FACTORY_REVIEW_DATA_PART_2_B64 }}
-      FACTORY_REVIEW_DATA_PART_3_B64: ${{ secrets.FACTORY_REVIEW_DATA_PART_3_B64 }}
-      FACTORY_REVIEW_DATA_SHA256: ${{ secrets.FACTORY_REVIEW_DATA_SHA256 }}
     steps:
+      - name: Checkout selected ref
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.ref }}
+          persist-credentials: false
+
       - name: Restore production data via SSH
+        env:
+          FACTORY_REVIEW_DATA_PART_1_B64: ${{ secrets.FACTORY_REVIEW_DATA_PART_1_B64 }}
+          FACTORY_REVIEW_DATA_PART_2_B64: ${{ secrets.FACTORY_REVIEW_DATA_PART_2_B64 }}
+          FACTORY_REVIEW_DATA_PART_3_B64: ${{ secrets.FACTORY_REVIEW_DATA_PART_3_B64 }}
+          FACTORY_REVIEW_DATA_SHA256: ${{ secrets.FACTORY_REVIEW_DATA_SHA256 }}
+          CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+          EXPECTED_COMMIT: ${{ github.sha }}
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         with:
           host: ${{ secrets.CLOUD_HOST }}
           username: ${{ secrets.CLOUD_USER }}
           key: ${{ secrets.CLOUD_SSH_KEY }}
+          fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
           command_timeout: 20m
-          envs: FACTORY_REVIEW_DATA_PART_1_B64,FACTORY_REVIEW_DATA_PART_2_B64,FACTORY_REVIEW_DATA_PART_3_B64,FACTORY_REVIEW_DATA_SHA256
+          envs: FACTORY_REVIEW_DATA_PART_1_B64,FACTORY_REVIEW_DATA_PART_2_B64,FACTORY_REVIEW_DATA_PART_3_B64,FACTORY_REVIEW_DATA_SHA256,EXPECTED_COMMIT
           script: |
             set -euo pipefail
             cd /opt/rr-portal
             git fetch origin main
-            git checkout main
-            git pull --ff-only origin main
-            git ls-files --error-unmatch deploy/restore-factory-review-data.sh
-            test -f deploy/restore-factory-review-data.sh
+            test "$(git rev-parse origin/main)" = "$EXPECTED_COMMIT"
+            test -z "$(git status --porcelain)"
+            git switch main
+            git merge-base --is-ancestor HEAD "$EXPECTED_COMMIT"
+            git merge --ff-only "$EXPECTED_COMMIT"
+            test "$(git rev-parse HEAD)" = "$EXPECTED_COMMIT"
+            git ls-tree -r --name-only "$EXPECTED_COMMIT" -- deploy/restore-factory-review-data.sh | grep -Fx 'deploy/restore-factory-review-data.sh'
+            git diff --quiet "$EXPECTED_COMMIT" -- deploy/restore-factory-review-data.sh
             bash deploy/restore-factory-review-data.sh

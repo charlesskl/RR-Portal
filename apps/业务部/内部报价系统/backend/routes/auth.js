@@ -1,7 +1,7 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const db = require('../db');
-const { loadUserAndPerms } = require('../middleware/auth');
+const { loadUserAndPerms, requireAuth } = require('../middleware/auth');
 
 const router = express.Router();
 
@@ -33,16 +33,20 @@ router.post('/login', (req, res) => {
   // 成功
   db.prepare('UPDATE users SET login_fails = 0, last_login = datetime(\'now\') WHERE id = ?').run(u.id);
   req.session.user_id = u.id;
+  req.session.factory_code = u.factory_code || 'qingxi';
 
   db.prepare(`INSERT INTO audit_log (dept, actor, action, detail) VALUES (?, ?, 'login', ?)`)
     .run(u.dept, u.username, u.role);
 
-  const me = loadUserAndPerms(u.id);
+  const me = loadUserAndPerms(u.id, req.session.factory_code);
   const deptRow = db.prepare('SELECT name_cn FROM departments WHERE code = ?').get(u.dept);
   res.json({
     id: me.id, username: me.username, display_name: me.display_name,
     dept: me.dept, dept_name: deptRow ? deptRow.name_cn : me.dept,
     role: me.role, perms: me.perms,
+    factory_code: me.factory_code, active_factory_code: me.active_factory_code,
+    active_factory_name: me.active_factory_name, factories: me.factories,
+    can_switch_factory: me.can_switch_factory,
   });
 });
 
@@ -54,7 +58,7 @@ router.post('/logout', (req, res) => {
 router.get('/me', (req, res) => {
   const s = req.session;
   if (!s || !s.user_id) return res.status(401).json({ error: '未登录' });
-  const me = loadUserAndPerms(s.user_id);
+  const me = loadUserAndPerms(s.user_id, s.factory_code);
   if (!me) { req.session = null; return res.status(401).json({ error: '账号失效' }); }
   if (me.locked_until && new Date(me.locked_until) > new Date()) {
     req.session = null;
@@ -65,7 +69,20 @@ router.get('/me', (req, res) => {
     id: me.id, username: me.username, display_name: me.display_name,
     dept: me.dept, dept_name: deptRow ? deptRow.name_cn : me.dept,
     role: me.role, perms: me.perms,
+    factory_code: me.factory_code, active_factory_code: me.active_factory_code,
+    active_factory_name: me.active_factory_name, factories: me.factories,
+    can_switch_factory: me.can_switch_factory,
   });
+});
+
+// POST /api/auth/factory { factory_code } — 管理员切换当前活动厂区
+router.post('/factory', requireAuth, (req, res) => {
+  if (!req.user.can_switch_factory) return res.status(403).json({ error: '当前账号不能切换厂区' });
+  const factoryCode = String((req.body && req.body.factory_code) || '').trim();
+  const factory = db.prepare('SELECT code, name_cn FROM factories WHERE code = ? AND active = 1').get(factoryCode);
+  if (!factory) return res.status(400).json({ error: '厂区不存在' });
+  req.session.factory_code = factory.code;
+  res.json({ ok: true, factory_code: factory.code, factory_name: factory.name_cn });
 });
 
 // POST /api/auth/change-password  { current, new }

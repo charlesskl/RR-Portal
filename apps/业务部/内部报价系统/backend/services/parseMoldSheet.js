@@ -14,6 +14,7 @@ const XLSX = require('xlsx');
 const FIELD_KEYWORDS = {
   mold_no:        ['模号', '模具编号', '客人模具编号', '编号', 'MOLDNO'],
   part_name:      ['配件名称', 'PARTNAME', 'PART NAME'],
+  part_name_cn:   ['中文名称', 'CHINESENAME', 'CHINESE NAME'],
   name:           ['产品名称', '零件名称', '中文名', 'CHINESENAME', '加工内容', '修改内容', '模具名称', '名称', 'PARTNAME', 'DESCRIPTION'],
   // 模具材料(内呵钢材) / 模具尺寸(模胚型号) 优先映射（避免被 "材质/材料" 短词抢占）
   mold_material:  ['模具材料', '钢材材质', '内呵材质', '内呵', '钢号', '钢材', 'STEELMATERIAL', 'TOOLINSERT', 'INSERT'],
@@ -25,7 +26,7 @@ const FIELD_KEYWORDS = {
   sets:           ['套数', 'UP', '数量/件', '数量'],
   product_size:   ['产品尺寸'],
   machine:        ['机型(TON)', 'INJECTIONMACHINETYPE', '机型'],
-  weight:         ['净重', '克重', '零件重量', '零件重', 'PARTWEIGHT'],
+  weight:         ['净重', '料重', '克重', '零件重量', '零件重', 'PARTWEIGHT'],
   cycle:          ['周期', 'CYCLETIME', 'CYCLE'],   // 注塑生产周期(秒)
   target:         ['模具预计日啤数', '目标数', 'CYCLES/DAY', 'CYCLESDAY'],
   structure:      ['滑块', '斜顶', '模具结构', '加工内容', 'SLIDE', '行位'],
@@ -184,11 +185,12 @@ function tryParseSheet(wb, sheetName) {
     bodyRows.push({ r, ri: i });
     // 有模号列时：既无模号又无名称的行不参与字段提取，但仍保留在 bodyRows，
     // 让同一模号下面的明细行图片可以按行范围归属到上一副模具。
-    if (cols.mold_no >= 0 && !cell(r, 'mold_no') && !cell(r, 'name') && !cell(r, 'part_name')) continue;
+    if (cols.mold_no >= 0 && !cell(r, 'mold_no') && !cell(r, 'name') && !cell(r, 'part_name') && !cell(r, 'part_name_cn')) continue;
     dataRows.push({ r, ri: i });  // ri = 0-based 原始行号，供图片按行归属
   }
 
-  const hasPartDetailCols = cols.part_name >= 0 && cols.name >= 0 && cols.part_name !== cols.name;
+  const hasPartDetailCols = cols.part_name >= 0
+    && (cols.part_name_cn >= 0 || (cols.name >= 0 && cols.part_name !== cols.name));
   if (hasPartDetailCols) {
     const detailMolds = buildPartDetailMolds(dataRows, cell);
     if (detailMolds.length) {
@@ -310,7 +312,7 @@ function tryParseSheet(wb, sheetName) {
 }
 
 function buildPartDetailMolds(dataRows, cell) {
-  const molds = [];
+  const groups = new Map();
   const state = {};
   const keep = (k, v) => {
     const s = String(v ?? '').trim();
@@ -321,13 +323,16 @@ function buildPartDetailMolds(dataRows, cell) {
   for (const { r, ri } of dataRows) {
     const moldNo = keep('mold_no', cell(r, 'mold_no'));
     const groupName = keep('group_name', cell(r, 'name'));
-    const partName = cell(r, 'part_name') || groupName || moldNo;
+    const partNameEn = cell(r, 'part_name');
+    const partNameCn = cell(r, 'part_name_cn');
+    const partName = partNameEn && partNameCn && nu(partNameEn) !== nu(partNameCn)
+      ? `${partNameEn}（${partNameCn}）`
+      : (partNameEn || partNameCn || groupName || moldNo);
     if (!partName) continue;
 
     const material = keep('material', cell(r, 'material'));
     const color = keep('color', cell(r, 'color'));
-    const cavity = cell(r, 'cavity') || state.cavity || '';
-    if (cavity) state.cavity = cavity;
+    const cavity = cell(r, 'cavity');
     const setsCell = parseNumber(cell(r, 'sets'));
     if (setsCell != null) state.sets = setsCell;
     const cycleCell = parseNumber(cell(r, 'cycle'));
@@ -337,40 +342,106 @@ function buildPartDetailMolds(dataRows, cell) {
 
     const machine = keep('machine', cell(r, 'machine'));
     const moldMaterial = keep('mold_material', cell(r, 'mold_material'));
+    const moldSize = keep('mold_size', cell(r, 'mold_size'));
     const moldType = keep('mold_type', cell(r, 'mold_type'));
     const structure = formatStructure(cell(r, 'structure'));
     const note = cell(r, 'note');
     const weight = parseNumber(cell(r, 'weight'));
+    const usage = parseNumber(cell(r, 'usage')) ?? 1;
     const price = parseNumber(cell(r, 'price_rmb'));
 
-    molds.push({
-      mold_no: moldNo,
+    // Empty mold numbers cannot be safely merged. Numbered molds are grouped
+    // even when their source rows are separated by merged/blank Excel cells.
+    const key = moldNo ? `mold:${moldNo}` : `row:${ri}`;
+    if (!groups.has(key)) {
+      groups.set(key, {
+        mold_no: moldNo,
+        names: [],
+        materials: [],
+        colors: [],
+        cavities: [],
+        structures: [],
+        notes: [],
+        sets: state.sets ?? 1,
+        weight_g: 0,
+        has_weight: false,
+        cycle_sec: state.cycle ?? null,
+        price_rmb: null,
+        mold_type: moldType,
+        mold_material: moldMaterial,
+        mold_size: moldSize,
+        machine,
+        target: state.target ?? null,
+        parent_name: groupName,
+        parts: [],
+        rowStart: ri,
+        rowEnd: ri,
+      });
+    }
+
+    const g = groups.get(key);
+    g.parts.push({
       name: partName,
-      mold_type: moldType,
-      structure,
+      name_en: partNameEn,
+      name_cn: partNameCn,
       material,
       color,
       cavity,
-      sets: state.sets ?? 1,
-      weight_g: weight,
-      cycle_sec: state.cycle ?? null,
-      price_rmb: price,
-      images: [],
-      detail: {
-        parent_name: groupName,
-        mold_material: moldMaterial,
-        machine,
-        machine_model: machineTonToModel(machine),
-        target: state.target ?? null,
-      },
-      machine,
-      machine_model: machineTonToModel(machine),
-      target: state.target ?? null,
+      weight_g: weight != null ? +(weight * usage).toFixed(4) : null,
+      structure,
       note,
-      _rows: [ri, ri],
+      images: [],
+      _row: ri,
     });
+    if (partName) g.names.push(partName);
+    if (material) g.materials.push(material);
+    if (color) g.colors.push(color);
+    if (cavity) g.cavities.push(cavity);
+    if (structure) g.structures.push(structure);
+    if (note) g.notes.push(note);
+    if (weight != null) {
+      g.weight_g += weight * usage;
+      g.has_weight = true;
+    }
+    if (price != null && g.price_rmb == null) g.price_rmb = price;
+    g.rowEnd = ri;
   }
-  return molds;
+
+  return [...groups.values()].map(g => {
+    const cavityTotal = g.cavities.reduce((total, value) => {
+      const nums = String(value).match(/[\d.]+/g);
+      return nums ? total + nums.map(Number).reduce((a, b) => a * b, 1) : total;
+    }, 0);
+    const machineModel = machineTonToModel(g.machine);
+    return {
+      mold_no: g.mold_no,
+      name: [...new Set(g.names)].join('/'),
+      mold_type: g.mold_type,
+      structure: [...new Set(g.structures)].join(' / '),
+      material: [...new Set(g.materials)].join('/'),
+      color: [...new Set(g.colors)].join('/'),
+      cavity: cavityTotal > 0 ? String(cavityTotal) : (g.cavities[0] || ''),
+      sets: g.sets,
+      weight_g: g.has_weight ? +g.weight_g.toFixed(4) : null,
+      cycle_sec: g.cycle_sec,
+      price_rmb: g.price_rmb,
+      images: [],
+      parts: g.parts,
+      detail: {
+        parent_name: g.parent_name,
+        mold_material: g.mold_material,
+        mold_size: g.mold_size,
+        machine: g.machine,
+        machine_model: machineModel,
+        target: g.target,
+      },
+      machine: g.machine,
+      machine_model: machineModel,
+      target: g.target,
+      note: [...new Set(g.notes)].join('；'),
+      _rows: [g.rowStart, g.rowEnd],
+    };
+  });
 }
 
 module.exports = { parseWorkbook };

@@ -1,6 +1,7 @@
 const express = require('express');
 const db = require('../db');
 const { requireAuth, quoteAccess } = require('../middleware/auth');
+const { expandEngineeringMolds } = require('../services/engineeringMolds');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -15,11 +16,12 @@ router.get('/', (req, res) => {
   let rows;
   if (isAdmin) {
     rows = db.prepare(`
-      SELECT q.*,
+      SELECT q.*, f.name_cn AS factory_name,
         (SELECT COUNT(*) FROM quote_sections s WHERE s.quote_id=q.id AND s.status='approved') AS approved_count
-      FROM quotes q
+      FROM quotes q JOIN factories f ON f.code = q.factory_code
+      WHERE q.factory_code = ?
       ORDER BY q.id DESC
-    `).all();
+    `).all(req.user.active_factory_code);
   } else {
     const customers = db.prepare('SELECT customer FROM user_customers WHERE user_id = ?').all(req.user.id).map(r => r.customer);
     if (customers.length === 0) {
@@ -27,12 +29,12 @@ router.get('/', (req, res) => {
     }
     const placeholders = customers.map(() => '?').join(',');
     rows = db.prepare(`
-      SELECT q.*,
+      SELECT q.*, f.name_cn AS factory_name,
         (SELECT COUNT(*) FROM quote_sections s WHERE s.quote_id=q.id AND s.status='approved') AS approved_count
-      FROM quotes q
-      WHERE q.customer IN (${placeholders})
+      FROM quotes q JOIN factories f ON f.code = q.factory_code
+      WHERE q.factory_code = ? AND q.customer IN (${placeholders})
       ORDER BY q.id DESC
-    `).all(...customers);
+    `).all(req.user.active_factory_code, ...customers);
   }
   res.json(rows.map(r => ({ ...r, total_depts: totalDepts })));
 });
@@ -45,9 +47,9 @@ router.post('/', (req, res) => {
 
   const tx = db.transaction(() => {
     const info = db.prepare(`
-      INSERT INTO quotes (quote_no, product_name, customer, qty, version, created_by_dept, created_by_name)
-      VALUES (?, ?, ?, ?, ?, 'sales', ?)
-    `).run(quote_no, product_name, customer || null, qty || null, version || null, req.user.name);
+      INSERT INTO quotes (quote_no, product_name, customer, qty, version, created_by_dept, created_by_name, factory_code)
+      VALUES (?, ?, ?, ?, ?, 'sales', ?, ?)
+    `).run(quote_no, product_name, customer || null, qty || null, version || null, req.user.name, req.user.active_factory_code);
     const id = info.lastInsertRowid;
     const ins = db.prepare(`INSERT INTO quote_sections (quote_id, dept) VALUES (?, ?)`);
     for (const d of DEPT_CODES) ins.run(id, d);
@@ -61,7 +63,7 @@ router.post('/', (req, res) => {
     res.json({ id });
   } catch (e) {
     if (String(e.message).includes('UNIQUE')) {
-      const _exist = db.prepare('SELECT customer FROM quotes WHERE quote_no = ?').get(quote_no);
+      const _exist = db.prepare('SELECT customer FROM quotes WHERE quote_no = ? AND factory_code = ?').get(quote_no, req.user.active_factory_code);
       const _cust = _exist && _exist.customer ? `客户「${_exist.customer}」` : '一张无客户的单';
       return res.status(409).json({ error: `货号「${quote_no}」已被占用（在${_cust}名下），请换一个货号` });
     }
@@ -75,13 +77,15 @@ router.post('/:id/clone', (req, res) => {
   const srcId = Number(req.params.id);
   const { quote_no, product_name, customer, qty, version } = req.body || {};
   if (!quote_no) return res.status(400).json({ error: '缺少 quote_no' });
+  const acc = quoteAccess(req.user, srcId);
+  if (acc.status !== 200) return res.status(acc.status).json({ error: acc.status === 404 ? '源报价单不存在' : '无权复制其他厂区的报价单' });
   const src = db.prepare('SELECT * FROM quotes WHERE id = ?').get(srcId);
   if (!src) return res.status(404).json({ error: '源报价单不存在' });
 
   const tx = db.transaction(() => {
     const info = db.prepare(`
-      INSERT INTO quotes (quote_no, product_name, customer, qty, version, created_by_dept, created_by_name)
-      VALUES (?, ?, ?, ?, ?, 'sales', ?)
+      INSERT INTO quotes (quote_no, product_name, customer, qty, version, created_by_dept, created_by_name, factory_code)
+      VALUES (?, ?, ?, ?, ?, 'sales', ?, ?)
     `).run(
       quote_no,
       product_name || src.product_name,
@@ -89,6 +93,7 @@ router.post('/:id/clone', (req, res) => {
       qty != null ? qty : src.qty,
       version != null ? version : src.version,
       req.user.name,
+      req.user.active_factory_code,
     );
     const newId = info.lastInsertRowid;
     // 复制 7 个 section 的 payload_json，状态 empty
@@ -105,7 +110,7 @@ router.post('/:id/clone', (req, res) => {
     res.json({ id });
   } catch (e) {
     if (String(e.message).includes('UNIQUE')) {
-      const _exist = db.prepare('SELECT customer FROM quotes WHERE quote_no = ?').get(quote_no);
+      const _exist = db.prepare('SELECT customer FROM quotes WHERE quote_no = ? AND factory_code = ?').get(quote_no, req.user.active_factory_code);
       const _cust = _exist && _exist.customer ? `客户「${_exist.customer}」` : '一张无客户的单';
       return res.status(409).json({ error: `货号「${quote_no}」已被占用（在${_cust}名下），请换一个货号` });
     }
@@ -155,7 +160,7 @@ router.put('/:id/header', (req, res) => {
 // GET /api/quotes/:id  报价单详情 + 所有 section（按可见性过滤）
 router.get('/:id', (req, res) => {
   const id = Number(req.params.id);
-  const quote = db.prepare('SELECT * FROM quotes WHERE id = ?').get(id);
+  const quote = db.prepare('SELECT q.*, f.name_cn AS factory_name FROM quotes q JOIN factories f ON f.code = q.factory_code WHERE q.id = ?').get(id);
   if (!quote) return res.status(404).json({ error: '不存在' });
   // 客户范围检查（admin 跳过；无客户单仅 admin）
   const acc = quoteAccess(req.user, id);
@@ -201,17 +206,7 @@ router.get('/:id', (req, res) => {
   if (engSection && engSection.payload_json) {
     try {
       const p = JSON.parse(engSection.payload_json);
-      engineering_molds = (p.molds || []).map(m => ({
-        mold_no: m.mold_no || '', name: m.name || '', cavity: m.cavity || '',
-        sets: m.sets ?? 1, material: m.material || '', color: m.color || '',
-        material_grade: m.material_grade || '', machine: m.machine || '',
-        machine_model: m.machine_model || (m.detail && m.detail.machine_model) || '',
-        target: m.target ?? (m.detail && m.detail.target) ?? null,
-        material_unit_price: m.material_unit_price ?? null,
-        shot_price: m.shot_price ?? null,
-        weight_g: m.weight_g ?? null, cycle_sec: m.cycle_sec ?? null,
-        note: m.note || '',
-      }));
+      engineering_molds = expandEngineeringMolds(p.molds);
     } catch {}
   }
 

@@ -55,6 +55,8 @@ test('CSV export neutralizes spreadsheet formulas in text fields', async t => {
     supplier: '=HYPERLINK("https://example.invalid","click")',
     productNo: '+1+1',
     productName: 'formula test',
+    deliveryNo: 'DN-2026-001',
+    orderNo: 'PO-2026-001',
     result: 'PASS',
   }];
   const saveResponse = await fetch(baseUrl + '/api/records', {
@@ -69,5 +71,13 @@ test('CSV export neutralizes spreadsheet formulas in text fields', async t => {
   const csv = await csvResponse.text();
   assert.match(csv, /"'=HYPERLINK\(""https:\/\/example\.invalid"",""click""\)"/);
   assert.match(csv, /"'\+1\+1"/);
+  assert.match(csv, /"PO号"/);
+  assert.match(csv, /"PO-2026-001"/);
   assert.doesNotMatch(csv, /(?:^|,)"[=+\-@]/m);
+
+  const excelResponse = await fetch(baseUrl + '/api/export/factory-excel.xls');
+  assert.equal(excelResponse.status, 200);
+  const excel = await excelResponse.text();
+  assert.match(excel, /<th class="head">PO号<\/th>/);
+  assert.match(excel, /<td>PO-2026-001<\/td>/);
 });

@@ -10,13 +10,23 @@ function loadUserAndPerms(userId, requestedFactory) {
     perms[r.menu] = { can_view: r.can_view, can_edit: r.can_edit, can_review: r.can_review, can_admin: r.can_admin };
   }
   const defaultFactory = u.factory_code || 'qingxi';
-  const canSwitchFactory = u.role === 'admin';
-  const requestedExists = requestedFactory && db.prepare('SELECT 1 FROM factories WHERE code = ? AND active = 1').get(requestedFactory);
-  const activeFactory = canSwitchFactory && requestedExists ? requestedFactory : defaultFactory;
-  const factory = db.prepare('SELECT name_cn FROM factories WHERE code = ?').get(activeFactory);
-  const factories = canSwitchFactory
+  let factories = u.role === 'admin'
     ? db.prepare('SELECT code, name_cn FROM factories WHERE active = 1 ORDER BY sort_order').all()
-    : db.prepare('SELECT code, name_cn FROM factories WHERE code = ? AND active = 1').all(defaultFactory);
+    : db.prepare(`
+        SELECT f.code, f.name_cn
+        FROM user_factories uf JOIN factories f ON f.code = uf.factory_code
+        WHERE uf.user_id = ? AND f.active = 1
+        ORDER BY f.sort_order
+      `).all(userId);
+  if (!factories.length) {
+    factories = db.prepare('SELECT code, name_cn FROM factories WHERE code = ? AND active = 1').all(defaultFactory);
+  }
+  const allowedFactories = new Set(factories.map(f => f.code));
+  const activeFactory = requestedFactory && allowedFactories.has(requestedFactory)
+    ? requestedFactory
+    : (allowedFactories.has(defaultFactory) ? defaultFactory : factories[0].code);
+  const canSwitchFactory = factories.length > 1;
+  const factory = db.prepare('SELECT name_cn FROM factories WHERE code = ?').get(activeFactory);
   return {
     id: u.id, username: u.username, display_name: u.display_name,
     dept: u.dept, role: u.role, factory_code: defaultFactory,

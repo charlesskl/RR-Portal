@@ -79,7 +79,7 @@ router.get('/me', (req, res) => {
 router.post('/factory', requireAuth, (req, res) => {
   if (!req.user.can_switch_factory) return res.status(403).json({ error: '当前账号不能切换厂区' });
   const factoryCode = String((req.body && req.body.factory_code) || '').trim();
-  const factory = db.prepare('SELECT code, name_cn FROM factories WHERE code = ? AND active = 1').get(factoryCode);
+  const factory = (req.user.factories || []).find(f => f.code === factoryCode);
   if (!factory) return res.status(400).json({ error: '厂区不存在' });
   req.session.factory_code = factory.code;
   res.json({ ok: true, factory_code: factory.code, factory_name: factory.name_cn });

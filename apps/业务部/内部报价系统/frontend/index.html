@@ -4,14 +4,14 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>公司内部报价明细系统</title>
-  <link rel="stylesheet" href="./styles.css" />
+  <link rel="stylesheet" href="./styles.css?v=20260717-topbar-factory" />
 </head>
 <body>
   <div class="topbar">
     <div class="brand">📋 内部报价明细系统 <small>多部门协同 · 主管审核 · 受控导出</small></div>
     <div id="user-chip" class="hidden">
-      <span id="factory-chip" class="badge b-approved"></span>
-      <select id="factory-switch" class="hidden" aria-label="切换厂区"></select>
+      <span id="factory-chip" class="factory-single-chip"></span>
+      <div id="factory-switch" class="factory-switcher hidden" role="group" aria-label="切换厂区"></div>
       <span id="who-chip"></span>
       <a href="#" id="btn-change-pwd">修改密码</a>
       <a href="./admin.html" id="btn-admin" class="hidden">⚙️ 管理后台</a>
@@ -92,6 +92,6 @@
       };
     })();
   </script>
-  <script src="./main.js?v=20260715-factory-scope"></script>
+  <script src="./main.js?v=20260717-topbar-factory"></script>
 </body>
 </html>

@@ -124,7 +124,7 @@ def _date_key(value):
 def _should_skip_sheet(name):
     n = str(name or '').strip()
     n_upper = n.upper()
-    if 'MA' in n_upper:
+    if re.match(r'^MA(?:$|[\s_-]|排期)', n_upper):
         return True
     if re.match(r'^Sheet\d*$', n, re.I):
         return True
@@ -224,7 +224,7 @@ def _scan_workbook_rows(filepath, source, master=False):
 
     with warnings.catch_warnings():
         warnings.simplefilter('ignore', UserWarning)
-        wb = openpyxl.load_workbook(filepath, read_only=True, data_only=True, keep_links=False)
+        wb = openpyxl.load_workbook(filepath, read_only=True, data_only=False, keep_links=False)
     try:
         sheet_names = wb.sheetnames
         if master:
@@ -266,7 +266,7 @@ def _scan_workbook_rows(filepath, source, master=False):
                         idx = cols[key] - 1
                         return row[idx].value if idx < len(row) else None
 
-                    rec = _build_record(source, filepath, sheet_name, row_idx, {
+                    row_values = {
                         'po': val('po'),
                         'cpo': val('cpo'),
                         'sku_line': val('sku_line'),
@@ -274,7 +274,26 @@ def _scan_workbook_rows(filepath, source, master=False):
                         'cn_name': val('cn_name'),
                         'qty': val('qty'),
                         'ship_date': val('ship_date'),
-                    }, cols)
+                    }
+                    formula_fields = [
+                        key for key, value in row_values.items()
+                        if isinstance(value, str) and value.startswith('=')
+                    ]
+                    po_value = row_values.get('po')
+                    item_value = row_values.get('item')
+                    has_order_identity = (
+                        ('po' in formula_fields or 'item' in formula_fields)
+                        or bool(_normalize_po(po_value) if 'po' not in formula_fields else '')
+                        or bool(_normalize_code(item_value) if 'item' not in formula_fields else '')
+                    )
+                    if formula_fields and has_order_identity:
+                        skipped.append({
+                            'file': os.path.basename(filepath),
+                            'sheet': sheet_name,
+                            'reason': f'第{row_idx}行关键字段包含公式（{", ".join(formula_fields)}），无法严格核对',
+                        })
+                        continue
+                    rec = _build_record(source, filepath, sheet_name, row_idx, row_values, cols)
                     if rec:
                         records.append(rec)
             except Exception as e:
@@ -545,9 +564,11 @@ def reconcile_schedules(master_path, schedule_dir=None, export_dir=None):
     }
     totals['count_diff_groups'] = sum(1 for x in summary_rows if x.get('diff') != 0)
     totals['count_match'] = totals['diff'] == 0 and totals['count_diff_groups'] == 0
+    totals['scan_complete'] = not failed_files and not skipped and not master_skipped
     totals['strict_match'] = (
         totals['missing'] == 0 and totals['extra'] == 0
         and totals['mismatch'] == 0 and totals['diff'] == 0
+        and totals['scan_complete']
     )
     totals['ok'] = totals['strict_match']
 
@@ -585,6 +606,8 @@ def _write_rows(ws, headers, rows):
     for ri, row in enumerate(rows, 2):
         for ci, key in enumerate(headers, 1):
             val = row.get(key, '')
+            if isinstance(val, str) and val.startswith('='):
+                val = "'" + val
             c = ws.cell(row=ri, column=ci, value=val)
             c.border = thin
             c.alignment = Alignment(vertical='center', wrap_text=True)
@@ -666,7 +689,7 @@ def generate_reconcile_report(result, output_dir):
         note_rows.append({'项目': f"跳过sheet: {s.get('file', '')}/{s.get('sheet', '')}", '内容': s.get('reason', '')})
     _write_rows(ws, ['项目', '内容'], note_rows)
 
-    ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+    ts = datetime.now().strftime('%Y%m%d_%H%M%S_%f')
     fname = f'{EXPORT_PREFIX}_{ts}.xlsx'
     out_path = os.path.join(output_dir, fname)
     wb.save(out_path)

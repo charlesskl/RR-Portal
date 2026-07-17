@@ -3,7 +3,8 @@
 功能：解析PO Excel + 与总排期匹配 → 输出修改单明细 + 生成新单Excel
 不依赖Z盘路径/WPS COM，纯Linux可跑
 """
-import os, sys, json, logging, re, shutil, zipfile, uuid
+import os, sys, json, logging, re, shutil, struct, zipfile, uuid, threading
+from contextlib import contextmanager
 from datetime import datetime
 from collections import defaultdict
 from flask import Flask, render_template, request, jsonify, send_file
@@ -32,6 +33,149 @@ logging.basicConfig(filename=LOG_FILE, level=logging.INFO,
 
 # 上传的总排期副本路径（持久化到磁盘，多 worker 共享）
 _MASTER_STATE_FILE = os.path.join(APP_DIR, 'data', 'master_state.json')
+MAX_XLSX_ENTRIES = 20000
+MAX_XLSX_COMPRESSED_BYTES = 64 * 1024 * 1024
+MAX_XLSX_UNCOMPRESSED_BYTES = 128 * 1024 * 1024
+MAX_XLSX_COMPRESSION_RATIO = 500
+MAX_OUTER_ZIP_FILES = 200
+MAX_OUTER_ZIP_COMPRESSED_BYTES = 128 * 1024 * 1024
+MAX_OUTER_ZIP_UNCOMPRESSED_BYTES = 256 * 1024 * 1024
+MAX_ZIP_CENTRAL_DIRECTORY_BYTES = 16 * 1024 * 1024
+_RECONCILE_THREAD_LOCK = threading.Lock()
+
+
+def _atomic_write_json(path, data):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp_path = f'{path}.{uuid.uuid4().hex}.tmp'
+    try:
+        with open(tmp_path, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, path)
+    finally:
+        try:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except OSError:
+            pass
+
+
+@contextmanager
+def _reconcile_guard():
+    """Serialize directory swaps and scans across Gunicorn workers on Linux."""
+    lock_path = os.path.join(APP_DIR, 'data', 'reconcile.lock')
+    os.makedirs(os.path.dirname(lock_path), exist_ok=True)
+    with _RECONCILE_THREAD_LOCK:
+        with open(lock_path, 'a+b') as lock_file:
+            try:
+                import fcntl
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+            except ImportError:
+                fcntl = None
+            try:
+                yield
+            finally:
+                if fcntl is not None:
+                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+
+def _preflight_zip(path, max_entries, max_compressed_bytes, label):
+    """Read only the ZIP footer so oversized central directories are rejected early."""
+    size = os.path.getsize(path)
+    if size > max_compressed_bytes:
+        raise ValueError(f'{label}压缩文件过大')
+    with open(path, 'rb') as f:
+        tail_start = max(0, size - (65535 + 22))
+        f.seek(tail_start)
+        tail = f.read()
+    signature = b'PK\x05\x06'
+    eocd = -1
+    search_end = len(tail)
+    while search_end > 0:
+        candidate = tail.rfind(signature, 0, search_end)
+        if candidate < 0:
+            break
+        if candidate + 22 <= len(tail):
+            comment_length = struct.unpack_from('<H', tail, candidate + 20)[0]
+            if candidate + 22 + comment_length == len(tail):
+                eocd = candidate
+                break
+        search_end = candidate
+    if eocd < 0:
+        raise ValueError(f'{label}缺少有效的 ZIP 目录')
+    disk_number, directory_disk = struct.unpack_from('<HH', tail, eocd + 4)
+    disk_entries, total_entries = struct.unpack_from('<HH', tail, eocd + 8)
+    if disk_number != 0 or directory_disk != 0 or disk_entries != total_entries:
+        raise ValueError(f'{label}不支持分卷 ZIP')
+    if total_entries == 0xFFFF:
+        raise ValueError(f'{label}内部文件数量异常')
+    if total_entries > max_entries:
+        raise ValueError(f'{label}内部文件超过 {max_entries} 个')
+    directory_size, directory_offset = struct.unpack_from('<II', tail, eocd + 12)
+    if directory_size == 0xFFFFFFFF or directory_offset == 0xFFFFFFFF:
+        raise ValueError(f'{label}不支持 ZIP64 目录')
+    if directory_size > MAX_ZIP_CENTRAL_DIRECTORY_BYTES:
+        raise ValueError(f'{label}中央目录超过 16MB')
+    eocd_offset = tail_start + eocd
+    if directory_offset + directory_size != eocd_offset:
+        raise ValueError(f'{label}中央目录边界不正确')
+
+    actual_entries = 0
+    consumed = 0
+    with open(path, 'rb') as f:
+        f.seek(directory_offset)
+        while consumed < directory_size:
+            header = f.read(46)
+            if len(header) != 46 or header[:4] != b'PK\x01\x02':
+                raise ValueError(f'{label}中央目录结构不正确')
+            name_length, extra_length, comment_length = struct.unpack_from('<HHH', header, 28)
+            variable_size = name_length + extra_length + comment_length
+            record_size = 46 + variable_size
+            if consumed + record_size > directory_size:
+                raise ValueError(f'{label}中央目录边界不正确')
+            actual_entries += 1
+            if actual_entries > max_entries:
+                raise ValueError(f'{label}内部文件超过 {max_entries} 个')
+            f.seek(variable_size, os.SEEK_CUR)
+            consumed += record_size
+    if consumed != directory_size or actual_entries != total_entries:
+        raise ValueError(f'{label}中央目录条目数不一致')
+
+
+def _validate_xlsx(path):
+    """Validate OOXML structure and bound nested ZIP expansion before openpyxl."""
+    _preflight_zip(path, MAX_XLSX_ENTRIES, MAX_XLSX_COMPRESSED_BYTES, '工作簿')
+    if not zipfile.is_zipfile(path):
+        raise ValueError('文件不是有效的 .xlsx 工作簿')
+    try:
+        with zipfile.ZipFile(path) as zf:
+            entries = [info for info in zf.infolist() if not info.is_dir()]
+            names = {info.filename.replace('\\', '/') for info in entries}
+            if '[Content_Types].xml' not in names or 'xl/workbook.xml' not in names:
+                raise ValueError('文件缺少 Excel 工作簿结构')
+            if len(entries) > MAX_XLSX_ENTRIES:
+                raise ValueError(f'工作簿内部文件超过 {MAX_XLSX_ENTRIES} 个')
+            total_size = sum(info.file_size for info in entries)
+            if total_size > MAX_XLSX_UNCOMPRESSED_BYTES:
+                raise ValueError('工作簿解压后超过 128MB')
+            for info in entries:
+                if info.file_size <= 0:
+                    continue
+                if info.compress_size <= 0 or info.file_size / info.compress_size > MAX_XLSX_COMPRESSION_RATIO:
+                    raise ValueError('工作簿压缩比异常，已拒绝处理')
+
+        import openpyxl
+        wb = openpyxl.load_workbook(path, read_only=True, data_only=False, keep_links=False)
+        try:
+            if not wb.sheetnames:
+                raise ValueError('工作簿没有可读取的工作表')
+        finally:
+            wb.close()
+    except ValueError:
+        raise
+    except Exception as e:
+        raise ValueError(f'文件不是可读取的 .xlsx 工作簿: {e}') from e
 
 
 def _get_master_path():
@@ -47,8 +191,7 @@ def _get_master_path():
 
 def _set_master_path(path):
     try:
-        with open(_MASTER_STATE_FILE, 'w', encoding='utf-8') as f:
-            json.dump({'path': path}, f, ensure_ascii=False)
+        _atomic_write_json(_MASTER_STATE_FILE, {'path': path})
     except OSError as e:
         logging.error(f'[总排期] 状态写入失败: {e}')
 
@@ -109,6 +252,24 @@ def _clear_uploaded_reconcile_files():
     _clear_reconcile_cache()
 
 
+def _activate_reconcile_staging(staging_dir):
+    final_dir = app.config['RECONCILE_FOLDER']
+    backup_dir = f'{final_dir}.backup.{uuid.uuid4().hex}'
+    os.makedirs(os.path.dirname(final_dir), exist_ok=True)
+    had_final = os.path.exists(final_dir)
+    if had_final:
+        os.replace(final_dir, backup_dir)
+    try:
+        os.replace(staging_dir, final_dir)
+    except Exception:
+        if had_final and os.path.exists(backup_dir) and not os.path.exists(final_dir):
+            os.replace(backup_dir, final_dir)
+        raise
+    if os.path.exists(backup_dir):
+        shutil.rmtree(backup_dir, ignore_errors=True)
+    _clear_reconcile_cache()
+
+
 def _list_uploaded_reconcile_files():
     directory = app.config['RECONCILE_FOLDER']
     if not os.path.isdir(directory):
@@ -126,13 +287,14 @@ def _extract_zip_schedules(storage, directory):
     tmp_path = os.path.join(directory, f'_upload_{uuid.uuid4().hex}.zip')
     storage.save(tmp_path)
     try:
+        _preflight_zip(tmp_path, MAX_OUTER_ZIP_FILES, MAX_OUTER_ZIP_COMPRESSED_BYTES, '压缩包')
         with zipfile.ZipFile(tmp_path) as zf:
             entries = [info for info in zf.infolist()
                        if not info.is_dir() and info.filename.lower().endswith('.xlsx')]
-            if len(entries) > 1000:
-                raise ValueError('压缩包内分排期文件超过 1000 个')
-            if sum(info.file_size for info in entries) > 1024 * 1024 * 1024:
-                raise ValueError('压缩包解压后超过 1GB')
+            if len(entries) > MAX_OUTER_ZIP_FILES:
+                raise ValueError(f'压缩包内分排期文件超过 {MAX_OUTER_ZIP_FILES} 个')
+            if sum(info.file_size for info in entries) > MAX_OUTER_ZIP_UNCOMPRESSED_BYTES:
+                raise ValueError('压缩包解压后超过 256MB')
             for info in entries:
                 inner_name = os.path.basename(info.filename.replace('\\', '/'))
                 if not inner_name or inner_name.startswith(('~$', '.')):
@@ -140,9 +302,11 @@ def _extract_zip_schedules(storage, directory):
                 target = _unique_upload_path(directory, inner_name)
                 with zf.open(info) as src, open(target, 'wb') as dst:
                     shutil.copyfileobj(src, dst)
-                if not zipfile.is_zipfile(target):
+                try:
+                    _validate_xlsx(target)
+                except ValueError as e:
                     os.remove(target)
-                    continue
+                    raise ValueError(f'{inner_name}: {e}') from e
                 saved.append(os.path.basename(target))
     finally:
         try:
@@ -163,9 +327,11 @@ def _save_reconcile_upload(storage, directory):
             raise ValueError('临时文件不需要上传')
         target = _unique_upload_path(directory, safe_name)
         storage.save(target)
-        if not zipfile.is_zipfile(target):
+        try:
+            _validate_xlsx(target)
+        except ValueError:
             os.remove(target)
-            raise ValueError('文件不是有效的 .xlsx 工作簿')
+            raise
         return [os.path.basename(target)]
     if ext == '.zip':
         return _extract_zip_schedules(storage, directory)
@@ -191,12 +357,31 @@ def upload_master():
     if not f or not f.filename:
         return jsonify({'error': '请选择总排期xlsx文件'}), 400
     ext = os.path.splitext(f.filename)[1].lower()
-    if ext not in ('.xlsx', '.xls'):
-        return jsonify({'error': '只支持xlsx/xls文件'}), 400
+    if ext != '.xlsx':
+        return jsonify({'error': '只支持 .xlsx 文件'}), 400
     # secure_filename 防路径穿越；为空时退回固定名
     safe_name = secure_filename(f.filename) or f'master{ext}'
     path = os.path.join(app.config['MASTER_FOLDER'], safe_name)
-    f.save(path)
+    tmp_path = f'{path}.{uuid.uuid4().hex}.tmp'
+    try:
+        f.save(tmp_path)
+        if ext == '.xlsx':
+            _validate_xlsx(tmp_path)
+        os.replace(tmp_path, path)
+    except ValueError as e:
+        try:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except OSError:
+            pass
+        return jsonify({'error': f'文件校验失败: {e}'}), 400
+    except Exception as e:
+        try:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except OSError:
+            pass
+        return jsonify({'error': f'保存失败: {e}'}), 500
     _set_master_path(path)
     logging.info(f'[总排期] 上传副本: {safe_name}')
     return jsonify({'ok': True, 'path': path, 'filename': safe_name,
@@ -228,10 +413,16 @@ def master_schedule_upload_file():
     try:
         os.makedirs(app.config['MASTER_FOLDER'], exist_ok=True)
         f.save(tmp_path)
-        if not zipfile.is_zipfile(tmp_path):
-            raise ValueError('文件不是有效的 .xlsx 工作簿')
+        _validate_xlsx(tmp_path)
         os.replace(tmp_path, save_path)
         _set_master_path(save_path)
+    except ValueError as e:
+        try:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except OSError:
+            pass
+        return jsonify({'error': f'文件校验失败: {e}'}), 400
     except Exception as e:
         try:
             if os.path.exists(tmp_path):
@@ -339,6 +530,8 @@ def get_ignore_items():
 
 @app.route('/api/ignore-items', methods=['POST'])
 def update_ignore_items():
+    if not request.is_json:
+        return jsonify({'error': '请求必须使用 application/json'}), 415
     payload = request.get_json(silent=True) or {}
     items = payload.get('items', [])
     cleaned = sorted(
@@ -352,8 +545,7 @@ def update_ignore_items():
     except Exception:
         data = {}
     data['ignore_items'] = cleaned
-    with open(p, 'w', encoding='utf-8') as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    _atomic_write_json(p, data)
     _ignore_cache['mtime'] = 0
     _ignore_cache['items'] = set()
     return jsonify({'ok': True, 'items': cleaned, 'count': len(cleaned)})
@@ -372,10 +564,32 @@ def get_dual_map():
 
 @app.route('/api/dual-map', methods=['POST'])
 def update_dual_map():
+    if not request.is_json:
+        return jsonify({'error': '请求必须使用 application/json'}), 415
     payload = request.get_json(silent=True) or {}
     items = payload.get('items', {})
     if not isinstance(items, dict):
         return jsonify({'error': '双排期映射格式不正确'}), 400
+    if len(items) > 1000:
+        return jsonify({'error': '双排期映射不能超过 1000 条'}), 400
+    allowed_modes = {'append', 'slt_insert', 'mid_insert', 's_insert', 'none'}
+    cleaned = {}
+    for raw_key, raw_value in items.items():
+        key = str(raw_key).strip()
+        if not key.isdigit() or len(key) > 20:
+            return jsonify({'error': f'货号前缀必须是纯数字: {key[:40]}'}), 400
+        if not isinstance(raw_value, dict):
+            return jsonify({'error': f'{key} 的映射格式不正确'}), 400
+        targets = raw_value.get('targets')
+        mode = str(raw_value.get('mode', '')).strip()
+        if not isinstance(targets, list) or not targets or len(targets) > 20:
+            return jsonify({'error': f'{key} 的目标系列必须为 1-20 个'}), 400
+        target_values = [str(value).strip() for value in targets]
+        if any(not value.isdigit() or len(value) > 20 for value in target_values):
+            return jsonify({'error': f'{key} 的目标系列必须是纯数字'}), 400
+        if mode not in allowed_modes:
+            return jsonify({'error': f'{key} 的插入模式不正确'}), 400
+        cleaned[key] = {'targets': target_values, 'mode': mode}
     p = os.path.join(APP_DIR, 'data', 'dual_schedule_map.json')
     try:
         with open(p, 'r', encoding='utf-8') as f:
@@ -383,12 +597,9 @@ def update_dual_map():
     except Exception:
         data = {}
     merged = {k: v for k, v in data.items() if k.startswith('_')}
-    merged.update(items)
-    with open(p, 'w', encoding='utf-8') as f:
-        json.dump(merged, f, ensure_ascii=False, indent=2)
-    import master_schedule
-    master_schedule._DUAL_MAP = master_schedule._load_dual_map()
-    return jsonify({'ok': True, 'count': len(items)})
+    merged.update(cleaned)
+    _atomic_write_json(p, merged)
+    return jsonify({'ok': True, 'count': len(cleaned)})
 
 
 def _extract_revision(filename):
@@ -568,22 +779,22 @@ def reconcile_schedule_files_upload():
             except Exception as e:
                 errors.append(f'{storage.filename}: {e}')
 
+        if errors:
+            return jsonify({
+                'error': '本批次包含无效文件，已保留原来的分排期文件',
+                'errors': errors,
+            }), 400
         if not saved:
             return jsonify({
                 'error': '没有上传到有效的分排期 .xlsx 文件，已保留原来的分排期文件',
                 'errors': errors,
             }), 400
 
-        _clear_uploaded_reconcile_files()
-        final_dir = app.config['RECONCILE_FOLDER']
-        for name in saved:
-            src = os.path.join(staging_dir, name)
-            if not _is_inside_dir(src, staging_dir) or not os.path.exists(src):
-                continue
-            target = _unique_upload_path(final_dir, name)
-            shutil.move(src, target)
-            final_files.append(os.path.basename(target))
-        _clear_reconcile_cache()
+        final_files = [name for name in saved if os.path.exists(os.path.join(staging_dir, name))]
+        if not final_files:
+            raise ValueError('暂存目录没有可用的分排期文件')
+        with _reconcile_guard():
+            _activate_reconcile_staging(staging_dir)
     except Exception as e:
         return jsonify({'error': f'分排期文件保存失败: {e}'}), 500
     finally:
@@ -603,20 +814,21 @@ def reconcile_schedule_files_upload():
 
 @app.route('/api/reconcile-schedules', methods=['POST'])
 def reconcile_schedules_api():
-    master_path = _get_master_path()
-    schedule_files = _list_uploaded_reconcile_files()
-    if not master_path or not os.path.exists(master_path):
-        return jsonify({'error': '请先上传总排期文件'}), 400
-    if not schedule_files:
-        return jsonify({
-            'error': '请先上传分排期文件，再进行总分排期核对（支持多个 .xlsx，或从金山下载的 .zip）。'
-        }), 400
     try:
-        result = reconcile_schedules(
-            master_path,
-            schedule_dir=app.config['RECONCILE_FOLDER'],
-            export_dir=app.config['EXPORT_FOLDER'],
-        )
+        with _reconcile_guard():
+            master_path = _get_master_path()
+            schedule_files = _list_uploaded_reconcile_files()
+            if not master_path or not os.path.exists(master_path):
+                return jsonify({'error': '请先上传总排期文件'}), 400
+            if not schedule_files:
+                return jsonify({
+                    'error': '请先上传分排期文件，再进行总分排期核对（支持多个 .xlsx，或从金山下载的 .zip）。'
+                }), 400
+            result = reconcile_schedules(
+                master_path,
+                schedule_dir=app.config['RECONCILE_FOLDER'],
+                export_dir=app.config['EXPORT_FOLDER'],
+            )
         result['uploaded_schedule_count'] = len(schedule_files)
         result['summary'] = result.get('summary', [])[:120]
         result['missing'] = result.get('missing', [])[:80]

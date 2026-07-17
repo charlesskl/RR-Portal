@@ -490,7 +490,7 @@ function showFiles(files) {
     document.getElementById('fileList').style.display = '';
     document.getElementById('fileCount').textContent = selectedFiles.length;
     document.getElementById('fileTags').innerHTML = selectedFiles.map(f =>
-        `<span class="file-tag">${f.name}</span>`).join('');
+        `<span class="file-tag">${_escHtml(f.name)}</span>`).join('');
 }
 function clearFiles() {
     selectedFiles = [];
@@ -519,7 +519,7 @@ async function doUpload() {
         if (data.ok) {
             let html = `<div class="alert alert-success mb-2"><i class="bi bi-check-circle me-1"></i><b>${_escHtml(data.msg || '')}</b></div>`;
             if (data.errors && data.errors.length) {
-                html += `<div class="alert alert-warning mb-2"><b>解析失败：</b><br>${data.errors.join('<br>')}</div>`;
+                html += `<div class="alert alert-warning mb-2"><b>解析失败：</b><br>${data.errors.map(_escHtml).join('<br>')}</div>`;
             }
             // 重复PO去重提示
             if (data.dedup_report && data.dedup_report.length) {
@@ -1024,7 +1024,7 @@ function renderDmList() {
                 <td class="fw-bold">${_escHtml(k)}</td>
                 <td>${_escHtml((v.targets||[]).join(', '))}</td>
                 <td><code>${_escHtml(v.mode||'')}</code></td>
-                <td><button class="btn btn-outline-danger btn-sm py-0 px-1" style="font-size:0.7rem;" onclick="removeDmItem('${_escHtml(k)}')"><i class="bi bi-x-lg"></i></button></td>
+                <td><button class="btn btn-outline-danger btn-sm py-0 px-1" style="font-size:0.7rem;" data-dm-key="${_escHtml(k)}" onclick="removeDmItem(this.dataset.dmKey)"><i class="bi bi-x-lg"></i></button></td>
             </tr>`;
         }).join('') + '</tbody></table>';
 }

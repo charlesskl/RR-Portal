@@ -11,4 +11,5 @@ data/ops.log
 data/history.json
 data/master_state.json
 data/reconcile_sub_cache.json
+data/reconcile.lock
 .env

@@ -9,6 +9,7 @@ const test = require('node:test');
 const appSource = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
 const aiOcrSource = fs.readFileSync(path.join(__dirname, 'ai-ocr.js'), 'utf8');
 const reportSource = fs.readFileSync(path.join(__dirname, 'report_export.js'), 'utf8');
+const indexSource = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
 const mobileCss = fs.readFileSync(path.join(__dirname, 'mobile.css'), 'utf8');
 
 function loadFunction(source, name, context = {}) {
@@ -180,6 +181,20 @@ test('records table shows and searches the modified date', () => {
   assert.match(appSource, /<th style="text-align:left">修改日期<\/th>/);
   assert.match(appSource, /formatModifiedDate\(r\.updatedAt\)/);
   assert.match(appSource, /r\.updatedAt,\s*formatModifiedDate\(r\.updatedAt\)/);
+});
+
+test('single entry modal can save and continue entering the next record', () => {
+  assert.match(indexSource, /id="btnSaveContinue"[^>]*onclick="saveRecord\(\{ continueEntry: true \}\)"/);
+  assert.match(indexSource, /保存并继续录入/);
+  assert.match(appSource, /function resetSingleEntryFormForNext\(\)/);
+  assert.match(appSource, /continueEntry \? '记录已添加，可继续录入下一条/);
+});
+
+test('account editor clearly exposes password reset fields', () => {
+  assert.match(appSource, /<span id="umPwdLabel">密码<\/span>/);
+  assert.match(appSource, /pwdLabel\.textContent = '新密码'/);
+  assert.match(appSource, /留空则不修改，填写则至少6位/);
+  assert.match(appSource, /保存账号/);
 });
 
 test('mobile modal controls keep a 16px font to avoid iOS focus zoom', () => {

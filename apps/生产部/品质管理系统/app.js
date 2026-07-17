@@ -336,7 +336,7 @@ function renderUsersPage() {
         <input id="umUsername" class="form-input" placeholder="字母/数字，至少2位" autocomplete="off"/>
       </div>
       <div style="margin-bottom:14px">
-        <label class="form-label">密码 <span id="umPwdHint" style="font-size:10px;color:var(--text-dim)">（留空则不修改）</span></label>
+        <label class="form-label"><span id="umPwdLabel">密码</span> <span id="umPwdHint" style="font-size:10px;color:var(--text-dim)">（留空则不修改）</span></label>
         <input id="umPassword" type="password" class="form-input" placeholder="至少6位" autocomplete="new-password"/>
       </div>
       <div style="margin-bottom:14px">
@@ -354,7 +354,7 @@ function renderUsersPage() {
       <div id="userModalErr" style="display:none;color:var(--red);font-size:12px;margin-bottom:12px"></div>
       <div style="display:flex;gap:10px;justify-content:flex-end">
         <button class="btn-secondary" onclick="_closeUserModal()">取消</button>
-        <button class="btn-primary" onclick="_saveUser()">保存</button>
+        <button class="btn-primary" onclick="_saveUser()">保存账号</button>
       </div>
     </div>
   </div>
@@ -371,6 +371,9 @@ function _openUserModal(username) {
 
   const titleEl = document.getElementById('userModalTitle');
   const hintEl  = document.getElementById('umPwdHint');
+  const pwdLabel = document.getElementById('umPwdLabel');
+  const pwdInput = document.getElementById('umPassword');
+  const pwdInput2 = document.getElementById('umPassword2');
 
   if (username) {
     /* 编辑模式 */
@@ -379,19 +382,21 @@ function _openUserModal(username) {
     if (!u) return;
     if (titleEl) titleEl.textContent = `编辑账号：${username}`;
     if (hintEl)  hintEl.style.display = '';
+    if (pwdLabel) pwdLabel.textContent = '新密码';
     document.getElementById('umUsername').value = u.username;
     document.getElementById('umUsername').disabled = true;
-    document.getElementById('umPassword').value  = '';
-    document.getElementById('umPassword2').value = '';
+    if (pwdInput)  { pwdInput.value = '';  pwdInput.placeholder = '留空则不修改，填写则至少6位'; }
+    if (pwdInput2) { pwdInput2.value = ''; pwdInput2.placeholder = '再次输入新密码'; }
     document.getElementById('umRole').value = u.role;
   } else {
     /* 新增模式 */
     if (titleEl) titleEl.textContent = '新增账号';
     if (hintEl)  hintEl.style.display = 'none';
+    if (pwdLabel) pwdLabel.textContent = '密码';
     document.getElementById('umUsername').value = '';
     document.getElementById('umUsername').disabled = false;
-    document.getElementById('umPassword').value  = '';
-    document.getElementById('umPassword2').value = '';
+    if (pwdInput)  { pwdInput.value = '';  pwdInput.placeholder = '至少6位'; }
+    if (pwdInput2) { pwdInput2.value = ''; pwdInput2.placeholder = '再次输入密码'; }
     document.getElementById('umRole').value = 'manager';
   }
   const errEl = document.getElementById('userModalErr');
@@ -2785,6 +2790,8 @@ function openAddModal() {
   /* 确认标签栏可见 */
   const tabs = document.getElementById('modalModeTabs');
   if (tabs) { tabs.style.display = 'flex'; tabs.style.visibility = 'visible'; }
+  const saveContinueBtn = document.getElementById('btnSaveContinue');
+  if (saveContinueBtn) saveContinueBtn.style.display = '';
 
   /* 切换到单条录入 */
   switchModalMode('single');
@@ -2812,6 +2819,8 @@ function openEditModal(id) {
   /* 编辑时隐藏模式切换，始终显示单条面板 */
   const tabs = document.getElementById('modalModeTabs');
   if (tabs) tabs.style.display = 'none';
+  const saveContinueBtn = document.getElementById('btnSaveContinue');
+  if (saveContinueBtn) saveContinueBtn.style.display = 'none';
   switchModalMode('single');
   setVal('f_date',        r.date || '');
   setVal('f_inspDate',    r.inspDate || '');
@@ -3952,6 +3961,25 @@ function closeModalDirect() {
   editingId = null;
 }
 
+function resetSingleEntryFormForNext() {
+  editingId = null;
+  setText('modalTitle', '新增验货记录');
+  clearForm();
+  const dateEl     = document.getElementById('f_date');
+  const inspDateEl = document.getElementById('f_inspDate');
+  if (dateEl)     dateEl.value     = todayStr();
+  if (inspDateEl) inspDateEl.value = todayStr();
+  switchModalMode('single');
+  const tabs = document.getElementById('modalModeTabs');
+  if (tabs) { tabs.style.display = 'flex'; tabs.style.visibility = 'visible'; }
+  const saveContinueBtn = document.getElementById('btnSaveContinue');
+  if (saveContinueBtn) saveContinueBtn.style.display = '';
+  renderInspectorDatalist();
+  refreshDefectDescDatalist();
+  const first = document.getElementById('f_supplier');
+  if (first) first.focus();
+}
+
 
 /* ════════════════════════════════════════
    §FINAL_RESULT  最终记录判定统一逻辑
@@ -3978,7 +4006,8 @@ function getFinalRecordResult(baseResult, defects, measurements, lotQty) {
   return baseResult || 'PASS';
 }
 
-function saveRecord() {
+function saveRecord(options = {}) {
+  const continueEntry = options && options.continueEntry === true && editingId === null;
   const date     = getVal('f_date');
   const supplier = getVal('f_supplier');
   if (!date)     { showToast('请填写来料日期', 'error'); return; }
@@ -4100,8 +4129,9 @@ function saveRecord() {
   }
 
   persist();
-  closeModalDirect();
-  showToast(editingId !== null ? '记录已更新 ✓' : '记录已添加 ✓', 'success');
+  const wasEditing = editingId !== null;
+  if (!continueEntry) closeModalDirect();
+  showToast(wasEditing ? '记录已更新 ✓' : (continueEntry ? '记录已添加，可继续录入下一条 ✓' : '记录已添加 ✓'), 'success');
   renderSupplierDatalist();   /* 新供应商/客户保存后立即进入下拉选项 */
   renderCustomerDatalist();
 
@@ -4111,6 +4141,10 @@ function saveRecord() {
   if (currentPage === 'analysis')  renderAnalysis();
   if (currentPage === 'suppliers') renderSuppliers();
   updateTopKpis();
+
+  if (continueEntry) {
+    resetSingleEntryFormForNext();
+  }
 }
 
 function deleteRecord(id) {

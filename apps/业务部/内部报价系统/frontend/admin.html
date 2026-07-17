@@ -4,13 +4,14 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>管理后台 · 账号管理</title>
-  <link rel="stylesheet" href="./styles.css?v=20260717-multi-factory-ui" />
+  <link rel="stylesheet" href="./styles.css?v=20260717-admin-factory-switcher" />
 </head>
 <body>
   <div class="topbar">
     <div class="brand">⚙️ 管理后台 <small>账号管理</small></div>
     <div id="user-chip">
-      <select id="factory-switch" aria-label="切换厂区"></select>
+      <span id="factory-chip" class="factory-single-chip hidden"></span>
+      <div id="factory-switch" class="factory-switcher hidden" role="group" aria-label="切换厂区"></div>
       <span id="who-chip"></span>
       <a href="./index.html">← 报价单</a>
       <a href="#" id="btn-logout">登出</a>
@@ -153,6 +154,6 @@
       };
     })();
   </script>
-  <script src="./admin.js?v=20260717-multi-factory-ui"></script>
+  <script src="./admin.js?v=20260717-admin-factory-switcher"></script>
 </body>
 </html>

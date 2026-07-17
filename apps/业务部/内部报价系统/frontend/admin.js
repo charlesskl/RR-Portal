@@ -29,15 +29,28 @@ async function init() {
     document.body.innerHTML = '<div style="padding:40px;text-align:center"><h2>无权访问</h2><a href="./index.html">← 返回</a></div>';
     return;
   }
-  $('who-chip').textContent = `${me.active_factory_name} · ${me.display_name || me.username} · 管理员`;
+  $('who-chip').textContent = `${me.display_name || me.username} · 管理员`;
+  const factoryChip = $('factory-chip');
+  factoryChip.textContent = me.active_factory_name || me.active_factory_code;
   const factorySwitch = $('factory-switch');
-  factorySwitch.innerHTML = (me.factories || []).map(f =>
-    `<option value="${esc(f.code)}" ${f.code === me.active_factory_code ? 'selected' : ''}>${esc(f.name_cn)}</option>`
-  ).join('');
-  factorySwitch.onchange = async () => {
-    await api('/auth/factory', { method: 'POST', body: JSON.stringify({ factory_code: factorySwitch.value }) });
-    location.reload();
-  };
+  if (me.can_switch_factory) {
+    factorySwitch.innerHTML = (me.factories || []).map(f =>
+      `<button type="button" class="top-factory-btn ${f.code === me.active_factory_code ? 'active' : ''}" data-code="${esc(f.code)}" aria-pressed="${f.code === me.active_factory_code}"><span class="factory-dot dot-${esc(f.code)}"></span>${esc(f.name_cn)}</button>`
+    ).join('');
+    factoryChip.classList.add('hidden');
+    factorySwitch.classList.remove('hidden');
+    factorySwitch.querySelectorAll('.top-factory-btn').forEach(btn => {
+      btn.onclick = async () => {
+        if (btn.classList.contains('active')) return;
+        factorySwitch.querySelectorAll('button').forEach(b => { b.disabled = true; });
+        await api('/auth/factory', { method: 'POST', body: JSON.stringify({ factory_code: btn.dataset.code }) });
+        location.reload();
+      };
+    });
+  } else {
+    factorySwitch.classList.add('hidden');
+    factoryChip.classList.remove('hidden');
+  }
   window.__me = me;
   await loadUsers();
 }

@@ -469,8 +469,9 @@ function parseMoldingContractImport(
   const colOf = (...aliases: string[]) => header.findIndex((cell) => aliases.some((alias) => cell === compactText(alias)))
   const C = {
     item_no: colOf('款号', '货号'),
+    mold_no: colOf('模具编号'),
     product: colOf('工模名称', '模具名称'),
-    qty: colOf('数量'),
+    qty: header.indexOf('啤数') >= 0 ? header.indexOf('啤数') : colOf('数量'),
     out: colOf('加工单价', '单价'),
     amount: colOf('加工金额', '金额'),
     notes: colOf('备注'),
@@ -487,7 +488,7 @@ function parseMoldingContractImport(
   let failed = 0
   const cell = (row: any[], i: number) => (i >= 0 ? row[i] : '')
   for (const row of aoa.slice(headerIdx + 1)) {
-    const itemNo = cleanText(cell(row, C.item_no))
+    const itemNo = cleanText(cell(row, C.item_no)) || cleanText(cell(row, C.mold_no))
     const product = cleanText(cell(row, C.product))
     if (!itemNo || !product || /合计|小计|备注/.test(itemNo)) continue
     if (!factoryId) { failed++; continue }

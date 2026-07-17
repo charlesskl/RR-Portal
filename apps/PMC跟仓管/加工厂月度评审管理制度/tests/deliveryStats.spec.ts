@@ -148,7 +148,7 @@ describe('parseDeliveryImport', () => {
       order_no: 'WXH2600140',
       product: '唱片模',
       process_category: '啤机',
-      quantity: 800000,
+      quantity: 100000,
       order_date: '2026-07-15',
       delivery_date: '2026-08-29',
       unit_price: 0.24,

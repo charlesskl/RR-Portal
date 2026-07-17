@@ -5,7 +5,7 @@ const { requireAuth } = require('../middleware/auth');
 const { requirePerm } = require('../middleware/perms');
 const { MENUS } = require('../permissions/menu_catalog');
 const { templateFor } = require('../permissions/role_templates');
-const { changeUserFactory } = require('../services/userFactory');
+const { changeUserFactories, changeUserRole } = require('../services/userFactory');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -24,11 +24,20 @@ function applyTemplate(userId, dept, role) {
   }
 }
 
+function factoryCodesFor(scope, role) {
+  if (scope === 'all' || role === 'admin') {
+    return db.prepare('SELECT code FROM factories WHERE active = 1 ORDER BY sort_order').all().map(r => r.code);
+  }
+  const code = String(scope || '').trim();
+  return db.prepare('SELECT code FROM factories WHERE code = ? AND active = 1').all(code).map(r => r.code);
+}
+
 // GET /api/admin/users
 router.get('/users', (req, res) => {
   const rows = db.prepare(`
     SELECT u.id, u.username, u.display_name, u.dept, d.name_cn AS dept_name,
            u.factory_code, f.name_cn AS factory_name,
+           COALESCE((SELECT GROUP_CONCAT(uf.factory_code) FROM user_factories uf WHERE uf.user_id = u.id), u.factory_code) AS factory_codes,
            u.role, u.locked_until, u.login_fails, u.last_login, u.created_at
     FROM users u
     LEFT JOIN departments d ON d.code = u.dept
@@ -50,20 +59,27 @@ router.post('/users', (req, res) => {
   if (String(password).length < 6) return res.status(400).json({ error: '密码至少 6 位' });
   const dept_ok = db.prepare('SELECT 1 FROM departments WHERE code = ?').get(dept);
   if (!dept_ok) return res.status(400).json({ error: '部门不存在' });
-  const factory_ok = db.prepare('SELECT 1 FROM factories WHERE code = ? AND active = 1').get(factory_code);
-  if (!factory_ok) return res.status(400).json({ error: '厂区不存在' });
+  const factoryCodes = factoryCodesFor(factory_code, role);
+  if (!factoryCodes.length) return res.status(400).json({ error: '厂区不存在' });
   const exists = db.prepare('SELECT 1 FROM users WHERE username = ?').get(String(username).trim());
   if (exists) return res.status(409).json({ error: '用户名已存在' });
   try {
-    const info = db.prepare(`
-      INSERT INTO users (username, password_hash, display_name, dept, role, factory_code)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `).run(String(username).trim(), bcrypt.hashSync(String(password), 8),
-           String(display_name).trim().slice(0, 32), dept, role, factory_code);
-    applyTemplate(info.lastInsertRowid, dept, role);
+    const createUser = db.transaction(() => {
+      const info = db.prepare(`
+        INSERT INTO users (username, password_hash, display_name, dept, role, factory_code)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `).run(String(username).trim(), bcrypt.hashSync(String(password), 8),
+             String(display_name).trim().slice(0, 32), dept, role, factoryCodes[0]);
+      db.prepare('DELETE FROM user_factories WHERE user_id = ?').run(info.lastInsertRowid);
+      const insertFactory = db.prepare('INSERT INTO user_factories (user_id, factory_code) VALUES (?, ?)');
+      for (const code of factoryCodes) insertFactory.run(info.lastInsertRowid, code);
+      applyTemplate(info.lastInsertRowid, dept, role);
+      return info.lastInsertRowid;
+    });
+    const userId = createUser();
     db.prepare(`INSERT INTO audit_log (dept, actor, action, detail) VALUES (?, ?, 'register_user', ?)`)
       .run(dept, req.user.username, username);
-    res.json({ id: info.lastInsertRowid });
+    res.json({ id: userId });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -73,16 +89,19 @@ router.post('/users', (req, res) => {
 router.put('/users/:id/factory', (req, res) => {
   const id = Number(req.params.id);
   const factoryCode = String((req.body && req.body.factory_code) || '').trim();
-  const factory = db.prepare('SELECT code, name_cn FROM factories WHERE code = ? AND active = 1').get(factoryCode);
-  if (!factory) return res.status(400).json({ error: '厂区不存在' });
-  const u = db.prepare('SELECT username FROM users WHERE id = ?').get(id);
+  const u = db.prepare('SELECT username, role FROM users WHERE id = ?').get(id);
   if (!u) return res.status(404).json({ error: '用户不存在' });
-  const result = changeUserFactory(db, id, factory.code);
-  if (result.changed) {
+  const factoryCodes = factoryCodesFor(factoryCode, u.role);
+  if (!factoryCodes.length) return res.status(400).json({ error: '厂区不存在' });
+  const result = changeUserFactories(db, id, factoryCodes);
+  const changed = result.changed;
+  const clearedCustomers = result.clearedCustomers;
+  const factoryName = factoryCodes.length > 1 ? '清溪 + 河源' : (factoryCodes[0] === 'heyuan' ? '河源' : '清溪');
+  if (changed) {
     db.prepare(`INSERT INTO audit_log (actor, action, detail) VALUES (?, 'change_user_factory', ?)`)
-      .run(req.user.username, `${u.username} -> ${factory.name_cn}; cleared customers=${result.clearedCustomers}`);
+      .run(req.user.username, `${u.username} -> ${factoryName}; cleared customers=${clearedCustomers}`);
   }
-  res.json({ ok: true, changed: result.changed, cleared_customers: result.clearedCustomers });
+  res.json({ ok: true, changed, cleared_customers: clearedCustomers });
 });
 
 // PUT /api/admin/users/:id/role  { role } — 改角色并按新角色模板重置权限
@@ -90,13 +109,19 @@ router.put('/users/:id/role', (req, res) => {
   const id = Number(req.params.id);
   const { role } = req.body || {};
   if (!['staff', 'supervisor', 'admin'].includes(role)) return res.status(400).json({ error: 'role 非法' });
-  const u = db.prepare('SELECT dept, username FROM users WHERE id = ?').get(id);
+  const u = db.prepare('SELECT dept, username, factory_code FROM users WHERE id = ?').get(id);
   if (!u) return res.status(404).json({ error: '用户不存在' });
-  db.prepare('UPDATE users SET role = ? WHERE id = ?').run(role, id);
-  applyTemplate(id, u.dept, role);  // 按新角色模板重置权限
-  db.prepare(`INSERT INTO audit_log (dept, actor, action, detail) VALUES (?, ?, 'change_role', ?)`)
-    .run(u.dept, req.user.username, `${u.username} -> ${role}`);
-  res.json({ ok: true });
+  const currentFactoryCodes = db.prepare('SELECT factory_code FROM user_factories WHERE user_id = ? ORDER BY factory_code')
+    .all(id).map(r => r.factory_code);
+  const nextFactoryCodes = role === 'admin'
+    ? factoryCodesFor('all', role)
+    : (currentFactoryCodes.length ? currentFactoryCodes : [u.factory_code]);
+  const result = changeUserRole(db, id, role, nextFactoryCodes, (userId) => {
+    applyTemplate(userId, u.dept, role);
+    db.prepare(`INSERT INTO audit_log (dept, actor, action, detail) VALUES (?, ?, 'change_role', ?)`)
+      .run(u.dept, req.user.username, `${u.username} -> ${role}`);
+  });
+  res.json({ ok: true, cleared_customers: result.clearedCustomers });
 });
 
 // POST /api/admin/users/:id/reset-password  { password }
@@ -151,9 +176,15 @@ router.delete('/users/:id', (req, res) => {
 // GET /api/admin/customers — 现有所有 distinct 客户
 router.get('/customers', (req, res) => {
   const userId = Number(req.query.user_id);
-  const target = userId ? db.prepare('SELECT factory_code FROM users WHERE id = ?').get(userId) : null;
-  const factoryCode = target ? target.factory_code : req.user.active_factory_code;
-  const rows = db.prepare('SELECT DISTINCT customer FROM quotes WHERE factory_code = ? AND customer IS NOT NULL AND customer != \'\' ORDER BY customer').all(factoryCode);
+  const rows = userId
+    ? db.prepare(`
+        SELECT DISTINCT q.customer FROM quotes q
+        WHERE q.factory_code IN (SELECT factory_code FROM user_factories WHERE user_id = ?)
+          AND q.customer IS NOT NULL AND q.customer != ''
+        ORDER BY q.customer
+      `).all(userId)
+    : db.prepare("SELECT DISTINCT customer FROM quotes WHERE factory_code = ? AND customer IS NOT NULL AND customer != '' ORDER BY customer")
+        .all(req.user.active_factory_code);
   res.json({ customers: rows.map(r => r.customer) });
 });
 

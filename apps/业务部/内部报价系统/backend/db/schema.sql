@@ -106,6 +106,13 @@ CREATE TABLE IF NOT EXISTS users (
 
 CREATE INDEX IF NOT EXISTS idx_users_dept ON users(dept);
 
+-- User-to-factory access; users.factory_code remains the default factory.
+CREATE TABLE IF NOT EXISTS user_factories (
+  user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  factory_code TEXT NOT NULL REFERENCES factories(code),
+  PRIMARY KEY (user_id, factory_code)
+);
+
 -- 用户 × 可见客户（多对多；空表 = 看不到任何报价单；admin 不受限）
 CREATE TABLE IF NOT EXISTS user_customers (
   user_id  INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,

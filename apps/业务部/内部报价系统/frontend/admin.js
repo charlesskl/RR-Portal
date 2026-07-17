@@ -53,7 +53,7 @@ async function loadUsers() {
 function renderUsers() {
   const q = ($('user-search')?.value || '').trim().toLowerCase();
   const rows = q
-    ? __allUsers.filter(u => [u.username, u.display_name, u.dept_name, u.dept, u.factory_name, u.factory_code]
+    ? __allUsers.filter(u => [u.username, u.display_name, u.dept_name, u.dept, u.factory_name, u.factory_code, u.factory_codes]
         .some(v => String(v || '').toLowerCase().includes(q)))
     : __allUsers;
   const cnt = $('user-count');
@@ -68,15 +68,23 @@ function renderUsers() {
     const tr = document.createElement('tr');
     const isLocked = !!u.is_locked;
     const last = u.last_login ? new Date(u.last_login.includes('T') ? u.last_login : u.last_login.replace(' ', 'T') + 'Z').toLocaleString() : '—';
+    const factoryCodes = new Set(String(u.factory_codes || u.factory_code || '').split(',').filter(Boolean));
+    const factoryScope = factoryCodes.has('qingxi') && factoryCodes.has('heyuan') ? 'all' : (factoryCodes.has('heyuan') ? 'heyuan' : 'qingxi');
+    const factoryControl = u.role === 'admin'
+      ? `<div class="factory-control admin-scope" title="管理员固定管理两个厂区">
+          <button type="button" class="factory-option scope-all active" disabled aria-pressed="true">双厂区</button>
+        </div>`
+      : `<div class="factory-control" role="group" aria-label="${esc(u.username)} 的可见厂区">
+          <button type="button" class="factory-option scope-qingxi ${factoryScope==='qingxi'?'active':''}" data-id="${u.id}" data-username="${esc(u.username)}" data-scope="qingxi" data-cur="${factoryScope}" aria-pressed="${factoryScope==='qingxi'}">清溪</button>
+          <button type="button" class="factory-option scope-heyuan ${factoryScope==='heyuan'?'active':''}" data-id="${u.id}" data-username="${esc(u.username)}" data-scope="heyuan" data-cur="${factoryScope}" aria-pressed="${factoryScope==='heyuan'}">河源</button>
+          <button type="button" class="factory-option scope-all ${factoryScope==='all'?'active':''}" data-id="${u.id}" data-username="${esc(u.username)}" data-scope="all" data-cur="${factoryScope}" aria-pressed="${factoryScope==='all'}">双厂区</button>
+        </div>`;
     tr.innerHTML = `
       <td>${u.id}</td>
       <td><b>${esc(u.username)}</b></td>
       <td>${esc(u.display_name)}</td>
       <td>${esc(u.dept_name || u.dept)}</td>
-      <td><select class="factory-sel" data-id="${u.id}" data-username="${esc(u.username)}" data-cur="${u.factory_code}" style="padding:3px 6px">
-        <option value="qingxi" ${u.factory_code==='qingxi'?'selected':''}>清溪</option>
-        <option value="heyuan" ${u.factory_code==='heyuan'?'selected':''}>河源</option>
-      </select></td>
+      <td>${factoryControl}</td>
       <td><select class="role-sel" data-id="${u.id}" data-username="${esc(u.username)}" data-cur="${u.role}" style="padding:3px 6px">
         <option value="staff" ${u.role==='staff'?'selected':''}>员工</option>
         <option value="supervisor" ${u.role==='supervisor'?'selected':''}>主管</option>
@@ -103,13 +111,14 @@ function renderUsers() {
   document.querySelectorAll('.btn-unlock').forEach(b => b.onclick = () => unlockUser(b.dataset.id));
   document.querySelectorAll('.btn-del').forEach(b => b.onclick = () => delUser(b.dataset.id, b.dataset.username));
   document.querySelectorAll('.role-sel').forEach(s => s.onchange = () => changeRole(s.dataset.id, s.dataset.username, s.value, s.dataset.cur));
-  document.querySelectorAll('.factory-sel').forEach(s => s.onchange = () => changeFactory(s.dataset.id, s.dataset.username, s.value, s.dataset.cur));
+  document.querySelectorAll('.factory-option:not(:disabled)').forEach(b => b.onclick = () => changeFactory(b.dataset.id, b.dataset.username, b.dataset.scope, b.dataset.cur));
 }
 
 async function changeFactory(id, username, factoryCode, cur) {
   if (factoryCode === cur) return;
-  const name = factoryCode === 'heyuan' ? '河源' : '清溪';
-  if (!confirm(`把「${username}」的所属厂区改为「${name}」？该账号下次登录后只会进入此厂区。`)) {
+  const name = factoryCode === 'all' ? '清溪 + 河源' : (factoryCode === 'heyuan' ? '河源' : '清溪');
+  const hint = factoryCode === 'all' ? '该账号登录后可以切换两个厂区。' : '该账号下次登录后只会进入此厂区。';
+  if (!confirm(`把「${username}」的可见厂区改为「${name}」？${hint}`)) {
     loadUsers();
     return;
   }
@@ -248,9 +257,18 @@ async function delUser(id, username) {
 
 $('btn-new-user').onclick = () => {
   $('new-user-form').classList.remove('hidden');
+  syncNewUserFactoryScope();
   $('nu-username').focus();
 };
 $('btn-cancel-user').onclick = () => $('new-user-form').classList.add('hidden');
+$('nu-role').onchange = syncNewUserFactoryScope;
+
+function syncNewUserFactoryScope() {
+  const isAdmin = $('nu-role').value === 'admin';
+  if (isAdmin) $('nu-factory').value = 'all';
+  $('nu-factory').disabled = isAdmin;
+}
+
 $('btn-create-user').onclick = async () => {
   $('nu-msg').textContent = '';
   const body = {

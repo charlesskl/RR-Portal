@@ -31,20 +31,27 @@ async function refreshMe() {
     $('user-chip').classList.remove('hidden');
     const roleZh = { admin: '管理员', supervisor: '主管', staff: '员工' }[me.role] || me.role;
     $('who-chip').textContent = `${me.dept_name} · ${roleZh} · ${me.display_name || me.username}`;
-    $('factory-chip').textContent = me.active_factory_name || me.active_factory_code;
+    const factoryChip = $('factory-chip');
+    factoryChip.textContent = me.active_factory_name || me.active_factory_code;
     $('factory-list-name').textContent = me.active_factory_name || me.active_factory_code;
     const factorySwitch = $('factory-switch');
     if (me.can_switch_factory) {
       factorySwitch.innerHTML = (me.factories || []).map(f =>
-        `<option value="${esc(f.code)}" ${f.code === me.active_factory_code ? 'selected' : ''}>${esc(f.name_cn)}</option>`
+        `<button type="button" class="top-factory-btn ${f.code === me.active_factory_code ? 'active' : ''}" data-code="${esc(f.code)}" aria-pressed="${f.code === me.active_factory_code}"><span class="factory-dot dot-${esc(f.code)}"></span>${esc(f.name_cn)}</button>`
       ).join('');
+      factoryChip.classList.add('hidden');
       factorySwitch.classList.remove('hidden');
-      factorySwitch.onchange = async () => {
-        await api('/auth/factory', { method: 'POST', body: JSON.stringify({ factory_code: factorySwitch.value }) });
-        await refreshMe();
-      };
+      factorySwitch.querySelectorAll('.top-factory-btn').forEach(btn => {
+        btn.onclick = async () => {
+          if (btn.classList.contains('active')) return;
+          factorySwitch.querySelectorAll('button').forEach(b => { b.disabled = true; });
+          await api('/auth/factory', { method: 'POST', body: JSON.stringify({ factory_code: btn.dataset.code }) });
+          await refreshMe();
+        };
+      });
     } else {
       factorySwitch.classList.add('hidden');
+      factoryChip.classList.remove('hidden');
     }
     // 新建报价：业务 dept 才显示
     if (hasPerm(me, '报价单列表', 'edit') && me.dept === 'sales') $('new-quote-form').classList.remove('hidden');

@@ -41,12 +41,14 @@ COL = {
 }
 
 
+DUAL_MAP_FILE = os.path.join(os.path.dirname(__file__), 'data', 'dual_schedule_map.json')
+
+
 def _load_dual_map():
     """加载双排期货号配置"""
-    p = os.path.join(os.path.dirname(__file__), 'data', 'dual_schedule_map.json')
     try:
-        if os.path.exists(p):
-            with open(p, 'r', encoding='utf-8') as f:
+        if os.path.exists(DUAL_MAP_FILE):
+            with open(DUAL_MAP_FILE, 'r', encoding='utf-8') as f:
                 raw = json.load(f)
             return {k.upper(): v for k, v in raw.items() if not k.startswith('_')}
     except (json.JSONDecodeError, OSError) as e:
@@ -54,10 +56,24 @@ def _load_dual_map():
     return {}
 
 
-_DUAL_MAP = _load_dual_map()  # 模块加载时初始化
+_DUAL_MAP = _load_dual_map()
+try:
+    _dual_stat = os.stat(DUAL_MAP_FILE)
+    _DUAL_MAP_FILE_STATE = (_dual_stat.st_mtime_ns, _dual_stat.st_size, _dual_stat.st_ino)
+except OSError:
+    _DUAL_MAP_FILE_STATE = None
 
 
 def _get_dual_map():
+    global _DUAL_MAP, _DUAL_MAP_FILE_STATE
+    try:
+        stat = os.stat(DUAL_MAP_FILE)
+        file_state = (stat.st_mtime_ns, stat.st_size, stat.st_ino)
+    except OSError:
+        file_state = None
+    if file_state != _DUAL_MAP_FILE_STATE:
+        _DUAL_MAP = _load_dual_map()
+        _DUAL_MAP_FILE_STATE = file_state
     return _DUAL_MAP
 
 

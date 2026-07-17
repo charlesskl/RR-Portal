@@ -70,8 +70,9 @@ describe('parseDeliveryExcelFiles', () => {
       quantity: 2500,
       order_date: '2026-07-02',
       delivery_date: '2026-07-14',
-      unit_price: 0.44,
+      unit_price_cny_tax: 0.44,
       amount: 1100,
     })
+    expect(result.payloads[0].unit_price).toBeUndefined()
   })
 })

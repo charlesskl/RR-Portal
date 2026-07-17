@@ -30,27 +30,17 @@ async function init() {
     return;
   }
   $('who-chip').textContent = `${me.display_name || me.username} · 管理员`;
-  const factoryChip = $('factory-chip');
-  factoryChip.textContent = me.active_factory_name || me.active_factory_code;
   const factorySwitch = $('factory-switch');
-  if (me.can_switch_factory) {
-    factorySwitch.innerHTML = (me.factories || []).map(f =>
-      `<button type="button" class="top-factory-btn ${f.code === me.active_factory_code ? 'active' : ''}" data-code="${esc(f.code)}" aria-pressed="${f.code === me.active_factory_code}"><span class="factory-dot dot-${esc(f.code)}"></span>${esc(f.name_cn)}</button>`
-    ).join('');
-    factoryChip.classList.add('hidden');
-    factorySwitch.classList.remove('hidden');
-    factorySwitch.querySelectorAll('.top-factory-btn').forEach(btn => {
-      btn.onclick = async () => {
-        if (btn.classList.contains('active')) return;
-        factorySwitch.querySelectorAll('button').forEach(b => { b.disabled = true; });
-        await api('/auth/factory', { method: 'POST', body: JSON.stringify({ factory_code: btn.dataset.code }) });
-        location.reload();
-      };
-    });
-  } else {
-    factorySwitch.classList.add('hidden');
-    factoryChip.classList.remove('hidden');
-  }
+  factorySwitch.innerHTML = (me.factories || []).map(f =>
+    `<option value="${esc(f.code)}" ${f.code === me.active_factory_code ? 'selected' : ''}>${esc(f.name_cn)}</option>`
+  ).join('');
+  $('factory-switch-dot').className = `factory-dot dot-${esc(me.active_factory_code)}`;
+  factorySwitch.disabled = !me.can_switch_factory;
+  factorySwitch.onchange = async () => {
+    factorySwitch.disabled = true;
+    await api('/auth/factory', { method: 'POST', body: JSON.stringify({ factory_code: factorySwitch.value }) });
+    location.reload();
+  };
   window.__me = me;
   await loadUsers();
 }

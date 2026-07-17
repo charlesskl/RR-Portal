@@ -38,8 +38,14 @@ async function init() {
   factorySwitch.disabled = !me.can_switch_factory;
   factorySwitch.onchange = async () => {
     factorySwitch.disabled = true;
-    await api('/auth/factory', { method: 'POST', body: JSON.stringify({ factory_code: factorySwitch.value }) });
-    location.reload();
+    try {
+      await api('/auth/factory', { method: 'POST', body: JSON.stringify({ factory_code: factorySwitch.value }) });
+      location.reload();
+    } catch (e) {
+      factorySwitch.value = me.active_factory_code;
+      factorySwitch.disabled = false;
+      alert(e.message);
+    }
   };
   window.__me = me;
   await loadUsers();

@@ -370,6 +370,10 @@ if (userCount === 0) {
     VALUES (?, ?, ?, ?, ?, ?)
   `);
   for (const p of tpl) insertPerm.run(adminId, p.menu, p.can_view, p.can_edit, p.can_review, p.can_admin);
+  db.prepare(`
+    INSERT OR IGNORE INTO user_factories (user_id, factory_code)
+    SELECT ?, code FROM factories WHERE active = 1
+  `).run(adminId);
   console.log('\n========================================');
   console.log('[seed] 初始管理员账号已创建:');
   console.log('  用户名: admin');
@@ -378,15 +382,10 @@ if (userCount === 0) {
   console.log('========================================\n');
 }
 
-// Existing users inherit their current factory; admins retain access to all factories.
+// Existing users without an explicit scope inherit their current factory.
 db.prepare(`
   INSERT OR IGNORE INTO user_factories (user_id, factory_code)
   SELECT id, factory_code FROM users
-`).run();
-db.prepare(`
-  INSERT OR IGNORE INTO user_factories (user_id, factory_code)
-  SELECT u.id, f.code FROM users u CROSS JOIN factories f
-  WHERE u.role = 'admin' AND f.active = 1
 `).run();
 
 // 包装：transaction(fn) 在 BEGIN/COMMIT/ROLLBACK 中运行 fn

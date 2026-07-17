@@ -10,14 +10,12 @@ function loadUserAndPerms(userId, requestedFactory) {
     perms[r.menu] = { can_view: r.can_view, can_edit: r.can_edit, can_review: r.can_review, can_admin: r.can_admin };
   }
   const defaultFactory = u.factory_code || 'qingxi';
-  let factories = u.role === 'admin'
-    ? db.prepare('SELECT code, name_cn FROM factories WHERE active = 1 ORDER BY sort_order').all()
-    : db.prepare(`
-        SELECT f.code, f.name_cn
-        FROM user_factories uf JOIN factories f ON f.code = uf.factory_code
-        WHERE uf.user_id = ? AND f.active = 1
-        ORDER BY f.sort_order
-      `).all(userId);
+  let factories = db.prepare(`
+    SELECT f.code, f.name_cn
+    FROM user_factories uf JOIN factories f ON f.code = uf.factory_code
+    WHERE uf.user_id = ? AND f.active = 1
+    ORDER BY f.sort_order
+  `).all(userId);
   if (!factories.length) {
     factories = db.prepare('SELECT code, name_cn FROM factories WHERE code = ? AND active = 1').all(defaultFactory);
   }

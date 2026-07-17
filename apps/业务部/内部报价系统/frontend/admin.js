@@ -79,13 +79,7 @@ function renderUsers() {
     const last = u.last_login ? new Date(u.last_login.includes('T') ? u.last_login : u.last_login.replace(' ', 'T') + 'Z').toLocaleString() : '—';
     const factoryCodes = new Set(String(u.factory_codes || u.factory_code || '').split(',').filter(Boolean));
     const factoryScope = factoryCodes.has('qingxi') && factoryCodes.has('heyuan') ? 'all' : (factoryCodes.has('heyuan') ? 'heyuan' : 'qingxi');
-    const factoryControl = u.role === 'admin'
-      ? `<div class="factory-control" role="group" aria-label="${esc(u.username)} 固定管理两个厂区" title="管理员固定管理两个厂区">
-          <button type="button" class="factory-option scope-qingxi" disabled aria-pressed="false">清溪</button>
-          <button type="button" class="factory-option scope-heyuan" disabled aria-pressed="false">河源</button>
-          <button type="button" class="factory-option scope-all active" disabled aria-pressed="true">双厂区</button>
-        </div>`
-      : `<div class="factory-control" role="group" aria-label="${esc(u.username)} 的可见厂区">
+    const factoryControl = `<div class="factory-control" role="group" aria-label="${esc(u.username)} 的可见厂区">
           <button type="button" class="factory-option scope-qingxi ${factoryScope==='qingxi'?'active':''}" data-id="${u.id}" data-username="${esc(u.username)}" data-scope="qingxi" data-cur="${factoryScope}" aria-pressed="${factoryScope==='qingxi'}">清溪</button>
           <button type="button" class="factory-option scope-heyuan ${factoryScope==='heyuan'?'active':''}" data-id="${u.id}" data-username="${esc(u.username)}" data-scope="heyuan" data-cur="${factoryScope}" aria-pressed="${factoryScope==='heyuan'}">河源</button>
           <button type="button" class="factory-option scope-all ${factoryScope==='all'?'active':''}" data-id="${u.id}" data-username="${esc(u.username)}" data-scope="all" data-cur="${factoryScope}" aria-pressed="${factoryScope==='all'}">双厂区</button>
@@ -268,17 +262,9 @@ async function delUser(id, username) {
 
 $('btn-new-user').onclick = () => {
   $('new-user-form').classList.remove('hidden');
-  syncNewUserFactoryScope();
   $('nu-username').focus();
 };
 $('btn-cancel-user').onclick = () => $('new-user-form').classList.add('hidden');
-$('nu-role').onchange = syncNewUserFactoryScope;
-
-function syncNewUserFactoryScope() {
-  const isAdmin = $('nu-role').value === 'admin';
-  if (isAdmin) $('nu-factory').value = 'all';
-  $('nu-factory').disabled = isAdmin;
-}
 
 $('btn-create-user').onclick = async () => {
   $('nu-msg').textContent = '';

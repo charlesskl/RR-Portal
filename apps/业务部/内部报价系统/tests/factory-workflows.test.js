@@ -83,20 +83,20 @@ test('changing user factories replaces scope and clears customers only when scop
   }
 });
 
-test('promoting a user to admin expands factory scope and clears customers atomically', () => {
+test('promoting a user to admin preserves its configured factory scope', () => {
   const db = createUserAccessDb();
 
   try {
-    const result = changeUserRole(db, 1, 'admin', ['qingxi', 'heyuan'], (userId) => {
+    const result = changeUserRole(db, 1, 'admin', ['qingxi'], (userId) => {
       db.prepare('DELETE FROM user_perms WHERE user_id = ?').run(userId);
       db.prepare('INSERT INTO user_perms (user_id, menu) VALUES (?, ?)').run(userId, 'admin-template');
     });
 
-    assert.deepEqual(result, { factoriesChanged: true, clearedCustomers: 2 });
+    assert.deepEqual(result, { factoriesChanged: false, clearedCustomers: 2 });
     assert.equal(db.prepare('SELECT role FROM users WHERE id = 1').get().role, 'admin');
     assert.deepEqual(
       db.prepare('SELECT factory_code FROM user_factories WHERE user_id = 1 ORDER BY factory_code').all().map(row => row.factory_code),
-      ['heyuan', 'qingxi']
+      ['qingxi']
     );
     assert.equal(db.prepare('SELECT COUNT(*) AS n FROM user_customers WHERE user_id = 1').get().n, 0);
     assert.equal(db.prepare('SELECT menu FROM user_perms WHERE user_id = 1').get().menu, 'admin-template');

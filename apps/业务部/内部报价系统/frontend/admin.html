@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>管理后台 · 账号管理</title>
-  <link rel="stylesheet" href="./styles.css" />
+  <link rel="stylesheet" href="./styles.css?v=20260717-multi-factory-ui" />
 </head>
 <body>
   <div class="topbar">
@@ -48,10 +48,11 @@
               <option value="admin">管理员</option>
             </select>
           </label>
-          <label>所属厂区
+          <label>可见厂区
             <select id="nu-factory">
               <option value="qingxi">清溪</option>
               <option value="heyuan">河源</option>
+              <option value="all">清溪 + 河源</option>
             </select>
           </label>
         </div>
@@ -74,7 +75,7 @@
           <th style="width:120px">用户名</th>
           <th style="width:120px">姓名</th>
           <th style="width:100px">部门</th>
-          <th style="width:90px">厂区</th>
+          <th style="width:250px">可见厂区</th>
           <th style="width:80px">角色</th>
           <th style="width:100px">状态</th>
           <th style="width:150px">上次登录</th>
@@ -152,6 +153,6 @@
       };
     })();
   </script>
-  <script src="./admin.js?v=20260715-factory-scope"></script>
+  <script src="./admin.js?v=20260717-multi-factory-ui"></script>
 </body>
 </html>

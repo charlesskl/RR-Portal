@@ -29,14 +29,23 @@ async function init() {
     document.body.innerHTML = '<div style="padding:40px;text-align:center"><h2>无权访问</h2><a href="./index.html">← 返回</a></div>';
     return;
   }
-  $('who-chip').textContent = `${me.active_factory_name} · ${me.display_name || me.username} · 管理员`;
+  $('who-chip').textContent = `${me.display_name || me.username} · 管理员`;
   const factorySwitch = $('factory-switch');
   factorySwitch.innerHTML = (me.factories || []).map(f =>
     `<option value="${esc(f.code)}" ${f.code === me.active_factory_code ? 'selected' : ''}>${esc(f.name_cn)}</option>`
   ).join('');
+  $('factory-switch-dot').className = `factory-dot dot-${esc(me.active_factory_code)}`;
+  factorySwitch.disabled = !me.can_switch_factory;
   factorySwitch.onchange = async () => {
-    await api('/auth/factory', { method: 'POST', body: JSON.stringify({ factory_code: factorySwitch.value }) });
-    location.reload();
+    factorySwitch.disabled = true;
+    try {
+      await api('/auth/factory', { method: 'POST', body: JSON.stringify({ factory_code: factorySwitch.value }) });
+      location.reload();
+    } catch (e) {
+      factorySwitch.value = me.active_factory_code;
+      factorySwitch.disabled = false;
+      alert(e.message);
+    }
   };
   window.__me = me;
   await loadUsers();
@@ -71,7 +80,9 @@ function renderUsers() {
     const factoryCodes = new Set(String(u.factory_codes || u.factory_code || '').split(',').filter(Boolean));
     const factoryScope = factoryCodes.has('qingxi') && factoryCodes.has('heyuan') ? 'all' : (factoryCodes.has('heyuan') ? 'heyuan' : 'qingxi');
     const factoryControl = u.role === 'admin'
-      ? `<div class="factory-control admin-scope" title="管理员固定管理两个厂区">
+      ? `<div class="factory-control" role="group" aria-label="${esc(u.username)} 固定管理两个厂区" title="管理员固定管理两个厂区">
+          <button type="button" class="factory-option scope-qingxi" disabled aria-pressed="false">清溪</button>
+          <button type="button" class="factory-option scope-heyuan" disabled aria-pressed="false">河源</button>
           <button type="button" class="factory-option scope-all active" disabled aria-pressed="true">双厂区</button>
         </div>`
       : `<div class="factory-control" role="group" aria-label="${esc(u.username)} 的可见厂区">

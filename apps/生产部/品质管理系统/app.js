@@ -2020,31 +2020,26 @@ const DEFAULT_SUPPLIERS = [
      failQty   — FAIL 数量
    返回：'PASS' | 'REJ'
 
-   判定依据：FUNC / 功能 MAJ 0.65 列（m065，Ac 值）
-   ┌──────────────┬──────┬────────────────┐
-   │ LOT SIZE     │Sample│ m065 AC / RE   │
-   ├──────────────┼──────┼────────────────┤
-   │ 1–50         │  20  │  0 /  1        │
-   │ 51–280       │  32  │  1 /  2        │←fail=1→PASS; fail=2→REJ
-   │ 281–500      │  50  │  1 /  2        │
-   │ 501–1200     │  80  │  2 /  3        │
-   │ 1201–3200    │ 125  │  3 /  4        │
-   │ 3201–10000   │ 200  │  5 /  6        │
-   │ 10001–35000  │ 315  │  7 /  8        │
-   │ 35001–150000 │ 500  │ 10 / 11        │
-   └──────────────┴──────┴────────────────┘
+   判定依据：用户提供的 AQL Level II 表，使用 MAJ 0.65 的 Ac 值。
    fail <= AC(m065) → PASS
    fail >= RE(= AC + 1) → REJ
 ───────────────────────────────────────────────────── */
 const _APP_AQL_TABLE = [
+  { rangeMax:8,      m065:0  },
+  { rangeMax:15,     m065:0  },
+  { rangeMax:25,     m065:0  },
   { rangeMax:50,     m065:0  },
-  { rangeMax:280,    m065:1  },
+  { rangeMax:90,     m065:0  },
+  { rangeMax:150,    m065:0  },
+  { rangeMax:280,    m065:0  },
   { rangeMax:500,    m065:1  },
-  { rangeMax:1200,   m065:2  },
-  { rangeMax:3200,   m065:3  },
-  { rangeMax:10000,  m065:5  },
-  { rangeMax:35000,  m065:7  },
-  { rangeMax:999999, m065:10 },
+  { rangeMax:1200,   m065:1  },
+  { rangeMax:3200,   m065:2  },
+  { rangeMax:10000,  m065:3  },
+  { rangeMax:35000,  m065:5  },
+  { rangeMax:150000, m065:7  },
+  { rangeMax:500000, m065:10 },
+  { rangeMax:Infinity, m065:14 },
 ];
 
 function aqlJudge(qty, sampleQty, failQty) {
@@ -3053,14 +3048,21 @@ ${unknown.map(u=>`「${u}」`).join('、')}
 
 /* AQL Level II 完整表 */
 const _AQL_TABLE = [
-  { lo:1,     hi:50,     sample:20,  cr:0, maj065:0, maj10:1, min25:1  },
-  { lo:51,    hi:280,    sample:32,  cr:0, maj065:0, maj10:2, min25:3  },
-  { lo:281,   hi:500,    sample:50,  cr:0, maj065:1, maj10:2, min25:5  },
-  { lo:501,   hi:1200,   sample:80,  cr:0, maj065:1, maj10:3, min25:7  },
-  { lo:1201,  hi:3200,   sample:125, cr:0, maj065:2, maj10:5, min25:10 },
-  { lo:3201,  hi:10000,  sample:200, cr:0, maj065:3, maj10:7, min25:14 },
-  { lo:10001, hi:35000,  sample:315, cr:0, maj065:5, maj10:10,min25:21 },
-  { lo:35001, hi:150000, sample:500, cr:0, maj065:7, maj10:14,min25:21 },
+  { lo:1,      hi:8,        sample:2,    cr:0, maj065:0,  maj10:0,  min25:0  },
+  { lo:9,      hi:15,       sample:3,    cr:0, maj065:0,  maj10:0,  min25:0  },
+  { lo:16,     hi:25,       sample:5,    cr:0, maj065:0,  maj10:0,  min25:0  },
+  { lo:26,     hi:50,       sample:8,    cr:0, maj065:0,  maj10:0,  min25:0  },
+  { lo:51,     hi:90,       sample:13,   cr:0, maj065:0,  maj10:0,  min25:1  },
+  { lo:91,     hi:150,      sample:20,   cr:0, maj065:0,  maj10:0,  min25:1  },
+  { lo:151,    hi:280,      sample:32,   cr:0, maj065:0,  maj10:1,  min25:2  },
+  { lo:281,    hi:500,      sample:50,   cr:0, maj065:1,  maj10:1,  min25:3  },
+  { lo:501,    hi:1200,     sample:80,   cr:0, maj065:1,  maj10:2,  min25:5  },
+  { lo:1201,   hi:3200,     sample:125,  cr:0, maj065:2,  maj10:3,  min25:7  },
+  { lo:3201,   hi:10000,    sample:200,  cr:0, maj065:3,  maj10:5,  min25:10 },
+  { lo:10001,  hi:35000,    sample:315,  cr:0, maj065:5,  maj10:7,  min25:14 },
+  { lo:35001,  hi:150000,   sample:500,  cr:0, maj065:7,  maj10:10, min25:21 },
+  { lo:150001, hi:500000,   sample:800,  cr:0, maj065:10, maj10:14, min25:21 },
+  { lo:500001, hi:Infinity, sample:1250, cr:0, maj065:14, maj10:21, min25:21 },
 ];
 
 /* 按批量取 AQL 行 */

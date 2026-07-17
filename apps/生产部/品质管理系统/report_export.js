@@ -1417,14 +1417,21 @@ function _buildSupplierCanvas(supplierName, withAppendix) {
 
 /* AQL 抽样表配置 */
 const IQC_AQL_TABLE = [
-  { range:'1–50',        rangeMax:50,     sample:20,  cr:0, maj065:0, maj10:1, min25:1, func_sample:20,  m065:0 },
-  { range:'51–280',      rangeMax:280,    sample:32,  cr:0, maj065:0, maj10:2, min25:3, func_sample:32,  m065:1 },
-  { range:'281–500',     rangeMax:500,    sample:50,  cr:0, maj065:1, maj10:2, min25:5, func_sample:50,  m065:1 },
-  { range:'501–1200',    rangeMax:1200,   sample:80,  cr:0, maj065:1, maj10:3, min25:7, func_sample:80,  m065:2 },
-  { range:'1201–3200',   rangeMax:3200,   sample:125, cr:0, maj065:2, maj10:5, min25:10,func_sample:125, m065:3 },
-  { range:'3201–10000',  rangeMax:10000,  sample:200, cr:0, maj065:3, maj10:7, min25:14,func_sample:200, m065:5 },
-  { range:'10001–35000', rangeMax:35000,  sample:315, cr:0, maj065:5, maj10:10,min25:21,func_sample:315, m065:7 },
-  { range:'35001–150000',rangeMax:999999, sample:500, cr:0, maj065:7, maj10:14,min25:21,func_sample:500, m065:10},
+  { range:'2–8',         rangeMax:8,      sample:2,    cr:0, maj065:0,  maj10:0,  min25:0,  func_sample:2,    m065:0  },
+  { range:'9–15',        rangeMax:15,     sample:3,    cr:0, maj065:0,  maj10:0,  min25:0,  func_sample:3,    m065:0  },
+  { range:'16–25',       rangeMax:25,     sample:5,    cr:0, maj065:0,  maj10:0,  min25:0,  func_sample:5,    m065:0  },
+  { range:'26–50',       rangeMax:50,     sample:8,    cr:0, maj065:0,  maj10:0,  min25:0,  func_sample:8,    m065:0  },
+  { range:'51–90',       rangeMax:90,     sample:13,   cr:0, maj065:0,  maj10:0,  min25:1,  func_sample:13,   m065:0  },
+  { range:'91–150',      rangeMax:150,    sample:20,   cr:0, maj065:0,  maj10:0,  min25:1,  func_sample:20,   m065:0  },
+  { range:'151–280',     rangeMax:280,    sample:32,   cr:0, maj065:0,  maj10:1,  min25:2,  func_sample:32,   m065:0  },
+  { range:'281–500',     rangeMax:500,    sample:50,   cr:0, maj065:1,  maj10:1,  min25:3,  func_sample:50,   m065:1  },
+  { range:'501–1200',    rangeMax:1200,   sample:80,   cr:0, maj065:1,  maj10:2,  min25:5,  func_sample:80,   m065:1  },
+  { range:'1201–3200',   rangeMax:3200,   sample:125,  cr:0, maj065:2,  maj10:3,  min25:7,  func_sample:125,  m065:2  },
+  { range:'3201–10000',  rangeMax:10000,  sample:200,  cr:0, maj065:3,  maj10:5,  min25:10, func_sample:200,  m065:3  },
+  { range:'10001–35000', rangeMax:35000,  sample:315,  cr:0, maj065:5,  maj10:7,  min25:14, func_sample:315,  m065:5  },
+  { range:'35001–150000',rangeMax:150000, sample:500,  cr:0, maj065:7,  maj10:10, min25:21, func_sample:500,  m065:7  },
+  { range:'150001–500000',rangeMax:500000,sample:800,  cr:0, maj065:10, maj10:14, min25:21, func_sample:800,  m065:10 },
+  { range:'500001 and over',rangeMax:Infinity,sample:1250,cr:0,maj065:14, maj10:21, min25:21, func_sample:1250, m065:14 },
 ];
 
 function _iqcGetRow(qty) {

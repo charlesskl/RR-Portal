@@ -5,6 +5,7 @@ const { requireAuth } = require('../middleware/auth');
 const { requirePerm } = require('../middleware/perms');
 const { MENUS } = require('../permissions/menu_catalog');
 const { templateFor } = require('../permissions/role_templates');
+const { changeUserFactories, changeUserRole } = require('../services/userFactory');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -29,13 +30,6 @@ function factoryCodesFor(scope, role) {
   }
   const code = String(scope || '').trim();
   return db.prepare('SELECT code FROM factories WHERE code = ? AND active = 1').all(code).map(r => r.code);
-}
-
-function replaceUserFactories(userId, codes) {
-  db.prepare('DELETE FROM user_factories WHERE user_id = ?').run(userId);
-  const insert = db.prepare('INSERT INTO user_factories (user_id, factory_code) VALUES (?, ?)');
-  for (const code of codes) insert.run(userId, code);
-  db.prepare('UPDATE users SET factory_code = ? WHERE id = ?').run(codes[0], userId);
 }
 
 // GET /api/admin/users
@@ -76,7 +70,9 @@ router.post('/users', (req, res) => {
         VALUES (?, ?, ?, ?, ?, ?)
       `).run(String(username).trim(), bcrypt.hashSync(String(password), 8),
              String(display_name).trim().slice(0, 32), dept, role, factoryCodes[0]);
-      replaceUserFactories(info.lastInsertRowid, factoryCodes);
+      db.prepare('DELETE FROM user_factories WHERE user_id = ?').run(info.lastInsertRowid);
+      const insertFactory = db.prepare('INSERT INTO user_factories (user_id, factory_code) VALUES (?, ?)');
+      for (const code of factoryCodes) insertFactory.run(info.lastInsertRowid, code);
       applyTemplate(info.lastInsertRowid, dept, role);
       return info.lastInsertRowid;
     });
@@ -97,18 +93,9 @@ router.put('/users/:id/factory', (req, res) => {
   if (!u) return res.status(404).json({ error: '用户不存在' });
   const factoryCodes = factoryCodesFor(factoryCode, u.role);
   if (!factoryCodes.length) return res.status(400).json({ error: '厂区不存在' });
-  const currentCodes = db.prepare('SELECT factory_code FROM user_factories WHERE user_id = ? ORDER BY factory_code')
-    .all(id).map(r => r.factory_code);
-  const nextCodes = [...factoryCodes].sort();
-  const changed = currentCodes.join(',') !== nextCodes.join(',');
-  let clearedCustomers = 0;
-  if (changed) {
-    const updateFactories = db.transaction(() => {
-      replaceUserFactories(id, factoryCodes);
-      clearedCustomers = db.prepare('DELETE FROM user_customers WHERE user_id = ?').run(id).changes;
-    });
-    updateFactories();
-  }
+  const result = changeUserFactories(db, id, factoryCodes);
+  const changed = result.changed;
+  const clearedCustomers = result.clearedCustomers;
   const factoryName = factoryCodes.length > 1 ? '清溪 + 河源' : (factoryCodes[0] === 'heyuan' ? '河源' : '清溪');
   if (changed) {
     db.prepare(`INSERT INTO audit_log (actor, action, detail) VALUES (?, 'change_user_factory', ?)`)
@@ -122,14 +109,19 @@ router.put('/users/:id/role', (req, res) => {
   const id = Number(req.params.id);
   const { role } = req.body || {};
   if (!['staff', 'supervisor', 'admin'].includes(role)) return res.status(400).json({ error: 'role 非法' });
-  const u = db.prepare('SELECT dept, username FROM users WHERE id = ?').get(id);
+  const u = db.prepare('SELECT dept, username, factory_code FROM users WHERE id = ?').get(id);
   if (!u) return res.status(404).json({ error: '用户不存在' });
-  db.prepare('UPDATE users SET role = ? WHERE id = ?').run(role, id);
-  if (role === 'admin') replaceUserFactories(id, factoryCodesFor('all', role));
-  applyTemplate(id, u.dept, role);  // 按新角色模板重置权限
-  db.prepare(`INSERT INTO audit_log (dept, actor, action, detail) VALUES (?, ?, 'change_role', ?)`)
-    .run(u.dept, req.user.username, `${u.username} -> ${role}`);
-  res.json({ ok: true });
+  const currentFactoryCodes = db.prepare('SELECT factory_code FROM user_factories WHERE user_id = ? ORDER BY factory_code')
+    .all(id).map(r => r.factory_code);
+  const nextFactoryCodes = role === 'admin'
+    ? factoryCodesFor('all', role)
+    : (currentFactoryCodes.length ? currentFactoryCodes : [u.factory_code]);
+  const result = changeUserRole(db, id, role, nextFactoryCodes, (userId) => {
+    applyTemplate(userId, u.dept, role);
+    db.prepare(`INSERT INTO audit_log (dept, actor, action, detail) VALUES (?, ?, 'change_role', ?)`)
+      .run(u.dept, req.user.username, `${u.username} -> ${role}`);
+  });
+  res.json({ ok: true, cleared_customers: result.clearedCustomers });
 });
 
 // POST /api/admin/users/:id/reset-password  { password }

@@ -1,0 +1,12 @@
+**/bin/
+**/obj/
+**/node_modules/
+**/dist/
+.git/
+.github/
+.superpowers/
+tests/
+db/
+seed/
+*.xlsx
+!web/public/template-customs.xlsx

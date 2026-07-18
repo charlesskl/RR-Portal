@@ -1,5 +1,14 @@
 import { describe, it, expect } from 'vitest'
-import { allowedCrafts, canApproveStatus, canEditOutput, canViewCraft, setAuthorizedCrafts, visibleCraft } from '../src/utils/permissions'
+import {
+  allowedCrafts,
+  canApproveStatus,
+  canEditOrders,
+  canEditOutput,
+  canViewCraft,
+  setAuthorizedCrafts,
+  setPermissionOverrides,
+  visibleCraft,
+} from '../src/utils/permissions'
 
 describe('permissions', () => {
   it('only finance_cost can edit output', () => {
@@ -10,6 +19,18 @@ describe('permissions', () => {
   it('only sc_manager/admin approve status', () => {
     expect(canApproveStatus('sc_manager')).toBe(true)
     expect(canApproveStatus('buyer_injection')).toBe(false)
+  })
+  it('uses the orders.edit override for all order editing actions', () => {
+    setPermissionOverrides(null)
+    expect(canEditOrders('buyer_injection')).toBe(true)
+    expect(canEditOrders('quality_qc')).toBe(false)
+
+    setPermissionOverrides({ 'orders.edit': false })
+    expect(canEditOrders('buyer_injection')).toBe(false)
+
+    setPermissionOverrides({ 'orders.edit': true })
+    expect(canEditOrders('quality_qc')).toBe(true)
+    setPermissionOverrides(null)
   })
   it('supports multiple authorized departments', () => {
     setAuthorizedCrafts(['painting', 'sewing'])

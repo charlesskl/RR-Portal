@@ -37,6 +37,7 @@ const saved = ref(false)
 const price = reactive({
   quote_labor_price: null as number | null,
   unit_price: null as number | null,
+  unit_price_cny_tax: null as number | null,
   supplier_price: null as number | null,
   process_category: '',
 })
@@ -46,6 +47,7 @@ const priceSaved = ref(false)
 function initPrice(o: Order) {
   price.quote_labor_price = o.quote_labor_price ?? null
   price.unit_price = o.unit_price ?? null
+  price.unit_price_cny_tax = o.unit_price_cny_tax ?? null
   price.supplier_price = o.supplier_price ?? null
   price.process_category = o.process_category ?? ''
 }
@@ -113,6 +115,7 @@ async function savePrice() {
   await orders.update(id.value, {
     quote_labor_price: num(price.quote_labor_price),
     unit_price: num(price.unit_price),
+    unit_price_cny_tax: num(price.unit_price_cny_tax),
     supplier_price: num(price.supplier_price),
     process_category: price.process_category,
   })
@@ -139,6 +142,7 @@ async function savePrice() {
           <div><dt>数量</dt><dd>{{ order.quantity ?? '-' }}</dd></div>
           <div><dt>核价生产工价</dt><dd>{{ order.quote_labor_price ?? '-' }}</dd></div>
           <div><dt>外发单价</dt><dd>{{ order.unit_price ?? '-' }}</dd></div>
+          <div><dt>外发工价(人民币含税)</dt><dd>{{ order.unit_price_cny_tax ?? '-' }}</dd></div>
           <div><dt>扣税点1.13后单价</dt><dd>{{ order.unit_price != null ? Math.round((order.unit_price / 1.13) * 10000) / 10000 : '-' }}</dd></div>
           <div><dt>占比</dt><dd>{{ order.unit_price != null && order.quote_labor_price ? Math.round(((order.unit_price / 1.13) / order.quote_labor_price) * 1000) / 10 + '%' : '-' }}</dd></div>
           <div><dt>金额</dt><dd>{{ order.amount != null ? order.amount.toLocaleString() : '-' }}</dd></div>
@@ -154,6 +158,7 @@ async function savePrice() {
           <label>核价生产工价 <input v-model.number="price.quote_labor_price" type="number" min="0" step="0.01" /></label>
           <label>供应商外发价 <input v-model.number="price.supplier_price" type="number" min="0" step="0.01" /></label>
           <label>外发单价 <input v-model.number="price.unit_price" type="number" min="0" step="0.01" /></label>
+          <label>外发工价(人民币含税) <input v-model.number="price.unit_price_cny_tax" type="number" min="0" step="0.01" /></label>
           <div class="actions">
             <button type="submit" :disabled="priceSaving">{{ priceSaving ? '保存中…' : '保存' }}</button>
             <span v-if="priceSaved" class="ok">已保存 ✓</span>

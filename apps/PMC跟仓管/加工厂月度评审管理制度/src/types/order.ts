@@ -11,6 +11,7 @@ export interface Order {
   process_category?: string
   quote_labor_price?: number
   unit_price?: number
+  unit_price_cny_tax?: number
   amount?: number
   defect_rate?: number
   pmc?: string

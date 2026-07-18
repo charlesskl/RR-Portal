@@ -54,6 +54,7 @@ type RowDraft = {
   actual_delivery_date: string
   quote_labor_price: string
   unit_price: string
+  unit_price_cny_tax: string
 }
 const drafts = ref<Record<string, RowDraft>>({})
 
@@ -126,6 +127,7 @@ function draftFromRow(row: DetailRow): RowDraft {
     actual_delivery_date: row.actual_delivery_date || '',
     quote_labor_price: priceInputValue(row.quote),
     unit_price: priceInputValue(row.outPrice),
+    unit_price_cny_tax: priceInputValue(row.outPriceCnyTax),
   }
 }
 
@@ -171,6 +173,7 @@ async function saveRow(row: DetailRow) {
   const quantity = parsePrice(draft.quantity)
   const quote = parsePrice(draft.quote_labor_price)
   const unitPrice = parsePrice(draft.unit_price)
+  const unitPriceCnyTax = parsePrice(draft.unit_price_cny_tax)
   if (!product) {
     alert('请输入物料名称')
     return
@@ -179,7 +182,7 @@ async function saveRow(row: DetailRow) {
     alert('数量请输入有效数字')
     return
   }
-  if (quote === undefined || unitPrice === undefined) {
+  if (quote === undefined || unitPrice === undefined || unitPriceCnyTax === undefined) {
     alert('工价请输入有效数字')
     return
   }
@@ -191,7 +194,10 @@ async function saveRow(row: DetailRow) {
     actual_delivery_date: draft.actual_delivery_date ? new Date(draft.actual_delivery_date).toISOString() : '',
     quote_labor_price: quote,
     unit_price: unitPrice,
-    amount: quantity === null || unitPrice === null ? null : quantity * unitPrice,
+    unit_price_cny_tax: unitPriceCnyTax,
+    amount: quantity === null || (unitPriceCnyTax === null && unitPrice === null)
+      ? null
+      : quantity * (unitPriceCnyTax ?? unitPrice!),
   }
   if (draft.actual_delivery_date && row.delivery_date) {
     const days = Math.round((new Date(draft.actual_delivery_date).getTime() - new Date(row.delivery_date).getTime()) / 86400000)
@@ -217,11 +223,12 @@ async function copyRow(row: DetailRow) {
   const quantity = parsePrice(draft.quantity)
   const quote = parsePrice(draft.quote_labor_price)
   const unitPrice = parsePrice(draft.unit_price)
+  const unitPriceCnyTax = parsePrice(draft.unit_price_cny_tax)
   if (quantity === undefined) {
     alert('数量请输入有效数字')
     return
   }
-  if (quote === undefined || unitPrice === undefined) {
+  if (quote === undefined || unitPrice === undefined || unitPriceCnyTax === undefined) {
     alert('工价请输入有效数字')
     return
   }
@@ -236,7 +243,10 @@ async function copyRow(row: DetailRow) {
     process_category: source.process_category,
     quote_labor_price: quote ?? undefined,
     unit_price: unitPrice ?? undefined,
-    amount: quantity != null && unitPrice != null ? quantity * unitPrice : source.amount,
+    unit_price_cny_tax: unitPriceCnyTax ?? undefined,
+    amount: quantity != null && (unitPriceCnyTax != null || unitPrice != null)
+      ? quantity * (unitPriceCnyTax ?? unitPrice!)
+      : source.amount,
     defect_rate: source.defect_rate,
     pmc: draft.pmc.trim(),
     order_no: source.order_no,
@@ -342,6 +352,12 @@ async function removeRow(row: DetailRow) {
                     @input="setDraftValue(r, 'unit_price', ($event.target as HTMLInputElement).value)" />
                   <span v-else>{{ r.outPrice }}</span>
                 </td>
+                <td>
+                  <input v-if="canEdit" type="number" class="price-inp" min="0" step="0.01"
+                    :value="draftValue(r, 'unit_price_cny_tax')"
+                    @input="setDraftValue(r, 'unit_price_cny_tax', ($event.target as HTMLInputElement).value)" />
+                  <span v-else>{{ r.outPriceCnyTax }}</span>
+                </td>
                 <td>{{ r.priceRatio }}</td>
                 <td>{{ r.notes || '-' }}</td>
                 <td v-if="canEdit" class="op-cell">
@@ -361,6 +377,7 @@ async function removeRow(row: DetailRow) {
                 <td>{{ r.delayAvg }}</td>
                 <td>{{ r.quote }}</td>
                 <td>{{ r.outPrice }}</td>
+                <td>{{ r.outPriceCnyTax }}</td>
                 <td>{{ r.priceRatio }}</td>
                 <td></td>
                 <td v-if="canEdit"></td>
@@ -378,7 +395,7 @@ async function removeRow(row: DetailRow) {
 .back { font-size: .9rem; }
 .search-box { width: 240px; padding: .4rem .7rem; font-size: .9rem; border: 1px solid var(--border); border-radius: var(--radius-sm); }
 .scroll { overflow-x: auto; }
-.report { min-width: 2720px; }
+.report { min-width: 2900px; }
 .report th, .report td { white-space: nowrap; text-align: center; font-size: .85rem; }
 .report .item-no-col {
   width: 220px;

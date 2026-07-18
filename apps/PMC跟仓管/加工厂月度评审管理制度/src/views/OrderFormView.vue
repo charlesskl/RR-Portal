@@ -21,7 +21,10 @@ const backTo = computed(() => (craft.value ? `/orders/dept/${craft.value}` : '/o
 const draft = ref<Partial<Order>>({ status: 'placed' })
 // 指定部门只列该部门工厂；不限部门(从货期管理落地页进入)则列全部
 const deptFactories = computed(() => (craft.value ? factories.items.filter((f) => f.craft === craft.value) : factories.items))
-const draftAmount = computed(() => (Number(draft.value.quantity) || 0) * (Number(draft.value.unit_price) || 0))
+const draftAmount = computed(() => {
+  const price = draft.value.unit_price_cny_tax ?? draft.value.unit_price ?? 0
+  return (Number(draft.value.quantity) || 0) * (Number(price) || 0)
+})
 const factorySearch = ref('')
 const factoryOpen = ref(false)
 const selectedFactoryName = computed(() => deptFactories.value.find((f) => f.id === draft.value.factory)?.name ?? '')
@@ -103,6 +106,7 @@ async function submit() {
           <label>加工类别 <input v-model="draft.process_category" placeholder="如塑胶半成品" /></label>
           <label>核价生产工价 <input v-model.number="draft.quote_labor_price" type="number" min="0" step="0.01" /></label>
           <label>外发单价 <input v-model.number="draft.unit_price" type="number" min="0" step="0.01" /></label>
+          <label>外发工价(人民币含税) <input v-model.number="draft.unit_price_cny_tax" type="number" min="0" step="0.01" /></label>
           <label>金额 <input :value="draftAmount" type="number" disabled /></label>
           <label>下单日期 <input v-model="draft.order_date" type="date" /></label>
           <label>交货日期 <input v-model="draft.delivery_date" type="date" /></label>

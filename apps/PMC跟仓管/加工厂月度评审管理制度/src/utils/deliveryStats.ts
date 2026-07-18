@@ -2,11 +2,11 @@ import * as XLSX from 'xlsx'
 import type { Order } from '../types/order'
 import { resolveFactoryName } from './factoryName'
 
-// 报表表头(单行,25 列)
+// 报表表头（单行）
 export const DELIVERY_HEADERS = [
   '范围', '下单PMC', '加工厂', '货号', '订单号', '加工类别', '物料名称', '数量', '下单时间', '下单交货时间', '实际交货时间', '延迟时间',
   '订单总单数', '延期单数', '占比', '延期平均天数',
-  '核价工价(港币不含税$)', '外发工价(港币不含税$)', '占比', '备注',
+  '核价工价(港币不含税$)', '外发工价(港币不含税$)', '外发工价(人民币含税)', '占比', '备注',
 ]
 
 const r1 = (n: number) => Math.round(n * 10) / 10
@@ -30,6 +30,7 @@ export interface Metrics {
   custPassRate: string
   quote: number
   outPrice: number
+  outPriceCnyTax: number
   priceRatio: string
 }
 export interface DetailRow extends Metrics {
@@ -119,6 +120,7 @@ function metricsOf(os: Order[]): Metrics {
   const returnCount = os.reduce((a, o) => a + num(o.return_count), 0)
   const quote = r2(os.reduce((a, o) => a + num(o.quote_labor_price), 0))
   const outPrice = r2(os.reduce((a, o) => a + num(o.unit_price), 0))
+  const outPriceCnyTax = r2(os.reduce((a, o) => a + num(o.unit_price_cny_tax), 0))
   return {
     orderCount: orderStats.orderCount,
     delayedCount: orderStats.delayedCount,
@@ -131,6 +133,7 @@ function metricsOf(os: Order[]): Metrics {
     custPassRate: pct1(qualified - returnCount, inspect),
     quote,
     outPrice,
+    outPriceCnyTax,
     priceRatio: pct2(outPrice, quote),
   }
 }
@@ -182,6 +185,7 @@ export function buildDeliveryReport(
         const returnCount = num(o.return_count)
         const quote = o.quote_labor_price ?? 0
         const outPrice = o.unit_price ?? 0
+        const outPriceCnyTax = o.unit_price_cny_tax ?? 0
         const orderStats = orderStatsById.get(o.id) ?? {
           orderCount: 1,
           delayedCount: o.is_delayed ? 1 : 0,
@@ -215,6 +219,7 @@ export function buildDeliveryReport(
           custPassRate: pct1(qualified - returnCount, inspect),
           quote,
           outPrice,
+          outPriceCnyTax,
           priceRatio: pct2(outPrice, quote),
           rangeSpan: firstRow ? totalRows : 0,
           pmcSpan: pmcFirst ? block.rows : 0,
@@ -244,7 +249,7 @@ export function exportDeliveryExcel(rows: ReportRow[], title: string) {
         r.rangeSpan ? r.range : '', r.pmcSpan ? r.pmc : '', r.factorySpan ? r.factory : '',
         r.item_no, r.order_no, r.category, r.product, r.quantity ?? '',
         r.order_date, r.delivery_date, r.actual_delivery_date, r.delay_days ?? '',
-        r.orderCount, r.delayedCount, r.delayRatio, r.delayAvg, r.quote, r.outPrice, r.priceRatio, r.notes,
+        r.orderCount, r.delayedCount, r.delayRatio, r.delayAvg, r.quote, r.outPrice, r.outPriceCnyTax, r.priceRatio, r.notes,
       ])
       if (r.rangeSpan > 1) merges.push({ s: { r: rr, c: 0 }, e: { r: rr + r.rangeSpan - 1, c: 0 } })
       if (r.pmcSpan > 1) merges.push({ s: { r: rr, c: 1 }, e: { r: rr + r.pmcSpan - 1, c: 1 } })
@@ -252,7 +257,7 @@ export function exportDeliveryExcel(rows: ReportRow[], title: string) {
     } else {
       body.push([
         '', '', '', `${r.factory}-小计`, '', '', '', '', '', '', '', '',
-        r.orderCount, r.delayedCount, r.delayRatio, r.delayAvg, r.quote, r.outPrice, r.priceRatio, '',
+        r.orderCount, r.delayedCount, r.delayRatio, r.delayAvg, r.quote, r.outPrice, r.outPriceCnyTax, r.priceRatio, '',
       ])
       merges.push({ s: { r: rr, c: 3 }, e: { r: rr, c: 11 } })
     }
@@ -469,8 +474,9 @@ function parseMoldingContractImport(
   const colOf = (...aliases: string[]) => header.findIndex((cell) => aliases.some((alias) => cell === compactText(alias)))
   const C = {
     item_no: colOf('款号', '货号'),
+    mold_no: colOf('模具编号'),
     product: colOf('工模名称', '模具名称'),
-    qty: colOf('数量'),
+    qty: header.indexOf('啤数') >= 0 ? header.indexOf('啤数') : colOf('数量'),
     out: colOf('加工单价', '单价'),
     amount: colOf('加工金额', '金额'),
     notes: colOf('备注'),
@@ -487,7 +493,7 @@ function parseMoldingContractImport(
   let failed = 0
   const cell = (row: any[], i: number) => (i >= 0 ? row[i] : '')
   for (const row of aoa.slice(headerIdx + 1)) {
-    const itemNo = cleanText(cell(row, C.item_no))
+    const itemNo = cleanText(cell(row, C.item_no)) || cleanText(cell(row, C.mold_no))
     const product = cleanText(cell(row, C.product))
     if (!itemNo || !product || /合计|小计|备注/.test(itemNo)) continue
     if (!factoryId) { failed++; continue }
@@ -506,7 +512,7 @@ function parseMoldingContractImport(
       is_delayed: false,
     }
     if (qty != null) p.quantity = qty
-    if (out != null) p.unit_price = out
+    if (out != null) p.unit_price_cny_tax = out
     if (amount != null) p.amount = amount
     else if (qty != null && out != null) p.amount = qty * out
     if (orderDate) p.order_date = orderDate

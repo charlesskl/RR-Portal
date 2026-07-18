@@ -20,6 +20,7 @@ describe('buildDeliveryReport', () => {
         product: '战斗猎犬头/鼻子',
         quantity: 3800,
         pmc: '陈梦楚',
+        unit_price_cny_tax: 1.2,
         is_delayed: true,
         delay_days: 17,
       }),
@@ -29,6 +30,7 @@ describe('buildDeliveryReport', () => {
         product: '战斗猎犬手掌/围裙',
         quantity: 3800,
         pmc: '陈梦楚',
+        unit_price_cny_tax: 1.3,
         is_delayed: true,
         delay_days: 20,
       }),
@@ -40,6 +42,7 @@ describe('buildDeliveryReport', () => {
       delayedCount: 1,
       delayRatio: '100%',
       delayAvg: '20',
+      outPriceCnyTax: 1.2,
     })
     expect(rows[1]).toMatchObject({
       kind: 'detail',
@@ -54,6 +57,7 @@ describe('buildDeliveryReport', () => {
       delayedCount: 1,
       delayRatio: '100%',
       delayAvg: '20',
+      outPriceCnyTax: 2.5,
     })
   })
 })
@@ -148,13 +152,14 @@ describe('parseDeliveryImport', () => {
       order_no: 'WXH2600140',
       product: '唱片模',
       process_category: '啤机',
-      quantity: 800000,
+      quantity: 100000,
       order_date: '2026-07-15',
       delivery_date: '2026-08-29',
-      unit_price: 0.24,
+      unit_price_cny_tax: 0.24,
       amount: 24000,
       status: 'placed',
       is_delayed: false,
     })
+    expect(result.payloads[0].unit_price).toBeUndefined()
   })
 })

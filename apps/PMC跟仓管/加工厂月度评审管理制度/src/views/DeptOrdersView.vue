@@ -10,6 +10,7 @@ import { canEditOrders, allowedRegions } from '../utils/permissions'
 import { buildDeliveryReport, exportDeliveryExcel, parseDeliveryImport, DELIVERY_HEADERS as HEADERS, type ReportRow, type DetailRow } from '../utils/deliveryStats'
 import { readDeliveryPdfAsAoa } from '../utils/pdfDeliveryImport'
 import { parseDeliveryExcelFiles } from '../utils/deliveryExcelImport'
+import { cnyTaxToHkdUntaxed } from '../utils/orderPricing'
 import type { Order } from '../types/order'
 
 const route = useRoute()
@@ -78,7 +79,7 @@ async function importExcel(ev: Event) {
   for (const f of factories.items) fByName[f.name] = f.id
   importingExcel.value = true
   try {
-    const parsed = await parseDeliveryExcelFiles(files, fByName)
+    const parsed = await parseDeliveryExcelFiles(files, fByName, { preferCnyTaxPrice: true })
     let ok = 0, fail = parsed.failedRows
     for (const p of parsed.payloads) {
       try { await orders.create({ ...p, created_by: auth.userId ?? undefined } as any); ok++ } catch { fail++ }
@@ -150,6 +151,12 @@ function draftValue(row: DetailRow, field: keyof RowDraft) {
 function setDraftValue(row: DetailRow, field: keyof RowDraft, value: string) {
   if (!drafts.value[row.id]) drafts.value[row.id] = draftFromRow(row)
   drafts.value[row.id][field] = value
+  if (field === 'unit_price_cny_tax') {
+    const cnyTaxPrice = Number(value)
+    drafts.value[row.id].unit_price = value.trim() && Number.isFinite(cnyTaxPrice)
+      ? String(cnyTaxToHkdUntaxed(cnyTaxPrice))
+      : ''
+  }
 }
 
 function parsePrice(val: string) {
@@ -341,13 +348,13 @@ async function removeRow(row: DetailRow) {
                 <td>{{ r.delayRatio }}</td>
                 <td>{{ r.delayAvg }}</td>
                 <td>
-                  <input v-if="canEdit" type="number" class="price-inp" min="0" step="0.01"
+                  <input v-if="canEdit" type="number" class="price-inp" min="0" step="0.0001"
                     :value="draftValue(r, 'quote_labor_price')"
                     @input="setDraftValue(r, 'quote_labor_price', ($event.target as HTMLInputElement).value)" />
                   <span v-else>{{ r.quote }}</span>
                 </td>
                 <td>
-                  <input v-if="canEdit" type="number" class="price-inp" min="0" step="0.01"
+                  <input v-if="canEdit" type="number" class="price-inp" min="0" step="0.0001"
                     :value="draftValue(r, 'unit_price')"
                     @input="setDraftValue(r, 'unit_price', ($event.target as HTMLInputElement).value)" />
                   <span v-else>{{ r.outPrice }}</span>

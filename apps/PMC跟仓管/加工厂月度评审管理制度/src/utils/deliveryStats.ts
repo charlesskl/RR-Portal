@@ -1,6 +1,7 @@
 import * as XLSX from 'xlsx'
 import type { Order } from '../types/order'
 import { resolveFactoryName } from './factoryName'
+import { cnyTaxToHkdUntaxed } from './orderPricing'
 
 // 报表表头（单行）
 export const DELIVERY_HEADERS = [
@@ -119,7 +120,7 @@ function metricsOf(os: Order[]): Metrics {
   const qualified = os.reduce((a, o) => a + Math.max(0, num(o.inspect_count) - num(o.defect_count)), 0)
   const returnCount = os.reduce((a, o) => a + num(o.return_count), 0)
   const quote = r2(os.reduce((a, o) => a + num(o.quote_labor_price), 0))
-  const outPrice = r2(os.reduce((a, o) => a + num(o.unit_price), 0))
+  const outPrice = r2(os.reduce((a, o) => a + effectiveHkdPrice(o), 0))
   const outPriceCnyTax = r2(os.reduce((a, o) => a + num(o.unit_price_cny_tax), 0))
   return {
     orderCount: orderStats.orderCount,
@@ -136,6 +137,12 @@ function metricsOf(os: Order[]): Metrics {
     outPriceCnyTax,
     priceRatio: pct2(outPrice, quote),
   }
+}
+
+function effectiveHkdPrice(order: Order) {
+  const hkdPrice = num(order.unit_price)
+  const cnyTaxPrice = num(order.unit_price_cny_tax)
+  return hkdPrice || (cnyTaxPrice ? cnyTaxToHkdUntaxed(cnyTaxPrice) : 0)
 }
 
 export function buildDeliveryReport(
@@ -184,7 +191,7 @@ export function buildDeliveryReport(
         const qualified = Math.max(0, inspect - num(o.defect_count))
         const returnCount = num(o.return_count)
         const quote = o.quote_labor_price ?? 0
-        const outPrice = o.unit_price ?? 0
+        const outPrice = effectiveHkdPrice(o)
         const outPriceCnyTax = o.unit_price_cny_tax ?? 0
         const orderStats = orderStatsById.get(o.id) ?? {
           orderCount: 1,

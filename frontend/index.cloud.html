@@ -181,11 +181,11 @@
 
     <div class="stats-bar">
       <div class="stat-card">
-        <div class="stat-value" id="statDepts">7</div>
+        <div class="stat-value" id="statDepts">6</div>
         <div class="stat-label">部门数量</div>
       </div>
       <div class="stat-card">
-        <div class="stat-value" id="statPlugins">24</div>
+        <div class="stat-value" id="statPlugins">23</div>
         <div class="stat-label">应用数量</div>
       </div>
       <div class="stat-card">
@@ -399,26 +399,6 @@
               <div class="plugin-info">
                 <div class="plugin-dot gray" id="hyScheduleDot"></div>
                 <span class="plugin-name">河源排期入单</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- 印尼小组 -->
-      <div class="dept-card" onclick="showDept('indonesia')">
-        <div class="dept-card-header">
-          <div class="dept-icon business">&#127760;</div>
-          <div>
-            <div class="dept-name">印尼小组</div>
-          </div>
-        </div>
-        <div class="dept-card-body">
-          <div class="plugin-list" id="indonesiaPluginList">
-            <div class="plugin-item">
-              <div class="plugin-info">
-                <div class="plugin-dot gray" id="indoShippingDot"></div>
-                <span class="plugin-name">印尼走货明细</span>
               </div>
             </div>
           </div>
@@ -969,41 +949,6 @@
   </div>
 
 
-  <!-- ===== 印尼小组详情 ===== -->
-  <div class="detail-view" id="indonesiaDetail">
-    <div class="back-btn" onclick="goHome()">&larr; 返回部门总览</div>
-    <div class="breadcrumb">
-      <a href="#" onclick="goHome()">控制台</a>
-      <span class="sep">/</span>
-      <span style="color:#f59e0b">印尼小组</span>
-    </div>
-    <div class="page-title" style="display:flex;align-items:center;gap:14px;">
-      <div class="dept-icon business" style="width:40px;height:40px;font-size:18px;">&#127760;</div>
-      印尼小组
-    </div>
-    <div class="page-subtitle">走货跟进 · 采购协同 · 生产排期 · 报关资料</div>
-
-    <div class="detail-plugin-card">
-      <div class="detail-plugin-left">
-        <div class="detail-plugin-icon" style="background:linear-gradient(135deg,#f59e0b,#ef4444);">&#128666;</div>
-        <div>
-          <div class="detail-plugin-name">印尼走货明细</div>
-          <div class="detail-plugin-desc">统一维护印尼走货、采购订单、生产排期与报关资料，支持按货柜、订单和时间快速追踪。</div>
-          <div class="feature-grid">
-            <div class="feature-tag">&#128666; 走货明细</div>
-            <div class="feature-tag">&#128203; 采购订单</div>
-            <div class="feature-tag">&#128197; 生产排期</div>
-            <div class="feature-tag">&#128196; 报关资料</div>
-          </div>
-        </div>
-      </div>
-      <div class="detail-plugin-right">
-        <div class="detail-plugin-status"><div class="plugin-dot gray" id="indoShippingDetailDot"></div> 检查中...</div>
-        <a href="/indo-shipping/" target="_blank" rel="noopener" class="btn btn-primary">打开系统</a>
-      </div>
-    </div>
-  </div>
-
   <!-- ===== 船务部详情 ===== -->
   <div class="detail-view" id="shippingDetail">
     <div class="back-btn" onclick="goHome()">&larr; 返回部门总览</div>
@@ -1083,7 +1028,7 @@
 </div>
 
 <script>
-var allDepts = ['engineering', 'pmc', 'production', 'business', 'shipping', 'indonesia', 'qa'];
+var allDepts = ['engineering', 'pmc', 'production', 'business', 'shipping', 'qa'];
 
 function showDept(dept) {
   document.getElementById('homeView').classList.add('hidden');
@@ -1128,7 +1073,6 @@ async function checkHealth() {
       { name: 'cpg', url: '/cpg/health', dot: 'cpgDot', detailDot: 'cpgDetailDot' },
       { name: 'factoryReview', url: '/factory-review/health', dot: 'factoryReviewDot', detailDot: 'factoryReviewDetailDot' },
       { name: 'shippingManagement', url: '/shipping/health', dot: 'shippingManagementDot', detailDot: 'shippingManagementDetailDot' },
-      { name: 'indoShipping', url: '/indo-shipping/health', dot: 'indoShippingDot', detailDot: 'indoShippingDetailDot' },
       { name: 'qaWeekly', url: '/qa-weekly-report/api/health', dot: 'qaWeeklyDot', detailDot: 'qaWeeklyDetailDot' },
     ];
     var healthy = 0;

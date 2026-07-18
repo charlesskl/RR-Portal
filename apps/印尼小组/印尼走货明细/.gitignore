@@ -1,0 +1,15 @@
+**/bin/
+**/obj/
+**/node_modules/
+**/dist/
+publish/
+logs/
+*.log
+*.user
+.vs/
+.vscode/
+appsettings.Local.json
+.env
+.env.*
+!*.env.example
+seed/business-data.json

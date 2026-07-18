@@ -55,21 +55,36 @@ function buildHeaderIndex(headerCells) {
 async function parseWorkbook(buffer) {
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.load(buffer);
-  const ws = wb.worksheets[0];
-  if (!ws) return { error: '工作簿为空' };
+  if (!wb.worksheets.length) return { error: '工作簿为空' };
 
-  // 抓出每行 values（1-based 的数组）
-  const rows = [];
-  ws.eachRow({ includeEmpty: true }, (row, rn) => {
-    const arr = [];
-    row.eachCell({ includeEmpty: true }, (cell, cn) => { arr[cn] = cell.value; });
-    rows.push(arr);
-  });
+  // 总表通常排在第一张；自动选取真正含车缝明细表头的工作表。
+  let ws = null;
+  let rows = [];
+  for (const candidate of wb.worksheets) {
+    const candidateRows = [];
+    candidate.eachRow({ includeEmpty: true }, (row) => {
+      const arr = [];
+      row.eachCell({ includeEmpty: true }, (cell, cn) => { arr[cn] = cell.value; });
+      candidateRows.push(arr);
+    });
+    if (candidateRows.some(isHeaderRow)) {
+      ws = candidate;
+      rows = candidateRows;
+      break;
+    }
+  }
+  if (!ws) return { error: '没有找到车缝明细表头（物料名称/裁片部位/用量/价钱）' };
+
+  const mergedTitleRows = new Set((ws.model.merges || []).flatMap((range) => {
+    const match = /^[A-Z]+(\d+):[A-Z]+(\d+)$/i.exec(range);
+    return match && match[1] === match[2] ? [Number(match[1])] : [];
+  }));
 
   const groups = [];
   let cur = null;
   let headerIdx = null;
   let pendingTitle = null;
+  let afterTotal = false;
 
   for (let i = 0; i < rows.length; i++) {
     const r = rows[i] || [];
@@ -79,10 +94,13 @@ async function parseWorkbook(buffer) {
     // header 行 → 新分组开始
     if (isHeaderRow(r)) {
       headerIdx = buildHeaderIndex(r);
-      const name = pendingTitle || ('产品 ' + (groups.length + 1));
-      cur = { name, items: [], labor_amount: 0, sub_parts: [] };
-      groups.push(cur);
+      if (!cur || cur.items.length > 0) {
+        const name = pendingTitle || ('产品 ' + (groups.length + 1));
+        cur = { name, items: [], labor_amount: 0, sub_parts: [] };
+        groups.push(cur);
+      }
       pendingTitle = null;
+      afterTotal = false;
       continue;
     }
 
@@ -98,26 +116,31 @@ async function parseWorkbook(buffer) {
 
     const matName = toStr(r[headerIdx.material]);
     const part = toStr(r[headerIdx.part]);
+
+    // 合并产品标题在 ExcelJS 中可能重复到整行多列，先按唯一文本识别，避免被数字尺寸误当成用量/价钱。
+    const uniqueTexts = [...new Set(joined)];
+    if (matName && uniqueTexts.length === 1 && (cur.items.length === 0 || afterTotal || mergedTitleRows.has(i + 1))) {
+      if (cur && cur.items.length === 0) cur.name = matName;
+      else { cur = { name: matName, items: [], labor_amount: 0, sub_parts: [] }; groups.push(cur); }
+      afterTotal = false;
+      continue;
+    }
+
     const price = toNum(r[headerIdx.price]);
     const qty = toNum(r[headerIdx.qty]);
     const unitPrice = toNum(r[headerIdx.unit_price]);
 
     // 合计行
     if (matName.includes('合计') || (part === '' && matName === '' && price != null && qty == null)) {
-      // 重置 header 等待下一个产品
-      headerIdx = null;
-      continue;
-    }
-
-    // 产品标题行：物料名称列有文字、但无用量/单价/价钱（如 "18寸 超级机器人…"，表头下方分节标题）
-    if (matName && qty == null && price == null && unitPrice == null && part === '') {
-      if (cur && cur.items.length === 0) cur.name = matName;  // 当前空组直接命名
-      else { cur = { name: matName, items: [], labor_amount: 0, sub_parts: [] }; groups.push(cur); }
+      // 保留表头索引；部分报价单整张明细表只在第一行提供一次表头。
+      afterTotal = true;
       continue;
     }
 
     // 仅当行没有 价钱 和 用量 → 跳过
     if (matName === '' && qty == null && price == null) continue;
+
+    afterTotal = false;
 
     // 人工类
     if (/裁床人工|车缝人工|手工人工|人工/.test(matName)) {

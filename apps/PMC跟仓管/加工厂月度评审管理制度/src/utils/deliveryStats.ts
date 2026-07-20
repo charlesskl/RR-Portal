@@ -1,13 +1,13 @@
 import * as XLSX from 'xlsx'
 import type { Order } from '../types/order'
 import { resolveFactoryName } from './factoryName'
-import { cnyTaxToHkdUntaxed } from './orderPricing'
+import { cnyTaxToHkdUntaxed, DEFAULT_CNY_TO_HKD_RATE } from './orderPricing'
 
 // 报表表头（单行）
 export const DELIVERY_HEADERS = [
-  '范围', '下单PMC', '加工厂', '货号', '订单号', '加工类别', '物料名称', '数量', '下单时间', '下单交货时间', '实际交货时间', '延迟时间',
+  '范围', '下单PMC', '加工厂', '货号', '模具编号', '订单号', '加工类别', '物料名称', '数量', '下单时间', '下单交货时间', '实际交货时间', '延迟时间',
   '订单总单数', '延期单数', '占比', '延期平均天数',
-  '核价工价(港币不含税$)', '外发工价(港币不含税$)', '外发工价(人民币含税)', '占比', '备注',
+  '核价工价(港币不含税$)', '外发工价(港币不含税$)', '外发工价(人民币含税)', '换算汇率', '占比', '备注',
 ]
 
 const r1 = (n: number) => Math.round(n * 10) / 10
@@ -41,6 +41,7 @@ export interface DetailRow extends Metrics {
   pmc: string
   factory: string
   item_no: string
+  mold_no: string
   order_no: string
   category: string
   product: string
@@ -49,6 +50,7 @@ export interface DetailRow extends Metrics {
   delivery_date: string
   actual_delivery_date: string
   delay_days: number | null
+  exchangeRate: number
   notes: string
   rangeSpan: number
   pmcSpan: number
@@ -142,7 +144,8 @@ function metricsOf(os: Order[]): Metrics {
 function effectiveHkdPrice(order: Order) {
   const hkdPrice = num(order.unit_price)
   const cnyTaxPrice = num(order.unit_price_cny_tax)
-  return hkdPrice || (cnyTaxPrice ? cnyTaxToHkdUntaxed(cnyTaxPrice) : 0)
+  const exchangeRate = num(order.exchange_rate) || DEFAULT_CNY_TO_HKD_RATE
+  return hkdPrice || (cnyTaxPrice ? cnyTaxToHkdUntaxed(cnyTaxPrice, exchangeRate) : 0)
 }
 
 export function buildDeliveryReport(
@@ -206,6 +209,7 @@ export function buildDeliveryReport(
           pmc: block.pmc,
           factory: fac.factory,
           item_no: o.item_no ?? '',
+          mold_no: o.mold_no ?? '',
           order_no: o.order_no ?? '',
           category: o.process_category ?? '',
           product: o.product ?? '',
@@ -214,6 +218,7 @@ export function buildDeliveryReport(
           delivery_date: o.delivery_date ? o.delivery_date.slice(0, 10) : '',
           actual_delivery_date: o.actual_delivery_date ? o.actual_delivery_date.slice(0, 10) : '',
           delay_days: o.delay_days ?? null,
+          exchangeRate: num(o.exchange_rate) || DEFAULT_CNY_TO_HKD_RATE,
           notes: o.notes ?? '',
           orderCount: orderStats.orderCount,
           delayedCount: orderStats.delayedCount,
@@ -254,19 +259,19 @@ export function exportDeliveryExcel(rows: ReportRow[], title: string) {
     if (r.kind === 'detail') {
       body.push([
         r.rangeSpan ? r.range : '', r.pmcSpan ? r.pmc : '', r.factorySpan ? r.factory : '',
-        r.item_no, r.order_no, r.category, r.product, r.quantity ?? '',
+        r.item_no, r.mold_no, r.order_no, r.category, r.product, r.quantity ?? '',
         r.order_date, r.delivery_date, r.actual_delivery_date, r.delay_days ?? '',
-        r.orderCount, r.delayedCount, r.delayRatio, r.delayAvg, r.quote, r.outPrice, r.outPriceCnyTax, r.priceRatio, r.notes,
+        r.orderCount, r.delayedCount, r.delayRatio, r.delayAvg, r.quote, r.outPrice, r.outPriceCnyTax, r.exchangeRate, r.priceRatio, r.notes,
       ])
       if (r.rangeSpan > 1) merges.push({ s: { r: rr, c: 0 }, e: { r: rr + r.rangeSpan - 1, c: 0 } })
       if (r.pmcSpan > 1) merges.push({ s: { r: rr, c: 1 }, e: { r: rr + r.pmcSpan - 1, c: 1 } })
       if (r.factorySpan > 1) merges.push({ s: { r: rr, c: 2 }, e: { r: rr + r.factorySpan - 1, c: 2 } })
     } else {
       body.push([
-        '', '', '', `${r.factory}-小计`, '', '', '', '', '', '', '', '',
-        r.orderCount, r.delayedCount, r.delayRatio, r.delayAvg, r.quote, r.outPrice, r.outPriceCnyTax, r.priceRatio, '',
+        '', '', '', `${r.factory}-小计`, '', '', '', '', '', '', '', '', '',
+        r.orderCount, r.delayedCount, r.delayRatio, r.delayAvg, r.quote, r.outPrice, r.outPriceCnyTax, '', r.priceRatio, '',
       ])
-      merges.push({ s: { r: rr, c: 3 }, e: { r: rr, c: 11 } })
+      merges.push({ s: { r: rr, c: 3 }, e: { r: rr, c: 12 } })
     }
   })
   const ws = XLSX.utils.aoa_to_sheet([titleRow, H, ...body])
@@ -337,6 +342,7 @@ function parsePurchaseOrderImport(
   const colOf = (...al: string[]) => { for (const a of al) { const i = header.indexOf(compactText(a)); if (i >= 0) return i } return -1 }
   const C = {
     item_no: colOf('款号', '货号'),
+    mold_no: colOf('模具编号'),
     product: colOf('物料名称', '货物名称', '产品名称'),
     category: colOf('加工内容', '加工类别'),
     qty: colOf('数量'),
@@ -372,6 +378,7 @@ function parsePurchaseOrderImport(
       pmc,
       product,
       item_no: itemNo,
+      mold_no: cleanText(cell(row, C.mold_no)),
       order_no: orderNo,
       process_category: cleanText(cell(row, C.category)),
       notes,
@@ -500,9 +507,10 @@ function parseMoldingContractImport(
   let failed = 0
   const cell = (row: any[], i: number) => (i >= 0 ? row[i] : '')
   for (const row of aoa.slice(headerIdx + 1)) {
-    const itemNo = cleanText(cell(row, C.item_no)) || cleanText(cell(row, C.mold_no))
+    const itemNo = cleanText(cell(row, C.item_no))
+    const moldNo = cleanText(cell(row, C.mold_no))
     const product = cleanText(cell(row, C.product))
-    if (!itemNo || !product || /合计|小计|备注/.test(itemNo)) continue
+    if ((!itemNo && !moldNo) || !product || /合计|小计|备注/.test(itemNo || moldNo)) continue
     if (!factoryId) { failed++; continue }
     const qty = parseNumberCell(cell(row, C.qty))
     const out = parseNumberCell(cell(row, C.out))
@@ -512,6 +520,7 @@ function parseMoldingContractImport(
       pmc,
       product,
       item_no: itemNo,
+      mold_no: moldNo,
       order_no: orderNo,
       process_category: '啤机',
       notes: cleanText(cell(row, C.notes)),
@@ -552,7 +561,7 @@ export function parseDeliveryImport(
     return parsePurchaseOrderImport(aoa, headerIdx, header, factoryIdByName)
   }
   const C = {
-    pmc: colOf('下单PMC'), factory: colOf('加工厂'), item_no: colOf('货号', '款号'), order_no: colOf('订单号'),
+    pmc: colOf('下单PMC'), factory: colOf('加工厂'), item_no: colOf('货号', '款号'), mold_no: colOf('模具编号'), order_no: colOf('订单号'),
     category: colOf('加工类别'), product: colOf('物料名称', '产品'), qty: colOf('数量'),
     order_date: colOf('下单时间', '下单日期'), delivery_date: colOf('下单交货时间', '交货日期'),
     actual: colOf('实际交货时间'), delay: colOf('延迟时间'), delayedCnt: colOf('延期单数'),
@@ -580,7 +589,7 @@ export function parseDeliveryImport(
     const inspect = numv(C.inspect), qualified = numv(C.qualified), out = numv(C.out), qty = numv(C.qty)
     const p: Record<string, any> = {
       factory: factoryId, product: prod, pmc: str(C.pmc), order_no: str(C.order_no),
-      item_no: str(C.item_no), process_category: str(C.category), notes: str(C.notes), status: 'placed',
+      item_no: str(C.item_no), mold_no: str(C.mold_no), process_category: str(C.category), notes: str(C.notes), status: 'placed',
     }
     if (qty != null) p.quantity = qty
     const od = cell(row, C.order_date); if (od) p.order_date = toDate(od)

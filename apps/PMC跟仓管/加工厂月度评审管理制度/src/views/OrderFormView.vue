@@ -7,7 +7,7 @@ import { useFactoriesStore } from '../stores/factories'
 import { useAuthStore } from '../stores/auth'
 import { CRAFT_LABELS, type Craft } from '../constants/roles'
 import type { Order } from '../types/order'
-import { cnyTaxToHkdUntaxed } from '../utils/orderPricing'
+import { cnyTaxToHkdUntaxed, DEFAULT_CNY_TO_HKD_RATE } from '../utils/orderPricing'
 
 const route = useRoute()
 const router = useRouter()
@@ -19,7 +19,7 @@ const craft = computed(() => route.params.craft as Craft | undefined)
 const deptName = computed(() => (craft.value ? CRAFT_LABELS[craft.value] ?? '部门' : '全部'))
 const backTo = computed(() => (craft.value ? `/orders/dept/${craft.value}` : '/orders'))
 
-const draft = ref<Partial<Order>>({ status: 'placed' })
+const draft = ref<Partial<Order>>({ status: 'placed', exchange_rate: DEFAULT_CNY_TO_HKD_RATE })
 // 指定部门只列该部门工厂；不限部门(从货期管理落地页进入)则列全部
 const deptFactories = computed(() => (craft.value ? factories.items.filter((f) => f.craft === craft.value) : factories.items))
 const draftAmount = computed(() => {
@@ -37,13 +37,16 @@ const filteredFactories = computed(() => {
     .slice(0, 60)
 })
 
-watch(() => draft.value.unit_price_cny_tax, (value) => {
+watch(() => [draft.value.unit_price_cny_tax, draft.value.exchange_rate], ([value, rate]) => {
   if (value == null || value === ('' as any)) {
     draft.value.unit_price = undefined
     return
   }
   const cnyTaxPrice = Number(value)
-  if (Number.isFinite(cnyTaxPrice)) draft.value.unit_price = cnyTaxToHkdUntaxed(cnyTaxPrice)
+  const exchangeRate = Number(rate)
+  if (Number.isFinite(cnyTaxPrice) && Number.isFinite(exchangeRate) && exchangeRate > 0) {
+    draft.value.unit_price = cnyTaxToHkdUntaxed(cnyTaxPrice, exchangeRate)
+  }
 })
 
 onMounted(() => factories.fetchAll())
@@ -110,6 +113,7 @@ async function submit() {
           <label>工序 <input v-model="draft.process" placeholder="如注塑/喷油" /></label>
           <label>车间 <input v-model="draft.workshop" placeholder="如注塑车间" /></label>
           <label>货号 <input v-model="draft.item_no" placeholder="货号" /></label>
+          <label>模具编号 <input v-model="draft.mold_no" placeholder="模具编号" /></label>
           <label>订单号 <input v-model="draft.order_no" placeholder="订单号" /></label>
           <label>产品 <input v-model="draft.product" placeholder="产品名称" required /></label>
           <label>数量 <input v-model.number="draft.quantity" type="number" min="0" /></label>
@@ -117,6 +121,7 @@ async function submit() {
           <label>核价生产工价 <input v-model.number="draft.quote_labor_price" type="number" min="0" step="0.01" /></label>
           <label>外发单价 <input v-model.number="draft.unit_price" type="number" min="0" step="0.0001" /></label>
           <label>外发工价(人民币含税) <input v-model.number="draft.unit_price_cny_tax" type="number" min="0" step="0.0001" /></label>
+          <label>换算汇率 <input v-model.number="draft.exchange_rate" type="number" min="0.0001" step="0.01" /></label>
           <label>金额 <input :value="draftAmount" type="number" disabled /></label>
           <label>下单日期 <input v-model="draft.order_date" type="date" /></label>
           <label>交货日期 <input v-model="draft.delivery_date" type="date" /></label>

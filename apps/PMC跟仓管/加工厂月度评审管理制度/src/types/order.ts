@@ -5,6 +5,7 @@ export interface Order {
   process?: string
   workshop?: string
   item_no?: string
+  mold_no?: string
   product: string
   quantity?: number
   supplier_price?: number
@@ -12,6 +13,7 @@ export interface Order {
   quote_labor_price?: number
   unit_price?: number
   unit_price_cny_tax?: number
+  exchange_rate?: number
   amount?: number
   defect_rate?: number
   pmc?: string

@@ -73,7 +73,8 @@ describe('parseDeliveryExcelFiles', () => {
     expect(result.payloads[0]).toMatchObject({
       factory: 'factory-1',
       pmc: '谭凤娟',
-      item_no: 'SR800-M03',
+      item_no: '',
+      mold_no: 'SR800-M03',
       order_no: 'RRT-HSY26016',
       product: '兔子',
       process_category: '啤机',

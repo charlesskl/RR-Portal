@@ -62,3 +62,30 @@ seed 就位、内存确认够之后：
 - 端口 5180，路径 `/indo-shipping/`，部门 印尼小组。
 - 阈值：`MIN_INDO_AVAILABLE_MEMORY_MB=2500`、`MIN_INDO_FREE_DISK_MB=10240`（见 `deploy/update-server.sh`）。
 - 4 个 Secret：`INDO_SQL_SA_PASSWORD`、`INDO_SQL_APP_PASSWORD`、`INDO_SHIPPING_JWT_KEY`、`INDO_SHIPPING_ADMIN_PASSWORD`（已配）。
+
+---
+
+## 实战记录 2026-07-20（✅ 已上线）
+
+indo-shipping 于 2026-07-20 通过 PR #291 成功上线，`/indo-shipping/health` 返回 200，门户首页「印尼小组」亮起，真实数据（snapshot 2026-07-15）已导入，密钥已持久化（CD 恢复健康），其他服务不受影响。过程中的关键经验，供以后维护 / 类似新 app 参考：
+
+### 用 GHA 代做服务器操作（本机/新电脑没配 SSH 时）
+Part A/B 原设计是人工登阿里云控制台。实际本机无 ECS SSH（私钥只在 GitHub Secret `CLOUD_SSH_KEY` + 原作者手里），改用 **GHA `workflow_dispatch` + `appleboy/ssh-action`** 代做，全程无需本地 SSH。做了两个可复用 workflow（都在 main）：
+- **`.github/workflows/provision-indo-seed.yml`**（Provision Indo Seed）：从私有分支 `codex/indonesia-shipping-portal` 的 blob 用 `git cat-file` 取真实 seed（6.86MB, sha256 `a657b1ca…c7590`, schemaVersion 2026-07-15）落到 `data/indo-shipping-seed/business-data.json`，含资源预检 + SHA256 双校验。**只放文件、不部署、不阻塞 CD。** 6.86MB 太大无法塞 base64 secret，也不宜粘进网页终端，走 git blob 最干净。
+- **`.github/workflows/ecs-disk-ops.yml`**（ECS Disk Ops）：`diagnose`（只读 df/lsblk/growpart dry-run/docker system df）/ `prune-safe`（`docker builder prune` + 无容器引用镜像 prune，不动运行容器/volume/data）/ `grow-disk`（growpart + resize2fs 扩分区）。
+- 所有 workflow 都校验 `CLOUD_HOST_FINGERPRINT` 防中间人，沿用 `appleboy/ssh-action@0ff4204…` 固定版本。
+
+### 坑 1：磁盘"不足"多半是分区没扩满，不是真容量不足
+`df` 显示 `/dev/vda3 40G` 让人误判容量不足，但阿里云控制台看**系统盘实际是 70GiB ESSD**，只是根分区没占满整块盘（~30GB 未分配）。用 `ECS Disk Ops` 的 `grow-disk` 模式（`growpart /dev/vda 3` + `resize2fs /dev/vda3`，在线扩、不影响容器/数据）分区 40G→69G，空闲从 9.4GB→38GB，瓶颈消失。**遇 ECS 磁盘告急先比对「云盘大小 vs `lsblk` 分区大小」。**
+
+### 坑 2：Dockerfile `addgroup app` 与 aspnet:8.0 基础镜像冲突
+`mcr.microsoft.com/dotnet/aspnet:8.0` 自 .NET 8 起自带非 root `app` 用户 → `addgroup --system app` 报 `The group 'app' already exists` → 整镜像 build 失败。修法：`(getent group app || addgroup --system app)` + `(getent passwd app || adduser …)` 幂等守卫。#280 当年卡在 seed 门槛没走到 build，所以这个 bug 直到 seed 就位后才暴露。
+
+### 坑 3：indo 部署失败 = 阻塞全平台 CD，必须立刻 revert
+`indo_secret_transport_changed` 只要密钥没持久化（持久化发生在 indo 成功部署的最后一步）就恒为真 → 每次 push 都走 indo 路径 → 任一步失败即 `exit 1` 阻塞所有人的部署。中途两次失败（Dockerfile build、资源预检）都立即回滚保平台，查清根因后再上。SQL Server 有 `MSSQL_MEMORY_LIMIT_MB=1536` + `mem_limit: 2304m` 兜底，OOM 只 kill indo 自身容器，不波及其他服务。
+
+### 成功路径（复现用）
+1. `ECS Disk Ops` → `diagnose` 看 df/分区；若分区没扩满 → `grow-disk`。
+2. `ECS Disk Ops` → `prune-safe` 清残骸（尤其失败重试后）。
+3. `Provision Indo Seed`（幂等，可反复跑校验 seed 在位 + 拿 mem/disk 准数，需 mem≥2500/disk≥10240）。
+4. 合并 indo 代码（含 Dockerfile getent 修复）→ 盯部署 → 冒烟 `/indo-shipping/health`。失败先 revert 再排查。

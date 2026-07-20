@@ -1,22 +1,25 @@
 name: ECS Disk Ops
 
 # ECS 磁盘运维（手动触发）：
-#   mode=diagnose   —— 只读诊断，报告 df / docker system df / 大目录占用，绝不改动任何东西
+#   mode=diagnose   —— 只读诊断：df / lsblk / growpart dry-run / docker system df / 大目录，绝不改动任何东西
 #   mode=prune-safe —— 安全回收：docker builder prune + 无容器引用的镜像 prune
 #                      不动运行中的容器、不动任何 volume/数据、不动 data 目录
+#   mode=grow-disk  —— 把根分区/文件系统撑满整块云盘（growpart + resize2fs/xfs_growfs）
+#                      云盘 70GiB 但分区只用 40G 时用它把剩余 ~30GB 扩进来
 # 用于 indo-shipping 上线前腾磁盘（需 >=10GB 空闲）。
 
 on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "diagnose (只读) 或 prune-safe (安全清理)"
+        description: "diagnose(只读) / prune-safe(安全清理) / grow-disk(扩分区占满云盘)"
         type: choice
         required: true
         default: diagnose
         options:
           - diagnose
           - prune-safe
+          - grow-disk
 
 permissions:
   contents: read
@@ -62,23 +65,29 @@ jobs:
             echo "== df -h =="
             df -h
 
+            echo "== lsblk =="
+            lsblk || true
+
+            echo "== 根分区/未分配空间（growpart dry-run） =="
+            ROOT_PART="$(findmnt -no SOURCE / || true)"
+            ROOT_FSTYPE="$(findmnt -no FSTYPE / || true)"
+            ROOT_DISK="/dev/$(lsblk -no PKNAME "$ROOT_PART" 2>/dev/null | head -1 || true)"
+            ROOT_PARTNUM="$(echo "$ROOT_PART" | grep -oE '[0-9]+$' || true)"
+            echo "root part=$ROOT_PART  disk=$ROOT_DISK  partnum=$ROOT_PARTNUM  fstype=$ROOT_FSTYPE"
+            if command -v growpart >/dev/null 2>&1; then
+              growpart -N "$ROOT_DISK" "$ROOT_PARTNUM" 2>&1 || echo "(growpart dry-run: 无可扩空间或已最大)"
+            else
+              echo "(growpart 未安装，grow-disk 模式会自动装 cloud-guest-utils)"
+            fi
+
             echo "== docker system df =="
             docker system df || true
-
-            echo "== docker system df -v (top 消耗) =="
-            docker system df -v 2>/dev/null | head -80 || true
 
             echo "== /var/lib/docker 一级子目录 =="
             du -xhd1 /var/lib/docker 2>/dev/null | sort -h | tail -12 || true
 
             echo "== /opt/rr-portal 一级子目录 =="
             du -xhd1 /opt/rr-portal 2>/dev/null | sort -h | tail -15 || true
-
-            echo "== /opt/rr-portal/data 二级 =="
-            du -xhd2 /opt/rr-portal/data 2>/dev/null | sort -h | tail -20 || true
-
-            echo "== 备份目录 =="
-            du -sh /root/rr-backups ~/rr-backups /opt/rr-portal/*backup* 2>/dev/null || true
 
             echo "== journal 日志占用 =="
             journalctl --disk-usage 2>/dev/null || true
@@ -93,6 +102,26 @@ jobs:
               echo "-- 清理后 df --"; df -h / | tail -1
               echo "-- 清理后 docker system df --"; docker system df || true
               echo "[OK] prune-safe 完成（未动任何运行中的容器/volume/data 目录）"
+
+            elif [ "$MODE" = "grow-disk" ]; then
+              echo "=================== GROW-DISK ==================="
+              [ -n "$ROOT_PART" ] && [ -n "$ROOT_DISK" ] && [ -n "$ROOT_PARTNUM" ] || { echo "[FAIL] 无法解析根分区信息" >&2; exit 1; }
+              echo "-- 扩容前 --"; df -h "$ROOT_PART" | tail -1; lsblk "$ROOT_DISK" || true
+              if ! command -v growpart >/dev/null 2>&1; then
+                echo "-- 安装 cloud-guest-utils（提供 growpart） --"
+                apt-get update && apt-get install -y --no-install-recommends cloud-guest-utils
+              fi
+              echo "-- growpart $ROOT_DISK $ROOT_PARTNUM --"
+              growpart "$ROOT_DISK" "$ROOT_PARTNUM" || echo "(growpart: NOCHANGE，可能已是最大)"
+              echo "-- 扩文件系统 (fstype=$ROOT_FSTYPE) --"
+              case "$ROOT_FSTYPE" in
+                ext2|ext3|ext4) resize2fs "$ROOT_PART" ;;
+                xfs)            xfs_growfs / ;;
+                *) echo "[FAIL] 未知文件系统 $ROOT_FSTYPE，需手动处理" >&2; exit 1 ;;
+              esac
+              echo "-- 扩容后 --"; df -h "$ROOT_PART" | tail -1; lsblk "$ROOT_DISK" || true
+              echo "[OK] grow-disk 完成（数据/容器不受影响，只是分区变大）"
+
             else
               echo "[OK] diagnose 完成（只读，未改动任何东西）"
             fi

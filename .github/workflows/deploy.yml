@@ -26,42 +26,14 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Prepare Indonesia secret transport
-        env:
-          INDO_SQL_SA_PASSWORD: ${{ secrets.INDO_SQL_SA_PASSWORD }}
-          INDO_SQL_APP_PASSWORD: ${{ secrets.INDO_SQL_APP_PASSWORD }}
-          INDO_SHIPPING_JWT_KEY: ${{ secrets.INDO_SHIPPING_JWT_KEY }}
-          INDO_SHIPPING_ADMIN_PASSWORD: ${{ secrets.INDO_SHIPPING_ADMIN_PASSWORD }}
-        run: |
-          set -euo pipefail
-          encode_indo_secret() {
-            local source_name="$1"
-            local transport_name="$2"
-            local value="${!source_name:-}"
-            local encoded
-            if [ -z "$value" ]; then
-              echo "[FAIL] Required GitHub Secret $source_name is missing"
-              exit 1
-            fi
-            printf '::add-mask::%s\n' "$value"
-            encoded=$(printf '%s' "$value" | base64 | tr -d '\r\n')
-            printf '::add-mask::%s\n' "$encoded"
-            printf '%s=%s\n' "$transport_name" "$encoded" >> "$GITHUB_ENV"
-            echo "[GUARD] $source_name prepared for synchronized transport (value masked)"
-          }
-          encode_indo_secret INDO_SQL_SA_PASSWORD INDO_SQL_SA_PASSWORD_B64
-          encode_indo_secret INDO_SQL_APP_PASSWORD INDO_SQL_APP_PASSWORD_B64
-          encode_indo_secret INDO_SHIPPING_JWT_KEY INDO_SHIPPING_JWT_KEY_B64
-          encode_indo_secret INDO_SHIPPING_ADMIN_PASSWORD INDO_SHIPPING_ADMIN_PASSWORD_B64
-
       - name: Deploy via SSH
-        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1
+        uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.CLOUD_HOST }}
           username: ${{ secrets.CLOUD_USER }}
           key: ${{ secrets.CLOUD_SSH_KEY }}
           command_timeout: 60m
-          envs: BEFORE_COMMIT,AFTER_COMMIT,INDO_SQL_SA_PASSWORD_B64,INDO_SQL_APP_PASSWORD_B64,INDO_SHIPPING_JWT_KEY_B64,INDO_SHIPPING_ADMIN_PASSWORD_B64
+          envs: BEFORE_COMMIT,AFTER_COMMIT
           # BEFORE_COMMIT / AFTER_COMMIT 传给 update-server.sh 用于算 diff
           # 脚本自己负责 git pull，不要在这里先 pull（否则 pull 后 HEAD 已经前进，脚本的 BEFORE==AFTER）
           script: |
@@ -73,20 +45,6 @@ jobs:
             export BEFORE_COMMIT="${{ github.event.before }}"
             export AFTER_COMMIT="${{ github.event.after }}"
             cd /opt/rr-portal
-
-            echo "=== Indonesia shipping secret guard ==="
-            for transport_name in \
-                INDO_SQL_SA_PASSWORD_B64 \
-                INDO_SQL_APP_PASSWORD_B64 \
-                INDO_SHIPPING_JWT_KEY_B64 \
-                INDO_SHIPPING_ADMIN_PASSWORD_B64; do
-              transport_value="${!transport_name:-}"
-              if [ -z "$transport_value" ]; then
-                echo "[FAIL] Required Indonesia secret transport $transport_name is missing"
-                exit 1
-              fi
-              printf '::add-mask::%s\n' "$transport_value"
-            done
 
             # === peise Bailian env guard (2026-06-02) ===
             # 背景: 服务器 .env.cloud.production 缺 PEISE_BAILIAN_API_KEY → 容器里 key 为空 → OCR 不可用。
@@ -166,31 +124,13 @@ jobs:
             fi
 
             echo "=== Script version check ==="
-            git fetch origin main
-            DEPLOY_SCRIPT_RUNNER=$(mktemp)
-            DEPLOY_RESULT_FILE=$(mktemp)
-            export DEPLOY_RESULT_FILE
-            trap 'rm -f "$DEPLOY_SCRIPT_RUNNER" "$DEPLOY_RESULT_FILE"' EXIT
-            if [ -n "$AFTER_COMMIT" ]; then
-              git show "${AFTER_COMMIT}:deploy/update-server.sh" > "$DEPLOY_SCRIPT_RUNNER"
-            else
-              git show "origin/main:deploy/update-server.sh" > "$DEPLOY_SCRIPT_RUNNER"
-            fi
-            chmod 700 "$DEPLOY_SCRIPT_RUNNER"
-            grep -c "recreate" "$DEPLOY_SCRIPT_RUNNER" && echo "[OK] incoming update-server.sh contains recreate logic" || echo "[WARN] incoming update-server.sh MISSING recreate logic"
-            bash "$DEPLOY_SCRIPT_RUNNER"
-            INDO_TARGETED_DEPLOY=0
-            if grep -qx 'TARGETED_INDONESIA=1' "$DEPLOY_RESULT_FILE"; then
-              INDO_TARGETED_DEPLOY=1
-              echo "[GUARD] Indonesia-targeted result received; unrelated recreates are suppressed."
-            fi
-            rm -f "$DEPLOY_SCRIPT_RUNNER" "$DEPLOY_RESULT_FILE"
-            trap - EXIT
+            grep -c "recreate" deploy/update-server.sh && echo "[OK] update-server.sh contains recreate logic" || echo "[WARN] update-server.sh MISSING recreate logic"
+            bash deploy/update-server.sh
             bash deploy/install-shipping-history-seed.sh
             unset SHIPPING_HISTORY_SEED_PASSPHRASE
 
             # peise env guard 改了 .env.cloud.production → 必须 recreate 容器才能注入新 env
-            if [ "$PEISE_ENV_CHANGED" = "1" ] && [ "$INDO_TARGETED_DEPLOY" != "1" ]; then
+            if [ "$PEISE_ENV_CHANGED" = "1" ]; then
               echo "=== peise env 已修正 → force-recreate peise ==="
               docker compose -f docker-compose.cloud.yml --env-file .env.cloud.production up -d --no-deps --force-recreate peise
               echo "=== 验证容器内 BAILIAN env (key 打码) ==="
@@ -198,7 +138,7 @@ jobs:
             fi
 
             # qc env guard 改了 .env.cloud.production,必须 recreate 容器才能注入新 env
-            if [ "$QC_ENV_CHANGED" = "1" ] && [ "$INDO_TARGETED_DEPLOY" != "1" ]; then
+            if [ "$QC_ENV_CHANGED" = "1" ]; then
               echo "=== qc env changed -> force-recreate qc ==="
               docker compose -f docker-compose.cloud.yml --env-file .env.cloud.production up -d --no-deps --force-recreate qc
               echo "=== Verify qc container DASHSCOPE env (masked) ==="
@@ -278,7 +218,6 @@ jobs:
               /production-plan/health \
               /shipping/health \
               /factory-review/health \
-              /indo-shipping/health \
               /tomy-paiqi/health \
               /zuru-order-system/health \
               /zuru-master/health; do

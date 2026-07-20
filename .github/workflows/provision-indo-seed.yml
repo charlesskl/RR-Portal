@@ -1,0 +1,96 @@
+name: Provision Indo Seed
+
+# 一次性：把 indo-shipping (印尼走货明细) 的真实生产 seed 放到服务器
+#   data/indo-shipping-seed/business-data.json
+# 只放文件、不部署代码、不动任何运行中的容器。资源预检不过则中止（不改动任何东西）。
+# 必须在重新上线 indo 代码（revert 掉 #282）之前先跑，见 docs/runbooks/indo-shipping-relaunch.md。
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-cloud
+  queue: max
+  cancel-in-progress: false
+
+jobs:
+  provision:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Validate SSH host fingerprint
+        shell: bash
+        env:
+          CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]]; then
+            echo 'CLOUD_HOST_FINGERPRINT must be a non-empty OpenSSH SHA256 fingerprint.' >&2
+            exit 1
+          fi
+
+      - name: Provision indo-shipping seed via SSH
+        env:
+          CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
+        with:
+          host: ${{ secrets.CLOUD_HOST }}
+          username: ${{ secrets.CLOUD_USER }}
+          key: ${{ secrets.CLOUD_SSH_KEY }}
+          fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
+          command_timeout: 15m
+          script: |
+            set -euo pipefail
+            cd /opt/rr-portal
+
+            SEED_BRANCH="codex/indonesia-shipping-portal"
+            SEED_BLOB="e0d5752edc7e672d4d2dd147fa7485166db1be5e"
+            SEED_SHA256="a657b1cad100609db980ca13e7b6bf3edea9c1d598deaa6102ec8c44557c7590"
+            SEED_BYTES="6860302"
+            SEED_VERSION="2026-07-15"
+            SEED_DIR="data/indo-shipping-seed"
+            SEED_FILE="$SEED_DIR/business-data.json"
+            MIN_MEM_MB=2500
+            MIN_DISK_MB=10240
+
+            echo "== resource preflight (SQL Server 2022 需较多内存) =="
+            MEM=$(free -m | awk '/^Mem:/{print $7}')
+            DISK=$(df -Pm /opt/rr-portal | awk 'NR==2{print $4}')
+            echo "available mem: ${MEM} MB (need >= ${MIN_MEM_MB})"
+            echo "free disk:     ${DISK} MB (need >= ${MIN_DISK_MB})"
+            if [ "${MEM:-0}" -lt "$MIN_MEM_MB" ]; then
+              echo "[ABORT] 可用内存不足，未改动任何东西。先腾内存再重跑。" >&2
+              exit 1
+            fi
+            if [ "${DISK:-0}" -lt "$MIN_DISK_MB" ]; then
+              echo "[ABORT] 空闲磁盘不足，未改动任何东西。" >&2
+              exit 1
+            fi
+
+            echo "== 从私有分支取 seed 对象（不打印内容） =="
+            git fetch --no-tags origin "$SEED_BRANCH"
+            test "$(git cat-file -t "$SEED_BLOB")" = blob
+
+            echo "== 提取到临时文件 + 完整性校验 =="
+            TMP="$(mktemp)"
+            trap 'rm -f "$TMP"' EXIT
+            git cat-file blob "$SEED_BLOB" > "$TMP"
+            ACT_BYTES="$(wc -c < "$TMP")"
+            ACT_SHA="$(sha256sum "$TMP" | awk '{print $1}')"
+            echo "bytes=$ACT_BYTES  sha256=$ACT_SHA"
+            test "$ACT_BYTES" = "$SEED_BYTES"
+            test "$ACT_SHA" = "$SEED_SHA256"
+            grep -q "\"schemaVersion\":\"$SEED_VERSION\"" "$TMP"
+
+            echo "== 原子落地（644，供只读挂载的容器读取） =="
+            mkdir -p "$SEED_DIR"
+            install -m 644 "$TMP" "$SEED_FILE"
+
+            echo "== 校验落地结果 =="
+            ls -l "$SEED_FILE"
+            test "$(sha256sum "$SEED_FILE" | awk '{print $1}')" = "$SEED_SHA256"
+            grep -o "\"schemaVersion\":\"[^\"]*\"" "$SEED_FILE" | head -1
+            echo "[OK] indo seed 已就位: $SEED_FILE ($ACT_BYTES bytes, schemaVersion $SEED_VERSION)"

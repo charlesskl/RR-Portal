@@ -89,3 +89,26 @@ Part A/B 原设计是人工登阿里云控制台。实际本机无 ECS SSH（私
 2. `ECS Disk Ops` → `prune-safe` 清残骸（尤其失败重试后）。
 3. `Provision Indo Seed`（幂等，可反复跑校验 seed 在位 + 拿 mem/disk 准数，需 mem≥2500/disk≥10240）。
 4. 合并 indo 代码（含 Dockerfile getent 修复）→ 盯部署 → 冒烟 `/indo-shipping/health`。失败先 revert 再排查。
+
+---
+
+## 日常运维：indo 重部署的内存约束（2026-07-20 补）
+
+**背景**：ECS 是 8GiB 内存（`ecs.e-c1m4.large`，2 核）。indo 正常运行后可用内存约 **2439MB**，**低于 indo 部署预检阈值 `MIN_INDO_AVAILABLE_MEMORY_MB=2500`**。
+
+### 影响面（重要，别慌）
+- **部署其他服务 / 日常 CD：不受影响。** 2500MB 预检只在「indo 被判定为 affected」时触发；transport 已持久化后，普通 push 不会连累 indo。单服务 build+重启，2439MB 足够。
+- **只有「重新部署 indo 本身」会卡**：改 indo 代码 / 改配置 / 改 admin 密码 secret → 触发 indo 部署 → 撞 2500 预检失败（indo 已在跑、占着内存），且会因 `indo_secret_transport_changed` 阻塞后续 CD，直到成功一次或 revert。
+
+### 重新部署 indo 的正确姿势
+1. 先跑 `ECS Disk Ops` workflow → `mode=indo-stop`（临时停 indo 容器，腾出 ~850MB → 可用内存回到 ~3100MB > 2500；数据在 bind mount，停机安全）。
+2. **紧接着**触发 `Deploy to Cloud`（push 或 workflow_dispatch）。它会：过预检 → `up indo-sqlserver` → 等 healthy → `run indo-shipping-init`（bootstrap）→ `up indo-shipping` → `persist_indo_secret_transport`（解 CD）。deploy 自己把 indo 拉回来。
+3. 冒烟 `/indo-shipping/health` 应 200。
+- 注：用 `workflow_dispatch` 触发时，末尾 "Verify deploy actually landed" 会因 `AFTER_COMMIT` 为空 cosmetic 报红，但 indo 部署在那之前已完成，以冒烟/登录结果为准。
+
+### 改 admin 登录密码
+- 用户名固定 `admin`，密码由 `INDO_SHIPPING_ADMIN_PASSWORD` secret 决定；bootstrap 的 `SetAdminPassword` **每次部署都跑**（不受 seed 已导入影响），所以改密码 = 改 secret + 触发一次 indo 部署（走上面 indo-stop 流程）。2026-07-20 已用此法重置为 `admin123`。
+- 也可登录后在系统「用户管理」里改（`UsersController.ResetPassword`），那样不动 secret、不需重部署。
+
+### 想免掉这个麻烦
+把 ECS 内存 8G→16G（阿里云控制台「配置变更」，涉及费用），indo 就能直接走部署预检，不用每次 `indo-stop`。

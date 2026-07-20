@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, reactive, onMounted, watch } from 'vue'
+import { ref, computed, reactive, onMounted, watch, nextTick } from 'vue'
 import { useRoute, RouterLink } from 'vue-router'
 import AppLayout from '../components/AppLayout.vue'
 import { pb } from '../pb'
@@ -45,7 +45,14 @@ const price = reactive({
 const priceSaving = ref(false)
 const priceSaved = ref(false)
 
+// 加载已存订单时按顺序赋值会触发下面的 watcher，若不加保护会用 CNY 现算值覆盖掉
+// 已存的 unit_price（手工改过的港币单价会被静默还原并在保存时丢失）。加载阶段跳过联动，
+// 只有用户真正编辑 CNY 价时才重算。默认 flush:'pre' 是异步的，用 nextTick 复位标志位
+// 以确保 watcher 回调（在 flush 队列里）跑完后 loadingPrice 才变回 false。
+let loadingPrice = false
+
 watch(() => price.unit_price_cny_tax, (value) => {
+  if (loadingPrice) return
   if (value == null || value === ('' as any)) {
     price.unit_price = null
     return
@@ -55,11 +62,13 @@ watch(() => price.unit_price_cny_tax, (value) => {
 })
 
 function initPrice(o: Order) {
+  loadingPrice = true
   price.quote_labor_price = o.quote_labor_price ?? null
   price.unit_price = o.unit_price ?? null
   price.unit_price_cny_tax = o.unit_price_cny_tax ?? null
   price.supplier_price = o.supplier_price ?? null
   price.process_category = o.process_category ?? ''
+  nextTick(() => { loadingPrice = false })
 }
 
 // 交期/客退信息（可编辑）

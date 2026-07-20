@@ -149,6 +149,7 @@ describe('parseDeliveryImport', () => {
       factory: 'factory-1',
       pmc: '温雪花',
       item_no: '77794-唱片机MA',
+      mold_no: 'MNVN-05M-01-2',
       order_no: 'WXH2600140',
       product: '唱片模',
       process_category: '啤机',

@@ -8,7 +8,7 @@ import { useAuthStore } from '../stores/auth'
 import { canEditOrders } from '../utils/permissions'
 import { CRAFT_LABELS, type Craft } from '../constants/roles'
 import type { Order } from '../types/order'
-import { cnyTaxToHkdUntaxed } from '../utils/orderPricing'
+import { cnyTaxToHkdUntaxed, DEFAULT_CNY_TO_HKD_RATE } from '../utils/orderPricing'
 
 const route = useRoute()
 const orders = useOrdersStore()
@@ -39,6 +39,7 @@ const price = reactive({
   quote_labor_price: null as number | null,
   unit_price: null as number | null,
   unit_price_cny_tax: null as number | null,
+  exchange_rate: DEFAULT_CNY_TO_HKD_RATE as number | null,
   supplier_price: null as number | null,
   process_category: '',
 })
@@ -47,18 +48,21 @@ const priceSaved = ref(false)
 
 // 加载已存订单时按顺序赋值会触发下面的 watcher，若不加保护会用 CNY 现算值覆盖掉
 // 已存的 unit_price（手工改过的港币单价会被静默还原并在保存时丢失）。加载阶段跳过联动，
-// 只有用户真正编辑 CNY 价时才重算。默认 flush:'pre' 是异步的，用 nextTick 复位标志位
+// 只有用户真正编辑 CNY 价或换算汇率时才重算。默认 flush:'pre' 是异步的，用 nextTick 复位标志位
 // 以确保 watcher 回调（在 flush 队列里）跑完后 loadingPrice 才变回 false。
 let loadingPrice = false
 
-watch(() => price.unit_price_cny_tax, (value) => {
+watch(() => [price.unit_price_cny_tax, price.exchange_rate], ([value, rate]) => {
   if (loadingPrice) return
   if (value == null || value === ('' as any)) {
     price.unit_price = null
     return
   }
   const cnyTaxPrice = Number(value)
-  if (Number.isFinite(cnyTaxPrice)) price.unit_price = cnyTaxToHkdUntaxed(cnyTaxPrice)
+  const exchangeRate = Number(rate)
+  if (Number.isFinite(cnyTaxPrice) && Number.isFinite(exchangeRate) && exchangeRate > 0) {
+    price.unit_price = cnyTaxToHkdUntaxed(cnyTaxPrice, exchangeRate)
+  }
 })
 
 function initPrice(o: Order) {
@@ -66,6 +70,7 @@ function initPrice(o: Order) {
   price.quote_labor_price = o.quote_labor_price ?? null
   price.unit_price = o.unit_price ?? null
   price.unit_price_cny_tax = o.unit_price_cny_tax ?? null
+  price.exchange_rate = o.exchange_rate && o.exchange_rate > 0 ? o.exchange_rate : DEFAULT_CNY_TO_HKD_RATE
   price.supplier_price = o.supplier_price ?? null
   price.process_category = o.process_category ?? ''
   nextTick(() => { loadingPrice = false })
@@ -135,6 +140,7 @@ async function savePrice() {
     quote_labor_price: num(price.quote_labor_price),
     unit_price: num(price.unit_price),
     unit_price_cny_tax: num(price.unit_price_cny_tax),
+    exchange_rate: num(price.exchange_rate),
     supplier_price: num(price.supplier_price),
     process_category: price.process_category,
   })
@@ -157,11 +163,13 @@ async function savePrice() {
           <div><dt>工序</dt><dd>{{ order.process || '-' }}</dd></div>
           <div><dt>车间</dt><dd>{{ order.workshop || '-' }}</dd></div>
           <div><dt>货号</dt><dd>{{ order.item_no || '-' }}</dd></div>
+          <div><dt>模具编号</dt><dd>{{ order.mold_no || '-' }}</dd></div>
           <div><dt>产品</dt><dd>{{ order.product }}</dd></div>
           <div><dt>数量</dt><dd>{{ order.quantity ?? '-' }}</dd></div>
           <div><dt>核价生产工价</dt><dd>{{ order.quote_labor_price ?? '-' }}</dd></div>
           <div><dt>外发单价</dt><dd>{{ order.unit_price ?? '-' }}</dd></div>
           <div><dt>外发工价(人民币含税)</dt><dd>{{ order.unit_price_cny_tax ?? '-' }}</dd></div>
+          <div><dt>换算汇率</dt><dd>{{ order.exchange_rate && order.exchange_rate > 0 ? order.exchange_rate : DEFAULT_CNY_TO_HKD_RATE }}</dd></div>
           <div><dt>扣税点1.13后单价</dt><dd>{{ order.unit_price != null ? Math.round((order.unit_price / 1.13) * 10000) / 10000 : '-' }}</dd></div>
           <div><dt>占比</dt><dd>{{ order.unit_price != null && order.quote_labor_price ? Math.round(((order.unit_price / 1.13) / order.quote_labor_price) * 1000) / 10 + '%' : '-' }}</dd></div>
           <div><dt>金额</dt><dd>{{ order.amount != null ? order.amount.toLocaleString() : '-' }}</dd></div>
@@ -178,6 +186,7 @@ async function savePrice() {
           <label>供应商外发价 <input v-model.number="price.supplier_price" type="number" min="0" step="0.01" /></label>
           <label>外发单价 <input v-model.number="price.unit_price" type="number" min="0" step="0.0001" /></label>
           <label>外发工价(人民币含税) <input v-model.number="price.unit_price_cny_tax" type="number" min="0" step="0.0001" /></label>
+          <label>换算汇率 <input v-model.number="price.exchange_rate" type="number" min="0.0001" step="0.01" /></label>
           <div class="actions">
             <button type="submit" :disabled="priceSaving">{{ priceSaving ? '保存中…' : '保存' }}</button>
             <span v-if="priceSaved" class="ok">已保存 ✓</span>

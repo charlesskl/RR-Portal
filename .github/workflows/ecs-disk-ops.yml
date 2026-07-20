@@ -1,0 +1,98 @@
+name: ECS Disk Ops
+
+# ECS 磁盘运维（手动触发）：
+#   mode=diagnose   —— 只读诊断，报告 df / docker system df / 大目录占用，绝不改动任何东西
+#   mode=prune-safe —— 安全回收：docker builder prune + 无容器引用的镜像 prune
+#                      不动运行中的容器、不动任何 volume/数据、不动 data 目录
+# 用于 indo-shipping 上线前腾磁盘（需 >=10GB 空闲）。
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "diagnose (只读) 或 prune-safe (安全清理)"
+        type: choice
+        required: true
+        default: diagnose
+        options:
+          - diagnose
+          - prune-safe
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-cloud
+  queue: max
+  cancel-in-progress: false
+
+jobs:
+  disk-ops:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Validate SSH host fingerprint
+        shell: bash
+        env:
+          CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]]; then
+            echo 'CLOUD_HOST_FINGERPRINT must be a non-empty OpenSSH SHA256 fingerprint.' >&2
+            exit 1
+          fi
+
+      - name: ECS disk ops via SSH
+        env:
+          CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+          OPS_MODE: ${{ inputs.mode }}
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
+        with:
+          host: ${{ secrets.CLOUD_HOST }}
+          username: ${{ secrets.CLOUD_USER }}
+          key: ${{ secrets.CLOUD_SSH_KEY }}
+          fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
+          command_timeout: 18m
+          envs: OPS_MODE
+          script: |
+            set -euo pipefail
+            MODE="${OPS_MODE:-diagnose}"
+            echo "=================== MODE: $MODE ==================="
+
+            echo "== df -h =="
+            df -h
+
+            echo "== docker system df =="
+            docker system df || true
+
+            echo "== docker system df -v (top 消耗) =="
+            docker system df -v 2>/dev/null | head -80 || true
+
+            echo "== /var/lib/docker 一级子目录 =="
+            du -xhd1 /var/lib/docker 2>/dev/null | sort -h | tail -12 || true
+
+            echo "== /opt/rr-portal 一级子目录 =="
+            du -xhd1 /opt/rr-portal 2>/dev/null | sort -h | tail -15 || true
+
+            echo "== /opt/rr-portal/data 二级 =="
+            du -xhd2 /opt/rr-portal/data 2>/dev/null | sort -h | tail -20 || true
+
+            echo "== 备份目录 =="
+            du -sh /root/rr-backups ~/rr-backups /opt/rr-portal/*backup* 2>/dev/null || true
+
+            echo "== journal 日志占用 =="
+            journalctl --disk-usage 2>/dev/null || true
+
+            if [ "$MODE" = "prune-safe" ]; then
+              echo "=================== PRUNE-SAFE ==================="
+              echo "-- 清理前 df --"; df -h / | tail -1
+              echo "-- docker builder prune -af (仅构建缓存) --"
+              docker builder prune -af || true
+              echo "-- docker image prune -af (仅无容器引用的镜像；不动运行中容器/数据/volume) --"
+              docker image prune -af || true
+              echo "-- 清理后 df --"; df -h / | tail -1
+              echo "-- 清理后 docker system df --"; docker system df || true
+              echo "[OK] prune-safe 完成（未动任何运行中的容器/volume/data 目录）"
+            else
+              echo "[OK] diagnose 完成（只读，未改动任何东西）"
+            fi

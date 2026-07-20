@@ -82,7 +82,8 @@ async function parseWorkbook(buffer) {
   const otpMatch = allText.match(/OTP\s*单价\s*[：:]\s*([\d,.]+)\s*\/\s*片/i);
   const quotedPrice = quoteMatch ? toNum(quoteMatch[1]) : 0;
   const otpPrice = otpMatch ? toNum(otpMatch[1]) : 0;
-  const totalPrice = quotedPrice + otpPrice;
+  // 联翔的“报价金额”已注明含芯片单价，OTP 仅用于拆分 IC 成本。
+  const totalPrice = quotedPrice;
 
   const meta = { supplier: toStr(rows[0] && rows[0][1]) };
   for (let i = 0; i < headerRow; i++) {

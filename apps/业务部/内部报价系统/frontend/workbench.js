@@ -535,7 +535,7 @@ function elecImportedSummaryRows(doc, ex, fx) {
   const otp = Math.max(0, num(sourceExtras.otp_price_rmb));
   const total = Math.max(0, num(sourceExtras.total_price_rmb || sourceExtras.taxed_price));
   const pacb = sourceExtras.quoted_price_rmb != null
-    ? Math.max(0, num(sourceExtras.quoted_price_rmb))
+    ? Math.max(0, num(sourceExtras.quoted_price_rmb) - otp)
     : Math.max(0, total - otp);
   const icPart = (doc.parts || []).find(p => /IC|芯片/i.test(`${p.name || ''} ${p.spec || ''}`));
   const mk = rmb => ({
@@ -2329,7 +2329,7 @@ function renderElectronic(host, payload, canEdit, onChange, fxRmbHkd) {
             <div class="card" style="background:#f0fdf4;border:1px solid #86efac;margin-top:10px">
               <p><b>${importer.label}</b>格式：从 <b>${escapeHtml(j.sheet_used || '')}</b> 解析到 <b>${j.count}</b> 个零件（${(j.parts || []).reduce((a, p) => a + 1 + (p.children || []).length, 0)} 行明细）</p>
               ${j.meta && j.meta.product ? `<p class="muted">产品: ${escapeHtml(j.meta.product)}${j.meta.customer ? ' · 客户: ' + escapeHtml(j.meta.customer) : ''}${j.meta.date ? ' · 日期: ' + escapeHtml(j.meta.date) : ''}</p>` : ''}
-              ${j.source_format === 'lianxiang' ? `<p class="muted">PACB电子 RMB ${formatNum(j.extras && j.extras.quoted_price_rmb)} + OTP 芯片 RMB ${formatNum(j.extras && j.extras.otp_price_rmb)} = 合计 RMB ${formatNum(j.extras && j.extras.total_price_rmb)} · 其它费用 ${(j.extras && j.extras.other_fees || []).length} 项</p>` : ''}
+              ${j.source_format === 'lianxiang' ? `<p class="muted">联翔报价 RMB ${formatNum(j.extras && j.extras.total_price_rmb)} / 套（已含 OTP 芯片 RMB ${formatNum(j.extras && j.extras.otp_price_rmb)}） · 其它费用 ${(j.extras && j.extras.other_fees || []).length} 项</p>` : ''}
               <p class="muted">导入后会替换电子表；导出 Excel 时会附加“电子明细”分表。</p>
               <div style="margin-top:10px;display:flex;gap:8px">
                 <button id="el-imp-apply">应用</button>

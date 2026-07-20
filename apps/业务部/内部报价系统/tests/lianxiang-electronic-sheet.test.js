@@ -32,8 +32,8 @@ test('lianxiang import reads materials, quotation, OTP price and other fees', as
   assert.equal(result.meta.quote_no, '2024010412');
   assert.equal(result.extras.quoted_price_rmb, 2.85);
   assert.equal(result.extras.otp_price_rmb, 0.88);
-  assert.equal(result.extras.total_price_rmb, 3.73);
-  assert.equal(result.extras.taxed_price, 3.73);
+  assert.equal(result.extras.total_price_rmb, 2.85);
+  assert.equal(result.extras.taxed_price, 2.85);
   assert.equal(result.extras.mold_fee_rmb, 2400);
   assert.equal(result.parts[1].unit_price, 0.88);
   assert.deepEqual(result.extras.other_fees[0], {

@@ -1,0 +1,6 @@
+@IndoShipping.Api_HostAddress = http://localhost:5198
+
+GET {{IndoShipping.Api_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

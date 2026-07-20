@@ -43,6 +43,7 @@ nginx/.htpasswd
 
 # Cloud deployment data
 data/postgres/*
+data/indo-shipping-seed/
 !data/postgres/.gitkeep
 
 # Docker

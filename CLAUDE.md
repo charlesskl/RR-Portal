@@ -46,6 +46,8 @@ RR-Portal/
 │   │   ├── 报价系统/                — baojia (Node.js, SPIN/TOMY 供应商报价)
 │   │   ├── TOMY排期核对系统/        — tomy-paiqi (Node.js + React)
 │   │   └── 内部报价系统/            — internal-quote (Node.js + node:sqlite, 多部门分工报价)
+│   ├── 印尼小组/
+│   │   └── 印尼走货明细/              — indo-shipping (ASP.NET Core + React)
 │   ├── QA部/
 │   │   └── QA测试报告周结系统/      — qa-weekly-report (Node.js + React + exceljs)
 │   └── task-api/                  — 任务 API (Node.js，仅本地 compose，无部门)
@@ -214,6 +216,7 @@ curl http://localhost:<port>/health
 | baojia 报价系统 | Node.js | 3007 | /baojia/ |
 | qa-weekly-report QA测试报告周结系统 | Node.js/React | 3210 | /qa-weekly-report/ |
 | internal-quote 内部报价系统 | Node.js | 3211 | /internal-quote/ |
+| indo-shipping 印尼走货明细 | ASP.NET Core + React | 5180 | /indo-shipping/ |
 
 ## 插件类型
 
@@ -468,6 +471,7 @@ const data = JSON.parse(fs.readFileSync('data/data.json'));
 | baojia | 报价系统 | 业务部 | Standalone (Node.js) | /baojia/ | — |
 | qa-weekly-report | QA测试报告周结系统 | QA部 | Standalone (Node.js/React + exceljs) | /qa-weekly-report/ | — |
 | internal-quote | 内部报价系统 | 业务部 | Standalone (Node.js + node:sqlite) | /internal-quote/ | — |
+| indo-shipping | 印尼走货明细 | 印尼小组 | Standalone (ASP.NET Core + React) | /indo-shipping/ | (PR #268) |
 
 ### 旧插件（已删除）
 

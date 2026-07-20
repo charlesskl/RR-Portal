@@ -63,7 +63,7 @@ router.post('/mold-image', requireAuth, upload.single('file'), (req, res) => {
 // 不持久化 — 前端预览后由用户决定是否合并入 payload.molds
 const memUpload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024 },
+  limits: { fileSize: 50 * 1024 * 1024 },
 });
 const { parseWorkbook } = require('../services/parseMoldSheet');
 const { extractImagesByRow } = require('../services/extractXlsxImages');
@@ -166,6 +166,25 @@ router.post('/electronic-sheet', requireAuth, memUpload.single('file'), async (r
   }
   try {
     const result = await parseElectronicWorkbook(req.file.buffer);
+    if (result.error) return res.status(422).json(result);
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ error: '解析失败: ' + e.message });
+  }
+});
+
+// POST /api/uploads/electronic-lianxiang-sheet  联翔电子报价单 xlsx → 返回 parts + 报价摘要
+const { parseWorkbook: parseLianxiangElectronicWorkbook } = require('../services/parseLianxiangElectronicSheet');
+router.post('/electronic-lianxiang-sheet', requireAuth, memUpload.single('file'), async (req, res) => {
+  if (!['electronic', 'sales', 'engineering'].includes(req.user.dept) && req.user.role !== 'admin') {
+    return res.status(403).json({ error: '仅 电子部/业务/工程/超级管理员 可上传' });
+  }
+  if (!req.file) return res.status(400).json({ error: '缺少文件' });
+  if (!/\.(xls|xlsx)$/i.test(req.file.originalname)) {
+    return res.status(400).json({ error: '当前只支持 .xls/.xlsx' });
+  }
+  try {
+    const result = await parseLianxiangElectronicWorkbook(req.file.buffer);
     if (result.error) return res.status(422).json(result);
     res.json(result);
   } catch (e) {

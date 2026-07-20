@@ -26,11 +26,11 @@ const FIELD_KEYWORDS = {
   sets:           ['套数', 'UP', '数量/件', '数量'],
   product_size:   ['产品尺寸'],
   machine:        ['机型(TON)', 'INJECTIONMACHINETYPE', '机型'],
-  weight:         ['净重', '料重', '克重', '零件重量', '零件重', 'PARTWEIGHT'],
+  weight:         ['净重', '重量', '料重', '克重', '零件重量', '零件重', 'PARTWEIGHT'],
   cycle:          ['周期', 'CYCLETIME', 'CYCLE'],   // 注塑生产周期(秒)
   target:         ['模具预计日啤数', '目标数', 'CYCLES/DAY', 'CYCLESDAY'],
   structure:      ['滑块', '斜顶', '模具结构', '加工内容', 'SLIDE', '行位'],
-  price_rmb:      ['含税模价', '总价', '模价', '价格', '单价', 'MOLDCOST', 'TOTALAMOUNT', 'AMOUNT'],
+  price_rmb:      ['含税模价', '金额RMB', '金额', '总价', '模价', '价格', '单价', 'MOLDCOST', 'TOTALAMOUNT', 'AMOUNT'],
   price_usd:      ['USD', '美元'],
   mold_type:      ['进胶方式', '模胚类型', '模胚大约', '模胚型号', '模胚', '水口', 'GATE'],
   note:           ['备注', '说明', 'REMARK'],
@@ -167,8 +167,11 @@ function tryParseSheet(wb, sheetName) {
     const txt = r.map(c => String(c ?? '')).join('').trim();
     if (!txt) continue;
     const rowText = r.map(c => nu(c)).join('|');
+    const firstNonEmpty = r.map(c => String(c ?? '').trim()).find(Boolean) || '';
     // 边界：再遇到 "X、XXX部分" 章节标题 → 停止
     if (/[一二三四五六七八九十]、.+部分/.test(rowText)) break;
+    // 模具明细后的总套数/总价行表示数据区结束，后面通常是付款与交期条款。
+    if (/^共\s*\d+\s*套.*模/.test(firstNonEmpty) || /合计\s*[（(]?\s*RMB\s*[）)]?\s*[:：]/i.test(rowText)) break;
     // 边界：再遇到 header-like 行（高密度关键字）→ 停止
     let hits = 0;
     for (const w of HEADER_HINT_WORDS) if (rowText.includes(nu(w))) hits++;
@@ -176,9 +179,9 @@ function tryParseSheet(wb, sheetName) {
     // 跳过条款 / 说明 / 签名 / 合计 等非数据行
     if (/^(小计|合计|总计|大写|说明|备注|以下空白|客户确认|签名|损耗)/.test(norm(r[0]))) continue;
     if (/以下空白|客户确认|确认签名|付款方式|完成时间|交货地点|交货时间|交货期|不含税|不含报价|不包含报价|请回电|协商|此单有问题|交付后|工作日完成|甲方|乙方|签字|盖章|改图|抄数费用|模具寿命|消耗品|本报价单|影印件|特别说明|蚀纹|温控箱|订金|首款|尾款|中款|另计/.test(rowText)) continue;
-    // 条款编号行：col-1 以"数字+点/、"开头（如 "1.模具符合..." "2、付款"）
-    const c1 = String(r[1] || '').trim();
-    if (/^\d+\s*[.、、，,]/.test(c1) && c1.length > 12) continue;
+    // 条款可能位于任意列；检查首个非空单元格，而不是固定检查 B 列。
+    if (/^NOTE\s*[:：]?/i.test(firstNonEmpty)) continue;
+    if (/^\d+\s*[.:：、，,]/.test(firstNonEmpty) && firstNonEmpty.length > 12) continue;
     if (/[一二三四五六七八九十]、/.test(String(r[0] || ''))) continue;
     // 页脚/签名/条款（如 "Authorized signature"）；英文条款
     if (/AUTHORIZED|SIGNATURE|I\/WE ACCEPT|COMPANY CHOP|TERMS/i.test(txt)) continue;

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
 import AppLayout from '../components/AppLayout.vue'
 import { useOrdersStore } from '../stores/orders'
@@ -7,6 +7,7 @@ import { useFactoriesStore } from '../stores/factories'
 import { useAuthStore } from '../stores/auth'
 import { CRAFT_LABELS, type Craft } from '../constants/roles'
 import type { Order } from '../types/order'
+import { cnyTaxToHkdUntaxed } from '../utils/orderPricing'
 
 const route = useRoute()
 const router = useRouter()
@@ -34,6 +35,15 @@ const filteredFactories = computed(() => {
   return deptFactories.value
     .filter((f) => f.name.toLowerCase().includes(q))
     .slice(0, 60)
+})
+
+watch(() => draft.value.unit_price_cny_tax, (value) => {
+  if (value == null || value === ('' as any)) {
+    draft.value.unit_price = undefined
+    return
+  }
+  const cnyTaxPrice = Number(value)
+  if (Number.isFinite(cnyTaxPrice)) draft.value.unit_price = cnyTaxToHkdUntaxed(cnyTaxPrice)
 })
 
 onMounted(() => factories.fetchAll())
@@ -105,8 +115,8 @@ async function submit() {
           <label>数量 <input v-model.number="draft.quantity" type="number" min="0" /></label>
           <label>加工类别 <input v-model="draft.process_category" placeholder="如塑胶半成品" /></label>
           <label>核价生产工价 <input v-model.number="draft.quote_labor_price" type="number" min="0" step="0.01" /></label>
-          <label>外发单价 <input v-model.number="draft.unit_price" type="number" min="0" step="0.01" /></label>
-          <label>外发工价(人民币含税) <input v-model.number="draft.unit_price_cny_tax" type="number" min="0" step="0.01" /></label>
+          <label>外发单价 <input v-model.number="draft.unit_price" type="number" min="0" step="0.0001" /></label>
+          <label>外发工价(人民币含税) <input v-model.number="draft.unit_price_cny_tax" type="number" min="0" step="0.0001" /></label>
           <label>金额 <input :value="draftAmount" type="number" disabled /></label>
           <label>下单日期 <input v-model="draft.order_date" type="date" /></label>
           <label>交货日期 <input v-model="draft.delivery_date" type="date" /></label>

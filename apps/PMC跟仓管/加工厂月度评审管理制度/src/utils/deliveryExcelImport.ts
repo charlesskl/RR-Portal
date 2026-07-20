@@ -1,5 +1,6 @@
 import * as XLSX from 'xlsx'
 import { parseDeliveryImport } from './deliveryStats'
+import { applyCnyTaxPrice } from './orderPricing'
 
 export interface DeliveryExcelFile {
   name: string
@@ -14,9 +15,14 @@ export interface DeliveryExcelBatchResult {
   readFailedFiles: string[]
 }
 
+export interface DeliveryExcelImportOptions {
+  preferCnyTaxPrice?: boolean
+}
+
 export async function parseDeliveryExcelFiles(
   files: DeliveryExcelFile[],
   factoryIdByName: Record<string, string>,
+  options: DeliveryExcelImportOptions = {},
 ): Promise<DeliveryExcelBatchResult> {
   const result: DeliveryExcelBatchResult = {
     fileCount: files.length,
@@ -37,7 +43,8 @@ export async function parseDeliveryExcelFiles(
         const parsed = parseDeliveryImport(aoa, factoryIdByName)
         if (!parsed.payloads.length && !parsed.failed) continue
         result.failedRows += parsed.failed
-        result.payloads.push(...parsed.payloads)
+        result.payloads.push(...parsed.payloads.map((payload) =>
+          applyCnyTaxPrice(payload, options.preferCnyTaxPrice)))
         recognized = true
         break
       }

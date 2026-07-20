@@ -34,12 +34,22 @@ describe('parseDeliveryExcelFiles', () => {
       ]),
     ]
 
-    const result = await parseDeliveryExcelFiles(files, { '益正': 'factory-1', '俊豪': 'factory-2' })
+    const result = await parseDeliveryExcelFiles(
+      files,
+      { '益正': 'factory-1', '俊豪': 'factory-2' },
+      { preferCnyTaxPrice: true },
+    )
 
     expect(result).toMatchObject({ fileCount: 2, failedRows: 0, unrecognizedFiles: [], readFailedFiles: [] })
     expect(result.payloads).toHaveLength(2)
-    expect(result.payloads[0]).toMatchObject({ factory: 'factory-1', order_no: 'ORDER-1', item_no: 'ITEM-1' })
-    expect(result.payloads[1]).toMatchObject({ factory: 'factory-2', order_no: 'ORDER-2', item_no: 'ITEM-2' })
+    expect(result.payloads[0]).toMatchObject({
+      factory: 'factory-1', order_no: 'ORDER-1', item_no: 'ITEM-1',
+      unit_price_cny_tax: 0.2, unit_price: 0.2034,
+    })
+    expect(result.payloads[1]).toMatchObject({
+      factory: 'factory-2', order_no: 'ORDER-2', item_no: 'ITEM-2',
+      unit_price_cny_tax: 0.3, unit_price: 0.3052,
+    })
   })
 
   it('uses molding shots as quantity and skips empty worksheets', async () => {
@@ -71,8 +81,8 @@ describe('parseDeliveryExcelFiles', () => {
       order_date: '2026-07-02',
       delivery_date: '2026-07-14',
       unit_price_cny_tax: 0.44,
+      unit_price: 0.4476,
       amount: 1100,
     })
-    expect(result.payloads[0].unit_price).toBeUndefined()
   })
 })

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, reactive, onMounted } from 'vue'
+import { ref, computed, reactive, onMounted, watch, nextTick } from 'vue'
 import { useRoute, RouterLink } from 'vue-router'
 import AppLayout from '../components/AppLayout.vue'
 import { pb } from '../pb'
@@ -8,6 +8,7 @@ import { useAuthStore } from '../stores/auth'
 import { canEditOrders } from '../utils/permissions'
 import { CRAFT_LABELS, type Craft } from '../constants/roles'
 import type { Order } from '../types/order'
+import { cnyTaxToHkdUntaxed } from '../utils/orderPricing'
 
 const route = useRoute()
 const orders = useOrdersStore()
@@ -44,12 +45,30 @@ const price = reactive({
 const priceSaving = ref(false)
 const priceSaved = ref(false)
 
+// 加载已存订单时按顺序赋值会触发下面的 watcher，若不加保护会用 CNY 现算值覆盖掉
+// 已存的 unit_price（手工改过的港币单价会被静默还原并在保存时丢失）。加载阶段跳过联动，
+// 只有用户真正编辑 CNY 价时才重算。默认 flush:'pre' 是异步的，用 nextTick 复位标志位
+// 以确保 watcher 回调（在 flush 队列里）跑完后 loadingPrice 才变回 false。
+let loadingPrice = false
+
+watch(() => price.unit_price_cny_tax, (value) => {
+  if (loadingPrice) return
+  if (value == null || value === ('' as any)) {
+    price.unit_price = null
+    return
+  }
+  const cnyTaxPrice = Number(value)
+  if (Number.isFinite(cnyTaxPrice)) price.unit_price = cnyTaxToHkdUntaxed(cnyTaxPrice)
+})
+
 function initPrice(o: Order) {
+  loadingPrice = true
   price.quote_labor_price = o.quote_labor_price ?? null
   price.unit_price = o.unit_price ?? null
   price.unit_price_cny_tax = o.unit_price_cny_tax ?? null
   price.supplier_price = o.supplier_price ?? null
   price.process_category = o.process_category ?? ''
+  nextTick(() => { loadingPrice = false })
 }
 
 // 交期/客退信息（可编辑）
@@ -157,8 +176,8 @@ async function savePrice() {
           <label>加工类别 <input v-model="price.process_category" placeholder="如塑胶半成品" /></label>
           <label>核价生产工价 <input v-model.number="price.quote_labor_price" type="number" min="0" step="0.01" /></label>
           <label>供应商外发价 <input v-model.number="price.supplier_price" type="number" min="0" step="0.01" /></label>
-          <label>外发单价 <input v-model.number="price.unit_price" type="number" min="0" step="0.01" /></label>
-          <label>外发工价(人民币含税) <input v-model.number="price.unit_price_cny_tax" type="number" min="0" step="0.01" /></label>
+          <label>外发单价 <input v-model.number="price.unit_price" type="number" min="0" step="0.0001" /></label>
+          <label>外发工价(人民币含税) <input v-model.number="price.unit_price_cny_tax" type="number" min="0" step="0.0001" /></label>
           <div class="actions">
             <button type="submit" :disabled="priceSaving">{{ priceSaving ? '保存中…' : '保存' }}</button>
             <span v-if="priceSaved" class="ok">已保存 ✓</span>

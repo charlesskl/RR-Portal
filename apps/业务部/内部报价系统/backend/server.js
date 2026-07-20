@@ -49,6 +49,12 @@ app.use((err, req, res, next) => {
   console.error('[error]', req.method, req.originalUrl, err);
   if (res.headersSent) return;
   const msg = String(err.message || '');
+  if (err && err.code === 'LIMIT_FILE_SIZE') {
+    const isSpreadsheet = /-sheet(?:\?|$)/.test(req.originalUrl);
+    return res.status(413).json({
+      error: isSpreadsheet ? 'Excel 文件过大，最大支持 50 MB' : '上传文件超过大小限制',
+    });
+  }
   if (msg.includes('UNIQUE')) return res.status(409).json({ error: '数据已存在（唯一约束冲突）' });
   res.status(500).json({ error: '服务器内部错误' });
 });

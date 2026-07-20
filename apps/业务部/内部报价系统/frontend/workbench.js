@@ -526,6 +526,27 @@ function elecSplitRows(parts, ex, fx) {
   return { icPart, ic: mk(taxed * icRatio), pacb: mk(taxed * (1 - icRatio)) };
 }
 
+function elecImportedSummaryRows(doc, ex, fx) {
+  if (!doc || doc.source_format !== 'lianxiang') {
+    return elecSplitRows((doc && doc.parts) || [], ex || (doc && doc.extras) || {}, fx);
+  }
+  fx = num(fx) || 0.85;
+  const sourceExtras = doc.extras || ex || {};
+  const otp = Math.max(0, num(sourceExtras.otp_price_rmb));
+  const total = Math.max(0, num(sourceExtras.total_price_rmb || sourceExtras.taxed_price));
+  const pacb = sourceExtras.quoted_price_rmb != null
+    ? Math.max(0, num(sourceExtras.quoted_price_rmb) - otp)
+    : Math.max(0, total - otp);
+  const icPart = (doc.parts || []).find(p => /IC|芯片/i.test(`${p.name || ''} ${p.spec || ''}`));
+  const mk = rmb => ({
+    unit_price_rmb: +rmb.toFixed(6),
+    unit_price: +(rmb / fx).toFixed(6),
+    _unit_price_taxed: +rmb.toFixed(6),
+    _unit_price_pretax: +rmb.toFixed(6),
+  });
+  return { icPart, ic: mk(otp), pacb: mk(pacb) };
+}
+
 function renderHierElectronics(container, rows, onChange, canEdit, fxRmbHkd) {
   const fx = num(fxRmbHkd) || 0.85;
   container.innerHTML = '';
@@ -2110,7 +2131,7 @@ function renderElectronic(host, payload, canEdit, onChange, fxRmbHkd) {
 
   host.innerHTML = `
     <h3>电子部分
-    ${canEdit ? '<button class="mini" id="el-import" type="button" style="margin-left:10px">📄 导入电子报价单</button><input id="el-file" type="file" accept=".xls,.xlsx" style="display:none"/>' : ''}
+    ${canEdit ? '<button class="mini" id="el-import" type="button" style="margin-left:10px">📄 导入登信报价单</button><input id="el-file" type="file" accept=".xls,.xlsx" style="display:none"/><button class="mini" id="el-import-lianxiang" type="button" style="margin-left:6px">📄 导入联翔报价单</button><input id="el-file-lianxiang" type="file" accept=".xls,.xlsx" style="display:none"/>' : ''}
     ${canEdit && payload.electronics_doc ? '<button class="mini" id="el-summarize" type="button" style="margin-left:6px">🔄 由明细汇总成 IC + PACB</button>' : ''}
     ${payload.electronics_doc ? `<small style="margin-left:8px;color:#16a34a">✓ 已导入 ${payload.electronics_doc.parts_count} 行 (${payload.electronics_doc.imported_at || ''})</small>` : ''}
     </h3>
@@ -2118,6 +2139,7 @@ function renderElectronic(host, payload, canEdit, onChange, fxRmbHkd) {
     <h4 style="margin-top:14px;color:#475569">总表（报价明细 用）</h4>
     <div id="wb-elec"></div>
     <div id="wb-elec-detail"></div>
+    <div id="wb-elec-fees"></div>
     <div id="wb-elec-extra"></div>
   `;
   const refreshes = [];
@@ -2204,7 +2226,7 @@ function renderElectronic(host, payload, canEdit, onChange, fxRmbHkd) {
       const autoResummarize = () => {
         if (!isDerivedSummary()) return;
         const fxH = num((payload._fx_rmb_hkd) || fxRmbHkd) || 0.85;
-        const sp = elecSplitRows(doc.parts, payload.electronics_extra || doc.extras || {}, fxH);
+        const sp = elecImportedSummaryRows(doc, payload.electronics_extra || doc.extras || {}, fxH);
         Object.assign(payload.electronics[0], sp.ic);
         Object.assign(payload.electronics[1], sp.pacb);
         paintSummarySubtotal();
@@ -2251,6 +2273,20 @@ function renderElectronic(host, payload, canEdit, onChange, fxRmbHkd) {
   } else {
     detailHost.innerHTML = '<p class="muted" style="margin-top:10px;font-size:13px">尚未导入电子细表 — 点上方"📄 导入电子报价单"</p>';
   }
+  const feeHost = host.querySelector('#wb-elec-fees');
+  const sourceFees = payload.electronics_doc?.extras?.other_fees || [];
+  if (sourceFees.length) {
+    const feeTotal = sum(sourceFees, fee => num(fee.amount) || num(fee.qty) * num(fee.unit_price));
+    feeHost.innerHTML = `
+      <h4 style="margin-top:16px;color:#475569">联翔其它费用 <small class="muted">（总额，不计入单套电子成本）</small></h4>
+      <table class="wb-table" style="max-width:760px;font-size:13px">
+        <thead><tr><th>费用名称</th><th style="width:90px">数量</th><th style="width:130px">单价 RMB</th><th style="width:130px">合计 RMB</th><th>备注</th></tr></thead>
+        <tbody>
+          ${sourceFees.map(fee => `<tr><td>${escapeHtml(fee.name || '')}</td><td>${formatNum(num(fee.qty))}</td><td>${formatNum(num(fee.unit_price))}</td><td>${formatNum(num(fee.amount) || num(fee.qty) * num(fee.unit_price))}</td><td>${escapeHtml(fee.note || '')}</td></tr>`).join('')}
+          <tr class="hi"><td colspan="3" style="text-align:right">其它费用合计</td><td>${formatNum(feeTotal)}</td><td></td></tr>
+        </tbody>
+      </table>`;
+  }
   renderElecExtra(host.querySelector('#wb-elec-extra'), payload, wrappedOnChange, canEdit, fxRmbHkd);
   if (canEdit) {
     // 由明细一键汇总成 IC + PACB电子 两行
@@ -2261,7 +2297,7 @@ function renderElectronic(host, payload, canEdit, onChange, fxRmbHkd) {
       if (payload.electronics && payload.electronics.length > 2 && !confirm('当前总表有 ' + payload.electronics.length + ' 行，确认重置为 IC + PACB电子 两行（手填数据会丢失）？')) return;
       // 总表行按细表占比分摊含税核价：合计=两行之和=含税核价，每行带各自那份加工/利润/税
       const fxHere = num((payload._fx_rmb_hkd) || fxRmbHkd) || 0.85;
-      const sp = elecSplitRows(doc.parts, payload.electronics_extra || doc.extras || {}, fxHere);
+      const sp = elecImportedSummaryRows(doc, payload.electronics_extra || doc.extras || {}, fxHere);
       payload.electronics = [
         { name: 'IC', spec: sp.icPart ? sp.icPart.spec : '', qty: 1, ...sp.ic, tax_label: '含税', note: '' },
         { name: 'PACB电子', spec: '含 PCB+电阻+电容+人工 等其余明细汇总', qty: 1, ...sp.pacb, tax_label: '含税', note: '' },
@@ -2271,24 +2307,30 @@ function renderElectronic(host, payload, canEdit, onChange, fxRmbHkd) {
     };
 
     // 导入
-    const impBtn = host.querySelector('#el-import');
-    const impFile = host.querySelector('#el-file');
     const impPreview = host.querySelector('#el-import-preview');
-    if (impBtn && impFile) {
+    const importers = [
+      { button: '#el-import', file: '#el-file', endpoint: '/api/uploads/electronic-sheet', label: '登信' },
+      { button: '#el-import-lianxiang', file: '#el-file-lianxiang', endpoint: '/api/uploads/electronic-lianxiang-sheet', label: '联翔' },
+    ];
+    importers.forEach(importer => {
+      const impBtn = host.querySelector(importer.button);
+      const impFile = host.querySelector(importer.file);
+      if (!impBtn || !impFile) return;
       impBtn.onclick = () => impFile.click();
       impFile.onchange = async (e) => {
         const f = e.target.files[0]; if (!f) return;
         impPreview.innerHTML = '<i class="muted" style="padding:8px;display:block">正在解析…</i>';
         try {
           const fd = new FormData(); fd.append('file', f);
-          const r = await fetch('/api/uploads/electronic-sheet', { method: 'POST', credentials: 'include', body: fd });
+          const r = await fetch(importer.endpoint, { method: 'POST', credentials: 'include', body: fd });
           const j = await r.json();
           if (!r.ok) throw new Error(j.error || '解析失败');
           impPreview.innerHTML = `
             <div class="card" style="background:#f0fdf4;border:1px solid #86efac;margin-top:10px">
-              <p>从 <b>${escapeHtml(j.sheet_used || '')}</b> 解析到 <b>${j.count}</b> 个零件（${(j.parts || []).reduce((a, p) => a + 1 + (p.children || []).length, 0)} 行明细）</p>
+              <p><b>${importer.label}</b>格式：从 <b>${escapeHtml(j.sheet_used || '')}</b> 解析到 <b>${j.count}</b> 个零件（${(j.parts || []).reduce((a, p) => a + 1 + (p.children || []).length, 0)} 行明细）</p>
               ${j.meta && j.meta.product ? `<p class="muted">产品: ${escapeHtml(j.meta.product)}${j.meta.customer ? ' · 客户: ' + escapeHtml(j.meta.customer) : ''}${j.meta.date ? ' · 日期: ' + escapeHtml(j.meta.date) : ''}</p>` : ''}
-              <p class="muted">导入后：会替换电子表 + 自动填充 测试费用 / 包装运输 / 利润% / 抵税差额；导出 Excel 时会附加"电子明细"分表。</p>
+              ${j.source_format === 'lianxiang' ? `<p class="muted">联翔报价 RMB ${formatNum(j.extras && j.extras.total_price_rmb)} / 套（已含 OTP 芯片 RMB ${formatNum(j.extras && j.extras.otp_price_rmb)}） · 其它费用 ${(j.extras && j.extras.other_fees || []).length} 项</p>` : ''}
+              <p class="muted">导入后会替换电子表；导出 Excel 时会附加“电子明细”分表。</p>
               <div style="margin-top:10px;display:flex;gap:8px">
                 <button id="el-imp-apply">应用</button>
                 <button id="el-imp-cancel" class="mini danger">取消</button>
@@ -2299,7 +2341,7 @@ function renderElectronic(host, payload, canEdit, onChange, fxRmbHkd) {
             // 明细是 RMB，总表单价是 HKD：单价 HKD = RMB ÷ 汇率（与税点下拉/由明细汇总按钮口径一致）
             const fx = num(fxRmbHkd) || 0.85;
             // 总表行按细表占比分摊含税核价：合计=两行之和=含税核价，每行带各自那份加工/利润/税
-            const sp = elecSplitRows(j.parts, j.extras || {}, fx);
+            const sp = elecImportedSummaryRows(j, j.extras || {}, fx);
             payload.electronics = [
               { name: 'IC', spec: sp.icPart ? sp.icPart.spec : '', qty: 1, ...sp.ic, note: '' },
               { name: 'PACB电子', spec: '含 PCB+电阻+电容+人工 等其余明细汇总', qty: 1, ...sp.pacb, note: '' },
@@ -2312,6 +2354,7 @@ function renderElectronic(host, payload, canEdit, onChange, fxRmbHkd) {
             }
             // 保存原始 parts/extras 供导出
             payload.electronics_doc = {
+              source_format: j.source_format || 'dengxin',
               parts: j.parts, extras: j.extras, meta: j.meta || {},
               parts_count: elecDetailRowCount(j.parts || []),
               imported_at: new Date().toISOString().slice(0, 10),
@@ -2325,7 +2368,7 @@ function renderElectronic(host, payload, canEdit, onChange, fxRmbHkd) {
           impPreview.innerHTML = `<div class="card" style="background:#fef2f2;border:1px solid #fecaca;margin-top:10px">解析失败：${err.message}</div>`;
         }
       };
-    }
+    });
   }
 }
 

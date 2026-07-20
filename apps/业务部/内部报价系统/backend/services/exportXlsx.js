@@ -598,6 +598,37 @@ function addElectronicDetailSheet(wb, electronic, quote) {
   ws.getCell(row, 8).numFmt = '0.000';
   ws.getCell(row, 9).value = 'RMB 含税价';
   styleSubtotal(ws.getCell(row, 8), 'hkd');
+
+  const sourceFees = ex.other_fees || [];
+  if (sourceFees.length) {
+    row += 2;
+    ws.getCell(row, 1).value = '其它费用（总额，不计入单套电子成本）';
+    ws.mergeCells(row, 1, row, 6);
+    styleSection(ws.getCell(row, 1));
+    row += 1;
+    ['费用名称', '数量', '单价 RMB', '合计 RMB', '备注'].forEach((value, index) => {
+      ws.getCell(row, index + 1).value = value;
+      styleHeader(ws.getCell(row, index + 1));
+    });
+    row += 1;
+    const feeStart = row;
+    sourceFees.forEach(fee => {
+      const amount = num(fee.amount) || num(fee.qty) * num(fee.unit_price);
+      ws.getCell(row, 1).value = fee.name || '';
+      ws.getCell(row, 2).value = num(fee.qty);
+      ws.getCell(row, 3).value = num(fee.unit_price);
+      ws.getCell(row, 4).value = amount;
+      ws.getCell(row, 5).value = fee.note || '';
+      for (let column = 1; column <= 5; column++) styleData(ws.getCell(row, column));
+      [3, 4].forEach(column => { ws.getCell(row, column).numFmt = '0.00'; });
+      row += 1;
+    });
+    ws.getCell(row, 1).value = '其它费用合计';
+    ws.getCell(row, 4).value = { formula: `SUM(D${feeStart}:D${row - 1})`, result: sum(sourceFees, fee => num(fee.amount) || num(fee.qty) * num(fee.unit_price)) };
+    styleSubtotal(ws.getCell(row, 1), 'sub');
+    styleSubtotal(ws.getCell(row, 4), 'sub');
+    ws.getCell(row, 4).numFmt = '0.00';
+  }
 }
 
 // 车缝明细 — 独立 sheet

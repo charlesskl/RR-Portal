@@ -362,7 +362,7 @@ def upload_master():
     # secure_filename 防路径穿越；为空时退回固定名
     safe_name = secure_filename(f.filename) or f'master{ext}'
     path = os.path.join(app.config['MASTER_FOLDER'], safe_name)
-    tmp_path = f'{path}.{uuid.uuid4().hex}.tmp'
+    tmp_path = f'{path}.{uuid.uuid4().hex}.tmp.xlsx'
     try:
         f.save(tmp_path)
         if ext == '.xlsx':
@@ -409,7 +409,7 @@ def master_schedule_upload_file():
         return jsonify({'error': '请选择 .xlsx 格式的总排期文件'}), 400
 
     save_path = os.path.join(app.config['MASTER_FOLDER'], 'uploaded_master.xlsx')
-    tmp_path = save_path + f'.{uuid.uuid4().hex}.tmp'
+    tmp_path = save_path + f'.{uuid.uuid4().hex}.tmp.xlsx'
     try:
         os.makedirs(app.config['MASTER_FOLDER'], exist_ok=True)
         f.save(tmp_path)

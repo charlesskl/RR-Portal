@@ -24,8 +24,8 @@ function applyTemplate(userId, dept, role) {
   }
 }
 
-function factoryCodesFor(scope, role) {
-  if (scope === 'all' || role === 'admin') {
+function factoryCodesFor(scope) {
+  if (scope === 'all') {
     return db.prepare('SELECT code FROM factories WHERE active = 1 ORDER BY sort_order').all().map(r => r.code);
   }
   const code = String(scope || '').trim();
@@ -59,7 +59,7 @@ router.post('/users', (req, res) => {
   if (String(password).length < 6) return res.status(400).json({ error: '密码至少 6 位' });
   const dept_ok = db.prepare('SELECT 1 FROM departments WHERE code = ?').get(dept);
   if (!dept_ok) return res.status(400).json({ error: '部门不存在' });
-  const factoryCodes = factoryCodesFor(factory_code, role);
+  const factoryCodes = factoryCodesFor(factory_code);
   if (!factoryCodes.length) return res.status(400).json({ error: '厂区不存在' });
   const exists = db.prepare('SELECT 1 FROM users WHERE username = ?').get(String(username).trim());
   if (exists) return res.status(409).json({ error: '用户名已存在' });
@@ -91,7 +91,7 @@ router.put('/users/:id/factory', (req, res) => {
   const factoryCode = String((req.body && req.body.factory_code) || '').trim();
   const u = db.prepare('SELECT username, role FROM users WHERE id = ?').get(id);
   if (!u) return res.status(404).json({ error: '用户不存在' });
-  const factoryCodes = factoryCodesFor(factoryCode, u.role);
+  const factoryCodes = factoryCodesFor(factoryCode);
   if (!factoryCodes.length) return res.status(400).json({ error: '厂区不存在' });
   const result = changeUserFactories(db, id, factoryCodes);
   const changed = result.changed;
@@ -113,9 +113,7 @@ router.put('/users/:id/role', (req, res) => {
   if (!u) return res.status(404).json({ error: '用户不存在' });
   const currentFactoryCodes = db.prepare('SELECT factory_code FROM user_factories WHERE user_id = ? ORDER BY factory_code')
     .all(id).map(r => r.factory_code);
-  const nextFactoryCodes = role === 'admin'
-    ? factoryCodesFor('all', role)
-    : (currentFactoryCodes.length ? currentFactoryCodes : [u.factory_code]);
+  const nextFactoryCodes = currentFactoryCodes.length ? currentFactoryCodes : [u.factory_code];
   const result = changeUserRole(db, id, role, nextFactoryCodes, (userId) => {
     applyTemplate(userId, u.dept, role);
     db.prepare(`INSERT INTO audit_log (dept, actor, action, detail) VALUES (?, ?, 'change_role', ?)`)

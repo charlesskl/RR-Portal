@@ -38,8 +38,8 @@ WORKDIR /app
 RUN apt-get update \
     && apt-get install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/* \
-    && (getent group app >/dev/null 2>&1 || addgroup --system app) \
-    && (getent passwd app >/dev/null 2>&1 || adduser --system --ingroup app app)
+    && addgroup --system app \
+    && adduser --system --ingroup app app
 
 COPY --from=build --chown=app:app /app/publish ./
 COPY --from=frontend --chown=app:app /src/web/dist ./wwwroot

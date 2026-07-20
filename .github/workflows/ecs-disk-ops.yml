@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "diagnose(只读) / prune-safe(安全清理) / grow-disk(扩分区占满云盘)"
+        description: "diagnose / prune-safe / grow-disk / indo-stop(临时停indo腾内存)"
         type: choice
         required: true
         default: diagnose
@@ -20,6 +20,7 @@ on:
           - diagnose
           - prune-safe
           - grow-disk
+          - indo-stop
 
 permissions:
   contents: read
@@ -121,6 +122,15 @@ jobs:
               esac
               echo "-- 扩容后 --"; df -h "$ROOT_PART" | tail -1; lsblk "$ROOT_DISK" || true
               echo "[OK] grow-disk 完成（数据/容器不受影响，只是分区变大）"
+
+            elif [ "$MODE" = "indo-stop" ]; then
+              echo "=================== INDO-STOP ==================="
+              echo "-- 停止前 free --"; free -m | awk '/^Mem:/{print "  available: "$7" MB"}'
+              echo "-- 停 indo 容器（数据在 bind mount，安全；随后由 deploy 拉回） --"
+              docker stop rr-portal-indo-shipping-1 rr-portal-indo-sqlserver-1 2>/dev/null || true
+              sleep 3
+              echo "-- 停止后 free --"; free -m | awk '/^Mem:/{print "  available: "$7" MB (需 >=2500 才能过 indo 预检)"}'
+              echo "[OK] indo-stop 完成。立即触发一次 Deploy to Cloud，它会重新拉起 indo（含重设密码 + 持久化 transport）。"
 
             else
               echo "[OK] diagnose 完成（只读，未改动任何东西）"

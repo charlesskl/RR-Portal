@@ -10,7 +10,7 @@ import { canEditOrders, allowedRegions } from '../utils/permissions'
 import { buildDeliveryReport, exportDeliveryExcel, parseDeliveryImport, DELIVERY_HEADERS as HEADERS, type ReportRow, type DetailRow } from '../utils/deliveryStats'
 import { readDeliveryPdfAsAoa } from '../utils/pdfDeliveryImport'
 import { parseDeliveryExcelFiles } from '../utils/deliveryExcelImport'
-import { cnyTaxToHkdUntaxed } from '../utils/orderPricing'
+import { cnyTaxToHkdUntaxed, DEFAULT_CNY_TO_HKD_RATE } from '../utils/orderPricing'
 import type { Order } from '../types/order'
 
 const route = useRoute()
@@ -39,7 +39,7 @@ const deptOrders = computed(() => {
     .filter((o) => !myRegions.value || myRegions.value.includes(regionOf(o.expand?.factory)))
     .filter((o) => {
       if (!q) return true
-      return [o.expand?.factory?.name, o.pmc, o.item_no, o.order_no, o.product]
+      return [o.expand?.factory?.name, o.pmc, o.item_no, o.mold_no, o.order_no, o.product]
         .some((s) => (s ?? '').toLowerCase().includes(q))
     })
 })
@@ -50,12 +50,14 @@ const visibleColumnCount = computed(() => HEADERS.length + (canEdit.value ? 1 : 
 
 type RowDraft = {
   pmc: string
+  mold_no: string
   product: string
   quantity: string
   actual_delivery_date: string
   quote_labor_price: string
   unit_price: string
   unit_price_cny_tax: string
+  exchange_rate: string
 }
 const drafts = ref<Record<string, RowDraft>>({})
 
@@ -123,12 +125,14 @@ function priceInputValue(val: number | null | undefined) {
 function draftFromRow(row: DetailRow): RowDraft {
   return {
     pmc: row.pmc || '',
+    mold_no: row.mold_no || '',
     product: row.product || '',
     quantity: priceInputValue(row.quantity),
     actual_delivery_date: row.actual_delivery_date || '',
     quote_labor_price: priceInputValue(row.quote),
     unit_price: priceInputValue(row.outPrice),
     unit_price_cny_tax: priceInputValue(row.outPriceCnyTax),
+    exchange_rate: priceInputValue(row.exchangeRate),
   }
 }
 
@@ -151,10 +155,11 @@ function draftValue(row: DetailRow, field: keyof RowDraft) {
 function setDraftValue(row: DetailRow, field: keyof RowDraft, value: string) {
   if (!drafts.value[row.id]) drafts.value[row.id] = draftFromRow(row)
   drafts.value[row.id][field] = value
-  if (field === 'unit_price_cny_tax') {
-    const cnyTaxPrice = Number(value)
-    drafts.value[row.id].unit_price = value.trim() && Number.isFinite(cnyTaxPrice)
-      ? String(cnyTaxToHkdUntaxed(cnyTaxPrice))
+  if (field === 'unit_price_cny_tax' || field === 'exchange_rate') {
+    const cnyTaxPrice = Number(drafts.value[row.id].unit_price_cny_tax)
+    const exchangeRate = Number(drafts.value[row.id].exchange_rate)
+    drafts.value[row.id].unit_price = drafts.value[row.id].unit_price_cny_tax.trim() && Number.isFinite(cnyTaxPrice) && Number.isFinite(exchangeRate) && exchangeRate > 0
+      ? String(cnyTaxToHkdUntaxed(cnyTaxPrice, exchangeRate))
       : ''
   }
 }
@@ -181,6 +186,7 @@ async function saveRow(row: DetailRow) {
   const quote = parsePrice(draft.quote_labor_price)
   const unitPrice = parsePrice(draft.unit_price)
   const unitPriceCnyTax = parsePrice(draft.unit_price_cny_tax)
+  const exchangeRate = parsePrice(draft.exchange_rate)
   if (!product) {
     alert('请输入物料名称')
     return
@@ -189,19 +195,21 @@ async function saveRow(row: DetailRow) {
     alert('数量请输入有效数字')
     return
   }
-  if (quote === undefined || unitPrice === undefined || unitPriceCnyTax === undefined) {
+  if (quote === undefined || unitPrice === undefined || unitPriceCnyTax === undefined || exchangeRate === undefined || (exchangeRate != null && exchangeRate <= 0)) {
     alert('工价请输入有效数字')
     return
   }
 
   const data: Partial<any> = {
     pmc: draft.pmc.trim(),
+    mold_no: draft.mold_no.trim(),
     product,
     quantity,
     actual_delivery_date: draft.actual_delivery_date ? new Date(draft.actual_delivery_date).toISOString() : '',
     quote_labor_price: quote,
     unit_price: unitPrice,
     unit_price_cny_tax: unitPriceCnyTax,
+    exchange_rate: exchangeRate ?? DEFAULT_CNY_TO_HKD_RATE,
     amount: quantity === null || (unitPriceCnyTax === null && unitPrice === null)
       ? null
       : quantity * (unitPriceCnyTax ?? unitPrice!),
@@ -231,11 +239,12 @@ async function copyRow(row: DetailRow) {
   const quote = parsePrice(draft.quote_labor_price)
   const unitPrice = parsePrice(draft.unit_price)
   const unitPriceCnyTax = parsePrice(draft.unit_price_cny_tax)
+  const exchangeRate = parsePrice(draft.exchange_rate)
   if (quantity === undefined) {
     alert('数量请输入有效数字')
     return
   }
-  if (quote === undefined || unitPrice === undefined || unitPriceCnyTax === undefined) {
+  if (quote === undefined || unitPrice === undefined || unitPriceCnyTax === undefined || exchangeRate === undefined || (exchangeRate != null && exchangeRate <= 0)) {
     alert('工价请输入有效数字')
     return
   }
@@ -244,6 +253,7 @@ async function copyRow(row: DetailRow) {
     process: source.process,
     workshop: source.workshop,
     item_no: source.item_no,
+    mold_no: draft.mold_no.trim(),
     product,
     quantity: quantity ?? undefined,
     supplier_price: source.supplier_price,
@@ -251,6 +261,7 @@ async function copyRow(row: DetailRow) {
     quote_labor_price: quote ?? undefined,
     unit_price: unitPrice ?? undefined,
     unit_price_cny_tax: unitPriceCnyTax ?? undefined,
+    exchange_rate: exchangeRate ?? DEFAULT_CNY_TO_HKD_RATE,
     amount: quantity != null && (unitPriceCnyTax != null || unitPrice != null)
       ? quantity * (unitPriceCnyTax ?? unitPrice!)
       : source.amount,
@@ -301,7 +312,7 @@ async function removeRow(row: DetailRow) {
           {{ importingExcel ? '导入中…' : '批量导入 Excel' }}
         </button>
         <input ref="fileInput" type="file" accept=".xlsx,.xls,.csv" multiple style="display:none" @change="importExcel" />
-        <input class="search-box" v-model="search" placeholder="搜索 工厂/PMC/货号/订单号/产品" />
+        <input class="search-box" v-model="search" placeholder="搜索 工厂/PMC/货号/模具编号/订单号/产品" />
         <button @click="exportExcel">导出 Excel</button>
       </div>
       <div class="scroll">
@@ -323,6 +334,11 @@ async function removeRow(row: DetailRow) {
                 </td>
                 <td v-if="r.factorySpan" :rowspan="r.factorySpan" class="grp">{{ r.factory || '-' }}</td>
                 <td class="item-no-col" :title="r.item_no || ''">{{ r.item_no || '-' }}</td>
+                <td>
+                  <input v-if="canEdit" class="mold-no-inp" :value="draftValue(r, 'mold_no')"
+                    @input="setDraftValue(r, 'mold_no', ($event.target as HTMLInputElement).value)" />
+                  <span v-else>{{ r.mold_no || '-' }}</span>
+                </td>
                 <td>{{ r.order_no || '-' }}</td>
                 <td>{{ r.category || '-' }}</td>
                 <td>
@@ -365,6 +381,12 @@ async function removeRow(row: DetailRow) {
                     @input="setDraftValue(r, 'unit_price_cny_tax', ($event.target as HTMLInputElement).value)" />
                   <span v-else>{{ r.outPriceCnyTax }}</span>
                 </td>
+                <td>
+                  <input v-if="canEdit" type="number" class="rate-inp" min="0.0001" step="0.01"
+                    :value="draftValue(r, 'exchange_rate')"
+                    @input="setDraftValue(r, 'exchange_rate', ($event.target as HTMLInputElement).value)" />
+                  <span v-else>{{ r.exchangeRate }}</span>
+                </td>
                 <td>{{ r.priceRatio }}</td>
                 <td>{{ r.notes || '-' }}</td>
                 <td v-if="canEdit" class="op-cell">
@@ -377,7 +399,7 @@ async function removeRow(row: DetailRow) {
               </tr>
               <tr v-else class="subtotal">
                 <td></td>
-                <td :colspan="9">{{ r.factory }}-小计</td>
+                <td :colspan="10">{{ r.factory }}-小计</td>
                 <td>{{ r.orderCount }}</td>
                 <td>{{ r.delayedCount }}</td>
                 <td>{{ r.delayRatio }}</td>
@@ -385,6 +407,7 @@ async function removeRow(row: DetailRow) {
                 <td>{{ r.quote }}</td>
                 <td>{{ r.outPrice }}</td>
                 <td>{{ r.outPriceCnyTax }}</td>
+                <td></td>
                 <td>{{ r.priceRatio }}</td>
                 <td></td>
                 <td v-if="canEdit"></td>
@@ -402,7 +425,7 @@ async function removeRow(row: DetailRow) {
 .back { font-size: .9rem; }
 .search-box { width: 240px; padding: .4rem .7rem; font-size: .9rem; border: 1px solid var(--border); border-radius: var(--radius-sm); }
 .scroll { overflow-x: auto; }
-.report { min-width: 2900px; }
+.report { min-width: 3140px; }
 .report th, .report td { white-space: nowrap; text-align: center; font-size: .85rem; }
 .report .item-no-col {
   width: 220px;
@@ -415,7 +438,9 @@ async function removeRow(row: DetailRow) {
 .report tr.subtotal td { background: #fff7e6; font-weight: 600; }
 .date-inp { padding: .25rem .4rem; font-size: .82rem; border: 1px solid var(--border); border-radius: var(--radius-sm); }
 .pmc-inp { width: 96px; padding: .25rem .4rem; font-size: .82rem; text-align: center; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.mold-no-inp { width: 120px; padding: .25rem .4rem; font-size: .82rem; text-align: center; border: 1px solid var(--border); border-radius: var(--radius-sm); }
 .price-inp { width: 96px; padding: .25rem .4rem; font-size: .82rem; text-align: center; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.rate-inp { width: 76px; padding: .25rem .4rem; font-size: .82rem; text-align: center; border: 1px solid var(--border); border-radius: var(--radius-sm); }
 .text-inp { width: 132px; padding: .25rem .4rem; font-size: .82rem; border: 1px solid var(--border); border-radius: var(--radius-sm); }
 .qty-inp { width: 88px; padding: .25rem .4rem; font-size: .82rem; text-align: center; border: 1px solid var(--border); border-radius: var(--radius-sm); }
 .op-col { min-width: 172px; }

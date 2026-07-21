@@ -282,7 +282,7 @@ services:
 
   sprayplan:
     build:
-      context: ./apps/生产部/喷油排期系统
+      context: ./apps/喷油部/喷油排期系统
       dockerfile: Dockerfile
       args:
         NEXT_PUBLIC_BASE_PATH: /sprayplan
@@ -293,8 +293,8 @@ services:
       - DATA_PATH=/app/data
       - TZ=Asia/Shanghai
     volumes:
-      - ./apps/生产部/喷油排期系统/data:/app/data
-      - ./apps/生产部/喷油排期系统/storage:/app/server/SprayPlan.Api/storage
+      - ./apps/喷油部/喷油排期系统/data:/app/data
+      - ./apps/喷油部/喷油排期系统/storage:/app/server/SprayPlan.Api/storage
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8400/sprayplan/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 10s

@@ -17,6 +17,110 @@ function multiSheetExcelFile(name: string, sheets: { name: string; aoa: any[][] 
 }
 
 describe('parseDeliveryExcelFiles', () => {
+  it('imports Xingxin assembly contracts with header and footer metadata', async () => {
+    const file = excelFile('东莞兴信塑胶制品有限公司.xlsx', [
+      ['东莞兴信塑胶制品有限公司'],
+      ['广东省东莞市清溪镇上元管理区兴信塑胶制品有限公司银坑北环路59号B栋2楼'],
+      ['TEL:0769-87362376 FAX:0769-87362377'],
+      ['', '', '', '委托加工合同'],
+      [],
+      ['厂  商：', '东莞市清溪鸿亚塑胶加工店', '', '', '', '', '订单编号：', '', 'A20260611'],
+      ['联 络 人：', '张海霞', '', '', '', '', '联 络 人：', '', '杨耿生'],
+      [],
+      [],
+      [],
+      ['货 号', '货 品 名 称', '数量', '单位', '单 价(¥)', '金 额(¥)', '单重（G)', '重量（KG)', '商品名称', '备 注'],
+      ['徽章制作机-JA120910100', 'UV灯盒', 7870, 'pcs', 0.95, 7476.5, '', '', '玩具半成品', ''],
+      ['77858-厨房四件套', '吸塑盒配件加工', 45200, 'pcs', 0.06, 2712, '', '', '', ''],
+      ['', '', '', '', '合计', 10188.5],
+      ['1. 2026 年 7 月 20 日前交货、货送 B栋2楼 处'],
+      [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [],
+      ['供应商确认：                采购签核：      刘艳           主管：                 经理：'],
+      ['时间：    年    月   日', '', '', '时间：', '2026年6月30日'],
+    ])
+
+    const result = await parseDeliveryExcelFiles(
+      [file],
+      { '东莞市清溪鸿亚塑胶加工厂': 'factory-assembly' },
+      { preferCnyTaxPrice: true },
+    )
+
+    expect(result).toMatchObject({ fileCount: 1, failedRows: 0, unrecognizedFiles: [], readFailedFiles: [] })
+    expect(result.payloads).toHaveLength(2)
+    expect(result.payloads[0]).toMatchObject({
+      factory: 'factory-assembly',
+      pmc: '刘艳',
+      item_no: '徽章制作机-JA120910100',
+      order_no: 'A20260611',
+      product: 'UV灯盒',
+      process_category: '玩具半成品',
+      quantity: 7870,
+      order_date: '2026-06-30',
+      delivery_date: '2026-07-20',
+      unit_price_cny_tax: 0.95,
+      unit_price: 0.9663,
+      exchange_rate: 0.87,
+      amount: 7476.5,
+    })
+    expect(result.payloads[1]).toMatchObject({
+      pmc: '刘艳',
+      item_no: '77858-厨房四件套',
+      product: '吸塑盒配件加工',
+      process_category: '玩具半成品',
+      quantity: 45200,
+      unit_price_cny_tax: 0.06,
+      unit_price: 0.061,
+      amount: 2712,
+    })
+  })
+
+  it('imports Runzhan assembly contracts with split approval and inherited delivery date', async () => {
+    const file = excelFile('润展RZ20260015.xlsx', [
+      ['东莞华登塑胶制品有限公司'],
+      ['广东省东莞市清溪镇上元管理区华登塑胶制品有限公司银松路1号'],
+      ['TEL:0769-87362376 FAX:0769-87362377'],
+      ['', '', '', '', '委托加工合同'],
+      ['', '', '', '', '', '', '', '', '', '', new Date('2026-06-08T00:00:00Z')],
+      ['厂    商：', '润 展', '', '', '', '', '', '', '', '订单编号：', 'RZ20260015'],
+      ['联 络 人：', '', '', '', '', '', '', '', '', '联 络 人：', '肖英华'],
+      [], [], [],
+      ['货 号', '货品名称', '款式', '数量', '单位', '单价(RMB)含税（3%）', '金额(RMB)', '单重（G)', '商品名称', '订单数量', 'PO', '交货期'],
+      ['SRMC400', '我的世界手链', 'A2', 1000, 'PCS', 0.2, 200, '', '散装手链', '', '样板', new Date('2026-07-01T00:00:00Z')],
+      ['SRMC103', '我的世界手链', 'B1', 1000, 'PCS', 0.2, 200, '', '散装手链', '', '', ''],
+      ['订单总数：', '', '', '', '', '合计', 400],
+      ['1.2026年7月1日前交货，货送东莞清溪华登厂'],
+      [], [],
+      ['供应商确认：', '', '采购签核：', '张佩玲', '', '生产经理：', '', '生产经理：', '', '', '经理：'],
+    ])
+
+    const result = await parseDeliveryExcelFiles(
+      [file],
+      { '东莞市润展塑料制品有限公司': 'factory-runzhan' },
+      { preferCnyTaxPrice: true },
+    )
+
+    expect(result).toMatchObject({ fileCount: 1, failedRows: 0, unrecognizedFiles: [], readFailedFiles: [] })
+    expect(result.payloads).toHaveLength(2)
+    expect(result.payloads[0]).toMatchObject({
+      factory: 'factory-runzhan',
+      pmc: '张佩玲',
+      item_no: 'SRMC400',
+      order_no: 'RZ20260015',
+      product: '我的世界手链',
+      process_category: '散装手链',
+      quantity: 1000,
+      order_date: '2026-06-08',
+      delivery_date: '2026-07-01',
+      unit_price_cny_tax: 0.2,
+      amount: 200,
+    })
+    expect(result.payloads[1]).toMatchObject({
+      pmc: '张佩玲',
+      item_no: 'SRMC103',
+      delivery_date: '2026-07-01',
+    })
+  })
+
   it('parses multiple workbooks in one batch without mixing their metadata', async () => {
     const header = ['序号', '款号', '模具编号', '物料编号', '物料名称', '用料名称', '颜色', '加工内容', '数量', '单价', '金额', '备注']
     const files = [

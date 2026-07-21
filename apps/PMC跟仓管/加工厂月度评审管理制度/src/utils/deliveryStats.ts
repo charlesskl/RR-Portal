@@ -248,8 +248,12 @@ export function buildDeliveryReport(
 }
 
 // 导出交货延期统计表 Excel(标题行 + 合并单元格)
-export function exportDeliveryExcel(rows: ReportRow[], title: string) {
-  const H = DELIVERY_HEADERS
+export function exportDeliveryExcel(rows: ReportRow[], title: string, includeMoldNumber = true) {
+  const H = DELIVERY_HEADERS.filter((header) => includeMoldNumber || header !== '模具编号')
+  const moldColumn = DELIVERY_HEADERS.indexOf('模具编号')
+  const withoutHiddenMold = (values: any[]) => includeMoldNumber
+    ? values
+    : values.filter((_, index) => index !== moldColumn)
   const titleRow = new Array(H.length).fill('')
   titleRow[0] = title
   const body: any[][] = []
@@ -257,21 +261,21 @@ export function exportDeliveryExcel(rows: ReportRow[], title: string) {
   rows.forEach((r, i) => {
     const rr = 2 + i
     if (r.kind === 'detail') {
-      body.push([
+      body.push(withoutHiddenMold([
         r.rangeSpan ? r.range : '', r.pmcSpan ? r.pmc : '', r.factorySpan ? r.factory : '',
         r.item_no, r.mold_no, r.order_no, r.category, r.product, r.quantity ?? '',
         r.order_date, r.delivery_date, r.actual_delivery_date, r.delay_days ?? '',
         r.orderCount, r.delayedCount, r.delayRatio, r.delayAvg, r.quote, r.outPrice, r.outPriceCnyTax, r.exchangeRate, r.priceRatio, r.notes,
-      ])
+      ]))
       if (r.rangeSpan > 1) merges.push({ s: { r: rr, c: 0 }, e: { r: rr + r.rangeSpan - 1, c: 0 } })
       if (r.pmcSpan > 1) merges.push({ s: { r: rr, c: 1 }, e: { r: rr + r.pmcSpan - 1, c: 1 } })
       if (r.factorySpan > 1) merges.push({ s: { r: rr, c: 2 }, e: { r: rr + r.factorySpan - 1, c: 2 } })
     } else {
-      body.push([
+      body.push(withoutHiddenMold([
         '', '', '', `${r.factory}-小计`, '', '', '', '', '', '', '', '', '',
         r.orderCount, r.delayedCount, r.delayRatio, r.delayAvg, r.quote, r.outPrice, r.outPriceCnyTax, '', r.priceRatio, '',
-      ])
-      merges.push({ s: { r: rr, c: 3 }, e: { r: rr, c: 12 } })
+      ]))
+      merges.push({ s: { r: rr, c: 3 }, e: { r: rr, c: includeMoldNumber ? 12 : 11 } })
     }
   })
   const ws = XLSX.utils.aoa_to_sheet([titleRow, H, ...body])
@@ -301,9 +305,12 @@ function parseNumberCell(value: any): number | undefined {
 
 function formatImportDate(value: any): string {
   if (value instanceof Date) {
-    const y = value.getFullYear()
-    const m = String(value.getMonth() + 1).padStart(2, '0')
-    const d = String(value.getDate()).padStart(2, '0')
+    // Excel 日期是“无时区的日历日”，xlsx 读取后可能落在前一天傍晚。
+    // 移到 UTC 正午再取日期，避免东八区/服务器时区导致少一天。
+    const calendarDate = new Date(value.getTime() + 12 * 60 * 60 * 1000)
+    const y = calendarDate.getUTCFullYear()
+    const m = String(calendarDate.getUTCMonth() + 1).padStart(2, '0')
+    const d = String(calendarDate.getUTCDate()).padStart(2, '0')
     return `${y}-${m}-${d}`
   }
   const text = cleanText(value)
@@ -416,6 +423,103 @@ function labeledValues(aoa: any[][], label: string, endRow = aoa.length) {
     }
   }
   return values
+}
+
+function labeledDates(aoa: any[][], label: string) {
+  const values: string[] = []
+  const labelKey = compactText(label).replace(/[：:]$/, '')
+  for (const row of aoa) {
+    for (let i = 0; i < row.length; i++) {
+      const compact = compactText(row[i])
+      const match = compact.match(new RegExp(`^${labelKey}[：:]?(.*)$`))
+      if (!match) continue
+      if (match[1]) {
+        const formatted = formatImportDate(match[1])
+        if (/^\d{4}-\d{2}-\d{2}$/.test(formatted)) values.push(formatted)
+        continue
+      }
+      for (let j = i + 1; j < row.length; j++) {
+        if (row[j] === '' || row[j] == null) continue
+        const formatted = formatImportDate(row[j])
+        if (/^\d{4}-\d{2}-\d{2}$/.test(formatted)) values.push(formatted)
+        break
+      }
+    }
+  }
+  return values
+}
+
+function parseAssemblyContractImport(
+  aoa: any[][],
+  headerIdx: number,
+  header: string[],
+  factoryIdByName: Record<string, string>,
+): { payloads: Record<string, any>[]; failed: number } {
+  const colContaining = (...aliases: string[]) => header.findIndex((value) =>
+    aliases.some((alias) => value.includes(compactText(alias))))
+  const C = {
+    item_no: colContaining('货号'),
+    product: colContaining('货品名称'),
+    qty: colContaining('数量'),
+    out: colContaining('单价'),
+    amount: colContaining('金额'),
+    category: colContaining('商品名称'),
+    delivery_date: colContaining('交货期', '交货日期'),
+    notes: colContaining('备注'),
+  }
+  const beforeHeader = aoa.slice(0, headerIdx)
+  const factoryName = labeledValues(beforeHeader, '厂商').at(-1) ?? ''
+  const orderNo = labeledValues(beforeHeader, '订单编号').at(-1) ?? ''
+  const standaloneOrderDate = beforeHeader.flat()
+    .map(formatImportDate)
+    .find((value) => /^\d{4}-\d{2}-\d{2}$/.test(value)) ?? ''
+  const orderDate = labeledDates(aoa, '时间').at(-1) ?? standaloneOrderDate
+  const pmc = labeledValue(aoa.flat(), '采购签核', ['主管', '生产经理', '经理'])
+    || labeledValues(aoa, '采购签核').at(-1)
+    || ''
+  const deliveryText = aoa.flat().map(cleanText)
+    .find((value) => /前交货/.test(value) && /\d{4}\s*年/.test(value)) ?? ''
+  const deliveryDate = formatImportDate(compactText(deliveryText))
+  const factoryId = factoryIdOf(factoryIdByName, factoryName)
+
+  const payloads: Record<string, any>[] = []
+  let failed = 0
+  let lastCategory = ''
+  let lastDeliveryDate = ''
+  const cell = (row: any[], index: number) => (index >= 0 ? row[index] : '')
+  for (const row of aoa.slice(headerIdx + 1)) {
+    if (row.some((value) => /\u5408\u8ba1|\u5c0f\u8ba1/.test(cleanText(value)))) break
+    const itemNo = cleanText(cell(row, C.item_no))
+    const product = cleanText(cell(row, C.product))
+    if (!itemNo && !product) continue
+    if (!product || !factoryId) { failed++; continue }
+    const category = cleanText(cell(row, C.category))
+    if (category) lastCategory = category
+    const rowDeliveryDate = formatImportDate(cell(row, C.delivery_date))
+    if (/^\d{4}-\d{2}-\d{2}$/.test(rowDeliveryDate)) lastDeliveryDate = rowDeliveryDate
+    const qty = parseNumberCell(cell(row, C.qty))
+    const out = parseNumberCell(cell(row, C.out))
+    const amount = parseNumberCell(cell(row, C.amount))
+    const payload: Record<string, any> = {
+      factory: factoryId,
+      pmc,
+      item_no: itemNo,
+      order_no: orderNo,
+      process_category: lastCategory,
+      product,
+      notes: cleanText(cell(row, C.notes)),
+      status: 'placed',
+      is_delayed: false,
+    }
+    if (qty != null) payload.quantity = qty
+    if (out != null) payload.unit_price_cny_tax = out
+    if (amount != null) payload.amount = amount
+    else if (qty != null && out != null) payload.amount = qty * out
+    if (orderDate) payload.order_date = orderDate
+    if (lastDeliveryDate || deliveryDate) payload.delivery_date = lastDeliveryDate || deliveryDate
+    payloads.push(payload)
+  }
+  return { payloads, failed }
 }
 
 function parseSewingPurchaseOrderImport(
@@ -559,6 +663,9 @@ export function parseDeliveryImport(
   }
   if (header.includes('款号') && header.includes('加工内容') && header.includes('单价')) {
     return parsePurchaseOrderImport(aoa, headerIdx, header, factoryIdByName)
+  }
+  if (header.includes('货号') && header.includes('货品名称') && header.includes('商品名称') && header.some((value) => value.includes('单价'))) {
+    return parseAssemblyContractImport(aoa, headerIdx, header, factoryIdByName)
   }
   const C = {
     pmc: colOf('下单PMC'), factory: colOf('加工厂'), item_no: colOf('货号', '款号'), mold_no: colOf('模具编号'), order_no: colOf('订单号'),

@@ -226,6 +226,7 @@ deploy_non_indonesia_affected_services() {
   for svc in "${AFFECTED_SERVICES[@]}"; do
     [[ "$svc" == "indo-shipping" ]] && continue
     echo "  [INCR] Rebuilding $svc (--no-deps)..."
+    ensure_service_base_images "$svc"
     docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --build --no-deps "$svc"
   done
 }
@@ -668,6 +669,55 @@ else
   echo "[5/6] DB 未被影响，跳过备份"
 fi
 
+# ─── base image mirror guard（2026-07-21）───
+# 背景: 服务器 /etc/docker/daemon.json 的 registry-mirror 指向 mirror.ccs.tencentyun.com
+#       （腾讯云内网镜像），这台阿里云 ECS 上 DNS 解析失败（no such host）。base image
+#       layer 不在本地缓存时，BuildKit 拉 python:3.12-slim 等基础镜像直接 "no such host"
+#       → 构建失败（见 PR #295 部署两次同一错误）。
+# 修复: 构建前把缺失的 Docker Hub 官方 base image 从可用的公共镜像站显式拉下来，tag 成短名。
+#       BuildKit 的 FROM 就能从本地 image store 解析，不再碰坏掉的 daemon mirror。
+# 特性: 幂等（本地已有就跳过）+ best-effort（镜像站全失败也只是回到原来的构建，绝不更糟）。
+#       不改 daemon.json、不 restart docker，零停机、零副作用。
+# 根治: 应在主机侧把 daemon.json 的 registry-mirror 换成可用的阿里云加速器；本守卫是兜底。
+BASE_IMAGE_MIRRORS=(docker.m.daocloud.io docker.1ms.run docker.1panel.live dockerpull.org)
+
+ensure_base_image() {
+  local img="$1"   # 例: python:3.12-slim
+  if docker image inspect "$img" >/dev/null 2>&1; then
+    return 0
+  fi
+  echo "  [MIRROR-GUARD] base image 本地缺失: $img，尝试从公共镜像站拉取..."
+  local mirror
+  for mirror in "${BASE_IMAGE_MIRRORS[@]}"; do
+    if docker pull "$mirror/library/$img" >/dev/null 2>&1; then
+      docker tag "$mirror/library/$img" "$img"
+      echo "  [MIRROR-GUARD] ✓ 已从 $mirror 拉取并 tag 为 $img"
+      return 0
+    fi
+    echo "  [MIRROR-GUARD] ✗ $mirror 不可用，尝试下一个"
+  done
+  echo "  [MIRROR-GUARD][WARN] 所有公共镜像站均失败: $img（交回正常构建，可能仍失败）"
+  return 0
+}
+
+# 给定 service 名，读取其 Dockerfile 的 FROM，确保用到的 Docker Hub 官方 base image 都在本地。
+# 只处理不含 registry/namespace 的 library 镜像（如 python:3.12-slim / node:20-alpine），
+# 自动跳过 mcr.microsoft.com/... 等非 Hub 镜像和多阶段 FROM <stage> 引用（无 tag 冒号）。
+ensure_service_base_images() {
+  local target_svc="$1"
+  local prefix dockerfile img
+  for prefix in "${!PATH_TO_SERVICE[@]}"; do
+    [[ "${PATH_TO_SERVICE[$prefix]}" == "$target_svc" ]] || continue
+    dockerfile="${prefix}Dockerfile"
+    [[ -f "$dockerfile" ]] || return 0
+    while read -r img; do
+      [[ -n "$img" ]] && ensure_base_image "$img"
+    done < <(grep -iE '^FROM ' "$dockerfile" | awk '{print $2}' \
+             | grep -E ':' | grep -vE '/' | sort -u)
+    return 0
+  done
+}
+
 # ─── Step 6: 执行部署 ───
 save_state "deploy"
 echo "[6/6] Deploying..."
@@ -691,6 +741,7 @@ elif [[ "$COMPOSE_CHANGED" -eq 1 ]]; then
   # 还要 rebuild 那些真的动了源码的服务（incremental）
   for svc in "${AFFECTED_SERVICES[@]}"; do
     echo "  [INCR] Rebuilding $svc (--no-deps)..."
+    ensure_service_base_images "$svc"
     docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --build --no-deps "$svc"
   done
   # 容器 IP 全变，但 nginx 用动态 resolver 10 秒自动感知
@@ -698,6 +749,7 @@ elif [[ "${#AFFECTED_SERVICES[@]}" -gt 0 ]]; then
   # 增量：只 rebuild 影响的服务，带 --no-deps 不触发依赖链
   for svc in "${AFFECTED_SERVICES[@]}"; do
     echo "  [INCR] Rebuilding $svc (--no-deps)..."
+    ensure_service_base_images "$svc"
     docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --build --no-deps "$svc"
   done
   # 容器 recreate 后 Docker bridge IP 会变，但因为 nginx 现在用动态 resolver

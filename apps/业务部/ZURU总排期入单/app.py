@@ -362,6 +362,8 @@ def upload_master():
     # secure_filename 防路径穿越；为空时退回固定名
     safe_name = secure_filename(f.filename) or f'master{ext}'
     path = os.path.join(app.config['MASTER_FOLDER'], safe_name)
+    # 临时文件必须保留 .xlsx 后缀：_validate_xlsx 内部用 openpyxl.load_workbook，
+    # openpyxl 会按扩展名判断格式，非 .xlsx（如 .tmp）会被直接拒绝导致合法文件误判校验失败。
     tmp_path = f'{path}.{uuid.uuid4().hex}.tmp.xlsx'
     try:
         f.save(tmp_path)
@@ -409,6 +411,7 @@ def master_schedule_upload_file():
         return jsonify({'error': '请选择 .xlsx 格式的总排期文件'}), 400
 
     save_path = os.path.join(app.config['MASTER_FOLDER'], 'uploaded_master.xlsx')
+    # 同上：保留 .xlsx 后缀，否则 _validate_xlsx 里的 openpyxl 会因扩展名拒绝合法文件。
     tmp_path = save_path + f'.{uuid.uuid4().hex}.tmp.xlsx'
     try:
         os.makedirs(app.config['MASTER_FOLDER'], exist_ok=True)

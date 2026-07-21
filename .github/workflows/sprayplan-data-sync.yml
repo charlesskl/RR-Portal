@@ -1,0 +1,159 @@
+name: SprayPlan Data Sync
+
+# 把 PR #306 里的业务数据（prisma/dev.db + storage/pdf/*.pdf）正确地迁到生产。
+# PR #306 直接把 gitignored 的 dev.db 和错路径的 PDF commit 进仓库，运行时根本不读——
+# 正解是把数据放到 bind-mount 的 data/sprayplan.db 与 storage/pdf/。此 workflow 干这件事。
+#
+#   mode=check  —— 只读：打印生产 data/sprayplan.db 各业务表行数 + storage/pdf 数量。判断有无真实数据会被覆盖。
+#   mode=apply  —— 备份现有 db+storage → 从 PR #306 取 dev.db 覆盖 data/sprayplan.db + 取 12 个 PDF 到 storage/pdf/
+#                  → force-recreate sprayplan → 健康检查。失败可用 rollback。
+#   mode=rollback —— 从最近一次 .bak 恢复 data/sprayplan.db 并 recreate。
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "check(只读) / apply(迁数据) / rollback(恢复)"
+        type: choice
+        required: true
+        default: check
+        options: [check, apply, rollback]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-cloud
+  queue: max
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Validate SSH host fingerprint
+        shell: bash
+        env:
+          CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]]; then
+            echo 'CLOUD_HOST_FINGERPRINT must be a non-empty OpenSSH SHA256 fingerprint.' >&2
+            exit 1
+          fi
+
+      - name: SprayPlan data sync via SSH
+        env:
+          CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+          OPS_MODE: ${{ inputs.mode }}
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
+        with:
+          host: ${{ secrets.CLOUD_HOST }}
+          username: ${{ secrets.CLOUD_USER }}
+          key: ${{ secrets.CLOUD_SSH_KEY }}
+          fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
+          command_timeout: 12m
+          envs: OPS_MODE
+          script: |
+            set -uo pipefail
+            MODE="${OPS_MODE:-check}"
+            cd /opt/rr-portal
+            APP="apps/喷油部/喷油排期系统"
+            DB="$APP/data/sprayplan.db"
+            STORE="$APP/storage/pdf"
+            COMPOSE="docker-compose.cloud.yml"
+            ENVF=".env.cloud.production"
+            PR_REF="refs/pull/306/head"
+            echo "=================== MODE: $MODE ==================="
+
+            count_db() {
+              python3 - "$1" <<'PY'
+            import sqlite3, sys, os
+            db=sys.argv[1]
+            if not os.path.exists(db):
+                print("  (data/sprayplan.db 不存在——容器还没首启?)"); sys.exit(0)
+            con=sqlite3.connect(f"file:{db}?mode=ro",uri=True,timeout=5); cur=con.cursor()
+            tbls=[r[0] for r in cur.execute("select name from sqlite_master where type='table' and name not like 'sqlite_%' and name not like '_prisma%'").fetchall()]
+            total=0
+            for t in tbls:
+                try:
+                    n=cur.execute(f'select count(*) from "{t}"').fetchone()[0]
+                    total+=n
+                    if n>0: print(f"    {t}: {n}")
+                except Exception as e: print(f"    {t}: ERR {e}")
+            print("  业务表非空行总计:", total)
+            con.close()
+            PY
+            }
+
+            echo "== 生产 data/sprayplan.db 现状 =="
+            count_db "$DB"
+            echo "== storage/pdf 现有文件数 =="
+            ls -1 "$STORE" 2>/dev/null | grep -i '\.pdf$' | wc -l || echo 0
+            echo "== 现有备份 =="
+            ls -t "$APP/data"/sprayplan.db.bak.* 2>/dev/null | head -5 || echo "  (无)"
+
+            if [ "$MODE" = "check" ]; then
+              echo "[OK] check 完成（只读）"
+              exit 0
+            fi
+
+            if [ "$MODE" = "rollback" ]; then
+              BAK="$(ls -t "$APP/data"/sprayplan.db.bak.* 2>/dev/null | head -1)"
+              [ -n "$BAK" ] || { echo "[FAIL] 无备份可回滚" >&2; exit 1; }
+              echo "-- 停 sprayplan --"; docker compose -f "$COMPOSE" --env-file "$ENVF" stop sprayplan
+              cp "$BAK" "$DB"; rm -f "$DB-wal" "$DB-shm"
+              docker compose -f "$COMPOSE" --env-file "$ENVF" up -d --force-recreate --no-deps sprayplan
+              echo "[OK] rollback 完成"; exit 0
+            fi
+
+            # ─── apply ───
+            TS="$(date +%Y%m%d-%H%M%S)"
+            echo "-- 取 PR #306 数据 --"
+            git fetch origin "$PR_REF:refs/tmp/pr306" 2>&1 | tail -2
+            if ! git -c core.quotePath=false cat-file -e "refs/tmp/pr306:$APP/prisma/dev.db" 2>/dev/null; then
+              echo "[FAIL] PR #306 里找不到 $APP/prisma/dev.db" >&2; exit 1
+            fi
+
+            echo "-- 备份现有 db + storage --"
+            mkdir -p "$APP/data" "$STORE"
+            [ -f "$DB" ] && cp "$DB" "$APP/data/sprayplan.db.bak.$TS" && echo "  db → sprayplan.db.bak.$TS"
+            tar -C "$APP" -czf "$APP/data/storage.bak.$TS.tgz" storage 2>/dev/null && echo "  storage → storage.bak.$TS.tgz"
+
+            echo "-- 停 sprayplan（释放 SQLite 锁）--"
+            docker compose -f "$COMPOSE" --env-file "$ENVF" stop sprayplan
+
+            echo "-- 覆盖 data/sprayplan.db ← dev.db --"
+            git -c core.quotePath=false show "refs/tmp/pr306:$APP/prisma/dev.db" > "$DB"
+            rm -f "$DB-wal" "$DB-shm"
+            echo "  new db size: $(stat -c%s "$DB" 2>/dev/null || wc -c <"$DB")"
+
+            echo "-- 拷贝 PDF → storage/pdf/ --"
+            n=0
+            git -c core.quotePath=false ls-tree -r --name-only refs/tmp/pr306 -- "$APP/server/SprayPlan.Api/storage/pdf/" | while read -r f; do
+              [ -n "$f" ] || continue
+              case "$f" in *.pdf|*.PDF) : ;; *) continue ;; esac
+              git -c core.quotePath=false show "refs/tmp/pr306:$f" > "$STORE/$(basename "$f")"
+            done
+            n=$(ls -1 "$STORE" 2>/dev/null | grep -i '\.pdf$' | wc -l)
+            echo "  storage/pdf 现在 $n 个 PDF"
+
+            echo "-- 修权限（容器 root 写，宽松即可）--"
+            chmod -R 777 "$APP/data" "$APP/storage" 2>/dev/null || true
+
+            echo "-- force-recreate sprayplan --"
+            docker compose -f "$COMPOSE" --env-file "$ENVF" up -d --force-recreate --no-deps sprayplan
+
+            echo "-- 等待健康 --"
+            ok=0
+            for i in $(seq 1 30); do
+              if curl -sf http://localhost:8400/sprayplan/api/health >/dev/null 2>&1 \
+                 || docker exec rr-portal-sprayplan-1 sh -c 'wget -qO- http://127.0.0.1:8400/sprayplan/api/health' >/dev/null 2>&1; then
+                ok=1; echo "  healthy after ${i}x3s"; break
+              fi
+              sleep 3
+            done
+            echo "-- 迁移后 db 行数 --"; count_db "$DB"
+            git update-ref -d refs/tmp/pr306 2>/dev/null || true
+            [ "$ok" = 1 ] && echo "[OK] apply 完成" || { echo "[WARN] 健康检查未通过，检查容器日志；必要时 mode=rollback"; exit 1; }

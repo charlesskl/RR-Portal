@@ -84,6 +84,45 @@ def test_fake_xlsx_does_not_replace_existing_master(isolated_app):
     assert app_module._get_master_path() == str(current)
 
 
+def test_valid_workbench_master_upload_succeeds(isolated_app, tmp_path):
+    client, master_dir, _ = isolated_app
+    source = tmp_path / '7.12.xlsx'
+    make_schedule(source, sheet_name='总排期')
+
+    response = client.post(
+        '/api/master-schedule-upload-file',
+        data={'file': (io.BytesIO(source.read_bytes()), source.name)},
+        content_type='multipart/form-data',
+    )
+
+    assert response.status_code == 200
+    saved = master_dir / 'uploaded_master.xlsx'
+    assert saved.exists()
+    workbook = openpyxl.load_workbook(saved, read_only=True)
+    try:
+        assert workbook.sheetnames == ['总排期']
+    finally:
+        workbook.close()
+    assert not list(master_dir.glob('*.tmp.xlsx'))
+
+
+def test_valid_legacy_master_upload_succeeds(isolated_app, tmp_path):
+    client, master_dir, _ = isolated_app
+    source = tmp_path / '7.12.xlsx'
+    make_schedule(source, sheet_name='总排期')
+
+    response = client.post(
+        '/api/master-schedule-upload-master',
+        data={'master_file': (io.BytesIO(source.read_bytes()), source.name)},
+        content_type='multipart/form-data',
+    )
+
+    assert response.status_code == 200
+    saved = master_dir / source.name
+    assert saved.exists()
+    assert not list(master_dir.glob('*.tmp.xlsx'))
+
+
 def test_legacy_master_upload_rejects_fake_xlsx(isolated_app):
     client, master_dir, _ = isolated_app
     current = master_dir / 'master.xlsx'

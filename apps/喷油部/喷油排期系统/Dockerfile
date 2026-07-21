@@ -1,6 +1,13 @@
 FROM node:20-bookworm-slim AS web-build
 
 WORKDIR /src
+# China 网络：registry.npmjs.org 与 prisma 引擎二进制直连超时（部署 ECS 在阿里云内）。
+# 构建期改用阿里云 npmmirror 镜像，npm ci 从 37min 超时失败降到分钟级。
+# npm 默认 replace-registry-host=npmjs，会把 lockfile 里 npmjs.org 的 resolved URL
+# 自动替换成此 registry。仅作用于构建阶段，不影响本地开发 / 运行时。
+ENV npm_config_registry=https://registry.npmmirror.com \
+    PRISMA_ENGINES_MIRROR=https://registry.npmmirror.com/-/binary/prisma \
+    NEXT_TELEMETRY_DISABLED=1
 RUN apt-get update \
     && apt-get install -y --no-install-recommends openssl \
     && rm -rf /var/lib/apt/lists/*

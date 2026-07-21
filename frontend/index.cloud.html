@@ -74,6 +74,7 @@
   }
   .dept-icon.engineering { background: linear-gradient(135deg, #3b82f6, #06b6d4); }
   .dept-icon.production { background: linear-gradient(135deg, #f97316, #ea580c); }
+  .dept-icon.spray { background: linear-gradient(135deg, #10b981, #047857); }
   .dept-icon.pmc { background: linear-gradient(135deg, #10b981, #059669); }
   .dept-icon.business { background: linear-gradient(135deg, #f59e0b, #ef4444); }
   .dept-icon.qa { background: linear-gradient(135deg, #8b5cf6, #ec4899); }
@@ -329,6 +330,26 @@
               <div class="plugin-info">
                 <div class="plugin-dot gray" id="qcDot"></div>
                 <span class="plugin-name">品质管理系统</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 喷油部 -->
+      <div class="dept-card" onclick="showDept('spray')">
+        <div class="dept-card-header">
+          <div class="dept-icon spray">&#128736;</div>
+          <div>
+            <div class="dept-name">喷油部</div>
+          </div>
+        </div>
+        <div class="dept-card-body">
+          <div class="plugin-list" id="sprayPluginList">
+            <div class="plugin-item">
+              <div class="plugin-info">
+                <div class="plugin-dot gray" id="sprayplanDot"></div>
+                <span class="plugin-name">喷油排期系统</span>
               </div>
             </div>
           </div>
@@ -647,6 +668,41 @@
       <div class="detail-plugin-right">
         <div class="detail-plugin-status"><div class="plugin-dot gray" id="productionPlanDetailDot"></div> 检查中...</div>
         <a href="/production-plan/" target="_blank" class="btn btn-primary">打开系统</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== 喷油部详情 ===== -->
+  <div class="detail-view" id="sprayDetail">
+    <div class="back-btn" onclick="goHome()">&larr; 返回部门总览</div>
+    <div class="breadcrumb">
+      <a href="#" onclick="goHome()">控制台</a>
+      <span class="sep">/</span>
+      <span style="color:#10b981">喷油部</span>
+    </div>
+    <div class="page-title" style="display:flex;align-items:center;gap:14px;">
+      <div class="dept-icon spray" style="width:40px;height:40px;font-size:18px;">&#128736;</div>
+      喷油部
+    </div>
+    <div class="page-subtitle">喷油订单、排期与实绩管理</div>
+
+    <div class="detail-plugin-card">
+      <div class="detail-plugin-left">
+        <div class="detail-plugin-icon" style="background:linear-gradient(135deg,#10b981,#047857);">&#128197;</div>
+        <div>
+          <div class="detail-plugin-name">喷油排期系统</div>
+          <div class="detail-plugin-desc">喷油订单、产品核价、月周排期、实绩录入及库存跟进</div>
+          <div class="feature-grid">
+            <div class="feature-tag">&#128203; 订单管理</div>
+            <div class="feature-tag">&#128197; 联合排期</div>
+            <div class="feature-tag">&#9989; 实绩录入</div>
+            <div class="feature-tag">&#128230; 库存跟进</div>
+          </div>
+        </div>
+      </div>
+      <div class="detail-plugin-right">
+        <div class="detail-plugin-status"><div class="plugin-dot gray" id="sprayplanDetailDot"></div> 检查中...</div>
+        <a href="/sprayplan/" target="_blank" class="btn btn-primary">打开系统</a>
       </div>
     </div>
   </div>
@@ -1083,7 +1139,7 @@
 </div>
 
 <script>
-var allDepts = ['engineering', 'pmc', 'production', 'business', 'shipping', 'indonesia', 'qa'];
+var allDepts = ['engineering', 'pmc', 'production', 'spray', 'business', 'shipping', 'indonesia', 'qa'];
 
 function showDept(dept) {
   document.getElementById('homeView').classList.add('hidden');
@@ -1111,6 +1167,7 @@ async function checkHealth() {
       { name: 'jiangping', url: '/jiangping/health', dot: 'jiangpingDot', detailDot: 'jiangpingDetailDot' },
       { name: 'paiji', url: '/paiji/health', dot: 'paijiDot', detailDot: 'paijiDetailDot' },
       { name: 'penyou', url: '/penyou/api/health', dot: 'penyouDot', detailDot: 'penyouDetailDot' },
+      { name: 'sprayplan', url: '/sprayplan/api/health', dot: 'sprayplanDot', detailDot: 'sprayplanDetailDot' },
       { name: 'piOutsource', url: '/pi-outsource/api/health', dot: 'piOutsourceDot', detailDot: 'piOutsourceDetailDot' },
       { name: 'productionPlan', url: '/production-plan/health', dot: 'productionPlanDot', detailDot: 'productionPlanDetailDot' },
       { name: 'qc', url: '/qc/api/health', dot: 'qcDot', detailDot: 'qcDetailDot' },

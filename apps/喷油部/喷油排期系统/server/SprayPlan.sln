@@ -1,0 +1,28 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SprayPlan.Api", "SprayPlan.Api\SprayPlan.Api.csproj", "{1F1F9D3D-D4E0-4A71-9FF6-C4160A076F84}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SprayPlan.Api.Tests", "SprayPlan.Api.Tests\SprayPlan.Api.Tests.csproj", "{955FB3B7-D74D-4AE5-B5E6-7FC1B4A928EF}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{1F1F9D3D-D4E0-4A71-9FF6-C4160A076F84}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1F1F9D3D-D4E0-4A71-9FF6-C4160A076F84}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1F1F9D3D-D4E0-4A71-9FF6-C4160A076F84}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1F1F9D3D-D4E0-4A71-9FF6-C4160A076F84}.Release|Any CPU.Build.0 = Release|Any CPU
+		{955FB3B7-D74D-4AE5-B5E6-7FC1B4A928EF}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{955FB3B7-D74D-4AE5-B5E6-7FC1B4A928EF}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{955FB3B7-D74D-4AE5-B5E6-7FC1B4A928EF}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{955FB3B7-D74D-4AE5-B5E6-7FC1B4A928EF}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal

@@ -1,0 +1,287 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// 使用经典 prisma-client-js 生成器：输出到 node_modules/@prisma/client，
+// 支持 `new PrismaClient()` 无参构造（Prisma v7 新版 prisma-client 生成器要求显式 adapter，
+// 这里为了符合 P0 任务规范且避免引入原生模块 better-sqlite3，沿用经典生成器）。
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// 用户表：支持后台登录的账号
+// role 取值约定（字符串而非 enum，SQLite + Prisma v6 简化处理）：
+//   - 'admin'  → 主管（拥有全部权限）
+//   - 'clerk'  → 文员 / 拉长（录入与排程）
+//   - 'viewer' → 统计组（只读）
+model User {
+  id            Int      @id @default(autoincrement())
+  username      String   @unique
+  passwordHash  String
+  displayName   String
+  role          String   // 'admin' | 'clerk' | 'viewer'
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  lastLoginAt   DateTime?
+
+  @@map("users")
+}
+
+// ============ 产品信息库（v1.0，原工艺模板重构）============
+
+// 产品主表：一条 = (货号 + 规格)。如 11494标准 / 11494波兰版 是两条
+// status: 'draft' 草稿 | 'active' 生效 | 'archived' 作废
+model Product {
+  id            Int      @id @default(autoincrement())
+  productNo     String   @unique // 产品货号（款号，如 11494），全厂唯一
+  iterationNo   String   @default("V1")   // 迭代号（模板改价代次 V1/V2）
+  status        String   @default("draft")
+  effectiveDate DateTime? // 版本生效日期（生效时填）
+  remark        String?
+  createdBy     String
+  createdAt     DateTime @default(now())
+  lastUpdatedBy String?
+  updatedAt     DateTime @updatedAt
+
+  items ProductItem[]
+  orders Order[]
+
+  @@map("products")
+}
+
+// 子件：一个产品多个子件（如套装的兔子/青蛙）
+model ProductItem {
+  id        Int    @id @default(autoincrement())
+  productId Int
+  itemName  String
+  itemOrder Int    @default(0)
+
+  product Product             @relation(fields: [productId], references: [id], onDelete: Cascade)
+  parts   ProductPart[]
+
+  @@index([productId, itemOrder])
+  @@map("product_items")
+}
+
+// 部位：只有 4 价（核/人工/油漆/报价），无特殊色加价（那是订单的事）
+model ProductPart {
+  id          Int    @id @default(autoincrement())
+  itemId      Int
+  partName    String
+  partOrder   Int    @default(0)
+  unitCost    Float  @default(0) // 核价
+  laborPrice  Float  @default(0) // 人工价
+  paintCost   Float  @default(0) // 油漆价
+  quotedPrice      Float  @default(0) // 报价
+  craft            String @default("")         // 工序/工艺大类：手喷 / 移印 / 自动喷 / UV（排期分拉别）
+  craftDetail      String @default("")         // 工序细类：原始小类（喷油/散枪/PP水…），导入保留
+  dailyCapacity    Int    @default(0)          // 单台(或单人)日产能：标准 11h、单一资源产量
+  productionMode   String @default("machine")  // 生产方式：machine 机喷 / manual 人工喷
+  stdMachineCount  Int    @default(1)          // 标准投入台/人数（出单日估算兜底）
+  isTumbler Boolean @default(false) // 是否走炒货机：true→计划行归手喷拉且产能进无限桶
+  craftPasses      Int    @default(0)          // 工序道数：该部位要走几道工序（兔子头=4）。存在该部位 partOrder 最小那行；约束 ≥ 该部位工序种类数
+  remark      String?
+
+  item ProductItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  @@index([itemId, partOrder])
+  @@map("product_parts")
+}
+
+// ============ 第 1 章 订单接收（v1.0）============
+
+// 订单头：一单一款号。status: 'received'|'scheduled'|'in_production'|'completed'|'archived'
+model Order {
+  id              Int       @id @default(autoincrement())
+  externalOrderNo String    @unique // 外部订单号（客户给的，如 ZWZ2026057）
+  productId       Int?      // 引用的款号；PDF导入新货号时为空（待补产品）
+  orderDate       DateTime  @default(now())
+  deliveryDate    DateTime? // 交货日期
+  status          String    @default("received")  // 已接单（去草稿，新建即已接单）
+  isMA            Boolean   @default(false)        // 非正式单（MA）标记
+  isUrgent        Boolean   @default(false)        // 急单标记（临时插入单，与 isMA 并排）
+  pendingProduct  Boolean   @default(false)        // 待补产品：PDF导入新货号，只存订单头等补明细
+  remark          String?
+  createdBy       String
+  createdAt       DateTime  @default(now())
+  lastUpdatedBy   String?
+  updatedAt       DateTime  @updatedAt
+
+  product Product?    @relation(fields: [productId], references: [id])
+  lines   OrderLine[]
+  plans   ProductionPlan[]
+
+  @@map("orders")
+}
+
+// 勾选的「子件」明细行（抄快照名 + 溯源 FK），数量下沉到部位级
+model OrderLine {
+  id            Int    @id @default(autoincrement())
+  orderId       Int
+  itemName      String // 快照名
+  sourceItemId  Int?   // 溯源产品库子件
+  lineOrder     Int    @default(0)
+
+  order    Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  partQtys OrderPartQty[]
+
+  @@index([orderId, lineOrder])
+  @@map("order_lines")
+}
+
+// 订单行（子件）下各部位的数量；接单按部位填，不分颜色/规格
+model OrderPartQty {
+  id           Int    @id @default(autoincrement())
+  orderLineId  Int
+  partName     String // 部位快照名
+  sourcePartId Int?   // 溯源产品库部位
+  qty          Int    @default(0)
+  partOrder    Int    @default(0)
+
+  line OrderLine @relation(fields: [orderLineId], references: [id], onDelete: Cascade)
+
+  @@index([orderLineId])
+  @@map("order_part_qtys")
+}
+
+// ============ 第 2 章 基础数据库（拉别 + 机台）============
+
+// 拉别（生产线）：机台、人员都挂拉别；拉别天然属某车间（选拉别即选车间）
+model ProductionLine {
+  id         Int       @id @default(autoincrement())
+  name       String    // 拉别名（如「A拉」「C拉」「UV拉」）
+  workshop   String    // 车间：兴信A / 华登A
+  leaderName String?   // 拉长名
+  craftType  String    @default("移印") // 工艺类型：手喷 / 移印 / 自动喷 / UV（整条拉一种工艺；机台默认继承）
+  dailyCapacityLimit Int @default(0) // 该拉一天产能上限（件）；0=不卡。A自动喷30万/C移印30万/UV40万/B手喷20万
+  isActive   Boolean   @default(true)
+  machines   Machine[]
+  plans      ProductionPlan[]
+
+  @@map("production_lines")
+}
+
+// 机台库：机型默认继承所属拉别工艺；isUV 由拉别工艺是否 UV 派生（排期挑 UV 机仍用此标记）
+model Machine {
+  id          Int     @id @default(autoincrement())
+  machineNo   String  // 机台号（5# / 21# / 38#…），同一拉别内唯一（A拉的5#与C拉的5#是两台）
+  lineId      Int
+  machineType String  @default("移印") // 机型（继承拉别工艺：移印 / 自动喷 / 手喷 / UV）
+  isUV        Boolean @default(false)
+  isActive    Boolean @default(true)
+  equipmentKind String  @default("普通") // 机台种类：炒货机/胭脂机/贴片机/普通（库存识别炒货超额用，独立于 machineType 工艺大类）
+
+  line ProductionLine @relation(fields: [lineId], references: [id], onDelete: Cascade)
+
+  @@unique([lineId, machineNo]) // 机台号按拉别唯一（原为全厂唯一）
+  @@index([lineId])
+  @@map("machines")
+}
+
+// ============ 第 2 章 排期（系统心脏）============
+// 一行 = 某天 × 某拉别 × 某订单子件部位 × 计划生产数（不分颜色/规格，spec §1.0）
+model ProductionPlan {
+  id            Int      @id @default(autoincrement())
+
+  // 排期维度
+  planDate      DateTime
+  planType      String   @default("daily")   // 'daily' | 'weekly'
+  lineId        Int
+
+  // 排的对象（部位级，不分颜色/规格）
+  orderId       Int
+  itemName      String                        // 子件名（快照）
+  partName      String                        // 部位名（快照）
+  sourcePartId  Int?                          // 溯源产品库部位
+
+  // 资源分配
+  machineNos    String   @default("[]")       // JSON 机台号数组（人工喷可空 []）
+  plannedQty    Int
+  workerCount   Int      @default(1)
+  groupNo       Int?     // 人数分组号：同拉别+同天内同一拨人圈成一组共享人数；null=未分组
+  stepNo        Int      @default(1)           // 第几道工序：工序链里的位置号（道1/道2…）。老数据/单道默认 1
+  craft         String   @default("")          // 该道工序大类（喷油/移印/UV）。空=未区分
+
+  // 实绩维度（第二批写入，本批留空）
+  goodQty         Int?
+  reportedQty     Int?    // 员工报数（实际生产数）：算车间存数用；车间存数=Σreported−Σgood，不存
+  defectQty       Int     @default(0)
+  workHours       Float   @default(11)
+  productionValue Float?  @default(0)
+
+  // 状态 / 审计 / 留痕 / 软删
+  status        String   @default("planned")  // 'planned' | 'recorded'
+  remark        String?
+  createdBy     String
+  createdAt     DateTime @default(now())
+  lastModifiedBy String?
+  lastModifiedAt DateTime @updatedAt
+  modificationHistory String @default("[]")
+  deletedAt     DateTime?
+  deletedBy     String?
+
+  line  ProductionLine @relation(fields: [lineId], references: [id])
+  order Order          @relation(fields: [orderId], references: [id])
+
+  @@index([planDate, lineId])
+  @@index([orderId])
+  @@map("production_plans")
+}
+
+// ============ 节假日表（月排自动化用：跳过休息日）============
+model Holiday {
+  id     Int      @id @default(autoincrement())
+  date   DateTime // 当天 0 点（UTC），存 Unix 毫秒，与 .NET MsConverter 对齐
+  type   String   @default("holiday") // holiday 休息 / workday 调休补班
+  remark String?  // 如「春节」「劳动节调休」
+
+  @@unique([date])
+  @@map("holidays")
+}
+
+// 工序对照表：核价表工序小类 → 系统 4 大类
+model CraftAlias {
+  id        Int      @id @default(autoincrement())
+  alias     String   @unique
+  category  String   // 手喷 / 移印 / 自动喷 / UV
+  createdBy String?
+  createdAt DateTime @default(now())
+
+  @@map("craft_aliases")
+}
+
+// ============ 机台种类（基础数据：可增删的下拉来源，独立于工艺大类）============
+model EquipmentKind {
+  id        Int      @id @default(autoincrement())
+  name      String   @unique // 种类名：普通/炒货机/胭脂机/贴片机…（可由文员增删）
+  createdAt DateTime @default(now())
+
+  @@map("equipment_kinds")
+}
+
+// ============ 库存模块（W1）：库存流水账（成品从实绩派生，仅存"挪动"事件）============
+// 每行 = 一笔库存变动。键=(productId,itemName,partName) 部位级、不分颜色。
+// ownerOrderId 非空=某订单成品；NULL=无主散件。delta 正进负出。
+model InventoryMove {
+  id           Int      @id @default(autoincrement())
+  productId    Int      // 款号
+  itemName     String   // 子件名（快照）
+  partName     String   // 部位名（快照）
+  ownerOrderId Int?     // 归属订单(成品)；NULL=散件
+  delta        Int      // 变动量：正=进 / 负=出
+  reason       String   // basket_overflow|tumbler_excess|assembly_pickup|reorder_consume
+  refOrderId   Int?     // 关联另一单（拆散件=原单；翻单消耗=新单）
+  createdBy    String
+  createdAt    DateTime @default(now())
+  remark       String?
+
+  @@index([productId, itemName, partName])
+  @@index([ownerOrderId])
+  @@index([refOrderId])
+  @@map("inventory_moves")
+}

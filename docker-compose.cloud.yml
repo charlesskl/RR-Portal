@@ -280,6 +280,40 @@ services:
     networks:
       - platform-net
 
+  sprayplan:
+    build:
+      context: ./apps/喷油部/喷油排期系统
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_BASE_PATH: /sprayplan
+    environment:
+      - NODE_ENV=production
+      - NEXT_PUBLIC_BASE_PATH=/sprayplan
+      - DOTNET_API_URL=http://127.0.0.1:5080
+      - DATA_PATH=/app/data
+      - TZ=Asia/Shanghai
+    volumes:
+      - ./apps/喷油部/喷油排期系统/data:/app/data
+      - ./apps/喷油部/喷油排期系统/storage:/app/server/SprayPlan.Api/storage
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8400/sprayplan/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+    mem_limit: 1g
+    memswap_limit: 1g
+    restart: unless-stopped
+    labels:
+      - "autoheal=true"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - platform-net
+
   qc:
     build:
       context: ./apps/生产部/品质管理系统

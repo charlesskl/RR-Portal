@@ -4,7 +4,12 @@ function requireOrdersEdit(e) {
   let permissions = {}
   const rawPermissions = auth.getString('permissions')
   if (rawPermissions) {
-    try { permissions = JSON.parse(rawPermissions) } catch { permissions = {} }
+    try {
+      const parsed = JSON.parse(rawPermissions)
+      permissions = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {}
+    } catch {
+      permissions = {}
+    }
   }
   if (permissions['orders.edit'] !== undefined) {
     if (permissions['orders.edit'] !== true) {

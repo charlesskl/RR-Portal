@@ -46,7 +46,10 @@ const deptOrders = computed(() => {
 const orderCount = computed(() => deptOrders.value.length)
 const rows = computed<ReportRow[]>(() =>
   buildDeliveryReport(deptOrders.value, deptName.value, (o) => o.expand?.factory?.name ?? ''))
-const visibleColumnCount = computed(() => HEADERS.length + (canEdit.value ? 1 : 0))
+const showMoldNumber = computed(() => craft.value === 'injection')
+const visibleHeaders = computed(() => HEADERS.filter((header) => showMoldNumber.value || header !== '模具编号'))
+const visibleColumnCount = computed(() => visibleHeaders.value.length + (canEdit.value ? 1 : 0))
+const subtotalLabelSpan = computed(() => showMoldNumber.value ? 10 : 9)
 
 type RowDraft = {
   pmc: string
@@ -83,13 +86,22 @@ async function importExcel(ev: Event) {
   try {
     const parsed = await parseDeliveryExcelFiles(files, fByName, { preferCnyTaxPrice: true })
     let ok = 0, fail = parsed.failedRows
+    const saveErrors: string[] = []
     for (const p of parsed.payloads) {
-      try { await orders.create({ ...p, created_by: auth.userId ?? undefined } as any); ok++ } catch { fail++ }
+      try {
+        await orders.create({ ...p, created_by: auth.userId ?? undefined } as any)
+        ok++
+      } catch (err: any) {
+        fail++
+        const message = err?.response?.message || err?.message || '记录保存失败'
+        if (!saveErrors.includes(message)) saveErrors.push(message)
+      }
     }
     await orders.fetchAll()
     const issues = [
       parsed.unrecognizedFiles.length ? `未识别 ${parsed.unrecognizedFiles.length} 个文件` : '',
       parsed.readFailedFiles.length ? `读取失败 ${parsed.readFailedFiles.length} 个文件` : '',
+      saveErrors.length ? `保存失败：${saveErrors.slice(0, 3).join('；')}` : '',
     ].filter(Boolean).join('，')
     alert(`批量导入完成：共 ${parsed.fileCount} 个文件，成功 ${ok} 条，失败 ${fail} 条${issues ? `\n${issues}` : ''}`)
   } finally {
@@ -176,7 +188,7 @@ function sourceOrder(row: DetailRow) {
 }
 
 function exportExcel() {
-  exportDeliveryExcel(rows.value, `${deptName.value}外发加工厂交货延期统计表`)
+  exportDeliveryExcel(rows.value, `${deptName.value}外发加工厂交货延期统计表`, showMoldNumber.value)
 }
 
 async function saveRow(row: DetailRow) {
@@ -312,14 +324,16 @@ async function removeRow(row: DetailRow) {
           {{ importingExcel ? '导入中…' : '批量导入 Excel' }}
         </button>
         <input ref="fileInput" type="file" accept=".xlsx,.xls,.csv" multiple style="display:none" @change="importExcel" />
-        <input class="search-box" v-model="search" placeholder="搜索 工厂/PMC/货号/模具编号/订单号/产品" />
+        <input class="search-box" v-model="search" :placeholder="showMoldNumber
+          ? '搜索 工厂/PMC/货号/模具编号/订单号/产品'
+          : '搜索 工厂/PMC/货号/订单号/产品'" />
         <button @click="exportExcel">导出 Excel</button>
       </div>
       <div class="scroll">
         <table class="report">
           <thead>
             <tr>
-              <th v-for="h in HEADERS" :key="h" :class="{ 'item-no-col': h === '货号' }">{{ h }}</th>
+              <th v-for="h in visibleHeaders" :key="h" :class="{ 'item-no-col': h === '货号' }">{{ h }}</th>
               <th v-if="canEdit" class="op-col">操作</th>
             </tr>
           </thead>
@@ -334,7 +348,7 @@ async function removeRow(row: DetailRow) {
                 </td>
                 <td v-if="r.factorySpan" :rowspan="r.factorySpan" class="grp">{{ r.factory || '-' }}</td>
                 <td class="item-no-col" :title="r.item_no || ''">{{ r.item_no || '-' }}</td>
-                <td>
+                <td v-if="showMoldNumber">
                   <input v-if="canEdit" class="mold-no-inp" :value="draftValue(r, 'mold_no')"
                     @input="setDraftValue(r, 'mold_no', ($event.target as HTMLInputElement).value)" />
                   <span v-else>{{ r.mold_no || '-' }}</span>
@@ -399,7 +413,7 @@ async function removeRow(row: DetailRow) {
               </tr>
               <tr v-else class="subtotal">
                 <td></td>
-                <td :colspan="10">{{ r.factory }}-小计</td>
+                <td :colspan="subtotalLabelSpan">{{ r.factory }}-小计</td>
                 <td>{{ r.orderCount }}</td>
                 <td>{{ r.delayedCount }}</td>
                 <td>{{ r.delayRatio }}</td>

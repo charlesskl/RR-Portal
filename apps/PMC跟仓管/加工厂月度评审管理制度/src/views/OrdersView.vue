@@ -44,7 +44,7 @@ function craftRows(craft: Craft): ReportRow[] {
 }
 // craft=null 导出全部(各部门拼接);指定部门只导该部门
 function exportExcel(craft: Craft | null) {
-  if (craft) { exportDeliveryExcel(craftRows(craft), `${CRAFT_LABELS[craft]}外发加工厂交货延期统计表`); return }
+  if (craft) { exportDeliveryExcel(craftRows(craft), `${CRAFT_LABELS[craft]}外发加工厂交货延期统计表`, craft === 'injection'); return }
   const all = visibleDepts.value.flatMap((d) => craftRows(d.craft))
   exportDeliveryExcel(all, '全部-外发加工厂交货延期统计表')
 }
@@ -63,13 +63,22 @@ async function importExcel(ev: Event) {
   try {
     const parsed = await parseDeliveryExcelFiles(files, fByName)
     let ok = 0, fail = parsed.failedRows
+    const saveErrors: string[] = []
     for (const p of parsed.payloads) {
-      try { await orders.create({ ...p, created_by: auth.userId ?? undefined } as any); ok++ } catch { fail++ }
+      try {
+        await orders.create({ ...p, created_by: auth.userId ?? undefined } as any)
+        ok++
+      } catch (err: any) {
+        fail++
+        const message = err?.response?.message || err?.message || '记录保存失败'
+        if (!saveErrors.includes(message)) saveErrors.push(message)
+      }
     }
     await orders.fetchAll()
     const issues = [
       parsed.unrecognizedFiles.length ? `未识别 ${parsed.unrecognizedFiles.length} 个文件` : '',
       parsed.readFailedFiles.length ? `读取失败 ${parsed.readFailedFiles.length} 个文件` : '',
+      saveErrors.length ? `保存失败：${saveErrors.slice(0, 3).join('；')}` : '',
     ].filter(Boolean).join('，')
     alert(`批量导入完成：共 ${parsed.fileCount} 个文件，成功 ${ok} 条，失败 ${fail} 条${issues ? `\n${issues}` : ''}`)
   } finally {

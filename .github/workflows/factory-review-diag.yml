@@ -55,37 +55,51 @@ jobs:
             echo "-- du --"; du -sh "$PBDATA" 2>/dev/null || true
             echo "-- data.db 大小/时间 --"; ls -la "$PBDATA"/data.db* 2>/dev/null || echo "(无 data.db!)"
 
-            echo "== orders 行数（python3 只读打开 SQLite）=="
+            echo "== orders 统计 / listRule / 最近 API 日志（python3 只读）=="
             python3 - "$PBDATA/data.db" <<'PY'
-            import sqlite3, sys, os
+            import sqlite3, sys, os, json
             db = sys.argv[1]
             if not os.path.exists(db):
                 print("data.db 不存在:", db); sys.exit(0)
+            con = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=5)
+            cur = con.cursor()
             try:
-                con = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=5)
-                cur = con.cursor()
-                # 列出所有表
-                tbls = [r[0] for r in cur.execute("select name from sqlite_master where type='table'").fetchall()]
-                print("tables:", ", ".join(tbls))
-                for t in ("orders",):
-                    if t in tbls:
-                        n = cur.execute(f"select count(*) from `{t}`").fetchone()[0]
-                        print(f"COUNT {t} = {n}")
-                        # 最近 3 条 created
-                        try:
-                            rows = cur.execute(f"select id, created from `{t}` order by created desc limit 3").fetchall()
-                            for r in rows: print("  recent:", r)
-                        except Exception as e:
-                            print("  (recent 查询失败:", e, ")")
-                    else:
-                        print(f"表 {t} 不存在")
-                # _collections 里 orders 的定义存在吗
-                if "_collections" in tbls:
-                    c = cur.execute("select count(*) from _collections where name='orders'").fetchone()[0]
-                    print("_collections 中 orders 定义:", c)
-                con.close()
+                n = cur.execute("select count(*) from `orders`").fetchone()[0]
+                print("COUNT orders =", n)
+                for st, c in cur.execute("select status, count(*) from `orders` group by status").fetchall():
+                    print(f"  status {st!r}: {c}")
             except Exception as e:
-                print("SQLite 读取失败:", e)
+                print("orders 统计失败:", e)
+            try:
+                for name, typ, lr, vr in cur.execute("select name, type, listRule, viewRule from _collections where name in ('orders','factories','users')").fetchall():
+                    print(f"collection {name} type={typ} listRule={lr!r} viewRule={vr!r}")
+            except Exception as e:
+                print("collections 读取失败:", e)
+            try:
+                print("users count =", cur.execute("select count(*) from `users`").fetchone()[0])
+            except Exception as e:
+                print("users 读取失败:", e)
+            try:
+                rows = cur.execute("select created, level, message, data from _logs order by created desc limit 120").fetchall()
+                print(f"-- 最近日志里 /api 请求与非2xx（扫 {len(rows)} 条）--")
+                shown = 0
+                for created, level, message, data in rows:
+                    d = {}
+                    try: d = json.loads(data) if data else {}
+                    except Exception: pass
+                    url = str(d.get("url","")); status = d.get("status"); method = d.get("method","")
+                    is_err = False
+                    try: is_err = status is not None and int(status) >= 400
+                    except Exception: pass
+                    if ("/api/" in url) or is_err:
+                        print(f"  {created} [{level}] {method} {status} {url}  {message}")
+                        shown += 1
+                    if shown >= 45: break
+                if not shown:
+                    print("  (无 /api 请求日志——PB 可能未记录请求级日志)")
+            except Exception as e:
+                print("_logs 读取失败:", e)
+            con.close()
             PY
 
             echo "== 容器近 40 行日志（找 hook/JS/DB 错误）=="

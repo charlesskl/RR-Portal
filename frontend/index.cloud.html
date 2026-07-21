@@ -315,6 +315,12 @@
             </div>
             <div class="plugin-item">
               <div class="plugin-info">
+                <div class="plugin-dot gray" id="sprayplanDot"></div>
+                <span class="plugin-name">喷油排期系统</span>
+              </div>
+            </div>
+            <div class="plugin-item">
+              <div class="plugin-info">
                 <div class="plugin-dot gray" id="piOutsourceDot"></div>
                 <span class="plugin-name">啤机外发系统</span>
               </div>
@@ -581,6 +587,26 @@
       <div class="detail-plugin-right">
         <div class="detail-plugin-status"><div class="plugin-dot gray" id="penyouDetailDot"></div> 检查中...</div>
         <a href="/penyou/" target="_blank" class="btn btn-primary">打开系统</a>
+      </div>
+    </div>
+
+    <div class="detail-plugin-card">
+      <div class="detail-plugin-left">
+        <div class="detail-plugin-icon" style="background:linear-gradient(135deg,#10b981,#047857);">&#128197;</div>
+        <div>
+          <div class="detail-plugin-name">喷油排期系统</div>
+          <div class="detail-plugin-desc">喷油订单、产品核价、月周排期、实绩录入及库存跟进</div>
+          <div class="feature-grid">
+            <div class="feature-tag">&#128203; 订单管理</div>
+            <div class="feature-tag">&#128197; 联合排期</div>
+            <div class="feature-tag">&#9989; 实绩录入</div>
+            <div class="feature-tag">&#128230; 库存跟进</div>
+          </div>
+        </div>
+      </div>
+      <div class="detail-plugin-right">
+        <div class="detail-plugin-status"><div class="plugin-dot gray" id="sprayplanDetailDot"></div> 检查中...</div>
+        <a href="/sprayplan/" target="_blank" class="btn btn-primary">打开系统</a>
       </div>
     </div>
 
@@ -1111,6 +1137,7 @@ async function checkHealth() {
       { name: 'jiangping', url: '/jiangping/health', dot: 'jiangpingDot', detailDot: 'jiangpingDetailDot' },
       { name: 'paiji', url: '/paiji/health', dot: 'paijiDot', detailDot: 'paijiDetailDot' },
       { name: 'penyou', url: '/penyou/api/health', dot: 'penyouDot', detailDot: 'penyouDetailDot' },
+      { name: 'sprayplan', url: '/sprayplan/api/health', dot: 'sprayplanDot', detailDot: 'sprayplanDetailDot' },
       { name: 'piOutsource', url: '/pi-outsource/api/health', dot: 'piOutsourceDot', detailDot: 'piOutsourceDetailDot' },
       { name: 'productionPlan', url: '/production-plan/health', dot: 'productionPlanDot', detailDot: 'productionPlanDetailDot' },
       { name: 'qc', url: '/qc/api/health', dot: 'qcDot', detailDot: 'qcDetailDot' },

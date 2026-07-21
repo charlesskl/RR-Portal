@@ -396,6 +396,7 @@ declare -A PATH_TO_SERVICE=(
   ["apps/生产部/注塑啤机排产系统/"]="paiji"
   ["apps/生产部/生产计划管理系统/"]="production-plan"
   ["apps/生产部/喷油部生产管理系统/"]="penyou"
+  ["apps/生产部/喷油排期系统/"]="sprayplan"
   ["apps/生产部/啤机外发系统/"]="pi-outsource"
   ["apps/生产部/品质管理系统/"]="qc"
   ["apps/PMC跟仓管/配色库存管理/"]="peise"

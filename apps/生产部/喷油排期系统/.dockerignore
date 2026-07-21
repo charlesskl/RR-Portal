@@ -1,0 +1,16 @@
+.next
+node_modules
+server/**/bin
+server/**/obj
+server/**/publish
+server/**/storage
+coverage
+test-results
+*.log
+.env*
+prisma/*.db
+prisma/*.db-*
+deploy
+docs
+tests
+server/SprayPlan.Api.Tests

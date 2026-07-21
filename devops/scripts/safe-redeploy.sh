@@ -172,6 +172,7 @@ declare -A PATH_MAP=(
   ["paiji"]="/paiji/health"
   ["peise"]="/peise/health"
   ["penyou"]="/penyou/api/health"
+  ["sprayplan"]="/sprayplan/api/health"
   ["jiangping"]="/jiangping/health"
   ["baojia"]="/baojia/health"
   ["tomy-paiqi"]="/tomy-paiqi/health"

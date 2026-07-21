@@ -7,6 +7,7 @@ WORKDIR /src
 # 自动替换成此 registry。仅作用于构建阶段，不影响本地开发 / 运行时。
 ENV npm_config_registry=https://registry.npmmirror.com \
     PRISMA_ENGINES_MIRROR=https://registry.npmmirror.com/-/binary/prisma \
+    PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 \
     NEXT_TELEMETRY_DISABLED=1
 RUN apt-get update \
     && apt-get install -y --no-install-recommends openssl \

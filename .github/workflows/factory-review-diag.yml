@@ -1,0 +1,96 @@
+name: Factory Review Diag
+
+# 只读诊断 factory-review 的 pb_data 数据状态（手动触发）。
+# 用于排查「货期管理入单记录消失」——确认 orders 表实际有多少行、pb_data 是否被重置。
+# 全程只读：count/ls/du/日志，绝不改动任何数据。
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-cloud
+  queue: max
+  cancel-in-progress: false
+
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Validate SSH host fingerprint
+        shell: bash
+        env:
+          CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]]; then
+            echo 'CLOUD_HOST_FINGERPRINT must be a non-empty OpenSSH SHA256 fingerprint.' >&2
+            exit 1
+          fi
+
+      - name: Diagnose factory-review pb_data via SSH
+        env:
+          CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
+        with:
+          host: ${{ secrets.CLOUD_HOST }}
+          username: ${{ secrets.CLOUD_USER }}
+          key: ${{ secrets.CLOUD_SSH_KEY }}
+          fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
+          command_timeout: 8m
+          script: |
+            set -uo pipefail
+            APP="/opt/rr-portal/apps/PMC跟仓管/加工厂月度评审管理制度"
+            PBDATA="$APP/pb_data"
+            echo "=================== factory-review pb_data 诊断 ==================="
+
+            echo "== 容器状态 =="
+            docker ps --filter name=factory-review --format '{{.Names}}\t{{.Status}}' || true
+
+            echo "== pb_data 目录（host 侧 bind mount）=="
+            ls -la "$PBDATA" 2>&1 | head -30 || echo "(pb_data 不存在!)"
+            echo "-- du --"; du -sh "$PBDATA" 2>/dev/null || true
+            echo "-- data.db 大小/时间 --"; ls -la "$PBDATA"/data.db* 2>/dev/null || echo "(无 data.db!)"
+
+            echo "== orders 行数（python3 只读打开 SQLite）=="
+            python3 - "$PBDATA/data.db" <<'PY'
+            import sqlite3, sys, os
+            db = sys.argv[1]
+            if not os.path.exists(db):
+                print("data.db 不存在:", db); sys.exit(0)
+            try:
+                con = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=5)
+                cur = con.cursor()
+                # 列出所有表
+                tbls = [r[0] for r in cur.execute("select name from sqlite_master where type='table'").fetchall()]
+                print("tables:", ", ".join(tbls))
+                for t in ("orders",):
+                    if t in tbls:
+                        n = cur.execute(f"select count(*) from `{t}`").fetchone()[0]
+                        print(f"COUNT {t} = {n}")
+                        # 最近 3 条 created
+                        try:
+                            rows = cur.execute(f"select id, created from `{t}` order by created desc limit 3").fetchall()
+                            for r in rows: print("  recent:", r)
+                        except Exception as e:
+                            print("  (recent 查询失败:", e, ")")
+                    else:
+                        print(f"表 {t} 不存在")
+                # _collections 里 orders 的定义存在吗
+                if "_collections" in tbls:
+                    c = cur.execute("select count(*) from _collections where name='orders'").fetchone()[0]
+                    print("_collections 中 orders 定义:", c)
+                con.close()
+            except Exception as e:
+                print("SQLite 读取失败:", e)
+            PY
+
+            echo "== 容器近 40 行日志（找 hook/JS/DB 错误）=="
+            docker logs --tail 40 rr-portal-factory-review-1 2>&1 | tail -40 || true
+
+            echo "== ~/rr-backups 里 factory-review 相关备份 =="
+            ls -lt ~/rr-backups/ 2>/dev/null | grep -i "factory\|review\|pb_data" | head || echo "(无匹配备份)"
+            echo "=================== 诊断结束（只读）==================="

@@ -1,0 +1,98 @@
+name: Mem Reclaim
+
+# 释放 ECS 内存/磁盘（手动触发）。
+#   mode=diagnose —— 只读：free -m、各容器内存占用(docker stats)、docker system df、占内存大的进程。
+#   mode=reclaim  —— 安全回收：docker builder prune + 无容器引用的镜像 prune（不动运行中的容器/volume/data）。
+#                    打印前后 free -m + docker system df 对比。
+#   mode=restart-unhealthy —— 重启 status=unhealthy 的容器以释放其泄漏内存（会有各服务几秒抖动）。
+#
+# 说明：Linux MemAvailable 已计入可回收 page cache，drop_caches 对它意义不大，故不做。
+# 真正腾 RAM 靠 reclaim(减压) + 必要时重启臃肿容器；加内存要去阿里云控制台改配置。
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "diagnose(只读) / reclaim(清缓存镜像) / restart-unhealthy(重启不健康容器)"
+        type: choice
+        required: true
+        default: diagnose
+        options: [diagnose, reclaim, restart-unhealthy]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-cloud
+  queue: max
+  cancel-in-progress: false
+
+jobs:
+  mem:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Validate SSH host fingerprint
+        shell: bash
+        env:
+          CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]]; then
+            echo 'CLOUD_HOST_FINGERPRINT must be a non-empty OpenSSH SHA256 fingerprint.' >&2
+            exit 1
+          fi
+
+      - name: Mem reclaim via SSH
+        env:
+          CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+          OPS_MODE: ${{ inputs.mode }}
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
+        with:
+          host: ${{ secrets.CLOUD_HOST }}
+          username: ${{ secrets.CLOUD_USER }}
+          key: ${{ secrets.CLOUD_SSH_KEY }}
+          fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
+          command_timeout: 12m
+          envs: OPS_MODE
+          script: |
+            set -uo pipefail
+            MODE="${OPS_MODE:-diagnose}"
+            echo "=================== MODE: $MODE ==================="
+
+            echo "== free -m =="
+            free -m
+            echo "== 各容器内存占用 top 15 =="
+            docker stats --no-stream --format '{{.MemUsage}}\t{{.MemPerc}}\t{{.Name}}' 2>/dev/null | sort -t'/' -k1 -hr | head -15 || true
+            echo "== docker system df =="
+            docker system df 2>/dev/null || true
+            echo "== 不健康容器 =="
+            docker ps --filter health=unhealthy --format '{{.Names}}\t{{.Status}}' || true
+            echo "== 占内存最高的进程 top 8 =="
+            ps -eo rss,comm --sort=-rss | head -9 | awk 'NR==1{print "  RSS(KB) COMMAND"} NR>1{printf "  %8d %s\n",$1,$2}'
+
+            if [ "$MODE" = "diagnose" ]; then
+              echo "[OK] diagnose 完成（只读）"; exit 0
+            fi
+
+            if [ "$MODE" = "restart-unhealthy" ]; then
+              UH="$(docker ps --filter health=unhealthy --format '{{.Names}}')"
+              if [ -z "$UH" ]; then echo "  没有 unhealthy 容器,无需重启"; exit 0; fi
+              echo "-- 重启: $UH --"
+              echo "$UH" | while read -r c; do [ -n "$c" ] && docker restart "$c" || true; done
+              sleep 5
+              echo "== 重启后 free -m =="; free -m
+              echo "[OK] restart-unhealthy 完成"; exit 0
+            fi
+
+            # ─── reclaim ───
+            echo "== 回收前 free -m =="; free -m | awk '/^Mem:/{print "  available: "$7" MB"}'
+            echo "-- docker builder prune -af（清构建缓存,今天多次重建攒了不少）--"
+            docker builder prune -af 2>&1 | tail -3 || true
+            echo "-- docker image prune -af（清无容器引用的镜像；运行中容器的镜像不动）--"
+            docker image prune -af 2>&1 | tail -3 || true
+            echo "-- docker container prune -f（清已退出的容器,不动运行中的）--"
+            docker container prune -f 2>&1 | tail -2 || true
+            echo "== 回收后 free -m =="; free -m
+            echo "== 回收后 docker system df =="; docker system df 2>/dev/null || true
+            echo "[OK] reclaim 完成（未动任何运行中的容器/volume/data 目录）"

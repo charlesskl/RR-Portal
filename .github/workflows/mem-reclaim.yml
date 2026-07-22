@@ -13,11 +13,11 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "diagnose(只读) / reclaim(清缓存镜像) / restart-unhealthy(重启不健康容器)"
+        description: "diagnose / reclaim / restart-unhealthy / restart-heavy(重启内存大户应用容器)"
         type: choice
         required: true
         default: diagnose
-        options: [diagnose, reclaim, restart-unhealthy]
+        options: [diagnose, reclaim, restart-unhealthy, restart-heavy]
 
 permissions:
   contents: read
@@ -83,6 +83,26 @@ jobs:
               sleep 5
               echo "== 重启后 free -m =="; free -m
               echo "[OK] restart-unhealthy 完成"; exit 0
+            fi
+
+            if [ "$MODE" = "restart-heavy" ]; then
+              # 内存大户应用容器（排除 SQL Server：停它会断 indo 且立刻涨回；排除 nginx/postgres 等基础设施）
+              TARGETS="rr-portal-shipping-management-1 rr-portal-sprayplan-1 rr-portal-peise-1 rr-portal-zuru-master-schedule-1 rr-portal-hy-schedule-system-1 rr-portal-tomy-paiqi-1"
+              echo "== 重启前 free -m =="; free -m | awk '/^Mem:/{print "  available: "$7" MB"}'
+              for c in $TARGETS; do
+                if docker ps --format '{{.Names}}' | grep -qx "$c"; then
+                  echo "-- restart $c --"; docker restart "$c" >/dev/null 2>&1 && echo "   ok" || echo "   [WARN] 失败"
+                else
+                  echo "-- skip $c（未运行）--"
+                fi
+              done
+              echo "-- 等 10s 让服务起来 --"; sleep 10
+              echo "== 重启后 free -m =="; free -m
+              echo "== 重启后各容器内存 top 8 =="
+              docker stats --no-stream --format '{{.MemUsage}}\t{{.Name}}' 2>/dev/null | sort -t'/' -k1 -hr | head -8 || true
+              echo "== 目标容器状态 =="
+              for c in $TARGETS; do docker ps --filter "name=$c" --format '  {{.Names}}\t{{.Status}}'; done
+              echo "[OK] restart-heavy 完成（临时释放,内存会随使用回涨）"; exit 0
             fi
 
             # ─── reclaim ───

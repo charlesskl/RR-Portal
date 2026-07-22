@@ -396,6 +396,7 @@ export async function importEngineeringFile(file: File, opts?: { hsDict?: HsDict
     const cSupplier = colOf('供应商', 'Supplier')
     const cWt       = colOf('单重', 'Berat')
     const cPlace    = colOf('生产地', 'PlaceofManufacture', 'Manufacture', '产地')
+    const cUsage    = colOf('用量', '数量', 'Qty', 'Quantity')
 
     for (let r = hdrIdx + 1; r < grid.length; r++) {
       const row = grid[r] || []
@@ -440,7 +441,7 @@ export async function importEngineeringFile(file: File, opts?: { hsDict?: HsDict
         length: 0, width: 0, height: 0,
         qty_per_carton: 0, weight_per_carton: 0,
         active: true,
-        usage_qty: 1,
+        usage_qty: cUsage >= 0 ? (Number(row[cUsage]) || 1) : 1,
       })
     }
   }

@@ -1,6 +1,11 @@
 FROM node:20-alpine AS frontend
 WORKDIR /src/web
 
+# China 网络：registry.npmjs.org 直连超时（部署 ECS 在阿里云内），npm ci 曾爬 35min 后崩溃、
+# 导致 npm run build exit 127。构建期改用阿里云 npmmirror 镜像，降到分钟级。仅构建阶段生效。
+ENV npm_config_registry=https://registry.npmmirror.com \
+    PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+
 COPY web/package.json web/package-lock.json ./
 COPY web/vendor ./vendor
 RUN npm ci

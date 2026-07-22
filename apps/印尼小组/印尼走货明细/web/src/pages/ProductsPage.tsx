@@ -574,6 +574,7 @@ function MaterialsEditor({ rows, onChange, dicts, productCode }: {
         qty_per_carton: Number(pick(r, ['件/箱', '装箱量', 'qtypercarton']) ?? 0) || 0,
         weight_per_carton: Number(pick(r, ['箱重', 'weightpercarton']) ?? 0) || 0,
         active: true,
+        usage_qty: Number(pick(r, ['用量', 'usage', 'usageqty', 'usage_qty']) ?? 0) || 1,
       })).filter(m => m.name_zh || m.item_no || m.material_code)
       if (!imported.length) { message.warning('没识别到有效行 (需含 中文名 / 料号 列)'); return }
       onChange([...rows, ...imported])

@@ -167,6 +167,16 @@ curl http://localhost:<port>/health
 ./devops/scripts/backup-db.sh        # PostgreSQL + SQLite 备份
 ```
 
+### 主机运维 Workflow（本机无 SSH，走 GHA workflow_dispatch）
+
+本机对 ECS 没有 SSH，主机侧操作通过手动触发的 Actions workflow 执行。详见
+**`docs/runbooks/ops-workflows-and-memory.md`**（内存回收 / indo-stop 部署流程 / registry mirror / pb_data 诊断 / 数据迁移）。速查：
+
+- **内存/磁盘紧** → `mem-reclaim`（diagnose / reclaim 清缓存 / restart-heavy 重启大户腾 RAM）
+- **indo 部署撞 2500MB 内存墙** → `ecs-disk-ops mode=indo-stop` → 重跑部署
+- **磁盘满** → `ecs-disk-ops mode=prune-safe | grow-disk`
+- **docker registry mirror 坏** → `docker-mirror-ops`（diagnose/apply/rollback，热重载零停机）
+
 ## 核心服务架构
 
 ### 认证流程 (core/app/auth/)

@@ -648,11 +648,11 @@ export default function PurchasePage() {
     const merged = new Map<string, any>()
     for (const it of items) {
       const k = (it.product_code || '') + '||' + (it.material_name || '') + '||' + (it.spec || '')
-      const cur = merged.get(k) || { code: it.product_code || '', matName: it.material_name || '', spec: it.spec || '', unit: it.ship_unit || 'PCE', totalShipQty: 0, totalAmount: 0, totalTomyQty: 0 }
+      const cur = merged.get(k) || { code: it.product_code || '', matName: it.material_name || '', spec: it.spec || '', unit: it.ship_unit || 'PCE', totalShipQty: 0, totalAmount: 0, totalPurchaseQty: 0 }
       const purchaseQty = Number(it.purchase_qty ?? ((it.material_qty || 0) + (it.spoilage_qty || 0))) || 0
       cur.totalShipQty += shipQuantity(it)
       cur.totalAmount += purchaseQty * (Number(it.price) || 0)
-      cur.totalTomyQty += Number(it.ordered_qty) || 0
+      cur.totalPurchaseQty += purchaseQty
       merged.set(k, cur)
     }
     const mergedRows = [...merged.values()]
@@ -675,7 +675,7 @@ export default function PurchasePage() {
     for (const m of mergedRows) {
       const shipUnitPrice = m.totalShipQty > 0 ? m.totalAmount / m.totalShipQty : 0
       const contractUnit = contractUnitLabel(m.unit)
-      rows.push([m.code, m.matName, m.spec, Number(m.totalShipQty.toFixed(shipQuantityDigits(m.unit))), contractUnit, Number(shipUnitPrice.toFixed(4)), Number(m.totalAmount.toFixed(2)), '数量：' + m.totalTomyQty + 'pcs'])
+      rows.push([m.code, m.matName, m.spec, Number(m.totalShipQty.toFixed(shipQuantityDigits(m.unit))), contractUnit, Number(shipUnitPrice.toFixed(4)), Number(m.totalAmount.toFixed(2)), '数量：' + Number(m.totalPurchaseQty.toFixed(2)) + 'pcs'])
     }
     rows.push(['以下空白！', '按工程签板生产！', '', '', '', '', '', ''])
     const sumRow = rows.length

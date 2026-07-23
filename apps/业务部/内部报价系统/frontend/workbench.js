@@ -124,6 +124,11 @@ function renderTable(container, columns, rows, opts = {}) {
       headerRefreshers.push(refreshCalcs);
       columns.forEach(c => {
         const td = document.createElement('td');
+        if (c.renderCell) {
+          c.renderCell(td, row, { readonly, onChange, rebuild });
+          tr.appendChild(td);
+          return;
+        }
         const ro = typeof c.readonly === 'function' ? c.readonly(row) : (c.readonly || readonly);
         let val = row[c.key];
         if (c.type === 'fraction' && row[c.key + '_raw'] != null && row[c.key + '_raw'] !== '') {
@@ -1678,26 +1683,93 @@ function renderTaxDeductionBlock(host, salesPayload, salesSec, me, autoFill) {
   }
 }
 
-// ============== 搪胶部门（占位） ==============
+function hasSlushCostingInputs(row) {
+  return ['material_price_lb', 'slush_labor_24h', 'batch_labor_12h', 'diesel_24h',
+    'electricity_24h', 'pigment_price', 'daily_output', 'batch_output_12h', 'weight_g',
+    'shipping_bag', 'markup_x'].some(key => row && row[key] !== null && row[key] !== undefined && row[key] !== '');
+}
+
+function slushCosting(row) {
+  const weight = num(row && row.weight_g);
+  const dailyOutput = num(row && row.daily_output);
+  const batchOutput = num(row && row.batch_output_12h);
+  const material = weight * num(row && row.material_price_lb) / 454;
+  const slushLabor = dailyOutput ? num(row && row.slush_labor_24h) / dailyOutput : 0;
+  const batchLabor = batchOutput ? num(row && row.batch_labor_12h) / batchOutput : 0;
+  const pigment = weight * num(row && row.pigment_price) / 25000;
+  const diesel = dailyOutput ? num(row && row.diesel_24h) / dailyOutput : 0;
+  const electricity = dailyOutput ? num(row && row.electricity_24h) / dailyOutput : 0;
+  const shippingBag = num(row && row.shipping_bag);
+  const subtotal = material + slushLabor + batchLabor + pigment + diesel + electricity + shippingBag;
+  const markup = num(row && row.markup_x) || 1;
+  return { material, slushLabor, batchLabor, pigment, diesel, electricity, shippingBag, subtotal, unitPrice: subtotal * markup };
+}
+
+function slushUnitPrice(row) {
+  return hasSlushCostingInputs(row) ? slushCosting(row).unitPrice : num(row && row.unit_price_hkd);
+}
+
+// ============== 搪胶部门 ==============
 function renderSlush(host, payload, canEdit, onChange, fxRmbHkd) {
   payload.slush_items = payload.slush_items || [];
-  host.innerHTML = `<h3>二·C、搪胶产品报价</h3><div class="muted">字段待定，先占位。下方为草拟表格：</div>
+  host.innerHTML = `<h3 style="display:flex;align-items:center;gap:10px">二·C、搪胶产品报价
+      ${canEdit ? `<button class="mini" id="slush-import" type="button">📄 导入搪胶报价模板</button>
+      <input id="slush-file" type="file" accept=".xls,.xlsx" style="display:none"/>` : ''}
+    </h3>
+    <div class="muted">按模板参数自动计算：料价、搪工、批工、色粉、柴油、电费、运费/胶袋 → 合计 × 码点 = 货价。</div>
+    <div id="slush-import-preview"></div>
     <div id="wb-slush-table" style="margin-top:8px"></div>`;
   const cols = [
+    { key: 'images', label: '图片', width: '150px',
+      renderCell: (td, row, context) => { td.className = 'mold-img-cell'; renderImageCell(td, row, !context.readonly, context.onChange); } },
     { key: 'item_code', label: '产品编号', width: '110px' },
     { key: 'name', label: '胶件名称', width: '120px' },
     { key: 'material', label: '材料', width: '100px' },
     { key: 'weight_g', label: '料重(g)', type: 'number', width: '80px' },
+    { key: 'material_price_lb', label: '料价 HK$/lb', type: 'number', width: '100px' },
+    { key: 'slush_labor_24h', label: '24H搪工', type: 'number', width: '90px' },
+    { key: 'batch_labor_12h', label: '12H批工/烤工', type: 'number', width: '110px' },
+    { key: 'diesel_24h', label: '24H柴油', type: 'number', width: '90px' },
+    { key: 'electricity_24h', label: '24H电费', type: 'number', width: '90px' },
+    { key: 'pigment_price', label: '色粉', type: 'number', width: '75px' },
     { key: 'daily_output', label: '日产量24H', type: 'number', width: '100px' },
+    { key: 'batch_output_12h', label: '12H批产量', type: 'number', width: '100px' },
+    { key: 'wax_sample', label: '腊样', type: 'number', width: '75px' },
+    { key: 'mold_fee', label: '模费', type: 'number', width: '75px' },
+    { key: 'shipping_bag', label: '运费/胶袋', type: 'number', width: '90px' },
+    { key: 'material_cost', label: '料价成本', readonly: true, calc: r => slushCosting(r).material, width: '90px' },
+    { key: 'slush_labor_cost', label: '搪工成本', readonly: true, calc: r => slushCosting(r).slushLabor, width: '90px' },
+    { key: 'batch_labor_cost', label: '批工成本', readonly: true, calc: r => slushCosting(r).batchLabor, width: '90px' },
+    { key: 'pigment_cost', label: '色粉成本', readonly: true, calc: r => slushCosting(r).pigment, width: '90px' },
+    { key: 'diesel_cost', label: '柴油成本', readonly: true, calc: r => slushCosting(r).diesel, width: '90px' },
+    { key: 'electricity_cost', label: '电费成本', readonly: true, calc: r => slushCosting(r).electricity, width: '90px' },
+    { key: 'markup_x', label: '码点', type: 'number', width: '70px' },
+    { key: 'subtotal_hkd', label: '成本合计', readonly: true, calc: r => slushCosting(r).subtotal, width: '90px' },
     { key: 'qty', label: '用量(PC)', type: 'number', width: '70px' },
-    { key: 'unit_price_hkd', label: '单价 HKD', type: 'number', width: '100px' },
-    { key: 'total_hkd', label: '总价 HKD', readonly: true, calc: r => num(r.unit_price_hkd) * num(r.qty), width: '90px' },
+    { key: 'unit_price_hkd', label: '货价 HKD', readonly: r => hasSlushCostingInputs(r), type: 'number',
+      calc: r => hasSlushCostingInputs(r) ? slushUnitPrice(r) : num(r.unit_price_hkd), width: '100px' },
+    { key: 'total_hkd', label: '总价 HKD', readonly: true, calc: r => slushUnitPrice(r) * num(r.qty), width: '90px' },
     { key: 'indo_amt', label: '印尼运费', readonly: true, width: '150px',
       headerInput: { get: () => payload.indo_pct, set: value => { payload.indo_pct = value; }, suffix: '%' },
-      calc: r => num(r.unit_price_hkd) * num(r.qty) * num(payload.indo_pct) / 100 },
+      calc: r => slushUnitPrice(r) * num(r.qty) * num(payload.indo_pct) / 100 },
     { key: 'note', label: '备注' },
   ];
-  const wrappedOnChange = (() => { const fns = []; const w = () => { fns.forEach(f => f()); onChange(); }; w._fns = fns; return w; })();
+  const wrappedOnChange = (() => {
+    const fns = [];
+    const w = () => {
+      payload.slush_items.forEach(row => {
+        if (hasSlushCostingInputs(row)) {
+          const costing = slushCosting(row);
+          row.subtotal_hkd = +costing.subtotal.toFixed(8);
+          row.unit_price_hkd = +costing.unitPrice.toFixed(8);
+        }
+      });
+      fns.forEach(f => f());
+      onChange();
+    };
+    w._fns = fns;
+    return w;
+  })();
   renderTable(host.querySelector('#wb-slush-table'), cols, payload.slush_items, { readonly: !canEdit, onChange: wrappedOnChange });
 
   // 搪胶单价本来就是 HKD，不再做 RMB→HKD 转换；只展示 HKD + 反向算 RMB 供参考
@@ -1705,13 +1777,54 @@ function renderSlush(host, payload, canEdit, onChange, fxRmbHkd) {
   const card = document.createElement('div'); card.className = 'loss-summary';
   host.appendChild(card);
   const refresh = () => {
-    const totalHkd = sum(payload.slush_items || [], r => num(r.unit_price_hkd) * num(r.qty));
+    const totalHkd = sum(payload.slush_items || [], r => slushUnitPrice(r) * num(r.qty));
     card.innerHTML = `
       <div class="ls-row hi"><span class="ls-label">合计 HKD</span><span class="ls-val">${formatNum(totalHkd)}</span></div>
       <div class="ls-row"><span class="ls-label">合计 RMB <small class="muted">(汇率 ${fx})</small></span><span class="ls-val">${formatNum(totalHkd * fx)}</span></div>`;
   };
   refresh();
   wrappedOnChange._fns.push(refresh);
+
+  if (canEdit) {
+    const importButton = host.querySelector('#slush-import');
+    const fileInput = host.querySelector('#slush-file');
+    const preview = host.querySelector('#slush-import-preview');
+    importButton.onclick = () => fileInput.click();
+    fileInput.onchange = async event => {
+      const file = event.target.files[0];
+      if (!file) return;
+      preview.innerHTML = '<i class="muted" style="padding:8px;display:block">正在解析…</i>';
+      try {
+        const body = new FormData();
+        body.append('file', file);
+        const response = await fetch('/api/uploads/slush-sheet', { method: 'POST', credentials: 'include', body });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || '解析失败');
+        const imageInfo = result.images_extracted ? ` · 含 <b>${result.images_extracted}</b> 张图片` : '';
+        preview.innerHTML = `<div class="card" style="background:#f0fdf4;border:1px solid #86efac;margin-top:10px">
+          <p>从 <b>${escapeHtml((result.sheets_used || []).join('、'))}</b> 解析到 <b>${result.count}</b> 张搪胶核价卡${imageInfo}</p>
+          ${result.images_hint ? `<p class="muted">⚠️ ${escapeHtml(result.images_hint)}</p>` : ''}
+          <p class="muted">应用后会替换当前搪胶明细；模板中的生产参数、成本、码点、货价和图片都会保留。</p>
+          <div style="margin-top:10px;display:flex;gap:8px">
+            <button id="slush-imp-apply">应用</button>
+            <button id="slush-imp-cancel" class="mini danger">取消</button>
+          </div>
+        </div>`;
+        preview.querySelector('#slush-imp-apply').onclick = () => {
+          const hasExisting = payload.slush_items.some(row => row && (row.name || row.item_code || slushUnitPrice(row)));
+          if (hasExisting && !confirm('将替换现有 ' + payload.slush_items.length + ' 行搪胶明细，确认？')) return;
+          payload.slush_items = (result.items || []).map(row => ({ ...row, images: row.images || [], qty: row.qty || 1 }));
+          preview.innerHTML = '';
+          fileInput.value = '';
+          onChange();
+          renderSlush(host, payload, canEdit, onChange, fxRmbHkd);
+        };
+        preview.querySelector('#slush-imp-cancel').onclick = () => { preview.innerHTML = ''; fileInput.value = ''; };
+      } catch (error) {
+        preview.innerHTML = `<div class="card" style="background:#fef2f2;border:1px solid #fecaca;margin-top:10px">解析失败：${escapeHtml(error.message)}</div>`;
+      }
+    };
+  }
 }
 
 // ============== 车缝部门 ==============

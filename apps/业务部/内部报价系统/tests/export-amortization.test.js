@@ -107,6 +107,63 @@ test('export keeps an explicit zero markup in tax summary', async () => {
   assert.ok(labels.includes('码点 × 0'));
 });
 
+test('export tax-summary base price uses the live page formula result instead of a stale snapshot', async () => {
+  const workbook = await buildWorkbook({
+    quote: { quote_no: 'LIVE-BASE', product_name: '实时货价', qty: 1000, factory_code: 'qingxi' },
+    sections: [
+      { dept: 'painting', payload_json: JSON.stringify({
+        painting_items: [{ name: 'UV件', position: '正面', uv_qty: 2, uv_unit: 1.25 }],
+      }) },
+      { dept: 'sales', payload_json: JSON.stringify({
+        header: { fx_rmb_hkd: 0.85, fx_hkd_usd: 7.8 },
+        shipping: { markup_x: 1.2, scenarios: [] },
+        pricing_summary: {
+          t1: { base_price: 999 },
+          t2: {},
+          t3: {},
+          t4: {},
+          overrides: {},
+        },
+      }) },
+    ],
+  });
+
+  const worksheet = workbook.worksheets[0];
+  let titleRow;
+  worksheet.eachRow(row => {
+    if (row.getCell(1).value === '一、出厂货价核') titleRow = row.number;
+  });
+  const basePriceCell = worksheet.getCell(titleRow + 2, 1).value;
+
+  assert.equal(basePriceCell.result, 3);
+  assert.doesNotMatch(basePriceCell.formula, /SUM/);
+});
+
+test('export tax-summary base price preserves a manual page override', async () => {
+  const workbook = await buildWorkbook({
+    quote: { quote_no: 'OVERRIDE-BASE', product_name: '手填货价', qty: 1000, factory_code: 'qingxi' },
+    sections: [{ dept: 'sales', payload_json: JSON.stringify({
+      header: { fx_rmb_hkd: 0.85, fx_hkd_usd: 7.8 },
+      shipping: { markup_x: 1.2, scenarios: [] },
+      pricing_summary: {
+        t1: { base_price: 8.7836 },
+        t2: {},
+        t3: {},
+        t4: {},
+        overrides: { 't1.base_price': true },
+      },
+    }) }],
+  });
+
+  const worksheet = workbook.worksheets[0];
+  let titleRow;
+  worksheet.eachRow(row => {
+    if (row.getCell(1).value === '一、出厂货价核') titleRow = row.number;
+  });
+
+  assert.equal(worksheet.getCell(titleRow + 2, 1).value, 8.7836);
+});
+
 test('export separates electronic and sewing pricing and keeps weighted sewing formulas', async () => {
   const workbook = await buildWorkbook({
     quote: { quote_no: 'WEIGHTED', product_name: '加权测试', qty: 1000, factory_code: 'qingxi' },

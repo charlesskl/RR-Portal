@@ -1964,9 +1964,14 @@ function renderTaxSummary(ws, row, sales, extra = {}) {
 
   const markupValue = sales.shipping?.markup_x;
   const _mk = markupValue == null || markupValue === '' ? 1.2 : num(markupValue);
+  // 用逐格相加代替 SUM()：liveResult 只计算纯四则运算，确保 xlsx 缓存值与页面实时值一致。
+  // A-L 中排除 C(电子)、K(车缝)，二者在出货价算价中独立处理。
+  const basePriceFormulaRef = sumR
+    ? `(${['A', 'B', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'L'].map(col => `${col}${sumR}`).join('+')})*${_mk}`
+    : null;
   const linkMap = {
     // 货价基数排除电子(C)和车缝(K)，二者在出货价算价中独立处理。
-    base_price: sumR ? { ref: `(SUM(A${sumR}:L${sumR})-C${sumR}-K${sumR})*${_mk}` } : null,
+    base_price: refLink('t1', 'base_price', basePriceFormulaRef),
     blow:     subRefs.blow      ? { ref: subRefs.blow }   : null,  // 吹气 本身就是 HKD
     slush:    subRefs.slush     ? { ref: subRefs.slush }  : null,  // 搪胶 本身就是 HKD
     electronic: auto('t1', 'electronic', elecNonMotorCells, false),  // 电子已是 HKD（剔除马达）

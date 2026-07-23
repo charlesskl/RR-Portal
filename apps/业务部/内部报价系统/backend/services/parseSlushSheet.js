@@ -22,6 +22,34 @@ function normalizedLabel(value) {
   return toStr(value).replace(/\s+/g, '').replace(/[：:]+$/, '');
 }
 
+function detectCurrency(value) {
+  const text = toStr(value).toUpperCase();
+  if (/USD|美元|美金/.test(text)) return 'USD';
+  if (/HKD|港币|港元/.test(text)) return 'HKD';
+  if (/RMB|CNY|人民币/.test(text)) return 'RMB';
+  return null;
+}
+
+function findMoneyPair(rows, wanted, defaultCurrency = 'RMB') {
+  for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
+    const row = rows[rowIndex] || [];
+    for (let columnIndex = 0; columnIndex < row.length; columnIndex++) {
+      const raw = toStr(row[columnIndex]);
+      if (!raw) continue;
+      const inline = /^(.+?)[：:]\s*([-+]?\d[\d,，]*(?:\.\d+)?)\s*$/.exec(raw);
+      const label = inline ? inline[1] : raw;
+      const plainLabel = normalizedLabel(label)
+        .replace(/[（(]?(?:RMB|CNY|USD|HKD|人民币|港币|港元|美元|美金)[）)]?/gi, '');
+      if (plainLabel !== wanted) continue;
+      return {
+        amount: toNum(inline ? inline[2] : row[columnIndex + 1]),
+        currency: detectCurrency(label) || defaultCurrency,
+      };
+    }
+  }
+  return { amount: null, currency: defaultCurrency };
+}
+
 function sheetjsToRows(sheet) {
   return XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null, raw: true }).map(row => {
     const cells = [];
@@ -93,6 +121,7 @@ function parseSheet(sheet) {
     || ['24小时搪工', '12批工/烤工', '24小时生产数', '料重'].filter(label => allText.some(text => normalizedLabel(text) === label)).length >= 3;
   if (!looksLikeSlush) return null;
 
+  const moldFee = findMoneyPair(rows, '模费');
   const item = {
     item_code: '',
     name: '',
@@ -108,7 +137,8 @@ function parseSheet(sheet) {
     daily_output: toNum(findPair(rows, '24小时生产数')),
     batch_output_12h: toNum(findPair(rows, '12小时批产量')),
     wax_sample: toNum(findPair(rows, '腊样')),
-    mold_fee: toNum(findPair(rows, '模费')),
+    mold_fee: moldFee.amount,
+    mold_fee_currency: moldFee.currency,
     weight_g: toNum(findPair(rows, '料重')),
     shipping_bag: toNum(findPair(rows, '运费、胶袋')),
     material_cost: toNum(findPair(rows, '料价', { withoutColon: true })),

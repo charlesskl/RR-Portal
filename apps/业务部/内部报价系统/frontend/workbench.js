@@ -1712,6 +1712,11 @@ function slushUnitPrice(row) {
 // ============== 搪胶部门 ==============
 function renderSlush(host, payload, canEdit, onChange, fxRmbHkd) {
   payload.slush_items = payload.slush_items || [];
+  payload.slush_items.forEach(row => {
+    if (row && row.mold_fee !== null && row.mold_fee !== undefined && row.mold_fee !== '' && !row.mold_fee_currency) {
+      row.mold_fee_currency = 'RMB';
+    }
+  });
   host.innerHTML = `<h3 style="display:flex;align-items:center;gap:10px">二·C、搪胶产品报价
       ${canEdit ? `<button class="mini" id="slush-import" type="button">📄 导入搪胶报价模板</button>
       <input id="slush-file" type="file" accept=".xls,.xlsx" style="display:none"/>` : ''}
@@ -1735,7 +1740,8 @@ function renderSlush(host, payload, canEdit, onChange, fxRmbHkd) {
     { key: 'daily_output', label: '日产量24H', type: 'number', width: '100px' },
     { key: 'batch_output_12h', label: '12H批产量', type: 'number', width: '100px' },
     { key: 'wax_sample', label: '腊样', type: 'number', width: '75px' },
-    { key: 'mold_fee', label: '模费', type: 'number', width: '75px' },
+    { key: 'mold_fee', label: '模费金额', type: 'number', width: '90px' },
+    { key: 'mold_fee_currency', label: '模费币种', type: 'select', options: ['RMB', 'HKD', 'USD'], width: '90px' },
     { key: 'shipping_bag', label: '运费/胶袋', type: 'number', width: '90px' },
     { key: 'material_cost', label: '料价成本', readonly: true, calc: r => slushCosting(r).material, width: '90px' },
     { key: 'slush_labor_cost', label: '搪工成本', readonly: true, calc: r => slushCosting(r).slushLabor, width: '90px' },

@@ -64,9 +64,29 @@ test('slush import parses the costing card and ignores blank sheets', async () =
   assert.equal(result.items[0].weight_g, 240);
   assert.equal(result.items[0].daily_output, 2000);
   assert.equal(result.items[0].mold_fee, 1000);
+  assert.equal(result.items[0].mold_fee_currency, 'RMB');
   assert.equal(result.items[0].markup_x, 1.14);
   assert.equal(result.items[0].unit_price_hkd, 4.89759166519824);
   assert.equal(result.items[0].qty, 1);
+});
+
+test('slush import recognizes an explicit mold fee currency', async () => {
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet('美元模费');
+  sheet.getCell('A1').value = '搪胶报价';
+  sheet.getCell('A2').value = '24小时搪工：';
+  sheet.getCell('B2').value = 900;
+  sheet.getCell('D2').value = '24小时生产数:';
+  sheet.getCell('E2').value = 2000;
+  sheet.getCell('D3').value = '料重：';
+  sheet.getCell('E3').value = 240;
+  sheet.getCell('D4').value = '模费(USD):1000';
+
+  const result = await parseWorkbook(await workbook.xlsx.writeBuffer());
+
+  assert.equal(result.error, undefined);
+  assert.equal(result.items[0].mold_fee, 1000);
+  assert.equal(result.items[0].mold_fee_currency, 'USD');
 });
 
 test('slush frontend wires template import, formula calculation, and image display', () => {
@@ -75,6 +95,7 @@ test('slush frontend wires template import, formula calculation, and image displ
   assert.match(source, /function slushCosting\(row\)/);
   assert.match(source, /weight \* num\(row && row\.material_price_lb\) \/ 454/);
   assert.match(source, /renderImageCell\(td, row/);
+  assert.match(source, /label:\s*'模费币种'.*options:\s*\['RMB', 'HKD', 'USD'\]/);
   assert.doesNotMatch(source, /搪胶部门（占位）/);
 });
 

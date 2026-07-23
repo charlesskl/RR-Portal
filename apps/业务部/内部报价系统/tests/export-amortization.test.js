@@ -106,3 +106,82 @@ test('export keeps an explicit zero markup in tax summary', async () => {
   assert.equal(markupCell && markupCell.value && markupCell.value.formula, '0');
   assert.ok(labels.includes('码点 × 0'));
 });
+
+test('export separates electronic and sewing pricing and keeps weighted sewing formulas', async () => {
+  const workbook = await buildWorkbook({
+    quote: { quote_no: 'WEIGHTED', product_name: '加权测试', qty: 1000, factory_code: 'qingxi' },
+    sections: [
+      { dept: 'electronic', payload_json: JSON.stringify({ electronics: [{ name: 'IC', qty: 1, unit_price_rmb: 8.5 }] }) },
+      { dept: 'sewing', payload_json: JSON.stringify({
+        sewing_groups: [
+          { name: '角色1', product_qty: 1, items: [{ fabric: '布1', usage: 1, mat_price: 10, markup: 1 }] },
+          { name: '角色2', product_qty: 3, items: [{ fabric: '布2', usage: 1, mat_price: 20, markup: 1 }] },
+        ],
+      }) },
+      { dept: 'sales', payload_json: JSON.stringify({
+        header: { fx_rmb_hkd: 0.85, fx_hkd_usd: 7.8 },
+        shipping: { markup_x: 1.2, sew_markup_x: 1.3, elec_markup_x: 1.4, divisor: 0.98,
+          scenarios: [{ name: '出厂价', is_factory: true }] },
+        pricing_summary: { t1: {}, t2: {}, t3: {}, t4: {}, overrides: {} },
+      }) },
+    ],
+  });
+
+  const worksheet = workbook.worksheets[0];
+  let summaryHeaderRow;
+  const labels = [];
+  worksheet.eachRow(row => row.eachCell(cell => {
+    if (typeof cell.value === 'string') labels.push(cell.value);
+    if (cell.value === '注塑+吹气' && row.values.includes('出货底价 HKD')) summaryHeaderRow = row.number;
+  }));
+
+  assert.ok(summaryHeaderRow);
+  assert.equal(worksheet.getCell(summaryHeaderRow, 3).value, '电子');
+  assert.equal(worksheet.getCell(summaryHeaderRow, 4).value, '五金');
+  assert.equal(worksheet.getCell(summaryHeaderRow, 11).value, '车缝');
+  assert.equal(worksheet.getCell(summaryHeaderRow, 14).value, '出货底价 HKD');
+  assert.match(worksheet.getCell(summaryHeaderRow + 1, 14).value.formula, /SUM\(A\d+:L\d+\)-C\d+-K\d+\+M\d+/);
+  assert.ok(labels.includes('车缝'));
+  assert.ok(labels.includes('电子'));
+  assert.ok(labels.includes('码点 × 1.3'));
+  assert.ok(labels.includes('码点 × 1.4'));
+
+  const sewingDetail = workbook.getWorksheet('车缝明细');
+  let weightedFormula;
+  sewingDetail.eachRow(row => row.eachCell(cell => {
+    if (typeof cell.value === 'string' && cell.value.startsWith('配套合计 RMB')) {
+      weightedFormula = sewingDetail.getCell(row.number, 10).value.formula;
+    }
+  }));
+  assert.match(weightedFormula, /\*1.*\*3/);
+  assert.match(weightedFormula, /\/4$/);
+});
+
+test('export combines mold RMB and USD display prices and converts production mold fees through HKD', async () => {
+  const workbook = await buildWorkbook({
+    quote: { quote_no: 'MOLD-FX', product_name: '模具汇率', qty: 1000, factory_code: 'qingxi' },
+    sections: [
+      { dept: 'engineering', payload_json: JSON.stringify({
+        molds: [{ name: '测试模具', price_rmb: 8500, price_usd: 100 }],
+        mold_costs: { items: [{ name: '生产模具', price_rmb: 100 }], fx_rmb_usd: 7.75, amortization_qty: 1000 },
+      }) },
+      { dept: 'sales', payload_json: JSON.stringify({
+        header: { fx_rmb_hkd: 0.85, fx_hkd_usd: 7.8 },
+        shipping: { scenarios: [] },
+      }) },
+    ],
+  });
+
+  const worksheet = workbook.worksheets[0];
+  let moldDisplayHkd;
+  let productionMoldUsd;
+  worksheet.eachRow(row => row.eachCell(cell => {
+    if (cell.value === '测试模具') moldDisplayHkd = worksheet.getCell(row.number, 17).value;
+    if (cell.value === '生产模具') productionMoldUsd = worksheet.getCell(row.number, 13).value;
+  }));
+
+  assert.equal(moldDisplayHkd.result, 10780);
+  assert.match(moldDisplayHkd.formula, /O\d+\/0\.85\+P\d+\*7\.8/);
+  assert.equal(Number(productionMoldUsd.result.toFixed(2)), 15.18);
+  assert.match(productionMoldUsd.formula, /K\d+\/0\.85\/7\.75/);
+});

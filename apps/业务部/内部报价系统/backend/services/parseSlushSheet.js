@@ -55,9 +55,18 @@ function findPair(rows, wanted, options = {}) {
   const matches = [];
   rows.forEach((row, rowIndex) => {
     (row || []).forEach((value, columnIndex) => {
-      if (normalizedLabel(value) === wanted) {
+      const rawLabel = toStr(value);
+      const inline = /^(.+?)[：:]\s*([-+]?\d[\d,，]*(?:\.\d+)?)\s*$/.exec(rawLabel);
+      if (inline && normalizedLabel(inline[1]) === wanted) {
         matches.push({
-          rawLabel: toStr(value),
+          rawLabel: inline[1] + '：',
+          value: inline[2],
+          row: rowIndex,
+          col: columnIndex,
+        });
+      } else if (normalizedLabel(value) === wanted) {
+        matches.push({
+          rawLabel,
           value: row[columnIndex + 1],
           row: rowIndex,
           col: columnIndex,

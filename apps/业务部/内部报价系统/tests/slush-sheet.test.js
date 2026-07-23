@@ -29,6 +29,7 @@ test('slush import parses the costing card and ignores blank sheets', async () =
   sheet.getCell('E5').value = 2000;
   sheet.getCell('D6').value = '12小时批产量:';
   sheet.getCell('E6').value = 4000;
+  sheet.getCell('D8').value = '模费:1000';
   sheet.getCell('D9').value = '料重：';
   sheet.getCell('E9').value = 240;
   sheet.getCell('A5').value = '料价';
@@ -62,6 +63,7 @@ test('slush import parses the costing card and ignores blank sheets', async () =
   assert.equal(result.items[0].pigment_cost, 0.1536);
   assert.equal(result.items[0].weight_g, 240);
   assert.equal(result.items[0].daily_output, 2000);
+  assert.equal(result.items[0].mold_fee, 1000);
   assert.equal(result.items[0].markup_x, 1.14);
   assert.equal(result.items[0].unit_price_hkd, 4.89759166519824);
   assert.equal(result.items[0].qty, 1);

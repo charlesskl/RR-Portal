@@ -1164,13 +1164,13 @@ function injectionSubtotal(p) {
 }
 
 function renderSecondProc(ws, row, payload, fxRH, refs) {
-  // 二次加工 = 喷油部 painting_items（夹模/移印/散枪/边模/油色/浸油/抹油/擦PP水 八工序）
+  // 二次加工 = 喷油部 painting_items（夹模/移印/散枪/边模/油色/浸油/抹油/擦PP水/UV 九工序）
   const items = payload.painting_items || payload.second_proc || [];
   const colLetter = (n) => { let s=''; while(n>0){const m=(n-1)%26; s=String.fromCharCode(65+m)+s; n=Math.floor((n-1)/26);} return s; };
   // 工序列布局：A 序号 | B 名称 | C 位置 | 各工序(数量+单价 两列) | 报价
-  const procs = ['夹模', '移印', '散枪', '边模', '油色', '浸油', '抹油', '擦PP水'];
-  const procKeys = ['clamp', 'pad', 'spray', 'edge', 'color', 'dip', 'oil', 'pp_water'];
-  const priceCol = 4 + procs.length * 2;      // 报价列号（八工序 = 20）
+  const procs = ['夹模', '移印', '散枪', '边模', '油色', '浸油', '抹油', '擦PP水', 'UV'];
+  const procKeys = ['clamp', 'pad', 'spray', 'edge', 'color', 'dip', 'oil', 'pp_water', 'uv'];
+  const priceCol = 4 + procs.length * 2;      // 报价列号（九工序 = 22）
   const PRICE = colLetter(priceCol);
   ws.getColumn(priceCol).width = 16;
   ws.mergeCells(row, 1, row, priceCol); styleSection(ws.getCell(row, 1));
@@ -1241,7 +1241,7 @@ function renderSecondProc(ws, row, payload, fxRH, refs) {
   return row;
 }
 function secondProcSubtotal(p) {
-  const procKeys = ['clamp', 'pad', 'spray', 'edge', 'color', 'dip', 'oil', 'pp_water'];
+  const procKeys = ['clamp', 'pad', 'spray', 'edge', 'color', 'dip', 'oil', 'pp_water', 'uv'];
   const items = p.painting_items || p.second_proc || [];
   const s = sum(items, r => {
     if (r.price !== undefined) return num(r.price) * num(r.qty); // 旧结构兼容

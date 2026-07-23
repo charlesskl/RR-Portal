@@ -185,3 +185,35 @@ test('export combines mold RMB and USD display prices and converts production mo
   assert.equal(Number(productionMoldUsd.result.toFixed(2)), 15.18);
   assert.match(productionMoldUsd.formula, /K\d+\/0\.85\/7\.75/);
 });
+
+test('export includes UV in painting detail and total quotation formula', async () => {
+  const workbook = await buildWorkbook({
+    quote: { quote_no: 'PAINT-UV', product_name: 'UV喷油测试', qty: 1000, factory_code: 'qingxi' },
+    sections: [
+      { dept: 'painting', payload_json: JSON.stringify({
+        painting_items: [{
+          name: 'UV测试件',
+          position: '正面',
+          uv_qty: 2,
+          uv_unit: 1.25,
+        }],
+      }) },
+      { dept: 'sales', payload_json: JSON.stringify({
+        header: { fx_rmb_hkd: 0.85, fx_hkd_usd: 7.8 },
+        shipping: { scenarios: [] },
+      }) },
+    ],
+  });
+
+  const worksheet = workbook.worksheets[0];
+  let uvHeaderFound = false;
+  let uvQuoteCell;
+  worksheet.eachRow(row => row.eachCell(cell => {
+    if (cell.value === 'UV') uvHeaderFound = true;
+    if (cell.value === 'UV测试件') uvQuoteCell = worksheet.getCell(row.number, 22).value;
+  }));
+
+  assert.equal(uvHeaderFound, true);
+  assert.equal(uvQuoteCell.result, 2.5);
+  assert.match(uvQuoteCell.formula, /T\d+\*U\d+/);
+});

@@ -1090,7 +1090,7 @@ function renderSummaryPane(host, sections, quote, me) {
     const mat = num(r.weight_g)*num(r.material_price_lb)/454;
     return (mat + num(r.blow_labor) + num(r.flash)) * (num(r.profit_x) || 1);
   });
-  const ppTotal = sum(pnt.painting_items || [], paintingRowAmount);  // 不计损耗（含八工序）
+  const ppTotal = sum(pnt.painting_items || [], paintingRowAmount);  // 不计损耗（含九工序）
   const slushTotal = sum(slush.slush_items || [], r => num(r.unit_price_hkd)*num(r.qty));
   const asmLaborTotal = sum(asm.assembly_labor || [], r => num(r.unit_price)*num(r.qty));
   const pkLaborTotal = sum(asm.packaging_labor || [], r => num(r.unit_price)*num(r.qty));
@@ -3103,7 +3103,7 @@ function renderPainting(host, payload, canEdit, onChange, fxRmbHkd) {
           <div class="card" style="background:#f0fdf4;border:1px solid #86efac;margin-top:10px">
             <p>从 <b>${escapeHtml(j.sheet_used || '')}</b> 解析到 <b>${j.count}</b> 行喷油工序${imgInfo}${j.meta && j.meta.title ? ' · ' + escapeHtml(j.meta.title) : ''}</p>
             ${j.images_hint ? `<p class="muted">⚠️ ${escapeHtml(j.images_hint)}</p>` : ''}
-            <p class="muted">应用后会替换当前喷油明细（夹模/移印/散枪/边模/油色/浸油/抹油/擦PP水 八道工序）。</p>
+            <p class="muted">应用后会替换当前喷油明细（夹模/移印/散枪/边模/油色/浸油/抹油/擦PP水/UV 九道工序）。</p>
             <div style="margin-top:10px;display:flex;gap:8px">
               <button id="pp-imp-apply">应用</button>
               <button id="pp-imp-cancel" class="mini danger">取消</button>
@@ -3134,6 +3134,7 @@ const PAINTING_PROCS = [
   { key: 'dip',    label: '浸油' },
   { key: 'oil',    label: '抹油' },
   { key: 'pp_water', label: '擦PP水' },
+  { key: 'uv', label: 'UV' },
 ];
 
 function currentFactoryCode() {

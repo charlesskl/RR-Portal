@@ -1,7 +1,7 @@
 // 解析"喷油核价表"型 xlsx → 返回 { meta, items, count, sheet_used }
 // 常见表头：图片 | 位置 | 夹模 | 夹模单价 | 移印 | 移印单价 | 散枪 | 散枪单价 |
 //           边模 | 边模单价 | 油色 | 油色价格 | 浸油 | 浸油单价 | 抹油 | 抹油单价 |
-//           擦PP水 | 擦PP水单价 | 总报价 | 备注
+//           擦PP水 | 擦PP水单价 | UV | UV单价 | 总报价 | 备注
 const ExcelJS = require('exceljs');
 const XLSX = require('xlsx');
 
@@ -15,6 +15,7 @@ const PROCS = [
   { key: 'dip',   label: '浸油' },
   { key: 'oil',   label: '抹油' },
   { key: 'pp_water', label: '擦PP水' },
+  { key: 'uv', label: 'UV' },
 ];
 
 function toStr(v) {

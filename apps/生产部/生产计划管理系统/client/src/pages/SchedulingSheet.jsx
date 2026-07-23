@@ -182,7 +182,7 @@ function buildScheduleSuggestions(rows) {
   return rows.filter(row => row?.id).map((row, index) => {
     const qty = Number(row.quantity) || 0;
     const produced = Number(row.production_count) || 0;
-    const remaining = qty > 0 ? Math.max(qty - produced, 0) || qty : 0;
+    const remaining = qty > 0 ? Math.max(qty - produced, 0) : 0;
     const dailyTarget = Number(row.daily_target) || 0;
     const daysFromField = Number(row.days) || 0;
     const requiredDays = dailyTarget > 0 && remaining > 0
@@ -203,6 +203,12 @@ function buildScheduleSuggestions(rows) {
       targetDate,
       targetLabel: shortDate(targetDate),
     };
+    if (qty <= 0) {
+      return { ...base, canApply: false, risk: 'missing', riskText: '缺数量', color: SCHEDULE_HINT_COLORS.missing };
+    }
+    if (qty > 0 && remaining === 0) {
+      return { ...base, canApply: false, risk: 'missing', riskText: '已完成', color: SCHEDULE_HINT_COLORS.missing };
+    }
     if (!targetDate || !requiredDays) {
       return { ...base, canApply: false, risk: 'missing', riskText: !targetDate ? '缺目标日期' : '缺日产量', color: SCHEDULE_HINT_COLORS.missing };
     }
@@ -256,6 +262,7 @@ export default function SchedulingSheet({ workshop, tab, lineName = 'all', lines
   const [importing, setImporting] = useState(false);
   const [newImportedIds, setNewImportedIds] = useState(new Set());
   const [searchText, setSearchText] = useState('');
+  const [searchDraft, setSearchDraft] = useState('');
   const [uploadVisible, setUploadVisible] = useState(false);
   const [fileList, setFileList] = useState([]);
   const [parsing, setParsing] = useState(false);
@@ -268,14 +275,7 @@ export default function SchedulingSheet({ workshop, tab, lineName = 'all', lines
   const [scheduleVisible, setScheduleVisible] = useState(false);
   const [scheduleSuggestions, setScheduleSuggestions] = useState([]);
   const [scheduleApplying, setScheduleApplying] = useState(false);
-
-  const scheduleHints = useMemo(() => {
-    const hints = {};
-    for (const s of scheduleSuggestions) {
-      if (s.canApply) hints[s.id] = { bg: s.color };
-    }
-    return hints;
-  }, [scheduleSuggestions]);
+  const [editorRefreshKey, setEditorRefreshKey] = useState(0);
 
   // 按货号主编号计算数量合计
   const quantitySums = useMemo(() => {
@@ -327,6 +327,14 @@ export default function SchedulingSheet({ workshop, tab, lineName = 'all', lines
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleSearch = (value) => {
+    if (editorRef.current?.hasPendingChanges?.()) {
+      message.warning('表格有未保存修改，请先保存再搜索');
+      return;
+    }
+    setSearchText(String(value || '').trim());
   };
 
   // 添加文件到待导入列表（支持拖拽和逐个选择）
@@ -561,6 +569,10 @@ export default function SchedulingSheet({ workshop, tab, lineName = 'all', lines
   };
 
   const handleGenerateSchedule = () => {
+    if (editorRef.current?.hasPendingChanges?.()) {
+      message.warning('表格有未保存修改，请先保存再生成建议排期');
+      return;
+    }
     if (data.length === 0) {
       message.warning('当前没有可排的数据');
       return;
@@ -583,6 +595,11 @@ export default function SchedulingSheet({ workshop, tab, lineName = 'all', lines
       await axios.post('/api/orders/batch-update', {
         updates: applyRows.map(s => ({ id: s.id, fields: { start_date: s.startISO } })),
       });
+      const startDateById = new Map(applyRows.map(s => [s.id, s.startISO]));
+      setAllData(prev => prev.map(order => (
+        startDateById.has(order.id) ? { ...order, start_date: startDateById.get(order.id) } : order
+      )));
+      setEditorRefreshKey(key => key + 1);
       message.success('已应用 ' + applyRows.length + ' 条上拉日期');
       setScheduleVisible(false);
       setScheduleSuggestions([]);
@@ -785,12 +802,13 @@ export default function SchedulingSheet({ workshop, tab, lineName = 'all', lines
           </Popconfirm>
         </Space>
         <Space>
-          <Input
+          <Input.Search
             prefix={<SearchOutlined />}
             placeholder="搜索货号、客名、产品..."
             allowClear
-            value={searchText}
-            onChange={e => setSearchText(e.target.value)}
+            value={searchDraft}
+            onChange={e => setSearchDraft(e.target.value)}
+            onSearch={handleSearch}
             style={{ width: 220 }}
           />
           <Button icon={<DownloadOutlined />} onClick={handleExport}>导出Excel</Button>
@@ -804,7 +822,7 @@ export default function SchedulingSheet({ workshop, tab, lineName = 'all', lines
         workshop={workshop}
         height={600}
         newImportedIds={newImportedIds}
-        scheduleHints={scheduleHints}
+        refreshKey={editorRefreshKey}
       />
 
       <Modal

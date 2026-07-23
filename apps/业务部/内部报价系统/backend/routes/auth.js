@@ -9,10 +9,10 @@ const MAX_FAILS = 5;
 const LOCK_MIN = 15;
 
 // POST /api/auth/login  { username, password }
-router.post('/login', (req, res) => {
+router.post('/login', async (req, res) => {
   const { username, password } = req.body || {};
   if (!username || !password) return res.status(400).json({ error: '缺少用户名或密码' });
-  const u = db.prepare('SELECT * FROM users WHERE username = ?').get(String(username).trim());
+  const u = await db.prepare('SELECT * FROM users WHERE username = ?').get(String(username).trim());
   if (!u) return res.status(401).json({ error: '用户名或密码错误' });
 
   // 锁定检查
@@ -25,21 +25,21 @@ router.post('/login', (req, res) => {
     if (fails >= MAX_FAILS) {
       lockUntil = new Date(Date.now() + LOCK_MIN * 60 * 1000).toISOString();
     }
-    db.prepare('UPDATE users SET login_fails = ?, locked_until = ? WHERE id = ?')
+    await db.prepare('UPDATE users SET login_fails = ?, locked_until = ? WHERE id = ?')
       .run(fails, lockUntil, u.id);
     return res.status(401).json({ error: '用户名或密码错误' });
   }
 
   // 成功
-  db.prepare('UPDATE users SET login_fails = 0, last_login = datetime(\'now\') WHERE id = ?').run(u.id);
+  await db.prepare('UPDATE users SET login_fails = 0, last_login = datetime(\'now\') WHERE id = ?').run(u.id);
   req.session.user_id = u.id;
   req.session.factory_code = u.factory_code || 'qingxi';
 
-  db.prepare(`INSERT INTO audit_log (dept, actor, action, detail) VALUES (?, ?, 'login', ?)`)
+  await db.prepare(`INSERT INTO audit_log (dept, actor, action, detail) VALUES (?, ?, 'login', ?)`)
     .run(u.dept, u.username, u.role);
 
-  const me = loadUserAndPerms(u.id, req.session.factory_code);
-  const deptRow = db.prepare('SELECT name_cn FROM departments WHERE code = ?').get(u.dept);
+  const me = await loadUserAndPerms(u.id, req.session.factory_code);
+  const deptRow = await db.prepare('SELECT name_cn FROM departments WHERE code = ?').get(u.dept);
   res.json({
     id: me.id, username: me.username, display_name: me.display_name,
     dept: me.dept, dept_name: deptRow ? deptRow.name_cn : me.dept,
@@ -55,16 +55,16 @@ router.post('/logout', (req, res) => {
   res.json({ ok: true });
 });
 
-router.get('/me', (req, res) => {
+router.get('/me', async (req, res) => {
   const s = req.session;
   if (!s || !s.user_id) return res.status(401).json({ error: '未登录' });
-  const me = loadUserAndPerms(s.user_id, s.factory_code);
+  const me = await loadUserAndPerms(s.user_id, s.factory_code);
   if (!me) { req.session = null; return res.status(401).json({ error: '账号失效' }); }
   if (me.locked_until && new Date(me.locked_until) > new Date()) {
     req.session = null;
     return res.status(403).json({ error: '账号已锁定' });
   }
-  const deptRow = db.prepare('SELECT name_cn FROM departments WHERE code = ?').get(me.dept);
+  const deptRow = await db.prepare('SELECT name_cn FROM departments WHERE code = ?').get(me.dept);
   res.json({
     id: me.id, username: me.username, display_name: me.display_name,
     dept: me.dept, dept_name: deptRow ? deptRow.name_cn : me.dept,
@@ -86,18 +86,18 @@ router.post('/factory', requireAuth, (req, res) => {
 });
 
 // POST /api/auth/change-password  { current, new }
-router.post('/change-password', (req, res) => {
+router.post('/change-password', async (req, res) => {
   const s = req.session;
   if (!s || !s.user_id) return res.status(401).json({ error: '未登录' });
   const { current, new: newPwd } = req.body || {};
   if (!current || !newPwd) return res.status(400).json({ error: '缺少 current 或 new' });
   if (String(newPwd).length < 6) return res.status(400).json({ error: '新密码至少 6 位' });
-  const u = db.prepare('SELECT * FROM users WHERE id = ?').get(s.user_id);
+  const u = await db.prepare('SELECT * FROM users WHERE id = ?').get(s.user_id);
   if (!u) return res.status(404).json({ error: '账号不存在' });
   if (!bcrypt.compareSync(String(current), u.password_hash)) {
     return res.status(401).json({ error: '当前密码错误' });
   }
-  db.prepare('UPDATE users SET password_hash = ? WHERE id = ?')
+  await db.prepare('UPDATE users SET password_hash = ? WHERE id = ?')
     .run(bcrypt.hashSync(String(newPwd), 8), u.id);
   res.json({ ok: true });
 });

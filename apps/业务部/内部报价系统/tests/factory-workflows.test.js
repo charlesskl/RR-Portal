@@ -61,11 +61,11 @@ function createUserAccessDb() {
   return db;
 }
 
-test('changing user factories replaces scope and clears customers only when scope changes', () => {
+test('changing user factories replaces scope and clears customers only when scope changes', async () => {
   const db = createUserAccessDb();
 
   try {
-    const changed = changeUserFactories(db, 1, ['heyuan']);
+    const changed = await changeUserFactories(db, 1, ['heyuan']);
     assert.deepEqual(changed, { changed: true, clearedCustomers: 2 });
     assert.equal(db.prepare('SELECT factory_code FROM users WHERE id = 1').get().factory_code, 'heyuan');
     assert.deepEqual(
@@ -75,7 +75,7 @@ test('changing user factories replaces scope and clears customers only when scop
     assert.equal(db.prepare('SELECT COUNT(*) AS n FROM user_customers WHERE user_id = 1').get().n, 0);
 
     db.prepare('INSERT INTO user_customers (user_id, customer) VALUES (?, ?)').run(1, 'Heyuan Customer');
-    const unchanged = changeUserFactories(db, 1, ['heyuan']);
+    const unchanged = await changeUserFactories(db, 1, ['heyuan']);
     assert.deepEqual(unchanged, { changed: false, clearedCustomers: 0 });
     assert.equal(db.prepare('SELECT COUNT(*) AS n FROM user_customers WHERE user_id = 1').get().n, 1);
   } finally {
@@ -83,11 +83,11 @@ test('changing user factories replaces scope and clears customers only when scop
   }
 });
 
-test('promoting a user to admin preserves its configured factory scope', () => {
+test('promoting a user to admin preserves its configured factory scope', async () => {
   const db = createUserAccessDb();
 
   try {
-    const result = changeUserRole(db, 1, 'admin', ['qingxi'], (userId) => {
+    const result = await changeUserRole(db, 1, 'admin', ['qingxi'], (userId) => {
       db.prepare('DELETE FROM user_perms WHERE user_id = ?').run(userId);
       db.prepare('INSERT INTO user_perms (user_id, menu) VALUES (?, ?)').run(userId, 'admin-template');
     });
@@ -105,12 +105,12 @@ test('promoting a user to admin preserves its configured factory scope', () => {
   }
 });
 
-test('role update rolls back role, factories, customers, and permissions together', () => {
+test('role update rolls back role, factories, customers, and permissions together', async () => {
   const db = createUserAccessDb();
   db.prepare('INSERT INTO user_perms (user_id, menu) VALUES (?, ?)').run(1, 'staff-template');
 
   try {
-    assert.throws(() => changeUserRole(db, 1, 'admin', ['qingxi', 'heyuan'], () => {
+    await assert.rejects(() => changeUserRole(db, 1, 'admin', ['qingxi', 'heyuan'], () => {
       db.prepare('DELETE FROM user_perms WHERE user_id = ?').run(1);
       throw new Error('template failure');
     }), /template failure/);
@@ -127,7 +127,7 @@ test('role update rolls back role, factories, customers, and permissions togethe
   }
 });
 
-test('demoting an admin clears customer scope even when factory scope stays unchanged', () => {
+test('demoting an admin clears customer scope even when factory scope stays unchanged', async () => {
   const db = createUserAccessDb();
   db.exec(`
     UPDATE users SET role = 'admin';
@@ -135,7 +135,7 @@ test('demoting an admin clears customer scope even when factory scope stays unch
   `);
 
   try {
-    const result = changeUserRole(db, 1, 'staff', ['qingxi', 'heyuan'], () => {});
+    const result = await changeUserRole(db, 1, 'staff', ['qingxi', 'heyuan'], () => {});
     assert.deepEqual(result, { factoriesChanged: false, clearedCustomers: 2 });
     assert.equal(db.prepare('SELECT role FROM users WHERE id = 1').get().role, 'staff');
     assert.equal(db.prepare('SELECT COUNT(*) AS n FROM user_customers WHERE user_id = 1').get().n, 0);

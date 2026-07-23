@@ -107,6 +107,7 @@ test('factory migration preserves refs, tolerates null payloads, and scopes quot
       cwd: appRoot,
       env: {
         ...process.env,
+        DB_DRIVER: 'sqlite',
         DB_FILE: dbPath,
         ADMIN_INITIAL_PASSWORD: 'TestOnly-123456',
       },

@@ -54,8 +54,10 @@ async function refreshMe() {
       factoryChip.classList.remove('hidden');
     }
     // 新建报价：业务 dept 才显示
-    if (hasPerm(me, '报价单列表', 'edit') && me.dept === 'sales') $('new-quote-form').classList.remove('hidden');
-    else $('new-quote-form').classList.add('hidden');
+    if (hasPerm(me, '报价单列表', 'edit') && me.dept === 'sales') {
+      $('new-quote-form').classList.remove('hidden');
+      loadCustomers();
+    } else $('new-quote-form').classList.add('hidden');
     // 管理后台入口
     if (hasPerm(me, '账号管理', 'admin')) $('btn-admin').classList.remove('hidden');
     else $('btn-admin').classList.add('hidden');
@@ -207,8 +209,105 @@ if ($('btn-create')) $('btn-create').onclick = async () => {
     });
     $('q-no').value = $('q-product').value = $('q-version').value = $('q-customer').value = $('q-qty').value = '';
     await loadQuotes();
+    loadCustomers();
   } catch (e) { alert(e.message); }
 };
+
+// 客户组合框：可从本人可见客户中选择，也可直接输入新客户。
+window.__customers = [];
+async function loadCustomers() {
+  try {
+    const r = await api('/quotes/customers');
+    window.__customers = Array.isArray(r.customers) ? r.customers : [];
+  } catch {
+    window.__customers = [];
+  }
+}
+
+(function initCustomerCombo() {
+  const input = $('q-customer');
+  const list = $('q-customer-list');
+  const toggle = $('q-customer-toggle');
+  const combo = $('q-customer-combo');
+  if (!input || !list || !toggle || !combo) return;
+  let activeIdx = -1;
+
+  const isOpen = () => !list.classList.contains('hidden');
+  const items = () => Array.from(list.querySelectorAll('.combo-item'));
+  function close() {
+    list.classList.add('hidden');
+    input.setAttribute('aria-expanded', 'false');
+    activeIdx = -1;
+  }
+  function render() {
+    const query = input.value.trim();
+    const lowered = query.toLowerCase();
+    const matches = window.__customers.filter(c => c.toLowerCase().includes(lowered));
+    const exact = window.__customers.some(c => c === query);
+    let html = '';
+    if (query && !exact) {
+      html += `<div class="combo-item combo-new" data-val="${esc(query)}" role="option">＋ 新建客户「${esc(query)}」</div>`;
+    }
+    if (matches.length) {
+      html += matches.map(c => `<div class="combo-item" data-val="${esc(c)}" role="option">${esc(c)}</div>`).join('');
+    } else if (!query) {
+      html += '<div class="combo-empty">暂无已设置客户，直接输入即可新建</div>';
+    }
+    list.innerHTML = html;
+    activeIdx = -1;
+    items().forEach(el => {
+      el.onmousedown = (event) => {
+        event.preventDefault();
+        input.value = el.dataset.val;
+        close();
+        input.focus();
+      };
+    });
+  }
+  function open() {
+    render();
+    list.classList.remove('hidden');
+    input.setAttribute('aria-expanded', 'true');
+  }
+  function highlight(index) {
+    const choices = items();
+    choices.forEach(el => el.classList.remove('active'));
+    if (index >= 0 && index < choices.length) {
+      choices[index].classList.add('active');
+      choices[index].scrollIntoView({ block: 'nearest' });
+    }
+    activeIdx = index;
+  }
+
+  input.addEventListener('focus', open);
+  input.addEventListener('input', () => { if (isOpen()) render(); else open(); });
+  toggle.addEventListener('mousedown', (event) => {
+    event.preventDefault();
+    if (isOpen()) close();
+    else { input.focus(); open(); }
+  });
+  input.addEventListener('keydown', (event) => {
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      if (!isOpen()) return open();
+      highlight(Math.min(activeIdx + 1, items().length - 1));
+    } else if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      highlight(Math.max(activeIdx - 1, 0));
+    } else if (event.key === 'Enter') {
+      const choices = items();
+      if (isOpen() && activeIdx >= 0 && choices[activeIdx]) {
+        event.preventDefault();
+        input.value = choices[activeIdx].dataset.val;
+        close();
+      }
+    } else if (event.key === 'Escape' && isOpen()) {
+      event.preventDefault();
+      close();
+    }
+  });
+  document.addEventListener('click', event => { if (!combo.contains(event.target)) close(); });
+})();
 
 // --- 修改密码 ---
 $('btn-change-pwd').onclick = (e) => {

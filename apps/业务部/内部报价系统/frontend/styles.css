@@ -481,6 +481,27 @@ h3 .upload-mold-sheet button:hover { background: #334155; }
 .new-quote-form input { padding: 7px 10px; font-size: 13px; min-width: 110px; }
 .new-quote-form input:nth-child(2) { min-width: 140px; }
 
+.combo { position: relative; display: inline-flex; align-items: center; }
+.combo > input { padding-right: 26px; width: 100%; }
+.combo-caret {
+  position: absolute; right: 4px; padding: 2px 4px; border: 0; background: transparent;
+  color: var(--text-light); cursor: pointer; box-shadow: none;
+}
+.combo-caret:hover { color: var(--text-dim); }
+.combo-list {
+  position: absolute; top: calc(100% + 4px); left: 0; z-index: 50;
+  min-width: 100%; max-width: 280px; max-height: 260px; overflow-y: auto;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.12); padding: 4px;
+}
+.combo-item {
+  padding: 7px 10px; font-size: 13px; border-radius: 6px; cursor: pointer;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text);
+}
+.combo-item:hover, .combo-item.active { background: var(--surface-soft); }
+.combo-item.combo-new { color: #2563eb; font-weight: 500; }
+.combo-empty { padding: 8px 10px; font-size: 12px; color: var(--text-light); }
+
 /* 进度条 */
 .progress {
   width: 80px;

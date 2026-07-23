@@ -39,6 +39,20 @@ router.get('/', (req, res) => {
   res.json(rows.map(r => ({ ...r, total_depts: totalDepts })));
 });
 
+// 新建报价单时的客户候选；必须放在 /:id 之前，避免 customers 被当成 id。
+router.get('/customers', (req, res) => {
+  const isAdmin = req.user.perms && req.user.perms['账号管理'] && req.user.perms['账号管理'].can_admin;
+  const customers = isAdmin
+    ? db.prepare(`
+        SELECT DISTINCT customer FROM quotes
+        WHERE factory_code = ? AND customer IS NOT NULL AND customer != ''
+        ORDER BY customer
+      `).all(req.user.active_factory_code).map(r => r.customer)
+    : db.prepare('SELECT customer FROM user_customers WHERE user_id = ? ORDER BY customer')
+      .all(req.user.id).map(r => r.customer);
+  res.json({ customers });
+});
+
 // POST /api/quotes  仅业务可建
 router.post('/', (req, res) => {
   if (req.user.dept !== 'sales') return res.status(403).json({ error: '只有业务可以创建报价单' });
@@ -55,6 +69,11 @@ router.post('/', (req, res) => {
     for (const d of DEPT_CODES) ins.run(id, d);
     db.prepare(`INSERT INTO audit_log (quote_id, dept, actor, action) VALUES (?, 'sales', ?, 'create')`)
       .run(id, req.user.name);
+    // 新客户建单后自动加入当前业务账号的可见范围，避免建完后自己看不到。
+    if (customer && req.user.role !== 'admin') {
+      db.prepare('INSERT OR IGNORE INTO user_customers (user_id, customer) VALUES (?, ?)')
+        .run(req.user.id, customer);
+    }
     return id;
   });
 
@@ -102,6 +121,11 @@ router.post('/:id/clone', (req, res) => {
     for (const s of srcSecs) ins.run(newId, s.dept, s.payload_json || '{}');
     db.prepare(`INSERT INTO audit_log (quote_id, dept, actor, action, detail) VALUES (?, 'sales', ?, 'clone', ?)`)
       .run(newId, req.user.name, `from #${srcId} (${src.quote_no})`);
+    const clonedCustomer = customer != null ? customer : src.customer;
+    if (clonedCustomer && req.user.role !== 'admin') {
+      db.prepare('INSERT OR IGNORE INTO user_customers (user_id, customer) VALUES (?, ?)')
+        .run(req.user.id, clonedCustomer);
+    }
     return newId;
   });
 

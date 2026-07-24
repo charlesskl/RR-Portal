@@ -2262,17 +2262,24 @@ function renderEngineering(host, payload, canEdit, onChange, fxRmbHkd, fxHkdUsd)
       const r = await fetch('/api/uploads/mold-sheet', { method: 'POST', credentials: 'include', body: fd });
       const j = await r.json();
       if (!r.ok) throw new Error(j.error || '解析失败');
+      // 港币模板先按当前 RMB→HKD 汇率换算成系统存储的 RMB，确保只读“模价 HKD”显示原报价。
+      const importedMolds = () => j.molds.map(m => ({
+        ...m,
+        price_rmb: m.price_rmb != null ? m.price_rmb
+          : (m.price_hkd != null ? +(num(m.price_hkd) * num(fxRmbHkd)).toFixed(4) : null),
+        images: m.images || [],
+      }));
       preview.innerHTML = `
         <div class="card" style="background:#f0fdf4;border:1px solid #86efac;">
           <p>从 <b>${escapeHtml(j.sheet_used || '')}</b> 解析到 <b>${j.molds.length}</b> 行明细：</p>
           <table class="wb-table"><thead><tr>
             <th>模号</th><th>名称</th><th>类型</th><th>材质</th>
-            <th>出模数</th><th>套数</th><th>净重(g)</th><th>周期(秒)</th><th>机型</th><th>目标数</th><th>图片</th><th>模具尺寸</th><th>价格RMB</th><th>备注</th>
+            <th>出模数</th><th>套数</th><th>净重(g)</th><th>周期(秒)</th><th>机型</th><th>目标数</th><th>图片</th><th>模具尺寸</th><th>价格RMB</th><th>价格HKD</th><th>备注</th>
           </tr></thead><tbody>
           ${j.molds.map(m => `<tr>
             <td>${escapeHtml(m.mold_no || '')}</td><td>${escapeHtml(m.name || '')}</td><td>${escapeHtml(m.mold_type || '')}</td>
             <td>${escapeHtml(m.material || '')}</td><td>${escapeHtml(m.cavity || '')}</td>
-            <td>${escapeHtml(m.sets ?? '')}</td><td>${escapeHtml(m.weight_g ?? '')}</td><td>${escapeHtml(m.cycle_sec ?? '')}</td><td>${escapeHtml(m.machine_model || '')}</td><td>${escapeHtml(m.target ?? '')}</td><td>${escapeHtml((m.images || []).length)}</td><td>${escapeHtml((m.detail && m.detail.mold_size) || '')}</td><td>${escapeHtml(m.price_rmb ?? '')}</td><td>${escapeHtml(m.note || '')}</td>
+            <td>${escapeHtml(m.sets ?? '')}</td><td>${escapeHtml(m.weight_g ?? '')}</td><td>${escapeHtml(m.cycle_sec ?? '')}</td><td>${escapeHtml(m.machine_model || '')}</td><td>${escapeHtml(m.target ?? '')}</td><td>${escapeHtml((m.images || []).length)}</td><td>${escapeHtml((m.detail && m.detail.mold_size) || '')}</td><td>${escapeHtml(m.price_rmb ?? '')}</td><td>${escapeHtml(m.price_hkd ?? '')}</td><td>${escapeHtml(m.note || '')}</td>
           </tr>`).join('')}
           </tbody></table>
           <div style="margin-top:10px">
@@ -2285,13 +2292,13 @@ function renderEngineering(host, payload, canEdit, onChange, fxRmbHkd, fxHkdUsd)
           ${j.images_extract_error ? `<p style="color:#dc2626;margin-top:8px">图片抽取失败: ${j.images_extract_error}</p>` : ''}
         </div>`;
       preview.querySelector('#btn-apply-replace').onclick = () => {
-        payload.molds = j.molds.map(m => ({ ...m, images: m.images || [] }));
+        payload.molds = importedMolds();
         preview.innerHTML = ''; fileInp.value = '';
         renderEngineering(host, payload, canEdit, onChange, fxRmbHkd, fxHkdUsd);
         onChange();
       };
       preview.querySelector('#btn-apply-append').onclick = () => {
-        payload.molds = (payload.molds || []).concat(j.molds.map(m => ({ ...m, images: m.images || [] })));
+        payload.molds = (payload.molds || []).concat(importedMolds());
         preview.innerHTML = ''; fileInp.value = '';
         renderEngineering(host, payload, canEdit, onChange, fxRmbHkd, fxHkdUsd);
         onChange();

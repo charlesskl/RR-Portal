@@ -341,9 +341,13 @@ async function parseExcelWithColors(fileBuffer, fileName) {
   const results = [];
   const header = fileBuffer.slice(0, 4).toString('hex');
   const isXlsx = header === '504b0304';
+  const isXls = header === 'd0cf11e0';
 
+  if (isXls) {
+    // 老 .xls 二进制格式，JSZip 读不了 — 走 SheetJS 路径
+    return parseXlsWithSheetJS(fileBuffer, fileName);
+  }
   if (!isXlsx) {
-    // .xls 格式无法读颜色，跳过
     return results;
   }
 
@@ -426,6 +430,91 @@ async function parseExcelWithColors(fileBuffer, fileName) {
         file: fileName,
         sheet: sheet.name,
         row: rowNum,
+        headers: headerNames,
+        data: rowData,
+      });
+    }
+  }
+
+  return results;
+}
+
+// .xls (老二进制) — 用 SheetJS 读 cellStyles，套用和 .xlsx 同样的颜色识别算法
+function parseXlsWithSheetJS(fileBuffer, fileName) {
+  const XLSX = require('xlsx');
+  const wb = XLSX.read(fileBuffer, { type: 'buffer', cellStyles: true, cellFormula: false });
+  const results = [];
+
+  for (const sheetName of wb.SheetNames) {
+    const ws = wb.Sheets[sheetName];
+    if (!ws || !ws['!ref']) continue;
+    const range = XLSX.utils.decode_range(ws['!ref']);
+
+    // 1) 找表头行（行号 0..5，前 10 列里有 >=4 个短中文且非"("开头）
+    const headerCandidates = [];
+    for (let r = range.s.r; r <= Math.min(range.s.r + 5, range.e.r); r++) {
+      let score = 0;
+      const rowData = {};
+      for (let c = range.s.c; c <= Math.min(9, range.e.c); c++) {
+        const cell = ws[XLSX.utils.encode_cell({ r, c })];
+        const v = cell?.v;
+        if (typeof v === 'string' && /[一-鿿]/.test(v) && v.length < 15
+            && !v.startsWith('(') && !v.startsWith('（')) {
+          score++;
+        }
+        if (v != null) rowData[c] = v;
+      }
+      if (score >= 4) headerCandidates.push({ r, score });
+    }
+    if (headerCandidates.length === 0) continue;
+    headerCandidates.sort((a, b) => (b.score - a.score) || (b.r - a.r));
+    const headerRow = headerCandidates[0].r;
+
+    // 2) 收完整表头（全列）
+    const headers = {};
+    for (let c = range.s.c; c <= range.e.c; c++) {
+      const cell = ws[XLSX.utils.encode_cell({ r: headerRow, c })];
+      if (cell?.v != null) {
+        headers[c] = String(cell.v).replace(/[\n\r]/g, '').replace(/\s+/g, '').trim();
+      }
+    }
+    const headerNames = Object.values(headers);
+
+    // 3) 扫数据行 — 前 10 列里黄/蓝格子 >=3 个 → 这行被选中
+    for (let r = headerRow + 1; r <= range.e.r; r++) {
+      let yellowCount = 0;
+      let blueCount = 0;
+      for (let c = range.s.c; c <= Math.min(9, range.e.c); c++) {
+        const cell = ws[XLSX.utils.encode_cell({ r, c })];
+        const rgb = cell?.s?.fgColor?.rgb;
+        if (!rgb) continue;
+        if (isYellowColor(rgb)) yellowCount++;
+        else if (isBlueColor(rgb)) blueCount++;
+      }
+      let rowColor = null;
+      if (yellowCount >= 3) rowColor = 'yellow';
+      else if (blueCount >= 3) rowColor = 'blue';
+      if (!rowColor) continue;
+
+      // 收整行数据
+      const rowData = {};
+      let nonEmpty = false;
+      for (let c = range.s.c; c <= range.e.c; c++) {
+        const hn = headers[c];
+        if (!hn) continue;
+        const cell = ws[XLSX.utils.encode_cell({ r, c })];
+        const v = cell?.v;
+        if (v == null) { rowData[hn] = ''; continue; }
+        rowData[hn] = v;
+        if (v !== '' && v !== null && v !== undefined) nonEmpty = true;
+      }
+      if (!nonEmpty) continue;
+
+      results.push({
+        type: rowColor === 'yellow' ? 'new' : 'modified',
+        file: fileName,
+        sheet: sheetName,
+        row: r + 1,
         headers: headerNames,
         data: rowData,
       });

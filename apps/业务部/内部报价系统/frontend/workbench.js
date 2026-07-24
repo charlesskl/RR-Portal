@@ -1364,7 +1364,6 @@ function renderSummaryPane(host, sections, quote, me) {
     motor: motorRmb,                         // 马达 HKD（电子/五金已 HKD，不除汇率）
     suction: blisterRmb,                     // 吸塑 HKD（包装已 HKD）
     glue_bag: glueBagRmb,                    // 胶袋 HKD（辅助/包装已 HKD）
-    code_before: markupX,                    // 未减税前码数 = 九、合计 码点
     color_box: colorBoxRmb,                  // 彩盒/内咭/内卡 HKD（包装已 HKD）
     other_buy: otherBuyRmb,                  // 其他外购 = 辅助材料剩余 HKD（辅助已 HKD）
     battery: batteryRmb,                     // 电池 HKD（包装已 HKD）
@@ -1426,9 +1425,8 @@ function renderTaxDeductionBlock(host, salesPayload, salesSec, me, autoFill) {
   applyAuto('t1', 'motor', autoFill.motor);
   applyAuto('t1', 'suction', autoFill.suction);
   applyAuto('t1', 'glue_bag', autoFill.glue_bag);
-  // 未减税前码数始终等于上方码点，不允许旧的手工覆盖阻断同步。
+  // 未减税前码数由 recalc 按“货价 ÷ 总成本”计算，不允许旧的手工覆盖阻断同步。
   delete ps.overrides['t2.code_before'];
-  applyAuto('t2', 'code_before', autoFill.code_before);
   applyAuto('t2', 'color_box', autoFill.color_box);
   applyAuto('t2', 'battery', autoFill.battery);
   applyAuto('t2', 'libao', autoFill.libao);
@@ -1596,6 +1594,10 @@ function renderTaxDeductionBlock(host, salesPayload, salesSec, me, autoFill) {
     const laborCost = num(ps.t3.painting_labor) + num(ps.t3.paint_material) + num(ps.t3.assembly_labor);
     const totalCost = noLaborCost + laborCost;
     const basePrice = num(ps.t1.base_price);
+    const codeBefore = totalCost > 0 ? basePrice / totalCost : 0;
+    ps.t2.code_before = +codeBefore.toFixed(4);
+    const codeBeforeInp = host.querySelector('input[data-tbl="t2"][data-key="code_before"]');
+    if (codeBeforeInp && document.activeElement !== codeBeforeInp) codeBeforeInp.value = ps.t2.code_before || '';
     const gross = basePrice - noLaborCost;
     const profit = basePrice - totalCost;
     const grossPct = basePrice ? gross / basePrice : 0;

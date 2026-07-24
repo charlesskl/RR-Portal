@@ -77,20 +77,25 @@ test('Heyuan export defaults assembly labor base rate to 260', async () => {
   assert.ok(values.some(value => typeof value === 'string' && value.includes('基数：260 HKD')));
 });
 
-test('export keeps an explicit zero markup in tax summary', async () => {
+test('export calculates pre-tax markup as base price divided by total cost', async () => {
   const workbook = await buildWorkbook({
     quote: { quote_no: 'ZERO-MARKUP', product_name: '零码点', qty: 1000, factory_code: 'qingxi' },
-    sections: [{
-      dept: 'sales',
-      payload_json: JSON.stringify({
+    sections: [
+      { dept: 'sales', payload_json: JSON.stringify({
         header: { fx_rmb_hkd: 0.85, fx_hkd_usd: 7.8 },
         shipping: {
-          markup_x: 0,
+          markup_x: 1.2,
           scenarios: [{ name: '出厂价', is_factory: true, base_rmb: 1 }],
         },
-        pricing_summary: { t1: {}, t2: {}, t3: {}, t4: {}, overrides: {} },
-      }),
-    }],
+        pricing_summary: {
+          t1: { base_price: 51.3 },
+          t2: { color_box: 42.75 },
+          t3: {},
+          t4: {},
+          overrides: { 't1.base_price': true, 't2.color_box': true },
+        },
+      }) },
+    ],
   });
 
   const worksheet = workbook.worksheets[0];
@@ -105,8 +110,16 @@ test('export keeps an explicit zero markup in tax summary', async () => {
     });
   });
 
-  assert.equal(markupCell && markupCell.value && markupCell.value.formula, '0');
-  assert.ok(labels.includes('码点 × 0'));
+  const formulaMatch = markupCell && markupCell.value && markupCell.value.formula
+    && markupCell.value.formula.match(/^IFERROR\(([A-Z]+\d+)\/(K\d+),0\)$/);
+  assert.ok(formulaMatch);
+  const resultOf = (addr) => {
+    const value = worksheet.getCell(addr).value;
+    return Number(value && typeof value === 'object' ? value.result : value) || 0;
+  };
+  const expected = resultOf(formulaMatch[1]) / resultOf(formulaMatch[2]);
+  assert.equal(Number(markupCell.value.result.toFixed(4)), Number(expected.toFixed(4)));
+  assert.ok(labels.includes('码点 × 1.2'));
 });
 
 test('export tax-summary base price uses the live page formula result instead of a stale snapshot', async () => {
@@ -151,6 +164,7 @@ test('page base price uses customer TOTAL HKD multiplied by divisor', () => {
   const source = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'workbench.js'), 'utf8');
   assert.match(source, /customerBeforeDivisorHkd\s*=\s*customerTotalHkd\s*\*\s*num\(s\.divisor\)/);
   assert.match(source, /base_price:\s*shippingCalc\.customerBeforeDivisorHkd/);
+  assert.match(source, /codeBefore\s*=\s*totalCost\s*>\s*0\s*\?\s*basePrice\s*\/\s*totalCost\s*:\s*0/);
 });
 
 test('export tax-summary base price preserves a manual page override', async () => {

@@ -2001,8 +2001,8 @@ function renderTaxSummary(ws, row, sales, extra = {}) {
     // 新列布局：纸箱=L，印尼运费=I，附加税=M。
     carton:      refLink('t2', 'carton',      sumR ? `L${sumR}` : null),
     misc:        refLink('t2', 'misc',        sumR ? `I${sumR}+M${sumR}` : null),
-    // 未减税前码数始终取当前码点；忽略旧报价残留的手工覆盖标记。
-    code_before: { ref: `${_mk}` },
+    // 未减税前码数会在总成本生成后回填为“货价 ÷ 总成本”。
+    code_before: null,
     // 运费/吊柜费 = 直接引用 出货价算价 盐田40柜 的 运费/吊柜费 单元格（单一来源）；回退到运费场景率×%
     freight: refLink('t2', 'freight', subRefs.shipFreightCell || (ytRateCell ? `${ytRateCell}*${fPct}/100` : null)),
     cabinet: refLink('t2', 'cabinet', subRefs.shipCabinetCell || (ytRateCell ? `${ytRateCell}*${lPct}/100` : null)),
@@ -2073,11 +2073,21 @@ function renderTaxSummary(ws, row, sales, extra = {}) {
 
   // 表 3 人工 & 成本汇总
   const t3 = ps.t3 || {};
+  const asmRef = (subRefs.asmLabor && subRefs.pkgLabor) ? `${subRefs.asmLabor}+${subRefs.pkgLabor}`
+                : (subRefs.asmLabor || subRefs.pkgLabor || null);
+  const injectionLabor = ov['t3.injection_labor'] ? num(t3.injection_labor)
+    : liveResult(subRefs.injShotSum, num(t3.injection_labor));
+  const paintingLabor = ov['t3.painting_labor'] ? num(t3.painting_labor)
+    : liveResult(subRefs.secondProc ? `${subRefs.secondProc}*0.7` : null, num(t3.painting_labor));
+  const paintMaterial = ov['t3.paint_material'] ? num(t3.paint_material)
+    : liveResult(subRefs.secondProc ? `${subRefs.secondProc}*0.3` : null, num(t3.paint_material));
+  const assemblyLabor = ov['t3.assembly_labor'] ? num(t3.assembly_labor)
+    : liveResult(asmRef, num(t3.assembly_labor));
   // result 用实时单元格值（不用过期 ps 快照），与 表1/表2 口径一致
   const basePrice = cellVal(t1Addr.base_price);
   const noLaborCost = noLaborRefs.reduce((s, ref) => s + cellVal(ref), 0)
-                    + num(t3.injection_labor) + num(t3.painting_labor) + num(t3.paint_material);
-  const totalCost = noLaborCost + num(t3.assembly_labor);
+                    + injectionLabor + paintingLabor + paintMaterial;
+  const totalCost = noLaborCost + assemblyLabor;
   const gross = basePrice - noLaborCost;
   const profit = basePrice - totalCost;
 
@@ -2093,18 +2103,16 @@ function renderTaxSummary(ws, row, sales, extra = {}) {
   const basePriceRef = t1Addr.base_price;  // 货价
   // A 啤工 B 喷油工 C 油漆 D 装配工 — 套公式引用来源；被手填覆盖(ov)则保持静态值
   //   啤工=注塑Σ啤价(K)；喷油工=二次加工合计×0.7；油漆=×0.3；装配工=组装人工+包装人工
-  const asmRef = (subRefs.asmLabor && subRefs.pkgLabor) ? `${subRefs.asmLabor}+${subRefs.pkgLabor}`
-                : (subRefs.asmLabor || subRefs.pkgLabor || null);
   const t3cell = (key, formula, result) => (ov[`t3.${key}`] || !formula) ? result : { formula, result };
-  ws.getCell(row, 1).value = t3cell('injection_labor', subRefs.injShotSum || null, num(t3.injection_labor)); ws.getCell(row, 1).numFmt = '0.0000';
-  ws.getCell(row, 2).value = t3cell('painting_labor', subRefs.secondProc ? `${subRefs.secondProc}*0.7` : null, num(t3.painting_labor)); ws.getCell(row, 2).numFmt = '0.0000';
-  ws.getCell(row, 3).value = t3cell('paint_material', subRefs.secondProc ? `${subRefs.secondProc}*0.3` : null, num(t3.paint_material)); ws.getCell(row, 3).numFmt = '0.0000';
-  ws.getCell(row, 4).value = t3cell('assembly_labor', asmRef, num(t3.assembly_labor)); ws.getCell(row, 4).numFmt = '0.0000';
+  ws.getCell(row, 1).value = t3cell('injection_labor', subRefs.injShotSum || null, injectionLabor); ws.getCell(row, 1).numFmt = '0.0000';
+  ws.getCell(row, 2).value = t3cell('painting_labor', subRefs.secondProc ? `${subRefs.secondProc}*0.7` : null, paintingLabor); ws.getCell(row, 2).numFmt = '0.0000';
+  ws.getCell(row, 3).value = t3cell('paint_material', subRefs.secondProc ? `${subRefs.secondProc}*0.3` : null, paintMaterial); ws.getCell(row, 3).numFmt = '0.0000';
+  ws.getCell(row, 4).value = t3cell('assembly_labor', asmRef, assemblyLabor); ws.getCell(row, 4).numFmt = '0.0000';
   // E 不含人工成本 = 表1(无货价)+表2(成本) + 啤工+喷油工+油漆
   const noLaborFormula = `${noLaborRefs.join('+')}+A${row}+B${row}+C${row}`;
   ws.getCell(row, 5).value = { formula: noLaborFormula, result: noLaborCost }; ws.getCell(row, 5).numFmt = '0.0000';
   // F 人工比例 = 装配工/货价
-  ws.getCell(row, 6).value = { formula: `IFERROR(D${row}/${basePriceRef},0)`, result: basePrice ? num(t3.assembly_labor)/basePrice : 0 }; ws.getCell(row, 6).numFmt = '0.00%';
+  ws.getCell(row, 6).value = { formula: `IFERROR(D${row}/${basePriceRef},0)`, result: basePrice ? assemblyLabor/basePrice : 0 }; ws.getCell(row, 6).numFmt = '0.00%';
   // G 毛利 = 货价 - 不含人工成本
   ws.getCell(row, 7).value = { formula: `${basePriceRef}-E${row}`, result: gross }; ws.getCell(row, 7).numFmt = '0.0000';
   // H 毛利率
@@ -2116,6 +2124,16 @@ function renderTaxSummary(ws, row, sales, extra = {}) {
   // K 总成本 = 不含人工成本 + 装配工
   const totalCostFormula = `E${row}+D${row}`;
   ws.getCell(row, 11).value = { formula: totalCostFormula, result: totalCost }; ws.getCell(row, 11).numFmt = '0.0000';
+  // 未减税前码数(表2) = 货价 / 总成本（总成本到这里才生成，回填前向引用公式）。
+  const codeBeforeIdx = t2Cols.findIndex(c => c[1] === 'code_before') + 1;
+  if (codeBeforeIdx) {
+    const cell = ws.getCell(t2DataRow, codeBeforeIdx);
+    cell.value = {
+      formula: `IFERROR(${basePriceRef}/K${t3Row},0)`,
+      result: totalCost > 0 ? basePrice / totalCost : 0,
+    };
+    cell.numFmt = '0.0000';
+  }
   for (let c = 1; c <= 11; c++) styleData(ws.getCell(row, c));
   row += 2;
 
@@ -2203,7 +2221,7 @@ function renderTaxSummary(ws, row, sales, extra = {}) {
   const totalCostRefExpanded = `K${t3Row}`;  // 表3 总成本 单元格
   const afterCost = totalCost - totalDed;
   const afterGross = basePrice - (noLaborCost - totalDed);
-  const afterProfit = afterGross - num(t3.assembly_labor);
+  const afterProfit = afterGross - assemblyLabor;
 
   const summaryRows = [
     ['合计减税', { formula: totalDedRef, result: totalDed }, '0.0000'],

@@ -1278,7 +1278,7 @@ function renderSummaryPane(host, sections, quote, me) {
       putSection(salesSec, sales, false).catch(() => {});
     }
   };
-  renderShipping(host.querySelector('#wb-shipping-sum'), sales, salesHeader, canEditShip, saveSales,
+  const shippingCalc = renderShipping(host.querySelector('#wb-shipping-sum'), sales, salesHeader, canEditShip, saveSales,
     freightMapSum, factoryHkdSum, surtaxHkd, {
       mold: moldFeeShareUsd,
       prototype: prototypeShareUsd,
@@ -1393,7 +1393,9 @@ function renderSummaryPane(host, sections, quote, me) {
     painting_labor: ppTotal * 0.7,    // 喷油工 = 喷油总额 70%（喷油已 HKD，不除汇率）
     paint_material: ppTotal * 0.3,    // 油漆 = 喷油总额 30%（喷油已 HKD）
     assembly_labor: combinedAsmHkd,   // 装配工 = 旧组装+旧包装+新排拉(装配)+新排拉(包装)（已 HKD，不除汇率）
-    base_price: afterMarkupHkd,              // 货价 = 码点后价 HKD
+    // 货价 = 默认报客场景（首个非出厂价，通常盐田40柜）TOTAL HKD × 找数，
+    // 即把最终总价还原到找数前；包含主体、车缝、电子及该场景运费/吊柜费。
+    base_price: shippingCalc.customerBeforeDivisorHkd,
   };
   renderTaxDeductionBlock(taxHost, sales, salesSec, me, autoFill);
 }
@@ -4064,8 +4066,12 @@ function renderShipping(host, payload, header, canEdit, onChange, freightMap, pr
     // 报客货价 = 第一个非"出厂价"场景（默认 盐田40柜）；若全是出厂价则取最小
     const customerIdx = s.scenarios.findIndex(x => !x.is_factory);
     const customerUSD = (customerIdx >= 0 && rows[customerIdx]) ? rows[customerIdx].finalUSD : (rows.length ? Math.min(...rows.map(r => r.finalUSD)) : 0);
+    const customerTotalHkd = (customerIdx >= 0 && rows[customerIdx])
+      ? rows[customerIdx].totalHKD
+      : (rows.length ? Math.min(...rows.map(r => r.totalHKD)) : 0);
+    const customerBeforeDivisorHkd = customerTotalHkd * num(s.divisor);
     const diffPct = target > 0 ? (customerUSD - target) / target * 100 : 0;
-    return { rows, target, customerUSD, diffPct };
+    return { rows, target, customerUSD, customerIdx, customerTotalHkd, customerBeforeDivisorHkd, diffPct };
   };
 
   // 重算并仅刷新计算单元格 / 同步出货底价（不重建 DOM，输入不丢焦）
@@ -4203,6 +4209,7 @@ function renderShipping(host, payload, header, canEdit, onChange, freightMap, pr
     };
   }
   build();
+  return compute();
 }
 
 function renderSales(host, payload, quote, canEditHeader, canEditPricing, allSections, onChange, onHeaderChange) {

@@ -1,6 +1,8 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const test = require('node:test');
 
 const { buildWorkbook } = require('../backend/services/exportXlsx');
@@ -116,7 +118,13 @@ test('export tax-summary base price uses the live page formula result instead of
       }) },
       { dept: 'sales', payload_json: JSON.stringify({
         header: { fx_rmb_hkd: 0.85, fx_hkd_usd: 7.8 },
-        shipping: { markup_x: 1.2, scenarios: [] },
+        shipping: {
+          markup_x: 1.2,
+          divisor: 0.98,
+          freight_pct: 48,
+          lifting_pct: 52,
+          scenarios: [{ name: '盐田40柜', _freight_rate: 1 }],
+        },
         pricing_summary: {
           t1: { base_price: 999 },
           t2: {},
@@ -135,8 +143,14 @@ test('export tax-summary base price uses the live page formula result instead of
   });
   const basePriceCell = worksheet.getCell(titleRow + 2, 1).value;
 
-  assert.equal(basePriceCell.result, 3);
+  assert.equal(Number(basePriceCell.result.toFixed(4)), 4.2);
   assert.doesNotMatch(basePriceCell.formula, /SUM/);
+});
+
+test('page base price uses customer TOTAL HKD multiplied by divisor', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'workbench.js'), 'utf8');
+  assert.match(source, /customerBeforeDivisorHkd\s*=\s*customerTotalHkd\s*\*\s*num\(s\.divisor\)/);
+  assert.match(source, /base_price:\s*shippingCalc\.customerBeforeDivisorHkd/);
 });
 
 test('export tax-summary base price preserves a manual page override', async () => {

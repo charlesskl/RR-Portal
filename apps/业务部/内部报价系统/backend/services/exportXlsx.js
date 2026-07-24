@@ -460,6 +460,7 @@ async function buildWorkbook({ quote, sections }) {
     prototypeShareUsdCell: subRefs.prototypeShareUsdCell,
     testingShareUsdCell: subRefs.testingShareUsdCell,
     freightCells: subRefs.freightCells,
+    sharedRefs: subRefs,
   };
   row = renderShippingBlock(ws, row, sales.shipping, header, fxRH, shipOpts);
   // 把"盐田40柜"运费/吊柜费单元格带回 subRefs，供减税明细 表2 直接引用
@@ -1056,6 +1057,9 @@ function renderShippingBlock(ws, row, shipping, header, fxRH, refs = {}) {
   const diffPct = target > 0 ? (customerUSD - target) / target : 0;
   // 引用单元格地址：B 是 第1列(出厂价)，customerIdx >= 0 时 = B + customerIdx
   const custCol = (customerIdx >= 0) ? colLetter(customerIdx + 2) : 'B';
+  // 减税明细“货价”取默认报客场景 TOTAL HKD × 找数，还原到找数前。
+  refs.customerTotalHkdCell = `${custCol}${rHKD}`;
+  if (refs.sharedRefs) refs.sharedRefs.customerTotalHkdCell = refs.customerTotalHkdCell;
 
   ws.mergeCells(row, 1, row, cols + 1);
   ws.getCell(row, 1).value = {
@@ -1966,9 +1970,13 @@ function renderTaxSummary(ws, row, sales, extra = {}) {
   const _mk = markupValue == null || markupValue === '' ? 1.2 : num(markupValue);
   // 用逐格相加代替 SUM()：liveResult 只计算纯四则运算，确保 xlsx 缓存值与页面实时值一致。
   // A-L 中排除 C(电子)、K(车缝)，二者在出货价算价中独立处理。
-  const basePriceFormulaRef = sumR
-    ? `(${['A', 'B', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'L'].map(col => `${col}${sumR}`).join('+')})*${_mk}`
-    : null;
+  const divisorValue = sales.shipping?.divisor;
+  const _divisor = divisorValue == null || divisorValue === '' ? 0.98 : num(divisorValue);
+  const basePriceFormulaRef = subRefs.customerTotalHkdCell
+    ? `${subRefs.customerTotalHkdCell}*${_divisor}`
+    : (sumR
+      ? `(${['A', 'B', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'L'].map(col => `${col}${sumR}`).join('+')})*${_mk}`
+      : null);
   const linkMap = {
     // 货价基数排除电子(C)和车缝(K)，二者在出货价算价中独立处理。
     base_price: refLink('t1', 'base_price', basePriceFormulaRef),

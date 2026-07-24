@@ -15,31 +15,43 @@ const FIELD_KEYWORDS = {
   mold_no:        ['模号', '模具编号', '客人模具编号', '编号', 'MOLDNO'],
   part_name:      ['配件名称', 'PARTNAME', 'PART NAME'],
   part_name_cn:   ['中文名称', 'CHINESENAME', 'CHINESE NAME'],
-  name:           ['产品名称', '零件名称', '中文名', 'CHINESENAME', '加工内容', '修改内容', '模具名称', '名称', 'PARTNAME', 'DESCRIPTION'],
+  name:           ['产品名称', '零件名称', '项目内容', '中文名', 'CHINESENAME', '加工内容', '修改内容', '模具名称', '名称', 'PARTNAME', 'DESCRIPTION'],
   // 模具材料(内呵钢材) / 模具尺寸(模胚型号) 优先映射（避免被 "材质/材料" 短词抢占）
-  mold_material:  ['模具材料', '钢材材质', '内呵材质', '内呵', '钢号', '钢材', 'STEELMATERIAL', 'TOOLINSERT', 'INSERT'],
-  mold_size:      ['模具尺寸', '模胚尺寸', 'DIM', 'HXWXD', 'TOOLINFORMATION'],
-  material:       ['胶料类型', '塑胶原料', '塑胶', '产品材质', '产品材料', '材质', '材料', '原料', 'PLASTIC', "MAT'L", 'MATERIAL'],
+  mold_material:  ['模具材料', '内模物料', '钢材材质', '内呵材质', '内呵', '钢号', '钢材', 'STEELMATERIAL', 'TOOLINSERT', 'INSERT'],
+  mold_size:      ['模具尺寸', '工模尺寸', '模胚尺寸', 'DIM', 'HXWXD', 'TOOLINFORMATION'],
+  material:       ['胶料类型', '塑胶原料', '塑胶', '产品材质', '产品材料', '物料', '材质', '材料', '原料', 'PLASTIC', "MAT'L", 'MATERIAL'],
   color:          ['颜色', 'COLOR'],
   cavity:         ['出模数', '型腔', '模数', 'CAV'],
   usage:          ['产品用量', '用量', 'USAGE'],
   sets:           ['套数', 'UP', '数量/件', '数量'],
   product_size:   ['产品尺寸'],
-  machine:        ['机型(TON)', 'INJECTIONMACHINETYPE', '机型'],
+  machine:        ['机型(TON)', '机台大小', 'INJECTIONMACHINETYPE', '机型'],
   weight:         ['净重', '重量', '料重', '克重', '零件重量', '零件重', 'PARTWEIGHT'],
   cycle:          ['周期', 'CYCLETIME', 'CYCLE'],   // 注塑生产周期(秒)
-  target:         ['模具预计日啤数', '目标数', 'CYCLES/DAY', 'CYCLESDAY'],
+  target:         ['模具预计日啤数', '日产能', '啤工', '目标数', 'CYCLES/DAY', 'CYCLESDAY'],
   structure:      ['滑块', '斜顶', '模具结构', '加工内容', 'SLIDE', '行位'],
+  price_hkd:      ['模价HKD', 'HKD模价', '港币模价', '模价港币'],
   price_rmb:      ['含税模价', '金额RMB', '金额', '总价', '模价', '价格', '单价', 'MOLDCOST', 'TOTALAMOUNT', 'AMOUNT'],
   price_usd:      ['USD', '美元'],
   mold_type:      ['进胶方式', '模胚类型', '模胚大约', '模胚型号', '模胚', '水口', 'GATE'],
   note:           ['备注', '说明', 'REMARK'],
 };
 
-const HEADER_HINT_WORDS = ['序号', '编号', '名称', '材质', '出模数', '套数', '数量', '单价', '总价', '模价', '价格', '备注', '图片', '加工', '产品', '客户',
+const HEADER_HINT_WORDS = ['序号', '编号', '模号', '名称', '项目', '物料', '材质', '重量', '出模数', '套数', '数量', '单价', '总价', '模价', '价格', '备注', '图片', '加工', '产品', '客户',
   'MOLD', 'PART', 'CAV', 'COLOR', 'CYCLE', 'AMOUNT', 'REMARK', 'GATE', 'WEIGHT', 'MATERIAL', 'PICTURE', 'SLIDE'];
 
-function norm(s) { return String(s || '').replace(/\s+/g, '').replace(/[（）]/g, ''); }
+const TRADITIONAL_CHAR_MAP = {
+  '號': '号', '圖': '图', '項': '项', '內': '内', '產': '产', '膠': '胶',
+  '價': '价', '備': '备', '註': '注', '數': '数', '稱': '称', '質': '质',
+  '顏': '颜', '總': '总', '單': '单', '機': '机', '臺': '台', '長': '长',
+  '寬': '宽', '幣': '币', '鋼': '钢',
+};
+function norm(s) {
+  return String(s || '')
+    .replace(/[號圖項內產膠價備註數稱質顏總單機臺長寬幣鋼]/g, ch => TRADITIONAL_CHAR_MAP[ch] || ch)
+    .replace(/\s+/g, '')
+    .replace(/[（）()]/g, '');
+}
 function nu(s) { return norm(s).toUpperCase(); }  // 去空格+大写，中英不敏感
 
 function findHeaderRow(rows) {
@@ -67,12 +79,18 @@ function mapColumns(headerRow) {
       if (cols[field] >= 0) break;
     }
   }
+  // “件*套”常以一个合并表头覆盖相邻两列：左列为出模数，右列为套数。
+  const pieceSetIdx = headerRow.findIndex(v => /件[*×X\/]?套/i.test(nu(v)));
+  if (pieceSetIdx >= 0) {
+    if (cols.cavity < 0) cols.cavity = pieceSetIdx;
+    if (cols.sets < 0 && pieceSetIdx + 1 < headerRow.length) cols.sets = pieceSetIdx + 1;
+  }
   return cols;
 }
 
 function parseNumber(v) {
   if (v == null || v === '') return null;
-  const n = Number(String(v).replace(/[￥$,，\s元RMB]/gi, ''));
+  const n = Number(String(v).replace(/HKD?|RMB|[￥$,，\s元]/gi, ''));
   return Number.isFinite(n) ? n : null;
 }
 
@@ -222,10 +240,13 @@ function tryParseSheet(wb, sheetName) {
         weights: [],
         weight: null,
         cycle: null,
+        machine: '',
+        target: null,
         mold_material: '',
         mold_size: '',
         structures: [],
         price_rmb: null,
+        price_hkd: null,
         mold_type: '',
         notes: [],
         rowStart: ri,
@@ -248,10 +269,13 @@ function tryParseSheet(wb, sheetName) {
       if (current.weight == null) current.weight = wt;
     }
     const cyc = parseNumber(cell(r, 'cycle')); if (cyc != null && current.cycle == null) current.cycle = cyc;
+    const machine = cell(r, 'machine'); if (machine && !current.machine) current.machine = machine;
+    const target = parseNumber(cell(r, 'target')); if (target != null && current.target == null) current.target = target;
     const mm = cell(r, 'mold_material'); if (mm && !current.mold_material) current.mold_material = mm;
     const ms = cell(r, 'mold_size'); if (ms && !current.mold_size) current.mold_size = ms;
     const st = cell(r, 'structure'); if (st && st !== '无') current.structures.push(st);
     const pr = parseNumber(cell(r, 'price_rmb')); if (pr != null && current.price_rmb == null) current.price_rmb = pr;
+    const ph = parseNumber(cell(r, 'price_hkd')); if (ph != null && current.price_hkd == null) current.price_hkd = ph;
     const mt = cell(r, 'mold_type'); if (mt && !current.mold_type) current.mold_type = mt;
     const nt = cell(r, 'note'); if (nt) current.notes.push(nt);
   }
@@ -303,9 +327,13 @@ function tryParseSheet(wb, sheetName) {
       sets: g.sets ?? 1,
       weight_g: weightTotal,
       cycle_sec: g.cycle,
+      machine: g.machine,
+      machine_model: machineTonToModel(g.machine),
+      target: g.target,
       price_rmb: g.price_rmb,
+      price_hkd: g.price_hkd,
       images: [],
-      detail: { mold_material: g.mold_material, mold_size: g.mold_size },
+      detail: { mold_material: g.mold_material, mold_size: g.mold_size, machine: g.machine, machine_model: machineTonToModel(g.machine), target: g.target },
       note: [...new Set(g.notes)].join('；'),
       _rows: [g.rowStart, g.rowEnd],  // 0-based 原始行范围，供图片归属
     };

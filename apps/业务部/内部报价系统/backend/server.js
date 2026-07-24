@@ -1,5 +1,6 @@
 const path = require('path');
 const express = require('express');
+require('express-async-errors');
 const cookieSession = require('cookie-session');
 
 // 生产环境必须显式设置 SESSION_SECRET：否则会用默认密钥，任何人可伪造登录
@@ -8,7 +9,7 @@ if (process.env.NODE_ENV === 'production' && !process.env.SESSION_SECRET) {
   process.exit(1);
 }
 
-require('./db'); // ensure schema + seed
+const db = require('./db');
 
 const app = express();
 // 反代(Caddy/nginx)在前面终止 TLS，按 X-Forwarded-Proto 识别 https，secure cookie 才生效
@@ -55,7 +56,7 @@ app.use((err, req, res, next) => {
       error: isSpreadsheet ? 'Excel 文件过大，最大支持 50 MB' : '上传文件超过大小限制',
     });
   }
-  if (msg.includes('UNIQUE')) return res.status(409).json({ error: '数据已存在（唯一约束冲突）' });
+  if (err?.code === '23505' || msg.includes('UNIQUE')) return res.status(409).json({ error: '数据已存在（唯一约束冲突）' });
   res.status(500).json({ error: '服务器内部错误' });
 });
 
@@ -65,5 +66,11 @@ process.on('unhandledRejection', (reason) => {
 });
 
 const PORT = process.env.PORT || 3211;
-app.listen(PORT, () => console.log(`内部报价系统 listening on http://localhost:${PORT}`));
-
+async function start() {
+  await db.ready;
+  app.listen(PORT, () => console.log(`内部报价系统 listening on http://localhost:${PORT}`));
+}
+start().catch((error) => {
+  console.error('[fatal] 数据库初始化失败，服务未启动', error);
+  process.exit(1);
+});

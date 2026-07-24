@@ -41,7 +41,7 @@ function isRealImage(buf) {
 
 // POST /api/uploads/mold-image  multipart field "file" — 工程上传模具图（同时被喷油/装配复用）
 router.post('/mold-image', requireAuth, upload.single('file'), (req, res) => {
-  if (!['engineering', 'painting', 'assembly', 'molding', 'sales'].includes(req.user.dept) && req.user.role !== 'admin') {
+  if (!['engineering', 'painting', 'assembly', 'molding', 'slush', 'sales'].includes(req.user.dept) && req.user.role !== 'admin') {
     if (req.file) { try { fs.unlinkSync(req.file.path); } catch {} }
     return res.status(403).json({ error: '无权上传' });
   }
@@ -249,6 +249,42 @@ router.post('/painting-sheet', requireAuth, memUpload.single('file'), async (req
     res.json(result);
   } catch (e) {
     res.status(500).json({ error: '解析失败: ' + e.message });
+  }
+});
+
+// POST /api/uploads/slush-sheet  搪胶报价模板 xlsx → 返回 { items, count, sheets_used }
+const { parseWorkbook: parseSlushWorkbook } = require('../services/parseSlushSheet');
+router.post('/slush-sheet', requireAuth, memUpload.single('file'), async (req, res) => {
+  if (!['slush', 'sales', 'engineering'].includes(req.user.dept) && req.user.role !== 'admin') {
+    return res.status(403).json({ error: '仅 搪胶/业务/工程/超级管理员 可上传' });
+  }
+  if (!req.file) return res.status(400).json({ error: '缺少文件' });
+  if (!/\.(xls|xlsx)$/i.test(req.file.originalname)) return res.status(400).json({ error: '只支持 .xls/.xlsx' });
+  try {
+    const result = await parseSlushWorkbook(req.file.buffer);
+    if (result.error) return res.status(422).json(result);
+
+    if (/\.xlsx$/i.test(req.file.originalname)) {
+      try {
+        const moldImgDir = path.join(UPLOAD_ROOT, 'mold');
+        const anchored = await extractImagesByRow(req.file.buffer, moldImgDir);
+        // 标准模板每个工作簿只有一张有效核价卡；将卡片内图片归入该产品。
+        if (result.items.length === 1) {
+          result.items[0].images = anchored.map(img => 'uploads/mold/' + img.file);
+        }
+        result.images_extracted = anchored.length;
+        if (anchored.length && result.items.length > 1) {
+          result.images_hint = '工作簿含多张有效搪胶核价卡，图片无法可靠区分工作表，请应用后手工核对图片。';
+        }
+      } catch (error) {
+        result.images_extract_error = error.message;
+      }
+    } else {
+      result.images_hint = '当前是 .xls 旧二进制格式，图片无法自动抽取。请另存为 .xlsx 后重新上传。';
+    }
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: '解析失败: ' + error.message });
   }
 });
 

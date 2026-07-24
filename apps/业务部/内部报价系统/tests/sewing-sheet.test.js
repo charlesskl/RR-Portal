@@ -31,3 +31,20 @@ test('sewing import finds detail sheet and reads merged product groups under one
   assert.deepEqual(result.groups.map(group => group.name), ['产品甲', '产品乙']);
   assert.deepEqual(result.groups.map(group => group.items[0].material), ['面料甲', '面料乙']);
 });
+
+test('sewing import splits products by 名称 column when the sheet has only one header', async () => {
+  const workbook = new ExcelJS.Workbook();
+  const detail = workbook.addWorksheet('车缝报价');
+  detail.addRow(['名称', '物料名称', '裁片部位', '用量', '单价', '价钱', '备注']);
+  detail.addRow(['角色1', '', '', '', '', '', '']);
+  detail.addRow(['', '面料甲', '前身', 0.5, 10, 5, '']);
+  detail.addRow(['', '合计', '', '', '', 5, '']);
+  detail.addRow(['角色2', '', '', '', '', '', '']);
+  detail.addRow(['', '面料乙', '后身', 0.25, 12, 3, '']);
+
+  const result = await parseWorkbook(await workbook.xlsx.writeBuffer());
+
+  assert.equal(result.error, undefined);
+  assert.deepEqual(result.groups.map(group => group.name), ['角色1', '角色2']);
+  assert.deepEqual(result.groups.map(group => group.items[0].material), ['面料甲', '面料乙']);
+});

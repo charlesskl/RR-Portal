@@ -48,6 +48,8 @@ function buildHeaderIndex(headerCells) {
     else if (s.includes('码点')) setOnce('markup', i);
     else if (s.includes('价钱')) setOnce('price', i);
     else if (s.includes('备注')) setOnce('note', i);
+    // 区别于“物料名称”：部分表格用“名称”列标记角色1/角色2等产品分组。
+    else if (s.includes('名称')) setOnce('product_name', i);
   });
   return idx;
 }
@@ -116,6 +118,23 @@ async function parseWorkbook(buffer) {
 
     const matName = toStr(r[headerIdx.material]);
     const part = toStr(r[headerIdx.part]);
+    const prodName = headerIdx.product_name != null ? toStr(r[headerIdx.product_name]) : '';
+
+    // 整张表只有一个表头时，“名称”列中的角色名负责切换产品分组。
+    // 仅在没有物料、用量和价钱时识别，避免误把正常物料行当成标题。
+    if (prodName && !matName) {
+      const productPrice = toNum(r[headerIdx.price]);
+      const productQty = toNum(r[headerIdx.qty]);
+      if (productPrice == null && productQty == null) {
+        if (cur && cur.items.length === 0) cur.name = prodName;
+        else {
+          cur = { name: prodName, items: [], labor_amount: 0, sub_parts: [] };
+          groups.push(cur);
+        }
+        afterTotal = false;
+        continue;
+      }
+    }
 
     // 合并产品标题在 ExcelJS 中可能重复到整行多列，先按唯一文本识别，避免被数字尺寸误当成用量/价钱。
     const uniqueTexts = [...new Set(joined)];

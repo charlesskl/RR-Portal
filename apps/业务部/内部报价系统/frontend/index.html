@@ -57,7 +57,11 @@
               <input id="q-no" placeholder="货号" />
               <input id="q-product" placeholder="产品名" />
               <input id="q-version" placeholder="版本(可选)" />
-              <input id="q-customer" placeholder="客户" />
+              <div id="q-customer-combo" class="combo">
+                <input id="q-customer" placeholder="客户" autocomplete="off" role="combobox" aria-expanded="false" aria-autocomplete="list" aria-controls="q-customer-list" />
+                <button type="button" id="q-customer-toggle" class="combo-caret" tabindex="-1" aria-label="展开客户列表">▾</button>
+                <div id="q-customer-list" class="combo-list hidden" role="listbox"></div>
+              </div>
               <input id="q-qty" placeholder="数量" type="number" />
               <button id="btn-create">＋ 新建报价单</button>
             </div>

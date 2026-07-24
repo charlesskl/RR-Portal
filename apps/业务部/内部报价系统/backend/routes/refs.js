@@ -8,10 +8,10 @@ router.use(requireAuth);
 const ALLOWED = new Set(['material_prices', 'machine_prices']);
 
 // GET /api/refs/:key — 拉全局参考表
-router.get('/:key', (req, res) => {
+router.get('/:key', async (req, res) => {
   const key = req.params.key;
   if (!ALLOWED.has(key)) return res.status(400).json({ error: 'invalid key' });
-  const row = db.prepare('SELECT data_json, updated_at, updated_by FROM factory_ref_tables WHERE factory_code = ? AND key = ?')
+  const row = await db.prepare('SELECT data_json, updated_at, updated_by FROM factory_ref_tables WHERE factory_code = ? AND key = ?')
     .get(req.user.active_factory_code, key);
   if (!row) return res.json({ data: [], updated_at: null, updated_by: null });
   let data = [];
@@ -20,14 +20,14 @@ router.get('/:key', (req, res) => {
 });
 
 // PUT /api/refs/:key — 覆盖全局参考表（业务/工程可改）
-router.put('/:key', (req, res) => {
+router.put('/:key', async (req, res) => {
   const key = req.params.key;
   if (!ALLOWED.has(key)) return res.status(400).json({ error: 'invalid key' });
   if (!['sales', 'engineering', 'molding'].includes(req.user.dept)) {
     return res.status(403).json({ error: '没有权限修改参考表' });
   }
   const data = Array.isArray(req.body && req.body.data) ? req.body.data : [];
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO factory_ref_tables (factory_code, key, data_json, updated_at, updated_by) VALUES (?, ?, ?, datetime('now'), ?)
     ON CONFLICT(factory_code, key) DO UPDATE SET data_json = excluded.data_json, updated_at = excluded.updated_at, updated_by = excluded.updated_by
   `).run(req.user.active_factory_code, key, JSON.stringify(data), `[${req.user.dept}] ${req.user.name}`);

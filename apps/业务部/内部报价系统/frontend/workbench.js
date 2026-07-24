@@ -40,9 +40,53 @@ async function putSection(sec, payload, submit) {
 }
 
 // ==================== 通用可编辑表格 ====================
-// columns: [{key, label, type?: 'text'|'number'|'textarea', readonly?: bool|fn, calc?: row => number, width?: string}]
+// columns: [{key, label, type?: 'text'|'number'|'textarea'|'fraction', readonly?: bool|fn,
+//   calc?: row => number, headerInput?: {get,set,suffix}, width?: string}]
 // rows:    数组（直接 mutate 本数组）
 // onChange: 数据变更时回调
+function isSewLaborRow(row) {
+  return /人工/.test((row && (row.fabric || row.part || row.name)) || '');
+}
+function sewMaterialOnlyAmount(group) {
+  return sum((group && group.items) || [], row => isSewLaborRow(row)
+    ? 0
+    : num(row.usage) * num(row.mat_price) * (num(row.markup) || 1));
+}
+function sewWeightedMaterialRmb(sewing) {
+  const groups = (sewing && sewing.sewing_groups) || [];
+  const groupQty = group => {
+    const value = group && group.product_qty;
+    if (value == null || value === '') return 1;
+    const parsed = Number(value);
+    return Number.isNaN(parsed) || parsed < 0 ? 1 : parsed;
+  };
+  const override = sewing && sewing.sewing_total_qty;
+  const totalQty = override != null && override !== '' && Number(override) > 0
+    ? Number(override)
+    : (sum(groups, groupQty) || 1);
+  return sum(groups, group => sewMaterialOnlyAmount(group) * groupQty(group)) / totalQty;
+}
+
+function parseFractionInput(value) {
+  const text = String(value ?? '').trim();
+  if (text === '') return null;
+  let match = /^([+-]?\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)$/.exec(text);
+  if (match) {
+    const whole = Number(match[1]);
+    const numerator = Number(match[2]);
+    const denominator = Number(match[3]);
+    if (!denominator) return null;
+    return whole < 0 ? whole - numerator / denominator : whole + numerator / denominator;
+  }
+  match = /^([+-]?\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)$/.exec(text);
+  if (match) {
+    const denominator = Number(match[2]);
+    return denominator ? Number(match[1]) / denominator : null;
+  }
+  const parsed = Number(text);
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
 function renderTable(container, columns, rows, opts = {}) {
   const { readonly = false, onChange = () => {}, footer = null } = opts;
   container.innerHTML = '';
@@ -51,11 +95,23 @@ function renderTable(container, columns, rows, opts = {}) {
   table.className = 'wb-table';
   const thead = document.createElement('thead');
   const tr = document.createElement('tr');
+  const headerRefreshers = [];
   tr.innerHTML = '<th style="width:36px">#</th>' +
-    columns.map(c => `<th${c.width ? ` style="width:${c.width}"` : ''}>${c.label}</th>`).join('') +
+    columns.map(c => `<th${c.width ? ` style="width:${c.width}"` : ''}>${c.headerInput
+      ? `${c.label} <input type="number" step="any" class="th-hinput" data-k="${c.key}" value="${c.headerInput.get() ?? ''}" style="width:56px"${readonly ? ' disabled' : ''}>${c.headerInput.suffix ?? ''}`
+      : c.label}</th>`).join('') +
     (readonly ? '' : '<th style="width:36px"></th>');
   thead.appendChild(tr);
   table.appendChild(thead);
+  tr.querySelectorAll('.th-hinput').forEach(input => {
+    const column = columns.find(item => item.key === input.dataset.k);
+    if (!column || !column.headerInput) return;
+    input.oninput = () => {
+      column.headerInput.set(input.value === '' ? null : Number(input.value));
+      headerRefreshers.forEach(refresh => refresh());
+      onChange();
+    };
+  });
 
   const tbody = document.createElement('tbody');
   function rebuild() {
@@ -65,15 +121,24 @@ function renderTable(container, columns, rows, opts = {}) {
       tr.innerHTML = `<td>${idx + 1}</td>`;
       const calcCells = []; // [{ td, fn }] — 行内所有计算列，用于实时刷新
       const refreshCalcs = () => calcCells.forEach(({ td, fn }) => { td.textContent = formatNum(fn(row)); });
+      headerRefreshers.push(refreshCalcs);
       columns.forEach(c => {
         const td = document.createElement('td');
+        if (c.renderCell) {
+          c.renderCell(td, row, { readonly, onChange, rebuild });
+          tr.appendChild(td);
+          return;
+        }
         const ro = typeof c.readonly === 'function' ? c.readonly(row) : (c.readonly || readonly);
         let val = row[c.key];
+        if (c.type === 'fraction' && row[c.key + '_raw'] != null && row[c.key + '_raw'] !== '') {
+          val = row[c.key + '_raw'];
+        }
         if (c.calc) val = c.calc(row);
         if (val === undefined || val === null) val = '';
         if (ro) {
           td.className = 'ro';
-          td.textContent = formatNum(val);
+          td.textContent = c.type === 'fraction' && typeof val === 'string' ? val : formatNum(val);
           if (c.calc) calcCells.push({ td, fn: c.calc });
         } else if (c.type === 'textarea') {
           const ta = document.createElement('textarea');
@@ -121,8 +186,18 @@ function renderTable(container, columns, rows, opts = {}) {
           if (c.type === 'number') inp.step = 'any';
           if (c.width) inp.style.minWidth = c.width;  // 让输入框按列宽撑开（覆盖全局 3.4em，避免长数字被截断）
           inp.value = val;
+          if (c.type === 'fraction') {
+            inp.title = '可填分数：1/2、3/4、1 1/2；也可直接填小数 0.5';
+            inp.placeholder = '如 1/2';
+          }
           inp.oninput = () => {
-            row[c.key] = c.type === 'number' ? (inp.value === '' ? null : Number(inp.value)) : inp.value;
+            if (c.type === 'fraction') {
+              row[c.key] = parseFractionInput(inp.value);
+              row[c.key + '_raw'] = inp.value;
+              inp.style.color = inp.value.trim() !== '' && row[c.key] == null ? '#b91c1c' : '';
+            } else {
+              row[c.key] = c.type === 'number' ? (inp.value === '' ? null : Number(inp.value)) : inp.value;
+            }
             refreshCalcs();
             onChange();
           };
@@ -256,7 +331,7 @@ function syncMoldFromParts(mold) {
   mold.images = [...new Set(parts.flatMap(p => p.images || []).filter(Boolean))];
 }
 
-function renderMolds(container, molds, onChange, canEdit, fxRmbHkd) {
+function renderMolds(container, molds, onChange, canEdit, fxRmbHkd, fxHkdUsd) {
   container.innerHTML = '';
   const table = document.createElement('table'); table.className = 'wb-table mold-table';
   table.innerHTML = `<thead><tr>
@@ -274,6 +349,7 @@ function renderMolds(container, molds, onChange, canEdit, fxRmbHkd) {
     <th style="width:110px">模具尺寸</th>
     <th style="width:240px">图  片</th>
     <th style="width:120px">模具价格 RMB</th>
+    <th style="width:120px">模具价格 USD</th>
     <th style="width:120px">模价 HKD</th>
     <th>备  注</th>
     ${canEdit ? '<th style="width:40px"></th>' : ''}
@@ -291,10 +367,12 @@ function renderMolds(container, molds, onChange, canEdit, fxRmbHkd) {
     ['mold_size', 'text', 'detail'],
     null, // 图片列
     ['price_rmb', 'number'],
-    ['price_hkd', 'calc_hkd'],  // 模价 HKD = 模价RMB ÷ 汇率（只读）
+    ['price_usd', 'number'],
+    ['price_hkd', 'calc_hkd'],  // 模价 HKD = RMB÷0.85 + USD×7.8（只读展示）
     ['note', 'textarea'],
   ];
   const fxv = num(fxRmbHkd) || 0.85;  // RMB→HKD 汇率
+  const usdv = num(fxHkdUsd) || 7.8;  // USD→HKD 汇率
 
   // 数据迁移：备注内容提取为模胚类型（仅当模胚类型为空时，避免覆盖导入的模胚型号如 CI 3040）
   molds.forEach(m => {
@@ -336,7 +414,7 @@ function renderMolds(container, molds, onChange, canEdit, fxRmbHkd) {
               const input = document.createElement('textarea'); input.rows = 2; input.value = part.name || ''; input.style.flex = '1';
               input.oninput = () => { part.name = input.value; syncMoldFromParts(m); onChange(); };
               const del = document.createElement('button'); del.className = 'mini danger'; del.textContent = '×';
-              del.onclick = () => { m.parts.splice(partIndex, 1); syncMoldFromParts(m); renderMolds(container, molds, onChange, canEdit, fxRmbHkd); onChange(); };
+              del.onclick = () => { m.parts.splice(partIndex, 1); syncMoldFromParts(m); renderMolds(container, molds, onChange, canEdit, fxRmbHkd, fxHkdUsd); onChange(); };
               nameRow.append(input, del);
             } else {
               nameRow.className = 'ro'; nameRow.style.whiteSpace = 'pre-wrap'; nameRow.textContent = part.name || '';
@@ -345,7 +423,7 @@ function renderMolds(container, molds, onChange, canEdit, fxRmbHkd) {
           });
           if (canEdit) {
             const addPart = document.createElement('button'); addPart.className = 'mini'; addPart.textContent = '+ 配件';
-            addPart.onclick = () => { m.parts.push({ name: '', cavity: '', weight_g: null, images: [] }); renderMolds(container, molds, onChange, canEdit, fxRmbHkd); onChange(); };
+            addPart.onclick = () => { m.parts.push({ name: '', cavity: '', weight_g: null, images: [] }); renderMolds(container, molds, onChange, canEdit, fxRmbHkd, fxHkdUsd); onChange(); };
             td.appendChild(addPart);
           }
         } else if (hasPartRows && k === 'cavity') {
@@ -380,7 +458,7 @@ function renderMolds(container, molds, onChange, canEdit, fxRmbHkd) {
             td.appendChild(weightRow);
           });
         } else if (type === 'calc_hkd') {
-          td.className = 'ro'; td.textContent = formatNum(num(m.price_rmb) / fxv);
+          td.className = 'ro'; td.textContent = formatNum(num(m.price_rmb) / fxv + num(m.price_usd) * usdv);
         } else if (!canEdit) {
           td.className = 'ro'; td.style.whiteSpace = 'pre-wrap'; td.textContent = formatNum(get() ?? '');
         } else if (type === 'textarea') {
@@ -415,7 +493,7 @@ function renderMolds(container, molds, onChange, canEdit, fxRmbHkd) {
     if (canEdit) {
       const td = document.createElement('td');
       const b = document.createElement('button'); b.textContent = '×'; b.className = 'mini danger';
-      b.onclick = () => { molds.splice(idx, 1); renderMolds(container, molds, onChange, canEdit); onChange(); };
+      b.onclick = () => { molds.splice(idx, 1); renderMolds(container, molds, onChange, canEdit, fxRmbHkd, fxHkdUsd); onChange(); };
       td.appendChild(b); tr.appendChild(td);
     }
     tbody.appendChild(tr);
@@ -424,11 +502,12 @@ function renderMolds(container, molds, onChange, canEdit, fxRmbHkd) {
 
   // 小计：RMB / HKD 同行，分别对齐 价格RMB / 价格HKD 列
   const rmbTotal = sum(molds, m => num(m.price_rmb));
-  const hkdTotal = rmbTotal / fxv;
+  const usdTotal = sum(molds, m => num(m.price_usd));
+  const hkdTotal = rmbTotal / fxv + usdTotal * usdv;
   const extra = canEdit ? '<td></td>' : '';
   const trSub = document.createElement('tr'); trSub.className = 'hi';
-  trSub.innerHTML = `<td colspan="13" style="text-align:right">小计 <span class="muted" style="font-weight:normal;font-size:12px">(汇率 ${fxv})</span></td>
-    <td>${formatNum(rmbTotal)}</td><td>${formatNum(hkdTotal)}</td><td></td>${extra}`;
+  trSub.innerHTML = `<td colspan="13" style="text-align:right">小计 <span class="muted" style="font-weight:normal;font-size:12px">(汇率 RMB ${fxv} · USD ${usdv})</span></td>
+    <td>${formatNum(rmbTotal)}</td><td>${formatNum(usdTotal)}</td><td>${formatNum(hkdTotal)}</td><td></td>${extra}`;
   tbody.appendChild(trSub);
 
   container.appendChild(table);
@@ -436,7 +515,7 @@ function renderMolds(container, molds, onChange, canEdit, fxRmbHkd) {
     const add = document.createElement('button');
     add.textContent = '+ 新增模具行'; add.className = 'mini';
     add.style.marginTop = '8px';
-    add.onclick = () => { molds.push({ images: [] }); renderMolds(container, molds, onChange, canEdit); onChange(); };
+    add.onclick = () => { molds.push({ images: [] }); renderMolds(container, molds, onChange, canEdit, fxRmbHkd, fxHkdUsd); onChange(); };
     container.appendChild(add);
   }
 }
@@ -547,7 +626,8 @@ function elecImportedSummaryRows(doc, ex, fx) {
   return { icPart, ic: mk(otp), pacb: mk(pacb) };
 }
 
-function renderHierElectronics(container, rows, onChange, canEdit, fxRmbHkd) {
+function renderHierElectronics(container, rows, onChange, canEdit, fxRmbHkd, pctHost) {
+  const indoRefreshers = [];
   const fx = num(fxRmbHkd) || 0.85;
   container.innerHTML = '';
   const table = document.createElement('table'); table.className = 'wb-table hier-table';
@@ -561,10 +641,17 @@ function renderHierElectronics(container, rows, onChange, canEdit, fxRmbHkd) {
     <th style="width:90px">单价 HKD</th>
     <th style="width:90px">金额 HKD</th>
     <th style="width:80px">税点 %</th>
+    <th style="width:150px">印尼运费 <input type="number" step="any" id="elec-indo-pct" value="${(pctHost && pctHost.indo_pct) ?? ''}" style="width:56px" ${canEdit ? '' : 'disabled'}>%</th>
     <th>备注</th>
     ${canEdit ? '<th style="width:36px"></th>' : ''}
   </tr></thead><tbody></tbody>`;
   const tbody = table.querySelector('tbody');
+  const indoPctInput = table.querySelector('#elec-indo-pct');
+  if (indoPctInput && canEdit && pctHost) indoPctInput.oninput = () => {
+    pctHost.indo_pct = indoPctInput.value === '' ? null : Number(indoPctInput.value);
+    indoRefreshers.forEach(refresh => refresh());
+    onChange();
+  };
   if (!Array.isArray(rows)) rows = [];
   ensureElecRmbPrices(rows, fx);
 
@@ -578,7 +665,7 @@ function renderHierElectronics(container, rows, onChange, canEdit, fxRmbHkd) {
     if (canEdit || hasChildren) {
       const btn = document.createElement('button'); btn.className = 'mini'; btn.textContent = row._open ? '▼' : '▶';
       btn.title = '展开/收起子明细'; btn.style.padding = '2px 6px';
-      btn.onclick = () => { row._open = !row._open; renderHierElectronics(container, rows, onChange, canEdit, fxRmbHkd); };
+      btn.onclick = () => { row._open = !row._open; renderHierElectronics(container, rows, onChange, canEdit, fxRmbHkd, pctHost); };
       tdExp.appendChild(btn);
     }
     tr.appendChild(tdExp);
@@ -602,11 +689,13 @@ function renderHierElectronics(container, rows, onChange, canEdit, fxRmbHkd) {
     const tdRmb = document.createElement('td');
     const tdHkd = document.createElement('td'); tdHkd.className = 'ro';
     const tdAmt = document.createElement('td'); tdAmt.className = 'ro';
+    let refreshIndo = () => {};
     const refreshAmt = () => {
       const amt = elecRowAmount(row, fxRmbHkd);
       const upHkd = num(row.qty) > 0 ? amt / num(row.qty) : freeUnitHkd(row, fxRmbHkd);
       tdHkd.textContent = formatNum(upHkd);
       tdAmt.textContent = formatNum(amt);
+      refreshIndo();
     };
     if (canEdit && !hasChildren) {
       const inpQ = document.createElement('input'); inpQ.type = 'number'; inpQ.step = 'any'; inpQ.value = row.qty ?? '';
@@ -652,11 +741,19 @@ function renderHierElectronics(container, rows, onChange, canEdit, fxRmbHkd) {
           row.unit_price = +(rmb / fx).toFixed(6);
         }
         onChange();
-        renderHierElectronics(container, rows, onChange, canEdit, fxRmbHkd);
+        renderHierElectronics(container, rows, onChange, canEdit, fxRmbHkd, pctHost);
       };
       tdTax.appendChild(sel);
     } else { tdTax.className = 'ro'; tdTax.textContent = taxVal; }
     tr.appendChild(tdTax);
+
+    const tdIndo = document.createElement('td'); tdIndo.className = 'ro';
+    refreshIndo = () => {
+      tdIndo.textContent = formatNum(elecRowAmount(row, fxRmbHkd) * num(pctHost && pctHost.indo_pct) / 100);
+    };
+    refreshIndo();
+    indoRefreshers.push(refreshIndo);
+    tr.appendChild(tdIndo);
 
     // 备注（自由文本）
     const tdNote = document.createElement('td');
@@ -671,7 +768,7 @@ function renderHierElectronics(container, rows, onChange, canEdit, fxRmbHkd) {
     if (canEdit) {
       const td = document.createElement('td');
       const b = document.createElement('button'); b.textContent = '×'; b.className = 'mini danger';
-      b.onclick = () => { rows.splice(idx, 1); renderHierElectronics(container, rows, onChange, canEdit, fxRmbHkd); onChange(); };
+      b.onclick = () => { rows.splice(idx, 1); renderHierElectronics(container, rows, onChange, canEdit, fxRmbHkd, pctHost); onChange(); };
       td.appendChild(b); tr.appendChild(td);
     }
     tbody.appendChild(tr);
@@ -679,7 +776,7 @@ function renderHierElectronics(container, rows, onChange, canEdit, fxRmbHkd) {
     // 展开后渲染子项
     if (row._open) {
       const trChild = document.createElement('tr'); trChild.className = 'hier-child-row';
-      const td = document.createElement('td'); td.colSpan = canEdit ? 11 : 10;
+      const td = document.createElement('td'); td.colSpan = canEdit ? 12 : 11;
       td.appendChild(renderHierChildren(row.children, () => { refreshAmt(); onChange(); }, canEdit, fxRmbHkd));
       trChild.appendChild(td);
       tbody.appendChild(trChild);
@@ -690,7 +787,7 @@ function renderHierElectronics(container, rows, onChange, canEdit, fxRmbHkd) {
   if (canEdit) {
     const btn = document.createElement('button'); btn.className = 'mini'; btn.textContent = '+ 新增电子件';
     btn.style.marginTop = '8px';
-    btn.onclick = () => { rows.push({ name: '', qty: 1, unit_price_rmb: 0, unit_price: 0, children: [] }); renderHierElectronics(container, rows, onChange, canEdit, fxRmbHkd); onChange(); };
+    btn.onclick = () => { rows.push({ name: '', qty: 1, unit_price_rmb: 0, unit_price: 0, children: [] }); renderHierElectronics(container, rows, onChange, canEdit, fxRmbHkd, pctHost); onChange(); };
     container.appendChild(btn);
   }
 }
@@ -848,7 +945,7 @@ function renderElecExtra(host, payload, onChange, canEdit, fxRmbHkd) {
 }
 
 // 通用：小计/损耗/合计 紧凑竖排（返回 refresh fn）
-function renderLossSummary(host, title, getRawSum, getLossPct, fxRmbHkd, currency) {
+function renderLossSummary(host, title, getRawSum, getLossPct, fxRmbHkd, currency, indo) {
   const fx = num(fxRmbHkd) || 0.85;
   const isHkd = currency === 'HKD';
   const card = document.createElement('div'); card.className = 'loss-summary';
@@ -865,7 +962,19 @@ function renderLossSummary(host, title, getRawSum, getLossPct, fxRmbHkd, currenc
       ${title ? `<div class="ls-title">${title}</div>` : ''}
       <div class="ls-row"><span class="ls-label">小计</span><span class="ls-val">${formatNum(raw)}</span></div>
       ${loss ? `<div class="ls-row"><span class="ls-label">损耗</span><span class="ls-val">${loss.toFixed(2)}%</span></div>` : ''}
-      ${primary}`;
+      ${primary}
+      ${indo ? `<div class="ls-row"><span class="ls-label">${indo.label || '印尼运费'}
+          <input class="ls-indo-pct" type="number" step="any" value="${indo.host[indo.pctKey] ?? ''}" style="width:52px" ${indo.readonly ? 'disabled' : ''}>%</span>
+        <span class="ls-val ls-indo-val">${formatNum(indo.base() * num(indo.host[indo.pctKey]) / 100)}</span></div>` : ''}`;
+    if (indo && !indo.readonly) {
+      const input = card.querySelector('.ls-indo-pct');
+      if (input) input.oninput = () => {
+        indo.host[indo.pctKey] = input.value === '' ? null : Number(input.value);
+        const value = card.querySelector('.ls-indo-val');
+        if (value) value.textContent = formatNum(indo.base() * num(indo.host[indo.pctKey]) / 100);
+        if (indo.onChange) indo.onChange();
+      };
+    }
   }
   paint();
   return paint;
@@ -883,7 +992,7 @@ function renderMoldCosts(host, mc, onChange, canEdit) {
   function paint() {
     const sumRmb = sum(mc.items, r => num(r.price_rmb));
     const fx = num(mc.fx_rmb_usd) || 7.75;
-    const sumUsd = sumRmb / fx;
+    const sumUsd = sumRmb / 0.85 / fx;
     const customerUsd = num(mc.customer_subsidy_usd);
     const netUsd = sumUsd - customerUsd;
     const qty = Math.max(num(mc.amortization_qty), 1);
@@ -895,8 +1004,8 @@ function renderMoldCosts(host, mc, onChange, canEdit) {
     const perPcsUsd = netUsd / qty;
     const prototypePerPcsUsd = prototypeFeeUsd / prototypeQty;
     const testingPerPcsUsd = testingFeeUsd / testingQty;
-    const prototypePerPcsRmb = prototypePerPcsUsd * fx;
-    const testingPerPcsRmb = testingPerPcsUsd * fx;
+    const prototypePerPcsRmb = prototypePerPcsUsd * fx * 0.85;
+    const testingPerPcsRmb = testingPerPcsUsd * fx * 0.85;
 
     host.innerHTML = `
       <table class="wb-table" style="max-width:680px">
@@ -911,7 +1020,7 @@ function renderMoldCosts(host, mc, onChange, canEdit) {
             <tr>
               <td>${canEdit ? `<input class="mc-name" data-i="${i}" value="${r.name || ''}">` : (r.name || '')}</td>
               <td>${canEdit ? `<input class="mc-rmb" data-i="${i}" type="number" step="any" value="${r.price_rmb ?? 0}">` : formatNum(num(r.price_rmb))}</td>
-              <td class="ro">${formatNum(num(r.price_rmb) / fx)}</td>
+              <td class="ro">${formatNum(num(r.price_rmb) / 0.85 / fx)}</td>
               ${canEdit ? `<td><button class="mini danger mc-del" data-i="${i}">×</button></td>` : ''}
             </tr>`).join('')}
           <tr class="hi"><td>模具总计</td><td>${formatNum(sumRmb)}</td><td>${formatNum(sumUsd)}</td>${canEdit ? '<td></td>' : ''}</tr>
@@ -923,7 +1032,7 @@ function renderMoldCosts(host, mc, onChange, canEdit) {
       </table>
       ${canEdit ? `<div style="margin-top:8px;display:flex;gap:10px;align-items:center">
         <button class="mini" id="mc-add">+ 增加费用行</button>
-        <label style="font-size:13px;color:#6b7280">RMB→USD 汇率 <input id="mc-fx" type="number" step="any" value="${mc.fx_rmb_usd}" style="width:80px"></label>
+        <label style="font-size:13px;color:#6b7280">模具费用 HKD→USD 汇率 <input id="mc-fx" type="number" step="any" value="${mc.fx_rmb_usd}" style="width:80px" title="模价 USD = RMB ÷ 0.85 ÷ 本汇率；手板/测试费 USD 折 RMB = USD × 本汇率 × 0.85"></label>
       </div>` : ''}
     `;
 
@@ -986,7 +1095,7 @@ function renderSummaryPane(host, sections, quote, me) {
     const mat = num(r.weight_g)*num(r.material_price_lb)/454;
     return (mat + num(r.blow_labor) + num(r.flash)) * (num(r.profit_x) || 1);
   });
-  const ppTotal = sum(pnt.painting_items || [], paintingRowAmount);  // 不计损耗（含八工序）
+  const ppTotal = sum(pnt.painting_items || [], paintingRowAmount);  // 不计损耗（含九工序）
   const slushTotal = sum(slush.slush_items || [], r => num(r.unit_price_hkd)*num(r.qty));
   const asmLaborTotal = sum(asm.assembly_labor || [], r => num(r.unit_price)*num(r.qty));
   const pkLaborTotal = sum(asm.packaging_labor || [], r => num(r.unit_price)*num(r.qty));
@@ -1014,8 +1123,17 @@ function renderSummaryPane(host, sections, quote, me) {
 
   // 九、合计 数据
   const pricing = sales.pricing || {};
-  // 运输费 = 减税明细 顶部手填的 印尼运费 (HKD) — 注意 toHkd 会再除一次汇率，所以这里存成 RMB 等价
-  const shipping = num(sales.pricing_summary?.indo_freight) * fxRH;
+  // 各表按自己的点数自动汇总印尼运费（HKD）；车缝仅材料，喷油以总价30%为基数。
+  const indoFreightHkd =
+      (hwRaw + auxRaw + pkmatRaw) * num(eng.indo_pct) / 100
+    + elecRaw * num(electronic.indo_pct) / 100
+    + (injTotal + blowTotal) * num(mold.indo_pct) / 100
+    + slushTotal * num(slush.indo_pct) / 100
+    + (sewWeightedMaterialRmb(sewing) / fxRH) * num(sewing.indo_pct) / 100
+    + ppTotal * 0.3 * num(pnt.indo_pct) / 100;
+  sales.pricing_summary = sales.pricing_summary || {};
+  sales.pricing_summary.indo_freight = +indoFreightHkd.toFixed(4);
+  const shipping = indoFreightHkd * fxRH;
   const hwTotal = hwRaw;
   const electronicTotal = elecRaw;
   // 注塑是 HKD，先换算 RMB（其他都是 RMB）
@@ -1027,14 +1145,25 @@ function renderSummaryPane(host, sections, quote, me) {
   const moldFx = num(mc.fx_rmb_usd) || 7.75;
   const prototypeShareUsd = num(mc.prototype_fee_usd ?? mc.prototype_fee_rmb) / Math.max(num(mc.prototype_amortization_qty) || 50000, 1);
   const testingShareUsd = num(mc.testing_fee_usd ?? mc.testing_fee_rmb) / Math.max(num(mc.testing_amortization_qty) || 2000, 1);
-  const moldShare = moldCostSumRmb / moldAmortQty + (prototypeShareUsd + testingShareUsd) * moldFx;
+  const moldShare = moldCostSumRmb / moldAmortQty + (prototypeShareUsd + testingShareUsd) * moldFx * 0.85;
   // 模费按 RMB 计算；手板费和测试费直接按 USD 总额分摊。
-  const moldFeeShareUsd = (moldCostSumRmb / moldFx - num(mc.customer_subsidy_usd)) / moldAmortQty;
+  const moldFeeShareUsd = (moldCostSumRmb / 0.85 / moldFx - num(mc.customer_subsidy_usd)) / moldAmortQty;
   const slushTotalRmb = slushTotal * fxRH;
   const sewingGroupAmount = (g) => sum(g.items || [], r => num(r.usage) * num(r.mat_price) * (num(r.markup) || 1)) + sewLaborToAdd(g);
-  const sewingTotalRmb = sum(sewing.sewing_groups || [], sewingGroupAmount);  // 不再乘损耗，与 UI 配套合计 一致
-  // 按 category 分车衣/车发
-  const sewingHairRmb = sum((sewing.sewing_groups || []).filter(g => g.category === '车发'), sewingGroupAmount);
+  const sewGroupQty = group => {
+    const value = group.product_qty;
+    if (value == null || value === '') return 1;
+    const parsed = Number(value);
+    return Number.isNaN(parsed) || parsed < 0 ? 1 : parsed;
+  };
+  const sewAutoQty = sum(sewing.sewing_groups || [], sewGroupQty);
+  const sewQtyOverride = sewing.sewing_total_qty;
+  const sewTotalQty = sewQtyOverride != null && sewQtyOverride !== '' && Number(sewQtyOverride) > 0
+    ? Number(sewQtyOverride)
+    : (sewAutoQty || 1);
+  const sewingTotalRmb = sum(sewing.sewing_groups || [], group => sewingGroupAmount(group) * sewGroupQty(group)) / sewTotalQty;
+  // 车发使用同一总用量分母，保证车衣 = 配套合计 − 车发。
+  const sewingHairRmb = sum((sewing.sewing_groups || []).filter(g => g.category === '车发'), group => sewingGroupAmount(group) * sewGroupQty(group)) / sewTotalQty;
   const sewingClothRmb = sewingTotalRmb - sewingHairRmb;
   // 多纸箱 + 多平卡：Σ((箱价i + Σ平卡价i_j) / qty_i) × 汇率
   const ccc = eng.carton_calc || {};
@@ -1071,12 +1200,16 @@ function renderSummaryPane(host, sections, quote, me) {
   const markupX = (sales.shipping?.markup_x == null) ? 1.2 : num(sales.shipping.markup_x);  // 允许 0；仅空/未设时默认 1.2
   // 成本明细列（HKD）— 出厂价 = 这些列之和（严格等于展示值，避免与 RMB 总额换算的舍入差）
   const costCols = [
-    ['注塑+吹气', toHkd(injTotalRmb + blowTotal * fxRH)], ['二次加工', ppTotal], ['电子五金', electronicTotal + hwTotal],
+    ['注塑+吹气', toHkd(injTotalRmb + blowTotal * fxRH)], ['二次加工（印喷）', ppTotal], ['电子', electronicTotal], ['五金', hwTotal],
     ['辅助材料', auxRaw], ['包装材料', pkmatRaw], ['组装人工', asmLaborTotal + asmStepTotal], ['包装/混装人工', pkLaborTotal + pkgStepTotal],
     ['印尼运费', toHkd(shipping)],
     ['搪胶', toHkd(slushTotalRmb)], ['车缝', toHkd(sewingTotalRmb)], ['纸箱', toHkd(cartonRmb)],
   ];
-  const factoryHkdSum = costCols.reduce((s, c) => s + num(c[1]), 0);  // 出厂价 = 前面所有成本列求和
+  // 电子和车缝在出货价算价中独立乘码点、除找数，不承担运费/吊柜费。
+  const baseExclude = new Set(['电子', '车缝']);
+  const elecHkdCol = num((costCols.find(column => column[0] === '电子') || [])[1]);
+  const sewHkdCol = num((costCols.find(column => column[0] === '车缝') || [])[1]);
+  const factoryHkdSum = costCols.reduce((total, column) => total + (baseExclude.has(column[0]) ? 0 : num(column[1])), 0);
   const afterMarkupHkd = factoryHkdSum * markupX;
   // 出货底价 = 出厂价（HKD）+ 附加税；码点(×markup)不在此处，移到下方「出货价算价」乘一次；模具分摊也在算价处理
   const priceHkdMarked = factoryHkdSum + toHkd(surtaxManual);
@@ -1145,12 +1278,12 @@ function renderSummaryPane(host, sections, quote, me) {
       putSection(salesSec, sales, false).catch(() => {});
     }
   };
-  renderShipping(host.querySelector('#wb-shipping-sum'), sales, salesHeader, canEditShip, saveSales,
+  const shippingCalc = renderShipping(host.querySelector('#wb-shipping-sum'), sales, salesHeader, canEditShip, saveSales,
     freightMapSum, factoryHkdSum, surtaxHkd, {
       mold: moldFeeShareUsd,
       prototype: prototypeShareUsd,
       testing: testingShareUsd,
-    });
+    }, { sewing: sewHkdCol, electronic: elecHkdCol });
   const surtaxInp = host.querySelector('#tot-surtax');
   if (surtaxInp && canEditShip) {
     surtaxInp.oninput = () => { sales.pricing_summary.surtax = surtaxInp.value === '' ? null : Number(surtaxInp.value); };
@@ -1231,7 +1364,6 @@ function renderSummaryPane(host, sections, quote, me) {
     motor: motorRmb,                         // 马达 HKD（电子/五金已 HKD，不除汇率）
     suction: blisterRmb,                     // 吸塑 HKD（包装已 HKD）
     glue_bag: glueBagRmb,                    // 胶袋 HKD（辅助/包装已 HKD）
-    code_before: markupX,                    // 未减税前码数 = 九、合计 码点
     color_box: colorBoxRmb,                  // 彩盒/内咭/内卡 HKD（包装已 HKD）
     other_buy: otherBuyRmb,                  // 其他外购 = 辅助材料剩余 HKD（辅助已 HKD）
     battery: batteryRmb,                     // 电池 HKD（包装已 HKD）
@@ -1260,7 +1392,9 @@ function renderSummaryPane(host, sections, quote, me) {
     painting_labor: ppTotal * 0.7,    // 喷油工 = 喷油总额 70%（喷油已 HKD，不除汇率）
     paint_material: ppTotal * 0.3,    // 油漆 = 喷油总额 30%（喷油已 HKD）
     assembly_labor: combinedAsmHkd,   // 装配工 = 旧组装+旧包装+新排拉(装配)+新排拉(包装)（已 HKD，不除汇率）
-    base_price: afterMarkupHkd,              // 货价 = 码点后价 HKD
+    // 货价 = 默认报客场景（首个非出厂价，通常盐田40柜）TOTAL HKD × 找数，
+    // 即把最终总价还原到找数前；包含主体、车缝、电子及该场景运费/吊柜费。
+    base_price: shippingCalc.customerBeforeDivisorHkd,
   };
   renderTaxDeductionBlock(taxHost, sales, salesSec, me, autoFill);
 }
@@ -1291,9 +1425,8 @@ function renderTaxDeductionBlock(host, salesPayload, salesSec, me, autoFill) {
   applyAuto('t1', 'motor', autoFill.motor);
   applyAuto('t1', 'suction', autoFill.suction);
   applyAuto('t1', 'glue_bag', autoFill.glue_bag);
-  // 未减税前码数始终等于上方码点，不允许旧的手工覆盖阻断同步。
+  // 未减税前码数由 recalc 按“货价 ÷ 总成本”计算，不允许旧的手工覆盖阻断同步。
   delete ps.overrides['t2.code_before'];
-  applyAuto('t2', 'code_before', autoFill.code_before);
   applyAuto('t2', 'color_box', autoFill.color_box);
   applyAuto('t2', 'battery', autoFill.battery);
   applyAuto('t2', 'libao', autoFill.libao);
@@ -1417,12 +1550,12 @@ function renderTaxDeductionBlock(host, salesPayload, salesSec, me, autoFill) {
       </table></div></div>`;
   }
 
-  // 印尼运费手填（HKD）— 用于 杂项自动算
+  // 印尼运费由各部门表格自动汇总，只读显示。
   ps.indo_freight = ps.indo_freight ?? 0;
   host.innerHTML = `<h2>🧾 减税明细 / 成本汇总</h2>
     <div style="display:flex;gap:14px;align-items:center;margin:6px 0 10px;padding:8px 12px;background:#fef9c3;border-radius:6px;font-size:13px">
-      <label>📦 印尼运费 (HKD) <input id="tk-indo-freight" type="number" step="0.0001" value="${num(ps.indo_freight) || ''}" style="width:100px" ${ro}/></label>
-      <small class="muted">杂项 = 印尼运费 + 附加税</small>
+      <label>📦 印尼运费 (HKD) <input id="tk-indo-freight" type="number" step="0.0001" value="${num(ps.indo_freight) || ''}" style="width:100px;background:#f3f4f6" disabled title="由各部门表格金额与印尼运费点数自动汇总"/></label>
+      <small class="muted">印尼运费 = 各表金额合计 × 表头点数% 自动汇总</small>
     </div>
     <style>
       .tk-block{margin-top:16px}
@@ -1461,6 +1594,10 @@ function renderTaxDeductionBlock(host, salesPayload, salesSec, me, autoFill) {
     const laborCost = num(ps.t3.painting_labor) + num(ps.t3.paint_material) + num(ps.t3.assembly_labor);
     const totalCost = noLaborCost + laborCost;
     const basePrice = num(ps.t1.base_price);
+    const codeBefore = totalCost > 0 ? basePrice / totalCost : 0;
+    ps.t2.code_before = +codeBefore.toFixed(4);
+    const codeBeforeInp = host.querySelector('input[data-tbl="t2"][data-key="code_before"]');
+    if (codeBeforeInp && document.activeElement !== codeBeforeInp) codeBeforeInp.value = ps.t2.code_before || '';
     const gross = basePrice - noLaborCost;
     const profit = basePrice - totalCost;
     const grossPct = basePrice ? gross / basePrice : 0;
@@ -1550,23 +1687,99 @@ function renderTaxDeductionBlock(host, salesPayload, salesSec, me, autoFill) {
   }
 }
 
-// ============== 搪胶部门（占位） ==============
+function hasSlushCostingInputs(row) {
+  return ['material_price_lb', 'slush_labor_24h', 'batch_labor_12h', 'diesel_24h',
+    'electricity_24h', 'pigment_price', 'daily_output', 'batch_output_12h', 'weight_g',
+    'shipping_bag', 'markup_x'].some(key => row && row[key] !== null && row[key] !== undefined && row[key] !== '');
+}
+
+function slushCosting(row) {
+  const weight = num(row && row.weight_g);
+  const dailyOutput = num(row && row.daily_output);
+  const batchOutput = num(row && row.batch_output_12h);
+  const material = weight * num(row && row.material_price_lb) / 454;
+  const slushLabor = dailyOutput ? num(row && row.slush_labor_24h) / dailyOutput : 0;
+  const batchLabor = batchOutput ? num(row && row.batch_labor_12h) / batchOutput : 0;
+  const pigment = weight * num(row && row.pigment_price) / 25000;
+  const diesel = dailyOutput ? num(row && row.diesel_24h) / dailyOutput : 0;
+  const electricity = dailyOutput ? num(row && row.electricity_24h) / dailyOutput : 0;
+  const shippingBag = num(row && row.shipping_bag);
+  const subtotal = material + slushLabor + batchLabor + pigment + diesel + electricity + shippingBag;
+  const markup = num(row && row.markup_x) || 1;
+  return { material, slushLabor, batchLabor, pigment, diesel, electricity, shippingBag, subtotal, unitPrice: subtotal * markup };
+}
+
+function slushUnitPrice(row) {
+  return hasSlushCostingInputs(row) ? slushCosting(row).unitPrice : num(row && row.unit_price_hkd);
+}
+
+// ============== 搪胶部门 ==============
 function renderSlush(host, payload, canEdit, onChange, fxRmbHkd) {
   payload.slush_items = payload.slush_items || [];
-  host.innerHTML = `<h3>二·C、搪胶产品报价</h3><div class="muted">字段待定，先占位。下方为草拟表格：</div>
+  payload.slush_items.forEach(row => {
+    if (row && row.mold_fee !== null && row.mold_fee !== undefined && row.mold_fee !== '' && !row.mold_fee_currency) {
+      row.mold_fee_currency = 'RMB';
+    }
+  });
+  host.innerHTML = `<h3 style="display:flex;align-items:center;gap:10px">二·C、搪胶产品报价
+      ${canEdit ? `<button class="mini" id="slush-import" type="button">📄 导入搪胶报价模板</button>
+      <input id="slush-file" type="file" accept=".xls,.xlsx" style="display:none"/>` : ''}
+    </h3>
+    <div class="muted">按模板参数自动计算：料价、搪工、批工、色粉、柴油、电费、运费/胶袋 → 合计 × 码点 = 货价。</div>
+    <div id="slush-import-preview"></div>
     <div id="wb-slush-table" style="margin-top:8px"></div>`;
   const cols = [
+    { key: 'images', label: '图片', width: '150px',
+      renderCell: (td, row, context) => { td.className = 'mold-img-cell'; renderImageCell(td, row, !context.readonly, context.onChange); } },
     { key: 'item_code', label: '产品编号', width: '110px' },
     { key: 'name', label: '胶件名称', width: '120px' },
     { key: 'material', label: '材料', width: '100px' },
     { key: 'weight_g', label: '料重(g)', type: 'number', width: '80px' },
+    { key: 'material_price_lb', label: '料价 HK$/lb', type: 'number', width: '100px' },
+    { key: 'slush_labor_24h', label: '24H搪工', type: 'number', width: '90px' },
+    { key: 'batch_labor_12h', label: '12H批工/烤工', type: 'number', width: '110px' },
+    { key: 'diesel_24h', label: '24H柴油', type: 'number', width: '90px' },
+    { key: 'electricity_24h', label: '24H电费', type: 'number', width: '90px' },
+    { key: 'pigment_price', label: '色粉', type: 'number', width: '75px' },
     { key: 'daily_output', label: '日产量24H', type: 'number', width: '100px' },
+    { key: 'batch_output_12h', label: '12H批产量', type: 'number', width: '100px' },
+    { key: 'wax_sample', label: '腊样', type: 'number', width: '75px' },
+    { key: 'mold_fee', label: '模费金额', type: 'number', width: '90px' },
+    { key: 'mold_fee_currency', label: '模费币种', type: 'select', options: ['RMB', 'HKD', 'USD'], width: '90px' },
+    { key: 'shipping_bag', label: '运费/胶袋', type: 'number', width: '90px' },
+    { key: 'material_cost', label: '料价成本', readonly: true, calc: r => slushCosting(r).material, width: '90px' },
+    { key: 'slush_labor_cost', label: '搪工成本', readonly: true, calc: r => slushCosting(r).slushLabor, width: '90px' },
+    { key: 'batch_labor_cost', label: '批工成本', readonly: true, calc: r => slushCosting(r).batchLabor, width: '90px' },
+    { key: 'pigment_cost', label: '色粉成本', readonly: true, calc: r => slushCosting(r).pigment, width: '90px' },
+    { key: 'diesel_cost', label: '柴油成本', readonly: true, calc: r => slushCosting(r).diesel, width: '90px' },
+    { key: 'electricity_cost', label: '电费成本', readonly: true, calc: r => slushCosting(r).electricity, width: '90px' },
+    { key: 'markup_x', label: '码点', type: 'number', width: '70px' },
+    { key: 'subtotal_hkd', label: '成本合计', readonly: true, calc: r => slushCosting(r).subtotal, width: '90px' },
     { key: 'qty', label: '用量(PC)', type: 'number', width: '70px' },
-    { key: 'unit_price_hkd', label: '单价 HKD', type: 'number', width: '100px' },
-    { key: 'total_hkd', label: '总价 HKD', readonly: true, calc: r => num(r.unit_price_hkd) * num(r.qty), width: '90px' },
+    { key: 'unit_price_hkd', label: '货价 HKD', readonly: r => hasSlushCostingInputs(r), type: 'number',
+      calc: r => hasSlushCostingInputs(r) ? slushUnitPrice(r) : num(r.unit_price_hkd), width: '100px' },
+    { key: 'total_hkd', label: '总价 HKD', readonly: true, calc: r => slushUnitPrice(r) * num(r.qty), width: '90px' },
+    { key: 'indo_amt', label: '印尼运费', readonly: true, width: '150px',
+      headerInput: { get: () => payload.indo_pct, set: value => { payload.indo_pct = value; }, suffix: '%' },
+      calc: r => slushUnitPrice(r) * num(r.qty) * num(payload.indo_pct) / 100 },
     { key: 'note', label: '备注' },
   ];
-  const wrappedOnChange = (() => { const fns = []; const w = () => { fns.forEach(f => f()); onChange(); }; w._fns = fns; return w; })();
+  const wrappedOnChange = (() => {
+    const fns = [];
+    const w = () => {
+      payload.slush_items.forEach(row => {
+        if (hasSlushCostingInputs(row)) {
+          const costing = slushCosting(row);
+          row.subtotal_hkd = +costing.subtotal.toFixed(8);
+          row.unit_price_hkd = +costing.unitPrice.toFixed(8);
+        }
+      });
+      fns.forEach(f => f());
+      onChange();
+    };
+    w._fns = fns;
+    return w;
+  })();
   renderTable(host.querySelector('#wb-slush-table'), cols, payload.slush_items, { readonly: !canEdit, onChange: wrappedOnChange });
 
   // 搪胶单价本来就是 HKD，不再做 RMB→HKD 转换；只展示 HKD + 反向算 RMB 供参考
@@ -1574,13 +1787,54 @@ function renderSlush(host, payload, canEdit, onChange, fxRmbHkd) {
   const card = document.createElement('div'); card.className = 'loss-summary';
   host.appendChild(card);
   const refresh = () => {
-    const totalHkd = sum(payload.slush_items || [], r => num(r.unit_price_hkd) * num(r.qty));
+    const totalHkd = sum(payload.slush_items || [], r => slushUnitPrice(r) * num(r.qty));
     card.innerHTML = `
       <div class="ls-row hi"><span class="ls-label">合计 HKD</span><span class="ls-val">${formatNum(totalHkd)}</span></div>
       <div class="ls-row"><span class="ls-label">合计 RMB <small class="muted">(汇率 ${fx})</small></span><span class="ls-val">${formatNum(totalHkd * fx)}</span></div>`;
   };
   refresh();
   wrappedOnChange._fns.push(refresh);
+
+  if (canEdit) {
+    const importButton = host.querySelector('#slush-import');
+    const fileInput = host.querySelector('#slush-file');
+    const preview = host.querySelector('#slush-import-preview');
+    importButton.onclick = () => fileInput.click();
+    fileInput.onchange = async event => {
+      const file = event.target.files[0];
+      if (!file) return;
+      preview.innerHTML = '<i class="muted" style="padding:8px;display:block">正在解析…</i>';
+      try {
+        const body = new FormData();
+        body.append('file', file);
+        const response = await fetch('/api/uploads/slush-sheet', { method: 'POST', credentials: 'include', body });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || '解析失败');
+        const imageInfo = result.images_extracted ? ` · 含 <b>${result.images_extracted}</b> 张图片` : '';
+        preview.innerHTML = `<div class="card" style="background:#f0fdf4;border:1px solid #86efac;margin-top:10px">
+          <p>从 <b>${escapeHtml((result.sheets_used || []).join('、'))}</b> 解析到 <b>${result.count}</b> 张搪胶核价卡${imageInfo}</p>
+          ${result.images_hint ? `<p class="muted">⚠️ ${escapeHtml(result.images_hint)}</p>` : ''}
+          <p class="muted">应用后会替换当前搪胶明细；模板中的生产参数、成本、码点、货价和图片都会保留。</p>
+          <div style="margin-top:10px;display:flex;gap:8px">
+            <button id="slush-imp-apply">应用</button>
+            <button id="slush-imp-cancel" class="mini danger">取消</button>
+          </div>
+        </div>`;
+        preview.querySelector('#slush-imp-apply').onclick = () => {
+          const hasExisting = payload.slush_items.some(row => row && (row.name || row.item_code || slushUnitPrice(row)));
+          if (hasExisting && !confirm('将替换现有 ' + payload.slush_items.length + ' 行搪胶明细，确认？')) return;
+          payload.slush_items = (result.items || []).map(row => ({ ...row, images: row.images || [], qty: row.qty || 1 }));
+          preview.innerHTML = '';
+          fileInput.value = '';
+          onChange();
+          renderSlush(host, payload, canEdit, onChange, fxRmbHkd);
+        };
+        preview.querySelector('#slush-imp-cancel').onclick = () => { preview.innerHTML = ''; fileInput.value = ''; };
+      } catch (error) {
+        preview.innerHTML = `<div class="card" style="background:#fef2f2;border:1px solid #fecaca;margin-top:10px">解析失败：${escapeHtml(error.message)}</div>`;
+      }
+    };
+  }
 }
 
 // ============== 车缝部门 ==============
@@ -1601,21 +1855,48 @@ function renderSewing(host, payload, canEdit, onChange, fxRmbHkd) {
     { key: 'markup', label: '码点', type: 'number', width: '70px' },
     { key: 'total', label: '总价钱 (RMB)', readonly: true,
       calc: r => num(r.usage) * num(r.mat_price) * (num(r.markup) || 1), width: '100px' },
+    { key: 'indo_amt', label: '印尼运费', readonly: true, width: '150px',
+      headerInput: { get: () => payload.indo_pct, set: value => { payload.indo_pct = value; }, suffix: '%' },
+      calc: r => isSewLaborRow(r) ? 0 : num(r.usage) * num(r.mat_price) * (num(r.markup) || 1) * num(payload.indo_pct) / 100 },
     { key: 'note', label: '备注' },
   ];
 
   const totalsBox = document.createElement('div'); totalsBox.className = 'loss-summary';
   const wrappedOnChange = (() => { const fns = []; const w = () => { fns.forEach(f => f()); onChange(); refreshTotals(); }; w._fns = fns; return w; })();
 
+  const groupTotal = group => sum(group.items || [], row =>
+    num(row.usage) * num(row.mat_price) * (num(row.markup) || 1)) + sewLaborToAdd(group);
+  const groupQty = group => {
+    const value = group.product_qty;
+    if (value == null || value === '') return 1;
+    const parsed = Number(value);
+    return Number.isNaN(parsed) || parsed < 0 ? 1 : parsed;
+  };
+  function weightedTotals() {
+    const autoQty = sum(payload.sewing_groups, groupQty);
+    const override = payload.sewing_total_qty;
+    const hasOverride = override != null && override !== '' && Number(override) > 0;
+    const totalQty = hasOverride ? Number(override) : autoQty;
+    const weightedSum = sum(payload.sewing_groups, group => groupTotal(group) * groupQty(group));
+    return { autoQty, override, hasOverride, total: totalQty > 0 ? weightedSum / totalQty : 0 };
+  }
   function refreshTotals() {
-    const groupTotal = (g) =>
-      sum(g.items || [], r => num(r.usage) * num(r.mat_price) * (num(r.markup) || 1))
-      + sewLaborToAdd(g);
-    const allRMB = sum(payload.sewing_groups, groupTotal);
+    const result = weightedTotals();
     totalsBox.innerHTML = `
-      <div class="ls-row"><span class="ls-label">配套合计</span><span class="ls-val">${formatNum(allRMB)} RMB</span></div>
-      <div class="ls-row hi"><span class="ls-label">合计 RMB</span><span class="ls-val">${formatNum(allRMB)}</span></div>
-      <div class="ls-row hi"><span class="ls-label">合计 HKD</span><span class="ls-val">${formatNum(allRMB / fx)} <small class="muted">(汇率 ${fx})</small></span></div>`;
+      <div class="ls-row"><span class="ls-label">配套合计 <small class="muted">(Σ组价×用量 ÷ 总用量)</small>
+        <span style="margin-left:8px">总用量 <input id="sw-totqty" type="number" step="any" min="0" value="${result.hasOverride ? result.override : result.autoQty}" title="默认=各组用量之和(${formatNum(result.autoQty)})；清空恢复自动" style="width:72px" ${canEdit ? '' : 'disabled'}/></span></span>
+        <span class="ls-val">${formatNum(result.total)} RMB</span></div>
+      <div class="ls-row hi"><span class="ls-label">合计 RMB</span><span class="ls-val">${formatNum(result.total)}</span></div>
+      <div class="ls-row hi"><span class="ls-label">合计 HKD</span><span class="ls-val">${formatNum(result.total / fx)} <small class="muted">(汇率 ${fx})</small></span></div>`;
+    const totalQtyInput = totalsBox.querySelector('#sw-totqty');
+    if (totalQtyInput && canEdit) totalQtyInput.oninput = () => {
+      payload.sewing_total_qty = totalQtyInput.value === '' ? null : Number(totalQtyInput.value);
+      onChange();
+      const next = weightedTotals();
+      totalsBox.querySelectorAll('.ls-val')[0].textContent = `${formatNum(next.total)} RMB`;
+      totalsBox.querySelectorAll('.ls-val')[1].textContent = formatNum(next.total);
+      totalsBox.querySelectorAll('.ls-val')[2].innerHTML = `${formatNum(next.total / fx)} <small class="muted">(汇率 ${fx})</small>`;
+    };
   }
 
   function render() {
@@ -1634,6 +1915,7 @@ function renderSewing(host, payload, canEdit, onChange, fxRmbHkd) {
       card.style.cssText = 'border:1px solid #e7e5e4;border-radius:8px;padding:12px;margin-top:10px;background:#fafaf9';
       const cat = g.category || '车衣';
       g.category = cat;
+      if (g.product_qty == null || g.product_qty === '') g.product_qty = 1;
       card.innerHTML = `
         <div style="display:flex;gap:10px;align-items:center;margin-bottom:8px">
           <strong style="color:#16a34a">📦 产品：</strong>
@@ -1643,6 +1925,9 @@ function renderSewing(host, payload, canEdit, onChange, fxRmbHkd) {
               <option value="车衣" ${cat==='车衣'?'selected':''}>车衣</option>
               <option value="车发" ${cat==='车发'?'selected':''}>车发</option>
             </select>
+          </label>
+          <label style="font-size:13px">用量
+            <input class="sw-gqty" data-gi="${gi}" type="number" step="any" min="0" value="${g.product_qty ?? 1}" title="合计按各组价×用量后除以总用量" style="width:64px" ${canEdit ? '' : 'disabled'}/>
           </label>
           ${canEdit ? `<button class="mini danger sw-gdel" data-gi="${gi}">删除</button>` : ''}
         </div>
@@ -1676,6 +1961,10 @@ function renderSewing(host, payload, canEdit, onChange, fxRmbHkd) {
     host.querySelectorAll('.sw-gcat').forEach(sel => sel.onchange = () => {
       payload.sewing_groups[+sel.dataset.gi].category = sel.value; onChange();
     });
+    host.querySelectorAll('.sw-gqty').forEach(input => input.oninput = () => {
+      payload.sewing_groups[+input.dataset.gi].product_qty = input.value === '' ? 1 : Number(input.value);
+      onChange(); refreshTotals();
+    });
     host.querySelectorAll('.sw-gdel').forEach(btn => btn.onclick = () => {
       const gi = +btn.dataset.gi;
       if (!confirm(`删除产品组"${payload.sewing_groups[gi].name || '未命名'}"？`)) return;
@@ -1683,7 +1972,7 @@ function renderSewing(host, payload, canEdit, onChange, fxRmbHkd) {
     });
     const addBtn = host.querySelector('#sw-add-group');
     if (addBtn) addBtn.onclick = () => {
-      payload.sewing_groups.push({ name: '', items: [], labor_amount: 0 });
+      payload.sewing_groups.push({ name: '', items: [], labor_amount: 0, product_qty: 1 });
       onChange(); render();
     };
 
@@ -1892,7 +2181,7 @@ function renderCartonCalc(host, c, canEdit, onChange) {
   render();
 }
 
-function renderEngineering(host, payload, canEdit, onChange, fxRmbHkd, fxRmbUsd) {
+function renderEngineering(host, payload, canEdit, onChange, fxRmbHkd, fxHkdUsd) {
   payload.molds = payload.molds || [];
   payload.electronics = payload.electronics || [];
   payload.hardware = payload.hardware || [];
@@ -1959,8 +2248,8 @@ function renderEngineering(host, payload, canEdit, onChange, fxRmbHkd, fxRmbUsd)
     <div id="wb-carton-calc" style="margin-top:14px"></div>
   `;
 
-  renderMolds(host.querySelector('#wb-molds'), payload.molds, onChange, canEdit);
-  renderMoldCosts(host.querySelector('#wb-mold-costs'), payload.mold_costs, onChange, canEdit, fxRmbUsd);
+  renderMolds(host.querySelector('#wb-molds'), payload.molds, onChange, canEdit, fxRmbHkd, fxHkdUsd);
+  renderMoldCosts(host.querySelector('#wb-mold-costs'), payload.mold_costs, onChange, canEdit);
 
   // 上传模具报价单 → 解析 → 预览 → 应用
   const fileInp = host.querySelector('#mold-sheet-input');
@@ -1973,17 +2262,24 @@ function renderEngineering(host, payload, canEdit, onChange, fxRmbHkd, fxRmbUsd)
       const r = await fetch('/api/uploads/mold-sheet', { method: 'POST', credentials: 'include', body: fd });
       const j = await r.json();
       if (!r.ok) throw new Error(j.error || '解析失败');
+      // 港币模板先按当前 RMB→HKD 汇率换算成系统存储的 RMB，确保只读“模价 HKD”显示原报价。
+      const importedMolds = () => j.molds.map(m => ({
+        ...m,
+        price_rmb: m.price_rmb != null ? m.price_rmb
+          : (m.price_hkd != null ? +(num(m.price_hkd) * num(fxRmbHkd)).toFixed(4) : null),
+        images: m.images || [],
+      }));
       preview.innerHTML = `
         <div class="card" style="background:#f0fdf4;border:1px solid #86efac;">
           <p>从 <b>${escapeHtml(j.sheet_used || '')}</b> 解析到 <b>${j.molds.length}</b> 行明细：</p>
           <table class="wb-table"><thead><tr>
             <th>模号</th><th>名称</th><th>类型</th><th>材质</th>
-            <th>出模数</th><th>套数</th><th>净重(g)</th><th>周期(秒)</th><th>机型</th><th>目标数</th><th>图片</th><th>模具尺寸</th><th>价格RMB</th><th>备注</th>
+            <th>出模数</th><th>套数</th><th>净重(g)</th><th>周期(秒)</th><th>机型</th><th>目标数</th><th>图片</th><th>模具尺寸</th><th>价格RMB</th><th>价格HKD</th><th>备注</th>
           </tr></thead><tbody>
           ${j.molds.map(m => `<tr>
             <td>${escapeHtml(m.mold_no || '')}</td><td>${escapeHtml(m.name || '')}</td><td>${escapeHtml(m.mold_type || '')}</td>
             <td>${escapeHtml(m.material || '')}</td><td>${escapeHtml(m.cavity || '')}</td>
-            <td>${escapeHtml(m.sets ?? '')}</td><td>${escapeHtml(m.weight_g ?? '')}</td><td>${escapeHtml(m.cycle_sec ?? '')}</td><td>${escapeHtml(m.machine_model || '')}</td><td>${escapeHtml(m.target ?? '')}</td><td>${escapeHtml((m.images || []).length)}</td><td>${escapeHtml((m.detail && m.detail.mold_size) || '')}</td><td>${escapeHtml(m.price_rmb ?? '')}</td><td>${escapeHtml(m.note || '')}</td>
+            <td>${escapeHtml(m.sets ?? '')}</td><td>${escapeHtml(m.weight_g ?? '')}</td><td>${escapeHtml(m.cycle_sec ?? '')}</td><td>${escapeHtml(m.machine_model || '')}</td><td>${escapeHtml(m.target ?? '')}</td><td>${escapeHtml((m.images || []).length)}</td><td>${escapeHtml((m.detail && m.detail.mold_size) || '')}</td><td>${escapeHtml(m.price_rmb ?? '')}</td><td>${escapeHtml(m.price_hkd ?? '')}</td><td>${escapeHtml(m.note || '')}</td>
           </tr>`).join('')}
           </tbody></table>
           <div style="margin-top:10px">
@@ -1996,15 +2292,15 @@ function renderEngineering(host, payload, canEdit, onChange, fxRmbHkd, fxRmbUsd)
           ${j.images_extract_error ? `<p style="color:#dc2626;margin-top:8px">图片抽取失败: ${j.images_extract_error}</p>` : ''}
         </div>`;
       preview.querySelector('#btn-apply-replace').onclick = () => {
-        payload.molds = j.molds.map(m => ({ ...m, images: m.images || [] }));
+        payload.molds = importedMolds();
         preview.innerHTML = ''; fileInp.value = '';
-        renderEngineering(host, payload, canEdit, onChange, fxRmbHkd, fxRmbUsd);
+        renderEngineering(host, payload, canEdit, onChange, fxRmbHkd, fxHkdUsd);
         onChange();
       };
       preview.querySelector('#btn-apply-append').onclick = () => {
-        payload.molds = (payload.molds || []).concat(j.molds.map(m => ({ ...m, images: m.images || [] })));
+        payload.molds = (payload.molds || []).concat(importedMolds());
         preview.innerHTML = ''; fileInp.value = '';
-        renderEngineering(host, payload, canEdit, onChange, fxRmbHkd, fxRmbUsd);
+        renderEngineering(host, payload, canEdit, onChange, fxRmbHkd, fxHkdUsd);
         onChange();
       };
       preview.querySelector('#btn-apply-cancel').onclick = () => { preview.innerHTML = ''; fileInp.value = ''; };
@@ -2045,13 +2341,13 @@ function renderEngineering(host, payload, canEdit, onChange, fxRmbHkd, fxRmbUsd)
       preview.querySelector('#btn-hardware-replace').onclick = () => {
         payload.hardware = j.items.map(item => ({ ...item }));
         preview.innerHTML = ''; hardwareFileInp.value = '';
-        renderEngineering(host, payload, canEdit, onChange, fxRmbHkd, fxRmbUsd);
+        renderEngineering(host, payload, canEdit, onChange, fxRmbHkd, fxHkdUsd);
         onChange();
       };
       preview.querySelector('#btn-hardware-append').onclick = () => {
         payload.hardware = (payload.hardware || []).concat(j.items.map(item => ({ ...item })));
         preview.innerHTML = ''; hardwareFileInp.value = '';
-        renderEngineering(host, payload, canEdit, onChange, fxRmbHkd, fxRmbUsd);
+        renderEngineering(host, payload, canEdit, onChange, fxRmbHkd, fxHkdUsd);
         onChange();
       };
       preview.querySelector('#btn-hardware-cancel').onclick = () => {
@@ -2065,10 +2361,13 @@ function renderEngineering(host, payload, canEdit, onChange, fxRmbHkd, fxRmbUsd)
   const freeCols = [
     { key: 'name', label: '零件名称' },
     { key: 'spec', label: '规格' },
-    { key: 'qty', label: '用量', type: 'number', width: '80px' },
+    { key: 'qty', label: '用量', type: 'fraction', width: '80px' },
     { key: 'unit_price_rmb', label: '单价 RMB', type: 'number', width: '100px' },
     { key: 'unit_price_hkd', label: '单价 HKD', readonly: true, calc: r => freeUnitHkd(r, fxRmbHkd), width: '100px' },
     { key: 'amount', label: '金额 HKD', readonly: true, calc: r => freeAmountHkd(r, fxRmbHkd), width: '90px' },
+    { key: 'indo_amt', label: '印尼运费', readonly: true, width: '150px',
+      headerInput: { get: () => payload.indo_pct, set: value => { payload.indo_pct = value; }, suffix: '%' },
+      calc: r => freeAmountHkd(r, fxRmbHkd) * num(payload.indo_pct) / 100 },
     { key: 'tax_pct', label: '税点 %', type: 'number', width: '90px' },
     { key: 'note', label: '备注' },
   ];
@@ -2077,10 +2376,13 @@ function renderEngineering(host, payload, canEdit, onChange, fxRmbHkd, fxRmbUsd)
     { key: 'name', label: '零件名称' },
     { key: 'spec', label: '规格' },
     { key: 'category', label: '类别', type: 'select', options: MAT_CATEGORIES, width: '120px' },
-    { key: 'qty', label: '用量', type: 'number', width: '80px' },
+    { key: 'qty', label: '用量', type: 'fraction', width: '80px' },
     { key: 'unit_price_rmb', label: '单价 RMB', type: 'number', width: '100px' },
     { key: 'unit_price_hkd', label: '单价 HKD', readonly: true, calc: r => freeUnitHkd(r, fxRmbHkd), width: '100px' },
     { key: 'amount', label: '金额 HKD', readonly: true, calc: r => freeAmountHkd(r, fxRmbHkd), width: '90px' },
+    { key: 'indo_amt', label: '印尼运费', readonly: true, width: '150px',
+      headerInput: { get: () => payload.indo_pct, set: value => { payload.indo_pct = value; }, suffix: '%' },
+      calc: r => freeAmountHkd(r, fxRmbHkd) * num(payload.indo_pct) / 100 },
     { key: 'tax_pct', label: '税点 %', type: 'number', width: '90px' },
     { key: 'note', label: '备注' },
   ];
@@ -2103,10 +2405,13 @@ function renderEngineering(host, payload, canEdit, onChange, fxRmbHkd, fxRmbUsd)
     { key: 'name', label: '零件名称' },
     { key: 'spec', label: '规格', type: 'textarea' },
     { key: 'category', label: '类别', type: 'select', options: MAT_CATEGORIES, width: '120px' },
-    { key: 'qty', label: '用量', type: 'number', width: '80px' },
+    { key: 'qty', label: '用量', type: 'fraction', width: '80px' },
     { key: 'unit_price_rmb', label: '单价 RMB', type: 'number', width: '100px' },
     { key: 'unit_price_hkd', label: '单价 HKD', readonly: true, calc: r => freeUnitHkd(r, fxRmbHkd), width: '100px' },
     { key: 'amount', label: '成品金额 HKD', readonly: true, calc: r => freeAmountHkd(r, fxRmbHkd), width: '90px' },
+    { key: 'indo_amt', label: '印尼运费', readonly: true, width: '150px',
+      headerInput: { get: () => payload.indo_pct, set: value => { payload.indo_pct = value; }, suffix: '%' },
+      calc: r => freeAmountHkd(r, fxRmbHkd) * num(payload.indo_pct) / 100 },
     { key: 'tax_pct', label: '税点 %', type: 'number', width: '90px' },
     { key: 'note', label: '备注' },
   ];
@@ -2144,7 +2449,7 @@ function renderElectronic(host, payload, canEdit, onChange, fxRmbHkd) {
   `;
   const refreshes = [];
   const wrappedOnChange = () => { refreshes.forEach(f => f()); onChange(); };
-  renderHierElectronics(host.querySelector('#wb-elec'), payload.electronics, wrappedOnChange, canEdit, fxRmbHkd);
+  renderHierElectronics(host.querySelector('#wb-elec'), payload.electronics, wrappedOnChange, canEdit, fxRmbHkd, payload);
   // 总表 小计 卡片（仅 IC + PACB电子 等当前 electronics 数组的合计）
   const sumHost = document.createElement('div');
   host.querySelector('#wb-elec').appendChild(sumHost);
@@ -2744,6 +3049,9 @@ function renderMolding(host, payload, canEdit, onChange, refMolds, fxRmbHkd, use
     { key: 'cycle_sec', label: '周期(秒)', type: 'number', width: '80px' },
     { key: 'finished_amt', label: '成品金额 HK$', readonly: true, width: '100px',
       calc: r => num(r.weight_g) * (1 + num(payload.injection_loss_pct ?? 3)/100) * num(r.material_unit_price) + num(r.shot_price) },
+    { key: 'indo_amt', label: '印尼运费', readonly: true, width: '150px',
+      headerInput: { get: () => payload.indo_pct, set: value => { payload.indo_pct = value; }, suffix: '%' },
+      calc: r => (num(r.weight_g) * (1 + num(payload.injection_loss_pct ?? 3)/100) * num(r.material_unit_price) + num(r.shot_price)) * num(payload.indo_pct) / 100 },
     { key: 'note', label: '备注' },
   ];
   const wrappedOnChange = (() => { const fns = []; const w = () => { fns.forEach(f => f()); onChange(); }; w._fns = fns; return w; })();
@@ -2773,11 +3081,11 @@ function renderMolding(host, payload, canEdit, onChange, refMolds, fxRmbHkd, use
   if (canEdit && lossInp) lossInp.oninput = (e) => { payload.injection_loss_pct = num(e.target.value); wrappedOnChange(); renderMolding(host, payload, canEdit, onChange, refMolds, fxRmbHkd, userRole); };
 
   // 吹气部分
-  renderBlowItems(host.querySelector('#wb-blow'), payload.blow_items, wrappedOnChange, canEdit);
+  renderBlowItems(host.querySelector('#wb-blow'), payload.blow_items, wrappedOnChange, canEdit, payload);
 }
 
 // 吹气产品报价表（每行 = 一个 货名）
-function renderBlowItems(container, rows, onChange, canEdit) {
+function renderBlowItems(container, rows, onChange, canEdit, pctHost) {
   container.innerHTML = '';
   const table = document.createElement('table'); table.className = 'wb-table';
   table.innerHTML = `<thead><tr>
@@ -2848,7 +3156,7 @@ function renderBlowItems(container, rows, onChange, canEdit) {
     if (canEdit) {
       const td = document.createElement('td');
       const b = document.createElement('button'); b.textContent = '×'; b.className = 'mini danger';
-      b.onclick = () => { rows.splice(idx, 1); renderBlowItems(container, rows, onChange, canEdit); onChange(); };
+      b.onclick = () => { rows.splice(idx, 1); renderBlowItems(container, rows, onChange, canEdit, pctHost); onChange(); };
       td.appendChild(b); tr.appendChild(td);
     }
     updateCalc();
@@ -2864,14 +3172,17 @@ function renderBlowItems(container, rows, onChange, canEdit) {
     const mat = num(r.weight_g) * num(r.material_price_lb) / 454;
     return (mat + num(r.blow_labor) + num(r.flash)) * (num(r.profit_x) || 1);
   });
-  totalDiv.innerHTML = `<div class="ls-title">二·B、吹气 成本汇总</div><div class="ls-row hi"><span class="ls-label">合计 HK$</span><span class="ls-val">${formatNum(blowTotal)}</span></div>`;
+  const indoPct = num(pctHost && pctHost.indo_pct);
+  totalDiv.innerHTML = `<div class="ls-title">二·B、吹气 成本汇总</div>`
+    + `<div class="ls-row hi"><span class="ls-label">合计 HK$</span><span class="ls-val">${formatNum(blowTotal)}</span></div>`
+    + `<div class="ls-row"><span class="ls-label">印尼运费 <small class="muted">(${indoPct}%)</small></span><span class="ls-val">${formatNum(blowTotal * indoPct / 100)}</span></div>`;
   container.appendChild(totalDiv);
   if (canEdit) {
     const btn = document.createElement('button');
     btn.textContent = '+ 增加吹气货号'; btn.className = 'mini'; btn.style.marginTop = '8px';
     btn.onclick = () => {
       rows.push({ profit_x: 1.05, weight_g: 0, material_price_lb: 0, blow_labor: 0, flash: 0 });
-      renderBlowItems(container, rows, onChange, canEdit); onChange();
+      renderBlowItems(container, rows, onChange, canEdit, pctHost); onChange();
     };
     container.appendChild(btn);
   }
@@ -2895,7 +3206,14 @@ function renderPainting(host, payload, canEdit, onChange, fxRmbHkd) {
   renderPaintingTable(host.querySelector('#wb-pp'), payload.painting_items, wrappedOnChange, canEdit);
   wrappedOnChange._fns.push(renderLossSummary(host, '三、二次加工 成本汇总',
     () => sum(payload.painting_items || [], paintingRowAmount),
-    () => 0, fxRmbHkd, 'HKD'));  // 不计损耗；喷油报价为港币
+    () => 0, fxRmbHkd, 'HKD', {
+      host: payload,
+      pctKey: 'indo_pct',
+      readonly: !canEdit,
+      onChange,
+      label: '印尼运费 <small class="muted">(总价×30%为基数)</small>',
+      base: () => sum(payload.painting_items || [], paintingRowAmount) * 0.3,
+    }));  // 不计损耗；喷油报价为港币
 
   if (canEdit) {
     const impBtn = host.querySelector('#pp-import');
@@ -2915,7 +3233,7 @@ function renderPainting(host, payload, canEdit, onChange, fxRmbHkd) {
           <div class="card" style="background:#f0fdf4;border:1px solid #86efac;margin-top:10px">
             <p>从 <b>${escapeHtml(j.sheet_used || '')}</b> 解析到 <b>${j.count}</b> 行喷油工序${imgInfo}${j.meta && j.meta.title ? ' · ' + escapeHtml(j.meta.title) : ''}</p>
             ${j.images_hint ? `<p class="muted">⚠️ ${escapeHtml(j.images_hint)}</p>` : ''}
-            <p class="muted">应用后会替换当前喷油明细（夹模/移印/散枪/边模/油色/浸油/抹油/擦PP水 八道工序）。</p>
+            <p class="muted">应用后会替换当前喷油明细（夹模/移印/散枪/边模/油色/浸油/抹油/擦PP水/UV 九道工序）。</p>
             <div style="margin-top:10px;display:flex;gap:8px">
               <button id="pp-imp-apply">应用</button>
               <button id="pp-imp-cancel" class="mini danger">取消</button>
@@ -2946,6 +3264,7 @@ const PAINTING_PROCS = [
   { key: 'dip',    label: '浸油' },
   { key: 'oil',    label: '抹油' },
   { key: 'pp_water', label: '擦PP水' },
+  { key: 'uv', label: 'UV' },
 ];
 
 function currentFactoryCode() {
@@ -3678,7 +3997,7 @@ function matchFreightByName(name) {
   return null;
 }
 
-function renderShipping(host, payload, header, canEdit, onChange, freightMap, priceHkdPerPcs, surtaxHkdPerPcs, amortSharesUsd) {
+function renderShipping(host, payload, header, canEdit, onChange, freightMap, priceHkdPerPcs, surtaxHkdPerPcs, amortSharesUsd, sideItemsHkd) {
   freightMap = freightMap || {};
   // 自动确保第一个场景是"出厂价"（freight/lifting = 0）
   if (!payload.shipping.scenarios.length || !payload.shipping.scenarios[0].is_factory) {
@@ -3689,6 +4008,9 @@ function renderShipping(host, payload, header, canEdit, onChange, freightMap, pr
   if (priceHkdPerPcs != null) payload.shipping.top.total_hkd = +num(priceHkdPerPcs).toFixed(4);
   if (surtaxHkdPerPcs != null) payload.shipping.top.surtax = +num(surtaxHkdPerPcs).toFixed(4);
   amortSharesUsd = amortSharesUsd || {};
+  sideItemsHkd = sideItemsHkd || {};
+  if (sideItemsHkd.sewing != null) payload.shipping.top.sewing_hkd = +num(sideItemsHkd.sewing).toFixed(4);
+  if (sideItemsHkd.electronic != null) payload.shipping.top.elec_hkd = +num(sideItemsHkd.electronic).toFixed(4);
   payload.shipping.top.mold_share = +num(amortSharesUsd.mold).toFixed(4);
   payload.shipping.top.prototype_share = +num(amortSharesUsd.prototype).toFixed(4);
   payload.shipping.top.testing_share = +num(amortSharesUsd.testing).toFixed(4);
@@ -3697,6 +4019,8 @@ function renderShipping(host, payload, header, canEdit, onChange, freightMap, pr
   const fxHU = num(header.fx_hkd_usd) || 7.8;
   const fxRH = num(header.fx_rmb_hkd) || 0.85;
   const fmt = (n) => Number.isFinite(n) ? n.toFixed(2) : '-';
+  const sewMarkupValue = () => s.sew_markup_x == null || s.sew_markup_x === '' ? num(s.markup_x) : num(s.sew_markup_x);
+  const elecMarkupValue = () => s.elec_markup_x == null || s.elec_markup_x === '' ? num(s.markup_x) : num(s.elec_markup_x);
 
   const compute = () => {
     const totalHkd = num(topData.total_hkd);
@@ -3730,21 +4054,33 @@ function renderShipping(host, payload, header, canEdit, onChange, freightMap, pr
       const afterShip = base + freight + lifting;
       const afterMarkup = afterShip * num(s.markup_x);
       const afterDivisor = afterMarkup / num(s.divisor);
-      const totalHKD = afterDivisor;  // 码点/找数后的港币总额（模具分摊在 USD 层加）
+      const sewBase = num(topData.sewing_hkd);
+      const elecBase = num(topData.elec_hkd);
+      const sewMarkup = sewBase * sewMarkupValue();
+      const sewDivisor = sewMarkup / num(s.divisor);
+      const elecMarkup = elecBase * elecMarkupValue();
+      const elecDivisor = elecMarkup / num(s.divisor);
+      const totalHKD = afterDivisor + sewDivisor + elecDivisor;
       const totalRMB = totalHKD * fxRH;
       const totalUSD = totalHKD / fxHU;
       const moldShareUSD = num(topData.mold_share);
       const prototypeShareUSD = num(topData.prototype_share);
       const testingShareUSD = num(topData.testing_share);
       const finalUSD = totalUSD + moldShareUSD + prototypeShareUSD + testingShareUSD;
-      return { freight, lifting, afterShip, afterMarkup, afterDivisor, totalHKD, totalRMB, totalUSD, moldShareUSD, prototypeShareUSD, testingShareUSD, finalUSD };
+      return { freight, lifting, afterShip, afterMarkup, afterDivisor, totalHKD, totalRMB, totalUSD, moldShareUSD, prototypeShareUSD, testingShareUSD, finalUSD,
+        mainTotal: afterDivisor, sewBase, sewMarkup, sewDivisor, sewTotal: sewDivisor,
+        elecBase, elecMarkup, elecDivisor, elecTotal: elecDivisor };
     });
     const target = num(s.target_usd);
     // 报客货价 = 第一个非"出厂价"场景（默认 盐田40柜）；若全是出厂价则取最小
     const customerIdx = s.scenarios.findIndex(x => !x.is_factory);
     const customerUSD = (customerIdx >= 0 && rows[customerIdx]) ? rows[customerIdx].finalUSD : (rows.length ? Math.min(...rows.map(r => r.finalUSD)) : 0);
+    const customerTotalHkd = (customerIdx >= 0 && rows[customerIdx])
+      ? rows[customerIdx].totalHKD
+      : (rows.length ? Math.min(...rows.map(r => r.totalHKD)) : 0);
+    const customerBeforeDivisorHkd = customerTotalHkd * num(s.divisor);
     const diffPct = target > 0 ? (customerUSD - target) / target * 100 : 0;
-    return { rows, target, customerUSD, diffPct };
+    return { rows, target, customerUSD, customerIdx, customerTotalHkd, customerBeforeDivisorHkd, diffPct };
   };
 
   // 重算并仅刷新计算单元格 / 同步出货底价（不重建 DOM，输入不丢焦）
@@ -3762,6 +4098,15 @@ function renderShipping(host, payload, header, canEdit, onChange, freightMap, pr
       setC('afterShip', fmt(r.afterShip));
       setC('afterMarkup', fmt(r.afterMarkup));
       setC('afterDivisor', fmt(r.afterDivisor));
+      setC('mainTotal', fmt(r.mainTotal));
+      setC('sewBase', fmt(r.sewBase));
+      setC('sewMarkup', fmt(r.sewMarkup));
+      setC('sewDivisor', fmt(r.sewDivisor));
+      setC('sewTotal', fmt(r.sewTotal));
+      setC('elecBase', fmt(r.elecBase));
+      setC('elecMarkup', fmt(r.elecMarkup));
+      setC('elecDivisor', fmt(r.elecDivisor));
+      setC('elecTotal', fmt(r.elecTotal));
       setC('moldShareUSD', fmt(r.moldShareUSD));
       setC('prototypeShareUSD', fmt(r.prototypeShareUSD));
       setC('testingShareUSD', fmt(r.testingShareUSD));
@@ -3815,7 +4160,16 @@ function renderShipping(host, payload, header, canEdit, onChange, freightMap, pr
           <tr class="hi"><td>含运 HK$</td>${rows.map((r, i) => cellTd(i, 'afterShip', r)).join('')}${canEdit ? '<td></td>' : ''}</tr>
           <tr><td>码点 × (${canEdit ? `<input id="sh-markup" type="number" step="any" value="${s.markup_x}" style="width:60px">` : s.markup_x})</td>${rows.map((r, i) => cellTd(i, 'afterMarkup', r)).join('')}${canEdit ? '<td></td>' : ''}</tr>
           <tr><td>找数 ÷ (${canEdit ? `<input id="sh-divisor" type="number" step="any" value="${s.divisor}" style="width:60px">` : s.divisor})</td>${rows.map((r, i) => cellTd(i, 'afterDivisor', r)).join('')}${canEdit ? '<td></td>' : ''}</tr>
-          <tr class="hi"><td>TOTAL (HK$)</td>${rows.map((r, i) => cellTd(i, 'totalHKD', r)).join('')}${canEdit ? '<td></td>' : ''}</tr>
+          <tr class="hi" style="background:#FEF3C7;color:#92400E;font-weight:700"><td>TOTAL (HK$)</td>${rows.map((r, i) => cellTd(i, 'mainTotal', r)).join('')}${canEdit ? '<td></td>' : ''}</tr>
+          <tr><td>车缝</td>${rows.map((r, i) => cellTd(i, 'sewBase', r)).join('')}${canEdit ? '<td></td>' : ''}</tr>
+          <tr><td>码点 × (${canEdit ? `<input id="sh-sew-markup" type="number" step="any" value="${sewMarkupValue()}" style="width:60px">` : sewMarkupValue()})</td>${rows.map((r, i) => cellTd(i, 'sewMarkup', r)).join('')}${canEdit ? '<td></td>' : ''}</tr>
+          <tr><td>找数 ÷ ${s.divisor}</td>${rows.map((r, i) => cellTd(i, 'sewDivisor', r)).join('')}${canEdit ? '<td></td>' : ''}</tr>
+          <tr class="hi" style="background:#FEF3C7;color:#92400E;font-weight:700"><td>TOTAL (HK$)</td>${rows.map((r, i) => cellTd(i, 'sewTotal', r)).join('')}${canEdit ? '<td></td>' : ''}</tr>
+          <tr><td>电子</td>${rows.map((r, i) => cellTd(i, 'elecBase', r)).join('')}${canEdit ? '<td></td>' : ''}</tr>
+          <tr><td>码点 × (${canEdit ? `<input id="sh-elec-markup" type="number" step="any" value="${elecMarkupValue()}" style="width:60px">` : elecMarkupValue()})</td>${rows.map((r, i) => cellTd(i, 'elecMarkup', r)).join('')}${canEdit ? '<td></td>' : ''}</tr>
+          <tr><td>找数 ÷ ${s.divisor}</td>${rows.map((r, i) => cellTd(i, 'elecDivisor', r)).join('')}${canEdit ? '<td></td>' : ''}</tr>
+          <tr class="hi" style="background:#FEF3C7;color:#92400E;font-weight:700"><td>TOTAL (HK$)</td>${rows.map((r, i) => cellTd(i, 'elecTotal', r)).join('')}${canEdit ? '<td></td>' : ''}</tr>
+          <tr class="hi" style="background:#DBEAFE;color:#1E40AF;font-weight:700"><td>TOTAL (HK$)</td>${rows.map((r, i) => cellTd(i, 'totalHKD', r)).join('')}${canEdit ? '<td></td>' : ''}</tr>
           <tr><td>(USD) = HK$/${fxHU}</td>${rows.map((r, i) => cellTd(i, 'totalUSD', r)).join('')}${canEdit ? '<td></td>' : ''}</tr>
           <tr><td>模具分摊 (USD)</td>${rows.map((r, i) => cellTd(i, 'moldShareUSD', r)).join('')}${canEdit ? '<td></td>' : ''}</tr>
           <tr><td>手板费分摊 (USD)</td>${rows.map((r, i) => cellTd(i, 'prototypeShareUSD', r)).join('')}${canEdit ? '<td></td>' : ''}</tr>
@@ -3844,7 +4198,8 @@ function renderShipping(host, payload, header, canEdit, onChange, freightMap, pr
     });
     bindNum('.sc-base', 'base_rmb');
     bindNum('.sc-mold', 'mold_share_rmb');
-    const globalMap = { freight: 'freight_pct', lifting: 'lifting_pct', markup: 'markup_x', divisor: 'divisor', target: 'target_usd' };
+    const globalMap = { freight: 'freight_pct', lifting: 'lifting_pct', markup: 'markup_x', divisor: 'divisor', target: 'target_usd',
+      'sew-markup': 'sew_markup_x', 'elec-markup': 'elec_markup_x' };
     Object.entries(globalMap).forEach(([id, key]) => {
       const el = host.querySelector('#sh-' + id);
       if (el) el.oninput = () => { s[key] = num(el.value); onChange(); refresh(); };
@@ -3863,6 +4218,7 @@ function renderShipping(host, payload, header, canEdit, onChange, freightMap, pr
     };
   }
   build();
+  return compute();
 }
 
 function renderSales(host, payload, quote, canEditHeader, canEditPricing, allSections, onChange, onHeaderChange) {
@@ -3898,7 +4254,7 @@ function renderSales(host, payload, quote, canEditHeader, canEditPricing, allSec
         </select>
       </label>
       <label>RMB→HKD 汇率 <input id="h-fxrh" type="number" step="any" value="${h.fx_rmb_hkd}" ${canEditPricing ? '' : 'disabled'} /></label>
-      <label>HKD→USD 汇率 <input id="h-fxhu" type="number" step="any" value="${h.fx_hkd_usd}" ${canEditPricing ? '' : 'disabled'} /></label>
+      <label>报价 HKD→USD 汇率 <input id="h-fxhu" type="number" step="any" value="${h.fx_hkd_usd}" ${canEditPricing ? '' : 'disabled'} /></label>
     </div>
 
     <div class="hidden">
@@ -4100,8 +4456,7 @@ async function renderQuotePage() {
     const salesHdr = salesSec && salesSec.payload_json ? (JSON.parse(salesSec.payload_json).header || {}) : {};
     const fx = num(salesHdr.fx_rmb_hkd) || 0.85;
     const fxHU = num(salesHdr.fx_hkd_usd) || 7.8;
-    const fxRmbUsd = fx * fxHU || 6.63;
-    if (me.dept === 'engineering') renderEngineering(body, payload, canEditMine, onChange, fx, fxRmbUsd);
+    if (me.dept === 'engineering') renderEngineering(body, payload, canEditMine, onChange, fx, fxHU);
     else if (me.dept === 'electronic') renderElectronic(body, payload, canEditMine, onChange, fx);
     else if (me.dept === 'molding') renderMolding(body, payload, canEditMine, onChange, refMolds, fx, me.role);
     else if (me.dept === 'painting') renderPainting(body, payload, canEditMine, onChange, fx);
@@ -4116,7 +4471,7 @@ async function renderQuotePage() {
     const salesSecForFx = sections.find(x => x.dept === 'sales');
     const salesHdrOther = salesSecForFx && salesSecForFx.payload_json ? (JSON.parse(salesSecForFx.payload_json).header || {}) : {};
     const fxRate = num(salesHdrOther.fx_rmb_hkd) || 0.85;
-    const fxRateUsd = fxRate * (num(salesHdrOther.fx_hkd_usd) || 7.8) || 6.63;
+    const fxRateUsd = num(salesHdrOther.fx_hkd_usd) || 7.8;
 
     others.forEach(s => {
       const sectionPayload = s.payload_json ? JSON.parse(s.payload_json) : {};

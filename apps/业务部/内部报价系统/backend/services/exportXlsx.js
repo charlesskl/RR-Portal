@@ -347,7 +347,7 @@ async function buildWorkbook({ quote, sections }) {
   row += 1;
 
   // 整行 HKD（与 UI 一致）；出厂价(=前面成本列之和)/码点/模具分摊 不单列，码点+模具在下方「出货价算价」
-  const totalsHeader = ['注塑+吹气', '二次加工', '电子', '五金', '辅助材料', '包装材料', '组装人工', '包装/混装人工', '印尼运费', '搪胶', '车缝', '纸箱', '附加税0.4%', '出货底价 HKD'];
+  const totalsHeader = ['注塑+吹气', '二次加工（印喷）', '电子', '五金', '辅助材料', '包装材料', '组装人工', '包装/混装人工', '印尼运费', '搪胶', '车缝', '纸箱', '附加税0.4%', '出货底价 HKD'];
   totalsHeader.forEach((h, i) => { ws.getCell(row, i + 1).value = h; styleHeader(ws.getCell(row, i + 1)); });
   row += 1;
 

@@ -1200,7 +1200,7 @@ function renderSummaryPane(host, sections, quote, me) {
   const markupX = (sales.shipping?.markup_x == null) ? 1.2 : num(sales.shipping.markup_x);  // 允许 0；仅空/未设时默认 1.2
   // 成本明细列（HKD）— 出厂价 = 这些列之和（严格等于展示值，避免与 RMB 总额换算的舍入差）
   const costCols = [
-    ['注塑+吹气', toHkd(injTotalRmb + blowTotal * fxRH)], ['二次加工', ppTotal], ['电子', electronicTotal], ['五金', hwTotal],
+    ['注塑+吹气', toHkd(injTotalRmb + blowTotal * fxRH)], ['二次加工（印喷）', ppTotal], ['电子', electronicTotal], ['五金', hwTotal],
     ['辅助材料', auxRaw], ['包装材料', pkmatRaw], ['组装人工', asmLaborTotal + asmStepTotal], ['包装/混装人工', pkLaborTotal + pkgStepTotal],
     ['印尼运费', toHkd(shipping)],
     ['搪胶', toHkd(slushTotalRmb)], ['车缝', toHkd(sewingTotalRmb)], ['纸箱', toHkd(cartonRmb)],

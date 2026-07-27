@@ -79,6 +79,7 @@
   .dept-icon.business { background: linear-gradient(135deg, #f59e0b, #ef4444); }
   .dept-icon.qa { background: linear-gradient(135deg, #8b5cf6, #ec4899); }
   .dept-icon.shipping { background: linear-gradient(135deg, #0ea5e9, #2563eb); }
+  .dept-icon.print3d { background: linear-gradient(135deg, #8b5cf6, #6d28d9); }
   .dept-name { font-size: 20px; font-weight: 600; color: #f1f5f9; }
   .dept-desc { font-size: 13px; color: #94a3b8; margin-top: 2px; }
   .dept-card-body { padding: 0 28px 24px; }
@@ -332,6 +333,20 @@
                 <span class="plugin-name">品质管理系统</span>
               </div>
             </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 3D打印部 -->
+      <div class="dept-card" onclick="showDept('print3d')">
+        <div class="dept-card-header">
+          <div class="dept-icon print3d">&#128424;</div>
+          <div>
+            <div class="dept-name">3D打印部</div>
+          </div>
+        </div>
+        <div class="dept-card-body">
+          <div class="plugin-list" id="print3dPluginList">
             <div class="plugin-item">
               <div class="plugin-info">
                 <div class="plugin-dot gray" id="print3dDot"></div>
@@ -635,28 +650,6 @@
 
     <div class="detail-plugin-card">
       <div class="detail-plugin-left">
-        <div class="detail-plugin-icon" style="background:linear-gradient(135deg,#8b5cf6,#6d28d9);">&#128424;</div>
-        <div>
-          <div class="detail-plugin-name">3D打印管理系统</div>
-          <div class="detail-plugin-desc">3D 打印生产管理 — 生产仪表盘、每日记录、材料库存、排期、维修与产品管理，支持 Excel 导出（打印机实时状态需在厂区局域网内部署后启用）</div>
-          <div class="feature-grid">
-            <div class="feature-tag">&#128202; 生产仪表盘</div>
-            <div class="feature-tag">&#128221; 每日记录</div>
-            <div class="feature-tag">&#128230; 材料库存</div>
-            <div class="feature-tag">&#128197; 排期管理</div>
-            <div class="feature-tag">&#128295; 维修记录</div>
-            <div class="feature-tag">&#128229; Excel 导出</div>
-          </div>
-        </div>
-      </div>
-      <div class="detail-plugin-right">
-        <div class="detail-plugin-status"><div class="plugin-dot gray" id="print3dDetailDot"></div> 检查中...</div>
-        <a href="/3d-print/" target="_blank" class="btn btn-primary">打开系统</a>
-      </div>
-    </div>
-
-    <div class="detail-plugin-card">
-      <div class="detail-plugin-left">
         <div class="detail-plugin-icon" style="background:linear-gradient(135deg,#0ea5e9,#0369a1);">&#128295;</div>
         <div>
           <div class="detail-plugin-name">啤机外发系统</div>
@@ -696,6 +689,43 @@
       <div class="detail-plugin-right">
         <div class="detail-plugin-status"><div class="plugin-dot gray" id="productionPlanDetailDot"></div> 检查中...</div>
         <a href="/production-plan/" target="_blank" class="btn btn-primary">打开系统</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== 3D打印部详情 ===== -->
+  <div class="detail-view" id="print3dDetail">
+    <div class="back-btn" onclick="goHome()">&larr; 返回部门总览</div>
+    <div class="breadcrumb">
+      <a href="#" onclick="goHome()">控制台</a>
+      <span class="sep">/</span>
+      <span style="color:#8b5cf6">3D打印部</span>
+    </div>
+    <div class="page-title" style="display:flex;align-items:center;gap:14px;">
+      <div class="dept-icon print3d" style="width:40px;height:40px;font-size:18px;">&#128424;</div>
+      3D打印部
+    </div>
+    <div class="page-subtitle">3D 打印生产管理 · 材料库存 · 排期与维修</div>
+
+    <div class="detail-plugin-card">
+      <div class="detail-plugin-left">
+        <div class="detail-plugin-icon" style="background:linear-gradient(135deg,#8b5cf6,#6d28d9);">&#128424;</div>
+        <div>
+          <div class="detail-plugin-name">3D打印管理系统</div>
+          <div class="detail-plugin-desc">3D 打印生产管理 — 生产仪表盘、每日记录、材料库存、排期、维修与产品管理，支持 Excel 导出（打印机实时状态需在厂区局域网内部署后启用）</div>
+          <div class="feature-grid">
+            <div class="feature-tag">&#128202; 生产仪表盘</div>
+            <div class="feature-tag">&#128221; 每日记录</div>
+            <div class="feature-tag">&#128230; 材料库存</div>
+            <div class="feature-tag">&#128197; 排期管理</div>
+            <div class="feature-tag">&#128295; 维修记录</div>
+            <div class="feature-tag">&#128229; Excel 导出</div>
+          </div>
+        </div>
+      </div>
+      <div class="detail-plugin-right">
+        <div class="detail-plugin-status"><div class="plugin-dot gray" id="print3dDetailDot"></div> 检查中...</div>
+        <a href="/3d-print/" target="_blank" class="btn btn-primary">打开系统</a>
       </div>
     </div>
   </div>
@@ -1167,7 +1197,7 @@
 </div>
 
 <script>
-var allDepts = ['engineering', 'pmc', 'production', 'spray', 'business', 'shipping', 'indonesia', 'qa'];
+var allDepts = ['engineering', 'pmc', 'production', 'print3d', 'spray', 'business', 'shipping', 'indonesia', 'qa'];
 
 function showDept(dept) {
   document.getElementById('homeView').classList.add('hidden');

@@ -956,7 +956,7 @@ services:
 
   print3d:
     build:
-      context: ./apps/生产部/3D打印管理系统
+      context: ./apps/3D打印部/3D打印管理系统
       dockerfile: Dockerfile
     environment:
       - PORT=3000
@@ -964,7 +964,7 @@ services:
       - NODE_ENV=production
       - TZ=Asia/Shanghai
     volumes:
-      - ./apps/生产部/3D打印管理系统/data:/app/data
+      - ./apps/3D打印部/3D打印管理系统/data:/app/data
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
       interval: 10s

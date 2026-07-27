@@ -719,9 +719,11 @@ class ExcelPOParser:
         for row in ws.iter_rows(max_row=600):
             # A列标签
             a_val = str(row[0].value or '').strip() if row else ''
+            # WPS 导出的标签常含多个空格，例如 "Tracking  Code:"
+            normalized_label = re.sub(r'\s+', ' ', a_val).strip()
 
             # 停止：遇到 Order Modifiable Records
-            if 'Order Modifiable' in a_val:
+            if re.search(r'Order\s+Modifiable', normalized_label, re.I):
                 break
 
             # 内容列：从第2列(B)开始收集所有非空值
@@ -753,15 +755,15 @@ class ExcelPOParser:
                 content = '\n'.join(merged_lines)
 
             # 识别标签
-            if 'Tracking Code' in a_val:
+            if re.search(r'\bTracking\s+Code\b', normalized_label, re.I):
                 current_label = 'tracking_code'
                 current_parts = [content] if content else []
                 sections[current_label] = current_parts
-            elif 'Packaging Info' in a_val and current_label:
+            elif re.search(r'\bPackaging\s+Info\b', normalized_label, re.I):
                 current_label = 'packaging_info'
                 current_parts = [content] if content else []
                 sections[current_label] = current_parts
-            elif re.match(r'Remark', a_val, re.I) and current_label:
+            elif re.match(r'Remark\b', normalized_label, re.I):
                 current_label = 'remark'
                 current_parts = [content] if content else []
                 sections[current_label] = current_parts

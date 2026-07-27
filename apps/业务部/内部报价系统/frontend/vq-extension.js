@@ -108,6 +108,59 @@
     };
   }
 
+  function cartonPriceBase(carton) {
+    return (toNumber(carton.cl) + toNumber(carton.cw) + 2)
+      * (toNumber(carton.cw) + toNumber(carton.ch) + 1) * 2 / 1000;
+  }
+
+  function addEditableCartonPrices(host, config, canEdit, onChange) {
+    (config.cartons || []).forEach((carton, index) => {
+      const nameInput = host.querySelector(
+        `input[data-bi="${index}"][data-k="name"]:not([data-fj])`
+      );
+      const metrics = nameInput?.parentElement?.nextElementSibling;
+      if (!metrics || metrics.querySelector(`[data-carton-price="${index}"]`)) return;
+      const priceHost = Array.from(metrics.children).find(element =>
+        element.tagName === 'SPAN' && /^箱价/.test(element.textContent.trim())
+      );
+      if (!priceHost) return;
+
+      const base = cartonPriceBase(carton);
+      const price = base * (toNumber(config.paper_rate) || 2.75);
+      priceHost.innerHTML = `<b>箱价</b> HK$
+        <input data-carton-price="${index}" type="number" step="0.01"
+          value="${price.toFixed(2)}" ${canEdit ? '' : 'disabled'}
+          title="可直接修改箱价；系统会自动反算并保存纸价系数"
+          style="width:82px;color:#7c2d12;font-weight:700;text-align:right"/>`;
+      if (!canEdit) return;
+
+      const input = priceHost.querySelector('input');
+      input.onchange = () => {
+        const desiredPrice = toNumber(input.value);
+        const currentBase = cartonPriceBase(carton);
+        if (desiredPrice < 0 || currentBase <= 0) return;
+        config.paper_rate = desiredPrice / currentBase;
+        // 兼容旧导出字段；主数据口径仍以反算后的 paper_rate 为准。
+        if (index === 0) config.box_price = desiredPrice;
+        const rateInput = host.querySelector('#cc-rate');
+        if (rateInput) rateInput.value = Number(config.paper_rate.toFixed(6));
+        onChange();
+        if (typeof rateInput?.onchange === 'function') rateInput.onchange();
+      };
+    });
+  }
+
+  const baseRenderCartonCalc = window.renderCartonCalc;
+  if (typeof baseRenderCartonCalc === 'function') {
+    window.renderCartonCalc = function (host, config, canEdit, onChange) {
+      baseRenderCartonCalc(host, config, canEdit, onChange);
+      const decorate = () => addEditableCartonPrices(host, config, canEdit, onChange);
+      decorate();
+      const observer = new MutationObserver(decorate);
+      observer.observe(host, { childList: true, subtree: true });
+    };
+  }
+
   function renderSpinTransport(host, config, freight, cartonConfig, canEdit, onChange) {
     if (!host) return () => {};
     config.fx_hkd_usd = toNumber(config.fx_hkd_usd) || 7.75;

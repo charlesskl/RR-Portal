@@ -79,13 +79,14 @@ jobs:
           PRINT3D_DATA_PART_37_B64: ${{ secrets.PRINT3D_DATA_PART_37_B64 }}
         run: |
           set -euo pipefail
+          mkdir -p /tmp/p3d
           for i in $(seq -w 1 37); do
             v="PRINT3D_DATA_PART_${i}_B64"
             [ -n "${!v:-}" ] || { echo "[FAIL] 缺少 $v"; exit 1; }
             printf '%s' "${!v}"
-          done | base64 -d > /tmp/print3d-payload.tar.gz
-          echo "$PRINT3D_DATA_SHA256  /tmp/print3d-payload.tar.gz" | sha256sum -c -
-          ls -l /tmp/print3d-payload.tar.gz
+          done | base64 -d > /tmp/p3d/print3d-payload.tar.gz
+          echo "$PRINT3D_DATA_SHA256  /tmp/p3d/print3d-payload.tar.gz" | sha256sum -c -
+          ls -l /tmp/p3d/print3d-payload.tar.gz
 
       - name: Upload payload to ECS via SCP
         uses: appleboy/scp-action@v0.1.7
@@ -94,7 +95,7 @@ jobs:
           username: ${{ secrets.CLOUD_USER }}
           key: ${{ secrets.CLOUD_SSH_KEY }}
           fingerprint: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
-          source: "/tmp/print3d-payload.tar.gz"
+          source: "/tmp/p3d/"
           target: "/tmp/"
           strip_components: 1
 

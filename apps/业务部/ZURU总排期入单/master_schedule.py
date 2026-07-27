@@ -1125,7 +1125,9 @@ _sub_map_cache = {}  # 缓存，避免每次重新加载
 
 def _find_in_sub_map(sub_map, base):
     """在sub_schedule_map中查找货号，返回locs列表或None
-    查找优先级：1)精确匹配 2)数字前缀 3)base是某个key的前缀（如77896SLT匹配77896SLT-77772）
+    查找优先级：1)精确匹配 2)数字前缀
+    3)base是某个key的前缀（如77896SLT匹配77896SLT-77772）
+    4)中间数字段（如MEC490-15759匹配15759）
     """
     # 1) 精确匹配
     if base in sub_map:
@@ -1141,7 +1143,16 @@ def _find_in_sub_map(sub_map, base):
         if k.startswith(base + '-') or k.startswith(base):
             if k != base:  # 避免重复
                 return v
+    # 4) 字母开头的组合货号，排期号可能位于中间或末尾
+    for segment in _numeric_segments(base):
+        if segment in sub_map:
+            return sub_map[segment]
     return None
+
+
+def _numeric_segments(base):
+    """提取4位以上数字段，靠后的排期号优先。"""
+    return re.findall(r'\d{4,}', base)[::-1]
 
 
 def _best_sheet_name(locs, base):
@@ -1153,8 +1164,9 @@ def _best_sheet_name(locs, base):
     if len(locs) == 1:
         return locs[0]['sheet']
     num_m = re.match(r'^(\d+)', base)
-    if num_m:
-        prefix = num_m.group(1)
+    prefixes = [num_m.group(1)] if num_m else []
+    prefixes.extend(_numeric_segments(base))
+    for prefix in prefixes:
         for loc in locs:
             sname = loc['sheet']
             # sheet名以货号数字前缀开头（如"92119"、"92119明细"）

@@ -754,7 +754,7 @@ let _syncTimer=null, _serverVer=0, _dirty=false;
 
 async function pushNow(){
   try{
-    const res=await fetch('/api/data',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({_version:_serverVer,settings:S,materials,products,records,maintenance,inventory,stockInLogs,schedules})});
+    const res=await fetch('api/data',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({_version:_serverVer,settings:S,materials,products,records,maintenance,inventory,stockInLogs,schedules})});
     if(res.status===409){
       const r=await res.json();
       if(r.latestData){
@@ -887,7 +887,7 @@ function today(){ const d=new Date(); return d.getFullYear()+'-'+String(d.getMon
 function fmt(v,d=2){ return v==null||isNaN(v)?'-':Number(v).toFixed(d) }
 function fmtM(v){ return v==null||isNaN(v)?'-':Number(v).toLocaleString('zh-CN',{minimumFractionDigits:2,maximumFractionDigits:2}) }
 function fmtP(v){ return v==null||isNaN(v)?'-':(Number(v)*100).toFixed(1)+'%' }
-function escHtml(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function escHtml(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 
 // 设备数量历史：历史汇总、报价分摊和使用率必须按当天实际设备数计算
 const MACHINE_COUNT_HISTORY = [
@@ -3106,7 +3106,7 @@ async function clearAllData(){
 // 初始化 - 从服务器加载数据 + 定时同步
 // ═══════════════════════════════════════════════════════
 async function pullFromServer(){
-  const res=await fetch('/api/data');
+  const res=await fetch('api/data');
   if(!res.ok) throw new Error('服务器返回 ' + res.status);
   const data=await res.json();
   if(data._version) _serverVer=data._version;
@@ -3143,7 +3143,7 @@ let liveStatus = {};
 
 async function pollPrinterStatus(){
   try{
-    const res = await fetch('/api/printers');
+    const res = await fetch('api/printers');
     liveStatus = await res.json();
     updateLiveCards();
   }catch(e){}
@@ -3232,7 +3232,7 @@ function renderLiveCard(machineId){
 async function rescanPrinter(id, btn){
   if(btn){ btn.disabled=true; btn.textContent='搜索中...'; }
   try{
-    await fetch(`/api/printers/${id}/rescan`, {method:'POST'});
+    await fetch(`api/printers/${id}/rescan`, {method:'POST'});
   }catch(e){
     if(btn){ btn.disabled=false; btn.textContent='重新搜索'; }
   }
@@ -3240,7 +3240,7 @@ async function rescanPrinter(id, btn){
 }
 
 async function rescanAllOffline(){
-  try{ await fetch('/api/printers/rescan-all', {method:'POST'}); }catch(e){}
+  try{ await fetch('api/printers/rescan-all', {method:'POST'}); }catch(e){}
   setTimeout(pollPrinterStatus, 500);
 }
 
@@ -3412,7 +3412,7 @@ async function boot(){
     if(_dirty) return;
     if(document.querySelector('.modal-bg.show')) return;
     try{
-      const res=await fetch('/api/version');
+      const res=await fetch('api/version');
       const {version}=await res.json();
       if(version>_serverVer){
         _serverVer=version;

@@ -39,12 +39,17 @@ Windows 可双击 `启动服务器.bat`；需要异常退出后自动重启时�
 ```bash
 docker build -t 3d-print-management .
 docker run --rm -p 3000:3000 \
-  -v "$PWD/config.json:/app/config.json" \
-  -v "$PWD/data.json:/app/data.json" \
+  -e DATA_PATH=/app/data \
+  -v "$PWD/data:/app/data" \
   3d-print-management
 ```
 
+首次启动时，`data.json` 会从 `data.example.json` 自动生成到 `DATA_PATH`；
+`config.json` 不存在时会自动生成（含随机管理员密码，打印在启动日志中）。
+请在 `DATA_PATH` 下的 `config.json` 中修改密码并填写真实打印机参数。
+
 打印机位于厂内局域网时，容器运行节点必须能访问打印机 IP 和 Bambu MQTT TLS 端口 `8883`。
+未配置真实凭据（仍为 `YOUR_*` 占位符）的打印机会被自动跳过，不会触发局域网扫描。
 
 ## 数据与安全
 

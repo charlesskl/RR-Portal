@@ -5,12 +5,25 @@ const os = require('os');
 const tls = require('tls');
 const crypto = require('crypto');
 
-const PORT = 3000;
-const DATA_FILE = path.join(__dirname, 'data.json');
+const PORT = parseInt(process.env.PORT || '3000', 10);
+// Docker 部署时数据/配置放 DATA_PATH（bind mount），本地运行默认当前目录
+const DATA_DIR = process.env.DATA_PATH || __dirname;
+fs.mkdirSync(DATA_DIR, { recursive: true });
+const DATA_FILE = path.join(DATA_DIR, 'data.json');
 const HTML_FILE = path.join(__dirname, 'index.html');
-const CONFIG_FILE = path.join(__dirname, 'config.json');
-const SYNC_STATE_FILE = path.join(__dirname, 'sync-state.json');
+const CONFIG_FILE = path.join(DATA_DIR, 'config.json');
+const SYNC_STATE_FILE = path.join(DATA_DIR, 'sync-state.json');
 let dataVersion = Date.now();
+
+// 首次启动：用示例数据初始化 data.json（幂等，不覆盖已有数据）
+if (!fs.existsSync(DATA_FILE)) {
+  try {
+    fs.copyFileSync(path.join(__dirname, 'data.example.json'), DATA_FILE);
+    console.log('[初始化] 已从 data.example.json 生成初始 data.json');
+  } catch (e) {
+    console.warn('[初始化] 无 data.example.json 可复制，将从空数据开始');
+  }
+}
 
 // 生成唯一ID
 function generateId() {
@@ -53,23 +66,11 @@ function loadConfig() {
   try {
     return JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
   } catch (e) {
-    // 首次运行：将默认配置写入 config.json，然后提示用户
+    // 首次运行：生成默认配置（空打印机列表 + 随机管理员密码），然后提示用户
     const defaultConfig = {
-      auth: { username: 'admin', password: 'changeme' },
-      bambuPrinters: [
-        { id: 1, name: '#1 Bambu-P1S', host: '192.168.3.110', serial: 'YOUR_SERIAL', accessCode: 'YOUR_ACCESS_CODE' },
-        { id: 2, name: '#2 Bambu-P1S', host: '192.168.3.176', serial: 'YOUR_SERIAL', accessCode: 'YOUR_ACCESS_CODE' },
-        { id: 3, name: '#3 Bambu-P1S', host: '192.168.2.119', serial: 'YOUR_SERIAL', accessCode: 'YOUR_ACCESS_CODE' },
-        { id: 4, name: '#4 Bambu-P1S', host: '192.168.3.157', serial: 'YOUR_SERIAL', accessCode: 'YOUR_ACCESS_CODE' },
-        { id: 5, name: '#5 Bambu-P1S', host: '192.168.3.218', serial: 'YOUR_SERIAL', accessCode: 'YOUR_ACCESS_CODE' },
-      ],
-      flashForgePrinters: [
-        { id: 6, name: '#6 3D001', host: '192.168.3.181', serial: 'YOUR_SERIAL', checkCode: 'YOUR_CHECK_CODE' },
-        { id: 7, name: '#7 3D002', host: '192.168.2.204', serial: 'YOUR_SERIAL', checkCode: 'YOUR_CHECK_CODE' },
-        { id: 8, name: '#8 3D003', host: '192.168.3.117', serial: 'YOUR_SERIAL', checkCode: 'YOUR_CHECK_CODE' },
-        { id: 9, name: '#9 3D004', host: '192.168.2.222', serial: 'YOUR_SERIAL', checkCode: 'YOUR_CHECK_CODE' },
-        { id: 10, name: '#10 3D005', host: '192.168.3.84', serial: 'YOUR_SERIAL', checkCode: 'YOUR_CHECK_CODE' },
-      ],
+      auth: { username: 'admin', password: crypto.randomBytes(9).toString('base64url') },
+      bambuPrinters: [],
+      flashForgePrinters: [],
       sync: {
         enabled: false,
         serverId: 'server-A',
@@ -79,7 +80,8 @@ function loadConfig() {
     };
     try {
       fs.writeFileSync(CONFIG_FILE, JSON.stringify(defaultConfig, null, 2), 'utf8');
-      console.warn('[警告] 未找到 config.json，已生成默认配置文件。请编辑 config.json 填入真实的打印机凭据。');
+      console.warn('[安全] 未找到 config.json，已生成默认配置。随机管理员密码: ' + defaultConfig.auth.password);
+      console.warn('[安全] 请记录密码并编辑 config.json 填入真实的打印机凭据。');
     } catch (writeErr) {
       console.error('[错误] 无法写入默认配置文件:', writeErr.message);
     }
@@ -270,7 +272,11 @@ function saveData(data) {
 // ═══════════════════════════════════════════════════════
 // Bambu Lab P1S MQTT 连接
 // ═══════════════════════════════════════════════════════
-const BAMBU_PRINTERS = _config.bambuPrinters || [];
+// 云端/降级部署：跳过未配置真实凭据的打印机（占位符或缺失），避免无意义的局域网扫描
+function isPlaceholder(v) { return !v || String(v).startsWith('YOUR_'); }
+const BAMBU_PRINTERS = (_config.bambuPrinters || []).filter(p =>
+  p && p.host && !isPlaceholder(p.serial) && !isPlaceholder(p.accessCode)
+);
 
 // 打印机实时状态存储
 const printerStatus = {};
@@ -1170,7 +1176,9 @@ function startBambuConnections() {
 // ═══════════════════════════════════════════════════════
 // FlashForge Adventurer 5M HTTP API 连接
 // ═══════════════════════════════════════════════════════
-const FLASHFORGE_PRINTERS = _config.flashForgePrinters || [];
+const FLASHFORGE_PRINTERS = (_config.flashForgePrinters || []).filter(p =>
+  p && p.host && !isPlaceholder(p.serial) && !isPlaceholder(p.checkCode)
+);
 
 // FlashForge IP 自动发现：扫描局域网找到打印机真实 IP
 function discoverFlashForgeIP(printer, callback) {
@@ -1843,6 +1851,13 @@ const server = http.createServer((req, res) => {
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
+
+  // 健康检查（无需认证，供 nginx / 门户探测）
+  if (req.url === '/health') {
+    res.writeHead(200, {'Content-Type': 'application/json'});
+    res.end(JSON.stringify({status: 'ok'}));
+    return;
+  }
 
   // 所有请求需要 Basic Auth
   if (!requireAuth(req, res)) return;

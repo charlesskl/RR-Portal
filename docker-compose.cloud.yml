@@ -2,7 +2,7 @@
 # Usage: docker compose -f docker-compose.cloud.yml up -d --build
 #
 # Includes: core + db + redis + nginx + rr-production
-# Excludes: 3D打印 (hardware), schedule-system (SMB/Windows), zuru-ma (deferred), indonesia-export (deleted)
+# Excludes: schedule-system (SMB/Windows), zuru-ma (deferred), indonesia-export (deleted)
 # 2026-06-16: 触发 COMPOSE_CHANGED 走 --remove-orphans 路径，清除 internal-quote (#181) 遗留孤儿容器
 
 services:
@@ -945,6 +945,33 @@ services:
       timeout: 5s
       retries: 3
       start_period: 20s
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - platform-net
+
+  print3d:
+    build:
+      context: ./apps/生产部/3D打印管理系统
+      dockerfile: Dockerfile
+    environment:
+      - PORT=3000
+      - DATA_PATH=/app/data
+      - NODE_ENV=production
+      - TZ=Asia/Shanghai
+    volumes:
+      - ./apps/生产部/3D打印管理系统/data:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    mem_limit: 256m
+    memswap_limit: 256m
     restart: unless-stopped
     logging:
       driver: json-file

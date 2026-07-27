@@ -9,6 +9,7 @@ import pytest
 
 import app as app_module
 import master_schedule
+from pdf_parser import PDFParser
 import schedule_reconcile
 
 
@@ -37,6 +38,26 @@ def fake_xlsx_bytes():
     with zipfile.ZipFile(data, 'w', zipfile.ZIP_DEFLATED) as zf:
         zf.writestr('not-an-excel-file.txt', 'hello')
     return data.getvalue()
+
+
+def test_letter_prefixed_item_uses_embedded_schedule_number():
+    locations = [
+        {'file': 'MEC.xlsx', 'sheet': '其他'},
+        {'file': '15759.xlsx', 'sheet': '15759明细'},
+    ]
+    schedule_map = {'15759': locations}
+
+    assert master_schedule._find_in_sub_map(
+        schedule_map, 'MEC490-15759') == locations
+    assert master_schedule._best_sheet_name(
+        locations, 'MEC490-15759') == '15759明细'
+
+
+def test_country_translation_prefers_exact_country_match():
+    parser = PDFParser()
+
+    assert parser._country('Curaçao') == '库拉索'
+    assert parser._country('United  States') == '美国'
 
 
 def zip_bytes(entries):

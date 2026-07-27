@@ -3,7 +3,10 @@ name: Print3D Data Restore
 # 3D打印管理系统（print3d）数据/配置恢复（手动触发，一次性使用）：
 #   把本地上传的 data.json + config.json + config-for-94.json 安装到 ECS 的
 #   bind mount 数据目录，restart print3d 并验证。
-#   payload 走临时 GitHub Secrets 分片传输（gzip+base64 切片），跑完后应删除这些 secret：
+#   payload 走临时 GitHub Secrets 分片传输（gzip+base64 切片）：
+#   runner 上重组 → scp 到 ECS → 校验 → 备份 → 安装 → restart → 验证。
+#   注意：不要用 ssh-action 的 envs 传大 payload（1.5MB env 会让 SSH 会话 EOF）。
+#   跑完后删除临时 secret：
 #     gh secret list --repo charlesskl/RR-Portal | grep PRINT3D_DATA | awk '{print $1}' | xargs -n1 gh secret delete --repo charlesskl/RR-Portal
 
 on:
@@ -33,9 +36,9 @@ jobs:
             exit 1
           fi
 
-      - name: Restore print3d data via SSH
+      - name: Reconstruct payload from secret parts
+        shell: bash
         env:
-          CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
           PRINT3D_DATA_SHA256: ${{ secrets.PRINT3D_DATA_SHA256 }}
           PRINT3D_DATA_PART_01_B64: ${{ secrets.PRINT3D_DATA_PART_01_B64 }}
           PRINT3D_DATA_PART_02_B64: ${{ secrets.PRINT3D_DATA_PART_02_B64 }}
@@ -74,6 +77,31 @@ jobs:
           PRINT3D_DATA_PART_35_B64: ${{ secrets.PRINT3D_DATA_PART_35_B64 }}
           PRINT3D_DATA_PART_36_B64: ${{ secrets.PRINT3D_DATA_PART_36_B64 }}
           PRINT3D_DATA_PART_37_B64: ${{ secrets.PRINT3D_DATA_PART_37_B64 }}
+        run: |
+          set -euo pipefail
+          for i in $(seq -w 1 37); do
+            v="PRINT3D_DATA_PART_${i}_B64"
+            [ -n "${!v:-}" ] || { echo "[FAIL] 缺少 $v"; exit 1; }
+            printf '%s' "${!v}"
+          done | base64 -d > /tmp/print3d-payload.tar.gz
+          echo "$PRINT3D_DATA_SHA256  /tmp/print3d-payload.tar.gz" | sha256sum -c -
+          ls -l /tmp/print3d-payload.tar.gz
+
+      - name: Upload payload to ECS via SCP
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.CLOUD_HOST }}
+          username: ${{ secrets.CLOUD_USER }}
+          key: ${{ secrets.CLOUD_SSH_KEY }}
+          fingerprint: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+          source: "/tmp/print3d-payload.tar.gz"
+          target: "/tmp/"
+          strip_components: 1
+
+      - name: Restore print3d data on ECS via SSH
+        env:
+          CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+          PRINT3D_DATA_SHA256: ${{ secrets.PRINT3D_DATA_SHA256 }}
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         with:
           host: ${{ secrets.CLOUD_HOST }}
@@ -81,21 +109,17 @@ jobs:
           key: ${{ secrets.CLOUD_SSH_KEY }}
           fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
           command_timeout: 12m
-          envs: PRINT3D_DATA_SHA256,PRINT3D_DATA_PART_01_B64,PRINT3D_DATA_PART_02_B64,PRINT3D_DATA_PART_03_B64,PRINT3D_DATA_PART_04_B64,PRINT3D_DATA_PART_05_B64,PRINT3D_DATA_PART_06_B64,PRINT3D_DATA_PART_07_B64,PRINT3D_DATA_PART_08_B64,PRINT3D_DATA_PART_09_B64,PRINT3D_DATA_PART_10_B64,PRINT3D_DATA_PART_11_B64,PRINT3D_DATA_PART_12_B64,PRINT3D_DATA_PART_13_B64,PRINT3D_DATA_PART_14_B64,PRINT3D_DATA_PART_15_B64,PRINT3D_DATA_PART_16_B64,PRINT3D_DATA_PART_17_B64,PRINT3D_DATA_PART_18_B64,PRINT3D_DATA_PART_19_B64,PRINT3D_DATA_PART_20_B64,PRINT3D_DATA_PART_21_B64,PRINT3D_DATA_PART_22_B64,PRINT3D_DATA_PART_23_B64,PRINT3D_DATA_PART_24_B64,PRINT3D_DATA_PART_25_B64,PRINT3D_DATA_PART_26_B64,PRINT3D_DATA_PART_27_B64,PRINT3D_DATA_PART_28_B64,PRINT3D_DATA_PART_29_B64,PRINT3D_DATA_PART_30_B64,PRINT3D_DATA_PART_31_B64,PRINT3D_DATA_PART_32_B64,PRINT3D_DATA_PART_33_B64,PRINT3D_DATA_PART_34_B64,PRINT3D_DATA_PART_35_B64,PRINT3D_DATA_PART_36_B64,PRINT3D_DATA_PART_37_B64
+          envs: PRINT3D_DATA_SHA256
           script: |
             set -euo pipefail
             DATA_DIR="/opt/rr-portal/apps/3D打印部/3D打印管理系统/data"
             [ -d "$DATA_DIR" ] || { echo "[FAIL] $DATA_DIR 不存在"; exit 1; }
+            [ -f /tmp/print3d-payload.tar.gz ] || { echo "[FAIL] payload 未上传"; exit 1; }
             TMP=$(mktemp -d)
-            trap 'rm -rf "$TMP"' EXIT
-            echo "-- 重组 payload（37 分片） --"
-            for i in $(seq -w 1 37); do
-              v="PRINT3D_DATA_PART_${i}_B64"
-              [ -n "${!v:-}" ] || { echo "[FAIL] 缺少 $v"; exit 1; }
-              printf '%s' "${!v}"
-            done | base64 -d > "$TMP/payload.tar.gz"
-            echo "$PRINT3D_DATA_SHA256  $TMP/payload.tar.gz" | sha256sum -c -
-            tar -xzf "$TMP/payload.tar.gz" -C "$TMP"
+            trap 'rm -rf "$TMP" /tmp/print3d-payload.tar.gz' EXIT
+            echo "-- 校验 payload 完整性 --"
+            echo "$PRINT3D_DATA_SHA256  /tmp/print3d-payload.tar.gz" | sha256sum -c -
+            tar -xzf /tmp/print3d-payload.tar.gz -C "$TMP"
             echo "-- 校验文件结构 --"
             python3 -c "import json; d=json.load(open('$TMP/data.json')); assert isinstance(d.get('records'),dict) and len(d['records'])>100, 'data.json records 异常'; print('  data.json OK，记录天数:', len(d['records']))"
             python3 -c "import json; c=json.load(open('$TMP/config.json')); assert c.get('auth',{}).get('password'), 'config.json 缺 auth.password'; print('  config.json OK')"

@@ -1,16 +1,19 @@
 FROM node:20-alpine AS frontend-build
 
 WORKDIR /build/client
+# 阿里云 ECS 直连 registry.npmjs.org 会超时，构建阶段统一使用国内镜像。
+ENV npm_config_registry=https://registry.npmmirror.com
 COPY client/package.json client/package-lock.json ./
 RUN npm ci
 COPY client/ ./
 ARG BASE_PATH=/production-plan/
 ENV VITE_BASE=${BASE_PATH}
-RUN npx vite build --base ${BASE_PATH}
+RUN npm run build -- --base ${BASE_PATH}
 
 FROM node:20-alpine AS production
 
 RUN apk add --no-cache tini curl python3 make g++
+ENV npm_config_registry=https://registry.npmmirror.com
 
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 

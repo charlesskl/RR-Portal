@@ -1,8 +1,9 @@
 "use client";
 // 排期页 Tab 外壳：总览看计划，月排自动生成，周排承担手工新建/调整/急单处理。
 // 月排不选拉别（后端 commit 自动占位），故 MonthlyScheduler 不需要 lines。
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { SchedulablePart } from "@/lib/schedule";
+import { cachedJson } from "@/lib/clientCache";
 import WeeklyScheduler from "./WeeklyScheduler";
 import MonthlyScheduler from "./MonthlyScheduler";
 import ScheduleOverview from "./ScheduleOverview";
@@ -37,10 +38,38 @@ type UrgentOrderLite = {
 };
 type WeeklyTarget = { planId: number; date: string; lineId: number };
 
-export default function ScheduleTabs({ lines, orders, urgentOrders }: { lines: Line[]; orders: OrderLite[]; urgentOrders: UrgentOrderLite[] }) {
+type ApiLine = Line & { isActive: boolean };
+
+type ScheduleOrderFilter = { orderId: number; orderNo: string; from?: string; to?: string };
+
+export default function ScheduleTabs({ orderFilter }: { orderFilter?: ScheduleOrderFilter }) {
   const [tab, setTab] = useState<"overview" | "monthly" | "weekly">("overview");
   const [weeklyMode, setWeeklyMode] = useState<"adjust" | "create" | "urgent">("adjust");
   const [weeklyTarget, setWeeklyTarget] = useState<WeeklyTarget | null>(null);
+  const [lines, setLines] = useState<Line[]>([]);
+  const [orders, setOrders] = useState<OrderLite[]>([]);
+  const [urgentOrders, setUrgentOrders] = useState<UrgentOrderLite[]>([]);
+  const [weeklyLoading, setWeeklyLoading] = useState(false);
+  const [weeklyError, setWeeklyError] = useState("");
+  const [weeklyLoaded, setWeeklyLoaded] = useState(false);
+
+  useEffect(() => {
+    if (tab !== "weekly" || weeklyLoaded || weeklyLoading || weeklyError) return;
+    setWeeklyLoading(true);
+    setWeeklyError("");
+    Promise.allSettled([
+      cachedJson<ApiLine[]>("/api/lines", 60_000),
+      cachedJson<OrderLite[]>("/api/schedule/orders", 5_000),
+      cachedJson<UrgentOrderLite[]>("/api/schedule/urgent/orders", 5_000),
+    ]).then(([lineResult, orderResult, urgentResult]) => {
+      if (lineResult.status === "rejected") throw lineResult.reason;
+      setLines(lineResult.value.filter((line) => line.isActive));
+      setOrders(orderResult.status === "fulfilled" ? orderResult.value : []);
+      setUrgentOrders(urgentResult.status === "fulfilled" ? urgentResult.value : []);
+      setWeeklyLoaded(true);
+    }).catch(() => setWeeklyError("周排数据加载失败，请重试"))
+      .finally(() => setWeeklyLoading(false));
+  }, [tab, weeklyLoaded, weeklyLoading, weeklyError]);
   const cls = (a: boolean) => `px-4 py-2 rounded-btn text-sm ${a ? "bg-mint-50 text-mint-700 font-semibold" : "text-text-secondary"}`;
   // 待排急单数 = 还没排进计划的急单
   const pendingUrgent = urgentOrders.filter((o) => !o.scheduled).length;
@@ -64,6 +93,7 @@ export default function ScheduleTabs({ lines, orders, urgentOrders }: { lines: L
       {tab === "monthly" && <MonthlyScheduler />}
       {tab === "overview" && (
         <ScheduleOverview
+          orderFilter={orderFilter}
           pendingOrderCount={pendingOrders}
           pendingUrgentCount={pendingUrgent}
           onCreatePlan={() => {
@@ -82,7 +112,13 @@ export default function ScheduleTabs({ lines, orders, urgentOrders }: { lines: L
         />
       )}
       {tab === "weekly" && (
-        <WeeklyScheduler
+        weeklyLoading ? <p className="py-10 text-center text-text-secondary">正在加载周排数据…</p> : weeklyError ? (
+          <div className="py-10 text-center text-rose">
+            <p>{weeklyError}</p>
+            <button type="button" className="mt-3 rounded-btn border border-rose px-4 py-2 text-sm"
+              onClick={() => setWeeklyError("")}>重新加载</button>
+          </div>
+        ) : <WeeklyScheduler
           lines={lines}
           orders={orders}
           urgentOrders={urgentOrders}

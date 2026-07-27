@@ -24,6 +24,8 @@ public class ScheduleController(AppDbContext db) : ControllerBase
         var orders = await db.Orders
             .Where(o => o.Status != "archived")
             .OrderByDescending(o => o.Id)
+            .AsNoTracking()
+            .AsSplitQuery()
             .Include(o => o.Product!).ThenInclude(p => p.Items).ThenInclude(i => i.Parts)
             .Include(o => o.Lines).ThenInclude(l => l.PartQtys)
             .Include(o => o.Plans.Where(p => p.DeletedAt == null))
@@ -74,6 +76,8 @@ public class ScheduleController(AppDbContext db) : ControllerBase
         var orders = await db.Orders
             .Where(o => statuses.Contains(o.Status))
             .OrderByDescending(o => o.Id)
+            .AsNoTracking()
+            .AsSplitQuery()
             .Include(o => o.Product!).ThenInclude(p => p.Items).ThenInclude(i => i.Parts)
             .Include(o => o.Lines).ThenInclude(l => l.PartQtys)
             .Include(o => o.Plans.Where(p => p.DeletedAt == null))
@@ -90,7 +94,7 @@ public class ScheduleController(AppDbContext db) : ControllerBase
     // 返回：活跃拉别清单 + 区间内未软删的计划明细行（含 stepNo/craft/货号/机台/人数）。
     // 网格聚合、产能占用%、红黄绿由前端算（口径纯 UI，无 DB 依赖）。读操作=登录即可（viewer 也能看）。
     [HttpGet("overview")]
-    public async Task<IActionResult> Overview([FromQuery] string? from, [FromQuery] string? to)
+    public async Task<IActionResult> Overview([FromQuery] string? from, [FromQuery] string? to, [FromQuery] int? orderId)
     {
         if (string.IsNullOrWhiteSpace(from) || string.IsNullOrWhiteSpace(to))
             return BadRequest(new { error = "from 和 to 必填" });
@@ -105,8 +109,10 @@ public class ScheduleController(AppDbContext db) : ControllerBase
             .ToListAsync();
 
         // 区间内每条未软删计划行（带货号，供点开明细）；按日期→拉别排序，前端好分格
-        var plans = await db.ProductionPlans
-            .Where(p => p.DeletedAt == null && p.PlanDate >= fromD && p.PlanDate <= toD)
+        var planQuery = db.ProductionPlans
+            .Where(p => p.DeletedAt == null && p.PlanDate >= fromD && p.PlanDate <= toD);
+        if (orderId is > 0) planQuery = planQuery.Where(p => p.OrderId == orderId.Value);
+        var plans = await planQuery
             .Include(p => p.Order).ThenInclude(o => o!.Product)
             .OrderBy(p => p.PlanDate).ThenBy(p => p.LineId).ThenBy(p => p.StepNo)
             .ToListAsync();

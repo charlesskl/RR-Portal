@@ -22,13 +22,64 @@ public class OrdersController(AppDbContext db, PdfStorage pdf) : ControllerBase
     [HttpGet]
     public async Task<IActionResult> List()
     {
-        var list = await db.Orders.OrderByDescending(o => o.Id)
+        var list = await db.Orders.AsNoTracking().OrderByDescending(o => o.Id)
             .Select(o => new OrderListItem(
                 o.Id, o.ExternalOrderNo, o.Product == null ? "" : o.Product.ProductNo,
                 o.OrderDate, o.DeliveryDate, o.Status, o.IsMA, o.IsUrgent,
                 o.Lines.SelectMany(l => l.PartQtys).Sum(q => q.Qty), o.PendingProduct))
             .ToListAsync();
         return Ok(list);
+    }
+
+    // GET /api/orders/overview —— 订单总览的轻量排期汇总。
+    // 不加载产品库/子件/工艺属性，只读订单需求与有效计划。
+    [HttpGet("overview")]
+    public async Task<IActionResult> Overview()
+    {
+        var orders = await db.Orders
+            .AsNoTracking()
+            .AsSplitQuery()
+            .Include(o => o.Lines).ThenInclude(l => l.PartQtys)
+            .Include(o => o.Plans.Where(p => p.DeletedAt == null))
+            .OrderByDescending(o => o.Id)
+            .ToListAsync();
+
+        var result = orders.Select(o =>
+        {
+            var plans = o.Plans;
+            var demand = o.Lines
+                .SelectMany(line => line.PartQtys.Select(q => new { Key = (line.ItemName, q.PartName), q.Qty }))
+                .GroupBy(x => x.Key)
+                .ToDictionary(g => g.Key, g => g.Sum(x => x.Qty));
+            var recorded = plans.GroupBy(p => (p.ItemName, p.PartName))
+                .ToDictionary(g => g.Key, g => g.Sum(p => p.GoodQty ?? 0));
+            var demandQty = demand.Values.Sum();
+            var recordedQty = demand.Sum(x => Math.Min(x.Value, recorded.GetValueOrDefault(x.Key)));
+            var progressPct = demandQty > 0 ? Math.Min(100, (int)Math.Round(recordedQty * 100.0 / demandQty)) : 0;
+
+            string? finishDate = null;
+            var covered = demand.Count > 0 && plans.Count > 0;
+            foreach (var (key, required) in demand)
+            {
+                var cumulative = 0;
+                DateTime? partFinish = null;
+                foreach (var plan in plans.Where(p => (p.ItemName, p.PartName) == key).OrderBy(p => p.PlanDate))
+                {
+                    cumulative += plan.PlannedQty;
+                    if (cumulative >= required) { partFinish = plan.PlanDate; break; }
+                }
+                if (partFinish is null) { covered = false; finishDate = null; break; }
+                var ymd = ScheduleCalc.Ymd(partFinish.Value);
+                if (finishDate is null || string.CompareOrdinal(ymd, finishDate) > 0) finishDate = ymd;
+            }
+
+            return new OrderOverviewSummary(
+                o.Id, plans.Count > 0,
+                plans.Count == 0 ? null : ScheduleCalc.Ymd(plans.Min(p => p.PlanDate)),
+                covered ? finishDate : null, covered,
+                plans.Sum(p => p.PlannedQty), recordedQty, demandQty, progressPct);
+        }).ToList();
+        return Ok(result);
     }
 
     // GET /api/orders/{id} — 详情（含 lines→partQtys + 引用产品的部位基础价）

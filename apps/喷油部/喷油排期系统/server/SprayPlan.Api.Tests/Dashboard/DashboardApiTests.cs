@@ -55,9 +55,13 @@ public class DashboardApiTests : IAsyncLifetime
         var p2 = await CreateProductAsync("D2");
         await CreateOrderAsync("O-OVERDUE", p1, "2020-01-01");  // 交货日已过 → 逾期
         await CreateOrderAsync("O-FUTURE", p2, "2030-01-01");   // 未来 → 不逾期
+        await CreateOrderAsync("O-ARCHIVED", p2, "2020-01-01");
+        var orders = await _client.GetFromJsonAsync<JsonElement>("/api/orders");
+        var archivedId = orders.EnumerateArray().Single(o => o.GetProperty("externalOrderNo").GetString() == "O-ARCHIVED").GetProperty("id").GetInt32();
+        (await _client.DeleteAsync($"/api/orders/{archivedId}")).EnsureSuccessStatusCode();
 
         var s = await (await _client.GetAsync("/api/dashboard")).Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal(2, s.GetProperty("ordersTotal").GetInt32());
+        Assert.Equal(2, s.GetProperty("ordersTotal").GetInt32()); // 不包含作废单
         Assert.Equal(2, s.GetProperty("productsCount").GetInt32());
         Assert.Equal(1, s.GetProperty("overdue").GetInt32());
         Assert.Equal(0, s.GetProperty("ordersActive").GetInt32());   // 无 confirmed（遗留口径恒 0）

@@ -241,19 +241,52 @@ public class ProductImportApiTests : IAsyncLifetime
 
     // 重新导入已存在货号 → 跳过（一个货号一条产品，已无规格版本概念）
     [Fact]
-    public async Task Commit_ExistingProductNo_Skips()
+    public async Task ExistingProduct_PreviewsDiff_And_CommitUpdatesSelectedFieldsOnly()
     {
-        await _client.PostAsJsonAsync("/api/products", new { productNo = "VER1",
-            items = new[]{ new { itemName="主体", parts = new[]{ new { partName="头", craft="移印", unitCost=1.0 } } } } });
+        var created = await (await _client.PostAsJsonAsync("/api/products", new { productNo = "VER1",
+            items = new[]{ new { itemName="头", parts = new object[]{
+                new { partName="头", craft="移印", unitCost=1.0, dailyCapacity=100, laborPrice=0.1, paintCost=0.2, quotedPrice=0.3 },
+                new { partName="旧明细", craft="移印", unitCost=9.0 }
+            } } } })).Content.ReadFromJsonAsync<JsonElement>();
+        var productId = created.GetProperty("id").GetInt32();
+        int partId;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<SprayPlan.Api.Data.AppDbContext>();
+            var product = await db.Products.Include(p => p.Items).ThenInclude(i => i.Parts).SingleAsync(p => p.Id == productId);
+            var part = product.Items[0].Parts.Single(p => p.PartName == "头");
+            part.CraftDetail = "移印";
+            part.StdMachineCount = 1;
+            partId = part.Id;
+            await db.SaveChangesAsync();
+        }
+
+        var bytes = BuildSheet("VER1", new string?[][] {
+            new[]{"货号","货名","工序","目标数","人数","工价","核价","油漆价","报价"},
+            new[]{"VER1","头","移印","200","1","0.1","2.0","0.2","0.3"},
+        });
+        var previewResp = await _client.PostAsync("/api/products/import/preview", FileContent(bytes));
+        previewResp.EnsureSuccessStatusCode();
+        var preview = await previewResp.Content.ReadFromJsonAsync<JsonElement>();
+        var previewProduct = preview.GetProperty("products")[0];
+        Assert.True(previewProduct.GetProperty("duplicate").GetBoolean());
+        Assert.True(previewProduct.GetProperty("hasChanges").GetBoolean());
+        Assert.Equal(productId, previewProduct.GetProperty("existingProductId").GetInt32());
+        var previewPart = previewProduct.GetProperty("parts")[0];
+        Assert.Equal("changed", previewPart.GetProperty("changeType").GetString());
+        var changed = previewPart.GetProperty("changedFields").EnumerateArray().Select(x => x.GetString()).ToList();
+        Assert.Contains("dailyCapacity", changed);
+        Assert.Contains("unitCost", changed);
 
         var req = new
         {
             products = new object[]
             {
-                new { productNo = "VER1", parts = new object[]
+                new { productNo = "VER1", existingProductId = productId, parts = new object[]
                 {
-                    new { itemName="主体", partName="头", craft="移印", craftDetail="移印",
-                          dailyCapacity=1, stdMachineCount=1, laborPrice=0.0, unitCost=2.0, paintCost=0.0, quotedPrice=0.0, remark=(string?)null },
+                    new { itemName="头", partName="头", craft="移印", craftDetail="移印",
+                          dailyCapacity=200, stdMachineCount=1, laborPrice=0.1, unitCost=2.0, paintCost=0.2, quotedPrice=0.3,
+                          remark=(string?)null, existingPartId=partId, updateFields=new[]{"unitCost"} },
                 }},
             }
         };
@@ -261,10 +294,44 @@ public class ProductImportApiTests : IAsyncLifetime
         resp.EnsureSuccessStatusCode();
         var json = await resp.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal(0, json.GetProperty("created").GetInt32());
-        Assert.Equal(1, json.GetProperty("skipped").GetInt32());
+        Assert.Equal(1, json.GetProperty("updated").GetInt32());
+        Assert.Equal(1, json.GetProperty("updatedFields").GetInt32());
 
-        var list = await _client.GetFromJsonAsync<JsonElement>("/api/products");
-        var ver1 = list.EnumerateArray().Where(p => p.GetProperty("productNo").GetString() == "VER1").ToList();
-        Assert.Single(ver1);
+        var detail = await _client.GetFromJsonAsync<JsonElement>($"/api/products/{productId}");
+        var parts = detail.GetProperty("items")[0].GetProperty("parts");
+        Assert.Equal(2, parts.GetArrayLength());
+        var head = parts.EnumerateArray().Single(p => p.GetProperty("partName").GetString() == "头");
+        Assert.Equal(2.0, head.GetProperty("unitCost").GetDouble());
+        Assert.Equal(100, head.GetProperty("dailyCapacity").GetInt32());
+    }
+
+    [Fact]
+    public async Task Commit_SameExistingProductWithSeveralNewParts_DoesNotIndexTemporaryZeroIds()
+    {
+        var created = await (await _client.PostAsJsonAsync("/api/products", new { productNo = "MULTI-UPDATE",
+            items = new[]{ new { itemName="主体", parts = new[]{ new { partName="原明细", craft="手喷", unitCost=1.0 } } } } }))
+            .Content.ReadFromJsonAsync<JsonElement>();
+        var productId = created.GetProperty("id").GetInt32();
+
+        object NewPart(string name) => new { itemName="主体", partName=name, craft="手喷", craftDetail="喷油",
+            dailyCapacity=100, stdMachineCount=1, laborPrice=0.1, unitCost=0.2, paintCost=0.1,
+            quotedPrice=0.3, remark=(string?)null, existingPartId=(int?)null, updateFields=Array.Empty<string>() };
+        var req = new
+        {
+            products = new object[]
+            {
+                new { productNo="MULTI-UPDATE", existingProductId=productId, parts=new[]{ NewPart("新增一"), NewPart("新增二") } },
+                // 第二个同货号条目会再次读取 tracked entity；旧实现会把前两条临时 Id=0 放进字典并崩溃。
+                new { productNo="MULTI-UPDATE", existingProductId=productId, parts=new[]{ NewPart("新增三") } },
+            }
+        };
+
+        var response = await _client.PostAsJsonAsync("/api/products/import/commit", req);
+        response.EnsureSuccessStatusCode();
+        var result = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(3, result.GetProperty("addedParts").GetInt32());
+
+        var detail = await _client.GetFromJsonAsync<JsonElement>($"/api/products/{productId}");
+        Assert.Equal(4, detail.GetProperty("items")[0].GetProperty("parts").GetArrayLength());
     }
 }

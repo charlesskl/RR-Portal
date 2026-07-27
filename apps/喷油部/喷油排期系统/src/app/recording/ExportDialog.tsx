@@ -8,14 +8,17 @@ export default function ExportDialog({ date, lines }: { date: string; lines: { i
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<"plan" | "actual">("plan");
   // 备注按拉别 id 存（与后端按 lineId 匹配一致，避免显示名对不上丢备注）
-  const [notes, setNotes] = useState<Record<number, { header: string; misc: string }>>({});
+  const [notes, setNotes] = useState<Record<number, { header: string; misc: string; miscCount: string }>>({});
   const [busy, setBusy] = useState(false);
 
   async function doExport() {
     setBusy(true);
     try {
       const lineNotes = lines.map((l) => ({
-        lineId: l.id, headerText: notes[l.id]?.header ?? "", miscText: notes[l.id]?.misc ?? "",
+        lineId: l.id,
+        headerText: notes[l.id]?.header ?? "",
+        miscText: notes[l.id]?.misc ?? "",
+        miscCount: Number(notes[l.id]?.miscCount || 0),
       }));
       const resp = await apiFetch("/api/recording/export", {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -62,11 +65,15 @@ export default function ExportDialog({ date, lines }: { date: string; lines: { i
                 <input placeholder="表头人数说明（如：35人，借出B拉2人…实际29人）"
                   className="mb-1.5 w-full rounded-md border border-app-border px-2 py-1 text-[13px]"
                   value={notes[l.id]?.header ?? ""}
-                  onChange={(e) => setNotes((p) => ({ ...p, [l.id]: { header: e.target.value, misc: p[l.id]?.misc ?? "" } }))} />
+                  onChange={(e) => setNotes((p) => ({ ...p, [l.id]: { header: e.target.value, misc: p[l.id]?.misc ?? "", miscCount: p[l.id]?.miscCount ?? "" } }))} />
+                <input type="number" min="0" placeholder="杂工人数（如：10）"
+                  className="mb-1.5 w-full rounded-md border border-app-border px-2 py-1 text-[13px]"
+                  value={notes[l.id]?.miscCount ?? ""}
+                  onChange={(e) => setNotes((p) => ({ ...p, [l.id]: { header: p[l.id]?.header ?? "", misc: p[l.id]?.misc ?? "", miscCount: e.target.value } }))} />
                 <textarea placeholder="杂工明细（如：做板2人，调机师傅1人…）" rows={2}
                   className="w-full rounded-md border border-app-border px-2 py-1 text-[13px]"
                   value={notes[l.id]?.misc ?? ""}
-                  onChange={(e) => setNotes((p) => ({ ...p, [l.id]: { header: p[l.id]?.header ?? "", misc: e.target.value } }))} />
+                  onChange={(e) => setNotes((p) => ({ ...p, [l.id]: { header: p[l.id]?.header ?? "", misc: e.target.value, miscCount: p[l.id]?.miscCount ?? "" } }))} />
               </div>
             ))}
             <div className="mt-3 flex justify-end gap-2">

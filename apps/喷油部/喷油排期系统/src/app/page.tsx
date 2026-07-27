@@ -3,8 +3,6 @@ import Link from "next/link";
 import { getSession } from "@/lib/session";
 import { redirect } from "next/navigation";
 import { dotnetGet } from "@/lib/dotnet";
-import type { GanttOrder } from "@/lib/scheduleData";
-import GanttView from "@/app/schedule/gantt/GanttView";
 
 // .NET 仪表盘统计接口返回结构（字段为 .NET 默认 camelCase 序列化）
 // 对应 server/.../Dashboard/DashboardController.cs 的 DashboardStats 记录。
@@ -20,17 +18,11 @@ export default async function Dashboard() {
   if (!session.userId) redirect("/login");
 
   const now = new Date();
-  const pad = (n: number) => String(n).padStart(2, "0");
-  const todayStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
-
   // 取数已迁移到 .NET：
   //  - 4 个统计卡 → GET /api/dashboard（口径与原 Prisma count 1:1 对齐）
   //  - 甘特图数据 → GET /api/schedule?today=YYYY-MM-DD（替代原 buildGanttData(now)，
   //    today 沿用页面本地日期字符串以保持 expectedOutDate 计算口径一致）
-  const [stats, ganttOrders] = await Promise.all([
-    dotnetGet<DashboardStats>("/api/dashboard"),
-    dotnetGet<GanttOrder[]>(`/api/schedule?today=${todayStr}`),
-  ]);
+  const stats = await dotnetGet<DashboardStats>("/api/dashboard");
   const { ordersTotal, ordersActive, overdue, productsCount } = stats;
 
   const dateStr = now.toLocaleDateString("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit" });
@@ -38,7 +30,7 @@ export default async function Dashboard() {
 
   const STATS = [
     { label: "订单总数（张）",   value: ordersTotal,   dot: "bg-mint-400" },
-    { label: "在产订单（张）",   value: ordersActive,  dot: "bg-sky",     hint: "状态=已确认" },
+    { label: "在产订单（张）",   value: ordersActive,  dot: "bg-sky",     hint: "状态=在产" },
     { label: "已逾期订单（张）", value: overdue,       dot: "bg-rose",    hint: "交货日已过且未作废" },
     { label: "产品款数（款）",   value: productsCount, dot: "bg-purple" },
   ];
@@ -120,10 +112,6 @@ export default async function Dashboard() {
         </div>
       </div>
 
-      {/* 排期甘特图（订单总览的甘特图视图，标题已在组件外去除） */}
-      <div>
-        <GanttView orders={ganttOrders} today={todayStr} />
-      </div>
     </div>
   );
 }

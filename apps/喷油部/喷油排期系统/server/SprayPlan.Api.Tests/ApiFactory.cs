@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using SprayPlan.Api.Data;
 using SprayPlan.Api.Entities;
 using SprayPlan.Api.Services;
@@ -18,6 +19,8 @@ public class ApiFactory : WebApplicationFactory<Program>
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
+        // Tests must not write to the Windows Event Log (which requires elevated permissions).
+        builder.ConfigureLogging(logging => logging.ClearProviders());
         builder.ConfigureServices(services =>
         {
             // 移除原 dev.db 的 DbContext 注册，替换成临时测试库

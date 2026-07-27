@@ -2,7 +2,6 @@
 // 已全量迁移到 .NET：GET /api/lines（拉别机台）+ GET /api/schedule/orders（可排订单+展开部位）。
 import { getSession } from "@/lib/session";
 import { redirect } from "next/navigation";
-import { dotnetGet } from "@/lib/dotnet";
 import ScheduleTabs from "./ScheduleTabs";
 
 // .NET GET /api/lines 返回结构（对齐 server/.../Basic/LineDtos.cs）
@@ -25,27 +24,16 @@ type UrgentOrder = {
   deliveryDate: string | null; scheduled: boolean; parts: SchedulablePart[];
 };
 
-export default async function SchedulePage() {
+export default async function SchedulePage({ searchParams }: { searchParams?: { orderId?: string; orderNo?: string; from?: string; to?: string } }) {
   const session = await getSession();
   if (!session.userId) redirect("/login");
 
-  // 拉别+机台、可排订单 —— 都改调 .NET（替代原先的 prisma 直查 + expandOrderParts）
-  const [allLines, orders, urgentOrders] = await Promise.all([
-    dotnetGet<DotnetLine[]>("/api/lines"),
-    dotnetGet<SchedulableOrder[]>("/api/schedule/orders"),
-    dotnetGet<UrgentOrder[]>("/api/schedule/urgent/orders"),
-  ]);
-
-  // /api/lines 返回所有拉别（含停用），按原页面口径只取启用的
-  const lines = allLines.filter((l) => l.isActive);
-  const lineData = lines.map((l) => ({
-    id: l.id,
-    name: l.name,
-    workshop: l.workshop,
-    leaderName: l.leaderName,
-    craftType: l.craftType,
-    machines: l.machines.map((m) => ({ id: m.id, machineNo: m.machineNo, isUV: m.isUV })),
-  }));
-
-  return <ScheduleTabs lines={lineData} orders={orders} urgentOrders={urgentOrders} />;
+  // 首屏只渲染排期总览。周排所需的拉别、订单和急单在用户点开周排后再加载。
+  const orderId = Number(searchParams?.orderId ?? 0) || undefined;
+  return <ScheduleTabs orderFilter={orderId ? {
+    orderId,
+    orderNo: searchParams?.orderNo ?? `#${orderId}`,
+    from: searchParams?.from,
+    to: searchParams?.to,
+  } : undefined} />;
 }

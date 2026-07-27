@@ -41,6 +41,7 @@ const nextConfig = {
         { source: "/api/products/:id/parts/:partId", destination: `${DOTNET_API_URL}/api/products/:id/parts/:partId` },
 
         // 订单
+        { source: "/api/orders/overview", destination: `${DOTNET_API_URL}/api/orders/overview` },
         { source: "/api/orders", destination: `${DOTNET_API_URL}/api/orders` },
         { source: "/api/orders/:id", destination: `${DOTNET_API_URL}/api/orders/:id` },
 
@@ -49,6 +50,8 @@ const nextConfig = {
         { source: "/api/plans/:id", destination: `${DOTNET_API_URL}/api/plans/:id` },
 
         // 月排自动排期（生成草稿预览 + 提交保存）
+        { source: "/api/schedule", destination: `${DOTNET_API_URL}/api/schedule` },
+        { source: "/api/schedule/orders", destination: `${DOTNET_API_URL}/api/schedule/orders` },
         { source: "/api/schedule/auto", destination: `${DOTNET_API_URL}/api/schedule/auto` },
         { source: "/api/schedule/auto/commit", destination: `${DOTNET_API_URL}/api/schedule/auto/commit` },
 

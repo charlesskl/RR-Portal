@@ -17,8 +17,10 @@ test.describe("P0 验收：登录 → Dashboard → 退出", () => {
     await expect(page).toHaveURL("http://localhost:8400/");
     // 仪表盘 h1 带 emoji "📊 仪表盘"，用模糊匹配
     await expect(page.getByRole("heading", { name: /仪表盘/ })).toBeVisible();
-    // TopNav 右上角显示 "admin (admin)"——锁定 header 避免和侧栏/表格里的 admin 冲突
-    await expect(page.locator("header").getByText(/admin \(admin\)/)).toBeVisible();
+    // 必须是重新读取 Cookie 后的已登录布局：顶部导航可见，主区域有 32px 安全边距。
+    await expect(page.locator("header")).toBeVisible();
+    await expect(page.locator("header").getByText("admin", { exact: true })).toHaveCount(2);
+    await expect.poll(() => page.locator("body > main").evaluate((el) => getComputedStyle(el).paddingLeft)).toBe("32px");
 
     // 通过侧栏跳转到用户管理
     await page.getByRole("link", { name: /用户管理/ }).click();

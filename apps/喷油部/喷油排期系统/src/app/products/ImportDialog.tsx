@@ -9,10 +9,16 @@ type PreviewPart = {
   itemName: string; partName: string; craftDetail: string; category: string | null;
   dailyCapacity: number; stdMachineCount: number;
   laborPrice: number; unitCost: number; paintCost: number; quotedPrice: number; remark: string | null;
+  existingPartId: number | null; changeType: "new" | "changed" | "unchanged"; changedFields: string[];
+  current: null | {
+    itemName: string; partName: string; craftDetail: string; craft: string;
+    dailyCapacity: number; stdMachineCount: number; laborPrice: number; unitCost: number;
+    paintCost: number; quotedPrice: number; remark: string | null;
+  };
 };
 type PreviewProduct = {
   sheetName: string; productNo: string; suggestedItemName: string; isThreeLevel: boolean;
-  duplicate: boolean; parts: PreviewPart[];
+  duplicate: boolean; existingProductId: number | null; hasChanges: boolean; parts: PreviewPart[];
 };
 type Unrecognized = { sheetName: string; reason: string };
 type PreviewResp = {
@@ -21,6 +27,14 @@ type PreviewResp = {
 };
 
 const partKey = (pi: number, ti: number) => `${pi}-${ti}`;
+const FIELD_META: Record<string, { label: string }> = {
+  dailyCapacity: { label: "目标数" }, stdMachineCount: { label: "人数" },
+  laborPrice: { label: "工价" }, unitCost: { label: "核价" },
+  paintCost: { label: "油漆价" }, quotedPrice: { label: "报价" },
+  remark: { label: "备注" }, craft: { label: "工序大类" },
+  craftDetail: { label: "原工序" },
+};
+const showValue = (v: unknown) => v === null || v === "" ? "（空）" : String(v);
 
 // 导入按钮（自带弹窗开关）—— 放在产品核价表页头「+ 新建产品」旁，经典蓝主色
 export function ImportButton() {
@@ -44,6 +58,9 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
   const [preview, setPreview] = useState<PreviewResp | null>(null);
   const [crafts, setCrafts] = useState<Record<string, string>>({});
   const [items, setItems] = useState<Record<string, string>>({});
+  const [selected, setSelected] = useState<Record<string, boolean>>({});
+  const selectedKey = (pi: number, ti: number, field: string) => `${pi}-${ti}-${field}`;
+  const isSelected = (pi: number, ti: number, field: string) => selected[selectedKey(pi, ti, field)] !== false;
   // 取某部位当前子件名（用户改过用改后的，否则用自动猜的）
   const itemOf = (pi: number, ti: number, fallback: string) => items[partKey(pi, ti)] ?? fallback;
 
@@ -68,28 +85,36 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
     if (!preview) return;
     for (let pi = 0; pi < preview.products.length; pi++) {
       const prod = preview.products[pi];
-      if (prod.duplicate) continue;   // 重复货号直接跳过
       for (let ti = 0; ti < prod.parts.length; ti++) {
         const pt = prod.parts[ti];
+        if (pt.changeType === "unchanged") continue;
+        if (pt.changeType === "new" && !isSelected(pi, ti, "__new__")) continue;
+        if (pt.changeType === "changed" && !pt.changedFields.some((f) => isSelected(pi, ti, f))) continue;
         const resolved = pt.category ?? crafts[partKey(pi, ti)];
-        if (!resolved) { setErr(`还有未指定大类的工序：${prod.productNo} / ${pt.partName}`); return; }
+        const needsCraft = pt.changeType === "new" || (pt.changedFields.includes("craft") && isSelected(pi, ti, "craft"));
+        if (needsCraft && !resolved) { setErr(`还有未指定大类的工序：${prod.productNo} / ${pt.partName}`); return; }
       }
     }
     // 先带上原始下标再过滤，避免 indexOf 在 preview 被复制/重建时返回 -1 导致工序类别静默丢失
     const products = preview.products
       .map((p, pi) => ({ p, pi }))
-      .filter(({ p }) => !p.duplicate)
       .map(({ p, pi }) => ({
         productNo: p.productNo,
+        existingProductId: p.existingProductId,
         parts: p.parts
-          .map((pt, ti) => ({ ...pt, _cat: pt.category ?? crafts[partKey(pi, ti)], _item: itemOf(pi, ti, pt.itemName) }))
+          .map((pt, ti) => ({ ...pt, _ti: ti, _cat: pt.category ?? crafts[partKey(pi, ti)], _item: itemOf(pi, ti, pt.itemName) }))
+          .filter((pt) => pt.changeType !== "unchanged")
+          .filter((pt) => pt.changeType !== "new" || isSelected(pi, pt._ti, "__new__"))
+          .filter((pt) => pt.changeType !== "changed" || pt.changedFields.some((f) => isSelected(pi, pt._ti, f)))
           .filter((pt) => pt._cat !== "__skip__")
           .map((pt) => ({
             itemName: pt._item, partName: pt.partName,
-            craft: pt._cat, craftDetail: pt.craftDetail,
+            craft: pt._cat ?? pt.current?.craft ?? "", craftDetail: pt.craftDetail,
             dailyCapacity: pt.dailyCapacity, stdMachineCount: pt.stdMachineCount,
             laborPrice: pt.laborPrice, unitCost: pt.unitCost, paintCost: pt.paintCost, quotedPrice: pt.quotedPrice,
             remark: pt.remark,
+            existingPartId: pt.existingPartId,
+            updateFields: pt.changeType === "changed" ? pt.changedFields.filter((f) => isSelected(pi, pt._ti, f)) : [],
           })),
       }))
       .filter((p) => p.parts.length > 0);
@@ -100,9 +125,13 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ products }),
       });
-      if (!res.ok) { setErr("导入失败，请重试"); return; }
+      if (!res.ok) {
+        const detail = await res.json().catch(() => ({}));
+        setErr(detail?.error ?? `导入失败（${res.status}），请重试`);
+        return;
+      }
       const r = await res.json();
-      alert(`导入完成：成功 ${r.created} 个，跳过 ${r.skipped} 个`);
+      alert(`处理完成：新增产品 ${r.created} 个，更新产品 ${r.updated} 个，新增明细 ${r.addedParts} 条，更新字段 ${r.updatedFields} 项，跳过 ${r.skipped} 个`);
       onClose();
       router.refresh();
     } catch {
@@ -215,12 +244,35 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
 
             {preview.products.some((p) => p.duplicate) && (
               <div>
-                <div className="text-sm font-semibold text-rose mb-2 pb-1 border-b border-[#f3d0d6]">⚠ 重复货号（系统已存在，将跳过）</div>
+                <div className="text-sm font-semibold text-[#b45309] mb-2 pb-1 border-b border-[#fde68a]">🔄 重复货号对比（只更新勾选项，上传表缺少的旧明细不会删除）</div>
                 {preview.products.map((p, pi) => p.duplicate && (
-                  <div key={pi} className="flex items-center gap-3 border border-app-border rounded-btn px-3 py-2 mb-2 bg-[#fafafa]">
-                    <span className="bg-[#F4B7BE] text-[#C91D32] text-xs px-2 py-0.5 rounded-full">重复</span>
-                    <span className="font-mono font-semibold">{p.productNo}</span>
-                    <span className="text-text-tertiary text-xs">· 系统中已存在，本次跳过</span>
+                  <div key={pi} className="border border-app-border rounded-btn px-3 py-3 mb-3 bg-[#fffbeb]">
+                    <div className="flex items-center gap-3 mb-2">
+                      <span className={p.hasChanges ? "bg-[#fef3c7] text-[#b45309] text-xs px-2 py-0.5 rounded-full" : "bg-[#e5e7eb] text-[#6b7280] text-xs px-2 py-0.5 rounded-full"}>{p.hasChanges ? "修改版" : "无变化"}</span>
+                      <span className="font-mono font-semibold">{p.productNo}</span>
+                      <span className="text-text-tertiary text-xs">{p.hasChanges ? "· 请确认以下差异" : "· 与系统现有数据一致，将跳过"}</span>
+                    </div>
+                    {p.parts.map((pt, ti) => pt.changeType === "new" ? (
+                      <label key={ti} className="flex items-center gap-2 text-xs py-1.5 border-t border-[#fde68a]">
+                        <input type="checkbox" checked={isSelected(pi, ti, "__new__")} onChange={(e) => setSelected({ ...selected, [selectedKey(pi, ti, "__new__")]: e.target.checked })} />
+                        <span className="text-mint-700 font-semibold">新增明细</span>
+                        <span>{pt.itemName} / {pt.partName} / {pt.craftDetail || pt.category || "未指定工序"}</span>
+                      </label>
+                    ) : pt.changeType === "changed" ? (
+                      <div key={ti} className="py-1.5 border-t border-[#fde68a]">
+                        <div className="text-xs font-semibold mb-1">{pt.current?.itemName} / {pt.partName} / {pt.craftDetail || pt.current?.craft}</div>
+                        {pt.changedFields.map((field) => {
+                          const meta = FIELD_META[field];
+                          if (!meta || !pt.current) return null;
+                          const oldValue = field === "craft" ? pt.current.craft : pt.current[field as keyof typeof pt.current];
+                          const newValue = field === "craft" ? pt.category : pt[field as keyof PreviewPart];
+                          return <label key={field} className="grid grid-cols-[24px_90px_1fr_24px_1fr] items-center text-xs py-1">
+                            <input type="checkbox" checked={isSelected(pi, ti, field)} onChange={(e) => setSelected({ ...selected, [selectedKey(pi, ti, field)]: e.target.checked })} />
+                            <span>{meta.label}</span><span className="text-text-secondary">现有：{showValue(oldValue)}</span><span>→</span><span className="text-[#b45309] font-semibold">上传：{showValue(newValue)}</span>
+                          </label>;
+                        })}
+                      </div>
+                    ) : null)}
                   </div>
                 ))}
               </div>

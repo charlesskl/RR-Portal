@@ -1,6 +1,8 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using DocumentFormat.OpenXml.Packaging;
+using DocumentFormat.OpenXml.Spreadsheet;
 using Xunit;
 
 namespace SprayPlan.Api.Tests.Recording;
@@ -251,5 +253,13 @@ public class RecordingApiTests : IAsyncLifetime
         var bytes = await r.Content.ReadAsByteArrayAsync();
         Assert.True(bytes.Length > 0);
         Assert.Equal(new byte[] { 0x50, 0x4B }, bytes[..2]);
+        using var stream = new MemoryStream(bytes);
+        using var doc = SpreadsheetDocument.Open(stream, false);
+        var row = doc.WorkbookPart!.WorksheetParts.First().Worksheet.GetFirstChild<SheetData>()!
+            .Elements<Row>().Single(x => x.RowIndex == 3u);
+        Assert.Equal("50", row.Elements<Cell>().Single(c => c.CellReference == "K3").CellValue!.Text); // 实际生产=入库数
+        Assert.Equal(1d, double.Parse(row.Elements<Cell>().Single(c => c.CellReference == "L3").CellValue!.Text,
+            System.Globalization.CultureInfo.InvariantCulture), 8); // 吻合率=入库数/计划生产数
+        Assert.Equal("IFERROR(K3/I3,0)", row.Elements<Cell>().Single(c => c.CellReference == "L3").CellFormula!.Text);
     }
 }

@@ -294,6 +294,57 @@ public class PlansController(AppDbContext db) : ControllerBase
     }
 
     // DELETE /api/plans/{id} —— 软删（deletedAt + deletedBy）
+    [HttpPost("batch-unschedule")]
+    [Authorize(Roles = "clerk,admin")]
+    public async Task<IActionResult> BatchUnschedule([FromBody] BatchUnscheduleRequest req)
+    {
+        var ids = (req.PlanIds ?? new()).Distinct().ToList();
+        var reason = (req.Reason ?? "").Trim();
+        if (ids.Count == 0) return BadRequest(new { error = "请至少选择一条计划" });
+        if (ids.Count > 500) return BadRequest(new { error = "一次最多撤销500条计划" });
+        if (reason.Length < 2) return BadRequest(new { error = "请填写撤销原因" });
+
+        var plans = await db.ProductionPlans
+            .Where(p => ids.Contains(p.Id) && p.DeletedAt == null)
+            .ToListAsync();
+        if (plans.Count != ids.Count)
+            return BadRequest(new { error = "部分计划不存在或已被撤销，请刷新后重试" });
+        if (plans.Any(p => p.Status == "recorded" || p.GoodQty is not null))
+            return BadRequest(new { error = "选中计划包含已录实绩数据，不能撤销" });
+
+        var orderIds = plans.Select(p => p.OrderId).Distinct().ToList();
+        var orders = await db.Orders.Where(o => orderIds.Contains(o.Id)).ToListAsync();
+        if (orders.Any(o => o.Status is "completed" or "archived"))
+            return BadRequest(new { error = "完工或作废订单的计划不能批量撤销" });
+
+        var by = CurrentUser();
+        var now = DateTime.UtcNow;
+        foreach (var p in plans)
+        {
+            p.DeletedAt = now;
+            p.DeletedBy = by;
+            var hist = ParseHistory(p.ModificationHistory);
+            hist.Add(new { action = "batch_unschedule", reason, by, at = now.ToString("o") });
+            p.ModificationHistory = JsonSerializer.Serialize(hist);
+        }
+
+        var remainingOrderIds = await db.ProductionPlans
+            .Where(p => orderIds.Contains(p.OrderId) && p.DeletedAt == null && !ids.Contains(p.Id))
+            .Select(p => p.OrderId)
+            .Distinct()
+            .ToListAsync();
+        var remaining = remainingOrderIds.ToHashSet();
+        foreach (var order in orders.Where(o => !remaining.Contains(o.Id) && (o.Status is "scheduled" or "in_production")))
+        {
+            order.Status = "received";
+            order.LastUpdatedBy = by;
+            order.UpdatedAt = now;
+        }
+
+        await db.SaveChangesAsync();
+        return Ok(new BatchUnscheduleResult(plans.Count, orderIds.Count, ids));
+    }
+
     [HttpDelete("{id:int}")]
     [Authorize(Roles = "clerk,admin")]
     public async Task<IActionResult> Delete(int id)

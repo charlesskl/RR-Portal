@@ -4,6 +4,8 @@ namespace SprayPlan.Api.Features.Plans;
 public record CreatePlanRow(string? PlanDate, string? PlanType, int? LineId, int? OrderId, string? ItemName, string? PartName, int? SourcePartId, List<string>? MachineNos, double? PlannedQty, int? WorkerCount, int? StepNo, string? Craft);
 public record CreatePlansRequest(List<CreatePlanRow>? Plans);
 public record CreatePlansResult(int Count);
+public record BatchUnscheduleRequest(List<int>? PlanIds, string? Reason);
+public record BatchUnscheduleResult(int DeletedPlans, int AffectedOrders, List<int> PlanIds);
 
 // PATCH：第6阶段处理计划字段；goodQty/defectQty/workHours 实绩分支第7阶段补
 public record UpdatePlanRequest(double? PlannedQty, List<string>? MachineNos, int? WorkerCount, string? PlanDate, string? Remark, int? GoodQty, int? ReportedQty, int? DefectQty, double? WorkHours, int? LineId, int? StepNo, string? Craft);

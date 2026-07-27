@@ -1,10 +1,11 @@
 "use client";
-import { apiFetch } from "@/lib/apiFetch";
 // 周排：手工排期主场。内部包含「已排调整」「新建计划」「排急单」三个入口。
 // 已排调整沿用原周排；新建计划吸收原日排能力，但交互改为周排式表格；急单复用 UrgentScheduler。
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { apiFetch } from "@/lib/apiFetch";
 import { lineLabel } from "@/lib/line";
+import { invalidateClientCache } from "@/lib/clientCache";
 import UrgentScheduler from "./UrgentScheduler";
 
 type Machine = { id: number; machineNo: string; isUV: boolean };
@@ -16,7 +17,7 @@ type WeeklyMode = "adjust" | "create" | "urgent";
 type OrderFilter = "all" | "normal" | "ma";
 type WeeklyTarget = { planId: number; date: string; lineId: number };
 
-type Plan = { id: number; planDate: string; lineId: number; orderId: number; itemName: string; partName: string; sourcePartId: number | null; machineNos: string[]; plannedQty: number; workerCount: number; stepNo: number; craft: string; standardStepCount: number | null; standardCraft: string | null; craftAdjusted: boolean };
+type Plan = { id: number; planDate: string; lineId: number; orderId: number; itemName: string; partName: string; sourcePartId: number | null; machineNos: string[]; plannedQty: number; workerCount: number; stepNo: number; craft: string; standardStepCount: number | null; standardCraft: string | null; craftAdjusted: boolean; status: string; goodQty: number | null };
 type Edit = { planDate: string; lineId: number; plannedQty: number | ""; workerCount: number | ""; stepNo: number | ""; craft: string; machineNos: string[] };
 type NewRow = {
   rowKey: string;
@@ -92,7 +93,9 @@ function AdjustPlansPanel({ lines, target }: { lines: Line[]; target?: WeeklyTar
   const [toDate, setToDate] = useState<string>(defTo());
   const [plans, setPlans] = useState<Plan[]>([]);
   const [edits, setEdits] = useState<Record<number, Edit>>({});
-  const [deleted, setDeleted] = useState<Set<number>>(new Set());
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [showBatchDialog, setShowBatchDialog] = useState(false);
+  const [batchReason, setBatchReason] = useState("");
   const [activeMachineKey, setActiveMachineKey] = useState<number | null>(null);
   const [focusPlanId, setFocusPlanId] = useState<number | null>(target?.planId ?? null);
   const focusRowRef = useRef<HTMLTableRowElement | null>(null);
@@ -103,7 +106,7 @@ function AdjustPlansPanel({ lines, target }: { lines: Line[]; target?: WeeklyTar
   const lineCraft = useCallback((id: number) => lines.find((l) => l.id === id)?.craftType ?? "", [lines]);
 
   const loadPlans = useCallback(async () => {
-    if (!lineId || !fromDate || !toDate) { setPlans([]); setEdits({}); setDeleted(new Set()); return; }
+    if (!lineId || !fromDate || !toDate) { setPlans([]); setEdits({}); setSelected(new Set()); return; }
     setLoading(true);
     try {
       const raw: Plan[] = await apiFetch(`/api/plans?lineId=${lineId}&from=${fromDate}&to=${toDate}`).then((r) => r.json());
@@ -111,7 +114,7 @@ function AdjustPlansPanel({ lines, target }: { lines: Line[]; target?: WeeklyTar
       setPlans(rows);
       const init: Record<number, Edit> = {};
       rows.forEach((p) => { init[p.id] = { planDate: p.planDate, lineId: p.lineId, plannedQty: p.plannedQty, workerCount: p.workerCount, stepNo: p.stepNo || 1, craft: p.craft || lineCraft(p.lineId), machineNos: p.machineNos }; });
-      setEdits(init); setDeleted(new Set()); setActiveMachineKey(null);
+      setEdits(init); setSelected(new Set()); setActiveMachineKey(null);
     } catch { setPlans([]); setEdits({}); }
     finally { setLoading(false); }
   }, [lineId, fromDate, toDate, lineCraft]);
@@ -146,9 +149,7 @@ function AdjustPlansPanel({ lines, target }: { lines: Line[]; target?: WeeklyTar
   async function save() {
     setSaving(true);
     try {
-      for (const id of Array.from(deleted)) await apiFetch(`/api/plans/${id}`, { method: "DELETE" });
       for (const p of plans) {
-        if (deleted.has(p.id)) continue;
         const e = edits[p.id]; if (!e) continue;
         const body: Record<string, unknown> = {};
         if (e.planDate !== p.planDate) body.planDate = e.planDate;
@@ -167,7 +168,30 @@ function AdjustPlansPanel({ lines, target }: { lines: Line[]; target?: WeeklyTar
     finally { setSaving(false); }
   }
 
-  const visible = plans.filter((p) => !deleted.has(p.id));
+  async function batchUnschedule() {
+    if (selected.size === 0 || batchReason.trim().length < 2) return;
+    setSaving(true);
+    try {
+      const response = await apiFetch("/api/plans/batch-unschedule", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ planIds: Array.from(selected), reason: batchReason.trim() }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || "批量撤销失败");
+      invalidateClientCache("/api/schedule");
+      setShowBatchDialog(false);
+      setBatchReason("");
+      alert(`已撤销 ${result.deletedPlans} 条计划，涉及 ${result.affectedOrders} 张订单`);
+      await loadPlans();
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "批量撤销失败，请重试");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const visible = plans;
   const dayKeys = Array.from(new Set(visible.map((p) => ed(p).planDate))).sort();
 
   return (
@@ -216,6 +240,7 @@ function AdjustPlansPanel({ lines, target }: { lines: Line[]; target?: WeeklyTar
 
       {!loading && dayKeys.map((key) => {
         const rows = visible.filter((p) => ed(p).planDate === key);
+        const eligibleRows = rows.filter((p) => p.status !== "recorded" && p.goodQty == null);
         const total = rows.reduce((s, p) => s + (Number(ed(p).plannedQty) || 0), 0);
         return (
           <div key={key} className="bg-white border border-app-border rounded-[10px] mb-4 overflow-hidden">
@@ -226,6 +251,16 @@ function AdjustPlansPanel({ lines, target }: { lines: Line[]; target?: WeeklyTar
             <table className="w-full border-collapse text-[13px]">
               <thead>
                 <tr className="bg-[#f0fdf4] text-[#047857]">
+                  <th className="px-3 py-2 text-center font-bold">
+                    <input type="checkbox" aria-label={`全选${dayLabel(key)}计划`}
+                      checked={eligibleRows.length > 0 && eligibleRows.every((p) => selected.has(p.id))}
+                      disabled={eligibleRows.length === 0}
+                      onChange={(ev) => setSelected((current) => {
+                        const next = new Set(current);
+                        eligibleRows.forEach((p) => ev.target.checked ? next.add(p.id) : next.delete(p.id));
+                        return next;
+                      })} />
+                  </th>
                   <th className="px-3 py-2 text-left font-bold">日期</th>
                   <th className="px-3 py-2 text-left font-bold">拉别</th>
                   <th className="px-3 py-2 text-left font-bold">部位</th>
@@ -245,8 +280,19 @@ function AdjustPlansPanel({ lines, target }: { lines: Line[]; target?: WeeklyTar
                     <tr
                       key={p.id}
                       ref={focused ? focusRowRef : null}
-                      className={focused ? "bg-[#ecfdf5] ring-2 ring-inset ring-[#34d399]" : i % 2 ? "bg-[#F9F9F9]" : "bg-white"}
+                      className={selected.has(p.id) ? "bg-[#fff1f2]" : focused ? "bg-[#ecfdf5] ring-2 ring-inset ring-[#34d399]" : i % 2 ? "bg-[#F9F9F9]" : "bg-white"}
                     >
+                      <td className="px-3 py-2 border-b border-app-border text-center">
+                        <input type="checkbox" aria-label={`选择${p.itemName}${p.partName}`}
+                          checked={selected.has(p.id)}
+                          disabled={p.status === "recorded" || p.goodQty != null}
+                          title={p.status === "recorded" || p.goodQty != null ? "已有实绩，不能撤销" : "选择后可批量撤销"}
+                          onChange={(ev) => setSelected((current) => {
+                            const next = new Set(current);
+                            ev.target.checked ? next.add(p.id) : next.delete(p.id);
+                            return next;
+                          })} />
+                      </td>
                       <td className="px-3 py-2 border-b border-app-border">
                         <input type="date" className="border border-app-border rounded-btn px-2 py-1 text-[13px]" value={e.planDate} onChange={(ev) => setEd(p.id, { planDate: ev.target.value })} />
                       </td>
@@ -289,9 +335,7 @@ function AdjustPlansPanel({ lines, target }: { lines: Line[]; target?: WeeklyTar
                           onClick={() => setActiveMachineKey(p.id)}
                           className={`w-[130px] rounded-btn px-2 py-1 text-[13px] cursor-pointer bg-white ${activeMachineKey === p.id ? "border-2 border-[#047857]" : "border border-app-border hover:border-[#047857]"}`} />
                       </td>
-                      <td className="px-3 py-2 border-b border-app-border">
-                        <button type="button" className="text-rose text-[13px] hover:underline" onClick={() => setDeleted((s) => new Set(s).add(p.id))}>删除</button>
-                      </td>
+                      <td className="px-3 py-2 border-b border-app-border text-text-tertiary">{p.status === "recorded" || p.goodQty != null ? "已有实绩" : "可撤销"}</td>
                     </tr>
                   );
                 })}
@@ -303,11 +347,39 @@ function AdjustPlansPanel({ lines, target }: { lines: Line[]; target?: WeeklyTar
 
       {!loading && dayKeys.length > 0 && (
         <div className="flex justify-end gap-3 items-center mt-2">
-          <span className="mr-auto text-xs text-text-secondary">改完点保存统一提交；未保存不生效。换拉/挪天保存后会移到对应拉别或日期。</span>
+          <span className="mr-auto text-xs text-text-secondary">可勾选多条计划批量撤销；已有实绩的计划不能撤销。</span>
+          <button type="button" disabled={saving || selected.size === 0} onClick={() => setShowBatchDialog(true)}
+            className="border border-rose text-rose disabled:opacity-40 font-bold rounded-[8px] px-5 py-2 text-sm">
+            批量撤销排期{selected.size > 0 ? `（${selected.size}）` : ""}
+          </button>
           <button type="button" disabled={saving} onClick={save}
             className="bg-[#2563EB] hover:bg-[#1D4ED8] disabled:bg-[#CCCCCC] text-white font-bold rounded-[8px] px-6 py-2 text-sm">
             {saving ? "保存中…" : "✓ 保存改动"}
           </button>
+        </div>
+      )}
+
+      {showBatchDialog && (
+        <div className="fixed inset-0 z-50 bg-black/30 flex items-center justify-center p-4">
+          <div className="w-full max-w-md rounded-card bg-white p-6 shadow-xl">
+            <h3 className="text-lg font-bold text-text">确认批量撤销排期</h3>
+            <p className="mt-3 text-sm text-text-secondary">
+              将撤销 <b className="text-rose">{selected.size}</b> 条计划，涉及 {new Set(plans.filter((p) => selected.has(p.id)).map((p) => p.orderId)).size} 张订单。
+              撤销后，无其他有效计划的订单会自动退回“已接单”。
+            </p>
+            <label className="mt-4 block text-sm font-semibold text-text">撤销原因</label>
+            <textarea autoFocus value={batchReason} onChange={(e) => setBatchReason(e.target.value)}
+              placeholder="请填写撤销原因（必填）" rows={3}
+              className="mt-2 w-full rounded-btn border border-app-border p-3 text-sm focus:border-mint-400 focus:outline-none" />
+            <div className="mt-5 flex justify-end gap-3">
+              <button type="button" disabled={saving} onClick={() => { setShowBatchDialog(false); setBatchReason(""); }}
+                className="rounded-btn border border-app-border px-4 py-2 text-sm">取消</button>
+              <button type="button" disabled={saving || batchReason.trim().length < 2} onClick={batchUnschedule}
+                className="rounded-btn bg-rose px-4 py-2 text-sm font-bold text-white disabled:opacity-40">
+                {saving ? "撤销中…" : "确认撤销"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </>

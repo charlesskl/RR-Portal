@@ -3,9 +3,7 @@ import { getSession } from "@/lib/session";
 import { redirect } from "next/navigation";
 import { dotnetGet } from "@/lib/dotnet";
 import type { OrderRow } from "@/lib/orderFilter";
-import type { GanttOrder } from "@/lib/scheduleData";
-import { orderScheduleCoverage, recordedOrderProgress } from "@/lib/orderProgress";
-import OrdersTable from "./OrdersTable";
+import OrdersDataLoader from "./OrdersDataLoader";
 
 // .NET GET /api/orders 列表项（整单总数已由后端聚合，字段 camelCase）
 type OrderListItemDto = {
@@ -40,47 +38,14 @@ export default async function OrdersPage() {
 
   // 原 prisma.order.findMany（含 product/lines/qtys 聚合）→ 调 .NET 列表接口（后端已聚合整单总数）
   // 同时复用甘特数据，补齐订单总览的排期进度 / 预计出单日 / 风险状态。
-  const [orders, ganttOrders] = await Promise.all([
-    dotnetGet<OrderListItemDto[]>("/api/orders"),
-    dotnetGet<GanttOrder[]>(`/api/schedule?today=${todayStr}`),
-  ]);
-  const ganttById = new Map(ganttOrders.map((g) => [g.id, g]));
-
-  const rows: OrderRow[] = orders.map((o) => ({
-    ...buildOrderRow(o, ganttById.get(o.id), todayStr),
-  }));
-
-  return <OrdersTable orders={rows} />;
+  // 首屏只等订单基础列表；排期进度和风险信息由客户端随后补齐。
+  const orders = await dotnetGet<OrderListItemDto[]>("/api/orders");
+  const rows: OrderRow[] = orders.map((o) => buildOrderRow(o));
+  return <OrdersDataLoader initialRows={rows} today={todayStr} />;
 }
 
-function buildOrderRow(o: OrderListItemDto, g: GanttOrder | undefined, today: string): OrderRow {
+function buildOrderRow(o: OrderListItemDto): OrderRow {
   const deliveryDate = ymd(o.deliveryDate);
-  const progress = g ? recordedOrderProgress(g) : { demandQty: o.totalQty, recordedQty: 0, progressPct: 0 };
-  const demandQty = progress.demandQty;
-  const plannedQty = g?.plans.reduce((sum, p) => sum + p.plannedQty, 0) ?? 0;
-  const recordedQty = progress.recordedQty;
-  const progressPct = progress.progressPct;
-  const scheduled = g?.scheduled ?? false;
-  const scheduleInfo = g ? orderScheduleCoverage(g) : { covered: false, finishDate: null };
-  const expectedOutDate = scheduleInfo.finishDate ?? g?.expectedOutDate ?? null;
-  const active = o.status !== "archived" && o.status !== "completed";
-  let riskLevel: OrderRow["riskLevel"] = "none";
-  let riskText = "正常";
-
-  if (active && !deliveryDate) {
-    riskLevel = "missing_due";
-    riskText = "缺交货日";
-  } else if (active && deliveryDate && expectedOutDate && expectedOutDate > deliveryDate) {
-    riskLevel = "late";
-    riskText = "预计超期";
-  } else if (active && deliveryDate && deliveryDate < today && !scheduleInfo.covered) {
-    riskLevel = "overdue";
-    riskText = "已超交期";
-  } else if (active && !scheduled && !o.pendingProduct) {
-    riskLevel = "unscheduled";
-    riskText = "未排期";
-  }
-
   return {
     id: o.id,
     externalOrderNo: o.externalOrderNo,
@@ -92,16 +57,16 @@ function buildOrderRow(o: OrderListItemDto, g: GanttOrder | undefined, today: st
     isUrgent: o.isUrgent,
     totalQty: o.totalQty,
     pendingProduct: o.pendingProduct,
-    scheduled,
-    firstPlanDate: g?.firstPlanDate ?? null,
-    expectedOutDate,
-    scheduleFinishDate: scheduleInfo.finishDate,
-    scheduleCovered: scheduleInfo.covered,
-    plannedQty,
-    recordedQty,
-    demandQty,
-    progressPct,
-    riskLevel,
-    riskText,
+    scheduled: o.status === "scheduled" || o.status === "in_production" || o.status === "completed",
+    firstPlanDate: null,
+    expectedOutDate: null,
+    scheduleFinishDate: null,
+    scheduleCovered: false,
+    plannedQty: 0,
+    recordedQty: 0,
+    demandQty: o.totalQty,
+    progressPct: o.status === "completed" ? 100 : 0,
+    riskLevel: "none",
+    riskText: "计算中",
   };
 }

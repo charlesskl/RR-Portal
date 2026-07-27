@@ -18,7 +18,8 @@ public class DashboardController(AppDbContext db) : ControllerBase
     public async Task<IActionResult> Get()
     {
         var now = DateTime.UtcNow;
-        var ordersTotal = await db.Orders.CountAsync();
+        // 总单数与“订单总览 · 正常单+待补产品”口径一致：不包含回收站作废单。
+        var ordersTotal = await db.Orders.CountAsync(o => o.Status != "archived");
         // 在产订单数：只数状态为「在产」的订单（业务方 2026-06-12 定口径，原 "confirmed" 为不存在的值恒 0，已修正）
         var ordersActive = await db.Orders.CountAsync(o => o.Status == "in_production");
         // 已逾期：交货日已过 且 未作废（deliveryDate 为 null 不计入，与现有 lt 语义一致）

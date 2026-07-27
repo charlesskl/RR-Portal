@@ -8,7 +8,7 @@ using SprayPlan.Api.Services;
 namespace SprayPlan.Api.Features.Recording;
 
 // 导出弹窗手填的按拉别文字备注（按 lineId 匹配，避免显示名/原始名不一致丢备注）
-public record LineNote(int LineId, string? HeaderText, string? MiscText);
+public record LineNote(int LineId, string? HeaderText, string? MiscText, int MiscCount = 0);
 // 导出请求：date 必填；mode = plan(计划版,默认) | actual(实际版,含生产数)；lineNotes 按拉别手填
 public record ExportRequest(string? Date, string? Mode, List<LineNote>? LineNotes);
 
@@ -38,27 +38,30 @@ public class RecordingController(AppDbContext db) : ControllerBase
         // 余下数 = 总需求 − 该订单该部位全期累计 goodQty
         var orderIds = plans.Select(p => p.OrderId).Distinct().ToList();
         var allRec = await db.ProductionPlans
-            .Where(p => p.DeletedAt == null && orderIds.Contains(p.OrderId))
-            .Select(p => new { p.OrderId, p.PartName, p.GoodQty })
+            .Where(p => p.DeletedAt == null && orderIds.Contains(p.OrderId) && p.PlanDate <= day)
+            .Select(p => new { p.OrderId, p.ItemName, p.PartName, p.PlannedQty, p.GoodQty })
             .ToListAsync();
-        var recMap = new Dictionary<string, int>();
+        var plannedMap = new Dictionary<string, int>();
+        var recordedMap = new Dictionary<string, int>();
         foreach (var r in allRec)
         {
-            var k = $"{r.OrderId}|{r.PartName}";
-            recMap[k] = (recMap.TryGetValue(k, out var v) ? v : 0) + (r.GoodQty ?? 0);
+            var k = $"{r.OrderId}|{r.ItemName}|{r.PartName}";
+            plannedMap[k] = plannedMap.GetValueOrDefault(k) + r.PlannedQty;
+            recordedMap[k] = recordedMap.GetValueOrDefault(k) + (r.GoodQty ?? 0);
         }
 
         var rows = plans.Select(p =>
         {
             var demand = PartDemandByName(p.Order!.Lines, p.ItemName, p.PartName);
-            var recorded = recMap.TryGetValue($"{p.OrderId}|{p.PartName}", out var rec) ? rec : 0;
+            var key = $"{p.OrderId}|{p.ItemName}|{p.PartName}";
+            var completed = mode == "actual" ? recordedMap.GetValueOrDefault(key) : plannedMap.GetValueOrDefault(key);
             return new RecordingExport.ExportRow(
                 p.LineId, p.Line!.Name, p.Line.LeaderName, p.Line.CraftType,
                 date, ScheduleCalc.SafeArr(p.MachineNos),
-                p.Order.Product!.ProductNo, $"{p.ItemName}{p.PartName}",
+                "", p.Order.Product!.ProductNo, $"{p.ItemName}{p.PartName}",
                 demand, p.WorkerCount, p.WorkHours, p.PlannedQty,
-                RecordingCalc.PartRemainingQty(demand, recorded),
-                recorded,                       // producedQty：实际版显示的累计入库数
+                RecordingCalc.PartRemainingQty(demand, completed),
+                p.GoodQty ?? 0,                  // 实际生产数 = 当天入库数
                 p.Remark ?? "");
         }).ToList();
 

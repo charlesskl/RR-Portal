@@ -6,30 +6,25 @@ using SprayPlan.Api.Features.Recording;
 
 namespace SprayPlan.Api.Services;
 
-// 《每日生产明细表》xlsx 导出（每拉一个 sheet）—— 用微软官方 OpenXML SDK（被 Smart App Control 信任）。
-// 抬头/表尾对照车间手工表（拉长｜工艺｜人数标签｜人数说明文字；备注标签｜杂工合计｜杂工明细文字｜上班人数）。
-// 两副面孔：plan(计划版,不含生产数) / actual(实际版,含生产数=累计入库)。
-// 文字(人数说明/杂工明细)由导出弹窗按 lineId 手填；数字(杂工合计/上班人数)第一批留空、第二批自动算。
-// 样式本批只做：框线+居中+合并；颜色等上云再做。
+// 《每日生产明细表》xlsx：每条拉别一个 sheet，版式对齐车间手工日报。
 public static class RecordingExport
 {
-    public record ExportRow(int LineId, string LineName, string? LeaderName, string CraftType,
-        string ProductionDate, List<string> MachineNos,
-        string ProductNo, string Name, int TotalDemand, int WorkerCount,
-        double WorkHours, int PlannedQty, int RemainingQty, int ProducedQty, string Remark);
+    const int ColumnCount = 13;
+    static readonly string[] Headers =
+    {
+        "生产日期", "机台号", "客名", "货号", "名称", "总订单数", "人数",
+        "生产时间", "计划生产数", "余下订单数", "实际生产数", "吻合率", "备注"
+    };
 
-    // 按 mode 取数据表头：actual 在「计划生产数」后插「生产数」
-    static string[] HeadersFor(string mode) => mode == "actual"
-        ? new[] { "生产日期", "机台号", "货号", "名称", "总订单数", "人数", "生产时间", "计划生产数", "生产数", "余下订单数", "备注" }
-        : new[] { "生产日期", "机台号", "货号", "名称", "总订单数", "人数", "生产时间", "计划生产数", "余下订单数", "备注" };
+    public record ExportRow(int LineId, string LineName, string? LeaderName, string CraftType,
+        string ProductionDate, List<string> MachineNos, string CustomerName,
+        string ProductNo, string Name, int TotalDemand, int WorkerCount,
+        double WorkHours, int PlannedQty, int RemainingQty, int ActualQty, string Remark);
 
     public static byte[] BuildDetailWorkbook(string date, string mode,
         IEnumerable<ExportRow> rows, IReadOnlyDictionary<int, LineNote> notes)
     {
-        var headers = HeadersFor(mode);
-        int n = headers.Length;
-        bool actual = mode == "actual";
-
+        var rowList = rows.ToList();
         using var ms = new MemoryStream();
         using (var doc = SpreadsheetDocument.Create(ms, SpreadsheetDocumentType.Workbook))
         {
@@ -41,127 +36,231 @@ public static class RecordingExport
             stylesPart.Stylesheet.Save();
 
             var sheets = wbPart.Workbook.AppendChild(new Sheets());
+            var usedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             uint sheetId = 1;
 
-            foreach (var grp in rows.GroupBy(r => r.LineId))
+            if (rowList.Count == 0)
             {
-                var first = grp.First();
-                notes.TryGetValue(grp.Key, out var note);
-                var wsPart = wbPart.AddNewPart<WorksheetPart>();
-                var sheetData = new SheetData();
-                var merges = new MergeCells();
-
-                // ── 第1行：结构化抬头（4 区块对照手工表）──
-                // 拉长：{leader} | {craftType} | 人数 | {人数说明文字·手填}
-                // 列分配（共 n 列）：A=拉长；B..(分到工艺)；中段=人数标签；尾段=人数说明（合并到末列）
-                var headerInfoRow = new Row { RowIndex = 1 };
-                headerInfoRow.Append(TextCell("A1", $"拉长：{first.LeaderName ?? ""}"));
-                headerInfoRow.Append(TextCell("B1", first.CraftType));
-                headerInfoRow.Append(TextCell("C1", "人数"));
-                headerInfoRow.Append(TextCell("D1", note?.HeaderText ?? ""));
-                sheetData.Append(headerInfoRow);
-                // 人数说明文字从 D 合并到末列
-                if (n > 4) merges.Append(new MergeCell { Reference = $"D1:{Col(n)}1" });
-
-                // ── 第2行：数据表头 ──
-                var headRow = new Row { RowIndex = 2 };
-                for (int i = 0; i < n; i++) headRow.Append(TextCell($"{Col(i + 1)}2", headers[i]));
-                sheetData.Append(headRow);
-
-                // ── 第3行起：数据 ──
-                uint r = 3;
-                foreach (var d in grp)
-                {
-                    var row = new Row { RowIndex = r };
-                    int c = 1;
-                    row.Append(TextCell($"{Col(c++)}{r}", d.ProductionDate));
-                    row.Append(TextCell($"{Col(c++)}{r}", string.Join("、", d.MachineNos)));
-                    row.Append(TextCell($"{Col(c++)}{r}", d.ProductNo));
-                    row.Append(TextCell($"{Col(c++)}{r}", d.Name));
-                    row.Append(NumCell($"{Col(c++)}{r}", d.TotalDemand));
-                    row.Append(NumCell($"{Col(c++)}{r}", d.WorkerCount));
-                    row.Append(NumCell($"{Col(c++)}{r}", d.WorkHours));
-                    row.Append(NumCell($"{Col(c++)}{r}", d.PlannedQty));
-                    if (actual) row.Append(NumCell($"{Col(c++)}{r}", d.ProducedQty));
-                    row.Append(NumCell($"{Col(c++)}{r}", d.RemainingQty));
-                    row.Append(TextCell($"{Col(c++)}{r}", d.Remark));
-                    sheetData.Append(row);
-                    r++;
-                }
-
-                // ── 末行：结构化表尾（对照手工表）──
-                // 备注： | {杂工合计·第一批空} | {杂工明细文字·手填} | {上班人数·第一批空}
-                var footRow = new Row { RowIndex = r };
-                footRow.Append(TextCell($"A{r}", "备注："));
-                footRow.Append(TextCell($"B{r}", ""));                       // 杂工合计（第一批留空）
-                footRow.Append(TextCell($"C{r}", note?.MiscText ?? ""));     // 杂工明细文字
-                if (n > 3)
-                {
-                    footRow.Append(TextCell($"{Col(n)}{r}", ""));           // 上班人数（第一批留空）
-                    // 杂工明细从 C 合并到倒数第二列（末列留给上班人数）
-                    if (n - 1 > 3) merges.Append(new MergeCell { Reference = $"C{r}:{Col(n - 1)}{r}" });
-                }
-                sheetData.Append(footRow);
-
-                var ws = new Worksheet();
-                ws.Append(sheetData);
-                if (merges.HasChildren) ws.Append(merges);
-                wsPart.Worksheet = ws;
-
-                sheets.Append(new Sheet { Id = wbPart.GetIdOfPart(wsPart), SheetId = sheetId, Name = SafeSheetName(first.LineName) });
-                sheetId++;
+                AddSheet(wbPart, sheets, sheetId, "日报表", date, mode, Array.Empty<ExportRow>(), null, usedNames);
             }
+            else
+            {
+                foreach (var grp in rowList.GroupBy(r => r.LineId))
+                {
+                    notes.TryGetValue(grp.Key, out var note);
+                    AddSheet(wbPart, sheets, sheetId++, grp.First().LineName, date, mode, grp, note, usedNames);
+                }
+            }
+
             wbPart.Workbook.Save();
         }
         return ms.ToArray();
     }
 
-    // 样式表：CellFormats[0]=默认；CellFormats[1]=居中+四边 thin 框线
+    static void AddSheet(WorkbookPart wbPart, Sheets sheets, uint sheetId, string requestedName,
+        string date, string mode, IEnumerable<ExportRow> sourceRows, LineNote? note, HashSet<string> usedNames)
+    {
+        var rows = sourceRows.ToList();
+        var first = rows.FirstOrDefault();
+        var wsPart = wbPart.AddNewPart<WorksheetPart>();
+        var sheetData = new SheetData();
+        var merges = new MergeCells();
+
+        var top = new Row { RowIndex = 1, Height = 30, CustomHeight = true };
+        for (var c = 1; c <= ColumnCount; c++)
+        {
+            var value = c == 1 ? $"拉长：{first?.LeaderName ?? ""}"
+                : c == 2 ? first?.CraftType ?? ""
+                : c == 6 ? note?.HeaderText ?? "" : "";
+            top.Append(TextCell($"{Col(c)}1", value, 2));
+        }
+        sheetData.Append(top);
+        merges.Append(new MergeCell { Reference = "B1:E1" });
+        merges.Append(new MergeCell { Reference = "F1:M1" });
+
+        var header = new Row { RowIndex = 2, Height = 30, CustomHeight = true };
+        for (var i = 0; i < Headers.Length; i++)
+        {
+            var style = i is 10 or 11 ? 3u : 2u;
+            header.Append(TextCell($"{Col(i + 1)}2", Headers[i], style));
+        }
+        sheetData.Append(header);
+
+        uint rowIndex = 3;
+        for (var index = 0; index < rows.Count; index++)
+        {
+            var data = rows[index];
+            var row = new Row { RowIndex = rowIndex, Height = 30, CustomHeight = true };
+            row.Append(TextCell($"A{rowIndex}", index == 0 ? ChineseDate(data.ProductionDate) : "", 1));
+            row.Append(TextCell($"B{rowIndex}", string.Join("、", data.MachineNos), 1));
+            row.Append(TextCell($"C{rowIndex}", data.CustomerName, 1));
+            row.Append(TextCell($"D{rowIndex}", data.ProductNo, 1));
+            row.Append(TextCell($"E{rowIndex}", data.Name, 1));
+            row.Append(NumCell($"F{rowIndex}", data.TotalDemand, 1));
+            row.Append(NumCell($"G{rowIndex}", data.WorkerCount, 1));
+            row.Append(NumCell($"H{rowIndex}", data.WorkHours, 1));
+            row.Append(NumCell($"I{rowIndex}", data.PlannedQty, 1));
+            row.Append(NumCell($"J{rowIndex}", data.RemainingQty, 1));
+            if (mode == "actual") row.Append(NumCell($"K{rowIndex}", data.ActualQty, 1));
+            else row.Append(TextCell($"K{rowIndex}", "", 1));
+            var rate = mode == "actual" && data.PlannedQty > 0 ? (double)data.ActualQty / data.PlannedQty : 0;
+            row.Append(FormulaCell($"L{rowIndex}", $"IFERROR(K{rowIndex}/I{rowIndex},0)", rate, 4));
+            row.Append(TextCell($"M{rowIndex}", data.Remark, 1));
+            sheetData.Append(row);
+            rowIndex++;
+        }
+
+        if (rows.Count == 0)
+        {
+            var empty = new Row { RowIndex = rowIndex, Height = 30, CustomHeight = true };
+            empty.Append(TextCell($"A{rowIndex}", ChineseDate(date), 1));
+            for (var c = 2; c <= ColumnCount; c++) empty.Append(TextCell($"{Col(c)}{rowIndex}", "", c == 12 ? 4u : 1u));
+            sheetData.Append(empty);
+            rowIndex++;
+        }
+
+        var productionPeople = rows.Sum(r => r.WorkerCount);
+        var summary = new Row { RowIndex = rowIndex, Height = 28, CustomHeight = true };
+        for (var c = 1; c <= ColumnCount; c++)
+        {
+            if (c == 6) summary.Append(TextCell($"F{rowIndex}", "生产人数：", 2));
+            else if (c == 7) summary.Append(NumCell($"G{rowIndex}", productionPeople, 2));
+            else summary.Append(TextCell($"{Col(c)}{rowIndex}", "", 1));
+        }
+        sheetData.Append(summary);
+        rowIndex++;
+
+        var miscCount = Math.Max(0, note?.MiscCount ?? 0);
+        var footer = new Row { RowIndex = rowIndex, Height = 32, CustomHeight = true };
+        for (var c = 1; c <= ColumnCount; c++)
+        {
+            if (c == 1) footer.Append(TextCell($"A{rowIndex}", "备注：", 5));
+            else if (c == 2) footer.Append(NumCell($"B{rowIndex}", miscCount, 5));
+            else if (c == 3) footer.Append(TextCell($"C{rowIndex}", note?.MiscText ?? "", 5));
+            else if (c == 13) footer.Append(NumCell($"M{rowIndex}", productionPeople + miscCount, 5));
+            else footer.Append(TextCell($"{Col(c)}{rowIndex}", "", 5));
+        }
+        sheetData.Append(footer);
+        merges.Append(new MergeCell { Reference = $"C{rowIndex}:L{rowIndex}" });
+
+        var columns = new Columns(
+            Width(1, 15), Width(2, 20), Width(3, 18), Width(4, 12), Width(5, 23),
+            Width(6, 12), Width(7, 10), Width(8, 10), Width(9, 14), Width(10, 14),
+            Width(11, 14), Width(12, 14), Width(13, 16));
+
+        var worksheet = new Worksheet();
+        worksheet.Append(new SheetViews(new SheetView
+        {
+            WorkbookViewId = 0,
+            ShowGridLines = false,
+            Pane = new Pane { VerticalSplit = 2, TopLeftCell = "A3", ActivePane = PaneValues.BottomLeft, State = PaneStateValues.Frozen }
+        }));
+        worksheet.Append(new SheetFormatProperties { DefaultRowHeight = 30 });
+        worksheet.Append(columns);
+        worksheet.Append(sheetData);
+        worksheet.Append(merges);
+        worksheet.Append(new PrintOptions { HorizontalCentered = true });
+        worksheet.Append(new PageMargins { Left = 0.2, Right = 0.2, Top = 0.35, Bottom = 0.35, Header = 0.1, Footer = 0.1 });
+        worksheet.Append(new PageSetup { Orientation = OrientationValues.Landscape, FitToWidth = 1, FitToHeight = 0, PaperSize = 9 });
+        wsPart.Worksheet = worksheet;
+
+        var sheetName = UniqueSheetName(requestedName, usedNames);
+        sheets.Append(new Sheet { Id = wbPart.GetIdOfPart(wsPart), SheetId = sheetId, Name = sheetName });
+
+        var definedNames = wbPart.Workbook.DefinedNames ?? wbPart.Workbook.AppendChild(new DefinedNames());
+        var localId = sheetId - 1;
+        definedNames.Append(new DefinedName($"'{sheetName.Replace("'", "''")}'!$1:$2") { Name = "_xlnm.Print_Titles", LocalSheetId = localId });
+        definedNames.Append(new DefinedName($"'{sheetName.Replace("'", "''")}'!$A$1:$M${rowIndex}") { Name = "_xlnm.Print_Area", LocalSheetId = localId });
+    }
+
     static Stylesheet BuildStylesheet()
     {
-        var borders = new Borders(
-            new Border(),
-            new Border(
-                new LeftBorder { Style = BorderStyleValues.Thin },
-                new RightBorder { Style = BorderStyleValues.Thin },
-                new TopBorder { Style = BorderStyleValues.Thin },
-                new BottomBorder { Style = BorderStyleValues.Thin },
-                new DiagonalBorder())
-        );
-        var fonts = new Fonts(new Font());
-        // OpenXML 规范(ECMA-376)强制：Fills 前两位必须是 None + Gray125，否则 Excel/WPS 打开报错
+        var normalFont = new Font(new FontSize { Val = 11 }, new FontName { Val = "宋体" });
+        var boldFont = new Font(new Bold(), new FontSize { Val = 11 }, new FontName { Val = "宋体" });
+        var redBoldFont = new Font(new Bold(), new FontSize { Val = 11 }, new Color { Rgb = "FFFF0000" }, new FontName { Val = "宋体" });
+        var redFont = new Font(new FontSize { Val = 11 }, new Color { Rgb = "FFFF0000" }, new FontName { Val = "宋体" });
+        var fonts = new Fonts(normalFont, boldFont, redBoldFont, redFont);
         var fills = new Fills(
             new Fill(new PatternFill { PatternType = PatternValues.None }),
-            new Fill(new PatternFill { PatternType = PatternValues.Gray125 }));
-        var cellFormats = new CellFormats(
+            new Fill(new PatternFill { PatternType = PatternValues.Gray125 }),
+            new Fill(new PatternFill(new ForegroundColor { Rgb = "FFFCD5B4" }) { PatternType = PatternValues.Solid }));
+        var borders = new Borders(new Border(), ThinBorder());
+        var formats = new CellFormats(
             new CellFormat(),
-            new CellFormat
-            {
-                BorderId = 1, ApplyBorder = true,
-                Alignment = new Alignment { Horizontal = HorizontalAlignmentValues.Center, Vertical = VerticalAlignmentValues.Center },
-                ApplyAlignment = true,
-            }
-        );
-        return new Stylesheet(fonts, fills, borders, cellFormats);
+            Format(0, 0),
+            Format(1, 0),
+            Format(2, 0),
+            Format(0, 10),
+            Format(3, 0, 2));
+        return new Stylesheet(
+            new NumberingFormats(new NumberingFormat { NumberFormatId = 164, FormatCode = "0%" }),
+            fonts, fills, borders, formats);
     }
 
-    static Cell TextCell(string reference, string text, uint styleIndex = 1)
+    static CellFormat Format(uint fontId, uint numberFormatId, uint fillId = 0) => new()
     {
-        var c = new Cell { CellReference = reference, DataType = CellValues.InlineString, StyleIndex = styleIndex };
-        c.Append(new InlineString(new Text(text)));
-        return c;
+        FontId = fontId, FillId = fillId, BorderId = 1, NumberFormatId = numberFormatId == 10 ? 164u : numberFormatId,
+        ApplyFont = true, ApplyFill = true, ApplyBorder = true, ApplyNumberFormat = numberFormatId != 0,
+        Alignment = new Alignment { Horizontal = HorizontalAlignmentValues.Center, Vertical = VerticalAlignmentValues.Center, WrapText = true },
+        ApplyAlignment = true
+    };
+
+    static Border ThinBorder() => new(
+        new LeftBorder { Style = BorderStyleValues.Thin, Color = new Color { Rgb = "FF000000" } },
+        new RightBorder { Style = BorderStyleValues.Thin, Color = new Color { Rgb = "FF000000" } },
+        new TopBorder { Style = BorderStyleValues.Thin, Color = new Color { Rgb = "FF000000" } },
+        new BottomBorder { Style = BorderStyleValues.Thin, Color = new Color { Rgb = "FF000000" } },
+        new DiagonalBorder());
+
+    static Column Width(uint index, double width) => new() { Min = index, Max = index, Width = width, CustomWidth = true };
+
+    static Cell TextCell(string reference, string text, uint styleIndex)
+    {
+        var cell = new Cell { CellReference = reference, DataType = CellValues.InlineString, StyleIndex = styleIndex };
+        cell.Append(new InlineString(new Text(text ?? "")));
+        return cell;
     }
 
-    static Cell NumCell(string reference, double value, uint styleIndex = 1)
-        => new() { CellReference = reference, CellValue = new CellValue(value.ToString(CultureInfo.InvariantCulture)),
-                   DataType = CellValues.Number, StyleIndex = styleIndex };
-
-    static string Col(int col) => ((char)('A' + col - 1)).ToString();
-
-    static string SafeSheetName(string s)
+    static Cell NumCell(string reference, double value, uint styleIndex) => new()
     {
-        var clean = s.Length > 31 ? s[..31] : s;
+        CellReference = reference,
+        CellValue = new CellValue(value.ToString(CultureInfo.InvariantCulture)),
+        DataType = CellValues.Number,
+        StyleIndex = styleIndex
+    };
+
+    static Cell FormulaCell(string reference, string formula, double cachedValue, uint styleIndex) => new()
+    {
+        CellReference = reference,
+        CellFormula = new CellFormula(formula),
+        CellValue = new CellValue(cachedValue.ToString(CultureInfo.InvariantCulture)),
+        StyleIndex = styleIndex
+    };
+
+    static string Col(int col)
+    {
+        var name = "";
+        while (col > 0) { col--; name = (char)('A' + col % 26) + name; col /= 26; }
+        return name;
+    }
+
+    static string ChineseDate(string ymd)
+        => DateTime.TryParseExact(ymd, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var date)
+            ? $"{date.Year}年{date.Month}月{date.Day}日"
+            : ymd;
+
+    static string UniqueSheetName(string requested, HashSet<string> used)
+    {
+        var clean = string.IsNullOrWhiteSpace(requested) ? "Sheet" : requested;
         foreach (var ch in new[] { '\\', '/', '?', '*', '[', ']', ':' }) clean = clean.Replace(ch, '_');
-        return string.IsNullOrEmpty(clean) ? "Sheet" : clean;
+        clean = clean.Length > 31 ? clean[..31] : clean;
+        var candidate = clean;
+        var suffix = 2;
+        while (!used.Add(candidate))
+        {
+            var tail = $"-{suffix++}";
+            candidate = clean[..Math.Min(clean.Length, 31 - tail.Length)] + tail;
+        }
+        return candidate;
     }
 }

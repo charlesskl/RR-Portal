@@ -1,17 +1,19 @@
 "use client";
-import { apiFetch } from "@/lib/apiFetch";
 // 排期总览看板（拉别 × 日期·只读）—— 照 mockup supervisor-grid-v4.html / spec 2026-06-24 §6。
 // 日期竖排、拉别横排；每格顶部小计（件数·产能占用%·红黄绿），下面铺「部位+数量+第几道」，按工序上色。
 // 数据来自 GET /api/schedule/overview；网格聚合/占用/配色由 @/lib/scheduleOverview 纯函数算。
 // 第一期只读；「点格子跳周排」联动留下一步。
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { buildOverviewGrid, cellKey, dateRange, type CellItem, type OverviewLine, type OverviewPlan } from "@/lib/scheduleOverview";
+import { cachedJson } from "@/lib/clientCache";
+import Link from "next/link";
 
 type Resp = { lines: OverviewLine[]; plans: OverviewPlan[] };
 type View = "week" | "twoweek" | "month" | "custom";
 type DetailState = { date: string; line: OverviewLine; item: CellItem };
 type AdjustTarget = { planId: number; date: string; lineId: number };
 type OverviewProps = {
+  orderFilter?: { orderId: number; orderNo: string; from?: string; to?: string };
   pendingOrderCount?: number;
   pendingUrgentCount?: number;
   onCreatePlan?: () => void;
@@ -27,10 +29,11 @@ const parseYmd = (s: string) => { const [y, m, d] = s.split("-").map(Number); re
 const MINI_BG = { ok: "sc-bg-ok", busy: "sc-bg-busy", over: "sc-bg-over" } as const;
 const MINI_TX = { ok: "sc-ut-ok", busy: "sc-ut-busy", over: "sc-ut-over" } as const;
 
-export default function ScheduleOverview({ pendingOrderCount = 0, pendingUrgentCount = 0, onCreatePlan, onPlanUrgent, onAdjustPlan }: OverviewProps) {
+export default function ScheduleOverview({ orderFilter, pendingOrderCount = 0, pendingUrgentCount = 0, onCreatePlan, onPlanUrgent, onAdjustPlan }: OverviewProps) {
   const [view, setView] = useState<View>("week");
-  const [from, setFrom] = useState<string>(() => ymd(new Date()));
+  const [from, setFrom] = useState<string>(() => orderFilter?.from || ymd(new Date()));
   const [to, setTo] = useState<string>(() => {
+    if (orderFilter?.to) return orderFilter.to;
     const d = new Date();
     d.setDate(d.getDate() + 6);
     return ymd(d);
@@ -45,12 +48,11 @@ export default function ScheduleOverview({ pendingOrderCount = 0, pendingUrgentC
     if (parseYmd(to) < parseYmd(from)) { setErr("结束日期不能早于起始日期"); setData(null); return; }
     setLoading(true); setErr("");
     try {
-      const r = await apiFetch(`/api/schedule/overview?from=${from}&to=${to}`);
-      if (!r.ok) { setErr(`加载失败（${r.status}）`); setData(null); return; }
-      setData(await r.json());
+      const filter = orderFilter ? `&orderId=${orderFilter.orderId}` : "";
+      setData(await cachedJson<Resp>(`/api/schedule/overview?from=${from}&to=${to}${filter}`, 5_000));
     } catch { setErr("加载失败"); setData(null); }
     finally { setLoading(false); }
-  }, [from, to]);
+  }, [from, to, orderFilter]);
   useEffect(() => { load(); }, [load]);
   useEffect(() => {
     if (!detail) return;
@@ -104,6 +106,13 @@ export default function ScheduleOverview({ pendingOrderCount = 0, pendingUrgentC
       )}
 
       <p className="sc-sub">日期竖排、拉别横排。每格顶部<b>小计（件数·产能占用）</b>，下面把<b>部位 + 数量 + 第几道</b>铺开（绿喷油 / 蓝移印 / 紫 UV）。只读，看到要改去「周排」。</p>
+
+      {orderFilter && (
+        <div className="mb-4 flex items-center gap-3 rounded-btn border border-mint-400 bg-mint-50 px-4 py-3 text-sm text-mint-700">
+          <span>当前只查看订单：<b>{orderFilter.orderNo}</b></span>
+          <Link href="/schedule" className="ml-auto font-semibold underline">清除订单筛选</Link>
+        </div>
+      )}
 
       {/* 工具栏：视图切换 + 前后翻 */}
       <div className="sc-toolbar">

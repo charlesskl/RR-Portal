@@ -188,6 +188,10 @@ export default function OrdersTable({ orders }: { orders: OrderRow[] }) {
                 <td className="px-3 py-3 text-center">
                   <span className="inline-flex gap-2.5">
                     <Link href={`/orders/${o.id}`} className="text-sky hover:underline">查看</Link>
+                    {o.scheduled && o.firstPlanDate && (
+                      <Link href={`/schedule?orderId=${o.id}&orderNo=${encodeURIComponent(o.externalOrderNo)}&from=${o.firstPlanDate}&to=${o.scheduleFinishDate ?? o.firstPlanDate}`}
+                        className="text-purple hover:underline">查看排期</Link>
+                    )}
                     {f.view === "recycle" ? (
                       <button disabled={busy} onClick={() => restore(o.id, o.externalOrderNo)} className="text-mint-400 font-semibold hover:underline disabled:opacity-50">恢复</button>
                     ) : f.view === "pending" ? (

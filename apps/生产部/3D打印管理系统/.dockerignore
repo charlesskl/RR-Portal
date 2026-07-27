@@ -1,0 +1,12 @@
+.git
+.gitignore
+config.json
+config-for-*.json
+data.json
+data.json.tmp
+data.json.bak.*
+data.backup.*.json
+server.log
+sync-state.json
+node_modules
+*.zip

@@ -1,0 +1,34 @@
+{
+  "auth": {
+    "username": "admin",
+    "password": "CHANGE_ME"
+  },
+  "bambuPrinters": [
+    {
+      "id": 1,
+      "name": "#1 Bambu-P1S",
+      "host": "192.168.1.101",
+      "serial": "YOUR_BAMBU_SERIAL",
+      "accessCode": "YOUR_BAMBU_ACCESS_CODE"
+    }
+  ],
+  "flashForgePrinters": [
+    {
+      "id": 2,
+      "name": "#2 Adventurer 5M",
+      "host": "192.168.1.102",
+      "serial": "YOUR_FLASHFORGE_SERIAL",
+      "checkCode": "YOUR_FLASHFORGE_CHECK_CODE"
+    }
+  ],
+  "sync": {
+    "enabled": false,
+    "serverId": "server-A",
+    "peer": {
+      "host": "",
+      "port": 3000
+    },
+    "intervalMs": 30000
+  },
+  "role": "master"
+}

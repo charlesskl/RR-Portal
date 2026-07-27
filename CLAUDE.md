@@ -33,7 +33,8 @@ RR-Portal/
 │   │   ├── 配色库存管理/            — peise (Flask)
 │   │   ├── 华登包材管理/            — huadeng (Flask)
 │   │   ├── 华登毛绒仓库/            — huadeng-maorong (Flask, 毛绒+戏服库存)
-│   │   └── 华登C仓库/              — c-store (Flask, SR3703 贴纸卷配比)
+│   │   ├── 华登C仓库/              — c-store (Flask, SR3703 贴纸卷配比)
+│   │   └── 车缝核价对比系统/        — stitch-cost (ASP.NET Core + React + PostgreSQL)
 │   ├── 生产部/
 │   │   ├── 注塑啤机排产系统/        — paiji (Node.js + React)
 │   │   ├── 喷油部生产管理系统/      — penyou (Node.js + React)
@@ -230,6 +231,7 @@ curl http://localhost:<port>/health
 | qa-weekly-report QA测试报告周结系统 | Node.js/React | 3210 | /qa-weekly-report/ |
 | internal-quote 内部报价系统 | Node.js | 3211 | /internal-quote/ |
 | indo-shipping 印尼走货明细 | ASP.NET Core + React | 5180 | /indo-shipping/ |
+| stitch-cost 车缝核价对比系统 | ASP.NET Core + React | 5192 | /stitch-cost/ |
 
 ## 插件类型
 
@@ -486,6 +488,7 @@ const data = JSON.parse(fs.readFileSync('data/data.json'));
 | qa-weekly-report | QA测试报告周结系统 | QA部 | Standalone (Node.js/React + exceljs) | /qa-weekly-report/ | — |
 | internal-quote | 内部报价系统 | 业务部 | Standalone (Node.js + node:sqlite) | /internal-quote/ | — |
 | indo-shipping | 印尼走货明细 | 印尼小组 | Standalone (ASP.NET Core + React) | /indo-shipping/ | (PR #268) |
+| stitch-cost | 车缝核价对比系统 | PMC跟仓管 | Standalone (ASP.NET Core + React + PostgreSQL) | /stitch-cost/ | — |
 
 ### 旧插件（已删除）
 

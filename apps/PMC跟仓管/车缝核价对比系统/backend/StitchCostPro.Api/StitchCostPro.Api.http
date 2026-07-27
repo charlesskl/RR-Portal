@@ -1,0 +1,6 @@
+@StitchCostPro.Api_HostAddress = http://localhost:5192
+
+GET {{StitchCostPro.Api_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

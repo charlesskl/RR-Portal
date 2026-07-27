@@ -1,0 +1,94 @@
+/* IBM Plex Sans（Latin/数字，本地打包，离线可用，不走 Google CDN）；中文走系统字体 */
+@import '@fontsource/ibm-plex-sans/400.css';
+@import '@fontsource/ibm-plex-sans/500.css';
+@import '@fontsource/ibm-plex-sans/600.css';
+
+:root {
+  --ink: #1f2937;
+  --ink-soft: #6b7686;
+  --bg: #f4f7fc;
+  --raised: #ffffff;
+  --line: #e9edf4;
+  --blue: #2f7ff0;
+  --blue-d: #1f63d8;
+  --blue-soft: #e9f2fe;
+  --ok: #16a34a;
+  --bad: #e0394b;
+  --amber: #d6890c;
+  --font-ui: 'IBM Plex Sans', 'PingFang SC', 'Microsoft YaHei', 'Segoe UI', system-ui, sans-serif;
+}
+
+/* 外发订单批量导入：保持拖放功能，但不要占满整个抽屉。 */
+.order-import-dragger,
+.order-import-dragger .ant-upload.ant-upload-drag {
+  height: 130px !important;
+  min-height: 130px !important;
+}
+
+.order-import-dragger .ant-upload-btn {
+  padding: 14px !important;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+
+body {
+  font-family: var(--font-ui);
+  color: var(--ink);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* 数字/金额/货号——表格数字对齐，金额纵向对齐更整齐 */
+.num {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+}
+
+/* 细腻滚动条 */
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-thumb {
+  background: #cdd5e2;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  border-radius: 8px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: #b4bdcc;
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* 表格全局统一居中（表头 + 单元格），覆盖各列原本的 align 设置。
+   改这一处 = 所有模块表格（核价对比/采购订单/产品库/加工厂/品质管理…）+ 未来新表统一对齐。 */
+.ant-table-wrapper .ant-table-cell {
+  text-align: center !important;
+}
+/* 个别需要左对齐的列（如长地址）：给该列加 className="cell-left" 即可覆盖上面的居中 */
+.ant-table-wrapper .ant-table-cell.cell-left {
+  text-align: left !important;
+}
+
+/* 核价录入表 · 紧凑模式：压缩表头/数据行的上下内边距，整表更矮、往下翻更短。
+   只作用于带 .pm-compact 的那张表，不影响其它模块的表格。 */
+.pm-compact .ant-table-thead > tr > th {
+  padding: 3px 6px !important;
+}
+.pm-compact .ant-table-tbody > tr > td {
+  padding: 4px 6px !important;
+}

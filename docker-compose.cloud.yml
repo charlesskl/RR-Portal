@@ -954,6 +954,40 @@ services:
     networks:
       - platform-net
 
+  stitch-cost:
+    build:
+      context: ./apps/PMC跟仓管/车缝核价对比系统
+      dockerfile: Dockerfile
+      args:
+        VITE_BASE_PATH: /stitch-cost/
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      Database__Provider: PostgreSQL
+      ConnectionStrings__Default: "Host=db;Port=5432;Database=${DB_NAME:-rrportal};Username=${DB_USER:-rrportal};Password=${DB_PASSWORD};Search Path=stitch_cost"
+      Jwt__Secret: "${STITCH_COST_JWT_SECRET:?STITCH_COST_JWT_SECRET is required}"
+      Bootstrap__InitialAdminPassword: "${STITCH_COST_ADMIN_PASSWORD:?STITCH_COST_ADMIN_PASSWORD is required}"
+    expose:
+      - "5192"
+    depends_on:
+      db:
+        condition: service_healthy
+    mem_limit: 512m
+    memswap_limit: 512m
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:5192/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - platform-net
+
 networks:
   platform-net:
     driver: bridge

@@ -1,0 +1,6 @@
+backend/**/bin/
+backend/**/obj/
+backend/**/.tmp/
+frontend/node_modules/
+frontend/dist/
+migration-data/

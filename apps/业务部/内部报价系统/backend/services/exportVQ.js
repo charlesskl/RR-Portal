@@ -959,9 +959,17 @@ function sectionsToData({ quote, sections }) {
   const cartonH = num(masterCarton.ch) || num(cc.ch);
   const cartonQty = num(masterCarton.qty) || num(cc.qty) || 1;
   const cartonRate = num(cc.paper_rate) || 2.75;
-  const masterBoxPrice = num(masterCarton.carton_price) || num(masterCarton.price) || num(masterCarton.box_price)
+  const hasPaperRate = cc.paper_rate != null
+    && cc.paper_rate !== ''
+    && Number.isFinite(Number(cc.paper_rate))
+    && Number(cc.paper_rate) > 0;
+  const calculatedBoxPrice = hasPaperRate && cartonL > 0 && cartonW > 0 && cartonH > 0
+    ? (cartonL + cartonW + 2) * (cartonW + cartonH + 1) * 2 * cartonRate / 1000
+    : 0;
+  const masterBoxPrice = calculatedBoxPrice
+    || num(masterCarton.carton_price) || num(masterCarton.price) || num(masterCarton.box_price)
     || num(cc.carton_price) || num(cc.price) || num(cc.box_price)
-    || ((cartonL + cartonW + 2) * (cartonW + cartonH + 1) * 2 * cartonRate / 1000);
+    || ((cartonL + cartonW + 2) * (cartonW + cartonH + 1) * 2 * 2.75 / 1000);
   const flatCards = Array.isArray(masterCarton.flat_cards) ? masterCarton.flat_cards : [];
   const masterFlatPrice = flatCards.length
     ? flatCards.reduce((s, f) => s + ((num(f.l) || cartonL) + 1) * ((num(f.w) || cartonW) + 1) * 2 / 1000, 0)

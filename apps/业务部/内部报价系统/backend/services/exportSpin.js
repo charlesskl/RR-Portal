@@ -136,8 +136,21 @@ function sectionsToSpinData({ quote, sections }) {
   const polybagIndex = packagingItems.findIndex(item => /polybag/i.test(item.name));
   packagingItems.splice(polybagIndex >= 0 ? polybagIndex : packagingItems.length, 0, ...auxPackagingItems);
 
-  const cartonHkd = num(mainCarton.carton_price) || num(mainCarton.price) || num(mainCarton.box_price)
-    || num(carton.carton_price) || num(carton.price) || num(carton.box_price);
+  const hasPaperRate = carton.paper_rate != null
+    && carton.paper_rate !== ''
+    && Number.isFinite(Number(carton.paper_rate))
+    && Number(carton.paper_rate) > 0;
+  const hasCartonDimensions = cartonL > 0 && cartonW > 0 && cartonH > 0;
+  const calculatedCartonHkd = hasPaperRate && hasCartonDimensions
+    ? (cartonL + cartonW + 2) * (cartonW + cartonH + 1) * 2
+      * num(carton.paper_rate) / 1000
+    : 0;
+  const cartonHkd = calculatedCartonHkd
+    || num(mainCarton.carton_price) || num(mainCarton.price) || num(mainCarton.box_price)
+    || num(carton.carton_price) || num(carton.price) || num(carton.box_price)
+    || (hasCartonDimensions
+      ? (cartonL + cartonW + 2) * (cartonW + cartonH + 1) * 2 * 2.75 / 1000
+      : 0);
   const flatCardHkd = num(carton.flat_card);
   if (cartonHkd || flatCardHkd) {
     const paperLabel = String(mainCarton.ka_label || carton.ka_label || 'K3A').replace(/^K=A$/i, 'K3A');

@@ -7,6 +7,7 @@ const ExcelJS = require('exceljs');
 const {
   buildSpinTransportRows,
   exportSpin,
+  sectionsToSpinData,
 } = require('../backend/services/exportSpin');
 const { buildWorkbook } = require('../backend/services/exportInternal');
 
@@ -44,6 +45,119 @@ test('SPIN transport follows actual-carton-quantity formulas', () => {
   assert.equal(chinaFcl.usd_per_toy, 7200 / 7.75 / chinaFcl.qty_40);
   assert.equal(chinaLcl1.qty_40, Math.floor(450 / 0.62) * 12);
   assert.equal(chinaLcl1.usd_per_toy, 16.8 * 0.62 / 12 / 0.98 / 7.75);
+});
+
+test('SPIN VQ uses the shared paper rate instead of stale legacy carton prices', () => {
+  const data = sectionsToSpinData({
+    quote: {
+      id: 328,
+      quote_no: 'SPIN-CARTON-RATE',
+      product_name: 'Carton Plush',
+      customer: 'SPIN',
+      qty: 1000,
+    },
+    sections: [
+      {
+        dept: 'engineering',
+        payload_json: JSON.stringify({
+          carton_calc: {
+            paper_rate: 3,
+            carton_price: 96,
+            price: 97,
+            box_price: 98,
+            cartons: [{
+              name: '主纸箱',
+              cl: 48,
+              cw: 20,
+              ch: 43,
+              qty: 10,
+              carton_price: 99,
+              price: 100,
+              box_price: 101,
+              flat_cards: [],
+            }],
+          },
+        }),
+      },
+      {
+        dept: 'sales',
+        payload_json: JSON.stringify({
+          header: { fx_hkd_usd: 7.8 },
+        }),
+      },
+    ],
+  });
+
+  const masterCarton = data.packagingItems.find(item =>
+    item.pkg_section === 'carton' && /^Master carton/.test(item.name)
+  );
+  assert.equal(masterCarton.new_price, 26.88 / 7.75);
+});
+
+test('SPIN VQ preserves an explicit legacy carton price when paper rate is absent', () => {
+  const data = sectionsToSpinData({
+    quote: {
+      id: 329,
+      quote_no: 'SPIN-LEGACY-CARTON',
+      product_name: 'Legacy Carton Plush',
+      customer: 'SPIN',
+      qty: 1000,
+    },
+    sections: [
+      {
+        dept: 'engineering',
+        payload_json: JSON.stringify({
+          carton_calc: {
+            cartons: [{
+              name: '主纸箱',
+              cl: 48,
+              cw: 20,
+              ch: 43,
+              qty: 10,
+              carton_price: 99,
+              flat_cards: [],
+            }],
+          },
+        }),
+      },
+      {
+        dept: 'sales',
+        payload_json: JSON.stringify({}),
+      },
+    ],
+  });
+
+  const masterCarton = data.packagingItems.find(item =>
+    item.pkg_section === 'carton' && /^Master carton/.test(item.name)
+  );
+  assert.equal(masterCarton.new_price, 99 / 7.75);
+});
+
+test('SPIN VQ does not create a master-carton cost without dimensions or price', () => {
+  const data = sectionsToSpinData({
+    quote: {
+      id: 330,
+      quote_no: 'SPIN-NO-CARTON',
+      product_name: 'No Carton Plush',
+      customer: 'SPIN',
+      qty: 1000,
+    },
+    sections: [
+      {
+        dept: 'engineering',
+        payload_json: JSON.stringify({}),
+      },
+      {
+        dept: 'sales',
+        payload_json: JSON.stringify({}),
+      },
+    ],
+  });
+
+  const masterCarton = data.packagingItems.find(item =>
+    item.pkg_section === 'carton' && /^Master carton/.test(item.name)
+  );
+  assert.equal(masterCarton, undefined);
 });
 
 test('SPIN VQ exports transportation as Excel formulas with cached results', async () => {

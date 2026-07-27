@@ -2,6 +2,7 @@
 import { apiFetch } from "@/lib/apiFetch";
 import { useState } from "react";
 import { clearClientCache } from "@/lib/clientCache";
+import { appRoot } from "@/lib/appRoot";
 
 export default function LoginPage() {
   const [username, setUsername] = useState("");
@@ -22,7 +23,7 @@ export default function LoginPage() {
       clearClientCache();
       // 根布局在打开登录页时是“未登录”版；客户端路由会复用该布局。
       // 完整页面跳转让服务器重新读取 Cookie，确保首次进入就显示顶部导航和正确宽度。
-      window.location.replace("/");
+      window.location.replace(appRoot());
     } else {
       const body = await res.json();
       setError(body.error || "登录失败");

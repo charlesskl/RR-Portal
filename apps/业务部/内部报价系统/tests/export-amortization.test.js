@@ -5,7 +5,36 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 
-const { buildWorkbook } = require('../backend/services/exportInternal');
+const { buildWorkbook, adaptSurtaxForBase } = require('../backend/services/exportInternal');
+
+test('surtax is stored and exported as a direct HKD amount', async () => {
+  const args = {
+    quote: { quote_no: 'SURTAX-HKD', product_name: '附加税港币', qty: 1000 },
+    sections: [{
+      dept: 'sales',
+      payload_json: JSON.stringify({
+        header: { fx_rmb_hkd: 0.85, fx_hkd_usd: 7.8 },
+        pricing_summary: { surtax: 0.1 },
+        shipping: { scenarios: [] },
+      }),
+    }],
+  };
+
+  const adapted = adaptSurtaxForBase(args);
+  const adaptedSales = JSON.parse(adapted.sections[0].payload_json);
+  assert.equal(adaptedSales.pricing_summary.surtax, 0.085);
+  assert.equal(JSON.parse(args.sections[0].payload_json).pricing_summary.surtax, 0.1);
+
+  const workbook = await buildWorkbook(args);
+  const worksheet = workbook.getWorksheet('报价明细');
+  let summaryRow = 0;
+  worksheet.eachRow(row => {
+    if (row.getCell(1).value === '十、合计') summaryRow = row.number + 2;
+  });
+  assert.ok(summaryRow);
+  assert.equal(worksheet.getCell(summaryRow, 13).value, 0.1);
+  assert.match(worksheet.getCell(summaryRow, 14).value.formula, new RegExp(`\\+M${summaryRow}$`));
+});
 
 test('export keeps prototype and testing amortization when mold items are empty', async () => {
   const workbook = await buildWorkbook({

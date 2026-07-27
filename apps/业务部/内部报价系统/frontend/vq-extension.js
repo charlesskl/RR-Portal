@@ -18,6 +18,96 @@
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
   }[char]));
 
+  // 旧汇总渲染器把 pricing_summary.surtax 当 RMB 保存并换算为 HKD。
+  // 当前业务口径是直接输入 HKD；通过轻量适配层保持旧渲染器不变，
+  // 同时确保任何由汇总面板触发的保存都还原为 HKD 后再写入数据库。
+  const SURTAX_ADAPTER = '__surtax_hkd_adapter';
+  const salesSections = new Map();
+
+  function parsePayload(section) {
+    try {
+      return JSON.parse(section?.payload_json || '{}');
+    } catch {
+      return {};
+    }
+  }
+
+  function normalizeSurtaxPayload(payload) {
+    const normalized = JSON.parse(JSON.stringify(payload || {}));
+    if (!normalized[SURTAX_ADAPTER]) return normalized;
+    const fx = toNumber(normalized.header?.fx_rmb_hkd) || 0.85;
+    normalized.pricing_summary = normalized.pricing_summary || {};
+    normalized.pricing_summary.surtax = toNumber(normalized.pricing_summary.surtax) / fx;
+    delete normalized[SURTAX_ADAPTER];
+    return normalized;
+  }
+
+  const basePutSection = window.putSection;
+  if (typeof basePutSection === 'function') {
+    window.putSection = function (section, payload, submit) {
+      if (!payload?.[SURTAX_ADAPTER]) return basePutSection(section, payload, submit);
+      const normalized = normalizeSurtaxPayload(payload);
+      const target = salesSections.get(section.id) || section;
+      target.payload_json = JSON.stringify(normalized);
+      return basePutSection(target, normalized, submit);
+    };
+  }
+
+  const baseRenderSummaryPane = window.renderSummaryPane;
+  if (typeof baseRenderSummaryPane === 'function') {
+    window.renderSummaryPane = function (host, sections, quote, me) {
+      const sourceSections = (sections || []).map(section => {
+        if (section.dept !== 'sales') return section;
+        const normalized = normalizeSurtaxPayload(parsePayload(section));
+        const original = salesSections.get(section.id) || section;
+        original.payload_json = JSON.stringify(normalized);
+        salesSections.set(section.id, original);
+        return original;
+      });
+      const adaptedSections = sourceSections.map(section => {
+        if (section.dept !== 'sales') return section;
+        const payload = parsePayload(section);
+        const fx = toNumber(payload.header?.fx_rmb_hkd) || 0.85;
+        payload.pricing_summary = payload.pricing_summary || {};
+        payload.pricing_summary.surtax = toNumber(payload.pricing_summary.surtax) * fx;
+        payload[SURTAX_ADAPTER] = true;
+        return { ...section, payload_json: JSON.stringify(payload) };
+      });
+
+      const result = baseRenderSummaryPane(host, adaptedSections, quote, me);
+      const salesSection = sourceSections.find(section => section.dept === 'sales');
+      const directPayload = parsePayload(salesSection);
+      const directHkd = directPayload.pricing_summary?.surtax;
+      const input = host.querySelector('#tot-surtax');
+      if (!input) return result;
+
+      input.value = directHkd == null ? '' : directHkd;
+      const cellIndex = input.closest('td')?.cellIndex;
+      const header = Number.isInteger(cellIndex)
+        ? input.closest('table')?.querySelectorAll('th')[cellIndex]
+        : null;
+      if (header) header.textContent = '附加税 HK$';
+
+      const canEdit = me?.dept === 'sales' || me?.dept === 'engineering';
+      if (!canEdit || !salesSection) {
+        input.disabled = true;
+        return result;
+      }
+      input.disabled = false;
+      input.oninput = () => {
+        directPayload.pricing_summary = directPayload.pricing_summary || {};
+        directPayload.pricing_summary.surtax = input.value === '' ? null : Number(input.value);
+      };
+      input.onchange = () => {
+        salesSection.payload_json = JSON.stringify(directPayload);
+        window.putSection(salesSection, directPayload, false)
+          .then(() => window.renderSummaryPane(host, sourceSections, quote, me))
+          .catch(() => {});
+      };
+      return result;
+    };
+  }
+
   function renderSpinTransport(host, config, freight, cartonConfig, canEdit, onChange) {
     if (!host) return () => {};
     config.fx_hkd_usd = toNumber(config.fx_hkd_usd) || 7.75;

@@ -29,6 +29,28 @@ function parseSections(sections) {
   return result;
 }
 
+// exportXlsx.js 的历史公式把附加税视为 RMB，再除以人民币兑港币汇率。
+// 页面和数据库现在直接保存 HKD，因此仅在调用旧导出器时临时换回它预期的
+// RMB 输入；后续增强逻辑仍使用原始 HKD 数据。
+function adaptSurtaxForBase({ quote, sections }) {
+  return {
+    quote,
+    sections: (sections || []).map(section => {
+      if (section.dept !== 'sales') return section;
+      let payload;
+      try {
+        payload = JSON.parse(section.payload_json || '{}');
+      } catch {
+        return section;
+      }
+      if (payload.pricing_summary?.surtax == null) return section;
+      const fx = num(payload.header?.fx_rmb_hkd) || 0.85;
+      payload.pricing_summary.surtax = num(payload.pricing_summary.surtax) * fx;
+      return { ...section, payload_json: JSON.stringify(payload) };
+    }),
+  };
+}
+
 function cloneStyle(style) {
   return style ? JSON.parse(JSON.stringify(style)) : {};
 }
@@ -653,8 +675,8 @@ function enhanceWorkbook(workbook, { quote, sections }) {
 }
 
 async function buildWorkbook(args) {
-  const workbook = await buildBaseWorkbook(args);
+  const workbook = await buildBaseWorkbook(adaptSurtaxForBase(args));
   return enhanceWorkbook(workbook, args);
 }
 
-module.exports = { buildWorkbook, enhanceWorkbook };
+module.exports = { buildWorkbook, enhanceWorkbook, adaptSurtaxForBase };

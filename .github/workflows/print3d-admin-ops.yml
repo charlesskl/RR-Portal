@@ -1,0 +1,66 @@
+name: Print3D Admin Ops
+
+# 3D打印管理系统（print3d）账号运维（手动触发）：
+#   重置 admin 密码 —— 改写服务器上 config.json 的 auth.password 并 restart print3d。
+#   print3d 的账号体系独立于 core（自有 Basic Auth，密码存 bind mount 的 config.json），
+#   首启会生成随机密码，忘记时用本 workflow 重置。
+
+on:
+  workflow_dispatch:
+    inputs:
+      new_password:
+        description: "print3d admin 新密码（会显示在 run 的 inputs 里，仅 repo 成员可见）"
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-cloud
+  queue: max
+  cancel-in-progress: false
+
+jobs:
+  reset-password:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Validate SSH host fingerprint
+        shell: bash
+        env:
+          CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]]; then
+            echo 'CLOUD_HOST_FINGERPRINT must be a non-empty OpenSSH SHA256 fingerprint.' >&2
+            exit 1
+          fi
+
+      - name: Reset print3d admin password via SSH
+        env:
+          CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+          NEW_PASSWORD: ${{ inputs.new_password }}
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
+        with:
+          host: ${{ secrets.CLOUD_HOST }}
+          username: ${{ secrets.CLOUD_USER }}
+          key: ${{ secrets.CLOUD_SSH_KEY }}
+          fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
+          command_timeout: 8m
+          envs: NEW_PASSWORD
+          script: |
+            set -euo pipefail
+            CONFIG="/opt/rr-portal/apps/3D打印部/3D打印管理系统/data/config.json"
+            [ -n "${NEW_PASSWORD:-}" ] || { echo "[FAIL] new_password 为空"; exit 1; }
+            [ -f "$CONFIG" ] || { echo "[FAIL] 未找到 $CONFIG"; exit 1; }
+            echo "-- 更新 config.json 的 auth.password（不回显密码） --"
+            python3 -c "import json,os; p='$CONFIG'; c=json.load(open(p)); c.setdefault('auth',{})['password']=os.environ['NEW_PASSWORD']; json.dump(c, open(p,'w'), ensure_ascii=False, indent=2)"
+            echo "-- restart print3d（restart 不 recreate，nginx upstream 不受影响） --"
+            docker compose -f /opt/rr-portal/docker-compose.cloud.yml --env-file /opt/rr-portal/.env.cloud.production restart print3d
+            sleep 3
+            echo "-- 健康检查 --"
+            curl -sf http://localhost/3d-print/health && echo
+            echo "-- 用新密码验证认证 --"
+            curl -sf -u "admin:${NEW_PASSWORD}" http://localhost/3d-print/api/version && echo
+            echo "[OK] print3d admin 密码已重置并验证通过"

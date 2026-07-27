@@ -966,6 +966,7 @@ class PDFParser:
     }
     # pycountry+babel 翻译缓存（类级别，进程内只初始化一次）
     _babel_locale = None
+    _dep_warned = False
     _country_cache = {}
 
     def _country(self, c):
@@ -973,7 +974,7 @@ class PDFParser:
         import re as _re
         raw = _re.sub(r'[\n\r]+', ' ', str(c)).strip()
         # 取逗号前段、去尾点、规范空格
-        lookup = raw.split(',')[0].strip().rstrip('.').strip()
+        lookup = _re.sub(r'\s+', ' ', raw.split(',')[0].strip()).rstrip('.').strip()
         cl = lookup.lower()
 
         # 1. 覆盖表（优先级最高：处理缩写、别名、babel长名→短名）
@@ -1000,7 +1001,13 @@ class PDFParser:
             country = None
             if len(cl_nodot) == 2:
                 country = pycountry.countries.get(alpha_2=cl_nodot.upper())
-            # 再模糊搜索（去点号后）
+            # 优先精确/别名查找，避免 Curaçao 等名称被 fuzzy 错配到其他国家
+            if not country:
+                try:
+                    country = pycountry.countries.lookup(cl_nodot)
+                except LookupError:
+                    country = None
+            # 最后才使用模糊搜索，兼容非标准国家名
             if not country:
                 results = pycountry.countries.search_fuzzy(cl_nodot)
                 country = results[0] if results else None
@@ -1012,6 +1019,12 @@ class PDFParser:
                 if cn:
                     PDFParser._country_cache[cl] = cn
                     return cn
+        except ImportError:
+            if not PDFParser._dep_warned:
+                PDFParser._dep_warned = True
+                logging.warning(
+                    '[国家翻译] 未安装 pycountry/babel，国家名将保持英文原样。'
+                    '请执行: pip install -r requirements.txt')
         except Exception:
             pass
 

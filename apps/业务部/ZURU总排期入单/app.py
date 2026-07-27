@@ -178,20 +178,40 @@ def _validate_xlsx(path):
         raise ValueError(f'文件不是可读取的 .xlsx 工作簿: {e}') from e
 
 
-def _get_master_path():
-    """从磁盘读取最新的总排期文件路径，确保 gunicorn 多 worker 一致"""
+def _get_master_state():
+    """读取总排期状态；兼容只保存 path 的旧状态文件。"""
+    state = {'path': '', 'filename': '', 'uploaded_at': ''}
     try:
         if os.path.exists(_MASTER_STATE_FILE):
             with open(_MASTER_STATE_FILE, 'r', encoding='utf-8') as f:
-                return (json.load(f) or {}).get('path', '')
+                saved = json.load(f) or {}
+            if isinstance(saved, dict):
+                state.update({
+                    'path': saved.get('path', ''),
+                    'filename': saved.get('filename', ''),
+                    'uploaded_at': saved.get('uploaded_at', ''),
+                })
     except (json.JSONDecodeError, OSError):
         pass
-    return ''
+    if state['path'] and not state['filename']:
+        state['filename'] = os.path.basename(state['path'])
+    return state
 
 
-def _set_master_path(path):
+def _get_master_path():
+    """从磁盘读取最新的总排期文件路径，确保 gunicorn 多 worker 一致。"""
+    return _get_master_state()['path']
+
+
+def _set_master_path(path, filename=''):
     try:
-        _atomic_write_json(_MASTER_STATE_FILE, {'path': path})
+        state = {'path': path, 'filename': '', 'uploaded_at': ''}
+        if path:
+            state['filename'] = _safe_upload_name(
+                filename or os.path.basename(path), 'master.xlsx')
+            state['uploaded_at'] = datetime.now().astimezone().isoformat(
+                timespec='seconds')
+        _atomic_write_json(_MASTER_STATE_FILE, state)
     except OSError as e:
         logging.error(f'[总排期] 状态写入失败: {e}')
 
@@ -384,20 +404,27 @@ def upload_master():
         except OSError:
             pass
         return jsonify({'error': f'保存失败: {e}'}), 500
-    _set_master_path(path)
+    display_name = _safe_upload_name(f.filename, f'master{ext}')
+    _set_master_path(path, display_name)
     logging.info(f'[总排期] 上传副本: {safe_name}')
-    return jsonify({'ok': True, 'path': path, 'filename': safe_name,
-                    'msg': f'已上传总排期: {safe_name}'})
+    state = _get_master_state()
+    return jsonify({'ok': True, 'path': state['filename'],
+                    'filename': state['filename'],
+                    'uploaded_at': state['uploaded_at'],
+                    'msg': f'已上传总排期: {state["filename"]}'})
 
 
 @app.route('/api/master-schedule-info')
 def master_schedule_info():
     """总排期文件状态"""
-    mp = _get_master_path()
+    state = _get_master_state()
+    mp = state['path']
     return jsonify({
         'exists': bool(mp) and os.path.exists(mp),
         'locked': False,
-        'path': mp or '(未上传总排期文件)',
+        'path': state['filename'] or '(未上传总排期文件)',
+        'filename': state['filename'],
+        'uploaded_at': state['uploaded_at'],
     })
 
 
@@ -418,7 +445,8 @@ def master_schedule_upload_file():
         f.save(tmp_path)
         _validate_xlsx(tmp_path)
         os.replace(tmp_path, save_path)
-        _set_master_path(save_path)
+        display_name = _safe_upload_name(f.filename, 'master.xlsx')
+        _set_master_path(save_path, display_name)
     except ValueError as e:
         try:
             if os.path.exists(tmp_path):
@@ -434,20 +462,26 @@ def master_schedule_upload_file():
             pass
         return jsonify({'error': f'保存失败: {e}'}), 500
     logging.info(f'[总排期] 工作台上传副本: {_safe_upload_name(f.filename)}')
+    state = _get_master_state()
     return jsonify({
         'ok': True,
-        'path': save_path,
-        'msg': f'已上传并切换到总排期文件: {f.filename}',
+        'path': state['filename'],
+        'filename': state['filename'],
+        'uploaded_at': state['uploaded_at'],
+        'msg': f'已上传并切换到总排期文件: {state["filename"]}',
     })
 
 
 @app.route('/api/master-schedule-download')
 def master_schedule_download():
     """下载当前总排期文件（上传的副本）"""
-    mp = _get_master_path()
+    state = _get_master_state()
+    mp = state['path']
     if not mp or not os.path.exists(mp):
         return jsonify({'error': '总排期文件不存在，请先上传'}), 404
-    return send_file(mp, as_attachment=True, download_name=os.path.basename(mp))
+    return send_file(
+        mp, as_attachment=True,
+        download_name=state['filename'] or os.path.basename(mp))
 
 
 @app.route('/api/master-schedule-set-path', methods=['POST'])
@@ -464,8 +498,9 @@ def master_schedule_set_path():
         return jsonify({'error': '路径非法，必须在上传目录下'}), 403
     if not os.path.exists(abs_path):
         return jsonify({'error': f'路径不存在: {new_path}'}), 400
-    _set_master_path(abs_path)
-    return jsonify({'ok': True, 'path': abs_path, 'msg': f'已切换到: {os.path.basename(abs_path)}'})
+    _set_master_path(abs_path, os.path.basename(abs_path))
+    return jsonify({'ok': True, 'path': os.path.basename(abs_path),
+                    'msg': f'已切换到: {os.path.basename(abs_path)}'})
 
 
 # ── 黑名单 ──

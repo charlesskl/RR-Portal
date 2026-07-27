@@ -8,6 +8,7 @@ import openpyxl
 import pytest
 
 import app as app_module
+from excel_po_parser import ExcelPOParser
 import master_schedule
 from pdf_parser import PDFParser
 import schedule_reconcile
@@ -58,6 +59,42 @@ def test_country_translation_prefers_exact_country_match():
 
     assert parser._country('Curaçao') == '库拉索'
     assert parser._country('United  States') == '美国'
+
+
+def test_requirements_parser_accepts_wps_double_space_labels():
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws['A1'] = 'Tracking  Code:'
+    ws['E1'] = '日期码格式'
+    ws['A2'] = 'Packaging  Info:'
+    ws['E2'] = 'MA UPC PKG'
+    ws['A3'] = 'Remark:'
+    ws['E3'] = '请按澳洲标准生产'
+    ws['A4'] = 'Order Modifiable Records'
+
+    parsed = ExcelPOParser()._parse_requirements_from_ws(ws)
+
+    assert parsed == {
+        'tracking_code': '日期码格式',
+        'packaging_info': 'MA UPC PKG',
+        'remark': '请按澳洲标准生产',
+    }
+    wb.close()
+
+
+def test_requirements_parser_does_not_require_tracking_code():
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws['A1'] = 'Packaging  Info:'
+    ws['D1'] = '英文MA包装'
+    ws['A2'] = 'Remark:'
+    ws['D2'] = '外箱需加贴纸'
+
+    parsed = ExcelPOParser()._parse_requirements_from_ws(ws)
+
+    assert parsed['packaging_info'] == '英文MA包装'
+    assert parsed['remark'] == '外箱需加贴纸'
+    wb.close()
 
 
 def zip_bytes(entries):
@@ -117,6 +154,11 @@ def test_valid_workbench_master_upload_succeeds(isolated_app, tmp_path):
     )
 
     assert response.status_code == 200
+    payload = response.get_json()
+    assert payload['path'] == source.name
+    assert payload['filename'] == source.name
+    assert payload['uploaded_at']
+    assert '/app/' not in payload['path']
     saved = master_dir / 'uploaded_master.xlsx'
     assert saved.exists()
     workbook = openpyxl.load_workbook(saved, read_only=True)
@@ -125,6 +167,16 @@ def test_valid_workbench_master_upload_succeeds(isolated_app, tmp_path):
     finally:
         workbook.close()
     assert not list(master_dir.glob('*.tmp.xlsx'))
+
+    status = client.get('/api/master-schedule-info').get_json()
+    assert status['exists'] is True
+    assert status['path'] == source.name
+    assert status['filename'] == source.name
+    assert status['uploaded_at'] == payload['uploaded_at']
+
+    download = client.get('/api/master-schedule-download')
+    assert download.status_code == 200
+    assert f'filename={source.name}' in download.headers['Content-Disposition']
 
 
 def test_valid_legacy_master_upload_succeeds(isolated_app, tmp_path):

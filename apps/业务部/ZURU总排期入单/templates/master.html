@@ -74,7 +74,8 @@
             <span id="file-status" class="badge bg-secondary small">检查中...</span>
         </div>
         <div class="master-row">
-            <input type="text" id="masterPath" class="form-control form-control-sm" readonly>
+            <input type="text" id="masterPath" class="form-control form-control-sm"
+                   aria-label="当前总排期文件" placeholder="尚未上传总排期" readonly>
             <div class="header-actions">
                 <button class="btn btn-outline-success btn-sm" id="btnLocalMasterUpload" onclick="openLocalMasterUpload()">
                     <i class="bi bi-upload"></i> 上传总排期
@@ -810,7 +811,7 @@ async function checkStatus() {
     try {
         const resp = await fetch(BASE + '/api/master-schedule-info');
         const data = await readJsonResponse(resp);
-        document.getElementById('masterPath').value = data.path || '';
+        document.getElementById('masterPath').value = masterFileDisplay(data);
         const badge = document.getElementById('file-status');
         if (!data.exists) {
             badge.className = 'badge bg-danger small'; badge.textContent = '文件不存在';
@@ -823,6 +824,13 @@ async function checkStatus() {
         document.getElementById('file-status').className = 'badge bg-secondary small';
         document.getElementById('file-status').textContent = '检查失败';
     }
+}
+function masterFileDisplay(data) {
+    const name = data.filename || data.path || '';
+    if (!name || !data.uploaded_at) return name;
+    const uploaded = new Date(data.uploaded_at);
+    if (Number.isNaN(uploaded.getTime())) return name;
+    return `${name} · 上传于 ${uploaded.toLocaleString('zh-CN', {hour12: false})}`;
 }
 function openLocalMasterUpload() {
     if (uploadingMaster) {
@@ -863,7 +871,7 @@ async function uploadMasterFile(file) {
         const resp = await fetch(BASE + '/api/master-schedule-upload-file', { method: 'POST', body: fd });
         const data = await readJsonResponse(resp);
         if (!resp.ok || data.error) throw new Error(data.error || '上传失败');
-        document.getElementById('masterPath').value = data.path || '';
+        document.getElementById('masterPath').value = masterFileDisplay(data);
         alert(data.msg || '已上传并切换到本地总排期文件');
         checkStatus();
     } catch(e) {

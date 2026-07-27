@@ -88,16 +88,24 @@ jobs:
           echo "$PRINT3D_DATA_SHA256  /tmp/p3d/print3d-payload.tar.gz" | sha256sum -c -
           ls -l /tmp/p3d/print3d-payload.tar.gz
 
-      - name: Upload payload to ECS via SCP
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.CLOUD_HOST }}
-          username: ${{ secrets.CLOUD_USER }}
-          key: ${{ secrets.CLOUD_SSH_KEY }}
-          fingerprint: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
-          source: "/tmp/p3d/"
-          target: "/tmp/"
-          strip_components: 1
+      - name: Upload payload to ECS via scp
+        shell: bash
+        env:
+          CLOUD_HOST: ${{ secrets.CLOUD_HOST }}
+          CLOUD_USER: ${{ secrets.CLOUD_USER }}
+          CLOUD_SSH_KEY: ${{ secrets.CLOUD_SSH_KEY }}
+          CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+        run: |
+          set -euo pipefail
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$CLOUD_SSH_KEY" > ~/.ssh/id_key
+          chmod 600 ~/.ssh/id_key
+          ssh-keyscan -t ed25519,rsa,ecdsa "$CLOUD_HOST" > ~/.ssh/known_hosts 2>/dev/null
+          ssh-keygen -lf ~/.ssh/known_hosts | awk '{print $2}' | grep -qxF "$CLOUD_HOST_FINGERPRINT" \
+            || { echo '[FAIL] SSH host fingerprint 不匹配'; exit 1; }
+          scp -i ~/.ssh/id_key -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            /tmp/p3d/print3d-payload.tar.gz "$CLOUD_USER@$CLOUD_HOST:/tmp/print3d-payload.tar.gz"
+          echo "[OK] payload 已上传到 ECS:/tmp/print3d-payload.tar.gz"
 
       - name: Restore print3d data on ECS via SSH
         env:

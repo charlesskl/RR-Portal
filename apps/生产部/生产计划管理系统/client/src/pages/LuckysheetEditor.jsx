@@ -99,7 +99,7 @@ function parseToISO(val) {
   return null;
 }
 
-function ordersToCelldata(orders, columns, newImportedIds) {
+function ordersToCelldata(orders, columns, newImportedIds, scheduleHints = {}) {
   const celldata = [];
   // 表头行
   columns.forEach((col, c) => {
@@ -115,6 +115,7 @@ function ordersToCelldata(orders, columns, newImportedIds) {
       try { return JSON.parse(order.cell_format); } catch { return {}; }
     })() : {};
     const isNewImport = newImportedIds && newImportedIds.has(order.id);
+    const scheduleHint = scheduleHints && scheduleHints[order.id];
 
     // row_color：导入时记录的行颜色（24 小时内有效）
     let showRowColor = false;
@@ -164,22 +165,16 @@ function ordersToCelldata(orders, columns, newImportedIds) {
         else if (order.row_color === 'yellow') cellValue.bg = '#FFF9C4';
       }
       if (isNewImport) cellValue.bg = '#FFFDE7';
+      if (scheduleHint && ['start_date', 'complete_date', 'ship_date'].includes(col.data)) cellValue.bg = scheduleHint.bg;
       if (isSumCol) { cellValue.bg = '#E6F4FF'; cellValue.bl = 1; }
       if (cellFmt.bg) cellValue.bg = cellFmt.bg;
       if (cellFmt.fc) cellValue.fc = cellFmt.fc;
       if (cellFmt.bl) cellValue.bl = cellFmt.bl;
       if (cellFmt.it) cellValue.it = cellFmt.it;
       if (cellFmt.un) cellValue.un = cellFmt.un;
-      if (cellFmt.cl) cellValue.cl = cellFmt.cl;
-      if (cellFmt.ff) cellValue.ff = cellFmt.ff;
       if (cellFmt.ht != null) cellValue.ht = cellFmt.ht;
       if (cellFmt.vt != null) cellValue.vt = cellFmt.vt;
       if (cellFmt.fs) cellValue.fs = cellFmt.fs;
-      if (cellFmt.tb != null) cellValue.tb = cellFmt.tb;
-      if (cellFmt.tr != null) cellValue.tr = cellFmt.tr;
-      if (cellFmt.rt != null) cellValue.rt = cellFmt.rt;
-      if (cellFmt.ps) cellValue.ps = cellFmt.ps;
-      if (cellFmt.qp != null) cellValue.qp = cellFmt.qp;
       if (cellFmt.bs) cellValue.bs = cellFmt.bs;
       // 公式恢复（解决 #5）：extractCellFormat 已经把 cell.f 存进 cell_format，
       // 重建时必须写回，否则刷新后公式丢失
@@ -187,7 +182,7 @@ function ordersToCelldata(orders, columns, newImportedIds) {
       // 注：天数列的自动公式 =M/AB 在 Luckysheet.create() 之后用 setCellValue 批量套，
       // 不在 celldata 里设 cellValue.f —— 因为 Luckysheet 只对 setCellValue 传入的公式做计算
 
-      if (cellValue.v === '' && Object.keys(cellFmt).length === 0 && !isNewImport && !isSumCol && !showRowColor) {
+      if (cellValue.v === '' && !cellFmt.bg && !cellFmt.fc && !cellFmt.bl && !cellFmt.f && !isNewImport && !isSumCol && !showRowColor && !scheduleHint) {
         return;
       }
       celldata.push({ r, c, v: cellValue });
@@ -233,7 +228,7 @@ function extractCellFormat(cell) {
   if (cell.tb != null) fmt.tb = cell.tb;
   if (cell.tr != null) fmt.tr = cell.tr;
   if (cell.rt != null) fmt.rt = cell.rt;
-  // 合并单元格由 sheet-settings.merge 统一持久化，不重复写入每个订单的 cell_format。
+  if (cell.mc) fmt.mc = cell.mc;
   // cell.ct（基本类型 s/n/g）渲染时自动赋值，不是用户意图，存了反而让 payload 巨大
   // 自定义格式（如 fa='m"月"d"日"' 之类）我们也不靠 cell_format 存
   if (cell.f) fmt.f = cell.f;
@@ -293,7 +288,7 @@ function LuckysheetEditor({
   height = 600,
   containerId = 'luckysheet-container',
   newImportedIds,
-  refreshKey = 0,
+  scheduleHints = {},
 }, ref) {
   const rowMapRef = useRef([]);
   const initializedRef = useRef(false);
@@ -303,6 +298,7 @@ function LuckysheetEditor({
   const settingsLoadedRef = useRef(false);
   const loadedIdsRef = useRef('');
   const [datePicker, setDatePicker] = useState(null); // {x, y, orderId, field, value}
+  const scheduleHintKey = JSON.stringify(scheduleHints || {});
 
   // 实时记录用户在 Luckysheet 里改动的 cell（值/格式），保存时直接读这个，
   // 不再在保存时去读 Luckysheet 内部 data（避免 flush 时序问题）
@@ -428,7 +424,7 @@ function LuckysheetEditor({
       if (!formula) {
         const fmt = extractCellFormat(cellObj);
         if (fmt) entry.fmt[colData] = fmt;
-        else entry.fmt[colData] = null;
+        else if (entry.fmt[colData]) delete entry.fmt[colData];
         console.log('[钩子] (r,c)=(' + r + ',' + c + ') orderId=' + orderId + ' col=' + colData + ' v=', v, 'fmt=', fmt);
       }
 
@@ -609,11 +605,7 @@ function LuckysheetEditor({
           delete c.ct;   // ct 是渲染时自动赋值，不该入 cell_format
           if (Object.keys(c).length > 0) cleaned[col] = c;
         }
-        const merged = { ...cleaned };
-        for (const [col, f] of Object.entries(b.fmt)) {
-          if (f == null) delete merged[col];
-          else merged[col] = f;
-        }
+        const merged = { ...cleaned, ...b.fmt };
         // 也把新进的 fmt 清掉 ct（防止万一）
         for (const col of Object.keys(merged)) {
           if (merged[col] && merged[col].ct) {
@@ -693,16 +685,8 @@ function LuckysheetEditor({
     }
   };
 
-  const hasPendingChanges = () => {
-    const editBox = document.querySelector('#luckysheet-input-box');
-    const editing = editBox && editBox.style.display && editBox.style.display !== 'none';
-    return Boolean(editing)
-      || Object.keys(pendingChangesRef.current).length > 0
-      || dataRef.current.some(order => order && order._pendingFields && Object.keys(order._pendingFields).length > 0);
-  };
-
-  // 暴露保存与脏状态给父组件，避免筛选或外部刷新静默丢失编辑
-  useImperativeHandle(ref, () => ({ saveAll, hasPendingChanges }), [workshop, data]);
+  // 暴露 saveAll 给父组件（保存按钮调用）
+  useImperativeHandle(ref, () => ({ saveAll }), [workshop, data]);
 
   useEffect(() => {
     // 等待 sheetSettings 加载完成后才初始化
@@ -715,9 +699,9 @@ function LuckysheetEditor({
 
     // 构建行号→订单id的映射
     rowMapRef.current = data.map(o => o.id);
-    loadedIdsRef.current = data.map(o => o.id).join(',') + '|' + refreshKey;
+    loadedIdsRef.current = data.map(o => o.id).join(',') + '|' + scheduleHintKey;
 
-    const celldata = ordersToCelldata(data, ORDER_COLUMNS, newImportedIds);
+    const celldata = ordersToCelldata(data, ORDER_COLUMNS, newImportedIds, scheduleHints);
     const defaultColWidths = {};
     ORDER_COLUMNS.forEach((c, i) => { defaultColWidths[i] = c.width || 80; });
     // 保存的设置优先
@@ -867,13 +851,13 @@ function LuckysheetEditor({
       pendingChangesRef.current = {};
       if (layoutSaveTimerRef.current) clearTimeout(layoutSaveTimerRef.current);
       document.removeEventListener('mouseup', handleLayoutMouseUp, true);
-      document.removeEventListener('keydown', handleKeyDelete, true);
+      document.removeEventListener('keydown', handleKeyDelete);
       const ls = getLuckysheet();
       if (ls && ls.destroy) {
         try { ls.destroy(); } catch {}
       }
     };
-  }, [containerId, sheetSettings, refreshKey]);
+  }, [containerId, sheetSettings, scheduleHintKey]);
 
   // 数据变化时刷新（仅当订单集合/顺序变化时才重建，避免用户编辑被覆盖）
   useEffect(() => {
@@ -881,14 +865,14 @@ function LuckysheetEditor({
     const luckysheet = getLuckysheet();
     if (!luckysheet) return;
 
-    const newIds = data.map(o => o.id).join(',') + '|' + refreshKey;
+    const newIds = data.map(o => o.id).join(',') + '|' + scheduleHintKey;
     if (newIds === loadedIdsRef.current) {
       // 订单集合没变，不重建，避免覆盖用户编辑
       return;
     }
     loadedIdsRef.current = newIds;
     rowMapRef.current = data.map(o => o.id);
-    const celldata = ordersToCelldata(data, ORDER_COLUMNS, newImportedIds);
+    const celldata = ordersToCelldata(data, ORDER_COLUMNS, newImportedIds, scheduleHints);
 
     try {
       const defaultColWidths = {};
@@ -963,7 +947,7 @@ function LuckysheetEditor({
     } catch (e) {
       console.error('Luckysheet 更新失败', e);
     }
-  }, [data, newImportedIds, refreshKey]);
+  }, [data, newImportedIds, scheduleHintKey]);
 
   function applySavedFormulasBatch() {
     setTimeout(() => {

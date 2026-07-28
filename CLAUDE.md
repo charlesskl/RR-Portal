@@ -40,8 +40,6 @@ RR-Portal/
 │   │   ├── 啤机外发系统/            — pi-outsource (Node.js + React)
 │   │   ├── 生产计划管理系统/        — production-plan (Node.js + React + Luckysheet)
 │   │   └── 品质管理系统/            — qc (Node.js, 兴信 QMS 来料/成品验货 + AQL + 阿里百炼AI识别, node:sqlite)
-│   ├── 3D打印部/
-│   │   └── 3D打印管理系统/          — print3d (Node.js, 云端部署打印机功能降级)
 │   ├── 喷油部/
 │   │   └── 喷油排期系统/            — sprayplan (Next.js + ASP.NET Core, 自带 SQLite + 自有 JWT 登录)
 │   ├── 业务部/
@@ -218,7 +216,6 @@ curl http://localhost:<port>/health
 | pi-outsource 啤机外发系统 | Node.js/React | 3010 | /pi-outsource/ |
 | production-plan 生产计划管理系统 | Node.js | 8080 | /production-plan/ |
 | qc 品质管理系统 | Node.js (node:sqlite) | 3400 | /qc/ |
-| print3d 3D打印管理系统 | Node.js | 3000 | /3d-print/ |
 | zuru-master-schedule (ZURU总排期入单) | Flask | 5003 | /zuru-master/ |
 | zuru-order-system (ZURU接单表入单系统) | Flask | 5005 | /zuru-order-system/ |
 | tomy-paiqi TOMY排期核对系统 | Node.js/React | 3006 | /tomy-paiqi/ |
@@ -475,7 +472,6 @@ const data = JSON.parse(fs.readFileSync('data/data.json'));
 | pi-outsource | 啤机外发系统 | 生产部 | Standalone (Node.js/React) | /pi-outsource/ | (PR #124) |
 | production-plan | 生产计划管理系统 | 生产部 | Standalone (Node.js/React + Luckysheet) | /production-plan/ | (PR #63) |
 | qc | 品质管理系统 (兴信 QMS) | 生产部 | Standalone (Node.js, 内置 node:sqlite + 阿里百炼 qwen-vl AI 识别) | /qc/ | — |
-| print3d | 3D打印管理系统 | 3D打印部 | Standalone (Node.js, 无依赖原生 HTTP；云端部署打印机实时状态/自动记录降级，需厂区局域网才能连打印机) | /3d-print/ | (PR #330) |
 | zuru-master-schedule | ZURU总排期入单 | 业务部 | Standalone (Python/Flask) | /zuru-master/ | (PR #59) |
 | zuru-order-system | ZURU接单表入单系统 | 业务部 | Standalone (Python/Flask) | /zuru-order-system/ | https://github.com/hanson678/zuru-order-system |
 | tomy-paiqi | TOMY排期核对系统 | 业务部 | Standalone (Node.js/React) | /tomy-paiqi/ | — |
@@ -504,6 +500,7 @@ const data = JSON.parse(fs.readFileSync('data/data.json'));
 - quotation-system (旧版) — 2026-04-22（git rm；已被 apps/quotation/ 完全取代）
 - product-library — 2026-04-22（git rm；从未实现过，只有占位 README）
 - 套客表系统 quotation (业务部) — 2026-04-23（完全下线：git rm 源码 + 删除服务器数据备份；已被 apps/业务部/报价系统/ (baojia) 取代。需要恢复时可从 git history commit 26faed8 之前找回源码）
+- 3D打印管理系统 print3d (3D打印部) — 2026-07-27 下线（PR #330 上线当日即下线：源码归档 archived/3d-print-management/，容器由 --remove-orphans 清除，服务器数据保留在 /opt/rr-portal/apps/3D打印部/3D打印管理系统/data/，业务数据在厂区本地 master 仍有完整副本。恢复时 git mv 回来 + 补 compose/nginx/门户注册即可）
 
 ---
 

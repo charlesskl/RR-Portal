@@ -954,33 +954,6 @@ services:
     networks:
       - platform-net
 
-  print3d:
-    build:
-      context: ./apps/3D打印部/3D打印管理系统
-      dockerfile: Dockerfile
-    environment:
-      - PORT=3000
-      - DATA_PATH=/app/data
-      - NODE_ENV=production
-      - TZ=Asia/Shanghai
-    volumes:
-      - ./apps/3D打印部/3D打印管理系统/data:/app/data
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-    mem_limit: 256m
-    memswap_limit: 256m
-    restart: unless-stopped
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
-    networks:
-      - platform-net
-
 networks:
   platform-net:
     driver: bridge

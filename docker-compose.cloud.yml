@@ -543,6 +543,9 @@ services:
       - LEGACY_SQLITE_FILE=/app/backend/legacy-data/data.db
       - SESSION_SECRET=${INTERNAL_QUOTE_SESSION_SECRET:-}
       - ADMIN_INITIAL_PASSWORD=${INTERNAL_QUOTE_ADMIN_PASSWORD:-}
+      # 百度翻译（报客表自动翻译英文）；复用 INTERNAL_QUOTE_BAIDU_* 注入
+      - BAIDU_APPID=${INTERNAL_QUOTE_BAIDU_APPID:-}
+      - BAIDU_KEY=${INTERNAL_QUOTE_BAIDU_KEY:-}
     depends_on:
       db:
         condition: service_healthy

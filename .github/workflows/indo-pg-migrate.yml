@@ -1,0 +1,223 @@
+name: Indo PG Migrate
+
+# 一次性：把 indo-shipping (印尼走货明细) 的业务数据从 SQL Server 容器
+#   rr-portal-indo-sqlserver-1 (库 IndoShipping, 14 张表)
+# 迁移到共享 PostgreSQL 16 容器 rr-portal-db-1 的 indo_shipping schema。
+#
+# 流程:
+#   a) 导出: sqlcmd 逐表导出 CSV（文本列加双引号并转义；bit → true/false；
+#      datetime → ISO8601 (style 126)；JSON 列保持合法 JSON 文本），并生成行数 manifest
+#   b) 建表: 对 rrportal 库应用 apps/印尼小组/印尼走货明细/db/postgres_schema.sql（幂等）
+#   c) 备份: pg_dump indo_shipping 现有数据（若有）留底
+#   d) 导入: TRUNCATE 后按外键依赖顺序 COPY FROM csv
+#   e) 序列: 对 11 张自增表 setval 对齐 MAX(id)
+#   f) 校验: 逐表比对 PG 行数 vs manifest，不一致 exit 1
+#
+# 安全: 全程不停止/不重启任何运行中容器；TRUNCATE 只发生在全部导出成功之后，
+#       且仅作用于 indo_shipping schema。CSV 与备份保留在
+#       /opt/rr-portal/backups/indo-pg-migration/<timestamp>/。
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-cloud
+  queue: max
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      - name: Validate SSH host fingerprint
+        shell: bash
+        env:
+          CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]]; then
+            echo 'CLOUD_HOST_FINGERPRINT must be a non-empty OpenSSH SHA256 fingerprint.' >&2
+            exit 1
+          fi
+
+      - name: Encode postgres schema for transport
+        shell: bash
+        run: |
+          set -euo pipefail
+          SCHEMA_FILE="apps/印尼小组/印尼走货明细/db/postgres_schema.sql"
+          test -s "$SCHEMA_FILE"
+          echo "SCHEMA_B64=$(base64 -w0 "$SCHEMA_FILE")" >> "$GITHUB_ENV"
+
+      - name: Run migration on ECS via SSH
+        env:
+          CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
+        with:
+          host: ${{ secrets.CLOUD_HOST }}
+          username: ${{ secrets.CLOUD_USER }}
+          key: ${{ secrets.CLOUD_SSH_KEY }}
+          fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
+          envs: SCHEMA_B64
+          command_timeout: 30m
+          script: |
+            set -euo pipefail
+            cd /opt/rr-portal
+
+            SRC=rr-portal-indo-sqlserver-1
+            DB=rr-portal-db-1
+
+            echo "== preflight: 容器在跑、schema 文件就位 =="
+            docker ps --format '{{.Names}}' | grep -qx "$SRC"
+            docker ps --format '{{.Names}}' | grep -qx "$DB"
+
+            TS=$(date +%Y%m%d-%H%M%S)
+            OUT=/opt/rr-portal/backups/indo-pg-migration/$TS
+            mkdir -p "$OUT"
+            echo "$SCHEMA_B64" | base64 -d > "$OUT/postgres_schema.sql"
+            grep -q 'CREATE SCHEMA IF NOT EXISTS indo_shipping' "$OUT/postgres_schema.sql"
+
+            # DB 凭据（与 docker-compose.cloud.yml 默认值一致，可被 .env.cloud.production 覆盖）
+            DB_USER=$(grep -E '^DB_USER=' .env.cloud.production 2>/dev/null | tail -1 | cut -d= -f2- || true)
+            DB_USER=${DB_USER:-rrportal}
+            DB_NAME=$(grep -E '^DB_NAME=' .env.cloud.production 2>/dev/null | tail -1 | cut -d= -f2- || true)
+            DB_NAME=${DB_NAME:-rrportal}
+            echo "target: db=$DB_NAME user=$DB_USER schema=indo_shipping"
+
+            SA_PASS=$(docker exec "$SRC" printenv MSSQL_SA_PASSWORD 2>/dev/null || docker exec "$SRC" printenv SA_PASSWORD)
+            test -n "$SA_PASS"
+            SQLCMD=(docker exec "$SRC" /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "$SA_PASS" -d IndoShipping -h -1 -W -y 0)
+
+            # ---- CSV 片段构造函数（T-SQL）----
+            # 文本列: 双引号包裹 + 内部双引号转义（NULL → 空字符串）
+            T() { printf "'\"'+REPLACE(COALESCE(CAST(%s AS NVARCHAR(MAX)),''),'\"','\"\"')+'\"'" "$1"; }
+            # 数值/整型列: 不引号（NULL → 空 → COPY 解析为 NULL）
+            N() { printf "COALESCE(CAST(%s AS NVARCHAR(40)),'')" "$1"; }
+            # date/datetime2: ISO8601 (style 126)（NULL → NULL）
+            D() { printf "COALESCE(CONVERT(varchar(33), %s, 126),'')" "$1"; }
+            # bit → true/false 字符串，PG boolean 直接可收
+            B() { printf "CASE WHEN %s=1 THEN 'true' WHEN %s=0 THEN 'false' ELSE '' END" "$1" "$1"; }
+            # JSON 列: NULL → NULL；非 NULL → 引号包裹的合法 JSON 文本（目标列是 JSONB）
+            J() { printf "CASE WHEN %s IS NULL THEN '' ELSE '\"'+REPLACE(CAST(%s AS NVARCHAR(MAX)),'\"','\"\"')+'\"' END" "$1" "$1"; }
+
+            # ---- 导出 ----
+            # 表清单与列顺序取自 apps/印尼小组/印尼走货明细/db/rebuild_schema.sql（14 张表）
+            export_table() { # <mssql表名> <csv表头> <SELECT ... FROM ...>
+              local name="$1" header="$2" sel="$3"
+              local cnt
+              cnt=$("${SQLCMD[@]}" -l 30 -Q "SET NOCOUNT ON; SELECT COUNT(*) FROM dbo.$name" | tr -d '[:space:]')
+              test -n "$cnt"
+              printf '%s %s\n' "$name" "$cnt" >> "$OUT/manifest.txt"
+              printf '%s\n' "$header" > "$OUT/$name.csv"
+              "${SQLCMD[@]}" -l 60 -Q "SET NOCOUNT ON; $sel" >> "$OUT/$name.csv"
+              echo "exported $name ($cnt rows)"
+            }
+
+            echo "== a) 从 SQL Server 导出 CSV + manifest =="
+            export_table Users 'Id,Username,PasswordHash,DisplayName,Userbqrpower,Usereditpower,IsActive,CreatedAt' \
+              "SELECT $(N Id),$(T Username),$(T PasswordHash),$(T DisplayName),$(T Userbqrpower),$(T Usereditpower),$(B IsActive),$(D CreatedAt) FROM dbo.Users"
+            export_table customers 'id,name,created_at,active' \
+              "SELECT $(N id),$(T name),$(D created_at),$(B active) FROM dbo.customers"
+            export_table products 'code,name,hs_cn,hs_id,customer,moldings,created_at,updated_at,active' \
+              "SELECT $(T code),$(T name),$(T hs_cn),$(T hs_id),$(T customer),$(J moldings),$(D created_at),$(D updated_at),$(B active) FROM dbo.products"
+            export_table images 'id,mime,data_url,created_at' \
+              "SELECT $(T id),$(T mime),$(T data_url),$(D created_at) FROM dbo.images"
+            export_table dict_hs 'id,keyword,hs_cn,hs_id,priority' \
+              "SELECT $(N id),$(T keyword),$(T hs_cn),$(T hs_id),$(N priority) FROM dbo.dict_hs"
+            export_table dict_supplier 'id,keyword,full_name,customs_company,priority' \
+              "SELECT $(N id),$(T keyword),$(T full_name),$(T customs_company),$(N priority) FROM dbo.dict_supplier"
+            export_table schedules 'id,week_label,upload_date,raw_rows,diff_from_prev,created_at' \
+              "SELECT $(N id),$(T week_label),$(D upload_date),$(J raw_rows),$(J diff_from_prev),$(D created_at) FROM dbo.schedules"
+            export_table settings 'key,value,updated_at' \
+              "SELECT $(T '[key]'),$(T value),$(D updated_at) FROM dbo.settings"
+            export_table materials 'id,product_code,item_no,name_zh,name_en,spec,category,material_code,hs_cn,hs_id,supplier,customs_company,unit_kg,gross_per_pc,net_per_pc,length,width,height,qty_per_carton,weight_per_carton,image_id,active,sort_order,usage_qty,created_at' \
+              "SELECT $(N id),$(T product_code),$(T item_no),$(T name_zh),$(T name_en),$(T spec),$(T category),$(T material_code),$(T hs_cn),$(T hs_id),$(T supplier),$(T customs_company),$(T unit_kg),$(N gross_per_pc),$(N net_per_pc),$(N length),$(N width),$(N height),$(N qty_per_carton),$(N weight_per_carton),$(T image_id),$(B active),$(N sort_order),$(N usage_qty),$(D created_at) FROM dbo.materials"
+            export_table purchase_orders 'id,po_no,supplier,status,order_date,delivery_date,notes,created_at' \
+              "SELECT $(N id),$(T po_no),$(T supplier),$(T status),$(D order_date),$(D delivery_date),$(T notes),$(D created_at) FROM dbo.purchase_orders"
+            export_table po_items 'id,po_id,product_code,material_id,material_name,qty,price,currency,notes,category,spec,usage_qty,ordered_qty,material_qty,spoilage_qty,purchase_qty,purchase_unit,tomy_po,ship_unit,net_per_pc,eta' \
+              "SELECT $(N id),$(N po_id),$(T product_code),$(N material_id),$(T material_name),$(N qty),$(N price),$(T currency),$(T notes),$(T category),$(T spec),$(N usage_qty),$(N ordered_qty),$(N material_qty),$(N spoilage_qty),$(N purchase_qty),$(T purchase_unit),$(T tomy_po),$(T ship_unit),$(N net_per_pc),$(T eta) FROM dbo.po_items"
+            export_table outbound 'id,po_no,material_id,qty,out_date,notes,created_at' \
+              "SELECT $(N id),$(T po_no),$(N material_id),$(N qty),$(D out_date),$(T notes),$(D created_at) FROM dbo.outbound"
+            export_table shipments 'id,customer,container_no,container_count,ship_date,load_date,bl_no,rate,status,created_at' \
+              "SELECT $(N id),$(T customer),$(T container_no),$(N container_count),$(D ship_date),$(D load_date),$(T bl_no),$(N rate),$(T status),$(D created_at) FROM dbo.shipments"
+            export_table shipment_items 'id,shipment_id,material_id,seq,kg,qty,cartons,qty_per_carton,pallet,price,currency,po_no,po_date,supplier,customs_company,bl_head,contract_no,contract_date,invoice_no,invoice_date,invoice_price,product_use,formula_name' \
+              "SELECT $(N id),$(N shipment_id),$(N material_id),$(N seq),$(N kg),$(N qty),$(N cartons),$(T qty_per_carton),$(T pallet),$(N price),$(T currency),$(T po_no),$(D po_date),$(T supplier),$(T customs_company),$(T bl_head),$(T contract_no),$(D contract_date),$(T invoice_no),$(D invoice_date),$(N invoice_price),$(T product_use),$(T formula_name) FROM dbo.shipment_items"
+
+            echo "== b) 应用 postgres_schema.sql 到 $DB_NAME =="
+            docker cp "$OUT/postgres_schema.sql" "$DB:/tmp/indo-pg-schema.sql"
+            docker exec "$DB" psql -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 -f /tmp/indo-pg-schema.sql
+            docker exec "$DB" rm -f /tmp/indo-pg-schema.sql
+
+            echo "== c) 备份 indo_shipping 现有数据（首跑通常为空） =="
+            docker exec "$DB" pg_dump -U "$DB_USER" -d "$DB_NAME" -n indo_shipping --data-only \
+              > "$OUT/pg-indo_shipping-before.sql" || echo "no existing indo_shipping data, skipped"
+
+            echo "== d) TRUNCATE + 按外键依赖顺序 COPY 导入 =="
+            docker exec "$DB" psql -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 -c \
+              'TRUNCATE indo_shipping."Users", indo_shipping.customers, indo_shipping.products, indo_shipping.images, indo_shipping.dict_hs, indo_shipping.dict_supplier, indo_shipping.schedules, indo_shipping.settings, indo_shipping.materials, indo_shipping.purchase_orders, indo_shipping.po_items, indo_shipping.outbound, indo_shipping.shipments, indo_shipping.shipment_items RESTART IDENTITY CASCADE'
+
+            load_table() { # <pg表名(需要时带双引号)> <csv文件> <列清单>
+              local pg="$1" file="$2" cols="$3"
+              docker cp "$OUT/$file" "$DB:/tmp/indo-mig-$file"
+              docker exec "$DB" psql -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 \
+                -c "COPY indo_shipping.$pg ($cols) FROM '/tmp/indo-mig-$file' WITH (FORMAT csv, HEADER true)"
+              docker exec "$DB" rm -f "/tmp/indo-mig-$file"
+              echo "loaded $pg"
+            }
+
+            load_table '"Users"' Users.csv '"Id","Username","PasswordHash","DisplayName","Userbqrpower","Usereditpower","IsActive","CreatedAt"'
+            load_table customers customers.csv 'id,name,created_at,active'
+            load_table products products.csv 'code,name,hs_cn,hs_id,customer,moldings,created_at,updated_at,active'
+            load_table images images.csv 'id,mime,data_url,created_at'
+            load_table dict_hs dict_hs.csv 'id,keyword,hs_cn,hs_id,priority'
+            load_table dict_supplier dict_supplier.csv 'id,keyword,full_name,customs_company,priority'
+            load_table schedules schedules.csv 'id,week_label,upload_date,raw_rows,diff_from_prev,created_at'
+            load_table settings settings.csv '"key",value,updated_at'
+            load_table materials materials.csv 'id,product_code,item_no,name_zh,name_en,spec,category,material_code,hs_cn,hs_id,supplier,customs_company,unit_kg,gross_per_pc,net_per_pc,length,width,height,qty_per_carton,weight_per_carton,image_id,active,sort_order,usage_qty,created_at'
+            load_table purchase_orders purchase_orders.csv 'id,po_no,supplier,status,order_date,delivery_date,notes,created_at'
+            load_table po_items po_items.csv 'id,po_id,product_code,material_id,material_name,qty,price,currency,notes,category,spec,usage_qty,ordered_qty,material_qty,spoilage_qty,purchase_qty,purchase_unit,tomy_po,ship_unit,net_per_pc,eta'
+            load_table outbound outbound.csv 'id,po_no,material_id,qty,out_date,notes,created_at'
+            load_table shipments shipments.csv 'id,customer,container_no,container_count,ship_date,load_date,bl_no,rate,status,created_at'
+            load_table shipment_items shipment_items.csv 'id,shipment_id,material_id,seq,kg,qty,cartons,qty_per_carton,pallet,price,currency,po_no,po_date,supplier,customs_company,bl_head,contract_no,contract_date,invoice_no,invoice_date,invoice_price,product_use,formula_name'
+
+            echo "== e) 自增序列 setval 对齐 MAX(id) =="
+            setval_one() { # <pg表名> <列名(pg_get_serial_sequence 第二参数按原名, 不折叠大小写)>
+              docker exec "$DB" psql -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 \
+                -c "SELECT setval(pg_get_serial_sequence('indo_shipping.$1','$2'), COALESCE((SELECT MAX(\"$2\") FROM indo_shipping.$1), 1))"
+            }
+            setval_one '"Users"' Id
+            setval_one customers id
+            setval_one materials id
+            setval_one dict_hs id
+            setval_one dict_supplier id
+            setval_one schedules id
+            setval_one purchase_orders id
+            setval_one po_items id
+            setval_one outbound id
+            setval_one shipments id
+            setval_one shipment_items id
+
+            echo "== f) 行数比对 (PG vs SQL Server manifest) =="
+            fail=0
+            while read -r name cnt; do
+              pg="$name"
+              [ "$name" = "Users" ] && pg='"Users"'
+              got=$(docker exec "$DB" psql -U "$DB_USER" -d "$DB_NAME" -Atc "SELECT COUNT(*) FROM indo_shipping.$pg")
+              if [ "$got" = "$cnt" ]; then
+                echo "[OK] $name = $cnt"
+              else
+                echo "[MISMATCH] $name sqlserver=$cnt pg=$got"
+                fail=1
+              fi
+            done < "$OUT/manifest.txt"
+            if [ "$fail" != 0 ]; then
+              echo "行数不一致，迁移校验失败。CSV 与备份保留在 $OUT" >&2
+              exit 1
+            fi
+
+            echo "[OK] indo_shipping 迁移完成。产物与备份: $OUT"

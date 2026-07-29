@@ -75,6 +75,7 @@
       <select id="clientFilter" class="form-select form-select-sm" style="width:auto" onchange="filterClient(this.value)">
         <option value="">全部客户</option>
       </select>
+      <button class="btn btn-outline-primary btn-sm" onclick="addClient()" title="手动添加新客户">+ 新增客户</button>
     </div>
     <div class="d-flex gap-2">
       <button class="btn btn-outline-secondary" onclick="openSummary()">
@@ -2175,17 +2176,57 @@ document.getElementById('injItemsBody').addEventListener('change', function(e) {
 
 // 客户列表（从API加载）
 let _clientList = [];
-apiFetch('/api/clients').then(r => r.json()).then(clients => {
-  _clientList = clients;
-  // 填充所有客户下拉框（啤办单、搪胶单、夹具单头部）
-  ['inj-client_name', 'slush-client_name', 'spray-client_name', 'asm-client_name'].forEach(id => {
+
+function renderClientOptions() {
+  // 填充所有客户下拉框（啤办单、搪胶单、夹具单头部 + 客名筛选）
+  ['inj-client_name', 'slush-client_name', 'spray-client_name', 'asm-client_name', 'clientFilter'].forEach(id => {
     const sel = document.getElementById(id);
-    if (sel) clients.forEach(c => { const o = document.createElement('option'); o.value = c; o.textContent = c; sel.appendChild(o); });
+    if (!sel) return;
+    const current = sel.value;
+    // 保留第一个占位 option（请选择客户 / 全部客户），重建其余
+    while (sel.options.length > 1) sel.remove(1);
+    _clientList.forEach(c => { const o = document.createElement('option'); o.value = c; o.textContent = c; sel.appendChild(o); });
+    // 尽量恢复原选中值（新增客户后下拉重建不丢选择）
+    if (current && _clientList.includes(current)) sel.value = current;
   });
-  // 填充客名筛选下拉框
-  const clientFilterSel = document.getElementById('clientFilter');
-  if (clientFilterSel) clients.forEach(c => { const o = document.createElement('option'); o.value = c; o.textContent = c; clientFilterSel.appendChild(o); });
-}).catch(() => {});
+}
+
+function loadClients() {
+  return apiFetch('/api/clients').then(r => r.json()).then(clients => {
+    _clientList = clients;
+    renderClientOptions();
+  }).catch(() => {});
+}
+
+async function addClient() {
+  const name = (prompt('请输入新客户名称：') || '').trim();
+  if (!name) return;
+  if (_clientList.some(c => c.toLowerCase() === name.toLowerCase())) {
+    alert('该客户已存在');
+    return;
+  }
+  const next = [..._clientList, name];
+  try {
+    const r = await apiFetch('/api/clients', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(next)
+    });
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.statusText);
+    _clientList = await r.json();
+    renderClientOptions();
+    // 新建单据的下拉框直接选中新客户，方便继续开单
+    ['inj-client_name', 'slush-client_name', 'spray-client_name', 'asm-client_name'].forEach(id => {
+      const sel = document.getElementById(id);
+      if (sel && sel.offsetParent !== null && !sel.value) sel.value = name;
+    });
+    alert('客户「' + name + '」已添加');
+  } catch (e) {
+    alert('添加失败：' + e.message);
+  }
+}
+
+loadClients();
 
 // ─── 用户登录 ─────────────────────────────────────────────────────────────────
 let currentUser = sessionStorage.getItem('eng_user') || '';

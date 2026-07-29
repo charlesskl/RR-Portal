@@ -32,7 +32,7 @@ jobs:
           fi
 
       - name: Checkout schema file
-        uses: actions/checkout@11bd71901cc5b72b3e1b57e8033df049ead3a4b3
+        uses: actions/checkout@v4
 
 
       - name: Encode schema file

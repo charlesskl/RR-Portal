@@ -1,0 +1,75 @@
+name: Indo PG Reset
+
+# 印尼走货明细 — 放弃 SQL Server 数据迁移后的 PG schema 重置（手动触发，一次性）：
+#   DROP SCHEMA indo_shipping CASCADE → 应用 db/postgres_schema.sql 重建空 schema。
+#   用于清掉迁移 workflow 半成品数据，让 indo-shipping 切换后从种子数据干净启动。
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-cloud
+  queue: max
+  cancel-in-progress: false
+
+jobs:
+  reset:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Validate SSH host fingerprint
+        shell: bash
+        env:
+          CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]]; then
+            echo 'CLOUD_HOST_FINGERPRINT must be a non-empty OpenSSH SHA256 fingerprint.' >&2
+            exit 1
+          fi
+
+      - name: Checkout schema file
+        uses: actions/checkout@11bd71901cc5b72b3e1b57e8033df049ead3a4b3
+
+
+      - name: Encode schema file
+        id: b64
+        run: echo "b64=$(base64 -w0 'apps/印尼小组/印尼走货明细/db/postgres_schema.sql')" >> "$GITHUB_OUTPUT"
+
+      - name: Reset indo_shipping schema on ECS via SSH
+        env:
+          CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+          SCHEMA_B64: ${{ steps.b64.outputs.b64 }}
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
+        with:
+          host: ${{ secrets.CLOUD_HOST }}
+          username: ${{ secrets.CLOUD_USER }}
+          key: ${{ secrets.CLOUD_SSH_KEY }}
+          fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
+          command_timeout: 8m
+          envs: SCHEMA_B64
+          script: |
+            set -euo pipefail
+            cd /opt/rr-portal
+            DB=rr-portal-db-1
+            docker ps --format '{{.Names}}' | grep -qx "$DB"
+            echo "$SCHEMA_B64" | base64 -d > /tmp/postgres_schema.sql
+            grep -q 'CREATE SCHEMA IF NOT EXISTS indo_shipping' /tmp/postgres_schema.sql
+            DB_USER=$(grep -E '^DB_USER=' .env.cloud.production 2>/dev/null | tail -1 | cut -d= -f2- || true)
+            DB_USER=${DB_USER:-rrportal}
+            DB_NAME=$(grep -E '^DB_NAME=' .env.cloud.production 2>/dev/null | tail -1 | cut -d= -f2- || true)
+            DB_NAME=${DB_NAME:-rrportal}
+            echo "-- DROP SCHEMA indo_shipping CASCADE（清除迁移半成品数据） --"
+            docker exec "$DB" psql -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 \
+              -c "DROP SCHEMA IF EXISTS indo_shipping CASCADE;"
+            docker cp /tmp/postgres_schema.sql "$DB":/tmp/postgres_schema.sql
+            echo "-- 应用 postgres_schema.sql 重建空 schema --"
+            docker exec "$DB" psql -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 \
+              -f /tmp/postgres_schema.sql
+            docker exec "$DB" psql -U "$DB_USER" -d "$DB_NAME" -Atc \
+              "SELECT count(*) FROM information_schema.tables WHERE table_schema='indo_shipping'" \
+              | xargs -I{} echo "[OK] indo_shipping 已重置，共 {} 张表（空库待种子）"
+            rm -f /tmp/postgres_schema.sql

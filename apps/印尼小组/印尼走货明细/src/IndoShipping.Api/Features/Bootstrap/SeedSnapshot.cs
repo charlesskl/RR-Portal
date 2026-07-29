@@ -1,6 +1,6 @@
 using System.Text.Json;
 
-namespace IndoShipping.Bootstrap;
+namespace IndoShipping.Api.Features.Bootstrap;
 
 public sealed class SeedSnapshot
 {

@@ -27,7 +27,7 @@ public class ApiPermissionMiddlewareTests
         context.Request.Path = path;
 
         var options = new DbContextOptionsBuilder<AppDbContext>()
-            .UseSqlServer("Server=localhost;Database=not-used;Integrated Security=True;TrustServerCertificate=True")
+            .UseNpgsql("Host=localhost;Database=not-used")
             .Options;
         await using var db = new AppDbContext(options);
 

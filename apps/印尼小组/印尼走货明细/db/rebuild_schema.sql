@@ -1,6 +1,11 @@
 -- 印尼走货明细系统 — T-SQL Schema (SQL Server 2019+)
 -- 由 印尼明细/backend/db/schema.sql (SQLite) 翻译而来
 -- 运行方式: sqlcmd -S (localdb)\MSSQLLocalDB -i rebuild_schema.sql
+--
+-- ⚠️ LEGACY / 已废弃 (2026-07-29): 系统已迁移到共享 PostgreSQL 16 (schema indo_shipping)。
+--    SQL Server 版 schema 不再维护，请以 db/postgres_schema.sql 为准；
+--    数据迁移由 .github/workflows/indo-pg-migrate.yml 执行。
+--    本文件仅保留作历史参考与列清单蓝本，请勿再对 SQL Server 实例执行。
 
 IF DB_ID('IndoShipping') IS NULL
     CREATE DATABASE IndoShipping;

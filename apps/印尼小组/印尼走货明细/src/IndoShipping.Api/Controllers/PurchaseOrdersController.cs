@@ -14,7 +14,7 @@ public class PurchaseOrdersController(ISqlConnectionFactory factory) : Controlle
     public async Task<IActionResult> GetBlob()
     {
         using var c = factory.Create();
-        var raw = await c.ExecuteScalarAsync<string?>("SELECT value FROM dbo.settings WHERE [key]='purchaseOrders'");
+        var raw = await c.ExecuteScalarAsync<string?>("SELECT value FROM settings WHERE key='purchaseOrders'");
         if (string.IsNullOrWhiteSpace(raw)) return Content("[]", "application/json");
         try { using var _ = JsonDocument.Parse(raw); return Content(raw, "application/json"); }
         catch { return Content("[]", "application/json"); }
@@ -26,7 +26,7 @@ public class PurchaseOrdersController(ISqlConnectionFactory factory) : Controlle
     {
         using var c = factory.Create();
         var rows = await c.QueryAsync(@"
-            SELECT DISTINCT tomy_po, product_code FROM dbo.po_items
+            SELECT DISTINCT tomy_po, product_code FROM po_items
             WHERE tomy_po IS NOT NULL AND tomy_po <> '' AND product_code IS NOT NULL AND product_code <> ''");
         return Ok(rows);
     }
@@ -38,9 +38,9 @@ public class PurchaseOrdersController(ISqlConnectionFactory factory) : Controlle
         using var c = factory.Create();
         var rows = await c.QueryAsync(@"
             SELECT product_code AS code,
-                   SUM(ISNULL(price,0) * ISNULL(NULLIF(usage_qty,0),1)) AS cost,
+                   SUM(COALESCE(price,0) * COALESCE(NULLIF(usage_qty,0),1)) AS cost,
                    MAX(currency) AS currency
-            FROM dbo.po_items
+            FROM po_items
             WHERE product_code IS NOT NULL AND product_code <> ''
             GROUP BY product_code");
         return Ok(rows);
@@ -52,8 +52,8 @@ public class PurchaseOrdersController(ISqlConnectionFactory factory) : Controlle
         using var c = factory.Create();
         var rows = await c.QueryAsync(@"
             SELECT po.*, COUNT(i.id) AS item_count, SUM(i.qty * i.price) AS total_amount
-            FROM dbo.purchase_orders po
-            LEFT JOIN dbo.po_items i ON i.po_id = po.id
+            FROM purchase_orders po
+            LEFT JOIN po_items i ON i.po_id = po.id
             GROUP BY po.id, po.po_no, po.supplier, po.status, po.order_date, po.delivery_date, po.notes, po.created_at
             ORDER BY po.created_at DESC");
         return Ok(rows);
@@ -63,9 +63,9 @@ public class PurchaseOrdersController(ISqlConnectionFactory factory) : Controlle
     public async Task<IActionResult> Get(int id)
     {
         using var c = factory.Create();
-        var po = await c.QueryFirstOrDefaultAsync("SELECT * FROM dbo.purchase_orders WHERE id=@id", new { id });
+        var po = await c.QueryFirstOrDefaultAsync("SELECT * FROM purchase_orders WHERE id=@id", new { id });
         if (po == null) return NotFound(new { error = "not found" });
-        var items = (await c.QueryAsync("SELECT * FROM dbo.po_items WHERE po_id=@id ORDER BY id", new { id })).ToList();
+        var items = (await c.QueryAsync("SELECT * FROM po_items WHERE po_id=@id ORDER BY id", new { id })).ToList();
         var dict = (IDictionary<string, object?>)po!;
         dict["items"] = items;
         return Ok(dict);
@@ -113,16 +113,16 @@ public class PurchaseOrdersController(ISqlConnectionFactory factory) : Controlle
         try
         {
             var id = await c.ExecuteScalarAsync<int>(@"
-INSERT INTO dbo.purchase_orders(po_no, supplier, status, order_date, delivery_date, notes)
-OUTPUT INSERTED.id
-VALUES (@po_no, @supplier, @status, @order_date, @delivery_date, @notes)",
+INSERT INTO purchase_orders(po_no, supplier, status, order_date, delivery_date, notes)
+VALUES (@po_no, @supplier, @status, @order_date, @delivery_date, @notes)
+RETURNING id",
                 new { po_no = body.po_no ?? "", supplier = body.supplier ?? "",
                       status = body.status ?? "draft", order_date = body.order_date,
                       delivery_date = body.delivery_date, notes = body.notes ?? "" }, tx);
             foreach (var it in body.items ?? new())
             {
                 await c.ExecuteAsync(@"
-INSERT INTO dbo.po_items(po_id, product_code, material_id, material_name, qty, price, currency, notes,
+INSERT INTO po_items(po_id, product_code, material_id, material_name, qty, price, currency, notes,
                          category, spec, usage_qty, ordered_qty, material_qty, spoilage_qty, purchase_qty, purchase_unit,
                          ship_unit, net_per_pc, eta, tomy_po)
 VALUES (@id, @pc, @mid, @mname, @qty, @price, @cur, @notes,
@@ -165,17 +165,17 @@ VALUES (@id, @pc, @mid, @mname, @qty, @price, @cur, @notes,
         using var tx = c.BeginTransaction();
         try
         {
-            var n = await c.ExecuteAsync(@"UPDATE dbo.purchase_orders SET po_no=@po_no, supplier=@supplier,
+            var n = await c.ExecuteAsync(@"UPDATE purchase_orders SET po_no=@po_no, supplier=@supplier,
                 status=@status, order_date=@order_date, delivery_date=@delivery_date, notes=@notes WHERE id=@id",
                 new { id, po_no = body.po_no ?? "", supplier = body.supplier ?? "",
                       status = body.status ?? "draft", order_date = body.order_date,
                       delivery_date = body.delivery_date, notes = body.notes ?? "" }, tx);
             if (n == 0) { tx.Rollback(); return NotFound(new { error = "采购单不存在" }); }
-            await c.ExecuteAsync("DELETE FROM dbo.po_items WHERE po_id=@id", new { id }, tx);
+            await c.ExecuteAsync("DELETE FROM po_items WHERE po_id=@id", new { id }, tx);
             foreach (var it in body.items ?? new())
             {
                 await c.ExecuteAsync(@"
-INSERT INTO dbo.po_items(po_id, product_code, material_id, material_name, qty, price, currency, notes,
+INSERT INTO po_items(po_id, product_code, material_id, material_name, qty, price, currency, notes,
                          category, spec, usage_qty, ordered_qty, material_qty, spoilage_qty, purchase_qty, purchase_unit,
                          ship_unit, net_per_pc, eta, tomy_po)
 VALUES (@id, @pc, @mid, @mname, @qty, @price, @cur, @notes,
@@ -219,11 +219,11 @@ VALUES (@id, @pc, @mid, @mname, @qty, @price, @cur, @notes,
         var cols = body.Keys.Where(k => allowed.Contains(k)).ToList();
         if (cols.Count == 0) return Ok(new { ok = true });
         using var c = factory.Create();
-        var sets = string.Join(",", cols.Select(k => $"[{k}]=@{k}"));
+        var sets = string.Join(",", cols.Select(k => $"{k}=@{k}"));
         var dyn = new DynamicParameters();
-        foreach (var k in cols) dyn.Add(k, body[k]);
+        foreach (var k in cols) dyn.Add(k, ParamValues.Normalize(body[k]));
         dyn.Add("id", id);
-        await c.ExecuteAsync($"UPDATE dbo.purchase_orders SET {sets} WHERE id=@id", dyn);
+        await c.ExecuteAsync($"UPDATE purchase_orders SET {sets} WHERE id=@id", dyn);
         return Ok(new { ok = true });
     }
 
@@ -231,7 +231,7 @@ VALUES (@id, @pc, @mid, @mname, @qty, @price, @cur, @notes,
     public async Task<IActionResult> Delete(int id)
     {
         using var c = factory.Create();
-        await c.ExecuteAsync("DELETE FROM dbo.purchase_orders WHERE id=@id", new { id });
+        await c.ExecuteAsync("DELETE FROM purchase_orders WHERE id=@id", new { id });
         return Ok(new { ok = true });
     }
 }

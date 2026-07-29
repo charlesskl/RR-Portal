@@ -50,7 +50,7 @@ RR-Portal/
 │   │   ├── TOMY排期核对系统/        — tomy-paiqi (Node.js + React)
 │   │   └── 内部报价系统/            — internal-quote (Node.js + node:sqlite, 多部门分工报价)
 │   ├── 印尼小组/
-│   │   └── 印尼走货明细/              — indo-shipping (ASP.NET Core + React)
+│   │   └── 印尼走货明细/              — indo-shipping (ASP.NET Core + React + PostgreSQL schema indo_shipping)
 │   ├── QA部/
 │   │   └── QA测试报告周结系统/      — qa-weekly-report (Node.js + React + exceljs)
 │   └── task-api/                  — 任务 API (Node.js，仅本地 compose，无部门)
@@ -171,10 +171,9 @@ curl http://localhost:<port>/health
 ### 主机运维 Workflow（本机无 SSH，走 GHA workflow_dispatch）
 
 本机对 ECS 没有 SSH，主机侧操作通过手动触发的 Actions workflow 执行。详见
-**`docs/runbooks/ops-workflows-and-memory.md`**（内存回收 / indo-stop 部署流程 / registry mirror / pb_data 诊断 / 数据迁移）。速查：
+**`docs/runbooks/ops-workflows-and-memory.md`**（内存回收 / registry mirror / pb_data 诊断 / 数据迁移）。速查：
 
 - **内存/磁盘紧** → `mem-reclaim`（diagnose / reclaim 清缓存 / restart-heavy 重启大户腾 RAM）
-- **indo 部署撞 2500MB 内存墙** → `ecs-disk-ops mode=indo-stop` → 重跑部署
 - **磁盘满** → `ecs-disk-ops mode=prune-safe | grow-disk`
 - **docker registry mirror 坏** → `docker-mirror-ops`（diagnose/apply/rollback，热重载零停机）
 
@@ -487,7 +486,7 @@ const data = JSON.parse(fs.readFileSync('data/data.json'));
 | baojia | 报价系统 | 业务部 | Standalone (Node.js) | /baojia/ | — |
 | qa-weekly-report | QA测试报告周结系统 | QA部 | Standalone (Node.js/React + exceljs) | /qa-weekly-report/ | — |
 | internal-quote | 内部报价系统 | 业务部 | Standalone (Node.js + node:sqlite) | /internal-quote/ | — |
-| indo-shipping | 印尼走货明细 | 印尼小组 | Standalone (ASP.NET Core + React) | /indo-shipping/ | (PR #268) |
+| indo-shipping | 印尼走货明细 | 印尼小组 | Standalone (ASP.NET Core + React + PostgreSQL schema indo_shipping) | /indo-shipping/ | (PR #268) |
 | stitch-cost | 车缝核价对比系统 | PMC跟仓管 | Standalone (ASP.NET Core + React + PostgreSQL) | /stitch-cost/ | — |
 
 ### 旧插件（已删除）

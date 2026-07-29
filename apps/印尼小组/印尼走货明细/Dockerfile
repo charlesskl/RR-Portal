@@ -26,17 +26,6 @@ RUN dotnet restore src/IndoShipping.Api/IndoShipping.Api.csproj
 COPY src/ ./src/
 RUN dotnet publish src/IndoShipping.Api/IndoShipping.Api.csproj -c Release -o /app/publish --no-restore
 
-FROM build AS bootstrap-build
-RUN mkdir -p db \
-    && touch db/rebuild_schema.sql \
-    && dotnet restore src/IndoShipping.Bootstrap/IndoShipping.Bootstrap.csproj \
-    && dotnet publish src/IndoShipping.Bootstrap/IndoShipping.Bootstrap.csproj -c Release -o /app/bootstrap --no-restore
-
-FROM mcr.microsoft.com/dotnet/runtime:8.0 AS bootstrap
-WORKDIR /app
-COPY --from=bootstrap-build /app/bootstrap ./
-ENTRYPOINT ["dotnet", "IndoShipping.Bootstrap.dll"]
-
 FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime
 WORKDIR /app
 
@@ -48,6 +37,8 @@ RUN apt-get update \
 
 COPY --from=build --chown=app:app /app/publish ./
 COPY --from=frontend --chown=app:app /src/web/dist ./wwwroot
+# 首启建表脚本（DatabaseCompatibility 在 schema 不存在时执行，幂等）
+COPY --chown=app:app db/postgres_schema.sql ./db/postgres_schema.sql
 
 ENV ASPNETCORE_URLS=http://+:5180
 EXPOSE 5180

@@ -1,5 +1,5 @@
 using System.Data;
-using Microsoft.Data.SqlClient;
+using Npgsql;
 
 namespace IndoShipping.Infrastructure.Persistence;
 
@@ -10,5 +10,5 @@ public interface ISqlConnectionFactory
 
 public class SqlConnectionFactory(string connectionString) : ISqlConnectionFactory
 {
-    public IDbConnection Create() => new SqlConnection(connectionString);
+    public IDbConnection Create() => new NpgsqlConnection(connectionString);
 }

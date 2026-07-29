@@ -1,0 +1,63 @@
+name: Indo shipping PR check
+
+# 印尼走货明细 (indo-shipping) PR 阶段的 .NET + 前端构建检查。
+# ASP.NET Core 8 已迁移到共享 PostgreSQL 16 (schema indo_shipping)，
+# 这里用 postgres:16-alpine service 复刻线上数据库环境。
+
+on:
+  pull_request:
+    paths:
+      - 'apps/印尼小组/印尼走货明细/**'
+      - '.github/workflows/pr-check.yml'
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: indo_shipping
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: dotnet restore
+        run: dotnet restore "apps/印尼小组/印尼走货明细/IndoShipping.sln"
+
+      - name: dotnet build
+        run: dotnet build "apps/印尼小组/印尼走货明细/IndoShipping.sln" --no-restore
+
+      - name: dotnet test
+        run: dotnet test "apps/印尼小组/印尼走货明细/IndoShipping.sln" --no-build
+        env:
+          DB_HOST: localhost
+          DB_PORT: '5432'
+          DB_USER: postgres
+          DB_PASSWORD: postgres
+          DB_NAME: indo_shipping
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: web build
+        working-directory: apps/印尼小组/印尼走货明细/web
+        run: |
+          npm ci
+          npm run build

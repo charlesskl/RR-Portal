@@ -89,7 +89,9 @@ jobs:
             DB_NAME=${DB_NAME:-rrportal}
             echo "target: db=$DB_NAME user=$DB_USER schema=indo_shipping"
 
-            SA_PASS=$(docker exec "$SRC" printenv MSSQL_SA_PASSWORD 2>/dev/null || docker exec "$SRC" printenv SA_PASSWORD)
+            # 容器 env 里只有 INDO_SQL_SA_PASSWORD_B64（compose entrypoint 解码后注入 PID1，
+            # printenv 看不到），从 B64 解码取 SA 密码
+            SA_PASS=$(docker exec "$SRC" printenv INDO_SQL_SA_PASSWORD_B64 | base64 -d)
             test -n "$SA_PASS"
             SQLCMD=(docker exec "$SRC" /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "$SA_PASS" -d IndoShipping -h -1 -W -y 0)
 

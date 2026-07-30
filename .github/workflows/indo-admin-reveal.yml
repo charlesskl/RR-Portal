@@ -1,0 +1,52 @@
+name: Indo Admin Password Reveal
+
+# 一次性运维：从 ECS .env.cloud.production 读取 INDO_SHIPPING_ADMIN_PASSWORD_B64
+# 并解码输出（indo-shipping admin 的登录密码）。用完即删。
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-cloud
+  queue: max
+  cancel-in-progress: false
+
+jobs:
+  reveal:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Validate SSH host fingerprint
+        shell: bash
+        env:
+          CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]]; then
+            echo 'CLOUD_HOST_FINGERPRINT must be a non-empty OpenSSH SHA256 fingerprint.' >&2
+            exit 1
+          fi
+
+      - name: Read and decode admin password via SSH
+        env:
+          CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
+        with:
+          host: ${{ secrets.CLOUD_HOST }}
+          username: ${{ secrets.CLOUD_USER }}
+          key: ${{ secrets.CLOUD_SSH_KEY }}
+          fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
+          command_timeout: 5m
+          script: |
+            set -euo pipefail
+            b64=$(grep -m1 '^INDO_SHIPPING_ADMIN_PASSWORD_B64=' /opt/rr-portal/.env.cloud.production | cut -d= -f2-)
+            if [ -z "$b64" ]; then
+              echo 'INDO_SHIPPING_ADMIN_PASSWORD_B64 不在 env 文件里' >&2
+              exit 1
+            fi
+            echo "== indo-shipping admin 密码（base64 解码）=="
+            printf '%s' "$b64" | base64 --decode
+            echo

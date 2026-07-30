@@ -886,11 +886,8 @@ services:
       DB_PASSWORD: "${DB_PASSWORD}"
       INDO_SHIPPING_JWT_KEY_B64: "${INDO_SHIPPING_JWT_KEY_B64:?INDO_SHIPPING_JWT_KEY_B64 is required}"
       INDO_SHIPPING_ADMIN_PASSWORD_B64: "${INDO_SHIPPING_ADMIN_PASSWORD_B64:?INDO_SHIPPING_ADMIN_PASSWORD_B64 is required}"
-      SEED_FILE: /app/seed/business-data.json
     expose:
       - "5180"
-    volumes:
-      - ./data/indo-shipping-seed:/app/seed:ro
     depends_on:
       db:
         condition: service_healthy

@@ -279,21 +279,6 @@ def test_shaoyang_summary_uses_issue_minus_finished_balance(client):
     assert by_name["邵阳华登"]["balance"] == 55
 
 
-def test_xinshao_summary_uses_issue_minus_finished_balance(client):
-    admin_login(client, "新邵")
-    lid = loc_id(client, "新邵")
-    client.post("/api/records", json={
-        "rec_type": "issue", "location_id": lid, "material": "PCBA板", "qty": 100})
-    client.post("/api/records", json={
-        "rec_type": "finished", "location_id": lid, "material": "PCBA板", "qty": 45,
-        "po_no": "PO-X01", "customer_name": "客户X"})
-
-    s = client.get("/api/summary").json()
-    by_name = {r["location"]: r for r in s["locations"]}
-    assert by_name["新邵"]["issue"] == 100
-    assert by_name["新邵"]["finished"] == 45
-    assert by_name["新邵"]["balance"] == 55
-
 
 def test_summary_requires_login(client):
     r = client.get("/api/summary")

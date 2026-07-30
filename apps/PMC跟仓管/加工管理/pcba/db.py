@@ -6,7 +6,7 @@ from pcba.auth import hash_password
 DEFAULT_DB = os.path.join("data", "pcba.db")
 LOCATIONS = [
     "兴信B来料仓", "东莞车间", "碟片半成品", "东莞加工厂利鸿",
-    "东莞加工厂鸿亚", "河源华兴", "邵阳华登", "新邵",
+    "河源华兴", "邵阳华登",
 ]
 PCBA_MATERIAL = "77794-PCBA板"
 LEGACY_PCBA_MATERIAL = "PCBA板"
@@ -15,7 +15,7 @@ LEGACY_STICKER_TYPES = [f"贴纸{i:02d}" for i in range(1, 41)]
 DEFAULT_STICKER_TYPES = [f"{i}#NFC贴纸" for i in range(1, 46)]
 DEPARTMENTS = [
     "兴信B来料仓", "东莞车间", "碟片半成品", "东莞加工厂利鸿",
-    "东莞加工厂鸿亚", "河源华兴", "邵阳华登", "新邵",
+    "河源华兴", "邵阳华登",
 ]
 DEPARTMENT_RENAMES = {
     "装配": "东莞车间",

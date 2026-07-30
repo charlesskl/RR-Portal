@@ -334,6 +334,24 @@ def reset_password(user_id: int, body: PasswordIn, _admin=Depends(require_admin)
     return {"ok": True}
 
 
+@app.delete("/api/users/{user_id}")
+def delete_user(user_id: int, admin=Depends(require_admin)):
+    conn = db.get_conn()
+    try:
+        row = conn.execute("SELECT id, username, role FROM users WHERE id=?", (user_id,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="用户不存在")
+        if row["id"] == admin["id"]:
+            raise HTTPException(status_code=400, detail="不能删除当前登录账号")
+        if row["role"] == "admin":
+            raise HTTPException(status_code=400, detail="不能删除管理员账号")
+        conn.execute("DELETE FROM users WHERE id=?", (user_id,))
+        conn.commit()
+    finally:
+        conn.close()
+    return {"ok": True, "deleted": row["username"]}
+
+
 # ---------- 静态前端 ----------
 @app.get("/")
 def index():
@@ -359,16 +377,13 @@ ASSEMBLY_DEPARTMENT = "东莞车间"
 SEMI_FINISHED_DEPARTMENT = "碟片半成品"
 SEMI_FINISHED_FILENAME_KEYWORD = "半成品"
 OUTSOURCE_DEPARTMENT = "东莞加工厂利鸿"
-HONGYA_DEPARTMENT = "东莞加工厂鸿亚"
-OUTSOURCE_DEPARTMENTS = (OUTSOURCE_DEPARTMENT, HONGYA_DEPARTMENT)
+OUTSOURCE_DEPARTMENTS = (OUTSOURCE_DEPARTMENT,)
 HEYUAN_DEPARTMENT = "河源华兴"
 SHAOYANG_DEPARTMENT = "邵阳华登"
-XINSHAO_DEPARTMENT = "新邵"
-PO_CUSTOMER_DEPARTMENTS = (SHAOYANG_DEPARTMENT, XINSHAO_DEPARTMENT)
+PO_CUSTOMER_DEPARTMENTS = (SHAOYANG_DEPARTMENT,)
 PROCESSING_BALANCE_DEPARTMENTS = (
     HEYUAN_DEPARTMENT,
     SHAOYANG_DEPARTMENT,
-    XINSHAO_DEPARTMENT,
 )
 NFC_MATERIAL = "NFC贴纸"
 PCBA_MATERIAL = "77794-PCBA板"
@@ -509,10 +524,8 @@ def _record_type_from_import(value, department):
         SEMI_FINISHED_DEPARTMENT: {"入库": "semi_inbound", "半成品入库": "semi_inbound", "出库": "semi_outbound", "半成品出库": "semi_outbound"},
         ASSEMBLY_DEPARTMENT: {"领料": "issue", "成品入库": "finished", "半成品入库": "semi_finished"},
         OUTSOURCE_DEPARTMENT: {"领料": "issue", "半成品出库": "semi_finished", "半成品入库": "semi_finished"},
-        HONGYA_DEPARTMENT: {"领料": "issue", "成品入库": "finished", "半成品入库": "semi_finished"},
         HEYUAN_DEPARTMENT: {"领料": "issue", "成品入库": "finished"},
         SHAOYANG_DEPARTMENT: {"领料": "issue", "成品入库": "finished"},
-        XINSHAO_DEPARTMENT: {"领料": "issue", "成品入库": "finished"},
     }
     rec_type = department_maps.get(department, {}).get(text)
     if rec_type:
@@ -1173,10 +1186,6 @@ def _legacy_location_from_sheet(sheet_name):
         return HEYUAN_DEPARTMENT
     if "邵阳" in sheet_name:
         return "邵阳华登"
-    if "新邵" in sheet_name:
-        return XINSHAO_DEPARTMENT
-    if "鸿亚" in sheet_name:
-        return HONGYA_DEPARTMENT
     if "利鸿" in sheet_name or "加工厂" in sheet_name:
         return "东莞加工厂利鸿"
     if "东莞" in sheet_name or "车间" in sheet_name:
@@ -1460,11 +1469,11 @@ def _parse_legacy_heyuan_workbook(conn, wb, department):
 
 
 def _parse_legacy_finished_workbook(conn, wb, department):
-    # 邵阳华登/新邵 成品入仓台账（.xls 老表）：记录页表头
+    # 邵阳华登 成品入仓台账（.xls 老表）：记录页表头
     # 日期/送货单号/第三方客户名称/合同号/货号/品名/规格/数量（pcs）/备注。
     # 逐 sheet 识别该表头，BOM/用量页（Sku No./Item No. 表头）自动跳过。
-    if department not in (SHAOYANG_DEPARTMENT, XINSHAO_DEPARTMENT):
-        raise HTTPException(status_code=400, detail="成品入仓台账只能在邵阳华登/新邵部门导入")
+    if department != SHAOYANG_DEPARTMENT:
+        raise HTTPException(status_code=400, detail="成品入仓台账只能在邵阳华登部门导入")
 
     bodies = []
     for ws in wb.worksheets:
@@ -1537,8 +1546,6 @@ def _pcba_summary_key_from_label(label):
         return ("issue", "邵阳华登")
     if "河源" in compact:
         return ("issue", "河源华兴")
-    if "鸿亚" in compact:
-        return ("issue", HONGYA_DEPARTMENT)
     if "利鸿" in compact or "加工厂" in compact:
         return ("issue", "东莞加工厂利鸿")
     if "东莞车间" in compact or "车间领料" in compact:
@@ -2377,8 +2384,6 @@ def _validate_record(body: RecordIn, department: Optional[str] = None):
         if normalized_material != PCBA_MATERIAL:
             raise HTTPException(status_code=400, detail="利鸿只允许使用77794-PCBA板")
         body.material = normalized_material
-    if department == HONGYA_DEPARTMENT and body.material != NFC_MATERIAL:
-        raise HTTPException(status_code=400, detail="鸿亚只允许使用NFC贴纸")
     if department == OUTSOURCE_DEPARTMENT and body.rec_type == "finished":
         raise HTTPException(status_code=400, detail="利鸿只能录入领料/半成品出库")
     if _is_outsource_department(department) and body.rec_type not in ("issue", "finished", "semi_finished"):
@@ -2387,8 +2392,6 @@ def _validate_record(body: RecordIn, department: Optional[str] = None):
         raise HTTPException(status_code=400, detail="河源华兴只能录入领料/成品入库")
     if department == SHAOYANG_DEPARTMENT and body.rec_type not in ("issue", "finished"):
         raise HTTPException(status_code=400, detail="邵阳华登只能录入领料/成品入库")
-    if department == XINSHAO_DEPARTMENT and body.rec_type not in ("issue", "finished"):
-        raise HTTPException(status_code=400, detail="新邵只能录入领料/成品入库")
     if department == SUPPLIER_DEPARTMENT and body.rec_type == "finished":
         raise HTTPException(status_code=400, detail="兴信B来料仓只能录入入库/出库")
     if body.rec_type == "semi_finished" and department not in (ASSEMBLY_DEPARTMENT, *OUTSOURCE_DEPARTMENTS):
@@ -2565,21 +2568,6 @@ def _auto_flow_targets(conn, source_body, source_department):
                 "semi_inbound",
             ),
             "assembly_to_semi_finished",
-        ))
-
-    if (
-        source_department == HONGYA_DEPARTMENT
-        and source_body.rec_type in ("finished", "semi_finished")
-    ):
-        targets.append((
-            SEMI_FINISHED_DEPARTMENT,
-            _auto_flow_record_body(
-                source_body,
-                source_department,
-                SEMI_FINISHED_DEPARTMENT,
-                "semi_inbound",
-            ),
-            "hongya_to_semi_finished",
         ))
 
     return targets
@@ -4045,11 +4033,6 @@ def export_records(
             _assembly_nfc_export_workbook(records, sticker_types),
             "东莞车间77772#NFC贴纸出入明细.xlsx",
         )
-    if user["department"] == HONGYA_DEPARTMENT and material == NFC_MATERIAL:
-        return _xlsx_response(
-            _hongya_nfc_export_workbook(records, sticker_types),
-            "东莞加工厂鸿亚77772#NFC贴纸出入明细.xlsx",
-        )
     if _is_outsource_department(user["department"]) and material == PCBA_MATERIAL:
         return _xlsx_response(
             _outsource_pcba_export_workbook(records, user["department"]),
@@ -4108,7 +4091,7 @@ def _parse_record_import_workbook(conn, wb, file, user):
     legacy_heyuan_import = _is_legacy_heyuan_workbook(wb)
     legacy_supplier_import = _is_legacy_supplier_workbook(wb)
     legacy_finished_import = (
-        user["department"] in (SHAOYANG_DEPARTMENT, XINSHAO_DEPARTMENT)
+        user["department"] == SHAOYANG_DEPARTMENT
         and _is_legacy_finished_workbook(wb)
     )
     legacy_import = (

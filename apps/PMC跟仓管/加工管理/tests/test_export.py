@@ -264,18 +264,3 @@ def test_shaoyang_finished_export_includes_po_and_customer_columns(client):
     assert ws.cell(row=2, column=4).value == "PO-001"
     assert ws.cell(row=2, column=5).value == "客户A"
     assert ws.cell(row=2, column=6).value == 45
-def test_xinshao_finished_export_includes_po_and_customer_columns(client):
-    admin_login(client, "新邵")
-    lid = loc_id(client, "新邵")
-    client.post("/api/records", json={
-        "rec_type": "finished", "location_id": lid, "material": "PCBA板",
-        "qty": 45, "po_no": "PO-X01", "customer_name": "客户X"})
-
-    r = client.get("/api/export")
-    wb = openpyxl.load_workbook(io.BytesIO(r.content), data_only=True)
-    ws = wb["新邵成品入仓"]
-    assert [cell.value for cell in ws[1]] == [
-        "日期", "单据编号", "物料名称", "PO", "客名", "入仓数", "备注"]
-    assert ws.cell(row=2, column=4).value == "PO-X01"
-    assert ws.cell(row=2, column=5).value == "客户X"
-    assert ws.cell(row=2, column=6).value == 45

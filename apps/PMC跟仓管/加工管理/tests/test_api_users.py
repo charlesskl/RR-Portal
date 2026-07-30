@@ -38,14 +38,8 @@ def test_list_departments(client):
     assert r.status_code == 200
     assert r.json() == [
         "兴信B来料仓", "东莞车间", "碟片半成品", "东莞加工厂利鸿",
-        "东莞加工厂鸿亚", "河源华兴", "邵阳华登", "新邵"]
+        "河源华兴", "邵阳华登"]
 
-
-def test_default_hongya_operator_can_login(client):
-    r = login(client, "东莞加工厂鸿亚", "123456", "东莞加工厂鸿亚")
-    assert r.status_code == 200
-    assert r.json()["role"] == "operator"
-    assert r.json()["department"] == "东莞加工厂鸿亚"
 
 
 def test_admin_can_create_operator(client):
@@ -72,9 +66,9 @@ def test_operator_login_rejects_wrong_department(client):
 
 
 def test_admin_can_login_to_any_department(client):
-    r = login(client, "admin", "admin123", "新邵")
+    r = login(client, "admin", "admin123", "邵阳华登")
     assert r.status_code == 200
-    assert r.json()["department"] == "新邵"
+    assert r.json()["department"] == "邵阳华登"
 
 
 def test_admin_can_switch_department_without_relogin(client):

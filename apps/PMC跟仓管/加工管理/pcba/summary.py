@@ -5,10 +5,8 @@ DEFAULT_DEPARTMENT_ORDER = (
     "东莞车间",
     "碟片半成品",
     "东莞加工厂利鸿",
-    "东莞加工厂鸿亚",
     "河源华兴",
     "邵阳华登",
-    "新邵",
 )
 DEPARTMENT_ALIASES = {
     "装配": "东莞车间",

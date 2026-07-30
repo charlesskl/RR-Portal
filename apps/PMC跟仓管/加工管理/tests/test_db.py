@@ -20,7 +20,7 @@ def test_init_creates_locations_and_admin(db_path):
     names = [r["name"] for r in locs]
     assert names == [
         "兴信B来料仓", "东莞车间", "碟片半成品", "东莞加工厂利鸿",
-        "东莞加工厂鸿亚", "河源华兴", "邵阳华登", "新邵",
+        "河源华兴", "邵阳华登",
     ]
     admin = conn.execute("SELECT role FROM users WHERE username='admin'").fetchone()
     assert admin["role"] == "admin"
@@ -192,7 +192,7 @@ def test_init_is_idempotent(db_path):
     conn = db.get_conn()
     count = conn.execute("SELECT COUNT(*) AS c FROM locations").fetchone()["c"]
     conn.close()
-    assert count == 8
+    assert count == 6
 
 
 def test_records_schema_stores_lihong_delivery_fields(db_path):
@@ -317,7 +317,7 @@ def test_init_migrates_existing_records_to_default_department(db_path):
     names = [r["name"] for r in conn.execute("SELECT name FROM locations ORDER BY sort").fetchall()]
     assert names == [
         "兴信B来料仓", "东莞车间", "碟片半成品", "东莞加工厂利鸿",
-        "东莞加工厂鸿亚", "河源华兴", "邵阳华登", "新邵",
+        "河源华兴", "邵阳华登",
     ]
     record_columns = [r["name"] for r in conn.execute("PRAGMA table_info(records)").fetchall()]
     assert "supplier" in record_columns

@@ -21,11 +21,9 @@ const XINGXIN_DEPARTMENT = '兴信B来料仓';
 const ASSEMBLY_DEPARTMENT = '东莞车间';
 const SEMI_FINISHED_DEPARTMENT = '碟片半成品';
 const OUTSOURCE_DEPARTMENT = '东莞加工厂利鸿';
-const HONGYA_DEPARTMENT = '东莞加工厂鸿亚';
-const OUTSOURCE_DEPARTMENTS = [OUTSOURCE_DEPARTMENT, HONGYA_DEPARTMENT];
+const OUTSOURCE_DEPARTMENTS = [OUTSOURCE_DEPARTMENT];
 const HEYUAN_DEPARTMENT = '河源华兴';
 const SHAOYANG_DEPARTMENT = '邵阳华登';
-const XINSHAO_DEPARTMENT = '新邵';
 const NFC_MATERIAL = 'NFC贴纸';
 const PCBA_MATERIAL = '77794-PCBA板';
 
@@ -83,10 +81,6 @@ function isLihong() {
   return ME && ME.department === OUTSOURCE_DEPARTMENT;
 }
 
-function isHongya() {
-  return ME && ME.department === HONGYA_DEPARTMENT;
-}
-
 function shouldHideLocationForType(type) {
   return type === 'inbound_raw'
     || (ME && ME.department === SEMI_FINISHED_DEPARTMENT && type !== 'semi_outbound')
@@ -101,12 +95,8 @@ function isShaoyang() {
   return ME && ME.department === SHAOYANG_DEPARTMENT;
 }
 
-function isXinshao() {
-  return ME && ME.department === XINSHAO_DEPARTMENT;
-}
-
 function supportsPoCustomer() {
-  return isShaoyang() || isXinshao();
+  return isShaoyang();
 }
 
 function shouldShowPoCustomer() {
@@ -172,7 +162,7 @@ function entryTypeOptionsForDepartment() {
       {value: 'semi_finished', label: '半成品入库'},
     ];
   }
-  if (isHeyuan() || isShaoyang() || isXinshao()) {
+  if (isHeyuan() || isShaoyang()) {
     return [
       {value: 'issue', label: '领料'},
       {value: 'finished', label: '成品入库'},
@@ -209,7 +199,6 @@ function setEntryType(type) {
 
 function entryMaterialOptions() {
   if (isLihong()) return MATERIALS.filter(m => m.name === PCBA_MATERIAL);
-  if (isHongya()) return MATERIALS.filter(m => m.name === NFC_MATERIAL);
   const preferred = [NFC_MATERIAL, PCBA_MATERIAL];
   const byName = new Map(MATERIALS.map(m => [m.name, m]));
   const ordered = preferred

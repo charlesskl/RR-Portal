@@ -137,12 +137,6 @@ def test_lihong_entry_only_exposes_pcba_material():
     assert "if (isLihong()) return MATERIALS.filter(m => m.name === PCBA_MATERIAL);" in js
 
 
-def test_hongya_entry_only_exposes_nfc_material():
-    js = (ROOT / "pcba/static/app.js").read_text(encoding="utf-8")
-
-    assert "function isHongya()" in js
-    assert "if (isHongya()) return MATERIALS.filter(m => m.name === NFC_MATERIAL);" in js
-
 
 def test_location_dropdown_hides_current_department():
     js = (ROOT / "pcba/static/app.js").read_text(encoding="utf-8")

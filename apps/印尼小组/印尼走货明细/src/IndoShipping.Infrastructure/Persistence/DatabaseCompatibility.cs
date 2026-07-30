@@ -8,7 +8,10 @@ public static class DatabaseCompatibility
     {
         if (!db.Database.IsRelational()) return;
 
-        await using var connection = db.Database.GetDbConnection();
+        // 连接归 DbContext 所有，不能 using/await using 释放——否则 EnsureAsync 返回后
+        // 后续复用同一 context 的代码（如 ProductionSeeder）会拿到已 Dispose 的连接，
+        // 抛 ObjectDisposedException。连接的释放由 context 自己负责。
+        var connection = db.Database.GetDbConnection();
         if (connection.State != System.Data.ConnectionState.Open)
             await connection.OpenAsync();
 

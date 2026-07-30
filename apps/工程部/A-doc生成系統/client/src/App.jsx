@@ -10,6 +10,13 @@ import AdocPage from './pages/AdocPage';
 const { Sider, Content, Header } = Layout;
 const { Text } = Typography;
 
+// 生产环境部署在 /zouhuo/ 子路径下：API 请求必须带前缀，否则打到 core 服务
+// （core 的 401 带 WWW-Authenticate: Basic，会让浏览器反复弹平台认证框）。
+// 开发环境走 vite proxy 的 /api 前缀，不加 baseURL。
+if (import.meta.env.PROD) {
+  axios.defaults.baseURL = import.meta.env.BASE_URL.replace(/\/$/, '');
+}
+
 // axios 拦截器：自动带 token，401 时跳转登录
 axios.interceptors.request.use(config => {
   const token = localStorage.getItem('token');

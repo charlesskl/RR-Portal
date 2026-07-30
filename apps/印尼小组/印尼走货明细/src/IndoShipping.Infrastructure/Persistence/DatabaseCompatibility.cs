@@ -18,6 +18,12 @@ public static class DatabaseCompatibility
         var scriptPath = Path.Combine(AppContext.BaseDirectory, "db", "postgres_schema.sql");
         if (!File.Exists(scriptPath))
             throw new FileNotFoundException($"未找到建表脚本 {scriptPath}（镜像应 COPY db/postgres_schema.sql）");
-        await db.Database.ExecuteSqlRawAsync(await File.ReadAllTextAsync(scriptPath));
+        // 不能用 ExecuteSqlRawAsync：EF 会把 SQL 过 string.Format，
+        // 脚本里 CHECK 正则的 '{9}' 会被当占位符直接 FormatException。
+        // 走原生 ADO.NET 命令，无格式化、支持多语句批量执行。
+        await using var command = connection.CreateCommand();
+        command.CommandText = await File.ReadAllTextAsync(scriptPath);
+        command.CommandTimeout = 120;
+        await command.ExecuteNonQueryAsync();
     }
 }

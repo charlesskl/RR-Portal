@@ -37,6 +37,7 @@ BEGIN
         line_id              INT IDENTITY(1,1) NOT NULL,
         order_id             INT           NOT NULL,           -- 所属订单
         product_id           INT           NOT NULL,           -- 款
+        contract_no          NVARCHAR(100) NULL,               -- 合同号
         qty                  DECIMAL(14,2) NULL,               -- 数量
         unit                 NVARCHAR(20)  NULL,               -- 单位
         outsource_price_excl DECIMAL(14,4) NULL,               -- 外发价(不含税)

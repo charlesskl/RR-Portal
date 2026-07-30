@@ -15,6 +15,9 @@ public static class DatabaseCompatibility
         }
 
         await db.Database.ExecuteSqlRawAsync("""
+            IF COL_LENGTH(N'dbo.purchase_order_line', N'contract_no') IS NULL
+                ALTER TABLE dbo.purchase_order_line ADD contract_no NVARCHAR(100) NULL;
+
             IF OBJECT_ID(N'dbo.product_import_alias', N'U') IS NULL
             BEGIN
                 CREATE TABLE dbo.product_import_alias
@@ -50,7 +53,14 @@ public static class DatabaseCompatibility
             )
             """;
         var schemaExists = (bool)(await checkCommand.ExecuteScalarAsync() ?? false);
-        if (schemaExists) return;
+        if (schemaExists)
+        {
+            await db.Database.ExecuteSqlRawAsync("""
+                ALTER TABLE stitch_cost.purchase_order_line
+                    ADD COLUMN IF NOT EXISTS contract_no character varying(100);
+                """);
+            return;
+        }
 
         // RR-Portal 的 PostgreSQL 是共享数据库，EnsureCreated 会因其他系统已有表而跳过。
         // 仅当本系统 schema 尚未建立时执行 EF 生成的完整建表脚本。

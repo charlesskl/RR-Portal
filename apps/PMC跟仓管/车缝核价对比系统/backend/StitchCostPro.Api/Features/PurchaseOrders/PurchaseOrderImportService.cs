@@ -6,12 +6,12 @@ namespace StitchCostPro.Api.Features.PurchaseOrders;
 
 public record OrderImportLineInput(
     int RowNo, string? ProductCode, string? ProductName, decimal? Qty, string? Unit,
-    decimal? UnitPrice, bool PriceIncludesTax, int? SelectedProductId = null);
+    decimal? UnitPrice, bool PriceIncludesTax, int? SelectedProductId = null, string? ContractNo = null);
 public record OrderImportInput(
     string? SourceFile, string? OrderNo, string? SupplierName, DateOnly? OrderDate,
     DateOnly? DeliveryDate, string? Remark, List<OrderImportLineInput> Lines);
 public record OrderImportPreviewLine(
-    int RowNo, string ProductCode, string ProductName, decimal? Qty, string? Unit,
+    int RowNo, string? ContractNo, string ProductCode, string ProductName, decimal? Qty, string? Unit,
     decimal? SourceUnitPrice, decimal? OutsourcePriceExcl, int? ProductId, string Status, string? Reason,
     string? MatchType, List<OrderImportProductCandidate> Candidates);
 public record OrderImportProductCandidate(
@@ -165,7 +165,8 @@ public class PurchaseOrderImportService(AppDbContext db, ICurrentUser current)
                 }
                 var price = ExcludingTax(line.UnitPrice, line.PriceIncludesTax);
                 string? lineError = null;
-                if (code.Length == 0 || name.Length == 0) lineError = "缺少货号或款式";
+                if (Clean(line.ContractNo).Length > 100) lineError = "合同号不能超过100个字符";
+                else if (code.Length == 0 || name.Length == 0) lineError = "缺少货号或款式";
                 else if (product is null && sameCode.Count == 0) lineError = "系统产品库中找不到该货号";
                 else if (product is null) lineError = "款式名称未能确定，请从候选款式中选择";
                 else if (!product.IsActive) lineError = $"匹配到“{product.ProductName}”，但该产品已停用";
@@ -173,7 +174,7 @@ public class PurchaseOrderImportService(AppDbContext db, ICurrentUser current)
                 else if (line.Qty is null or <= 0) lineError = "数量必须大于0";
                 else if (price is null or < 0) lineError = "外发单价为空或无效";
                 lineRows.Add(new OrderImportPreviewLine(
-                    line.RowNo, code, name, line.Qty, Clean(line.Unit), line.UnitPrice, price,
+                    line.RowNo, Clean(line.ContractNo), code, name, line.Qty, Clean(line.Unit), line.UnitPrice, price,
                     product?.ProductId, lineError is null ? "ok" : "error", lineError, matchType, candidates));
             }
             lineRows = lineRows
@@ -187,6 +188,8 @@ public class PurchaseOrderImportService(AppDbContext db, ICurrentUser current)
                     return first with
                     {
                         Qty = group.Sum(line => line.Qty ?? 0),
+                        ContractNo = string.Join(" / ", group.Select(line => Clean(line.ContractNo))
+                            .Where(value => value.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase)),
                         MatchType = "merged",
                         Reason = $"已合并 Excel 第 {string.Join("、", group.Select(line => line.RowNo))} 行"
                     };
@@ -277,6 +280,7 @@ public class PurchaseOrderImportService(AppDbContext db, ICurrentUser current)
                 {
                     OrderId = entity.OrderId,
                     ProductId = line.ProductId.Value,
+                    ContractNo = string.IsNullOrWhiteSpace(line.ContractNo) ? null : line.ContractNo,
                     Qty = line.Qty,
                     Unit = string.IsNullOrWhiteSpace(line.Unit) ? null : line.Unit,
                     OutsourcePriceExcl = line.OutsourcePriceExcl,

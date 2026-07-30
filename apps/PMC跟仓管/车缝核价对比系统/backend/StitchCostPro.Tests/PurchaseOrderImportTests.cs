@@ -28,7 +28,7 @@ public class PurchaseOrderImportTests
         var order = new OrderImportInput(
             "采购单.xlsx", "NBFY26070101", supplier.SupplierName, new DateOnly(2026, 7, 1),
             new DateOnly(2026, 8, 15), null,
-            [new OrderImportLineInput(12, "15752", "布偶猫", 55000, "PCS", 2.26m, true)]);
+            [new OrderImportLineInput(12, "15752", "布偶猫", 55000, "PCS", 2.26m, true, ContractNo: "MA-RR-2393")]);
         var service = new PurchaseOrderImportService(db, new FakeUser());
 
         var preview = await service.PreviewAsync([order]);
@@ -40,6 +40,7 @@ public class PurchaseOrderImportTests
         var savedLine = await db.PurchaseOrderLines.SingleAsync();
         Assert.Equal(2m, savedLine.OutsourcePriceExcl);
         Assert.Equal(2.18m, savedLine.InternalPriceExcl);
+        Assert.Equal("MA-RR-2393", savedLine.ContractNo);
         Assert.Single(await db.OrderPriceHistories.ToListAsync());
     }
 

@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using System.ComponentModel.DataAnnotations;
 
 namespace StitchCostPro.Api.Entities;
 
@@ -6,6 +7,7 @@ namespace StitchCostPro.Api.Entities;
 public class PurchaseOrderLine
 {
     public int LineId { get; set; }
+    [MaxLength(100)] public string? ContractNo { get; set; }
     public int OrderId { get; set; }                                  // 所属订单
     public int ProductId { get; set; }                               // 具体款式
     [Precision(14, 2)] public decimal? Qty { get; set; }             // 数量

@@ -30,7 +30,7 @@ public class DeliveryNoteController(DeliveryNoteService svc) : ControllerBase
     }
 
     [HttpDelete("{id:int}")]
-    [Authorize(Roles = "管理员")]
+    [Authorize(Roles = "业务,外发,跟单,管理员")]
     public async Task<ActionResult<ApiResponse<bool>>> Delete(int id)
     {
         var (ok, error) = await svc.DeleteAsync(id);

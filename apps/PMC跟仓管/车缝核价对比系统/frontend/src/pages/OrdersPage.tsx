@@ -31,9 +31,9 @@ function overdueDays(deliveryDate?: string | null): number {
 }
 // 状态由回货 QC 自动流转，前端只读展示，按状态着色
 const STATUS_COLOR: Record<string, string> = { 待核价: 'warning', 已下单: 'default', 生产中: 'processing', 已交货: 'success' };
-// 每列固定 120px；12 个普通列 + 操作列(冻结右侧, 150px)。超出屏幕时表格底部出横向滚动条
+// 每列固定 120px；13 个普通列 + 操作列(冻结右侧, 150px)。超出屏幕时表格底部出横向滚动条
 const COL_W = 120;
-const TABLE_MIN_W = COL_W * 12 + 150;
+const TABLE_MIN_W = COL_W * 13 + 150;
 
 export default function OrdersPage() {
   const { message } = App.useApp();
@@ -70,6 +70,7 @@ export default function OrdersPage() {
   const columns: ColumnsType<OrderListRow> = [
     { title: '订单号', dataIndex: 'orderNo', width: COL_W, align: 'center', onHeaderCell: hcell, render: (v) => <b>{v}</b> },
     { title: '加工厂', dataIndex: 'supplierName', width: COL_W, align: 'center', onHeaderCell: hcell },
+    { title: '合同号', dataIndex: 'contractNos', width: COL_W, align: 'center', onHeaderCell: hcell, render: (v) => v || dash },
     { title: '货号', dataIndex: 'seriesCodes', width: COL_W, align: 'center', onHeaderCell: hcell, render: (v) => v || dash },
     { title: '款式', dataIndex: 'styleNames', width: COL_W, align: 'center', onHeaderCell: hcell, render: (v) => v || dash },
     { title: '订单数量', dataIndex: 'totalQty', width: COL_W, align: 'center', onHeaderCell: hcell, render: (v) => v ?? dash },
@@ -209,6 +210,7 @@ interface FormLine {
   lineId?: number | null;
   productId?: number;
   qty?: number;
+  contractNo?: string;
 }
 
 /* —— 编辑采购订单（独立窗口，不接收/显示任何价格）—— */
@@ -228,12 +230,13 @@ function OrderEditDrawer({ id, onClose, onDone }: { id: number | null; onClose: 
   const [progress, setProgress] = useState(0);
   const [locked, setLocked] = useState(false);
   const [lines, setLines] = useState<FormLine[]>([]);
+  const [deliveryNotes, setDeliveryNotes] = useState<DeliveryNoteDto[]>([]);
 
   useEffect(() => {
     if (!id) return;
     setLoading(true);
-    Promise.all([orderApi.getEdit(id), supplierApi.list(), productApi.list({ pageSize: 1000 })])
-      .then(([order, ss, ps]) => {
+    Promise.all([orderApi.getEdit(id), supplierApi.list(), productApi.list({ pageSize: 1000 }), deliveryNoteApi.listByOrder(id)])
+      .then(([order, ss, ps, notes]) => {
         setOrderNo(order.orderNo);
         setSupplierId(order.supplierId);
         setOrderDate(order.orderDate);
@@ -248,9 +251,11 @@ function OrderEditDrawer({ id, onClose, onDone }: { id: number | null; onClose: 
           lineId: l.lineId,
           productId: l.productId,
           qty: l.qty ?? undefined,
+          contractNo: l.contractNo ?? '',
         })));
         setSups(ss);
         setProds(ps.items);
+        setDeliveryNotes(notes);
       })
       .catch((e) => {
         message.error((e as Error)?.message ?? '订单加载失败');
@@ -284,6 +289,7 @@ function OrderEditDrawer({ id, onClose, onDone }: { id: number | null; onClose: 
           productId: l.productId!,
           qty: l.qty ?? null,
           unit: null,
+          contractNo: l.contractNo?.trim() || null,
         })),
       });
       message.success('订单已更新');
@@ -296,6 +302,20 @@ function OrderEditDrawer({ id, onClose, onDone }: { id: number | null; onClose: 
   };
 
   const cols: ColumnsType<FormLine> = [
+    {
+      title: '合同号',
+      width: 170,
+      onHeaderCell: hcell,
+      render: (_, r) => (
+        <Input
+          size="small"
+          value={r.contractNo}
+          maxLength={100}
+          onChange={(event) => patchLine(r.id, 'contractNo', event.target.value)}
+          placeholder="可补录或修改"
+        />
+      ),
+    },
     {
       title: '产品(款)',
       width: 280,
@@ -329,10 +349,19 @@ function OrderEditDrawer({ id, onClose, onDone }: { id: number | null; onClose: 
     },
   ];
 
+  const removeDeliveryNote = async (deliveryNoteId: number) => {
+    await deliveryNoteApi.remove(deliveryNoteId);
+    message.success('回货批次已删除');
+    if (!id) return;
+    const [order, notes] = await Promise.all([orderApi.getEdit(id), deliveryNoteApi.listByOrder(id)]);
+    setLocked(order.hasLinkedRecords);
+    setDeliveryNotes(notes);
+  };
+
   return (
     <Drawer
       title={`编辑外发订单 · ${orderNo}`}
-      width={850}
+      width={980}
       open={!!id}
       onClose={onClose}
       destroyOnHidden
@@ -355,6 +384,38 @@ function OrderEditDrawer({ id, onClose, onDone }: { id: number | null; onClose: 
         </div>
         <Table<FormLine> rowKey="id" size="small" bordered columns={cols} dataSource={lines} pagination={false} />
         {!locked && <Button icon={<PlusOutlined />} onClick={addLine} style={{ borderStyle: 'dashed', marginTop: 12 }}>加一行</Button>}
+        <div style={{ marginTop: 20, marginBottom: 8, fontWeight: 700 }}>回货批次</div>
+        <Table<DeliveryNoteDto>
+          rowKey="deliveryNoteId"
+          size="small"
+          bordered
+          dataSource={deliveryNotes}
+          pagination={false}
+          locale={{ emptyText: '暂无回货批次' }}
+          columns={[
+            { title: '送货单号', dataIndex: 'noteNo', onHeaderCell: hcell },
+            { title: '回货日期', dataIndex: 'receivedDate', width: 120, onHeaderCell: hcell },
+            { title: '明细数', dataIndex: 'items', width: 90, align: 'center', onHeaderCell: hcell, render: (items) => items.length },
+            {
+              title: '操作',
+              width: 90,
+              align: 'center',
+              onHeaderCell: hcell,
+              render: (_, note) => (
+                <Popconfirm
+                  title={`删除回货批次 ${note.noteNo}？`}
+                  description="该批次及其回货明细将永久删除。"
+                  onConfirm={() => removeDeliveryNote(note.deliveryNoteId)}
+                  okText="删除"
+                  cancelText="取消"
+                  okButtonProps={{ danger: true }}
+                >
+                  <a style={{ color: palette.bad }}>删除</a>
+                </Popconfirm>
+              ),
+            },
+          ]}
+        />
       </Spin>
     </Drawer>
   );
@@ -406,7 +467,12 @@ function OrderFormDrawer({ open, onClose, onDone }: { open: boolean; onClose: ()
         orderDate: orderDate.trim(),
         deliveryDate: deliveryDate.trim() || null,
         remark: remark.trim() || null,
-        lines: valid.map((l) => ({ productId: l.productId!, qty: l.qty ?? null, unit: 'PCS' })),
+        lines: valid.map((l) => ({
+          productId: l.productId!,
+          qty: l.qty ?? null,
+          unit: 'PCS',
+          contractNo: l.contractNo?.trim() || null,
+        })),
       });
       message.success('订单已建立，可在订单明细中填写外发价格');
       onDone();
@@ -418,6 +484,20 @@ function OrderFormDrawer({ open, onClose, onDone }: { open: boolean; onClose: ()
   };
 
   const cols: ColumnsType<FormLine> = [
+    {
+      title: '合同号',
+      width: 150,
+      onHeaderCell: hcell,
+      render: (_, r) => (
+        <Input
+          size="small"
+          value={r.contractNo}
+          maxLength={100}
+          onChange={(event) => patch(r.id, 'contractNo', event.target.value)}
+          placeholder="选填"
+        />
+      ),
+    },
     {
       title: '产品(款)',
       width: 220,
@@ -520,7 +600,6 @@ function OrderDetailDrawer({ id, onClose }: { id: number | null; onClose: () => 
   const { message } = App.useApp();
   const { role } = useAuth();
   const canPrice = can.editOutPrice(role);
-  const canDeleteDelivery = role === '管理员';
   const [order, setOrder] = useState<OrderDetailDto | null>(null);
   const [loading, setLoading] = useState(false);
   const [editingLine, setEditingLine] = useState<OrderDetailDto['lines'][number] | null>(null);
@@ -530,31 +609,17 @@ function OrderDetailDrawer({ id, onClose }: { id: number | null; onClose: () => 
   const [historyLine, setHistoryLine] = useState<OrderDetailDto['lines'][number] | null>(null);
   const [history, setHistory] = useState<OrderPriceHistory[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
-  const [deliveryNotes, setDeliveryNotes] = useState<DeliveryNoteDto[]>([]);
 
   useEffect(() => {
     if (!id) {
       setOrder(null);
-      setDeliveryNotes([]);
       return;
     }
     setLoading(true);
-    Promise.all([orderApi.get(id), deliveryNoteApi.listByOrder(id)])
-      .then(([orderResult, noteResult]) => {
-        setOrder(orderResult);
-        setDeliveryNotes(noteResult);
-      })
+    orderApi.get(id)
+      .then(setOrder)
       .finally(() => setLoading(false));
   }, [id]);
-  const removeDeliveryNote = async (deliveryNoteId: number) => {
-    await deliveryNoteApi.remove(deliveryNoteId);
-    message.success('回货批次已删除');
-    if (id) {
-      const [orderResult, noteResult] = await Promise.all([orderApi.get(id), deliveryNoteApi.listByOrder(id)]);
-      setOrder(orderResult);
-      setDeliveryNotes(noteResult);
-    }
-  };
   const openPriceEditor = (line: OrderDetailDto['lines'][number]) => {
     setEditingLine(line);
     setEditPrice(line.outsourcePriceExcl ?? null);
@@ -661,38 +726,6 @@ function OrderDetailDrawer({ id, onClose }: { id: number | null; onClose: () => 
             </div> : <Alert type="warning" showIcon message="该订单尚未完成核价，暂不计算外发金额和节约金额。" style={{ marginBottom: 14 }} />}
 
             <Table rowKey="lineId" size="small" bordered columns={cols} dataSource={order.lines} pagination={false} />
-            <div style={{ marginTop: 20, marginBottom: 8, fontWeight: 700 }}>回货批次</div>
-            <Table<DeliveryNoteDto>
-              rowKey="deliveryNoteId"
-              size="small"
-              bordered
-              dataSource={deliveryNotes}
-              pagination={false}
-              locale={{ emptyText: '暂无回货批次' }}
-              columns={[
-                { title: '送货单号', dataIndex: 'noteNo', onHeaderCell: hcell },
-                { title: '回货日期', dataIndex: 'receivedDate', width: 120, onHeaderCell: hcell },
-                { title: '明细数', dataIndex: 'items', width: 90, align: 'center', onHeaderCell: hcell, render: (items) => items.length },
-                {
-                  title: '操作',
-                  width: 90,
-                  align: 'center',
-                  onHeaderCell: hcell,
-                  render: (_, note) => canDeleteDelivery ? (
-                    <Popconfirm
-                      title={`删除回货批次 ${note.noteNo}？`}
-                      description="该批次及其回货明细将永久删除。"
-                      onConfirm={() => removeDeliveryNote(note.deliveryNoteId)}
-                      okText="删除"
-                      cancelText="取消"
-                      okButtonProps={{ danger: true }}
-                    >
-                      <a style={{ color: palette.bad }}>删除</a>
-                    </Popconfirm>
-                  ) : dash,
-                },
-              ]}
-            />
             <Modal
               title={`维护外发价 · ${editingLine?.productLabel ?? ''}`}
               open={!!editingLine}

@@ -4,6 +4,7 @@ export interface OrderLineUpsert {
   productId: number;
   qty?: number | null;
   unit?: string | null;
+  contractNo?: string | null;
 }
 export interface OrderUpsert {
   orderNo: string; // 手填
@@ -19,6 +20,7 @@ export interface OrderListRow {
   orderNo: string;
   supplierId: number;
   supplierName: string;
+  contractNos: string;
   seriesCodes: string; // 货号(合并)
   styleNames: string; // 款式(合并)
   totalQty: number;
@@ -36,6 +38,7 @@ export interface OrderEditLine {
   productId: number;
   qty?: number | null;
   unit?: string | null;
+  contractNo?: string | null;
 }
 export interface OrderEditDto {
   orderId: number;
@@ -62,6 +65,7 @@ export interface OrderLineDto {
   lineId: number;
   productId: number;
   productLabel: string;
+  contractNo?: string | null;
   qty?: number | null;
   unit?: string | null;
   outsourcePriceExcl?: number | null;
@@ -94,6 +98,7 @@ export interface OrderDetailDto {
 
 export interface OrderImportLineInput {
   rowNo: number;
+  contractNo?: string | null;
   productCode: string;
   productName: string;
   qty?: number | null;

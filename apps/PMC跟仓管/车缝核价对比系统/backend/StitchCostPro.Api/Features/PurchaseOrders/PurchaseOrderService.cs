@@ -4,20 +4,20 @@ using StitchCostPro.Api.Shared;
 
 namespace StitchCostPro.Api.Features.PurchaseOrders;
 
-public record OrderLineUpsert(int ProductId, decimal? Qty, string? Unit);
+public record OrderLineUpsert(int ProductId, decimal? Qty, string? Unit, string? ContractNo = null);
 public record OrderUpsert(string OrderNo, int SupplierId, DateOnly OrderDate, DateOnly? DeliveryDate, string? Remark, List<OrderLineUpsert> Lines);
-public record OrderEditLineReq(int? LineId, int ProductId, decimal? Qty, string? Unit);
+public record OrderEditLineReq(int? LineId, int ProductId, decimal? Qty, string? Unit, string? ContractNo = null);
 public record OrderEditReq(int SupplierId, DateOnly OrderDate, DateOnly? DeliveryDate, string? DelayReason, string? Remark, List<OrderEditLineReq> Lines);
-public record OrderEditLineDto(int LineId, int ProductId, decimal? Qty, string? Unit);
+public record OrderEditLineDto(int LineId, int ProductId, decimal? Qty, string? Unit, string? ContractNo);
 public record OrderEditDto(int OrderId, string OrderNo, int SupplierId, DateOnly OrderDate, DateOnly? DeliveryDate,
     string Status, int ProductionProgress, string? DelayReason, string? Remark, bool HasLinkedRecords, List<OrderEditLineDto> Lines);
 
-public record OrderLineDto(int LineId, int ProductId, string ProductLabel, decimal? Qty, string? Unit,
+public record OrderLineDto(int LineId, int ProductId, string ProductLabel, string? ContractNo, decimal? Qty, string? Unit,
     decimal? CustomerQuoteExcl, decimal? InternalPriceExcl, decimal? DongguanPriceExcl, decimal? HunanPriceExcl,
     decimal? OutsourcePriceExcl, decimal? Saving, decimal? OutsourceInternalRate, string? Compliance);
 
 public record OrderListRow(int OrderId, string OrderNo, int SupplierId, string SupplierName,
-    string SeriesCodes, string StyleNames, decimal TotalQty,
+    string ContractNos, string SeriesCodes, string StyleNames, decimal TotalQty,
     DateOnly OrderDate, DateOnly? DeliveryDate, int ProductionProgress, int DelayDays,
     string? DelayReason, string Status, string? Remark, int LineCount);
 
@@ -53,6 +53,7 @@ public class PurchaseOrderService(AppDbContext db, ICurrentUser current)
         {
             var ls = lines.Where(l => l.OrderId == o.OrderId).ToList();
             return new OrderListRow(o.OrderId, o.OrderNo, o.SupplierId, suppliers.GetValueOrDefault(o.SupplierId, ""),
+                Join(ls.Select(l => l.ContractNo ?? "")),
                 Join(ls.Select(l => products.TryGetValue(l.ProductId, out var p) ? p.SeriesCode ?? p.ProductCode : "")),
                 Join(ls.Select(l => products.TryGetValue(l.ProductId, out var p) ? p.ProductName : "")),
                 ls.Sum(l => l.Qty ?? 0), o.OrderDate, o.DeliveryDate, o.ProductionProgress, o.DelayDays,
@@ -65,7 +66,7 @@ public class PurchaseOrderService(AppDbContext db, ICurrentUser current)
         var o = await db.PurchaseOrders.AsNoTracking().FirstOrDefaultAsync(x => x.OrderId == id);
         if (o is null) return null;
         var lines = await db.PurchaseOrderLines.AsNoTracking().Where(l => l.OrderId == id).OrderBy(l => l.LineId)
-            .Select(l => new OrderEditLineDto(l.LineId, l.ProductId, l.Qty, l.Unit)).ToListAsync();
+            .Select(l => new OrderEditLineDto(l.LineId, l.ProductId, l.Qty, l.Unit, l.ContractNo)).ToListAsync();
         return new OrderEditDto(o.OrderId, o.OrderNo, o.SupplierId, o.OrderDate, o.DeliveryDate, o.Status,
             o.ProductionProgress, o.DelayReason, o.Remark, await HasLinkedRecordsAsync(id), lines);
     }
@@ -84,7 +85,7 @@ public class PurchaseOrderService(AppDbContext db, ICurrentUser current)
             var p = products.FirstOrDefault(x => x.ProductId == id);
             return p is null ? $"#{id}" : $"{p.SeriesCode ?? p.ProductCode} {p.StyleNo ?? ""} {p.ProductName}".Trim();
         }
-        var dtos = lines.Select(l => new OrderLineDto(l.LineId, l.ProductId, Label(l.ProductId), l.Qty, l.Unit,
+        var dtos = lines.Select(l => new OrderLineDto(l.LineId, l.ProductId, Label(l.ProductId), l.ContractNo, l.Qty, l.Unit,
             l.CustomerQuoteExcl, l.InternalPriceExcl, l.DongguanPriceExcl, l.HunanPriceExcl, l.OutsourcePriceExcl,
             LineSaving(l.InternalPriceExcl, l.OutsourcePriceExcl, l.Qty), Rate(l.InternalPriceExcl, l.OutsourcePriceExcl),
             Compliance(l.InternalPriceExcl, l.OutsourcePriceExcl))).ToList();
@@ -102,6 +103,7 @@ public class PurchaseOrderService(AppDbContext db, ICurrentUser current)
         if (supplier is null) return (0, "加工厂不存在");
         var lines = (req.Lines ?? []).Where(l => l.ProductId > 0).ToList();
         if (lines.Count == 0) return (0, "至少填一行产品明细");
+        if (lines.Any(l => Clean(l.ContractNo)?.Length > 100)) return (0, "合同号不能超过100个字符");
         if (lines.GroupBy(l => l.ProductId).Any(g => g.Count() > 1)) return (0, "同一款式在一张订单中只能出现一次");
         var orderNo = req.OrderNo?.Trim();
         if (string.IsNullOrWhiteSpace(orderNo)) return (0, "请填订单号");
@@ -121,7 +123,7 @@ public class PurchaseOrderService(AppDbContext db, ICurrentUser current)
         foreach (var line in lines)
         {
             var price = prices[line.ProductId];
-            db.PurchaseOrderLines.Add(NewLine(order.OrderId, line.ProductId, line.Qty, line.Unit, price));
+            db.PurchaseOrderLines.Add(NewLine(order.OrderId, line.ProductId, line.Qty, line.Unit, line.ContractNo, price));
         }
         await db.SaveChangesAsync();
         return (order.OrderId, null);
@@ -135,6 +137,7 @@ public class PurchaseOrderService(AppDbContext db, ICurrentUser current)
         if (supplier is null) return (false, "加工厂不存在");
         var incoming = (req.Lines ?? []).Where(l => l.ProductId > 0).ToList();
         if (incoming.Count == 0) return (false, "至少保留一行产品明细");
+        if (incoming.Any(l => Clean(l.ContractNo)?.Length > 100)) return (false, "合同号不能超过100个字符");
         if (incoming.GroupBy(l => l.ProductId).Any(g => g.Count() > 1)) return (false, "同一款式在一张订单中只能出现一次");
         var existing = await db.PurchaseOrderLines.Where(l => l.OrderId == id).OrderBy(l => l.LineId).ToListAsync();
         var existingMap = existing.ToDictionary(l => l.LineId);
@@ -161,6 +164,7 @@ public class PurchaseOrderService(AppDbContext db, ICurrentUser current)
                 db.PurchaseOrderLines.Add(entity);
             }
             entity.ProductId = line.ProductId;
+            entity.ContractNo = Clean(line.ContractNo);
             entity.Qty = line.Qty;
             entity.Unit = line.Unit;
             if (identityChanged) ApplySnapshot(entity, prices[line.ProductId], clearOutsource: true);
@@ -188,9 +192,12 @@ public class PurchaseOrderService(AppDbContext db, ICurrentUser current)
         return rows.GroupBy(q => q.ProductId).ToDictionary(g => g.Key, g => g.First());
     }
 
-    private static PurchaseOrderLine NewLine(int orderId, int productId, decimal? qty, string? unit, ProductQuote price)
+    private static PurchaseOrderLine NewLine(int orderId, int productId, decimal? qty, string? unit, string? contractNo, ProductQuote price)
     {
-        var line = new PurchaseOrderLine { OrderId = orderId, ProductId = productId, Qty = qty, Unit = unit };
+        var line = new PurchaseOrderLine
+        {
+            OrderId = orderId, ProductId = productId, Qty = qty, Unit = unit, ContractNo = Clean(contractNo),
+        };
         ApplySnapshot(line, price, true);
         return line;
     }

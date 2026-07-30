@@ -74,12 +74,13 @@ public class PurchaseOrderEditTests
         var newDelivery = new DateOnly(2026, 7, 20);
         var (ok, error) = await svc.UpdateAsync(order.OrderId,
             new OrderEditReq(order.SupplierId, order.OrderDate, newDelivery, "产能不足", "继续跟进",
-                [new OrderEditLineReq(line.LineId, line.ProductId, line.Qty, line.Unit)]));
+                [new OrderEditLineReq(line.LineId, line.ProductId, line.Qty, line.Unit, "MA-RR-2393")]));
         Assert.True(ok, error);
         var saved = await db.PurchaseOrders.SingleAsync();
         Assert.Equal(newDelivery, saved.DeliveryDate);
         Assert.Equal("产能不足", saved.DelayReason);
         Assert.Equal("继续跟进", saved.Remark);
+        Assert.Equal("MA-RR-2393", await db.PurchaseOrderLines.Select(item => item.ContractNo).SingleAsync());
     }
 
     private static async Task<(PurchaseOrder order, PurchaseOrderLine line)> SeedOrderAsync(AppDbContext db)

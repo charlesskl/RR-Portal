@@ -41,10 +41,14 @@ const valueAfterLabel = (row: unknown[], label: RegExp) => {
   }
   return '';
 };
-const extractProductCode = (value: unknown) => {
+const extractContractAndProductCode = (value: unknown) => {
   const raw = str(value);
   const pieces = raw.split(/[/／]/).map((item) => item.trim()).filter(Boolean);
-  return pieces.at(-1) ?? raw;
+  if (pieces.length < 2) return { contractNo: null, productCode: pieces[0] ?? raw };
+  return {
+    contractNo: pieces.slice(0, -1).join('/'),
+    productCode: pieces.at(-1) ?? raw,
+  };
 };
 
 type LineColumns = {
@@ -111,9 +115,11 @@ function parseWorksheet(rows: unknown[][], sourceFile: string): OrderImportInput
         const price = numberValue(row[header.columns.price]);
         if (!str(rawCode) && !productName && qty == null && price == null) continue;
         if (!str(rawCode) && !productName) continue;
+        const { contractNo, productCode } = extractContractAndProductCode(rawCode);
         lines.push({
           rowNo: rowIndex + 1,
-          productCode: extractProductCode(rawCode),
+          contractNo,
+          productCode,
           productName,
           qty,
           unit: header.columns.unit == null ? null : str(row[header.columns.unit]) || null,
@@ -281,6 +287,7 @@ export default function ImportOrdersDrawer({ onDone }: { onDone: () => void }) {
 
   const lineColumns = (order: OrderImportPreviewOrder): ColumnsType<OrderImportPreviewLine> => [
     { title: 'Excel行', dataIndex: 'rowNo', width: 70 },
+    { title: '合同号', dataIndex: 'contractNo', width: 130, render: (value) => value || '—' },
     { title: '货号', dataIndex: 'productCode', width: 110 },
     { title: '款式', dataIndex: 'productName', width: 170 },
     { title: '数量', dataIndex: 'qty', width: 90 },

@@ -1,0 +1,12 @@
+config.json
+config-for-*.json
+data.json
+data.json.tmp
+data.json.bak.*
+data.backup.*.json
+data/
+server.log
+sync-state.json
+node_modules/
+.DS_Store
+*.zip

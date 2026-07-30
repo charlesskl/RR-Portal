@@ -17,8 +17,8 @@ public class DictionariesController(ISqlConnectionFactory factory) : ControllerB
     public async Task<IActionResult> Get()
     {
         using var c = factory.Create();
-        var hs  = (await c.QueryAsync("SELECT keyword, hs_cn AS hsCN, hs_id AS hsID FROM dbo.dict_hs ORDER BY priority, id")).ToList();
-        var sup = (await c.QueryAsync("SELECT keyword, full_name AS [full], customs_company AS customs FROM dbo.dict_supplier ORDER BY priority, id")).ToList();
+        var hs  = (await c.QueryAsync("SELECT keyword, hs_cn AS \"hsCN\", hs_id AS \"hsID\" FROM dict_hs ORDER BY priority, id")).ToList();
+        var sup = (await c.QueryAsync("SELECT keyword, full_name AS \"full\", customs_company AS customs FROM dict_supplier ORDER BY priority, id")).ToList();
         return Ok(new { hs, suppliers = sup });
     }
 
@@ -30,14 +30,14 @@ public class DictionariesController(ISqlConnectionFactory factory) : ControllerB
         using var tx = c.BeginTransaction();
         try
         {
-            await c.ExecuteAsync("DELETE FROM dbo.dict_hs;       DELETE FROM dbo.dict_supplier;", transaction: tx);
+            await c.ExecuteAsync("DELETE FROM dict_hs;       DELETE FROM dict_supplier;", transaction: tx);
             var hs = body?.hs ?? new(); var sup = body?.suppliers ?? new();
             for (int i = 0; i < hs.Count; i++)
             {
                 var r = hs[i];
                 if (string.IsNullOrWhiteSpace(r.keyword)) continue;
                 await c.ExecuteAsync(
-                    "INSERT INTO dbo.dict_hs(keyword, hs_cn, hs_id, priority) VALUES (@k, @cn, @id, @p)",
+                    "INSERT INTO dict_hs(keyword, hs_cn, hs_id, priority) VALUES (@k, @cn, @id, @p)",
                     new { k = r.keyword, cn = r.hsCN ?? "", id = r.hsID ?? "", p = i * 10 }, tx);
             }
             for (int i = 0; i < sup.Count; i++)
@@ -45,7 +45,7 @@ public class DictionariesController(ISqlConnectionFactory factory) : ControllerB
                 var r = sup[i];
                 if (string.IsNullOrWhiteSpace(r.keyword)) continue;
                 await c.ExecuteAsync(
-                    "INSERT INTO dbo.dict_supplier(keyword, full_name, customs_company, priority) VALUES (@k, @f, @cc, @p)",
+                    "INSERT INTO dict_supplier(keyword, full_name, customs_company, priority) VALUES (@k, @f, @cc, @p)",
                     new { k = r.keyword, f = r.full ?? "", cc = r.customs ?? "", p = i * 10 }, tx);
             }
             tx.Commit();

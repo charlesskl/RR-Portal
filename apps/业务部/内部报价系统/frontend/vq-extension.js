@@ -370,10 +370,43 @@
       }
     };
     exportButton.insertAdjacentElement('afterend', button);
+
+    const translateButton = document.createElement('button');
+    translateButton.id = 'btn-translate-vq';
+    translateButton.style.marginLeft = '10px';
+    translateButton.textContent = '自动翻译英文';
+    translateButton.title = '翻译报客表中的产品、布料、物料、包装及零件名称，并保存英文结果';
+    translateButton.onclick = async () => {
+      const id = new URLSearchParams(location.search).get('id');
+      const originalText = translateButton.textContent;
+      translateButton.disabled = true;
+      translateButton.textContent = '正在翻译…';
+      try {
+        const response = await fetch('/api/quotes/' + id + '/translate-vq', {
+          method: 'POST',
+          credentials: 'include',
+        });
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(body.error || response.statusText);
+        const incomplete = body.untranslated
+          ? `\n另有 ${body.untranslated} 项未翻译：${body.warning || '翻译服务暂不可用'}`
+          : '';
+        alert(`英文翻译完成，共更新 ${body.translated} 项。${incomplete}\n请生成新的 ${customer} 报客表。`);
+      } catch (error) {
+        alert(error.message);
+      } finally {
+        translateButton.disabled = false;
+        translateButton.textContent = originalText;
+      }
+    };
+    button.insertAdjacentElement('beforebegin', translateButton);
   }
 
   try {
-    if (typeof ACTION_LABEL === 'object') ACTION_LABEL.export_vq = '📤 生成报客表';
+    if (typeof ACTION_LABEL === 'object') {
+      ACTION_LABEL.export_vq = '📤 生成报客表';
+      ACTION_LABEL.translate_vq = '🌐 翻译报客表英文';
+    }
   } catch {}
 
   const sections = document.getElementById('sections');

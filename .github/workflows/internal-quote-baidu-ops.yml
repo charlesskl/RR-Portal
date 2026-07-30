@@ -1,0 +1,72 @@
+name: Internal Quote Baidu Ops
+
+# 内部报价系统（internal-quote）百度翻译凭据注入（手动触发，一次性/轮换用）：
+#   从 GitHub Secrets 读取 INTERNAL_QUOTE_BAIDU_APPID / INTERNAL_QUOTE_BAIDU_KEY，
+#   幂等写入 ECS 的 .env.cloud.production，force-recreate internal-quote 注入并验证。
+#   凭据轮换：更新 GitHub Secret 后再跑一次本 workflow 即可。
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-cloud
+  queue: max
+  cancel-in-progress: false
+
+jobs:
+  inject-baidu-credentials:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Validate SSH host fingerprint
+        shell: bash
+        env:
+          CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]]; then
+            echo 'CLOUD_HOST_FINGERPRINT must be a non-empty OpenSSH SHA256 fingerprint.' >&2
+            exit 1
+          fi
+
+      - name: Inject Baidu credentials via SSH
+        env:
+          CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+          BAIDU_APPID_VALUE: ${{ secrets.INTERNAL_QUOTE_BAIDU_APPID }}
+          BAIDU_KEY_VALUE: ${{ secrets.INTERNAL_QUOTE_BAIDU_KEY }}
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
+        with:
+          host: ${{ secrets.CLOUD_HOST }}
+          username: ${{ secrets.CLOUD_USER }}
+          key: ${{ secrets.CLOUD_SSH_KEY }}
+          fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
+          command_timeout: 8m
+          envs: BAIDU_APPID_VALUE,BAIDU_KEY_VALUE
+          script: |
+            set -euo pipefail
+            [ -n "${BAIDU_APPID_VALUE:-}" ] || { echo "[FAIL] Secret INTERNAL_QUOTE_BAIDU_APPID 为空"; exit 1; }
+            [ -n "${BAIDU_KEY_VALUE:-}" ] || { echo "[FAIL] Secret INTERNAL_QUOTE_BAIDU_KEY 为空"; exit 1; }
+            ENV_FILE=/opt/rr-portal/.env.cloud.production
+            [ -f "$ENV_FILE" ] || { echo "[FAIL] 未找到 $ENV_FILE"; exit 1; }
+            upsert() {
+              if grep -qE "^$1=" "$ENV_FILE"; then
+                sed -i "s|^$1=.*|$1=$2|" "$ENV_FILE"
+              else
+                echo "$1=$2" >> "$ENV_FILE"
+              fi
+            }
+            upsert INTERNAL_QUOTE_BAIDU_APPID "$BAIDU_APPID_VALUE"
+            upsert INTERNAL_QUOTE_BAIDU_KEY "$BAIDU_KEY_VALUE"
+            echo "[OK] .env.cloud.production 已写入 INTERNAL_QUOTE_BAIDU_*（值不回显）"
+            echo "-- force-recreate internal-quote 注入新环境变量 --"
+            docker compose -f /opt/rr-portal/docker-compose.cloud.yml --env-file "$ENV_FILE" \
+              up -d --no-deps --force-recreate internal-quote
+            sleep 5
+            echo "-- 健康检查 --"
+            curl -sf http://localhost/internal-quote/health && echo
+            echo "-- 验证容器内凭据已注入（不回显值） --"
+            docker exec rr-portal-internal-quote-1 sh -c '[ -n "$BAIDU_APPID" ] && [ -n "$BAIDU_KEY" ] && echo "[OK] BAIDU_APPID/BAIDU_KEY 已注入容器"'
+            echo "[OK] internal-quote 百度翻译凭据注入完成"

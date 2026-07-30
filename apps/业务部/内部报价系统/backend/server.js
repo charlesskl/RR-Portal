@@ -1,4 +1,11 @@
 const path = require('path');
+try {
+  process.loadEnvFile(path.join(__dirname, '..', '.env'));
+} catch (error) {
+  if (error.code !== 'ENOENT') {
+    console.warn('[env] 读取 .env 失败:', error.message);
+  }
+}
 const express = require('express');
 require('express-async-errors');
 const cookieSession = require('cookie-session');

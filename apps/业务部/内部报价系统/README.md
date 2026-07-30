@@ -3,6 +3,17 @@
 公司内部报价明细系统 — 多部门分工填写（业务/工程/电子/啤机/喷油/搪胶/车缝/装配）+ 主管审核 + 受控导出 xlsx。
 
 - **技术栈**: Node.js + Express + PostgreSQL，cookie-session 鉴权，ExcelJS 导出
+
+## 报客表英文翻译
+
+复制 `.env.example` 为 `.env`，填写百度翻译开放平台凭据：
+
+```env
+BAIDU_APPID=your_app_id
+BAIDU_KEY=your_secret_key
+```
+
+`.env` 已被 Git 忽略，不会提交凭据。SPIN/TOMY 报价单页面的“自动翻译英文”按钮会优先使用已保存英文；常见内部名称使用本地词典，其余中文调用百度翻译。
 - **数据隔离**: 共用 RR-Portal PostgreSQL 实例，使用独立 `internal_quote` schema，不与 core 表混用
 
 ## 接线状态（本 PR 已完成）

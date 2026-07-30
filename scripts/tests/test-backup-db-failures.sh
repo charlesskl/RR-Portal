@@ -33,14 +33,6 @@ case "$remote" in
       printf '%s\n' '1024'
     fi
     ;;
-  *"bash -s"*)
-    cat >/dev/null
-    if [[ "${BACKUP_SCENARIO}" == "sql-fail" ]]; then
-      printf '%s\n' 'SQL_FAIL'
-    else
-      printf '%s\n' 'SQL_SKIP'
-    fi
-    ;;
   *)
     ;;
 esac
@@ -88,8 +80,7 @@ assert_zero() {
 
 assert_nonzero postgres-fail
 assert_nonzero postgres-empty
-assert_nonzero sql-fail
-assert_zero sql-skip
+assert_zero ok
 
-grep -q 'WARNING: indo-sqlserver container is not running' "$TMP_ROOT/sql-skip.out"
+grep -q 'BACKUP: Complete' "$TMP_ROOT/ok.out"
 echo 'backup-db failure simulations OK'

@@ -6,8 +6,8 @@ using IndoShipping.Api.Controllers;
 using IndoShipping.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Logging.Abstractions;
+using Npgsql;
 using Xunit;
 
 namespace IndoShipping.Api.Tests;
@@ -23,7 +23,7 @@ public class HealthControllerTests
     [Fact]
     public async Task Get_returns_generic_503_when_database_check_fails()
     {
-        const string detail = "Server=sql.internal;Database=IndoShipping;User ID=indoshipping_app;Password=super-secret;";
+        const string detail = "Host=pg.internal;Port=5432;Database=IndoShipping;Username=indoshipping_app;Password=super-secret;";
         var controller = new HealthController(new ThrowingConnectionFactory(detail), NullLogger<HealthController>.Instance);
 
         var result = await controller.Get();
@@ -34,7 +34,7 @@ public class HealthControllerTests
     [Fact]
     public async Task Db_returns_generic_503_when_database_check_fails()
     {
-        const string detail = "Server=sql.internal;Database=IndoShipping;User ID=indoshipping_app;Password=super-secret;";
+        const string detail = "Host=pg.internal;Port=5432;Database=IndoShipping;Username=indoshipping_app;Password=super-secret;";
         var controller = new HealthController(new ThrowingConnectionFactory(detail), NullLogger<HealthController>.Instance);
 
         var result = await controller.Db();
@@ -52,7 +52,7 @@ public class HealthControllerTests
         Assert.False(body.RootElement.GetProperty("ok").GetBoolean());
         Assert.Equal("Service unavailable", body.RootElement.GetProperty("error").GetString());
         Assert.DoesNotContain(detail, responseBody);
-        Assert.DoesNotContain("sql.internal", responseBody);
+        Assert.DoesNotContain("pg.internal", responseBody);
         Assert.DoesNotContain("super-secret", responseBody);
     }
 
@@ -75,6 +75,6 @@ public class HealthControllerTests
         public override void Open() => throw new InvalidOperationException(detail);
         public override Task OpenAsync(CancellationToken cancellationToken) => Task.FromException(new InvalidOperationException(detail));
         protected override DbTransaction BeginDbTransaction(IsolationLevel isolationLevel) => throw new NotSupportedException();
-        protected override DbCommand CreateDbCommand() => new SqlCommand();
+        protected override DbCommand CreateDbCommand() => new NpgsqlCommand();
     }
 }

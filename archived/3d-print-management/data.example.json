@@ -1,0 +1,16 @@
+{
+  "settings": {
+    "machines": 20,
+    "elecPerMachine": 1.5,
+    "laborPerDay": 220,
+    "lossRate": 1.2,
+    "profitRate": 40
+  },
+  "materials": [],
+  "products": [],
+  "records": {},
+  "maintenance": [],
+  "inventory": {},
+  "stockInLogs": [],
+  "schedules": []
+}

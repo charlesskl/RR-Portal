@@ -13,7 +13,7 @@ public class SchedulesController(ISqlConnectionFactory factory) : ControllerBase
     public async Task<IActionResult> GetBlob()
     {
         using var c = factory.Create();
-        var raw = await c.ExecuteScalarAsync<string?>("SELECT value FROM dbo.settings WHERE [key]='schedules'");
+        var raw = await c.ExecuteScalarAsync<string?>("SELECT value FROM settings WHERE key='schedules'");
         if (string.IsNullOrWhiteSpace(raw)) return Content("[]", "application/json");
         try { using var _ = JsonDocument.Parse(raw); return Content(raw, "application/json"); }
         catch { return Content("[]", "application/json"); }
@@ -24,7 +24,7 @@ public class SchedulesController(ISqlConnectionFactory factory) : ControllerBase
     {
         using var c = factory.Create();
         var rows = (await c.QueryAsync<(int id, string? week_label, DateTime? upload_date, string? raw_rows)>(
-            "SELECT id, week_label, upload_date, raw_rows FROM dbo.schedules ORDER BY upload_date DESC")).ToList();
+            "SELECT id, week_label, upload_date, raw_rows FROM schedules ORDER BY upload_date DESC")).ToList();
         var output = rows.Select(r => new
         {
             id = r.id,
@@ -40,7 +40,7 @@ public class SchedulesController(ISqlConnectionFactory factory) : ControllerBase
     public async Task<IActionResult> GetPlacedManual()
     {
         using var c = factory.Create();
-        var raw = await c.ExecuteScalarAsync<string?>("SELECT value FROM dbo.settings WHERE [key]='schedule_placed_manual'");
+        var raw = await c.ExecuteScalarAsync<string?>("SELECT value FROM settings WHERE key='schedule_placed_manual'");
         if (string.IsNullOrWhiteSpace(raw)) return Content("[]", "application/json");
         try { using var _ = JsonDocument.Parse(raw); return Content(raw, "application/json"); }
         catch { return Content("[]", "application/json"); }
@@ -57,9 +57,8 @@ public class SchedulesController(ISqlConnectionFactory factory) : ControllerBase
         var json = JsonSerializer.Serialize(keys);
         using var c = factory.Create();
         await c.ExecuteAsync(@"
-MERGE dbo.settings AS t USING (SELECT 'schedule_placed_manual' AS [key]) s ON t.[key]=s.[key]
-WHEN MATCHED THEN UPDATE SET value=@v
-WHEN NOT MATCHED THEN INSERT ([key], value) VALUES ('schedule_placed_manual', @v);",
+INSERT INTO settings(key, value) VALUES ('schedule_placed_manual', @v)
+ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;",
             new { v = json });
         return Ok(new { ok = true, count = keys.Length });
     }
@@ -70,7 +69,7 @@ WHEN NOT MATCHED THEN INSERT ([key], value) VALUES ('schedule_placed_manual', @v
     public async Task<IActionResult> GetProductionPlacedManual()
     {
         using var c = factory.Create();
-        var raw = await c.ExecuteScalarAsync<string?>("SELECT value FROM dbo.settings WHERE [key]='schedule_production_placed_manual'");
+        var raw = await c.ExecuteScalarAsync<string?>("SELECT value FROM settings WHERE key='schedule_production_placed_manual'");
         if (string.IsNullOrWhiteSpace(raw)) return Content("{}", "application/json");
         try { using var _ = JsonDocument.Parse(raw); return Content(raw, "application/json"); }
         catch { return Content("{}", "application/json"); }
@@ -89,9 +88,8 @@ WHEN NOT MATCHED THEN INSERT ([key], value) VALUES ('schedule_placed_manual', @v
         var json = JsonSerializer.Serialize(values);
         using var c = factory.Create();
         await c.ExecuteAsync(@"
-MERGE dbo.settings AS t USING (SELECT 'schedule_production_placed_manual' AS [key]) s ON t.[key]=s.[key]
-WHEN MATCHED THEN UPDATE SET value=@v
-WHEN NOT MATCHED THEN INSERT ([key], value) VALUES ('schedule_production_placed_manual', @v);",
+INSERT INTO settings(key, value) VALUES ('schedule_production_placed_manual', @v)
+ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;",
             new { v = json });
         return Ok(new { ok = true, count = values.Count });
     }
@@ -100,7 +98,7 @@ WHEN NOT MATCHED THEN INSERT ([key], value) VALUES ('schedule_production_placed_
     public async Task<IActionResult> Get(int id)
     {
         using var c = factory.Create();
-        var row = await c.QueryFirstOrDefaultAsync("SELECT * FROM dbo.schedules WHERE id=@id", new { id });
+        var row = await c.QueryFirstOrDefaultAsync("SELECT * FROM schedules WHERE id=@id", new { id });
         if (row == null) return NotFound(new { error = "not found" });
         return Ok(row);
     }
@@ -119,9 +117,9 @@ WHEN NOT MATCHED THEN INSERT ([key], value) VALUES ('schedule_production_placed_
         // Diff baseline: 按周次标签排序紧邻的"前一周"（week_label 严格小于本次的最大者），
         // 而非按上传时间——这样补传历史周次也不会比错对象。
         var prevRaw = await c.ExecuteScalarAsync<string?>(@"
-            SELECT TOP 1 raw_rows FROM dbo.schedules
+            SELECT raw_rows FROM schedules
             WHERE week_label IS NOT NULL AND week_label < @wl
-            ORDER BY week_label DESC", new { wl = body.week_label });
+            ORDER BY week_label DESC LIMIT 1", new { wl = body.week_label });
         var rawRowsStr = body.raw_rows?.GetRawText() ?? "[]";
         var prevRows = ParseArray(prevRaw);
         var currRows = ParseArray(rawRowsStr);
@@ -129,12 +127,13 @@ WHEN NOT MATCHED THEN INSERT ([key], value) VALUES ('schedule_production_placed_
         var diffStr = JsonSerializer.Serialize(diff);
         // Upsert by week_label (overwrite on re-upload of same week)
         var id = await c.ExecuteScalarAsync<int>(@"
-MERGE dbo.schedules AS t
-USING (SELECT @wl AS week_label) s ON t.week_label = s.week_label
-WHEN MATCHED THEN UPDATE SET upload_date=@ud, raw_rows=@rr, diff_from_prev=@df
-WHEN NOT MATCHED THEN INSERT (week_label, upload_date, raw_rows, diff_from_prev)
-    VALUES (@wl, @ud, @rr, @df)
-OUTPUT INSERTED.id;",
+INSERT INTO schedules(week_label, upload_date, raw_rows, diff_from_prev)
+VALUES (@wl, @ud, @rr, @df)
+ON CONFLICT (week_label) DO UPDATE SET
+    upload_date = EXCLUDED.upload_date,
+    raw_rows = EXCLUDED.raw_rows,
+    diff_from_prev = EXCLUDED.diff_from_prev
+RETURNING id;",
             new { wl = body.week_label, ud = body.upload_date, rr = rawRowsStr, df = diffStr });
         return Ok(new { ok = true, id, diff });
     }

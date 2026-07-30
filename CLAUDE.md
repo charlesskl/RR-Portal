@@ -50,7 +50,7 @@ RR-Portal/
 │   │   ├── TOMY排期核对系统/        — tomy-paiqi (Node.js + React)
 │   │   └── 内部报价系统/            — internal-quote (Node.js + node:sqlite, 多部门分工报价)
 │   ├── 印尼小组/
-│   │   └── 印尼走货明细/              — indo-shipping (ASP.NET Core + React)
+│   │   └── 印尼走货明细/              — indo-shipping (ASP.NET Core + React + PostgreSQL schema indo_shipping)
 │   ├── QA部/
 │   │   └── QA测试报告周结系统/      — qa-weekly-report (Node.js + React + exceljs)
 │   └── task-api/                  — 任务 API (Node.js，仅本地 compose，无部门)
@@ -171,10 +171,9 @@ curl http://localhost:<port>/health
 ### 主机运维 Workflow（本机无 SSH，走 GHA workflow_dispatch）
 
 本机对 ECS 没有 SSH，主机侧操作通过手动触发的 Actions workflow 执行。详见
-**`docs/runbooks/ops-workflows-and-memory.md`**（内存回收 / indo-stop 部署流程 / registry mirror / pb_data 诊断 / 数据迁移）。速查：
+**`docs/runbooks/ops-workflows-and-memory.md`**（内存回收 / registry mirror / pb_data 诊断 / 数据迁移）。速查：
 
 - **内存/磁盘紧** → `mem-reclaim`（diagnose / reclaim 清缓存 / restart-heavy 重启大户腾 RAM）
-- **indo 部署撞 2500MB 内存墙** → `ecs-disk-ops mode=indo-stop` → 重跑部署
 - **磁盘满** → `ecs-disk-ops mode=prune-safe | grow-disk`
 - **docker registry mirror 坏** → `docker-mirror-ops`（diagnose/apply/rollback，热重载零停机）
 
@@ -487,7 +486,7 @@ const data = JSON.parse(fs.readFileSync('data/data.json'));
 | baojia | 报价系统 | 业务部 | Standalone (Node.js) | /baojia/ | — |
 | qa-weekly-report | QA测试报告周结系统 | QA部 | Standalone (Node.js/React + exceljs) | /qa-weekly-report/ | — |
 | internal-quote | 内部报价系统 | 业务部 | Standalone (Node.js + node:sqlite) | /internal-quote/ | — |
-| indo-shipping | 印尼走货明细 | 印尼小组 | Standalone (ASP.NET Core + React) | /indo-shipping/ | (PR #268) |
+| indo-shipping | 印尼走货明细 | 印尼小组 | Standalone (ASP.NET Core + React + PostgreSQL schema indo_shipping) | /indo-shipping/ | (PR #268) |
 | stitch-cost | 车缝核价对比系统 | PMC跟仓管 | Standalone (ASP.NET Core + React + PostgreSQL) | /stitch-cost/ | — |
 
 ### 旧插件（已删除）
@@ -503,6 +502,7 @@ const data = JSON.parse(fs.readFileSync('data/data.json'));
 - quotation-system (旧版) — 2026-04-22（git rm；已被 apps/quotation/ 完全取代）
 - product-library — 2026-04-22（git rm；从未实现过，只有占位 README）
 - 套客表系统 quotation (业务部) — 2026-04-23（完全下线：git rm 源码 + 删除服务器数据备份；已被 apps/业务部/报价系统/ (baojia) 取代。需要恢复时可从 git history commit 26faed8 之前找回源码）
+- 3D打印管理系统 print3d (3D打印部) — 2026-07-27 下线（PR #330 上线当日即下线：源码归档 archived/3d-print-management/，容器由 --remove-orphans 清除，服务器数据保留在 /opt/rr-portal/apps/3D打印部/3D打印管理系统/data/，业务数据在厂区本地 master 仍有完整副本。恢复时 git mv 回来 + 补 compose/nginx/门户注册即可）
 
 ---
 

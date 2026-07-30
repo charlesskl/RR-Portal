@@ -21,7 +21,7 @@ public class DbAdminController(ISqlConnectionFactory factory) : ControllerBase
     };
 
     private static bool Allowed(string t) => Tables.Contains(t);
-    private static string Q(string ident) => "[" + ident.Replace("]", "]]") + "]";
+    private static string Q(string ident) => "\"" + ident.Replace("\"", "\"\"") + "\"";
 
     [HttpGet]
     public async Task<IActionResult> ListTables()
@@ -30,7 +30,7 @@ public class DbAdminController(ISqlConnectionFactory factory) : ControllerBase
         var rows = new List<object>();
         foreach (var t in Tables)
         {
-            var cnt = await conn.ExecuteScalarAsync<long>($"SELECT COUNT(*) FROM dbo.{Q(t)}");
+            var cnt = await conn.ExecuteScalarAsync<long>($"SELECT COUNT(*) FROM {Q(t)}");
             rows.Add(new { table = t, count = cnt });
         }
         return Ok(rows);
@@ -46,27 +46,30 @@ public class DbAdminController(ISqlConnectionFactory factory) : ControllerBase
         offset = Math.Max(0, offset);
         using var conn = factory.Create();
 
+        var pk = await PkColumnAsync(conn, table);
         var cols = table.Equals("images", StringComparison.OrdinalIgnoreCase)
-            ? "id, mime, created_at, DATALENGTH(data_url) AS size_bytes"
+            ? "id, mime, created_at, octet_length(data_url) AS size_bytes"
             : "*";
 
-        var sql = $"SELECT {cols} FROM dbo.{Q(table)} ORDER BY (SELECT NULL) OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY";
+        var sql = $"SELECT {cols} FROM {Q(table)} ORDER BY {Q(pk)} OFFSET @offset LIMIT @limit";
         var rows = (await conn.QueryAsync(sql, new { offset, limit })).ToList();
 
-        var pk = await PkColumnsAsync(conn, table);
         var columnsSql = @"
-SELECT c.name AS Name, t.name AS [Type],
-       CAST(CASE WHEN EXISTS (
-            SELECT 1 FROM sys.indexes i
-            JOIN sys.index_columns ic ON ic.object_id=i.object_id AND ic.index_id=i.index_id
-            WHERE i.is_primary_key=1 AND i.object_id=c.object_id AND ic.column_id=c.column_id
-       ) THEN 1 ELSE 0 END AS BIT) AS Pk,
-       CAST(CASE WHEN c.is_nullable=0 THEN 1 ELSE 0 END AS BIT) AS Nn
-FROM sys.columns c
-JOIN sys.types t ON t.user_type_id = c.user_type_id
-WHERE c.object_id = OBJECT_ID(@t)
-ORDER BY c.column_id";
-        var columns = (await conn.QueryAsync<ColumnInfo>(columnsSql, new { t = $"dbo.{table}" })).ToList();
+SELECT c.column_name AS ""name"", c.data_type AS ""type"",
+       EXISTS (
+            SELECT 1
+            FROM pg_catalog.pg_constraint con
+            JOIN pg_catalog.pg_class rel ON rel.oid = con.conrelid
+            JOIN pg_catalog.pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = ANY (con.conkey)
+            WHERE con.contype = 'p'
+              AND rel.relname = c.table_name
+              AND a.attname = c.column_name
+       ) AS ""pk"",
+       (c.is_nullable = 'NO') AS ""nn""
+FROM information_schema.columns c
+WHERE c.table_schema = current_schema() AND c.table_name = @tableName
+ORDER BY c.ordinal_position";
+        var columns = (await conn.QueryAsync<ColumnInfo>(columnsSql, new { tableName = table })).ToList();
 
         return Ok(new { rows, columns, total = rows.Count });
     }
@@ -74,17 +77,20 @@ ORDER BY c.column_id";
     private static async Task<string> PkColumnAsync(IDbConnection conn, string table)
     {
         var sql = @"
-SELECT TOP 1 c.name
-FROM sys.indexes i
-JOIN sys.index_columns ic ON ic.object_id=i.object_id AND ic.index_id=i.index_id
-JOIN sys.columns c ON c.object_id=i.object_id AND c.column_id=ic.column_id
-WHERE i.is_primary_key=1 AND i.object_id=OBJECT_ID(@t)
-ORDER BY ic.key_ordinal";
-        var pk = await conn.ExecuteScalarAsync<string?>(sql, new { t = $"dbo.{table}" });
+SELECT kcu.column_name
+FROM information_schema.table_constraints tc
+JOIN information_schema.key_column_usage kcu
+  ON kcu.constraint_name = tc.constraint_name
+ AND kcu.table_schema = tc.table_schema
+ AND kcu.table_name = tc.table_name
+WHERE tc.constraint_type = 'PRIMARY KEY'
+  AND tc.table_schema = current_schema()
+  AND tc.table_name = @tableName
+ORDER BY kcu.ordinal_position
+LIMIT 1";
+        var pk = await conn.ExecuteScalarAsync<string?>(sql, new { tableName = table });
         return pk ?? "id";
     }
-
-    private static Task<string> PkColumnsAsync(IDbConnection conn, string table) => PkColumnAsync(conn, table);
 
     [HttpPost("{table}")]
     public async Task<IActionResult> Insert(string table, [FromBody] Dictionary<string, object?> body)
@@ -93,14 +99,15 @@ ORDER BY ic.key_ordinal";
         if (body == null || body.Count == 0) return BadRequest(new { error = "empty body" });
         using var conn = factory.Create();
 
+        var pk = await PkColumnAsync(conn, table);
         var validCols = await ValidColumnsAsync(conn, table);
         var cols = body.Keys.Where(k => validCols.Contains(k)).ToList();
         if (cols.Count == 0) return BadRequest(new { error = "no valid columns" });
 
-        var sql = $"INSERT INTO dbo.{Q(table)} ({string.Join(",", cols.Select(Q))}) VALUES ({string.Join(",", cols.Select(c => "@" + c))}); SELECT CAST(SCOPE_IDENTITY() AS BIGINT);";
+        var sql = $"INSERT INTO {Q(table)} ({string.Join(",", cols.Select(Q))}) VALUES ({string.Join(",", cols.Select(c => "@" + c))}) RETURNING {Q(pk)}";
         var dyn = new DynamicParameters();
-        foreach (var c in cols) dyn.Add(c, body[c]);
-        var id = await conn.ExecuteScalarAsync<long?>(sql, dyn);
+        foreach (var c in cols) dyn.Add(c, ParamValues.Normalize(body[c]));
+        var id = await conn.ExecuteScalarAsync(sql, dyn);
         return Ok(new { ok = true, lastID = id });
     }
 
@@ -116,9 +123,9 @@ ORDER BY ic.key_ordinal";
         var cols = body.Keys.Where(k => validCols.Contains(k)).ToList();
         if (cols.Count == 0) return Ok(new { ok = true, noop = true });
         var sets = string.Join(",", cols.Select(c => $"{Q(c)}=@{c}"));
-        var sql = $"UPDATE dbo.{Q(table)} SET {sets} WHERE {Q(pk)}=@__id";
+        var sql = $"UPDATE {Q(table)} SET {sets} WHERE {Q(pk)}::text = @__id";
         var dyn = new DynamicParameters();
-        foreach (var c in cols) dyn.Add(c, body[c]);
+        foreach (var c in cols) dyn.Add(c, ParamValues.Normalize(body[c]));
         dyn.Add("__id", id);
         await conn.ExecuteAsync(sql, dyn);
         return Ok(new { ok = true });
@@ -130,7 +137,7 @@ ORDER BY ic.key_ordinal";
         if (!Allowed(table)) return BadRequest(new { error = "table not allowed" });
         using var conn = factory.Create();
         var pk = await PkColumnAsync(conn, table);
-        await conn.ExecuteAsync($"DELETE FROM dbo.{Q(table)} WHERE {Q(pk)}=@id", new { id });
+        await conn.ExecuteAsync($"DELETE FROM {Q(table)} WHERE {Q(pk)}::text = @id", new { id });
         return Ok(new { ok = true });
     }
 
@@ -140,15 +147,15 @@ ORDER BY ic.key_ordinal";
         if (!Allowed(table)) return BadRequest(new { error = "table not allowed" });
         if (confirm != "YES") return BadRequest(new { error = "add ?confirm=YES to wipe" });
         using var conn = factory.Create();
-        await conn.ExecuteAsync($"DELETE FROM dbo.{Q(table)}");
+        await conn.ExecuteAsync($"DELETE FROM {Q(table)}");
         return Ok(new { ok = true });
     }
 
     private static async Task<HashSet<string>> ValidColumnsAsync(IDbConnection conn, string table)
     {
         var names = await conn.QueryAsync<string>(
-            "SELECT name FROM sys.columns WHERE object_id = OBJECT_ID(@t)",
-            new { t = $"dbo.{table}" });
+            "SELECT column_name FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = @tableName",
+            new { tableName = table });
         return new HashSet<string>(names, StringComparer.OrdinalIgnoreCase);
     }
 }

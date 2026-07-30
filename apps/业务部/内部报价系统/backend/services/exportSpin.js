@@ -5,6 +5,7 @@
 const ExcelJS = require('exceljs');
 const { buildSpinTransportRows } = require('./spinTransport');
 const { readTemplateParts } = require('./templateParts');
+const { customerEnglish } = require('./vqEnglish');
 
 const SPIN_MACHINE_HOURS = 22;
 const SPIN_HKD_USD = 7.75;
@@ -71,21 +72,28 @@ function sectionsToSpinData({ quote, sections }) {
   const sewingByChar = {};
   const allSewing = [];
   for (const [groupIndex, group] of (sewing.sewing_groups || []).entries()) {
-    const charName = safeSheetName(group.name, `Product ${groupIndex + 1}`);
+    const charName = safeSheetName(customerEnglish(group.eng_name || group.name), `Product ${groupIndex + 1}`);
     const rows = [];
     let lastFabric = '';
+    let lastFabricEng = '';
     for (const item of group.items || []) {
-      const fabricName = String(item.fabric || '').trim() || lastFabric;
-      if (String(item.fabric || '').trim()) lastFabric = String(item.fabric).trim();
-      const part = String(item.part || '').trim();
+      const sourceFabric = String(item.fabric || '').trim();
+      const fabricName = customerEnglish(item.eng_name || sourceFabric || lastFabricEng || lastFabric);
+      if (sourceFabric) {
+        lastFabric = sourceFabric;
+        lastFabricEng = item.eng_name || '';
+      }
+      const part = customerEnglish(item.part_eng || String(item.part || '').trim());
       const usage = num(item.usage) || 1;
       const materialPrice = num(item.mat_price);
-      const isLabor = !part && /裁床|车缝|車縫|手工|人工|cut|sew|stuff/i.test(fabricName);
+      const isLabor = !part && /裁床|车缝|車縫|手工|人工|cut|sew|stuff|pack|labou?r/i.test(fabricName);
       const row = {
         sub_product: charName,
         product_name: charName,
         fabric_name: fabricName,
-        eng_name: '',
+        eng_name: fabricName,
+        cn_name: sourceFabric || lastFabric,
+        cn_part: String(item.part || '').trim(),
         usage_amount: usage,
         material_price_rmb: materialPrice,
         price_rmb: usage * materialPrice,
@@ -97,7 +105,7 @@ function sectionsToSpinData({ quote, sections }) {
     sewingByChar[charName] = rows;
   }
 
-  const defaultChar = safeSheetName(quote.product_name, quote.quote_no);
+  const defaultChar = safeSheetName(customerEnglish(quote.product_name), quote.quote_no);
   if (!Object.keys(sewingByChar).length) sewingByChar[defaultChar] = [];
 
   const carton = engineering.carton_calc || {};
@@ -118,17 +126,19 @@ function sectionsToSpinData({ quote, sections }) {
 
   const packagingItems = (engineering.packaging_materials || []).map(item => ({
     name: /胶袋|polybag/i.test(item.name || '')
-      ? `Individual polybag ( recycled) ${item.spec || ''}`.trim()
-      : (item.name || ''),
-    eng_name: '',
+      ? `Individual polybag ( recycled) ${item.spec_eng || customerEnglish(item.spec || '')}`.trim()
+      : customerEnglish(item.eng_name || item.name || ''),
+    eng_name: item.eng_name || '',
+    cn_name: item.name || '',
     quantity: num(item.qty) || 1,
     new_price: engineeringUnitUsd(item, 1.06),
     pkg_section: /纸箱|紙箱|外箱|carton/i.test(`${item.category || ''} ${item.name || ''}`) ? 'carton' : 'retail',
   }));
 
   const auxPackagingItems = (engineering.aux_materials || []).map(item => ({
-    name: /杂费|胶纸|胶针|dennison/i.test(item.name || '') ? 'Dennison' : (item.name || ''),
-    eng_name: '',
+    name: /杂费|胶纸|胶针|dennison/i.test(item.name || '') ? 'Dennison' : customerEnglish(item.eng_name || item.name || ''),
+    eng_name: item.eng_name || '',
+    cn_name: item.name || '',
     quantity: num(item.qty) || 1,
     new_price: engineeringUnitUsd(item, 1.06),
     pkg_section: 'retail',
@@ -164,7 +174,7 @@ function sectionsToSpinData({ quote, sections }) {
     });
     if (flatCardHkd) {
       packagingItems.push({
-        name: '防刮盖板',
+        name: 'Anti-scratch Inner Board',
         eng_name: 'Inner B33',
         quantity: 1,
         new_price: hkdUsd ? flatCardHkd / cartonQty / hkdUsd : 0,
@@ -182,16 +192,19 @@ function sectionsToSpinData({ quote, sections }) {
 
   const electronicRows = (electronic.electronics?.length ? electronic.electronics : engineering.electronics || []);
   const electronicItems = electronicRows.map(item => ({
-    part_name: item.name || '',
-    eng_name: '',
-    spec: item.spec || '',
+    part_name: customerEnglish(item.eng_name || item.name || ''),
+    eng_name: item.eng_name || '',
+    cn_name: item.name || '',
+    cn_spec: item.spec || '',
+    spec: customerEnglish(item.spec_eng || item.spec || ''),
     quantity: num(item.qty) || 1,
     unit_price_usd: hkdUsd ? num(item.unit_price) / hkdUsd : 0,
   }));
 
   const hardwareItems = (engineering.hardware || []).map(item => ({
-    name: item.name || '',
-    eng_name: '',
+    name: customerEnglish(item.eng_name || item.name || ''),
+    eng_name: item.eng_name || '',
+    cn_name: item.name || '',
     quantity: num(item.qty) || 1,
     new_price: num(item.unit_price_rmb ?? item.unit_price),
     part_category: 'hardware',
@@ -206,7 +219,7 @@ function sectionsToSpinData({ quote, sections }) {
     .reduce((sum, item) => sum + num(item.unit_price) * (num(item.qty) || 1), 0);
   if (packagingStepHkd || packagingLineHkd) {
     hardwareItems.push({
-      name: '包装人工',
+      name: 'Packing Labour',
       quantity: 1,
       new_price: packagingStepHkd + packagingLineHkd,
       part_category: 'labor_assembly',
@@ -215,8 +228,9 @@ function sectionsToSpinData({ quote, sections }) {
 
   const materialPrices = molding.material_prices || [];
   const moldParts = (molding.injection || []).map(item => ({
-    description: item.name || '',
-    eng_name: '',
+    description: customerEnglish(item.eng_name || item.name || ''),
+    eng_name: item.eng_name || '',
+    cn_name: item.name || '',
     mold_no: item.mold_no || '',
     part_no: '',
     cavity_count: num(item.cavity) || num(item.output_qty) || null,
@@ -247,7 +261,7 @@ function sectionsToSpinData({ quote, sections }) {
     },
     product: {
       item_no: quote.quote_no || String(quote.id || ''),
-      item_desc: quote.product_name || '',
+      item_desc: customerEnglish(sales.vq_english?.product_name || quote.product_name || ''),
       client: quote.customer || 'SPIN',
     },
     params: {
@@ -279,7 +293,7 @@ function sectionsToSpinData({ quote, sections }) {
     transportConfig: sales.spin_transport || {},
     spinTransport,
     refMaterials: materialPrices.map(item => ({
-      material_name: item.name || '',
+      material_name: customerEnglish(item.name || ''),
       client_spin_usd_kg: hkdUsd ? num(item.price) * 1000 / 454 / hkdUsd : 0,
     })),
     refMachines: SPIN_MACHINE_PRICES.map(item => ({
@@ -530,18 +544,21 @@ function fillCharacterSheet(ws, d) {
   ws.getCell(5, 3).value = product ? (product.item_no || '') : '';
   ws.getCell(5, 14).value = new Date();                   // DATE — N5
   ws.getCell(6, 3).value = null;  // MATERIAL GROUP — leave blank
-  const charSuffix = d.charName ? `--${d.charName}` : '';
-  ws.getCell(7, 3).value = product ? ((product.item_desc || '') + charSuffix) : '';
+  const productDescription = customerEnglish(product?.item_desc || '');
+  const characterName = customerEnglish(d.charName || '');
+  const charSuffix = characterName && !productDescription.includes(characterName)
+    ? `--${characterName}`
+    : '';
+  ws.getCell(7, 3).value = product ? `${productDescription}${charSuffix}` : '';
 
   // ── Fabric Cost (R23+): cols C=3 eng desc, D=4 cn desc, J=10 USD price, K=11 qty ──
   const fabricEndRow = FABRIC_START + Math.max(FABRIC_SLOTS, sortedFabrics.length) - 1;
   clearRows(ws, FABRIC_START, fabricEndRow, [3, 4, 5, 10, 11, 12]);
   sortedFabrics.forEach((item, i) => {
     const r = 23 + i;
-    const engName = item.eng_name || '';
-    const cnName = item.fabric_name || '';
-    setVal(ws, r, 3, engName || cnName);
-    setVal(ws, r, 4, engName ? cnName : '');
+    const engName = customerEnglish(item.eng_name || item.fabric_name || '');
+    setVal(ws, r, 3, engName);
+    setVal(ws, r, 4, item.cn_name || '');
     if (showProductCol) setVal(ws, r, 5, item.product_name || '');
     // 毛绒: 单价 / 6.8 * 1.06 / 1.1
     const unitPriceUsd = (parseFloat(item.material_price_rmb) || 0) / 6.8 * 1.06 / 1.1;
@@ -567,10 +584,9 @@ function fillCharacterSheet(ws, d) {
   clearRows(ws, othersRow, othersEndRow, [3, 4, 10, 11, 12]);
   sortedOthers.forEach((item, i) => {
     const r = othersRow + i;
-    const oEngName = item.eng_name || '';
-    const oCnName = item.fabric_name || '';
-    setVal(ws, r, 3, oEngName || oCnName);
-    setVal(ws, r, 4, oEngName ? oCnName : '');
+    const oEngName = customerEnglish(item.eng_name || item.fabric_name || '');
+    setVal(ws, r, 3, oEngName);
+    setVal(ws, r, 4, item.cn_name || '');
     if (showOtherProductCol) setVal(ws, r, 5, item.product_name || '');
     const rmb = parseFloat(item.material_price_rmb) || 0;
     // 电绣: 单价 / 6.8 / 1.1; 毛绒(其他): 单价 / 6.8 * 1.06 / 1.1
@@ -619,8 +635,8 @@ function fillCharacterSheet(ws, d) {
   function writePkgItems(items, startRow, maxSlots) {
     items.slice(0, maxSlots).forEach((item, i) => {
       const r = startRow + i;
-      ws.getCell(r, 3).value = item.eng_name || item.name || '';
-      ws.getCell(r, 4).value = (item.eng_name && item.eng_name !== item.name) ? (item.name || '') : '';
+      ws.getCell(r, 3).value = customerEnglish(item.eng_name || item.name || '');
+      ws.getCell(r, 4).value = item.cn_name || '';
       const price = parseFloat(item.new_price) || 0;
       const qty = parseFloat(item.quantity) || 1;
       ws.getCell(r, 10).value = price;
@@ -723,7 +739,7 @@ function fillCharacterSheet(ws, d) {
   if (stuffLabor) writeLaborRow(sewingRow + 4, laborRate, laborHrs(stuffLabor));
 
   // Packing (R128): sum of Packing Labor items (半成品人工, 包装人工, 查货) from HardwareItem
-  const PACKING_RE = /半成品人工|包装人工|查货/;
+  const PACKING_RE = /半成品人工|包装人工|查货|packing labour|inspection/i;
   const packingItems = (d.hardwareItems || []).filter(h =>
     h.part_category === 'labor_assembly' && PACKING_RE.test(h.name || '')
   );
@@ -794,7 +810,7 @@ function fillCharacterSheet(ws, d) {
 
   (moldParts || []).slice(0, 8).forEach((item, i) => {
     const r = 10 + i;
-    setVal(ws, r, 3,  item.eng_name && item.description ? `${item.eng_name} ${item.description}` : (item.description || ''));
+    setVal(ws, r, 3, customerEnglish(item.eng_name || item.description || ''));
     // 重置描述列字体颜色（模板可能有红色字体）
     const descCell = ws.getCell(r, 3);
     if (descCell.font) descCell.font = { ...descCell.font, color: { argb: 'FF000000' } };
@@ -853,8 +869,8 @@ function fillCharacterSheet(ws, d) {
   for (let r = metalStart; r <= metalStart + 7; r++) { const c = ws.getCell(r, 12); delete c._sharedFormula; c.value = null; }
   metalItems.slice(0, 8).forEach((item, i) => {
     const r = metalStart + i;
-    ws.getCell(r, 3).value = item.eng_name || item.name || '';
-    ws.getCell(r, 4).value = item.eng_name ? (item.name || '') : '';
+    ws.getCell(r, 3).value = customerEnglish(item.eng_name || item.name || '');
+    ws.getCell(r, 4).value = item.cn_name || '';
     const unitUsd = (parseFloat(item.new_price) || 0) / rmb_hkd / hkd_usd * 1.06;
     const qty = parseFloat(item.quantity) || 1;
     setVal(ws, r, 10, unitUsd);
@@ -879,8 +895,8 @@ function fillCharacterSheet(ws, d) {
   }
   elecList.forEach((item, i) => {
     const r = elecStart + i;
-    setVal(ws, r, 3,  item.eng_name || item.part_name || '');
-    setVal(ws, r, 4,  item.part_name || item.spec || '');
+    setVal(ws, r, 3, customerEnglish(item.eng_name || item.part_name || ''));
+    setVal(ws, r, 4, item.cn_name || item.part_name || '');
     const unitUsd = r2(parseFloat(item.unit_price_usd) || 0);
     const qty = parseFloat(item.quantity) || 1;
     setVal(ws, r, 10, unitUsd);

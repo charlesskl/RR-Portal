@@ -39,7 +39,7 @@ public class HealthController : ControllerBase
         try
         {
             using var conn = _connFactory.Create();
-            var now = await conn.ExecuteScalarAsync<DateTime>("SELECT SYSUTCDATETIME()");
+            var now = await conn.ExecuteScalarAsync<DateTime>("SELECT now()");
             return Ok(new { ok = true, time = now });
         }
         catch (Exception ex)
@@ -50,7 +50,7 @@ public class HealthController : ControllerBase
 
     private ObjectResult ServiceUnavailable(Exception exception)
     {
-        _logger.LogError(exception, "SQL Server health check failed.");
+        _logger.LogError(exception, "PostgreSQL health check failed.");
         return StatusCode(StatusCodes.Status503ServiceUnavailable, new { ok = false, error = "Service unavailable" });
     }
 }

@@ -1,0 +1,3455 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>3D打印部门管理系统</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" integrity="sha384-9nhczxUqK87bcKHh20fSQcTGD4qq5GhayNYSYWqwBkINBhOfQLg/P5HG5lF1urn4" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js" integrity="sha384-OUW9euuUyxyHcAhTqbhI+Iyb8LMssXt/cpz0yXhs9UWG2/R/uaWdakx/4cfww7Vb" crossorigin="anonymous"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{--c1:#1a73e8;--c1h:#1557b0;--c1bg:#e8f0fe;--g:#34a853;--gbg:#e6f4ea;--r:#ea4335;--rbg:#fce8e6;--y:#f9ab00;--ybg:#fef7e0;--p:#9334e6;--gray:#5f6368;--grayL:#f1f3f4;--border:#dadce0;--shadow:0 1px 3px rgba(0,0,0,.12),0 1px 2px rgba(0,0,0,.08);--radius:12px}
+body{font-family:"Microsoft YaHei",sans-serif;background:#f8f9fa;color:#202124;font-size:14px}
+
+/* ── 侧栏 ── */
+.sidebar{position:fixed;left:0;top:0;bottom:0;width:220px;background:#fff;border-right:1px solid var(--border);z-index:100;display:flex;flex-direction:column}
+.sidebar .brand{padding:20px;font-size:16px;font-weight:bold;color:var(--c1);border-bottom:1px solid var(--border)}
+.sidebar .brand small{display:block;font-size:11px;color:var(--gray);font-weight:normal;margin-top:2px}
+.sidebar nav{flex:1;padding:8px}
+.sidebar nav a{display:flex;align-items:center;gap:10px;padding:10px 16px;border-radius:8px;color:#202124;text-decoration:none;font-size:13px;margin-bottom:2px;cursor:pointer;transition:all .15s}
+.sidebar nav a:hover{background:var(--grayL)}
+.sidebar nav a.active{background:var(--c1bg);color:var(--c1);font-weight:bold}
+.sidebar nav a .icon{font-size:18px;width:24px;text-align:center}
+.sidebar .bottom{padding:12px;border-top:1px solid var(--border);font-size:11px;color:var(--gray);text-align:center}
+
+/* ── 主区 ── */
+.main{margin-left:220px;padding:24px;min-height:100vh}
+.page{display:none}.page.active{display:block}
+.page-title{font-size:22px;font-weight:bold;margin-bottom:20px;color:#202124}
+
+/* ── 卡片/KPI ── */
+.kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;margin-bottom:24px}
+.kpi{background:#fff;border-radius:var(--radius);padding:20px;box-shadow:var(--shadow);border-left:4px solid var(--c1)}
+.kpi .label{font-size:12px;color:var(--gray);margin-bottom:4px}
+.kpi .val{font-size:24px;font-weight:bold}
+.kpi .sub{font-size:11px;color:var(--gray);margin-top:4px}
+.kpi.green{border-color:var(--g)}.kpi.green .val{color:var(--g)}
+.kpi.red{border-color:var(--r)}.kpi.red .val{color:var(--r)}
+.kpi.yellow{border-color:var(--y)}.kpi.yellow .val{color:var(--y)}
+.kpi.purple{border-color:var(--p)}.kpi.purple .val{color:var(--p)}
+
+/* ── 图表 ── */
+.chart-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px}
+.chart-card{background:#fff;border-radius:var(--radius);padding:20px;box-shadow:var(--shadow)}
+.chart-card h3{font-size:14px;color:var(--gray);margin-bottom:12px}
+@media(max-width:1100px){.chart-grid{grid-template-columns:1fr}}
+
+/* ── 面板 ── */
+.panel{background:#fff;border-radius:var(--radius);box-shadow:var(--shadow);margin-bottom:20px;overflow:hidden}
+.panel-head{padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px}
+.panel-head h2{font-size:15px}
+.panel-body{padding:20px}
+.tools{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+
+/* ── 表单 ── */
+input,select,textarea{font-family:inherit;font-size:13px}
+.form-row{display:flex;gap:12px;margin-bottom:12px;align-items:end;flex-wrap:wrap}
+.form-group{display:flex;flex-direction:column;gap:4px}
+.form-group label{font-size:12px;color:var(--gray);font-weight:500}
+.pd-item{padding:8px 12px;cursor:pointer;font-size:13px;transition:background .1s}
+.pd-item:hover{background:var(--c1bg)}
+.form-group input,.form-group select{padding:8px 12px;border:1px solid var(--border);border-radius:8px;min-width:120px}
+.form-group input:focus,.form-group select:focus{outline:none;border-color:var(--c1);box-shadow:0 0 0 2px rgba(26,115,232,.2)}
+
+/* ── 按钮 ── */
+.btn{padding:8px 20px;border:none;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;transition:all .15s;display:inline-flex;align-items:center;gap:6px}
+.btn-p{background:var(--c1);color:#fff}.btn-p:hover{background:var(--c1h)}
+.btn-g{background:var(--g);color:#fff}.btn-g:hover{opacity:.9}
+.btn-r{background:var(--r);color:#fff}.btn-r:hover{opacity:.9}
+.btn-o{background:#fff;border:1px solid var(--border);color:var(--gray)}.btn-o:hover{background:var(--grayL)}
+.btn-sm{padding:6px 12px;font-size:12px}
+
+/* ── 表格 ── */
+.tbl-wrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{background:var(--c1);color:#fff;padding:10px 12px;text-align:center;white-space:nowrap;position:sticky;top:0;z-index:1}
+td{padding:8px 12px;text-align:center;border-bottom:1px solid #f0f0f0}
+tr:hover{background:#f8f9ff}
+.date-hdr{background:var(--gbg);font-weight:bold}
+.sub-row{background:var(--c1bg);font-weight:bold}
+.pos{color:var(--g);font-weight:bold}.neg{color:var(--r);font-weight:bold}
+
+/* ── 机器状态网格 ── */
+.machine-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px;grid-auto-rows:195px}
+#dayMachineGrid{grid-template-columns:repeat(5,minmax(0,1fr))!important}
+.machine-card{background:#fff;border:2px solid var(--border);border-radius:var(--radius);padding:16px;text-align:center;transition:all .2s;height:195px;display:flex;flex-direction:column;justify-content:flex-start;align-items:center;overflow:hidden;box-sizing:border-box}
+.machine-card.running{border-color:var(--g);background:var(--gbg)}
+.machine-card.idle{border-color:var(--y);background:var(--ybg)}
+.machine-card.fault{border-color:var(--r);background:var(--rbg)}
+.machine-card .m-no{font-size:16px;font-weight:bold;margin-bottom:4px}
+.machine-card .m-status{font-size:11px;padding:2px 8px;border-radius:10px;display:inline-block;color:#fff;margin-bottom:4px}
+.machine-card .m-status.running{background:var(--g)}
+.machine-card .m-status.idle{background:var(--y)}
+.machine-card .m-status.fault{background:var(--r)}
+.machine-card .m-type{font-size:10px;color:var(--gray);margin-bottom:2px}
+.machine-card .m-product{font-size:12px;color:var(--gray);margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* ── 实时打印状态 ── */
+.machine-card.printing{border-color:var(--c1);background:var(--c1bg)}
+.machine-card .m-status.printing{background:var(--c1)}
+.machine-card .m-live{font-size:10px;color:var(--gray);margin-top:4px;line-height:1.4}
+.machine-card .m-live .live-dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--g);margin-right:3px;animation:blink 1.5s infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
+.machine-card .m-progress{margin-top:6px;background:#e0e0e0;border-radius:4px;height:6px;overflow:hidden}
+.machine-card .m-progress-bar{height:100%;background:var(--c1);border-radius:4px;transition:width .5s}
+.machine-card .m-temps{font-size:9px;color:var(--gray);margin-top:3px}
+.machine-card .live-badge{display:inline-block;font-size:9px;padding:1px 5px;border-radius:6px;background:var(--c1);color:#fff;margin-left:4px;vertical-align:middle}
+.machine-card .offline-badge{display:inline-block;font-size:9px;padding:1px 5px;border-radius:6px;background:var(--gray);color:#fff;margin-left:4px;vertical-align:middle}
+
+/* ── 模态框 ── */
+.modal-bg{display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:200;align-items:center;justify-content:center}
+.modal-bg.show{display:flex}
+.modal{background:#fff;border-radius:16px;padding:24px;width:600px;max-width:90vw;max-height:85vh;overflow-y:auto;box-shadow:0 8px 30px rgba(0,0,0,.2)}
+.modal h3{font-size:18px;margin-bottom:16px}
+.modal .close{float:right;cursor:pointer;font-size:20px;color:var(--gray)}
+.prod-image-cell{width:60px;padding:4px;text-align:center;vertical-align:middle}
+.prod-thumb{width:48px;height:48px;object-fit:cover;border-radius:6px;cursor:pointer;border:1px solid var(--border);display:inline-block;vertical-align:middle}
+.prod-thumb:hover{box-shadow:0 0 0 2px var(--c1)}
+.prod-no-image{color:#bbb;font-size:11px}
+.prod-image-view-bg{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:300;align-items:center;justify-content:center;cursor:zoom-out}
+.prod-image-view-bg.show{display:flex}
+.prod-image-view-bg img{max-width:80vw;max-height:80vh;object-fit:contain;border-radius:8px;box-shadow:0 8px 40px rgba(0,0,0,.6)}
+.prod-image-upload{display:flex;gap:12px;align-items:center;margin:8px 0}
+.prod-image-preview{width:120px;height:120px;border:2px dashed var(--border);border-radius:8px;display:flex;align-items:center;justify-content:center;cursor:pointer;overflow:hidden;background:#fafafa;outline:none;flex-shrink:0}
+.prod-image-preview.has-image{border-style:solid}
+.prod-image-preview.drag-over{border-color:var(--c1);background:#f0f7ff}
+.prod-image-preview img{max-width:100%;max-height:100%;object-fit:contain}
+.prod-image-preview .placeholder{color:#aaa;font-size:11px;text-align:center;padding:8px;line-height:1.5}
+
+/* ── 导出页 ── */
+.export-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:20px}
+.export-card{background:#fff;border-radius:var(--radius);padding:24px;box-shadow:var(--shadow);text-align:center}
+.export-card h3{color:var(--c1);margin-bottom:8px}
+.export-card p{font-size:12px;color:var(--gray);margin-bottom:16px}
+.export-card .big-icon{font-size:48px;margin-bottom:12px}
+
+/* ── 日期选择提示 ── */
+.date-picker-bar{background:#fff;border-radius:var(--radius);padding:16px 20px;box-shadow:var(--shadow);margin-bottom:20px;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+
+/* 标签 */
+.tag{display:inline-block;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:600}
+.tag-g{background:var(--gbg);color:var(--g)}.tag-r{background:var(--rbg);color:var(--r)}.tag-y{background:var(--ybg);color:var(--y)}
+@keyframes alertSlideIn{from{opacity:0;transform:translateX(30px)}to{opacity:1;transform:translateX(0)}}
+#filament-alerts{position:fixed;top:70px;right:20px;z-index:400;display:flex;flex-direction:column;gap:8px;width:290px}
+.f-alert{background:#fff;border-radius:12px;padding:12px 14px;box-shadow:0 4px 20px rgba(0,0,0,.18);animation:alertSlideIn .3s ease;transition:opacity .2s,transform .2s}
+.f-alert-head{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
+.f-alert-title{font-size:13px;font-weight:700;line-height:1.3}
+.f-alert-dismiss{border:none;background:none;cursor:pointer;font-size:20px;color:#aaa;line-height:1;flex-shrink:0;padding:0}
+.f-alert-dismiss:hover{color:#555}
+.f-alert-body{font-size:12px;color:#555;margin-top:5px}
+.f-alert-hint{font-size:11px;color:var(--gray);margin-top:3px}
+</style>
+</head>
+<body>
+<div id="filament-alerts"></div>
+
+<div class="sidebar">
+  <div class="brand">3D打印管理<small>部门生产管理系统</small></div>
+  <nav id="nav">
+    <a data-p="dashboard" class="active"><span class="icon">&#128202;</span>仪表盘</a>
+    <a data-p="daily"><span class="icon">&#128221;</span>每日记录</a>
+    <a data-p="machines"><span class="icon">&#9881;</span>机器状态</a>
+    <a data-p="materials"><span class="icon">&#127912;</span>材料管理</a>
+    <a data-p="warehouse"><span class="icon">&#127970;</span>材料仓库</a>
+    <a data-p="schedule"><span class="icon">&#128197;</span>排期表</a>
+    <a data-p="products"><span class="icon">&#128230;</span>产品库</a>
+    <a data-p="maintenance"><span class="icon">&#128295;</span>维修记录</a>
+    <a data-p="report"><span class="icon">&#128200;</span>报表导出</a>
+    <a data-p="settings"><span class="icon">&#9881;</span>设置</a>
+  </nav>
+  <div class="bottom" id="syncStatus">多人协作模式<br>数据实时同步</div>
+</div>
+
+<div class="main">
+
+<!-- ═══ 仪表盘 ═══ -->
+<div class="page active" id="pg-dashboard">
+  <div class="page-title">仪表盘</div>
+  <div class="date-picker-bar" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+    <span style="font-weight:bold">查看周期：</span>
+    <select id="dashPeriod" style="padding:6px 12px;border:1px solid var(--border);border-radius:8px">
+      <option value="today">今天</option>
+      <option value="month" selected>本月</option>
+      <option value="year">本年</option>
+      <option value="custom-month">指定月份</option>
+      <option value="custom-year">指定年份</option>
+      <option value="custom-range">自定义范围</option>
+      <option value="all">全部</option>
+    </select>
+    <span id="dashCustomInputs" style="display:none">
+      <input type="month" id="dashMonth" style="padding:5px 10px;border:1px solid var(--border);border-radius:8px">
+      <select id="dashYear" style="padding:6px 12px;border:1px solid var(--border);border-radius:8px;display:none"></select>
+      <input type="date" id="dashFrom" style="padding:5px 10px;border:1px solid var(--border);border-radius:8px;display:none">
+      <span id="dashRangeSep" style="display:none"> ~ </span>
+      <input type="date" id="dashTo" style="padding:5px 10px;border:1px solid var(--border);border-radius:8px;display:none">
+    </span>
+    <span id="dashRange" style="color:var(--gray);font-size:12px"></span>
+  </div>
+  <div class="kpi-grid" id="kpiGrid"></div>
+  <div class="chart-grid">
+    <div class="chart-card"><h3>产值与支出趋势</h3><canvas id="chTrend"></canvas></div>
+    <div class="chart-card"><h3>每日结余</h3><canvas id="chBalance"></canvas></div>
+  </div>
+  <div class="chart-grid">
+    <div class="chart-card"><h3>支出构成</h3><canvas id="chPie"></canvas></div>
+    <div class="chart-card"><h3>机器使用率</h3><canvas id="chUtil"></canvas></div>
+  </div>
+</div>
+
+<!-- ═══ 每日记录 ═══ -->
+<div class="page" id="pg-daily">
+  <div class="page-title">每日生产记录</div>
+  <div class="date-picker-bar">
+    <span style="font-weight:bold">日期：</span>
+    <input type="date" id="recDate" style="padding:6px 12px;border:1px solid var(--border);border-radius:8px">
+    <button class="btn btn-p btn-sm" onclick="loadDay()">加载</button>
+    <button class="btn btn-g btn-sm" onclick="openAddRecord()">+ 添加记录</button>
+    <button class="btn btn-o btn-sm" onclick="openExportDayModal()">📊 导出 Excel</button>
+    <span style="flex:1"></span>
+    <button class="btn btn-o btn-sm" onclick="rescanAllOffline()" title="重新搜索所有离线的FlashForge打印机IP">&#128269; 搜索离线设备</button>
+    <button class="btn btn-o btn-sm" onclick="markDayOff()">标记为休息日</button>
+  </div>
+  <!-- 当天机器概览 -->
+  <div class="machine-grid" id="dayMachineGrid"></div>
+  <!-- 记录表 -->
+  <div class="panel">
+    <div class="panel-head">
+      <h2 id="dayTitle">请选择日期</h2>
+      <div id="daySummary" style="font-size:12px;color:var(--gray)"></div>
+    </div>
+    <div class="tbl-wrap" id="dayTable"></div>
+  </div>
+</div>
+
+<!-- ═══ 机器状态 ═══ -->
+<div class="page" id="pg-machines">
+  <div class="page-title">机器状态总览</div>
+  <div class="date-picker-bar">
+    <span style="font-weight:bold">日期：</span>
+    <input type="date" id="machDate" style="padding:6px 12px;border:1px solid var(--border);border-radius:8px">
+    <button class="btn btn-p btn-sm" onclick="renderMachinePage()">查看</button>
+  </div>
+  <div class="machine-grid" id="machGrid" style="grid-template-columns:repeat(4,1fr)"></div>
+  <div class="panel">
+    <div class="panel-head"><h2>机器使用率明细</h2></div>
+    <div class="tbl-wrap" id="machTable"></div>
+  </div>
+</div>
+
+<!-- ═══ 材料管理 ═══ -->
+<div class="page" id="pg-materials">
+  <div class="page-title">材料管理</div>
+  <div class="panel">
+    <div class="panel-head">
+      <h2>材料价格表</h2>
+      <div style="display:flex;gap:8px;align-items:center">
+        <input id="matSearch" type="text" placeholder="搜索名称/类型..." oninput="renderMaterials()"
+          style="padding:6px 12px;border:1px solid var(--border);border-radius:8px;width:200px;font-size:13px">
+        <button class="btn btn-p btn-sm" onclick="openAddMaterial()">+ 添加材料</button>
+      </div>
+    </div>
+    <div class="panel-body">
+      <div class="tbl-wrap" id="matTable"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ 产品库 ═══ -->
+<div class="page" id="pg-products">
+  <div class="page-title">产品库</div>
+  <div class="panel">
+    <div class="panel-head">
+      <h2>产品列表</h2>
+      <div class="tools">
+        <input type="text" id="prodSearch" placeholder="搜索产品..." style="padding:6px 12px;border:1px solid var(--border);border-radius:8px" oninput="renderProducts()">
+        <button class="btn btn-p btn-sm" onclick="openAddProduct()">+ 添加产品</button>
+      </div>
+    </div>
+    <div class="tbl-wrap" id="prodTable"></div>
+  </div>
+</div>
+
+<!-- ═══ 维修记录 ═══ -->
+<div class="page" id="pg-maintenance">
+  <div class="page-title">设备维修记录</div>
+  <div class="panel">
+    <div class="panel-head">
+      <h2>维修费用记录</h2>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <label style="font-size:12px;color:var(--gray)">月份：</label>
+        <input type="month" id="maintFilterMonth" style="padding:6px 12px;border:1px solid var(--border);border-radius:8px" oninput="renderMaintenance()">
+        <select id="maintFilterMachine" style="padding:6px 12px;border:1px solid var(--border);border-radius:8px" onchange="renderMaintenance()">
+          <option value="">全部机台</option>
+        </select>
+        <button class="btn btn-p btn-sm" onclick="openAddMaintenance()">+ 添加维修记录</button>
+      </div>
+    </div>
+    <div class="panel-body">
+      <div id="maintSummary" style="margin-bottom:12px;padding:10px 16px;background:var(--rbg);border-radius:8px;font-size:13px;display:none"></div>
+      <div class="tbl-wrap" id="maintTable"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ 报表导出 ═══ -->
+<div class="page" id="pg-report">
+  <div class="page-title">报表导出</div>
+  <div class="export-grid">
+    <div class="export-card">
+      <div class="big-icon">&#128197;</div>
+      <h3>月度汇总</h3>
+      <p>导出选定月份的财务结余、机器使用率、产品统计</p>
+      <div class="form-row" style="justify-content:center">
+        <select id="expMonth" style="padding:8px 12px;border:1px solid var(--border);border-radius:8px"></select>
+      </div>
+      <button class="btn btn-p" onclick="exportMonth()" style="margin-top:8px">导出月度报表</button>
+    </div>
+    <div class="export-card">
+      <div class="big-icon">&#128198;</div>
+      <h3>年度汇总</h3>
+      <p>导出选定年份的12个月汇总数据</p>
+      <div class="form-row" style="justify-content:center">
+        <select id="expYear" style="padding:8px 12px;border:1px solid var(--border);border-radius:8px"></select>
+      </div>
+      <button class="btn btn-g" onclick="exportYear()" style="margin-top:8px">导出年度报表</button>
+    </div>
+    <div class="export-card">
+      <div class="big-icon">&#128203;</div>
+      <h3>自定义范围</h3>
+      <p>按任意起止日期导出财务明细、维修记录、机器统计</p>
+      <div class="form-row" style="justify-content:center;gap:6px;align-items:center;flex-wrap:wrap">
+        <input type="date" id="expFrom" style="padding:6px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px">
+        <span style="color:var(--gray)">~</span>
+        <input type="date" id="expTo" style="padding:6px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px">
+      </div>
+      <div id="expRangeInfo" style="font-size:12px;color:var(--gray);margin-top:6px;min-height:18px"></div>
+      <button class="btn btn-p" onclick="exportRange()" style="margin-top:8px;background:var(--p);border-color:var(--p)">导出自定义报表</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ 材料仓库 ═══ -->
+<div class="page" id="pg-warehouse">
+  <div class="page-title">材料仓库</div>
+  <div class="kpi-grid" id="whKpi"></div>
+  <div class="panel">
+    <div class="panel-head">
+      <h2>库存总览</h2>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <input id="whSearch" type="text" placeholder="搜索材料..." oninput="renderWarehouse()"
+          style="padding:6px 12px;border:1px solid var(--border);border-radius:8px;width:180px;font-size:13px">
+        <select id="whFilter" onchange="renderWarehouse()" style="padding:6px 12px;border:1px solid var(--border);border-radius:8px">
+          <option value="">全部状态</option>
+          <option value="low">低库存</option>
+          <option value="out">缺货</option>
+          <option value="ok">充足</option>
+        </select>
+        <button class="btn btn-p btn-sm" onclick="openAddMaterialFromWH()">+ 添加材料</button>
+        <button class="btn btn-g btn-sm" onclick="openStockIn()">+ 入库</button>
+      </div>
+    </div>
+    <div class="tbl-wrap" id="whTable"></div>
+  </div>
+  <div class="panel">
+    <div class="panel-head">
+      <h2>入库记录</h2>
+      <div style="display:flex;gap:8px;align-items:center">
+        <input type="month" id="whLogMonth" style="padding:6px 12px;border:1px solid var(--border);border-radius:8px" oninput="renderWarehouse()">
+        <button class="btn btn-g btn-sm" onclick="exportStockInLogs()" style="white-space:nowrap">导出 Excel</button>
+      </div>
+    </div>
+    <div class="tbl-wrap" id="whLogTable"></div>
+  </div>
+</div>
+
+<!-- ═══ 排期表 ═══ -->
+<div class="page" id="pg-schedule">
+  <div class="page-title">排期表</div>
+  <div class="date-picker-bar" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+    <span style="font-weight:bold;font-size:13px">筛选：</span>
+    <input type="date" id="schedFrom" style="padding:6px 10px;border:1px solid var(--border);border-radius:8px" onchange="renderSchedule()">
+    <span style="color:var(--gray)">~</span>
+    <input type="date" id="schedTo" style="padding:6px 10px;border:1px solid var(--border);border-radius:8px" onchange="renderSchedule()">
+    <select id="schedStatusFilter" style="padding:6px 10px;border:1px solid var(--border);border-radius:8px" onchange="renderSchedule()">
+      <option value="">全部状态</option>
+      <option value="pending">待生产</option>
+      <option value="printing">打印中</option>
+      <option value="done">已完成</option>
+      <option value="cancelled">已取消</option>
+    </select>
+    <select id="schedMatFilter" style="padding:6px 10px;border:1px solid var(--border);border-radius:8px" onchange="renderSchedule()">
+      <option value="">全部材料</option>
+    </select>
+    <span style="flex:1"></span>
+    <button class="btn btn-g btn-sm" onclick="openAddSchedule()">+ 添加排期</button>
+  </div>
+  <div class="kpi-grid" id="schedKpi"></div>
+  <div class="panel">
+    <div class="panel-head">
+      <h2>材料用量预算</h2>
+      <div style="font-size:12px;color:var(--gray)">待生产排期所需材料 vs 当前库存</div>
+    </div>
+    <div class="tbl-wrap" id="schedBudgetTable"></div>
+  </div>
+  <div class="panel">
+    <div class="panel-head">
+      <h2>排期明细</h2>
+      <div style="display:flex;gap:8px;align-items:center;flex:1;justify-content:flex-end">
+        <input type="text" id="schedSearch" placeholder="搜索日期/产品/客户/材料..." oninput="renderSchedule()"
+          style="padding:5px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px;width:220px">
+        <div id="schedSummary" style="font-size:12px;color:var(--gray);white-space:nowrap"></div>
+      </div>
+    </div>
+    <div class="tbl-wrap" id="schedTable"></div>
+  </div>
+</div>
+
+<!-- ═══ 设置 ═══ -->
+<div class="page" id="pg-settings">
+  <div class="page-title">系统设置</div>
+  <div class="panel">
+    <div class="panel-head"><h2>基础参数</h2></div>
+    <div class="panel-body">
+      <div class="form-row">
+        <div class="form-group"><label>机器数量</label><input type="number" id="sMachines" min="20" max="50"></div>
+        <div class="form-group"><label>每台机器日电费(元/12h)</label><input type="number" id="sElec" step="0.1"></div>
+        <div class="form-group"><label>每日人工费用(元/12h)</label><input type="number" id="sLabor" step="1"></div>
+        <div class="form-group"><label>材料损耗系数</label><input type="number" id="sLoss" step="0.01" min="1"></div>
+        <div class="form-group"><label>利润率(%)</label><input type="number" id="sProfit" step="1" min="0"></div>
+      </div>
+      <button class="btn btn-p" onclick="saveSettings()">保存设置</button>
+    </div>
+  </div>
+  <div class="panel">
+    <div class="panel-head"><h2>机器配置</h2></div>
+    <div class="panel-body">
+      <table style="font-size:13px">
+        <tr><th>机台</th><th>机型</th><th>功率参考(kWh)</th></tr>
+        <tr><td>#1 ~ #5, #11 ~ #20</td><td>Bambu-P1S</td><td>0.22</td></tr>
+        <tr><td>#6 ~ #10</td><td>Adventurer 5M</td><td>0.35</td></tr>
+      </table>
+      <p style="font-size:11px;color:var(--gray);margin-top:8px">如需修改机器配置，请联系管理员编辑HTML文件中的 MACHINE_CONFIG</p>
+    </div>
+  </div>
+  <div class="panel">
+    <div class="panel-head"><h2>数据管理</h2></div>
+    <div class="panel-body" style="display:flex;gap:12px;flex-wrap:wrap">
+      <button class="btn btn-g" onclick="exportAllData()">导出全部数据(JSON备份)</button>
+      <label class="btn btn-o" style="cursor:pointer">导入数据(JSON)<input type="file" accept=".json" style="display:none" onchange="importAllData(event)"></label>
+      <button class="btn btn-r" onclick="clearAllData()">清空所有数据</button>
+    </div>
+  </div>
+</div>
+
+</div><!-- main end -->
+
+<!-- ═══ 模态框：添加记录 ═══ -->
+<div class="modal-bg" id="modalRecord">
+<div class="modal">
+  <span class="close" onclick="closeModal('modalRecord')">&times;</span>
+  <h3 id="modalRecTitle">添加生产记录</h3>
+  <div class="form-row">
+    <div class="form-group"><label>机台</label>
+      <select id="rMachine"></select>
+    </div>
+    <div class="form-group"><label>状态</label>
+      <select id="rStatus" onchange="toggleRecordFields()">
+        <option value="running">生产中</option>
+        <option value="idle">空闲/待单</option>
+        <option value="fault">故障</option>
+      </select>
+    </div>
+  </div>
+  <div id="runFields">
+    <div class="form-row">
+      <div class="form-group" style="position:relative"><label>产品</label>
+        <input type="text" id="rProductSearch" placeholder="点击选择或搜索产品..." autocomplete="off" readonly
+          onclick="openProductDropdown()" style="width:100%;cursor:pointer;background:#fff">
+        <input type="hidden" id="rProduct">
+        <div id="rProductDropdown" style="display:none;position:absolute;left:0;right:0;top:100%;z-index:999;background:#fff;border:1px solid var(--border);border-radius:8px;box-shadow:var(--shadow)">
+          <div style="padding:6px 8px;border-bottom:1px solid var(--border)">
+            <input type="text" id="rProductFilter" placeholder="搜索产品名称..." autocomplete="off"
+              oninput="filterProductList()" style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:13px;box-sizing:border-box">
+          </div>
+          <div id="rProductList" style="max-height:200px;overflow-y:auto"></div>
+        </div>
+      </div>
+      <div class="form-group" id="rCustomNameWrap" style="display:none"><label>产品名称</label><input type="text" id="rCustomName"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>材料</label><select id="rMaterial"></select></div>
+      <div class="form-group"><label>料重(g)</label><input type="number" id="rWeight" step="0.1"></div>
+      <div class="form-group"><label>数量</label><input type="number" id="rQty" value="1" min="1"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>打印耗时(h)</label><input type="number" id="rTime" step="0.1"></div>
+      <div class="form-group"><label>设计费(元)</label><input type="number" id="rDesignFee" step="0.01" placeholder="0"></div>
+      <div class="form-group"><label>报价/售价(元)</label><input type="number" id="rPrice" step="0.01"></div>
+    </div>
+    <div id="rCalcInfo" style="margin-top:4px;padding:8px 12px;background:#f0f7ff;border-radius:6px;font-size:12px;color:#555;display:none">
+      <span style="font-weight:bold;color:var(--c1)">自动估算：</span>
+      <span id="rCalcDetail"></span>
+    </div>
+  </div>
+  <div class="form-row">
+    <div class="form-group" style="flex:1"><label>客户</label><input type="text" id="rCustomer" style="width:100%" placeholder="客户名称（可选）"></div>
+    <div class="form-group" style="flex:1"><label>备注</label><input type="text" id="rRemark" style="width:100%"></div>
+  </div>
+  <div style="margin-top:16px;display:flex;gap:8px;justify-content:flex-end">
+    <button class="btn btn-o" onclick="closeModal('modalRecord')">取消</button>
+    <button class="btn btn-p" onclick="saveRecord()">保存</button>
+  </div>
+</div>
+</div>
+
+<!-- ═══ 模态框：添加材料 ═══ -->
+<div class="modal-bg" id="modalMaterial">
+<div class="modal" style="width:400px">
+  <span class="close" onclick="closeModal('modalMaterial')">&times;</span>
+  <h3>添加材料</h3>
+  <div class="form-row"><div class="form-group" style="flex:1"><label>材料名称</label><input type="text" id="mName" style="width:100%" placeholder="如: PLA基础黑"></div></div>
+  <div class="form-row">
+    <div class="form-group"><label>价格(元/kg)</label><input type="number" id="mPrice" step="0.1"></div>
+    <div class="form-group"><label>类型</label>
+      <select id="mType"><option>PLA</option><option>PETG</option><option>ABS</option><option>TPU</option><option>PC</option><option>ASA</option><option>HPLA</option><option>其他</option></select>
+    </div>
+  </div>
+  <div style="margin-top:16px;text-align:right">
+    <button class="btn btn-o" onclick="closeModal('modalMaterial')">取消</button>
+    <button class="btn btn-p" onclick="saveMaterial()" style="margin-left:8px">保存</button>
+  </div>
+</div>
+</div>
+
+<!-- 产品图片放大查看 -->
+<div class="prod-image-view-bg" id="modalProductImage" onclick="closeProductImage()">
+  <img id="modalProductImageImg" alt="产品图片">
+</div>
+
+<!-- ═══ 模态框：添加产品 ═══ -->
+<div class="modal-bg" id="modalProduct">
+<div class="modal" style="width:500px">
+  <span class="close" onclick="closeModal('modalProduct')">&times;</span>
+  <h3>添加产品</h3>
+  <div class="form-row"><div class="form-group" style="flex:1"><label>产品名称</label><input type="text" id="pName" style="width:100%"></div></div>
+  <div class="form-row"><div class="form-group" style="flex:1"><label>客户</label><input type="text" id="pCustomer" style="width:100%" placeholder="客户名称（可选）"></div></div>
+  <div class="form-row"><div class="form-group" style="flex:1">
+    <label>产品图片</label>
+    <div class="prod-image-upload">
+      <div id="pImagePreview" class="prod-image-preview" tabindex="0">
+        <div class="placeholder">点击选择<br>Ctrl+V 粘贴<br>或拖入图片</div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <button type="button" class="btn btn-p btn-sm" onclick="document.getElementById('pImageFile').click()">选择文件</button>
+        <button type="button" class="btn btn-o btn-sm" id="pImageClearBtn" onclick="clearProductImage()" style="display:none">清除</button>
+      </div>
+      <input type="file" id="pImageFile" accept="image/*" style="display:none" onchange="onProductImageFilePicked(event)">
+    </div>
+  </div></div>
+  <div class="form-row">
+    <div class="form-group"><label>默认材料</label><select id="pMaterial"></select></div>
+    <div class="form-group"><label>默认料重(g)</label><input type="number" id="pWeight" step="0.1"></div>
+  </div>
+  <div class="form-row">
+    <div class="form-group"><label>默认耗时(h)</label><input type="number" id="pTime" step="0.1"></div>
+    <div class="form-group"><label>默认数量</label><input type="number" id="pQty" min="1" step="1" value="1"></div>
+    <div class="form-group"><label>默认报价(元)</label><input type="number" id="pPrice" step="0.01"></div>
+  </div>
+  <div id="pCalcInfo" style="margin-top:8px;padding:8px 12px;background:#f0f7ff;border-radius:6px;font-size:12px;color:#555;display:none">
+    <span style="font-weight:bold;color:var(--c1)">自动估算：</span>
+    <span id="pCalcDetail"></span>
+  </div>
+  <div style="margin-top:16px;text-align:right">
+    <button class="btn btn-o" onclick="closeModal('modalProduct')">取消</button>
+    <button class="btn btn-p" onclick="saveProduct()" style="margin-left:8px">保存</button>
+  </div>
+</div>
+</div>
+
+<!-- 导出每日记录 -->
+<div class="modal-bg" id="modalExportDay">
+<div class="modal" style="width:380px">
+  <span class="close" onclick="closeModal('modalExportDay')">&times;</span>
+  <h3>导出每日生产记录</h3>
+  <div class="form-row">
+    <div class="form-group"><label>起始日期</label><input type="date" id="expDayFrom" style="width:100%"></div>
+    <div class="form-group"><label>结束日期</label><input type="date" id="expDayTo" style="width:100%"></div>
+  </div>
+  <div id="expDayInfo" style="margin:12px 0;padding:8px 12px;background:#f0f7ff;border-radius:6px;font-size:12px;color:#555">请选择日期</div>
+  <div style="margin-top:16px;text-align:right">
+    <button class="btn btn-o" onclick="closeModal('modalExportDay')">取消</button>
+    <button class="btn btn-p" onclick="doExportDayRecords()" style="margin-left:8px">导出</button>
+  </div>
+</div>
+</div>
+
+<!-- ═══ 模态框：维修记录 ═══ -->
+<div class="modal-bg" id="modalMaintenance">
+<div class="modal" style="width:480px">
+  <span class="close" onclick="closeModal('modalMaintenance')">&times;</span>
+  <h3 id="modalMaintTitle">添加维修记录</h3>
+  <div class="form-row">
+    <div class="form-group"><label>日期</label><input type="date" id="maintDate" style="min-width:140px"></div>
+    <div class="form-group"><label>机台</label>
+      <select id="maintMachine" style="min-width:140px">
+        <option value="0">全部/不限</option>
+      </select>
+    </div>
+  </div>
+  <div class="form-row">
+    <div class="form-group"><label>维修类型</label>
+      <select id="maintType">
+        <option>日常维护</option>
+        <option>零件更换</option>
+        <option>故障维修</option>
+        <option>软件调试</option>
+        <option>耗材采购</option>
+        <option>其他</option>
+      </select>
+    </div>
+    <div class="form-group"><label>费用(元)</label><input type="number" id="maintCost" step="0.01" min="0" placeholder="0.00" style="min-width:120px"></div>
+  </div>
+  <div class="form-row">
+    <div class="form-group" style="flex:1"><label>维修描述</label><input type="text" id="maintDesc" style="width:100%" placeholder="如：更换喷嘴、清洁送料机构..."></div>
+  </div>
+  <div class="form-row">
+    <div class="form-group" style="flex:1"><label>服务商/维修人</label><input type="text" id="maintVendor" style="width:100%" placeholder="厂家售后/自维修..."></div>
+  </div>
+  <div class="form-row">
+    <div class="form-group" style="flex:1"><label>备注</label><input type="text" id="maintRemark" style="width:100%"></div>
+  </div>
+  <div style="margin-top:16px;text-align:right">
+    <button class="btn btn-o" onclick="closeModal('modalMaintenance')">取消</button>
+    <button class="btn btn-p" onclick="saveMaintenance()" style="margin-left:8px">保存</button>
+  </div>
+</div>
+</div>
+
+<!-- ═══ 模态框：入库 ═══ -->
+<div class="modal-bg" id="modalStockIn">
+<div class="modal" style="width:460px">
+  <span class="close" onclick="closeModal('modalStockIn')">&times;</span>
+  <h3>材料入库</h3>
+  <div class="form-row">
+    <div class="form-group" style="flex:1"><label>材料</label><select id="siMaterial" style="width:100%" onchange="autoFillStockCost()"></select></div>
+  </div>
+  <div class="form-row">
+    <div class="form-group"><label>入库重量(kg)</label><input type="number" id="siAmount" step="0.1" min="0.1" placeholder="如: 1" oninput="autoFillStockCost()"></div>
+    <div class="form-group"><label>采购费用(元)</label><input type="number" id="siCost" step="0.01" min="0" placeholder="0.00"></div>
+  </div>
+  <div class="form-row">
+    <div class="form-group" style="flex:1"><label>供应商</label><input type="text" id="siVendor" style="width:100%" placeholder="如: 拼多多"></div>
+  </div>
+  <div class="form-row">
+    <div class="form-group" style="flex:1"><label>备注</label><input type="text" id="siRemark" style="width:100%"></div>
+  </div>
+  <div style="margin-top:16px;text-align:right">
+    <button class="btn btn-o" onclick="closeModal('modalStockIn')">取消</button>
+    <button class="btn btn-g" onclick="saveStockIn()" style="margin-left:8px">确认入库</button>
+  </div>
+</div>
+</div>
+
+<!-- ═══ 模态框：库存调整 ═══ -->
+<div class="modal-bg" id="modalStockAdjust">
+<div class="modal" style="width:400px">
+  <span class="close" onclick="closeModal('modalStockAdjust')">&times;</span>
+  <h3 id="adjTitle">库存调整</h3>
+  <input type="hidden" id="adjMaterial">
+  <div class="form-row">
+    <div class="form-group"><label>当前库存(g)</label><input type="number" id="adjCurrent" readonly style="background:#f1f3f4"></div>
+    <div class="form-group"><label>调整为(g)</label><input type="number" id="adjNew" step="1" min="0"></div>
+  </div>
+  <div class="form-row">
+    <div class="form-group" style="flex:1"><label>调整原因</label><input type="text" id="adjReason" style="width:100%" placeholder="如: 盘点修正、报废"></div>
+  </div>
+  <div style="margin-top:16px;text-align:right">
+    <button class="btn btn-o" onclick="closeModal('modalStockAdjust')">取消</button>
+    <button class="btn btn-p" onclick="saveStockAdjust()" style="margin-left:8px">确认调整</button>
+  </div>
+</div>
+</div>
+
+<div class="modal-bg" id="modalInvEdit">
+<div class="modal" style="width:400px">
+  <span class="close" onclick="closeModal('modalInvEdit')">&times;</span>
+  <h3 id="invEditTitle">编辑库存设置</h3>
+  <input type="hidden" id="invEditName">
+  <div class="form-row">
+    <div class="form-group"><label>当前库存(kg)</label><input type="number" id="invEditStock" step="0.1" min="0"></div>
+    <div class="form-group"><label>警戒线(kg)</label><input type="number" id="invEditMin" step="0.1" min="0"></div>
+  </div>
+  <div style="margin-top:16px;text-align:right">
+    <button class="btn btn-o" onclick="closeModal('modalInvEdit')">取消</button>
+    <button class="btn btn-p" onclick="saveInventoryEdit()" style="margin-left:8px">保存</button>
+  </div>
+</div>
+</div>
+
+<!-- ═══ 模态框：排期 ═══ -->
+<div class="modal-bg" id="modalSched">
+<div class="modal" style="width:560px">
+  <span class="close" onclick="closeModal('modalSched')">&times;</span>
+  <h3 id="modalSchedTitle">添加排期</h3>
+  <div class="form-row">
+    <div class="form-group"><label>计划日期</label><input type="date" id="schDate"></div>
+    <div class="form-group"><label>优先级</label>
+      <select id="schPriority">
+        <option value="high">紧急</option>
+        <option value="normal" selected>普通</option>
+        <option value="low">低</option>
+      </select>
+    </div>
+    <div class="form-group"><label>状态</label>
+      <select id="schStatus">
+        <option value="pending">待生产</option>
+        <option value="printing">打印中</option>
+        <option value="done">已完成</option>
+        <option value="cancelled">已取消</option>
+      </select>
+    </div>
+  </div>
+  <div class="form-row">
+    <div class="form-group" style="flex:1;position:relative"><label>产品(搜索选择)</label>
+      <input type="text" id="schProductSearch" style="width:100%" placeholder="输入关键字搜索产品..." autocomplete="off" oninput="filterSchedProducts()" onfocus="filterSchedProducts()">
+      <div id="schProductDropdown" style="display:none;position:absolute;left:0;right:0;top:100%;background:#fff;border:1px solid var(--border);border-radius:8px;max-height:200px;overflow-y:auto;z-index:10;box-shadow:0 4px 12px rgba(0,0,0,.15)"></div>
+      <input type="hidden" id="schProductSelect" value="">
+    </div>
+  </div>
+  <div class="form-row">
+    <div class="form-group" style="flex:1"><label>产品名称</label><input type="text" id="schProductName" style="width:100%" placeholder="产品名称"></div>
+  </div>
+  <div class="form-row">
+    <div class="form-group"><label>材料</label><select id="schMaterial"></select></div>
+    <div class="form-group"><label>单件料重(g)</label><input type="number" id="schWeight" step="0.1" min="0"></div>
+    <div class="form-group"><label>数量</label><input type="number" id="schQty" value="1" min="1"></div>
+  </div>
+  <div class="form-row">
+    <div class="form-group"><label>指定机台</label><select id="schMachine"><option value="0">不指定</option></select></div>
+    <div class="form-group" style="flex:1"><label>客户</label><input type="text" id="schCustomer" style="width:100%" placeholder="客户名称（可选）"></div>
+    <div class="form-group" style="flex:1"><label>备注</label><input type="text" id="schRemark" style="width:100%"></div>
+  </div>
+  <div style="margin-top:16px;text-align:right">
+    <button class="btn btn-o" onclick="closeModal('modalSched')">取消</button>
+    <button class="btn btn-p" onclick="saveSchedule()" style="margin-left:8px">保存</button>
+  </div>
+</div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════
+// 数据层 - 服务器同步 (多人协作)
+// ═══════════════════════════════════════════════════════
+let _syncTimer=null, _serverVer=0, _dirty=false;
+
+async function pushNow(){
+  try{
+    const res=await fetch('api/data',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({_version:_serverVer,settings:S,materials,products,records,maintenance,inventory,stockInLogs,schedules})});
+    if(res.status===409){
+      const r=await res.json();
+      if(r.latestData){
+        const data=r.latestData;
+        if(data._version) _serverVer=data._version;
+        if(data.settings) { S=data.settings; if(S.machines<20){S.machines=20;} }
+        if(data.materials&&data.materials.length) { materials=data.materials; nextMatId=Math.max(0,...materials.map(m=>m.id))+1; }
+        if(data.products&&data.products.length) { products=data.products; nextProdId=Math.max(0,...products.map(p=>p.id))+1; }
+        if(data.records) records=data.records;
+        if(data.maintenance) { maintenance=data.maintenance; nextMaintId=maintenance.length?Math.max(0,...maintenance.map(m=>m.id))+1:1; }
+        if(data.inventory) inventory=data.inventory;
+        if(data.stockInLogs) { stockInLogs=data.stockInLogs; nextStockInId=stockInLogs.length?Math.max(0,...stockInLogs.map(l=>l.id))+1:1; }
+        if(data.schedules) { schedules=data.schedules; nextSchedId=schedules.length?Math.max(0,...schedules.map(s=>s.id))+1:1; }
+        if(typeof reRenderCurrent==='function') reRenderCurrent();
+      }
+      updateSyncUI('err');
+      alert('数据冲突：其他用户已更新数据，页面已刷新为最新版本。请重新操作。');
+      return;
+    }
+    const r=await res.json();
+    if(r.version) _serverVer=r.version;
+    _dirty=false;
+    updateSyncUI('ok');
+  }catch(e){ updateSyncUI('err'); console.error('保存失败:',e); }
+}
+
+function updateSyncUI(st){
+  const el=document.getElementById('syncStatus');
+  if(!el) return;
+  if(st==='saving') el.innerHTML='<span style="color:var(--y)">保存中...</span>';
+  else if(st==='ok') el.innerHTML='<span style="color:var(--g)">已同步</span><br><span style="font-size:10px">多人协作模式</span>';
+  else if(st==='err') el.innerHTML='<span style="color:var(--r)">同步失败</span><br><span style="font-size:10px">请检查网络</span>';
+  else if(st==='pull') el.innerHTML='<span style="color:var(--c1)">同步更新...</span>';
+  else el.innerHTML='多人协作模式<br>数据实时同步';
+}
+
+// 默认设置 (初始值，boot()会从服务器覆盖)
+let S = {machines:20, elecPerMachine:1.5, laborPerDay:220, lossRate:1.2, profitRate:40};
+
+// 20台机器型号配置
+const MACHINE_CONFIG = {
+  1:{name:'#1', type:'Bambu-P1S', kwh:0.22},
+  2:{name:'#2', type:'Bambu-P1S', kwh:0.22},
+  3:{name:'#3', type:'Bambu-P1S', kwh:0.22},
+  4:{name:'#4', type:'Bambu-P1S', kwh:0.22},
+  5:{name:'#5', type:'Bambu-P1S', kwh:0.22},
+  6:{name:'#6', type:'Adventurer 5M', kwh:0.35},
+  7:{name:'#7', type:'Adventurer 5M', kwh:0.35},
+  8:{name:'#8', type:'Adventurer 5M', kwh:0.35},
+  9:{name:'#9', type:'Adventurer 5M', kwh:0.35},
+  10:{name:'#10', type:'Adventurer 5M', kwh:0.35},
+  11:{name:'#11', type:'Bambu-P1S', kwh:0.22},
+  12:{name:'#12', type:'Bambu-P1S', kwh:0.22},
+  13:{name:'#13', type:'Bambu-P1S', kwh:0.22},
+  14:{name:'#14', type:'Bambu-P1S', kwh:0.22},
+  15:{name:'#15', type:'Bambu-P1S', kwh:0.22},
+  16:{name:'#16', type:'Bambu-P1S', kwh:0.22},
+  17:{name:'#17', type:'Bambu-P1S', kwh:0.22},
+  18:{name:'#18', type:'Bambu-P1S', kwh:0.22},
+  19:{name:'#19', type:'Bambu-P1S', kwh:0.22},
+  20:{name:'#20', type:'Bambu-P1S', kwh:0.22},
+};
+function getMachineLabel(i){ const mc=MACHINE_CONFIG[i]; return mc ? `#${i} ${mc.type}` : `#${i}`; }
+function getMachineType(i){ const mc=MACHINE_CONFIG[i]; return mc ? mc.type : '未知'; }
+let materials = [
+  {id:1,name:'PLA基础黑',type:'PLA',priceKg:32},{id:2,name:'PLA基础白',type:'PLA',priceKg:32},
+  {id:3,name:'PETG基础黑',type:'PETG',priceKg:19},{id:4,name:'PETG基础白',type:'PETG',priceKg:19},
+  {id:5,name:'PLA亮金丝绸',type:'PLA',priceKg:31},{id:6,name:'PETG马卡龙',type:'PETG',priceKg:23},
+  {id:7,name:'ABS白色',type:'ABS',priceKg:56},{id:8,name:'TPU白色85A',type:'TPU',priceKg:62},
+  {id:9,name:'蓝色PLA',type:'PLA',priceKg:29},{id:10,name:'PETG荧光绿',type:'PETG',priceKg:19},
+  {id:11,name:'PLA哑光灰',type:'PLA',priceKg:32},{id:12,name:'PC基础黑',type:'PC',priceKg:68},
+  {id:13,name:'ASA基础黑',type:'ASA',priceKg:60},{id:14,name:'HPLA',type:'HPLA',priceKg:45},
+  {id:15,name:'PLA马卡龙2号',type:'PLA',priceKg:33},{id:16,name:'PLA夜光绿',type:'PLA',priceKg:38},
+  {id:17,name:'PETG晶莹柠绿',type:'PETG',priceKg:32},{id:18,name:'PETG琉璃极光',type:'PETG',priceKg:32},
+  {id:19,name:'大昆三维PLA+',type:'PLA',priceKg:52},{id:20,name:'PLA白色丝绸',type:'PLA',priceKg:31},
+  {id:21,name:'PLA银色丝绸',type:'PLA',priceKg:31},{id:22,name:'TPU白色95A',type:'TPU',priceKg:50},
+  {id:23,name:'PETG橙色',type:'PETG',priceKg:25},{id:24,name:'PETG灰色',type:'PETG',priceKg:32},
+];
+let products = [];
+let records = {};
+let maintenance = [];
+let nextMaintId = 1;
+let inventory = {};
+let stockInLogs = [];
+let nextStockInId = 1;
+let schedules = [];
+let nextSchedId = 1;
+let editingSchedId = -1;
+
+let nextMatId = materials.length ? Math.max(...materials.map(m=>m.id))+1 : 1;
+let nextProdId = products.length ? Math.max(...products.map(p=>p.id))+1 : 1;
+let editingRecIdx = -1;
+
+function saveAll(){
+  _dirty=true;
+  clearTimeout(_syncTimer);
+  updateSyncUI('saving');
+  _syncTimer = setTimeout(pushNow, 500); // 500ms 防抖，防止多人同时编辑时频繁写入
+}
+
+// ═══════════════════════════════════════════════════════
+// 导航
+// ═══════════════════════════════════════════════════════
+document.querySelectorAll('#nav a').forEach(a=>{
+  a.addEventListener('click',()=>{
+    document.querySelectorAll('#nav a').forEach(x=>x.classList.remove('active'));
+    a.classList.add('active');
+    document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+    document.getElementById('pg-'+a.dataset.p).classList.add('active');
+    if(a.dataset.p==='dashboard') renderDashboard();
+    if(a.dataset.p==='daily') loadDay();
+    if(a.dataset.p==='machines') renderMachinePage();
+    if(a.dataset.p==='materials') renderMaterials();
+    if(a.dataset.p==='products') renderProducts();
+    if(a.dataset.p==='maintenance') renderMaintenance();
+    if(a.dataset.p==='warehouse') renderWarehouse();
+    if(a.dataset.p==='schedule') renderSchedule();
+    if(a.dataset.p==='report') setupReport();
+    if(a.dataset.p==='settings') loadSettings();
+  });
+});
+
+function openModal(id){document.getElementById(id).classList.add('show')}
+function closeModal(id){document.getElementById(id).classList.remove('show')}
+
+// ═══════════════════════════════════════════════════════
+// 工具
+// ═══════════════════════════════════════════════════════
+function today(){ const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+function fmt(v,d=2){ return v==null||isNaN(v)?'-':Number(v).toFixed(d) }
+function fmtM(v){ return v==null||isNaN(v)?'-':Number(v).toLocaleString('zh-CN',{minimumFractionDigits:2,maximumFractionDigits:2}) }
+function fmtP(v){ return v==null||isNaN(v)?'-':(Number(v)*100).toFixed(1)+'%' }
+function escHtml(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+
+// 设备数量历史：历史汇总、报价分摊和使用率必须按当天实际设备数计算
+const MACHINE_COUNT_HISTORY = [
+  {from:'0000-01-01', count:12},
+  {from:'2026-07-17', count:15},
+  {from:'2026-07-22', count:20},
+];
+function getMachineCountForDate(date){
+  const target=date||today();
+  let count=MACHINE_COUNT_HISTORY[0].count;
+  MACHINE_COUNT_HISTORY.forEach(item=>{ if(target>=item.from) count=item.count; });
+  return count;
+}
+
+function calcMaterialCost(materialName, weightG){
+  const mat = materials.find(m=>m.name===materialName);
+  if(!mat||!weightG) return 0;
+  return (weightG * S.lossRate * mat.priceKg) / 1000;
+}
+
+// 根据材料、料重、耗时、数量自动计算报价（按12小时工作制摊分电费和人工）
+function calcUnitPrice(materialName, weightG, timeH, qty, machineCount=S.machines){
+  qty = qty || 1;
+  const matCost = calcMaterialCost(materialName, weightG) * qty;
+  const totalTimeH = timeH * qty;
+  const elecCost = (totalTimeH / 12) * S.elecPerMachine;
+  const laborCost = (totalTimeH / 12) * (S.laborPerDay / machineCount);
+  const totalCost = matCost + elecCost + laborCost;
+  return { matCost, elecCost, laborCost, totalCost, price: totalCost * (1 + S.profitRate / 100) };
+}
+
+function getDayData(date){
+  if(!records[date]) records[date]={off:false, items:[]};
+  return records[date];
+}
+
+function getDaySummary(date){
+  const machineCount=getMachineCountForDate(date);
+  const day = records[date];
+  if(!day||day.off) return {revenue:0, materialCost:0, elecCost:0, laborCost:0, otherCost:0, totalCost:0, balance:0, runningMachines:0, utilization:0, machineCount, isOff:day&&day.off};
+  const items = (day.items||[]).filter(i=>!i._deleted);
+  const running = new Set(items.filter(i=>i.status==='running').map(i=>i.machine));
+  const runCount = running.size;
+  const revenue = items.filter(i=>i.status==='running').reduce((s,i)=>{
+    const qty = i.qty||1;
+    const c = calcUnitPrice(i.material, i.weight||0, i.time||0, qty, machineCount);
+    const base = c.price > 0 ? c.price : (i.price||0)*qty;
+    return s + base + (+i.designFee||0);
+  },0);
+  const matCost = items.filter(i=>i.status==='running').reduce((s,i)=>s+calcMaterialCost(i.material,i.weight)*(i.qty||1),0);
+  const elecCost = items.filter(i=>i.status==='running').reduce((s,i)=>s+((i.time||0)/12)*S.elecPerMachine*(i.qty||1),0);
+  const hasRunning = items.some(i=>i.status==='running');
+  const laborCost = hasRunning ? S.laborPerDay : 0;
+  const totalCost = matCost + elecCost + laborCost;
+  const balance = revenue - totalCost;
+  const machineHours = {};
+  for(let i=1;i<=machineCount;i++) machineHours[i]={running:0,idle:0,fault:0};
+  items.forEach(i=>{
+    const mn = parseInt(i.machine);
+    if(machineHours[mn]){
+      if(i.status==='running') machineHours[mn].running += (i.time||0)*(i.qty||1);
+      else if(i.status==='idle') machineHours[mn].idle = 12;
+      else if(i.status==='fault') machineHours[mn].fault = 12;
+    }
+  });
+  let totalUtil=0;
+  for(let i=1;i<=machineCount;i++){
+    const h=machineHours[i];
+    const total=h.running+h.idle+h.fault;
+    if(total>0) totalUtil+=h.running/12;
+  }
+  return {revenue, materialCost:matCost, elecCost, laborCost, totalCost, balance, runningMachines:runCount, utilization:machineCount>0?totalUtil/machineCount:0, machineCount, machineHours, isOff:false};
+}
+
+// ═══════════════════════════════════════════════════════
+// 仪表盘
+// ═══════════════════════════════════════════════════════
+let dashCharts={};
+function renderDashboard(){
+  const period = document.getElementById('dashPeriod').value;
+  const todayStr = today();
+  let dates = Object.keys(records).filter(d => d <= todayStr).sort();
+
+  if(period==='today') {
+    dates = dates.filter(d => d === todayStr);
+  } else if(period==='month') {
+    const m = todayStr.slice(0,7);
+    dates = dates.filter(d => d.startsWith(m));
+  } else if(period==='year') {
+    const y = todayStr.slice(0,4);
+    dates = dates.filter(d => d.startsWith(y));
+  } else if(period==='custom-month') {
+    const m = document.getElementById('dashMonth').value;
+    if(m) dates = dates.filter(d => d.startsWith(m));
+  } else if(period==='custom-year') {
+    const y = document.getElementById('dashYear').value;
+    if(y) dates = dates.filter(d => d.startsWith(y));
+  } else if(period==='custom-range') {
+    const from = document.getElementById('dashFrom').value;
+    const to   = document.getElementById('dashTo').value;
+    if(from) dates = dates.filter(d => d >= from);
+    if(to)   dates = dates.filter(d => d <= to);
+  }
+
+  document.getElementById('dashRange').textContent = dates.length ? `${dates[0]} ~ ${dates[dates.length-1]} (${dates.length}天)` : '暂无数据';
+
+  let totRev=0,totMat=0,totElec=0,totLabor=0,totBal=0,workDays=0,totUtilCapacity=0,totMachineDays=0;
+  const dayLabels=[], dayOutputs=[], dayBalances=[], dayUtils=[];
+  // 缓存 getDaySummary 结果，避免同一日期重复计算
+  const _summaryCache = {};
+  dates.forEach(d => { _summaryCache[d] = getDaySummary(d); });
+
+  dates.forEach(d=>{
+    const s=_summaryCache[d];
+    if(s.isOff) return;
+    workDays++;
+    totRev+=s.revenue; totMat+=s.materialCost; totElec+=s.elecCost; totLabor+=s.laborCost; totBal+=s.balance;
+    totUtilCapacity+=s.utilization*s.machineCount; totMachineDays+=s.machineCount;
+    dayLabels.push(d.slice(5));
+    dayOutputs.push(+s.revenue.toFixed(2));
+    dayBalances.push(+s.balance.toFixed(2));
+    dayUtils.push(+(s.utilization*100).toFixed(1));
+  });
+
+  // 计算所选周期内的维修费用
+  let maintFromDate=null, maintToDate=null;
+  if(period==='today'){maintFromDate=maintToDate=todayStr;}
+  else if(period==='month'){const m=todayStr.slice(0,7);maintFromDate=m+'-01';maintToDate=todayStr;}
+  else if(period==='year'){const y=todayStr.slice(0,4);maintFromDate=y+'-01-01';maintToDate=todayStr;}
+  else if(period==='custom-month'){const m=document.getElementById('dashMonth').value;if(m){maintFromDate=m+'-01';const _d=new Date(m+'-01');_d.setMonth(_d.getMonth()+1);_d.setDate(0);maintToDate=_d.getFullYear()+'-'+String(_d.getMonth()+1).padStart(2,'0')+'-'+String(_d.getDate()).padStart(2,'0');}}
+  else if(period==='custom-year'){const y=document.getElementById('dashYear').value;if(y){maintFromDate=y+'-01-01';maintToDate=y+'-12-31';}}
+  else if(period==='custom-range'){maintFromDate=document.getElementById('dashFrom').value;maintToDate=document.getElementById('dashTo').value;}
+  else{maintFromDate='1970-01-01';maintToDate='9999-12-31';}
+  const totMaint=getRangeMaintCost(maintFromDate,maintToDate);
+
+  const totExp = totMat+totElec+totLabor;
+  const netBal = totBal - totMaint;
+  const avgUtil = totMachineDays?totUtilCapacity/totMachineDays:0;
+
+  document.getElementById('kpiGrid').innerHTML=`
+    <div class="kpi"><div class="label">总产值</div><div class="val">${fmtM(totRev)}</div><div class="sub">${workDays}个工作日</div></div>
+    <div class="kpi red"><div class="label">生产支出</div><div class="val">${fmtM(totExp)}</div><div class="sub">材料${fmtM(totMat)} 电费${fmtM(totElec)} 人工${fmtM(totLabor)}</div></div>
+    <div class="kpi red"><div class="label">维修支出</div><div class="val">${fmtM(totMaint)}</div><div class="sub">共${maintenance.filter(m=>m.date&&(!maintFromDate||m.date>=maintFromDate)&&(!maintToDate||m.date<=maintToDate)).length}条记录</div></div>
+    <div class="kpi ${netBal>=0?'green':'red'}"><div class="label">净结余</div><div class="val">${fmtM(netBal)}</div><div class="sub">${totRev?(netBal/totRev*100).toFixed(1)+'%':'0%'}</div></div>
+    <div class="kpi yellow"><div class="label">日均结余</div><div class="val">${fmtM(workDays?netBal/workDays:0)}</div></div>
+    <div class="kpi purple"><div class="label">平均使用率</div><div class="val">${fmtP(avgUtil)}</div></div>
+  `;
+
+  Object.values(dashCharts).forEach(c=>c.destroy()); dashCharts={};
+
+  if(!dayLabels.length) return;
+
+  const dayExps = dates.filter(d=>!_summaryCache[d].isOff).map(d=>+(_summaryCache[d].totalCost).toFixed(2));
+
+  const singleDay = dayLabels.length === 1;
+  dashCharts.trend=new Chart(document.getElementById('chTrend'),{type:singleDay?'bar':'line',data:{labels:dayLabels,datasets:[
+    {label:'产值',data:dayOutputs,borderColor:'#1a73e8',backgroundColor:singleDay?'rgba(26,115,232,.6)':'rgba(26,115,232,.08)',fill:!singleDay,tension:.3,pointRadius:singleDay?6:3},
+    {label:'支出',data:dayExps,borderColor:'#ea4335',backgroundColor:singleDay?'rgba(234,67,53,.6)':'transparent',borderDash:singleDay?[]:[5,5],tension:.3,pointRadius:singleDay?6:3}
+  ]},options:{responsive:true,plugins:{legend:{position:'bottom'}}}});
+
+  dashCharts.balance=new Chart(document.getElementById('chBalance'),{type:'bar',data:{labels:dayLabels,datasets:[
+    {label:'结余',data:dayBalances,backgroundColor:dayBalances.map(v=>v>=0?'rgba(52,168,83,.6)':'rgba(234,67,53,.6)')}
+  ]},options:{responsive:true,plugins:{legend:{display:false}}}});
+
+  const pieData=[+totMat.toFixed(2),+totElec.toFixed(2),+totLabor.toFixed(2)];
+  const pieLabels=['材料成本','电费','人工'];
+  const pieColors=['#1a73e8','#f9ab00','#9334e6'];
+  if(totMaint>0){pieData.push(+totMaint.toFixed(2));pieLabels.push('维修费用');pieColors.push('#ea4335');}
+  dashCharts.pie=new Chart(document.getElementById('chPie'),{type:'doughnut',data:{labels:pieLabels,datasets:[
+    {data:pieData,backgroundColor:pieColors}
+  ]},options:{responsive:true,plugins:{legend:{position:'bottom'}}}});
+
+  dashCharts.util=new Chart(document.getElementById('chUtil'),{type:'bar',data:{labels:dayLabels,datasets:[
+    {label:'使用率(%)',data:dayUtils,backgroundColor:'rgba(52,168,83,.5)'}
+  ]},options:{responsive:true,plugins:{legend:{display:false}},scales:{y:{min:0,max:110}}}});
+}
+function updateDashCustomInputs() {
+  const period = document.getElementById('dashPeriod').value;
+  const wrap = document.getElementById('dashCustomInputs');
+  const elMonth = document.getElementById('dashMonth');
+  const elYear  = document.getElementById('dashYear');
+  const elFrom  = document.getElementById('dashFrom');
+  const elSep   = document.getElementById('dashRangeSep');
+  const elTo    = document.getElementById('dashTo');
+
+  // 隐藏全部子控件
+  [elMonth, elYear, elFrom, elSep, elTo].forEach(el => el.style.display = 'none');
+
+  if (period === 'custom-month') {
+    wrap.style.display = 'inline';
+    elMonth.style.display = 'inline-block';
+    // 默认显示当前月
+    if (!elMonth.value) elMonth.value = today().slice(0, 7);
+  } else if (period === 'custom-year') {
+    wrap.style.display = 'inline';
+    elYear.style.display = 'inline-block';
+    // 填充年份选项（根据记录中已有的年份）
+    const years = [...new Set(Object.keys(records).map(d => d.slice(0, 4)))].sort().reverse();
+    const curYear = today().slice(0, 4);
+    if (!years.includes(curYear)) years.unshift(curYear);
+    elYear.innerHTML = years.map(y => `<option value="${y}">${y}年</option>`).join('');
+    if (!elYear.value) elYear.value = curYear;
+  } else if (period === 'custom-range') {
+    wrap.style.display = 'inline';
+    elFrom.style.display = 'inline-block';
+    elSep.style.display  = 'inline';
+    elTo.style.display   = 'inline-block';
+    if (!elFrom.value) elFrom.value = today().slice(0, 7) + '-01';
+    if (!elTo.value)   elTo.value   = today();
+  } else {
+    wrap.style.display = 'none';
+  }
+}
+
+document.getElementById('dashPeriod').addEventListener('change', () => {
+  updateDashCustomInputs();
+  renderDashboard();
+});
+document.getElementById('dashMonth').addEventListener('change', renderDashboard);
+document.getElementById('dashYear').addEventListener('change', renderDashboard);
+document.getElementById('dashFrom').addEventListener('change', renderDashboard);
+document.getElementById('dashTo').addEventListener('change', renderDashboard);
+
+// ═══════════════════════════════════════════════════════
+// 每日记录
+// ═══════════════════════════════════════════════════════
+document.getElementById('recDate').value = today();
+
+function fmtTS(iso){
+  if(!iso) return '-';
+  const d=new Date(iso);
+  return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
+}
+
+function loadDay(){
+  const date = document.getElementById('recDate').value;
+  if(!date) return;
+  const day = getDayData(date);
+  const s = getDaySummary(date);
+  document.getElementById('dayTitle').textContent = date + (day.off?' (休息日)':'');
+  document.getElementById('daySummary').innerHTML = day.off ? '<span class="tag tag-y">休息日</span>' :
+    `产值:<b>${fmtM(s.revenue)}</b> | 支出:<b>${fmtM(s.totalCost)}</b> | 结余:<b class="${s.balance>=0?'pos':'neg'}">${fmtM(s.balance)}</b> | 开机:${s.runningMachines}/${s.machineCount}台 | 使用率:${fmtP(s.utilization)}`;
+
+  // 机器网格
+  const grid = document.getElementById('dayMachineGrid');
+  let ghtml='';
+  const machineStatus={};
+  (day.items||[]).filter(i=>!i._deleted).forEach(i=>{
+    const mn=i.machine;
+    if(!machineStatus[mn]||i.status==='running') machineStatus[mn]={status:i.status,product:i.productName||''};
+  });
+  for(let i=1;i<=s.machineCount;i++){
+    // 优先显示实时数据（仅Bambu 1-5号）
+    const liveHtml = !day.off ? renderLiveCard(i) : null;
+    if(liveHtml){
+      ghtml += liveHtml.replace('class="machine-card', 'data-live-id="'+i+'" class="machine-card');
+    } else {
+      const ms=machineStatus[i]||{status:'idle',product:''};
+      const st = day.off ? 'idle' : ms.status;
+      const stText = st==='running'?'生产中':st==='fault'?'故障':'空闲';
+      const offlineBadge = (i<=5 && !day.off) ? '<span class="offline-badge">离线</span>' : '';
+      ghtml+=`<div class="machine-card ${st}" data-live-id="${i}"><div class="m-no">#${i}${offlineBadge}</div><div class="m-type">${getMachineType(i)}</div><span class="m-status ${st}">${stText}</span><div class="m-product">${escHtml(ms.product||'-')}</div></div>`;
+    }
+  }
+  grid.innerHTML=ghtml;
+
+  // 表格（过滤已删除的记录，保留原始索引用于编辑/删除）
+  const allItems = day.items||[];
+  const visibleItems = allItems.filter(i=>!i._deleted);
+  let html='<table><tr><th>#</th><th>机台</th><th>机型</th><th>状态</th><th>产品</th><th>图片</th><th>客户</th><th>材料</th><th>料重(g)</th><th>数量</th><th>耗时(h)</th><th>材料成本</th><th>设计费</th><th>报价</th><th>备注</th><th>入库时间</th><th>操作</th></tr>';
+  if(day.off){
+    html+='<tr><td colspan="17" style="padding:40px;color:var(--gray)">休息日 - 无生产记录</td></tr>';
+  } else if(!visibleItems.length){
+    html+='<tr><td colspan="17" style="padding:40px;color:var(--gray)">暂无记录，点击"+ 添加记录"开始</td></tr>';
+  } else {
+    let rowNum=0;
+    allItems.forEach((it,idx)=>{
+      if(it._deleted) return;
+      rowNum++;
+      const qty = it.qty||1;
+      const matCost = it.status==='running' ? calcMaterialCost(it.material, it.weight)*qty : 0;
+      const calc = it.status==='running' ? calcUnitPrice(it.material, it.weight||0, it.time||0, qty, s.machineCount) : null;
+      const designFee = it.status==='running' ? (+it.designFee||0) : 0;
+      // 始终动态计算报价（材料/料重/耗时有值时），跟随产品库和设置自动更新；设计费在基础报价上叠加
+      const basePrice = it.status==='running' ? (calc && calc.price > 0 ? calc.price : (it.price||0)*qty) : 0;
+      const displayPrice = it.status==='running' ? (basePrice + designFee) : 0;
+      const stTag = it.status==='running'?'<span class="tag tag-g">生产</span>':it.status==='fault'?'<span class="tag tag-r">故障</span>':'<span class="tag tag-y">空闲</span>';
+      const autoBadge = it.autoRecord ? '<span class="tag tag-g" style="font-size:10px;margin-right:4px">自动</span>' : '';
+      html+=`<tr>
+        <td>${rowNum}</td><td>#${it.machine}</td><td style="font-size:11px">${getMachineType(it.machine)}</td><td>${stTag}</td>
+        <td style="text-align:left">${autoBadge}${escHtml(it.productName||'-')}</td>${renderProductImageCell(lookupProductImage(it.productName))}<td>${escHtml(it.customer||(products.find(p=>p.name===it.productName)||{}).customer||'-')}</td><td>${escHtml(it.material||'-')}</td>
+        <td>${it.weight||'-'}</td><td>${qty}</td><td>${it.time!=null&&it.time!==0?it.time:it.autoRecord&&it.printStartTime&&!it.printEndTime?'...':'-'}</td>
+        <td>${fmtM(matCost)}</td><td>${it.status==='running'?fmtM(designFee):'-'}</td><td>${it.status==='running'?fmtM(displayPrice):'-'}</td>
+        <td style="font-size:11px;color:var(--gray)">${escHtml(it.remark||'')}</td>
+        <td style="font-size:11px;color:var(--gray)">${fmtTS(it.createdAt||it.printStartTime)}</td>
+        <td style="white-space:nowrap"><button class="btn btn-p btn-sm" onclick="editRecord(${idx})">编辑</button> <button class="btn btn-r btn-sm" onclick="deleteRecord(${idx})">删除</button></td></tr>`;
+    });
+  }
+  html+='</table>';
+  document.getElementById('dayTable').innerHTML=html;
+}
+
+function markDayOff(){
+  const date = document.getElementById('recDate').value;
+  const day = getDayData(date);
+  const willOff = !day.off;
+  if(willOff && day.items && day.items.length > 0){
+    if(!confirm('标记为休息日将清空当天所有记录，确定继续？')) return;
+  }
+  day.off = willOff;
+  if(day.off) day.items=[];
+  saveAll(); loadDay();
+}
+
+function openAddRecord(){
+  editingRecIdx=-1;
+  document.getElementById('modalRecTitle').textContent='添加生产记录';
+  const sel=document.getElementById('rMachine');
+  sel.innerHTML='';
+  for(let i=1;i<=S.machines;i++) sel.innerHTML+=`<option value="${i}">#${i} ${getMachineType(i)}</option>`;
+  document.getElementById('rStatus').value='running';
+  fillProductSelect();
+  fillMaterialSelect('rMaterial');
+  document.getElementById('rWeight').value='';
+  document.getElementById('rQty').value='1';
+  document.getElementById('rTime').value='';
+  document.getElementById('rDesignFee').value='';
+  document.getElementById('rPrice').value='';
+  document.getElementById('rCustomer').value='';
+  document.getElementById('rRemark').value='';
+  document.getElementById('rCustomName').value='';
+  document.getElementById('rCalcInfo').style.display='none';
+  toggleRecordFields();
+  openModal('modalRecord');
+}
+
+function editRecord(idx){
+  const date=document.getElementById('recDate').value;
+  const day=getDayData(date);
+  const it=day.items[idx];
+  if(!it) return;
+  editingRecIdx=idx;
+  document.getElementById('modalRecTitle').textContent='编辑生产记录';
+  // 填充机台下拉
+  const sel=document.getElementById('rMachine');
+  sel.innerHTML='';
+  for(let i=1;i<=S.machines;i++) sel.innerHTML+=`<option value="${i}">#${i} ${getMachineType(i)}</option>`;
+  sel.value=it.machine;
+  // 状态
+  document.getElementById('rStatus').value=it.status;
+  toggleRecordFields();
+  // 产品与材料
+  fillProductSelect();
+  fillMaterialSelect('rMaterial');
+  if(it.status==='running'){
+    // 尝试匹配产品库
+    const matched=products.find(p=>p.name===it.productName);
+    if(matched){
+      document.getElementById('rProduct').value=matched.id;
+      document.getElementById('rProductSearch').value=matched.name;
+      document.getElementById('rCustomNameWrap').style.display='none';
+    } else if(it.productName){
+      document.getElementById('rProduct').value='__custom';
+      document.getElementById('rProductSearch').value='手动输入';
+      document.getElementById('rCustomName').value=it.productName;
+      document.getElementById('rCustomNameWrap').style.display='flex';
+    }
+    if(it.material) document.getElementById('rMaterial').value=it.material;
+    document.getElementById('rWeight').value=it.weight||'';
+    document.getElementById('rQty').value=it.qty||1;
+    document.getElementById('rTime').value=it.time||'';
+    document.getElementById('rDesignFee').value=it.designFee||'';
+    document.getElementById('rPrice').value=it.price||'';
+  }
+  document.getElementById('rCustomer').value=it.customer||'';
+  document.getElementById('rRemark').value=it.remark||'';
+  openModal('modalRecord');
+  autoCalcRecordPrice();
+}
+
+function toggleRecordFields(){
+  document.getElementById('runFields').style.display = document.getElementById('rStatus').value==='running'?'block':'none';
+}
+
+function fillProductSelect(){
+  document.getElementById('rProduct').value='';
+  document.getElementById('rProductSearch').value='';
+  document.getElementById('rProductDropdown').style.display='none';
+}
+
+function openProductDropdown(){
+  const dd=document.getElementById('rProductDropdown');
+  dd.style.display='block';
+  const fi=document.getElementById('rProductFilter');
+  fi.value='';
+  renderProductList('');
+  setTimeout(()=>fi.focus(),50);
+}
+
+function filterProductList(){
+  const q=document.getElementById('rProductFilter').value;
+  renderProductList(q);
+}
+
+function renderProductList(q){
+  if(typeof q!=='string') q='';
+  const kw=q.toLowerCase();
+  const list=document.getElementById('rProductList');
+  const hi=s=>{const escaped=escHtml(s);if(!kw)return escaped;const safeKw=kw.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');return escaped.replace(new RegExp(safeKw,'gi'),t=>`<mark style="background:#fff3cd;padding:0 2px;border-radius:2px">${t}</mark>`);};
+  let html='<div class="pd-item" data-val="__custom" style="color:var(--c1);font-weight:bold;padding:8px 12px;border-bottom:1px solid var(--border)">+ 手动输入</div>';
+  const filtered=products.filter(p=>!kw||p.name.toLowerCase().includes(kw)||(p.material||'').toLowerCase().includes(kw));
+  if(filtered.length===0){
+    html+='<div style="padding:10px 12px;color:var(--gray);text-align:center">未找到匹配产品</div>';
+  } else {
+    filtered.forEach(p=>{
+      html+=`<div class="pd-item" data-val="${p.id}" style="padding:8px 12px">${hi(p.name)}<span style="float:right;color:var(--gray);font-size:11px">${hi(p.material||'')} ${p.weight?p.weight+'g':''}</span></div>`;
+    });
+  }
+  list.innerHTML=html;
+  list.querySelectorAll('.pd-item').forEach(el=>{
+    el.addEventListener('click',()=>selectProduct(el.dataset.val));
+  });
+}
+
+// 已废弃，保留兼容性
+function showProductList(q){ renderProductList(q||''); document.getElementById('rProductDropdown').style.display='block'; }
+
+function selectProduct(val){
+  document.getElementById('rProductDropdown').style.display='none';
+  document.getElementById('rProduct').value=val;
+  if(val==='__custom'){
+    document.getElementById('rProductSearch').value='手动输入';
+    document.getElementById('rCustomNameWrap').style.display='flex';
+  } else if(val){
+    const p=products.find(x=>x.id==val);
+    document.getElementById('rProductSearch').value=p?p.name:'';
+    document.getElementById('rCustomNameWrap').style.display='none';
+    fillProductInfo();
+  }
+}
+
+// 点击外部关闭下拉
+document.addEventListener('click',function(e){
+  const dd=document.getElementById('rProductDropdown');
+  if(!dd) return;
+  const trigger=document.getElementById('rProductSearch');
+  if(!dd.contains(e.target) && e.target!==trigger) dd.style.display='none';
+});
+
+function fillMaterialSelect(id){
+  const sel=document.getElementById(id);
+  sel.innerHTML='';
+  materials.forEach(m=>{ sel.innerHTML+=`<option value="${m.name}">${m.name} (${m.priceKg}元/kg)</option>`; });
+}
+
+function fillProductInfo(){
+  const sel=document.getElementById('rProduct');
+  if(sel.value && sel.value!=='__custom'){
+    const p=products.find(x=>x.id==sel.value);
+    if(p){
+      if(p.material) document.getElementById('rMaterial').value=p.material;
+      if(p.weight) document.getElementById('rWeight').value=p.weight;
+      if(p.qty) document.getElementById('rQty').value=p.qty;
+      if(p.time) document.getElementById('rTime').value=p.time;
+      if(p.price) document.getElementById('rPrice').value=p.price;
+      if(p.customer) document.getElementById('rCustomer').value=p.customer;
+    }
+  }
+  document.getElementById('rCustomNameWrap').style.display = sel.value==='__custom'?'flex':'none';
+  autoCalcRecordPrice();
+}
+
+// 记录模态框：自动计算报价
+function autoCalcRecordPrice(){
+  const matName = document.getElementById('rMaterial').value;
+  const weightG = parseFloat(document.getElementById('rWeight').value) || 0;
+  const timeH = parseFloat(document.getElementById('rTime').value) || 0;
+  const qty = parseInt(document.getElementById('rQty').value) || 1;
+  const designFee = parseFloat(document.getElementById('rDesignFee').value) || 0;
+  const infoDiv = document.getElementById('rCalcInfo');
+  const detailSpan = document.getElementById('rCalcDetail');
+  if(!matName || !weightG || !timeH){ infoDiv.style.display='none'; return; }
+  const mat = materials.find(m => m.name === matName);
+  if(!mat){ infoDiv.style.display='none'; return; }
+  const c = calcUnitPrice(matName, weightG, timeH, qty);
+  const basePrice = c.price;
+  const totalPrice = basePrice + designFee;
+  // 先清空再逐步构建，避免 textContent += 与 appendChild 混合导致显示异常
+  detailSpan.textContent = '';
+  let text = `材料${c.matCost.toFixed(2)} + 电费${c.elecCost.toFixed(2)} + 人工${c.laborCost.toFixed(2)} = ${c.totalCost.toFixed(2)}，×${(1+S.profitRate/100).toFixed(1)} = ${basePrice.toFixed(2)}`;
+  if(qty > 1) text = `${qty}件合计: ` + text;
+  if(designFee > 0) text += ` + 设计费${designFee.toFixed(2)} = ${totalPrice.toFixed(2)} 元 `;
+  else text += ' 元 ';
+  detailSpan.appendChild(document.createTextNode(text));
+  const linkSpan = document.createElement('a');
+  linkSpan.href='#';
+  linkSpan.style.cssText='color:var(--c1);font-weight:bold;text-decoration:underline;cursor:pointer';
+  linkSpan.textContent = '(填入报价)';
+  linkSpan.onclick = function(e){ e.preventDefault(); document.getElementById('rPrice').value = basePrice.toFixed(2); };
+  detailSpan.appendChild(linkSpan);
+  infoDiv.style.display='block';
+}
+document.getElementById('rMaterial').addEventListener('change', autoCalcRecordPrice);
+document.getElementById('rWeight').addEventListener('input', autoCalcRecordPrice);
+document.getElementById('rTime').addEventListener('input', autoCalcRecordPrice);
+document.getElementById('rQty').addEventListener('input', autoCalcRecordPrice);
+document.getElementById('rDesignFee').addEventListener('input', autoCalcRecordPrice);
+
+function saveRecord(){
+  const date=document.getElementById('recDate').value;
+  const day=getDayData(date);
+  day.off=false;
+  const status=document.getElementById('rStatus').value;
+  const machine=document.getElementById('rMachine').value;
+
+  let productName='';
+  if(status==='running'){
+    const pSel=document.getElementById('rProduct');
+    if(pSel.value==='__custom'){
+      productName=document.getElementById('rCustomName').value.trim();
+      if(!productName){alert('请输入产品名称');return;}
+    }
+    else if(pSel.value){ const p=products.find(x=>x.id==pSel.value); productName=p?p.name:''; }
+  }
+
+  const rec={
+    machine: parseInt(machine),
+    status,
+    productName: status==='running'?productName:(status==='idle'?'空闲':'故障'),
+    material: status==='running'?document.getElementById('rMaterial').value:'',
+    weight: status==='running'?parseFloat(document.getElementById('rWeight').value)||0:0,
+    qty: status==='running'?parseInt(document.getElementById('rQty').value)||1:0,
+    time: status==='running'?parseFloat(document.getElementById('rTime').value)||0:0,
+    designFee: status==='running'?parseFloat(document.getElementById('rDesignFee').value)||0:0,
+    price: status==='running'?parseFloat(document.getElementById('rPrice').value)||0:0,
+    customer: document.getElementById('rCustomer').value.trim(),
+    remark: document.getElementById('rRemark').value,
+  };
+
+  // 编辑记录时保留内部字段
+  if(editingRecIdx>=0){
+    const old = day.items[editingRecIdx];
+    if(old){
+      if(old.autoRecord){
+        rec.autoRecord = old.autoRecord;
+        rec.printStartTime = old.printStartTime;
+        rec.printEndTime = old.printEndTime;
+        rec._gcodeFile = old._gcodeFile;
+      }
+      // 保留同步字段
+      if(old._id) rec._id = old._id;
+      if(old._updatedAt) rec._updatedAt = old._updatedAt;
+      if(old._deleted) rec._deleted = old._deleted;
+      if(old.createdAt) rec.createdAt = old.createdAt;
+    }
+    day.items[editingRecIdx]=rec;
+  } else {
+    rec.createdAt = new Date().toISOString();
+    day.items.push(rec);
+  }
+
+  // 自动扣减库存：新增"生产中"记录时扣减（编辑时不重复扣）
+  if(editingRecIdx<0 && status==='running' && rec.material && rec.weight>0){
+    deductStock(rec.material, rec.weight * (rec.qty||1));
+  }
+
+  saveAll();
+  closeModal('modalRecord');
+  loadDay();
+  checkLowStock();
+}
+
+function deleteRecord(idx){
+  if(!confirm('确定删除这条记录？')) return;
+  const date=document.getElementById('recDate').value;
+  const day=getDayData(date);
+  const it=day.items[idx];
+  if(!it) return;
+  // 软删除：硬 splice 会让服务端"自动记录保护"逻辑误判为同步新增并复活记录
+  // （server.js 会保留前端加载后 _updatedAt 较新的旧 item）。改用 _deleted 标记，
+  // 渲染处的 filter(!_deleted) 已经覆盖，同步也能正确传播删除。
+  it._deleted=true;
+  it._updatedAt=Date.now();
+  saveAll(); loadDay();
+}
+
+// ═══════════════════════════════════════════════════════
+// 机器状态页
+// ═══════════════════════════════════════════════════════
+document.getElementById('machDate').value=today();
+function renderMachinePage(){
+  const date=document.getElementById('machDate').value||today();
+  const day=records[date]||{off:false,items:[]};
+  const s=getDaySummary(date);
+  const mh=s.machineHours||{};
+
+  const isToday = date === today();
+  let ghtml='';
+  for(let i=1;i<=s.machineCount;i++){
+    // 如果是今天，优先显示实时数据
+    const liveHtml = (isToday && !day.off) ? renderLiveCard(i) : null;
+    if(liveHtml){
+      ghtml += liveHtml.replace('class="machine-card', 'data-live-id="'+i+'" class="machine-card');
+    } else {
+      const h=mh[i]||{running:0,idle:0,fault:0};
+      const total=h.running+h.idle+h.fault;
+      const st = h.running>0?'running':h.fault>0?'fault':'idle';
+      const stText=st==='running'?'生产中':st==='fault'?'故障':'空闲';
+      const util=total>0?(h.running/12*100).toFixed(1):'0.0';
+      ghtml+=`<div class="machine-card ${day.off?'idle':st}" data-live-id="${i}"><div class="m-no">#${i}</div><div class="m-type">${getMachineType(i)}</div><span class="m-status ${day.off?'idle':st}">${day.off?'休息':stText}</span><div class="m-product">运行${fmt(h.running,1)}h | 使用率${util}%</div></div>`;
+    }
+  }
+  document.getElementById('machGrid').innerHTML=ghtml;
+
+  let thtml='<table><tr><th>机台</th><th>机型</th><th>运行(h)</th><th>空闲(h)</th><th>故障(h)</th><th>使用率</th><th>产品</th></tr>';
+  for(let i=1;i<=s.machineCount;i++){
+    const h=mh[i]||{running:0,idle:0,fault:0};
+    const total=h.running+h.idle+h.fault;
+    const util=total>0?h.running/12:0;
+    const prods=(day.items||[]).filter(it=>!it._deleted&&it.machine==i&&it.status==='running').map(it=>escHtml(it.productName||'')).join(', ')||'-';
+    thtml+=`<tr><td>#${i}</td><td style="font-size:12px">${getMachineType(i)}</td><td>${fmt(h.running,1)}</td><td>${fmt(h.idle,1)}</td><td>${fmt(h.fault,1)}</td><td>${fmtP(util)}</td><td style="text-align:left;font-size:12px">${prods}</td></tr>`;
+  }
+  thtml+='</table>';
+  document.getElementById('machTable').innerHTML=thtml;
+}
+
+// ═══════════════════════════════════════════════════════
+// 材料管理
+// ═══════════════════════════════════════════════════════
+function renderMaterials(){
+  const kw = (document.getElementById('matSearch')?.value || '').trim().toLowerCase();
+  const list = kw ? materials.filter(m => m.name.toLowerCase().includes(kw) || m.type.toLowerCase().includes(kw)) : materials;
+  let html='<table><tr><th>ID</th><th>名称</th><th>类型</th><th>价格(元/kg)</th><th>每克价格</th><th>操作</th></tr>';
+  if(list.length === 0){
+    html += '<tr><td colspan="6" style="text-align:center;color:var(--gray);padding:20px">未找到匹配材料</td></tr>';
+  } else {
+    list.forEach(m=>{
+      const hi = s => { const escaped=escHtml(s); if(!kw) return escaped; const safeKw=kw.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'); return escaped.replace(new RegExp(safeKw,'gi'), t=>`<mark style="background:#fff3cd;padding:0 2px;border-radius:2px">${t}</mark>`); };
+      html+=`<tr><td>${m.id}</td><td style="text-align:left">${hi(m.name)}</td><td>${hi(m.type)}</td><td>${m.priceKg}</td><td>${(m.priceKg/1000).toFixed(4)}</td><td style="white-space:nowrap"><button class="btn btn-p btn-sm" onclick="editMaterial(${m.id})">编辑</button> <button class="btn btn-r btn-sm" onclick="deleteMaterial(${m.id})">删除</button></td></tr>`;
+    });
+  }
+  html+='</table>';
+  document.getElementById('matTable').innerHTML=html;
+}
+let editingMatId=-1;
+function openAddMaterial(){
+  editingMatId=-1;
+  document.getElementById('mName').value='';
+  document.getElementById('mPrice').value='';
+  document.getElementById('mType').value='PLA';
+  document.querySelector('#modalMaterial h3').textContent='添加材料';
+  openModal('modalMaterial');
+}
+function editMaterial(id){
+  const m=materials.find(x=>x.id===id);
+  if(!m) return;
+  editingMatId=id;
+  document.getElementById('mName').value=m.name;
+  document.getElementById('mPrice').value=m.priceKg;
+  document.getElementById('mType').value=m.type;
+  document.querySelector('#modalMaterial h3').textContent='编辑材料';
+  openModal('modalMaterial');
+}
+let _matFromWH=false;
+function openAddMaterialFromWH(){
+  _matFromWH=true;
+  openAddMaterial();
+}
+
+function saveMaterial(){
+  const name=document.getElementById('mName').value.trim();
+  const price=parseFloat(document.getElementById('mPrice').value);
+  const type=document.getElementById('mType').value;
+  if(!name||!price){alert('请填写完整');return}
+  if(editingMatId>=0){
+    const m=materials.find(x=>x.id===editingMatId);
+    if(m){ m.name=name; m.priceKg=price; m.type=type; }
+  } else {
+    materials.push({id:nextMatId++, name, type, priceKg:price});
+  }
+  editingMatId=-1;
+  saveAll(); closeModal('modalMaterial');
+  if(_matFromWH){ _matFromWH=false; renderWarehouse(); }
+  else { renderMaterials(); }
+}
+function deleteMaterial(id){ if(!confirm('确定删除此材料？')) return; materials=materials.filter(m=>m.id!==id); saveAll(); renderMaterials(); }
+
+// ═══════════════════════════════════════════════════════
+// 产品库
+// ═══════════════════════════════════════════════════════
+function renderProducts(){
+  const search=(document.getElementById('prodSearch')?.value||'').toLowerCase();
+  let list=products;
+  if(search) list=list.filter(p=>p.name.toLowerCase().includes(search));
+
+  let html='<table><tr><th>ID</th><th>名称</th><th>图片</th><th>客户</th><th>默认材料</th><th>默认料重(g)</th><th>默认耗时(h)</th><th>数量</th><th>默认报价</th><th>操作</th></tr>';
+  list.forEach(p=>{
+    html+=`<tr><td>${p.id}</td><td style="text-align:left">${escHtml(p.name)}</td>${renderProductImageCell(p.image)}<td>${escHtml(p.customer||'-')}</td><td>${escHtml(p.material||'-')}</td><td>${p.weight||'-'}</td><td>${p.time||'-'}</td><td>${p.qty||1}</td><td>${p.price?fmtM(p.price):'-'}</td><td style="white-space:nowrap"><button class="btn btn-p btn-sm" onclick="editProduct(${p.id})">编辑</button> <button class="btn btn-r btn-sm" onclick="deleteProduct(${p.id})">删除</button></td></tr>`;
+  });
+  if(!list.length) html+='<tr><td colspan="10" style="padding:30px;color:var(--gray)">暂无产品，点击"+ 添加产品"</td></tr>';
+  html+='</table>';
+  document.getElementById('prodTable').innerHTML=html;
+}
+let editingProdId=-1;
+let editingProductImage = '';  // 暂存当前编辑产品的图片 base64
+// 自动计算报价
+function autoCalcProductPrice(){
+  const matName = document.getElementById('pMaterial').value;
+  const weightG = parseFloat(document.getElementById('pWeight').value) || 0;
+  const timeH = parseFloat(document.getElementById('pTime').value) || 0;
+  const qty = parseInt(document.getElementById('pQty').value) || 1;
+  const infoDiv = document.getElementById('pCalcInfo');
+  const detailSpan = document.getElementById('pCalcDetail');
+  if(!matName || !weightG || !timeH){ infoDiv.style.display='none'; return; }
+  const mat = materials.find(m => m.name === matName);
+  if(!mat){ infoDiv.style.display='none'; return; }
+  const unitTimeH = timeH / qty;
+  const matCost = (weightG * S.lossRate * mat.priceKg) / 1000;
+  const elecCost = (unitTimeH / 12) * S.elecPerMachine;
+  const laborCost = (unitTimeH / 12) * (S.laborPerDay / S.machines);
+  const totalCost = matCost + elecCost + laborCost;
+  const price = totalCost * (1 + S.profitRate / 100);
+  document.getElementById('pPrice').value = price.toFixed(2);
+  let text = `单件: 材料${matCost.toFixed(2)} + 电费${elecCost.toFixed(2)} + 人工${laborCost.toFixed(2)} = ${totalCost.toFixed(2)}，×${(1+S.profitRate/100).toFixed(1)} = ${price.toFixed(2)}元`;
+  if(qty > 1) text = `单件(耗时${timeH}h÷${qty}件): 材料${matCost.toFixed(2)} + 电费${elecCost.toFixed(2)} + 人工${laborCost.toFixed(2)} = ${totalCost.toFixed(2)}，×${(1+S.profitRate/100).toFixed(1)} = ${price.toFixed(2)}元`;
+  detailSpan.textContent = text;
+  infoDiv.style.display='block';
+}
+document.getElementById('pMaterial').addEventListener('change', autoCalcProductPrice);
+document.getElementById('pWeight').addEventListener('input', autoCalcProductPrice);
+document.getElementById('pTime').addEventListener('input', autoCalcProductPrice);
+document.getElementById('pQty').addEventListener('input', autoCalcProductPrice);
+
+function openAddProduct(){
+  editingProdId=-1;
+  document.getElementById('pName').value='';
+  document.getElementById('pCustomer').value='';
+  document.getElementById('pWeight').value='';
+  document.getElementById('pTime').value='';
+  document.getElementById('pQty').value='1';
+  document.getElementById('pPrice').value='';
+  document.getElementById('pCalcInfo').style.display='none';
+  fillMaterialSelect('pMaterial');
+  document.querySelector('#modalProduct h3').textContent='添加产品';
+  editingProductImage = '';
+  refreshProductImagePreview();
+  openModal('modalProduct');
+}
+function editProduct(id){
+  const p=products.find(x=>x.id===id);
+  if(!p) return;
+  editingProdId=id;
+  fillMaterialSelect('pMaterial');
+  document.getElementById('pName').value=p.name;
+  document.getElementById('pCustomer').value=p.customer||'';
+  if(p.material) document.getElementById('pMaterial').value=p.material;
+  document.getElementById('pWeight').value=p.weight||'';
+  document.getElementById('pTime').value=p.time||'';
+  document.getElementById('pQty').value=p.qty||1;
+  document.getElementById('pPrice').value=p.price||'';
+  document.querySelector('#modalProduct h3').textContent='编辑产品';
+  editingProductImage = p.image || '';
+  refreshProductImagePreview();
+  openModal('modalProduct');
+  autoCalcProductPrice();
+}
+function syncProductToRecords(oldName, newName, data){
+  let count=0;
+  // 更新每日记录
+  for(const day of Object.values(records)){
+    if(!day.items) continue;
+    for(const it of day.items){
+      if(it.productName===oldName){
+        it.productName=newName;
+        if(data.material) it.material=data.material;
+        if(data.weight) it.weight=data.weight;
+        if(data.time) it.time=data.time;
+        if(data.price) it.price=data.price;
+        count++;
+      }
+    }
+  }
+  // 更新排期
+  for(const s of schedules){
+    if(s.productName===oldName){
+      s.productName=newName;
+      if(data.material) s.material=data.material;
+      if(data.weight) s.weight=data.weight;
+      count++;
+    }
+  }
+  if(count>0) console.log(`[产品同步] "${oldName}"→"${newName}" 更新了 ${count} 条记录`);
+}
+
+function saveProduct(){
+  const name=document.getElementById('pName').value.trim();
+  if(!name){alert('请填写产品名称');return}
+  const data={
+    customer:document.getElementById('pCustomer').value.trim(),
+    material:document.getElementById('pMaterial').value,
+    weight:parseFloat(document.getElementById('pWeight').value)||0,
+    time:parseFloat(document.getElementById('pTime').value)||0,
+    qty:parseInt(document.getElementById('pQty').value)||1,
+    price:parseFloat(document.getElementById('pPrice').value)||0,
+    image: editingProductImage,
+  };
+  if(editingProdId>=0){
+    const p=products.find(x=>x.id===editingProdId);
+    if(p){
+      const oldName=p.name;
+      p.name=name; Object.assign(p,data);
+      // 同步更新所有引用该产品的记录和排期
+      syncProductToRecords(oldName, name, data);
+    }
+  } else {
+    products.push({id:nextProdId++, name, ...data});
+  }
+  editingProdId=-1;
+  saveAll(); closeModal('modalProduct'); renderProducts();
+}
+function deleteProduct(id){ products=products.filter(p=>p.id!==id); saveAll(); renderProducts(); }
+// 放大查看产品图片
+function showProductImage(dataUri){
+  if(!dataUri) return;
+  document.getElementById('modalProductImageImg').src = dataUri;
+  document.getElementById('modalProductImage').classList.add('show');
+}
+function closeProductImage(){
+  document.getElementById('modalProductImage').classList.remove('show');
+}
+// 通过产品名查找产品图片（用于每日记录、排期表的只读引用）
+function lookupProductImage(productName){
+  if(!productName) return '';
+  const p = products.find(x => x.name === productName);
+  return (p && p.image) ? p.image : '';
+}
+// 渲染图片单元格（三处统一调用）
+function renderProductImageCell(dataUri){
+  if(!dataUri) return '<td class="prod-image-cell"><span class="prod-no-image">无</span></td>';
+  // 注意 dataUri 是 base64，没有引号转义问题，但仍走变量传递避免 HTML 上下文出问题
+  const id = 'thumb_' + Math.random().toString(36).slice(2,9);
+  setTimeout(() => {
+    const el = document.getElementById(id);
+    if(el) el.onclick = () => showProductImage(dataUri);
+  }, 0);
+  return `<td class="prod-image-cell"><img id="${id}" src="${dataUri}" class="prod-thumb"></td>`;
+}
+// 处理上传的图片文件（来自文件选择/粘贴/拖入），压缩成 base64
+async function handleProductImageFile(file){
+  if(!file){ alert('未取得图片文件'); return; }
+  if(!file.type.startsWith('image/')){ alert('请提供图片文件（PNG/JPG/WebP 等）'); return; }
+  try {
+    const dataUri = await fileToCompressedDataUri(file, 800, 0.8);
+    editingProductImage = dataUri;
+    refreshProductImagePreview();
+  } catch(err){
+    console.error(err);
+    alert('图片处理失败: ' + (err.message || err));
+  }
+}
+function fileToCompressedDataUri(file, maxSize, quality){
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('读取文件失败'));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error('图片解析失败'));
+      img.onload = () => {
+        try {
+          let w = img.naturalWidth, h = img.naturalHeight;
+          if(w >= h && w > maxSize){ h = Math.round(h * maxSize / w); w = maxSize; }
+          else if(h > w && h > maxSize){ w = Math.round(w * maxSize / h); h = maxSize; }
+          const canvas = document.createElement('canvas');
+          canvas.width = w; canvas.height = h;
+          const ctx = canvas.getContext('2d');
+          ctx.fillStyle = '#fff'; ctx.fillRect(0,0,w,h);  // 处理透明背景
+          ctx.drawImage(img, 0, 0, w, h);
+          resolve(canvas.toDataURL('image/jpeg', quality));
+        } catch(e){ reject(e); }
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+function refreshProductImagePreview(){
+  const box = document.getElementById('pImagePreview');
+  const clearBtn = document.getElementById('pImageClearBtn');
+  if(editingProductImage){
+    box.classList.add('has-image');
+    box.innerHTML = `<img src="${editingProductImage}" alt="产品图片">`;
+    clearBtn.style.display = '';
+  } else {
+    box.classList.remove('has-image');
+    box.innerHTML = '<div class="placeholder">点击选择<br>Ctrl+V 粘贴<br>或拖入图片</div>';
+    clearBtn.style.display = 'none';
+  }
+}
+function clearProductImage(){
+  editingProductImage = '';
+  refreshProductImagePreview();
+  document.getElementById('pImageFile').value = '';
+}
+function onProductImageFilePicked(e){
+  const f = e.target.files && e.target.files[0];
+  handleProductImageFile(f);
+  e.target.value = '';  // 允许再次选同一文件
+}
+// 绑定粘贴和拖拽（粘贴绑在 document 上，仅当 modalProduct 打开时才处理）
+(function(){
+  const box = document.getElementById('pImagePreview');
+  box.addEventListener('click', () => document.getElementById('pImageFile').click());
+  document.addEventListener('paste', e => {
+    if(!document.getElementById('modalProduct').classList.contains('show')) return;
+    const items = (e.clipboardData || {}).items || [];
+    for(const it of items){
+      if(it.type && it.type.startsWith('image/')){
+        const f = it.getAsFile();
+        if(f){ e.preventDefault(); handleProductImageFile(f); return; }
+      }
+    }
+  });
+  box.addEventListener('dragover', e => { e.preventDefault(); box.classList.add('drag-over'); });
+  box.addEventListener('dragleave', () => box.classList.remove('drag-over'));
+  box.addEventListener('drop', e => {
+    e.preventDefault();
+    box.classList.remove('drag-over');
+    const f = e.dataTransfer.files && e.dataTransfer.files[0];
+    handleProductImageFile(f);
+  });
+})();
+document.addEventListener('keydown', e => {
+  if(e.key === 'Escape' && document.getElementById('modalProductImage').classList.contains('show')){
+    closeProductImage();
+  }
+});
+
+// ═══════════════════════════════════════════════════════
+// 设备维修记录
+// ═══════════════════════════════════════════════════════
+function fillMaintMachineDropdowns(){
+  ['maintMachine','maintFilterMachine'].forEach(selId=>{
+    const sel=document.getElementById(selId);
+    if(!sel) return;
+    const cur=sel.value;
+    sel.innerHTML = selId==='maintFilterMachine' ? '<option value="">全部机台</option>' : '<option value="0">全部/不限</option>';
+    for(let i=1;i<=S.machines;i++) sel.innerHTML+=`<option value="${i}">#${i} ${getMachineType(i)}</option>`;
+    if(cur) sel.value=cur;
+  });
+}
+
+// ═══════════════════════════════════════════════════════
+// 材料仓库
+// ═══════════════════════════════════════════════════════
+function ensureInventory(){
+  // 确保所有材料在 inventory 中都有记录
+  materials.forEach(m=>{
+    if(!inventory[m.name]) inventory[m.name]={stockG:0, minStockG:3000};
+  });
+}
+
+function renderWarehouse(){
+  ensureInventory();
+  const search=(document.getElementById('whSearch')||{}).value||'';
+  const filter=(document.getElementById('whFilter')||{}).value||'all';
+  const lowerS=search.toLowerCase();
+
+  // 筛选
+  const entries=Object.entries(inventory).filter(([name,inv])=>{
+    if(search && !name.toLowerCase().includes(lowerS)) return false;
+    if(filter==='low' && inv.stockG>=inv.minStockG) return false;
+    if(filter==='ok' && inv.stockG<inv.minStockG) return false;
+    if(filter==='empty' && inv.stockG>0) return false;
+    return true;
+  });
+
+  // KPI
+  const totalG=Object.values(inventory).reduce((s,v)=>s+v.stockG,0);
+  const kinds=Object.keys(inventory).length;
+  const lowCount=Object.values(inventory).filter(v=>v.stockG<v.minStockG).length;
+  document.getElementById('whKpi').innerHTML=
+    `<div class="kpi"><div class="kpi-val">${(totalG/1000).toFixed(1)} kg</div><div class="kpi-label">总库存量</div></div>`+
+    `<div class="kpi"><div class="kpi-val">${kinds}</div><div class="kpi-label">材料种类</div></div>`+
+    `<div class="kpi"><div class="kpi-val" style="color:${lowCount?'var(--r)':'var(--g)'}">${lowCount}</div><div class="kpi-label">低库存预警</div></div>`;
+
+  // 库存表格
+  let html='<table><thead><tr><th>材料名</th><th>类型</th><th>当前库存</th><th>警戒线</th><th>状态</th><th>操作</th></tr></thead><tbody>';
+  if(entries.length===0) html+='<tr><td colspan="6" style="text-align:center;color:#999">暂无数据</td></tr>';
+  entries.sort((a,b)=>a[1].stockG-b[1].stockG).forEach(([name,inv])=>{
+    const mat=materials.find(m=>m.name===name);
+    const type=mat?mat.type:'-';
+    const kg=(inv.stockG/1000).toFixed(2);
+    const minKg=(inv.minStockG/1000).toFixed(1);
+    const isLow=inv.stockG<inv.minStockG;
+    const isEmpty=inv.stockG<=0;
+    const isFull=inv.stockG>=10000;
+    const tag=isEmpty?'<span style="color:var(--r);font-weight:600">缺货</span>'
+             :isLow?'<span style="color:#f59e0b;font-weight:600">低库存</span>'
+             :isFull?'<span style="color:var(--g)">充足</span>'
+             :'<span style="color:#3b82f6">一般</span>';
+    html+=`<tr>
+      <td>${escHtml(name)}</td><td>${escHtml(type)}</td>
+      <td style="font-weight:600;${isLow?'color:var(--r)':''}">${kg} kg</td>
+      <td>${minKg} kg</td><td>${tag}</td>
+      <td>
+        <button class="btn btn-p btn-sm" onclick="editInventory('${escHtml(name)}')">编辑</button>
+        <button class="btn btn-g btn-sm" onclick="openStockIn('${escHtml(name)}')">入库</button>
+        <button class="btn btn-o btn-sm" onclick="adjustStock('${escHtml(name)}')">调整</button>
+      </td></tr>`;
+  });
+  html+='</tbody></table>';
+  document.getElementById('whTable').innerHTML=html;
+
+  // 入库记录表格
+  let lhtml='<table><thead><tr><th>日期</th><th>材料</th><th>数量(kg)</th><th>供应商</th><th>费用(元)</th><th>备注</th><th>操作</th></tr></thead><tbody>';
+  const logs=[...stockInLogs].sort((a,b)=>b.id-a.id);
+  if(logs.length===0) lhtml+='<tr><td colspan="7" style="text-align:center;color:#999">暂无入库记录</td></tr>';
+  logs.forEach(l=>{
+    lhtml+=`<tr>
+      <td>${escHtml(l.date)}</td><td>${escHtml(l.material)}</td>
+      <td>${(l.amountG/1000).toFixed(2)} kg</td>
+      <td>${escHtml(l.vendor||'-')}</td><td>${l.cost!=null?Number(l.cost).toFixed(2):'-'}</td>
+      <td>${escHtml(l.remark||'')}</td>
+      <td><button class="btn btn-p btn-sm" onclick="editStockLog(${l.id})">编辑</button> <button class="btn btn-r btn-sm" onclick="deleteStockLog(${l.id})">删除</button></td></tr>`;
+  });
+  lhtml+='</tbody></table>';
+  document.getElementById('whLogTable').innerHTML=lhtml;
+}
+
+function exportStockInLogs(){
+  const month=(document.getElementById('whLogMonth')||{}).value||'';
+  let logs=[...stockInLogs].sort((a,b)=>a.date<b.date?-1:a.date>b.date?1:0);
+  if(month) logs=logs.filter(l=>l.date&&l.date.startsWith(month));
+  if(!logs.length){alert('当前筛选范围内无入库记录');return;}
+
+  const label=month?`${month}月`:today();
+  const nc=6;
+  const rows=[
+    [`3D打印部门  入库记录  ${label}`],
+    [`导出日期: ${today()}    |    共 ${logs.length} 条记录    |    合计入库: ${(logs.reduce((s,l)=>s+l.amountG,0)/1000).toFixed(2)} kg    |    合计费用: ${logs.reduce((s,l)=>s+(l.cost||0),0).toFixed(2)} 元`],
+    [],
+    ['日期','材料','数量(kg)','供应商','费用(元)','备注'],
+  ];
+  logs.forEach(l=>{
+    rows.push([l.date||'', l.material||'', +(l.amountG/1000).toFixed(3), l.vendor||'', l.cost!=null?+Number(l.cost).toFixed(2):0, l.remark||'']);
+  });
+  const totalR=rows.length;
+  const totalKg=logs.reduce((s,l)=>s+l.amountG,0)/1000;
+  const totalCost=logs.reduce((s,l)=>s+(l.cost||0),0);
+  rows.push(['合计','',+totalKg.toFixed(3),'',+totalCost.toFixed(2),'']);
+
+  const wb=XLSX.utils.book_new();
+  const ws=XLSX.utils.aoa_to_sheet(rows);
+  ws['!merges']=[{s:{r:0,c:0},e:{r:0,c:nc-1}},{s:{r:1,c:0},e:{r:1,c:nc-1}}];
+  ws['!cols']=[{wch:12},{wch:16},{wch:12},{wch:24},{wch:12},{wch:20}];
+  _styleSheet(ws,nc,0,1,3,4,totalR);
+  for(let r=4;r<totalR;r++){
+    const alt=(r-4)%2===1;
+    _sc(ws,r,0,'data',alt);
+    _sc(ws,r,1,'data',alt);
+    _sc(ws,r,2,'money',alt);
+    _sc(ws,r,3,'data',alt);
+    _sc(ws,r,4,'money',alt);
+    _sc(ws,r,5,'data',alt);
+  }
+  for(let c=0;c<nc;c++) _sc(ws,totalR,c,c===2||c===4?'totalM':'total');
+  XLSX.utils.book_append_sheet(wb,ws,'入库记录');
+  XLSX.writeFile(wb,`入库记录_${label}.xlsx`);
+}
+
+let editingStockLogId=-1;
+
+function autoFillStockCost(){
+  const matName=document.getElementById('siMaterial').value;
+  const kg=parseFloat(document.getElementById('siAmount').value)||0;
+  const mat=materials.find(m=>m.name===matName);
+  if(mat && kg>0) document.getElementById('siCost').value=(mat.priceKg*kg).toFixed(2);
+}
+
+function openStockIn(materialName){
+  editingStockLogId=-1;
+  const sel=document.getElementById('siMaterial');
+  sel.innerHTML=materials.map(m=>`<option value="${escHtml(m.name)}">${escHtml(m.name)}</option>`).join('');
+  if(materialName) sel.value=materialName;
+  document.getElementById('siAmount').value='';
+  document.getElementById('siCost').value='';
+  document.getElementById('siVendor').value='';
+  document.getElementById('siRemark').value='';
+  document.querySelector('#modalStockIn h3').textContent='材料入库';
+  openModal('modalStockIn');
+}
+
+function editStockLog(id){
+  const log=stockInLogs.find(l=>l.id===id);
+  if(!log) return;
+  editingStockLogId=id;
+  const sel=document.getElementById('siMaterial');
+  sel.innerHTML=materials.map(m=>`<option value="${escHtml(m.name)}">${escHtml(m.name)}</option>`).join('');
+  sel.value=log.material;
+  document.getElementById('siAmount').value=(log.amountG/1000).toFixed(2);
+  document.getElementById('siCost').value=log.cost||'';
+  document.getElementById('siVendor').value=log.vendor||'';
+  document.getElementById('siRemark').value=log.remark||'';
+  document.querySelector('#modalStockIn h3').textContent='编辑入库记录';
+  openModal('modalStockIn');
+}
+
+function saveStockIn(){
+  const material=document.getElementById('siMaterial').value;
+  const amountKg=parseFloat(document.getElementById('siAmount').value);
+  if(!material){alert('请选择材料');return;}
+  if(!amountKg||amountKg<=0){alert('请输入有效的入库重量');return;}
+  const amountG=Math.round(amountKg*1000);
+  const cost=parseFloat(document.getElementById('siCost').value)||0;
+  const vendor=document.getElementById('siVendor').value.trim();
+  const remark=document.getElementById('siRemark').value.trim();
+
+  ensureInventory();
+
+  if(editingStockLogId>=0){
+    // 编辑模式：先回退旧库存，再加新库存
+    const old=stockInLogs.find(l=>l.id===editingStockLogId);
+    if(old){
+      if(inventory[old.material]) inventory[old.material].stockG-=old.amountG;
+      old.material=material; old.amountG=amountG; old.cost=cost; old.vendor=vendor; old.remark=remark;
+    }
+    if(!inventory[material]) inventory[material]={stockG:0, minStockG:3000};
+    inventory[material].stockG+=amountG;
+    editingStockLogId=-1;
+  } else {
+    // 新增模式
+    if(!inventory[material]) inventory[material]={stockG:0, minStockG:3000};
+    inventory[material].stockG+=amountG;
+    stockInLogs.push({id:nextStockInId++, date:today(), material, amountG, vendor, cost, remark});
+  }
+
+  saveAll();
+  closeModal('modalStockIn');
+  renderWarehouse();
+  checkLowStock();
+}
+
+function adjustStock(materialName){
+  ensureInventory();
+  const inv=inventory[materialName];
+  if(!inv) return;
+  document.getElementById('adjMaterial').value=materialName;
+  document.getElementById('adjTitle').textContent='库存调整 - '+materialName;
+  document.getElementById('adjCurrent').value=inv.stockG;
+  document.getElementById('adjNew').value=inv.stockG;
+  document.getElementById('adjReason').value='';
+  openModal('modalStockAdjust');
+}
+
+function saveStockAdjust(){
+  const materialName=document.getElementById('adjMaterial').value;
+  const newG=parseInt(document.getElementById('adjNew').value);
+  const reason=document.getElementById('adjReason').value.trim();
+  if(isNaN(newG)||newG<0){alert('请输入有效的库存值');return;}
+  if(!reason){alert('请输入调整原因');return;}
+
+  ensureInventory();
+  const inv=inventory[materialName];
+  if(!inv) return;
+  const diff=newG-inv.stockG;
+  inv.stockG=newG;
+
+  // 记录一条调整日志
+  stockInLogs.push({id:nextStockInId++, date:today(), material:materialName, amountG:diff, vendor:'[调整]', cost:0, remark:reason});
+  saveAll();
+  closeModal('modalStockAdjust');
+  renderWarehouse();
+  checkLowStock();
+}
+
+function deleteStockLog(logId){
+  if(!confirm('确定删除此入库记录？（不会回退库存）')) return;
+  stockInLogs=stockInLogs.filter(l=>l.id!==logId);
+  saveAll();
+  renderWarehouse();
+}
+
+function editInventory(materialName){
+  ensureInventory();
+  const inv=inventory[materialName];
+  if(!inv) return;
+  document.getElementById('invEditName').value=materialName;
+  document.getElementById('invEditTitle').textContent='编辑 - '+materialName;
+  document.getElementById('invEditStock').value=(inv.stockG/1000).toFixed(2);
+  document.getElementById('invEditMin').value=(inv.minStockG/1000).toFixed(1);
+  openModal('modalInvEdit');
+}
+
+function saveInventoryEdit(){
+  const name=document.getElementById('invEditName').value;
+  const stockKg=parseFloat(document.getElementById('invEditStock').value);
+  const minKg=parseFloat(document.getElementById('invEditMin').value);
+  if(isNaN(stockKg)||stockKg<0){alert('请输入有效的库存值');return;}
+  if(isNaN(minKg)||minKg<0){alert('请输入有效的警戒线');return;}
+  ensureInventory();
+  const inv=inventory[name];
+  if(!inv) return;
+  inv.stockG=Math.round(stockKg*1000);
+  inv.minStockG=Math.round(minKg*1000);
+  saveAll();
+  closeModal('modalInvEdit');
+  renderWarehouse();
+  checkLowStock();
+}
+
+function deductStock(materialName, weightG){
+  if(!materialName||!weightG||weightG<=0) return;
+  ensureInventory();
+  if(!inventory[materialName]) inventory[materialName]={stockG:0, minStockG:3000};
+  inventory[materialName].stockG=Math.max(0, inventory[materialName].stockG-weightG);
+}
+
+function checkLowStock(){
+  ensureInventory();
+  for(const [name,inv] of Object.entries(inventory)){
+    const key='stock_low_'+name;
+    if(inv.stockG<inv.minStockG && inv.stockG>=0){
+      if(!_dismissedKeys.has(key)){
+        _showAlert(key, false, `${name} 库存不足`, `当前库存 ${(inv.stockG/1000).toFixed(2)} kg，低于警戒线 ${(inv.minStockG/1000).toFixed(1)} kg`, '请及时补仓');
+      }
+    } else {
+      _removeAlert(key);
+      _dismissedKeys.delete(key);
+    }
+  }
+}
+
+// ═══════════════════════════════════════════════════════
+// 排期表
+// ═══════════════════════════════════════════════════════
+function renderSchedule(){
+  // 填充材料筛选下拉
+  const matF=document.getElementById('schedMatFilter');
+  if(matF){
+    const cur=matF.value;
+    matF.innerHTML='<option value="">全部材料</option>'+materials.map(m=>`<option value="${escHtml(m.name)}">${escHtml(m.name)}</option>`).join('');
+    if(cur) matF.value=cur;
+  }
+
+  // 读取筛选条件
+  const fromD=(document.getElementById('schedFrom')||{}).value||'';
+  const toD=(document.getElementById('schedTo')||{}).value||'';
+  const statusF=(document.getElementById('schedStatusFilter')||{}).value||'';
+  const materialF=(document.getElementById('schedMatFilter')||{}).value||'';
+
+  const searchQ=((document.getElementById('schedSearch')||{}).value||'').toLowerCase().trim();
+  let list=schedules.filter(s=>{
+    if(fromD && s.date<fromD) return false;
+    if(toD && s.date>toD) return false;
+    if(statusF && s.status!==statusF) return false;
+    if(materialF && s.material!==materialF) return false;
+    if(searchQ){
+      const hit=(s.date||'').includes(searchQ)||
+                (s.productName||'').toLowerCase().includes(searchQ)||
+                (s.customer||'').toLowerCase().includes(searchQ)||
+                (s.material||'').toLowerCase().includes(searchQ);
+      if(!hit) return false;
+    }
+    return true;
+  });
+
+  // 排序：日期升序，优先级高优先
+  const priOrd={high:0,normal:1,low:2};
+  list=[...list].sort((a,b)=>{
+    const d=a.date.localeCompare(b.date);
+    if(d!==0) return d;
+    return (priOrd[a.priority]||1)-(priOrd[b.priority]||1);
+  });
+
+  // KPI
+  const pending=schedules.filter(s=>s.status==='pending');
+  const totalNeedG=pending.reduce((s,v)=>s+(v.weight||0)*(v.qty||0),0);
+  // 材料不足种数
+  ensureInventory();
+  const budgetMap={};
+  pending.forEach(s=>{if(s.material) budgetMap[s.material]=(budgetMap[s.material]||0)+(s.weight||0)*(s.qty||0);});
+  const shortCount=Object.entries(budgetMap).filter(([name,need])=>{
+    const stock=(inventory[name]&&inventory[name].stockG)||0;
+    return stock<need;
+  }).length;
+
+  document.getElementById('schedKpi').innerHTML=
+    `<div class="kpi"><div class="kpi-val">${pending.length}</div><div class="kpi-label">待生产</div></div>`+
+    `<div class="kpi"><div class="kpi-val">${(totalNeedG/1000).toFixed(1)} kg</div><div class="kpi-label">总需材料</div></div>`+
+    `<div class="kpi"><div class="kpi-val" style="color:${shortCount?'var(--r)':'var(--g)'}">${shortCount}</div><div class="kpi-label">材料不足</div></div>`;
+
+  // 材料预算
+  renderSchedBudget(budgetMap);
+
+  // 排期表格
+  let html='<table><thead><tr><th>#</th><th>日期</th><th>产品</th><th>图片</th><th>客户</th><th>材料</th><th>料重/件</th><th>数量</th><th>总用料</th><th>机台</th><th>优先级</th><th>状态</th><th>备注</th><th>操作</th></tr></thead><tbody>';
+  if(!list.length){
+    html+='<tr><td colspan="14" style="text-align:center;padding:30px;color:#999">暂无排期，点击「+ 添加排期」</td></tr>';
+  } else {
+    list.forEach((s,i)=>{
+      const totalG=(s.weight||0)*(s.qty||0);
+      const totalStr=totalG>=1000?(totalG/1000).toFixed(2)+' kg':totalG+' g';
+      const machLabel=s.machine>0?getMachineLabel(s.machine):'-';
+      let acts='<button class="btn btn-p btn-sm" onclick="editSchedule('+s.id+')">编辑</button> ';
+      if(s.status==='pending') acts+='<button class="btn btn-g btn-sm" onclick="markSchedulePrinting('+s.id+')">开始</button> ';
+      if(s.status==='printing') acts+='<button class="btn btn-g btn-sm" onclick="markScheduleDone('+s.id+')">完成</button> ';
+      if(s.status!=='done'&&s.status!=='cancelled') acts+='<button class="btn btn-r btn-sm" onclick="deleteSchedule('+s.id+')">删除</button>';
+      html+=`<tr>
+        <td>${i+1}</td><td>${s.date}</td>
+        <td style="text-align:left">${escHtml(s.productName)}</td>
+        ${renderProductImageCell(lookupProductImage(s.productName))}
+        <td>${escHtml(s.customer||'-')}</td>
+        <td>${escHtml(s.material)}</td>
+        <td>${s.weight||'-'} g</td><td>${s.qty||'-'}</td>
+        <td style="font-weight:600">${totalStr}</td>
+        <td style="font-size:12px">${machLabel}</td>
+        <td>${schedPriTag(s.priority)}</td>
+        <td>${schedStatTag(s.status)}</td>
+        <td style="font-size:11px;color:var(--gray);max-width:120px;overflow:hidden;text-overflow:ellipsis">${escHtml(s.remark||'')}</td>
+        <td style="white-space:nowrap">${acts}</td></tr>`;
+    });
+  }
+  html+='</tbody></table>';
+  document.getElementById('schedTable').innerHTML=html;
+  document.getElementById('schedSummary').textContent='共 '+list.length+' 条排期';
+}
+
+function renderSchedBudget(budgetMap){
+  if(!budgetMap){
+    budgetMap={};
+    schedules.filter(s=>s.status==='pending').forEach(s=>{
+      if(s.material) budgetMap[s.material]=(budgetMap[s.material]||0)+(s.weight||0)*(s.qty||0);
+    });
+  }
+  const names=Object.keys(budgetMap).sort();
+  if(!names.length){
+    document.getElementById('schedBudgetTable').innerHTML='<div style="padding:20px;text-align:center;color:#999">暂无待生产排期</div>';
+    return;
+  }
+  ensureInventory();
+  let html='<table><thead><tr><th>材料</th><th>待生产需求</th><th>当前库存</th><th>差额</th><th>状态</th></tr></thead><tbody>';
+  names.forEach(name=>{
+    const needG=budgetMap[name];
+    const stockG=(inventory[name]&&inventory[name].stockG)||0;
+    const diffG=stockG-needG;
+    const ok=diffG>=0;
+    html+=`<tr>
+      <td style="text-align:left;font-weight:600">${escHtml(name)}</td>
+      <td>${(needG/1000).toFixed(2)} kg</td>
+      <td>${(stockG/1000).toFixed(2)} kg</td>
+      <td style="color:${ok?'var(--g)':'var(--r)'};font-weight:600">${ok?'+':''}${(diffG/1000).toFixed(2)} kg</td>
+      <td><span style="padding:2px 8px;border-radius:4px;font-size:12px;font-weight:600;${ok?'background:var(--gbg);color:var(--g)':'background:var(--rbg);color:var(--r)'}">${ok?'充足':'不足'}</span></td></tr>`;
+  });
+  html+='</tbody></table>';
+  document.getElementById('schedBudgetTable').innerHTML=html;
+}
+
+function schedPriTag(p){
+  if(p==='high') return '<span style="padding:2px 8px;border-radius:4px;font-size:12px;background:var(--rbg);color:var(--r);font-weight:bold">紧急</span>';
+  if(p==='low') return '<span style="padding:2px 8px;border-radius:4px;font-size:12px;background:var(--grayL);color:var(--gray)">低</span>';
+  return '<span style="padding:2px 8px;border-radius:4px;font-size:12px;background:var(--ybg);color:#b06000">普通</span>';
+}
+function schedStatTag(st){
+  if(st==='pending') return '<span style="padding:2px 8px;border-radius:4px;font-size:12px;background:var(--ybg);color:var(--y)">待生产</span>';
+  if(st==='printing') return '<span style="padding:2px 8px;border-radius:4px;font-size:12px;background:var(--c1bg);color:var(--c1)">打印中</span>';
+  if(st==='done') return '<span style="padding:2px 8px;border-radius:4px;font-size:12px;background:var(--gbg);color:var(--g)">已完成</span>';
+  if(st==='cancelled') return '<span style="padding:2px 8px;border-radius:4px;font-size:12px;background:var(--grayL);color:var(--gray);text-decoration:line-through">已取消</span>';
+  return st;
+}
+
+function filterSchedProducts(){
+  const kw=(document.getElementById('schProductSearch').value||'').toLowerCase();
+  const dd=document.getElementById('schProductDropdown');
+  const list=kw?products.filter(p=>p.name.toLowerCase().includes(kw)):products;
+  if(!list.length){dd.style.display='none';return;}
+  dd.style.display='block';
+  dd.innerHTML=list.map(p=>`<div style="padding:8px 12px;cursor:pointer;font-size:13px" onmousedown="selectSchedProduct(${p.id})" onmouseover="this.style.background='var(--c1bg)'" onmouseout="this.style.background=''">${escHtml(p.name)}</div>`).join('');
+}
+function selectSchedProduct(id){
+  const p=products.find(x=>x.id===id);
+  if(!p) return;
+  document.getElementById('schProductSearch').value=p.name;
+  document.getElementById('schProductSelect').value=id;
+  document.getElementById('schProductDropdown').style.display='none';
+  document.getElementById('schProductName').value=p.name;
+  if(p.material) document.getElementById('schMaterial').value=p.material;
+  if(p.weight) document.getElementById('schWeight').value=p.weight;
+  if(p.qty) document.getElementById('schQty').value=p.qty;
+  document.getElementById('schCustomer').value=p.customer||'';
+}
+function _initSchedDropdowns(){
+  const mSel=document.getElementById('schMaterial');
+  mSel.innerHTML=materials.map(m=>`<option value="${escHtml(m.name)}">${escHtml(m.name)}</option>`).join('');
+  const mcSel=document.getElementById('schMachine');
+  mcSel.innerHTML='<option value="0">不指定</option>';
+  for(let i=1;i<=S.machines;i++) mcSel.innerHTML+=`<option value="${i}">${getMachineLabel(i)}</option>`;
+}
+// 点击外部关闭下拉
+document.addEventListener('click',e=>{if(!e.target.closest('#schProductSearch')&&!e.target.closest('#schProductDropdown'))document.getElementById('schProductDropdown')&&(document.getElementById('schProductDropdown').style.display='none');});
+
+function openAddSchedule(){
+  editingSchedId=-1;
+  document.getElementById('modalSchedTitle').textContent='添加排期';
+  document.getElementById('schDate').value=today();
+  document.getElementById('schPriority').value='normal';
+  document.getElementById('schStatus').value='pending';
+  document.getElementById('schProductSearch').value='';
+  document.getElementById('schProductSelect').value='';
+  document.getElementById('schProductName').value='';
+  document.getElementById('schWeight').value='';
+  document.getElementById('schQty').value='1';
+  document.getElementById('schCustomer').value='';
+  document.getElementById('schRemark').value='';
+  document.getElementById('schProductDropdown').style.display='none';
+  _initSchedDropdowns();
+  openModal('modalSched');
+}
+
+function editSchedule(id){
+  const s=schedules.find(x=>x.id===id);
+  if(!s) return;
+  editingSchedId=id;
+  document.getElementById('modalSchedTitle').textContent='编辑排期';
+  _initSchedDropdowns();
+  document.getElementById('schProductSearch').value=s.productName||'';
+  document.getElementById('schProductSelect').value='';
+  document.getElementById('schProductDropdown').style.display='none';
+  document.getElementById('schDate').value=s.date;
+  document.getElementById('schPriority').value=s.priority||'normal';
+  document.getElementById('schStatus').value=s.status||'pending';
+  document.getElementById('schProductName').value=s.productName;
+  document.getElementById('schMaterial').value=s.material;
+  document.getElementById('schWeight').value=s.weight||'';
+  document.getElementById('schQty').value=s.qty||1;
+  document.getElementById('schMachine').value=s.machine||0;
+  const _sp=products.find(p=>p.name===s.productName);
+  document.getElementById('schCustomer').value=s.customer||(_sp?_sp.customer:'')||'';
+  document.getElementById('schRemark').value=s.remark||'';
+  openModal('modalSched');
+}
+
+function saveSchedule(){
+  const date=document.getElementById('schDate').value;
+  const productName=document.getElementById('schProductName').value.trim();
+  const material=document.getElementById('schMaterial').value;
+  const weight=parseFloat(document.getElementById('schWeight').value)||0;
+  const qty=parseInt(document.getElementById('schQty').value)||1;
+  const machine=parseInt(document.getElementById('schMachine').value)||0;
+  const priority=document.getElementById('schPriority').value;
+  const status=document.getElementById('schStatus').value;
+  const customer=document.getElementById('schCustomer').value.trim();
+  const remark=document.getElementById('schRemark').value.trim();
+  if(!date){alert('请选择计划日期');return;}
+  if(!productName){alert('请输入产品名称');return;}
+  if(!material){alert('请选择材料');return;}
+  if(weight<=0){alert('请输入有效料重');return;}
+
+  const rec={date,productName,customer,material,weight,qty,machine,priority,status,remark};
+  if(editingSchedId>=0){
+    const idx=schedules.findIndex(x=>x.id===editingSchedId);
+    if(idx>=0){ rec.id=editingSchedId; schedules[idx]=rec; }
+  } else {
+    rec.id=nextSchedId++;
+    schedules.push(rec);
+  }
+  saveAll();
+  closeModal('modalSched');
+  renderSchedule();
+}
+
+function deleteSchedule(id){
+  if(!confirm('确定删除此排期？')) return;
+  schedules=schedules.filter(s=>s.id!==id);
+  saveAll();
+  renderSchedule();
+}
+
+function markSchedulePrinting(id){
+  const s=schedules.find(x=>x.id===id);
+  if(s){ s.status='printing'; saveAll(); renderSchedule(); }
+}
+
+function markScheduleDone(id){
+  const s=schedules.find(x=>x.id===id);
+  if(s){ s.status='done'; saveAll(); renderSchedule(); }
+}
+
+function renderMaintenance(){
+  // 初始化筛选月份
+  const elMonth=document.getElementById('maintFilterMonth');
+  if(elMonth && !elMonth.value) elMonth.value=today().slice(0,7);
+  fillMaintMachineDropdowns();
+
+  const month=(document.getElementById('maintFilterMonth')?.value)||'';
+  const machineFilter=(document.getElementById('maintFilterMachine')?.value)||'';
+
+  let list=maintenance;
+  if(month) list=list.filter(m=>m.date&&m.date.startsWith(month));
+  if(machineFilter) list=list.filter(m=>m.machine==machineFilter);
+  list=[...list].sort((a,b)=>b.date.localeCompare(a.date));
+
+  const totCost=list.reduce((s,m)=>s+(m.cost||0),0);
+  const summaryEl=document.getElementById('maintSummary');
+  if(list.length){
+    summaryEl.style.display='block';
+    summaryEl.innerHTML=`共 <b>${list.length}</b> 条维修记录，合计支出：<b style="color:var(--r);font-size:15px">${fmtM(totCost)} 元</b>`;
+  } else {
+    summaryEl.style.display='none';
+  }
+
+  const typeTagMap={'日常维护':'tag-g','零件更换':'tag-y','故障维修':'tag-r','软件调试':'tag-y','耗材采购':'tag-g','其他':''};
+  let html='<table><tr><th>#</th><th>日期</th><th>机台</th><th>类型</th><th>维修描述</th><th>费用(元)</th><th>服务商</th><th>备注</th><th>操作</th></tr>';
+  if(!list.length){
+    html+='<tr><td colspan="9" style="padding:30px;color:var(--gray)">暂无维修记录，点击"+ 添加维修记录"</td></tr>';
+  } else {
+    list.forEach((m,i)=>{
+      const machLabel=m.machine&&m.machine>0?`#${m.machine} ${getMachineType(m.machine)}`:'通用';
+      const tag=typeTagMap[m.type]||'';
+      html+=`<tr>
+        <td>${i+1}</td>
+        <td>${m.date}</td>
+        <td style="font-size:12px">${machLabel}</td>
+        <td><span class="tag ${tag}">${m.type||'-'}</span></td>
+        <td style="text-align:left">${m.description||'-'}</td>
+        <td style="color:var(--r);font-weight:bold">${fmtM(m.cost)}</td>
+        <td style="font-size:12px;color:var(--gray)">${m.vendor||'-'}</td>
+        <td style="font-size:11px;color:var(--gray)">${m.remark||''}</td>
+        <td style="white-space:nowrap">
+          <button class="btn btn-p btn-sm" onclick="editMaintenance(${m.id})">编辑</button>
+          <button class="btn btn-r btn-sm" onclick="deleteMaintenance(${m.id})">删除</button>
+        </td></tr>`;
+    });
+  }
+  html+='</table>';
+  document.getElementById('maintTable').innerHTML=html;
+}
+
+let editingMaintId=-1;
+function openAddMaintenance(){
+  editingMaintId=-1;
+  document.getElementById('modalMaintTitle').textContent='添加维修记录';
+  document.getElementById('maintDate').value=today();
+  fillMaintMachineDropdowns();
+  document.getElementById('maintMachine').value='0';
+  document.getElementById('maintType').value='日常维护';
+  document.getElementById('maintCost').value='';
+  document.getElementById('maintDesc').value='';
+  document.getElementById('maintVendor').value='';
+  document.getElementById('maintRemark').value='';
+  openModal('modalMaintenance');
+}
+function editMaintenance(id){
+  const m=maintenance.find(x=>x.id===id);
+  if(!m) return;
+  editingMaintId=id;
+  document.getElementById('modalMaintTitle').textContent='编辑维修记录';
+  document.getElementById('maintDate').value=m.date;
+  fillMaintMachineDropdowns();
+  document.getElementById('maintMachine').value=m.machine||'0';
+  document.getElementById('maintType').value=m.type||'日常维护';
+  document.getElementById('maintCost').value=m.cost||'';
+  document.getElementById('maintDesc').value=m.description||'';
+  document.getElementById('maintVendor').value=m.vendor||'';
+  document.getElementById('maintRemark').value=m.remark||'';
+  openModal('modalMaintenance');
+}
+function saveMaintenance(){
+  const date=document.getElementById('maintDate').value;
+  const machine=parseInt(document.getElementById('maintMachine').value)||0;
+  const type=document.getElementById('maintType').value;
+  const cost=parseFloat(document.getElementById('maintCost').value)||0;
+  const description=document.getElementById('maintDesc').value.trim();
+  const vendor=document.getElementById('maintVendor').value.trim();
+  const remark=document.getElementById('maintRemark').value.trim();
+  if(!date){alert('请填写日期');return}
+  if(!description){alert('请填写维修描述');return}
+  const rec={date,machine,type,cost,description,vendor,remark};
+  if(editingMaintId>=0){
+    const idx=maintenance.findIndex(x=>x.id===editingMaintId);
+    if(idx>=0) maintenance[idx]={id:editingMaintId,...rec};
+  } else {
+    maintenance.push({id:nextMaintId++,...rec});
+  }
+  editingMaintId=-1;
+  saveAll(); closeModal('modalMaintenance'); renderMaintenance();
+}
+function deleteMaintenance(id){
+  if(!confirm('确定删除此维修记录？')) return;
+  maintenance=maintenance.filter(m=>m.id!==id);
+  saveAll(); renderMaintenance();
+}
+
+// 获取指定月份维修费用合计
+function getMonthMaintCost(month){
+  return maintenance.filter(m=>m.date&&m.date.startsWith(month)).reduce((s,m)=>s+(m.cost||0),0);
+}
+// 获取日期区间维修费用合计
+function getRangeMaintCost(fromDate,toDate){
+  return maintenance.filter(m=>m.date&&(!fromDate||m.date>=fromDate)&&(!toDate||m.date<=toDate)).reduce((s,m)=>s+(m.cost||0),0);
+}
+
+// ═══════════════════════════════════════════════════════
+// 每日记录 Excel 导出
+// ═══════════════════════════════════════════════════════
+function openExportDayModal(){
+  const d = document.getElementById('recDate').value || today();
+  document.getElementById('expDayFrom').value = d;
+  document.getElementById('expDayTo').value = d;
+  updateExpDayInfo();
+  openModal('modalExportDay');
+}
+function updateExpDayInfo(){
+  const from = document.getElementById('expDayFrom').value;
+  const to = document.getElementById('expDayTo').value;
+  const el = document.getElementById('expDayInfo');
+  if(!from || !to){ el.textContent = '请选择起止日期'; return; }
+  if(from > to){ el.textContent = '⚠ 起始日期不能晚于结束日期'; return; }
+  let days = 0, rows = 0;
+  Object.keys(records).forEach(d => {
+    if(d < from || d > to) return;
+    const day = records[d];
+    if(!day || day.off) return;
+    const items = (day.items||[]).filter(it => !it._deleted);
+    if(items.length === 0) return;
+    days++; rows += items.length;
+  });
+  el.textContent = days === 0 ? '所选范围内无记录' : `共 ${days} 个工作日 · ${rows} 条记录`;
+}
+function doExportDayRecords(){
+  const from = document.getElementById('expDayFrom').value;
+  const to = document.getElementById('expDayTo').value;
+  if(!from || !to){ alert('请选择起止日期'); return; }
+  if(from > to){ alert('起始日期不能晚于结束日期'); return; }
+
+  // 收集所有符合条件的明细行
+  const dates = Object.keys(records).filter(d => d >= from && d <= to).sort();
+  const detailRows = [];
+  let totalDays = 0, totalRev = 0, totalMat = 0, totalDesign = 0;
+  const stateMap = { running: '生产', idle: '空闲', fault: '故障' };
+
+  dates.forEach(d => {
+    const day = records[d];
+    if(!day || day.off) return;
+    const items = (day.items||[]).filter(it => !it._deleted);
+    if(items.length === 0) return;
+    totalDays++;
+    const s = getDaySummary(d);
+    totalRev += s.revenue;
+    totalMat += s.materialCost;
+    // 同日内按机台排序
+    const sorted = [...items].sort((a,b) => (a.machine||0) - (b.machine||0));
+    sorted.forEach(it => {
+      const qty = it.qty || 1;
+      const matCost = it.status === 'running' ? calcMaterialCost(it.material, it.weight) * qty : 0;
+      const calc = it.status === 'running' ? calcUnitPrice(it.material, it.weight||0, it.time||0, qty, s.machineCount) : null;
+      const designFee = it.status === 'running' ? (+it.designFee||0) : 0;
+      const basePrice = it.status === 'running' ? (calc && calc.price > 0 ? calc.price : (it.price||0) * qty) : 0;
+      const price = it.status === 'running' ? (basePrice + designFee) : 0;
+      totalDesign += designFee;
+      const customer = it.customer || (products.find(p => p.name === it.productName)||{}).customer || '';
+      detailRows.push([
+        d,
+        '#' + it.machine,
+        getMachineType(it.machine),
+        stateMap[it.status] || it.status || '',
+        it.productName || '',
+        customer,
+        it.material || '',
+        +(it.weight||0),
+        qty,
+        +(it.time||0),
+        +matCost.toFixed(2),
+        +designFee.toFixed(2),
+        +price.toFixed(2),
+        it.remark || '',
+        fmtTS(it.createdAt || it.printStartTime) || '',
+      ]);
+    });
+  });
+
+  if(detailRows.length === 0){ alert('所选范围内无记录'); return; }
+
+  // 构造表头和合计行
+  const label = from === to ? from : `${from} ~ ${to}`;
+  const nc = 15;
+  const headers = ['日期','机台','机型','状态','产品','客户','材料','料重(g)','数量','耗时(h)','材料成本(元)','设计费(元)','报价(元)','备注','入库时间'];
+  const balance = totalRev - totalMat;
+  const rows = [
+    [`3D打印部门 · ${label} · 每日生产记录明细`],
+    [`导出日期: ${today()}  |  共 ${totalDays} 个工作日  |  ${detailRows.length} 条记录  |  产值合计 ${totalRev.toFixed(2)} 元  |  材料成本合计 ${totalMat.toFixed(2)} 元  |  设计费合计 ${totalDesign.toFixed(2)} 元  |  毛利(产值-材料) ${balance.toFixed(2)} 元`],
+    [],
+    headers,
+    ...detailRows,
+  ];
+  const totalR = rows.length;
+  // 合计行：数量/料重/耗时 用 detailRows SUM；材料成本/设计费/报价 用未舍入的 totalMat/totalDesign/totalRev 保证与副标题一致
+  const sumColsRaw = [7,8,9];  // 列下标：料重(g)=7, 数量=8, 耗时(h)=9（detailRows 里这些已是未舍入数）
+  const totalRow = new Array(nc).fill('');
+  totalRow[0] = '合计';
+  sumColsRaw.forEach(c => {
+    totalRow[c] = +(detailRows.reduce((s,r) => s + (typeof r[c] === 'number' ? r[c] : 0), 0).toFixed(2));
+  });
+  totalRow[10] = +totalMat.toFixed(2);
+  totalRow[11] = +totalDesign.toFixed(2);
+  totalRow[12] = +totalRev.toFixed(2);
+  rows.push(totalRow);
+
+  // 创建 workbook 和样式
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  ws['!merges'] = [
+    { s:{r:0,c:0}, e:{r:0,c:nc-1} },
+    { s:{r:1,c:0}, e:{r:1,c:nc-1} },
+  ];
+  ws['!cols'] = [
+    {wch:12},{wch:6},{wch:14},{wch:6},{wch:24},{wch:14},{wch:14},
+    {wch:10},{wch:6},{wch:8},{wch:12},{wch:10},{wch:12},{wch:24},{wch:18},
+  ];
+  // 标题=0, 副标题=1, (空行=2), 表头=3, 数据从=4, 合计=totalR
+  _styleSheet(ws, nc, 0, 1, 3, 4, totalR);
+  // 数据行样式（交替色）
+  for(let r = 4; r < totalR; r++){
+    const alt = (r - 4) % 2 === 1;
+    for(let c = 0; c < 7; c++) _sc(ws, r, c, 'data', alt);    // 文本列
+    _sc(ws, r, 7, 'data', alt);   // 料重数字（不格式化为货币）
+    _sc(ws, r, 8, 'data', alt);   // 数量
+    _sc(ws, r, 9, 'data', alt);   // 耗时
+    _sc(ws, r, 10, 'money', alt); // 材料成本
+    _sc(ws, r, 11, 'money', alt); // 设计费
+    _sc(ws, r, 12, 'money', alt); // 报价
+    _sc(ws, r, 13, 'data', alt);  // 备注
+    _sc(ws, r, 14, 'data', alt);  // 入库时间
+  }
+  // 合计行样式
+  _sc(ws, totalR, 0, 'total');
+  for(let c = 1; c < 7; c++) _sc(ws, totalR, c, 'total');
+  _sc(ws, totalR, 7, 'totalM'); _sc(ws, totalR, 8, 'totalM'); _sc(ws, totalR, 9, 'totalM');
+  _sc(ws, totalR, 10, 'totalM'); _sc(ws, totalR, 11, 'totalM'); _sc(ws, totalR, 12, 'totalM');
+  _sc(ws, totalR, 13, 'total'); _sc(ws, totalR, 14, 'total');
+
+  XLSX.utils.book_append_sheet(wb, ws, '明细');
+  const fname = from === to ? `每日记录_${from}.xlsx` : `每日记录_${from}_${to}.xlsx`;
+  XLSX.writeFile(wb, fname);
+  closeModal('modalExportDay');
+}
+
+// 绑定日期 input 变更事件（IIFE 立即执行）
+// 注意：此 IIFE 在脚本解析时立即运行；依赖 modalExportDay HTML 已在 <script> 块之前出现在 DOM 中
+(function(){
+  const from = document.getElementById('expDayFrom');
+  const to = document.getElementById('expDayTo');
+  if(from) from.addEventListener('change', updateExpDayInfo);
+  if(to) to.addEventListener('change', updateExpDayInfo);
+})();
+
+// ═══════════════════════════════════════════════════════
+// 报表导出 (带Excel样式)
+// ═══════════════════════════════════════════════════════
+function setupReport(){
+  const dates=Object.keys(records).sort();
+  const months=[...new Set(dates.map(d=>d.slice(0,7)))].sort();
+  const years=[...new Set(dates.map(d=>d.slice(0,4)))].sort();
+  const expMonth=document.getElementById('expMonth');
+  const expYear=document.getElementById('expYear');
+  expMonth.innerHTML=months.length?months.map(m=>`<option value="${m}">${m}</option>`).join(''):'<option value="">暂无数据</option>';
+  expYear.innerHTML=years.length?years.map(y=>`<option value="${y}">${y}年</option>`).join(''):'<option value="">暂无数据</option>';
+  // 自定义范围：默认显示当月
+  const curMonth=today().slice(0,7);
+  const elFrom=document.getElementById('expFrom'), elTo=document.getElementById('expTo');
+  if(!elFrom.value) elFrom.value=curMonth+'-01';
+  if(!elTo.value) elTo.value=today();
+  updateRangeInfo();
+  if(!elFrom._hasChangeListener){
+    elFrom.addEventListener('change',updateRangeInfo);
+    elFrom._hasChangeListener=true;
+  }
+  if(!elTo._hasChangeListener){
+    elTo.addEventListener('change',updateRangeInfo);
+    elTo._hasChangeListener=true;
+  }
+}
+function updateRangeInfo(){
+  const from=document.getElementById('expFrom').value;
+  const to=document.getElementById('expTo').value;
+  const el=document.getElementById('expRangeInfo');
+  if(!from||!to||from>to){el.textContent='';return;}
+  const dates=Object.keys(records).filter(d=>d>=from&&d<=to&&!records[d]?.off);
+  const maint=maintenance.filter(m=>m.date&&m.date>=from&&m.date<=to);
+  el.textContent=`共 ${dates.length} 个工作日 · ${maint.length} 条维修记录`;
+}
+
+function getMonthSummary(month){
+  const dates=Object.keys(records).filter(d=>d.startsWith(month)).sort();
+  let rev=0,mat=0,elec=0,labor=0,days=0,utilCapacity=0,machineDays=0;
+  const dailyData=[];
+  dates.forEach(d=>{
+    const s=getDaySummary(d);
+    if(s.isOff) return;
+    days++; rev+=s.revenue; mat+=s.materialCost; elec+=s.elecCost; labor+=s.laborCost;
+    utilCapacity+=s.utilization*s.machineCount; machineDays+=s.machineCount;
+    dailyData.push({date:d,...s});
+  });
+  const exp=mat+elec+labor;
+  const maintCost=getMonthMaintCost(month);
+  return {month, dates, days, revenue:rev, materialCost:mat, elecCost:elec, laborCost:labor, totalCost:exp, maintCost, balance:rev-exp-maintCost, avgUtil:machineDays?utilCapacity/machineDays:0, dailyData};
+}
+
+function getDateRangeSummary(fromDate, toDate){
+  const dates=Object.keys(records).filter(d=>d>=fromDate&&d<=toDate).sort();
+  let rev=0,mat=0,elec=0,labor=0,days=0,utilCapacity=0,machineDays=0;
+  const dailyData=[];
+  dates.forEach(d=>{
+    const s=getDaySummary(d);
+    if(s.isOff) return;
+    days++; rev+=s.revenue; mat+=s.materialCost; elec+=s.elecCost; labor+=s.laborCost;
+    utilCapacity+=s.utilization*s.machineCount; machineDays+=s.machineCount;
+    dailyData.push({date:d,...s});
+  });
+  const exp=mat+elec+labor;
+  const maintCost=getRangeMaintCost(fromDate,toDate);
+  return {fromDate,toDate,dates,days,revenue:rev,materialCost:mat,elecCost:elec,laborCost:labor,totalCost:exp,maintCost,balance:rev-exp-maintCost,avgUtil:machineDays?utilCapacity/machineDays:0,dailyData};
+}
+
+function exportRange(){
+  const from=document.getElementById('expFrom').value;
+  const to=document.getElementById('expTo').value;
+  if(!from||!to){alert('请选择起止日期');return}
+  if(from>to){alert('开始日期不能晚于结束日期');return}
+  const rs=getDateRangeSummary(from,to);
+  if(!rs.days&&!rs.maintCost){alert('所选范围内无数据');return}
+  const wb=XLSX.utils.book_new();
+  const nc=11;
+  const label=`${from} ~ ${to}`;
+
+  // ── Sheet 1: 财务明细 ──
+  const rows=[
+    [`3D打印部门  ${label}  财务汇总报表`],
+    [`导出日期: ${today()}    |    工作天数: ${rs.days}天    |    机台数: ${S.machines}台    |    维修支出: ${rs.maintCost.toFixed(2)}元    |    净结余: ${rs.balance>=0?'+':''}${rs.balance.toFixed(2)} 元`],
+    [],
+    ['日期','开机台数','总产值(元)','材料成本(元)','电费(元)','人工(元)','生产支出(元)','维修费用(元)','净结余(元)','结余率','使用率'],
+  ];
+  rs.dailyData.forEach(d=>{
+    const dayMaint=maintenance.filter(m=>m.date===d.date).reduce((s,m)=>s+(m.cost||0),0);
+    const dayNetBal=d.balance-dayMaint;
+    rows.push([d.date,d.runningMachines,+d.revenue.toFixed(2),+d.materialCost.toFixed(2),+d.elecCost.toFixed(2),+d.laborCost.toFixed(2),+d.totalCost.toFixed(2),+dayMaint.toFixed(2),+dayNetBal.toFixed(2),d.revenue?+(dayNetBal/d.revenue).toFixed(4):0,+d.utilization.toFixed(4)]);
+  });
+  const totalR=rows.length;
+  rows.push(['合计',rs.days+'天',+rs.revenue.toFixed(2),+rs.materialCost.toFixed(2),+rs.elecCost.toFixed(2),+rs.laborCost.toFixed(2),+rs.totalCost.toFixed(2),+rs.maintCost.toFixed(2),+rs.balance.toFixed(2),rs.revenue?+(rs.balance/rs.revenue).toFixed(4):0,+rs.avgUtil.toFixed(4)]);
+
+  const ws1=XLSX.utils.aoa_to_sheet(rows);
+  ws1['!merges']=[{s:{r:0,c:0},e:{r:0,c:nc-1}},{s:{r:1,c:0},e:{r:1,c:nc-1}}];
+  ws1['!cols']=[{wch:12},{wch:10},{wch:14},{wch:14},{wch:10},{wch:10},{wch:14},{wch:14},{wch:14},{wch:10},{wch:10}];
+  _styleSheet(ws1,nc,0,1,3,4,totalR);
+  for(let r=4;r<totalR;r++){
+    const alt=(r-4)%2===1;
+    _sc(ws1,r,0,'data',alt); _sc(ws1,r,1,'data',alt);
+    for(let c=2;c<=8;c++) _sc(ws1,r,c,'money',alt);
+    _sc(ws1,r,9,'pct',alt); _sc(ws1,r,10,'pct',alt);
+    _balColor(ws1,r,8);
+  }
+  _sc(ws1,totalR,0,'total'); _sc(ws1,totalR,1,'total');
+  for(let c=2;c<=8;c++) _sc(ws1,totalR,c,'totalM');
+  _sc(ws1,totalR,9,'totalP'); _sc(ws1,totalR,10,'totalP');
+  _balColor(ws1,totalR,8);
+  XLSX.utils.book_append_sheet(wb,ws1,'财务明细');
+
+  // ── Sheet 2: 机器汇总 ──
+  const mc=5;
+  const machRows=[
+    [`3D打印  ${label}  机器运行汇总`],[],
+    ['机台','机型','总运行(h)','总产值(元)','平均使用率'],
+  ];
+  const machData={};
+  rs.dailyData.forEach(d=>{
+    if(!d.machineHours) return;
+    for(let i=1;i<=S.machines;i++){
+      if(!machData[i]) machData[i]={run:0,output:0,days:0};
+      const h=d.machineHours[i];
+      if(h){machData[i].run+=h.running; machData[i].days++;}
+    }
+  });
+  rs.dates.forEach(date=>{
+    const day=records[date];
+    if(!day||day.off) return;
+    (day.items||[]).forEach(it=>{
+      if(it.status==='running'&&machData[it.machine]) machData[it.machine].output+=(it.price||0)*(it.qty||1)+(+it.designFee||0);
+    });
+  });
+  let mTotalRun=0,mTotalOut=0;
+  for(let i=1;i<=S.machines;i++){
+    const m=machData[i]||{run:0,output:0,days:0};
+    machRows.push([`#${i}`,getMachineType(i),+m.run.toFixed(1),+m.output.toFixed(2),m.days?+(m.run/(m.days*24)).toFixed(4):0]);
+    mTotalRun+=m.run; mTotalOut+=m.output;
+  }
+  const mTotalR=machRows.length;
+  machRows.push(['合计','',+mTotalRun.toFixed(1),+mTotalOut.toFixed(2),'']);
+  const ws2=XLSX.utils.aoa_to_sheet(machRows);
+  ws2['!merges']=[{s:{r:0,c:0},e:{r:0,c:mc-1}}];
+  ws2['!cols']=[{wch:8},{wch:18},{wch:14},{wch:14},{wch:12}];
+  _styleSheet(ws2,mc,0,-1,2,3,mTotalR);
+  for(let r=3;r<mTotalR;r++){
+    const alt=(r-3)%2===1;
+    _sc(ws2,r,0,'data',alt); _sc(ws2,r,1,'data',alt);
+    _sc(ws2,r,2,'money',alt); _sc(ws2,r,3,'money',alt); _sc(ws2,r,4,'pct',alt);
+  }
+  _sc(ws2,mTotalR,0,'total'); _sc(ws2,mTotalR,1,'total');
+  _sc(ws2,mTotalR,2,'totalM'); _sc(ws2,mTotalR,3,'totalM'); _sc(ws2,mTotalR,4,'total');
+  XLSX.utils.book_append_sheet(wb,ws2,'机器汇总');
+
+  // ── Sheet 3: 维修记录 ──
+  const mc3=6;
+  const maintRows=[
+    [`3D打印  ${label}  维修费用明细`],[],
+    ['日期','机台','类型','维修描述','费用(元)','服务商'],
+  ];
+  const rangeMaint=maintenance.filter(m=>m.date&&m.date>=from&&m.date<=to).sort((a,b)=>a.date.localeCompare(b.date));
+  rangeMaint.forEach(m=>{
+    const machLabel=m.machine&&m.machine>0?`#${m.machine} ${getMachineType(m.machine)}`:'通用';
+    maintRows.push([m.date,machLabel,m.type||'',m.description||'',+(m.cost||0),m.vendor||'']);
+  });
+  const mTR=maintRows.length;
+  const mTotC=rangeMaint.reduce((s,m)=>s+(m.cost||0),0);
+  maintRows.push(['合计','','','',+mTotC.toFixed(2),'']);
+  const ws3=XLSX.utils.aoa_to_sheet(maintRows);
+  ws3['!merges']=[{s:{r:0,c:0},e:{r:0,c:mc3-1}}];
+  ws3['!cols']=[{wch:12},{wch:16},{wch:12},{wch:30},{wch:12},{wch:16}];
+  _styleSheet(ws3,mc3,0,-1,2,3,mTR);
+  for(let r=3;r<mTR;r++){
+    const alt=(r-3)%2===1;
+    _sc(ws3,r,0,'data',alt);_sc(ws3,r,1,'data',alt);_sc(ws3,r,2,'data',alt);
+    _sc(ws3,r,3,'data',alt);_sc(ws3,r,4,'money',alt);_sc(ws3,r,5,'data',alt);
+  }
+  _sc(ws3,mTR,0,'total');_sc(ws3,mTR,1,'total');_sc(ws3,mTR,2,'total');
+  _sc(ws3,mTR,3,'total');_sc(ws3,mTR,4,'totalM');_sc(ws3,mTR,5,'total');
+  XLSX.utils.book_append_sheet(wb,ws3,'维修记录');
+
+  XLSX.writeFile(wb, `3D打印_${from}_${to}_自定义汇总.xlsx`);
+}
+
+// ── Excel样式工具 ──
+function _bd(c){const s={style:'thin',color:{rgb:c||'FFD0D0D0'}};return{top:s,bottom:s,left:s,right:s}}
+function _sty(type,alt){
+  switch(type){
+    case 'title': return {font:{name:'微软雅黑',sz:16,bold:true,color:{rgb:'FFFFFFFF'}},fill:{fgColor:{rgb:'FF1A73E8'}},alignment:{horizontal:'center',vertical:'center'}};
+    case 'sub': return {font:{name:'微软雅黑',sz:10,color:{rgb:'FF5F6368'}},fill:{fgColor:{rgb:'FFE8F0FE'}},alignment:{horizontal:'center',vertical:'center'}};
+    case 'hdr': return {font:{name:'微软雅黑',sz:11,bold:true,color:{rgb:'FFFFFFFF'}},fill:{fgColor:{rgb:'FF1A73E8'}},alignment:{horizontal:'center',vertical:'center',wrapText:true},border:_bd('FF0D47A1')};
+    case 'data': return {font:{name:'微软雅黑',sz:10,color:{rgb:'FF202124'}},fill:{fgColor:{rgb:alt?'FFF8F9FA':'FFFFFFFF'}},alignment:{horizontal:'center',vertical:'center'},border:_bd()};
+    case 'money': {const s=_sty('data',alt);s.numFmt='#,##0.00';return s}
+    case 'pct': {const s=_sty('data',alt);s.numFmt='0.0%';return s}
+    case 'total': return {font:{name:'微软雅黑',sz:11,bold:true,color:{rgb:'FF0D47A1'}},fill:{fgColor:{rgb:'FFE8F0FE'}},alignment:{horizontal:'center',vertical:'center'},border:{top:{style:'medium',color:{rgb:'FF1A73E8'}},bottom:{style:'medium',color:{rgb:'FF1A73E8'}},left:{style:'thin',color:{rgb:'FFD0D0D0'}},right:{style:'thin',color:{rgb:'FFD0D0D0'}}}};
+    case 'totalM': {const s=_sty('total');s.numFmt='#,##0.00';return s}
+    case 'totalP': {const s=_sty('total');s.numFmt='0.0%';return s}
+    default: return {};
+  }
+}
+function _sc(ws,r,c,type,alt){
+  const ref=XLSX.utils.encode_cell({r,c});
+  if(!ws[ref]) ws[ref]={v:'',t:'s'};
+  ws[ref].s=_sty(type,alt);
+}
+function _rh(ws,r,h){if(!ws['!rows'])ws['!rows']=[];ws['!rows'][r]={hpt:h}}
+function _balColor(ws,r,c){
+  const ref=XLSX.utils.encode_cell({r,c});
+  if(ws[ref]&&typeof ws[ref].v==='number'){
+    if(ws[ref].v>0) ws[ref].s.font={...ws[ref].s.font,color:{rgb:'FF34A853'},bold:true};
+    else if(ws[ref].v<0) ws[ref].s.font={...ws[ref].s.font,color:{rgb:'FFEA4335'},bold:true};
+  }
+}
+function _styleSheet(ws,nc,titleR,subR,hdrR,dataStart,totalR){
+  _rh(ws,titleR,38); _rh(ws,hdrR,30); if(totalR>=0) _rh(ws,totalR,30);
+  if(subR>=0) _rh(ws,subR,24);
+  for(let c=0;c<nc;c++) _sc(ws,titleR,c,'title');
+  if(subR>=0) for(let c=0;c<nc;c++) _sc(ws,subR,c,'sub');
+  for(let c=0;c<nc;c++) _sc(ws,hdrR,c,'hdr');
+}
+
+function exportMonth(){
+  const month=document.getElementById('expMonth').value;
+  if(!month){alert('请选择月份');return}
+  const ms=getMonthSummary(month);
+  const wb=XLSX.utils.book_new();
+  const nc=11;
+
+  // ── Sheet 1: 月度财务 ──
+  const rows=[
+    [`3D打印部门  ${month}  月度财务报表`],
+    [`导出日期: ${today()}    |    工作天数: ${ms.days}天    |    机台数: ${S.machines}台    |    维修支出: ${ms.maintCost.toFixed(2)}元    |    月净结余: ${ms.balance>=0?'+':''}${ms.balance.toFixed(2)} 元`],
+    [],
+    ['日期','开机台数','总产值(元)','材料成本(元)','电费(元)','人工(元)','生产支出(元)','维修费用(元)','净结余(元)','结余率','使用率'],
+  ];
+  ms.dailyData.forEach(d=>{
+    const dayMaint=maintenance.filter(m=>m.date===d.date).reduce((s,m)=>s+(m.cost||0),0);
+    const dayNetBal=d.balance-dayMaint;
+    rows.push([d.date, d.runningMachines, +d.revenue.toFixed(2), +d.materialCost.toFixed(2), +d.elecCost.toFixed(2), +d.laborCost.toFixed(2), +d.totalCost.toFixed(2), +dayMaint.toFixed(2), +dayNetBal.toFixed(2), d.revenue?+(dayNetBal/d.revenue).toFixed(4):0, +d.utilization.toFixed(4)]);
+  });
+  const totalR=rows.length;
+  rows.push(['合计', ms.days+'天', +ms.revenue.toFixed(2), +ms.materialCost.toFixed(2), +ms.elecCost.toFixed(2), +ms.laborCost.toFixed(2), +ms.totalCost.toFixed(2), +ms.maintCost.toFixed(2), +ms.balance.toFixed(2), ms.revenue?+(ms.balance/ms.revenue).toFixed(4):0, +ms.avgUtil.toFixed(4)]);
+
+  const ws1=XLSX.utils.aoa_to_sheet(rows);
+  ws1['!merges']=[{s:{r:0,c:0},e:{r:0,c:nc-1}},{s:{r:1,c:0},e:{r:1,c:nc-1}}];
+  ws1['!cols']=[{wch:12},{wch:10},{wch:14},{wch:14},{wch:10},{wch:10},{wch:14},{wch:14},{wch:14},{wch:10},{wch:10}];
+  _styleSheet(ws1,nc,0,1,3,4,totalR);
+
+  for(let r=4;r<totalR;r++){
+    const alt=(r-4)%2===1;
+    _sc(ws1,r,0,'data',alt);
+    _sc(ws1,r,1,'data',alt);
+    for(let c=2;c<=8;c++) _sc(ws1,r,c,'money',alt);
+    _sc(ws1,r,9,'pct',alt);
+    _sc(ws1,r,10,'pct',alt);
+    _balColor(ws1,r,8);
+  }
+  _sc(ws1,totalR,0,'total'); _sc(ws1,totalR,1,'total');
+  for(let c=2;c<=8;c++) _sc(ws1,totalR,c,'totalM');
+  _sc(ws1,totalR,9,'totalP'); _sc(ws1,totalR,10,'totalP');
+  _balColor(ws1,totalR,8);
+
+  XLSX.utils.book_append_sheet(wb,ws1,'月度财务');
+
+  // ── Sheet 2: 机器汇总 ──
+  const mc=5;
+  const machRows=[
+    [`3D打印  ${month}  机器运行汇总`],
+    [],
+    ['机台','机型','总运行(h)','总产值(元)','平均使用率'],
+  ];
+  const machData={};
+  ms.dailyData.forEach(d=>{
+    if(!d.machineHours) return;
+    for(let i=1;i<=S.machines;i++){
+      if(!machData[i]) machData[i]={run:0,output:0,days:0};
+      const h=d.machineHours[i];
+      if(h){machData[i].run+=h.running; machData[i].days++;}
+    }
+  });
+  ms.dates.forEach(date=>{
+    const day=records[date];
+    if(!day||day.off) return;
+    (day.items||[]).forEach(it=>{
+      if(it.status==='running'&&machData[it.machine]) machData[it.machine].output+=(it.price||0)*(it.qty||1)+(+it.designFee||0);
+    });
+  });
+  let mTotalRun=0,mTotalOut=0;
+  for(let i=1;i<=S.machines;i++){
+    const m=machData[i]||{run:0,output:0,days:0};
+    machRows.push([`#${i}`, getMachineType(i), +m.run.toFixed(1), +m.output.toFixed(2), m.days?+(m.run/(m.days*24)).toFixed(4):0]);
+    mTotalRun+=m.run; mTotalOut+=m.output;
+  }
+  const mTotalR=machRows.length;
+  machRows.push(['合计','', +mTotalRun.toFixed(1), +mTotalOut.toFixed(2), '']);
+
+  const ws2=XLSX.utils.aoa_to_sheet(machRows);
+  ws2['!merges']=[{s:{r:0,c:0},e:{r:0,c:mc-1}}];
+  ws2['!cols']=[{wch:8},{wch:18},{wch:14},{wch:14},{wch:12}];
+  _styleSheet(ws2,mc,0,-1,2,3,mTotalR);
+
+  for(let r=3;r<mTotalR;r++){
+    const alt=(r-3)%2===1;
+    _sc(ws2,r,0,'data',alt);
+    _sc(ws2,r,1,'data',alt);
+    _sc(ws2,r,2,'money',alt);
+    _sc(ws2,r,3,'money',alt);
+    _sc(ws2,r,4,'pct',alt);
+  }
+  _sc(ws2,mTotalR,0,'total'); _sc(ws2,mTotalR,1,'total');
+  _sc(ws2,mTotalR,2,'totalM'); _sc(ws2,mTotalR,3,'totalM'); _sc(ws2,mTotalR,4,'total');
+
+  XLSX.utils.book_append_sheet(wb,ws2,'机器汇总');
+
+  // ── Sheet 3: 维修记录 ──
+  const mc3=6;
+  const maintRows=[
+    [`3D打印  ${month}  维修费用明细`],[],
+    ['日期','机台','类型','维修描述','费用(元)','服务商'],
+  ];
+  const monthMaint=maintenance.filter(m=>m.date&&m.date.startsWith(month)).sort((a,b)=>a.date.localeCompare(b.date));
+  monthMaint.forEach(m=>{
+    const machLabel=m.machine&&m.machine>0?`#${m.machine} ${getMachineType(m.machine)}`:'通用';
+    maintRows.push([m.date,machLabel,m.type||'',m.description||'',+(m.cost||0),m.vendor||'']);
+  });
+  const mTR=maintRows.length;
+  const mTotC=monthMaint.reduce((s,m)=>s+(m.cost||0),0);
+  maintRows.push(['合计','','','',+mTotC.toFixed(2),'']);
+  const ws3=XLSX.utils.aoa_to_sheet(maintRows);
+  ws3['!merges']=[{s:{r:0,c:0},e:{r:0,c:mc3-1}}];
+  ws3['!cols']=[{wch:12},{wch:16},{wch:12},{wch:30},{wch:12},{wch:16}];
+  _styleSheet(ws3,mc3,0,-1,2,3,mTR);
+  for(let r=3;r<mTR;r++){
+    const alt=(r-3)%2===1;
+    _sc(ws3,r,0,'data',alt);_sc(ws3,r,1,'data',alt);_sc(ws3,r,2,'data',alt);
+    _sc(ws3,r,3,'data',alt);_sc(ws3,r,4,'money',alt);_sc(ws3,r,5,'data',alt);
+  }
+  _sc(ws3,mTR,0,'total');_sc(ws3,mTR,1,'total');_sc(ws3,mTR,2,'total');
+  _sc(ws3,mTR,3,'total');_sc(ws3,mTR,4,'totalM');_sc(ws3,mTR,5,'total');
+  XLSX.utils.book_append_sheet(wb,ws3,'维修记录');
+
+  XLSX.writeFile(wb, `3D打印_${month}_月度汇总.xlsx`);
+}
+
+function exportYear(){
+  const year=document.getElementById('expYear').value;
+  if(!year){alert('请选择年份');return}
+  const wb=XLSX.utils.book_new();
+  const nc=11;
+
+  const rows=[
+    [`3D打印部门  ${year}年  年度汇总报表`],
+    [`导出日期: ${today()}`],
+    [],
+    ['月份','工作天数','总产值(元)','材料成本(元)','电费(元)','人工(元)','生产支出(元)','维修费用(元)','净结余(元)','结余率','平均使用率']
+  ];
+  let yRev=0,yMat=0,yElec=0,yLab=0,yMaint=0,yDays=0,yUtil=0;
+  for(let m=1;m<=12;m++){
+    const key=`${year}-${String(m).padStart(2,'0')}`;
+    const ms=getMonthSummary(key);
+    if(!ms.days) continue;
+    yRev+=ms.revenue; yMat+=ms.materialCost; yElec+=ms.elecCost; yLab+=ms.laborCost; yMaint+=ms.maintCost; yDays+=ms.days; yUtil+=ms.avgUtil*ms.days;
+    rows.push([key, ms.days, +ms.revenue.toFixed(2), +ms.materialCost.toFixed(2), +ms.elecCost.toFixed(2), +ms.laborCost.toFixed(2), +ms.totalCost.toFixed(2), +ms.maintCost.toFixed(2), +ms.balance.toFixed(2), ms.revenue?+(ms.balance/ms.revenue).toFixed(4):0, +ms.avgUtil.toFixed(4)]);
+  }
+  const yExp=yMat+yElec+yLab;
+  const yNetBal=yRev-yExp-yMaint;
+  const totalR=rows.length;
+  rows.push(['年度合计', yDays, +yRev.toFixed(2), +yMat.toFixed(2), +yElec.toFixed(2), +yLab.toFixed(2), +yExp.toFixed(2), +yMaint.toFixed(2), +yNetBal.toFixed(2), yRev?+(yNetBal/yRev).toFixed(4):0, yDays?+(yUtil/yDays).toFixed(4):0]);
+
+  const ws=XLSX.utils.aoa_to_sheet(rows);
+  ws['!merges']=[{s:{r:0,c:0},e:{r:0,c:nc-1}},{s:{r:1,c:0},e:{r:1,c:nc-1}}];
+  ws['!cols']=[{wch:10},{wch:10},{wch:14},{wch:14},{wch:10},{wch:10},{wch:14},{wch:14},{wch:14},{wch:10},{wch:12}];
+  _styleSheet(ws,nc,0,1,3,4,totalR);
+
+  for(let r=4;r<totalR;r++){
+    const alt=(r-4)%2===1;
+    _sc(ws,r,0,'data',alt);
+    _sc(ws,r,1,'data',alt);
+    for(let c=2;c<=8;c++) _sc(ws,r,c,'money',alt);
+    _sc(ws,r,9,'pct',alt);
+    _sc(ws,r,10,'pct',alt);
+    _balColor(ws,r,8);
+  }
+  _sc(ws,totalR,0,'total'); _sc(ws,totalR,1,'total');
+  for(let c=2;c<=8;c++) _sc(ws,totalR,c,'totalM');
+  _sc(ws,totalR,9,'totalP'); _sc(ws,totalR,10,'totalP');
+  _balColor(ws,totalR,8);
+
+  XLSX.utils.book_append_sheet(wb,ws,'年度汇总');
+  XLSX.writeFile(wb, `3D打印_${year}年_年度汇总.xlsx`);
+}
+
+// ═══════════════════════════════════════════════════════
+// 设置
+// ═══════════════════════════════════════════════════════
+function loadSettings(){
+  document.getElementById('sMachines').value=S.machines;
+  document.getElementById('sElec').value=S.elecPerMachine;
+  document.getElementById('sLabor').value=S.laborPerDay;
+  document.getElementById('sLoss').value=S.lossRate;
+  document.getElementById('sProfit').value=S.profitRate;
+}
+function saveSettings(){
+  S.machines=Math.max(20, parseInt(document.getElementById('sMachines').value)||20);
+  S.elecPerMachine=parseFloat(document.getElementById('sElec').value)||1.5;
+  S.laborPerDay=parseFloat(document.getElementById('sLabor').value)||220;
+  S.lossRate=Math.max(1, parseFloat(document.getElementById('sLoss').value)||1.2);
+  S.profitRate=parseFloat(document.getElementById('sProfit').value)||40;
+  saveAll(); alert('设置已保存');
+}
+
+// 导出/导入JSON
+function exportAllData(){
+  const data={settings:S, materials, products, records, maintenance, inventory, stockInLogs, schedules, exportDate:new Date().toISOString()};
+  const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download=`3D打印数据备份_${today()}.json`;
+  a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href),100);
+}
+function importAllData(e){
+  const file=e.target.files[0];
+  if(!file) return;
+  const reader=new FileReader();
+  reader.onload=async ev=>{
+    try{
+      const data=JSON.parse(ev.target.result);
+      if(typeof data !== 'object' || data === null || Array.isArray(data)) throw new Error('数据格式错误，需要JSON对象');
+      if(data.materials && !Array.isArray(data.materials)) throw new Error('materials 必须是数组');
+      if(data.products && !Array.isArray(data.products)) throw new Error('products 必须是数组');
+      if(data.records && (typeof data.records !== 'object' || Array.isArray(data.records))) throw new Error('records 格式错误');
+      if(data.maintenance && !Array.isArray(data.maintenance)) throw new Error('maintenance 必须是数组');
+      if(data.inventory && (typeof data.inventory !== 'object' || Array.isArray(data.inventory))) throw new Error('inventory 格式错误');
+      if(data.stockInLogs && !Array.isArray(data.stockInLogs)) throw new Error('stockInLogs 必须是数组');
+      if(data.schedules && !Array.isArray(data.schedules)) throw new Error('schedules 必须是数组');
+      if(data.settings) S=data.settings;
+      if(data.materials) { materials=data.materials; nextMatId=Math.max(0,...materials.map(m=>m.id))+1; }
+      if(data.products) { products=data.products; nextProdId=products.length?Math.max(0,...products.map(p=>p.id))+1:1; }
+      if(data.records) records=data.records;
+      if(data.maintenance) { maintenance=data.maintenance; nextMaintId=maintenance.length?Math.max(0,...maintenance.map(m=>m.id))+1:1; }
+      if(data.inventory) inventory=data.inventory;
+      if(data.stockInLogs) { stockInLogs=data.stockInLogs; nextStockInId=stockInLogs.length?Math.max(0,...stockInLogs.map(l=>l.id))+1:1; }
+      if(data.schedules) { schedules=data.schedules; nextSchedId=schedules.length?Math.max(0,...schedules.map(s=>s.id))+1:1; }
+      await pushNow();
+      alert('数据导入成功！'); location.reload();
+    }catch(err){alert('导入失败: '+err.message)}
+  };
+  reader.readAsText(file);
+}
+async function clearAllData(){
+  if(!confirm('确定清空所有数据？此操作不可恢复！')) return;
+  S={machines:20, elecPerMachine:1.5, laborPerDay:220, lossRate:1.2, profitRate:40};
+  materials=[]; products=[]; records={}; maintenance=[]; inventory={}; stockInLogs=[]; schedules=[];
+  nextMatId=1; nextProdId=1; nextMaintId=1; nextStockInId=1; nextSchedId=1;
+  await pushNow();
+  location.reload();
+}
+
+// ═══════════════════════════════════════════════════════
+// 初始化 - 从服务器加载数据 + 定时同步
+// ═══════════════════════════════════════════════════════
+async function pullFromServer(){
+  const res=await fetch('api/data');
+  if(!res.ok) throw new Error('服务器返回 ' + res.status);
+  const data=await res.json();
+  if(data._version) _serverVer=data._version;
+  if(data.settings) { S=data.settings; if(S.machines<20){S.machines=20;} }
+  if(data.materials&&data.materials.length) { materials=data.materials; nextMatId=Math.max(0,...materials.map(m=>m.id))+1; }
+  if(data.products) { products=data.products; nextProdId=products.length?Math.max(0,...products.map(p=>p.id))+1:1; }
+  if(data.records) records=data.records;
+  if(data.maintenance) { maintenance=data.maintenance; nextMaintId=maintenance.length?Math.max(0,...maintenance.map(m=>m.id))+1:1; }
+  if(data.inventory) inventory=data.inventory;
+  if(data.stockInLogs) { stockInLogs=data.stockInLogs; nextStockInId=stockInLogs.length?Math.max(0,...stockInLogs.map(l=>l.id))+1:1; }
+  if(data.schedules) { schedules=data.schedules; nextSchedId=schedules.length?Math.max(0,...schedules.map(s=>s.id))+1:1; }
+}
+
+function reRenderCurrent(){
+  const a=document.querySelector('#nav a.active');
+  if(!a) return;
+  const p=a.dataset.p;
+  if(p==='dashboard') renderDashboard();
+  else if(p==='daily') loadDay();
+  else if(p==='machines') renderMachinePage();
+  else if(p==='materials') renderMaterials();
+  else if(p==='products') renderProducts();
+  else if(p==='maintenance') renderMaintenance();
+  else if(p==='warehouse') renderWarehouse();
+  else if(p==='schedule') renderSchedule();
+  else if(p==='report') setupReport();
+  else if(p==='settings') loadSettings();
+}
+
+// ═══════════════════════════════════════════════════════
+// 打印机实时状态
+// ═══════════════════════════════════════════════════════
+let liveStatus = {};
+
+async function pollPrinterStatus(){
+  try{
+    const res = await fetch('api/printers');
+    liveStatus = await res.json();
+    updateLiveCards();
+  }catch(e){}
+}
+
+function getBambuStateText(state){
+  const map = {
+    'IDLE':'空闲','RUNNING':'打印中','PAUSE':'已暂停','FINISH':'已完成',
+    'FAILED':'打印失败','PREPARE':'准备中','SLICING':'切片中','UNKNOWN':'未知'
+  };
+  return map[state] || state || '未知';
+}
+
+function getBambuStateClass(state){
+  if(state==='RUNNING'||state==='PREPARE'||state==='SLICING') return 'printing';
+  if(state==='FAILED') return 'fault';
+  return 'idle';
+}
+
+function formatRemaining(min){
+  if(!min||min<=0) return '';
+  const h=Math.floor(min/60), m=min%60;
+  return h>0 ? `${h}h${m}m` : `${m}m`;
+}
+
+function renderLiveCard(machineId){
+  const ps = liveStatus[machineId];
+  if(!ps) return null;
+
+  // ── 离线状态 ──
+  if(!ps.connected){
+    const isFF = machineId >= 6 && machineId <= 10;
+    const errText = ps.error || '未连接';
+    const isScanning = errText.includes('搜索');
+    let html = `<div class="machine-card idle">`;
+    html += `<div class="m-no">#${machineId}<span class="offline-badge">离线</span></div>`;
+    html += `<div class="m-type">${getMachineType(machineId)}</div>`;
+    html += `<span class="m-status idle">离线</span>`;
+    html += `<div class="m-product" style="color:var(--r);font-size:10px;margin-top:2px">${escHtml(errText)}</div>`;
+    if(isFF){
+      if(isScanning){
+        html += `<div style="margin-top:5px;font-size:10px;color:var(--gray)">&#128269; 扫描中，请稍候...</div>`;
+      } else {
+        html += `<div style="margin-top:5px"><button onclick="rescanPrinter(${machineId},this)" style="font-size:10px;padding:2px 10px;border:1px solid var(--c1);border-radius:4px;background:#fff;color:var(--c1);cursor:pointer">&#128269; 重新搜索</button></div>`;
+      }
+    }
+    html += `</div>`;
+    return html;
+  }
+
+  // ── 在线状态 ──
+  const stClass = getBambuStateClass(ps.gcodeState);
+  const stText = getBambuStateText(ps.gcodeState);
+  const fileName = ps.gcodeFile ? ps.gcodeFile.replace(/\.gcode\.3mf$/i,'').replace(/\.3mf$/i,'').replace(/\.gcode$/i,'') : '';
+  const cleanFileName = fileName.replace(/_\d+$/, '');
+  let matchedProd = null;
+  if(cleanFileName && products && products.length){
+    matchedProd = products.find(p => cleanFileName === p.name);
+    if(!matchedProd) matchedProd = products.find(p => p.name.length >= 3 && (cleanFileName.includes(p.name) || p.name.includes(cleanFileName)));
+  }
+  const displayName = matchedProd ? matchedProd.name : fileName;
+  let html = `<div class="machine-card ${stClass}">`;
+  html += `<div class="m-no">#${machineId}<span class="live-badge">实时</span></div>`;
+  html += `<div class="m-type">${getMachineType(machineId)}</div>`;
+  html += `<span class="m-status ${stClass}">${stText}</span>`;
+  if(ps.gcodeState==='RUNNING'){
+    html += `<div class="m-product" title="${escHtml(fileName)}">${escHtml(displayName)||'打印中'}</div>`;
+    html += `<div class="m-progress"><div class="m-progress-bar" style="width:${ps.printProgress}%"></div></div>`;
+    html += `<div class="m-live"><span class="live-dot"></span>${ps.printProgress}%`;
+    const rem = formatRemaining(ps.remainingTime);
+    if(rem) html += ` · 剩余${rem}`;
+    if(ps.totalLayers>0) html += ` · ${ps.layerNum}/${ps.totalLayers}层`;
+    html += `</div>`;
+  } else if(ps.gcodeState==='FINISH'){
+    html += `<div class="m-product" title="${escHtml(fileName)}">${escHtml(displayName)||'完成'}</div>`;
+  } else {
+    html += `<div class="m-product">-</div>`;
+  }
+  if(ps.nozzleTemp>0 || ps.bedTemp>0){
+    html += `<div class="m-temps">喷头 ${Math.round(ps.nozzleTemp)}°/${Math.round(ps.nozzleTarget)}° · 热床 ${Math.round(ps.bedTemp)}°/${Math.round(ps.bedTarget)}°</div>`;
+  }
+  html += `</div>`;
+  return html;
+}
+
+async function rescanPrinter(id, btn){
+  if(btn){ btn.disabled=true; btn.textContent='搜索中...'; }
+  try{
+    await fetch(`api/printers/${id}/rescan`, {method:'POST'});
+  }catch(e){
+    if(btn){ btn.disabled=false; btn.textContent='重新搜索'; }
+  }
+  setTimeout(pollPrinterStatus, 500);
+}
+
+async function rescanAllOffline(){
+  try{ await fetch('api/printers/rescan-all', {method:'POST'}); }catch(e){}
+  setTimeout(pollPrinterStatus, 500);
+}
+
+// ─── 耗材报警系统 ───────────────────────────────────────
+const _activeAlerts = new Map(); // key → DOM el
+
+function _playAlertBeep(critical){
+  try{
+    const ctx = new (window.AudioContext||window.webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.type = 'sine';
+    if(critical){
+      osc.frequency.setValueAtTime(880, ctx.currentTime);
+      osc.frequency.setValueAtTime(660, ctx.currentTime + 0.18);
+      osc.frequency.setValueAtTime(880, ctx.currentTime + 0.36);
+    } else {
+      osc.frequency.setValueAtTime(660, ctx.currentTime);
+    }
+    gain.gain.setValueAtTime(0.25, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.55);
+    osc.start(ctx.currentTime); osc.stop(ctx.currentTime + 0.6);
+  }catch(e){}
+}
+
+function _showAlert(key, critical, title, body, hint){
+  if(_activeAlerts.has(key)) return;
+  const container = document.getElementById('filament-alerts');
+  if(!container) return;
+  const color = critical ? 'var(--r)' : '#f59e0b';
+  const icon  = critical ? '🚨' : '⚠️';
+  const el = document.createElement('div');
+  el.className = 'f-alert';
+  el.style.border = `2px solid ${color}`;
+  el.innerHTML =
+    `<div class="f-alert-head">` +
+    `<span class="f-alert-title" style="color:${color}">${icon} ${title}</span>` +
+    `<button class="f-alert-dismiss" onclick="_dismissAlert('${key}')">×</button></div>` +
+    (body ? `<div class="f-alert-body">${body}</div>` : '') +
+    (hint ? `<div class="f-alert-hint">${hint}</div>` : '');
+  container.appendChild(el);
+  _activeAlerts.set(key, el);
+  _playAlertBeep(critical);
+}
+
+function _removeAlert(key){
+  const el = _activeAlerts.get(key);
+  if(el && el.parentNode) el.parentNode.removeChild(el);
+  _activeAlerts.delete(key);
+}
+
+function _dismissAlert(key){
+  const el = _activeAlerts.get(key);
+  if(el){ el.style.opacity='0'; el.style.transform='translateX(30px)'; }
+  setTimeout(()=>_removeAlert(key), 200);
+  // 记录本次dismiss避免立刻重弹（清除后在下次状态变化才重新触发）
+  _dismissedKeys.add(key);
+}
+const _dismissedKeys = new Set();
+
+function checkFilamentAlerts(){
+  for(const [id, ps] of Object.entries(liveStatus)){
+    const mid = parseInt(id);
+    if(!ps || !ps.connected) continue;
+
+    // ── Bambu AMS 余量监测 ──────────────────────────────
+    const remain = ps.activeTrayRemain; // -1 = 未知, 0-100 = %
+    if(remain !== undefined && remain >= 0){
+      const mat   = ps.liveMaterial || '耗材';
+      const critK = `${mid}_filament_out`;
+      const warnK = `${mid}_filament_low`;
+
+      if(remain === 0 && ps.gcodeState !== 'IDLE' && ps.gcodeState !== 'FINISH'){
+        if(!_dismissedKeys.has(critK))
+          _showAlert(critK, true, `#${mid} 耗材耗尽`, `${mat} 剩余 0%，打印已暂停`, '请更换耗材后继续打印');
+        _removeAlert(warnK); // 升级后移除低耗预警
+      } else {
+        // 条件解除（换料后 remain > 0）
+        if(remain > 0){ _removeAlert(critK); _dismissedKeys.delete(critK); }
+        if(remain > 15){ _removeAlert(warnK); _dismissedKeys.delete(warnK); }
+        if(remain > 0 && remain <= 15 && ps.gcodeState === 'RUNNING'){
+          if(!_dismissedKeys.has(warnK))
+            _showAlert(warnK, false, `#${mid} 耗材不足`, `${mat} 仅剩 ${remain}%`, '请准备更换耗材');
+        }
+      }
+    }
+
+    // ── 打印失败报警（所有设备） ────────────────────────
+    const failK = `${mid}_failed`;
+    if(ps.gcodeState === 'FAILED'){
+      if(!_dismissedKeys.has(failK))
+        _showAlert(failK, true, `#${mid} 打印失败`, ps.gcodeFile || '', '请检查打印机状态');
+    } else {
+      _removeAlert(failK); _dismissedKeys.delete(failK);
+    }
+
+    // ── FlashForge / 任意设备 ERROR 状态 ───────────────
+    const errK = `${mid}_error`;
+    if(ps.gcodeState === 'ERROR'){
+      if(!_dismissedKeys.has(errK))
+        _showAlert(errK, true, `#${mid} 打印异常`, ps.error || '', '请检查打印机状态');
+    } else {
+      _removeAlert(errK); _dismissedKeys.delete(errK);
+    }
+
+    // ── FlashForge (#6-#10) 断料检测 ─────────────────────
+    if(mid >= 6 && mid <= 10){
+      const filK = `${mid}_ff_filament_out`;
+      if(ps.filamentOut){
+        if(!_dismissedKeys.has(filK))
+          _showAlert(filK, true, `#${mid} 耗材用完`,
+            '检测到断料，已自动发送暂停指令',
+            '请更换耗材，装料后在设备上继续打印');
+      } else {
+        _removeAlert(filK);
+        if(ps.gcodeState === 'RUNNING') _dismissedKeys.delete(filK);
+      }
+
+      // FlashForge 暂停状态（可能是断料导致或手动暂停）
+      const pauseK = `${mid}_ff_pause`;
+      if(ps.gcodeState === 'PAUSE'){
+        if(!_dismissedKeys.has(pauseK))
+          _showAlert(pauseK, true, `#${mid} 打印已暂停`,
+            '检测到打印机暂停，常见原因：耗材用完',
+            '请检查耗材，装料后在设备上继续打印');
+      } else {
+        _removeAlert(pauseK);
+        if(ps.gcodeState === 'RUNNING') _dismissedKeys.delete(pauseK);
+      }
+    }
+  }
+}
+// ────────────────────────────────────────────────────────
+
+function updateLiveCards(){
+  checkFilamentAlerts();
+  // Update dashboard machine cards if visible
+  document.querySelectorAll('.machine-card[data-live-id]').forEach(card => {
+    const mid = parseInt(card.dataset.liveId);
+    const liveHtml = renderLiveCard(mid);
+    if(liveHtml){
+      const tmp = document.createElement('div');
+      tmp.innerHTML = liveHtml;
+      const newCard = tmp.firstElementChild;
+      newCard.setAttribute('data-live-id', mid);
+      card.replaceWith(newCard);
+    }
+  });
+}
+
+async function boot(){
+  try{
+    await pullFromServer();
+    updateSyncUI('ok');
+  }catch(e){
+    console.log('服务器未连接，使用默认数据');
+    updateSyncUI('err');
+  }
+  updateDashCustomInputs();
+  renderDashboard();
+
+  // 拉取打印机实时状态
+  pollPrinterStatus();
+
+  // 每5分钟检查服务器是否有新数据（其他用户的修改）
+  setInterval(async()=>{
+    // 有未保存修改 或 模态框打开时跳过拉取，防止覆盖用户输入
+    if(_dirty) return;
+    if(document.querySelector('.modal-bg.show')) return;
+    try{
+      const res=await fetch('api/version');
+      const {version}=await res.json();
+      if(version>_serverVer){
+        _serverVer=version;
+        updateSyncUI('pull');
+        await pullFromServer();
+        reRenderCurrent();
+        updateSyncUI('ok');
+      }
+    }catch(e){}
+  }, 300000);
+
+  // 每5秒刷新打印机实时状态
+  setInterval(pollPrinterStatus, 5000);
+
+  // 每秒更新实时耗时计时器
+  setInterval(() => {
+    document.querySelectorAll('.live-timer').forEach(el => {
+      const start = parseInt(el.dataset.start);
+      if (!start) return;
+      // 若打印机实时状态已不是RUNNING，停止计时（显示静止时间，不再跳动）
+      const machineId = parseInt(el.dataset.machine);
+      const live = machineId ? liveStatus[machineId] : null;
+      const isStillRunning = !live || !live.connected || live.gcodeState === 'RUNNING' || live.gcodeState === 'UNKNOWN';
+      if (isStillRunning && el.dataset.frozenMs) { delete el.dataset.frozenMs; el.style.color = ''; }
+      const elapsed = ((isStillRunning ? Date.now() : (el.dataset.frozenMs ? start + parseInt(el.dataset.frozenMs) : Date.now())) - start) / 1000;
+      if (!isStillRunning && !el.dataset.frozenMs) {
+        el.dataset.frozenMs = Date.now() - start; // 记录停止时的毫秒数
+        el.style.color = 'var(--gray)'; // 变灰表示已停止
+      }
+      const h = Math.floor(elapsed / 3600);
+      const m = Math.floor((elapsed % 3600) / 60);
+      const s = Math.floor(elapsed % 60);
+      el.textContent = h + 'h' + String(m).padStart(2,'0') + 'm' + String(s).padStart(2,'0') + 's';
+    });
+  }, 1000);
+}
+boot();
+</script>
+</body>
+</html>

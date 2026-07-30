@@ -247,12 +247,78 @@ test('SPIN VQ clears electronic amount formulas from unused template rows', asyn
 
   const firstDataRow = electronicHeaderRow + 1;
   assert.equal(worksheet.getCell(firstDataRow, 3).value, 'IC');
-  assert.equal(worksheet.getCell(firstDataRow + 1, 3).value, 'PACB电子');
+  assert.equal(worksheet.getCell(firstDataRow + 1, 3).value, 'PACB Electronics');
+  assert.equal(worksheet.getCell(firstDataRow + 1, 4).value, 'PACB电子');
   assert.ok(worksheet.getCell(firstDataRow, 12).value.formula);
   assert.ok(worksheet.getCell(firstDataRow + 1, 12).value.formula);
   for (let row = firstDataRow + 2; row < firstDataRow + 10; row++) {
     assert.equal(worksheet.getCell(row, 12).value, null);
   }
+});
+
+test('SPIN VQ displays English and Chinese in separate description columns', async () => {
+  const buffer = await exportSpin({
+    quote: {
+      id: 22,
+      quote_no: 'SPIN-BILINGUAL',
+      product_name: '红色艾摩',
+      customer: 'SPIN',
+      version: 'V1',
+    },
+    sections: [
+      {
+        dept: 'sewing',
+        payload_json: JSON.stringify({
+          sewing_groups: [{
+            name: '红色艾摩',
+            items: [
+              { fabric: '58"白色细纹莱卡布', part: '面部', usage: 0.1, mat_price: 10 },
+              { fabric: '布标', part: '', usage: 1, mat_price: 0.2 },
+            ],
+          }],
+        }),
+      },
+      {
+        dept: 'engineering',
+        payload_json: JSON.stringify({
+          hardware: [{ name: '胶针', qty: 1, unit_price: 0.2 }],
+        }),
+      },
+      {
+        dept: 'electronic',
+        payload_json: JSON.stringify({
+          electronics: [{ name: 'PACB电子', qty: 1, unit_price: 3.9 }],
+        }),
+      },
+      {
+        dept: 'sales',
+        payload_json: JSON.stringify({
+          header: { fx_hkd_usd: 7.75 },
+          freight_calc: freight,
+          spin_transport: spinConfig,
+        }),
+      },
+    ],
+  });
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(buffer);
+  const worksheet = workbook.worksheets.find(sheet => sheet.name !== 'Summary');
+  const sectionRows = {};
+  worksheet.eachRow(row => {
+    const title = String(row.getCell(3).value || '');
+    for (const section of ['Fabric Cost', 'Metal Parts Cost', 'Electronic Parts Cost', 'Others Cost']) {
+      if (title.includes(section)) sectionRows[section] = row.number;
+    }
+  });
+
+  assert.equal(worksheet.getCell(sectionRows['Fabric Cost'] + 1, 3).value, '58" White Fine-texture Lycra Fabric');
+  assert.equal(worksheet.getCell(sectionRows['Fabric Cost'] + 1, 4).value, '58"白色细纹莱卡布');
+  assert.equal(worksheet.getCell(sectionRows['Metal Parts Cost'] + 1, 3).value, 'Dennison Tag');
+  assert.equal(worksheet.getCell(sectionRows['Metal Parts Cost'] + 1, 4).value, '胶针');
+  assert.equal(worksheet.getCell(sectionRows['Electronic Parts Cost'] + 1, 3).value, 'PACB Electronics');
+  assert.equal(worksheet.getCell(sectionRows['Electronic Parts Cost'] + 1, 4).value, 'PACB电子');
+  assert.equal(worksheet.getCell(sectionRows['Others Cost'] + 1, 3).value, 'Woven Label');
+  assert.equal(worksheet.getCell(sectionRows['Others Cost'] + 1, 4).value, '布标');
 });
 
 test('SPIN VQ exports labor amounts as Excel formulas', async () => {

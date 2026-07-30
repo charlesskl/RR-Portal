@@ -14,7 +14,7 @@ public class ShipmentsController(ISqlConnectionFactory factory) : ControllerBase
         using var c = factory.Create();
         var rows = await c.QueryAsync(@"
             SELECT s.*, COUNT(si.id) AS item_count
-            FROM dbo.shipments s LEFT JOIN dbo.shipment_items si ON si.shipment_id = s.id
+            FROM shipments s LEFT JOIN shipment_items si ON si.shipment_id = s.id
             GROUP BY s.id, s.customer, s.container_no, s.container_count, s.ship_date, s.load_date, s.bl_no, s.rate, s.status, s.created_at
             ORDER BY s.ship_date DESC, s.id DESC");
         return Ok(rows);
@@ -25,7 +25,7 @@ public class ShipmentsController(ISqlConnectionFactory factory) : ControllerBase
     public async Task<IActionResult> ShippedMaterialIds()
     {
         using var c = factory.Create();
-        var ids = await c.QueryAsync<int>("SELECT DISTINCT material_id FROM dbo.shipment_items WHERE material_id IS NOT NULL");
+        var ids = await c.QueryAsync<int>("SELECT DISTINCT material_id FROM shipment_items WHERE material_id IS NOT NULL");
         return Ok(ids);
     }
 
@@ -33,9 +33,9 @@ public class ShipmentsController(ISqlConnectionFactory factory) : ControllerBase
     public async Task<IActionResult> Get(int id)
     {
         using var c = factory.Create();
-        var sh = await c.QueryFirstOrDefaultAsync("SELECT * FROM dbo.shipments WHERE id=@id", new { id });
+        var sh = await c.QueryFirstOrDefaultAsync("SELECT * FROM shipments WHERE id=@id", new { id });
         if (sh == null) return NotFound(new { error = "not found" });
-        var items = (await c.QueryAsync("SELECT * FROM dbo.shipment_items WHERE shipment_id=@id ORDER BY seq, id", new { id })).ToList();
+        var items = (await c.QueryAsync("SELECT * FROM shipment_items WHERE shipment_id=@id ORDER BY seq, id", new { id })).ToList();
         var dict = (IDictionary<string, object?>)sh!;
         dict["items"] = items;
         return Ok(dict);
@@ -86,9 +86,9 @@ public class ShipmentsController(ISqlConnectionFactory factory) : ControllerBase
         try
         {
             var id = await c.ExecuteScalarAsync<int>(@"
-INSERT INTO dbo.shipments(customer, container_no, container_count, ship_date, load_date, bl_no, rate, status)
-OUTPUT INSERTED.id
-VALUES (@customer, @container_no, @container_count, @ship_date, @load_date, @bl_no, @rate, @status)",
+INSERT INTO shipments(customer, container_no, container_count, ship_date, load_date, bl_no, rate, status)
+VALUES (@customer, @container_no, @container_count, @ship_date, @load_date, @bl_no, @rate, @status)
+RETURNING id",
                 new {
                     customer = s.customer ?? "",
                     container_no = s.container_no ?? "",
@@ -104,7 +104,7 @@ VALUES (@customer, @container_no, @container_count, @ship_date, @load_date, @bl_
             {
                 var it = items[i];
                 await c.ExecuteAsync(@"
-INSERT INTO dbo.shipment_items(shipment_id, material_id, seq, kg, qty, cartons, qty_per_carton, pallet, price, currency,
+INSERT INTO shipment_items(shipment_id, material_id, seq, kg, qty, cartons, qty_per_carton, pallet, price, currency,
     po_no, po_date, supplier, customs_company, bl_head, contract_no, contract_date,
     invoice_no, invoice_date, invoice_price, product_use, formula_name)
 VALUES (@id, @material_id, @seq, @kg, @qty, @cartons, @qty_per_carton, @pallet, @price, @currency,
@@ -141,7 +141,7 @@ VALUES (@id, @material_id, @seq, @kg, @qty, @cartons, @qty_per_carton, @pallet, 
         using var tx = c.BeginTransaction();
         try
         {
-            var n = await c.ExecuteAsync(@"UPDATE dbo.shipments SET customer=@customer, container_no=@container_no,
+            var n = await c.ExecuteAsync(@"UPDATE shipments SET customer=@customer, container_no=@container_no,
                 container_count=@container_count, ship_date=@ship_date, load_date=@load_date, bl_no=@bl_no, rate=@rate, status=@status
                 WHERE id=@id",
                 new {
@@ -156,13 +156,13 @@ VALUES (@id, @material_id, @seq, @kg, @qty, @cartons, @qty_per_carton, @pallet, 
                     status = s.status ?? "draft"
                 }, tx);
             if (n == 0) { tx.Rollback(); return NotFound(new { error = "走货不存在" }); }
-            await c.ExecuteAsync("DELETE FROM dbo.shipment_items WHERE shipment_id=@id", new { id }, tx);
+            await c.ExecuteAsync("DELETE FROM shipment_items WHERE shipment_id=@id", new { id }, tx);
             var items = s.items ?? new();
             for (int i = 0; i < items.Count; i++)
             {
                 var it = items[i];
                 await c.ExecuteAsync(@"
-INSERT INTO dbo.shipment_items(shipment_id, material_id, seq, kg, qty, cartons, qty_per_carton, pallet, price, currency,
+INSERT INTO shipment_items(shipment_id, material_id, seq, kg, qty, cartons, qty_per_carton, pallet, price, currency,
     po_no, po_date, supplier, customs_company, bl_head, contract_no, contract_date,
     invoice_no, invoice_date, invoice_price, product_use, formula_name)
 VALUES (@id, @material_id, @seq, @kg, @qty, @cartons, @qty_per_carton, @pallet, @price, @currency,
@@ -195,7 +195,7 @@ VALUES (@id, @material_id, @seq, @kg, @qty, @cartons, @qty_per_carton, @pallet, 
     public async Task<IActionResult> Delete(int id)
     {
         using var c = factory.Create();
-        await c.ExecuteAsync("DELETE FROM dbo.shipments WHERE id=@id", new { id });
+        await c.ExecuteAsync("DELETE FROM shipments WHERE id=@id", new { id });
         return Ok(new { ok = true });
     }
 }

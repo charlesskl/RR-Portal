@@ -12,6 +12,7 @@
 const ExcelJS = require('exceljs');
 const { exportSpin } = require('./exportSpin');
 const { readTemplateParts } = require('./templateParts');
+const { customerEnglish } = require('./vqEnglish');
 
 
 // 报客表「Mark Up (%)」固定加价率 — 统一套到原料/人工/购买件/车缝等成本行。
@@ -30,13 +31,12 @@ const sewingMarkup = (row) => {
   return num(row.markup) || SEWING_DEFAULT_MARKUP;
 };
 
-// Bilingual name: "English 中文" when eng_name exists, otherwise just Chinese
+// TOMY 报客表同一单元格显示英文和中文；已有英文优先，否则套常见内部名称英译。
 function biName(zh, eng) {
   const z = (zh || '').trim();
-  const e = (eng || '').trim();
-  if (!e) return z;
-  if (!z || z === e || z.includes(e) || e.includes(z)) return e || z;
-  return `${e} ${z}`;
+  const e = customerEnglish((eng || '').trim() || z);
+  if (/[\u3400-\u9fff]/.test(z) && e && e !== z) return `${e}\n${z}`;
+  return e || z;
 }
 
 // Round a numeric value to 2 decimal places (for monetary amounts)
@@ -55,6 +55,20 @@ function setVal(ws, row, col, value) {
   if (cell.value && typeof cell.value === 'object' && cell.value.formula) return;
   if (typeof value === 'number' && isNaN(value)) value = null;
   cell.value = (value === undefined) ? null : value;
+}
+
+function setBiVal(ws, row, col, zh, eng) {
+  const value = biName(zh, eng);
+  setVal(ws, row, col, value);
+  if (!value.includes('\n')) return;
+  const cell = ws.getCell(row, col);
+  cell.alignment = {
+    ...(cell.alignment || {}),
+    vertical: 'middle',
+    wrapText: true,
+  };
+  const requiredHeight = value.length > 70 ? 46 : 34;
+  ws.getRow(row).height = Math.max(ws.getRow(row).height || 0, requiredHeight);
 }
 
 function clearRows(ws, startRow, endRow, dataCols) {
@@ -109,14 +123,14 @@ function fillVQ(ws, d) {
   setVal(ws, 2, 8, version.prepared_by || (product?.client === 'TOMY' ? 'Michelle' : ''));
   setVal(ws, 3, 3, product?.item_no || '');
   setVal(ws, 3, 8, new Date());
-  setVal(ws, 4, 3, product?.item_desc || '');
+  setBiVal(ws, 4, 3, product?.item_desc, product?.item_desc_eng);
   setVal(ws, 4, 8, version.quote_rev || '');
   setVal(ws, 5, 3, version.item_rev || '');
   setVal(ws, 5, 8, version.fty_delivery_date || '');
 
   if (product?.item_no) {
     setVal(ws, 11, 1, product.item_no + '-00');
-    setVal(ws, 11, 2, product.item_desc || '');
+    setBiVal(ws, 11, 2, product.item_desc, product.item_desc_eng);
     const detectedMoq = num(product.moq) || (packagingItems || []).find(i => i.moq)?.moq || 2500;
     setVal(ws, 11, 5, detectedMoq);
     setVal(ws, 11, 6, 1);
@@ -131,7 +145,7 @@ function fillVQ(ws, d) {
   vqSupplements.slice(0, 5).forEach((acc, i) => {
     const r = 12 + i;
     setVal(ws, r, 1, acc.part_no || '');
-    setVal(ws, r, 2, acc.description || '');
+    setBiVal(ws, r, 2, acc.description, acc.eng_name);
     setVal(ws, r, 5, parseInt(acc.moq) || 2500);
     setVal(ws, r, 6, parseFloat(acc.usage_qty) || 1);
     setVal(ws, r, 7, r2(acc.unit_price) || 0);
@@ -158,8 +172,8 @@ function fillVQ(ws, d) {
   const PKG_FONT = { size: 12, name: 'Arial', charset: 134 };
   function writePkgRow(r, item) {
     setVal(ws, r, 1, item.pm_no || '');
-    setVal(ws, r, 2, biName(item.name, item.eng_name));
-    setVal(ws, r, 3, item.remark || '');
+    setBiVal(ws, r, 2, item.name, item.eng_name);
+    setBiVal(ws, r, 3, item.remark, item.remark_eng);
     for (const c of [1, 2, 3, 5, 6, 7, 8]) {
       ws.getCell(r, c).font = PKG_FONT;
     }
@@ -286,7 +300,7 @@ function fillBCD(ws, d) {
           paintingDetail, materialPrices, rawMaterials, bodyAccessories, sewingItems, sewingLaborItems, assemblyLaborItems, rotocastItems } = d;
 
   setVal(ws, 7, 1, version.body_no || (product?.item_no ? product.item_no + '-00' : ''));
-  setVal(ws, 7, 2, product?.item_desc || '');
+  setBiVal(ws, 7, 2, product?.item_desc, product?.item_desc_eng);
   setVal(ws, 7, 3, version.body_cost_revision || '');
   setVal(ws, 7, 4, 'ROYAL REGENT PRODUCTS (H.K.) LIMITED');
   setVal(ws, 7, 6, version.prepared_by || (product?.client === 'TOMY' ? 'Michelle' : ''));
@@ -330,7 +344,7 @@ function fillBCD(ws, d) {
     }
     items.slice(0, endRow - startRow + 1).forEach((m, i) => {
       const r = startRow + i;
-      setVal(ws, r, 2, biName(m.material_name, m.eng_name));
+      setBiVal(ws, r, 2, m.material_name, m.eng_name);
       const usage = parseFloat(m.usage_g ?? m.weight_g) || 0;
       const rawPrice = parseFloat(m.unit_price_per_kg) || 0;
       const price = hasSpec ? rawPrice : Math.round(rawPrice);
@@ -424,7 +438,7 @@ function fillBCD(ws, d) {
     const laborPerToy = parseFloat(part.molding_labor) || 0;
     const costPerShot = r2(laborPerToy * setsPerToy * 1.08);
     ws.getCell(r, 1).value = part.part_no || '';
-    ws.getCell(r, 2).value = biName(part.description, part.eng_name);
+    setBiVal(ws, r, 2, part.description, part.eng_name);
     ws.getCell(r, 3).value = part.machine_type || '';
     ws.getCell(r, 4).value = shots;
     ws.getCell(r, 5).value = r2(costPerShot);
@@ -468,7 +482,7 @@ function fillBCD(ws, d) {
       const usagePcs   = parseInt(item.usage_pcs) || 1;
       const unitPrice  = r2((parseFloat(item.unit_price_hkd) || 0) * 1.08);
       setVal(ws, r, 1, item.mold_no || '');
-      setVal(ws, r, 2, item.name || '');
+      setBiVal(ws, r, 2, item.name, item.eng_name);
       setVal(ws, r, 3, '');
       setVal(ws, r, 4, usagePcs);
       setVal(ws, r, 5, unitPrice);
@@ -500,7 +514,7 @@ function fillBCD(ws, d) {
   electronicItems.slice(0, ELEC_END - ELEC_START + 1).forEach((item, i) => {
     const r = ELEC_START + i;
     const unitPrice = (parseFloat(item.unit_price_usd) || 0) * (parseFloat(item.markup) || 1);
-    setVal(ws, r, 2, biName(item.part_name, item.eng_name));
+    setBiVal(ws, r, 2, item.part_name, item.eng_name);
     setVal(ws, r, 3, 'pc');
     setVal(ws, r, 4, parseFloat(item.quantity) || 1);
     setVal(ws, r, 5, r2(unitPrice) || 0);
@@ -529,7 +543,8 @@ function fillBCD(ws, d) {
     const totalHkd = hkdRmb > 0 ? (parseFloat(item.total_price_rmb) || 0) / hkdRmb : 0;
     const usage = parseFloat(item.usage_amount) || 1;
     const unitPriceHkd = Math.round(totalHkd / usage * 10000) / 10000;
-    const c2 = ws.getCell(r, 2); c2.value = biName(item.fabric_name, item.eng_name); c2.font = SEW_FONT; c2.alignment = { vertical: 'middle', wrapText: true };
+    setBiVal(ws, r, 2, item.fabric_name, item.eng_name);
+    const c2 = ws.getCell(r, 2); c2.font = SEW_FONT; c2.alignment = { vertical: 'middle', wrapText: true };
     const c3 = ws.getCell(r, 3); c3.value = usage > 1 ? 'pcs' : 'pc'; c3.font = SEW_FONT; c3.alignment = { horizontal: 'center' };
     const c4 = ws.getCell(r, 4); c4.value = usage; c4.font = SEW_FONT;
     const c5 = ws.getCell(r, 5); c5.value = unitPriceHkd; c5.font = SEW_FONT; c5.style = { numFmt: '#,##0.0000', font: SEW_FONT, alignment: { horizontal: 'right' } };
@@ -568,7 +583,7 @@ function fillBCD(ws, d) {
     const r = C3_DATA_START + i;
     const usage = parseFloat(item.usage_qty) || 1;
     const unitPrice = r2(parseFloat(item.unit_price) || 0);
-    ws.getCell(r, 2).value = biName(item.description, item.eng_name);
+    setBiVal(ws, r, 2, item.description, item.eng_name);
     ws.getCell(r, 3).value = usage > 1 ? 'pcs' : 'pc';
     ws.getCell(r, 3).alignment = { horizontal: 'center' };
     ws.getCell(r, 4).value = usage;
@@ -737,6 +752,7 @@ function sectionsToData({ quote, sections }) {
   const product = {
     item_no:   quote.quote_no || String(quote.id || ''),
     item_desc: quote.product_name || '',
+    item_desc_eng: customerEnglish(sales.vq_english?.product_name || quote.product_name || ''),
     client:    quote.customer || 'TOMY',
     moq:       num(quote.qty),
   };
@@ -766,7 +782,7 @@ function sectionsToData({ quote, sections }) {
   const moldParts = (molding.injection || []).map(r => ({
     part_no:      r.mold_no || '',
     description:  r.name || '',
-    eng_name:     '',
+    eng_name:     customerEnglish(r.eng_name || r.name || ''),
     machine_type: r.machine || r.machine_model || '',
     sets_per_toy: num(r.sets) || 1,
     // 系统注塑表的啤价已是 HK$/啤，BCD 直接使用，后续只乘码点。
@@ -780,8 +796,8 @@ function sectionsToData({ quote, sections }) {
     const usageG = r2(num(r.weight_g) * injectionLossM);
     rawMaterials.push({
       category: 'plastic',
-      material_name: r.material || (r.name || ''),
-      eng_name: '',
+      material_name: r.material || r.name || '',
+      eng_name: customerEnglish(r.material_eng || r.material || r.eng_name || r.name || ''),
       weight_g: num(r.weight_g),
       usage_g: usageG,
       unit_price_per_kg: num(r.material_unit_price) * 1000,
@@ -791,19 +807,25 @@ function sectionsToData({ quote, sections }) {
   const sewingItems = [];
   (sewing.sewing_groups || []).forEach(g => {
     let lastFabric = '';
+    let lastFabricEng = '';
     (g.items || []).forEach(it => {
       if (/人工/.test(it.fabric || it.part || it.name || '')) return;  // 人工归到 E 段
       const fabric = (it.fabric || '').trim() || lastFabric;
-      if (it.fabric) lastFabric = it.fabric;
+      const fabricEng = it.eng_name || (!(it.fabric || '').trim() ? lastFabricEng : '');
+      if (it.fabric) {
+        lastFabric = it.fabric;
+        lastFabricEng = it.eng_name || '';
+      }
       const hasPart = (it.part || '').trim() !== '';
       if (hasPart) {
         // 面料裁片 → A 段 Fabric
         const fabHkdPerYd = num(it.mat_price) * SEWING_DEFAULT_MARKUP;  // 面料 HK$/YD 固定按 1.08 码点
         rawMaterials.push({
           category: 'fabric',
-          material_name: fabric || (g.name || ''),
-          eng_name: '',
+          material_name: fabric || g.name || '',
+          eng_name: customerEnglish(fabricEng || fabric || g.eng_name || g.name || ''),
           spec: it.part || '',
+          spec_eng: customerEnglish(it.part_eng || it.part || ''),
           weight_g: num(it.usage),   // 用量/码（裁片数 pieces 不参与成本，仅信息列）
           // 物料价内部为 RMB/码 → HK$/YD（模板面料列为 HK$/YD）
           unit_price_per_kg: fxRH ? fabHkdPerYd / fxRH : fabHkdPerYd,
@@ -813,7 +835,7 @@ function sectionsToData({ quote, sections }) {
         const accessoryTotalRmb = num(it.usage) * num(it.mat_price) * SEWING_DEFAULT_MARKUP;
         sewingItems.push({
           fabric_name: fabric || '',
-          eng_name: '',
+          eng_name: customerEnglish(fabricEng || fabric || ''),
           total_price_rmb: accessoryTotalRmb,
           usage_amount: num(it.usage) || 1,
         });
@@ -847,7 +869,7 @@ function sectionsToData({ quote, sections }) {
     ? electronic.electronics : (eng.electronics || []);
   const electronicItems = elecSrc.map(r => ({
     part_name: r.name || '',
-    eng_name: '',
+    eng_name: customerEnglish(r.eng_name || r.name || ''),
     quantity: num(r.qty) || 1,
     // 内部电子单价为 HKD，模板电子列为 USD → 按内部 HKD→USD 汇率换算
     unit_price_usd: num(r.unit_price) / fxHU,
@@ -865,7 +887,7 @@ function sectionsToData({ quote, sections }) {
   ].filter(r => (r.name || r.spec || '').trim() || num(r.unit_price) || num(r.qty))
   .map(r => ({
     description: r.name || '',
-    eng_name: '',
+    eng_name: customerEnglish(r.eng_name || r.name || ''),
     usage_qty: num(r.qty) || 1,
     unit_price: num(r.unit_price) * SEWING_DEFAULT_MARKUP,
   }));
@@ -883,6 +905,7 @@ function sectionsToData({ quote, sections }) {
   const rotocastItems = (slush.slush_items || []).map((r, i) => ({
     mold_no: 'S' + (i + 1),
     name: r.name || '',
+    eng_name: customerEnglish(r.eng_name || r.name || ''),
     usage_pcs: num(r.qty) || 1,
     unit_price_hkd: num(r.unit_price_hkd),
   }));
@@ -919,7 +942,7 @@ function sectionsToData({ quote, sections }) {
   }, 0);
   const asmHkd = asmLineHkd + asmStepHkd;
   const assemblyLaborItems = asmHkd
-    ? [{ name: '装配', new_price: asmHkd }]
+    ? [{ name: 'Assembly', new_price: asmHkd }]
     : [];
 
   const pkgLineHkd = (assembly.packaging_labor || [])
@@ -938,8 +961,9 @@ function sectionsToData({ quote, sections }) {
   ].map(r => ({
     pm_no: r.code || r.item_code || '',
     name: r.name || '',
-    eng_name: '',
+    eng_name: customerEnglish(r.eng_name || r.name || ''),
     remark: r.spec || r.note || '',
+    remark_eng: customerEnglish(r.spec_eng || r.note_eng || r.spec || r.note || ''),
     moq: r.moq != null ? num(r.moq) : null,
     quantity: num(r.qty) || 1,
     new_price: num(r.unit_price) * SEWING_DEFAULT_MARKUP,

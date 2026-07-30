@@ -23,11 +23,9 @@ public class ImagesController(ISqlConnectionFactory factory) : ControllerBase
         var mime = string.IsNullOrWhiteSpace(body.mime) ? "image/jpeg" : body.mime;
         using var c = factory.Create();
         await c.ExecuteAsync(@"
-MERGE dbo.images AS t
-USING (SELECT @id AS id) s ON t.id = s.id
-WHEN MATCHED THEN UPDATE SET mime=@mime, data_url=@dataUrl
-WHEN NOT MATCHED THEN INSERT (id, mime, data_url, created_at)
-    VALUES (@id, @mime, @dataUrl, SYSUTCDATETIME());",
+INSERT INTO images(id, mime, data_url, created_at)
+VALUES (@id, @mime, @dataUrl, now())
+ON CONFLICT (id) DO UPDATE SET mime=EXCLUDED.mime, data_url=EXCLUDED.data_url;",
             new { id, mime, dataUrl = body.data_url });
         return Ok(new { ok = true, id });
     }
@@ -37,7 +35,7 @@ WHEN NOT MATCHED THEN INSERT (id, mime, data_url, created_at)
     {
         using var c = factory.Create();
         var row = await c.QueryFirstOrDefaultAsync<(string id, string? mime, string? data_url)?>(
-            "SELECT id, mime, data_url FROM dbo.images WHERE id=@id", new { id });
+            "SELECT id, mime, data_url FROM images WHERE id=@id", new { id });
         if (row == null) return NotFound();
         return Ok(new { id = row.Value.id, mime = row.Value.mime, data_url = row.Value.data_url });
     }
@@ -46,7 +44,7 @@ WHEN NOT MATCHED THEN INSERT (id, mime, data_url, created_at)
     public async Task<IActionResult> Delete(string id)
     {
         using var c = factory.Create();
-        await c.ExecuteAsync("DELETE FROM dbo.images WHERE id=@id", new { id });
+        await c.ExecuteAsync("DELETE FROM images WHERE id=@id", new { id });
         return Ok(new { ok = true });
     }
 }

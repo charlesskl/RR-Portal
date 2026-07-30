@@ -7,6 +7,7 @@
 .superpowers/
 tests/
 db/
+!db/postgres_schema.sql
 seed/
 *.xlsx
 !web/public/template-customs.xlsx

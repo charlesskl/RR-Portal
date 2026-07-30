@@ -304,7 +304,7 @@ app.use('/api', (req, res, next) => {
   // PATCH /status 已有 PIN 验证
   if (req.method === 'PATCH' && req.path.match(/\/\d+\/status$/)) return next();
   // 认证端点本身不需要 X-User
-  if (req.path === '/verify-pin' || req.path === '/change-pin' || req.path === '/reset-supervisor-pin' || req.path === '/recalc-amounts' || req.path === '/manager-update-prices') return next();
+  if (req.path === '/verify-pin' || req.path === '/change-pin' || req.path === '/reset-supervisor-pin' || req.path === '/recalc-amounts' || req.path === '/manager-update-prices' || req.path === '/clients/add' || req.path === '/clients/delete') return next();
   const user = req.headers['x-user'];
   if (!user || !decodeURIComponent(user).trim()) {
     return res.status(401).json({ error: '未授权：请登录后操作' });
@@ -519,16 +519,37 @@ app.get('/api/clients', (req, res) => {
   res.json(data.clients || DEFAULT_CLIENTS);
 });
 
-app.put('/api/clients', (req, res) => {
-  try {
-    if (!Array.isArray(req.body) || !req.body.every(c => typeof c === 'string')) {
-      return res.status(400).json({ error: '客户列表格式错误：需要字符串数组' });
-    }
-    const data = loadData();
-    data.clients = req.body;
-    saveData(data);
-    res.json(data.clients);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+// 客户新增/删除：仅经理可操作（经理 PIN 验证，见 manager.html 客户管理）
+app.post('/api/clients/add', (req, res) => {
+  const actor = authManager(req, res);
+  if (!actor) return;
+  const name = String(req.body.name || '').trim();
+  if (!name) return res.status(400).json({ error: '客户名称不能为空' });
+  if (name.length > 100) return res.status(400).json({ error: '客户名称过长' });
+  const data = loadData();
+  if (!Array.isArray(data.clients)) data.clients = DEFAULT_CLIENTS.slice();
+  if (data.clients.some(c => c.toLowerCase() === name.toLowerCase())) {
+    return res.status(409).json({ error: '该客户已存在' });
+  }
+  data.clients.push(name);
+  appendAudit(data, req, 'client-add', actor, { name });
+  saveData(data);
+  res.json(data.clients);
+});
+
+app.post('/api/clients/delete', (req, res) => {
+  const actor = authManager(req, res);
+  if (!actor) return;
+  const name = String(req.body.name || '').trim();
+  if (!name) return res.status(400).json({ error: '客户名称不能为空' });
+  const data = loadData();
+  if (!Array.isArray(data.clients)) data.clients = DEFAULT_CLIENTS.slice();
+  const idx = data.clients.indexOf(name);
+  if (idx === -1) return res.status(404).json({ error: '客户不存在' });
+  data.clients.splice(idx, 1);
+  appendAudit(data, req, 'client-delete', actor, { name });
+  saveData(data);
+  res.json(data.clients);
 });
 
 // ─── 系统设置（汇率等） ─────────────────────────────────────────────────────

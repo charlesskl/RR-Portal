@@ -1,0 +1,152 @@
+'use strict';
+
+// 客户报客表使用的常见内部名称英译。专有产品名或无法可靠识别的文本保留原文，
+// 避免在没有英文品名来源时产生错误翻译。
+const EXACT_TRANSLATIONS = new Map([
+  ['防刮盖板', 'Anti-scratch Inner Board'],
+  ['包装人工', 'Packing Labour'],
+  ['半成品人工', 'Packing Labour'],
+  ['装配', 'Assembly'],
+  ['装配人工', 'Assembly Labour'],
+  ['车缝', 'Sewing'],
+  ['裁床', 'Cutting'],
+  ['手工', 'Stuffing'],
+  ['查货', 'Inspection'],
+  ['拆查货', 'Unpacking and Inspection'],
+  ['拆货', 'Unpacking'],
+  ['主纸箱', 'Master Carton'],
+  ['主平卡', 'Main Flat Card'],
+  ['杂费', 'Miscellaneous'],
+  ['胶纸', 'Adhesive Tape'],
+  ['胶针', 'Dennison Tag'],
+  ['胶袋', 'Polybag'],
+  ['搪胶', 'Rotocast'],
+  ['喷油', 'Spray Painting'],
+  ['棉花', 'Stuffing'],
+  ['商标', 'Label'],
+  ['贴纸', 'Sticker'],
+  ['利宝', 'Product Label'],
+  ['产品利宝', 'Product Label'],
+  ['彩盒', 'Color Box'],
+  ['含 PCB+电阻+电容+人工 等其余明细汇总', 'Includes PCB, resistors, capacitors, labour and other itemized costs'],
+  ['么术贴贴布', 'Hook-and-loop Fastener Patch'],
+]);
+
+const REPLACEMENTS = [
+  [/机芯/g, 'Mechanism'],
+  [/艾摩/g, 'Elmo'],
+  [/红色/g, 'Red'],
+  [/橙色/g, 'Orange'],
+  [/黄色/g, 'Yellow'],
+  [/绿色/g, 'Green'],
+  [/蓝色/g, 'Blue'],
+  [/紫色/g, 'Purple'],
+  [/粉红色|粉色/g, 'Pink'],
+  [/白色/g, 'White'],
+  [/黑色/g, 'Black'],
+  [/灰色/g, 'Grey'],
+  [/棕色|啡色/g, 'Brown'],
+  [/米色/g, 'Beige'],
+  [/弹力北极绒/g, 'Stretch Polar Fleece'],
+  [/北极绒/g, 'Polar Fleece'],
+  [/水晶超柔/g, 'Crystal Super-soft Plush'],
+  [/细纹莱卡布/g, 'Fine-texture Lycra Fabric'],
+  [/莱卡布/g, 'Lycra Fabric'],
+  [/边纶布|邊綸布/g, 'Tricot Fabric'],
+  [/数码定位印|數碼定位印/g, 'Digital Positioning Print'],
+  [/数码定位|數碼定位/g, 'Digital Positioning'],
+  [/定位印/g, 'Positioned Print'],
+  [/定位/g, 'Positioning'],
+  [/眼珠/g, 'Eyes'],
+  [/进口|進口/g, 'Imported'],
+  [/透明/g, 'Transparent'],
+  [/公.?毛/g, 'Loop Side'],
+  [/公.?勾/g, 'Hook Side'],
+  [/母.?毛/g, 'Loop Side'],
+  [/母.?勾/g, 'Hook Side'],
+  [/么术毛|魔术毛|魔術毛/g, 'Loop Tape'],
+  [/么术勾|魔术勾|魔術勾/g, 'Hook Tape'],
+  [/面部/g, 'Face'],
+  [/后头|後頭/g, 'Back Head'],
+  [/前身/g, 'Front Body'],
+  [/后身|後身/g, 'Back Body'],
+  [/内手|內手/g, 'Inner Arm'],
+  [/外手/g, 'Outer Arm'],
+  [/脚杆|腳桿/g, 'Leg'],
+  [/脚面|腳面/g, 'Top of Foot'],
+  [/脚底|腳底/g, 'Sole'],
+  [/鼻子档布|鼻子擋布/g, 'Nose Backing'],
+  [/帽子档布|帽子擋布/g, 'Hat Backing'],
+  [/眼睛前片/g, 'Eye Front Panel'],
+  [/眼睛后片|眼睛後片/g, 'Eye Back Panel'],
+  [/里布|裡布/g, 'Lining'],
+  [/鼻子/g, 'Nose'],
+  [/嘴巴/g, 'Mouth'],
+  [/帽边|帽邊/g, 'Hat Trim'],
+  [/帽/g, 'Hat'],
+  [/布标|布標/g, 'Woven Label'],
+  [/普通/g, 'Standard'],
+  [/配色/g, 'Color-matched'],
+  [/强力线|強力線/g, 'Heavy-duty Thread'],
+  [/直径|直徑/g, 'Diameter'],
+  [/毛球/g, 'Pom-pom'],
+  [/兴信报价|興信報價/g, 'Xingxin Quotation'],
+  [/广全|廣全/g, 'Guangquan'],
+  [/肚子/g, 'Belly'],
+  [/密绣图案|密繡圖案/g, 'Dense Embroidery Pattern'],
+  [/贴布绣|貼布繡/g, 'Appliqué Embroidery'],
+  [/PACB电子/gi, 'PACB Electronics'],
+  [/PCB电子/gi, 'PCB Electronics'],
+  [/包装人工/g, 'Packing Labour'],
+  [/装配人工/g, 'Assembly Labour'],
+  [/半成品人工/g, 'Packing Labour'],
+  [/防刮盖板/g, 'Anti-scratch Inner Board'],
+  [/主纸箱/g, 'Master Carton'],
+  [/主平卡/g, 'Main Flat Card'],
+  [/产品利宝/g, 'Product Label'],
+  [/纸箱/g, 'Carton'],
+  [/平卡/g, 'Flat Card'],
+  [/胶袋/g, 'Polybag'],
+  [/胶纸/g, 'Adhesive Tape'],
+  [/胶针/g, 'Dennison Tag'],
+  [/彩盒/g, 'Color Box'],
+  [/贴纸/g, 'Sticker'],
+  [/商标/g, 'Label'],
+  [/电绣|绣花|繡花/g, 'Embroidery'],
+  [/喷油/g, 'Spray Painting'],
+  [/搪胶/g, 'Rotocast'],
+  [/车缝|車縫/g, 'Sewing'],
+  [/裁床/g, 'Cutting'],
+  [/装配/g, 'Assembly'],
+  [/包装/g, 'Packing'],
+  [/手工/g, 'Stuffing'],
+  [/查货/g, 'Inspection'],
+  [/人工/g, 'Labour'],
+  [/电子/g, 'Electronics'],
+  [/五金/g, 'Metal Part'],
+  [/辅助材料/g, 'Auxiliary Material'],
+  [/包装材料/g, 'Packaging Material'],
+  [/棉花/g, 'Stuffing'],
+  [/棉带/g, 'Cotton Tape'],
+  [/杂费/g, 'Miscellaneous'],
+];
+
+function customerEnglish(value, fallback = '') {
+  const source = String(value ?? '').trim();
+  if (!source) return fallback;
+  if (EXACT_TRANSLATIONS.has(source)) return EXACT_TRANSLATIONS.get(source);
+  let translated = source;
+  for (const [pattern, replacement] of REPLACEMENTS) {
+    translated = translated.replace(pattern, ` ${replacement} `);
+  }
+  return translated
+    .replace(/[（]/g, '(')
+    .replace(/[）]/g, ')')
+    .replace(/[，、]/g, ', ')
+    .replace(/\s+/g, ' ')
+    .replace(/\s+([,)])/g, '$1')
+    .replace(/([(])\s+/g, '$1')
+    .trim() || fallback;
+}
+
+module.exports = { customerEnglish };

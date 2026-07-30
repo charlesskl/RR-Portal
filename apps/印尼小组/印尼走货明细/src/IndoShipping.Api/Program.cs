@@ -1,5 +1,6 @@
 using System.Text;
 using IndoShipping.Api.Auth;
+using IndoShipping.Api.Features.Bootstrap;
 using IndoShipping.Api.Startup;
 using IndoShipping.Domain.Auth;
 using IndoShipping.Infrastructure.Auth;
@@ -9,6 +10,9 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
+
+// 实体里的 DateTime 均为 timestamp without time zone，沿用旧 SQL Server datetime 语义。
+AppContext.SetSwitch("Npgsql.EnableLegacyTimestampBehavior", true);
 
 var builder = WebApplication.CreateBuilder(args);
 DeploymentSecrets.TryApplyToConfiguration(builder.Configuration);
@@ -25,7 +29,7 @@ builder.Services.AddSingleton(jwtOpts);
 builder.Services.AddSingleton<IJwtTokenService, JwtTokenService>();
 builder.Services.AddSingleton<IPasswordHasher, BcryptPasswordHasher>();
 builder.Services.AddSingleton<ISqlConnectionFactory>(_ => new SqlConnectionFactory(connStr));
-builder.Services.AddDbContext<AppDbContext>(o => o.UseSqlServer(connStr));
+builder.Services.AddDbContext<AppDbContext>(o => o.UseNpgsql(connStr));
 
 builder.Services.AddCors(o => o.AddDefaultPolicy(p =>
     p.AllowAnyHeader().AllowAnyMethod().AllowAnyOrigin()));
@@ -81,17 +85,13 @@ builder.Services.AddSwaggerGen(c =>
 
 var app = builder.Build();
 
-// 自动升级旧数据库：新增独立编辑权限，并让已有账号默认沿用原访问权限。
+// 首次启动建表（共享 PostgreSQL 不能用 EnsureCreated）+ 幂等种子导入。
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-    db.Database.ExecuteSqlRaw(@"
-IF COL_LENGTH('dbo.Users', 'Usereditpower') IS NULL
-BEGIN
-    EXEC('ALTER TABLE dbo.Users ADD Usereditpower CHAR(9) NOT NULL
-        CONSTRAINT DF_Users_Usereditpower DEFAULT ''000000000'' WITH VALUES');
-    EXEC('UPDATE dbo.Users SET Usereditpower = Userbqrpower');
-END");
+    await DatabaseCompatibility.EnsureAsync(db);
+    var passwordHasher = scope.ServiceProvider.GetRequiredService<IPasswordHasher>();
+    await ProductionSeeder.SeedAsync(db, app.Configuration, passwordHasher, app.Logger);
 }
 
 if (app.Environment.IsDevelopment())

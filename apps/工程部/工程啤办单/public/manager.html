@@ -75,6 +75,9 @@
         <button class="btn btn-sm btn-outline-light" onclick="openPriceTableModal()">
           <i class="bi bi-table me-1"></i>价格表管理
         </button>
+        <button class="btn btn-sm btn-outline-light" onclick="openClientModal()">
+          <i class="bi bi-people me-1"></i>客户管理
+        </button>
         <button class="btn btn-sm btn-outline-light" onclick="openRecalcModal()">
           <i class="bi bi-calculator me-1"></i>料费重算
         </button>
@@ -185,6 +188,28 @@
         <button class="btn btn-primary" style="background:#7c3aed;border-color:#7c3aed" onclick="submitResetPin()">
           <i class="bi bi-check-circle me-1"></i>确认重置
         </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ─── 客户管理 Modal ──────────────────────────────────────────────────────── -->
+<div class="modal fade" id="clientModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header" style="background:#7c3aed;color:#fff">
+        <h5 class="modal-title"><i class="bi bi-people me-2"></i>客户管理</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="input-group mb-3">
+          <input type="text" id="newClientName" class="form-control" placeholder="新客户名称" maxlength="100"
+                 autocomplete="off" onkeydown="if(event.key==='Enter')submitAddClient()">
+          <button class="btn btn-primary" style="background:#7c3aed;border-color:#7c3aed" onclick="submitAddClient()">
+            <i class="bi bi-plus-lg me-1"></i>添加
+          </button>
+        </div>
+        <div id="clientList"><div class="text-center text-muted py-3">加载中...</div></div>
       </div>
     </div>
   </div>
@@ -665,6 +690,79 @@ function showToast(msg, type = 'success') {
   el.style.background = colors[type] || '#333';
   document.getElementById('toastMsg').textContent = msg;
   new bootstrap.Toast(el, { delay: 2500 }).show();
+}
+
+// ─── 客户管理（新增 / 删除，需经理 PIN，复用登录 session）────────────────────
+let _mgrClients = [];
+
+function openClientModal() {
+  document.getElementById('newClientName').value = '';
+  new bootstrap.Modal(document.getElementById('clientModal')).show();
+  loadClientList();
+}
+
+function loadClientList() {
+  document.getElementById('clientList').innerHTML = '<div class="text-center text-muted py-3">加载中...</div>';
+  apiFetch('/api/clients')
+    .then(r => r.json())
+    .then(renderClientList)
+    .catch(() => { document.getElementById('clientList').innerHTML = '<div class="text-center text-danger py-3">加载失败</div>'; });
+}
+
+function renderClientList(clients) {
+  _mgrClients = clients;
+  const el = document.getElementById('clientList');
+  if (!clients.length) {
+    el.innerHTML = '<div class="text-center text-muted py-3">暂无客户</div>';
+    return;
+  }
+  el.innerHTML = '<ul class="list-group">' + clients.map((c, i) => `
+    <li class="list-group-item d-flex justify-content-between align-items-center py-2">
+      <span>${esc(c)}</span>
+      <button class="btn btn-sm btn-outline-danger" title="删除" onclick="submitDeleteClient(${i})">
+        <i class="bi bi-trash"></i>
+      </button>
+    </li>`).join('') + '</ul>';
+}
+
+async function submitAddClient() {
+  const input = document.getElementById('newClientName');
+  const name = input.value.trim();
+  if (!name) { showToast('请输入客户名称', 'warning'); return; }
+  try {
+    const r = await apiFetch('/api/clients/add', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ manager_name: MANAGER_NAME, manager_pin: sessionStorage.getItem('mgr_pin') || '', name })
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || r.statusText);
+    input.value = '';
+    input.focus();
+    renderClientList(d);
+    showToast('客户「' + name + '」已添加');
+  } catch (e) {
+    showToast('添加失败：' + e.message, 'danger');
+  }
+}
+
+async function submitDeleteClient(i) {
+  const name = _mgrClients[i];
+  if (name == null) return;
+  if (!confirm('确定删除客户「' + name + '」吗？\n仅从下拉列表移除，历史单据上的客户名不受影响。')) return;
+  try {
+    const r = await apiFetch('/api/clients/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ manager_name: MANAGER_NAME, manager_pin: sessionStorage.getItem('mgr_pin') || '', name })
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || r.statusText);
+    renderClientList(d);
+    showToast('客户「' + name + '」已删除');
+  } catch (e) {
+    showToast('删除失败：' + e.message, 'danger');
+  }
 }
 
 // ─── 自动恢复登录 session ──────────────────────────────────────────────────────

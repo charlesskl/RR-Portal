@@ -10,9 +10,9 @@ const FREIGHT_DEFAULTS = {
   yt20: 6000,
 };
 const LCL_DEFAULTS = [
-  { code: 'CHINA LCL1', label: '盐田散货 3吨', capacity_cuft: 450, unit_hkd: 16.8 },
-  { code: 'CHINA LCL2', label: '盐田散货 5吨', capacity_cuft: 850, unit_hkd: 11.24 },
-  { code: 'CHINA LCL3', label: '盐田散货 8吨', capacity_cuft: 1000, unit_hkd: 9.67 },
+  { code: 'CHINA LCL1', label: 'Yantian LCL - 3 Ton Truck', capacity_cuft: 450, unit_hkd: 16.8 },
+  { code: 'CHINA LCL2', label: 'Yantian LCL - 5 Ton Truck', capacity_cuft: 850, unit_hkd: 11.24 },
+  { code: 'CHINA LCL3', label: 'Yantian LCL - 8 Ton Truck', capacity_cuft: 1000, unit_hkd: 9.67 },
 ];
 
 function num(value) {
@@ -37,7 +37,7 @@ function buildSpinTransportRows({ cartonCuft, pcsPerCarton, freightCalc, spinCon
   const rows = [
     {
       code: 'CHINA FCL',
-      description: '盐田柜货',
+      description: 'Yantian FCL',
       capacity_20: num(freight.cap_20),
       capacity_40: num(freight.cap_40),
       fee_20_hkd: num(freight.yt20),
@@ -49,7 +49,7 @@ function buildSpinTransportRows({ cartonCuft, pcsPerCarton, freightCalc, spinCon
     },
     {
       code: 'HK FCL',
-      description: 'HK柜货',
+      description: 'Hong Kong FCL',
       capacity_20: num(freight.cap_20),
       capacity_40: num(freight.cap_40),
       fee_20_hkd: num(freight.hk20),

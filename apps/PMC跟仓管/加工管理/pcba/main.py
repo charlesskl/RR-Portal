@@ -404,6 +404,36 @@ def _load_upload_workbook(file: UploadFile):
     try:
         return load_workbook(file.file, data_only=True)
     except Exception:
+        pass
+    # 旧版 .xls（openpyxl 读不了）：用 xlrd 读出后转成 openpyxl 工作簿，
+    # 后续所有旧台账解析路径保持一致。整数型浮点转 int，避免单号带出 .0。
+    try:
+        import xlrd
+
+        file.file.seek(0)
+        book = xlrd.open_workbook(file_contents=file.file.read())
+        wb = Workbook()
+        wb.remove(wb.active)
+        for sheet in book.sheets():
+            ws = wb.create_sheet(title=sheet.name[:31])
+            for row_no in range(sheet.nrows):
+                values = []
+                for col_no in range(sheet.ncols):
+                    cell = sheet.cell(row_no, col_no)
+                    value = cell.value
+                    if cell.ctype == xlrd.XL_CELL_DATE:
+                        try:
+                            value = xlrd.xldate.xldate_as_datetime(value, book.datemode)
+                        except Exception:
+                            pass
+                    elif cell.ctype == xlrd.XL_CELL_NUMBER and float(value).is_integer():
+                        value = int(value)
+                    elif cell.ctype in (xlrd.XL_CELL_EMPTY, xlrd.XL_CELL_BLANK):
+                        value = None
+                    values.append(value)
+                ws.append(values)
+        return wb
+    except Exception:
         raise HTTPException(status_code=400, detail="Excel 文件无法读取")
 
 
@@ -737,6 +767,18 @@ def _is_legacy_supplier_workbook(wb):
     return {"总表", "入库明细", "出库明细"}.issubset(sheet_names)
 
 
+def _is_legacy_finished_workbook(wb):
+    # 邵阳/新邵成品入仓台账（.xls 老表）：记录页表头为
+    # 日期/送货单号/(第三方客户名称/)合同号/货号/品名/规格/数量（pcs）/备注
+    for ws in wb.worksheets:
+        headers = set(_legacy_row_headers(ws))
+        if {"日期", "送货单号", "货号", "品名/规格"}.issubset(headers) and (
+            "数量（pcs）" in headers or "数量" in headers
+        ):
+            return True
+    return False
+
+
 def _legacy_record_type(sheet_name):
     if "入库" in sheet_name:
         return "semi_inbound", "monthly_inbound", "当月入仓总数"
@@ -877,7 +919,7 @@ def _parse_legacy_semi_finished_workbook(conn, wb, department):
 
             for col_no, rec_date, doc_no in detail_columns:
                 qty = _legacy_int(ws.cell(row_no, col_no).value, row_no, "数量")
-                if qty is None or qty <= 0:
+                if qty is None or qty == 0:
                     continue
                 body = RecordIn(
                     rec_type=rec_type,
@@ -889,8 +931,8 @@ def _parse_legacy_semi_finished_workbook(conn, wb, department):
                     qty=qty,
                     remark=f"{ws.title}导入",
                 )
-                _validate_record(body, department)
-                bodies.append(body)
+                # 负数=退货，保留原样（与其他旧台账导入路径一致）
+                _add_record_body(bodies, body, department, validate_positive=(qty > 0))
 
     if not bodies and not monthly_totals:
         raise HTTPException(status_code=400, detail="半成品台账没有可导入的数据")
@@ -940,7 +982,7 @@ def _parse_legacy_assembly_workbook(conn, wb, department):
                     row_no,
                     opening_label,
                 )
-                if qty is None or qty <= 0:
+                if qty is None or qty == 0:
                     continue
                 sticker_type = _normalize_sticker_type(
                     conn, NFC_MATERIAL, sticker_type
@@ -956,8 +998,7 @@ def _parse_legacy_assembly_workbook(conn, wb, department):
                     remark="总表期初领料导入",
                     summary_month=6,
                 )
-                _validate_record(body, department)
-                bodies.append(body)
+                _add_record_body(bodies, body, department, validate_positive=(qty > 0))
 
     for sheet_name, rec_type in sheet_types.items():
         if sheet_name not in wb.sheetnames:
@@ -974,7 +1015,7 @@ def _parse_legacy_assembly_workbook(conn, wb, department):
             sticker_type = _normalize_sticker_type(conn, NFC_MATERIAL, sticker_type)
             for col_no, rec_date, doc_no in detail_columns:
                 qty = _legacy_int(ws.cell(row_no, col_no).value, row_no, "数量")
-                if qty is None or qty <= 0:
+                if qty is None or qty == 0:
                     continue
                 body = RecordIn(
                     rec_type=rec_type,
@@ -987,8 +1028,8 @@ def _parse_legacy_assembly_workbook(conn, wb, department):
                     remark=f"{ws.title}导入",
                     summary_month=summary_month,
                 )
-                _validate_record(body, department)
-                bodies.append(body)
+                # 负数=退货，保留原样
+                _add_record_body(bodies, body, department, validate_positive=(qty > 0))
 
     if not bodies:
         raise HTTPException(status_code=400, detail="东莞车间台账没有可导入的数据")
@@ -1016,7 +1057,7 @@ def _parse_legacy_assembly_pcba_workbook(conn, wb, department):
                 row_no,
                 "领料数",
             )
-            if qty is None or qty <= 0:
+            if qty is None or qty == 0:
                 continue
             date_value = _legacy_header_value(ws, headers, row_no, "日期")
             body = RecordIn(
@@ -1035,8 +1076,8 @@ def _parse_legacy_assembly_pcba_workbook(conn, wb, department):
                     "备注",
                 ) or f"{ws.title}导入",
             )
-            _validate_record(body, department)
-            bodies.append(body)
+            # 负数=退货，保留原样
+            _add_record_body(bodies, body, department, validate_positive=(qty > 0))
 
     ws = wb["成品入仓明细"]
     headers = _legacy_header_map(ws)
@@ -1046,7 +1087,7 @@ def _parse_legacy_assembly_pcba_workbook(conn, wb, department):
             row_no,
             "数量",
         )
-        if qty is None or qty <= 0:
+        if qty is None or qty == 0:
             continue
         contract = _cell_text(_legacy_header_value(ws, headers, row_no, "合同号"))
         item_no = _cell_text(_legacy_header_value(ws, headers, row_no, "货号"))
@@ -1072,8 +1113,8 @@ def _parse_legacy_assembly_pcba_workbook(conn, wb, department):
             item_no=item_no or None,
             product_name=product_name or None,
         )
-        _validate_record(body, department)
-        bodies.append(body)
+        # 负数=退货，保留原样
+        _add_record_body(bodies, body, department, validate_positive=(qty > 0))
 
     if not bodies:
         raise HTTPException(status_code=400, detail="东莞车间PCBA台账没有可导入的数据")
@@ -1184,8 +1225,8 @@ def _parse_legacy_outsource_workbook(conn, wb, department):
                     "备注",
                 ) or "领料明细导入",
             )
-            _validate_record(body, department)
-            bodies.append(body)
+            # 负数=退货，保留原样
+            _add_record_body(bodies, body, department, validate_positive=(qty > 0))
 
     inbound_ws = wb["半成品入仓明细"] if "半成品入仓明细" in wb.sheetnames else None
     if inbound_ws:
@@ -1221,8 +1262,8 @@ def _parse_legacy_outsource_workbook(conn, wb, department):
                 item_no=item_no or None,
                 product_name=name or None,
             )
-            _validate_record(body, department)
-            bodies.append(body)
+            # 负数=退货，保留原样
+            _add_record_body(bodies, body, department, validate_positive=(qty > 0))
 
     if not bodies:
         raise HTTPException(status_code=400, detail=f"{department}台账没有可导入的数据")
@@ -1274,7 +1315,7 @@ def _parse_legacy_outsource_nfc_workbook(conn, wb, department):
             sticker_type = _normalize_sticker_type(conn, NFC_MATERIAL, sticker_type)
             for col_no, rec_date, doc_no in detail_columns:
                 qty = _legacy_int(ws.cell(row_no, col_no).value, row_no, "数量")
-                if qty is None or qty <= 0:
+                if qty is None or qty == 0:
                     continue
                 body = RecordIn(
                     rec_type=rec_type,
@@ -1286,8 +1327,8 @@ def _parse_legacy_outsource_nfc_workbook(conn, wb, department):
                     qty=qty,
                     remark=f"{ws.title}导入",
                 )
-                _validate_record(body, department)
-                bodies.append(body)
+                # 负数=退货，保留原样
+                _add_record_body(bodies, body, department, validate_positive=(qty > 0))
 
     if not bodies:
         raise HTTPException(status_code=400, detail=f"{department}贴纸台账没有可导入的数据")
@@ -1388,7 +1429,7 @@ def _parse_legacy_heyuan_workbook(conn, wb, department):
                 row_no,
                 "数量",
             )
-            if qty is None or qty <= 0:
+            if qty is None or qty == 0:
                 continue
             contract = _cell_text(_legacy_header_value(ws, headers, row_no, "合同号"))
             item_no = _cell_text(_legacy_header_value(ws, headers, row_no, "货号"))
@@ -1410,11 +1451,78 @@ def _parse_legacy_heyuan_workbook(conn, wb, department):
                 product_name=name or None,
                 summary_month=section_month,
             )
-            _validate_record(body, department)
-            bodies.append(body)
+            # 负数=退货，保留原样
+            _add_record_body(bodies, body, department, validate_positive=(qty > 0))
 
     if not bodies:
         raise HTTPException(status_code=400, detail="河源华兴台账没有可导入的数据")
+    return bodies
+
+
+def _parse_legacy_finished_workbook(conn, wb, department):
+    # 邵阳华登/新邵 成品入仓台账（.xls 老表）：记录页表头
+    # 日期/送货单号/第三方客户名称/合同号/货号/品名/规格/数量（pcs）/备注。
+    # 逐 sheet 识别该表头，BOM/用量页（Sku No./Item No. 表头）自动跳过。
+    if department not in (SHAOYANG_DEPARTMENT, XINSHAO_DEPARTMENT):
+        raise HTTPException(status_code=400, detail="成品入仓台账只能在邵阳华登/新邵部门导入")
+
+    bodies = []
+    for ws in wb.worksheets:
+        headers = _legacy_header_map(ws)
+        if not (
+            headers.get("日期")
+            and headers.get("送货单号")
+            and (headers.get("数量（pcs）") or headers.get("数量"))
+        ):
+            continue
+        last_date_value = None
+        last_doc_no = ""
+        for row_no in range(2, ws.max_row + 1):
+            qty = _legacy_int(
+                _legacy_header_value(ws, headers, row_no, "数量（pcs）", "数量"),
+                row_no,
+                "数量",
+            )
+            if qty is None or qty == 0:
+                continue
+            # 同一送货单的续行日期/单号留空，沿用上一条
+            date_value = _legacy_header_value(ws, headers, row_no, "日期")
+            if _cell_text(date_value):
+                last_date_value = date_value
+            else:
+                date_value = last_date_value
+            doc_no = _cell_text(_legacy_header_value(ws, headers, row_no, "送货单号"))
+            if doc_no:
+                last_doc_no = doc_no
+            else:
+                doc_no = last_doc_no
+            source_remark = _cell_text(_legacy_header_value(ws, headers, row_no, "备注"))
+            body = RecordIn(
+                rec_type="finished",
+                location_id=_location_id_from_name(conn, department, row_no),
+                rec_date=_outsource_date_value(date_value),
+                doc_no=doc_no or None,
+                material=PCBA_MATERIAL,
+                qty=qty,
+                remark=source_remark or f"{ws.title}导入",
+                customer_name=_cell_text(
+                    _legacy_header_value(ws, headers, row_no, "第三方客户名称")
+                ) or None,
+                contract_no=_cell_text(
+                    _legacy_header_value(ws, headers, row_no, "合同号")
+                ) or None,
+                item_no=_cell_text(
+                    _legacy_header_value(ws, headers, row_no, "货号")
+                ) or None,
+                product_name=_cell_text(
+                    _legacy_header_value(ws, headers, row_no, "品名/规格")
+                ) or None,
+            )
+            # 负数=退货，保留原样
+            _add_record_body(bodies, body, department, validate_positive=(qty > 0))
+
+    if not bodies:
+        raise HTTPException(status_code=400, detail="成品入仓台账没有可导入的数据")
     return bodies
 
 
@@ -3999,6 +4107,10 @@ def _parse_record_import_workbook(conn, wb, file, user):
     )
     legacy_heyuan_import = _is_legacy_heyuan_workbook(wb)
     legacy_supplier_import = _is_legacy_supplier_workbook(wb)
+    legacy_finished_import = (
+        user["department"] in (SHAOYANG_DEPARTMENT, XINSHAO_DEPARTMENT)
+        and _is_legacy_finished_workbook(wb)
+    )
     legacy_import = (
         legacy_semi_finished_import
         or legacy_assembly_import
@@ -4007,6 +4119,7 @@ def _parse_record_import_workbook(conn, wb, file, user):
         or legacy_outsource_nfc_import
         or legacy_heyuan_import
         or legacy_supplier_import
+        or legacy_finished_import
     )
     if legacy_semi_finished_import:
         _require_filename_contains(file, SEMI_FINISHED_FILENAME_KEYWORD)
@@ -4032,6 +4145,10 @@ def _parse_record_import_workbook(conn, wb, file, user):
         bodies = _parse_legacy_outsource_nfc_workbook(
             conn, wb, user["department"]
         )
+        monthly_totals = []
+    elif legacy_finished_import:
+        _require_filename_contains(file, "成品入仓")
+        bodies = _parse_legacy_finished_workbook(conn, wb, user["department"])
         monthly_totals = []
     elif legacy_heyuan_import:
         bodies = _parse_legacy_heyuan_workbook(conn, wb, user["department"])

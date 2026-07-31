@@ -1,5 +1,8 @@
 FROM node:20-alpine AS frontend-build
 
+# 阿里云 npm 镜像（国内 ECS 加速）
+RUN npm config set registry https://registry.npmmirror.com
+
 WORKDIR /build/client
 COPY client/package.json client/package-lock.json ./
 RUN npm ci
@@ -9,6 +12,10 @@ ENV VITE_BASE_PATH=${BASE_PATH}
 RUN npx vite build --base ${BASE_PATH}
 
 FROM node:20-alpine AS production
+
+# 阿里云 Alpine + npm 镜像（国内 ECS 加速，避免 apk 拉包超时）
+RUN sed -i 's|https\?://dl-cdn.alpinelinux.org|https://mirrors.aliyun.com|g' /etc/apk/repositories
+RUN npm config set registry https://registry.npmmirror.com
 
 # 系统工具：tini(信号处理) + curl(健康检查) + 编译工具(原生模块) + poppler-utils(PDF转图片)
 RUN apk add --no-cache tini curl python3 make g++ poppler-utils

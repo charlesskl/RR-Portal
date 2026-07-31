@@ -74,6 +74,103 @@ test('manually adjusted carton price is preserved by the shared paper-rate formu
   assert.match(source, /config\.paper_rate\s*=\s*desiredPrice\s*\/\s*currentBase/);
 });
 
+test('carton price can be manually adjusted to zero and exports as zero', async () => {
+  const carton = { name: '主纸箱', cl: 17, cw: 14, ch: 12, qty: 6, flat_cards: [] };
+  const workbook = await buildWorkbook({
+    quote: { quote_no: 'CARTON-ZERO', product_name: '零箱价', qty: 1000 },
+    sections: [
+      {
+        dept: 'engineering',
+        payload_json: JSON.stringify({
+          carton_calc: { paper_rate: 0, box_price: 0, cartons: [carton] },
+        }),
+      },
+      {
+        dept: 'sales',
+        payload_json: JSON.stringify({
+          header: { fx_rmb_hkd: 0.85, fx_hkd_usd: 7.8 },
+          shipping: { scenarios: [] },
+        }),
+      },
+    ],
+  });
+
+  const worksheet = workbook.getWorksheet('报价明细');
+  let cartonPrice;
+  let cartonRow;
+  worksheet.eachRow(row => {
+    if (row.getCell(1).value === '主纸箱') {
+      cartonRow = row.number;
+      cartonPrice = row.getCell(6).value;
+    }
+  });
+  assert.equal(
+    cartonPrice.formula,
+    `(B${cartonRow}+C${cartonRow}+2)*(C${cartonRow}+D${cartonRow}+1)*2*0/1000`
+  );
+  const workbenchSource = fs.readFileSync(
+    path.join(__dirname, '..', 'frontend', 'workbench.js'),
+    'utf8'
+  );
+  assert.match(workbenchSource, /ccc\.paper_rate == null \|\| ccc\.paper_rate === ''/);
+  assert.match(workbenchSource, /c\.paper_rate == null \|\| c\.paper_rate === ''/);
+});
+
+test('explicit formula inputs remain formulas in the internal quotation export', async () => {
+  const workbook = await buildWorkbook({
+    quote: { quote_no: 'FREE-FORMULA', product_name: '辅助材料公式', qty: 1000 },
+    sections: [
+      {
+        dept: 'engineering',
+        payload_json: JSON.stringify({
+          aux_materials: [{
+            name: '公式杂费',
+            qty: 0.5,
+            qty_raw: '=1/2',
+            unit_price_rmb: 0.1,
+            unit_price_rmb_raw: '=(0.05+0.05)',
+          }, {
+            name: '分数杂费',
+            qty: 0.5,
+            qty_raw: '1/2',
+            unit_price_rmb: 0.25,
+            unit_price_rmb_raw: '1/4',
+          }],
+        }),
+      },
+      {
+        dept: 'sales',
+        payload_json: JSON.stringify({
+          header: { fx_rmb_hkd: 0.85, fx_hkd_usd: 7.8 },
+          shipping: { scenarios: [] },
+        }),
+      },
+    ],
+  });
+
+  const worksheet = workbook.getWorksheet('报价明细');
+  let itemRow = 0;
+  worksheet.eachRow(row => {
+    if (row.getCell(2).value === '公式杂费') itemRow = row.number;
+  });
+  assert.ok(itemRow);
+  assert.deepEqual(worksheet.getCell(itemRow, 7).value, { formula: '1/2', result: 0.5 });
+  assert.deepEqual(worksheet.getCell(itemRow, 8).value, { formula: '(0.05+0.05)', result: 0.1 });
+  assert.equal(worksheet.getCell(itemRow, 9).value.formula, `H${itemRow}/0.85`);
+  assert.equal(worksheet.getCell(itemRow, 10).value.formula, `G${itemRow}*I${itemRow}`);
+
+  let fractionRow = 0;
+  worksheet.eachRow(row => {
+    if (row.getCell(2).value === '分数杂费') fractionRow = row.number;
+  });
+  assert.ok(fractionRow);
+  assert.equal(worksheet.getCell(fractionRow, 7).value, 0.5);
+  assert.equal(worksheet.getCell(fractionRow, 7).numFmt, '# ?/?');
+  assert.equal(worksheet.getCell(fractionRow, 8).value, 0.25);
+  assert.equal(worksheet.getCell(fractionRow, 8).numFmt, '# ?/?');
+  assert.equal(worksheet.getCell(fractionRow, 10).value.formula, `G${fractionRow}*I${fractionRow}`);
+});
+
 test('export keeps prototype and testing amortization when mold items are empty', async () => {
   const workbook = await buildWorkbook({
     quote: { quote_no: 'TEST-264', product_name: '分摊测试', qty: 10000 },

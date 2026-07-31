@@ -126,7 +126,10 @@
       if (!priceHost) return;
 
       const base = cartonPriceBase(carton);
-      const price = base * (toNumber(config.paper_rate) || 2.75);
+      const rate = config.paper_rate == null || config.paper_rate === ''
+        ? 2.75
+        : toNumber(config.paper_rate);
+      const price = base * rate;
       priceHost.innerHTML = `<b>箱价</b> HK$
         <input data-carton-price="${index}" type="number" step="0.01"
           value="${price.toFixed(2)}" ${canEdit ? '' : 'disabled'}

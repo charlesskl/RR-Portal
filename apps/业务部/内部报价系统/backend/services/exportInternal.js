@@ -4,6 +4,7 @@
 // check rejects a new blob larger than 50 KB, so new formula sections live in
 // this small post-processor instead of growing exportXlsx.js further.
 const { buildWorkbook: buildBaseWorkbook } = require('./exportXlsx');
+const { toExcelFormulaInput, fractionNumberFormat } = require('../../frontend/formula-input');
 
 const FONT = 'Microsoft YaHei';
 const HKD4 = '"HK$"0.0000';
@@ -272,6 +273,58 @@ function patchSimpleIndoColumns(ws, payloads) {
     refs[`${patch.title}:indo`] = `${colLetter(patch.indoCol)}${totalRow}`;
   }
   return refs;
+}
+
+function patchFreeInputFormulas(ws, payloads) {
+  const engineering = payloads.engineering || {};
+  const sections = [
+    { title: '五、五金', rows: engineering.hardware || [] },
+    { title: '六、辅助材料', rows: engineering.aux_materials || [] },
+    { title: '七、包装材料', rows: engineering.packaging_materials || [] },
+  ];
+
+  for (const section of sections) {
+    const titleRow = findRow(ws, section.title);
+    if (!titleRow) continue;
+    const dataStart = titleRow + 2;
+    section.rows.forEach((item, index) => {
+      const row = dataStart + index;
+      const qtyFormula = toExcelFormulaInput(item.qty_raw);
+      const priceFormula = toExcelFormulaInput(item.unit_price_rmb_raw);
+      const qtyFractionFmt = fractionNumberFormat(item.qty_raw);
+      const priceFractionFmt = fractionNumberFormat(item.unit_price_rmb_raw);
+      if (qtyFormula) {
+        ws.getCell(row, 7).value = { formula: qtyFormula, result: num(item.qty) };
+      } else if (qtyFractionFmt) {
+        ws.getCell(row, 7).value = num(item.qty);
+        ws.getCell(row, 7).numFmt = qtyFractionFmt;
+      }
+      if (priceFormula) {
+        ws.getCell(row, 8).value = { formula: priceFormula, result: num(item.unit_price_rmb) };
+      } else if (priceFractionFmt) {
+        ws.getCell(row, 8).value = num(item.unit_price_rmb);
+        ws.getCell(row, 8).numFmt = priceFractionFmt;
+      }
+    });
+  }
+}
+
+function patchZeroCartonRate(ws, payloads) {
+  const cartonCalc = payloads.engineering && payloads.engineering.carton_calc;
+  if (!cartonCalc || Number(cartonCalc.paper_rate) !== 0) return;
+  const titleRow = findRow(ws, '📦 纸箱 / 运费 计算（参考）');
+  if (!titleRow) return;
+  const cartons = Array.isArray(cartonCalc.cartons) ? cartonCalc.cartons : [];
+  const names = new Set(cartons.map((carton, index) => carton.name || `纸箱${index + 1}`));
+  for (let row = titleRow + 1; row <= Math.min(ws.rowCount, titleRow + 100); row += 1) {
+    const name = ws.getCell(row, 1).value;
+    if (!names.has(name)) continue;
+    ws.getCell(row, 6).value = {
+      formula: `(B${row}+C${row}+2)*(C${row}+D${row}+1)*2*0/1000`,
+      result: 0,
+    };
+    ws.getCell(row, 6).numFmt = '"HK$"0.0000';
+  }
 }
 
 function patchSlush(ws, slush) {
@@ -633,6 +686,8 @@ function enhanceWorkbook(workbook, { quote, sections }) {
   const sales = payloads.sales || {};
   const fx = num(sales.header && sales.header.fx_rmb_hkd) || 0.85;
 
+  patchFreeInputFormulas(ws, payloads);
+  patchZeroCartonRate(ws, payloads);
   const refs = patchSimpleIndoColumns(ws, payloads);
   Object.assign(refs, patchSlush(ws, payloads.slush || {}));
   const sewingRefs = patchSewingDetail(workbook, payloads.sewing || {});

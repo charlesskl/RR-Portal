@@ -40,8 +40,9 @@ async function putSection(sec, payload, submit) {
 }
 
 // ==================== 通用可编辑表格 ====================
-// columns: [{key, label, type?: 'text'|'number'|'textarea'|'fraction', readonly?: bool|fn,
-//   calc?: row => number, headerInput?: {get,set,suffix}, width?: string}]
+// columns: [{key, label, type?: 'text'|'number'|'textarea'|'formula', readonly?: bool|fn,
+//   calc?: row => number, onValue?: (row,value,raw) => void,
+//   headerInput?: {get,set,suffix}, width?: string}]
 // rows:    数组（直接 mutate 本数组）
 // onChange: 数据变更时回调
 function isSewLaborRow(row) {
@@ -67,25 +68,7 @@ function sewWeightedMaterialRmb(sewing) {
   return sum(groups, group => sewMaterialOnlyAmount(group) * groupQty(group)) / totalQty;
 }
 
-function parseFractionInput(value) {
-  const text = String(value ?? '').trim();
-  if (text === '') return null;
-  let match = /^([+-]?\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)$/.exec(text);
-  if (match) {
-    const whole = Number(match[1]);
-    const numerator = Number(match[2]);
-    const denominator = Number(match[3]);
-    if (!denominator) return null;
-    return whole < 0 ? whole - numerator / denominator : whole + numerator / denominator;
-  }
-  match = /^([+-]?\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)$/.exec(text);
-  if (match) {
-    const denominator = Number(match[2]);
-    return denominator ? Number(match[1]) / denominator : null;
-  }
-  const parsed = Number(text);
-  return Number.isNaN(parsed) ? null : parsed;
-}
+const parseFormulaInput = window.FormulaInput.parseFormulaInput;
 
 function renderTable(container, columns, rows, opts = {}) {
   const { readonly = false, onChange = () => {}, footer = null } = opts;
@@ -131,7 +114,7 @@ function renderTable(container, columns, rows, opts = {}) {
         }
         const ro = typeof c.readonly === 'function' ? c.readonly(row) : (c.readonly || readonly);
         let val = row[c.key];
-        if (c.type === 'fraction' && row[c.key + '_raw'] != null && row[c.key + '_raw'] !== '') {
+        if ((c.type === 'fraction' || c.type === 'formula') && row[c.key + '_raw'] != null && row[c.key + '_raw'] !== '') {
           val = row[c.key + '_raw'];
         }
         if (c.calc) val = c.calc(row);
@@ -186,18 +169,19 @@ function renderTable(container, columns, rows, opts = {}) {
           if (c.type === 'number') inp.step = 'any';
           if (c.width) inp.style.minWidth = c.width;  // 让输入框按列宽撑开（覆盖全局 3.4em，避免长数字被截断）
           inp.value = val;
-          if (c.type === 'fraction') {
-            inp.title = '可填分数：1/2、3/4、1 1/2；也可直接填小数 0.5';
+          if (c.type === 'fraction' || c.type === 'formula') {
+            inp.title = '可输入算式：1/2、3*0.25、(10+2)/4；也可直接输入数字';
             inp.placeholder = '如 1/2';
           }
           inp.oninput = () => {
-            if (c.type === 'fraction') {
-              row[c.key] = parseFractionInput(inp.value);
+            if (c.type === 'fraction' || c.type === 'formula') {
+              row[c.key] = parseFormulaInput(inp.value);
               row[c.key + '_raw'] = inp.value;
               inp.style.color = inp.value.trim() !== '' && row[c.key] == null ? '#b91c1c' : '';
             } else {
               row[c.key] = c.type === 'number' ? (inp.value === '' ? null : Number(inp.value)) : inp.value;
             }
+            if (c.onValue) c.onValue(row, row[c.key], inp.value);
             refreshCalcs();
             onChange();
           };
@@ -1171,7 +1155,9 @@ function renderSummaryPane(host, sections, quote, me) {
     cl: ccc.cl, cw: ccc.cw, ch: ccc.ch, qty: ccc.qty,
     flat_cards: ccc.flat_card ? [{ l: ccc.cl, w: ccc.cw }] : [],
   }] : []);
-  const cartonRate = num(ccc.paper_rate) || 2.75;
+  const cartonRate = ccc.paper_rate == null || ccc.paper_rate === ''
+    ? 2.75
+    : num(ccc.paper_rate);
   const cartonRmb = cartonList.reduce((s, b) => {
     const boxPrice = (num(b.cl) + num(b.cw) + 2) * (num(b.cw) + num(b.ch) + 1) * 2 * cartonRate / 1000;
     const flatSum = (b.flat_cards || []).reduce((a, f) => a + ((num(f.l) || num(b.cl)) + 1) * ((num(f.w) || num(b.cw)) + 1) * 2 / 1000, 0);
@@ -2049,7 +2035,9 @@ function renderCartonCalc(host, c, canEdit, onChange) {
   delete c.flat_cards;
   c.paper_rate = c.paper_rate ?? 2.75;  // 纸价系数（可调）
 
-  const rate = () => num(c.paper_rate) || 2.75;
+  const rate = () => c.paper_rate == null || c.paper_rate === ''
+    ? 2.75
+    : num(c.paper_rate);
   const cuftOf = (b) => num(b.cl) * num(b.cw) * num(b.ch) / 1728;
   const boxPriceOf = (b) => (num(b.cl) + num(b.cw) + 2) * (num(b.cw) + num(b.ch) + 1) * 2 * rate() / 1000;
   // 平卡 L/W 留空时对应所在纸箱的长/宽
@@ -2358,11 +2346,15 @@ function renderEngineering(host, payload, canEdit, onChange, fxRmbHkd, fxHkdUsd)
     }
   };
 
+  const syncFreeRmbPrice = (row, value) => {
+    const fx = num(fxRmbHkd) || 0.85;
+    row.unit_price = value == null ? null : +(value / fx).toFixed(6);
+  };
   const freeCols = [
     { key: 'name', label: '零件名称' },
     { key: 'spec', label: '规格' },
-    { key: 'qty', label: '用量', type: 'fraction', width: '80px' },
-    { key: 'unit_price_rmb', label: '单价 RMB', type: 'number', width: '100px' },
+    { key: 'qty', label: '用量', type: 'formula', width: '80px' },
+    { key: 'unit_price_rmb', label: '单价 RMB', type: 'formula', onValue: syncFreeRmbPrice, width: '100px' },
     { key: 'unit_price_hkd', label: '单价 HKD', readonly: true, calc: r => freeUnitHkd(r, fxRmbHkd), width: '100px' },
     { key: 'amount', label: '金额 HKD', readonly: true, calc: r => freeAmountHkd(r, fxRmbHkd), width: '90px' },
     { key: 'indo_amt', label: '印尼运费', readonly: true, width: '150px',
@@ -2376,8 +2368,8 @@ function renderEngineering(host, payload, canEdit, onChange, fxRmbHkd, fxHkdUsd)
     { key: 'name', label: '零件名称' },
     { key: 'spec', label: '规格' },
     { key: 'category', label: '类别', type: 'select', options: MAT_CATEGORIES, width: '120px' },
-    { key: 'qty', label: '用量', type: 'fraction', width: '80px' },
-    { key: 'unit_price_rmb', label: '单价 RMB', type: 'number', width: '100px' },
+    { key: 'qty', label: '用量', type: 'formula', width: '80px' },
+    { key: 'unit_price_rmb', label: '单价 RMB', type: 'formula', onValue: syncFreeRmbPrice, width: '100px' },
     { key: 'unit_price_hkd', label: '单价 HKD', readonly: true, calc: r => freeUnitHkd(r, fxRmbHkd), width: '100px' },
     { key: 'amount', label: '金额 HKD', readonly: true, calc: r => freeAmountHkd(r, fxRmbHkd), width: '90px' },
     { key: 'indo_amt', label: '印尼运费', readonly: true, width: '150px',
@@ -2405,8 +2397,8 @@ function renderEngineering(host, payload, canEdit, onChange, fxRmbHkd, fxHkdUsd)
     { key: 'name', label: '零件名称' },
     { key: 'spec', label: '规格', type: 'textarea' },
     { key: 'category', label: '类别', type: 'select', options: MAT_CATEGORIES, width: '120px' },
-    { key: 'qty', label: '用量', type: 'fraction', width: '80px' },
-    { key: 'unit_price_rmb', label: '单价 RMB', type: 'number', width: '100px' },
+    { key: 'qty', label: '用量', type: 'formula', width: '80px' },
+    { key: 'unit_price_rmb', label: '单价 RMB', type: 'formula', onValue: syncFreeRmbPrice, width: '100px' },
     { key: 'unit_price_hkd', label: '单价 HKD', readonly: true, calc: r => freeUnitHkd(r, fxRmbHkd), width: '100px' },
     { key: 'amount', label: '成品金额 HKD', readonly: true, calc: r => freeAmountHkd(r, fxRmbHkd), width: '90px' },
     { key: 'indo_amt', label: '印尼运费', readonly: true, width: '150px',

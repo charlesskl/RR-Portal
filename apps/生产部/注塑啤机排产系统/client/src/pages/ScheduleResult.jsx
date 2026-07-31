@@ -5,6 +5,7 @@ import axios from 'axios';
 import { DndContext, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
+import { getSameMoldMachineChange } from '../utils/sameMoldMachineSync';
 
 const API = '/api/scheduling';
 const EXPORT_API = '/api/export';
@@ -178,27 +179,86 @@ export default function ScheduleResult({ workshop = 'B' }) {
   };
 
   // 保存单行编辑
-  const saveEdit = async (scheduleId, itemId) => {
-    try {
-      await axios.put(`${API}/${scheduleId}/items/${itemId}`, editingData);
-      message.success('已保存');
-      setEditingKey(null);
-      fetchDetail(scheduleId);
-    } catch (e) {
-      message.error('保存失败：' + (e.response?.data?.message || e.message));
+  const saveEdit = (scheduleId, record) => {
+    const machineChange = getSameMoldMachineChange(
+      items,
+      record,
+      editingData.machine_no
+    );
+    const submit = async () => {
+      try {
+        const { data } = await axios.put(
+          `${API}/${scheduleId}/items/${record.id}`,
+          {
+            ...editingData,
+            ...(machineChange.shouldSync ? { sync_same_mold_machine: true } : {}),
+          }
+        );
+        const syncedCount = Number(data.synced_same_mold_count) || 1;
+        message.success(
+          syncedCount > 1
+            ? `已将同模 ${syncedCount} 条排机记录移动到 ${editingData.machine_no}`
+            : '已保存'
+        );
+        setEditingKey(null);
+        fetchDetail(scheduleId);
+      } catch (e) {
+        message.error('保存失败：' + (e.response?.data?.message || e.message));
+      }
+    };
+
+    if (machineChange.shouldConfirm) {
+      Modal.confirm({
+        title: `同模共 ${machineChange.sameMoldCount} 条`,
+        content: `将一起移到 ${editingData.machine_no} 机台，是否确认？`,
+        okText: '确认更改',
+        cancelText: '取消',
+        onOk: submit,
+      });
+      return;
     }
+
+    submit();
   };
 
   // 快速更换机台（点击机台号直接切换）
-  const saveMachineChange = async (record, newMachineNo) => {
-    try {
-      await axios.put(`${API}/${selectedSchedule.id}/items/${record.id}`, { machine_no: newMachineNo });
-      message.success(`已更换到 ${newMachineNo}`);
-      setMachineEditKey(null);
-      fetchDetail(selectedSchedule.id);
-    } catch (e) {
-      message.error('更换失败：' + (e.response?.data?.message || e.message));
+  const saveMachineChange = (record, newMachineNo) => {
+    const machineChange = getSameMoldMachineChange(items, record, newMachineNo);
+    const submit = async () => {
+      try {
+        const { data } = await axios.put(
+          `${API}/${selectedSchedule.id}/items/${record.id}`,
+          {
+            machine_no: newMachineNo,
+            ...(machineChange.shouldSync ? { sync_same_mold_machine: true } : {}),
+          }
+        );
+        const syncedCount = Number(data.synced_same_mold_count) || 1;
+        message.success(
+          syncedCount > 1
+            ? `已将同模 ${syncedCount} 条排机记录移动到 ${newMachineNo}`
+            : `已更换到 ${newMachineNo}`
+        );
+        setMachineEditKey(null);
+        fetchDetail(selectedSchedule.id);
+      } catch (e) {
+        message.error('更换失败：' + (e.response?.data?.message || e.message));
+      }
+    };
+
+    if (machineChange.shouldConfirm) {
+      Modal.confirm({
+        title: `同模共 ${machineChange.sameMoldCount} 条`,
+        content: `将一起移到 ${newMachineNo} 机台，是否确认？`,
+        okText: '确认更改',
+        cancelText: '取消',
+        onOk: submit,
+        onCancel: () => setMachineEditKey(null),
+      });
+      return;
     }
+
+    submit();
   };
 
   // 复制到其他机台
@@ -393,17 +453,17 @@ export default function ScheduleResult({ workshop = 'B' }) {
         );
       }
     },
-    { title: '产品货号', dataIndex: 'product_code', width: 110 },
+    { title: '产品货号', dataIndex: 'product_code', width: 110, ellipsis: true },
     { title: '模号名称', dataIndex: 'mold_name', width: 160, ellipsis: true },
-    { title: '颜色', dataIndex: 'color', width: 90,
+    { title: '颜色', dataIndex: 'color', width: 90, ellipsis: true,
       render: (v, record) => isEditing(record)
         ? <Input size="small" value={editingData.color} onChange={e => setEditingData({...editingData, color: e.target.value})} />
         : v },
-    { title: '色粉编号', dataIndex: 'color_powder_no', width: 90,
+    { title: '色粉编号', dataIndex: 'color_powder_no', width: 90, ellipsis: true,
       render: (v, record) => isEditing(record)
         ? <Input size="small" value={editingData.color_powder_no} onChange={e => setEditingData({...editingData, color_powder_no: e.target.value})} />
         : v },
-    { title: '料型', dataIndex: 'material_type', width: 120,
+    { title: '料型', dataIndex: 'material_type', width: 120, ellipsis: true,
       render: (v, record) => isEditing(record)
         ? <Input size="small" value={editingData.material_type} onChange={e => setEditingData({...editingData, material_type: e.target.value})} />
         : v },
@@ -500,27 +560,27 @@ export default function ScheduleResult({ workshop = 'B' }) {
       render: v => v > 0 ? Math.round(v * 100) / 100 : ''
     },
     { title: '装箱数', dataIndex: 'packing_qty', width: 70 },
-    { title: '备注', dataIndex: 'notes', width: 120,
+    { title: '备注', dataIndex: 'notes', width: 120, ellipsis: true,
       render: (v, record) => isEditing(record) ? (
         <Input size="small" value={editingData.notes} onChange={e => setEditingData({...editingData, notes: e.target.value})} />
       ) : (v ? <span style={{ color: 'red', fontWeight: 'bold' }}>{v}</span> : '')
     },
-    { title: '机械手', dataIndex: 'robot_arm', width: 80,
+    { title: '机械手', dataIndex: 'robot_arm', width: 80, ellipsis: true,
       render: (v, record) => isEditing(record) ? (
         <Input size="small" value={editingData.robot_arm} onChange={e => setEditingData({...editingData, robot_arm: e.target.value})} style={{width: 65}} />
       ) : v
     },
-    { title: '夹具', dataIndex: 'clamp', width: 70,
+    { title: '夹具', dataIndex: 'clamp', width: 70, ellipsis: true,
       render: (v, record) => isEditing(record) ? (
         <Input size="small" value={editingData.clamp} onChange={e => setEditingData({...editingData, clamp: e.target.value})} style={{width: 55}} />
       ) : v
     },
-    { title: '转膜时间', dataIndex: 'mold_change_time', width: 90,
+    { title: '转膜时间', dataIndex: 'mold_change_time', width: 90, ellipsis: true,
       render: (v, record) => isEditing(record) ? (
         <Input size="small" value={editingData.mold_change_time} onChange={e => setEditingData({...editingData, mold_change_time: e.target.value})} style={{width: 75}} />
       ) : v
     },
-    { title: '调机人员', dataIndex: 'adjuster', width: 80,
+    { title: '调机人员', dataIndex: 'adjuster', width: 80, ellipsis: true,
       render: (v, record) => isEditing(record) ? (
         <Input size="small" value={editingData.adjuster} onChange={e => setEditingData({...editingData, adjuster: e.target.value})} style={{width: 65}} />
       ) : v
@@ -531,7 +591,7 @@ export default function ScheduleResult({ workshop = 'B' }) {
         if (isConfirmed) return <Tag color="green">已保存</Tag>;
         return isEditing(record) ? (
           <Space>
-            <Button size="small" type="primary" icon={<SaveOutlined />} onClick={() => saveEdit(selectedSchedule.id, record.id)}>保存</Button>
+            <Button size="small" type="primary" icon={<SaveOutlined />} onClick={() => saveEdit(selectedSchedule.id, record)}>保存</Button>
             <Button size="small" onClick={() => setEditingKey(null)}>取消</Button>
           </Space>
         ) : (
@@ -548,6 +608,58 @@ export default function ScheduleResult({ workshop = 'B' }) {
     },
   ];
 
+  const renderScheduleDetail = (record) => {
+    if (selectedSchedule?.id !== record.id) return null;
+
+    return (
+      <Card
+        title={
+          <Space>
+            <span>排机明细 - {selectedSchedule.schedule_date} {selectedSchedule.shift}</span>
+            <Tag color={selectedSchedule.status === 'confirmed' ? 'green' : 'default'}>
+              {selectedSchedule.status === 'confirmed' ? '已保存' : '草稿'}
+            </Tag>
+            <span style={{ color: '#999', fontSize: 12 }}>共 {items.filter(r => r.shortage > 0).length} 条待生产 {items.filter(r => r.shortage === 0).length > 0 ? `/ ${items.filter(r => r.shortage === 0).length}条已完成` : ''}</span>
+            <Switch size="small" checked={showCompleted} onChange={setShowCompleted} checkedChildren="显示已完成" unCheckedChildren="隐藏已完成" />
+            {selectedSchedule.shift === '夜班' && (
+              <Switch size="small" checked={showDayShift} onChange={setShowDayShift} checkedChildren="显示白班" unCheckedChildren="显示白班" />
+            )}
+          </Space>
+        }
+        size="small"
+        style={{ margin: '8px 0' }}
+        extra={
+          !isConfirmed && (
+            <Popconfirm
+              title="按机台号升序重排当前排机单？"
+              description="A-6# → A-12# → A-26# → A-40# 这样升序排列，同机台多行保留现有顺序。"
+              onConfirm={handleSortByMachine}
+              okText="确定排序"
+              cancelText="取消"
+            >
+              <Button size="small" icon={<SortAscendingOutlined />}>按机台号排序</Button>
+            </Popconfirm>
+          )
+        }
+      >
+        <DndContext sensors={dndSensors} onDragEnd={handleDragEnd}>
+          <SortableContext items={items.map(i => i.id)} strategy={verticalListSortingStrategy}>
+            <Table
+              components={{ body: { row: DraggableRow } }}
+              columns={itemColumns}
+              dataSource={tableDataSource}
+              rowKey={r => r._isDayShift ? `day_${r.id}` : r.id}
+              size="small"
+              pagination={false}
+              scroll={{ x: 2200 }}
+              rowClassName={item => item._isDayShift ? 'day-shift-row' : ''}
+            />
+          </SortableContext>
+        </DndContext>
+      </Card>
+    );
+  };
+
   return (
     <div>
       <Card title="排机单列表" size="small" style={{ marginBottom: 16 }}>
@@ -558,55 +670,14 @@ export default function ScheduleResult({ workshop = 'B' }) {
           loading={loading}
           size="small"
           pagination={{ pageSize: 20 }}
+          expandable={{
+            expandedRowKeys: selectedSchedule ? [selectedSchedule.id] : [],
+            expandedRowRender: renderScheduleDetail,
+            showExpandColumn: false,
+            rowExpandable: record => selectedSchedule?.id === record.id,
+          }}
         />
       </Card>
-
-      {selectedSchedule && (
-        <Card
-          title={
-            <Space>
-              <span>排机明细 - {selectedSchedule.schedule_date} {selectedSchedule.shift}</span>
-              <Tag color={selectedSchedule.status === 'confirmed' ? 'green' : 'default'}>
-                {selectedSchedule.status === 'confirmed' ? '已保存' : '草稿'}
-              </Tag>
-              <span style={{ color: '#999', fontSize: 12 }}>共 {items.filter(r => r.shortage > 0).length} 条待生产 {items.filter(r => r.shortage === 0).length > 0 ? `/ ${items.filter(r => r.shortage === 0).length}条已完成` : ''}</span>
-              <Switch size="small" checked={showCompleted} onChange={setShowCompleted} checkedChildren="显示已完成" unCheckedChildren="隐藏已完成" />
-              {selectedSchedule?.shift === '夜班' && (
-                <Switch size="small" checked={showDayShift} onChange={setShowDayShift} checkedChildren="显示白班" unCheckedChildren="显示白班" />
-              )}
-            </Space>
-          }
-          size="small"
-          extra={
-            !isConfirmed && (
-              <Popconfirm
-                title="按机台号升序重排当前排机单？"
-                description="A-6# → A-12# → A-26# → A-40# 这样升序排列，同机台多行保留现有顺序。"
-                onConfirm={handleSortByMachine}
-                okText="确定排序"
-                cancelText="取消"
-              >
-                <Button size="small" icon={<SortAscendingOutlined />}>按机台号排序</Button>
-              </Popconfirm>
-            )
-          }
-        >
-          <DndContext sensors={dndSensors} onDragEnd={handleDragEnd}>
-            <SortableContext items={items.map(i => i.id)} strategy={verticalListSortingStrategy}>
-              <Table
-                components={{ body: { row: DraggableRow } }}
-                columns={itemColumns}
-                dataSource={tableDataSource}
-                rowKey={r => r._isDayShift ? `day_${r.id}` : r.id}
-                size="small"
-                pagination={false}
-                scroll={{ x: 2000 }}
-                rowClassName={record => record._isDayShift ? 'day-shift-row' : ''}
-              />
-            </SortableContext>
-          </DndContext>
-        </Card>
-      )}
 
       {/* 复制到其他机台弹窗 */}
       <Modal

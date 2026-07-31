@@ -117,14 +117,28 @@ router.delete('/:id', (req, res) => {
 
 // 更新明细行
 router.put('/:id/items/:itemId', (req, res) => {
-  const { itemId } = req.params;
+  const { id, itemId } = req.params;
+  const currentItem = db.prepare(
+    'SELECT * FROM schedule_items WHERE id = ? AND schedule_id = ?'
+  ).get(itemId, id);
+  if (!currentItem) return res.status(404).json({ message: '记录不存在' });
+
+  const shouldSyncSameMold = (
+    req.body.sync_same_mold_machine === true
+    && req.body.machine_no !== undefined
+    && req.body.machine_no !== currentItem.machine_no
+    && Boolean(currentItem.mold_name)
+  );
+
   const fields = [
     'notes', 'robot_arm', 'clamp', 'mold_change_time', 'adjuster', 'machine_no',
+    'color', 'color_powder_no', 'material_type',
     // 日报表扩展字段
     'worker_name', 'piece_rate', 'approved_piece_rate', 'output_value', 'actual_hours',
     'piece_wage', 'hour_wage', 'day_regular_wage', 'ot_wage_12h', 'encouragement',
     'supper_fee', 'overtime_wage', 'total_wage', 'downtime_reason', 'pi_ban',
   ];
+  const numericFields = ['shot_weight', 'material_kg'];
   const updates = [];
   const values = [];
 
@@ -135,19 +149,36 @@ router.put('/:id/items/:itemId', (req, res) => {
     }
   }
 
-  // 累计数更新时自动计算欠数
-  if (req.body.accumulated !== undefined) {
-    const currentItem = db.prepare('SELECT * FROM schedule_items WHERE id = ?').get(itemId);
-    if (!currentItem) return res.status(404).json({ message: '记录不存在' });
+  for (const f of numericFields) {
+    if (req.body[f] !== undefined) {
+      updates.push(`${f} = ?`);
+      values.push(Number(req.body[f]) || 0);
+    }
+  }
 
-    const accumulated = Number(req.body.accumulated) || 0;
-    const shortage = Math.max(0, (currentItem.quantity_needed || 0) - accumulated);
+  // 累计数或需啤数更新时，统一按最新值计算欠数
+  if (req.body.accumulated !== undefined || req.body.quantity_needed !== undefined) {
+    const accumulated = req.body.accumulated !== undefined
+      ? Number(req.body.accumulated) || 0
+      : Number(currentItem.accumulated) || 0;
+    const quantityNeeded = req.body.quantity_needed !== undefined
+      ? Number(req.body.quantity_needed) || 0
+      : Number(currentItem.quantity_needed) || 0;
+    const shortage = Math.max(0, quantityNeeded - accumulated);
 
-    updates.push('accumulated = ?', 'shortage = ?');
-    values.push(accumulated, shortage);
+    if (req.body.accumulated !== undefined) {
+      updates.push('accumulated = ?');
+      values.push(accumulated);
+    }
+    if (req.body.quantity_needed !== undefined) {
+      updates.push('quantity_needed = ?');
+      values.push(quantityNeeded);
+    }
+    updates.push('shortage = ?');
+    values.push(shortage);
 
     // 同步更新订单表，若欠数为0则标记完成
-    if (currentItem.order_id) {
+    if (req.body.accumulated !== undefined && currentItem.order_id) {
       if (shortage <= 0) {
         db.prepare("UPDATE orders SET accumulated = ?, status = 'completed' WHERE id = ?")
           .run(accumulated, currentItem.order_id);
@@ -166,8 +197,6 @@ router.put('/:id/items/:itemId', (req, res) => {
 
   // 目标数更新时自动计算天数，并同步到 mold_targets 表（永久保存，下次自动用）
   if (req.body.target_24h !== undefined) {
-    const currentItem = db.prepare('SELECT * FROM schedule_items WHERE id = ?').get(itemId);
-    if (!currentItem) return res.status(404).json({ message: '记录不存在' });
     const t24h = Number(req.body.target_24h) || 0;
     const t11h = Number(req.body.target_11h) || (t24h > 0 ? Math.round(t24h / 24 * 11) : 0);
     const shortage = currentItem.shortage || Math.max(0, (currentItem.quantity_needed || 0) - (currentItem.accumulated || 0));
@@ -200,7 +229,6 @@ router.put('/:id/items/:itemId', (req, res) => {
   // 机台更新时自动学习「模具→机台」映射（人工改一次，下次智能排机自动用）
   if (req.body.machine_no !== undefined) {
     try {
-      const currentItem = db.prepare('SELECT * FROM schedule_items WHERE id = ?').get(itemId);
       if (currentItem && currentItem.mold_name) {
         const moldCode = currentItem.mold_name.split(' ')[0].replace(/[一-龥].*$/, '').trim();
         if (moldCode) {
@@ -223,10 +251,29 @@ router.put('/:id/items/:itemId', (req, res) => {
 
   if (updates.length === 0) return res.status(400).json({ message: '没有要更新的字段' });
 
-  values.push(itemId);
-  db.prepare(`UPDATE schedule_items SET ${updates.join(', ')} WHERE id = ?`).run(...values);
+  let syncedSameMoldCount = 1;
+  const saveItem = db.transaction(() => {
+    db.prepare(`UPDATE schedule_items SET ${updates.join(', ')} WHERE id = ?`)
+      .run(...values, itemId);
+
+    if (shouldSyncSameMold) {
+      const sameMold = db.prepare(`
+        SELECT COUNT(*) AS count
+        FROM schedule_items
+        WHERE schedule_id = ? AND mold_name = ?
+      `).get(id, currentItem.mold_name);
+      db.prepare(`
+        UPDATE schedule_items
+        SET machine_no = ?
+        WHERE schedule_id = ? AND mold_name = ?
+      `).run(req.body.machine_no, id, currentItem.mold_name);
+      syncedSameMoldCount = sameMold.count;
+    }
+  });
+  saveItem();
+
   const item = db.prepare('SELECT * FROM schedule_items WHERE id = ?').get(itemId);
-  res.json(item);
+  res.json({ ...item, synced_same_mold_count: syncedSameMoldCount });
 });
 
 // 复制排机项到另一台机

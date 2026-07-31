@@ -936,6 +936,42 @@
     "workshop": "C"
   },
   {
+    "machine_no": "C-35#",
+    "brand": "博创",
+    "tonnage": 150,
+    "arm_type": "三轴单臂",
+    "model_desc": "博创150T三轴单臂",
+    "status": "active",
+    "workshop": "C"
+  },
+  {
+    "machine_no": "C-36#",
+    "brand": "博创",
+    "tonnage": 150,
+    "arm_type": "三轴单臂",
+    "model_desc": "博创150T三轴单臂",
+    "status": "active",
+    "workshop": "C"
+  },
+  {
+    "machine_no": "C-37#",
+    "brand": "博创",
+    "tonnage": 150,
+    "arm_type": "三轴单臂",
+    "model_desc": "博创150T三轴单臂",
+    "status": "active",
+    "workshop": "C"
+  },
+  {
+    "machine_no": "C-38#",
+    "brand": "博创",
+    "tonnage": 150,
+    "arm_type": "三轴单臂",
+    "model_desc": "博创150T三轴单臂",
+    "status": "active",
+    "workshop": "C"
+  },
+  {
     "machine_no": "其他机台",
     "brand": "-",
     "tonnage": 0,

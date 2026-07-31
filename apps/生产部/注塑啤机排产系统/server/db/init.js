@@ -198,8 +198,8 @@ function initDatabase() {
   });
   insertManyWs(machinesA);
 
-  // ========== 预置华登(C车间)34台机 ==========
-  const machinesC = Array.from({ length: 34 }, (_, i) => ({
+  // ========== 预置华登(C车间)38台机 ==========
+  const machinesC = Array.from({ length: 38 }, (_, i) => ({
     no: `C-${i + 1}#`, brand: '博创', tonnage: 150, arm: '三轴单臂', workshop: 'C'
   }));
   insertManyWs(machinesC);

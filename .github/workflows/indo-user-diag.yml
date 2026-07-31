@@ -38,4 +38,4 @@ jobs:
             set -euo pipefail
             docker exec -e PGPASSWORD="$DB_PASSWORD" rr-portal-db-1 \
               psql -U rrportal -d rrportal -c \
-              'SET search_path TO indo_shipping; SELECT "Id", "Username", "IsActive", left("PasswordHash", 25) AS hash_prefix, "CreatedAt" FROM "Users" ORDER BY "Id";'
+              'SET search_path TO indo_shipping; SELECT "Id", "Username", "IsActive", "PasswordHash", "CreatedAt" FROM "Users" ORDER BY "Id";'

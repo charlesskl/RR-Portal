@@ -2546,7 +2546,9 @@ def _append_department_transfer_target(
 
 
 def _auto_flow_targets(conn, source_body, source_department):
-    if source_body.qty is None or source_body.qty <= 0:
+    # 退货（负数）也要联动：一个部门退回，另一部门必须收到（负数镜像），
+    # 否则两边数量对不上。只有 0 不联动（无意义记录）。
+    if source_body.qty is None or source_body.qty == 0:
         return []
 
     if source_body.material == NFC_MATERIAL and source_body.sticker_type:
@@ -2574,7 +2576,28 @@ def _auto_flow_targets(conn, source_body, source_department):
 
 
 def _insert_auto_record(conn, target_department, body, source_record_id, source_flow, created_by):
-    _validate_record(body, target_department)
+    # 目标部门已有相同的人工/导入记录（各部门自己的台账）时不再生成联动记录，
+    # 否则同一笔流向在目标部门计两次（人工一条 + 联动一条），数量对不上。
+    if body.doc_no:
+        dup = conn.execute(
+            "SELECT 1 FROM records WHERE department=? AND source_record_id IS NULL "
+            "AND rec_type=? AND doc_no=? AND material=? AND IFNULL(sticker_type,'')=? "
+            "AND qty=? AND IFNULL(rec_date,'')=? LIMIT 1",
+            (
+                target_department,
+                body.rec_type,
+                body.doc_no,
+                body.material,
+                body.sticker_type or "",
+                body.qty,
+                body.rec_date or "",
+            ),
+        ).fetchone()
+        if dup:
+            return
+    # 负数（退货）联动记录跳过非负校验，与旧台账导入的处理一致
+    if body.qty is None or body.qty > 0:
+        _validate_record(body, target_department)
     supplier, po_no, customer_name = _record_extras(body, target_department)
     sticker_type = _normalize_sticker_type(conn, body.material, body.sticker_type)
     conn.execute(

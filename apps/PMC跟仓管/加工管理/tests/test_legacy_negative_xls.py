@@ -151,3 +151,61 @@ def test_xls_upload_falls_back_to_xlrd(conn, tmp_path):
     with pytest.raises(m.HTTPException) as exc:
         m._load_upload_workbook(upload)
     assert exc.value.status_code == 400
+
+
+# ─── 退货（负数）联动 + 联动去重 ─────────────────────────────────────────────
+
+def _make_body(**kw):
+    base = dict(
+        rec_type="issue",
+        location_id=None,
+        rec_date="2026-07-29",
+        doc_no="T001",
+        material=m.NFC_MATERIAL,
+        sticker_type="1#NFC贴纸",
+        qty=-100,
+        remark="测试",
+    )
+    base.update(kw)
+    return m.RecordIn(**base)
+
+
+def test_negative_issue_links_to_target_department(conn):
+    loc = conn.execute(
+        "SELECT id FROM locations WHERE name=?", ("东莞车间",)
+    ).fetchone()
+    body = _make_body(location_id=loc["id"])
+    targets = m._auto_flow_targets(conn, body, "兴信B来料仓")
+    assert len(targets) == 1
+    target_dept, target_body, flow = targets[0]
+    assert target_dept == "东莞车间"
+    assert target_body.qty == -100
+    assert target_body.rec_type == "issue"
+    # 负数联动记录落库不触发非负校验
+    m._insert_auto_record(conn, target_dept, target_body, 1, flow, 1)
+    row = conn.execute(
+        "SELECT qty, department FROM records WHERE doc_no='T001'"
+    ).fetchone()
+    assert row["qty"] == -100
+    assert row["department"] == "东莞车间"
+
+
+def test_auto_record_skipped_when_manual_record_exists(conn):
+    loc = conn.execute(
+        "SELECT id FROM locations WHERE name=?", ("东莞车间",)
+    ).fetchone()
+    body = _make_body(location_id=loc["id"], qty=100)
+    targets = m._auto_flow_targets(conn, body, "兴信B来料仓")
+    target_dept, target_body, flow = targets[0]
+    # 目标部门先有一条同单号同数量的人工记录
+    m._insert_auto_record(conn, target_dept, target_body, None, "manual", 1)
+    before = conn.execute(
+        "SELECT COUNT(*) AS c FROM records WHERE doc_no='T001'"
+    ).fetchone()["c"]
+    # 再插联动记录应被去重跳过
+    m._insert_auto_record(conn, target_dept, target_body, 999, flow, 1)
+    after = conn.execute(
+        "SELECT COUNT(*) AS c FROM records WHERE doc_no='T001'"
+    ).fetchone()["c"]
+    assert before == 1
+    assert after == 1

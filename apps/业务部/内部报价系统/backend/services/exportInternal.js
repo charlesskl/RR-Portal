@@ -314,6 +314,35 @@ function patchFreeInputFormulas(ws, payloads) {
   }
 }
 
+function patchMoldProductGroups(ws, payloads) {
+  const molds = (payloads.engineering && payloads.engineering.molds) || [];
+  if (!molds.some(mold => mold.product_group_id)) return;
+  const titleRow = findRow(ws, '一、模具部分');
+  if (!titleRow) return;
+  const counters = {};
+  let previousGroup = '';
+  for (let index = 0; index < molds.length; index += 1) {
+    const mold = molds[index];
+    const row = titleRow + 2 + index;
+    const groupId = mold.product_group_id || '';
+    if (!groupId) continue;
+    counters[groupId] = (counters[groupId] || 0) + 1;
+    const groupNumber = Object.keys(counters).indexOf(groupId) + 1;
+    ws.getCell(row, 1).value = `${groupNumber}.${counters[groupId]}`;
+    if (groupId !== previousGroup) {
+      ws.getCell(row, 2).value = `【${mold.product_group_name || `产品${groupNumber}`}】${mold.name || ''}`;
+      for (let column = 1; column <= 18; column += 1) {
+        ws.getCell(row, column).fill = {
+          type: 'pattern',
+          pattern: 'solid',
+          fgColor: { argb: 'FFE0F2FE' },
+        };
+      }
+    }
+    previousGroup = groupId;
+  }
+}
+
 function patchZeroCartonRate(ws, payloads) {
   const cartonCalc = payloads.engineering && payloads.engineering.carton_calc;
   if (!cartonCalc || Number(cartonCalc.paper_rate) !== 0) return;
@@ -691,6 +720,7 @@ function enhanceWorkbook(workbook, { quote, sections }) {
   const sales = payloads.sales || {};
   const fx = num(sales.header && sales.header.fx_rmb_hkd) || 0.85;
 
+  patchMoldProductGroups(ws, payloads);
   patchFreeInputFormulas(ws, payloads);
   patchZeroCartonRate(ws, payloads);
   const refs = patchSimpleIndoColumns(ws, payloads);

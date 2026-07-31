@@ -364,6 +364,39 @@ function renderMolds(container, molds, onChange, canEdit, fxRmbHkd, fxHkdUsd) {
   });
 
   molds.forEach((m, idx) => {
+    const groupId = m.product_group_id || '';
+    const previousGroupId = idx > 0 ? (molds[idx - 1].product_group_id || '') : '';
+    const nextGroupId = idx + 1 < molds.length ? (molds[idx + 1].product_group_id || '') : '';
+    if (groupId && groupId !== previousGroupId) {
+      const groupMolds = molds.filter(item => item.product_group_id === groupId);
+      const leader = groupMolds[0] || m;
+      const trGroup = document.createElement('tr');
+      trGroup.style.background = '#e0f2fe';
+      const tdGroup = document.createElement('td');
+      tdGroup.colSpan = canEdit ? 18 : 17;
+      tdGroup.style.cssText = 'padding:10px 14px;font-weight:700;color:#075985;border-top:2px solid #38bdf8';
+      const groupImage = leader.product_image || '';
+      const sourceRows = leader.product_group_rows || [];
+      tdGroup.innerHTML = `
+        <div style="display:flex;align-items:center;gap:12px">
+          ${groupImage ? `<img src="${escapeHtml(groupImage)}" style="width:72px;height:72px;object-fit:contain;border:1px solid #bae6fd;border-radius:8px;background:white"/>` : ''}
+          <span>产品组</span>
+          ${canEdit
+            ? `<input data-product-group-name="${escapeHtml(groupId)}" value="${escapeHtml(leader.product_group_name || '')}" style="width:140px;font-weight:700"/>`
+            : `<span>${escapeHtml(leader.product_group_name || '')}</span>`}
+          <span class="muted" style="font-weight:400">共 ${groupMolds.length} 副模具${sourceRows.length === 2 ? ` · 原表第 ${sourceRows[0]}–${sourceRows[1]} 行` : ''}</span>
+        </div>`;
+      trGroup.appendChild(tdGroup);
+      tbody.appendChild(trGroup);
+      if (canEdit) {
+        const groupNameInput = tdGroup.querySelector('[data-product-group-name]');
+        groupNameInput.oninput = () => {
+          groupMolds.forEach(item => { item.product_group_name = groupNameInput.value; });
+          onChange();
+        };
+      }
+    }
+
     const tr = document.createElement('tr');
     // 序号
     const tdNo = document.createElement('td'); tdNo.className = 'ro'; tdNo.textContent = idx + 1; tr.appendChild(tdNo);
@@ -482,6 +515,21 @@ function renderMolds(container, molds, onChange, canEdit, fxRmbHkd, fxHkdUsd) {
     }
     tbody.appendChild(tr);
 
+    if (groupId && groupId !== nextGroupId) {
+      const groupMolds = molds.filter(item => item.product_group_id === groupId);
+      const groupRmb = sum(groupMolds, item => num(item.price_rmb));
+      const groupUsd = sum(groupMolds, item => num(item.price_usd));
+      const groupHkd = groupRmb / fxv + groupUsd * usdv;
+      const trGroupSubtotal = document.createElement('tr');
+      trGroupSubtotal.style.background = '#f0f9ff';
+      trGroupSubtotal.innerHTML = `
+        <td colspan="13" style="text-align:right;font-weight:700;color:#075985">${escapeHtml(m.product_group_name || '')} 小计</td>
+        <td style="font-weight:700">${formatNum(groupRmb)}</td>
+        <td style="font-weight:700">${formatNum(groupUsd)}</td>
+        <td style="font-weight:700">${formatNum(groupHkd)}</td>
+        <td></td>${canEdit ? '<td></td>' : ''}`;
+      tbody.appendChild(trGroupSubtotal);
+    }
   });
 
   // 小计：RMB / HKD 同行，分别对齐 价格RMB / 价格HKD 列
@@ -2283,11 +2331,11 @@ function renderEngineering(host, payload, canEdit, onChange, fxRmbHkd, fxHkdUsd)
         <div class="card" style="background:#f0fdf4;border:1px solid #86efac;">
           <p>从 <b>${escapeHtml(j.sheet_used || '')}</b> 解析到 <b>${j.molds.length}</b> 行明细：</p>
           <table class="wb-table"><thead><tr>
-            <th>模号</th><th>名称</th><th>类型</th><th>材质</th>
+            <th>产品</th><th>模号</th><th>名称</th><th>类型</th><th>材质</th>
             <th>出模数</th><th>套数</th><th>净重(g)</th><th>周期(秒)</th><th>机型</th><th>目标数</th><th>图片</th><th>模具尺寸</th><th>价格RMB</th><th>价格HKD</th><th>备注</th>
           </tr></thead><tbody>
           ${j.molds.map(m => `<tr>
-            <td>${escapeHtml(m.mold_no || '')}</td><td>${escapeHtml(m.name || '')}</td><td>${escapeHtml(m.mold_type || '')}</td>
+            <td>${escapeHtml(m.product_group_name || '')}</td><td>${escapeHtml(m.mold_no || '')}</td><td>${escapeHtml(m.name || '')}</td><td>${escapeHtml(m.mold_type || '')}</td>
             <td>${escapeHtml(m.material || '')}</td><td>${escapeHtml(m.cavity || '')}</td>
             <td>${escapeHtml(m.sets ?? '')}</td><td>${escapeHtml(m.weight_g ?? '')}</td><td>${escapeHtml(m.cycle_sec ?? '')}</td><td>${escapeHtml(m.machine_model || '')}</td><td>${escapeHtml(m.target ?? '')}</td><td>${escapeHtml((m.images || []).length)}</td><td>${escapeHtml((m.detail && m.detail.mold_size) || '')}</td><td>${escapeHtml(m.price_rmb ?? '')}</td><td>${escapeHtml(m.price_hkd ?? '')}</td><td>${escapeHtml(m.note || '')}</td>
           </tr>`).join('')}

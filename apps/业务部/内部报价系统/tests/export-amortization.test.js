@@ -214,6 +214,43 @@ test('electronic quantity accepts formulas and preserves them in export', async 
   assert.match(source, /c\.qty\s*=\s*parseFormulaInput\(i\.value\)/);
 });
 
+test('internal export keeps mold rows separated by product group', async () => {
+  const workbook = await buildWorkbook({
+    quote: { quote_no: 'MOLD-PRODUCT-GROUPS', product_name: '多产品模具', qty: 1000 },
+    sections: [
+      {
+        dept: 'engineering',
+        payload_json: JSON.stringify({
+          molds: [
+            { mold_no: 'NO.01', name: '产品一外壳', product_group_id: 'product-1', product_group_name: '产品1' },
+            { mold_no: 'NO.02', name: '产品一配件', product_group_id: 'product-1', product_group_name: '产品1' },
+            { mold_no: 'NO.03', name: '产品二外壳', product_group_id: 'product-2', product_group_name: '产品2' },
+          ],
+        }),
+      },
+      {
+        dept: 'sales',
+        payload_json: JSON.stringify({
+          header: { fx_rmb_hkd: 0.85, fx_hkd_usd: 7.8 },
+          shipping: { scenarios: [] },
+        }),
+      },
+    ],
+  });
+
+  const worksheet = workbook.getWorksheet('报价明细');
+  const rows = {};
+  worksheet.eachRow(row => {
+    const moldNo = row.getCell(3).value;
+    if (moldNo) rows[moldNo] = row;
+  });
+  assert.equal(rows['NO.01'].getCell(1).value, '1.1');
+  assert.equal(rows['NO.02'].getCell(1).value, '1.2');
+  assert.equal(rows['NO.03'].getCell(1).value, '2.1');
+  assert.match(rows['NO.01'].getCell(2).value, /^【产品1】/);
+  assert.match(rows['NO.03'].getCell(2).value, /^【产品2】/);
+});
+
 test('export keeps prototype and testing amortization when mold items are empty', async () => {
   const workbook = await buildWorkbook({
     quote: { quote_no: 'TEST-264', product_name: '分摊测试', qty: 10000 },

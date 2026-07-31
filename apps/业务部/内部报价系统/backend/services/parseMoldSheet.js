@@ -35,6 +35,7 @@ const FIELD_KEYWORDS = {
   price_usd:      ['USD', '美元'],
   mold_type:      ['进胶方式', '模胚类型', '模胚大约', '模胚型号', '模胚', '水口', 'GATE'],
   note:           ['备注', '说明', 'REMARK'],
+  image:          ['图片', '产品图', 'PICTURE', 'IMAGE'],
 };
 
 const HEADER_HINT_WORDS = ['序号', '编号', '模号', '名称', '项目', '物料', '材质', '重量', '出模数', '套数', '数量', '单价', '总价', '模价', '价格', '备注', '图片', '加工', '产品', '客户',
@@ -108,6 +109,58 @@ function machineTonToModel(v) {
   if (n <= 680) return '60A';
   if (n <= 900) return '105A';
   return `${n}T`;
+}
+
+function detectProductGroups(ws, imageCol, dataStart, dataRows) {
+  if (imageCol < 0 || !dataRows.length) return [];
+  const dataRowIndexes = dataRows.map(({ ri }) => ri);
+  const firstDataRow = Math.min(...dataRowIndexes);
+  const lastDataRow = Math.max(...dataRowIndexes);
+  const mergedGroups = (ws['!merges'] || [])
+    .filter(range =>
+      range.s.c <= imageCol && range.e.c >= imageCol
+      && range.e.r >= firstDataRow && range.s.r <= lastDataRow
+      && range.e.r > range.s.r
+    )
+    .map(range => ({
+      rowStart: Math.max(range.s.r, dataStart),
+      rowEnd: Math.min(range.e.r, lastDataRow),
+    }))
+    .filter(range => range.rowStart <= range.rowEnd)
+    .sort((a, b) => a.rowStart - b.rowStart);
+
+  const formulaAnchors = [];
+  for (let row = firstDataRow; row <= lastDataRow; row += 1) {
+    const address = XLSX.utils.encode_cell({ r: row, c: imageCol });
+    const formula = String(ws[address]?.f || ws[address]?.v || '');
+    if (/DISPIMG|IMAGE/i.test(formula)) formulaAnchors.push(row);
+  }
+  const ranges = mergedGroups.length
+    ? mergedGroups
+    : formulaAnchors.map((rowStart, index) => ({
+      rowStart,
+      rowEnd: (formulaAnchors[index + 1] ?? (lastDataRow + 1)) - 1,
+    }));
+
+  return ranges.map((range, index) => ({
+    id: `product-${index + 1}`,
+    name: `产品${index + 1}`,
+    rowStart: range.rowStart,
+    rowEnd: range.rowEnd,
+    source_rows: [range.rowStart + 1, range.rowEnd + 1],
+  }));
+}
+
+function applyProductGroups(molds, productGroups) {
+  for (const mold of molds) {
+    const row = mold._rows && mold._rows[0];
+    const group = productGroups.find(item => row >= item.rowStart && row <= item.rowEnd);
+    if (!group) continue;
+    mold.product_group_id = group.id;
+    mold.product_group_name = group.name;
+    mold.product_group_rows = group.source_rows;
+  }
+  return molds;
 }
 
 function formatStructure(v) {
@@ -209,13 +262,21 @@ function tryParseSheet(wb, sheetName) {
     if (cols.mold_no >= 0 && !cell(r, 'mold_no') && !cell(r, 'name') && !cell(r, 'part_name') && !cell(r, 'part_name_cn')) continue;
     dataRows.push({ r, ri: i });  // ri = 0-based 原始行号，供图片按行归属
   }
+  const productGroups = detectProductGroups(ws, cols.image, dataStart, dataRows);
 
   const hasPartDetailCols = cols.part_name >= 0
     && (cols.part_name_cn >= 0 || (cols.name >= 0 && cols.part_name !== cols.name));
   if (hasPartDetailCols) {
-    const detailMolds = buildPartDetailMolds(dataRows, cell);
+    const detailMolds = applyProductGroups(buildPartDetailMolds(dataRows, cell), productGroups);
     if (detailMolds.length) {
-      return { sheets: wb.SheetNames, sheet_used: sheetName, header_row: hIdx + 1, cols_found: cols, molds: detailMolds };
+      return {
+        sheets: wb.SheetNames,
+        sheet_used: sheetName,
+        header_row: hIdx + 1,
+        cols_found: cols,
+        product_groups: productGroups,
+        molds: detailMolds,
+      };
     }
   }
 
@@ -339,7 +400,15 @@ function tryParseSheet(wb, sheetName) {
     };
   });
 
-  return { sheets: wb.SheetNames, sheet_used: sheetName, header_row: hIdx + 1, cols_found: cols, molds };
+  applyProductGroups(molds, productGroups);
+  return {
+    sheets: wb.SheetNames,
+    sheet_used: sheetName,
+    header_row: hIdx + 1,
+    cols_found: cols,
+    product_groups: productGroups,
+    molds,
+  };
 }
 
 function buildPartDetailMolds(dataRows, cell) {

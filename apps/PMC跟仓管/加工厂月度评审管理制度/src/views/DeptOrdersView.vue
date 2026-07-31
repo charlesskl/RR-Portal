@@ -7,10 +7,11 @@ import { useFactoriesStore } from '../stores/factories'
 import { useAuthStore } from '../stores/auth'
 import { CRAFT_LABELS, REGION_LABELS, regionOf, type Craft, type Region } from '../constants/roles'
 import { canEditOrders, allowedRegions } from '../utils/permissions'
-import { buildDeliveryReport, exportDeliveryExcel, parseDeliveryImport, DELIVERY_HEADERS as HEADERS, type ReportRow, type DetailRow } from '../utils/deliveryStats'
+import { buildDeliveryReport, exportDeliveryExcel, parseDeliveryImport, splitSewingContractItemNo, DELIVERY_HEADERS as HEADERS, type ReportRow, type DetailRow } from '../utils/deliveryStats'
 import { readDeliveryPdfAsAoa } from '../utils/pdfDeliveryImport'
 import { parseDeliveryExcelFiles } from '../utils/deliveryExcelImport'
 import { cnyTaxToHkdUntaxed, DEFAULT_CNY_TO_HKD_RATE } from '../utils/orderPricing'
+import { matchesOrderDate, type OrderDateFilter } from '../utils/orderDateFilter'
 import type { Order } from '../types/order'
 
 const route = useRoute()
@@ -27,7 +28,23 @@ const deptName = computed(() =>
   (region.value ? REGION_LABELS[region.value] + '厂区 · ' : '') + (CRAFT_LABELS[craft.value] ?? '部门'))
 const newLink = computed(() => `/orders/dept/${craft.value}/new` + (region.value ? `?region=${region.value}` : ''))
 const search = ref<string>('')
+const dateMode = ref<'all' | 'month' | 'range'>('all')
+const selectedMonth = ref(new Date().toISOString().slice(0, 7))
+const rangeStart = ref('')
+const rangeEnd = ref('')
 const canEdit = computed(() => (auth.role ? canEditOrders(auth.role) : false))
+
+const dateFilter = computed<OrderDateFilter>(() => {
+  if (dateMode.value === 'month') return { mode: 'month', month: selectedMonth.value }
+  if (dateMode.value === 'range') return { mode: 'range', start: rangeStart.value, end: rangeEnd.value }
+  return { mode: 'all' }
+})
+
+function clearDateFilter() {
+  dateMode.value = 'all'
+  rangeStart.value = ''
+  rangeEnd.value = ''
+}
 
 onMounted(() => Promise.all([orders.fetchAll(), factories.fetchAll()]))
 
@@ -37,6 +54,7 @@ const deptOrders = computed(() => {
   return orders.items
     .filter((o) => o.expand?.factory?.craft === craft.value && (!region.value || regionOf(o.expand?.factory) === region.value))
     .filter((o) => !myRegions.value || myRegions.value.includes(regionOf(o.expand?.factory)))
+    .filter((o) => matchesOrderDate(o.order_date, dateFilter.value))
     .filter((o) => {
       if (!q) return true
       return [o.expand?.factory?.name, o.pmc, o.item_no, o.mold_no, o.order_no, o.product]
@@ -47,9 +65,14 @@ const orderCount = computed(() => deptOrders.value.length)
 const rows = computed<ReportRow[]>(() =>
   buildDeliveryReport(deptOrders.value, deptName.value, (o) => o.expand?.factory?.name ?? ''))
 const showMoldNumber = computed(() => craft.value === 'injection')
-const visibleHeaders = computed(() => HEADERS.filter((header) => showMoldNumber.value || header !== '模具编号'))
+const showContractNumber = computed(() => craft.value === 'sewing')
+const visibleHeaders = computed(() => {
+  const headers = HEADERS.filter((header) => showMoldNumber.value || header !== '模具编号')
+  if (showContractNumber.value) headers.splice(headers.indexOf('货号'), 0, '合同号')
+  return headers
+})
 const visibleColumnCount = computed(() => visibleHeaders.value.length + (canEdit.value ? 1 : 0))
-const subtotalLabelSpan = computed(() => showMoldNumber.value ? 10 : 9)
+const subtotalLabelSpan = computed(() => Math.max(1, visibleHeaders.value.indexOf('订单总单数') - 1))
 
 type RowDraft = {
   pmc: string
@@ -187,8 +210,17 @@ function sourceOrder(row: DetailRow) {
   return orders.items.find((order) => order.id === row.id)
 }
 
+function sewingItemParts(row: DetailRow) {
+  return splitSewingContractItemNo(row.item_no)
+}
+
 function exportExcel() {
-  exportDeliveryExcel(rows.value, `${deptName.value}外发加工厂交货延期统计表`, showMoldNumber.value)
+  exportDeliveryExcel(
+    rows.value,
+    `${deptName.value}外发加工厂交货延期统计表`,
+    showMoldNumber.value,
+    showContractNumber.value,
+  )
 }
 
 async function saveRow(row: DetailRow) {
@@ -318,6 +350,21 @@ async function removeRow(row: DetailRow) {
         <span class="muted">共 {{ orderCount }} 单</span>
         <RouterLink v-if="canEdit" :to="newLink"><button>+ 新增下单</button></RouterLink>
         <span class="spacer"></span>
+        <div class="date-filter">
+          <select v-model="dateMode" aria-label="下单日期筛选方式">
+            <option value="all">全部日期</option>
+            <option value="month">按月份</option>
+            <option value="range">按时间段</option>
+          </select>
+          <input v-if="dateMode === 'month'" v-model="selectedMonth" type="month" aria-label="选择月份" />
+          <template v-else-if="dateMode === 'range'">
+            <input v-model="rangeStart" type="date" :max="rangeEnd || undefined" aria-label="开始日期" />
+            <span class="date-separator">至</span>
+            <input v-model="rangeEnd" type="date" :min="rangeStart || undefined" aria-label="结束日期" />
+          </template>
+          <button v-if="dateMode !== 'all'" class="ghost date-clear" type="button" title="清除日期筛选"
+            aria-label="清除日期筛选" @click="clearDateFilter">×</button>
+        </div>
         <button v-if="canEdit" class="ghost" @click="pdfInput?.click()">导入 PDF</button>
         <input ref="pdfInput" type="file" accept=".pdf,application/pdf" multiple style="display:none" @change="importPdf" />
         <button v-if="canEdit" class="ghost" :disabled="importingExcel" @click="fileInput?.click()">
@@ -326,14 +373,20 @@ async function removeRow(row: DetailRow) {
         <input ref="fileInput" type="file" accept=".xlsx,.xls,.csv" multiple style="display:none" @change="importExcel" />
         <input class="search-box" v-model="search" :placeholder="showMoldNumber
           ? '搜索 工厂/PMC/货号/模具编号/订单号/产品'
-          : '搜索 工厂/PMC/货号/订单号/产品'" />
+          : showContractNumber
+            ? '搜索 工厂/PMC/合同号/货号/订单号/产品'
+            : '搜索 工厂/PMC/货号/订单号/产品'" />
         <button @click="exportExcel">导出 Excel</button>
       </div>
       <div class="scroll">
         <table class="report">
           <thead>
             <tr>
-              <th v-for="h in visibleHeaders" :key="h" :class="{ 'item-no-col': h === '货号' }">{{ h }}</th>
+              <th
+                v-for="h in visibleHeaders"
+                :key="h"
+                :class="{ 'item-no-col': h === '货号', 'notes-col': h === '备注' }"
+              >{{ h }}</th>
               <th v-if="canEdit" class="op-col">操作</th>
             </tr>
           </thead>
@@ -347,7 +400,12 @@ async function removeRow(row: DetailRow) {
                   <span v-else>{{ r.pmc || '-' }}</span>
                 </td>
                 <td v-if="r.factorySpan" :rowspan="r.factorySpan" class="grp">{{ r.factory || '-' }}</td>
-                <td class="item-no-col" :title="r.item_no || ''">{{ r.item_no || '-' }}</td>
+                <td v-if="showContractNumber" class="contract-no-col" :title="sewingItemParts(r).contractNo">
+                  {{ sewingItemParts(r).contractNo || '-' }}
+                </td>
+                <td class="item-no-col" :title="r.item_no || ''">
+                  {{ showContractNumber ? (sewingItemParts(r).itemNo || '-') : (r.item_no || '-') }}
+                </td>
                 <td v-if="showMoldNumber">
                   <input v-if="canEdit" class="mold-no-inp" :value="draftValue(r, 'mold_no')"
                     @input="setDraftValue(r, 'mold_no', ($event.target as HTMLInputElement).value)" />
@@ -402,7 +460,7 @@ async function removeRow(row: DetailRow) {
                   <span v-else>{{ r.exchangeRate }}</span>
                 </td>
                 <td>{{ r.priceRatio }}</td>
-                <td>{{ r.notes || '-' }}</td>
+                <td class="notes-col">{{ r.notes || '-' }}</td>
                 <td v-if="canEdit" class="op-cell">
                   <div class="op-actions">
                     <button class="ghost mini" @click="saveRow(r)">保存</button>
@@ -427,7 +485,7 @@ async function removeRow(row: DetailRow) {
                 <td v-if="canEdit"></td>
               </tr>
             </template>
-            <tr v-if="!rows.length"><td :colspan="visibleColumnCount" class="hint" style="text-align:center">该部门暂无订单</td></tr>
+            <tr v-if="!rows.length"><td :colspan="visibleColumnCount" class="hint" style="text-align:center">没有符合条件的订单</td></tr>
           </tbody>
         </table>
       </div>
@@ -437,7 +495,17 @@ async function removeRow(row: DetailRow) {
 <style scoped>
 .wide { max-width: none; }
 .back { font-size: .9rem; }
+.date-filter { display: flex; align-items: center; gap: .35rem; min-height: 38px; }
+.date-filter select, .date-filter input { height: 38px; padding: .35rem .55rem; font-size: .86rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: white; }
+.date-filter input[type="month"] { width: 138px; }
+.date-filter input[type="date"] { width: 138px; }
+.date-separator { color: var(--text-soft); font-size: .82rem; }
+.date-clear { width: 34px; height: 34px; padding: 0; font-size: 1.15rem; line-height: 1; }
 .search-box { width: 240px; padding: .4rem .7rem; font-size: .9rem; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+@media (max-width: 1180px) {
+  .toolbar { flex-wrap: wrap; }
+  .spacer { display: none; }
+}
 .scroll { overflow-x: auto; }
 .report { min-width: 3140px; }
 .report th, .report td { white-space: nowrap; text-align: center; font-size: .85rem; }
@@ -447,6 +515,22 @@ async function removeRow(row: DetailRow) {
   max-width: 220px;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.report .contract-no-col {
+  width: 150px;
+  min-width: 150px;
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.report .notes-col {
+  width: 220px;
+  min-width: 220px;
+  max-width: 220px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  line-height: 1.45;
 }
 .report td.grp { font-weight: 600; background: #fafbff; }
 .report tr.subtotal td { background: #fff7e6; font-weight: 600; }

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import AppLayout from '../components/AppLayout.vue'
 import FactoryCompare from '../components/FactoryCompare.vue'
@@ -13,10 +13,19 @@ const auth = useAuthStore()
 const scores = useScoresStore()
 const factories = useFactoriesStore()
 const month = ref(new Date().toISOString().slice(0, 7))
+const loadingMonth = ref(false)
 
-onMounted(async () => {
-  await Promise.all([scores.fetchByMonth(month.value), factories.fetchAll()])
-})
+async function loadMonth() {
+  loadingMonth.value = true
+  try {
+    await scores.fetchByMonth(month.value)
+  } finally {
+    loadingMonth.value = false
+  }
+}
+
+onMounted(() => Promise.all([loadMonth(), factories.fetchAll()]))
+watch(month, loadMonth)
 
 const submitted = computed(() => scores.items.filter((s) => s.status !== 'draft').length)
 const flagged = computed(() => scores.items.filter((s) => s.flag && s.flag !== 'none'))
@@ -50,11 +59,11 @@ const roleLabel = computed(() => (auth.role ? ROLE_LABELS[auth.role] : ''))
       <section class="hero">
         <div class="hero-text">
           <h1>欢迎回来，{{ auth.displayName }}</h1>
-          <p>{{ roleLabel }} · 本月外协加工厂月度评审</p>
+          <p>{{ roleLabel }} · 外协加工厂月度评审</p>
         </div>
         <div class="hero-month">
-          <span class="m-label">当前周期</span>
-          <span class="m-value">{{ month }}</span>
+          <label class="m-label" for="dashboard-month">统计月份</label>
+          <input id="dashboard-month" v-model="month" class="m-value" type="month" :disabled="loadingMonth" />
         </div>
       </section>
 
@@ -66,7 +75,7 @@ const roleLabel = computed(() => (auth.role ? ROLE_LABELS[auth.role] : ''))
         </div>
         <div class="stat">
           <span class="stat-ico ico-green">📝</span>
-          <div><span class="stat-num">{{ submitted }}</span><span class="stat-lbl">本月已评分</span></div>
+          <div><span class="stat-num">{{ submitted }}</span><span class="stat-lbl">已评分</span></div>
         </div>
         <div class="stat">
           <span class="stat-ico ico-amber">⚖️</span>
@@ -84,7 +93,7 @@ const roleLabel = computed(() => (auth.role ? ROLE_LABELS[auth.role] : ''))
       <div class="cols">
         <!-- 等级分布 -->
         <section class="panel">
-          <h3 class="panel-title">本月等级分布</h3>
+          <h3 class="panel-title">等级分布</h3>
           <RouterLink v-for="(meta, g) in gradeMeta" :key="g" class="grade-row" :to="`/grade/${month}/${g}`" title="查看该等级工厂">
             <span class="grade-tag" :style="{ background: meta.color }">{{ g }}</span>
             <span class="grade-name">{{ meta.label }}</span>
@@ -109,7 +118,7 @@ const roleLabel = computed(() => (auth.role ? ROLE_LABELS[auth.role] : ''))
       </div>
 
       <!-- 工厂对比 -->
-      <FactoryCompare />
+      <FactoryCompare :month="month" />
     </div>
   </AppLayout>
 </template>
@@ -125,9 +134,15 @@ const roleLabel = computed(() => (auth.role ? ROLE_LABELS[auth.role] : ''))
 }
 .hero-text h1 { margin: 0 0 .35rem; font-size: 1.5rem; }
 .hero-text p { margin: 0; opacity: .9; font-size: .95rem; }
-.hero-month { text-align: right; display: flex; flex-direction: column; }
+.hero-month { text-align: right; display: flex; flex-direction: column; align-items: flex-end; gap: .2rem; }
 .m-label { font-size: .75rem; opacity: .85; }
-.m-value { font-size: 1.6rem; font-weight: 700; letter-spacing: 1px; }
+.m-value {
+  width: 178px; min-height: 44px; padding: .3rem .55rem; color: #fff; color-scheme: dark;
+  font: inherit; font-size: 1.35rem; font-weight: 700; letter-spacing: 0; text-align: center;
+  background: rgba(255,255,255,.14); border: 1px solid rgba(255,255,255,.55); border-radius: 8px;
+}
+.m-value:focus { outline: 2px solid #fff; outline-offset: 2px; }
+.m-value:disabled { opacity: .65; }
 
 .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; }
 .stat {
@@ -167,6 +182,6 @@ const roleLabel = computed(() => (auth.role ? ROLE_LABELS[auth.role] : ''))
   .stats { grid-template-columns: repeat(2, 1fr); }
   .cols { grid-template-columns: 1fr; }
   .hero { flex-direction: column; align-items: flex-start; gap: 1rem; }
-  .hero-month { text-align: left; }
+  .hero-month { text-align: left; align-items: flex-start; }
 }
 </style>

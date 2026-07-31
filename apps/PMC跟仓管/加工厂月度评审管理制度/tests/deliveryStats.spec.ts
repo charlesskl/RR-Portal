@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildDeliveryReport, parseDeliveryImport } from '../src/utils/deliveryStats'
+import { buildDeliveryReport, parseDeliveryImport, splitSewingContractItemNo } from '../src/utils/deliveryStats'
 import type { Order } from '../src/types/order'
 
 function order(partial: Partial<Order>): Order {
@@ -58,6 +58,22 @@ describe('buildDeliveryReport', () => {
       delayRatio: '100%',
       delayAvg: '20',
       outPriceCnyTax: 2.5,
+    })
+  })
+})
+
+describe('splitSewingContractItemNo', () => {
+  it('splits a sewing contract and item number at the last slash', () => {
+    expect(splitSewingContractItemNo('MA-RR-2345/92125')).toEqual({
+      contractNo: 'MA-RR-2345',
+      itemNo: '92125',
+    })
+  })
+
+  it('keeps legacy values without a slash as the item number', () => {
+    expect(splitSewingContractItemNo('92125')).toEqual({
+      contractNo: '',
+      itemNo: '92125',
     })
   })
 })

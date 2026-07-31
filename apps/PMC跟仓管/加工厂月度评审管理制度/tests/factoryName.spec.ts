@@ -50,6 +50,24 @@ describe('resolveFactoryName', () => {
     expect(result).toMatchObject({ status: 'matched', id: 'junhao' })
   })
 
+  it('matches a unique brand when the supplier uses different industry words', () => {
+    const result = resolveFactoryName(
+      [make('qianning', '东莞市清溪千宁五金塑胶加工厂')],
+      '东莞市千宁塑胶加工店',
+    )
+
+    expect(result).toMatchObject({ status: 'matched', id: 'qianning' })
+  })
+
+  it('matches a short registered name against an out-of-city garment supplier', () => {
+    const result = resolveFactoryName(
+      [make('kaiyuan', '开源')],
+      '高州市开源制衣厂',
+    )
+
+    expect(result).toMatchObject({ status: 'matched', id: 'kaiyuan' })
+  })
+
   it('does not match one-character abbreviations', () => {
     expect(resolveFactoryName(factories, '豪')).toMatchObject({ status: 'not_found' })
   })

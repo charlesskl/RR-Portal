@@ -121,6 +121,101 @@ describe('parseDeliveryExcelFiles', () => {
     })
   })
 
+  it('imports Qianning assembly contracts when the supplier name differs from the factory registry', async () => {
+    const file = excelFile('QN20260001.xlsx', [
+      ['东莞华登塑胶制品有限公司'],
+      ['', '', '', '委托加工合同'],
+      [],
+      ['厂  商：', '东莞市千宁塑胶加工店', '', '', '', '', '订单编号：', '', 'QN20260001'],
+      ['联 络 人：', '栗小姐', '', '', '', '', '联 络 人：', '', '肖英华'],
+      [], [], [],
+      ['货 号', '货 品 名 称', '数量', '单位', '单 价(¥)', '金 额(¥)', '单重（G)', '重量（KG)', '商品名称', '备 注'],
+      ['FNT1666', '汉堡头\n（左脚）', 206, 'pcs', 0.3, 61.8, '', '', '半成品', '超声+打胶'],
+      ['FNT1666', '汉堡头\n（右脚）', 380, 'pcs', 0.3, 114, '', '', '', ''],
+      ['', '', '', '', '合计', 175.8],
+      ['1. 2026 年 3 月 20 日前交货、货送华登厂'],
+      [],
+      ['供应商确认：             采购签核：   张佩玲       主管：                 经理：'],
+      ['时间：    年    月   日', '', '', '时间：', '2026年1月6日'],
+    ])
+
+    const result = await parseDeliveryExcelFiles(
+      [file],
+      { '东莞市清溪千宁五金塑胶加工厂': 'factory-qianning' },
+      { preferCnyTaxPrice: true },
+    )
+
+    expect(result).toMatchObject({ fileCount: 1, failedRows: 0, unrecognizedFiles: [], readFailedFiles: [] })
+    expect(result.payloads).toHaveLength(2)
+    expect(result.payloads[0]).toMatchObject({
+      factory: 'factory-qianning',
+      pmc: '张佩玲',
+      item_no: 'FNT1666',
+      order_no: 'QN20260001',
+      product: '汉堡头\n（左脚）',
+      process_category: '半成品',
+      quantity: 206,
+      order_date: '2026-01-06',
+      delivery_date: '2026-03-20',
+      unit_price_cny_tax: 0.3,
+      amount: 61.8,
+    })
+    expect(result.payloads[1]).toMatchObject({
+      product: '汉堡头\n（右脚）',
+      process_category: '半成品',
+      quantity: 380,
+      amount: 114,
+    })
+  })
+
+  it('imports sewing contracts that use a plain unit-price header', async () => {
+    const file = excelFile('NBFM260511.xlsx', [
+      ['东莞华登塑胶制品有限公司'],
+      ['', '', '', '车缝采购单'],
+      [],
+      ['供应商：', '高州市开源制衣厂', '', '', '', '', '订单编号：', 'NBFM260511'],
+      ['联络人：', '程金凤', '', '', '', '', '联络人：', '陈文旋'],
+      [], [], [],
+      ['合同号/货号', '', '货 品 名 称', '单位', '数量', '单 价', '金 额', '单重（G)', '重量（KG)', '备 注'],
+      ['MA-RR-2286/9565', '', '橙色松鼠尾巴', 'PCS', 70000, 0.38, '', '', '', ''],
+      ['MA-RR-2286/9565', '', '粉红色松鼠尾巴', 'PCS', 95000, 0.38, '', '', '', ''],
+      ['MA-RR-2286/9565', '', '湖蓝色松鼠尾巴', 'PCS', 67000, 0.38, '', '', '', ''],
+      ['MA-RR-2286/9565', '', '棕色松鼠尾巴', 'PCS', 78000, 0.38, '', '', '', ''],
+      ['', '', '', '合计'],
+      ['1. 2026 年 12 月 31 日前交货、货送华登厂'],
+      [],
+      ['供应商确认：              采购签核：              业务:                主管：               经理：'],
+      [],
+      ['时间： 2026 年 05 月 11 日'],
+    ])
+
+    const result = await parseDeliveryExcelFiles(
+      [file],
+      { 开源: 'factory-kaiyuan' },
+      { preferCnyTaxPrice: true },
+    )
+
+    expect(result).toMatchObject({ fileCount: 1, failedRows: 0, unrecognizedFiles: [], readFailedFiles: [] })
+    expect(result.payloads).toHaveLength(4)
+    expect(result.payloads[0]).toMatchObject({
+      factory: 'factory-kaiyuan',
+      pmc: '陈文旋',
+      item_no: 'MA-RR-2286/9565',
+      order_no: 'NBFM260511',
+      product: '橙色松鼠尾巴',
+      process_category: '车缝',
+      quantity: 70000,
+      order_date: '2026-05-11',
+      delivery_date: '2026-12-31',
+      unit_price_cny_tax: 0.38,
+      unit_price: 0.3865,
+      amount: 26600,
+    })
+    expect(result.payloads.map((payload) => payload.product)).toEqual([
+      '橙色松鼠尾巴', '粉红色松鼠尾巴', '湖蓝色松鼠尾巴', '棕色松鼠尾巴',
+    ])
+  })
+
   it('parses multiple workbooks in one batch without mixing their metadata', async () => {
     const header = ['序号', '款号', '模具编号', '物料编号', '物料名称', '用料名称', '颜色', '加工内容', '数量', '单价', '金额', '备注']
     const files = [

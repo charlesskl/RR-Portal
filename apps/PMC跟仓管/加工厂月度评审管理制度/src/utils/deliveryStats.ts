@@ -19,6 +19,18 @@ const pct1 = (a: number, b: number) => (b ? (Math.round((a / b) * 1000) / 10).to
 const pct2 = (a: number, b: number) => (b ? (Math.round((a / b) * 10000) / 100).toFixed(2) + '%' : '-')
 const orderKey = (o: Order) => (o.order_no?.trim() ? `order:${o.order_no.trim().toLowerCase()}` : `id:${o.id}`)
 
+export function splitSewingContractItemNo(value: unknown): { contractNo: string; itemNo: string } {
+  const text = String(value ?? '').trim()
+  const separator = text.lastIndexOf('/')
+  if (separator <= 0 || separator >= text.length - 1) {
+    return { contractNo: '', itemNo: text }
+  }
+  return {
+    contractNo: text.slice(0, separator).trim(),
+    itemNo: text.slice(separator + 1).trim(),
+  }
+}
+
 export interface Metrics {
   orderCount: number
   delayedCount: number
@@ -248,12 +260,30 @@ export function buildDeliveryReport(
 }
 
 // 导出交货延期统计表 Excel(标题行 + 合并单元格)
-export function exportDeliveryExcel(rows: ReportRow[], title: string, includeMoldNumber = true) {
+export function exportDeliveryExcel(
+  rows: ReportRow[],
+  title: string,
+  includeMoldNumber = true,
+  includeContractNumber = false,
+) {
   const H = DELIVERY_HEADERS.filter((header) => includeMoldNumber || header !== '模具编号')
+  if (includeContractNumber) H.splice(H.indexOf('货号'), 0, '合同号')
   const moldColumn = DELIVERY_HEADERS.indexOf('模具编号')
-  const withoutHiddenMold = (values: any[]) => includeMoldNumber
-    ? values
-    : values.filter((_, index) => index !== moldColumn)
+  const visibleValues = (values: any[], splitItemNumber = true) => {
+    const visible = includeMoldNumber
+      ? [...values]
+      : values.filter((_, index) => index !== moldColumn)
+    if (includeContractNumber) {
+      const itemColumn = H.indexOf('货号') - 1
+      if (splitItemNumber) {
+        const parts = splitSewingContractItemNo(visible[itemColumn])
+        visible.splice(itemColumn, 1, parts.contractNo, parts.itemNo)
+      } else {
+        visible.splice(itemColumn + 1, 0, '')
+      }
+    }
+    return visible
+  }
   const titleRow = new Array(H.length).fill('')
   titleRow[0] = title
   const body: any[][] = []
@@ -261,7 +291,7 @@ export function exportDeliveryExcel(rows: ReportRow[], title: string, includeMol
   rows.forEach((r, i) => {
     const rr = 2 + i
     if (r.kind === 'detail') {
-      body.push(withoutHiddenMold([
+      body.push(visibleValues([
         r.rangeSpan ? r.range : '', r.pmcSpan ? r.pmc : '', r.factorySpan ? r.factory : '',
         r.item_no, r.mold_no, r.order_no, r.category, r.product, r.quantity ?? '',
         r.order_date, r.delivery_date, r.actual_delivery_date, r.delay_days ?? '',
@@ -271,11 +301,14 @@ export function exportDeliveryExcel(rows: ReportRow[], title: string, includeMol
       if (r.pmcSpan > 1) merges.push({ s: { r: rr, c: 1 }, e: { r: rr + r.pmcSpan - 1, c: 1 } })
       if (r.factorySpan > 1) merges.push({ s: { r: rr, c: 2 }, e: { r: rr + r.factorySpan - 1, c: 2 } })
     } else {
-      body.push(withoutHiddenMold([
+      body.push(visibleValues([
         '', '', '', `${r.factory}-小计`, '', '', '', '', '', '', '', '', '',
         r.orderCount, r.delayedCount, r.delayRatio, r.delayAvg, r.quote, r.outPrice, r.outPriceCnyTax, '', r.priceRatio, '',
-      ]))
-      merges.push({ s: { r: rr, c: 3 }, e: { r: rr, c: includeMoldNumber ? 12 : 11 } })
+      ], false))
+      merges.push({
+        s: { r: rr, c: 3 },
+        e: { r: rr, c: (includeMoldNumber ? 12 : 11) + (includeContractNumber ? 1 : 0) },
+      })
     }
   })
   const ws = XLSX.utils.aoa_to_sheet([titleRow, H, ...body])
@@ -655,7 +688,7 @@ export function parseDeliveryImport(
   if (headerIdx < 0) return { payloads: [], failed: 0 }
   const header = aoa[headerIdx].map(norm)
   const colOf = (...al: string[]) => { for (const a of al) { const i = header.indexOf(norm(a)); if (i >= 0) return i } return -1 }
-  if (header.some((cell) => cell.includes('合同号/货号')) && header.some((cell) => cell.includes('含税价'))) {
+  if (header.some((cell) => cell.includes('合同号/货号')) && header.includes('货品名称')) {
     return parseSewingPurchaseOrderImport(aoa, headerIdx, header, factoryIdByName)
   }
   if (header.includes('款号') && header.includes('工模名称') && header.includes('加工单价')) {

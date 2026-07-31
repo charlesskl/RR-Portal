@@ -14,8 +14,8 @@ export const PERMISSION_MODULES: PermissionModule[] = [
   { key: 'purchase', name: '采购订单', path: '/purchase', positions: [4] },
   { key: 'molding', name: '生产单', path: '/molding-pos', positions: [6] },
   { key: 'schedules', name: '排期', path: '/schedules', positions: [3] },
-  { key: 'shipments', name: '走货明细', path: '/shipments', positions: [8] },
   { key: 'outbound', name: '出库', path: '/outbound', positions: [7] },
+  { key: 'shipments', name: '走货明细', path: '/shipments', positions: [8] },
 ]
 
 export interface AuthSession {

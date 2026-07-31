@@ -25,7 +25,7 @@ export default function LoginPage() {
   return (
     <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', background: 'linear-gradient(135deg,#eef5ff,#f8fafc)' }}>
       <Card style={{ width: 400, boxShadow: '0 18px 48px rgba(31,75,153,.15)' }}>
-        <Typography.Title level={3} style={{ marginBottom: 4 }}>印尼走货明细</Typography.Title>
+        <Typography.Title level={3} style={{ marginBottom: 4 }}>印尼物料管理系统</Typography.Title>
         <Typography.Text type="secondary">请使用分配的账户登录</Typography.Text>
         {error && <Alert type="error" message={error} showIcon style={{ marginTop: 18 }} />}
         <Form layout="vertical" onFinish={submit} style={{ marginTop: 20 }}>

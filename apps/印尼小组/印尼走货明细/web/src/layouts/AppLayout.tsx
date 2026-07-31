@@ -26,7 +26,7 @@ export default function AppLayout() {
   }
   return (
     <ProLayout
-      title="印尼走货明细"
+      title="印尼物料管理系统"
       logo={false}
       layout="mix"
       location={{ pathname: location.pathname }}

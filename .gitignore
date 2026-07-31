@@ -46,6 +46,9 @@ data/postgres/*
 data/indo-shipping-seed/
 !data/postgres/.gitkeep
 
+# Database backups contain private business data and must never be committed.
+backups/
+
 # Docker
 *.tar
 

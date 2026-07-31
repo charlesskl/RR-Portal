@@ -6,6 +6,7 @@ import {
 import dayjs from 'dayjs'
 import { api } from '../api/client'
 import { publicAsset } from '../deployment'
+import './ShipmentsPage.css'
 
 interface ShipmentSummary {
   id: number
@@ -23,6 +24,7 @@ interface ShipmentSummary {
 
 interface ShipmentItem {
   id?: number
+  outbound_id?: number
   material_id?: number
   seq?: number
   kg?: number
@@ -51,12 +53,22 @@ interface ShipmentDetail extends ShipmentSummary {
 }
 
 interface OutByMat {
+  outbound_id: number
+  po_item_id?: number
   material_id?: number
   code?: string
   name_zh?: string
-  total_out?: number
-  po_nos?: string
-  last_out_date?: string
+  po_no?: string
+  supplier?: string
+  out_date?: string
+  outbound_qty?: number
+  allocated_other?: number
+  allocated_current?: number
+  allocatable_qty?: number
+  price?: number
+  currency?: string
+  po_date?: string
+  customs_company?: string
 }
 
 interface ShipmentForm {
@@ -101,6 +113,7 @@ export default function ShipmentsPage() {
   const [items, setItems] = useState<ShipmentItem[]>([])
   const [form] = Form.useForm<ShipmentForm>()
   const [drawerFull, setDrawerFull] = useState(false)
+  const [saving, setSaving] = useState(false)
   const [customers, setCustomers] = useState<string[]>([])
   const [selKeys, setSelKeys] = useState<React.Key[]>([])
   const [schedRows, setSchedRows] = useState<any[]>([])
@@ -109,7 +122,6 @@ export default function ShipmentsPage() {
   const [schedPickerSel, setSchedPickerSel] = useState<React.Key[]>([])
   // 从出库拉物料
   const [outRows, setOutRows] = useState<OutByMat[]>([])
-  const [shippedIds, setShippedIds] = useState<Set<number>>(new Set())  // 已走货物料
   const [outOpen, setOutOpen] = useState(false)
   const [outFilter, setOutFilter] = useState('')
   const [outSel, setOutSel] = useState<React.Key[]>([])
@@ -128,7 +140,10 @@ export default function ShipmentsPage() {
   // material_id → 出库总量（按货号选物料时带入数量）
   const outByMat = useMemo(() => {
     const m = new Map<number, number>()
-    for (const o of outRows) if (o.material_id != null) m.set(o.material_id, Number(o.total_out) || 0)
+    for (const o of outRows) {
+      if (o.material_id == null) continue
+      m.set(o.material_id, (m.get(o.material_id) ?? 0) + (Number(o.allocatable_qty) || 0))
+    }
     return m
   }, [outRows])
 
@@ -175,13 +190,14 @@ export default function ShipmentsPage() {
   }
 
   // 公共：物料 + 数量 → 走货明细行（poInfo 来自 buildMatToPo；poNo/productUse 可覆盖）
-  function makeItem(m: any, qty: number, opts: { poInfo?: { po: any; it: any }; poNo?: string; productUse?: string } = {}): ShipmentItem {
+  function makeItem(m: any, qty: number, opts: { poInfo?: { po: any; it: any }; poNo?: string; productUse?: string; outboundId?: number } = {}): ShipmentItem {
     const netPerPc = Number(m.net_per_pc) || 0
     const kg = (m.unit_kg || 'KGM') === 'KGM' ? qty * netPerPc : qty   // KGM→净重；个数→数量
     const qtyPerCarton = Number(m.qty_per_carton) || 0
     const cartons = qtyPerCarton > 0 ? Math.ceil(qty / qtyPerCarton) : 0
     const poInfo = opts.poInfo
     return {
+      outbound_id: opts.outboundId,
       material_id: m.id,
       qty, kg, cartons,
       qty_per_carton: qtyPerCarton > 0 ? String(qtyPerCarton) : '',
@@ -286,17 +302,21 @@ export default function ShipmentsPage() {
     message.success(`已从 ${picked.length} 条排期拉出 ${newItems.length} 条物料明细`)
   }
 
-  async function loadOutbound() {
-    try { const { data } = await api.get<OutByMat[]>('/outbound/by-material'); setOutRows(Array.isArray(data) ? data : []) } catch {}
-    try { const { data } = await api.get<number[]>('/shipments/shipped-material-ids'); setShippedIds(new Set(Array.isArray(data) ? data : [])) } catch {}
+  async function loadOutbound(shipmentId?: number) {
+    try {
+      const { data } = await api.get<OutByMat[]>('/outbound/allocatable', {
+        params: shipmentId ? { shipment_id: shipmentId } : {},
+      })
+      setOutRows(Array.isArray(data) ? data : [])
+    } catch {}
   }
   async function loadProductCodes() {
     try { const { data } = await api.get<{ code: string }[]>('/products'); setProductCodes((data || []).map(p => p.code).filter(Boolean)) } catch {}
   }
 
-  // 从出库拉物料：数量 = Σ出库量（已按物料合并）
+  // 从出库拉物料：每行绑定具体出库记录，数量可拆分到不同柜。
   async function pullFromOutbound() {
-    const picked = outSel.map(k => outRows.find(o => String(o.material_id) === String(k))).filter(Boolean) as OutByMat[]
+    const picked = outSel.map(k => outRows.find(o => String(o.outbound_id) === String(k))).filter(Boolean) as OutByMat[]
     if (!picked.length) { message.warning('请先勾选出库物料'); return }
     const matToPo = await buildMatToPo()
     const matsByCode = await loadMatsByCodes(picked.map(o => o.code ?? ''))
@@ -305,9 +325,14 @@ export default function ShipmentsPage() {
       const mats = matsByCode.get(o.code ?? '') ?? []
       const m = mats.find(x => String(x.id) === String(o.material_id))
       if (!m) continue
-      newItems.push(makeItem(m, Number(o.total_out) || 0, {
-        poInfo: m.id ? matToPo.get(m.id) : undefined,
-        poNo: o.po_nos || undefined,
+      const poInfo = {
+        po: { po_no: o.po_no, order_date: o.po_date, supplier: o.supplier },
+        it: { price: o.price, currency: o.currency },
+      }
+      newItems.push(makeItem(m, Number(o.allocatable_qty) || 0, {
+        poInfo: o.po_no ? poInfo : (m.id ? matToPo.get(m.id) : undefined),
+        poNo: o.po_no || undefined,
+        outboundId: o.outbound_id,
       }))
     }
     appendItems(newItems)
@@ -341,6 +366,7 @@ export default function ShipmentsPage() {
     setCreating(true); setEditing({ id: 0, status: 'draft', rate: 0.93, container_count: 1 })
     setItems([]); setMatMap(new Map()); setDirtyMatIds(new Set())
     form.resetFields()
+    loadOutbound()
     setTimeout(() => form.setFieldsValue({
       status: 'draft',
       rate: 0.93,
@@ -352,6 +378,7 @@ export default function ShipmentsPage() {
     setCreating(false); setEditing(s)
     form.resetFields(); setItems([]); setMatMap(new Map()); setDirtyMatIds(new Set())
     try {
+      loadOutbound(s.id)
       const { data } = await api.get<ShipmentDetail>(`/shipments/${s.id}`)
       form.setFieldsValue({
         customer: data.customer,
@@ -372,6 +399,7 @@ export default function ShipmentsPage() {
   }
   async function save() {
     const v = await form.validateFields()
+    setSaving(true)
     try {
       // 空字符串日期 → null，否则后端 DateTime? 绑定失败 400
       const dOrNull = (x: any) => (x ? x : null)
@@ -417,6 +445,8 @@ export default function ShipmentsPage() {
       load()
     } catch {
       /* 拦截器已提示 */
+    } finally {
+      setSaving(false)
     }
   }
   async function del(id: number) {
@@ -464,6 +494,7 @@ export default function ShipmentsPage() {
     }
     items.forEach((it, i) => {
       const tag = `行${i + 1}（物料#${it.material_id ?? '-'} ${it.formula_name ?? ''}）：`
+      if (!it.outbound_id) warn.push(tag + '未关联具体出库记录，不参与出库余额校验')
       if (!(Number(it.kg) > 0)) hard.push(tag + '送货 KG 必须 > 0')
       if (!(Number(it.qty) > 0)) hard.push(tag + '送货数量必须 > 0')
       if (!(Number(it.cartons) > 0)) hard.push(tag + '箱数必须 > 0')
@@ -684,16 +715,17 @@ export default function ShipmentsPage() {
 
       <Drawer
         open={editing !== null}
-        width={drawerFull ? '100vw' : '85vw'}
+        width={drawerFull ? '100vw' : '92vw'}
+        className="shipment-editor"
         title={creating ? '新建走货' : `编辑走货 #${editing?.id} — ${editing?.container_no || ''}`}
         onClose={() => { setEditing(null); setCreating(false); setDrawerFull(false) }}
         destroyOnClose
         extra={
-          <Space>
+          <Space size={8} wrap>
             <Button onClick={runValidation}>🔍 运行核对</Button>
             <Button onClick={exportShipmentExcel} loading={exporting}>📤 导出报关明细</Button>
             <Button onClick={() => setDrawerFull(!drawerFull)}>{drawerFull ? '⤢ 退出全屏' : '⤡ 全屏'}</Button>
-            <Button type="primary" onClick={save}>💾 保存</Button>
+            <Button type="primary" onClick={save} loading={saving}>💾 保存</Button>
           </Space>
         }
       >
@@ -744,10 +776,20 @@ export default function ShipmentsPage() {
 
         <Card
           size="small"
-          title={`明细 ${tot.rows} 行 · 数量 ${tot.qty.toFixed(2)} · 送货重 ${tot.kg.toFixed(2)}kg · 毛重 ${tot.gross.toFixed(2)} · 净重 ${tot.net.toFixed(2)} · 箱数 ${tot.cartons} · 总CBM ${tot.cbm.toFixed(4)} · 采购额 ${tot.amount.toFixed(2)}`}
+          className="shipment-detail-card"
+          title={
+            <div className="shipment-summary">
+              <span><b>{tot.rows}</b><small>明细行</small></span>
+              <span><b>{tot.qty.toFixed(2)}</b><small>送货数量</small></span>
+              <span><b>{tot.kg.toFixed(2)} kg</b><small>送货重量</small></span>
+              <span><b>{tot.cartons}</b><small>总箱数</small></span>
+              <span><b>{tot.cbm.toFixed(4)}</b><small>总 CBM</small></span>
+              <span><b>{tot.amount.toFixed(2)}</b><small>采购金额</small></span>
+            </div>
+          }
           extra={
             <Space wrap>
-              <Button size="small" type="primary" onClick={() => { loadOutbound(); setOutOpen(true) }}>📦 从出库拉物料</Button>
+              <Button size="small" type="primary" onClick={() => { loadOutbound(editing?.id || undefined); setOutOpen(true) }}>📦 从出库精确分配</Button>
               <Button size="small" onClick={() => { setManOpen(true); if (!manMats.length) loadManMats(manCode) }}>🗂 按货号选物料</Button>
               <Button size="small" onClick={() => setSchedPickerOpen(true)}>🔗 从排期勾选</Button>
               <Button size="small" onClick={addItem}>➕ 加一行</Button>
@@ -758,10 +800,16 @@ export default function ShipmentsPage() {
             rowKey={(_, i) => String(i)}
             size="small"
             pagination={false}
-            scroll={{ x: 4400 }}
+            scroll={{ x: 4400, y: drawerFull ? 'calc(100vh - 350px)' : 'calc(100vh - 400px)' }}
             dataSource={items}
             columns={[
               { title: '序号', dataIndex: 'seq', width: 50, fixed: 'left', align: 'center' },
+              {
+                title: '出库来源', dataIndex: 'outbound_id', width: 95, fixed: 'left',
+                render: (v) => v
+                  ? <Tag bordered={false} color="blue">OUT-{v}</Tag>
+                  : <Tag bordered={false}>未关联</Tag>,
+              },
               {
                 title: '图片', width: 56, fixed: 'left', align: 'center',
                 render: (_v, r) => {
@@ -878,7 +926,7 @@ export default function ShipmentsPage() {
       {/* 从出库拉物料 */}
       <Modal
         open={outOpen}
-        title={`从出库拉物料（共 ${outRows.length} 物料 · 已选 ${outSel.length}）`}
+        title={`从出库精确分配到本柜（共 ${outRows.length} 笔 · 已选 ${outSel.length}）`}
         width="80vw"
         onCancel={() => { setOutOpen(false); setOutSel([]) }}
         footer={null}
@@ -889,28 +937,31 @@ export default function ShipmentsPage() {
             onSearch={setOutFilter} onChange={(e) => !e.target.value && setOutFilter('')} />
           <Button type="primary" disabled={!outSel.length} onClick={pullFromOutbound}>📥 拉物料到本走货</Button>
           <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-            数量 = 该物料出库总量；总重 = 数量 × 净重/件；箱数 = ceil(数量 / 件箱)；自动套最近一张 PO 的供应商/单价
+            每行对应一笔出库；拉入后可修改本柜数量，保存时会校验，不能超过该笔出库的可分配量
           </Typography.Text>
         </Space>
         <Table
-          rowKey={(r) => String(r.material_id)}
+          rowKey={(r) => String(r.outbound_id)}
           size="small"
           rowSelection={{ selectedRowKeys: outSel, onChange: (k) => setOutSel(k) }}
           dataSource={outRows.filter(r => {
-            if (r.material_id != null && shippedIds.has(r.material_id)) return false  // 已走货不再显示
             if (!outFilter) return true
             const s = outFilter.toLowerCase()
-            return ((r.code || '') + (r.name_zh || '') + (r.po_nos || '')).toLowerCase().includes(s)
+            return ((r.code || '') + (r.name_zh || '') + (r.po_no || '')).toLowerCase().includes(s)
           })}
           pagination={{ pageSize: 30 }}
           scroll={{ x: 900, y: 480 }}
           columns={[
+            { title: '出库记录', dataIndex: 'outbound_id', width: 95, render: (v) => `OUT-${v}` },
             { title: '货号', dataIndex: 'code', width: 120 },
             { title: '物料', dataIndex: 'name_zh', width: 220, ellipsis: true },
-            { title: '物料ID', dataIndex: 'material_id', width: 90, align: 'right' },
-            { title: '出库总量', dataIndex: 'total_out', width: 110, align: 'right', render: (v) => Number(v ?? 0).toFixed(2) },
-            { title: 'PO号', dataIndex: 'po_nos', width: 200, ellipsis: true },
-            { title: '末次出库', dataIndex: 'last_out_date', width: 120, render: (v) => v ? dayjs(v).format('YYYY-MM-DD') : '' },
+            { title: '本次出库', dataIndex: 'outbound_qty', width: 110, align: 'right', render: (v) => Number(v ?? 0).toFixed(2) },
+            {
+              title: '本柜可分配', dataIndex: 'allocatable_qty', width: 120, align: 'right',
+              render: (v) => <Typography.Text strong type="success">{Number(v ?? 0).toFixed(2)}</Typography.Text>,
+            },
+            { title: 'PO号', dataIndex: 'po_no', width: 180, ellipsis: true },
+            { title: '出库日期', dataIndex: 'out_date', width: 120, render: (v) => v ? dayjs(v).format('YYYY-MM-DD') : '' },
           ]}
         />
       </Modal>

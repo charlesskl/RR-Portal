@@ -75,6 +75,22 @@ const CURR = [
   { value: 'Rp',  label: 'Rp 印尼盾' },
 ]
 
+function missingUnitPrice(item: MpoItem): boolean {
+  return item.unitPrice == null || Number(item.unitPrice) <= 0
+}
+
+function earliestItemDelivery(items?: MpoItem[]): string {
+  return (items ?? []).map(it => it.deliveryDate ?? '').filter(Boolean).sort()[0] ?? ''
+}
+
+function priceKeys(item: MpoItem): string[] {
+  return [
+    item.moldId ? `mold:${item.moldId}` : '',
+    item.partCode ? `part:${item.code ?? ''}:${item.partCode}` : '',
+    item.partName ? `name:${item.code ?? ''}:${item.partName}` : '',
+  ].filter(Boolean)
+}
+
 export default function MoldingPosPage() {
   const { message } = App.useApp()
   const [rows, setRows] = useState<Mpo[]>([])
@@ -110,8 +126,17 @@ export default function MoldingPosPage() {
     try {
       const resp = await api.get<Mpo[]>('/molding-pos/blob')
       blobVersion.current = resp.headers['x-blob-version'] ?? ''
-      setRows(Array.isArray(resp.data) ? resp.data : [])
-      setDirty(false)
+      const loaded = Array.isArray(resp.data) ? resp.data : []
+      const needsNormalization = loaded.some(m =>
+        (!m.deliveryDate && !!earliestItemDelivery(m.items))
+        || (m.items ?? []).some(it => Number(it.unitPrice) === 0))
+      setRows(loaded.map(m => ({
+        ...m,
+        deliveryDate: m.deliveryDate || earliestItemDelivery(m.items),
+        items: (m.items ?? []).map(it => missingUnitPrice(it) ? { ...it, unitPrice: undefined } : it),
+      })))
+      setDirty(needsNormalization)
+      if (needsNormalization) message.info('已补全生产交期并标记缺失单价，请点击“保存全部”完成数据升级')
     } finally { setLoading(false) }
   }
   async function loadCustomers() {
@@ -134,6 +159,23 @@ export default function MoldingPosPage() {
     if (!pickerSel.length) { message.warning('请至少勾选一行排期'); return }
     const picked = pickerSel.map(k => schedRows[Number(k)]).filter(Boolean)
     if (!picked.length) return
+
+    const historicalPrices = new Map<string, number>()
+    for (const mpo of rows) {
+      for (const item of (mpo.items ?? [])) {
+        if (missingUnitPrice(item)) continue
+        for (const key of priceKeys(item)) {
+          if (!historicalPrices.has(key)) historicalPrices.set(key, Number(item.unitPrice))
+        }
+      }
+    }
+    const historicalPriceFor = (item: MpoItem): number | undefined => {
+      for (const key of priceKeys(item)) {
+        const price = historicalPrices.get(key)
+        if (price != null) return price
+      }
+      return undefined
+    }
 
     // groups: key = `${category}||${workshop}` → { category, workshop, items: [] }
     type Group = { category: string; workshop: string; items: MpoItem[] }
@@ -167,7 +209,7 @@ export default function MoldingPosPage() {
           // 塑胶: 1 模具 1 行
           const qty = Number(sched.qty) || 0
           const ejections = Number(parts[0]?.ejections) || 1
-          g.items.push({
+          const item: MpoItem = {
             code: sched.code, productName: sched.productName ?? prod.name,
             orderNo: sched.orderNo,
             moldId: md.moldId ?? '', moldName: md.moldName ?? '',
@@ -179,17 +221,19 @@ export default function MoldingPosPage() {
             netGramsPerShot: Number(md.netGramsPerShot) || 0,
             setsPerShot: Number(md.setsPerShot) || 1,
             ejections, usage: 1, qty,
-            unitPrice: 0, currency: 'HK$',
             deliveryDate: sched.eta ?? '',
             notes: '',
-          })
+          }
+          item.unitPrice = historicalPriceFor(item)
+          item.currency = 'HK$'
+          g.items.push(item)
           continue
         }
         // 搪胶: 1 件 1 行
         for (const pt of parts) {
           const usage = Number(pt.usage) || 1
           const qty = (Number(sched.qty) || 0) * usage
-          g.items.push({
+          const item: MpoItem = {
             code: sched.code, productName: sched.productName ?? prod.name,
             orderNo: sched.orderNo,
             moldId: md.moldId ?? '', moldName: md.moldName ?? '',
@@ -201,10 +245,12 @@ export default function MoldingPosPage() {
             setsPerShot: Number(md.setsPerShot) || 1,
             ejections: Number(pt.ejections) || 1,
             usage, qty,
-            unitPrice: 0, currency: 'HK$',
             deliveryDate: sched.eta ?? '',
             notes: '',
-          })
+          }
+          item.unitPrice = historicalPriceFor(item)
+          item.currency = 'HK$'
+          g.items.push(item)
         }
       }
     }
@@ -270,7 +316,7 @@ export default function MoldingPosPage() {
         workshop: g.workshop,
         status: 'draft',
         orderDate,
-        deliveryDate: '',
+        deliveryDate: earliestItemDelivery(g.items),
         currency: 'HK$',
         notes: '',
         items: g.items,
@@ -280,7 +326,8 @@ export default function MoldingPosPage() {
     setRows(rs => [...newMpos, ...rs])
     setDirty(true)
     setPickerOpen(false); setPickerSel([])
-    message.success(`已生成 ${newMpos.length} 张生产单（${newMpos.map(m => m.category + ' ' + m.workshop).join(' · ')}）— 别忘点 💾 保存全部`)
+    const missingPriceCount = newMpos.flatMap(m => m.items ?? []).filter(missingUnitPrice).length
+    message.success(`已生成 ${newMpos.length} 张生产单（${newMpos.map(m => m.category + ' ' + m.workshop).join(' · ')}）${missingPriceCount ? `，${missingPriceCount} 行待录单价` : ''}— 别忘点 💾 保存全部`)
   }
 
   function stripMatPrefix(s?: string): string {
@@ -309,10 +356,14 @@ export default function MoldingPosPage() {
     const next: Mpo = { no: '', customer: customerFilter, category: '塑胶', workshop: '兴信A车间', status: 'draft', currency: 'HK$', items: [] }
     setRows(rs => [next, ...rs])
     setDirty(true)
-    openEdit(0)
+    openEdit(0, next)
   }
-  function openEdit(idx: number) {
-    const m = rows[idx]
+  function openEdit(idx: number, record?: Mpo) {
+    const m = record ?? rows[idx]
+    if (!m) {
+      message.error('生产单记录已变化，请重新加载后再试')
+      return
+    }
     setEditingIdx(idx)
     setItems(Array.isArray(m.items) ? [...m.items] : [])
     editingForm.resetFields()
@@ -350,7 +401,7 @@ export default function MoldingPosPage() {
   }, [rows])
 
   const filtered = useMemo(() => rows
-    .map((m, _i) => ({ m, _i }))
+    .map((m, sourceIndex) => ({ m, sourceIndex }))
     .filter(({ m }) => {
       if (customerFilter && (m.customer || '(未分配)') !== customerFilter) return false
       if (statusFilter && (m.status || 'draft') !== statusFilter) return false
@@ -366,6 +417,7 @@ export default function MoldingPosPage() {
   }, [rows])
 
   const itemsTotal = useMemo(() => items.reduce((s, it) => s + (it.qty ?? 0) * (it.unitPrice ?? 0), 0), [items])
+  const itemsMissingPrice = useMemo(() => items.some(missingUnitPrice), [items])
 
   return (
     <div style={{ padding: 16 }}>
@@ -433,6 +485,7 @@ export default function MoldingPosPage() {
             {
               title: '金额', width: 130, align: 'right',
               render: (_v, r) => {
+                if ((r.m.items ?? []).some(missingUnitPrice)) return <Tag color="warning">待录单价</Tag>
                 const tot = (r.m.items ?? []).reduce((s, it) => s + (it.qty ?? 0) * (it.unitPrice ?? 0), 0)
                 return `${r.m.currency || 'HK$'} ${tot.toFixed(2)}`
               },
@@ -441,13 +494,13 @@ export default function MoldingPosPage() {
               title: '操作', width: 180,
               render: (_v, r) => (
                 <Space>
-                  <a onClick={() => openEdit(r._i)}>编辑</a>
+                  <a onClick={() => openEdit(r.sourceIndex, r.m)}>编辑</a>
                   <a onClick={async () => {
                     const { exportMpo } = await import('../utils/moldingPoExport')
                     await exportMpo(r.m as any)
                     message.success(`已导出 ${r.m.no}`)
                   }}>📤 导出</a>
-                  <Popconfirm title={`删除 ${r.m.no}?`} onConfirm={() => delMpo(r._i)}>
+                  <Popconfirm title={`删除 ${r.m.no}?`} onConfirm={() => delMpo(r.sourceIndex)}>
                     <a style={{ color: '#ff4d4f' }}>删除</a>
                   </Popconfirm>
                 </Space>
@@ -526,7 +579,7 @@ export default function MoldingPosPage() {
 
         <Card
           size="small"
-          title={`明细 (${items.length}) · 金额合计 ${itemsTotal.toFixed(2)}`}
+          title={`明细 (${items.length}) · ${itemsMissingPrice ? '存在待录单价' : `金额合计 ${itemsTotal.toFixed(2)}`}`}
           extra={<Button size="small" onClick={addItem}>➕ 加一行</Button>}
         >
           <Table
@@ -545,7 +598,7 @@ export default function MoldingPosPage() {
               { title: '数量', width: 100, render: (_v, r, i) => <InputNumber size="small" min={0} value={r.qty} onChange={(v) => patchItem(i, 'qty', v ?? 0)} style={{ width: '100%' }} /> },
               { title: '单价', width: 110, render: (_v, r, i) => <InputNumber size="small" min={0} step={0.0001} value={r.unitPrice} onChange={(v) => patchItem(i, 'unitPrice', v ?? 0)} style={{ width: '100%' }} /> },
               { title: '币种', width: 100, render: (_v, r, i) => <Select size="small" value={r.currency || 'HK$'} options={CURR} onChange={(v) => patchItem(i, 'currency', v)} style={{ width: '100%' }} /> },
-              { title: '小计', width: 100, align: 'right', render: (_v, r) => ((r.qty ?? 0) * (r.unitPrice ?? 0)).toFixed(2) },
+              { title: '小计', width: 100, align: 'right', render: (_v, r) => missingUnitPrice(r) ? <Tag color="warning">待录价</Tag> : ((r.qty ?? 0) * (r.unitPrice ?? 0)).toFixed(2) },
               { title: '交货', width: 130, render: (_v, r, i) => <DatePicker size="small" style={{ width: '100%' }} format="YYYY-MM-DD" value={r.deliveryDate ? dayjs(r.deliveryDate) : null} onChange={(v) => patchItem(i, 'deliveryDate', v ? v.format('YYYY-MM-DD') : '')} /> },
               { title: '备注', render: (_v, r, i) => <Input size="small" value={r.notes} onChange={(e) => patchItem(i, 'notes', e.target.value)} /> },
               {

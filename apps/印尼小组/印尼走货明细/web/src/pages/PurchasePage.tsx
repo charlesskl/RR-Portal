@@ -33,6 +33,8 @@ interface PoSummary {
   created_at?: string
   item_count?: number
   total_amount?: number
+  received_qty?: number
+  shortage_qty?: number
 }
 
 interface PoItem {
@@ -56,10 +58,34 @@ interface PoItem {
   net_per_pc?: number
   eta?: string
   tomy_po?: string
+  received_qty?: number
+  shortage_qty?: number
 }
 
 interface PoDetail extends PoSummary {
   items?: PoItem[]
+}
+
+interface PurchaseItemRow extends PoItem {
+  id: number
+  po_id: number
+  po_no?: string
+  supplier?: string
+  status?: string
+  order_date?: string
+  delivery_date?: string
+  po_notes?: string
+  receipt_summary?: string
+}
+
+interface ReceiptRecord {
+  id: number
+  po_item_id: number
+  receipt_date: string
+  qty: number
+  batch_no?: string
+  notes?: string
+  created_at?: string
 }
 
 interface PoForm {
@@ -139,6 +165,7 @@ function contractUnitLabel(unit: string | undefined): string {
 export default function PurchasePage() {
   const { message } = App.useApp()
   const [rows, setRows] = useState<PoSummary[]>([])
+  const [itemRows, setItemRows] = useState<PurchaseItemRow[]>([])
   const [filter, setFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('')
   const [dateRange, setDateRange] = useState<[string, string]>([
@@ -164,17 +191,79 @@ export default function PurchasePage() {
   const [pickerSelKeys, setPickerSelKeys] = useState<React.Key[]>([])
   const [placedSet, setPlacedSet] = useState<Set<string>>(new Set())  // 已下单(自动+手动) orderNo|code
   const [hidePlaced, setHidePlaced] = useState(true)                  // 默认隐藏已下单
+  const [receiptItem, setReceiptItem] = useState<PurchaseItemRow | null>(null)
+  const [receiptRows, setReceiptRows] = useState<ReceiptRecord[]>([])
+  const [receiptLoading, setReceiptLoading] = useState(false)
+  const [receiptForm] = Form.useForm()
 
   async function load() {
     setLoading(true)
     try {
-      const { data } = await api.get<PoSummary[]>('/purchase')
+      const [{ data }, { data: detailRows }] = await Promise.all([
+        api.get<PoSummary[]>('/purchase'),
+        api.get<PurchaseItemRow[]>('/purchase/items'),
+      ])
       setRows(Array.isArray(data) ? data : [])
+      setItemRows(Array.isArray(detailRows) ? detailRows : [])
       // Track placed TOMY POs by po_no (used to grey out rows in picker)
       const placed = new Set<string>()
       for (const p of data) if (p.po_no) placed.add(p.po_no)
       setPlacedTomyPos(placed)
     } finally { setLoading(false) }
+  }
+
+  async function loadReceipts(itemId: number) {
+    setReceiptLoading(true)
+    try {
+      const { data } = await api.get<ReceiptRecord[]>(`/purchase/items/${itemId}/receipts`)
+      setReceiptRows(Array.isArray(data) ? data : [])
+    } finally { setReceiptLoading(false) }
+  }
+
+  async function openReceipt(item: PurchaseItemRow) {
+    setReceiptItem(item)
+    receiptForm.resetFields()
+    receiptForm.setFieldsValue({
+      receipt_date: dayjs(),
+      qty: Number(item.shortage_qty ?? 0),
+      batch_no: '',
+      notes: '',
+    })
+    await loadReceipts(item.id)
+  }
+
+  async function saveReceipt() {
+    if (!receiptItem) return
+    const values = await receiptForm.validateFields()
+    const nextShortage = Math.max(
+      Number(receiptItem.shortage_qty ?? 0) - Number(values.qty ?? 0),
+      0,
+    )
+    const nextReceived = Number(receiptItem.received_qty ?? 0) + Number(values.qty ?? 0)
+    await api.post(`/purchase/items/${receiptItem.id}/receipts`, {
+      receipt_date: values.receipt_date?.format('YYYY-MM-DD'),
+      qty: values.qty,
+      batch_no: values.batch_no,
+      notes: values.notes,
+    })
+    message.success('本批入库已登记，欠数已自动更新')
+    await load()
+    await loadReceipts(receiptItem.id)
+    setReceiptItem({ ...receiptItem, received_qty: nextReceived, shortage_qty: nextShortage })
+    receiptForm.setFieldsValue({ qty: nextShortage, batch_no: '', notes: '' })
+  }
+
+  async function deleteReceipt(receiptId: number) {
+    if (!receiptItem) return
+    const deletedQty = Number(receiptRows.find(x => x.id === receiptId)?.qty ?? 0)
+    await api.delete(`/purchase/receipts/${receiptId}`)
+    message.success('入库记录已删除，欠数已重新计算')
+    setReceiptItem({
+      ...receiptItem,
+      received_qty: Math.max(Number(receiptItem.received_qty ?? 0) - deletedQty, 0),
+      shortage_qty: Number(receiptItem.shortage_qty ?? 0) + deletedQty,
+    })
+    await Promise.all([load(), loadReceipts(receiptItem.id)])
   }
   async function loadProductCodes() {
     try {
@@ -513,14 +602,8 @@ export default function PurchasePage() {
       /* 拦截器已提示 */
     }
   }
-  async function del(id: number) {
-    try {
-      await api.delete(`/purchase/${id}`)
-      message.success('已删除'); load()
-    } catch { /* 拦截器已提示 */ }
-  }
-
   const [poSelKeys, setPoSelKeys] = useState<React.Key[]>([])
+  const [detailSelKeys, setDetailSelKeys] = useState<React.Key[]>([])
   async function delSelected() {
     if (!poSelKeys.length) return
     setLoading(true)
@@ -530,7 +613,7 @@ export default function PurchasePage() {
       try { await api.delete(`/purchase/${k}`); ok++ }
       catch (e: any) { fails.push(`#${k}: ${e?.response?.data?.error ?? e?.message ?? '失败'}`) }
     }
-    setLoading(false); setPoSelKeys([])
+    setLoading(false); setPoSelKeys([]); setDetailSelKeys([])
     if (fails.length) Modal.warning({ title: `成功 ${ok} 条，失败 ${fails.length} 条`, content: fails.join('\n') })
     else message.success(`已删除 ${ok} 条`)
     load()
@@ -978,6 +1061,22 @@ export default function PurchasePage() {
     return ((r.po_no || '') + (r.supplier || '') + (r.notes || '')).toLowerCase().includes(s)
   }), [rows, filter, statusFilter, dateRange])
 
+  const filteredItems = useMemo(() => itemRows.filter(r => {
+    if (statusFilter && r.status !== statusFilter) return false
+    if (dateRange[0] || dateRange[1]) {
+      const d = r.order_date ? dayjs(r.order_date) : null
+      if (!d) return false
+      if (dateRange[0] && d.isBefore(dayjs(dateRange[0]), 'day')) return false
+      if (dateRange[1] && d.isAfter(dayjs(dateRange[1]), 'day')) return false
+    }
+    if (!filter) return true
+    const s = filter.toLowerCase()
+    return [
+      r.po_no, r.supplier, r.product_code, r.material_name, r.spec,
+      r.notes, r.po_notes, r.receipt_summary,
+    ].join(' ').toLowerCase().includes(s)
+  }), [itemRows, filter, statusFilter, dateRange])
+
   const statsByStatus = useMemo(() => {
     const m = new Map<string, number>()
     for (const r of rows) m.set(r.status || 'draft', (m.get(r.status || 'draft') ?? 0) + 1)
@@ -989,10 +1088,10 @@ export default function PurchasePage() {
   return (
     <div style={{ padding: 16 }}>
       <Card
-        title={`采购订单 — 共 ${rows.length} 张`}
+        title={`采购管理 — 共 ${filteredItems.length} 行物料 / ${rows.length} 张采购单`}
         extra={
           <Space wrap size={[4, 8]}>
-            <Input.Search allowClear placeholder="搜索 PO / 供应商 / 备注" style={{ width: 220 }}
+            <Input.Search allowClear placeholder="搜索采购单 / 货号 / 物料 / 供应商" style={{ width: 260 }}
               onSearch={setFilter} onChange={(e) => !e.target.value && setFilter('')} />
             <Select
               value={statusFilter} onChange={setStatusFilter}
@@ -1041,38 +1140,93 @@ export default function PurchasePage() {
           rowKey="id"
           size="small"
           loading={loading}
-          dataSource={filtered}
+          dataSource={filteredItems}
           rowSelection={{
-            selectedRowKeys: poSelKeys,
-            onChange: (keys) => setPoSelKeys(keys),
+            selectedRowKeys: detailSelKeys,
+            onChange: (keys, selected) => {
+              setDetailSelKeys(keys)
+              setPoSelKeys([...new Set(selected.map(r => r.po_id))])
+            },
           }}
           pagination={{ defaultPageSize: 50, showSizeChanger: true }}
+          scroll={{ x: 1700 }}
+          rowClassName={(r) => Number(r.shortage_qty ?? 0) <= 0 ? 'purchase-row-complete' : ''}
           columns={[
-            { title: 'PO 号', dataIndex: 'po_no', width: 160 },
-            { title: '供应商', dataIndex: 'supplier' },
             {
-              title: '状态', dataIndex: 'status', width: 100,
-              render: (v) => {
-                const s = STATUS.find(x => x.value === v) ?? STATUS[0]
-                return <Tag color={s.color}>{s.label}</Tag>
-              },
+              title: '日期', dataIndex: 'order_date', width: 95,
+              render: (v) => v ? dayjs(v).format('MM/DD') : '',
             },
-            { title: '下单日期', dataIndex: 'order_date', width: 120, render: (v) => v ? dayjs(v).format('YYYY-MM-DD') : '' },
-            { title: '行数', dataIndex: 'item_count', width: 70, align: 'right' },
-            { title: '金额', dataIndex: 'total_amount', width: 110, align: 'right', render: (v) => v != null ? Number(v).toFixed(2) : '' },
             {
-              title: '操作', width: 130,
+              title: '采购单号', dataIndex: 'po_no', width: 170, fixed: 'left',
+              render: (v, r) => <a onClick={() => {
+                const po = rows.find(x => x.id === r.po_id)
+                if (po) openEdit(po)
+              }}>{v || `#${r.po_id}`}</a>,
+            },
+            { title: '供应商', dataIndex: 'supplier', width: 170, ellipsis: true },
+            { title: '货号', dataIndex: 'product_code', width: 130, ellipsis: true },
+            { title: '货品名称', dataIndex: 'material_name', width: 220, ellipsis: true },
+            {
+              title: '采购数量', width: 110, align: 'right',
+              render: (_v, r) => Number(r.purchase_qty ?? r.qty ?? 0).toLocaleString(),
+            },
+            {
+              title: '单位', dataIndex: 'purchase_unit', width: 75,
+              render: (v) => v || '个',
+            },
+            {
+              title: '单价', dataIndex: 'price', width: 105, align: 'right',
+              render: (v, r) => `${r.currency || '¥'} ${Number(v ?? 0).toFixed(4)}`,
+            },
+            {
+              title: '金额', width: 120, align: 'right',
               render: (_v, r) => (
-                <Space>
-                  <a onClick={() => openEdit(r)}>编辑</a>
-                  <Popconfirm title={`删除 PO ${r.po_no}?`} onConfirm={() => del(r.id)}>
-                    <a style={{ color: '#ff4d4f' }}>删除</a>
-                  </Popconfirm>
+                Number((r.purchase_qty ?? r.qty ?? 0) * (r.price ?? 0)).toLocaleString(undefined, {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                })
+              ),
+            },
+            {
+              title: '交货期', dataIndex: 'delivery_date', width: 100,
+              render: (v) => v ? dayjs(v).format('MM/DD') : '',
+            },
+            {
+              title: '入库记录', dataIndex: 'receipt_summary', width: 330,
+              render: (v, r) => v
+                ? <Typography.Text>{v}</Typography.Text>
+                : <Typography.Text type="secondary">尚未入库{r.notes ? ` · ${r.notes}` : ''}</Typography.Text>,
+            },
+            {
+              title: '累计入库', dataIndex: 'received_qty', width: 110, align: 'right',
+              render: (v) => Number(v ?? 0).toLocaleString(),
+            },
+            {
+              title: '欠数', dataIndex: 'shortage_qty', width: 105, align: 'right', fixed: 'right',
+              render: (v) => Number(v ?? 0) > 0
+                ? <Typography.Text strong type="danger">{Number(v).toLocaleString()}</Typography.Text>
+                : <Tag color="success">已入库</Tag>,
+            },
+            {
+              title: '操作', width: 125, fixed: 'right',
+              render: (_v, r) => (
+                <Space size={4}>
+                  <Button size="small" type="primary" ghost onClick={() => openReceipt(r)}>
+                    入库
+                  </Button>
+                  <Button size="small" onClick={() => {
+                    const po = rows.find(x => x.id === r.po_id)
+                    if (po) openEdit(po)
+                  }}>编辑</Button>
                 </Space>
               ),
             },
           ]}
         />
+        <style>{`
+          .purchase-row-complete td { background: #f6ffed !important; }
+          .purchase-row-complete:hover td { background: #eaffdc !important; }
+        `}</style>
       </Card>
 
       <Drawer
@@ -1190,6 +1344,109 @@ export default function PurchasePage() {
           />
         </Card>
       </Drawer>
+
+      <Modal
+        open={receiptItem !== null}
+        title={`分批入库 · ${receiptItem?.po_no || ''} · ${receiptItem?.material_name || receiptItem?.product_code || ''}`}
+        width={760}
+        onCancel={() => { setReceiptItem(null); setReceiptRows([]); receiptForm.resetFields() }}
+        onOk={saveReceipt}
+        okText={Number(receiptItem?.shortage_qty ?? 0) > 0 ? '确认本批入库' : '已全部入库'}
+        okButtonProps={{ disabled: Number(receiptItem?.shortage_qty ?? 0) <= 0 }}
+        destroyOnClose
+      >
+        <Row gutter={12} style={{ marginBottom: 12 }}>
+          <Col span={8}>
+            <Card size="small">
+              采购数量<br />
+              <Typography.Text strong style={{ fontSize: 20 }}>
+                {Number(receiptItem?.purchase_qty ?? receiptItem?.qty ?? 0).toLocaleString()}
+              </Typography.Text>
+            </Card>
+          </Col>
+          <Col span={8}>
+            <Card size="small">
+              累计入库<br />
+              <Typography.Text strong style={{ fontSize: 20, color: '#1677ff' }}>
+                {Number(receiptItem?.received_qty ?? 0).toLocaleString()}
+              </Typography.Text>
+            </Card>
+          </Col>
+          <Col span={8}>
+            <Card size="small">
+              当前欠数<br />
+              <Typography.Text strong type={Number(receiptItem?.shortage_qty ?? 0) > 0 ? 'danger' : 'success'} style={{ fontSize: 20 }}>
+                {Number(receiptItem?.shortage_qty ?? 0).toLocaleString()}
+              </Typography.Text>
+            </Card>
+          </Col>
+        </Row>
+
+        {Number(receiptItem?.shortage_qty ?? 0) > 0 && (
+          <Form form={receiptForm} layout="vertical">
+            <Row gutter={12}>
+              <Col span={8}>
+                <Form.Item name="receipt_date" label="入库日期" rules={[{ required: true, message: '请选择入库日期' }]}>
+                  <DatePicker style={{ width: '100%' }} />
+                </Form.Item>
+              </Col>
+              <Col span={8}>
+                <Form.Item
+                  name="qty"
+                  label="本批入库数量"
+                  rules={[
+                    { required: true, message: '请输入数量' },
+                    {
+                      validator: async (_rule, value) => {
+                        const qty = Number(value ?? 0)
+                        const shortage = Number(receiptItem?.shortage_qty ?? 0)
+                        if (qty <= 0) throw new Error('数量必须大于 0')
+                        if (qty > shortage) throw new Error(`不能超过当前欠数 ${shortage}`)
+                      },
+                    },
+                  ]}
+                >
+                  <InputNumber min={0.0001} max={Number(receiptItem?.shortage_qty ?? 0)} style={{ width: '100%' }} />
+                </Form.Item>
+              </Col>
+              <Col span={8}>
+                <Form.Item name="batch_no" label="批次号">
+                  <Input placeholder="可选，例如 2026-07-A" />
+                </Form.Item>
+              </Col>
+              <Col span={24}>
+                <Form.Item name="notes" label="备注">
+                  <Input placeholder="送货单号、异常说明等" />
+                </Form.Item>
+              </Col>
+            </Row>
+          </Form>
+        )}
+
+        <Typography.Title level={5}>历史入库批次</Typography.Title>
+        <Table
+          rowKey="id"
+          size="small"
+          loading={receiptLoading}
+          pagination={false}
+          dataSource={receiptRows}
+          locale={{ emptyText: '尚无入库记录' }}
+          columns={[
+            { title: '入库日期', dataIndex: 'receipt_date', width: 110, render: (v) => dayjs(v).format('YYYY-MM-DD') },
+            { title: '数量', dataIndex: 'qty', width: 110, align: 'right', render: (v) => Number(v).toLocaleString() },
+            { title: '批次号', dataIndex: 'batch_no', width: 140, render: (v) => v || '-' },
+            { title: '备注', dataIndex: 'notes', ellipsis: true, render: (v) => v || '-' },
+            {
+              title: '操作', width: 70,
+              render: (_v, r) => (
+                <Popconfirm title="删除这条入库记录？欠数会自动恢复。" onConfirm={() => deleteReceipt(r.id)}>
+                  <a style={{ color: '#ff4d4f' }}>删除</a>
+                </Popconfirm>
+              ),
+            },
+          ]}
+        />
+      </Modal>
 
       <Modal
         open={schedPickerOpen}

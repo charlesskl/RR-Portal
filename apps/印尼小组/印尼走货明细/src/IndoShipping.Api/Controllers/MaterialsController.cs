@@ -33,7 +33,8 @@ public class MaterialsController(ISqlConnectionFactory factory) : ControllerBase
         var rows = await c.QueryAsync(@"
             SELECT m.*, i.data_url AS image
             FROM materials m LEFT JOIN images i ON i.id = m.image_id
-            WHERE m.id IN @ids", new { ids = idList });
+            WHERE m.id = ANY(@ids)
+            ORDER BY array_position(@ids, m.id)", new { ids = idList });
         return Ok(rows);
     }
 

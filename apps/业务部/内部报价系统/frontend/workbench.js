@@ -682,8 +682,17 @@ function renderHierElectronics(container, rows, onChange, canEdit, fxRmbHkd, pct
       refreshIndo();
     };
     if (canEdit && !hasChildren) {
-      const inpQ = document.createElement('input'); inpQ.type = 'number'; inpQ.step = 'any'; inpQ.value = row.qty ?? '';
-      inpQ.oninput = () => { row.qty = inpQ.value === '' ? null : Number(inpQ.value); refreshAmt(); onChange(); };
+      const inpQ = document.createElement('input'); inpQ.type = 'text';
+      inpQ.value = row.qty_raw != null && row.qty_raw !== '' ? row.qty_raw : (row.qty ?? '');
+      inpQ.placeholder = '如 1/2';
+      inpQ.title = '可输入算式：1/2、3*0.25、(10+2)/4；也可直接输入数字';
+      inpQ.oninput = () => {
+        row.qty_raw = inpQ.value;
+        row.qty = parseFormulaInput(inpQ.value);
+        inpQ.style.color = inpQ.value.trim() !== '' && row.qty == null ? '#b91c1c' : '';
+        refreshAmt();
+        onChange();
+      };
       tdQty.appendChild(inpQ);
       const inpP = document.createElement('input'); inpP.type = 'number'; inpP.step = 'any'; inpP.value = row.unit_price_rmb ?? '';
       inpP.oninput = () => {
@@ -814,7 +823,20 @@ function renderHierChildren(children, onParentChange, canEdit, fxRmbHkd) {
       tr.appendChild(td);
     });
     const tdQ = document.createElement('td');
-    if (canEdit) { const i = document.createElement('input'); i.type='number'; i.step='any'; i.value = c.qty ?? ''; i.oninput = () => { c.qty = i.value===''?null:Number(i.value); refresh(); onParentChange(); }; tdQ.appendChild(i); }
+    if (canEdit) {
+      const i = document.createElement('input'); i.type = 'text';
+      i.value = c.qty_raw != null && c.qty_raw !== '' ? c.qty_raw : (c.qty ?? '');
+      i.placeholder = '如 1/2';
+      i.title = '可输入算式：1/2、3*0.25、(10+2)/4；也可直接输入数字';
+      i.oninput = () => {
+        c.qty_raw = i.value;
+        c.qty = parseFormulaInput(i.value);
+        i.style.color = i.value.trim() !== '' && c.qty == null ? '#b91c1c' : '';
+        refresh();
+        onParentChange();
+      };
+      tdQ.appendChild(i);
+    }
     else { tdQ.className='ro'; tdQ.textContent = formatNum(c.qty ?? ''); }
     const tdP = document.createElement('td');
     if (canEdit) {

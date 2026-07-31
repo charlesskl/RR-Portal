@@ -171,6 +171,49 @@ test('explicit formula inputs remain formulas in the internal quotation export',
   assert.equal(worksheet.getCell(fractionRow, 10).value.formula, `G${fractionRow}*I${fractionRow}`);
 });
 
+test('electronic quantity accepts formulas and preserves them in export', async () => {
+  const workbook = await buildWorkbook({
+    quote: { quote_no: 'ELECTRONIC-QTY-FORMULA', product_name: '电子用量公式', qty: 1000 },
+    sections: [
+      {
+        dept: 'electronic',
+        payload_json: JSON.stringify({
+          electronics: [{
+            name: 'IC',
+            qty: 0.5,
+            qty_raw: '=1/2',
+            unit_price_rmb: 0.31,
+            unit_price: 0.364706,
+          }],
+        }),
+      },
+      {
+        dept: 'sales',
+        payload_json: JSON.stringify({
+          header: { fx_rmb_hkd: 0.85, fx_hkd_usd: 7.8 },
+          shipping: { scenarios: [] },
+        }),
+      },
+    ],
+  });
+
+  const worksheet = workbook.getWorksheet('报价明细');
+  let itemRow = 0;
+  worksheet.eachRow(row => {
+    if (row.getCell(2).value === 'IC') itemRow = row.number;
+  });
+  assert.ok(itemRow);
+  assert.deepEqual(worksheet.getCell(itemRow, 7).value, { formula: '1/2', result: 0.5 });
+  assert.equal(worksheet.getCell(itemRow, 10).value.formula, `G${itemRow}*I${itemRow}`);
+
+  const source = fs.readFileSync(
+    path.join(__dirname, '..', 'frontend', 'workbench.js'),
+    'utf8'
+  );
+  assert.match(source, /row\.qty\s*=\s*parseFormulaInput\(inpQ\.value\)/);
+  assert.match(source, /c\.qty\s*=\s*parseFormulaInput\(i\.value\)/);
+});
+
 test('export keeps prototype and testing amortization when mold items are empty', async () => {
   const workbook = await buildWorkbook({
     quote: { quote_no: 'TEST-264', product_name: '分摊测试', qty: 10000 },

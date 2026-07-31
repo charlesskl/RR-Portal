@@ -278,6 +278,11 @@ function patchSimpleIndoColumns(ws, payloads) {
 function patchFreeInputFormulas(ws, payloads) {
   const engineering = payloads.engineering || {};
   const sections = [
+    {
+      title: '四、电子',
+      rows: (payloads.electronic && payloads.electronic.electronics) || [],
+      quantityOnly: true,
+    },
     { title: '五、五金', rows: engineering.hardware || [] },
     { title: '六、辅助材料', rows: engineering.aux_materials || [] },
     { title: '七、包装材料', rows: engineering.packaging_materials || [] },
@@ -299,9 +304,9 @@ function patchFreeInputFormulas(ws, payloads) {
         ws.getCell(row, 7).value = num(item.qty);
         ws.getCell(row, 7).numFmt = qtyFractionFmt;
       }
-      if (priceFormula) {
+      if (!section.quantityOnly && priceFormula) {
         ws.getCell(row, 8).value = { formula: priceFormula, result: num(item.unit_price_rmb) };
-      } else if (priceFractionFmt) {
+      } else if (!section.quantityOnly && priceFractionFmt) {
         ws.getCell(row, 8).value = num(item.unit_price_rmb);
         ws.getCell(row, 8).numFmt = priceFractionFmt;
       }

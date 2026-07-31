@@ -268,11 +268,42 @@ RETURNING id",
                 keptIds.Add(newItemId);
             }
             if (keptIds.Count == 0)
+            {
+                // 整单清空等同删除全部明细，同样要挡住已有入库/出库的情况
+                var linkedAll = await c.ExecuteScalarAsync<int>(@"
+                    SELECT COUNT(*) FROM (
+                      SELECT r.po_item_id FROM po_receipts r JOIN po_items i ON i.id=r.po_item_id WHERE i.po_id=@id
+                      UNION ALL
+                      SELECT o.po_item_id FROM outbound o JOIN po_items i ON i.id=o.po_item_id WHERE i.po_id=@id
+                    ) t", new { id }, tx);
+                if (linkedAll > 0)
+                {
+                    tx.Rollback();
+                    return Conflict(new { error = "采购单明细已有入库/出库记录，不能清空删除" });
+                }
                 await c.ExecuteAsync("DELETE FROM po_items WHERE po_id=@id", new { id }, tx);
+            }
             else
+            {
+                var removedIds = existingIds.Where(x => !keptIds.Contains(x)).ToList();
+                if (removedIds.Count > 0)
+                {
+                    var linked = await c.ExecuteScalarAsync<int>(@"
+                        SELECT COUNT(*) FROM (
+                          SELECT r.po_item_id FROM po_receipts r WHERE r.po_item_id = ANY(@ids)
+                          UNION ALL
+                          SELECT o.po_item_id FROM outbound o WHERE o.po_item_id = ANY(@ids)
+                        ) t", new { ids = removedIds.ToArray() }, tx);
+                    if (linked > 0)
+                    {
+                        tx.Rollback();
+                        return Conflict(new { error = "部分明细已有入库/出库记录，不能从采购单删除，请先处理对应记录" });
+                    }
+                }
                 await c.ExecuteAsync(
                     "DELETE FROM po_items WHERE po_id=@id AND NOT (id = ANY(@keptIds))",
                     new { id, keptIds = keptIds.ToArray() }, tx);
+            }
             await this.WriteAsync(c, tx, "purchase", "update", "purchase_order", id,
                 $"修改采购单 {body.po_no ?? ""}",
                 new { id, body.po_no, body.supplier, item_count = keptIds.Count });
@@ -427,7 +458,7 @@ RETURNING id",
             FROM po_receipts r
             JOIN po_items i ON i.id=r.po_item_id
             WHERE r.id=@receiptId
-            FOR UPDATE OF r", new { receiptId }, tx);
+            FOR UPDATE OF r, i", new { receiptId }, tx);
         if (row.ReceiptId == 0)
         {
             tx.Rollback();
@@ -493,6 +524,24 @@ RETURNING id",
         using var tx = c.BeginTransaction();
         var poNo = await c.ExecuteScalarAsync<string?>(
             "SELECT po_no FROM purchase_orders WHERE id=@id FOR UPDATE", new { id }, tx);
+        if (poNo is null)
+        {
+            tx.Rollback();
+            return NotFound(new { error = "采购单不存在" });
+        }
+        // 与入库/出库的写路径同一把锁（po_items 行），防止检查与删除之间被并发写入
+        await c.ExecuteAsync("SELECT id FROM po_items WHERE po_id=@id FOR UPDATE", new { id }, tx);
+        var linked = await c.ExecuteScalarAsync<int>(@"
+            SELECT COUNT(*) FROM (
+              SELECT r.po_item_id FROM po_receipts r JOIN po_items i ON i.id=r.po_item_id WHERE i.po_id=@id
+              UNION ALL
+              SELECT o.po_item_id FROM outbound o JOIN po_items i ON i.id=o.po_item_id WHERE i.po_id=@id
+            ) t", new { id }, tx);
+        if (linked > 0)
+        {
+            tx.Rollback();
+            return Conflict(new { error = "采购单已有入库/出库记录，不能删除，请先处理对应记录" });
+        }
         var n = await c.ExecuteAsync("DELETE FROM purchase_orders WHERE id=@id", new { id }, tx);
         if (n == 0)
         {

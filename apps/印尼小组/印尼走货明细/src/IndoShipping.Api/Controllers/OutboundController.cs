@@ -112,7 +112,7 @@ public class OutboundController(ISqlConnectionFactory factory) : ControllerBase
                 FROM po_items i
                 JOIN purchase_orders po ON po.id=i.po_id
                 WHERE i.id=@poItemId
-                FOR UPDATE", new { poItemId = body.po_item_id }, tx);
+                FOR UPDATE OF i", new { poItemId = body.po_item_id }, tx);
             if (item is null)
             {
                 tx.Rollback();
@@ -196,7 +196,7 @@ public class OutboundController(ISqlConnectionFactory factory) : ControllerBase
                 FROM po_items i
                 JOIN purchase_orders po ON po.id=i.po_id
                 WHERE i.id=@poItemId
-                FOR UPDATE", new { poItemId = body.po_item_id }, tx);
+                FOR UPDATE OF i", new { poItemId = body.po_item_id }, tx);
             if (item is null)
             {
                 tx.Rollback();

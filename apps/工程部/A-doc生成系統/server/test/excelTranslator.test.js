@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
+const PizZip = require('pizzip');
 const XlsxPopulate = require('xlsx-populate');
 
 const { createWorkbookFixture } = require('./helpers/workbookFixture');
@@ -181,4 +182,19 @@ test('deletes an output that fails the post-write package limit gate', async t =
     error => error.name === 'WorkbookIntegrityError' && error.code === 'package_too_large',
   );
   await assert.rejects(() => fs.stat(outputPath), error => error.code === 'ENOENT');
+});
+
+test('accepts xlsx-populate adding an empty semantic sheetPr node', async t => {
+  const { inputPath, outputPath } = await fixturePaths(t);
+  const zip = new PizZip(await fs.readFile(inputPath));
+  const sheetPart = 'xl/worksheets/sheet1.xml';
+  const worksheet = zip.file(sheetPart).asText();
+  const withoutEmptySheetProperties = worksheet.replace(/<sheetPr\s*\/>/, '');
+  assert.notEqual(withoutEmptySheetProperties, worksheet);
+  zip.file(sheetPart, withoutEmptySheetProperties);
+  await fs.writeFile(inputPath, zip.generate({ type: 'nodebuffer', compression: 'DEFLATE' }));
+
+  const summary = await translateWorkbook(inputPath, outputPath, { provider: fakeProvider() });
+  assert.equal(summary.failedCells, 0);
+  await fs.stat(outputPath);
 });

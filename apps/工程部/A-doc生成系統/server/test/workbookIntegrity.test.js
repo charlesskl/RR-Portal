@@ -125,6 +125,38 @@ test('rejects number-format semantics changes but accepts attribute reordering',
   });
 });
 
+test('accepts xlsx-populate adding an empty semantic numFmts collection', async t => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'empty-num-fmts-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const sourcePath = path.join(directory, 'source.xlsx');
+  const inputPath = path.join(directory, 'input.xlsx');
+  const outputPath = path.join(directory, 'output.xlsx');
+  const workbook = await XlsxPopulate.fromBlankAsync();
+  workbook.sheet(0).name('Visible').cell('A1').value('卡车车身');
+  await workbook.toFileAsync(sourcePath);
+
+  await mutateZip(sourcePath, inputPath, zip => {
+    const styles = zip.file('xl/styles.xml').asText();
+    const withoutEmptyNumberFormats = styles.replace(
+      /<numFmts(?:\s+count="0")?\s*\/>/,
+      '',
+    );
+    assert.notEqual(withoutEmptyNumberFormats, styles);
+    zip.file('xl/styles.xml', withoutEmptyNumberFormats);
+  });
+
+  const provider = {
+    async translateMany(requests) {
+      return new Map(requests.map(request => [request.id, {
+        text: 'Truck body',
+        detectedLanguage: 'zh-CN',
+      }]));
+    },
+  };
+  const summary = await translateWorkbook(inputPath, outputPath, { provider });
+  assert.equal(summary.changedCells.has('Visible!A1'), true);
+});
+
 test('rejects loss of a default VBA content-type declaration', async t => {
   const { directory, inputPath, outputPath } = await fixturePaths(t);
   const macroInputPath = path.join(directory, 'macro-declaration.xlsx');

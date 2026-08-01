@@ -150,6 +150,11 @@ function canonicalStyles(root) {
     for (const child of node.children || []) visit(child);
   };
   visit(styles);
+  styles.children = (styles.children || []).filter(node => !(
+    node.name === 'numFmts'
+    && node.attributes.length === 0
+    && node.children.length === 0
+  ));
   return styles;
 }
 
@@ -333,7 +338,12 @@ function worksheetXmlSnapshot(root) {
   const columnsNode = firstDescendant(root, 'cols');
   const structures = elementChildren(root)
     .filter(node => WORKSHEET_STRUCTURE_NODES.has(localName(node.name)))
-    .map(canonicalNode);
+    .map(canonicalNode)
+    .filter(node => !(
+      node.name === 'sheetPr'
+      && node.attributes.length === 0
+      && node.children.length === 0
+    ));
 
   return {
     merges,

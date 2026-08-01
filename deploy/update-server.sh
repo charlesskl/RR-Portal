@@ -88,7 +88,7 @@ echo "$CHANGED_FILES" | sed 's/^/    /'
 save_state "analyze"
 echo "[3/6] Analyzing affected services..."
 
-# path → service 映射（compose service name 为准）
+# path → service 映射（compose service name 为准，空格分隔多个 service）
 # 匹配规则：CHANGED_FILES 里任一行以下列 prefix 开头，就标记对应 service
 declare -A PATH_TO_SERVICE=(
   ["core/"]="core"
@@ -119,6 +119,7 @@ declare -A PATH_TO_SERVICE=(
   ["apps/喷油部/喷油排期系统/"]="sprayplan"
   ["apps/印尼小组/印尼走货明细/"]="indo-shipping"
   ["apps/QA部/QA测试报告周结系统/"]="qa-weekly-report"
+  ["apps/QA部/QC成品报告系统/"]="qc-report qc-report-worker"
   ["apps/task-api/"]="task-api"
 )
 
@@ -179,11 +180,13 @@ while IFS= read -r file; do
   MATCHED=0
   for prefix in "${!PATH_TO_SERVICE[@]}"; do
     if [[ "$file" == "$prefix"* ]]; then
-      svc="${PATH_TO_SERVICE[$prefix]}"
-      # 去重添加
-      if [[ ! " ${AFFECTED_SERVICES[*]} " =~ " $svc " ]]; then
-        AFFECTED_SERVICES+=("$svc")
-      fi
+      read -r -a mapped_services <<< "${PATH_TO_SERVICE[$prefix]}"
+      for svc in "${mapped_services[@]}"; do
+        # 去重添加
+        if [[ ! " ${AFFECTED_SERVICES[*]} " =~ " $svc " ]]; then
+          AFFECTED_SERVICES+=("$svc")
+        fi
+      done
       MATCHED=1
       NONRUNTIME_ONLY=0
       break
@@ -255,7 +258,7 @@ with open('${COMPOSE_FILE}') as f:
     content = f.read()
 for match in re.findall(r'^\s*-\s+\./([^:]+):', content, re.MULTILINE):
     path = match.strip()
-    if not any(seg in path for seg in ['data', 'uploads', 'instance']):
+    if not any(seg in path for seg in ['data', 'uploads', 'instance', 'storage']):
         continue
     os.makedirs(path, exist_ok=True)
     # 只 chmod apps/ 下的 bind-mount。data/postgres 等基础设施 dir 跳过：
@@ -287,7 +290,7 @@ for match in re.findall(r'^\s*-\s+\./([^:]+):', content, re.MULTILINE):
 " || true
 
 # ─── Step 5: 备份数据库（只在影响 db 或全量时）───
-if [[ "$COMPOSE_CHANGED" -eq 1 ]] || [[ " ${AFFECTED_SERVICES[*]} " =~ " core " ]] || [[ "$DB_INIT_CHANGED" -eq 1 ]]; then
+if [[ "$COMPOSE_CHANGED" -eq 1 ]] || [[ " ${AFFECTED_SERVICES[*]} " =~ " core " ]] || [[ " ${AFFECTED_SERVICES[*]} " =~ " qc-report " ]] || [[ " ${AFFECTED_SERVICES[*]} " =~ " qc-report-worker " ]] || [[ "$DB_INIT_CHANGED" -eq 1 ]]; then
   save_state "backup"
   echo "[5/6] Backing up databases (core/db 会被动到)..."
   mkdir -p "$BACKUP_DIR"
@@ -300,12 +303,38 @@ if [[ "$COMPOSE_CHANGED" -eq 1 ]] || [[ " ${AFFECTED_SERVICES[*]} " =~ " core " 
       && echo "  [OK] PostgreSQL → ${PG_BACKUP}" \
       || echo "  [WARN] PostgreSQL backup failed"
   fi
+  QC_REPORT_DB="apps/QA部/QC成品报告系统/data/qc-report.db"
+  QC_REPORT_STORAGE="apps/QA部/QC成品报告系统/storage"
+  if [[ -f "$QC_REPORT_DB" ]]; then
+    QC_REPORT_BACKUP="${BACKUP_DIR}/qc-report.db-${BACKUP_TS}"
+    python3 - "$QC_REPORT_DB" "$QC_REPORT_BACKUP" <<'PY'
+import sqlite3
+import sys
+
+source = sqlite3.connect(f"file:{sys.argv[1]}?mode=ro", uri=True)
+destination = sqlite3.connect(sys.argv[2])
+try:
+    source.backup(destination)
+finally:
+    destination.close()
+    source.close()
+PY
+    echo "  [OK] ${QC_REPORT_DB} (SQLite online backup)"
+  fi
+  if [[ -d "$QC_REPORT_STORAGE" ]]; then
+    QC_STORAGE_BACKUP="${BACKUP_DIR}/qc-report-storage-${BACKUP_TS}.tar.gz"
+    tar -czf "$QC_STORAGE_BACKUP" -C "$QC_REPORT_STORAGE" . \
+      && echo "  [OK] ${QC_REPORT_STORAGE} → ${QC_STORAGE_BACKUP}" \
+      || echo "  [WARN] QC report storage backup failed"
+  fi
   find apps/ plugins/ -path '*/data/*.db' -type f 2>/dev/null | while read -r db_file; do
+    [[ "$db_file" == "$QC_REPORT_DB" ]] && continue
     backup_name="$(echo "$db_file" | tr '/' '-')-${BACKUP_TS}"
     cp "$db_file" "${BACKUP_DIR}/${backup_name}" && echo "  [OK] ${db_file}"
   done
   ls -t "$BACKUP_DIR"/postgres-*.sql.gz 2>/dev/null | tail -n +6 | xargs rm -f 2>/dev/null || true
   ls -t "$BACKUP_DIR"/*.db-* 2>/dev/null | tail -n +11 | xargs rm -f 2>/dev/null || true
+  ls -t "$BACKUP_DIR"/qc-report-storage-*.tar.gz 2>/dev/null | tail -n +6 | xargs rm -f 2>/dev/null || true
 else
   echo "[5/6] DB 未被影响，跳过备份"
 fi
@@ -346,9 +375,10 @@ ensure_base_image() {
 # 自动跳过 mcr.microsoft.com/... 等非 Hub 镜像和多阶段 FROM <stage> 引用（无 tag 冒号）。
 ensure_service_base_images() {
   local target_svc="$1"
-  local prefix dockerfile img
+  local prefix dockerfile img mapped_svc
   for prefix in "${!PATH_TO_SERVICE[@]}"; do
-    [[ "${PATH_TO_SERVICE[$prefix]}" == "$target_svc" ]] || continue
+    mapped_svc=" ${PATH_TO_SERVICE[$prefix]} "
+    [[ "$mapped_svc" == *" $target_svc "* ]] || continue
     dockerfile="${prefix}Dockerfile"
     [[ -f "$dockerfile" ]] || return 0
     while read -r img; do

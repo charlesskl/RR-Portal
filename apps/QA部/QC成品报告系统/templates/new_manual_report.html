@@ -1,0 +1,12 @@
+{% extends 'base.html' %}
+{% block title %}手工建单 · AI 辅助 QC{% endblock %}
+{% block content %}
+<div class="page" style="max-width:880px">
+  <header class="page-header"><div><span class="eyebrow">Manual fallback</span><h1>手工选择已有订单</h1><p>仅用于没有可上传 PO 的情况；后续仍按照片格位、AI 草稿和 QC 审核流程进行。</p></div></header>
+  <form method="post" class="card section-card">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label>采购订单 / Purchase order<select name="po_id" required><option value="">请选择 PO</option>{% for order in orders %}<option value="{{ order.id }}">{{ order.po_no }} · {{ order.quantity }} PCS · {{ order.date_code }}</option>{% endfor %}</select></label>
+    <div class="actions" style="margin-top:24px;justify-content:flex-end"><a class="button secondary" href="{{ url_for('new_report') }}">返回上传 PO</a><button class="button" type="submit">建立验货任务 →</button></div>
+  </form>
+</div>
+{% endblock %}

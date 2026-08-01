@@ -1,0 +1,8 @@
+{% extends 'base.html' %}
+{% block title %}操作日志 · QC 质检工作台{% endblock %}
+{% block content %}
+<div class="page">
+  <header class="page-header"><div><span class="eyebrow">Audit trail</span><h1>操作日志</h1><p>记录登录、创建、编辑、签名、照片、正式锁定和修订操作。</p></div><div class="actions"><a class="button secondary" href="{{ url_for('admin') }}">返回设置</a></div></header>
+  <section class="card table-wrap"><table class="table"><thead><tr><th>时间</th><th>操作</th><th>对象</th><th>对象 ID</th><th>详情</th><th>来源 IP</th></tr></thead><tbody>{% for log in logs %}<tr><td>{{ log.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</td><td><strong>{{ log.action }}</strong></td><td>{{ log.entity_type }}</td><td>{{ log.entity_id or '-' }}</td><td>{{ log.detail or '-' }}</td><td>{{ log.ip_address }}</td></tr>{% endfor %}</tbody></table></section>
+</div>
+{% endblock %}

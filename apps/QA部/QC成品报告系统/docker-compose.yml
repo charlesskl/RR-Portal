@@ -1,0 +1,136 @@
+x-app-environment: &app-environment
+  SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env}
+  ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Set ADMIN_PASSWORD in .env}
+  QC_PASSWORD: ${QC_PASSWORD:?Set QC_PASSWORD in .env}
+  COOKIE_SECURE: ${COOKIE_SECURE:-false}
+  DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-qc_app}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-qc_reports}
+  STORAGE_ROOT: /app/storage
+  AUTO_CREATE_SCHEMA: "false"
+  SEED_DATABASE: "false"
+  REDIS_URL: redis://redis:6379/0
+  QUEUE_REQUIRED: "true"
+  RQ_QUEUE_NAME: ${RQ_QUEUE_NAME:-qc-ai}
+  RQ_JOB_TIMEOUT_SECONDS: ${RQ_JOB_TIMEOUT_SECONDS:-900}
+  RQ_RESULT_TTL_SECONDS: ${RQ_RESULT_TTL_SECONDS:-604800}
+  RQ_FAILURE_TTL_SECONDS: ${RQ_FAILURE_TTL_SECONDS:-1209600}
+  REDIS_CONNECT_TIMEOUT_SECONDS: ${REDIS_CONNECT_TIMEOUT_SECONDS:-3}
+  OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+  OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+  OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5.6-terra}
+  OPENAI_TIMEOUT_SECONDS: ${OPENAI_TIMEOUT_SECONDS:-180}
+  OPENAI_MAX_RETRIES: ${OPENAI_MAX_RETRIES:-2}
+  OPENAI_MAX_OUTPUT_TOKENS: ${OPENAI_MAX_OUTPUT_TOKENS:-12000}
+  AI_MAX_DOCUMENT_BYTES: ${AI_MAX_DOCUMENT_BYTES:-26214400}
+  AI_MAX_IMAGE_BYTES: ${AI_MAX_IMAGE_BYTES:-20971520}
+  AI_MAX_TOTAL_IMAGE_BYTES: ${AI_MAX_TOTAL_IMAGE_BYTES:-47185920}
+  AI_MAX_PHOTOS: ${AI_MAX_PHOTOS:-80}
+  AI_MOCK_MODE: ${AI_MOCK_MODE:-false}
+  AI_MOCK_FIXTURE: ${AI_MOCK_FIXTURE:-long_loose_thread}
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-qc_reports}
+      POSTGRES_USER: ${POSTGRES_USER:-qc_app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - qc-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-qc_app} -d ${POSTGRES_DB:-qc_reports}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --appendfsync
+      - everysec
+      - --maxmemory-policy
+      - noeviction
+      - --loglevel
+      - warning
+    volumes:
+      - qc-redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  migrate:
+    build: .
+    restart: "no"
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      <<: *app-environment
+      QC_SKIP_APP_INIT: "true"
+
+  seed:
+    build: .
+    restart: "no"
+    command: ["python", "-c", "from app import create_app; create_app()"]
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      <<: *app-environment
+      QC_SKIP_APP_INIT: "true"
+      SEED_DATABASE: "true"
+
+  web:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      seed:
+        condition: service_completed_successfully
+    environment:
+      <<: *app-environment
+    ports:
+      - "8000:3410"
+    volumes:
+      - qc-storage:/app/storage
+
+  worker:
+    build: .
+    restart: unless-stopped
+    init: true
+    command: ["python", "worker.py"]
+    stop_grace_period: 2m
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      seed:
+        condition: service_completed_successfully
+    environment:
+      <<: *app-environment
+    volumes:
+      - qc-storage:/app/storage
+    healthcheck:
+      test: ["CMD", "python", "worker.py", "--check"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+volumes:
+  qc-postgres:
+  qc-redis:
+  qc-storage:

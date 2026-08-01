@@ -52,7 +52,8 @@ RR-Portal/
 │   ├── 印尼小组/
 │   │   └── 印尼走货明细/              — indo-shipping (ASP.NET Core + React + PostgreSQL schema indo_shipping)
 │   ├── QA部/
-│   │   └── QA测试报告周结系统/      — qa-weekly-report (Node.js + React + exceljs)
+│   │   ├── QA测试报告周结系统/      — qa-weekly-report (Node.js + React + exceljs)
+│   │   └── QC成品报告系统/          — qc-report (Python/Flask + SQLite + Redis/RQ)
 │   └── task-api/                  — 任务 API (Node.js，仅本地 compose，无部门)
 ├── archived/                      — 下线 / 历史代码，不参与部署
 ├── core/                          — 核心服务 (FastAPI, 用户/权限/插件注册)
@@ -228,6 +229,7 @@ curl http://localhost:<port>/health
 | hy-schedule-system ZURU河源排期入单 | Flask | 5008 | /hy-schedule/ |
 | baojia 报价系统 | Node.js | 3007 | /baojia/ |
 | qa-weekly-report QA测试报告周结系统 | Node.js/React | 3210 | /qa-weekly-report/ |
+| qc-report QC成品报告系统 | Python/Flask | 3410 | /qc-report/ |
 | internal-quote 内部报价系统 | Node.js | 3211 | /internal-quote/ |
 | indo-shipping 印尼走货明细 | ASP.NET Core + React | 5180 | /indo-shipping/ |
 | stitch-cost 车缝核价对比系统 | ASP.NET Core + React | 5192 | /stitch-cost/ |
@@ -485,6 +487,7 @@ const data = JSON.parse(fs.readFileSync('data/data.json'));
 | hy-schedule-system | ZURU河源排期入单 | 业务部 | Standalone (Python/Flask) | /hy-schedule/ | https://github.com/hanson678/hy-schedule-system |
 | baojia | 报价系统 | 业务部 | Standalone (Node.js) | /baojia/ | — |
 | qa-weekly-report | QA测试报告周结系统 | QA部 | Standalone (Node.js/React + exceljs) | /qa-weekly-report/ | — |
+| qc-report | QC成品报告系统 | QA部 | Standalone (Python/Flask + SQLite + Redis/RQ + OpenAI) | /qc-report/ | — |
 | internal-quote | 内部报价系统 | 业务部 | Standalone (Node.js + node:sqlite) | /internal-quote/ | — |
 | indo-shipping | 印尼走货明细 | 印尼小组 | Standalone (ASP.NET Core + React + PostgreSQL schema indo_shipping) | /indo-shipping/ | (PR #268) |
 | stitch-cost | 车缝核价对比系统 | PMC跟仓管 | Standalone (ASP.NET Core + React + PostgreSQL) | /stitch-cost/ | — |

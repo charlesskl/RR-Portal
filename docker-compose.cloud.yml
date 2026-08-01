@@ -5,6 +5,30 @@
 # Excludes: schedule-system (SMB/Windows), zuru-ma (deferred), indonesia-export (deleted)
 # 2026-06-16: 触发 COMPOSE_CHANGED 走 --remove-orphans 路径，清除 internal-quote (#181) 遗留孤儿容器
 
+x-qc-report-environment: &qc-report-environment
+  PORT: "3410"
+  SECRET_KEY: ${QC_REPORT_SECRET_KEY:?Set QC_REPORT_SECRET_KEY in the production env file}
+  ADMIN_PASSWORD: ${QC_REPORT_ADMIN_PASSWORD:?Set QC_REPORT_ADMIN_PASSWORD in the production env file}
+  QC_PASSWORD: ${QC_REPORT_QC_PASSWORD:?Set QC_REPORT_QC_PASSWORD in the production env file}
+  DATABASE_URL: sqlite:////app/data/qc-report.db
+  STORAGE_ROOT: /app/storage
+  AUTO_CREATE_SCHEMA: "false"
+  SEED_DATABASE: "false"
+  SEED_SAMPLE_DATA: "false"
+  PROXY_PREFIX: /qc-report
+  SESSION_COOKIE_PATH: /qc-report/
+  COOKIE_SECURE: ${QC_REPORT_COOKIE_SECURE:-false}
+  REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/2
+  QUEUE_REQUIRED: "true"
+  RQ_QUEUE_NAME: qc-report-ai
+  OPENAI_API_KEY: ${QC_REPORT_OPENAI_API_KEY:-}
+  OPENAI_BASE_URL: ${QC_REPORT_OPENAI_BASE_URL:-https://api.openai.com/v1}
+  OPENAI_MODEL: ${QC_REPORT_OPENAI_MODEL:-gpt-5.6-terra}
+  OPENAI_TIMEOUT_SECONDS: ${QC_REPORT_OPENAI_TIMEOUT_SECONDS:-180}
+  OPENAI_MAX_RETRIES: ${QC_REPORT_OPENAI_MAX_RETRIES:-2}
+  OPENAI_MAX_OUTPUT_TOKENS: ${QC_REPORT_OPENAI_MAX_OUTPUT_TOKENS:-12000}
+  AI_MOCK_MODE: "false"
+
 services:
   # ──────────────────────────────────────
   # Infrastructure
@@ -66,6 +90,8 @@ services:
   redis:
     image: redis:7-alpine
     command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
+    volumes:
+      - redis-data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
       interval: 5s
@@ -333,6 +359,77 @@ services:
       retries: 3
     mem_limit: 512m
     memswap_limit: 512m
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - platform-net
+
+  qc-report:
+    build:
+      context: ./apps/QA部/QC成品报告系统
+      dockerfile: Dockerfile
+    environment:
+      <<: *qc-report-environment
+      WEB_CONCURRENCY: "1"
+      WEB_THREADS: "1"
+    command:
+      - sh
+      - -c
+      - >-
+        alembic upgrade head &&
+        SEED_DATABASE=true QC_SKIP_APP_INIT=true python -c 'from app import create_app; create_app()' &&
+        exec gunicorn --bind 0.0.0.0:3410 --workers 1 --threads 1 --timeout 120 app:app
+    volumes:
+      - ./apps/QA部/QC成品报告系统/data:/app/data
+      - ./apps/QA部/QC成品报告系统/storage:/app/storage
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:3410/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+    mem_limit: 1g
+    memswap_limit: 1g
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - platform-net
+
+  qc-report-worker:
+    build:
+      context: ./apps/QA部/QC成品报告系统
+      dockerfile: Dockerfile
+    command: ["python", "worker.py"]
+    init: true
+    stop_grace_period: 2m
+    environment:
+      <<: *qc-report-environment
+    volumes:
+      - ./apps/QA部/QC成品报告系统/data:/app/data
+      - ./apps/QA部/QC成品报告系统/storage:/app/storage
+    depends_on:
+      redis:
+        condition: service_healthy
+      qc-report:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "worker.py", "--check"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    mem_limit: 768m
+    memswap_limit: 768m
     restart: unless-stopped
     logging:
       driver: json-file
@@ -945,3 +1042,6 @@ services:
 networks:
   platform-net:
     driver: bridge
+
+volumes:
+  redis-data:

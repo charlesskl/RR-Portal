@@ -1,0 +1,63 @@
+name: CPG Opening Linked Cleanup
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "输入 DELETE 确认删除联动期初记录"
+        type: string
+        required: true
+permissions:
+  contents: read
+concurrency:
+  group: deploy-cloud
+  queue: max
+  cancel-in-progress: false
+jobs:
+  clean:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Validate confirmation
+        run: |
+          if [ "${{ inputs.confirm }}" != "DELETE" ]; then
+            echo '必须在 confirm 输入 DELETE 才会执行' >&2
+            exit 1
+          fi
+      - name: Validate SSH host fingerprint
+        shell: bash
+        env:
+          CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]]; then
+            echo 'CLOUD_HOST_FINGERPRINT must be a non-empty OpenSSH SHA256 fingerprint.' >&2
+            exit 1
+          fi
+      - name: Delete linked opening records via SSH
+        env:
+          CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
+        with:
+          host: ${{ secrets.CLOUD_HOST }}
+          username: ${{ secrets.CLOUD_USER }}
+          key: ${{ secrets.CLOUD_SSH_KEY }}
+          fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
+          command_timeout: 5m
+          script: |
+            set -euo pipefail
+            docker exec -i rr-portal-cpg-1 python - <<'PYEOF'
+            import sqlite3
+            conn = sqlite3.connect('/app/data/pcba.db')
+            rows = conn.execute(
+                "SELECT department, COUNT(*) FROM records "
+                "WHERE source_record_id IS NOT NULL AND doc_no LIKE '%期初%' "
+                "GROUP BY department").fetchall()
+            print('联动期初记录分布:', rows)
+            before = conn.execute("SELECT COUNT(*) FROM records").fetchone()[0]
+            conn.execute(
+                "DELETE FROM records WHERE source_record_id IS NOT NULL AND doc_no LIKE '%期初%'")
+            conn.commit()
+            after = conn.execute("SELECT COUNT(*) FROM records").fetchone()[0]
+            print(f'删除 {before - after} 条（{before} → {after}）')
+            conn.close()
+            PYEOF

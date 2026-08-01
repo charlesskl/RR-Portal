@@ -36,8 +36,11 @@ jobs:
             set -euo pipefail
             docker ps -a --filter name=qc-report --format 'table {{.Names}}\t{{.Status}}'
             docker ps -a --filter status=created --format '{{.Names}}' | xargs -r docker rm
+            cd /opt/rr-portal
+            grep -c qc-report nginx/nginx.cloud.conf
+            docker compose -f docker-compose.cloud.yml --env-file .env.cloud.production up -d --no-deps --force-recreate nginx
+            sleep 5
             docker exec rr-portal-nginx-1 nginx -t
-            docker exec rr-portal-nginx-1 nginx -s reload
             sleep 3
             curl -sf http://localhost/qc-report/health && echo && echo '[OK] /qc-report/health'
             echo "== 容器内 /health =="

@@ -221,3 +221,40 @@ def test_opening_stock_record_does_not_link(conn):
                       qty=766369, remark="总表期初出仓导入")
     targets = m._auto_flow_targets(conn, body, "兴信B来料仓")
     assert targets == []
+
+
+def test_assembly_opening_inbound_imported(conn):
+    # 总表右块「半成品入仓 截止6月27号」也要生成期初记录，
+    # 否则导出的期初入仓/累计入仓缺这一块（线上曾缺 682723）
+    wb = openpyxl.Workbook()
+    total = wb.active
+    total.title = "总表"
+    total.cell(1, 2).value = "累计领料总数"
+    total.cell(1, 4).value = "7月领料\n总数"
+    total.cell(1, 11).value = "应存数"
+    total.cell(1, 12).value = "累计入仓总数"
+    total.cell(1, 13).value = "东莞"
+    total.cell(1, 15).value = "7月入仓\n总数"
+    total.cell(2, 1).value = "物料名称"
+    total.cell(2, 3).value = "截止6月27号"
+    total.cell(2, 13).value = "截止6月27号"
+    total.cell(3, 1).value = "1#NFC\n贴纸"
+    total.cell(3, 3).value = 766369
+    total.cell(3, 13).value = 682723
+    issue_ws = wb.create_sheet("领料明细")
+    issue_ws.cell(1, 2).value = "当月领料总数"
+    issue_ws.cell(2, 1).value = "物料名称"
+    semi_ws = wb.create_sheet("半成品入仓明细")
+    semi_ws.cell(1, 2).value = "当月入仓总数"
+    semi_ws.cell(2, 1).value = "物料名称"
+
+    upload = FakeUpload("东莞车间77772#NFC贴纸出入明细.xlsx")
+    bodies, _, legacy = m._parse_record_import_workbook(
+        conn, wb, upload, {"department": "东莞车间"}
+    )
+    assert legacy
+    opening_issue = [b for b in bodies if b.rec_type == "issue" and "期初" in (b.remark or "")]
+    opening_inbound = [b for b in bodies if b.rec_type == "semi_finished" and "期初" in (b.remark or "")]
+    assert len(opening_issue) == 1 and opening_issue[0].qty == 766369
+    assert len(opening_inbound) == 1 and opening_inbound[0].qty == 682723
+    assert opening_inbound[0].summary_month == 6

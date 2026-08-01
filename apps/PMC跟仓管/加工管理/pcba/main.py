@@ -1013,6 +1013,43 @@ def _parse_legacy_assembly_workbook(conn, wb, department):
                 )
                 _add_record_body(bodies, body, department, validate_positive=(qty > 0))
 
+        # 右块期初（半成品入仓 截止6月27号）：与领料期初同理，
+        # 生成 semi_finished 期初记录，否则导出的期初入仓/累计入仓永远缺这一块
+        opening_inbound_col = None
+        for col_no in range(11, total_ws.max_column + 1):
+            if "截止" in _cell_text(total_ws.cell(header_row or 2, col_no).value):
+                opening_inbound_col = col_no
+                break
+        if header_row and opening_inbound_col:
+            inbound_label = _cell_text(total_ws.cell(header_row, opening_inbound_col).value)
+            inbound_date = _legacy_cutoff_date(inbound_label, workbook_year)
+            for row_no in range(header_row + 1, total_ws.max_row + 1):
+                sticker_type = _cell_text(total_ws.cell(row_no, 1).value)
+                if not sticker_type or "#NFC" not in sticker_type:
+                    continue
+                qty = _legacy_int(
+                    total_ws.cell(row_no, opening_inbound_col).value,
+                    row_no,
+                    inbound_label,
+                )
+                if qty is None or qty == 0:
+                    continue
+                sticker_type = _normalize_sticker_type(
+                    conn, NFC_MATERIAL, sticker_type
+                )
+                body = RecordIn(
+                    rec_type="semi_finished",
+                    location_id=location_id,
+                    rec_date=inbound_date,
+                    doc_no=inbound_label,
+                    material=NFC_MATERIAL,
+                    sticker_type=sticker_type,
+                    qty=qty,
+                    remark="总表期初入仓导入",
+                    summary_month=6,
+                )
+                _add_record_body(bodies, body, department, validate_positive=(qty > 0))
+
     for sheet_name, rec_type in sheet_types.items():
         if sheet_name not in wb.sheetnames:
             continue

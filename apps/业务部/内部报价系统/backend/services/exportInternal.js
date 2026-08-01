@@ -128,16 +128,8 @@ function shiftRowsDown(ws, startRow, shift) {
     }
   }
 
-  for (const model of merges) {
-    if (model.top < startRow) continue;
-    ws.mergeCells(
-      model.top + shift,
-      model.left,
-      model.bottom + shift,
-      model.right
-    );
-  }
-
+  // 必须在恢复合并单元格之前调整公式。ExcelJS 的合并占位格会共享
+  // 顶左单元格的 value；若先 merge 再 eachCell，同一公式会被重复平移多次。
   const formulaPattern = /([A-Z]+)(\d+)/g;
   ws.eachRow(row => {
     row.eachCell(cell => {
@@ -150,6 +142,16 @@ function shiftRowsDown(ws, startRow, shift) {
       if (formula !== value.formula) cell.value = { formula, result: value.result };
     });
   });
+
+  for (const model of merges) {
+    if (model.top < startRow) continue;
+    ws.mergeCells(
+      model.top + shift,
+      model.left,
+      model.bottom + shift,
+      model.right
+    );
+  }
 }
 
 function applyStyle(cell, style, numFmt) {

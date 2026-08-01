@@ -520,6 +520,48 @@ test('export tax-summary base price preserves a manual page override', async () 
   assert.equal(worksheet.getCell(titleRow + 2, 1).value, 8.7836);
 });
 
+test('SPIN export keeps shifted tax-summary formulas linked to their real rows', async () => {
+  const workbook = await buildWorkbook({
+    quote: { quote_no: 'SPIN-TAX-SHIFT', customer: 'SPIN', product_name: '公式平移', qty: 1000 },
+    sections: [{ dept: 'sales', payload_json: JSON.stringify({
+      header: { fx_rmb_hkd: 0.85, fx_hkd_usd: 7.8 },
+      shipping: { markup_x: 1.2, divisor: 0.98, scenarios: [] },
+      pricing_summary: {
+        t1: { base_price: 30 },
+        t2: { carton: 1 },
+        t3: {},
+        t4: { carton: { amt: 1, rate: 10 } },
+        overrides: { 't1.base_price': true, 't2.carton': true },
+      },
+    }) }],
+  });
+
+  const worksheet = workbook.getWorksheet('报价明细');
+  let deductionRow = 0;
+  let summaryRow = 0;
+  let afterCostRow = 0;
+  worksheet.eachRow(row => {
+    const deduction = row.getCell(11).value;
+    const summary = row.getCell(9).value;
+    if (deduction && typeof deduction === 'object' && /^SUM\(A\d+:J\d+\)$/.test(deduction.formula || '')) {
+      deductionRow = row.number;
+    }
+    if (row.getCell(1).value === '合计减税' && summary && typeof summary === 'object') summaryRow = row.number;
+    if (row.getCell(1).value === '减税后成本') afterCostRow = row.number;
+  });
+
+  assert.ok(deductionRow);
+  assert.ok(summaryRow);
+  assert.ok(afterCostRow);
+  assert.equal(worksheet.getCell(summaryRow, 9).value.formula, `K${deductionRow}`);
+  assert.match(worksheet.getCell(afterCostRow, 9).value.formula, new RegExp(`-K${deductionRow}$`));
+  for (const rowNumber of [summaryRow, afterCostRow]) {
+    const formula = worksheet.getCell(rowNumber, 9).value.formula;
+    const refs = [...formula.matchAll(/[A-Z]+(\d+)/g)].map(match => Number(match[1]));
+    assert.ok(refs.every(ref => ref <= worksheet.rowCount), `${formula} 引用了工作表范围外的行`);
+  }
+});
+
 test('export separates electronic and sewing pricing and keeps weighted sewing formulas', async () => {
   const workbook = await buildWorkbook({
     quote: { quote_no: 'WEIGHTED', product_name: '加权测试', qty: 1000, factory_code: 'qingxi' },

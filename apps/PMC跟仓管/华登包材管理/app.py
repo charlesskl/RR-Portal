@@ -1442,6 +1442,17 @@ def _sum_items_by_order(con, *, recorded_by, from_party, to_party, date_from, da
     return by_order, no_cnt
 
 
+def _sum_items_no_orderno(con, *, recorded_by, from_party, to_party, date_from, date_to):
+    """无单号记录的各包材合计（与 _sum_items 同口径，只统计 order_no 为空的记录）。"""
+    qty_cols_sql = ', '.join([f'COALESCE(SUM({k}_qty), 0) AS {k}_sum' for k, _ in ITEMS])
+    row = con.execute(f"""
+        SELECT {qty_cols_sql} FROM flow_records
+        WHERE recorded_by=? AND from_party=? AND to_party=? AND date BETWEEN ? AND ?
+          AND (order_no IS NULL OR TRIM(order_no) = '')
+    """, (recorded_by, from_party, to_party, date_from, date_to)).fetchone()
+    return {k: float(row[f'{k}_sum']) for k, _ in ITEMS}
+
+
 def _compare_by_order(con, *, sender, receiver, date_from, date_to):
     """单号级核对（一个方向 sender→receiver）：
     - missing_in_receiver：发方录了、收方没有的单号
@@ -1466,12 +1477,24 @@ def _compare_by_order(con, *, sender, receiver, date_from, date_to):
                     'order_no': on, 'item': k, 'item_name': name,
                     'sender': round(sv, 4), 'receiver': round(rv, 4),
                 })
+    # 无单号记录的分项差异（汇总差异里剔除单号一致部分后，剩下的就来自这里）
+    sender_no_items = _sum_items_no_orderno(
+        con, recorded_by=sender, from_party=sender, to_party=receiver,
+        date_from=date_from, date_to=date_to)
+    receiver_no_items = _sum_items_no_orderno(
+        con, recorded_by=receiver, from_party=sender, to_party=receiver,
+        date_from=date_from, date_to=date_to)
     return {
         'missing_in_receiver': sorted(sset - rset),
         'missing_in_sender': sorted(rset - sset),
         'item_mismatches': item_mismatches,
         'no_orderno_sender': sender_no,
         'no_orderno_receiver': receiver_no,
+        'no_orderno_sender_items': sender_no_items,
+        'no_orderno_receiver_items': receiver_no_items,
+        'no_orderno_diffs': {k: round(sender_no_items[k] - receiver_no_items[k], 4)
+                             for k, _ in ITEMS
+                             if abs(sender_no_items[k] - receiver_no_items[k]) > 1e-9},
     }
 
 

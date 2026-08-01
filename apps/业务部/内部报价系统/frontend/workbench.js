@@ -2868,6 +2868,12 @@ function renderMolding(host, payload, canEdit, onChange, refMolds, fxRmbHkd, use
   if (canEdit && payload.injection.length === 0 && refMolds && refMolds.length) {
     payload.injection = refMolds.map(m => ({
       mold_no: m.mold_no || '', name: m.name,
+      product_group_id: m.product_group_id || '',
+      product_group_name: m.product_group_name || '',
+      product_group_rows: m.product_group_rows || [],
+      product_image: m.product_image || '',
+      source_sheet_name: m.source_sheet_name || '',
+      source_sheet_index: m.source_sheet_index ?? null,
       material: m.material || '',
       material_grade: m.material_grade || '',
       color: m.color || '',
@@ -2958,11 +2964,21 @@ function renderMolding(host, payload, canEdit, onChange, refMolds, fxRmbHkd, use
     const syncBtn = host.querySelector('#btn-sync-mold');
     if (syncBtn) syncBtn.onclick = () => {
       if (!confirm(`将根据工程已填的 ${refMolds.length} 副模具同步注塑表。已填行（按"模具名称"匹配）会保留其他字段，新增的会追加，工程已删除的会移除。继续？`)) return;
-      const byName = new Map(payload.injection.map(r => [r.name, r]));
+      const syncKey = row => [
+        row.product_group_id || row.product_group_name || '',
+        row.mold_no || '', row.name || '', row.mold_part_index ?? 0,
+      ].join('|');
+      const byName = new Map(payload.injection.map(r => [syncKey(r), r]));
       payload.injection = refMolds.map(m => {
-        const existing = byName.get(m.name) || {};
+        const existing = byName.get(syncKey(m)) || {};
         return {
           ...existing,
+          product_group_id: m.product_group_id || '',
+          product_group_name: m.product_group_name || '',
+          product_group_rows: m.product_group_rows || [],
+          product_image: m.product_image || '',
+          source_sheet_name: m.source_sheet_name || '',
+          source_sheet_index: m.source_sheet_index ?? null,
           mold_no: m.mold_no || existing.mold_no || '',
           name: m.name,
           material: m.material || existing.material || '',
@@ -3077,6 +3093,7 @@ function renderMolding(host, payload, canEdit, onChange, refMolds, fxRmbHkd, use
   });
 
   const cols = [
+    { key: 'product_group_name', label: '产品', readonly: true, width: '110px' },
     { key: 'name', label: '模具名称', type: 'textarea', width: '220px' },
     { key: 'mold_no', label: '模号', width: '70px' },
     { key: 'material', label: '材质', width: '110px', type: 'select', affectsOptions: true,
@@ -3128,9 +3145,27 @@ function renderMolding(host, payload, canEdit, onChange, refMolds, fxRmbHkd, use
     const rawSum = sum(rows, r => num(r.weight_g) * lossM * num(r.material_unit_price));
     const shotSum = sum(rows, r => num(r.shot_price));
     const finishedSum = rawSum + shotSum;
+    const grouped = new Map();
+    rows.forEach(row => {
+      const key = row.product_group_id || row.product_group_name || '';
+      if (!key) return;
+      if (!grouped.has(key)) grouped.set(key, []);
+      grouped.get(key).push(row);
+    });
+    const groupCards = [...grouped.values()].map(groupRows => {
+      const first = groupRows[0] || {};
+      const groupRaw = sum(groupRows, r => num(r.weight_g) * lossM * num(r.material_unit_price));
+      const groupShot = sum(groupRows, r => num(r.shot_price));
+      const groupFinished = groupRaw + groupShot;
+      return `<div class="ls-row" style="background:#f0f9ff;color:#075985">
+        <span class="ls-label">${escapeHtml(first.product_group_name || '产品')} 小计（${groupRows.length} 行）</span>
+        <span class="ls-val">HK$ ${formatNum(groupFinished)} <small class="muted">原料 ${formatNum(groupRaw)} + 啤价 ${formatNum(groupShot)}</small></span>
+      </div>`;
+    }).join('');
     injCard.className = 'loss-summary';
     injCard.innerHTML = `
       <div class="ls-title">二、注塑 成本汇总</div>
+      ${groupCards}
       <div class="ls-row"><span class="ls-label">原料单价 总</span><span class="ls-val">${formatNum(rawSum)}</span></div>
       <div class="ls-row"><span class="ls-label">啤价 总</span><span class="ls-val">${formatNum(shotSum)}</span></div>
       <div class="ls-row hi"><span class="ls-label">成品金额 总 HK$</span><span class="ls-val">${formatNum(finishedSum)}</span></div>

@@ -100,4 +100,7 @@ test('mold UI renders product headers and per-product subtotals', () => {
   assert.match(source, /共 \$\{groupMolds\.length\} 副模具/);
   assert.match(source, /groupRmb\s*=\s*sum\(groupMolds/);
   assert.match(source, /product_group_name \|\| ''\)\}\s*小计/);
+  assert.match(source, /key: 'product_group_name', label: '产品'/);
+  assert.match(source, /product_group_id \|\| row\.product_group_name/);
+  assert.match(source, /原料 \$\{formatNum\(groupRaw\)\} \+ 啤价/);
 });

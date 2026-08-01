@@ -251,6 +251,43 @@ test('internal export keeps mold rows separated by product group', async () => {
   assert.match(rows['NO.03'].getCell(2).value, /^【产品2】/);
 });
 
+test('internal export keeps molding rows separated by engineering product group', async () => {
+  const workbook = await buildWorkbook({
+    quote: { quote_no: 'MOLDING-PRODUCT-GROUPS', product_name: '多产品注塑', qty: 1000 },
+    sections: [
+      {
+        dept: 'molding',
+        payload_json: JSON.stringify({
+          injection: [
+            { name: '产品一外壳', product_group_id: 'product-1', product_group_name: '1#产品', weight_g: 10 },
+            { name: '产品一配件', product_group_id: 'product-1', product_group_name: '1#产品', weight_g: 5 },
+            { name: '产品二外壳', product_group_id: 'product-2', product_group_name: '2#产品', weight_g: 12 },
+          ],
+        }),
+      },
+      {
+        dept: 'sales',
+        payload_json: JSON.stringify({
+          header: { fx_rmb_hkd: 0.85, fx_hkd_usd: 7.8 },
+          shipping: { scenarios: [] },
+        }),
+      },
+    ],
+  });
+
+  const worksheet = workbook.getWorksheet('报价明细');
+  const rows = {};
+  worksheet.eachRow(row => {
+    const name = String(row.getCell(2).value || '').replace(/^【[^】]+】/, '');
+    if (name) rows[name] = row;
+  });
+  assert.equal(rows['产品一外壳'].getCell(1).value, '1.1');
+  assert.equal(rows['产品一配件'].getCell(1).value, '1.2');
+  assert.equal(rows['产品二外壳'].getCell(1).value, '2.1');
+  assert.match(rows['产品一外壳'].getCell(2).value, /^【1#产品】/);
+  assert.match(rows['产品二外壳'].getCell(2).value, /^【2#产品】/);
+});
+
 test('export keeps prototype and testing amortization when mold items are empty', async () => {
   const workbook = await buildWorkbook({
     quote: { quote_no: 'TEST-264', product_name: '分摊测试', qty: 10000 },

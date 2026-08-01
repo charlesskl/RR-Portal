@@ -146,7 +146,7 @@ export default function ExcelTranslatePage() {
   const active = job && shouldPoll(job);
 
   return (
-    <Space direction="vertical" size={20} style={{ width: '100%' }}>
+    <Space orientation="vertical" size={20} style={{ width: '100%' }}>
       <div>
         <Title level={3} style={{ marginBottom: 4 }}>
           <TranslationOutlined /> Excel 中英翻译
@@ -159,7 +159,7 @@ export default function ExcelTranslatePage() {
       <Alert
         type="info"
         showIcon
-        message="翻译与隐私说明"
+        title="翻译与隐私说明"
         description="只有去重后的待翻译文字会发送至外部翻译服务；公式、图片、VBA、文件格式和完整工作簿不会发送。"
       />
 
@@ -172,9 +172,9 @@ export default function ExcelTranslatePage() {
             beforeUpload={handleUpload}
             disabled={uploading}
           >
-            <p className="ant-upload-drag-icon">
+            <div className="ant-upload-drag-icon">
               {uploading ? <Spin /> : <InboxOutlined />}
-            </p>
+            </div>
             <p className="ant-upload-text">点击或将一个 Excel 文件拖到这里</p>
             <p className="ant-upload-hint">支持 .xlsx / .xlsm，上传后先扫描，确认统计后再开始翻译</p>
           </Dragger>
@@ -197,7 +197,7 @@ export default function ExcelTranslatePage() {
           }
           extra={<Button icon={<ReloadOutlined />} onClick={reset}>重新上传</Button>}
         >
-          <Space direction="vertical" size={20} style={{ width: '100%' }}>
+          <Space orientation="vertical" size={20} style={{ width: '100%' }}>
             <Descriptions bordered size="small" column={{ xs: 1, sm: 2, lg: 4 }}>
               <Descriptions.Item label="Sheet 数量">{job.sheetCount ?? '扫描中'}</Descriptions.Item>
               <Descriptions.Item label="公式数量">{job.formulaCount ?? '扫描中'}</Descriptions.Item>
@@ -209,13 +209,13 @@ export default function ExcelTranslatePage() {
               <Alert
                 type="warning"
                 showIcon
-                message="输出为阅读型副本"
+                title="输出为阅读型副本"
                 description="公式表达式会保留，但引用已翻译文字的公式结果可能需要在 Excel 中重新计算。"
               />
             )}
 
             {job.status === 'ready' && Number(job.candidateUniqueCount) === 0 && (
-              <Alert type="info" showIcon message="没有发现需要翻译的文字" />
+              <Alert type="info" showIcon title="没有发现需要翻译的文字" />
             )}
 
             {(active || canDownload(job) || job.status === 'failed') && (
@@ -250,7 +250,7 @@ export default function ExcelTranslatePage() {
               <Alert
                 type="error"
                 showIcon
-                message="处理失败"
+                title="处理失败"
                 description={job.errorMessage || '处理失败，请重新上传或联系管理员'}
               />
             )}
@@ -259,7 +259,7 @@ export default function ExcelTranslatePage() {
               <Alert
                 type={job.status === 'completed_with_warnings' ? 'warning' : 'success'}
                 showIcon
-                message={notice}
+                title={notice}
               />
             )}
 

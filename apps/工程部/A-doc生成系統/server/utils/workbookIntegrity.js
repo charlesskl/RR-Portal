@@ -21,6 +21,7 @@ const PROTECTED = [
   /^xl\/(?:comments\d+\.xml|threadedComments\/)/,
   /^xl\/persons\/person\.xml$/,
   /^customXml\//,
+  /^xl\/calcChain\.xml$/,
   /^xl\/vbaProject.*\.bin$/,
   /_rels\/.*\.rels$/,
 ];
@@ -168,6 +169,51 @@ async function parseXml(zip, partName) {
   }
 }
 
+function relationshipBaseDirectory(partName) {
+  if (partName === '_rels/.rels') return '';
+  const marker = '/_rels/';
+  const markerIndex = partName.indexOf(marker);
+  if (markerIndex < 0 || !partName.endsWith('.rels')) fail('invalid_ooxml_package');
+  const sourceDirectory = partName.slice(0, markerIndex);
+  return sourceDirectory;
+}
+
+function internalRelationshipTarget(partName, target) {
+  let decoded;
+  try {
+    decoded = decodeURI(String(target || '').replace(/\\/g, '/')).split('#')[0];
+  } catch {
+    fail('relationship_target_missing');
+  }
+  if (!decoded || /^[a-z][a-z\d+.-]*:/i.test(decoded)) {
+    fail('relationship_target_missing');
+  }
+  if (decoded.startsWith('/')) return path.posix.normalize(decoded.slice(1));
+  return path.posix.normalize(path.posix.join(
+    relationshipBaseDirectory(partName),
+    decoded,
+  ));
+}
+
+async function assertRelationshipTargets(zip) {
+  const relationshipParts = Object.keys(zip.files)
+    .filter(name => !zip.files[name].dir && name.endsWith('.rels'))
+    .sort();
+  for (const partName of relationshipParts) {
+    const root = await parseXml(zip, partName);
+    for (const relationship of descendants(root, 'Relationship')) {
+      if (String(attribute(relationship, 'TargetMode') || '').toLowerCase() === 'external') {
+        continue;
+      }
+      const targetPart = internalRelationshipTarget(
+        partName,
+        attribute(relationship, 'Target'),
+      );
+      if (!zip.file(targetPart)) fail('relationship_target_missing');
+    }
+  }
+}
+
 function protectedHashes(zip) {
   const hashes = new Map();
   for (const name of Object.keys(zip.files).sort()) {
@@ -182,6 +228,7 @@ function protectedHashes(zip) {
 async function loadPackage(filePath, {
   maxCompressedBytes = DEFAULT_MAX_COMPRESSED_BYTES,
   maxUncompressedBytes = DEFAULT_MAX_UNCOMPRESSED_BYTES,
+  validateRelationships = true,
 } = {}) {
   let buffer;
   try {
@@ -219,6 +266,8 @@ async function loadPackage(filePath, {
     fail('invalid_ooxml_package');
   }
 
+  if (validateRelationships) await assertRelationshipTargets(zip);
+
   return {
     buffer,
     zip,
@@ -239,11 +288,14 @@ async function assertPackageLimits(filePath, limits = {}) {
 async function restoreProtectedParts(inputPath, outputPath) {
   const [input, output] = await Promise.all([
     loadPackage(inputPath),
-    loadPackage(outputPath),
+    loadPackage(outputPath, { validateRelationships: false }),
   ]);
   const inputNames = [...input.protectedParts.keys()];
   const outputNames = [...output.protectedParts.keys()];
-  if (!same(inputNames, outputNames)) fail('protected_part_set_changed');
+  const inputNameSet = new Set(inputNames);
+  if (outputNames.some(name => !inputNameSet.has(name))) {
+    fail('protected_part_set_changed');
+  }
 
   for (const name of inputNames) {
     output.zip.file(name, Buffer.from(input.zip.file(name).asUint8Array()));

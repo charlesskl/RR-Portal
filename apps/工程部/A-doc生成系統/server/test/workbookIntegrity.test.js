@@ -59,6 +59,18 @@ test('rejects deletion of a protected relationship part', async t => {
   );
 });
 
+test('rejects an internal relationship whose target part is missing', async t => {
+  const { inputPath, outputPath } = await fixturePaths(t);
+  await mutateZip(inputPath, outputPath, zip => {
+    zip.remove('xl/sharedStrings.xml');
+  });
+
+  await assert.rejects(
+    () => validateWorkbookIntegrity({ inputPath, outputPath, changedCells: new Set() }),
+    isIntegrityCode('relationship_target_missing'),
+  );
+});
+
 test('rejects an unexpected non-target cell value change', async t => {
   const { inputPath, outputPath } = await fixturePaths(t);
   const workbook = await XlsxPopulate.fromFileAsync(inputPath);
@@ -155,6 +167,49 @@ test('accepts xlsx-populate adding an empty semantic numFmts collection', async 
   };
   const summary = await translateWorkbook(inputPath, outputPath, { provider });
   assert.equal(summary.changedCells.has('Visible!A1'), true);
+});
+
+test('round-trips a calc chain referenced by workbook relationships', async t => {
+  const { directory, inputPath, outputPath } = await fixturePaths(t);
+  const calcInputPath = path.join(directory, 'with-calc-chain.xlsx');
+  const calcChain = Buffer.from(
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+    + '<calcChain xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+    + '<c r="A2" i="1"/>'
+    + '</calcChain>',
+  );
+  await mutateZip(inputPath, calcInputPath, zip => {
+    zip.file('xl/calcChain.xml', calcChain);
+    const relationships = zip.file('xl/_rels/workbook.xml.rels').asText();
+    zip.file('xl/_rels/workbook.xml.rels', relationships.replace(
+      '</Relationships>',
+      '<Relationship Id="rIdCalcChain" '
+      + 'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/calcChain" '
+      + 'Target="calcChain.xml"/></Relationships>',
+    ));
+    const contentTypes = zip.file('[Content_Types].xml').asText();
+    zip.file('[Content_Types].xml', contentTypes.replace(
+      '</Types>',
+      '<Override PartName="/xl/calcChain.xml" '
+      + 'ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.calcChain+xml"/>'
+      + '</Types>',
+    ));
+  });
+
+  const provider = {
+    async translateMany(requests) {
+      return new Map(requests.map(request => [request.id, {
+        text: request.to === 'en' ? 'English translation' : '中文翻译',
+        detectedLanguage: request.to === 'en' ? 'zh-CN' : 'en',
+      }]));
+    },
+  };
+  await translateWorkbook(calcInputPath, outputPath, { provider });
+  const output = new PizZip(await fs.readFile(outputPath));
+  assert.deepEqual(
+    Buffer.from(output.file('xl/calcChain.xml').asUint8Array()),
+    calcChain,
+  );
 });
 
 test('rejects loss of a default VBA content-type declaration', async t => {

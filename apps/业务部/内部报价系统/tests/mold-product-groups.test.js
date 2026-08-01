@@ -38,6 +38,32 @@ test('mold import separates products by merged image row ranges', () => {
   );
 });
 
+test('mold import treats each product mold worksheet as a separate product', () => {
+  const workbook = XLSX.utils.book_new();
+  const makeRows = (prefix, count) => [
+    ['模号', '', '名称', '', '', '料型', '料重(G)', '料重(G)含损耗', '料价(G)', '机型（A）', '件数', '套数', '目标数', '啤工', '料金额', '图片'],
+    ...Array.from({ length: count }, (_, index) => [
+      `NO.${String(index + 1).padStart(2, '0')}`, '', `${prefix}配件${index + 1}`, '', '',
+      'PP', 10, 10.3, 0.01, 10, 1, 1, 3000, 0.1, 0.1,
+      index === 0 ? `=DISPIMG("ID_${prefix}",1)` : '',
+    ]),
+  ];
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(makeRows('一', 2)), '1#产品模具');
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(makeRows('二', 3)), '2#产品模具');
+
+  const result = parseWorkbook(XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }));
+  assert.deepEqual(result.sheets_used, ['1#产品模具', '2#产品模具']);
+  assert.deepEqual(result.product_groups.map(group => group.name), ['1#产品', '2#产品']);
+  assert.deepEqual(result.product_groups.map(group => group.sheet_index), [0, 1]);
+  assert.deepEqual(
+    result.molds.map(mold => [mold.product_group_name, mold._sheet_index]),
+    [
+      ['1#产品', 0], ['1#产品', 0],
+      ['2#产品', 1], ['2#产品', 1], ['2#产品', 1],
+    ]
+  );
+});
+
 test('WPS DISPIMG cell images are extracted at their worksheet rows', async () => {
   const zip = new JSZip();
   zip.file('xl/media/image1.png', Buffer.from('89504e470d0a1a0a', 'hex'));
@@ -61,6 +87,7 @@ test('WPS DISPIMG cell images are extracted at their worksheet rows', async () =
   assert.equal(images.length, 1);
   assert.equal(images[0].row, 7);
   assert.equal(images[0].col, 15);
+  assert.equal(images[0].sheetIndex, 0);
   assert.ok(fs.existsSync(path.join(outputDir, images[0].file)));
 });
 

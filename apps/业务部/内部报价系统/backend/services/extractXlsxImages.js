@@ -14,10 +14,35 @@ async function extractImagesByRow(buf, outDir) {
 
   const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '@_' });
   const results = [];
-  // 去重：同一 (媒体源, 行号) 只输出一次（避免多 sheet 重复引用同张图）
+  // 同一行号可以出现在不同产品 Sheet，去重必须包含 Sheet 索引。
   const seen = new Set();
+  const worksheetFiles = Object.keys(zip.files)
+    .filter(p => /^xl\/worksheets\/sheet\d+\.xml$/.test(p));
+  const sheetIndexOf = sheetPath => {
+    const match = String(sheetPath).match(/sheet(\d+)\.xml$/);
+    return match ? Number(match[1]) - 1 : null;
+  };
+  const resolveTarget = (basePath, target) => {
+    const value = String(target || '').replace(/\\/g, '/');
+    if (!value) return '';
+    if (value.startsWith('/')) return value.replace(/^\//, '');
+    return path.posix.normalize(path.posix.join(path.posix.dirname(basePath), value));
+  };
+  const drawingToSheetIndex = {};
+  for (const sheetPath of worksheetFiles) {
+    const relsPath = `xl/worksheets/_rels/${path.basename(sheetPath)}.rels`;
+    if (!zip.files[relsPath]) continue;
+    const relsObj = parser.parse(await zip.files[relsPath].async('string'));
+    for (const rel of [].concat(relsObj?.Relationships?.Relationship || [])) {
+      const target = resolveTarget(sheetPath, rel['@_Target']);
+      if (/^xl\/drawings\/drawing\d+\.xml$/.test(target)) {
+        drawingToSheetIndex[target] = sheetIndexOf(sheetPath);
+      }
+    }
+  }
 
   for (const dpath of drawingFiles) {
+    const sheetIndex = drawingToSheetIndex[dpath] ?? null;
     const name = path.basename(dpath); // drawing1.xml
     const relsPath = `xl/drawings/_rels/${name}.rels`;
     if (!zip.files[relsPath]) continue;
@@ -48,7 +73,7 @@ async function extractImagesByRow(buf, outDir) {
       const mediaFile = zip.files[mediaPath];
       if (!mediaFile) continue;
       // 去重：同一媒体源 + 同一行号 已收 → 跳过
-      const key = `${mediaPath}@${fromRow}`;
+      const key = `${mediaPath}@${sheetIndex ?? dpath}@${fromRow}`;
       if (seen.has(key)) continue;
       seen.add(key);
       const data = await mediaFile.async('nodebuffer');
@@ -56,7 +81,7 @@ async function extractImagesByRow(buf, outDir) {
       const outName = `xls-${Date.now()}-${Math.random().toString(36).slice(2, 7)}${ext}`;
       const outPath = path.join(outDir, outName);
       fs.writeFileSync(outPath, data);
-      results.push({ row: fromRow, col: fromCol, file: outName });
+      results.push({ row: fromRow, col: fromCol, sheetIndex, file: outName });
     }
   }
 
@@ -83,9 +108,8 @@ async function extractImagesByRow(buf, outDir) {
       idToMedia[imageId] = (`xl/${target}`).replace(/\\/g, '/');
     }
 
-    const worksheetFiles = Object.keys(zip.files)
-      .filter(p => /^xl\/worksheets\/sheet\d+\.xml$/.test(p));
     for (const sheetPath of worksheetFiles) {
+      const sheetIndex = sheetIndexOf(sheetPath);
       const xml = await zip.files[sheetPath].async('string');
       const cellPattern = /<c\b[^>]*\br="([A-Z]+)(\d+)"[^>]*>(?:(?!<\/c>)[\s\S])*?<f(?![^>]*\/>)[^>]*>((?:(?!<\/f>)[\s\S])*?DISPIMG(?:(?!<\/f>)[\s\S])*?)<\/f>(?:(?!<\/c>)[\s\S])*?<\/c>/g;
       let match;
@@ -100,14 +124,14 @@ async function extractImagesByRow(buf, outDir) {
         let col = 0;
         for (const ch of colText) col = col * 26 + ch.charCodeAt(0) - 64;
         col -= 1;
-        const key = `${mediaPath}@${row}`;
+        const key = `${mediaPath}@${sheetIndex}@${row}`;
         if (seen.has(key)) continue;
         seen.add(key);
         const data = await mediaFile.async('nodebuffer');
         const ext = path.extname(mediaPath).toLowerCase() || '.png';
         const outName = `xls-${Date.now()}-${Math.random().toString(36).slice(2, 7)}${ext}`;
         fs.writeFileSync(path.join(outDir, outName), data);
-        results.push({ row, col, file: outName });
+        results.push({ row, col, sheetIndex, file: outName });
       }
     }
   }

@@ -163,6 +163,57 @@ function applyProductGroups(molds, productGroups) {
   return molds;
 }
 
+function productNameFromSheet(sheetName, index) {
+  const name = String(sheetName || '').replace(/\s*模具.*$/i, '').trim();
+  return name || `产品${index + 1}`;
+}
+
+function attachSheetIdentity(result, sheetName, sheetIndex) {
+  for (const mold of result.molds || []) {
+    mold._sheet_name = sheetName;
+    mold._sheet_index = sheetIndex;
+  }
+  return result;
+}
+
+function combineProductSheets(wb, parsedSheets) {
+  const productGroups = [];
+  const molds = [];
+  parsedSheets.forEach((result, index) => {
+    const sheetIndex = wb.SheetNames.indexOf(result.sheet_used);
+    const rows = (result.molds || []).flatMap(mold => mold._rows || []);
+    const sourceRows = rows.length
+      ? [Math.min(...rows) + 1, Math.max(...rows) + 1]
+      : [];
+    const group = {
+      id: `product-${index + 1}`,
+      name: productNameFromSheet(result.sheet_used, index),
+      sheet_name: result.sheet_used,
+      sheet_index: sheetIndex,
+      source_rows: sourceRows,
+    };
+    productGroups.push(group);
+    for (const mold of result.molds || []) {
+      mold.product_group_id = group.id;
+      mold.product_group_name = group.name;
+      mold.product_group_rows = sourceRows;
+      mold._sheet_name = result.sheet_used;
+      mold._sheet_index = sheetIndex;
+      molds.push(mold);
+    }
+  });
+  const first = parsedSheets[0];
+  return {
+    sheets: wb.SheetNames,
+    sheet_used: first.sheet_used,
+    sheets_used: parsedSheets.map(result => result.sheet_used),
+    header_row: first.header_row,
+    cols_found: first.cols_found,
+    product_groups: productGroups,
+    molds,
+  };
+}
+
 function formatStructure(v) {
   const s = String(v || '').trim();
   if (!s || s === '无') return '';
@@ -178,12 +229,21 @@ function parseWorkbook(buf) {
   const candidates = wb.SheetNames.filter(n => wb.Sheets[n] && wb.Sheets[n]['!ref'] && !EXCLUDE.test(n));
   if (candidates.length === 0) return { error: '所有工作表都是空的或被排除', sheets: wb.SheetNames };
 
+  const parsedSheets = [];
   let best = null;
   for (const sheetName of candidates) {
-    const r = tryParseSheet(wb, sheetName);
+    const sheetIndex = wb.SheetNames.indexOf(sheetName);
+    const r = attachSheetIdentity(tryParseSheet(wb, sheetName), sheetName, sheetIndex);
+    parsedSheets.push(r);
     if (!best) best = r;
     if (r.molds && (!best.molds || r.molds.length > best.molds.length)) best = r;
   }
+  // 产品模具范本以“每个产品一张工作表”分开，工作表名即产品边界。
+  // 只在至少两张“产品模具”表都成功解析时合并，避免误合并普通多 Sheet 报价文件。
+  const productSheets = parsedSheets.filter(result =>
+    result.molds?.length && /产品.*模具|模具.*产品/i.test(result.sheet_used)
+  );
+  if (productSheets.length >= 2) return combineProductSheets(wb, productSheets);
   if (!best.molds || best.molds.length === 0) {
     return {
       error: best.error || '未在任何工作表中解析到模具行',

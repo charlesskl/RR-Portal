@@ -14,6 +14,7 @@ from typing import Any
 from redis import Redis
 from redis.exceptions import RedisError
 from rq import Queue, Retry
+from rq.serializers import JSONSerializer
 
 
 class QueueUnavailable(RuntimeError):
@@ -77,7 +78,7 @@ def get_queue(*, required: bool | None = None, check_connection: bool = True) ->
     return Queue(
         os.getenv("RQ_QUEUE_NAME", "qc-ai"),
         connection=connection,
-        serializer="json",
+        serializer=JSONSerializer,
         default_timeout=_positive_int("RQ_JOB_TIMEOUT_SECONDS", 900),
     )
 

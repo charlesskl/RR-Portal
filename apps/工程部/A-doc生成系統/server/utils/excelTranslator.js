@@ -175,6 +175,7 @@ async function translateWorkbookCore(inputPath, outputPath, { provider, onProgre
     if (onProgress) {
       onProgress({
         phase: 'writing',
+        sheetName: item.sheet.name(),
         processedCells: succeededCells + skippedCells + failedCells,
         candidateCellCount: collected.cells.length,
       });
@@ -202,6 +203,7 @@ async function translateWorkbook(inputPath, outputPath, options = {}) {
     await assertPackageLimits(inputPath, { maxUncompressedBytes });
     const summary = await translateWorkbookCore(inputPath, outputPath, options);
     await restoreProtectedParts(inputPath, outputPath);
+    if (options.onProgress) options.onProgress({ phase: 'validating' });
     await validateWorkbookIntegrity({
       inputPath,
       outputPath,

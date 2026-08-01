@@ -289,11 +289,12 @@ test('internal export keeps mold rows separated by product group', async () => {
     const moldNo = row.getCell(3).value;
     if (moldNo) rows[moldNo] = row;
   });
-  assert.equal(rows['NO.01'].getCell(1).value, '1.1');
+  assert.equal(rows['NO.01'].getCell(1).value, '产品1\n1.1');
   assert.equal(rows['NO.02'].getCell(1).value, '1.2');
-  assert.equal(rows['NO.03'].getCell(1).value, '2.1');
-  assert.match(rows['NO.01'].getCell(2).value, /^【产品1】/);
-  assert.match(rows['NO.03'].getCell(2).value, /^【产品2】/);
+  assert.equal(rows['NO.03'].getCell(1).value, '产品2\n2.1');
+  assert.equal(rows['NO.01'].getCell(2).value, '产品一外壳');
+  assert.equal(rows['NO.03'].getCell(2).value, '产品二外壳');
+  assert.equal(worksheet.getCell(rows['NO.01'].number - 1, 1).value, '产品 / 序号');
 });
 
 test('internal export keeps molding rows separated by engineering product group', async () => {
@@ -323,14 +324,15 @@ test('internal export keeps molding rows separated by engineering product group'
   const worksheet = workbook.getWorksheet('报价明细');
   const rows = {};
   worksheet.eachRow(row => {
-    const name = String(row.getCell(2).value || '').replace(/^【[^】]+】/, '');
+    const name = String(row.getCell(2).value || '');
     if (name) rows[name] = row;
   });
-  assert.equal(rows['产品一外壳'].getCell(1).value, '1.1');
+  assert.equal(rows['产品一外壳'].getCell(1).value, '1#产品\n1.1');
   assert.equal(rows['产品一配件'].getCell(1).value, '1.2');
-  assert.equal(rows['产品二外壳'].getCell(1).value, '2.1');
-  assert.match(rows['产品一外壳'].getCell(2).value, /^【1#产品】/);
-  assert.match(rows['产品二外壳'].getCell(2).value, /^【2#产品】/);
+  assert.equal(rows['产品二外壳'].getCell(1).value, '2#产品\n2.1');
+  assert.equal(rows['产品一外壳'].getCell(2).value, '产品一外壳');
+  assert.equal(rows['产品二外壳'].getCell(2).value, '产品二外壳');
+  assert.equal(worksheet.getCell(rows['产品一外壳'].number - 1, 1).value, '产品 / 序号');
 });
 
 test('export keeps prototype and testing amortization when mold items are empty', async () => {

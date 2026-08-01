@@ -330,6 +330,7 @@ function patchMoldProductGroups(ws, payloads) {
   if (!molds.some(mold => mold.product_group_id)) return;
   const titleRow = findRow(ws, '一、模具部分');
   if (!titleRow) return;
+  ws.getCell(titleRow + 1, 1).value = '产品 / 序号';
   const counters = {};
   let previousGroup = '';
   for (let index = 0; index < molds.length; index += 1) {
@@ -341,7 +342,11 @@ function patchMoldProductGroups(ws, payloads) {
     const groupNumber = Object.keys(counters).indexOf(groupId) + 1;
     ws.getCell(row, 1).value = `${groupNumber}.${counters[groupId]}`;
     if (groupId !== previousGroup) {
-      ws.getCell(row, 2).value = `【${mold.product_group_name || `产品${groupNumber}`}】${mold.name || ''}`;
+      const groupName = mold.product_group_name || `产品${groupNumber}`;
+      ws.getCell(row, 1).value = `${groupName}\n${groupNumber}.${counters[groupId]}`;
+      ws.getCell(row, 1).alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+      ws.getCell(row, 1).font = { ...ws.getCell(row, 1).font, bold: true, name: FONT };
+      ws.getRow(row).height = Math.max(ws.getRow(row).height || 0, 34);
       for (let column = 1; column <= 18; column += 1) {
         ws.getCell(row, column).fill = {
           type: 'pattern',
@@ -359,6 +364,7 @@ function patchMoldingProductGroups(ws, payloads) {
   if (!rows.some(item => item.product_group_id || item.product_group_name)) return;
   const titleRow = findRow(ws, '二、注塑部分');
   if (!titleRow) return;
+  ws.getCell(titleRow + 1, 1).value = '产品 / 序号';
   const counters = {};
   const groupNumbers = {};
   let groupCount = 0;
@@ -371,7 +377,11 @@ function patchMoldingProductGroups(ws, payloads) {
     counters[groupId] = (counters[groupId] || 0) + 1;
     ws.getCell(row, 1).value = `${groupNumbers[groupId]}.${counters[groupId]}`;
     if (groupId !== previousGroup) {
-      ws.getCell(row, 2).value = `【${item.product_group_name || `产品${groupNumbers[groupId]}`}】${item.name || ''}`;
+      const groupName = item.product_group_name || `产品${groupNumbers[groupId]}`;
+      ws.getCell(row, 1).value = `${groupName}\n${groupNumbers[groupId]}.${counters[groupId]}`;
+      ws.getCell(row, 1).alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+      ws.getCell(row, 1).font = { ...ws.getCell(row, 1).font, bold: true, name: FONT };
+      ws.getRow(row).height = Math.max(ws.getRow(row).height || 0, 34);
       for (let column = 1; column <= 17; column += 1) {
         ws.getCell(row, column).fill = {
           type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE0F2FE' },

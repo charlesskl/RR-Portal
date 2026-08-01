@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { Layout, Menu, Typography, Button } from 'antd';
 import { UnorderedListOutlined, UploadOutlined, FileExcelOutlined, LogoutOutlined, FilePdfOutlined } from '@ant-design/icons';
 import axios from 'axios';
@@ -6,6 +6,7 @@ import ProductList from './pages/ProductList';
 import Upload from './pages/Upload';
 import Login from './pages/Login';
 import AdocPage from './pages/AdocPage';
+import ExcelTranslatePage from './pages/ExcelTranslatePage';
 
 const { Sider, Content, Header } = Layout;
 const { Text } = Typography;
@@ -16,6 +17,13 @@ const { Text } = Typography;
 if (import.meta.env.PROD) {
   axios.defaults.baseURL = import.meta.env.BASE_URL.replace(/\/$/, '');
 }
+
+const PAGE_TITLES = {
+  list: '走货明细列表',
+  upload: '上传 Excel 文件处理',
+  adoc: 'TOMY A-DOC 生成',
+  'excel-translate': 'Excel 中英翻译',
+};
 
 // axios 拦截器：自动带 token，401 时跳转登录
 axios.interceptors.request.use(config => {
@@ -64,6 +72,7 @@ export default function App() {
         { key: 'upload', icon: <UploadOutlined />,        label: '上传处理' },
       ],
     },
+    { key: 'excel-translate', icon: <FileExcelOutlined />, label: 'Excel 中英翻译' },
     { key: 'adoc', icon: <FilePdfOutlined />, label: 'A-DOC 生成' },
   ];
 
@@ -114,12 +123,13 @@ export default function App() {
       <Layout>
         <Header style={{ background: '#fff', padding: '0 24px', boxShadow: '0 1px 4px rgba(0,0,0,0.1)', display: 'flex', alignItems: 'center' }}>
           <Text style={{ fontSize: 15, color: '#333' }}>
-            {page === 'list' ? '走货明细列表' : page === 'upload' ? '上传 Excel 文件处理' : 'TOMY A-DOC 生成'}
+            {PAGE_TITLES[page]}
           </Text>
         </Header>
         <Content style={{ margin: 24, padding: 24, background: '#fff', borderRadius: 8 }}>
           {page === 'list'   && <ProductList onUpload={() => setPage('upload')} />}
           {page === 'upload' && <Upload onDone={() => setPage('list')} />}
+          {page === 'excel-translate' && <ExcelTranslatePage />}
           {page === 'adoc'   && <AdocPage />}
         </Content>
       </Layout>

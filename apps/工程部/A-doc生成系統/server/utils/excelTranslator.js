@@ -1,6 +1,12 @@
+const fs = require('node:fs/promises');
 const XlsxPopulate = require('xlsx-populate');
 
 const { analyzeText, translateUniqueTexts } = require('./translationRules');
+const {
+  assertPackageLimits,
+  restoreProtectedParts,
+  validateWorkbookIntegrity,
+} = require('./workbookIntegrity');
 
 const RICH_STYLES = [
   'bold',
@@ -43,10 +49,16 @@ function collectWorkbookCells(workbook, { onSheet } = {}) {
         sheetCount: sheets.length,
       });
     }
-    const range = sheet.usedRange();
-    if (!range) return;
+    const existingCells = [];
+    for (const row of sheet._rows || []) {
+      if (!row) continue;
+      for (const cell of row._cells || []) {
+        if (cell) existingCells.push(cell);
+      }
+    }
 
-    range.forEach(cell => {
+    if (!existingCells.length) return;
+    existingCells.forEach(cell => {
       const formula = cell.formula();
       if (formula !== undefined && formula !== null) {
         formulaCount += 1;
@@ -74,7 +86,8 @@ function collectWorkbookCells(workbook, { onSheet } = {}) {
   };
 }
 
-async function scanWorkbook(inputPath, { onSheet } = {}) {
+async function scanWorkbook(inputPath, { onSheet, maxUncompressedBytes } = {}) {
+  await assertPackageLimits(inputPath, { maxUncompressedBytes });
   const workbook = await XlsxPopulate.fromFileAsync(inputPath);
   const collected = collectWorkbookCells(workbook, { onSheet });
   return {
@@ -100,7 +113,7 @@ function appendRichText(cell, originalText, translatedText) {
   rich.add(suffix, styleSource.style(RICH_STYLES));
 }
 
-async function translateWorkbook(inputPath, outputPath, { provider, onProgress } = {}) {
+async function translateWorkbookCore(inputPath, outputPath, { provider, onProgress } = {}) {
   const workbook = await XlsxPopulate.fromFileAsync(inputPath);
   const collected = collectWorkbookCells(workbook, {
     onSheet: sheetProgress => {
@@ -181,6 +194,25 @@ async function translateWorkbook(inputPath, outputPath, { provider, onProgress }
     failedCells,
     changedCells,
   };
+}
+
+async function translateWorkbook(inputPath, outputPath, options = {}) {
+  const { maxUncompressedBytes } = options;
+  try {
+    await assertPackageLimits(inputPath, { maxUncompressedBytes });
+    const summary = await translateWorkbookCore(inputPath, outputPath, options);
+    await restoreProtectedParts(inputPath, outputPath);
+    await validateWorkbookIntegrity({
+      inputPath,
+      outputPath,
+      changedCells: summary.changedCells,
+      maxUncompressedBytes,
+    });
+    return summary;
+  } catch (error) {
+    await fs.unlink(outputPath).catch(() => {});
+    throw error;
+  }
 }
 
 module.exports = {

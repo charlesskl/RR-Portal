@@ -7,6 +7,7 @@ const XlsxPopulate = require('xlsx-populate');
 
 const { createWorkbookFixture } = require('./helpers/workbookFixture');
 const { scanWorkbook, translateWorkbook } = require('../utils/excelTranslator');
+const { assertPackageLimits } = require('../utils/workbookIntegrity');
 
 const TRANSLATIONS = {
   '卡车车身|en': { text: 'Truck body', detectedLanguage: 'zh-CN' },
@@ -166,4 +167,18 @@ test('rich text suffix inherits the last nonempty fragment style', async t => {
   assert.equal(suffix.style('superscript'), true);
   assert.deepEqual(suffix.style('fontColor'), { rgb: 'FFFF0000' });
   assert.equal(suffix.style('italic'), false);
+});
+
+test('deletes an output that fails the post-write package limit gate', async t => {
+  const { inputPath, outputPath } = await fixturePaths(t);
+  const inputSize = await assertPackageLimits(inputPath);
+
+  await assert.rejects(
+    () => translateWorkbook(inputPath, outputPath, {
+      provider: fakeProvider(),
+      maxUncompressedBytes: inputSize.uncompressedBytes,
+    }),
+    error => error.name === 'WorkbookIntegrityError' && error.code === 'package_too_large',
+  );
+  await assert.rejects(() => fs.stat(outputPath), error => error.code === 'ENOENT');
 });

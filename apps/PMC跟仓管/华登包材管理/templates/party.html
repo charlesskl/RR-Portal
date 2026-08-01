@@ -19,9 +19,32 @@
         <label class="block text-xs text-gray-500 mb-1">订单号</label>
         <input type="text" name="order_no" value="{{ order_no }}" placeholder="订单号" class="border rounded px-2 py-1 text-sm">
     </div>
+    <div>
+        <label class="block text-xs text-gray-500 mb-1">包材</label>
+        <select name="item" class="border rounded px-2 py-1 text-sm">
+            <option value="">全部包材</option>
+            {% for k, name in ITEMS %}
+            <option value="{{ k }}" {{ 'selected' if item == k }}>{{ name }}</option>
+            {% endfor %}
+        </select>
+    </div>
     <button class="px-3 py-1.5 bg-blue-600 text-white text-sm rounded">筛选</button>
     <a href="/party/{{ party }}" class="px-3 py-1.5 bg-gray-200 text-sm rounded">重置</a>
 </form>
+
+{% if period_locks %}
+<div class="bg-amber-50 border border-amber-300 rounded-lg p-3 mb-4 text-sm">
+    <div class="font-semibold text-amber-800 mb-1">🔒 已锁定时间段（对账已确认，范围内不能录入/修改/删除）</div>
+    {% for lock in period_locks %}
+    <div class="flex items-center gap-3 py-1">
+        <span>{{ lock.date_from }} ~ {{ lock.date_to }}<span class="text-xs text-gray-500 ml-2">{{ lock.reason or '' }}</span></span>
+        <form method="POST" action="/locks/{{ lock.id }}/delete" onsubmit="return confirm('确定解锁 {{ lock.date_from }} ~ {{ lock.date_to }} 吗？解锁后该时间段可以录入。')">
+            <button class="px-2 py-0.5 bg-white border border-amber-400 text-amber-700 rounded text-xs">解锁</button>
+        </form>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
 
 {% include "_monthly_stats.html" with context %}
 
@@ -188,6 +211,7 @@
             <input type="hidden" name="_f_date_from" value="{{ date_from }}">
             <input type="hidden" name="_f_date_to" value="{{ date_to }}">
             <input type="hidden" name="_f_order_no" value="{{ order_no }}">
+            <input type="hidden" name="_f_item" value="{{ item }}">
             <input type="hidden" name="_tab" id="edit_tab" value="">
             <div class="flex gap-3 mb-3 flex-wrap items-end">
                 <div>

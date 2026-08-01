@@ -110,6 +110,21 @@ def init_db():
     cur.execute("CREATE INDEX IF NOT EXISTS idx_reconc_approver ON reconciliations(approver_party, status)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_reconc_pair ON reconciliations(pair_low, pair_high, status)")
 
+    # period_locks 对账时间段锁：核对确认后锁定该范围，禁止再录入/修改/删除，
+    # 解锁（手动删除锁或对账被撤销）后才可操作
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS period_locks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        party TEXT NOT NULL,
+        date_from TEXT NOT NULL,
+        date_to TEXT NOT NULL,
+        reconciliation_id INTEGER,
+        reason TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(party, date_from, date_to, reconciliation_id)
+    )
+    """)
+
     # investment_records 投资记录（按 pair）
     cur.execute("""
     CREATE TABLE IF NOT EXISTS investment_records (
@@ -211,6 +226,7 @@ ITEMS = [
     ('djx', '大胶箱'), ('zb', '纸板'),
 ]
 STAT_ITEMS = [('mkb', '木卡板'), ('jkb', '胶卡板'), ('jx', '胶箱'), ('gx', '钙塑箱')]
+ITEM_KEYS = {k for k, _ in ITEMS}
 TRIANGLE_ITEMS = [('mkb', '木卡板'), ('jkb', '胶卡板'), ('jx', '胶箱'), ('gx', '钙塑箱'), ('zx', '纸箱')]
 PAIRS = [('hd', 'sy'), ('hd', 'xx'), ('sy', 'xx')]
 
@@ -597,6 +613,9 @@ def party_page(party):
     date_from = request.args.get('date_from', '')
     date_to = request.args.get('date_to', '')
     order_no = request.args.get('order_no', '').strip()
+    item = request.args.get('item', '').strip()
+    if item not in ITEM_KEYS:
+        item = ''
     try:
         page_size = int(request.args.get('page_size', 50))
     except ValueError:
@@ -613,7 +632,8 @@ def party_page(party):
         panel = {'cp': cp, 'cp_name': PARTIES[cp]['name']}
         for direction, from_p, to_p in [('sent', party, cp), ('received', cp, party)]:
             all_r = _query_flow(con, recorded_by=party, from_party=from_p, to_party=to_p,
-                                date_from=date_from, date_to=date_to, order_no=order_no)
+                                date_from=date_from, date_to=date_to, order_no=order_no,
+                                item=item)
             page_key = f'page_{cp}_{direction}'
             try:
                 page = max(1, int(request.args.get(page_key, 1) or 1))
@@ -634,13 +654,16 @@ def party_page(party):
         panels.append(panel)
 
     prices = {r['item_key']: r['price'] for r in con.execute('SELECT * FROM default_prices').fetchall()}
+    locks = [dict(r) for r in con.execute(
+        'SELECT * FROM period_locks WHERE party=? ORDER BY date_from', (party,)).fetchall()]
     con.close()
     monthly = _build_monthly_stats(party)
     dup_warning = session.pop('dup_warning', None)
     return render_template('party.html', party=party, party_name=PARTIES[party]['name'],
                            panels=panels, prices=prices, monthly=monthly,
                            date_from=date_from, date_to=date_to, page_size=page_size,
-                           dup_warning=dup_warning, order_no=order_no)
+                           dup_warning=dup_warning, order_no=order_no, item=item,
+                           period_locks=locks)
 
 
 @app.route('/party/<party>/entry', methods=['POST'])
@@ -682,6 +705,10 @@ def party_entry(party):
     confirm_dup = request.form.get('confirm_dup') == '1'
 
     con = sqlite3.connect(DATABASE)
+    if _is_period_locked(con, party, date):
+        con.close()
+        flash(f'{date} 已对账锁定，该时间段内不能录入；如需录入请先在页面下方解锁')
+        return _party_redirect(party)
     if order_no and not confirm_dup:
         dups = _find_duplicate_order(con, order_no=order_no, party=party, cp=cp)
         if dups:
@@ -761,7 +788,8 @@ def _party_redirect(party):
     args = {}
     for form_key, arg_key in (('_f_date_from', 'date_from'),
                               ('_f_date_to', 'date_to'),
-                              ('_f_order_no', 'order_no')):
+                              ('_f_order_no', 'order_no'),
+                              ('_f_item', 'item')):
         v = (request.form.get(form_key) or '').strip()
         if v:
             args[arg_key] = v
@@ -788,6 +816,10 @@ def record_edit(rid):
         con.close(); flash('记录已锁定，不能修改'); return redirect(url_for('party_page', party=party))
 
     date = request.form.get('date', '').strip() or r['date']
+    if _is_period_locked(con, party, r['date']) or _is_period_locked(con, party, date):
+        con.close()
+        flash('该日期所在时间段已对账锁定，不能修改；如需修改请先解锁')
+        return _party_redirect(party)
     order_no = request.form.get('order_no', '').strip() or None
     remark = request.form.get('remark', '').strip() or None
     qty_cols = [f'{k}_qty' for k, _ in ITEMS]
@@ -817,13 +849,16 @@ def record_delete(rid):
         return redirect(url_for('index'))
     con = sqlite3.connect(DATABASE)
     con.row_factory = sqlite3.Row
-    r = con.execute("SELECT recorded_by, locked FROM flow_records WHERE id=?", (rid,)).fetchone()
+    r = con.execute("SELECT recorded_by, locked, date FROM flow_records WHERE id=?", (rid,)).fetchone()
     if not r:
         con.close(); flash('记录不存在'); return redirect(url_for('party_page', party=party))
     if r['recorded_by'] != party:
         con.close(); flash('无权删除'); return redirect(url_for('party_page', party=party))
     if r['locked']:
         con.close(); flash('记录已锁定'); return redirect(url_for('party_page', party=party))
+    if _is_period_locked(con, party, r['date']):
+        con.close(); flash('该日期所在时间段已对账锁定，不能删除；如需删除请先解锁')
+        return _party_redirect(party)
     con.execute("DELETE FROM flow_records WHERE id=?", (rid,))
     con.commit(); con.close()
     return _party_redirect(party)
@@ -1019,8 +1054,15 @@ def reconcile_approve(rid):
 
     con.execute("""UPDATE reconciliations SET status='confirmed', approved_at=CURRENT_TIMESTAMP WHERE id=?""", (rid,))
     con.execute("UPDATE flow_records SET locked=1 WHERE reconciliation_id=?", (rid,))
+    # 对账确认 → 双方该时间段锁定，禁止再录入/修改/删除（解锁后才可）
+    for p in (r['initiator_party'], r['approver_party']):
+        con.execute("""
+            INSERT OR IGNORE INTO period_locks (party, date_from, date_to, reconciliation_id, reason)
+            VALUES (?, ?, ?, ?, ?)
+        """, (p, r['date_from'], r['date_to'], rid, f'核对#{rid} 已确认'))
     con.commit(); con.close()
-    flash('已确认'); return redirect(url_for('reconcile_detail', rid=rid))
+    flash('已确认，该时间段已锁定，禁止录入新数')
+    return redirect(url_for('reconcile_detail', rid=rid))
 
 
 @app.route('/reconcile/<int:rid>/reject', methods=['POST'])
@@ -1084,8 +1126,26 @@ def reconcile_cancel(rid):
 
     con.execute("UPDATE reconciliations SET status='withdrawn' WHERE id=?", (rid,))
     con.execute("UPDATE flow_records SET locked=0, reconciliation_id=NULL WHERE reconciliation_id=?", (rid,))
+    con.execute("DELETE FROM period_locks WHERE reconciliation_id=?", (rid,))
     con.commit(); con.close()
-    flash('已撤销对账，记录解锁'); return redirect(url_for('reconcile_detail', rid=rid))
+    flash('已撤销对账，记录与时间段已解锁'); return redirect(url_for('reconcile_detail', rid=rid))
+
+
+@app.route('/locks/<int:lid>/delete', methods=['POST'])
+def period_lock_delete(lid):
+    """手动解锁某个对账时间段（解锁后该范围可再录入）。"""
+    party = current_party()
+    if not party:
+        return redirect(url_for('index'))
+    con = sqlite3.connect(DATABASE)
+    con.row_factory = sqlite3.Row
+    lock = con.execute("SELECT * FROM period_locks WHERE id=?", (lid,)).fetchone()
+    if not lock or lock['party'] != party:
+        con.close(); flash('锁定不存在或无权解锁'); return redirect(url_for('index'))
+    con.execute("DELETE FROM period_locks WHERE id=?", (lid,))
+    con.commit(); con.close()
+    flash(f"已解锁 {lock['date_from']} ~ {lock['date_to']}，该时间段可以录入了")
+    return _party_redirect(party)
 
 
 @app.route('/reports')
@@ -1356,8 +1416,8 @@ def _build_inventory_grand_total(monthly_by_party):
     }
 
 
-def _query_flow(con, *, recorded_by, from_party, to_party, date_from=None, date_to=None, order_no=None):
-    """查 flow_records。"""
+def _query_flow(con, *, recorded_by, from_party, to_party, date_from=None, date_to=None, order_no=None, item=None):
+    """查 flow_records。item 为包材 key 时只保留该包材数量非零的记录。"""
     sql = """SELECT * FROM flow_records
              WHERE recorded_by=? AND from_party=? AND to_party=?"""
     args = [recorded_by, from_party, to_party]
@@ -1367,8 +1427,20 @@ def _query_flow(con, *, recorded_by, from_party, to_party, date_from=None, date_
         sql += ' AND date <= ?'; args.append(date_to)
     if order_no:
         sql += ' AND order_no LIKE ?'; args.append(f'%{order_no}%')
+    if item and item in ITEM_KEYS:
+        sql += f' AND COALESCE({item}_qty, 0) != 0'
     sql += ' ORDER BY date DESC, id DESC'
     return [dict(r) for r in con.execute(sql, args).fetchall()]
+
+
+def _is_period_locked(con, party, date):
+    """该日期是否落在 party 的某个对账锁定时间段内。"""
+    if not date:
+        return False
+    return con.execute("""
+        SELECT 1 FROM period_locks
+        WHERE party=? AND date_from<=? AND date_to>=? LIMIT 1
+    """, (party, date, date)).fetchone() is not None
 
 
 def _calc_summary(records):

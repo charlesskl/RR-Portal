@@ -8,3 +8,4 @@ data/
 flask_session/
 bash.exe.stackdump
 upload_tmp.xlsx
+huadeng.db*

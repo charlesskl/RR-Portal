@@ -44,7 +44,8 @@ test('mold import treats each product mold worksheet as a separate product', () 
     ['模号', '', '名称', '', '', '料型', '料重(G)', '料重(G)含损耗', '料价(G)', '机型（A）', '件数', '套数', '目标数', '啤工', '料金额', '图片'],
     ...Array.from({ length: count }, (_, index) => [
       `NO.${String(index + 1).padStart(2, '0')}`, '', `${prefix}配件${index + 1}`, '', '',
-      'PP', 10, 10.3, 0.01, 10, 1, 1, 3000, 0.1, 0.1,
+      'PP', 10, 10.3, 0.01, index === 0 ? 18 : 10, 1, 1,
+      index === 0 ? 3400 : 3000, index === 0 ? 0.565 : 0.1, 0.1,
       index === 0 ? `=DISPIMG("ID_${prefix}",1)` : '',
     ]),
   ];
@@ -62,6 +63,10 @@ test('mold import treats each product mold worksheet as a separate product', () 
       ['2#产品', 1], ['2#产品', 1], ['2#产品', 1],
     ]
   );
+  assert.equal(result.molds[0].machine, '18A');
+  assert.equal(result.molds[0].machine_model, '18A');
+  assert.equal(result.molds[0].target, 3400);
+  assert.equal(result.molds[0].shot_price, 0.565);
 });
 
 test('WPS DISPIMG cell images are extracted at their worksheet rows', async () => {

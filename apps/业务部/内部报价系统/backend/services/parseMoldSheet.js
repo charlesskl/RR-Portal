@@ -28,7 +28,8 @@ const FIELD_KEYWORDS = {
   machine:        ['机型(TON)', '机台大小', 'INJECTIONMACHINETYPE', '机型'],
   weight:         ['净重', '重量', '料重', '克重', '零件重量', '零件重', 'PARTWEIGHT'],
   cycle:          ['周期', 'CYCLETIME', 'CYCLE'],   // 注塑生产周期(秒)
-  target:         ['模具预计日啤数', '日产能', '啤工', '目标数', 'CYCLES/DAY', 'CYCLESDAY'],
+  target:         ['模具预计日啤数', '日产能', '目标数', 'CYCLES/DAY', 'CYCLESDAY'],
+  shot_price:     ['啤工价', '啤工', '啤价HK$/啤', '啤价'],
   structure:      ['滑块', '斜顶', '模具结构', '加工内容', 'SLIDE', '行位'],
   price_hkd:      ['模价HKD', 'HKD模价', '港币模价', '模价港币'],
   price_rmb:      ['含税模价', '金额RMB', '金额', '总价', '模价', '价格', '单价', 'MOLDCOST', 'TOTALAMOUNT', 'AMOUNT'],
@@ -86,6 +87,15 @@ function mapColumns(headerRow) {
     if (cols.cavity < 0) cols.cavity = pieceSetIdx;
     if (cols.sets < 0 && pieceSetIdx + 1 < headerRow.length) cols.sets = pieceSetIdx + 1;
   }
+  // 旧报价单会把日产目标列简称为“啤工”；新产品模具范本则同时存在
+  // “目标数”和“啤工”（后者是每啤人工价）。仅在没有明确目标数时沿用旧含义。
+  if (cols.target < 0 && cols.shot_price >= 0) {
+    const shotHeader = nu(headerRow[cols.shot_price]);
+    if (shotHeader.includes(nu('啤工')) && !shotHeader.includes(nu('价'))) {
+      cols.target = cols.shot_price;
+      cols.shot_price = -1;
+    }
+  }
   return cols;
 }
 
@@ -95,10 +105,21 @@ function parseNumber(v) {
   return Number.isFinite(n) ? n : null;
 }
 
-function machineTonToModel(v) {
-  const m = String(v || '').match(/[\d.]+/);
+function normalizeMachine(v, headerText = '') {
+  const text = String(v || '').trim();
+  if (!text) return '';
+  if (/^[\d.]+A$/i.test(text)) return text.toUpperCase();
+  // “机型（A）”中的数字已经是本系统的 A 型号，不是注塑机吨位。
+  if (/机型A|MACHINEA/i.test(nu(headerText)) && /^[\d.]+$/.test(text)) return `${text}A`;
+  return text;
+}
+
+function machineTonToModel(v, headerText = '') {
+  const text = normalizeMachine(v, headerText);
+  if (/^[\d.]+A$/i.test(text)) return text.toUpperCase();
+  const m = text.match(/[\d.]+/);
   const n = m ? Number(m[0]) : null;
-  if (n == null) return String(v || '').trim();
+  if (n == null) return text;
   if (n <= 90) return '7A';
   if (n <= 130) return '10A';
   if (n <= 170) return '14A';
@@ -284,6 +305,7 @@ function tryParseSheet(wb, sheetName) {
     }
   }
   const cols = mapColumns(header);
+  const machineHeader = cols.machine >= 0 ? header[cols.machine] : '';
 
   const cell = (r, k) => cols[k] >= 0 ? String(r[cols[k]] ?? '').trim() : '';
 
@@ -327,7 +349,7 @@ function tryParseSheet(wb, sheetName) {
   const hasPartDetailCols = cols.part_name >= 0
     && (cols.part_name_cn >= 0 || (cols.name >= 0 && cols.part_name !== cols.name));
   if (hasPartDetailCols) {
-    const detailMolds = applyProductGroups(buildPartDetailMolds(dataRows, cell), productGroups);
+    const detailMolds = applyProductGroups(buildPartDetailMolds(dataRows, cell, machineHeader), productGroups);
     if (detailMolds.length) {
       return {
         sheets: wb.SheetNames,
@@ -363,6 +385,7 @@ function tryParseSheet(wb, sheetName) {
         cycle: null,
         machine: '',
         target: null,
+        shot_price: null,
         mold_material: '',
         mold_size: '',
         structures: [],
@@ -390,8 +413,9 @@ function tryParseSheet(wb, sheetName) {
       if (current.weight == null) current.weight = wt;
     }
     const cyc = parseNumber(cell(r, 'cycle')); if (cyc != null && current.cycle == null) current.cycle = cyc;
-    const machine = cell(r, 'machine'); if (machine && !current.machine) current.machine = machine;
+    const machine = normalizeMachine(cell(r, 'machine'), machineHeader); if (machine && !current.machine) current.machine = machine;
     const target = parseNumber(cell(r, 'target')); if (target != null && current.target == null) current.target = target;
+    const shotPrice = parseNumber(cell(r, 'shot_price')); if (shotPrice != null && current.shot_price == null) current.shot_price = shotPrice;
     const mm = cell(r, 'mold_material'); if (mm && !current.mold_material) current.mold_material = mm;
     const ms = cell(r, 'mold_size'); if (ms && !current.mold_size) current.mold_size = ms;
     const st = cell(r, 'structure'); if (st && st !== '无') current.structures.push(st);
@@ -449,12 +473,13 @@ function tryParseSheet(wb, sheetName) {
       weight_g: weightTotal,
       cycle_sec: g.cycle,
       machine: g.machine,
-      machine_model: machineTonToModel(g.machine),
+      machine_model: machineTonToModel(g.machine, machineHeader),
       target: g.target,
+      shot_price: g.shot_price,
       price_rmb: g.price_rmb,
       price_hkd: g.price_hkd,
       images: [],
-      detail: { mold_material: g.mold_material, mold_size: g.mold_size, machine: g.machine, machine_model: machineTonToModel(g.machine), target: g.target },
+      detail: { mold_material: g.mold_material, mold_size: g.mold_size, machine: g.machine, machine_model: machineTonToModel(g.machine, machineHeader), target: g.target },
       note: [...new Set(g.notes)].join('；'),
       _rows: [g.rowStart, g.rowEnd],  // 0-based 原始行范围，供图片归属
     };
@@ -471,7 +496,7 @@ function tryParseSheet(wb, sheetName) {
   };
 }
 
-function buildPartDetailMolds(dataRows, cell) {
+function buildPartDetailMolds(dataRows, cell, machineHeader = '') {
   const groups = new Map();
   const state = {};
   const keep = (k, v) => {
@@ -499,8 +524,10 @@ function buildPartDetailMolds(dataRows, cell) {
     if (cycleCell != null) state.cycle = cycleCell;
     const targetCell = parseNumber(cell(r, 'target'));
     if (targetCell != null) state.target = targetCell;
+    const shotPriceCell = parseNumber(cell(r, 'shot_price'));
+    if (shotPriceCell != null) state.shot_price = shotPriceCell;
 
-    const machine = keep('machine', cell(r, 'machine'));
+    const machine = keep('machine', normalizeMachine(cell(r, 'machine'), machineHeader));
     const moldMaterial = keep('mold_material', cell(r, 'mold_material'));
     const moldSize = keep('mold_size', cell(r, 'mold_size'));
     const moldType = keep('mold_type', cell(r, 'mold_type'));
@@ -532,6 +559,7 @@ function buildPartDetailMolds(dataRows, cell) {
         mold_size: moldSize,
         machine,
         target: state.target ?? null,
+        shot_price: state.shot_price ?? null,
         parent_name: groupName,
         parts: [],
         rowStart: ri,
@@ -572,7 +600,7 @@ function buildPartDetailMolds(dataRows, cell) {
       const nums = String(value).match(/[\d.]+/g);
       return nums ? total + nums.map(Number).reduce((a, b) => a * b, 1) : total;
     }, 0);
-    const machineModel = machineTonToModel(g.machine);
+    const machineModel = machineTonToModel(g.machine, machineHeader);
     return {
       mold_no: g.mold_no,
       name: [...new Set(g.names)].join('/'),
@@ -598,6 +626,7 @@ function buildPartDetailMolds(dataRows, cell) {
       machine: g.machine,
       machine_model: machineModel,
       target: g.target,
+      shot_price: g.shot_price,
       note: [...new Set(g.notes)].join('；'),
       _rows: [g.rowStart, g.rowEnd],
     };

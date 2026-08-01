@@ -35,6 +35,23 @@ test('internal export writes product-ratio weighted injection formulas', async (
   assert.equal(worksheet.getCell(totalRow, 17).value.formula, `((Q${dataStart}+Q${dataStart + 1})*2+(Q${dataStart + 2})*1)/3`);
 });
 
+test('empty department Indonesian freight totals do not create circular references', async () => {
+  const workbook = await buildWorkbook({
+    quote: { quote_no: 'EMPTY-DEPT', product_name: '空部门', qty: 1000 },
+    sections: [
+      { dept: 'engineering', payload_json: JSON.stringify({ hardware: [], aux_materials: [], packaging_materials: [] }) },
+      { dept: 'sales', payload_json: JSON.stringify({ header: { fx_rmb_hkd: 0.85 }, shipping: { scenarios: [] } }) },
+    ],
+  });
+  const worksheet = workbook.getWorksheet('报价明细');
+  for (const title of ['五、五金', '六、辅助材料', '七、包装材料']) {
+    let titleRow = 0;
+    worksheet.eachRow(row => { if (row.getCell(1).value === title) titleRow = row.number; });
+    const totalRow = titleRow + 2;
+    assert.equal(worksheet.getCell(totalRow, 11).value.formula, '0');
+  }
+});
+
 test('surtax is stored and exported as a direct HKD amount', async () => {
   const args = {
     quote: { quote_no: 'SURTAX-HKD', product_name: '附加税港币', qty: 1000 },

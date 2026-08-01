@@ -270,10 +270,13 @@ function patchSimpleIndoColumns(ws, payloads) {
     if (patch.weighted) {
       total = weightedInjectionSum(patch.dept, (_row, index) => rowResults[index]);
     }
+    const hasDetailRows = totalRow > headerRow + 1;
     ws.getCell(totalRow, patch.indoCol).value = {
-      formula: patch.weighted
-        ? weightedColumnFormula(patch.dept, headerRow + 1, colLetter(patch.indoCol))
-        : `SUM(${colLetter(patch.indoCol)}${headerRow + 1}:${colLetter(patch.indoCol)}${totalRow - 1})`,
+      formula: !hasDetailRows
+        ? '0'
+        : patch.weighted
+          ? weightedColumnFormula(patch.dept, headerRow + 1, colLetter(patch.indoCol))
+          : `SUM(${colLetter(patch.indoCol)}${headerRow + 1}:${colLetter(patch.indoCol)}${totalRow - 1})`,
       result: total,
     };
     applyStyle(ws.getCell(totalRow, patch.indoCol), ws.getCell(totalRow, patch.amountCol).style, HKD4);

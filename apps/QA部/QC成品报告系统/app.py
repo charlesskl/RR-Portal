@@ -675,8 +675,7 @@ def create_app(test_config: dict | None = None) -> Flask:
     app = Flask(__name__)
     root = Path(__file__).resolve().parent
     app.config.update(
-        SECRET_KEY=os.getenv("SECRET_KEY", "dev-change-this-secret"),
-        DATABASE_URL=os.getenv("DATABASE_URL", f"sqlite:///{(root / 'data' / 'qc.db').as_posix()}"),
+        SECRET_KEY=os.getenv("SECRET_KEY", "dev-change-this-secret"),        DATABASE_URL=os.getenv("DATABASE_URL", f"sqlite:///{(root / 'data' / 'qc.db').as_posix()}"),
         STORAGE_ROOT=os.getenv("STORAGE_ROOT", str(root / "storage")),
         MAX_CONTENT_LENGTH=int(os.getenv("MAX_UPLOAD_MB", "64")) * 1024 * 1024,
         SESSION_COOKIE_HTTPONLY=True,
@@ -693,6 +692,9 @@ def create_app(test_config: dict | None = None) -> Flask:
         app.config.update(test_config)
     if app.config["TESTING"] and "SEED_SAMPLE_DATA" not in (test_config or {}):
         app.config["SEED_SAMPLE_DATA"] = True
+    # 非测试环境必须使用显式配置的 SECRET_KEY，禁止带已知默认密钥运行
+    if app.config["SECRET_KEY"] == "dev-change-this-secret" and not app.config["TESTING"]:
+        raise RuntimeError("SECRET_KEY 未配置，拒绝启动（请通过环境变量设置）")
 
     if app.config["PROXY_PREFIX"]:
         app.wsgi_app = TrustedPrefixMiddleware(app.wsgi_app, app.config["PROXY_PREFIX"])
@@ -1672,7 +1674,11 @@ def register_routes(app: Flask):
             session["csrf_token"] = secrets.token_urlsafe(24)
             audit(g.db, "login", "user", user.id)
             g.db.commit()
-            return redirect(request.args.get("next") or url_for("new_report"))
+            # next 只允许站内相对路径，防开放重定向到钓鱼站
+            next_url = request.args.get("next") or ""
+            if not (next_url.startswith("/") and not next_url.startswith("//")):
+                next_url = url_for("new_report")
+            return redirect(next_url)
         return render_template("login.html")
 
     @app.post("/logout")
@@ -3285,9 +3291,18 @@ def register_routes(app: Flask):
 def seed_database(db, *, include_sample_data: bool = False):
     try:
         if not db.scalar(select(func.count()).select_from(User)):
+            admin_pw = os.getenv("ADMIN_PASSWORD")
+            qc_pw = os.getenv("QC_PASSWORD")
+            if not admin_pw or not qc_pw:
+                from flask import current_app
+                if current_app.config.get("TESTING"):
+                    admin_pw = admin_pw or "Admin@12345"
+                    qc_pw = qc_pw or "QC@12345"
+                else:
+                    raise RuntimeError("ADMIN_PASSWORD/QC_PASSWORD 未配置，无法初始化账号")
             db.add_all([
-                User(username="admin", name="系统管理员", role="admin", password_hash=generate_password_hash(os.getenv("ADMIN_PASSWORD", "Admin@12345"))),
-                User(username="qc", name="QC Inspector", role="qc", password_hash=generate_password_hash(os.getenv("QC_PASSWORD", "QC@12345"))),
+                User(username="admin", name="系统管理员", role="admin", password_hash=generate_password_hash(admin_pw)),
+                User(username="qc", name="QC Inspector", role="qc", password_hash=generate_password_hash(qc_pw)),
             ])
         if include_sample_data:
             customer = db.scalar(select(Customer).where(Customer.name == "Zanzoon"))

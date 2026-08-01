@@ -1,4 +1,9 @@
 import os
+
+os.environ.setdefault("SECRET_KEY", "qc-test-secret")
+os.environ.setdefault("ADMIN_PASSWORD", "Admin@12345")
+os.environ.setdefault("QC_PASSWORD", "QC@12345")
+import os
 import re
 import shutil
 import tempfile

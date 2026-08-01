@@ -9,7 +9,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 RUN groupadd --system qc && useradd --system --gid qc --home-dir /app qc
 COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
+# 阿里云 PyPI 镜像（国内 ECS 构建加速，避免拉包超时）
+RUN pip config set global.index-url https://mirrors.aliyun.com/pypi/simple/ \
+    && pip install --no-cache-dir -r requirements.txt
 COPY app.py ai_service.py pdf_service.py task_queue.py unified_pdf.py worker.py ./
 COPY alembic.ini ./
 COPY migrations ./migrations

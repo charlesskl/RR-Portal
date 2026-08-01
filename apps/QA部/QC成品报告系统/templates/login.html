@@ -26,7 +26,9 @@
         <label>密码<input type="password" name="password" autocomplete="current-password" placeholder="请输入密码" required></label>
         <button class="button" type="submit">登录系统</button>
       </form>
+      {% if config.get('TESTING') or config.get('DEBUG') %}
       <div class="login-hint">首次本地演示可使用：管理员 <strong>admin / Admin@12345</strong>，QC <strong>qc / QC@12345</strong>。正式部署必须通过环境变量替换默认密码。</div>
+      {% endif %}
     </div>
   </section>
 </div>

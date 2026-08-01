@@ -103,4 +103,7 @@ test('mold UI renders product headers and per-product subtotals', () => {
   assert.match(source, /key: 'product_group_name', label: '产品'/);
   assert.match(source, /product_group_id \|\| row\.product_group_name/);
   assert.match(source, /原料 \$\{formatNum\(groupRaw\)\} \+ 啤价/);
+  assert.match(source, /class="product-mix-ratio"/);
+  assert.match(source, /product_mix_ratios/);
+  assert.match(source, /weightedInjectionSum/);
 });

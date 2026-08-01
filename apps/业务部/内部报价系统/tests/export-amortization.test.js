@@ -7,6 +7,34 @@ const test = require('node:test');
 
 const { buildWorkbook, adaptSurtaxForBase } = require('../backend/services/exportInternal');
 
+test('internal export writes product-ratio weighted injection formulas', async () => {
+  const workbook = await buildWorkbook({
+    quote: { quote_no: 'PRODUCT-MIX', product_name: '产品配比', qty: 1000 },
+    sections: [
+      { dept: 'molding', payload_json: JSON.stringify({
+        injection_loss_pct: 0,
+        indo_pct: 2,
+        product_mix_ratios: { p1: 2, p2: 1 },
+        injection: [
+          { product_group_id: 'p1', product_group_name: '1#产品', name: 'A', weight_g: 0, material_unit_price: 0, shot_price: 10 },
+          { product_group_id: 'p1', product_group_name: '1#产品', name: 'B', weight_g: 0, material_unit_price: 0, shot_price: 20 },
+          { product_group_id: 'p2', product_group_name: '2#产品', name: 'C', weight_g: 0, material_unit_price: 0, shot_price: 40 },
+        ],
+      }) },
+      { dept: 'sales', payload_json: JSON.stringify({ header: { fx_rmb_hkd: 0.85 }, shipping: { scenarios: [] } }) },
+    ],
+  });
+  const worksheet = workbook.getWorksheet('报价明细');
+  let titleRow = 0;
+  worksheet.eachRow(row => { if (row.getCell(1).value === '二、注塑部分') titleRow = row.number; });
+  const dataStart = titleRow + 2;
+  const totalRow = dataStart + 3;
+  assert.equal(worksheet.getCell(totalRow, 1).value, '加权合计（总配比 3）');
+  assert.equal(worksheet.getCell(totalRow, 16).value.formula, `((P${dataStart}+P${dataStart + 1})*2+(P${dataStart + 2})*1)/3`);
+  assert.equal(Number(worksheet.getCell(totalRow, 16).value.result.toFixed(4)), 33.3333);
+  assert.equal(worksheet.getCell(totalRow, 17).value.formula, `((Q${dataStart}+Q${dataStart + 1})*2+(Q${dataStart + 2})*1)/3`);
+});
+
 test('surtax is stored and exported as a direct HKD amount', async () => {
   const args = {
     quote: { quote_no: 'SURTAX-HKD', product_name: '附加税港币', qty: 1000 },

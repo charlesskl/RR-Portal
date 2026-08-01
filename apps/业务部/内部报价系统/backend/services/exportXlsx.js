@@ -3,6 +3,7 @@
 const ExcelJS = require('exceljs');
 const path = require('path');
 const fs = require('fs');
+const { injectionProductGroups, weightedInjectionSum, weightedColumnFormula } = require('./productMix');
 
 const RMB = '￥#,##0.00';
 const HKD = '"HK$"#,##0.00';
@@ -1128,22 +1129,23 @@ function renderInjection(ws, row, payload, fxRH, refs) {
     else if (_mat) impMatCells.push(`I${row}`);
     row += 1;
   });
-  const dataEnd = row - 1;
   const cnt = (payload.injection || []).length;
   if (cnt) {
-    const rawSumVal = sum(payload.injection, r => num(r.weight_g) * lossM * num(r.material_unit_price));
-    const shotSumVal = sum(payload.injection, r => num(r.shot_price));
+    const rawSumVal = weightedInjectionSum(payload, r => num(r.weight_g) * lossM * num(r.material_unit_price));
+    const shotSumVal = weightedInjectionSum(payload, r => num(r.shot_price));
     const finSumVal = rawSumVal + shotSumVal;
-    // 合计行：分别 sum 原料单价(I) / 啤价(K) / 成品金额(O)
+    // 合计行：按产品配比分别加权原料单价(I) / 啤价(K) / 成品金额(P)
     const totalRow = row;
-    ws.getCell(row, 1).value = '合计';
+    const mixGroups = injectionProductGroups(payload);
+    const totalRatio = sum(mixGroups, group => group.ratio);
+    ws.getCell(row, 1).value = mixGroups.length ? `加权合计（总配比 ${totalRatio}）` : '合计';
     ws.getCell(row, 1).alignment = { horizontal: 'right', vertical: 'middle' };
     ws.mergeCells(row, 1, row, 8);
-    ws.getCell(row, 9).value = { formula: `SUM(I${dataStart}:I${dataEnd})`, result: rawSumVal };
+    ws.getCell(row, 9).value = { formula: weightedColumnFormula(payload, dataStart, 'I'), result: rawSumVal };
     ws.getCell(row, 9).numFmt = '0.0000';
-    ws.getCell(row, 11).value = { formula: `SUM(K${dataStart}:K${dataEnd})`, result: shotSumVal };
+    ws.getCell(row, 11).value = { formula: weightedColumnFormula(payload, dataStart, 'K'), result: shotSumVal };
     ws.getCell(row, 11).numFmt = '0.0000';
-    ws.getCell(row, 16).value = { formula: `SUM(P${dataStart}:P${dataEnd})`, result: finSumVal };
+    ws.getCell(row, 16).value = { formula: weightedColumnFormula(payload, dataStart, 'P'), result: finSumVal };
     ws.getCell(row, 16).numFmt = '0.0000';
     for (let c = 1; c <= 16; c++) styleSubtotal(ws.getCell(row, c), 'hkd');
     // 加粗 合计 标签 + 3 个数值
@@ -1164,7 +1166,7 @@ function materialCost(r) {
 function injectionSubtotal(p) {
   // 与注塑表"成品金额"一致 = 原料单价(啤净重×(1+料损耗%)×料价) + 啤价；用于出厂价成本
   const lossM = 1 + num(p.injection_loss_pct ?? 3) / 100;
-  return sum(p.injection || [], r => num(r.weight_g) * lossM * num(r.material_unit_price) + num(r.shot_price));
+  return weightedInjectionSum(p, r => num(r.weight_g) * lossM * num(r.material_unit_price) + num(r.shot_price));
 }
 
 function renderSecondProc(ws, row, payload, fxRH, refs) {

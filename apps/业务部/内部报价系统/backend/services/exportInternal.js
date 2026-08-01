@@ -5,6 +5,7 @@
 // this small post-processor instead of growing exportXlsx.js further.
 const { buildWorkbook: buildBaseWorkbook } = require('./exportXlsx');
 const { toExcelFormulaInput, fractionNumberFormat } = require('../../frontend/formula-input');
+const { weightedInjectionSum, weightedColumnFormula } = require('./productMix');
 
 const FONT = 'Microsoft YaHei';
 const HKD4 = '"HK$"0.0000';
@@ -222,7 +223,7 @@ function slushUnitPrice(row) {
 
 function patchSimpleIndoColumns(ws, payloads) {
   const patches = [
-    { title: '二、注塑部分', dept: payloads.molding || {}, amountCol: 16, indoCol: 17 },
+    { title: '二、注塑部分', dept: payloads.molding || {}, amountCol: 16, indoCol: 17, weighted: true },
     { title: '二·B、吹气部分 (HKD)', dept: payloads.molding || {}, amountCol: 11, indoCol: 14 },
     { title: '三、二次加工（印喷报价）', dept: payloads.painting || {}, amountCol: 22, indoCol: 23, factor: 0.3 },
     { title: '四、电子', dept: payloads.electronic || {}, amountCol: 10, indoCol: 11 },
@@ -238,7 +239,7 @@ function patchSimpleIndoColumns(ws, payloads) {
     const headerRow = titleRow + 1;
     const totalRow = findRowMatching(
       ws,
-      value => /^(合计|小计)/.test(String(value || '')),
+      value => /^(加权合计|合计|小计)/.test(String(value || '')),
       headerRow + 1,
       Math.min(ws.rowCount, headerRow + 100)
     );
@@ -248,6 +249,7 @@ function patchSimpleIndoColumns(ws, payloads) {
     ws.getCell(headerRow, patch.indoCol).value = `印尼运费 ${pct}%`;
     applyStyle(ws.getCell(headerRow, patch.indoCol), headerStyle);
     let total = 0;
+    const rowResults = [];
     for (let row = headerRow + 1; row < totalRow; row += 1) {
       const amountCell = ws.getCell(row, patch.amountCol);
       const amount = num(amountCell.value && typeof amountCell.value === 'object'
@@ -263,9 +265,15 @@ function patchSimpleIndoColumns(ws, payloads) {
       ws.getCell(row, patch.indoCol).numFmt = HKD4;
       applyStyle(ws.getCell(row, patch.indoCol), ws.getCell(row, patch.amountCol).style, HKD4);
       total += result;
+      rowResults.push(result);
+    }
+    if (patch.weighted) {
+      total = weightedInjectionSum(patch.dept, (_row, index) => rowResults[index]);
     }
     ws.getCell(totalRow, patch.indoCol).value = {
-      formula: `SUM(${colLetter(patch.indoCol)}${headerRow + 1}:${colLetter(patch.indoCol)}${totalRow - 1})`,
+      formula: patch.weighted
+        ? weightedColumnFormula(patch.dept, headerRow + 1, colLetter(patch.indoCol))
+        : `SUM(${colLetter(patch.indoCol)}${headerRow + 1}:${colLetter(patch.indoCol)}${totalRow - 1})`,
       result: total,
     };
     applyStyle(ws.getCell(totalRow, patch.indoCol), ws.getCell(totalRow, patch.amountCol).style, HKD4);
@@ -527,11 +535,10 @@ function freeSubtotal(rows, fx) {
 }
 
 function injectionSubtotal(molding) {
-  return sum((molding && molding.injection) || [], row => {
-    const material = num(row.material_unit_price)
-      || num(row.weight_g) * num(row.material_price_lb) / 454;
-    return material + num(row.shot_price);
-  });
+  const payload = molding || {};
+  const lossM = 1 + num(payload.injection_loss_pct ?? 3) / 100;
+  return weightedInjectionSum(payload, row =>
+    num(row.weight_g) * lossM * num(row.material_unit_price) + num(row.shot_price));
 }
 
 function blowSubtotal(molding) {

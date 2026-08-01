@@ -2529,6 +2529,12 @@ def _append_department_transfer_target(
 ):
     if source_body.rec_type not in ("issue", "semi_outbound"):
         return
+    # 期初（期初领料/期初出仓）只是各部门自己的期初库存，不是真实流转，
+    # 联动会在目标部门重复计一次（目标部门自己的台账里已有期初数）
+    if (source_body.doc_no and "期初" in source_body.doc_no) or (
+        source_body.remark and "期初" in source_body.remark
+    ):
+        return
     if source_location not in DEPARTMENTS or source_location == source_department:
         return
     rec_type = _auto_receive_record_type(source_location)
@@ -3715,14 +3721,14 @@ def _assembly_nfc_export_workbook(records, sticker_types):
     ]
     sticker_names = _supplier_nfc_sticker_names(records, sticker_types)
 
-    ws.cell(1, 2).value = "累计入仓总数"
+    ws.cell(1, 2).value = "累计领料总数"
     ws.cell(1, 3).value = "东莞"
     ws.cell(2, 1).value = "物料名称"
     ws.cell(2, 3).value = "截止6月27号"
     for col_no, month in enumerate(EXPORT_MONTHS, start=4):
         ws.cell(1, col_no).value = f"{month}月领料\n总数"
     ws.cell(1, 11).value = "应存数"
-    ws.cell(1, 12).value = "累计出仓总数"
+    ws.cell(1, 12).value = "累计入仓总数"
     ws.cell(1, 13).value = "东莞"
     ws.cell(1, 14).value = "邵阳"
     ws.cell(2, 13).value = "截止6月27号"

@@ -1273,10 +1273,10 @@ def test_assembly_nfc_export_matches_import_workbook_format(client):
     assert imported.status_code == 200
     assert exported.status_code == 200
     assert wb.sheetnames == ["总表", "领料明细", "半成品入仓明细"]
-    assert wb["总表"].cell(1, 2).value == "累计入仓总数"
+    assert wb["总表"].cell(1, 2).value == "累计领料总数"
     assert wb["总表"].cell(1, 4).value == "7月领料\n总数"
     assert wb["总表"].cell(1, 11).value == "应存数"
-    assert wb["总表"].cell(1, 12).value == "累计出仓总数"
+    assert wb["总表"].cell(1, 12).value == "累计入仓总数"
     assert wb["总表"].cell(1, 15).value == "7月入仓\n总数"
     assert wb["总表"].cell(3, 1).value == "1#NFC\n贴纸"
     assert wb["总表"].cell(3, 2).value == 100

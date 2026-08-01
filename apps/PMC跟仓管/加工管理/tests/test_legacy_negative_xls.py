@@ -209,3 +209,15 @@ def test_auto_record_skipped_when_manual_record_exists(conn):
     ).fetchone()["c"]
     assert before == 1
     assert after == 1
+
+
+def test_opening_stock_record_does_not_link(conn):
+    # 期初出仓/期初领料不是真实流转：目标部门自己的台账已有期初数，
+    # 联动会重复计一次（线上曾因此期初翻倍）
+    loc = conn.execute(
+        "SELECT id FROM locations WHERE name=?", ("东莞车间",)
+    ).fetchone()
+    body = _make_body(location_id=loc["id"], doc_no="1#NFC贴纸-东莞期初出仓",
+                      qty=766369, remark="总表期初出仓导入")
+    targets = m._auto_flow_targets(conn, body, "兴信B来料仓")
+    assert targets == []

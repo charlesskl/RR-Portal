@@ -7,6 +7,11 @@ import Upload from './pages/Upload';
 import Login from './pages/Login';
 import AdocPage from './pages/AdocPage';
 import ExcelTranslatePage from './pages/ExcelTranslatePage';
+import {
+  initialPageFromStoredTranslationJob,
+  readStoredTranslationJob,
+  translationJobStorageKey,
+} from './pages/excelTranslateState';
 
 const { Sider, Content, Header } = Layout;
 const { Text } = Typography;
@@ -24,6 +29,14 @@ const PAGE_TITLES = {
   adoc: 'TOMY A-DOC 生成',
   'excel-translate': 'Excel 中英翻译',
 };
+
+function storedUser() {
+  try {
+    return JSON.parse(localStorage.getItem('user'));
+  } catch {
+    return null;
+  }
+}
 
 // axios 拦截器：自动带 token，401 时跳转登录
 axios.interceptors.request.use(config => {
@@ -45,16 +58,24 @@ axios.interceptors.response.use(
 );
 
 export default function App() {
-  const [page, setPage] = useState('list');
+  const [user, setUser] = useState(storedUser);
+  const [page, setPage] = useState(() => initialPageFromStoredTranslationJob(
+    readStoredTranslationJob(localStorage, translationJobStorageKey(storedUser())),
+  ));
   const [authed, setAuthed] = useState(!!localStorage.getItem('token'));
 
-  const handleLogin = () => {
+  const handleLogin = ({ user: loggedInUser }) => {
+    setUser(loggedInUser);
+    setPage(initialPageFromStoredTranslationJob(
+      readStoredTranslationJob(localStorage, translationJobStorageKey(loggedInUser)),
+    ));
     setAuthed(true);
   };
 
   const handleLogout = () => {
     localStorage.removeItem('token');
     localStorage.removeItem('user');
+    setUser(null);
     setAuthed(false);
   };
 
@@ -76,7 +97,7 @@ export default function App() {
     { key: 'adoc', icon: <FilePdfOutlined />, label: 'A-DOC 生成' },
   ];
 
-  const user = (() => { try { return JSON.parse(localStorage.getItem('user')); } catch { return null; } })();
+  const translationStorageKey = translationJobStorageKey(user);
 
   return (
     <Layout style={{ minHeight: '100vh' }}>
@@ -129,7 +150,9 @@ export default function App() {
         <Content style={{ margin: 24, padding: 24, background: '#fff', borderRadius: 8 }}>
           {page === 'list'   && <ProductList onUpload={() => setPage('upload')} />}
           {page === 'upload' && <Upload onDone={() => setPage('list')} />}
-          {page === 'excel-translate' && <ExcelTranslatePage />}
+          {page === 'excel-translate' && (
+            <ExcelTranslatePage key={translationStorageKey} storageKey={translationStorageKey} />
+          )}
           {page === 'adoc'   && <AdocPage />}
         </Content>
       </Layout>

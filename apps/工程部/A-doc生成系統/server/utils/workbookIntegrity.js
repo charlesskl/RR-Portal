@@ -1,14 +1,39 @@
 const crypto = require('node:crypto');
 const fs = require('node:fs/promises');
 const path = require('node:path');
+const { Readable } = require('node:stream');
+const { createInflateRaw } = require('node:zlib');
 const PizZip = require('pizzip');
+const crc32 = require('pizzip/js/crc32');
 const XlsxPopulate = require('xlsx-populate');
+const XmlBuilder = require('xlsx-populate/lib/XmlBuilder');
 const XmlParser = require('xlsx-populate/lib/XmlParser');
+
+let sax;
+try {
+  sax = require('sax');
+} catch {
+  sax = require(require.resolve('sax', {
+    paths: [path.dirname(require.resolve('xlsx-populate/package.json'))],
+  }));
+}
 
 const DEFAULT_MAX_COMPRESSED_BYTES = 50 * 1024 * 1024;
 const DEFAULT_MAX_UNCOMPRESSED_BYTES = 512 * 1024 * 1024;
+const DEFAULT_MAX_ENTRY_COUNT = 10_000;
+const DEFAULT_MAX_CELL_COUNT = 1_000_000;
+const WORKBOOK_RELATIONSHIPS_PART = 'xl/_rels/workbook.xml.rels';
+const SHARED_STRINGS_PART = 'xl/sharedStrings.xml';
+const XLSX_WORKBOOK_CONTENT_TYPE =
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml';
+const XLSM_WORKBOOK_CONTENT_TYPE =
+  'application/vnd.ms-excel.sheet.macroEnabled.main+xml';
+const MAX_WORKSHEET_ROW = 1_048_576;
+const MAX_WORKSHEET_COLUMN = 16_384;
+const RELATIONSHIP_PART = /_rels\/.*\.rels$/;
 
 const PROTECTED = [
+  /^xl\/workbook\.xml$/,
   /^xl\/media\//,
   /^xl\/drawings\//,
   /^xl\/charts\//,
@@ -22,8 +47,7 @@ const PROTECTED = [
   /^xl\/persons\/person\.xml$/,
   /^customXml\//,
   /^xl\/calcChain\.xml$/,
-  /^xl\/vbaProject.*\.bin$/,
-  /_rels\/.*\.rels$/,
+  /^xl\/vbaProject.*\.bin$/i,
 ];
 
 const WORKSHEET_STRUCTURE_NODES = new Set([
@@ -72,6 +96,175 @@ class WorkbookIntegrityError extends Error {
 
 function fail(code) {
   throw new WorkbookIntegrityError(code);
+}
+
+function preflightZipDirectory(buffer, maxEntryCount) {
+  const minimumEocdSize = 22;
+  if (!Buffer.isBuffer(buffer) || buffer.length < minimumEocdSize) {
+    fail('invalid_ooxml_package');
+  }
+  const minimumOffset = Math.max(0, buffer.length - 65_535 - minimumEocdSize);
+  let eocdOffset = -1;
+  for (let offset = buffer.length - minimumEocdSize; offset >= minimumOffset; offset -= 1) {
+    if (buffer.readUInt32LE(offset) !== 0x06054b50) continue;
+    const commentLength = buffer.readUInt16LE(offset + 20);
+    if (offset + minimumEocdSize + commentLength !== buffer.length) continue;
+    eocdOffset = offset;
+    break;
+  }
+  if (eocdOffset < 0) fail('invalid_ooxml_package');
+
+  const diskNumber = buffer.readUInt16LE(eocdOffset + 4);
+  const centralDisk = buffer.readUInt16LE(eocdOffset + 6);
+  const entriesOnDisk = buffer.readUInt16LE(eocdOffset + 8);
+  const entryCount = buffer.readUInt16LE(eocdOffset + 10);
+  const centralSize = buffer.readUInt32LE(eocdOffset + 12);
+  const centralOffset = buffer.readUInt32LE(eocdOffset + 16);
+  if (diskNumber !== 0 || centralDisk !== 0 || entriesOnDisk !== entryCount) {
+    fail('invalid_ooxml_package');
+  }
+  if (entryCount > maxEntryCount) fail('package_too_large');
+  if (centralOffset + centralSize > eocdOffset) fail('invalid_ooxml_package');
+
+  let centralCursor = centralOffset;
+  const entries = new Map();
+  for (let index = 0; index < entryCount; index += 1) {
+    if (centralCursor + 46 > eocdOffset || buffer.readUInt32LE(centralCursor) !== 0x02014b50) {
+      fail('invalid_ooxml_package');
+    }
+    const flags = buffer.readUInt16LE(centralCursor + 8);
+    const method = buffer.readUInt16LE(centralCursor + 10);
+    const expectedCrc = buffer.readUInt32LE(centralCursor + 16);
+    const compressedSize = buffer.readUInt32LE(centralCursor + 20);
+    const uncompressedSize = buffer.readUInt32LE(centralCursor + 24);
+    const nameLength = buffer.readUInt16LE(centralCursor + 28);
+    const extraLength = buffer.readUInt16LE(centralCursor + 30);
+    const commentLength = buffer.readUInt16LE(centralCursor + 32);
+    const localOffset = buffer.readUInt32LE(centralCursor + 42);
+    const centralEnd = centralCursor + 46 + nameLength + extraLength + commentLength;
+    if (
+      centralEnd > eocdOffset
+      || compressedSize === 0xffffffff
+      || uncompressedSize === 0xffffffff
+      || localOffset === 0xffffffff
+      || ![0, 8].includes(method)
+      || (flags & 0x1) !== 0
+    ) fail('invalid_ooxml_package');
+
+    if (localOffset + 30 > centralOffset || buffer.readUInt32LE(localOffset) !== 0x04034b50) {
+      fail('invalid_ooxml_package');
+    }
+    const localFlags = buffer.readUInt16LE(localOffset + 6);
+    const localMethod = buffer.readUInt16LE(localOffset + 8);
+    const localCrc = buffer.readUInt32LE(localOffset + 14);
+    const localCompressedSize = buffer.readUInt32LE(localOffset + 18);
+    const localUncompressedSize = buffer.readUInt32LE(localOffset + 22);
+    const localNameLength = buffer.readUInt16LE(localOffset + 26);
+    const localExtraLength = buffer.readUInt16LE(localOffset + 28);
+    const centralName = buffer.subarray(centralCursor + 46, centralCursor + 46 + nameLength);
+    const localNameStart = localOffset + 30;
+    const localName = buffer.subarray(localNameStart, localNameStart + localNameLength);
+    const dataStart = localNameStart + localNameLength + localExtraLength;
+    if (
+      localFlags !== flags
+      || localMethod !== method
+      || !centralName.equals(localName)
+      || dataStart + compressedSize > centralOffset
+    ) fail('invalid_ooxml_package');
+    const entryName = centralName.toString((flags & 0x800) !== 0 ? 'utf8' : 'binary');
+    if (entries.has(entryName)) fail('invalid_ooxml_package');
+    entries.set(entryName, {
+      usesDataDescriptor: (flags & 0x8) !== 0,
+      localCrc,
+      localCompressedSize,
+      localUncompressedSize,
+      centralCrc: expectedCrc,
+      centralCompressedSize: compressedSize,
+      centralUncompressedSize: uncompressedSize,
+    });
+    centralCursor = centralEnd;
+  }
+  if (centralCursor !== centralOffset + centralSize) fail('invalid_ooxml_package');
+  return { entryCount, entries };
+}
+
+function compressionMethodCode(method) {
+  const value = String(method || '');
+  return (value.charCodeAt(0) || 0) | ((value.charCodeAt(1) || 0) << 8);
+}
+
+function countWorksheetCells(state, chunk, flush = false) {
+  if (!state) return;
+  const text = `${state.tail}${chunk ? chunk.toString('utf8') : ''}`;
+  const retainedCharacters = flush ? 0 : Math.min(32, text.length);
+  const scanLength = text.length - retainedCharacters;
+  const scan = text.slice(0, scanLength);
+  const matches = scan.match(/<(?:[A-Za-z_][\w.-]*:)?c(?:\s|\/?>)/g);
+  state.count += matches ? matches.length : 0;
+  if (state.count > state.max) fail('package_too_large');
+  state.tail = text.slice(scanLength);
+}
+
+async function measureZipEntry(file, remainingBytes, cellState, directoryEntry) {
+  const data = file && file._data;
+  if (!data || typeof data.getCompressedContent !== 'function') {
+    fail('invalid_ooxml_package');
+  }
+  const declaredSize = Number(data.uncompressedSize);
+  if (!Number.isSafeInteger(declaredSize) || declaredSize < 0) {
+    fail('invalid_ooxml_package');
+  }
+  if (declaredSize > remainingBytes) fail('package_too_large');
+
+  let compressed;
+  try {
+    compressed = Buffer.from(data.getCompressedContent());
+  } catch {
+    fail('invalid_ooxml_package');
+  }
+  if (compressed.length !== Number(data.compressedSize)) fail('invalid_ooxml_package');
+
+  const method = compressionMethodCode(data.compressionMethod);
+  let stream;
+  if (method === 0) {
+    stream = Readable.from([compressed]);
+  } else if (method === 8) {
+    const inflater = createInflateRaw();
+    Readable.from([compressed]).pipe(inflater);
+    stream = inflater;
+  } else {
+    fail('invalid_ooxml_package');
+  }
+
+  let actualSize = 0;
+  let actualCrc = 0;
+  try {
+    for await (const chunk of stream) {
+      actualSize += chunk.length;
+      if (actualSize > remainingBytes) fail('package_too_large');
+      actualCrc = crc32(chunk, actualCrc);
+      countWorksheetCells(cellState, chunk);
+    }
+    countWorksheetCells(cellState, null, true);
+  } catch (error) {
+    stream.destroy();
+    if (error instanceof WorkbookIntegrityError) throw error;
+    fail('invalid_ooxml_package');
+  }
+
+  if (actualSize !== declaredSize) fail('invalid_ooxml_package');
+  if ((actualCrc >>> 0) !== (Number(data.crc32) >>> 0)) fail('invalid_ooxml_package');
+  if (!directoryEntry || (
+    directoryEntry.centralCrc !== (Number(data.crc32) >>> 0)
+    || directoryEntry.centralCompressedSize !== compressed.length
+    || directoryEntry.centralUncompressedSize !== declaredSize
+  )) fail('invalid_ooxml_package');
+  if (!directoryEntry.usesDataDescriptor && (
+    directoryEntry.localCrc !== (actualCrc >>> 0)
+    || directoryEntry.localCompressedSize !== compressed.length
+    || directoryEntry.localUncompressedSize !== actualSize
+  )) fail('invalid_ooxml_package');
+  return actualSize;
 }
 
 function localName(name) {
@@ -169,6 +362,185 @@ async function parseXml(zip, partName) {
   }
 }
 
+function worksheetColumnNumber(name) {
+  if (!/^[A-Z]{1,3}$/.test(name)) fail('invalid_ooxml_package');
+  let column = 0;
+  for (const character of name) {
+    column = (column * 26) + character.charCodeAt(0) - 64;
+  }
+  if (column > MAX_WORKSHEET_COLUMN) fail('invalid_ooxml_package');
+  return column;
+}
+
+function worksheetRowNumber(reference) {
+  const text = String(reference ?? '');
+  if (!/^[1-9]\d*$/.test(text)) fail('invalid_ooxml_package');
+  const row = Number(text);
+  if (!Number.isSafeInteger(row) || row > MAX_WORKSHEET_ROW) {
+    fail('invalid_ooxml_package');
+  }
+  return row;
+}
+
+function worksheetCellReference(reference) {
+  const match = String(reference ?? '').match(/^([A-Z]+)([1-9]\d*)$/);
+  if (!match) fail('invalid_ooxml_package');
+  worksheetColumnNumber(match[1]);
+  return { row: worksheetRowNumber(match[2]) };
+}
+
+function worksheetRows(root) {
+  if (localName(root?.name) !== 'worksheet') fail('invalid_ooxml_package');
+  const sheetData = elementChildren(root, 'sheetData');
+  if (sheetData.length !== 1) fail('invalid_ooxml_package');
+  const rows = elementChildren(sheetData[0]);
+  if (rows.some(node => localName(node.name) !== 'row')) fail('invalid_ooxml_package');
+  return rows;
+}
+
+function worksheetRowXmlRecords(xml) {
+  const rows = new Map();
+  const extensions = new Map();
+  const stack = [];
+  const parser = sax.parser(true);
+  parser.onerror = () => fail('invalid_ooxml_package');
+  parser.onopentag = node => {
+    const parent = stack[stack.length - 1];
+    const grandparent = stack[stack.length - 2];
+    const name = String(node.name || '');
+    const nodeLocalName = localName(name);
+    const isWorksheetRow = nodeLocalName === 'row'
+      && parent?.localName === 'sheetData'
+      && grandparent?.localName === 'worksheet';
+    const record = {
+      name,
+      localName: nodeLocalName,
+      start: parser.startTagPosition - 1,
+      startTagEnd: parser.position,
+      selfClosing: Boolean(node.isSelfClosing),
+      isWorksheetRow,
+      worksheetRowNumber: isWorksheetRow
+        ? worksheetRowNumber(attribute(node, 'r'))
+        : parent?.worksheetRowNumber,
+      isRowExtension: nodeLocalName === 'extLst' && Boolean(parent?.isWorksheetRow),
+    };
+    if (isWorksheetRow) {
+      if (rows.has(record.worksheetRowNumber)) fail('invalid_ooxml_package');
+      rows.set(record.worksheetRowNumber, record);
+    }
+    stack.push(record);
+  };
+  parser.onclosetag = name => {
+    const record = stack.pop();
+    if (!record || record.name !== String(name || '')) fail('invalid_ooxml_package');
+    record.closeStart = record.selfClosing ? null : parser.startTagPosition - 1;
+    record.end = parser.position;
+    if (record.isRowExtension) {
+      if (extensions.has(record.worksheetRowNumber)) fail('invalid_ooxml_package');
+      extensions.set(record.worksheetRowNumber, {
+        start: record.start,
+        end: record.end,
+        xml: xml.slice(record.start, record.end),
+      });
+    }
+  };
+  try {
+    parser.write(xml).close();
+  } catch (error) {
+    if (error instanceof WorkbookIntegrityError) throw error;
+    fail('invalid_ooxml_package');
+  }
+  if (stack.length > 0) fail('invalid_ooxml_package');
+  return { rows, extensions };
+}
+
+function replaceXmlRanges(xml, replacements) {
+  let output = xml;
+  const ordered = [...replacements].sort((left, right) => right.start - left.start);
+  for (const { start, end, value } of ordered) {
+    if (
+      !Number.isInteger(start)
+      || !Number.isInteger(end)
+      || start < 0
+      || end < start
+      || end > output.length
+    ) fail('invalid_ooxml_package');
+    output = `${output.slice(0, start)}${value}${output.slice(end)}`;
+  }
+  return output;
+}
+
+async function assertWorksheetCoordinates(zip) {
+  const worksheetParts = Object.keys(zip.files)
+    .filter(name => /^xl\/worksheets\/[^/]+\.xml$/i.test(name) && !zip.files[name].dir)
+    .sort();
+  const sharedStringIndexes = [];
+  const worksheetRoots = new Map();
+  const rowExtensionLists = new Map();
+  const rowXmlParts = new Map();
+  for (const partName of worksheetParts) {
+    const worksheetXml = zip.file(partName).asText();
+    const rowXml = worksheetRowXmlRecords(worksheetXml);
+    const root = await parseXml(zip, partName);
+    const rows = worksheetRows(root);
+    worksheetRoots.set(partName, root);
+    const rowReferences = new Set();
+    const cellReferences = new Set();
+    const extensionsByRow = new Map();
+    for (const rowNode of rows) {
+      const row = worksheetRowNumber(attribute(rowNode, 'r'));
+      if (rowReferences.has(row)) fail('invalid_ooxml_package');
+      rowReferences.add(row);
+      let hasExtensionList = false;
+      for (const cellNode of elementChildren(rowNode)) {
+        const childName = localName(cellNode.name);
+        if (childName === 'extLst') {
+          if (hasExtensionList) fail('invalid_ooxml_package');
+          hasExtensionList = true;
+          extensionsByRow.set(row, cellNode);
+          continue;
+        }
+        if (childName !== 'c' || hasExtensionList) fail('invalid_ooxml_package');
+        const reference = String(attribute(cellNode, 'r') ?? '');
+        const cell = worksheetCellReference(reference);
+        if (cell.row !== row) fail('invalid_ooxml_package');
+        if (cellReferences.has(reference)) fail('invalid_ooxml_package');
+        cellReferences.add(reference);
+
+        if (String(attribute(cellNode, 't') || '') === 's') {
+          const values = elementChildren(cellNode, 'v');
+          if (values.length !== 1 || elementChildren(values[0]).length > 0) {
+            fail('invalid_ooxml_package');
+          }
+          const valueChildren = values[0].children || [];
+          const index = valueChildren[0];
+          if (
+            valueChildren.length !== 1
+            || typeof index !== 'number'
+            || !Number.isSafeInteger(index)
+            || index < 0
+          ) fail('invalid_ooxml_package');
+          sharedStringIndexes.push(index);
+        }
+      }
+    }
+    if (extensionsByRow.size > 0) rowExtensionLists.set(partName, extensionsByRow);
+    if (
+      rowXml.rows.size !== rowReferences.size
+      || [...rowReferences].some(row => !rowXml.rows.has(row))
+      || rowXml.extensions.size !== extensionsByRow.size
+      || [...extensionsByRow.keys()].some(row => !rowXml.extensions.has(row))
+    ) fail('invalid_ooxml_package');
+    rowXmlParts.set(partName, rowXml);
+  }
+  return {
+    sharedStringIndexes,
+    worksheetRoots,
+    rowExtensionLists,
+    rowXmlParts,
+  };
+}
+
 function relationshipBaseDirectory(partName) {
   if (partName === '_rels/.rels') return '';
   const marker = '/_rels/';
@@ -195,30 +567,222 @@ function internalRelationshipTarget(partName, target) {
   ));
 }
 
+function relationshipRecords(root, partName) {
+  const records = descendants(root, 'Relationship').map(node => {
+    const targetMode = String(attribute(node, 'TargetMode') || '');
+    const target = String(attribute(node, 'Target') || '');
+    return {
+      id: String(attribute(node, 'Id') || ''),
+      type: String(attribute(node, 'Type') || ''),
+      target,
+      targetMode,
+      resolvedTarget: targetMode.toLowerCase() === 'external'
+        ? null
+        : internalRelationshipTarget(partName, target),
+    };
+  });
+  const relationshipIds = new Set();
+  for (const record of records) {
+    if (!record.id || relationshipIds.has(record.id)) fail('invalid_ooxml_package');
+    relationshipIds.add(record.id);
+  }
+  return records.sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)));
+}
+
+function contentTypeMaps(root) {
+  const overrides = new Map();
+  for (const node of descendants(root, 'Override')) {
+    const partName = String(attribute(node, 'PartName') || '').replace(/^\//, '');
+    const contentType = String(attribute(node, 'ContentType') || '');
+    if (!partName || !contentType || overrides.has(partName)) fail('invalid_ooxml_package');
+    overrides.set(partName, contentType);
+  }
+  const defaults = new Map();
+  for (const node of descendants(root, 'Default')) {
+    const extension = String(attribute(node, 'Extension') || '').toLowerCase();
+    const contentType = String(attribute(node, 'ContentType') || '');
+    if (!extension || !contentType || defaults.has(extension)) fail('invalid_ooxml_package');
+    defaults.set(extension, contentType);
+  }
+  return { overrides, defaults };
+}
+
+function contentTypeForPart(maps, partName) {
+  if (maps.overrides.has(partName)) return maps.overrides.get(partName);
+  const basename = path.posix.basename(partName);
+  const standardExtension = path.posix.extname(basename).slice(1);
+  const extension = (standardExtension || (basename.startsWith('.') ? basename.slice(1) : ''))
+    .toLowerCase();
+  return maps.defaults.get(extension) || null;
+}
+
+function partContentTypes(zip, root) {
+  const maps = contentTypeMaps(root);
+  const result = new Map();
+  for (const name of Object.keys(zip.files).sort()) {
+    if (zip.files[name].dir || name === '[Content_Types].xml') continue;
+    result.set(name, contentTypeForPart(maps, name));
+  }
+  return result;
+}
+
+async function vbaPartNames(zip, contentTypesRoot) {
+  const names = new Set();
+  const maps = contentTypeMaps(contentTypesRoot);
+  for (const [partName, contentType] of maps.overrides) {
+    if (/vbaProject/i.test(contentType)) names.add(partName);
+  }
+  for (const [extension, contentType] of maps.defaults) {
+    if (!/vbaProject/i.test(contentType)) continue;
+    for (const name of Object.keys(zip.files)) {
+      if (path.posix.extname(name).slice(1).toLowerCase() === extension) names.add(name);
+    }
+  }
+  for (const partName of Object.keys(zip.files)) {
+    if (!partName.endsWith('.rels') || zip.files[partName].dir) continue;
+    const root = await parseXml(zip, partName);
+    for (const record of relationshipRecords(root, partName)) {
+      if (/\/vbaProject$/i.test(record.type) && record.resolvedTarget) {
+        names.add(record.resolvedTarget);
+      }
+    }
+  }
+  return names;
+}
+
 async function assertRelationshipTargets(zip) {
   const relationshipParts = Object.keys(zip.files)
     .filter(name => !zip.files[name].dir && name.endsWith('.rels'))
     .sort();
   for (const partName of relationshipParts) {
     const root = await parseXml(zip, partName);
-    for (const relationship of descendants(root, 'Relationship')) {
-      if (String(attribute(relationship, 'TargetMode') || '').toLowerCase() === 'external') {
-        continue;
-      }
-      const targetPart = internalRelationshipTarget(
-        partName,
-        attribute(relationship, 'Target'),
-      );
-      if (!zip.file(targetPart)) fail('relationship_target_missing');
+    for (const relationship of relationshipRecords(root, partName)) {
+      if (relationship.targetMode.toLowerCase() === 'external') continue;
+      if (!zip.file(relationship.resolvedTarget)) fail('relationship_target_missing');
     }
   }
 }
 
-function protectedHashes(zip) {
+async function assertRequiredWorkbookRelationships(
+  zip,
+  contentTypesRoot,
+  { sharedStringIndexes = [] } = {},
+) {
+  const relationshipsRoot = await parseXml(zip, WORKBOOK_RELATIONSHIPS_PART);
+  const records = relationshipRecords(relationshipsRoot, WORKBOOK_RELATIONSHIPS_PART);
+  const contentTypes = contentTypeMaps(contentTypesRoot);
+  const sharedStringsRelationships = records.filter(
+    record => /\/sharedStrings$/i.test(record.type),
+  );
+  if (
+    sharedStringsRelationships.length > 1
+    || sharedStringsRelationships.some(
+    record => record.resolvedTarget !== SHARED_STRINGS_PART,
+    )
+  ) fail('invalid_ooxml_package');
+
+  const sharedStrings = sharedStringsRelationships[0];
+  if (sharedStringIndexes.length > 0 && !sharedStrings) fail('invalid_ooxml_package');
+  if (sharedStrings) {
+    if (
+      !sharedStrings.resolvedTarget
+      || !zip.file(sharedStrings.resolvedTarget)
+      || contentTypeForPart(contentTypes, sharedStrings.resolvedTarget)
+        !== 'application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml'
+    ) fail('invalid_ooxml_package');
+
+    const sharedStringsRoot = await parseXml(zip, sharedStrings.resolvedTarget);
+    if (localName(sharedStringsRoot.name) !== 'sst') fail('invalid_ooxml_package');
+    const sharedStringCount = elementChildren(sharedStringsRoot, 'si').length;
+    if (sharedStringIndexes.some(index => index >= sharedStringCount)) {
+      fail('invalid_ooxml_package');
+    }
+  }
+
+  if (zip.file('xl/styles.xml')) {
+    const styles = records.find(record => /\/styles$/i.test(record.type));
+    if (!styles || styles.resolvedTarget !== 'xl/styles.xml') fail('invalid_ooxml_package');
+    if (contentTypeForPart(contentTypes, 'xl/styles.xml')
+      !== 'application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml') {
+      fail('content_types_changed');
+    }
+  }
+}
+
+async function inspectWorkbookSheets(zip) {
+  const workbookRoot = await parseXml(zip, 'xl/workbook.xml');
+  if (localName(workbookRoot.name) !== 'workbook') fail('invalid_ooxml_package');
+  const sheetsNodes = elementChildren(workbookRoot, 'sheets');
+  if (sheetsNodes.length !== 1) fail('invalid_ooxml_package');
+  const sheetNodes = elementChildren(sheetsNodes[0]);
+  if (
+    sheetNodes.length === 0
+    || sheetNodes.some(node => localName(node.name) !== 'sheet')
+  ) fail('invalid_ooxml_package');
+
+  const relationshipsRoot = await parseXml(zip, WORKBOOK_RELATIONSHIPS_PART);
+  const relationships = new Map(relationshipRecords(
+    relationshipsRoot,
+    WORKBOOK_RELATIONSHIPS_PART,
+  ).map(record => [record.id, record]));
+  const sheetNames = new Set();
+  const sheetIds = new Set();
+  const partIndexes = new Set();
+  const sheetRecords = sheetNodes.map(node => {
+    const name = String(attribute(node, 'name') || '');
+    const sheetId = Number(attribute(node, 'sheetId'));
+    const relationshipId = String(attribute(node, 'r:id') || '');
+    const relationship = relationships.get(relationshipId);
+    const partMatch = relationship?.resolvedTarget?.match(
+      /^xl\/worksheets\/sheet([1-9]\d*)\.xml$/,
+    );
+    if (
+      !name
+      || !Number.isSafeInteger(sheetId)
+      || sheetId < 1
+      || sheetNames.has(name)
+      || sheetIds.has(sheetId)
+      || !relationship
+      || !/\/worksheet$/i.test(relationship.type)
+      || !partMatch
+    ) fail('invalid_ooxml_package');
+    const partIndex = Number(partMatch[1]);
+    if (
+      !Number.isSafeInteger(partIndex)
+      || partIndex < 1
+      || partIndex > sheetNodes.length
+      || partIndexes.has(partIndex)
+    ) fail('invalid_ooxml_package');
+    sheetNames.add(name);
+    sheetIds.add(sheetId);
+    partIndexes.add(partIndex);
+    return { node, relationshipId, partIndex };
+  });
+  if (partIndexes.size !== sheetNodes.length) fail('invalid_ooxml_package');
+
+  return {
+    workbookRoot,
+    sheetsNode: sheetsNodes[0],
+    sheetRecords,
+    needsCanonicalOrder: sheetRecords.some(
+      (record, index) => record.partIndex !== index + 1,
+    ),
+  };
+}
+
+async function protectedHashes(zip, contentTypesRoot) {
   const hashes = new Map();
+  const dynamicVbaParts = await vbaPartNames(zip, contentTypesRoot);
   for (const name of Object.keys(zip.files).sort()) {
     const file = zip.files[name];
-    if (file.dir || !PROTECTED.some(pattern => pattern.test(name))) continue;
+    const relationshipProtected = RELATIONSHIP_PART.test(name)
+      && name !== WORKBOOK_RELATIONSHIPS_PART;
+    if (
+      file.dir
+      || (!relationshipProtected
+        && !dynamicVbaParts.has(name)
+        && !PROTECTED.some(pattern => pattern.test(name)))
+    ) continue;
     const data = Buffer.from(file.asUint8Array());
     hashes.set(name, crypto.createHash('sha256').update(data).digest('hex'));
   }
@@ -228,6 +792,8 @@ function protectedHashes(zip) {
 async function loadPackage(filePath, {
   maxCompressedBytes = DEFAULT_MAX_COMPRESSED_BYTES,
   maxUncompressedBytes = DEFAULT_MAX_UNCOMPRESSED_BYTES,
+  maxEntryCount = DEFAULT_MAX_ENTRY_COUNT,
+  maxCellCount = DEFAULT_MAX_CELL_COUNT,
   validateRelationships = true,
 } = {}) {
   let buffer;
@@ -240,6 +806,8 @@ async function loadPackage(filePath, {
     fail('invalid_ooxml_package');
   }
 
+  const zipDirectory = preflightZipDirectory(buffer, maxEntryCount);
+
   let zip;
   try {
     zip = new PizZip(buffer);
@@ -251,38 +819,175 @@ async function loadPackage(filePath, {
   }
 
   let uncompressedBytes = 0;
-  try {
-    for (const file of Object.values(zip.files)) {
-      if (file.dir) continue;
-      const recordedSize = file._data && Number(file._data.uncompressedSize);
-      const size = Number.isFinite(recordedSize)
-        ? recordedSize
-        : file.asUint8Array().byteLength;
-      uncompressedBytes += size;
-      if (uncompressedBytes > maxUncompressedBytes) fail('package_too_large');
-    }
-  } catch (error) {
-    if (error instanceof WorkbookIntegrityError) throw error;
-    fail('invalid_ooxml_package');
+  const entryNames = Object.keys(zip.files);
+  if (entryNames.length > maxEntryCount) fail('package_too_large');
+  const cellCounter = { count: 0, max: maxCellCount, tail: '' };
+  for (const name of entryNames) {
+    const file = zip.files[name];
+    if (file.dir) continue;
+    const worksheetCounter = /^xl\/worksheets\/[^/]+\.xml$/i.test(name)
+      ? cellCounter
+      : null;
+    uncompressedBytes += await measureZipEntry(
+      file,
+      maxUncompressedBytes - uncompressedBytes,
+      worksheetCounter,
+      zipDirectory.entries.get(name),
+    );
   }
 
-  if (validateRelationships) await assertRelationshipTargets(zip);
+  const contentTypesRoot = await parseXml(zip, '[Content_Types].xml');
+  const contentTypes = partContentTypes(zip, contentTypesRoot);
+  if ([...contentTypes.values()].some(contentType => !contentType)) {
+    fail('invalid_ooxml_package');
+  }
+  const worksheetInspection = await assertWorksheetCoordinates(zip);
+  let workbookSheetInspection = null;
+  if (validateRelationships) {
+    await assertRelationshipTargets(zip);
+    await assertRequiredWorkbookRelationships(zip, contentTypesRoot, worksheetInspection);
+    workbookSheetInspection = await inspectWorkbookSheets(zip);
+  }
 
   return {
     buffer,
     zip,
     compressedBytes: buffer.length,
     uncompressedBytes,
-    protectedParts: protectedHashes(zip),
+    cellCount: cellCounter.count,
+    contentTypesRoot,
+    contentTypes,
+    workbookSheetInspection,
+    worksheetInspection,
+    protectedParts: await protectedHashes(zip, contentTypesRoot),
   };
 }
 
+async function assertExpectedWorkbookType(loaded, expectedExtension) {
+  if (expectedExtension === undefined) return;
+  const normalizedExtension = String(expectedExtension).toLowerCase();
+  if (!['.xlsx', '.xlsm'].includes(normalizedExtension)) fail('workbook_type_mismatch');
+  const vbaParts = await vbaPartNames(loaded.zip, loaded.contentTypesRoot);
+  const expectedContentType = normalizedExtension === '.xlsm'
+    ? XLSM_WORKBOOK_CONTENT_TYPE
+    : XLSX_WORKBOOK_CONTENT_TYPE;
+  const matches = loaded.contentTypes.get('xl/workbook.xml') === expectedContentType
+    && (normalizedExtension === '.xlsm' || vbaParts.size === 0);
+  if (!matches) fail('workbook_type_mismatch');
+}
+
+async function xlsxPopulateCompatibleBuffer(loaded) {
+  const rowXmlParts = loaded.worksheetInspection.rowXmlParts;
+  const hasRowExtensions = [...rowXmlParts.values()].some(
+    part => part.extensions.size > 0,
+  );
+  const needsCanonicalSheetOrder = Boolean(
+    loaded.workbookSheetInspection?.needsCanonicalOrder,
+  );
+  if (!hasRowExtensions && !needsCanonicalSheetOrder) {
+    return loaded.buffer;
+  }
+
+  const zip = new PizZip(loaded.buffer);
+  for (const [partName, rowXml] of rowXmlParts) {
+    if (rowXml.extensions.size === 0) continue;
+    const xml = zip.file(partName).asText();
+    zip.file(partName, replaceXmlRanges(
+      xml,
+      [...rowXml.extensions.values()].map(extension => ({
+        start: extension.start,
+        end: extension.end,
+        value: '',
+      })),
+    ));
+  }
+  if (needsCanonicalSheetOrder) {
+    const workbookRoot = await parseXml(zip, 'xl/workbook.xml');
+    const sheetsNodes = elementChildren(workbookRoot, 'sheets');
+    if (sheetsNodes.length !== 1) fail('invalid_ooxml_package');
+    const partIndexByRelationship = new Map(
+      loaded.workbookSheetInspection.sheetRecords.map(record => [
+        record.relationshipId,
+        record.partIndex,
+      ]),
+    );
+    sheetsNodes[0].children = [...sheetsNodes[0].children].sort((left, right) => {
+      const leftIndex = partIndexByRelationship.get(String(attribute(left, 'r:id') || ''));
+      const rightIndex = partIndexByRelationship.get(String(attribute(right, 'r:id') || ''));
+      if (!leftIndex || !rightIndex) fail('invalid_ooxml_package');
+      return leftIndex - rightIndex;
+    });
+    zip.file('xl/workbook.xml', new XmlBuilder().build(workbookRoot));
+  }
+  return zip.generate({ type: 'nodebuffer', compression: 'DEFLATE' });
+}
+
+async function loadWorkbookForProcessing(filePath, limits = {}) {
+  const { expectedExtension, ...packageLimits } = limits;
+  const loaded = await loadPackage(filePath, packageLimits);
+  await assertExpectedWorkbookType(loaded, expectedExtension);
+  try {
+    return await XlsxPopulate.fromDataAsync(await xlsxPopulateCompatibleBuffer(loaded));
+  } catch (error) {
+    if (error instanceof WorkbookIntegrityError) throw error;
+    fail('invalid_ooxml_package');
+  }
+}
+
 async function assertPackageLimits(filePath, limits = {}) {
-  const loaded = await loadPackage(filePath, limits);
+  const { expectedExtension, ...packageLimits } = limits;
+  const loaded = await loadPackage(filePath, packageLimits);
+  await assertExpectedWorkbookType(loaded, expectedExtension);
   return {
     compressedBytes: loaded.compressedBytes,
     uncompressedBytes: loaded.uncompressedBytes,
+    entryCount: Object.keys(loaded.zip.files).length,
+    cellCount: loaded.cellCount,
   };
+}
+
+function restoreWorksheetRowExtensions(input, output) {
+  const inputParts = input.worksheetInspection.rowXmlParts;
+  const outputParts = output.worksheetInspection.rowXmlParts;
+  for (const [partName, outputPart] of outputParts) {
+    const inputPart = inputParts.get(partName);
+    for (const [rowNumber, extension] of outputPart.extensions) {
+      if (inputPart?.extensions.get(rowNumber)?.xml !== extension.xml) {
+        fail('sheet_structure_changed');
+      }
+    }
+  }
+
+  for (const [partName, inputPart] of inputParts) {
+    if (inputPart.extensions.size === 0) continue;
+    const outputPart = outputParts.get(partName);
+    const outputFile = output.zip.file(partName);
+    if (!outputPart || !outputFile) fail('sheet_structure_changed');
+    const xml = outputFile.asText();
+    const replacements = [];
+    for (const [rowNumber, extension] of inputPart.extensions) {
+      const existing = outputPart.extensions.get(rowNumber);
+      if (existing) {
+        replacements.push({ start: existing.start, end: existing.end, value: extension.xml });
+        continue;
+      }
+      const row = outputPart.rows.get(rowNumber);
+      if (!row) fail('sheet_structure_changed');
+      if (row.selfClosing) {
+        const startTag = xml.slice(row.start, row.startTagEnd);
+        if (!/\/\s*>$/.test(startTag)) fail('sheet_structure_changed');
+        replacements.push({
+          start: row.start,
+          end: row.startTagEnd,
+          value: `${startTag.replace(/\/\s*>$/, '>')}${extension.xml}</${row.name}>`,
+        });
+      } else {
+        if (!Number.isInteger(row.closeStart)) fail('sheet_structure_changed');
+        replacements.push({ start: row.closeStart, end: row.closeStart, value: extension.xml });
+      }
+    }
+    output.zip.file(partName, replaceXmlRanges(xml, replacements));
+  }
 }
 
 async function restoreProtectedParts(inputPath, outputPath) {
@@ -300,6 +1005,7 @@ async function restoreProtectedParts(inputPath, outputPath) {
   for (const name of inputNames) {
     output.zip.file(name, Buffer.from(input.zip.file(name).asUint8Array()));
   }
+  restoreWorksheetRowExtensions(input, output);
   await fs.writeFile(outputPath, output.zip.generate({
     type: 'nodebuffer',
     compression: 'DEFLATE',
@@ -365,29 +1071,39 @@ function relationTarget(target) {
   return path.posix.normalize(path.posix.join('xl', raw));
 }
 
-function worksheetXmlSnapshot(root) {
-  const cells = descendants(root, 'c');
+function worksheetXmlSnapshot(root, rowXml) {
+  const rowNodes = worksheetRows(root);
+  const cells = rowNodes.flatMap(row => elementChildren(row, 'c'));
+  if (cells.length > DEFAULT_MAX_CELL_COUNT) fail('package_too_large');
   const formulas = [];
   const cellStyles = [];
+  const cellReferences = [];
   for (const cell of cells) {
     const reference = String(attribute(cell, 'r') || '');
+    if (!reference) fail('invalid_ooxml_package');
+    cellReferences.push(reference);
     cellStyles.push([reference, String(attribute(cell, 's') ?? '0')]);
     const formula = elementChildren(cell, 'f')[0];
     if (formula) formulas.push([reference, canonicalNode(formula)]);
   }
   formulas.sort(([left], [right]) => left.localeCompare(right));
   cellStyles.sort(([left], [right]) => left.localeCompare(right));
+  cellReferences.sort((left, right) => left.localeCompare(right));
 
-  const merges = descendants(root, 'mergeCell')
+  const mergeCellsNode = elementChildren(root, 'mergeCells')[0];
+  const merges = elementChildren(mergeCellsNode, 'mergeCell')
     .map(node => String(attribute(node, 'ref') || ''))
     .sort();
-  const rows = descendants(root, 'row')
+  const rows = rowNodes
     .map(node => ({
       reference: String(attribute(node, 'r') || ''),
       attributes: canonicalNode({ name: 'row', attributes: node.attributes, children: [] }).attributes,
+      extensionList: rowXml.extensions.get(
+        worksheetRowNumber(attribute(node, 'r')),
+      )?.xml || null,
     }))
     .sort((left, right) => left.reference.localeCompare(right.reference, undefined, { numeric: true }));
-  const columnsNode = firstDescendant(root, 'cols');
+  const columnsNode = elementChildren(root, 'cols')[0];
   const structures = elementChildren(root)
     .filter(node => WORKSHEET_STRUCTURE_NODES.has(localName(node.name)))
     .map(canonicalNode)
@@ -401,6 +1117,7 @@ function worksheetXmlSnapshot(root) {
     merges,
     formulas,
     cellStyles,
+    cellReferences,
     dimensions: {
       rows,
       columns: columnsNode ? canonicalNode(columnsNode) : null,
@@ -409,31 +1126,39 @@ function worksheetXmlSnapshot(root) {
   };
 }
 
-function displayedCellValues(sheet, formulaReferences) {
+function displayedCellValues(sheet, formulaReferences, cellReferences) {
   const values = [];
-  const range = sheet.usedRange();
-  if (!range) return values;
   const formulas = new Set(formulaReferences);
-  range.forEach(cell => {
-    const reference = cell.address();
-    if (formulas.has(reference)) return;
+  for (const reference of cellReferences) {
+    if (formulas.has(reference)) continue;
+    const cell = sheet.cell(reference);
     values.push([reference, normalizeValue(cell.value())]);
-  });
+  }
   values.sort(([left], [right]) => left.localeCompare(right));
   return values;
 }
 
 async function snapshotFromPackage(loaded) {
-  const { zip, buffer } = loaded;
-  const contentTypes = await parseXml(zip, '[Content_Types].xml');
+  const { zip } = loaded;
+  const contentTypes = loaded.contentTypesRoot;
   const workbookRoot = await parseXml(zip, 'xl/workbook.xml');
   const relationshipsRoot = await parseXml(zip, 'xl/_rels/workbook.xml.rels');
+  const workbookRelationships = relationshipRecords(
+    relationshipsRoot,
+    WORKBOOK_RELATIONSHIPS_PART,
+  );
   const relationshipMap = new Map(descendants(relationshipsRoot, 'Relationship').map(node => [
     String(attribute(node, 'Id') || ''),
     relationTarget(attribute(node, 'Target')),
   ]));
   const sheetNodes = descendants(workbookRoot, 'sheet');
-  const workbook = await XlsxPopulate.fromDataAsync(buffer);
+  let workbook;
+  try {
+    workbook = await XlsxPopulate.fromDataAsync(await xlsxPopulateCompatibleBuffer(loaded));
+  } catch (error) {
+    if (error instanceof WorkbookIntegrityError) throw error;
+    fail('invalid_ooxml_package');
+  }
   const sheets = [];
 
   for (const sheetNode of sheetNodes) {
@@ -442,7 +1167,9 @@ async function snapshotFromPackage(loaded) {
     const partName = relationshipMap.get(relationshipId);
     if (!partName || !zip.file(partName)) fail('invalid_ooxml_package');
     const worksheetRoot = await parseXml(zip, partName);
-    const xmlSnapshot = worksheetXmlSnapshot(worksheetRoot);
+    const rowXml = loaded.worksheetInspection.rowXmlParts.get(partName);
+    if (!rowXml) fail('invalid_ooxml_package');
+    const xmlSnapshot = worksheetXmlSnapshot(worksheetRoot, rowXml);
     const sheet = workbook.sheet(name);
     if (!sheet) fail('invalid_ooxml_package');
     sheets.push({
@@ -455,7 +1182,11 @@ async function snapshotFromPackage(loaded) {
       cellStyles: xmlSnapshot.cellStyles,
       dimensions: xmlSnapshot.dimensions,
       structures: xmlSnapshot.structures,
-      values: displayedCellValues(sheet, xmlSnapshot.formulas.map(([reference]) => reference)),
+      values: displayedCellValues(
+        sheet,
+        xmlSnapshot.formulas.map(([reference]) => reference),
+        xmlSnapshot.cellReferences,
+      ),
     });
   }
 
@@ -466,6 +1197,8 @@ async function snapshotFromPackage(loaded) {
     : null;
   return {
     macro: macroSnapshot(contentTypes),
+    contentTypes: loaded.contentTypes,
+    workbookRelationships,
     protectedParts: loaded.protectedParts,
     sheetMetadata: sheets.map(sheet => ({
       name: sheet.name,
@@ -489,6 +1222,28 @@ function compareProtectedParts(input, output) {
   if (!same(inputNames, outputNames)) fail('protected_part_set_changed');
   for (const name of inputNames) {
     if (input.get(name) !== output.get(name)) fail('protected_part_changed');
+  }
+}
+
+function compareContentTypes(input, output) {
+  for (const [partName, contentType] of input) {
+    if (output.get(partName) !== contentType) fail('content_types_changed');
+  }
+  for (const partName of output.keys()) {
+    if (input.has(partName)) continue;
+    if (partName !== 'xl/sharedStrings.xml') fail('content_types_changed');
+  }
+}
+
+function compareWorkbookRelationships(input, output) {
+  const outputRecords = new Set(output.map(record => JSON.stringify(record)));
+  for (const record of input) {
+    if (!outputRecords.has(JSON.stringify(record))) fail('workbook_relationships_changed');
+  }
+  const inputRecords = new Set(input.map(record => JSON.stringify(record)));
+  for (const record of output) {
+    if (inputRecords.has(JSON.stringify(record))) continue;
+    if (!/\/sharedStrings$/i.test(record.type)) fail('workbook_relationships_changed');
   }
 }
 
@@ -520,6 +1275,8 @@ async function validateWorkbookIntegrity({
     snapshotFromPackage(outputPackage),
   ]);
   if (!same(input.macro, output.macro)) fail('macro_container_changed');
+  compareContentTypes(input.contentTypes, output.contentTypes);
+  compareWorkbookRelationships(input.workbookRelationships, output.workbookRelationships);
   if (!same(input.sheetMetadata, output.sheetMetadata)) fail('sheet_structure_changed');
   if (!same(input.definedNames, output.definedNames)) fail('defined_names_changed');
   if (!same(input.styles, output.styles)) fail('styles_changed');
@@ -541,9 +1298,12 @@ async function validateWorkbookIntegrity({
 module.exports = {
   DEFAULT_MAX_COMPRESSED_BYTES,
   DEFAULT_MAX_UNCOMPRESSED_BYTES,
+  DEFAULT_MAX_ENTRY_COUNT,
+  DEFAULT_MAX_CELL_COUNT,
   PROTECTED,
   WorkbookIntegrityError,
   assertPackageLimits,
+  loadWorkbookForProcessing,
   restoreProtectedParts,
   snapshotWorkbook,
   validateWorkbookIntegrity,

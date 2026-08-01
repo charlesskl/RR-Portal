@@ -20,25 +20,59 @@ function createTranslationProvider({
   translateFn = require('google-translate-api-x'),
   batchSize = 25,
   timeoutMs = 15_000,
+  abortGraceMs = 250,
   retryCount = 2,
   sleep = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds)),
   logger = console,
 } = {}) {
   const safeBatchSize = Math.max(1, Math.floor(batchSize));
   const safeRetryCount = Math.max(0, Math.floor(retryCount));
+  const safeTimeoutMs = Math.max(1, Math.floor(timeoutMs));
+  const safeAbortGraceMs = Math.max(0, Math.floor(abortGraceMs));
+  const timeoutResult = Symbol('translation-timeout');
+
+  async function waitForAbortSettlement(attempt) {
+    const settled = attempt.then(() => undefined, () => undefined);
+    if (safeAbortGraceMs === 0) return;
+    let graceTimer;
+    try {
+      await Promise.race([
+        settled,
+        new Promise(resolve => {
+          graceTimer = setTimeout(resolve, safeAbortGraceMs);
+        }),
+      ]);
+    } finally {
+      clearTimeout(graceTimer);
+    }
+  }
 
   async function withTimeout(operation) {
+    const controller = new AbortController();
+    const attempt = Promise.resolve().then(() => operation(controller.signal));
     let timer;
+    let result;
     try {
-      return await Promise.race([
-        Promise.resolve().then(operation),
-        new Promise((resolve, reject) => {
-          timer = setTimeout(() => reject(new TranslationTimeoutError()), timeoutMs);
+      result = await Promise.race([
+        attempt.then(
+          value => ({ status: 'fulfilled', value }),
+          reason => ({ status: 'rejected', reason }),
+        ),
+        new Promise(resolve => {
+          timer = setTimeout(() => resolve(timeoutResult), safeTimeoutMs);
         }),
       ]);
     } finally {
       clearTimeout(timer);
     }
+
+    if (result === timeoutResult) {
+      controller.abort();
+      await waitForAbortSettlement(attempt);
+      throw new TranslationTimeoutError();
+    }
+    if (result.status === 'rejected') throw result.reason;
+    return result.value;
   }
 
   async function withRetries(operation) {
@@ -80,9 +114,9 @@ function createTranslationProvider({
 
   async function translateChunk(chunk, languagePair, results) {
     try {
-      const raw = await withRetries(() => translateFn(
+      const raw = await withRetries(signal => translateFn(
         chunk.map(request => request.text),
-        languagePair,
+        { ...languagePair, requestOptions: { signal } },
       ));
       const translated = normalizeBatch(raw, chunk.length);
       chunk.forEach((request, index) => saveSuccess(results, request, translated[index]));
@@ -97,7 +131,10 @@ function createTranslationProvider({
 
     for (const request of chunk) {
       try {
-        const raw = await withRetries(() => translateFn(request.text, languagePair));
+        const raw = await withRetries(signal => translateFn(
+          request.text,
+          { ...languagePair, requestOptions: { signal } },
+        ));
         const translated = normalizeBatch(raw, 1);
         saveSuccess(results, request, translated[0]);
       } catch (error) {

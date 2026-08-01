@@ -26,7 +26,11 @@ test('groups equal language pairs into batches and preserves request ids', async
 
   assert.equal(calls.length, 3);
   assert.deepEqual(calls[0].texts, ['甲', '乙']);
-  assert.deepEqual(calls[0].opts, { from: 'zh-CN', to: 'en' });
+  assert.equal(calls[0].opts.from, 'zh-CN');
+  assert.equal(calls[0].opts.to, 'en');
+  assert.ok(calls.every(call => (
+    call.opts.requestOptions?.signal instanceof AbortSignal
+  )));
   assert.equal(result.get('r1').text, 'T:甲');
   assert.equal(result.get('r1').detectedLanguage, 'zh-CN');
   assert.equal(result.get('r4').text, 'T:Truck');
@@ -81,7 +85,15 @@ test('falls back to individual requests and isolates a final item failure', asyn
 
 test('times out stalled batch and individual calls', async () => {
   const provider = createTranslationProvider({
-    translateFn: async () => new Promise(() => {}),
+    translateFn: async (_texts, options) => new Promise((resolve, reject) => {
+      const signal = options.requestOptions && options.requestOptions.signal;
+      if (!signal) return;
+      signal.addEventListener('abort', () => {
+        const error = new Error('request aborted');
+        error.name = 'AbortError';
+        reject(error);
+      }, { once: true });
+    }),
     timeoutMs: 5,
     retryCount: 0,
     sleep: async () => {},
@@ -94,4 +106,129 @@ test('times out stalled batch and individual calls', async () => {
 
   assert.deepEqual(result.get('slow'), { error: 'translation_failed' });
   assert.ok(Date.now() - startedAt < 200);
+});
+
+test('continues after a bounded abort grace when the request ignores abort', async () => {
+  let calls = 0;
+  const provider = createTranslationProvider({
+    translateFn: async () => {
+      calls += 1;
+      return new Promise(() => {});
+    },
+    timeoutMs: 5,
+    abortGraceMs: 5,
+    retryCount: 0,
+    sleep: async () => {},
+    logger: silentLogger,
+  });
+  const startedAt = Date.now();
+  const result = await provider.translateMany([
+    { id: 'ignores-abort', text: 'Slow', from: 'auto', to: 'zh-CN' },
+  ]);
+
+  assert.deepEqual(result.get('ignores-abort'), { error: 'translation_failed' });
+  assert.equal(calls, 2); // one batch attempt, then one isolated fallback attempt
+  assert.ok(Date.now() - startedAt < 200);
+});
+
+test('aborts and settles a timed-out request before starting its retry', async () => {
+  let attempts = 0;
+  let active = 0;
+  let maxActive = 0;
+  let aborts = 0;
+  let settlements = 0;
+  const order = [];
+  const provider = createTranslationProvider({
+    translateFn: (texts, options) => {
+      attempts += 1;
+      const attempt = attempts;
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      order.push(`start-${attempt}`);
+
+      if (attempt > 1) {
+        active -= 1;
+        return Promise.resolve(
+          texts.map(text => ({ text: `OK:${text}`, ...detected('en') })),
+        );
+      }
+
+      return new Promise((resolve, reject) => {
+        const signal = options.requestOptions && options.requestOptions.signal;
+        if (!signal) return;
+        signal.addEventListener('abort', () => {
+          aborts += 1;
+          order.push(`abort-${attempt}`);
+          setImmediate(() => {
+            active -= 1;
+            settlements += 1;
+            order.push(`settle-${attempt}`);
+            const error = new Error('request aborted');
+            error.name = 'AbortError';
+            reject(error);
+          });
+        }, { once: true });
+      });
+    },
+    timeoutMs: 5,
+    retryCount: 1,
+    sleep: async () => {},
+    logger: silentLogger,
+  });
+
+  const result = await provider.translateMany([
+    { id: 'retry-after-timeout', text: 'Truck', from: 'auto', to: 'zh-CN' },
+  ]);
+
+  assert.equal(result.get('retry-after-timeout').text, 'OK:Truck');
+  assert.equal(attempts, 2);
+  assert.equal(aborts, 1);
+  assert.equal(settlements, 1);
+  assert.equal(maxActive, 1);
+  assert.deepEqual(order, ['start-1', 'abort-1', 'settle-1', 'start-2']);
+});
+
+test('settles a timed-out batch before starting individual fallback', async () => {
+  let active = 0;
+  let maxActive = 0;
+  let batchAborts = 0;
+  let batchSettlements = 0;
+  const provider = createTranslationProvider({
+    translateFn: (texts, options) => {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      if (!Array.isArray(texts)) {
+        active -= 1;
+        return Promise.resolve({ text: `OK:${texts}`, ...detected('en') });
+      }
+
+      return new Promise((resolve, reject) => {
+        const signal = options.requestOptions && options.requestOptions.signal;
+        if (!signal) return;
+        signal.addEventListener('abort', () => {
+          batchAborts += 1;
+          setImmediate(() => {
+            active -= 1;
+            batchSettlements += 1;
+            const error = new Error('batch aborted');
+            error.name = 'AbortError';
+            reject(error);
+          });
+        }, { once: true });
+      });
+    },
+    timeoutMs: 5,
+    retryCount: 0,
+    sleep: async () => {},
+    logger: silentLogger,
+  });
+
+  const result = await provider.translateMany([
+    { id: 'fallback-after-timeout', text: 'Truck', from: 'auto', to: 'zh-CN' },
+  ]);
+
+  assert.equal(result.get('fallback-after-timeout').text, 'OK:Truck');
+  assert.equal(batchAborts, 1);
+  assert.equal(batchSettlements, 1);
+  assert.equal(maxActive, 1);
 });

@@ -13,17 +13,19 @@ const ALLOWED_MIME_TYPES = new Set([
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   'application/vnd.ms-excel.sheet.macroEnabled.12',
   'application/octet-stream',
-]);
+].map(value => value.toLowerCase()));
 
 const ERROR_RESPONSES = {
   file_required: '请选择一个 Excel 文件',
   invalid_file_type: '只支持 .xlsx 或 .xlsm 文件',
   file_too_large: '上传文件超过大小限制',
   invalid_ooxml_package: '文件不是有效的 Excel 工作簿',
+  workbook_type_mismatch: '文件扩展名与实际 Excel 类型不一致',
   package_too_large: 'Excel 文件解压后超过大小限制',
   job_not_found: '任务不存在',
   job_not_ready: '任务尚未准备好',
   download_not_ready: '文件尚未生成',
+  job_capacity_reached: '任务数量已达上限，请稍后再试',
   job_conflict: '当前任务状态不允许此操作',
   internal_error: '服务器内部错误',
 };
@@ -47,7 +49,13 @@ function errorResponse(error) {
   }
   if (
     error instanceof WorkbookIntegrityError
-    || ['invalid_file_type', 'file_required', 'invalid_ooxml_package', 'package_too_large']
+    || [
+      'invalid_file_type',
+      'file_required',
+      'invalid_ooxml_package',
+      'package_too_large',
+      'workbook_type_mismatch',
+    ]
       .includes(error.code)
   ) {
     const code = Object.hasOwn(ERROR_RESPONSES, error.code)
@@ -89,7 +97,10 @@ function createExcelTranslationRouter({
       const safeName = path.basename(String(file.originalname || ''));
       const extension = path.extname(safeName).toLowerCase();
       file.originalname = safeName;
-      if (!['.xlsx', '.xlsm'].includes(extension) || !ALLOWED_MIME_TYPES.has(file.mimetype)) {
+      if (
+        !['.xlsx', '.xlsm'].includes(extension)
+        || !ALLOWED_MIME_TYPES.has(String(file.mimetype || '').toLowerCase())
+      ) {
         callback(codedError('invalid_file_type'));
         return;
       }
@@ -101,6 +112,13 @@ function createExcelTranslationRouter({
     if (req.file && req.file.path) await fs.unlink(req.file.path).catch(() => {});
   }
 
+  function releaseDownload(download) {
+    try {
+      const cleanup = download.release();
+      if (cleanup && typeof cleanup.catch === 'function') void cleanup.catch(() => {});
+    } catch {}
+  }
+
   router.post('/', (req, res) => {
     upload.single('file')(req, res, async uploadError => {
       if (uploadError) {
@@ -110,11 +128,12 @@ function createExcelTranslationRouter({
       }
       try {
         if (!req.file) throw codedError('file_required');
+        const extension = path.extname(req.file.originalname).toLowerCase();
         await assertPackageLimits(req.file.path, {
           maxCompressedBytes: limits.maxFileBytes,
           maxUncompressedBytes: limits.maxUncompressedBytes,
+          expectedExtension: extension,
         });
-        const extension = path.extname(req.file.originalname).toLowerCase();
         const view = await jobManager.createJob({
           ownerId: req.user.id,
           incomingPath: req.file.path,
@@ -158,21 +177,32 @@ function createExcelTranslationRouter({
   });
 
   router.get('/:jobId/download', (req, res) => {
+    let download;
     try {
-      const download = jobManager.getDownload(req.user.id, req.params.jobId);
+      download = jobManager.acquireDownload(req.user.id, req.params.jobId);
       res.setHeader('Content-Type', download.contentType);
       res.setHeader(
         'Content-Disposition',
         `attachment; filename*=UTF-8''${encodeURIComponent(download.fileName)}`,
       );
-      audit('excel_translation_download', req.user.id, {
-        jobId: req.params.jobId,
-        fileName: download.fileName,
-      });
       res.sendFile(download.path, error => {
-        if (error && !res.headersSent) sendError(res, error);
+        releaseDownload(download);
+        if (error) {
+          if (!res.headersSent) {
+            res.removeHeader('Content-Type');
+            res.removeHeader('Content-Disposition');
+            res.removeHeader('Content-Length');
+            sendError(res, error);
+          }
+          return;
+        }
+        audit('excel_translation_download', req.user.id, {
+          jobId: req.params.jobId,
+          fileName: download.fileName,
+        });
       });
     } catch (error) {
+      if (download) releaseDownload(download);
       sendError(res, error);
     }
   });

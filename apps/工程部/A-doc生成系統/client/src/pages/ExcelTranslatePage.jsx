@@ -29,14 +29,20 @@ import {
   canDownload,
   canStart,
   completionNotice,
+  createRequestLifecycle,
+  observeStoredTranslationJob,
+  persistCreatedTranslationJob,
   progressPercent,
+  readStoredTranslationJob,
+  removeStoredTranslationJob,
   shouldPoll,
+  startFailureRecovery,
   statusLabel,
+  translationControlsLocked,
 } from './excelTranslateState';
 
 const { Title, Paragraph, Text } = Typography;
 const { Dragger } = Upload;
-const JOB_STORAGE_KEY = 'excelTranslationJobId';
 
 function statusColor(status) {
   if (status === 'completed') return 'success';
@@ -46,13 +52,31 @@ function statusColor(status) {
   return 'processing';
 }
 
-export default function ExcelTranslatePage() {
-  const [jobId, setJobId] = useState(() => localStorage.getItem(JOB_STORAGE_KEY));
+export default function ExcelTranslatePage({ storageKey }) {
+  const [jobId, setJobId] = useState(() => readStoredTranslationJob(localStorage, storageKey));
   const [job, setJob] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [starting, setStarting] = useState(false);
   const [pollCycle, setPollCycle] = useState(0);
   const [networkError, setNetworkError] = useState(false);
+  const [reconcilingStart, setReconcilingStart] = useState(false);
+  const [requestLifecycle] = useState(() => createRequestLifecycle(storageKey));
+
+  useEffect(() => {
+    requestLifecycle.activate();
+    return () => requestLifecycle.invalidate();
+  }, [requestLifecycle]);
+
+  useEffect(() => observeStoredTranslationJob(
+    localStorage,
+    storageKey,
+    storedJobId => {
+      setJobId(storedJobId);
+      setJob(null);
+      setNetworkError(false);
+      setReconcilingStart(false);
+    },
+  ), [storageKey]);
 
   useEffect(() => {
     if (!jobId) return undefined;
@@ -64,15 +88,20 @@ export default function ExcelTranslatePage() {
         if (cancelled) return;
         setJob(response.data);
         setNetworkError(false);
+        setReconcilingStart(false);
         if (shouldPoll(response.data)) timer = window.setTimeout(poll, 10_000);
       } catch (error) {
         if (cancelled) return;
         if (error.response?.status === 404) {
-          localStorage.removeItem(JOB_STORAGE_KEY);
-          setJobId(null);
+          const removed = removeStoredTranslationJob(localStorage, storageKey, jobId);
+          const currentJobId = readStoredTranslationJob(localStorage, storageKey);
+          setJobId(currentJobId);
           setJob(null);
-          setNetworkError(false);
-          message.warning('翻译任务已过期，请重新上传文件');
+          if (removed) {
+            setNetworkError(false);
+            setReconcilingStart(false);
+            message.warning('翻译任务已过期，请重新上传文件');
+          }
         } else {
           setNetworkError(true);
           timer = window.setTimeout(poll, 10_000);
@@ -84,7 +113,7 @@ export default function ExcelTranslatePage() {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [jobId, pollCycle]);
+  }, [jobId, pollCycle, storageKey]);
 
   const handleUpload = async file => {
     const extension = file.name.slice(file.name.lastIndexOf('.')).toLowerCase();
@@ -93,36 +122,73 @@ export default function ExcelTranslatePage() {
       return false;
     }
 
+    const lifecycle = requestLifecycle;
+    const requestGeneration = lifecycle.begin();
+    const expectedJobId = readStoredTranslationJob(localStorage, storageKey);
     setUploading(true);
     setNetworkError(false);
     try {
       const formData = new FormData();
       formData.append('file', file);
       const response = await axios.post('/api/excel-translations', formData);
-      localStorage.setItem(JOB_STORAGE_KEY, response.data.jobId);
+      const isCurrent = lifecycle.isCurrent(requestGeneration);
+      const stored = lifecycle.shouldPersistCreatedJob(requestGeneration)
+        && persistCreatedTranslationJob({
+          storage: localStorage,
+          storageKey,
+          expectedJobId,
+          createdJobId: response.data.jobId,
+        });
+      if (!isCurrent) return false;
+      if (!stored) {
+        setJobId(readStoredTranslationJob(localStorage, storageKey));
+        setJob(null);
+        setPollCycle(cycle => cycle + 1);
+        return false;
+      }
       setJob(response.data);
       setJobId(response.data.jobId);
+      setReconcilingStart(false);
       setPollCycle(cycle => cycle + 1);
       message.success('文件已上传，正在扫描全部工作表');
     } catch (error) {
+      if (!lifecycle.isCurrent(requestGeneration)) return false;
       message.error(error.response?.data?.message || '上传失败，请检查文件格式');
     } finally {
-      setUploading(false);
+      if (lifecycle.isCurrent(requestGeneration)) setUploading(false);
     }
     return false;
   };
 
   const handleStart = async () => {
     if (!jobId) return;
+    const lifecycle = requestLifecycle;
+    const requestGeneration = lifecycle.begin();
+    const startedJobId = jobId;
     setStarting(true);
     try {
-      const response = await axios.post(`/api/excel-translations/${jobId}/start`);
+      const response = await axios.post(`/api/excel-translations/${startedJobId}/start`);
+      if (!lifecycle.isCurrent(requestGeneration)) return;
       setJob(response.data);
+      setReconcilingStart(false);
       setPollCycle(cycle => cycle + 1);
     } catch (error) {
-      message.error(error.response?.data?.message || '无法开始翻译');
+      if (!lifecycle.isCurrent(requestGeneration)) return;
+      if (startFailureRecovery(error.response?.status) === 'expire') {
+        removeStoredTranslationJob(localStorage, storageKey, startedJobId);
+        setJobId(readStoredTranslationJob(localStorage, storageKey));
+        setJob(null);
+        setNetworkError(false);
+        setReconcilingStart(false);
+        message.warning('翻译任务已过期，请重新上传文件');
+      } else {
+        setReconcilingStart(true);
+        setNetworkError(!error.response);
+        setPollCycle(cycle => cycle + 1);
+        message.warning('启动结果未确认，正在同步任务状态');
+      }
     } finally {
-      setStarting(false);
+      if (lifecycle.isCurrent(requestGeneration)) setStarting(false);
     }
   };
 
@@ -136,14 +202,16 @@ export default function ExcelTranslatePage() {
   };
 
   const reset = () => {
-    localStorage.removeItem(JOB_STORAGE_KEY);
-    setJobId(null);
+    removeStoredTranslationJob(localStorage, storageKey, jobId);
+    setJobId(readStoredTranslationJob(localStorage, storageKey));
     setJob(null);
     setNetworkError(false);
+    setReconcilingStart(false);
   };
 
   const notice = completionNotice(job);
   const active = job && shouldPoll(job);
+  const controlsLocked = translationControlsLocked({ job, starting, reconcilingStart });
 
   return (
     <Space orientation="vertical" size={20} style={{ width: '100%' }}>
@@ -181,9 +249,25 @@ export default function ExcelTranslatePage() {
         </Card>
       )}
 
-      {jobId && !job && (
+      {jobId && !job && !networkError && (
         <Card>
           <Space><Spin /><Text>正在恢复翻译任务…</Text></Space>
+        </Card>
+      )}
+
+      {jobId && !job && networkError && (
+        <Card>
+          <Alert
+            type="error"
+            showIcon
+            title="暂时无法恢复翻译任务"
+            description="网络恢复后会自动重试，也可以立即重新查询任务状态。"
+            action={(
+              <Button size="small" onClick={() => setPollCycle(cycle => cycle + 1)}>
+                立即重试
+              </Button>
+            )}
+          />
         </Card>
       )}
 
@@ -195,27 +279,48 @@ export default function ExcelTranslatePage() {
               <Tag color={statusColor(job.status)}>{statusLabel(job)}</Tag>
             </Space>
           }
-          extra={<Button icon={<ReloadOutlined />} onClick={reset}>重新上传</Button>}
+          extra={(
+            <Button icon={<ReloadOutlined />} onClick={reset} disabled={controlsLocked}>
+              重新上传
+            </Button>
+          )}
         >
           <Space orientation="vertical" size={20} style={{ width: '100%' }}>
             <Descriptions bordered size="small" column={{ xs: 1, sm: 2, lg: 4 }}>
               <Descriptions.Item label="Sheet 数量">{job.sheetCount ?? '扫描中'}</Descriptions.Item>
               <Descriptions.Item label="公式数量">{job.formulaCount ?? '扫描中'}</Descriptions.Item>
               <Descriptions.Item label="候选单元格">{job.candidateCellCount ?? '扫描中'}</Descriptions.Item>
-              <Descriptions.Item label="唯一文本">{job.candidateUniqueCount ?? '扫描中'}</Descriptions.Item>
+              <Descriptions.Item label="候选唯一文本">{job.candidateUniqueCount ?? '扫描中'}</Descriptions.Item>
             </Descriptions>
+            <Text type="secondary">语言检测后，实际处理的唯一文本数量可能少于候选数。</Text>
 
             {Number(job.formulaCount) > 0 && (
               <Alert
                 type="warning"
                 showIcon
                 title="输出为阅读型副本"
-                description="公式表达式会保留，但引用已翻译文字的公式结果可能需要在 Excel 中重新计算。"
+                description="公式表达式会保留；如果公式引用了被翻译的文字，其依赖结果可能改变，并且可能需要在 Excel 中重新计算。"
               />
             )}
 
             {job.status === 'ready' && Number(job.candidateUniqueCount) === 0 && (
               <Alert type="info" showIcon title="没有发现需要翻译的文字" />
+            )}
+
+            {reconcilingStart && (
+              <Alert
+                type="warning"
+                showIcon
+                title="正在确认任务是否已经启动"
+                description={networkError
+                  ? '网络暂时不可用，恢复后会自动查询；确认前不能重复启动或重新上传。'
+                  : '正在从服务器同步最新状态；确认前不能重复启动或重新上传。'}
+                action={(
+                  <Button size="small" onClick={() => setPollCycle(cycle => cycle + 1)}>
+                    立即查询
+                  </Button>
+                )}
+              />
             )}
 
             {(active || canDownload(job) || job.status === 'failed') && (
@@ -269,7 +374,7 @@ export default function ExcelTranslatePage() {
                   type="primary"
                   icon={<PlayCircleOutlined />}
                   loading={starting}
-                  disabled={!canStart(job)}
+                  disabled={!canStart(job) || controlsLocked}
                   onClick={handleStart}
                 >
                   开始中英翻译
@@ -280,7 +385,9 @@ export default function ExcelTranslatePage() {
                   下载 {job.downloadName}
                 </Button>
               )}
-              <Button icon={<ReloadOutlined />} onClick={reset}>重新上传</Button>
+              <Button icon={<ReloadOutlined />} onClick={reset} disabled={controlsLocked}>
+                重新上传
+              </Button>
             </Space>
           </Space>
         </Card>

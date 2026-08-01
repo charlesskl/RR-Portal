@@ -50,7 +50,7 @@ test('rejects oversized and invalid OOXML packages', async t => {
 test('rejects deletion of a protected relationship part', async t => {
   const { inputPath, outputPath } = await fixturePaths(t);
   await mutateZip(inputPath, outputPath, zip => {
-    zip.remove('xl/_rels/workbook.xml.rels');
+    zip.remove('_rels/.rels');
   });
 
   await assert.rejects(

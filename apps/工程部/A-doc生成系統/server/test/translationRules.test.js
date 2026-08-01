@@ -46,6 +46,8 @@ test('skips codes, paths, errors and non-text tokens', () => {
 test('keeps canonical bilingual and trilingual text idempotent', async () => {
   const provider = fakeProvider({
     'Truck body|zh-CN': { text: '卡车车身', detectedLanguage: 'en' },
+    'Nama Produk|zh-CN': { text: '产品名称', detectedLanguage: 'id' },
+    'Product Name|zh-CN': { text: '产品名称', detectedLanguage: 'en' },
   });
   const input = ['卡车车身 / Truck body', 'Nama Produk / 产品名称 / Product Name'];
   const result = await translateUniqueTexts(input, provider);
@@ -57,7 +59,11 @@ test('keeps canonical bilingual and trilingual text idempotent', async () => {
   });
   assert.equal(result.get(input[1]).value, input[1]);
   assert.equal(result.get(input[1]).status, 'skipped');
-  assert.equal(provider.calls.flat().length, 1);
+  assert.equal(provider.calls.length, 1);
+  assert.deepEqual(
+    provider.calls[0].map(request => request.text),
+    ['Truck body', 'Nama Produk', 'Product Name'],
+  );
 });
 
 test('adds English to Chinese, Chinese to English, and both to other languages', async () => {
@@ -96,6 +102,91 @@ test('handles embedded codes, mixed text, and one missing target language', asyn
   assert.equal(result.get(input[1]).status, 'skipped');
 });
 
+test('adds only Chinese when English already exists in a later segment', async () => {
+  const provider = fakeProvider({
+    'Nama Produk|zh-CN': { text: '产品名称', detectedLanguage: 'id' },
+    'Product Name|zh-CN': { text: '产品名称', detectedLanguage: 'en' },
+    'Nama Produk|en': { text: 'Product Name', detectedLanguage: 'id' },
+  });
+  const input = 'Nama Produk / Product Name';
+  const result = await translateUniqueTexts([input], provider);
+
+  assert.deepEqual(result.get(input), {
+    status: 'translated',
+    value: 'Nama Produk / Product Name / 产品名称',
+    reason: 'translated',
+  });
+  assert.deepEqual(
+    provider.calls[0].map(request => request.text),
+    ['Nama Produk', 'Product Name'],
+  );
+  assert.equal(provider.calls.flat().some(request => request.to === 'en'), false);
+});
+
+test('adds English when every non-Chinese segment is confirmed non-English', async () => {
+  const provider = fakeProvider({
+    'Nama Produk|zh-CN': { text: '产品名称', detectedLanguage: 'id' },
+    'Deskripsi|zh-CN': { text: '描述', detectedLanguage: 'id' },
+    'Nama Produk|en': { text: 'Product Name', detectedLanguage: 'id' },
+  });
+  const input = 'Nama Produk / 产品名称 / Deskripsi';
+  const result = await translateUniqueTexts([input], provider);
+
+  assert.deepEqual(result.get(input), {
+    status: 'translated',
+    value: 'Nama Produk / 产品名称 / Deskripsi / Product Name',
+    reason: 'translated',
+  });
+  assert.deepEqual(
+    provider.calls[0].map(request => request.text),
+    ['Nama Produk', 'Deskripsi'],
+  );
+});
+
+test('adds only English when multi-segment Han text already contains Chinese', async () => {
+  const provider = fakeProvider({
+    '製品名|en': { text: 'Product Name', detectedLanguage: 'ja' },
+    '製品名|zh-CN': { text: '产品名称', detectedLanguage: 'ja' },
+  });
+  const input = '製品名 / 产品名称';
+  const result = await translateUniqueTexts([input], provider);
+
+  assert.deepEqual(result.get(input), {
+    status: 'translated',
+    value: '製品名 / 产品名称 / Product Name',
+    reason: 'translated',
+  });
+  assert.equal(provider.calls.flat().some(request => request.to === 'zh-CN'), false);
+});
+
+test('keeps canonical text when one successful detection confirms English', async () => {
+  const provider = fakeProvider({
+    'Product Name|zh-CN': { text: '产品名称', detectedLanguage: 'en' },
+  });
+  const input = 'Nama Produk / 产品名称 / Product Name';
+  const result = await translateUniqueTexts([input], provider);
+
+  assert.deepEqual(result.get(input), {
+    status: 'skipped',
+    value: input,
+    reason: 'already-complete',
+  });
+});
+
+test('leaves multi-segment text unchanged when missing English is not confirmed', async () => {
+  const provider = fakeProvider({
+    'Nama Produk|zh-CN': { text: '产品名称', detectedLanguage: 'id' },
+  });
+  const input = 'Nama Produk / 产品名称 / Product Name';
+  const result = await translateUniqueTexts([input], provider);
+
+  assert.deepEqual(result.get(input), {
+    status: 'skipped',
+    value: input,
+    reason: 'language-unconfirmed',
+  });
+});
+
 test('deduplicates source text and preserves the complete untrimmed original', async () => {
   const input = '  卡车车身  ';
   const provider = fakeProvider({
@@ -107,6 +198,23 @@ test('deduplicates source text and preserves the complete untrimmed original', a
   assert.equal(result.size, 1);
   assert.equal(result.get(input).value.startsWith(input), true);
   assert.equal(result.get(input).value, '  卡车车身   / Truck body');
+});
+
+test('deduplicates repeated language segments across different cells and phases', async () => {
+  const provider = fakeProvider({
+    'Nama|zh-CN': { text: '名称', detectedLanguage: 'id' },
+    'Nama|en': { text: 'Name', detectedLanguage: 'id' },
+  });
+  const first = 'Nama / 产品';
+  const second = 'Nama / 说明';
+  const result = await translateUniqueTexts([first, second], provider);
+
+  assert.equal(result.get(first).value, 'Nama / 产品 / Name');
+  assert.equal(result.get(second).value, 'Nama / 说明 / Name');
+  assert.deepEqual(
+    provider.calls.map(call => call.map(request => `${request.text}|${request.to}`)),
+    [['Nama|zh-CN'], ['Nama|en']],
+  );
 });
 
 test('keeps the original when a translation fails or would exceed the Excel cell limit', async () => {

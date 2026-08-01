@@ -7,6 +7,10 @@ const excelTranslator = require('./excelTranslator');
 
 const DEFAULT_TTL_MS = 3_600_000;
 const DEFAULT_CLEANUP_INTERVAL_MS = 600_000;
+const DEFAULT_OPERATION_TIMEOUT_MS = 30 * 60_000;
+const DEFAULT_QUEUE_TTL_MS = 60 * 60_000;
+const DEFAULT_MAX_JOBS = 20;
+const DEFAULT_MAX_JOBS_PER_OWNER = 5;
 const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const XLSM_MIME = 'application/vnd.ms-excel.sheet.macroEnabled.12';
 
@@ -27,6 +31,9 @@ const ERROR_MESSAGES = {
   package_too_large: 'Excel 文件解压后超过大小限制',
   protected_part_set_changed: '输出文件的受保护部件不完整',
   protected_part_changed: '输出文件的受保护部件发生变化',
+  relationship_target_missing: '输出文件的关系目标不完整',
+  workbook_relationships_changed: '工作簿核心关系校验失败',
+  content_types_changed: '工作簿内容类型校验失败',
   macro_container_changed: '宏工作簿结构校验失败',
   sheet_structure_changed: '工作表结构校验失败',
   defined_names_changed: '工作簿名称定义校验失败',
@@ -38,6 +45,7 @@ const ERROR_MESSAGES = {
   worksheet_structure_changed: '工作表附加结构校验失败',
   unexpected_cell_change: '检测到非翻译单元格变化',
   translation_failed: '翻译未能生成可下载文件',
+  operation_timeout: '处理超时，请重新上传后再试',
   operation_failed: '处理失败，请稍后重试',
 };
 
@@ -97,9 +105,29 @@ function createTranslationJobManager({
   translateWorkbook = excelTranslator.translateWorkbook,
   ttlMs = DEFAULT_TTL_MS,
   cleanupIntervalMs = DEFAULT_CLEANUP_INTERVAL_MS,
+  operationTimeoutMs = DEFAULT_OPERATION_TIMEOUT_MS,
+  queueTtlMs = DEFAULT_QUEUE_TTL_MS,
+  maxJobs = DEFAULT_MAX_JOBS,
+  maxJobsPerOwner = DEFAULT_MAX_JOBS_PER_OWNER,
 } = {}) {
+  const positiveInteger = (value, fallback) => (
+    Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback
+  );
+  const safeOperationTimeoutMs = positiveInteger(
+    operationTimeoutMs,
+    DEFAULT_OPERATION_TIMEOUT_MS,
+  );
+  const safeQueueTtlMs = positiveInteger(queueTtlMs, DEFAULT_QUEUE_TTL_MS);
+  const safeMaxJobs = positiveInteger(maxJobs, DEFAULT_MAX_JOBS);
+  const safeMaxJobsPerOwner = Math.min(
+    safeMaxJobs,
+    positiveInteger(maxJobsPerOwner, DEFAULT_MAX_JOBS_PER_OWNER),
+  );
   const jobs = new Map();
   const queue = [];
+  const operationTimers = new Set();
+  const pendingCreatesByOwner = new Map();
+  let pendingCreates = 0;
   let operationRunning = false;
   cleanDirectoryContents(jobsRoot);
   cleanDirectoryContents(incomingDir);
@@ -129,9 +157,85 @@ function createTranslationJobManager({
     };
   }
 
+  function beginCleanup(job) {
+    if (!job.cleanupRequested || job.downloadLeases.size > 0) return null;
+    if (!job.cleanupPromise) {
+      job.cleanupPromise = fs.rm(job.jobDirectory, { recursive: true, force: true });
+    }
+    return job.cleanupPromise;
+  }
+
+  function claimJobForCleanup(jobId, job) {
+    if (jobs.get(jobId) !== job) return null;
+    jobs.delete(jobId);
+    job.cleanupRequested = true;
+    return beginCleanup(job);
+  }
+
+  function claimExpiredJobs() {
+    const now = clock();
+    for (const [jobId, job] of jobs) {
+      if (job.expiresAt === null || job.expiresAt > now) continue;
+      const cleanup = claimJobForCleanup(jobId, job);
+      if (cleanup) void cleanup.catch(() => {});
+    }
+  }
+
+  function reserveCreate(ownerId) {
+    claimExpiredJobs();
+    const normalizedOwnerId = String(ownerId);
+    const retainedForOwner = [...jobs.values()].filter(job => (
+      job.ownerId === normalizedOwnerId
+    )).length;
+    const pendingForOwner = pendingCreatesByOwner.get(normalizedOwnerId) || 0;
+    if (
+      jobs.size + pendingCreates >= safeMaxJobs
+      || retainedForOwner + pendingForOwner >= safeMaxJobsPerOwner
+    ) {
+      throw new JobConflictError('job_capacity_reached');
+    }
+
+    pendingCreates += 1;
+    pendingCreatesByOwner.set(normalizedOwnerId, pendingForOwner + 1);
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      pendingCreates -= 1;
+      const remaining = (pendingCreatesByOwner.get(normalizedOwnerId) || 1) - 1;
+      if (remaining > 0) pendingCreatesByOwner.set(normalizedOwnerId, remaining);
+      else pendingCreatesByOwner.delete(normalizedOwnerId);
+    };
+  }
+
+  function operationTimeoutError() {
+    const error = new Error('operation_timeout');
+    error.code = 'operation_timeout';
+    return error;
+  }
+
+  async function waitForOperation(attempt) {
+    let timer;
+    const timeout = new Promise((_resolve, reject) => {
+      timer = setTimeout(() => reject(operationTimeoutError()), safeOperationTimeoutMs);
+      operationTimers.add(timer);
+    });
+    try {
+      return await Promise.race([attempt, timeout]);
+    } finally {
+      clearTimeout(timer);
+      operationTimers.delete(timer);
+    }
+  }
+
   function ownedJob(ownerId, jobId) {
     const job = jobs.get(jobId);
     if (!job || job.ownerId !== String(ownerId)) throw new JobNotFoundError();
+    if (job.expiresAt !== null && job.expiresAt <= clock()) {
+      const cleanup = claimJobForCleanup(jobId, job);
+      if (cleanup) void cleanup.catch(() => {});
+      throw new JobNotFoundError();
+    }
     return job;
   }
 
@@ -162,7 +266,8 @@ function createTranslationJobManager({
     expireLater(job);
   }
 
-  function onTranslationProgress(job, progress = {}) {
+  function onTranslationProgress(job, operationToken, progress = {}) {
+    if (job.activeOperation !== operationToken) return;
     if (progress.phase === 'writing') {
       job.status = 'writing';
       job.phase = 'writing';
@@ -183,13 +288,16 @@ function createTranslationJobManager({
     copySummary(job, progress);
   }
 
-  async function runScan(job) {
+  async function runScan(job, operationToken) {
     try {
-      const summary = await scanWorkbook(job.inputPath, {
+      const attempt = Promise.resolve().then(() => scanWorkbook(job.inputPath, {
         onSheet: event => {
+          if (job.activeOperation !== operationToken) return;
           job.currentSheet = event && event.sheetName ? event.sheetName : null;
         },
-      });
+      }));
+      const summary = await waitForOperation(attempt);
+      if (job.activeOperation !== operationToken) return;
       copySummary(job, summary);
       job.status = 'ready';
       job.phase = 'ready';
@@ -197,15 +305,28 @@ function createTranslationJobManager({
       job.errorMessage = null;
       expireLater(job);
     } catch (error) {
+      if (job.activeOperation !== operationToken) return;
       markFailed(job, error);
     }
   }
 
-  async function runTranslation(job) {
+  async function runTranslation(job, operationToken) {
     try {
-      const summary = await translateWorkbook(job.inputPath, job.outputPath, {
-        onProgress: progress => onTranslationProgress(job, progress),
-      });
+      const attempt = Promise.resolve().then(() => translateWorkbook(
+        job.inputPath,
+        job.outputPath,
+        {
+          onProgress: progress => onTranslationProgress(job, operationToken, progress),
+        },
+      ));
+      void attempt.finally(() => {
+        if (job.activeOperation !== operationToken || job.status === 'failed') {
+          return removeOutput(job);
+        }
+        return undefined;
+      }).catch(() => {});
+      const summary = await waitForOperation(attempt);
+      if (job.activeOperation !== operationToken) return;
       copySummary(job, summary);
       const succeeded = job.succeededCells || 0;
       const failed = job.failedCells || 0;
@@ -220,6 +341,7 @@ function createTranslationJobManager({
       job.errorMessage = null;
       expireLater(job);
     } catch (error) {
+      if (job.activeOperation !== operationToken) return;
       await removeOutput(job);
       markFailed(job, error);
     }
@@ -227,30 +349,45 @@ function createTranslationJobManager({
 
   async function drainQueue() {
     if (operationRunning) return;
-    const item = queue.shift();
+    let item = queue.shift();
+    while (item) {
+      const { job } = item;
+      if (jobs.get(job.jobId) === job) {
+        if (job.expiresAt === null || job.expiresAt > clock()) break;
+        const cleanup = claimJobForCleanup(job.jobId, job);
+        if (cleanup) void cleanup.catch(() => {});
+      }
+      item = queue.shift();
+    }
     if (!item) return;
     operationRunning = true;
     const { job, type } = item;
+    const operationToken = Symbol(type);
+    job.activeOperation = operationToken;
     job.expiresAt = null;
     job.currentSheet = null;
-    if (type === 'scan') {
-      job.status = 'scanning';
-      job.phase = 'scanning';
-      await runScan(job);
-    } else {
-      job.status = 'translating';
-      job.phase = 'translating';
-      await runTranslation(job);
+    try {
+      if (type === 'scan') {
+        job.status = 'scanning';
+        job.phase = 'scanning';
+        await runScan(job, operationToken);
+      } else {
+        job.status = 'translating';
+        job.phase = 'translating';
+        await runTranslation(job, operationToken);
+      }
+    } finally {
+      if (job.activeOperation === operationToken) job.activeOperation = null;
+      operationRunning = false;
+      void drainQueue();
     }
-    operationRunning = false;
-    void drainQueue();
   }
 
   function enqueue(job, type) {
     job.status = 'queued';
     job.phase = 'queued';
     job.currentSheet = null;
-    job.expiresAt = null;
+    job.expiresAt = clock() + safeQueueTtlMs;
     queue.push({ job, type });
     void drainQueue();
   }
@@ -271,47 +408,56 @@ function createTranslationJobManager({
     }
     const safeIncomingPath = ensureInside(incomingDir, incomingPath);
     const jobDirectory = ensureInside(jobsRoot, path.join(jobsRoot, jobId));
-    await fs.mkdir(jobDirectory, { recursive: false });
-    const inputPath = path.join(jobDirectory, `input${normalizedExtension}`);
-    const outputPath = path.join(jobDirectory, `output${normalizedExtension}`);
+    const releaseCreate = reserveCreate(ownerId);
     try {
-      await moveFile(safeIncomingPath, inputPath);
-    } catch (error) {
-      await fs.rm(jobDirectory, { recursive: true, force: true });
-      throw error;
-    }
+      await fs.mkdir(jobDirectory, { recursive: false });
+      const inputPath = path.join(jobDirectory, `input${normalizedExtension}`);
+      const outputPath = path.join(jobDirectory, `output${normalizedExtension}`);
+      try {
+        await moveFile(safeIncomingPath, inputPath);
+      } catch (error) {
+        await fs.rm(jobDirectory, { recursive: true, force: true });
+        throw error;
+      }
 
-    const safeOriginalName = path.basename(String(originalName || `workbook${normalizedExtension}`));
-    const downloadName = `${path.parse(safeOriginalName).name}_中英翻译${normalizedExtension}`;
-    const job = {
-      jobId,
-      ownerId: String(ownerId),
-      status: 'queued',
-      phase: 'queued',
-      originalName: safeOriginalName,
-      downloadName,
-      extension: normalizedExtension,
-      inputPath,
-      outputPath,
-      jobDirectory,
-      sheetCount: null,
-      formulaCount: null,
-      candidateCellCount: null,
-      candidateUniqueCount: null,
-      totalUnique: null,
-      processedUnique: null,
-      succeededCells: null,
-      skippedCells: null,
-      failedCells: null,
-      currentSheet: null,
-      errorCode: null,
-      errorMessage: null,
-      createdAt: clock(),
-      expiresAt: null,
-    };
-    jobs.set(jobId, job);
-    enqueue(job, 'scan');
-    return publicView(job);
+      const safeOriginalName = path.basename(String(originalName || `workbook${normalizedExtension}`));
+      const downloadName = `${path.parse(safeOriginalName).name}_中英翻译${normalizedExtension}`;
+      const job = {
+        jobId,
+        ownerId: String(ownerId),
+        status: 'queued',
+        phase: 'queued',
+        originalName: safeOriginalName,
+        downloadName,
+        extension: normalizedExtension,
+        inputPath,
+        outputPath,
+        jobDirectory,
+        sheetCount: null,
+        formulaCount: null,
+        candidateCellCount: null,
+        candidateUniqueCount: null,
+        totalUnique: null,
+        processedUnique: null,
+        succeededCells: null,
+        skippedCells: null,
+        failedCells: null,
+        currentSheet: null,
+        errorCode: null,
+        errorMessage: null,
+        createdAt: clock(),
+        expiresAt: null,
+        downloadLeases: new Set(),
+        cleanupRequested: false,
+        cleanupPromise: null,
+        activeOperation: null,
+      };
+      jobs.set(jobId, job);
+      enqueue(job, 'scan');
+      return publicView(job);
+    } finally {
+      releaseCreate();
+    }
   }
 
   function startJob(ownerId, jobId) {
@@ -337,15 +483,39 @@ function createTranslationJobManager({
     };
   }
 
+  function acquireDownload(ownerId, jobId) {
+    const job = ownedJob(ownerId, jobId);
+    if (!['completed', 'completed_with_warnings'].includes(job.status)) {
+      throw new JobConflictError('download_not_ready');
+    }
+    const lease = Symbol('download');
+    let released = false;
+    job.downloadLeases.add(lease);
+    return {
+      path: job.outputPath,
+      fileName: job.downloadName,
+      contentType: job.extension === '.xlsm' ? XLSM_MIME : XLSX_MIME,
+      release() {
+        if (!released) {
+          released = true;
+          job.downloadLeases.delete(lease);
+        }
+        return beginCleanup(job) || Promise.resolve();
+      },
+    };
+  }
+
   async function sweepExpired() {
     const now = clock();
     let removed = 0;
+    const cleanups = [];
     for (const [jobId, job] of jobs) {
       if (job.expiresAt === null || job.expiresAt > now) continue;
-      await fs.rm(job.jobDirectory, { recursive: true, force: true });
-      jobs.delete(jobId);
+      const cleanup = claimJobForCleanup(jobId, job);
+      if (cleanup) cleanups.push(cleanup);
       removed += 1;
     }
+    await Promise.all(cleanups);
     return removed;
   }
 
@@ -356,6 +526,8 @@ function createTranslationJobManager({
 
   function close() {
     clearInterval(timer);
+    for (const operationTimer of operationTimers) clearTimeout(operationTimer);
+    operationTimers.clear();
   }
 
   return {
@@ -363,6 +535,7 @@ function createTranslationJobManager({
     startJob,
     getJob,
     getDownload,
+    acquireDownload,
     sweepExpired,
     close,
   };
@@ -371,6 +544,10 @@ function createTranslationJobManager({
 module.exports = {
   DEFAULT_TTL_MS,
   DEFAULT_CLEANUP_INTERVAL_MS,
+  DEFAULT_OPERATION_TIMEOUT_MS,
+  DEFAULT_QUEUE_TTL_MS,
+  DEFAULT_MAX_JOBS,
+  DEFAULT_MAX_JOBS_PER_OWNER,
   JobNotFoundError,
   JobConflictError,
   createTranslationJobManager,

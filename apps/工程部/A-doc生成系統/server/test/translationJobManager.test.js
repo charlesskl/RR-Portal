@@ -59,6 +59,10 @@ async function createHarness(t, overrides = {}) {
     idFactory: () => `job-${++id}`,
     ttlMs: 3_600_000,
     cleanupIntervalMs: 60_000,
+    operationTimeoutMs: overrides.operationTimeoutMs,
+    queueTtlMs: overrides.queueTtlMs,
+    maxJobs: overrides.maxJobs,
+    maxJobsPerOwner: overrides.maxJobsPerOwner,
     scanWorkbook: overrides.scanWorkbook || (async () => SCAN_SUMMARY),
     translateWorkbook: overrides.translateWorkbook || (async (inputPath, outputPath) => {
       await fs.writeFile(outputPath, 'translated');
@@ -106,6 +110,17 @@ async function createReadyJob(harness, {
     extension,
   });
   return waitForStatus(harness.manager, ownerId, created.jobId, 'ready');
+}
+
+async function createCompletedJob(harness, options) {
+  const ready = await createReadyJob(harness, options);
+  harness.manager.startJob(options && options.ownerId ? options.ownerId : 'owner-a', ready.jobId);
+  return waitForStatus(
+    harness.manager,
+    options && options.ownerId ? options.ownerId : 'owner-a',
+    ready.jobId,
+    'completed',
+  );
 }
 
 test('moves scanning to ready and exposes only safe summary fields', async t => {
@@ -180,6 +195,152 @@ test('runs scan operations one at a time', async t => {
   await waitForStatus(harness.manager, 'owner-a', second.jobId, 'ready');
 });
 
+test('times out a stalled operation and continues draining the queue', async t => {
+  const stalled = deferred();
+  let scanCalls = 0;
+  const harness = await createHarness(t, {
+    operationTimeoutMs: 10,
+    scanWorkbook: async () => {
+      scanCalls += 1;
+      return scanCalls === 1 ? stalled.promise : SCAN_SUMMARY;
+    },
+  });
+  const firstPath = await harness.createIncoming('stalled.xlsx');
+  const secondPath = await harness.createIncoming('next.xlsx');
+  const first = await harness.manager.createJob({
+    ownerId: 'owner-a', incomingPath: firstPath,
+    originalName: 'stalled.xlsx', extension: '.xlsx',
+  });
+  const second = await harness.manager.createJob({
+    ownerId: 'owner-b', incomingPath: secondPath,
+    originalName: 'next.xlsx', extension: '.xlsx',
+  });
+
+  await new Promise(resolve => setTimeout(resolve, 25));
+  const failed = await waitForStatus(harness.manager, 'owner-a', first.jobId, 'failed');
+  assert.equal(failed.errorCode, 'operation_timeout');
+  await waitForStatus(harness.manager, 'owner-b', second.jobId, 'ready');
+  assert.equal(scanCalls, 2);
+  stalled.resolve(SCAN_SUMMARY);
+});
+
+test('ignores late translation progress and removes output written after timeout', async t => {
+  const translationGate = deferred();
+  const translationSettled = deferred();
+  const harness = await createHarness(t, {
+    operationTimeoutMs: 10,
+    translateWorkbook: async (inputPath, outputPath, { onProgress }) => {
+      try {
+        onProgress({ phase: 'translating', processedUnique: 1 });
+        await translationGate.promise;
+        onProgress({ phase: 'writing', processedUnique: 99, sheetName: 'Late' });
+        await fs.writeFile(outputPath, 'late-output');
+        return { succeededCells: 99, failedCells: 0, processedUnique: 99 };
+      } finally {
+        translationSettled.resolve();
+      }
+    },
+  });
+  const ready = await createReadyJob(harness);
+  harness.manager.startJob('owner-a', ready.jobId);
+  await new Promise(resolve => setTimeout(resolve, 25));
+  const failed = await waitForStatus(harness.manager, 'owner-a', ready.jobId, 'failed');
+  assert.equal(failed.errorCode, 'operation_timeout');
+  assert.equal(failed.processedUnique, 1);
+
+  translationGate.resolve();
+  await translationSettled.promise;
+  await new Promise(resolve => setImmediate(resolve));
+  const outputPath = path.join(harness.jobsRoot, ready.jobId, 'output.xlsx');
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    const missing = await fs.access(outputPath).then(() => false, () => true);
+    if (missing) break;
+    await new Promise(resolve => setImmediate(resolve));
+  }
+  await assert.rejects(fs.access(outputPath), error => error.code === 'ENOENT');
+  const stillFailed = harness.manager.getJob('owner-a', ready.jobId);
+  assert.equal(stillFailed.status, 'failed');
+  assert.equal(stillFailed.processedUnique, 1);
+});
+
+test('bounds retained jobs globally and per owner', async t => {
+  const gates = [deferred(), deferred()];
+  let scanIndex = 0;
+  const harness = await createHarness(t, {
+    maxJobs: 2,
+    maxJobsPerOwner: 1,
+    scanWorkbook: async () => gates[scanIndex++].promise,
+  });
+  const firstPath = await harness.createIncoming('first.xlsx');
+  const first = await harness.manager.createJob({
+    ownerId: 'owner-a', incomingPath: firstPath,
+    originalName: 'first.xlsx', extension: '.xlsx',
+  });
+
+  const sameOwnerPath = await harness.createIncoming('same-owner.xlsx');
+  await assert.rejects(
+    harness.manager.createJob({
+      ownerId: 'owner-a', incomingPath: sameOwnerPath,
+      originalName: 'same-owner.xlsx', extension: '.xlsx',
+    }),
+    error => error instanceof JobConflictError && error.code === 'job_capacity_reached',
+  );
+  assert.equal(await fs.readFile(sameOwnerPath, 'utf8'), 'input');
+
+  const secondPath = await harness.createIncoming('second.xlsx');
+  const second = await harness.manager.createJob({
+    ownerId: 'owner-b', incomingPath: secondPath,
+    originalName: 'second.xlsx', extension: '.xlsx',
+  });
+  const overGlobalPath = await harness.createIncoming('over-global.xlsx');
+  await assert.rejects(
+    harness.manager.createJob({
+      ownerId: 'owner-c', incomingPath: overGlobalPath,
+      originalName: 'over-global.xlsx', extension: '.xlsx',
+    }),
+    error => error instanceof JobConflictError && error.code === 'job_capacity_reached',
+  );
+
+  gates[0].resolve(SCAN_SUMMARY);
+  await waitForStatus(harness.manager, 'owner-a', first.jobId, 'ready');
+  gates[1].resolve(SCAN_SUMMARY);
+  await waitForStatus(harness.manager, 'owner-b', second.jobId, 'ready');
+});
+
+test('expires queued jobs that wait beyond the queue lifetime', async t => {
+  const firstGate = deferred();
+  let calls = 0;
+  const harness = await createHarness(t, {
+    operationTimeoutMs: 60_000,
+    queueTtlMs: 100,
+    scanWorkbook: async () => {
+      calls += 1;
+      return calls === 1 ? firstGate.promise : SCAN_SUMMARY;
+    },
+  });
+  const firstPath = await harness.createIncoming('active.xlsx');
+  const queuedPath = await harness.createIncoming('queued.xlsx');
+  const first = await harness.manager.createJob({
+    ownerId: 'owner-a', incomingPath: firstPath,
+    originalName: 'active.xlsx', extension: '.xlsx',
+  });
+  const queued = await harness.manager.createJob({
+    ownerId: 'owner-b', incomingPath: queuedPath,
+    originalName: 'queued.xlsx', extension: '.xlsx',
+  });
+
+  harness.advance(101);
+  assert.equal(await harness.manager.sweepExpired(), 1);
+  assert.throws(
+    () => harness.manager.getJob('owner-b', queued.jobId),
+    JobNotFoundError,
+  );
+  firstGate.resolve(SCAN_SUMMARY);
+  await waitForStatus(harness.manager, 'owner-a', first.jobId, 'ready');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(calls, 1);
+});
+
 test('maps translation summaries to downloadable and failed terminal states', async t => {
   const harness = await createHarness(t, {
     translationSummaries: [
@@ -225,11 +386,12 @@ test('maps translation summaries to downloadable and failed terminal states', as
   }
 });
 
-test('does not expire scanning, queued, translating, writing or validating work', async t => {
+test('does not expire active scanning, translating, writing or validating work', async t => {
   const scanGates = [deferred(), deferred()];
   let scanIndex = 0;
   const translateGates = [deferred(), deferred(), deferred()];
   const harness = await createHarness(t, {
+    queueTtlMs: 7_200_000,
     scanWorkbook: async () => scanGates[scanIndex++].promise,
     translateWorkbook: async (inputPath, outputPath, { onProgress }) => {
       onProgress({ phase: 'translating' });
@@ -308,4 +470,117 @@ test('expires ready and every terminal state after one hour', async t => {
       JobNotFoundError,
     );
   }
+});
+
+test('sweep claims an expired job before waiting for directory deletion', async t => {
+  const harness = await createHarness(t);
+  const ready = await createReadyJob(harness);
+  const deletionStarted = deferred();
+  const allowDeletion = deferred();
+  const originalRm = fs.rm;
+  fs.rm = async (target, options) => {
+    if (target === path.join(harness.jobsRoot, ready.jobId)) {
+      deletionStarted.resolve();
+      await allowDeletion.promise;
+    }
+    return originalRm(target, options);
+  };
+
+  try {
+    harness.advance(3_600_001);
+    const sweep = harness.manager.sweepExpired();
+    await deletionStarted.promise;
+
+    assert.throws(
+      () => harness.manager.startJob('owner-a', ready.jobId),
+      JobNotFoundError,
+    );
+
+    allowDeletion.resolve();
+    assert.equal(await sweep, 1);
+  } finally {
+    allowDeletion.resolve();
+    fs.rm = originalRm;
+  }
+});
+
+test('start rejects an already-expired ready job before a sweep runs', async t => {
+  const harness = await createHarness(t);
+  const ready = await createReadyJob(harness);
+  harness.advance(3_600_000);
+
+  assert.throws(
+    () => harness.manager.startJob('owner-a', ready.jobId),
+    JobNotFoundError,
+  );
+  assert.throws(
+    () => harness.manager.getJob('owner-a', ready.jobId),
+    JobNotFoundError,
+  );
+});
+
+test('acquiring a download lease does not extend the job expiry', async t => {
+  const harness = await createHarness(t);
+  const completed = await createCompletedJob(harness);
+  harness.advance(1_800_000);
+
+  const download = harness.manager.acquireDownload('owner-a', completed.jobId);
+
+  assert.equal(
+    harness.manager.getJob('owner-a', completed.jobId).expiresAt,
+    completed.expiresAt,
+  );
+  await download.release();
+});
+
+test('an expired download stays on disk until its lease is released', async t => {
+  const harness = await createHarness(t);
+  const completed = await createCompletedJob(harness);
+  const jobDirectory = path.join(harness.jobsRoot, completed.jobId);
+  const outputPath = path.join(jobDirectory, 'output.xlsx');
+  const download = harness.manager.acquireDownload('owner-a', completed.jobId);
+  harness.advance(3_600_001);
+
+  assert.equal(await harness.manager.sweepExpired(), 1);
+  assert.throws(
+    () => harness.manager.getJob('owner-a', completed.jobId),
+    JobNotFoundError,
+  );
+  assert.equal(await fs.readFile(outputPath, 'utf8'), 'translated');
+
+  await download.release();
+  await assert.rejects(fs.access(jobDirectory), error => error.code === 'ENOENT');
+});
+
+test('cleanup waits for every active download lease', async t => {
+  const harness = await createHarness(t);
+  const completed = await createCompletedJob(harness);
+  const jobDirectory = path.join(harness.jobsRoot, completed.jobId);
+  const first = harness.manager.acquireDownload('owner-a', completed.jobId);
+  const second = harness.manager.acquireDownload('owner-a', completed.jobId);
+  harness.advance(3_600_001);
+  await harness.manager.sweepExpired();
+
+  await first.release();
+  assert.equal(await fs.stat(jobDirectory).then(() => true), true);
+
+  await second.release();
+  await assert.rejects(fs.access(jobDirectory), error => error.code === 'ENOENT');
+});
+
+test('download leases preserve job ownership isolation', async t => {
+  const harness = await createHarness(t);
+  const completed = await createCompletedJob(harness);
+
+  assert.throws(
+    () => harness.manager.acquireDownload('owner-b', completed.jobId),
+    JobNotFoundError,
+  );
+
+  harness.advance(3_600_001);
+  assert.equal(await harness.manager.sweepExpired(), 1);
+  await assert.rejects(
+    fs.access(path.join(harness.jobsRoot, completed.jobId)),
+    error => error.code === 'ENOENT',
+  );
 });

@@ -19,6 +19,9 @@ class FakeJobManager {
     this.downloadPath = downloadPath;
     this.jobs = new Map();
     this.sequence = 0;
+    this.downloadLeaseAcquisitions = 0;
+    this.downloadLeaseReleases = 0;
+    this.activeDownloadLeases = 0;
   }
 
   createJob = async ({ ownerId, originalName, extension }) => {
@@ -69,6 +72,22 @@ class FakeJobManager {
       path: this.downloadPath,
       fileName: job.downloadName,
       contentType: job.extension === '.xlsm' ? XLSM_MIME : XLSX_MIME,
+    };
+  };
+
+  acquireDownload = (ownerId, jobId) => {
+    const download = this.getDownload(ownerId, jobId);
+    let released = false;
+    this.downloadLeaseAcquisitions += 1;
+    this.activeDownloadLeases += 1;
+    return {
+      ...download,
+      release: async () => {
+        if (released) return;
+        released = true;
+        this.downloadLeaseReleases += 1;
+        this.activeDownloadLeases -= 1;
+      },
     };
   };
 
@@ -164,6 +183,29 @@ test('rejects unsupported extensions, fake ZIPs and both size limits', async t =
   assert.equal((await response.json()).code, 'package_too_large');
 });
 
+test('rejects workbook containers renamed to the other Excel extension', async t => {
+  process.env.JWT_SECRET = 'route-test-secret';
+  const { baseUrl, fixture } = await setup(t);
+  const ownerToken = token('owner-a');
+
+  let response = await upload(
+    baseUrl,
+    ownerToken,
+    uploadForm(fixture, 'renamed.xlsm', XLSM_MIME),
+  );
+  assert.equal(response.status, 400);
+  assert.equal((await response.json()).code, 'workbook_type_mismatch');
+
+  const macroTemplate = await fs.readFile(path.join(__dirname, '../templates/走货明细模表.xlsm'));
+  response = await upload(
+    baseUrl,
+    ownerToken,
+    uploadForm(macroTemplate, 'renamed.xlsx', XLSX_MIME),
+  );
+  assert.equal(response.status, 400);
+  assert.equal((await response.json()).code, 'workbook_type_mismatch');
+});
+
 test('creates, owns, starts, polls and downloads a translation job', async t => {
   process.env.JWT_SECRET = 'route-test-secret';
   const { baseUrl, fixture, manager, audits } = await setup(t);
@@ -200,9 +242,37 @@ test('creates, owns, starts, polls and downloads a translation job', async t => 
   assert.equal(response.headers.get('content-type'), XLSX_MIME);
   assert.match(response.headers.get('content-disposition'), /sample_%E4%B8%AD%E8%8B%B1%E7%BF%BB%E8%AF%91\.xlsx/);
   assert.equal(await response.text(), 'download-body');
+  assert.equal(manager.downloadLeaseAcquisitions, 1);
+  assert.equal(manager.downloadLeaseReleases, 1);
+  assert.equal(manager.activeDownloadLeases, 0);
   assert.deepEqual(audits.map(entry => entry[0]), [
     'excel_translation_upload',
     'excel_translation_start',
     'excel_translation_download',
   ]);
+});
+
+test('releases the download lease when sendFile fails', async t => {
+  process.env.JWT_SECRET = 'route-test-secret';
+  const { baseUrl, fixture, manager } = await setup(t);
+  const ownerToken = token('owner-a');
+  const uploadResponse = await upload(baseUrl, ownerToken, uploadForm(fixture));
+  const created = await uploadResponse.json();
+  manager.markCompleted(created.jobId);
+  await fs.unlink(manager.downloadPath);
+
+  const response = await fetch(`${baseUrl}/${created.jobId}/download`, {
+    headers: { Authorization: `Bearer ${ownerToken}` },
+  });
+
+  assert.equal(response.status, 500);
+  assert.match(response.headers.get('content-type'), /^application\/json\b/);
+  assert.equal(response.headers.get('content-disposition'), null);
+  assert.deepEqual(await response.json(), {
+    code: 'internal_error',
+    message: '服务器内部错误',
+  });
+  assert.equal(manager.downloadLeaseAcquisitions, 1);
+  assert.equal(manager.downloadLeaseReleases, 1);
+  assert.equal(manager.activeDownloadLeases, 0);
 });

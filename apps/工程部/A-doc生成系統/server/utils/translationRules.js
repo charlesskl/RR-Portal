@@ -28,10 +28,8 @@ function analyzeText(text) {
 
   const segments = core.split(SEP).map(segment => segment.trim()).filter(Boolean);
   const chineseSegments = segments.filter(segment => HAS_ZH.test(segment));
-  const latinSegments = segments.filter(segment => HAS_LATIN.test(segment) && !HAS_ZH.test(segment));
-  if (segments.length >= 3 && chineseSegments.length && latinSegments.length) {
-    return { original, core, action: 'complete', segments };
-  }
+  const nonChineseSegments = segments.filter(segment => !HAS_ZH.test(segment));
+  const latinSegments = nonChineseSegments.filter(segment => HAS_LATIN.test(segment));
 
   return {
     original,
@@ -39,6 +37,7 @@ function analyzeText(text) {
     action: 'translate',
     segments,
     chineseSegments,
+    nonChineseSegments,
     latinSegments,
   };
 }
@@ -78,16 +77,21 @@ async function translateUniqueTexts(texts, provider) {
   const results = new Map();
   const pending = [];
   let requestSequence = 0;
+  const requestIdsByTextAndTarget = new Map();
 
-  const makeRequest = (work, text, to, phase) => {
+  const queueRequest = (requests, text, to) => {
+    const key = `${to}\u0000${text}`;
+    const existingId = requestIdsByTextAndTarget.get(key);
+    if (existingId) return existingId;
     const request = {
       id: `translation-${++requestSequence}`,
       text,
       from: 'auto',
       to,
     };
-    work[`${phase}RequestId`] = request.id;
-    return request;
+    requestIdsByTextAndTarget.set(key, request.id);
+    requests.push(request);
+    return request.id;
   };
 
   const firstRequests = [];
@@ -97,30 +101,18 @@ async function translateUniqueTexts(texts, provider) {
       results.set(input, outcome('skipped', analysis.original, analysis.reason));
       continue;
     }
-    if (analysis.action === 'complete') {
-      results.set(input, outcome('skipped', analysis.original, 'already-complete'));
-      continue;
-    }
-
     const work = { input, analysis };
-    const { segments, chineseSegments } = analysis;
-    if (segments.length === 1) {
-      work.mode = HAS_ZH.test(segments[0]) ? 'single-han' : 'single-non-han';
+    const { segments, chineseSegments, nonChineseSegments } = analysis;
+    if (!nonChineseSegments.length) {
+      work.mode = segments.length === 1 ? 'han-source' : 'multi-han';
       work.source = segments[0];
-      firstRequests.push(makeRequest(
-        work,
-        work.source,
-        work.mode === 'single-han' ? 'en' : 'zh-CN',
-        'first',
-      ));
-    } else if (chineseSegments.length) {
-      work.mode = 'multi-with-chinese';
-      work.source = segments.find(segment => !HAS_ZH.test(segment)) || segments[0];
-      firstRequests.push(makeRequest(work, work.source, 'zh-CN', 'first'));
+      work.firstRequestId = queueRequest(firstRequests, work.source, 'en');
     } else {
-      work.mode = 'multi-without-chinese';
-      work.source = segments[0];
-      firstRequests.push(makeRequest(work, work.source, 'zh-CN', 'first'));
+      work.mode = chineseSegments.length ? 'detect-with-chinese' : 'detect-without-chinese';
+      work.detections = nonChineseSegments.map(source => {
+        const requestId = queueRequest(firstRequests, source, 'zh-CN');
+        return { source, requestId };
+      });
     }
     pending.push(work);
   }
@@ -137,41 +129,59 @@ async function translateUniqueTexts(texts, provider) {
   const secondRequests = [];
   const secondPending = [];
   for (const work of pending) {
-    const response = firstResponses.get(work.firstRequestId);
     const original = work.analysis.original;
-    if (!usableTranslation(response)) {
-      results.set(work.input, outcome('failed', original, 'translation-unavailable'));
-      continue;
-    }
-
-    if (work.mode === 'single-han') {
-      if (isChineseLanguage(response.detectedLanguage)) {
+    if (work.mode === 'han-source' || work.mode === 'multi-han') {
+      const response = firstResponses.get(work.firstRequestId);
+      if (!usableTranslation(response)) {
+        results.set(work.input, outcome('failed', original, 'translation-unavailable'));
+        continue;
+      }
+      if (work.mode === 'multi-han' || isChineseLanguage(response.detectedLanguage)) {
         results.set(work.input, appendTranslations(original, [response.text]));
       } else {
         work.english = response.text;
-        secondRequests.push(makeRequest(work, work.source, 'zh-CN', 'second'));
+        work.secondRequestId = queueRequest(secondRequests, work.source, 'zh-CN');
         secondPending.push(work);
       }
       continue;
     }
 
-    if (work.mode === 'single-non-han' || work.mode === 'multi-without-chinese') {
-      work.chinese = response.text;
-      if (isEnglishLanguage(response.detectedLanguage)) {
-        results.set(work.input, appendTranslations(original, [work.chinese]));
+    const detections = work.detections.map(detection => ({
+      ...detection,
+      response: firstResponses.get(detection.requestId),
+    }));
+    const usableDetections = detections.filter(detection => (
+      usableTranslation(detection.response)
+    ));
+    const englishDetection = usableDetections.find(detection => (
+      isEnglishLanguage(detection.response.detectedLanguage)
+    ));
+    if (englishDetection) {
+      if (work.mode === 'detect-without-chinese') {
+        results.set(work.input, appendTranslations(original, [englishDetection.response.text]));
       } else {
-        secondRequests.push(makeRequest(work, work.source, 'en', 'second'));
-        secondPending.push(work);
+        results.set(work.input, outcome('skipped', original, 'already-complete'));
       }
       continue;
     }
-
-    if (isEnglishLanguage(response.detectedLanguage)) {
-      results.set(work.input, outcome('skipped', original, 'already-complete'));
-    } else {
-      secondRequests.push(makeRequest(work, work.source, 'en', 'second'));
-      secondPending.push(work);
+    if (usableDetections.length !== detections.length) {
+      results.set(work.input, detections.length > 1
+        ? outcome('skipped', original, 'language-unconfirmed')
+        : outcome('failed', original, 'translation-unavailable'));
+      continue;
     }
+
+    if (work.mode === 'detect-without-chinese') {
+      work.chinese = detections[0].response.text;
+      work.source = detections[0].source;
+      work.secondRequestId = queueRequest(secondRequests, work.source, 'en');
+      secondPending.push(work);
+      continue;
+    }
+
+    work.source = detections[0].source;
+    work.secondRequestId = queueRequest(secondRequests, work.source, 'en');
+    secondPending.push(work);
   }
 
   let secondResponses = new Map();
@@ -184,16 +194,18 @@ async function translateUniqueTexts(texts, provider) {
   }
 
   for (const work of secondPending) {
-    const response = secondResponses.get(work.secondRequestId);
+    const response = secondResponses.has(work.secondRequestId)
+      ? secondResponses.get(work.secondRequestId)
+      : firstResponses.get(work.secondRequestId);
     const original = work.analysis.original;
     if (!usableTranslation(response)) {
       results.set(work.input, outcome('failed', original, 'translation-unavailable'));
       continue;
     }
 
-    if (work.mode === 'single-han') {
+    if (work.mode === 'han-source') {
       results.set(work.input, appendTranslations(original, [response.text, work.english]));
-    } else if (work.mode === 'multi-with-chinese') {
+    } else if (work.mode === 'detect-with-chinese') {
       results.set(work.input, appendTranslations(original, [response.text]));
     } else {
       results.set(work.input, appendTranslations(original, [work.chinese, response.text]));

@@ -1,9 +1,10 @@
 const fs = require('node:fs/promises');
+const path = require('node:path');
 const XlsxPopulate = require('xlsx-populate');
 
 const { analyzeText, translateUniqueTexts } = require('./translationRules');
 const {
-  assertPackageLimits,
+  loadWorkbookForProcessing,
   restoreProtectedParts,
   validateWorkbookIntegrity,
 } = require('./workbookIntegrity');
@@ -50,12 +51,12 @@ function collectWorkbookCells(workbook, { onSheet } = {}) {
       });
     }
     const existingCells = [];
-    for (const row of sheet._rows || []) {
-      if (!row) continue;
-      for (const cell of row._cells || []) {
+    (sheet._rows || []).forEach(row => {
+      if (!row) return;
+      (row._cells || []).forEach(cell => {
         if (cell) existingCells.push(cell);
-      }
-    }
+      });
+    });
 
     if (!existingCells.length) return;
     existingCells.forEach(cell => {
@@ -87,8 +88,10 @@ function collectWorkbookCells(workbook, { onSheet } = {}) {
 }
 
 async function scanWorkbook(inputPath, { onSheet, maxUncompressedBytes } = {}) {
-  await assertPackageLimits(inputPath, { maxUncompressedBytes });
-  const workbook = await XlsxPopulate.fromFileAsync(inputPath);
+  const workbook = await loadWorkbookForProcessing(inputPath, {
+    maxUncompressedBytes,
+    expectedExtension: path.extname(inputPath).toLowerCase(),
+  });
   const collected = collectWorkbookCells(workbook, { onSheet });
   return {
     sheetCount: collected.sheetCount,
@@ -113,8 +116,7 @@ function appendRichText(cell, originalText, translatedText) {
   rich.add(suffix, styleSource.style(RICH_STYLES));
 }
 
-async function translateWorkbookCore(inputPath, outputPath, { provider, onProgress } = {}) {
-  const workbook = await XlsxPopulate.fromFileAsync(inputPath);
+async function translateWorkbookCore(workbook, outputPath, { provider, onProgress } = {}) {
   const collected = collectWorkbookCells(workbook, {
     onSheet: sheetProgress => {
       if (onProgress) onProgress({ phase: 'scanning', ...sheetProgress });
@@ -200,8 +202,11 @@ async function translateWorkbookCore(inputPath, outputPath, { provider, onProgre
 async function translateWorkbook(inputPath, outputPath, options = {}) {
   const { maxUncompressedBytes } = options;
   try {
-    await assertPackageLimits(inputPath, { maxUncompressedBytes });
-    const summary = await translateWorkbookCore(inputPath, outputPath, options);
+    const workbook = await loadWorkbookForProcessing(inputPath, {
+      maxUncompressedBytes,
+      expectedExtension: path.extname(inputPath).toLowerCase(),
+    });
+    const summary = await translateWorkbookCore(workbook, outputPath, options);
     await restoreProtectedParts(inputPath, outputPath);
     if (options.onProgress) options.onProgress({ phase: 'validating' });
     await validateWorkbookIntegrity({

@@ -22,7 +22,7 @@ jobs:
             echo 'CLOUD_HOST_FINGERPRINT must be a non-empty OpenSSH SHA256 fingerprint.' >&2
             exit 1
           fi
-      - name: Fetch qc-report container logs via SSH
+      - name: Fetch qc-report diagnostics via SSH
         env:
           CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
@@ -35,8 +35,9 @@ jobs:
           script: |
             set -euo pipefail
             docker ps -a --filter name=qc-report --format 'table {{.Names}}\t{{.Status}}'
-            docker ps -a --filter name=redis --format 'table {{.Names}}\t{{.Status}}'
-            echo "== qc-report 日志 =="
-            docker logs rr-portal-qc-report-1 --tail 40 2>&1 || true
-            echo "== redis 日志 =="
-            docker logs rr-portal-redis-1 --tail 15 2>&1 || true
+            echo "== 容器内 /health =="
+            docker exec rr-portal-qc-report-1 python -c "import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:3410/health', timeout=5).read().decode())" 2>&1 || true
+            echo "== redis ping（从 qc-report 容器）=="
+            docker exec rr-portal-qc-report-1 python -c "import os, redis; print(redis.Redis.from_url(os.environ['REDIS_URL'], socket_connect_timeout=3).ping())" 2>&1 || true
+            echo "== worker 日志 =="
+            docker logs rr-portal-qc-report-worker-1 --tail 20 2>&1 || true

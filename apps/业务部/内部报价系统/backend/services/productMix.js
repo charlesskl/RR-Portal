@@ -37,7 +37,7 @@ function injectionProductGroups(payload) {
 function weightedInjectionSum(payload, getter) {
   const rows = (payload && payload.injection) || [];
   const groups = injectionProductGroups(payload);
-  if (!groups.length) return rows.reduce((total, row, index) => total + num(getter(row, index)), 0);
+  if (groups.length <= 1) return rows.reduce((total, row, index) => total + num(getter(row, index)), 0);
   const totalRatio = groups.reduce((total, group) => total + group.ratio, 0);
   if (totalRatio <= 0) return 0;
   return groups.reduce((total, group) => {
@@ -49,7 +49,7 @@ function weightedInjectionSum(payload, getter) {
 function weightedColumnFormula(payload, dataStartRow, columnLetter) {
   const groups = injectionProductGroups(payload);
   const rows = (payload && payload.injection) || [];
-  if (!groups.length) return `SUM(${columnLetter}${dataStartRow}:${columnLetter}${dataStartRow + rows.length - 1})`;
+  if (groups.length <= 1) return `SUM(${columnLetter}${dataStartRow}:${columnLetter}${dataStartRow + rows.length - 1})`;
   const totalRatio = groups.reduce((total, group) => total + group.ratio, 0);
   if (totalRatio <= 0) return '0';
   const terms = groups.map(group => {

@@ -318,7 +318,7 @@ function productMixRatio(payload, key) {
 }
 function weightedInjectionSum(payload, getter) {
   const groups = injectionProductGroups(payload);
-  if (!groups.length) return sum(payload.injection || [], getter);
+  if (groups.length <= 1) return sum(payload.injection || [], getter);
   const totalRatio = sum(groups, group => productMixRatio(payload, group.key));
   if (totalRatio <= 0) return 0;
   return sum(groups, group =>
@@ -3174,6 +3174,7 @@ function renderMolding(host, payload, canEdit, onChange, refMolds, fxRmbHkd, use
     const shotSum = weightedInjectionSum(payload, r => num(r.shot_price));
     const finishedSum = rawSum + shotSum;
     const groups = injectionProductGroups(payload);
+    const hasMultipleProducts = groups.length > 1;
     const totalRatio = sum(groups, group => productMixRatio(payload, group.key));
     const groupCards = groups.map(group => {
       const groupRaw = sum(group.rows, item => num(item.row.weight_g) * lossM * num(item.row.material_unit_price));
@@ -3181,9 +3182,9 @@ function renderMolding(host, payload, canEdit, onChange, refMolds, fxRmbHkd, use
       const groupFinished = groupRaw + groupShot;
       return `<div class="ls-row" style="background:#f0f9ff;color:#075985">
         <span class="ls-label">${escapeHtml(group.name)} 小计（${group.rows.length} 行）</span>
-        <span class="ls-val">HK$ ${formatNum(groupFinished)} × 配比
+        <span class="ls-val">HK$ ${formatNum(groupFinished)} ${hasMultipleProducts ? `× 配比
           <input class="product-mix-ratio" data-group="${escapeHtml(group.key)}" type="number" min="0" step="any"
-            value="${productMixRatio(payload, group.key)}" ${canEdit ? '' : 'disabled'} style="width:72px;margin:0 6px">
+            value="${productMixRatio(payload, group.key)}" ${canEdit ? '' : 'disabled'} style="width:72px;margin:0 6px">` : ''}
           <small class="muted">原料 ${formatNum(groupRaw)} + 啤价 ${formatNum(groupShot)}</small>
         </span>
       </div>`;
@@ -3192,9 +3193,9 @@ function renderMolding(host, payload, canEdit, onChange, refMolds, fxRmbHkd, use
     injCard.innerHTML = `
       <div class="ls-title">二、注塑 成本汇总</div>
       ${groupCards}
-      <div class="ls-row"><span class="ls-label">原料单价 ${groups.length ? '加权平均' : '总'}</span><span class="ls-val">${formatNum(rawSum)}</span></div>
-      <div class="ls-row"><span class="ls-label">啤价 ${groups.length ? '加权平均' : '总'}</span><span class="ls-val">${formatNum(shotSum)}</span></div>
-      <div class="ls-row hi"><span class="ls-label">成品金额 ${groups.length ? `加权平均（总配比 ${formatNum(totalRatio)}）` : '总'} HK$</span><span class="ls-val">${formatNum(finishedSum)}</span></div>
+      <div class="ls-row"><span class="ls-label">原料单价 ${hasMultipleProducts ? '加权平均' : '总'}</span><span class="ls-val">${formatNum(rawSum)}</span></div>
+      <div class="ls-row"><span class="ls-label">啤价 ${hasMultipleProducts ? '加权平均' : '总'}</span><span class="ls-val">${formatNum(shotSum)}</span></div>
+      <div class="ls-row hi"><span class="ls-label">成品金额 ${hasMultipleProducts ? `加权平均（总配比 ${formatNum(totalRatio)}）` : '总'} HK$</span><span class="ls-val">${formatNum(finishedSum)}</span></div>
       <div class="ls-row hi"><span class="ls-label">合计 RMB</span><span class="ls-val">${formatNum(finishedSum / fxv)} <small class="muted">(汇率 ${fxv})</small></span></div>
     `;
     injCard.querySelectorAll('.product-mix-ratio').forEach(input => {

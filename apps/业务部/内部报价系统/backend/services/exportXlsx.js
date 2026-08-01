@@ -1138,7 +1138,7 @@ function renderInjection(ws, row, payload, fxRH, refs) {
     const totalRow = row;
     const mixGroups = injectionProductGroups(payload);
     const totalRatio = sum(mixGroups, group => group.ratio);
-    ws.getCell(row, 1).value = mixGroups.length ? `加权合计（总配比 ${totalRatio}）` : '合计';
+    ws.getCell(row, 1).value = mixGroups.length > 1 ? `加权合计（总配比 ${totalRatio}）` : '合计';
     ws.getCell(row, 1).alignment = { horizontal: 'right', vertical: 'middle' };
     ws.mergeCells(row, 1, row, 8);
     ws.getCell(row, 9).value = { formula: weightedColumnFormula(payload, dataStart, 'I'), result: rawSumVal };

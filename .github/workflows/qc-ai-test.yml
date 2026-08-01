@@ -46,9 +46,9 @@ jobs:
                     [PhotoInput(path=f.name, photo_id='smoke-1', caption='蓝色测试图')],
                     po_reference={'po_no': 'SMOKE-TEST'},
                 )
-                print('AI 调用成功, status:', result.status)
+                print('AI 调用成功')
                 print('metadata:', result.metadata)
-                print('findings 数:', len(result.findings or []))
+                print('data 摘要:', str(result.data)[:600])
             except Exception as e:
                 print('AI 调用失败:', type(e).__name__, str(e)[:500])
             PYEOF

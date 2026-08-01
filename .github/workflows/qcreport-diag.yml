@@ -39,5 +39,6 @@ jobs:
             docker exec rr-portal-qc-report-1 python -c "import urllib.request,urllib.error;exec(\"try:\\n print(urllib.request.urlopen('http://127.0.0.1:3410/health',timeout=5).read().decode())\\nexcept urllib.error.HTTPError as e:\\n print('HTTP',e.code,e.read().decode())\")" 2>&1 || true
             echo "== 挂载权限 =="
             docker exec rr-portal-qc-report-1 sh -c 'id; ls -la /app/data /app/storage' 2>&1 || true
-            echo "== worker 日志 =="
+            echo "== get_queue 实测 =="
             docker logs rr-portal-qc-report-worker-1 --tail 20 2>&1 || true
+            docker exec rr-portal-qc-report-1 python -c "from task_queue import get_queue; q=get_queue(required=True); print(type(q).__name__, q.name)" 2>&1 || true

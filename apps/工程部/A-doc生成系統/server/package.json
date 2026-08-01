@@ -5,6 +5,7 @@
   "scripts": {
     "start": "node app.js",
     "dev": "node --watch app.js",
+    "test": "node --test test/*.test.js",
     "pkg": "pkg app.js --target node18-win-x64 --output ../dist/走货明细.exe"
   },
   "pkg": {

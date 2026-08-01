@@ -36,7 +36,15 @@ jobs:
             set -euo pipefail
             docker ps -a --filter name=qc-report --format 'table {{.Names}}\t{{.Status}}'
             echo "== 容器内 /health =="
-            docker exec rr-portal-qc-report-1 python -c "import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:3410/health', timeout=5).read().decode())" 2>&1 || true
+            docker exec rr-portal-qc-report-1 python -c "
+import urllib.request, urllib.error
+try:
+    print(urllib.request.urlopen('http://127.0.0.1:3410/health', timeout=5).read().decode())
+except urllib.error.HTTPError as e:
+    print('HTTP', e.code, e.read().decode())
+" 2>&1 || true
+            echo '== 挂载权限 =='
+            docker exec rr-portal-qc-report-1 sh -c 'id; ls -la /app/data /app/storage' 2>&1 || true
             echo "== redis ping（从 qc-report 容器）=="
             docker exec rr-portal-qc-report-1 python -c "import os, redis; print(redis.Redis.from_url(os.environ['REDIS_URL'], socket_connect_timeout=3).ping())" 2>&1 || true
             echo "== worker 日志 =="

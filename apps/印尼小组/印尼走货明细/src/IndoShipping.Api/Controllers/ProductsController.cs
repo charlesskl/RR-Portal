@@ -54,7 +54,7 @@ public class ProductsController(ISqlConnectionFactory factory) : ControllerBase
         using var c = factory.Create();
         await c.ExecuteAsync(@"
 INSERT INTO products(code, name, hs_cn, hs_id, customer, moldings, updated_at)
-VALUES (@code, @name, @hs_cn, @hs_id, @customer, @moldings, now())
+VALUES (@code, @name, @hs_cn, @hs_id, @customer, CAST(@moldings AS jsonb), now())
 ON CONFLICT (code) DO UPDATE SET
     name=EXCLUDED.name, hs_cn=EXCLUDED.hs_cn, hs_id=EXCLUDED.hs_id,
     customer=EXCLUDED.customer, moldings=EXCLUDED.moldings, updated_at=now();",

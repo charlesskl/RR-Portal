@@ -1,0 +1,47 @@
+name: Server Spot Check
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: deploy-cloud
+  queue: max
+  cancel-in-progress: false
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Validate SSH host fingerprint
+        shell: bash
+        env:
+          CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]]; then
+            echo 'CLOUD_HOST_FINGERPRINT must be a non-empty OpenSSH SHA256 fingerprint.' >&2
+            exit 1
+          fi
+      - name: Check factory-review on server via SSH
+        env:
+          CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
+        with:
+          host: ${{ secrets.CLOUD_HOST }}
+          username: ${{ secrets.CLOUD_USER }}
+          key: ${{ secrets.CLOUD_SSH_KEY }}
+          fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
+          command_timeout: 5m
+          script: |
+            set -euo pipefail
+            echo "== 容器状态 =="
+            docker ps -a --filter name=factory-review --format 'table {{.Names}}\t{{.Status}}'
+            echo "== nginx 里 factory-review 配置 =="
+            docker exec rr-portal-nginx-1 grep -n "factory-review" /etc/nginx/nginx.cloud.conf | head -8 || \
+            docker exec rr-portal-nginx-1 grep -rn "factory-review" /etc/nginx/ | head -8
+            echo "== 服务器本机访问 =="
+            curl -s -o /dev/null -w 'localhost /factory-review/health → %{http_code}\n' http://localhost/factory-review/health
+            curl -s -o /dev/null -w 'localhost /factory-review/ → %{http_code}\n' http://localhost/factory-review/
+            echo "== 容器本机 =="
+            docker exec rr-portal-factory-review-1 wget -qO- http://127.0.0.1:8080/api/health 2>/dev/null || \
+            docker exec rr-portal-factory-review-1 curl -s http://127.0.0.1:8080/api/health || true

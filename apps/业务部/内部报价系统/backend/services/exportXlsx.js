@@ -19,6 +19,15 @@ const SUBTOTAL_FONT = 'FF92400E';
 // 工具
 const num = (v) => Number(v) || 0;
 const sum = (arr, fn) => arr.reduce((a, r) => a + (fn(r) || 0), 0);
+const blowUsage = row => row && row.usage_qty !== undefined && row.usage_qty !== null && row.usage_qty !== ''
+  ? num(row.usage_qty)
+  : 1;
+const blowRowTotal = row => {
+  const material = num(row && row.weight_g) * num(row && row.material_price_lb) / 454;
+  return (material + num(row && row.blow_labor) + num(row && row.flash))
+    * (num(row && row.profit_x) || 1)
+    * blowUsage(row);
+};
 function hasFreeRmbPrice(row) {
   return row && row.unit_price_rmb !== undefined && row.unit_price_rmb !== null && row.unit_price_rmb !== '';
 }
@@ -387,8 +396,7 @@ async function buildWorkbook({ quote, sections }) {
   }, 0) * fxRH;
   // cost 包含 吹气/搪胶/车缝/纸箱
   const blowRmb = sum(mold.blow_items || [], r => {
-    const mat = num(r.weight_g) * num(r.material_price_lb) / 454;
-    return (mat + num(r.blow_labor) + num(r.flash)) * (num(r.profit_x) || 1);
+    return blowRowTotal(r);
   }) * fxRH;
   // 电子/五金/辅助/包装/二次加工(喷油)/组装+包装人工 现按港币(HKD)，加入 RMB 成本时 ×fxRH 还原成 RMB
   const cost = injSubtotalRmb + blowRmb + (ppSubtotal + elecSubtotal + auxSubtotal + pkSubtotal + asmSubtotal + pklSubtotal) * fxRH + shipping + slushTotalRmb + sewingTotalRmb + cartonRmb;
@@ -407,8 +415,7 @@ async function buildWorkbook({ quote, sections }) {
     (subRefs.injection || subRefs.blow)
       ? { formula: `(${[subRefs.injection, subRefs.blow].filter(Boolean).join('+')})`,
           result: injSubtotal + sum(mold.blow_items || [], r => {
-            const mat = num(r.weight_g) * num(r.material_price_lb) / 454;
-            return (mat + num(r.blow_labor) + num(r.flash)) * (num(r.profit_x) || 1);
+            return blowRowTotal(r);
           }) }
       : injSubtotalRmb / fxRH,
     // B 二次加工 (本身 HKD，不换算)
@@ -1576,17 +1583,18 @@ function renderSlushBlock(ws, row, slush, fxRH, refs) {
 function renderBlowBlock(ws, row, mold, refs) {
   const items = mold.blow_items || [];
   if (!items.length) return row;
-  ws.mergeCells(row, 1, row, 13); styleSection(ws.getCell(row, 1));
+  ws.mergeCells(row, 1, row, 14); styleSection(ws.getCell(row, 1));
   ws.getCell(row, 1).value = '二·B、吹气部分 (HKD)';
   row += 1;
-  const h = ['货名', '日产量/22H', '用料', '预估料重(g)', '料价 HK$/lb', '产品料价', '吹工', '披锋', '小计', '利润 ×', '合计 HK$', '出数', '模价(¥)'];
+  const h = ['货名', '日产量/22H', '用料', '预估料重(g)', '料价 HK$/lb', '产品料价', '吹工', '披锋', '小计', '利润 ×', '用量', '合计 HK$', '出数', '模价(¥)'];
   h.forEach((v, i) => { ws.getCell(row, i + 1).value = v; styleHeader(ws.getCell(row, i + 1)); });
   row += 1;
   items.forEach(r => {
     const mat = num(r.weight_g) * num(r.material_price_lb) / 454;
     const sub = mat + num(r.blow_labor) + num(r.flash);
-    const tot = sub * (num(r.profit_x) || 1);
-    // 列：A货名 B产能 C用料 D重 E料价 F产品料价 G吹工 H披锋 I小计 J利润× K合计 L一出 M模价
+    const usage = blowUsage(r);
+    const tot = sub * (num(r.profit_x) || 1) * usage;
+    // 列：A货名 B产能 C用料 D重 E料价 F产品料价 G吹工 H披锋 I小计 J利润× K用量 L合计 M一出 N模价
     ws.getCell(row, 1).value = r.name || '';
     ws.getCell(row, 2).value = r.capacity || '';
     ws.getCell(row, 3).value = r.material || '';
@@ -1597,33 +1605,33 @@ function renderBlowBlock(ws, row, mold, refs) {
     ws.getCell(row, 8).value = num(r.flash);
     ws.getCell(row, 9).value = { formula: `F${row}+G${row}+H${row}`, result: sub };  // 小计 = 产品料价+吹工+披锋
     ws.getCell(row, 10).value = num(r.profit_x);
-    ws.getCell(row, 11).value = { formula: `I${row}*J${row}`, result: tot };  // 合计 = 小计×利润
-    ws.getCell(row, 12).value = r.cavity_note || '';
-    ws.getCell(row, 13).value = r.mold_price_note || '';
-    for (let c = 1; c <= 13; c++) styleData(ws.getCell(row, c));
-    [4, 5, 6, 7, 8, 9, 11].forEach(c => ws.getCell(row, c).numFmt = '0.0000');
+    ws.getCell(row, 11).value = usage;
+    ws.getCell(row, 12).value = { formula: `I${row}*J${row}*K${row}`, result: tot };  // 合计 = 小计×利润×用量
+    ws.getCell(row, 13).value = r.cavity_note || '';
+    ws.getCell(row, 14).value = r.mold_price_note || '';
+    for (let c = 1; c <= 14; c++) styleData(ws.getCell(row, c));
+    [4, 5, 6, 7, 8, 9, 10, 11, 12].forEach(c => ws.getCell(row, c).numFmt = '0.0000');
     row += 1;
   });
   const dataEnd = row - 1;
   // 合计 HK$ - SUM 公式（只数值上色）
-  ws.mergeCells(row, 1, row, 10);
+  ws.mergeCells(row, 1, row, 11);
   ws.getCell(row, 1).value = '合计 HK$';
   ws.getCell(row, 1).alignment = { horizontal: 'right', vertical: 'middle' };
   const blowTot = sum(items, r => {
-    const mat = num(r.weight_g) * num(r.material_price_lb) / 454;
-    return (mat + num(r.blow_labor) + num(r.flash)) * (num(r.profit_x) || 1);
+    return blowRowTotal(r);
   });
-  ws.getCell(row, 11).value = { formula: `SUM(K${dataEnd - items.length + 1}:K${dataEnd})`, result: blowTot };
-  ws.getCell(row, 11).numFmt = HKD4;
-  for (let c = 1; c <= 13; c++) {
+  ws.getCell(row, 12).value = { formula: `SUM(L${dataEnd - items.length + 1}:L${dataEnd})`, result: blowTot };
+  ws.getCell(row, 12).numFmt = HKD4;
+  for (let c = 1; c <= 14; c++) {
     const cell = ws.getCell(row, c);
     cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFFFF' } };
     cell.border = thinBorder();
   }
-  styleSubtotal(ws.getCell(row, 11), 'total');
+  styleSubtotal(ws.getCell(row, 12), 'total');
   ws.getCell(row, 1).font = { bold: true, color: { argb: 'FF1F2937' }, name: 'Microsoft YaHei' };
-  ws.getCell(row, 11).font = { bold: true, color: { argb: 'FF1F2937' }, name: 'Microsoft YaHei' };
-  if (refs) refs.blow = `K${row}`;
+  ws.getCell(row, 12).font = { bold: true, color: { argb: 'FF1F2937' }, name: 'Microsoft YaHei' };
+  if (refs) refs.blow = `L${row}`;
   row += 2;
   return row;
 }

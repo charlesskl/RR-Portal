@@ -1,6 +1,9 @@
 import type { Order } from '../types/order'
 import { cnyTaxToUntaxedRmb } from './orderPricing'
 
+const SEP = ' '
+const groupCollator = new Intl.Collator('zh-CN-u-co-stroke')
+
 export interface PriceStatsRow {
   workshop: string
   factory: string
@@ -39,7 +42,6 @@ function ratioFromPrice(price?: number | null, quoteLaborPrice?: number | null):
   return Math.round((price / quoteLaborPrice) * 1000) / 10
 }
 
-const SEP = ' '
 function computeSpan(
   rows: PriceStatsRow[],
   key: (r: PriceStatsRow) => string,
@@ -91,9 +93,9 @@ export function buildPriceStatsRows(
   })
   // 排序保证同组相邻：车间 → 加工厂 → 加工类别
   rows.sort((a, b) =>
-    a.workshop.localeCompare(b.workshop) ||
-    a.factory.localeCompare(b.factory) ||
-    a.category.localeCompare(b.category))
+    groupCollator.compare(a.workshop, b.workshop) ||
+    groupCollator.compare(a.factory, b.factory) ||
+    groupCollator.compare(a.category, b.category))
   computeSpan(rows, (r) => r.workshop, 'workshopSpan')
   computeSpan(rows, (r) => r.workshop + SEP + r.factory, 'factorySpan')
   computeSpan(rows, (r) => r.workshop + SEP + r.factory + SEP + r.category, 'categorySpan')

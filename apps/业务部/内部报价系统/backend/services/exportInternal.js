@@ -760,6 +760,11 @@ function appendSpinTransportBlock(ws, row, quote, sales, engineering, styles) {
     ws.getCell(row, 10).numFmt = '0.0000';
     row += 1;
   });
+  // 保留运费表与“十、合计”之间的空白行，但仍套用完整表格边框，
+  // 避免导出后 E:M 列看起来像缺失单元格。
+  for (let column = 1; column <= 13; column += 1) {
+    applyStyle(ws.getCell(row, column), styles.data);
+  }
   return row + 1;
 }
 

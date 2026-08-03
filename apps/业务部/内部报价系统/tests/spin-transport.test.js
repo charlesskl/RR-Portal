@@ -439,4 +439,13 @@ test('internal quotation export includes the SPIN transportation formula table',
   assert.equal(worksheet.getCell(firstLclRow, 2).value.formula, `L${firstLclRow}`);
   assert.equal(worksheet.getCell(firstLclRow, 3).value.formula, `M${firstLclRow}`);
   assert.match(worksheet.getCell(firstLclRow, 10).value.formula, /C\d+\*F\d+\/G\d+\/E\d+\/D\d+/);
+
+  const spacerRow = firstDataRow + 7;
+  for (let column = 1; column <= 13; column += 1) {
+    const border = worksheet.getCell(spacerRow, column).border;
+    assert.equal(border.top.style, 'thin');
+    assert.equal(border.bottom.style, 'thin');
+    assert.equal(border.left.style, 'thin');
+    assert.equal(border.right.style, 'thin');
+  }
 });

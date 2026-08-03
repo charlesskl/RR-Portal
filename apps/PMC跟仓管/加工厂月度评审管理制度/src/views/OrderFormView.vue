@@ -7,7 +7,7 @@ import { useFactoriesStore } from '../stores/factories'
 import { useAuthStore } from '../stores/auth'
 import { CRAFT_LABELS, type Craft } from '../constants/roles'
 import type { Order } from '../types/order'
-import { cnyTaxToHkdUntaxed, DEFAULT_CNY_TO_HKD_RATE } from '../utils/orderPricing'
+import { cnyTaxToHkdUntaxed, cnyTaxToUntaxedRmb, DEFAULT_CNY_TO_HKD_RATE } from '../utils/orderPricing'
 
 const route = useRoute()
 const router = useRouter()
@@ -45,7 +45,9 @@ watch(() => [draft.value.unit_price_cny_tax, draft.value.exchange_rate], ([value
   const cnyTaxPrice = Number(value)
   const exchangeRate = Number(rate)
   if (Number.isFinite(cnyTaxPrice) && Number.isFinite(exchangeRate) && exchangeRate > 0) {
-    draft.value.unit_price = cnyTaxToHkdUntaxed(cnyTaxPrice, exchangeRate)
+    draft.value.unit_price = craft.value === 'sewing'
+      ? cnyTaxToUntaxedRmb(cnyTaxPrice, exchangeRate)
+      : cnyTaxToHkdUntaxed(cnyTaxPrice, exchangeRate)
   }
 })
 
@@ -119,9 +121,11 @@ async function submit() {
           <label>数量 <input v-model.number="draft.quantity" type="number" min="0" /></label>
           <label>加工类别 <input v-model="draft.process_category" placeholder="如塑胶半成品" /></label>
           <label>核价生产工价 <input v-model.number="draft.quote_labor_price" type="number" min="0" step="0.01" /></label>
-          <label>外发单价 <input v-model.number="draft.unit_price" type="number" min="0" step="0.0001" /></label>
+          <label>{{ craft === 'sewing' ? '外发工价(不含税RMB)' : '外发单价' }}
+            <input v-model.number="draft.unit_price" type="number" min="0" step="0.0001" :readonly="craft === 'sewing'" />
+          </label>
           <label>外发工价(人民币含税) <input v-model.number="draft.unit_price_cny_tax" type="number" min="0" step="0.0001" /></label>
-          <label>换算汇率 <input v-model.number="draft.exchange_rate" type="number" min="0.0001" step="0.01" /></label>
+          <label>{{ craft === 'sewing' ? '税点' : '换算汇率' }} <input v-model.number="draft.exchange_rate" type="number" min="0.0001" step="0.01" /></label>
           <label>金额 <input :value="draftAmount" type="number" disabled /></label>
           <label>下单日期 <input v-model="draft.order_date" type="date" /></label>
           <label>交货日期 <input v-model="draft.delivery_date" type="date" /></label>

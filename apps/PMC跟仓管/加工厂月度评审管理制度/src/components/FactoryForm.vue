@@ -4,7 +4,7 @@ import type { Factory } from '../types/factory'
 import { useAuthStore } from '../stores/auth'
 import { pb } from '../pb'
 
-const props = defineProps<{ modelValue: Partial<Factory>; readonly?: boolean }>()
+const props = defineProps<{ modelValue: Partial<Factory>; readonly?: boolean; saving?: boolean }>()
 const emit = defineEmits<{ (e: 'save', v: FormData): void }>()
 const auth = useAuthStore()
 
@@ -130,7 +130,9 @@ function onSubmit() {
     <label>合作车间 <input v-model="form.cooperative_workshops" placeholder="如：移印车间、丝印车间外协" /></label>
     <label>IP管控 <input v-model="form.ip_control" placeholder="如：已授权 / 无 IP 风险 / 待确认" /></label>
     </fieldset>
-    <button v-if="!props.readonly" type="submit">保存</button>
+    <button v-if="!props.readonly" type="submit" :disabled="props.saving">
+      {{ props.saving ? '保存中...' : '保存' }}
+    </button>
   </form>
 </template>
 <style scoped>

@@ -1,7 +1,7 @@
 import * as XLSX from 'xlsx'
 import type { Order } from '../types/order'
 import { resolveFactoryName } from './factoryName'
-import { cnyTaxToHkdUntaxed, DEFAULT_CNY_TO_HKD_RATE } from './orderPricing'
+import { cnyTaxToHkdUntaxed, cnyTaxToUntaxedRmb, DEFAULT_CNY_TO_HKD_RATE } from './orderPricing'
 
 // 报表表头（单行）
 export const DELIVERY_HEADERS = [
@@ -9,6 +9,23 @@ export const DELIVERY_HEADERS = [
   '订单总单数', '延期单数', '占比', '延期平均天数',
   '核价工价(港币不含税$)', '外发工价(港币不含税$)', '外发工价(人民币含税)', '换算汇率', '占比', '备注',
 ]
+
+export function deliveryHeaders(
+  includeMoldNumber = true,
+  includeContractNumber = false,
+) {
+  let headers = DELIVERY_HEADERS.filter((header) => includeMoldNumber || header !== '模具编号')
+  if (includeContractNumber) {
+    headers.splice(headers.indexOf('货号'), 0, '合同号')
+    headers = headers.map((header) => {
+      if (header === '核价工价(港币不含税$)') return '核价工价(不含税RMB)'
+      if (header === '外发工价(港币不含税$)') return '外发工价(不含税RMB)'
+      if (header === '换算汇率') return '税点'
+      return header
+    })
+  }
+  return headers
+}
 
 const r1 = (n: number) => Math.round(n * 10) / 10
 const r2 = (n: number) => Math.round(n * 100) / 100
@@ -128,13 +145,13 @@ function detailOrderStats(os: Order[]) {
   return stats
 }
 
-function metricsOf(os: Order[]): Metrics {
+function metricsOf(os: Order[], useSewingTaxPoint = false): Metrics {
   const orderStats = uniqueOrderStats(os)
   const inspect = os.reduce((a, o) => a + num(o.inspect_count), 0)
   const qualified = os.reduce((a, o) => a + Math.max(0, num(o.inspect_count) - num(o.defect_count)), 0)
   const returnCount = os.reduce((a, o) => a + num(o.return_count), 0)
   const quote = r2(os.reduce((a, o) => a + num(o.quote_labor_price), 0))
-  const outPrice = r2(os.reduce((a, o) => a + effectiveHkdPrice(o), 0))
+  const outPrice = r2(os.reduce((a, o) => a + effectiveOutPrice(o, useSewingTaxPoint), 0))
   const outPriceCnyTax = r2(os.reduce((a, o) => a + num(o.unit_price_cny_tax), 0))
   return {
     orderCount: orderStats.orderCount,
@@ -153,10 +170,11 @@ function metricsOf(os: Order[]): Metrics {
   }
 }
 
-function effectiveHkdPrice(order: Order) {
+function effectiveOutPrice(order: Order, useSewingTaxPoint = false) {
   const hkdPrice = num(order.unit_price)
   const cnyTaxPrice = num(order.unit_price_cny_tax)
   const exchangeRate = num(order.exchange_rate) || DEFAULT_CNY_TO_HKD_RATE
+  if (useSewingTaxPoint && cnyTaxPrice) return cnyTaxToUntaxedRmb(cnyTaxPrice, exchangeRate)
   return hkdPrice || (cnyTaxPrice ? cnyTaxToHkdUntaxed(cnyTaxPrice, exchangeRate) : 0)
 }
 
@@ -164,6 +182,7 @@ export function buildDeliveryReport(
   orders: Order[],
   range: string,
   factoryName: (o: Order) => string,
+  useSewingTaxPoint = false,
 ): ReportRow[] {
   // 分组 下单PMC → 加工厂（保持组内相邻）
   const sorted = [...orders].sort((a, b) =>
@@ -206,7 +225,7 @@ export function buildDeliveryReport(
         const qualified = Math.max(0, inspect - num(o.defect_count))
         const returnCount = num(o.return_count)
         const quote = o.quote_labor_price ?? 0
-        const outPrice = effectiveHkdPrice(o)
+        const outPrice = effectiveOutPrice(o, useSewingTaxPoint)
         const outPriceCnyTax = o.unit_price_cny_tax ?? 0
         const orderStats = orderStatsById.get(o.id) ?? {
           orderCount: 1,
@@ -253,7 +272,7 @@ export function buildDeliveryReport(
         pmcFirst = false
         facFirst = false
       }
-      out.push({ kind: 'subtotal', factory: fac.factory, ...metricsOf(fac.orders) })
+      out.push({ kind: 'subtotal', factory: fac.factory, ...metricsOf(fac.orders, useSewingTaxPoint) })
     }
   }
   return out
@@ -266,8 +285,7 @@ export function exportDeliveryExcel(
   includeMoldNumber = true,
   includeContractNumber = false,
 ) {
-  const H = DELIVERY_HEADERS.filter((header) => includeMoldNumber || header !== '模具编号')
-  if (includeContractNumber) H.splice(H.indexOf('货号'), 0, '合同号')
+  const H = deliveryHeaders(includeMoldNumber, includeContractNumber)
   const moldColumn = DELIVERY_HEADERS.indexOf('模具编号')
   const visibleValues = (values: any[], splitItemNumber = true) => {
     const visible = includeMoldNumber

@@ -27,8 +27,7 @@ const DEPTS: { craft: Craft; name: string; icon: string }[] = [
 const canEdit = computed(() => (auth.role ? canEditOrders(auth.role) : false))
 const visibleDepts = computed(() => DEPTS.filter((d) => allowedCrafts().includes(d.craft)))
 const myRegions = computed(() => (auth.role ? allowedRegions(auth.role) : REGIONS))
-// 用 <a> 整页跳转（而非 RouterLink）时必须自己带上路由 base，否则会丢掉 /factory-review/ 前缀跳到站点根导致报错
-const deptHref = (craft: Craft, region: string) => `${import.meta.env.BASE_URL}orders/dept/${craft}?region=${region}`
+const deptHref = (craft: Craft, region: string) => `/orders/dept/${craft}?region=${region}`
 const regionBlocks = computed(() =>
   myRegions.value.map((region) => ({
     region,
@@ -42,7 +41,12 @@ const regionBlocks = computed(() =>
 
 const fname = (o: any) => o.expand?.factory?.name ?? ''
 function craftRows(craft: Craft): ReportRow[] {
-  return buildDeliveryReport(orders.items.filter((o) => o.expand?.factory?.craft === craft), CRAFT_LABELS[craft], fname)
+  return buildDeliveryReport(
+    orders.items.filter((o) => o.expand?.factory?.craft === craft),
+    CRAFT_LABELS[craft],
+    fname,
+    craft === 'sewing',
+  )
 }
 // craft=null 导出全部(各部门拼接);指定部门只导该部门
 function exportExcel(craft: Craft | null) {

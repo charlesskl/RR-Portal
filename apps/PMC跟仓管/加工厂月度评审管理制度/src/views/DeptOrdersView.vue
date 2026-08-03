@@ -7,11 +7,13 @@ import { useFactoriesStore } from '../stores/factories'
 import { useAuthStore } from '../stores/auth'
 import { CRAFT_LABELS, REGION_LABELS, regionOf, type Craft, type Region } from '../constants/roles'
 import { canEditOrders, allowedRegions } from '../utils/permissions'
-import { buildDeliveryReport, exportDeliveryExcel, parseDeliveryImport, splitSewingContractItemNo, DELIVERY_HEADERS as HEADERS, type ReportRow, type DetailRow } from '../utils/deliveryStats'
+import { buildDeliveryReport, deliveryHeaders, exportDeliveryExcel, parseDeliveryImport, splitSewingContractItemNo, type ReportRow, type DetailRow } from '../utils/deliveryStats'
 import { readDeliveryPdfAsAoa } from '../utils/pdfDeliveryImport'
 import { parseDeliveryExcelFiles } from '../utils/deliveryExcelImport'
-import { cnyTaxToHkdUntaxed, DEFAULT_CNY_TO_HKD_RATE } from '../utils/orderPricing'
+import { cnyTaxToHkdUntaxed, cnyTaxToUntaxedRmb, DEFAULT_CNY_TO_HKD_RATE } from '../utils/orderPricing'
 import { matchesOrderDate, type OrderDateFilter } from '../utils/orderDateFilter'
+import { deliveryImportFactoryMap } from '../utils/deliveryImportScope'
+import { isPercentOver100 } from '../utils/percentage'
 import type { Order } from '../types/order'
 
 const route = useRoute()
@@ -63,14 +65,10 @@ const deptOrders = computed(() => {
 })
 const orderCount = computed(() => deptOrders.value.length)
 const rows = computed<ReportRow[]>(() =>
-  buildDeliveryReport(deptOrders.value, deptName.value, (o) => o.expand?.factory?.name ?? ''))
+  buildDeliveryReport(deptOrders.value, deptName.value, (o) => o.expand?.factory?.name ?? '', craft.value === 'sewing'))
 const showMoldNumber = computed(() => craft.value === 'injection')
 const showContractNumber = computed(() => craft.value === 'sewing')
-const visibleHeaders = computed(() => {
-  const headers = HEADERS.filter((header) => showMoldNumber.value || header !== '模具编号')
-  if (showContractNumber.value) headers.splice(headers.indexOf('货号'), 0, '合同号')
-  return headers
-})
+const visibleHeaders = computed(() => deliveryHeaders(showMoldNumber.value, showContractNumber.value))
 const visibleColumnCount = computed(() => visibleHeaders.value.length + (canEdit.value ? 1 : 0))
 const subtotalLabelSpan = computed(() => Math.max(1, visibleHeaders.value.indexOf('订单总单数') - 1))
 
@@ -87,14 +85,29 @@ type RowDraft = {
 }
 const drafts = ref<Record<string, RowDraft>>({})
 
+function convertedOutPrice(cnyTaxPrice: number, rateOrTaxPoint: number) {
+  return craft.value === 'sewing'
+    ? cnyTaxToUntaxedRmb(cnyTaxPrice, rateOrTaxPoint)
+    : cnyTaxToHkdUntaxed(cnyTaxPrice, rateOrTaxPoint)
+}
+
+function normalizeDeptPricing(payload: Record<string, any>) {
+  if (craft.value !== 'sewing') return payload
+  const cnyTaxPrice = Number(payload.unit_price_cny_tax)
+  const taxPoint = Number(payload.exchange_rate)
+  if (Number.isFinite(cnyTaxPrice) && Number.isFinite(taxPoint) && taxPoint > 0) {
+    payload.unit_price = cnyTaxToUntaxedRmb(cnyTaxPrice, taxPoint)
+  }
+  return payload
+}
+
 async function importRows(aoa: any[][]) {
-  const fByName: Record<string, string> = {}
-  for (const f of factories.items) fByName[f.name] = f.id
+  const fByName = deliveryImportFactoryMap(factories.items, craft.value, region.value)
   const { payloads, failed } = parseDeliveryImport(aoa, fByName)
   if (!payloads.length && !failed) { alert('未识别到表头(需含「货号/物料名称」)'); return }
   let ok = 0, fail = failed
   for (const p of payloads) {
-    try { await orders.create({ ...p, created_by: auth.userId ?? undefined } as any); ok++ } catch { fail++ }
+    try { await orders.create(normalizeDeptPricing({ ...p, created_by: auth.userId ?? undefined }) as any); ok++ } catch { fail++ }
   }
   await orders.fetchAll()
   alert(`导入完成：成功 ${ok} 条` + (fail ? `，失败 ${fail} 条(工厂名对不上或缺物料名称)` : '') + '\n(小计/合计行已自动跳过;加工厂名称需与系统一致)')
@@ -103,8 +116,7 @@ async function importRows(aoa: any[][]) {
 async function importExcel(ev: Event) {
   const files = Array.from((ev.target as HTMLInputElement).files ?? [])
   if (!files.length) return
-  const fByName: Record<string, string> = {}
-  for (const f of factories.items) fByName[f.name] = f.id
+  const fByName = deliveryImportFactoryMap(factories.items, craft.value, region.value)
   importingExcel.value = true
   try {
     const parsed = await parseDeliveryExcelFiles(files, fByName, { preferCnyTaxPrice: true })
@@ -112,7 +124,7 @@ async function importExcel(ev: Event) {
     const saveErrors: string[] = []
     for (const p of parsed.payloads) {
       try {
-        await orders.create({ ...p, created_by: auth.userId ?? undefined } as any)
+        await orders.create(normalizeDeptPricing({ ...p, created_by: auth.userId ?? undefined }) as any)
         ok++
       } catch (err: any) {
         fail++
@@ -194,7 +206,7 @@ function setDraftValue(row: DetailRow, field: keyof RowDraft, value: string) {
     const cnyTaxPrice = Number(drafts.value[row.id].unit_price_cny_tax)
     const exchangeRate = Number(drafts.value[row.id].exchange_rate)
     drafts.value[row.id].unit_price = drafts.value[row.id].unit_price_cny_tax.trim() && Number.isFinite(cnyTaxPrice) && Number.isFinite(exchangeRate) && exchangeRate > 0
-      ? String(cnyTaxToHkdUntaxed(cnyTaxPrice, exchangeRate))
+      ? String(convertedOutPrice(cnyTaxPrice, exchangeRate))
       : ''
   }
 }
@@ -228,9 +240,12 @@ async function saveRow(row: DetailRow) {
   const product = draft.product.trim()
   const quantity = parsePrice(draft.quantity)
   const quote = parsePrice(draft.quote_labor_price)
-  const unitPrice = parsePrice(draft.unit_price)
+  const enteredUnitPrice = parsePrice(draft.unit_price)
   const unitPriceCnyTax = parsePrice(draft.unit_price_cny_tax)
   const exchangeRate = parsePrice(draft.exchange_rate)
+  const unitPrice = craft.value === 'sewing' && unitPriceCnyTax != null && exchangeRate != null
+    ? cnyTaxToUntaxedRmb(unitPriceCnyTax, exchangeRate)
+    : enteredUnitPrice
   if (!product) {
     alert('请输入物料名称')
     return
@@ -281,9 +296,12 @@ async function copyRow(row: DetailRow) {
   const product = draft.product.trim() || source.product
   const quantity = parsePrice(draft.quantity)
   const quote = parsePrice(draft.quote_labor_price)
-  const unitPrice = parsePrice(draft.unit_price)
+  const enteredUnitPrice = parsePrice(draft.unit_price)
   const unitPriceCnyTax = parsePrice(draft.unit_price_cny_tax)
   const exchangeRate = parsePrice(draft.exchange_rate)
+  const unitPrice = craft.value === 'sewing' && unitPriceCnyTax != null && exchangeRate != null
+    ? cnyTaxToUntaxedRmb(unitPriceCnyTax, exchangeRate)
+    : enteredUnitPrice
   if (quantity === undefined) {
     alert('数量请输入有效数字')
     return
@@ -443,6 +461,7 @@ async function removeRow(row: DetailRow) {
                 </td>
                 <td>
                   <input v-if="canEdit" type="number" class="price-inp" min="0" step="0.0001"
+                    :readonly="showContractNumber"
                     :value="draftValue(r, 'unit_price')"
                     @input="setDraftValue(r, 'unit_price', ($event.target as HTMLInputElement).value)" />
                   <span v-else>{{ r.outPrice }}</span>
@@ -459,7 +478,7 @@ async function removeRow(row: DetailRow) {
                     @input="setDraftValue(r, 'exchange_rate', ($event.target as HTMLInputElement).value)" />
                   <span v-else>{{ r.exchangeRate }}</span>
                 </td>
-                <td>{{ r.priceRatio }}</td>
+                <td :class="{ 'over-limit': isPercentOver100(r.priceRatio) }">{{ r.priceRatio }}</td>
                 <td class="notes-col">{{ r.notes || '-' }}</td>
                 <td v-if="canEdit" class="op-cell">
                   <div class="op-actions">
@@ -480,7 +499,7 @@ async function removeRow(row: DetailRow) {
                 <td>{{ r.outPrice }}</td>
                 <td>{{ r.outPriceCnyTax }}</td>
                 <td></td>
-                <td>{{ r.priceRatio }}</td>
+                <td :class="{ 'over-limit': isPercentOver100(r.priceRatio) }">{{ r.priceRatio }}</td>
                 <td></td>
                 <td v-if="canEdit"></td>
               </tr>
@@ -509,6 +528,7 @@ async function removeRow(row: DetailRow) {
 .scroll { overflow-x: auto; }
 .report { min-width: 3140px; }
 .report th, .report td { white-space: nowrap; text-align: center; font-size: .85rem; }
+.report .over-limit { color: #dc2626; font-weight: 600; }
 .report .item-no-col {
   width: 220px;
   min-width: 220px;

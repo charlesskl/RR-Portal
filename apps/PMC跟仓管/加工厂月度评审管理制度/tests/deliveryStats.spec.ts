@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildDeliveryReport, parseDeliveryImport, splitSewingContractItemNo } from '../src/utils/deliveryStats'
+import { buildDeliveryReport, deliveryHeaders, parseDeliveryImport, splitSewingContractItemNo } from '../src/utils/deliveryStats'
 import type { Order } from '../src/types/order'
 
 function order(partial: Partial<Order>): Order {
@@ -60,6 +60,21 @@ describe('buildDeliveryReport', () => {
       outPriceCnyTax: 2.5,
     })
   })
+
+  it('uses CNY tax-inclusive price divided by tax point only for sewing', () => {
+    const source = [order({
+      id: 'sewing-row',
+      unit_price: 2.2722,
+      unit_price_cny_tax: 2.85,
+      exchange_rate: 1.11,
+    })]
+    const regularRows = buildDeliveryReport(source, '装配部', () => '工厂')
+    const sewingRows = buildDeliveryReport(source, '车缝部', () => '工厂', true)
+
+    expect(regularRows[0]).toMatchObject({ kind: 'detail', outPrice: 2.2722 })
+    expect(sewingRows[0]).toMatchObject({ kind: 'detail', outPrice: 2.5676 })
+    expect(sewingRows[1]).toMatchObject({ kind: 'subtotal', outPrice: 2.57 })
+  })
 })
 
 describe('splitSewingContractItemNo', () => {
@@ -75,6 +90,21 @@ describe('splitSewingContractItemNo', () => {
       contractNo: '',
       itemNo: '92125',
     })
+  })
+})
+
+describe('deliveryHeaders', () => {
+  it('uses RMB untaxed pricing labels and tax point only for sewing', () => {
+    const sewing = deliveryHeaders(false, true)
+    expect(sewing).toContain('核价工价(不含税RMB)')
+    expect(sewing).toContain('外发工价(不含税RMB)')
+    expect(sewing).toContain('税点')
+    expect(sewing).not.toContain('换算汇率')
+
+    const assembly = deliveryHeaders(false, false)
+    expect(assembly).toContain('核价工价(港币不含税$)')
+    expect(assembly).toContain('外发工价(港币不含税$)')
+    expect(assembly).toContain('换算汇率')
   })
 })
 

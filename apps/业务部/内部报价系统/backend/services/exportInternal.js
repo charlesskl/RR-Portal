@@ -226,7 +226,7 @@ function slushUnitPrice(row) {
 function patchSimpleIndoColumns(ws, payloads) {
   const patches = [
     { title: '二、注塑部分', dept: payloads.molding || {}, amountCol: 16, indoCol: 17, weighted: true },
-    { title: '二·B、吹气部分 (HKD)', dept: payloads.molding || {}, amountCol: 11, indoCol: 14 },
+    { title: '二·B、吹气部分 (HKD)', dept: payloads.molding || {}, amountCol: 12, indoCol: 15 },
     { title: '三、二次加工（印喷报价）', dept: payloads.painting || {}, amountCol: 22, indoCol: 23, factor: 0.3 },
     { title: '四、电子', dept: payloads.electronic || {}, amountCol: 10, indoCol: 11 },
     { title: '五、五金', dept: payloads.engineering || {}, amountCol: 10, indoCol: 11 },
@@ -559,7 +559,10 @@ function injectionSubtotal(molding) {
 function blowSubtotal(molding) {
   return sum((molding && molding.blow_items) || [], row => {
     const material = num(row.weight_g) * num(row.material_price_lb) / 454;
-    return (material + num(row.blow_labor) + num(row.flash)) * (num(row.profit_x) || 1);
+    const usage = row.usage_qty !== undefined && row.usage_qty !== null && row.usage_qty !== ''
+      ? num(row.usage_qty)
+      : 1;
+    return (material + num(row.blow_labor) + num(row.flash)) * (num(row.profit_x) || 1) * usage;
   });
 }
 

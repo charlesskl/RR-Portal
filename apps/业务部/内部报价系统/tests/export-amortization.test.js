@@ -756,7 +756,7 @@ test('internal export mirrors UI formulas for slush and each departmental Indone
       { dept: 'molding', payload_json: JSON.stringify({
         indo_pct: 2,
         injection: [{ name: '注塑', weight_g: 10, material_unit_price: 0.01, shot_price: 0.5 }],
-        blow_items: [{ name: '吹气', weight_g: 454, material_price_lb: 1, blow_labor: 1, flash: 0.5, profit_x: 2 }],
+        blow_items: [{ name: '吹气', weight_g: 454, material_price_lb: 1, blow_labor: 1, flash: 0.5, profit_x: 2, usage_qty: 3 }],
       }) },
       { dept: 'slush', payload_json: JSON.stringify({
         indo_pct: 3,
@@ -810,8 +810,13 @@ test('internal export mirrors UI formulas for slush and each departmental Indone
   assert.equal(worksheet.getCell(injectionHeader + 1, 17).value.formula, `P${injectionHeader + 1}*2/100`);
 
   const blowHeader = sectionRows['二·B、吹气部分 (HKD)'] + 1;
-  assert.equal(worksheet.getCell(blowHeader, 14).value, '印尼运费 2%');
-  assert.equal(worksheet.getCell(blowHeader + 1, 14).value.formula, `K${blowHeader + 1}*2/100`);
+  const blowRow = blowHeader + 1;
+  assert.equal(worksheet.getCell(blowHeader, 11).value, '用量');
+  assert.equal(worksheet.getCell(blowRow, 11).value, 3);
+  assert.equal(worksheet.getCell(blowRow, 12).value.formula, `I${blowRow}*J${blowRow}*K${blowRow}`);
+  assert.equal(worksheet.getCell(blowRow, 12).value.result, 15);
+  assert.equal(worksheet.getCell(blowHeader, 15).value, '印尼运费 2%');
+  assert.equal(worksheet.getCell(blowRow, 15).value.formula, `L${blowRow}*2/100`);
 
   const slushHeader = sectionRows['二·C、搪胶部分'] + 1;
   const slushRow = slushHeader + 1;

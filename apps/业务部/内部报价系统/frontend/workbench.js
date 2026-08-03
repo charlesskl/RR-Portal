@@ -262,6 +262,17 @@ function formatNum(v) {
 }
 function num(v) { return Number(v) || 0; }
 function sum(arr, fn) { return arr.reduce((a, r) => a + (fn(r) || 0), 0); }
+function blowUsage(row) {
+  return row && row.usage_qty !== undefined && row.usage_qty !== null && row.usage_qty !== ''
+    ? num(row.usage_qty)
+    : 1;
+}
+function blowRowTotal(row) {
+  const material = num(row && row.weight_g) * num(row && row.material_price_lb) / 454;
+  return (material + num(row && row.blow_labor) + num(row && row.flash))
+    * (num(row && row.profit_x) || 1)
+    * blowUsage(row);
+}
 function hasFreeRmbPrice(row) {
   return row && row.unit_price_rmb !== undefined && row.unit_price_rmb !== null && row.unit_price_rmb !== '';
 }
@@ -1172,8 +1183,7 @@ function renderSummaryPane(host, sections, quote, me) {
   const injTotal = weightedInjectionSum(mold, r => num(r.weight_g) * _injLossM * num(r.material_unit_price) + num(r.shot_price));
   const injRaw = injTotal / _injLossM; // 留作兼容（部分老逻辑可能引用）
   const blowTotal = sum(mold.blow_items || [], r => {
-    const mat = num(r.weight_g)*num(r.material_price_lb)/454;
-    return (mat + num(r.blow_labor) + num(r.flash)) * (num(r.profit_x) || 1);
+    return blowRowTotal(r);
   });
   const ppTotal = sum(pnt.painting_items || [], paintingRowAmount);  // 不计损耗（含九工序）
   const slushTotal = sum(slush.slush_items || [], r => num(r.unit_price_hkd)*num(r.qty));
@@ -3231,6 +3241,7 @@ function renderBlowItems(container, rows, onChange, canEdit, pctHost) {
     <th style="width:80px">披锋</th>
     <th style="width:90px">小计</th>
     <th style="width:80px">利润 ×</th>
+    <th style="width:80px">用量</th>
     <th style="width:100px">合计 HK$</th>
     <th style="width:90px">出数</th>
     <th>模价 (¥)</th>
@@ -3241,11 +3252,12 @@ function renderBlowItems(container, rows, onChange, canEdit, pctHost) {
   const calc = (r) => {
     const matCost = num(r.weight_g) * num(r.material_price_lb) / 454;
     const sub = matCost + num(r.blow_labor) + num(r.flash);
-    const total = sub * (num(r.profit_x) || 1);
+    const total = sub * (num(r.profit_x) || 1) * blowUsage(r);
     return { matCost, sub, total };
   };
 
   rows.forEach((r, idx) => {
+    if (r.usage_qty === undefined || r.usage_qty === null || r.usage_qty === '') r.usage_qty = 1;
     const tr = document.createElement('tr');
     tr.innerHTML = `<td class="ro">${idx + 1}</td>`;
     const refs = {};
@@ -3280,6 +3292,7 @@ function renderBlowItems(container, rows, onChange, canEdit, pctHost) {
     refs.sub = document.createElement('td'); refs.sub.className = 'ro';
     tr.appendChild(refs.sub);
     tr.appendChild(mk('profit_x', 'number'));
+    tr.appendChild(mk('usage_qty', 'number'));
     refs.total = document.createElement('td'); refs.total.className = 'ro hi';
     tr.appendChild(refs.total);
     tr.appendChild(mk('cavity_note', 'text'));
@@ -3300,8 +3313,7 @@ function renderBlowItems(container, rows, onChange, canEdit, pctHost) {
   totalDiv.className = 'loss-summary';
   totalDiv.style.marginTop = '8px';
   const blowTotal = sum(rows, r => {
-    const mat = num(r.weight_g) * num(r.material_price_lb) / 454;
-    return (mat + num(r.blow_labor) + num(r.flash)) * (num(r.profit_x) || 1);
+    return blowRowTotal(r);
   });
   const indoPct = num(pctHost && pctHost.indo_pct);
   totalDiv.innerHTML = `<div class="ls-title">二·B、吹气 成本汇总</div>`
@@ -3312,7 +3324,7 @@ function renderBlowItems(container, rows, onChange, canEdit, pctHost) {
     const btn = document.createElement('button');
     btn.textContent = '+ 增加吹气货号'; btn.className = 'mini'; btn.style.marginTop = '8px';
     btn.onclick = () => {
-      rows.push({ profit_x: 1.05, weight_g: 0, material_price_lb: 0, blow_labor: 0, flash: 0 });
+      rows.push({ profit_x: 1.05, usage_qty: 1, weight_g: 0, material_price_lb: 0, blow_labor: 0, flash: 0 });
       renderBlowItems(container, rows, onChange, canEdit, pctHost); onChange();
     };
     container.appendChild(btn);

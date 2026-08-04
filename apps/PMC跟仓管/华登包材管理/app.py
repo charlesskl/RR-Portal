@@ -1151,8 +1151,12 @@ def period_lock_delete(lid):
         con.close(); flash('解锁范围无效：开始日期不能晚于结束日期')
         return _party_redirect(party)
     con.execute("DELETE FROM period_locks WHERE id=?", (lid,))
+    # 同步解除该范围内流水记录的记录级锁（否则解锁了还是不能编辑）
+    unlocked = con.execute(
+        "UPDATE flow_records SET locked=0 WHERE recorded_by=? AND date BETWEEN ? AND ?",
+        (party, uf, ut)).rowcount
     if uf == lock['date_from'] and ut == lock['date_to']:
-        msg = f"已解锁 {uf} ~ {ut}，该时间段可以录入了"
+        msg = f"已解锁 {uf} ~ {ut}，该时间段可以录入，范围内 {unlocked} 条记录已可编辑"
     else:
         # 拆分：保留解锁区间前后的锁定
         if lock['date_from'] < uf:
@@ -1163,7 +1167,7 @@ def period_lock_delete(lid):
             con.execute(
                 "INSERT INTO period_locks (party, date_from, date_to, reconciliation_id, reason) VALUES (?,?,?,?,?)",
                 (party, _shift_day(ut, 1), lock['date_to'], lock['reconciliation_id'], lock['reason']))
-        msg = f"已解锁 {uf} ~ {ut}，其余区间仍在锁定"
+        msg = f"已解锁 {uf} ~ {ut}，范围内 {unlocked} 条记录已可编辑，其余区间仍在锁定"
     con.commit(); con.close()
     flash(msg)
     return _party_redirect(party)

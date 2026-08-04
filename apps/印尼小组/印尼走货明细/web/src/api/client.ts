@@ -27,7 +27,9 @@ api.interceptors.response.use(
       (status === 403 ? '没有执行此操作的权限' : null) ||
       (status === 409 ? '数据已被他人修改，请刷新后重试' : null) ||
       error?.message || '网络错误'
-    message.error('操作失败：' + text)
+    if (!(error?.config as any)?.skipErrorToast) {
+      message.error({ key: 'api-error', content: '操作失败：' + text })
+    }
     return Promise.reject(error)
   },
 )

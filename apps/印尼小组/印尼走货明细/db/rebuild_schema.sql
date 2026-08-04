@@ -189,7 +189,7 @@ CREATE TABLE dbo.po_items (
     spoilage_qty    DECIMAL(18,4) NULL,
     purchase_qty    DECIMAL(18,4) NULL,
     purchase_unit   NVARCHAR(16)  NULL,
-    tomy_po         NVARCHAR(64)  NULL,   -- 来源排期行的 TOMY PO，用于排期「已下单」精确关联
+    tomy_po         NVARCHAR(MAX) NULL,   -- 可关联多张排期 TOMY PO，避免批量聚合时截断
     ship_unit       NVARCHAR(16)  NULL,
     net_per_pc      DECIMAL(18,6) NULL,
     eta              NVARCHAR(32)  NULL,

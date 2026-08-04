@@ -483,13 +483,15 @@ export default function PurchasePage() {
           order_date: orderDate,
           notes: `从排期生成 · 货号: ${[...new Set(lines.map(l => l.sched.code))].join(', ')}`,
           items,
-        })
+        }, { skipErrorToast: true } as any)
         ok++; suppliers++
       } catch { fail++ }
     }
     setSchedPickerOpen(false); setPickerSelKeys([])
     setEditing(null); setCreating(false); setDrawerFull(false)
-    message.success(`已生成 ${ok} 张 PO（${suppliers} 个供应商 · 总 ${matCount} 行物料 · ${codeCount} 个货号）${fail ? ` · 失败 ${fail}` : ''}`)
+    const resultText = `已生成 ${ok} 张 PO（${suppliers} 个供应商 · 总 ${matCount} 行物料 · ${codeCount} 个货号）${fail ? ` · 失败 ${fail}` : ''}`
+    if (fail) message.warning({ key: 'generate-po-result', content: resultText })
+    else message.success({ key: 'generate-po-result', content: resultText })
     load()
   }
 

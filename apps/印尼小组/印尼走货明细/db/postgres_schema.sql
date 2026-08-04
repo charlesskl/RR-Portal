@@ -162,13 +162,15 @@ CREATE TABLE IF NOT EXISTS po_items (
     spoilage_qty    DECIMAL(18,4) NULL,
     purchase_qty    DECIMAL(18,4) NULL,
     purchase_unit   VARCHAR(16)  NULL,
-    tomy_po         VARCHAR(64)  NULL,   -- 来源排期行的 TOMY PO，用于排期「已下单」精确关联
+    tomy_po         TEXT         NULL,   -- 可关联多张排期 TOMY PO，避免批量聚合时超过 64 字符
     ship_unit       VARCHAR(16)  NULL,
     net_per_pc      DECIMAL(18,6) NULL,
     eta             VARCHAR(32)  NULL,
     CONSTRAINT "FK_po_items_po"       FOREIGN KEY (po_id)       REFERENCES purchase_orders(id) ON DELETE CASCADE,
     CONSTRAINT "FK_po_items_material" FOREIGN KEY (material_id) REFERENCES materials(id)
 );
+-- 兼容旧库：只放宽字段容量，不修改已有采购资料。
+ALTER TABLE IF EXISTS po_items ALTER COLUMN tomy_po TYPE TEXT;
 CREATE INDEX IF NOT EXISTS "IX_po_items_po" ON po_items(po_id);
 
 -- ============ 出库 ============

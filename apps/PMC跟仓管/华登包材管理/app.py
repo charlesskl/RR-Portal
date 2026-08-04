@@ -1133,7 +1133,7 @@ def reconcile_cancel(rid):
 
 @app.route('/locks/<int:lid>/delete', methods=['POST'])
 def period_lock_delete(lid):
-    """手动解锁某个对账时间段（解锁后该范围可再录入）。"""
+    """解锁（可只解锁子区间）：删除请求范围，剩余部分自动拆分保留。"""
     party = current_party()
     if not party:
         return redirect(url_for('index'))
@@ -1142,9 +1142,30 @@ def period_lock_delete(lid):
     lock = con.execute("SELECT * FROM period_locks WHERE id=?", (lid,)).fetchone()
     if not lock or lock['party'] != party:
         con.close(); flash('锁定不存在或无权解锁'); return redirect(url_for('index'))
+    uf = (request.form.get('unlock_from') or '').strip() or lock['date_from']
+    ut = (request.form.get('unlock_to') or '').strip() or lock['date_to']
+    # 只允许解本锁范围内的区间
+    uf = max(uf, lock['date_from'])
+    ut = min(ut, lock['date_to'])
+    if uf > ut:
+        con.close(); flash('解锁范围无效：开始日期不能晚于结束日期')
+        return _party_redirect(party)
     con.execute("DELETE FROM period_locks WHERE id=?", (lid,))
+    if uf == lock['date_from'] and ut == lock['date_to']:
+        msg = f"已解锁 {uf} ~ {ut}，该时间段可以录入了"
+    else:
+        # 拆分：保留解锁区间前后的锁定
+        if lock['date_from'] < uf:
+            con.execute(
+                "INSERT INTO period_locks (party, date_from, date_to, reconciliation_id, reason) VALUES (?,?,?,?,?)",
+                (party, lock['date_from'], _shift_day(uf, -1), lock['reconciliation_id'], lock['reason']))
+        if ut < lock['date_to']:
+            con.execute(
+                "INSERT INTO period_locks (party, date_from, date_to, reconciliation_id, reason) VALUES (?,?,?,?,?)",
+                (party, _shift_day(ut, 1), lock['date_to'], lock['reconciliation_id'], lock['reason']))
+        msg = f"已解锁 {uf} ~ {ut}，其余区间仍在锁定"
     con.commit(); con.close()
-    flash(f"已解锁 {lock['date_from']} ~ {lock['date_to']}，该时间段可以录入了")
+    flash(msg)
     return _party_redirect(party)
 
 
@@ -1441,6 +1462,12 @@ def _is_period_locked(con, party, date):
         SELECT 1 FROM period_locks
         WHERE party=? AND date_from<=? AND date_to>=? LIMIT 1
     """, (party, date, date)).fetchone() is not None
+
+
+def _shift_day(iso_date, days):
+    """ISO 日期串 ±N 天，返回 ISO 串。"""
+    d = datetime.strptime(iso_date, '%Y-%m-%d').date() + timedelta(days=days)
+    return d.isoformat()
 
 
 def _calc_summary(records):

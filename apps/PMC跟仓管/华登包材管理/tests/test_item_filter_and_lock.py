@@ -136,3 +136,56 @@ def test_cancel_reconcile_removes_locks(client):
     assert len(_locks()) == 2
     client.post(f'/reconcile/{rid}/cancel')
     assert _locks() == []
+
+
+def test_partial_unlock_splits_lock(client):
+    """只解锁中间一段：锁被拆成前后两段，解锁区间可录入，其余仍锁定。"""
+    con = sqlite3.connect(app_module.DATABASE)
+    cur = con.execute(
+        "INSERT INTO period_locks (party, date_from, date_to, reconciliation_id, reason) VALUES ('hd','2026-06-01','2026-06-30',1,'核对#1 已确认')")
+    lid = cur.lastrowid
+    con.commit(); con.close()
+    _login(client, 'hd')
+    client.post(f'/locks/{lid}/delete', data={'unlock_from': '2026-06-10', 'unlock_to': '2026-06-15'})
+    locks = _locks()
+    assert len(locks) == 2
+    ranges = sorted((l['date_from'], l['date_to']) for l in locks)
+    assert ranges == [('2026-06-01', '2026-06-09'), ('2026-06-16', '2026-06-30')]
+    # 解锁区间内可录入
+    client.post('/party/hd/entry', data={
+        'direction': 'sent', 'counterparty': 'sy', 'date': '2026-06-12', 'jx_qty': '1'})
+    con = sqlite3.connect(app_module.DATABASE)
+    n = con.execute("SELECT COUNT(*) FROM flow_records WHERE date='2026-06-12'").fetchone()[0]
+    con.close()
+    assert n == 1
+    # 未解锁区间仍拦截
+    rv = client.post('/party/hd/entry', data={
+        'direction': 'sent', 'counterparty': 'sy', 'date': '2026-06-20', 'jx_qty': '1'},
+        follow_redirects=True)
+    assert '已对账锁定' in rv.data.decode('utf-8')
+
+
+def test_partial_unlock_edge_keeps_single_lock(client):
+    """只解锁开头：锁收缩为一段而不是被删除。"""
+    con = sqlite3.connect(app_module.DATABASE)
+    cur = con.execute(
+        "INSERT INTO period_locks (party, date_from, date_to, reconciliation_id, reason) VALUES ('hd','2026-06-01','2026-06-30',1,'x')")
+    lid = cur.lastrowid
+    con.commit(); con.close()
+    _login(client, 'hd')
+    client.post(f'/locks/{lid}/delete', data={'unlock_from': '2026-06-01', 'unlock_to': '2026-06-05'})
+    locks = _locks()
+    assert len(locks) == 1
+    assert (locks[0]['date_from'], locks[0]['date_to']) == ('2026-06-06', '2026-06-30')
+
+
+def test_banner_is_collapsible(client):
+    """锁定横幅默认折叠（details 无 open 属性），段数显示在标题里。"""
+    con = sqlite3.connect(app_module.DATABASE)
+    con.execute("INSERT INTO period_locks (party, date_from, date_to, reconciliation_id, reason) VALUES ('hd','2026-06-01','2026-06-30',1,'x')")
+    con.commit(); con.close()
+    _login(client, 'hd')
+    html = client.get('/party/hd').data.decode('utf-8')
+    banner = html[html.find('已锁定时间段')-200:]
+    assert '<details' in banner and '已锁定时间段（1 段' in banner
+    assert 'class="bg-amber-50 border border-amber-300 rounded-lg p-3 mb-4 text-sm" open' not in banner

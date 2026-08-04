@@ -36,7 +36,9 @@
 <details class="bg-amber-50 border border-amber-300 rounded-lg p-3 mb-4 text-sm">
     <summary class="font-semibold text-amber-800 cursor-pointer select-none">🔒 已锁定时间段（{{ period_locks|length }} 段，范围内不能录入/修改/删除）<span class="text-xs font-normal text-gray-500 ml-2">点击展开管理</span></summary>
     <div class="mt-2 max-h-64 overflow-y-auto">
-        {% for lock in period_locks %}
+        {% for cp_name, cp_locks in locks_by_cp.items() %}
+        <div class="font-semibold text-amber-900 mt-2 mb-1 border-b border-amber-200">对{{ cp_name }}（{{ cp_locks|length }} 段）</div>
+        {% for lock in cp_locks %}
         <form method="POST" action="/locks/{{ lock.id }}/delete" class="flex items-center gap-2 py-1 flex-wrap"
               onsubmit="return confirm('确认解锁所选范围吗？未选中的部分会继续锁定。')">
             <span class="text-xs text-gray-500">{{ lock.reason or '' }}</span>
@@ -45,6 +47,7 @@
             <input type="date" name="unlock_to" value="{{ lock.date_to }}" min="{{ lock.date_from }}" max="{{ lock.date_to }}" class="border rounded px-1 py-0.5 text-xs">
             <button class="px-2 py-0.5 bg-white border border-amber-400 text-amber-700 rounded text-xs">解锁</button>
         </form>
+        {% endfor %}
         {% endfor %}
     </div>
 </details>

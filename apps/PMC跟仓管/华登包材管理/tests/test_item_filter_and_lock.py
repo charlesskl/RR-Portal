@@ -211,3 +211,23 @@ def test_unlock_also_unlocks_records_in_range(client):
     con.close()
     assert r10 == 0   # 范围内已解锁
     assert r20 == 1   # 范围外仍锁
+def test_locks_grouped_by_counterparty(client):
+    """锁定横幅按对方分组显示（邵阳是邵阳，兴信是兴信）。"""
+    con = sqlite3.connect(app_module.DATABASE)
+    # 一次 hd↔sy 核对、一次 hd↔xx 核对，各自确认产生锁
+    for cp in ('sy', 'xx'):
+        pair_low, pair_high = sorted(['hd', cp])
+        cur = con.execute("""
+            INSERT INTO reconciliations (initiator_party, approver_party, pair_low, pair_high,
+                                         date_from, date_to, status)
+            VALUES ('hd', ?, ?, ?, '2026-06-01', '2026-06-30', 'confirmed')
+        """, (cp, pair_low, pair_high))
+        rid = cur.lastrowid
+        con.execute(
+            "INSERT INTO period_locks (party, date_from, date_to, reconciliation_id, reason) VALUES ('hd','2026-06-01','2026-06-30',?,?)",
+            (rid, f'核对#{rid} 已确认'))
+    con.commit(); con.close()
+    _login(client, 'hd')
+    html = client.get('/party/hd').data.decode('utf-8')
+    assert '对邵阳华登（1 段）' in html
+    assert '对兴信（1 段）' in html

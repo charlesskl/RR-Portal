@@ -1,8 +1,0 @@
-__pycache__/
-*.pyc
-.pytest_cache/
-instance/
-*.xlsx
-!tests/fixtures/*.xlsx
-*_dump.txt
-.env

@@ -82,6 +82,7 @@ type RowDraft = {
   unit_price: string
   unit_price_cny_tax: string
   exchange_rate: string
+  notes: string
 }
 const drafts = ref<Record<string, RowDraft>>({})
 
@@ -180,6 +181,7 @@ function draftFromRow(row: DetailRow): RowDraft {
     unit_price: priceInputValue(row.outPrice),
     unit_price_cny_tax: priceInputValue(row.outPriceCnyTax),
     exchange_rate: priceInputValue(row.exchangeRate),
+    notes: row.notes || '',
   }
 }
 
@@ -269,6 +271,7 @@ async function saveRow(row: DetailRow) {
     unit_price: unitPrice,
     unit_price_cny_tax: unitPriceCnyTax,
     exchange_rate: exchangeRate ?? DEFAULT_CNY_TO_HKD_RATE,
+    notes: draft.notes.trim(),
     amount: quantity === null || (unitPriceCnyTax === null && unitPrice === null)
       ? null
       : quantity * (unitPriceCnyTax ?? unitPrice!),
@@ -345,7 +348,7 @@ async function copyRow(row: DetailRow) {
     is_resolved: source.is_resolved,
     quality_issues: source.quality_issues,
     manager_rating: source.manager_rating,
-    notes: source.notes,
+    notes: draft.notes.trim(),
     created_by: auth.userId ?? source.created_by,
   }
   await orders.create(payload)
@@ -397,13 +400,20 @@ async function removeRow(row: DetailRow) {
         <button @click="exportExcel">导出 Excel</button>
       </div>
       <div class="scroll">
-        <table class="report">
+        <table class="report" :class="{ 'sewing-report': showContractNumber }">
           <thead>
             <tr>
               <th
                 v-for="h in visibleHeaders"
                 :key="h"
-                :class="{ 'item-no-col': h === '货号', 'notes-col': h === '备注' }"
+                :class="{
+                  'freeze-col range-col': h === '范围',
+                  'freeze-col pmc-col': h === '下单PMC',
+                  'freeze-col factory-col': h === '加工厂',
+                  'freeze-col contract-no-col': h === '合同号',
+                  'freeze-col item-no-col': h === '货号',
+                  'notes-col': h === '备注',
+                }"
               >{{ h }}</th>
               <th v-if="canEdit" class="op-col">操作</th>
             </tr>
@@ -411,17 +421,17 @@ async function removeRow(row: DetailRow) {
           <tbody>
             <template v-for="(r, i) in rows" :key="i">
               <tr v-if="r.kind === 'detail'">
-                <td v-if="r.rangeSpan" :rowspan="r.rangeSpan" class="grp">{{ r.range }}</td>
-                <td>
+                <td v-if="r.rangeSpan" :rowspan="r.rangeSpan" class="grp freeze-col range-col">{{ r.range }}</td>
+                <td class="freeze-col pmc-col">
                   <input v-if="canEdit" class="pmc-inp" :value="draftValue(r, 'pmc')"
                     @input="setDraftValue(r, 'pmc', ($event.target as HTMLInputElement).value)" />
                   <span v-else>{{ r.pmc || '-' }}</span>
                 </td>
-                <td v-if="r.factorySpan" :rowspan="r.factorySpan" class="grp">{{ r.factory || '-' }}</td>
-                <td v-if="showContractNumber" class="contract-no-col" :title="sewingItemParts(r).contractNo">
+                <td v-if="r.factorySpan" :rowspan="r.factorySpan" class="grp freeze-col factory-col">{{ r.factory || '-' }}</td>
+                <td v-if="showContractNumber" class="freeze-col contract-no-col" :title="sewingItemParts(r).contractNo">
                   {{ sewingItemParts(r).contractNo || '-' }}
                 </td>
-                <td class="item-no-col" :title="r.item_no || ''">
+                <td class="freeze-col item-no-col" :title="r.item_no || ''">
                   {{ showContractNumber ? (sewingItemParts(r).itemNo || '-') : (r.item_no || '-') }}
                 </td>
                 <td v-if="showMoldNumber">
@@ -479,7 +489,12 @@ async function removeRow(row: DetailRow) {
                   <span v-else>{{ r.exchangeRate }}</span>
                 </td>
                 <td :class="{ 'over-limit': isPercentOver100(r.priceRatio) }">{{ r.priceRatio }}</td>
-                <td class="notes-col">{{ r.notes || '-' }}</td>
+                <td class="notes-col">
+                  <textarea v-if="canEdit" class="notes-inp" rows="2" :value="draftValue(r, 'notes')"
+                    @input="setDraftValue(r, 'notes', ($event.target as HTMLTextAreaElement).value)" />
+                  <span v-else>{{ r.notes || '-' }}</span>
+                </td>
+
                 <td v-if="canEdit" class="op-cell">
                   <div class="op-actions">
                     <button class="ghost mini" @click="saveRow(r)">保存</button>
@@ -512,7 +527,15 @@ async function removeRow(row: DetailRow) {
   </AppLayout>
 </template>
 <style scoped>
-.wide { max-width: none; }
+.wide {
+  max-width: none;
+  height: calc(100vh - 106px);
+  height: calc(100dvh - 106px);
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
 .back { font-size: .9rem; }
 .date-filter { display: flex; align-items: center; gap: .35rem; min-height: 38px; }
 .date-filter select, .date-filter input { height: 38px; padding: .35rem .55rem; font-size: .86rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: white; }
@@ -525,9 +548,50 @@ async function removeRow(row: DetailRow) {
   .toolbar { flex-wrap: wrap; }
   .spacer { display: none; }
 }
-.scroll { overflow-x: auto; }
-.report { min-width: 3140px; }
+.toolbar {
+  position: relative;
+  flex: 0 0 auto;
+  z-index: 9;
+  margin: -.35rem 0 1rem;
+  padding: .35rem 0;
+  background: var(--bg);
+}
+.scroll {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  isolation: isolate;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+.report {
+  min-width: 3140px;
+  margin-top: 0;
+  overflow: visible;
+}
 .report th, .report td { white-space: nowrap; text-align: center; font-size: .85rem; }
+.report thead th {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: #fafbfc;
+}
+.report .freeze-col {
+  position: sticky;
+  z-index: 2;
+  box-sizing: border-box;
+  background: var(--surface);
+}
+.report thead .freeze-col { z-index: 5; background: #fafbfc; }
+.report .range-col { left: 0; width: 180px; min-width: 180px; max-width: 180px; }
+.report .pmc-col { left: 180px; width: 140px; min-width: 140px; max-width: 140px; }
+.report .factory-col { left: 320px; width: 300px; min-width: 300px; max-width: 300px; }
+.report:not(.sewing-report) .item-no-col { left: 620px; }
+.report.sewing-report .contract-no-col { left: 620px; }
+.report.sewing-report .item-no-col { left: 770px; }
+.report .item-no-col { box-shadow: 5px 0 7px -7px rgba(31, 37, 51, .55); }
+
 .report .over-limit { color: #dc2626; font-weight: 600; }
 .report .item-no-col {
   width: 220px;
@@ -552,7 +616,22 @@ async function removeRow(row: DetailRow) {
   word-break: break-word;
   line-height: 1.45;
 }
+.notes-inp {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 52px;
+  padding: .35rem .45rem;
+  resize: vertical;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  line-height: 1.4;
+  font: inherit;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
 .report td.grp { font-weight: 600; background: #fafbff; }
+.report td.grp.freeze-col { background: #fafbff; }
 .report tr.subtotal td { background: #fff7e6; font-weight: 600; }
 .date-inp { padding: .25rem .4rem; font-size: .82rem; border: 1px solid var(--border); border-radius: var(--radius-sm); }
 .pmc-inp { width: 96px; padding: .25rem .4rem; font-size: .82rem; text-align: center; border: 1px solid var(--border); border-radius: var(--radius-sm); }

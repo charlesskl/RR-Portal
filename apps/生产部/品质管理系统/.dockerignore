@@ -1,7 +1,0 @@
-**/qc.db
-**/*.db-shm
-**/*.db-wal
-*.bat
-node_modules
-data
-.git

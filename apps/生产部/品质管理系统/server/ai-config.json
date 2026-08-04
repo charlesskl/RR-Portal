@@ -1,8 +1,0 @@
-{
-  "enabled": true,
-  "baseURL": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-  "apiKey": "",
-  "ocrModel": "qwen-vl-max",
-  "textModel": "qwen-plus",
-  "_note": "生产环境密钥请用 DASHSCOPE_API_KEY 或 QC_BAILIAN_API_KEY 注入。不要把真实密钥提交到仓库；本地单机调试时才临时填写 apiKey。"
-}

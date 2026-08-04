@@ -654,6 +654,20 @@ def party_page(party):
         panels.append(panel)
 
     prices = {r['item_key']: r['price'] for r in con.execute('SELECT * FROM default_prices').fetchall()}
+    # 锁按对方（邵阳/兴信）分组，方便分开解锁管理
+    lock_rows = con.execute("""
+        SELECT l.*, r.initiator_party, r.approver_party
+        FROM period_locks l
+        LEFT JOIN reconciliations r ON r.id = l.reconciliation_id
+        WHERE l.party=? ORDER BY l.date_from
+    """, (party,)).fetchall()
+    locks_by_cp = {}
+    for row in lock_rows:
+        d = dict(row)
+        parties = {d.get('initiator_party'), d.get('approver_party')} - {party, None}
+        cp = parties.pop() if parties else None
+        d['cp_name'] = PARTIES[cp]['name'] if cp in PARTIES else '其他'
+        locks_by_cp.setdefault(d['cp_name'], []).append(d)
     locks = [dict(r) for r in con.execute(
         'SELECT * FROM period_locks WHERE party=? ORDER BY date_from', (party,)).fetchall()]
     con.close()
@@ -663,7 +677,7 @@ def party_page(party):
                            panels=panels, prices=prices, monthly=monthly,
                            date_from=date_from, date_to=date_to, page_size=page_size,
                            dup_warning=dup_warning, order_no=order_no, item=item,
-                           period_locks=locks)
+                           period_locks=locks, locks_by_cp=locks_by_cp)
 
 
 @app.route('/party/<party>/entry', methods=['POST'])

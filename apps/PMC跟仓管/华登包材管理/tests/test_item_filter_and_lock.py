@@ -189,3 +189,25 @@ def test_banner_is_collapsible(client):
     banner = html[html.find('已锁定时间段')-200:]
     assert '<details' in banner and '已锁定时间段（1 段' in banner
     assert 'class="bg-amber-50 border border-amber-300 rounded-lg p-3 mb-4 text-sm" open' not in banner
+
+
+def test_locks_grouped_by_counterparty(client):
+    """锁定横幅按对方分组显示（邵阳是邵阳，兴信是兴信）。"""
+    con = sqlite3.connect(app_module.DATABASE)
+    # 一次 hd↔sy 核对、一次 hd↔xx 核对，各自确认产生锁
+    for cp in ('sy', 'xx'):
+        pair_low, pair_high = sorted(['hd', cp])
+        cur = con.execute("""
+            INSERT INTO reconciliations (initiator_party, approver_party, pair_low, pair_high,
+                                         date_from, date_to, status)
+            VALUES ('hd', ?, ?, ?, '2026-06-01', '2026-06-30', 'confirmed')
+        """, (cp, pair_low, pair_high))
+        rid = cur.lastrowid
+        con.execute(
+            "INSERT INTO period_locks (party, date_from, date_to, reconciliation_id, reason) VALUES ('hd','2026-06-01','2026-06-30',?,?)",
+            (rid, f'核对#{rid} 已确认'))
+    con.commit(); con.close()
+    _login(client, 'hd')
+    html = client.get('/party/hd').data.decode('utf-8')
+    assert '对邵阳华登（1 段）' in html
+    assert '对兴信（1 段）' in html

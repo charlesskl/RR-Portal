@@ -1,0 +1,69 @@
+name: Huadeng Backfill Record Unlock
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "输入 YES 确认：解锁所有已不在时间段锁覆盖范围内的记录"
+        type: string
+        required: true
+permissions:
+  contents: read
+concurrency:
+  group: deploy-cloud
+  queue: max
+  cancel-in-progress: false
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Validate confirmation
+        run: |
+          if [ "${{ inputs.confirm }}" != "YES" ]; then
+            echo '必须输入 YES 确认' >&2
+            exit 1
+          fi
+      - name: Validate SSH host fingerprint
+        shell: bash
+        env:
+          CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]]; then
+            echo 'CLOUD_HOST_FINGERPRINT must be a non-empty OpenSSH SHA256 fingerprint.' >&2
+            exit 1
+          fi
+      - name: Backfill unlock records via SSH
+        env:
+          CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
+        with:
+          host: ${{ secrets.CLOUD_HOST }}
+          username: ${{ secrets.CLOUD_USER }}
+          key: ${{ secrets.CLOUD_SSH_KEY }}
+          fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
+          command_timeout: 5m
+          script: |
+            set -euo pipefail
+            docker exec -i rr-portal-huadeng-1 python - <<'PYEOF'
+            import sqlite3
+            conn = sqlite3.connect('/app/data/huadeng.db')
+            locked = conn.execute("SELECT COUNT(*) FROM flow_records WHERE locked=1").fetchone()[0]
+            uncovered = conn.execute("""
+                SELECT COUNT(*) FROM flow_records f
+                WHERE f.locked=1 AND NOT EXISTS (
+                    SELECT 1 FROM period_locks p
+                    WHERE p.party=f.recorded_by AND p.date_from<=f.date AND p.date_to>=f.date)
+            """).fetchone()[0]
+            print(f"locked=1 记录: {locked}，其中已不在任何时间段锁覆盖内: {uncovered}")
+            cur = conn.execute("""
+                UPDATE flow_records SET locked=0
+                WHERE locked=1 AND NOT EXISTS (
+                    SELECT 1 FROM period_locks p
+                    WHERE p.party=flow_records.recorded_by
+                      AND p.date_from<=flow_records.date AND p.date_to>=flow_records.date)
+            """)
+            conn.commit()
+            print(f"已解锁 {cur.rowcount} 条记录；仍在锁定: {conn.execute('SELECT COUNT(*) FROM flow_records WHERE locked=1').fetchone()[0]}")
+            conn.close()
+            PYEOF

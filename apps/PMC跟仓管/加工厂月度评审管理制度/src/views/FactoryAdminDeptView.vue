@@ -16,6 +16,10 @@ const craft = computed(() => route.params.craft as Craft)
 const region = computed(() => (route.query.region as Region) || null)
 const deptName = computed(() =>
   (region.value ? REGION_LABELS[region.value] + '厂区 · ' : '') + (CRAFT_LABELS[craft.value] ?? '部门'))
+const summaryTo = computed(() => ({
+  path: `/factory-view/dept/${craft.value}/summary`,
+  query: region.value ? { region: region.value } : {},
+}))
 const search = ref('')
 
 onMounted(() => store.fetchAll())
@@ -36,6 +40,7 @@ const list = computed(() => {
         <RouterLink to="/factory-view" class="back">← 部门</RouterLink>
         <h2 style="margin:0">{{ deptName }}</h2>
         <span class="muted">共 {{ list.length }} 家</span>
+        <RouterLink :to="summaryTo"><button class="ghost">汇总</button></RouterLink>
         <span class="spacer"></span>
         <input class="search-box" v-model="search" placeholder="搜索 厂名/联系人" />
       </div>

@@ -9,6 +9,7 @@ export interface PriceStatsRow {
   factory: string
   category: string
   item_no: string
+  mold_no: string
   product: string
   quote_labor_price: number | null
   supplier_price: number | null
@@ -75,6 +76,7 @@ export function buildPriceStatsRows(
       factory: factoryName(o),
       category: o.process_category ?? '',
       item_no: o.item_no ?? '',
+      mold_no: o.mold_no ?? '',
       product: o.product ?? '',
       quote_labor_price: o.quote_labor_price ?? null,
       supplier_price: o.supplier_price ?? null,

@@ -115,14 +115,14 @@ async function importExcel(ev: Event) {
       <section v-for="b in regionBlocks" :key="b.region" class="region-block">
         <h3 class="region-title">{{ b.name }}厂区</h3>
         <div class="dept-grid">
-          <RouterLink v-for="c in b.cards" :key="c.craft" class="dept-card" :to="deptHref(c.craft, b.region)">
+          <a v-for="c in b.cards" :key="c.craft" class="dept-card" :href="deptHref(c.craft, b.region)">
             <span class="ico">{{ c.icon }}</span>
             <div class="info">
               <span class="name">{{ c.name }}</span>
               <span class="sub">{{ c.count }} 单<span v-if="c.ongoing" class="ongoing"> · {{ c.ongoing }} 单进行中</span></span>
             </div>
             <span class="arrow">→</span>
-          </RouterLink>
+          </a>
         </div>
       </section>
     </div>

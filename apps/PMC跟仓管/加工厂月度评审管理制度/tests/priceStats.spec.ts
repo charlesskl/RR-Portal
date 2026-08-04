@@ -62,6 +62,16 @@ describe('buildPriceStatsRows', () => {
     expect(duck.ratio_pct).toBe(97.8)
   })
 
+  it('带出货期管理中的模具编号', () => {
+    const rows = buildPriceStatsRows([{
+      item_no: 'SR8003',
+      mold_no: 'SR800-M03',
+      product: '兔子',
+    } as any], factoryName)
+
+    expect(rows[0].mold_no).toBe('SR800-M03')
+  })
+
   it('车缝部关联货期中的人民币价格字段', () => {
     const rows = buildPriceStatsRows([{
       workshop: '',

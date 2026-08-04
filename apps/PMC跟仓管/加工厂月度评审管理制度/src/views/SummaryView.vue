@@ -185,7 +185,8 @@ function exportExcel() {
         <table class="summary">
           <thead>
             <tr class="grp">
-              <th :colspan="10" rowspan="2">工厂基础信息</th>
+              <th rowspan="3" class="factory-name-col">厂名</th>
+              <th :colspan="9" rowspan="2">工厂基础信息</th>
               <th :colspan="7">PMC/外发组</th>
               <th :colspan="4">QC品质</th>
               <th rowspan="2">综合评级</th>
@@ -198,7 +199,7 @@ function exportExcel() {
               <th rowspan="2">现场综合合格率</th>
             </tr>
             <tr>
-              <th>厂名</th><th>联系人</th><th>联系电话</th><th>工厂地址</th><th>合作年限</th>
+              <th>联系人</th><th>联系电话</th><th>工厂地址</th><th>合作年限</th>
               <th>设备台数/生产拉线</th><th>帮我们生产的机台/生产线</th><th>员工人数</th><th>月产能</th><th>加工类型</th>
               <th>核价总工价</th><th>外发总工价</th><th>占比</th>
               <th>订单总单数</th><th>延期单数</th><th>占比</th><th>延期平均天数</th>
@@ -208,7 +209,7 @@ function exportExcel() {
           </thead>
           <tbody>
             <tr v-for="r in rows" :key="r.f.id">
-              <td>{{ r.f.name || '-' }}</td>
+              <td class="factory-name-col">{{ r.f.name || '-' }}</td>
               <td>{{ r.f.contact_person || '-' }}</td>
               <td>{{ r.f.contact_phone || '-' }}</td>
               <td>{{ r.f.address || '-' }}</td>
@@ -240,10 +241,63 @@ function exportExcel() {
   </AppLayout>
 </template>
 <style scoped>
-.wide { max-width: none; }
-.scroll { overflow-x: auto; }
-.summary { min-width: 2600px; }
+.wide {
+  max-width: none;
+  height: calc(100vh - 106px);
+  height: calc(100dvh - 106px);
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.toolbar {
+  position: relative;
+  flex: 0 0 auto;
+  z-index: 9;
+  margin: -.35rem 0 1rem;
+  padding: .35rem 0;
+  background: var(--bg);
+}
+.scroll {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  isolation: isolate;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+.summary {
+  min-width: 2600px;
+  margin-top: 0;
+  overflow: visible;
+}
 .summary th, .summary td { white-space: nowrap; text-align: center; }
+.summary thead tr { height: 44px; }
+.summary thead th {
+  position: sticky;
+  z-index: 3;
+  background: #fafbfc;
+}
+.summary thead tr:first-child th { top: 0; }
+.summary thead tr:nth-child(2) th { top: 44px; }
+.summary thead tr:nth-child(3) th { top: 88px; }
+.summary .factory-name-col {
+  position: sticky;
+  left: 0;
+  width: 300px;
+  min-width: 300px;
+  max-width: 300px;
+  box-sizing: border-box;
+  background: var(--surface);
+  box-shadow: 5px 0 7px -7px rgba(31, 37, 51, .55);
+}
+.summary thead .factory-name-col {
+  top: 0;
+  z-index: 6;
+  background: #fafbfc;
+}
+.summary tbody .factory-name-col { z-index: 2; }
 .grp th { background: #f0f2f8; border-left: 1px solid var(--border); }
 .search-box { width: 240px; padding: .4rem .7rem; font-size: .9rem; border: 1px solid var(--border); border-radius: var(--radius-sm); margin-right: .6rem; }
 .region-sel { height: 34px; padding: 0 .6rem; margin-left: .6rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); cursor: pointer; }

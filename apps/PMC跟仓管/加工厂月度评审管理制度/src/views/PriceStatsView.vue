@@ -20,6 +20,8 @@ const region = computed(() => (route.query.region as Region) || null)
 const deptName = computed(() =>
   (region.value ? REGION_LABELS[region.value] + '厂区 · ' : '') + (CRAFT_LABELS[craft.value] ?? '部门'))
 const isSewing = computed(() => craft.value === 'sewing')
+const showMoldNumber = computed(() => craft.value === 'injection')
+
 const priceHeaders = computed(() => isSewing.value
   ? ['核价工价(不含税RMB)', '外发工价(人民币含税)', '税点', '扣税点后单价', '占比']
   : ['核价生产工价', '外发单价', '扣税点1.13后单价', '占比'])
@@ -39,18 +41,24 @@ const num = (v: number | null) => (v == null ? '-' : v)
 
 function exportExcel() {
   const title = `${deptName.value}-外发产品单价统计表`
-  const notesColumn = 5 + priceHeaders.value.length
+  const detailHeaders = showMoldNumber.value
+    ? ['车间', '加工厂名称', '加工类别', '货号', '模具编号', '配件名称/模号']
+    : ['车间', '加工厂名称', '加工类别', '货号', '配件名称/模号']
+  const priceColumn = detailHeaders.length
+  const notesColumn = priceColumn + priceHeaders.value.length
   const columnCount = notesColumn + 1
   // 三行表头
   const titleRow = [title, ...Array(columnCount - 1).fill('')]
-  const groupRow = ['车间', '加工厂名称', '加工类别', '货号', '配件名称/模号', '价格管理',
+  const groupRow = [...detailHeaders, '价格管理',
     ...Array(priceHeaders.value.length - 1).fill(''), '备注']
-  const subRow = ['', '', '', '', '', ...priceHeaders.value, '']
+  const subRow = [...Array(detailHeaders.length).fill(''), ...priceHeaders.value, '']
+
   const body = rows.value.map((r) => [
     r.workshopSpan ? r.workshop : '',
     r.factorySpan ? r.factory : '',
     r.categorySpan ? r.category : '',
     r.item_no,
+    ...(showMoldNumber.value ? [r.mold_no] : []),
     r.product,
     r.quote_labor_price ?? '',
     r.unit_price ?? '',
@@ -65,10 +73,11 @@ function exportExcel() {
   // 合并：标题、表头分组、左侧三列纵向合并
   const merges = [
     { s: { r: 0, c: 0 }, e: { r: 0, c: columnCount - 1 } },
-    { s: { r: 1, c: 5 }, e: { r: 1, c: notesColumn - 1 } },
+    { s: { r: 1, c: priceColumn }, e: { r: 1, c: notesColumn - 1 } },
   ]
-  // 表头第 1、2 行：车间/加工厂/加工类别/货号/配件名称/备注 纵向合并
-  for (const c of [0, 1, 2, 3, 4, notesColumn]) merges.push({ s: { r: 1, c }, e: { r: 2, c } })
+  // 表头第 1、2 行：左侧明细列和备注纵向合并
+  for (const c of [...detailHeaders.keys(), notesColumn]) merges.push({ s: { r: 1, c }, e: { r: 2, c } })
+
   // 数据区 车间/加工厂/加工类别 纵向合并（数据从第 3 行开始）
   rows.value.forEach((r, i) => {
     const rr = 3 + i
@@ -110,7 +119,8 @@ function exportExcel() {
           <thead>
             <tr>
               <th rowspan="2">车间</th><th rowspan="2">加工厂名称</th><th rowspan="2">加工类别</th>
-              <th rowspan="2">货号</th><th rowspan="2">配件名称/模号</th>
+              <th rowspan="2" class="item-no-col">货号</th><th v-if="showMoldNumber" rowspan="2">模具编号</th><th rowspan="2">配件名称/模号</th>
+
               <th :colspan="priceHeaders.length">价格管理</th>
               <th rowspan="2">备注</th>
             </tr>
@@ -123,7 +133,8 @@ function exportExcel() {
               <td v-if="r.workshopSpan" :rowspan="r.workshopSpan">{{ r.workshop || '-' }}</td>
               <td v-if="r.factorySpan" :rowspan="r.factorySpan">{{ r.factory || '-' }}</td>
               <td v-if="r.categorySpan" :rowspan="r.categorySpan">{{ r.category || '-' }}</td>
-              <td>{{ r.item_no || '-' }}</td>
+              <td class="item-no-col">{{ r.item_no || '-' }}</td>
+              <td v-if="showMoldNumber">{{ r.mold_no || '-' }}</td>
               <td>{{ r.product || '-' }}</td>
               <td>{{ num(r.quote_labor_price) }}</td>
               <td>{{ num(r.unit_price) }}</td>
@@ -132,7 +143,8 @@ function exportExcel() {
               <td :class="{ 'over-limit': isPercentOver100(r.ratio_pct) }">{{ pct(r.ratio_pct) }}</td>
               <td>{{ r.notes || '-' }}</td>
             </tr>
-            <tr v-if="!rows.length"><td :colspan="6 + priceHeaders.length" class="hint" style="text-align:center">该部门暂无数据</td></tr>
+            <tr v-if="!rows.length"><td :colspan="6 + priceHeaders.length + (showMoldNumber ? 1 : 0)" class="hint" style="text-align:center">该部门暂无数据</td></tr>
+
           </tbody>
         </table>
       </div>
@@ -145,5 +157,14 @@ function exportExcel() {
 .scroll { overflow-x: auto; }
 .stats { min-width: 1100px; }
 .stats th, .stats td { text-align: left; white-space: nowrap; }
+.stats .item-no-col {
+  width: 180px;
+  min-width: 180px;
+  max-width: 180px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
 .stats .over-limit { color: #dc2626; font-weight: 600; }
 </style>

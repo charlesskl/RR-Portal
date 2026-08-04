@@ -1164,24 +1164,31 @@ def period_lock_delete(lid):
     if uf > ut:
         con.close(); flash('解锁范围无效：开始日期不能晚于结束日期')
         return _party_redirect(party)
-    con.execute("DELETE FROM period_locks WHERE id=?", (lid,))
+    # 同一时间段可能被多段锁重叠覆盖（历史补建产生的重复），
+    # 解锁要对该 party 所有与本区间重叠的锁一起生效，否则用户解了一段仍被另一段锁住。
+    overlaps = con.execute(
+        "SELECT * FROM period_locks WHERE party=? AND date_from<=? AND date_to>=?",
+        (party, ut, uf)).fetchall()
+    for lk in overlaps:
+        con.execute("DELETE FROM period_locks WHERE id=?", (lk['id'],))
+        # 拆分：保留解锁区间前后的锁定
+        if lk['date_from'] < uf:
+            con.execute(
+                "INSERT INTO period_locks (party, date_from, date_to, reconciliation_id, reason) VALUES (?,?,?,?,?)",
+                (party, lk['date_from'], _shift_day(uf, -1), lk['reconciliation_id'], lk['reason']))
+        if ut < lk['date_to']:
+            con.execute(
+                "INSERT INTO period_locks (party, date_from, date_to, reconciliation_id, reason) VALUES (?,?,?,?,?)",
+                (party, _shift_day(ut, 1), lk['date_to'], lk['reconciliation_id'], lk['reason']))
     # 同步解除该范围内流水记录的记录级锁（否则解锁了还是不能编辑）
     unlocked = con.execute(
         "UPDATE flow_records SET locked=0 WHERE recorded_by=? AND date BETWEEN ? AND ?",
         (party, uf, ut)).rowcount
-    if uf == lock['date_from'] and ut == lock['date_to']:
-        msg = f"已解锁 {uf} ~ {ut}，该时间段可以录入，范围内 {unlocked} 条记录已可编辑"
+    n = len(overlaps)
+    if n > 1:
+        msg = f"已解锁 {uf} ~ {ut}（含 {n} 段重叠锁定），范围内 {unlocked} 条记录已可编辑"
     else:
-        # 拆分：保留解锁区间前后的锁定
-        if lock['date_from'] < uf:
-            con.execute(
-                "INSERT INTO period_locks (party, date_from, date_to, reconciliation_id, reason) VALUES (?,?,?,?,?)",
-                (party, lock['date_from'], _shift_day(uf, -1), lock['reconciliation_id'], lock['reason']))
-        if ut < lock['date_to']:
-            con.execute(
-                "INSERT INTO period_locks (party, date_from, date_to, reconciliation_id, reason) VALUES (?,?,?,?,?)",
-                (party, _shift_day(ut, 1), lock['date_to'], lock['reconciliation_id'], lock['reason']))
-        msg = f"已解锁 {uf} ~ {ut}，范围内 {unlocked} 条记录已可编辑，其余区间仍在锁定"
+        msg = f"已解锁 {uf} ~ {ut}，范围内 {unlocked} 条记录已可编辑"
     con.commit(); con.close()
     flash(msg)
     return _party_redirect(party)

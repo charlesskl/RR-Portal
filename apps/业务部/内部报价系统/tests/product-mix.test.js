@@ -1,8 +1,13 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const test = require('node:test');
 const {
+  ensureExplicitProductGroups,
+  weightedRowsSum,
+  weightedRowsFormula,
   weightedInjectionSum,
   weightedColumnFormula,
 } = require('../backend/services/productMix');
@@ -41,4 +46,40 @@ test('a single product keeps direct totals and does not apply its saved ratio', 
 
 test('exported weighted total remains an editable Excel formula', () => {
   assert.equal(weightedColumnFormula(payload(), 23, 'P'), '((P23+P24)*2+(P25)*1)/3');
+});
+
+test('painting rows use the same multi-product weighted-average rules', () => {
+  const painting = {
+    product_mix_ratios: { 'product-1': 1, 'product-2': 3 },
+    painting_items: [
+      { product_group_id: 'product-1', amount: 10 },
+      { product_group_id: 'product-1', amount: 5 },
+      { product_group_id: 'product-2', amount: 25 },
+    ],
+  };
+  assert.equal(
+    weightedRowsSum(painting, painting.painting_items, row => row.amount),
+    (15 * 1 + 25 * 3) / 4,
+  );
+  assert.equal(
+    weightedRowsFormula(painting, painting.painting_items, 10, 'V'),
+    '((V10+V11)*1+(V12)*3)/4',
+  );
+});
+
+test('legacy painting rows recover product groups from explicit numbered names', () => {
+  const rows = [
+    { name: '1#公仔', value: 10 },
+    { name: '', value: 5 },
+    { name: '2#公仔', value: 20 },
+  ];
+  ensureExplicitProductGroups(rows);
+  assert.deepEqual(rows.map(row => row.product_group_id), ['product-1', 'product-1', 'product-2']);
+});
+
+test('molding UI visually separates multiple product groups', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../frontend/workbench.js'), 'utf8');
+  assert.match(source, /className: 'injection-product-group'/);
+  assert.match(source, /产品 \$\{group\.index \+ 1\}\/\$\{injectionGroupsForTable\.length\}/);
+  assert.match(source, /rowStyle: showInjectionGroups/);
 });

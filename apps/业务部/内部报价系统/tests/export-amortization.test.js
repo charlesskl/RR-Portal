@@ -35,6 +35,50 @@ test('internal export writes product-ratio weighted injection formulas', async (
   assert.equal(worksheet.getCell(totalRow, 17).value.formula, `((Q${dataStart}+Q${dataStart + 1})*2+(Q${dataStart + 2})*1)/3`);
 });
 
+test('internal export keeps editable spray-product ratios and a weighted-average formula', async () => {
+  const workbook = await buildWorkbook({
+    quote: { quote_no: 'PAINT-MIX', product_name: '喷油产品配比', qty: 1000 },
+    sections: [
+      { dept: 'molding', payload_json: JSON.stringify({
+        injection_loss_pct: 0,
+        injection: [{ name: '占位注塑件', weight_g: 0, material_unit_price: 0, shot_price: 0 }],
+      }) },
+      { dept: 'painting', payload_json: JSON.stringify({
+        indo_pct: 5,
+        product_mix_ratios: { 'product-1': 2, 'product-2': 1 },
+        painting_items: [
+          { name: '1#公仔', position: 'A', clamp_qty: 1, clamp_unit: 10 },
+          { name: '1#公仔', position: 'B', pad_qty: 1, pad_unit: 20 },
+          { name: '2#公仔', position: 'C', spray_qty: 1, spray_unit: 60 },
+        ],
+      }) },
+      { dept: 'sales', payload_json: JSON.stringify({ header: { fx_rmb_hkd: 0.85 }, shipping: { scenarios: [] } }) },
+    ],
+  });
+  const worksheet = workbook.getWorksheet('报价明细');
+  const labels = {};
+  worksheet.eachRow(row => {
+    const value = row.getCell(1).value;
+    if (typeof value === 'string') labels[value] = row.number;
+  });
+  const firstSummary = labels['1#公仔 小计 · 配比'];
+  const secondSummary = labels['2#公仔 小计 · 配比'];
+  const totalRow = secondSummary + 1;
+  assert.ok(firstSummary && secondSummary);
+  assert.equal(worksheet.getCell(totalRow, 1).value, '合计 HKD');
+  assert.equal(worksheet.getCell(firstSummary, 21).value, 2);
+  assert.equal(worksheet.getCell(secondSummary, 21).value, 1);
+  assert.equal(worksheet.getCell(firstSummary, 22).value.result, 30);
+  assert.equal(worksheet.getCell(secondSummary, 22).value.result, 60);
+  assert.equal(
+    worksheet.getCell(totalRow, 22).value.formula,
+    `(IFERROR(SUMPRODUCT(U${firstSummary}:U${secondSummary},V${firstSummary}:V${secondSummary})/SUM(U${firstSummary}:U${secondSummary}),0))`,
+  );
+  assert.equal(worksheet.getCell(totalRow, 22).value.result, 40);
+  assert.equal(worksheet.getCell(totalRow, 23).value.formula, `V${totalRow}*30%*5/100`);
+  assert.equal(worksheet.getCell(totalRow, 23).value.result, 0.6);
+});
+
 test('empty department Indonesian freight totals do not create circular references', async () => {
   const workbook = await buildWorkbook({
     quote: { quote_no: 'EMPTY-DEPT', product_name: '空部门', qty: 1000 },

@@ -71,7 +71,13 @@ function sewWeightedMaterialRmb(sewing) {
 const parseFormulaInput = window.FormulaInput.parseFormulaInput;
 
 function renderTable(container, columns, rows, opts = {}) {
-  const { readonly = false, onChange = () => {}, footer = null } = opts;
+  const {
+    readonly = false,
+    onChange = () => {},
+    footer = null,
+    beforeRow = null,
+    rowStyle = null,
+  } = opts;
   container.innerHTML = '';
 
   const table = document.createElement('table');
@@ -100,6 +106,17 @@ function renderTable(container, columns, rows, opts = {}) {
   function rebuild() {
     tbody.innerHTML = '';
     rows.forEach((row, idx) => {
+      const before = beforeRow ? beforeRow(row, idx, rows) : null;
+      if (before) {
+        const groupRow = document.createElement('tr');
+        groupRow.className = before.className || 'wb-group-row';
+        const groupCell = document.createElement('td');
+        groupCell.colSpan = columns.length + 1 + (readonly ? 0 : 1);
+        groupCell.innerHTML = before.html || '';
+        Object.assign(groupCell.style, before.style || {});
+        groupRow.appendChild(groupCell);
+        tbody.appendChild(groupRow);
+      }
       const tr = document.createElement('tr');
       tr.innerHTML = `<td>${idx + 1}</td>`;
       const calcCells = []; // [{ td, fn }] — 行内所有计算列，用于实时刷新
@@ -218,6 +235,13 @@ function renderTable(container, columns, rows, opts = {}) {
         td.appendChild(delBtn);
         tr.appendChild(td);
       }
+      const inlineStyle = rowStyle ? rowStyle(row, idx, rows) : null;
+      if (inlineStyle) {
+        Object.assign(tr.style, inlineStyle);
+        if (inlineStyle.backgroundColor) {
+          tr.querySelectorAll('td').forEach(cell => { cell.style.backgroundColor = inlineStyle.backgroundColor; });
+        }
+      }
       tbody.appendChild(tr);
     });
   }
@@ -311,21 +335,46 @@ function applyLoss(subtotal, pct) {
   return subtotal;  // 已全面取消损耗
 }
 
-function injectionProductGroups(payload) {
-  const rows = payload.injection || [];
-  if (!rows.some(row => row.product_group_id || row.product_group_name)) return [];
+function rowProductGroups(payload, rows) {
+  const sourceRows = rows || [];
+  if (!sourceRows.some(row => row.product_group_id || row.product_group_name)) return [];
   const groups = new Map();
-  rows.forEach((row, index) => {
+  sourceRows.forEach((row, index) => {
     const key = String(row.product_group_id || row.product_group_name || '__ungrouped__');
     if (!groups.has(key)) groups.set(key, { key, name: row.product_group_name || '未分组产品', rows: [] });
     groups.get(key).rows.push({ row, index });
   });
   return [...groups.values()];
 }
+function injectionProductGroups(payload) {
+  return rowProductGroups(payload, payload.injection || []);
+}
 function productMixRatio(payload, key) {
   const ratios = payload.product_mix_ratios || {};
   if (!Object.prototype.hasOwnProperty.call(ratios, key) || ratios[key] === '') return 1;
   return Math.max(0, num(ratios[key]));
+}
+function ensurePaintingProductGroups(payload) {
+  const rows = payload.painting_items || [];
+  if (rows.some(row => row.product_group_id || row.product_group_name)) return;
+  const markers = new Map();
+  rows.forEach(row => {
+    const text = String(row.name || '').replace(/\s+/g, ' ').trim();
+    const match = text.match(/^(\d+)\s*[#＃号]\s*(.*)$/);
+    if (!match) return;
+    const number = Number(match[1]);
+    markers.set(`product-${number}`, { id: `product-${number}`, name: text, number });
+  });
+  if (markers.size <= 1) return;
+  let current = null;
+  rows.forEach(row => {
+    const text = String(row.name || '').replace(/\s+/g, ' ').trim();
+    const match = text.match(/^(\d+)\s*[#＃号]\s*(.*)$/);
+    if (match) current = markers.get(`product-${Number(match[1])}`) || current;
+    if (!current) return;
+    row.product_group_id = current.id;
+    row.product_group_name = current.name;
+  });
 }
 function weightedInjectionSum(payload, getter) {
   const groups = injectionProductGroups(payload);
@@ -334,6 +383,28 @@ function weightedInjectionSum(payload, getter) {
   if (totalRatio <= 0) return 0;
   return sum(groups, group =>
     sum(group.rows, item => getter(item.row, item.index)) * productMixRatio(payload, group.key)
+  ) / totalRatio;
+}
+function weightedPaintingSum(payload) {
+  ensurePaintingProductGroups(payload);
+  const rows = payload.painting_items || [];
+  const groups = rowProductGroups(payload, rows);
+  if (groups.length <= 1) return sum(rows, paintingRowAmount);
+  const totalRatio = sum(groups, group => productMixRatio(payload, group.key));
+  if (totalRatio <= 0) return 0;
+  return sum(groups, group =>
+    sum(group.rows, item => paintingRowAmount(item.row)) * productMixRatio(payload, group.key)
+  ) / totalRatio;
+}
+function weightedPaintingProcSum(payload, procKey) {
+  ensurePaintingProductGroups(payload);
+  const rows = payload.painting_items || [];
+  const groups = rowProductGroups(payload, rows);
+  if (groups.length <= 1) return sum(rows, row => num(row[procKey + '_qty']));
+  const totalRatio = sum(groups, group => productMixRatio(payload, group.key));
+  if (totalRatio <= 0) return 0;
+  return sum(groups, group =>
+    sum(group.rows, item => num(item.row[procKey + '_qty'])) * productMixRatio(payload, group.key)
   ) / totalRatio;
 }
 
@@ -1185,7 +1256,7 @@ function renderSummaryPane(host, sections, quote, me) {
   const blowTotal = sum(mold.blow_items || [], r => {
     return blowRowTotal(r);
   });
-  const ppTotal = sum(pnt.painting_items || [], paintingRowAmount);  // 不计损耗（含九工序）
+  const ppTotal = weightedPaintingSum(pnt);  // 多产品按配比加权；单产品直接合计（含九工序）
   const slushTotal = sum(slush.slush_items || [], r => num(r.unit_price_hkd)*num(r.qty));
   const asmLaborTotal = sum(asm.assembly_labor || [], r => num(r.unit_price)*num(r.qty));
   const pkLaborTotal = sum(asm.packaging_labor || [], r => num(r.unit_price)*num(r.qty));
@@ -3172,7 +3243,49 @@ function renderMolding(host, payload, canEdit, onChange, refMolds, fxRmbHkd, use
     { key: 'note', label: '备注' },
   ];
   const wrappedOnChange = (() => { const fns = []; const w = () => { fns.forEach(f => f()); onChange(); }; w._fns = fns; return w; })();
-  renderTable(host.querySelector('#wb-inj'), cols, payload.injection, { readonly: !canEdit, onChange: wrappedOnChange });
+  const injectionGroupsForTable = injectionProductGroups(payload);
+  const showInjectionGroups = injectionGroupsForTable.length > 1;
+  const injectionGroupMeta = new Map(injectionGroupsForTable.map((group, index) => [group.key, {
+    ...group,
+    index,
+  }]));
+  const injectionPalette = [
+    { banner: '#dbeafe', border: '#3b82f6', row: '#f8fbff' },
+    { banner: '#dcfce7', border: '#22c55e', row: '#f8fdf9' },
+    { banner: '#fef3c7', border: '#f59e0b', row: '#fffdf7' },
+    { banner: '#f3e8ff', border: '#a855f7', row: '#fcfaff' },
+  ];
+  const injectionGroupKey = row => String(row.product_group_id || row.product_group_name || '__ungrouped__');
+  renderTable(host.querySelector('#wb-inj'), cols, payload.injection, {
+    readonly: !canEdit,
+    onChange: wrappedOnChange,
+    beforeRow: showInjectionGroups ? (row, index, allRows) => {
+      const key = injectionGroupKey(row);
+      const previousKey = index > 0 ? injectionGroupKey(allRows[index - 1]) : '';
+      if (key === previousKey) return null;
+      const group = injectionGroupMeta.get(key);
+      if (!group) return null;
+      const tone = injectionPalette[group.index % injectionPalette.length];
+      return {
+        className: 'injection-product-group',
+        style: {
+          padding: '10px 14px',
+          background: tone.banner,
+          borderLeft: `5px solid ${tone.border}`,
+          color: '#1e293b',
+        },
+        html: `<div style="display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap">
+          <strong style="font-size:15px">${escapeHtml(group.name)}</strong>
+          <span style="font-size:12px;color:#475569">产品 ${group.index + 1}/${injectionGroupsForTable.length} · ${group.rows.length} 行模具 · 配比 ${formatNum(productMixRatio(payload, group.key))}</span>
+        </div>`,
+      };
+    } : null,
+    rowStyle: showInjectionGroups ? row => {
+      const group = injectionGroupMeta.get(injectionGroupKey(row));
+      const tone = injectionPalette[(group ? group.index : 0) % injectionPalette.length];
+      return { backgroundColor: tone.row, borderLeft: `3px solid ${tone.border}` };
+    } : null,
+  });
 
   // 二、注塑 成本汇总 — 分项求和：原料单价 / 啤价 / 成品金额
   const injCard = host.querySelector('#wb-inj-summary');
@@ -3333,6 +3446,8 @@ function renderBlowItems(container, rows, onChange, canEdit, pctHost) {
 
 function renderPainting(host, payload, canEdit, onChange, fxRmbHkd) {
   payload.painting_items = payload.painting_items || [];
+  ensurePaintingProductGroups(payload);
+  payload.product_mix_ratios = payload.product_mix_ratios || {};
   payload.second_proc_loss_pct = payload.second_proc_loss_pct ?? 1;
   // 旧数据 second_proc 已废弃，不再迁移；首次进入空表
 
@@ -3346,16 +3461,16 @@ function renderPainting(host, payload, canEdit, onChange, fxRmbHkd) {
   `;
 
   const wrappedOnChange = (() => { const fns = []; const w = () => { fns.forEach(f => f()); onChange(); }; w._fns = fns; return w; })();
-  renderPaintingTable(host.querySelector('#wb-pp'), payload.painting_items, wrappedOnChange, canEdit);
+  renderPaintingTable(host.querySelector('#wb-pp'), payload, wrappedOnChange, canEdit);
   wrappedOnChange._fns.push(renderLossSummary(host, '三、二次加工 成本汇总',
-    () => sum(payload.painting_items || [], paintingRowAmount),
+    () => weightedPaintingSum(payload),
     () => 0, fxRmbHkd, 'HKD', {
       host: payload,
       pctKey: 'indo_pct',
       readonly: !canEdit,
       onChange,
       label: '印尼运费 <small class="muted">(总价×30%为基数)</small>',
-      base: () => sum(payload.painting_items || [], paintingRowAmount) * 0.3,
+      base: () => weightedPaintingSum(payload) * 0.3,
     }));  // 不计损耗；喷油报价为港币
 
   if (canEdit) {
@@ -3375,6 +3490,7 @@ function renderPainting(host, payload, canEdit, onChange, fxRmbHkd) {
         impPreview.innerHTML = `
           <div class="card" style="background:#f0fdf4;border:1px solid #86efac;margin-top:10px">
             <p>从 <b>${escapeHtml(j.sheet_used || '')}</b> 解析到 <b>${j.count}</b> 行喷油工序${imgInfo}${j.meta && j.meta.title ? ' · ' + escapeHtml(j.meta.title) : ''}</p>
+            ${j.multi_product ? `<p><b>已识别 ${j.product_groups.length} 个明确产品编号</b>，应用后按产品配比加权平均。</p>` : '<p class="muted">未识别到两个以上明确产品编号，将按单产品直接合计。</p>'}
             ${j.images_hint ? `<p class="muted">⚠️ ${escapeHtml(j.images_hint)}</p>` : ''}
             <p class="muted">应用后会替换当前喷油明细（夹模/移印/散枪/边模/油色/浸油/抹油/擦PP水/UV 九道工序）。</p>
             <div style="margin-top:10px;display:flex;gap:8px">
@@ -3432,7 +3548,11 @@ function paintingRowAmount(r) {
   return PAINTING_PROCS.reduce((s, p) => s + num(r[p.key + '_qty']) * num(r[p.key + '_unit']), 0);
 }
 
-function renderPaintingTable(container, rows, onChange, canEdit) {
+function renderPaintingTable(container, payload, onChange, canEdit) {
+  const rows = payload.painting_items || [];
+  const groups = rowProductGroups(payload, rows);
+  const hasMultipleProducts = groups.length > 1;
+  const groupByKey = new Map(groups.map(group => [group.key, group]));
   container.innerHTML = '';
   const table = document.createElement('table'); table.className = 'wb-table';
   // 表头
@@ -3454,6 +3574,30 @@ function renderPaintingTable(container, rows, onChange, canEdit) {
   const tbody = table.querySelector('tbody');
 
   rows.forEach((row, idx) => {
+    const groupKey = String(row.product_group_id || row.product_group_name || '__ungrouped__');
+    const previousKey = idx > 0
+      ? String(rows[idx - 1].product_group_id || rows[idx - 1].product_group_name || '__ungrouped__')
+      : '';
+    if (hasMultipleProducts && groupKey !== previousKey) {
+      const group = groupByKey.get(groupKey);
+      const subtotal = group ? sum(group.rows, item => paintingRowAmount(item.row)) : 0;
+      const colspan = 4 + PAINTING_PROCS.length * 2 + 2 + (canEdit ? 1 : 0);
+      const groupRow = document.createElement('tr');
+      groupRow.className = 'product-group-row';
+      groupRow.innerHTML = `<td colspan="${colspan}" style="background:#e0f2fe;font-weight:700;text-align:left">
+        ${escapeHtml(group?.name || '未分组产品')} · 小计 HK$ ${formatNum(subtotal)} · 配比
+        ${canEdit
+          ? `<input class="painting-product-mix-ratio" data-group="${escapeHtml(groupKey)}" type="number" min="0" step="any" value="${productMixRatio(payload, groupKey)}" style="width:80px;margin-left:6px">`
+          : formatNum(productMixRatio(payload, groupKey))}
+      </td>`;
+      const ratioInput = groupRow.querySelector('.painting-product-mix-ratio');
+      if (ratioInput) ratioInput.onchange = () => {
+        payload.product_mix_ratios[groupKey] = Math.max(0, num(ratioInput.value));
+        renderPaintingTable(container, payload, onChange, canEdit);
+        onChange();
+      };
+      tbody.appendChild(groupRow);
+    }
     row.images = row.images || [];
     const tr = document.createElement('tr');
     tr.innerHTML = `<td class="ro">${idx + 1}</td>`;
@@ -3482,20 +3626,21 @@ function renderPaintingTable(container, rows, onChange, canEdit) {
     if (canEdit) {
       const td = document.createElement('td'); td.className = 'row-actions';
       const mkBtn = (label, title, fn, cls) => { const b = document.createElement('button'); b.textContent = label; b.title = title; b.className = 'mini ' + (cls||''); b.style.padding='2px 6px'; b.style.marginRight='2px'; b.onclick = fn; return b; };
-      if (idx > 0) td.appendChild(mkBtn('↑', '上移', () => { [rows[idx-1], rows[idx]] = [rows[idx], rows[idx-1]]; renderPaintingTable(container, rows, onChange, canEdit); onChange(); }));
-      if (idx < rows.length - 1) td.appendChild(mkBtn('↓', '下移', () => { [rows[idx+1], rows[idx]] = [rows[idx], rows[idx+1]]; renderPaintingTable(container, rows, onChange, canEdit); onChange(); }));
-      td.appendChild(mkBtn('⎘', '复制此行', () => { rows.splice(idx+1, 0, JSON.parse(JSON.stringify(rows[idx]))); renderPaintingTable(container, rows, onChange, canEdit); onChange(); }));
-      td.appendChild(mkBtn('×', '删除', () => { rows.splice(idx, 1); renderPaintingTable(container, rows, onChange, canEdit); onChange(); }, 'danger'));
+      if (idx > 0) td.appendChild(mkBtn('↑', '上移', () => { [rows[idx-1], rows[idx]] = [rows[idx], rows[idx-1]]; renderPaintingTable(container, payload, onChange, canEdit); onChange(); }));
+      if (idx < rows.length - 1) td.appendChild(mkBtn('↓', '下移', () => { [rows[idx+1], rows[idx]] = [rows[idx], rows[idx+1]]; renderPaintingTable(container, payload, onChange, canEdit); onChange(); }));
+      td.appendChild(mkBtn('⎘', '复制此行', () => { rows.splice(idx+1, 0, JSON.parse(JSON.stringify(rows[idx]))); renderPaintingTable(container, payload, onChange, canEdit); onChange(); }));
+      td.appendChild(mkBtn('×', '删除', () => { rows.splice(idx, 1); renderPaintingTable(container, payload, onChange, canEdit); onChange(); }, 'danger'));
       tr.appendChild(td);
     }
     tbody.appendChild(tr);
   });
 
   // 合计行
-  const totals = PAINTING_PROCS.map(p => sum(rows, r => num(r[p.key + '_qty'])));
-  const totalAmt = sum(rows, paintingRowAmount);
+  const totals = PAINTING_PROCS.map(p => weightedPaintingProcSum(payload, p.key));
+  const totalAmt = weightedPaintingSum(payload);
   const tr = document.createElement('tr'); tr.className = 'hi';
-  let html = `<td colspan="4" style="text-align:right">合计</td>`;
+  const totalRatio = sum(groups, group => productMixRatio(payload, group.key));
+  let html = `<td colspan="4" style="text-align:right">${hasMultipleProducts ? `配比加权平均（总配比 ${formatNum(totalRatio)}）` : '合计'}</td>`;
   PAINTING_PROCS.forEach((p, i) => { html += `<td>${formatNum(totals[i])}</td><td></td>`; });
   html += `<td>${formatNum(totalAmt)}</td><td></td>${canEdit ? '<td></td>' : ''}`;
   tr.innerHTML = html;
@@ -3504,7 +3649,11 @@ function renderPaintingTable(container, rows, onChange, canEdit) {
   container.appendChild(table);
   if (canEdit) {
     const btn = document.createElement('button'); btn.textContent = '+ 增加行'; btn.className = 'mini'; btn.style.marginTop = '8px';
-    btn.onclick = () => { rows.push({ images: [] }); renderPaintingTable(container, rows, onChange, canEdit); onChange(); };
+    btn.onclick = () => {
+      const last = rows[rows.length - 1] || {};
+      rows.push({ images: [], product_group_id: last.product_group_id || '', product_group_name: last.product_group_name || '' });
+      renderPaintingTable(container, payload, onChange, canEdit); onChange();
+    };
     container.appendChild(btn);
   }
 }

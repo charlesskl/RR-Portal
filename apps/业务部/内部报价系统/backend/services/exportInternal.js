@@ -5,7 +5,13 @@
 // this small post-processor instead of growing exportXlsx.js further.
 const { buildWorkbook: buildBaseWorkbook } = require('./exportXlsx');
 const { toExcelFormulaInput, fractionNumberFormat } = require('../../frontend/formula-input');
-const { weightedInjectionSum, weightedColumnFormula } = require('./productMix');
+const {
+  ensureExplicitProductGroups,
+  productGroups,
+  weightedRowsSum,
+  weightedInjectionSum,
+  weightedColumnFormula,
+} = require('./productMix');
 
 const FONT = 'Microsoft YaHei';
 const HKD4 = '"HK$"0.0000';
@@ -223,11 +229,64 @@ function slushUnitPrice(row) {
   return hasSlushCostingInputs(row) ? slushCosting(row).unitPrice : num(row && row.unit_price_hkd);
 }
 
+function patchPaintingProductMix(ws, painting) {
+  const payload = painting || {};
+  const items = payload.painting_items || [];
+  ensureExplicitProductGroups(items);
+  const groups = productGroups(payload, items);
+  if (groups.length <= 1) return;
+
+  const titleRow = findRow(ws, '三、二次加工（印喷报价）');
+  if (!titleRow) return;
+  const headerRow = titleRow + 1;
+  // 喷油表使用两层表头（工序名 + 数量/单价），数据从标题下第 3 行开始。
+  const dataStart = headerRow + 2;
+  const originalTotalRow = dataStart + items.length;
+  const ratioColumn = 21;
+  const amountColumn = 22;
+  const ratioLetter = colLetter(ratioColumn);
+  const amountLetter = colLetter(amountColumn);
+  const amountKeys = ['clamp', 'pad', 'spray', 'edge', 'color', 'dip', 'oil', 'pp_water', 'uv'];
+  const amountOf = item => sum(amountKeys, key => num(item[`${key}_qty`]) * num(item[`${key}_unit`]));
+  const weightedTotal = weightedRowsSum(payload, items, amountOf);
+
+  shiftRowsDown(ws, originalTotalRow, groups.length);
+  const movedTotalRow = originalTotalRow + groups.length;
+  const totalStyle = ws.getCell(movedTotalRow, amountColumn).style;
+  const labelStyle = ws.getCell(movedTotalRow, 1).style;
+
+  groups.forEach((group, index) => {
+    const row = originalTotalRow + index;
+    const subtotal = sum(group.rows, entry => amountOf(entry.row));
+    const amountCells = group.rows.map(entry => `${amountLetter}${dataStart + entry.index}`);
+    ws.mergeCells(row, 1, row, ratioColumn - 1);
+    ws.getCell(row, 1).value = `${group.name} 小计 · 配比`;
+    ws.getCell(row, 1).alignment = { horizontal: 'right', vertical: 'middle' };
+    applyStyle(ws.getCell(row, 1), labelStyle);
+    for (let column = 2; column < ratioColumn; column += 1) {
+      applyStyle(ws.getCell(row, column), labelStyle);
+    }
+    ws.getCell(row, ratioColumn).value = group.ratio;
+    applyStyle(ws.getCell(row, ratioColumn), totalStyle, '0.####');
+    ws.getCell(row, amountColumn).value = {
+      formula: amountCells.length ? amountCells.join('+') : '0',
+      result: subtotal,
+    };
+    applyStyle(ws.getCell(row, amountColumn), totalStyle, '0.0000');
+  });
+
+  ws.getCell(movedTotalRow, amountColumn).value = {
+    formula: `(IFERROR(SUMPRODUCT(${ratioLetter}${originalTotalRow}:${ratioLetter}${movedTotalRow - 1},${amountLetter}${originalTotalRow}:${amountLetter}${movedTotalRow - 1})/SUM(${ratioLetter}${originalTotalRow}:${ratioLetter}${movedTotalRow - 1}),0))`,
+    result: weightedTotal,
+  };
+  ws.getCell(movedTotalRow, amountColumn).numFmt = HKD4;
+}
+
 function patchSimpleIndoColumns(ws, payloads) {
   const patches = [
     { title: '二、注塑部分', dept: payloads.molding || {}, amountCol: 16, indoCol: 17, weighted: true },
     { title: '二·B、吹气部分 (HKD)', dept: payloads.molding || {}, amountCol: 12, indoCol: 15 },
-    { title: '三、二次加工（印喷报价）', dept: payloads.painting || {}, amountCol: 22, indoCol: 23, factor: 0.3 },
+    { title: '三、二次加工（印喷报价）', dept: payloads.painting || {}, amountCol: 22, indoCol: 23, factor: 0.3, totalFromAmount: true },
     { title: '四、电子', dept: payloads.electronic || {}, amountCol: 10, indoCol: 11 },
     { title: '五、五金', dept: payloads.engineering || {}, amountCol: 10, indoCol: 11 },
     { title: '六、辅助材料', dept: payloads.engineering || {}, amountCol: 10, indoCol: 11 },
@@ -272,10 +331,19 @@ function patchSimpleIndoColumns(ws, payloads) {
     if (patch.weighted) {
       total = weightedInjectionSum(patch.dept, (_row, index) => rowResults[index]);
     }
+    if (patch.totalFromAmount) {
+      const totalAmountCell = ws.getCell(totalRow, patch.amountCol);
+      const totalAmount = num(totalAmountCell.value && typeof totalAmountCell.value === 'object'
+        ? totalAmountCell.value.result
+        : totalAmountCell.value);
+      total = totalAmount * (patch.factor || 1) * pct / 100;
+    }
     const hasDetailRows = totalRow > headerRow + 1;
     ws.getCell(totalRow, patch.indoCol).value = {
       formula: !hasDetailRows
         ? '0'
+        : patch.totalFromAmount
+          ? `${colLetter(patch.amountCol)}${totalRow}*30%*${pct}/100`
         : patch.weighted
           ? weightedColumnFormula(patch.dept, headerRow + 1, colLetter(patch.indoCol))
           : `SUM(${colLetter(patch.indoCol)}${headerRow + 1}:${colLetter(patch.indoCol)}${totalRow - 1})`,
@@ -568,7 +636,10 @@ function blowSubtotal(molding) {
 
 function secondProcSubtotal(painting) {
   const keys = ['clamp', 'pad', 'spray', 'edge', 'color', 'dip', 'oil', 'pp_water', 'uv'];
-  return sum((painting && painting.painting_items) || [], row =>
+  const payload = painting || {};
+  const items = payload.painting_items || [];
+  ensureExplicitProductGroups(items);
+  return weightedRowsSum(payload, items, row =>
     sum(keys, key => num(row[`${key}_qty`]) * num(row[`${key}_unit`]))
   );
 }
@@ -780,6 +851,7 @@ function enhanceWorkbook(workbook, { quote, sections }) {
 
   patchMoldProductGroups(ws, payloads);
   patchMoldingProductGroups(ws, payloads);
+  patchPaintingProductMix(ws, payloads.painting || {});
   patchFreeInputFormulas(ws, payloads);
   patchZeroCartonRate(ws, payloads);
   const refs = patchSimpleIndoColumns(ws, payloads);

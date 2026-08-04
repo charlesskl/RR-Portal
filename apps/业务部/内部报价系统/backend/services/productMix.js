@@ -15,11 +15,35 @@ function productRatio(payload, key) {
   return Math.max(0, num(ratios[key]));
 }
 
-function injectionProductGroups(payload) {
-  const rows = (payload && payload.injection) || [];
-  if (!rows.some(row => productKey(row))) return [];
+function ensureExplicitProductGroups(rows) {
+  const sourceRows = rows || [];
+  if (sourceRows.some(row => productKey(row))) return sourceRows;
+  const markers = new Map();
+  sourceRows.forEach(row => {
+    const text = String((row && row.name) || '').replace(/\s+/g, ' ').trim();
+    const match = text.match(/^(\d+)\s*[#＃号]\s*(.*)$/);
+    if (!match) return;
+    const number = Number(match[1]);
+    markers.set(`product-${number}`, { id: `product-${number}`, name: text, number });
+  });
+  if (markers.size <= 1) return sourceRows;
+  let current = null;
+  sourceRows.forEach(row => {
+    const text = String((row && row.name) || '').replace(/\s+/g, ' ').trim();
+    const match = text.match(/^(\d+)\s*[#＃号]\s*(.*)$/);
+    if (match) current = markers.get(`product-${Number(match[1])}`) || current;
+    if (!current) return;
+    row.product_group_id = current.id;
+    row.product_group_name = current.name;
+  });
+  return sourceRows;
+}
+
+function productGroups(payload, rows) {
+  const sourceRows = rows || [];
+  if (!sourceRows.some(row => productKey(row))) return [];
   const groups = new Map();
-  rows.forEach((row, index) => {
+  sourceRows.forEach((row, index) => {
     const key = productKey(row) || '__ungrouped__';
     if (!groups.has(key)) {
       groups.set(key, {
@@ -34,10 +58,14 @@ function injectionProductGroups(payload) {
   return [...groups.values()];
 }
 
-function weightedInjectionSum(payload, getter) {
-  const rows = (payload && payload.injection) || [];
-  const groups = injectionProductGroups(payload);
-  if (groups.length <= 1) return rows.reduce((total, row, index) => total + num(getter(row, index)), 0);
+function injectionProductGroups(payload) {
+  return productGroups(payload, (payload && payload.injection) || []);
+}
+
+function weightedRowsSum(payload, rows, getter) {
+  const sourceRows = rows || [];
+  const groups = productGroups(payload, sourceRows);
+  if (groups.length <= 1) return sourceRows.reduce((total, row, index) => total + num(getter(row, index)), 0);
   const totalRatio = groups.reduce((total, group) => total + group.ratio, 0);
   if (totalRatio <= 0) return 0;
   return groups.reduce((total, group) => {
@@ -46,10 +74,16 @@ function weightedInjectionSum(payload, getter) {
   }, 0) / totalRatio;
 }
 
-function weightedColumnFormula(payload, dataStartRow, columnLetter) {
-  const groups = injectionProductGroups(payload);
+function weightedInjectionSum(payload, getter) {
   const rows = (payload && payload.injection) || [];
-  if (groups.length <= 1) return `SUM(${columnLetter}${dataStartRow}:${columnLetter}${dataStartRow + rows.length - 1})`;
+  return weightedRowsSum(payload, rows, getter);
+}
+
+function weightedRowsFormula(payload, rows, dataStartRow, columnLetter) {
+  const sourceRows = rows || [];
+  if (!sourceRows.length) return '0';
+  const groups = productGroups(payload, sourceRows);
+  if (groups.length <= 1) return `SUM(${columnLetter}${dataStartRow}:${columnLetter}${dataStartRow + sourceRows.length - 1})`;
   const totalRatio = groups.reduce((total, group) => total + group.ratio, 0);
   if (totalRatio <= 0) return '0';
   const terms = groups.map(group => {
@@ -59,10 +93,19 @@ function weightedColumnFormula(payload, dataStartRow, columnLetter) {
   return `(${terms.join('+')})/${totalRatio}`;
 }
 
+function weightedColumnFormula(payload, dataStartRow, columnLetter) {
+  const rows = (payload && payload.injection) || [];
+  return weightedRowsFormula(payload, rows, dataStartRow, columnLetter);
+}
+
 module.exports = {
   productKey,
   productRatio,
+  ensureExplicitProductGroups,
+  productGroups,
   injectionProductGroups,
+  weightedRowsSum,
   weightedInjectionSum,
+  weightedRowsFormula,
   weightedColumnFormula,
 };

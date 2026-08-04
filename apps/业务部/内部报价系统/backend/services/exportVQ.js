@@ -13,6 +13,7 @@ const ExcelJS = require('exceljs');
 const { exportSpin } = require('./exportSpin');
 const { readTemplateParts } = require('./templateParts');
 const { customerEnglish } = require('./vqEnglish');
+const { ensureExplicitProductGroups, weightedRowsSum } = require('./productMix');
 
 
 // 报客表「Mark Up (%)」固定加价率 — 统一套到原料/人工/购买件/车缝等成本行。
@@ -630,7 +631,7 @@ function fillBCD(ws, d) {
   }
   let decoAmount = 0;
   if (paintingDetail) {
-    const totalOps  = parseInt(paintingDetail.total_operations) || 0;
+    const totalOps  = parseFloat(paintingDetail.total_operations) || 0;
     const quotedPrice = parseFloat(paintingDetail.quoted_price_hkd) || 0;
     const unitCost  = totalOps > 0 ? quotedPrice / totalOps : null;
     decoAmount = r2(quotedPrice) || 0;
@@ -894,8 +895,10 @@ function sectionsToData({ quote, sections }) {
 
   // 装饰 / 喷油（BCD DECORATION 段）：次数取喷油七工序数量合计，金额取喷油完整港币值。
   const paintingProcKeys = ['clamp', 'pad', 'spray', 'edge', 'color', 'dip', 'oil'];
-  const paintOps = (painting.painting_items || painting.second_proc || [])
-    .reduce((s, row) => s + paintingProcKeys.reduce((t, key) => t + num(row[`${key}_qty`]), 0), 0);
+  const paintingRows = painting.painting_items || painting.second_proc || [];
+  ensureExplicitProductGroups(paintingRows);
+  const paintOps = weightedRowsSum(painting, paintingRows, row =>
+    paintingProcKeys.reduce((total, key) => total + num(row[`${key}_qty`]), 0));
   const paintDetailAmt = (num(t3.painting_labor) + num(t3.paint_material)) * SEWING_DEFAULT_MARKUP;
   const paintingDetail = paintDetailAmt
     ? { total_operations: paintOps || 1, quoted_price_hkd: paintDetailAmt }

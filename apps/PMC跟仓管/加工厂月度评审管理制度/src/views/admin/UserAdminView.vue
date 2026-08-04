@@ -57,6 +57,7 @@ async function createUser() {
         crafts: draft.value.crafts,
         craft: draft.value.crafts[0] || '',
         permissions: deltaOf(draft.value.role, draftPerm.value),
+        quality_edit: !!draftPerm.value['quality.edit'],
       },
     })
     draft.value = { email: '', password: '', display_name: '', role: 'buyer_injection', crafts: [] }
@@ -80,7 +81,10 @@ async function saveRow(u: any) {
     const originalCrafts = Array.isArray(u.crafts) && u.crafts.length ? u.crafts : (u.craft ? [u.craft] : [])
     const craftsChanged = JSON.stringify(crafts) !== JSON.stringify(originalCrafts)
     if (name !== (u.display_name ?? '') || role !== u.role || craftsChanged || permChanged) {
-      await pb.collection('users').update(u.id, { display_name: name, role, craft, crafts, permissions: permObj })
+      await pb.collection('users').update(u.id, {
+        display_name: name, role, craft, crafts, permissions: permObj,
+        quality_edit: !!permEdits.value[u.id]?.['quality.edit'],
+      })
     }
     const email = (emailEdits.value[u.id] ?? '').trim()
     if (email && email !== u.email) {

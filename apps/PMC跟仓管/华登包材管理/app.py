@@ -719,9 +719,9 @@ def party_entry(party):
     confirm_dup = request.form.get('confirm_dup') == '1'
 
     con = sqlite3.connect(DATABASE)
-    if _is_period_locked(con, party, date):
+    if _is_period_locked(con, party, date, cp):
         con.close()
-        flash(f'{date} 已对账锁定，该时间段内不能录入；如需录入请先在页面下方解锁')
+        flash(f'{date} 已与{PARTIES[cp]["name"]}对账锁定，该时间段内不能录入；如需录入请先在页面下方解锁')
         return _party_redirect(party)
     if order_no and not confirm_dup:
         dups = _find_duplicate_order(con, order_no=order_no, party=party, cp=cp)
@@ -830,7 +830,8 @@ def record_edit(rid):
         con.close(); flash('记录已锁定，不能修改'); return redirect(url_for('party_page', party=party))
 
     date = request.form.get('date', '').strip() or r['date']
-    if _is_period_locked(con, party, r['date']) or _is_period_locked(con, party, date):
+    rec_cp = r['to_party'] if r['from_party'] == party else r['from_party']
+    if _is_period_locked(con, party, r['date'], rec_cp) or _is_period_locked(con, party, date, rec_cp):
         con.close()
         flash('该日期所在时间段已对账锁定，不能修改；如需修改请先解锁')
         return _party_redirect(party)
@@ -863,14 +864,15 @@ def record_delete(rid):
         return redirect(url_for('index'))
     con = sqlite3.connect(DATABASE)
     con.row_factory = sqlite3.Row
-    r = con.execute("SELECT recorded_by, locked, date FROM flow_records WHERE id=?", (rid,)).fetchone()
+    r = con.execute("SELECT recorded_by, locked, date, from_party, to_party FROM flow_records WHERE id=?", (rid,)).fetchone()
     if not r:
         con.close(); flash('记录不存在'); return redirect(url_for('party_page', party=party))
     if r['recorded_by'] != party:
         con.close(); flash('无权删除'); return redirect(url_for('party_page', party=party))
     if r['locked']:
         con.close(); flash('记录已锁定'); return redirect(url_for('party_page', party=party))
-    if _is_period_locked(con, party, r['date']):
+    rec_cp = r['to_party'] if r['from_party'] == party else r['from_party']
+    if _is_period_locked(con, party, r['date'], rec_cp):
         con.close(); flash('该日期所在时间段已对账锁定，不能删除；如需删除请先解锁')
         return _party_redirect(party)
     con.execute("DELETE FROM flow_records WHERE id=?", (rid,))
@@ -1479,14 +1481,27 @@ def _query_flow(con, *, recorded_by, from_party, to_party, date_from=None, date_
     return [dict(r) for r in con.execute(sql, args).fetchall()]
 
 
-def _is_period_locked(con, party, date):
-    """该日期是否落在 party 的某个对账锁定时间段内。"""
+def _is_period_locked(con, party, date, cp=None):
+    """该日期是否落在 party 的某个对账锁定时间段内。
+
+    传入 cp（本单的对方）时，只认「party ↔ cp」这一对的对账锁：
+    与邵阳对平的日期，不应挡住与兴信的录入/修改/删除。
+    """
     if not date:
         return False
+    if cp is None:
+        return con.execute("""
+            SELECT 1 FROM period_locks
+            WHERE party=? AND date_from<=? AND date_to>=? LIMIT 1
+        """, (party, date, date)).fetchone() is not None
     return con.execute("""
-        SELECT 1 FROM period_locks
-        WHERE party=? AND date_from<=? AND date_to>=? LIMIT 1
-    """, (party, date, date)).fetchone() is not None
+        SELECT 1 FROM period_locks l
+        JOIN reconciliations r ON r.id = l.reconciliation_id
+        WHERE l.party=? AND l.date_from<=? AND l.date_to>=?
+          AND ((r.initiator_party=? AND r.approver_party=?)
+            OR (r.initiator_party=? AND r.approver_party=?))
+        LIMIT 1
+    """, (party, date, date, party, cp, cp, party)).fetchone() is not None
 
 
 def _shift_day(iso_date, days):

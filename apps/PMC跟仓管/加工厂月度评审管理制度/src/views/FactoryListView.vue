@@ -8,6 +8,8 @@ import { useAuthStore } from '../stores/auth'
 import { allowedCrafts, canEditFactories, allowedRegions } from '../utils/permissions'
 import { CRAFT_LABELS, REGIONS, REGION_LABELS, regionOf, type Craft, type Region } from '../constants/roles'
 import type { Factory } from '../types/factory'
+import { taxPointFactor, taxPointRate } from '../utils/taxPoint'
+import { resolveFactoryName } from '../utils/factoryName'
 
 const store = useFactoriesStore()
 const auth = useAuthStore()
@@ -32,7 +34,7 @@ function exportExcel(craft: Craft | null = null, region: Region | null = null) {
   if (craft) list = list.filter((f) => f.craft === craft)
   if (region) list = list.filter((f) => regionOf(f) === region)
   // 表头与「喷油-外发加工厂信息」模板完全一致(顺序固定)
-  const headers = ['序号', '名称', '部门', '联系人', '联系电话', '地址', '设备台数/生产拉线', '帮我们生产的机台/生产线', '员工人数', '月产能', '加工类型', '环评/消防/安监资质', '合作车间', 'IP管控']
+  const headers = ['序号', '名称', '部门', '联系人', '联系电话', '地址', '设备台数/生产拉线', '帮我们生产的机台/生产线', '员工人数', '月产能', '加工类型', '税点', '环评/消防/安监资质', '合作车间', 'IP管控']
   const row = (f: Factory, i: number) => ({
     序号: i + 1,
     名称: f.name,
@@ -45,6 +47,7 @@ function exportExcel(craft: Craft | null = null, region: Region | null = null) {
     员工人数: f.staff_count ?? '',
     月产能: f.monthly_capacity ?? '',
     加工类型: f.processable_types ?? '',
+    税点: f.craft === 'sewing' ? (taxPointFactor(f.tax_point) ?? '') : '',
     '环评/消防/安监资质': f.cert_status ?? '',
     合作车间: f.cooperative_workshops ?? '',
     IP管控: f.ip_control ?? '',
@@ -67,8 +70,17 @@ async function importExcel(ev: Event) {
   if (!file) return
   const buf = await file.arrayBuffer()
   const wb = XLSX.read(buf, { cellDates: true })
-  const rows = XLSX.utils.sheet_to_json<Record<string, any>>(wb.Sheets[wb.SheetNames[0]])
-  let ok = 0, fail = 0
+  const sheet = wb.Sheets[wb.SheetNames[0]]
+  const matrix = XLSX.utils.sheet_to_json<any[]>(sheet, { header: 1, defval: '' })
+  const headerRow = matrix.findIndex((row) => row.some((cell) =>
+    ['名称', '工厂名称', '加工厂名称'].includes(String(cell ?? '').replace(/\s+/g, ''))))
+  if (headerRow < 0) {
+    alert('导入失败：未识别到“加工厂名称”表头')
+    if (fileInput.value) fileInput.value.value = ''
+    return
+  }
+  const rows = XLSX.utils.sheet_to_json<Record<string, any>>(sheet, { range: headerRow, defval: '' })
+  let created = 0, updated = 0, fail = 0
   for (const r of rows) {
     // 表头容错：去掉所有空白(含换行)，并支持多种别名写法
     const norm = (s: string) => s.replace(/\s+/g, '')
@@ -85,25 +97,33 @@ async function importExcel(ev: Event) {
       const v = pick(...aliases)
       if (v != null && String(v).trim() !== '') fd.append(key, String(v).trim())
     }
+    const setText = (fd: FormData, key: string, ...aliases: string[]) => {
+      const v = pick(...aliases)
+      if (v != null) fd.append(key, String(v).trim())
+    }
 
-    const name = String(pick('名称', '工厂名称', 'name') ?? '').trim()
+    const name = String(pick('名称', '工厂名称', '加工厂名称', 'name') ?? '').trim()
     const deptRaw = String(pick('部门', '工艺') ?? '').trim()
     const craft = DEPT_TO_CRAFT[deptRaw]
     if (!name || !craft) { fail++; continue }
     const fd = new FormData()
     fd.append('name', name)
     fd.append('craft', craft)
-    fd.append('contact_person', String(pick('联系人') ?? ''))
-    fd.append('contact_phone', String(pick('电话', '联系电话') ?? ''))
-    fd.append('address', String(pick('地址') ?? ''))
-    fd.append('processable_types', String(pick('加工类型', '可加工类型') ?? ''))
-    fd.append('cooperative_workshops', String(pick('合作车间') ?? ''))
-    fd.append('ip_control', String(pick('IP管控', 'IP管控情况') ?? ''))
-    fd.append('production_lines', String(pick('帮我们生产的机台/生产线', '帮我们生产的几台/生产线', '帮我们生产的设备/生产线') ?? ''))
+    setText(fd, 'contact_person', '联系人')
+    setText(fd, 'contact_phone', '电话', '联系电话')
+    setText(fd, 'address', '地址', '工厂地址')
+    setText(fd, 'processable_types', '加工类型', '可加工类型')
+    setText(fd, 'cooperative_workshops', '合作车间')
+    setText(fd, 'ip_control', 'IP管控', 'IP管控情况')
+    setText(fd, 'production_lines', '帮我们生产的机台/生产线', '帮我们生产的几台/生产线', '帮我们生产的设备/生产线')
     setNum(fd, 'workshop_area', '厂房面积(㎡)', '厂房面积')
     setNum(fd, 'staff_count', '员工人数', '人员', '人员(人)')
     setNum(fd, 'monthly_capacity', '月产能')
     setNum(fd, 'annual_revenue', '年生意额(万)', '年生意额')
+    if (craft === 'sewing') {
+      const taxPoint = taxPointRate(pick('税点'))
+      if (taxPoint != null) fd.append('tax_point', String(taxPoint))
+    }
     // 设备(类型×数量)：解析 "注塑机×3，喷涂线×2"
     const equipRaw = String(pick('设备(类型×数量)', '设备类型') ?? '').trim()
     if (equipRaw) {
@@ -125,14 +145,26 @@ async function importExcel(ev: Event) {
     // 资质：直接存原文本（如「有效期内」「有效期至2026-12」）
     const certs = String(pick('环评/消防/安监资质', '环评/消防/安监', '资质') ?? '').trim()
     if (certs) fd.append('cert_status', certs)
-    fd.append('status', 'active')
-    if (auth.userId) fd.append('created_by', auth.userId)
     // 注：厂房图片/证书为文件，无法从 Excel 单元格导入，请在工厂详情页单独上传
-    try { await store.create(fd); ok++ } catch { fail++ }
+    try {
+      const resolved = resolveFactoryName(store.items.filter((factory) => factory.craft === craft), name)
+      if (resolved.status === 'matched') {
+        await store.update(resolved.id, fd)
+        updated++
+      } else if (resolved.status === 'ambiguous') {
+        fail++
+      } else {
+        fd.append('status', 'active')
+        if (auth.userId) fd.append('created_by', auth.userId)
+        const added = await store.create(fd)
+        store.items.push(added)
+        created++
+      }
+    } catch { fail++ }
   }
   await store.fetchAll()
   if (fileInput.value) fileInput.value.value = ''
-  alert(`导入完成：成功 ${ok} 家` + (fail ? `，失败 ${fail} 家（缺名称或部门无法识别）` : '') + '\n（厂房图片/证书为文件，需在工厂详情页单独上传）')
+  alert(`导入完成：更新 ${updated} 家，新增 ${created} 家` + (fail ? `，失败 ${fail} 家（缺名称、部门无法识别或名称不唯一）` : '') + '\n（Excel 空白单元格不会清空原资料；厂房图片/证书需在详情页单独上传）')
 }
 
 const visible = computed(() => {

@@ -1,5 +1,6 @@
 import type { Order } from '../types/order'
 import { cnyTaxToUntaxedRmb } from './orderPricing'
+import { splitSewingContractItemNo } from './deliveryStats'
 
 const SEP = ' '
 const groupCollator = new Intl.Collator('zh-CN-u-co-stroke')
@@ -75,7 +76,11 @@ export function buildPriceStatsRows(
       workshop: o.workshop ?? '',
       factory: factoryName(o),
       category: o.process_category ?? '',
-      item_no: o.item_no ?? '',
+      // 车缝订单在数据库中以“合同号/货号”存储；
+      // 单价统计与货期管理保持一致，只展示关联后的货号。
+      item_no: useSewingPrices
+        ? splitSewingContractItemNo(o.item_no).itemNo
+        : o.item_no ?? '',
       mold_no: o.mold_no ?? '',
       product: o.product ?? '',
       quote_labor_price: o.quote_labor_price ?? null,

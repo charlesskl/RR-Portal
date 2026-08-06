@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed, watch } from 'vue'
+import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import { useRoute, RouterLink } from 'vue-router'
 import AppLayout from '../components/AppLayout.vue'
 import { useOrdersStore } from '../stores/orders'
@@ -14,6 +14,7 @@ import { cnyTaxToHkdUntaxed, cnyTaxToUntaxedRmb, DEFAULT_CNY_TO_HKD_RATE } from 
 import { matchesOrderDate, type OrderDateFilter } from '../utils/orderDateFilter'
 import { deliveryImportFactoryMap } from '../utils/deliveryImportScope'
 import { isPercentOver100 } from '../utils/percentage'
+import { taxPointFactor } from '../utils/taxPoint'
 import type { Order } from '../types/order'
 
 const route = useRoute()
@@ -23,6 +24,22 @@ const auth = useAuthStore()
 const fileInput = ref<HTMLInputElement | null>(null)
 const importingExcel = ref(false)
 const pdfInput = ref<HTMLInputElement | null>(null)
+const savingRowId = ref<string | null>(null)
+const saveToast = ref<{ type: 'success' | 'error'; message: string } | null>(null)
+let saveToastTimer: ReturnType<typeof setTimeout> | null = null
+
+function showSaveToast(type: 'success' | 'error', message: string) {
+  saveToast.value = { type, message }
+  if (saveToastTimer) clearTimeout(saveToastTimer)
+  saveToastTimer = setTimeout(() => {
+    saveToast.value = null
+    saveToastTimer = null
+  }, 3000)
+}
+
+onUnmounted(() => {
+  if (saveToastTimer) clearTimeout(saveToastTimer)
+})
 
 const craft = computed(() => route.params.craft as Craft)
 const region = computed(() => (route.query.region as Region) || null)
@@ -64,13 +81,36 @@ const deptOrders = computed(() => {
     })
 })
 const orderCount = computed(() => deptOrders.value.length)
+function factoryTaxPoint(factoryId: string | null | undefined) {
+  return taxPointFactor(factories.items.find((factory) => factory.id === factoryId)?.tax_point)
+}
+
+const reportOrders = computed(() => craft.value === 'sewing'
+  ? deptOrders.value.map((order) => ({
+      ...order,
+      exchange_rate: factoryTaxPoint(order.factory) ?? order.exchange_rate,
+    }))
+  : deptOrders.value)
 const rows = computed<ReportRow[]>(() =>
-  buildDeliveryReport(deptOrders.value, deptName.value, (o) => o.expand?.factory?.name ?? '', craft.value === 'sewing'))
+  buildDeliveryReport(reportOrders.value, deptName.value, (o) => o.expand?.factory?.name ?? '', craft.value === 'sewing'))
 const showMoldNumber = computed(() => craft.value === 'injection')
 const showContractNumber = computed(() => craft.value === 'sewing')
 const visibleHeaders = computed(() => deliveryHeaders(showMoldNumber.value, showContractNumber.value))
 const visibleColumnCount = computed(() => visibleHeaders.value.length + (canEdit.value ? 1 : 0))
-const subtotalLabelSpan = computed(() => Math.max(1, visibleHeaders.value.indexOf('订单总单数') - 1))
+
+function subtotalValue(header: string, index: number, row: Extract<ReportRow, { kind: 'subtotal' }>) {
+  if (header === '加工厂') return `${row.factory}-小计`
+  if (header === '订单总单数') return row.orderCount
+  if (header === '延期单数') return row.delayedCount
+  if (header === '延期平均天数') return row.delayAvg
+  if (header === '占比') {
+    return index === visibleHeaders.value.indexOf('占比') ? row.delayRatio : row.priceRatio
+  }
+  if (header.startsWith('核价工价')) return row.quote
+  if (header === '外发工价(人民币含税)') return row.outPriceCnyTax
+  if (header.startsWith('外发工价')) return row.outPrice
+  return ''
+}
 
 type RowDraft = {
   pmc: string
@@ -94,6 +134,8 @@ function convertedOutPrice(cnyTaxPrice: number, rateOrTaxPoint: number) {
 
 function normalizeDeptPricing(payload: Record<string, any>) {
   if (craft.value !== 'sewing') return payload
+  const configuredTaxPoint = factoryTaxPoint(payload.factory)
+  if (configuredTaxPoint != null) payload.exchange_rate = configuredTaxPoint
   const cnyTaxPrice = Number(payload.unit_price_cny_tax)
   const taxPoint = Number(payload.exchange_rate)
   if (Number.isFinite(cnyTaxPrice) && Number.isFinite(taxPoint) && taxPoint > 0) {
@@ -238,26 +280,32 @@ function exportExcel() {
 }
 
 async function saveRow(row: DetailRow) {
+  if (savingRowId.value) return
   const draft = drafts.value[row.id] ?? draftFromRow(row)
   const product = draft.product.trim()
   const quantity = parsePrice(draft.quantity)
   const quote = parsePrice(draft.quote_labor_price)
   const enteredUnitPrice = parsePrice(draft.unit_price)
   const unitPriceCnyTax = parsePrice(draft.unit_price_cny_tax)
-  const exchangeRate = parsePrice(draft.exchange_rate)
+  const source = sourceOrder(row)
+  const exchangeRate = craft.value === 'sewing'
+    ? factoryTaxPoint(source?.factory)
+    : parsePrice(draft.exchange_rate)
   const unitPrice = craft.value === 'sewing' && unitPriceCnyTax != null && exchangeRate != null
     ? cnyTaxToUntaxedRmb(unitPriceCnyTax, exchangeRate)
     : enteredUnitPrice
   if (!product) {
-    alert('请输入物料名称')
+    showSaveToast('error', '保存失败：请输入物料名称')
     return
   }
   if (quantity === undefined) {
-    alert('数量请输入有效数字')
+    showSaveToast('error', '保存失败：数量请输入有效数字')
     return
   }
   if (quote === undefined || unitPrice === undefined || unitPriceCnyTax === undefined || exchangeRate === undefined || (exchangeRate != null && exchangeRate <= 0)) {
-    alert('工价请输入有效数字')
+    showSaveToast('error', craft.value === 'sewing' && exchangeRate == null
+      ? '保存失败：请先在工厂信息管理中维护该加工厂的税点'
+      : '保存失败：工价请输入有效数字')
     return
   }
 
@@ -284,9 +332,18 @@ async function saveRow(row: DetailRow) {
     data.delay_days = 0
     data.is_delayed = false
   }
-  await orders.update(row.id, data)
-  await orders.fetchAll()
-  drafts.value[row.id] = draft
+  savingRowId.value = row.id
+  try {
+    await orders.update(row.id, data)
+    await orders.fetchAll()
+    drafts.value[row.id] = draft
+    showSaveToast('success', '保存成功')
+  } catch (error: any) {
+    const message = error?.response?.message || error?.message || '未知错误'
+    showSaveToast('error', `保存失败：${message}`)
+  } finally {
+    savingRowId.value = null
+  }
 }
 
 async function copyRow(row: DetailRow) {
@@ -301,7 +358,9 @@ async function copyRow(row: DetailRow) {
   const quote = parsePrice(draft.quote_labor_price)
   const enteredUnitPrice = parsePrice(draft.unit_price)
   const unitPriceCnyTax = parsePrice(draft.unit_price_cny_tax)
-  const exchangeRate = parsePrice(draft.exchange_rate)
+  const exchangeRate = craft.value === 'sewing'
+    ? factoryTaxPoint(source.factory)
+    : parsePrice(draft.exchange_rate)
   const unitPrice = craft.value === 'sewing' && unitPriceCnyTax != null && exchangeRate != null
     ? cnyTaxToUntaxedRmb(unitPriceCnyTax, exchangeRate)
     : enteredUnitPrice
@@ -310,7 +369,9 @@ async function copyRow(row: DetailRow) {
     return
   }
   if (quote === undefined || unitPrice === undefined || unitPriceCnyTax === undefined || exchangeRate === undefined || (exchangeRate != null && exchangeRate <= 0)) {
-    alert('工价请输入有效数字')
+    alert(craft.value === 'sewing' && exchangeRate == null
+      ? '请先在工厂信息管理中维护该加工厂的税点'
+      : '工价请输入有效数字')
     return
   }
   const payload: Partial<Order> = {
@@ -365,6 +426,12 @@ async function removeRow(row: DetailRow) {
 <template>
   <AppLayout>
     <div class="page wide">
+      <Transition name="save-toast">
+        <div v-if="saveToast" class="save-toast" :class="saveToast.type" role="status" aria-live="polite">
+          <span class="save-toast-icon">{{ saveToast.type === 'success' ? '✓' : '!' }}</span>
+          {{ saveToast.message }}
+        </div>
+      </Transition>
       <div class="toolbar">
         <RouterLink to="/orders" class="back">← 部门</RouterLink>
         <h2 style="margin:0">{{ deptName }} · 货期管理</h2>
@@ -400,7 +467,7 @@ async function removeRow(row: DetailRow) {
         <button @click="exportExcel">导出 Excel</button>
       </div>
       <div class="scroll">
-        <table class="report" :class="{ 'sewing-report': showContractNumber }">
+        <table class="report" :class="{ 'sewing-report': showContractNumber, 'injection-report': showMoldNumber }">
           <thead>
             <tr>
               <th
@@ -412,6 +479,10 @@ async function removeRow(row: DetailRow) {
                   'freeze-col factory-col': h === '加工厂',
                   'freeze-col contract-no-col': h === '合同号',
                   'freeze-col item-no-col': h === '货号',
+                  'freeze-col mold-no-col': h === '模具编号',
+                  'freeze-col order-no-col': h === '订单号',
+                  'freeze-col category-col': h === '加工类别',
+                  'freeze-col product-col': h === '物料名称',
                   'notes-col': h === '备注',
                 }"
               >{{ h }}</th>
@@ -434,14 +505,14 @@ async function removeRow(row: DetailRow) {
                 <td class="freeze-col item-no-col" :title="r.item_no || ''">
                   {{ showContractNumber ? (sewingItemParts(r).itemNo || '-') : (r.item_no || '-') }}
                 </td>
-                <td v-if="showMoldNumber">
+                <td v-if="showMoldNumber" class="freeze-col mold-no-col">
                   <input v-if="canEdit" class="mold-no-inp" :value="draftValue(r, 'mold_no')"
                     @input="setDraftValue(r, 'mold_no', ($event.target as HTMLInputElement).value)" />
                   <span v-else>{{ r.mold_no || '-' }}</span>
                 </td>
-                <td>{{ r.order_no || '-' }}</td>
-                <td>{{ r.category || '-' }}</td>
-                <td>
+                <td class="freeze-col order-no-col">{{ r.order_no || '-' }}</td>
+                <td class="freeze-col category-col">{{ r.category || '-' }}</td>
+                <td class="freeze-col product-col">
                   <input v-if="canEdit" class="text-inp" :value="draftValue(r, 'product')"
                     @input="setDraftValue(r, 'product', ($event.target as HTMLInputElement).value)" />
                   <span v-else>{{ r.product || '-' }}</span>
@@ -484,6 +555,7 @@ async function removeRow(row: DetailRow) {
                 </td>
                 <td>
                   <input v-if="canEdit" type="number" class="rate-inp" min="0.0001" step="0.01"
+                    :readonly="showContractNumber"
                     :value="draftValue(r, 'exchange_rate')"
                     @input="setDraftValue(r, 'exchange_rate', ($event.target as HTMLInputElement).value)" />
                   <span v-else>{{ r.exchangeRate }}</span>
@@ -497,25 +569,30 @@ async function removeRow(row: DetailRow) {
 
                 <td v-if="canEdit" class="op-cell">
                   <div class="op-actions">
-                    <button class="ghost mini" @click="saveRow(r)">保存</button>
+                    <button class="ghost mini" :disabled="savingRowId === r.id" @click="saveRow(r)">
+                      {{ savingRowId === r.id ? '保存中…' : '保存' }}
+                    </button>
                     <button class="ghost mini" @click="copyRow(r)">复制单</button>
                     <button class="ghost mini danger" @click="removeRow(r)">删除</button>
                   </div>
                 </td>
               </tr>
               <tr v-else class="subtotal">
-                <td></td>
-                <td :colspan="subtotalLabelSpan">{{ r.factory }}-小计</td>
-                <td>{{ r.orderCount }}</td>
-                <td>{{ r.delayedCount }}</td>
-                <td>{{ r.delayRatio }}</td>
-                <td>{{ r.delayAvg }}</td>
-                <td>{{ r.quote }}</td>
-                <td>{{ r.outPrice }}</td>
-                <td>{{ r.outPriceCnyTax }}</td>
-                <td></td>
-                <td :class="{ 'over-limit': isPercentOver100(r.priceRatio) }">{{ r.priceRatio }}</td>
-                <td></td>
+                <td
+                  v-for="(header, subtotalIndex) in visibleHeaders.slice(1)"
+                  :key="subtotalIndex"
+                  :class="{
+                    'freeze-col pmc-col': header === '下单PMC',
+                    'freeze-col factory-col': header === '加工厂',
+                    'freeze-col contract-no-col': header === '合同号',
+                    'freeze-col item-no-col': header === '货号',
+                    'freeze-col mold-no-col': header === '模具编号',
+                    'freeze-col order-no-col': header === '订单号',
+                    'freeze-col category-col': header === '加工类别',
+                    'freeze-col product-col': header === '物料名称',
+                    'over-limit': header === '占比' && subtotalIndex + 1 !== visibleHeaders.indexOf('占比') && isPercentOver100(r.priceRatio),
+                  }"
+                >{{ subtotalValue(header, subtotalIndex + 1, r) }}</td>
                 <td v-if="canEdit"></td>
               </tr>
             </template>
@@ -566,7 +643,7 @@ async function removeRow(row: DetailRow) {
   scrollbar-gutter: stable;
 }
 .report {
-  min-width: 3140px;
+  min-width: 2860px;
   margin-top: 0;
   overflow: visible;
 }
@@ -590,15 +667,30 @@ async function removeRow(row: DetailRow) {
 .report:not(.sewing-report) .item-no-col { left: 620px; }
 .report.sewing-report .contract-no-col { left: 620px; }
 .report.sewing-report .item-no-col { left: 770px; }
-.report .item-no-col { box-shadow: 5px 0 7px -7px rgba(31, 37, 51, .55); }
-
+.report:not(.sewing-report):not(.injection-report) .order-no-col { left: 760px; }
+.report:not(.sewing-report):not(.injection-report) .category-col { left: 900px; }
+.report:not(.sewing-report):not(.injection-report) .product-col { left: 1020px; }
+.report.injection-report .mold-no-col { left: 760px; }
+.report.injection-report .order-no-col { left: 900px; }
+.report.injection-report .category-col { left: 1040px; }
+.report.injection-report .product-col { left: 1160px; }
+.report.sewing-report .order-no-col { left: 910px; }
+.report.sewing-report .category-col { left: 1050px; }
+.report.sewing-report .product-col { left: 1170px; }
+.report .product-col { box-shadow: 5px 0 7px -7px rgba(31, 37, 51, .55); }
 .report .over-limit { color: #dc2626; font-weight: 600; }
 .report .item-no-col {
-  width: 220px;
-  min-width: 220px;
-  max-width: 220px;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  width: 140px;
+  min-width: 140px;
+  max-width: 140px;
+}
+.report .range-col,
+.report .factory-col,
+.report .item-no-col {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  line-height: 1.4;
 }
 .report .contract-no-col {
   width: 150px;
@@ -606,6 +698,22 @@ async function removeRow(row: DetailRow) {
   max-width: 150px;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.report .mold-no-col,
+.report .order-no-col {
+  width: 140px;
+  min-width: 140px;
+  max-width: 140px;
+}
+.report .category-col {
+  width: 120px;
+  min-width: 120px;
+  max-width: 120px;
+}
+.report .product-col {
+  width: 160px;
+  min-width: 160px;
+  max-width: 160px;
 }
 .report .notes-col {
   width: 220px;
@@ -644,4 +752,39 @@ async function removeRow(row: DetailRow) {
 .op-actions { display: flex; gap: .35rem; justify-content: center; align-items: center; }
 .mini { padding: .25rem .5rem; font-size: .8rem; }
 .danger { color: #dc2626; border-color: #fecaca; }
+.save-toast {
+  position: fixed;
+  top: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  gap: .55rem;
+  min-width: 220px;
+  max-width: min(520px, calc(100vw - 32px));
+  padding: .8rem 1rem;
+  border: 1px solid;
+  border-radius: 10px;
+  box-shadow: 0 12px 30px rgba(31, 37, 51, .18);
+  background: #fff;
+  font-size: .92rem;
+  font-weight: 600;
+}
+.save-toast.success { color: #15803d; border-color: #bbf7d0; background: #f0fdf4; }
+.save-toast.error { color: #b91c1c; border-color: #fecaca; background: #fef2f2; }
+.save-toast-icon {
+  width: 22px;
+  height: 22px;
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  color: #fff;
+  font-size: .78rem;
+}
+.save-toast.success .save-toast-icon { background: #16a34a; }
+.save-toast.error .save-toast-icon { background: #dc2626; }
+.save-toast-enter-active, .save-toast-leave-active { transition: opacity .2s ease, transform .2s ease; }
+.save-toast-enter-from, .save-toast-leave-to { opacity: 0; transform: translate(-50%, -10px); }
 </style>

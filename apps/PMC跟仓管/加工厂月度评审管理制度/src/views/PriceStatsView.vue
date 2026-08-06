@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, computed } from 'vue'
+import { onMounted, computed, ref } from 'vue'
 import { useRoute, RouterLink } from 'vue-router'
 import * as XLSX from 'xlsx'
 import AppLayout from '../components/AppLayout.vue'
@@ -9,11 +9,16 @@ import { allowedRegions } from '../utils/permissions'
 import { useAuthStore } from '../stores/auth'
 import { buildPriceStatsRows, type PriceStatsRow } from '../utils/priceStats'
 import { isPercentOver100 } from '../utils/percentage'
+import { canEditOrders } from '../utils/permissions'
+import { matchPriceImportRows, parsePriceStatsExcel } from '../utils/priceStatsExcelImport'
 
 const route = useRoute()
 const orders = useOrdersStore()
 const auth = useAuthStore()
 const myRegions = computed(() => (auth.role ? allowedRegions(auth.role) : null))
+const fileInput = ref<HTMLInputElement | null>(null)
+const importing = ref(false)
+const canImport = computed(() => !!auth.role && canEditOrders(auth.role))
 
 const craft = computed(() => route.params.craft as Craft)
 const region = computed(() => (route.query.region as Region) || null)
@@ -103,6 +108,40 @@ function exportExcel() {
   XLSX.utils.book_append_sheet(wb, ws, '外发-工价表')
   XLSX.writeFile(wb, `${title}.xlsx`)
 }
+
+async function importExcel(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file || importing.value) return
+  importing.value = true
+  try {
+    const parsed = await parsePriceStatsExcel(file)
+    if (!parsed.rows.length) {
+      const detail = parsed.unrecognizedSheets.length ? '未识别到“核价工价”表头。' : '没有可导入的有效数据行。'
+      alert(`导入失败：${detail}`)
+      return
+    }
+    const visibleOrders = orders.items.filter((o) =>
+      o.expand?.factory?.craft === craft.value
+      && (!region.value || regionOf(o.expand?.factory) === region.value)
+      && (!myRegions.value || myRegions.value.includes(regionOf(o.expand?.factory))))
+    const matched = matchPriceImportRows(parsed.rows, visibleOrders)
+    if (!matched.updates.length) {
+      alert(`未匹配到可更新的记录。\n未匹配 ${matched.unmatchedRows.length} 行，冲突 ${matched.conflictingRows.length} 行，无效 ${parsed.invalidRows} 行。`)
+      return
+    }
+    await Promise.all(matched.updates.map(({ order, quoteLaborPrice }) =>
+      orders.update(order.id, { quote_labor_price: quoteLaborPrice })))
+    await orders.fetchAll()
+    alert(`导入完成：识别 ${parsed.rows.length} 行，成功匹配 ${matched.matchedRows} 行，更新 ${matched.updates.length} 条系统记录。\n未匹配 ${matched.unmatchedRows.length} 行，冲突 ${matched.conflictingRows.length} 行，无效 ${parsed.invalidRows} 行。`)
+  } catch (error) {
+    console.error('核价 Excel 导入失败', error)
+    alert('导入失败：请确认文件是有效的 Excel，且包含货号、工序名称和核价生产工价（不含税￥）列。')
+  } finally {
+    importing.value = false
+    input.value = ''
+  }
+}
 </script>
 <template>
   <AppLayout>
@@ -112,6 +151,10 @@ function exportExcel() {
         <h2 style="margin:0">{{ deptName }} · 外发产品单价统计表</h2>
         <span class="muted">共 {{ rows.length }} 条</span>
         <span class="spacer"></span>
+        <button v-if="canImport" class="ghost" :disabled="importing" @click="fileInput?.click()">
+          {{ importing ? '导入中…' : '导入 Excel' }}
+        </button>
+        <input ref="fileInput" type="file" accept=".xlsx,.xls,.csv" style="display:none" @change="importExcel" />
         <button @click="exportExcel">导出 Excel</button>
       </div>
       <div class="scroll">

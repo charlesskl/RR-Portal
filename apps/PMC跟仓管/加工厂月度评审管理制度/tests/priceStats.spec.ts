@@ -86,6 +86,7 @@ describe('buildPriceStatsRows', () => {
     } as any], factoryName, true)
 
     expect(rows[0]).toMatchObject({
+      item_no: '92125',
       quote_labor_price: 2.5,
       unit_price: 2.85,
       tax_point: 1.11,

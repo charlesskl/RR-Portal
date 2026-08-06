@@ -266,7 +266,11 @@ export function buildDeliveryReport(
           priceRatio: pct2(outPrice, quote),
           rangeSpan: firstRow ? totalRows : 0,
           pmcSpan: pmcFirst ? block.rows : 0,
-          factorySpan: facFirst ? fac.orders.length + 1 : 0,
+          // The factory cell spans detail rows only. The following subtotal row
+          // renders its own factory cell ("<factory>-小计"). Including the
+          // subtotal here would occupy that column and shift every subtotal
+          // value one column to the right in the browser table.
+          factorySpan: facFirst ? fac.orders.length : 0,
         })
         firstRow = false
         pmcFirst = false

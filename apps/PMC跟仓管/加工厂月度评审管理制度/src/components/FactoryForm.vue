@@ -3,12 +3,17 @@ import { reactive, computed, ref } from 'vue'
 import type { Factory } from '../types/factory'
 import { useAuthStore } from '../stores/auth'
 import { pb } from '../pb'
+import { taxPointFactor, taxPointRate } from '../utils/taxPoint'
 
 const props = defineProps<{ modelValue: Partial<Factory>; readonly?: boolean; saving?: boolean }>()
 const emit = defineEmits<{ (e: 'save', v: FormData): void }>()
 const auth = useAuthStore()
 
 const form = reactive<Partial<Factory>>({ status: 'active', region: 'dongguan', ...props.modelValue })
+const displayedTaxPoint = computed<number | null>({
+  get: () => taxPointFactor(form.tax_point),
+  set: (value) => { form.tax_point = taxPointRate(value) ?? undefined },
+})
 const photoInput = ref<HTMLInputElement | null>(null)
 
 // 设备清单：一行一种设备（类型 + 数量），可加可删
@@ -66,6 +71,9 @@ function onSubmit() {
   const totalQty = (form.equipment_qty != null && form.equipment_qty !== ('' as any)) ? Number(form.equipment_qty) : sumQty
   if (totalQty) fd.append('equipment_qty', String(totalQty))
   fd.append('processable_types', form.processable_types ?? '')
+  if (form.craft === 'sewing' && form.tax_point != null && form.tax_point !== ('' as any)) {
+    fd.append('tax_point', String(form.tax_point))
+  }
   fd.append('production_lines', form.production_lines ?? '')
   fd.append('cooperative_workshops', form.cooperative_workshops ?? '')
   fd.append('ip_control', form.ip_control ?? '')
@@ -115,6 +123,9 @@ function onSubmit() {
     <label>员工人数 <input v-model.number="form.staff_count" type="number" min="0" /></label>
     <label>月产能 <input v-model.number="form.monthly_capacity" type="number" min="0" /></label>
     <label>加工类型 <input v-model="form.processable_types" placeholder="如 ABS/PC 注塑、金属喷涂" /></label>
+    <label v-if="form.craft === 'sewing'">税点
+      <input v-model.number="displayedTaxPoint" type="number" min="1" max="2" step="0.01" placeholder="如：1.03（3%）" />
+    </label>
     <label>厂房面积(㎡) <input v-model.number="form.workshop_area" type="number" /></label>
     <label v-if="!props.readonly">厂房图片/证书
       <input ref="photoInput" type="file" multiple accept="image/*,.pdf" />

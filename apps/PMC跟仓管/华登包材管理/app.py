@@ -626,10 +626,21 @@ def party_page(party):
     con = sqlite3.connect(DATABASE)
     con.row_factory = sqlite3.Row
 
+    # 每个对方各自的对账锁定区间（按 pair 隔离），用于给流水记录标注 period_locked
+    lock_ranges = {}
+    for row in con.execute("""
+        SELECT l.date_from AS f, l.date_to AS t, r.initiator_party AS ip, r.approver_party AS ap
+        FROM period_locks l JOIN reconciliations r ON r.id = l.reconciliation_id
+        WHERE l.party=?""", (party,)).fetchall():
+        others = {row['ip'], row['ap']} - {party}
+        if others:
+            lock_ranges.setdefault(others.pop(), []).append((row['f'], row['t']))
+
     counterparties = PARTIES[party]['counterparties']
     panels = []
     for cp in counterparties:
         panel = {'cp': cp, 'cp_name': PARTIES[cp]['name']}
+        cp_lock_ranges = lock_ranges.get(cp, [])
         for direction, from_p, to_p in [('sent', party, cp), ('received', cp, party)]:
             all_r = _query_flow(con, recorded_by=party, from_party=from_p, to_party=to_p,
                                 date_from=date_from, date_to=date_to, order_no=order_no,
@@ -643,7 +654,12 @@ def party_page(party):
             pages = max(1, (total + page_size - 1) // page_size)
             page = min(page, pages)
             start = (page - 1) * page_size
-            panel[f'{direction}_records'] = all_r[start:start + page_size]
+            page_records = all_r[start:start + page_size]
+            # 区间锁内的记录同样视为锁定（记录级 locked 标志可能因历史数据修复而不准）
+            if cp_lock_ranges:
+                for rec in page_records:
+                    rec['period_locked'] = any(f <= rec['date'] <= t for f, t in cp_lock_ranges)
+            panel[f'{direction}_records'] = page_records
             panel[f'{direction}_summary'] = _calc_summary(all_r)
             panel[f'{direction}_pagination'] = {
                 'page': page, 'pages': pages, 'total': total, 'page_size': page_size,
@@ -1168,9 +1184,23 @@ def period_lock_delete(lid):
         return _party_redirect(party)
     # 同一时间段可能被多段锁重叠覆盖（历史补建产生的重复），
     # 解锁要对该 party 所有与本区间重叠的锁一起生效，否则用户解了一段仍被另一段锁住。
-    overlaps = con.execute(
-        "SELECT * FROM period_locks WHERE party=? AND date_from<=? AND date_to>=?",
-        (party, ut, uf)).fetchall()
+    # 但只解与点击的锁同一对（party ↔ lock_cp）的锁——与第三方的对账锁不受影响。
+    lock_cp = None
+    if lock['reconciliation_id']:
+        rec = con.execute("SELECT initiator_party, approver_party FROM reconciliations WHERE id=?",
+                          (lock['reconciliation_id'],)).fetchone()
+        if rec:
+            others = {rec['initiator_party'], rec['approver_party']} - {party}
+            lock_cp = others.pop() if others else None
+    overlaps = con.execute("""
+        SELECT l.* FROM period_locks l
+        LEFT JOIN reconciliations r ON r.id = l.reconciliation_id
+        WHERE l.party=? AND l.date_from<=? AND l.date_to>=?
+          AND (? IS NULL OR r.initiator_party IN (?, ?) AND r.approver_party IN (?, ?))""",
+        (party, ut, uf, lock_cp, party, lock_cp, party, lock_cp)).fetchall()
+    overlaps = [lk for lk in overlaps
+                if lock_cp is None
+                or {lk['initiator_party'], lk['approver_party']} == {party, lock_cp}]
     for lk in overlaps:
         con.execute("DELETE FROM period_locks WHERE id=?", (lk['id'],))
         # 拆分：保留解锁区间前后的锁定
@@ -1182,10 +1212,17 @@ def period_lock_delete(lid):
             con.execute(
                 "INSERT INTO period_locks (party, date_from, date_to, reconciliation_id, reason) VALUES (?,?,?,?,?)",
                 (party, _shift_day(ut, 1), lk['date_to'], lk['reconciliation_id'], lk['reason']))
-    # 同步解除该范围内流水记录的记录级锁（否则解锁了还是不能编辑）
-    unlocked = con.execute(
-        "UPDATE flow_records SET locked=0 WHERE recorded_by=? AND date BETWEEN ? AND ?",
-        (party, uf, ut)).rowcount
+    # 同步解除该范围内流水记录的记录级锁（否则解锁了还是不能编辑）；
+    # 同样只解与这一对相关的记录，不动与第三方的记录。
+    if lock_cp is not None:
+        unlocked = con.execute(
+            """UPDATE flow_records SET locked=0 WHERE recorded_by=? AND date BETWEEN ? AND ?
+               AND ((from_party=? AND to_party=?) OR (from_party=? AND to_party=?))""",
+            (party, uf, ut, party, lock_cp, lock_cp, party)).rowcount
+    else:
+        unlocked = con.execute(
+            "UPDATE flow_records SET locked=0 WHERE recorded_by=? AND date BETWEEN ? AND ?",
+            (party, uf, ut)).rowcount
     n = len(overlaps)
     if n > 1:
         msg = f"已解锁 {uf} ~ {ut}（含 {n} 段重叠锁定），范围内 {unlocked} 条记录已可编辑"

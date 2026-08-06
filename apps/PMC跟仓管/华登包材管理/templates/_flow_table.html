@@ -25,7 +25,7 @@
                 {% endfor %}
                 <td class="border px-2 py-1 text-xs">{{ r.remark or '' }}</td>
                 <td class="border px-2 py-1 whitespace-nowrap">
-                    {% if r.locked %}
+                    {% if r.locked or r.period_locked %}
                         <span class="text-xs text-gray-400">🔒 已锁</span>
                     {% else %}
                         <button onclick="openEditModal({{ r.id }}, '{{ direction }}-{{ cp }}')" class="text-xs text-blue-600 hover:underline">编辑</button>

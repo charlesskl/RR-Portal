@@ -25,6 +25,10 @@ function sum(rows, getter) {
   return (rows || []).reduce((total, row) => total + num(getter(row)), 0);
 }
 
+function isIcElectronicRow(row) {
+  return /^IC$/i.test(String(row && row.name || '').trim());
+}
+
 function parseSections(sections) {
   const result = {};
   for (const section of sections || []) {
@@ -44,6 +48,24 @@ function adaptSurtaxForBase({ quote, sections }) {
   return {
     quote,
     sections: (sections || []).map(section => {
+      if (section.dept === 'engineering') {
+        let payload;
+        try {
+          payload = JSON.parse(section.payload_json || '{}');
+        } catch {
+          return section;
+        }
+        const items = payload.mold_costs && Array.isArray(payload.mold_costs.items)
+          ? payload.mold_costs.items
+          : [];
+        let changed = false;
+        items.forEach(item => {
+          if (String(item && item.name || '').trim() !== '超声模费用') return;
+          item.name = '夹具模费用';
+          changed = true;
+        });
+        return changed ? { ...section, payload_json: JSON.stringify(payload) } : section;
+      }
       if (section.dept !== 'sales') return section;
       let payload;
       try {
@@ -283,11 +305,23 @@ function patchPaintingProductMix(ws, painting) {
 }
 
 function patchSimpleIndoColumns(ws, payloads) {
+  const engineering = payloads.engineering || {};
+  const electronic = payloads.electronic || {};
+  const electronicRows = (electronic.electronics || []).length
+    ? electronic.electronics
+    : (engineering.electronics || []);
   const patches = [
     { title: '二、注塑部分', dept: payloads.molding || {}, amountCol: 16, indoCol: 17, weighted: true },
     { title: '二·B、吹气部分 (HKD)', dept: payloads.molding || {}, amountCol: 12, indoCol: 15 },
     { title: '三、二次加工（印喷报价）', dept: payloads.painting || {}, amountCol: 22, indoCol: 23, factor: 0.3, totalFromAmount: true },
-    { title: '四、电子', dept: payloads.electronic || {}, amountCol: 10, indoCol: 11 },
+    {
+      title: '四、电子',
+      dept: electronic,
+      amountCol: 10,
+      indoCol: 11,
+      rows: electronicRows,
+      exclude: isIcElectronicRow,
+    },
     { title: '五、五金', dept: payloads.engineering || {}, amountCol: 10, indoCol: 11 },
     { title: '六、辅助材料', dept: payloads.engineering || {}, amountCol: 10, indoCol: 11 },
     { title: '七、包装材料', dept: payloads.engineering || {}, amountCol: 10, indoCol: 11 },
@@ -311,6 +345,7 @@ function patchSimpleIndoColumns(ws, payloads) {
     applyStyle(ws.getCell(headerRow, patch.indoCol), headerStyle);
     let total = 0;
     const rowResults = [];
+    const eligibleAmountCells = [];
     for (let row = headerRow + 1; row < totalRow; row += 1) {
       const amountCell = ws.getCell(row, patch.amountCol);
       const amount = num(amountCell.value && typeof amountCell.value === 'object'
@@ -318,15 +353,20 @@ function patchSimpleIndoColumns(ws, payloads) {
         : amountCell.value);
       if (!amount && !ws.getCell(row, 1).value) continue;
       const factor = patch.factor || 1;
-      const result = amount * factor * pct / 100;
-      const formula = patch.factor
-        ? `${colLetter(patch.amountCol)}${row}*30%*${pct}/100`
-        : `${colLetter(patch.amountCol)}${row}*${pct}/100`;
+      const item = (patch.rows || [])[row - (headerRow + 1)];
+      const excluded = Boolean(patch.exclude && patch.exclude(item));
+      const result = excluded ? 0 : amount * factor * pct / 100;
+      const formula = excluded
+        ? '0'
+        : patch.factor
+          ? `${colLetter(patch.amountCol)}${row}*30%*${pct}/100`
+          : `${colLetter(patch.amountCol)}${row}*${pct}/100`;
       ws.getCell(row, patch.indoCol).value = { formula, result };
       ws.getCell(row, patch.indoCol).numFmt = HKD4;
       applyStyle(ws.getCell(row, patch.indoCol), ws.getCell(row, patch.amountCol).style, HKD4);
       total += result;
       rowResults.push(result);
+      if (!excluded) eligibleAmountCells.push(`${colLetter(patch.amountCol)}${row}`);
     }
     if (patch.weighted) {
       total = weightedInjectionSum(patch.dept, (_row, index) => rowResults[index]);
@@ -352,6 +392,7 @@ function patchSimpleIndoColumns(ws, payloads) {
     applyStyle(ws.getCell(totalRow, patch.indoCol), ws.getCell(totalRow, patch.amountCol).style, HKD4);
     refs[patch.title] = `${colLetter(patch.amountCol)}${totalRow}`;
     refs[`${patch.title}:indo`] = `${colLetter(patch.indoCol)}${totalRow}`;
+    refs[`${patch.title}:indoBase`] = eligibleAmountCells.join('+') || '0';
   }
   return refs;
 }
@@ -478,6 +519,11 @@ function patchZeroCartonRate(ws, payloads) {
     };
     ws.getCell(row, 6).numFmt = '"HK$"0.0000';
   }
+}
+
+function patchUnitLabels(ws) {
+  const productSizeRow = findRow(ws, '产品尺寸 CM');
+  if (productSizeRow) ws.getCell(productSizeRow, 1).value = '产品尺寸（英寸）';
 }
 
 function patchSlush(ws, slush) {
@@ -666,10 +712,10 @@ function appendIndonesiaBlock(ws, row, payloads, refs, fx, styles) {
     },
     {
       label: '电子',
-      base: freeSubtotal(electronicRows, fx),
+      base: freeSubtotal(electronicRows.filter(row => !isIcElectronicRow(row)), fx),
       rate: num(electronic.indo_pct),
-      formula: refs['四、电子'] || '0',
-      note: '电子金额合计',
+      formula: refs['四、电子:indoBase'] || '0',
+      note: '电子金额合计（IC除外）',
     },
     {
       label: '注塑＋吹气',
@@ -852,6 +898,7 @@ function enhanceWorkbook(workbook, { quote, sections }) {
   patchMoldProductGroups(ws, payloads);
   patchMoldingProductGroups(ws, payloads);
   patchPaintingProductMix(ws, payloads.painting || {});
+  patchUnitLabels(ws);
   patchFreeInputFormulas(ws, payloads);
   patchZeroCartonRate(ws, payloads);
   const refs = patchSimpleIndoColumns(ws, payloads);

@@ -1010,6 +1010,18 @@ function sectionsToData({ quote, sections }) {
     carton_price: cartonPrice,
   };
 
+  const vqSupplements = ((sales.shipping && sales.shipping.customer_supplied_products) || [])
+    .filter(item => String(item && item.name || '').trim() || num(item && item.amount_usd))
+    .slice(0, 5)
+    .map((item, index) => ({
+      part_no: `CUSTOMER-${index + 1}`,
+      description: item.name || `客供成品${index + 1}`,
+      eng_name: customerEnglish(item.name || `客供成品${index + 1}`),
+      moq: num(quote.qty) || 2500,
+      usage_qty: 1,
+      unit_price: num(item.amount_usd),
+    }));
+
   // 运输（VQ Section E）：内部无 CuFt 单价，留空走模板默认
   const transportConfig = {};
 
@@ -1026,7 +1038,7 @@ function sectionsToData({ quote, sections }) {
     materialPrices: [],
     machinePrices: [],
     bodyAccessories,
-    vqSupplements: [],
+    vqSupplements,
     rawMaterials: groupedRawMaterials,
     sewingItems,                // 车缝辅料(无部位) → C2 Sewing Accessories；面料裁片(有部位)在 rawMaterials(fabric)
     sewingLaborItems,

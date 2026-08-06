@@ -9,6 +9,60 @@ const {
   exportSpin,
   sectionsToSpinData,
 } = require('../backend/services/exportSpin');
+
+test('SPIN data preserves named customer-supplied products for misc-cost rows', () => {
+  const data = sectionsToSpinData({
+    quote: { id: 400, quote_no: 'SPIN-CUSTOMER-PRODUCTS', product_name: 'Toy', customer: 'SPIN', qty: 1000 },
+    sections: [{
+      dept: 'sales',
+      payload_json: JSON.stringify({
+        shipping: {
+          customer_supplied_products: [
+            { name: '控制器', amount_usd: 2.5 },
+            { name: '充电线', amount_usd: 1.25 },
+          ],
+        },
+      }),
+    }],
+  });
+  assert.deepEqual(data.customerSuppliedProducts.map(item => [item.name, item.amount_usd]), [
+    ['控制器', 2.5],
+    ['充电线', 1.25],
+  ]);
+});
+
+test('SPIN VQ writes up to five customer-supplied products and expands the misc subtotal formula', async () => {
+  const products = [
+    { name: '控制器', amount_usd: 2.5 },
+    { name: '充电线', amount_usd: 1.25 },
+    { name: '电池', amount_usd: 0.5 },
+    { name: '说明书', amount_usd: 0.2 },
+    { name: '贴纸', amount_usd: 0.1 },
+  ];
+  const buffer = await exportSpin({
+    quote: { id: 401, quote_no: 'SPIN-CUSTOMER-EXPORT', product_name: 'Toy', customer: 'SPIN', qty: 1000 },
+    sections: [{ dept: 'sales', payload_json: JSON.stringify({
+      shipping: { customer_supplied_products: products },
+    }) }],
+  });
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(buffer);
+  const worksheet = workbook.getWorksheet('Toy');
+  let testingRow = 0;
+  worksheet.eachRow(row => {
+    if (row.getCell(2).value === 'testing fee') testingRow = row.number;
+  });
+  assert.ok(testingRow);
+  products.forEach((product, index) => {
+    const row = testingRow + index + 1;
+    assert.match(String(worksheet.getCell(row, 2).value), new RegExp(product.name));
+    assert.equal(worksheet.getCell(row, 10).value, product.amount_usd);
+    assert.equal(worksheet.getCell(row, 12).value.formula, `J${row}*K${row}`);
+  });
+  const subtotalRow = testingRow + 6;
+  assert.equal(worksheet.getCell(subtotalRow, 13).value.formula, `SUM(L${testingRow}:L${subtotalRow - 1})`);
+  assert.equal(worksheet.getCell(subtotalRow, 13).value.result, 4.55);
+});
 const { buildWorkbook } = require('../backend/services/exportInternal');
 
 const carton = { cuft: 0.62, qty: 12 };

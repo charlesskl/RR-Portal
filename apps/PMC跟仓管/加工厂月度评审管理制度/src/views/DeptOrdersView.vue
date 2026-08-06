@@ -661,22 +661,22 @@ async function removeRow(row: DetailRow) {
   background: var(--surface);
 }
 .report thead .freeze-col { z-index: 5; background: #fafbfc; }
-.report .range-col { left: 0; width: 180px; min-width: 180px; max-width: 180px; }
-.report .pmc-col { left: 180px; width: 140px; min-width: 140px; max-width: 140px; }
-.report .factory-col { left: 320px; width: 300px; min-width: 300px; max-width: 300px; }
-.report:not(.sewing-report) .item-no-col { left: 620px; }
-.report.sewing-report .contract-no-col { left: 620px; }
-.report.sewing-report .item-no-col { left: 770px; }
-.report:not(.sewing-report):not(.injection-report) .order-no-col { left: 760px; }
-.report:not(.sewing-report):not(.injection-report) .category-col { left: 900px; }
-.report:not(.sewing-report):not(.injection-report) .product-col { left: 1020px; }
-.report.injection-report .mold-no-col { left: 760px; }
-.report.injection-report .order-no-col { left: 900px; }
-.report.injection-report .category-col { left: 1040px; }
-.report.injection-report .product-col { left: 1160px; }
-.report.sewing-report .order-no-col { left: 910px; }
-.report.sewing-report .category-col { left: 1050px; }
-.report.sewing-report .product-col { left: 1170px; }
+.report .range-col { left: 0; width: 140px; min-width: 140px; max-width: 140px; }
+.report .pmc-col { left: 140px; width: 140px; min-width: 140px; max-width: 140px; }
+.report .factory-col { left: 280px; width: 140px; min-width: 140px; max-width: 140px; }
+.report:not(.sewing-report) .item-no-col { left: 420px; }
+.report.sewing-report .contract-no-col { left: 420px; }
+.report.sewing-report .item-no-col { left: 570px; }
+.report:not(.sewing-report):not(.injection-report) .order-no-col { left: 560px; }
+.report:not(.sewing-report):not(.injection-report) .category-col { left: 700px; }
+.report:not(.sewing-report):not(.injection-report) .product-col { left: 820px; }
+.report.injection-report .mold-no-col { left: 560px; }
+.report.injection-report .order-no-col { left: 700px; }
+.report.injection-report .category-col { left: 840px; }
+.report.injection-report .product-col { left: 960px; }
+.report.sewing-report .order-no-col { left: 710px; }
+.report.sewing-report .category-col { left: 850px; }
+.report.sewing-report .product-col { left: 970px; }
 .report .product-col { box-shadow: 5px 0 7px -7px rgba(31, 37, 51, .55); }
 .report .over-limit { color: #dc2626; font-weight: 600; }
 .report .item-no-col {

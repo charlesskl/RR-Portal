@@ -49,7 +49,7 @@ const ORDER_COLUMNS = [
   'start_date','complete_date','ship_date',
   'target_time','daily_target','days','unit_price','process_value',
   'inspection_date','month','warehouse_record','output_value','process_price','remark',
-  'cell_format','row_color',
+  'cell_format','row_color','sort_order',
   ...Array.from({length: 31}, (_, i) => `day_${i + 1}`)
 ];
 const ALLOWED_COLUMNS = new Set(ORDER_COLUMNS);
@@ -66,7 +66,9 @@ router.get('/', (req, res) => {
   const params = [];
   if (workshop) { sql += ' AND workshop = ?'; params.push(workshop); }
   if (status) { sql += ' AND status = ?'; params.push(status); }
-  sql += ' ORDER BY line_name ASC, ship_date ASC, id ASC';
+  // 手动排过序（剪切/粘贴行，sort_order 非空）的优先按 sort_order；
+  // 没排过的仍按原来的走货期+id 排，保证老数据行为不变
+  sql += ' ORDER BY line_name ASC, (sort_order IS NULL), sort_order ASC, ship_date ASC, id ASC';
   const rows = db.prepare(sql).all(...params);
   res.json(rows);
 });

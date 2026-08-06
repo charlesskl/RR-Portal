@@ -897,6 +897,10 @@ function renderShippingBlock(ws, row, shipping, header, fxRH, refs = {}) {
   const markupX = shipping.markup_x == null || shipping.markup_x === '' ? 1 : num(shipping.markup_x);
   const sewMarkupX = shipping.sew_markup_x == null || shipping.sew_markup_x === '' ? markupX : num(shipping.sew_markup_x);
   const elecMarkupX = shipping.elec_markup_x == null || shipping.elec_markup_x === '' ? markupX : num(shipping.elec_markup_x);
+  const customerSuppliedProducts = Array.isArray(shipping.customer_supplied_products)
+    ? shipping.customer_supplied_products.filter(item => String(item && item.name || '').trim() || num(item && item.amount_usd))
+    : [];
+  const customerSuppliedUSD = sum(customerSuppliedProducts, item => num(item.amount_usd));
 
   // 章节标题
   ws.mergeCells(row, 1, row, Math.max(13, cols + 1)); styleSection(ws.getCell(row, 1));
@@ -939,8 +943,8 @@ function renderShippingBlock(ws, row, shipping, header, fxRH, refs = {}) {
     const moldShareUSD = num(refs.moldShareUsd);
     const prototypeShareUSD = num(refs.prototypeShareUsd);
     const testingShareUSD = num(refs.testingShareUsd);
-    const finalUSD = totalUSD + moldShareUSD + prototypeShareUSD + testingShareUSD;
-    return { base, freight, lifting, afterShip, afterMarkup, afterDivisor, totalHKD, totalUSD, moldShareUSD, prototypeShareUSD, testingShareUSD, finalUSD,
+    const finalUSD = totalUSD + moldShareUSD + prototypeShareUSD + testingShareUSD + customerSuppliedUSD;
+    return { base, freight, lifting, afterShip, afterMarkup, afterDivisor, totalHKD, totalUSD, moldShareUSD, prototypeShareUSD, testingShareUSD, customerSuppliedUSD, finalUSD,
       sewBase, sewMarkup, sewDivisor, elecBase, elecMarkup, elecDivisor };
   });
 
@@ -1051,10 +1055,16 @@ function renderShippingBlock(ws, row, shipping, header, fxRH, refs = {}) {
   writeRow('测试费分摊 (USD)',
     i => refs.testingShareUsdCell ? { formula: refs.testingShareUsdCell, result: rows[i].testingShareUSD } : rows[i].testingShareUSD,
     { fmt: '0.0000' });
-  // TOTAL USD = USD + 模具 + 手板 + 测试分摊
+  const customerSuppliedRows = customerSuppliedProducts.map(item => {
+    const itemRow = row;
+    writeRow(`客供成品：${String(item.name || '未命名').trim() || '未命名'} (USD)`, () => num(item.amount_usd), { fmt: '0.0000' });
+    return itemRow;
+  });
+  // TOTAL USD = USD + 模具 + 手板 + 测试分摊 + 客供成品
   const rFinal = row;
+  const finalFormulaRows = [rUSD, rMold, rPrototype, rTesting, ...customerSuppliedRows];
   writeRow('TOTAL (USD)',
-    i => ({ formula: `${colLetter(i+2)}${rUSD}+${colLetter(i+2)}${rMold}+${colLetter(i+2)}${rPrototype}+${colLetter(i+2)}${rTesting}`, result: rows[i].finalUSD }),
+    i => ({ formula: finalFormulaRows.map(sourceRow => `${colLetter(i + 2)}${sourceRow}`).join('+'), result: rows[i].finalUSD }),
     { fmt: '0.0000', bold: true });
 
   // 报客货价 = 第一个非"出厂价"场景的 finalUSD（默认 盐田40柜）

@@ -312,6 +312,12 @@ function freeAmountHkd(row, fxRmbHkd) {
   if (row && row.is_subtotal) return num(row.amount);
   return num(row && row.qty) * freeUnitHkd(row, fxRmbHkd);
 }
+function isIcElectronicRow(row) {
+  return /^IC$/i.test(String(row && row.name || '').trim());
+}
+function electronicIndoAmount(row, fxRmbHkd, pct) {
+  return isIcElectronicRow(row) ? 0 : elecRowAmount(row, fxRmbHkd) * num(pct) / 100;
+}
 function ensureFreeRmbPrices(rows, fxRmbHkd) {
   (rows || []).forEach(row => {
     if (!hasFreeRmbPrice(row) && row.unit_price !== undefined && row.unit_price !== null && row.unit_price !== '') {
@@ -898,7 +904,8 @@ function renderHierElectronics(container, rows, onChange, canEdit, fxRmbHkd, pct
 
     const tdIndo = document.createElement('td'); tdIndo.className = 'ro';
     refreshIndo = () => {
-      tdIndo.textContent = formatNum(elecRowAmount(row, fxRmbHkd) * num(pctHost && pctHost.indo_pct) / 100);
+      tdIndo.textContent = formatNum(electronicIndoAmount(row, fxRmbHkd, pctHost && pctHost.indo_pct));
+      tdIndo.title = isIcElectronicRow(row) ? 'IC 不计算印尼运费' : '';
     };
     refreshIndo();
     indoRefreshers.push(refreshIndo);
@@ -1247,6 +1254,7 @@ function renderSummaryPane(host, sections, quote, me) {
   // 各部门关键合计
   const moldTotal = sum(eng.molds || [], m => num(m.price_rmb));
   const elecRaw = sum(elecSrc, r => elecRowAmount(r, fxRH));  // 不算损耗（与导出同源：电子部优先）
+  const elecIndoRaw = sum(elecSrc, r => isIcElectronicRow(r) ? 0 : elecRowAmount(r, fxRH));
   const hwRaw = sum(eng.hardware || [], r => freeAmountHkd(r, fxRH));  // 五金不计损耗（与导出一致）
   const auxRaw = sum(eng.aux_materials || [], r => freeAmountHkd(r, fxRH));  // 不计损耗
   const pkmatRaw = sum(eng.packaging_materials || [], r => freeAmountHkd(r, fxRH));  // 不计损耗
@@ -1287,7 +1295,7 @@ function renderSummaryPane(host, sections, quote, me) {
   // 各表按自己的点数自动汇总印尼运费（HKD）；车缝仅材料，喷油以总价30%为基数。
   const indoFreightHkd =
       (hwRaw + auxRaw + pkmatRaw) * num(eng.indo_pct) / 100
-    + elecRaw * num(electronic.indo_pct) / 100
+    + elecIndoRaw * num(electronic.indo_pct) / 100
     + (injTotal + blowTotal) * num(mold.indo_pct) / 100
     + slushTotal * num(slush.indo_pct) / 100
     + (sewWeightedMaterialRmb(sewing) / fxRH) * num(sewing.indo_pct) / 100
@@ -2276,7 +2284,7 @@ function renderCartonCalc(host, c, canEdit, onChange) {
           </span>
         </div>
 
-        <div style="margin-bottom:6px;color:#78716c;font-size:13px">产品尺寸 CM</div>
+        <div style="margin-bottom:6px;color:#78716c;font-size:13px">产品尺寸（英寸）</div>
         <table class="wb-table" style="font-size:13px;margin-bottom:14px;max-width:340px">
           <thead><tr><th style="width:80px">L</th><th style="width:80px">W</th><th style="width:80px">H</th></tr></thead>
           <tbody><tr>
@@ -2365,7 +2373,7 @@ function renderEngineering(host, payload, canEdit, onChange, fxRmbHkd, fxHkdUsd)
   payload.mold_costs = payload.mold_costs || {
     items: [
       { name: '模具费用', price_rmb: 0 },
-      { name: '超声模费用', price_rmb: 0 },
+      { name: '夹具模费用', price_rmb: 0 },
       { name: '喷油模具', price_rmb: 0 },
     ],
     customer_subsidy_usd: 0,
@@ -2376,6 +2384,10 @@ function renderEngineering(host, payload, canEdit, onChange, fxRmbHkd, fxHkdUsd)
     testing_amortization_qty: 2000,
     fx_rmb_usd: 7.75,
   };
+  // 兼容旧报价：历史名称“超声模费用”现在统一显示并保存为“夹具模费用”。
+  (payload.mold_costs.items || []).forEach(item => {
+    if (String(item && item.name || '').trim() === '超声模费用') item.name = '夹具模费用';
+  });
   if (payload.mold_costs.prototype_fee_usd == null) payload.mold_costs.prototype_fee_usd = num(payload.mold_costs.prototype_fee_rmb);
   if (payload.mold_costs.testing_fee_usd == null) payload.mold_costs.testing_fee_usd = num(payload.mold_costs.testing_fee_rmb);
   if (payload.mold_costs.prototype_amortization_qty == null) payload.mold_costs.prototype_amortization_qty = 50000;
@@ -4308,11 +4320,13 @@ function renderShipping(host, payload, header, canEdit, onChange, freightMap, pr
   payload.shipping.top.testing_share = +num(amortSharesUsd.testing).toFixed(4);
   const topData = payload.shipping.top;
   const s = payload.shipping;
+  if (!Array.isArray(s.customer_supplied_products)) s.customer_supplied_products = [];
   const fxHU = num(header.fx_hkd_usd) || 7.8;
   const fxRH = num(header.fx_rmb_hkd) || 0.85;
   const fmt = (n) => Number.isFinite(n) ? n.toFixed(2) : '-';
   const sewMarkupValue = () => s.sew_markup_x == null || s.sew_markup_x === '' ? num(s.markup_x) : num(s.sew_markup_x);
   const elecMarkupValue = () => s.elec_markup_x == null || s.elec_markup_x === '' ? num(s.markup_x) : num(s.elec_markup_x);
+  const customerSuppliedTotal = () => sum(s.customer_supplied_products, item => num(item.amount_usd));
 
   const compute = () => {
     const totalHkd = num(topData.total_hkd);
@@ -4358,8 +4372,9 @@ function renderShipping(host, payload, header, canEdit, onChange, freightMap, pr
       const moldShareUSD = num(topData.mold_share);
       const prototypeShareUSD = num(topData.prototype_share);
       const testingShareUSD = num(topData.testing_share);
-      const finalUSD = totalUSD + moldShareUSD + prototypeShareUSD + testingShareUSD;
-      return { freight, lifting, afterShip, afterMarkup, afterDivisor, totalHKD, totalRMB, totalUSD, moldShareUSD, prototypeShareUSD, testingShareUSD, finalUSD,
+      const customerSuppliedUSD = customerSuppliedTotal();
+      const finalUSD = totalUSD + moldShareUSD + prototypeShareUSD + testingShareUSD + customerSuppliedUSD;
+      return { freight, lifting, afterShip, afterMarkup, afterDivisor, totalHKD, totalRMB, totalUSD, moldShareUSD, prototypeShareUSD, testingShareUSD, customerSuppliedUSD, finalUSD,
         mainTotal: afterDivisor, sewBase, sewMarkup, sewDivisor, sewTotal: sewDivisor,
         elecBase, elecMarkup, elecDivisor, elecTotal: elecDivisor };
     });
@@ -4402,6 +4417,7 @@ function renderShipping(host, payload, header, canEdit, onChange, freightMap, pr
       setC('moldShareUSD', fmt(r.moldShareUSD));
       setC('prototypeShareUSD', fmt(r.prototypeShareUSD));
       setC('testingShareUSD', fmt(r.testingShareUSD));
+      setC('customerSuppliedUSD', fmt(r.customerSuppliedUSD));
       setC('totalHKD', fmt(r.totalHKD));
       setC('totalRMB', fmt(r.totalRMB));
       setC('totalUSD', fmt(r.totalUSD));
@@ -4422,6 +4438,11 @@ function renderShipping(host, payload, header, canEdit, onChange, freightMap, pr
         }
       }
     });
+    s.customer_supplied_products.forEach((item, itemIndex) => {
+      host.querySelectorAll(`[data-k="customerSuppliedItem"][data-item="${itemIndex}"]`).forEach(cell => {
+        cell.textContent = fmt(num(item.amount_usd));
+      });
+    });
     const set = (sel, v, bg) => { const el = host.querySelector(sel); if (el) { el.value = v; if (bg) el.style.background = bg; } };
     set('.sh-customer', fmt(customerUSD));
     set('.sh-diff', target > 0 ? diffPct.toFixed(2) + '%' : '-', diffPct >= 0 ? '#fef3c7' : '#dcfce7');
@@ -4432,6 +4453,22 @@ function renderShipping(host, payload, header, canEdit, onChange, freightMap, pr
     const sc = s.scenarios;
     const { rows, target, customerUSD, diffPct } = compute();
     const cellTd = (i, k, r) => `<td class="ro" data-i="${i}" data-k="${k}">${fmt(r[k])}</td>`;
+    const suppliedRows = s.customer_supplied_products.map((item, itemIndex) => `
+      <tr class="customer-supplied-row">
+        <td>
+          <div style="display:flex;gap:5px;align-items:center;flex-wrap:wrap">
+            <span style="white-space:nowrap">客供成品</span>
+            ${canEdit
+              ? `<input class="customer-supplied-name" data-item="${itemIndex}" value="${escapeHtml(item.name || '')}" placeholder="成品名称" style="width:105px">
+                 <input class="customer-supplied-amount" data-item="${itemIndex}" type="number" step="any" value="${item.amount_usd ?? 0}" title="金额 USD" style="width:72px">
+                 <span>USD</span>
+                 <button class="mini danger customer-supplied-del" data-item="${itemIndex}" title="删除">×</button>`
+              : `<span>${escapeHtml(item.name || '未命名')}</span>`}
+          </div>
+        </td>
+        ${rows.map((r, i) => `<td class="ro" data-i="${i}" data-k="customerSuppliedItem" data-item="${itemIndex}">${fmt(num(item.amount_usd))}</td>`).join('')}
+        ${canEdit ? '<td></td>' : ''}
+      </tr>`).join('');
     host.innerHTML = `
       <p class="muted" style="font-size:12px;margin:0 0 10px 0">
         出货底价 = 出厂价 <b id="sh-top-total">${fmt(num(topData.total_hkd))}</b>
@@ -4466,6 +4503,7 @@ function renderShipping(host, payload, header, canEdit, onChange, freightMap, pr
           <tr><td>模具分摊 (USD)</td>${rows.map((r, i) => cellTd(i, 'moldShareUSD', r)).join('')}${canEdit ? '<td></td>' : ''}</tr>
           <tr><td>手板费分摊 (USD)</td>${rows.map((r, i) => cellTd(i, 'prototypeShareUSD', r)).join('')}${canEdit ? '<td></td>' : ''}</tr>
           <tr><td>测试费分摊 (USD)</td>${rows.map((r, i) => cellTd(i, 'testingShareUSD', r)).join('')}${canEdit ? '<td></td>' : ''}</tr>
+          ${suppliedRows}
           <tr class="hi"><td>TOTAL (USD)</td>${rows.map((r, i) => cellTd(i, 'finalUSD', r)).join('')}${canEdit ? '<td></td>' : ''}</tr>
         </tbody>
       </table>
@@ -4473,7 +4511,7 @@ function renderShipping(host, payload, header, canEdit, onChange, freightMap, pr
         <label>报客货价 (USD) <input class="sh-customer" value="${fmt(customerUSD)}" disabled style="width:100px;background:#f0f9ff;font-weight:600"></label>
         <label>目标价 (USD) ${canEdit ? `<input id="sh-target" type="number" step="any" value="${s.target_usd}" style="width:100px">` : `<span>${s.target_usd}</span>`}</label>
         <label>相差 % <input class="sh-diff" value="${target > 0 ? diffPct.toFixed(2) + '%' : '-'}" disabled style="width:90px;background:${diffPct >= 0 ? '#fef3c7' : '#dcfce7'};font-weight:600"></label>
-        ${canEdit ? `<button class="mini" id="sh-add">+ 增加场景</button>` : ''}
+        ${canEdit ? `<button class="mini" id="sh-add-customer-product">+ 客供成品</button><button class="mini" id="sh-add">+ 增加场景</button>` : ''}
       </div>
     `;
     if (!canEdit) return;
@@ -4496,6 +4534,24 @@ function renderShipping(host, payload, header, canEdit, onChange, freightMap, pr
       const el = host.querySelector('#sh-' + id);
       if (el) el.oninput = () => { s[key] = num(el.value); onChange(); refresh(); };
     });
+    host.querySelectorAll('.customer-supplied-name').forEach(inp => inp.oninput = () => {
+      s.customer_supplied_products[+inp.dataset.item].name = inp.value;
+      onChange();
+    });
+    host.querySelectorAll('.customer-supplied-amount').forEach(inp => inp.oninput = () => {
+      s.customer_supplied_products[+inp.dataset.item].amount_usd = inp.value === '' ? 0 : Number(inp.value);
+      onChange(); refresh();
+    });
+    host.querySelectorAll('.customer-supplied-del').forEach(btn => btn.onclick = () => {
+      s.customer_supplied_products.splice(+btn.dataset.item, 1);
+      onChange(); build();
+    });
+    const addCustomerProductBtn = host.querySelector('#sh-add-customer-product');
+    if (addCustomerProductBtn) addCustomerProductBtn.onclick = () => {
+      if (s.customer_supplied_products.length >= 5) return alert('客供成品最多添加 5 项');
+      s.customer_supplied_products.push({ name: '', amount_usd: 0 });
+      onChange(); build();
+    };
     // 结构性变更（增删场景）才重建
     host.querySelectorAll('.sc-del').forEach(btn => btn.onclick = () => {
       const i = +btn.dataset.i;

@@ -83,3 +83,19 @@ test('molding UI visually separates multiple product groups', () => {
   assert.match(source, /产品 \$\{group\.index \+ 1\}\/\$\{injectionGroupsForTable\.length\}/);
   assert.match(source, /rowStyle: showInjectionGroups/);
 });
+
+test('electronic IC rows are excluded only from Indonesian freight', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../frontend/workbench.js'), 'utf8');
+  assert.match(source, /function isIcElectronicRow\(row\)/);
+  assert.match(source, /const elecIndoRaw = sum\(elecSrc/);
+  assert.match(source, /electronicIndoAmount\(row, fxRmbHkd/);
+  assert.match(source, /\+ elecIndoRaw \* num\(electronic\.indo_pct\)/);
+});
+
+test('shipping UI supports named customer-supplied products in final USD', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../frontend/workbench.js'), 'utf8');
+  assert.match(source, /customer_supplied_products/);
+  assert.match(source, /\+ customerSuppliedUSD/);
+  assert.match(source, /customer-supplied-name/);
+  assert.match(source, /\+ 客供成品/);
+});

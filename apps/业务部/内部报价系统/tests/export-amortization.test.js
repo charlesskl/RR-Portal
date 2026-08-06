@@ -35,6 +35,50 @@ test('internal export writes product-ratio weighted injection formulas', async (
   assert.equal(worksheet.getCell(totalRow, 17).value.formula, `((Q${dataStart}+Q${dataStart + 1})*2+(Q${dataStart + 2})*1)/3`);
 });
 
+test('legacy ultrasonic mold fee is displayed as fixture mold fee', async () => {
+  const workbook = await buildWorkbook({
+    quote: { quote_no: 'FIXTURE-MOLD-LABEL', product_name: '夹具模费用', qty: 1000 },
+    sections: [
+      { dept: 'engineering', payload_json: JSON.stringify({
+        mold_costs: {
+          items: [{ name: '超声模费用', price_rmb: 1300 }],
+          fx_rmb_usd: 7.75,
+        },
+      }) },
+      { dept: 'sales', payload_json: JSON.stringify({ header: { fx_rmb_hkd: 0.85 }, shipping: { scenarios: [] } }) },
+    ],
+  });
+  const worksheet = workbook.getWorksheet('报价明细');
+  const labels = [];
+  worksheet.eachRow(row => row.eachCell(cell => {
+    if (typeof cell.value === 'string') labels.push(cell.value);
+  }));
+  assert.ok(labels.includes('夹具模费用'));
+  assert.ok(!labels.includes('超声模费用'));
+});
+
+test('carton product dimensions are labeled in inches', async () => {
+  const workbook = await buildWorkbook({
+    quote: { quote_no: 'CARTON-INCH-LABEL', product_name: '纸箱英寸单位', qty: 1000 },
+    sections: [
+      { dept: 'engineering', payload_json: JSON.stringify({
+        carton_calc: {
+          pl: 9, pw: 5, ph: 12,
+          cartons: [{ name: '主纸箱', cl: 17, cw: 14, ch: 12, qty: 6, flat_cards: [] }],
+        },
+      }) },
+      { dept: 'sales', payload_json: JSON.stringify({ header: { fx_rmb_hkd: 0.85 }, shipping: { scenarios: [] } }) },
+    ],
+  });
+  const worksheet = workbook.getWorksheet('报价明细');
+  const labels = [];
+  worksheet.eachRow(row => row.eachCell(cell => {
+    if (typeof cell.value === 'string') labels.push(cell.value);
+  }));
+  assert.ok(labels.includes('产品尺寸（英寸）'));
+  assert.ok(!labels.includes('产品尺寸 CM'));
+});
+
 test('internal export keeps editable spray-product ratios and a weighted-average formula', async () => {
   const workbook = await buildWorkbook({
     quote: { quote_no: 'PAINT-MIX', product_name: '喷油产品配比', qty: 1000 },
@@ -729,7 +773,10 @@ test('internal export lists Indonesian freight by department and links its total
       }) },
       { dept: 'electronic', payload_json: JSON.stringify({
         indo_pct: 5,
-        electronics: [{ name: '电子', qty: 1, unit_price: 40 }],
+        electronics: [
+          { name: 'IC', qty: 1, unit_price: 100 },
+          { name: 'PACB电子', qty: 1, unit_price: 40 },
+        ],
       }) },
       { dept: 'molding', payload_json: JSON.stringify({
         indo_pct: 2,
@@ -787,10 +834,52 @@ test('internal export lists Indonesian freight by department and links its total
     ['印尼运费 5%', '印尼运费 10%', '印尼运费 10%', '印尼运费 10%']
   );
   const electronicHeaderRow = indoHeaderRows[0];
+  const icRow = electronicHeaderRow + 1;
+  const pacbRow = electronicHeaderRow + 2;
   assert.equal(
-    worksheet.getCell(electronicHeaderRow + 1, 11).value.formula,
-    `J${electronicHeaderRow + 1}*5/100`
+    worksheet.getCell(icRow, 11).value.formula,
+    '0'
   );
+  assert.equal(worksheet.getCell(pacbRow, 11).value.formula, `J${pacbRow}*5/100`);
+  assert.equal(worksheet.getCell(pacbRow, 11).value.result, 2);
+  assert.equal(worksheet.getCell(firstDataRow + 1, 2).value.formula, `J${pacbRow}`);
+  assert.equal(worksheet.getCell(firstDataRow + 1, 2).value.result, 40);
+});
+
+test('customer-supplied products are named separately and added to exported customer price', async () => {
+  const workbook = await buildWorkbook({
+    quote: { quote_no: 'CUSTOMER-PRODUCTS', product_name: '客供成品测试', qty: 1000 },
+    sections: [{ dept: 'sales', payload_json: JSON.stringify({
+      header: { fx_rmb_hkd: 0.85, fx_hkd_usd: 7.8 },
+      shipping: {
+        markup_x: 1,
+        divisor: 1,
+        scenarios: [{ name: '盐田40柜', base_rmb: 0 }],
+        customer_supplied_products: [
+          { name: '控制器', amount_usd: 2.5 },
+          { name: '充电线', amount_usd: 1.25 },
+        ],
+      },
+    }) }],
+  });
+  const worksheet = workbook.getWorksheet('报价明细');
+  let controllerRow = 0;
+  let cableRow = 0;
+  let totalUsdRow = 0;
+  let customerPriceRow = 0;
+  worksheet.eachRow(row => {
+    if (row.getCell(1).value === '客供成品：控制器 (USD)') controllerRow = row.number;
+    if (row.getCell(1).value === '客供成品：充电线 (USD)') cableRow = row.number;
+    if (controllerRow && row.number > cableRow && row.getCell(1).value === 'TOTAL (USD)') totalUsdRow = row.number;
+    const value = row.getCell(1).value;
+    if (value && typeof value === 'object' && String(value.result || '').startsWith('报客货价:')) customerPriceRow = row.number;
+  });
+  assert.ok(controllerRow && cableRow && totalUsdRow && customerPriceRow);
+  assert.equal(worksheet.getCell(controllerRow, 3).value, 2.5);
+  assert.equal(worksheet.getCell(cableRow, 3).value, 1.25);
+  assert.match(worksheet.getCell(totalUsdRow, 3).value.formula, new RegExp(`C${controllerRow}\\+C${cableRow}`));
+  assert.equal(worksheet.getCell(totalUsdRow, 3).value.result, 3.75);
+  assert.match(worksheet.getCell(customerPriceRow, 1).value.result, /报客货价: 3\.7500/);
 });
 
 test('internal export mirrors UI formulas for slush and each departmental Indonesian freight', async () => {

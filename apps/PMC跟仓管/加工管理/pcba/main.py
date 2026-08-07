@@ -2574,6 +2574,11 @@ def _append_department_transfer_target(
         return
     if source_location not in DEPARTMENTS or source_location == source_department:
         return
+    # 已停用的联动对：兴信B来料仓 <-> 东莞车间。
+    # 业务决定（2026-08-07）：东莞车间完全按自己导入的台账记账，
+    # 不再由来料仓出库自动生成联动记录（历史联动数据已删除）。
+    if {source_department, source_location} == {SUPPLIER_DEPARTMENT, ASSEMBLY_DEPARTMENT}:
+        return
     rec_type = _auto_receive_record_type(source_location)
     targets.append((
         source_location,

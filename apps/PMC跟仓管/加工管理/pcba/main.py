@@ -1092,11 +1092,45 @@ def _parse_legacy_assembly_pcba_workbook(conn, wb, department):
 
     bodies = []
     location_id = _location_id_from_name(conn, ASSEMBLY_DEPARTMENT, 1)
+    workbook_year = _legacy_workbook_year(wb)
     for ws in wb.worksheets:
         if "领料明细" not in ws.title:
             continue
+        # 「36#CD领料明细」里的 36#唱片CD 就是 NFC 36贴纸（车间沿用旧称），
+        # 要按 NFC 贴纸领料入库，不能当非 PCBA 物料跳过
+        is_cd_sheet = "36#CD" in ws.title
         headers = _legacy_header_map(ws)
         for row_no in range(2, ws.max_row + 1):
+            if is_cd_sheet:
+                qty = _legacy_int(
+                    _legacy_header_value(ws, headers, row_no, "领料数"),
+                    row_no,
+                    "领料数",
+                )
+                if qty is None or qty == 0:
+                    continue
+                date_value = _legacy_header_value(ws, headers, row_no, "日期")
+                body = RecordIn(
+                    rec_type="issue",
+                    location_id=location_id,
+                    rec_date=_legacy_cutoff_date(date_value, workbook_year),
+                    doc_no=_legacy_doc_no(
+                        _legacy_header_value(ws, headers, row_no, "领料编号"),
+                        date_value,
+                        f"{ws.title}-{row_no}",
+                    ),
+                    material=NFC_MATERIAL,
+                    sticker_type=_normalize_sticker_type(
+                        conn, NFC_MATERIAL, "36#NFC贴纸"
+                    ),
+                    qty=qty,
+                    remark=_first_value(
+                        {"备注": _legacy_header_value(ws, headers, row_no, "备注")},
+                        "备注",
+                    ) or f"{ws.title}导入",
+                )
+                _add_record_body(bodies, body, department, validate_positive=(qty > 0))
+                continue
             material = _normalize_pcba_material(
                 _legacy_header_value(ws, headers, row_no, "物料名称")
             )

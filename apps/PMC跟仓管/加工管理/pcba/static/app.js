@@ -1336,7 +1336,7 @@ async function importSelectedRecords() {
     const data = await r.json();
     const parts = [`导入成功：${fmt(data.created || 0)} 条`];
     if (data.monthly_totals) parts.push(`更新当月汇总 ${fmt(data.monthly_totals)} 项`);
-    if (data.skipped_documents) parts.push(`跳过 ${fmt(data.skipped_documents)} 张重复单据`);
+    if (data.skipped) parts.push(`跳过 ${fmt(data.skipped)} 条重复记录`);
     if (data.replaced_documents) parts.push(`覆盖 ${fmt(data.replaced_documents)} 张单据`);
     const message = parts.join('，');
     setMessage('entryErr', message, true);

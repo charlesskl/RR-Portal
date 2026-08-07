@@ -4229,6 +4229,23 @@ def _import_document_key(body):
     return body.rec_type, body.location_id or 0, doc_no.casefold()
 
 
+def _import_row_key(row):
+    """行级去重键：类型/地点/单号/物料/型号/数量/日期全等才算重复。
+    兼容 RecordIn（属性）和 sqlite3.Row（下标）两种入参。"""
+    get = (lambda k: getattr(row, k)) if hasattr(row, "rec_type") and not hasattr(row, "keys") \
+        else (lambda k: row[k])
+    qty = get("qty")
+    return (
+        get("rec_type"),
+        get("location_id") or 0,
+        _cell_text(get("doc_no")).casefold(),
+        _cell_text(get("material")),
+        _cell_text(get("sticker_type")),
+        int(qty) if qty is not None else None,
+        _cell_text(get("rec_date")),
+    )
+
+
 def _group_import_documents(bodies):
     documents = {}
     without_document = []
@@ -4319,17 +4336,36 @@ def import_records(
             for existing_ids in duplicate_keys.values():
                 _delete_record_ids_with_links(conn, existing_ids)
                 replaced_documents += 1
-        else:
-            skipped_documents = len(duplicate_keys)
-            skipped_document_rows = sum(
-                len(documents[key]) for key in duplicate_keys
-            )
 
         import_bodies = list(blank_rows)
-        for key, document_bodies in documents.items():
-            if mode == "skip" and key in duplicate_keys:
-                continue
-            import_bodies.extend(document_bodies)
+        if mode == "skip":
+            # 行级精确去重：车间表格会用同一单号记多笔（同单号不同日期/数量的列），
+            # 整单跳过会把这些新明细丢掉。改为只跳过与库中完全相同的行
+            # （部门/类型/日期/单号/物料/型号/数量全等），其余照常导入。
+            existing_row_keys = {
+                _import_row_key(row)
+                for row in conn.execute(
+                    "SELECT rec_type, location_id, doc_no, material, sticker_type, qty, rec_date "
+                    "FROM records WHERE department=? AND source_record_id IS NULL",
+                    (user["department"],),
+                ).fetchall()
+            }
+            for key, document_bodies in documents.items():
+                all_skipped = True
+                for body in document_bodies:
+                    row_key = _import_row_key(body)
+                    if row_key in existing_row_keys:
+                        skipped_document_rows += 1
+                        continue
+                    # 同文件内完全相同的重复列也只入一次
+                    existing_row_keys.add(row_key)
+                    import_bodies.append(body)
+                    all_skipped = False
+                if all_skipped and key in duplicate_keys:
+                    skipped_documents += 1
+        else:
+            for document_bodies in documents.values():
+                import_bodies.extend(document_bodies)
         ids = []
         skipped = skipped_document_rows
         for body in import_bodies:

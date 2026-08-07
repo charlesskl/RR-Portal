@@ -172,13 +172,13 @@ def _make_body(**kw):
 
 def test_negative_issue_links_to_target_department(conn):
     loc = conn.execute(
-        "SELECT id FROM locations WHERE name=?", ("东莞车间",)
+        "SELECT id FROM locations WHERE name=?", ("河源华兴",)
     ).fetchone()
     body = _make_body(location_id=loc["id"])
     targets = m._auto_flow_targets(conn, body, "兴信B来料仓")
     assert len(targets) == 1
     target_dept, target_body, flow = targets[0]
-    assert target_dept == "东莞车间"
+    assert target_dept == "河源华兴"
     assert target_body.qty == -100
     assert target_body.rec_type == "issue"
     # 负数联动记录落库不触发非负校验
@@ -187,12 +187,21 @@ def test_negative_issue_links_to_target_department(conn):
         "SELECT qty, department FROM records WHERE doc_no='T001'"
     ).fetchone()
     assert row["qty"] == -100
-    assert row["department"] == "东莞车间"
+    assert row["department"] == "河源华兴"
+
+
+def test_xingxin_dongguan_link_disabled(conn):
+    # 2026-08-07 业务决定：兴信B来料仓 <-> 东莞车间 联动停用
+    loc = conn.execute(
+        "SELECT id FROM locations WHERE name=?", ("东莞车间",)
+    ).fetchone()
+    body = _make_body(location_id=loc["id"])
+    assert m._auto_flow_targets(conn, body, "兴信B来料仓") == []
 
 
 def test_auto_record_skipped_when_manual_record_exists(conn):
     loc = conn.execute(
-        "SELECT id FROM locations WHERE name=?", ("东莞车间",)
+        "SELECT id FROM locations WHERE name=?", ("河源华兴",)
     ).fetchone()
     body = _make_body(location_id=loc["id"], qty=100)
     targets = m._auto_flow_targets(conn, body, "兴信B来料仓")

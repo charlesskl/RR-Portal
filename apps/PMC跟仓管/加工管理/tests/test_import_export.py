@@ -793,6 +793,71 @@ def test_record_import_skip_mode_skips_whole_duplicate_documents(client):
     assert len(client.get("/api/records").json()) == 5
 
 
+def _assembly_nfc_workbook_with_dup_doc(second_col_qty=None):
+    """领料明细里同一单号两列：第一列 7/25，第二列 7/27（重复单号的第二笔）。"""
+    wb = openpyxl.Workbook()
+    total_ws = wb.active
+    total_ws.title = "总表"
+    total_ws["A2"] = "物料名称"
+    issue_ws = wb.create_sheet("领料明细")
+    issue_ws["B1"] = "当月领料总数"
+    issue_ws["C1"] = "7月25日"
+    issue_ws["A2"] = "物料名称"
+    issue_ws["C2"] = "DUP-DOC-001"
+    issue_ws["A3"] = "1#NFC\n贴纸"
+    issue_ws["C3"] = 60
+    issue_ws["A4"] = "2#NFC\n贴纸"
+    issue_ws["C4"] = 40
+    if second_col_qty is not None:
+        issue_ws["D1"] = "7月27日"
+        issue_ws["D2"] = "DUP-DOC-001"
+        issue_ws["D3"] = second_col_qty
+    semi_ws = wb.create_sheet("半成品入仓明细")
+    semi_ws["B1"] = "当月入仓总数"
+    semi_ws["A2"] = "物料名称"
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def test_record_import_skip_mode_imports_new_rows_of_duplicate_document(client):
+    # 车间表格会用同一单号记多笔：重导时只跳过完全相同的行，新明细照常导入
+    login(client, "东莞车间", "123456", "东莞车间")
+    filename = "东莞车间77772#NFC贴纸出入明细.xlsx"
+    first = upload_bytes(
+        client, "/api/records/import",
+        _assembly_nfc_workbook_with_dup_doc(), filename,
+    )
+    assert first.status_code == 200
+    assert first.json()["created"] == 2
+
+    second = upload_bytes(
+        client, "/api/records/import",
+        _assembly_nfc_workbook_with_dup_doc(second_col_qty=15), filename,
+        data={"mode": "skip"},
+    )
+    assert second.status_code == 200
+    assert second.json()["created"] == 1
+    assert second.json()["skipped"] == 2
+
+    # 原样再导一次：全部跳过，不再新增
+    third = upload_bytes(
+        client, "/api/records/import",
+        _assembly_nfc_workbook_with_dup_doc(second_col_qty=15), filename,
+        data={"mode": "skip"},
+    )
+    assert third.status_code == 200
+    assert third.json()["created"] == 0
+    assert third.json()["skipped"] == 3
+
+    rows = client.get("/api/records?doc_no=DUP-DOC-001").json()
+    assert sorted((r["rec_date"], r["sticker_type"], r["qty"]) for r in rows) == [
+        ("2026-07-25", "1#NFC贴纸", 60),
+        ("2026-07-25", "2#NFC贴纸", 40),
+        ("2026-07-27", "1#NFC贴纸", 15),
+    ]
+
+
 def test_record_import_replace_mode_replaces_document_and_auto_records(client):
     login(client, "碟片半成品", "123456", "碟片半成品")
     filename = "塑胶仓77772#CD半成品出入明细.xlsx"

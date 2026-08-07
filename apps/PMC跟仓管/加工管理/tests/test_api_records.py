@@ -233,7 +233,7 @@ def test_admin_can_delete_any(client):
 
 def test_bulk_delete_removes_selected_records_and_linked_records(client):
     admin_login(client, "兴信B来料仓")
-    dongguan = loc_id(client, "东莞车间")
+    dongguan = loc_id(client, "河源华兴")
     source = client.post("/api/records", json={
         "rec_type": "issue", "location_id": dongguan,
         "material": "NFC贴纸", "sticker_type": "1#NFC贴纸",
@@ -249,19 +249,19 @@ def test_bulk_delete_removes_selected_records_and_linked_records(client):
     assert client.get("/api/records?doc_no=BULK-LINK-001").json() == []
     assert client.get("/api/records?doc_no=BULK-IN-001").json() == []
     client.post("/api/logout")
-    admin_login(client, "东莞车间")
+    admin_login(client, "河源华兴")
     assert client.get("/api/records?doc_no=BULK-LINK-001").json() == []
 
 
 def test_bulk_delete_rejects_auto_linked_record(client):
     admin_login(client, "兴信B来料仓")
-    dongguan = loc_id(client, "东莞车间")
+    dongguan = loc_id(client, "河源华兴")
     client.post("/api/records", json={
         "rec_type": "issue", "location_id": dongguan,
         "material": "NFC贴纸", "sticker_type": "1#NFC贴纸",
         "doc_no": "BULK-AUTO-001", "qty": 12})
     client.post("/api/logout")
-    admin_login(client, "东莞车间")
+    admin_login(client, "河源华兴")
     linked_id = client.get("/api/records?doc_no=BULK-AUTO-001").json()[0]["id"]
 
     r = client.post("/api/records/bulk-delete", json={"ids": [linked_id]})
@@ -284,7 +284,7 @@ def test_operator_bulk_delete_rejects_other_users_records(client):
 
 def test_admin_can_clear_records_by_department_and_material(client):
     admin_login(client, "兴信B来料仓")
-    dongguan = loc_id(client, "东莞车间")
+    dongguan = loc_id(client, "河源华兴")
     source_id = client.post("/api/records", json={
         "rec_type": "issue", "location_id": dongguan,
         "material": "77794-PCBA板", "doc_no": "CLEAR-PCBA-001", "qty": 18}).json()["id"]
@@ -304,7 +304,7 @@ def test_admin_can_clear_records_by_department_and_material(client):
     assert all(row["id"] != source_id for row in rows)
     assert any(row["id"] == keep_id for row in rows)
     client.post("/api/logout")
-    admin_login(client, "东莞车间")
+    admin_login(client, "河源华兴")
     assert client.get("/api/records?doc_no=CLEAR-PCBA-001").json() == []
 
 
@@ -597,7 +597,9 @@ def test_non_semi_finished_department_rejects_warehouse_types(client):
         assert r.status_code == 400
 
 
-def test_xingxin_nfc_issue_auto_syncs_dongguan_issue_record(client):
+def test_xingxin_issue_no_longer_auto_syncs_dongguan(client):
+    # 2026-08-07 业务决定：兴信B来料仓 <-> 东莞车间 联动停用，
+    # 东莞车间完全按自己导入的台账记账
     admin_login(client, "兴信B来料仓")
     dongguan = loc_id(client, "东莞车间")
     created = client.post("/api/records", json={
@@ -610,49 +612,13 @@ def test_xingxin_nfc_issue_auto_syncs_dongguan_issue_record(client):
         "qty": 100,
     })
     assert created.status_code == 200
-    source_id = created.json()["id"]
-
-    client.post("/api/logout")
-    admin_login(client, "东莞车间")
-    rows = client.get("/api/records?doc_no=FLOW-XD-001").json()
-    assert len(rows) == 1
-    assert rows[0]["rec_type"] == "issue"
-    assert rows[0]["location_name"] == "东莞车间"
-    assert rows[0]["material"] == "NFC贴纸"
-    assert rows[0]["sticker_type"] == "1#NFC贴纸"
-    assert rows[0]["qty"] == 100
-    assert rows[0]["source_record_id"] == source_id
-
-    client.post("/api/logout")
-    admin_login(client, "兴信B来料仓")
-    updated = client.put(f"/api/records/{source_id}", json={
-        "rec_type": "issue",
-        "location_id": dongguan,
-        "material": "NFC贴纸",
-        "sticker_type": "1#NFC贴纸",
-        "rec_date": "2026-07-10",
-        "doc_no": "FLOW-XD-001",
-        "qty": 60,
-    })
-    assert updated.status_code == 200
-
-    client.post("/api/logout")
-    admin_login(client, "东莞车间")
-    rows = client.get("/api/records?doc_no=FLOW-XD-001").json()
-    assert len(rows) == 1
-    assert rows[0]["qty"] == 60
-
-    client.post("/api/logout")
-    admin_login(client, "兴信B来料仓")
-    deleted = client.delete(f"/api/records/{source_id}")
-    assert deleted.status_code == 200
 
     client.post("/api/logout")
     admin_login(client, "东莞车间")
     assert client.get("/api/records?doc_no=FLOW-XD-001").json() == []
 
 
-def test_xingxin_pcba_issue_auto_syncs_dongguan_issue_record(client):
+def test_xingxin_pcba_issue_no_longer_auto_syncs_dongguan(client):
     admin_login(client, "兴信B来料仓")
     dongguan = loc_id(client, "东莞车间")
     created = client.post("/api/records", json={
@@ -664,23 +630,39 @@ def test_xingxin_pcba_issue_auto_syncs_dongguan_issue_record(client):
         "qty": 88,
     })
     assert created.status_code == 200
-    source_id = created.json()["id"]
 
     client.post("/api/logout")
     admin_login(client, "东莞车间")
-    rows = client.get("/api/records?doc_no=FLOW-PCBA-XD-001").json()
+    assert client.get("/api/records?doc_no=FLOW-PCBA-XD-001").json() == []
+
+
+def test_xingxin_issue_still_auto_syncs_heyuan(client):
+    # 其他部门对的联动不受影响：来料仓 -> 河源华兴 仍然联动
+    admin_login(client, "兴信B来料仓")
+    heyuan = loc_id(client, "河源华兴")
+    created = client.post("/api/records", json={
+        "rec_type": "issue",
+        "location_id": heyuan,
+        "material": "NFC贴纸",
+        "sticker_type": "1#NFC贴纸",
+        "rec_date": "2026-07-10",
+        "doc_no": "FLOW-XH-001",
+        "qty": 66,
+    })
+    assert created.status_code == 200
+    source_id = created.json()["id"]
+
+    client.post("/api/logout")
+    admin_login(client, "河源华兴")
+    rows = client.get("/api/records?doc_no=FLOW-XH-001").json()
     assert len(rows) == 1
-    assert rows[0]["rec_type"] == "issue"
-    assert rows[0]["location_name"] == "东莞车间"
-    assert rows[0]["material"] == "77794-PCBA板"
-    assert rows[0]["sticker_type"] is None
-    assert rows[0]["qty"] == 88
+    assert rows[0]["qty"] == 66
     assert rows[0]["source_record_id"] == source_id
 
 
 def test_auto_linked_records_cannot_be_edited_or_deleted_directly(client):
     admin_login(client, "兴信B来料仓")
-    dongguan = loc_id(client, "东莞车间")
+    dongguan = loc_id(client, "河源华兴")
     source_id = client.post("/api/records", json={
         "rec_type": "issue",
         "location_id": dongguan,
@@ -691,7 +673,7 @@ def test_auto_linked_records_cannot_be_edited_or_deleted_directly(client):
     }).json()["id"]
 
     client.post("/api/logout")
-    admin_login(client, "东莞车间")
+    admin_login(client, "河源华兴")
     auto_record = client.get("/api/records?doc_no=FLOW-LOCK-001").json()[0]
     assert auto_record["source_record_id"] == source_id
 

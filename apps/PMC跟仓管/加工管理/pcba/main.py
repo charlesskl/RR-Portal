@@ -4338,42 +4338,21 @@ def import_records(
                 replaced_documents += 1
 
         import_bodies = list(blank_rows)
-        if mode == "skip":
-            # 行级精确去重：车间表格会用同一单号记多笔（同单号不同日期/数量的列），
-            # 整单跳过会把这些新明细丢掉。改为只跳过与库中完全相同的行
-            # （部门/类型/日期/单号/物料/型号/数量全等），其余照常导入。
-            existing_row_keys = {
-                _import_row_key(row)
-                for row in conn.execute(
-                    "SELECT rec_type, location_id, doc_no, material, sticker_type, qty, rec_date "
-                    "FROM records WHERE department=? AND source_record_id IS NULL",
-                    (user["department"],),
-                ).fetchall()
-            }
-            for key, document_bodies in documents.items():
-                all_skipped = True
-                for body in document_bodies:
-                    row_key = _import_row_key(body)
-                    if row_key in existing_row_keys:
-                        skipped_document_rows += 1
-                        continue
-                    # 同文件内完全相同的重复列也只入一次
-                    existing_row_keys.add(row_key)
-                    import_bodies.append(body)
-                    all_skipped = False
-                if all_skipped and key in duplicate_keys:
-                    skipped_documents += 1
-        else:
-            for document_bodies in documents.values():
-                import_bodies.extend(document_bodies)
+        # 车间表格同一单号、日期、数量都可能是真实的不同笔（重复列），
+        # 业务要求一律导入、不做任何跳过（2026-08-07）。防重复靠导入前的查重提示
+        # 和「覆盖导入」模式。
+        for document_bodies in documents.values():
+            import_bodies.extend(document_bodies)
         ids = []
         skipped = skipped_document_rows
         for body in import_bodies:
+            # 不再做任何跳过（含落库层的完全重复检测）：业务确认
+            # 日期/单号/数量全相同的行也可能是真实的另一笔（2026-08-07）。
             record_id = _insert_record_body(
                 conn,
                 body,
                 user,
-                skip_duplicate=(legacy_import or _import_document_key(body) is None),
+                skip_duplicate=False,
             )
             if record_id is None:
                 skipped += 1

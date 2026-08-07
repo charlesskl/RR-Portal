@@ -768,7 +768,9 @@ def test_record_import_check_groups_duplicate_documents_without_writing(client):
     assert len(after) == len(before)
 
 
-def test_record_import_skip_mode_skips_whole_duplicate_documents(client):
+def test_record_import_skip_mode_appends_without_skipping(client):
+    # 业务要求（2026-08-07）：日期/单号/数量完全相同的行也可能是真实的另一笔，
+    # 一律导入不跳过；防重复靠导入前查重提示和「覆盖导入」模式
     login(client, "碟片半成品", "123456", "碟片半成品")
     content = routed_semi_finished_workbook_bytes()
     first = upload_bytes(
@@ -788,9 +790,9 @@ def test_record_import_skip_mode_skips_whole_duplicate_documents(client):
     assert first.status_code == 200
     assert first.json()["created"] == 5
     assert second.status_code == 200
-    assert second.json()["created"] == 0
-    assert second.json()["skipped_documents"] == 4
-    assert len(client.get("/api/records").json()) == 5
+    assert second.json()["created"] == 5
+    assert second.json()["skipped_documents"] == 0
+    assert len(client.get("/api/records").json()) == 10
 
 
 def _assembly_nfc_workbook_with_dup_doc(second_col_qty=None):
@@ -820,8 +822,8 @@ def _assembly_nfc_workbook_with_dup_doc(second_col_qty=None):
     return buf.getvalue()
 
 
-def test_record_import_skip_mode_imports_new_rows_of_duplicate_document(client):
-    # 车间表格会用同一单号记多笔：重导时只跳过完全相同的行，新明细照常导入
+def test_record_import_skip_mode_imports_duplicate_document_rows(client):
+    # 同一单号多笔（含完全相同的行）全部导入，不做任何跳过
     login(client, "东莞车间", "123456", "东莞车间")
     filename = "东莞车间77772#NFC贴纸出入明细.xlsx"
     first = upload_bytes(
@@ -837,22 +839,14 @@ def test_record_import_skip_mode_imports_new_rows_of_duplicate_document(client):
         data={"mode": "skip"},
     )
     assert second.status_code == 200
-    assert second.json()["created"] == 1
-    assert second.json()["skipped"] == 2
-
-    # 原样再导一次：全部跳过，不再新增
-    third = upload_bytes(
-        client, "/api/records/import",
-        _assembly_nfc_workbook_with_dup_doc(second_col_qty=15), filename,
-        data={"mode": "skip"},
-    )
-    assert third.status_code == 200
-    assert third.json()["created"] == 0
-    assert third.json()["skipped"] == 3
+    assert second.json()["created"] == 3
+    assert second.json()["skipped"] == 0
 
     rows = client.get("/api/records?doc_no=DUP-DOC-001").json()
     assert sorted((r["rec_date"], r["sticker_type"], r["qty"]) for r in rows) == [
         ("2026-07-25", "1#NFC贴纸", 60),
+        ("2026-07-25", "1#NFC贴纸", 60),
+        ("2026-07-25", "2#NFC贴纸", 40),
         ("2026-07-25", "2#NFC贴纸", 40),
         ("2026-07-27", "1#NFC贴纸", 15),
     ]
@@ -925,7 +919,7 @@ def test_record_import_replace_allows_same_department_records_owned_by_another_u
     assert rows[0]["qty"] == 20
 
 
-def test_record_import_same_document_number_on_different_dates_is_duplicate(client):
+def test_record_import_same_document_number_on_different_dates_appends(client):
     login(client, "兴信B来料仓", "123456", DEFAULT_DEPARTMENT)
     headers = ["类型", "物料名称", "日期", "单据编号", "数量"]
     first = upload_xlsx(
@@ -947,11 +941,12 @@ def test_record_import_same_document_number_on_different_dates_is_duplicate(clie
 
     assert first.status_code == 200
     assert second.status_code == 200
-    assert second.json()["created"] == 0
-    assert second.json()["skipped_documents"] == 1
+    assert second.json()["created"] == 1
+    assert second.json()["skipped_documents"] == 0
     rows = client.get("/api/records?doc_no=PERIODIC-001").json()
-    assert [(row["rec_date"], row["qty"]) for row in rows] == [
+    assert sorted((row["rec_date"], row["qty"]) for row in rows) == [
         ("2026-07-01", 10),
+        ("2026-08-01", 20),
     ]
 
 
@@ -1245,9 +1240,9 @@ def test_semi_finished_legacy_workbook_imports_detail_rows_and_monthly_totals(cl
         "塑胶仓77772#CD半成品出入明细.xlsx",
     )
     assert second.status_code == 200
-    assert second.json()["created"] == 0
-    assert second.json()["skipped"] == 3
-    assert len(client.get("/api/records").json()) == 3
+    assert second.json()["created"] == 3
+    assert second.json()["skipped"] == 0
+    assert len(client.get("/api/records").json()) == 6
 
 
 def test_semi_finished_export_keeps_stored_total_on_matching_outbound_sheet(client):
@@ -1374,8 +1369,8 @@ def test_assembly_nfc_export_matches_import_workbook_format(client):
         "东莞车间77772#NFC贴纸出入明细.xlsx",
     )
     assert reimported.status_code == 200
-    assert reimported.json()["created"] == 0
-    assert reimported.json()["skipped"] == 3
+    assert reimported.json()["created"] == 3
+    assert reimported.json()["skipped"] == 0
 
 
 def test_assembly_nfc_export_sorts_document_columns_by_date(client):
@@ -1487,8 +1482,8 @@ def test_assembly_pcba_export_matches_import_workbook_format(client):
         "东莞车间77794#PCB主板出入明细.xlsx",
     )
     assert reimported.status_code == 200
-    assert reimported.json()["created"] == 0
-    assert reimported.json()["skipped"] == 4
+    assert reimported.json()["created"] == 4
+    assert reimported.json()["skipped"] == 0
 
 
 def test_outsource_legacy_workbook_rejects_filename_without_department(client):
@@ -1540,9 +1535,9 @@ def test_outsource_legacy_workbook_imports_issue_and_semi_finished_rows(client):
         "东莞加工厂利鸿77794PCB主板出入明细.xlsx",
     )
     assert second.status_code == 200
-    assert second.json()["created"] == 0
-    assert second.json()["skipped"] == 3
-    assert len(client.get("/api/records").json()) == 3
+    assert second.json()["created"] == 3
+    assert second.json()["skipped"] == 0
+    assert len(client.get("/api/records").json()) == 6
 
 
 def test_lihong_legacy_workbook_round_trip_preserves_fields_and_skips_duplicates(client):
@@ -1572,9 +1567,9 @@ def test_lihong_legacy_workbook_round_trip_preserves_fields_and_skips_duplicates
     second = upload_bytes(client, "/api/records/import", exported.content, filename)
 
     assert second.status_code == 200
-    assert second.json()["created"] == 0
-    assert second.json()["skipped"] == 3
-    assert len(client.get("/api/records").json()) == 3
+    assert second.json()["created"] == 3
+    assert second.json()["skipped"] == 0
+    assert len(client.get("/api/records").json()) == 6
 
 
 
@@ -1620,9 +1615,9 @@ def test_heyuan_legacy_workbook_imports_issue_corrections_and_finished_rows(clie
 
     second = upload_bytes(client, "/api/records/import", legacy_heyuan_workbook_bytes())
     assert second.status_code == 200
-    assert second.json()["created"] == 0
-    assert second.json()["skipped"] == 6
-    assert len(client.get("/api/records").json()) == 6
+    assert second.json()["created"] == 6
+    assert second.json()["skipped"] == 0
+    assert len(client.get("/api/records").json()) == 12
 
 
 def test_supplier_pcba_legacy_workbook_imports_inbound_and_issue_rows(client):
@@ -1654,9 +1649,9 @@ def test_supplier_pcba_legacy_workbook_imports_inbound_and_issue_rows(client):
 
     second = upload_bytes(client, "/api/records/import", legacy_supplier_pcba_workbook_bytes())
     assert second.status_code == 200
-    assert second.json()["created"] == 0
-    assert second.json()["skipped"] == 7
-    assert len(client.get("/api/records").json()) == 7
+    assert second.json()["created"] == 7
+    assert second.json()["skipped"] == 0
+    assert len(client.get("/api/records").json()) == 14
 
 
 def test_supplier_nfc_legacy_workbook_keeps_summary_rows_out_of_record_list(client):
@@ -1686,9 +1681,9 @@ def test_supplier_nfc_legacy_workbook_keeps_summary_rows_out_of_record_list(clie
 
     second = upload_bytes(client, "/api/records/import", legacy_supplier_nfc_workbook_bytes())
     assert second.status_code == 200
-    assert second.json()["created"] == 0
-    assert second.json()["skipped"] == 6
-    assert len(client.get("/api/records").json()) == 3
+    assert second.json()["created"] == 6
+    assert second.json()["skipped"] == 0
+    assert len(client.get("/api/records").json()) == 6
 
 
 def test_supplier_nfc_detail_only_shaoyang_opening_uses_shaoyang_location(client):
@@ -1739,8 +1734,8 @@ def test_supplier_nfc_export_can_be_reimported_without_creating_opening_rows(cli
     after = client.get("/api/records").json()
 
     assert second.status_code == 200
-    assert second.json()["created"] == 0
-    assert len(after) == len(before)
+    assert second.json()["created"] == len(before)
+    assert len(after) == 2 * len(before)
 
 
 def test_operator_can_import_and_export_materials(client):

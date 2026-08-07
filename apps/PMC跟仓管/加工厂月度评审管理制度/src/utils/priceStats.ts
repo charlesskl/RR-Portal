@@ -63,10 +63,12 @@ export function buildPriceStatsRows(
   orders: Order[],
   factoryName: (o: Order) => string,
   useSewingPrices = false,
+  sewingTaxPoint?: (o: Order) => number | null,
 ): PriceStatsRow[] {
   const rows: PriceStatsRow[] = orders.map((o) => {
     const cnyTaxPrice = o.unit_price_cny_tax ?? null
-    const taxPoint = Number(o.exchange_rate)
+    const linkedTaxPoint = useSewingPrices && sewingTaxPoint ? sewingTaxPoint(o) : o.exchange_rate
+    const taxPoint = Number(linkedTaxPoint)
     const sewingUntaxedPrice = cnyTaxPrice != null && Number.isFinite(taxPoint) && taxPoint > 0
       ? cnyTaxToUntaxedRmb(cnyTaxPrice, taxPoint)
       : o.unit_price ?? null

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
+import XLSX from 'xlsx-js-style'
 import AppLayout from '../components/AppLayout.vue'
 import { pb } from '../pb'
 import { useAuthStore } from '../stores/auth'
@@ -10,6 +11,7 @@ import { allowedRegions } from '../utils/permissions'
 import { computeFactoryStats, computeSiteStats, type FactoryStats } from '../utils/factoryStats'
 import type { Factory } from '../types/factory'
 import type { Order } from '../types/order'
+import { FACTORY_SUMMARY_HEADERS, factorySummaryExportRow } from '../utils/factorySummaryExcel'
 
 const route = useRoute()
 const factoriesStore = useFactoriesStore()
@@ -47,6 +49,79 @@ function formatNumber(value: number | null, suffix = '') {
   if (value == null) return '-'
   const rounded = Math.round(value * 100) / 100
   return `${rounded.toFixed(2).replace(/\.00$/, '').replace(/(\.\d)0$/, '$1')}${suffix}`
+}
+
+function exportExcel() {
+  if (!summaries.value.length || !totalStats.value) return
+  const title = `${deptName.value}加工厂汇总表`
+  const detailRows = summaries.value.map((summary) => factorySummaryExportRow({
+    name: summary.factory.name,
+    stats: summary.stats,
+    siteScore: summary.siteScore,
+    siteRate: summary.siteRate,
+  }))
+  const totalRow = factorySummaryExportRow({
+    name: `${factoryCount.value} 家工厂总计`,
+    stats: totalStats.value,
+    siteScore: totalSiteScore.value,
+    siteRate: totalSiteRate.value,
+  })
+  const aoa = [
+    [title, ...Array(FACTORY_SUMMARY_HEADERS.length - 1).fill('')],
+    [...FACTORY_SUMMARY_HEADERS],
+    ...detailRows,
+    totalRow,
+  ]
+  const ws = XLSX.utils.aoa_to_sheet(aoa)
+  const lastRow = aoa.length
+  const lastCol = FACTORY_SUMMARY_HEADERS.length - 1
+  ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: lastCol } }]
+  ws['!autofilter'] = { ref: `A2:${XLSX.utils.encode_col(lastCol)}${lastRow}` }
+  ws['!cols'] = [
+    { wch: 32 },
+    { wch: 15 }, { wch: 15 }, { wch: 12 },
+    { wch: 13 }, { wch: 12 }, { wch: 12 }, { wch: 16 },
+    { wch: 13 }, { wch: 12 }, { wch: 12 },
+    { wch: 12 }, { wch: 16 },
+  ]
+  ws['!rows'] = [{ hpt: 28 }, { hpt: 24 }]
+
+  const titleCell = ws.A1
+  titleCell.s = {
+    fill: { fgColor: { rgb: '4F46E5' } },
+    font: { bold: true, color: { rgb: 'FFFFFF' }, sz: 16 },
+    alignment: { horizontal: 'center', vertical: 'center' },
+  }
+  const headerColors = ['64748B', '4F46E5', '4F46E5', '4F46E5', 'D97706', 'D97706', 'D97706', 'D97706', '0D9488', '0D9488', '0D9488', '16A34A', '16A34A']
+  for (let col = 0; col <= lastCol; col++) {
+    const cell = ws[XLSX.utils.encode_cell({ r: 1, c: col })]
+    cell.s = {
+      fill: { fgColor: { rgb: headerColors[col] } },
+      font: { bold: true, color: { rgb: 'FFFFFF' } },
+      alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
+      border: { bottom: { style: 'medium', color: { rgb: 'D1D5DB' } } },
+    }
+  }
+  for (let row = 2; row < lastRow; row++) {
+    for (let col = 0; col <= lastCol; col++) {
+      const cell = ws[XLSX.utils.encode_cell({ r: row, c: col })]
+      if (!cell) continue
+      cell.s = {
+        fill: { fgColor: { rgb: row === lastRow - 1 ? 'EEF2FF' : (row % 2 ? 'F8FAFC' : 'FFFFFF') } },
+        font: { bold: row === lastRow - 1 },
+        alignment: { horizontal: col === 0 ? 'left' : 'right', vertical: 'center' },
+        border: { bottom: { style: 'thin', color: { rgb: 'E5E7EB' } } },
+      }
+      if ([1, 2].includes(col)) cell.z = '#,##0.00'
+      else if ([3, 6, 10, 12].includes(col)) cell.z = '0.00%'
+      else if ([4, 5, 8, 9].includes(col)) cell.z = '#,##0'
+      else if ([7, 11].includes(col)) cell.z = '0.00'
+    }
+  }
+
+  const wb = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(wb, ws, '汇总表')
+  XLSX.writeFile(wb, `${title}.xlsx`)
 }
 
 onMounted(async () => {
@@ -106,6 +181,8 @@ onMounted(async () => {
         <RouterLink :to="backTo" class="back">← 工厂列表</RouterLink>
         <h2 style="margin:0">{{ deptName }} · 汇总</h2>
         <span class="muted">共 {{ factoryCount }} 家</span>
+        <span class="spacer"></span>
+        <button :disabled="loading || !!error || !summaries.length" @click="exportExcel">导出 Excel</button>
       </div>
 
       <div v-if="loading" class="state">正在汇总数据...</div>

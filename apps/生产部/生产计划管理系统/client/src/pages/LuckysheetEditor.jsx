@@ -10,6 +10,37 @@ import { ORDER_COLUMNS } from '../constants/columns';
 // Luckysheet 从 window.luckysheet（CDN 加载）获取
 const getLuckysheet = () => window.luckysheet;
 
+// 生产环境关闭高频调试日志 —— 单元格钩子每次编辑/粘贴都 console.log，
+// 大批量操作时（几百格）光日志就能让页面卡出「此页面没有响应」
+const DEBUG = import.meta.env.DEV;
+const dbg = (...args) => { if (DEBUG) console.log(...args); };
+
+// Luckysheet 的 updated/rangeUpdated 钩子，operate 的形状不稳定：
+// 有时是 {range:[{row,column}]}，有时 range 是单个对象，有时 operate 本身就是 range。
+// 工具栏改字体/颜色时 range 结构不同 —— 旧代码直接 for..of 非数组会抛 TypeError，
+// 钩子异常导致格式变化根本没记录（这就是「改字体保存不了」的根因之一）。
+// 统一归一化成 range 数组。
+function toRanges(operate) {
+  if (!operate) return [];
+  let r = operate.range !== undefined ? operate.range : operate;
+  if (!Array.isArray(r)) r = [r];
+  return r.filter(x => x && Array.isArray(x.row) && Array.isArray(x.column));
+}
+
+// 一次性列宽迁移：默认值收窄后，把「还停在旧默认值」的已保存列宽换成新默认值。
+// 用户手动拖过的列（不等于旧默认值）保持不动。
+const WIDTH_MIGRATION = { 180: 160, 120: 105, 130: 115, 150: 130 };
+function migrateSavedWidths(savedColWidths, columns) {
+  const out = { ...savedColWidths };
+  columns.forEach((col, i) => {
+    const saved = out[i];
+    if (saved != null && WIDTH_MIGRATION[saved] && col.width === WIDTH_MIGRATION[saved]) {
+      out[i] = col.width;
+    }
+  });
+  return out;
+}
+
 /**
  * 将订单行数组转成 Luckysheet 的 celldata 格式
  * celldata: [{r, c, v: {v, ct: {t: 's'|'n'}, bg, fc, bl, ...}}]
@@ -378,16 +409,16 @@ function LuckysheetEditor({
   // 整体 try/catch 包住 —— 任何 Luckysheet 异常都不能炸到 console
   const recordCellChange = (r, c) => {
     try {
-      if (suppressHookRef.current) { console.log('[钩子] (r,c)=(' + r + ',' + c + ') 被 suppress 跳过'); return; }
-      if (r == null || r === 0) { console.log('[钩子] (r,c)=(' + r + ',' + c + ') 表头跳过'); return; }       // 跳过表头
+      if (suppressHookRef.current) { dbg('[钩子] (r,c)=(' + r + ',' + c + ') 被 suppress 跳过'); return; }
+      if (r == null || r === 0) { dbg('[钩子] (r,c)=(' + r + ',' + c + ') 表头跳过'); return; }       // 跳过表头
       const orderId = rowMapRef.current[r - 1];
-      if (!orderId) { console.log('[钩子] (r,c)=(' + r + ',' + c + ') 找不到 orderId'); return; }
+      if (!orderId) { dbg('[钩子] (r,c)=(' + r + ',' + c + ') 找不到 orderId'); return; }
       const colData = ORDER_COLUMNS[c]?.data;
-      if (!colData || colData === 'quantity_sum') { console.log('[钩子] (r,c)=(' + r + ',' + c + ') 列', colData, '跳过'); return; }
+      if (!colData || colData === 'quantity_sum') { dbg('[钩子] (r,c)=(' + r + ',' + c + ') 列', colData, '跳过'); return; }
       // days 列由 quantity/daily_target 改动时显式 push，不经钩子（避免 Luckysheet 异步 cellUpdated 把自动算的天数批量入 pending）
-      if (colData === 'days') { console.log('[钩子] (r,c)=(' + r + ',' + c + ') days 列跳过（由按需 handler 处理）'); return; }
+      if (colData === 'days') { dbg('[钩子] (r,c)=(' + r + ',' + c + ') days 列跳过（由按需 handler 处理）'); return; }
       const ls = getLuckysheet();
-      if (!ls || !ls.getAllSheets) { console.log('[钩子] (r,c)=(' + r + ',' + c + ') ls 不可用'); return; }
+      if (!ls || !ls.getAllSheets) { dbg('[钩子] (r,c)=(' + r + ',' + c + ') ls 不可用'); return; }
       let cell;
       try {
         const sheets = ls.getAllSheets();
@@ -405,7 +436,7 @@ function LuckysheetEditor({
         const result = getFormulaComputedValue(cellObj);
         writeFieldValue(entry.fields, colData, ORDER_COLUMNS[c], result);
         entry.fmt[colData] = { ...(extractCellFormat(cellObj) || {}), f: formula };
-        console.log('[钩子] 公式单元格 orderId=' + orderId + ' col=' + colData + ' formula=' + formula + ' result=', result);
+        dbg('[钩子] 公式单元格 orderId=' + orderId + ' col=' + colData + ' formula=' + formula + ' result=', result);
       } else if (DATE_FIELDS.has(colData)) {
         if (v == null) entry.fields[colData] = null;
         else {
@@ -429,7 +460,7 @@ function LuckysheetEditor({
         const fmt = extractCellFormat(cellObj);
         if (fmt) entry.fmt[colData] = fmt;
         else entry.fmt[colData] = null;
-        console.log('[钩子] (r,c)=(' + r + ',' + c + ') orderId=' + orderId + ' col=' + colData + ' v=', v, 'fmt=', fmt);
+        dbg('[钩子] (r,c)=(' + r + ',' + c + ') orderId=' + orderId + ' col=' + colData + ' v=', v, 'fmt=', fmt);
       }
 
       // 用户改了 数量 或 每天目标 → 直接 JS 算天数写回（不靠 Luckysheet 的公式引擎，不稳）
@@ -499,7 +530,7 @@ function LuckysheetEditor({
                       editBox;
         const text = (inner.innerText || inner.textContent || '').trim();
         const range = ls.getRange && ls.getRange();
-        console.log('[saveAll] 检测到编辑态，文本="' + text + '" range=', JSON.stringify(range));
+        dbg('[saveAll] 检测到编辑态，文本="' + text + '" range=', JSON.stringify(range));
         if (range && range[0] && text !== '') {
           const r = range[0].row[0];
           const c = range[0].column[0];
@@ -510,7 +541,7 @@ function LuckysheetEditor({
             } else {
               ls.setCellValue(r, c, text);
             }
-            console.log('[saveAll] 强制 commit setCellValue(' + r + ',' + c + ',"' + text + '")');
+            dbg('[saveAll] 强制 commit setCellValue(' + r + ',' + c + ',"' + text + '")');
           } catch (e) { console.warn('[saveAll] commit 失败:', e?.message); }
         }
         // 同时调 exitEditMode 退出编辑 UI（在编辑态调是安全的）
@@ -651,10 +682,10 @@ function LuckysheetEditor({
     const settings = buildSheetSettings(sheet);
 
     // 诊断：把要发送的 payload 完整打出来
-    console.log('[saveAll] 待发送 updates =', updates.length, 'sheet-settings 字段数 =',
+    dbg('[saveAll] 待发送 updates =', updates.length, 'sheet-settings 字段数 =',
       Object.keys(settings.columnlen).length + '列宽');
     if (updates.length > 0) {
-      console.log('[saveAll] batch-update payload 前 3 条:', JSON.stringify(updates.slice(0, 3), null, 2));
+      dbg('[saveAll] batch-update payload 前 3 条:', JSON.stringify(updates.slice(0, 3), null, 2));
     }
 
     try {
@@ -664,7 +695,7 @@ function LuckysheetEditor({
       }
       const results = await Promise.all(calls);
       lastLayoutJsonRef.current = JSON.stringify(settings);
-      console.log('[saveAll] 后端返回:', results.map(r => r?.data));
+      dbg('[saveAll] 后端返回:', results.map(r => r?.data));
       // 更新 dataRef，下次保存比较时不会重复 push
       for (const u of updates) {
         const o = dataRef.current.find(x => x.id === u.id);
@@ -722,7 +753,7 @@ function LuckysheetEditor({
     ORDER_COLUMNS.forEach((c, i) => { defaultColWidths[i] = c.width || 80; });
     // 保存的设置优先
     const savedColWidths = (sheetSettings && sheetSettings.columnlen) || {};
-    const colWidths = { ...defaultColWidths, ...savedColWidths };
+    const colWidths = { ...defaultColWidths, ...migrateSavedWidths(savedColWidths, ORDER_COLUMNS) };
     const rowLen = (sheetSettings && sheetSettings.rowlen) || {};
     const savedFrozen = sheetSettings && sheetSettings.frozen;
 
@@ -758,18 +789,17 @@ function LuckysheetEditor({
       enableAddBackTop: false,
       showConfigWindowResize: false,
       enableShortcutKey: true,
+      defaultRowHeight: 24,
       data: [sheetConfig],
       // 钩子：
       //   - cellEditBefore：日期字段弹 DatePicker
       //   - cellUpdated / rangeUpdated / updated：实时记录变化到 pendingChangesRef
       //     这样保存时不用再去读 Luckysheet 内部 data（避免 flush 时序问题）
       hook: {
-        cellUpdated: function(r, c) { console.log('[Luckysheet] cellUpdated 触发 (r,c)=(' + r + ',' + c + ')'); recordCellChange(r, c); },
+        cellUpdated: function(r, c) { dbg('[Luckysheet] cellUpdated 触发 (r,c)=(' + r + ',' + c + ')'); recordCellChange(r, c); },
         rangeUpdated: function(operate) {
-          console.log('[Luckysheet] rangeUpdated 触发, operate=', operate);
-          if (!operate || !operate.range) return;
-          for (const range of operate.range) {
-            if (!range.row || !range.column) continue;
+          dbg('[Luckysheet] rangeUpdated 触发, operate=', operate);
+          for (const range of toRanges(operate)) {
             for (let r = range.row[0]; r <= range.row[1]; r++) {
               for (let c = range.column[0]; c <= range.column[1]; c++) {
                 recordCellChange(r, c);
@@ -778,12 +808,8 @@ function LuckysheetEditor({
           }
         },
         updated: function(operate) {
-          console.log('[Luckysheet] updated 触发, operate=', operate);
-          if (!operate) return;
-          const ranges = operate.range || (Array.isArray(operate) ? operate : null);
-          if (!ranges) return;
-          for (const range of ranges) {
-            if (!range || !range.row || !range.column) continue;
+          dbg('[Luckysheet] updated 触发, operate=', operate);
+          for (const range of toRanges(operate)) {
             for (let r = range.row[0]; r <= range.row[1]; r++) {
               for (let c = range.column[0]; c <= range.column[1]; c++) {
                 recordCellChange(r, c);
@@ -840,11 +866,15 @@ function LuckysheetEditor({
       const editBox = document.querySelector('#luckysheet-input-box');
       const editing = editBox && editBox.style.display && editBox.style.display !== 'none';
       if (editing) { console.log('[KeyDelete] 编辑态中，跳过'); return; }
-      // 顶部搜索框等真正的输入框 → 不拦截
-      if ((target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA') &&
-          target?.id !== '' && !target?.id?.startsWith('luckysheet')) {
-        console.log('[KeyDelete] 真输入框，跳过');
-        return;
+      // 顶部搜索框、查找替换对话框等真正的输入框 → Delete/Backspace 是删字符，不拦截。
+      // 旧逻辑要求 input 必须有 id 才放行，AntD 搜索框没有 id → Backspace 被 preventDefault，
+      // 用户在搜索框/查找框里永远删不了字（只能全选重输）。
+      // 新逻辑：可见的输入控件一律放行；不可见的（Luckysheet 隐藏键盘捕获框，焦点在格子时
+      // offsetParent 为 null、尺寸为 0）才继续走 clearRange 清单元格。
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
+        const visible = target.isContentEditable || target.offsetParent !== null ||
+          (target.getBoundingClientRect && target.getBoundingClientRect().width > 0);
+        if (visible) { console.log('[KeyDelete] 可见输入框，跳过'); return; }
       }
       const ls = getLuckysheet();
       if (!ls || !ls.clearRange || !ls.getRange) { console.log('[KeyDelete] ls 不可用'); return; }
@@ -894,7 +924,7 @@ function LuckysheetEditor({
       const defaultColWidths = {};
       ORDER_COLUMNS.forEach((c, i) => { defaultColWidths[i] = c.width || 80; });
       const savedColWidths = (sheetSettings && sheetSettings.columnlen) || {};
-      const colWidths = { ...defaultColWidths, ...savedColWidths };
+      const colWidths = { ...defaultColWidths, ...migrateSavedWidths(savedColWidths, ORDER_COLUMNS) };
       const rowLen = (sheetSettings && sheetSettings.rowlen) || {};
       const savedFrozen = sheetSettings && sheetSettings.frozen;
       luckysheet.destroy && luckysheet.destroy();
@@ -911,6 +941,7 @@ function LuckysheetEditor({
         enableAddRow: false,
         enableAddBackTop: false,
         showConfigWindowResize: false,
+        defaultRowHeight: 24,
         data: [{
           name: '生产计划',
           celldata,
@@ -928,11 +959,9 @@ function LuckysheetEditor({
         }],
         // 实时记录改动到 pendingChangesRef，由「保存」按钮 saveAll 提交
         hook: {
-          cellUpdated: function(r, c) { console.log('[Luckysheet] cellUpdated 触发 (r,c)=(' + r + ',' + c + ')'); recordCellChange(r, c); },
+          cellUpdated: function(r, c) { dbg('[Luckysheet] cellUpdated 触发 (r,c)=(' + r + ',' + c + ')'); recordCellChange(r, c); },
           rangeUpdated: function(operate) {
-            if (!operate || !operate.range) return;
-            for (const range of operate.range) {
-              if (!range.row || !range.column) continue;
+            for (const range of toRanges(operate)) {
               for (let r = range.row[0]; r <= range.row[1]; r++) {
                 for (let c = range.column[0]; c <= range.column[1]; c++) {
                   recordCellChange(r, c);
@@ -941,11 +970,7 @@ function LuckysheetEditor({
             }
           },
           updated: function(operate) {
-            if (!operate) return;
-            const ranges = operate.range || (Array.isArray(operate) ? operate : null);
-            if (!ranges) return;
-            for (const range of ranges) {
-              if (!range || !range.row || !range.column) continue;
+            for (const range of toRanges(operate)) {
               for (let r = range.row[0]; r <= range.row[1]; r++) {
                 for (let c = range.column[0]; c <= range.column[1]; c++) {
                   recordCellChange(r, c);
@@ -958,74 +983,111 @@ function LuckysheetEditor({
       // 重建后清空 pending 并解锁 hook（数据已重新加载，避免误记）
       pendingChangesRef.current = {};
       suppressHookRef.current = true;
-      applySavedFormulasBatch();
-      applyDaysFormulaBatch();   // 数据重建后也套天数公式
+      // 两个批量任务都结束才释放 suppress：公式恢复分块后可能跑很久，
+      // 天数任务先结束就释放会让公式恢复的 setCellValue 触发 cellUpdated，
+      // 产生幻"未保存修改"
+      let batchesPending = 2;
+      const batchDone = () => { if (--batchesPending === 0) suppressHookRef.current = false; };
+      applySavedFormulasBatch(batchDone);
+      applyDaysFormulaBatch(batchDone);   // 数据重建后也套天数公式
     } catch (e) {
       console.error('Luckysheet 更新失败', e);
     }
   }, [data, newImportedIds, refreshKey]);
 
-  function applySavedFormulasBatch() {
+  function applySavedFormulasBatch(onDone) {
     setTimeout(() => {
       try {
         const ls = getLuckysheet();
-        if (!ls?.setCellValue) return;
+        if (!ls?.setCellValue) { onDone?.(); return; }
         suppressHookRef.current = true;
         let applied = 0;
-        for (let rowIdx = 0; rowIdx < dataRef.current.length; rowIdx++) {
-          const order = dataRef.current[rowIdx];
-          if (!order?.cell_format) continue;
-          let format = {};
-          try { format = JSON.parse(order.cell_format); } catch { format = {}; }
-          for (const [field, fmt] of Object.entries(format)) {
-            if (!fmt?.f) continue;
-            const colIdx = ORDER_COLUMNS.findIndex(col => col.data === field);
-            if (colIdx < 0) continue;
-            const col = ORDER_COLUMNS[colIdx];
-            const raw = order[field];
-            const display = raw == null ? '' : String(raw);
-            const ct = { t: col.type === 'numeric' || NUMERIC_SUM_FIELDS.has(field) ? 'n' : 'g' };
-            ls.setCellValue(rowIdx + 1, colIdx, { v: raw ?? '', m: display, ct, f: fmt.f });
-            applied++;
+        // 分块执行，避免大量公式单元格连续 setCellValue 阻塞主线程
+        let rowIdx = 0;
+        const CHUNK = 30;
+        const step = () => {
+          const end = Math.min(rowIdx + CHUNK, dataRef.current.length);
+          for (; rowIdx < end; rowIdx++) {
+            const order = dataRef.current[rowIdx];
+            if (!order?.cell_format) continue;
+            let format = {};
+            try { format = JSON.parse(order.cell_format); } catch { format = {}; }
+            for (const [field, fmt] of Object.entries(format)) {
+              if (!fmt?.f) continue;
+              const colIdx = ORDER_COLUMNS.findIndex(col => col.data === field);
+              if (colIdx < 0) continue;
+              const col = ORDER_COLUMNS[colIdx];
+              const raw = order[field];
+              const display = raw == null ? '' : String(raw);
+              const ct = { t: col.type === 'numeric' || NUMERIC_SUM_FIELDS.has(field) ? 'n' : 'g' };
+              ls.setCellValue(rowIdx + 1, colIdx, { v: raw ?? '', m: display, ct, f: fmt.f });
+              applied++;
+            }
           }
-        }
-        console.log('[公式恢复] 已恢复 ' + applied + ' 个公式单元格');
+          if (rowIdx < dataRef.current.length) setTimeout(step, 0);
+          else { console.log('[公式恢复] 已恢复 ' + applied + ' 个公式单元格'); onDone?.(); }
+        };
+        step();
       } catch (e) {
         console.warn('[公式恢复] 失败:', e?.message);
+        onDone?.();
       }
     }, 300);
   }
 
   // 批量算天数（init + 数据重建时调）—— 直接 JS 算然后写回，不用 Luckysheet 的公式引擎
-  function applyDaysFormulaBatch() {
+  function applyDaysFormulaBatch(onDone) {
     setTimeout(() => {
       try {
         const daysColIdx = ORDER_COLUMNS.findIndex(c => c.data === 'days');
         const qtyColIdx = ORDER_COLUMNS.findIndex(c => c.data === 'quantity');
         const targetColIdx = ORDER_COLUMNS.findIndex(c => c.data === 'daily_target');
-        if (daysColIdx < 0 || qtyColIdx < 0 || targetColIdx < 0) return;
         const ls = getLuckysheet();
-        if (!ls?.setCellValue) return;
+        // 早退也必须回调 onDone —— suppress 由调用方在两个批量任务都结束后统一释放，
+        // 漏掉回调会导致用户所有编辑都记录不到、「保存不了」
+        if (daysColIdx < 0 || qtyColIdx < 0 || targetColIdx < 0) { onDone?.(); return; }
+        if (!ls?.setCellValue) { onDone?.(); return; }
         const sheet = ls.getAllSheets()[0];
-        if (!sheet?.data) return;
+        if (!sheet?.data) { onDone?.(); return; }
         const t0 = performance.now();
         let applied = 0;
-        for (let r = 1; r < sheet.data.length - 1; r++) {
-          const M = sheet.data[r]?.[qtyColIdx]?.v;
-          const AB = sheet.data[r]?.[targetColIdx]?.v;
-          const Mn = Number(M), ABn = Number(AB);
-          if (!isNaN(Mn) && !isNaN(ABn) && ABn !== 0 && M !== '' && M != null && AB !== '' && AB != null) {
-            const days = Math.round((Mn / ABn) * 10000) / 10000;
-            // 同时设 v + m
-            ls.setCellValue(r, daysColIdx, { v: days, m: String(days), ct: { t: 'n' } });
-            applied++;
+        // 分块执行：每块 30 行就让出主线程。500+ 行连续 setCellValue（每次都触发
+        // Luckysheet 重绘）会长时间阻塞，浏览器弹「此页面没有响应」
+        let r = 1;
+        const CHUNK = 30;
+        const step = () => {
+          const end = Math.min(r + CHUNK, sheet.data.length - 1);
+          for (; r < end; r++) {
+            const M = sheet.data[r]?.[qtyColIdx]?.v;
+            const AB = sheet.data[r]?.[targetColIdx]?.v;
+            const Mn = Number(M), ABn = Number(AB);
+            if (!isNaN(Mn) && !isNaN(ABn) && ABn !== 0 && M !== '' && M != null && AB !== '' && AB != null) {
+              const days = Math.round((Mn / ABn) * 10000) / 10000;
+              // 同时设 v + m
+              ls.setCellValue(r, daysColIdx, { v: days, m: String(days), ct: { t: 'n' } });
+              applied++;
+            }
           }
-        }
-        console.log('[天数自动算] 已算 ' + applied + ' 行，耗时 ' + Math.round(performance.now() - t0) + 'ms');
-      } catch (e) { console.warn('[天数自动算] 失败:', e?.message); }
-      suppressHookRef.current = false;
+          if (r < sheet.data.length - 1) {
+            setTimeout(step, 0);
+          } else {
+            console.log('[天数自动算] 已算 ' + applied + ' 行，耗时 ' + Math.round(performance.now() - t0) + 'ms');
+            onDone?.();
+          }
+        };
+        step();
+      } catch (e) { console.warn('[天数自动算] 失败:', e?.message); onDone?.(); }
     }, 600);
   }
+
+  // 容器高度变化（父组件按窗口高度动态调整）→ 通知 Luckysheet 重排，填满可视区
+  useEffect(() => {
+    if (!initializedRef.current) return;
+    const ls = getLuckysheet();
+    if (ls && ls.resize) {
+      try { ls.resize(); } catch {}
+    }
+  }, [height]);
 
   // ISO 字符串或 Excel 序列号 → dayjs
   const toDayjs = (val) => {

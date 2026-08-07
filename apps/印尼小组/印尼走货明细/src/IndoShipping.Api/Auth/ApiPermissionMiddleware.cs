@@ -18,6 +18,7 @@ public class ApiPermissionMiddleware(RequestDelegate next)
         ["/api/customers"] = PermissionPosition.Customers,
         ["/api/schedules"] = PermissionPosition.Schedules,
         ["/api/purchase"] = PermissionPosition.Purchase,
+        ["/api/material-alerts"] = PermissionPosition.Purchase,
         ["/api/quotes"] = PermissionPosition.Quotes,
         ["/api/molding-pos"] = PermissionPosition.MoldingPos,
         ["/api/outbound"] = PermissionPosition.Outbound,

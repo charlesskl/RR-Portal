@@ -49,5 +49,6 @@ export function isAdminSession(v: AuthSession | null) {
 
 export function moduleForPath(pathname: string) {
   if (pathname.startsWith('/dictionaries')) return PERMISSION_MODULES.find(x => x.key === 'products')
+  if (pathname.startsWith('/material-alerts')) return PERMISSION_MODULES.find(x => x.key === 'purchase')
   return PERMISSION_MODULES.find(x => pathname.startsWith(x.path))
 }

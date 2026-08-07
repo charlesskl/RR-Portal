@@ -18,6 +18,7 @@ const ShipmentsPage    = lazy(() => import('./pages/ShipmentsPage'))
 const DbAdminPage      = lazy(() => import('./pages/DbAdminPage'))
 const LoginPage        = lazy(() => import('./pages/LoginPage'))
 const UsersPage        = lazy(() => import('./pages/UsersPage'))
+const MaterialAlertsPage = lazy(() => import('./pages/MaterialAlertsPage'))
 
 const Fallback = <div style={{ padding: 48, textAlign: 'center' }}><Spin /></div>
 
@@ -56,6 +57,7 @@ export default function App() {
               <Route path="products"     element={<ModuleRoute module="products"><ProductsPage /></ModuleRoute>} />
               <Route path="quotes"       element={<ModuleRoute module="quotes"><QuotesPage /></ModuleRoute>} />
               <Route path="purchase"     element={<ModuleRoute module="purchase"><PurchasePage /></ModuleRoute>} />
+              <Route path="material-alerts" element={<ModuleRoute module="purchase"><MaterialAlertsPage /></ModuleRoute>} />
               <Route path="molding-pos"  element={<ModuleRoute module="molding"><MoldingPosPage /></ModuleRoute>} />
               <Route path="schedules"    element={<ModuleRoute module="schedules"><SchedulesPage /></ModuleRoute>} />
               <Route path="shipments"    element={<ModuleRoute module="shipments"><ShipmentsPage /></ModuleRoute>} />

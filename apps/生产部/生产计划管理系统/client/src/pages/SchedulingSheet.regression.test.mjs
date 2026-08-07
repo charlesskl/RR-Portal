@@ -50,3 +50,29 @@ test('applying schedule updates triggers an explicit editor refresh', () => {
   assert.match(source, /setEditorRefreshKey/);
   assert.match(source, /refreshKey=\{editorRefreshKey\}/);
 });
+
+// ===== 2026-08 车间反馈六项修复的回归测试 =====
+
+test('cut/paste rows persist manual order through sort_order batch update', () => {
+  assert.match(source, /handleCutRows/);
+  assert.match(source, /handlePasteRows/);
+  assert.match(source, /剪切选中行/);
+  assert.match(source, /粘贴行/);
+  // 整页新顺序写 sort_order（1..N），刷新后不乱
+  assert.match(source, /fields: \{ sort_order: i \+ 1 \}/);
+  assert.match(source, /batch-update/);
+});
+
+test('paste rows refuses to run with unsaved edits', () => {
+  const start = source.indexOf('const handlePasteRows');
+  const end = source.indexOf('const handleAutoAssign');
+  const body = source.slice(start, end);
+  assert.match(body, /hasPendingChanges/);
+});
+
+test('sheet height follows the window instead of fixed 600px', () => {
+  assert.match(source, /window\.innerHeight - 210/);
+  assert.match(source, /height=\{sheetHeight\}/);
+  assert.match(source, /addEventListener\('resize', onResize\)/);
+  assert.doesNotMatch(source, /height=\{600\}/);
+});

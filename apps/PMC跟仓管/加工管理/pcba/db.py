@@ -90,6 +90,7 @@ CREATE TABLE IF NOT EXISTS semi_finished_monthly_totals (
     hongya_opening_stock INTEGER NOT NULL DEFAULT 0,
     monthly_inbound INTEGER NOT NULL DEFAULT 0,
     monthly_outbound INTEGER NOT NULL DEFAULT 0,
+    shaoyang_production INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now')),
     UNIQUE(department, material, sticker_type)
@@ -203,6 +204,11 @@ def _migrate_schema(conn):
         conn.execute(
             "ALTER TABLE semi_finished_monthly_totals "
             "ADD COLUMN hongya_opening_stock INTEGER NOT NULL DEFAULT 0"
+        )
+    if not _column_exists(conn, "semi_finished_monthly_totals", "shaoyang_production"):
+        conn.execute(
+            "ALTER TABLE semi_finished_monthly_totals "
+            "ADD COLUMN shaoyang_production INTEGER NOT NULL DEFAULT 0"
         )
     _migrate_department_names(conn)
 

@@ -4681,13 +4681,27 @@ def _with_common_summary_fields(summary, records, filters, reverse_departments=(
 
 def _compute_semi_finished_warehouse_summary(records):
     inbound = sum(int(r["qty"] or 0) for r in records if r["rec_type"] == "semi_inbound")
-    outbound = sum(int(r["qty"] or 0) for r in records if r["rec_type"] == "semi_outbound")
+    outbound_by_location = {name: 0 for name in LOCATIONS}
+    outbound = 0
+    for r in records:
+        if r["rec_type"] != "semi_outbound":
+            continue
+        qty = int(r["qty"] or 0)
+        outbound += qty
+        # 按加工点拆分（邵阳/河源/车间各发了多少），原来是硬编码全 0
+        if r.get("location") in outbound_by_location:
+            outbound_by_location[r["location"]] += qty
     return {
         "locations": [
-            {"location": name, "issue": 0, "finished": 0, "balance": 0}
+            {
+                "location": name,
+                "issue": outbound_by_location[name],
+                "finished": 0,
+                "balance": outbound_by_location[name],
+            }
             for name in LOCATIONS
         ],
-        "subtotal": {"issue": 0, "finished": 0, "balance": 0},
+        "subtotal": {"issue": outbound, "finished": 0, "balance": outbound},
         "raw": {"inbound": inbound, "outbound": outbound, "balance": inbound - outbound},
     }
 

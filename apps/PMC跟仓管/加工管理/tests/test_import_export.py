@@ -879,14 +879,13 @@ def test_record_import_replace_mode_replaces_document_and_auto_records(client):
     assert len(shaoyang_source) == 1
     assert shaoyang_source[0]["qty"] == 15
 
+    # 2026-08-08 起所有部门联动停用：邵阳华登不会再收到自动联动记录
     login(client, "邵阳华登", "123456", "邵阳华登")
     target_rows = [
         row for row in client.get("/api/records").json()
         if row["doc_no"] == "LL-SY-001"
     ]
-    assert len(target_rows) == 1
-    assert target_rows[0]["qty"] == 15
-    assert target_rows[0]["source_record_id"] is not None
+    assert target_rows == []
 
 
 def test_record_import_replace_allows_same_department_records_owned_by_another_user(client):

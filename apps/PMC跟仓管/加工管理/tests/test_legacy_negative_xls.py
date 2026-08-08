@@ -171,23 +171,12 @@ def _make_body(**kw):
 
 
 def test_negative_issue_links_to_target_department(conn):
+    # 2026-08-08 起所有部门联动全部停用，不再生成联动目标
     loc = conn.execute(
         "SELECT id FROM locations WHERE name=?", ("河源华兴",)
     ).fetchone()
     body = _make_body(location_id=loc["id"])
-    targets = m._auto_flow_targets(conn, body, "兴信B来料仓")
-    assert len(targets) == 1
-    target_dept, target_body, flow = targets[0]
-    assert target_dept == "河源华兴"
-    assert target_body.qty == -100
-    assert target_body.rec_type == "issue"
-    # 负数联动记录落库不触发非负校验
-    m._insert_auto_record(conn, target_dept, target_body, 1, flow, 1)
-    row = conn.execute(
-        "SELECT qty, department FROM records WHERE doc_no='T001'"
-    ).fetchone()
-    assert row["qty"] == -100
-    assert row["department"] == "河源华兴"
+    assert m._auto_flow_targets(conn, body, "兴信B来料仓") == []
 
 
 def test_xingxin_dongguan_link_disabled(conn):
@@ -200,24 +189,12 @@ def test_xingxin_dongguan_link_disabled(conn):
 
 
 def test_auto_record_skipped_when_manual_record_exists(conn):
+    # 联动已停用：不产生联动目标
     loc = conn.execute(
         "SELECT id FROM locations WHERE name=?", ("河源华兴",)
     ).fetchone()
     body = _make_body(location_id=loc["id"], qty=100)
-    targets = m._auto_flow_targets(conn, body, "兴信B来料仓")
-    target_dept, target_body, flow = targets[0]
-    # 目标部门先有一条同单号同数量的人工记录
-    m._insert_auto_record(conn, target_dept, target_body, None, "manual", 1)
-    before = conn.execute(
-        "SELECT COUNT(*) AS c FROM records WHERE doc_no='T001'"
-    ).fetchone()["c"]
-    # 再插联动记录应被去重跳过
-    m._insert_auto_record(conn, target_dept, target_body, 999, flow, 1)
-    after = conn.execute(
-        "SELECT COUNT(*) AS c FROM records WHERE doc_no='T001'"
-    ).fetchone()["c"]
-    assert before == 1
-    assert after == 1
+    assert m._auto_flow_targets(conn, body, "兴信B来料仓") == []
 
 
 def test_opening_stock_record_does_not_link(conn):

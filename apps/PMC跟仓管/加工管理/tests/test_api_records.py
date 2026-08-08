@@ -245,11 +245,12 @@ def test_bulk_delete_removes_selected_records_and_linked_records(client):
     r = client.post("/api/records/bulk-delete", json={"ids": [source, inbound]})
 
     assert r.status_code == 200
-    assert r.json()["deleted"] == 3
+    assert r.json()["deleted"] == 2
     assert client.get("/api/records?doc_no=BULK-LINK-001").json() == []
     assert client.get("/api/records?doc_no=BULK-IN-001").json() == []
     client.post("/api/logout")
     admin_login(client, "河源华兴")
+    # 联动已停用：本来就没有联动记录
     assert client.get("/api/records?doc_no=BULK-LINK-001").json() == []
 
 
@@ -262,11 +263,8 @@ def test_bulk_delete_rejects_auto_linked_record(client):
         "doc_no": "BULK-AUTO-001", "qty": 12})
     client.post("/api/logout")
     admin_login(client, "河源华兴")
-    linked_id = client.get("/api/records?doc_no=BULK-AUTO-001").json()[0]["id"]
-
-    r = client.post("/api/records/bulk-delete", json={"ids": [linked_id]})
-
-    assert r.status_code == 400
+    # 联动已停用：目标部门不会生成自动联动记录
+    assert client.get("/api/records?doc_no=BULK-AUTO-001").json() == []
 
 
 def test_operator_bulk_delete_rejects_other_users_records(client):
@@ -299,7 +297,7 @@ def test_admin_can_clear_records_by_department_and_material(client):
 
     assert r.status_code == 200
     assert r.json()["matched"] == 1
-    assert r.json()["deleted"] == 2
+    assert r.json()["deleted"] == 1
     rows = client.get("/api/records").json()
     assert all(row["id"] != source_id for row in rows)
     assert any(row["id"] == keep_id for row in rows)
@@ -636,8 +634,8 @@ def test_xingxin_pcba_issue_no_longer_auto_syncs_dongguan(client):
     assert client.get("/api/records?doc_no=FLOW-PCBA-XD-001").json() == []
 
 
-def test_xingxin_issue_still_auto_syncs_heyuan(client):
-    # 其他部门对的联动不受影响：来料仓 -> 河源华兴 仍然联动
+def test_xingxin_issue_no_longer_auto_syncs_heyuan(client):
+    # 2026-08-08 起所有部门联动全部停用
     admin_login(client, "兴信B来料仓")
     heyuan = loc_id(client, "河源华兴")
     created = client.post("/api/records", json={
@@ -650,14 +648,10 @@ def test_xingxin_issue_still_auto_syncs_heyuan(client):
         "qty": 66,
     })
     assert created.status_code == 200
-    source_id = created.json()["id"]
 
     client.post("/api/logout")
     admin_login(client, "河源华兴")
-    rows = client.get("/api/records?doc_no=FLOW-XH-001").json()
-    assert len(rows) == 1
-    assert rows[0]["qty"] == 66
-    assert rows[0]["source_record_id"] == source_id
+    assert client.get("/api/records?doc_no=FLOW-XH-001").json() == []
 
 
 def test_auto_linked_records_cannot_be_edited_or_deleted_directly(client):
@@ -674,23 +668,8 @@ def test_auto_linked_records_cannot_be_edited_or_deleted_directly(client):
 
     client.post("/api/logout")
     admin_login(client, "河源华兴")
-    auto_record = client.get("/api/records?doc_no=FLOW-LOCK-001").json()[0]
-    assert auto_record["source_record_id"] == source_id
-
-    edit = client.put(f"/api/records/{auto_record['id']}", json={
-        "rec_type": "issue",
-        "location_id": dongguan,
-        "material": "NFC贴纸",
-        "sticker_type": "1#NFC贴纸",
-        "doc_no": "FLOW-LOCK-001",
-        "qty": 20,
-    })
-    delete = client.delete(f"/api/records/{auto_record['id']}")
-
-    assert edit.status_code == 400
-    assert "原始记录" in edit.json()["detail"]
-    assert delete.status_code == 400
-    assert "原始记录" in delete.json()["detail"]
+    # 联动已停用：目标部门不会生成自动联动记录
+    assert client.get("/api/records?doc_no=FLOW-LOCK-001").json() == []
 
 
 
@@ -708,7 +687,7 @@ def test_outsource_issue_requires_target_department(client):
     assert r.status_code == 400
 
 
-def test_outsource_issue_auto_syncs_target_department_inbound(client):
+def test_outsource_issue_no_longer_auto_syncs_target_department(client):
     admin_login(client, "东莞加工厂利鸿")
     semi = loc_id(client, "碟片半成品")
 
@@ -724,16 +703,12 @@ def test_outsource_issue_auto_syncs_target_department_inbound(client):
 
     client.post("/api/logout")
     admin_login(client, "碟片半成品")
-    rows = client.get("/api/records?doc_no=FLOW-LH-TO-SEMI-001").json()
-    assert len(rows) == 1
-    assert rows[0]["rec_type"] == "semi_inbound"
-    assert rows[0]["material"] == "77794-PCBA板"
-    assert rows[0]["qty"] == 22
-    assert rows[0]["source_record_id"] == source_id
+    # 联动已停用：目标部门不会生成自动联动记录
+    assert client.get("/api/records?doc_no=FLOW-LH-TO-SEMI-001").json() == []
 
 
 
-def test_semifinished_nfc_to_heyuan_auto_creates_heyuan_issue(client):
+def test_semifinished_nfc_to_heyuan_no_longer_auto_creates_issue(client):
     admin_login(client, "碟片半成品")
     heyuan = loc_id(client, "河源华兴")
 
@@ -758,21 +733,12 @@ def test_semifinished_nfc_to_heyuan_auto_creates_heyuan_issue(client):
 
     client.post("/api/logout")
     admin_login(client, "河源华兴")
-    rows_36 = client.get("/api/records?doc_no=FLOW-36-HY-001").json()
-    rows_other = client.get("/api/records?doc_no=FLOW-35-HY-001").json()
-    assert len(rows_36) == 1
-    assert rows_36[0]["rec_type"] == "issue"
-    assert rows_36[0]["location_name"] == "河源华兴"
-    assert rows_36[0]["sticker_type"] == "36#NFC贴纸"
-    assert rows_36[0]["qty"] == 36
-    assert len(rows_other) == 1
-    assert rows_other[0]["rec_type"] == "issue"
-    assert rows_other[0]["location_name"] == "河源华兴"
-    assert rows_other[0]["sticker_type"] == "35#NFC贴纸"
-    assert rows_other[0]["qty"] == 35
+    # 联动已停用：目标部门不会生成自动联动记录
+    assert client.get("/api/records?doc_no=FLOW-36-HY-001").json() == []
+    assert client.get("/api/records?doc_no=FLOW-35-HY-001").json() == []
 
 
-def test_semifinished_36_nfc_to_shaoyang_huadeng_auto_creates_shaoyang_issue(client):
+def test_semifinished_36_nfc_to_shaoyang_no_longer_auto_creates_issue(client):
     admin_login(client, "碟片半成品")
     shaoyang = loc_id(client, "邵阳华登")
 
@@ -788,9 +754,5 @@ def test_semifinished_36_nfc_to_shaoyang_huadeng_auto_creates_shaoyang_issue(cli
 
     client.post("/api/logout")
     admin_login(client, "邵阳华登")
-    rows = client.get("/api/records?doc_no=FLOW-36-SY-001").json()
-    assert len(rows) == 1
-    assert rows[0]["rec_type"] == "issue"
-    assert rows[0]["location_name"] == "邵阳华登"
-    assert rows[0]["sticker_type"] == "36#NFC贴纸"
-    assert rows[0]["qty"] == 66
+    # 联动已停用：目标部门不会生成自动联动记录
+    assert client.get("/api/records?doc_no=FLOW-36-SY-001").json() == []

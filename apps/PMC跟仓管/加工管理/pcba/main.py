@@ -2628,6 +2628,10 @@ def _append_department_transfer_target(
 
 
 def _auto_flow_targets(conn, source_body, source_department):
+    # 2026-08-08 业务决定：所有部门联动全部停用，各部门完全按自己导入的
+    # 台账记账，不再自动生成联动记录（历史联动数据已全部删除）。
+    return []
+
     # 退货（负数）也要联动：一个部门退回，另一部门必须收到（负数镜像），
     # 否则两边数量对不上。只有 0 不联动（无意义记录）。
     if source_body.qty is None or source_body.qty == 0:

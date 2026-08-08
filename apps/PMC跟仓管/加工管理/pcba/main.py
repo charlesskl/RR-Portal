@@ -3607,7 +3607,29 @@ def _supplier_nfc_export_workbook(records, sticker_types):
         ws.cell(row_no, 14).value = _sum_qty(shaoyang_opening) or 0
         for col_no, month in enumerate(EXPORT_MONTHS, start=15):
             ws.cell(row_no, col_no).value = _month_sum(sticker_outbound, month) or None
-    _apply_legacy_sheet_style(ws, len(sticker_names) + 2, 20)
+    # 小计行：与源表格一致，列结构同行内（累计/期初/逐月/应存）
+    total_row = len(sticker_names) + 3
+    ws.cell(total_row, 1).value = "小计："
+    ws.cell(total_row, 2).value = _sum_qty(inbound) or 0
+    opening_inbound_all = [
+        row for row in inbound if _supplier_nfc_opening_kind(row) == "inbound"
+    ]
+    ws.cell(total_row, 3).value = _sum_qty(opening_inbound_all) or 0
+    for col_no, month in enumerate(EXPORT_MONTHS, start=4):
+        ws.cell(total_row, col_no).value = _month_sum(inbound, month) or None
+    ws.cell(total_row, 11).value = _sum_qty(inbound) - _sum_qty(outbound)
+    ws.cell(total_row, 12).value = _sum_qty(outbound) or 0
+    dongguan_opening_all = [
+        row for row in outbound if _supplier_nfc_opening_kind(row) == "dongguan_outbound"
+    ]
+    shaoyang_opening_all = [
+        row for row in outbound if _supplier_nfc_opening_kind(row) == "shaoyang_outbound"
+    ]
+    ws.cell(total_row, 13).value = _sum_qty(dongguan_opening_all) or 0
+    ws.cell(total_row, 14).value = _sum_qty(shaoyang_opening_all) or 0
+    for col_no, month in enumerate(EXPORT_MONTHS, start=15):
+        ws.cell(total_row, col_no).value = _month_sum(outbound, month) or None
+    _apply_legacy_sheet_style(ws, total_row, 20)
     ws.column_dimensions["A"].width = 13
     ws.column_dimensions["B"].width = 11
     ws.column_dimensions["C"].width = 12

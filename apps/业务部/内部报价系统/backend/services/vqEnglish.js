@@ -123,6 +123,7 @@ const REPLACEMENTS = [
   [/查货/g, 'Inspection'],
   [/人工/g, 'Labour'],
   [/电子/g, 'Electronics'],
+  [/电池/g, 'Battery'],
   [/五金/g, 'Metal Part'],
   [/辅助材料/g, 'Auxiliary Material'],
   [/包装材料/g, 'Packaging Material'],

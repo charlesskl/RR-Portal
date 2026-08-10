@@ -145,12 +145,14 @@ function fillVQ(ws, d) {
   }
   vqSupplements.slice(0, 5).forEach((acc, i) => {
     const r = 12 + i;
+    const unitPrice = acc.preserve_unit_price ? r4(acc.unit_price) : r2(acc.unit_price);
     setVal(ws, r, 1, acc.part_no || '');
     setBiVal(ws, r, 2, acc.description, acc.eng_name);
     setVal(ws, r, 5, parseInt(acc.moq) || 2500);
     setVal(ws, r, 6, parseFloat(acc.usage_qty) || 1);
-    setVal(ws, r, 7, r2(acc.unit_price) || 0);
-    const amt = r2((parseFloat(acc.usage_qty) || 1) * (r2(acc.unit_price) || 0));
+    setVal(ws, r, 7, unitPrice || 0);
+    const amountRaw = (parseFloat(acc.usage_qty) || 1) * (unitPrice || 0);
+    const amt = acc.preserve_unit_price ? r4(amountRaw) : r2(amountRaw);
     ws.getCell(r, 8).value = { formula: `F${r}*G${r}`, result: amt };
   });
 
@@ -880,6 +882,8 @@ function sectionsToData({ quote, sections }) {
   const isProductLibao = r => /^(产品利宝|利宝)$/i.test(String(r.category || '').trim())
     || (/利宝|libao|sticker|贴纸/i.test(String(`${r.name || ''} ${r.spec || ''}`))
       && !/彩盒/i.test(String(`${r.category || ''} ${r.name || ''} ${r.spec || ''}`)));
+  const isBatteryItem = r => /^(电池|battery)$/i.test(String(r.category || '').trim())
+    || /电池|battery/i.test(String(`${r.name || ''} ${r.spec || ''}`));
 
   // 其他购买件（BCD C3 Other Components）：对应工程部「五金」+ 辅助材料「产品利宝」。
   const bodyAccessories = [
@@ -958,9 +962,14 @@ function sectionsToData({ quote, sections }) {
   const packingLabourHkd = pkgLineHkd + pkgStepHkd;
 
   // 包装（VQ Section B）：工程辅助材料 + 包装材料
-  const packagingItems = [
-    ...(eng.aux_materials || []).filter(r => !isProductLibao(r)),
+  // 电池属于 VQ Section A 的昂贵购买件，不能留在包装段，也不能套 1.08 码点。
+  const batterySourceItems = [
+    ...(eng.aux_materials || []),
     ...(eng.packaging_materials || []),
+  ].filter(isBatteryItem);
+  const packagingItems = [
+    ...(eng.aux_materials || []).filter(r => !isProductLibao(r) && !isBatteryItem(r)),
+    ...(eng.packaging_materials || []).filter(r => !isBatteryItem(r)),
   ].map(r => ({
     pm_no: r.code || r.item_code || '',
     name: r.name || '',
@@ -1010,9 +1019,18 @@ function sectionsToData({ quote, sections }) {
     carton_price: cartonPrice,
   };
 
-  const vqSupplements = ((sales.shipping && sales.shipping.customer_supplied_products) || [])
+  const batteryVqItems = batterySourceItems.map((item, index) => ({
+    part_no: item.code || item.item_code || `BATTERY-${index + 1}`,
+    description: item.name || '电池',
+    eng_name: customerEnglish(item.eng_name || item.name || 'Battery'),
+    moq: item.moq != null ? num(item.moq) : (num(quote.qty) || 2500),
+    usage_qty: num(item.qty) || 1,
+    // 电池直接使用内部报价的原始 HKD 单价，不乘包装材料 1.08 码点。
+    unit_price: num(item.unit_price),
+    preserve_unit_price: true,
+  }));
+  const customerSuppliedVqItems = ((sales.shipping && sales.shipping.customer_supplied_products) || [])
     .filter(item => String(item && item.name || '').trim() || num(item && item.amount_usd))
-    .slice(0, 5)
     .map((item, index) => ({
       part_no: `CUSTOMER-${index + 1}`,
       description: item.name || `客供成品${index + 1}`,
@@ -1021,6 +1039,7 @@ function sectionsToData({ quote, sections }) {
       usage_qty: 1,
       unit_price: num(item.amount_usd),
     }));
+  const vqSupplements = [...batteryVqItems, ...customerSuppliedVqItems].slice(0, 5);
 
   // 运输（VQ Section E）：内部无 CuFt 单价，留空走模板默认
   const transportConfig = {};

@@ -66,6 +66,49 @@ test('TOMY VQ carries named customer-supplied products into supplemental quote r
   ]);
 });
 
+test('TOMY VQ places batteries in section A without packaging markup', async () => {
+  const input = {
+    quote: {
+      id: 331,
+      quote_no: 'TOMY-BATTERY',
+      product_name: 'Battery Toy',
+      customer: 'TOMY',
+      qty: 3000,
+    },
+    sections: [{
+      dept: 'engineering',
+      payload_json: JSON.stringify({
+        aux_materials: [
+          { name: '贴脸静电模', category: '其他外购', qty: 1, unit_price: 0.08 },
+          { name: 'AAA电池', spec: '碱性', category: '电池', qty: 3, unit_price: 0.5282 },
+        ],
+      }),
+    }],
+  };
+
+  const data = sectionsToData(input);
+  assert.equal(data.packagingItems.some(item => /电池|battery/i.test(item.name)), false);
+  assert.deepEqual(data.vqSupplements[0], {
+    part_no: 'BATTERY-1',
+    description: 'AAA电池',
+    eng_name: 'AAA Battery',
+    moq: 3000,
+    usage_qty: 3,
+    unit_price: 0.5282,
+    preserve_unit_price: true,
+  });
+
+  const buffer = await exportVQ(input);
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(buffer);
+  const vq = workbook.worksheets[0];
+  assert.match(String(vq.getCell(12, 2).value), /AAA Battery/);
+  assert.equal(vq.getCell(12, 6).value, 3);
+  assert.equal(vq.getCell(12, 7).value, 0.5282);
+  assert.equal(vq.getCell(12, 8).value.formula, 'F12*G12');
+  assert.equal(vq.getCell(12, 8).value.result, 1.5846);
+});
+
 test('TOMY VQ uses the shared paper rate instead of stale legacy carton prices', () => {
   const data = sectionsToData({
     quote: {

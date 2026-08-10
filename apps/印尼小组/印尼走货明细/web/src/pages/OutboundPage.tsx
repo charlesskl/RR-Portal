@@ -18,6 +18,7 @@ interface OutboundRow {
   notes?: string
   created_at?: string
   material_name?: string
+  spec?: string
   product_code?: string
   supplier?: string
   received_qty?: number
@@ -58,6 +59,7 @@ interface LedgerRow {
   po_no?: string
   product_code?: string
   material_name?: string
+  spec?: string
   in_qty?: number
   out_qty?: number
   balance?: number
@@ -166,7 +168,7 @@ export default function OutboundPage() {
   const filtered = useMemo(() => rows.filter(r => {
     if (!filter) return true
     const s = filter.toLowerCase()
-    return ((r.po_no || '') + (r.material_name || '') + (r.notes || '')).toLowerCase().includes(s)
+    return ((r.po_no || '') + (r.material_name || '') + (r.spec || '') + (r.notes || '')).toLowerCase().includes(s)
   }), [rows, filter])
 
   const summaryByPo = useMemo(() => {
@@ -194,7 +196,7 @@ export default function OutboundPage() {
     const q = `${poFilter} ${filter}`.trim().toLowerCase()
     return [...groups.values()].filter(group => {
       if (!q) return true
-      return `${group.po_no || ''} ${group.supplier || ''} ${group.items.map(x => `${x.product_code || ''} ${x.material_name || ''}`).join(' ')}`
+      return `${group.po_no || ''} ${group.supplier || ''} ${group.items.map(x => `${x.product_code || ''} ${x.material_name || ''} ${x.spec || ''}`).join(' ')}`
         .toLowerCase().includes(q)
     })
   }, [stockRows, poFilter, filter])
@@ -220,6 +222,7 @@ export default function OutboundPage() {
         material_id: editing.material_id,
         product_code: editing.product_code,
         material_name: editing.material_name,
+        spec: editing.spec,
         received_qty: editing.received_qty,
         total_out: Number(editing.total_out ?? 0) - Number(editing.qty ?? 0),
         available_qty: Number(editing.available_qty ?? 0) + Number(editing.qty ?? 0),
@@ -325,6 +328,7 @@ export default function OutboundPage() {
                         columns={[
                           { title: '货号', dataIndex: 'product_code', width: 130 },
                           { title: '物料', dataIndex: 'material_name', ellipsis: true },
+                          { title: '规格', dataIndex: 'spec', width: 160, ellipsis: true, render: v => v || <Typography.Text type="secondary">—</Typography.Text> },
                           { title: '累计入库', dataIndex: 'received_qty', width: 120, align: 'right', render: v => Number(v ?? 0).toLocaleString() },
                           { title: '累计出库', dataIndex: 'total_out', width: 120, align: 'right', render: v => Number(v ?? 0).toLocaleString() },
                           { title: '可出库存', dataIndex: 'available_qty', width: 120, align: 'right', render: v => <Typography.Text strong type="success">{Number(v ?? 0).toLocaleString()}</Typography.Text> },
@@ -399,6 +403,7 @@ export default function OutboundPage() {
                     { title: 'PO 号', width: 155, dataIndex: 'po_no', fixed: 'left', render: (v) => <Typography.Text strong>{v || '-'}</Typography.Text> },
                     { title: '货号', width: 110, dataIndex: 'product_code' },
                     { title: '物料名', width: 200, dataIndex: 'material_name', ellipsis: true },
+                    { title: '规格', width: 160, dataIndex: 'spec', ellipsis: true, render: v => v || <Typography.Text type="secondary">—</Typography.Text> },
                     { title: '累计入库', width: 105, dataIndex: 'received_qty', align: 'right', render: (v) => <span className="number-muted">{Number(v ?? 0).toLocaleString()}</span> },
                     { title: '本次出库', width: 105, dataIndex: 'qty', align: 'right', render: (v) => <span className="number-out">{Number(v ?? 0).toLocaleString()}</span> },
                     {
@@ -475,6 +480,7 @@ export default function OutboundPage() {
                     { title: 'PO 号', dataIndex: 'po_no', width: 160 },
                     { title: '货号', dataIndex: 'product_code', width: 110 },
                     { title: '物料', dataIndex: 'material_name', width: 220, ellipsis: true },
+                    { title: '规格', dataIndex: 'spec', width: 160, ellipsis: true, render: v => v || <Typography.Text type="secondary">—</Typography.Text> },
                     { title: '入库', dataIndex: 'in_qty', width: 100, align: 'right', render: (v) => Number(v || 0) ? <Typography.Text type="success">{Number(v).toLocaleString()}</Typography.Text> : '-' },
                     { title: '出库', dataIndex: 'out_qty', width: 100, align: 'right', render: (v) => Number(v || 0) ? <span className="number-out">{Number(v).toLocaleString()}</span> : '-' },
                     { title: '结余', dataIndex: 'balance', width: 100, align: 'right', render: (v) => <Typography.Text strong>{Number(v ?? 0).toLocaleString()}</Typography.Text> },
@@ -513,7 +519,7 @@ export default function OutboundPage() {
       <Modal
         open={bulkPo !== null}
         title={`整单统一出库 · ${bulkPo?.po_no || ''}`}
-        width={880}
+        width={1080}
         onCancel={() => setBulkPo(null)}
         onOk={saveBulkOutbound}
         okText="确认本次统一出库"
@@ -543,11 +549,12 @@ export default function OutboundPage() {
           rowKey="po_item_id"
           size="small"
           pagination={false}
-          scroll={{ y: 420 }}
+          scroll={{ x: 1080, y: 420 }}
           dataSource={bulkPo?.items || []}
           columns={[
             { title: '货号', dataIndex: 'product_code', width: 120 },
-            { title: '物料', dataIndex: 'material_name', ellipsis: true },
+            { title: '物料名称', dataIndex: 'material_name', width: 240, ellipsis: true },
+            { title: '规格', dataIndex: 'spec', width: 160, ellipsis: true, render: v => v || <Typography.Text type="secondary">—</Typography.Text> },
             { title: '累计入库', dataIndex: 'received_qty', width: 110, align: 'right', render: v => Number(v ?? 0).toLocaleString() },
             { title: '已出库', dataIndex: 'total_out', width: 100, align: 'right', render: v => Number(v ?? 0).toLocaleString() },
             { title: '可出库存', dataIndex: 'available_qty', width: 110, align: 'right', render: v => <Typography.Text type="success">{Number(v ?? 0).toLocaleString()}</Typography.Text> },
@@ -586,6 +593,7 @@ export default function OutboundPage() {
                     po_no: stock?.po_no,
                     material_id: stock?.material_id,
                     material_name: stock?.material_name,
+                    spec: stock?.spec,
                     product_code: stock?.product_code,
                     qty: Math.min(Number(editing.qty ?? 0), Number(stock?.available_qty ?? 0)),
                   })
@@ -593,12 +601,12 @@ export default function OutboundPage() {
                 options={[
                   ...stockRows.map(o => ({
                     value: o.po_item_id,
-                    label: `${o.po_no || '-'} · ${o.product_code || '-'} / ${o.material_name || '-'} · 可出 ${Number(o.available_qty ?? 0).toLocaleString()}`,
+                    label: `${o.po_no || '-'} · ${o.product_code || '-'} / ${o.material_name || '-'}${o.spec ? ` / 规格：${o.spec}` : ''} · 可出 ${Number(o.available_qty ?? 0).toLocaleString()}`,
                   })),
                   ...(!creating && selectedStock && !stockRows.some(x => x.po_item_id === selectedStock.po_item_id)
                     ? [{
                         value: selectedStock.po_item_id,
-                        label: `${selectedStock.po_no || '-'} · ${selectedStock.product_code || '-'} / ${selectedStock.material_name || '-'} · 可编辑 ${Number(selectedStock.available_qty ?? 0).toLocaleString()}`,
+                        label: `${selectedStock.po_no || '-'} · ${selectedStock.product_code || '-'} / ${selectedStock.material_name || '-'}${selectedStock.spec ? ` / 规格：${selectedStock.spec}` : ''} · 可编辑 ${Number(selectedStock.available_qty ?? 0).toLocaleString()}`,
                       }]
                     : []),
                 ]}
@@ -612,6 +620,7 @@ export default function OutboundPage() {
               <Card size="small">
                 <Space size="large" wrap>
                   <span>采购单：<b>{selectedStock.po_no}</b></span>
+                  <span>规格：<b>{selectedStock.spec || '—'}</b></span>
                   <span>累计入库：<b>{Number(selectedStock.received_qty ?? 0).toLocaleString()}</b></span>
                   <span>已出库：<b>{Number(selectedStock.total_out ?? 0).toLocaleString()}</b></span>
                   <span>本记录可用：<b style={{ color: '#1677ff' }}>{Number(selectedStock.available_qty ?? 0).toLocaleString()}</b></span>

@@ -35,6 +35,7 @@ public class OutboundController(ISqlConnectionFactory factory) : ControllerBase
             SELECT o.*,
                    i.product_code,
                    COALESCE(i.material_name, m.name_zh) AS material_name,
+                   i.spec,
                    po.supplier,
                    COALESCE(r.received_qty, 0) AS received_qty,
                    COALESCE(s.total_out, 0) AS total_out,
@@ -399,6 +400,7 @@ public class OutboundController(ISqlConnectionFactory factory) : ControllerBase
             )
             SELECT o.id AS outbound_id, o.po_item_id, o.po_no, o.material_id,
                    m.product_code AS code, COALESCE(i.material_name, m.name_zh) AS name_zh,
+                   i.spec,
                    po.supplier, o.out_date, o.notes,
                    COALESCE(o.qty, 0) AS outbound_qty,
                    COALESCE(a.allocated_other, 0) AS allocated_other,
@@ -433,6 +435,7 @@ public class OutboundController(ISqlConnectionFactory factory) : ControllerBase
             )
             SELECT mv.*, po.po_no, i.product_code,
                    COALESCE(i.material_name, m.name_zh) AS material_name,
+                   i.spec,
                    SUM(mv.in_qty - mv.out_qty) OVER (
                        PARTITION BY mv.po_item_id
                        ORDER BY mv.movement_date, mv.created_at, mv.movement_id

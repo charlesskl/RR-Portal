@@ -1215,6 +1215,7 @@ export default function PurchasePage() {
                   columns={[
                     { title: '货号', dataIndex: 'product_code', width: 120 },
                     { title: '物料', dataIndex: 'material_name', width: 220, ellipsis: true },
+                    { title: '规格', dataIndex: 'spec', width: 160, ellipsis: true, render: v => v || <Typography.Text type="secondary">—</Typography.Text> },
                     { title: '采购数量', width: 110, align: 'right', render: (_v, r) => Number(r.purchase_qty ?? r.qty ?? 0).toLocaleString() },
                     { title: '单位', dataIndex: 'purchase_unit', width: 70, render: v => v || '个' },
                     { title: '累计入库', dataIndex: 'received_qty', width: 110, align: 'right', render: v => Number(v ?? 0).toLocaleString() },
@@ -1401,7 +1402,7 @@ export default function PurchasePage() {
       <Modal
         open={bulkReceiptPo !== null}
         title={`整单统一入库 · ${bulkReceiptPo?.po_no || ''}`}
-        width={900}
+        width={1080}
         onCancel={() => setBulkReceiptPo(null)}
         onOk={saveBulkReceipt}
         okText="确认本批统一入库"
@@ -1438,11 +1439,12 @@ export default function PurchasePage() {
           rowKey="id"
           size="small"
           pagination={false}
-          scroll={{ y: 420 }}
+          scroll={{ x: 1080, y: 420 }}
           dataSource={(itemsByPo.get(bulkReceiptPo?.id || 0) || []).filter(x => Number(x.shortage_qty ?? 0) > 0)}
           columns={[
             { title: '货号', dataIndex: 'product_code', width: 120 },
-            { title: '物料', dataIndex: 'material_name', ellipsis: true },
+            { title: '物料名称', dataIndex: 'material_name', width: 240, ellipsis: true },
+            { title: '规格', dataIndex: 'spec', width: 160, ellipsis: true, render: v => v || <Typography.Text type="secondary">—</Typography.Text> },
             { title: '采购数', width: 105, align: 'right', render: (_v, r) => Number(r.purchase_qty ?? r.qty ?? 0).toLocaleString() },
             { title: '已入库', dataIndex: 'received_qty', width: 100, align: 'right', render: v => Number(v ?? 0).toLocaleString() },
             { title: '欠数', dataIndex: 'shortage_qty', width: 100, align: 'right', render: v => <Typography.Text type="danger">{Number(v ?? 0).toLocaleString()}</Typography.Text> },
@@ -1462,7 +1464,7 @@ export default function PurchasePage() {
 
       <Modal
         open={receiptItem !== null}
-        title={`分批入库 · ${receiptItem?.po_no || ''} · ${receiptItem?.material_name || receiptItem?.product_code || ''}`}
+        title={`分批入库 · ${receiptItem?.po_no || ''} · ${receiptItem?.material_name || receiptItem?.product_code || ''}${receiptItem?.spec ? ` · ${receiptItem.spec}` : ''}`}
         width={760}
         onCancel={() => { setReceiptItem(null); setReceiptRows([]); receiptForm.resetFields() }}
         onOk={saveReceipt}

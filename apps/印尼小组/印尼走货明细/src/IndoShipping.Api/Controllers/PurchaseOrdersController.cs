@@ -346,6 +346,118 @@ RETURNING id",
         public string? notes { get; set; }
     }
 
+    public class BulkReceiptLine
+    {
+        public int po_item_id { get; set; }
+        public decimal? qty { get; set; }
+    }
+
+    public class BulkReceiptBody
+    {
+        public DateTime? receipt_date { get; set; }
+        public string? batch_no { get; set; }
+        public string? notes { get; set; }
+        public List<BulkReceiptLine>? items { get; set; }
+    }
+
+    private sealed class BulkReceiptStock
+    {
+        public int PoItemId { get; set; }
+        public decimal OrderedQty { get; set; }
+        public decimal ReceivedQty { get; set; }
+    }
+
+    // 同一采购单统一入库：一次提交多项物料，但仍逐项写入库存流水，保证欠数可精确追踪。
+    [HttpPost("{poId:int}/receipts/bulk")]
+    public async Task<IActionResult> CreateBulkReceipt(int poId, [FromBody] BulkReceiptBody body)
+    {
+        var requested = (body.items ?? new())
+            .Where(x => x.po_item_id > 0 && (x.qty ?? 0) > 0)
+            .GroupBy(x => x.po_item_id)
+            .Select(g => new { PoItemId = g.Key, Qty = g.Sum(x => x.qty ?? 0) })
+            .ToList();
+        if (requested.Count == 0) return BadRequest(new { error = "请至少填写一项入库数量" });
+
+        using var c = factory.Create();
+        c.Open();
+        using var tx = c.BeginTransaction();
+        try
+        {
+            var poNo = await c.ExecuteScalarAsync<string?>(
+                "SELECT po_no FROM purchase_orders WHERE id=@poId FOR UPDATE", new { poId }, tx);
+            if (poNo is null)
+            {
+                tx.Rollback();
+                return NotFound(new { error = "采购单不存在" });
+            }
+
+            var itemIds = requested.Select(x => x.PoItemId).ToArray();
+            var stocks = (await c.QueryAsync<BulkReceiptStock>(@"
+                SELECT i.id AS ""PoItemId"",
+                       COALESCE(i.purchase_qty, i.qty, 0) AS ""OrderedQty"",
+                       COALESCE((SELECT SUM(r.qty) FROM po_receipts r WHERE r.po_item_id=i.id), 0) AS ""ReceivedQty""
+                FROM po_items i
+                WHERE i.po_id=@poId AND i.id = ANY(@itemIds)
+                FOR UPDATE OF i", new { poId, itemIds }, tx)).ToDictionary(x => x.PoItemId);
+            if (stocks.Count != requested.Count)
+            {
+                tx.Rollback();
+                return BadRequest(new { error = "提交内容包含不属于该采购单的物料" });
+            }
+
+            foreach (var line in requested)
+            {
+                var stock = stocks[line.PoItemId];
+                var shortage = Math.Max(stock.OrderedQty - stock.ReceivedQty, 0);
+                if (line.Qty > shortage)
+                {
+                    tx.Rollback();
+                    return BadRequest(new
+                    {
+                        error = $"采购明细 #{line.PoItemId} 本批入库 {line.Qty:0.####} 超过欠数 {shortage:0.####}"
+                    });
+                }
+            }
+
+            var receiptDate = body.receipt_date?.Date ?? DateTime.Today;
+            var batchNo = body.batch_no?.Trim() ?? "";
+            var notes = body.notes?.Trim() ?? "";
+            var ids = new List<int>();
+            foreach (var line in requested)
+            {
+                var receiptId = await c.ExecuteScalarAsync<int>(@"
+                    INSERT INTO po_receipts(po_item_id, receipt_date, qty, batch_no, notes)
+                    VALUES (@poItemId, @receiptDate, @qty, @batchNo, @notes)
+                    RETURNING id",
+                    new { line.PoItemId, receiptDate, line.Qty, batchNo, notes }, tx);
+                ids.Add(receiptId);
+            }
+
+            await c.ExecuteAsync(@"
+                UPDATE purchase_orders po
+                SET status='received'
+                WHERE po.id=@poId
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM po_items i
+                      LEFT JOIN (
+                          SELECT po_item_id, SUM(qty) AS received_qty
+                          FROM po_receipts GROUP BY po_item_id
+                      ) r ON r.po_item_id=i.id
+                      WHERE i.po_id=po.id
+                        AND COALESCE(i.purchase_qty, i.qty, 0) > COALESCE(r.received_qty, 0)
+                  )", new { poId }, tx);
+
+            var totalQty = requested.Sum(x => x.Qty);
+            await this.WriteAsync(c, tx, "inventory", "bulk_receipt", "purchase_order", poId,
+                $"采购单 {poNo} 统一入库 {requested.Count} 项 / {totalQty:0.####}",
+                new { po_id = poId, po_no = poNo, receipt_date = receiptDate, batch_no = batchNo, items = requested });
+            tx.Commit();
+            return Ok(new { ok = true, receipt_ids = ids, item_count = requested.Count, qty = totalQty });
+        }
+        catch { tx.Rollback(); throw; }
+    }
+
     [HttpGet("items/{itemId:int}/receipts")]
     public async Task<IActionResult> ListReceipts(int itemId)
     {

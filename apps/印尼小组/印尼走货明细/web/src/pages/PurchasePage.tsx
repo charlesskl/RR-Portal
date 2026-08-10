@@ -195,6 +195,11 @@ export default function PurchasePage() {
   const [receiptRows, setReceiptRows] = useState<ReceiptRecord[]>([])
   const [receiptLoading, setReceiptLoading] = useState(false)
   const [receiptForm] = Form.useForm()
+  const [bulkReceiptPo, setBulkReceiptPo] = useState<PoSummary | null>(null)
+  const [bulkReceiptQty, setBulkReceiptQty] = useState<Record<number, number>>({})
+  const [bulkReceiptDate, setBulkReceiptDate] = useState(dayjs())
+  const [bulkReceiptBatch, setBulkReceiptBatch] = useState('')
+  const [bulkReceiptNotes, setBulkReceiptNotes] = useState('')
 
   async function load() {
     setLoading(true)
@@ -264,6 +269,32 @@ export default function PurchasePage() {
       shortage_qty: Number(receiptItem.shortage_qty ?? 0) + deletedQty,
     })
     await Promise.all([load(), loadReceipts(receiptItem.id)])
+  }
+
+  function openBulkReceipt(po: PoSummary) {
+    const poItems = itemRows.filter(x => x.po_id === po.id && Number(x.shortage_qty ?? 0) > 0)
+    setBulkReceiptPo(po)
+    setBulkReceiptQty(Object.fromEntries(poItems.map(x => [x.id, 0])))
+    setBulkReceiptDate(dayjs())
+    setBulkReceiptBatch('')
+    setBulkReceiptNotes('')
+  }
+
+  async function saveBulkReceipt() {
+    if (!bulkReceiptPo) return
+    const items = Object.entries(bulkReceiptQty)
+      .map(([po_item_id, qty]) => ({ po_item_id: Number(po_item_id), qty: Number(qty) || 0 }))
+      .filter(x => x.qty > 0)
+    if (!items.length) { message.warning('请至少填写一项本批入库数量'); return }
+    await api.post(`/purchase/${bulkReceiptPo.id}/receipts/bulk`, {
+      receipt_date: bulkReceiptDate.format('YYYY-MM-DD'),
+      batch_no: bulkReceiptBatch,
+      notes: bulkReceiptNotes,
+      items,
+    })
+    message.success(`采购单 ${bulkReceiptPo.po_no || ''} 已统一入库 ${items.length} 项`)
+    setBulkReceiptPo(null)
+    await load()
   }
   async function loadProductCodes() {
     try {
@@ -605,7 +636,6 @@ export default function PurchasePage() {
     }
   }
   const [poSelKeys, setPoSelKeys] = useState<React.Key[]>([])
-  const [detailSelKeys, setDetailSelKeys] = useState<React.Key[]>([])
   async function delSelected() {
     if (!poSelKeys.length) return
     setLoading(true)
@@ -615,7 +645,7 @@ export default function PurchasePage() {
       try { await api.delete(`/purchase/${k}`); ok++ }
       catch (e: any) { fails.push(`#${k}: ${e?.response?.data?.error ?? e?.message ?? '失败'}`) }
     }
-    setLoading(false); setPoSelKeys([]); setDetailSelKeys([])
+    setLoading(false); setPoSelKeys([])
     if (fails.length) Modal.warning({ title: `成功 ${ok} 条，失败 ${fails.length} 条`, content: fails.join('\n') })
     else message.success(`已删除 ${ok} 条`)
     load()
@@ -1079,6 +1109,28 @@ export default function PurchasePage() {
     ].join(' ').toLowerCase().includes(s)
   }), [itemRows, filter, statusFilter, dateRange])
 
+  const itemsByPo = useMemo(() => {
+    const map = new Map<number, PurchaseItemRow[]>()
+    for (const item of itemRows) map.set(item.po_id, [...(map.get(item.po_id) || []), item])
+    return map
+  }, [itemRows])
+
+  const visiblePurchaseOrders = useMemo(() => {
+    const matchedPoIds = new Set(filteredItems.map(x => x.po_id))
+    return rows.filter(po => {
+      if (statusFilter && po.status !== statusFilter) return false
+      if (dateRange[0] || dateRange[1]) {
+        const d = po.order_date ? dayjs(po.order_date) : null
+        if (!d) return false
+        if (dateRange[0] && d.isBefore(dayjs(dateRange[0]), 'day')) return false
+        if (dateRange[1] && d.isAfter(dayjs(dateRange[1]), 'day')) return false
+      }
+      if (!filter) return true
+      const header = `${po.po_no || ''} ${po.supplier || ''} ${po.notes || ''}`.toLowerCase()
+      return header.includes(filter.toLowerCase()) || matchedPoIds.has(po.id)
+    })
+  }, [rows, filteredItems, filter, statusFilter, dateRange])
+
   const statsByStatus = useMemo(() => {
     const m = new Map<string, number>()
     for (const r of rows) m.set(r.status || 'draft', (m.get(r.status || 'draft') ?? 0) + 1)
@@ -1090,7 +1142,7 @@ export default function PurchasePage() {
   return (
     <div style={{ padding: 16 }}>
       <Card
-        title={`采购管理 — 共 ${filteredItems.length} 行物料 / ${rows.length} 张采购单`}
+        title={`采购管理 — 共 ${visiblePurchaseOrders.length} 张采购单（物料默认收起）`}
         extra={
           <Space wrap size={[4, 8]}>
             <Input.Search allowClear placeholder="搜索采购单 / 货号 / 物料 / 供应商" style={{ width: 260 }}
@@ -1142,84 +1194,83 @@ export default function PurchasePage() {
           rowKey="id"
           size="small"
           loading={loading}
-          dataSource={filteredItems}
+          dataSource={visiblePurchaseOrders}
           rowSelection={{
-            selectedRowKeys: detailSelKeys,
-            onChange: (keys, selected) => {
-              setDetailSelKeys(keys)
-              setPoSelKeys([...new Set(selected.map(r => r.po_id))])
-            },
+            selectedRowKeys: poSelKeys,
+            onChange: setPoSelKeys,
           }}
-          pagination={{ defaultPageSize: 50, showSizeChanger: true }}
-          scroll={{ x: 1700 }}
+          pagination={{ defaultPageSize: 30, showSizeChanger: true }}
+          scroll={{ x: 1200 }}
           rowClassName={(r) => Number(r.shortage_qty ?? 0) <= 0 ? 'purchase-row-complete' : ''}
+          expandable={{
+            expandedRowRender: (po) => {
+              const details = itemsByPo.get(po.id) || []
+              return (
+                <Table
+                  rowKey="id"
+                  size="small"
+                  pagination={false}
+                  dataSource={details}
+                  scroll={{ x: 1250 }}
+                  columns={[
+                    { title: '货号', dataIndex: 'product_code', width: 120 },
+                    { title: '物料', dataIndex: 'material_name', width: 220, ellipsis: true },
+                    { title: '采购数量', width: 110, align: 'right', render: (_v, r) => Number(r.purchase_qty ?? r.qty ?? 0).toLocaleString() },
+                    { title: '单位', dataIndex: 'purchase_unit', width: 70, render: v => v || '个' },
+                    { title: '累计入库', dataIndex: 'received_qty', width: 110, align: 'right', render: v => Number(v ?? 0).toLocaleString() },
+                    { title: '欠数', dataIndex: 'shortage_qty', width: 100, align: 'right', render: v => Number(v ?? 0) > 0 ? <Typography.Text type="danger">{Number(v).toLocaleString()}</Typography.Text> : <Tag color="success">完成</Tag> },
+                    { title: '入库批次', dataIndex: 'receipt_summary', width: 330, render: v => v || <Typography.Text type="secondary">尚未入库</Typography.Text> },
+                    { title: '操作', width: 90, render: (_v, r) => <Button size="small" onClick={() => openReceipt(r)}>单项入库</Button> },
+                  ]}
+                />
+              )
+            },
+            rowExpandable: po => (itemsByPo.get(po.id)?.length || 0) > 0,
+            columnTitle: '物料',
+          }}
           columns={[
             {
-              title: '日期', dataIndex: 'order_date', width: 95,
-              render: (v) => v ? dayjs(v).format('MM/DD') : '',
+              title: '下单日期', dataIndex: 'order_date', width: 110,
+              render: (v) => v ? dayjs(v).format('YYYY-MM-DD') : '',
             },
             {
-              title: '采购单号', dataIndex: 'po_no', width: 170, fixed: 'left',
-              render: (v, r) => <a onClick={() => {
-                const po = rows.find(x => x.id === r.po_id)
-                if (po) openEdit(po)
-              }}>{v || `#${r.po_id}`}</a>,
+              title: '采购单号', dataIndex: 'po_no', width: 180, fixed: 'left',
+              render: (v, po) => <a onClick={() => openEdit(po)}>{v || `#${po.id}`}</a>,
             },
             { title: '供应商', dataIndex: 'supplier', width: 170, ellipsis: true },
-            { title: '货号', dataIndex: 'product_code', width: 130, ellipsis: true },
-            { title: '货品名称', dataIndex: 'material_name', width: 220, ellipsis: true },
             {
-              title: '采购数量', width: 110, align: 'right',
-              render: (_v, r) => Number(r.purchase_qty ?? r.qty ?? 0).toLocaleString(),
+              title: '物料项', dataIndex: 'item_count', width: 90, align: 'center',
+              render: v => <Tag bordered={false} color="blue">{Number(v ?? 0)} 项</Tag>,
             },
             {
-              title: '单位', dataIndex: 'purchase_unit', width: 75,
-              render: (v) => v || '个',
+              title: '交货期', dataIndex: 'delivery_date', width: 110,
+              render: (v) => v ? dayjs(v).format('YYYY-MM-DD') : '-',
             },
             {
-              title: '单价', dataIndex: 'price', width: 105, align: 'right',
-              render: (v, r) => `${r.currency || '¥'} ${Number(v ?? 0).toFixed(4)}`,
+              title: '累计入库', dataIndex: 'received_qty', width: 120, align: 'right',
+              render: v => Number(v ?? 0).toLocaleString(),
             },
             {
-              title: '金额', width: 120, align: 'right',
-              render: (_v, r) => (
-                Number((r.purchase_qty ?? r.qty ?? 0) * (r.price ?? 0)).toLocaleString(undefined, {
-                  minimumFractionDigits: 2,
-                  maximumFractionDigits: 2,
-                })
-              ),
-            },
-            {
-              title: '交货期', dataIndex: 'delivery_date', width: 100,
-              render: (v) => v ? dayjs(v).format('MM/DD') : '',
-            },
-            {
-              title: '入库记录', dataIndex: 'receipt_summary', width: 330,
-              render: (v, r) => v
-                ? <Typography.Text>{v}</Typography.Text>
-                : <Typography.Text type="secondary">尚未入库{r.notes ? ` · ${r.notes}` : ''}</Typography.Text>,
-            },
-            {
-              title: '累计入库', dataIndex: 'received_qty', width: 110, align: 'right',
-              render: (v) => Number(v ?? 0).toLocaleString(),
-            },
-            {
-              title: '欠数', dataIndex: 'shortage_qty', width: 105, align: 'right', fixed: 'right',
-              render: (v) => Number(v ?? 0) > 0
+              title: '总欠数', dataIndex: 'shortage_qty', width: 120, align: 'right',
+              render: v => Number(v ?? 0) > 0
                 ? <Typography.Text strong type="danger">{Number(v).toLocaleString()}</Typography.Text>
-                : <Tag color="success">已入库</Tag>,
+                : <Tag color="success">全部入库</Tag>,
             },
             {
-              title: '操作', width: 125, fixed: 'right',
-              render: (_v, r) => (
+              title: '状态', dataIndex: 'status', width: 100,
+              render: v => {
+                const status = STATUS.find(x => x.value === v) || STATUS[0]
+                return <Tag color={status.color}>{status.label}</Tag>
+              },
+            },
+            {
+              title: '操作', width: 190, fixed: 'right',
+              render: (_v, po) => (
                 <Space size={4}>
-                  <Button size="small" type="primary" ghost onClick={() => openReceipt(r)}>
-                    入库
+                  <Button size="small" type="primary" ghost disabled={Number(po.shortage_qty ?? 0) <= 0} onClick={() => openBulkReceipt(po)}>
+                    统一入库
                   </Button>
-                  <Button size="small" onClick={() => {
-                    const po = rows.find(x => x.id === r.po_id)
-                    if (po) openEdit(po)
-                  }}>编辑</Button>
+                  <Button size="small" onClick={() => openEdit(po)}>编辑订单</Button>
                 </Space>
               ),
             },
@@ -1346,6 +1397,68 @@ export default function PurchasePage() {
           />
         </Card>
       </Drawer>
+
+      <Modal
+        open={bulkReceiptPo !== null}
+        title={`整单统一入库 · ${bulkReceiptPo?.po_no || ''}`}
+        width={900}
+        onCancel={() => setBulkReceiptPo(null)}
+        onOk={saveBulkReceipt}
+        okText="确认本批统一入库"
+        destroyOnClose
+      >
+        <Typography.Paragraph type="secondary">
+          同一张采购单只登记一次日期、批次和备注；下方逐项填写本批实收数量，未到货的物料保持 0。
+        </Typography.Paragraph>
+        <Row gutter={12} style={{ marginBottom: 12 }}>
+          <Col span={7}>
+            <Field label="入库日期">
+              <DatePicker value={bulkReceiptDate} onChange={v => v && setBulkReceiptDate(v)} style={{ width: '100%' }} />
+            </Field>
+          </Col>
+          <Col span={7}>
+            <Field label="统一批次号">
+              <Input value={bulkReceiptBatch} onChange={e => setBulkReceiptBatch(e.target.value)} placeholder="可选" />
+            </Field>
+          </Col>
+          <Col span={10}>
+            <Field label="统一备注">
+              <Input value={bulkReceiptNotes} onChange={e => setBulkReceiptNotes(e.target.value)} placeholder="送货单号、异常说明等" />
+            </Field>
+          </Col>
+        </Row>
+        <Space style={{ marginBottom: 8 }}>
+          <Button onClick={() => setBulkReceiptQty(Object.fromEntries(
+            (itemsByPo.get(bulkReceiptPo?.id || 0) || []).map(x => [x.id, Number(x.shortage_qty ?? 0)]),
+          ))}>填入全部欠数</Button>
+          <Button onClick={() => setBulkReceiptQty({})}>全部清零</Button>
+          <Typography.Text type="secondary">只会提交数量大于 0 的物料</Typography.Text>
+        </Space>
+        <Table
+          rowKey="id"
+          size="small"
+          pagination={false}
+          scroll={{ y: 420 }}
+          dataSource={(itemsByPo.get(bulkReceiptPo?.id || 0) || []).filter(x => Number(x.shortage_qty ?? 0) > 0)}
+          columns={[
+            { title: '货号', dataIndex: 'product_code', width: 120 },
+            { title: '物料', dataIndex: 'material_name', ellipsis: true },
+            { title: '采购数', width: 105, align: 'right', render: (_v, r) => Number(r.purchase_qty ?? r.qty ?? 0).toLocaleString() },
+            { title: '已入库', dataIndex: 'received_qty', width: 100, align: 'right', render: v => Number(v ?? 0).toLocaleString() },
+            { title: '欠数', dataIndex: 'shortage_qty', width: 100, align: 'right', render: v => <Typography.Text type="danger">{Number(v ?? 0).toLocaleString()}</Typography.Text> },
+            {
+              title: '本批入库', width: 150, fixed: 'right',
+              render: (_v, r) => <InputNumber
+                min={0}
+                max={Number(r.shortage_qty ?? 0)}
+                value={bulkReceiptQty[r.id] || 0}
+                onChange={v => setBulkReceiptQty(q => ({ ...q, [r.id]: Number(v ?? 0) }))}
+                style={{ width: '100%' }}
+              />,
+            },
+          ]}
+        />
+      </Modal>
 
       <Modal
         open={receiptItem !== null}
@@ -1557,6 +1670,15 @@ export default function PurchasePage() {
         />
       </Modal>
     </div>
+  )
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <span style={{ fontSize: 12, color: '#666' }}>{label}</span>
+      {children}
+    </label>
   )
 }
 

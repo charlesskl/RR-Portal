@@ -95,6 +95,29 @@ public class OutboundController(ISqlConnectionFactory factory) : ControllerBase
         public string? notes { get; set; }
     }
 
+    public class BulkOutboundLine
+    {
+        public int po_item_id { get; set; }
+        public decimal? qty { get; set; }
+    }
+
+    public class BulkOutboundBody
+    {
+        public int po_id { get; set; }
+        public DateTime? out_date { get; set; }
+        public string? notes { get; set; }
+        public List<BulkOutboundLine>? items { get; set; }
+    }
+
+    private sealed class BulkOutboundStock
+    {
+        public int PoItemId { get; set; }
+        public string PoNo { get; set; } = "";
+        public int? MaterialId { get; set; }
+        public decimal ReceivedQty { get; set; }
+        public decimal OutboundQty { get; set; }
+    }
+
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] CreateBody body)
     {
@@ -150,6 +173,77 @@ public class OutboundController(ISqlConnectionFactory factory) : ControllerBase
                 new { id, po_item_id = item.PoItemId, po_no = item.PoNo, qty });
             tx.Commit();
             return Ok(new { ok = true, id, available_qty = available - qty });
+        }
+        catch { tx.Rollback(); throw; }
+    }
+
+    // 同一采购单统一出库：一次提交多项物料，数据库仍保留逐项出库记录，便于库存和装柜精确分配。
+    [HttpPost("bulk")]
+    public async Task<IActionResult> CreateBulk([FromBody] BulkOutboundBody body)
+    {
+        var requested = (body.items ?? new())
+            .Where(x => x.po_item_id > 0 && (x.qty ?? 0) > 0)
+            .GroupBy(x => x.po_item_id)
+            .Select(g => new { PoItemId = g.Key, Qty = g.Sum(x => x.qty ?? 0) })
+            .ToList();
+        if (body.po_id <= 0) return BadRequest(new { error = "请选择采购单" });
+        if (requested.Count == 0) return BadRequest(new { error = "请至少填写一项出库数量" });
+
+        using var c = factory.Create();
+        c.Open();
+        using var tx = c.BeginTransaction();
+        try
+        {
+            var itemIds = requested.Select(x => x.PoItemId).ToArray();
+            var stocks = (await c.QueryAsync<BulkOutboundStock>(@"
+                SELECT i.id AS ""PoItemId"", po.po_no AS ""PoNo"", i.material_id AS ""MaterialId"",
+                       COALESCE((SELECT SUM(r.qty) FROM po_receipts r WHERE r.po_item_id=i.id), 0) AS ""ReceivedQty"",
+                       COALESCE((SELECT SUM(o.qty) FROM outbound o WHERE o.po_item_id=i.id), 0) AS ""OutboundQty""
+                FROM po_items i
+                JOIN purchase_orders po ON po.id=i.po_id
+                WHERE i.po_id=@poId AND i.id = ANY(@itemIds)
+                FOR UPDATE OF i", new { poId = body.po_id, itemIds }, tx)).ToDictionary(x => x.PoItemId);
+            if (stocks.Count != requested.Count)
+            {
+                tx.Rollback();
+                return BadRequest(new { error = "提交内容包含不属于该采购单的物料" });
+            }
+
+            foreach (var line in requested)
+            {
+                var stock = stocks[line.PoItemId];
+                var available = Math.Max(stock.ReceivedQty - stock.OutboundQty, 0);
+                if (line.Qty > available)
+                {
+                    tx.Rollback();
+                    return BadRequest(new
+                    {
+                        error = $"采购明细 #{line.PoItemId} 本次出库 {line.Qty:0.####} 超过可用库存 {available:0.####}"
+                    });
+                }
+            }
+
+            var outDate = body.out_date?.Date ?? DateTime.Today;
+            var notes = body.notes?.Trim() ?? "";
+            var ids = new List<int>();
+            foreach (var line in requested)
+            {
+                var stock = stocks[line.PoItemId];
+                var id = await c.ExecuteScalarAsync<int>(@"
+                    INSERT INTO outbound(po_item_id, po_no, material_id, qty, out_date, notes)
+                    VALUES (@poItemId, @poNo, @materialId, @qty, @outDate, @notes)
+                    RETURNING id",
+                    new { line.PoItemId, stock.PoNo, stock.MaterialId, line.Qty, outDate, notes }, tx);
+                ids.Add(id);
+            }
+
+            var poNo = stocks.Values.First().PoNo;
+            var totalQty = requested.Sum(x => x.Qty);
+            await this.WriteAsync(c, tx, "outbound", "bulk_create", "purchase_order", body.po_id,
+                $"采购单 {poNo} 统一出库 {requested.Count} 项 / {totalQty:0.####}",
+                new { po_id = body.po_id, po_no = poNo, out_date = outDate, items = requested });
+            tx.Commit();
+            return Ok(new { ok = true, outbound_ids = ids, item_count = requested.Count, qty = totalQty });
         }
         catch { tx.Rollback(); throw; }
     }

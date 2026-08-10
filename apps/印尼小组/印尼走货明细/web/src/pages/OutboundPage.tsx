@@ -88,6 +88,10 @@ export default function OutboundPage() {
   const [stockRows, setStockRows] = useState<StockRow[]>([])
   const [ledgerRows, setLedgerRows] = useState<LedgerRow[]>([])
   const [auditRows, setAuditRows] = useState<AuditRow[]>([])
+  const [bulkPo, setBulkPo] = useState<{ po_id: number; po_no?: string; supplier?: string; items: StockRow[] } | null>(null)
+  const [bulkQty, setBulkQty] = useState<Record<number, number>>({})
+  const [bulkOutDate, setBulkOutDate] = useState(dayjs())
+  const [bulkNotes, setBulkNotes] = useState('')
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -135,6 +139,30 @@ export default function OutboundPage() {
     } catch { /* 拦截器已提示 */ }
   }
 
+  function openBulkOutbound(group: { po_id: number; po_no?: string; supplier?: string; items: StockRow[] }) {
+    setBulkPo(group)
+    setBulkQty(Object.fromEntries(group.items.map(x => [x.po_item_id, 0])))
+    setBulkOutDate(dayjs())
+    setBulkNotes('')
+  }
+
+  async function saveBulkOutbound() {
+    if (!bulkPo) return
+    const items = Object.entries(bulkQty)
+      .map(([po_item_id, qty]) => ({ po_item_id: Number(po_item_id), qty: Number(qty) || 0 }))
+      .filter(x => x.qty > 0)
+    if (!items.length) { message.warning('请至少填写一项本次出库数量'); return }
+    await api.post('/outbound/bulk', {
+      po_id: bulkPo.po_id,
+      out_date: bulkOutDate.format('YYYY-MM-DD'),
+      notes: bulkNotes,
+      items,
+    })
+    message.success(`采购单 ${bulkPo.po_no || ''} 已统一出库 ${items.length} 项`)
+    setBulkPo(null)
+    await load()
+  }
+
   const filtered = useMemo(() => rows.filter(r => {
     if (!filter) return true
     const s = filter.toLowerCase()
@@ -149,6 +177,27 @@ export default function OutboundPage() {
     }
     return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0]))
   }, [summary])
+
+  const stockGroups = useMemo(() => {
+    const groups = new Map<number, { po_id: number; po_no?: string; supplier?: string; items: StockRow[]; received: number; out: number; available: number }>()
+    for (const item of stockRows) {
+      const group = groups.get(item.po_id) || {
+        po_id: item.po_id, po_no: item.po_no, supplier: item.supplier,
+        items: [], received: 0, out: 0, available: 0,
+      }
+      group.items.push(item)
+      group.received += Number(item.received_qty ?? 0)
+      group.out += Number(item.total_out ?? 0)
+      group.available += Number(item.available_qty ?? 0)
+      groups.set(item.po_id, group)
+    }
+    const q = `${poFilter} ${filter}`.trim().toLowerCase()
+    return [...groups.values()].filter(group => {
+      if (!q) return true
+      return `${group.po_no || ''} ${group.supplier || ''} ${group.items.map(x => `${x.product_code || ''} ${x.material_name || ''}`).join(' ')}`
+        .toLowerCase().includes(q)
+    })
+  }, [stockRows, poFilter, filter])
 
   const selectedStock = useMemo(() => {
     if (!editing?.po_item_id) return undefined
@@ -241,7 +290,64 @@ export default function OutboundPage() {
         className="outbound-tabs"
         items={[
           {
-            key: 'list', label: '出库登记',
+            key: 'order', label: '按订单统一出库',
+            children: (
+              <Card
+                className="outbound-list-card"
+                title={
+                  <Space size={10}>
+                    <span>可出库订单</span>
+                    <Tag bordered={false} color="blue">{stockGroups.length} 张</Tag>
+                  </Space>
+                }
+              >
+                <div className="outbound-toolbar">
+                  <div className="outbound-toolbar-searches">
+                    <Input allowClear prefix={<SearchOutlined />} placeholder="搜索 PO、供应商、货号或物料"
+                      value={filter} onChange={e => setFilter(e.target.value)} />
+                  </div>
+                  <Button icon={<ReloadOutlined />} onClick={load}>刷新</Button>
+                </div>
+                <Table
+                  className="outbound-table"
+                  rowKey="po_id"
+                  size="small"
+                  loading={loading}
+                  dataSource={stockGroups}
+                  pagination={{ defaultPageSize: 20, showSizeChanger: true, hideOnSinglePage: true }}
+                  expandable={{
+                    expandedRowRender: group => (
+                      <Table
+                        rowKey="po_item_id"
+                        size="small"
+                        pagination={false}
+                        dataSource={group.items}
+                        columns={[
+                          { title: '货号', dataIndex: 'product_code', width: 130 },
+                          { title: '物料', dataIndex: 'material_name', ellipsis: true },
+                          { title: '累计入库', dataIndex: 'received_qty', width: 120, align: 'right', render: v => Number(v ?? 0).toLocaleString() },
+                          { title: '累计出库', dataIndex: 'total_out', width: 120, align: 'right', render: v => Number(v ?? 0).toLocaleString() },
+                          { title: '可出库存', dataIndex: 'available_qty', width: 120, align: 'right', render: v => <Typography.Text strong type="success">{Number(v ?? 0).toLocaleString()}</Typography.Text> },
+                        ]}
+                      />
+                    ),
+                    columnTitle: '物料',
+                  }}
+                  columns={[
+                    { title: 'PO 号', dataIndex: 'po_no', width: 190, render: v => <Typography.Text strong>{v || '-'}</Typography.Text> },
+                    { title: '供应商', dataIndex: 'supplier', ellipsis: true },
+                    { title: '可出物料', width: 110, align: 'center', render: (_v, r) => <Tag color="blue">{r.items.length} 项</Tag> },
+                    { title: '累计入库', dataIndex: 'received', width: 130, align: 'right', render: v => Number(v ?? 0).toLocaleString() },
+                    { title: '累计出库', dataIndex: 'out', width: 130, align: 'right', render: v => Number(v ?? 0).toLocaleString() },
+                    { title: '当前可出', dataIndex: 'available', width: 130, align: 'right', render: v => <span className="stock-pill">{Number(v ?? 0).toLocaleString()}</span> },
+                    { title: '操作', width: 130, fixed: 'right', render: (_v, r) => <Button type="primary" ghost onClick={() => openBulkOutbound(r)}>统一出库</Button> },
+                  ]}
+                />
+              </Card>
+            ),
+          },
+          {
+            key: 'list', label: '出库明细记录',
             children: (
               <Card
                 className="outbound-list-card"
@@ -403,6 +509,61 @@ export default function OutboundPage() {
           },
         ]}
       />
+
+      <Modal
+        open={bulkPo !== null}
+        title={`整单统一出库 · ${bulkPo?.po_no || ''}`}
+        width={880}
+        onCancel={() => setBulkPo(null)}
+        onOk={saveBulkOutbound}
+        okText="确认本次统一出库"
+        destroyOnClose
+      >
+        <Typography.Paragraph type="secondary">
+          同一张订单只登记一次出库日期和备注；下方逐项填写实际出库数量，库存流水仍按物料精确记录。
+        </Typography.Paragraph>
+        <Row gutter={12} style={{ marginBottom: 12 }}>
+          <Col span={8}>
+            <Field label="出库日期">
+              <DatePicker value={bulkOutDate} onChange={v => v && setBulkOutDate(v)} style={{ width: '100%' }} />
+            </Field>
+          </Col>
+          <Col span={16}>
+            <Field label="统一备注">
+              <Input value={bulkNotes} onChange={e => setBulkNotes(e.target.value)} placeholder="领料单号、用途或异常说明" />
+            </Field>
+          </Col>
+        </Row>
+        <Space style={{ marginBottom: 8 }}>
+          <Button onClick={() => setBulkQty(Object.fromEntries((bulkPo?.items || []).map(x => [x.po_item_id, Number(x.available_qty ?? 0)])))}>填入全部可出库存</Button>
+          <Button onClick={() => setBulkQty({})}>全部清零</Button>
+          <Typography.Text type="secondary">只会提交数量大于 0 的物料</Typography.Text>
+        </Space>
+        <Table
+          rowKey="po_item_id"
+          size="small"
+          pagination={false}
+          scroll={{ y: 420 }}
+          dataSource={bulkPo?.items || []}
+          columns={[
+            { title: '货号', dataIndex: 'product_code', width: 120 },
+            { title: '物料', dataIndex: 'material_name', ellipsis: true },
+            { title: '累计入库', dataIndex: 'received_qty', width: 110, align: 'right', render: v => Number(v ?? 0).toLocaleString() },
+            { title: '已出库', dataIndex: 'total_out', width: 100, align: 'right', render: v => Number(v ?? 0).toLocaleString() },
+            { title: '可出库存', dataIndex: 'available_qty', width: 110, align: 'right', render: v => <Typography.Text type="success">{Number(v ?? 0).toLocaleString()}</Typography.Text> },
+            {
+              title: '本次出库', width: 150, fixed: 'right',
+              render: (_v, r) => <InputNumber
+                min={0}
+                max={Number(r.available_qty ?? 0)}
+                value={bulkQty[r.po_item_id] || 0}
+                onChange={v => setBulkQty(q => ({ ...q, [r.po_item_id]: Number(v ?? 0) }))}
+                style={{ width: '100%' }}
+              />,
+            },
+          ]}
+        />
+      </Modal>
 
       <Modal
         open={editing !== null}

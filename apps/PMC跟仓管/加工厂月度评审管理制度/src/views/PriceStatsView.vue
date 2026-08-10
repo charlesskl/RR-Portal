@@ -4,6 +4,7 @@ import { useRoute, RouterLink } from 'vue-router'
 import * as XLSX from 'xlsx'
 import AppLayout from '../components/AppLayout.vue'
 import { useOrdersStore } from '../stores/orders'
+import { useFactoriesStore } from '../stores/factories'
 import { CRAFT_LABELS, REGION_LABELS, regionOf, type Craft, type Region } from '../constants/roles'
 import { allowedRegions } from '../utils/permissions'
 import { useAuthStore } from '../stores/auth'
@@ -11,9 +12,11 @@ import { buildPriceStatsRows, type PriceStatsRow } from '../utils/priceStats'
 import { isPercentOver100 } from '../utils/percentage'
 import { canEditOrders } from '../utils/permissions'
 import { matchPriceImportRows, parsePriceStatsExcel } from '../utils/priceStatsExcelImport'
+import { taxPointFactor } from '../utils/taxPoint'
 
 const route = useRoute()
 const orders = useOrdersStore()
+const factories = useFactoriesStore()
 const auth = useAuthStore()
 const myRegions = computed(() => (auth.role ? allowedRegions(auth.role) : null))
 const fileInput = ref<HTMLInputElement | null>(null)
@@ -31,14 +34,23 @@ const priceHeaders = computed(() => isSewing.value
   ? ['核价工价(不含税RMB)', '外发工价(人民币含税)', '税点', '扣税点后单价', '占比']
   : ['核价生产工价', '外发单价', '扣税点1.13后单价', '占比'])
 
-onMounted(() => orders.fetchAll())
+onMounted(() => Promise.all([orders.fetchAll(), factories.fetchAll()]))
+
+function linkedFactoryTaxPoint(factoryId: string | null | undefined) {
+  return taxPointFactor(factories.items.find((factory) => factory.id === factoryId)?.tax_point)
+}
 
 const rows = computed<PriceStatsRow[]>(() => {
   const list = orders.items.filter((o) =>
     o.expand?.factory?.craft === craft.value
     && (!region.value || regionOf(o.expand?.factory) === region.value)
     && (!myRegions.value || myRegions.value.includes(regionOf(o.expand?.factory))))
-  return buildPriceStatsRows(list, (o) => o.expand?.factory?.name ?? '', isSewing.value)
+  return buildPriceStatsRows(
+    list,
+    (o) => o.expand?.factory?.name ?? '',
+    isSewing.value,
+    (o) => linkedFactoryTaxPoint(o.factory),
+  )
 })
 
 const pct = (v: number | null) => (v == null ? '-' : v + '%')

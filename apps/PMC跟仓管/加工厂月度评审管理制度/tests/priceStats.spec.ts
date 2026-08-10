@@ -95,6 +95,24 @@ describe('buildPriceStatsRows', () => {
     })
   })
 
+  it('车缝部单价统计使用货期管理关联的加工厂税点', () => {
+    const rows = buildPriceStatsRows([{
+      factory: 'factory-1',
+      item_no: 'MA-RR-2345/92125',
+      product: '橘猫',
+      quote_labor_price: 2.8,
+      unit_price_cny_tax: 2.85,
+      exchange_rate: 0.87,
+      expand: { factory: { name: '东安年达' } },
+    } as any], factoryName, true, () => 1.11)
+
+    expect(rows[0]).toMatchObject({
+      tax_point: 1.11,
+      after_tax: 2.5676,
+      ratio_pct: 91.7,
+    })
+  })
+
   it('其他部门继续使用原单价统计公式', () => {
     const rows = buildPriceStatsRows([{
       unit_price: 0.58,

@@ -195,14 +195,19 @@ public class OutboundController(ISqlConnectionFactory factory) : ControllerBase
         try
         {
             var itemIds = requested.Select(x => x.PoItemId).ToArray();
+            // 先单独加行锁，再用新语句读库存汇总：READ COMMITTED 下每条语句取新快照，
+            // 锁等待期间其他事务提交的出库才能被 SUM 看到，否则会超发为负库存
+            await c.ExecuteAsync(@"
+                SELECT i.id FROM po_items i
+                WHERE i.po_id=@poId AND i.id = ANY(@itemIds)
+                FOR UPDATE", new { poId = body.po_id, itemIds }, tx);
             var stocks = (await c.QueryAsync<BulkOutboundStock>(@"
                 SELECT i.id AS ""PoItemId"", po.po_no AS ""PoNo"", i.material_id AS ""MaterialId"",
                        COALESCE((SELECT SUM(r.qty) FROM po_receipts r WHERE r.po_item_id=i.id), 0) AS ""ReceivedQty"",
                        COALESCE((SELECT SUM(o.qty) FROM outbound o WHERE o.po_item_id=i.id), 0) AS ""OutboundQty""
                 FROM po_items i
                 JOIN purchase_orders po ON po.id=i.po_id
-                WHERE i.po_id=@poId AND i.id = ANY(@itemIds)
-                FOR UPDATE OF i", new { poId = body.po_id, itemIds }, tx)).ToDictionary(x => x.PoItemId);
+                WHERE i.po_id=@poId AND i.id = ANY(@itemIds)", new { poId = body.po_id, itemIds }, tx)).ToDictionary(x => x.PoItemId);
             if (stocks.Count != requested.Count)
             {
                 tx.Rollback();

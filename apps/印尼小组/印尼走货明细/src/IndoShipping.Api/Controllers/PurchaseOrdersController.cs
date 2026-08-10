@@ -383,6 +383,12 @@ RETURNING id",
         using var tx = c.BeginTransaction();
         try
         {
+            var itemIds = requested.Select(x => x.PoItemId).ToArray();
+            // 锁序与单条入库路径保持一致（po_items -> purchase_orders），避免 ABBA 死锁
+            await c.ExecuteAsync(@"
+                SELECT i.id FROM po_items i
+                WHERE i.po_id=@poId AND i.id = ANY(@itemIds)
+                FOR UPDATE", new { poId, itemIds }, tx);
             var poNo = await c.ExecuteScalarAsync<string?>(
                 "SELECT po_no FROM purchase_orders WHERE id=@poId FOR UPDATE", new { poId }, tx);
             if (poNo is null)
@@ -391,14 +397,12 @@ RETURNING id",
                 return NotFound(new { error = "采购单不存在" });
             }
 
-            var itemIds = requested.Select(x => x.PoItemId).ToArray();
             var stocks = (await c.QueryAsync<BulkReceiptStock>(@"
                 SELECT i.id AS ""PoItemId"",
                        COALESCE(i.purchase_qty, i.qty, 0) AS ""OrderedQty"",
                        COALESCE((SELECT SUM(r.qty) FROM po_receipts r WHERE r.po_item_id=i.id), 0) AS ""ReceivedQty""
                 FROM po_items i
-                WHERE i.po_id=@poId AND i.id = ANY(@itemIds)
-                FOR UPDATE OF i", new { poId, itemIds }, tx)).ToDictionary(x => x.PoItemId);
+                WHERE i.po_id=@poId AND i.id = ANY(@itemIds)", new { poId, itemIds }, tx)).ToDictionary(x => x.PoItemId);
             if (stocks.Count != requested.Count)
             {
                 tx.Rollback();

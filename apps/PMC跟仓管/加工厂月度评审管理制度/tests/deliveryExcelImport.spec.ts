@@ -17,6 +17,40 @@ function multiSheetExcelFile(name: string, sheets: { name: string; aoa: any[][] 
 }
 
 describe('parseDeliveryExcelFiles', () => {
+  it('imports the assembly processing purchase-order template', async () => {
+    const file = excelFile('工作簿1.xlsx', [
+      ['装配加工采购单'],
+      ['供应商：邵阳市华登塑胶制品有限公司', '', '', '日期：2026-07-27   交货日期：2026-09-02   收货仓库：成品仓   收货人：吴周平   下单人：石玉珍', '', '', '', '', '备注：', '', '单号：SYH2600076'],
+      ['序号', '接单日期', '生产单号', '产品货号', '产品名称', '配件编号', '产品装配名称', '加工数量', '单价', '金额', '备注'],
+      [2, '2026-06-25', '32179', 'K1000（John Adams版）', '第五代1PK装香蕉36PCS（John Adams版）', 'BBA02044', '第五代1PK装香蕉36PCS（John Adams版）', 3024, 0.9, 2721.6, ''],
+    ])
+
+    const result = await parseDeliveryExcelFiles(
+      [file],
+      { '邵阳市华登塑胶制品有限公司': 'factory-huadeng' },
+      { preferCnyTaxPrice: true },
+    )
+
+    expect(result).toMatchObject({ fileCount: 1, failedRows: 0, unrecognizedFiles: [], readFailedFiles: [] })
+    expect(result.payloads).toHaveLength(1)
+    expect(result.payloads[0]).toMatchObject({
+      factory: 'factory-huadeng',
+      pmc: '石玉珍',
+      item_no: 'K1000（John Adams版）',
+      order_no: 'SYH2600076',
+      product: '第五代1PK装香蕉36PCS（John Adams版）',
+      process_category: '成品仓',
+      quantity: 3024,
+      order_date: '2026-07-27',
+      delivery_date: '2026-09-02',
+      unit_price_cny_tax: 0.9,
+      unit_price: 0.9155,
+      exchange_rate: 0.87,
+      amount: 2721.6,
+      notes: '',
+    })
+  })
+
   it('imports Xingxin assembly contracts with header and footer metadata', async () => {
     const file = excelFile('东莞兴信塑胶制品有限公司.xlsx', [
       ['东莞兴信塑胶制品有限公司'],

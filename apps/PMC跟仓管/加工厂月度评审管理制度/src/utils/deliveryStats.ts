@@ -577,6 +577,69 @@ function parseAssemblyContractImport(
   return { payloads, failed }
 }
 
+function parseAssemblyPurchaseOrderImport(
+  aoa: any[][],
+  headerIdx: number,
+  header: string[],
+  factoryIdByName: Record<string, string>,
+): { payloads: Record<string, any>[]; failed: number } {
+  const colOf = (...aliases: string[]) => header.findIndex((cell) =>
+    aliases.some((alias) => cell === compactText(alias)))
+  const C = {
+    item_no: colOf('产品货号'),
+    product: colOf('产品名称'),
+    qty: colOf('加工数量'),
+    out: colOf('单价'),
+    amount: colOf('金额'),
+    notes: colOf('备注'),
+  }
+  const metaCells = aoa.slice(0, headerIdx).flat()
+  const stopLabels = ['供应商', '日期', '交货日期', '收货仓库', '收货人', '下单人', '备注', '单号']
+  const factoryName = labeledValue(metaCells, '供应商', stopLabels)
+  const orderDate = formatImportDate(labeledValue(metaCells, '日期', stopLabels))
+  const deliveryDate = formatImportDate(labeledValue(metaCells, '交货日期', stopLabels))
+  const warehouse = labeledValue(metaCells, '收货仓库', stopLabels)
+  const pmc = labeledValue(metaCells, '下单人', stopLabels)
+  const metaNotes = labeledValue(metaCells, '备注', stopLabels)
+  const orderNo = labeledValue(metaCells, '单号', stopLabels)
+  const factoryId = factoryIdOf(factoryIdByName, factoryName)
+
+  const payloads: Record<string, any>[] = []
+  let failed = 0
+  const cell = (row: any[], index: number) => (index >= 0 ? row[index] : '')
+  for (const row of aoa.slice(headerIdx + 1)) {
+    const itemNo = cleanText(cell(row, C.item_no))
+    const product = cleanText(cell(row, C.product))
+    if (!itemNo && !product) continue
+    if (/合计|小计/.test(itemNo) || /合计|小计/.test(product)) continue
+    if (!product || !factoryId) { failed++; continue }
+    const qty = parseNumberCell(cell(row, C.qty))
+    const out = parseNumberCell(cell(row, C.out))
+    const amount = parseNumberCell(cell(row, C.amount))
+    const rowNotes = cleanText(cell(row, C.notes))
+    const notes = [metaNotes, rowNotes].filter(Boolean).join(' ')
+    const payload: Record<string, any> = {
+      factory: factoryId,
+      pmc,
+      item_no: itemNo,
+      order_no: orderNo,
+      process_category: warehouse,
+      product,
+      notes,
+      status: 'placed',
+      is_delayed: false,
+    }
+    if (qty != null) payload.quantity = qty
+    if (out != null) payload.unit_price_cny_tax = out
+    if (amount != null) payload.amount = amount
+    else if (qty != null && out != null) payload.amount = qty * out
+    if (orderDate) payload.order_date = orderDate
+    if (deliveryDate) payload.delivery_date = deliveryDate
+    payloads.push(payload)
+  }
+  return { payloads, failed }
+}
+
 function parseSewingPurchaseOrderImport(
   aoa: any[][],
   headerIdx: number,
@@ -705,11 +768,14 @@ export function parseDeliveryImport(
   const norm = compactText
   const headerIdx = aoa.findIndex((row) => row.some((c) => {
     const text = norm(c)
-    return ['货号', '款号', '物料名称', '订单号'].includes(text) || text.includes('合同号/货号') || text.includes('货品名称')
+    return ['货号', '款号', '产品货号', '物料名称', '产品名称', '订单号'].includes(text) || text.includes('合同号/货号') || text.includes('货品名称')
   }))
   if (headerIdx < 0) return { payloads: [], failed: 0 }
   const header = aoa[headerIdx].map(norm)
   const colOf = (...al: string[]) => { for (const a of al) { const i = header.indexOf(norm(a)); if (i >= 0) return i } return -1 }
+  if (header.includes('产品货号') && header.includes('产品名称') && header.includes('加工数量')) {
+    return parseAssemblyPurchaseOrderImport(aoa, headerIdx, header, factoryIdByName)
+  }
   if (header.some((cell) => cell.includes('合同号/货号')) && header.includes('货品名称')) {
     return parseSewingPurchaseOrderImport(aoa, headerIdx, header, factoryIdByName)
   }

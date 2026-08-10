@@ -58,6 +58,7 @@ interface OutByMat {
   material_id?: number
   code?: string
   name_zh?: string
+  spec?: string
   po_no?: string
   supplier?: string
   out_date?: string
@@ -947,7 +948,7 @@ export default function ShipmentsPage() {
           dataSource={outRows.filter(r => {
             if (!outFilter) return true
             const s = outFilter.toLowerCase()
-            return ((r.code || '') + (r.name_zh || '') + (r.po_no || '')).toLowerCase().includes(s)
+            return ((r.code || '') + (r.name_zh || '') + (r.spec || '') + (r.po_no || '')).toLowerCase().includes(s)
           })}
           pagination={{ pageSize: 30 }}
           scroll={{ x: 900, y: 480 }}
@@ -955,6 +956,7 @@ export default function ShipmentsPage() {
             { title: '出库记录', dataIndex: 'outbound_id', width: 95, render: (v) => `OUT-${v}` },
             { title: '货号', dataIndex: 'code', width: 120 },
             { title: '物料', dataIndex: 'name_zh', width: 220, ellipsis: true },
+            { title: '规格', dataIndex: 'spec', width: 160, ellipsis: true, render: v => v || <Typography.Text type="secondary">—</Typography.Text> },
             { title: '本次出库', dataIndex: 'outbound_qty', width: 110, align: 'right', render: (v) => Number(v ?? 0).toFixed(2) },
             {
               title: '本柜可分配', dataIndex: 'allocatable_qty', width: 120, align: 'right',

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { Layout, Menu, Typography, Button } from 'antd';
 import { UnorderedListOutlined, UploadOutlined, FileExcelOutlined, LogoutOutlined, FilePdfOutlined } from '@ant-design/icons';
 import axios from 'axios';
@@ -6,6 +6,12 @@ import ProductList from './pages/ProductList';
 import Upload from './pages/Upload';
 import Login from './pages/Login';
 import AdocPage from './pages/AdocPage';
+import ExcelTranslatePage from './pages/ExcelTranslatePage';
+import {
+  initialPageFromStoredTranslationJob,
+  readStoredTranslationJob,
+  translationJobStorageKey,
+} from './pages/excelTranslateState';
 
 const { Sider, Content, Header } = Layout;
 const { Text } = Typography;
@@ -15,6 +21,21 @@ const { Text } = Typography;
 // 开发环境走 vite proxy 的 /api 前缀，不加 baseURL。
 if (import.meta.env.PROD) {
   axios.defaults.baseURL = import.meta.env.BASE_URL.replace(/\/$/, '');
+}
+
+const PAGE_TITLES = {
+  list: '走货明细列表',
+  upload: '上传 Excel 文件处理',
+  adoc: 'TOMY A-DOC 生成',
+  'excel-translate': 'Excel 中英翻译',
+};
+
+function storedUser() {
+  try {
+    return JSON.parse(localStorage.getItem('user'));
+  } catch {
+    return null;
+  }
 }
 
 // axios 拦截器：自动带 token，401 时跳转登录
@@ -37,16 +58,24 @@ axios.interceptors.response.use(
 );
 
 export default function App() {
-  const [page, setPage] = useState('list');
+  const [user, setUser] = useState(storedUser);
+  const [page, setPage] = useState(() => initialPageFromStoredTranslationJob(
+    readStoredTranslationJob(localStorage, translationJobStorageKey(storedUser())),
+  ));
   const [authed, setAuthed] = useState(!!localStorage.getItem('token'));
 
-  const handleLogin = () => {
+  const handleLogin = ({ user: loggedInUser }) => {
+    setUser(loggedInUser);
+    setPage(initialPageFromStoredTranslationJob(
+      readStoredTranslationJob(localStorage, translationJobStorageKey(loggedInUser)),
+    ));
     setAuthed(true);
   };
 
   const handleLogout = () => {
     localStorage.removeItem('token');
     localStorage.removeItem('user');
+    setUser(null);
     setAuthed(false);
   };
 
@@ -64,10 +93,11 @@ export default function App() {
         { key: 'upload', icon: <UploadOutlined />,        label: '上传处理' },
       ],
     },
+    { key: 'excel-translate', icon: <FileExcelOutlined />, label: 'Excel 中英翻译' },
     { key: 'adoc', icon: <FilePdfOutlined />, label: 'A-DOC 生成' },
   ];
 
-  const user = (() => { try { return JSON.parse(localStorage.getItem('user')); } catch { return null; } })();
+  const translationStorageKey = translationJobStorageKey(user);
 
   return (
     <Layout style={{ minHeight: '100vh' }}>
@@ -114,12 +144,15 @@ export default function App() {
       <Layout>
         <Header style={{ background: '#fff', padding: '0 24px', boxShadow: '0 1px 4px rgba(0,0,0,0.1)', display: 'flex', alignItems: 'center' }}>
           <Text style={{ fontSize: 15, color: '#333' }}>
-            {page === 'list' ? '走货明细列表' : page === 'upload' ? '上传 Excel 文件处理' : 'TOMY A-DOC 生成'}
+            {PAGE_TITLES[page]}
           </Text>
         </Header>
         <Content style={{ margin: 24, padding: 24, background: '#fff', borderRadius: 8 }}>
           {page === 'list'   && <ProductList onUpload={() => setPage('upload')} />}
           {page === 'upload' && <Upload onDone={() => setPage('list')} />}
+          {page === 'excel-translate' && (
+            <ExcelTranslatePage key={translationStorageKey} storageKey={translationStorageKey} />
+          )}
           {page === 'adoc'   && <AdocPage />}
         </Content>
       </Layout>

@@ -1,0 +1,5 @@
+Alembic migration environment for the QC report database.
+
+Fresh installations run `alembic upgrade head`. Existing installations created
+before Alembic should back up first, then stamp the legacy baseline revision and
+upgrade to head as documented in the project README.

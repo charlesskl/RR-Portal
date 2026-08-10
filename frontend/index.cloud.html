@@ -378,6 +378,12 @@
                 <span class="plugin-name">QA 测试报告周结系统</span>
               </div>
             </div>
+            <div class="plugin-item">
+              <div class="plugin-info">
+                <div class="plugin-dot gray" id="qcReportDot"></div>
+                <span class="plugin-name">QC 成品报告系统</span>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -1161,6 +1167,28 @@
         <a href="/qa-weekly-report/" target="_blank" class="btn btn-primary">打开系统</a>
       </div>
     </div>
+
+    <div class="detail-plugin-card">
+      <div class="detail-plugin-left">
+        <div class="detail-plugin-icon" style="background:linear-gradient(135deg,#0891b2,#0f766e);">&#128203;</div>
+        <div>
+          <div class="detail-plugin-name">QC 成品报告系统</div>
+          <div class="detail-plugin-desc">独立的成品验货报告工作台，支持 PO 导入校对、AQL 判定、现场照片、AI 辅助、QC 签名与正式 PDF 修订版</div>
+          <div class="feature-grid">
+            <div class="feature-tag">&#128229; PO 导入</div>
+            <div class="feature-tag">&#128203; AQL 判定</div>
+            <div class="feature-tag">&#128247; 现场证据</div>
+            <div class="feature-tag">&#129302; AI 辅助</div>
+            <div class="feature-tag">&#9997; QC 签名</div>
+            <div class="feature-tag">&#128196; PDF 修订</div>
+          </div>
+        </div>
+      </div>
+      <div class="detail-plugin-right">
+        <div class="detail-plugin-status"><div class="plugin-dot gray" id="qcReportDetailDot"></div> 检查中...</div>
+        <a href="/qc-report/" target="_blank" rel="noopener" class="btn btn-primary">打开系统</a>
+      </div>
+    </div>
   </div>
 
 </div>
@@ -1215,6 +1243,7 @@ async function checkHealth() {
       { name: 'indoShipping', url: '/indo-shipping/health', dot: 'indoShippingDot', detailDot: 'indoShippingDetailDot' },
       { name: 'stitchCost', url: '/stitch-cost/health', dot: 'stitchCostDot', detailDot: 'stitchCostDetailDot' },
       { name: 'qaWeekly', url: '/qa-weekly-report/api/health', dot: 'qaWeeklyDot', detailDot: 'qaWeeklyDetailDot' },
+      { name: 'qcReport', url: '/qc-report/health', dot: 'qcReportDot', detailDot: 'qcReportDetailDot' },
     ];
     var healthy = 0;
     var total = checks.length;

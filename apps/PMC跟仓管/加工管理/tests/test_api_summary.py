@@ -208,8 +208,11 @@ def test_semi_finished_department_summary_uses_warehouse_balance(client):
     assert s["raw"]["inbound"] == 80
     assert s["raw"]["outbound"] == 30
     assert s["raw"]["balance"] == 50
-    assert s["subtotal"]["issue"] == 0
+    # 汇总按加工点拆分出仓：利鸿 30
+    assert s["subtotal"]["issue"] == 30
     assert s["subtotal"]["finished"] == 0
+    lihong_row = [r for r in s["locations"] if r["location"] == "东莞加工厂利鸿"][0]
+    assert lihong_row["issue"] == 30
 
 
 def test_lihong_summary_uses_issue_minus_semifinished_outbound(client):

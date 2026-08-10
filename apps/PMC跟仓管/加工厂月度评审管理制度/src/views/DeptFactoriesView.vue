@@ -8,6 +8,8 @@ import { useAuthStore } from '../stores/auth'
 import { CRAFT_LABELS, REGION_LABELS, regionOf, type Craft, type Region } from '../constants/roles'
 import { canEditFactories, allowedRegions } from '../utils/permissions'
 import type { Factory } from '../types/factory'
+import { resolveFactoryName } from '../utils/factoryName'
+import { taxPointRate } from '../utils/taxPoint'
 
 const route = useRoute()
 const store = useFactoriesStore()
@@ -38,9 +40,20 @@ async function importExcel(ev: Event) {
   if (!file) return
   const buf = await file.arrayBuffer()
   const wb = XLSX.read(buf, { cellDates: true })
-  const rows = XLSX.utils.sheet_to_json<Record<string, any>>(wb.Sheets[wb.SheetNames[0]])
   const norm = (s: string) => s.replace(/\s+/g, '')
-  let ok = 0, fail = 0
+  const sheet = wb.Sheets[wb.SheetNames[0]]
+  const matrix = XLSX.utils.sheet_to_json<any[]>(sheet, { header: 1, defval: '' })
+  const headerRow = matrix.findIndex((row) => row.some((cell) =>
+    ['名称', '工厂名称', '加工厂名称'].includes(norm(String(cell ?? '')))))
+  if (headerRow < 0) {
+    alert('导入失败：未识别到“加工厂名称”表头')
+    if (fileInput.value) fileInput.value.value = ''
+    return
+  }
+  const rows = XLSX.utils.sheet_to_json<Record<string, any>>(sheet, { range: headerRow, defval: '' })
+  let created = 0, updated = 0, fail = 0
+  const candidates = store.items.filter((factory) =>
+    factory.craft === craft.value && regionOf(factory) === (region.value || 'dongguan'))
   for (const r of rows) {
     const cells: Record<string, any> = {}
     for (const k of Object.keys(r)) cells[norm(k)] = r[k]
@@ -51,33 +64,52 @@ async function importExcel(ev: Event) {
     const setNum = (fd: FormData, key: string, ...al: string[]) => {
       const v = pick(...al); if (v != null && String(v).trim() !== '') fd.append(key, String(v).trim())
     }
-    const name = String(pick('名称', '工厂名称', 'name') ?? '').trim()
+    const setText = (fd: FormData, key: string, ...al: string[]) => {
+      const v = pick(...al); if (v != null) fd.append(key, String(v).trim())
+    }
+    const name = String(pick('名称', '工厂名称', '加工厂名称', 'name') ?? '').trim()
     if (!name) { fail++; continue }
     const fd = new FormData()
     fd.append('name', name)
     fd.append('craft', craft.value)
     fd.append('region', region.value || 'dongguan')
-    fd.append('contact_person', String(pick('联系人') ?? ''))
-    fd.append('contact_phone', String(pick('电话', '联系电话') ?? ''))
-    fd.append('address', String(pick('地址') ?? ''))
-    fd.append('processable_types', String(pick('加工类型', '可加工类型') ?? ''))
-    fd.append('cooperative_workshops', String(pick('合作车间') ?? ''))
-    fd.append('ip_control', String(pick('IP管控', 'IP管控情况') ?? ''))
-    fd.append('production_lines', String(pick('帮我们生产的机台/生产线', '帮我们生产的几台/生产线') ?? ''))
-    fd.append('cooperation_period', String(pick('同我们工厂合作年限', '合作年限') ?? ''))
+    setText(fd, 'contact_person', '联系人')
+    setText(fd, 'contact_phone', '电话', '联系电话')
+    setText(fd, 'address', '地址', '工厂地址')
+    setText(fd, 'processable_types', '加工类型', '可加工类型')
+    setText(fd, 'cooperative_workshops', '合作车间')
+    setText(fd, 'ip_control', 'IP管控', 'IP管控情况')
+    setText(fd, 'production_lines', '帮我们生产的机台/生产线', '帮我们生产的几台/生产线')
+    setText(fd, 'cooperation_period', '同我们工厂合作年限', '合作年限')
     setNum(fd, 'workshop_area', '厂房面积(㎡)', '厂房面积')
     setNum(fd, 'staff_count', '员工人数', '人员')
     setNum(fd, 'monthly_capacity', '月产能')
     setNum(fd, 'equipment_qty', '设备台数/生产拉线', '设备台数', '设备数量')
+    if (craft.value === 'sewing') {
+      const taxPoint = taxPointRate(pick('税点'))
+      if (taxPoint != null) fd.append('tax_point', String(taxPoint))
+    }
     const certs = String(pick('环评/消防/安监资质', '环评/消防/安监', '资质') ?? '').trim()
     if (certs) fd.append('cert_status', certs)
-    fd.append('status', 'active')
-    if (auth.userId) fd.append('created_by', auth.userId)
-    try { await store.create(fd); ok++ } catch { fail++ }
+    try {
+      const resolved = resolveFactoryName(candidates, name)
+      if (resolved.status === 'matched') {
+        await store.update(resolved.id, fd)
+        updated++
+      } else if (resolved.status === 'ambiguous') {
+        fail++
+      } else {
+        fd.append('status', 'active')
+        if (auth.userId) fd.append('created_by', auth.userId)
+        const added = await store.create(fd)
+        candidates.push(added)
+        created++
+      }
+    } catch { fail++ }
   }
   await store.fetchAll()
   if (fileInput.value) fileInput.value.value = ''
-  alert(`导入完成：成功 ${ok} 家` + (fail ? `，失败 ${fail} 家（缺名称）` : '') + `\n（已自动归到「${title.value}」；厂房图片/证书需在详情页单独上传）`)
+  alert(`导入完成：更新 ${updated} 家，新增 ${created} 家` + (fail ? `，失败 ${fail} 家（缺名称或名称不唯一）` : '') + `\n（已自动归到「${title.value}」；厂房图片/证书需在详情页单独上传）`)
 }
 
 async function remove(f: Factory) {

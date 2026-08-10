@@ -1,32 +1,56 @@
 <script setup lang="ts">
-import { onMounted, computed } from 'vue'
+import { onMounted, computed, ref } from 'vue'
 import { useRoute, RouterLink } from 'vue-router'
 import * as XLSX from 'xlsx'
 import AppLayout from '../components/AppLayout.vue'
 import { useOrdersStore } from '../stores/orders'
+import { useFactoriesStore } from '../stores/factories'
 import { CRAFT_LABELS, REGION_LABELS, regionOf, type Craft, type Region } from '../constants/roles'
 import { allowedRegions } from '../utils/permissions'
 import { useAuthStore } from '../stores/auth'
 import { buildPriceStatsRows, type PriceStatsRow } from '../utils/priceStats'
+import { isPercentOver100 } from '../utils/percentage'
+import { canEditOrders } from '../utils/permissions'
+import { matchPriceImportRows, parsePriceStatsExcel } from '../utils/priceStatsExcelImport'
+import { taxPointFactor } from '../utils/taxPoint'
 
 const route = useRoute()
 const orders = useOrdersStore()
+const factories = useFactoriesStore()
 const auth = useAuthStore()
 const myRegions = computed(() => (auth.role ? allowedRegions(auth.role) : null))
+const fileInput = ref<HTMLInputElement | null>(null)
+const importing = ref(false)
+const canImport = computed(() => !!auth.role && canEditOrders(auth.role))
 
 const craft = computed(() => route.params.craft as Craft)
 const region = computed(() => (route.query.region as Region) || null)
 const deptName = computed(() =>
   (region.value ? REGION_LABELS[region.value] + '厂区 · ' : '') + (CRAFT_LABELS[craft.value] ?? '部门'))
+const isSewing = computed(() => craft.value === 'sewing')
+const showMoldNumber = computed(() => craft.value === 'injection')
 
-onMounted(() => orders.fetchAll())
+const priceHeaders = computed(() => isSewing.value
+  ? ['核价工价(不含税RMB)', '外发工价(人民币含税)', '税点', '扣税点后单价', '占比']
+  : ['核价生产工价', '外发单价', '扣税点1.13后单价', '占比'])
+
+onMounted(() => Promise.all([orders.fetchAll(), factories.fetchAll()]))
+
+function linkedFactoryTaxPoint(factoryId: string | null | undefined) {
+  return taxPointFactor(factories.items.find((factory) => factory.id === factoryId)?.tax_point)
+}
 
 const rows = computed<PriceStatsRow[]>(() => {
   const list = orders.items.filter((o) =>
     o.expand?.factory?.craft === craft.value
     && (!region.value || regionOf(o.expand?.factory) === region.value)
     && (!myRegions.value || myRegions.value.includes(regionOf(o.expand?.factory))))
-  return buildPriceStatsRows(list, (o) => o.expand?.factory?.name ?? '')
+  return buildPriceStatsRows(
+    list,
+    (o) => o.expand?.factory?.name ?? '',
+    isSewing.value,
+    (o) => linkedFactoryTaxPoint(o.factory),
+  )
 })
 
 const pct = (v: number | null) => (v == null ? '-' : v + '%')
@@ -34,18 +58,28 @@ const num = (v: number | null) => (v == null ? '-' : v)
 
 function exportExcel() {
   const title = `${deptName.value}-外发产品单价统计表`
+  const detailHeaders = showMoldNumber.value
+    ? ['车间', '加工厂名称', '加工类别', '货号', '模具编号', '配件名称/模号']
+    : ['车间', '加工厂名称', '加工类别', '货号', '配件名称/模号']
+  const priceColumn = detailHeaders.length
+  const notesColumn = priceColumn + priceHeaders.value.length
+  const columnCount = notesColumn + 1
   // 三行表头
-  const titleRow = [title, '', '', '', '', '', '', '', '', '']
-  const groupRow = ['车间', '加工厂名称', '加工类别', '货号', '配件名称/模号', '价格管理', '', '', '', '备注']
-  const subRow = ['', '', '', '', '', '核价生产工价$', '外发单价$', '扣税点1.13后单价$', '占比', '']
+  const titleRow = [title, ...Array(columnCount - 1).fill('')]
+  const groupRow = [...detailHeaders, '价格管理',
+    ...Array(priceHeaders.value.length - 1).fill(''), '备注']
+  const subRow = [...Array(detailHeaders.length).fill(''), ...priceHeaders.value, '']
+
   const body = rows.value.map((r) => [
     r.workshopSpan ? r.workshop : '',
     r.factorySpan ? r.factory : '',
     r.categorySpan ? r.category : '',
     r.item_no,
+    ...(showMoldNumber.value ? [r.mold_no] : []),
     r.product,
     r.quote_labor_price ?? '',
     r.unit_price ?? '',
+    ...(isSewing.value ? [r.tax_point ?? ''] : []),
     r.after_tax ?? '',
     r.ratio_pct == null ? '' : r.ratio_pct + '%',
     r.notes,
@@ -55,11 +89,12 @@ function exportExcel() {
 
   // 合并：标题、表头分组、左侧三列纵向合并
   const merges = [
-    { s: { r: 0, c: 0 }, e: { r: 0, c: 9 } },           // 标题横跨
-    { s: { r: 1, c: 5 }, e: { r: 1, c: 8 } },           // 价格管理 横跨 4 列
+    { s: { r: 0, c: 0 }, e: { r: 0, c: columnCount - 1 } },
+    { s: { r: 1, c: priceColumn }, e: { r: 1, c: notesColumn - 1 } },
   ]
-  // 表头第 1、2 行：车间/加工厂/加工类别/货号/配件名称/备注 纵向合并
-  for (const c of [0, 1, 2, 3, 4, 9]) merges.push({ s: { r: 1, c }, e: { r: 2, c } })
+  // 表头第 1、2 行：左侧明细列和备注纵向合并
+  for (const c of [...detailHeaders.keys(), notesColumn]) merges.push({ s: { r: 1, c }, e: { r: 2, c } })
+
   // 数据区 车间/加工厂/加工类别 纵向合并（数据从第 3 行开始）
   rows.value.forEach((r, i) => {
     const rr = 3 + i
@@ -85,6 +120,40 @@ function exportExcel() {
   XLSX.utils.book_append_sheet(wb, ws, '外发-工价表')
   XLSX.writeFile(wb, `${title}.xlsx`)
 }
+
+async function importExcel(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file || importing.value) return
+  importing.value = true
+  try {
+    const parsed = await parsePriceStatsExcel(file)
+    if (!parsed.rows.length) {
+      const detail = parsed.unrecognizedSheets.length ? '未识别到“核价工价”表头。' : '没有可导入的有效数据行。'
+      alert(`导入失败：${detail}`)
+      return
+    }
+    const visibleOrders = orders.items.filter((o) =>
+      o.expand?.factory?.craft === craft.value
+      && (!region.value || regionOf(o.expand?.factory) === region.value)
+      && (!myRegions.value || myRegions.value.includes(regionOf(o.expand?.factory))))
+    const matched = matchPriceImportRows(parsed.rows, visibleOrders)
+    if (!matched.updates.length) {
+      alert(`未匹配到可更新的记录。\n未匹配 ${matched.unmatchedRows.length} 行，冲突 ${matched.conflictingRows.length} 行，无效 ${parsed.invalidRows} 行。`)
+      return
+    }
+    await Promise.all(matched.updates.map(({ order, quoteLaborPrice }) =>
+      orders.update(order.id, { quote_labor_price: quoteLaborPrice })))
+    await orders.fetchAll()
+    alert(`导入完成：识别 ${parsed.rows.length} 行，成功匹配 ${matched.matchedRows} 行，更新 ${matched.updates.length} 条系统记录。\n未匹配 ${matched.unmatchedRows.length} 行，冲突 ${matched.conflictingRows.length} 行，无效 ${parsed.invalidRows} 行。`)
+  } catch (error) {
+    console.error('核价 Excel 导入失败', error)
+    alert('导入失败：请确认文件是有效的 Excel，且包含货号、工序名称和核价生产工价（不含税￥）列。')
+  } finally {
+    importing.value = false
+    input.value = ''
+  }
+}
 </script>
 <template>
   <AppLayout>
@@ -94,6 +163,10 @@ function exportExcel() {
         <h2 style="margin:0">{{ deptName }} · 外发产品单价统计表</h2>
         <span class="muted">共 {{ rows.length }} 条</span>
         <span class="spacer"></span>
+        <button v-if="canImport" class="ghost" :disabled="importing" @click="fileInput?.click()">
+          {{ importing ? '导入中…' : '导入 Excel' }}
+        </button>
+        <input ref="fileInput" type="file" accept=".xlsx,.xls,.csv" style="display:none" @change="importExcel" />
         <button @click="exportExcel">导出 Excel</button>
       </div>
       <div class="scroll">
@@ -101,12 +174,13 @@ function exportExcel() {
           <thead>
             <tr>
               <th rowspan="2">车间</th><th rowspan="2">加工厂名称</th><th rowspan="2">加工类别</th>
-              <th rowspan="2">货号</th><th rowspan="2">配件名称/模号</th>
-              <th colspan="4">价格管理</th>
+              <th rowspan="2" class="item-no-col">货号</th><th v-if="showMoldNumber" rowspan="2">模具编号</th><th rowspan="2">配件名称/模号</th>
+
+              <th :colspan="priceHeaders.length">价格管理</th>
               <th rowspan="2">备注</th>
             </tr>
             <tr>
-              <th>核价生产工价</th><th>外发单价</th><th>扣税点1.13后单价</th><th>占比</th>
+              <th v-for="header in priceHeaders" :key="header">{{ header }}</th>
             </tr>
           </thead>
           <tbody>
@@ -114,15 +188,18 @@ function exportExcel() {
               <td v-if="r.workshopSpan" :rowspan="r.workshopSpan">{{ r.workshop || '-' }}</td>
               <td v-if="r.factorySpan" :rowspan="r.factorySpan">{{ r.factory || '-' }}</td>
               <td v-if="r.categorySpan" :rowspan="r.categorySpan">{{ r.category || '-' }}</td>
-              <td>{{ r.item_no || '-' }}</td>
+              <td class="item-no-col">{{ r.item_no || '-' }}</td>
+              <td v-if="showMoldNumber">{{ r.mold_no || '-' }}</td>
               <td>{{ r.product || '-' }}</td>
               <td>{{ num(r.quote_labor_price) }}</td>
               <td>{{ num(r.unit_price) }}</td>
+              <td v-if="isSewing">{{ num(r.tax_point) }}</td>
               <td>{{ num(r.after_tax) }}</td>
-              <td>{{ pct(r.ratio_pct) }}</td>
+              <td :class="{ 'over-limit': isPercentOver100(r.ratio_pct) }">{{ pct(r.ratio_pct) }}</td>
               <td>{{ r.notes || '-' }}</td>
             </tr>
-            <tr v-if="!rows.length"><td colspan="10" class="hint" style="text-align:center">该部门暂无数据</td></tr>
+            <tr v-if="!rows.length"><td :colspan="6 + priceHeaders.length + (showMoldNumber ? 1 : 0)" class="hint" style="text-align:center">该部门暂无数据</td></tr>
+
           </tbody>
         </table>
       </div>
@@ -135,4 +212,14 @@ function exportExcel() {
 .scroll { overflow-x: auto; }
 .stats { min-width: 1100px; }
 .stats th, .stats td { text-align: left; white-space: nowrap; }
+.stats .item-no-col {
+  width: 180px;
+  min-width: 180px;
+  max-width: 180px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.stats .over-limit { color: #dc2626; font-weight: 600; }
 </style>

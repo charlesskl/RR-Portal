@@ -252,6 +252,14 @@ function sectionsToSpinData({ quote, sections }) {
     freightCalc: sales.freight_calc,
     spinConfig: sales.spin_transport,
   });
+  const customerSuppliedProducts = ((sales.shipping && sales.shipping.customer_supplied_products) || [])
+    .filter(item => String(item && item.name || '').trim() || num(item && item.amount_usd))
+    .slice(0, 5)
+    .map((item, index) => ({
+      name: item.name || `客供成品${index + 1}`,
+      eng_name: customerEnglish(item.name || `客供成品${index + 1}`),
+      amount_usd: num(item.amount_usd),
+    }));
 
   return {
     version: {
@@ -292,6 +300,7 @@ function sectionsToSpinData({ quote, sections }) {
     electronicLaborTotalHkd,
     transportConfig: sales.spin_transport || {},
     spinTransport,
+    customerSuppliedProducts,
     refMaterials: materialPrices.map(item => ({
       material_name: customerEnglish(item.name || ''),
       client_spin_usd_kg: hkdUsd ? num(item.price) * 1000 / 454 / hkdUsd : 0,
@@ -414,7 +423,7 @@ function fixSharedFormulas(wb) {
 
 function fillCharacterSheet(ws, d) {
   const { version, product, params, fabricItems, otherItems, laborItems, packagingItems, productDim,
-          moldParts, electronicItems, transportConfig } = d;
+          moldParts, electronicItems, transportConfig, customerSuppliedProducts = [] } = d;
 
   // Pre-process: fix shared formulas and clear merges for safe row manipulation
   ws.eachRow({ includeEmpty: false }, row => {
@@ -1019,6 +1028,8 @@ function fillCharacterSheet(ws, d) {
   }
   const testingFee = parseFloat(params.testing_fee_usd) || 0;
   if (testingRow) {
+    const extraCustomerRows = Math.max(0, customerSuppliedProducts.length - 3);
+    if (extraCustomerRows) shiftRowsDown(ws, testingRow + 4, extraCustomerRows);
     ws.getCell(testingRow, 10).value = testingFee ? r2(testingFee) : 0;
     ws.getCell(testingRow, 10).numFmt = '0.0000';
     ws.getCell(testingRow, 11).value = testingFee ? 1 : 0;
@@ -1027,6 +1038,37 @@ function fillCharacterSheet(ws, d) {
     delete lCell._sharedFormula;
     lCell.value = { formula: `J${testingRow}*K${testingRow}`, result: testingFee ? r2(testingFee) : 0 };
     lCell.numFmt = '0.0000';
+
+    customerSuppliedProducts.forEach((item, index) => {
+      const itemRow = testingRow + 1 + index;
+      if (index >= 3) {
+        for (let column = 1; column <= 13; column += 1) {
+          ws.getCell(itemRow, column).style = ws.getCell(testingRow + 1, column).style;
+        }
+      }
+      ws.getCell(itemRow, 1).value = 'Misc Cost';
+      const suppliedDescription = item.eng_name && item.eng_name !== item.name
+        ? `${item.eng_name}\n${item.name}`
+        : item.name;
+      setVal(ws, itemRow, 2, suppliedDescription);
+      ws.getCell(itemRow, 2).alignment = { vertical: 'middle', wrapText: true };
+      ws.getCell(itemRow, 10).value = r2(item.amount_usd) || 0;
+      ws.getCell(itemRow, 10).numFmt = '0.0000';
+      ws.getCell(itemRow, 11).value = 1;
+      ws.getCell(itemRow, 11).numFmt = '0.00';
+      const amountCell = ws.getCell(itemRow, 12);
+      delete amountCell._sharedFormula;
+      amountCell.value = { formula: `J${itemRow}*K${itemRow}`, result: r2(item.amount_usd) || 0 };
+      amountCell.numFmt = '0.0000';
+    });
+    const miscSubtotalRow = testingRow + 4 + extraCustomerRows;
+    const miscTotal = testingFee + customerSuppliedProducts.reduce((total, item) => total + num(item.amount_usd), 0);
+    const subtotalCell = ws.getCell(miscSubtotalRow, 13);
+    delete subtotalCell._sharedFormula;
+    subtotalCell.value = {
+      formula: `SUM(L${testingRow}:L${miscSubtotalRow - 1})`,
+      result: r2(miscTotal) || 0,
+    };
   }
 
   // Apply molding presentation last because template cells share style objects.

@@ -128,7 +128,7 @@ ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;",
         // Upsert by week_label (overwrite on re-upload of same week)
         var id = await c.ExecuteScalarAsync<int>(@"
 INSERT INTO schedules(week_label, upload_date, raw_rows, diff_from_prev)
-VALUES (@wl, @ud, @rr, @df)
+VALUES (@wl, @ud, CAST(@rr AS jsonb), CAST(@df AS jsonb))
 ON CONFLICT (week_label) DO UPDATE SET
     upload_date = EXCLUDED.upload_date,
     raw_rows = EXCLUDED.raw_rows,

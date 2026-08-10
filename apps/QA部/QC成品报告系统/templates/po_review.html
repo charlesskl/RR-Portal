@@ -1,0 +1,48 @@
+{% extends 'base.html' %}
+{% block title %}校对 PO · AI 辅助 QC{% endblock %}
+{% block content %}
+<div class="page">
+  <header class="page-header">
+    <div><span class="eyebrow">PO extraction review</span><h1>校对 PO 提取结果</h1><p>{{ po_import.original_name }} · 每个货号会单独建立一份报告。</p></div>
+    <div class="actions"><a class="button secondary" href="{{ url_for('po_import_source', import_id=po_import.id) }}" target="_blank">查看原始 PO</a><a class="button secondary" href="{{ url_for('new_report') }}">上传其他 PO</a></div>
+  </header>
+  <div class="progress-steps"><span class="step done"><i>✓</i>上传 PO</span><b class="step-line"></b><span class="step active"><i>2</i>校对货号</span><b class="step-line"></b><span class="step"><i>3</i>拍照与测试</span><b class="step-line"></b><span class="step"><i>4</i>AI 草稿</span><b class="step-line"></b><span class="step"><i>5</i>签字出报告</span></div>
+
+  {% if po_import.status in ['queued','processing'] %}
+  <section class="card processing-card" data-import-status="{{ po_import.status }}" data-status-url="{{ url_for('api_get_po_import', import_id=po_import.id) }}"><span class="spinner"></span><div><h2>正在读取 PO…</h2><p>正在识别页面、单元格和货号。页面会在提取完成后自动刷新。</p></div></section>
+  {% elif po_import.status == 'failed' %}
+  <section class="card error-panel"><h2>提取失败</h2><p>{{ po_import.error_message }}</p><a class="button" href="{{ url_for('new_report') }}">重新上传</a></section>
+  {% elif not items %}
+  <section class="card error-panel"><h2>没有识别到货号</h2><p>{{ po_import.error_message or '请检查文件清晰度，或重新上传更清楚的 PO。系统没有创建猜测性的货号。' }}</p></section>
+  {% endif %}
+
+  {% for item in items %}
+  {% set item_fields=fields_by_item[item.id] %}
+  <form id="item-{{ item.id }}" method="post" action="{{ url_for('confirm_po_item', import_id=po_import.id, item_id=item.id) }}" class="card section-card po-item-review">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="section-title"><div><span class="item-number">货号 {{ loop.index }}</span><h2>{{ item_fields.get('item_no').normalized_value if item_fields.get('item_no') else '未识别货号' }}</h2><p>逐项核对；空白代表 PO 中没有找到，禁止系统猜测。</p></div>{% if reports_by_item.get(item.id) %}<a class="button success" href="{{ url_for('inspection_workspace', report_id=reports_by_item[item.id]) }}">进入验货 →</a>{% else %}<span class="review-pill">待 QC 确认</span>{% endif %}</div>
+    <div class="field-evidence-table">
+      <div class="field-evidence-head"><span>报告字段</span><span>AI 提取值（可修改）</span><span>原文 / 出处</span><span>置信度</span></div>
+      {% for field_key,label,scope,ai_key,required in field_definitions %}
+      {% set field=item_fields.get(field_key) %}
+      {% set source=json_load(field.source_ref) if field else {} %}
+      <div class="field-evidence-row {{ 'required-field' if required else '' }}">
+        <label for="field-{{ item.id }}-{{ field_key }}"><strong>{{ label }}</strong>{% if required %}<em>必填</em>{% endif %}</label>
+        <input id="field-{{ item.id }}-{{ field_key }}" name="field_{{ field_key }}" value="{{ field.normalized_value if field else '' }}" {% if required %}required{% endif %} placeholder="PO 未提供，请 QC 补充">
+        <div class="source-cell"><span>{{ field.raw_value if field and field.raw_value else 'PO 未找到' }}</span>{% if source %}<small>{% if source.page %}第 {{ source.page }} 页{% endif %}{% if source.sheet %}工作表 {{ source.sheet }}{% endif %}{% if source.cell_range %} · {{ source.cell_range }}{% endif %}{% if source.excerpt %} · {{ source.excerpt }}{% endif %}</small>{% else %}<small>无来源证据</small>{% endif %}</div>
+        <span class="confidence {{ 'high' if field and field.confidence >= 0.85 else 'medium' if field and field.confidence >= 0.6 else 'low' }}">{{ ((field.confidence if field else 0)*100)|round|int }}%</span>
+      </div>
+      {% endfor %}
+    </div>
+    {% if not reports_by_item.get(item.id) %}<div class="review-confirm"><div><strong>由 QC 确认后才能继续</strong><p>确认后本货号独立建报告；AI 原值与 QC 修改值都会保留在审计记录中。</p></div><button class="button" type="submit">确认字段并建立报告 →</button></div>{% endif %}
+  </form>
+  {% endfor %}
+  {% if items %}<section class="trace-note"><strong>AI 提取记录</strong><span>模型 {{ po_import.model or '—' }} · Prompt {{ po_import.prompt_version or '—' }} · Schema {{ po_import.schema_version or '—' }} · Request {{ po_import.request_id or '—' }}</span></section>{% endif %}
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+const processing=document.querySelector('[data-import-status]');
+if(processing){const poll=async()=>{try{const response=await fetch(processing.dataset.statusUrl);const data=await response.json();if(!['queued','processing'].includes(data.status)){location.reload();return;}}catch(e){}setTimeout(poll,1600)};setTimeout(poll,1000)}
+</script>
+{% endblock %}

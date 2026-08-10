@@ -17,8 +17,41 @@ const cors    = require('cors');
 const helmet  = require('helmet');
 const rateLimit = require('express-rate-limit');
 const { authenticate } = require('./middleware/auth');
+const { readTranslationConfig } = require('./config/translation');
+const { createExcelTranslationRouter } = require('./routes/excelTranslation');
+const { scanWorkbook, translateWorkbook } = require('./utils/excelTranslator');
+const { createTranslationJobManager } = require('./utils/translationJobManager');
+const { createTranslationProvider } = require('./utils/translationProvider');
 
 const app = express();
+
+const uploadsRoot = process.pkg
+  ? path.join(path.dirname(process.execPath), 'uploads')
+  : path.join(__dirname, 'uploads');
+const translationConfig = readTranslationConfig(process.env, { uploadsRoot });
+const translationProvider = createTranslationProvider({
+  batchSize: translationConfig.batchSize,
+  timeoutMs: translationConfig.timeoutMs,
+});
+const translationJobManager = createTranslationJobManager({
+  jobsRoot: translationConfig.jobsRoot,
+  incomingDir: translationConfig.incomingDir,
+  ttlMs: translationConfig.jobTtlMs,
+  cleanupIntervalMs: translationConfig.cleanupIntervalMs,
+  scanWorkbook: (inputPath, options) => scanWorkbook(inputPath, {
+    ...options,
+    maxUncompressedBytes: translationConfig.maxUncompressedBytes,
+  }),
+  translateWorkbook: (inputPath, outputPath, options) => translateWorkbook(
+    inputPath,
+    outputPath,
+    {
+      ...options,
+      provider: translationProvider,
+      maxUncompressedBytes: translationConfig.maxUncompressedBytes,
+    },
+  ),
+});
 
 // 安全头
 app.use(helmet({ contentSecurityPolicy: false }));
@@ -51,6 +84,18 @@ app.get('/health', (req, res) => res.json({ status: 'ok' }));
 app.use('/api/auth', require('./routes/auth'));
 
 // 其余 API 路由需要认证
+app.use(
+  '/api/excel-translations',
+  authenticate,
+  createExcelTranslationRouter({
+    jobManager: translationJobManager,
+    incomingDir: translationConfig.incomingDir,
+    limits: {
+      maxFileBytes: translationConfig.maxFileBytes,
+      maxUncompressedBytes: translationConfig.maxUncompressedBytes,
+    },
+  }),
+);
 app.use('/api', authenticate, require('./routes/zouhuo'));
 app.use('/api/pricings', authenticate, require('./routes/pricing'));
 app.use('/api/adoc', authenticate, require('./routes/adoc'));
@@ -78,7 +123,7 @@ app.use((err, req, res, next) => {
 });
 
 const PORT = process.env.PORT || 80;
-app.listen(PORT, '0.0.0.0', () => {
+const server = app.listen(PORT, '0.0.0.0', () => {
   const url = `http://localhost:${PORT}`;
   console.log(`走货明细服务启动: ${url}`);
   // pkg 打包后自动打开浏览器
@@ -87,3 +132,14 @@ app.listen(PORT, '0.0.0.0', () => {
     exec(`start "" "${url}"`);
   }
 });
+
+let shutdownStarted = false;
+function shutdown() {
+  if (shutdownStarted) return;
+  shutdownStarted = true;
+  translationJobManager.close();
+  server.close(() => process.exit(0));
+}
+
+process.once('SIGINT', shutdown);
+process.once('SIGTERM', shutdown);

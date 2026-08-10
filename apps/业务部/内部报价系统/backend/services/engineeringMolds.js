@@ -15,6 +15,12 @@ function expandEngineeringMolds(molds) {
       material_unit_price: mold.material_unit_price ?? null,
       shot_price: mold.shot_price ?? null,
       cycle_sec: mold.cycle_sec ?? null,
+      product_group_id: mold.product_group_id || '',
+      product_group_name: mold.product_group_name || '',
+      product_group_rows: mold.product_group_rows || [],
+      product_image: mold.product_image || '',
+      source_sheet_name: mold._sheet_name || '',
+      source_sheet_index: mold._sheet_index ?? null,
     };
 
     if (Array.isArray(mold.parts) && mold.parts.length) {

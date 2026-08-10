@@ -6,6 +6,11 @@ export function cnyTaxToHkdUntaxed(value: number, exchangeRate = DEFAULT_CNY_TO_
   return Math.round((value / exchangeRate / TAX_RATE_FACTOR) * 10000) / 10000
 }
 
+export function cnyTaxToUntaxedRmb(value: number, taxPoint: number): number {
+  if (!Number.isFinite(value) || !Number.isFinite(taxPoint) || taxPoint <= 0) return 0
+  return Math.round((value / taxPoint) * 10000) / 10000
+}
+
 export function applyCnyTaxPrice(payload: Record<string, any>, preferCnyTaxPrice = false) {
   const source = payload.unit_price_cny_tax ?? (preferCnyTaxPrice ? payload.unit_price : undefined)
   if (source == null || source === '') return payload

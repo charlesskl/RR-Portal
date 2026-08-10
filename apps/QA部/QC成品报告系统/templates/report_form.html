@@ -1,0 +1,93 @@
+{% extends 'base.html' %}
+{% block title %}编辑 {{ report.report_no }}{% endblock %}
+{% block content %}{% set s=json_load(report.product_snapshot) %}{% set p=json_load(report.packing_snapshot) %}
+<div class="page">
+  <header class="page-header">
+    <div><span class="eyebrow">Draft · Rev.{{ report.revision }}</span><h1>{{ report.report_no }}</h1><p>{{ s.customer_name }} · {{ s.po_no }} · {{ s.item_no }}</p></div>
+    <div class="actions"><a class="button secondary" href="{{ url_for('preview_report', report_id=report.id, template='legacy', language='en') }}" target="_blank">预览五页客户报告</a><a class="button secondary" href="{{ url_for('report_detail', report_id=report.id) }}">查看摘要</a><button class="button" form="report-form" type="submit">保存并判定</button></div>
+  </header>
+  <div class="progress-steps"><span class="step done"><i>✓</i>选择订单</span><b class="step-line done"></b><span class="step active"><i>2</i>检验录入</span><b class="step-line {% if photos %}done{% endif %}"></b><span class="step {% if photos %}active{% endif %}"><i>3</i>照片签名</span><b class="step-line"></b><span class="step"><i>4</i>正式报告</span></div>
+  <section class="summary-strip">
+    <div><small>客户</small><strong>{{ s.customer_name }}</strong></div><div><small>PO</small><strong>{{ s.po_no }}</strong></div><div><small>产品编号</small><strong>{{ s.item_no }}</strong></div><div><small>订单数量</small><strong>{{ s.po_quantity }} PCS</strong></div><div><small>日期码</small><strong>{{ s.date_code }}</strong></div>
+  </section>
+  <section class="result-banner {{ report.result|lower|replace(' ','-') }}">
+    <div><strong>{{ report.result }}</strong><p>{{ report.result_reason }}</p></div><span class="status {{ report.result|lower|replace(' ','-') }}">实时判定</span>
+  </section>
+  <nav class="tabs"><a href="#inspection">检验资料</a><a href="#aql">AQL 与缺陷</a><a href="#tests">性能测试</a><a href="#packing">包装资料</a><a href="#photos">现场照片</a><a href="#signature">电子签名</a></nav>
+
+  <form id="report-form" method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <section class="card section-card" id="inspection">
+      <div class="section-title"><div><h2>检验资料</h2><p>订单与产品资料已快照保存，修订版不会受基础资料变化影响。</p></div></div>
+      <div class="field-grid">
+        <label>检验日期<input type="date" name="inspection_date" value="{{ report.inspection_date }}" required></label>
+        <label>检验状态<select name="inspection_status"><option>Final 1st</option><option>Final 2nd</option><option>Final 3rd</option><option>In-line</option></select></label>
+        <label>检验级别<select name="inspection_level"><option value="II" selected>Level II</option><option value="I">Level I</option><option value="III">Level III</option></select></label>
+        <label>生产完成比例<input type="number" name="completed_pct" value="{{ report.completed_pct }}" min="0" max="100"></label>
+        <label>应抽样数量<input value="{{ report.sample_size or '待 AQL 规则计算' }}" readonly></label>
+        <label>实际检验数量<input type="number" name="inspected_qty" value="{{ report.inspected_qty }}" min="0" required></label>
+        <label class="span-2">备注<textarea name="remarks">{{ report.remarks }}</textarea></label>
+      </div>
+    </section>
+
+    <section class="card section-card" id="aql">
+      <div class="section-title"><div><h2>AQL 判定与缺陷</h2><p>Ac / Re 来自管理员维护的公司授权抽样表，缺少规则时自动 ON HOLD。</p></div></div>
+      <div class="aql-grid">
+        {% for severity in ['critical','major','minor'] %}{% set rule=rules.get(severity) %}{% set detail=decision[severity] %}
+        <article class="aql-card"><header><h3>{{ severity }}</h3><span class="status {{ 'pass' if detail.count <= (detail.accept if detail.accept is not none else -1) else 'on-hold' }}">{{ detail.count }} found</span></header>
+          <label>AQL<input type="number" step="0.1" name="{{ severity }}_aql" value="{{ detail.aql }}"></label>
+          <div class="aql-numbers"><div><small>Sample</small><strong>{{ rule.sample_size if rule else '-' }}</strong></div><div><small>Ac</small><strong>{{ detail.accept if detail.accept is not none else '-' }}</strong></div><div><small>Re</small><strong>{{ detail.reject if detail.reject is not none else '-' }}</strong></div></div>
+        </article>{% endfor %}
+      </div>
+      <div style="margin-top:20px">
+        {% for index in range(1,6) %}{% set defect=defects[index-1] if defects|length >= index else none %}
+        <div class="defect-row"><label>缺陷级别<select name="defect_severity_{{ index }}"><option value="minor" {% if defect and defect.severity=='minor' %}selected{% endif %}>Minor</option><option value="major" {% if defect and defect.severity=='major' %}selected{% endif %}>Major</option><option value="critical" {% if defect and defect.severity=='critical' %}selected{% endif %}>Critical</option></select></label><label>数量<input type="number" min="0" name="defect_quantity_{{ index }}" value="{{ defect.quantity if defect else 0 }}"></label><label>缺陷描述<input name="defect_description_{{ index }}" list="defect-category-options" value="{{ defect.description if defect else '' }}" placeholder="例如：DIRTY MARK"></label></div>
+        {% endfor %}
+        <datalist id="defect-category-options">{% for category in defect_categories %}<option value="{{ category.name }}">{{ category.default_severity|title }}</option>{% endfor %}</datalist>
+      </div>
+      <div class="field-grid two" style="margin-top:18px"><label style="display:flex;align-items:center;gap:9px;grid-auto-flow:column;justify-content:start"><input type="checkbox" name="manual_hold" style="width:18px;min-height:auto" {% if report.manual_hold %}checked{% endif %}> 手动暂挂 ON HOLD</label><label>暂挂原因<input name="hold_reason" value="{{ report.hold_reason }}" placeholder="手动暂挂时必填"></label></div>
+    </section>
+
+    <section class="card section-card" id="tests">
+      <div class="section-title"><div><h2>性能与可靠性</h2><p>测试项目由管理员模板维护，空白项目会在报告中显示 “-”。</p></div></div>
+      {% for test in tests %}<div class="test-row"><div><span class="help">项目</span><div class="static-field">{{ test.name }}</div></div><div><span class="help">标准</span><div class="static-field">{{ test.standard }}</div></div><label>结果<select name="test_result_{{ test.id }}"><option value="">未填写</option><option value="PASS" {% if test.result=='PASS' %}selected{% endif %}>PASS</option><option value="FAIL" {% if test.result=='FAIL' %}selected{% endif %}>FAIL</option><option value="N/A" {% if test.result=='N/A' %}selected{% endif %}>N/A</option></select></label></div>{% endfor %}
+    </section>
+
+    <section class="card section-card" id="packing">
+      <div class="section-title"><div><h2>外箱与包装</h2><p>记录外箱尺寸、重量和条码，产品固有资料来自产品库。</p></div></div>
+      <div class="field-grid two">
+        <label>外箱尺寸<input name="master_carton_dimension" value="{{ report.master_carton_dimension }}" placeholder="44.50 x 28.00 x 29.00 cm"></label>
+        <label>外箱条码<input name="outer_carton_barcode" value="{{ report.outer_carton_barcode }}"></label>
+        <label>外箱净重 (kg)<input type="number" step="0.01" name="master_carton_nw" value="{{ report.master_carton_nw or '' }}"></label>
+        <label>外箱毛重 (kg)<input type="number" step="0.01" name="master_carton_gw" value="{{ report.master_carton_gw or '' }}"></label>
+      </div>
+    </section>
+  </form>
+
+  <section class="card section-card" id="photos">
+    <div class="section-title"><div><h2>现场照片</h2><p>支持手机直接拍照；上传时自动纠正方向、压缩并清除定位等 EXIF 信息。</p></div><span class="revision">{{ photos|length }} 张</span></div>
+    <form method="post" enctype="multipart/form-data" action="{{ url_for('upload_photos', report_id=report.id) }}" class="photo-upload">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><div class="field-grid three" style="text-align:left"><label>照片类别<select name="category">{% for key,label in photo_categories.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}</select></label><label>说明<input name="caption" placeholder="可选，例如：Front side view"></label><label>选择照片<input id="photo-input" type="file" name="photos" accept="image/*" capture="environment" multiple required><span id="photo-count" class="help">可一次选择多张照片</span></label></div><button class="button" type="submit" style="margin-top:14px">上传并归档</button>
+    </form>
+    <div class="photo-grid">{% for photo in photos %}<article class="photo-card"><img src="{{ url_for('media_photo', photo_id=photo.id) }}" alt="{{ photo.caption or photo.category }}"><div class="photo-meta"><strong>{{ photo_categories.get(photo.category,photo.category) }}</strong><small>{{ photo.caption or photo.original_name }}</small><form method="post" action="{{ url_for('delete_photo', report_id=report.id, photo_id=photo.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="button ghost small" data-confirm="确认删除这张照片？">删除</button></form></div></article>{% endfor %}</div>
+  </section>
+
+  <section class="card section-card" id="signature">
+    <div class="section-title"><div><h2>电子签名</h2><p>可现场手写并选择保存到个人资料，也可复用已预存的签名。</p></div></div>
+    <div class="signature-grid">
+      <form id="signature-form" method="post" action="{{ url_for('save_signature', report_id=report.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input id="signature-data" type="hidden" name="signature_data"><input id="signature-mode" type="hidden" name="signature_mode" value="draw">
+        <div class="signature-pad"><canvas id="signature-canvas" aria-label="手写签名板"></canvas><div class="signature-tools"><button id="clear-signature" class="button ghost small" type="button">清空重签</button><label style="display:flex;align-items:center;gap:7px;grid-auto-flow:column"><input type="checkbox" name="save_to_profile" style="width:16px;min-height:auto">保存为个人签名</label></div></div>
+        <div class="actions" style="margin-top:12px"><button class="button" type="submit" value="draw">保存现场签名</button><button class="button secondary" type="submit" value="profile">使用预存签名</button></div>
+      </form>
+      <div class="signature-preview">{% if report.signature_path %}<div><strong>签名已保存</strong><small>{{ report.signed_at.strftime('%Y-%m-%d %H:%M') if report.signed_at else '' }}</small></div>{% else %}<div><strong>等待签名</strong><small>正式报告生成前必须完成签名</small></div>{% endif %}</div>
+    </div>
+  </section>
+
+  <section class="card section-card">
+    <div class="section-title"><div><h2>生成正式报告</h2><p>生成后本版本数据、照片和 PDF 全部锁定；修改需创建新的 Rev. 版本。</p></div></div>
+    <form method="post" action="{{ url_for('finalize_report', report_id=report.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="button success" type="submit" data-confirm="确认生成并锁定正式报告？系统将同时生成四种 PDF。" {% if not report.signature_path %}disabled title="请先签名"{% endif %}>锁定并生成四种 PDF</button></form>
+  </section>
+</div>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='report.js') }}"></script>{% endblock %}

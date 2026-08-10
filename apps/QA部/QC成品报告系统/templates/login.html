@@ -1,0 +1,35 @@
+{% extends 'base.html' %}
+{% block title %}登录 · QC 质检工作台{% endblock %}
+{% block body_class %}login-body{% endblock %}
+{% block content %}
+<div class="login-page">
+  <section class="login-visual">
+    <a class="brand" href="#"><span class="brand-mark">QC</span><span><strong>质检工作台</strong><small>INSPECTION HUB</small></span></a>
+    <div class="login-copy">
+      <span class="eyebrow" style="color:#8db8ff">从现场到报告，一处完成</span>
+      <h1>让每一份检验报告<br>都有据可查。</h1>
+      <p>录入检验数据、上传现场照片、自动执行 AQL 判定，并生成不可篡改的中英文 PDF 报告。</p>
+    </div>
+    <div class="login-features">
+      <div class="login-feature"><strong>AQL 自动判定</strong><small>授权规则集中维护</small></div>
+      <div class="login-feature"><strong>移动端拍照</strong><small>现场证据分类归档</small></div>
+      <div class="login-feature"><strong>版本可追溯</strong><small>正式报告不可覆盖</small></div>
+    </div>
+  </section>
+  <section class="login-form-wrap">
+    <div class="login-form">
+      <h2>欢迎回来</h2>
+      <p>请使用公司分配的账号登录系统</p>
+      <form method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <label>账号<input name="username" autocomplete="username" placeholder="请输入账号" required autofocus></label>
+        <label>密码<input type="password" name="password" autocomplete="current-password" placeholder="请输入密码" required></label>
+        <button class="button" type="submit">登录系统</button>
+      </form>
+      {% if config.get('TESTING') or config.get('DEBUG') %}
+      <div class="login-hint">首次本地演示可使用：管理员 <strong>admin / Admin@12345</strong>，QC <strong>qc / QC@12345</strong>。正式部署必须通过环境变量替换默认密码。</div>
+      {% endif %}
+    </div>
+  </section>
+</div>
+{% endblock %}

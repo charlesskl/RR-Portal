@@ -7,6 +7,9 @@ import { CRAFT_LABELS, type Craft } from '../constants/roles'
 import { computeFactoryStats, computeSiteStats, type FactoryStats, type SiteStats } from '../utils/factoryStats'
 import type { Factory } from '../types/factory'
 import type { Order } from '../types/order'
+import { matchesOrderDate } from '../utils/orderDateFilter'
+
+const props = defineProps<{ month: string }>()
 
 const store = useFactoriesStore()
 
@@ -62,7 +65,7 @@ function blurClose() {
   setTimeout(() => (open.value = false), 150)
 }
 
-watch(selectedIds, async (ids) => {
+watch(() => [selectedIds.value.slice(), props.month] as const, async ([ids]) => {
   if (!ids.length) { data.value = {}; return }
   loading.value = true
   const flt = ids.map((id) => `factory = "${id}"`).join(' || ')
@@ -72,13 +75,18 @@ watch(selectedIds, async (ids) => {
     pb.collection('quality_5s_checks').getFullList({ filter: flt, sort: '-check_date' }),
     pb.collection('monthly_scores').getFullList({ filter: flt, sort: '-year_month' }),
   ])
+  const monthFilter = { mode: 'month' as const, month: props.month }
+  const monthOrders = os.filter((item) => matchesOrderDate(item.order_date, monthFilter))
+  const monthInspections = (qis as any[]).filter((item) => matchesOrderDate(item.inspect_date, monthFilter))
+  const monthChecks = (checks as any[]).filter((item) => matchesOrderDate(item.check_date, monthFilter))
+  const monthScores = (scs as any[]).filter((item) => item.year_month === props.month)
   const next: Record<string, Cell> = {}
   for (const id of ids) {
     next[id] = {
       factory: store.items.find((f) => f.id === id) ?? {},
-      stats: computeFactoryStats(os.filter((o) => o.factory === id), (qis as any[]).filter((q) => q.factory === id)),
-      site: computeSiteStats((checks as any[]).filter((c) => c.factory === id)),
-      grade: (scs as any[]).filter((s) => s.factory === id).find((s) => s.grade)?.grade ?? '',
+      stats: computeFactoryStats(monthOrders.filter((o) => o.factory === id), monthInspections.filter((q) => q.factory === id)),
+      site: computeSiteStats(monthChecks.filter((c) => c.factory === id)),
+      grade: monthScores.find((s) => s.factory === id)?.grade ?? '',
     }
   }
   data.value = next

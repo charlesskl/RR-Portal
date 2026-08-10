@@ -1,14 +1,21 @@
 import type { Order } from '../types/order'
+import { cnyTaxToUntaxedRmb } from './orderPricing'
+import { splitSewingContractItemNo } from './deliveryStats'
+
+const SEP = ' '
+const groupCollator = new Intl.Collator('zh-CN-u-co-stroke')
 
 export interface PriceStatsRow {
   workshop: string
   factory: string
   category: string
   item_no: string
+  mold_no: string
   product: string
   quote_labor_price: number | null
   supplier_price: number | null
   unit_price: number | null
+  tax_point: number | null
   after_tax: number | null
   ratio_pct: number | null
   manager_rating: number | null
@@ -32,8 +39,11 @@ export function ratioPct(unitPrice?: number | null, quoteLaborPrice?: number | n
   return Math.round((at / quoteLaborPrice) * 1000) / 10
 }
 
-const SEP = ' '
-const groupCollator = new Intl.Collator('zh-CN-u-co-stroke')
+function ratioFromPrice(price?: number | null, quoteLaborPrice?: number | null): number | null {
+  if (price == null || !quoteLaborPrice) return null
+  return Math.round((price / quoteLaborPrice) * 1000) / 10
+}
+
 function computeSpan(
   rows: PriceStatsRow[],
   key: (r: PriceStatsRow) => string,
@@ -52,24 +62,44 @@ function computeSpan(
 export function buildPriceStatsRows(
   orders: Order[],
   factoryName: (o: Order) => string,
+  useSewingPrices = false,
+  sewingTaxPoint?: (o: Order) => number | null,
 ): PriceStatsRow[] {
-  const rows: PriceStatsRow[] = orders.map((o) => ({
-    workshop: o.workshop ?? '',
-    factory: factoryName(o),
-    category: o.process_category ?? '',
-    item_no: o.item_no ?? '',
-    product: o.product ?? '',
-    quote_labor_price: o.quote_labor_price ?? null,
-    supplier_price: o.supplier_price ?? null,
-    unit_price: o.unit_price ?? null,
-    after_tax: afterTax(o.unit_price),
-    ratio_pct: ratioPct(o.unit_price, o.quote_labor_price),
-    manager_rating: o.manager_rating ?? null,
-    notes: o.notes ?? '',
-    workshopSpan: 0,
-    factorySpan: 0,
-    categorySpan: 0,
-  }))
+  const rows: PriceStatsRow[] = orders.map((o) => {
+    const cnyTaxPrice = o.unit_price_cny_tax ?? null
+    const linkedTaxPoint = useSewingPrices && sewingTaxPoint ? sewingTaxPoint(o) : o.exchange_rate
+    const taxPoint = Number(linkedTaxPoint)
+    const sewingUntaxedPrice = cnyTaxPrice != null && Number.isFinite(taxPoint) && taxPoint > 0
+      ? cnyTaxToUntaxedRmb(cnyTaxPrice, taxPoint)
+      : o.unit_price ?? null
+    const unitPrice = useSewingPrices ? cnyTaxPrice : o.unit_price ?? null
+    const comparedPrice = useSewingPrices ? sewingUntaxedPrice : afterTax(o.unit_price)
+    return {
+      workshop: o.workshop ?? '',
+      factory: factoryName(o),
+      category: o.process_category ?? '',
+      // 车缝订单在数据库中以“合同号/货号”存储；
+      // 单价统计与货期管理保持一致，只展示关联后的货号。
+      item_no: useSewingPrices
+        ? splitSewingContractItemNo(o.item_no).itemNo
+        : o.item_no ?? '',
+      mold_no: o.mold_no ?? '',
+      product: o.product ?? '',
+      quote_labor_price: o.quote_labor_price ?? null,
+      supplier_price: o.supplier_price ?? null,
+      unit_price: unitPrice,
+      tax_point: useSewingPrices && Number.isFinite(taxPoint) ? taxPoint : null,
+      after_tax: comparedPrice,
+      ratio_pct: useSewingPrices
+        ? ratioFromPrice(comparedPrice, o.quote_labor_price)
+        : ratioPct(o.unit_price, o.quote_labor_price),
+      manager_rating: o.manager_rating ?? null,
+      notes: o.notes ?? '',
+      workshopSpan: 0,
+      factorySpan: 0,
+      categorySpan: 0,
+    }
+  })
   // 排序保证同组相邻：车间 → 加工厂 → 加工类别
   rows.sort((a, b) =>
     groupCollator.compare(a.workshop, b.workshop) ||

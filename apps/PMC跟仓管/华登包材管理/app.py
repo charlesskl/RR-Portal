@@ -110,6 +110,21 @@ def init_db():
     cur.execute("CREATE INDEX IF NOT EXISTS idx_reconc_approver ON reconciliations(approver_party, status)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_reconc_pair ON reconciliations(pair_low, pair_high, status)")
 
+    # period_locks 对账时间段锁：核对确认后锁定该范围，禁止再录入/修改/删除，
+    # 解锁（手动删除锁或对账被撤销）后才可操作
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS period_locks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        party TEXT NOT NULL,
+        date_from TEXT NOT NULL,
+        date_to TEXT NOT NULL,
+        reconciliation_id INTEGER,
+        reason TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(party, date_from, date_to, reconciliation_id)
+    )
+    """)
+
     # investment_records 投资记录（按 pair）
     cur.execute("""
     CREATE TABLE IF NOT EXISTS investment_records (
@@ -211,6 +226,7 @@ ITEMS = [
     ('djx', '大胶箱'), ('zb', '纸板'),
 ]
 STAT_ITEMS = [('mkb', '木卡板'), ('jkb', '胶卡板'), ('jx', '胶箱'), ('gx', '钙塑箱')]
+ITEM_KEYS = {k for k, _ in ITEMS}
 TRIANGLE_ITEMS = [('mkb', '木卡板'), ('jkb', '胶卡板'), ('jx', '胶箱'), ('gx', '钙塑箱'), ('zx', '纸箱')]
 PAIRS = [('hd', 'sy'), ('hd', 'xx'), ('sy', 'xx')]
 
@@ -597,6 +613,9 @@ def party_page(party):
     date_from = request.args.get('date_from', '')
     date_to = request.args.get('date_to', '')
     order_no = request.args.get('order_no', '').strip()
+    item = request.args.get('item', '').strip()
+    if item not in ITEM_KEYS:
+        item = ''
     try:
         page_size = int(request.args.get('page_size', 50))
     except ValueError:
@@ -607,13 +626,25 @@ def party_page(party):
     con = sqlite3.connect(DATABASE)
     con.row_factory = sqlite3.Row
 
+    # 每个对方各自的对账锁定区间（按 pair 隔离），用于给流水记录标注 period_locked
+    lock_ranges = {}
+    for row in con.execute("""
+        SELECT l.date_from AS f, l.date_to AS t, r.initiator_party AS ip, r.approver_party AS ap
+        FROM period_locks l JOIN reconciliations r ON r.id = l.reconciliation_id
+        WHERE l.party=?""", (party,)).fetchall():
+        others = {row['ip'], row['ap']} - {party}
+        if others:
+            lock_ranges.setdefault(others.pop(), []).append((row['f'], row['t']))
+
     counterparties = PARTIES[party]['counterparties']
     panels = []
     for cp in counterparties:
         panel = {'cp': cp, 'cp_name': PARTIES[cp]['name']}
+        cp_lock_ranges = lock_ranges.get(cp, [])
         for direction, from_p, to_p in [('sent', party, cp), ('received', cp, party)]:
             all_r = _query_flow(con, recorded_by=party, from_party=from_p, to_party=to_p,
-                                date_from=date_from, date_to=date_to, order_no=order_no)
+                                date_from=date_from, date_to=date_to, order_no=order_no,
+                                item=item)
             page_key = f'page_{cp}_{direction}'
             try:
                 page = max(1, int(request.args.get(page_key, 1) or 1))
@@ -623,7 +654,12 @@ def party_page(party):
             pages = max(1, (total + page_size - 1) // page_size)
             page = min(page, pages)
             start = (page - 1) * page_size
-            panel[f'{direction}_records'] = all_r[start:start + page_size]
+            page_records = all_r[start:start + page_size]
+            # 区间锁内的记录同样视为锁定（记录级 locked 标志可能因历史数据修复而不准）
+            if cp_lock_ranges:
+                for rec in page_records:
+                    rec['period_locked'] = any(f <= rec['date'] <= t for f, t in cp_lock_ranges)
+            panel[f'{direction}_records'] = page_records
             panel[f'{direction}_summary'] = _calc_summary(all_r)
             panel[f'{direction}_pagination'] = {
                 'page': page, 'pages': pages, 'total': total, 'page_size': page_size,
@@ -634,13 +670,30 @@ def party_page(party):
         panels.append(panel)
 
     prices = {r['item_key']: r['price'] for r in con.execute('SELECT * FROM default_prices').fetchall()}
+    # 锁按对方（邵阳/兴信）分组，方便分开解锁管理
+    lock_rows = con.execute("""
+        SELECT l.*, r.initiator_party, r.approver_party
+        FROM period_locks l
+        LEFT JOIN reconciliations r ON r.id = l.reconciliation_id
+        WHERE l.party=? ORDER BY l.date_from
+    """, (party,)).fetchall()
+    locks_by_cp = {}
+    for row in lock_rows:
+        d = dict(row)
+        parties = {d.get('initiator_party'), d.get('approver_party')} - {party, None}
+        cp = parties.pop() if parties else None
+        d['cp_name'] = PARTIES[cp]['name'] if cp in PARTIES else '其他'
+        locks_by_cp.setdefault(d['cp_name'], []).append(d)
+    locks = [dict(r) for r in con.execute(
+        'SELECT * FROM period_locks WHERE party=? ORDER BY date_from', (party,)).fetchall()]
     con.close()
     monthly = _build_monthly_stats(party)
     dup_warning = session.pop('dup_warning', None)
     return render_template('party.html', party=party, party_name=PARTIES[party]['name'],
                            panels=panels, prices=prices, monthly=monthly,
                            date_from=date_from, date_to=date_to, page_size=page_size,
-                           dup_warning=dup_warning, order_no=order_no)
+                           dup_warning=dup_warning, order_no=order_no, item=item,
+                           period_locks=locks, locks_by_cp=locks_by_cp)
 
 
 @app.route('/party/<party>/entry', methods=['POST'])
@@ -682,6 +735,10 @@ def party_entry(party):
     confirm_dup = request.form.get('confirm_dup') == '1'
 
     con = sqlite3.connect(DATABASE)
+    if _is_period_locked(con, party, date, cp):
+        con.close()
+        flash(f'{date} 已与{PARTIES[cp]["name"]}对账锁定，该时间段内不能录入；如需录入请先在页面下方解锁')
+        return _party_redirect(party)
     if order_no and not confirm_dup:
         dups = _find_duplicate_order(con, order_no=order_no, party=party, cp=cp)
         if dups:
@@ -761,7 +818,8 @@ def _party_redirect(party):
     args = {}
     for form_key, arg_key in (('_f_date_from', 'date_from'),
                               ('_f_date_to', 'date_to'),
-                              ('_f_order_no', 'order_no')):
+                              ('_f_order_no', 'order_no'),
+                              ('_f_item', 'item')):
         v = (request.form.get(form_key) or '').strip()
         if v:
             args[arg_key] = v
@@ -788,6 +846,11 @@ def record_edit(rid):
         con.close(); flash('记录已锁定，不能修改'); return redirect(url_for('party_page', party=party))
 
     date = request.form.get('date', '').strip() or r['date']
+    rec_cp = r['to_party'] if r['from_party'] == party else r['from_party']
+    if _is_period_locked(con, party, r['date'], rec_cp) or _is_period_locked(con, party, date, rec_cp):
+        con.close()
+        flash('该日期所在时间段已对账锁定，不能修改；如需修改请先解锁')
+        return _party_redirect(party)
     order_no = request.form.get('order_no', '').strip() or None
     remark = request.form.get('remark', '').strip() or None
     qty_cols = [f'{k}_qty' for k, _ in ITEMS]
@@ -817,13 +880,17 @@ def record_delete(rid):
         return redirect(url_for('index'))
     con = sqlite3.connect(DATABASE)
     con.row_factory = sqlite3.Row
-    r = con.execute("SELECT recorded_by, locked FROM flow_records WHERE id=?", (rid,)).fetchone()
+    r = con.execute("SELECT recorded_by, locked, date, from_party, to_party FROM flow_records WHERE id=?", (rid,)).fetchone()
     if not r:
         con.close(); flash('记录不存在'); return redirect(url_for('party_page', party=party))
     if r['recorded_by'] != party:
         con.close(); flash('无权删除'); return redirect(url_for('party_page', party=party))
     if r['locked']:
         con.close(); flash('记录已锁定'); return redirect(url_for('party_page', party=party))
+    rec_cp = r['to_party'] if r['from_party'] == party else r['from_party']
+    if _is_period_locked(con, party, r['date'], rec_cp):
+        con.close(); flash('该日期所在时间段已对账锁定，不能删除；如需删除请先解锁')
+        return _party_redirect(party)
     con.execute("DELETE FROM flow_records WHERE id=?", (rid,))
     con.commit(); con.close()
     return _party_redirect(party)
@@ -1019,8 +1086,15 @@ def reconcile_approve(rid):
 
     con.execute("""UPDATE reconciliations SET status='confirmed', approved_at=CURRENT_TIMESTAMP WHERE id=?""", (rid,))
     con.execute("UPDATE flow_records SET locked=1 WHERE reconciliation_id=?", (rid,))
+    # 对账确认 → 双方该时间段锁定，禁止再录入/修改/删除（解锁后才可）
+    for p in (r['initiator_party'], r['approver_party']):
+        con.execute("""
+            INSERT OR IGNORE INTO period_locks (party, date_from, date_to, reconciliation_id, reason)
+            VALUES (?, ?, ?, ?, ?)
+        """, (p, r['date_from'], r['date_to'], rid, f'核对#{rid} 已确认'))
     con.commit(); con.close()
-    flash('已确认'); return redirect(url_for('reconcile_detail', rid=rid))
+    flash('已确认，该时间段已锁定，禁止录入新数')
+    return redirect(url_for('reconcile_detail', rid=rid))
 
 
 @app.route('/reconcile/<int:rid>/reject', methods=['POST'])
@@ -1084,8 +1158,79 @@ def reconcile_cancel(rid):
 
     con.execute("UPDATE reconciliations SET status='withdrawn' WHERE id=?", (rid,))
     con.execute("UPDATE flow_records SET locked=0, reconciliation_id=NULL WHERE reconciliation_id=?", (rid,))
+    con.execute("DELETE FROM period_locks WHERE reconciliation_id=?", (rid,))
     con.commit(); con.close()
-    flash('已撤销对账，记录解锁'); return redirect(url_for('reconcile_detail', rid=rid))
+    flash('已撤销对账，记录与时间段已解锁'); return redirect(url_for('reconcile_detail', rid=rid))
+
+
+@app.route('/locks/<int:lid>/delete', methods=['POST'])
+def period_lock_delete(lid):
+    """解锁（可只解锁子区间）：删除请求范围，剩余部分自动拆分保留。"""
+    party = current_party()
+    if not party:
+        return redirect(url_for('index'))
+    con = sqlite3.connect(DATABASE)
+    con.row_factory = sqlite3.Row
+    lock = con.execute("SELECT * FROM period_locks WHERE id=?", (lid,)).fetchone()
+    if not lock or lock['party'] != party:
+        con.close(); flash('锁定不存在或无权解锁'); return redirect(url_for('index'))
+    uf = (request.form.get('unlock_from') or '').strip() or lock['date_from']
+    ut = (request.form.get('unlock_to') or '').strip() or lock['date_to']
+    # 只允许解本锁范围内的区间
+    uf = max(uf, lock['date_from'])
+    ut = min(ut, lock['date_to'])
+    if uf > ut:
+        con.close(); flash('解锁范围无效：开始日期不能晚于结束日期')
+        return _party_redirect(party)
+    # 同一时间段可能被多段锁重叠覆盖（历史补建产生的重复），
+    # 解锁要对该 party 所有与本区间重叠的锁一起生效，否则用户解了一段仍被另一段锁住。
+    # 但只解与点击的锁同一对（party ↔ lock_cp）的锁——与第三方的对账锁不受影响。
+    lock_cp = None
+    if lock['reconciliation_id']:
+        rec = con.execute("SELECT initiator_party, approver_party FROM reconciliations WHERE id=?",
+                          (lock['reconciliation_id'],)).fetchone()
+        if rec:
+            others = {rec['initiator_party'], rec['approver_party']} - {party}
+            lock_cp = others.pop() if others else None
+    overlaps = con.execute("""
+        SELECT l.* FROM period_locks l
+        LEFT JOIN reconciliations r ON r.id = l.reconciliation_id
+        WHERE l.party=? AND l.date_from<=? AND l.date_to>=?
+          AND (? IS NULL OR r.initiator_party IN (?, ?) AND r.approver_party IN (?, ?))""",
+        (party, ut, uf, lock_cp, party, lock_cp, party, lock_cp)).fetchall()
+    overlaps = [lk for lk in overlaps
+                if lock_cp is None
+                or {lk['initiator_party'], lk['approver_party']} == {party, lock_cp}]
+    for lk in overlaps:
+        con.execute("DELETE FROM period_locks WHERE id=?", (lk['id'],))
+        # 拆分：保留解锁区间前后的锁定
+        if lk['date_from'] < uf:
+            con.execute(
+                "INSERT INTO period_locks (party, date_from, date_to, reconciliation_id, reason) VALUES (?,?,?,?,?)",
+                (party, lk['date_from'], _shift_day(uf, -1), lk['reconciliation_id'], lk['reason']))
+        if ut < lk['date_to']:
+            con.execute(
+                "INSERT INTO period_locks (party, date_from, date_to, reconciliation_id, reason) VALUES (?,?,?,?,?)",
+                (party, _shift_day(ut, 1), lk['date_to'], lk['reconciliation_id'], lk['reason']))
+    # 同步解除该范围内流水记录的记录级锁（否则解锁了还是不能编辑）；
+    # 同样只解与这一对相关的记录，不动与第三方的记录。
+    if lock_cp is not None:
+        unlocked = con.execute(
+            """UPDATE flow_records SET locked=0 WHERE recorded_by=? AND date BETWEEN ? AND ?
+               AND ((from_party=? AND to_party=?) OR (from_party=? AND to_party=?))""",
+            (party, uf, ut, party, lock_cp, lock_cp, party)).rowcount
+    else:
+        unlocked = con.execute(
+            "UPDATE flow_records SET locked=0 WHERE recorded_by=? AND date BETWEEN ? AND ?",
+            (party, uf, ut)).rowcount
+    n = len(overlaps)
+    if n > 1:
+        msg = f"已解锁 {uf} ~ {ut}（含 {n} 段重叠锁定），范围内 {unlocked} 条记录已可编辑"
+    else:
+        msg = f"已解锁 {uf} ~ {ut}，范围内 {unlocked} 条记录已可编辑"
+    con.commit(); con.close()
+    flash(msg)
+    return _party_redirect(party)
 
 
 @app.route('/reports')
@@ -1356,8 +1501,8 @@ def _build_inventory_grand_total(monthly_by_party):
     }
 
 
-def _query_flow(con, *, recorded_by, from_party, to_party, date_from=None, date_to=None, order_no=None):
-    """查 flow_records。"""
+def _query_flow(con, *, recorded_by, from_party, to_party, date_from=None, date_to=None, order_no=None, item=None):
+    """查 flow_records。item 为包材 key 时只保留该包材数量非零的记录。"""
     sql = """SELECT * FROM flow_records
              WHERE recorded_by=? AND from_party=? AND to_party=?"""
     args = [recorded_by, from_party, to_party]
@@ -1367,8 +1512,39 @@ def _query_flow(con, *, recorded_by, from_party, to_party, date_from=None, date_
         sql += ' AND date <= ?'; args.append(date_to)
     if order_no:
         sql += ' AND order_no LIKE ?'; args.append(f'%{order_no}%')
+    if item and item in ITEM_KEYS:
+        sql += f' AND COALESCE({item}_qty, 0) != 0'
     sql += ' ORDER BY date DESC, id DESC'
     return [dict(r) for r in con.execute(sql, args).fetchall()]
+
+
+def _is_period_locked(con, party, date, cp=None):
+    """该日期是否落在 party 的某个对账锁定时间段内。
+
+    传入 cp（本单的对方）时，只认「party ↔ cp」这一对的对账锁：
+    与邵阳对平的日期，不应挡住与兴信的录入/修改/删除。
+    """
+    if not date:
+        return False
+    if cp is None:
+        return con.execute("""
+            SELECT 1 FROM period_locks
+            WHERE party=? AND date_from<=? AND date_to>=? LIMIT 1
+        """, (party, date, date)).fetchone() is not None
+    return con.execute("""
+        SELECT 1 FROM period_locks l
+        JOIN reconciliations r ON r.id = l.reconciliation_id
+        WHERE l.party=? AND l.date_from<=? AND l.date_to>=?
+          AND ((r.initiator_party=? AND r.approver_party=?)
+            OR (r.initiator_party=? AND r.approver_party=?))
+        LIMIT 1
+    """, (party, date, date, party, cp, cp, party)).fetchone() is not None
+
+
+def _shift_day(iso_date, days):
+    """ISO 日期串 ±N 天，返回 ISO 串。"""
+    d = datetime.strptime(iso_date, '%Y-%m-%d').date() + timedelta(days=days)
+    return d.isoformat()
 
 
 def _calc_summary(records):
@@ -1442,6 +1618,17 @@ def _sum_items_by_order(con, *, recorded_by, from_party, to_party, date_from, da
     return by_order, no_cnt
 
 
+def _sum_items_no_orderno(con, *, recorded_by, from_party, to_party, date_from, date_to):
+    """无单号记录的各包材合计（与 _sum_items 同口径，只统计 order_no 为空的记录）。"""
+    qty_cols_sql = ', '.join([f'COALESCE(SUM({k}_qty), 0) AS {k}_sum' for k, _ in ITEMS])
+    row = con.execute(f"""
+        SELECT {qty_cols_sql} FROM flow_records
+        WHERE recorded_by=? AND from_party=? AND to_party=? AND date BETWEEN ? AND ?
+          AND (order_no IS NULL OR TRIM(order_no) = '')
+    """, (recorded_by, from_party, to_party, date_from, date_to)).fetchone()
+    return {k: float(row[f'{k}_sum']) for k, _ in ITEMS}
+
+
 def _compare_by_order(con, *, sender, receiver, date_from, date_to):
     """单号级核对（一个方向 sender→receiver）：
     - missing_in_receiver：发方录了、收方没有的单号
@@ -1466,12 +1653,24 @@ def _compare_by_order(con, *, sender, receiver, date_from, date_to):
                     'order_no': on, 'item': k, 'item_name': name,
                     'sender': round(sv, 4), 'receiver': round(rv, 4),
                 })
+    # 无单号记录的分项差异（汇总差异里剔除单号一致部分后，剩下的就来自这里）
+    sender_no_items = _sum_items_no_orderno(
+        con, recorded_by=sender, from_party=sender, to_party=receiver,
+        date_from=date_from, date_to=date_to)
+    receiver_no_items = _sum_items_no_orderno(
+        con, recorded_by=receiver, from_party=sender, to_party=receiver,
+        date_from=date_from, date_to=date_to)
     return {
         'missing_in_receiver': sorted(sset - rset),
         'missing_in_sender': sorted(rset - sset),
         'item_mismatches': item_mismatches,
         'no_orderno_sender': sender_no,
         'no_orderno_receiver': receiver_no,
+        'no_orderno_sender_items': sender_no_items,
+        'no_orderno_receiver_items': receiver_no_items,
+        'no_orderno_diffs': {k: round(sender_no_items[k] - receiver_no_items[k], 4)
+                             for k, _ in ITEMS
+                             if abs(sender_no_items[k] - receiver_no_items[k]) > 1e-9},
     }
 
 

@@ -73,3 +73,40 @@ def test_compare_pair_negative_diff(client):
     _insert('sy', 'hd', 'sy', '2026-05-01', jx_qty=100)
     result = app_module.compare_pair('hd', 'sy', '2026-05-01', '2026-05-01')
     assert result['hd_to_sy']['diffs'] == {'jx': -2}
+
+
+def _insert_no_orderno(recorded_by, from_p, to_p, date, **qtys):
+    con = sqlite3.connect(app_module.DATABASE)
+    cols = ['recorded_by', 'from_party', 'to_party', 'date', 'order_no'] + list(qtys.keys())
+    placeholders = ', '.join(['?'] * len(cols))
+    con.execute(f"INSERT INTO flow_records ({', '.join(cols)}) VALUES ({placeholders})",
+                [recorded_by, from_p, to_p, date, '', *qtys.values()])
+    con.commit(); con.close()
+
+
+def test_no_orderno_diffs_exposed(client):
+    """单号记录一致但无单号记录有差异 → no_orderno_diffs 列出分项差，
+    汇总 diffs 与 no_orderno_diffs 一致（差异来源可解释）。"""
+    # 单号记录：两边一致
+    con = sqlite3.connect(app_module.DATABASE)
+    con.execute("INSERT INTO flow_records (recorded_by, from_party, to_party, date, order_no, gx_qty) VALUES ('hd','hd','sy','2026-05-01','A1',100)")
+    con.execute("INSERT INTO flow_records (recorded_by, from_party, to_party, date, order_no, gx_qty) VALUES ('sy','hd','sy','2026-05-01','A1',100)")
+    con.commit(); con.close()
+    # 无单号记录：发方 60，收方 0
+    _insert_no_orderno('hd', 'hd', 'sy', '2026-05-02', gx_qty=60)
+    result = app_module.compare_pair('hd', 'sy', '2026-05-01', '2026-05-31')
+    oc = result['hd_to_sy']['order_check']
+    assert oc['item_mismatches'] == []
+    assert oc['no_orderno_diffs'] == {'gx': 60}
+    assert oc['no_orderno_sender_items']['gx'] == 60
+    assert oc['no_orderno_receiver_items']['gx'] == 0
+    assert result['hd_to_sy']['diffs'] == {'gx': 60}
+
+
+def test_no_orderno_diffs_empty_when_matching(client):
+    """无单号记录两边一致 → no_orderno_diffs 为空。"""
+    _insert_no_orderno('hd', 'hd', 'sy', '2026-05-02', jx_qty=10)
+    _insert_no_orderno('sy', 'hd', 'sy', '2026-05-02', jx_qty=10)
+    result = app_module.compare_pair('hd', 'sy', '2026-05-01', '2026-05-31')
+    oc = result['hd_to_sy']['order_check']
+    assert oc['no_orderno_diffs'] == {}

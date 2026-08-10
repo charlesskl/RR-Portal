@@ -51,9 +51,12 @@
         <div class="mt-4 border-t pt-3">
             <h3 class="font-semibold text-sm mb-2">差异明细（按单号自动核对）</h3>
             {% set _has = oc.missing_in_receiver or oc.missing_in_sender or oc.item_mismatches %}
-            {% if not _has %}
+            {% if not _has and not oc.no_orderno_diffs %}
                 <p class="text-sm text-green-600">✓ 单号与包材数量完全一致，无差异。</p>
             {% else %}
+                {% if not _has and oc.no_orderno_diffs %}
+                <p class="text-sm text-amber-600 mb-2">⚠ 单号记录一致，但无单号记录存在差异（见下表）。</p>
+                {% endif %}
                 {% if oc.missing_in_receiver %}
                 <div class="mb-2 text-sm">
                     <span class="text-red-600 font-medium">{{ sname }} 有、{{ rname }} 没有的单号（{{ oc.missing_in_receiver|length }}）：</span>
@@ -89,6 +92,30 @@
                     </table>
                 </div>
                 {% endif %}
+            {% endif %}
+            {% if oc.no_orderno_diffs %}
+                <div class="text-sm mt-2">
+                    <div class="text-red-600 font-medium mb-1">无单号记录的分项差异（{{ oc.no_orderno_diffs|length }} 项，造成上方汇总差异）：</div>
+                    <table class="text-xs w-full border-collapse">
+                        <thead class="bg-gray-50"><tr>
+                            <th class="border px-2 py-1 text-left">包材</th>
+                            <th class="border px-2 py-1 text-right">{{ sname }} 记的</th>
+                            <th class="border px-2 py-1 text-right">{{ rname }} 记的</th>
+                            <th class="border px-2 py-1 text-right">差</th>
+                        </tr></thead>
+                        <tbody>
+                        {% set name_of = dict(ITEMS) %}
+                        {% for k, d in oc.no_orderno_diffs.items() %}
+                            <tr class="bg-red-50">
+                                <td class="border px-2 py-1">{{ name_of.get(k, k) }}</td>
+                                <td class="border px-2 py-1 text-right">{{ '%g'|format(oc.no_orderno_sender_items.get(k, 0)) }}</td>
+                                <td class="border px-2 py-1 text-right">{{ '%g'|format(oc.no_orderno_receiver_items.get(k, 0)) }}</td>
+                                <td class="border px-2 py-1 text-right">{{ '%g'|format(d) }}</td>
+                            </tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
             {% endif %}
             {% if oc.no_orderno_sender or oc.no_orderno_receiver %}
                 <p class="text-xs text-gray-400 mt-2">注：{{ sname }} 有 {{ oc.no_orderno_sender }} 条、{{ rname }} 有 {{ oc.no_orderno_receiver }} 条无单号记录，未参与单号核对（仍计入上方包材汇总差异）。</p>

@@ -5,6 +5,7 @@
   "scripts": {
     "start": "node app.js",
     "dev": "node --watch app.js",
+    "test": "node --test test/*.test.js",
     "pkg": "pkg app.js --target node18-win-x64 --output ../dist/走货明细.exe"
   },
   "pkg": {
@@ -34,6 +35,7 @@
     "pdf-parse": "^2.4.5",
     "pdf2json": "^4.0.2",
     "pizzip": "^3.2.0",
+    "sax": "^1.5.0",
     "xlsx": "^0.18.5",
     "xlsx-populate": "^1.21.0"
   }

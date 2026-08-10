@@ -14,6 +14,8 @@ export interface Factory {
   equipment_type?: string
   equipment_qty?: number
   processable_types?: string
+  /** 车缝加工厂税点，按比例存储（例如 3% = 0.03） */
+  tax_point?: number
   production_lines?: string
   cooperative_workshops?: string
   ip_control?: string

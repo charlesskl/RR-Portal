@@ -35,6 +35,37 @@ test('TOMY VQ converts internal electronic prices from HKD to USD', () => {
   assert.equal(data.electronicItems[0].unit_price_usd, 1);
 });
 
+test('TOMY VQ carries named customer-supplied products into supplemental quote rows', () => {
+  const data = sectionsToData({
+    quote: {
+      id: 330,
+      quote_no: 'TOMY-CUSTOMER-PRODUCTS',
+      product_name: 'Customer Product Toy',
+      customer: 'TOMY',
+      qty: 3000,
+    },
+    sections: [{
+      dept: 'sales',
+      payload_json: JSON.stringify({
+        shipping: {
+          customer_supplied_products: [
+            { name: '控制器', amount_usd: 2.5 },
+            { name: '充电线', amount_usd: 1.25 },
+          ],
+        },
+      }),
+    }],
+  });
+  assert.deepEqual(data.vqSupplements.map(item => ({
+    name: item.description,
+    amount: item.unit_price,
+    usage: item.usage_qty,
+  })), [
+    { name: '控制器', amount: 2.5, usage: 1 },
+    { name: '充电线', amount: 1.25, usage: 1 },
+  ]);
+});
+
 test('TOMY VQ uses the shared paper rate instead of stale legacy carton prices', () => {
   const data = sectionsToData({
     quote: {

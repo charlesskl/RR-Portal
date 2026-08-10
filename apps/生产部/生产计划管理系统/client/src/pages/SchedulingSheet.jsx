@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { Button, Space, message, Modal, Table, Tag, Alert, Popconfirm, Select } from 'antd';
-import { DownloadOutlined, PlusOutlined, UploadOutlined, DeleteOutlined, BranchesOutlined, SearchOutlined, SaveOutlined, CalendarOutlined } from '@ant-design/icons';
+import { DownloadOutlined, PlusOutlined, UploadOutlined, DeleteOutlined, BranchesOutlined, SearchOutlined, SaveOutlined, CalendarOutlined, ScissorOutlined, SnippetsOutlined } from '@ant-design/icons';
 import { Input } from 'antd';
 import axios from 'axios';
 import LuckysheetEditor from './LuckysheetEditor';
@@ -276,6 +276,23 @@ export default function SchedulingSheet({ workshop, tab, lineName = 'all', lines
   const [scheduleSuggestions, setScheduleSuggestions] = useState([]);
   const [scheduleApplying, setScheduleApplying] = useState(false);
   const [editorRefreshKey, setEditorRefreshKey] = useState(0);
+  // 剪切/粘贴行：先剪切暂存订单 id，再在目标位置粘贴，整页顺序写 sort_order 持久化
+  const [cutRowIds, setCutRowIds] = useState([]);
+  const [pastingRows, setPastingRows] = useState(false);
+
+  // 表格高度跟随窗口：顶栏(48) + 按钮区/页边距约 160，剩下全给表格。
+  // 旧逻辑固定 600px，大屏底下空一大块（用户反馈「底下空白不需要留太多」）
+  const [sheetHeight, setSheetHeight] = useState(() =>
+    Math.max((typeof window === 'undefined' ? 820 : window.innerHeight) - 210, 420));
+  useEffect(() => {
+    let timer = null;
+    const onResize = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => setSheetHeight(Math.max(window.innerHeight - 210, 420)), 200);
+    };
+    window.addEventListener('resize', onResize);
+    return () => { window.removeEventListener('resize', onResize); if (timer) clearTimeout(timer); };
+  }, []);
 
   // 按货号主编号计算数量合计
   const quantitySums = useMemo(() => {
@@ -531,6 +548,69 @@ export default function SchedulingSheet({ workshop, tab, lineName = 'all', lines
         }
       },
     });
+  };
+
+  // 剪切选中行：暂存订单 id，等「粘贴行」选目标位置（解决「没剪切键，上拉时间调不动」）
+  const handleCutRows = () => {
+    const ls = window.luckysheet;
+    if (!ls || !ls.getRange) { message.warning('表格未加载'); return; }
+    const range = ls.getRange();
+    if (!range || !range[0]) { message.warning('请先在表格里选中要剪切的行'); return; }
+    const ids = [];
+    for (const seg of range) {
+      const [r0, r1] = seg.row || [];
+      if (r0 == null) continue;
+      for (let r = r0; r <= r1; r++) {
+        if (r === 0) continue;  // 表头
+        const idx = r - 1;
+        if (idx < data.length && data[idx]?.id) ids.push(data[idx].id);
+      }
+    }
+    const uniq = [...new Set(ids)];
+    if (uniq.length === 0) { message.warning('选中范围里没有可剪切的订单行'); return; }
+    setCutRowIds(uniq);
+    message.success(`已剪切 ${uniq.length} 行。再选中目标位置的任意一行，点「粘贴行」插到它上方`, 5);
+  };
+
+  // 粘贴行：剪切的行插到选中行上方；整页新顺序写进 sort_order，刷新后不会乱
+  const handlePasteRows = async () => {
+    if (cutRowIds.length === 0) { message.warning('请先剪切行'); return; }
+    if (editorRef.current?.hasPendingChanges?.()) {
+      message.warning('表格有未保存修改，请先保存再粘贴行');
+      return;
+    }
+    if (searchText.trim()) {
+      message.warning('搜索过滤状态下不能粘贴行（未匹配的行会丢失排序），请先清除搜索再粘贴');
+      return;
+    }
+    const ls = window.luckysheet;
+    if (!ls || !ls.getRange) { message.warning('表格未加载'); return; }
+    const range = ls.getRange();
+    if (!range || !range[0] || !range[0].row) { message.warning('请先选中目标位置（粘贴到该行上方）'); return; }
+    const targetRow = range[0].row[0];
+    if (targetRow === 0) { message.warning('不能粘贴到表头上方，请选中数据行'); return; }
+    const targetId = data[Math.min(targetRow - 1, data.length - 1)]?.id;
+    const cutSet = new Set(cutRowIds);
+    const cutRows = data.filter(r => cutSet.has(r.id));
+    if (cutRows.length === 0) {
+      message.warning('剪切的行不在当前筛选里，请切回原来的拉 / 清除搜索再粘贴');
+      return;
+    }
+    const rest = data.filter(r => !cutSet.has(r.id));
+    let insertAt = rest.findIndex(r => r.id === targetId);
+    if (insertAt < 0) insertAt = rest.length;
+    const newOrder = [...rest.slice(0, insertAt), ...cutRows, ...rest.slice(insertAt)];
+    setPastingRows(true);
+    try {
+      const updates = newOrder.map((r, i) => ({ id: r.id, fields: { sort_order: i + 1 } }));
+      await axios.post('/api/orders/batch-update', { updates });
+      message.success(`已把 ${cutRows.length} 行移动到目标位置，顺序已保存`);
+      setCutRowIds([]);
+      fetchData();
+    } catch (e) {
+      message.error('粘贴行失败: ' + (e.response?.data?.message || e.message));
+    }
+    setPastingRows(false);
   };
 
   const handleAutoAssign = async () => {
@@ -795,6 +875,22 @@ export default function SchedulingSheet({ workshop, tab, lineName = 'all', lines
           <Button icon={<DeleteOutlined />} danger onClick={handleDeleteSelectedRows}>
             删除选中行
           </Button>
+          {tab === 'active' && (
+            <>
+              <Button icon={<ScissorOutlined />} onClick={handleCutRows}>
+                剪切选中行
+              </Button>
+              <Button
+                icon={<SnippetsOutlined />}
+                type={cutRowIds.length > 0 ? 'primary' : 'default'}
+                loading={pastingRows}
+                disabled={cutRowIds.length === 0}
+                onClick={handlePasteRows}
+              >
+                粘贴行{cutRowIds.length > 0 ? ` (${cutRowIds.length})` : ''}
+              </Button>
+            </>
+          )}
           <Popconfirm title={`确定清空当前全部 ${data.length} 条数据吗？`} onConfirm={handleDeleteAll} okText="确定清空" cancelText="取消">
             <Button icon={<DeleteOutlined />} danger disabled={data.length === 0}>
               清空全部{data.length > 0 ? ` (${data.length})` : ''}
@@ -820,7 +916,7 @@ export default function SchedulingSheet({ workshop, tab, lineName = 'all', lines
         data={data}
         onRefreshData={fetchData}
         workshop={workshop}
-        height={600}
+        height={sheetHeight}
         newImportedIds={newImportedIds}
         refreshKey={editorRefreshKey}
       />

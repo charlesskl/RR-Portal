@@ -123,8 +123,56 @@ async function remove(r: Quality5sCheck) {
   await pb.collection('quality_5s_checks').delete(r.id)
   await load()
 }
-const canDelete = computed(() => auth.role === 'admin')
 const canEdit = computed(() => (auth.role ? canEditQuality(auth.role) : false))
+const canDelete = computed(() => canEdit.value)
+const canOperate = computed(() => canEdit.value || canDelete.value)
+const editingId = ref<string | null>(null)
+const rowSavingId = ref<string | null>(null)
+
+function blankRowDraft() {
+  return {
+    check_date: '', factory: '', check_type: '', project: '', customer: '', inspector: '',
+    s_area: '' as number | '', s_material: '' as number | '', s_hygiene: '' as number | '',
+    s_sharp: '' as number | '', s_nonconform: '' as number | '', s_standard: '' as number | '',
+    s_qc_staff: '' as number | '', s_correction: '' as number | '', ip_control: '', notes: '',
+  }
+}
+const rowDraft = reactive(blankRowDraft())
+
+function startEdit(r: Quality5sCheck) {
+  editingId.value = r.id
+  Object.assign(rowDraft, blankRowDraft(), {
+    check_date: r.check_date?.slice(0, 10) ?? '', factory: r.factory ?? '',
+    check_type: r.check_type ?? '', project: r.project ?? '', customer: r.customer ?? '',
+    inspector: r.inspector ?? '', ip_control: r.ip_control ?? '', notes: r.notes ?? '',
+  })
+  for (const f of SCORE_FIELDS) rowDraft[f.key] = r[f.key] ?? ''
+}
+
+function rowPreview(r: Quality5sCheck): Quality5sCheck {
+  return editingId.value === r.id ? { ...r, ...rowDraft } as Quality5sCheck : r
+}
+
+async function saveEdit(r: Quality5sCheck) {
+  if (editingId.value !== r.id) { alert('请先点击编辑'); return }
+  if (!rowDraft.factory) { alert('请选择加工厂'); return }
+  rowSavingId.value = r.id
+  const payload: Record<string, any> = {
+    check_date: rowDraft.check_date || null, factory: rowDraft.factory,
+    check_type: rowDraft.check_type, project: rowDraft.project, customer: rowDraft.customer,
+    inspector: rowDraft.inspector, ip_control: rowDraft.ip_control, notes: rowDraft.notes,
+  }
+  for (const f of SCORE_FIELDS) payload[f.key] = rowDraft[f.key] === '' ? null : Number(rowDraft[f.key])
+  try {
+    await pb.collection('quality_5s_checks').update(r.id, payload)
+    editingId.value = null
+    await load()
+    alert('保存成功')
+  } catch (error) {
+    console.error(error)
+    alert('保存失败，请检查填写内容后重试')
+  } finally { rowSavingId.value = null }
+}
 
 async function importExcel(ev: Event) {
   const file = (ev.target as HTMLInputElement).files?.[0]
@@ -278,26 +326,38 @@ function exportExcel() {
               <th>序号</th><th>检查日期</th><th>加工厂名称</th><th>检查类型</th><th>加工项目</th><th>客户</th><th>检查人员</th>
               <th v-for="f in SCORE_FIELDS" :key="f.key">{{ f.label }}</th>
               <th>达成率</th><th>IP保护得分</th><th>折算总达成率</th><th>备注</th>
-              <th v-if="canDelete">操作</th>
+              <th v-if="canOperate">操作</th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="(r, i) in filteredRecords" :key="r.id">
               <td>{{ i + 1 }}</td>
-              <td>{{ r.check_date ? r.check_date.slice(0, 10) : '-' }}</td>
-              <td>{{ factoryName(r) }}</td>
-              <td>{{ r.check_type || '-' }}</td>
-              <td>{{ r.project || '-' }}</td>
-              <td>{{ r.customer || '-' }}</td>
-              <td>{{ r.inspector || '-' }}</td>
-              <td v-for="f in SCORE_FIELDS" :key="f.key">{{ (r as any)[f.key] ?? '-' }}</td>
-              <td class="score">{{ achieveRate(r) }}</td>
-              <td>{{ ipDisplay(r) }}</td>
-              <td class="score">{{ finalRate(r) }}</td>
-              <td>{{ r.notes || '-' }}</td>
-              <td v-if="canDelete"><button class="ghost mini" @click="remove(r)">删除</button></td>
+              <td><input v-if="editingId === r.id" v-model="rowDraft.check_date" class="table-input date-input" type="date" /><template v-else>{{ r.check_date ? r.check_date.slice(0, 10) : '-' }}</template></td>
+              <td>
+                <select v-if="editingId === r.id" v-model="rowDraft.factory" class="table-input factory-input">
+                  <option value="">选择工厂</option>
+                  <option v-for="f in factories.items" :key="f.id" :value="f.id">{{ f.name }}</option>
+                </select>
+                <template v-else>{{ factoryName(r) }}</template>
+              </td>
+              <td><select v-if="editingId === r.id" v-model="rowDraft.check_type" class="table-input"><option value="">-</option><option v-for="t in CHECK_TYPES" :key="t" :value="t">{{ t }}</option></select><template v-else>{{ r.check_type || '-' }}</template></td>
+              <td><input v-if="editingId === r.id" v-model="rowDraft.project" class="table-input" /><template v-else>{{ r.project || '-' }}</template></td>
+              <td><input v-if="editingId === r.id" v-model="rowDraft.customer" class="table-input" /><template v-else>{{ r.customer || '-' }}</template></td>
+              <td><input v-if="editingId === r.id" v-model="rowDraft.inspector" class="table-input" /><template v-else>{{ r.inspector || '-' }}</template></td>
+              <td v-for="f in SCORE_FIELDS" :key="f.key"><input v-if="editingId === r.id" v-model.number="rowDraft[f.key]" class="table-input score-input" type="number" min="0" step="0.1" /><template v-else>{{ r[f.key] ?? '-' }}</template></td>
+              <td class="score">{{ achieveRate(rowPreview(r)) }}</td>
+              <td><input v-if="editingId === r.id" v-model="rowDraft.ip_control" class="table-input score-input" placeholder="NA/0-10" /><template v-else>{{ ipDisplay(r) }}</template></td>
+              <td class="score">{{ finalRate(rowPreview(r)) }}</td>
+              <td><input v-if="editingId === r.id" v-model="rowDraft.notes" class="table-input notes-input" /><template v-else>{{ r.notes || '-' }}</template></td>
+              <td v-if="canOperate">
+                <div class="op-actions">
+                  <button v-if="canEdit" class="ghost mini" @click="startEdit(r)">编辑</button>
+                  <button v-if="canEdit" class="ghost mini" :disabled="editingId !== r.id || rowSavingId === r.id" @click="saveEdit(r)">{{ rowSavingId === r.id ? '保存中…' : '保存' }}</button>
+                  <button v-if="canDelete" class="ghost mini danger" @click="remove(r)">删除</button>
+                </div>
+              </td>
             </tr>
-            <tr v-if="!filteredRecords.length"><td :colspan="canDelete ? 20 : 19" class="hint" style="text-align:center">暂无检查记录</td></tr>
+            <tr v-if="!filteredRecords.length"><td :colspan="canOperate ? 20 : 19" class="hint" style="text-align:center">暂无检查记录</td></tr>
           </tbody>
         </table>
       </div>
@@ -314,9 +374,24 @@ function exportExcel() {
 .computed { align-self: end; font-size: .9rem; color: var(--text-soft); }
 .computed b { color: var(--primary, #4f46e5); font-size: 1.1rem; }
 .actions { margin-top: .9rem; }
-.scroll { overflow-x: auto; }
-.q5s { min-width: 2200px; }
+.toolbar { position: sticky; top: 58px; z-index: 9; margin: -.35rem 0 1rem; padding: .35rem 0; background: var(--bg); }
+.scroll { position: relative; max-height: calc(100vh - 178px); overflow: auto; isolation: isolate; }
+.q5s { min-width: 2200px; margin-top: 0; overflow: visible; }
 .q5s th, .q5s td { white-space: nowrap; text-align: left; }
+.q5s thead th { position: sticky; top: 0; z-index: 3; background: #fafbfc; }
+.q5s th:nth-child(1), .q5s td:nth-child(1) { left: 0; width: 64px; min-width: 64px; max-width: 64px; }
+.q5s th:nth-child(2), .q5s td:nth-child(2) { left: 64px; width: 138px; min-width: 138px; max-width: 138px; }
+.q5s th:nth-child(3), .q5s td:nth-child(3) { left: 202px; width: 260px; min-width: 260px; max-width: 260px; }
+.q5s tbody td:nth-child(-n+3) { position: sticky; z-index: 2; background: var(--surface); }
+.q5s thead th:nth-child(-n+3) { z-index: 5; }
+.q5s th:nth-child(3), .q5s td:nth-child(3) { box-shadow: 5px 0 7px -7px rgba(31, 37, 51, .55); }
 .score { font-weight: 600; }
 .mini { padding: .25rem .6rem; font-size: .82rem; }
+.table-input { width: 112px; min-width: 0; height: 32px; padding: 0 .45rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); }
+.date-input { width: 138px; }
+.factory-input { width: 210px; }
+.score-input { width: 76px; }
+.notes-input { width: 150px; }
+.op-actions { display: flex; align-items: center; gap: .35rem; min-width: 178px; }
+.danger { color: #ef4444; border-color: #fecaca; }
 </style>

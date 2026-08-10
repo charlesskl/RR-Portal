@@ -10,6 +10,9 @@ const { changeUserFactories, changeUserRole } = require('../backend/services/use
 test('engineering mold expansion preserves material and color for each part', () => {
   const rows = expandEngineeringMolds([{
     mold_no: 'M-001',
+    product_group_id: 'product-1',
+    product_group_name: '1#产品',
+    product_image: 'uploads/mold/product-1.png',
     material: 'ABS/PP',
     color: 'red/blue',
     shot_price: 120,
@@ -27,6 +30,14 @@ test('engineering mold expansion preserves material and color for each part', ()
   })), [
     { name: 'shell', material: 'ABS', color: 'red', shot_price: 120 },
     { name: 'base', material: 'PP', color: 'blue', shot_price: 0 },
+  ]);
+  assert.deepEqual(rows.map(row => ({
+    product_group_id: row.product_group_id,
+    product_group_name: row.product_group_name,
+    product_image: row.product_image,
+  })), [
+    { product_group_id: 'product-1', product_group_name: '1#产品', product_image: 'uploads/mold/product-1.png' },
+    { product_group_id: 'product-1', product_group_name: '1#产品', product_image: 'uploads/mold/product-1.png' },
   ]);
 });
 

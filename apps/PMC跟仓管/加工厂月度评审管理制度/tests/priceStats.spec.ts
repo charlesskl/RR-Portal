@@ -61,4 +61,71 @@ describe('buildPriceStatsRows', () => {
     expect(duck.after_tax).toBe(0.5133)
     expect(duck.ratio_pct).toBe(97.8)
   })
+
+  it('带出货期管理中的模具编号', () => {
+    const rows = buildPriceStatsRows([{
+      item_no: 'SR8003',
+      mold_no: 'SR800-M03',
+      product: '兔子',
+    } as any], factoryName)
+
+    expect(rows[0].mold_no).toBe('SR800-M03')
+  })
+
+  it('车缝部关联货期中的人民币价格字段', () => {
+    const rows = buildPriceStatsRows([{
+      workshop: '',
+      process_category: '车缝',
+      item_no: 'MA-RR-2345/92125',
+      product: '橘猫',
+      quote_labor_price: 2.5,
+      unit_price: 2.2722,
+      unit_price_cny_tax: 2.85,
+      exchange_rate: 1.11,
+      expand: { factory: { name: '东安年达' } },
+    } as any], factoryName, true)
+
+    expect(rows[0]).toMatchObject({
+      item_no: '92125',
+      quote_labor_price: 2.5,
+      unit_price: 2.85,
+      tax_point: 1.11,
+      after_tax: 2.5676,
+      ratio_pct: 102.7,
+    })
+  })
+
+  it('车缝部单价统计使用货期管理关联的加工厂税点', () => {
+    const rows = buildPriceStatsRows([{
+      factory: 'factory-1',
+      item_no: 'MA-RR-2345/92125',
+      product: '橘猫',
+      quote_labor_price: 2.8,
+      unit_price_cny_tax: 2.85,
+      exchange_rate: 0.87,
+      expand: { factory: { name: '东安年达' } },
+    } as any], factoryName, true, () => 1.11)
+
+    expect(rows[0]).toMatchObject({
+      tax_point: 1.11,
+      after_tax: 2.5676,
+      ratio_pct: 91.7,
+    })
+  })
+
+  it('其他部门继续使用原单价统计公式', () => {
+    const rows = buildPriceStatsRows([{
+      unit_price: 0.58,
+      unit_price_cny_tax: 2.85,
+      exchange_rate: 1.11,
+      quote_labor_price: 0.525,
+    } as any], factoryName)
+
+    expect(rows[0]).toMatchObject({
+      unit_price: 0.58,
+      tax_point: null,
+      after_tax: 0.5133,
+      ratio_pct: 97.8,
+    })
+  })
 })

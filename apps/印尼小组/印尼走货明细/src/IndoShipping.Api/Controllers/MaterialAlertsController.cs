@@ -212,7 +212,7 @@ public class MaterialAlertsController(ISqlConnectionFactory factory) : Controlle
         var productionParts = new List<ProductionPartRow>();
         var productRows = await c.QueryAsync<ProductMoldingRow>(@"
             SELECT code, name, moldings FROM products
-            WHERE active=TRUE AND moldings IS NOT NULL AND moldings <> ''");
+            WHERE active=TRUE AND moldings IS NOT NULL AND moldings <> '[]'::jsonb");
         foreach (var product in productRows) productionParts.AddRange(ParseProductionParts(product));
         var productionByCode = productionParts.GroupBy(x => x.product_code, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(x => x.Key, x => x.ToList(), StringComparer.OrdinalIgnoreCase);

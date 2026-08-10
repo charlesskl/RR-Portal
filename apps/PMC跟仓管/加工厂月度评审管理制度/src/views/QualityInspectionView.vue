@@ -61,8 +61,9 @@ async function load() {
   })
 }
 onMounted(async () => { await Promise.all([factories.fetchAll(), load()]) })
-const canDelete = computed(() => auth.role === 'admin')
 const canEdit = computed(() => (auth.role ? canEditQuality(auth.role) : false))
+const canDelete = computed(() => canEdit.value)
+const canOperate = computed(() => canEdit.value || canDelete.value)
 
 function blankDraft() {
   return {
@@ -74,6 +75,41 @@ function blankDraft() {
 }
 const draft = reactive(blankDraft())
 const saving = ref(false)
+const editingId = ref<string | null>(null)
+const rowSavingId = ref<string | null>(null)
+const rowDraft = reactive(blankDraft())
+
+function startEdit(r: QualityInspection) {
+  editingId.value = r.id
+  Object.assign(rowDraft, blankDraft(), {
+    inspect_date: r.inspect_date?.slice(0, 10) ?? '', factory: r.factory ?? '',
+    process_type: r.process_type ?? '', customer: r.customer ?? '', delivery_no: r.delivery_no ?? '',
+    item_no: r.item_no ?? '', product: r.product ?? '', quantity: r.quantity ?? null,
+    internal_result: r.internal_result ?? '', internal_defect: r.internal_defect ?? '',
+    internal_inspector: r.internal_inspector ?? '', cust_inspect_date: r.cust_inspect_date ?? '',
+    cust_result: r.cust_result ?? '', cust_defect: r.cust_defect ?? '', notes: r.notes ?? '',
+  })
+}
+
+async function saveEdit(r: QualityInspection) {
+  if (editingId.value !== r.id) { alert('请先点击编辑'); return }
+  if (!rowDraft.factory) { alert('请选择加工厂'); return }
+  rowSavingId.value = r.id
+  const payload: Record<string, any> = {}
+  for (const [key, value] of Object.entries(rowDraft)) {
+    if (key === 'inspect_date') payload.inspect_date = value || null
+    else payload[key] = key === 'quantity' && value !== null && value !== '' ? Number(value) : value
+  }
+  try {
+    await pb.collection('quality_inspections').update(r.id, payload)
+    editingId.value = null
+    await load()
+    alert('保存成功')
+  } catch (error) {
+    console.error(error)
+    alert('保存失败，请检查填写内容后重试')
+  } finally { rowSavingId.value = null }
+}
 
 async function submit() {
   if (!draft.factory) { alert('请选择加工厂'); return }
@@ -226,7 +262,7 @@ function exportExcel() {
               <th colspan="3">内部验货状态</th>
               <th colspan="3">客户验货状态（适用于装配与包装加工）</th>
               <th rowspan="2">备注</th>
-              <th v-if="canDelete" rowspan="2">操作</th>
+              <th v-if="canOperate" rowspan="2">操作</th>
             </tr>
             <tr>
               <th>检验结果</th><th>不良描述</th><th>检验人员</th>
@@ -236,25 +272,37 @@ function exportExcel() {
           <tbody>
             <tr v-for="(r, i) in filteredRecords" :key="r.id">
               <td>{{ i + 1 }}</td>
-              <td>{{ r.inspect_date ? r.inspect_date.slice(0, 10) : '-' }}</td>
-              <td>{{ factoryName(r) }}</td>
-              <td>{{ r.process_type || '-' }}</td>
-              <td>{{ r.customer || '-' }}</td>
-              <td>{{ r.delivery_no || '-' }}</td>
-              <td>{{ r.item_no || '-' }}</td>
-              <td>{{ r.product || '-' }}</td>
-              <td>{{ r.quantity ?? '-' }}</td>
+              <td><input v-if="editingId === r.id" v-model="rowDraft.inspect_date" class="table-input date-input" type="date" /><template v-else>{{ r.inspect_date ? r.inspect_date.slice(0, 10) : '-' }}</template></td>
+              <td>
+                <select v-if="editingId === r.id" v-model="rowDraft.factory" class="table-input factory-input">
+                  <option value="">选择工厂</option>
+                  <option v-for="f in factories.items" :key="f.id" :value="f.id">{{ f.name }}</option>
+                </select>
+                <template v-else>{{ factoryName(r) }}</template>
+              </td>
+              <td><input v-if="editingId === r.id" v-model="rowDraft.process_type" class="table-input" /><template v-else>{{ r.process_type || '-' }}</template></td>
+              <td><input v-if="editingId === r.id" v-model="rowDraft.customer" class="table-input" /><template v-else>{{ r.customer || '-' }}</template></td>
+              <td><input v-if="editingId === r.id" v-model="rowDraft.delivery_no" class="table-input" /><template v-else>{{ r.delivery_no || '-' }}</template></td>
+              <td><input v-if="editingId === r.id" v-model="rowDraft.item_no" class="table-input" /><template v-else>{{ r.item_no || '-' }}</template></td>
+              <td><input v-if="editingId === r.id" v-model="rowDraft.product" class="table-input product-input" /><template v-else>{{ r.product || '-' }}</template></td>
+              <td><input v-if="editingId === r.id" v-model.number="rowDraft.quantity" class="table-input quantity-input" type="number" min="0" /><template v-else>{{ r.quantity ?? '-' }}</template></td>
               <td>1</td>
-              <td>{{ r.internal_result || '-' }}</td>
-              <td>{{ r.internal_defect || '-' }}</td>
-              <td>{{ r.internal_inspector || '-' }}</td>
-              <td>{{ r.cust_inspect_date || '-' }}</td>
-              <td>{{ r.cust_result || '-' }}</td>
-              <td>{{ r.cust_defect || '-' }}</td>
-              <td>{{ r.notes || '-' }}</td>
-              <td v-if="canDelete"><button class="ghost mini" @click="remove(r)">删除</button></td>
+              <td><select v-if="editingId === r.id" v-model="rowDraft.internal_result" class="table-input result-input"><option value="">-</option><option v-for="o in RESULTS" :key="o" :value="o">{{ o }}</option></select><template v-else>{{ r.internal_result || '-' }}</template></td>
+              <td><input v-if="editingId === r.id" v-model="rowDraft.internal_defect" class="table-input" /><template v-else>{{ r.internal_defect || '-' }}</template></td>
+              <td><input v-if="editingId === r.id" v-model="rowDraft.internal_inspector" class="table-input" /><template v-else>{{ r.internal_inspector || '-' }}</template></td>
+              <td><input v-if="editingId === r.id" v-model="rowDraft.cust_inspect_date" class="table-input" /><template v-else>{{ r.cust_inspect_date || '-' }}</template></td>
+              <td><select v-if="editingId === r.id" v-model="rowDraft.cust_result" class="table-input result-input"><option value="">-</option><option v-for="o in RESULTS" :key="o" :value="o">{{ o }}</option></select><template v-else>{{ r.cust_result || '-' }}</template></td>
+              <td><input v-if="editingId === r.id" v-model="rowDraft.cust_defect" class="table-input" /><template v-else>{{ r.cust_defect || '-' }}</template></td>
+              <td><input v-if="editingId === r.id" v-model="rowDraft.notes" class="table-input notes-input" /><template v-else>{{ r.notes || '-' }}</template></td>
+              <td v-if="canOperate">
+                <div class="op-actions">
+                  <button v-if="canEdit" class="ghost mini" @click="startEdit(r)">编辑</button>
+                  <button v-if="canEdit" class="ghost mini" :disabled="editingId !== r.id || rowSavingId === r.id" @click="saveEdit(r)">{{ rowSavingId === r.id ? '保存中…' : '保存' }}</button>
+                  <button v-if="canDelete" class="ghost mini danger" @click="remove(r)">删除</button>
+                </div>
+              </td>
             </tr>
-            <tr v-if="!filteredRecords.length"><td :colspan="canDelete ? 18 : 17" class="hint" style="text-align:center">暂无检验记录</td></tr>
+            <tr v-if="!filteredRecords.length"><td :colspan="canOperate ? 18 : 17" class="hint" style="text-align:center">暂无检验记录</td></tr>
           </tbody>
         </table>
       </div>
@@ -269,8 +317,27 @@ function exportExcel() {
 .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: .8rem; }
 .grid label { display: flex; flex-direction: column; gap: .25rem; font-size: .85rem; }
 .actions { margin-top: .9rem; }
-.scroll { overflow-x: auto; }
-.qi { min-width: 1900px; }
+.toolbar { position: sticky; top: 58px; z-index: 9; margin: -.35rem 0 1rem; padding: .35rem 0; background: var(--bg); }
+.scroll { position: relative; max-height: calc(100vh - 178px); overflow: auto; isolation: isolate; }
+.qi { min-width: 1900px; margin-top: 0; overflow: visible; }
 .qi th, .qi td { white-space: nowrap; text-align: center; font-size: .85rem; }
+.qi thead tr { height: 44px; }
+.qi thead th { position: sticky; z-index: 3; background: #fafbfc; }
+.qi thead tr:first-child th { top: 0; }
+.qi thead tr:nth-child(2) th { top: 44px; }
+.qi thead tr:first-child th:nth-child(1), .qi tbody td:nth-child(1) { left: 0; width: 64px; min-width: 64px; max-width: 64px; }
+.qi thead tr:first-child th:nth-child(2), .qi tbody td:nth-child(2) { left: 64px; width: 138px; min-width: 138px; max-width: 138px; }
+.qi thead tr:first-child th:nth-child(3), .qi tbody td:nth-child(3) { left: 202px; width: 260px; min-width: 260px; max-width: 260px; }
+.qi tbody td:nth-child(-n+3) { position: sticky; z-index: 2; background: var(--surface); }
+.qi thead tr:first-child th:nth-child(-n+3) { z-index: 5; }
+.qi thead tr:first-child th:nth-child(3), .qi tbody td:nth-child(3) { box-shadow: 5px 0 7px -7px rgba(31, 37, 51, .55); }
 .mini { padding: .25rem .6rem; font-size: .82rem; }
+.table-input { width: 112px; min-width: 0; height: 32px; padding: 0 .45rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); }
+.date-input { width: 138px; }
+.factory-input { width: 210px; }
+.product-input, .notes-input { width: 150px; }
+.quantity-input { width: 92px; }
+.result-input { width: 88px; }
+.op-actions { display: flex; align-items: center; justify-content: center; gap: .35rem; min-width: 178px; }
+.danger { color: #ef4444; border-color: #fecaca; }
 </style>

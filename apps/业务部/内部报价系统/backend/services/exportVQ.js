@@ -13,6 +13,7 @@ const ExcelJS = require('exceljs');
 const { exportSpin } = require('./exportSpin');
 const { readTemplateParts } = require('./templateParts');
 const { customerEnglish } = require('./vqEnglish');
+const { ensureExplicitProductGroups, weightedRowsSum } = require('./productMix');
 
 
 // 报客表「Mark Up (%)」固定加价率 — 统一套到原料/人工/购买件/车缝等成本行。
@@ -630,7 +631,7 @@ function fillBCD(ws, d) {
   }
   let decoAmount = 0;
   if (paintingDetail) {
-    const totalOps  = parseInt(paintingDetail.total_operations) || 0;
+    const totalOps  = parseFloat(paintingDetail.total_operations) || 0;
     const quotedPrice = parseFloat(paintingDetail.quoted_price_hkd) || 0;
     const unitCost  = totalOps > 0 ? quotedPrice / totalOps : null;
     decoAmount = r2(quotedPrice) || 0;
@@ -894,8 +895,10 @@ function sectionsToData({ quote, sections }) {
 
   // 装饰 / 喷油（BCD DECORATION 段）：次数取喷油七工序数量合计，金额取喷油完整港币值。
   const paintingProcKeys = ['clamp', 'pad', 'spray', 'edge', 'color', 'dip', 'oil'];
-  const paintOps = (painting.painting_items || painting.second_proc || [])
-    .reduce((s, row) => s + paintingProcKeys.reduce((t, key) => t + num(row[`${key}_qty`]), 0), 0);
+  const paintingRows = painting.painting_items || painting.second_proc || [];
+  ensureExplicitProductGroups(paintingRows);
+  const paintOps = weightedRowsSum(painting, paintingRows, row =>
+    paintingProcKeys.reduce((total, key) => total + num(row[`${key}_qty`]), 0));
   const paintDetailAmt = (num(t3.painting_labor) + num(t3.paint_material)) * SEWING_DEFAULT_MARKUP;
   const paintingDetail = paintDetailAmt
     ? { total_operations: paintOps || 1, quoted_price_hkd: paintDetailAmt }
@@ -1007,6 +1010,18 @@ function sectionsToData({ quote, sections }) {
     carton_price: cartonPrice,
   };
 
+  const vqSupplements = ((sales.shipping && sales.shipping.customer_supplied_products) || [])
+    .filter(item => String(item && item.name || '').trim() || num(item && item.amount_usd))
+    .slice(0, 5)
+    .map((item, index) => ({
+      part_no: `CUSTOMER-${index + 1}`,
+      description: item.name || `客供成品${index + 1}`,
+      eng_name: customerEnglish(item.name || `客供成品${index + 1}`),
+      moq: num(quote.qty) || 2500,
+      usage_qty: 1,
+      unit_price: num(item.amount_usd),
+    }));
+
   // 运输（VQ Section E）：内部无 CuFt 单价，留空走模板默认
   const transportConfig = {};
 
@@ -1023,7 +1038,7 @@ function sectionsToData({ quote, sections }) {
     materialPrices: [],
     machinePrices: [],
     bodyAccessories,
-    vqSupplements: [],
+    vqSupplements,
     rawMaterials: groupedRawMaterials,
     sewingItems,                // 车缝辅料(无部位) → C2 Sewing Accessories；面料裁片(有部位)在 rawMaterials(fabric)
     sewingLaborItems,

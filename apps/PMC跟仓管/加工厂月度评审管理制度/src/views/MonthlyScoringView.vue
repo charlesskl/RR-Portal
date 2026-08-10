@@ -30,6 +30,7 @@ const myRegions = computed(() => (auth.role ? allowedRegions(auth.role) : REGION
 const gradeCls: Record<string, string> = { A: 'badge-A', B: 'badge-B', C: 'badge-C', D: 'badge-D' }
 const statusLabel: Record<string, string> = { draft: '草稿', submitted: '已提交', approved: '已审批' }
 const flagLabel: Record<string, string> = { yellow: '黄牌', red: '红牌' }
+const formatScore = (value: number) => value.toFixed(2)
 
 const scoreByFactory = computed(() => {
   const m: Record<string, MonthlyScore> = {}
@@ -123,7 +124,7 @@ load()
           <tr v-for="f in rows" :key="f.id">
             <td>{{ f.name }}</td>
             <td class="muted">{{ CRAFT_LABELS[f.craft] }}</td>
-            <td><strong v-if="scoreByFactory[f.id]?.total_score != null">{{ scoreByFactory[f.id].total_score }}</strong><span v-else class="muted">—</span></td>
+            <td><strong v-if="scoreByFactory[f.id]?.total_score != null">{{ formatScore(scoreByFactory[f.id].total_score!) }}</strong><span v-else class="muted">—</span></td>
             <td>
               <span v-if="scoreByFactory[f.id]?.grade" class="badge" :class="gradeCls[scoreByFactory[f.id].grade!]">{{ scoreByFactory[f.id].grade }}</span>
               <span v-else class="muted">—</span>

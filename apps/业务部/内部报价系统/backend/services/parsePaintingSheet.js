@@ -37,6 +37,20 @@ function isHeaderRow(values) {
   return /位置/.test(j) && /(夹模|移印|散枪|边模|抹油)/.test(j);
 }
 
+// 只有“1#公仔 / 2#产品”这类明确编号才视为产品边界。
+// 图片、空白分隔行和零件名称都不能单独触发多产品配比。
+function parseProductLabel(value) {
+  const text = toStr(value).replace(/\s+/g, ' ').trim();
+  const match = text.match(/^(\d+)\s*[#＃号]\s*(.*)$/);
+  if (!match) return null;
+  const number = Number(match[1]);
+  return {
+    id: `product-${number}`,
+    name: text || `${number}#产品`,
+    number,
+  };
+}
+
 // SheetJS sheet → 1-based 行数组（与 ExcelJS 输出一致）
 function sheetjsToRows(sheet) {
   const aoa = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null, raw: true });
@@ -100,6 +114,7 @@ async function parseWorkbook(buffer) {
   const meta = {};
   let cols = null;
   const items = [];
+  let currentProduct = null;
 
   for (let i = 0; i < rows.length; i++) {
     const r = rows[i] || [];
@@ -116,9 +131,17 @@ async function parseWorkbook(buffer) {
     if (/合计|小计|总报价/.test(first)) continue; // 跳过底部合计行（"合计"在首列）
     const name = cols.name != null ? toStr(r[cols.name]) : '';
     const position = cols.position != null ? toStr(r[cols.position]) : '';
+    const explicitProduct = parseProductLabel(name);
+    if (explicitProduct) currentProduct = explicitProduct;
     if (!name && !position) continue; // 跳过分隔空行
     if (/合计|小计|总报价/.test(position) || /[:：]\s*$/.test(position)) continue; // 跳过合计/图例(如"夹模：")
-    const item = { name, position, note: cols.note != null ? toStr(r[cols.note]) : '', _row: i };
+    const item = {
+      name,
+      position,
+      note: cols.note != null ? toStr(r[cols.note]) : '',
+      _row: i,
+      _product_marker: currentProduct,
+    };
     let hasQty = false;
     for (const p of PROCS) {
       const c = cols.procs[p.key];
@@ -133,7 +156,29 @@ async function parseWorkbook(buffer) {
   }
 
   if (!items.length) return { error: '未解析到喷油工序行（请确认表头含 位置 / 夹模…）' };
-  return { meta, items, count: items.length, sheet_used: picked.name };
+  const distinctProducts = new Map();
+  items.forEach(item => {
+    if (item._product_marker) distinctProducts.set(item._product_marker.id, item._product_marker);
+  });
+  const isMultiProduct = distinctProducts.size > 1;
+  items.forEach(item => {
+    if (isMultiProduct && item._product_marker) {
+      item.product_group_id = item._product_marker.id;
+      item.product_group_name = item._product_marker.name;
+    }
+    delete item._product_marker;
+  });
+  const productGroups = isMultiProduct
+    ? [...distinctProducts.values()].sort((a, b) => a.number - b.number)
+    : [];
+  return {
+    meta,
+    items,
+    count: items.length,
+    sheet_used: picked.name,
+    product_groups: productGroups,
+    multi_product: isMultiProduct,
+  };
 }
 
 module.exports = { parseWorkbook };

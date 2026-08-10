@@ -1,0 +1,41 @@
+{% extends 'base.html' %}
+{% block title %}上传 PO · AI 辅助 QC{% endblock %}
+{% block content %}
+<div class="page" style="max-width:1060px">
+  <header class="page-header">
+    <div><span class="eyebrow">AI-assisted inspection</span><h1>从 PO 开始一份验货报告</h1><p>系统先提取订单资料；QC 校对后，再按照片清单验货。AI 只提供草稿，最终结论由 QC 确认。</p></div>
+    <a class="button secondary" href="{{ url_for('new_manual_report') }}">没有电子 PO？手工建单</a>
+  </header>
+  <div class="progress-steps"><span class="step active"><i>1</i>上传 PO</span><b class="step-line"></b><span class="step"><i>2</i>校对货号</span><b class="step-line"></b><span class="step"><i>3</i>拍照与测试</span><b class="step-line"></b><span class="step"><i>4</i>AI 草稿</span><b class="step-line"></b><span class="step"><i>5</i>签字出报告</span></div>
+
+  <form method="post" enctype="multipart/form-data" class="card section-card po-drop-card">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="section-title"><div><h2>上传采购订单</h2><p>支持文字 PDF、扫描 PDF、Excel、JPG 和 PNG。一个 PO 有多个货号时会自动拆分。</p></div><span class="ai-draft-badge">AI 提取 · QC 必须校对</span></div>
+    <label class="upload-zone" for="po-file">
+      <span class="upload-icon">PO</span>
+      <strong>点击选择或拖入 PO 文件</strong>
+      <small id="po-file-name">PDF / XLS / XLSX / JPG / PNG，单文件最多 25 MB</small>
+      <input id="po-file" type="file" name="po_file" accept=".pdf,.xls,.xlsx,.jpg,.jpeg,.png" required>
+    </label>
+    <div class="privacy-note"><strong>资料边界：</strong>PO 没有的内容保持空白并提示补充，系统不会猜测。照片只用于可见问题分析，跌落、扭力、拉力、电流等测试仍由 QC 手填。</div>
+    <div class="actions" style="margin-top:20px;justify-content:flex-end"><button class="button" type="submit">上传并开始提取 →</button></div>
+  </form>
+
+  {% if imports %}
+  <section class="card section-card">
+    <div class="section-title"><div><h2>最近上传</h2><p>可继续处理待校对的 PO。</p></div></div>
+    <div class="import-list">
+      {% for item in imports %}
+      <a class="import-row" href="{{ url_for('po_import_detail', import_id=item.id) }}">
+        <span class="file-type">{{ item.original_name.rsplit('.',1)[-1]|upper }}</span>
+        <span><strong>{{ item.original_name }}</strong><small>{{ item.created_at.strftime('%Y-%m-%d %H:%M') }} · SHA-256 {{ item.checksum[:12] }}…</small></span>
+        <span class="import-status {{ item.status }}">{{ {'queued':'排队中','processing':'提取中','needs_review':'需校对','failed':'失败'}.get(item.status,item.status) }}</span>
+        <b>→</b>
+      </a>
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
+</div>
+{% endblock %}
+{% block scripts %}<script>document.querySelector('#po-file')?.addEventListener('change',e=>{document.querySelector('#po-file-name').textContent=e.target.files?.[0]?.name||'请选择文件'});</script>{% endblock %}

@@ -676,12 +676,25 @@ def test_semi_finished_export_uses_legacy_matrix_workbook(client):
     assert wb.sheetnames[:5] == [
         "总表", "入库明细", "邵阳领料", "河源华兴36#CD领料", "车间36#CD领料"]
     assert wb["总表"].cell(1, 2).value == "累计入仓总数"
-    assert wb["总表"].cell(1, 11).value == "应存数"
-    assert wb["总表"].cell(1, 14).value == "湖南"
+    assert wb["总表"].cell(1, 3).value == "7月入仓\n总数"
+    assert wb["总表"].cell(1, 10).value == "应存数"
+    assert wb["总表"].cell(1, 11).value == "累计出仓总数"
+    assert wb["总表"].cell(1, 12).value == "东莞车间"
+    assert wb["总表"].cell(2, 12).value == "领料"
+    assert wb["总表"].cell(1, 13).value == "河源华兴"
+    assert wb["总表"].cell(2, 13).value == "领料"
+    assert wb["总表"].cell(1, 14).value == "邵阳生产数据"
+    assert wb["总表"].cell(1, 15).value == "7月出仓\n总数"
     assert wb["总表"].cell(3, 1).value == "1#NFC\n贴纸"
     assert wb["总表"].cell(3, 2).value == 100
-    assert wb["总表"].cell(3, 11).value == 60
-    assert wb["总表"].cell(3, 12).value == 40
+    assert wb["总表"].cell(3, 3).value == 100
+    assert wb["总表"].cell(3, 10).value == 60
+    assert wb["总表"].cell(3, 11).value == 40
+    # 小计行（型号行之后空一行，与源表布局一致）
+    assert wb["总表"].cell(49, 1).value == "小计："
+    assert wb["总表"].cell(49, 2).value == 100
+    assert wb["总表"].cell(49, 10).value == 60
+    assert wb["总表"].cell(49, 11).value == 40
 
     inbound = wb["入库明细"]
     assert inbound.cell(1, 4).value == "日期"
@@ -697,6 +710,8 @@ def test_semi_finished_export_uses_legacy_matrix_workbook(client):
     assert inbound.cell(1, 5).value == "2026-07-01"
     assert inbound.cell(2, 5).value == "RK-001"
     assert inbound.cell(4, 5).value == 30
+    assert inbound.cell(50, 1).value == "小计："
+    assert inbound.cell(50, 2).value == 100
 
     outbound = wb["邵阳领料"]
     assert outbound.cell(5, 1).value == "物料名称"
@@ -707,6 +722,8 @@ def test_semi_finished_export_uses_legacy_matrix_workbook(client):
     assert outbound.cell(1, 4).value == "2026-07-03"
     assert outbound.cell(2, 4).value == "LL-001"
     assert outbound.cell(6, 4).value == 35
+    assert outbound.cell(52, 1).value == "小计："
+    assert outbound.cell(52, 2).value == 40
 
 
 def test_semi_finished_import_routes_outbound_sheets_to_departments(client):
@@ -768,7 +785,9 @@ def test_record_import_check_groups_duplicate_documents_without_writing(client):
     assert len(after) == len(before)
 
 
-def test_record_import_skip_mode_skips_whole_duplicate_documents(client):
+def test_record_import_skip_mode_appends_without_skipping(client):
+    # 业务要求（2026-08-07）：日期/单号/数量完全相同的行也可能是真实的另一笔，
+    # 一律导入不跳过；防重复靠导入前查重提示和「覆盖导入」模式
     login(client, "碟片半成品", "123456", "碟片半成品")
     content = routed_semi_finished_workbook_bytes()
     first = upload_bytes(
@@ -788,9 +807,66 @@ def test_record_import_skip_mode_skips_whole_duplicate_documents(client):
     assert first.status_code == 200
     assert first.json()["created"] == 5
     assert second.status_code == 200
-    assert second.json()["created"] == 0
-    assert second.json()["skipped_documents"] == 4
-    assert len(client.get("/api/records").json()) == 5
+    assert second.json()["created"] == 5
+    assert second.json()["skipped_documents"] == 0
+    assert len(client.get("/api/records").json()) == 10
+
+
+def _assembly_nfc_workbook_with_dup_doc(second_col_qty=None):
+    """领料明细里同一单号两列：第一列 7/25，第二列 7/27（重复单号的第二笔）。"""
+    wb = openpyxl.Workbook()
+    total_ws = wb.active
+    total_ws.title = "总表"
+    total_ws["A2"] = "物料名称"
+    issue_ws = wb.create_sheet("领料明细")
+    issue_ws["B1"] = "当月领料总数"
+    issue_ws["C1"] = "7月25日"
+    issue_ws["A2"] = "物料名称"
+    issue_ws["C2"] = "DUP-DOC-001"
+    issue_ws["A3"] = "1#NFC\n贴纸"
+    issue_ws["C3"] = 60
+    issue_ws["A4"] = "2#NFC\n贴纸"
+    issue_ws["C4"] = 40
+    if second_col_qty is not None:
+        issue_ws["D1"] = "7月27日"
+        issue_ws["D2"] = "DUP-DOC-001"
+        issue_ws["D3"] = second_col_qty
+    semi_ws = wb.create_sheet("半成品入仓明细")
+    semi_ws["B1"] = "当月入仓总数"
+    semi_ws["A2"] = "物料名称"
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def test_record_import_skip_mode_imports_duplicate_document_rows(client):
+    # 同一单号多笔（含完全相同的行）全部导入，不做任何跳过
+    login(client, "东莞车间", "123456", "东莞车间")
+    filename = "东莞车间77772#NFC贴纸出入明细.xlsx"
+    first = upload_bytes(
+        client, "/api/records/import",
+        _assembly_nfc_workbook_with_dup_doc(), filename,
+    )
+    assert first.status_code == 200
+    assert first.json()["created"] == 2
+
+    second = upload_bytes(
+        client, "/api/records/import",
+        _assembly_nfc_workbook_with_dup_doc(second_col_qty=15), filename,
+        data={"mode": "skip"},
+    )
+    assert second.status_code == 200
+    assert second.json()["created"] == 3
+    assert second.json()["skipped"] == 0
+
+    rows = client.get("/api/records?doc_no=DUP-DOC-001").json()
+    assert sorted((r["rec_date"], r["sticker_type"], r["qty"]) for r in rows) == [
+        ("2026-07-25", "1#NFC贴纸", 60),
+        ("2026-07-25", "1#NFC贴纸", 60),
+        ("2026-07-25", "2#NFC贴纸", 40),
+        ("2026-07-25", "2#NFC贴纸", 40),
+        ("2026-07-27", "1#NFC贴纸", 15),
+    ]
 
 
 def test_record_import_replace_mode_replaces_document_and_auto_records(client):
@@ -820,14 +896,13 @@ def test_record_import_replace_mode_replaces_document_and_auto_records(client):
     assert len(shaoyang_source) == 1
     assert shaoyang_source[0]["qty"] == 15
 
+    # 2026-08-08 起所有部门联动停用：邵阳华登不会再收到自动联动记录
     login(client, "邵阳华登", "123456", "邵阳华登")
     target_rows = [
         row for row in client.get("/api/records").json()
         if row["doc_no"] == "LL-SY-001"
     ]
-    assert len(target_rows) == 1
-    assert target_rows[0]["qty"] == 15
-    assert target_rows[0]["source_record_id"] is not None
+    assert target_rows == []
 
 
 def test_record_import_replace_allows_same_department_records_owned_by_another_user(client):
@@ -860,7 +935,7 @@ def test_record_import_replace_allows_same_department_records_owned_by_another_u
     assert rows[0]["qty"] == 20
 
 
-def test_record_import_same_document_number_on_different_dates_is_duplicate(client):
+def test_record_import_same_document_number_on_different_dates_appends(client):
     login(client, "兴信B来料仓", "123456", DEFAULT_DEPARTMENT)
     headers = ["类型", "物料名称", "日期", "单据编号", "数量"]
     first = upload_xlsx(
@@ -882,11 +957,12 @@ def test_record_import_same_document_number_on_different_dates_is_duplicate(clie
 
     assert first.status_code == 200
     assert second.status_code == 200
-    assert second.json()["created"] == 0
-    assert second.json()["skipped_documents"] == 1
+    assert second.json()["created"] == 1
+    assert second.json()["skipped_documents"] == 0
     rows = client.get("/api/records?doc_no=PERIODIC-001").json()
-    assert [(row["rec_date"], row["qty"]) for row in rows] == [
+    assert sorted((row["rec_date"], row["qty"]) for row in rows) == [
         ("2026-07-01", 10),
+        ("2026-08-01", 20),
     ]
 
 
@@ -915,20 +991,29 @@ def test_semi_finished_export_splits_outbound_by_target_department(client):
     exported = client.get("/api/records/export?material=NFC贴纸")
     wb = openpyxl.load_workbook(io.BytesIO(exported.content), data_only=True)
 
-    def sticker_qty(sheet_name):
-        ws = wb[sheet_name]
-        row_no = next(
-            row for row in range(1, ws.max_row + 1)
-            if ws.cell(row, 1).value == "36#NFC\n贴纸"
-        )
-        return ws.cell(row_no, 4).value
-
+    shaoyang_row = next(
+        row for row in range(1, wb["邵阳领料"].max_row + 1)
+        if wb["邵阳领料"].cell(row, 1).value == "36#NFC\n贴纸"
+    )
     assert wb["邵阳领料"].cell(2, 4).value == "LL-SY-001"
-    assert sticker_qty("邵阳领料") == 10
-    assert wb["河源华兴36#CD领料"].cell(2, 4).value == "LL-HY-001"
-    assert sticker_qty("河源华兴36#CD领料") == 20
-    assert wb["车间36#CD领料"].cell(2, 4).value == "LL-DG-001"
-    assert sticker_qty("车间36#CD领料") == 30
+    assert wb["邵阳领料"].cell(shaoyang_row, 4).value == 10
+
+    # 河源/车间 sheet 为简单表格式：日期|领料单号|型号列|（备注），末行小计
+    heyuan = wb["河源华兴36#CD领料"]
+    assert [heyuan.cell(1, col).value for col in range(1, 5)] == [
+        "日期", "领料单号", "36#NFC贴纸", "备注"]
+    assert [heyuan.cell(2, col).value for col in range(1, 5)] == [
+        "2026-07-02", "LL-HY-001", 20, None]
+    assert heyuan.cell(3, 2).value == "小计："
+    assert heyuan.cell(3, 3).value == 20
+
+    workshop = wb["车间36#CD领料"]
+    assert [workshop.cell(1, col).value for col in range(1, 4)] == [
+        "日期", "领料单号", "36#NFC贴纸"]
+    assert [workshop.cell(2, col).value for col in range(1, 4)] == [
+        "2026-07-02", "LL-DG-001", 30]
+    assert workshop.cell(3, 2).value == "小计："
+    assert workshop.cell(3, 3).value == 30
 
 
 def test_outsource_record_export_uses_legacy_pcba_workbook(client):
@@ -1180,9 +1265,9 @@ def test_semi_finished_legacy_workbook_imports_detail_rows_and_monthly_totals(cl
         "塑胶仓77772#CD半成品出入明细.xlsx",
     )
     assert second.status_code == 200
-    assert second.json()["created"] == 0
-    assert second.json()["skipped"] == 3
-    assert len(client.get("/api/records").json()) == 3
+    assert second.json()["created"] == 3
+    assert second.json()["skipped"] == 0
+    assert len(client.get("/api/records").json()) == 6
 
 
 def test_semi_finished_export_keeps_stored_total_on_matching_outbound_sheet(client):
@@ -1199,8 +1284,163 @@ def test_semi_finished_export_keeps_stored_total_on_matching_outbound_sheet(clie
     assert imported.status_code == 200
     assert exported.status_code == 200
     assert wb["邵阳领料"].cell(6, 2).value == 40
-    assert wb["河源华兴36#CD领料"].cell(6, 2).value == 0
-    assert wb["车间36#CD领料"].cell(6, 2).value == 0
+    # 河源/车间 sheet 为简单表格式（日期|领料单号|型号列|备注），无数据时只有表头和小计行
+    heyuan = wb["河源华兴36#CD领料"]
+    assert [heyuan.cell(1, col).value for col in range(1, 5)] == [
+        "日期", "领料单号", "36#NFC贴纸", "备注"]
+    assert heyuan.cell(2, 2).value == "小计："
+    assert heyuan.cell(2, 3).value is None
+    workshop = wb["车间36#CD领料"]
+    assert [workshop.cell(1, col).value for col in range(1, 4)] == [
+        "日期", "领料单号", "36#NFC贴纸"]
+    assert workshop.cell(2, 2).value == "小计："
+    assert workshop.cell(2, 3).value is None
+
+
+def semi_finished_simple_sheets_workbook_bytes():
+    """简单领料表（河源/车间36#CD领料）+ 总表邵阳生产数据列的半成品台账。"""
+    wb = openpyxl.Workbook()
+    inbound = wb.active
+    inbound.title = "入库明细"
+    inbound["D1"] = "日期"
+    inbound["E1"] = "2026-07-01"
+    inbound["D2"] = "入库单号"
+    inbound["E2"] = "RK-SIMPLE-001"
+    inbound["A3"] = "物料名称"
+    inbound["B3"] = "当月入仓总数"
+    inbound["A4"] = "36#NFC\n贴纸"
+    inbound["B4"] = 100
+    inbound["E4"] = 100
+    inbound["A5"] = "小计："
+    inbound["B5"] = 100
+
+    total = wb.create_sheet("总表", 0)
+    total["B1"] = "累计入仓总数"
+    total["N1"] = "邵阳生产数据"
+    total["A2"] = "物料名称"
+    total["A3"] = "36#NFC\n贴纸"
+    total["N3"] = 5000
+
+    heyuan = wb.create_sheet("河源华兴36#CD领料")
+    heyuan.append(["日期", "领料单号", "36#NFC贴纸", "备注"])
+    heyuan.append(["2026-07-05", 2611001, 200, "备注A"])
+    heyuan.append([None, None, None, None])
+    heyuan.append([None, "小计：", 200, None])
+
+    workshop = wb.create_sheet("车间36#CD领料")
+    workshop.append(["日期", "领料单号", "36#NFC贴纸", "25#NFC贴纸"])
+    workshop.append(["2026-07-06", 2510001, 300, 50])
+    workshop.append([None, None, None, None])
+    workshop.append([None, "小计：", 300, 50])
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def _patch_upload_seekable(monkeypatch):
+    """py3.9 TestClient 上传的 SpooledTemporaryFile 没有 seekable，
+    先读进 BytesIO 再走原加载逻辑。"""
+    import pcba.main
+
+    original = pcba.main._load_upload_workbook
+
+    def _patched(file):
+        file.file = io.BytesIO(file.file.read())
+        return original(file)
+
+    monkeypatch.setattr(pcba.main, "_load_upload_workbook", _patched)
+
+
+def test_semi_finished_simple_sheets_and_shaoyang_production_round_trip(
+    client, monkeypatch
+):
+    _patch_upload_seekable(monkeypatch)
+    login(client, "碟片半成品", "123456", "碟片半成品")
+
+    imported = upload_bytes(
+        client,
+        "/api/records/import",
+        semi_finished_simple_sheets_workbook_bytes(),
+        "塑胶仓77772#CD半成品出入明细.xlsx",
+    )
+    assert imported.status_code == 200
+    # 入库1笔 + 河源1笔 + 车间2笔（36#/25#）
+    assert imported.json()["created"] == 4
+
+    records = client.get("/api/records").json()
+    rows = {
+        (row["doc_no"], row["sticker_type"]): row
+        for row in records
+        if row["rec_type"] == "semi_outbound"
+    }
+    heyuan_row = rows[("2611001", "36#NFC贴纸")]
+    assert heyuan_row["location_name"] == "河源华兴"
+    assert heyuan_row["rec_date"] == "2026-07-05"
+    assert heyuan_row["qty"] == 200
+    assert heyuan_row["remark"] == "备注A"
+    assert rows[("2510001", "36#NFC贴纸")]["location_name"] == "东莞车间"
+    assert rows[("2510001", "36#NFC贴纸")]["qty"] == 300
+    assert rows[("2510001", "25#NFC贴纸")]["qty"] == 50
+
+    from pcba import db
+
+    conn = db.get_conn()
+    try:
+        total_row = conn.execute(
+            "SELECT monthly_inbound, shaoyang_production "
+            "FROM semi_finished_monthly_totals "
+            "WHERE department='碟片半成品' AND sticker_type='36#NFC贴纸'"
+        ).fetchone()
+    finally:
+        conn.close()
+    assert total_row["monthly_inbound"] == 100
+    assert total_row["shaoyang_production"] == 5000
+
+    exported = client.get("/api/records/export?material=NFC贴纸")
+    wb = openpyxl.load_workbook(io.BytesIO(exported.content), data_only=True)
+    assert exported.status_code == 200
+
+    total_ws = wb["总表"]
+    assert total_ws.cell(1, 12).value == "东莞车间"
+    assert total_ws.cell(1, 13).value == "河源华兴"
+    assert total_ws.cell(1, 14).value == "邵阳生产数据"
+    row_36 = next(
+        row for row in range(3, total_ws.max_row + 1)
+        if total_ws.cell(row, 1).value == "36#NFC\n贴纸"
+    )
+    # B = 当月入仓 + 邵阳生产数据；K = 邵阳领料 + 东莞车间 + 河源华兴 + 邵阳生产数据
+    assert total_ws.cell(row_36, 2).value == 5100
+    assert total_ws.cell(row_36, 10).value == -400
+    assert total_ws.cell(row_36, 11).value == 5500
+    assert total_ws.cell(row_36, 12).value == 300
+    assert total_ws.cell(row_36, 13).value == 200
+    assert total_ws.cell(row_36, 14).value == 5000
+    subtotal_row = next(
+        row for row in range(3, total_ws.max_row + 1)
+        if total_ws.cell(row, 1).value == "小计："
+    )
+    assert total_ws.cell(subtotal_row, 2).value == 5100
+    # 25# 还有 50 的东莞车间出仓，累计出仓小计 = 5500 + 50
+    assert total_ws.cell(subtotal_row, 11).value == 5550
+    assert total_ws.cell(subtotal_row, 14).value == 5000
+
+    heyuan = wb["河源华兴36#CD领料"]
+    assert [heyuan.cell(1, col).value for col in range(1, 5)] == [
+        "日期", "领料单号", "36#NFC贴纸", "备注"]
+    assert [heyuan.cell(2, col).value for col in range(1, 5)] == [
+        "2026-07-05", 2611001, 200, "备注A"]
+    assert heyuan.cell(3, 2).value == "小计："
+    assert heyuan.cell(3, 3).value == 200
+
+    workshop = wb["车间36#CD领料"]
+    assert [workshop.cell(1, col).value for col in range(1, 5)] == [
+        "日期", "领料单号", "36#NFC贴纸", "25#NFC贴纸"]
+    assert [workshop.cell(2, col).value for col in range(1, 5)] == [
+        "2026-07-06", 2510001, 300, 50]
+    assert workshop.cell(3, 2).value == "小计："
+    assert workshop.cell(3, 3).value == 300
+    assert workshop.cell(3, 4).value == 50
 
 
 def test_semi_finished_legacy_workbook_rejects_filename_without_department(client):
@@ -1273,10 +1513,10 @@ def test_assembly_nfc_export_matches_import_workbook_format(client):
     assert imported.status_code == 200
     assert exported.status_code == 200
     assert wb.sheetnames == ["总表", "领料明细", "半成品入仓明细"]
-    assert wb["总表"].cell(1, 2).value == "累计入仓总数"
+    assert wb["总表"].cell(1, 2).value == "累计领料总数"
     assert wb["总表"].cell(1, 4).value == "7月领料\n总数"
     assert wb["总表"].cell(1, 11).value == "应存数"
-    assert wb["总表"].cell(1, 12).value == "累计出仓总数"
+    assert wb["总表"].cell(1, 12).value == "累计入仓总数"
     assert wb["总表"].cell(1, 15).value == "7月入仓\n总数"
     assert wb["总表"].cell(3, 1).value == "1#NFC\n贴纸"
     assert wb["总表"].cell(3, 2).value == 100
@@ -1309,8 +1549,8 @@ def test_assembly_nfc_export_matches_import_workbook_format(client):
         "东莞车间77772#NFC贴纸出入明细.xlsx",
     )
     assert reimported.status_code == 200
-    assert reimported.json()["created"] == 0
-    assert reimported.json()["skipped"] == 3
+    assert reimported.json()["created"] == 3
+    assert reimported.json()["skipped"] == 0
 
 
 def test_assembly_nfc_export_sorts_document_columns_by_date(client):
@@ -1422,8 +1662,8 @@ def test_assembly_pcba_export_matches_import_workbook_format(client):
         "东莞车间77794#PCB主板出入明细.xlsx",
     )
     assert reimported.status_code == 200
-    assert reimported.json()["created"] == 0
-    assert reimported.json()["skipped"] == 4
+    assert reimported.json()["created"] == 4
+    assert reimported.json()["skipped"] == 0
 
 
 def test_outsource_legacy_workbook_rejects_filename_without_department(client):
@@ -1475,9 +1715,9 @@ def test_outsource_legacy_workbook_imports_issue_and_semi_finished_rows(client):
         "东莞加工厂利鸿77794PCB主板出入明细.xlsx",
     )
     assert second.status_code == 200
-    assert second.json()["created"] == 0
-    assert second.json()["skipped"] == 3
-    assert len(client.get("/api/records").json()) == 3
+    assert second.json()["created"] == 3
+    assert second.json()["skipped"] == 0
+    assert len(client.get("/api/records").json()) == 6
 
 
 def test_lihong_legacy_workbook_round_trip_preserves_fields_and_skips_duplicates(client):
@@ -1507,9 +1747,9 @@ def test_lihong_legacy_workbook_round_trip_preserves_fields_and_skips_duplicates
     second = upload_bytes(client, "/api/records/import", exported.content, filename)
 
     assert second.status_code == 200
-    assert second.json()["created"] == 0
-    assert second.json()["skipped"] == 3
-    assert len(client.get("/api/records").json()) == 3
+    assert second.json()["created"] == 3
+    assert second.json()["skipped"] == 0
+    assert len(client.get("/api/records").json()) == 6
 
 
 
@@ -1555,9 +1795,9 @@ def test_heyuan_legacy_workbook_imports_issue_corrections_and_finished_rows(clie
 
     second = upload_bytes(client, "/api/records/import", legacy_heyuan_workbook_bytes())
     assert second.status_code == 200
-    assert second.json()["created"] == 0
-    assert second.json()["skipped"] == 6
-    assert len(client.get("/api/records").json()) == 6
+    assert second.json()["created"] == 6
+    assert second.json()["skipped"] == 0
+    assert len(client.get("/api/records").json()) == 12
 
 
 def test_supplier_pcba_legacy_workbook_imports_inbound_and_issue_rows(client):
@@ -1589,9 +1829,9 @@ def test_supplier_pcba_legacy_workbook_imports_inbound_and_issue_rows(client):
 
     second = upload_bytes(client, "/api/records/import", legacy_supplier_pcba_workbook_bytes())
     assert second.status_code == 200
-    assert second.json()["created"] == 0
-    assert second.json()["skipped"] == 7
-    assert len(client.get("/api/records").json()) == 7
+    assert second.json()["created"] == 7
+    assert second.json()["skipped"] == 0
+    assert len(client.get("/api/records").json()) == 14
 
 
 def test_supplier_nfc_legacy_workbook_keeps_summary_rows_out_of_record_list(client):
@@ -1621,9 +1861,9 @@ def test_supplier_nfc_legacy_workbook_keeps_summary_rows_out_of_record_list(clie
 
     second = upload_bytes(client, "/api/records/import", legacy_supplier_nfc_workbook_bytes())
     assert second.status_code == 200
-    assert second.json()["created"] == 0
-    assert second.json()["skipped"] == 6
-    assert len(client.get("/api/records").json()) == 3
+    assert second.json()["created"] == 6
+    assert second.json()["skipped"] == 0
+    assert len(client.get("/api/records").json()) == 6
 
 
 def test_supplier_nfc_detail_only_shaoyang_opening_uses_shaoyang_location(client):
@@ -1674,8 +1914,8 @@ def test_supplier_nfc_export_can_be_reimported_without_creating_opening_rows(cli
     after = client.get("/api/records").json()
 
     assert second.status_code == 200
-    assert second.json()["created"] == 0
-    assert len(after) == len(before)
+    assert second.json()["created"] == len(before)
+    assert len(after) == 2 * len(before)
 
 
 def test_operator_can_import_and_export_materials(client):

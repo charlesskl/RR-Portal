@@ -1,0 +1,40 @@
+{% extends 'base.html' %}
+{% block title %}{{ report.report_no }} · QC 质检工作台{% endblock %}
+{% block content %}{% set s=json_load(report.product_snapshot) %}
+<div class="page">
+  <header class="page-header">
+    <div><span class="eyebrow">{{ 'Finalized' if report.finalized else 'Draft' }} · Rev.{{ report.revision }}</span><h1>{{ report.report_no }}</h1><p>{{ s.customer_name }} · {{ s.po_no }} · {{ s.item_no }} · {{ s.description }}</p></div>
+    <div class="actions">
+      {% if not report.finalized %}<a class="button" href="{{ url_for('inspection_workspace', report_id=report.id) }}">继续验货</a>{% else %}<form method="post" action="{{ url_for('create_revision', report_id=report.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="button" data-confirm="将复制此正式版本并创建新的修订草稿，确认继续？">创建修订版</button></form>{% endif %}
+      <form method="post" action="{{ url_for('copy_report', report_id=report.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="button secondary" data-confirm="将复制检验数据和照片为一个独立草稿，确认继续？">复制报告</button></form>
+      <a class="button secondary" href="{{ url_for('dashboard') }}">返回列表</a>
+    </div>
+  </header>
+  <section class="result-banner {{ report.result|lower|replace(' ','-') }}"><div><strong>{{ report.result }}</strong><p>{{ report.result_reason }}</p></div><span class="status {{ report.result|lower|replace(' ','-') }}">{{ '正式锁定' if report.finalized else '草稿判定' }}</span></section>
+  <section class="summary-strip"><div><small>客户</small><strong>{{ s.customer_name }}</strong></div><div><small>PO</small><strong>{{ s.po_no }}</strong></div><div><small>产品编号</small><strong>{{ s.item_no }}</strong></div><div><small>订单 / 抽检</small><strong>{{ s.po_quantity }} / {{ report.inspected_qty }}</strong></div><div><small>检验日期</small><strong>{{ report.inspection_date }}</strong></div></section>
+  <section class="metric-grid" style="grid-template-columns:repeat(3,1fr)">
+    <article class="card metric"><small>Critical 缺陷</small><strong>{{ report.critical_count }}</strong><i class="dot red"></i></article>
+    <article class="card metric"><small>Major 缺陷</small><strong>{{ report.major_count }}</strong><i class="dot amber"></i></article>
+    <article class="card metric"><small>Minor 缺陷</small><strong>{{ report.minor_count }}</strong><i class="dot blue"></i></article>
+  </section>
+  <div class="field-grid two report-detail-panels">
+    <section class="card section-card">
+      <div class="section-title"><div><h2>正式 PDF</h2><p>每个文件都保存 SHA-256 校验值，生成后不可覆盖。</p></div></div>
+      {% if versions %}<div class="pdf-grid">{% for version in versions %}<article class="pdf-card"><span class="pdf-icon">PDF</span><div><strong>{{ '统一英文正式报告' if version.template=='unified' else ('客户旧版' if version.template=='legacy' else '专业新版') }}{% if version.template!='unified' %} · {{ '英文' if version.language=='en' else '中英双语' }}{% endif %}</strong><small>{{ version.created_at.strftime('%Y-%m-%d %H:%M') }}</small><small class="checksum" title="{{ version.checksum }}">{{ version.checksum }}</small></div><div><a class="button small secondary" href="{{ url_for('download_pdf', report_id=report.id, version_id=version.id) }}" target="_blank">查看</a><a class="button small ghost" href="{{ url_for('download_pdf', report_id=report.id, version_id=version.id, download=1) }}">下载</a></div></article>{% endfor %}</div>{% else %}<div class="empty"><strong>尚未生成正式 PDF</strong><p>完成 QC 审核、测试和电子签名后，可锁定并生成统一英文正式报告。</p></div>{% endif %}
+    </section>
+    <section class="card section-card">
+      <div class="section-title"><div><h2>检验内容</h2><p>缺陷、照片与签署信息摘要。</p></div></div>
+      <div class="mini-list">
+        <div class="mini-item"><strong>签名 QC</strong><span>{{ signer.name if signer else '未签名' }}</span></div>
+        <div class="mini-item"><strong>样本量</strong><span>{{ report.sample_size }} PCS</span></div>
+        <div class="mini-item"><strong>照片数量</strong><span>{{ photos|length }} 张</span></div>
+        <div class="mini-item"><strong>缺陷记录</strong><span>{{ defects|length }} 项</span></div>
+        <div class="mini-item"><strong>电子签名</strong><span>{{ report.signed_at.strftime('%Y-%m-%d %H:%M') if report.signed_at else '未签名' }}</span></div>
+        <div class="mini-item"><strong>正式锁定</strong><span>{{ report.finalized_at.strftime('%Y-%m-%d %H:%M') if report.finalized_at else '未锁定' }}</span></div>
+      </div>
+    </section>
+  </div>
+  {% if photos %}<section class="card section-card"><div class="section-title"><div><h2>现场证据</h2><p>按上传顺序显示，正式版本内照片不可删除。</p></div></div><div class="photo-grid">{% for photo in photos %}<article class="photo-card"><img src="{{ url_for('media_photo', photo_id=photo.id) }}" alt="{{ photo.caption or photo.category }}"><div class="photo-meta"><strong>{{ photo_categories.get(photo.category,photo.category) }}</strong><small>{{ photo.caption or photo.original_name }}</small></div></article>{% endfor %}</div></section>{% endif %}
+</div>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='report.js') }}"></script>{% endblock %}

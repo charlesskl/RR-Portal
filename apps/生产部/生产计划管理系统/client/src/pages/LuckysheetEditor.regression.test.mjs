@@ -48,3 +48,86 @@ test('the editor exposes pending-state checks and an explicit refresh key', () =
   assert.match(source, /hasPendingChanges/);
   assert.match(source, /refreshKey/);
 });
+
+// ===== 2026-08 车间反馈六项修复的回归测试 =====
+
+const rangesStart = source.indexOf('function toRanges');
+const rangesEnd = source.indexOf('// 一次性列宽迁移');
+const rangesCtx = {};
+vm.createContext(rangesCtx);
+vm.runInContext(`${source.slice(rangesStart, rangesEnd)}\nthis.toRanges = toRanges;`, rangesCtx);
+
+test('hook ranges normalize array / single-object / bare operate shapes', () => {
+  const { toRanges } = rangesCtx;
+  const seg = { row: [1, 2], column: [3, 4] };
+  // 注意：toRanges 在 vm realm 里跑，返回数组的 prototype 与主 realm 不同，
+  // deepEqual 会因原型不等而误判 —— 用长度 + 引用/键值断言
+  const check = (result, expectSeg) => {
+    assert.equal(result.length, 1);
+    if (expectSeg) { assert.equal(result[0], seg); assert.deepEqual([...result[0].row], [1, 2]); }
+  };
+  // 标准：{range:[seg]}
+  check(toRanges({ range: [seg] }), true);
+  // 工具栏改字体：{range: seg}（单对象，旧代码 for..of 直接抛 TypeError → 字体保存不了）
+  check(toRanges({ range: seg }), true);
+  // operate 本身就是 range 数组
+  check(toRanges([seg]), true);
+  // 空 / 垃圾输入不抛异常、不产生记录
+  assert.equal(toRanges(null).length, 0);
+  assert.equal(toRanges({}).length, 0);
+  assert.equal(toRanges({ range: [{ row: [1] }] }).length, 0);
+});
+
+test('high-frequency cell hook logs are gated behind DEV mode', () => {
+  assert.match(source, /const DEBUG = import\.meta\.env\.DEV/);
+  assert.match(source, /const dbg = \(\.\.\.args\) => \{ if \(DEBUG\) console\.log\(\.\.\.args\); \}/);
+  // 热路径不允许再直接 console.log（日志洪泛是「页面没有响应」的主因）
+  assert.doesNotMatch(source, /console\.log\('\[钩子\]/);
+  assert.doesNotMatch(source, /console\.log\('\[Luckysheet\]/);
+});
+
+test('Delete/Backspace interception ignores visible inputs (search & find dialogs)', () => {
+  // 旧逻辑要求 input 有 id 才放行，无 id 的搜索框退格被拦截 —— 必须已移除
+  assert.doesNotMatch(source, /target\?\.id !== ''/);
+  // 新逻辑：可见输入控件（offsetParent / 尺寸判断）一律放行
+  assert.match(source, /target\.offsetParent !== null/);
+  assert.match(source, /isContentEditable/);
+});
+
+test('hook suppression is released even when days batch exits early', () => {
+  // 早退不释放会让所有编辑永远记录不到（「保存不了」根因之一）。
+  // main 上是回调式实现：两个批量任务共享计数，都结束才释放 suppress
+  assert.match(source, /batchesPending === 0\) suppressHookRef\.current = false/);
+  // 每个早退/失败路径都必须回调 onDone
+  assert.match(source, /if \(!ls\?\.setCellValue\) \{ onDone\?\.\(\); return; \}/);
+  assert.match(source, /if \(!sheet\?\.data\) \{ onDone\?\.\(\); return; \}/);
+  assert.match(source, /\[天数自动算\] 失败:', e\?\.message\); onDone\?\.\(\); \}/);
+});
+
+test('batch cell writes are chunked to avoid blocking the main thread', () => {
+  const chunks = source.match(/const CHUNK = 30/g) || [];
+  assert.ok(chunks.length >= 2, 'days batch and formula batch should both chunk');
+});
+
+test('sheet uses taller default rows and resizes with the container', () => {
+  assert.match(source, /defaultRowHeight: 24/);
+  assert.match(source, /ls\.resize\(\)/);
+});
+
+const migStart = source.indexOf('const WIDTH_MIGRATION');
+const migEnd = source.indexOf('function ordersToCelldata');
+const migCtx = {};
+vm.createContext(migCtx);
+vm.runInContext(`${source.slice(migStart, migEnd)}\nthis.migrateSavedWidths = migrateSavedWidths;`, migCtx);
+
+test('saved column widths at old defaults migrate; user-customized widths stay', () => {
+  const cols = [
+    { data: 'contract', width: 105 },      // 旧默认 120 → 新 105
+    { data: 'item_no', width: 115 },       // 旧默认 130 → 新 115
+    { data: 'product_name', width: 115 },
+  ];
+  const migrated = migCtx.migrateSavedWidths({ 0: 120, 1: 130, 2: 200 }, cols);
+  assert.equal(migrated[0], 105, '停在旧默认值 120 → 换成新默认 105');
+  assert.equal(migrated[1], 115, '停在旧默认值 130 → 换成新默认 115');
+  assert.equal(migrated[2], 200, '用户手调过 200 → 不动');
+});

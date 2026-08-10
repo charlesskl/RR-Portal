@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { applyCnyTaxPrice, cnyTaxToHkdUntaxed } from '../src/utils/orderPricing'
+import { applyCnyTaxPrice, cnyTaxToHkdUntaxed, cnyTaxToUntaxedRmb } from '../src/utils/orderPricing'
 
 describe('order pricing conversion', () => {
   it('converts CNY tax-inclusive price to HKD tax-exclusive price', () => {
@@ -14,5 +14,9 @@ describe('order pricing conversion', () => {
       exchange_rate: 0.87,
       unit_price: 2.902,
     })
+  })
+
+  it('converts sewing CNY tax-inclusive price using only the tax point', () => {
+    expect(cnyTaxToUntaxedRmb(2.85, 1.11)).toBe(2.5676)
   })
 })

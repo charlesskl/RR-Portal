@@ -25,6 +25,7 @@ const factory = ref<Partial<Factory>>(
     : {},
 )
 const ready = ref(isNew) // 新建立即可渲染；编辑需等数据加载完再渲染表单
+const saving = ref(false)
 const newStatus = ref<FactoryStatus>('active')
 
 const photoInput = ref<HTMLInputElement | null>(null)
@@ -77,14 +78,25 @@ async function submitIncident() {
 }
 
 async function onSave(fd: FormData) {
-  if (isNew) {
-    fd.append('status', 'active')
-    if (auth.userId) fd.append('created_by', auth.userId)
-    const created = await store.create(fd)
-    router.push(`/factories/${created.id}`)
-  } else {
-    await store.update(route.params.id as string, fd)
-    factory.value = await store.get(route.params.id as string)
+  if (saving.value) return
+  saving.value = true
+  try {
+    if (isNew) {
+      fd.append('status', 'active')
+      if (auth.userId) fd.append('created_by', auth.userId)
+      const created = await store.create(fd)
+      alert('保存成功')
+      await router.push(`/factories/${created.id}`)
+    } else {
+      await store.update(route.params.id as string, fd)
+      factory.value = await store.get(route.params.id as string)
+      alert('保存成功')
+    }
+  } catch (error: any) {
+    const message = error?.response?.message || error?.message || '未知错误'
+    alert(`保存失败：${message}`)
+  } finally {
+    saving.value = false
   }
 }
 
@@ -107,7 +119,7 @@ async function approveStatus() {
     <h2>{{ isNew ? '新增工厂' : factory.name }}</h2>
     <section class="card info-row">
       <div class="form-col">
-        <FactoryForm v-if="ready" :model-value="factory" :readonly="!(auth.role && canEditFactories(auth.role))" @save="onSave" />
+        <FactoryForm v-if="ready" :model-value="factory" :readonly="!(auth.role && canEditFactories(auth.role))" :saving="saving" @save="onSave" />
         <p v-else class="muted">加载中…</p>
       </div>
     </section>

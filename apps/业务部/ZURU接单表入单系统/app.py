@@ -194,16 +194,25 @@ def _list_dir(path):
 
 
 def _translate_country(en_name):
-    """英文国家名 → 中文（含洲）"""
+    """英文国家名 → 中文（含洲）
+    支持逗号分隔的多国写法（如 "Taiwan, Hong Kong"），逐段翻译后拼接。
+    精确匹配 → 忽略大小写匹配 → 保留原文。
+    """
     if not en_name:
         return ''
-    cn = COUNTRY_MAP.get(en_name.strip())
-    if cn:
-        return cn
-    for k, v in COUNTRY_MAP.items():
-        if k.lower() == en_name.strip().lower():
-            return v
-    return en_name.strip()
+    parts = [p.strip() for p in str(en_name).split(',') if p.strip()]
+    if not parts:
+        return ''
+    out = []
+    for p in parts:
+        cn = COUNTRY_MAP.get(p)
+        if not cn:
+            for k, v in COUNTRY_MAP.items():
+                if k.lower() == p.lower():
+                    cn = v
+                    break
+        out.append(cn or p)
+    return ', '.join(out)
 
 
 def _date_serial(dt):

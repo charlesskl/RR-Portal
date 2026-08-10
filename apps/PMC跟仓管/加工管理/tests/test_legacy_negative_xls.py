@@ -171,41 +171,76 @@ def _make_body(**kw):
 
 
 def test_negative_issue_links_to_target_department(conn):
+    # 2026-08-08 起所有部门联动全部停用，不再生成联动目标
+    loc = conn.execute(
+        "SELECT id FROM locations WHERE name=?", ("河源华兴",)
+    ).fetchone()
+    body = _make_body(location_id=loc["id"])
+    assert m._auto_flow_targets(conn, body, "兴信B来料仓") == []
+
+
+def test_xingxin_dongguan_link_disabled(conn):
+    # 2026-08-07 业务决定：兴信B来料仓 <-> 东莞车间 联动停用
     loc = conn.execute(
         "SELECT id FROM locations WHERE name=?", ("东莞车间",)
     ).fetchone()
     body = _make_body(location_id=loc["id"])
-    targets = m._auto_flow_targets(conn, body, "兴信B来料仓")
-    assert len(targets) == 1
-    target_dept, target_body, flow = targets[0]
-    assert target_dept == "东莞车间"
-    assert target_body.qty == -100
-    assert target_body.rec_type == "issue"
-    # 负数联动记录落库不触发非负校验
-    m._insert_auto_record(conn, target_dept, target_body, 1, flow, 1)
-    row = conn.execute(
-        "SELECT qty, department FROM records WHERE doc_no='T001'"
-    ).fetchone()
-    assert row["qty"] == -100
-    assert row["department"] == "东莞车间"
+    assert m._auto_flow_targets(conn, body, "兴信B来料仓") == []
 
 
 def test_auto_record_skipped_when_manual_record_exists(conn):
+    # 联动已停用：不产生联动目标
+    loc = conn.execute(
+        "SELECT id FROM locations WHERE name=?", ("河源华兴",)
+    ).fetchone()
+    body = _make_body(location_id=loc["id"], qty=100)
+    assert m._auto_flow_targets(conn, body, "兴信B来料仓") == []
+
+
+def test_opening_stock_record_does_not_link(conn):
+    # 期初出仓/期初领料不是真实流转：目标部门自己的台账已有期初数，
+    # 联动会重复计一次（线上曾因此期初翻倍）
     loc = conn.execute(
         "SELECT id FROM locations WHERE name=?", ("东莞车间",)
     ).fetchone()
-    body = _make_body(location_id=loc["id"], qty=100)
+    body = _make_body(location_id=loc["id"], doc_no="1#NFC贴纸-东莞期初出仓",
+                      qty=766369, remark="总表期初出仓导入")
     targets = m._auto_flow_targets(conn, body, "兴信B来料仓")
-    target_dept, target_body, flow = targets[0]
-    # 目标部门先有一条同单号同数量的人工记录
-    m._insert_auto_record(conn, target_dept, target_body, None, "manual", 1)
-    before = conn.execute(
-        "SELECT COUNT(*) AS c FROM records WHERE doc_no='T001'"
-    ).fetchone()["c"]
-    # 再插联动记录应被去重跳过
-    m._insert_auto_record(conn, target_dept, target_body, 999, flow, 1)
-    after = conn.execute(
-        "SELECT COUNT(*) AS c FROM records WHERE doc_no='T001'"
-    ).fetchone()["c"]
-    assert before == 1
-    assert after == 1
+    assert targets == []
+
+
+def test_assembly_opening_inbound_imported(conn):
+    # 总表右块「半成品入仓 截止6月27号」也要生成期初记录，
+    # 否则导出的期初入仓/累计入仓缺这一块（线上曾缺 682723）
+    wb = openpyxl.Workbook()
+    total = wb.active
+    total.title = "总表"
+    total.cell(1, 2).value = "累计领料总数"
+    total.cell(1, 4).value = "7月领料\n总数"
+    total.cell(1, 11).value = "应存数"
+    total.cell(1, 12).value = "累计入仓总数"
+    total.cell(1, 13).value = "东莞"
+    total.cell(1, 15).value = "7月入仓\n总数"
+    total.cell(2, 1).value = "物料名称"
+    total.cell(2, 3).value = "截止6月27号"
+    total.cell(2, 13).value = "截止6月27号"
+    total.cell(3, 1).value = "1#NFC\n贴纸"
+    total.cell(3, 3).value = 766369
+    total.cell(3, 13).value = 682723
+    issue_ws = wb.create_sheet("领料明细")
+    issue_ws.cell(1, 2).value = "当月领料总数"
+    issue_ws.cell(2, 1).value = "物料名称"
+    semi_ws = wb.create_sheet("半成品入仓明细")
+    semi_ws.cell(1, 2).value = "当月入仓总数"
+    semi_ws.cell(2, 1).value = "物料名称"
+
+    upload = FakeUpload("东莞车间77772#NFC贴纸出入明细.xlsx")
+    bodies, _, legacy = m._parse_record_import_workbook(
+        conn, wb, upload, {"department": "东莞车间"}
+    )
+    assert legacy
+    opening_issue = [b for b in bodies if b.rec_type == "issue" and "期初" in (b.remark or "")]
+    opening_inbound = [b for b in bodies if b.rec_type == "semi_finished" and "期初" in (b.remark or "")]
+    assert len(opening_issue) == 1 and opening_issue[0].qty == 766369
+    assert len(opening_inbound) == 1 and opening_inbound[0].qty == 682723
+    assert opening_inbound[0].summary_month == 6

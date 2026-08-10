@@ -83,6 +83,7 @@ function initDatabase() {
       day_31 INTEGER DEFAULT 0,
 
       cell_format TEXT,
+      sort_order REAL,
       created_at TEXT DEFAULT (datetime('now')),
       updated_at TEXT DEFAULT (datetime('now'))
     )
@@ -96,6 +97,10 @@ function initDatabase() {
     }
     if (!cols.includes('row_color')) {
       db.exec('ALTER TABLE orders ADD COLUMN row_color TEXT');
+    }
+    // 手动行排序（剪切/粘贴行）：NULL = 未手动排过，仍按走货期排
+    if (!cols.includes('sort_order')) {
+      db.exec('ALTER TABLE orders ADD COLUMN sort_order REAL');
     }
   } catch {}
 

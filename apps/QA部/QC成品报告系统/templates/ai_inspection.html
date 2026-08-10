@@ -1,0 +1,117 @@
+{% extends 'base.html' %}
+{% block title %}{{ report.report_no }} · AI 辅助验货{% endblock %}
+{% block content %}
+<div class="page inspection-page">
+  <header class="page-header">
+    <div><span class="eyebrow">Guided QC inspection · Rev.{{ report.revision }}</span><h1>{{ snapshot.item_no }} · {{ snapshot.description }}</h1><p>{{ snapshot.customer_name }} · {{ snapshot.po_no }} · {{ snapshot.po_quantity }} PCS</p></div>
+    <div class="actions"><a class="button secondary" href="{{ url_for('preview_report', report_id=report.id, template='unified', language='en') }}" target="_blank">预览英文报告</a><a class="button secondary" href="{{ url_for('report_detail', report_id=report.id) }}">报告摘要</a></div>
+  </header>
+  <div class="progress-steps"><span class="step done"><i>✓</i>PO 已确认</span><b class="step-line"></b><span class="step active"><i>2</i>照片与测试</span><b class="step-line"></b><span class="step {{ 'done' if latest_run and latest_run.status=='completed' else '' }}"><i>3</i>AI 验货草稿</span><b class="step-line"></b><span class="step"><i>4</i>QC 审核</span><b class="step-line"></b><span class="step"><i>5</i>签字出报告</span></div>
+
+  <section class="result-banner {{ report.result|lower|replace(' ','-') }}"><div><span class="eyebrow">Current decision</span><strong>{{ report.result }}</strong><p>{{ report.result_reason }}</p></div><div class="decision-counts"><span>CR <b>{{ report.critical_count }}</b></span><span>MAJ <b>{{ report.major_count }}</b></span><span>MIN <b>{{ report.minor_count }}</b></span></div></section>
+  <section class="summary-strip"><div><small>PO</small><strong>{{ snapshot.po_no }}</strong></div><div><small>货号</small><strong>{{ snapshot.item_no }}</strong></div><div><small>订单数量</small><strong>{{ snapshot.po_quantity }} PCS</strong></div><div><small>要求抽样</small><strong>{{ report.sample_size or '待计算' }} PCS</strong></div><div><small>必拍进度</small><strong>{{ required_done }} / {{ required_total }}</strong></div></section>
+
+  <nav class="tabs"><a href="#photos">① 引导拍照</a><a href="#tests">② 抽检与测试</a><a href="#ai-review">③ AI 草稿 / QC 审核</a><a href="#signature">④ QC 签字</a></nav>
+
+  <section class="card section-card" id="photos">
+    <div class="section-title"><div><h2>引导式照片采集</h2><p>每个格位都可现场拍照或从相册/电脑上传。必拍照片未齐或图像模糊时，报告保持 ON HOLD。</p></div><span class="completion-ring">{{ required_done }}/{{ required_total }}<small>必拍</small></span></div>
+    <div id="upload-queue-status" class="upload-queue-status" role="status" aria-live="polite" hidden><span data-upload-message></span><button id="retry-upload-queue" class="button secondary small" type="button">立即重试</button></div>
+    <div class="photo-slot-grid">
+      {% for slot in slots %}
+      <article id="slot-{{ slot.id }}" class="photo-slot {{ 'complete' if photos_by_slot.get(slot.id) else '' }} {{ 'required' if slot.required else '' }}">
+        <header><span class="slot-index">{{ '%02d'|format(loop.index) }}</span><div><h3>{{ slot.label }}</h3><p>{{ slot.instruction }}</p></div><span class="slot-required">{{ '必拍' if slot.required else '选拍' }}</span></header>
+        {% if photos_by_slot.get(slot.id) %}
+        <div class="slot-photo-list">
+          {% for photo,evidence in photos_by_slot[slot.id] %}
+          <figure><img src="{{ url_for('media_photo', photo_id=photo.id) }}" alt="{{ slot.label }}"><figcaption><span>{{ evidence.upload_source }}{% if evidence.sample_ids %} · 样品 {{ evidence.sample_ids }}{% endif %}</span><form method="post" action="{{ url_for('delete_photo', report_id=report.id, photo_id=photo.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button type="submit" aria-label="删除照片" data-confirm="确认删除这张照片？">×</button></form></figcaption></figure>
+          {% endfor %}
+        </div>
+        {% else %}<div class="slot-empty"><span>＋</span><small>等待照片</small></div>{% endif %}
+        <div class="slot-upload-fields {% if slot.category!='defect' %}compact{% endif %}">
+          {% if slot.category=='defect' %}<input class="slot-sample-input" placeholder="样品编号，如 #03,#17"><input class="slot-group-input" placeholder="同一缺陷组，如 THREAD-01">{% endif %}
+        </div>
+        <div class="slot-actions">
+          <form id="camera-{{ slot.id }}" method="post" enctype="multipart/form-data" action="{{ url_for('upload_slot_photos_form', report_id=report.id, slot_id=slot.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="upload_source" value="camera"><input type="hidden" name="sample_ids"><input type="hidden" name="defect_group"><label class="button camera-button">📷 现场拍照<input class="photo-upload-input" type="file" name="photos" accept="image/*" capture="environment" required></label></form>
+          <form id="gallery-{{ slot.id }}" method="post" enctype="multipart/form-data" action="{{ url_for('upload_slot_photos_form', report_id=report.id, slot_id=slot.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="upload_source" value="gallery"><input type="hidden" name="sample_ids"><input type="hidden" name="defect_group"><label class="button secondary">▧ 相册 / 文件<input class="photo-upload-input" type="file" name="photos" accept="image/*" multiple required></label></form>
+        </div>
+      </article>
+      {% endfor %}
+    </div>
+  </section>
+
+  <form id="inspection-data" method="post" class="card section-card">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <section id="tests">
+      <div class="section-title"><div><h2>抽检数据与性能测试</h2><p>这些测试必须由 QC 实测；AI 不会从普通照片推断跌落、扭力、拉力、电流或电压结果。</p></div><button class="button" type="submit">保存并重新判定</button></div>
+      <div class="field-grid three compact-fields"><label>检验日期<input type="date" name="inspection_date" value="{{ report.inspection_date.isoformat() }}" required></label><label>实际抽检数量<input type="number" name="inspected_qty" min="0" value="{{ report.inspected_qty }}" required></label><label>检验水平<select name="inspection_level"><option value="II" selected>General II</option></select></label><label>Critical AQL<input type="number" step="0.1" name="critical_aql" value="{{ report.critical_aql }}"></label><label>Major AQL<input type="number" step="0.1" name="major_aql" value="{{ report.major_aql }}"></label><label>Minor AQL<input type="number" step="0.1" name="minor_aql" value="{{ report.minor_aql }}"></label></div>
+      {% set required_tests=packing.get('required_tests',[]) %}
+      <div class="test-entry-table"><div class="test-entry-head"><span>Abuse / Test</span><span>Standard（QC 可修正）</span><span>Result</span></div>{% for test in tests %}<div class="test-entry-row"><label><strong>{{ test.name }}</strong>{% if test.name in required_tests %}<em>必填</em>{% endif %}</label><input name="test_standard_{{ test.id }}" value="{{ test.standard }}" placeholder="Test standard"><select name="test_result_{{ test.id }}" {% if test.name in required_tests %}required{% endif %}><option value="">待测试</option><option value="PASS" {% if test.result=='PASS' %}selected{% endif %}>PASS</option><option value="FAIL" {% if test.result=='FAIL' %}selected{% endif %}>FAIL</option><option value="N/A" {% if test.result=='N/A' %}selected{% endif %}>N/A</option></select></div>{% endfor %}</div>
+      <div class="field-grid two" style="margin-top:18px"><label>备注 / Remarks<textarea name="remarks" rows="4" placeholder="Working current, sleeping current, battery voltage, or other QC notes">{{ report.remarks }}</textarea></label><div class="hold-control"><label class="check-line"><input type="checkbox" name="manual_hold" {% if report.manual_hold %}checked{% endif %}> QC 手动暂挂</label><label>暂挂原因<textarea name="hold_reason" rows="3" placeholder="手动 ON HOLD 时必须说明原因">{{ report.hold_reason }}</textarea></label></div></div>
+    </section>
+  </form>
+
+  <section class="card section-card ai-review-section" id="ai-review" data-run-url="{{ url_for('start_analysis_run', report_id=report.id) }}" data-api-prefix="{{ request.script_root }}/api" data-login-url="{{ url_for('login') }}" data-status-base="{{ url_for('get_analysis_run', run_id=0)[:-1] }}" {% if latest_run %}data-status-url="{{ url_for('get_analysis_run', run_id=latest_run.id) }}" data-run-status="{{ latest_run.status }}"{% endif %}>
+    <div class="section-title"><div><span class="ai-draft-badge">AI DRAFT · 不能自动定稿</span><h2>AI 验货分析与 QC 审核</h2><p>AI 只判断照片中可见、且能由 PO 佐证的问题。QC 必须审核每条建议并填写受影响样品数量。</p></div><button id="start-ai-analysis" class="button" type="button" {% if required_done < required_total or (latest_run and latest_run.status in ['queued','processing']) %}disabled{% endif %}>{{ '重新开始 AI 分析' if latest_run and latest_run.status in ['completed','failed'] else '开始 AI 验货分析' }}</button></div>
+    <div id="analysis-message" class="analysis-message {% if latest_run %}{{ latest_run.status }}{% endif %}">
+      {% if not latest_run %}<strong>尚未运行</strong><span>必拍照片上传齐全后，由 QC 手动启动。</span>
+      {% elif latest_run.status in ['queued','processing'] %}<span class="spinner"></span><div><strong>AI 正在分析照片</strong><span>识别清晰度、标签、条码、日期码、包装和可见缺陷…</span></div>
+      {% elif latest_run.status=='failed' %}<strong>分析失败</strong><span>{{ latest_run.error_message }}</span>
+      {% else %}<strong>分析已返回草稿</strong><span>{{ latest_run.model }} · {{ latest_run.completed_at.strftime('%Y-%m-%d %H:%M') if latest_run.completed_at else '' }} · Request {{ latest_run.request_id }}</span>{% endif %}
+    </div>
+    {% if latest_run and latest_run.status=='completed' and observations %}
+    <details class="observation-panel" open>
+      <summary><span><strong>逐张照片识别记录</strong><small>核对清晰度、OCR、条码、日期码及与 PO 的一致性</small></span><b>{{ observations|length }} 张</b></summary>
+      <div class="observation-grid">
+        {% for item in observations %}
+        <article class="observation-card {{ 'retake' if item.requires_retake else '' }}">
+          {% if item.photo_id %}<a class="observation-photo" href="{{ url_for('media_photo', photo_id=item.photo_id) }}" target="_blank" aria-label="查看照片 {{ item.photo_id }} 原图"><img src="{{ url_for('media_photo', photo_id=item.photo_id) }}" alt="{{ item.slot_key }} evidence"></a>{% else %}<div class="observation-photo missing">无关联照片</div>{% endif %}
+          <div class="observation-body">
+            <header><strong>{{ item.slot_key }}</strong><span class="observation-quality {{ 'bad' if item.requires_retake else 'good' if item.clarity_status in ['clear','good','readable'] else 'neutral' }}">{{ item.clarity_status or 'unknown' }}</span></header>
+            <dl>
+              <div><dt>OCR</dt><dd>{{ item.ocr_text if item.ocr_text and item.ocr_text not in ['[]','{}','null'] else '未识别到文字' }}</dd></div>
+              <div><dt>条码</dt><dd>{{ item.barcode if item.barcode and item.barcode not in ['[]','{}','null'] else '未识别' }}</dd></div>
+              <div><dt>日期码</dt><dd>{{ item.date_code if item.date_code and item.date_code not in ['[]','{}','null'] else '未识别' }}</dd></div>
+              <div><dt>与 PO 一致性</dt><dd>{{ item.consistency if item.consistency and item.consistency not in ['[]','{}','null'] else 'not_checked' }}</dd></div>
+              <div class="wide"><dt>可见状态</dt><dd>{{ item.visible_state or '未记录' }}</dd></div>
+            </dl>
+            {% if item.reason %}<p>{{ item.reason }}</p>{% endif %}
+          </div>
+        </article>
+        {% endfor %}
+      </div>
+    </details>
+    {% endif %}
+    {% if observations|selectattr('requires_retake')|list %}<div class="retake-panel"><strong>需要补拍</strong>{% for item in observations if item.requires_retake %}<p>{{ item.slot_key }}：{{ item.reason or '照片模糊、遮挡或证据不足。请删除问题照片并补拍后重新分析。' }}</p>{% endfor %}</div>{% endif %}
+    {% if latest_run and latest_run.status=='completed' and not findings %}<div class="no-finding"><strong>没有生成可见缺陷建议</strong><p>这不等于 AI 判定 PASS；系统仍依据照片完整性、QC 测试、AQL 和签名生成结论。</p></div>{% endif %}
+    <div class="finding-list">
+      {% for finding in findings %}
+      {% set evidence_ids=json_load(finding.evidence_photo_ids) %}
+      <article class="finding-card {{ finding.status }}">
+        <header><div><span class="severity {{ finding.suggested_severity }}">{{ finding.suggested_severity|upper }}</span><h3>{{ finding.name }}</h3></div><span class="confidence {{ 'high' if finding.confidence>=0.85 else 'medium' if finding.confidence>=0.6 else 'low' }}">AI {{ (finding.confidence*100)|round|int }}%</span></header>
+        <p class="finding-reason">{{ finding.reason }}</p>
+        {% if evidence_ids %}<div class="finding-evidence"><strong>证据照片</strong><div>{% for photo_id in evidence_ids %}<a href="{{ url_for('media_photo', photo_id=photo_id|int) }}" target="_blank"><img src="{{ url_for('media_photo', photo_id=photo_id|int) }}" alt="Evidence photo {{ photo_id }}"><span>#{{ photo_id }}</span></a>{% endfor %}</div></div>{% endif %}
+        <small>同一可见问题已跨照片合并；AI 不自动计算缺陷数量，须由 QC 填写。</small>
+        <form method="post" action="{{ url_for('review_ai_finding', finding_id=finding.id) }}" class="finding-review-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <label class="span-2">英文报告描述<input name="description_en" value="{{ finding.description_en }}" required></label>
+          <label>QC 严重等级<select name="severity"><option value="critical" {% if finding.suggested_severity=='critical' %}selected{% endif %}>Critical</option><option value="major" {% if finding.suggested_severity=='major' %}selected{% endif %}>Major</option><option value="minor" {% if finding.suggested_severity=='minor' %}selected{% endif %}>Minor</option></select></label>
+          <label>受影响数量<input type="number" name="affected_quantity" min="1" value="{{ defects_by_id.get(finding.confirmed_defect_id).quantity if finding.confirmed_defect_id and defects_by_id.get(finding.confirmed_defect_id) else '' }}" placeholder="QC 必填"></label>
+          <label class="span-2">受影响样品编号<input name="sample_ids" value="{{ decisions_by_finding.get(finding.id).sample_ids if decisions_by_finding.get(finding.id) else '' }}" placeholder="#03, #17；可留空但数量必填"></label>
+          <div class="finding-actions span-2"><button class="button success" name="action" value="accept">接受 AI 建议</button><button class="button secondary" name="action" value="edit">保存修改并接受</button><button class="button danger ghost" name="action" value="reject" formnovalidate>驳回建议</button><span class="finding-status">{{ {'pending':'待审核','accepted':'已接受','edited':'QC 已修改','rejected':'已驳回'}.get(finding.status,finding.status) }}</span></div>
+        </form>
+      </article>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section class="card section-card" id="signature">
+    <div class="section-title"><div><h2>QC 签字与正式报告</h2><p>首版只需要 QC 签字。锁定后数据、原图、分析记录和 PDF 均不可覆盖；修改需创建 Rev.1。</p></div></div>
+    <div class="signature-grid">
+      <form id="signature-form" method="post" action="{{ url_for('save_signature', report_id=report.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input id="signature-data" type="hidden" name="signature_data"><input id="signature-mode" type="hidden" name="signature_mode" value="draw"><div class="signature-pad"><canvas id="signature-canvas" aria-label="手写签名板"></canvas><div class="signature-tools"><button id="clear-signature" class="button ghost small" type="button">清空重签</button><label class="check-line"><input type="checkbox" name="save_to_profile">保存为个人签名</label></div></div><div class="actions" style="margin-top:12px"><button class="button" name="signature_mode" value="draw">保存手写签名</button><button class="button secondary" name="signature_mode" value="profile" formnovalidate>使用预存签名</button></div></form>
+      <div class="signature-preview">{% if report.signature_path %}<div><strong>QC 签名已保存</strong><small>{{ report.signed_at.strftime('%Y-%m-%d %H:%M') if report.signed_at else '' }}</small></div>{% else %}<div><strong>等待 QC 签名</strong><small>签名前请先确认所有 AI 草稿和测试结果</small></div>{% endif %}</div>
+    </div>
+    <div class="finalize-bar"><div><strong>当前判定：{{ report.result }}</strong><p>{{ report.result_reason }}</p></div><form method="post" action="{{ url_for('finalize_report', report_id=report.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="button success" type="submit" data-confirm="确认由 QC 签字并锁定此版本？之后只能创建修订版。" {% if not report.signature_path %}disabled{% endif %}>锁定并生成统一英文 PDF</button></form></div>
+  </section>
+</div>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='report.js') }}"></script><script src="{{ url_for('static', filename='qc_urls.js') }}"></script><script src="{{ url_for('static', filename='ai_inspection.js') }}"></script>{% endblock %}

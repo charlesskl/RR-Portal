@@ -94,7 +94,6 @@ const rows = computed<ReportRow[]>(() =>
 const showMoldNumber = computed(() => craft.value === 'injection')
 const showContractNumber = computed(() => craft.value === 'sewing')
 const visibleHeaders = computed(() => deliveryHeaders(showMoldNumber.value, showContractNumber.value))
-const visibleColumnCount = computed(() => visibleHeaders.value.length + (canEdit.value ? 1 : 0))
 
 const COLUMN_WIDTHS: Record<string, number> = {
   '范围': 140,
@@ -134,8 +133,44 @@ const freezeOptions = computed(() => visibleHeaders.value.map((header, index) =>
     ? (visibleHeaders.value.indexOf(header) === index ? '延期占比' : '价格占比')
     : header,
 })))
+const hiddenColumnKeys = ref<string[]>([])
+const columnsReady = ref(false)
 const freezeIndex = computed(() => freezeOptions.value.find((option) => option.key === freezeTo.value)?.index ?? -1)
 const freezeStorageKey = computed(() => `delivery-report-freeze:${craft.value}`)
+const columnStorageKey = computed(() => `delivery-report-hidden-columns:${craft.value}`)
+const visibleColumnCount = computed(() => visibleHeaders.value.filter((_, index) => isColumnVisible(index)).length + (canEdit.value ? 1 : 0))
+
+function columnKey(index: number) {
+  return `${index}:${visibleHeaders.value[index]}`
+}
+
+function isColumnVisible(index: number) {
+  return !hiddenColumnKeys.value.includes(columnKey(index))
+}
+
+function setColumnVisible(index: number, visible: boolean) {
+  const key = columnKey(index)
+  hiddenColumnKeys.value = visible
+    ? hiddenColumnKeys.value.filter((value) => value !== key)
+    : [...new Set([...hiddenColumnKeys.value, key])]
+}
+
+function showAllColumns() {
+  hiddenColumnKeys.value = []
+}
+
+function restoreColumnVisibility() {
+  columnsReady.value = false
+  try {
+    const saved = JSON.parse(window.localStorage.getItem(columnStorageKey.value) ?? '[]')
+    hiddenColumnKeys.value = Array.isArray(saved)
+      ? saved.filter((value): value is string => typeof value === 'string' && freezeOptions.value.some((option) => option.key === value))
+      : []
+  } catch {
+    hiddenColumnKeys.value = []
+  }
+  columnsReady.value = true
+}
 
 function defaultFreezeKey() {
   const index = visibleHeaders.value.indexOf('物料名称')
@@ -157,7 +192,14 @@ watch(freezeTo, (value) => {
   if (!freezeReady.value) return
   try { window.localStorage.setItem(freezeStorageKey.value, value) } catch { /* 浏览器禁用存储时仍可正常使用 */ }
 })
-watch(craft, restoreFreezePreference)
+watch(hiddenColumnKeys, (value) => {
+  if (!columnsReady.value) return
+  try { window.localStorage.setItem(columnStorageKey.value, JSON.stringify(value)) } catch { /* 浏览器禁用存储时仍可正常使用 */ }
+})
+watch(craft, () => {
+  restoreFreezePreference()
+  restoreColumnVisibility()
+})
 
 function columnIndex(header: string, occurrence = 0) {
   let found = 0
@@ -172,7 +214,7 @@ function columnIndex(header: string, occurrence = 0) {
 function columnClass(index: number) {
   const header = visibleHeaders.value[index]
   return {
-    'freeze-col': index >= 0 && index <= freezeIndex.value,
+    'freeze-col': isColumnVisible(index) && index >= 0 && index <= freezeIndex.value,
     'range-col': header === '范围',
     'pmc-col': header === '下单PMC',
     'factory-col': header === '加工厂',
@@ -197,9 +239,11 @@ function columnStyle(index: number) {
     minWidth: `${width}px`,
     maxWidth: `${width}px`,
   }
-  if (index >= 0 && index <= freezeIndex.value) {
+  if (!isColumnVisible(index)) {
+    style.display = 'none'
+  } else if (index >= 0 && index <= freezeIndex.value) {
     const left = visibleHeaders.value.slice(0, index)
-      .reduce((total, header) => total + (COLUMN_WIDTHS[header] ?? 120), 0)
+      .reduce((total, header, previousIndex) => total + (isColumnVisible(previousIndex) ? (COLUMN_WIDTHS[header] ?? 120) : 0), 0)
     style['--freeze-left'] = `${left}px`
   }
   return style
@@ -211,6 +255,7 @@ function columnStyleFor(header: string, occurrence = 0) {
 
 onMounted(() => {
   restoreFreezePreference()
+  restoreColumnVisibility()
   return Promise.all([orders.fetchAll(), factories.fetchAll()])
 })
 
@@ -578,6 +623,23 @@ async function removeRow(row: DetailRow) {
             </option>
           </select>
         </label>
+        <details class="column-control">
+          <summary>显示栏目</summary>
+          <div class="column-menu">
+            <div class="column-menu-top">
+              <strong>显示/隐藏栏目</strong>
+              <button type="button" class="link-button" @click="showAllColumns">全部显示</button>
+            </div>
+            <label v-for="option in freezeOptions" :key="option.key" class="column-option">
+              <input
+                type="checkbox"
+                :checked="isColumnVisible(option.index)"
+                @change="setColumnVisible(option.index, ($event.target as HTMLInputElement).checked)"
+              />
+              {{ option.label }}
+            </label>
+          </div>
+        </details>
         <button v-if="canEdit" class="ghost" @click="pdfInput?.click()">导入 PDF</button>
         <input ref="pdfInput" type="file" accept=".pdf,application/pdf" multiple style="display:none" @change="importPdf" />
         <button v-if="canEdit" class="ghost" :disabled="importingExcel" @click="fileInput?.click()">
@@ -730,6 +792,16 @@ async function removeRow(row: DetailRow) {
 .date-clear { width: 34px; height: 34px; padding: 0; font-size: 1.15rem; line-height: 1; }
 .freeze-control { display: flex; align-items: center; gap: .35rem; min-height: 38px; white-space: nowrap; color: var(--text-soft); font-size: .86rem; }
 .freeze-control select { height: 38px; max-width: 148px; padding: .35rem .5rem; font: inherit; color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-sm); background: white; }
+.column-control { position: relative; flex: 0 0 auto; }
+.column-control summary { height: 38px; box-sizing: border-box; display: flex; align-items: center; padding: .35rem .7rem; cursor: pointer; list-style: none; color: var(--text); font-size: .88rem; white-space: nowrap; border: 1px solid var(--border); border-radius: var(--radius-sm); background: white; }
+.column-control summary::-webkit-details-marker { display: none; }
+.column-control summary::after { content: '⌄'; margin-left: .38rem; color: var(--text-soft); font-size: 1rem; }
+.column-control[open] summary { border-color: #aaa7ff; }
+.column-menu { position: absolute; top: calc(100% + .35rem); right: 0; z-index: 20; width: 232px; max-height: min(490px, calc(100vh - 150px)); overflow-y: auto; padding: .65rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: white; box-shadow: 0 12px 28px rgba(31, 37, 51, .18); }
+.column-menu-top { display: flex; align-items: center; justify-content: space-between; gap: .5rem; margin-bottom: .45rem; padding-bottom: .45rem; border-bottom: 1px solid var(--border); font-size: .84rem; }
+.link-button { padding: 0; color: var(--primary); font-size: .8rem; background: transparent; border: 0; box-shadow: none; }
+.column-option { display: flex; align-items: center; gap: .5rem; min-height: 30px; padding: .18rem .1rem; cursor: pointer; font-size: .85rem; }
+.column-option input { margin: 0; }
 .search-box { width: 240px; padding: .4rem .7rem; font-size: .9rem; border: 1px solid var(--border); border-radius: var(--radius-sm); }
 @media (max-width: 1180px) {
   .toolbar { flex-wrap: wrap; }

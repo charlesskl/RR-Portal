@@ -208,6 +208,38 @@ describe('parseDeliveryImport', () => {
     })
   })
 
+  it('imports every order section in painting purchase order templates', () => {
+    const aoa = [
+      ['邵阳市华登塑胶制品有限公司', '', '', '', '', '', '', '', ''],
+      ['供应商：', '新宁县安山乡创达玩具厂', '', '', '', '', '订单编号：', 'DP26052-PC076', ''],
+      ['', '', '', '', '', '', '', '联络人：', '韦文帅', ''],
+      ['货 号', '货 物 名 称', '加工类别', '数量', '单位', '单价', '金额', '备 注'],
+      [92106, '幻彩紫考拉', '印喷', 5000, 'PCS', 0.159, 795, ''],
+      [92106, '幻彩白考拉', '印喷', 5000, 'PCS', 0.159, 795, ''],
+      ['', '', '', '', '', '', '合计', 1590],
+      ['1. 2026年 7 月 13 日前交货 8 月 8 日 前交完，货送24栋处', '', '', '', '', '', '', ''],
+      ['采购签核：陈玉叶', '', '', '', '时间：2026年7月3日', '', '', ''],
+      ['供应商：', '新宁县安山乡创达玩具厂', '', '', '', '', '订单编号：', 'DP26053-PC077', ''],
+      ['货 号', '货 物 名 称', '加工类别', '数量', '单位', '单价', '金额', '备 注'],
+      ['47722A', '小鸡1#', '印喷', 2500, 'PCS', 0.25, 625, ''],
+      ['1. 2026年 7 月 28 日前交货 8 月 5 日 前交完，货送24栋处', '', '', '', '', '', '', ''],
+      ['采购签核：陈玉叶', '', '', '', '时间：2026年7月3日', '', '', ''],
+    ]
+
+    const result = parseDeliveryImport(aoa, { '新宁县安山乡创达玩具厂': 'factory-1' })
+
+    expect(result.failed).toBe(0)
+    expect(result.payloads).toHaveLength(3)
+    expect(result.payloads[0]).toMatchObject({
+      factory: 'factory-1', pmc: '陈玉叶', item_no: '92106', order_no: 'DP26052-PC076',
+      product: '幻彩紫考拉', process_category: '印喷', quantity: 5000,
+      order_date: '2026-07-03', delivery_date: '2026-07-13', unit_price_cny_tax: 0.159, amount: 795,
+    })
+    expect(result.payloads[2]).toMatchObject({
+      order_no: 'DP26053-PC077', item_no: '47722A', product: '小鸡1#', delivery_date: '2026-07-28',
+    })
+  })
+
   it('imports molding contract templates', () => {
     const aoa = [
       ['东莞兴信塑胶制品有限公司', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', ''],

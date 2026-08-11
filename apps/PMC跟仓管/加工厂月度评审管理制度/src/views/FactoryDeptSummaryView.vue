@@ -61,64 +61,35 @@ function exportExcel() {
     siteRate: summary.siteRate,
   }))
   const totalRow = factorySummaryExportRow({
-    name: `${factoryCount.value} 家工厂总计`,
+    name: `${factoryCount.value} 家加工厂总计`,
     stats: totalStats.value,
     siteScore: totalSiteScore.value,
     siteRate: totalSiteRate.value,
   })
-  const aoa = [
-    [title, ...Array(FACTORY_SUMMARY_HEADERS.length - 1).fill('')],
-    [...FACTORY_SUMMARY_HEADERS],
-    ...detailRows,
-    totalRow,
-  ]
+  const aoa = [[title, ...Array(FACTORY_SUMMARY_HEADERS.length - 1).fill('')], [...FACTORY_SUMMARY_HEADERS], ...detailRows, totalRow]
   const ws = XLSX.utils.aoa_to_sheet(aoa)
   const lastRow = aoa.length
   const lastCol = FACTORY_SUMMARY_HEADERS.length - 1
   ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: lastCol } }]
   ws['!autofilter'] = { ref: `A2:${XLSX.utils.encode_col(lastCol)}${lastRow}` }
-  ws['!cols'] = [
-    { wch: 32 },
-    { wch: 15 }, { wch: 15 }, { wch: 12 },
-    { wch: 13 }, { wch: 12 }, { wch: 12 }, { wch: 16 },
-    { wch: 13 }, { wch: 12 }, { wch: 12 },
-    { wch: 12 }, { wch: 16 },
-  ]
+  ws['!cols'] = [{ wch: 32 }, { wch: 15 }, { wch: 15 }, { wch: 12 }, { wch: 13 }, { wch: 12 }, { wch: 12 }, { wch: 16 }, { wch: 13 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 16 }]
   ws['!rows'] = [{ hpt: 28 }, { hpt: 24 }]
-
-  const titleCell = ws.A1
-  titleCell.s = {
-    fill: { fgColor: { rgb: '4F46E5' } },
-    font: { bold: true, color: { rgb: 'FFFFFF' }, sz: 16 },
-    alignment: { horizontal: 'center', vertical: 'center' },
-  }
-  const headerColors = ['64748B', '4F46E5', '4F46E5', '4F46E5', 'D97706', 'D97706', 'D97706', 'D97706', '0D9488', '0D9488', '0D9488', '16A34A', '16A34A']
+  ws.A1.s = { fill: { fgColor: { rgb: 'FFFFFF' } }, font: { bold: true, color: { rgb: '000000' }, sz: 16 }, alignment: { horizontal: 'center', vertical: 'center' } }
   for (let col = 0; col <= lastCol; col++) {
     const cell = ws[XLSX.utils.encode_cell({ r: 1, c: col })]
-    cell.s = {
-      fill: { fgColor: { rgb: headerColors[col] } },
-      font: { bold: true, color: { rgb: 'FFFFFF' } },
-      alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
-      border: { bottom: { style: 'medium', color: { rgb: 'D1D5DB' } } },
-    }
+    cell.s = { fill: { fgColor: { rgb: 'FFFFFF' } }, font: { bold: true, color: { rgb: '000000' } }, alignment: { horizontal: 'center', vertical: 'center', wrapText: true }, border: { bottom: { style: 'medium', color: { rgb: 'D1D5DB' } } } }
   }
   for (let row = 2; row < lastRow; row++) {
     for (let col = 0; col <= lastCol; col++) {
       const cell = ws[XLSX.utils.encode_cell({ r: row, c: col })]
       if (!cell) continue
-      cell.s = {
-        fill: { fgColor: { rgb: row === lastRow - 1 ? 'EEF2FF' : (row % 2 ? 'F8FAFC' : 'FFFFFF') } },
-        font: { bold: row === lastRow - 1 },
-        alignment: { horizontal: col === 0 ? 'left' : 'right', vertical: 'center' },
-        border: { bottom: { style: 'thin', color: { rgb: 'E5E7EB' } } },
-      }
-      if ([1, 2].includes(col)) cell.z = '#,##0.00'
-      else if ([3, 6, 10, 12].includes(col)) cell.z = '0.00%'
+      cell.s = { fill: { fgColor: { rgb: row === lastRow - 1 ? 'EEF2FF' : (row % 2 ? 'F8FAFC' : 'FFFFFF') } }, font: { bold: row === lastRow - 1 }, alignment: { horizontal: col === 0 ? 'left' : 'right', vertical: 'center' }, border: { bottom: { style: 'thin', color: { rgb: 'E5E7EB' } } } }
+      if ([1, 2].includes(col)) cell.z = '#,##0'
+      else if ([3, 6, 10, 12].includes(col)) cell.z = '0.0%'
       else if ([4, 5, 8, 9].includes(col)) cell.z = '#,##0'
       else if ([7, 11].includes(col)) cell.z = '0.00'
     }
   }
-
   const wb = XLSX.utils.book_new()
   XLSX.utils.book_append_sheet(wb, ws, '汇总表')
   XLSX.writeFile(wb, `${title}.xlsx`)

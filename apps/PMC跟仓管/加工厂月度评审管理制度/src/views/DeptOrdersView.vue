@@ -65,8 +65,6 @@ function clearDateFilter() {
   rangeEnd.value = ''
 }
 
-onMounted(() => Promise.all([orders.fetchAll(), factories.fetchAll()]))
-
 const myRegions = computed(() => (auth.role ? allowedRegions(auth.role) : null))
 const deptOrders = computed(() => {
   const q = search.value.trim().toLowerCase()
@@ -96,7 +94,170 @@ const rows = computed<ReportRow[]>(() =>
 const showMoldNumber = computed(() => craft.value === 'injection')
 const showContractNumber = computed(() => craft.value === 'sewing')
 const visibleHeaders = computed(() => deliveryHeaders(showMoldNumber.value, showContractNumber.value))
-const visibleColumnCount = computed(() => visibleHeaders.value.length + (canEdit.value ? 1 : 0))
+
+const COLUMN_WIDTHS: Record<string, number> = {
+  '范围': 140,
+  '下单PMC': 140,
+  '加工厂': 140,
+  '合同号': 150,
+  '货号': 140,
+  '模具编号': 140,
+  '订单号': 140,
+  '加工类别': 120,
+  '物料名称': 160,
+  '数量': 110,
+  '下单时间': 120,
+  '下单交货时间': 130,
+  '实际交货时间': 130,
+  '延迟时间': 100,
+  '订单总单数': 110,
+  '延期单数': 100,
+  '占比': 90,
+  '延期平均天数': 130,
+  '核价工价(港币不含税$)': 150,
+  '外发工价(港币不含税$)': 150,
+  '核价工价(不含税RMB)': 150,
+  '外发工价(不含税RMB)': 150,
+  '外发工价(人民币含税)': 150,
+  '换算汇率': 100,
+  '税点': 100,
+  '备注': 220,
+}
+
+const freezeTo = ref('')
+const freezeReady = ref(false)
+const freezeOptions = computed(() => visibleHeaders.value.map((header, index) => ({
+  key: `${index}:${header}`,
+  index,
+  label: header === '占比'
+    ? (visibleHeaders.value.indexOf(header) === index ? '延期占比' : '价格占比')
+    : header,
+})))
+const hiddenColumnKeys = ref<string[]>([])
+const columnsReady = ref(false)
+const freezeIndex = computed(() => freezeOptions.value.find((option) => option.key === freezeTo.value)?.index ?? -1)
+const freezeStorageKey = computed(() => `delivery-report-freeze:${craft.value}`)
+const columnStorageKey = computed(() => `delivery-report-hidden-columns:${craft.value}`)
+const visibleColumnCount = computed(() => visibleHeaders.value.filter((_, index) => isColumnVisible(index)).length + (canEdit.value ? 1 : 0))
+
+function columnKey(index: number) {
+  return `${index}:${visibleHeaders.value[index]}`
+}
+
+function isColumnVisible(index: number) {
+  return !hiddenColumnKeys.value.includes(columnKey(index))
+}
+
+function setColumnVisible(index: number, visible: boolean) {
+  const key = columnKey(index)
+  hiddenColumnKeys.value = visible
+    ? hiddenColumnKeys.value.filter((value) => value !== key)
+    : [...new Set([...hiddenColumnKeys.value, key])]
+}
+
+function showAllColumns() {
+  hiddenColumnKeys.value = []
+}
+
+function restoreColumnVisibility() {
+  columnsReady.value = false
+  try {
+    const saved = JSON.parse(window.localStorage.getItem(columnStorageKey.value) ?? '[]')
+    hiddenColumnKeys.value = Array.isArray(saved)
+      ? saved.filter((value): value is string => typeof value === 'string' && freezeOptions.value.some((option) => option.key === value))
+      : []
+  } catch {
+    hiddenColumnKeys.value = []
+  }
+  columnsReady.value = true
+}
+
+function defaultFreezeKey() {
+  const index = visibleHeaders.value.indexOf('物料名称')
+  return index < 0 ? '' : `${index}:物料名称`
+}
+
+function restoreFreezePreference() {
+  freezeReady.value = false
+  try {
+    const saved = window.localStorage.getItem(freezeStorageKey.value)
+    freezeTo.value = freezeOptions.value.some((option) => option.key === saved) ? saved! : defaultFreezeKey()
+  } catch {
+    freezeTo.value = defaultFreezeKey()
+  }
+  freezeReady.value = true
+}
+
+watch(freezeTo, (value) => {
+  if (!freezeReady.value) return
+  try { window.localStorage.setItem(freezeStorageKey.value, value) } catch { /* 浏览器禁用存储时仍可正常使用 */ }
+})
+watch(hiddenColumnKeys, (value) => {
+  if (!columnsReady.value) return
+  try { window.localStorage.setItem(columnStorageKey.value, JSON.stringify(value)) } catch { /* 浏览器禁用存储时仍可正常使用 */ }
+})
+watch(craft, () => {
+  restoreFreezePreference()
+  restoreColumnVisibility()
+})
+
+function columnIndex(header: string, occurrence = 0) {
+  let found = 0
+  for (let index = 0; index < visibleHeaders.value.length; index++) {
+    if (visibleHeaders.value[index] !== header) continue
+    if (found === occurrence) return index
+    found++
+  }
+  return -1
+}
+
+function columnClass(index: number) {
+  const header = visibleHeaders.value[index]
+  return {
+    'freeze-col': isColumnVisible(index) && index >= 0 && index <= freezeIndex.value,
+    'range-col': header === '范围',
+    'pmc-col': header === '下单PMC',
+    'factory-col': header === '加工厂',
+    'contract-no-col': header === '合同号',
+    'item-no-col': header === '货号',
+    'mold-no-col': header === '模具编号',
+    'order-no-col': header === '订单号',
+    'category-col': header === '加工类别',
+    'product-col': header === '物料名称',
+    'notes-col': header === '备注',
+  }
+}
+
+function columnClassFor(header: string, occurrence = 0) {
+  return columnClass(columnIndex(header, occurrence))
+}
+
+function columnStyle(index: number) {
+  const width = COLUMN_WIDTHS[visibleHeaders.value[index]] ?? 120
+  const style: Record<string, string> = {
+    width: `${width}px`,
+    minWidth: `${width}px`,
+    maxWidth: `${width}px`,
+  }
+  if (!isColumnVisible(index)) {
+    style.display = 'none'
+  } else if (index >= 0 && index <= freezeIndex.value) {
+    const left = visibleHeaders.value.slice(0, index)
+      .reduce((total, header, previousIndex) => total + (isColumnVisible(previousIndex) ? (COLUMN_WIDTHS[header] ?? 120) : 0), 0)
+    style['--freeze-left'] = `${left}px`
+  }
+  return style
+}
+
+function columnStyleFor(header: string, occurrence = 0) {
+  return columnStyle(columnIndex(header, occurrence))
+}
+
+onMounted(() => {
+  restoreFreezePreference()
+  restoreColumnVisibility()
+  return Promise.all([orders.fetchAll(), factories.fetchAll()])
+})
 
 function subtotalValue(header: string, index: number, row: Extract<ReportRow, { kind: 'subtotal' }>) {
   if (header === '加工厂') return `${row.factory}-小计`
@@ -453,6 +614,32 @@ async function removeRow(row: DetailRow) {
           <button v-if="dateMode !== 'all'" class="ghost date-clear" type="button" title="清除日期筛选"
             aria-label="清除日期筛选" @click="clearDateFilter">×</button>
         </div>
+        <label class="freeze-control">
+          冻结到
+          <select v-model="freezeTo" aria-label="选择冻结到的栏目">
+            <option value="">不冻结</option>
+            <option v-for="option in freezeOptions" :key="option.key" :value="option.key">
+              {{ option.label }}
+            </option>
+          </select>
+        </label>
+        <details class="column-control">
+          <summary>显示栏目</summary>
+          <div class="column-menu">
+            <div class="column-menu-top">
+              <strong>显示/隐藏栏目</strong>
+              <button type="button" class="link-button" @click="showAllColumns">全部显示</button>
+            </div>
+            <label v-for="option in freezeOptions" :key="option.key" class="column-option">
+              <input
+                type="checkbox"
+                :checked="isColumnVisible(option.index)"
+                @change="setColumnVisible(option.index, ($event.target as HTMLInputElement).checked)"
+              />
+              {{ option.label }}
+            </label>
+          </div>
+        </details>
         <button v-if="canEdit" class="ghost" @click="pdfInput?.click()">导入 PDF</button>
         <input ref="pdfInput" type="file" accept=".pdf,application/pdf" multiple style="display:none" @change="importPdf" />
         <button v-if="canEdit" class="ghost" :disabled="importingExcel" @click="fileInput?.click()">
@@ -471,20 +658,10 @@ async function removeRow(row: DetailRow) {
           <thead>
             <tr>
               <th
-                v-for="h in visibleHeaders"
+                v-for="(h, headerIndex) in visibleHeaders"
                 :key="h"
-                :class="{
-                  'freeze-col range-col': h === '范围',
-                  'freeze-col pmc-col': h === '下单PMC',
-                  'freeze-col factory-col': h === '加工厂',
-                  'freeze-col contract-no-col': h === '合同号',
-                  'freeze-col item-no-col': h === '货号',
-                  'freeze-col mold-no-col': h === '模具编号',
-                  'freeze-col order-no-col': h === '订单号',
-                  'freeze-col category-col': h === '加工类别',
-                  'freeze-col product-col': h === '物料名称',
-                  'notes-col': h === '备注',
-                }"
+                :class="columnClass(headerIndex)"
+                :style="columnStyle(headerIndex)"
               >{{ h }}</th>
               <th v-if="canEdit" class="op-col">操作</th>
             </tr>
@@ -492,76 +669,76 @@ async function removeRow(row: DetailRow) {
           <tbody>
             <template v-for="(r, i) in rows" :key="i">
               <tr v-if="r.kind === 'detail'">
-                <td v-if="r.rangeSpan" :rowspan="r.rangeSpan" class="grp freeze-col range-col">{{ r.range }}</td>
-                <td class="freeze-col pmc-col">
+                <td v-if="r.rangeSpan" :rowspan="r.rangeSpan" :class="['grp', columnClassFor('范围')]" :style="columnStyleFor('范围')">{{ r.range }}</td>
+                <td :class="columnClassFor('下单PMC')" :style="columnStyleFor('下单PMC')">
                   <input v-if="canEdit" class="pmc-inp" :value="draftValue(r, 'pmc')"
                     @input="setDraftValue(r, 'pmc', ($event.target as HTMLInputElement).value)" />
                   <span v-else>{{ r.pmc || '-' }}</span>
                 </td>
-                <td v-if="r.factorySpan" :rowspan="r.factorySpan" class="grp freeze-col factory-col">{{ r.factory || '-' }}</td>
-                <td v-if="showContractNumber" class="freeze-col contract-no-col" :title="sewingItemParts(r).contractNo">
+                <td v-if="r.factorySpan" :rowspan="r.factorySpan" :class="['grp', columnClassFor('加工厂')]" :style="columnStyleFor('加工厂')">{{ r.factory || '-' }}</td>
+                <td v-if="showContractNumber" :class="columnClassFor('合同号')" :style="columnStyleFor('合同号')" :title="sewingItemParts(r).contractNo">
                   {{ sewingItemParts(r).contractNo || '-' }}
                 </td>
-                <td class="freeze-col item-no-col" :title="r.item_no || ''">
+                <td :class="columnClassFor('货号')" :style="columnStyleFor('货号')" :title="r.item_no || ''">
                   {{ showContractNumber ? (sewingItemParts(r).itemNo || '-') : (r.item_no || '-') }}
                 </td>
-                <td v-if="showMoldNumber" class="freeze-col mold-no-col">
+                <td v-if="showMoldNumber" :class="columnClassFor('模具编号')" :style="columnStyleFor('模具编号')">
                   <input v-if="canEdit" class="mold-no-inp" :value="draftValue(r, 'mold_no')"
                     @input="setDraftValue(r, 'mold_no', ($event.target as HTMLInputElement).value)" />
                   <span v-else>{{ r.mold_no || '-' }}</span>
                 </td>
-                <td class="freeze-col order-no-col">{{ r.order_no || '-' }}</td>
-                <td class="freeze-col category-col">{{ r.category || '-' }}</td>
-                <td class="freeze-col product-col">
+                <td :class="columnClassFor('订单号')" :style="columnStyleFor('订单号')">{{ r.order_no || '-' }}</td>
+                <td :class="columnClassFor('加工类别')" :style="columnStyleFor('加工类别')">{{ r.category || '-' }}</td>
+                <td :class="columnClassFor('物料名称')" :style="columnStyleFor('物料名称')">
                   <input v-if="canEdit" class="text-inp" :value="draftValue(r, 'product')"
                     @input="setDraftValue(r, 'product', ($event.target as HTMLInputElement).value)" />
                   <span v-else>{{ r.product || '-' }}</span>
                 </td>
-                <td>
+                <td :class="columnClassFor('数量')" :style="columnStyleFor('数量')">
                   <input v-if="canEdit" type="number" class="qty-inp" min="0" :value="draftValue(r, 'quantity')"
                     @input="setDraftValue(r, 'quantity', ($event.target as HTMLInputElement).value)" />
                   <span v-else>{{ r.quantity ?? '-' }}</span>
                 </td>
-                <td>{{ r.order_date || '-' }}</td>
-                <td>{{ r.delivery_date || '-' }}</td>
-                <td>
+                <td :class="columnClassFor('下单时间')" :style="columnStyleFor('下单时间')">{{ r.order_date || '-' }}</td>
+                <td :class="columnClassFor('下单交货时间')" :style="columnStyleFor('下单交货时间')">{{ r.delivery_date || '-' }}</td>
+                <td :class="columnClassFor('实际交货时间')" :style="columnStyleFor('实际交货时间')">
                   <input v-if="canEdit" type="date" class="date-inp" :value="draftValue(r, 'actual_delivery_date')"
                     @input="setDraftValue(r, 'actual_delivery_date', ($event.target as HTMLInputElement).value)" />
                   <span v-else>{{ r.actual_delivery_date || '-' }}</span>
                 </td>
-                <td>{{ r.delay_days ?? '-' }}</td>
-                <td>{{ r.orderCount }}</td>
-                <td>{{ r.delayedCount }}</td>
-                <td>{{ r.delayRatio }}</td>
-                <td>{{ r.delayAvg }}</td>
-                <td>
+                <td :class="columnClassFor('延迟时间')" :style="columnStyleFor('延迟时间')">{{ r.delay_days ?? '-' }}</td>
+                <td :class="columnClassFor('订单总单数')" :style="columnStyleFor('订单总单数')">{{ r.orderCount }}</td>
+                <td :class="columnClassFor('延期单数')" :style="columnStyleFor('延期单数')">{{ r.delayedCount }}</td>
+                <td :class="columnClassFor('占比', 0)" :style="columnStyleFor('占比', 0)">{{ r.delayRatio }}</td>
+                <td :class="columnClassFor('延期平均天数')" :style="columnStyleFor('延期平均天数')">{{ r.delayAvg }}</td>
+                <td :class="columnClassFor(visibleHeaders[columnIndex('核价工价(港币不含税$)')] ? '核价工价(港币不含税$)' : '核价工价(不含税RMB)')" :style="columnStyleFor(visibleHeaders[columnIndex('核价工价(港币不含税$)')] ? '核价工价(港币不含税$)' : '核价工价(不含税RMB)')">
                   <input v-if="canEdit" type="number" class="price-inp" min="0" step="0.0001"
                     :value="draftValue(r, 'quote_labor_price')"
                     @input="setDraftValue(r, 'quote_labor_price', ($event.target as HTMLInputElement).value)" />
                   <span v-else>{{ r.quote }}</span>
                 </td>
-                <td>
+                <td :class="columnClassFor(visibleHeaders[columnIndex('外发工价(港币不含税$)')] ? '外发工价(港币不含税$)' : '外发工价(不含税RMB)')" :style="columnStyleFor(visibleHeaders[columnIndex('外发工价(港币不含税$)')] ? '外发工价(港币不含税$)' : '外发工价(不含税RMB)')">
                   <input v-if="canEdit" type="number" class="price-inp" min="0" step="0.0001"
                     :readonly="showContractNumber"
                     :value="draftValue(r, 'unit_price')"
                     @input="setDraftValue(r, 'unit_price', ($event.target as HTMLInputElement).value)" />
                   <span v-else>{{ r.outPrice }}</span>
                 </td>
-                <td>
+                <td :class="columnClassFor('外发工价(人民币含税)')" :style="columnStyleFor('外发工价(人民币含税)')">
                   <input v-if="canEdit" type="number" class="price-inp" min="0" step="0.01"
                     :value="draftValue(r, 'unit_price_cny_tax')"
                     @input="setDraftValue(r, 'unit_price_cny_tax', ($event.target as HTMLInputElement).value)" />
                   <span v-else>{{ r.outPriceCnyTax }}</span>
                 </td>
-                <td>
+                <td :class="columnClassFor(showContractNumber ? '税点' : '换算汇率')" :style="columnStyleFor(showContractNumber ? '税点' : '换算汇率')">
                   <input v-if="canEdit" type="number" class="rate-inp" min="0.0001" step="0.01"
                     :readonly="showContractNumber"
                     :value="draftValue(r, 'exchange_rate')"
                     @input="setDraftValue(r, 'exchange_rate', ($event.target as HTMLInputElement).value)" />
                   <span v-else>{{ r.exchangeRate }}</span>
                 </td>
-                <td :class="{ 'over-limit': isPercentOver100(r.priceRatio) }">{{ r.priceRatio }}</td>
-                <td class="notes-col">
+                <td :class="[columnClassFor('占比', 1), { 'over-limit': isPercentOver100(r.priceRatio) }]" :style="columnStyleFor('占比', 1)">{{ r.priceRatio }}</td>
+                <td :class="columnClassFor('备注')" :style="columnStyleFor('备注')">
                   <textarea v-if="canEdit" class="notes-inp" rows="2" :value="draftValue(r, 'notes')"
                     @input="setDraftValue(r, 'notes', ($event.target as HTMLTextAreaElement).value)" />
                   <span v-else>{{ r.notes || '-' }}</span>
@@ -581,17 +758,10 @@ async function removeRow(row: DetailRow) {
                 <td
                   v-for="(header, subtotalIndex) in visibleHeaders.slice(1)"
                   :key="subtotalIndex"
-                  :class="{
-                    'freeze-col pmc-col': header === '下单PMC',
-                    'freeze-col factory-col': header === '加工厂',
-                    'freeze-col contract-no-col': header === '合同号',
-                    'freeze-col item-no-col': header === '货号',
-                    'freeze-col mold-no-col': header === '模具编号',
-                    'freeze-col order-no-col': header === '订单号',
-                    'freeze-col category-col': header === '加工类别',
-                    'freeze-col product-col': header === '物料名称',
+                  :class="[columnClass(subtotalIndex + 1), {
                     'over-limit': header === '占比' && subtotalIndex + 1 !== visibleHeaders.indexOf('占比') && isPercentOver100(r.priceRatio),
-                  }"
+                  }]"
+                  :style="columnStyle(subtotalIndex + 1)"
                 >{{ subtotalValue(header, subtotalIndex + 1, r) }}</td>
                 <td v-if="canEdit"></td>
               </tr>
@@ -620,6 +790,18 @@ async function removeRow(row: DetailRow) {
 .date-filter input[type="date"] { width: 138px; }
 .date-separator { color: var(--text-soft); font-size: .82rem; }
 .date-clear { width: 34px; height: 34px; padding: 0; font-size: 1.15rem; line-height: 1; }
+.freeze-control { display: flex; align-items: center; gap: .35rem; min-height: 38px; white-space: nowrap; color: var(--text-soft); font-size: .86rem; }
+.freeze-control select { height: 38px; max-width: 148px; padding: .35rem .5rem; font: inherit; color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-sm); background: white; }
+.column-control { position: relative; flex: 0 0 auto; }
+.column-control summary { height: 38px; box-sizing: border-box; display: flex; align-items: center; padding: .35rem .7rem; cursor: pointer; list-style: none; color: var(--text); font-size: .88rem; white-space: nowrap; border: 1px solid var(--border); border-radius: var(--radius-sm); background: white; }
+.column-control summary::-webkit-details-marker { display: none; }
+.column-control summary::after { content: '⌄'; margin-left: .38rem; color: var(--text-soft); font-size: 1rem; }
+.column-control[open] summary { border-color: #aaa7ff; }
+.column-menu { position: absolute; top: calc(100% + .35rem); right: 0; z-index: 20; width: 232px; max-height: min(490px, calc(100vh - 150px)); overflow-y: auto; padding: .65rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: white; box-shadow: 0 12px 28px rgba(31, 37, 51, .18); }
+.column-menu-top { display: flex; align-items: center; justify-content: space-between; gap: .5rem; margin-bottom: .45rem; padding-bottom: .45rem; border-bottom: 1px solid var(--border); font-size: .84rem; }
+.link-button { padding: 0; color: var(--primary); font-size: .8rem; background: transparent; border: 0; box-shadow: none; }
+.column-option { display: flex; align-items: center; gap: .5rem; min-height: 30px; padding: .18rem .1rem; cursor: pointer; font-size: .85rem; }
+.column-option input { margin: 0; }
 .search-box { width: 240px; padding: .4rem .7rem; font-size: .9rem; border: 1px solid var(--border); border-radius: var(--radius-sm); }
 @media (max-width: 1180px) {
   .toolbar { flex-wrap: wrap; }
@@ -656,28 +838,13 @@ async function removeRow(row: DetailRow) {
 }
 .report .freeze-col {
   position: sticky;
+  left: var(--freeze-left);
   z-index: 2;
   box-sizing: border-box;
   background: var(--surface);
 }
 .report thead .freeze-col { z-index: 5; background: #fafbfc; }
-.report .range-col { left: 0; width: 140px; min-width: 140px; max-width: 140px; }
-.report .pmc-col { left: 140px; width: 140px; min-width: 140px; max-width: 140px; }
-.report .factory-col { left: 280px; width: 140px; min-width: 140px; max-width: 140px; }
-.report:not(.sewing-report) .item-no-col { left: 420px; }
-.report.sewing-report .contract-no-col { left: 420px; }
-.report.sewing-report .item-no-col { left: 570px; }
-.report:not(.sewing-report):not(.injection-report) .order-no-col { left: 560px; }
-.report:not(.sewing-report):not(.injection-report) .category-col { left: 700px; }
-.report:not(.sewing-report):not(.injection-report) .product-col { left: 820px; }
-.report.injection-report .mold-no-col { left: 560px; }
-.report.injection-report .order-no-col { left: 700px; }
-.report.injection-report .category-col { left: 840px; }
-.report.injection-report .product-col { left: 960px; }
-.report.sewing-report .order-no-col { left: 710px; }
-.report.sewing-report .category-col { left: 850px; }
-.report.sewing-report .product-col { left: 970px; }
-.report .product-col { box-shadow: 5px 0 7px -7px rgba(31, 37, 51, .55); }
+.report .freeze-col.product-col { box-shadow: 5px 0 7px -7px rgba(31, 37, 51, .55); }
 .report .over-limit { color: #dc2626; font-weight: 600; }
 .report .item-no-col {
   width: 140px;

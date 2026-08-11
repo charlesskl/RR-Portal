@@ -65,9 +65,14 @@ const DUE_FIELDS = new Set([
 ]);
 
 // 把 Excel 序列号转回 "M月D日"（不能解析就原样返回）
+// ISO 格式（2026-04-22）也统一转成 "4月22日" —— 复期列历史值混着 ISO 和中文两种显示，
+// 用户为了统一才去点格式下拉（还被旧纠正逻辑顶掉、要点两次）
 function normalizeDueText(val) {
   if (val == null || val === '') return '';
   const s = String(val).trim();
+  // ISO 日期（2026-04-22 / 2026/4/22）→ 统一显示 "M月D日"
+  const iso = s.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+  if (iso) return `${parseInt(iso[2], 10)}月${parseInt(iso[3], 10)}日`;
   // 纯数字且在 Excel 日期序列号范围 → 转日期文本
   const num = Number(s);
   if (!isNaN(num) && num > 40000 && num < 60000 && /^\d+(\.\d+)?$/.test(s)) {
@@ -446,10 +451,13 @@ function LuckysheetEditor({
       } else if (DUE_FIELDS.has(colData)) {
         // 复期列：把 Luckysheet 误转成序列号的值转回"M月D日"文本再存
         entry.fields[colData] = v == null ? null : normalizeDueText(v);
-        // 同时把单元格显示也修正（避免视觉上还是 46197）
+        // 只在 Luckysheet 真把文本转成了日期序列号（v 变成 40000~60000 的数字）时才回写纠正。
+        // 用户通过工具栏手动设置「日期」格式时 v 不变、只是 ct/fa 变了，
+        // 旧逻辑无差别回写会把刚设的格式顶掉 —— 「设置日期格式要点两次」的根因
         try {
           const text = entry.fields[colData] || '';
-          if (cell && cell.v !== text) {
+          const vIsSerial = typeof cell?.v === 'number' && cell.v > 40000 && cell.v < 60000;
+          if (cell && vIsSerial && cell.v !== text) {
             ls.setCellValue(r, c, { v: text, m: text, ct: { t: 's', fa: '@' } });
           }
         } catch {}

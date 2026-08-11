@@ -131,3 +131,27 @@ test('saved column widths at old defaults migrate; user-customized widths stay',
   assert.equal(migrated[1], 115, '停在旧默认值 130 → 换成新默认 115');
   assert.equal(migrated[2], 200, '用户手调过 200 → 不动');
 });
+
+// ===== 2026-08-11 「设置日期格式要点两次」修复 =====
+
+const dueStart = source.indexOf('function normalizeDueText');
+const dueEnd = source.indexOf('function formatDateShort');
+const dueCtx = {};
+vm.createContext(dueCtx);
+vm.runInContext(`${source.slice(dueStart, dueEnd)}\nthis.normalizeDueText = normalizeDueText;`, dueCtx);
+
+test('due-column text normalizes ISO dates and serials to a consistent display', () => {
+  const { normalizeDueText } = dueCtx;
+  assert.equal(normalizeDueText('2026-04-22'), '4月22日', 'ISO 格式统一成中文显示');
+  assert.equal(normalizeDueText('2026/4/22'), '4月22日');
+  assert.equal(normalizeDueText('45885'), '8月16日', '序列号转日期文本');
+  assert.equal(normalizeDueText('8月11日'), '8月11日', '已是中文格式不动');
+  assert.equal(normalizeDueText('无'), '无', '普通文字不动');
+});
+
+test('due-column auto-correction only fires on real serial conversion', () => {
+  // 用户手动设「日期」格式时 v 不变、只变 ct/fa —— 纠正逻辑不得回写，
+  // 否则把刚设的格式顶掉（点两次才生效的根因）
+  assert.match(source, /vIsSerial = typeof cell\?\.v === 'number' && cell\.v > 40000 && cell\.v < 60000/);
+  assert.match(source, /if \(cell && vIsSerial && cell\.v !== text\)/);
+});

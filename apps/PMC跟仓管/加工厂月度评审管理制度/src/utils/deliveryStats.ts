@@ -640,6 +640,71 @@ function parseAssemblyPurchaseOrderImport(
   return { payloads, failed }
 }
 
+// 装配部委托加工合同：加工厂/订单编号/下单日期在表头，明细为产品货号、产品装配名称、装配方式、加工数量、单价。
+function parseAssemblyProcessingContractImport(
+  aoa: any[][],
+  headerIdx: number,
+  header: string[],
+  factoryIdByName: Record<string, string>,
+): { payloads: Record<string, any>[]; failed: number } {
+  const colContaining = (...aliases: string[]) => header.findIndex((cell) =>
+    aliases.some((alias) => cell.includes(compactText(alias))))
+  const C = {
+    item_no: colContaining('产品货号'),
+    product: colContaining('产品装配名称'),
+    category: colContaining('装配方式'),
+    qty: colContaining('加工数量'),
+    out: colContaining('单价'),
+    amount: colContaining('金额'),
+    notes: colContaining('备注'),
+  }
+  const beforeHeader = aoa.slice(0, headerIdx)
+  const factoryName = labeledValues(beforeHeader, '加工厂').at(-1) ?? ''
+  const orderNo = labeledValues(beforeHeader, '订单编号').at(-1) ?? ''
+  const orderDate = labeledDates(beforeHeader, '下单日期').at(-1) ?? ''
+  const pmc = labeledValues(aoa, '采购签核').at(-1)
+    || labeledValues(beforeHeader, '联络人').at(-1)
+    || ''
+  const deliveryText = aoa.flat().map(cleanText)
+    .find((value) => /前交货/.test(value) && /\d{4}\s*年/.test(value)) ?? ''
+  const deliveryDate = formatImportDate(compactText(deliveryText))
+  const factoryId = factoryIdOf(factoryIdByName, factoryName)
+
+  const payloads: Record<string, any>[] = []
+  let failed = 0
+  const cell = (row: any[], index: number) => (index >= 0 ? row[index] : '')
+  for (const row of aoa.slice(headerIdx + 1)) {
+    const itemNo = cleanText(cell(row, C.item_no))
+    const product = cleanText(cell(row, C.product))
+    // 合同表的页尾说明/签核也可能出现在明细的列范围内，必须同时有货号和装配名称。
+    if (!itemNo || !product) continue
+    if (/合计|小计/.test(itemNo) || /合计|小计/.test(product)) continue
+    if (!factoryId) { failed++; continue }
+    const qty = parseNumberCell(cell(row, C.qty))
+    const out = parseNumberCell(cell(row, C.out))
+    const amount = parseNumberCell(cell(row, C.amount))
+    const payload: Record<string, any> = {
+      factory: factoryId,
+      pmc,
+      item_no: itemNo,
+      order_no: orderNo,
+      process_category: cleanText(cell(row, C.category)),
+      product,
+      notes: cleanText(cell(row, C.notes)),
+      status: 'placed',
+      is_delayed: false,
+    }
+    if (qty != null) payload.quantity = qty
+    if (out != null) payload.unit_price_cny_tax = out
+    if (amount != null) payload.amount = amount
+    else if (qty != null && out != null) payload.amount = qty * out
+    if (orderDate) payload.order_date = orderDate
+    if (deliveryDate) payload.delivery_date = deliveryDate
+    payloads.push(payload)
+  }
+  return { payloads, failed }
+}
+
 function parseSewingPurchaseOrderImport(
   aoa: any[][],
   headerIdx: number,
@@ -775,6 +840,9 @@ export function parseDeliveryImport(
   const colOf = (...al: string[]) => { for (const a of al) { const i = header.indexOf(norm(a)); if (i >= 0) return i } return -1 }
   if (header.includes('产品货号') && header.includes('产品名称') && header.includes('加工数量')) {
     return parseAssemblyPurchaseOrderImport(aoa, headerIdx, header, factoryIdByName)
+  }
+  if (header.includes('产品货号') && header.includes('产品装配名称') && header.includes('装配方式') && header.includes('加工数量')) {
+    return parseAssemblyProcessingContractImport(aoa, headerIdx, header, factoryIdByName)
   }
   if (header.some((cell) => cell.includes('合同号/货号')) && header.includes('货品名称')) {
     return parseSewingPurchaseOrderImport(aoa, headerIdx, header, factoryIdByName)

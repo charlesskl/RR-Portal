@@ -174,6 +174,40 @@ describe('parseDeliveryImport', () => {
     })
   })
 
+  it('imports assembly processing contract templates', () => {
+    const aoa = [
+      ['东莞华登塑胶制品有限公司', '', '', '', '', '', '', '', ''],
+      ['', '加工厂：', '邵阳华登塑胶制品有限公司', '', '', '', '', '订单编号：', 'SY20260042'],
+      ['', '', '', '', '', '', '', '下单日期', '2026-07-03'],
+      ['', '', '', '', '', '', '', '联络人：', '严新荟'],
+      ['序号', '产品货号', '生产单号', '产品装配名称', '装配方式', '加工数量', '单价（¥）', '金额（¥）：', '备注'],
+      [1, 'SR1023', '', '手链', '包装(已装箱)', 69480, 1.28, 88934.4, ''],
+      [2, 'SR1023CDU-16', '', '手链', '包装(已装箱)', 25440, 1.33, 33835.2, ''],
+      ['1、', '2026年08月01日前交货货送 A栋三楼处，收货人：', '', '', '', '', '', '', ''],
+      ['', '', '', '采购签核：', '严新荟', '', '', '', ''],
+    ]
+
+    const result = parseDeliveryImport(aoa, { '邵阳华登塑胶制品有限公司': 'factory-1' })
+
+    expect(result.failed).toBe(0)
+    expect(result.payloads).toHaveLength(2)
+    expect(result.payloads[0]).toMatchObject({
+      factory: 'factory-1',
+      pmc: '严新荟',
+      item_no: 'SR1023',
+      order_no: 'SY20260042',
+      product: '手链',
+      process_category: '包装(已装箱)',
+      quantity: 69480,
+      order_date: '2026-07-03',
+      delivery_date: '2026-08-01',
+      unit_price_cny_tax: 1.28,
+      amount: 88934.4,
+      status: 'placed',
+      is_delayed: false,
+    })
+  })
+
   it('imports molding contract templates', () => {
     const aoa = [
       ['东莞兴信塑胶制品有限公司', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', ''],

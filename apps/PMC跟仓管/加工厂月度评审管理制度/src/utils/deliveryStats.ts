@@ -705,6 +705,72 @@ function parseAssemblyProcessingContractImport(
   return { payloads, failed }
 }
 
+// 喷油部采购单可在同一工作表连续放置多张订单，每一段各自有供应商、订单编号、采购签核和时间。
+function parsePaintingPurchaseOrderImport(
+  aoa: any[][],
+  factoryIdByName: Record<string, string>,
+): { payloads: Record<string, any>[]; failed: number } {
+  const isHeader = (row: any[]) => {
+    const cells = row.map(compactText)
+    return cells.includes('货号') && cells.includes('货物名称') && cells.includes('加工类别')
+      && cells.includes('数量') && cells.some((cell) => cell.includes('单价'))
+  }
+  const headerIndexes = aoa.reduce<number[]>((indexes, row, index) => {
+    if (isHeader(row)) indexes.push(index)
+    return indexes
+  }, [])
+  const payloads: Record<string, any>[] = []
+  let failed = 0
+
+  for (let section = 0; section < headerIndexes.length; section++) {
+    const headerIdx = headerIndexes[section]
+    const nextHeaderIdx = headerIndexes[section + 1] ?? aoa.length
+    const previousHeaderIdx = headerIndexes[section - 1] ?? -1
+    const metadata = aoa.slice(previousHeaderIdx + 1, headerIdx)
+    const sectionRows = aoa.slice(headerIdx + 1, nextHeaderIdx)
+    const header = aoa[headerIdx].map(compactText)
+    const colContaining = (...aliases: string[]) => header.findIndex((cell) =>
+      aliases.some((alias) => cell.includes(compactText(alias))))
+    const C = {
+      item_no: colContaining('货号'), product: colContaining('货物名称'), category: colContaining('加工类别'),
+      qty: colContaining('数量'), out: colContaining('单价'), amount: colContaining('金额'), notes: colContaining('备注'),
+    }
+    const factoryName = labeledValues(metadata, '供应商').at(-1) ?? ''
+    const orderNo = labeledValues(metadata, '订单编号').at(-1) ?? ''
+    const pmc = labeledValues(sectionRows, '采购签核').at(-1) ?? ''
+    const orderDate = labeledDates(sectionRows, '时间').at(-1) ?? ''
+    const deliveryText = sectionRows.flat().map(cleanText)
+      .find((value) => /前交货/.test(value) && /\d{4}\s*年/.test(value)) ?? ''
+    const deliveryDate = formatImportDate(compactText(deliveryText))
+    const factoryId = factoryIdOf(factoryIdByName, factoryName)
+    const cell = (row: any[], index: number) => (index >= 0 ? row[index] : '')
+
+    for (const row of aoa.slice(headerIdx + 1, nextHeaderIdx)) {
+      const itemNo = cleanText(cell(row, C.item_no))
+      const product = cleanText(cell(row, C.product))
+      if (!itemNo || !product || /合计|小计/.test(itemNo) || /合计|小计/.test(product)) continue
+      const qty = parseNumberCell(cell(row, C.qty))
+      if (qty == null) continue
+      if (!factoryId) { failed++; continue }
+      const out = parseNumberCell(cell(row, C.out))
+      const amount = parseNumberCell(cell(row, C.amount))
+      const payload: Record<string, any> = {
+        factory: factoryId, pmc, item_no: itemNo, order_no: orderNo,
+        process_category: cleanText(cell(row, C.category)), product, notes: cleanText(cell(row, C.notes)),
+        status: 'placed', is_delayed: false,
+      }
+      if (qty != null) payload.quantity = qty
+      if (out != null) payload.unit_price_cny_tax = out
+      if (amount != null) payload.amount = amount
+      else if (qty != null && out != null) payload.amount = qty * out
+      if (orderDate) payload.order_date = orderDate
+      if (deliveryDate) payload.delivery_date = deliveryDate
+      payloads.push(payload)
+    }
+  }
+  return { payloads, failed }
+}
+
 function parseSewingPurchaseOrderImport(
   aoa: any[][],
   headerIdx: number,
@@ -843,6 +909,9 @@ export function parseDeliveryImport(
   }
   if (header.includes('产品货号') && header.includes('产品装配名称') && header.includes('装配方式') && header.includes('加工数量')) {
     return parseAssemblyProcessingContractImport(aoa, headerIdx, header, factoryIdByName)
+  }
+  if (header.includes('货号') && header.includes('货物名称') && header.includes('加工类别') && header.includes('数量')) {
+    return parsePaintingPurchaseOrderImport(aoa, factoryIdByName)
   }
   if (header.some((cell) => cell.includes('合同号/货号')) && header.includes('货品名称')) {
     return parseSewingPurchaseOrderImport(aoa, headerIdx, header, factoryIdByName)

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 import XLSX from 'xlsx-js-style'
 import AppLayout from '../components/AppLayout.vue'
@@ -12,6 +12,7 @@ import { computeFactoryStats, computeSiteStats, type FactoryStats } from '../uti
 import type { Factory } from '../types/factory'
 import type { Order } from '../types/order'
 import { FACTORY_SUMMARY_HEADERS, factorySummaryExportRow } from '../utils/factorySummaryExcel'
+import { matchesOrderDate, type OrderDateFilter } from '../utils/orderDateFilter'
 
 const route = useRoute()
 const factoriesStore = useFactoriesStore()
@@ -29,6 +30,20 @@ const backTo = computed(() => ({
 const loading = ref(true)
 const error = ref('')
 const factoryCount = ref(0)
+const dateMode = ref<'all' | 'month' | 'range'>('all')
+const selectedMonth = ref(new Date().toISOString().slice(0, 7))
+const rangeStart = ref('')
+const rangeEnd = ref('')
+const dateFilter = computed<OrderDateFilter>(() => {
+  if (dateMode.value === 'month') return { mode: 'month', month: selectedMonth.value }
+  if (dateMode.value === 'range') return { mode: 'range', start: rangeStart.value, end: rangeEnd.value }
+  return { mode: 'all' }
+})
+const dateSummaryLabel = computed(() => {
+  if (dateMode.value === 'month' && selectedMonth.value) return `·${selectedMonth.value}`
+  if (dateMode.value === 'range' && (rangeStart.value || rangeEnd.value)) return `·${rangeStart.value || '开始'}至${rangeEnd.value || '结束'}`
+  return ''
+})
 interface FactorySummary {
   factory: Factory
   stats: FactoryStats
@@ -39,6 +54,16 @@ const summaries = ref<FactorySummary[]>([])
 const totalStats = ref<FactoryStats | null>(null)
 const totalSiteScore = ref<string>('-')
 const totalSiteRate = ref<string>('-')
+const targetFactories = ref<Factory[]>([])
+const allOrders = ref<Order[]>([])
+const allInspections = ref<any[]>([])
+const allChecks = ref<any[]>([])
+
+function clearDateFilter() {
+  dateMode.value = 'all'
+  rangeStart.value = ''
+  rangeEnd.value = ''
+}
 
 function average(values: number[]) {
   if (!values.length) return null
@@ -53,7 +78,7 @@ function formatNumber(value: number | null, suffix = '') {
 
 function exportExcel() {
   if (!summaries.value.length || !totalStats.value) return
-  const title = `${deptName.value}加工厂汇总表`
+  const title = `${deptName.value}${dateSummaryLabel.value}加工厂汇总表`
   const detailRows = summaries.value.map((summary) => factorySummaryExportRow({
     name: summary.factory.name,
     stats: summary.stats,
@@ -95,14 +120,48 @@ function exportExcel() {
   XLSX.writeFile(wb, `${title}.xlsx`)
 }
 
+function refreshSummaries() {
+  const factoryIds = new Set(targetFactories.value.map((factory) => factory.id))
+  const orders = allOrders.value.filter((order) =>
+    factoryIds.has(order.factory) && matchesOrderDate(order.order_date, dateFilter.value))
+  const inspections = allInspections.value.filter((record) =>
+    factoryIds.has(record.factory) && matchesOrderDate(record.inspect_date, dateFilter.value))
+  const checks = allChecks.value.filter((check) =>
+    factoryIds.has(check.factory) && matchesOrderDate(check.check_date, dateFilter.value))
+  const latestCheckByFactory = new Map<string, any>()
+  for (const check of checks) {
+    if (!latestCheckByFactory.has(check.factory)) latestCheckByFactory.set(check.factory, check)
+  }
+  const deptSiteStats = [...latestCheckByFactory.values()].map((check) => computeSiteStats([check]))
+  totalStats.value = computeFactoryStats(orders, inspections)
+  totalSiteScore.value = formatNumber(average(deptSiteStats.map((item) => item.siteScore)))
+  totalSiteRate.value = formatNumber(average(deptSiteStats
+    .map((item) => Number.parseFloat(item.finalRate))
+    .filter((value) => Number.isFinite(value))), '%')
+
+  summaries.value = targetFactories.value.map((factory) => {
+    const factoryOrders = orders.filter((order) => order.factory === factory.id)
+    const factoryInspections = inspections.filter((record) => record.factory === factory.id)
+    const latestCheck = latestCheckByFactory.get(factory.id)
+    const site = latestCheck ? computeSiteStats([latestCheck]) : null
+    return {
+      factory,
+      stats: computeFactoryStats(factoryOrders, factoryInspections),
+      siteScore: site?.siteScore ?? '-',
+      siteRate: site?.finalRate ?? '-',
+    }
+  }).sort((a, b) => a.factory.name.localeCompare(b.factory.name, 'zh-CN'))
+}
+
+watch([dateMode, selectedMonth, rangeStart, rangeEnd], refreshSummaries)
+
 onMounted(async () => {
   try {
     await factoriesStore.fetchAll()
-    const targetFactories = factoriesStore.items
+    targetFactories.value = factoriesStore.items
       .filter((factory: Factory) => factory.craft === craft.value && (!region.value || regionOf(factory) === region.value))
       .filter((factory) => !myRegions.value || myRegions.value.includes(regionOf(factory)))
-    factoryCount.value = targetFactories.length
-    const factoryIds = new Set(targetFactories.map((factory) => factory.id))
+    factoryCount.value = targetFactories.value.length
 
     const [orders, inspections, checks] = await Promise.all([
       pb.collection('orders').getFullList<Order>(),
@@ -110,33 +169,10 @@ onMounted(async () => {
       pb.collection('quality_5s_checks').getFullList({ sort: '-check_date' }),
     ])
 
-    const latestCheckByFactory = new Map<string, any>()
-    for (const check of checks as any[]) {
-      if (factoryIds.has(check.factory) && !latestCheckByFactory.has(check.factory)) {
-        latestCheckByFactory.set(check.factory, check)
-      }
-    }
-    const deptOrders = orders.filter((order) => factoryIds.has(order.factory))
-    const deptInspections = (inspections as any[]).filter((record) => factoryIds.has(record.factory))
-    const deptSiteStats = [...latestCheckByFactory.values()].map((check) => computeSiteStats([check]))
-    totalStats.value = computeFactoryStats(deptOrders, deptInspections)
-    totalSiteScore.value = formatNumber(average(deptSiteStats.map((item) => item.siteScore)))
-    totalSiteRate.value = formatNumber(average(deptSiteStats
-      .map((item) => Number.parseFloat(item.finalRate))
-      .filter((value) => Number.isFinite(value))), '%')
-
-    summaries.value = targetFactories.map((factory) => {
-      const factoryOrders = orders.filter((order) => order.factory === factory.id)
-      const factoryInspections = (inspections as any[]).filter((record) => record.factory === factory.id)
-      const latestCheck = latestCheckByFactory.get(factory.id)
-      const site = latestCheck ? computeSiteStats([latestCheck]) : null
-      return {
-        factory,
-        stats: computeFactoryStats(factoryOrders, factoryInspections),
-        siteScore: site?.siteScore ?? '-',
-        siteRate: site?.finalRate ?? '-',
-      }
-    }).sort((a, b) => a.factory.name.localeCompare(b.factory.name, 'zh-CN'))
+    allOrders.value = orders
+    allInspections.value = inspections as any[]
+    allChecks.value = checks as any[]
+    refreshSummaries()
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : '汇总数据加载失败'
   } finally {
@@ -153,6 +189,21 @@ onMounted(async () => {
         <h2 style="margin:0">{{ deptName }} · 汇总</h2>
         <span class="muted">共 {{ factoryCount }} 家</span>
         <span class="spacer"></span>
+        <div class="date-filter">
+          <select v-model="dateMode" aria-label="汇总日期筛选方式">
+            <option value="all">全部日期</option>
+            <option value="month">按月份</option>
+            <option value="range">按时间段</option>
+          </select>
+          <input v-if="dateMode === 'month'" v-model="selectedMonth" type="month" aria-label="选择月份" />
+          <template v-else-if="dateMode === 'range'">
+            <input v-model="rangeStart" type="date" :max="rangeEnd || undefined" aria-label="开始日期" />
+            <span class="date-separator">至</span>
+            <input v-model="rangeEnd" type="date" :min="rangeStart || undefined" aria-label="结束日期" />
+          </template>
+          <button v-if="dateMode !== 'all'" class="ghost date-clear" type="button" title="清除日期筛选"
+            aria-label="清除日期筛选" @click="clearDateFilter">×</button>
+        </div>
         <button :disabled="loading || !!error || !summaries.length" @click="exportExcel">导出 Excel</button>
       </div>
 
@@ -233,6 +284,11 @@ onMounted(async () => {
 <style scoped>
 .summary-page { display: flex; flex-direction: column; gap: 1rem; }
 .back { font-size: .95rem; }
+.date-filter { display: flex; align-items: center; gap: .35rem; min-height: 38px; }
+.date-filter select, .date-filter input { height: 38px; padding: .35rem .55rem; font-size: .86rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: white; }
+.date-filter input[type="month"], .date-filter input[type="date"] { width: 138px; }
+.date-separator { color: var(--text-soft); font-size: .82rem; }
+.date-clear { width: 34px; height: 34px; padding: 0; font-size: 1.15rem; line-height: 1; }
 .state { padding: 3rem 1rem; text-align: center; color: var(--muted); border: 1px solid var(--border); border-radius: var(--radius-sm); background: #fff; }
 .state.error { color: #dc2626; }
 .factory-comparison { display: flex; flex-direction: column; gap: 1.15rem; }
@@ -254,5 +310,6 @@ onMounted(async () => {
 .quality-card { --accent: #0d9488; }
 .site-card { --accent: #16a34a; }
 @media (max-width: 1050px) { .metrics-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 900px) { .toolbar { flex-wrap: wrap; } .spacer { display: none; } }
 @media (max-width: 620px) { .metrics-grid { grid-template-columns: 1fr; } }
 </style>

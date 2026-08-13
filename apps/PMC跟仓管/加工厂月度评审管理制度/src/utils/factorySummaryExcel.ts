@@ -2,14 +2,17 @@ import type { FactoryStats } from './factoryStats'
 
 export const FACTORY_SUMMARY_HEADERS = [
   '加工厂名称',
+  '评级',
   '核价总金额', '外发总金额', '价格占比',
   '订单总单数', '延期单数', '延期占比', '延期平均天数',
   '验货总单数', '合格单数', '合格率',
-  '现场得分', '折算总达成率',
+  'IP管控', '现场得分', '折算总达成率',
 ] as const
 
 export interface FactorySummaryExportItem {
   name: string
+  grade: string
+  ipControl: string
   stats: FactoryStats
   siteScore: number | string
   siteRate: string
@@ -31,6 +34,7 @@ function metricPercent(value: string): number | null {
 export function factorySummaryExportRow(item: FactorySummaryExportItem): Array<string | number | null> {
   return [
     item.name,
+    item.grade,
     item.stats.quoteAmount,
     item.stats.outAmount,
     metricPercent(item.stats.amountRatio),
@@ -41,6 +45,7 @@ export function factorySummaryExportRow(item: FactorySummaryExportItem): Array<s
     item.stats.intInspect,
     item.stats.intPass,
     metricPercent(item.stats.intRate),
+    item.ipControl,
     metricNumber(item.siteScore),
     metricPercent(item.siteRate),
   ]

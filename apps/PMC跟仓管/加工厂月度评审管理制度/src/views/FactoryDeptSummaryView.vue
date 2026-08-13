@@ -47,6 +47,7 @@ const dateSummaryLabel = computed(() => {
 interface FactorySummary {
   factory: Factory
   stats: FactoryStats
+  grade: string
   siteScore: number | string
   siteRate: string
 }
@@ -58,6 +59,7 @@ const targetFactories = ref<Factory[]>([])
 const allOrders = ref<Order[]>([])
 const allInspections = ref<any[]>([])
 const allChecks = ref<any[]>([])
+const allMonthlyScores = ref<any[]>([])
 
 function clearDateFilter() {
   dateMode.value = 'all'
@@ -81,12 +83,16 @@ function exportExcel() {
   const title = `${deptName.value}${dateSummaryLabel.value}加工厂汇总表`
   const detailRows = summaries.value.map((summary) => factorySummaryExportRow({
     name: summary.factory.name,
+    grade: summary.grade,
+    ipControl: summary.factory.ip_control || '-',
     stats: summary.stats,
     siteScore: summary.siteScore,
     siteRate: summary.siteRate,
   }))
   const totalRow = factorySummaryExportRow({
     name: `${factoryCount.value} 家加工厂总计`,
+    grade: '-',
+    ipControl: '-',
     stats: totalStats.value,
     siteScore: totalSiteScore.value,
     siteRate: totalSiteRate.value,
@@ -97,7 +103,7 @@ function exportExcel() {
   const lastCol = FACTORY_SUMMARY_HEADERS.length - 1
   ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: lastCol } }]
   ws['!autofilter'] = { ref: `A2:${XLSX.utils.encode_col(lastCol)}${lastRow}` }
-  ws['!cols'] = [{ wch: 32 }, { wch: 15 }, { wch: 15 }, { wch: 12 }, { wch: 13 }, { wch: 12 }, { wch: 12 }, { wch: 16 }, { wch: 13 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 16 }]
+  ws['!cols'] = [{ wch: 32 }, { wch: 8 }, { wch: 15 }, { wch: 15 }, { wch: 12 }, { wch: 13 }, { wch: 12 }, { wch: 12 }, { wch: 16 }, { wch: 13 }, { wch: 12 }, { wch: 12 }, { wch: 16 }, { wch: 12 }, { wch: 12 }]
   ws['!rows'] = [{ hpt: 28 }, { hpt: 24 }]
   ws.A1.s = { fill: { fgColor: { rgb: 'FFFFFF' } }, font: { bold: true, color: { rgb: '000000' }, sz: 16 }, alignment: { horizontal: 'center', vertical: 'center' } }
   for (let col = 0; col <= lastCol; col++) {
@@ -109,10 +115,10 @@ function exportExcel() {
       const cell = ws[XLSX.utils.encode_cell({ r: row, c: col })]
       if (!cell) continue
       cell.s = { fill: { fgColor: { rgb: row === lastRow - 1 ? 'EEF2FF' : (row % 2 ? 'F8FAFC' : 'FFFFFF') } }, font: { bold: row === lastRow - 1 }, alignment: { horizontal: col === 0 ? 'left' : 'right', vertical: 'center' }, border: { bottom: { style: 'thin', color: { rgb: 'E5E7EB' } } } }
-      if ([1, 2].includes(col)) cell.z = '#,##0'
-      else if ([3, 6, 10, 12].includes(col)) cell.z = '0.0%'
-      else if ([4, 5, 8, 9].includes(col)) cell.z = '#,##0'
-      else if ([7, 11].includes(col)) cell.z = '0.00'
+      if ([2, 3].includes(col)) cell.z = '#,##0'
+      else if ([4, 7, 11, 14].includes(col)) cell.z = '0.0%'
+      else if ([5, 6, 9, 10].includes(col)) cell.z = '#,##0'
+      else if ([8, 13].includes(col)) cell.z = '0.00'
     }
   }
   const wb = XLSX.utils.book_new()
@@ -132,6 +138,10 @@ function refreshSummaries() {
   for (const check of checks) {
     if (!latestCheckByFactory.has(check.factory)) latestCheckByFactory.set(check.factory, check)
   }
+  const gradeByFactory = new Map<string, string>()
+  for (const score of allMonthlyScores.value) {
+    if (!gradeByFactory.has(score.factory) && score.grade) gradeByFactory.set(score.factory, score.grade)
+  }
   const deptSiteStats = [...latestCheckByFactory.values()].map((check) => computeSiteStats([check]))
   totalStats.value = computeFactoryStats(orders, inspections)
   totalSiteScore.value = formatNumber(average(deptSiteStats.map((item) => item.siteScore)))
@@ -147,6 +157,7 @@ function refreshSummaries() {
     return {
       factory,
       stats: computeFactoryStats(factoryOrders, factoryInspections),
+      grade: gradeByFactory.get(factory.id) || '-',
       siteScore: site?.siteScore ?? '-',
       siteRate: site?.finalRate ?? '-',
     }
@@ -163,15 +174,17 @@ onMounted(async () => {
       .filter((factory) => !myRegions.value || myRegions.value.includes(regionOf(factory)))
     factoryCount.value = targetFactories.value.length
 
-    const [orders, inspections, checks] = await Promise.all([
+    const [orders, inspections, checks, monthlyScores] = await Promise.all([
       pb.collection('orders').getFullList<Order>(),
       pb.collection('quality_inspections').getFullList(),
       pb.collection('quality_5s_checks').getFullList({ sort: '-check_date' }),
+      pb.collection('monthly_scores').getFullList({ sort: '-year_month' }),
     ])
 
     allOrders.value = orders
     allInspections.value = inspections as any[]
     allChecks.value = checks as any[]
+    allMonthlyScores.value = monthlyScores as any[]
     refreshSummaries()
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : '汇总数据加载失败'
@@ -212,7 +225,7 @@ onMounted(async () => {
       <div v-else-if="!summaries.length" class="state">该部门暂无加工厂</div>
       <section v-else class="factory-comparison">
         <article v-for="summary in summaries" :key="summary.factory.id" class="factory-summary">
-          <h3 class="factory-name">{{ summary.factory.name }}</h3>
+          <h3 class="factory-name"><span>{{ summary.factory.name }}</span><span class="factory-grade">工厂评级 <b>{{ summary.grade }}</b></span></h3>
           <div class="metrics-grid">
             <div class="metric-card price-card">
               <h4><span class="metric-icon">💰</span>价格</h4>
@@ -240,6 +253,7 @@ onMounted(async () => {
               <h4><span class="metric-icon">🧹</span>现场管理</h4>
               <div class="metric-line"><span>现场得分</span><b>{{ summary.siteScore }}</b></div>
               <div class="metric-line"><span>折算总达成率</span><b class="site-rate">{{ summary.siteRate }}</b></div>
+              <div class="metric-line"><span>IP管控</span><b>{{ summary.factory.ip_control || '-' }}</b></div>
             </div>
           </div>
         </article>
@@ -294,6 +308,9 @@ onMounted(async () => {
 .factory-comparison { display: flex; flex-direction: column; gap: 1.15rem; }
 .factory-summary { display: flex; flex-direction: column; gap: .55rem; }
 .factory-name { margin: 0; padding: .15rem .25rem .45rem; border-bottom: 3px solid #84cc16; color: #1f2937; font-size: 1.1rem; word-break: break-word; }
+.factory-name { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; }
+.factory-grade { color: var(--muted); font-size: .92rem; font-weight: 400; white-space: nowrap; }
+.factory-grade b { color: #dc2626; }
 .total-summary { margin-top: .8rem; padding-top: 1rem; border-top: 2px solid #4f46e5; }
 .total-name { color: #3730a3; border-bottom-color: #4f46e5; font-size: 1.2rem; }
 .total-summary .metric-card { box-shadow: 0 5px 16px rgba(79, 70, 229, .08); }

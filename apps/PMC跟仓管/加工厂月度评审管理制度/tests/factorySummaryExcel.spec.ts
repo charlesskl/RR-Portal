@@ -17,8 +17,8 @@ describe('factory summary Excel rows', () => {
       intRate: '96.82%',
     } as FactoryStats
 
-    expect(factorySummaryExportRow({ name: '测试工厂', stats, siteScore: 70, siteRate: '70%' }))
-      .toEqual(['测试工厂', 607123.04, 578588.95, 0.953, 57, 2, 0.0351, 2.5, 157, 152, 0.9682, 70, 0.7])
+    expect(factorySummaryExportRow({ name: '测试工厂', grade: 'A', ipControl: '已授权', stats, siteScore: 70, siteRate: '70%' }))
+      .toEqual(['测试工厂', 'A', 607123.04, 578588.95, 0.953, 57, 2, 0.0351, 2.5, 157, 152, 0.9682, '已授权', 70, 0.7])
   })
 
   it('exports unavailable metrics as blank cells', () => {
@@ -35,7 +35,7 @@ describe('factory summary Excel rows', () => {
       intRate: '-',
     } as FactoryStats
 
-    const row = factorySummaryExportRow({ name: '空数据工厂', stats, siteScore: '-', siteRate: '-' })
-    expect(row.slice(3)).toEqual([null, 0, 0, null, null, 0, 0, null, null, null])
+    const row = factorySummaryExportRow({ name: '空数据工厂', grade: '-', ipControl: '-', stats, siteScore: '-', siteRate: '-' })
+    expect(row.slice(4)).toEqual([null, 0, 0, null, null, 0, 0, null, '-', null, null])
   })
 })

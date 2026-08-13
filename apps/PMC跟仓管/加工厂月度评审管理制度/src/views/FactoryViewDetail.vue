@@ -56,7 +56,6 @@ onMounted(async () => {
             <div class="m-line"><span>加工类型</span><b>{{ factory.processable_types || '-' }}</b></div>
             <div class="m-line"><span>设备台数/生产拉线</span><b>{{ factory.equipment_qty ?? '-' }}</b></div>
             <div class="m-line"><span>合作车间</span><b>{{ factory.cooperative_workshops || '-' }}</b></div>
-            <div class="m-line"><span>IP管控</span><b>{{ factory.ip_control || '-' }}</b></div>
             <div class="m-line"><span>员工人数</span><b>{{ factory.staff_count ?? '-' }}</b></div>
           </div>
         </div>
@@ -88,6 +87,7 @@ onMounted(async () => {
               <div class="m-title"><span class="ic">🧹</span>现场管理</div>
               <div class="m-line"><span>现场得分</span><b>{{ site ? site.siteScore : '-' }}</b></div>
               <div class="m-line"><span>折算总达成率</span><b class="hl">{{ site ? site.finalRate : '-' }}</b></div>
+              <div class="m-line"><span>IP管控</span><b>{{ factory.ip_control || '-' }}</b></div>
             </div>
           </div>
         </div>

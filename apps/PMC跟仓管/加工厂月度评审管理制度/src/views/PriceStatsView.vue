@@ -22,6 +22,7 @@ const myRegions = computed(() => (auth.role ? allowedRegions(auth.role) : null))
 const fileInput = ref<HTMLInputElement | null>(null)
 const importing = ref(false)
 const canImport = computed(() => !!auth.role && canEditOrders(auth.role))
+const searchKeyword = ref('')
 
 const craft = computed(() => route.params.craft as Craft)
 const region = computed(() => (route.query.region as Region) || null)
@@ -41,10 +42,20 @@ function linkedFactoryTaxPoint(factoryId: string | null | undefined) {
 }
 
 const rows = computed<PriceStatsRow[]>(() => {
-  const list = orders.items.filter((o) =>
+  const keyword = searchKeyword.value.trim().toLocaleLowerCase()
+  const list = orders.items.filter((o) => {
+    const matchesKeyword = !keyword || [
+      o.expand?.factory?.name,
+      o.item_no,
+      o.mold_no,
+      o.product,
+    ].some((value) => String(value ?? '').toLocaleLowerCase().includes(keyword))
+    return matchesKeyword
+      &&
     o.expand?.factory?.craft === craft.value
     && (!region.value || regionOf(o.expand?.factory) === region.value)
-    && (!myRegions.value || myRegions.value.includes(regionOf(o.expand?.factory))))
+    && (!myRegions.value || myRegions.value.includes(regionOf(o.expand?.factory)))
+  })
   return buildPriceStatsRows(
     list,
     (o) => o.expand?.factory?.name ?? '',
@@ -163,6 +174,8 @@ async function importExcel(event: Event) {
         <h2 style="margin:0">{{ deptName }} · 外发产品单价统计表</h2>
         <span class="muted">共 {{ rows.length }} 条</span>
         <span class="spacer"></span>
+        <input v-model="searchKeyword" class="price-search" type="search"
+          placeholder="搜索加工厂/货号/模具编号/配件名称" aria-label="搜索加工厂、货号、模具编号或配件名称" />
         <button v-if="canImport" class="ghost" :disabled="importing" @click="fileInput?.click()">
           {{ importing ? '导入中…' : '导入 Excel' }}
         </button>
@@ -222,4 +235,5 @@ async function importExcel(event: Event) {
 }
 
 .stats .over-limit { color: #dc2626; font-weight: 600; }
+.price-search { width: min(320px, 36vw); }
 </style>

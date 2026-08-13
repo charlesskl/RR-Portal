@@ -1,4 +1,5 @@
 using System.Data;
+using System.Text.Json;
 using IndoShipping.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 
@@ -11,8 +12,8 @@ namespace IndoShipping.Api.Features.Bootstrap;
 /// </summary>
 public static class DataMigrations
 {
-    private const string ConsolidateThreadAndScrewHsKey =
-        "data_migration:2026-08-13-consolidate-thread-screw-hs-v1";
+    private const string ReplaceHsDictionaryKey =
+        "data_migration:2026-08-13-replace-hs-dictionary-v1";
 
     public static async Task ApplyAsync(AppDbContext db, ILogger logger)
     {
@@ -26,7 +27,7 @@ public static class DataMigrations
         claim.Transaction = transaction;
         claim.CommandText = $"""
             INSERT INTO settings ("key", value, updated_at)
-            VALUES ('{ConsolidateThreadAndScrewHsKey}', 'running', now())
+            VALUES ('{ReplaceHsDictionaryKey}', 'running', now())
             ON CONFLICT ("key") DO NOTHING
             RETURNING 1;
             """;
@@ -37,26 +38,64 @@ public static class DataMigrations
             return;
         }
 
-        await using var normalize = connection.CreateCommand();
-        normalize.Transaction = transaction;
-        normalize.CommandText = $"""
-            DELETE FROM dict_hs
-            WHERE keyword LIKE '%强力线%'
-               OR keyword LIKE '%螺丝%';
+        var entries = await LoadHsDictionaryAsync();
+        if (entries.Count == 0)
+            throw new InvalidOperationException("Bundled HS dictionary is empty; refusing to replace existing data.");
+        if (entries.Any(entry => entry.HsId.Length != 8 || !entry.HsId.All(char.IsDigit)))
+            throw new InvalidOperationException("Every Indonesian HS code must contain exactly eight digits.");
+        if (entries.GroupBy(entry => entry.Keyword, StringComparer.OrdinalIgnoreCase).Any(group => group.Count() > 1))
+            throw new InvalidOperationException("Bundled HS dictionary contains duplicate keywords.");
 
+        await using var replace = connection.CreateCommand();
+        replace.Transaction = transaction;
+        replace.CommandText = "DELETE FROM dict_hs;";
+        await replace.ExecuteNonQueryAsync();
+
+        await using var insert = connection.CreateCommand();
+        insert.Transaction = transaction;
+        insert.CommandText = """
             INSERT INTO dict_hs (keyword, hs_cn, hs_id, priority)
-            VALUES
-                ('强力线', '5401101000', '54023900', 1860),
-                ('螺丝',   '7318159090', '74153310', 2110);
+            VALUES (@keyword, @hs_cn, @hs_id, @priority);
+            """;
+        var keyword = insert.CreateParameter(); keyword.ParameterName = "keyword"; insert.Parameters.Add(keyword);
+        var hsCn = insert.CreateParameter(); hsCn.ParameterName = "hs_cn"; insert.Parameters.Add(hsCn);
+        var hsId = insert.CreateParameter(); hsId.ParameterName = "hs_id"; insert.Parameters.Add(hsId);
+        var priority = insert.CreateParameter(); priority.ParameterName = "priority"; insert.Parameters.Add(priority);
 
+        foreach (var entry in entries)
+        {
+            keyword.Value = entry.Keyword;
+            hsCn.Value = entry.HsCn;
+            hsId.Value = entry.HsId;
+            priority.Value = entry.Priority;
+            await insert.ExecuteNonQueryAsync();
+        }
+
+        await using var complete = connection.CreateCommand();
+        complete.Transaction = transaction;
+        complete.CommandText = $"""
             UPDATE settings
             SET value = 'applied', updated_at = now()
-            WHERE "key" = '{ConsolidateThreadAndScrewHsKey}';
+            WHERE "key" = '{ReplaceHsDictionaryKey}';
             """;
-        await normalize.ExecuteNonQueryAsync();
+        await complete.ExecuteNonQueryAsync();
         await transaction.CommitAsync();
 
-        logger.LogInformation(
-            "Consolidated HS dictionary entries for 强力线 and 螺丝 to one canonical row each.");
+        logger.LogInformation("Replaced HS dictionary with {Count} validated entries.", entries.Count);
     }
+
+    private static async Task<IReadOnlyList<HsDictionaryEntry>> LoadHsDictionaryAsync()
+    {
+        var path = Path.Combine(AppContext.BaseDirectory, "seed", "hs-dictionary.json");
+        if (!File.Exists(path))
+            throw new FileNotFoundException($"Bundled HS dictionary not found: {path}");
+
+        await using var stream = File.OpenRead(path);
+        return await JsonSerializer.DeserializeAsync<List<HsDictionaryEntry>>(
+                   stream,
+                   new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
+               ?? [];
+    }
+
+    private sealed record HsDictionaryEntry(string Keyword, string HsCn, string HsId, int Priority);
 }

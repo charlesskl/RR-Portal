@@ -9,5 +9,8 @@ tests/
 db/
 !db/postgres_schema.sql
 seed/
+!seed/
+seed/*
+!seed/hs-dictionary.json
 *.xlsx
 !web/public/template-customs.xlsx

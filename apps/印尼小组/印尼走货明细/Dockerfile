@@ -39,6 +39,7 @@ COPY --from=build --chown=app:app /app/publish ./
 COPY --from=frontend --chown=app:app /src/web/dist ./wwwroot
 # 首启建表脚本（DatabaseCompatibility 在 schema 不存在时执行，幂等）
 COPY --chown=app:app db/postgres_schema.sql ./db/postgres_schema.sql
+COPY --chown=app:app seed/hs-dictionary.json ./seed/hs-dictionary.json
 
 ENV ASPNETCORE_URLS=http://+:5180
 EXPOSE 5180

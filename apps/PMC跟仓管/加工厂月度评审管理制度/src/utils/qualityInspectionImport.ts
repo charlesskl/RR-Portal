@@ -1,3 +1,7 @@
+import { CRAFT_LABELS, regionOf, type Craft, type Region } from '../constants/roles'
+import type { Factory } from '../types/factory'
+import { resolveFactoryName, type FactoryNameResolveResult } from './factoryName'
+
 export interface QualityInspectionImportColumns {
   date: number
   factory: number
@@ -19,6 +23,24 @@ export interface QualityInspectionImportColumns {
 
 export function normalizeExcelHeader(value: unknown): string {
   return String(value).replace(/\s+/g, '')
+}
+
+/** 先按加工类型与厂区缩小范围，再匹配加工厂简称，避免同名简称冲突。 */
+export function resolveQualityInspectionFactory(
+  factories: Factory[],
+  name: unknown,
+  processType: unknown,
+  region: Region | '',
+): FactoryNameResolveResult {
+  const normalizedProcess = normalizeExcelHeader(processType).replace(/部$/, '')
+  const craft = (Object.entries(CRAFT_LABELS).find(([, label]) =>
+    normalizeExcelHeader(label).replace(/部$/, '') === normalizedProcess,
+  )?.[0] ?? '') as Craft | ''
+
+  let candidates = factories
+  if (craft) candidates = candidates.filter((factory) => factory.craft === craft)
+  if (region) candidates = candidates.filter((factory) => regionOf(factory) === region)
+  return resolveFactoryName(candidates, name)
 }
 
 function pad2(value: number): string {

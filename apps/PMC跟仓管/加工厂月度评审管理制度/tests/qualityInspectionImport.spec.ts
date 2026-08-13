@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest'
-import { buildQualityInspectionImportColumns, formatImportedDate } from '../src/utils/qualityInspectionImport'
+import { buildQualityInspectionImportColumns, formatImportedDate, resolveQualityInspectionFactory } from '../src/utils/qualityInspectionImport'
+import type { Factory } from '../src/types/factory'
+
+const factory = (id: string, name: string, craft: Factory['craft'], region: Factory['region']): Factory =>
+  ({ id, name, craft, region, status: 'active' })
 
 describe('buildQualityInspectionImportColumns', () => {
   it('starts internal inspection fields after 单数 when the exported template has that column', () => {
@@ -66,5 +70,21 @@ describe('formatImportedDate', () => {
 
   it('returns empty values as empty strings', () => {
     expect(formatImportedDate('')).toBe('')
+  })
+})
+
+describe('resolveQualityInspectionFactory', () => {
+  const factories = [
+    factory('assembly-spring', '东莞市春风玩具有限公司', 'assembly', 'dongguan'),
+    factory('injection-spring', '东莞市春风塑胶厂', 'injection', 'dongguan'),
+    factory('hunan-spring', '邵阳市晨风玩具厂', 'assembly', 'hunan'),
+  ]
+
+  it('uses the imported processing type before resolving a factory abbreviation', () => {
+    expect(resolveQualityInspectionFactory(factories, '春风', '装配', '')).toMatchObject({ status: 'matched', id: 'assembly-spring' })
+  })
+
+  it('also narrows an import to the selected region', () => {
+    expect(resolveQualityInspectionFactory(factories, '晨风', '装配', 'hunan')).toMatchObject({ status: 'matched', id: 'hunan-spring' })
   })
 })

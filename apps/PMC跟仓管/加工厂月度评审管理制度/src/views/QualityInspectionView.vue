@@ -7,8 +7,7 @@ import { pb } from '../pb'
 import { useFactoriesStore } from '../stores/factories'
 import { useAuthStore } from '../stores/auth'
 import { canEditQuality, allowedRegions, canViewCraft } from '../utils/permissions'
-import { resolveFactoryName } from '../utils/factoryName'
-import { buildQualityInspectionImportColumns, formatImportedDate, normalizeExcelHeader } from '../utils/qualityInspectionImport'
+import { buildQualityInspectionImportColumns, formatImportedDate, normalizeExcelHeader, resolveQualityInspectionFactory } from '../utils/qualityInspectionImport'
 import { REGIONS, REGION_LABELS, regionOf, type Craft, type Region } from '../constants/roles'
 import type { QualityInspection } from '../types/qualityInspection'
 
@@ -152,7 +151,7 @@ async function importExcel(ev: Event) {
     const prod = str(row, idx.product)
     if (prod.includes('小计') || prod.includes('合计')) continue
     if (!fname && !prod) continue
-    const factoryMatch = resolveFactoryName(factories.items, fname)
+    const factoryMatch = resolveQualityInspectionFactory(factories.items, fname, str(row, idx.ptype), regionFilter.value)
     if (!fname || factoryMatch.status !== 'matched') { if (prod) fail++; continue }
     const payload: Record<string, any> = {
       created_by: auth.userId ?? undefined,

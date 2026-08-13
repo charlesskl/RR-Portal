@@ -728,27 +728,35 @@ function elecTaxedCore(parts, ex) {
     + num(ex.test_repair) + num(ex.packing_shipping);
   const profitPrice = cost * (1 + num(ex.profit_pct) / 100);
   const taxed = profitPrice + num(ex.tax_diff) + num(ex.tax_diff) * 0.1;
-  return { profitPrice, taxed };
+  return { cost, profitPrice, taxed };
 }
 
-// 由细表汇总成 IC + PACB电子 两行：含税核价按各自在细表的占比分摊到两行，
-// 合计 = 两行之和 = 含税核价；不含税 = 含税 ×(含利润价÷含税核价)。
+// 由细表汇总成 IC + PACB电子 两行：
+// - IC 只承担自身采购成本、利润，以及按直接成本占比分配的税费；
+// - 其余零件与邦定/贴片/人工/测试/包装等加工费用全部归 PACB；
+// - 两行合计始终等于整套电子的含税核价。
 function elecSplitRows(parts, ex, fx) {
   fx = num(fx) || 0.85;
-  const { profitPrice, taxed } = elecTaxedCore(parts, ex);
-  const detailTotal = sum(parts || [], p => num(p.qty) * num(p.unit_price)
-    + sum(p.children || [], c => num(c.qty) * num(c.unit_price)));
+  ex = ex || {};
+  const { cost, profitPrice, taxed } = elecTaxedCore(parts, ex);
   const icPart = (parts || []).find(p => /IC/i.test(p.name || ''));
-  const icAmt = icPart ? num(icPart.qty) * num(icPart.unit_price) : 0;
-  const icRatio = detailTotal > 0 ? icAmt / detailTotal : 0;
-  const pretaxRatio = taxed > 0 ? profitPrice / taxed : 1;
-  const mk = (taxedRMB) => ({
+  const icDirectCost = icPart ? Math.max(0, num(icPart.qty) * num(icPart.unit_price)) : 0;
+  const safeCost = Math.max(0, cost);
+  const boundedIcCost = Math.min(icDirectCost, safeCost);
+  const icCostRatio = safeCost > 0 ? boundedIcCost / safeCost : 0;
+  const profitFactor = 1 + num(ex.profit_pct) / 100;
+  const icPretax = boundedIcCost * profitFactor;
+  const pacbPretax = profitPrice - icPretax;
+  const sharedTax = taxed - profitPrice;
+  const icTaxed = icPretax + sharedTax * icCostRatio;
+  const pacbTaxed = taxed - icTaxed;
+  const mk = (taxedRMB, pretaxRMB) => ({
     unit_price_rmb: +taxedRMB.toFixed(6),
     unit_price: +(taxedRMB / fx).toFixed(6),
     _unit_price_taxed: +taxedRMB.toFixed(6),
-    _unit_price_pretax: +(taxedRMB * pretaxRatio).toFixed(6),
+    _unit_price_pretax: +pretaxRMB.toFixed(6),
   });
-  return { icPart, ic: mk(taxed * icRatio), pacb: mk(taxed * (1 - icRatio)) };
+  return { icPart, ic: mk(icTaxed, icPretax), pacb: mk(pacbTaxed, pacbPretax) };
 }
 
 function elecImportedSummaryRows(doc, ex, fx) {
@@ -770,6 +778,33 @@ function elecImportedSummaryRows(doc, ex, fx) {
     _unit_price_pretax: +rmb.toFixed(6),
   });
   return { icPart, ic: mk(otp), pacb: mk(pacb) };
+}
+
+// 旧报价曾按“IC占零件明细比例”分摊全部加工费用。仅当当前两行仍精确匹配旧自动结果时，
+// 才升级成新的直接归属规则；人工改过的 IC/PACB 价格保持不动。
+function upgradeLegacyElecSplit(payload, fx) {
+  const doc = payload && payload.electronics_doc;
+  const rows = payload && payload.electronics;
+  if (!doc || doc.source_format === 'lianxiang' || !Array.isArray(doc.parts)
+    || !Array.isArray(rows) || rows.length !== 2
+    || !/^IC$/i.test(rows[0].name || '') || !/PACB/i.test(rows[1].name || '')) return false;
+  const ex = payload.electronics_extra || doc.extras || {};
+  const { taxed } = elecTaxedCore(doc.parts, ex);
+  const detailTotal = sum(doc.parts, p => num(p.qty) * num(p.unit_price)
+    + sum(p.children || [], c => num(c.qty) * num(c.unit_price)));
+  const icPart = doc.parts.find(p => /IC/i.test(p.name || ''));
+  const icAmount = icPart ? num(icPart.qty) * num(icPart.unit_price) : 0;
+  const oldIc = detailTotal > 0 ? taxed * icAmount / detailTotal : 0;
+  const oldPacb = taxed - oldIc;
+  const currentRmb = row => row.unit_price_rmb != null
+    ? num(row.unit_price_rmb)
+    : num(row.unit_price) * (num(fx) || 0.85);
+  if (Math.abs(currentRmb(rows[0]) - oldIc) > 0.00001
+    || Math.abs(currentRmb(rows[1]) - oldPacb) > 0.00001) return false;
+  const split = elecSplitRows(doc.parts, ex, fx);
+  Object.assign(rows[0], split.ic);
+  Object.assign(rows[1], split.pacb);
+  return true;
 }
 
 function renderHierElectronics(container, rows, onChange, canEdit, fxRmbHkd, pctHost) {
@@ -2614,6 +2649,7 @@ function renderElectronic(host, payload, canEdit, onChange, fxRmbHkd) {
   ['profit_pct', 'tax_diff', 'tax_payable'].forEach(k => { if (payload.electronics_extra[k] == null) payload.electronics_extra[k] = k === 'profit_pct' ? 10 : 0; });
   if (payload.electronics_doc && payload.electronics_doc.parts) {
     payload.electronics_doc.parts_count = elecDetailRowCount(payload.electronics_doc.parts);
+    upgradeLegacyElecSplit(payload, fxRmbHkd);
   }
 
   host.innerHTML = `

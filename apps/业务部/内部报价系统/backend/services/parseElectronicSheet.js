@@ -12,7 +12,10 @@ function toStr(v) {
 }
 function toNum(v) {
   if (v == null || v === '') return null;
-  if (typeof v === 'object' && 'result' in v) return Number(v.result) || null;
+  if (typeof v === 'object' && 'result' in v) {
+    const result = Number(v.result);
+    return Number.isNaN(result) ? null : result;
+  }
   const n = Number(String(v).replace(/[^\d.\-]/g, ''));
   return isNaN(n) ? null : n;
 }
@@ -118,9 +121,9 @@ async function parseWorkbook(buffer) {
     if (!name && spec && lastParent) {
       lastParent.children = lastParent.children || [];
       lastParent.children.push({
-        name: '', spec, qty: qty || 1,
-        unit_price: unitPrice || 0,
-        amount: amount || (qty || 0) * (unitPrice || 0),
+        name: '', spec, qty: qty ?? 1,
+        unit_price: unitPrice ?? 0,
+        amount: amount ?? (qty ?? 0) * (unitPrice ?? 0),
         note,
       });
       continue;
@@ -128,8 +131,8 @@ async function parseWorkbook(buffer) {
     if (name) {
       const part = {
         name, spec: spec || '',
-        qty: qty || 1, unit_price: unitPrice || 0,
-        amount: amount || (qty || 0) * (unitPrice || 0),
+        qty: qty ?? 1, unit_price: unitPrice ?? 0,
+        amount: amount ?? (qty ?? 0) * (unitPrice ?? 0),
         note,
         children: [],
       };

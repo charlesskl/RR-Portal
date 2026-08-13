@@ -793,6 +793,32 @@ class ExcelPOParser:
                 pi = '\n'.join(_pi_lines[:_split_idx]).rstrip()
                 rm = '\n'.join(_pi_lines[_split_idx:]).strip()
 
+        # 兜底2：无标签版面（PRODUCT REQUERIMENTS 下方直接是内容，没有
+        # Tracking Code/Packaging Info/Remark 标签行），整段收进 packaging_info
+        if not tc and not pi and not rm:
+            _in_block = False
+            _block = []
+            for row in ws.iter_rows(max_row=600):
+                _a2 = re.sub(r'\s+', ' ', str(row[0].value or '')).strip() if row else ''
+                if re.search(r'Order\s+Modifiable', _a2, re.I):
+                    break
+                if 'PRODUCT REQUERIMENTS' in _a2:
+                    _in_block = True
+                    continue
+                if not _in_block:
+                    continue
+                # 标签行不当作内容（正常但内容为空的版面防护）
+                if (re.search(r'\bTracking\s+Code\b', _a2, re.I)
+                        or re.search(r'\bPackaging\s+Info\b', _a2, re.I)
+                        or re.match(r'Remark\b', _a2, re.I)):
+                    continue
+                for cell in row:
+                    v = str(cell.value or '').strip()
+                    if v:
+                        _block.append(v)
+            if _block:
+                pi = '\n'.join(_block)
+
         return {
             'tracking_code': tc,
             'packaging_info': pi,

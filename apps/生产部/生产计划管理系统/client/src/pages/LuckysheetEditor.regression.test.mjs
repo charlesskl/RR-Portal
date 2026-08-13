@@ -155,3 +155,37 @@ test('due-column auto-correction only fires on real serial conversion', () => {
   assert.match(source, /vIsSerial = typeof cell\?\.v === 'number' && cell\.v > 40000 && cell\.v < 60000/);
   assert.match(source, /if \(cell && vIsSerial && cell\.v !== text\)/);
 });
+
+// ===== 2026-08-13 「货期列改字体保存不了」修复 =====
+
+const fmtStart = source.indexOf('const AUTO_BG_SET');
+const fmtEnd = source.indexOf('function getCellFormula');
+const fmtCtx = {};
+vm.createContext(fmtCtx);
+vm.runInContext(`${source.slice(fmtStart, fmtEnd)}\nthis.extractCellFormat = extractCellFormat;\nthis.formatKey = formatKey;`, fmtCtx);
+
+test('extractCellFormat captures toolbar font changes (ff/fs/fc/bl)', () => {
+  const { extractCellFormat } = fmtCtx;
+  // 工具栏改字体后，Luckysheet 只在单元格上写 ff —— 必须被提取进 cell_format
+  const fmt = extractCellFormat({ v: '货期待复', m: '货期待复', ct: { t: 'g' }, ff: '微软雅黑' });
+  assert.equal(fmt.ff, '微软雅黑');
+  // 渲染时自动加的背景色不算用户格式
+  assert.equal(extractCellFormat({ v: 'x', bg: '#FFFDE7' }), null);
+});
+
+test('formatKey comparison is key-order independent', () => {
+  const { formatKey } = fmtCtx;
+  // DB JSON 的键序与 extractCellFormat 生成的不同时，不得误判为「有变化」
+  assert.equal(formatKey({ ff: '微软雅黑', bl: 1 }), formatKey({ bl: 1, ff: '微软雅黑' }));
+  assert.equal(formatKey(null), formatKey(undefined));
+  assert.notEqual(formatKey({ ff: '微软雅黑' }), formatKey(null));
+});
+
+test('saveAll has a format-only fallback scan for hook-less toolbar operations', () => {
+  // luckysheet@2.1.13 工具栏格式操作不触发任何钩子（rangeUpdated 源码中从未调用，
+  // updated 只在撤销/重做时触发）—— 保存时必须兜底扫描格式差异
+  assert.match(source, /格式兜底扫描/);
+  assert.match(source, /formatKey\(curFmt\) === formatKey\(base\)/);
+  // 扫描只对比格式，不得回写字段值（历史值类型差异会产生幻影变化）
+  assert.doesNotMatch(source, /格式兜底扫描[\s\S]{0,2000}?writeFieldValue/);
+});

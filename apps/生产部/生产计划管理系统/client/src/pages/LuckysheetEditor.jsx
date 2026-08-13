@@ -17,9 +17,9 @@ const dbg = (...args) => { if (DEBUG) console.log(...args); };
 
 // Luckysheet 的 updated/rangeUpdated 钩子，operate 的形状不稳定：
 // 有时是 {range:[{row,column}]}，有时 range 是单个对象，有时 operate 本身就是 range。
-// 工具栏改字体/颜色时 range 结构不同 —— 旧代码直接 for..of 非数组会抛 TypeError，
-// 钩子异常导致格式变化根本没记录（这就是「改字体保存不了」的根因之一）。
-// 统一归一化成 range 数组。
+// 旧代码直接 for..of 非数组会抛 TypeError，统一归一化成 range 数组。
+// 注意（luckysheet@2.1.13 源码实测）：rangeUpdated 从未被调用，updated 只在撤销/重做时触发，
+// 工具栏格式操作（字体/颜色等）不触发任何钩子 —— 格式保存靠 saveAll 里的格式兜底扫描。
 function toRanges(operate) {
   if (!operate) return [];
   let r = operate.range !== undefined ? operate.range : operate;
@@ -276,6 +276,13 @@ function extractCellFormat(cell) {
   if (cell.ps) fmt.ps = cell.ps;
   if (cell.qp != null) fmt.qp = cell.qp;
   return Object.keys(fmt).length > 0 ? fmt : null;
+}
+
+// 键序无关的格式指纹：DB 里 cell_format 的键顺序和 extractCellFormat 生成的不同，
+// 直接 JSON.stringify 对比会误判「不一致」。排序后拼接成稳定指纹。
+function formatKey(fmt) {
+  if (!fmt || typeof fmt !== 'object') return '';
+  return Object.keys(fmt).sort().map(k => k + '=' + JSON.stringify(fmt[k])).join('|');
 }
 
 function getCellFormula(cell) {
@@ -630,7 +637,47 @@ function LuckysheetEditor({
       console.warn('[saveAll] formula scan failed:', e?.message);
     }
 
-    // 3. 把 updateMap 转成 updates，处理格式合并 + 蓝字检测 + DatePicker
+    // 3. 格式兜底扫描：工具栏格式操作（字体/字号/颜色/加粗等）在 luckysheet@2.1.13
+    //    里不触发任何钩子 —— rangeUpdated 从未被源码调用，updated 只在撤销/重做时触发，
+    //    cellUpdated 只在 setCellValue/updatecell 路径触发。纯格式改动进不了 pendingChanges，
+    //    「改字体保存不了」的真正根因。
+    //    只对比「格式」、不对比「值」，避免历史 number/string 类型差异造成幻影变化。
+    //    对比基准 = DB cell_format 清理后（去 ct、去自动 bg）+ 当前 sheet 实际格式。
+    try {
+      const sheetData = (sheet && sheet.data) || [];
+      for (let rowIdx = 1; rowIdx < sheetData.length; rowIdx++) {
+        const orderId = rowMapRef.current[rowIdx - 1];
+        if (!orderId) continue;
+        const order = dataRef.current.find(o => o.id === orderId);
+        if (!order) continue;
+        let existing = {};
+        try { if (order.cell_format) existing = JSON.parse(order.cell_format); } catch {}
+        const row = sheetData[rowIdx] || [];
+        for (let colIdx = 0; colIdx < ORDER_COLUMNS.length; colIdx++) {
+          const colData = ORDER_COLUMNS[colIdx] && ORDER_COLUMNS[colIdx].data;
+          if (!colData || colData === 'quantity_sum') continue;
+          const cell = row[colIdx];
+          const curFmt = extractCellFormat(cell && typeof cell === 'object' ? cell : null);
+          let base = existing[colData];
+          if (base && typeof base === 'object') {
+            base = { ...base };
+            if (base.bg && AUTO_BG_SET.has(base.bg)) delete base.bg;
+            delete base.ct;
+            if (Object.keys(base).length === 0) base = null;
+          } else {
+            base = null;
+          }
+          if (formatKey(curFmt) === formatKey(base)) continue;
+          const bucket = getBucket(orderId);
+          // 以当前 sheet 真实状态为准（含用户清除格式 → null 表示删除）
+          bucket.fmt[colData] = curFmt || null;
+        }
+      }
+    } catch (e) {
+      console.warn('[saveAll] format scan failed:', e?.message);
+    }
+
+    // 4. 把 updateMap 转成 updates，处理格式合并 + 蓝字检测 + DatePicker
     for (const [orderId, b] of updateMap.entries()) {
       const order = dataRef.current.find(o => o.id === orderId);
       if (!order) continue;

@@ -1,9 +1,13 @@
 export const DEFAULT_CNY_TO_HKD_RATE = 0.87
 const TAX_RATE_FACTOR = 1.13
 
-export function cnyTaxToHkdUntaxed(value: number, exchangeRate = DEFAULT_CNY_TO_HKD_RATE): number {
-  if (!Number.isFinite(value) || !Number.isFinite(exchangeRate) || exchangeRate <= 0) return 0
-  return Math.round((value / exchangeRate / TAX_RATE_FACTOR) * 10000) / 10000
+export function cnyTaxToHkdUntaxed(
+  value: number,
+  exchangeRate = DEFAULT_CNY_TO_HKD_RATE,
+  taxPoint = TAX_RATE_FACTOR,
+): number {
+  if (!Number.isFinite(value) || !Number.isFinite(exchangeRate) || exchangeRate <= 0 || !Number.isFinite(taxPoint) || taxPoint <= 0) return 0
+  return Math.round((value / exchangeRate / taxPoint) * 10000) / 10000
 }
 
 export function cnyTaxToUntaxedRmb(value: number, taxPoint: number): number {

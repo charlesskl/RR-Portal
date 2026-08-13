@@ -92,6 +92,7 @@ using (var scope = app.Services.CreateScope())
     await DatabaseCompatibility.EnsureAsync(db);
     var passwordHasher = scope.ServiceProvider.GetRequiredService<IPasswordHasher>();
     await ProductionSeeder.SeedAsync(db, app.Configuration, passwordHasher, app.Logger);
+    await DataMigrations.ApplyAsync(db, app.Logger);
 }
 
 if (app.Environment.IsDevelopment())

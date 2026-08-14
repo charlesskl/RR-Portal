@@ -45,7 +45,14 @@ const rows = computed(() => {
   if (deptFilter.value) list = list.filter((f) => f.craft === deptFilter.value)
   const query = search.value.trim().toLowerCase()
   if (query) list = list.filter((f) => f.name.toLowerCase().includes(query))
-  return list
+  return [...list].sort((a, b) => {
+    const aScore = scoreByFactory.value[a.id]?.total_score
+    const bScore = scoreByFactory.value[b.id]?.total_score
+    if (aScore == null && bScore == null) return a.name.localeCompare(b.name, 'zh-CN')
+    if (aScore == null) return 1
+    if (bScore == null) return -1
+    return bScore - aScore || a.name.localeCompare(b.name, 'zh-CN')
+  })
 })
 
 async function load() {

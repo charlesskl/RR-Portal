@@ -10,7 +10,14 @@ const draft = ref<Partial<ScoreTemplate>>({
   module: 'craft_specific', scoring_role: 'quality_qc', is_active: true, max_score: 0, sort_order: 99,
 })
 onMounted(() => store.fetchAll())
-const total = computed(() => store.items.filter((t) => t.is_active).reduce((s, t) => s + t.max_score, 0))
+const commonTotal = computed(() => store.items
+  .filter((t) => t.is_active && !t.craft_filter)
+  .reduce((sum, t) => sum + t.max_score, 0))
+const specialtyScoresValid = computed(() => {
+  const specialties = store.items.filter((t) => t.is_active && t.craft_filter)
+  return specialties.length > 0 && specialties.every((t) => t.max_score === 15)
+})
+const scoreConfigValid = computed(() => commonTotal.value === 85 && specialtyScoresValid.value)
 
 async function add() {
   await store.create({ ...draft.value })
@@ -24,8 +31,8 @@ async function toggle(t: ScoreTemplate) {
 <template>
   <AppLayout>
     <div class="page">
-    <h2>评分模板配置（当前启用合计 {{ total }} 分）</h2>
-    <p v-if="total !== 100" class="warn">提示：通用70+专项30 应为100分，当前 {{ total }} 分</p>
+    <h2>评分模板配置（通用 {{ commonTotal }} 分 + 对应部门专项 15 分）</h2>
+    <p v-if="!scoreConfigValid" class="warn">提示：通用85+对应部门专项15 应为100分</p>
     <table>
       <thead><tr><th>名称</th><th>模块</th><th>分值</th><th>打分主体</th><th>部门</th><th>启用</th></tr></thead>
       <tbody>

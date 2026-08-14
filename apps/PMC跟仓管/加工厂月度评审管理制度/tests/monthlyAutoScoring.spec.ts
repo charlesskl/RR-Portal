@@ -31,8 +31,8 @@ describe('monthly automatic scoring', () => {
       { id: '4', inspect_date: '2026-07-04', internal_result: 'PASS' },
     ]
     const data = { orders: [], inspections, checks: [] }
-    expect(calculateAutoScore('defect_rate', 15, factory, data)?.score).toBe(11.25)
-    expect(calculateAutoScore('process', 10, factory, data)?.score).toBe(7.5)
+    expect(calculateAutoScore('defect_rate', 20, factory, data)?.score).toBe(15)
+    expect(calculateAutoScore('process', 5, factory, data)?.score).toBe(3.75)
   })
 
   it('uses the latest 5S record and preserves manual items', () => {
@@ -40,7 +40,7 @@ describe('monthly automatic scoring', () => {
       { id: 'old', check_date: '2026-07-01', s_area: 5 },
       { id: 'new', check_date: '2026-07-20', s_area: 10, s_material: 10, s_hygiene: 10, s_sharp: 15, s_nonconform: 15, s_standard: 15, s_qc_staff: 15, s_correction: 10 },
     ]
-    expect(calculateAutoScore('5s', 5, factory, { orders: [], inspections: [], checks })?.score).toBe(5)
+    expect(calculateAutoScore('5s', 20, factory, { orders: [], inspections: [], checks })?.score).toBe(20)
 
     const templates = [
       { id: 'auto', module: 'qualification', max_score: 10 },
@@ -64,10 +64,10 @@ describe('monthly automatic scoring', () => {
         { id: '1', check_date: '2026-07-20', s_area: 10, s_material: 10, s_hygiene: 10, s_sharp: 15, s_nonconform: 15, s_standard: 15, s_qc_staff: 15, s_correction: 10 },
       ],
     }
-    const result = calculateAutoScore('craft_specific', 30, factory, data)
-    expect(result?.score).toBe(24.38)
-    expect(result?.notes).toContain('月度综合不良率 11.25/15')
-    expect(result?.notes).toContain('5S现场评分 5/5')
+    const result = calculateAutoScore('craft_specific', 15, factory, data)
+    expect(result?.score).toBe(13.13)
+    expect(result?.notes).toContain('月度综合不良率 15/20')
+    expect(result?.notes).toContain('5S现场评分 20/20')
   })
 
   it('filters records into the selected month', () => {

@@ -132,13 +132,13 @@ function siteScore(checks: Quality5sCheck[], maxScore: number): AutoScoreResult 
 }
 
 function craftSpecificScore(data: MonthlyScoringData, maxScore: number): AutoScoreResult {
-  const defect = defectRateScore(data.inspections, 15)
-  const site = siteScore(data.checks, 5)
+  const defect = defectRateScore(data.inspections, 20)
+  const site = siteScore(data.checks, 20)
   const sourceTotal = defect.score + site.score
-  const rate = sourceTotal / 20
+  const rate = sourceTotal / 40
   return {
     score: round2(rate * maxScore),
-    notes: `自动评分：月度综合不良率 ${defect.score}/15 + 5S现场评分 ${site.score}/5，综合达成率 ${round2(rate * 100)}%，专项得分 ${round2(rate * maxScore)}/${maxScore}`,
+    notes: `自动评分：月度综合不良率 ${defect.score}/20 + 5S现场评分 ${site.score}/20，综合达成率 ${round2(rate * 100)}%，专项得分 ${round2(rate * maxScore)}/${maxScore}`,
   }
 }
 

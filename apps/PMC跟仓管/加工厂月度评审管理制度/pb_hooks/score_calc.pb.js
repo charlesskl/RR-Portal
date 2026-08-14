@@ -17,8 +17,8 @@ onRecordCreateRequest((e) => {
   for (const it of items) total += Number(it.score) || 0
   let grade = 'D'
   if (total >= 90) grade = 'A'
-  else if (total >= 80) grade = 'B'
-  else if (total >= 70) grade = 'C'
+  else if (total >= 70) grade = 'B'
+  else if (total >= 50) grade = 'C'
   e.record.set('total_score', total)
   e.record.set('grade', grade)
   return e.next()
@@ -35,8 +35,8 @@ onRecordUpdateRequest((e) => {
   for (const it of items) total += Number(it.score) || 0
   let grade = 'D'
   if (total >= 90) grade = 'A'
-  else if (total >= 80) grade = 'B'
-  else if (total >= 70) grade = 'C'
+  else if (total >= 70) grade = 'B'
+  else if (total >= 50) grade = 'C'
   e.record.set('total_score', total)
   e.record.set('grade', grade)
   return e.next()

@@ -61,7 +61,7 @@ describe('buildDeliveryReport', () => {
     })
   })
 
-  it('uses CNY tax-inclusive price divided by tax point only for sewing', () => {
+  it('uses CNY tax-inclusive price divided by tax point for RMB pricing', () => {
     const source = [order({
       id: 'sewing-row',
       unit_price: 2.2722,
@@ -74,6 +74,14 @@ describe('buildDeliveryReport', () => {
     expect(regularRows[0]).toMatchObject({ kind: 'detail', outPrice: 2.2722 })
     expect(sewingRows[0]).toMatchObject({ kind: 'detail', outPrice: 2.5676 })
     expect(sewingRows[1]).toMatchObject({ kind: 'subtotal', outPrice: 2.57 })
+  })
+
+  it('uses factory tax point as well as FX rate for Dongguan HKD pricing', () => {
+    const rows = buildDeliveryReport([order({
+      id: 'hkd-tax-row', unit_price_cny_tax: 6, exchange_rate: 0.87,
+    })], '东莞厂区 · 注塑部', () => '工厂', 'hkd-tax', () => 1.11)
+
+    expect(rows[0]).toMatchObject({ kind: 'detail', outPrice: 6.2131, exchangeRate: 0.87, taxPoint: 1.11 })
   })
 })
 
@@ -105,10 +113,55 @@ describe('deliveryHeaders', () => {
     expect(assembly).toContain('核价工价(港币不含税$)')
     expect(assembly).toContain('外发工价(港币不含税$)')
     expect(assembly).toContain('换算汇率')
+
+    const dongguanTax = deliveryHeaders(true, false, 'hkd-tax')
+    expect(dongguanTax).toContain('换算汇率')
+    expect(dongguanTax).toContain('税点')
   })
 })
 
 describe('parseDeliveryImport', () => {
+  it('imports Hunan injection purchase orders with the tax-inclusive outsource unit price', () => {
+    const aoa = [
+      ['采购单（啤机）'],
+      ['加工商：', '越翔', '', '', '', 'PMC单编号：', 'BB2026135-BB124'],
+      ['', '', '', '', '', '日期：', '2026/7/6'],
+      ['货号', '模号', '名称', '颜色编号', '加工类别', '用料', '啤重', '数量', '啤数', '用料量', '外发单价（啤）', '金额', '完成交货期'],
+      ['77772', 'MNVN-11M-01', '耳罩模', '黑色7726', '注塑', 'PVC', 12.5, '1836736', '225952', '2869.90', '0.28', '64285.76', '2026/9/7'],
+      ['', '', '', '', '', '', '', '', '', '', '', '', ''],
+      ['采购签核：', '车浪宇'],
+    ]
+    const result = parseDeliveryImport(aoa, { 越翔: 'factory-1' })
+
+    expect(result.failed).toBe(0)
+    expect(result.payloads).toHaveLength(1)
+    expect(result.payloads[0]).toMatchObject({
+      factory: 'factory-1', order_no: 'BB2026135-BB124', item_no: '77772', mold_no: 'MNVN-11M-01',
+      product: '耳罩模', process_category: '注塑', quantity: 1836736, unit_price_cny_tax: 0.28,
+      order_date: '2026-07-06', delivery_date: '2026-09-07', pmc: '车浪宇',
+    })
+  })
+
+  it('imports Hunan sewing purchase orders and takes the final delivery date from a date range', () => {
+    const aoa = [
+      ['采购单'],
+      ['供应商：', '光明', '', '', '', '订单编号：', 'HHGM20260002'],
+      ['货号', '货品名称', '数量', '单位', '单价', '加工项目', 'MA号', '备注'],
+      ['125160', '杏色毛冷怪', '15000', 'PCS', '¥ 1.42', '车缝', '011', ''],
+      ['交货期：2026年7月29日至2026年8月22日，货送园区3栋处'],
+      ['采购签核：', '易鸳姣'],
+      ['时间：2026年07月09日'],
+    ]
+    const result = parseDeliveryImport(aoa, { 光明: 'factory-1' })
+
+    expect(result.failed).toBe(0)
+    expect(result.payloads[0]).toMatchObject({
+      factory: 'factory-1', order_no: 'HHGM20260002', item_no: '125160', product: '杏色毛冷怪',
+      process_category: '车缝', quantity: 15000, unit_price_cny_tax: 1.42,
+      delivery_date: '2026-08-22', order_date: '2026-07-09', pmc: '易鸳姣',
+    })
+  })
+
   it('imports plastic outsource purchase order templates', () => {
     const aoa = [
       ['塑胶发外加工采购单', '', '', '', '', '', '', '', '', '', '', ''],

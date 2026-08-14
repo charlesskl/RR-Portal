@@ -7,7 +7,7 @@ import { useFactoriesStore } from '../stores/factories'
 import { useAuthStore } from '../stores/auth'
 import { CRAFT_LABELS, REGION_LABELS, regionOf, type Craft, type Region } from '../constants/roles'
 import { canEditOrders, allowedRegions } from '../utils/permissions'
-import { buildDeliveryReport, deliveryHeaders, exportDeliveryExcel, parseDeliveryImport, splitSewingContractItemNo, type ReportRow, type DetailRow } from '../utils/deliveryStats'
+import { buildDeliveryReport, deliveryHeaders, exportDeliveryExcel, parseDeliveryImport, splitSewingContractItemNo, type DeliveryPricingMode, type ReportRow, type DetailRow } from '../utils/deliveryStats'
 import { readDeliveryPdfAsAoa } from '../utils/pdfDeliveryImport'
 import { parseDeliveryExcelFiles } from '../utils/deliveryExcelImport'
 import { cnyTaxToHkdUntaxed, cnyTaxToUntaxedRmb, DEFAULT_CNY_TO_HKD_RATE } from '../utils/orderPricing'
@@ -83,17 +83,23 @@ function factoryTaxPoint(factoryId: string | null | undefined) {
   return taxPointFactor(factories.items.find((factory) => factory.id === factoryId)?.tax_point)
 }
 
-const reportOrders = computed(() => craft.value === 'sewing'
+const isHunan = computed(() => region.value === 'hunan')
+const isDongguanTaxDept = computed(() => region.value === 'dongguan' && ['injection', 'painting', 'assembly'].includes(craft.value))
+// 湖南四部门、车缝部按人民币未税展示；东莞三部门保留港币列并同时显示工厂税点。
+const pricingMode = computed<DeliveryPricingMode>(() =>
+  isHunan.value || craft.value === 'sewing' ? 'rmb-tax' : isDongguanTaxDept.value ? 'hkd-tax' : 'hkd')
+const usesFactoryTaxPoint = computed(() => pricingMode.value !== 'hkd')
+const reportOrders = computed(() => pricingMode.value === 'rmb-tax'
   ? deptOrders.value.map((order) => ({
       ...order,
       exchange_rate: factoryTaxPoint(order.factory) ?? order.exchange_rate,
     }))
   : deptOrders.value)
 const rows = computed<ReportRow[]>(() =>
-  buildDeliveryReport(reportOrders.value, deptName.value, (o) => o.expand?.factory?.name ?? '', craft.value === 'sewing'))
+  buildDeliveryReport(reportOrders.value, deptName.value, (o) => o.expand?.factory?.name ?? '', pricingMode.value, (o) => factoryTaxPoint(o.factory)))
 const showMoldNumber = computed(() => craft.value === 'injection')
 const showContractNumber = computed(() => craft.value === 'sewing')
-const visibleHeaders = computed(() => deliveryHeaders(showMoldNumber.value, showContractNumber.value))
+const visibleHeaders = computed(() => deliveryHeaders(showMoldNumber.value, showContractNumber.value, pricingMode.value))
 
 const COLUMN_WIDTHS: Record<string, number> = {
   '范围': 140,
@@ -287,20 +293,26 @@ type RowDraft = {
 }
 const drafts = ref<Record<string, RowDraft>>({})
 
-function convertedOutPrice(cnyTaxPrice: number, rateOrTaxPoint: number) {
-  return craft.value === 'sewing'
-    ? cnyTaxToUntaxedRmb(cnyTaxPrice, rateOrTaxPoint)
-    : cnyTaxToHkdUntaxed(cnyTaxPrice, rateOrTaxPoint)
+function convertedOutPrice(cnyTaxPrice: number, exchangeRate: number, taxPoint: number | null): number | undefined {
+  if (pricingMode.value === 'rmb-tax') return cnyTaxToUntaxedRmb(cnyTaxPrice, taxPoint ?? exchangeRate)
+  if (pricingMode.value === 'hkd-tax') {
+    // 缺税点时不按 0 折算（会静默把工价写成 0），返回 undefined 让校验拦截并提示维护税点
+    if (taxPoint == null) return undefined
+    return cnyTaxToHkdUntaxed(cnyTaxPrice, exchangeRate, taxPoint)
+  }
+  return cnyTaxToHkdUntaxed(cnyTaxPrice, exchangeRate)
 }
 
 function normalizeDeptPricing(payload: Record<string, any>) {
-  if (craft.value !== 'sewing') return payload
   const configuredTaxPoint = factoryTaxPoint(payload.factory)
-  if (configuredTaxPoint != null) payload.exchange_rate = configuredTaxPoint
   const cnyTaxPrice = Number(payload.unit_price_cny_tax)
-  const taxPoint = Number(payload.exchange_rate)
-  if (Number.isFinite(cnyTaxPrice) && Number.isFinite(taxPoint) && taxPoint > 0) {
-    payload.unit_price = cnyTaxToUntaxedRmb(cnyTaxPrice, taxPoint)
+  if (pricingMode.value === 'rmb-tax' && configuredTaxPoint != null) {
+    payload.exchange_rate = configuredTaxPoint
+    if (Number.isFinite(cnyTaxPrice)) payload.unit_price = cnyTaxToUntaxedRmb(cnyTaxPrice, configuredTaxPoint)
+  } else if (pricingMode.value === 'hkd-tax' && configuredTaxPoint != null && Number.isFinite(cnyTaxPrice)) {
+    const exchangeRate = Number(payload.exchange_rate) || DEFAULT_CNY_TO_HKD_RATE
+    payload.exchange_rate = exchangeRate
+    payload.unit_price = cnyTaxToHkdUntaxed(cnyTaxPrice, exchangeRate, configuredTaxPoint)
   }
   return payload
 }
@@ -411,7 +423,7 @@ function setDraftValue(row: DetailRow, field: keyof RowDraft, value: string) {
     const cnyTaxPrice = Number(drafts.value[row.id].unit_price_cny_tax)
     const exchangeRate = Number(drafts.value[row.id].exchange_rate)
     drafts.value[row.id].unit_price = drafts.value[row.id].unit_price_cny_tax.trim() && Number.isFinite(cnyTaxPrice) && Number.isFinite(exchangeRate) && exchangeRate > 0
-      ? String(convertedOutPrice(cnyTaxPrice, exchangeRate))
+      ? String(convertedOutPrice(cnyTaxPrice, exchangeRate, factoryTaxPoint(sourceOrder(row)?.factory)) ?? '')
       : ''
   }
 }
@@ -437,6 +449,7 @@ function exportExcel() {
     `${deptName.value}外发加工厂交货延期统计表`,
     showMoldNumber.value,
     showContractNumber.value,
+    pricingMode.value,
   )
 }
 
@@ -449,11 +462,10 @@ async function saveRow(row: DetailRow) {
   const enteredUnitPrice = parsePrice(draft.unit_price)
   const unitPriceCnyTax = parsePrice(draft.unit_price_cny_tax)
   const source = sourceOrder(row)
-  const exchangeRate = craft.value === 'sewing'
-    ? factoryTaxPoint(source?.factory)
-    : parsePrice(draft.exchange_rate)
-  const unitPrice = craft.value === 'sewing' && unitPriceCnyTax != null && exchangeRate != null
-    ? cnyTaxToUntaxedRmb(unitPriceCnyTax, exchangeRate)
+  const taxPoint = factoryTaxPoint(source?.factory)
+  const exchangeRate = pricingMode.value === 'rmb-tax' ? taxPoint : parsePrice(draft.exchange_rate)
+  const unitPrice = unitPriceCnyTax != null && exchangeRate != null
+    ? convertedOutPrice(unitPriceCnyTax, exchangeRate, taxPoint)
     : enteredUnitPrice
   if (!product) {
     showSaveToast('error', '保存失败：请输入物料名称')
@@ -464,7 +476,7 @@ async function saveRow(row: DetailRow) {
     return
   }
   if (quote === undefined || unitPrice === undefined || unitPriceCnyTax === undefined || exchangeRate === undefined || (exchangeRate != null && exchangeRate <= 0)) {
-    showSaveToast('error', craft.value === 'sewing' && exchangeRate == null
+    showSaveToast('error', usesFactoryTaxPoint.value && taxPoint == null
       ? '保存失败：请先在工厂信息管理中维护该加工厂的税点'
       : '保存失败：工价请输入有效数字')
     return
@@ -519,18 +531,17 @@ async function copyRow(row: DetailRow) {
   const quote = parsePrice(draft.quote_labor_price)
   const enteredUnitPrice = parsePrice(draft.unit_price)
   const unitPriceCnyTax = parsePrice(draft.unit_price_cny_tax)
-  const exchangeRate = craft.value === 'sewing'
-    ? factoryTaxPoint(source.factory)
-    : parsePrice(draft.exchange_rate)
-  const unitPrice = craft.value === 'sewing' && unitPriceCnyTax != null && exchangeRate != null
-    ? cnyTaxToUntaxedRmb(unitPriceCnyTax, exchangeRate)
+  const taxPoint = factoryTaxPoint(source.factory)
+  const exchangeRate = pricingMode.value === 'rmb-tax' ? taxPoint : parsePrice(draft.exchange_rate)
+  const unitPrice = unitPriceCnyTax != null && exchangeRate != null
+    ? convertedOutPrice(unitPriceCnyTax, exchangeRate, taxPoint)
     : enteredUnitPrice
   if (quantity === undefined) {
     alert('数量请输入有效数字')
     return
   }
   if (quote === undefined || unitPrice === undefined || unitPriceCnyTax === undefined || exchangeRate === undefined || (exchangeRate != null && exchangeRate <= 0)) {
-    alert(craft.value === 'sewing' && exchangeRate == null
+    alert(usesFactoryTaxPoint.value && taxPoint == null
       ? '请先在工厂信息管理中维护该加工厂的税点'
       : '工价请输入有效数字')
     return
@@ -719,7 +730,7 @@ async function removeRow(row: DetailRow) {
                 </td>
                 <td :class="columnClassFor(visibleHeaders[columnIndex('外发工价(港币不含税$)')] ? '外发工价(港币不含税$)' : '外发工价(不含税RMB)')" :style="columnStyleFor(visibleHeaders[columnIndex('外发工价(港币不含税$)')] ? '外发工价(港币不含税$)' : '外发工价(不含税RMB)')">
                   <input v-if="canEdit" type="number" class="price-inp" min="0" step="0.0001"
-                    :readonly="showContractNumber"
+                    :readonly="pricingMode === 'rmb-tax' || pricingMode === 'hkd-tax'"
                     :value="draftValue(r, 'unit_price')"
                     @input="setDraftValue(r, 'unit_price', ($event.target as HTMLInputElement).value)" />
                   <span v-else>{{ r.outPrice }}</span>
@@ -730,12 +741,15 @@ async function removeRow(row: DetailRow) {
                     @input="setDraftValue(r, 'unit_price_cny_tax', ($event.target as HTMLInputElement).value)" />
                   <span v-else>{{ r.outPriceCnyTax }}</span>
                 </td>
-                <td :class="columnClassFor(showContractNumber ? '税点' : '换算汇率')" :style="columnStyleFor(showContractNumber ? '税点' : '换算汇率')">
+                <td :class="columnClassFor(pricingMode === 'rmb-tax' ? '税点' : '换算汇率')" :style="columnStyleFor(pricingMode === 'rmb-tax' ? '税点' : '换算汇率')">
                   <input v-if="canEdit" type="number" class="rate-inp" min="0.0001" step="0.01"
-                    :readonly="showContractNumber"
+                    :readonly="pricingMode === 'rmb-tax'"
                     :value="draftValue(r, 'exchange_rate')"
                     @input="setDraftValue(r, 'exchange_rate', ($event.target as HTMLInputElement).value)" />
                   <span v-else>{{ r.exchangeRate }}</span>
+                </td>
+                <td v-if="pricingMode === 'hkd-tax'" :class="columnClassFor('税点')" :style="columnStyleFor('税点')">
+                  {{ r.taxPoint ?? '-' }}
                 </td>
                 <td :class="[columnClassFor('占比', 1), { 'over-limit': isPercentOver100(r.priceRatio) }]" :style="columnStyleFor('占比', 1)">{{ r.priceRatio }}</td>
                 <td :class="columnClassFor('备注')" :style="columnStyleFor('备注')">

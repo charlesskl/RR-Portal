@@ -47,7 +47,7 @@ function exportExcel(craft: Craft | null = null, region: Region | null = null) {
     员工人数: f.staff_count ?? '',
     月产能: f.monthly_capacity ?? '',
     加工类型: f.processable_types ?? '',
-    税点: f.craft === 'sewing' ? (taxPointFactor(f.tax_point) ?? '') : '',
+    税点: taxPointFactor(f.tax_point) ?? '',
     '环评/消防/安监资质': f.cert_status ?? '',
     合作车间: f.cooperative_workshops ?? '',
     IP管控: f.ip_control ?? '',
@@ -120,10 +120,8 @@ async function importExcel(ev: Event) {
     setNum(fd, 'staff_count', '员工人数', '人员', '人员(人)')
     setNum(fd, 'monthly_capacity', '月产能')
     setNum(fd, 'annual_revenue', '年生意额(万)', '年生意额')
-    if (craft === 'sewing') {
-      const taxPoint = taxPointRate(pick('税点'))
-      if (taxPoint != null) fd.append('tax_point', String(taxPoint))
-    }
+    const taxPoint = taxPointRate(pick('税点'))
+    if (taxPoint != null) fd.append('tax_point', String(taxPoint))
     // 设备(类型×数量)：解析 "注塑机×3，喷涂线×2"
     const equipRaw = String(pick('设备(类型×数量)', '设备类型') ?? '').trim()
     if (equipRaw) {

@@ -10,19 +10,25 @@ export const DELIVERY_HEADERS = [
   '核价工价(港币不含税$)', '外发工价(港币不含税$)', '外发工价(人民币含税)', '换算汇率', '占比', '备注',
 ]
 
+/** Price columns differ by region: Hunan keeps RMB, while selected Dongguan departments show both FX and tax point. */
+export type DeliveryPricingMode = 'hkd' | 'rmb-tax' | 'hkd-tax'
+
 export function deliveryHeaders(
   includeMoldNumber = true,
   includeContractNumber = false,
+  pricingMode: DeliveryPricingMode = includeContractNumber ? 'rmb-tax' : 'hkd',
 ) {
   let headers = DELIVERY_HEADERS.filter((header) => includeMoldNumber || header !== '模具编号')
-  if (includeContractNumber) {
-    headers.splice(headers.indexOf('货号'), 0, '合同号')
+  if (includeContractNumber) headers.splice(headers.indexOf('货号'), 0, '合同号')
+  if (pricingMode === 'rmb-tax') {
     headers = headers.map((header) => {
       if (header === '核价工价(港币不含税$)') return '核价工价(不含税RMB)'
       if (header === '外发工价(港币不含税$)') return '外发工价(不含税RMB)'
       if (header === '换算汇率') return '税点'
       return header
     })
+  } else if (pricingMode === 'hkd-tax') {
+    headers.splice(headers.indexOf('换算汇率') + 1, 0, '税点')
   }
   return headers
 }
@@ -80,6 +86,7 @@ export interface DetailRow extends Metrics {
   actual_delivery_date: string
   delay_days: number | null
   exchangeRate: number
+  taxPoint: number | null
   notes: string
   rangeSpan: number
   pmcSpan: number
@@ -145,13 +152,21 @@ function detailOrderStats(os: Order[]) {
   return stats
 }
 
-function metricsOf(os: Order[], useSewingTaxPoint = false): Metrics {
+function normalizePricingMode(mode: DeliveryPricingMode | boolean) {
+  return mode === true ? 'rmb-tax' : mode === false ? 'hkd' : mode
+}
+
+function metricsOf(
+  os: Order[],
+  pricingMode: DeliveryPricingMode | boolean = 'hkd',
+  factoryTaxPoint: (order: Order) => number | null = () => null,
+): Metrics {
   const orderStats = uniqueOrderStats(os)
   const inspect = os.reduce((a, o) => a + num(o.inspect_count), 0)
   const qualified = os.reduce((a, o) => a + Math.max(0, num(o.inspect_count) - num(o.defect_count)), 0)
   const returnCount = os.reduce((a, o) => a + num(o.return_count), 0)
   const quote = r2(os.reduce((a, o) => a + num(o.quote_labor_price), 0))
-  const outPrice = r2(os.reduce((a, o) => a + effectiveOutPrice(o, useSewingTaxPoint), 0))
+  const outPrice = r2(os.reduce((a, o) => a + effectiveOutPrice(o, normalizePricingMode(pricingMode), factoryTaxPoint(o)), 0))
   const outPriceCnyTax = r2(os.reduce((a, o) => a + num(o.unit_price_cny_tax), 0))
   return {
     orderCount: orderStats.orderCount,
@@ -170,11 +185,18 @@ function metricsOf(os: Order[], useSewingTaxPoint = false): Metrics {
   }
 }
 
-function effectiveOutPrice(order: Order, useSewingTaxPoint = false) {
+function effectiveOutPrice(order: Order, pricingMode: DeliveryPricingMode = 'hkd', factoryTaxPoint: number | null = null) {
   const hkdPrice = num(order.unit_price)
   const cnyTaxPrice = num(order.unit_price_cny_tax)
   const exchangeRate = num(order.exchange_rate) || DEFAULT_CNY_TO_HKD_RATE
-  if (useSewingTaxPoint && cnyTaxPrice) return cnyTaxToUntaxedRmb(cnyTaxPrice, exchangeRate)
+  const taxPoint = factoryTaxPoint ?? (pricingMode === 'rmb-tax' ? exchangeRate : null)
+  if (pricingMode === 'rmb-tax' && cnyTaxPrice) return cnyTaxToUntaxedRmb(cnyTaxPrice, taxPoint ?? 0)
+  if (pricingMode === 'hkd-tax' && cnyTaxPrice) {
+    // 工厂未维护税点时不能按 0 折算（否则历史数据外发工价全归零）：
+    // 回退到手填港币价，其次按默认 1.13 系数折算
+    if (taxPoint == null) return hkdPrice || cnyTaxToHkdUntaxed(cnyTaxPrice, exchangeRate)
+    return cnyTaxToHkdUntaxed(cnyTaxPrice, exchangeRate, taxPoint)
+  }
   return hkdPrice || (cnyTaxPrice ? cnyTaxToHkdUntaxed(cnyTaxPrice, exchangeRate) : 0)
 }
 
@@ -182,8 +204,10 @@ export function buildDeliveryReport(
   orders: Order[],
   range: string,
   factoryName: (o: Order) => string,
-  useSewingTaxPoint = false,
+  pricingMode: DeliveryPricingMode | boolean = 'hkd',
+  factoryTaxPoint: (order: Order) => number | null = () => null,
 ): ReportRow[] {
+  const mode = normalizePricingMode(pricingMode)
   // 分组 下单PMC → 加工厂（保持组内相邻）
   const sorted = [...orders].sort((a, b) =>
     (a.pmc ?? '').localeCompare(b.pmc ?? '') ||
@@ -225,7 +249,8 @@ export function buildDeliveryReport(
         const qualified = Math.max(0, inspect - num(o.defect_count))
         const returnCount = num(o.return_count)
         const quote = o.quote_labor_price ?? 0
-        const outPrice = effectiveOutPrice(o, useSewingTaxPoint)
+        const taxPoint = factoryTaxPoint(o)
+        const outPrice = effectiveOutPrice(o, mode, taxPoint)
         const outPriceCnyTax = o.unit_price_cny_tax ?? 0
         const orderStats = orderStatsById.get(o.id) ?? {
           orderCount: 1,
@@ -249,7 +274,10 @@ export function buildDeliveryReport(
           delivery_date: o.delivery_date ? o.delivery_date.slice(0, 10) : '',
           actual_delivery_date: o.actual_delivery_date ? o.actual_delivery_date.slice(0, 10) : '',
           delay_days: o.delay_days ?? null,
-          exchangeRate: num(o.exchange_rate) || DEFAULT_CNY_TO_HKD_RATE,
+          exchangeRate: mode === 'rmb-tax'
+            ? (taxPoint ?? (num(o.exchange_rate) || DEFAULT_CNY_TO_HKD_RATE))
+            : (num(o.exchange_rate) || DEFAULT_CNY_TO_HKD_RATE),
+          taxPoint,
           notes: o.notes ?? '',
           orderCount: orderStats.orderCount,
           delayedCount: orderStats.delayedCount,
@@ -276,7 +304,7 @@ export function buildDeliveryReport(
         pmcFirst = false
         facFirst = false
       }
-      out.push({ kind: 'subtotal', factory: fac.factory, ...metricsOf(fac.orders, useSewingTaxPoint) })
+      out.push({ kind: 'subtotal', factory: fac.factory, ...metricsOf(fac.orders, mode, factoryTaxPoint) })
     }
   }
   return out
@@ -288,13 +316,16 @@ export function exportDeliveryExcel(
   title: string,
   includeMoldNumber = true,
   includeContractNumber = false,
+  pricingMode: DeliveryPricingMode = includeContractNumber ? 'rmb-tax' : 'hkd',
 ) {
-  const H = deliveryHeaders(includeMoldNumber, includeContractNumber)
+  const H = deliveryHeaders(includeMoldNumber, includeContractNumber, pricingMode)
   const moldColumn = DELIVERY_HEADERS.indexOf('模具编号')
   const visibleValues = (values: any[], splitItemNumber = true) => {
     const visible = includeMoldNumber
       ? [...values]
       : values.filter((_, index) => index !== moldColumn)
+    let taxPointIndex = 21
+    if (!includeMoldNumber) taxPointIndex--
     if (includeContractNumber) {
       const itemColumn = H.indexOf('货号') - 1
       if (splitItemNumber) {
@@ -303,7 +334,9 @@ export function exportDeliveryExcel(
       } else {
         visible.splice(itemColumn + 1, 0, '')
       }
+      taxPointIndex++
     }
+    if (pricingMode !== 'hkd-tax') visible.splice(taxPointIndex, 1)
     return visible
   }
   const titleRow = new Array(H.length).fill('')
@@ -317,7 +350,7 @@ export function exportDeliveryExcel(
         r.rangeSpan ? r.range : '', r.pmcSpan ? r.pmc : '', r.factorySpan ? r.factory : '',
         r.item_no, r.mold_no, r.order_no, r.category, r.product, r.quantity ?? '',
         r.order_date, r.delivery_date, r.actual_delivery_date, r.delay_days ?? '',
-        r.orderCount, r.delayedCount, r.delayRatio, r.delayAvg, r.quote, r.outPrice, r.outPriceCnyTax, r.exchangeRate, r.priceRatio, r.notes,
+        r.orderCount, r.delayedCount, r.delayRatio, r.delayAvg, r.quote, r.outPrice, r.outPriceCnyTax, r.exchangeRate, r.taxPoint ?? '', r.priceRatio, r.notes,
       ]))
       if (r.rangeSpan > 1) merges.push({ s: { r: rr, c: 0 }, e: { r: rr + r.rangeSpan - 1, c: 0 } })
       if (r.pmcSpan > 1) merges.push({ s: { r: rr, c: 1 }, e: { r: rr + r.pmcSpan - 1, c: 1 } })
@@ -325,7 +358,7 @@ export function exportDeliveryExcel(
     } else {
       body.push(visibleValues([
         '', '', '', `${r.factory}-小计`, '', '', '', '', '', '', '', '', '',
-        r.orderCount, r.delayedCount, r.delayRatio, r.delayAvg, r.quote, r.outPrice, r.outPriceCnyTax, '', r.priceRatio, '',
+        r.orderCount, r.delayedCount, r.delayRatio, r.delayAvg, r.quote, r.outPrice, r.outPriceCnyTax, '', '', r.priceRatio, '',
       ], false))
       merges.push({
         s: { r: rr, c: 3 },
@@ -352,7 +385,7 @@ const cleanText = (s: any) => String(s ?? '').trim()
 function parseNumberCell(value: any): number | undefined {
   if (value === '' || value == null) return undefined
   if (typeof value === 'number') return Number.isFinite(value) ? value : undefined
-  const cleaned = String(value).replace(/[,，\s]/g, '').trim()
+  const cleaned = String(value).replace(/[¥￥$]/g, '').replace(/[,，\s]/g, '').trim()
   if (!cleaned || /^[-－—]+$/.test(cleaned)) return undefined
   const next = Number(cleaned)
   return Number.isFinite(next) ? next : undefined
@@ -372,6 +405,12 @@ function formatImportDate(value: any): string {
   const m = text.match(/(\d{4})[\/\-年.](\d{1,2})[\/\-月.](\d{1,2})/)
   if (!m) return text
   return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`
+}
+
+function lastDateInText(value: any): string {
+  // 先 compactText 去掉所有空白（合同里常见 "2026 年 7 月 20 日" 带空格的写法）
+  const matches = compactText(value).match(/(\d{4})[\/\-年.](\d{1,2})[\/\-月.](\d{1,2})/g)
+  return matches?.length ? formatImportDate(matches.at(-1)) : ''
 }
 
 function factoryIdOf(factoryIdByName: Record<string, string>, name: string) {
@@ -523,18 +562,22 @@ function parseAssemblyContractImport(
     notes: colContaining('备注'),
   }
   const beforeHeader = aoa.slice(0, headerIdx)
-  const factoryName = labeledValues(beforeHeader, '厂商').at(-1) ?? ''
+  const factoryName = labeledValues(beforeHeader, '厂商').at(-1)
+    || labeledValues(beforeHeader, '供应商').at(-1)
+    || ''
   const orderNo = labeledValues(beforeHeader, '订单编号').at(-1) ?? ''
   const standaloneOrderDate = beforeHeader.flat()
     .map(formatImportDate)
     .find((value) => /^\d{4}-\d{2}-\d{2}$/.test(value)) ?? ''
-  const orderDate = labeledDates(aoa, '时间').at(-1) ?? standaloneOrderDate
+  const orderDate = labeledDates(aoa, '下单日期').at(-1)
+    || labeledDates(aoa, '时间').at(-1)
+    || standaloneOrderDate
   const pmc = labeledValue(aoa.flat(), '采购签核', ['主管', '生产经理', '经理'])
     || labeledValues(aoa, '采购签核').at(-1)
     || ''
   const deliveryText = aoa.flat().map(cleanText)
     .find((value) => /前交货/.test(value) && /\d{4}\s*年/.test(value)) ?? ''
-  const deliveryDate = formatImportDate(compactText(deliveryText))
+  const deliveryDate = lastDateInText(deliveryText)
   const factoryId = factoryIdOf(factoryIdByName, factoryName)
 
   const payloads: Record<string, any>[] = []
@@ -832,6 +875,51 @@ function parseSewingPurchaseOrderImport(
   return { payloads, failed }
 }
 
+// 湖南车缝采购单：没有“合同号/货号”列，以加工项目作为加工类别。
+function parseHunanSewingPurchaseOrderImport(
+  aoa: any[][],
+  headerIdx: number,
+  header: string[],
+  factoryIdByName: Record<string, string>,
+): { payloads: Record<string, any>[]; failed: number } {
+  const colContaining = (...aliases: string[]) => header.findIndex((cell) => aliases.some((alias) => cell.includes(compactText(alias))))
+  const C = {
+    item_no: colContaining('货号'), product: colContaining('货品名称'), qty: colContaining('数量'),
+    out: colContaining('单价'), category: colContaining('加工项目'), notes: colContaining('备注'),
+  }
+  const metadata = aoa.slice(0, headerIdx)
+  const factoryName = labeledValues(metadata, '供应商').at(-1) ?? ''
+  const orderNo = labeledValues(metadata, '订单编号').at(-1) ?? ''
+  const pmc = labeledValues(aoa, '采购签核').at(-1) ?? ''
+  const orderDate = labeledDates(aoa, '时间').at(-1) ?? ''
+  const deliveryText = aoa.flat().map(cleanText).find((text) => /交货期/.test(text) && /\d{4}\s*年/.test(text)) ?? ''
+  const deliveryDate = lastDateInText(deliveryText)
+  const factoryId = factoryIdOf(factoryIdByName, factoryName)
+  const payloads: Record<string, any>[] = []
+  let failed = 0
+  const cell = (row: any[], index: number) => (index >= 0 ? row[index] : '')
+  for (const row of aoa.slice(headerIdx + 1)) {
+    const itemNo = cleanText(cell(row, C.item_no))
+    const product = cleanText(cell(row, C.product))
+    if (!itemNo || !product || /合计|小计/.test(itemNo) || /合计|小计/.test(product)) continue
+    if (!factoryId) { failed++; continue }
+    const qty = parseNumberCell(cell(row, C.qty))
+    const out = parseNumberCell(cell(row, C.out))
+    const payload: Record<string, any> = {
+      factory: factoryId, pmc, item_no: itemNo, order_no: orderNo,
+      process_category: cleanText(cell(row, C.category)) || '车缝', product,
+      notes: cleanText(cell(row, C.notes)), status: 'placed', is_delayed: false,
+    }
+    if (qty != null) payload.quantity = qty
+    if (out != null) payload.unit_price_cny_tax = out
+    if (qty != null && out != null) payload.amount = qty * out
+    if (orderDate) payload.order_date = orderDate
+    if (deliveryDate) payload.delivery_date = deliveryDate
+    payloads.push(payload)
+  }
+  return { payloads, failed }
+}
+
 function parseMoldingContractImport(
   aoa: any[][],
   headerIdx: number,
@@ -891,6 +979,71 @@ function parseMoldingContractImport(
   return { payloads, failed }
 }
 
+// 湖南注塑“采购单（啤机）”：同一工作表可连续放置多张采购单，每张订单的表头都以货号/模号/名称开头。
+function parseHunanInjectionPurchaseOrderImport(
+  aoa: any[][],
+  factoryIdByName: Record<string, string>,
+): { payloads: Record<string, any>[]; failed: number } {
+  const isHeader = (row: any[]) => {
+    const cells = row.map(compactText)
+    return cells.includes('货号') && cells.includes('模号') && cells.includes('名称')
+      && cells.includes('加工类别') && cells.includes('数量')
+      && cells.some((cell) => cell.includes('外发单价'))
+  }
+  const headerIndexes = aoa.reduce<number[]>((indexes, row, index) => {
+    if (isHeader(row)) indexes.push(index)
+    return indexes
+  }, [])
+  const payloads: Record<string, any>[] = []
+  let failed = 0
+
+  for (let section = 0; section < headerIndexes.length; section++) {
+    const headerIdx = headerIndexes[section]
+    const previousHeaderIdx = headerIndexes[section - 1] ?? -1
+    const nextHeaderIdx = headerIndexes[section + 1] ?? aoa.length
+    const metadata = aoa.slice(previousHeaderIdx + 1, headerIdx)
+    const sectionRows = aoa.slice(headerIdx + 1, nextHeaderIdx)
+    const header = aoa[headerIdx].map(compactText)
+    const colContaining = (...aliases: string[]) => header.findIndex((cell) => aliases.some((alias) => cell.includes(compactText(alias))))
+    const C = {
+      item_no: colContaining('货号'), mold_no: colContaining('模号'), product: colContaining('名称'),
+      category: colContaining('加工类别'), qty: colContaining('数量'), out: colContaining('外发单价'),
+      amount: colContaining('金额'), delivery_date: colContaining('完成交货期', '交货期'), notes: colContaining('备注'),
+    }
+    const factoryName = labeledValues(metadata, '加工商').at(-1) || labeledValues(metadata, '供应商').at(-1) || ''
+    const orderNo = labeledValues(metadata, 'PMC单编号').at(-1) || labeledValues(metadata, '订单编号').at(-1) || ''
+    const orderDate = labeledDates(metadata, '日期').at(-1) ?? ''
+    const pmc = labeledValues(sectionRows, '采购签核').at(-1) || labeledValues(metadata, '采购签核').at(-1) || ''
+    const factoryId = factoryIdOf(factoryIdByName, factoryName)
+    const cell = (row: any[], index: number) => (index >= 0 ? row[index] : '')
+
+    for (const row of sectionRows) {
+      const itemNo = cleanText(cell(row, C.item_no))
+      const product = cleanText(cell(row, C.product))
+      if (!itemNo || !product || /合计|小计/.test(itemNo) || /合计|小计/.test(product)) continue
+      const qty = parseNumberCell(cell(row, C.qty))
+      if (qty == null) continue
+      if (!factoryId) { failed++; continue }
+      const out = parseNumberCell(cell(row, C.out))
+      const amount = parseNumberCell(cell(row, C.amount))
+      const payload: Record<string, any> = {
+        factory: factoryId, pmc, item_no: itemNo, mold_no: cleanText(cell(row, C.mold_no)), order_no: orderNo,
+        process_category: cleanText(cell(row, C.category)), product, notes: cleanText(cell(row, C.notes)),
+        status: 'placed', is_delayed: false,
+      }
+      if (qty != null) payload.quantity = qty
+      if (out != null) payload.unit_price_cny_tax = out
+      if (amount != null) payload.amount = amount
+      else if (out != null) payload.amount = qty * out
+      if (orderDate) payload.order_date = orderDate
+      const deliveryDate = formatImportDate(cell(row, C.delivery_date))
+      if (/^\d{4}-\d{2}-\d{2}$/.test(deliveryDate)) payload.delivery_date = deliveryDate
+      payloads.push(payload)
+    }
+  }
+  return { payloads, failed }
+}
+
 // 解析导入的 Excel(识别表头、跳过小计、加工厂合并向下填充)→ 订单 payload 数组
 export function parseDeliveryImport(
   aoa: any[][],
@@ -910,8 +1063,14 @@ export function parseDeliveryImport(
   if (header.includes('产品货号') && header.includes('产品装配名称') && header.includes('装配方式') && header.includes('加工数量')) {
     return parseAssemblyProcessingContractImport(aoa, headerIdx, header, factoryIdByName)
   }
+  if (header.includes('货号') && header.includes('模号') && header.includes('名称') && header.includes('加工类别') && header.some((cell) => cell.includes('外发单价'))) {
+    return parseHunanInjectionPurchaseOrderImport(aoa, factoryIdByName)
+  }
   if (header.includes('货号') && header.includes('货物名称') && header.includes('加工类别') && header.includes('数量')) {
     return parsePaintingPurchaseOrderImport(aoa, factoryIdByName)
+  }
+  if (header.includes('货号') && header.includes('货品名称') && header.some((cell) => cell.includes('加工项目'))) {
+    return parseHunanSewingPurchaseOrderImport(aoa, headerIdx, header, factoryIdByName)
   }
   if (header.some((cell) => cell.includes('合同号/货号')) && header.includes('货品名称')) {
     return parseSewingPurchaseOrderImport(aoa, headerIdx, header, factoryIdByName)

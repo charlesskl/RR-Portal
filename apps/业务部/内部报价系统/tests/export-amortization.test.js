@@ -7,6 +7,38 @@ const test = require('node:test');
 
 const { buildWorkbook, adaptSurtaxForBase } = require('../backend/services/exportInternal');
 
+test('electronic detail export preserves the original USD currency and formulas', async () => {
+  const workbook = await buildWorkbook({
+    quote: { quote_no: 'USD-ELECTRONIC', product_name: '美金电子报价', qty: 5000 },
+    sections: [
+      { dept: 'electronic', payload_json: JSON.stringify({
+        electronics: [],
+        electronics_doc: {
+          source_currency: 'USD',
+          source_extras: {
+            parts_cost: 0.25, total_cost: 0.25, profit_pct: 12, profit_price: 0.28,
+            mold_fees: [{ name: 'PCB模费', amount: 354, currency: 'USD' }],
+          },
+          meta: { tax_label: '不含税', moq: 5000 },
+          parts: [{ name: 'PCB', spec: '40*35', qty: 1, unit_price: 1.6575, source_unit_price: 0.25, note: '' }],
+        },
+        electronics_extra: { parts_cost: 1.6575, profit_pct: 12 },
+      }) },
+      { dept: 'sales', payload_json: JSON.stringify({ header: { fx_rmb_hkd: 0.85, fx_hkd_usd: 7.8 }, shipping: { scenarios: [] } }) },
+    ],
+  });
+  const sheet = workbook.getWorksheet('电子明细');
+  assert.equal(sheet.getCell('D5').value, '单价USD');
+  assert.equal(sheet.getCell('D6').value, 0.25);
+  assert.equal(sheet.getCell('E6').value.formula, 'C6*D6');
+  assert.equal(sheet.getCell('E6').value.result, 0.25);
+  const values = [];
+  sheet.eachRow(row => row.eachCell(cell => values.push(cell.value)));
+  assert.ok(values.includes('电子报价单（USD）'));
+  assert.ok(values.includes('PCB模费'));
+  assert.ok(values.includes(354));
+});
+
 test('internal export writes product-ratio weighted injection formulas', async () => {
   const workbook = await buildWorkbook({
     quote: { quote_no: 'PRODUCT-MIX', product_name: '产品配比', qty: 1000 },

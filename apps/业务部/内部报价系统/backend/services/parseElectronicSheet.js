@@ -1,5 +1,5 @@
 // 解析"电子报价单"型 xlsx
-// 表头：零件名称 / 规格 / 用量 / 单价RMB / 合计RMB / 备注
+// 表头：零件名称 / 规格 / 用量 / 单价RMB(或 USD) / 合计RMB(或 USD) / 备注
 // 末尾：模费/外购 + 成本汇总（零件成本 / 邦定 / 贴片 / 人工 / 测试 / 包装运输 / 含利润价 / 含税报价）
 const ExcelJS = require('exceljs');
 
@@ -39,6 +39,31 @@ function indexHeader(headerCells) {
   return idx;
 }
 
+function detectCurrency(ws, rows, headerRow) {
+  const headerText = (headerRow || []).map(toStr).join('|').toUpperCase();
+  const sheetText = String(ws.name || '').toUpperCase();
+  const workbookText = rows.map(r => (r || []).map(toStr).join('|')).join('\n').toUpperCase();
+  const usdSignals = [];
+  const rmbSignals = [];
+  if (/单价\s*USD|合计\s*USD/.test(headerText)) usdSignals.push('表头标注 USD');
+  if (/单价\s*RMB|合计\s*RMB/.test(headerText)) rmbSignals.push('表头标注 RMB');
+  if (/\bUSD\b/.test(sheetText)) usdSignals.push('工作表名称含 USD');
+  if (/\bRMB\b/.test(sheetText)) rmbSignals.push('工作表名称含 RMB');
+  if (/USD\s*(?:不含税|含税)|(?:不含税|含税)\s*USD|模费[^\n|]*USD/.test(workbookText)) usdSignals.push('报价内容标注 USD');
+  if (/RMB\s*(?:不含税|含税)|(?:不含税|含税)\s*RMB|模费[^\n|]*RMB/.test(workbookText)) rmbSignals.push('报价内容标注 RMB');
+
+  const headerCurrency = usdSignals[0] === '表头标注 USD' ? 'USD'
+    : (rmbSignals[0] === '表头标注 RMB' ? 'RMB' : null);
+  const currency = headerCurrency || (usdSignals.length > rmbSignals.length ? 'USD' : 'RMB');
+  return {
+    currency,
+    confidence: headerCurrency ? 'high' : (usdSignals.length || rmbSignals.length ? 'medium' : 'low'),
+    conflict: usdSignals.length > 0 && rmbSignals.length > 0 && !headerCurrency,
+    signals: currency === 'USD' ? usdSignals : rmbSignals,
+    all_signals: { USD: usdSignals, RMB: rmbSignals },
+  };
+}
+
 async function parseWorkbook(buffer) {
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.load(buffer);
@@ -53,6 +78,7 @@ async function parseWorkbook(buffer) {
   });
 
   let headerIdx = null;
+  let headerRow = null;
   const parts = [];
   let lastParent = null;
   const extras = { test_repair: 0, packing_shipping: 0, profit_pct: 0, tax_diff: 0, tax_payable: 0 };
@@ -64,15 +90,20 @@ async function parseWorkbook(buffer) {
     const text = joined.join('|');
 
     // 标题元数据
-    const productMatch = text.match(/产品(?:名称|编号)[：:]\s*([^\s|]+)/);
-    if (productMatch) meta.product = productMatch[1];
-    const custMatch = text.match(/客户[：:]\s*([^\s|]+)/);
-    if (custMatch) meta.customer = custMatch[1];
+    const productMatch = text.match(/产品名称[：:]\s*(.*?)(?=产品编号|客户|报价日期|\|)/);
+    if (productMatch && productMatch[1].trim()) meta.product = productMatch[1].trim();
+    const productNoMatch = text.match(/产品编号[：:]\s*([^\s|]+)/);
+    if (productNoMatch) meta.product_no = productNoMatch[1];
+    const custMatch = text.match(/客户[：:]\s*(.*?)(?=报价日期|\|)/);
+    if (custMatch && custMatch[1].trim()) meta.customer = custMatch[1].trim();
     const dateMatch = text.match(/报价日期[：:]\s*([\d.\-/]+)/);
     if (dateMatch) meta.date = dateMatch[1];
 
     if (!headerIdx) {
-      if (isHeader(r)) headerIdx = indexHeader(r);
+      if (isHeader(r)) {
+        headerIdx = indexHeader(r);
+        headerRow = r;
+      }
       continue;
     }
 
@@ -104,6 +135,7 @@ async function parseWorkbook(buffer) {
         else if (label.includes('含税报价')) extras.taxed_price = val;
         else if (label.includes('含利润价')) extras.profit_price = val;
         else if (label.includes('零件成本')) extras.parts_cost = val;
+        else if (label.includes('合计成本')) extras.total_cost = val;
       }
       // 含 *N%利润 提取利润 %
       const profitMatch = text.match(/[*\s]*(\d{1,3})%\s*利润/);
@@ -143,7 +175,51 @@ async function parseWorkbook(buffer) {
 
   if (!parts.length) return { error: '未解析到任何零件行（请确认表头含 零件名称/规格/用量/单价）' };
 
-  return { meta, parts, extras, count: parts.length, sheet_used: ws.name };
+  const currencyDetection = detectCurrency(ws, rows, headerRow);
+  const sourceCurrency = currencyDetection.currency;
+  const fullText = rows.map(r => (r || []).map(toStr).join('|')).join('\n');
+  const moldFees = [];
+  for (const match of fullText.matchAll(/([^\n|：:]{0,20}模费)\s*[：:]\s*(?:USD|RMB|HKD|HK\$|￥|¥)?\s*([\d,.]+)/gi)) {
+    moldFees.push({ name: match[1].trim(), amount: Number(match[2].replace(/,/g, '')), currency: sourceCurrency });
+  }
+  if (moldFees.length) extras.mold_fees = moldFees;
+  const moqMatch = fullText.match(/MOQ\s*[：:]?\s*([\d,.]+)\s*([Kk万]?)/i);
+  if (moqMatch) {
+    let moq = Number(moqMatch[1].replace(/,/g, ''));
+    if (/K/i.test(moqMatch[2])) moq *= 1000;
+    else if (moqMatch[2] === '万') moq *= 10000;
+    meta.moq = moq;
+  }
+  meta.tax_label = /USD\s*不含税|不含税价/.test(fullText) ? '不含税'
+    : (/含税报价|含税价/.test(fullText) ? '含税' : '含税');
+
+  const computedPartsCost = parts.reduce((total, part) => total + (part.amount ?? part.qty * part.unit_price)
+    + (part.children || []).reduce((childTotal, child) => childTotal + (child.amount ?? child.qty * child.unit_price), 0), 0);
+  const computedTotalCost = computedPartsCost + ['bonding_cost', 'smt_cost', 'labor_cost', 'test_repair', 'packing_shipping']
+    .reduce((total, key) => total + (Number(extras[key]) || 0), 0);
+  const computedProfitPrice = computedTotalCost * (1 + (Number(extras.profit_pct) || 0) / 100);
+  const tolerance = 0.000001;
+  const validation = {
+    parts_cost: { expected: extras.parts_cost ?? null, actual: computedPartsCost, ok: extras.parts_cost == null || Math.abs(extras.parts_cost - computedPartsCost) <= tolerance },
+    total_cost: { expected: extras.total_cost ?? null, actual: computedTotalCost, ok: extras.total_cost == null || Math.abs(extras.total_cost - computedTotalCost) <= tolerance },
+    profit_price: { expected: extras.profit_price ?? null, actual: computedProfitPrice, ok: extras.profit_price == null || Math.abs(extras.profit_price - computedProfitPrice) <= tolerance },
+  };
+  validation.ok = validation.parts_cost.ok && validation.total_cost.ok && validation.profit_price.ok;
+
+  const markSourceCurrency = row => {
+    row.currency = sourceCurrency;
+    row.source_unit_price = row.unit_price;
+    row.source_amount = row.amount;
+    (row.children || []).forEach(markSourceCurrency);
+  };
+  parts.forEach(markSourceCurrency);
+
+  return {
+    meta, parts, extras, count: parts.length, sheet_used: ws.name,
+    source_currency: sourceCurrency,
+    currency_detection: currencyDetection,
+    validation,
+  };
 }
 
 module.exports = { parseWorkbook };

@@ -509,13 +509,16 @@ function beautifyFonts(wb, name = FONT) {
 function addElectronicDetailSheet(wb, electronic, quote) {
   const doc = electronic && electronic.electronics_doc;
   if (!doc || !doc.parts || !doc.parts.length) return;
+  const sourceCurrency = doc.source_currency || 'RMB';
+  const sourceExtras = doc.source_extras || doc.extras || {};
+  const sourceUnit = part => part.source_unit_price != null ? num(part.source_unit_price) : num(part.unit_price);
   const ws = wb.addWorksheet('电子明细');
   ws.columns = [
     { width: 12 },  // A 零件名称
     { width: 30 },  // B 规格
     { width: 8 },   // C 用量
-    { width: 12 },  // D 单价RMB
-    { width: 12 },  // E 合计RMB
+    { width: 12 },  // D 原币单价
+    { width: 12 },  // E 原币合计
     { width: 14 },  // F 备注
     { width: 14 },  // G 汇总标签
     { width: 12 },  // H 汇总值
@@ -524,7 +527,7 @@ function addElectronicDetailSheet(wb, electronic, quote) {
   let row = 1;
   // 标题
   ws.mergeCells(row, 1, row, 9);
-  ws.getCell(row, 1).value = '电子报价单';
+  ws.getCell(row, 1).value = `电子报价单（${sourceCurrency}）`;
   ws.getCell(row, 1).font = { bold: true, size: 16, name: 'Microsoft YaHei' };
   ws.getCell(row, 1).alignment = { horizontal: 'center', vertical: 'middle' };
   ws.getRow(row).height = 28;
@@ -538,7 +541,7 @@ function addElectronicDetailSheet(wb, electronic, quote) {
   for (let c = 1; c <= 9; c++) ws.getCell(row, c).font = { name: 'Microsoft YaHei' };
   row += 2;
   // 表头
-  const h = ['零件名称', '规格', '用量', '单价RMB', '合计RMB', '备注'];
+  const h = ['零件名称', '规格', '用量', `单价${sourceCurrency}`, `合计${sourceCurrency}`, '备注'];
   h.forEach((v, i) => { ws.getCell(row, i + 1).value = v; styleHeader(ws.getCell(row, i + 1)); });
   row += 1;
   const dataStart = row;
@@ -547,8 +550,8 @@ function addElectronicDetailSheet(wb, electronic, quote) {
     ws.getCell(row, 1).value = p.name || '';
     ws.getCell(row, 2).value = p.spec || '';
     ws.getCell(row, 3).value = num(p.qty);
-    ws.getCell(row, 4).value = num(p.unit_price);
-    ws.getCell(row, 5).value = { formula: `C${row}*D${row}`, result: num(p.qty) * num(p.unit_price) };
+    ws.getCell(row, 4).value = sourceUnit(p);
+    ws.getCell(row, 5).value = { formula: `C${row}*D${row}`, result: num(p.qty) * sourceUnit(p) };
     ws.getCell(row, 5).numFmt = '0.000';
     ws.getCell(row, 6).value = p.note || '';
     for (let c = 1; c <= 6; c++) styleData(ws.getCell(row, c));
@@ -559,8 +562,8 @@ function addElectronicDetailSheet(wb, electronic, quote) {
       ws.getCell(row, 1).value = '';
       ws.getCell(row, 2).value = c.spec || '';
       ws.getCell(row, 3).value = num(c.qty);
-      ws.getCell(row, 4).value = num(c.unit_price);
-      ws.getCell(row, 5).value = { formula: `C${row}*D${row}`, result: num(c.qty) * num(c.unit_price) };
+      ws.getCell(row, 4).value = sourceUnit(c);
+      ws.getCell(row, 5).value = { formula: `C${row}*D${row}`, result: num(c.qty) * sourceUnit(c) };
       ws.getCell(row, 5).numFmt = '0.000';
       ws.getCell(row, 6).value = c.note || '';
       for (let k = 1; k <= 6; k++) styleData(ws.getCell(row, k));
@@ -570,9 +573,9 @@ function addElectronicDetailSheet(wb, electronic, quote) {
   const dataEnd = row - 1;
   row += 1;
   // 成本汇总
-  const ex = doc.extras || {};
-  const partsCost = sum(doc.parts, p => num(p.qty) * num(p.unit_price)
-    + sum(p.children || [], c => num(c.qty) * num(c.unit_price)));
+  const ex = sourceExtras;
+  const partsCost = sum(doc.parts, p => num(p.qty) * sourceUnit(p)
+    + sum(p.children || [], c => num(c.qty) * sourceUnit(c)));
   const labels = [
     ['零件成本', partsCost, `SUM(E${dataStart}:E${dataEnd})`],
     ['邦定成本', num(ex.bonding_cost), null],
@@ -595,7 +598,9 @@ function addElectronicDetailSheet(wb, electronic, quote) {
   ws.getCell(row, 7).value = '合计成本：';
   ws.getCell(row, 7).alignment = { horizontal: 'right' };
   ws.getCell(row, 7).font = { bold: true, name: 'Microsoft YaHei' };
-  ws.getCell(row, 8).value = { formula: `SUM(H${summaryStart}:H${row - 1})`, result: partsCost + num(ex.test_repair) + num(ex.packing_shipping) };
+  const totalCost = partsCost + num(ex.bonding_cost) + num(ex.smt_cost) + num(ex.labor_cost)
+    + num(ex.test_repair) + num(ex.packing_shipping);
+  ws.getCell(row, 8).value = { formula: `SUM(H${summaryStart}:H${row - 1})`, result: totalCost };
   ws.getCell(row, 8).numFmt = '0.000';
   styleSubtotal(ws.getCell(row, 8), 'sub');
   const totalCostRow = row;
@@ -605,10 +610,10 @@ function addElectronicDetailSheet(wb, electronic, quote) {
   ws.getCell(row, 7).value = `含 ${profitPct}% 利润价：`;
   ws.getCell(row, 7).alignment = { horizontal: 'right' };
   ws.getCell(row, 7).font = { bold: true, name: 'Microsoft YaHei' };
-  const profitVal = ex.profit_price != null ? num(ex.profit_price) : (partsCost + num(ex.test_repair) + num(ex.packing_shipping)) * (1 + profitPct / 100);
+  const profitVal = ex.profit_price != null ? num(ex.profit_price) : totalCost * (1 + profitPct / 100);
   ws.getCell(row, 8).value = { formula: `H${totalCostRow}*(1+${profitPct}/100)`, result: profitVal };
   ws.getCell(row, 8).numFmt = '0.000';
-  ws.getCell(row, 9).value = 'RMB 不含税价';
+  ws.getCell(row, 9).value = `${sourceCurrency} 不含税价`;
   styleSubtotal(ws.getCell(row, 8), 'sub');
   row += 1;
   // 抵税差额
@@ -632,8 +637,30 @@ function addElectronicDetailSheet(wb, electronic, quote) {
   const taxedVal = ex.taxed_price != null ? num(ex.taxed_price) : profitVal + num(ex.tax_diff) + num(ex.tax_payable);
   ws.getCell(row, 8).value = taxedVal;
   ws.getCell(row, 8).numFmt = '0.000';
-  ws.getCell(row, 9).value = 'RMB 含税价';
+  ws.getCell(row, 9).value = `${sourceCurrency} 含税价`;
   styleSubtotal(ws.getCell(row, 8), 'hkd');
+
+  const moldFees = ex.mold_fees || [];
+  if (moldFees.length) {
+    row += 2;
+    ws.getCell(row, 1).value = '模具费用（单独记录，不自动摊入单价）';
+    ws.mergeCells(row, 1, row, 6);
+    styleSection(ws.getCell(row, 1));
+    row += 1;
+    ['费用名称', '金额', '币种', '备注'].forEach((value, index) => {
+      ws.getCell(row, index + 1).value = value;
+      styleHeader(ws.getCell(row, index + 1));
+    });
+    row += 1;
+    moldFees.forEach(fee => {
+      ws.getCell(row, 1).value = fee.name || '模费';
+      ws.getCell(row, 2).value = num(fee.amount);
+      ws.getCell(row, 3).value = fee.currency || sourceCurrency;
+      ws.getCell(row, 4).value = fee.note || '';
+      for (let column = 1; column <= 4; column++) styleData(ws.getCell(row, column));
+      row += 1;
+    });
+  }
 
   const sourceFees = ex.other_fees || [];
   if (sourceFees.length) {

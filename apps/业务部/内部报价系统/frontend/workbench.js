@@ -705,6 +705,50 @@ function elecRowAmount(r, fxRmbHkd) {
 function elecDetailRowCount(parts) {
   return (parts || []).reduce((a, p) => a + 1 + ((p.children || []).length), 0);
 }
+function electronicSourceToRmb(value, currency, fxRmbHkd, fxHkdUsd) {
+  const amount = num(value);
+  const fxRH = num(fxRmbHkd) || 0.85;
+  const fxHU = num(fxHkdUsd) || 7.8;
+  if (currency === 'USD') return amount * fxHU * fxRH;
+  if (currency === 'HKD') return amount * fxRH;
+  return amount;
+}
+function electronicSourceToHkd(value, currency, fxRmbHkd, fxHkdUsd) {
+  const amount = num(value);
+  if (currency === 'USD') return amount * (num(fxHkdUsd) || 7.8);
+  if (currency === 'RMB') return amount / (num(fxRmbHkd) || 0.85);
+  return amount;
+}
+function electronicHkdToSource(value, currency, fxRmbHkd, fxHkdUsd) {
+  const amount = num(value);
+  if (currency === 'USD') return amount / (num(fxHkdUsd) || 7.8);
+  if (currency === 'RMB') return amount * (num(fxRmbHkd) || 0.85);
+  return amount;
+}
+function normalizeElectronicImport(source, fxRmbHkd, fxHkdUsd) {
+  const doc = JSON.parse(JSON.stringify(source || {}));
+  const currency = doc.source_currency || 'RMB';
+  const convertRow = row => {
+    row.currency = currency;
+    if (row.source_unit_price == null) row.source_unit_price = num(row.unit_price);
+    if (row.source_amount == null) row.source_amount = num(row.amount);
+    row.unit_price = +electronicSourceToRmb(row.source_unit_price, currency, fxRmbHkd, fxHkdUsd).toFixed(9);
+    row.amount = +electronicSourceToRmb(row.source_amount, currency, fxRmbHkd, fxHkdUsd).toFixed(9);
+    (row.children || []).forEach(convertRow);
+  };
+  (doc.parts || []).forEach(convertRow);
+  doc.source_extras = JSON.parse(JSON.stringify(doc.extras || {}));
+  const moneyKeys = ['test_repair', 'packing_shipping', 'bonding_cost', 'smt_cost', 'labor_cost',
+    'tax_diff', 'tax_payable', 'taxed_price', 'profit_price', 'parts_cost', 'total_cost'];
+  moneyKeys.forEach(key => {
+    if (doc.extras && doc.extras[key] != null) {
+      doc.extras[key] = +electronicSourceToRmb(doc.extras[key], currency, fxRmbHkd, fxHkdUsd).toFixed(9);
+    }
+  });
+  doc.normalized_currency = 'RMB';
+  doc.import_fx = { fx_rmb_hkd: num(fxRmbHkd) || 0.85, fx_hkd_usd: num(fxHkdUsd) || 7.8 };
+  return doc;
+}
 function ensureElecRmbPrices(rows, fxRmbHkd) {
   const fx = num(fxRmbHkd) || 0.85;
   (rows || []).forEach(row => {
@@ -807,9 +851,13 @@ function upgradeLegacyElecSplit(payload, fx) {
   return true;
 }
 
-function renderHierElectronics(container, rows, onChange, canEdit, fxRmbHkd, pctHost) {
+function renderHierElectronics(container, rows, onChange, canEdit, fxRmbHkd, pctHost, fxHkdUsd) {
   const indoRefreshers = [];
   const fx = num(fxRmbHkd) || 0.85;
+  const fxHU = num(fxHkdUsd) || 7.8;
+  const sourceDoc = pctHost && pctHost.electronics_doc;
+  const sourceCurrency = sourceDoc && sourceDoc.source_currency !== 'RMB' && sourceDoc.source_extras
+    ? sourceDoc.source_currency : 'RMB';
   container.innerHTML = '';
   const table = document.createElement('table'); table.className = 'wb-table hier-table';
   table.innerHTML = `<thead><tr>
@@ -818,7 +866,7 @@ function renderHierElectronics(container, rows, onChange, canEdit, fxRmbHkd, pct
     <th>零件名称</th>
     <th>规格</th>
     <th style="width:70px">用量</th>
-    <th style="width:90px">单价 RMB</th>
+    <th style="width:90px">单价 ${sourceCurrency}</th>
     <th style="width:90px">单价 HKD</th>
     <th style="width:90px">金额 HKD</th>
     <th style="width:80px">税点 %</th>
@@ -846,7 +894,7 @@ function renderHierElectronics(container, rows, onChange, canEdit, fxRmbHkd, pct
     if (canEdit || hasChildren) {
       const btn = document.createElement('button'); btn.className = 'mini'; btn.textContent = row._open ? '▼' : '▶';
       btn.title = '展开/收起子明细'; btn.style.padding = '2px 6px';
-      btn.onclick = () => { row._open = !row._open; renderHierElectronics(container, rows, onChange, canEdit, fxRmbHkd, pctHost); };
+      btn.onclick = () => { row._open = !row._open; renderHierElectronics(container, rows, onChange, canEdit, fxRmbHkd, pctHost, fxHU); };
       tdExp.appendChild(btn);
     }
     tr.appendChild(tdExp);
@@ -891,10 +939,12 @@ function renderHierElectronics(container, rows, onChange, canEdit, fxRmbHkd, pct
         onChange();
       };
       tdQty.appendChild(inpQ);
-      const inpP = document.createElement('input'); inpP.type = 'number'; inpP.step = 'any'; inpP.value = row.unit_price_rmb ?? '';
+      const inpP = document.createElement('input'); inpP.type = 'number'; inpP.step = 'any';
+      inpP.value = row.unit_price_rmb == null ? '' : electronicHkdToSource(freeUnitHkd(row, fx), sourceCurrency, fx, fxHU);
       inpP.oninput = () => {
-        row.unit_price_rmb = inpP.value === '' ? null : Number(inpP.value);
-        row.unit_price = hasFreeRmbPrice(row) ? +(num(row.unit_price_rmb) / fx).toFixed(6) : null;
+        const sourceValue = inpP.value === '' ? null : Number(inpP.value);
+        row.unit_price = sourceValue == null ? null : +electronicSourceToHkd(sourceValue, sourceCurrency, fx, fxHU).toFixed(6);
+        row.unit_price_rmb = sourceValue == null ? null : +electronicSourceToRmb(sourceValue, sourceCurrency, fx, fxHU).toFixed(6);
         refreshAmt();
         onChange();
       };
@@ -904,7 +954,7 @@ function renderHierElectronics(container, rows, onChange, canEdit, fxRmbHkd, pct
       tdQty.className = 'ro'; tdQty.textContent = formatNum(row.qty ?? '');
       const amt = elecRowAmount(row, fxRmbHkd);
       const up = num(row.qty) > 0 ? amt / num(row.qty) : amt;
-      tdRmb.className = 'ro'; tdRmb.textContent = formatNum(up * fx);
+      tdRmb.className = 'ro'; tdRmb.textContent = formatNum(electronicHkdToSource(up, sourceCurrency, fx, fxHU));
       tdHkd.textContent = formatNum(up);
     }
     refreshAmt();
@@ -931,7 +981,7 @@ function renderHierElectronics(container, rows, onChange, canEdit, fxRmbHkd, pct
           row.unit_price = +(rmb / fx).toFixed(6);
         }
         onChange();
-        renderHierElectronics(container, rows, onChange, canEdit, fxRmbHkd, pctHost);
+        renderHierElectronics(container, rows, onChange, canEdit, fxRmbHkd, pctHost, fxHU);
       };
       tdTax.appendChild(sel);
     } else { tdTax.className = 'ro'; tdTax.textContent = taxVal; }
@@ -959,7 +1009,7 @@ function renderHierElectronics(container, rows, onChange, canEdit, fxRmbHkd, pct
     if (canEdit) {
       const td = document.createElement('td');
       const b = document.createElement('button'); b.textContent = '×'; b.className = 'mini danger';
-      b.onclick = () => { rows.splice(idx, 1); renderHierElectronics(container, rows, onChange, canEdit, fxRmbHkd, pctHost); onChange(); };
+      b.onclick = () => { rows.splice(idx, 1); renderHierElectronics(container, rows, onChange, canEdit, fxRmbHkd, pctHost, fxHU); onChange(); };
       td.appendChild(b); tr.appendChild(td);
     }
     tbody.appendChild(tr);
@@ -968,7 +1018,7 @@ function renderHierElectronics(container, rows, onChange, canEdit, fxRmbHkd, pct
     if (row._open) {
       const trChild = document.createElement('tr'); trChild.className = 'hier-child-row';
       const td = document.createElement('td'); td.colSpan = canEdit ? 12 : 11;
-      td.appendChild(renderHierChildren(row.children, () => { refreshAmt(); onChange(); }, canEdit, fxRmbHkd));
+      td.appendChild(renderHierChildren(row.children, () => { refreshAmt(); onChange(); }, canEdit, fxRmbHkd, sourceCurrency, fxHU));
       trChild.appendChild(td);
       tbody.appendChild(trChild);
     }
@@ -978,13 +1028,15 @@ function renderHierElectronics(container, rows, onChange, canEdit, fxRmbHkd, pct
   if (canEdit) {
     const btn = document.createElement('button'); btn.className = 'mini'; btn.textContent = '+ 新增电子件';
     btn.style.marginTop = '8px';
-    btn.onclick = () => { rows.push({ name: '', qty: 1, unit_price_rmb: 0, unit_price: 0, children: [] }); renderHierElectronics(container, rows, onChange, canEdit, fxRmbHkd, pctHost); onChange(); };
+    btn.onclick = () => { rows.push({ name: '', qty: 1, unit_price_rmb: 0, unit_price: 0, children: [] }); renderHierElectronics(container, rows, onChange, canEdit, fxRmbHkd, pctHost, fxHU); onChange(); };
     container.appendChild(btn);
   }
 }
 
-function renderHierChildren(children, onParentChange, canEdit, fxRmbHkd) {
+function renderHierChildren(children, onParentChange, canEdit, fxRmbHkd, sourceCurrency, fxHkdUsd) {
   const fx = num(fxRmbHkd) || 0.85;
+  const fxHU = num(fxHkdUsd) || 7.8;
+  sourceCurrency = sourceCurrency || 'RMB';
   ensureElecRmbPrices(children || [], fx);
   const wrap = document.createElement('div'); wrap.className = 'hier-children';
   function rebuild() {
@@ -998,7 +1050,7 @@ function renderHierChildren(children, onParentChange, canEdit, fxRmbHkd) {
     <th>子项名称</th>
     <th>规格</th>
     <th style="width:70px">用量</th>
-    <th style="width:90px">单价 RMB</th>
+    <th style="width:90px">单价 ${sourceCurrency}</th>
     <th style="width:90px">单价 HKD</th>
     <th style="width:90px">金额 HKD</th>
     <th>备注</th>
@@ -1038,16 +1090,18 @@ function renderHierChildren(children, onParentChange, canEdit, fxRmbHkd) {
     else { tdQ.className='ro'; tdQ.textContent = formatNum(c.qty ?? ''); }
     const tdP = document.createElement('td');
     if (canEdit) {
-      const i = document.createElement('input'); i.type='number'; i.step='any'; i.value = c.unit_price_rmb ?? '';
+      const i = document.createElement('input'); i.type='number'; i.step='any';
+      i.value = c.unit_price_rmb == null ? '' : electronicHkdToSource(freeUnitHkd(c, fx), sourceCurrency, fx, fxHU);
       i.oninput = () => {
-        c.unit_price_rmb = i.value===''?null:Number(i.value);
-        c.unit_price = hasFreeRmbPrice(c) ? +(num(c.unit_price_rmb) / fx).toFixed(6) : null;
+        const sourceValue = i.value === '' ? null : Number(i.value);
+        c.unit_price = sourceValue == null ? null : +electronicSourceToHkd(sourceValue, sourceCurrency, fx, fxHU).toFixed(6);
+        c.unit_price_rmb = sourceValue == null ? null : +electronicSourceToRmb(sourceValue, sourceCurrency, fx, fxHU).toFixed(6);
         refresh();
         onParentChange();
       };
       tdP.appendChild(i);
     }
-    else { tdP.className='ro'; tdP.textContent = formatNum(freeUnitRmb(c, fx)); }
+    else { tdP.className='ro'; tdP.textContent = formatNum(electronicHkdToSource(freeUnitHkd(c, fx), sourceCurrency, fx, fxHU)); }
     refresh();
     const tdN = document.createElement('td');
     if (canEdit) { const i = document.createElement('input'); i.value = c.note ?? ''; i.oninput = () => { c.note = i.value; onParentChange(); }; tdN.appendChild(i); }
@@ -1077,67 +1131,84 @@ function renderHierChildren(children, onParentChange, canEdit, fxRmbHkd) {
   return wrap;
 }
 
-function renderElecExtra(host, payload, onChange, canEdit, fxRmbHkd) {
+function renderElecExtra(host, payload, onChange, canEdit, fxRmbHkd, fxHkdUsd) {
   const fx = num(fxRmbHkd) || 0.85;
+  const fxHU = num(fxHkdUsd) || 7.8;
   const x = payload.electronics_extra;
+  const doc = payload.electronics_doc;
+  const sourceCurrency = (doc && doc.source_currency) || 'RMB';
+  const usesSourceCurrency = sourceCurrency !== 'RMB' && doc && doc.source_extras;
+  const currency = usesSourceCurrency ? sourceCurrency : 'RMB';
+  const displayX = usesSourceCurrency ? doc.source_extras : x;
   // 默认初始化新字段
-  ['bonding_cost', 'smt_cost', 'labor_cost'].forEach(k => { if (x[k] == null) x[k] = 0; });
+  ['bonding_cost', 'smt_cost', 'labor_cost', 'test_repair', 'packing_shipping', 'tax_diff'].forEach(k => {
+    if (x[k] == null) x[k] = 0;
+    if (displayX[k] == null) displayX[k] = 0;
+  });
+  if (displayX.profit_pct == null) displayX.profit_pct = num(x.profit_pct);
   // 零件成本 优先用 细表（导入明细）；没有细表才回退用 总表
   const computePartsFromDoc = () => {
-    const doc = payload.electronics_doc;
     if (!doc || !doc.parts || !doc.parts.length) return null;
-    return sum(doc.parts, p => num(p.qty) * num(p.unit_price)
-      + sum(p.children || [], c => num(c.qty) * num(c.unit_price)));
+    const unit = row => usesSourceCurrency && row.source_unit_price != null ? num(row.source_unit_price) : num(row.unit_price);
+    return sum(doc.parts, p => num(p.qty) * unit(p)
+      + sum(p.children || [], c => num(c.qty) * unit(c)));
   };
-  const partsRaw = computePartsFromDoc() ?? sum(payload.electronics || [], r => elecRowAmount(r, fxRmbHkd));
+  const fallbackParts = () => sum(payload.electronics || [], r => num(r.qty) * num(r.unit_price_rmb));
+  const partsRaw = computePartsFromDoc() ?? fallbackParts();
   const partsAfterLoss = partsRaw;  // 不计损耗
-  const costBeforeTax = partsAfterLoss + num(x.bonding_cost) + num(x.smt_cost) + num(x.labor_cost)
-    + num(x.test_repair) + num(x.packing_shipping); // 成本合计(不含税)
-  const profitPrice = costBeforeTax * (1 + num(x.profit_pct)/100); // 含利润价
-  const taxPayableAuto = num(x.tax_diff) * 0.1; // 应交税负 = 抵税差额 × 10%
-  x.tax_payable = taxPayableAuto;
-  const taxed = profitPrice + num(x.tax_diff) + taxPayableAuto; // 含税核价
+  const costBeforeTax = partsAfterLoss + num(displayX.bonding_cost) + num(displayX.smt_cost) + num(displayX.labor_cost)
+    + num(displayX.test_repair) + num(displayX.packing_shipping); // 成本合计(不含税)
+  const profitPrice = costBeforeTax * (1 + num(displayX.profit_pct)/100); // 含利润价
+  const taxPayableAuto = num(displayX.tax_diff) * 0.1; // 应交税负 = 抵税差额 × 10%
+  displayX.tax_payable = taxPayableAuto;
+  x.tax_payable = electronicSourceToRmb(taxPayableAuto, currency, fx, fxHU);
+  const taxed = profitPrice + num(displayX.tax_diff) + taxPayableAuto; // 含税核价
+  const taxLabel = (doc && doc.meta && doc.meta.tax_label) || '含税';
+  const finalLabel = taxLabel === '不含税' ? '报价' : '含税核价';
+  const hkdValue = electronicSourceToHkd(taxed, currency, fx, fxHU);
   host.innerHTML = `
     <div class="card" style="background:#f9fafb;margin-top:12px">
-      <h3 style="margin-top:0">电子 成本汇总（RMB）</h3>
+      <h3 style="margin-top:0">电子 成本汇总（${currency}）${usesSourceCurrency ? `<small class="muted" style="font-size:13px;margin-left:8px">原币核算 · 1 USD = ${fxHU} HKD</small>` : ''}</h3>
       <div class="wb-grid2">
-        <label><span>零件成本</span><input value="${formatNum(partsAfterLoss)}" disabled></label>
-        <label><span>邦定成本</span><input id="elx-bond" type="number" step="any" value="${x.bonding_cost}" ${canEdit?'':'disabled'}></label>
-        <label><span>贴片成本</span><input id="elx-smt" type="number" step="any" value="${x.smt_cost}" ${canEdit?'':'disabled'}></label>
-        <label><span>人工成本</span><input id="elx-labor" type="number" step="any" value="${x.labor_cost}" ${canEdit?'':'disabled'}></label>
-        <label><span>测试费用</span><input id="elx-test" type="number" step="any" value="${x.test_repair}" ${canEdit?'':'disabled'}></label>
-        <label><span>包装运输</span><input id="elx-pack" type="number" step="any" value="${x.packing_shipping}" ${canEdit?'':'disabled'}></label>
-        <label><span><b>成本合计（不含税）</b></span><input value="${formatNum(costBeforeTax)}" disabled style="font-weight:600;background:#fef3c7"></label>
-        <label><span>利润 %</span><input id="elx-profit" type="number" step="any" value="${x.profit_pct}" ${canEdit?'':'disabled'}></label>
-        <label><span><b>含利润价</b></span><input value="${formatNum(profitPrice)}" disabled style="font-weight:600;background:#fef3c7"></label>
+        <label><span>零件成本</span><input id="elx-parts-result" value="${formatNum(partsAfterLoss)}" disabled></label>
+        <label><span>邦定成本</span><input id="elx-bond" type="number" step="any" value="${displayX.bonding_cost}" ${canEdit?'':'disabled'}></label>
+        <label><span>贴片成本</span><input id="elx-smt" type="number" step="any" value="${displayX.smt_cost}" ${canEdit?'':'disabled'}></label>
+        <label><span>人工成本</span><input id="elx-labor" type="number" step="any" value="${displayX.labor_cost}" ${canEdit?'':'disabled'}></label>
+        <label><span>测试费用</span><input id="elx-test" type="number" step="any" value="${displayX.test_repair}" ${canEdit?'':'disabled'}></label>
+        <label><span>包装运输</span><input id="elx-pack" type="number" step="any" value="${displayX.packing_shipping}" ${canEdit?'':'disabled'}></label>
+        <label><span><b>成本合计（不含税）</b></span><input id="elx-cost-result" value="${formatNum(costBeforeTax)}" disabled style="font-weight:600;background:#fef3c7"></label>
+        <label><span>利润 %</span><input id="elx-profit" type="number" step="any" value="${displayX.profit_pct}" ${canEdit?'':'disabled'}></label>
+        <label><span><b>含利润价</b></span><input id="elx-profit-result" value="${formatNum(profitPrice)}" disabled style="font-weight:600;background:#fef3c7"></label>
         <label><span></span></label>
-        <label><span>抵税差额</span><input id="elx-taxdiff" type="number" step="any" value="${x.tax_diff}" ${canEdit?'':'disabled'}></label>
-        <label><span>应交税负 <small class="muted">= 抵税差额 × 10%</small></span><input id="elx-taxpay" value="${formatNum(x.tax_payable)}" disabled></label>
-        <label><span><b>含税核价 RMB</b></span><input value="${formatNum(taxed)}" disabled style="font-weight:700;background:#dcfce7;color:#166534"></label>
-        <label><span><b>含税核价 HKD</b></span><input value="${formatNum(taxed / fx)} (汇率 ${fx})" disabled style="font-weight:700;background:#dcfce7;color:#166534"></label>
+        <label><span>抵税差额</span><input id="elx-taxdiff" type="number" step="any" value="${displayX.tax_diff}" ${canEdit?'':'disabled'}></label>
+        <label><span>应交税负 <small class="muted">= 抵税差额 × 10%</small></span><input id="elx-taxpay-result" value="${formatNum(displayX.tax_payable)}" disabled></label>
+        <label><span><b>${finalLabel} ${currency}</b></span><input id="elx-final-result" value="${formatNum(taxed)}" disabled style="font-weight:700;background:#dcfce7;color:#166534"></label>
+        <label><span><b>${finalLabel} HKD</b></span><input id="elx-hkd-result" value="${formatNum(hkdValue)}${currency === 'USD' ? ` (USD×${fxHU})` : ` (汇率 ${fx})`}" disabled style="font-weight:700;background:#dcfce7;color:#166534"></label>
       </div>
     </div>`;
-  // 引用所有只读结果字段，输入时局部刷新（不重建整块，避免输入框失焦）
-  const inputs = host.querySelectorAll('.wb-grid2 input[disabled]');
-  // 顺序对应 grid 中的 6 个 disabled input：成本合计(零件+人工)、成本合计(不含税)、含利润价、含税核价 RMB、含税核价 HKD
-  // 直接按 DOM 顺序索引：0=零件+人工 1=不含税 2=含利润 3=含税RMB 4=含税HKD
   function refreshComputed() {
-    const partsRaw2 = computePartsFromDoc() ?? sum(payload.electronics || [], r => elecRowAmount(r, fxRmbHkd));
+    const partsRaw2 = computePartsFromDoc() ?? fallbackParts();
     const partsLoss2 = partsRaw2;  // 不计损耗
-    const cost2 = partsLoss2 + num(x.bonding_cost) + num(x.smt_cost) + num(x.labor_cost)
-      + num(x.test_repair) + num(x.packing_shipping);
-    const profit2 = cost2 * (1 + num(x.profit_pct)/100);
-    x.tax_payable = num(x.tax_diff) * 0.1;
-    const taxed2 = profit2 + num(x.tax_diff) + x.tax_payable;
-    inputs[0].value = formatNum(partsLoss2);  // 零件成本
-    inputs[1].value = formatNum(cost2);       // 不含税
-    inputs[2].value = formatNum(profit2);     // 含利润价
-    inputs[3].value = formatNum(x.tax_payable); // 应交税负 (auto)
-    inputs[4].value = formatNum(taxed2);      // 含税核价 RMB
-    inputs[5].value = `${formatNum(taxed2 / fx)} (汇率 ${fx})`;
+    const cost2 = partsLoss2 + num(displayX.bonding_cost) + num(displayX.smt_cost) + num(displayX.labor_cost)
+      + num(displayX.test_repair) + num(displayX.packing_shipping);
+    const profit2 = cost2 * (1 + num(displayX.profit_pct)/100);
+    displayX.tax_payable = num(displayX.tax_diff) * 0.1;
+    x.tax_payable = electronicSourceToRmb(displayX.tax_payable, currency, fx, fxHU);
+    const taxed2 = profit2 + num(displayX.tax_diff) + displayX.tax_payable;
+    host.querySelector('#elx-parts-result').value = formatNum(partsLoss2);
+    host.querySelector('#elx-cost-result').value = formatNum(cost2);
+    host.querySelector('#elx-profit-result').value = formatNum(profit2);
+    host.querySelector('#elx-taxpay-result').value = formatNum(displayX.tax_payable);
+    host.querySelector('#elx-final-result').value = formatNum(taxed2);
+    host.querySelector('#elx-hkd-result').value = `${formatNum(electronicSourceToHkd(taxed2, currency, fx, fxHU))}${currency === 'USD' ? ` (USD×${fxHU})` : ` (汇率 ${fx})`}`;
   }
   if (canEdit) {
-    const bind = (id, key) => { host.querySelector(id).oninput = (e) => { x[key] = e.target.value === '' ? null : Number(e.target.value); refreshComputed(); onChange(); }; };
+    const bind = (id, key) => { host.querySelector(id).oninput = (e) => {
+      displayX[key] = e.target.value === '' ? null : Number(e.target.value);
+      x[key] = key === 'profit_pct' ? displayX[key] : electronicSourceToRmb(displayX[key], currency, fx, fxHU);
+      if (doc && doc.extras) doc.extras[key] = x[key];
+      refreshComputed(); onChange();
+    }; };
     bind('#elx-bond', 'bonding_cost');
     bind('#elx-smt', 'smt_cost');
     bind('#elx-labor', 'labor_cost');
@@ -2642,7 +2713,8 @@ function renderEngineering(host, payload, canEdit, onChange, fxRmbHkd, fxHkdUsd)
 }
 
 // ============ 电子部 ============
-function renderElectronic(host, payload, canEdit, onChange, fxRmbHkd) {
+function renderElectronic(host, payload, canEdit, onChange, fxRmbHkd, fxHkdUsd) {
+  fxHkdUsd = num(fxHkdUsd) || 7.8;
   payload.electronics = payload.electronics || [];
   payload.electronics_loss_pct = payload.electronics_loss_pct ?? 1;
   payload.electronics_extra = payload.electronics_extra || { test_repair: 0, packing_shipping: 0, profit_pct: 10, tax_diff: 0, tax_payable: 0 };
@@ -2656,7 +2728,7 @@ function renderElectronic(host, payload, canEdit, onChange, fxRmbHkd) {
     <h3>电子部分
     ${canEdit ? '<button class="mini" id="el-import" type="button" style="margin-left:10px">📄 导入登信报价单</button><input id="el-file" type="file" accept=".xls,.xlsx" style="display:none"/><button class="mini" id="el-import-lianxiang" type="button" style="margin-left:6px">📄 导入联翔报价单</button><input id="el-file-lianxiang" type="file" accept=".xls,.xlsx" style="display:none"/>' : ''}
     ${canEdit && payload.electronics_doc ? '<button class="mini" id="el-summarize" type="button" style="margin-left:6px">🔄 由明细汇总成 IC + PACB</button>' : ''}
-    ${payload.electronics_doc ? `<small style="margin-left:8px;color:#16a34a">✓ 已导入 ${payload.electronics_doc.parts_count} 行 (${payload.electronics_doc.imported_at || ''})</small>` : ''}
+    ${payload.electronics_doc ? `<small style="margin-left:8px;color:#16a34a">✓ 已导入 ${payload.electronics_doc.parts_count} 行 · 原币 ${payload.electronics_doc.source_currency || 'RMB'} (${payload.electronics_doc.imported_at || ''})</small>` : ''}
     </h3>
     <div id="el-import-preview"></div>
     <h4 style="margin-top:14px;color:#475569">总表（报价明细 用）</h4>
@@ -2667,15 +2739,19 @@ function renderElectronic(host, payload, canEdit, onChange, fxRmbHkd) {
   `;
   const refreshes = [];
   const wrappedOnChange = () => { refreshes.forEach(f => f()); onChange(); };
-  renderHierElectronics(host.querySelector('#wb-elec'), payload.electronics, wrappedOnChange, canEdit, fxRmbHkd, payload);
+  renderHierElectronics(host.querySelector('#wb-elec'), payload.electronics, wrappedOnChange, canEdit, fxRmbHkd, payload, fxHkdUsd);
   // 总表 小计 卡片（仅 IC + PACB电子 等当前 electronics 数组的合计）
   const sumHost = document.createElement('div');
   host.querySelector('#wb-elec').appendChild(sumHost);
   const paintSummarySubtotal = () => {
     const total = sum(payload.electronics || [], r => elecRowAmount(r, fxRmbHkd));
+    const doc = payload.electronics_doc;
+    const sourceCurrency = doc && doc.source_currency !== 'RMB' && doc.source_extras ? doc.source_currency : 'RMB';
+    const sourceTotal = electronicHkdToSource(total, sourceCurrency, fxRmbHkd, fxHkdUsd);
     sumHost.className = 'loss-summary';
     sumHost.innerHTML = `
       <div class="ls-title">总表 小计</div>
+      <div class="ls-row"><span class="ls-label">合计 ${sourceCurrency}</span><span class="ls-val">${formatNum(sourceTotal)}</span></div>
       <div class="ls-row hi"><span class="ls-label">合计 HKD</span><span class="ls-val">${formatNum(total)}</span></div>
     `;
   };
@@ -2685,10 +2761,12 @@ function renderElectronic(host, payload, canEdit, onChange, fxRmbHkd) {
   const detailHost = host.querySelector('#wb-elec-detail');
   if (payload.electronics_doc && payload.electronics_doc.parts && payload.electronics_doc.parts.length) {
     const doc = payload.electronics_doc;
+    const sourceCurrency = doc.source_currency || 'RMB';
+    const isForeignSource = sourceCurrency !== 'RMB';
     detailHost.innerHTML = `
       <details style="margin-top:14px" ${doc._open ? 'open' : ''}>
         <summary style="cursor:pointer;color:#475569;font-weight:600;padding:6px 0">
-          📋 细表（导入的 ${doc.parts_count} 行明细 — 会写进 电子明细 sheet）
+          📋 细表（导入的 ${doc.parts_count} 行明细 · 原币 ${sourceCurrency} — 会写进 电子明细 sheet）
         </summary>
         <table class="wb-table" style="margin-top:8px;font-size:13px">
           <thead><tr>
@@ -2696,8 +2774,9 @@ function renderElectronic(host, payload, canEdit, onChange, fxRmbHkd) {
             <th style="width:120px">零件名称</th>
             <th>规格</th>
             <th style="width:80px">用量</th>
-            <th style="width:90px">单价 RMB</th>
-            <th style="width:90px">合计 RMB</th>
+            <th style="width:90px">单价 ${sourceCurrency}</th>
+            <th style="width:90px">合计 ${sourceCurrency}</th>
+            ${isForeignSource ? '<th style="width:90px">合计 HKD</th>' : ''}
             <th style="width:120px">备注</th>
             ${canEdit ? '<th style="width:48px"></th>' : ''}
           </tr></thead>
@@ -2708,6 +2787,8 @@ function renderElectronic(host, payload, canEdit, onChange, fxRmbHkd) {
     let n = 0;
     const renderDetailRow = (i, p, isChild) => {
       n++;
+      const sourceUnit = p.source_unit_price != null ? num(p.source_unit_price) : num(p.unit_price);
+      const sourceAmount = num(p.qty) * sourceUnit;
       const tr = document.createElement('tr');
       const ro = canEdit ? '' : 'disabled';
       tr.innerHTML = `
@@ -2715,8 +2796,9 @@ function renderElectronic(host, payload, canEdit, onChange, fxRmbHkd) {
         <td><input value="${(p.name || '').replace(/"/g, '&quot;')}" data-pi="${i}" data-k="name" ${ro} /></td>
         <td><input value="${(p.spec || '').replace(/"/g, '&quot;')}" data-pi="${i}" data-k="spec" ${ro} /></td>
         <td><input type="number" step="any" value="${num(p.qty)}" data-pi="${i}" data-k="qty" ${ro} style="width:75px"/></td>
-        <td><input type="number" step="any" value="${num(p.unit_price)}" data-pi="${i}" data-k="unit_price" ${ro} style="width:85px"/></td>
-        <td class="ro">${formatNum(num(p.qty) * num(p.unit_price))}</td>
+        <td><input type="number" step="any" value="${sourceUnit}" data-pi="${i}" data-k="source_unit_price" ${ro} style="width:85px"/></td>
+        <td class="ro">${formatNum(sourceAmount)}</td>
+        ${isForeignSource ? `<td class="ro">${formatNum(electronicSourceToHkd(sourceAmount, sourceCurrency, fxRmbHkd, fxHkdUsd))}</td>` : ''}
         <td><input value="${(p.note || '').replace(/"/g, '&quot;')}" data-pi="${i}" data-k="note" ${ro} /></td>
         ${canEdit ? `<td class="row-actions"><button class="mini danger el-detail-del" type="button" data-pi="${i}" title="删除">×</button></td>` : ''}`;
       if (isChild) tr.style.background = '#f8fafc';
@@ -2730,13 +2812,16 @@ function renderElectronic(host, payload, canEdit, onChange, fxRmbHkd) {
         n++;
         tr.style.background = '#f8fafc';
         const ro = canEdit ? '' : 'disabled';
+        const sourceUnit = c.source_unit_price != null ? num(c.source_unit_price) : num(c.unit_price);
+        const sourceAmount = num(c.qty) * sourceUnit;
         tr.innerHTML = `
           <td class="ro">${n}</td>
           <td></td>
           <td><input value="${(c.spec || '').replace(/"/g, '&quot;')}" data-pi="${i}" data-ci="${ci}" data-k="spec" ${ro} /></td>
           <td><input type="number" step="any" value="${num(c.qty)}" data-pi="${i}" data-ci="${ci}" data-k="qty" ${ro} style="width:75px"/></td>
-          <td><input type="number" step="any" value="${num(c.unit_price)}" data-pi="${i}" data-ci="${ci}" data-k="unit_price" ${ro} style="width:85px"/></td>
-          <td class="ro">${formatNum(num(c.qty) * num(c.unit_price))}</td>
+          <td><input type="number" step="any" value="${sourceUnit}" data-pi="${i}" data-ci="${ci}" data-k="source_unit_price" ${ro} style="width:85px"/></td>
+          <td class="ro">${formatNum(sourceAmount)}</td>
+          ${isForeignSource ? `<td class="ro">${formatNum(electronicSourceToHkd(sourceAmount, sourceCurrency, fxRmbHkd, fxHkdUsd))}</td>` : ''}
           <td><input value="${(c.note || '').replace(/"/g, '&quot;')}" data-pi="${i}" data-ci="${ci}" data-k="note" ${ro} /></td>
           ${canEdit ? `<td class="row-actions"><button class="mini danger el-detail-del" type="button" data-pi="${i}" data-ci="${ci}" title="删除">×</button></td>` : ''}`;
         tbody.appendChild(tr);
@@ -2758,18 +2843,28 @@ function renderElectronic(host, payload, canEdit, onChange, fxRmbHkd) {
         inp.oninput = (e) => {
           const pi = +inp.dataset.pi, ci = inp.dataset.ci, k = inp.dataset.k;
           const target = ci != null ? doc.parts[pi].children[+ci] : doc.parts[pi];
-          target[k] = (k === 'qty' || k === 'unit_price') ? num(e.target.value) : e.target.value;
+          target[k] = (k === 'qty' || k === 'unit_price' || k === 'source_unit_price') ? num(e.target.value) : e.target.value;
+          if (k === 'source_unit_price') {
+            target.unit_price = +electronicSourceToRmb(target.source_unit_price, sourceCurrency, fxRmbHkd, fxHkdUsd).toFixed(9);
+            target.source_amount = num(target.qty) * target.source_unit_price;
+            target.amount = num(target.qty) * target.unit_price;
+          }
           // 用量/单价改动 → 刷新本行「合计 RMB」格（第 6 列，index 5）+ 总表小计联动
-          if (k === 'qty' || k === 'unit_price') {
+          if (k === 'qty' || k === 'unit_price' || k === 'source_unit_price') {
+            if (k === 'qty') {
+              target.source_amount = num(target.qty) * num(target.source_unit_price);
+              target.amount = num(target.qty) * num(target.unit_price);
+            }
             const tr = inp.closest('tr');
-            if (tr && tr.children[5]) tr.children[5].textContent = formatNum(num(target.qty) * num(target.unit_price));
+            if (tr && tr.children[5]) tr.children[5].textContent = formatNum(num(target.qty) * num(target.source_unit_price));
+            if (isForeignSource && tr && tr.children[6]) tr.children[6].textContent = formatNum(electronicSourceToHkd(num(target.qty) * num(target.source_unit_price), sourceCurrency, fxRmbHkd, fxHkdUsd));
             autoResummarize();
           }
           onChange();
         };
         // 失焦时整表重渲染，同步总表行单价/金额 + 成本汇总
-        if (inp.dataset.k === 'qty' || inp.dataset.k === 'unit_price') {
-          inp.onchange = () => { if (isDerivedSummary()) renderElectronic(host, payload, canEdit, onChange, fxRmbHkd); };
+        if (inp.dataset.k === 'qty' || inp.dataset.k === 'unit_price' || inp.dataset.k === 'source_unit_price') {
+          inp.onchange = () => { if (isDerivedSummary()) renderElectronic(host, payload, canEdit, onChange, fxRmbHkd, fxHkdUsd); };
         }
       });
       tbody.querySelectorAll('.el-detail-del').forEach(btn => {
@@ -2787,7 +2882,7 @@ function renderElectronic(host, payload, canEdit, onChange, fxRmbHkd) {
           doc.parts_count = elecDetailRowCount(doc.parts);
           autoResummarize();
           onChange();
-          renderElectronic(host, payload, canEdit, onChange, fxRmbHkd);
+          renderElectronic(host, payload, canEdit, onChange, fxRmbHkd, fxHkdUsd);
         };
       });
       // 展开折叠状态记忆
@@ -2810,7 +2905,18 @@ function renderElectronic(host, payload, canEdit, onChange, fxRmbHkd) {
         </tbody>
       </table>`;
   }
-  renderElecExtra(host.querySelector('#wb-elec-extra'), payload, wrappedOnChange, canEdit, fxRmbHkd);
+  const sourceMoldFees = payload.electronics_doc?.source_extras?.mold_fees
+    || payload.electronics_doc?.extras?.mold_fees || [];
+  if (sourceMoldFees.length) {
+    const sourceCurrency = payload.electronics_doc?.source_currency || 'RMB';
+    feeHost.insertAdjacentHTML('beforeend', `
+      <h4 style="margin-top:16px;color:#475569">电子模具费用 <small class="muted">（单独记录，不自动摊入单价）</small></h4>
+      <table class="wb-table" style="max-width:620px;font-size:13px">
+        <thead><tr><th>费用名称</th><th style="width:130px">金额</th><th style="width:90px">币种</th></tr></thead>
+        <tbody>${sourceMoldFees.map(fee => `<tr><td>${escapeHtml(fee.name || '模费')}</td><td>${formatNum(fee.amount)}</td><td>${escapeHtml(fee.currency || sourceCurrency)}</td></tr>`).join('')}</tbody>
+      </table>`);
+  }
+  renderElecExtra(host.querySelector('#wb-elec-extra'), payload, wrappedOnChange, canEdit, fxRmbHkd, fxHkdUsd);
   if (canEdit) {
     // 由明细一键汇总成 IC + PACB电子 两行
     const sumBtn = host.querySelector('#el-summarize');
@@ -2821,12 +2927,13 @@ function renderElectronic(host, payload, canEdit, onChange, fxRmbHkd) {
       // 总表行按细表占比分摊含税核价：合计=两行之和=含税核价，每行带各自那份加工/利润/税
       const fxHere = num((payload._fx_rmb_hkd) || fxRmbHkd) || 0.85;
       const sp = elecImportedSummaryRows(doc, payload.electronics_extra || doc.extras || {}, fxHere);
+      const taxLabel = (doc.meta && doc.meta.tax_label) || '含税';
       payload.electronics = [
-        { name: 'IC', spec: sp.icPart ? sp.icPart.spec : '', qty: 1, ...sp.ic, tax_label: '含税', note: '' },
-        { name: 'PACB电子', spec: '含 PCB+电阻+电容+人工 等其余明细汇总', qty: 1, ...sp.pacb, tax_label: '含税', note: '' },
+        { name: 'IC', spec: sp.icPart ? sp.icPart.spec : '', qty: 1, ...sp.ic, tax_label: taxLabel, note: '' },
+        { name: 'PACB电子', spec: '含 PCB+电阻+电容+人工 等其余明细汇总', qty: 1, ...sp.pacb, tax_label: taxLabel, note: '' },
       ];
       onChange();
-      renderElectronic(host, payload, canEdit, onChange, fxRmbHkd);
+      renderElectronic(host, payload, canEdit, onChange, fxRmbHkd, fxHkdUsd);
     };
 
     // 导入
@@ -2848,11 +2955,25 @@ function renderElectronic(host, payload, canEdit, onChange, fxRmbHkd) {
           const r = await fetch(importer.endpoint, { method: 'POST', credentials: 'include', body: fd });
           const j = await r.json();
           if (!r.ok) throw new Error(j.error || '解析失败');
+          const detectedCurrency = j.source_currency || 'RMB';
+          const validation = j.validation || {};
+          const validationText = validation.ok === true ? '✓ 金额校验通过'
+            : (validation.ok === false ? '⚠ 金额校验不一致，请核对源表公式' : '未提供金额校验');
+          const validationColor = validation.ok === false ? '#b91c1c' : '#15803d';
+          const moldFees = (j.extras && j.extras.mold_fees) || [];
           impPreview.innerHTML = `
             <div class="card" style="background:#f0fdf4;border:1px solid #86efac;margin-top:10px">
               <p><b>${importer.label}</b>格式：从 <b>${escapeHtml(j.sheet_used || '')}</b> 解析到 <b>${j.count}</b> 个零件（${(j.parts || []).reduce((a, p) => a + 1 + (p.children || []).length, 0)} 行明细）</p>
+              <p><b>识别币种：</b>
+                <select id="el-source-currency" style="width:90px"><option value="RMB" ${detectedCurrency === 'RMB' ? 'selected' : ''}>RMB</option><option value="USD" ${detectedCurrency === 'USD' ? 'selected' : ''}>USD</option><option value="HKD" ${detectedCurrency === 'HKD' ? 'selected' : ''}>HKD</option></select>
+                <span class="muted">${escapeHtml(((j.currency_detection && j.currency_detection.signals) || []).join('、'))}</span>
+                · <span style="color:${validationColor};font-weight:600">${validationText}</span>
+              </p>
               ${j.meta && j.meta.product ? `<p class="muted">产品: ${escapeHtml(j.meta.product)}${j.meta.customer ? ' · 客户: ' + escapeHtml(j.meta.customer) : ''}${j.meta.date ? ' · 日期: ' + escapeHtml(j.meta.date) : ''}</p>` : ''}
               ${j.source_format === 'lianxiang' ? `<p class="muted">联翔报价 RMB ${formatNum(j.extras && j.extras.total_price_rmb)} / 套（已含 OTP 芯片 RMB ${formatNum(j.extras && j.extras.otp_price_rmb)}） · 其它费用 ${(j.extras && j.extras.other_fees || []).length} 项</p>` : ''}
+              ${moldFees.length ? `<p class="muted">模具费用：${moldFees.map(fee => `${escapeHtml(fee.name || '模费')} ${escapeHtml(fee.currency || detectedCurrency)} ${formatNum(fee.amount)}`).join('；')}（单独记录，不自动摊入单价）</p>` : ''}
+              ${j.meta && j.meta.moq ? `<p class="muted">MOQ：${formatNum(j.meta.moq)}（作为报价条件保存，不自动摊销）</p>` : ''}
+              <p class="muted">换算汇率：1 USD = ${fxHkdUsd} HKD；1 RMB = ${formatNum(1 / (num(fxRmbHkd) || 0.85))} HKD。</p>
               <p class="muted">导入后会替换电子表；导出 Excel 时会附加“电子明细”分表。</p>
               <div style="margin-top:10px;display:flex;gap:8px">
                 <button id="el-imp-apply">应用</button>
@@ -2863,28 +2984,31 @@ function renderElectronic(host, payload, canEdit, onChange, fxRmbHkd) {
             // 导入应用后总表重置为 IC + PACB电子 两行（值从明细汇总，导入后可手改）
             // 明细是 RMB，总表单价是 HKD：单价 HKD = RMB ÷ 汇率（与税点下拉/由明细汇总按钮口径一致）
             const fx = num(fxRmbHkd) || 0.85;
+            j.source_currency = impPreview.querySelector('#el-source-currency').value;
+            const normalized = normalizeElectronicImport(j, fx, fxHkdUsd);
             // 总表行按细表占比分摊含税核价：合计=两行之和=含税核价，每行带各自那份加工/利润/税
-            const sp = elecImportedSummaryRows(j, j.extras || {}, fx);
+            const sp = elecImportedSummaryRows(normalized, normalized.extras || {}, fx);
+            const taxLabel = (normalized.meta && normalized.meta.tax_label) || '含税';
             payload.electronics = [
-              { name: 'IC', spec: sp.icPart ? sp.icPart.spec : '', qty: 1, ...sp.ic, note: '' },
-              { name: 'PACB电子', spec: '含 PCB+电阻+电容+人工 等其余明细汇总', qty: 1, ...sp.pacb, note: '' },
+              { name: 'IC', spec: sp.icPart ? sp.icPart.spec : '', qty: 1, ...sp.ic, tax_label: taxLabel, note: '' },
+              { name: 'PACB电子', spec: '含 PCB+电阻+电容+人工 等其余明细汇总', qty: 1, ...sp.pacb, tax_label: taxLabel, note: '' },
             ];
-            if (j.extras) {
+            if (normalized.extras) {
               payload.electronics_extra = payload.electronics_extra || {};
               ['test_repair', 'packing_shipping', 'profit_pct', 'tax_diff', 'tax_payable', 'bonding_cost', 'smt_cost', 'labor_cost'].forEach(k => {
-                if (j.extras[k] != null) payload.electronics_extra[k] = j.extras[k];
+                if (normalized.extras[k] != null) payload.electronics_extra[k] = normalized.extras[k];
               });
             }
             // 保存原始 parts/extras 供导出
             payload.electronics_doc = {
-              source_format: j.source_format || 'dengxin',
-              parts: j.parts, extras: j.extras, meta: j.meta || {},
-              parts_count: elecDetailRowCount(j.parts || []),
+              ...normalized,
+              source_format: normalized.source_format || 'dengxin',
+              parts_count: elecDetailRowCount(normalized.parts || []),
               imported_at: new Date().toISOString().slice(0, 10),
             };
             impPreview.innerHTML = ''; impFile.value = '';
             onChange();
-            renderElectronic(host, payload, canEdit, onChange, fxRmbHkd);
+            renderElectronic(host, payload, canEdit, onChange, fxRmbHkd, fxHkdUsd);
           };
           impPreview.querySelector('#el-imp-cancel').onclick = () => { impPreview.innerHTML = ''; impFile.value = ''; };
         } catch (err) {
@@ -4841,7 +4965,7 @@ async function renderQuotePage() {
     const fx = num(salesHdr.fx_rmb_hkd) || 0.85;
     const fxHU = num(salesHdr.fx_hkd_usd) || 7.8;
     if (me.dept === 'engineering') renderEngineering(body, payload, canEditMine, onChange, fx, fxHU);
-    else if (me.dept === 'electronic') renderElectronic(body, payload, canEditMine, onChange, fx);
+    else if (me.dept === 'electronic') renderElectronic(body, payload, canEditMine, onChange, fx, fxHU);
     else if (me.dept === 'molding') renderMolding(body, payload, canEditMine, onChange, refMolds, fx, me.role);
     else if (me.dept === 'painting') renderPainting(body, payload, canEditMine, onChange, fx);
     else if (me.dept === 'slush') renderSlush(body, payload, canEditMine, onChange, fx);
@@ -4886,7 +5010,7 @@ async function renderQuotePage() {
         body.innerHTML = '';
         const onChangeOther = () => {};
         if (s.dept === 'engineering') renderEngineering(body, sectionPayload, inEdit, onChangeOther, fxRate, fxRateUsd);
-        else if (s.dept === 'electronic') renderElectronic(body, sectionPayload, inEdit, onChangeOther, fxRate);
+        else if (s.dept === 'electronic') renderElectronic(body, sectionPayload, inEdit, onChangeOther, fxRate, fxRateUsd);
         else if (s.dept === 'sales') renderSales(body, sectionPayload, quote, inEdit, inEdit, sections, onChangeOther, async (patch) => {
           await api('/quotes/' + id + '/header', { method: 'PUT', body: JSON.stringify(patch) }).catch(e => alert(e.message));
         });

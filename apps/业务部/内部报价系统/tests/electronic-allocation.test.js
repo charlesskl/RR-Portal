@@ -19,6 +19,36 @@ function loadElectronicAllocation() {
   return context;
 }
 
+function loadElectronicCurrencyHelpers() {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'workbench.js'), 'utf8');
+  const start = source.indexOf('function electronicSourceToRmb');
+  const end = source.indexOf('function ensureElecRmbPrices', start);
+  assert.ok(start >= 0 && end > start, 'electronic currency helpers must be present');
+  const context = { num: value => Number(value) || 0 };
+  vm.runInNewContext(`${source.slice(start, end)}\nthis.normalizeElectronicImport = normalizeElectronicImport;`, context);
+  return context;
+}
+
+test('USD electronic import keeps source amounts and normalizes calculation values to RMB', () => {
+  const { normalizeElectronicImport } = loadElectronicCurrencyHelpers();
+  const source = {
+    source_currency: 'USD',
+    parts: [{ name: 'IC', qty: 1, unit_price: 0, source_unit_price: 0 }, { name: 'PCB', qty: 1, unit_price: 0.25, source_unit_price: 0.25 }],
+    extras: { parts_cost: 0.25, labor_cost: 0.1, profit_pct: 12, mold_fees: [{ name: 'PCB模费', amount: 354, currency: 'USD' }] },
+  };
+
+  const result = normalizeElectronicImport(source, 0.85, 7.8);
+
+  assert.equal(result.source_currency, 'USD');
+  assert.equal(result.normalized_currency, 'RMB');
+  assert.equal(result.parts[0].unit_price, 0);
+  assert.equal(result.parts[1].source_unit_price, 0.25);
+  assert.equal(result.parts[1].unit_price, 1.6575);
+  assert.equal(result.extras.labor_cost, 0.663);
+  assert.equal(result.source_extras.labor_cost, 0.1);
+  assert.equal(result.source_extras.mold_fees[0].amount, 354);
+});
+
 test('IC only receives its direct cost, profit and proportional tax', () => {
   const { elecSplitRows: split } = loadElectronicAllocation();
   const parts = [

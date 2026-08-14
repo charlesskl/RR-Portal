@@ -88,6 +88,7 @@ public class MaterialsController(ISqlConnectionFactory factory) : ControllerBase
         {
             var existing = (await c.QueryAsync<int>("SELECT id FROM materials WHERE product_code=@code", new { code }, tx)).ToHashSet();
             var keepIds = new HashSet<int>();
+            var enteredTranslations = new List<(string Keyword, string English)>();
             for (int i = 0; i < list.Count; i++)
             {
                 var m = list[i];
@@ -97,6 +98,10 @@ public class MaterialsController(ISqlConnectionFactory factory) : ControllerBase
                 if (usageVal == 0m) usageVal = Dec("usage_qty");
                 if (usageVal == 0m) usageVal = 1m;
                 int? id = int.TryParse(Get("id")?.ToString(), out var pid) ? pid : (int?)null;
+                var enteredZh = (Get("nameZh")?.ToString() ?? "").Trim();
+                var enteredEn = (Get("nameEn")?.ToString() ?? "").Trim();
+                if (enteredZh.Length > 0 && enteredEn.Length > 0)
+                    enteredTranslations.Add((enteredZh, enteredEn));
 
                 if (id is int x && existing.Contains(x))
                 {
@@ -189,8 +194,39 @@ public class MaterialsController(ISqlConnectionFactory factory) : ControllerBase
                     await c.ExecuteAsync("DELETE FROM materials WHERE id=@id", new { id = oldId }, tx);
             }
 
+            // Learn only confirmed Chinese + English pairs. Existing dictionary choices are
+            // never silently overwritten; conflicting user input is returned to the UI.
+            var learned = 0;
+            var conflicts = new List<object>();
+            var seenThisSave = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var (keyword, english) in enteredTranslations)
+            {
+                if (seenThisSave.TryGetValue(keyword, out var firstEnglish))
+                {
+                    if (!string.Equals(firstEnglish, english, StringComparison.OrdinalIgnoreCase))
+                        conflicts.Add(new { keyword, savedEnglish = firstEnglish, enteredEnglish = english });
+                    continue;
+                }
+                seenThisSave[keyword] = english;
+
+                var savedEnglish = await c.QuerySingleOrDefaultAsync<string?>(
+                    "SELECT english_name FROM dict_translation WHERE keyword=@keyword",
+                    new { keyword }, tx);
+                if (savedEnglish is not null)
+                {
+                    if (!string.Equals(savedEnglish.Trim(), english, StringComparison.OrdinalIgnoreCase))
+                        conflicts.Add(new { keyword, savedEnglish, enteredEnglish = english });
+                    continue;
+                }
+
+                learned += await c.ExecuteAsync(@"
+                    INSERT INTO dict_translation(keyword, english_name, active, source, priority, updated_at)
+                    VALUES (@keyword, @english, true, 'material-save', 100, now())
+                    ON CONFLICT (keyword) DO NOTHING", new { keyword, english }, tx);
+            }
+
             tx.Commit();
-            return Ok(new { ok = true, count = list.Count });
+            return Ok(new { ok = true, count = list.Count, translation_learned = learned, translation_conflicts = conflicts });
         }
         catch
         {

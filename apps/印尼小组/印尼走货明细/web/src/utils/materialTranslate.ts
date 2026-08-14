@@ -77,3 +77,21 @@ export function translateMaterialName(zh?: string): string {
   if (/[\u3400-\u9fff]/.test(translated)) return ''
   return cleanEnglish(translated)
 }
+
+export interface TranslationMemoryEntry {
+  keyword: string
+  english: string
+  active?: boolean
+}
+
+// 人工确认的精确译名优先；停用条目不参与，未命中再退回内置术语。
+export function resolveMaterialTranslation(
+  zh: string | undefined,
+  memory: TranslationMemoryEntry[] = [],
+): string {
+  const source = String(zh || '').trim()
+  if (!source) return ''
+  const remembered = memory.find((row) =>
+    row.active !== false && row.keyword.trim() === source && row.english.trim())
+  return remembered?.english.trim() || translateMaterialName(source)
+}

@@ -6,7 +6,7 @@ import {
 import { api, type Dictionaries, type Material, type Molding, type MoldingPart, type Product, type ProductDetail } from '../api/client'
 import { MATERIAL_CATEGORIES, inferMaterialCategory } from '../utils/engineeringImport'
 import { CUSTOMS_FIXED } from '../utils/customsExport'
-import { translateMaterialName } from '../utils/materialTranslate'
+import { resolveMaterialTranslation } from '../utils/materialTranslate'
 
 interface ProductForm {
   code: string
@@ -15,6 +15,10 @@ interface ProductForm {
 }
 
 const WORKSHOPS = ['兴信A车间', '兴信B车间', '华登']
+
+function translatedMaterialName(nameZh: string, dicts: Dictionaries): string {
+  return resolveMaterialTranslation(nameZh, dicts.translations || [])
+}
 
 export default function ProductsPage() {
   const { message } = App.useApp()
@@ -29,7 +33,7 @@ export default function ProductsPage() {
   const [customers, setCustomers] = useState<string[]>([])
   const [savingDetail, setSavingDetail] = useState(false)
   const [activeTab, setActiveTab] = useState<'mold' | 'mat'>('mold')
-  const [dicts, setDicts] = useState<Dictionaries>({ hs: [], suppliers: [] })
+  const [dicts, setDicts] = useState<Dictionaries>({ hs: [], suppliers: [], translations: [] })
   const [drawerFull, setDrawerFull] = useState(false)
   const [showInactive, setShowInactive] = useState(false)
 
@@ -44,7 +48,7 @@ export default function ProductsPage() {
     try { const { data } = await api.get<string[]>('/customers'); setCustomers(data || []) } catch {}
   }
   async function loadDicts() {
-    try { const { data } = await api.get<Dictionaries>('/dictionaries'); setDicts({ hs: data.hs || [], suppliers: data.suppliers || [] }) } catch {}
+    try { const { data } = await api.get<Dictionaries>('/dictionaries'); setDicts({ hs: data.hs || [], suppliers: data.suppliers || [], translations: data.translations || [] }) } catch {}
   }
   useEffect(() => { loadCustomers(); loadDicts() }, [])
   useEffect(() => { loadList() }, [loadList])
@@ -79,7 +83,7 @@ export default function ProductsPage() {
         moldings,
       })
       // Replace materials via bulk PUT. Backend upserts by id; rows removed in UI are soft-removed if referenced, else deleted.
-      await api.put(`/materials/bulk/${encodeURIComponent(v.code)}`, {
+      const { data: materialSave } = await api.put(`/materials/bulk/${encodeURIComponent(v.code)}`, {
         materials: materials.map((m) => ({
           ...(m.id != null ? { id: m.id } : {}),
           itemNo: m.item_no ?? '',
@@ -105,7 +109,15 @@ export default function ProductsPage() {
           usage_qty: m.usage_qty ?? 1,
         })),
       })
-      message.success('已保存')
+      const conflicts = Array.isArray(materialSave?.translation_conflicts) ? materialSave.translation_conflicts : []
+      if (conflicts.length) {
+        message.warning(`已保存；${conflicts.length} 个中文名存在不同英文译法，翻译字典保留原译文，请到字典库确认`)
+      } else if (materialSave?.translation_learned > 0) {
+        message.success(`已保存，并记住 ${materialSave.translation_learned} 个英文译名`)
+      } else {
+        message.success('已保存')
+      }
+      loadDicts()
       setCreating(false)
       loadList()
       // 停留在编辑页；重新拉详情回填物料 id（再次保存按 id upsert，不重复新增）
@@ -547,7 +559,7 @@ function MaterialsEditor({ rows, onChange, dicts, productCode }: {
       if ((m.name_en || '').trim()) return m
       const nameZh = (m.name_zh || '').trim()
       if (!nameZh) return m
-      const nameEn = translateMaterialName(nameZh)
+      const nameEn = translatedMaterialName(nameZh, dicts)
       if (!nameEn) { unresolved++; return m }
       filled++
       return { ...m, name_en: nameEn }
@@ -579,7 +591,7 @@ function MaterialsEditor({ rows, onChange, dicts, productCode }: {
         product_code: productCode,
         item_no:        String(pick(r, ['料号', 'itemno', 'item_no']) ?? ''),
         name_zh:        nameZh,
-        name_en:        importedNameEn || translateMaterialName(nameZh),
+        name_en:        importedNameEn || translatedMaterialName(nameZh, dicts),
         spec:           String(pick(r, ['规格', 'spec']) ?? ''),
         category:       inferMaterialCategory(`${pick(r, ['类别', 'category']) ?? ''} ${pick(r, ['中文名', '名称', 'namezh', 'name_zh']) ?? ''} ${pick(r, ['规格', 'spec']) ?? ''}`),
         material_code:  String(pick(r, ['物料编码', 'materialcode', 'material_code']) ?? ''),
@@ -617,7 +629,7 @@ function MaterialsEditor({ rows, onChange, dicts, productCode }: {
         <Button onClick={autoFillHs}>🔍 HS 自动填充</Button>
         <Button onClick={autoFillSupplier}>🏭 供应商扩展</Button>
         <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-          字典: HS {dicts.hs.length} 条 / 供应商 {dicts.suppliers.length} 条
+          字典: HS {dicts.hs.length} 条 / 供应商 {dicts.suppliers.length} 条 / 英文翻译 {dicts.translations.length} 条
         </Typography.Text>
       </Space>
       <Table

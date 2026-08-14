@@ -44,7 +44,7 @@ describe('parseDeliveryExcelFiles', () => {
       order_date: '2026-07-27',
       delivery_date: '2026-09-02',
       unit_price_cny_tax: 0.9,
-      unit_price: 0.9155,
+      unit_price: 0.6929,
       exchange_rate: 0.87,
       amount: 2721.6,
       notes: '',
@@ -92,7 +92,7 @@ describe('parseDeliveryExcelFiles', () => {
       order_date: '2026-06-30',
       delivery_date: '2026-07-20',
       unit_price_cny_tax: 0.95,
-      unit_price: 0.9663,
+      unit_price: 0.7314,
       exchange_rate: 0.87,
       amount: 7476.5,
     })
@@ -103,7 +103,7 @@ describe('parseDeliveryExcelFiles', () => {
       process_category: '玩具半成品',
       quantity: 45200,
       unit_price_cny_tax: 0.06,
-      unit_price: 0.061,
+      unit_price: 0.0462,
       amount: 2712,
     })
   })
@@ -242,7 +242,7 @@ describe('parseDeliveryExcelFiles', () => {
       order_date: '2026-05-11',
       delivery_date: '2026-12-31',
       unit_price_cny_tax: 0.38,
-      unit_price: 0.3865,
+      unit_price: 0.2926,
       amount: 26600,
     })
     expect(result.payloads.map((payload) => payload.product)).toEqual([
@@ -277,11 +277,11 @@ describe('parseDeliveryExcelFiles', () => {
     expect(result.payloads).toHaveLength(2)
     expect(result.payloads[0]).toMatchObject({
       factory: 'factory-1', order_no: 'ORDER-1', item_no: 'ITEM-1',
-      unit_price_cny_tax: 0.2, unit_price: 0.2034,
+      unit_price_cny_tax: 0.2, unit_price: 0.154,
     })
     expect(result.payloads[1]).toMatchObject({
       factory: 'factory-2', order_no: 'ORDER-2', item_no: 'ITEM-2',
-      unit_price_cny_tax: 0.3, unit_price: 0.3052,
+      unit_price_cny_tax: 0.3, unit_price: 0.231,
     })
   })
 
@@ -315,7 +315,7 @@ describe('parseDeliveryExcelFiles', () => {
       order_date: '2026-07-02',
       delivery_date: '2026-07-14',
       unit_price_cny_tax: 0.44,
-      unit_price: 0.4476,
+      unit_price: 0.3388,
       amount: 1100,
     })
   })

@@ -85,9 +85,10 @@ function factoryTaxPoint(factoryId: string | null | undefined) {
 
 const isHunan = computed(() => region.value === 'hunan')
 const isDongguanTaxDept = computed(() => region.value === 'dongguan' && ['injection', 'painting', 'assembly'].includes(craft.value))
-// 湖南四部门、车缝部按人民币未税展示；东莞三部门保留港币列并同时显示工厂税点。
+const isDongguanRmbDept = computed(() => region.value === 'dongguan' && craft.value === 'electronics')
+// 湖南各部门、车缝部及东莞电子部按人民币未税展示；东莞注塑/喷油/装配保留港币列并同时显示工厂税点。
 const pricingMode = computed<DeliveryPricingMode>(() =>
-  isHunan.value || craft.value === 'sewing' ? 'rmb-tax' : isDongguanTaxDept.value ? 'hkd-tax' : 'hkd')
+  isHunan.value || craft.value === 'sewing' || isDongguanRmbDept.value ? 'rmb-tax' : isDongguanTaxDept.value ? 'hkd-tax' : 'hkd')
 const usesFactoryTaxPoint = computed(() => pricingMode.value !== 'hkd')
 const reportOrders = computed(() => pricingMode.value === 'rmb-tax'
   ? deptOrders.value.map((order) => ({

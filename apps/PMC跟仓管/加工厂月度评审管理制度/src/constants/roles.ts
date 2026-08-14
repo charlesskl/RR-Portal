@@ -3,7 +3,7 @@ export type Role =
   | 'buyer_injection' | 'buyer_painting' | 'buyer_assembly' | 'buyer_sewing'
   | 'finance_cost' | 'finance_mgr' | 'quality_qc' | 'sc_clerk'
 
-export type Craft = 'injection' | 'painting' | 'assembly' | 'sewing'
+export type Craft = 'injection' | 'painting' | 'assembly' | 'sewing' | 'electronics'
 
 // 厂区（东莞为现有默认；湖南、河源为新增）
 export type Region = 'dongguan' | 'hunan' | 'heyuan'
@@ -26,7 +26,7 @@ export const ROLE_LABELS: Record<Role, string> = {
 
 // 部门标签（底层值仍是 craft，UI 统一以「部门」口径展示）
 export const CRAFT_LABELS: Record<Craft, string> = {
-  injection: '注塑部', painting: '喷油部', assembly: '装配部', sewing: '车缝部',
+  injection: '注塑部', painting: '喷油部', assembly: '装配部', sewing: '车缝部', electronics: '电子部',
 }
 export const CRAFTS = Object.keys(CRAFT_LABELS) as Craft[]
 

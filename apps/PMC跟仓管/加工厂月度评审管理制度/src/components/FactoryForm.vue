@@ -35,6 +35,7 @@ const DEPTS = [
   { value: 'painting', label: '喷油部' },
   { value: 'assembly', label: '装配部' },
   { value: 'sewing', label: '车缝部' },
+  { value: 'electronics', label: '电子部' },
 ]
 const REGIONS = [
   { value: 'dongguan', label: '东莞' },

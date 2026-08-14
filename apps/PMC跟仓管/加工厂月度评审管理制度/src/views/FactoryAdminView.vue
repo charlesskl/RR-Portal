@@ -18,12 +18,13 @@ const DEPTS: { craft: Craft; name: string; icon: string }[] = [
   { craft: 'painting', name: '喷油部', icon: '🎨' },
   { craft: 'assembly', name: '装配部', icon: '🔧' },
   { craft: 'sewing', name: '车缝部', icon: '🧵' },
+  { craft: 'electronics', name: '电子部', icon: '🔌' },
 ]
 const regionBlocks = computed(() =>
   myRegions.value.map((region) => ({
     region,
     name: REGION_LABELS[region],
-    cards: DEPTS.filter((d) => allowedCrafts().includes(d.craft)).map((d) => ({
+    cards: DEPTS.filter((d) => allowedCrafts().includes(d.craft) && (d.craft !== 'electronics' || region !== 'heyuan')).map((d) => ({
       ...d,
       count: store.items.filter((f: Factory) => regionOf(f) === region && f.craft === d.craft).length,
     })),

@@ -177,14 +177,15 @@ const DEPTS: { craft: Craft; name: string; icon: string }[] = [
   { craft: 'painting', name: '喷油部', icon: '🎨' },
   { craft: 'assembly', name: '装配部', icon: '🔧' },
   { craft: 'sewing', name: '车缝部', icon: '🧵' },
+  { craft: 'electronics', name: '电子部', icon: '🔌' },
 ]
-// 按厂区分块；每个厂区固定展示 4 个部门卡（含厂区，便于进入后新增）
+// 按厂区分块；电子部仅在东莞、湖南厂区展示（含厂区，便于进入后新增）
 const myRegions = computed(() => (auth.role ? allowedRegions(auth.role) : REGIONS))
 const regionBlocks = computed(() =>
   myRegions.value.map((region) => ({
     region,
     name: REGION_LABELS[region],
-    cards: DEPTS.filter((d) => allowedCrafts().includes(d.craft)).map((d) => {
+    cards: DEPTS.filter((d) => allowedCrafts().includes(d.craft) && (d.craft !== 'electronics' || region !== 'heyuan')).map((d) => {
       const list = visible.value.filter((f: Factory) => regionOf(f) === region && f.craft === d.craft)
       return {
         ...d,

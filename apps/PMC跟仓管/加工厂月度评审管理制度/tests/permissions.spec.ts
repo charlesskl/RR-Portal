@@ -41,6 +41,6 @@ describe('permissions', () => {
     setAuthorizedCrafts(['painting'])
     expect(visibleCraft('buyer_painting')).toBe('painting')
     setAuthorizedCrafts([])
-    expect(allowedCrafts()).toHaveLength(4)
+    expect(allowedCrafts()).toHaveLength(5)
   })
 })

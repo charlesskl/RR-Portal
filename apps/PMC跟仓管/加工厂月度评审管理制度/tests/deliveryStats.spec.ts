@@ -81,7 +81,7 @@ describe('buildDeliveryReport', () => {
       id: 'hkd-tax-row', unit_price_cny_tax: 6, exchange_rate: 0.87,
     })], '东莞厂区 · 注塑部', () => '工厂', 'hkd-tax', () => 1.11)
 
-    expect(rows[0]).toMatchObject({ kind: 'detail', outPrice: 6.2131, exchangeRate: 0.87, taxPoint: 1.11 })
+    expect(rows[0]).toMatchObject({ kind: 'detail', outPrice: 4.7027, exchangeRate: 0.87, taxPoint: 1.11 })
   })
 })
 
@@ -327,5 +327,49 @@ describe('parseDeliveryImport', () => {
       is_delayed: false,
     })
     expect(result.payloads[0].unit_price).toBeUndefined()
+  })
+
+  it('imports Dongguan electronics processing contracts including the process column', () => {
+    const aoa = [
+      ['东莞市登信电子有限公司'],
+      ['', '', '', '委托加工合同'],
+      [],
+      ['厂  商：', '彰源', '', '', '', '', '订单编号：', 'FDI00040262'],
+      ['联络人：', '刘先生', '', '', '', '', '联络人：', '张焕丽'],
+      [], [], [],
+      ['货 号', '货 品 名 称', '工序', '数量', '单位', '单 价', '金 额', '单重（G)', '重量（KG)', '商品名称', '备 注'],
+      ['1026157-城市套装游戏机-PCBA\n（法国-FR）\nFlash:AMSFX128DHS-P07MCUAM32A070A-052', '电子料', '贴片', 2040, 'PCS', 0.38, 775.2, '', '', '', 'BBD-40132354-01'],
+      ['1226157-西班牙城市套装游戏机\n-ES-PCBA Flash:\nAMSFX128DHS-P08MCU:\nAM32A070A-051', '电子料', '贴片', 5100, 'PCS', 0.38, 1938, '', '', '', 'BBD-40132354-01'],
+      ['1026157-城市套装游戏机-PCBA\n（法国-FR）\nFlash:AMSFX128DHS-P07MCUAM32A070A-052', 'IC', '邦定', 2040, 'PCS', 0.5, 1020, '', '', '', 'BBD-40132354-01'],
+      ['1226157-西班牙城市套装游戏机\n-ES-PCBA Flash:\nAMSFX128DHS-P08MCU:\nAM32A070A-051', 'IC', '邦定', 5100, 'PCS', 0.5, 2550, '', '', '', 'BBD-40132354-01'],
+      ['', '', '', '', '', '合计', 6283.2],
+      ['1. 2026 年8月25日前交货、货送 D栋二楼货仓 处，收货人：符小姐'],
+      [],
+      ['供应商确认：', '', '', '采购签核：胡爱莲', '', '', '主管：', '', '经理：'],
+      ['时间：    年    月   日', '', '', '', '时间：  2026  年7月 31 日'],
+    ]
+
+    const result = parseDeliveryImport(aoa, { 彰源: 'factory-electronics' })
+
+    expect(result.failed).toBe(0)
+    expect(result.payloads).toHaveLength(4)
+    expect(result.payloads[0]).toMatchObject({
+      factory: 'factory-electronics',
+      pmc: '胡爱莲',
+      item_no: '1026157-城市套装游戏机-PCBA\n（法国-FR）\nFlash:AMSFX128DHS-P07MCUAM32A070A-052',
+      order_no: 'FDI00040262',
+      product: '电子料',
+      process: '贴片',
+      process_category: '贴片',
+      quantity: 2040,
+      unit_price_cny_tax: 0.38,
+      amount: 775.2,
+      order_date: '2026-07-31',
+      delivery_date: '2026-08-25',
+      notes: 'BBD-40132354-01',
+    })
+    expect(result.payloads[2]).toMatchObject({
+      product: 'IC', process: '邦定', process_category: '邦定', quantity: 2040, unit_price_cny_tax: 0.5, amount: 1020,
+    })
   })
 })

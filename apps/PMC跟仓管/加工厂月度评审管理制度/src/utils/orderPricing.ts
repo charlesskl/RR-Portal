@@ -7,7 +7,8 @@ export function cnyTaxToHkdUntaxed(
   taxPoint = TAX_RATE_FACTOR,
 ): number {
   if (!Number.isFinite(value) || !Number.isFinite(exchangeRate) || exchangeRate <= 0 || !Number.isFinite(taxPoint) || taxPoint <= 0) return 0
-  return Math.round((value / exchangeRate / taxPoint) * 10000) / 10000
+  // 港币未税价 = 人民币含税价 × 换算汇率 ÷ 税点系数。
+  return Math.round((value * exchangeRate / taxPoint) * 10000) / 10000
 }
 
 export function cnyTaxToUntaxedRmb(value: number, taxPoint: number): number {

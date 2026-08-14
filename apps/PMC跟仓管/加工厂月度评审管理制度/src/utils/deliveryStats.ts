@@ -554,6 +554,7 @@ function parseAssemblyContractImport(
   const C = {
     item_no: colContaining('货号'),
     product: colContaining('货品名称'),
+    process: colContaining('工序'),
     qty: colContaining('数量'),
     out: colContaining('单价'),
     amount: colContaining('金额'),
@@ -593,6 +594,7 @@ function parseAssemblyContractImport(
     if (!product || !factoryId) { failed++; continue }
     const category = cleanText(cell(row, C.category))
     if (category) lastCategory = category
+    const process = cleanText(cell(row, C.process))
     const rowDeliveryDate = formatImportDate(cell(row, C.delivery_date))
     if (/^\d{4}-\d{2}-\d{2}$/.test(rowDeliveryDate)) lastDeliveryDate = rowDeliveryDate
     const qty = parseNumberCell(cell(row, C.qty))
@@ -603,7 +605,9 @@ function parseAssemblyContractImport(
       pmc,
       item_no: itemNo,
       order_no: orderNo,
-      process_category: lastCategory,
+      process,
+      // 电子部合同没有“商品名称”时，以工序作为列表中的加工类别展示。
+      process_category: lastCategory || process,
       product,
       notes: cleanText(cell(row, C.notes)),
       status: 'placed',

@@ -23,6 +23,7 @@ const DEPTS: { craft: Craft; name: string; icon: string }[] = [
   { craft: 'painting', name: '喷油部', icon: '🎨' },
   { craft: 'assembly', name: '装配部', icon: '🔧' },
   { craft: 'sewing', name: '车缝部', icon: '🧵' },
+  { craft: 'electronics', name: '电子部', icon: '🔌' },
 ]
 const canEdit = computed(() => (auth.role ? canEditOrders(auth.role) : false))
 const visibleDepts = computed(() => DEPTS.filter((d) => allowedCrafts().includes(d.craft)))
@@ -32,7 +33,7 @@ const regionBlocks = computed(() =>
   myRegions.value.map((region) => ({
     region,
     name: REGION_LABELS[region],
-    cards: visibleDepts.value.map((d) => {
+    cards: visibleDepts.value.filter((d) => d.craft !== 'electronics' || region !== 'heyuan').map((d) => {
       const list = orders.items.filter((o) => regionOf(o.expand?.factory) === region && o.expand?.factory?.craft === d.craft)
       return { ...d, count: list.length, ongoing: list.filter((o) => o.status !== 'delivered').length }
     }),

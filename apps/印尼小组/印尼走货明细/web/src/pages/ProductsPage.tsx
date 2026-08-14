@@ -6,6 +6,7 @@ import {
 import { api, type Dictionaries, type Material, type Molding, type MoldingPart, type Product, type ProductDetail } from '../api/client'
 import { MATERIAL_CATEGORIES, inferMaterialCategory } from '../utils/engineeringImport'
 import { CUSTOMS_FIXED } from '../utils/customsExport'
+import { translateMaterialName } from '../utils/materialTranslate'
 
 interface ProductForm {
   code: string
@@ -539,6 +540,24 @@ function MaterialsEditor({ rows, onChange, dicts, productCode }: {
     message.success(`供应商/报关公司自动扩展：${filled} 行`)
   }
 
+  function autoFillEnglish() {
+    let filled = 0
+    let unresolved = 0
+    const next = rows.map((m) => {
+      if ((m.name_en || '').trim()) return m
+      const nameZh = (m.name_zh || '').trim()
+      if (!nameZh) return m
+      const nameEn = translateMaterialName(nameZh)
+      if (!nameEn) { unresolved++; return m }
+      filled++
+      return { ...m, name_en: nameEn }
+    })
+    onChange(next)
+    if (filled) message.success(`英文名已补齐 ${filled} 行${unresolved ? `，另有 ${unresolved} 行需人工翻译` : ''}`)
+    else if (unresolved) message.warning(`${unresolved} 行未匹配到术语，请人工填写英文名`)
+    else message.info('没有需要补充的英文名')
+  }
+
   async function importExcel(file: File) {
     try {
       const XLSX = await import('xlsx')
@@ -553,11 +572,14 @@ function MaterialsEditor({ rows, onChange, dicts, productCode }: {
           if (norm(k) === norm(n)) return row[k]
         return undefined
       }
-      const imported: Material[] = arr.map((r) => ({
+      const imported: Material[] = arr.map((r) => {
+        const nameZh = String(pick(r, ['中文名', '名称', 'namezh', 'name_zh']) ?? '')
+        const importedNameEn = String(pick(r, ['英文名', 'nameen', 'name_en']) ?? '')
+        return {
         product_code: productCode,
         item_no:        String(pick(r, ['料号', 'itemno', 'item_no']) ?? ''),
-        name_zh:        String(pick(r, ['中文名', '名称', 'namezh', 'name_zh']) ?? ''),
-        name_en:        String(pick(r, ['英文名', 'nameen', 'name_en']) ?? ''),
+        name_zh:        nameZh,
+        name_en:        importedNameEn || translateMaterialName(nameZh),
         spec:           String(pick(r, ['规格', 'spec']) ?? ''),
         category:       inferMaterialCategory(`${pick(r, ['类别', 'category']) ?? ''} ${pick(r, ['中文名', '名称', 'namezh', 'name_zh']) ?? ''} ${pick(r, ['规格', 'spec']) ?? ''}`),
         material_code:  String(pick(r, ['物料编码', 'materialcode', 'material_code']) ?? ''),
@@ -575,7 +597,7 @@ function MaterialsEditor({ rows, onChange, dicts, productCode }: {
         weight_per_carton: Number(pick(r, ['箱重', 'weightpercarton']) ?? 0) || 0,
         active: true,
         usage_qty: Number(pick(r, ['用量', 'usage', 'usageqty', 'usage_qty']) ?? 0) || 1,
-      })).filter(m => m.name_zh || m.item_no || m.material_code)
+      }}).filter(m => m.name_zh || m.item_no || m.material_code)
       if (!imported.length) { message.warning('没识别到有效行 (需含 中文名 / 料号 列)'); return }
       onChange([...rows, ...imported])
       message.success(`已导入 ${imported.length} 行 — 别忘点 💾 保存`)
@@ -591,6 +613,7 @@ function MaterialsEditor({ rows, onChange, dicts, productCode }: {
         <Button onClick={() => fileRef.current?.click()}>📥 Excel 导入</Button>
         <input ref={fileRef} type="file" accept=".xlsx,.xls" style={{ display: 'none' }}
           onChange={(e) => { const f = e.target.files?.[0]; if (f) importExcel(f); e.target.value = '' }} />
+        <Button onClick={autoFillEnglish}>🌐 英文名翻译</Button>
         <Button onClick={autoFillHs}>🔍 HS 自动填充</Button>
         <Button onClick={autoFillSupplier}>🏭 供应商扩展</Button>
         <Typography.Text type="secondary" style={{ fontSize: 12 }}>

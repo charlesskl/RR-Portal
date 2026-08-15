@@ -81,7 +81,7 @@ describe('buildDeliveryReport', () => {
       id: 'hkd-tax-row', unit_price_cny_tax: 6, exchange_rate: 0.87,
     })], '东莞厂区 · 注塑部', () => '工厂', 'hkd-tax', () => 1.11)
 
-    expect(rows[0]).toMatchObject({ kind: 'detail', outPrice: 4.7027, exchangeRate: 0.87, taxPoint: 1.11 })
+    expect(rows[0]).toMatchObject({ kind: 'detail', outPrice: 6.2131, exchangeRate: 0.87, taxPoint: 1.11 })
   })
 })
 

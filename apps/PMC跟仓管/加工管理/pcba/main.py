@@ -3465,7 +3465,7 @@ def _heyuan_pcba_export_workbook(records):
     return wb
 
 
-def _assembly_pcba_summary_section(ws, header_row, label, records):
+def _assembly_pcba_summary_section(ws, header_row, label, records, cd_records=None):
     headers = ["物料名称", label, "截6月月结"]
     headers += [f"{month}月" for month in EXPORT_MONTHS]
     headers.append("备注")
@@ -3477,18 +3477,24 @@ def _assembly_pcba_summary_section(ws, header_row, label, records):
     ws.cell(header_row + 1, 2).value = _sum_qty(records)
     for col_no, value in enumerate(month_sums, start=3):
         ws.cell(header_row + 1, col_no).value = value or None
+    # 36#唱片CD = 36#NFC贴纸（车间沿用旧称）：领料取贴纸领料记录，
+    # 成品与 PCBA 一比一沿用 PCBA 成品数，结存相应推导
+    cd_source = cd_records if cd_records is not None else []
+    cd_month_sums = _supplier_pcba_month_sums(cd_source)
     ws.cell(header_row + 2, 1).value = "36#唱片CD"
-    ws.cell(header_row + 2, 2).value = 0
+    ws.cell(header_row + 2, 2).value = _sum_qty(cd_source)
+    for col_no, value in enumerate(cd_month_sums, start=3):
+        ws.cell(header_row + 2, col_no).value = value or None
 
 
-def _assembly_pcba_issue_sheet(wb, title, records):
+def _assembly_pcba_issue_sheet(wb, title, records, material_label="PCBA主板"):
     ws = wb.create_sheet(title)
     ws.append(["日期", "领料编号", "物料名称", "领料数", "备注"])
     for row in records:
         ws.append([
             _record_export_date(row),
             row.get("doc_no"),
-            "PCBA主板",
+            material_label,
             row.get("qty"),
             row.get("remark"),
         ])
@@ -3518,24 +3524,29 @@ def _assembly_pcba_finished_sheet(wb, records):
     ws.column_dimensions["G"].width = 22
 
 
-def _assembly_pcba_export_workbook(records):
+def _assembly_pcba_export_workbook(records, cd_issue=None):
     wb = Workbook()
     ws = wb.active
     ws.title = "总表"
     issue = [row for row in records if row["rec_type"] == "issue"]
     finished = [row for row in records if row["rec_type"] == "finished"]
+    cd_issue = cd_issue or []
 
-    _assembly_pcba_summary_section(ws, 1, "领料总数", issue)
-    _assembly_pcba_summary_section(ws, 5, "成品总数", finished)
+    _assembly_pcba_summary_section(ws, 1, "领料总数", issue, cd_issue)
+    # 成品：36#唱片CD 与 PCBA主板 一比一，沿用 PCBA 成品数
+    _assembly_pcba_summary_section(ws, 5, "成品总数", finished, finished)
     balance_records = [
         {**row, "qty": -int(row.get("qty") or 0)} for row in finished
     ] + issue
-    _assembly_pcba_summary_section(ws, 9, "理论结存数", balance_records)
+    cd_balance = [
+        {**row, "qty": -int(row.get("qty") or 0)} for row in finished
+    ] + cd_issue
+    _assembly_pcba_summary_section(ws, 9, "理论结存数", balance_records, cd_balance)
     _apply_legacy_sheet_style(ws, 11, 10)
     ws.column_dimensions["A"].width = 14
     ws.column_dimensions["B"].width = 14
 
-    _assembly_pcba_issue_sheet(wb, "36#CD领料明细", [])
+    _assembly_pcba_issue_sheet(wb, "36#CD领料明细", cd_issue, "36#唱片CD")
     _assembly_pcba_issue_sheet(wb, "PCB主板领料明细", issue)
     _assembly_pcba_finished_sheet(wb, finished)
     return wb
@@ -4390,6 +4401,21 @@ def export_records(
             totals_sql += " AND material=?"
             totals_params.append(material)
         monthly_totals = conn.execute(totals_sql, totals_params).fetchall()
+        # 东莞车间 PCBA 台账的「36#CD领料明细」是 CD 贴纸的独立小台账，
+        # 只取该页导入的记录（备注前缀区分），不要把 NFC 贴纸整仓领料混进来
+        cd_issue_records = []
+        if user["department"] == ASSEMBLY_DEPARTMENT and material == PCBA_MATERIAL:
+            cd_issue_records = [dict(r) for r in conn.execute(
+                "SELECT r.id, r.rec_type, l.name AS location_name, r.rec_date, r.doc_no, "
+                "r.material, r.sticker_type, r.supplier, r.po_no, r.customer_name, "
+                "r.contract_no, r.item_no, r.product_name, "
+                "r.qty, r.remark, r.summary_month "
+                "FROM records r LEFT JOIN locations l ON r.location_id = l.id "
+                "WHERE r.department=? AND r.material=? AND r.sticker_type=? "
+                "AND r.rec_type='issue' AND COALESCE(r.remark, '') LIKE '36#CD领料明细%' "
+                "ORDER BY r.id",
+                (user["department"], NFC_MATERIAL, "36#NFC贴纸"),
+            ).fetchall()]
     finally:
         conn.close()
     records = [dict(r) for r in rows]
@@ -4411,7 +4437,7 @@ def export_records(
         )
     if user["department"] == ASSEMBLY_DEPARTMENT and material == PCBA_MATERIAL:
         return _xlsx_response(
-            _assembly_pcba_export_workbook(records),
+            _assembly_pcba_export_workbook(records, cd_issue_records),
             "东莞车间77794#PCB主板出入明细.xlsx",
         )
     if user["department"] == ASSEMBLY_DEPARTMENT and material == NFC_MATERIAL:

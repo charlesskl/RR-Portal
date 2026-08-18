@@ -1678,6 +1678,41 @@ def test_assembly_pcba_legacy_workbook_skips_subtotal_rows(client):
     ) == 20800
 
 
+def test_assembly_pcba_export_shows_cd_sticker_quantities(client):
+    # 「36#唱片CD」= 36#NFC贴纸（车间沿用旧称）：PCBA 导出的 36#唱片CD 行
+    # 领料取贴纸领料记录，成品沿用 PCBA 成品数（一比一），不再恒为 0。
+    login(client, "东莞车间", "123456", "东莞车间")
+    dongguan = loc_id(client, "东莞车间")
+    client.post("/api/records", json={
+        "rec_type": "issue", "location_id": dongguan, "material": "NFC贴纸",
+        "sticker_type": "36#NFC贴纸", "rec_date": "2026-07-09",
+        "doc_no": "DS260617-01", "qty": 16944, "remark": "36#CD领料明细导入",
+    })
+    client.post("/api/records", json={
+        "rec_type": "finished", "location_id": dongguan, "material": "77794-PCBA板",
+        "rec_date": "2026-07-07", "doc_no": "2510160", "qty": 168080,
+    })
+
+    r = client.get("/api/records/export?material=77794-PCBA板")
+    wb = openpyxl.load_workbook(io.BytesIO(r.content), data_only=True)
+
+    assert r.status_code == 200
+    # 领料总数区：36#唱片CD = 贴纸领料
+    assert wb["总表"].cell(3, 1).value == "36#唱片CD"
+    assert wb["总表"].cell(3, 2).value == 16944
+    assert wb["总表"].cell(3, 4).value == 16944  # 7月
+    # 成品总数区：36#唱片CD 沿用 PCBA 成品（一比一）
+    assert wb["总表"].cell(7, 1).value == "36#唱片CD"
+    assert wb["总表"].cell(7, 2).value == 168080
+    # 理论结存数区：36#唱片CD = 领料 - 成品
+    assert wb["总表"].cell(11, 1).value == "36#唱片CD"
+    assert wb["总表"].cell(11, 2).value == -151136
+    # 36#CD领料明细页包含贴纸领料记录
+    assert wb["36#CD领料明细"].cell(2, 2).value == "DS260617-01"
+    assert wb["36#CD领料明细"].cell(2, 3).value == "36#唱片CD"
+    assert wb["36#CD领料明细"].cell(2, 4).value == 16944
+
+
 def test_assembly_pcba_export_matches_import_workbook_format(client):
     login(client, "东莞车间", "123456", "东莞车间")
     imported = upload_bytes(

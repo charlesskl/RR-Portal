@@ -189,3 +189,15 @@ test('saveAll has a format-only fallback scan for hook-less toolbar operations',
   // 扫描只对比格式，不得回写字段值（历史值类型差异会产生幻影变化）
   assert.doesNotMatch(source, /格式兜底扫描[\s\S]{0,2000}?writeFieldValue/);
 });
+
+// ===== 2026-08-21 「走货期填文字保存不了」修复 =====
+
+test('non-date text in date columns is preserved instead of silently dropped', () => {
+  // 车间在走货期列填「货期待复」等文字 —— parseToISO 解析不了时必须按原文本存。
+  // 旧逻辑 if (iso) entry.fields[...] = iso —— 解析失败静默丢弃，保存后全丢
+  assert.match(source, /entry\.fields\[colData\] = iso \|\| String\(v\)/);
+  assert.doesNotMatch(source, /if \(iso\) entry\.fields\[colData\] = iso;/);
+  // writeFieldValue（公式兜底扫描用）同样不得丢文本
+  assert.match(source, /\{ fields\[colData\] = String\(value\); return true; \}/);
+  assert.doesNotMatch(source, /if \(!iso && value != null && value !== ''\) return false;/);
+});

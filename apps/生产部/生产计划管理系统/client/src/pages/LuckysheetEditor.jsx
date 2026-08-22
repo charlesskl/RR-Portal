@@ -330,7 +330,8 @@ function writeFieldValue(fields, colData, col, value) {
   if (value === undefined) return false;
   if (DATE_FIELDS.has(colData)) {
     const iso = parseToISO(value);
-    if (!iso && value != null && value !== '') return false;
+    // 解析不成日期的文本（如「货期待复」）按原文本存，不丢
+    if (!iso && value != null && value !== '') { fields[colData] = String(value); return true; }
     fields[colData] = iso;
     return true;
   }
@@ -473,7 +474,10 @@ function LuckysheetEditor({
         if (v == null) entry.fields[colData] = null;
         else {
           const iso = parseToISO(v);
-          if (iso) entry.fields[colData] = iso;
+          // 车间会在日期列填「货期待复」等文字 —— 解析不成日期就按原文本存。
+          // 旧逻辑静默丢弃（只记能解析成日期的），用户填的文字保存后全丢 ——
+          // 「货期这编辑了保存不了」的真正根因
+          entry.fields[colData] = iso || String(v);
         }
       } else if (DUE_FIELDS.has(colData)) {
         // 复期列：把 Luckysheet 误转成序列号的值转回"M月D日"文本再存

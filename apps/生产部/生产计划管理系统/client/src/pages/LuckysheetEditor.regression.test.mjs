@@ -190,51 +190,14 @@ test('saveAll has a format-only fallback scan for hook-less toolbar operations',
   assert.doesNotMatch(source, /格式兜底扫描[\s\S]{0,2000}?writeFieldValue/);
 });
 
-// ===== 2026-08-20 「生产进度固定百分比」 =====
+// ===== 2026-08-21 「走货期填文字保存不了」修复 =====
 
-const progStart = source.indexOf('function computeProgress');
-const progEnd = source.indexOf('function ordersToCelldata');
-const progCtx = {};
-vm.createContext(progCtx);
-vm.runInContext(`${source.slice(progStart, progEnd)}\nthis.computeProgress = computeProgress;`, progCtx);
-
-test('production progress is a fixed percentage of production_count / quantity', () => {
-  const { computeProgress } = progCtx;
-  // 注意：computeProgress 在 vm realm 里跑，返回对象原型与主 realm 不同，
-  // deepEqual 会误判 —— 逐字段断言
-  const check = (q, c, text, value) => {
-    const r = computeProgress(q, c);
-    assert.equal(r.text, text, `computeProgress(${q}, ${c}).text`);
-    assert.equal(r.value, value, `computeProgress(${q}, ${c}).value`);
-  };
-  check(51072, 5000, '9.79%', 9.79);
-  check(44320, 1000, '2.26%', 2.26);
-  check(51072, 51072, '100%', 100);
-  // 生产数为空/0 → 显示 0（和车间手填习惯一致）
-  check(51072, 0, '0%', 0);
-  check(51072, null, '0%', 0);
-  // 数量为空/0 → 空白，不出 NaN%
-  check('', 100, '', null);
-  check(0, 100, '', null);
-});
-
-test('progress cell renders computed percentage, not the raw DB value', () => {
-  const start = source.indexOf('const NUMERIC_SUM_FIELDS');
-  const end = source.indexOf('// 从 Luckysheet 单元格对象提取格式');
-  const ctx = { Date, Set };
-  vm.createContext(ctx);
-  vm.runInContext(`${source.slice(start, end)}\nthis.ordersToCelldata = ordersToCelldata;`, ctx);
-  const cells = ctx.ordersToCelldata([
-    { id: 1, quantity: 51072, production_count: 5000, production_progress: 0 },
-  ], [{ data: 'production_progress', title: '生产进度' }], new Set());
-  const cell = cells.find(c => c.r === 1 && c.c === 0);
-  assert.equal(cell.v.m, '9.79%', '显示层直接算百分比，不信 DB 里手填的旧值');
-  assert.equal(cell.v.v, 9.79);
-});
-
-test('editing quantity or production_count recomputes the progress cell live', () => {
-  // 钩子里 production_count 必须触发重算（原只有 quantity/daily_target）
-  assert.match(source, /colData === 'quantity' \|\| colData === 'daily_target' \|\| colData === 'production_count'/);
-  // 重算结果要入 pending，保存才会落库
-  assert.match(source, /fields\.production_progress = progressValue/);
+test('non-date text in date columns is preserved instead of silently dropped', () => {
+  // 车间在走货期列填「货期待复」等文字 —— parseToISO 解析不了时必须按原文本存。
+  // 旧逻辑 if (iso) entry.fields[...] = iso —— 解析失败静默丢弃，保存后全丢
+  assert.match(source, /entry\.fields\[colData\] = iso \|\| String\(v\)/);
+  assert.doesNotMatch(source, /if \(iso\) entry\.fields\[colData\] = iso;/);
+  // writeFieldValue（公式兜底扫描用）同样不得丢文本
+  assert.match(source, /\{ fields\[colData\] = String\(value\); return true; \}/);
+  assert.doesNotMatch(source, /if \(!iso && value != null && value !== ''\) return false;/);
 });

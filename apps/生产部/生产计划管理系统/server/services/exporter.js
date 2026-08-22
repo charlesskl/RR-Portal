@@ -62,7 +62,15 @@ function addOrderSheet(wb, sheetName, orders) {
   ws.views = [{ state: 'frozen', ySplit: 1 }];
 
   for (const order of orders) {
-    const row = ws.addRow(order);
+    // 生产进度在系统里固定 = 生产数/数量 百分比，导出时同样按此口径算，
+    // 不直接导 DB 里的比率小数值（0.0979 车间看不懂）
+    const q = Number(order.quantity), c = Number(order.production_count);
+    const row = ws.addRow({
+      ...order,
+      production_progress: (order.quantity != null && order.quantity !== '' && !isNaN(q) && q !== 0)
+        ? Math.round(((isNaN(c) ? 0 : c) / q) * 10000) / 100 + '%'
+        : '',
+    });
     row.eachCell(cell => {
       cell.font = { size: 9 };
       cell.alignment = { vertical: 'middle', wrapText: true };

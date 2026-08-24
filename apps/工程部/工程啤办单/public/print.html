@@ -415,7 +415,7 @@
           <td>${v(it.process)}</td>
           <td>${v(it.sample_qty)}</td>
           <td>${v(it.provide_time)}</td>
-          <td>${v(it.receive_time || o.actual_receive_time)}</td>
+          <td>${v(it.receive_time || o.receive_time || o.actual_receive_time)}</td>
           <td>${v(it.eng_complete_time)}</td>
           <td style="color:#c00;font-weight:bold">${v(it.delivery_time)}</td>
           <td>${v(it.engineer)}</td>

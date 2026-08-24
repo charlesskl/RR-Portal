@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { apiFetch } from "@/lib/apiFetch";
 
 type Part = { id: number; partGroupId: number; partName: string };
 type ProductLite = { id: number; productNo: string };
@@ -19,7 +20,7 @@ export default function OrderEditor({ products }: { products: ProductLite[] }) {
   async function pickProduct(id: number) {
     setProductId(id);
     setQtys({}); setParts([]); setError("");
-    const res = await fetch(`/api/products/${id}`);
+    const res = await apiFetch(`/api/products/${id}`);
     if (!res.ok) { setError("载入款号数据失败，请重试"); return; }
     const p = await res.json();
     setParts(Array.from(new Map((p.parts || []).map((part: Part) => [part.partGroupId || part.id, {
@@ -38,7 +39,7 @@ export default function OrderEditor({ products }: { products: ProductLite[] }) {
 
     if (partQtys.length === 0) { setError("请至少给一个部位填数量"); setLoading(false); return; }
 
-    const res = await fetch("/api/orders", {
+    const res = await apiFetch("/api/orders", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ...head, productId, partQtys }),
     });

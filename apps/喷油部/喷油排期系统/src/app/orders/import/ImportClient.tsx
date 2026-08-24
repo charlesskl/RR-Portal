@@ -5,6 +5,7 @@
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { apiFetch } from "@/lib/apiFetch";
 
 type DraftHead = { externalOrderNo: string; orderDate: string; deliveryDate: string | null; productNo: string; isMa: boolean };
 type DraftLine = { pdfItemName: string; totalQty: number; mergedRows: number; matchedItemName: string | null; unitPrice: number; existingUnitCost: number | null };
@@ -33,7 +34,7 @@ export default function ImportClient() {
     setBusy(true); setErr("");
     const fd = new FormData(); fd.append("file", f);
     try {
-      const res = await fetch("/api/orders/import-pdf", { method: "POST", body: fd });
+      const res = await apiFetch("/api/orders/import-pdf", { method: "POST", body: fd });
       if (!res.ok) { setErr((await res.json().catch(() => ({})))?.error ?? "解析失败，请确认是委托加工合同 PDF"); return; }
       const d: Draft = await res.json();
       setDraft(d); setHead(d.head); setPicks({}); setSavePricing(!d.productFound); setFileName(f.name);
@@ -60,7 +61,7 @@ export default function ImportClient() {
       .map((x) => ({ matchedItemName: x.name as string, totalQty: x.totalQty, unitPrice: x.unitPrice }));
     const body = { head, pdfToken: draft.pdfToken, asPendingProduct: asPending, savePricing, lines };
     try {
-      const res = await fetch("/api/orders/import-confirm", {
+      const res = await apiFetch("/api/orders/import-confirm", {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
       });
       if (!res.ok) { setErr((await res.json().catch(() => ({})))?.error ?? "入库失败，请重试"); return; }

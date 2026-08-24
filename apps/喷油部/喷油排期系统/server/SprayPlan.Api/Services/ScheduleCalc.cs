@@ -60,11 +60,11 @@ public static class ScheduleCalc
     public static List<SchedulablePart> ExpandOrderParts(Order order)
     {
         var outl = new List<SchedulablePart>();
+        var processedGroups = new HashSet<int>();
         foreach (var pq in order.PartQtys)
         {
             var part = order.Product?.Parts.FirstOrDefault(p => p.Id == pq.SourcePartId);
             if (part is null) continue;
-            var processedGroups = new HashSet<int>();
             var groupId = part.PartGroupId > 0 ? part.PartGroupId : part.Id;
             if (!processedGroups.Add(groupId)) continue;
             var group = PartProcessRules.SameLogicalPart(order.Product!.Parts, part);

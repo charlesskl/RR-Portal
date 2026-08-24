@@ -2,6 +2,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { apiFetch } from "@/lib/apiFetch";
 import { filterProducts, PRODUCT_STATUS_META } from "@/lib/product";
 
 // 列表行结构（与 page.tsx 取数后传入的字段一致）
@@ -31,14 +32,14 @@ export function ProductsTable({ products }: { products: ProductRow[] }) {
   async function archive(id: number, no: string) {
     if (!confirm(`确认作废产品「${no}」？作废后可在回收站恢复。`)) return;
     setBusy(true);
-    const res = await fetch(`/api/products/${id}`, { method: "DELETE" });
+    const res = await apiFetch(`/api/products/${id}`, { method: "DELETE" });
     setBusy(false);
     if (res.ok) router.refresh(); else alert("作废失败，请重试");
   }
   async function restore(id: number, no: string) {
     if (!confirm(`确认恢复产品「${no}」？将回到「待审核」状态，需重新审核生效。`)) return;
     setBusy(true);
-    const res = await fetch(`/api/products/${id}`, {
+    const res = await apiFetch(`/api/products/${id}`, {
       method: "PATCH", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ status: "draft" }),
     });

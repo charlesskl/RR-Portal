@@ -3,6 +3,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { STATUS_META } from "@/lib/orderStatus";
+import { apiFetch } from "@/lib/apiFetch";
 
 type PartQtyDto = { id: number; partName: string; sourcePartId: number | null; qty: number; partOrder: number };
 type ProductPartDto = { id: number; partName: string; unitCost: number; laborPrice: number; paintCost: number; quotedPrice: number };
@@ -42,18 +43,18 @@ export default function OrderDetailEditor({ order, isAdmin }: { order: OrderDeta
   async function save() {
     setLoading(true); setError("");
     const partQtys = order.qtyEditable ? order.partQtys.map(q => ({ id: q.id, qty: qtys[q.id] ?? q.qty })) : undefined;
-    const res = await fetch(`/api/orders/${order.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ orderDate: orderDate || undefined, deliveryDate: deliveryDate || null, remark, isMA, isUrgent, partQtys }) });
+    const res = await apiFetch(`/api/orders/${order.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ orderDate: orderDate || undefined, deliveryDate: deliveryDate || null, remark, isMA, isUrgent, partQtys }) });
     if (res.ok) router.refresh(); else { const body = await res.json().catch(() => ({})); setError(body.error || "保存失败"); }
     setLoading(false);
   }
   async function unschedule() {
     if (!confirm(`确认撤销订单 ${order.externalOrderNo} 的全部排期？`)) return;
-    const res = await fetch(`/api/schedule/orders/${order.id}/unschedule`, { method: "POST" });
+    const res = await apiFetch(`/api/schedule/orders/${order.id}/unschedule`, { method: "POST" });
     if (res.ok) router.refresh(); else { const body = await res.json().catch(() => ({})); setError(body.error || "撤销排期失败"); }
   }
   async function openRevokeActuals() {
     setError("");
-    const res = await fetch(`/api/orders/${order.id}/actuals-summary`, { cache: "no-store" });
+    const res = await apiFetch(`/api/orders/${order.id}/actuals-summary`, { cache: "no-store" });
     if (!res.ok) { const body = await res.json().catch(() => ({})); setError(body.error || "读取实绩失败"); return; }
     const summary = await res.json() as ActualsSummary;
     if (summary.days.length === 0) { setError("该订单没有可撤销的实绩"); return; }
@@ -64,7 +65,7 @@ export default function OrderDetailEditor({ order, isAdmin }: { order: OrderDeta
   async function revokeActuals() {
     if (!actualsSummary || (revokeScope === "day" && !revokeDate)) return;
     setRevoking(true); setError("");
-    const res = await fetch(`/api/orders/${order.id}/revoke-actuals`, {
+    const res = await apiFetch(`/api/orders/${order.id}/revoke-actuals`, {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ scope: revokeScope, date: revokeScope === "day" ? revokeDate : null }),
     });
@@ -83,7 +84,7 @@ export default function OrderDetailEditor({ order, isAdmin }: { order: OrderDeta
     }
     const rows = processRows;
     const partQtys = order.partQtys.map(part => ({ id: part.id, qty: qtys[part.id] ?? part.qty }));
-    const res = await fetch(`/api/orders/${order.id}/process-schedule`, {
+    const res = await apiFetch(`/api/orders/${order.id}/process-schedule`, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ rows, partQtys }),
     });
     if (res.ok) { router.refresh(); router.push(`/schedule?orderId=${order.id}&orderNo=${encodeURIComponent(order.externalOrderNo)}`); }

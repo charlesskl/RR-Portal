@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { apiFetch } from "@/lib/apiFetch";
 import { CRAFTS } from "@/lib/product";
 
 type Part = { id: number; partGroupId: number; partName: string; craft: string; unitCost: number; laborPrice: number; paintCost: number; quotedPrice: number; dailyCapacity: number; productionMode: string; stdMachineCount: number; remark: string | null; craftPasses: number };
@@ -15,18 +16,18 @@ export function ProductEditor({ productId, parts }: { productId: number; parts: 
 
   async function save() {
     setSaving(true); setError("");
-    const res = await fetch(`/api/products/${productId}/parts`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ parts: rows }) });
+    const res = await apiFetch(`/api/products/${productId}/parts`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ parts: rows }) });
     if (!res.ok) { const body = await res.json().catch(() => ({})); setError(body.error || "保存失败"); }
     else router.refresh();
     setSaving(false);
   }
   async function addPart() {
-    const res = await fetch(`/api/products/${productId}/parts`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ partName: "新部位", partOrder: rows.length, craft: "移印" }) });
+    const res = await apiFetch(`/api/products/${productId}/parts`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ partName: "新部位", partOrder: rows.length, craft: "移印" }) });
     if (res.ok) router.refresh(); else { const body = await res.json().catch(() => ({})); setError(body.error || "添加失败"); }
   }
   async function removePart(id: number) {
     if (!confirm("确认删除这个部位？")) return;
-    const res = await fetch(`/api/products/${productId}/parts/${id}`, { method: "DELETE" });
+    const res = await apiFetch(`/api/products/${productId}/parts/${id}`, { method: "DELETE" });
     if (res.ok) { setRows(current => current.filter(row => row.id !== id)); router.refresh(); }
     else setError("删除失败");
   }

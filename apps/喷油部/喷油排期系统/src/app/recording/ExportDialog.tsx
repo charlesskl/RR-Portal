@@ -2,6 +2,7 @@
 // 导出日报表弹窗：选计划版/实际版 + 按拉别手填「表头人数说明」「杂工明细」，POST 拉取 xlsx 下载。
 // 备注临时填、不持久化（每次打开都空）。生产人数合计/上班人数等数字字段留待第二批（人数捆）。
 import { useState } from "react";
+import { apiFetch } from "@/lib/apiFetch";
 
 export default function ExportDialog({ date, lines }: { date: string; lines: { id: number; label: string }[] }) {
   const [open, setOpen] = useState(false);
@@ -20,7 +21,7 @@ export default function ExportDialog({ date, lines }: { date: string; lines: { i
         miscText: notes[l.id]?.misc ?? "",
         miscCount: Number(notes[l.id]?.miscCount || 0),
       }));
-      const resp = await fetch("/api/recording/export", {
+      const resp = await apiFetch("/api/recording/export", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ date: exportDate, mode, lineNotes }),
       });

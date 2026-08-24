@@ -2,6 +2,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { clearClientCache } from "@/lib/clientCache";
+import { apiFetch } from "@/lib/apiFetch";
 
 const NAV_ITEMS = [
   { href: "/",          label: "仪表盘",     allowed: ["admin", "clerk", "viewer"], ready: true },
@@ -18,7 +19,7 @@ export default function TopNav({ username, role }: { username: string; role: str
   const router = useRouter();
 
   async function handleLogout() {
-    await fetch("/api/auth/logout", { method: "POST" });
+    await apiFetch("/api/auth/logout", { method: "POST" });
     clearClientCache();
     router.push("/login");
     router.refresh();

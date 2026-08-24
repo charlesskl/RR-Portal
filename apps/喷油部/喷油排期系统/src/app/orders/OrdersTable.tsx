@@ -5,6 +5,7 @@
 import { useState, useMemo } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { apiFetch } from "@/lib/apiFetch";
 import { filterOrders, type OrderRow, type OrderFilter } from "@/lib/orderFilter";
 import { STATUS_META, ACTIVE_STATUSES } from "@/lib/orderStatus";
 import DatePicker from "./DatePicker";
@@ -29,14 +30,14 @@ export default function OrdersTable({ orders }: { orders: OrderRow[] }) {
   async function archive(id: number, no: string) {
     if (!confirm(`确认作废订单「${no}」？作废后可在回收站恢复。`)) return;
     setBusy(true);
-    const res = await fetch(`/api/orders/${id}`, { method: "DELETE" });
+    const res = await apiFetch(`/api/orders/${id}`, { method: "DELETE" });
     setBusy(false);
     if (res.ok) router.refresh(); else alert("作废失败，请重试");
   }
   async function restore(id: number, no: string) {
     if (!confirm(`确认恢复订单「${no}」？将回到「已接单」状态。`)) return;
     setBusy(true);
-    const res = await fetch(`/api/orders/${id}`, {
+    const res = await apiFetch(`/api/orders/${id}`, {
       method: "PATCH", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ status: "received" }),
     });

@@ -6,6 +6,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { buildOverviewGrid, cellKey, dateRange, type CellItem, type OverviewLine, type OverviewPlan } from "@/lib/scheduleOverview";
 import { cachedJson } from "@/lib/clientCache";
+import { apiFetch } from "@/lib/apiFetch";
 import Link from "next/link";
 import ExportDialog from "../recording/ExportDialog";
 
@@ -109,7 +110,7 @@ export default function ScheduleOverview({ orderFilter, pendingOrderCount = 0, p
     if (!Number.isInteger(inbound) || inbound < 0) { setSaveError("实际入库数必须是大于或等于 0 的整数"); return; }
     setSaving(true); setSaveError("");
     try {
-      const res = await fetch(`/api/plans/${detail.item.id}`, {
+      const res = await apiFetch(`/api/plans/${detail.item.id}`, {
         method: "PATCH", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ goodQty: qty, inboundQty: inbound, remark: detailRemark }),
       });

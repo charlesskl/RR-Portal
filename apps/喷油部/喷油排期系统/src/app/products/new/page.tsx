@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { CRAFTS } from "@/lib/product";
+import { apiFetch } from "@/lib/apiFetch";
 
 type PartForm = { partName: string; craft: string; unitCost: string; laborPrice: string; paintCost: string; quotedPrice: string; dailyCapacity: string };
 
@@ -28,7 +29,7 @@ export default function NewProductPage() {
           dailyCapacity: num(p.dailyCapacity),
         })),
     };
-    const res = await fetch("/api/products", {
+    const res = await apiFetch("/api/products", {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
     });
     if (res.ok) { router.push("/products"); router.refresh(); }

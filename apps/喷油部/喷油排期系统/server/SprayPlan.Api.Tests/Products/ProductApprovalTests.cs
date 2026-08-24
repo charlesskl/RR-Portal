@@ -27,7 +27,7 @@ public class ProductApprovalTests : IAsyncLifetime
         var resp = await _client.PostAsJsonAsync("/api/products", new
         {
             productNo = "AP1", customerName = "ZURU",
-            items = new[] { new { itemName = "兔子", parts = new[] { new { partName = "头", unitCost = 1.0 } } } }
+            parts = new[] { new { partName = "头", unitCost = 1.0 } }
         });
         resp.EnsureSuccessStatusCode();
         return (await resp.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetInt32();

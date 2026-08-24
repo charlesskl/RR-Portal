@@ -3,7 +3,7 @@ using SprayPlan.Api.Services;
 namespace SprayPlan.Api.Features.Schedule;
 
 // 甘特图数据结构 —— 对应现有 scheduleData.ts 的 GanttPlan/DemandPart/GanttOrder。
-public record GanttPlan(string PlanDate, string ItemName, string PartName, int? SourcePartId, int PlannedQty, int? GoodQty, int? ReportedQty, List<string> MachineNos, int WorkerCount);
+public record GanttPlan(string PlanDate, string ItemName, string PartName, int? SourcePartId, int PlannedQty, int? GoodQty, int? InboundQty, int? ReportedQty, List<string> MachineNos, int WorkerCount);
 public record DemandPart(int SourceItemId, string ItemName, int SourcePartId, string PartName, int TotalDemand);
 public record GanttOrder(int Id, string ExternalOrderNo, string ProductNo, string Status,
     string? DeliveryDate, bool Scheduled, string? FirstPlanDate, string? ExpectedOutDate,
@@ -21,5 +21,5 @@ public record SchedulableOrder(int Id, string ExternalOrderNo, string ProductNo,
 public record OverviewLine(int LineId, string Name, string CraftType, int DailyLimit);
 public record OverviewPlan(int Id, int LineId, string Date, int OrderId, string ProductNo,
     string ItemName, string PartName, int StepNo, string Craft, int PlannedQty,
-    List<string> MachineNos, int WorkerCount);
+    List<string> MachineNos, int WorkerCount, int? GoodQty, int? InboundQty, string? Remark, string ExternalOrderNo);
 public record OverviewResult(List<OverviewLine> Lines, List<OverviewPlan> Plans);

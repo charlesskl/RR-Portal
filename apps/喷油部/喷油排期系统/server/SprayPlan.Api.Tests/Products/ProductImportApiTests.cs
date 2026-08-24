@@ -171,7 +171,7 @@ public class ProductImportApiTests : IAsyncLifetime
         Assert.Equal("draft", ne.GetProperty("status").GetString());
         var pid = ne.GetProperty("id").GetInt32();
         var detail = await _client.GetFromJsonAsync<JsonElement>($"/api/products/{pid}");
-        var part0 = detail.GetProperty("items")[0].GetProperty("parts")[0];
+        var part0 = detail.GetProperty("parts")[0];
         Assert.Equal("喷油", part0.GetProperty("craftDetail").GetString());
         Assert.Equal("手喷", part0.GetProperty("craft").GetString());
 
@@ -183,7 +183,7 @@ public class ProductImportApiTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Commit_ThreeLevel_GroupsByItem()
+    public async Task Commit_ImportedRows_AreStoredAsParts()
     {
         var req = new
         {
@@ -202,10 +202,8 @@ public class ProductImportApiTests : IAsyncLifetime
         var list = await _client.GetFromJsonAsync<JsonElement>("/api/products");
         var p = list.EnumerateArray().First(x => x.GetProperty("productNo").GetString() == "TL1");
         var detail = await _client.GetFromJsonAsync<JsonElement>($"/api/products/{p.GetProperty("id").GetInt32()}");
-        var items = detail.GetProperty("items");
-        Assert.Equal(2, items.GetArrayLength());
-        Assert.Equal(2, items[0].GetProperty("parts").GetArrayLength());
-        Assert.Equal(1, items[1].GetProperty("parts").GetArrayLength()); // 3#鞋子 只有 左鞋 一个部位
+        var parts = detail.GetProperty("parts");
+        Assert.Equal(3, parts.GetArrayLength());
     }
 
     // I-1 回归测试：同一请求内两个相同 productNo+specName（importAsNewVersion=false），
@@ -244,17 +242,17 @@ public class ProductImportApiTests : IAsyncLifetime
     public async Task ExistingProduct_PreviewsDiff_And_CommitUpdatesSelectedFieldsOnly()
     {
         var created = await (await _client.PostAsJsonAsync("/api/products", new { productNo = "VER1",
-            items = new[]{ new { itemName="头", parts = new object[]{
+            parts = new object[]{
                 new { partName="头", craft="移印", unitCost=1.0, dailyCapacity=100, laborPrice=0.1, paintCost=0.2, quotedPrice=0.3 },
                 new { partName="旧明细", craft="移印", unitCost=9.0 }
-            } } } })).Content.ReadFromJsonAsync<JsonElement>();
+            } })).Content.ReadFromJsonAsync<JsonElement>();
         var productId = created.GetProperty("id").GetInt32();
         int partId;
         using (var scope = _factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<SprayPlan.Api.Data.AppDbContext>();
-            var product = await db.Products.Include(p => p.Items).ThenInclude(i => i.Parts).SingleAsync(p => p.Id == productId);
-            var part = product.Items[0].Parts.Single(p => p.PartName == "头");
+            var product = await db.Products.Include(p => p.Parts).SingleAsync(p => p.Id == productId);
+            var part = product.Parts.Single(p => p.PartName == "头");
             part.CraftDetail = "移印";
             part.StdMachineCount = 1;
             partId = part.Id;
@@ -298,7 +296,7 @@ public class ProductImportApiTests : IAsyncLifetime
         Assert.Equal(1, json.GetProperty("updatedFields").GetInt32());
 
         var detail = await _client.GetFromJsonAsync<JsonElement>($"/api/products/{productId}");
-        var parts = detail.GetProperty("items")[0].GetProperty("parts");
+        var parts = detail.GetProperty("parts");
         Assert.Equal(2, parts.GetArrayLength());
         var head = parts.EnumerateArray().Single(p => p.GetProperty("partName").GetString() == "头");
         Assert.Equal(2.0, head.GetProperty("unitCost").GetDouble());
@@ -309,7 +307,7 @@ public class ProductImportApiTests : IAsyncLifetime
     public async Task Commit_SameExistingProductWithSeveralNewParts_DoesNotIndexTemporaryZeroIds()
     {
         var created = await (await _client.PostAsJsonAsync("/api/products", new { productNo = "MULTI-UPDATE",
-            items = new[]{ new { itemName="主体", parts = new[]{ new { partName="原明细", craft="手喷", unitCost=1.0 } } } } }))
+            parts = new[]{ new { partName="原明细", craft="手喷", unitCost=1.0 } } }))
             .Content.ReadFromJsonAsync<JsonElement>();
         var productId = created.GetProperty("id").GetInt32();
 
@@ -332,6 +330,6 @@ public class ProductImportApiTests : IAsyncLifetime
         Assert.Equal(3, result.GetProperty("addedParts").GetInt32());
 
         var detail = await _client.GetFromJsonAsync<JsonElement>($"/api/products/{productId}");
-        Assert.Equal(4, detail.GetProperty("items")[0].GetProperty("parts").GetArrayLength());
+        Assert.Equal(4, detail.GetProperty("parts").GetArrayLength());
     }
 }

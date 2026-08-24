@@ -4,15 +4,15 @@ using SprayPlan.Api.Services;
 
 namespace SprayPlan.Api.Features.Inventory;
 
-// 库存聚合查询：在 (款号·子件·部位) 键上，把实绩累计良品与流水叠加成"成品在库/散件可用"。
+// 库存聚合查询：按订单排期步骤计算工序半成品、最后工序车间存数和成品库存。
 public class InventoryService(AppDbContext db)
 {
     public async Task<List<InventoryRow>> Query(int? productId, string? itemName, string? partName)
     {
-        // 1) 实绩累计良品：plan→order 取 productId；只算未软删、已录良品的行（带员工报数，算车间存数用）
+        // 1) 实绩：同订单、同部位、同 StepNo 的多日实绩先累计；StepNo 表示当前排期中的工序顺序。
         var goods = await db.ProductionPlans
             .Where(p => p.DeletedAt == null && p.GoodQty != null)
-            .Join(db.Orders.Where(o => o.ProductId != null), p => p.OrderId, o => o.Id, (p, o) => new { ProductId = o.ProductId!.Value, p.ItemName, p.PartName, Good = p.GoodQty!.Value, Reported = p.ReportedQty })
+            .Join(db.Orders.Where(o => o.ProductId != null), p => p.OrderId, o => o.Id, (p, o) => new { ProductId = o.ProductId!.Value, p.OrderId, p.ItemName, p.PartName, p.StepNo, Good = p.GoodQty!.Value, Inbound = p.InboundQty ?? 0 })
             .ToListAsync();
 
         // 2) 流水：owner 非空=成品出账，owner=NULL=散件
@@ -30,10 +30,23 @@ public class InventoryService(AppDbContext db)
         var rows = keys.Select(k =>
         {
             var keyGoods = goods.Where(g => g.ProductId == k.ProductId && g.ItemName == k.ItemName && g.PartName == k.PartName).ToList();
-            var cumGood = keyGoods.Sum(g => g.Good);
-            // 车间存数 = Σ员工报数 − Σ入库数(良品)，按本键聚合（复用 RecordingCalc，避免公式分叉）
-            var workshopStock = RecordingCalc.WorkshopStock(
-                keyGoods.Select(g => g.Reported), keyGoods.Select(g => (int?)g.Good));
+            var orderStocks = keyGoods.GroupBy(g => g.OrderId).Select(order =>
+            {
+                var steps = order.GroupBy(g => g.StepNo)
+                    .OrderBy(step => step.Key)
+                    .Select(step => new { Good = step.Sum(g => g.Good), Inbound = step.Sum(g => g.Inbound) })
+                    .ToList();
+                var finalStep = steps.LastOrDefault();
+                return new
+                {
+                    FinishedInbound = finalStep?.Inbound ?? 0,
+                    Workshop = finalStep is null ? 0 : InventoryCalc.WorkshopStock(finalStep.Good, finalStep.Inbound),
+                    ProcessLoose = InventoryCalc.ProcessLoose(steps.Select(step => step.Good))
+                };
+            }).ToList();
+            var finishedInbound = orderStocks.Sum(x => x.FinishedInbound);
+            var workshopStock = orderStocks.Sum(x => x.Workshop);
+            var processLoose = orderStocks.Sum(x => x.ProcessLoose);
 
             // 成品出账流水（owner 非空）的 delta 序列 → 复用 InventoryCalc 公式，避免公式分叉
             var ownerDeltas = moves
@@ -49,9 +62,9 @@ public class InventoryService(AppDbContext db)
             return new InventoryRow(
                 k.ProductId, prod?.ProductNo ?? "?",
                 k.ItemName, k.PartName,
-                InventoryCalc.FinishedInStock(cumGood, ownerDeltas),
+                InventoryCalc.FinishedInStock(finishedInbound, ownerDeltas),
                 workshopStock,
-                InventoryCalc.LooseAvailable(looseDeltas));
+                processLoose + InventoryCalc.LooseAvailable(looseDeltas));
         });
 
         if (productId is not null) rows = rows.Where(r => r.ProductId == productId);

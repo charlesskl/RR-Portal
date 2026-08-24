@@ -1,31 +1,30 @@
 "use client";
-import { apiFetch } from "@/lib/apiFetch";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
-type Part = { id: number; partName: string };
-type Item = { id: number; itemName: string; parts: Part[] };
+type Part = { id: number; partGroupId: number; partName: string };
 type ProductLite = { id: number; productNo: string };
 
-const k = (itemId: number, partId: number) => `${itemId}_${partId}`;
 const num = (s: string | undefined) => (!s ? 0 : Number(s));
 
 export default function OrderEditor({ products }: { products: ProductLite[] }) {
   const router = useRouter();
   const [head, setHead] = useState({ externalOrderNo: "", orderDate: "", deliveryDate: "", remark: "", isUrgent: false });
   const [productId, setProductId] = useState<number | "">("");
-  const [items, setItems] = useState<Item[]>([]);
-  const [qtys, setQtys] = useState<Record<string, string>>({}); // key=itemId_partId -> 数量
+  const [parts, setParts] = useState<Part[]>([]);
+  const [qtys, setQtys] = useState<Record<number, string>>({});
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
   async function pickProduct(id: number) {
     setProductId(id);
-    setQtys({}); setItems([]); setError("");
-    const res = await apiFetch(`/api/products/${id}`);
+    setQtys({}); setParts([]); setError("");
+    const res = await fetch(`/api/products/${id}`);
     if (!res.ok) { setError("载入款号数据失败，请重试"); return; }
     const p = await res.json();
-    setItems(p.items || []);
+    setParts(Array.from(new Map((p.parts || []).map((part: Part) => [part.partGroupId || part.id, {
+      ...part, id: part.partGroupId || part.id,
+    }])).values()) as Part[]);
   }
 
   async function submit(e: React.FormEvent) {
@@ -33,18 +32,15 @@ export default function OrderEditor({ products }: { products: ProductLite[] }) {
     if (!productId) { setError("请先选择款号"); return; }
     setLoading(true); setError("");
     // 每个子件一行；行内含填了数量(>0)的部位
-    const lines = items.map((it) => ({
-      itemName: it.itemName, sourceItemId: it.id,
-      partQtys: it.parts
-        .map((pt) => ({ partName: pt.partName, sourcePartId: pt.id, qty: num(qtys[k(it.id, pt.id)]) }))
-        .filter((q) => q.qty > 0),
-    })).filter((ln) => ln.partQtys.length > 0);
+    const partQtys = parts
+      .map((pt, index) => ({ partName: pt.partName, sourcePartId: pt.id, qty: num(qtys[pt.id]), partOrder: index }))
+      .filter((q) => q.qty > 0);
 
-    if (lines.length === 0) { setError("请至少给一个部位填数量"); setLoading(false); return; }
+    if (partQtys.length === 0) { setError("请至少给一个部位填数量"); setLoading(false); return; }
 
-    const res = await apiFetch("/api/orders", {
+    const res = await fetch("/api/orders", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...head, productId, lines }),
+      body: JSON.stringify({ ...head, productId, partQtys }),
     });
     if (res.ok) { router.push("/orders"); router.refresh(); }
     else { const b = await res.json(); setError(b.error || "创建失败"); setLoading(false); }
@@ -58,7 +54,7 @@ export default function OrderEditor({ products }: { products: ProductLite[] }) {
         <L label="款号 *">
           <select className={inp} required value={productId} onChange={(e) => {
             if (e.target.value) pickProduct(Number(e.target.value));
-            else { setProductId(""); setItems([]); setQtys({}); }
+            else { setProductId(""); setParts([]); setQtys({}); }
           }}>
             <option value="">— 选择款号 —</option>
             {products.map((p) => <option key={p.id} value={p.id}>{p.productNo}</option>)}
@@ -74,35 +70,31 @@ export default function OrderEditor({ products }: { products: ProductLite[] }) {
         </label>
       </div>
 
-      {/* 子件→部位数量 */}
-      {items.length === 0 ? (
+      {/* 部件数量（内部仍保留旧 itemId 关联，兼容历史数据） */}
+      {parts.length === 0 ? (
         <div className="bg-[#ecfdf5] border-l-[3px] border-mint-400 p-4 rounded-btn text-sm text-[#065f46]">
-          先在上面选一个款号，系统会列出它的「子件 → 部位」让你按部位填数量（不需要的部位留空即可）。
+          先在上面选择货号，系统会直接列出部件供填写订单数量（不需要的部件留空即可）。
         </div>
       ) : (
-        <div className="space-y-4">
-          {items.map((it) => (
-            <div key={it.id} className="bg-white p-4 rounded-card border border-app-border">
-              <p className="text-sm font-medium text-text mb-2">{it.itemName}</p>
-              <table className="w-full text-sm">
+        <div className="bg-white p-4 rounded-card border border-app-border">
+              <table className="w-full table-fixed text-sm">
+                <colgroup><col /><col className="w-40" /></colgroup>
                 <thead className="bg-[#f0fdf4] text-[#047857] text-xs">
                   <tr><th className="px-2 py-2 text-left">部位</th><th className="px-2 py-2 text-right w-40">数量</th></tr>
                 </thead>
                 <tbody>
-                  {it.parts.map((pt) => (
+                  {parts.map((pt) => (
                     <tr key={pt.id} className="border-t border-app-border">
                       <td className="px-2 py-1">{pt.partName}</td>
                       <td className="px-1 py-1">
                         <input className={cell} type="number" min="0" placeholder="0"
-                          value={qtys[k(it.id, pt.id)] ?? ""}
-                          onChange={(e) => setQtys({ ...qtys, [k(it.id, pt.id)]: e.target.value })} />
+                          value={qtys[pt.id] ?? ""}
+                          onChange={(e) => setQtys({ ...qtys, [pt.id]: e.target.value })} />
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
-            </div>
-          ))}
         </div>
       )}
 

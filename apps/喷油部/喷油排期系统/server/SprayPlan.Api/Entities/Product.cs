@@ -15,5 +15,5 @@ public class Product
     public string? LastUpdatedBy { get; set; }
     public DateTime UpdatedAt { get; set; }
 
-    public List<ProductItem> Items { get; set; } = new();
+    public List<ProductPart> Parts { get; set; } = new();
 }

@@ -7,9 +7,10 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { buildOverviewGrid, cellKey, dateRange, type CellItem, type OverviewLine, type OverviewPlan } from "@/lib/scheduleOverview";
 import { cachedJson } from "@/lib/clientCache";
 import Link from "next/link";
+import ExportDialog from "../recording/ExportDialog";
 
 type Resp = { lines: OverviewLine[]; plans: OverviewPlan[] };
-type View = "week" | "twoweek" | "month" | "custom";
+type View = "today" | "month" | "lastMonth" | "custom";
 type DetailState = { date: string; line: OverviewLine; item: CellItem };
 type AdjustTarget = { planId: number; date: string; lineId: number };
 type OverviewProps = {
@@ -30,18 +31,21 @@ const MINI_BG = { ok: "sc-bg-ok", busy: "sc-bg-busy", over: "sc-bg-over" } as co
 const MINI_TX = { ok: "sc-ut-ok", busy: "sc-ut-busy", over: "sc-ut-over" } as const;
 
 export default function ScheduleOverview({ orderFilter, pendingOrderCount = 0, pendingUrgentCount = 0, onCreatePlan, onPlanUrgent, onAdjustPlan }: OverviewProps) {
-  const [view, setView] = useState<View>("week");
+  const [view, setView] = useState<View>("today");
   const [from, setFrom] = useState<string>(() => orderFilter?.from || ymd(new Date()));
   const [to, setTo] = useState<string>(() => {
     if (orderFilter?.to) return orderFilter.to;
-    const d = new Date();
-    d.setDate(d.getDate() + 6);
-    return ymd(d);
+    return ymd(new Date());
   });
   const [data, setData] = useState<Resp | null>(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
   const [detail, setDetail] = useState<DetailState | null>(null);
+  const [todayQty, setTodayQty] = useState("");
+  const [inboundQty, setInboundQty] = useState("");
+  const [detailRemark, setDetailRemark] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
 
   const load = useCallback(async () => {
     if (!from || !to) { setErr("请选择起止日期"); setData(null); return; }
@@ -73,18 +77,48 @@ export default function ScheduleOverview({ orderFilter, pendingOrderCount = 0, p
   const applyPreset = (v: Exclude<View, "custom">) => {
     setView(v);
     const today = new Date();
+    if (v === "today") {
+      setFrom(ymd(today));
+      setTo(ymd(today));
+      return;
+    }
     if (v === "month") {
       const y = today.getFullYear(), m = today.getMonth();
       setFrom(ymd(new Date(y, m, 1)));
       setTo(ymd(new Date(y, m + 1, 0)));
       return;
     }
-    const end = new Date(today);
-    end.setDate(end.getDate() + (v === "week" ? 6 : 13));
-    setFrom(ymd(today));
-    setTo(ymd(end));
+    const y = today.getFullYear(), m = today.getMonth();
+    setFrom(ymd(new Date(y, m - 1, 1)));
+    setTo(ymd(new Date(y, m, 0)));
   };
-  const backToday = () => applyPreset("week");
+
+  const openDetail = (next: DetailState) => {
+    setDetail(next);
+    setTodayQty(next.item.goodQty?.toString() ?? "");
+    setInboundQty(next.item.inboundQty?.toString() ?? "");
+    setDetailRemark(next.item.remark ?? "");
+    setSaveError("");
+  };
+
+  const saveTodayProduction = async () => {
+    if (!detail) return;
+    const qty = Number(todayQty);
+    const inbound = Number(inboundQty);
+    if (!Number.isInteger(qty) || qty < 0) { setSaveError("今日生产数必须是大于或等于 0 的整数"); return; }
+    if (!Number.isInteger(inbound) || inbound < 0) { setSaveError("实际入库数必须是大于或等于 0 的整数"); return; }
+    setSaving(true); setSaveError("");
+    try {
+      const res = await fetch(`/api/plans/${detail.item.id}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ goodQty: qty, inboundQty: inbound, remark: detailRemark }),
+      });
+      if (!res.ok) { const body = await res.json().catch(() => ({})); throw new Error(body.error || "保存失败"); }
+      setDetail(null);
+      await load();
+    } catch (e) { setSaveError(e instanceof Error ? e.message : "保存失败"); }
+    finally { setSaving(false); }
+  };
 
   return (
     <div className="sc">
@@ -105,8 +139,6 @@ export default function ScheduleOverview({ orderFilter, pendingOrderCount = 0, p
         </div>
       )}
 
-      <p className="sc-sub">日期竖排、拉别横排。每格顶部<b>小计（件数·产能占用）</b>，下面把<b>部位 + 数量 + 第几道</b>铺开（绿喷油 / 蓝移印 / 紫 UV）。只读，看到要改去「周排」。</p>
-
       {orderFilter && (
         <div className="mb-4 flex items-center gap-3 rounded-btn border border-mint-400 bg-mint-50 px-4 py-3 text-sm text-mint-700">
           <span>当前只查看订单：<b>{orderFilter.orderNo}</b></span>
@@ -117,16 +149,18 @@ export default function ScheduleOverview({ orderFilter, pendingOrderCount = 0, p
       {/* 工具栏：视图切换 + 前后翻 */}
       <div className="sc-toolbar">
         <div className="sc-seg">
-          <button className={view === "week" ? "on" : ""} onClick={() => applyPreset("week")}>周</button>
-          <button className={view === "twoweek" ? "on" : ""} onClick={() => applyPreset("twoweek")}>两周</button>
+          <button className={view === "today" ? "on" : ""} onClick={() => applyPreset("today")}>今天</button>
           <button className={view === "month" ? "on" : ""} onClick={() => applyPreset("month")}>本月</button>
+          <button className={view === "lastMonth" ? "on" : ""} onClick={() => applyPreset("lastMonth")}>上月</button>
         </div>
         <div className="sc-datepick">
           <input type="date" value={from} onChange={(e) => { setView("custom"); setFrom(e.target.value); }} aria-label="起始日期" />
           <span>～</span>
           <input type="date" value={to} onChange={(e) => { setView("custom"); setTo(e.target.value); }} aria-label="结束日期" />
         </div>
-        <button className="sc-today" onClick={backToday}>回今天</button>
+        <div className="sc-export">
+          <ExportDialog date={from === to ? from : ymd(new Date())} lines={lines.map((l) => ({ id: l.lineId, label: l.name }))} />
+        </div>
         {loading && <span className="sc-loading">⏳ 加载中…</span>}
         {err && <span className="sc-err">{err}</span>}
       </div>
@@ -181,7 +215,7 @@ export default function ScheduleOverview({ orderFilter, pendingOrderCount = 0, p
                                 type="button"
                                 className={`sc-plan sc-${it.color}`}
                                 aria-label={`查看 ${it.partName} 计划详情`}
-                                onClick={() => setDetail({ date, line: l, item: it })}
+                                onClick={() => openDetail({ date, line: l, item: it })}
                               >
                                 <span className="nm">{it.partName}</span>
                                 <span className="qd">{it.qty.toLocaleString()}<span className="dao">道{it.stepNo}</span></span>
@@ -219,10 +253,17 @@ export default function ScheduleOverview({ orderFilter, pendingOrderCount = 0, p
               <div><dt>货号</dt><dd>{detail.item.productNo || "-"}</dd></div>
               <div><dt>部位</dt><dd>{detail.item.partName || "-"}</dd></div>
               <div><dt>计划生产数</dt><dd>{detail.item.qty.toLocaleString()}</dd></div>
+              <div><dt>订单号</dt><dd>{detail.item.externalOrderNo || "-"}</dd></div>
               <div><dt>机台号</dt><dd>{detail.item.machineNos.join("、") || "-"}</dd></div>
               <div><dt>人数</dt><dd>{detail.item.workerCount || "-"}</dd></div>
               <div><dt>拉别产能上限</dt><dd>{detail.line.dailyLimit > 0 ? `${(detail.line.dailyLimit / 10000)}万` : "不卡"}</dd></div>
             </dl>
+            <div className="sc-entry-grid">
+              <label>今日生产数<input type="number" min={0} step={1} value={todayQty} onChange={(e) => setTodayQty(e.target.value)} /></label>
+              <label>实际入库数<input type="number" min={0} step={1} value={inboundQty} onChange={(e) => setInboundQty(e.target.value)} /></label>
+              <label>备注<textarea rows={2} value={detailRemark} onChange={(e) => setDetailRemark(e.target.value)} placeholder="填写异常、补数或其他说明" /></label>
+            </div>
+            {saveError && <p className="sc-save-error">{saveError}</p>}
             <div className="sc-dialog-ft">
               {onAdjustPlan && (
                 <button
@@ -233,10 +274,11 @@ export default function ScheduleOverview({ orderFilter, pendingOrderCount = 0, p
                     setDetail(null);
                   }}
                 >
-                  去周排调整
+                  去排期调整
                 </button>
               )}
               <button type="button" onClick={() => setDetail(null)}>关闭</button>
+              <button type="button" className="primary" disabled={saving} onClick={saveTodayProduction}>{saving ? "保存中…" : "保存今日实绩"}</button>
             </div>
           </div>
         </div>
@@ -259,6 +301,8 @@ const CSS = `
   .sc-sub { color:#94a3b8; font-size:12.5px; margin:0 0 14px; line-height:1.7; }
   .sc-sub b { color:#475569; }
   .sc-toolbar { display:flex; align-items:center; gap:12px; margin-bottom:12px; flex-wrap:wrap; }
+  .sc-export { margin-left:auto; }
+  .sc-export > button { margin-left:0; }
   .sc-seg { display:inline-flex; border:1px solid #E0E0E0; border-radius:10px; overflow:hidden; }
   .sc-seg button { border:none; background:#fff; padding:7px 16px; font-size:13px; color:#6b7280; cursor:pointer; }
   .sc-seg button.on { background:#ecfdf5; color:#047857; font-weight:600; }
@@ -314,6 +358,11 @@ const CSS = `
   .sc-detail-grid div { border:1px solid #eef2f7; background:#fbfefc; border-radius:8px; padding:10px 12px; min-width:0; }
   .sc-detail-grid dt { color:#94a3b8; font-size:12px; margin-bottom:5px; }
   .sc-detail-grid dd { margin:0; color:#111827; font-weight:700; font-size:14px; word-break:break-all; }
+  .sc-entry-grid { margin:0 18px 16px; display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  .sc-entry-grid label { color:#64748b; font-size:12px; font-weight:600; display:flex; flex-direction:column; gap:6px; }
+  .sc-entry-grid input, .sc-entry-grid textarea { width:100%; border:1px solid #dbe4df; border-radius:8px; padding:8px 10px; color:#111827; font:inherit; font-weight:400; resize:vertical; }
+  .sc-entry-grid input:focus, .sc-entry-grid textarea:focus { outline:none; border-color:#34d399; box-shadow:0 0 0 2px rgba(52,211,153,.16); }
+  .sc-save-error { margin:-6px 18px 12px; color:#c91d32; font-size:12px; }
   .sc-dialog-ft { border-top:1px solid #eef2f7; padding:12px 18px; display:flex; gap:10px; justify-content:flex-end; background:#fff; }
   .sc-dialog-ft button { border:1px solid #d1fae5; background:#ecfdf5; color:#047857; border-radius:8px; padding:7px 16px; font-weight:600; cursor:pointer; }
   .sc-dialog-ft button:hover { background:#d1fae5; }
@@ -321,6 +370,7 @@ const CSS = `
   .sc-dialog-ft button.primary:hover { background:#10b981; }
   @media (max-width: 560px) {
     .sc-detail-grid { grid-template-columns:1fr; }
+    .sc-entry-grid { grid-template-columns:1fr; }
     .sc-dialog { max-height:calc(100vh - 32px); overflow:auto; }
   }
 `;

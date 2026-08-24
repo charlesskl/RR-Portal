@@ -12,12 +12,10 @@ public class AppDbContext : DbContext
     public DbSet<ProductionLine> ProductionLines => Set<ProductionLine>();
     public DbSet<Machine> Machines => Set<Machine>();
     public DbSet<Product> Products => Set<Product>();
-    public DbSet<ProductItem> ProductItems => Set<ProductItem>();
     public DbSet<ProductPart> ProductParts => Set<ProductPart>();
     public DbSet<CraftAlias> CraftAliases => Set<CraftAlias>();
     public DbSet<EquipmentKind> EquipmentKinds => Set<EquipmentKind>();
     public DbSet<Order> Orders => Set<Order>();
-    public DbSet<OrderLine> OrderLines => Set<OrderLine>();
     public DbSet<OrderPartQty> OrderPartQtys => Set<OrderPartQty>();
     public DbSet<ProductionPlan> ProductionPlans => Set<ProductionPlan>();
     public DbSet<Holiday> Holidays => Set<Holiday>();
@@ -74,19 +72,12 @@ public class AppDbContext : DbContext
         p.Property(x => x.LastUpdatedBy).HasColumnName("lastUpdatedBy");
         p.Property(x => x.UpdatedAt).HasColumnName("updatedAt").HasConversion(MsConverter);
 
-        // 子件 product_items
-        var pi = b.Entity<ProductItem>();
-        pi.ToTable("product_items");
-        pi.Property(x => x.ProductId).HasColumnName("productId");
-        pi.Property(x => x.ItemName).HasColumnName("itemName");
-        pi.Property(x => x.ItemOrder).HasColumnName("itemOrder");
-        pi.HasOne(x => x.Product).WithMany(x => x.Items).HasForeignKey(x => x.ProductId).OnDelete(DeleteBehavior.Cascade);
-
         // 部位 product_parts
         var pp = b.Entity<ProductPart>();
         pp.ToTable("product_parts");
-        pp.Property(x => x.ItemId).HasColumnName("itemId");
+        pp.Property(x => x.ProductId).HasColumnName("productId");
         pp.Property(x => x.PartName).HasColumnName("partName");
+        pp.Property(x => x.PartGroupId).HasColumnName("partGroupId");
         pp.Property(x => x.PartOrder).HasColumnName("partOrder");
         pp.Property(x => x.UnitCost).HasColumnName("unitCost");
         pp.Property(x => x.LaborPrice).HasColumnName("laborPrice");
@@ -98,8 +89,9 @@ public class AppDbContext : DbContext
         pp.Property(x => x.ProductionMode).HasColumnName("productionMode");
         pp.Property(x => x.StdMachineCount).HasColumnName("stdMachineCount");
         pp.Property(x => x.CraftPasses).HasColumnName("craftPasses");
+        pp.HasIndex(x => new { x.ProductId, x.PartGroupId });
         pp.Property(x => x.Remark).HasColumnName("remark");
-        pp.HasOne(x => x.Item).WithMany(x => x.Parts).HasForeignKey(x => x.ItemId).OnDelete(DeleteBehavior.Cascade);
+        pp.HasOne(x => x.Product).WithMany(x => x.Parts).HasForeignKey(x => x.ProductId).OnDelete(DeleteBehavior.Cascade);
 
         // ===== 订单 3 表 =====
         var o = b.Entity<Order>();
@@ -120,22 +112,14 @@ public class AppDbContext : DbContext
         o.Property(x => x.UpdatedAt).HasColumnName("updatedAt").HasConversion(MsConverter);
         o.HasOne(x => x.Product).WithMany().HasForeignKey(x => x.ProductId);
 
-        var ol = b.Entity<OrderLine>();
-        ol.ToTable("order_lines");
-        ol.Property(x => x.OrderId).HasColumnName("orderId");
-        ol.Property(x => x.ItemName).HasColumnName("itemName");
-        ol.Property(x => x.SourceItemId).HasColumnName("sourceItemId");
-        ol.Property(x => x.LineOrder).HasColumnName("lineOrder");
-        ol.HasOne(x => x.Order).WithMany(x => x.Lines).HasForeignKey(x => x.OrderId).OnDelete(DeleteBehavior.Cascade);
-
         var oq = b.Entity<OrderPartQty>();
         oq.ToTable("order_part_qtys");
-        oq.Property(x => x.OrderLineId).HasColumnName("orderLineId");
+        oq.Property(x => x.OrderId).HasColumnName("orderId");
         oq.Property(x => x.PartName).HasColumnName("partName");
         oq.Property(x => x.SourcePartId).HasColumnName("sourcePartId");
         oq.Property(x => x.Qty).HasColumnName("qty");
         oq.Property(x => x.PartOrder).HasColumnName("partOrder");
-        oq.HasOne(x => x.Line).WithMany(x => x.PartQtys).HasForeignKey(x => x.OrderLineId).OnDelete(DeleteBehavior.Cascade);
+        oq.HasOne(x => x.Order).WithMany(x => x.PartQtys).HasForeignKey(x => x.OrderId).OnDelete(DeleteBehavior.Cascade);
 
         // ===== 排期 production_plans（系统心脏）=====
         var pl = b.Entity<ProductionPlan>();
@@ -154,6 +138,7 @@ public class AppDbContext : DbContext
         pl.Property(x => x.StepNo).HasColumnName("stepNo");
         pl.Property(x => x.Craft).HasColumnName("craft");
         pl.Property(x => x.GoodQty).HasColumnName("goodQty");
+        pl.Property(x => x.InboundQty).HasColumnName("inboundQty");
         pl.Property(x => x.ReportedQty).HasColumnName("reportedQty");
         pl.Property(x => x.DefectQty).HasColumnName("defectQty");
         pl.Property(x => x.WorkHours).HasColumnName("workHours");

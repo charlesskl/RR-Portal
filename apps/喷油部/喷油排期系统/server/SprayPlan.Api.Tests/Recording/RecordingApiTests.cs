@@ -30,13 +30,13 @@ public class RecordingApiTests : IAsyncLifetime
         var resp = await _client.PostAsJsonAsync("/api/products", new
         {
             productNo = "R1", customerName = "ZURU",
-            items = new[] { new { itemName = "兔子", parts = new[] { new { partName = "头", unitCost = 2.0, laborPrice = 3.0, paintCost = 0.0 } } } }
+            parts = new[] { new { partName = "头", unitCost = 2.0, laborPrice = 3.0, paintCost = 0.0 } }
         });
         resp.EnsureSuccessStatusCode();
         var pid = (await resp.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetInt32();
         var detail = await (await _client.GetAsync($"/api/products/{pid}")).Content.ReadFromJsonAsync<JsonElement>();
-        var item = detail.GetProperty("items")[0];
-        return (pid, item.GetProperty("id").GetInt32(), item.GetProperty("parts")[0].GetProperty("id").GetInt32());
+        var part = detail.GetProperty("parts")[0];
+        return (pid, 0, part.GetProperty("id").GetInt32());
     }
 
     private async Task<int> CreateOrderAsync(string no, int pid, int itemId)
@@ -44,7 +44,7 @@ public class RecordingApiTests : IAsyncLifetime
         var r = await _client.PostAsJsonAsync("/api/orders", new
         {
             externalOrderNo = no, customerName = "兴信", productId = pid,
-            lines = new[] { new { itemName = "兔子", colorName = "粉", sourceItemId = itemId, qtys = new[] { new { specName = "标准", qty = 100 } } } }
+            partQtys = new[] { new { partName = "头", qty = 100 } }
         });
         r.EnsureSuccessStatusCode();
         return (await r.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetInt32();
@@ -66,24 +66,22 @@ public class RecordingApiTests : IAsyncLifetime
         var pResp = await _client.PostAsJsonAsync("/api/products", new
         {
             productNo = "P2", customerName = "ZURU",
-            items = new[] { new { itemName = "兔子", parts = new[] {
+            parts = new[] {
                 new { partName = "头", unitCost = 2.0, laborPrice = 3.0, paintCost = 0.0 },
-                new { partName = "脚", unitCost = 1.0, laborPrice = 1.0, paintCost = 0.0 } } } }
+                new { partName = "脚", unitCost = 1.0, laborPrice = 1.0, paintCost = 0.0 } }
         });
         pResp.EnsureSuccessStatusCode();
         var pid = (await pResp.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetInt32();
         var detail = await (await _client.GetAsync($"/api/products/{pid}")).Content.ReadFromJsonAsync<JsonElement>();
-        var item = detail.GetProperty("items")[0];
-        var itemId = item.GetProperty("id").GetInt32();
-        var parts = item.GetProperty("parts");
+        var parts = detail.GetProperty("parts");
         int headPid = parts[0].GetProperty("id").GetInt32(), footPid = parts[1].GetProperty("id").GetInt32();
 
         var oResp = await _client.PostAsJsonAsync("/api/orders", new
         {
             externalOrderNo = orderNo, productId = pid,
-            lines = new[] { new { itemName = "兔子", sourceItemId = itemId, partQtys = new[] {
+            partQtys = new[] {
                 new { partName = "头", sourcePartId = headPid, qty = 100 },
-                new { partName = "脚", sourcePartId = footPid, qty = 100 } } } }
+                new { partName = "脚", sourcePartId = footPid, qty = 100 } }
         });
         oResp.EnsureSuccessStatusCode();
         var oid = (await oResp.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetInt32();

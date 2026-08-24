@@ -30,7 +30,7 @@ public class OrderOverviewSummaryTests : IAsyncLifetime
             var order = new Order
             {
                 ExternalOrderNo = "SUMMARY-1", OrderDate = now, Status = "scheduled", CreatedBy = "test", CreatedAt = now, UpdatedAt = now,
-                Lines = new List<OrderLine> { new() { ItemName = "兔子", PartQtys = new List<OrderPartQty> { new() { PartName = "头", Qty = 100 } } } }
+                PartQtys = new List<OrderPartQty> { new() { PartName = "头", Qty = 100 } }
             };
             db.Orders.Add(order);
             await db.SaveChangesAsync();

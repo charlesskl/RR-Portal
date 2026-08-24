@@ -21,7 +21,7 @@ public class UnscheduleOrderTests : IAsyncLifetime
         var r = await _c.PostAsJsonAsync("/api/products", new
         {
             productNo = no, customerName = "ZURU",
-            items = new[] { new { itemName = "兔子", parts = new[] { new { partName = "头", unitCost = 1.0 } } } }
+            parts = new[] { new { partName = "头", unitCost = 1.0 } }
         });
         r.EnsureSuccessStatusCode();
         return (await r.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetInt32();
@@ -32,7 +32,7 @@ public class UnscheduleOrderTests : IAsyncLifetime
         var r = await _c.PostAsJsonAsync("/api/orders", new
         {
             externalOrderNo = orderNo, productId,
-            lines = new[] { new { itemName = "兔子", partQtys = new[] { new { partName = "头", qty = 100 } } } }
+            partQtys = new[] { new { partName = "头", qty = 100 } }
         });
         r.EnsureSuccessStatusCode();
         return (await r.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetInt32();

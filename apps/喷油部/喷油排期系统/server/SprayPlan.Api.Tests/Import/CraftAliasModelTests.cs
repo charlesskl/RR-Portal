@@ -20,7 +20,7 @@ public class CraftAliasModelTests : IAsyncLifetime
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         db.CraftAliases.Add(new CraftAlias { Alias = "散枪", Category = "手喷", CreatedAt = DateTime.UtcNow });
         var p = new Product { ProductNo = "T1", CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow,
-            Items = { new ProductItem { ItemName = "主体", Parts = { new ProductPart { PartName = "头", Craft = "手喷", CraftDetail = "散枪" } } } } };
+            Parts = { new ProductPart { PartName = "头", Craft = "手喷", CraftDetail = "散枪" } } };
         db.Products.Add(p);
         await db.SaveChangesAsync();
 

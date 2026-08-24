@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using SprayPlan.Api.Data;
 using SprayPlan.Api.Entities;
 using SprayPlan.Api.Features.Basic;
+using SprayPlan.Api.Services;
 using SprayPlan.Api.Services.Import;
 
 namespace SprayPlan.Api.Features.Products;
@@ -19,7 +20,7 @@ public class ProductImportController(AppDbContext db) : ControllerBase
     string CurrentUser() => User.FindFirst("username")?.Value ?? "unknown";
 
     static bool Same(double a, double b) => Math.Abs(a - b) < 0.000001;
-    static string Key(string item, string part, string detail) => $"{item.Trim()}\u001f{part.Trim()}\u001f{detail.Trim()}";
+    static string Key(string part, string detail) => $"{part.Trim()}\u001f{detail.Trim()}";
 
     static List<string> Changes(ParsedPart uploaded, ProductPart current)
     {
@@ -70,37 +71,36 @@ public class ProductImportController(AppDbContext db) : ControllerBase
 
             // 重复货号不再直接跳过：读取现有明细，逐字段生成修改版预览。
             var existing = await db.Products.AsNoTracking()
-                .Include(p => p.Items).ThenInclude(i => i.Parts)
+                .Include(p => p.Parts)
                 .AsSplitQuery()
                 .FirstOrDefaultAsync(p => p.ProductNo == parsed.ProductNo);
             bool duplicate = existing is not null;
             if (duplicate) dup++; else normal++;
 
-            var exact = existing?.Items.SelectMany(i => i.Parts.Select(pt => (i, pt)))
-                .GroupBy(x => Key(x.i.ItemName, x.pt.PartName, x.pt.CraftDetail))
+            var exact = existing?.Parts
+                .GroupBy(part => Key(part.PartName, part.CraftDetail))
                 .ToDictionary(g => g.Key, g => g.First());
             var parts = parsed.Parts.Select(p =>
             {
                 // 优先查对照表，其次启发式
                 string? cat = aliasMap.TryGetValue(p.CraftDetail, out var c) ? c : p.Category;
                 if (cat is null) pending++;
-                (ProductItem i, ProductPart pt)? matched = null;
-                if (exact is not null && exact.TryGetValue(Key(p.ItemName, p.PartName, p.CraftDetail), out var hit)) matched = hit;
+                ProductPart? matched = null;
+                if (exact is not null && exact.TryGetValue(Key(p.PartName, p.CraftDetail), out var hit)) matched = hit;
                 // 子件名可能在系统中被人工整理过；精确匹配失败时，仅在“部位+工序细类”唯一时兜底。
                 if (matched is null && existing is not null)
                 {
-                    var candidates = existing.Items.SelectMany(i => i.Parts
-                        .Where(pt => pt.PartName.Trim() == p.PartName.Trim() && pt.CraftDetail.Trim() == p.CraftDetail.Trim())
-                        .Select(pt => (i, pt))).ToList();
+                    var candidates = existing.Parts
+                        .Where(pt => pt.PartName.Trim() == p.PartName.Trim() && pt.CraftDetail.Trim() == p.CraftDetail.Trim()).ToList();
                     if (candidates.Count == 1) matched = candidates[0];
                 }
-                var changed = matched is null ? new List<string>() : Changes(p with { Category = cat }, matched.Value.pt);
-                var current = matched is null ? null : new CurrentPartValues(matched.Value.i.ItemName, matched.Value.pt.PartName,
-                    matched.Value.pt.CraftDetail, matched.Value.pt.Craft, matched.Value.pt.DailyCapacity, matched.Value.pt.StdMachineCount,
-                    matched.Value.pt.LaborPrice, matched.Value.pt.UnitCost, matched.Value.pt.PaintCost, matched.Value.pt.QuotedPrice, matched.Value.pt.Remark);
+                var changed = matched is null ? new List<string>() : Changes(p with { Category = cat }, matched);
+                var current = matched is null ? null : new CurrentPartValues("", matched.PartName,
+                    matched.CraftDetail, matched.Craft, matched.DailyCapacity, matched.StdMachineCount,
+                    matched.LaborPrice, matched.UnitCost, matched.PaintCost, matched.QuotedPrice, matched.Remark);
                 return new PreviewPart(p.ItemName, p.PartName, p.CraftDetail, cat,
                     p.DailyCapacity, p.StdMachineCount, p.LaborPrice, p.UnitCost, p.PaintCost, p.QuotedPrice, p.Remark,
-                    matched?.pt.Id, matched is null ? "new" : changed.Count > 0 ? "changed" : "unchanged", changed, current);
+                    matched?.Id, matched is null ? "new" : changed.Count > 0 ? "changed" : "unchanged", changed, current);
             }).ToList();
 
             products.Add(new PreviewProduct(sheetName, parsed.ProductNo, parsed.SuggestedItemName, parsed.IsThreeLevel,
@@ -125,7 +125,7 @@ public class ProductImportController(AppDbContext db) : ControllerBase
         {
             if (cp.Parts is null || cp.Parts.Count == 0) continue;
 
-            var existing = await db.Products.Include(p => p.Items).ThenInclude(i => i.Parts)
+            var existing = await db.Products.Include(p => p.Parts)
                 .FirstOrDefaultAsync(p => p.ProductNo == cp.ProductNo);
             if (existing is not null)
             {
@@ -134,7 +134,7 @@ public class ProductImportController(AppDbContext db) : ControllerBase
                 if (cp.ExistingProductId != existing.Id) return Conflict(new { error = $"货号 {cp.ProductNo} 已变化，请重新预览" });
                 // 同一批次可能为同一货号连续加入多条明细；SaveChanges 前这些新实体的临时 Id 都是 0。
                 // 只有数据库中已有的正式 Id 才参与“可更新明细”索引，新明细继续走下方新增分支。
-                var allowedIds = existing.Items.SelectMany(i => i.Parts)
+                var allowedIds = existing.Parts
                     .Where(p => p.Id > 0)
                     .ToDictionary(p => p.Id);
                 bool productChanged = false;
@@ -167,13 +167,7 @@ public class ProductImportController(AppDbContext db) : ControllerBase
                     else
                     {
                         if (!CraftTypes.IsValid(pt.Craft)) return BadRequest(new { error = $"货号 {cp.ProductNo} 的新增明细工序大类无效" });
-                        var item = existing.Items.FirstOrDefault(i => i.ItemName == pt.ItemName);
-                        if (item is null)
-                        {
-                            item = new ProductItem { ProductId = existing.Id, ItemName = pt.ItemName, ItemOrder = existing.Items.Count };
-                            existing.Items.Add(item);
-                        }
-                        item.Parts.Add(new ProductPart { PartName = pt.PartName, PartOrder = item.Parts.Count,
+                        existing.Parts.Add(new ProductPart { ProductId = existing.Id, PartName = pt.PartName, PartOrder = existing.Parts.Count,
                             Craft = pt.Craft, CraftDetail = pt.CraftDetail, DailyCapacity = pt.DailyCapacity,
                             StdMachineCount = pt.StdMachineCount, LaborPrice = pt.LaborPrice, UnitCost = pt.UnitCost,
                             PaintCost = pt.PaintCost, QuotedPrice = pt.QuotedPrice, Remark = pt.Remark });
@@ -193,29 +187,18 @@ public class ProductImportController(AppDbContext db) : ControllerBase
             // 批内去重：DB 查重查不到本批未提交的实体，用 HashSet 兜底
             if (!batchKeys.Add(cp.ProductNo)) { skipped.Add(cp.ProductNo); continue; }
 
-            // 按 ItemName 分组成子件（保持出现顺序）
-            var groups = cp.Parts
-                .Select((p, i) => (p, i))
-                .GroupBy(x => x.p.ItemName)
-                .Select(g => (Name: g.Key, Parts: g.OrderBy(x => x.i).Select(x => x.p).ToList()))
-                .ToList();
-
             var product = new Product
             {
                 ProductNo = cp.ProductNo,
                 IterationNo = "V1", Status = "draft",
                 CreatedBy = me, CreatedAt = now, UpdatedAt = now,
-                Items = groups.Select((g, gi) => new ProductItem
-                {
-                    ItemName = g.Name, ItemOrder = gi,
-                    Parts = g.Parts.Select((pt, pi) => new ProductPart
+                Parts = cp.Parts.Select((pt, pi) => new ProductPart
                     {
                         PartName = pt.PartName, PartOrder = pi,
                         Craft = pt.Craft, CraftDetail = pt.CraftDetail,
                         UnitCost = pt.UnitCost, LaborPrice = pt.LaborPrice, PaintCost = pt.PaintCost, QuotedPrice = pt.QuotedPrice,
                         DailyCapacity = pt.DailyCapacity, StdMachineCount = pt.StdMachineCount, Remark = pt.Remark,
                     }).ToList()
-                }).ToList()
             };
             db.Products.Add(product);
             created++;
@@ -232,6 +215,9 @@ public class ProductImportController(AppDbContext db) : ControllerBase
             }
         }
 
+        await db.SaveChangesAsync();
+        var importedParts = db.ChangeTracker.Entries<ProductPart>().Select(e => e.Entity).ToList();
+        PartProcessRules.AssignGroupIds(importedParts);
         await db.SaveChangesAsync();
         return Ok(new ImportCommitResult(created, updated, addedParts, updatedFields, skipped.Count, skipped));
     }

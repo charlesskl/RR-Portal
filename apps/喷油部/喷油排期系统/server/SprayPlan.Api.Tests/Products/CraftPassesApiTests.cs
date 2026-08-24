@@ -30,14 +30,11 @@ public class CraftPassesApiTests : IAsyncLifetime
         var body = new
         {
             productNo = "CP001",
-            items = new[] { new {
-                itemName = "兔子",
-                parts = new[] { new {
+            parts = new[] { new {
                     partName = "头", partOrder = 0, craft = "自动喷",
                     unitCost = 1.0, laborPrice = 2.0, paintCost = 3.0, quotedPrice = 9.0,
                     dailyCapacity = 3000, craftPasses = 4
                 } }
-            } }
         };
         var r = await _client.PostAsJsonAsync("/api/products", body);
         Assert.Equal(HttpStatusCode.Created, r.StatusCode);
@@ -45,7 +42,7 @@ public class CraftPassesApiTests : IAsyncLifetime
         var pid = created.GetProperty("id").GetInt32();
 
         var detail = await (await _client.GetAsync($"/api/products/{pid}")).Content.ReadFromJsonAsync<JsonElement>();
-        var passes = detail.GetProperty("items")[0].GetProperty("parts")[0].GetProperty("craftPasses").GetInt32();
+        var passes = detail.GetProperty("parts")[0].GetProperty("craftPasses").GetInt32();
         Assert.Equal(4, passes);
     }
 
@@ -57,21 +54,18 @@ public class CraftPassesApiTests : IAsyncLifetime
         var body = new
         {
             productNo = "CP002",
-            items = new[] { new {
-                itemName = "兔子",
-                parts = new[] { new { partName = "头", partOrder = 0, craft = "自动喷", craftPasses = 2 } }
-            } }
+            parts = new[] { new { partName = "头", partOrder = 0, craft = "自动喷", craftPasses = 2 } }
         };
         var cr = await (await _client.PostAsJsonAsync("/api/products", body)).Content.ReadFromJsonAsync<JsonElement>();
         var pid = cr.GetProperty("id").GetInt32();
         var detail = await (await _client.GetAsync($"/api/products/{pid}")).Content.ReadFromJsonAsync<JsonElement>();
-        var partId = detail.GetProperty("items")[0].GetProperty("parts")[0].GetProperty("id").GetInt32();
+        var partId = detail.GetProperty("parts")[0].GetProperty("id").GetInt32();
 
         var patch = await _client.PatchAsJsonAsync($"/api/products/{pid}/parts/{partId}", new { craftPasses = 5 });
         Assert.Equal(HttpStatusCode.OK, patch.StatusCode);
 
         var detail2 = await (await _client.GetAsync($"/api/products/{pid}")).Content.ReadFromJsonAsync<JsonElement>();
-        var passes = detail2.GetProperty("items")[0].GetProperty("parts")[0].GetProperty("craftPasses").GetInt32();
+        var passes = detail2.GetProperty("parts")[0].GetProperty("craftPasses").GetInt32();
         Assert.Equal(5, passes);
     }
 }

@@ -29,14 +29,12 @@ const nextConfig = {
         { source: "/api/users", destination: `${DOTNET_API_URL}/api/users` },
         { source: "/api/users/:id", destination: `${DOTNET_API_URL}/api/users/:id` },
 
-        // 产品信息库（三层下钻）
+        // 产品核价库（产品直接包含部位）
         // ⚠️ 导入路由（三段路径）必须显式列出，否则不会被两段的 /api/products/:id 规则代理 → Next 返回 404
         { source: "/api/products/import/preview", destination: `${DOTNET_API_URL}/api/products/import/preview` },
         { source: "/api/products/import/commit", destination: `${DOTNET_API_URL}/api/products/import/commit` },
         { source: "/api/products", destination: `${DOTNET_API_URL}/api/products` },
         { source: "/api/products/:id", destination: `${DOTNET_API_URL}/api/products/:id` },
-        { source: "/api/products/:id/items", destination: `${DOTNET_API_URL}/api/products/:id/items` },
-        { source: "/api/products/:id/items/:itemId", destination: `${DOTNET_API_URL}/api/products/:id/items/:itemId` },
         { source: "/api/products/:id/parts", destination: `${DOTNET_API_URL}/api/products/:id/parts` },
         { source: "/api/products/:id/parts/:partId", destination: `${DOTNET_API_URL}/api/products/:id/parts/:partId` },
 
@@ -65,6 +63,10 @@ const nextConfig = {
 
         // 实绩导出（每日生产明细表 xlsx 下载）
         { source: "/api/recording/export", destination: `${DOTNET_API_URL}/api/recording/export` },
+      ],
+      // 本地 Next API 路由优先；其余业务接口统一交给 .NET。
+      afterFiles: [
+        { source: "/api/:path*", destination: `${DOTNET_API_URL}/api/:path*` },
       ],
     };
   },

@@ -48,30 +48,18 @@ model Product {
   lastUpdatedBy String?
   updatedAt     DateTime @updatedAt
 
-  items ProductItem[]
+  parts ProductPart[]
   orders Order[]
 
   @@map("products")
 }
 
 // 子件：一个产品多个子件（如套装的兔子/青蛙）
-model ProductItem {
-  id        Int    @id @default(autoincrement())
-  productId Int
-  itemName  String
-  itemOrder Int    @default(0)
-
-  product Product             @relation(fields: [productId], references: [id], onDelete: Cascade)
-  parts   ProductPart[]
-
-  @@index([productId, itemOrder])
-  @@map("product_items")
-}
-
 // 部位：只有 4 价（核/人工/油漆/报价），无特殊色加价（那是订单的事）
 model ProductPart {
   id          Int    @id @default(autoincrement())
-  itemId      Int
+  productId   Int
+  partGroupId Int    @default(0)          // 逻辑部位ID：同一子件内同一部位的不同工序共享
   partName    String
   partOrder   Int    @default(0)
   unitCost    Float  @default(0) // 核价
@@ -87,9 +75,10 @@ model ProductPart {
   craftPasses      Int    @default(0)          // 工序道数：该部位要走几道工序（兔子头=4）。存在该部位 partOrder 最小那行；约束 ≥ 该部位工序种类数
   remark      String?
 
-  item ProductItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
 
-  @@index([itemId, partOrder])
+  @@index([productId, partOrder])
+  @@index([productId, partGroupId])
   @@map("product_parts")
 }
 
@@ -113,39 +102,25 @@ model Order {
   updatedAt       DateTime  @updatedAt
 
   product Product?    @relation(fields: [productId], references: [id])
-  lines   OrderLine[]
+  partQtys OrderPartQty[]
   plans   ProductionPlan[]
 
   @@map("orders")
 }
 
 // 勾选的「子件」明细行（抄快照名 + 溯源 FK），数量下沉到部位级
-model OrderLine {
-  id            Int    @id @default(autoincrement())
-  orderId       Int
-  itemName      String // 快照名
-  sourceItemId  Int?   // 溯源产品库子件
-  lineOrder     Int    @default(0)
-
-  order    Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  partQtys OrderPartQty[]
-
-  @@index([orderId, lineOrder])
-  @@map("order_lines")
-}
-
 // 订单行（子件）下各部位的数量；接单按部位填，不分颜色/规格
 model OrderPartQty {
   id           Int    @id @default(autoincrement())
-  orderLineId  Int
+  orderId      Int
   partName     String // 部位快照名
   sourcePartId Int?   // 溯源产品库部位
   qty          Int    @default(0)
   partOrder    Int    @default(0)
 
-  line OrderLine @relation(fields: [orderLineId], references: [id], onDelete: Cascade)
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
-  @@index([orderLineId])
+  @@index([orderId, partOrder])
   @@map("order_part_qtys")
 }
 
@@ -195,7 +170,7 @@ model ProductionPlan {
 
   // 排的对象（部位级，不分颜色/规格）
   orderId       Int
-  itemName      String                        // 子件名（快照）
+  itemName      String   @default("")
   partName      String                        // 部位名（快照）
   sourcePartId  Int?                          // 溯源产品库部位
 
@@ -209,6 +184,7 @@ model ProductionPlan {
 
   // 实绩维度（第二批写入，本批留空）
   goodQty         Int?
+  inboundQty      Int?    // 实际入库数；车间存数 = ΣgoodQty - ΣinboundQty
   reportedQty     Int?    // 员工报数（实际生产数）：算车间存数用；车间存数=Σreported−Σgood，不存
   defectQty       Int     @default(0)
   workHours       Float   @default(11)
@@ -270,7 +246,7 @@ model EquipmentKind {
 model InventoryMove {
   id           Int      @id @default(autoincrement())
   productId    Int      // 款号
-  itemName     String   // 子件名（快照）
+  itemName     String   @default("")
   partName     String   // 部位名（快照）
   ownerOrderId Int?     // 归属订单(成品)；NULL=散件
   delta        Int      // 变动量：正=进 / 负=出
@@ -280,7 +256,7 @@ model InventoryMove {
   createdAt    DateTime @default(now())
   remark       String?
 
-  @@index([productId, itemName, partName])
+  @@index([productId, partName])
   @@index([ownerOrderId])
   @@index([refOrderId])
   @@map("inventory_moves")

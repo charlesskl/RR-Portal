@@ -20,12 +20,12 @@ public class OrderStatusFlowTests : IAsyncLifetime
         var r = await _c.PostAsJsonAsync("/api/products", new
         {
             productNo = no, customerName = "ZURU",
-            items = new[] { new { itemName = "兔子", parts = new[] { new { partName = "头", unitCost = 1.0 } } } }
+            parts = new[] { new { partName = "头", unitCost = 1.0 } }
         });
         r.EnsureSuccessStatusCode();
         var pid = (await r.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetInt32();
         var d = await (await _c.GetAsync($"/api/products/{pid}")).Content.ReadFromJsonAsync<JsonElement>();
-        var partId = d.GetProperty("items")[0].GetProperty("parts")[0].GetProperty("id").GetInt32();
+        var partId = d.GetProperty("parts")[0].GetProperty("id").GetInt32();
         return (pid, partId);
     }
 
@@ -34,7 +34,7 @@ public class OrderStatusFlowTests : IAsyncLifetime
         var r = await _c.PostAsJsonAsync("/api/orders", new
         {
             externalOrderNo = no, productId = pid,
-            lines = new[] { new { itemName = "兔子", partQtys = new[] { new { partName = "头", qty = 100 } } } }
+            partQtys = new[] { new { partName = "头", qty = 100 } }
         });
         r.EnsureSuccessStatusCode();
         return (await r.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetInt32();
@@ -64,7 +64,7 @@ public class OrderStatusFlowTests : IAsyncLifetime
         // 试图手动把 received 改成 in_production → 拒绝
         var r = await _c.PatchAsJsonAsync($"/api/orders/{oid}", new { status = "in_production" });
         Assert.Equal(HttpStatusCode.BadRequest, r.StatusCode);
-        Assert.Equal("received", await StatusOf(oid));
+        Assert.Equal("draft", await StatusOf(oid));
     }
 
     [Fact]

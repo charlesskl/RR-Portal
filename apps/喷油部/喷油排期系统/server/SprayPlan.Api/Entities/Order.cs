@@ -19,6 +19,6 @@ public class Order
     public DateTime UpdatedAt { get; set; }
 
     public Product? Product { get; set; }
-    public List<OrderLine> Lines { get; set; } = new();
+    public List<OrderPartQty> PartQtys { get; set; } = new();
     public List<ProductionPlan> Plans { get; set; } = new();
 }

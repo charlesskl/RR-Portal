@@ -31,9 +31,7 @@ public class ProductsApiTests : IAsyncLifetime
         var resp = await _client.PostAsJsonAsync("/api/products", new
         {
             productNo,
-            customerName = "ZURU",
-            specName = spec,
-            items = new[] { new { itemName = "兔子", colors = new[] { "粉", "紫" }, parts = new[] { new { partName = "头", unitCost = 1.0, quotedPrice = 5.0 } } } }
+            parts = new[] { new { partName = "头", unitCost = 1.0, quotedPrice = 5.0 } }
         });
         resp.EnsureSuccessStatusCode();
         var doc = await resp.Content.ReadFromJsonAsync<JsonElement>();
@@ -65,7 +63,7 @@ public class ProductsApiTests : IAsyncLifetime
         var arr = await r.Content.ReadFromJsonAsync<JsonElement>();
         var first = arr[0];
         Assert.Equal("11494", first.GetProperty("productNo").GetString());
-        Assert.Equal(1, first.GetProperty("itemCount").GetInt32());
+        Assert.Equal(1, first.GetProperty("partCount").GetInt32());
         Assert.Equal(1.0, first.GetProperty("totalUnitCost").GetDouble());
         Assert.Equal(5.0, first.GetProperty("totalQuotedPrice").GetDouble());
     }
@@ -102,8 +100,8 @@ public class ProductsApiTests : IAsyncLifetime
         await LoginAsync("clerk", "clerk123");
         var r = await _client.PostAsJsonAsync("/api/products", new
         {
-            productNo = "P2", customerName = "ZURU",
-            items = new[] { new { itemName = "兔子", parts = new[] { new { partName = "" } } } }
+            productNo = "P2",
+            parts = new[] { new { partName = "" } }
         });
         Assert.Equal(HttpStatusCode.BadRequest, r.StatusCode);
     }
@@ -145,28 +143,20 @@ public class ProductsApiTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task AddItem_ThenAddPart_Flow()
+    public async Task AddPart_Flow()
     {
         await LoginAsync("clerk", "clerk123");
         var pid = await CreateProductAsync("FLOW");
 
-        // 加子件
-        var itemResp = await _client.PostAsJsonAsync($"/api/products/{pid}/items", new { itemName = "青蛙", colors = new[] { "蓝" } });
-        Assert.Equal(HttpStatusCode.Created, itemResp.StatusCode);
-        var itemId = (await itemResp.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetInt32();
-
-        // 给该子件加部位
-        var partResp = await _client.PostAsJsonAsync($"/api/products/{pid}/parts", new { itemId, partName = "腿", unitCost = 2.0 });
+        var partResp = await _client.PostAsJsonAsync($"/api/products/{pid}/parts", new { partName = "腿", unitCost = 2.0 });
         Assert.Equal(HttpStatusCode.Created, partResp.StatusCode);
     }
 
     [Fact]
-    public async Task AddPart_WrongProduct_Returns404()
+    public async Task AddPart_MissingProduct_Returns404()
     {
         await LoginAsync("clerk", "clerk123");
-        var pid = await CreateProductAsync("WP");
-        // itemId=9999 不属于该产品 → 404
-        var r = await _client.PostAsJsonAsync($"/api/products/{pid}/parts", new { itemId = 9999, partName = "腿" });
+        var r = await _client.PostAsJsonAsync("/api/products/9999/parts", new { partName = "腿" });
         Assert.Equal(HttpStatusCode.NotFound, r.StatusCode);
     }
 
@@ -177,26 +167,24 @@ public class ProductsApiTests : IAsyncLifetime
         var pid = await CreateProductAsync("PM");
         // 取详情拿第一个部位 id
         var detail = await (await _client.GetAsync($"/api/products/{pid}")).Content.ReadFromJsonAsync<JsonElement>();
-        var partId = detail.GetProperty("items")[0].GetProperty("parts")[0].GetProperty("id").GetInt32();
+        var partId = detail.GetProperty("parts")[0].GetProperty("id").GetInt32();
 
         var r = await _client.PatchAsJsonAsync($"/api/products/{pid}/parts/{partId}", new { productionMode = "bogus" });
         Assert.Equal(HttpStatusCode.BadRequest, r.StatusCode);
     }
 
     [Fact]
-    public async Task DeleteItem_CascadesParts()
+    public async Task DeletePart_RemovesPart()
     {
         await LoginAsync("clerk", "clerk123");
         var pid = await CreateProductAsync("CAS");
         var detail = await (await _client.GetAsync($"/api/products/{pid}")).Content.ReadFromJsonAsync<JsonElement>();
-        var itemId = detail.GetProperty("items")[0].GetProperty("id").GetInt32();
+        var partId = detail.GetProperty("parts")[0].GetProperty("id").GetInt32();
 
-        // 删子件应级联删其部位
-        var del = await _client.DeleteAsync($"/api/products/{pid}/items/{itemId}");
+        var del = await _client.DeleteAsync($"/api/products/{pid}/parts/{partId}");
         del.EnsureSuccessStatusCode();
 
-        // 再取详情，items 应为空
         var after = await (await _client.GetAsync($"/api/products/{pid}")).Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal(0, after.GetProperty("items").GetArrayLength());
+        Assert.Equal(0, after.GetProperty("parts").GetArrayLength());
     }
 }

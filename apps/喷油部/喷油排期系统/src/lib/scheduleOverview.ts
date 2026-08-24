@@ -15,6 +15,10 @@ export type OverviewPlan = {
   plannedQty: number;
   machineNos: string[];
   workerCount: number;
+  goodQty: number | null;
+  inboundQty: number | null;
+  remark: string | null;
+  externalOrderNo: string;
 };
 
 /** 后端 OverviewLine：一条拉别（当列）。dailyLimit=每天产能上限件数，0=不卡。 */
@@ -45,6 +49,7 @@ export function loadLevel(total: number, dailyLimit: number): LoadLevel {
 export type CellItem = {
   partName: string; qty: number; stepNo: number; craft: string; color: CraftColor;
   id: number; orderId: number; productNo: string; machineNos: string[]; workerCount: number;
+  goodQty: number | null; inboundQty: number | null; remark: string | null; externalOrderNo: string;
 };
 
 /** 一个格子（某天 × 某拉）。count=条数（mockup「N款」）；occupancyPct/level 靠该拉日上限算。 */
@@ -92,6 +97,7 @@ export function buildOverviewGrid(plans: OverviewPlan[], lines: OverviewLine[]):
     cell.items.push({
       partName: p.partName, qty: p.plannedQty, stepNo: p.stepNo, craft, color: craftColor(craft),
       id: p.id, orderId: p.orderId, productNo: p.productNo, machineNos: p.machineNos, workerCount: p.workerCount,
+      goodQty: p.goodQty, inboundQty: p.inboundQty, remark: p.remark, externalOrderNo: p.externalOrderNo,
     });
     cell.total += p.plannedQty;
     cell.count += 1;

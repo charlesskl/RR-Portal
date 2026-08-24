@@ -16,6 +16,13 @@ public class InventoryCalcTests
         => Assert.Equal(800, InventoryCalc.FinishedInStock(800, System.Array.Empty<int>()));
 
     [Fact]
+    public void WorkshopAndProcessLoose_UseOrderedProcessSteps()
+    {
+        Assert.Equal(200, InventoryCalc.WorkshopStock(5000, 4800));
+        Assert.Equal(3000, InventoryCalc.ProcessLoose(new[] { 8000, 6000, 5000 }));
+    }
+
+    [Fact]
     public void LooseAvailable_SumsLooseDeltas()
         // 散件入 +10 +5，被借 -3 → 12
         => Assert.Equal(12, InventoryCalc.LooseAvailable(new[] { 10, 5, -3 }));

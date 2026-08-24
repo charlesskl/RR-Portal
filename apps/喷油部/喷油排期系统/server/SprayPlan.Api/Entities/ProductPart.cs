@@ -4,7 +4,8 @@ namespace SprayPlan.Api.Entities;
 public class ProductPart
 {
     public int Id { get; set; }
-    public int ItemId { get; set; }
+    public int ProductId { get; set; }
+    public int PartGroupId { get; set; }        // 逻辑部位ID：同一部位的不同工序共享
     public string PartName { get; set; } = "";
     public int PartOrder { get; set; }
     public double UnitCost { get; set; }       // 核价
@@ -20,5 +21,5 @@ public class ProductPart
     public int CraftPasses { get; set; }        // 工序道数：该部位走几道工序（存 partOrder 最小那行）；约束 ≥ 工序种类数
     public string? Remark { get; set; }
 
-    public ProductItem? Item { get; set; }
+    public Product? Product { get; set; }
 }

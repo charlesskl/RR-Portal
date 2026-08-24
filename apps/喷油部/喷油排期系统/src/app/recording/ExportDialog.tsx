@@ -1,11 +1,11 @@
 "use client";
-import { apiFetch } from "@/lib/apiFetch";
 // 导出日报表弹窗：选计划版/实际版 + 按拉别手填「表头人数说明」「杂工明细」，POST 拉取 xlsx 下载。
 // 备注临时填、不持久化（每次打开都空）。生产人数合计/上班人数等数字字段留待第二批（人数捆）。
 import { useState } from "react";
 
 export default function ExportDialog({ date, lines }: { date: string; lines: { id: number; label: string }[] }) {
   const [open, setOpen] = useState(false);
+  const [exportDate, setExportDate] = useState(date);
   const [mode, setMode] = useState<"plan" | "actual">("plan");
   // 备注按拉别 id 存（与后端按 lineId 匹配一致，避免显示名对不上丢备注）
   const [notes, setNotes] = useState<Record<number, { header: string; misc: string; miscCount: string }>>({});
@@ -20,15 +20,19 @@ export default function ExportDialog({ date, lines }: { date: string; lines: { i
         miscText: notes[l.id]?.misc ?? "",
         miscCount: Number(notes[l.id]?.miscCount || 0),
       }));
-      const resp = await apiFetch("/api/recording/export", {
+      const resp = await fetch("/api/recording/export", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ date, mode, lineNotes }),
+        body: JSON.stringify({ date: exportDate, mode, lineNotes }),
       });
-      if (!resp.ok) { alert(`导出失败（${resp.status}）`); return; }  // 防把错误响应当损坏 xlsx 下载
+      if (!resp.ok) {
+        const body = await resp.json().catch(() => ({}));
+        alert(body.error || `导出失败（${resp.status}）`);
+        return;
+      }  // 防把错误响应当损坏 xlsx 下载
       const blob = await resp.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
-      a.href = url; a.download = `recording-${date}.xlsx`; a.click();
+      a.href = url; a.download = `recording-${exportDate}.xlsx`; a.click();
       URL.revokeObjectURL(url);
       setOpen(false);
     } finally {
@@ -45,7 +49,10 @@ export default function ExportDialog({ date, lines }: { date: string; lines: { i
       {open && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30" onClick={() => setOpen(false)}>
           <div className="max-h-[80vh] w-[560px] overflow-auto rounded-card bg-white p-5" onClick={(e) => e.stopPropagation()}>
-            <h3 className="mb-3 text-[16px] font-bold text-text">导出日报表 · {date}</h3>
+            <h3 className="mb-3 text-[16px] font-bold text-text">导出日报表</h3>
+            <label className="mb-3 flex items-center gap-3 text-[13px] text-text-secondary">日报日期
+              <input type="date" value={exportDate} onChange={(event) => setExportDate(event.target.value)} className="rounded-md border border-app-border px-2 py-1 text-text" />
+            </label>
             <div className="mb-3 flex flex-col gap-1.5 text-[13px] text-text-secondary">
               <label className="flex items-center gap-1.5">
                 <input type="radio" checked={mode === "plan"} onChange={() => setMode("plan")} />

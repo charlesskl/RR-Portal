@@ -10,7 +10,7 @@ public static class OrderCalc
     public static int LineTotalQty(IEnumerable<OrderPartQty> partQtys) => partQtys.Sum(q => q.Qty);
 
     // 整单总数：各行各部位数量之和
-    public static int OrderTotalQty(IEnumerable<OrderLine> lines) => lines.Sum(l => LineTotalQty(l.PartQtys));
+    public static int OrderTotalQty(IEnumerable<OrderPartQty> partQtys) => partQtys.Sum(q => q.Qty);
 
     // 部位单件综合价 = 核 + 人工 + 油漆
     public static double PartComprehensivePrice(double unitCost, double laborPrice, double paintCost)

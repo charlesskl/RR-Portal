@@ -39,54 +39,6 @@ async function main() {
     console.log(`✓ seeded user: ${u.username} / ${u.password}`);
   }
 
-  // ===== 示例产品：11494 兔子套装（产品信息库结构，部位级）=====
-  const existing = await prisma.product.findUnique({ where: { productNo: "11494" } });
-  if (!existing) {
-    await prisma.product.create({
-      data: {
-        productNo: "11494",
-        iterationNo: "V1", status: "active", createdBy: "clerk",
-        effectiveDate: new Date("2026-05-28"),
-        items: {
-          create: [{
-            itemName: "兔子", itemOrder: 0,
-            parts: { create: [
-              { partName: "头", partOrder: 0, unitCost: 0.5, laborPrice: 0.2, paintCost: 0.35, quotedPrice: 1.5 },
-              { partName: "身体", partOrder: 1, unitCost: 0.3, laborPrice: 0.1, paintCost: 0.15, quotedPrice: 0.8 },
-              { partName: "腿", partOrder: 2, unitCost: 0.3, laborPrice: 0.1, paintCost: 0.15, quotedPrice: 0.8 },
-            ] },
-          }],
-        },
-      },
-    });
-    console.log("✅ 已创建示例产品 11494 兔子套装");
-  }
-
-  // ===== 示例订单：引用 11494，按部位填数量 =====
-  const prod = await prisma.product.findUnique({
-    where: { productNo: "11494" },
-    include: { items: { include: { parts: true } } },
-  });
-  const orderExists = await prisma.order.findUnique({ where: { externalOrderNo: "ZWZ2026057" } });
-  if (prod && !orderExists) {
-    const rabbit = prod.items[0];
-    await prisma.order.create({
-      data: {
-        externalOrderNo: "ZWZ2026057",
-        productId: prod.id, status: "received",
-        orderDate: new Date("2026-05-20"), deliveryDate: new Date("2026-06-09"),
-        createdBy: "clerk",
-        lines: { create: [{
-          itemName: rabbit.itemName, sourceItemId: rabbit.id, lineOrder: 0,
-          partQtys: { create: rabbit.parts.map((p, i) => ({
-            partName: p.partName, sourcePartId: p.id, qty: 800, partOrder: i,
-          })) },
-        }] },
-      },
-    });
-    console.log("✅ 已创建示例订单 ZWZ2026057");
-  }
-
   // —— 第 2 章基础数据：4 条拉别（业务方定：名字含工艺、车间兴信A）+ 示例机台（幂等：先查后建）——
   // 工艺类型贴在拉别上（手喷/移印/自动喷/UV），机台工艺继承所属拉别
   const lineDefs = [
@@ -108,62 +60,10 @@ async function main() {
   }
   console.log(`✓ seeded productionLines: ${lineDefs.map(l => l.name).join(", ")}`);
 
-  // —— 给示例产品 11494 的部位填上日产能（机喷、单台 3000/天）——
-  const parts = await prisma.productPart.findMany({ where: { dailyCapacity: 0 } });
-  for (const p of parts) {
-    await prisma.productPart.update({
-      where: { id: p.id },
-      data: { dailyCapacity: 3000, productionMode: "machine", stdMachineCount: 1 },
-    });
-  }
-  if (parts.length > 0) {
-    console.log(`✓ updated ${parts.length} productPart(s) dailyCapacity → 3000`);
-  }
-
   // —— 验证输出 ——
   const lineCount = await prisma.productionLine.count();
   const machineCount = await prisma.machine.count();
-  const samplePart = await prisma.productPart.findFirst();
-  console.log(`📊 productionLine.count=${lineCount}, machine.count=${machineCount}, samplePart.dailyCapacity=${samplePart?.dailyCapacity ?? "N/A"}`);
-
-  // === 示例排期计划（幂等：先清该订单的计划再建）===
-  const demoOrder = await prisma.order.findUnique({
-    where: { externalOrderNo: "ZWZ2026057" },
-    include: { lines: true },
-  });
-  const demoLine = await prisma.productionLine.findFirst({
-    where: { name: { startsWith: "C拉" } },
-  });
-  if (demoOrder && demoLine) {
-    // 幂等：先删该订单已有的所有排期计划，再重新创建
-    await prisma.productionPlan.deleteMany({ where: { orderId: demoOrder.id } });
-    const firstItem = demoOrder.lines[0];
-    if (firstItem) {
-      await prisma.productionPlan.create({
-        data: {
-          planDate: new Date(),
-          planType: "daily",
-          lineId: demoLine.id,
-          orderId: demoOrder.id,
-          itemName: firstItem.itemName,
-          partName: "头",        // 示意部位，seed 仅建一条示例
-          machineNos: '["5#"]',  // JSON 字符串，与 schema @default("[]") 一致
-          plannedQty: 3000,
-          workerCount: 1,
-          createdBy: "seed",
-        },
-      });
-      console.log(`✅ 已创建示例排期计划：orderId=${demoOrder.id} lineId=${demoLine.id} qty=3000`);
-    }
-    // 将示例订单状态更新为「已排期」
-    await prisma.order.update({
-      where: { id: demoOrder.id },
-      data: { status: "scheduled" },
-    });
-    console.log(`✓ 已将订单 ZWZ2026057 状态更新为 scheduled`);
-  } else {
-    console.warn("⚠️  未找到订单 ZWZ2026057 或拉别「胡旗」，跳过示例排期计划创建");
-  }
+  console.log(`📊 productionLine.count=${lineCount}, machine.count=${machineCount}`);
 
   // —— 2026 法定节假日（休息日。⚠️ 以国务院《放假安排通知》为准，文员可在节假日 tab 微调；
   //     调休「补班日」每年不同，此处不预填，由文员按官方通知补 workday 记录）——

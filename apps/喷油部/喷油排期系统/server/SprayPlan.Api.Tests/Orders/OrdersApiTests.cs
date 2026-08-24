@@ -27,7 +27,7 @@ public class OrdersApiTests : IAsyncLifetime
         var r = await _client.PostAsJsonAsync("/api/products", new
         {
             productNo = no, customerName = "ZURU",
-            items = new[] { new { itemName = "兔子", parts = new[] { new { partName = "头", unitCost = 1.0 } } } }
+            parts = new[] { new { partName = "头", unitCost = 1.0 } }
         });
         r.EnsureSuccessStatusCode();
         return (await r.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetInt32();
@@ -38,7 +38,7 @@ public class OrdersApiTests : IAsyncLifetime
         var r = await _client.PostAsJsonAsync("/api/orders", new
         {
             externalOrderNo = orderNo, productId,
-            lines = new[] { new { itemName = "兔子", partQtys = new[] { new { partName = "头", qty = 100 } } } }
+            partQtys = new[] { new { partName = "头", qty = 100 } }
         });
         r.EnsureSuccessStatusCode();
         return (await r.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetInt32();
@@ -67,7 +67,7 @@ public class OrdersApiTests : IAsyncLifetime
         Assert.Equal("ZWZ001", first.GetProperty("externalOrderNo").GetString());
         Assert.Equal("11494", first.GetProperty("productNo").GetString());
         Assert.Equal(100, first.GetProperty("totalQty").GetInt32());
-        Assert.Equal("received", first.GetProperty("status").GetString());
+        Assert.Equal("draft", first.GetProperty("status").GetString());
     }
 
     [Fact]
@@ -104,14 +104,14 @@ public class OrdersApiTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Detail_IncludesLinesAndProduct()
+    public async Task Detail_IncludesPartQtysAndProduct()
     {
         await LoginAsync("clerk", "clerk123");
         var pid = await CreateProductAsync("D");
         var oid = await CreateOrderAsync("DET", pid);
         var d = await (await _client.GetAsync($"/api/orders/{oid}")).Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal(1, d.GetProperty("lines").GetArrayLength());
-        Assert.Equal("兔子", d.GetProperty("lines")[0].GetProperty("itemName").GetString());
+        Assert.Equal(1, d.GetProperty("partQtys").GetArrayLength());
+        Assert.Equal("头", d.GetProperty("partQtys")[0].GetProperty("partName").GetString());
         Assert.Equal("D", d.GetProperty("product").GetProperty("productNo").GetString());
     }
 

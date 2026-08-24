@@ -1,5 +1,4 @@
 "use client";
-import { apiFetch } from "@/lib/apiFetch";
 import Link from "next/link";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
@@ -10,7 +9,7 @@ export type ProductRow = {
   id: number;
   productNo: string;
   status: string;            // draft 待审核 / active 已生效 / archived 作废
-  itemCount: number;
+  partCount: number;
   totalUnitCost: number;     // 核价合计
   totalPaintCost: number;    // 油漆合计
   totalQuotedPrice: number;
@@ -32,14 +31,14 @@ export function ProductsTable({ products }: { products: ProductRow[] }) {
   async function archive(id: number, no: string) {
     if (!confirm(`确认作废产品「${no}」？作废后可在回收站恢复。`)) return;
     setBusy(true);
-    const res = await apiFetch(`/api/products/${id}`, { method: "DELETE" });
+    const res = await fetch(`/api/products/${id}`, { method: "DELETE" });
     setBusy(false);
     if (res.ok) router.refresh(); else alert("作废失败，请重试");
   }
   async function restore(id: number, no: string) {
     if (!confirm(`确认恢复产品「${no}」？将回到「待审核」状态，需重新审核生效。`)) return;
     setBusy(true);
-    const res = await apiFetch(`/api/products/${id}`, {
+    const res = await fetch(`/api/products/${id}`, {
       method: "PATCH", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ status: "draft" }),
     });
@@ -85,7 +84,7 @@ export function ProductsTable({ products }: { products: ProductRow[] }) {
           <thead className="bg-[#f0fdf4] text-[#047857] text-xs">
             <tr>
               <th className="px-3 py-3 text-left w-[18%]">产品货号</th>
-              <th className="px-3 py-3 text-center w-[9%]">子件数</th>
+              <th className="px-3 py-3 text-center w-[9%]">部位数</th>
               <th className="px-3 py-3 text-center w-[10%]">总核价</th>
               <th className="px-3 py-3 text-center w-[10%]">总报价</th>
               <th className="px-3 py-3 text-center w-[10%]">状态</th>
@@ -100,9 +99,9 @@ export function ProductsTable({ products }: { products: ProductRow[] }) {
               return (
                 <tr key={p.id} className={i % 2 ? "bg-[#fafdfb]" : ""}>
                   <td className="px-3 py-3 font-mono">{p.productNo}</td>
-                  <td className="px-3 py-3 text-center">{p.itemCount}</td>
-                  <td className="px-3 py-3 text-center">{(p.totalUnitCost + p.totalPaintCost).toFixed(3)}</td>
-                  <td className="px-3 py-3 text-center">{p.totalQuotedPrice.toFixed(3)}</td>
+                  <td className="px-3 py-3 text-center">{p.partCount ?? 0}</td>
+                  <td className="px-3 py-3 text-center">{((p.totalUnitCost ?? 0) + (p.totalPaintCost ?? 0)).toFixed(3)}</td>
+                  <td className="px-3 py-3 text-center">{(p.totalQuotedPrice ?? 0).toFixed(3)}</td>
                   <td className="px-3 py-3 text-center"><span className={`text-[11px] px-2 py-0.5 rounded-full ${st.cls}`}>{st.text}</span></td>
                   <td className="px-3 py-3 text-center text-text-secondary">{new Date(p.updatedAt).toLocaleDateString("zh-CN")}</td>
                   <td className="px-3 py-3 text-center text-text-secondary">{p.lastUpdatedBy ?? "—"}</td>

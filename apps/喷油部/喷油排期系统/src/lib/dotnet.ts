@@ -10,6 +10,12 @@ const BASE = process.env.DOTNET_API_URL || "http://localhost:5080";
 
 const COOKIE_NAME = "sprayplan_session";
 
+export class DotnetHttpError extends Error {
+  constructor(public readonly status: number, public readonly path: string) {
+    super(`调用 .NET 接口失败：${path} 返回 ${status}`);
+  }
+}
+
 // GET 请求 .NET 接口并返回解析后的 JSON。失败抛错（让页面的错误边界/日志能感知）。
 export async function dotnetGet<T>(path: string): Promise<T> {
   const token = cookies().get(COOKIE_NAME)?.value;
@@ -19,7 +25,7 @@ export async function dotnetGet<T>(path: string): Promise<T> {
     cache: "no-store",
   });
   if (!res.ok) {
-    throw new Error(`调用 .NET 接口失败：${path} 返回 ${res.status}`);
+    throw new DotnetHttpError(res.status, path);
   }
   return res.json() as Promise<T>;
 }

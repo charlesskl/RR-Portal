@@ -26,12 +26,12 @@ public class ProductCraftTests : IAsyncLifetime
         var resp = await _client.PostAsJsonAsync("/api/products", new
         {
             productNo = "C1", customerName = "ZURU",
-            items = new[] { new { itemName = "兔子", parts = new[] { new { partName = "头", craft = "移印", unitCost = 1.0 } } } }
+            parts = new[] { new { partName = "头", craft = "移印", unitCost = 1.0 } }
         });
         resp.EnsureSuccessStatusCode();
         var pid = (await resp.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetInt32();
         var detail = await _client.GetFromJsonAsync<JsonElement>($"/api/products/{pid}");
-        var craft = detail.GetProperty("items")[0].GetProperty("parts")[0].GetProperty("craft").GetString();
+        var craft = detail.GetProperty("parts")[0].GetProperty("craft").GetString();
         Assert.Equal("移印", craft);
     }
 
@@ -41,14 +41,13 @@ public class ProductCraftTests : IAsyncLifetime
         var resp = await _client.PostAsJsonAsync("/api/products", new
         {
             productNo = "C2", customerName = "ZURU",
-            items = new[] { new { itemName = "兔子", parts = new[] { new { partName = "头", unitCost = 1.0 } } } }
+            parts = new[] { new { partName = "头", unitCost = 1.0 } }
         });
         resp.EnsureSuccessStatusCode();
         var pid = (await resp.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetInt32();
         var detail = await _client.GetFromJsonAsync<JsonElement>($"/api/products/{pid}");
-        var itemId = detail.GetProperty("items")[0].GetProperty("id").GetInt32();
         // 非法工艺「喷漆」应被拦
-        var add = await _client.PostAsJsonAsync($"/api/products/{pid}/parts", new { itemId, partName = "脚", craft = "喷漆" });
+        var add = await _client.PostAsJsonAsync($"/api/products/{pid}/parts", new { partName = "脚", craft = "喷漆" });
         Assert.Equal(HttpStatusCode.BadRequest, add.StatusCode);
     }
 
@@ -58,12 +57,12 @@ public class ProductCraftTests : IAsyncLifetime
         var resp = await _client.PostAsJsonAsync("/api/products", new
         {
             productNo = "C3", customerName = "ZURU",
-            items = new[] { new { itemName = "兔子", parts = new[] { new { partName = "头", craft = "移印", unitCost = 1.0 } } } }
+            parts = new[] { new { partName = "头", craft = "移印", unitCost = 1.0 } }
         });
         resp.EnsureSuccessStatusCode();
         var pid = (await resp.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetInt32();
         var detail = await _client.GetFromJsonAsync<JsonElement>($"/api/products/{pid}");
-        var partId = detail.GetProperty("items")[0].GetProperty("parts")[0].GetProperty("id").GetInt32();
+        var partId = detail.GetProperty("parts")[0].GetProperty("id").GetInt32();
         var patch = await _client.PatchAsJsonAsync($"/api/products/{pid}/parts/{partId}", new { craft = "UV" });
         patch.EnsureSuccessStatusCode();
         Assert.Contains("UV", await patch.Content.ReadAsStringAsync());

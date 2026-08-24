@@ -70,20 +70,18 @@ public class ScheduleOverviewApiTests : IAsyncLifetime
         var presp = await _c.PostAsJsonAsync("/api/products", new
         {
             productNo = "OV1", customerName = "ZURU",
-            items = new[] { new { itemName = "兔子", parts = new[] { new { partName = "头", unitCost = 1.0 } } } }
+            parts = new[] { new { partName = "头", unitCost = 1.0 } }
         });
         presp.EnsureSuccessStatusCode();
         var pid = (await presp.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetInt32();
         var detail = await (await _c.GetAsync($"/api/products/{pid}")).Content.ReadFromJsonAsync<JsonElement>();
-        var item = detail.GetProperty("items")[0];
-        var itemId = item.GetProperty("id").GetInt32();
-        var partId = item.GetProperty("parts")[0].GetProperty("id").GetInt32();
+        var partId = detail.GetProperty("parts")[0].GetProperty("id").GetInt32();
         (await _c.PatchAsJsonAsync($"/api/products/{pid}/parts/{partId}",
             new { dailyCapacity, productionMode = "machine", stdMachineCount = 1, craft = "移印" })).EnsureSuccessStatusCode();
         (await _c.PostAsJsonAsync("/api/orders", new
         {
             externalOrderNo = "OVO", productId = pid, orderDate = "2026-06-01", deliveryDate,
-            lines = new[] { new { itemName = "兔子", sourceItemId = itemId, partQtys = new[] { new { partName = "头", sourcePartId = partId, qty = demand } } } }
+            partQtys = new[] { new { partName = "头", sourcePartId = partId, qty = demand } }
         })).EnsureSuccessStatusCode();
     }
 }

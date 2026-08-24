@@ -48,30 +48,31 @@ public static class ScheduleCalc
         => dayOffsets.Select(off => Ymd(weekMonday.AddDays(off))).ToList();
 
     // 某子件总需求 = 该子件所有明细行各部位数量之和（不分颜色/规格）
-    public static int SubItemTotalDemand(IEnumerable<OrderLine> lines, int sourceItemId)
-        => lines.Where(l => l.SourceItemId == sourceItemId).Sum(l => l.PartQtys.Sum(q => q.Qty));
+    public static int PartTotalDemand(IEnumerable<OrderPartQty> partQtys, int sourcePartId)
+        => partQtys.Where(q => q.SourcePartId == sourcePartId).Sum(q => q.Qty);
 
     // 可排部位（Craft=工艺大类：手喷/移印/自动喷/UV；IsTumbler=是否走炒货机）
     public record SchedulablePart(int SourceItemId, string ItemName, int SourcePartId, string PartName,
         string ProductionMode, int DailyCapacity, int StdMachineCount, int TotalDemand, string Craft, bool IsTumbler,
-        int CraftPasses);
+        int CraftPasses, int PartGroupId);
 
     // 把订单展开成「可排部位清单」：每个订单部位一项，需求=该部位订单数量，产能属性来自产品库部位。
     public static List<SchedulablePart> ExpandOrderParts(Order order)
     {
         var outl = new List<SchedulablePart>();
-        foreach (var line in order.Lines)
+        foreach (var pq in order.PartQtys)
         {
-            var item = order.Product?.Items.FirstOrDefault(it => it.Id == line.SourceItemId);
-            if (item is null) continue;
-            foreach (var pq in line.PartQtys)
-            {
-                var part = item.Parts.FirstOrDefault(p => p.Id == pq.SourcePartId);
-                if (part is null) continue;
-                outl.Add(new SchedulablePart(item.Id, item.ItemName, part.Id, part.PartName,
-                    part.ProductionMode, part.DailyCapacity, part.StdMachineCount, pq.Qty, part.Craft, part.IsTumbler,
-                    part.CraftPasses));
-            }
+            var part = order.Product?.Parts.FirstOrDefault(p => p.Id == pq.SourcePartId);
+            if (part is null) continue;
+            var processedGroups = new HashSet<int>();
+            var groupId = part.PartGroupId > 0 ? part.PartGroupId : part.Id;
+            if (!processedGroups.Add(groupId)) continue;
+            var group = PartProcessRules.SameLogicalPart(order.Product!.Parts, part);
+            var passes = group.Select(p => p.CraftPasses).FirstOrDefault(v => v > 0);
+            foreach (var process in group)
+                outl.Add(new SchedulablePart(0, "", process.Id, process.PartName,
+                    process.ProductionMode, process.DailyCapacity, process.StdMachineCount, pq.Qty, process.Craft,
+                    process.IsTumbler, passes, groupId));
         }
         return outl;
     }

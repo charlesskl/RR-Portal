@@ -1,5 +1,4 @@
 "use client";
-import { apiFetch } from "@/lib/apiFetch";
 // PDF 订单导入 · 核对界面（客户端）
 // 流程：上传 PDF → 调 /api/orders/import-pdf 出草稿 → 文员核对(绿/红行手工选) → 确认入库。
 // 货号产品库找不到 → 走「待补产品」（只登记订单头）。
@@ -8,7 +7,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 
 type DraftHead = { externalOrderNo: string; orderDate: string; deliveryDate: string | null; productNo: string; isMa: boolean };
-type DraftLine = { pdfItemName: string; totalQty: number; mergedRows: number; matchedItemName: string | null };
+type DraftLine = { pdfItemName: string; totalQty: number; mergedRows: number; matchedItemName: string | null; unitPrice: number; existingUnitCost: number | null };
 type Draft = {
   head: DraftHead; productFound: boolean; productId: number | null;
   lines: DraftLine[]; pdfToken: string; availableItems: string[];
@@ -26,6 +25,7 @@ export default function ImportClient() {
   const [fileName, setFileName] = useState("");
   // 红行的人工处理：行下标 → 选中的产品库子件名，或 SKIP（跳过本行）
   const [picks, setPicks] = useState<Record<number, string>>({});
+  const [savePricing, setSavePricing] = useState(false);
 
   async function doUpload() {
     const f = fileRef.current?.files?.[0];
@@ -33,10 +33,10 @@ export default function ImportClient() {
     setBusy(true); setErr("");
     const fd = new FormData(); fd.append("file", f);
     try {
-      const res = await apiFetch("/api/orders/import-pdf", { method: "POST", body: fd });
+      const res = await fetch("/api/orders/import-pdf", { method: "POST", body: fd });
       if (!res.ok) { setErr((await res.json().catch(() => ({})))?.error ?? "解析失败，请确认是委托加工合同 PDF"); return; }
       const d: Draft = await res.json();
-      setDraft(d); setHead(d.head); setPicks({}); setFileName(f.name);
+      setDraft(d); setHead(d.head); setPicks({}); setSavePricing(!d.productFound); setFileName(f.name);
     } catch { setErr("网络错误，请确认后端服务是否运行后重试"); }
     finally { setBusy(false); }
   }
@@ -55,12 +55,12 @@ export default function ImportClient() {
     if (!draft || !head) return;
     setBusy(true); setErr("");
     const lines = asPending ? [] : draft.lines
-      .map((ln, i) => ({ name: resolved(i, ln), totalQty: ln.totalQty }))
+      .map((ln, i) => ({ name: resolved(i, ln), totalQty: ln.totalQty, unitPrice: ln.unitPrice }))
       .filter((x) => x.name)   // 跳过未匹配/已标跳过的红行
-      .map((x) => ({ matchedItemName: x.name as string, totalQty: x.totalQty }));
-    const body = { head, pdfToken: draft.pdfToken, asPendingProduct: asPending, lines };
+      .map((x) => ({ matchedItemName: x.name as string, totalQty: x.totalQty, unitPrice: x.unitPrice }));
+    const body = { head, pdfToken: draft.pdfToken, asPendingProduct: asPending, savePricing, lines };
     try {
-      const res = await apiFetch("/api/orders/import-confirm", {
+      const res = await fetch("/api/orders/import-confirm", {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
       });
       if (!res.ok) { setErr((await res.json().catch(() => ({})))?.error ?? "入库失败，请重试"); return; }
@@ -97,14 +97,13 @@ export default function ImportClient() {
       {/* 状态横幅 */}
       {draft.productFound ? (
         <div className="bg-mint-50 border-l-[3px] border-mint-400 text-[#065f46] rounded-btn px-4 py-3 text-sm mb-4">
-          ✅ 货号 <b>{head.productNo}</b> 已匹配产品库 · 共 <b>{draft.lines.length}</b> 个子件
+          ✅ 货号 <b>{head.productNo}</b> 已匹配核价库 · 共 <b>{draft.lines.length}</b> 个部件
           {redCount > 0 ? <span className="text-rose font-semibold"> · {redCount} 个待处理</span>
             : <span className="text-mint-700 font-semibold"> · 全部已匹配</span>}
         </div>
       ) : (
         <div className="bg-[#fef2f2] border-l-[3px] border-[#f87171] text-[#991b1b] rounded-btn px-4 py-3 text-sm mb-4">
-          ⚠️ 货号 <b>{head.productNo || "（未识别）"}</b> 未在产品库中找到。本单只登记订单头并标记「待补产品」，
-          PDF 已保存，产品建好后可在订单总览「待补产品」标签一键补全。
+          ⚠️ 货号 <b>{head.productNo || "（未识别）"}</b> 未在核价库中找到。请核对下方订单部位和单价，确认后可直接创建草稿核价并登记订单。
         </div>
       )}
 
@@ -130,16 +129,18 @@ export default function ImportClient() {
         </Fld>
       </div>
 
-      {/* 子件明细（仅产品库命中时） */}
-      {draft.productFound && (
+      {/* 部件明细（仅核价库命中时） */}
+      {(
         <>
-          <div className="text-[15px] font-semibold text-text border-l-4 border-mint-400 pl-3 mb-3">子件明细</div>
+          <div className="text-[15px] font-semibold text-text border-l-4 border-mint-400 pl-3 mb-3">部件明细</div>
           <table className="w-full text-sm">
             <thead className="bg-[#f0fdf4] text-[#047857] text-xs">
               <tr>
-                <th className="px-3 py-2.5 text-left w-[34%]">PDF 子件名</th>
+                <th className="px-3 py-2.5 text-left w-[34%]">订单部件名</th>
                 <th className="px-3 py-2.5 text-left w-[42%]">产品库匹配</th>
                 <th className="px-3 py-2.5 text-right">合计数量</th>
+                <th className="px-3 py-2.5 text-right">订单核价</th>
+                <th className="px-3 py-2.5 text-right">库内核价</th>
               </tr>
             </thead>
             <tbody>
@@ -159,7 +160,7 @@ export default function ImportClient() {
                           {!picks[i] && <span className="text-[11px] bg-[#fee2e2] text-rose px-2 py-0.5 rounded-full font-semibold">未找到</span>}
                           <select value={picks[i] ?? ""} onChange={(e) => setPicks({ ...picks, [i]: e.target.value })}
                             className="h-[34px] border border-[#fca5a5] rounded-btn px-2 text-[12.5px] text-rose bg-white min-w-[190px]">
-                            <option value="">选择对应子件…</option>
+                            <option value="">选择对应部件…</option>
                             {draft.availableItems.map((a) => <option key={a} value={a}>{a}</option>)}
                             <option value={SKIP}>✗ 跳过本行（不导入）</option>
                           </select>
@@ -170,6 +171,8 @@ export default function ImportClient() {
                       <span className="font-mono font-semibold text-text">{ln.totalQty.toLocaleString("zh-CN")}</span>
                       {ln.mergedRows > 1 && <span className="ml-2 text-[11px] text-text-tertiary bg-[#f1f5f9] px-1.5 py-0.5 rounded">{ln.mergedRows} 行合并</span>}
                     </td>
+                    <td className="px-3 py-2.5 text-right font-mono">{ln.unitPrice.toFixed(4)}</td>
+                    <td className="px-3 py-2.5 text-right font-mono">{ln.existingUnitCost == null ? "—" : ln.existingUnitCost.toFixed(4)}</td>
                   </tr>
                 );
               })}
@@ -180,12 +183,17 @@ export default function ImportClient() {
 
       {err && <p className="text-rose text-sm mt-4">{err}</p>}
 
+      <label className="mt-4 flex items-center gap-2 text-sm text-text-secondary">
+        <input type="checkbox" checked={savePricing} onChange={(e) => setSavePricing(e.target.checked)} />
+        {draft.productFound ? "将订单单价更新到核价库（不勾选则只登记订单）" : "同时创建草稿核价（新货号必选）"}
+      </label>
+
       {/* 底部操作 */}
       <div className="flex items-center gap-3 mt-6 pt-5 border-t border-app-border-light">
         <div className="text-[12.5px] text-text-tertiary">
           {draft.productFound
-            ? (redPending ? <>还有 <b className="text-rose">{draft.lines.filter((ln, i) => !ln.matchedItemName && !picks[i]).length}</b> 个子件没处理，处理完才能入库</> : "可入库")
-            : "新货号 · 仅登记订单头"}
+            ? (redPending ? <>还有 <b className="text-rose">{draft.lines.filter((ln, i) => !ln.matchedItemName && !picks[i]).length}</b> 个部件没处理，处理完才能入库</> : "可入库")
+            : "新货号 · 可从订单直接建立核价"}
         </div>
         <div className="ml-auto flex gap-3">
           <button onClick={() => { setDraft(null); setHead(null); setErr(""); }} className="text-sm border border-app-border rounded-btn px-4 py-2 text-text-secondary">重新上传</button>
@@ -195,9 +203,9 @@ export default function ImportClient() {
               {busy ? "入库中…" : "确认入库"}
             </button>
           ) : (
-            <button disabled={busy} onClick={() => doConfirm(true)}
+            <button disabled={busy || !savePricing || draft.lines.length === 0} onClick={() => doConfirm(false)}
               className="bg-mint-400 hover:bg-mint-700 text-white px-5 py-2 rounded-btn text-sm font-semibold shadow-[0_2px_8px_rgba(52,211,153,0.30)] disabled:opacity-50">
-              {busy ? "登记中…" : "登记订单（待补产品）"}
+              {busy ? "保存中…" : "保存核价并登记订单"}
             </button>
           )}
         </div>

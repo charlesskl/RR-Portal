@@ -4,11 +4,11 @@ namespace SprayPlan.Api.Entities;
 public class OrderPartQty
 {
     public int Id { get; set; }
-    public int OrderLineId { get; set; }
+    public int OrderId { get; set; }
     public string PartName { get; set; } = "";   // 部位快照名
     public int? SourcePartId { get; set; }       // 溯源产品库部位
     public int Qty { get; set; }
     public int PartOrder { get; set; }
 
-    public OrderLine? Line { get; set; }
+    public Order? Order { get; set; }
 }

@@ -46,6 +46,7 @@ public static class PdfTableExtractor
         public int IdxProductNo => 0;   // 款号
         public int IdxItemName  => 1;   // 物料名称
         public int IdxQty       => 6;   // 数量
+        public int IdxUnitPrice => 7;   // 单价（订单核价）
 
         // 判断词中心 X 落入哪一列；返回 HeaderTexts 索引，落在所有列之外返回 -1。
         // 列边界 = 相邻两表头词之间空白档的中点（leftCol.Right 与 rightCol.Left 的中点）；
@@ -196,6 +197,12 @@ public static class PdfTableExtractor
         return int.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out var v) ? v : (int?)null;
     }
 
+    private static double ParsePrice(string text)
+    {
+        var s = text.Replace(",", "").Replace("HK$", "", StringComparison.OrdinalIgnoreCase).Trim();
+        return double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out var value) && value >= 0 ? value : 0;
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // ExtractRows：遍历所有页，抽出每条逻辑行的(物料原始名, 数量)。
     // ─────────────────────────────────────────────────────────────────────────
@@ -240,8 +247,11 @@ public static class PdfTableExtractor
 
                 var itemRaw = string.Concat(nameWords.Select(w => w.Text)).Trim();
                 var qty = ParseQty(anchor.Text)!.Value;
+                var priceWords = OrderCellWords(body.Where(w => geo.ColumnOf(w.CenterX) == geo.IdxUnitPrice
+                    && w.Top <= hiTop && w.Top > loTop));
+                var unitPrice = ParsePrice(string.Concat(priceWords.Select(w => w.Text)));
 
-                result.Add(new RawLine(itemRaw, qty));
+                result.Add(new RawLine(itemRaw, qty, unitPrice));
             }
         }
 

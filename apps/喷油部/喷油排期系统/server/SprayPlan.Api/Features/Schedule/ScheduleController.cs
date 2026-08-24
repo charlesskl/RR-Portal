@@ -26,8 +26,8 @@ public class ScheduleController(AppDbContext db) : ControllerBase
             .OrderByDescending(o => o.Id)
             .AsNoTracking()
             .AsSplitQuery()
-            .Include(o => o.Product!).ThenInclude(p => p.Items).ThenInclude(i => i.Parts)
-            .Include(o => o.Lines).ThenInclude(l => l.PartQtys)
+            .Include(o => o.Product!).ThenInclude(p => p.Parts)
+            .Include(o => o.PartQtys)
             .Include(o => o.Plans.Where(p => p.DeletedAt == null))
             .ToListAsync();
 
@@ -59,7 +59,7 @@ public class ScheduleController(AppDbContext db) : ControllerBase
                 scheduled, firstPlanDate, expectedOutDate,
                 activePlans.Select(p => new GanttPlan(
                     ScheduleCalc.Ymd(p.PlanDate), p.ItemName, p.PartName, p.SourcePartId,
-                    p.PlannedQty, p.GoodQty, p.ReportedQty, ScheduleCalc.SafeArr(p.MachineNos), p.WorkerCount)).ToList(),
+                    p.PlannedQty, p.GoodQty, p.InboundQty, p.ReportedQty, ScheduleCalc.SafeArr(p.MachineNos), p.WorkerCount)).ToList(),
                 parts.Select(pt => new DemandPart(pt.SourceItemId, pt.ItemName, pt.SourcePartId, pt.PartName, pt.TotalDemand)).ToList());
         }).ToList();
 
@@ -72,14 +72,14 @@ public class ScheduleController(AppDbContext db) : ControllerBase
     [HttpGet("orders")]
     public async Task<IActionResult> SchedulableOrders()
     {
-        var statuses = new[] { "received", "scheduled", "in_production" };
+        var statuses = new[] { "draft", "received", "scheduled", "in_production" };
         var orders = await db.Orders
             .Where(o => statuses.Contains(o.Status))
             .OrderByDescending(o => o.Id)
             .AsNoTracking()
             .AsSplitQuery()
-            .Include(o => o.Product!).ThenInclude(p => p.Items).ThenInclude(i => i.Parts)
-            .Include(o => o.Lines).ThenInclude(l => l.PartQtys)
+            .Include(o => o.Product!).ThenInclude(p => p.Parts)
+            .Include(o => o.PartQtys)
             .Include(o => o.Plans.Where(p => p.DeletedAt == null))
             .ToListAsync();
 
@@ -121,7 +121,8 @@ public class ScheduleController(AppDbContext db) : ControllerBase
             p.Id, p.LineId, ScheduleCalc.Ymd(p.PlanDate), p.OrderId,
             p.Order?.Product?.ProductNo ?? "待补产品",
             p.ItemName, p.PartName, p.StepNo, p.Craft, p.PlannedQty,
-            ScheduleCalc.SafeArr(p.MachineNos), p.WorkerCount)).ToList();
+            ScheduleCalc.SafeArr(p.MachineNos), p.WorkerCount, p.GoodQty, p.InboundQty, p.Remark,
+            p.Order?.ExternalOrderNo ?? "-")).ToList();
 
         return Ok(new OverviewResult(lines, planDtos));
     }
@@ -130,7 +131,7 @@ public class ScheduleController(AppDbContext db) : ControllerBase
     string CurrentUser() => User.FindFirst("username")?.Value ?? "unknown";
 
     // 月排纳入的订单状态：已接单/已排/在产（未完工未作废）
-    private static readonly string[] AutoStatuses = { "received", "scheduled", "in_production" };
+    private static readonly string[] AutoStatuses = { "draft", "received", "scheduled", "in_production" };
 
     private static string MonthlyPartNameKey(string? s) =>
         (s ?? "").Trim()
@@ -145,21 +146,21 @@ public class ScheduleController(AppDbContext db) : ControllerBase
         var result = new List<MonthlyScheduleCalc.PartInput>();
         if (o.Product is null) return result;
 
-        foreach (var line in o.Lines)
+        foreach (var pq in o.PartQtys)
         {
-            var item = o.Product.Items.FirstOrDefault(i => i.Id == line.SourceItemId);
-            if (item is null) continue;
-
-            var qtyGroups = line.PartQtys
-                .Select(pq =>
+            var qtyGroups = new[] { pq }
+                .Select(qty =>
                 {
-                    var anchor = pq.SourcePartId is int sid
-                        ? item.Parts.FirstOrDefault(p => p.Id == sid)
+                    var anchor = qty.SourcePartId is int sid
+                        ? o.Product.Parts.FirstOrDefault(p => p.Id == sid)
                         : null;
-                    var partName = (anchor?.PartName ?? pq.PartName ?? "").Trim();
-                    return new { Qty = pq, Anchor = anchor, PartName = partName, Key = MonthlyPartNameKey(partName) };
+                    var partName = (anchor?.PartName ?? qty.PartName ?? "").Trim();
+                    var key = anchor?.PartGroupId > 0
+                        ? $"id:{anchor.PartGroupId}"
+                        : $"name:{MonthlyPartNameKey(partName)}";
+                    return new { Qty = qty, Anchor = anchor, PartName = partName, Key = key };
                 })
-                .Where(x => x.Key.Length > 0)
+                .Where(x => x.PartName.Length > 0)
                 .GroupBy(x => x.Key);
 
             foreach (var qtyGroup in qtyGroups)
@@ -170,11 +171,13 @@ public class ScheduleController(AppDbContext db) : ControllerBase
                     .First();
                 var partName = first.PartName;
 
-                var group = item.Parts
-                    .Where(p => MonthlyPartNameKey(p.PartName) == qtyGroup.Key)
-                    .OrderBy(p => p.PartOrder)
-                    .ThenBy(p => p.Id)
-                    .ToList();
+                var group = first.Anchor is not null
+                    ? PartProcessRules.SameLogicalPart(o.Product.Parts, first.Anchor)
+                    : o.Product.Parts
+                        .Where(p => MonthlyPartNameKey(p.PartName) == MonthlyPartNameKey(first.PartName))
+                        .OrderBy(p => p.PartOrder)
+                        .ThenBy(p => p.Id)
+                        .ToList();
                 if (group.Count == 0 && first.Anchor is not null) group.Add(first.Anchor);
                 if (group.Count == 0) continue;
 
@@ -197,7 +200,7 @@ public class ScheduleController(AppDbContext db) : ControllerBase
                 var totalDemand = qtyGroup.Max(x => x.Qty.Qty);
 
                 result.Add(new MonthlyScheduleCalc.PartInput(
-                    representative.Id, item.ItemName, partName, totalDemand,
+                    representative.Id, "", partName, totalDemand,
                     representative.DailyCapacity, representative.StdMachineCount, representative.Craft, representative.IsTumbler,
                     passes, craftSet));
             }
@@ -228,8 +231,8 @@ public class ScheduleController(AppDbContext db) : ControllerBase
             .Where(o => AutoStatuses.Contains(o.Status) &&
                 o.OrderDate < monthEnd &&
                 (o.DeliveryDate == null || o.DeliveryDate >= monthStart))
-            .Include(o => o.Product!).ThenInclude(p => p.Items).ThenInclude(i => i.Parts)
-            .Include(o => o.Lines).ThenInclude(l => l.PartQtys)
+            .Include(o => o.Product!).ThenInclude(p => p.Parts)
+            .Include(o => o.PartQtys)
             .ToListAsync();
 
         var skipped = new List<AutoHint>();
@@ -309,7 +312,6 @@ public class ScheduleController(AppDbContext db) : ControllerBase
             x.Row.SourcePartId <= 0 ||
             x.Row.PlannedQty <= 0 ||
             x.Row.StepNo <= 0 ||
-            string.IsNullOrWhiteSpace(x.Row.ItemName) ||
             string.IsNullOrWhiteSpace(x.Row.PartName) ||
             string.IsNullOrWhiteSpace(x.Row.Craft)))
             return BadRequest(new { error = "草稿计划行不完整，请重新生成后再保存" });

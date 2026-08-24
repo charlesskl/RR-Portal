@@ -30,14 +30,11 @@ public class PartCapacityApiTests : IAsyncLifetime
         var body = new
         {
             productNo = "CAP001", customerName = "测试客户", specName = "标准",
-            items = new[] { new {
-                itemName = "兔子", itemOrder = 0, colors = new[] { "粉" },
-                parts = new[] { new {
+            parts = new[] { new {
                     partName = "头", partOrder = 0,
                     unitCost = 1.0, laborPrice = 2.0, paintCost = 3.0, quotedPrice = 9.0,
                     dailyCapacity = 5000
                 } }
-            } }
         };
         var r = await _client.PostAsJsonAsync("/api/products", body);
         Assert.Equal(HttpStatusCode.Created, r.StatusCode);
@@ -47,7 +44,7 @@ public class PartCapacityApiTests : IAsyncLifetime
         var pid = created.GetProperty("id").GetInt32();
 
         var detail = await (await _client.GetAsync($"/api/products/{pid}")).Content.ReadFromJsonAsync<JsonElement>();
-        var dailyCapacity = detail.GetProperty("items")[0].GetProperty("parts")[0].GetProperty("dailyCapacity").GetInt32();
+        var dailyCapacity = detail.GetProperty("parts")[0].GetProperty("dailyCapacity").GetInt32();
         Assert.Equal(5000, dailyCapacity);
     }
 
@@ -58,21 +55,16 @@ public class PartCapacityApiTests : IAsyncLifetime
         // 先建一个产品（含 1 子件）
         var createResp = await _client.PostAsJsonAsync("/api/products", new {
             productNo = "CAP002", customerName = "C", specName = "标准",
-            items = new[] { new { itemName = "身", itemOrder = 0, colors = new string[0],
-                parts = new[] { new { partName = "壳", partOrder = 0,
-                    unitCost = 0.0, laborPrice = 0.0, paintCost = 0.0, quotedPrice = 0.0 } } } }
+            parts = new[] { new { partName = "壳", partOrder = 0,
+                    unitCost = 0.0, laborPrice = 0.0, paintCost = 0.0, quotedPrice = 0.0 } }
         });
         createResp.EnsureSuccessStatusCode();
         var prod = await createResp.Content.ReadFromJsonAsync<JsonElement>();
         var pid = prod.GetProperty("id").GetInt32();
 
-        // 通过 GET 详情获取子件 id
-        var detail = await (await _client.GetAsync($"/api/products/{pid}")).Content.ReadFromJsonAsync<JsonElement>();
-        var itemId = detail.GetProperty("items")[0].GetProperty("id").GetInt32();
-
         // 给子件加部位，携带 dailyCapacity = 8000
         var r = await _client.PostAsJsonAsync($"/api/products/{pid}/parts", new {
-            itemId, partName = "底", partOrder = 1,
+            partName = "底", partOrder = 1,
             unitCost = 0.0, laborPrice = 0.0, paintCost = 0.0, quotedPrice = 0.0, dailyCapacity = 8000
         });
         Assert.Equal(HttpStatusCode.Created, r.StatusCode);

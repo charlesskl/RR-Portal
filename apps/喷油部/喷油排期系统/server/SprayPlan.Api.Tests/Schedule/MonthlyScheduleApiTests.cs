@@ -77,20 +77,18 @@ public class MonthlyScheduleApiTests : IAsyncLifetime
         var presp = await _c.PostAsJsonAsync("/api/products", new
         {
             productNo = "MP1", customerName = "ZURU",
-            items = new[] { new { itemName = "兔子", parts = new[] { new { partName = "头", unitCost = 1.0 } } } }
+            parts = new[] { new { partName = "头", unitCost = 1.0 } }
         });
         presp.EnsureSuccessStatusCode();
         var pid = (await presp.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetInt32();
         var detail = await (await _c.GetAsync($"/api/products/{pid}")).Content.ReadFromJsonAsync<JsonElement>();
-        var item = detail.GetProperty("items")[0];
-        var itemId = item.GetProperty("id").GetInt32();
-        var partId = item.GetProperty("parts")[0].GetProperty("id").GetInt32();
+        var partId = detail.GetProperty("parts")[0].GetProperty("id").GetInt32();
         (await _c.PatchAsJsonAsync($"/api/products/{pid}/parts/{partId}",
             new { dailyCapacity = 1000, productionMode = "machine", stdMachineCount = 1, craft = "移印", craftPasses = 2 })).EnsureSuccessStatusCode();
         (await _c.PostAsJsonAsync("/api/orders", new
         {
             externalOrderNo = "MPO", productId = pid, orderDate = "2026-06-01", deliveryDate = "2026-07-31",
-            lines = new[] { new { itemName = "兔子", sourceItemId = itemId, partQtys = new[] { new { partName = "头", sourcePartId = partId, qty = 100 } } } }
+            partQtys = new[] { new { partName = "头", sourcePartId = partId, qty = 100 } }
         })).EnsureSuccessStatusCode();
 
         var gen = await (await _c.PostAsJsonAsync("/api/schedule/auto", new { month = "2026-07", mode = "incremental", today = "2026-07-01" }))
@@ -108,14 +106,12 @@ public class MonthlyScheduleApiTests : IAsyncLifetime
         var presp = await _c.PostAsJsonAsync("/api/products", new
         {
             productNo = "M1", customerName = "ZURU",
-            items = new[] { new { itemName = "兔子", parts = new[] { new { partName = "头", unitCost = 1.0 } } } }
+            parts = new[] { new { partName = "头", unitCost = 1.0 } }
         });
         presp.EnsureSuccessStatusCode();
         var pid = (await presp.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetInt32();
         var detail = await (await _c.GetAsync($"/api/products/{pid}")).Content.ReadFromJsonAsync<JsonElement>();
-        var item = detail.GetProperty("items")[0];
-        var itemId = item.GetProperty("id").GetInt32();
-        var partId = item.GetProperty("parts")[0].GetProperty("id").GetInt32();
+        var partId = detail.GetProperty("parts")[0].GetProperty("id").GetInt32();
         // 2) 设部位日产能（机喷·标准1台·移印工艺→对应胡旗拉 craftType=移印）
         (await _c.PatchAsJsonAsync($"/api/products/{pid}/parts/{partId}",
             new { dailyCapacity, productionMode = "machine", stdMachineCount = 1, craft = "移印" })).EnsureSuccessStatusCode();
@@ -125,7 +121,7 @@ public class MonthlyScheduleApiTests : IAsyncLifetime
         var oresp = await _c.PostAsJsonAsync("/api/orders", new
         {
             externalOrderNo = "MO", productId = pid, orderDate = "2026-06-01", deliveryDate,
-            lines = new[] { new { itemName = "兔子", sourceItemId = itemId, partQtys = new[] { new { partName = "头", sourcePartId = partId, qty = demand } } } }
+            partQtys = new[] { new { partName = "头", sourcePartId = partId, qty = demand } }
         });
         oresp.EnsureSuccessStatusCode();
     }

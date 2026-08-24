@@ -38,11 +38,7 @@ public class ImportApiTests : IAsyncLifetime
         {
             ProductNo = productNo, IterationNo = "V1", Status = "active",
             CreatedBy = "test", CreatedAt = now, UpdatedAt = now,
-            Items = items.Select((it, ii) => new ProductItem
-            {
-                ItemName = it.item, ItemOrder = ii,
-                Parts = it.parts.Select((pn, pi) => new ProductPart { PartName = pn, PartOrder = pi }).ToList()
-            }).ToList()
+            Parts = items.SelectMany(it => it.parts).Distinct().Select((pn, pi) => new ProductPart { PartName = pn, PartOrder = pi }).ToList()
         };
         db.Products.Add(p);
         await db.SaveChangesAsync();
@@ -68,7 +64,7 @@ public class ImportApiTests : IAsyncLifetime
     {
         using var scope = _factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        return await db.Orders.Include(o => o.Lines).ThenInclude(l => l.PartQtys)
+        return await db.Orders.Include(o => o.PartQtys)
             .FirstAsync(o => o.ExternalOrderNo == externalOrderNo);
     }
 
@@ -88,8 +84,8 @@ public class ImportApiTests : IAsyncLifetime
             asPendingProduct = false,
             lines = new[]
             {
-                new { matchedItemName = "兔子", totalQty = 300 },
-                new { matchedItemName = "青蛙", totalQty = 150 },
+                new { matchedItemName = "头", totalQty = 300 },
+                new { matchedItemName = "腿", totalQty = 150 },
             }
         };
         var r = await _client.PostAsJsonAsync("/api/orders/import-confirm", req);
@@ -98,18 +94,15 @@ public class ImportApiTests : IAsyncLifetime
         var o = await LoadOrderAsync("ORD-N1");
         Assert.Equal(pid, o.ProductId);
         Assert.False(o.PendingProduct);
-        Assert.Equal("received", o.Status);
-        Assert.Equal(2, o.Lines.Count);
+        Assert.Equal("draft", o.Status);
+        Assert.Equal(2, o.PartQtys.Count);
 
-        var rabbit = o.Lines.Single(l => l.ItemName == "兔子");
-        Assert.Equal(2, rabbit.PartQtys.Count);
-        Assert.All(rabbit.PartQtys, q => Assert.Equal(300, q.Qty));   // 每部位 = 该子件合计
-        Assert.NotNull(rabbit.SourceItemId);                          // 溯源子件
-        Assert.All(rabbit.PartQtys, q => Assert.NotNull(q.SourcePartId)); // 溯源部位
+        var head = o.PartQtys.Single(q => q.PartName == "头");
+        Assert.Equal(300, head.Qty);
+        Assert.NotNull(head.SourcePartId);
 
-        var frog = o.Lines.Single(l => l.ItemName == "青蛙");
-        Assert.Equal(2, frog.PartQtys.Count);
-        Assert.All(frog.PartQtys, q => Assert.Equal(150, q.Qty));
+        var leg = o.PartQtys.Single(q => q.PartName == "腿");
+        Assert.Equal(150, leg.Qty);
 
         // 正常单不应把 PDF token 存进 Remark
         Assert.Null(o.Remark);
@@ -133,7 +126,7 @@ public class ImportApiTests : IAsyncLifetime
         var o = await LoadOrderAsync("ORD-PEND");
         Assert.Null(o.ProductId);
         Assert.True(o.PendingProduct);
-        Assert.Empty(o.Lines);
+        Assert.Empty(o.PartQtys);
         Assert.Contains("tok-pend.pdf", o.Remark);
         Assert.True(o.IsMA);
     }

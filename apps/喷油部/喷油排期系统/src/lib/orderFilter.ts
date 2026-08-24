@@ -20,6 +20,9 @@ export type OrderRow = {
   recordedQty?: number;
   demandQty?: number;
   progressPct?: number;
+  planProductionDays?: number;
+  finishedQty?: number;
+  remainingQty?: number;
   riskLevel?: "none" | "missing_due" | "unscheduled" | "late" | "overdue";
   riskText?: string;
 };

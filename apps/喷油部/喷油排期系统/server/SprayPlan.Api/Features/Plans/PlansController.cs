@@ -26,27 +26,8 @@ public class PlansController(AppDbContext db) : ControllerBase
             .Replace("\t", "")
             .ToLowerInvariant();
 
-    static int CraftPriority(string craft) => craft switch
-    {
-        "自动喷" => 0, "手喷" => 1, "移印" => 2, "UV" => 3, _ => 99,
-    };
-
     static List<(int StepNo, string Craft)> StandardPasses(List<ProductPart> parts)
-    {
-        var crafts = parts
-            .Select(p => (p.Craft ?? "").Trim())
-            .Where(c => c.Length > 0)
-            .Distinct()
-            .OrderBy(CraftPriority)
-            .ToList();
-        if (crafts.Count == 0) return new() { (1, "") };
-        var passes = parts.Select(p => p.CraftPasses).FirstOrDefault(v => v > 0);
-        if (crafts.Count > 1) passes = Math.Max(passes, crafts.Count);
-        if (passes <= 0) passes = 1;
-        var result = new List<(int StepNo, string Craft)>();
-        for (var i = 0; i < passes; i++) result.Add((i + 1, crafts[i % crafts.Count]));
-        return result;
-    }
+        => PartProcessRules.ExpandPasses(parts);
 
     static PlanDto ToDto(ProductionPlan p, Dictionary<int, List<(int StepNo, string Craft)>> standards)
     {
@@ -59,7 +40,7 @@ public class PlansController(AppDbContext db) : ControllerBase
         p.Id, p.PlanDate, p.PlanType, p.LineId, p.OrderId, p.ItemName, p.PartName, p.SourcePartId,
         ScheduleCalc.SafeArr(p.MachineNos), p.PlannedQty, p.WorkerCount, p.StepNo, p.Craft ?? "",
         standardStepCount, standardCraft, craftAdjusted,
-        p.GoodQty, p.ReportedQty, p.DefectQty, p.WorkHours,
+        p.GoodQty, p.InboundQty, p.ReportedQty, p.DefectQty, p.WorkHours,
         p.ProductionValue, p.Status, p.Remark, p.CreatedBy, p.CreatedAt, p.LastModifiedBy, p.LastModifiedAt,
         p.ModificationHistory, p.DeletedAt, p.DeletedBy);
     }
@@ -113,21 +94,16 @@ public class PlansController(AppDbContext db) : ControllerBase
         var anchors = await db.ProductParts
             .Where(p => sourcePartIds.Contains(p.Id))
             .ToListAsync();
-        var itemIds = anchors.Select(p => p.ItemId).Distinct().ToList();
+        var productIds = anchors.Select(p => p.ProductId).Distinct().ToList();
         var itemParts = await db.ProductParts
-            .Where(p => itemIds.Contains(p.ItemId))
+            .Where(p => productIds.Contains(p.ProductId))
             .ToListAsync();
         var anchorById = anchors.ToDictionary(p => p.Id);
 
         foreach (var plan in plans)
         {
             if (plan.SourcePartId is null || !anchorById.TryGetValue(plan.SourcePartId.Value, out var anchor)) continue;
-            var key = PartNameKey(anchor.PartName);
-            var group = itemParts
-                .Where(p => p.ItemId == anchor.ItemId && PartNameKey(p.PartName) == key)
-                .OrderBy(p => p.PartOrder)
-                .ThenBy(p => p.Id)
-                .ToList();
+            var group = PartProcessRules.SameLogicalPart(itemParts, anchor);
             if (group.Count == 0) group.Add(anchor);
             result[plan.Id] = StandardPasses(group);
         }
@@ -146,7 +122,7 @@ public class PlansController(AppDbContext db) : ControllerBase
         foreach (var p in plans)
         {
             if (string.IsNullOrEmpty(p.PlanDate) || p.LineId is null or 0 || p.OrderId is null or 0
-                || string.IsNullOrWhiteSpace(p.ItemName) || string.IsNullOrWhiteSpace(p.PartName))
+                || string.IsNullOrWhiteSpace(p.PartName))
                 return BadRequest(new { error = "计划行字段不完整" });
             if (p.PlannedQty is null || p.PlannedQty <= 0)
                 return BadRequest(new { error = "计划生产数必须大于 0" });
@@ -163,7 +139,7 @@ public class PlansController(AppDbContext db) : ControllerBase
             PlanType = p.PlanType == "weekly" ? "weekly" : "daily",
             LineId = p.LineId!.Value,
             OrderId = p.OrderId!.Value,
-            ItemName = p.ItemName!,
+            ItemName = p.ItemName ?? "",
             PartName = p.PartName!,
             SourcePartId = p.SourcePartId,
             MachineNos = JsonSerializer.Serialize(p.MachineNos ?? new()),
@@ -179,7 +155,7 @@ public class PlansController(AppDbContext db) : ControllerBase
 
         // 把状态仍为 received 的涉及订单推进到 scheduled（一次 SaveChanges 原子提交）
         var orderIds = plans.Select(p => p.OrderId!.Value).Distinct().ToList();
-        var toUpdate = await db.Orders.Where(o => orderIds.Contains(o.Id) && o.Status == "received").ToListAsync();
+        var toUpdate = await db.Orders.Where(o => orderIds.Contains(o.Id) && (o.Status == "draft" || o.Status == "received")).ToListAsync();
         foreach (var o in toUpdate) { o.Status = "scheduled"; o.LastUpdatedBy = by; }
 
         await db.SaveChangesAsync();
@@ -200,6 +176,8 @@ public class PlansController(AppDbContext db) : ControllerBase
             return BadRequest(new { error = "工序道次必须大于 0" });
         if (req.Craft is not null && req.Craft.Trim().Length > 0 && !CraftTypes.IsValid(req.Craft.Trim()))
             return BadRequest(new { error = "工序无效（手喷/移印/自动喷/UV）" });
+        if (req.InboundQty is not null && req.InboundQty < 0)
+            return BadRequest(new { error = "实际入库数必须大于或等于 0" });
         if (req.GoodQty is not null && req.GoodQty < 0)
             return BadRequest(new { error = "实际生产数必须 ≥ 0" });
 
@@ -242,9 +220,31 @@ public class PlansController(AppDbContext db) : ControllerBase
             await AutoAdvanceOrderStatus(p.OrderId);
         }
 
+        if (req.InboundQty is not null)
+        {
+            p.InboundQty = req.InboundQty.Value;
+            p.Status = "recorded";
+
+            var related = await db.ProductionPlans
+                .Where(x => x.DeletedAt == null && x.OrderId == p.OrderId && x.PartName == p.PartName)
+                .ToListAsync();
+            var finalStepNo = related.Select(x => x.StepNo).DefaultIfEmpty(p.StepNo).Max();
+            if (p.StepNo != finalStepNo && req.InboundQty.Value > 0)
+                return BadRequest(new { error = "只有最后一道工序可以填写实际入库数" });
+
+            var finalStepPlans = related.Where(x => x.StepNo == finalStepNo).ToList();
+            var finalStepGood = finalStepPlans.Sum(x => x.GoodQty ?? 0);
+            var finalStepInbound = finalStepPlans.Sum(x => x.InboundQty ?? 0);
+            if (finalStepInbound > finalStepGood)
+            {
+                var previousInbound = finalStepInbound - req.InboundQty.Value;
+                return BadRequest(new { error = $"实际入库数超过最后工序累计完成数，当前最多可入库 {Math.Max(0, finalStepGood - previousInbound):N0}" });
+            }
+        }
+
         p.LastModifiedBy = CurrentUser();
         await db.SaveChangesAsync();
-        return Ok(new PlanUpdated(p.Id, p.GoodQty, p.ProductionValue, p.Status, p.PlannedQty, ScheduleCalc.SafeArr(p.MachineNos)));
+        return Ok(new PlanUpdated(p.Id, p.GoodQty, p.InboundQty, p.ProductionValue, p.Status, p.PlannedQty, ScheduleCalc.SafeArr(p.MachineNos)));
     }
 
     // 解析改值留痕 JSON 为列表（失败返回空），追加后再序列化
@@ -262,7 +262,7 @@ public class PlansController(AppDbContext db) : ControllerBase
     {
         // 订单含明细行+部位需求（按真实采购数量逐部位判完工，木桶逻辑）
         var order = await db.Orders
-            .Include(o => o.Lines).ThenInclude(l => l.PartQtys)
+            .Include(o => o.PartQtys)
             .FirstOrDefaultAsync(o => o.Id == orderId);
         if (order is null || order.Status is "completed" or "archived") return;
 
@@ -276,14 +276,14 @@ public class PlansController(AppDbContext db) : ControllerBase
 
         // 各(子件,部位)累计已录入库 = Σ goodQty（按部位名聚合）
         var recByPart = plans
-            .GroupBy(p => (p.ItemName, p.PartName))
+            .GroupBy(p => p.PartName)
             .ToDictionary(g => g.Key, g => g.Sum(p => p.GoodQty ?? 0));
 
         // 订单真实需求：每个明细行下每个部位的采购数量。完工=每个有需求的部位累计入库 ≥ 需求。
-        var parts = order.Lines
-            .SelectMany(l => l.PartQtys.Select(q => (
+        var parts = order.PartQtys
+            .Select(q => (
                 Demand: q.Qty,
-                Recorded: recByPart.TryGetValue((l.ItemName, q.PartName), out var r) ? r : 0)))
+                Recorded: recByPart.TryGetValue(q.PartName, out var r) ? r : 0))
             .ToList();
 
         if (RecordingCalc.IsOrderComplete(parts)) order.Status = "completed";

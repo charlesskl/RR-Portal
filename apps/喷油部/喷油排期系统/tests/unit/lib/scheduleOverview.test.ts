@@ -43,7 +43,8 @@ describe("buildOverviewGrid", () => {
   ];
   const mk = (o: Partial<OverviewPlan>): OverviewPlan => ({
     id: 1, lineId: 1, date: "2026-06-23", orderId: 1, productNo: "P1", itemName: "兔子",
-    partName: "头", stepNo: 1, craft: "自动喷", plannedQty: 1000, machineNos: [], workerCount: 1, ...o,
+    partName: "头", stepNo: 1, craft: "自动喷", plannedQty: 1000, machineNos: [], workerCount: 1,
+    goodQty: null, inboundQty: null, remark: null, externalOrderNo: "ORDER-1", ...o,
   });
 
   it("按 (日期,拉别) 分格，同格累加、计数", () => {

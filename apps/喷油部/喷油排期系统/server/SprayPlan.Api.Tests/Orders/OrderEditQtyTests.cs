@@ -21,7 +21,7 @@ public class OrderEditQtyTests : IAsyncLifetime
         var r = await _c.PostAsJsonAsync("/api/products", new
         {
             productNo = no, customerName = "ZURU",
-            items = new[] { new { itemName = "兔子", parts = new[] { new { partName = "头", unitCost = 1.0 } } } }
+            parts = new[] { new { partName = "头", unitCost = 1.0 } }
         });
         r.EnsureSuccessStatusCode();
         return (await r.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetInt32();
@@ -32,7 +32,7 @@ public class OrderEditQtyTests : IAsyncLifetime
         var r = await _c.PostAsJsonAsync("/api/orders", new
         {
             externalOrderNo = orderNo, productId,
-            lines = new[] { new { itemName = "兔子", partQtys = new[] { new { partName = "头", qty = 100 } } } }
+            partQtys = new[] { new { partName = "头", qty = 100 } }
         });
         r.EnsureSuccessStatusCode();
         return (await r.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetInt32();
@@ -42,7 +42,7 @@ public class OrderEditQtyTests : IAsyncLifetime
     private async Task<int> FirstPartQtyIdAsync(int oid)
     {
         var d = await (await _c.GetAsync($"/api/orders/{oid}")).Content.ReadFromJsonAsync<JsonElement>();
-        return d.GetProperty("lines")[0].GetProperty("partQtys")[0].GetProperty("id").GetInt32();
+        return d.GetProperty("partQtys")[0].GetProperty("id").GetInt32();
     }
 
     [Fact]
@@ -54,12 +54,12 @@ public class OrderEditQtyTests : IAsyncLifetime
         var qid = await FirstPartQtyIdAsync(oid);
 
         var r = await _c.PatchAsJsonAsync($"/api/orders/{oid}",
-            new { lines = new[] { new { partQtys = new[] { new { id = qid, qty = 555 } } } } });
+            new { partQtys = new[] { new { id = qid, qty = 555 } } });
         Assert.Equal(HttpStatusCode.OK, r.StatusCode);
 
         // 数量已落库
         var d = await (await _c.GetAsync($"/api/orders/{oid}")).Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal(555, d.GetProperty("lines")[0].GetProperty("partQtys")[0].GetProperty("qty").GetInt32());
+        Assert.Equal(555, d.GetProperty("partQtys")[0].GetProperty("qty").GetInt32());
     }
 
     [Fact]
@@ -76,7 +76,7 @@ public class OrderEditQtyTests : IAsyncLifetime
         })).EnsureSuccessStatusCode();
 
         var r = await _c.PatchAsJsonAsync($"/api/orders/{oid}",
-            new { lines = new[] { new { partQtys = new[] { new { id = qid, qty = 777 } } } } });
+            new { partQtys = new[] { new { id = qid, qty = 777 } } });
         Assert.Equal(HttpStatusCode.BadRequest, r.StatusCode);
     }
 
@@ -130,7 +130,7 @@ public class OrderEditQtyTests : IAsyncLifetime
         });
 
         var r = await _c.PatchAsJsonAsync($"/api/orders/{oid}",
-            new { lines = new[] { new { partQtys = new[] { new { id = qid, qty = 888 } } } } });
+            new { partQtys = new[] { new { id = qid, qty = 888 } } });
         Assert.Equal(HttpStatusCode.BadRequest, r.StatusCode);
     }
 }

@@ -28,28 +28,26 @@ public class PlansScheduleApiTests : IAsyncLifetime
         var resp = await _client.PostAsJsonAsync("/api/products", new
         {
             productNo = "G1", customerName = "ZURU",
-            items = new[] { new { itemName = "兔子", parts = new[] { new { partName = "头", unitCost = 1.0 } } } }
+            parts = new[] { new { partName = "头", unitCost = 1.0 } }
         });
         resp.EnsureSuccessStatusCode();
         var pid = (await resp.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetInt32();
         var detail = await (await _client.GetAsync($"/api/products/{pid}")).Content.ReadFromJsonAsync<JsonElement>();
-        var item = detail.GetProperty("items")[0];
-        var itemId = item.GetProperty("id").GetInt32();
-        var partId = item.GetProperty("parts")[0].GetProperty("id").GetInt32();
+        var partId = detail.GetProperty("parts")[0].GetProperty("id").GetInt32();
         (await _client.PatchAsJsonAsync($"/api/products/{pid}/parts/{partId}",
             new { dailyCapacity = 50, productionMode = "machine", stdMachineCount = 1 })).EnsureSuccessStatusCode();
-        return (pid, itemId);
+        return (pid, 0);
     }
 
     // 建订单(子件兔子·部位头 需求100)，返回订单 id
     private async Task<int> CreateOrderAsync(string no, int pid, int itemId)
     {
         var detail = await (await _client.GetAsync($"/api/products/{pid}")).Content.ReadFromJsonAsync<JsonElement>();
-        var partId = detail.GetProperty("items")[0].GetProperty("parts")[0].GetProperty("id").GetInt32();
+        var partId = detail.GetProperty("parts")[0].GetProperty("id").GetInt32();
         var r = await _client.PostAsJsonAsync("/api/orders", new
         {
             externalOrderNo = no, productId = pid,
-            lines = new[] { new { itemName = "兔子", sourceItemId = itemId, partQtys = new[] { new { partName = "头", sourcePartId = partId, qty = 100 } } } }
+            partQtys = new[] { new { partName = "头", sourcePartId = partId, qty = 100 } }
         });
         r.EnsureSuccessStatusCode();
         return (await r.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetInt32();

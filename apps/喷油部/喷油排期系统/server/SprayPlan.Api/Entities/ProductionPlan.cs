@@ -28,6 +28,7 @@ public class ProductionPlan
 
     // 实绩维度（第7阶段写入）
     public int? GoodQty { get; set; }
+    public int? InboundQty { get; set; }
     public int? ReportedQty { get; set; }   // 员工报数（实际生产数）
     public int DefectQty { get; set; }
     public double WorkHours { get; set; } = 11;

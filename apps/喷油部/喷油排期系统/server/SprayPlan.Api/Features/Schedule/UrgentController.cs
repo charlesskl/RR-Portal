@@ -34,12 +34,12 @@ public class UrgentController(AppDbContext db) : ControllerBase
     [HttpGet("orders")]
     public async Task<IActionResult> UrgentOrders()
     {
-        var statuses = new[] { "received", "scheduled", "in_production" };
+        var statuses = new[] { "draft", "received", "scheduled", "in_production" };
         var orders = await db.Orders
             .Where(o => o.IsUrgent && statuses.Contains(o.Status))
             .OrderByDescending(o => o.Id)
-            .Include(o => o.Product!).ThenInclude(p => p.Items).ThenInclude(i => i.Parts)
-            .Include(o => o.Lines).ThenInclude(l => l.PartQtys)
+            .Include(o => o.Product!).ThenInclude(p => p.Parts)
+            .Include(o => o.PartQtys)
             .Include(o => o.Plans.Where(p => p.DeletedAt == null))
             .ToListAsync();
 

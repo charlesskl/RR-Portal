@@ -25,7 +25,8 @@ public class InventoryApiTests : IAsyncLifetime
         => (await _client.PostAsJsonAsync("/api/auth/login", new { username = u, password = p })).EnsureSuccessStatusCode();
 
     // 种 1 产品 + 1 订单
-    // 部位"耳朵"：2 条实绩行（累计良品 195），无流水 → 成品=195、散件=0
+    // 部位"耳朵"：三道工序完成 8000/6000/5000，最后工序入库 4800
+    // → 成品=4800、车间存数=200、工序半成品(散件)=2000+1000=3000
     // 部位"身体"：1 条实绩行（良品 100）+ owner 出账 -20 + 散件入账 30 → 成品=80、散件=30
     private async Task SeedInventoryFixture()
     {
@@ -39,15 +40,16 @@ public class InventoryApiTests : IAsyncLifetime
         var order = new Order { ExternalOrderNo = "ZWZ001", ProductId = prod.Id, OrderDate = now, Status = "in_production", CreatedBy = "admin", CreatedAt = now, UpdatedAt = now };
         db.Orders.Add(order); await db.SaveChangesAsync();
 
-        // 部位"耳朵"：2 条实绩，无流水。报数 130+85=215、入库 120+75=195 → 成品195、车间存数20
+        // 部位"耳朵"：按 StepNo 判断工序先后；只有最后工序的入库计入成品。
         db.ProductionPlans.AddRange(
-            new ProductionPlan { PlanDate = now, LineId = 1, OrderId = order.Id, ItemName = "兔子", PartName = "耳朵", PlannedQty = 100, GoodQty = 120, ReportedQty = 130, CreatedBy = "admin", CreatedAt = now, LastModifiedAt = now },
-            new ProductionPlan { PlanDate = now, LineId = 1, OrderId = order.Id, ItemName = "兔子", PartName = "耳朵", PlannedQty = 100, GoodQty = 75, ReportedQty = 85, CreatedBy = "admin", CreatedAt = now, LastModifiedAt = now }
+            new ProductionPlan { PlanDate = now, LineId = 1, OrderId = order.Id, ItemName = "兔子", PartName = "耳朵", StepNo = 1, PlannedQty = 8000, GoodQty = 8000, CreatedBy = "admin", CreatedAt = now, LastModifiedAt = now },
+            new ProductionPlan { PlanDate = now, LineId = 1, OrderId = order.Id, ItemName = "兔子", PartName = "耳朵", StepNo = 2, PlannedQty = 6000, GoodQty = 6000, CreatedBy = "admin", CreatedAt = now, LastModifiedAt = now },
+            new ProductionPlan { PlanDate = now, LineId = 1, OrderId = order.Id, ItemName = "兔子", PartName = "耳朵", StepNo = 3, PlannedQty = 5000, GoodQty = 5000, InboundQty = 4800, CreatedBy = "admin", CreatedAt = now, LastModifiedAt = now }
         );
 
         // 部位"身体"：1 条实绩 + 2 条流水（owner 出账 -20 + 散件入账 30）
         db.ProductionPlans.Add(
-            new ProductionPlan { PlanDate = now, LineId = 1, OrderId = order.Id, ItemName = "兔子", PartName = "身体", PlannedQty = 100, GoodQty = 100, CreatedBy = "admin", CreatedAt = now, LastModifiedAt = now }
+            new ProductionPlan { PlanDate = now, LineId = 1, OrderId = order.Id, ItemName = "兔子", PartName = "身体", StepNo = 1, PlannedQty = 100, GoodQty = 100, InboundQty = 100, CreatedBy = "admin", CreatedAt = now, LastModifiedAt = now }
         );
         await db.SaveChangesAsync();
 
@@ -74,9 +76,9 @@ public class InventoryApiTests : IAsyncLifetime
         var rows = await _client.GetFromJsonAsync<List<InvRow>>("/api/inventory/query");
         var ear = rows!.Single(r => r.PartName == "耳朵");
         Assert.Equal("11494", ear.ProductNo);
-        Assert.Equal(195, ear.FinishedInStock);   // 120 + 75
-        Assert.Equal(20, ear.WorkshopStock);       // 报数(130+85) − 入库(120+75) = 215 − 195
-        Assert.Equal(0, ear.LooseAvailable);
+        Assert.Equal(4800, ear.FinishedInStock);
+        Assert.Equal(200, ear.WorkshopStock);
+        Assert.Equal(3000, ear.LooseAvailable);
     }
 
     // 验证有流水时 InventoryCalc 公式派生正确（§2.3）

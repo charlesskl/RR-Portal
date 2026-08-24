@@ -32,33 +32,33 @@ public class RecordingController(AppDbContext db) : ControllerBase
             .OrderBy(p => p.LineId).ThenBy(p => p.Id)
             .Include(p => p.Line)
             .Include(p => p.Order!).ThenInclude(o => o.Product)
-            .Include(p => p.Order!).ThenInclude(o => o.Lines).ThenInclude(l => l.PartQtys)
+            .Include(p => p.Order!).ThenInclude(o => o.PartQtys)
             .ToListAsync();
 
         // 余下数 = 总需求 − 该订单该部位全期累计 goodQty
         var orderIds = plans.Select(p => p.OrderId).Distinct().ToList();
         var allRec = await db.ProductionPlans
             .Where(p => p.DeletedAt == null && orderIds.Contains(p.OrderId) && p.PlanDate <= day)
-            .Select(p => new { p.OrderId, p.ItemName, p.PartName, p.PlannedQty, p.GoodQty })
+            .Select(p => new { p.OrderId, p.PartName, p.PlannedQty, p.GoodQty })
             .ToListAsync();
         var plannedMap = new Dictionary<string, int>();
         var recordedMap = new Dictionary<string, int>();
         foreach (var r in allRec)
         {
-            var k = $"{r.OrderId}|{r.ItemName}|{r.PartName}";
+            var k = $"{r.OrderId}|{r.PartName}";
             plannedMap[k] = plannedMap.GetValueOrDefault(k) + r.PlannedQty;
             recordedMap[k] = recordedMap.GetValueOrDefault(k) + (r.GoodQty ?? 0);
         }
 
         var rows = plans.Select(p =>
         {
-            var demand = PartDemandByName(p.Order!.Lines, p.ItemName, p.PartName);
-            var key = $"{p.OrderId}|{p.ItemName}|{p.PartName}";
+            var demand = PartDemandByName(p.Order!.PartQtys, p.PartName);
+            var key = $"{p.OrderId}|{p.PartName}";
             var completed = mode == "actual" ? recordedMap.GetValueOrDefault(key) : plannedMap.GetValueOrDefault(key);
             return new RecordingExport.ExportRow(
                 p.LineId, p.Line!.Name, p.Line.LeaderName, p.Line.CraftType,
                 date, ScheduleCalc.SafeArr(p.MachineNos),
-                "", p.Order.Product!.ProductNo, $"{p.ItemName}{p.PartName}",
+                "", p.Order.Product!.ProductNo, p.PartName,
                 demand, p.WorkerCount, p.WorkHours, p.PlannedQty,
                 RecordingCalc.PartRemainingQty(demand, completed),
                 p.GoodQty ?? 0,                  // 实际生产数 = 当天入库数
@@ -74,7 +74,6 @@ public class RecordingController(AppDbContext db) : ControllerBase
     }
 
     // 按子件名+部位名(快照)求该部位订单需求量
-    static int PartDemandByName(IEnumerable<OrderLine> lines, string itemName, string partName)
-        => lines.Where(l => l.ItemName == itemName)
-            .Sum(l => l.PartQtys.Where(q => q.PartName == partName).Sum(q => q.Qty));
+    static int PartDemandByName(IEnumerable<OrderPartQty> partQtys, string partName)
+        => partQtys.Where(q => q.PartName == partName).Sum(q => q.Qty);
 }

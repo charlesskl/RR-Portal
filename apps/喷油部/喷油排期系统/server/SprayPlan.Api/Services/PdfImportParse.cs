@@ -15,16 +15,16 @@ public static class PdfImportParse
     public record ProductNoMa(string ProductNo, bool IsMa);
 
     /// <summary>PDF 原始明细行：子件名（含后缀）+ 本行数量</summary>
-    public record RawLine(string ItemRaw, int Qty);
+    public record RawLine(string ItemRaw, int Qty, double UnitPrice = 0);
 
     /// <summary>按子件合计后的聚合结果</summary>
-    public record AggItem(string ItemName, int TotalQty, int MergedRows);
+    public record AggItem(string ItemName, int TotalQty, int MergedRows, double UnitPrice);
 
     /// <summary>含原始名+归一名+合计的草稿行，供前端预览和匹配</summary>
-    public record DraftLine(string PdfItemName, string NormalizedName, int TotalQty, int MergedRows);
+    public record DraftLine(string PdfItemName, string NormalizedName, int TotalQty, int MergedRows, double UnitPrice = 0);
 
     /// <summary>匹配产品库后的结果行：MatchedItemName 非 null = 绿（命中），null = 红（未命中）</summary>
-    public record MatchedLine(string PdfItemName, int TotalQty, int MergedRows, string? MatchedItemName);
+    public record MatchedLine(string PdfItemName, int TotalQty, int MergedRows, string? MatchedItemName, double UnitPrice);
 
     // ─────────────────────────────────────────────────────────────────────────
     // 函数 1：ParseProductNoAndMa
@@ -67,6 +67,7 @@ public static class PdfImportParse
         var order = new List<string>();           // 保持首次出现顺序
         var qty   = new Dictionary<string, int>(); // 各子件累计数量
         var cnt   = new Dictionary<string, int>(); // 各子件合并行数
+        var price = new Dictionary<string, double>();
 
         foreach (var r in rows)
         {
@@ -76,12 +77,14 @@ public static class PdfImportParse
                 order.Add(name);
                 qty[name] = 0;
                 cnt[name] = 0;
+                price[name] = r.UnitPrice;
             }
             qty[name] += r.Qty;
             cnt[name] += 1;
+            if (price[name] <= 0 && r.UnitPrice > 0) price[name] = r.UnitPrice;
         }
 
-        return order.Select(n => new AggItem(n, qty[n], cnt[n])).ToList();
+        return order.Select(n => new AggItem(n, qty[n], cnt[n], price[n])).ToList();
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -110,7 +113,8 @@ public static class PdfImportParse
             PdfItemName:    firstRaw[a.ItemName],
             NormalizedName: a.ItemName,
             TotalQty:       a.TotalQty,
-            MergedRows:     a.MergedRows
+            MergedRows:     a.MergedRows,
+            UnitPrice:      a.UnitPrice
         )).ToList();
     }
 
@@ -133,7 +137,8 @@ public static class PdfImportParse
             PdfItemName:      l.PdfItemName,
             TotalQty:         l.TotalQty,
             MergedRows:       l.MergedRows,
-            MatchedItemName:  set.Contains(l.NormalizedName) ? l.NormalizedName : null
+            MatchedItemName:  set.Contains(l.NormalizedName) ? l.NormalizedName : null,
+            UnitPrice:        l.UnitPrice
         )).ToList();
     }
 }

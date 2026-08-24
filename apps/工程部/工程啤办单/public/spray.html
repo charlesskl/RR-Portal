@@ -272,7 +272,7 @@ function renderOrders(orders) {
         <tr class="order-row" onclick="viewOrder(${o.id})">
           <td>${esc(o.workshop||'-')}</td>
           <td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td>
-          <td>-</td><td>-</td>
+          <td>-</td>
           <td>${statusBadge(o.status)} ${o.status === '待生产' ? `<button class="btn btn-warning btn-sm" onclick="event.stopPropagation();setSprayStatus(${o.id},'生产中')"><i class="bi bi-play-fill"></i>开始生产</button>` : ''} ${problemsMap[o.id]?`<span class="badge bg-danger ms-1">${problemsMap[o.id]}问题</span>`:''}</td>
           <td><div class="btn-group btn-group-sm">
             <button class="btn btn-outline-danger" data-order-id="${o.id}" data-order-num="${esc(o.order_number||'')}" onclick="event.stopPropagation();openProblemModalFromBtn(this)" title="问题反馈"><i class="bi bi-exclamation-triangle"></i></button>
@@ -292,7 +292,6 @@ function renderOrders(orders) {
           <td>${esc(it.process||'-')}</td>
           <td>${esc(it.sample_qty||'-')}</td>
           <td>${esc(it.provide_time||'-')}</td>
-          <td>${esc(it.receive_time || o.actual_receive_time || '-')}</td>
           <td>${esc(it.eng_complete_time||'-')}</td>
           <td>${esc(it.delivery_time||'-')}</td>
           <td>${esc(it.engineer||'-')}</td>
@@ -321,7 +320,6 @@ function renderOrders(orders) {
       <thead class="table-dark">
         <tr>
           <th>车间</th><th>客名</th><th>产品名称</th><th>零件名称</th><th>工序</th><th>样板数量</th><th>提供胶件时间</th>
-          <th style="color:#86efac">收到胶件时间</th>
           <th style="color:#f9a8d4">工程需求完成时间</th>
           <th style="color:#fca5a5">喷油收到胶件时间</th>
           <th>工程师</th><th>跟进人</th><th style="color:#86efac">完成时间</th><th>进度</th><th>状态/操作</th>

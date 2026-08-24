@@ -11,6 +11,7 @@ import { REGIONS, REGION_LABELS, regionOf, type Craft, type Region } from '../co
 import type { Quality5sCheck } from '../types/quality5s'
 import { useTableColumnPreferences } from '../composables/useTableColumnPreferences'
 import { resolveFactoryName } from '../utils/factoryName'
+import { normalizeQuality5sHeader, quality5sColumnOf, quality5sImportDate } from '../utils/quality5sExcelImport'
 
 const factories = useFactoriesStore()
 const auth = useAuthStore()
@@ -120,6 +121,34 @@ function blankDraft() {
   }
 }
 const draft = reactive(blankDraft())
+const factorySearch = ref('')
+const factoryPickerOpen = ref(false)
+const selectedFactoryName = computed(() => factories.items.find((factory) => factory.id === draft.factory)?.name ?? '')
+const filteredDraftFactories = computed(() => {
+  const q = normalizeSearch(factorySearch.value)
+  const available = regionFilter.value
+    ? factories.items.filter((factory) => regionOf(factory) === regionFilter.value)
+    : factories.items
+  if (!q) return available.slice(0, 60)
+  return available.filter((factory) => normalizeSearch(factory.name).includes(q)).slice(0, 60)
+})
+
+function selectDraftFactory(id: string, name: string) {
+  draft.factory = id
+  factorySearch.value = name
+  factoryPickerOpen.value = false
+}
+
+function onDraftFactoryInput(event: Event) {
+  const value = (event.target as HTMLInputElement).value
+  factorySearch.value = value
+  factoryPickerOpen.value = true
+  if (selectedFactoryName.value !== value) draft.factory = ''
+}
+
+function closeDraftFactoryPicker() {
+  window.setTimeout(() => { factoryPickerOpen.value = false }, 120)
+}
 const draftSite = computed(() => SCORE_FIELDS.reduce((a, f) => a + (Number((draft as any)[f.key]) || 0), 0))
 const draftFinal = computed(() => draft.ip_applicable
   ? Math.round(((draftSite.value + (Number(draft.ip_score) || 0)) / 110) * 100) + '%'
@@ -144,6 +173,8 @@ async function submit() {
   try {
     await pb.collection('quality_5s_checks').create(payload)
     Object.assign(draft, blankDraft())
+    factorySearch.value = ''
+    factoryPickerOpen.value = false
     showForm.value = false
     await load()
   } finally {
@@ -214,22 +245,19 @@ async function importExcel(ev: Event) {
   const wb = XLSX.read(buf, { cellDates: true })
   const ws = wb.Sheets[wb.SheetNames[0]]
   const aoa = XLSX.utils.sheet_to_json<any[]>(ws, { header: 1, defval: '' })
-  const norm = (s: any) => String(s).replace(/\s+/g, '')
+  const norm = normalizeQuality5sHeader
   // 跳过可能的标题行，定位真正的表头行
   const headerIdx = aoa.findIndex((row) => row.some((c) => ['加工厂名称', '检查日期', '检查类型'].includes(norm(c))))
   if (headerIdx < 0) { alert('未识别到表头(需含「加工厂名称/检查日期」)'); return }
-  const header = aoa[headerIdx].map(norm)
-  const colOf = (...aliases: string[]) => {
-    for (const a of aliases) { const i = header.indexOf(norm(a)); if (i >= 0) return i }
-    return -1
-  }
+  const header = aoa[headerIdx]
+  const colOf = (...aliases: string[]) => quality5sColumnOf(header, ...aliases)
   const idx: Record<string, number> = {
     date: colOf('检查日期'), factory: colOf('加工厂名称', '加工厂'), type: colOf('检查类型'),
     project: colOf('加工项目'), customer: colOf('客户'), inspector: colOf('检查人员'),
     ip: colOf('IP保护得分(NA=不适用;适用)', 'IP保护得分', 'IP控制(如适用)', 'IP控制'), notes: colOf('备注'),
   }
   for (const f of SCORE_FIELDS) idx[f.key] = colOf(f.label, f.label.replace(/\(.*\)/, ''))
-  const toDate = (v: any) => (v instanceof Date ? v.toISOString() : String(v ?? '').trim())
+  const toDate = quality5sImportDate
   const cell = (row: any[], i: number) => (i >= 0 ? row[i] : '')
   const candidates = regionFilter.value
     ? factories.items.filter((factory) => regionOf(factory) === regionFilter.value)
@@ -377,10 +405,28 @@ function exportExcel() {
         <div class="grid">
           <label>检查日期 <input v-model="draft.check_date" type="date" /></label>
           <label>加工厂
-            <select v-model="draft.factory">
-              <option value="">选择工厂</option>
-              <option v-for="f in factories.items" :key="f.id" :value="f.id">{{ f.name }}</option>
-            </select>
+            <div class="factory-picker">
+              <input
+                :value="factorySearch"
+                placeholder="输入工厂名称搜索"
+                autocomplete="off"
+                @focus="factoryPickerOpen = true"
+                @input="onDraftFactoryInput"
+                @blur="closeDraftFactoryPicker"
+              />
+              <div v-if="factoryPickerOpen" class="factory-picker-menu">
+                <button
+                  v-for="factory in filteredDraftFactories"
+                  :key="factory.id"
+                  type="button"
+                  class="factory-picker-option"
+                  @mousedown.prevent="selectDraftFactory(factory.id, factory.name)"
+                >
+                  {{ factory.name }}
+                </button>
+                <div v-if="!filteredDraftFactories.length" class="factory-picker-empty">没有匹配的工厂</div>
+              </div>
+            </div>
           </label>
           <label>检查类型
             <select v-model="draft.check_type">
@@ -418,12 +464,13 @@ function exportExcel() {
           <p class="import-tip">此时尚未写入系统。请检查内容；如有异常行，请取消并修正 Excel 后重新导入。</p>
           <div class="import-table-wrap">
             <table class="import-preview-table">
-              <thead><tr><th>Excel行</th><th>检查日期</th><th>加工厂</th><th>检查类型</th><th>加工项目</th><th>客户</th><th>检查人员</th><th>现场得分</th><th>IP保护</th><th>检查结果</th></tr></thead>
+              <thead><tr><th>Excel行</th><th>检查日期</th><th>加工厂</th><th>检查类型</th><th>加工项目</th><th>客户</th><th>检查人员</th><th v-for="field in SCORE_FIELDS" :key="field.key">{{ field.label }}</th><th>现场得分</th><th>IP保护</th><th>检查结果</th></tr></thead>
               <tbody>
                 <tr v-for="row in importDraftRows" :key="row.rowNo" :class="{ 'import-row-error': row.error || row.saveError }">
                   <td>{{ row.rowNo }}</td><td>{{ row.payload.check_date || '-' }}</td><td>{{ row.factoryName || '-' }}</td>
                   <td>{{ row.payload.check_type || '-' }}</td><td>{{ row.payload.project || '-' }}</td><td>{{ row.payload.customer || '-' }}</td>
                   <td>{{ row.payload.inspector || '-' }}</td>
+                  <td v-for="field in SCORE_FIELDS" :key="field.key">{{ row.payload[field.key] ?? '-' }}</td>
                   <td>{{ SCORE_FIELDS.reduce((sum, field) => sum + (Number(row.payload[field.key]) || 0), 0) }}</td>
                   <td>{{ row.payload.ip_control || 'NA' }}</td><td>{{ row.error || row.saveError || '可导入' }}</td>
                 </tr>
@@ -491,6 +538,12 @@ function exportExcel() {
 .form-card { margin-bottom: 1rem; }
 .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: .8rem; }
 .grid label { display: flex; flex-direction: column; gap: .25rem; font-size: .85rem; }
+.factory-picker { position: relative; }
+.factory-picker > input { width: 100%; }
+.factory-picker-menu { position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 30; max-height: 280px; overflow-y: auto; padding: .3rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); box-shadow: var(--shadow-lg); }
+.factory-picker-option { width: 100%; padding: .55rem .65rem; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text); text-align: left; font-weight: 400; }
+.factory-picker-option:hover { background: var(--primary-soft); color: var(--primary); }
+.factory-picker-empty { padding: .7rem; color: var(--text-soft); text-align: center; }
 .computed { align-self: end; font-size: .9rem; color: var(--text-soft); }
 .computed b { color: var(--primary, #4f46e5); font-size: 1.1rem; }
 .actions { margin-top: .9rem; }
@@ -514,7 +567,7 @@ function exportExcel() {
 .import-dialog-head h3 { margin: 0; }
 .import-tip { color: var(--text-soft); font-size: .88rem; }
 .import-table-wrap { min-height: 0; overflow: auto; }
-.import-preview-table { min-width: 1100px; margin: 0; overflow: visible; }
+.import-preview-table { min-width: 2300px; margin: 0; overflow: visible; }
 .import-preview-table th { position: sticky; top: 0; z-index: 2; }
 .import-preview-table th, .import-preview-table td { text-align: left; white-space: nowrap; }
 .import-row-error td { background: #fff1f2; color: #b91c1c; }

@@ -1,0 +1,141 @@
+name: CPG Data Ops
+
+# 唱片机（cpg / 加工管理）业务数据运维。
+#
+#   mode=check    —— 只读：打印生产 pcba.db 各表行数 + 现有备份列表。
+#   mode=clear    —— 备份 pcba.db → 停 cpg → 清空 records 与 semi_finished_monthly_totals
+#                     （保留 users/locations/materials/suppliers/sticker_types 基础数据）
+#                     → 重启 cpg → 健康检查 + 复核行数。误删可用 rollback。
+#   mode=rollback —— 从最近一次 pcba.db.bak.* 恢复并重启。
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "check(只读) / clear(备份+清业务记录) / rollback(恢复)"
+        type: choice
+        required: true
+        default: check
+        options: [check, clear, rollback]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-cloud
+  queue: max
+  cancel-in-progress: false
+
+jobs:
+  ops:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Validate SSH host fingerprint
+        shell: bash
+        env:
+          CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]]; then
+            echo 'CLOUD_HOST_FINGERPRINT must be a non-empty OpenSSH SHA256 fingerprint.' >&2
+            exit 1
+          fi
+
+      - name: CPG data ops via SSH
+        env:
+          CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+          OPS_MODE: ${{ inputs.mode }}
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
+        with:
+          host: ${{ secrets.CLOUD_HOST }}
+          username: ${{ secrets.CLOUD_USER }}
+          key: ${{ secrets.CLOUD_SSH_KEY }}
+          fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
+          command_timeout: 12m
+          envs: OPS_MODE
+          script: |
+            set -uo pipefail
+            MODE="${OPS_MODE:-check}"
+            cd /opt/rr-portal
+            APP="apps/PMC跟仓管/加工管理"
+            DB="$APP/data/pcba.db"
+            COMPOSE="docker-compose.cloud.yml"
+            ENVF=".env.cloud.production"
+            echo "=================== MODE: $MODE ==================="
+
+            count_db() {
+              python3 - "$1" <<'PY'
+            import sqlite3, sys, os
+            db=sys.argv[1]
+            if not os.path.exists(db):
+                print("  (pcba.db 不存在——容器还没首启?)"); sys.exit(0)
+            con=sqlite3.connect(f"file:{db}?mode=ro",uri=True,timeout=5); cur=con.cursor()
+            tbls=[r[0] for r in cur.execute("select name from sqlite_master where type='table' and name not like 'sqlite_%'").fetchall()]
+            for t in sorted(tbls):
+                try:
+                    n=cur.execute(f'select count(*) from "{t}"').fetchone()[0]
+                    print(f"    {t}: {n}")
+                except Exception as e: print(f"    {t}: ERR {e}")
+            con.close()
+            PY
+            }
+
+            echo "== 生产 pcba.db 现状 =="
+            count_db "$DB"
+            echo "== 现有备份 =="
+            ls -t "$APP/data"/pcba.db.bak.* 2>/dev/null | head -5 || echo "  (无)"
+
+            if [ "$MODE" = "check" ]; then
+              echo "[OK] check 完成（只读）"
+              exit 0
+            fi
+
+            if [ "$MODE" = "rollback" ]; then
+              BAK="$(ls -t "$APP/data"/pcba.db.bak.* 2>/dev/null | head -1)"
+              [ -n "$BAK" ] || { echo "[FAIL] 无备份可回滚" >&2; exit 1; }
+              echo "-- 停 cpg --"; docker compose -f "$COMPOSE" --env-file "$ENVF" stop cpg
+              cp "$BAK" "$DB"; rm -f "$DB-wal" "$DB-shm"
+              docker compose -f "$COMPOSE" --env-file "$ENVF" up -d --force-recreate --no-deps cpg
+              echo "-- 恢复后行数 --"; count_db "$DB"
+              echo "[OK] rollback 完成（来自 $BAK）"; exit 0
+            fi
+
+            # ─── clear ───
+            TS="$(date +%Y%m%d-%H%M%S)"
+            [ -f "$DB" ] || { echo "[FAIL] $DB 不存在" >&2; exit 1; }
+
+            echo "-- 备份 pcba.db --"
+            cp "$DB" "$APP/data/pcba.db.bak.$TS" && echo "  → pcba.db.bak.$TS ($(stat -c%s "$APP/data/pcba.db.bak.$TS") bytes)"
+
+            echo "-- 停 cpg（释放 SQLite 锁）--"
+            docker compose -f "$COMPOSE" --env-file "$ENVF" stop cpg
+
+            echo "-- 清空 records + semi_finished_monthly_totals --"
+            python3 - "$DB" <<'PY'
+            import sqlite3, sys
+            db=sys.argv[1]
+            con=sqlite3.connect(db, timeout=10); cur=con.cursor()
+            for t in ("records", "semi_finished_monthly_totals"):
+                n=cur.execute(f'select count(*) from "{t}"').fetchone()[0]
+                cur.execute(f'delete from "{t}"')
+                print(f"    {t}: 删除 {n} 行")
+            cur.execute("delete from sqlite_sequence where name in ('records','semi_finished_monthly_totals')")
+            con.commit(); con.close()
+            print("  id 自增序列已重置")
+            PY
+            rm -f "$DB-wal" "$DB-shm"
+
+            echo "-- 重启 cpg --"
+            docker compose -f "$COMPOSE" --env-file "$ENVF" up -d --force-recreate --no-deps cpg
+
+            echo "-- 等待健康 --"
+            ok=0
+            for i in $(seq 1 30); do
+              if docker exec rr-portal-cpg-1 curl -sf http://localhost:5011/api/health >/dev/null 2>&1; then
+                ok=1; echo "  healthy after ${i}x3s"; break
+              fi
+              sleep 3
+            done
+            echo "-- 清除后行数 --"; count_db "$DB"
+            [ "$ok" = 1 ] && echo "[OK] clear 完成（备份: pcba.db.bak.$TS）" || { echo "[WARN] 健康检查未通过，检查容器日志；必要时 mode=rollback"; exit 1; }

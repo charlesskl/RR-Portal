@@ -137,6 +137,11 @@ jobs:
                     print(f"  跳过 {name}（product_items 已不存在，视为已应用）"); continue
                 if "add_actual_inbound_qty" in name and "inboundQty" in plans_cols:
                     print(f"  跳过 {name}（inboundQty 已存在，视为已应用）"); continue
+                if "remove_item_layers" in name:
+                    # 历史残留（早前某次半成功的手工迁移）会让 CREATE TABLE new_* 直接失败，先清掉
+                    cur.execute("DROP TABLE IF EXISTS new_product_parts")
+                    cur.execute("DROP TABLE IF EXISTS new_order_part_qtys")
+                    con.commit()
                 print(f"  应用 {name} ...")
                 cur.executescript(open(path, encoding="utf-8").read())
                 con.commit()
@@ -148,11 +153,10 @@ jobs:
             echo "-- 重启 sprayplan --"
             docker compose -f "$COMPOSE" --env-file "$ENVF" up -d --force-recreate --no-deps sprayplan
 
-            echo "-- 等待健康（sprayplan 首启慢，放宽到 3 分钟）--"
+            echo "-- 等待健康（sprayplan 首启慢，放宽到 3 分钟；走 nginx 免认证 health 路径）--"
             ok=0
             for i in $(seq 1 60); do
-              if curl -sf http://localhost:8400/sprayplan/api/health >/dev/null 2>&1 \
-                 || docker exec rr-portal-sprayplan-1 sh -c 'wget -qO- http://127.0.0.1:8400/sprayplan/api/health' >/dev/null 2>&1; then
+              if curl -sf http://localhost/sprayplan/api/health >/dev/null 2>&1; then
                 ok=1; echo "  healthy after ${i}x3s"; break
               fi
               sleep 3

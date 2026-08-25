@@ -1,0 +1,157 @@
+name: SprayPlan DB Ops
+
+# 喷油排期系统（sprayplan）数据库运维。
+# 背景：docker-entrypoint.sh 从不执行 prisma migrate deploy，运行时镜像也不含
+# prisma CLI 和 migrations 目录——含结构迁移的 PR 上线后生产库结构不会更新。
+# PR #530（remove_item_layers + add_actual_inbound_qty）就需要本 workflow 手工补迁移。
+#
+#   mode=check    —— 只读：关键表结构（order_lines/product_items 是否还在、
+#                     production_plans.inboundQty 是否存在）+ 最近 80 行容器日志。
+#   mode=migrate  —— 备份 sprayplan.db → 停 sprayplan → 按顺序执行仓库里
+#                     prisma/migrations/*/migration.sql（跳过已应用的特征）→
+#                     重启 + 健康检查 + 复核结构。
+#   mode=rollback —— 从最近一次 sprayplan.db.bak.* 恢复并重启。
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "check(只读) / migrate(备份+补迁移) / rollback(恢复)"
+        type: choice
+        required: true
+        default: check
+        options: [check, migrate, rollback]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-cloud
+  queue: max
+  cancel-in-progress: false
+
+jobs:
+  ops:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Validate SSH host fingerprint
+        shell: bash
+        env:
+          CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]]; then
+            echo 'CLOUD_HOST_FINGERPRINT must be a non-empty OpenSSH SHA256 fingerprint.' >&2
+            exit 1
+          fi
+
+      - name: SprayPlan DB ops via SSH
+        env:
+          CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+          OPS_MODE: ${{ inputs.mode }}
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
+        with:
+          host: ${{ secrets.CLOUD_HOST }}
+          username: ${{ secrets.CLOUD_USER }}
+          key: ${{ secrets.CLOUD_SSH_KEY }}
+          fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
+          command_timeout: 12m
+          envs: OPS_MODE
+          script: |
+            set -uo pipefail
+            MODE="${OPS_MODE:-check}"
+            cd /opt/rr-portal
+            APP="apps/喷油部/喷油排期系统"
+            DB="$APP/data/sprayplan.db"
+            COMPOSE="docker-compose.cloud.yml"
+            ENVF=".env.cloud.production"
+            echo "=================== MODE: $MODE ==================="
+
+            show_state() {
+              python3 - "$1" <<'PY'
+            import sqlite3, sys, os
+            db=sys.argv[1]
+            if not os.path.exists(db):
+                print("  (sprayplan.db 不存在)"); sys.exit(0)
+            con=sqlite3.connect(f"file:{db}?mode=ro",uri=True,timeout=5); cur=con.cursor()
+            tbls={r[0] for r in cur.execute("select name from sqlite_master where type='table'").fetchall()}
+            print("  product_items 表存在(旧结构):", "product_items" in tbls)
+            print("  order_lines 表存在(旧结构):", "order_lines" in tbls)
+            if "production_plans" in tbls:
+                cols=[r[1] for r in cur.execute("PRAGMA table_info(production_plans)").fetchall()]
+                print("  production_plans.inboundQty 存在(新结构):", "inboundQty" in cols)
+            for t in ("orders","products","production_plans"):
+                if t in tbls:
+                    print(f"    {t}: {cur.execute(f'select count(*) from \"{t}\"').fetchone()[0]} 行")
+            con.close()
+            PY
+            }
+
+            echo "== 生产 sprayplan.db 结构现状 =="
+            show_state "$DB"
+            echo "== 现有备份 =="
+            ls -t "$APP/data"/sprayplan.db.bak.* 2>/dev/null | head -5 || echo "  (无)"
+
+            if [ "$MODE" = "check" ]; then
+              echo "== 容器最近日志（查 Prisma 报错）=="
+              docker logs rr-portal-sprayplan-1 --tail 80 2>&1 | grep -iE 'error|exception|no such|prisma' | tail -20 || echo "  (无明显错误行)"
+              echo "[OK] check 完成（只读）"
+              exit 0
+            fi
+
+            if [ "$MODE" = "rollback" ]; then
+              BAK="$(ls -t "$APP/data"/sprayplan.db.bak.* 2>/dev/null | head -1)"
+              [ -n "$BAK" ] || { echo "[FAIL] 无备份可回滚" >&2; exit 1; }
+              echo "-- 停 sprayplan --"; docker compose -f "$COMPOSE" --env-file "$ENVF" stop sprayplan
+              cp "$BAK" "$DB"; rm -f "$DB-wal" "$DB-shm"
+              docker compose -f "$COMPOSE" --env-file "$ENVF" up -d --force-recreate --no-deps sprayplan
+              echo "-- 恢复后结构 --"; show_state "$DB"
+              echo "[OK] rollback 完成（来自 $BAK）"; exit 0
+            fi
+
+            # ─── migrate ───
+            TS="$(date +%Y%m%d-%H%M%S)"
+            [ -f "$DB" ] || { echo "[FAIL] $DB 不存在" >&2; exit 1; }
+
+            echo "-- 备份 sprayplan.db --"
+            cp "$DB" "$APP/data/sprayplan.db.bak.$TS" && echo "  → sprayplan.db.bak.$TS ($(stat -c%s "$APP/data/sprayplan.db.bak.$TS") bytes)"
+
+            echo "-- 停 sprayplan（释放 SQLite 锁）--"
+            docker compose -f "$COMPOSE" --env-file "$ENVF" stop sprayplan
+
+            echo "-- 按顺序应用 prisma/migrations 里的迁移（幂等跳过）--"
+            python3 - "$DB" "$APP/prisma/migrations" <<'PY'
+            import sqlite3, sys, os, glob
+            db, mdir = sys.argv[1], sys.argv[2]
+            con = sqlite3.connect(db, timeout=15); cur = con.cursor()
+            tbls = {r[0] for r in cur.execute("select name from sqlite_master where type='table'").fetchall()}
+            plans_cols = [r[1] for r in cur.execute("PRAGMA table_info(production_plans)").fetchall()] if "production_plans" in tbls else []
+            for path in sorted(glob.glob(os.path.join(mdir, "*", "migration.sql"))):
+                name = os.path.basename(os.path.dirname(path))
+                if "remove_item_layers" in name and "product_items" not in tbls:
+                    print(f"  跳过 {name}（product_items 已不存在，视为已应用）"); continue
+                if "add_actual_inbound_qty" in name and "inboundQty" in plans_cols:
+                    print(f"  跳过 {name}（inboundQty 已存在，视为已应用）"); continue
+                print(f"  应用 {name} ...")
+                cur.executescript(open(path, encoding="utf-8").read())
+                con.commit()
+            con.close()
+            print("  迁移执行完毕")
+            PY
+            rm -f "$DB-wal" "$DB-shm"
+
+            echo "-- 重启 sprayplan --"
+            docker compose -f "$COMPOSE" --env-file "$ENVF" up -d --force-recreate --no-deps sprayplan
+
+            echo "-- 等待健康 --"
+            ok=0
+            for i in $(seq 1 40); do
+              if curl -sf http://localhost:8400/sprayplan/api/health >/dev/null 2>&1 \
+                 || docker exec rr-portal-sprayplan-1 sh -c 'wget -qO- http://127.0.0.1:8400/sprayplan/api/health' >/dev/null 2>&1; then
+                ok=1; echo "  healthy after ${i}x3s"; break
+              fi
+              sleep 3
+            done
+            echo "-- 迁移后结构 --"; show_state "$DB"
+            [ "$ok" = 1 ] && echo "[OK] migrate 完成（备份: sprayplan.db.bak.$TS）" || { echo "[WARN] 健康检查未通过，检查容器日志；必要时 mode=rollback"; exit 1; }

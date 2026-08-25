@@ -81,10 +81,11 @@ jobs:
             if "production_plans" in tbls:
                 cols=[r[1] for r in cur.execute("PRAGMA table_info(production_plans)").fetchall()]
                 print("  production_plans.inboundQty 存在(新结构):", "inboundQty" in cols)
-            for t in ("orders","products","production_plans"):
+            for t in ("product_parts","product_items","order_part_qtys","order_lines","production_plans"):
                 if t in tbls:
-                    q='select count(*) from "%s"' % t
-                    print("    %s: %d 行" % (t, cur.execute(q).fetchone()[0]))
+                    cols=[r[1] for r in cur.execute("PRAGMA table_info(%s)" % t).fetchall()]
+                    n=cur.execute('select count(*) from "%s"' % t).fetchone()[0]
+                    print("    %s (%d 行): %s" % (t, n, ",".join(cols)))
             con.close()
             PY
             }
@@ -148,6 +149,13 @@ jobs:
             con.close()
             print("  迁移执行完毕")
             PY
+            PYOK=$?
+            if [ "$PYOK" -ne 0 ]; then
+              echo "[FAIL] 迁移脚本执行失败（上方 Traceback），DB 未被改动，正在重启服务并保持旧结构" >&2
+              rm -f "$DB-wal" "$DB-shm"
+              docker compose -f "$COMPOSE" --env-file "$ENVF" up -d --force-recreate --no-deps sprayplan
+              exit 1
+            fi
             rm -f "$DB-wal" "$DB-shm"
 
             echo "-- 重启 sprayplan --"

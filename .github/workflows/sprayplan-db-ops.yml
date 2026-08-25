@@ -142,6 +142,11 @@ jobs:
                     # 历史残留（早前某次半成功的手工迁移）会让 CREATE TABLE new_* 直接失败，先清掉
                     cur.execute("DROP TABLE IF EXISTS new_product_parts")
                     cur.execute("DROP TABLE IF EXISTS new_order_part_qtys")
+                    # 生产库漂移：product_parts 缺 partGroupId（迁移 SELECT 引用它）
+                    pp_cols = [r[1] for r in cur.execute("PRAGMA table_info(product_parts)").fetchall()]
+                    if "partGroupId" not in pp_cols:
+                        cur.execute("ALTER TABLE product_parts ADD COLUMN partGroupId INTEGER NOT NULL DEFAULT 0")
+                        print("  补列 product_parts.partGroupId DEFAULT 0")
                     con.commit()
                 print(f"  应用 {name} ...")
                 cur.executescript(open(path, encoding="utf-8").read())

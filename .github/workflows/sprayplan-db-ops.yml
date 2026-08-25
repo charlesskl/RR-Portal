@@ -121,15 +121,18 @@ jobs:
             echo "-- 停 sprayplan（释放 SQLite 锁）--"
             docker compose -f "$COMPOSE" --env-file "$ENVF" stop sprayplan
 
-            echo "-- 按顺序应用 prisma/migrations 里的迁移（幂等跳过）--"
+            echo "-- 仅应用 PR #530 的两个迁移（幂等跳过；早期迁移系 db push 时代，不能重放）--"
             python3 - "$DB" "$APP/prisma/migrations" <<'PY'
-            import sqlite3, sys, os, glob
+            import sqlite3, sys, os
             db, mdir = sys.argv[1], sys.argv[2]
+            targets = ["20260817000000_remove_item_layers", "20260817090000_add_actual_inbound_qty"]
             con = sqlite3.connect(db, timeout=15); cur = con.cursor()
             tbls = {r[0] for r in cur.execute("select name from sqlite_master where type='table'").fetchall()}
             plans_cols = [r[1] for r in cur.execute("PRAGMA table_info(production_plans)").fetchall()] if "production_plans" in tbls else []
-            for path in sorted(glob.glob(os.path.join(mdir, "*", "migration.sql"))):
-                name = os.path.basename(os.path.dirname(path))
+            for name in targets:
+                path = os.path.join(mdir, name, "migration.sql")
+                if not os.path.exists(path):
+                    print("  [FAIL] 找不到迁移文件 " + path); sys.exit(1)
                 if "remove_item_layers" in name and "product_items" not in tbls:
                     print(f"  跳过 {name}（product_items 已不存在，视为已应用）"); continue
                 if "add_actual_inbound_qty" in name and "inboundQty" in plans_cols:
@@ -145,9 +148,9 @@ jobs:
             echo "-- 重启 sprayplan --"
             docker compose -f "$COMPOSE" --env-file "$ENVF" up -d --force-recreate --no-deps sprayplan
 
-            echo "-- 等待健康 --"
+            echo "-- 等待健康（sprayplan 首启慢，放宽到 3 分钟）--"
             ok=0
-            for i in $(seq 1 40); do
+            for i in $(seq 1 60); do
               if curl -sf http://localhost:8400/sprayplan/api/health >/dev/null 2>&1 \
                  || docker exec rr-portal-sprayplan-1 sh -c 'wget -qO- http://127.0.0.1:8400/sprayplan/api/health' >/dev/null 2>&1; then
                 ok=1; echo "  healthy after ${i}x3s"; break

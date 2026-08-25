@@ -155,4 +155,21 @@ public class OrdersApiTests : IAsyncLifetime
         r.EnsureSuccessStatusCode();
         Assert.Contains("archived", await r.Content.ReadAsStringAsync());
     }
+
+    [Fact]
+    public async Task EmptyRecycleBin_IsAdminOnly_AndPermanentlyDeletesArchivedOrders()
+    {
+        await LoginAsync("clerk", "clerk123");
+        var pid = await CreateProductAsync("EMPTY-ORDER");
+        var oid = await CreateOrderAsync("EMPTY-ORDER-1", pid);
+        (await _client.DeleteAsync($"/api/orders/{oid}")).EnsureSuccessStatusCode();
+        Assert.Equal(HttpStatusCode.Forbidden, (await _client.DeleteAsync("/api/orders/recycle-bin")).StatusCode);
+
+        await LoginAsync("admin", "admin123");
+        var cleared = await _client.DeleteAsync("/api/orders/recycle-bin");
+        cleared.EnsureSuccessStatusCode();
+        var result = await cleared.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(1, result.GetProperty("deleted").GetInt32());
+        Assert.Equal(HttpStatusCode.NotFound, (await _client.GetAsync($"/api/orders/{oid}")).StatusCode);
+    }
 }

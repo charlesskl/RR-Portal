@@ -18,7 +18,7 @@ export type ProductRow = {
   updatedAt: string;
 };
 
-export function ProductsTable({ products }: { products: ProductRow[] }) {
+export function ProductsTable({ products, isAdmin }: { products: ProductRow[]; isAdmin: boolean }) {
   const router = useRouter();
   const [kw, setKw] = useState("");
   const [view, setView] = useState<"normal" | "recycle">("normal");
@@ -47,6 +47,17 @@ export function ProductsTable({ products }: { products: ProductRow[] }) {
     if (res.ok) router.refresh(); else alert("恢复失败，请重试");
   }
 
+  async function emptyRecycleBin() {
+    if (!confirm(`确认永久清空核价回收站？\n\n将删除 ${recycleCount} 个已作废货号；仍被订单引用的货号会自动保留。此操作无法撤销。`)) return;
+    setBusy(true);
+    const res = await apiFetch("/api/products/recycle-bin", { method: "DELETE" });
+    const body = await res.json().catch(() => ({}));
+    setBusy(false);
+    if (!res.ok) return alert(body.error || "清空失败，请重试");
+    if (body.skipped > 0) alert(`已永久删除 ${body.deleted} 个货号；另有 ${body.skipped} 个仍被订单引用，已安全保留。`);
+    router.refresh();
+  }
+
   return (
     <div>
       {/* 搜索 + 回收站入口按钮 */}
@@ -71,7 +82,11 @@ export function ProductsTable({ products }: { products: ProductRow[] }) {
       </div>
 
       {view === "recycle" && (
-        <p className="text-xs text-text-secondary mb-3">🗑 回收站：这里是已作废的产品，可「恢复」回待审核状态。</p>
+        <div className="flex items-center justify-between mb-3">
+          <p className="text-xs text-text-secondary">🗑 回收站：这里是已作废的产品，可「恢复」回待审核状态。</p>
+          {isAdmin && recycleCount > 0 && <button disabled={busy} onClick={emptyRecycleBin}
+            className="text-sm border border-rose/50 text-rose rounded-btn px-3 py-1.5 hover:bg-rose/5 disabled:opacity-50">清空回收站</button>}
+        </div>
       )}
 
       {rows.length === 0 ? (

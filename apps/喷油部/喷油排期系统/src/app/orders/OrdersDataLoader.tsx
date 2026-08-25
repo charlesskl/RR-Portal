@@ -40,7 +40,7 @@ function enrich(row: OrderRow, summary: Summary | undefined, today: string): Ord
   };
 }
 
-export default function OrdersDataLoader({ initialRows, today }: { initialRows: OrderRow[]; today: string }) {
+export default function OrdersDataLoader({ initialRows, today, isAdmin }: { initialRows: OrderRow[]; today: string; isAdmin: boolean }) {
   const [rows, setRows] = useState(initialRows);
   useEffect(() => {
     let active = true;
@@ -54,5 +54,5 @@ export default function OrdersDataLoader({ initialRows, today }: { initialRows: 
     });
     return () => { active = false; };
   }, [initialRows, today]);
-  return <OrdersTable orders={rows} />;
+  return <OrdersTable orders={rows} isAdmin={isAdmin} />;
 }

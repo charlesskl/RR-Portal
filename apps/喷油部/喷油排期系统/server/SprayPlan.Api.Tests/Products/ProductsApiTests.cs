@@ -143,6 +143,32 @@ public class ProductsApiTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task EmptyRecycleBin_DeletesUnusedProducts_AndKeepsReferencedProducts()
+    {
+        await LoginAsync("clerk", "clerk123");
+        var unusedId = await CreateProductAsync("EMPTY-PRODUCT");
+        var usedId = await CreateProductAsync("USED-PRODUCT");
+        var order = await _client.PostAsJsonAsync("/api/orders", new
+        {
+            externalOrderNo = "USED-PRODUCT-ORDER", productId = usedId,
+            partQtys = new[] { new { partName = "头", qty = 10 } }
+        });
+        order.EnsureSuccessStatusCode();
+        (await _client.DeleteAsync($"/api/products/{unusedId}")).EnsureSuccessStatusCode();
+        (await _client.DeleteAsync($"/api/products/{usedId}")).EnsureSuccessStatusCode();
+        Assert.Equal(HttpStatusCode.Forbidden, (await _client.DeleteAsync("/api/products/recycle-bin")).StatusCode);
+
+        await LoginAsync("admin", "admin123");
+        var cleared = await _client.DeleteAsync("/api/products/recycle-bin");
+        cleared.EnsureSuccessStatusCode();
+        var result = await cleared.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(1, result.GetProperty("deleted").GetInt32());
+        Assert.Equal(1, result.GetProperty("skipped").GetInt32());
+        Assert.Equal(HttpStatusCode.NotFound, (await _client.GetAsync($"/api/products/{unusedId}")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await _client.GetAsync($"/api/products/{usedId}")).StatusCode);
+    }
+
+    [Fact]
     public async Task AddPart_Flow()
     {
         await LoginAsync("clerk", "clerk123");

@@ -41,7 +41,7 @@ export default async function OrdersPage() {
   // 首屏只等订单基础列表；排期进度和风险信息由客户端随后补齐。
   const orders = await dotnetGet<OrderListItemDto[]>("/api/orders");
   const rows: OrderRow[] = orders.map((o) => buildOrderRow(o));
-  return <OrdersDataLoader initialRows={rows} today={todayStr} />;
+  return <OrdersDataLoader initialRows={rows} today={todayStr} isAdmin={session.role === "admin"} />;
 }
 
 function buildOrderRow(o: OrderListItemDto): OrderRow {

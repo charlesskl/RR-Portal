@@ -1,14 +1,14 @@
-// 库存查询页 —— 从本地 Prisma 实时计算，不再走 .NET
+// 库存查询页 —— 统一走 .NET 库存服务，确保库存流水与实绩撤销使用同一口径。
 import { getSession } from "@/lib/session";
 import { redirect } from "next/navigation";
-import { queryInventory } from "@/lib/inventory";
-import { InventoryTable } from "./InventoryTable";
+import { dotnetGet } from "@/lib/dotnet";
+import { InventoryTable, type InventoryRow } from "./InventoryTable";
 
 export default async function InventoryPage() {
   const session = await getSession();
   if (!session.userId) redirect("/login");
 
-  const rows = await queryInventory();
+  const rows = await dotnetGet<InventoryRow[]>("/api/inventory/query");
 
   return (
     <div className="bg-white rounded-card border border-app-border p-6 shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
@@ -17,7 +17,7 @@ export default async function InventoryPage() {
           📦 库存查询
         </h1>
         <span className="text-xs text-text-secondary">
-          半成品=各工序间积压合计；成品=最后工序入库累计；车间存数=最后工序完成未入库
+          散件可用=各工序间积压及库存流水；成品=实际入库扣除领用；车间存数=完成未入库
         </span>
       </div>
       <InventoryTable rows={rows} />

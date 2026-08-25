@@ -39,6 +39,11 @@ public class OrderActualsRevokeTests : IAsyncLifetime
                 new ProductionPlan { PlanDate = new DateTime(2026, 8, 17, 0, 0, 0, DateTimeKind.Utc), LineId = lineId, OrderId = order.Id, PartName = "部位A", PlannedQty = 100, GoodQty = 10, InboundQty = 0, Status = "recorded", CreatedBy = "admin", CreatedAt = now, LastModifiedAt = now },
             };
             db.ProductionPlans.AddRange(plans);
+            db.InventoryMoves.Add(new InventoryMove
+            {
+                ProductId = product.Id, PartName = "部位A", OwnerOrderId = order.Id,
+                Delta = -10, Reason = "assembly_pickup", CreatedBy = "admin", CreatedAt = now
+            });
             await db.SaveChangesAsync();
             _orderId = order.Id;
             _secondPlanId = plans[1].Id;
@@ -91,6 +96,7 @@ public class OrderActualsRevokeTests : IAsyncLifetime
                 Assert.Equal("planned", p.Status);
             });
             Assert.Equal("scheduled", (await db.Orders.FindAsync(_orderId))!.Status);
+            Assert.False(await db.InventoryMoves.AnyAsync(move => move.OwnerOrderId == _orderId || move.RefOrderId == _orderId));
         });
     }
 }

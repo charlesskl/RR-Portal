@@ -221,6 +221,15 @@ public class OrdersController(AppDbContext db, PdfStorage pdf) : ControllerBase
         }
         order.LastUpdatedBy = by;
         order.UpdatedAt = now;
+
+        // 库存是由实绩和库存流水共同派生的。撤销实绩时必须同时移除该订单产生/消耗的
+        // 流水，否则实绩已经清空，库存页仍会因流水键残留而显示该货号。
+        var inventoryMoves = await db.InventoryMoves
+            .Where(move => move.OwnerOrderId == id || move.RefOrderId == id)
+            .Where(move => selectedDate == null || move.CreatedAt.Date == selectedDate.Value)
+            .ToListAsync();
+        db.InventoryMoves.RemoveRange(inventoryMoves);
+
         await db.SaveChangesAsync();
         return Ok(new RevokeActualsResult(targets.Count, productionQty, inboundQty, order.Status));
     }
@@ -337,6 +346,32 @@ public class OrdersController(AppDbContext db, PdfStorage pdf) : ControllerBase
         o.LastUpdatedBy = CurrentUser();
         await db.SaveChangesAsync();
         return Ok(new OrderIdStatus(o.Id, o.Status));
+    }
+
+    // DELETE /api/orders/recycle-bin — 永久清空订单回收站（主管专属）
+    [HttpDelete("recycle-bin")]
+    [Authorize(Roles = "admin")]
+    public async Task<IActionResult> EmptyRecycleBin()
+    {
+        var orders = await db.Orders.Where(order => order.Status == "archived").ToListAsync();
+        if (orders.Count == 0) return Ok(new { deleted = 0 });
+
+        var ids = orders.Select(order => order.Id).ToList();
+        var plans = await db.ProductionPlans.Where(plan => ids.Contains(plan.OrderId)).ToListAsync();
+        var moves = await db.InventoryMoves
+            .Where(move => (move.OwnerOrderId != null && ids.Contains(move.OwnerOrderId.Value)) ||
+                           (move.RefOrderId != null && ids.Contains(move.RefOrderId.Value)))
+            .ToListAsync();
+        var partQtys = await db.OrderPartQtys.Where(part => ids.Contains(part.OrderId)).ToListAsync();
+
+        await using var transaction = await db.Database.BeginTransactionAsync();
+        db.InventoryMoves.RemoveRange(moves);
+        db.ProductionPlans.RemoveRange(plans);
+        db.OrderPartQtys.RemoveRange(partQtys);
+        db.Orders.RemoveRange(orders);
+        await db.SaveChangesAsync();
+        await transaction.CommitAsync();
+        return Ok(new { deleted = orders.Count });
     }
 
     // ═══════════════════════════════════════════════════════════════════════

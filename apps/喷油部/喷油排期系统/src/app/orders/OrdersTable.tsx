@@ -14,7 +14,7 @@ import CompletePendingDialog from "./CompletePendingDialog";
 const EMPTY: OrderFilter = { view: "normal", keyword: "", status: "", ma: "", risk: "",
   orderFrom: "", orderTo: "", deliveryFrom: "", deliveryTo: "" };
 
-export default function OrdersTable({ orders }: { orders: OrderRow[] }) {
+export default function OrdersTable({ orders, isAdmin }: { orders: OrderRow[]; isAdmin: boolean }) {
   const router = useRouter();
   const [f, setF] = useState<OrderFilter>(EMPTY);
   const [busy, setBusy] = useState(false);
@@ -43,6 +43,16 @@ export default function OrdersTable({ orders }: { orders: OrderRow[] }) {
     });
     setBusy(false);
     if (res.ok) router.refresh(); else alert("恢复失败，请重试");
+  }
+
+  async function emptyRecycleBin() {
+    if (!confirm(`确认永久清空订单回收站？\n\n将永久删除 ${recycleCount} 张作废订单，以及关联的排期和库存流水。此操作无法撤销。`)) return;
+    setBusy(true);
+    const res = await apiFetch("/api/orders/recycle-bin", { method: "DELETE" });
+    const body = await res.json().catch(() => ({}));
+    setBusy(false);
+    if (!res.ok) return alert(body.error || "清空失败，请重试");
+    router.refresh();
   }
 
   const tab = (v: OrderFilter["view"], label: string, cnt: number) => (
@@ -81,10 +91,12 @@ export default function OrdersTable({ orders }: { orders: OrderRow[] }) {
       </div>
 
       {/* 正常单 / 回收站 */}
-      <div className="flex gap-1 border-b border-app-border-light mb-4">
+      <div className="flex items-center gap-1 border-b border-app-border-light mb-4">
         {tab("normal", "📋 正常单", normalCount)}
         {tab("pending", "🗂️ 待补产品", pendingCount)}
         {tab("recycle", "🗑 回收站", recycleCount)}
+        {f.view === "recycle" && isAdmin && recycleCount > 0 && <button disabled={busy} onClick={emptyRecycleBin}
+          className="ml-auto mb-1 text-sm border border-rose/50 text-rose rounded-btn px-3 py-1.5 hover:bg-rose/5 disabled:opacity-50">清空回收站</button>}
       </div>
 
       {/* 筛选栏 */}

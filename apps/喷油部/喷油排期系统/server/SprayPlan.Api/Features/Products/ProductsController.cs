@@ -149,6 +149,33 @@ public class ProductsController(AppDbContext db) : ControllerBase
         return Ok(new IdStatus(product.Id, product.Status));
     }
 
+    // DELETE /api/products/recycle-bin — 永久清空核价回收站（主管专属）。
+    // 已被订单引用的产品必须保留，避免破坏历史订单；其余产品连同库存流水一起清除。
+    [HttpDelete("recycle-bin")]
+    [Authorize(Roles = "admin")]
+    public async Task<IActionResult> EmptyRecycleBin()
+    {
+        var archived = await db.Products.Where(product => product.Status == "archived").ToListAsync();
+        if (archived.Count == 0) return Ok(new { deleted = 0, skipped = 0 });
+
+        var archivedIds = archived.Select(product => product.Id).ToList();
+        var referencedIds = await db.Orders
+            .Where(order => order.ProductId != null && archivedIds.Contains(order.ProductId.Value))
+            .Select(order => order.ProductId!.Value)
+            .Distinct()
+            .ToListAsync();
+        var deletable = archived.Where(product => !referencedIds.Contains(product.Id)).ToList();
+        var deletableIds = deletable.Select(product => product.Id).ToList();
+        var moves = await db.InventoryMoves.Where(move => deletableIds.Contains(move.ProductId)).ToListAsync();
+
+        await using var transaction = await db.Database.BeginTransactionAsync();
+        db.InventoryMoves.RemoveRange(moves);
+        db.Products.RemoveRange(deletable);
+        await db.SaveChangesAsync();
+        await transaction.CommitAsync();
+        return Ok(new { deleted = deletable.Count, skipped = referencedIds.Count });
+    }
+
     [HttpPatch("{id:int}/parts")]
     [Authorize(Roles = "clerk,admin")]
     public async Task<IActionResult> SavePricingTable(int id, [FromBody] SavePricingTableRequest req)

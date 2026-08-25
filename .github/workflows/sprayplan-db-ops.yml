@@ -81,7 +81,7 @@ jobs:
             if "production_plans" in tbls:
                 cols=[r[1] for r in cur.execute("PRAGMA table_info(production_plans)").fetchall()]
                 print("  production_plans.inboundQty 存在(新结构):", "inboundQty" in cols)
-            for t in ("product_parts","product_items","order_part_qtys","order_lines","production_plans"):
+            for t in ("product_parts","product_items","order_part_qtys","order_lines","production_plans","inventory_moves"):
                 if t in tbls:
                     cols=[r[1] for r in cur.execute("PRAGMA table_info(%s)" % t).fetchall()]
                     n=cur.execute('select count(*) from "%s"' % t).fetchone()[0]

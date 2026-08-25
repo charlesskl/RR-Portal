@@ -25,7 +25,7 @@ export function normalizeExcelHeader(value: unknown): string {
   return String(value).replace(/\s+/g, '')
 }
 
-/** 先按加工类型与厂区缩小范围，再匹配加工厂简称，避免同名简称冲突。 */
+/** 先按厂区和名称匹配；仅当名称命中多家时，才用加工类型二次区分。 */
 export function resolveQualityInspectionFactory(
   factories: Factory[],
   name: unknown,
@@ -52,7 +52,10 @@ export function resolveQualityInspectionFactory(
   let candidates = factories
   if (region) candidates = candidates.filter((factory) => regionOf(factory) === region)
 
-  // 优先用工厂资料中的「加工类型」与 Excel 值做二次核对。
+  const nameMatch = resolveFactoryName(candidates, name)
+  if (nameMatch.status !== 'ambiguous') return nameMatch
+
+  // 只有重名或简称重复时，才用工厂资料中的「加工类型」与 Excel 值二次区分。
   if (normalizedProcess) {
     const processMatched = candidates.filter((factory) => {
       if (factory.processable_types == null || factory.processable_types === '') return false

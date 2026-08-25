@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { quality5sColumnOf, quality5sImportDate } from '../src/utils/quality5sExcelImport'
+import { resolveQualityInspectionFactory } from '../src/utils/qualityInspectionImport'
+import type { Factory } from '../src/types/factory'
 
 describe('quality 5S Excel import', () => {
   const headers = [
@@ -19,7 +21,28 @@ describe('quality 5S Excel import', () => {
     expect(quality5sColumnOf(headers, '整改及记录管理(10分)')).toBe(7)
   })
 
-  it('keeps an Excel local date on the same calendar day', () => {
-    expect(quality5sImportDate(new Date(2026, 6, 1, 0, 0, 17))).toBe('2026-07-01')
+  it('keeps an Excel formatted date on the same calendar day', () => {
+    expect(quality5sImportDate('2026-07-01')).toBe('2026-07-01')
+  })
+
+  it('uses the processing project to distinguish factories with the same short name', () => {
+    const factories: Factory[] = [
+      { id: 'assembly', name: '东莞市佳兴加工厂', craft: 'assembly', processable_types: '装配加工、成品包装', status: 'active' },
+      { id: 'sewing', name: '湖南省佳兴加工厂', craft: 'sewing', processable_types: '车缝、毛绒', status: 'active' },
+    ]
+
+    expect(resolveQualityInspectionFactory(factories, '佳兴', '装配加工', '')).toMatchObject({
+      status: 'matched',
+      id: 'assembly',
+    })
+  })
+
+  it('keeps an ambiguous result when the processing project cannot distinguish the factories', () => {
+    const factories: Factory[] = [
+      { id: 'one', name: '东莞市佳兴加工厂', craft: 'assembly', processable_types: '装配加工', status: 'active' },
+      { id: 'two', name: '湖南省佳兴加工厂', craft: 'assembly', processable_types: '装配加工', status: 'active' },
+    ]
+
+    expect(resolveQualityInspectionFactory(factories, '佳兴', '装配加工', '')).toMatchObject({ status: 'ambiguous' })
   })
 })

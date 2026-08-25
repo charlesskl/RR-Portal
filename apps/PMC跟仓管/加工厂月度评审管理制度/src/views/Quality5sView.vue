@@ -10,7 +10,7 @@ import { canEditQuality, allowedRegions, canViewCraft } from '../utils/permissio
 import { REGIONS, REGION_LABELS, regionOf, type Craft, type Region } from '../constants/roles'
 import type { Quality5sCheck } from '../types/quality5s'
 import { useTableColumnPreferences } from '../composables/useTableColumnPreferences'
-import { resolveFactoryName } from '../utils/factoryName'
+import { resolveQualityInspectionFactory } from '../utils/qualityInspectionImport'
 import { normalizeQuality5sHeader, quality5sColumnOf, quality5sImportDate } from '../utils/quality5sExcelImport'
 
 const factories = useFactoriesStore()
@@ -242,9 +242,10 @@ async function importExcel(ev: Event) {
   const file = (ev.target as HTMLInputElement).files?.[0]
   if (!file) return
   const buf = await file.arrayBuffer()
-  const wb = XLSX.read(buf, { cellDates: true })
+  // 保留 Excel 单元格显示的日期文本。cellDates:true 在东八区会受历史时区偏移影响，导致日期减一天。
+  const wb = XLSX.read(buf)
   const ws = wb.Sheets[wb.SheetNames[0]]
-  const aoa = XLSX.utils.sheet_to_json<any[]>(ws, { header: 1, defval: '' })
+  const aoa = XLSX.utils.sheet_to_json<any[]>(ws, { header: 1, defval: '', raw: false })
   const norm = normalizeQuality5sHeader
   // 跳过可能的标题行，定位真正的表头行
   const headerIdx = aoa.findIndex((row) => row.some((c) => ['加工厂名称', '检查日期', '检查类型'].includes(norm(c))))
@@ -253,7 +254,7 @@ async function importExcel(ev: Event) {
   const colOf = (...aliases: string[]) => quality5sColumnOf(header, ...aliases)
   const idx: Record<string, number> = {
     date: colOf('检查日期'), factory: colOf('加工厂名称', '加工厂'), type: colOf('检查类型'),
-    project: colOf('加工项目'), customer: colOf('客户'), inspector: colOf('检查人员'),
+    project: colOf('加工项目', '加工类别'), customer: colOf('客户'), inspector: colOf('检查人员'),
     ip: colOf('IP保护得分(NA=不适用;适用)', 'IP保护得分', 'IP控制(如适用)', 'IP控制'), notes: colOf('备注'),
   }
   for (const f of SCORE_FIELDS) idx[f.key] = colOf(f.label, f.label.replace(/\(.*\)/, ''))
@@ -267,13 +268,15 @@ async function importExcel(ev: Event) {
     const fname = String(cell(row, idx.factory) ?? '').trim()
     const dv = cell(row, idx.date)
     if (!fname && !dv) continue // 跳过空行
-    const factoryMatch = resolveFactoryName(candidates, fname)
+    const project = String(cell(row, idx.project) ?? '').trim()
+    // 工厂简称命中多家时，结合 Excel 的加工项目/加工类别与工厂资料中的加工类型区分。
+    const factoryMatch = resolveQualityInspectionFactory(candidates, fname, project, '')
     const payload: Record<string, any> = { created_by: auth.userId ?? undefined }
     if (dv) payload.check_date = toDate(dv)
     if (factoryMatch.status === 'matched') payload.factory = factoryMatch.id
     const str = (i: number) => { const v = cell(row, i); return v == null ? '' : String(v).trim() }
     payload.check_type = str(idx.type)
-    payload.project = str(idx.project)
+    payload.project = project
     payload.customer = str(idx.customer)
     payload.inspector = str(idx.inspector)
     payload.ip_control = str(idx.ip)

@@ -88,6 +88,16 @@ describe('resolveQualityInspectionFactory', () => {
     expect(resolveQualityInspectionFactory(factories, '晨风', '装配', 'hunan')).toMatchObject({ status: 'matched', id: 'hunan-spring' })
   })
 
+  it('does not reject a unique factory when the imported project differs from its configured processing type', () => {
+    const uniqueFactory = [
+      factory('kuailichong', '邵阳快立充电子科技有限公司', 'assembly', 'hunan', '装配加工'),
+      factory('plastic', '冷水江市红飞塑料制品有限公司', 'injection', 'hunan', '塑胶半成品'),
+    ]
+
+    expect(resolveQualityInspectionFactory(uniqueFactory, '快立充', '半成品', 'hunan'))
+      .toMatchObject({ status: 'matched', id: 'kuailichong' })
+  })
+
   it('uses the configured processing type to disambiguate factories with the same abbreviation', () => {
     const sameNameFactories = [
       factory('longxin-plastic', '邵阳县罗城乡隆鑫加工厂', 'injection', 'hunan', '塑胶半成品'),

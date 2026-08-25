@@ -76,9 +76,11 @@ public class InventoryApiTests : IAsyncLifetime
         var rows = await _client.GetFromJsonAsync<List<InvRow>>("/api/inventory/query");
         var ear = rows!.Single(r => r.PartName == "耳朵");
         Assert.Equal("11494", ear.ProductNo);
-        Assert.Equal(4800, ear.FinishedInStock);
+        Assert.Equal("ZWZ001", ear.OrderNos);
+        Assert.Equal(4800, ear.FinishedStock);
         Assert.Equal(200, ear.WorkshopStock);
-        Assert.Equal(3000, ear.LooseAvailable);
+        Assert.Equal(3000, ear.WipTotal);
+        Assert.Equal(new[] { 2000, 1000, 200 }, ear.Steps.Select(s => s.Backlog));
     }
 
     // 验证有流水时 InventoryCalc 公式派生正确（§2.3）
@@ -89,9 +91,10 @@ public class InventoryApiTests : IAsyncLifetime
         var rows = await _client.GetFromJsonAsync<List<InvRow>>("/api/inventory/query");
         // 部位"身体"：cumGood=100, ownerDelta=-20 → FinishedInStock=80；looseDelta=30 → LooseAvailable=30
         var body = rows!.Single(r => r.PartName == "身体");
-        Assert.Equal(80, body.FinishedInStock);
-        Assert.Equal(30, body.LooseAvailable);
+        Assert.Equal(80, body.FinishedStock);
+        Assert.Equal(30, body.WipTotal);
     }
 
-    private record InvRow(int ProductId, string ProductNo, string CustomerName, string ItemName, string PartName, int FinishedInStock, int WorkshopStock, int LooseAvailable);
+    private record InvStep(int StepNo, string Craft, int TotalGood, int Backlog);
+    private record InvRow(int ProductId, string ProductNo, string ItemName, string PartName, string OrderNos, List<InvStep> Steps, int WipTotal, int FinishedStock, int WorkshopStock);
 }

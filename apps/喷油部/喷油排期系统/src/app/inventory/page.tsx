@@ -17,7 +17,7 @@ export default async function InventoryPage() {
           📦 库存查询
         </h1>
         <span className="text-xs text-text-secondary">
-          散件可用=各工序间积压及库存流水；成品=实际入库扣除领用；车间存数=完成未入库
+          半成品=各工序间积压合计；成品=最后工序入库累计；车间存数=最后工序完成未入库
         </span>
       </div>
       <InventoryTable rows={rows} />

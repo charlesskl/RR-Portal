@@ -83,7 +83,8 @@ jobs:
                 print("  production_plans.inboundQty 存在(新结构):", "inboundQty" in cols)
             for t in ("orders","products","production_plans"):
                 if t in tbls:
-                    print(f"    {t}: {cur.execute(f'select count(*) from \"{t}\"').fetchone()[0]} 行")
+                    q='select count(*) from "%s"' % t
+                    print("    %s: %d 行" % (t, cur.execute(q).fetchone()[0]))
             con.close()
             PY
             }

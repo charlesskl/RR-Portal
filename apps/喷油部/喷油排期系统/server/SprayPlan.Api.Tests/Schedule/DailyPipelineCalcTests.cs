@@ -52,9 +52,9 @@ public class DailyPipelineCalcTests
         new(new HashSet<string>(), new HashSet<string>());
 
     // 单部位 2 道（道1自动喷 / 道2移印各日产能 400），1000 件：
-    // 验证 道2 任一天累计 ≤ 道1 同天累计（卡上游），且道2 第1天就能做（当天流转）。
+    // 验证 道2 任一天累计 ≤ 道1 前一天累计（卡上游），当天新产量不能当天流转。
     [Fact]
-    public void Generate_TwoPass_DownstreamNeverExceedsUpstream_SameDayFlow()
+    public void Generate_TwoPass_DownstreamUsesOnlyPriorDayUpstreamOutput()
     {
         var part = new MonthlyScheduleCalc.PartInput(
             SourcePartId: 1, ItemName: "兔子", PartName: "头", TotalDemand: 1000,
@@ -73,18 +73,37 @@ public class DailyPipelineCalcTests
         var step2 = r.Rows.Where(x => x.StepNo == 2).OrderBy(x => x.PlanDate).ToList();
         Assert.Equal(1000, step1.Sum(x => x.PlannedQty));   // 道1 做满
         Assert.Equal(1000, step2.Sum(x => x.PlannedQty));   // 道2 做满
-        // 卡上游：逐日累计，道2 累计 ≤ 道1 累计
+        // 卡上游：逐日累计，道2 当天结束累计 ≤ 道1 前一天结束累计。
         var days = r.Rows.Select(x => x.PlanDate).Distinct().OrderBy(x => x).ToList();
-        int up = 0, down = 0;
+        int up = 0, down = 0, priorUp = 0;
         foreach (var d in days)
         {
             up += step1.Where(x => x.PlanDate == d).Sum(x => x.PlannedQty);
             down += step2.Where(x => x.PlanDate == d).Sum(x => x.PlannedQty);
-            Assert.True(down <= up, $"道2累计{down} 超过 道1累计{up} 于 {d}");
+            Assert.True(down <= priorUp, $"道2累计{down} 超过 道1前一天累计{priorUp} 于 {d}");
+            priorUp = up;
         }
-        // 当天流转：第一天道2 就有产出（>0）
+        // 第一天只有道1；道2至少下一工作日才能开始，并且晚于道1完工。
         var firstDay = days.First();
-        Assert.True(step2.Where(x => x.PlanDate == firstDay).Sum(x => x.PlannedQty) > 0);
+        Assert.Equal(0, step2.Where(x => x.PlanDate == firstDay).Sum(x => x.PlannedQty));
+        Assert.True(string.CompareOrdinal(step2.Max(x => x.PlanDate), step1.Max(x => x.PlanDate)) > 0);
+    }
+
+    [Fact]
+    public void Generate_FastDownstream_IsLimitedByPriorDayAvailableQuantity()
+    {
+        var part = new MonthlyScheduleCalc.PartInput(
+            1, "黄瓜片", "眼扣", 600, 200, 1, "自动喷", false, 2,
+            new List<string> { "自动喷", "移印" });
+        var order = new MonthlyScheduleCalc.OrderInput(10, "2026-07-31", false, new() { part });
+        var lines = new List<MonthlyScheduleCalc.LineInput> {
+            new(1, "自动喷拉", "自动喷", 0), new(2, "移印拉", "移印", 1000),
+        };
+
+        var r = MonthlyScheduleCalc.Generate(new[] { order }, lines, "2026-07-01", 2, Cal());
+        var step2 = r.Rows.Where(row => row.StepNo == 2).OrderBy(row => row.PlanDate).ToList();
+        Assert.Equal(new[] { 200, 200, 200 }, step2.Select(row => row.PlannedQty).ToArray());
+        Assert.Equal("2026-07-02", step2[0].PlanDate);
     }
 
     // 两订单抢同一条移印拉（上限 500/天），各 1 道 500 件，交货日一早一晚：

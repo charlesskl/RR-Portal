@@ -125,7 +125,7 @@ public static class MonthlyScheduleCalc
         int safety = 0;
         const int SafetyMaxWorkdays = 600; // ≈ 2 年半工作日，防死循环
 
-        // 调度顺序：交货日升序 → 订单号 → 部位 → stepNo升序（保证同部位上游先于下游，当天流转）。
+        // 调度顺序：交货日升序 → 订单号 → 部位 → stepNo升序。
         // 排序键均不可变（循环内只改 Done），故循环外排一次即可，避免每个工作日重排。
         var schedulable = tasks
             .Where(t => t.Line is not null)
@@ -135,6 +135,9 @@ public static class MonthlyScheduleCalc
         while (!AllLastDone() && safety++ < SafetyMaxWorkdays)
         {
             var ymd = ScheduleCalc.Ymd(day);
+            // 每天开工前冻结各工序已有产量。后一道只能使用上一道截至前一天已完成的数量，
+            // 不能把上一道今天刚排出的数量当作今天的来料，避免后工序提前完工。
+            var availableAtDayStart = tasks.ToDictionary(task => task, task => task.Done);
             foreach (var t in schedulable)
             {
                 if (t.Done >= t.Demand) continue;
@@ -142,7 +145,9 @@ public static class MonthlyScheduleCalc
                 int byPart = Math.Min(t.DailyCap, t.Demand - t.Done);
                 if (byPart <= 0) continue;
                 int byLine = (t.Unlimited || lineLimit <= 0) ? byPart : Math.Max(0, lineLimit - LoadOf(t.Line.LineId, ymd));
-                int byUp = t.Upstream is null ? byPart : Math.Max(0, t.Upstream.Done - t.Done);
+                int byUp = t.Upstream is null
+                    ? byPart
+                    : Math.Max(0, availableAtDayStart[t.Upstream] - t.Done);
                 int put = Math.Min(Math.Min(byPart, byLine), byUp);
                 if (put <= 0) continue;
 

@@ -1,0 +1,96 @@
+name: SprayPlan Runtime Inspect
+
+# 一次性诊断：确认喷油排期系统（sprayplan）后端进程运行目录、DLL 版本、
+# 源码是否含 SavePricing、是否存在新旧发布目录混用。
+# 第 1-7 节为用户提供的原始命令（逐字执行）；第 8 节为容器内补充检查
+# （sprayplan 跑在 Docker 容器里，宿主机 ps/find 看不到容器内进程与文件）。
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-cloud
+  queue: max
+  cancel-in-progress: false
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Validate SSH host fingerprint
+        shell: bash
+        env:
+          CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]]; then
+            echo 'CLOUD_HOST_FINGERPRINT must be a non-empty OpenSSH SHA256 fingerprint.' >&2
+            exit 1
+          fi
+
+      - name: Run inspect script via SSH
+        env:
+          CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
+        with:
+          host: ${{ secrets.CLOUD_HOST }}
+          username: ${{ secrets.CLOUD_USER }}
+          key: ${{ secrets.CLOUD_SSH_KEY }}
+          fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
+          command_timeout: 8m
+          script: |
+            echo "=== 1. 查找喷油系统进程 ==="
+            ps -ef | grep -E "SprayPlan.Api|dotnet|next-server|next start" | grep -v grep
+
+            echo "=== 2. 查看 5080/8400 端口对应进程 ==="
+            sudo ss -lntp | grep -E ":5080|:8400"
+
+            echo "=== 3. 查看后端进程实际运行目录和程序 ==="
+            PID=$(pgrep -f "SprayPlan.Api" | head -1)
+            echo "后端 PID=$PID"
+            if [ -n "$PID" ]; then
+              sudo readlink -f /proc/$PID/cwd
+              sudo readlink -f /proc/$PID/exe
+              sudo tr '\0' ' ' < /proc/$PID/cmdline
+              echo
+            fi
+
+            echo "=== 4. 查找服务器上的后端源码或发布目录 ==="
+            sudo find /opt /var/www /www /data /home -type f \
+              \( -name "SprayPlan.Api.dll" -o -name "OrdersController.cs" \) \
+              2>/dev/null
+
+            echo "=== 5. 检查运行版本是否支持订单核价保存 ==="
+            sudo grep -R -n \
+              "SavePricing\|同时创建草稿核价\|UnitPrice" \
+              /opt /var/www /www /data /home \
+              --include="ImportDtos.cs" \
+              --include="OrdersController.cs" \
+              --include="ImportClient.tsx" \
+              2>/dev/null | head -100
+
+            echo "=== 6. 检查后端 DLL 更新时间 ==="
+            sudo find /opt /var/www /www /data /home -name "SprayPlan.Api.dll" \
+              -exec ls -lh --time-style=long-iso {} \; 2>/dev/null
+
+            echo "=== 7. 查看可能的服务配置 ==="
+            sudo systemctl list-units --type=service --all | grep -Ei "spray|plan|dotnet"
+
+            echo "=== 8. 容器内补充检查（sprayplan 运行在 Docker 中） ==="
+            echo "--- 8.1 容器进程 ---"
+            docker exec rr-portal-sprayplan-1 ps aux 2>/dev/null | grep -E "dotnet|node" | grep -v grep || echo "(容器无 ps 命令或无匹配)"
+            echo "--- 8.2 容器内 DLL 位置与更新时间 ---"
+            docker exec rr-portal-sprayplan-1 sh -c 'ls -lh /app/publish/SprayPlan.Api.dll 2>/dev/null || find /app -maxdepth 3 -name "SprayPlan.Api.dll" -exec ls -lh {} \;' 2>/dev/null || echo "(读取失败)"
+            echo "--- 8.3 容器内 DLL 是否含 SavePricing 字符串 ---"
+            docker exec rr-portal-sprayplan-1 sh -c 'DLL=$(find /app -maxdepth 3 -name "SprayPlan.Api.dll" | head -1); echo "DLL=$DLL"; grep -c "SavePricing" "$DLL" 2>/dev/null || echo 0' 2>/dev/null || echo "(读取失败)"
+            echo "--- 8.4 宿主机仓库 HEAD 与关键文件时间 ---"
+            cd /opt/rr-portal && git log -1 --format='%h %ci %s' 2>/dev/null
+            ls -lh --time-style=long-iso "apps/喷油部/喷油排期系统/server/SprayPlan.Api/Features/Orders/OrdersController.cs" 2>/dev/null
+            echo "--- 8.5 仓库源码是否含 SavePricing ---"
+            grep -rn "SavePricing" "apps/喷油部/喷油排期系统/server/SprayPlan.Api/Features/Orders/" 2>/dev/null | head -10
+            echo "--- 8.6 是否存在多个发布/检出目录 ---"
+            find /opt /var/www /www /data /home -maxdepth 4 -type d \( -name "*sprayplan*" -o -name "*SprayPlan*" -o -name "*喷油*" \) 2>/dev/null | head -20

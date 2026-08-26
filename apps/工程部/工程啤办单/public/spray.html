@@ -298,7 +298,7 @@ function renderOrders(orders) {
           <td>${esc(it.follower||'-')}</td>
           <td>${idx===0 ? esc(o.completed_date||'-') : ''}</td>
           <td onclick="event.stopPropagation()">
-            ${renderProcessBadges(it, o.id)}
+            ${renderProcessBadges(it, o.id, false, o.status)}
           </td>
           <td>
             ${idx===0 ? `<div class="btn-group btn-group-sm">
@@ -463,7 +463,7 @@ function viewOrder(id) {
           <td>${esc(it.engineer||'-')}</td>
           <td>${esc(it.follower||'-')}</td>
           <td>
-            ${renderProcessBadges(it, order.id, true)}
+            ${renderProcessBadges(it, order.id, true, order.status)}
           </td>
         </tr>`).join('');
 
@@ -540,19 +540,23 @@ function parseProcesses(proc) {
 /** 缓存 item process_status 用于 openProgress 取值，避免 inline JSON */
 const _psCache = {};
 
-/** 渲染工序打勾标签（列表和详情通用） */
-function renderProcessBadges(item, orderId, showDetail) {
+/** 渲染工序打勾标签（列表和详情通用）。orderStatus 非「生产中」时工序标签锁定不可点击。 */
+function renderProcessBadges(item, orderId, showDetail, orderStatus) {
   const procs = parseProcesses(item.process);
   if (!procs.length) return '-';
   const ps = item.process_status || {};
   const cacheKey = orderId + '_' + item.id;
   _psCache[cacheKey] = { ps, process: item.process, name: item.product_name || '' };
   const allDone = procs.every(p => ps[p] && ps[p].done);
+  const locked = orderStatus !== '生产中';
   let html = procs.map(p => {
     const done = ps[p] && ps[p].done;
     if (done) {
       const tip = showDetail ? `<div style="font-size:.65rem;color:#6c757d">${esc(ps[p].done_by||'')} ${esc((ps[p].done_at||'').replace('T',' ').slice(0,16))}</div>` : '';
       return `<span class="proc-done" style="margin-right:4px"><i class="bi bi-check-circle-fill me-1"></i>${esc(p)}</span>${tip}`;
+    }
+    if (locked) {
+      return `<span class="badge bg-secondary" style="margin-right:4px;opacity:.65" title="审核通过并点击「开始生产」后才能登记工序"><i class="bi bi-lock-fill me-1"></i>${esc(p)}</span>`;
     }
     return `<span class="badge bg-secondary" style="margin-right:4px;cursor:pointer" onclick="event.stopPropagation();openProgressCached(${orderId},${item.id})">${esc(p)}</span>`;
   }).join('');

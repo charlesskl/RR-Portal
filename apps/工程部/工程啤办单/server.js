@@ -947,6 +947,11 @@ app.patch('/api/spray/:id/item-progress', (req, res) => {
   const data = loadData();
   const order = data.spray_orders.find(o => o.id === +req.params.id);
   if (!order) return res.status(404).json({ error: '未找到' });
+  // 状态闸门：必须审核通过（待生产）并点击「开始生产」（生产中）后才能登记工序，
+  // 避免未审核订单被车间直接做掉
+  if (order.status !== '生产中') {
+    return res.status(409).json({ error: `当前状态「${order.status}」不可登记工序，请先完成审核并点击「开始生产」` });
+  }
   const { item_id, processes_done, done_by } = req.body;
   if (item_id === undefined || !Array.isArray(processes_done) || !done_by) {
     return res.status(400).json({ error: '参数不完整' });
@@ -967,10 +972,7 @@ app.patch('/api/spray/:id/item-progress', (req, res) => {
     item.progress_by = done_by;
     item.progress_at = now;
   }
-  // 有工序完成且订单仍为待生产 → 自动改为生产中
-  if (order.status === '待生产') {
-    order.status = '生产中';
-  }
+  // 状态闸门已保证此处必为「生产中」（待生产自动转生产中的旧逻辑随之废弃）
   // 所有项目都已完成 → 自动标记订单已完成
   const orderAllDone = items.every(it => it.progress === '已完成');
   if (orderAllDone) {

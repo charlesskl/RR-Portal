@@ -469,24 +469,52 @@ public class OrdersController(AppDbContext db, PdfStorage pdf) : ControllerBase
             if (req.Lines.Any(l => string.IsNullOrWhiteSpace(l.MatchedItemName)))
                 return BadRequest(new { error = "存在未匹配子件，请先处理后再入库" });
 
+            // 货号统一去首尾空格：查询与插入用同一值，避免 "ABC " 查不到已有 "ABC"，
+            // 插入时被 products.productNo 唯一约束顶回 500。
+            var productNo = (req.Head.ProductNo ?? "").Trim();
             var product = await db.Products.Include(p => p.Parts)
-                .FirstOrDefaultAsync(p => p.ProductNo == req.Head.ProductNo && p.Status != "archived");
+                .FirstOrDefaultAsync(p => p.ProductNo == productNo && p.Status != "archived");
             if (product is null)
             {
-                if (!req.SavePricing) return BadRequest(new { error = "款号不存在，请选择保存订单核价" });
-                product = new Product
+                // 唯一约束覆盖回收站：货号在回收站（archived）时直接插入会撞
+                // UNIQUE(products.productNo) → 500。勾选保存核价时把回收站货号
+                // 复活为草稿核价并整体替换为本次导入的部位/单价；否则明确报错。
+                var archived = await db.Products.Include(p => p.Parts)
+                    .FirstOrDefaultAsync(p => p.ProductNo == productNo && p.Status == "archived");
+                if (archived is not null)
                 {
-                    ProductNo = req.Head.ProductNo.Trim(), IterationNo = "V1", Status = "draft",
-                    CreatedBy = CurrentUser(), CreatedAt = now, UpdatedAt = now,
-                    Parts = req.Lines.Select((line, index) => new ProductPart
+                    if (!req.SavePricing)
+                        return Conflict(new { error = "款号在核价回收站中，请勾选「保存核价」重建草稿核价，或先在回收站恢复该款号" });
+                    db.ProductParts.RemoveRange(archived.Parts);
+                    archived.Parts = req.Lines.Select((line, index) => new ProductPart
                     {
                         PartName = line.MatchedItemName.Trim(), PartOrder = index,
                         UnitCost = Math.Max(0, line.UnitPrice), PartGroupId = 0,
-                    }).ToList(),
-                };
-                db.Products.Add(product);
-                await db.SaveChangesAsync();
-                PartProcessRules.AssignGroupIds(product.Parts);
+                    }).ToList();
+                    archived.Status = "draft";
+                    archived.LastUpdatedBy = CurrentUser();
+                    archived.UpdatedAt = now;
+                    await db.SaveChangesAsync();
+                    PartProcessRules.AssignGroupIds(archived.Parts);
+                    product = archived;
+                }
+                else
+                {
+                    if (!req.SavePricing) return BadRequest(new { error = "款号不存在，请选择保存订单核价" });
+                    product = new Product
+                    {
+                        ProductNo = productNo, IterationNo = "V1", Status = "draft",
+                        CreatedBy = CurrentUser(), CreatedAt = now, UpdatedAt = now,
+                        Parts = req.Lines.Select((line, index) => new ProductPart
+                        {
+                            PartName = line.MatchedItemName.Trim(), PartOrder = index,
+                            UnitCost = Math.Max(0, line.UnitPrice), PartGroupId = 0,
+                        }).ToList(),
+                    };
+                    db.Products.Add(product);
+                    await db.SaveChangesAsync();
+                    PartProcessRules.AssignGroupIds(product.Parts);
+                }
             }
             else if (req.SavePricing)
             {

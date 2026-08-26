@@ -148,6 +148,99 @@ public class ImportApiTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.Conflict, r.StatusCode);
     }
 
+    // 种一个回收站（archived）产品，返回产品 id。
+    private async Task<int> SeedArchivedProductAsync(string productNo, params string[] partNames)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var now = DateTime.UtcNow;
+        var p = new Product
+        {
+            ProductNo = productNo, IterationNo = "V1", Status = "archived",
+            CreatedBy = "test", CreatedAt = now, UpdatedAt = now,
+            Parts = partNames.Select((pn, pi) => new ProductPart { PartName = pn, PartOrder = pi }).ToList()
+        };
+        db.Products.Add(p);
+        await db.SaveChangesAsync();
+        return p.Id;
+    }
+
+    // ─── import-confirm 货号在回收站 + 勾选保存核价 → 复活为草稿并替换部位（不再 500）───
+    [Fact]
+    public async Task ImportConfirm_ArchivedProductWithSavePricing_RevivesAsDraft()
+    {
+        await LoginAsync("clerk", "clerk123");
+        var pid = await SeedArchivedProductAsync("77711", "旧部位X", "旧部位Y");
+
+        var req = new
+        {
+            head = new { externalOrderNo = "ORD-ARCH1", orderDate = "2026-08-26", deliveryDate = (string?)null, productNo = "77711", isMa = false },
+            pdfToken = "tok-arch.pdf",
+            asPendingProduct = false,
+            savePricing = true,
+            lines = new[]
+            {
+                new { matchedItemName = "P69雪糕猕猴桃", totalQty = 100, unitPrice = 0.14 },
+                new { matchedItemName = "P03培根", totalQty = 200, unitPrice = 0.03 },
+            }
+        };
+        var r = await _client.PostAsJsonAsync("/api/orders/import-confirm", req);
+        Assert.Equal(HttpStatusCode.Created, r.StatusCode);
+
+        var o = await LoadOrderAsync("ORD-ARCH1");
+        Assert.Equal(pid, o.ProductId);
+        Assert.Equal(2, o.PartQtys.Count);
+
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var product = await db.Products.Include(p => p.Parts).FirstAsync(p => p.Id == pid);
+        Assert.Equal("draft", product.Status);
+        // 旧部位被替换为本次导入的部位与单价
+        Assert.DoesNotContain(product.Parts, p => p.PartName == "旧部位X");
+        Assert.Equal(2, product.Parts.Count);
+        Assert.Equal(0.14, product.Parts.Single(p => p.PartName == "P69雪糕猕猴桃").UnitCost);
+    }
+
+    // ─── import-confirm 货号在回收站 + 未勾选保存核价 → 409 明确报错（不再 500）───
+    [Fact]
+    public async Task ImportConfirm_ArchivedProductWithoutSavePricing_Returns409()
+    {
+        await LoginAsync("clerk", "clerk123");
+        await SeedArchivedProductAsync("77843", "部位A");
+        var req = new
+        {
+            head = new { externalOrderNo = "ORD-ARCH2", orderDate = "2026-08-26", deliveryDate = (string?)null, productNo = "77843", isMa = false },
+            pdfToken = "tok.pdf",
+            asPendingProduct = false,
+            savePricing = false,
+            lines = new[] { new { matchedItemName = "部位A", totalQty = 10, unitPrice = 1.0 } }
+        };
+        var r = await _client.PostAsJsonAsync("/api/orders/import-confirm", req);
+        Assert.Equal(HttpStatusCode.Conflict, r.StatusCode);
+        var body = await r.Content.ReadAsStringAsync();
+        Assert.Contains("回收站", body);
+    }
+
+    // ─── import-confirm 货号带首尾空格 → 归一后命中已有产品，不重复插入 ───
+    [Fact]
+    public async Task ImportConfirm_ProductNoWithWhitespace_MatchesExisting()
+    {
+        await LoginAsync("clerk", "clerk123");
+        var pid = await SeedProductAsync("TESTWS", ("兔子", new[] { "头" }));
+        var req = new
+        {
+            head = new { externalOrderNo = "ORD-WS", orderDate = "2026-06-10", deliveryDate = (string?)null, productNo = " TESTWS ", isMa = false },
+            pdfToken = "tok.pdf",
+            asPendingProduct = false,
+            savePricing = false,
+            lines = new[] { new { matchedItemName = "头", totalQty = 50, unitPrice = 1.0 } }
+        };
+        var r = await _client.PostAsJsonAsync("/api/orders/import-confirm", req);
+        Assert.Equal(HttpStatusCode.Created, r.StatusCode);
+        var o = await LoadOrderAsync("ORD-WS");
+        Assert.Equal(pid, o.ProductId);
+    }
+
     [Fact]
     public async Task ImportConfirm_AsViewer_Forbidden()
     {

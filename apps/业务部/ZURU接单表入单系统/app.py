@@ -199,24 +199,34 @@ def _list_dir(path):
 
 def _translate_country(en_name):
     """英文国家名 → 中文（含洲）
-    支持逗号分隔的多国写法（如 "Taiwan, Hong Kong"），逐段翻译后拼接。
-    精确匹配 → 忽略大小写匹配 → 保留原文。
+
+    先整串匹配（官方名常带逗号，如 "Virgin Islands, British"、
+    "Congo, The Democratic Republic of the"，必须先整串试，否则会被逗号拆开）；
+    再按逗号拆分多国写法（如 "Taiwan, Hong Kong"），逐段翻译后拼接。
+    匹配顺序：精确 → 忽略大小写 → 保留原文。
     """
     if not en_name:
         return ''
-    parts = [p.strip() for p in str(en_name).split(',') if p.strip()]
+    s = str(en_name).strip()
+    if not s:
+        return ''
+
+    def _lookup(key):
+        hit = COUNTRY_MAP.get(key)
+        if hit:
+            return hit
+        for k, v in COUNTRY_MAP.items():
+            if k.lower() == key.lower():
+                return v
+        return None
+
+    whole = _lookup(s)
+    if whole:
+        return whole
+    parts = [p.strip() for p in s.split(',') if p.strip()]
     if not parts:
         return ''
-    out = []
-    for p in parts:
-        cn = COUNTRY_MAP.get(p)
-        if not cn:
-            for k, v in COUNTRY_MAP.items():
-                if k.lower() == p.lower():
-                    cn = v
-                    break
-        out.append(cn or p)
-    return ', '.join(out)
+    return ', '.join(_lookup(p) or p for p in parts)
 
 
 def _date_serial(dt):
@@ -422,6 +432,31 @@ def _generate_excel(parsed_orders, custom_date=None):
 def health():
     """Docker/nginx健康检查端点"""
     return jsonify({'status': 'ok'})
+
+
+@app.route('/api/translate')
+def translate_api():
+    """只读自检：英文国家名 → 中文（含洲）。
+
+    用于部署后在线核对 country_map 是否已被进程加载（本模块的 COUNTRY_MAP
+    在启动时读入内存，数据文件更新必须重启才生效）。不写任何数据。
+    """
+    name = (request.args.get('name') or '').strip()
+    if not name:
+        return jsonify({'ok': False, 'error': '缺少 name 参数',
+                        'map_size': len(COUNTRY_MAP)}), 400
+    out = _translate_country(name)
+    # 输出段含中文字符才算翻译成功；原样保留的英文段即为未翻译
+    untranslated = [seg for seg in out.split(', ')
+                    if seg and not re.search(r'[一-鿿]', seg)]
+    return jsonify({
+        'ok': True,
+        'input': name,
+        'output': out,
+        'fully_translated': not untranslated,
+        'untranslated': untranslated,
+        'map_size': len(COUNTRY_MAP),
+    })
 
 
 @app.route('/')

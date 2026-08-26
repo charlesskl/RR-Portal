@@ -16,11 +16,15 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "check(只读) / migrate(备份+补迁移) / rollback(恢复)"
+        description: "check(只读) / migrate(备份+补迁移) / rollback(恢复) / query(只读 SELECT)"
         type: choice
         required: true
         default: check
-        options: [check, migrate, rollback]
+        options: [check, migrate, rollback, query]
+      sql:
+        description: "mode=query 时执行的 SELECT 语句（仅限只读 SELECT）"
+        type: string
+        required: false
 
 permissions:
   contents: read
@@ -50,6 +54,7 @@ jobs:
         env:
           CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
           OPS_MODE: ${{ inputs.mode }}
+          OPS_SQL: ${{ inputs.sql }}
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         with:
           host: ${{ secrets.CLOUD_HOST }}
@@ -57,7 +62,7 @@ jobs:
           key: ${{ secrets.CLOUD_SSH_KEY }}
           fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
           command_timeout: 12m
-          envs: OPS_MODE
+          envs: OPS_MODE,OPS_SQL
           script: |
             set -uo pipefail
             MODE="${OPS_MODE:-check}"
@@ -99,6 +104,32 @@ jobs:
               echo "== 容器最近日志（查 Prisma 报错）=="
               docker logs rr-portal-sprayplan-1 --tail 80 2>&1 | grep -iE 'error|exception|no such|prisma' | tail -20 || echo "  (无明显错误行)"
               echo "[OK] check 完成（只读）"
+              exit 0
+            fi
+
+            if [ "$MODE" = "query" ]; then
+              echo "== 只读查询 =="
+              python3 - "$DB" "$OPS_SQL" <<'PY'
+            import sqlite3, sys, re
+            db, sql = sys.argv[1], (sys.argv[2] or "").strip().rstrip(";")
+            if not re.match(r"(?is)^\s*select\b", sql) or ";" in sql:
+                print("[FAIL] 仅允许单条只读 SELECT 语句"); sys.exit(1)
+            con = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=10)
+            cur = con.cursor()
+            try:
+                cur.execute(sql)
+                cols = [d[0] for d in cur.description] if cur.description else []
+                print("  列:", " | ".join(cols))
+                rows = cur.fetchmany(200)
+                for r in rows:
+                    print("  " + " | ".join("NULL" if v is None else str(v) for v in r))
+                print(f"  (共返回 {len(rows)} 行，最多显示 200 行)")
+            except Exception as e:
+                print("[FAIL]", e); sys.exit(1)
+            finally:
+                con.close()
+            PY
+              echo "[OK] query 完成（只读）"
               exit 0
             fi
 

@@ -183,6 +183,7 @@ function deleteOrder(type, id) {
   data[`${type}_orders`] = data[`${type}_orders`].filter(o => o.id !== +id);
   data[`${type}_items`]  = data[`${type}_items`].filter(i => i.order_id !== +id);
   saveData(data);
+  if (type === 'assembly') removeAsmImages(id);
 }
 
 function updateStatus(type, id, status) {
@@ -285,6 +286,56 @@ function pinKey(req, name) {
 // ─── Health Check ────────────────────────────────────────────────────────────
 app.get('/health', (req, res) => res.json({ status: 'ok', service: 'rr-production' }));
 
+// ─── 夹具申请单图片（文件存储在 data/assembly-images/<订单id>/，JSON 只存文件名） ───
+const ASM_IMG_DIR = path.join(DATA_DIR, 'assembly-images');
+const ASM_IMG_MAX_COUNT = 10;          // 每单最多 10 张
+const ASM_IMG_MAX_BYTES = 5 * 1024 * 1024; // 单张解码后 ≤5MB（前端已压缩到 ~400KB）
+
+// keepList=要保留的已有文件名（非数组=保留全部旧图），newImages=base64 dataURL 数组。
+// 返回最终文件名列表；不在列表内的旧文件一并删除。
+function persistAsmImages(orderId, keepList, newImages, existingList) {
+  const dir = path.join(ASM_IMG_DIR, String(orderId));
+  fs.mkdirSync(dir, { recursive: true });
+  const keep = Array.isArray(keepList) ? keepList : (existingList || []);
+  const final = [];
+  keep.forEach(n => {
+    if (typeof n === 'string' && /^[\w.-]+$/.test(n) && final.length < ASM_IMG_MAX_COUNT &&
+        fs.existsSync(path.join(dir, n))) {
+      final.push(n);
+    }
+  });
+  (Array.isArray(newImages) ? newImages : []).forEach(d => {
+    if (final.length >= ASM_IMG_MAX_COUNT) return;
+    const m = /^data:image\/(png|jpe?g|webp|gif);base64,([A-Za-z0-9+/=]+)$/.exec(typeof d === 'string' ? d : '');
+    if (!m) return;
+    const buf = Buffer.from(m[2], 'base64');
+    if (!buf.length || buf.length > ASM_IMG_MAX_BYTES) return;
+    const ext = m[1] === 'jpeg' ? 'jpg' : m[1];
+    const name = `${Date.now()}-${crypto.randomBytes(4).toString('hex')}.${ext}`;
+    fs.writeFileSync(path.join(dir, name), buf);
+    final.push(name);
+  });
+  fs.readdirSync(dir).forEach(f => {
+    if (!final.includes(f)) fs.unlinkSync(path.join(dir, f));
+  });
+  return final;
+}
+
+function removeAsmImages(orderId) {
+  fs.rmSync(path.join(ASM_IMG_DIR, String(orderId)), { recursive: true, force: true });
+}
+
+// 读取订单图片（GET 无需 X-User；文件名由服务端生成，正则兜底防穿越）
+app.get('/api/assembly-images/:orderId/:file', (req, res) => {
+  const { orderId, file } = req.params;
+  if (!/^\d{1,10}$/.test(orderId) || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,80}$/.test(file)) {
+    return res.status(400).json({ error: '非法路径' });
+  }
+  const p = path.join(ASM_IMG_DIR, orderId, file);
+  if (!fs.existsSync(p)) return res.status(404).json({ error: '未找到' });
+  res.sendFile(p);
+});
+
 // ─── Middleware ──────────────────────────────────────────────────────────────
 app.use(express.json({ limit: '10mb' }));
 // 禁用 HTML 缓存，确保每次都获取最新版本
@@ -324,7 +375,17 @@ app.use('/api', (req, res, next) => {
   app.post(`/api/${type}`, (req, res) => {
     try {
       const { items, ...header } = req.body;
-      res.status(201).json(createOrder(type, header, items));
+      // 夹具申请单图片：new_images 为 base64 dataURL 数组，落盘为文件，订单只存文件名
+      const newImages = type === 'assembly' ? header.new_images : undefined;
+      if (type === 'assembly') delete header.new_images;
+      const created = createOrder(type, header, items);
+      if (type === 'assembly' && Array.isArray(newImages) && newImages.length) {
+        const data = loadData();
+        const o = data.assembly_orders.find(x => x.id === created.id);
+        if (o) { o.images = persistAsmImages(o.id, [], newImages, []); saveData(data); }
+        return res.status(201).json(getOrderById(type, created.id));
+      }
+      res.status(201).json(created);
     } catch (e) { res.status(500).json({ error: e.message }); }
   });
 
@@ -345,7 +406,20 @@ app.use('/api', (req, res, next) => {
       const order = data[`${type}_orders`].find(o => o.id === +req.params.id);
       if (checkLock(req, res, order, '修改')) return;
       const { items, ...header } = req.body;
+      // 夹具申请单图片：images=保留的已有文件名，new_images=新上传的 dataURL。
+      // 未传 images 字段时保留全部旧图（兼容旧前端/部分更新）。
+      let imgReq = null;
+      if (type === 'assembly') {
+        imgReq = { keep: header.images, newImages: header.new_images };
+        delete header.images; delete header.new_images;
+      }
       const updated = updateOrder(type, req.params.id, header, items);
+      if (updated && imgReq) {
+        const d2 = loadData();
+        const o2 = d2.assembly_orders.find(o => o.id === +req.params.id);
+        if (o2) { o2.images = persistAsmImages(o2.id, imgReq.keep, imgReq.newImages, o2.images); saveData(d2); }
+        return res.json(getOrderById(type, req.params.id));
+      }
       updated ? res.json(updated) : res.status(404).json({ error: '未找到' });
     } catch (e) { res.status(500).json({ error: e.message }); }
   });

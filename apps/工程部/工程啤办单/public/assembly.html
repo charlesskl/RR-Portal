@@ -95,6 +95,12 @@
             <tbody id="asmItemsBody"></tbody>
           </table>
         </div>
+        <div class="d-flex justify-content-between align-items-center mt-3 mb-2">
+          <strong>参考图片</strong>
+          <button class="btn btn-sm btn-outline-primary" onclick="triggerAsmImagePick()"><i class="bi bi-image me-1"></i>上传图片</button>
+        </div>
+        <div id="asmImagesPreview" class="d-flex flex-wrap gap-2 mb-1"></div>
+        <div class="text-muted small">支持多张图片，上传前自动压缩；最多 10 张。</div>
       </div>
       <div class="modal-footer">
         <button class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
@@ -237,6 +243,8 @@ function openNewModal() {
   document.getElementById('asm-status').value = '待审核';
   document.getElementById('asmItemsBody').innerHTML = '';
   _rowSeq = 0;
+  asmImages = [];
+  renderAsmImages();
   addAsmRow();
   new bootstrap.Modal(document.getElementById('asmModal')).show();
 }
@@ -264,9 +272,79 @@ function editOrder(id) {
       (order.items || []).forEach(it => addAsmRow(it));
       if (!order.items || !order.items.length) addAsmRow();
 
+      asmImages = (order.images || []).map(n => ({ name: n, dataUrl: asmImgUrl(order.id, n) }));
+      renderAsmImages();
+
       new bootstrap.Modal(document.getElementById('asmModal')).show();
     })
     .catch(() => showToast('加载失败', 'danger'));
+}
+
+// ─── 参考图片（上传/预览/删除）────────────────────────────────────────────────
+// asmImages: { name?: 服务端文件名, dataUrl: 预览用 dataURL 或图片URL, isNew?: bool }
+let asmImages = [];
+
+function asmImgUrl(orderId, name) { return `${API_BASE}/api/assembly-images/${orderId}/${name}`; }
+
+function renderAsmImages() {
+  const box = document.getElementById('asmImagesPreview');
+  if (!asmImages.length) { box.innerHTML = '<div class="text-muted small">暂无图片</div>'; return; }
+  box.innerHTML = asmImages.map((im, i) => `
+    <div class="position-relative">
+      <a href="${im.dataUrl}" target="_blank"><img src="${im.dataUrl}" class="rounded border" style="width:96px;height:96px;object-fit:cover"></a>
+      <button type="button" class="btn btn-sm btn-danger position-absolute top-0 end-0 px-1 py-0" title="移除" onclick="removeAsmImage(${i})"><i class="bi bi-x-lg"></i></button>
+    </div>`).join('');
+}
+
+function removeAsmImage(i) { asmImages.splice(i, 1); renderAsmImages(); }
+
+const _asmImgInput = (() => {
+  const el = document.createElement('input');
+  el.type = 'file'; el.accept = 'image/*'; el.multiple = true; el.style.display = 'none';
+  document.body.appendChild(el);
+  el.addEventListener('change', onAsmImagesSelected);
+  return el;
+})();
+
+function triggerAsmImagePick() {
+  if (asmImages.length >= 10) { showToast('最多上传 10 张图片', 'warning'); return; }
+  _asmImgInput.value = ''; _asmImgInput.click();
+}
+
+// 客户端压缩：最长边 ≤1280px，JPEG 0.85（约 100~400KB/张），避免 data.json/请求体过大
+function fileToResizedDataURL(file, maxDim = 1280, quality = 0.85) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      let w = img.width, h = img.height;
+      const scale = Math.min(1, maxDim / Math.max(w, h));
+      w = Math.max(1, Math.round(w * scale)); h = Math.max(1, Math.round(h * scale));
+      const c = document.createElement('canvas');
+      c.width = w; c.height = h;
+      c.getContext('2d').drawImage(img, 0, 0, w, h);
+      URL.revokeObjectURL(url);
+      resolve(c.toDataURL('image/jpeg', quality));
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('图片读取失败')); };
+    img.src = url;
+  });
+}
+
+async function onAsmImagesSelected() {
+  const files = Array.from(_asmImgInput.files || []);
+  if (!files.length) return;
+  let added = 0;
+  for (const f of files) {
+    if (asmImages.length >= 10) { showToast('最多上传 10 张图片', 'warning'); break; }
+    if (!f.type.startsWith('image/')) continue;
+    try {
+      const dataUrl = await fileToResizedDataURL(f);
+      asmImages.push({ dataUrl, isNew: true });
+      added++;
+    } catch (e) { showToast('图片处理失败: ' + f.name, 'danger'); }
+  }
+  if (added) renderAsmImages();
 }
 
 // ─── 添加表格行 ───────────────────────────────────────────────────────────────
@@ -329,6 +407,8 @@ function saveOrder() {
     reason:        document.getElementById('asm-reason').value || null,
     status:        document.getElementById('asm-status').value,
     items:         items,
+    images:        asmImages.filter(im => !im.isNew).map(im => im.name),
+    new_images:    asmImages.filter(im => im.isNew).map(im => im.dataUrl),
   };
 
   const url    = id ? `/api/assembly/${id}` : '/api/assembly';
@@ -404,6 +484,14 @@ function viewOrderDetail(id, orderNum) {
 }
 
 function renderOrderDetails(order) {
+  const imgs = order.images || [];
+  const imagesHtml = imgs.length ? `
+      <div class="col-12"><div class="text-muted small">参考图片</div>
+        <div class="d-flex flex-wrap gap-2">${imgs.map(n => {
+          const u = asmImgUrl(order.id, n);
+          return `<a href="${u}" target="_blank"><img src="${u}" class="rounded border" style="width:110px;height:110px;object-fit:cover"></a>`;
+        }).join('')}</div>
+      </div>` : '';
   const headerHtml = `
     <div class="row g-2 mb-3">
       <div class="col-6 col-md-3"><div class="text-muted small">货号</div><div class="fw-bold">${esc(order.order_number || '-')}</div></div>
@@ -413,6 +501,7 @@ function renderOrderDetails(order) {
       <div class="col-6 col-md-3"><div class="text-muted small">状态</div><div>${statusBadge(order.status)}</div></div>
       ${order.reason ? `<div class="col-12"><div class="text-muted small">备注</div><div>${esc(order.reason)}</div></div>` : ''}
       ${order.reject_reason ? `<div class="col-12"><div class="text-muted small text-danger">驳回原因</div><div class="text-danger fw-bold">${esc(order.reject_reason)}</div></div>` : ''}
+      ${imagesHtml}
     </div>`;
 
   const items = order.items || [];

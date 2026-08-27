@@ -1,20 +1,25 @@
 name: Huadeng Data Ops
 
-# 华登包材管理（huadeng）业务数据只读查询。
+# 华登包材管理（huadeng）业务数据运维。
 #
-#   mode=check —— 只读：打印生产 huadeng.db 各关键表行数 + period_locks 列表。
-#   mode=query —— 只读：执行 inputs.sql 中的单条 SELECT（如查"在时间段锁内但
-#                 未逐条核对锁定（locked=0）"的流水记录）。
+#   mode=check         —— 只读：打印生产 huadeng.db 各关键表行数 + period_locks 列表。
+#   mode=query         —— 只读：执行 inputs.sql 中的单条 SELECT（如查"在时间段锁内但
+#                        未逐条核对锁定（locked=0）"的流水记录）。
+#   mode=repair-locked —— 修复 locked 标志：解锁时间段操作会把记录 locked 重置为 0，
+#                        之后新时间段锁只罩住区间不恢复标志，导致"仅已核对"(locked=1
+#                        过滤) 与全量数据不一致。本模式备份 → 停服 → 把"挂在已确认批次
+#                        且当前在同 pair 时间段锁内"的记录 locked 恢复为 1 → 重启复核。
+#   mode=rollback      —— 从最近一次 huadeng.db.bak.* 恢复并重启。
 
 on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "check(只读概况) / query(只读 SELECT)"
+        description: "check(只读概况) / query(只读 SELECT) / repair-locked(修复标志) / rollback(恢复)"
         type: choice
         required: true
         default: check
-        options: [check, query]
+        options: [check, query, repair-locked, rollback]
       sql:
         description: "mode=query 时执行的 SELECT 语句（仅限只读 SELECT）"
         type: string
@@ -100,5 +105,86 @@ jobs:
               echo "== 只读查询 =="
               run_select "$OPS_SQL"
               echo "[OK] query 完成（只读）"
+              exit 0
+            fi
+
+            COMPOSE="docker-compose.cloud.yml"
+            ENVF=".env.cloud.production"
+            DBDIR="apps/PMC跟仓管/华登包材管理/data"
+
+            # 待修复记录数：locked=0 且挂在已确认批次 且当前在同 pair 时间段锁内
+            count_pending() {
+              python3 - "$DB" <<'PY'
+            import sqlite3, sys
+            con = sqlite3.connect(f"file:{sys.argv[1]}?mode=ro", uri=True, timeout=10)
+            n = con.execute("""
+              SELECT COUNT(*) FROM flow_records f
+              JOIN period_locks l ON l.party = f.recorded_by
+              JOIN reconciliations r ON r.id = l.reconciliation_id
+              WHERE f.locked = 0
+                AND f.reconciliation_id IN (SELECT id FROM reconciliations WHERE status='confirmed')
+                AND f.date BETWEEN l.date_from AND l.date_to
+                AND ((f.from_party = r.initiator_party AND f.to_party = r.approver_party)
+                  OR (f.from_party = r.approver_party AND f.to_party = r.initiator_party))""").fetchone()[0]
+            print(n)
+            con.close()
+            PY
+            }
+
+            if [ "$MODE" = "rollback" ]; then
+              BAK="$(ls -t "$DBDIR"/huadeng.db.bak.* 2>/dev/null | head -1)"
+              [ -n "$BAK" ] || { echo "[FAIL] 无备份可回滚" >&2; exit 1; }
+              echo "-- 停 huadeng --"; docker compose -f "$COMPOSE" --env-file "$ENVF" stop huadeng
+              cp "$BAK" "$DB"; rm -f "$DB-wal" "$DB-shm"
+              docker compose -f "$COMPOSE" --env-file "$ENVF" up -d --force-recreate --no-deps huadeng
+              echo "[OK] rollback 完成（来自 $BAK）"; exit 0
+            fi
+
+            if [ "$MODE" = "repair-locked" ]; then
+              [ -f "$DB" ] || { echo "[FAIL] $DB 不存在" >&2; exit 1; }
+              echo "== 修复前待修复记录数 =="
+              BEFORE="$(count_pending)"; echo "  $BEFORE 条"
+              [ "$BEFORE" != "0" ] || { echo "[OK] 无需修复"; exit 0; }
+
+              TS="$(date +%Y%m%d-%H%M%S)"
+              echo "-- 备份 huadeng.db --"
+              cp "$DB" "$DBDIR/huadeng.db.bak.$TS" && echo "  → huadeng.db.bak.$TS ($(stat -c%s "$DBDIR/huadeng.db.bak.$TS") bytes)"
+
+              echo "-- 停 huadeng（释放 SQLite 锁）--"
+              docker compose -f "$COMPOSE" --env-file "$ENVF" stop huadeng
+
+              echo "-- 修复 locked 标志 --"
+              python3 - "$DB" <<'PY'
+            import sqlite3, sys
+            con = sqlite3.connect(sys.argv[1], timeout=15)
+            n = con.execute("""
+              UPDATE flow_records SET locked=1 WHERE id IN (
+                SELECT f.id FROM flow_records f
+                JOIN period_locks l ON l.party = f.recorded_by
+                JOIN reconciliations r ON r.id = l.reconciliation_id
+                WHERE f.locked = 0
+                  AND f.reconciliation_id IN (SELECT id FROM reconciliations WHERE status='confirmed')
+                  AND f.date BETWEEN l.date_from AND l.date_to
+                  AND ((f.from_party = r.initiator_party AND f.to_party = r.approver_party)
+                    OR (f.from_party = r.approver_party AND f.to_party = r.initiator_party)))""").rowcount
+            con.commit(); con.close()
+            print(f"  已修复 {n} 条")
+            PY
+              PYOK=$?
+              rm -f "$DB-wal" "$DB-shm"
+
+              echo "-- 重启 huadeng --"
+              docker compose -f "$COMPOSE" --env-file "$ENVF" up -d --force-recreate --no-deps huadeng
+              [ "$PYOK" = 0 ] || { echo "[FAIL] 修复脚本失败，已重启服务；可用 mode=rollback 回滚（备份 huadeng.db.bak.$TS）" >&2; exit 1; }
+
+              ok=0
+              for i in $(seq 1 20); do
+                if curl -sf http://localhost/huadeng/health >/dev/null 2>&1; then ok=1; echo "  healthy after ${i}x3s"; break; fi
+                sleep 3
+              done
+
+              echo "== 修复后待修复记录数（应只剩未挂接/未确认批次）=="
+              AFTER="$(count_pending)"; echo "  $AFTER 条"
+              [ "$ok" = 1 ] && echo "[OK] repair-locked 完成（备份: huadeng.db.bak.$TS）" || { echo "[WARN] 健康检查未通过，检查容器日志；必要时 mode=rollback"; exit 1; }
               exit 0
             fi

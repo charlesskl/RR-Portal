@@ -1,0 +1,104 @@
+name: Huadeng Data Ops
+
+# 华登包材管理（huadeng）业务数据只读查询。
+#
+#   mode=check —— 只读：打印生产 huadeng.db 各关键表行数 + period_locks 列表。
+#   mode=query —— 只读：执行 inputs.sql 中的单条 SELECT（如查"在时间段锁内但
+#                 未逐条核对锁定（locked=0）"的流水记录）。
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "check(只读概况) / query(只读 SELECT)"
+        type: choice
+        required: true
+        default: check
+        options: [check, query]
+      sql:
+        description: "mode=query 时执行的 SELECT 语句（仅限只读 SELECT）"
+        type: string
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-cloud
+  queue: max
+  cancel-in-progress: false
+
+jobs:
+  ops:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Validate SSH host fingerprint
+        shell: bash
+        env:
+          CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]]; then
+            echo 'CLOUD_HOST_FINGERPRINT must be a non-empty OpenSSH SHA256 fingerprint.' >&2
+            exit 1
+          fi
+
+      - name: Huadeng data ops via SSH
+        env:
+          CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+          OPS_MODE: ${{ inputs.mode }}
+          OPS_SQL: ${{ inputs.sql }}
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
+        with:
+          host: ${{ secrets.CLOUD_HOST }}
+          username: ${{ secrets.CLOUD_USER }}
+          key: ${{ secrets.CLOUD_SSH_KEY }}
+          fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
+          command_timeout: 12m
+          envs: OPS_MODE,OPS_SQL
+          script: |
+            set -uo pipefail
+            MODE="${OPS_MODE:-check}"
+            cd /opt/rr-portal
+            DB="apps/PMC跟仓管/华登包材管理/data/huadeng.db"
+            echo "=================== MODE: $MODE ==================="
+
+            run_select() {
+              python3 - "$DB" "$1" <<'PY'
+            import sqlite3, sys, re
+            db, sql = sys.argv[1], (sys.argv[2] or "").strip().rstrip(";")
+            if not re.match(r"(?is)^\s*select\b", sql) or ";" in sql:
+                print("[FAIL] 仅允许单条只读 SELECT 语句"); sys.exit(1)
+            con = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=10)
+            cur = con.cursor()
+            try:
+                cur.execute(sql)
+                cols = [d[0] for d in cur.description] if cur.description else []
+                print("  列:", " | ".join(cols))
+                rows = cur.fetchmany(300)
+                for r in rows:
+                    print("  " + " | ".join("NULL" if v is None else str(v) for v in r))
+                print(f"  (共返回 {len(rows)} 行，最多显示 300 行)")
+            except Exception as e:
+                print("[FAIL]", e); sys.exit(1)
+            finally:
+                con.close()
+            PY
+            }
+
+            if [ "$MODE" = "check" ]; then
+              echo "== 关键表行数 =="
+              run_select "SELECT 'flow_records' AS t, COUNT(*) AS n FROM flow_records UNION ALL SELECT 'reconciliations', COUNT(*) FROM reconciliations UNION ALL SELECT 'period_locks', COUNT(*) FROM period_locks"
+              echo "== period_locks 列表 =="
+              run_select "SELECT l.id, l.party, l.date_from, l.date_to, l.reconciliation_id AS rid, r.status, r.initiator_party, r.approver_party FROM period_locks l LEFT JOIN reconciliations r ON r.id = l.reconciliation_id ORDER BY l.party, l.date_from"
+              echo "[OK] check 完成（只读）"
+              exit 0
+            fi
+
+            if [ "$MODE" = "query" ]; then
+              echo "== 只读查询 =="
+              run_select "$OPS_SQL"
+              echo "[OK] query 完成（只读）"
+              exit 0
+            fi

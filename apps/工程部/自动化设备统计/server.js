@@ -3,6 +3,7 @@
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 
 const PORT = process.env.PORT || 3008;
 const DATA_DIR = path.join(__dirname, 'data');
@@ -61,7 +62,18 @@ function saveData(data) {
 }
 
 function publicState(data) {
-  return { equipment: data.equipment, records: data.records, users: data.users };
+  return {
+    equipment: data.equipment,
+    records: data.records,
+    users: data.users.map(({ passwordHash, passwordSalt, ...user }) => user),
+  };
+}
+
+function hashPassword(password, salt = crypto.randomBytes(16).toString('hex')) {
+  return {
+    passwordSalt: salt,
+    passwordHash: crypto.scryptSync(password, salt, 64).toString('hex'),
+  };
 }
 
 // 更新日期显示格式（MM-DD，中国时区）
@@ -151,12 +163,14 @@ app.post('/api/records', (req, res) => {
 // 新增用户
 app.post('/api/users', (req, res) => {
   const b = req.body || {};
-  if (!b.name || !b.account || !b.role) return res.status(400).json({ error: '缺少必填字段' });
+  if (!b.name || !b.account || !b.role || !b.password) return res.status(400).json({ error: '缺少必填字段' });
+  if (String(b.password).length < 8) return res.status(400).json({ error: '密码至少需要 8 位字符' });
   const data = loadData();
   if (data.users.some(u => u.account === b.account)) return res.status(409).json({ error: '账号已存在' });
   data.users.push({
     id: data.nextId++, name: b.name, account: b.account, role: b.role,
     department: b.department || '全部部门', workshop: b.workshop || '全部车间', status: true,
+    ...hashPassword(String(b.password)),
   });
   saveData(data);
   res.status(201).json(publicState(data));
@@ -168,6 +182,21 @@ app.patch('/api/users/:id', (req, res) => {
   const user = data.users.find(u => u.id === +req.params.id);
   if (!user) return res.status(404).json({ error: '用户不存在' });
   if (typeof req.body?.status === 'boolean') user.status = req.body.status;
+  if (req.body?.role) user.role = req.body.role;
+  if (req.body?.department) user.department = req.body.department;
+  if (req.body?.workshop) user.workshop = req.body.workshop;
+  saveData(data);
+  res.json(publicState(data));
+});
+
+// 管理员重置用户密码；只保存 scrypt 哈希和随机盐，不落盘明文密码
+app.put('/api/users/:id/password', (req, res) => {
+  const password = String(req.body?.password || '');
+  if (password.length < 8) return res.status(400).json({ error: '密码至少需要 8 位字符' });
+  const data = loadData();
+  const user = data.users.find(u => u.id === +req.params.id);
+  if (!user) return res.status(404).json({ error: '用户不存在' });
+  Object.assign(user, hashPassword(password));
   saveData(data);
   res.json(publicState(data));
 });

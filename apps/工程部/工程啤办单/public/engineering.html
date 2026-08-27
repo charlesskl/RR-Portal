@@ -297,7 +297,7 @@
             <thead>
               <tr>
                 <th>产品名称 <span class="text-danger">*</span></th><th>零件名称</th><th>工序</th><th>样板数量</th><th>提供胶件时间</th>
-                <th>工程需求完成时间</th><th style="color:#dc3545">喷油收到胶件时间</th><th>工程师</th><th></th>
+                <th>工程需求完成时间</th><th>工程师</th><th></th>
               </tr>
             </thead>
             <tbody id="sprayItemsBody"></tbody>
@@ -1164,7 +1164,6 @@ function addSprayRow(it={}) {
     <td>${inp('number','sample_qty',it.sample_qty,'style="width:65px"')}</td>
     <td>${inp('date','provide_time',it.provide_time,'class="w-date"')}</td>
     <td>${inp('date','eng_complete_time',it.eng_complete_time,'class="w-date"')}</td>
-    <td>${inp('date','delivery_time',it.delivery_time,'class="w-date"')}</td>
     <td>${inp('text','engineer',it.engineer)}</td>
     <td>${delBtn()}</td>`;
   document.getElementById('sprayItemsBody').appendChild(tr);
@@ -1184,7 +1183,8 @@ function collectRows(tbodyId, fields) {
 
 const injFields   = ['mold_id','mold_name','machine_type','material','color','pigment_no','quantity','shoot_qty','gross_weight_g','required_material_kg','mold_return_time','completion_time','notes'];
 const slushFields = ['seq_no','product_id','mold_id','mold_name','material','color_code','pigment_no','unit_weight','quantity','required_date','return_time','notes'];
-const sprayFields = ['client_name','product_name','part_name','process','sample_qty','provide_time','eng_complete_time','delivery_time','engineer','follower'];
+// delivery_time（喷油收到胶件时间）仅喷油部在喷油页面填写，工程部表单不提交该字段
+const sprayFields = ['client_name','product_name','part_name','process','sample_qty','provide_time','eng_complete_time','engineer','follower'];
 
 function saveOrder(type) {
   // 夹具单独立处理
@@ -1825,7 +1825,6 @@ const EXCEL_COL_MAP = {
     '客名':'client_name','客户':'client_name',
     '名称':'product_name','产品名称':'product_name',
     '样板数量':'sample_qty',
-    '喷油交货时间':'delivery_time','交货时间':'delivery_time',
     '工程师':'engineer','工程师/pmc':'engineer',
     '备注':'notes'
   }

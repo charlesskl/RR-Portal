@@ -406,6 +406,18 @@ app.use('/api', (req, res, next) => {
       const order = data[`${type}_orders`].find(o => o.id === +req.params.id);
       if (checkLock(req, res, order, '修改')) return;
       const { items, ...header } = req.body;
+      // 喷油收到胶件时间（delivery_time）仅喷油部可填：工程部编辑整单时 items 全量重建，
+      // 这里按行位置把已有值补回，避免被清空
+      if (type === 'spray' && Array.isArray(items)) {
+        const oldItems = data.spray_items
+          .filter(i => i.order_id === +req.params.id)
+          .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+        items.forEach((it, i) => {
+          if (it.delivery_time == null && oldItems[i] && oldItems[i].delivery_time) {
+            it.delivery_time = oldItems[i].delivery_time;
+          }
+        });
+      }
       // 夹具申请单图片：images=保留的已有文件名，new_images=新上传的 dataURL。
       // 未传 images 字段时保留全部旧图（兼容旧前端/部分更新）。
       let imgReq = null;

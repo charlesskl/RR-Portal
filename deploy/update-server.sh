@@ -115,6 +115,7 @@ declare -A PATH_TO_SERVICE=(
   ["apps/工程部/A-doc生成系統/"]="zouhuo"
   ["apps/工程部/工程啤办单/"]="rr-production"
   ["apps/工程部/模具手办采购订单系统/"]="figure-mold-cost-system"
+  ["apps/工程部/自动化设备统计/"]="automation-equipment"
   ["apps/船务部/船务管理系统/"]="shipping-management"
   ["apps/喷油部/喷油排期系统/"]="sprayplan"
   ["apps/印尼小组/印尼走货明细/"]="indo-shipping"

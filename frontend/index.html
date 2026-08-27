@@ -244,7 +244,7 @@
           <div class="dept-icon engineering">&#9881;</div>
           <div>
             <div class="dept-name">工程部</div>
-            <div class="dept-desc">工程啤办单 · A-doc生成 · 新产品排期 · 模具手办采购</div>
+            <div class="dept-desc">工程啤办单 · A-doc生成 · 新产品排期 · 模具手办采购 · 自动化设备统计</div>
           </div>
         </div>
         <div class="dept-card-body">
@@ -268,6 +268,13 @@
                 <div class="plugin-dot green" id="dotFigureMoldCost"></div>
                 <span class="plugin-name">模具手办采购订单</span>
                 <span class="plugin-tag">采购</span>
+              </div>
+            </div>
+            <div class="plugin-item">
+              <div class="plugin-info">
+                <div class="plugin-dot green" id="dotAutomation"></div>
+                <span class="plugin-name">自动化设备统计</span>
+                <span class="plugin-tag">设备</span>
               </div>
             </div>
           </div>
@@ -486,7 +493,7 @@
       <div class="dept-icon engineering" style="width:40px;height:40px;font-size:18px;">&#9881;</div>
       工程部
     </div>
-    <div class="page-subtitle">工程啤办单 · A-doc生成 · 新产品排期 · 模具手办采购</div>
+    <div class="page-subtitle">工程啤办单 · A-doc生成 · 新产品排期 · 模具手办采购 · 自动化设备统计</div>
 
     <div class="detail-plugin-card">
       <div class="detail-plugin-left">
@@ -549,6 +556,26 @@
         <a href="/figure-mold-cost-system/" target="_blank" class="btn btn-primary">打开系统</a>
       </div>
     </div>
+
+    <div class="detail-plugin-card">
+      <div class="detail-plugin-left">
+        <div class="detail-plugin-icon" style="background:linear-gradient(135deg,#0e7668,#14b8a6);">&#9881;</div>
+        <div>
+          <div class="detail-plugin-name">自动化设备统计</div>
+          <div class="detail-plugin-desc">生产自动化设备投资、产量上报、节省成本与投资结余统计，支持设备台账与数据更新记录导出</div>
+          <div class="feature-grid">
+            <div class="feature-tag">&#128202; 结余看板</div>
+            <div class="feature-tag">&#9881; 设备台账</div>
+            <div class="feature-tag">&#10133; 产量录入</div>
+            <div class="feature-tag">&#128337; 更新记录</div>
+          </div>
+        </div>
+      </div>
+      <div class="detail-plugin-right">
+        <div class="detail-plugin-status"><div class="plugin-dot green" id="dotAutomationDetail"></div> 运行中</div>
+        <a href="/automation-equipment/" target="_blank" class="btn btn-primary">打开系统</a>
+      </div>
+    </div>
   </div>
 
 </div>
@@ -577,6 +604,7 @@ async function checkHealth() {
     const checks = [
       { name: 'rr', url: '/rr/health' },
       { name: 'figureMoldCost', url: '/figure-mold-cost-system/health' },
+      { name: 'automation', url: '/automation-equipment/health' },
       { name: 'zouhuo', url: '/zouhuo/health' },
       { name: 'jiangping', url: '/jiangping/health' },
       { name: 'paiji', url: '/paiji/health' },
@@ -598,6 +626,8 @@ async function checkHealth() {
 
     updateDots('rr', '/rr/health');
     updateDot('dotFigureMoldCost', '/figure-mold-cost-system/health');
+    updateDot('dotAutomation', '/automation-equipment/health');
+    updateDot('dotAutomationDetail', '/automation-equipment/health');
     updateDot('dotZouhuo', '/zouhuo/health');
     updateDot('dotZouhuoDetail', '/zouhuo/health');
     updateDot('dotJiangping', '/jiangping/health');

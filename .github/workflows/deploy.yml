@@ -220,6 +220,7 @@ jobs:
               /jiangping/health \
               /paiji/health \
               /figure-mold-cost-system/health \
+              /automation-equipment/health \
               /baojia/health \
               /liwenjuan/health \
               /huadeng-maorong/health \

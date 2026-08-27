@@ -26,7 +26,8 @@ RR-Portal/
 │   ├── 工程部/
 │   │   ├── 工程啤办单/              — rr-production (Node.js)
 │   │   ├── A-doc生成系統/           — zouhuo (Node.js)
-│   │   └── 模具手办采购订单系统/    — figure-mold-cost-system (Node.js)
+│   │   ├── 模具手办采购订单系统/    — figure-mold-cost-system (Node.js)
+│   │   └── 自动化设备统计/          — automation-equipment (Node.js + Vite/React)
 │   ├── PMC跟仓管/
 │   │   ├── 采购订单管理系统/        — jiangping (Flask + EasyOCR)
 │   │   ├── 成品核对系统/            — liwenjuan (Flask)
@@ -468,6 +469,7 @@ const data = JSON.parse(fs.readFileSync('data/data.json'));
 | zouhuo | A-doc生成系統 | Engineering | Standalone (Node.js) | /zouhuo/ | https://github.com/duanlei10/123 |
 | task-api | 任务 API | — | Standalone (Node.js) | — | — |
 | figure-mold-cost-system | 模具手办采购订单 | Engineering | Standalone (Node.js) | /figure-mold-cost-system/ | https://github.com/hufan4308-blip/figure-mold-cost-system |
+| automation-equipment | 自动化设备统计 | Engineering | Standalone (Node.js + Vite/React) | /automation-equipment/ | (PR #556) |
 | jiangping | 采购订单管理系统 | PMC跟仓管 | Standalone (Python/Flask) | /jiangping/ | https://github.com/fxxaxxx/jiangping |
 | paiji | AI注塑啤机排产系统 | 生产部 | Standalone (Node.js) | /paiji/ | https://github.com/duanlei10/234 |
 | penyou | 喷油部生产管理系统 | 生产部 | Standalone (Node.js/React) | /penyou/ | (PR #100) |

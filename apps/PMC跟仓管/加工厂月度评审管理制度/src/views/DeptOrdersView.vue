@@ -7,14 +7,14 @@ import { useFactoriesStore } from '../stores/factories'
 import { useAuthStore } from '../stores/auth'
 import { CRAFT_LABELS, REGION_LABELS, regionOf, type Craft, type Region } from '../constants/roles'
 import { canEditOrders, canImportOrdersForScope, allowedRegions } from '../utils/permissions'
-import { buildDeliveryReport, deliveryHeaders, exportDeliveryExcel, parseDeliveryImport, splitSewingContractItemNo, type DeliveryPricingMode, type ReportRow, type DetailRow } from '../utils/deliveryStats'
+import { buildDeliveryReport, deliveryHeaders, exportDeliveryExcel, formatHkdOutPrice, parseDeliveryImport, splitSewingContractItemNo, type DeliveryPricingMode, type ReportRow, type DetailRow } from '../utils/deliveryStats'
 import { readDeliveryPdfAsAoa } from '../utils/pdfDeliveryImport'
 import { parseDeliveryExcelFiles, UNMATCHED_IMPORT_FACTORY_PREFIX } from '../utils/deliveryExcelImport'
 import { cnyTaxToHkdUntaxed, cnyTaxToUntaxedRmb, DEFAULT_CNY_TO_HKD_RATE } from '../utils/orderPricing'
 import { matchesOrderDate, type OrderDateFilter } from '../utils/orderDateFilter'
 import { deliveryImportFactoryMap } from '../utils/deliveryImportScope'
 import { isPercentOver100 } from '../utils/percentage'
-import { taxPointFactor } from '../utils/taxPoint'
+import { factoryTaxPointFactors } from '../utils/taxPoint'
 import { orderRegion } from '../utils/orderRegion'
 import type { Order } from '../types/order'
 
@@ -148,8 +148,9 @@ const deptOrders = computed(() => {
     })
 })
 const orderCount = computed(() => deptOrders.value.length)
+const factoryTaxPoints = computed(() => factoryTaxPointFactors(factories.items))
 function factoryTaxPoint(factoryId: string | null | undefined) {
-  return taxPointFactor(factories.items.find((factory) => factory.id === factoryId)?.tax_point)
+  return factoryId ? (factoryTaxPoints.value.get(factoryId) ?? null) : null
 }
 
 const isHunan = computed(() => region.value === 'hunan')
@@ -345,6 +346,7 @@ function subtotalValue(header: string, index: number, row: Extract<ReportRow, { 
   }
   if (header.startsWith('核价工价')) return row.quote
   if (header === '外发工价(人民币含税)') return row.outPriceCnyTax
+  if (header === '外发工价(港币不含税$)') return formatHkdOutPrice(row.outPrice)
   if (header.startsWith('外发工价')) return row.outPrice
   return ''
 }
@@ -511,7 +513,7 @@ function draftFromRow(row: DetailRow): RowDraft {
     quantity: priceInputValue(row.quantity),
     actual_delivery_date: row.actual_delivery_date || '',
     quote_labor_price: priceInputValue(row.quote),
-    unit_price: priceInputValue(row.outPrice),
+    unit_price: pricingMode.value === 'rmb-tax' ? priceInputValue(row.outPrice) : formatHkdOutPrice(row.outPrice),
     unit_price_cny_tax: priceInputValue(row.outPriceCnyTax),
     exchange_rate: priceInputValue(row.exchangeRate),
     notes: row.notes || '',
@@ -544,7 +546,7 @@ function setDraftValue(row: DetailRow, field: keyof RowDraft, value: string) {
     const cnyTaxPrice = Number(drafts.value[row.id].unit_price_cny_tax)
     const exchangeRate = Number(drafts.value[row.id].exchange_rate)
     drafts.value[row.id].unit_price = drafts.value[row.id].unit_price_cny_tax.trim() && Number.isFinite(cnyTaxPrice) && Number.isFinite(exchangeRate) && exchangeRate > 0
-      ? String(convertedOutPrice(cnyTaxPrice, exchangeRate, factoryTaxPoint(sourceOrder(row)?.factory)) ?? '')
+      ? formatHkdOutPrice(convertedOutPrice(cnyTaxPrice, exchangeRate, factoryTaxPoint(sourceOrder(row)?.factory)))
       : ''
   }
 }
@@ -965,11 +967,11 @@ async function removeRow(row: DetailRow) {
                   <span v-else>{{ r.quote }}</span>
                 </td>
                 <td :class="columnClassFor(visibleHeaders[columnIndex('外发工价(港币不含税$)')] ? '外发工价(港币不含税$)' : '外发工价(不含税RMB)')" :style="columnStyleFor(visibleHeaders[columnIndex('外发工价(港币不含税$)')] ? '外发工价(港币不含税$)' : '外发工价(不含税RMB)')">
-                  <input v-if="canEdit" type="number" class="price-inp" min="0" step="0.0001"
+                  <input v-if="canEdit" type="number" class="price-inp" min="0" step="0.001"
                     :readonly="pricingMode === 'rmb-tax' || pricingMode === 'hkd-tax'"
                     :value="draftValue(r, 'unit_price')"
                     @input="setDraftValue(r, 'unit_price', ($event.target as HTMLInputElement).value)" />
-                  <span v-else>{{ r.outPrice }}</span>
+                  <span v-else>{{ pricingMode === 'rmb-tax' ? r.outPrice : formatHkdOutPrice(r.outPrice) }}</span>
                 </td>
                 <td :class="columnClassFor('外发工价(人民币含税)')" :style="columnStyleFor('外发工价(人民币含税)')">
                   <input v-if="canEdit" type="number" class="price-inp" min="0" step="0.01"

@@ -35,4 +35,6 @@ export interface Factory {
   status_updated_by?: string
   status_updated_at?: string
   created_by?: string
+  created?: string
+  updated?: string
 }

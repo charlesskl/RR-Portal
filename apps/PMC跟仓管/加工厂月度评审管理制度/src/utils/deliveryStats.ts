@@ -35,12 +35,18 @@ export function deliveryHeaders(
 
 const r1 = (n: number) => Math.round(n * 10) / 10
 const r2 = (n: number) => Math.round(n * 100) / 100
+const r3 = (n: number) => Math.round(n * 1000) / 1000
 const num = (v: any) => Number(v) || 0
 // 交期占比：整数百分比；合格率/客验货：1 位；价格占比：2 位
 const pct0 = (a: number, b: number) => (b ? Math.round((a / b) * 100) + '%' : '-')
 const pct1 = (a: number, b: number) => (b ? (Math.round((a / b) * 1000) / 10).toFixed(1) + '%' : '-')
 const pct2 = (a: number, b: number) => (b ? (Math.round((a / b) * 10000) / 100).toFixed(2) + '%' : '-')
 const orderKey = (o: Order) => (o.order_no?.trim() ? `order:${o.order_no.trim().toLowerCase()}` : `id:${o.id}`)
+
+/** 港币外发工价统一固定显示 3 位小数。 */
+export function formatHkdOutPrice(value: number | null | undefined): string {
+  return value == null || !Number.isFinite(Number(value)) ? '' : Number(value).toFixed(3)
+}
 
 export function splitSewingContractItemNo(value: unknown): { contractNo: string; itemNo: string } {
   const text = String(value ?? '').trim()
@@ -166,7 +172,9 @@ function metricsOf(
   const qualified = os.reduce((a, o) => a + Math.max(0, num(o.inspect_count) - num(o.defect_count)), 0)
   const returnCount = os.reduce((a, o) => a + num(o.return_count), 0)
   const quote = r2(os.reduce((a, o) => a + num(o.quote_labor_price), 0))
-  const outPrice = r2(os.reduce((a, o) => a + effectiveOutPrice(o, normalizePricingMode(pricingMode), factoryTaxPoint(o)), 0))
+  const mode = normalizePricingMode(pricingMode)
+  const outPriceTotal = os.reduce((a, o) => a + effectiveOutPrice(o, mode, factoryTaxPoint(o)), 0)
+  const outPrice = mode === 'rmb-tax' ? r2(outPriceTotal) : r3(outPriceTotal)
   const outPriceCnyTax = r2(os.reduce((a, o) => a + num(o.unit_price_cny_tax), 0))
   return {
     orderCount: orderStats.orderCount,
@@ -368,6 +376,13 @@ export function exportDeliveryExcel(
   })
   const ws = XLSX.utils.aoa_to_sheet([titleRow, H, ...body])
   ws['!merges'] = merges
+  const hkdOutPriceColumn = pricingMode === 'rmb-tax' ? -1 : H.indexOf('外发工价(港币不含税$)')
+  if (hkdOutPriceColumn >= 0) {
+    for (let row = 2; row < body.length + 2; row++) {
+      const cell = ws[XLSX.utils.encode_cell({ r: row, c: hkdOutPriceColumn })]
+      if (cell?.t === 'n') cell.z = '0.000'
+    }
+  }
   const cw = (v: any) => { let w = 0; for (const ch of String(v ?? '')) w += /[⺀-￿]/.test(ch) ? 2 : 1; return w }
   ws['!cols'] = H.map((h, c) => {
     let max = cw(h)

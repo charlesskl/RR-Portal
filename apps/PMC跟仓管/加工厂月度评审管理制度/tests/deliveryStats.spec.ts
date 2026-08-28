@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildDeliveryReport, deliveryHeaders, parseDeliveryImport, splitSewingContractItemNo } from '../src/utils/deliveryStats'
+import { buildDeliveryReport, deliveryHeaders, formatHkdOutPrice, parseDeliveryImport, splitSewingContractItemNo } from '../src/utils/deliveryStats'
 import type { Order } from '../src/types/order'
 
 function order(partial: Partial<Order>): Order {
@@ -12,6 +12,11 @@ function order(partial: Partial<Order>): Order {
 }
 
 describe('buildDeliveryReport', () => {
+  it('formats HKD outsource prices with exactly three decimal places', () => {
+    expect(formatHkdOutPrice(0.5289)).toBe('0.529')
+    expect(formatHkdOutPrice(1.36)).toBe('1.360')
+  })
+
   it('counts the same order number as one order across multiple material rows', () => {
     const rows = buildDeliveryReport([
       order({
@@ -82,6 +87,7 @@ describe('buildDeliveryReport', () => {
     })], '东莞厂区 · 注塑部', () => '工厂', 'hkd-tax', () => 1.11)
 
     expect(rows[0]).toMatchObject({ kind: 'detail', outPrice: 6.2131, exchangeRate: 0.87, taxPoint: 1.11 })
+    expect(rows[1]).toMatchObject({ kind: 'subtotal', outPrice: 6.213 })
   })
 })
 

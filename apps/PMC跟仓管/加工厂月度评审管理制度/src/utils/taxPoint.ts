@@ -15,3 +15,38 @@ export function taxPointRate(value: unknown): number | null {
   if (!Number.isFinite(entered) || entered < 0) return null
   return round4(entered >= 1 ? entered - 1 : entered)
 }
+
+export interface FactoryTaxPointRecord {
+  id: string
+  name: string
+  craft?: string
+  region?: string
+  tax_point?: number | null
+  status?: string
+  created?: string
+  updated?: string
+}
+
+function factoryMasterKey(factory: FactoryTaxPointRecord): string {
+  return [factory.region ?? '', factory.craft ?? '', factory.name.trim().replace(/\s+/g, '').toLowerCase()].join('|')
+}
+
+function masterPriority(factory: FactoryTaxPointRecord): string {
+  return `${factory.status === 'active' ? '1' : '0'}|${factory.updated ?? factory.created ?? ''}`
+}
+
+/** 同厂区、同部门、同完整厂名的重复 ID，统一采用最近更新的有效主档税点。 */
+export function factoryTaxPointFactors(factories: FactoryTaxPointRecord[]): Map<string, number | null> {
+  const canonical = new Map<string, FactoryTaxPointRecord>()
+  for (const factory of factories) {
+    const key = factoryMasterKey(factory)
+    const current = canonical.get(key)
+    if (!current || masterPriority(factory) > masterPriority(current)) canonical.set(key, factory)
+  }
+
+  const result = new Map<string, number | null>()
+  for (const factory of factories) {
+    result.set(factory.id, taxPointFactor(canonical.get(factoryMasterKey(factory))?.tax_point))
+  }
+  return result
+}

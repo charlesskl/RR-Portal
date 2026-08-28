@@ -1,28 +1,17 @@
 <script setup lang="ts">
-import { onMounted, ref, computed } from 'vue'
+import { onMounted, computed } from 'vue'
 import AppLayout from '../../components/AppLayout.vue'
 import { useScoreTemplatesStore } from '../../stores/scoreTemplates'
 import type { ScoreTemplate } from '../../types/score'
-import { CRAFT_LABELS, type Craft } from '../../constants/roles'
 
 const store = useScoreTemplatesStore()
-const draft = ref<Partial<ScoreTemplate>>({
-  module: 'craft_specific', scoring_role: 'quality_qc', is_active: true, max_score: 0, sort_order: 99,
-})
 onMounted(() => store.fetchAll())
 const commonTotal = computed(() => store.items
   .filter((t) => t.is_active && !t.craft_filter)
   .reduce((sum, t) => sum + t.max_score, 0))
-const specialtyScoresValid = computed(() => {
-  const specialties = store.items.filter((t) => t.is_active && t.craft_filter)
-  return specialties.length > 0 && specialties.every((t) => t.max_score === 15)
-})
-const scoreConfigValid = computed(() => commonTotal.value === 85 && specialtyScoresValid.value)
+const scoreConfigValid = computed(() => commonTotal.value === 100
+  && !store.items.some((t) => t.is_active && (t.craft_filter || t.module === 'craft_specific')))
 
-async function add() {
-  await store.create({ ...draft.value })
-  await store.fetchAll()
-}
 async function toggle(t: ScoreTemplate) {
   await store.update(t.id, { is_active: !t.is_active })
   await store.fetchAll()
@@ -31,38 +20,22 @@ async function toggle(t: ScoreTemplate) {
 <template>
   <AppLayout>
     <div class="page">
-    <h2>评分模板配置（通用 {{ commonTotal }} 分 + 对应部门专项 15 分）</h2>
-    <p v-if="!scoreConfigValid" class="warn">提示：通用85+对应部门专项15 应为100分</p>
+    <h2>评分模板配置（通用 {{ commonTotal }} 分）</h2>
+    <p v-if="!scoreConfigValid" class="warn">提示：启用的通用评分项总分应为100分，且不应包含部门专项评分</p>
     <table>
       <thead><tr><th>名称</th><th>模块</th><th>分值</th><th>打分主体</th><th>部门</th><th>启用</th></tr></thead>
       <tbody>
         <tr v-for="t in store.items" :key="t.id">
           <td>{{ t.name }}</td><td>{{ t.module }}</td><td>{{ t.max_score }}</td>
           <td>{{ t.scoring_role === 'buyer' ? '采购' : '品质' }}</td>
-          <td>{{ t.craft_filter ? CRAFT_LABELS[t.craft_filter as Craft] : '通用' }}</td>
+          <td>通用</td>
           <td><button @click="toggle(t)">{{ t.is_active ? '停用' : '启用' }}</button></td>
         </tr>
       </tbody>
     </table>
-    <h3>新增评分项</h3>
-    <form class="tpl-form" @submit.prevent="add">
-      <input v-model="draft.name" placeholder="名称" required />
-      <input v-model.number="draft.max_score" type="number" placeholder="分值" required />
-      <select v-model="draft.scoring_role">
-        <option value="buyer">采购</option>
-        <option value="quality_qc">品质QC</option>
-      </select>
-      <select v-model="draft.craft_filter">
-        <option value="">通用</option>
-        <option v-for="(label, key) in CRAFT_LABELS" :key="key" :value="key">{{ label }}</option>
-      </select>
-      <button type="submit">添加</button>
-    </form>
     </div>
   </AppLayout>
 </template>
 <style scoped>
-h3 { margin-top: 1.5rem; }
-.tpl-form { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.5rem; align-items: center; }
 .warn { color: var(--grade-d); font-size: .9rem; }
 </style>

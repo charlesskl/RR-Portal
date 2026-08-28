@@ -28,14 +28,16 @@ export interface FactoryTaxPointRecord {
 }
 
 function factoryMasterKey(factory: FactoryTaxPointRecord): string {
-  return [factory.region ?? '', factory.craft ?? '', factory.name.trim().replace(/\s+/g, '').toLowerCase()].join('|')
+  // 工厂服务的订单厂区可能与工厂所在地不同，历史重复主档的 region 也可能不一致；
+  // 同一部门下完整厂名相同即视为同一工厂，税点不应再按 region 拆分。
+  return [factory.craft ?? '', factory.name.trim().replace(/\s+/g, '').toLowerCase()].join('|')
 }
 
 function masterPriority(factory: FactoryTaxPointRecord): string {
   return `${factory.status === 'active' ? '1' : '0'}|${factory.updated ?? factory.created ?? ''}`
 }
 
-/** 同厂区、同部门、同完整厂名的重复 ID，统一采用最近更新的有效主档税点。 */
+/** 同部门、同完整厂名的重复 ID，统一采用最近更新的有效主档税点。 */
 export function factoryTaxPointFactors(factories: FactoryTaxPointRecord[]): Map<string, number | null> {
   const canonical = new Map<string, FactoryTaxPointRecord>()
   for (const factory of factories) {

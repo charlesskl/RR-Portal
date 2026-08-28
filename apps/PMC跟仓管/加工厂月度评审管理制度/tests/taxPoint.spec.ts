@@ -17,15 +17,15 @@ describe('tax point display and storage conversion', () => {
 describe('factoryTaxPointFactors', () => {
   it('uses one latest active master tax point for duplicate factory ids with the same full name', () => {
     const factors = factoryTaxPointFactors([
-      { id: 'old', name: '邵阳市华镕玩具制品有限公司', craft: 'assembly', region: 'dongguan', tax_point: 0.03, status: 'active', updated: '2026-01-01' },
-      { id: 'current', name: '邵阳市华镕玩具制品有限公司', craft: 'assembly', region: 'dongguan', tax_point: 0.115, status: 'active', updated: '2026-08-01' },
+      { id: 'old', name: '邵阳市华登塑胶制品有限公司', craft: 'assembly', region: 'hunan', tax_point: 0.03, status: 'active', updated: '2026-01-01' },
+      { id: 'current', name: '邵阳市华登塑胶制品有限公司', craft: 'assembly', region: 'dongguan', tax_point: 0.115, status: 'active', updated: '2026-08-01' },
     ])
 
     expect(factors.get('old')).toBe(1.115)
     expect(factors.get('current')).toBe(1.115)
   })
 
-  it('does not merge same-name factories from different regions or departments', () => {
+  it('does not merge same-name factories from different departments', () => {
     const factors = factoryTaxPointFactors([
       { id: 'assembly', name: '同名加工厂', craft: 'assembly', region: 'dongguan', tax_point: 0.03, status: 'active' },
       { id: 'sewing', name: '同名加工厂', craft: 'sewing', region: 'hunan', tax_point: 0.115, status: 'active' },

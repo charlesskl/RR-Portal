@@ -358,9 +358,7 @@
           <td></td>
         </tr>`).join('');
       const totalPrice = items.reduce((a, it) => a + (Number(it.price) || 0) * (Number(it.quantity) || 0), 0);
-      const totalRow = items.some(it => it.price != null && it.price !== '')
-        ? `<tr style="height:22px"><td colspan="5" style="text-align:right"><strong>总价</strong></td><td style="text-align:right"><strong>${totalPrice.toFixed(2)}</strong></td><td colspan="3"></td></tr>`
-        : '';
+      const totalRow = `<tr style="height:22px"><td colspan="5" style="text-align:right"><strong>总价</strong></td><td style="text-align:right"><strong>${totalPrice.toFixed(2)}</strong></td><td colspan="3"></td></tr>`;
 
       return `
         <div style="display:flex;align-items:flex-start;margin-bottom:4px">

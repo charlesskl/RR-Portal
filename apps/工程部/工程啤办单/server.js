@@ -316,6 +316,7 @@ function persistAsmImages(orderId, keepList, newImages, existingList) {
     final.push(name);
   });
   fs.readdirSync(dir).forEach(f => {
+    if (f.startsWith('item-')) return; // 明细行图片由 persistAsmItemImages 管理，不在这里清理
     if (!final.includes(f)) fs.unlinkSync(path.join(dir, f));
   });
   return final;
@@ -351,6 +352,11 @@ function persistAsmItemImages(orderId, items) {
       it.image = null;
     }
   }
+  // 清理不再被任何明细行引用的旧行图（用户移除/更换图片后）
+  const used = new Set(items.filter(it => typeof it.image === 'string').map(it => it.image));
+  fs.readdirSync(dir).forEach(f => {
+    if (f.startsWith('item-') && !used.has(f)) fs.unlinkSync(path.join(dir, f));
+  });
 }
 
 // 读取订单图片（GET 无需 X-User；文件名由服务端生成，正则兜底防穿越）

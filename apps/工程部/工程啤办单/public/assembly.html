@@ -89,7 +89,7 @@
           <table class="table table-bordered table-sm items-table" id="asmItemsTable">
             <thead>
               <tr>
-                <th style="width:50px">序号</th><th>名称</th><th style="width:80px">数量</th><th>要求完成日期</th><th>价格</th><th>完成时间</th><th style="width:40px"></th>
+                <th style="width:50px">序号</th><th>名称</th><th style="width:80px">数量</th><th>要求完成日期</th><th>价格</th><th>完成时间</th><th style="width:96px">图片</th><th style="width:40px"></th>
               </tr>
             </thead>
             <tbody id="asmItemsBody"></tbody>
@@ -356,6 +356,7 @@ function inp(type, name, val='', extra='') {
 function addAsmRow(it={}) {
   _rowSeq++;
   const tr = document.createElement('tr');
+  tr._img = it.image ? { name: it.image, dataUrl: null } : {};
   tr.innerHTML = `
     <td class="text-center seq-num">${_rowSeq}</td>
     <td>${inp('text','product_name',it.product_name,'placeholder="夹具名称"')}</td>
@@ -363,8 +364,45 @@ function addAsmRow(it={}) {
     <td>${inp('text','required_date',it.required_date,'placeholder="YYYY-MM-DD" class="w-date"')}</td>
     <td>${inp('number','price',it.price||'','placeholder="价格" step="0.01"')}</td>
     <td>${inp('text','completion_time',it.completion_time,'placeholder="完成时间" class="w-date"')}</td>
+    <td class="text-center asm-img-cell p-1">
+      <input type="file" accept="image/*" hidden onchange="onAsmRowImage(this)">
+      <button type="button" class="btn btn-sm btn-outline-primary py-0 px-1" title="上传图片" onclick="this.previousElementSibling.click()"><i class="bi bi-image"></i></button>
+      <span class="asm-row-preview d-inline-block align-middle ms-1"></span>
+    </td>
     <td><button type="button" class="btn btn-sm btn-danger" onclick="removeRow(this)"><i class="bi bi-x-lg"></i></button></td>`;
   document.getElementById('asmItemsBody').appendChild(tr);
+  renderAsmRowImage(tr);
+}
+
+// ─── 明细行图片（每行一张：tr._img = { name?: 服务端文件名, dataUrl?: 新图 }) ───
+function renderAsmRowImage(tr) {
+  const box = tr.querySelector('.asm-row-preview');
+  const img = tr._img || {};
+  const orderId = document.getElementById('asm-id').value;
+  const src = img.dataUrl || (img.name && orderId ? asmImgUrl(orderId, img.name) : '');
+  box.innerHTML = src
+    ? `<img src="${src}" title="点击移除图片" style="max-height:34px;max-width:56px;border-radius:4px;border:1px solid #ddd;cursor:pointer" onclick="clearAsmRowImage(this)">`
+    : '';
+}
+
+function onAsmRowImage(input) {
+  const file = input.files[0];
+  input.value = '';
+  if (!file) return;
+  if (!file.type.startsWith('image/')) { showToast('请选择图片文件', 'warning'); return; }
+  fileToResizedDataURL(file)
+    .then(dataUrl => {
+      const tr = input.closest('tr');
+      tr._img = { name: tr._img?.name || null, dataUrl };
+      renderAsmRowImage(tr);
+    })
+    .catch(() => showToast('图片处理失败: ' + file.name, 'danger'));
+}
+
+function clearAsmRowImage(el) {
+  const tr = el.closest('tr');
+  tr._img = {};
+  renderAsmRowImage(tr);
 }
 
 function removeRow(btn) {
@@ -399,6 +437,11 @@ function saveOrder() {
   if (!items.length || items.every(it => !it.product_name)) {
     alert('请至少填写一项夹具名称'); return;
   }
+  document.querySelectorAll('#asmItemsBody tr').forEach((tr, i) => {
+    const st = tr._img || {};
+    items[i].image = st.name || null;
+    if (st.dataUrl) items[i].new_image = st.dataUrl;
+  });
 
   const id = document.getElementById('asm-id').value;
   const body = {
@@ -507,8 +550,8 @@ function renderOrderDetails(order) {
   const items = order.items || [];
   if (!items.length) return headerHtml + '<div class="text-muted small">（无明细行）</div>';
 
-  const thead = '<tr><th>序号</th><th>名称</th><th>数量</th><th>要求完成日期</th><th>价格</th><th>完成时间</th></tr>';
-  const rows = items.map((it, i) => `<tr><td>${i+1}</td><td>${esc(it.product_name||'-')}</td><td>${esc(it.quantity||'-')}</td><td>${esc(it.required_date||'-')}</td><td>${esc(it.price||'-')}</td><td>${esc(it.completion_time||'-')}</td></tr>`).join('');
+  const thead = '<tr><th>序号</th><th>名称</th><th>数量</th><th>要求完成日期</th><th>价格</th><th>完成时间</th><th>图片</th></tr>';
+  const rows = items.map((it, i) => `<tr><td>${i+1}</td><td>${esc(it.product_name||'-')}</td><td>${esc(it.quantity||'-')}</td><td>${esc(it.required_date||'-')}</td><td>${esc(it.price||'-')}</td><td>${esc(it.completion_time||'-')}</td><td>${it.image ? `<img src="${asmImgUrl(order.id, it.image)}" style="max-height:48px;max-width:72px;border-radius:4px;border:1px solid #ddd">` : '-'}</td></tr>`).join('');
 
   return headerHtml + `<div class="table-responsive"><table class="table table-bordered table-sm"><thead class="table-light">${thead}</thead><tbody>${rows}</tbody></table></div>`;
 }

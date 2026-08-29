@@ -353,7 +353,7 @@
           <td style="text-align:center">${v(it.quantity)}</td>
           <td style="text-align:center">${i < items.length && it.quantity ? 'SET' : ''}</td>
           <td style="text-align:right">${v(it.price)}</td>
-          <td></td>
+          <td style="text-align:center">${i < items.length && it.image ? `<img src="${API_BASE}/api/assembly-images/${o.id}/${v(it.image)}" style="max-height:44px;max-width:76px">` : ''}</td>
           <td style="text-align:center">${v(it.completion_time)}</td>
           <td></td>
         </tr>`).join('');

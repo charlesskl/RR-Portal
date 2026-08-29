@@ -325,6 +325,34 @@ function removeAsmImages(orderId) {
   fs.rmSync(path.join(ASM_IMG_DIR, String(orderId)), { recursive: true, force: true });
 }
 
+// 夹具明细行图片：item.new_image 为 base64 dataURL，落盘为文件后 item.image 只存文件名；
+// 校验旧文件名（前端回传保留的 image）防止伪造/穿越，不存在的置空。
+function persistAsmItemImages(orderId, items) {
+  if (!Array.isArray(items)) return;
+  const dir = path.join(ASM_IMG_DIR, String(orderId));
+  fs.mkdirSync(dir, { recursive: true });
+  for (const it of items) {
+    const d = it.new_image;
+    delete it.new_image;
+    if (typeof d === 'string') {
+      const m = /^data:image\/(png|jpe?g|webp|gif);base64,([A-Za-z0-9+/=]+)$/.exec(d);
+      if (m) {
+        const buf = Buffer.from(m[2], 'base64');
+        if (buf.length && buf.length <= ASM_IMG_MAX_BYTES) {
+          const ext = m[1] === 'jpeg' ? 'jpg' : m[1];
+          const name = `item-${Date.now()}-${crypto.randomBytes(4).toString('hex')}.${ext}`;
+          fs.writeFileSync(path.join(dir, name), buf);
+          it.image = name;
+        }
+      }
+    }
+    if (typeof it.image !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,80}$/.test(it.image) ||
+        !fs.existsSync(path.join(dir, it.image))) {
+      it.image = null;
+    }
+  }
+}
+
 // 读取订单图片（GET 无需 X-User；文件名由服务端生成，正则兜底防穿越）
 app.get('/api/assembly-images/:orderId/:file', (req, res) => {
   const { orderId, file } = req.params;
@@ -379,10 +407,16 @@ app.use('/api', (req, res, next) => {
       const newImages = type === 'assembly' ? header.new_images : undefined;
       if (type === 'assembly') delete header.new_images;
       const created = createOrder(type, header, items);
-      if (type === 'assembly' && Array.isArray(newImages) && newImages.length) {
+      if (type === 'assembly') {
         const data = loadData();
         const o = data.assembly_orders.find(x => x.id === created.id);
-        if (o) { o.images = persistAsmImages(o.id, [], newImages, []); saveData(data); }
+        if (o) {
+          if (Array.isArray(newImages) && newImages.length) {
+            o.images = persistAsmImages(o.id, [], newImages, []);
+          }
+          persistAsmItemImages(o.id, data.assembly_items.filter(i => i.order_id === o.id));
+          saveData(data);
+        }
         return res.status(201).json(getOrderById(type, created.id));
       }
       res.status(201).json(created);
@@ -429,7 +463,11 @@ app.use('/api', (req, res, next) => {
       if (updated && imgReq) {
         const d2 = loadData();
         const o2 = d2.assembly_orders.find(o => o.id === +req.params.id);
-        if (o2) { o2.images = persistAsmImages(o2.id, imgReq.keep, imgReq.newImages, o2.images); saveData(d2); }
+        if (o2) {
+          o2.images = persistAsmImages(o2.id, imgReq.keep, imgReq.newImages, o2.images);
+          persistAsmItemImages(o2.id, d2.assembly_items.filter(i => i.order_id === o2.id));
+          saveData(d2);
+        }
         return res.json(getOrderById(type, req.params.id));
       }
       updated ? res.json(updated) : res.status(404).json({ error: '未找到' });

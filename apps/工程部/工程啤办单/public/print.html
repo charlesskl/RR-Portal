@@ -350,13 +350,17 @@
           <td style="text-align:center">${i < items.length ? i + 1 : ''}</td>
           <td style="text-align:center">${i < items.length ? v(`${o.order_number || ''}-${String(i + 1).padStart(3, '0')}`) : ''}</td>
           <td>${v(it.product_name)}</td>
-          <td></td>
           <td style="text-align:center">${v(it.quantity)}</td>
           <td style="text-align:center">${i < items.length && it.quantity ? 'SET' : ''}</td>
+          <td style="text-align:right">${v(it.price)}</td>
           <td></td>
-          <td></td>
+          <td style="text-align:center">${v(it.completion_time)}</td>
           <td></td>
         </tr>`).join('');
+      const totalPrice = items.reduce((a, it) => a + (Number(it.price) || 0) * (Number(it.quantity) || 0), 0);
+      const totalRow = items.some(it => it.price != null && it.price !== '')
+        ? `<tr style="height:22px"><td colspan="5" style="text-align:right"><strong>总价</strong></td><td style="text-align:right"><strong>${totalPrice.toFixed(2)}</strong></td><td colspan="3"></td></tr>`
+        : '';
 
       return `
         <div style="display:flex;align-items:flex-start;margin-bottom:4px">
@@ -381,15 +385,15 @@
               <th style="width:40px">No.<br>序号</th>
               <th style="width:130px">Nomor JIG<br>夹具编号</th>
               <th>夹具名称<br><span style="font-weight:normal">Nama Mandarin JIG</span></th>
-              <th>夹具印尼文名称<br><span style="font-weight:normal">Nama Indonesia JIG</span></th>
               <th style="width:56px">Jumlah<br>数量</th>
               <th style="width:56px">Satuan<br>单位</th>
+              <th style="width:80px">报价</th>
               <th style="width:110px">Gambar JIG<br>夹具图片</th>
-              <th style="width:120px">装配签收人<br><span style="font-weight:normal">Pihak penerima</span></th>
+              <th style="width:100px">完成时间</th>
               <th style="width:90px">Catatan<br>备注</th>
             </tr>
           </thead>
-          <tbody>${rows}</tbody>
+          <tbody>${rows}${totalRow}</tbody>
         </table>
         <div style="border:1px solid #333;border-top:none;padding:6px 8px;font-size:9pt;display:flex;align-items:center">
           <span style="flex:1"><strong>申请：</strong>${v(o.eng_name || o.created_by)}</span>

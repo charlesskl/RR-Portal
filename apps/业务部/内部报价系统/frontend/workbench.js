@@ -3449,7 +3449,7 @@ function renderMolding(host, payload, canEdit, onChange, refMolds, fxRmbHkd, use
       if (!ownMachine && mac.length) { payload.machine_prices = JSON.parse(JSON.stringify(mac)); changed = true; }
       if (canEdit) {
         const autoResult = applyInjectionReferencePrices(payload, { overwrite: false });
-        if (autoResult.changed) { changed = true; onChange(); }
+        if (autoResult.changed) { changed = true; /* 自动补齐的值来自参考表，不应标记为未保存 */ }
       }
       if (changed || window.__refs.material_meta) {
         renderMolding(host, payload, canEdit, onChange, refMolds, fxRmbHkd, userRole);

@@ -2327,7 +2327,7 @@ function renderFreightScenarioPanel(ws, row, eng, sales, refs, startCol) {
     ws.getCell(row, startCol + 2).value = fee;
     ws.getCell(row, startCol + 2).numFmt = '"HK$"#,##0';
     const boxesCalc = Math.max(Math.round(cap / cuftValue), 1);
-    const boxesFormula = `MAX(ROUND(${capCol}${row}/${cuftRef ? `MAX(${cuftRef},0.01)` : '1'},0),1)`;
+    const boxesFormula = `MAX(ROUND(${capCol}${row}/${cuftRef ? `MAX(${cuftRef},0.01)` : '0.01'},0),1)`;
     ws.getCell(row, startCol + 3).value = { formula: boxesFormula, result: boxesCalc };
     ws.getCell(row, startCol + 4).value = {
       formula: `${feeCol}${row}/${boxesCol}${row}/${qtyRef ? `MAX(${qtyRef},1)` : '1'}`,

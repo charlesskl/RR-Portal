@@ -12,20 +12,42 @@ name: Internal Quote Data Ops
 #                        账号种子（PR 576）在容器启动时读取该变量为新建账号设初始密码。
 #   mode=delete-users      —— 删除指定账号（逗号分隔）。user_factories/user_customers/user_perms
 #                        级联删除，factory_material_price_control 置空；报价等业务数据不受影响。
+#   mode=create-user       —— 创建账号（如恢复被删的 admin），密码取 Secret
+#                        INTERNAL_QUOTE_ACCOUNT_PASSWORD，归属 qingxi 厂区并赋予全部客户。
+#   mode=clear-quotes      —— 清空全部报价：先 pg_dump 备份 quotes+quote_sections 到
+#                        /opt/rr-portal/backups/，再 DELETE（sections 级联）。参考表/账号不动。
 
 on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "check-env / check-users / counts / set-account-password-env / delete-users"
+        description: "check-env / check-users / counts / set-account-password-env / delete-users / create-user / clear-quotes"
         type: choice
         required: true
         default: counts
-        options: [check-env, check-users, counts, set-account-password-env, delete-users]
+        options: [check-env, check-users, counts, set-account-password-env, delete-users, create-user, clear-quotes]
       usernames:
         description: "mode=delete-users 时要删除的账号名（逗号分隔；仅限配置表之外的旧账号）"
         type: string
         required: false
+      username:
+        description: "mode=create-user 时的登录名"
+        type: string
+        required: false
+      display_name:
+        description: "mode=create-user 时的显示名"
+        type: string
+        required: false
+      dept:
+        description: "mode=create-user 时的部门代码（sales/engineering/electronic/sewing/painting/slush/molding/assembly）"
+        type: string
+        required: false
+        default: sales
+      role:
+        description: "mode=create-user 时的角色（admin/supervisor/staff）"
+        type: string
+        required: false
+        default: admin
 
 permissions:
   contents: read
@@ -57,6 +79,10 @@ jobs:
           OPS_MODE: ${{ inputs.mode }}
           ACCOUNT_PASSWORD_VALUE: ${{ secrets.INTERNAL_QUOTE_ACCOUNT_PASSWORD }}
           OPS_USERNAMES: ${{ inputs.usernames }}
+          OPS_USERNAME: ${{ inputs.username }}
+          OPS_DISPLAY: ${{ inputs.display_name }}
+          OPS_DEPT: ${{ inputs.dept }}
+          OPS_ROLE: ${{ inputs.role }}
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         with:
           host: ${{ secrets.CLOUD_HOST }}
@@ -64,7 +90,7 @@ jobs:
           key: ${{ secrets.CLOUD_SSH_KEY }}
           fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
           command_timeout: 8m
-          envs: OPS_MODE,ACCOUNT_PASSWORD_VALUE,OPS_USERNAMES
+          envs: OPS_MODE,ACCOUNT_PASSWORD_VALUE,OPS_USERNAMES,OPS_USERNAME,OPS_DISPLAY,OPS_DEPT,OPS_ROLE
           script: |
             set -uo pipefail
             cd /opt/rr-portal
@@ -93,6 +119,39 @@ jobs:
               q "DELETE FROM internal_quote.users WHERE username IN ($SQL_LIST)"
               q "SELECT '剩余用户数=' || COUNT(*) FROM internal_quote.users"
               echo "[OK] delete-users 完成"
+              exit 0
+            fi
+
+            if [ "$MODE" = "create-user" ]; then
+              U="${OPS_USERNAME:-}"; D="${OPS_DEPT:-sales}"; R="${OPS_ROLE:-admin}"; DN="${OPS_DISPLAY:-$U}"
+              P="${ACCOUNT_PASSWORD_VALUE:-}"
+              [ -n "$U" ] && [ -n "$P" ] || { echo "[FAIL] 需要提供 username，且 Secret INTERNAL_QUOTE_ACCOUNT_PASSWORD 已设置" >&2; exit 1; }
+              [[ "$U" =~ ^[一-龥A-Za-z0-9_.-]{1,50}$ ]] || { echo "[FAIL] 非法账号名" >&2; exit 1; }
+              HASH=$(docker compose -f docker-compose.cloud.yml --env-file "$ENVF" exec -T -e "OPS_P=$P" internal-quote \
+                node -e "console.log(require('bcryptjs').hashSync(process.env.OPS_P, 8))")
+              [ -n "$HASH" ] || { echo "[FAIL] 密码哈希生成失败" >&2; exit 1; }
+              echo "-- 创建/恢复账号: $U (dept=$D role=$R) --"
+              q "INSERT INTO internal_quote.users (username, password_hash, display_name, dept, role, factory_code) VALUES ('$U', '$HASH', '$DN', '$D', '$R', 'qingxi') ON CONFLICT (username) DO UPDATE SET password_hash=EXCLUDED.password_hash, display_name=EXCLUDED.display_name, dept=EXCLUDED.dept, role=EXCLUDED.role, factory_code='qingxi'"
+              q "INSERT INTO internal_quote.user_factories (user_id, factory_code) SELECT id, 'qingxi' FROM internal_quote.users WHERE username='$U' ON CONFLICT DO NOTHING"
+              q "INSERT INTO internal_quote.user_customers (user_id, customer) SELECT u.id, c.name FROM internal_quote.users u CROSS JOIN (SELECT DISTINCT customer AS name FROM (SELECT customer FROM internal_quote.quotes WHERE customer IS NOT NULL UNION SELECT customer FROM internal_quote.user_customers) t) c WHERE u.username='$U' ON CONFLICT DO NOTHING"
+              q "SELECT '已创建: ' || username || ' | ' || dept || ' | ' || role FROM internal_quote.users WHERE username='$U'"
+              echo "[OK] create-user 完成（密码与 Secret INTERNAL_QUOTE_ACCOUNT_PASSWORD 相同，请登录后修改）"
+              exit 0
+            fi
+
+            if [ "$MODE" = "clear-quotes" ]; then
+              TS="$(date +%Y%m%d-%H%M%S)"
+              BK="/opt/rr-portal/backups/internal-quote-quotes-$TS.sql"
+              mkdir -p /opt/rr-portal/backups
+              echo "-- 备份 quotes+quote_sections 到 $BK --"
+              docker compose -f docker-compose.cloud.yml --env-file "$ENVF" exec -T db \
+                pg_dump -U rrportal -d rrportal --schema=internal_quote -t 'internal_quote.quotes' -t 'internal_quote.quote_sections' --data-only > "$BK"
+              [ -s "$BK" ] && echo "  备份大小: $(stat -c%s "$BK") bytes"
+              q "SELECT '删除前报价数=' || COUNT(*) FROM internal_quote.quotes"
+              q "DELETE FROM internal_quote.quotes"
+              q "SELECT '删除后报价数=' || COUNT(*) FROM internal_quote.quotes"
+              q "SELECT '剩余明细段=' || COUNT(*) FROM internal_quote.quote_sections"
+              echo "[OK] clear-quotes 完成（备份: $BK）"
               exit 0
             fi
 

@@ -1,0 +1,204 @@
+name: Internal Quote Data Ops
+
+# 内部报价系统（internal-quote，Postgres schema=internal_quote）数据运维。
+#
+#   mode=check-env    —— 只读：检查 .env.cloud.production 中关键环境变量是否存在（只显示
+#                        设置/未设置，不显示值），重点核对 ACCOUNT_INITIAL_PASSWORD，
+#                        避免账号种子因缺密码导致服务起不来。
+#   mode=check-users  —— 只读：列出全部账号（用户名/部门/角色/显示名/厂区），不输出密码哈希。
+#   mode=counts       —— 只读：关键表行数（users/quotes/user_customers/user_perms 等）。
+#   mode=set-account-password-env —— 把 GitHub Secret INTERNAL_QUOTE_ACCOUNT_PASSWORD 幂等写入
+#                        ECS 的 .env.cloud.production（不重建容器；下次重建时生效）。
+#                        账号种子（PR 576）在容器启动时读取该变量为新建账号设初始密码。
+#   mode=delete-users      —— 删除指定账号（逗号分隔）。user_factories/user_customers/user_perms
+#                        级联删除，factory_material_price_control 置空；报价等业务数据不受影响。
+#   mode=create-user       —— 创建账号（如恢复被删的 admin），密码取 Secret
+#                        INTERNAL_QUOTE_ACCOUNT_PASSWORD，归属 qingxi 厂区并赋予全部客户。
+#   mode=clear-quotes      —— 清空全部报价：先 pg_dump 备份 quotes+quote_sections 到
+#                        /opt/rr-portal/backups/，再 DELETE（sections 级联）。参考表/账号不动。
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "check-env / check-users / counts / set-account-password-env / delete-users / create-user / clear-quotes"
+        type: choice
+        required: true
+        default: counts
+        options: [check-env, check-users, counts, set-account-password-env, delete-users, create-user, clear-quotes]
+      usernames:
+        description: "mode=delete-users 时要删除的账号名（逗号分隔；仅限配置表之外的旧账号）"
+        type: string
+        required: false
+      username:
+        description: "mode=create-user 时的登录名"
+        type: string
+        required: false
+      display_name:
+        description: "mode=create-user 时的显示名"
+        type: string
+        required: false
+      dept:
+        description: "mode=create-user 时的部门代码（sales/engineering/electronic/sewing/painting/slush/molding/assembly）"
+        type: string
+        required: false
+        default: sales
+      role:
+        description: "mode=create-user 时的角色（admin/supervisor/staff）"
+        type: string
+        required: false
+        default: admin
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-cloud
+  queue: max
+  cancel-in-progress: false
+
+jobs:
+  ops:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Validate SSH host fingerprint
+        shell: bash
+        env:
+          CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]]; then
+            echo 'CLOUD_HOST_FINGERPRINT must be a non-empty OpenSSH SHA256 fingerprint.' >&2
+            exit 1
+          fi
+
+      - name: Internal quote data ops via SSH
+        env:
+          CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+          OPS_MODE: ${{ inputs.mode }}
+          ACCOUNT_PASSWORD_VALUE: ${{ secrets.INTERNAL_QUOTE_ACCOUNT_PASSWORD }}
+          OPS_USERNAMES: ${{ inputs.usernames }}
+          OPS_USERNAME: ${{ inputs.username }}
+          OPS_DISPLAY: ${{ inputs.display_name }}
+          OPS_DEPT: ${{ inputs.dept }}
+          OPS_ROLE: ${{ inputs.role }}
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
+        with:
+          host: ${{ secrets.CLOUD_HOST }}
+          username: ${{ secrets.CLOUD_USER }}
+          key: ${{ secrets.CLOUD_SSH_KEY }}
+          fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
+          command_timeout: 8m
+          envs: OPS_MODE,ACCOUNT_PASSWORD_VALUE,OPS_USERNAMES,OPS_USERNAME,OPS_DISPLAY,OPS_DEPT,OPS_ROLE
+          script: |
+            set -uo pipefail
+            cd /opt/rr-portal
+            MODE="${OPS_MODE:-counts}"
+            ENVF=".env.cloud.production"
+            echo "=================== MODE: $MODE ==================="
+
+            # Postgres 查询（容器内本地连接，只读）
+            q() {
+              docker compose -f docker-compose.cloud.yml --env-file "$ENVF" exec -T db \
+                psql -U rrportal -d rrportal -At -c "$1"
+            }
+
+
+            if [ "$MODE" = "delete-users" ]; then
+              RAW="${OPS_USERNAMES:-}"
+              [ -n "$RAW" ] || { echo "[FAIL] 需要提供 usernames" >&2; exit 1; }
+              SQL_LIST=""
+              IFS=',' read -ra NAMES <<< "$RAW"
+              for n in "${NAMES[@]}"; do
+                n="$(echo "$n" | xargs)"
+                [[ "$n" =~ ^[一-龥A-Za-z0-9_.-]{1,50}$ ]] || { echo "[FAIL] 非法账号名: $n" >&2; exit 1; }
+                SQL_LIST="${SQL_LIST}${SQL_LIST:+,}'$n'"
+              done
+              echo "-- 删除账号: $SQL_LIST --"
+              q "DELETE FROM internal_quote.users WHERE username IN ($SQL_LIST)"
+              q "SELECT '剩余用户数=' || COUNT(*) FROM internal_quote.users"
+              echo "[OK] delete-users 完成"
+              exit 0
+            fi
+
+            if [ "$MODE" = "create-user" ]; then
+              U="${OPS_USERNAME:-}"; D="${OPS_DEPT:-sales}"; R="${OPS_ROLE:-admin}"; DN="${OPS_DISPLAY:-$U}"
+              P="${ACCOUNT_PASSWORD_VALUE:-}"
+              [ -n "$U" ] && [ -n "$P" ] || { echo "[FAIL] 需要提供 username，且 Secret INTERNAL_QUOTE_ACCOUNT_PASSWORD 已设置" >&2; exit 1; }
+              [[ "$U" =~ ^[一-龥A-Za-z0-9_.-]{1,50}$ ]] || { echo "[FAIL] 非法账号名" >&2; exit 1; }
+              HASH=$(docker compose -f docker-compose.cloud.yml --env-file "$ENVF" exec -T -e "OPS_P=$P" internal-quote \
+                node -e "console.log(require('bcryptjs').hashSync(process.env.OPS_P, 8))")
+              [ -n "$HASH" ] || { echo "[FAIL] 密码哈希生成失败" >&2; exit 1; }
+              echo "-- 创建/恢复账号: $U (dept=$D role=$R) --"
+              q "INSERT INTO internal_quote.users (username, password_hash, display_name, dept, role, factory_code) VALUES ('$U', '$HASH', '$DN', '$D', '$R', 'qingxi') ON CONFLICT (username) DO UPDATE SET password_hash=EXCLUDED.password_hash, display_name=EXCLUDED.display_name, dept=EXCLUDED.dept, role=EXCLUDED.role, factory_code='qingxi'"
+              q "INSERT INTO internal_quote.user_factories (user_id, factory_code) SELECT id, 'qingxi' FROM internal_quote.users WHERE username='$U' ON CONFLICT DO NOTHING"
+              q "INSERT INTO internal_quote.user_customers (user_id, customer) SELECT u.id, c.name FROM internal_quote.users u CROSS JOIN (SELECT DISTINCT customer AS name FROM (SELECT customer FROM internal_quote.quotes WHERE customer IS NOT NULL UNION SELECT customer FROM internal_quote.user_customers) t) c WHERE u.username='$U' ON CONFLICT DO NOTHING"
+              q "SELECT '已创建: ' || username || ' | ' || dept || ' | ' || role FROM internal_quote.users WHERE username='$U'"
+              echo "[OK] create-user 完成（密码与 Secret INTERNAL_QUOTE_ACCOUNT_PASSWORD 相同，请登录后修改）"
+              exit 0
+            fi
+
+            if [ "$MODE" = "clear-quotes" ]; then
+              TS="$(date +%Y%m%d-%H%M%S)"
+              BK="/opt/rr-portal/backups/internal-quote-quotes-$TS.sql"
+              mkdir -p /opt/rr-portal/backups
+              echo "-- 备份 quotes+quote_sections 到 $BK --"
+              docker compose -f docker-compose.cloud.yml --env-file "$ENVF" exec -T db \
+                pg_dump -U rrportal -d rrportal --schema=internal_quote -t 'internal_quote.quotes' -t 'internal_quote.quote_sections' --data-only > "$BK"
+              [ -s "$BK" ] && echo "  备份大小: $(stat -c%s "$BK") bytes"
+              q "SELECT '删除前报价数=' || COUNT(*) FROM internal_quote.quotes"
+              q "DELETE FROM internal_quote.quotes"
+              q "SELECT '删除后报价数=' || COUNT(*) FROM internal_quote.quotes"
+              q "SELECT '剩余明细段=' || COUNT(*) FROM internal_quote.quote_sections"
+              echo "[OK] clear-quotes 完成（备份: $BK）"
+              exit 0
+            fi
+
+            if [ "$MODE" = "set-account-password-env" ]; then
+              [ -n "${ACCOUNT_PASSWORD_VALUE:-}" ] || { echo "[FAIL] GitHub Secret INTERNAL_QUOTE_ACCOUNT_PASSWORD 未设置" >&2; exit 1; }
+              KEY="INTERNAL_QUOTE_ACCOUNT_PASSWORD"
+              if grep -q "^$KEY=." "$ENVF" 2>/dev/null; then
+                sed -i "s|^$KEY=.*|$KEY=$ACCOUNT_PASSWORD_VALUE|" "$ENVF" && echo "  已更新 $KEY"
+              else
+                echo "$KEY=$ACCOUNT_PASSWORD_VALUE" >> "$ENVF" && echo "  已追加 $KEY"
+              fi
+              grep -q "^$KEY=." "$ENVF" && echo "[OK] set-account-password-env 完成（下次重建容器时生效）"
+              exit 0
+            fi
+
+            if [ "$MODE" = "check-env" ]; then
+              echo "== 关键环境变量（只看是否设置，不显示值） =="
+              for k in INTERNAL_QUOTE_ACCOUNT_PASSWORD INTERNAL_QUOTE_ADMIN_PASSWORD INTERNAL_QUOTE_SESSION_SECRET INTERNAL_QUOTE_BAIDU_APPID; do
+                if grep -q "^$k=.\+" "$ENVF" 2>/dev/null; then
+                  echo "  $k = [已设置, ${#k} 字符名]"
+                else
+                  echo "  $k = [未设置]"
+                fi
+              done
+              echo "[OK] check-env 完成（只读）"
+              exit 0
+            fi
+
+
+            if [ "$MODE" = "check-users" ]; then
+              echo "== 账号列表 =="
+              q "SELECT username || ' | ' || COALESCE(dept,'-') || ' | ' || COALESCE(role,'-') || ' | ' || COALESCE(display_name,'-') || ' | ' || COALESCE(factory_code,'-') FROM internal_quote.users ORDER BY username"
+              echo "[OK] check-users 完成（只读）"
+              exit 0
+            fi
+
+            if [ "$MODE" = "counts" ]; then
+              echo "== 关键表行数 =="
+              q "SELECT 'users=' || COUNT(*) FROM internal_quote.users"
+              q "SELECT 'quotes=' || COUNT(*) FROM internal_quote.quotes"
+              q "SELECT 'user_customers=' || COUNT(*) FROM internal_quote.user_customers"
+              q "SELECT 'user_perms=' || COUNT(*) FROM internal_quote.user_perms"
+              q "SELECT 'user_factories=' || COUNT(*) FROM internal_quote.user_factories"
+              q "SELECT 'factories=' || COUNT(*) FROM internal_quote.factories"
+              q "SELECT 'app_migrations=' || COUNT(*) FROM internal_quote.app_migrations"
+              echo "[OK] counts 完成（只读）"
+              exit 0
+            fi
+
+            echo "[FAIL] 未知 mode: $MODE" >&2; exit 1

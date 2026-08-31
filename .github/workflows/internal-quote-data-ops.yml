@@ -65,6 +65,18 @@ jobs:
             ENVF=".env.cloud.production"
             echo "=================== MODE: $MODE ==================="
 
+            if [ "$MODE" = "set-account-password-env" ]; then
+              [ -n "${ACCOUNT_PASSWORD_VALUE:-}" ] || { echo "[FAIL] GitHub Secret INTERNAL_QUOTE_ACCOUNT_PASSWORD 未设置" >&2; exit 1; }
+              KEY="INTERNAL_QUOTE_ACCOUNT_PASSWORD"
+              if grep -q "^$KEY=." "$ENVF" 2>/dev/null; then
+                sed -i "s|^$KEY=.*|$KEY=$ACCOUNT_PASSWORD_VALUE|" "$ENVF" && echo "  已更新 $KEY"
+              else
+                echo "$KEY=$ACCOUNT_PASSWORD_VALUE" >> "$ENVF" && echo "  已追加 $KEY"
+              fi
+              grep -q "^$KEY=." "$ENVF" && echo "[OK] set-account-password-env 完成（下次重建容器时生效）"
+              exit 0
+            fi
+
             if [ "$MODE" = "check-env" ]; then
               echo "== 关键环境变量（只看是否设置，不显示值） =="
               for k in INTERNAL_QUOTE_ACCOUNT_PASSWORD INTERNAL_QUOTE_ADMIN_PASSWORD INTERNAL_QUOTE_SESSION_SECRET INTERNAL_QUOTE_BAIDU_APPID; do

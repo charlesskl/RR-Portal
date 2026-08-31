@@ -133,6 +133,10 @@ jobs:
               echo "-- 创建/恢复账号: $U (dept=$D role=$R) --"
               q "INSERT INTO internal_quote.users (username, password_hash, display_name, dept, role, factory_code) VALUES ('$U', '$HASH', '$DN', '$D', '$R', 'qingxi') ON CONFLICT (username) DO UPDATE SET password_hash=EXCLUDED.password_hash, display_name=EXCLUDED.display_name, dept=EXCLUDED.dept, role=EXCLUDED.role, factory_code='qingxi'"
               q "INSERT INTO internal_quote.user_factories (user_id, factory_code) SELECT id, 'qingxi' FROM internal_quote.users WHERE username='$U' ON CONFLICT DO NOTHING"
+              if [ "$R" = "admin" ]; then
+                q "INSERT INTO internal_quote.user_perms (user_id, menu, can_view, can_edit, can_review, can_admin) SELECT u.id, m.menu, 1, 1, 1, 1 FROM internal_quote.users u CROSS JOIN (SELECT DISTINCT menu FROM internal_quote.user_perms) m WHERE u.username='$U' ON CONFLICT DO NOTHING"
+                echo "  已授予 admin 全权（全部菜单 view/edit/review/admin）"
+              fi
               q "INSERT INTO internal_quote.user_customers (user_id, customer) SELECT u.id, c.name FROM internal_quote.users u CROSS JOIN (SELECT DISTINCT customer AS name FROM (SELECT customer FROM internal_quote.quotes WHERE customer IS NOT NULL UNION SELECT customer FROM internal_quote.user_customers) t) c WHERE u.username='$U' ON CONFLICT DO NOTHING"
               q "SELECT '已创建: ' || username || ' | ' || dept || ' | ' || role FROM internal_quote.users WHERE username='$U'"
               echo "[OK] create-user 完成（密码与 Secret INTERNAL_QUOTE_ACCOUNT_PASSWORD 相同，请登录后修改）"

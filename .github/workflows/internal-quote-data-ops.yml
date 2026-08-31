@@ -87,7 +87,7 @@ jobs:
               for n in "${NAMES[@]}"; do
                 n="$(echo "$n" | xargs)"
                 [[ "$n" =~ ^[一-龥A-Za-z0-9_.-]{1,50}$ ]] || { echo "[FAIL] 非法账号名: $n" >&2; exit 1; }
-                SQL_LIST="${SQL_LIST}${SQL_LIST:+,}'${n//'/''}'"
+                SQL_LIST="${SQL_LIST}${SQL_LIST:+,}'$n'"
               done
               echo "-- 删除账号: $SQL_LIST --"
               q "DELETE FROM internal_quote.users WHERE username IN ($SQL_LIST)"

@@ -17,11 +17,15 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "check-env / check-users / counts"
+        description: "check-env / check-users / counts / set-account-password-env / delete-users"
         type: choice
         required: true
         default: counts
-        options: [check-env, check-users, counts, set-account-password-env]
+        options: [check-env, check-users, counts, set-account-password-env, delete-users]
+      usernames:
+        description: "mode=delete-users 时要删除的账号名（逗号分隔；仅限配置表之外的旧账号）"
+        type: string
+        required: false
 
 permissions:
   contents: read

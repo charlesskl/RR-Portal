@@ -7,6 +7,9 @@ name: Internal Quote Data Ops
 #                        避免账号种子因缺密码导致服务起不来。
 #   mode=check-users  —— 只读：列出全部账号（用户名/部门/角色/显示名/厂区），不输出密码哈希。
 #   mode=counts       —— 只读：关键表行数（users/quotes/user_customers/user_perms 等）。
+#   mode=set-account-password-env —— 把 GitHub Secret INTERNAL_QUOTE_ACCOUNT_PASSWORD 幂等写入
+#                        ECS 的 .env.cloud.production（不重建容器；下次重建时生效）。
+#                        账号种子（PR 576）在容器启动时读取该变量为新建账号设初始密码。
 
 on:
   workflow_dispatch:
@@ -16,7 +19,7 @@ on:
         type: choice
         required: true
         default: counts
-        options: [check-env, check-users, counts]
+        options: [check-env, check-users, counts, set-account-password-env]
 
 permissions:
   contents: read
@@ -46,6 +49,7 @@ jobs:
         env:
           CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
           OPS_MODE: ${{ inputs.mode }}
+          ACCOUNT_PASSWORD_VALUE: ${{ secrets.INTERNAL_QUOTE_ACCOUNT_PASSWORD }}
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         with:
           host: ${{ secrets.CLOUD_HOST }}
@@ -53,7 +57,7 @@ jobs:
           key: ${{ secrets.CLOUD_SSH_KEY }}
           fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
           command_timeout: 8m
-          envs: OPS_MODE
+          envs: OPS_MODE,ACCOUNT_PASSWORD_VALUE
           script: |
             set -uo pipefail
             cd /opt/rr-portal

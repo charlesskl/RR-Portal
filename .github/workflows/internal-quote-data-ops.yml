@@ -10,6 +10,8 @@ name: Internal Quote Data Ops
 #   mode=set-account-password-env —— 把 GitHub Secret INTERNAL_QUOTE_ACCOUNT_PASSWORD 幂等写入
 #                        ECS 的 .env.cloud.production（不重建容器；下次重建时生效）。
 #                        账号种子（PR 576）在容器启动时读取该变量为新建账号设初始密码。
+#   mode=delete-users      —— 删除指定账号（逗号分隔）。user_factories/user_customers/user_perms
+#                        级联删除，factory_material_price_control 置空；报价等业务数据不受影响。
 
 on:
   workflow_dispatch:
@@ -50,6 +52,7 @@ jobs:
           CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
           OPS_MODE: ${{ inputs.mode }}
           ACCOUNT_PASSWORD_VALUE: ${{ secrets.INTERNAL_QUOTE_ACCOUNT_PASSWORD }}
+          OPS_USERNAMES: ${{ inputs.usernames }}
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         with:
           host: ${{ secrets.CLOUD_HOST }}
@@ -57,13 +60,37 @@ jobs:
           key: ${{ secrets.CLOUD_SSH_KEY }}
           fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
           command_timeout: 8m
-          envs: OPS_MODE,ACCOUNT_PASSWORD_VALUE
+          envs: OPS_MODE,ACCOUNT_PASSWORD_VALUE,OPS_USERNAMES
           script: |
             set -uo pipefail
             cd /opt/rr-portal
             MODE="${OPS_MODE:-counts}"
             ENVF=".env.cloud.production"
             echo "=================== MODE: $MODE ==================="
+
+            # Postgres 查询（容器内本地连接，只读）
+            q() {
+              docker compose -f docker-compose.cloud.yml --env-file "$ENVF" exec -T db \
+                psql -U rrportal -d rrportal -At -c "$1"
+            }
+
+
+            if [ "$MODE" = "delete-users" ]; then
+              RAW="${OPS_USERNAMES:-}"
+              [ -n "$RAW" ] || { echo "[FAIL] 需要提供 usernames" >&2; exit 1; }
+              SQL_LIST=""
+              IFS=',' read -ra NAMES <<< "$RAW"
+              for n in "${NAMES[@]}"; do
+                n="$(echo "$n" | xargs)"
+                [[ "$n" =~ ^[一-龥A-Za-z0-9_.-]{1,50}$ ]] || { echo "[FAIL] 非法账号名: $n" >&2; exit 1; }
+                SQL_LIST="${SQL_LIST}${SQL_LIST:+,}'${n//'/''}'"
+              done
+              echo "-- 删除账号: $SQL_LIST --"
+              q "DELETE FROM internal_quote.users WHERE username IN ($SQL_LIST)"
+              q "SELECT '剩余用户数=' || COUNT(*) FROM internal_quote.users"
+              echo "[OK] delete-users 完成"
+              exit 0
+            fi
 
             if [ "$MODE" = "set-account-password-env" ]; then
               [ -n "${ACCOUNT_PASSWORD_VALUE:-}" ] || { echo "[FAIL] GitHub Secret INTERNAL_QUOTE_ACCOUNT_PASSWORD 未设置" >&2; exit 1; }
@@ -90,11 +117,6 @@ jobs:
               exit 0
             fi
 
-            # Postgres 查询（容器内本地连接，只读）
-            q() {
-              docker compose -f docker-compose.cloud.yml --env-file "$ENVF" exec -T db \
-                psql -U rrportal -d rrportal -At -c "$1"
-            }
 
             if [ "$MODE" = "check-users" ]; then
               echo "== 账号列表 =="

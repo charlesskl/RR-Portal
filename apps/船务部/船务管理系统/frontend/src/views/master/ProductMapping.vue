@@ -12,6 +12,7 @@
             <input v-model="searchInput" placeholder="搜索货号或货名" class="plain-search-input" @keyup.enter="doSearch" />
             <el-button type="primary" @click="doSearch" :icon="Search">搜索</el-button>
             <el-button @click="searchInput = ''; doSearch()" :icon="Refresh">重置</el-button>
+            <el-button :icon="Download" :loading="exporting" @click="exportProducts">导出</el-button>
             <el-button type="success" :icon="Plus" @click="addNew">新增</el-button>
           </div>
         </div>
@@ -205,13 +206,14 @@
 
 <script setup>
 import { ref, onMounted, computed } from 'vue'
-import { Search, Refresh, Plus } from '@element-plus/icons-vue'
+import { Search, Refresh, Plus, Download } from '@element-plus/icons-vue'
 import api from '../../api/auth'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 const products = ref([])
 const loading = ref(false)
 const saving = ref(false)
+const exporting = ref(false)
 const searchInput = ref('')
 const searchQuery = ref('')
 const selectedCustomer = ref('')
@@ -291,6 +293,32 @@ async function loadData() {
 function doSearch() { searchQuery.value = searchInput.value; page.value = 1; loadData() }
 function selectCustomer() { page.value = 1; loadData() }
 function handleSizeChange(size) { pageSize.value = size; page.value = 1; loadData() }
+
+async function exportProducts() {
+  exporting.value = true
+  try {
+    const params = {}
+    if (searchQuery.value) params.search = searchQuery.value
+    if (selectedCustomer.value) params.customer = selectedCustomer.value
+    const { data } = await api.get('/master-data/product-mappings/export/', {
+      params,
+      responseType: 'blob',
+    })
+    const url = URL.createObjectURL(data)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `产品资料_${new Date().toISOString().slice(0, 10)}.csv`
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(url)
+    ElMessage.success('产品资料已导出')
+  } catch (e) {
+    ElMessage.error('导出失败，请重试')
+  } finally {
+    exporting.value = false
+  }
+}
 
 function addNew() {
   editForm.value = { customer_name: selectedCustomer.value || 'ZURU' }

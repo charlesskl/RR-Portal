@@ -1,9 +1,11 @@
+import csv
 import re
 import tempfile
 from decimal import Decimal, InvalidOperation
 
+from django.http import HttpResponse
 from rest_framework import viewsets, filters, status
-from rest_framework.decorators import api_view, parser_classes
+from rest_framework.decorators import action, api_view, parser_classes
 from rest_framework.parsers import MultiPartParser
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
@@ -78,6 +80,30 @@ class ProductMappingViewSet(viewsets.ModelViewSet):
         if source:
             qs = qs.filter(source=source)
         return qs
+
+    @action(detail=False, methods=['get'], url_path='export')
+    def export_csv(self, request):
+        """导出全部货号映射，并沿用列表页的客户和搜索筛选。"""
+        queryset = self.filter_queryset(self.get_queryset())
+        response = HttpResponse(content_type='text/csv; charset=utf-8')
+        response['Content-Disposition'] = 'attachment; filename="product_mappings.csv"'
+        # Excel 直接打开 UTF-8 CSV 时需要 BOM 才能正确识别中文。
+        response.write('\ufeff')
+        writer = csv.writer(response)
+        writer.writerow([
+            '客户', '货号', '货名', '每箱个数', '玩具类别', '备注(柜单)',
+            '每箱毛重(kg)', '每箱净重(kg)', '来源',
+        ])
+        for item in queryset.iterator(chunk_size=1000):
+            writer.writerow([
+                item.customer_name, item.product_code, item.product_name,
+                item.qty_per_box if item.qty_per_box is not None else '',
+                item.toy_category, item.factory_short,
+                item.gross_weight_per_box if item.gross_weight_per_box is not None else '',
+                item.net_weight_per_box if item.net_weight_per_box is not None else '',
+                item.source,
+            ])
+        return response
 
 
 SKIP_CN = re.compile(r'[\u4e00-\u9fff]')

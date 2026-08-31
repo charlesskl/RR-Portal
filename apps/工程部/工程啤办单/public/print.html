@@ -353,12 +353,13 @@
           <td style="text-align:center">${v(it.quantity)}</td>
           <td style="text-align:center">${i < items.length && it.quantity ? 'SET' : ''}</td>
           <td style="text-align:right">${v(it.price)}</td>
+          <td style="text-align:right">${it.price != null && it.price !== '' && Number(it.price) ? (Number(it.price) * (Number(it.quantity) || 0)).toFixed(2) : ''}</td>
           <td style="text-align:center">${i < items.length && it.image ? `<img src="${API_BASE}/api/assembly-images/${o.id}/${v(it.image)}" style="max-height:44px;max-width:76px">` : ''}</td>
           <td style="text-align:center">${v(it.completion_time)}</td>
           <td></td>
         </tr>`).join('');
       const totalPrice = items.reduce((a, it) => a + (Number(it.price) || 0) * (Number(it.quantity) || 0), 0);
-      const totalRow = `<tr style="height:22px"><td colspan="5" style="text-align:right"><strong>总价</strong></td><td style="text-align:right"><strong>${totalPrice.toFixed(2)}</strong></td><td colspan="3"></td></tr>`;
+      const totalRow = `<tr style="height:22px"><td colspan="6" style="text-align:right"><strong>汇总</strong></td><td style="text-align:right"><strong>${totalPrice.toFixed(2)}</strong></td><td colspan="3"></td></tr>`;
 
       return `
         <div style="display:flex;align-items:flex-start;margin-bottom:4px">
@@ -373,6 +374,7 @@
         </div>
         <div style="border:1px solid #333;border-bottom:none;padding:4px 8px;font-size:10pt;display:flex;gap:0">
           <span style="flex:2"><strong>客户：</strong>${v(o.client_name)}</span>
+          <span style="flex:2"><strong>车间：</strong>${v(o.workshop)}</span>
           <span style="flex:3"><strong>产品编号：</strong>${v(o.order_number)}</span>
           <span style="flex:3"><strong>产品名称：</strong>${v(o.product_name)}</span>
           <span style="flex:2;text-align:right"><strong>日期：</strong>${v((o.date || o.created_at || '').slice(0, 10))}</span>
@@ -385,7 +387,8 @@
               <th>夹具名称<br><span style="font-weight:normal">Nama Mandarin JIG</span></th>
               <th style="width:56px">Jumlah<br>数量</th>
               <th style="width:56px">Satuan<br>单位</th>
-              <th style="width:80px">报价</th>
+              <th style="width:70px">单价</th>
+              <th style="width:80px">总价</th>
               <th style="width:110px">Gambar JIG<br>夹具图片</th>
               <th style="width:100px">完成时间</th>
               <th style="width:90px">Catatan<br>备注</th>

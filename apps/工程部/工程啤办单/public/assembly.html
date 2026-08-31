@@ -76,6 +76,12 @@
               <option value="">请选择客户</option>
             </select>
           </div>
+          <div class="col-md-3"><label class="form-label fw-bold">车间</label>
+            <select class="form-select" id="asm-workshop">
+              <option value="">请选择车间</option>
+              <option>华登车间</option><option>A车间</option><option>B车间</option>
+            </select>
+          </div>
           <div class="col-md-3"><label class="form-label fw-bold">备注</label><input class="form-control" id="asm-reason" placeholder="备注信息"></div>
         </div>
         <div class="d-flex justify-content-between align-items-center mb-2">
@@ -239,6 +245,7 @@ function openNewModal() {
   document.getElementById('asm-applicant').value = '';
   document.getElementById('asm-order_number').value = '';
   document.getElementById('asm-client_name').value = '';
+  document.getElementById('asm-workshop').value = '';
   document.getElementById('asm-reason').value = '';
   document.getElementById('asm-status').value = '待审核';
   document.getElementById('asmItemsBody').innerHTML = '';
@@ -263,6 +270,7 @@ function editOrder(id) {
       document.getElementById('asm-applicant').value = order.created_by || '';
       document.getElementById('asm-order_number').value = order.order_number || '';
       document.getElementById('asm-client_name').value = order.client_name || '';
+      document.getElementById('asm-workshop').value = order.workshop || '';
       document.getElementById('asm-reason').value = order.reason || '';
       document.getElementById('asm-status').value = (order.status === '已驳回') ? '待审核' : order.status;
 
@@ -447,6 +455,7 @@ function saveOrder() {
   const body = {
     order_number:  orderNumber,
     client_name:   document.getElementById('asm-client_name').value || null,
+    workshop:      document.getElementById('asm-workshop').value || null,
     reason:        document.getElementById('asm-reason').value || null,
     status:        document.getElementById('asm-status').value,
     items:         items,
@@ -539,6 +548,7 @@ function renderOrderDetails(order) {
     <div class="row g-2 mb-3">
       <div class="col-6 col-md-3"><div class="text-muted small">货号</div><div class="fw-bold">${esc(order.order_number || '-')}</div></div>
       <div class="col-6 col-md-3"><div class="text-muted small">客名</div><div>${esc(order.client_name || '-')}</div></div>
+      <div class="col-6 col-md-3"><div class="text-muted small">车间</div><div>${esc(order.workshop || '-')}</div></div>
       <div class="col-6 col-md-3"><div class="text-muted small">申请人</div><div>${esc(order.created_by || '-')}</div></div>
       <div class="col-6 col-md-3"><div class="text-muted small">申请时间</div><div>${fmtDateTime(order.created_at)}</div></div>
       <div class="col-6 col-md-3"><div class="text-muted small">状态</div><div>${statusBadge(order.status)}</div></div>

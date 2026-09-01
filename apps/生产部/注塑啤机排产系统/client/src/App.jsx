@@ -29,8 +29,8 @@ import OutsourceModule from './pages/outsource/OutsourceModule.jsx';
 const { Sider, Content, Header } = Layout;
 const { Text } = Typography;
 
-const WORKSHOP_COLORS = { A: '#1565c0', B: '#e65100', C: '#2e7d32' };
-const WORKSHOP_LABELS = { A: 'A车间', B: 'B车间', C: '华登' };
+const WORKSHOP_COLORS = { A: '#1565c0', B: '#e65100', C: '#2e7d32', W: '#6a1b9a' };
+const WORKSHOP_LABELS = { A: 'A车间', B: 'B车间', C: '华登', W: '外发部' };
 
 const menuItems = [
   { key: 'monthlyPlan',    icon: <CalendarOutlined />,      label: '月计划' },
@@ -69,12 +69,16 @@ export default function App() {
     return ws;
   });
   const [page, setPage] = useState('orderImport');
-  const [topModule, setTopModule] = useState('paiji'); // 'paiji' | 'outsource'
+  const [topModule, setTopModule] = useState(() =>
+    localStorage.getItem('workshop') === 'W' ? 'outsource' : 'paiji'
+  ); // 'paiji' | 'outsource'
+  const isOutsourceDept = workshop === 'W'; // 外发部：只显示外发模块
 
   const handleEnter = (ws) => {
     localStorage.setItem('workshop', ws);
     setWorkshop(ws);
     setPage('orderImport');
+    setTopModule(ws === 'W' ? 'outsource' : 'paiji');
   };
 
   const handleSwitch = () => {
@@ -124,16 +128,18 @@ export default function App() {
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         }}>
           <Text style={{ fontSize: 16, fontWeight: 600, color: '#333' }}>
-            {topModule === 'paiji' ? titles[page] : '外发管理'}
+            {isOutsourceDept ? '外发管理' : topModule === 'paiji' ? titles[page] : '外发管理'}
           </Text>
-          <Segmented
-            value={topModule}
-            onChange={setTopModule}
-            options={[
-              { label: '排产', value: 'paiji' },
-              { label: '外发', value: 'outsource' },
-            ]}
-          />
+          {!isOutsourceDept && (
+            <Segmented
+              value={topModule}
+              onChange={setTopModule}
+              options={[
+                { label: '排产', value: 'paiji' },
+                { label: '外发', value: 'outsource' },
+              ]}
+            />
+          )}
           <Button
             icon={<SwapOutlined />}
             size="small"

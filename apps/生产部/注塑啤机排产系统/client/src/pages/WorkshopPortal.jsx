@@ -3,9 +3,10 @@ import { Modal, Input, message } from 'antd';
 import axios from 'axios';
 
 const WORKSHOPS = [
-  { key: 'A', label: 'A车间', color: '#1565c0', bg: 'linear-gradient(135deg,#1565c0,#1976d2)', icon: '🏭' },
-  { key: 'B', label: 'B车间', color: '#e65100', bg: 'linear-gradient(135deg,#e65100,#f57c00)', icon: '🏭' },
-  { key: 'C', label: '华登', color: '#2e7d32', bg: 'linear-gradient(135deg,#2e7d32,#388e3c)', icon: '🏭' },
+  { key: 'A', label: 'A车间', color: '#1565c0', bg: 'linear-gradient(135deg,#1565c0,#1976d2)', icon: '🏭', statLabels: ['待排订单', '机台数量'] },
+  { key: 'B', label: 'B车间', color: '#e65100', bg: 'linear-gradient(135deg,#e65100,#f57c00)', icon: '🏭', statLabels: ['待排订单', '机台数量'] },
+  { key: 'C', label: '华登', color: '#2e7d32', bg: 'linear-gradient(135deg,#2e7d32,#388e3c)', icon: '🏭', statLabels: ['待排订单', '机台数量'] },
+  { key: 'W', label: '外发部', color: '#6a1b9a', bg: 'linear-gradient(135deg,#6a1b9a,#8e24aa)', icon: '🚚', statLabels: ['外发订单', '供应商数'] },
 ];
 
 export default function WorkshopPortal({ onEnter }) {
@@ -33,6 +34,18 @@ export default function WorkshopPortal({ onEnter }) {
   useEffect(() => {
     WORKSHOPS.forEach(async (ws) => {
       try {
+        if (ws.key === 'W') {
+          // 外发部：显示外发订单数和供应商数
+          const res = await axios.get('/api/outsource/stats/summary');
+          setStats(prev => ({
+            ...prev,
+            W: {
+              pending: res.data.total ?? 0,
+              machines: Object.keys(res.data.by_supplier || {}).filter(k => k !== '(空)').length,
+            },
+          }));
+          return;
+        }
         const [ordersRes, machinesRes] = await Promise.all([
           axios.get(`/api/orders?workshop=${ws.key}&status=pending`),
           axios.get(`/api/machines?workshop=${ws.key}`),
@@ -89,7 +102,7 @@ export default function WorkshopPortal({ onEnter }) {
                 <div style={{ fontSize: 22, fontWeight: 700, marginBottom: 4 }}>
                   {ws.icon} {ws.label}
                 </div>
-                <div style={{ fontSize: 13, opacity: 0.85 }}>注塑啤机排产系统</div>
+                <div style={{ fontSize: 13, opacity: 0.85 }}>{ws.key === 'W' ? '供应商 · 外发订单管理' : '注塑啤机排产系统'}</div>
               </div>
 
               {/* 统计数字 */}
@@ -98,14 +111,14 @@ export default function WorkshopPortal({ onEnter }) {
                   <div style={{ fontSize: 28, fontWeight: 700, color: ws.color }}>
                     {s.pending ?? '-'}
                   </div>
-                  <div style={{ fontSize: 12, color: '#999', marginTop: 4 }}>待排订单</div>
+                  <div style={{ fontSize: 12, color: '#999', marginTop: 4 }}>{ws.statLabels[0]}</div>
                 </div>
                 <div style={{ width: 1, background: '#f0f0f0' }} />
                 <div style={{ flex: 1, textAlign: 'center' }}>
                   <div style={{ fontSize: 28, fontWeight: 700, color: '#333' }}>
                     {s.machines ?? '-'}
                   </div>
-                  <div style={{ fontSize: 12, color: '#999', marginTop: 4 }}>机台数量</div>
+                  <div style={{ fontSize: 12, color: '#999', marginTop: 4 }}>{ws.statLabels[1]}</div>
                 </div>
               </div>
 

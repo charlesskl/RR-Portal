@@ -16,16 +16,24 @@ name: Internal Quote Data Ops
 #                        INTERNAL_QUOTE_ACCOUNT_PASSWORD，归属 qingxi 厂区并赋予全部客户。
 #   mode=clear-quotes      —— 清空全部报价：先 pg_dump 备份 quotes+quote_sections 到
 #                        /opt/rr-portal/backups/，再 DELETE（sections 级联）。参考表/账号不动。
+#   mode=list-customers    —— 只读：列出 user_customers / quotes 中出现过的全部客户名（去重排序）。
+#   mode=prune-customers   —— 清理客户白名单之外的授权：先 pg_dump 备份 user_customers，再把
+#                        user_customers 中不在 allowed_customers 名单里的客户名整名删除
+#                        （所有账号同步生效；allowed_customers 用「、」分隔）。
 
 on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "check-env / check-users / counts / set-account-password-env / delete-users / create-user / clear-quotes"
+        description: "check-env / check-users / counts / set-account-password-env / delete-users / create-user / clear-quotes / list-customers / prune-customers"
         type: choice
         required: true
         default: counts
-        options: [check-env, check-users, counts, set-account-password-env, delete-users, create-user, clear-quotes]
+        options: [check-env, check-users, counts, set-account-password-env, delete-users, create-user, clear-quotes, list-customers, prune-customers]
+      allowed_customers:
+        description: "mode=prune-customers 时保留的客户名单（用「、」分隔；名单外的客户授权会被删除）"
+        type: string
+        required: false
       usernames:
         description: "mode=delete-users 时要删除的账号名（逗号分隔；仅限配置表之外的旧账号）"
         type: string
@@ -83,6 +91,7 @@ jobs:
           OPS_DISPLAY: ${{ inputs.display_name }}
           OPS_DEPT: ${{ inputs.dept }}
           OPS_ROLE: ${{ inputs.role }}
+          OPS_CUSTOMERS: ${{ inputs.allowed_customers }}
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         with:
           host: ${{ secrets.CLOUD_HOST }}
@@ -90,7 +99,7 @@ jobs:
           key: ${{ secrets.CLOUD_SSH_KEY }}
           fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
           command_timeout: 8m
-          envs: OPS_MODE,ACCOUNT_PASSWORD_VALUE,OPS_USERNAMES,OPS_USERNAME,OPS_DISPLAY,OPS_DEPT,OPS_ROLE
+          envs: OPS_MODE,ACCOUNT_PASSWORD_VALUE,OPS_USERNAMES,OPS_USERNAME,OPS_DISPLAY,OPS_DEPT,OPS_ROLE,OPS_CUSTOMERS
           script: |
             set -uo pipefail
             cd /opt/rr-portal
@@ -202,6 +211,50 @@ jobs:
               q "SELECT 'factories=' || COUNT(*) FROM internal_quote.factories"
               q "SELECT 'app_migrations=' || COUNT(*) FROM internal_quote.app_migrations"
               echo "[OK] counts 完成（只读）"
+              exit 0
+            fi
+
+            if [ "$MODE" = "list-customers" ]; then
+              echo "== user_customers 中的客户（按账号数） =="
+              q "SELECT customer || ' （' || COUNT(*) || ' 个账号）' FROM internal_quote.user_customers GROUP BY customer ORDER BY customer"
+              echo "== quotes 中出现过的客户 =="
+              q "SELECT COALESCE(string_agg(DISTINCT customer, '、'), '（无）') FROM internal_quote.quotes WHERE customer IS NOT NULL AND customer <> ''"
+              echo "[OK] list-customers 完成（只读）"
+              exit 0
+            fi
+
+            if [ "$MODE" = "prune-customers" ]; then
+              RAW="${OPS_CUSTOMERS:-}"
+              [ -n "$RAW" ] || { echo "[FAIL] 需要提供 allowed_customers（用「、」分隔）" >&2; exit 1; }
+              SQL_LIST=""
+              KEEP=0
+              IFS='、' read -ra NAMES <<< "${RAW//,/、}"
+              for n in "${NAMES[@]}"; do
+                n="$(echo "$n" | xargs)"
+                [ -n "$n" ] || continue
+                [ "${#n}" -le 60 ] || { echo "[FAIL] 客户名过长: $n" >&2; exit 1; }
+                case "$n" in *\\*|*\"*) echo "[FAIL] 客户名含非法字符: $n" >&2; exit 1;; esac
+                n="${n//\'/\'\'}"
+                SQL_LIST="${SQL_LIST}${SQL_LIST:+,}'$n'"
+                KEEP=$((KEEP+1))
+              done
+              [ "$KEEP" -gt 0 ] || { echo "[FAIL] 解析后名单为空" >&2; exit 1; }
+              echo "-- 保留 $KEEP 个客户: $SQL_LIST --"
+              echo "== 清理前 user_customers 客户清单 =="
+              q "SELECT customer || ' （' || COUNT(*) || ' 个账号）' FROM internal_quote.user_customers GROUP BY customer ORDER BY customer"
+              TS="$(date +%Y%m%d-%H%M%S)"
+              BK="/opt/rr-portal/backups/internal-quote-user-customers-$TS.sql"
+              mkdir -p /opt/rr-portal/backups
+              docker compose -f docker-compose.cloud.yml --env-file "$ENVF" exec -T db \
+                pg_dump -U rrportal -d rrportal --schema=internal_quote -t 'internal_quote.user_customers' --data-only > "$BK"
+              [ -s "$BK" ] && echo "  已备份 user_customers: $BK ($(stat -c%s "$BK") bytes)"
+              echo "== 删除名单外客户授权 =="
+              q "SELECT '将删除的客户: ' || COALESCE(string_agg(DISTINCT customer, '、'), '（无）') FROM internal_quote.user_customers WHERE customer NOT IN ($SQL_LIST)"
+              q "DELETE FROM internal_quote.user_customers WHERE customer NOT IN ($SQL_LIST)"
+              echo "== 清理后 user_customers 客户清单 =="
+              q "SELECT customer || ' （' || COUNT(*) || ' 个账号）' FROM internal_quote.user_customers GROUP BY customer ORDER BY customer"
+              q "SELECT '剩余授权行数=' || COUNT(*) FROM internal_quote.user_customers"
+              echo "[OK] prune-customers 完成（备份: $BK）"
               exit 0
             fi
 

@@ -3,6 +3,8 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const ExcelJS = require('exceljs');
+const fs = require('node:fs');
+const path = require('node:path');
 
 const { parseWorkbook } = require('../backend/services/parseMoldSheet');
 
@@ -50,4 +52,21 @@ test('mold import recognizes traditional Chinese HKD quotation headers', async (
   assert.equal(result.molds[0].detail.mold_size, '300*400*320');
   assert.equal(result.molds[0].detail.mold_material, 'S136H加硬');
   assert.equal(result.molds[0].note, '潛水');
+});
+
+test('mold import keeps separate RMB and USD prices for TOMY preference selection', async () => {
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet('TOMY模具报价');
+  sheet.addRow(['序号', '模具编号', '名称', '材料', '模具价格 RMB', '模具价格 USD', '备注']);
+  sheet.addRow([1, 'M01', '机身', 'ABS', 95000, 12000, 'TOMY']);
+
+  const result = parseWorkbook(Buffer.from(await workbook.xlsx.writeBuffer()));
+
+  assert.equal(result.error, undefined);
+  assert.equal(result.molds[0].price_rmb, 95000);
+  assert.equal(result.molds[0].price_usd, 12000);
+
+  const source = fs.readFileSync(path.join(__dirname, '../frontend/workbench.js'), 'utf8');
+  assert.match(source, /quoteCustomer[\s\S]*toUpperCase\(\) === 'TOMY'/);
+  assert.match(source, /price_rmb:\s*preferUsd && hasUsd \? null/);
 });

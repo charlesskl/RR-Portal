@@ -380,16 +380,21 @@ function hasFreeUsdPrice(row) {
   return row && row.unit_price_usd !== undefined && row.unit_price_usd !== null && row.unit_price_usd !== '';
 }
 function usesFreeUsdPrice(row) {
-  return hasFreeUsdPrice(row) && (row.source_currency === 'USD' || !hasFreeRmbPrice(row));
+  if (!row) return false;
+  if (row.source_currency === 'USD') return hasFreeUsdPrice(row) || hasFreeRmbPrice(row);
+  return hasFreeUsdPrice(row) && !hasFreeRmbPrice(row);
+}
+function freeUsdSourcePrice(row) {
+  return hasFreeUsdPrice(row) ? num(row.unit_price_usd) : num(row && row.unit_price_rmb);
 }
 function freeUnitRmb(row, fxRmbHkd, fxHkdUsd) {
   const fx = num(fxRmbHkd) || 0.85;
-  if (usesFreeUsdPrice(row)) return num(row.unit_price_usd) * (num(fxHkdUsd) || 7.8) * fx;
+  if (usesFreeUsdPrice(row)) return freeUsdSourcePrice(row) * (num(fxHkdUsd) || 7.8) * fx;
   return hasFreeRmbPrice(row) ? num(row.unit_price_rmb) : num(row.unit_price) * fx;
 }
 function freeUnitHkd(row, fxRmbHkd, fxHkdUsd) {
   const fx = num(fxRmbHkd) || 0.85;
-  if (usesFreeUsdPrice(row)) return num(row.unit_price_usd) * (num(fxHkdUsd) || 7.8);
+  if (usesFreeUsdPrice(row)) return freeUsdSourcePrice(row) * (num(fxHkdUsd) || 7.8);
   return hasFreeRmbPrice(row) ? num(row.unit_price_rmb) / fx : num(row.unit_price);
 }
 function freeAmountHkd(row, fxRmbHkd, fxHkdUsd) {
@@ -407,6 +412,15 @@ function ensureFreeRmbPrices(rows, fxRmbHkd) {
     if (!hasFreeRmbPrice(row) && !usesFreeUsdPrice(row) && row.unit_price !== undefined && row.unit_price !== null && row.unit_price !== '') {
       row.unit_price_rmb = +freeUnitRmb(row, fxRmbHkd).toFixed(6);
     }
+  });
+}
+function normalizeFreeCurrencyPrices(rows) {
+  (rows || []).forEach(row => {
+    if (!row || row.source_currency !== 'USD' || hasFreeUsdPrice(row) || !hasFreeRmbPrice(row)) return;
+    row.unit_price_usd = row.unit_price_rmb;
+    row.unit_price_usd_raw = row.unit_price_rmb_raw;
+    row.unit_price_rmb = null;
+    row.unit_price_rmb_raw = null;
   });
 }
 
@@ -2636,7 +2650,7 @@ function renderCartonCalc(host, c, canEdit, onChange) {
   render();
 }
 
-function renderEngineering(host, payload, canEdit, onChange, fxRmbHkd, fxHkdUsd, quoteQty = 0) {
+function renderEngineering(host, payload, canEdit, onChange, fxRmbHkd, fxHkdUsd, quoteQty = 0, quoteCustomer = '') {
   payload.molds = payload.molds || [];
   payload.electronics = payload.electronics || [];
   payload.hardware = payload.hardware || [];
@@ -2734,12 +2748,18 @@ function renderEngineering(host, payload, canEdit, onChange, fxRmbHkd, fxHkdUsd,
       const j = await r.json();
       if (!r.ok) throw new Error(j.error || '解析失败');
       // 港币模板先按当前 RMB→HKD 汇率换算成系统存储的 RMB，确保只读“模价 HKD”显示原报价。
-      const importedMolds = () => j.molds.map(m => ({
-        ...m,
-        price_rmb: m.price_rmb != null ? m.price_rmb
-          : (m.price_hkd != null ? +(num(m.price_hkd) * num(fxRmbHkd)).toFixed(4) : null),
-        images: m.images || [],
-      }));
+      const preferUsd = String(quoteCustomer || '').trim().toUpperCase() === 'TOMY';
+      const importedMolds = () => j.molds.map(m => {
+        const hasUsd = m.price_usd != null && m.price_usd !== '';
+        return {
+          ...m,
+          // TOMY 模具报价同时出现人民币和美金时，以美金为准，避免 HKD 重复相加。
+          price_rmb: preferUsd && hasUsd ? null : (m.price_rmb != null ? m.price_rmb
+            : (m.price_hkd != null ? +(num(m.price_hkd) * num(fxRmbHkd)).toFixed(4) : null)),
+          price_usd: hasUsd ? m.price_usd : null,
+          images: m.images || [],
+        };
+      });
       preview.innerHTML = `
         <div class="card" style="background:#f0fdf4;border:1px solid #86efac;">
           <p>从 <b>${escapeHtml(j.sheet_used || '')}</b> 解析到 <b>${j.molds.length}</b> 行明细：</p>
@@ -2765,13 +2785,13 @@ function renderEngineering(host, payload, canEdit, onChange, fxRmbHkd, fxHkdUsd,
       preview.querySelector('#btn-apply-replace').onclick = () => {
         payload.molds = importedMolds();
         preview.innerHTML = ''; fileInp.value = '';
-        renderEngineering(host, payload, canEdit, onChange, fxRmbHkd, fxHkdUsd, quoteQty);
+        renderEngineering(host, payload, canEdit, onChange, fxRmbHkd, fxHkdUsd, quoteQty, quoteCustomer);
         onChange();
       };
       preview.querySelector('#btn-apply-append').onclick = () => {
         payload.molds = (payload.molds || []).concat(importedMolds());
         preview.innerHTML = ''; fileInp.value = '';
-        renderEngineering(host, payload, canEdit, onChange, fxRmbHkd, fxHkdUsd, quoteQty);
+        renderEngineering(host, payload, canEdit, onChange, fxRmbHkd, fxHkdUsd, quoteQty, quoteCustomer);
         onChange();
       };
       preview.querySelector('#btn-apply-cancel').onclick = () => { preview.innerHTML = ''; fileInp.value = ''; };
@@ -2880,7 +2900,7 @@ function renderEngineering(host, payload, canEdit, onChange, fxRmbHkd, fxHkdUsd,
               : (payload[targetKey] || []).concat(appliedItems.map(item => ({ ...item })));
             preview.innerHTML = '';
             fileInput.value = '';
-            renderEngineering(host, payload, canEdit, onChange, fxRmbHkd, fxHkdUsd, quoteQty);
+            renderEngineering(host, payload, canEdit, onChange, fxRmbHkd, fxHkdUsd, quoteQty, quoteCustomer);
             onChange();
           };
           preview.querySelector('[data-action="replace"]').onclick = () => finish('replace');
@@ -2996,6 +3016,9 @@ function renderEngineering(host, payload, canEdit, onChange, fxRmbHkd, fxHkdUsd,
   const wrappedOnChange = () => { refreshes.forEach(f => f()); onChange(); };
 
   // 电子部分已移到 电子部 tab（renderElectronic）
+  normalizeFreeCurrencyPrices(payload.hardware);
+  normalizeFreeCurrencyPrices(payload.aux_materials);
+  normalizeFreeCurrencyPrices(payload.packaging_materials);
   ensureFreeRmbPrices(payload.hardware, fxRmbHkd);
   ensureFreeRmbPrices(payload.aux_materials, fxRmbHkd);
   ensureFreeRmbPrices(payload.packaging_materials, fxRmbHkd);
@@ -5520,7 +5543,7 @@ async function renderQuotePage() {
       body.append(headerHost, engineeringHost);
       renderEngineeringQuoteHeader(headerHost, quote, authorizedCustomers, patch =>
         api('/quotes/' + id + '/header', { method: 'PUT', body: JSON.stringify(patch) }));
-      renderEngineering(engineeringHost, payload, canEditMine, onChange, fx, fxHU, quote.qty);
+      renderEngineering(engineeringHost, payload, canEditMine, onChange, fx, fxHU, quote.qty, quote.customer);
     }
     else if (me.dept === 'electronic') renderElectronic(body, payload, canEditMine, onChange, fx, fxHU);
     else if (me.dept === 'molding') renderMolding(body, payload, canEditMine, onChange, refMolds, fx, me.role);
@@ -5566,7 +5589,7 @@ async function renderQuotePage() {
       const renderBody = () => {
         body.innerHTML = '';
         const onChangeOther = () => markDirty(s.dept);
-        if (s.dept === 'engineering') renderEngineering(body, sectionPayload, inEdit, onChangeOther, fxRate, fxRateUsd, quote.qty);
+        if (s.dept === 'engineering') renderEngineering(body, sectionPayload, inEdit, onChangeOther, fxRate, fxRateUsd, quote.qty, quote.customer);
         else if (s.dept === 'electronic') renderElectronic(body, sectionPayload, inEdit, onChangeOther, fxRate, fxRateUsd);
         else if (s.dept === 'sales') renderSales(body, sectionPayload, quote, inEdit, inEdit, sections, onChangeOther, async (patch) => {
           await api('/quotes/' + id + '/header', { method: 'PUT', body: JSON.stringify(patch) }).catch(e => alert(e.message));

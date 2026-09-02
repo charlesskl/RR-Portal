@@ -32,8 +32,8 @@ const FIELD_KEYWORDS = {
   shot_price:     ['啤工价', '啤工', '啤价HK$/啤', '啤价'],
   structure:      ['滑块', '斜顶', '模具结构', '加工内容', 'SLIDE', '行位'],
   price_hkd:      ['模价HKD', 'HKD模价', '港币模价', '模价港币'],
-  price_rmb:      ['含税模价', '金额RMB', '金额', '总价', '模价', '价格', '单价', 'MOLDCOST', 'TOTALAMOUNT', 'AMOUNT'],
   price_usd:      ['USD', '美元'],
+  price_rmb:      ['含税模价', '金额RMB', '人民币', 'RMB', '金额', '总价', '模价', '价格', '单价', 'MOLDCOST', 'TOTALAMOUNT', 'AMOUNT'],
   mold_type:      ['进胶方式', '模胚类型', '模胚大约', '模胚型号', '模胚', '水口', 'GATE'],
   note:           ['备注', '说明', 'REMARK'],
   image:          ['图片', '产品图', 'PICTURE', 'IMAGE'],
@@ -390,6 +390,7 @@ function tryParseSheet(wb, sheetName) {
         mold_size: '',
         structures: [],
         price_rmb: null,
+        price_usd: null,
         price_hkd: null,
         mold_type: '',
         notes: [],
@@ -420,6 +421,7 @@ function tryParseSheet(wb, sheetName) {
     const ms = cell(r, 'mold_size'); if (ms && !current.mold_size) current.mold_size = ms;
     const st = cell(r, 'structure'); if (st && st !== '无') current.structures.push(st);
     const pr = parseNumber(cell(r, 'price_rmb')); if (pr != null && current.price_rmb == null) current.price_rmb = pr;
+    const pu = parseNumber(cell(r, 'price_usd')); if (pu != null && current.price_usd == null) current.price_usd = pu;
     const ph = parseNumber(cell(r, 'price_hkd')); if (ph != null && current.price_hkd == null) current.price_hkd = ph;
     const mt = cell(r, 'mold_type'); if (mt && !current.mold_type) current.mold_type = mt;
     const nt = cell(r, 'note'); if (nt) current.notes.push(nt);
@@ -477,6 +479,7 @@ function tryParseSheet(wb, sheetName) {
       target: g.target,
       shot_price: g.shot_price,
       price_rmb: g.price_rmb,
+      price_usd: g.price_usd,
       price_hkd: g.price_hkd,
       images: [],
       detail: { mold_material: g.mold_material, mold_size: g.mold_size, machine: g.machine, machine_model: machineTonToModel(g.machine, machineHeader), target: g.target },
@@ -536,6 +539,7 @@ function buildPartDetailMolds(dataRows, cell, machineHeader = '') {
     const weight = parseNumber(cell(r, 'weight'));
     const usage = parseNumber(cell(r, 'usage')) ?? 1;
     const price = parseNumber(cell(r, 'price_rmb'));
+    const priceUsd = parseNumber(cell(r, 'price_usd'));
 
     // Empty mold numbers cannot be safely merged. Numbered molds are grouped
     // even when their source rows are separated by merged/blank Excel cells.
@@ -554,6 +558,7 @@ function buildPartDetailMolds(dataRows, cell, machineHeader = '') {
         has_weight: false,
         cycle_sec: state.cycle ?? null,
         price_rmb: null,
+        price_usd: null,
         mold_type: moldType,
         mold_material: moldMaterial,
         mold_size: moldSize,
@@ -592,6 +597,7 @@ function buildPartDetailMolds(dataRows, cell, machineHeader = '') {
       g.has_weight = true;
     }
     if (price != null && g.price_rmb == null) g.price_rmb = price;
+    if (priceUsd != null && g.price_usd == null) g.price_usd = priceUsd;
     g.rowEnd = ri;
   }
 
@@ -613,6 +619,7 @@ function buildPartDetailMolds(dataRows, cell, machineHeader = '') {
       weight_g: g.has_weight ? +g.weight_g.toFixed(4) : null,
       cycle_sec: g.cycle_sec,
       price_rmb: g.price_rmb,
+      price_usd: g.price_usd,
       images: [],
       parts: g.parts,
       detail: {

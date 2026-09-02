@@ -60,16 +60,21 @@ function hasFreeUsdPrice(row) {
   return row && row.unit_price_usd !== undefined && row.unit_price_usd !== null && row.unit_price_usd !== '';
 }
 function usesFreeUsdPrice(row) {
-  return hasFreeUsdPrice(row) && (row.source_currency === 'USD' || !hasFreeRmbPrice(row));
+  if (!row) return false;
+  if (row.source_currency === 'USD') return hasFreeUsdPrice(row) || hasFreeRmbPrice(row);
+  return hasFreeUsdPrice(row) && !hasFreeRmbPrice(row);
+}
+function freeUsdSourcePrice(row) {
+  return hasFreeUsdPrice(row) ? num(row.unit_price_usd) : num(row && row.unit_price_rmb);
 }
 function freeUnitRmb(row, fxRH, fxHU) {
   const fx = num(fxRH) || 0.85;
-  if (usesFreeUsdPrice(row)) return num(row.unit_price_usd) * (num(fxHU) || 7.8) * fx;
+  if (usesFreeUsdPrice(row)) return freeUsdSourcePrice(row) * (num(fxHU) || 7.8) * fx;
   return hasFreeRmbPrice(row) ? num(row.unit_price_rmb) : num(row.unit_price) * fx;
 }
 function freeUnitHkd(row, fxRH, fxHU) {
   const fx = num(fxRH) || 0.85;
-  if (usesFreeUsdPrice(row)) return num(row.unit_price_usd) * (num(fxHU) || 7.8);
+  if (usesFreeUsdPrice(row)) return freeUsdSourcePrice(row) * (num(fxHU) || 7.8);
   return hasFreeRmbPrice(row) ? num(row.unit_price_rmb) / fx : num(row.unit_price);
 }
 function freeAmountHkd(row, fxRH, fxHU) {
@@ -1590,7 +1595,7 @@ function renderUnifiedCostTable(ws, row, data, refs) {
       ws.mergeCells(row, 4, row, 7);
       ws.getCell(row, 4).value = item.spec || '';
       ws.getCell(row, 8).value = qty;
-      ws.getCell(row, 9).value = sourceIsUsd ? num(item.unit_price_usd) : freeUnitRmb(item, data.fxRH, data.fxHU);
+      ws.getCell(row, 9).value = sourceIsUsd ? freeUsdSourcePrice(item) : freeUnitRmb(item, data.fxRH, data.fxHU);
       ws.getCell(row, 9).numFmt = sourceIsUsd ? '"US$"#,##0.0000' : RMB;
       ws.getCell(row, 10).value = { formula: sourceIsUsd ? `I${row}*${num(data.fxHU) || 7.8}` : `I${row}/${num(data.fxRH) || 0.85}`, result: unitHkd };
       ws.getCell(row, 11).value = { formula: `H${row}*J${row}`, result: amount };
@@ -1703,7 +1708,7 @@ function renderFreeTable(ws, row, title, rows, lossPct, fxRH, refs, refKey, opts
     if (rmbPrice) {
       const sourceIsUsd = usesFreeUsdPrice(r);
       ws.getCell(row, 7).value = num(r.qty);
-      ws.getCell(row, 8).value = sourceIsUsd ? num(r.unit_price_usd) : freeUnitRmb(r, fx, fxHU);
+      ws.getCell(row, 8).value = sourceIsUsd ? freeUsdSourcePrice(r) : freeUnitRmb(r, fx, fxHU);
       ws.getCell(row, 8).numFmt = sourceIsUsd ? '"US$"#,##0.0000' : RMB;
       ws.getCell(row, 9).value = {
         formula: sourceIsUsd ? `H${row}*${fxHU}` : `H${row}/${fx}`,

@@ -1,0 +1,108 @@
+name: Paiji Data Ops
+
+# 注塑啤机排产系统（paiji，SQLite，容器内 /app/data/paiji.db）数据运维。
+#
+#   mode=check-outsource       —— 只读：打印四张外发表的当前行数。
+#   mode=apply-outsource-seed  —— 应用 server/seed/outsource-2026-07-22.sql：
+#                                 先在容器内备份 paiji.db（paiji.db.bak-时间戳），
+#                                 再用 better-sqlite3 执行种子 SQL（事务包裹，只 DELETE+INSERT
+#                                 四张外发表），最后打印行数与 stats/summary 接口结果。
+#
+# 说明：种子 SQL 只随镜像发布落盘，不会自动执行，必须用本 workflow 手动应用一次。
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "check-outsource / apply-outsource-seed"
+        type: choice
+        required: true
+        default: check-outsource
+        options: [check-outsource, apply-outsource-seed]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-cloud
+  queue: max
+  cancel-in-progress: false
+
+jobs:
+  ops:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Validate SSH host fingerprint
+        shell: bash
+        env:
+          CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]]; then
+            echo 'CLOUD_HOST_FINGERPRINT must be a non-empty OpenSSH SHA256 fingerprint.' >&2
+            exit 1
+          fi
+
+      - name: Paiji data ops via SSH
+        env:
+          CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+          OPS_MODE: ${{ inputs.mode }}
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
+        with:
+          host: ${{ secrets.CLOUD_HOST }}
+          username: ${{ secrets.CLOUD_USER }}
+          key: ${{ secrets.CLOUD_SSH_KEY }}
+          fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
+          command_timeout: 8m
+          envs: OPS_MODE
+          script: |
+            set -euo pipefail
+            MODE="${OPS_MODE:-check-outsource}"
+            echo "=================== MODE: $MODE ==================="
+
+            CT="$(docker ps --format '{{.Names}}' | grep -i paiji | head -1)"
+            [ -n "$CT" ] || { echo '[FAIL] 找不到 paiji 容器' >&2; exit 1; }
+            echo "paiji 容器: $CT"
+
+            counts() {
+              docker exec "$CT" node -e "
+                const db = require('better-sqlite3')('/app/data/paiji.db');
+                for (const t of ['outsource_orders','outsource_suppliers','outsource_pc_orders','outsource_mold_mappings']) {
+                  console.log(t + '=' + db.prepare('SELECT COUNT(*) c FROM ' + t).get().c);
+                }
+              "
+            }
+
+            if [ "$MODE" = "check-outsource" ]; then
+              echo '== 四张外发表当前行数 =='
+              counts
+              echo '[OK] check-outsource 完成（只读）'
+              exit 0
+            fi
+
+            if [ "$MODE" = "apply-outsource-seed" ]; then
+              SEED=/app/seed/outsource-2026-07-22.sql
+              docker exec "$CT" sh -c "test -f $SEED" || { echo "[FAIL] 容器内没有 $SEED（镜像未包含种子文件？）" >&2; exit 1; }
+              TS="$(date +%Y%m%d-%H%M%S)"
+              echo "-- 备份数据库到容器内 /app/data/paiji.db.bak-$TS --"
+              docker exec "$CT" sh -c "cp /app/data/paiji.db /app/data/paiji.db.bak-$TS && ls -lh /app/data/paiji.db*"
+              echo '== 应用前行数 =='
+              counts
+              echo "-- 执行种子 SQL（事务包裹，只动四张外发表） --"
+              docker exec "$CT" node -e "
+                const fs = require('fs');
+                const db = require('better-sqlite3')('/app/data/paiji.db');
+                db.exec(fs.readFileSync('/app/seed/outsource-2026-07-22.sql', 'utf8'));
+                console.log('种子 SQL 执行完成');
+              "
+              echo '== 应用后行数 =='
+              counts
+              echo '== stats/summary 接口 =='
+              docker exec "$CT" sh -c 'curl -s http://localhost:3000/api/outsource/stats/summary' | head -c 400
+              echo
+              echo "[OK] apply-outsource-seed 完成（备份在容器内 paiji.db.bak-$TS）"
+              exit 0
+            fi
+
+            echo "[FAIL] 未知 mode: $MODE" >&2; exit 1

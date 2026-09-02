@@ -81,8 +81,10 @@ jobs:
               # 下一轮 15 分钟定时同步会全量重拉（按 ext_main_id 幂等，不产生重复）。
               ENVF=.env.cloud.production
               HQ_KEY=$(grep -E '^STITCH_COST_HQ_API_KEY=' "$ENVF" | cut -d= -f2-)
-              HQ_URL=$(grep -E '^STITCH_COST_HQ_BASE_URL=' "$ENVF" | cut -d= -f2-)
-              [ -n "$HQ_KEY" ] && [ -n "$HQ_URL" ] || { echo "[FAIL] STITCH_COST_HQ_* 未配置" >&2; exit 1; }
+              # 注意：本脚本跑在宿主机，容器名 factory-review 在宿主机上无法解析；
+              # 宿主机走 nginx 的 /factory-review 前缀访问同一个集成 API。
+              HQ_URL="http://127.0.0.1/factory-review"
+              [ -n "$HQ_KEY" ] || { echo "[FAIL] STITCH_COST_HQ_API_KEY 未配置" >&2; exit 1; }
 
               TS="$(date +%Y%m%d-%H%M%S)"
               mkdir -p /opt/rr-portal/backups

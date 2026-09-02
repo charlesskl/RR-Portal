@@ -572,11 +572,14 @@ h3 .upload-mold-sheet button:hover { background: #334155; }
 .new-quote-form input:nth-child(2) { min-width: 140px; }
 
 .combo { position: relative; display: inline-flex; align-items: center; }
-.combo > input { padding-right: 26px; width: 100%; }
+.combo > input { padding-right: 50px; width: 100%; }
+.combo-clear,
 .combo-caret {
   position: absolute; right: 4px; padding: 2px 4px; border: 0; background: transparent;
   color: var(--text-light); cursor: pointer; box-shadow: none;
 }
+.combo-clear { right: 25px; font-size: 16px; line-height: 1; }
+.combo-clear:hover,
 .combo-caret:hover { color: var(--text-dim); }
 .combo-list {
   position: absolute; top: calc(100% + 4px); left: 0; z-index: 50;

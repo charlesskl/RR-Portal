@@ -20,8 +20,21 @@ const FONT = 'Microsoft YaHei';  // 全表统一字体
 // 辅助/包装材料 类别 — 减税明细各外购项按此类别统计（须与前端 workbench.js MAT_CATEGORIES 一致）
 const MAT_CATEGORIES = ['吸塑', '胶袋', '彩盒/内咭', '电池', '产品利宝', '彩盒利宝', '电镀', '其他外购'];
 const MOLD_USD_HKD = 7.8;
-const SUBTOTAL_FILL = 'FFFEF3C7';
-const SUBTOTAL_FONT = 'FF92400E';
+const COLORS = {
+  navy: 'FF17365D',
+  blue: 'FF5B9BD5',
+  section: 'FFDCE6F1',
+  border: 'FFB8C6D1',
+  meta: 'FFF3F6FA',
+  subtotal: 'FFEAF2F8',
+  total: 'FFDCE6F1',
+  loss: 'FFEAF2F8',
+  text: 'FF1F2937',
+  muted: 'FF64748B',
+  white: 'FFFFFFFF',
+};
+const SUBTOTAL_FILL = COLORS.subtotal;
+const SUBTOTAL_FONT = COLORS.navy;
 
 // 工具
 const num = (v) => Number(v) || 0;
@@ -92,11 +105,10 @@ function sewTotalQty(sewing) {
   return groups.reduce((total, group) => total + sewGroupQty(group), 0) || 1;
 }
 
-// 暖灰系单色调
 function styleHeader(cell) {
-  cell.font = { bold: true, color: { argb: 'FF1F2937' }, size: 11, name: 'Microsoft YaHei' };
+  cell.font = { bold: true, color: { argb: COLORS.navy }, size: 11, name: 'Microsoft YaHei' };
   cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
-  cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF0DBA1' } };  // 合计同色 暖米
+  cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.section } };
   cell.border = thinBorder();
   if (cell.worksheet && cell.worksheet.getRow(cell.row).height < 30) {
     cell.worksheet.getRow(cell.row).height = 30;
@@ -112,20 +124,18 @@ function styleData(cell) {
   }
 }
 function styleSection(cell) {
-  // 章节标题：白底 + 加粗深色文字，不填充
-  cell.font = { bold: true, size: 14, color: { argb: 'FF704917' }, name: 'Microsoft YaHei' };
+  cell.font = { bold: true, size: 14, color: { argb: COLORS.navy }, name: 'Microsoft YaHei' };
   cell.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
-  cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFFFF' } };
-  cell.border = { bottom: { style: 'medium', color: { argb: 'FFF0DBA1' } } };
+  cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.white } };
+  cell.border = { bottom: { style: 'medium', color: { argb: COLORS.blue } } };
   if (cell.worksheet) cell.worksheet.getRow(cell.row).height = 30;
 }
 function styleSubtotal(cell, level) {
-  // 奶油拿铁 配色
   const palette = {
-    sub:   'FFFDF8E7',  // 极浅奶
-    total: 'FFF0DBA1',  // 暖米（合计）
-    hkd:   'FFF0DBA1',  // 同合计
-    loss:  'FFFBF5E0',  // 米色
+    sub: COLORS.subtotal,
+    total: COLORS.total,
+    hkd: COLORS.total,
+    loss: COLORS.loss,
   };
   const color = palette[level] || palette.sub;
   cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: color } };
@@ -136,7 +146,7 @@ function styleSubtotal(cell, level) {
   }
 }
 function thinBorder() {
-  const s = { style: 'thin', color: { argb: 'FFEFE7D2' } };  // 米色边框
+  const s = { style: 'thin', color: { argb: COLORS.border } };
   return { top: s, bottom: s, left: s, right: s };
 }
 function mediumBorder() {
@@ -175,22 +185,22 @@ async function buildWorkbook({ quote, sections }) {
   let row = 1;
 
   // 报价单标题
-  ws.mergeCells(row, 1, row, 13);
+  ws.mergeCells(row, 1, row, 17);
   const titleCell = ws.getCell(row, 1);
   titleCell.value = `${quote.quote_no || ''} ${quote.product_name || ''} 内部报价明细`;
-  titleCell.font = { bold: true, size: 18, color: { argb: 'FF1F2937' }, name: 'Microsoft YaHei' };
+  titleCell.font = { bold: true, size: 18, color: { argb: COLORS.white }, name: 'Microsoft YaHei' };
   titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
-  titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFFFF' } };
+  titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.navy } };
   ws.getRow(row).height = 40;
   row += 1;
 
   // 报价单元信息
-  ws.mergeCells(row, 1, row, 13);
+  ws.mergeCells(row, 1, row, 17);
   const subCell = ws.getCell(row, 1);
   subCell.value = `客户: ${quote.customer || '—'}    数量: ${quote.qty || '—'}    创建: ${quote.created_at || ''}`;
   subCell.alignment = { horizontal: 'center', vertical: 'middle' };
-  subCell.font = { color: { argb: 'FF64748B' }, size: 11, italic: true, name: 'Microsoft YaHei' };
-  subCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
+  subCell.font = { color: { argb: COLORS.muted }, size: 11, italic: true, name: 'Microsoft YaHei' };
+  subCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLORS.meta } };
   ws.getRow(row).height = 22;
   row += 2;
 
@@ -2676,12 +2686,14 @@ function renderTaxSummary(ws, row, sales, extra = {}) {
     ['减税后利润率', { formula: `IFERROR(((${basePriceRef}-((${noLaborRefExpanded})-${totalDedRef}))-D${t3Row})/${basePriceRef},0)`, result: basePrice ? afterProfit/basePrice : 0 }, '0.00%'],
   ];
   let afterCostRow = null;
+  const summaryValueCol = 7;
+  const summaryValueColL = colL(summaryValueCol);
   summaryRows.forEach(([k, v, fmt]) => {
-    if (k === '减税后成本') afterCostRow = row;  // 减税后成本 值在 I 列
-    ws.getCell(row, 1).value = k; ws.mergeCells(row, 1, row, 8);
-    ws.getCell(row, 9).value = v; ws.mergeCells(row, 9, row, 13);
-    ws.getCell(row, 9).numFmt = fmt;
-    for (let cc = 1; cc <= 13; cc++) styleSubtotal(ws.getCell(row, cc), 'sub');
+    if (k === '减税后成本') afterCostRow = row;
+    ws.getCell(row, 1).value = k; ws.mergeCells(row, 1, row, 6);
+    ws.getCell(row, summaryValueCol).value = v; ws.mergeCells(row, summaryValueCol, row, sumCol);
+    ws.getCell(row, summaryValueCol).numFmt = fmt;
+    for (let cc = 1; cc <= sumCol; cc++) styleSubtotal(ws.getCell(row, cc), 'sub');
     row += 1;
   });
   row += 1;
@@ -2689,9 +2701,10 @@ function renderTaxSummary(ws, row, sales, extra = {}) {
   // 减税后码数(表2) = 货价 / 减税后成本（前向引用：减税后成本 此处才渲染完，回填公式）
   const codeAfterIdx = t2Cols.findIndex(c => c[1] === 'code_after') + 1;
   if (afterCostRow && codeAfterIdx && !ov['t2.code_after']) {
-    const baseLive = cellVal(basePriceRef), afterLive = cellVal(`I${afterCostRow}`);
+    const afterCostRef = `${summaryValueColL}${afterCostRow}`;
+    const baseLive = cellVal(basePriceRef), afterLive = cellVal(afterCostRef);
     const cell = ws.getCell(t2DataRow, codeAfterIdx);
-    cell.value = { formula: `IFERROR(${basePriceRef}/I${afterCostRow},0)`, result: afterLive > 0 ? baseLive / afterLive : 0 };
+    cell.value = { formula: `IFERROR(${basePriceRef}/${afterCostRef},0)`, result: afterLive > 0 ? baseLive / afterLive : 0 };
     cell.numFmt = '0.0000';
   }
   return row;

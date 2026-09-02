@@ -60,9 +60,9 @@ router.get('/customers', async (req, res) => {
   res.json({ customers });
 });
 
-// POST /api/quotes  仅业务可建
+// POST /api/quotes  业务 / 工程可建
 router.post('/', async (req, res) => {
-  if (req.user.dept !== 'sales') return res.status(403).json({ error: '只有业务可以创建报价单' });
+  if (!['sales', 'engineering'].includes(req.user.dept)) return res.status(403).json({ error: '只有业务或工程可以创建报价单' });
   const { quote_no, product_name, customer, qty, version } = req.body || {};
   const normalizedQuoteNo = String(quote_no || '').trim();
   const normalizedProductName = String(product_name || '').trim();
@@ -79,13 +79,13 @@ router.post('/', async (req, res) => {
   const tx = db.transaction(async () => {
     const info = await db.prepare(`
       INSERT INTO quotes (quote_no, product_name, customer, qty, version, created_by_dept, created_by_name, factory_code)
-      VALUES (?, ?, ?, ?, ?, 'sales', ?, ?)
-    `).run(normalizedQuoteNo, normalizedProductName, normalizedCustomer, qty || null, version || null, req.user.name, req.user.active_factory_code);
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(normalizedQuoteNo, normalizedProductName, normalizedCustomer, qty || null, version || null, req.user.dept, req.user.name, req.user.active_factory_code);
     const id = info.lastInsertRowid;
     const ins = db.prepare(`INSERT INTO quote_sections (quote_id, dept) VALUES (?, ?)`);
     for (const d of DEPT_CODES) await ins.run(id, d);
-    await db.prepare(`INSERT INTO audit_log (quote_id, dept, actor, action) VALUES (?, 'sales', ?, 'create')`)
-      .run(id, req.user.name);
+    await db.prepare(`INSERT INTO audit_log (quote_id, dept, actor, action) VALUES (?, ?, ?, 'create')`)
+      .run(id, req.user.dept, req.user.name);
     return id;
   });
 
@@ -179,10 +179,27 @@ router.put('/:id/header', async (req, res) => {
   const id = Number(req.params.id);
   const acc = await quoteAccess(req.user, id);
   if (acc.status !== 200) return res.status(acc.status).json({ error: acc.status === 404 ? '不存在' : '无权修改该客户的报价单' });
-  const { product_name, customer, qty, version } = req.body || {};
+  const { quote_no, product_name, customer, qty, version } = req.body || {};
   const fields = []; const vals = [];
+  if (quote_no !== undefined) {
+    const normalizedQuoteNo = String(quote_no || '').trim();
+    if (!normalizedQuoteNo) return res.status(400).json({ error: '货号不能为空' });
+    const duplicate = await db.prepare('SELECT id, customer FROM quotes WHERE quote_no = ? AND factory_code = ? AND id != ?')
+      .get(normalizedQuoteNo, req.user.active_factory_code, id);
+    if (duplicate) return res.status(409).json({ error: `货号「${normalizedQuoteNo}」已被占用（客户：${duplicate.customer || '未填写'}）` });
+    fields.push('quote_no = ?'); vals.push(normalizedQuoteNo);
+  }
   if (product_name !== undefined) { fields.push('product_name = ?'); vals.push(product_name); }
-  if (customer !== undefined)     { fields.push('customer = ?');     vals.push(customer); }
+  if (customer !== undefined) {
+    const normalizedCustomer = String(customer || '').trim();
+    if (!normalizedCustomer) return res.status(400).json({ error: '客户不能为空' });
+    if (req.user.role !== 'admin') {
+      const allowedCustomer = await db.prepare('SELECT 1 FROM user_customers WHERE user_id = ? AND customer = ?')
+        .get(req.user.id, normalizedCustomer);
+      if (!allowedCustomer) return res.status(403).json({ error: '该客户不在当前账号的授权范围内' });
+    }
+    fields.push('customer = ?'); vals.push(normalizedCustomer);
+  }
   if (qty !== undefined)          { fields.push('qty = ?');          vals.push(qty); }
   if (version !== undefined)      { fields.push('version = ?');      vals.push(version); }
   if (!fields.length) return res.json({ ok: true });

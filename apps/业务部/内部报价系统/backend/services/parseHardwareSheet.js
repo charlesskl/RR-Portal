@@ -67,14 +67,31 @@ function parseMoq(value) {
   return Math.round(base);
 }
 
-function chooseTier(tiers, targetQty) {
-  const priced = (tiers || []).filter(t => t.unit_price_rmb != null || t.unit_price_usd != null);
+function chooseTier(tiers, targetQty, targetCurrency) {
+  const currency = String(targetCurrency || '').toUpperCase();
+  const priced = (tiers || []).filter(t => currency === 'USD'
+    ? t.unit_price_usd != null
+    : (currency === 'RMB' ? t.unit_price_rmb != null : (t.unit_price_rmb != null || t.unit_price_usd != null)));
   if (!priced.length) return null;
   const sorted = priced.slice().sort((a, b) => (a.moq_qty ?? 0) - (b.moq_qty ?? 0));
   const qty = Number(targetQty);
-  if (!Number.isFinite(qty) || qty <= 0) return sorted[0];
-  const eligible = sorted.filter(t => t.moq_qty != null && t.moq_qty <= qty);
-  return eligible.length ? eligible[eligible.length - 1] : sorted[0];
+  const picked = !Number.isFinite(qty) || qty <= 0
+    ? sorted[0]
+    : (() => {
+      const eligible = sorted.filter(t => t.moq_qty != null && t.moq_qty <= qty);
+      return eligible.length ? eligible[eligible.length - 1] : sorted[0];
+    })();
+  const useUsd = currency === 'USD' || (currency !== 'RMB' && picked.unit_price_rmb == null && picked.unit_price_usd != null);
+  const useTaxedRmb = !useUsd && picked.unit_price_rmb_untaxed == null && picked.unit_price_rmb_taxed != null;
+  return {
+    ...picked,
+    unit_price_rmb: useUsd ? null : (useTaxedRmb ? picked.unit_price_rmb_taxed : picked.unit_price_rmb_untaxed),
+    unit_price_usd: useUsd ? picked.unit_price_usd : null,
+    source_currency: useUsd ? 'USD' : 'RMB',
+    tax_pct: useUsd ? 0 : (useTaxedRmb ? 13 : 0),
+    price_source: useUsd ? 'USD不含税' : (useTaxedRmb ? '人民币含税' : '人民币不含税'),
+    price_type: useUsd ? 'USD_UNTAXED' : (useTaxedRmb ? 'RMB_TAXED' : 'RMB_UNTAXED'),
+  };
 }
 
 function joinNote(parts) {
@@ -158,7 +175,12 @@ async function parseWorkbook(buffer, options = {}) {
         || untaxed != null || taxed != null || usd != null;
       if (!hasContent) continue;
 
-      const startsProduct = !!(rawSerial || (rawName && rawName !== carried.name));
+      // 部分供应商会给同一物料的每个 MOQ 档都填独立序号；名称和规格相同的连续行
+      // 仍应合并成一个物料的阶梯价，不能因序号不同拆成多个单选档。
+      const repeatsCurrentProduct = !!(current && rawName && rawName === current.name
+        && (!rawSpec || !current.spec || rawSpec === current.spec)
+        && (!rawMaterial || !current.material || rawMaterial === current.material));
+      const startsProduct = !repeatsCurrentProduct && !!(rawSerial || (rawName && rawName !== carried.name));
       if (startsProduct) {
         carried = {
           serial: rawSerial || carried.serial,
@@ -196,23 +218,23 @@ async function parseWorkbook(buffer, options = {}) {
       if (rowNote) current.note = rowNote;
       if (rowDelivery) current.delivery_days = rowDelivery;
 
-      const priceSource = untaxed != null ? '人民币不含税'
-        : (taxed != null ? '人民币含税' : (usd != null ? 'USD不含税' : ''));
-      if (priceSource) {
+      if (untaxed != null || taxed != null || usd != null) {
         current.tiers.push({
           moq: moqText,
           moq_qty: parseMoq(moqText),
           unit_price_rmb: untaxed ?? taxed,
-          unit_price_usd: untaxed == null && taxed == null ? usd : null,
-          tax_pct: taxed != null && untaxed == null ? 13 : 0,
-          price_source: priceSource,
+          unit_price_rmb_untaxed: untaxed,
+          unit_price_rmb_taxed: taxed,
+          unit_price_usd: usd,
+          rmb_tax_pct: taxed != null && untaxed == null ? 13 : 0,
+          rmb_price_source: untaxed != null ? '人民币不含税' : (taxed != null ? '人民币含税' : null),
           source_row: index + 1,
         });
       }
     }
 
     const items = groups.map(group => {
-      const tier = chooseTier(group.tiers, options.targetQty);
+      const tier = chooseTier(group.tiers, options.targetQty, options.targetCurrency);
       if (!group.name || !tier) return null;
       const spec = [group.spec, group.material ? `材料/表面处理：${group.material}` : ''].filter(Boolean).join('；');
       return {
@@ -221,7 +243,8 @@ async function parseWorkbook(buffer, options = {}) {
         qty: 1,
         unit_price_rmb: tier.unit_price_rmb,
         unit_price_usd: tier.unit_price_usd,
-        source_currency: tier.unit_price_usd != null ? 'USD' : 'RMB',
+        source_currency: tier.source_currency,
+        price_type: tier.price_type,
         tax_pct: tier.tax_pct,
         note: joinNote([
           group.note,
@@ -248,6 +271,7 @@ async function parseWorkbook(buffer, options = {}) {
       header_row: headerRow + 1,
       template_type: 'supplier_quote',
       target_qty: Number(options.targetQty) || null,
+      target_currency: options.targetCurrency || null,
     };
   }
 

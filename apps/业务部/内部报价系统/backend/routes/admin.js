@@ -284,6 +284,40 @@ router.get('/customers', async (req, res) => {
   res.json({ customers: rows.map(r => r.customer) });
 });
 
+// PUT /api/admin/customers/rename 统一修改客户名称，并同步报价单及账号授权。
+router.put('/customers/rename', async (req, res) => {
+  const oldCustomer = String(req.body?.old_customer || '').trim();
+  const newCustomer = String(req.body?.new_customer || '').trim();
+  if (!oldCustomer || !newCustomer) return res.status(400).json({ error: '原客户名和新客户名均不能为空' });
+  if (oldCustomer === newCustomer) return res.json({ ok: true, quotes_changed: 0, users_changed: 0 });
+
+  const quoteCount = Number((await db.prepare('SELECT COUNT(*) AS n FROM quotes WHERE customer = ?').get(oldCustomer)).n || 0);
+  const userRows = await db.prepare('SELECT user_id FROM user_customers WHERE customer = ?').all(oldCustomer);
+  await db.transaction(async () => {
+    await db.prepare('UPDATE quotes SET customer = ? WHERE customer = ?').run(newCustomer, oldCustomer);
+    const add = db.prepare('INSERT INTO user_customers (user_id, customer) VALUES (?, ?) ON CONFLICT DO NOTHING');
+    for (const row of userRows) await add.run(row.user_id, newCustomer);
+    await db.prepare('DELETE FROM user_customers WHERE customer = ?').run(oldCustomer);
+  })();
+  await db.prepare(`INSERT INTO audit_log (actor, action, detail) VALUES (?, 'rename_customer', ?)`)
+    .run(req.user.username, `${oldCustomer} → ${newCustomer}; quotes=${quoteCount}; users=${userRows.length}`);
+  res.json({ ok: true, quotes_changed: quoteCount, users_changed: userRows.length });
+});
+
+// DELETE /api/admin/customers 仅删除未被报价单使用的预授权客户。
+router.delete('/customers', async (req, res) => {
+  const customer = String(req.body?.customer || '').trim();
+  if (!customer) return res.status(400).json({ error: '客户名不能为空' });
+  const quoteCount = Number((await db.prepare('SELECT COUNT(*) AS n FROM quotes WHERE customer = ?').get(customer)).n || 0);
+  if (quoteCount > 0) {
+    return res.status(409).json({ error: `客户「${customer}」仍有 ${quoteCount} 张报价单，不能删除；可先使用“修改”统一更名` });
+  }
+  const result = await db.prepare('DELETE FROM user_customers WHERE customer = ?').run(customer);
+  await db.prepare(`INSERT INTO audit_log (actor, action, detail) VALUES (?, 'delete_customer', ?)`)
+    .run(req.user.username, `${customer}; users=${result.changes || 0}`);
+  res.json({ ok: true, users_changed: result.changes || 0 });
+});
+
 // GET /api/admin/users/:id/customers — 该用户可见客户
 router.get('/users/:id/customers', async (req, res) => {
   const id = Number(req.params.id);

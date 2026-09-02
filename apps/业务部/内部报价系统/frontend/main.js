@@ -53,8 +53,8 @@ async function refreshMe() {
       factorySwitch.classList.add('hidden');
       factoryChip.classList.remove('hidden');
     }
-    // 新建报价：业务 dept 才显示
-    if (hasPerm(me, '报价单列表', 'edit') && me.dept === 'sales') {
+    // 新建报价：业务 / 工程可建
+    if (hasPerm(me, '报价单列表', 'edit') && (me.dept === 'sales' || me.dept === 'engineering')) {
       $('new-quote-form').classList.remove('hidden');
       loadCustomers();
     } else $('new-quote-form').classList.add('hidden');
@@ -245,6 +245,7 @@ if ($('btn-create')) $('btn-create').onclick = async () => {
       }),
     });
     $('q-no').value = $('q-product').value = $('q-version').value = $('q-customer').value = $('q-qty').value = '';
+    $('q-customer-clear')?.classList.add('hidden');
     await loadQuotes();
     loadCustomers();
   } catch (e) { alert(e.message); }
@@ -265,8 +266,9 @@ async function loadCustomers() {
   const input = $('q-customer');
   const list = $('q-customer-list');
   const toggle = $('q-customer-toggle');
+  const clear = $('q-customer-clear');
   const combo = $('q-customer-combo');
-  if (!input || !list || !toggle || !combo) return;
+  if (!input || !list || !toggle || !clear || !combo) return;
   let activeIdx = -1;
 
   const isOpen = () => !list.classList.contains('hidden');
@@ -275,6 +277,15 @@ async function loadCustomers() {
     list.classList.add('hidden');
     input.setAttribute('aria-expanded', 'false');
     activeIdx = -1;
+  }
+  function syncClearButton() {
+    clear.classList.toggle('hidden', !input.value.trim());
+  }
+  function clearSelection() {
+    input.value = '';
+    syncClearButton();
+    input.focus();
+    open();
   }
   function render() {
     const query = input.value.trim();
@@ -292,6 +303,7 @@ async function loadCustomers() {
       el.onmousedown = (event) => {
         event.preventDefault();
         input.value = el.dataset.val;
+        syncClearButton();
         close();
         input.focus();
       };
@@ -319,8 +331,15 @@ async function loadCustomers() {
     if (isOpen()) close();
     else { input.focus(); open(); }
   });
+  clear.addEventListener('mousedown', (event) => {
+    event.preventDefault();
+    clearSelection();
+  });
   input.addEventListener('keydown', (event) => {
-    if (event.key === 'ArrowDown') {
+    if ((event.key === 'Backspace' || event.key === 'Delete') && input.value) {
+      event.preventDefault();
+      clearSelection();
+    } else if (event.key === 'ArrowDown') {
       event.preventDefault();
       if (!isOpen()) return open();
       highlight(Math.min(activeIdx + 1, items().length - 1));
@@ -332,6 +351,7 @@ async function loadCustomers() {
       if (isOpen() && activeIdx >= 0 && choices[activeIdx]) {
         event.preventDefault();
         input.value = choices[activeIdx].dataset.val;
+        syncClearButton();
         close();
       }
     } else if (event.key === 'Escape' && isOpen()) {
@@ -339,6 +359,7 @@ async function loadCustomers() {
       close();
     }
   });
+  syncClearButton();
   document.addEventListener('click', event => { if (!combo.contains(event.target)) close(); });
 })();
 

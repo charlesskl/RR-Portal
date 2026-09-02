@@ -95,8 +95,11 @@ test('internal quotation workbook uses print-friendly layouts on every sheet', a
   }
   const mainSheet = workbook.getWorksheet('报价明细');
   assert.equal(mainSheet.pageSetup.printTitlesRow, '1:2');
-  // 模具颜色列移除后，主表最后一个真实业务列为 Q，不能把其后的样式空白列带入打印区域。
+  // 顶部标题与资料栏延伸到 Q 列，R 列及后方空白不进入打印区域。
   assert.equal(mainSheet.pageSetup.printArea, `A1:Q${mainSheet.rowCount}`);
+  assert.equal(mainSheet.getCell('Q1').master.address, 'A1');
+  assert.equal(mainSheet.getCell('Q2').master.address, 'A2');
+  assert.notEqual(mainSheet.getCell('R1').master.address, 'A1');
   assert.equal(mainSheet.getCell(1, 1).font.size, 18);
   assert.ok(mainSheet.getCell(2, 1).font.size >= 12);
   assert.ok(mainSheet.getColumn(7).width >= 20);
@@ -782,7 +785,7 @@ test('SPIN export keeps shifted tax-summary formulas linked to their real rows',
   let afterCostRow = 0;
   worksheet.eachRow(row => {
     const deduction = row.getCell(11).value;
-    const summary = row.getCell(9).value;
+    const summary = row.getCell(7).value;
     if (deduction && typeof deduction === 'object' && /^SUM\(A\d+:J\d+\)$/.test(deduction.formula || '')) {
       deductionRow = row.number;
     }
@@ -793,10 +796,10 @@ test('SPIN export keeps shifted tax-summary formulas linked to their real rows',
   assert.ok(deductionRow);
   assert.ok(summaryRow);
   assert.ok(afterCostRow);
-  assert.equal(worksheet.getCell(summaryRow, 9).value.formula, `K${deductionRow}`);
-  assert.match(worksheet.getCell(afterCostRow, 9).value.formula, new RegExp(`-K${deductionRow}$`));
+  assert.equal(worksheet.getCell(summaryRow, 7).value.formula, `K${deductionRow}`);
+  assert.match(worksheet.getCell(afterCostRow, 7).value.formula, new RegExp(`-K${deductionRow}$`));
   for (const rowNumber of [summaryRow, afterCostRow]) {
-    const formula = worksheet.getCell(rowNumber, 9).value.formula;
+    const formula = worksheet.getCell(rowNumber, 7).value.formula;
     const refs = [...formula.matchAll(/[A-Z]+(\d+)/g)].map(match => Number(match[1]));
     assert.ok(refs.every(ref => ref <= worksheet.rowCount), `${formula} 引用了工作表范围外的行`);
   }

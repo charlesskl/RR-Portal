@@ -16,6 +16,16 @@ const {
 
 const FONT = 'Microsoft YaHei';
 const HKD4 = '"HK$"0.0000';
+const EXPORT_COLORS = {
+  navy: 'FF17365D',
+  blue: 'FF5B9BD5',
+  section: 'FFDCE6F1',
+  border: 'FFB8C6D1',
+  soft: 'FFF3F6FA',
+  subtotal: 'FFEAF2F8',
+  total: 'FFDCE6F1',
+  white: 'FFFFFFFF',
+};
 
 function num(value) {
   const parsed = Number(value);
@@ -698,10 +708,10 @@ function patchSlush(ws, slush) {
     { width: 20 }, { width: 18 }, { width: 16 }, { width: 18 },
   ];
   const border = {
-    top: { style: 'thin', color: { argb: 'FFD6C28A' } },
-    left: { style: 'thin', color: { argb: 'FFD6C28A' } },
-    bottom: { style: 'thin', color: { argb: 'FFD6C28A' } },
-    right: { style: 'thin', color: { argb: 'FFD6C28A' } },
+    top: { style: 'thin', color: { argb: EXPORT_COLORS.border } },
+    left: { style: 'thin', color: { argb: EXPORT_COLORS.border } },
+    bottom: { style: 'thin', color: { argb: EXPORT_COLORS.border } },
+    right: { style: 'thin', color: { argb: EXPORT_COLORS.border } },
   };
   const fill = argb => ({ type: 'pattern', pattern: 'solid', fgColor: { argb } });
   const styleRange = (row, start, end, options = {}) => {
@@ -724,20 +734,21 @@ function patchSlush(ws, slush) {
     ws.mergeCells(row, 1, row, 8);
     ws.getCell(row, 1).value = `搪胶报价 · ${index + 1}# ${item.name || item.source_sheet || '产品'}`;
     applyStyle(ws.getCell(row, 1), titleStyle);
-    ws.getCell(row, 1).fill = fill('FFF4D98B');
+    ws.getCell(row, 1).fill = fill(EXPORT_COLORS.navy);
+    ws.getCell(row, 1).font = { ...ws.getCell(row, 1).font, color: { argb: EXPORT_COLORS.white } };
     row += 1;
     [['产品编号', item.item_code || ''], ['胶件名称', item.name || ''], ['材料', item.material || ''], ['来源工作表', item.source_sheet || '']]
       .forEach(([label, value], pair) => {
         const column = pair * 2 + 1;
         ws.getCell(row, column).value = label;
         ws.getCell(row, column + 1).value = value;
-        styleRange(row, column, column, { bold: true, fill: 'FFEAF2F8' });
+        styleRange(row, column, column, { bold: true, fill: EXPORT_COLORS.section });
         styleRange(row, column + 1, column + 1, { align: 'left' });
       });
     row += 1;
     ws.mergeCells(row, 1, row, 4); ws.getCell(row, 1).value = '成本明细（HK$/PC）';
     ws.mergeCells(row, 5, row, 8); ws.getCell(row, 5).value = '生产参数（按导入模板）';
-    styleRange(row, 1, 8, { bold: true, fill: 'FFD9EAD3' });
+    styleRange(row, 1, 8, { bold: true, fill: EXPORT_COLORS.section, color: EXPORT_COLORS.navy });
     row += 1;
     const costStart = row;
     const costLabels = ['产品料价', '搪工', '批工/烤工', '色粉', '柴油', '电费', '运费/胶袋'];
@@ -750,7 +761,7 @@ function patchSlush(ws, slush) {
       ws.mergeCells(dataRow, 5, dataRow, 6); ws.getCell(dataRow, 5).value = paramLabels[offset];
       ws.mergeCells(dataRow, 7, dataRow, 8); ws.getCell(dataRow, 7).value = num(paramValues[offset]);
       styleRange(dataRow, 1, 2, { align: 'left' }); styleRange(dataRow, 3, 4, { numFmt: HKD4 });
-      styleRange(dataRow, 5, 6, { align: 'left', fill: 'FFF8F8F8' }); styleRange(dataRow, 7, 8, { numFmt: '0.0000' });
+      styleRange(dataRow, 5, 6, { align: 'left', fill: EXPORT_COLORS.soft }); styleRange(dataRow, 7, 8, { numFmt: '0.0000' });
     }
     ws.getCell(costStart, 3).value = { formula: `G${costStart}*G${costStart + 1}/454`, result: costing.material };
     ws.getCell(costStart + 1, 3).value = { formula: `IFERROR(G${costStart + 2}/G${costStart + 7},0)`, result: costing.slushLabor };
@@ -769,7 +780,7 @@ function patchSlush(ws, slush) {
       const dataRow = costStart + 7 + offset;
       ws.mergeCells(dataRow, 5, dataRow, 6); ws.getCell(dataRow, 5).value = label;
       ws.mergeCells(dataRow, 7, dataRow, 8); ws.getCell(dataRow, 7).value = typeof value === 'number' ? num(value) : value;
-      styleRange(dataRow, 5, 6, { align: 'left', fill: 'FFF8F8F8' }); styleRange(dataRow, 7, 8, { numFmt: '0.0000' });
+      styleRange(dataRow, 5, 6, { align: 'left', fill: EXPORT_COLORS.soft }); styleRange(dataRow, 7, 8, { numFmt: '0.0000' });
     });
     const subtotalRow = row;
     const rows = [
@@ -784,8 +795,8 @@ function patchSlush(ws, slush) {
       const dataRow = subtotalRow + offset;
       ws.mergeCells(dataRow, 1, dataRow, 2); ws.getCell(dataRow, 1).value = label;
       ws.mergeCells(dataRow, 3, dataRow, 4); ws.getCell(dataRow, 3).value = value;
-      styleRange(dataRow, 1, 2, { bold: offset >= 4, align: 'left', fill: offset >= 4 ? 'FFFFF2CC' : undefined });
-      styleRange(dataRow, 3, 4, { bold: offset >= 4, numFmt: offset === 1 || offset === 3 ? '0.0000' : HKD4, fill: offset >= 4 ? 'FFFFF2CC' : undefined });
+      styleRange(dataRow, 1, 2, { bold: offset >= 4, align: 'left', fill: offset >= 4 ? EXPORT_COLORS.subtotal : undefined });
+      styleRange(dataRow, 3, 4, { bold: offset >= 4, numFmt: offset === 1 || offset === 3 ? '0.0000' : HKD4, fill: offset >= 4 ? EXPORT_COLORS.subtotal : undefined });
     });
     totalCells.push(`C${subtotalRow + 4}`);
     indoCells.push(`C${subtotalRow + 5}`);
@@ -794,12 +805,12 @@ function patchSlush(ws, slush) {
   });
   ws.mergeCells(row, 1, row, 6); ws.getCell(row, 1).value = '搪胶合计 HKD';
   ws.mergeCells(row, 7, row, 8); ws.getCell(row, 7).value = { formula: totalCells.join('+'), result: total };
-  styleRange(row, 1, 8, { bold: true, fill: 'FFD9EAD3', numFmt: HKD4 });
+  styleRange(row, 1, 8, { bold: true, fill: EXPORT_COLORS.total, numFmt: HKD4 });
   const totalRow = row;
   row += 1;
   ws.mergeCells(row, 1, row, 6); ws.getCell(row, 1).value = `搪胶印尼运费合计 HKD（${pct}%）`;
   ws.mergeCells(row, 7, row, 8); ws.getCell(row, 7).value = { formula: indoCells.join('+'), result: total * pct / 100 };
-  styleRange(row, 1, 8, { bold: true, fill: 'FFFFF2CC', numFmt: HKD4 });
+  styleRange(row, 1, 8, { bold: true, fill: EXPORT_COLORS.subtotal, numFmt: HKD4 });
   ws.views = [{ state: 'frozen', ySplit: titleRow - 1 }];
   ws.pageSetup = { orientation: 'portrait', fitToPage: true, fitToWidth: 1, fitToHeight: 0 };
   return { slush: `G${totalRow}`, slushIndo: `G${row}`, total };

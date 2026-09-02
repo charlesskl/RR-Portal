@@ -383,10 +383,41 @@ function renderCustList() {
   for (const c of __custState.all) {
     const checked = __custState.selected.has(c) ? 'checked' : '';
     const div = document.createElement('div');
-    div.innerHTML = `<label><input type="checkbox" data-cust="${esc(c)}" ${checked}/> ${esc(c)}</label>`;
+    div.style.cssText = 'display:flex;align-items:center;gap:6px;min-height:32px';
+    div.innerHTML = `<label style="display:flex;align-items:center;gap:7px;flex:1;min-width:0"><input type="checkbox" data-cust="${esc(c)}" ${checked}/> <span style="overflow:hidden;text-overflow:ellipsis">${esc(c)}</span></label>
+      <button type="button" class="mini cd-rename" title="修改客户名称">修改</button>
+      <button type="button" class="mini danger cd-delete" title="删除未使用的客户">删除</button>`;
     div.querySelector('input').onchange = (e) => {
       if (e.target.checked) __custState.selected.add(c);
       else __custState.selected.delete(c);
+    };
+    div.querySelector('.cd-rename').onclick = async () => {
+      const next = prompt('请输入新的客户名称', c);
+      if (next == null || !next.trim() || next.trim() === c) return;
+      try {
+        await api('/admin/customers/rename', {
+          method: 'PUT',
+          body: JSON.stringify({ old_customer: c, new_customer: next.trim() }),
+        });
+        if (__custState.selected.delete(c)) __custState.selected.add(next.trim());
+        __custState.all = __custState.all.filter(value => value !== c);
+        if (!__custState.all.includes(next.trim())) __custState.all.push(next.trim());
+        __custState.all.sort();
+        renderCustList();
+        $('cd-msg').style.color = 'green';
+        $('cd-msg').textContent = `✓ 已将「${c}」修改为「${next.trim()}」`;
+      } catch (error) { $('cd-msg').style.color = ''; $('cd-msg').textContent = error.message; }
+    };
+    div.querySelector('.cd-delete').onclick = async () => {
+      if (!confirm(`确定删除客户「${c}」？\n仅没有报价单使用时才可删除。`)) return;
+      try {
+        await api('/admin/customers', { method: 'DELETE', body: JSON.stringify({ customer: c }) });
+        __custState.selected.delete(c);
+        __custState.all = __custState.all.filter(value => value !== c);
+        renderCustList();
+        $('cd-msg').style.color = 'green';
+        $('cd-msg').textContent = `✓ 已删除「${c}」`;
+      } catch (error) { $('cd-msg').style.color = ''; $('cd-msg').textContent = error.message; }
     };
     list.appendChild(div);
   }

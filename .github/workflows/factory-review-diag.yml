@@ -1,11 +1,20 @@
 name: Factory Review Diag
 
-# 只读诊断 factory-review 的 pb_data 数据状态（手动触发）。
-# 用于排查「货期管理入单记录消失」——确认 orders 表实际有多少行、pb_data 是否被重置。
-# 全程只读：count/ls/du/日志，绝不改动任何数据。
+# factory-review 的 pb_data 运维（手动触发）。
+#   mode=diag   —— 只读诊断：count/ls/du/日志，绝不改动任何数据。
+#   mode=backup —— 备份 pb_data：用 SQLite online backup 生成一致快照 data.db 副本，
+#                  再连其它文件一起 tar 到 /opt/rr-portal/backups/pb_data-时间戳.tar.gz。
+#                  不停容器、不改数据。
 
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "diag（只读诊断）/ backup（备份 pb_data）"
+        type: choice
+        required: true
+        default: diag
+        options: [diag, backup]
 
 permissions:
   contents: read
@@ -34,6 +43,7 @@ jobs:
       - name: Diagnose factory-review pb_data via SSH
         env:
           CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+          OPS_MODE: ${{ inputs.mode }}
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         with:
           host: ${{ secrets.CLOUD_HOST }}
@@ -41,11 +51,39 @@ jobs:
           key: ${{ secrets.CLOUD_SSH_KEY }}
           fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
           command_timeout: 8m
+          envs: OPS_MODE
           script: |
             set -uo pipefail
             APP="/opt/rr-portal/apps/PMC跟仓管/加工厂月度评审管理制度"
             PBDATA="$APP/pb_data"
-            echo "=================== factory-review pb_data 诊断 ==================="
+            MODE="${OPS_MODE:-diag}"
+            echo "=================== factory-review pb_data $MODE ==================="
+
+            if [ "$MODE" = "backup" ]; then
+              [ -f "$PBDATA/data.db" ] || { echo "[FAIL] $PBDATA/data.db 不存在" >&2; exit 1; }
+              BK_DIR=/opt/rr-portal/backups
+              mkdir -p "$BK_DIR"
+              TS="$(date +%Y%m%d-%H%M%S)"
+              SNAP="$BK_DIR/pb_data-snap-$TS.db"
+              echo "-- SQLite online backup（一致性快照，不停容器）--"
+              python3 - "$PBDATA/data.db" "$SNAP" <<'PY'
+            import sqlite3, sys
+            src = sqlite3.connect(f"file:{sys.argv[1]}?mode=ro", uri=True, timeout=30)
+            dst = sqlite3.connect(sys.argv[2])
+            try:
+                src.backup(dst)
+            finally:
+                dst.close(); src.close()
+            print("snapshot ok:", sys.argv[2])
+            PY
+              [ -s "$SNAP" ] || { echo "[FAIL] 快照生成失败" >&2; exit 1; }
+              TARBALL="$BK_DIR/pb_data-$TS.tar.gz"
+              tar -czf "$TARBALL" -C "$BK_DIR" "pb_data-snap-$TS.db" \
+                && rm -f "$SNAP" \
+                && ls -lh "$TARBALL" \
+                && echo "[OK] backup 完成: $TARBALL"
+              exit 0
+            fi
 
             echo "== 容器状态 =="
             docker ps --filter name=factory-review --format '{{.Names}}\t{{.Status}}' || true

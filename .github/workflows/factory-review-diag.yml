@@ -5,16 +5,19 @@ name: Factory Review Diag
 #   mode=backup —— 备份 pb_data：用 SQLite online backup 生成一致快照 data.db 副本，
 #                  再连其它文件一起 tar 到 /opt/rr-portal/backups/pb_data-时间戳.tar.gz。
 #                  不停容器、不改数据。
+#   mode=set-integration-key —— 把 GitHub Secret FACTORY_REVIEW_INTEGRATION_API_KEY 幂等写入
+#                  .env.cloud.production，然后 force-recreate factory-review 容器（几秒抖动），
+#                  最后用新 key 实测集成接口 health 返回 200。轮换 key 也走这里。
 
 on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "diag（只读诊断）/ backup（备份 pb_data）"
+        description: "diag（只读诊断）/ backup（备份 pb_data）/ set-integration-key（注入集成 API 密钥并重建容器）"
         type: choice
         required: true
         default: diag
-        options: [diag, backup]
+        options: [diag, backup, set-integration-key]
 
 permissions:
   contents: read
@@ -44,6 +47,7 @@ jobs:
         env:
           CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
           OPS_MODE: ${{ inputs.mode }}
+          INTEG_KEY: ${{ secrets.FACTORY_REVIEW_INTEGRATION_API_KEY }}
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
         with:
           host: ${{ secrets.CLOUD_HOST }}
@@ -51,13 +55,37 @@ jobs:
           key: ${{ secrets.CLOUD_SSH_KEY }}
           fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
           command_timeout: 8m
-          envs: OPS_MODE
+          envs: OPS_MODE,INTEG_KEY
           script: |
             set -uo pipefail
             APP="/opt/rr-portal/apps/PMC跟仓管/加工厂月度评审管理制度"
             PBDATA="$APP/pb_data"
             MODE="${OPS_MODE:-diag}"
             echo "=================== factory-review pb_data $MODE ==================="
+
+            if [ "$MODE" = "set-integration-key" ]; then
+              [ -n "${INTEG_KEY:-}" ] || { echo "[FAIL] GitHub Secret FACTORY_REVIEW_INTEGRATION_API_KEY 未设置" >&2; exit 1; }
+              [ ${#INTEG_KEY} -ge 32 ] || { echo "[FAIL] key 需 >=32 字符" >&2; exit 1; }
+              ENV_FILE=/opt/rr-portal/.env.cloud.production
+              [ -f "$ENV_FILE" ] || { echo "[FAIL] 未找到 $ENV_FILE" >&2; exit 1; }
+              if grep -qE "^FACTORY_REVIEW_INTEGRATION_API_KEY=" "$ENV_FILE"; then
+                sed -i "s|^FACTORY_REVIEW_INTEGRATION_API_KEY=.*|FACTORY_REVIEW_INTEGRATION_API_KEY=$INTEG_KEY|" "$ENV_FILE"
+                echo "  已更新 .env.cloud.production 中的 FACTORY_REVIEW_INTEGRATION_API_KEY"
+              else
+                echo "FACTORY_REVIEW_INTEGRATION_API_KEY=$INTEG_KEY" >> "$ENV_FILE"
+                echo "  已追加 FACTORY_REVIEW_INTEGRATION_API_KEY 到 .env.cloud.production"
+              fi
+              echo "-- force-recreate factory-review 容器（几秒抖动） --"
+              cd /opt/rr-portal
+              docker compose -f docker-compose.cloud.yml --env-file "$ENV_FILE" up -d --force-recreate factory-review
+              sleep 8
+              echo "-- 实测：新 key 访问集成 health --"
+              CODE=$(docker exec rr-portal-factory-review-1 sh -c "curl -s -o /dev/null -w '%{http_code}' -H \"Authorization: Bearer $INTEG_KEY\" http://127.0.0.1:8090/api/integration/v1/health" 2>/dev/null || echo "000")
+              echo "  容器内 health http=$CODE"
+              [ "$CODE" = "200" ] || { echo "[FAIL] key 注入后接口仍未返回 200" >&2; exit 1; }
+              echo "[OK] set-integration-key 完成（key 只保存在服务器 env 文件，不回显）"
+              exit 0
+            fi
 
             if [ "$MODE" = "backup" ]; then
               [ -f "$PBDATA/data.db" ] || { echo "[FAIL] $PBDATA/data.db 不存在" >&2; exit 1; }

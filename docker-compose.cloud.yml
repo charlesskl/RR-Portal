@@ -843,6 +843,8 @@ services:
     environment:
       - FACTORY_REVIEW_ADMIN_EMAIL=${FACTORY_REVIEW_ADMIN_EMAIL:-admin@rr.local}
       - FACTORY_REVIEW_ADMIN_PASSWORD=${FACTORY_REVIEW_ADMIN_PASSWORD:-}
+      # 对车缝核价对比系统的只读集成 API 密钥；未设置时集成接口一律返回 401
+      - INTEGRATION_API_KEY=${FACTORY_REVIEW_INTEGRATION_API_KEY:-}
       - TZ=Asia/Shanghai
     volumes:
       - ./apps/PMC跟仓管/加工厂月度评审管理制度/pb_data:/pb/pb_data

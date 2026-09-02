@@ -202,15 +202,15 @@ test('production progress is a fixed percentage of production_count / quantity',
   const { computeProgress } = progCtx;
   // 注意：computeProgress 在 vm realm 里跑，返回对象原型与主 realm 不同，
   // deepEqual 会误判 —— 逐字段断言
-  const check = (q, c, text, value) => {
+  const check = (q, c, text, ratio) => {
     const r = computeProgress(q, c);
     assert.equal(r.text, text, `computeProgress(${q}, ${c}).text`);
-    assert.equal(r.value, value, `computeProgress(${q}, ${c}).value`);
+    assert.equal(r.ratio, ratio, `computeProgress(${q}, ${c}).ratio`);
   };
-  check(51072, 5000, '9.79%', 9.79);
-  check(44320, 1000, '2.26%', 2.26);
-  check(51072, 51072, '100%', 100);
-  // 生产数为空/0 → 显示 0（和车间手填习惯一致）
+  check(51072, 5000, '9.79%', 0.097901);
+  check(44320, 1000, '2.26%', 0.022563);
+  check(51072, 51072, '100%', 1);
+  // 生产数为空/0 → 显示 0%（和车间手填习惯一致）
   check(51072, 0, '0%', 0);
   check(51072, null, '0%', 0);
   // 数量为空/0 → 空白，不出 NaN%
@@ -218,7 +218,9 @@ test('production progress is a fixed percentage of production_count / quantity',
   check(0, 100, '', null);
 });
 
-test('progress cell renders computed percentage, not the raw DB value', () => {
+test('progress cell uses native percent format so Luckysheet never strips the %', () => {
+  // 落地实测：celldata 初次加载时 Luckysheet 会用 v 重写 m ——
+  // v=数字 + m='9.79%' 会被改回 '9.79'（%丢失）。必须用 v=比率 + fa='0.00%'
   const start = source.indexOf('const NUMERIC_SUM_FIELDS');
   const end = source.indexOf('// 从 Luckysheet 单元格对象提取格式');
   const ctx = { Date, Set };
@@ -228,8 +230,9 @@ test('progress cell renders computed percentage, not the raw DB value', () => {
     { id: 1, quantity: 51072, production_count: 5000, production_progress: 0 },
   ], [{ data: 'production_progress', title: '生产进度' }], new Set());
   const cell = cells.find(c => c.r === 1 && c.c === 0);
-  assert.equal(cell.v.m, '9.79%', '显示层直接算百分比，不信 DB 里手填的旧值');
-  assert.equal(cell.v.v, 9.79);
+  assert.equal(cell.v.v, 0.097901, 'v 是比率');
+  assert.equal(cell.v.ct.fa, '0.00%', '原生百分比格式');
+  assert.equal(cell.v.ct.t, 'n');
 });
 
 test('editing quantity or production_count recomputes the progress cell live', () => {
@@ -237,4 +240,40 @@ test('editing quantity or production_count recomputes the progress cell live', (
   assert.match(source, /colData === 'quantity' \|\| colData === 'daily_target' \|\| colData === 'production_count'/);
   // 重算结果要入 pending，保存才会落库
   assert.match(source, /fields\.production_progress = progressValue/);
+});
+
+// ===== 2026-08-21 「走货期填文字保存不了」修复 =====
+
+test('non-date text in date columns is preserved instead of silently dropped', () => {
+  // 车间在走货期列填「货期待复」等文字 —— parseToISO 解析不了时必须按原文本存。
+  // 旧逻辑 if (iso) entry.fields[...] = iso —— 解析失败静默丢弃，保存后全丢
+  assert.match(source, /entry\.fields\[colData\] = iso \|\| String\(v\)/);
+  assert.doesNotMatch(source, /if \(iso\) entry\.fields\[colData\] = iso;/);
+  // writeFieldValue（公式兜底扫描用）同样不得丢文本
+  assert.match(source, /\{ fields\[colData\] = String\(value\); return true; \}/);
+  assert.doesNotMatch(source, /if \(!iso && value != null && value !== ''\) return false;/);
+});
+
+// ===== 2026-08-22 落地实测发现：首次创建路径不释放 suppress =====
+
+test('first-create path releases hook suppression after both batches finish', () => {
+  // 竞态：数据比 sheet-settings 先到时，重建 effect 早退、首次创建直接消费数据，
+  // 而旧代码只有重建路径释放 suppressHookRef —— suppress 永远为 true，
+  // 所有编辑静默丢失。首次创建路径必须同样计数释放。
+  assert.match(source, /initBatchesPending === 0\) suppressHookRef\.current = false/);
+  assert.match(source, /applySavedFormulasBatch\(initBatchDone\)/);
+  assert.match(source, /applyDaysFormulaBatch\(initBatchDone\)/);
+});
+
+// ===== 2026-08-22 「走货期格子不能编辑文字」修复：移除 DatePicker 拦截 =====
+
+test('date columns are free-typed: no DatePicker interception remains', () => {
+  // 车间反馈：走货期要填「货期待复」「客想9/5走」等文字，但单击/双击格子被
+  // cellEditBefore 弹出的 antd DatePicker 挡住，根本进不了编辑态。
+  // 落地实测确认后整体移除 DatePicker 方案，日期列改为自由输入
+  // （parseToISO 照旧归一化日期，非日期文字按原文保存）。
+  assert.doesNotMatch(source, /cellEditBefore/);
+  assert.doesNotMatch(source, /_pendingFields/);
+  assert.doesNotMatch(source, /DatePicker/);
+  assert.doesNotMatch(source, /from 'dayjs'/);
 });

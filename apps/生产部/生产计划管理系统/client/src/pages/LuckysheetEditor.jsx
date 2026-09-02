@@ -1,10 +1,6 @@
 import { useEffect, useRef, useState, forwardRef, useImperativeHandle } from 'react';
 import axios from 'axios';
-import { DatePicker, ConfigProvider, message } from 'antd';
-import zhCN from 'antd/locale/zh_CN';
-import dayjs from 'dayjs';
-import 'dayjs/locale/zh-cn';
-dayjs.locale('zh-cn');
+import { message } from 'antd';
 import { ORDER_COLUMNS } from '../constants/columns';
 
 // Luckysheet 从 window.luckysheet（CDN 加载）获取
@@ -51,9 +47,8 @@ const NUMERIC_SUM_FIELDS = new Set([
   'unit_price', 'process_value', 'output_value',
 ]);
 
-// 真正的日期字段（显示成 X月X日 + 单击弹 DatePicker + parseToISO 入库）
-// 注意：4 个「复期」字段（胶件/来料/纸箱/包材）已移出 —— 用户要手填"无"/"一"/"5/22出"等文字，
-// 不该弹日期选择器、不该被 parseToISO 转换。它们当作普通文本格子。
+// 日期字段：用户自由输入（可填「9/5走」「货期待复」等文字），保存时 parseToISO 尽量归一化日期、
+// 非日期文字按原文保存。不再弹日期选择器拦截编辑。
 const DATE_FIELDS = new Set([
   'order_date', 'ship_date', 'start_date', 'complete_date', 'inspection_date',
 ]);
@@ -136,16 +131,20 @@ function parseToISO(val) {
 }
 
 // 生产进度固定 = 生产数/数量 百分比（2026-08-20 车间要求）。
-// 返回 { text: 显示文本, value: 存库的数值（百分数，如 9.79） }
-// 数量为空/为 0 → 空；生产数为空当 0（显示 "0"，和车间手填习惯一致）
+// 返回 { ratio: 比率（存库/单元格 v 用）, text: 显示文本（如 '9.79%'） }
+// 数量为空/为 0 → 空；生产数为空当 0
+// 注意：单元格必须用 Luckysheet 原生百分比格式（v=比率, ct={t:'n', fa:'0.00%'}），
+// 不能 v=数字 + m='9.79%' —— 实测 celldata 初次加载时 Luckysheet 会用 v 重写 m，
+// '9.79%' 会被改回 '9.79'（%丢失）
 function computeProgress(quantity, productionCount) {
-  if (quantity == null || quantity === '') return { text: '', value: null };
+  if (quantity == null || quantity === '') return { ratio: null, text: '' };
   const q = Number(quantity);
-  if (isNaN(q) || q === 0) return { text: '', value: null };
+  if (isNaN(q) || q === 0) return { ratio: null, text: '' };
   let c = Number(productionCount);
   if (isNaN(c)) c = 0;
-  const pct = Math.round((c / q) * 10000) / 100;
-  return { text: pct + '%', value: pct };
+  const ratio = Math.round((c / q) * 1000000) / 1000000;
+  const pct = Math.round(ratio * 10000) / 100;
+  return { ratio, text: pct + '%' };
 }
 
 function ordersToCelldata(orders, columns, newImportedIds) {
@@ -199,10 +198,11 @@ function ordersToCelldata(orders, columns, newImportedIds) {
       } else if (col.data === 'production_progress') {
         // 生产进度固定 = 生产数/数量 百分比（车间要求），显示层直接算，
         // 不信 DB 里手填的旧值；用户改数量/生产数后钩子里会实时重算
+        // v 存比率 + 原生百分比格式：渲染/编辑/解析全由 Luckysheet 处理
         const p = computeProgress(order.quantity, order.production_count);
         displayVal = p.text;
-        valueToStore = p.value ?? '';
-        ct = { t: 's', fa: '@' };
+        valueToStore = p.ratio ?? '';
+        ct = p.ratio == null ? { t: 's', fa: '@' } : { t: 'n', fa: '0.00%' };
       } else {
         displayVal = val == null ? '' : String(val);
         valueToStore = val ?? '';
@@ -330,7 +330,8 @@ function writeFieldValue(fields, colData, col, value) {
   if (value === undefined) return false;
   if (DATE_FIELDS.has(colData)) {
     const iso = parseToISO(value);
-    if (!iso && value != null && value !== '') return false;
+    // 解析不成日期的文本（如「货期待复」）按原文本存，不丢
+    if (!iso && value != null && value !== '') { fields[colData] = String(value); return true; }
     fields[colData] = iso;
     return true;
   }
@@ -365,7 +366,6 @@ function LuckysheetEditor({
   const [sheetSettings, setSheetSettings] = useState(null);
   const settingsLoadedRef = useRef(false);
   const loadedIdsRef = useRef('');
-  const [datePicker, setDatePicker] = useState(null); // {x, y, orderId, field, value}
 
   // 实时记录用户在 Luckysheet 里改动的 cell（值/格式），保存时直接读这个，
   // 不再在保存时去读 Luckysheet 内部 data（避免 flush 时序问题）
@@ -473,7 +473,10 @@ function LuckysheetEditor({
         if (v == null) entry.fields[colData] = null;
         else {
           const iso = parseToISO(v);
-          if (iso) entry.fields[colData] = iso;
+          // 车间会在日期列填「货期待复」等文字 —— 解析不成日期就按原文本存。
+          // 旧逻辑静默丢弃（只记能解析成日期的），用户填的文字保存后全丢 ——
+          // 「货期这编辑了保存不了」的真正根因
+          entry.fields[colData] = iso || String(v);
         }
       } else if (DUE_FIELDS.has(colData)) {
         // 复期列：把 Luckysheet 误转成序列号的值转回"M月D日"文本再存
@@ -521,12 +524,14 @@ function LuckysheetEditor({
             // 暂时 suppress 钩子，避免 days 被记成"用户改了" → 保存条数虚高
             suppressHookRef.current = true;
             ls2.setCellValue(r, daysColIdx, { v: days === '' ? '' : days, m: days === '' ? '' : String(days), ct: { t: 'n' } });
-            // 生产进度：数量/生产数变化时实时重算成固定百分比
+            // 生产进度：数量/生产数变化时实时重算成固定百分比（v=比率 + 原生百分比格式）
             let progressValue;
             if (progColIdx >= 0 && prodCntColIdx >= 0 && (colData === 'quantity' || colData === 'production_count')) {
               const p = computeProgress(M, sheet2.data[r]?.[prodCntColIdx]?.v);
-              progressValue = p.value;
-              ls2.setCellValue(r, progColIdx, { v: p.value ?? '', m: p.text, ct: { t: 's', fa: '@' } });
+              progressValue = p.ratio;
+              ls2.setCellValue(r, progColIdx, p.ratio == null
+                ? { v: '', m: '', ct: { t: 's', fa: '@' } }
+                : { v: p.ratio, ct: { t: 'n', fa: '0.00%' } });
             }
             // 还得自己把 days / 生产进度 入 pending（不然 DB 不会更新这条）
             if (!pendingChangesRef.current[orderId]) pendingChangesRef.current[orderId] = { fields: {}, fmt: {} };
@@ -546,7 +551,6 @@ function LuckysheetEditor({
   //   - 单元格值（与 DB 不一致的字段）
   //   - 单元格格式（cell_format JSON）
   //   - 蓝色字体 → 自动转完成
-  //   - DatePicker 选的日期（通过 _pendingFields 暂存）
   // 写到 batch-update；列宽/行高/冻结/合并/边框写到 sheet-settings。
   // 没有任何 polling/auto-save，避免 nginx 限流 + toast 风暴。
   const saveAll = async () => {
@@ -707,7 +711,7 @@ function LuckysheetEditor({
       console.warn('[saveAll] format scan failed:', e?.message);
     }
 
-    // 4. 把 updateMap 转成 updates，处理格式合并 + 蓝字检测 + DatePicker
+    // 4. 把 updateMap 转成 updates，处理格式合并 + 蓝字检测
     for (const [orderId, b] of updateMap.entries()) {
       const order = dataRef.current.find(o => o.id === orderId);
       if (!order) continue;
@@ -746,21 +750,7 @@ function LuckysheetEditor({
           if (f && isBlueFont(f.fc)) { fields.status = 'completed'; rowsCompleted++; break; }
         }
       }
-      // DatePicker
-      if (order._pendingFields) {
-        Object.assign(fields, order._pendingFields);
-        delete order._pendingFields;
-      }
       if (Object.keys(fields).length > 0) updates.push({ id: orderId, fields });
-    }
-
-    // 4. DatePicker 改了但既不在 pending 也不在 scan 命中的订单（纯日期改动）
-    for (const order of dataRef.current) {
-      if (!order._pendingFields) continue;
-      if (updateMap.has(order.id)) continue;
-      const fields = { ...order._pendingFields };
-      delete order._pendingFields;
-      if (Object.keys(fields).length > 0) updates.push({ id: order.id, fields });
     }
 
     // 5. 列宽/行高/冻结/合并/边框（不是 cell 级变化）
@@ -813,8 +803,7 @@ function LuckysheetEditor({
     const editBox = document.querySelector('#luckysheet-input-box');
     const editing = editBox && editBox.style.display && editBox.style.display !== 'none';
     return Boolean(editing)
-      || Object.keys(pendingChangesRef.current).length > 0
-      || dataRef.current.some(order => order && order._pendingFields && Object.keys(order._pendingFields).length > 0);
+      || Object.keys(pendingChangesRef.current).length > 0;
   };
 
   // 暴露保存与脏状态给父组件，避免筛选或外部刷新静默丢失编辑
@@ -877,7 +866,6 @@ function LuckysheetEditor({
       defaultRowHeight: 24,
       data: [sheetConfig],
       // 钩子：
-      //   - cellEditBefore：日期字段弹 DatePicker
       //   - cellUpdated / rangeUpdated / updated：实时记录变化到 pendingChangesRef
       //     这样保存时不用再去读 Luckysheet 内部 data（避免 flush 时序问题）
       hook: {
@@ -902,36 +890,20 @@ function LuckysheetEditor({
             }
           }
         },
-        cellEditBefore: function(range) {
-          if (!range || !range[0]) return;
-          const r = range[0].row?.[0];
-          const c = range[0].column?.[0];
-          if (r == null || r === 0 || c == null) return;
-          const field = ORDER_COLUMNS[c]?.data;
-          if (!field || !DATE_FIELDS.has(field)) return;
-          const orderId = rowMapRef.current[r - 1];
-          if (!orderId) return;
-          const order = dataRef.current.find(o => o.id === orderId);
-          // 不调 ls.exitEditMode()：它在没编辑态时会抛 "Cannot read properties of undefined (reading 'config')"。
-          // 我们 return false 已经够阻止 Luckysheet 进入编辑态了。
-          setTimeout(() => {
-            const selBox = document.querySelector('#luckysheet-cell-selected') || document.querySelector('.luckysheet-cs-selection-box');
-            const cellRect = selBox?.getBoundingClientRect();
-            setDatePicker({
-              x: cellRect ? cellRect.left : 300,
-              y: cellRect ? cellRect.bottom + 2 : 300,
-              orderId, field, value: order?.[field],
-            });
-          }, 50);
-          return false;
-        },
       },
     });
 
     initializedRef.current = true;
 
-    applySavedFormulasBatch();
-    applyDaysFormulaBatch();
+    // 落地实测发现的竞态：数据比 sheet-settings 先返回时，重建 effect 因
+    // !initializedRef 早退、首次创建又直接消费了已加载数据（loadedIdsRef 已同步），
+    // 重建不再触发 —— 而全文件只有重建路径会释放 suppressHookRef，
+    // 导致 suppress 永远为 true，所有编辑静默丢失（「保存不了」的隐藏根因之一）。
+    // 首次创建路径必须同样在两个批量任务结束后释放 suppress。
+    let initBatchesPending = 2;
+    const initBatchDone = () => { if (--initBatchesPending === 0) suppressHookRef.current = false; };
+    applySavedFormulasBatch(initBatchDone);
+    applyDaysFormulaBatch(initBatchDone);
 
     const handleLayoutMouseUp = () => {
       if (layoutSaveTimerRef.current) clearTimeout(layoutSaveTimerRef.current);
@@ -1174,67 +1146,11 @@ function LuckysheetEditor({
     }
   }, [height]);
 
-  // ISO 字符串或 Excel 序列号 → dayjs
-  const toDayjs = (val) => {
-    if (!val) return null;
-    const s = String(val);
-    if (/^\d{4}-\d{2}-\d{2}/.test(s)) return dayjs(s.substring(0, 10));
-    const num = Number(s);
-    if (!isNaN(num) && num > 40000 && num < 60000) {
-      return dayjs(new Date((num - 25569) * 86400000));
-    }
-    return null;
-  };
-
   return (
-    <>
-      <div
-        id={containerId}
-        style={{ width: '100%', height, position: 'relative' }}
-      />
-      {datePicker && (
-        <ConfigProvider locale={zhCN}>
-          <div
-            style={{
-              position: 'fixed', left: datePicker.x, top: datePicker.y,
-              zIndex: 10000, background: '#fff',
-              boxShadow: '0 4px 12px rgba(0,0,0,0.15)', borderRadius: 4,
-            }}
-            onMouseDown={e => e.stopPropagation()}
-          >
-            <DatePicker
-              open
-              value={toDayjs(datePicker.value)}
-              onChange={(d) => {
-                const iso = d ? d.format('YYYY-MM-DD') : null;
-                const display = d ? `${d.month() + 1}月${d.date()}日` : '';
-                // 把日期变化写入 order._pendingFields，下次 saveAll 时一并提交
-                // 不立即发送 axios 请求，与 saveAll 的 batch-update 架构保持一致
-                const order = dataRef.current.find(o => o.id === datePicker.orderId);
-                if (order) {
-                  if (!order._pendingFields) order._pendingFields = {};
-                  order._pendingFields[datePicker.field] = iso;
-                  order[datePicker.field] = iso; // 同步 dataRef 以供下次 toDayjs 使用
-                }
-                // 直接更新 Luckysheet 单元格显示（不触发任何 axios 请求）
-                const ls = getLuckysheet();
-                const rowIdx = rowMapRef.current.indexOf(datePicker.orderId);
-                const colIdx = ORDER_COLUMNS.findIndex(col => col.data === datePicker.field);
-                if (ls && ls.setCellValue && rowIdx >= 0 && colIdx >= 0) {
-                  try { ls.setCellValue(rowIdx + 1, colIdx, display); } catch {}
-                }
-                setDatePicker(null);
-              }}
-              onOpenChange={(open) => { if (!open) setDatePicker(null); }}
-              format="YYYY-MM-DD"
-              placeholder="选择日期"
-              style={{ visibility: 'hidden', position: 'absolute' }}
-              popupStyle={{ zIndex: 10001 }}
-            />
-          </div>
-        </ConfigProvider>
-      )}
-    </>
+    <div
+      id={containerId}
+      style={{ width: '100%', height, position: 'relative' }}
+    />
   );
 }
 

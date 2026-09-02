@@ -26,6 +26,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<QualityDefect> QualityDefects => Set<QualityDefect>();
     public DbSet<OrderPriceHistory> OrderPriceHistories => Set<OrderPriceHistory>();
     public DbSet<ProductImportAlias> ProductImportAliases => Set<ProductImportAlias>();
+    public DbSet<IntegrationSyncState> IntegrationSyncStates => Set<IntegrationSyncState>();
+    public DbSet<IntegrationSyncLog> IntegrationSyncLogs => Set<IntegrationSyncLog>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -50,6 +52,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         b.Entity<OrderPriceHistory>().HasKey(x => x.HistoryId);
         b.Entity<ProductImportAlias>().HasKey(x => x.AliasId);
         b.Entity<ProductImportAlias>().HasIndex(x => new { x.ProductCode, x.ExternalName }).IsUnique();
+        b.Entity<IntegrationSyncState>().HasKey(x => new { x.Source, x.ResourceType });
+        b.Entity<IntegrationSyncLog>().HasKey(x => x.Id);
 
         // —— 全局：表名取实体类名（单数，对应手写 DDL 的单数表名，而非 DbSet 的复数）——
         //    列名取属性名，统一转 snake_case；所有外键改为 Restrict（与 DDL 的 NO ACTION 一致）。

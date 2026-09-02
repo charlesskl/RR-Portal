@@ -40,6 +40,7 @@ GO
 :r 2026-07-16_order_pricing.sql
 :r 2026-07-24_product_level_pricing.sql
 :r 2026-07-24_remove_process_legacy.sql
+:r 2026-09-02_hq_integration.sql
 
 PRINT N'StitchCostPro 当前完整结构重建完成。';
 GO

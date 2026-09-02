@@ -5,6 +5,7 @@ using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using StitchCostPro.Api.Features.Auth;
 using StitchCostPro.Api.Features.Depts;
+using StitchCostPro.Api.Features.HqSync;
 using StitchCostPro.Api.Features.Products;
 using StitchCostPro.Api.Features.PurchaseOrders;
 using StitchCostPro.Api.Features.RateConfigs;
@@ -48,6 +49,20 @@ builder.Services.AddScoped<StitchCostPro.Api.Features.PriceBoard.PriceBoardServi
 builder.Services.AddScoped<SupplierService>();
 builder.Services.AddScoped<SupplierImportService>();
 builder.Services.AddScoped<RateConfigService>();
+
+// —— 总部集成同步：从总部加工厂系统只读 API 定时增量拉取（HqSync 配置节，默认关闭）——
+builder.Services.Configure<HqSyncOptions>(builder.Configuration.GetSection(HqSyncOptions.SectionName));
+builder.Services.AddHttpClient<HqApiClient>((sp, http) =>
+{
+    var opt = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<HqSyncOptions>>().Value;
+    http.Timeout = TimeSpan.FromSeconds(60);
+    if (!string.IsNullOrWhiteSpace(opt.BaseUrl))
+        http.BaseAddress = new Uri(opt.BaseUrl.TrimEnd('/') + "/");
+    if (!string.IsNullOrWhiteSpace(opt.ApiKey))
+        http.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", opt.ApiKey);
+});
+builder.Services.AddSingleton<HqSyncService>();
+builder.Services.AddHostedService<HqSyncWorker>();
 
 // —— 认证：JWT ——
 var jwt = builder.Configuration.GetSection("Jwt").Get<JwtOptions>()

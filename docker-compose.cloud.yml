@@ -1044,6 +1044,9 @@ services:
       ConnectionStrings__Default: "Host=db;Port=5432;Database=${DB_NAME:-rrportal};Username=${DB_USER:-rrportal};Password=${DB_PASSWORD};Search Path=stitch_cost"
       Jwt__Secret: "${STITCH_COST_JWT_SECRET:?STITCH_COST_JWT_SECRET is required}"
       Bootstrap__InitialAdminPassword: "${STITCH_COST_ADMIN_PASSWORD:?STITCH_COST_ADMIN_PASSWORD is required}"
+      HqSync__Enabled: "${STITCH_COST_HQ_SYNC_ENABLED:-false}"
+      HqSync__BaseUrl: "${STITCH_COST_HQ_BASE_URL:-}"
+      HqSync__ApiKey: "${STITCH_COST_HQ_API_KEY:-}"
     expose:
       - "5192"
     depends_on:

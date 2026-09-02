@@ -14,6 +14,8 @@ public class PurchaseOrder : AuditableEntity
     public string? DelayReason { get; set; }              // 主要延期原因
     public string? Remark { get; set; }
     public int DeptId { get; set; }
+    public string? ExtMainId { get; set; }                // 总部订单记录永久 ID（取首个落入本订单头的总部记录 id，仅供溯源；幂等键在行级）
+    public DateTime? SourceUpdatedAt { get; set; }        // 总部 updated_at 快照(UTC)
 
     public Supplier? Supplier { get; set; }
 }

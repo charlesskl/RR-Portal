@@ -17,4 +17,8 @@ public class PurchaseOrderLine
     [Precision(14, 4)] public decimal? InternalPriceExcl { get; set; }  // 本厂核价快照
     [Precision(14, 4)] public decimal? DongguanPriceExcl { get; set; }  // 东莞参考价快照
     [Precision(14, 4)] public decimal? HunanPriceExcl { get; set; }     // 湖南参考价快照
+    public string? ExtMainId { get; set; }                            // 总部订单记录 id（总部同步幂等键）
+    public DateTime? SourceUpdatedAt { get; set; }                    // 总部 updated_at 快照(UTC)
+
+    public PurchaseOrder? Order { get; set; }
 }

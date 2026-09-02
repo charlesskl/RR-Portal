@@ -9,11 +9,11 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "hq-sync-status（只读查看总部同步状态）"
+        description: "hq-sync-status（只读查看总部同步状态）/ hq-backfill-products（从总部订单补齐缺失产品资料并重置订单游标）"
         type: choice
         required: true
         default: hq-sync-status
-        options: [hq-sync-status]
+        options: [hq-sync-status, hq-backfill-products]
 
 permissions:
   contents: read
@@ -72,6 +72,76 @@ jobs:
               q "SELECT 'purchase_order 总行=' || COUNT(*) || ' 其中总部同步=' || COUNT(ext_main_id) FROM stitch_cost.purchase_order"
               q "SELECT 'purchase_order_line 总行=' || COUNT(*) || ' 其中总部同步=' || COUNT(ext_main_id) FROM stitch_cost.purchase_order_line"
               echo "[OK] hq-sync-status 完成（只读）"
+              exit 0
+            fi
+
+            if [ "$MODE" = "hq-backfill-products" ]; then
+              # 背景：首轮订单同步有 1378 条因「货号在产品资料里不存在」被跳过。
+              # 本模式：从总部订单提取去重货号+品名 → 补建 product → 重置订单游标，
+              # 下一轮 15 分钟定时同步会全量重拉（按 ext_main_id 幂等，不产生重复）。
+              ENVF=.env.cloud.production
+              HQ_KEY=$(grep -E '^STITCH_COST_HQ_API_KEY=' "$ENVF" | cut -d= -f2-)
+              HQ_URL=$(grep -E '^STITCH_COST_HQ_BASE_URL=' "$ENVF" | cut -d= -f2-)
+              [ -n "$HQ_KEY" ] && [ -n "$HQ_URL" ] || { echo "[FAIL] STITCH_COST_HQ_* 未配置" >&2; exit 1; }
+
+              TS="$(date +%Y%m%d-%H%M%S)"
+              mkdir -p /opt/rr-portal/backups
+              echo "-- 备份 stitch_cost.product 到 /opt/rr-portal/backups/stitch-product-$TS.sql --"
+              docker compose -f docker-compose.cloud.yml --env-file "$ENVF" exec -T db \
+                pg_dump -U rrportal -d rrportal --schema=stitch_cost -t 'stitch_cost.product' --data-only \
+                > "/opt/rr-portal/backups/stitch-product-$TS.sql"
+              [ -s "/opt/rr-portal/backups/stitch-product-$TS.sql" ] && echo "  备份大小: $(stat -c%s /opt/rr-portal/backups/stitch-product-$TS.sql) bytes"
+
+              echo "-- 从总部 API 拉全部订单，提取去重货号 --"
+              HQ_URL="$HQ_URL" HQ_KEY="$HQ_KEY" python3 - <<'PY'
+            import json, os, urllib.request, urllib.parse
+            base = os.environ['HQ_URL'].rstrip('/')
+            key = os.environ['HQ_KEY']
+            seen = {}
+            ua = cid = None
+            pages = 0
+            while True:
+                url = f"{base}/api/integration/v1/orders?page_size=200"
+                if ua:
+                    url += "&updated_after=" + urllib.parse.quote(ua) + "&cursor_id=" + urllib.parse.quote(cid or '')
+                req = urllib.request.Request(url, headers={'Authorization': 'Bearer ' + key})
+                d = json.load(urllib.request.urlopen(req, timeout=60))
+                pages += 1
+                for o in d.get('data', []):
+                    item = (o.get('item_no') or '').strip()
+                    prod = (o.get('product') or '').strip()
+                    if item and item not in seen:
+                        seen[item] = prod or item
+                if not d.get('has_more'):
+                    break
+                ua, cid = d.get('next_updated_after'), d.get('next_cursor_id')
+            esc = lambda s: s.replace("'", "''")
+            with open('/tmp/hq_products.sql', 'w', encoding='utf-8') as f:
+                f.write('BEGIN;\n')
+                for code, name in seen.items():
+                    f.write(
+                        "INSERT INTO stitch_cost.product (product_code, product_name, dept_id, is_active, created_at)\n"
+                        f"SELECT '{esc(code)}', '{esc(name)}',\n"
+                        "  COALESCE((SELECT dept_id FROM stitch_cost.purchase_order WHERE ext_main_id IS NOT NULL LIMIT 1),\n"
+                        "           (SELECT dept_id FROM stitch_cost.dept ORDER BY dept_id LIMIT 1)),\n"
+                        "  true, now()\n"
+                        f"WHERE NOT EXISTS (SELECT 1 FROM stitch_cost.product WHERE product_code = '{esc(code)}');\n"
+                    )
+                f.write('COMMIT;\n')
+            print(f'pages={pages} distinct_item_no={len(seen)}')
+            PY
+              [ -s /tmp/hq_products.sql ] || { echo "[FAIL] 未生成产品 SQL" >&2; exit 1; }
+
+              echo "-- 补建产品（幂等：已存在的货号跳过） --"
+              docker compose -f docker-compose.cloud.yml --env-file "$ENVF" cp /tmp/hq_products.sql db:/tmp/hq_products.sql
+              docker compose -f docker-compose.cloud.yml --env-file "$ENVF" exec -T db \
+                psql -U rrportal -d rrportal -v ON_ERROR_STOP=1 -f /tmp/hq_products.sql | tail -3
+              q "SELECT 'product 总行=' || COUNT(*) FROM stitch_cost.product"
+
+              echo "-- 重置订单同步游标（下轮全量重拉，幂等补齐全跳过单） --"
+              q "UPDATE stitch_cost.integration_sync_state SET last_cursor_updated_at=NULL, last_cursor_id=NULL WHERE resource_type='orders'"
+              q "SELECT 'orders 游标已重置: ' || COALESCE(last_cursor_updated_at,'NULL') FROM stitch_cost.integration_sync_state WHERE resource_type='orders'"
+              echo "[OK] hq-backfill-products 完成；等下一轮定时同步（≤15 分钟）后用 hq-sync-status 复核"
               exit 0
             fi
 

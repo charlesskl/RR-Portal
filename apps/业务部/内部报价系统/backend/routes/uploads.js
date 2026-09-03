@@ -300,14 +300,19 @@ router.post('/slush-sheet', requireAuth, memUpload.single('file'), async (req, r
       try {
         const moldImgDir = path.join(UPLOAD_ROOT, 'mold');
         const anchored = await extractImagesByRow(req.file.buffer, moldImgDir);
-        // 标准模板每个工作簿只有一张有效核价卡；将卡片内图片归入该产品。
-        if (result.items.length === 1) {
-          result.items[0].images = anchored.map(img => 'uploads/mold/' + img.file);
-        }
+        result.items.forEach(item => {
+          item.images = anchored
+            .filter(img => img.sheetIndex === item.source_sheet_index
+              && (item.source_anchor_row == null || (img.row >= item.source_anchor_row && img.row <= item.source_end_row
+                && img.col >= item.source_anchor_col && img.col <= item.source_end_col)))
+            .map(img => 'uploads/mold/' + img.file);
+          delete item.source_sheet_index;
+          delete item.source_anchor_row;
+          delete item.source_anchor_col;
+          delete item.source_end_row;
+          delete item.source_end_col;
+        });
         result.images_extracted = anchored.length;
-        if (anchored.length && result.items.length > 1) {
-          result.images_hint = '工作簿含多张有效搪胶核价卡，图片无法可靠区分工作表，请应用后手工核对图片。';
-        }
       } catch (error) {
         result.images_extract_error = error.message;
       }

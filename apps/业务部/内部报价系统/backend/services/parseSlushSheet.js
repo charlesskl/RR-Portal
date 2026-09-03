@@ -1,5 +1,5 @@
 // 解析“搪胶报价”型 xls/xlsx。
-// 模板为单产品核价卡：左侧是成本分解，右侧是生产参数；每个有效 sheet 返回一条 slush_item。
+// 每个“产品名称”开始的核价卡返回一条 slush_item；同一 sheet 可横向/纵向排列多张卡。
 const ExcelJS = require('exceljs');
 const XLSX = require('xlsx');
 
@@ -120,8 +120,7 @@ function findPair(rows, wanted, options = {}) {
   return matches[0].value;
 }
 
-function parseSheet(sheet) {
-  const rows = sheet.rows || [];
+function parseCard(rows, source = {}) {
   const allText = rows.flatMap(row => (row || []).map(toStr)).filter(Boolean);
   const looksLikeSlush = allText.some(text => /搪胶报价/.test(text))
     || ['24小时搪工', '12批工/烤工', '24小时生产数', '料重'].filter(label => allText.some(text => normalizedLabel(text) === label)).length >= 3;
@@ -129,7 +128,7 @@ function parseSheet(sheet) {
 
   const moldFee = findMoneyPair(rows, '模费');
   const item = {
-    item_code: '',
+    item_code: toStr(source.itemCode),
     name: toStr(findPair(rows, '产品名称')),
     material: '搪胶料',
     qty: 1,
@@ -183,7 +182,54 @@ function parseSheet(sheet) {
       + item.pigment_cost + item.diesel_cost + item.electricity_cost + n(item.shipping_bag);
   }
   if (item.unit_price_hkd == null) item.unit_price_hkd = item.subtotal_hkd * (n(item.markup_x) || 1);
+  item.source_anchor_row = source.anchorRow ?? null;
+  item.source_anchor_col = source.anchorCol ?? null;
+  item.source_end_row = source.endRow ?? null;
+  item.source_end_col = source.endCol ?? null;
   return item;
+}
+
+function sliceCardRows(rows, startRow, endRow, startCol, endCol) {
+  return rows.slice(startRow, endRow + 1).map(row => {
+    const cells = [];
+    for (let col = startCol; col <= endCol; col++) cells[col - startCol + 1] = (row || [])[col];
+    return cells;
+  });
+}
+
+function parseSheet(sheet) {
+  const rows = sheet.rows || [];
+  const anchors = [];
+  rows.forEach((row, rowIndex) => {
+    (row || []).forEach((value, columnIndex) => {
+      if (normalizedLabel(value) === '产品名称') anchors.push({ row: rowIndex, col: columnIndex });
+    });
+  });
+
+  if (!anchors.length) {
+    const item = parseCard(rows);
+    return item ? [item] : [];
+  }
+
+  return anchors.map(anchor => {
+    const nextBelow = anchors
+      .filter(other => other.col === anchor.col && other.row > anchor.row)
+      .sort((a, b) => a.row - b.row)[0];
+    const nextRight = anchors
+      .filter(other => other.row === anchor.row && other.col > anchor.col)
+      .sort((a, b) => a.col - b.col)[0];
+    const endRow = nextBelow ? nextBelow.row - 1 : rows.length - 1;
+    const endCol = nextRight ? nextRight.col - 1 : anchor.col + 5;
+    const cardRows = sliceCardRows(rows, anchor.row, endRow, anchor.col, endCol);
+    const itemCode = (rows[anchor.row] || [])[anchor.col + 3];
+    return parseCard(cardRows, {
+      itemCode,
+      anchorRow: anchor.row,
+      anchorCol: anchor.col,
+      endRow,
+      endCol,
+    });
+  }).filter(Boolean);
 }
 
 async function parseWorkbook(buffer) {
@@ -197,11 +243,15 @@ async function parseWorkbook(buffer) {
 
   const items = [];
   const sheetNames = [];
-  for (const sheet of sheets) {
-    const item = parseSheet(sheet);
-    if (!item) continue;
-    item.source_sheet = sheet.name;
-    items.push(item);
+  for (let sheetIndex = 0; sheetIndex < sheets.length; sheetIndex++) {
+    const sheet = sheets[sheetIndex];
+    const parsedItems = parseSheet(sheet);
+    if (!parsedItems.length) continue;
+    parsedItems.forEach(item => {
+      item.source_sheet = sheet.name;
+      item.source_sheet_index = sheetIndex;
+      items.push(item);
+    });
     sheetNames.push(sheet.name);
   }
   if (!items.length) return { error: '未找到搪胶报价模板（需包含“搪胶报价”及生产参数）' };

@@ -117,6 +117,40 @@ test('slush import supports 皇冠猪 template product name and calculated mold 
   assert.equal(result.items[0].mold_fee_currency, 'RMB');
 });
 
+test('slush import separates multiple costing cards arranged across rows and columns', async () => {
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet('Sheet1');
+  const writeCard = (row, col, name, weight, output) => {
+    sheet.getCell(row, col).value = '产品名称';
+    sheet.getCell(row, col + 1).value = name;
+    sheet.getCell(row, col + 3).value = 'E74055';
+    sheet.getCell(row + 1, col).value = '料价：';
+    sheet.getCell(row + 1, col + 1).value = 6.2;
+    sheet.getCell(row + 2, col).value = '24小时搪工：';
+    sheet.getCell(row + 2, col + 1).value = 900;
+    sheet.getCell(row + 3, col).value = '12批工/烤工：';
+    sheet.getCell(row + 3, col + 1).value = 280;
+    sheet.getCell(row + 4, col + 3).value = '24小时生产数:';
+    sheet.getCell(row + 4, col + 4).value = output;
+    sheet.getCell(row + 7, col + 3).value = '料重：';
+    sheet.getCell(row + 7, col + 4).value = weight;
+  };
+  writeCard(2, 1, '皇冠猪', 25, 6000);
+  writeCard(2, 7, '眼镜猪', 28, 6000);
+  writeCard(17, 1, '母猪', 26, 5000);
+  writeCard(17, 7, '大猪仔', 24, 4000);
+
+  const result = await parseWorkbook(await workbook.xlsx.writeBuffer());
+
+  assert.equal(result.error, undefined);
+  assert.equal(result.count, 4);
+  assert.deepEqual(result.items.map(item => item.name), ['皇冠猪', '眼镜猪', '母猪', '大猪仔']);
+  assert.deepEqual(result.items.map(item => item.item_code), ['E74055', 'E74055', 'E74055', 'E74055']);
+  assert.deepEqual(result.items.map(item => item.weight_g), [25, 28, 26, 24]);
+  assert.deepEqual(result.items.map(item => item.daily_output), [6000, 6000, 5000, 4000]);
+  assert.deepEqual(result.sheets_used, ['Sheet1']);
+});
+
 test('slush frontend wires template import, formula calculation, and image display', () => {
   const source = fs.readFileSync(path.join(__dirname, '..', 'frontend', 'workbench.js'), 'utf8');
   assert.match(source, /fetch\('\/api\/uploads\/slush-sheet'/);

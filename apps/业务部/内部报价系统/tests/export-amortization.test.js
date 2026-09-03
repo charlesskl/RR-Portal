@@ -137,7 +137,7 @@ test('carton product dimensions are labeled in inches', async () => {
           pl: 9, pw: 5, ph: 12,
           cartons: [{
             name: '主纸箱', cl: 17, cw: 14, ch: 12, qty: 6,
-            flat_cards: [{ name: '主平卡', l: 15.95, w: 12 }],
+            flat_cards: [{ name: '主平卡', l: 15.95, w: 12, qty: 0.5, qty_raw: '=1/2' }],
           }, { name: '纸箱2', cl: 0, cw: 0, ch: 0, qty: 1, flat_cards: [] }],
         },
       }) },
@@ -161,8 +161,13 @@ test('carton product dimensions are labeled in inches', async () => {
   assert.equal(worksheet.getCell(titleRow + 3, 1).value, '主纸箱');
   assert.equal(worksheet.getCell(titleRow + 3, 5).numFmt, '0.00');
   assert.equal(worksheet.getCell(titleRow + 4, 1).value, '主平卡');
+  assert.deepEqual(worksheet.getCell(titleRow + 4, 4).value, { formula: '1/2', result: 0.5 });
   assert.ok(!labels.includes('纸箱2'));
-  assert.match(worksheet.getCell(titleRow + 4, 6).value.formula, /^\(B\d+\+1\)\*\(C\d+\+1\)\*2\/1000$/);
+  assert.match(worksheet.getCell(titleRow + 4, 6).value.formula, /^\(B\d+\+1\)\*\(C\d+\+1\)\*2\/1000\*D\d+$/);
+  assert.ok(Math.abs(worksheet.getCell(titleRow + 4, 6).value.result - (15.95 + 1) * (12 + 1) * 2 / 1000 * 0.5) < 1e-9);
+  const workbenchSource = fs.readFileSync(path.join(__dirname, '../frontend/workbench.js'), 'utf8');
+  assert.match(workbenchSource, /data-formula-flat-qty/);
+  assert.match(workbenchSource, /flat_cards\[j\]\[`\$\{k\}_raw`\] = el\.value/);
 });
 
 test('carton dimensions accept formulas and preserve them in Excel export', async () => {
@@ -269,6 +274,9 @@ test('USD supplier material keeps USD as source price and converts directly to H
         }, {
           name: '旧USD包装材料', spec: 'PCS', qty: 1,
           unit_price_rmb: 4, unit_price_usd: null, source_currency: 'USD',
+        }, {
+          name: '只有原始文本的USD包装材料', spec: 'PCS', qty: 1,
+          unit_price: 4.705882, unit_price_usd: null, unit_price_usd_raw: '4', source_currency: 'USD',
         }],
         packaging_materials: [],
       }) },
@@ -281,10 +289,12 @@ test('USD supplier material keeps USD as source price and converts directly to H
   let headerRow = 0;
   let dataRow = 0;
   let legacyDataRow = 0;
+  let rawOnlyDataRow = 0;
   worksheet.eachRow(row => {
     if (row.getCell(1).value === '序号' && row.getCell(2).value === '类别') headerRow = row.number;
     if (row.getCell(2).value === '辅助材料' && row.getCell(3).value === 'USD辅料') dataRow = row.number;
     if (row.getCell(2).value === '辅助材料' && row.getCell(3).value === '旧USD包装材料') legacyDataRow = row.number;
+    if (row.getCell(2).value === '辅助材料' && row.getCell(3).value === '只有原始文本的USD包装材料') rawOnlyDataRow = row.number;
   });
   assert.equal(worksheet.getCell(headerRow, 9).value, '单价（RMB / USD）');
   assert.equal(worksheet.getCell(dataRow, 9).value, 1.2);
@@ -296,6 +306,10 @@ test('USD supplier material keeps USD as source price and converts directly to H
   assert.match(worksheet.getCell(legacyDataRow, 9).numFmt, /US\$/);
   assert.equal(worksheet.getCell(legacyDataRow, 10).value.formula, `I${legacyDataRow}*7.75`);
   assert.equal(worksheet.getCell(legacyDataRow, 10).value.result, 31);
+  assert.equal(worksheet.getCell(rawOnlyDataRow, 9).value, 4);
+  assert.match(worksheet.getCell(rawOnlyDataRow, 9).numFmt, /US\$/);
+  assert.equal(worksheet.getCell(rawOnlyDataRow, 10).value.formula, `I${rawOnlyDataRow}*7.75`);
+  assert.equal(worksheet.getCell(rawOnlyDataRow, 10).value.result, 31);
 });
 
 test('surtax is stored and exported as a direct HKD amount', async () => {

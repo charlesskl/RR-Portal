@@ -379,13 +379,18 @@ function hasFreeRmbPrice(row) {
 function hasFreeUsdPrice(row) {
   return row && row.unit_price_usd !== undefined && row.unit_price_usd !== null && row.unit_price_usd !== '';
 }
+function hasFreeUsdRawPrice(row) {
+  return row && row.unit_price_usd_raw !== undefined && row.unit_price_usd_raw !== null && row.unit_price_usd_raw !== '';
+}
 function usesFreeUsdPrice(row) {
   if (!row) return false;
-  if (row.source_currency === 'USD') return hasFreeUsdPrice(row) || hasFreeRmbPrice(row);
+  if (row.source_currency === 'USD') return true;
   return hasFreeUsdPrice(row) && !hasFreeRmbPrice(row);
 }
 function freeUsdSourcePrice(row) {
-  return hasFreeUsdPrice(row) ? num(row.unit_price_usd) : num(row && row.unit_price_rmb);
+  if (hasFreeUsdPrice(row)) return num(row.unit_price_usd);
+  if (hasFreeUsdRawPrice(row)) return num(parseFormulaInput(row.unit_price_usd_raw));
+  return num(row && row.unit_price_rmb);
 }
 function freeUnitRmb(row, fxRmbHkd, fxHkdUsd) {
   const fx = num(fxRmbHkd) || 0.85;
@@ -1635,14 +1640,14 @@ function renderSummaryPane(host, sections, quote, me) {
   const ccc = eng.carton_calc || {};
   const cartonList = (ccc.cartons && ccc.cartons.length) ? ccc.cartons : (ccc.cl ? [{
     cl: ccc.cl, cw: ccc.cw, ch: ccc.ch, qty: ccc.qty,
-    flat_cards: ccc.flat_card ? [{ l: ccc.cl, w: ccc.cw }] : [],
+    flat_cards: ccc.flat_card ? [{ l: ccc.cl, w: ccc.cw, qty: 1 }] : [],
   }] : []);
   const cartonRate = ccc.paper_rate == null || ccc.paper_rate === ''
     ? 2.75
     : num(ccc.paper_rate);
   const cartonRmb = cartonList.reduce((s, b) => {
     const boxPrice = (num(b.cl) + num(b.cw) + 2) * (num(b.cw) + num(b.ch) + 1) * 2 * cartonRate / 1000;
-    const flatSum = (b.flat_cards || []).reduce((a, f) => a + ((num(f.l) || num(b.cl)) + 1) * ((num(f.w) || num(b.cw)) + 1) * 2 / 1000, 0);
+    const flatSum = (b.flat_cards || []).reduce((a, f) => a + ((num(f.l) || num(b.cl)) + 1) * ((num(f.w) || num(b.cw)) + 1) * 2 / 1000 * (f.qty == null || f.qty === '' ? 1 : num(f.qty)), 0);
     const q = Math.max(num(b.qty), 1);
     return s + (boxPrice + flatSum) / q;
   }, 0) * fxRH;
@@ -2497,11 +2502,14 @@ function renderCartonCalc(host, c, canEdit, onChange) {
     c.cartons = [{
       name: '主纸箱', cl: c.cl || 0, cw: c.cw || 0, ch: c.ch || 0,
       ka_label: c.ka_label || 'K=A', qty: c.qty || 1,
-      flat_cards: [{ name: '主平卡', l: c.cl || 0, w: c.cw || 0 }],
+      flat_cards: [{ name: '主平卡', l: c.cl || 0, w: c.cw || 0, qty: 1 }],
     }];
   }
   // 确保每个 carton 都有 flat_cards 数组
-  c.cartons.forEach(b => { if (!b.flat_cards) b.flat_cards = []; });
+  c.cartons.forEach(b => {
+    if (!b.flat_cards) b.flat_cards = [];
+    b.flat_cards.forEach(f => { if (f.qty == null || f.qty === '') f.qty = 1; });
+  });
   // 删除老的顶层 flat_cards
   delete c.flat_cards;
   c.paper_rate = c.paper_rate ?? 2.75;  // 纸价系数（可调）
@@ -2515,7 +2523,7 @@ function renderCartonCalc(host, c, canEdit, onChange) {
   const cuftOf = (b) => num(b.cl) * num(b.cw) * num(b.ch) / 1728;
   const boxPriceOf = (b) => (num(b.cl) + num(b.cw) + 2) * (num(b.cw) + num(b.ch) + 1) * 2 * rate() / 1000;
   // 平卡 L/W 留空时对应所在纸箱的长/宽
-  const flatPriceOf = (f, b) => ((num(f.l) || num((b||{}).cl)) + 1) * ((num(f.w) || num((b||{}).cw)) + 1) * 2 / 1000;
+  const flatPriceOf = (f, b) => ((num(f.l) || num((b||{}).cl)) + 1) * ((num(f.w) || num((b||{}).cw)) + 1) * 2 / 1000 * (f.qty == null || f.qty === '' ? 1 : num(f.qty));
 
   function render() {
     // 同步首个纸箱回旧字段（运费计算/出口表使用）
@@ -2533,6 +2541,7 @@ function renderCartonCalc(host, c, canEdit, onChange) {
           <td><input data-bi="${i}" data-fj="${j}" data-k="name" type="text" value="${f.name || ''}" ${canEdit?'':'disabled'} style="width:90px"/></td>
           <td><input data-bi="${i}" data-fj="${j}" data-k="l" type="number" step="any" value="${f.l || ''}" placeholder="${b.cl || ''}" title="留空=纸箱长 ${b.cl || ''}" ${canEdit?'':'disabled'} style="width:80px"/></td>
           <td><input data-bi="${i}" data-fj="${j}" data-k="w" type="number" step="any" value="${f.w || ''}" placeholder="${b.cw || ''}" title="留空=纸箱宽 ${b.cw || ''}" ${canEdit?'':'disabled'} style="width:80px"/></td>
+          <td><input data-bi="${i}" data-fj="${j}" data-k="qty" data-formula-flat-qty type="text" value="${escapeHtml(String(f.qty_raw != null && f.qty_raw !== '' ? f.qty_raw : (f.qty == null || f.qty === '' ? 1 : f.qty)))}" placeholder="如 1/2" title="可输入分数或公式：1/2、3*0.5、(2+1)/4" ${canEdit?'':'disabled'} style="width:72px"/></td>
           <td style="text-align:right;color:#0f766e;font-weight:600">${flatPriceOf(f, b).toFixed(2)}</td>
           ${canEdit ? `<td><button class="mini danger" data-del-f="${i}-${j}">×</button></td>` : ''}
         </tr>`).join('');
@@ -2555,8 +2564,8 @@ function renderCartonCalc(host, c, canEdit, onChange) {
           </div>
           <div style="margin-bottom:4px;color:#78716c;font-size:12px">📄 配的平卡 (inch)</div>
           <table class="wb-table" style="font-size:13px;margin-bottom:6px">
-            <thead><tr><th>名称</th><th>L</th><th>W</th><th>平卡价(HK$)</th>${canEdit?'<th></th>':''}</tr></thead>
-            <tbody>${fcRows || `<tr><td colspan="${canEdit?5:4}" class="muted" style="text-align:center">暂无平卡</td></tr>`}</tbody>
+            <thead><tr><th>名称</th><th>L</th><th>W</th><th>用量</th><th>平卡价(HK$)</th>${canEdit?'<th></th>':''}</tr></thead>
+            <tbody>${fcRows || `<tr><td colspan="${canEdit?6:5}" class="muted" style="text-align:center">暂无平卡</td></tr>`}</tbody>
           </table>
           ${canEdit ? `<button class="mini" data-add-f="${i}">+ 增加平卡</button>` : ''}
         </div>`;
@@ -2619,7 +2628,14 @@ function renderCartonCalc(host, c, canEdit, onChange) {
     host.querySelectorAll('input[data-fj]').forEach(el => {
       el.oninput = () => {
         const i = +el.dataset.bi, j = +el.dataset.fj, k = el.dataset.k;
-        c.cartons[i].flat_cards[j][k] = el.type === 'number' ? (el.value === '' ? 0 : Number(el.value)) : el.value;
+        if (el.hasAttribute('data-formula-flat-qty')) {
+          const parsed = parseFormulaInput(el.value);
+          c.cartons[i].flat_cards[j][k] = parsed == null ? 0 : parsed;
+          c.cartons[i].flat_cards[j][`${k}_raw`] = el.value;
+          el.style.color = el.value.trim() !== '' && parsed == null ? '#b91c1c' : '';
+        } else {
+          c.cartons[i].flat_cards[j][k] = el.type === 'number' ? (el.value === '' ? 0 : Number(el.value)) : el.value;
+        }
         onChange();
       };
       el.onchange = () => render();
@@ -2643,7 +2659,7 @@ function renderCartonCalc(host, c, canEdit, onChange) {
     // 加平卡
     host.querySelectorAll('[data-add-f]').forEach(btn => btn.onclick = () => {
       const i = +btn.dataset.addF;
-      c.cartons[i].flat_cards.push({ name: '平卡'+(c.cartons[i].flat_cards.length+1), l: c.cartons[i].cl || 0, w: c.cartons[i].cw || 0 });
+      c.cartons[i].flat_cards.push({ name: '平卡'+(c.cartons[i].flat_cards.length+1), l: c.cartons[i].cl || 0, w: c.cartons[i].cw || 0, qty: 1 });
       onChange(); render();
     });
   }

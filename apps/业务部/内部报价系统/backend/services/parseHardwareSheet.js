@@ -27,7 +27,7 @@ function isHeader(row) {
   const text = (row || []).map(norm).join('|');
   const legacy = /(零件名称|零件名稱|PARTNAME)/.test(text)
     && /(用量|数量|數量|QTY|QUANTITY)/.test(text);
-  const supplier = /(产品编号.*产品名称|產品編號.*產品名稱|PRODUCT.*NAME|ITEM.*NAME)/.test(text)
+  const supplier = /(产品编号.*(?:产品|物料)名称|產品編號.*(?:產品|物料)名稱|物料名称|物料名稱|PRODUCT.*NAME|ITEM.*NAME|MATERIAL.*NAME)/.test(text)
     && /MOQ/.test(text);
   return (legacy || supplier) && /(单价|單價|UNITPRICE)/.test(text);
 }
@@ -37,7 +37,9 @@ function indexHeader(row) {
   (row || []).forEach((value, index) => {
     const s = norm(value);
     if (!s) return;
-    if (cols.name == null && /(零件名称|零件名稱|PARTNAME|产品编号.*产品名称|產品編號.*產品名稱|PRODUCT.*NAME|ITEM.*NAME)/.test(s)) cols.name = index;
+    if (cols.serial == null && /^(序号|序號|NO\.?|#)$/.test(s)) cols.serial = index;
+    else if (cols.productCode == null && /^(产品编号|產品編號|PRODUCT(?:NO\.?|CODE)|ITEM(?:NO\.?|CODE))$/.test(s)) cols.productCode = index;
+    else if (cols.name == null && /(零件名称|零件名稱|PARTNAME|物料名称|物料名稱|产品名称|產品名稱|产品编号.*(?:产品|物料)名称|產品編號.*(?:產品|物料)名稱|PRODUCT.*NAME|ITEM.*NAME|MATERIAL.*NAME)/.test(s)) cols.name = index;
     else if (cols.spec == null && /(规格描述|規格描述|规格|規格|SPEC)/.test(s)) cols.spec = index;
     else if (cols.material == null && /(材料.*表面处理|材料.*表面處理|MATERIAL.*SURFACE)/.test(s)) cols.material = index;
     else if (cols.unit == null && /^(单位|單位|UNIT)$/.test(s)) cols.unit = index;
@@ -156,13 +158,14 @@ async function parseWorkbook(buffer, options = {}) {
   if (cols.supplierTemplate) {
     const groups = [];
     let current = null;
-    let carried = { serial: '', name: '', spec: '', material: '', unit: '' };
+    let carried = { serial: '', product_code: '', name: '', spec: '', material: '', unit: '' };
     for (let index = headerRow + 1; index < picked.rows.length; index += 1) {
       const row = picked.rows[index] || [];
       const rowText = row.map(toStr).join('|');
       if (/备注说明|供应商签章|供應商簽章/.test(rowText)) break;
 
-      const rawSerial = toStr(row[1]);
+      const rawSerial = toStr(row[cols.serial == null ? 1 : cols.serial]);
+      const rawProductCode = cols.productCode == null ? '' : toStr(row[cols.productCode]);
       const rawName = toStr(row[cols.name]);
       const rawSpec = cols.spec == null ? '' : toStr(row[cols.spec]);
       const rawMaterial = cols.material == null ? '' : toStr(row[cols.material]);
@@ -184,6 +187,7 @@ async function parseWorkbook(buffer, options = {}) {
       if (startsProduct) {
         carried = {
           serial: rawSerial || carried.serial,
+          product_code: rawProductCode || carried.product_code,
           name: rawName || carried.name,
           spec: rawSpec || '',
           material: rawMaterial || '',
@@ -199,6 +203,7 @@ async function parseWorkbook(buffer, options = {}) {
       } else {
         carried = {
           serial: carried.serial,
+          product_code: rawProductCode || carried.product_code,
           name: rawName || carried.name,
           spec: rawSpec || carried.spec,
           material: rawMaterial || carried.material,
@@ -239,6 +244,7 @@ async function parseWorkbook(buffer, options = {}) {
       const spec = [group.spec, group.material ? `材料/表面处理：${group.material}` : ''].filter(Boolean).join('；');
       return {
         name: group.name,
+        product_code: group.product_code,
         spec,
         qty: 1,
         unit_price_rmb: tier.unit_price_rmb,

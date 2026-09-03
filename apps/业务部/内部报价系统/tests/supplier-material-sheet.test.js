@@ -89,6 +89,28 @@ test('numbered rows with the same product and spec merge into selectable MOQ tie
   assert.deepEqual(result.items[0].price_tiers.map(tier => tier.moq), ['5K', '30K', '50K']);
 });
 
+test('modified supplier template with separate product code and material name columns is supported', async () => {
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet('供应商报价单');
+  sheet.getRow(13).values = [
+    '序号', '产品编号', '物料名称', '规格描述', '材料&表面处理', '单位', 'MOQ',
+    '单价(元)不含税', '单价(元)含税', '单价（USD）不含税', '备注', '交期(天)',
+  ];
+  sheet.getRow(14).values = [1, 'MAT-001', 'ABS透明拉管料价', '14.3\"*22\"*0.06，1C', '', '个', '5K', 34, 0.365, 44, '新模板', 15];
+  sheet.getRow(15).values = [2, 'MAT-001', 'ABS透明拉管料价', '14.3\"*22\"*0.06，1C', '', '个', '30K', 23, 23, 23];
+  sheet.getRow(16).values = [3, 'MAT-001', 'ABS透明拉管料价', '14.3\"*22\"*0.06，1C', '', '个', '50K', 4, 4, 4];
+
+  const result = await parseWorkbook(await workbook.xlsx.writeBuffer(), { targetQty: 30000, targetCurrency: 'USD' });
+  assert.equal(result.error, undefined);
+  assert.equal(result.items.length, 1);
+  assert.equal(result.items[0].name, 'ABS透明拉管料价');
+  assert.equal(result.items[0].product_code, 'MAT-001');
+  assert.equal(result.items[0].moq, '30K');
+  assert.equal(result.items[0].source_currency, 'USD');
+  assert.equal(result.items[0].unit_price_usd, 23);
+  assert.deepEqual(result.items[0].price_tiers.map(tier => tier.moq), ['5K', '30K', '50K']);
+});
+
 test('legacy hardware quotation header remains supported', async () => {
   const workbook = new ExcelJS.Workbook();
   const sheet = workbook.addWorksheet('旧五金报价');

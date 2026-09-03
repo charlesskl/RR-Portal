@@ -2721,8 +2721,8 @@ function renderEngineering(host, payload, canEdit, onChange, fxRmbHkd, fxHkdUsd,
 
     <h3>四、五金
       ${canEdit ? `<small><label class="upload-mold-sheet" style="display:inline-block;margin-left:12px">
-        <button class="mini" type="button" onclick="this.parentElement.querySelector('input').click()">📄 上传五金报价单 (xlsx)</button>
-        <input type="file" accept=".xls,.xlsx" hidden id="hardware-sheet-input" />
+        <button class="mini" type="button" onclick="this.parentElement.querySelector('input').click()">📄 上传五金报价单 (Excel/PDF)</button>
+        <input type="file" accept=".xls,.xlsx,.pdf,application/pdf" hidden id="hardware-sheet-input" />
       </label></small>` : ''}
     </h3>
     <div id="hardware-sheet-preview"></div>
@@ -2731,8 +2731,8 @@ function renderEngineering(host, payload, canEdit, onChange, fxRmbHkd, fxHkdUsd,
 
     <h3>五、辅助材料
       ${canEdit ? `<small><label class="upload-mold-sheet" style="display:inline-block;margin-left:12px">
-        <button class="mini" type="button" onclick="this.parentElement.querySelector('input').click()">📄 上传供应商报价单 (xlsx)</button>
-        <input type="file" accept=".xls,.xlsx" hidden id="aux-sheet-input" />
+        <button class="mini" type="button" onclick="this.parentElement.querySelector('input').click()">📄 上传供应商报价单 (Excel/PDF)</button>
+        <input type="file" accept=".xls,.xlsx,.pdf,application/pdf" hidden id="aux-sheet-input" />
       </label></small>` : ''}
     </h3>
     <div id="aux-sheet-preview"></div>
@@ -2740,8 +2740,8 @@ function renderEngineering(host, payload, canEdit, onChange, fxRmbHkd, fxHkdUsd,
 
     <h3>六、包装材料
       ${canEdit ? `<small><label class="upload-mold-sheet" style="display:inline-block;margin-left:12px">
-        <button class="mini" type="button" onclick="this.parentElement.querySelector('input').click()">📄 上传供应商报价单 (xlsx)</button>
-        <input type="file" accept=".xls,.xlsx" hidden id="packaging-material-sheet-input" />
+        <button class="mini" type="button" onclick="this.parentElement.querySelector('input').click()">📄 上传供应商报价单 (Excel/PDF)</button>
+        <input type="file" accept=".xls,.xlsx,.pdf,application/pdf" hidden id="packaging-material-sheet-input" />
       </label></small>` : ''}
     </h3>
     <div id="packaging-material-sheet-preview"></div>

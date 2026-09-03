@@ -47,7 +47,8 @@ function indexHeader(row) {
     else if (cols.qty == null && /(用量|数量|數量|QTY|QUANTITY)/.test(s)) cols.qty = index;
     else if (cols.unitPriceUntaxed == null && /(单价.*元.*不含税|單價.*元.*不含稅|RMB.*EXCL)/.test(s)) cols.unitPriceUntaxed = index;
     else if (cols.unitPriceTaxed == null && /(单价.*元.*含税|單價.*元.*含稅|RMB.*INCL)/.test(s)) cols.unitPriceTaxed = index;
-    else if (cols.unitPriceUsd == null && /(单价.*USD.*不含税|單價.*USD.*不含稅|USD.*EXCL)/.test(s)) cols.unitPriceUsd = index;
+    // PDF 受表头行高限制时，“单价（USD）不含税”末尾可能被裁成“单价（USD）不”。
+    else if (cols.unitPriceUsd == null && /(单价.*USD|單價.*USD|USD.*(?:EXCL|PRICE))/.test(s)) cols.unitPriceUsd = index;
     else if (cols.unitPrice == null && /(单价RMB|單價RMB|RMB单价|RMB單價|UNITPRICE)/.test(s)) cols.unitPrice = index;
     else if (cols.note == null && /(备注|備註|REMARK)/.test(s)) cols.note = index;
     else if (cols.delivery == null && /(交期|LEADTIME|DELIVERY)/.test(s)) cols.delivery = index;
@@ -129,13 +130,7 @@ async function readSheets(buffer) {
   return workbook.SheetNames.map(name => ({ name, rows: sheetjsRows(workbook.Sheets[name]) }));
 }
 
-async function parseWorkbook(buffer, options = {}) {
-  let sheets;
-  try {
-    sheets = await readSheets(buffer);
-  } catch (error) {
-    return { error: '解析失败：' + error.message };
-  }
+async function parseSheets(sheets, options = {}) {
   if (!sheets.length) return { error: '工作簿为空' };
 
   let picked = null;
@@ -307,4 +302,12 @@ async function parseWorkbook(buffer, options = {}) {
   return { items, count: items.length, sheet_used: picked.name, header_row: headerRow + 1 };
 }
 
-module.exports = { parseWorkbook };
+async function parseWorkbook(buffer, options = {}) {
+  try {
+    return parseSheets(await readSheets(buffer), options);
+  } catch (error) {
+    return { error: '解析失败：' + error.message };
+  }
+}
+
+module.exports = { parseWorkbook, parseSheets };

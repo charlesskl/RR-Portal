@@ -127,19 +127,21 @@ router.post('/mold-sheet', requireAuth, memUpload.single('file'), async (req, re
 
 // POST /api/uploads/hardware-sheet  五金/外购件报价单 → 返回 items[]
 const { parseWorkbook: parseHardwareWorkbook } = require('../services/parseHardwareSheet');
+const { parsePdf: parseSupplierPdf } = require('../services/parseSupplierPdf');
 router.post('/hardware-sheet', requireAuth, memUpload.single('file'), async (req, res) => {
   if (!['engineering', 'sales'].includes(req.user.dept) && req.user.role !== 'admin') {
     return res.status(403).json({ error: '仅 工程/业务/超级管理员 可上传' });
   }
   if (!req.file) return res.status(400).json({ error: '缺少文件' });
-  if (!/\.(xls|xlsx)$/i.test(req.file.originalname)) {
-    return res.status(400).json({ error: '当前只支持 .xls/.xlsx' });
+  if (!/\.(xls|xlsx|pdf)$/i.test(req.file.originalname)) {
+    return res.status(400).json({ error: '当前只支持 .xls/.xlsx/.pdf' });
   }
   try {
     const targetQty = Number(req.body?.target_qty) || 5000;
     const targetCurrency = ['RMB', 'USD'].includes(String(req.body?.target_currency || '').toUpperCase())
       ? String(req.body.target_currency).toUpperCase() : null;
-    const result = await parseHardwareWorkbook(req.file.buffer, { targetQty, targetCurrency });
+    const isPdf = /\.pdf$/i.test(req.file.originalname);
+    const result = await (isPdf ? parseSupplierPdf : parseHardwareWorkbook)(req.file.buffer, { targetQty, targetCurrency });
     if (result.error) return res.status(422).json(result);
     res.json(result);
   } catch (e) {

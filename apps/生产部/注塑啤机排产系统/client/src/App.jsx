@@ -29,8 +29,8 @@ import OutsourceModule from './pages/outsource/OutsourceModule.jsx';
 const { Sider, Content, Header } = Layout;
 const { Text } = Typography;
 
-const WORKSHOP_COLORS = { A: '#1565c0', B: '#e65100', C: '#2e7d32', W: '#6a1b9a' };
-const WORKSHOP_LABELS = { A: 'A车间', B: 'B车间', C: '华登', W: '外发部' };
+const WORKSHOP_COLORS = { A: '#1565c0', B: '#e65100', C: '#2e7d32', W: '#6a1b9a', AT: '#00838f' };
+const WORKSHOP_LABELS = { A: 'A车间', B: 'B车间', C: '华登', W: '外发部', AT: '兴信A(测试版)' };
 
 const menuItems = [
   { key: 'monthlyPlan',    icon: <CalendarOutlined />,      label: '月计划' },

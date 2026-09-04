@@ -4,6 +4,8 @@ import axios from 'axios';
 
 const WORKSHOPS = [
   { key: 'A', label: 'A车间', color: '#1565c0', bg: 'linear-gradient(135deg,#1565c0,#1976d2)', icon: '🏭', statLabels: ['待排订单', '机台数量'] },
+  // 兴信A(测试版)：结构与 A 车间相同，独立 workshop=AT，数据与正式 A 车间隔离，供联调测试使用
+  { key: 'AT', label: '兴信A(测试版)', color: '#00838f', bg: 'linear-gradient(135deg,#00838f,#00acc1)', icon: '🧪', statLabels: ['待排订单', '机台数量'] },
   { key: 'B', label: 'B车间', color: '#e65100', bg: 'linear-gradient(135deg,#e65100,#f57c00)', icon: '🏭', statLabels: ['待排订单', '机台数量'] },
   { key: 'C', label: '华登', color: '#2e7d32', bg: 'linear-gradient(135deg,#2e7d32,#388e3c)', icon: '🏭', statLabels: ['待排订单', '机台数量'] },
   { key: 'W', label: '外发部', color: '#6a1b9a', bg: 'linear-gradient(135deg,#6a1b9a,#8e24aa)', icon: '🚚', statLabels: ['外发订单', '供应商数'] },

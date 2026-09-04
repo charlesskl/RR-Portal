@@ -23,6 +23,10 @@ function norm(v) {
   return toStr(v).replace(/\s+/g, '').toUpperCase();
 }
 
+function identityNorm(v) {
+  return toStr(v).normalize('NFKC').replace(/\s+/g, '').replace(/[x×＊*]/gi, 'X').toUpperCase();
+}
+
 function isHeader(row) {
   const text = (row || []).map(norm).join('|');
   const legacy = /(零件名称|零件名稱|PARTNAME)/.test(text)
@@ -173,12 +177,31 @@ async function parseSheets(sheets, options = {}) {
         || untaxed != null || taxed != null || usd != null;
       if (!hasContent) continue;
 
+      const tierEntry = untaxed != null || taxed != null || usd != null ? {
+        moq: moqText,
+        moq_qty: parseMoq(moqText),
+        unit_price_rmb: untaxed ?? taxed,
+        unit_price_rmb_untaxed: untaxed,
+        unit_price_rmb_taxed: taxed,
+        unit_price_usd: usd,
+        rmb_tax_pct: taxed != null && untaxed == null ? 13 : 0,
+        rmb_price_source: untaxed != null ? '人民币不含税' : (taxed != null ? '人民币含税' : null),
+        source_row: index + 1,
+      } : null;
+
+      // 只有名称已出现后的连续空白行才向上归入该物料；
+      // 名称出现前的空白行不向后猜测，防止将上一个物料的报价档误并。
+      if (!current && !rawName) {
+        continue;
+      }
+
       // 部分供应商会给同一物料的每个 MOQ 档都填独立序号；名称和规格相同的连续行
       // 仍应合并成一个物料的阶梯价，不能因序号不同拆成多个单选档。
-      const repeatsCurrentProduct = !!(current && rawName && rawName === current.name
-        && (!rawSpec || !current.spec || rawSpec === current.spec)
-        && (!rawMaterial || !current.material || rawMaterial === current.material));
-      const startsProduct = !repeatsCurrentProduct && !!(rawSerial || (rawName && rawName !== carried.name));
+      const repeatsCurrentProduct = !!(current
+        && (!rawName || identityNorm(rawName) === identityNorm(current.name))
+        && (!rawSpec || !current.spec || identityNorm(rawSpec) === identityNorm(current.spec)));
+      const startsProduct = !repeatsCurrentProduct
+        && !!(rawSerial || (rawName && identityNorm(rawName) !== identityNorm(carried.name)));
       if (startsProduct) {
         carried = {
           serial: rawSerial || carried.serial,
@@ -218,19 +241,7 @@ async function parseSheets(sheets, options = {}) {
       if (rowNote) current.note = rowNote;
       if (rowDelivery) current.delivery_days = rowDelivery;
 
-      if (untaxed != null || taxed != null || usd != null) {
-        current.tiers.push({
-          moq: moqText,
-          moq_qty: parseMoq(moqText),
-          unit_price_rmb: untaxed ?? taxed,
-          unit_price_rmb_untaxed: untaxed,
-          unit_price_rmb_taxed: taxed,
-          unit_price_usd: usd,
-          rmb_tax_pct: taxed != null && untaxed == null ? 13 : 0,
-          rmb_price_source: untaxed != null ? '人民币不含税' : (taxed != null ? '人民币含税' : null),
-          source_row: index + 1,
-        });
-      }
+      if (tierEntry) current.tiers.push(tierEntry);
     }
 
     const items = groups.map(group => {

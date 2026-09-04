@@ -7,9 +7,10 @@ const PASSWORDS = {
   B: process.env.WS_B_PASS || 'zhutou',
   C: process.env.WS_C_PASS || 'huadeng',
   W: process.env.WS_W_PASS || 'waifa1234',
+  AT: process.env.WS_AT_PASS || 'test1234',   // 兴信A(测试版)：联调测试专用车间
 };
 
-const LABELS = { A: 'A车间(兴信A)', B: 'B车间(兴信B)', C: '华登', W: '外发部' };
+const LABELS = { A: 'A车间(兴信A)', B: 'B车间(兴信B)', C: '华登', W: '外发部', AT: '兴信A(测试版)' };
 
 // 简单 token：base64(workshop:timestamp)，前端用作登录态标记
 function makeToken(workshop) {

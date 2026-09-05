@@ -1193,7 +1193,7 @@ def period_lock_delete(lid):
             others = {rec['initiator_party'], rec['approver_party']} - {party}
             lock_cp = others.pop() if others else None
     overlaps = con.execute("""
-        SELECT l.* FROM period_locks l
+        SELECT l.*, r.initiator_party, r.approver_party FROM period_locks l
         LEFT JOIN reconciliations r ON r.id = l.reconciliation_id
         WHERE l.party=? AND l.date_from<=? AND l.date_to>=?
           AND (? IS NULL OR r.initiator_party IN (?, ?) AND r.approver_party IN (?, ?))""",

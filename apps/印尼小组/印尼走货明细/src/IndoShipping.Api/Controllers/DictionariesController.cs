@@ -25,6 +25,20 @@ public class DictionariesController(ISqlConnectionFactory factory) : ControllerB
         public List<TranslationItem>? translations { get; set; }
     }
 
+    public class SupplierSyncItem
+    {
+        public string? supplier { get; set; }
+        public string? customs { get; set; }
+        public string? previousSupplier { get; set; }
+        public string? previousCustoms { get; set; }
+    }
+
+    public class SupplierSyncBody
+    {
+        public List<SupplierSyncItem>? entries { get; set; }
+        public bool confirmChanges { get; set; }
+    }
+
     [HttpGet]
     public async Task<IActionResult> Get()
     {
@@ -35,6 +49,107 @@ public class DictionariesController(ISqlConnectionFactory factory) : ControllerB
             SELECT keyword, english_name AS english, active, source
             FROM dict_translation ORDER BY active DESC, priority, id")).ToList();
         return Ok(new { hs, suppliers = sup, translations });
+    }
+
+    // 货号库保存时同步供应商字典：
+    // - 新供应商直接加入；
+    // - 已有供应商的全称/报关公司不静默覆盖，第一次请求只返回差异，前端确认后再更新。
+    [HttpPost("suppliers/sync")]
+    public async Task<IActionResult> SyncSuppliers([FromBody] SupplierSyncBody body)
+    {
+        var confirmChanges = body?.confirmChanges == true;
+        var entries = (body?.entries ?? new())
+            .Select(x => new
+            {
+                supplier = (x.supplier ?? "").Trim(),
+                customs = (x.customs ?? "").Trim(),
+                previousSupplier = (x.previousSupplier ?? "").Trim(),
+                previousCustoms = (x.previousCustoms ?? "").Trim(),
+            })
+            .Where(x => x.supplier.Length > 0)
+            .GroupBy(x => $"{x.previousSupplier.ToUpperInvariant()}|{x.supplier.ToUpperInvariant()}|{x.customs.ToUpperInvariant()}")
+            .Select(g => g.First())
+            .ToList();
+
+        using var c = factory.Create();
+        c.Open();
+        using var tx = c.BeginTransaction();
+        try
+        {
+            var added = 0;
+            var updated = 0;
+            var conflicts = new List<object>();
+
+            foreach (var entry in entries)
+            {
+                dynamic? saved = null;
+                if (entry.previousSupplier.Length > 0)
+                {
+                    saved = await c.QuerySingleOrDefaultAsync(@"
+                        SELECT id, keyword, full_name AS ""full"", customs_company AS customs
+                        FROM dict_supplier
+                        WHERE lower(trim(keyword))=lower(@name) OR lower(trim(COALESCE(full_name,'')))=lower(@name)
+                        ORDER BY CASE WHEN lower(trim(COALESCE(full_name,'')))=lower(@name) THEN 0 ELSE 1 END, priority, id
+                        LIMIT 1", new { name = entry.previousSupplier }, tx);
+                }
+                if (saved is null)
+                {
+                    saved = await c.QuerySingleOrDefaultAsync(@"
+                        SELECT id, keyword, full_name AS ""full"", customs_company AS customs
+                        FROM dict_supplier
+                        WHERE lower(trim(keyword))=lower(@name) OR lower(trim(COALESCE(full_name,'')))=lower(@name)
+                        ORDER BY CASE WHEN lower(trim(COALESCE(full_name,'')))=lower(@name) THEN 0 ELSE 1 END, priority, id
+                        LIMIT 1", new { name = entry.supplier }, tx);
+                }
+
+                if (saved is null)
+                {
+                    var nextPriority = await c.ExecuteScalarAsync<int>("SELECT COALESCE(MAX(priority), 0) + 10 FROM dict_supplier", transaction: tx);
+                    added += await c.ExecuteAsync(@"
+                        INSERT INTO dict_supplier(keyword, full_name, customs_company, priority)
+                        VALUES (@supplier, @supplier, @customs, @priority)",
+                        new { entry.supplier, entry.customs, priority = nextPriority }, tx);
+                    continue;
+                }
+
+                var savedFull = ((string?)saved.full ?? "").Trim();
+                var savedCustoms = ((string?)saved.customs ?? "").Trim();
+                var supplierChanged = entry.previousSupplier.Length > 0
+                    && !string.Equals(entry.previousSupplier, entry.supplier, StringComparison.OrdinalIgnoreCase);
+                var customsChanged = entry.customs.Length > 0
+                    && !string.Equals(savedCustoms, entry.customs, StringComparison.OrdinalIgnoreCase);
+                if (!supplierChanged && !customsChanged) continue;
+
+                conflicts.Add(new
+                {
+                    keyword = (string?)saved.keyword ?? "",
+                    savedFull,
+                    savedCustoms,
+                    enteredFull = entry.supplier,
+                    enteredCustoms = entry.customs,
+                });
+                if (!confirmChanges) continue;
+
+                updated += await c.ExecuteAsync(@"
+                    UPDATE dict_supplier
+                    SET full_name=@full, customs_company=@customs
+                    WHERE id=@id",
+                    new
+                    {
+                        id = (int)saved.id,
+                        full = supplierChanged ? entry.supplier : savedFull,
+                        customs = entry.customs.Length > 0 ? entry.customs : savedCustoms,
+                    }, tx);
+            }
+
+            tx.Commit();
+            return Ok(new { ok = true, added, updated, conflicts });
+        }
+        catch
+        {
+            tx.Rollback();
+            throw;
+        }
     }
 
     [HttpPut]

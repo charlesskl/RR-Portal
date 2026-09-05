@@ -21,7 +21,7 @@ function translatedMaterialName(nameZh: string, dicts: Dictionaries): string {
 }
 
 export default function ProductsPage() {
-  const { message } = App.useApp()
+  const { message, modal } = App.useApp()
   const [rows, setRows] = useState<Product[]>([])
   const [filter, setFilter] = useState('')
   const [loading, setLoading] = useState(false)
@@ -30,6 +30,7 @@ export default function ProductsPage() {
   const [form] = Form.useForm<ProductForm>()
   const [moldings, setMoldings] = useState<Molding[]>([])
   const [materials, setMaterials] = useState<Material[]>([])
+  const originalMaterialsRef = useRef<Material[]>([])
   const [customers, setCustomers] = useState<string[]>([])
   const [savingDetail, setSavingDetail] = useState(false)
   const [activeTab, setActiveTab] = useState<'mold' | 'mat'>('mold')
@@ -55,7 +56,7 @@ export default function ProductsPage() {
 
   function openCreate() {
     setCreating(true); setEditing(null); setActiveTab('mold')
-    form.resetFields(); setMoldings([]); setMaterials([])
+    form.resetFields(); setMoldings([]); setMaterials([]); originalMaterialsRef.current = []
   }
 
   async function openEdit(p: Product, tab: 'mold' | 'mat' = 'mold') {
@@ -66,7 +67,9 @@ export default function ProductsPage() {
     try {
       const { data } = await api.get<ProductDetail>(`/products/${encodeURIComponent(p.code)}`)
       setMoldings(Array.isArray(data.moldings) ? data.moldings : [])
-      setMaterials(Array.isArray(data.materials) ? data.materials : [])
+      const loadedMaterials = Array.isArray(data.materials) ? data.materials : []
+      setMaterials(loadedMaterials)
+      originalMaterialsRef.current = loadedMaterials.map(m => ({ ...m }))
     } catch (e: any) {
       message.error('加载货号详情失败: ' + (e?.message ?? e))
     }
@@ -109,13 +112,71 @@ export default function ProductsPage() {
           usage_qty: m.usage_qty ?? 1,
         })),
       })
+      const originalById = new Map(originalMaterialsRef.current
+        .filter(m => m.id != null)
+        .map(m => [Number(m.id), m]))
+      const supplierSyncEntries = materials
+        .filter(m => String(m.supplier || '').trim())
+        .map(m => {
+          const previous = m.id != null ? originalById.get(Number(m.id)) : undefined
+          return {
+            supplier: String(m.supplier || '').trim(),
+            customs: String(m.customs_company || '').trim(),
+            previousSupplier: String(previous?.supplier || '').trim(),
+            previousCustoms: String(previous?.customs_company || '').trim(),
+          }
+        })
+      let supplierAdded = 0
+      if (supplierSyncEntries.length) {
+        try {
+          const { data: supplierSync } = await api.post('/dictionaries/suppliers/sync', {
+            entries: supplierSyncEntries,
+            confirmChanges: false,
+          })
+          supplierAdded = Number(supplierSync?.added) || 0
+          const supplierConflicts = Array.isArray(supplierSync?.conflicts) ? supplierSync.conflicts : []
+          if (supplierConflicts.length) {
+            modal.confirm({
+              title: '确认更新供应商字典',
+              width: 680,
+              okText: '确认并更新字典',
+              cancelText: '仅保存货号，不改字典',
+              content: (
+                <div style={{ maxHeight: 320, overflow: 'auto' }}>
+                  <p style={{ color: '#8c8c8c' }}>检测到 {supplierConflicts.length} 个已有供应商的资料变化：</p>
+                  {supplierConflicts.map((x: any, i: number) => (
+                    <div key={`${x.keyword}-${i}`} style={{ marginBottom: 12, padding: 10, background: '#fafafa', borderRadius: 6 }}>
+                      <b>{x.keyword || x.savedFull || `供应商 ${i + 1}`}</b>
+                      <div>全称：{x.savedFull || '(空)'} → <span style={{ color: '#1677ff' }}>{x.enteredFull || '(空)'}</span></div>
+                      <div>报关公司：{x.savedCustoms || '(空)'} → <span style={{ color: '#1677ff' }}>{x.enteredCustoms || '(空)'}</span></div>
+                    </div>
+                  ))}
+                </div>
+              ),
+              onOk: async () => {
+                const { data: confirmed } = await api.post('/dictionaries/suppliers/sync', {
+                  entries: supplierSyncEntries,
+                  confirmChanges: true,
+                })
+                message.success(`已确认更新 ${Number(confirmed?.updated) || 0} 条供应商字典`)
+                loadDicts()
+              },
+            })
+          }
+        } catch {
+          message.warning('货号已保存，但供应商字典同步失败')
+        }
+      }
       const conflicts = Array.isArray(materialSave?.translation_conflicts) ? materialSave.translation_conflicts : []
+      const unitLinksUpdated = Number(materialSave?.unit_links_updated) || 0
       if (conflicts.length) {
-        message.warning(`已保存；${conflicts.length} 个中文名存在不同英文译法，翻译字典保留原译文，请到字典库确认`)
+        message.warning(`已保存${unitLinksUpdated ? `，已同步 ${unitLinksUpdated} 行采购走货单位` : ''}；${conflicts.length} 个中文名存在不同英文译法，翻译字典保留原译文，请到字典库确认`)
       } else if (materialSave?.translation_learned > 0) {
-        message.success(`已保存，并记住 ${materialSave.translation_learned} 个英文译名`)
+        message.success(`已保存，并记住 ${materialSave.translation_learned} 个英文译名${unitLinksUpdated ? `，同步 ${unitLinksUpdated} 行采购走货单位` : ''}`)
+      } else if (unitLinksUpdated > 0) {
+        message.success(`已保存，并同步 ${unitLinksUpdated} 行采购走货单位`)
       } else {
-        message.success('已保存')
+        message.success(`已保存${supplierAdded ? `，自动新增 ${supplierAdded} 个供应商字典` : ''}`)
       }
       loadDicts()
       setCreating(false)
@@ -123,7 +184,10 @@ export default function ProductsPage() {
       // 停留在编辑页；重新拉详情回填物料 id（再次保存按 id upsert，不重复新增）
       try {
         const { data } = await api.get<ProductDetail>(`/products/${encodeURIComponent(v.code)}`)
-        if (Array.isArray(data.materials)) setMaterials(data.materials)
+        if (Array.isArray(data.materials)) {
+          setMaterials(data.materials)
+          originalMaterialsRef.current = data.materials.map(m => ({ ...m }))
+        }
         if (Array.isArray(data.moldings)) setMoldings(data.moldings)
         setEditing(prev => prev ?? { code: v.code, name: v.name ?? '', customer: v.customer ?? '' })
       } catch {}
@@ -174,6 +238,7 @@ export default function ProductsPage() {
           const { data } = await api.get<ProductDetail>(`/products/${encodeURIComponent(r.code)}`)
           // Merge: imported overrides matching names; existing extras stay
           const existingMats = Array.isArray(data.materials) ? data.materials : []
+          originalMaterialsRef.current = existingMats.map(m => ({ ...m }))
           const merged = [...existingMats]
           for (const m of r.materials) {
             const dupe = merged.find(x => x.name_zh === m.name_zh)
@@ -193,6 +258,7 @@ export default function ProductsPage() {
           setMoldings(mergedMoldings)
         } catch {}
       } else {
+        originalMaterialsRef.current = []
         setMoldings(r.moldings); setMaterials(r.materials)
       }
       message.success(`已识别：${r.moldings.length} 个模具 / ${r.materials.length} 个物料 — 检查后点 💾 保存`)
@@ -692,7 +758,7 @@ function MaterialsEditor({ rows, onChange, dicts, productCode }: {
           { title: '高', width: 70, render: (_v, r, i) => <InputNumber size="small" min={0} value={r.height} onChange={(x) => patch(i, 'height', x ?? 0)} style={{ width: '100%' }} /> },
           { title: '单位', width: 90, render: (_v, r, i) => (
             <Select size="small" style={{ width: '100%' }} value={r.unit_kg || 'KGM'}
-              options={['KGM', 'PCE', 'SET', 'TNE'].map(u => ({ value: u, label: u }))}
+              options={['PCE', 'KGM', 'MTR', 'SET', 'PAR', 'ROLL', 'TNE'].map(u => ({ value: u, label: u }))}
               onChange={(v) => patch(i, 'unit_kg', v)} />
           ) },
           {

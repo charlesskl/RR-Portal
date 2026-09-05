@@ -18,6 +18,9 @@ public static class DataMigrations
     private const string BackfillTranslationsKey =
         "data_migration:2026-08-15-backfill-translations-v1";
 
+    private const string BackfillSuppliersKey =
+        "data_migration:2026-09-05-backfill-supplier-dictionary-v1";
+
     public static async Task ApplyAsync(AppDbContext db, ILogger logger)
     {
         var connection = db.Database.GetDbConnection();
@@ -68,6 +71,57 @@ public static class DataMigrations
                     ON CONFLICT (keyword) DO NOTHING;
                     """;
                 await backfill.ExecuteNonQueryAsync();
+            }
+        }
+
+        // 旧版货号保存流程只把供应商写入 materials，没有同步到供应商字典。
+        // 一次性补录历史供应商；只新增缺失项，绝不覆盖字典中已经维护的内容。
+        await using (var supplierBackfillClaim = connection.CreateCommand())
+        {
+            supplierBackfillClaim.CommandText = $"""
+                INSERT INTO settings ("key", value, updated_at)
+                VALUES ('{BackfillSuppliersKey}', 'applied', now())
+                ON CONFLICT ("key") DO NOTHING
+                RETURNING 1;
+                """;
+            if (await supplierBackfillClaim.ExecuteScalarAsync() is not null)
+            {
+                await using var supplierBackfill = connection.CreateCommand();
+                supplierBackfill.CommandText = """
+                    WITH source AS (
+                        SELECT
+                            min(trim(supplier)) AS keyword,
+                            max(NULLIF(trim(COALESCE(customs_company, '')), '')) AS customs_company
+                        FROM materials
+                        WHERE trim(COALESCE(supplier, '')) <> ''
+                        GROUP BY lower(trim(supplier))
+                    ), missing AS (
+                        SELECT
+                            source.keyword,
+                            source.customs_company,
+                            row_number() OVER (ORDER BY source.keyword) AS row_number
+                        FROM source
+                        WHERE NOT EXISTS (
+                            SELECT 1
+                            FROM dict_supplier existing
+                            WHERE lower(trim(existing.keyword)) = lower(source.keyword)
+                               OR lower(trim(COALESCE(existing.full_name, ''))) = lower(source.keyword)
+                        )
+                    ), current_priority AS (
+                        SELECT COALESCE(max(priority), 0) AS value
+                        FROM dict_supplier
+                    )
+                    INSERT INTO dict_supplier(keyword, full_name, customs_company, priority)
+                    SELECT
+                        missing.keyword,
+                        missing.keyword,
+                        missing.customs_company,
+                        current_priority.value + (missing.row_number * 10)::int
+                    FROM missing
+                    CROSS JOIN current_priority;
+                    """;
+                var inserted = await supplierBackfill.ExecuteNonQueryAsync();
+                logger.LogInformation("Backfilled {Count} suppliers from saved materials.", inserted);
             }
         }
 

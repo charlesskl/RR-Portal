@@ -4,7 +4,7 @@ import {
   Row, Select, Space, Table, Tag, Typography,
 } from 'antd'
 import dayjs from 'dayjs'
-import { api } from '../api/client'
+import { api, type Material } from '../api/client'
 import { numToChinese, poDetermineEntity, poGenContractNo, PO_ENTITY_META, type PoEntity } from '../utils/poNumber'
 
 interface SchedRow {
@@ -60,6 +60,19 @@ interface PoItem {
   tomy_po?: string
   received_qty?: number
   shortage_qty?: number
+}
+
+interface QuoteRow {
+  supplier?: string
+  productCode?: string
+  product_code?: string
+  code?: string
+  matName?: string
+  spec?: string
+  minQty?: number
+  unitPrice?: number
+  currency?: string
+  notes?: string
 }
 
 interface PoDetail extends PoSummary {
@@ -160,6 +173,59 @@ function contractUnitLabel(unit: string | undefined): string {
     CTN: '箱',
   }
   return labels[code] || unit || ''
+}
+
+function applyQuotePrices(sourceItems: PoItem[], quotes: QuoteRow[], supplier: string, overwrite: boolean) {
+  let hit = 0
+  const normalizedSupplier = supplier.trim()
+  if (!normalizedSupplier) return { items: sourceItems, hit }
+  const normalizeCode = (value: unknown) => String(value ?? '').trim().toUpperCase()
+  const normalizeSpec = (value: unknown) => String(value ?? '')
+    .trim().toUpperCase().replace(/[×*]/g, 'X').replace(/\s+/g, '')
+  const quoteCode = (q: QuoteRow) => normalizeCode(
+    q.productCode
+    || q.product_code
+    || q.code
+    || String(q.notes ?? '').match(/(?:^|\/)\s*货号\s*[:：]\s*([^/]+?)\s*$/)?.[1]
+    || '')
+
+  const items = sourceItems.map(it => {
+    if (!overwrite && Number(it.price) > 0) return it
+    const matName = (it.material_name ?? '').trim()
+      || ((it.notes ?? '').split('·')[1]?.replace(/\(.*\)/, '').trim() ?? '')
+    const nameGroup = quotes.filter(q => {
+      const quoteName = (q.matName ?? '').trim()
+      return (q.supplier ?? '').trim() === normalizedSupplier
+        && !!quoteName
+        && (quoteName === matName || (!!matName && matName.includes(quoteName)))
+    })
+    const purchaseCodes = new Set(String(it.product_code ?? '')
+      .split(/\s*\/\s*|[,，;]/)
+      .map(normalizeCode)
+      .filter(Boolean))
+    const codeGroups = [
+      nameGroup.filter(q => purchaseCodes.has(quoteCode(q))),
+      nameGroup.filter(q => quoteCode(q) === '共用'),
+      nameGroup.filter(q => !quoteCode(q)),
+    ]
+    let sameGroup: QuoteRow[] = []
+    for (const codeGroup of codeGroups) {
+      if (!codeGroup.length) continue
+      const exactGroup = codeGroup.filter(q => normalizeSpec(q.spec) === normalizeSpec(it.spec))
+      const quoteSpecs = new Set(codeGroup.map(q => normalizeSpec(q.spec)))
+      const matched = exactGroup.length ? exactGroup : (quoteSpecs.size === 1 ? codeGroup : [])
+      if (matched.length) { sameGroup = matched; break }
+    }
+    if (!sameGroup.length) return it
+    const qty = it.purchase_qty ?? it.qty ?? 0
+    sameGroup.sort((a, b) => (Number(a.minQty) || 0) - (Number(b.minQty) || 0))
+    let pick = sameGroup[0]
+    for (const q of sameGroup) if ((Number(q.minQty) || 0) <= qty) pick = q
+    if (Number(pick.unitPrice) <= 0) return it
+    hit++
+    return { ...it, price: Number(pick.unitPrice), currency: pick.currency || it.currency }
+  })
+  return { items, hit }
 }
 
 export default function PurchasePage() {
@@ -436,7 +502,14 @@ export default function PurchasePage() {
     }
     const wcode = askWcode()
     if (wcode === null) return
-    let ok = 0, fail = 0, suppliers = 0
+    let autoQuotes: QuoteRow[] = []
+    try {
+      const { data } = await api.get<QuoteRow[]>('/quotes/blob', { skipErrorToast: true } as any)
+      autoQuotes = Array.isArray(data) ? data : []
+    } catch {
+      // 报价读取失败不阻断采购单生成，生成后仍可手工套用。
+    }
+    let ok = 0, fail = 0, suppliers = 0, quoteHits = 0
     const existingNos = rows.map(r => r.po_no || '').concat([])
     for (const [supplier, lines] of buckets) {
       // 推断实体：用第一条物料的报关公司
@@ -507,20 +580,22 @@ export default function PurchasePage() {
         tomy_po: [...(it._pos as Set<string>)].filter(Boolean).join('; '),
         notes: '',
       }))
+      const priced = applyQuotePrices(items, autoQuotes, supplier, false)
+      quoteHits += priced.hit
       try {
         await api.post('/purchase', {
           po_no, supplier,
           status: 'draft',
           order_date: orderDate,
           notes: `从排期生成 · 货号: ${[...new Set(lines.map(l => l.sched.code))].join(', ')}`,
-          items,
+          items: priced.items,
         }, { skipErrorToast: true } as any)
         ok++; suppliers++
       } catch { fail++ }
     }
     setSchedPickerOpen(false); setPickerSelKeys([])
     setEditing(null); setCreating(false); setDrawerFull(false)
-    const resultText = `已生成 ${ok} 张 PO（${suppliers} 个供应商 · 总 ${matCount} 行物料 · ${codeCount} 个货号）${fail ? ` · 失败 ${fail}` : ''}`
+    const resultText = `已生成 ${ok} 张 PO（${suppliers} 个供应商 · 总 ${matCount} 行物料 · ${codeCount} 个货号）${quoteHits ? ` · 自动导入报价 ${quoteHits} 行` : ''}${fail ? ` · 失败 ${fail}` : ''}`
     if (fail) message.warning({ key: 'generate-po-result', content: resultText })
     else message.success({ key: 'generate-po-result', content: resultText })
     load()
@@ -613,22 +688,35 @@ export default function PurchasePage() {
       const parsed = dayjs(value as any)
       return parsed.isValid() ? parsed.format('YYYY-MM-DD') : null
     }
+    let saveItems = items
+    let quoteHits = 0
+    if (v.supplier) {
+      try {
+        const { data: quotes } = await api.get<QuoteRow[]>('/quotes/blob', { skipErrorToast: true } as any)
+        const priced = applyQuotePrices(items, Array.isArray(quotes) ? quotes : [], v.supplier, false)
+        saveItems = priced.items
+        quoteHits = priced.hit
+        if (quoteHits) setItems(saveItems)
+      } catch {
+        // 报价不可用时仍允许保存采购单，避免影响下单。
+      }
+    }
     const payload = {
       ...v,
       order_date: normalizeDate(v.order_date),
       delivery_date: normalizeDate(v.delivery_date),
-      items,
+      items: saveItems,
     }
     try {
       if (creating) {
         const { data } = await api.post<{ id?: number }>('/purchase', payload)
-        message.success('已新建')
+        message.success(`已新建${quoteHits ? `，自动导入报价 ${quoteHits} 行` : ''}`)
         // 切到编辑态，留在当前页（后续保存走更新）
         setCreating(false)
         setEditing({ ...(editing as any), id: data?.id ?? editing?.id, po_no: v.po_no, supplier: v.supplier, status: v.status })
       } else if (editing) {
         await api.put(`/purchase/${editing.id}`, payload)
-        message.success('已更新')
+        message.success(`已更新${quoteHits ? `，自动导入报价 ${quoteHits} 行` : ''}`)
       }
       load()  // 后台刷新列表，不关闭抽屉
     } catch {
@@ -759,11 +847,43 @@ export default function PurchasePage() {
     const deliveryDateCN = deliveryDay?.isValid()
       ? deliveryDay.year() + '年' + (deliveryDay.month() + 1) + '月' + deliveryDay.date() + '日'
       : todayCN.replace(String(today.getFullYear()), String(today.getFullYear() + 1))
+
+    // 导出时从货号库补全英文名称和物料编码。PO 明细只保存物料 ID，不重复存储这两个可维护字段。
+    const productCodes = [...new Set(items.map(it => resolveProductCode(it.product_code)).filter(Boolean))]
+    const materials = (await Promise.all(productCodes.map(code =>
+      api.get<Material[]>('/materials', { params: { code } }).then(r => r.data || []).catch(() => [])
+    ))).flat()
+    const materialById = new Map(materials.filter(m => m.id != null).map(m => [Number(m.id), m]))
+    const normalize = (value: unknown) => String(value ?? '').trim().toUpperCase().replace(/[×*]/g, 'X').replace(/\s+/g, '')
+    const findMaterial = (item: PoItem) => {
+      if (item.material_id != null) {
+        const exact = materialById.get(Number(item.material_id))
+        if (exact) return exact
+      }
+      const code = normalize(resolveProductCode(item.product_code))
+      const name = normalize(item.material_name)
+      const spec = normalize(item.spec)
+      return materials.find(m => normalize(m.product_code) === code
+        && normalize(m.name_zh) === name
+        && normalize(m.spec) === spec)
+    }
+
     // 按 (货号+物料+规格) 聚合：合同数量/单位/单价使用走货口径，金额保持与采购口径一致。
     const merged = new Map<string, any>()
     for (const it of items) {
-      const k = (it.product_code || '') + '||' + (it.material_name || '') + '||' + (it.spec || '')
-      const cur = merged.get(k) || { code: it.product_code || '', matName: it.material_name || '', spec: it.spec || '', unit: it.ship_unit || 'PCE', totalShipQty: 0, totalAmount: 0, totalPurchaseQty: 0 }
+      const material = findMaterial(it)
+      const k = (it.material_id || '') + '||' + (it.product_code || '') + '||' + (it.material_name || '') + '||' + (it.spec || '')
+      const cur = merged.get(k) || {
+        code: it.product_code || '',
+        matName: it.material_name || '',
+        spec: it.spec || '',
+        unit: it.ship_unit || 'PCE',
+        nameEn: material?.name_en || '',
+        materialCode: material?.material_code || '',
+        totalShipQty: 0,
+        totalAmount: 0,
+        totalPurchaseQty: 0,
+      }
       const purchaseQty = Number(it.purchase_qty ?? ((it.material_qty || 0) + (it.spoilage_qty || 0))) || 0
       cur.totalShipQty += shipQuantity(it)
       cur.totalAmount += purchaseQty * (Number(it.price) || 0)
@@ -785,12 +905,12 @@ export default function PurchasePage() {
     rows.push(['乙方：', supplier, '', '', '', '日期：', todayStr, ''])
     rows.push(PAD(8))
     const hdrRow = 8
-    rows.push(['货 号', '货品名称', '规格型号', '数量', '单位', '单 价 (' + meta.currency + ')', '金额', '备 注'])
+    rows.push(['货 号', '货品名称', '规格型号', '数量', '单位', '单 价 (' + meta.currency + ')', '金额', '备 注', '英文名称', '物料编码'])
     const itemStart = rows.length
     for (const m of mergedRows) {
       const shipUnitPrice = m.totalShipQty > 0 ? m.totalAmount / m.totalShipQty : 0
       const contractUnit = contractUnitLabel(m.unit)
-      rows.push([m.code, m.matName, m.spec, Number(m.totalShipQty.toFixed(shipQuantityDigits(m.unit))), contractUnit, Number(shipUnitPrice.toFixed(4)), Number(m.totalAmount.toFixed(2)), '数量：' + Number(m.totalPurchaseQty.toFixed(2)) + 'pcs'])
+      rows.push([m.code, m.matName, m.spec, Number(m.totalShipQty.toFixed(shipQuantityDigits(m.unit))), contractUnit, Number(shipUnitPrice.toFixed(4)), Number(m.totalAmount.toFixed(2)), '数量：' + Number(m.totalPurchaseQty.toFixed(2)) + 'pcs', m.nameEn, m.materialCode])
     }
     rows.push(['以下空白！', '按工程签板生产！', '', '', '', '', '', ''])
     const sumRow = rows.length
@@ -846,7 +966,7 @@ export default function PurchasePage() {
     for (let r = sumRow + 3; r < rows.length - 2; r++) { if (String(rows[r][0] || '')) mg(r, 0, r, 7) }
     mg(rows.length - 2, 1, rows.length - 2, 3); mg(rows.length - 2, 5, rows.length - 2, 7)
     mg(rows.length - 1, 1, rows.length - 1, 3); mg(rows.length - 1, 5, rows.length - 1, 7)
-    ws['!cols'] = [{ wch: 12 }, { wch: 22 }, { wch: 16 }, { wch: 10 }, { wch: 8 }, { wch: 13 }, { wch: 13 }, { wch: 18 }]
+    ws['!cols'] = [{ wch: 12 }, { wch: 22 }, { wch: 16 }, { wch: 10 }, { wch: 8 }, { wch: 13 }, { wch: 13 }, { wch: 18 }, { wch: 32 }, { wch: 16 }]
     const rowH: any[] = [{ hpt: 30 }, { hpt: 18 }, { hpt: 18 }, { hpt: 24 }, { hpt: 10 }, { hpt: 22 }, { hpt: 22 }, { hpt: 10 }, { hpt: 26 }]
     // 所有物料明细行使用相同行高；多行名称/规格仍可完整换行显示。
     for (let r = itemStart; r < itemStart + mergedRows.length; r++) rowH[r] = { hpt: 45 }
@@ -867,8 +987,19 @@ export default function PurchasePage() {
       setStyle(r, 5, { font: { sz: 12 }, alignment: { horizontal: 'right', vertical: 'center' } })
       setStyle(r, 6, { font: { sz: 12, bold: true }, alignment: left })
     }
-    for (let c = 0; c < 8; c++) setStyle(hdrRow, c, { font: { bold: true, sz: 12 }, alignment: center, border })
+    for (let c = 0; c < 10; c++) setStyle(hdrRow, c, {
+      font: { bold: true, sz: 12 },
+      alignment: center,
+      border,
+      ...(c >= 8 ? { fill: { patternType: 'solid', fgColor: { rgb: 'FFFF00' } } } : {}),
+    })
     for (let r = itemStart; r <= sumRow + 1; r++) for (let c = 0; c < 8; c++) setStyle(r, c, { font: { sz: 11 }, alignment: center, border })
+    for (let r = itemStart; r < itemStart + mergedRows.length; r++) {
+      for (let c = 8; c < 10; c++) setStyle(r, c, {
+        font: { sz: 11 }, alignment: center, border,
+        fill: { patternType: 'solid', fgColor: { rgb: 'FFFF00' } },
+      })
+    }
     for (let r = sumRow + 3; r < rows.length - 2; r++) setStyle(r, 0, { font: { sz: 11 }, alignment: left })
     // 三条合同说明各自加完整格子边框，与上方明细表保持一致。
     for (let r = sumRow + 3; r <= sumRow + 5; r++) {
@@ -1024,58 +1155,12 @@ export default function PurchasePage() {
   // 每一级再按供应商、物料名、规格和采购数量选择阶梯价。
   async function applyQuotes() {
     try {
-      const { data: quotes } = await api.get<any[]>('/quotes/blob')
+      const { data: quotes } = await api.get<QuoteRow[]>('/quotes/blob')
       const supplier = form.getFieldValue('supplier') as string ?? ''
       if (!supplier) { message.warning('请先填供应商'); return }
-      let hit = 0
-      const next = items.map(it => {
-        const matName = (it.material_name ?? '').trim()
-          || ((it.notes ?? '').split('·')[1]?.replace(/\(.*\)/, '').trim() ?? '')
-        const nameGroup = (quotes ?? []).filter((q: any) =>
-          (q.supplier ?? '').trim() === supplier.trim()
-          && ((q.matName ?? '').trim() === matName || (matName && matName.includes((q.matName ?? '').trim())))
-        )
-        const normalizeCode = (value: unknown) => String(value ?? '').trim().toUpperCase()
-        const purchaseCodes = new Set(String(it.product_code ?? '')
-          .split(/\s*\/\s*|[,，;]/)
-          .map(normalizeCode)
-          .filter(Boolean))
-        const quoteCode = (q: any) => normalizeCode(
-          q.productCode
-          || q.product_code
-          || q.code
-          || String(q.notes ?? '').match(/(?:^|\/)\s*货号\s*[:：]\s*([^/]+?)\s*$/)?.[1]
-          || '')
-        const normalizeSpec = (value: unknown) => String(value ?? '')
-          .trim().toUpperCase().replace(/[×*]/g, 'X').replace(/\s+/g, '')
-        const codeGroups = [
-          nameGroup.filter((q: any) => purchaseCodes.has(quoteCode(q))),
-          nameGroup.filter((q: any) => quoteCode(q) === '共用'),
-          nameGroup.filter((q: any) => !quoteCode(q)),
-        ]
-        let sameGroup: any[] = []
-        for (const codeGroup of codeGroups) {
-          if (!codeGroup.length) continue
-          const exactGroup = codeGroup.filter((q: any) => normalizeSpec(q.spec) === normalizeSpec(it.spec))
-          const quoteSpecs = new Set(codeGroup.map((q: any) => normalizeSpec(q.spec)))
-          // 规格优先精确匹配；该货号层级下只有一种报价规格时，允许名称唯一回退。
-          const matched = exactGroup.length ? exactGroup : (quoteSpecs.size === 1 ? codeGroup : [])
-          if (matched.length) { sameGroup = matched; break }
-        }
-        if (!sameGroup.length) return it
-        // 报价档位使用报价单的采购口径；导出合同时再换算为走货数量/单价。
-        const qty = it.purchase_qty ?? it.qty ?? 0
-        sameGroup.sort((a: any, b: any) => (Number(a.minQty) || 0) - (Number(b.minQty) || 0))
-        let pick = sameGroup[0]
-        for (const q of sameGroup) if ((Number(q.minQty) || 0) <= qty) pick = q
-        if (Number(pick.unitPrice) > 0) {
-          hit++
-          return { ...it, price: Number(pick.unitPrice), currency: pick.currency || it.currency }
-        }
-        return it
-      })
-      setItems(next)
-      message.success(`已套用报价：${hit}/${items.length} 行`)
+      const priced = applyQuotePrices(items, Array.isArray(quotes) ? quotes : [], supplier, true)
+      setItems(priced.items)
+      message.success(`已套用报价：${priced.hit}/${items.length} 行`)
     } catch {
       /* 拦截器已提示 */
     }
@@ -1393,10 +1478,13 @@ export default function PurchasePage() {
                   options={['个', '只', '米'].map(x => ({ value: x, label: x }))}
                   onChange={(v) => patchItem(i, 'purchase_unit', v)} />
               ) },
-              { title: '走货单位', width: 90, render: (_v, r, i) => (
-                <Select size="small" value={r.ship_unit || 'PCE'} style={{ width: '100%' }}
-                  options={['PCE', 'KGM', 'MTR', 'SET', 'PAR', 'ROLL', 'TNE'].map(x => ({ value: x, label: x }))}
-                  onChange={(v) => patchItem(i, 'ship_unit', v)} />
+              { title: '走货单位（货号库）', width: 130, render: (_v, r, i) => (
+                <div title={r.material_id ? '已关联货号库物料，单位跟随货号库' : '手工明细未关联物料库，可自行选择'}>
+                  <Select size="small" value={r.ship_unit || 'PCE'} style={{ width: '100%' }}
+                    disabled={!!r.material_id}
+                    options={['PCE', 'KGM', 'MTR', 'SET', 'PAR', 'ROLL', 'TNE'].map(x => ({ value: x, label: x }))}
+                    onChange={(v) => patchItem(i, 'ship_unit', v)} />
+                </div>
               ) },
               { title: '走货数量', width: 100, align: 'right', render: (_v, r) => <b style={{ color: '#28a06a' }}>{shipQuantity(r).toFixed(shipQuantityDigits(r.ship_unit))}</b> },
               { title: '走货单价', width: 100, align: 'right', render: (_v, r) => {

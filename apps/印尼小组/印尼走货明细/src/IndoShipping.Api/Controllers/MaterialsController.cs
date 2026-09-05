@@ -54,12 +54,15 @@ public class MaterialsController(ISqlConnectionFactory factory) : ControllerBase
     public async Task<IActionResult> UpdateDims(int id, [FromBody] DimsBody body)
     {
         using var c = factory.Create();
-        var n = await c.ExecuteAsync(@"
+        c.Open();
+        using var tx = c.BeginTransaction();
+        var unit = await c.QuerySingleOrDefaultAsync<string?>(@"
             UPDATE materials SET
                 length=@length, width=@width, height=@height,
                 weight_per_carton=@weight_per_carton, gross_per_pc=@gross_per_pc, net_per_pc=@net_per_pc,
                 unit_kg=COALESCE(NULLIF(@unit_kg,''),'KGM')
-            WHERE id=@id",
+            WHERE id=@id
+            RETURNING unit_kg",
             new
             {
                 id,
@@ -67,9 +70,18 @@ public class MaterialsController(ISqlConnectionFactory factory) : ControllerBase
                 weight_per_carton = body.weight_per_carton ?? 0m,
                 gross_per_pc = body.gross_per_pc ?? 0m, net_per_pc = body.net_per_pc ?? 0m,
                 unit_kg = body.unit_kg ?? "",
-            });
-        if (n == 0) return NotFound(new { error = "物料不存在" });
-        return Ok(new { ok = true, id });
+            }, tx);
+        if (unit is null)
+        {
+            tx.Rollback();
+            return NotFound(new { error = "物料不存在" });
+        }
+        var linked = await c.ExecuteAsync(@"
+            UPDATE po_items SET ship_unit=@unit
+            WHERE material_id=@id AND ship_unit IS DISTINCT FROM @unit",
+            new { id, unit }, tx);
+        tx.Commit();
+        return Ok(new { ok = true, id, unit_links_updated = linked });
     }
 
     public class BulkBody
@@ -194,6 +206,17 @@ public class MaterialsController(ISqlConnectionFactory factory) : ControllerBase
                     await c.ExecuteAsync("DELETE FROM materials WHERE id=@id", new { id = oldId }, tx);
             }
 
+            // 物料库的单位是走货单位的唯一来源。保存货号物料后，同步所有已关联的采购明细，
+            // 避免采购单保留旧单位或被手工改成与货号库不一致的值。
+            var unitLinksUpdated = keepIds.Count == 0 ? 0 : await c.ExecuteAsync(@"
+                UPDATE po_items p
+                SET ship_unit=COALESCE(NULLIF(m.unit_kg,''),'PCE')
+                FROM materials m
+                WHERE p.material_id=m.id
+                  AND m.id = ANY(@ids)
+                  AND p.ship_unit IS DISTINCT FROM COALESCE(NULLIF(m.unit_kg,''),'PCE')",
+                new { ids = keepIds.ToArray() }, tx);
+
             // Learn only confirmed Chinese + English pairs. Existing dictionary choices are
             // never silently overwritten; conflicting user input is returned to the UI.
             var learned = 0;
@@ -226,7 +249,7 @@ public class MaterialsController(ISqlConnectionFactory factory) : ControllerBase
             }
 
             tx.Commit();
-            return Ok(new { ok = true, count = list.Count, translation_learned = learned, translation_conflicts = conflicts });
+            return Ok(new { ok = true, count = list.Count, unit_links_updated = unitLinksUpdated, translation_learned = learned, translation_conflicts = conflicts });
         }
         catch
         {
@@ -251,7 +274,26 @@ public class MaterialsController(ISqlConnectionFactory factory) : ControllerBase
         var dyn = new DynamicParameters();
         foreach (var k in cols) dyn.Add(k, ParamValues.Normalize(body[k]));
         dyn.Add("id", id);
-        await c.ExecuteAsync($"UPDATE materials SET {sets} WHERE id=@id", dyn);
-        return Ok(new { ok = true });
+        c.Open();
+        using var tx = c.BeginTransaction();
+        var n = await c.ExecuteAsync($"UPDATE materials SET {sets} WHERE id=@id", dyn, tx);
+        if (n == 0)
+        {
+            tx.Rollback();
+            return NotFound(new { error = "物料不存在" });
+        }
+        var linked = 0;
+        if (cols.Contains("unit_kg", StringComparer.OrdinalIgnoreCase))
+        {
+            linked = await c.ExecuteAsync(@"
+                UPDATE po_items p
+                SET ship_unit=COALESCE(NULLIF(m.unit_kg,''),'PCE')
+                FROM materials m
+                WHERE p.material_id=m.id AND m.id=@id
+                  AND p.ship_unit IS DISTINCT FROM COALESCE(NULLIF(m.unit_kg,''),'PCE')",
+                new { id }, tx);
+        }
+        tx.Commit();
+        return Ok(new { ok = true, unit_links_updated = linked });
     }
 }

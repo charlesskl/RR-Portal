@@ -84,7 +84,7 @@ const ROLE_PERMS = {
     manageDefectLib:true,
   },
   viewer: {
-    createRecord:true,  editRecord:true,  deleteRecord:false, batchDelete:false,
+    createRecord:true,  editRecord:false, deleteRecord:false, batchDelete:false,
     importData:false,   exportData:true,  exportPdf:true,    manageUsers:false,
     manageDefectLib:false,
   },
@@ -336,7 +336,7 @@ function renderUsersPage() {
         <input id="umUsername" class="form-input" placeholder="字母/数字，至少2位" autocomplete="off"/>
       </div>
       <div style="margin-bottom:14px">
-        <label class="form-label">密码 <span id="umPwdHint" style="font-size:10px;color:var(--text-dim)">（留空则不修改）</span></label>
+        <label class="form-label"><span id="umPwdLabel">密码</span> <span id="umPwdHint" style="font-size:10px;color:var(--text-dim)">（留空则不修改）</span></label>
         <input id="umPassword" type="password" class="form-input" placeholder="至少6位" autocomplete="new-password"/>
       </div>
       <div style="margin-bottom:14px">
@@ -354,7 +354,7 @@ function renderUsersPage() {
       <div id="userModalErr" style="display:none;color:var(--red);font-size:12px;margin-bottom:12px"></div>
       <div style="display:flex;gap:10px;justify-content:flex-end">
         <button class="btn-secondary" onclick="_closeUserModal()">取消</button>
-        <button class="btn-primary" onclick="_saveUser()">保存</button>
+        <button class="btn-primary" onclick="_saveUser()">保存账号</button>
       </div>
     </div>
   </div>
@@ -371,6 +371,9 @@ function _openUserModal(username) {
 
   const titleEl = document.getElementById('userModalTitle');
   const hintEl  = document.getElementById('umPwdHint');
+  const pwdLabel = document.getElementById('umPwdLabel');
+  const pwdInput = document.getElementById('umPassword');
+  const pwdInput2 = document.getElementById('umPassword2');
 
   if (username) {
     /* 编辑模式 */
@@ -379,19 +382,21 @@ function _openUserModal(username) {
     if (!u) return;
     if (titleEl) titleEl.textContent = `编辑账号：${username}`;
     if (hintEl)  hintEl.style.display = '';
+    if (pwdLabel) pwdLabel.textContent = '新密码';
     document.getElementById('umUsername').value = u.username;
     document.getElementById('umUsername').disabled = true;
-    document.getElementById('umPassword').value  = '';
-    document.getElementById('umPassword2').value = '';
+    if (pwdInput)  { pwdInput.value = '';  pwdInput.placeholder = '留空则不修改，填写则至少6位'; }
+    if (pwdInput2) { pwdInput2.value = ''; pwdInput2.placeholder = '再次输入新密码'; }
     document.getElementById('umRole').value = u.role;
   } else {
     /* 新增模式 */
     if (titleEl) titleEl.textContent = '新增账号';
     if (hintEl)  hintEl.style.display = 'none';
+    if (pwdLabel) pwdLabel.textContent = '密码';
     document.getElementById('umUsername').value = '';
     document.getElementById('umUsername').disabled = false;
-    document.getElementById('umPassword').value  = '';
-    document.getElementById('umPassword2').value = '';
+    if (pwdInput)  { pwdInput.value = '';  pwdInput.placeholder = '至少6位'; }
+    if (pwdInput2) { pwdInput2.value = ''; pwdInput2.placeholder = '再次输入密码'; }
     document.getElementById('umRole').value = 'manager';
   }
   const errEl = document.getElementById('userModalErr');
@@ -535,6 +540,19 @@ function todayStr() {
   return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
 }
 function pad(n) { return String(n).padStart(2, '0'); }
+
+function nowIso() {
+  return new Date().toISOString();
+}
+
+function formatModifiedDate(value) {
+  if (!value) return '';
+  const raw = String(value).trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(raw)) return raw.slice(0, 10);
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) return raw;
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+}
 
 function weekStart(dateStr) {
   const dt = dateStr ? new Date(dateStr) : new Date();
@@ -1763,7 +1781,10 @@ function filterRecords() {
 
     filteredRecs = data.filter(r => {
       if (search) {
-        const haystack = [r.supplier, r.productNo, r.productName, r.client, r.orderNo, r.deliveryNo, r.defect]
+        const haystack = [
+          r.supplier, r.productNo, r.productName, r.client, r.orderNo, r.deliveryNo,
+          r.defect, r.updatedAt, formatModifiedDate(r.updatedAt),
+        ]
           .filter(Boolean).join(' ').toLowerCase();
         if (!haystack.includes(search)) return false;
       }
@@ -1799,6 +1820,7 @@ function filterRecords() {
         <col style="width:36px"/>   <!-- 复选框 -->
         <col style="width:44px"/>   <!-- # -->
         <col style="width:98px"/>   <!-- 来料日期 -->
+        <col style="width:98px"/>   <!-- 修改日期 -->
         <col style="width:110px"/>  <!-- 供应商 -->
         <col style="width:80px"/>   <!-- 客户 -->
         <col style="width:92px"/>   <!-- 货号 -->
@@ -1821,6 +1843,7 @@ function filterRecords() {
         </th>
         <th style="text-align:right">#</th>
         <th style="text-align:left">来料日期</th>
+        <th style="text-align:left">修改日期</th>
         <th style="text-align:left">供应商</th>
         <th style="text-align:left">客户</th>
         <th style="text-align:left">货号</th>
@@ -1854,6 +1877,7 @@ function filterRecords() {
           </td>
           <td style="text-align:right;color:#3a4858">${r.id}</td>
           <td style="font-family:var(--font-mono);font-size:11px;white-space:nowrap">${r.date}</td>
+          <td style="font-family:var(--font-mono);font-size:11px;white-space:nowrap">${formatModifiedDate(r.updatedAt) || '-'}</td>
           <td style="font-weight:500;color:#e8edf5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${r.supplier}">${r.supplier}</td>
           <td style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${r.client||''}">${r.client||'-'}</td>
           <td style="font-family:var(--font-mono);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${r.productNo||''}">${r.productNo||'-'}</td>
@@ -1996,31 +2020,26 @@ const DEFAULT_SUPPLIERS = [
      failQty   — FAIL 数量
    返回：'PASS' | 'REJ'
 
-   判定依据：FUNC / 功能 MAJ 0.65 列（m065，Ac 值）
-   ┌──────────────┬──────┬────────────────┐
-   │ LOT SIZE     │Sample│ m065 AC / RE   │
-   ├──────────────┼──────┼────────────────┤
-   │ 1–50         │  20  │  0 /  1        │
-   │ 51–280       │  32  │  1 /  2        │←fail=1→PASS; fail=2→REJ
-   │ 281–500      │  50  │  1 /  2        │
-   │ 501–1200     │  80  │  2 /  3        │
-   │ 1201–3200    │ 125  │  3 /  4        │
-   │ 3201–10000   │ 200  │  5 /  6        │
-   │ 10001–35000  │ 315  │  7 /  8        │
-   │ 35001–150000 │ 500  │ 10 / 11        │
-   └──────────────┴──────┴────────────────┘
+   判定依据：用户提供的 AQL Level II 表，使用 MAJ 0.65 的 Ac 值。
    fail <= AC(m065) → PASS
    fail >= RE(= AC + 1) → REJ
 ───────────────────────────────────────────────────── */
 const _APP_AQL_TABLE = [
+  { rangeMax:8,      m065:0  },
+  { rangeMax:15,     m065:0  },
+  { rangeMax:25,     m065:0  },
   { rangeMax:50,     m065:0  },
-  { rangeMax:280,    m065:1  },
+  { rangeMax:90,     m065:0  },
+  { rangeMax:150,    m065:0  },
+  { rangeMax:280,    m065:0  },
   { rangeMax:500,    m065:1  },
-  { rangeMax:1200,   m065:2  },
-  { rangeMax:3200,   m065:3  },
-  { rangeMax:10000,  m065:5  },
-  { rangeMax:35000,  m065:7  },
-  { rangeMax:999999, m065:10 },
+  { rangeMax:1200,   m065:1  },
+  { rangeMax:3200,   m065:2  },
+  { rangeMax:10000,  m065:3  },
+  { rangeMax:35000,  m065:5  },
+  { rangeMax:150000, m065:7  },
+  { rangeMax:500000, m065:10 },
+  { rangeMax:Infinity, m065:14 },
 ];
 
 function aqlJudge(qty, sampleQty, failQty) {
@@ -2766,6 +2785,8 @@ function openAddModal() {
   /* 确认标签栏可见 */
   const tabs = document.getElementById('modalModeTabs');
   if (tabs) { tabs.style.display = 'flex'; tabs.style.visibility = 'visible'; }
+  const saveContinueBtn = document.getElementById('btnSaveContinue');
+  if (saveContinueBtn) saveContinueBtn.style.display = '';
 
   /* 切换到单条录入 */
   switchModalMode('single');
@@ -2793,6 +2814,8 @@ function openEditModal(id) {
   /* 编辑时隐藏模式切换，始终显示单条面板 */
   const tabs = document.getElementById('modalModeTabs');
   if (tabs) tabs.style.display = 'none';
+  const saveContinueBtn = document.getElementById('btnSaveContinue');
+  if (saveContinueBtn) saveContinueBtn.style.display = 'none';
   switchModalMode('single');
   setVal('f_date',        r.date || '');
   setVal('f_inspDate',    r.inspDate || '');
@@ -3025,14 +3048,21 @@ ${unknown.map(u=>`「${u}」`).join('、')}
 
 /* AQL Level II 完整表 */
 const _AQL_TABLE = [
-  { lo:1,     hi:50,     sample:20,  cr:0, maj065:0, maj10:1, min25:1  },
-  { lo:51,    hi:280,    sample:32,  cr:0, maj065:0, maj10:2, min25:3  },
-  { lo:281,   hi:500,    sample:50,  cr:0, maj065:1, maj10:2, min25:5  },
-  { lo:501,   hi:1200,   sample:80,  cr:0, maj065:1, maj10:3, min25:7  },
-  { lo:1201,  hi:3200,   sample:125, cr:0, maj065:2, maj10:5, min25:10 },
-  { lo:3201,  hi:10000,  sample:200, cr:0, maj065:3, maj10:7, min25:14 },
-  { lo:10001, hi:35000,  sample:315, cr:0, maj065:5, maj10:10,min25:21 },
-  { lo:35001, hi:150000, sample:500, cr:0, maj065:7, maj10:14,min25:21 },
+  { lo:1,      hi:8,        sample:2,    cr:0, maj065:0,  maj10:0,  min25:0  },
+  { lo:9,      hi:15,       sample:3,    cr:0, maj065:0,  maj10:0,  min25:0  },
+  { lo:16,     hi:25,       sample:5,    cr:0, maj065:0,  maj10:0,  min25:0  },
+  { lo:26,     hi:50,       sample:8,    cr:0, maj065:0,  maj10:0,  min25:0  },
+  { lo:51,     hi:90,       sample:13,   cr:0, maj065:0,  maj10:0,  min25:1  },
+  { lo:91,     hi:150,      sample:20,   cr:0, maj065:0,  maj10:0,  min25:1  },
+  { lo:151,    hi:280,      sample:32,   cr:0, maj065:0,  maj10:1,  min25:2  },
+  { lo:281,    hi:500,      sample:50,   cr:0, maj065:1,  maj10:1,  min25:3  },
+  { lo:501,    hi:1200,     sample:80,   cr:0, maj065:1,  maj10:2,  min25:5  },
+  { lo:1201,   hi:3200,     sample:125,  cr:0, maj065:2,  maj10:3,  min25:7  },
+  { lo:3201,   hi:10000,    sample:200,  cr:0, maj065:3,  maj10:5,  min25:10 },
+  { lo:10001,  hi:35000,    sample:315,  cr:0, maj065:5,  maj10:7,  min25:14 },
+  { lo:35001,  hi:150000,   sample:500,  cr:0, maj065:7,  maj10:10, min25:21 },
+  { lo:150001, hi:500000,   sample:800,  cr:0, maj065:10, maj10:14, min25:21 },
+  { lo:500001, hi:Infinity, sample:1250, cr:0, maj065:14, maj10:21, min25:21 },
 ];
 
 /* 按批量取 AQL 行 */
@@ -3933,6 +3963,25 @@ function closeModalDirect() {
   editingId = null;
 }
 
+function resetSingleEntryFormForNext() {
+  editingId = null;
+  setText('modalTitle', '新增验货记录');
+  clearForm();
+  const dateEl     = document.getElementById('f_date');
+  const inspDateEl = document.getElementById('f_inspDate');
+  if (dateEl)     dateEl.value     = todayStr();
+  if (inspDateEl) inspDateEl.value = todayStr();
+  switchModalMode('single');
+  const tabs = document.getElementById('modalModeTabs');
+  if (tabs) { tabs.style.display = 'flex'; tabs.style.visibility = 'visible'; }
+  const saveContinueBtn = document.getElementById('btnSaveContinue');
+  if (saveContinueBtn) saveContinueBtn.style.display = '';
+  renderInspectorDatalist();
+  refreshDefectDescDatalist();
+  const first = document.getElementById('f_supplier');
+  if (first) first.focus();
+}
+
 
 /* ════════════════════════════════════════
    §FINAL_RESULT  最终记录判定统一逻辑
@@ -3959,7 +4008,8 @@ function getFinalRecordResult(baseResult, defects, measurements, lotQty) {
   return baseResult || 'PASS';
 }
 
-function saveRecord() {
+function saveRecord(options = {}) {
+  const continueEntry = options && options.continueEntry === true && editingId === null;
   const date     = getVal('f_date');
   const supplier = getVal('f_supplier');
   if (!date)     { showToast('请填写来料日期', 'error'); return; }
@@ -4067,6 +4117,7 @@ function saveRecord() {
       Number(getVal('f_qty')) || 0
     ), defect,
     qc: getVal('f_qc'), remark: getVal('f_remark'),
+    updatedAt: nowIso(),
     ...(defectsArr ? { defects: defectsArr } : {}),
     ...(measArr   ? { measurements: measArr } : {}),
   };
@@ -4080,8 +4131,9 @@ function saveRecord() {
   }
 
   persist();
-  closeModalDirect();
-  showToast(editingId !== null ? '记录已更新 ✓' : '记录已添加 ✓', 'success');
+  const wasEditing = editingId !== null;
+  if (!continueEntry) closeModalDirect();
+  showToast(wasEditing ? '记录已更新 ✓' : (continueEntry ? '记录已添加，可继续录入下一条 ✓' : '记录已添加 ✓'), 'success');
   renderSupplierDatalist();   /* 新供应商/客户保存后立即进入下拉选项 */
   renderCustomerDatalist();
 
@@ -4091,6 +4143,10 @@ function saveRecord() {
   if (currentPage === 'analysis')  renderAnalysis();
   if (currentPage === 'suppliers') renderSuppliers();
   updateTopKpis();
+
+  if (continueEntry) {
+    resetSingleEntryFormForNext();
+  }
 }
 
 function deleteRecord(id) {
@@ -4399,10 +4455,10 @@ function exportCSV() {
   if (_downloadServerExport('records.csv', 'CSV')) return;
   try {
     const data = filteredRecs.length ? filteredRecs : recs();
-    const HDR  = ['ID','来料日期','检验日期','供应商','客户','货号','款式名称','PO号','类型',
+    const HDR  = ['ID','来料日期','检验日期','修改日期','供应商','客户','货号','款式名称','PO号','类型',
                   '来料数量','抽查数量','PASS数','FAIL数','不良率','不良现象','判定结果','检验员','备注'];
     const rows = data.map(r => [
-      r.id, r.date, r.inspDate, r.supplier, r.client, r.productNo, r.productName,
+      r.id, r.date, r.inspDate, formatModifiedDate(r.updatedAt), r.supplier, r.client, r.productNo, r.productName,
       r.orderNo, r.type, r.qty, r.sampleQty, r.pass, r.fail, r.defectRate, r.defect, r.result, r.qc, r.remark,
     ].map(v => `"${String(v==null?'':v).replace(/"/g,'""')}"`));
     const csv  = '\uFEFF' + [HDR, ...rows].map(r=>r.join(',')).join('\n');
@@ -4701,6 +4757,7 @@ function _backupDoImport(incoming, mode) {
       defect:      r.defect      || '',
       qc:          r.qc          || '',
       remark:      r.remark      || '',
+      updatedAt:   r.updatedAt   || nowIso(),
     }));
 
     if (mode === 'replace') {
@@ -5502,6 +5559,7 @@ function _buildImportPlan(mode) {
       confirmResult: res2Col ? _normalizeResult(String(row[res2Col] ?? '').trim()) : '',
       confirmBy:   confCol  ? String(row[confCol]  ?? '').trim() : '',
       remark:      remCol   ? String(row[remCol]   ?? '').trim() : '',
+      updatedAt:   nowIso(),
     });
   });
 

@@ -9,6 +9,7 @@ const test = require('node:test');
 const appSource = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
 const aiOcrSource = fs.readFileSync(path.join(__dirname, 'ai-ocr.js'), 'utf8');
 const reportSource = fs.readFileSync(path.join(__dirname, 'report_export.js'), 'utf8');
+const indexSource = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
 const mobileCss = fs.readFileSync(path.join(__dirname, 'mobile.css'), 'utf8');
 
 function loadFunction(source, name, context = {}) {
@@ -20,6 +21,19 @@ function loadFunction(source, name, context = {}) {
     if (source[index] === '{') depth += 1;
     if (source[index] === '}') depth -= 1;
     if (depth === 0) return vm.runInNewContext(`(${source.slice(start, index + 1)})`, context);
+  }
+  throw new Error(`Could not parse ${name}`);
+}
+
+function loadConstArray(source, name) {
+  const start = source.indexOf(`const ${name} = [`);
+  assert.notEqual(start, -1, `${name} should exist`);
+  const bodyStart = source.indexOf('[', start);
+  let depth = 0;
+  for (let index = bodyStart; index < source.length; index += 1) {
+    if (source[index] === '[') depth += 1;
+    if (source[index] === ']') depth -= 1;
+    if (depth === 0) return vm.runInNewContext(source.slice(bodyStart, index + 1));
   }
   throw new Error(`Could not parse ${name}`);
 }
@@ -117,6 +131,50 @@ test('import mapping keeps customer order numbers separate from delivery numbers
   assert.equal(autoMapColumns(['供应商送货单号'])['供应商送货单号'], 'deliveryNo');
 });
 
+test('AQL Level II limits match the provided table without shifting columns', () => {
+  const table = loadConstArray(appSource, '_AQL_TABLE');
+  const row3000 = table.find(r => r.lo <= 3000 && 3000 <= r.hi);
+  assert.deepEqual(
+    { sample: row3000.sample, maj065: row3000.maj065, maj10: row3000.maj10, min25: row3000.min25 },
+    { sample: 125, maj065: 2, maj10: 3, min25: 7 },
+  );
+
+  const row8000 = table.find(r => r.lo <= 8000 && 8000 <= r.hi);
+  assert.deepEqual(
+    { sample: row8000.sample, maj065: row8000.maj065, maj10: row8000.maj10, min25: row8000.min25 },
+    { sample: 200, maj065: 3, maj10: 5, min25: 10 },
+  );
+});
+
+test('AQL auto judgment rejects defects above the corrected 1.0 and 2.5 limits', () => {
+  const table = loadConstArray(appSource, '_AQL_TABLE');
+  const getAqlRowByLotSize = loadFunction(appSource, 'getAqlRowByLotSize', { _AQL_TABLE: table });
+  const _normLevel = loadFunction(appSource, '_normLevel');
+  const getDefectLevelTotals = loadFunction(appSource, 'getDefectLevelTotals', { _normLevel });
+  const autoJudgeByAql = loadFunction(appSource, 'autoJudgeByAql', { getAqlRowByLotSize, getDefectLevelTotals });
+
+  assert.equal(autoJudgeByAql(3000, [{ level: 'MAJ 1.0', qty: 3 }]).result, 'PASS');
+  assert.equal(autoJudgeByAql(3000, [{ level: 'MAJ 1.0', qty: 4 }]).result, 'REJ');
+  assert.equal(autoJudgeByAql(3000, [{ level: 'MIN 2.5', qty: 7 }]).result, 'PASS');
+  assert.equal(autoJudgeByAql(3000, [{ level: 'MIN 2.5', qty: 8 }]).result, 'REJ');
+});
+
+test('legacy AQL batch judge uses the corrected MAJ 0.65 limits', () => {
+  const table = loadConstArray(appSource, '_APP_AQL_TABLE');
+  const aqlJudge = loadFunction(appSource, 'aqlJudge', { _APP_AQL_TABLE: table });
+  assert.equal(aqlJudge(3000, 125, 2), 'PASS');
+  assert.equal(aqlJudge(3000, 125, 3), 'REJ');
+});
+
+test('IQC report uses the same corrected AQL row for a 3000 lot', () => {
+  const table = loadConstArray(reportSource, 'IQC_AQL_TABLE');
+  const row3000 = table.find(r => 3000 <= r.rangeMax);
+  assert.deepEqual(
+    { range: row3000.range, sample: row3000.sample, maj065: row3000.maj065, maj10: row3000.maj10, min25: row3000.min25 },
+    { range: '1201–3200', sample: 125, maj065: 2, maj10: 3, min25: 7 },
+  );
+});
+
 test('IQC report renders the PO label and value', () => {
   const aqlRow = {
     range: '1-50', sample: 20, cr: 0, maj065: 0, maj10: 1,
@@ -166,6 +224,34 @@ test('basic record entry does not grant defect-library management', () => {
   assert.match(appSource, /manager:\s*{[^}]*manageDefectLib:true/s);
   assert.match(appSource, /viewer:\s*{[^}]*manageDefectLib:false/s);
   assert.match(appSource, /const canAdd = can\('manageDefectLib'\)/);
+});
+
+test('viewer account can create records but cannot edit or delete them', () => {
+  const viewerPerms = appSource.match(/viewer:\s*\{(?<body>[\s\S]*?)\n\s*\}/)?.groups?.body;
+  assert.ok(viewerPerms, 'viewer permissions should exist');
+  assert.match(viewerPerms, /createRecord:\s*true/);
+  assert.match(viewerPerms, /editRecord:\s*false/);
+  assert.match(viewerPerms, /deleteRecord:\s*false/);
+});
+
+test('records table shows and searches the modified date', () => {
+  assert.match(appSource, /<th style="text-align:left">修改日期<\/th>/);
+  assert.match(appSource, /formatModifiedDate\(r\.updatedAt\)/);
+  assert.match(appSource, /r\.updatedAt,\s*formatModifiedDate\(r\.updatedAt\)/);
+});
+
+test('single entry modal can save and continue entering the next record', () => {
+  assert.match(indexSource, /id="btnSaveContinue"[^>]*onclick="saveRecord\(\{ continueEntry: true \}\)"/);
+  assert.match(indexSource, /保存并继续录入/);
+  assert.match(appSource, /function resetSingleEntryFormForNext\(\)/);
+  assert.match(appSource, /continueEntry \? '记录已添加，可继续录入下一条/);
+});
+
+test('account editor clearly exposes password reset fields', () => {
+  assert.match(appSource, /<span id="umPwdLabel">密码<\/span>/);
+  assert.match(appSource, /pwdLabel\.textContent = '新密码'/);
+  assert.match(appSource, /留空则不修改，填写则至少6位/);
+  assert.match(appSource, /保存账号/);
 });
 
 test('mobile modal controls keep a 16px font to avoid iOS focus zoom', () => {

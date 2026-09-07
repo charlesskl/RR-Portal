@@ -245,6 +245,15 @@ function todayStr() {
   return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 }
 
+function formatModifiedDate(value) {
+  if (!value) return '';
+  const raw = String(value).trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(raw)) return raw.slice(0, 10);
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) return raw;
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+
 function neutralizeSpreadsheetFormula(v) {
   const value = String(v == null ? '' : v);
   return /^[=+\-@\t\r]/.test(value) ? "'" + value : value;
@@ -279,7 +288,10 @@ function getFilteredExportRecords(searchParams) {
   const to = String(searchParams.get('dateTo') || '').trim();
   return getBootstrap().records.filter(r => {
     if (search) {
-      const haystack = [r.supplier, r.productNo, r.productName, r.client, r.orderNo, r.deliveryNo, r.defect]
+      const haystack = [
+        r.supplier, r.productNo, r.productName, r.client, r.orderNo, r.deliveryNo,
+        r.defect, r.updatedAt, formatModifiedDate(r.updatedAt),
+      ]
         .filter(Boolean).join(' ').toLowerCase();
       if (!haystack.includes(search)) return false;
     }
@@ -292,13 +304,13 @@ function getFilteredExportRecords(searchParams) {
 }
 
 function buildRecordsCsv(records) {
-  const hdr = ['ID','来料日期','检验日期','供应商','客户','货号','款式名称','PO号','类型',
+  const hdr = ['ID','来料日期','检验日期','修改日期','供应商','客户','货号','款式名称','PO号','类型',
     '来料数量','抽查数量','PASS数','FAIL数','不良率','不良现象','判定结果','检验员','备注'];
   const rows = records
     .slice()
     .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')))
     .map(r => [
-      r.id, r.date, r.inspDate, r.supplier, r.client, r.productNo, r.productName,
+      r.id, r.date, r.inspDate, formatModifiedDate(r.updatedAt), r.supplier, r.client, r.productNo, r.productName,
       r.orderNo, r.type, r.qty, r.sampleQty, r.pass, r.fail, r.defectRate, r.defect, r.result, r.qc, r.remark,
     ].map(csvCell));
   return '\uFEFF' + [hdr.map(csvCell), ...rows].map(r => r.join(',')).join('\n');

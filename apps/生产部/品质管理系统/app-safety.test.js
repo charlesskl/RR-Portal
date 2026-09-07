@@ -221,17 +221,21 @@ test('basic record entry does not grant defect-library management', () => {
   }
 
   assert.deepEqual(checkedActions, ['manageDefectLib', 'manageDefectLib', 'manageDefectLib']);
-  assert.match(appSource, /manager:\s*{[^}]*manageDefectLib:true/s);
-  assert.match(appSource, /viewer:\s*{[^}]*manageDefectLib:false/s);
+  // 权限矩阵模型（#629）：manager 预设 defectlib 管理位=1，viewer 管理位=0
+  assert.match(appSource, /manager:\s*_permSet[\s\S]*?m:\s*\['defectlib','import'\]/);
+  assert.match(appSource, /viewer:\s*_permSet[\s\S]*?a:\s*0,\s*m:\s*0/);
   assert.match(appSource, /const canAdd = can\('manageDefectLib'\)/);
 });
 
 test('viewer account can create records but cannot edit or delete them', () => {
-  const viewerPerms = appSource.match(/viewer:\s*\{(?<body>[\s\S]*?)\n\s*\}/)?.groups?.body;
-  assert.ok(viewerPerms, 'viewer permissions should exist');
-  assert.match(viewerPerms, /createRecord:\s*true/);
-  assert.match(viewerPerms, /editRecord:\s*false/);
-  assert.match(viewerPerms, /deleteRecord:\s*false/);
+  // 权限矩阵模型（#629）：viewer 验货明细 可录入(e=1) 但不可审核修改(a=0)、不可删除(m=0)；
+  // 旧动作映射保持 editRecord→records.a、deleteRecord→records.m。
+  const viewerPerms = appSource.match(/viewer:\s*_permSet\(k => \(\{(?<body>[\s\S]*?)\}\)\)/)?.groups?.body;
+  assert.ok(viewerPerms, 'viewer permission matrix should exist');
+  assert.match(viewerPerms, /e: k === 'records' \? 1 : 0/);
+  assert.match(viewerPerms, /a: 0, m: 0/);
+  assert.match(appSource, /editRecord:\s*\['records', 'a'\]/);
+  assert.match(appSource, /deleteRecord:\s*\['records', 'm'\]/);
 });
 
 test('records table shows and searches the modified date', () => {

@@ -2,10 +2,16 @@
    兴信 QMS 后端服务器  ·  零依赖（Node 内置 http + node:sqlite）
    ────────────────────────────────────────────────────────────
    职责：
-     1. 用 SQLite 文件库 qc.db 持久化 验货记录 / 账号 / 不良描述库
-     2. 首次启动从 seed.json 灌入 30 条记录 + 默认账号 + 不良库
+     1. 用 SQLite 文件库持久化 验货记录 / 账号 / 不良描述库
+     2. 首次启动从 seed.json 灌入默认账号 + 不良库
      3. 提供 REST API：/api/bootstrap (拉全量)、/api/records|users|defects (全量写回)
      4. 同端口静态托管前端（index.html / app.js / ...）
+
+   多厂区（2026-09 新增）：
+     · 每个厂区一套完全独立的数据库文件：server/data/<厂区id>/qc.db
+     · 数据（记录 / 账号 / 不良库）在厂区之间物理隔离、互不流通
+     · 所有数据 API 通过 ?company=<厂区id> 指定目标厂区（缺省默认 dg-xingxin，兼容旧链接）
+     · 旧版单库（生产：DATA_PATH/qc.db；本地：server/qc.db）首次启动自动迁移为东莞兴信库
    启动：node server.js   （默认端口 8765，可用环境变量 PORT 覆盖）
 ══════════════════════════════════════════════════════════════ */
 'use strict';
@@ -14,13 +20,54 @@ const fs   = require('node:fs');
 const path = require('node:path');
 const { DatabaseSync } = require('node:sqlite');
 
-const ROOT      = path.join(__dirname, '..');           // 前端静态根目录 C:\DL\QC
-const DB_PATH   = process.env.DATA_PATH ? path.join(process.env.DATA_PATH, 'qc.db') : path.join(__dirname, 'qc.db');
+const ROOT      = path.join(__dirname, '..');           // 前端静态根目录
+const DATA_DIR  = process.env.DATA_PATH || path.join(__dirname, 'data');
+const LEGACY_DB = path.join(__dirname, 'qc.db');        // 本地开发的旧版单库路径（自动迁移用；生产旧库在 DATA_PATH/qc.db）
 const SEED_PATH = path.join(__dirname, 'seed.json');
 const AI_CONFIG_PATH = path.join(__dirname, 'ai-config.json');
 const PORT      = Number(process.env.PORT) || 8765;
 
-/* ════════ AI 配置（阿里百炼 / DashScope OpenAI 兼容）════════ */
+/* ════════ 厂区 → 子公司清单（数据隔离边界；每家子公司一个独立库 server/data/<id>/qc.db）════════
+   新增子公司：在这里加一行 + 前端 app.js 的 QC_COMPANIES 加一行即可 */
+const COMPANIES = [
+  /* 东莞厂区 */
+  { id: 'dg-xingxin',   site: '东莞', name: '东莞兴信' },
+  { id: 'dg-huadeng-a', site: '东莞', name: '东莞华登A' },
+  { id: 'dg-huadeng-b', site: '东莞', name: '东莞华登B' },
+  { id: 'dg-huajia',    site: '东莞', name: '东莞华嘉' },
+  /* 河源厂区 */
+  { id: 'hy-huakang-a', site: '河源', name: '华康A' },
+  { id: 'hy-huakang-b', site: '河源', name: '华康B' },
+  { id: 'hy-huakang-c', site: '河源', name: '华康C' },
+  { id: 'hy-huakang-d', site: '河源', name: '华康D' },
+  { id: 'hy-huadeng',   site: '河源', name: '河源华登' },
+  { id: 'hy-huaxing',   site: '河源', name: '河源华兴' },
+  /* 湖南厂区 */
+  { id: 'sy-huadeng',   site: '湖南', name: '邵阳华登' },
+  { id: 'sy-xingxin',   site: '湖南', name: '邵阳兴信' },
+  { id: 'xs-huadeng',   site: '湖南', name: '新邵华登' },
+];
+const DEFAULT_COMPANY = 'dg-xingxin';
+/* 旧版兼容：早期按厂区名当 company 的链接/缓存自动映射到该厂区默认子公司 */
+const LEGACY_ALIAS = { dongguan: 'dg-xingxin', heyuan: 'hy-huakang-a', hunan: 'sy-huadeng' };
+
+function resolveCompany(searchParams) {
+  let raw = String((searchParams && searchParams.get('company')) || '').trim().toLowerCase();
+  if (!raw) return DEFAULT_COMPANY;
+  if (LEGACY_ALIAS[raw]) raw = LEGACY_ALIAS[raw];
+  const hit = COMPANIES.find(c => c.id === raw);
+  return hit ? hit.id : null;   // 非法子公司 → null → 路由返回 400
+}
+function companyName(id) {
+  const c = COMPANIES.find(c => c.id === id);
+  return c ? c.name : id;
+}
+function companySite(id) {
+  const c = COMPANIES.find(c => c.id === id);
+  return c ? c.site : id;
+}
+
+/* ════════ AI 配置（阿里百炼 / DashScope OpenAI 兼容，全局共用）════════ */
 function loadAiConfig() {
   let cfg = {
     enabled: false,
@@ -99,9 +146,7 @@ const RECORD_COLS = [
   'qc', 'confirmBy', 'remark', 'orderQty', 'updatedAt',
 ];
 
-/* ════════ 数据库初始化 ════════ */
-const db = new DatabaseSync(DB_PATH);
-db.exec(`
+const SCHEMA_SQL = `
   CREATE TABLE IF NOT EXISTS records (
     id INTEGER PRIMARY KEY,
     date TEXT, inspDate TEXT, supplier TEXT, client TEXT,
@@ -120,7 +165,7 @@ db.exec(`
     name TEXT, category TEXT, defaultLevel TEXT,
     keywords TEXT, enabled INTEGER, createdAt TEXT
   );
-`);
+`;
 
 const toNum = (v) => (v === '' || v === null || v === undefined || isNaN(Number(v))) ? null : Number(v);
 const j     = (v) => JSON.stringify(Array.isArray(v) ? v : (v ? [v] : []));
@@ -145,7 +190,7 @@ function rowToRecord(row) {
 }
 
 /* ── 全量替换（事务）── */
-function replaceRecords(records) {
+function replaceRecords(db, records) {
   const ph = RECORD_COLS.map(() => '?').join(',');
   const ins = db.prepare(`INSERT INTO records(${RECORD_COLS.join(',')}) VALUES(${ph})`);
   db.exec('BEGIN');
@@ -156,17 +201,42 @@ function replaceRecords(records) {
   } catch (e) { db.exec('ROLLBACK'); throw e; }
 }
 
-function replaceUsers(users) {
-  const ins = db.prepare('INSERT INTO users(username,password,role,enabled,createdAt,lastLoginAt) VALUES(?,?,?,?,?,?)');
+function replaceUsers(db, users) {
+  migrateUsersTable(db);
+  const ins = db.prepare('INSERT INTO users(username,password,role,enabled,createdAt,lastLoginAt,name,dept,perms) VALUES(?,?,?,?,?,?,?,?,?)');
   db.exec('BEGIN');
   try {
     db.prepare('DELETE FROM users').run();
-    for (const u of users) ins.run(u.username, u.password ?? null, u.role ?? 'viewer', u.enabled ? 1 : 0, u.createdAt ?? null, u.lastLoginAt ?? null);
+    for (const u of users) ins.run(
+      u.username, u.password ?? null, u.role ?? 'viewer', u.enabled ? 1 : 0,
+      u.createdAt ?? null, u.lastLoginAt ?? null,
+      u.name ?? null, u.dept ?? null,
+      u.perms ? (typeof u.perms === 'string' ? u.perms : JSON.stringify(u.perms)) : null,
+    );
     db.exec('COMMIT');
   } catch (e) { db.exec('ROLLBACK'); throw e; }
+  ensureSuperAdmin(db);
 }
 
-function replaceDefects(lib) {
+/* 保底：主账号 jc 在任何子公司都不能被删除/停用（确保管理员永远进得去） */
+function ensureSuperAdmin(db) {
+  try {
+    const seed = JSON.parse(fs.readFileSync(SEED_PATH, 'utf8'));
+    const jc = (seed.users || []).find(u => u.username === 'jc');
+    if (!jc) return;
+    const cur = db.prepare("SELECT * FROM users WHERE username='jc'").get();
+    if (!cur) {
+      db.prepare('INSERT INTO users(username,password,role,enabled,createdAt,lastLoginAt) VALUES(?,?,?,1,?,NULL)')
+        .run('jc', jc.password ?? null, 'admin', new Date().toISOString());
+      console.log('[保底] jc 主账号被删除，已自动恢复');
+    } else if (!cur.enabled || cur.role !== 'admin') {
+      db.prepare("UPDATE users SET enabled=1, role='admin' WHERE username='jc'").run();
+      console.log('[保底] jc 主账号被停用/降权，已自动恢复');
+    }
+  } catch (e) { console.warn('[保底] jc 主账号检查失败：', e.message); }
+}
+
+function replaceDefects(db, lib) {
   const ins = db.prepare('INSERT INTO defect_library(name,category,defaultLevel,keywords,enabled,createdAt) VALUES(?,?,?,?,?,?)');
   db.exec('BEGIN');
   try {
@@ -176,32 +246,89 @@ function replaceDefects(lib) {
   } catch (e) { db.exec('ROLLBACK'); throw e; }
 }
 
-/* ── 首次启动灌种子（仅在对应表为空时）── */
-function seedIfEmpty() {
+/* ── 首次启动灌种子（仅在对应表为空时）──
+   includeRecords=false 时只灌默认账号 + 不良库（用于新厂区，不带示例验货记录） */
+function seedIfEmpty(db, { includeRecords = true } = {}) {
   let seed = { records: [], users: [], defectLib: [] };
   try { seed = JSON.parse(fs.readFileSync(SEED_PATH, 'utf8')); }
   catch (e) { console.warn('[seed] 读取 seed.json 失败，跳过灌种子：', e.message); }
 
   if (db.prepare('SELECT COUNT(*) c FROM users').get().c === 0 && seed.users?.length) {
-    replaceUsers(seed.users);
+    replaceUsers(db, seed.users);
     console.log('[seed] 灌入默认账号', seed.users.length, '个');
   }
-  if (db.prepare('SELECT COUNT(*) c FROM records').get().c === 0 && seed.records?.length) {
-    replaceRecords(seed.records);
+  if (includeRecords && db.prepare('SELECT COUNT(*) c FROM records').get().c === 0 && seed.records?.length) {
+    replaceRecords(db, seed.records);
     console.log('[seed] 灌入验货记录', seed.records.length, '条');
   }
   if (db.prepare('SELECT COUNT(*) c FROM defect_library').get().c === 0 && seed.defectLib?.length) {
-    replaceDefects(seed.defectLib);
+    replaceDefects(db, seed.defectLib);
     console.log('[seed] 灌入不良描述库', seed.defectLib.length, '条');
   }
 }
-seedIfEmpty();
+
+/* 用户表新增字段（姓名/部门/权限矩阵），老库自动补齐 */
+const USER_EXTRA_COLS = [
+  { col: 'name',  ddl: "ALTER TABLE users ADD COLUMN name TEXT" },
+  { col: 'dept',  ddl: "ALTER TABLE users ADD COLUMN dept TEXT" },
+  { col: 'perms', ddl: "ALTER TABLE users ADD COLUMN perms TEXT" },
+];
+function migrateUsersTable(db) {
+  const cols = db.prepare("PRAGMA table_info(users)").all().map(c => c.name);
+  for (const c of USER_EXTRA_COLS) {
+    if (!cols.includes(c.col)) { try { db.exec(c.ddl); } catch (e) {} }
+  }
+}
+
+/* ════════ 多厂区数据库管理（每厂区一个独立 qc.db，懒加载 + 缓存）════════ */
+const _dbs = new Map();
+
+/* 旧版单库迁移：旧 qc.db → data/dg-xingxin/qc.db（仅首次）。
+   旧库可能的位置：生产容器是 DATA_PATH/qc.db（/app/data/qc.db，bind-mount 持久卷），
+   本地开发是 server/qc.db（server.js 同目录）。两处都要看，漏掉生产路径会导致
+   上线后旧数据"消失"（文件还在 data/qc.db 但没人读）。 */
+function migrateLegacyDb() {
+  try {
+    const dgDir = path.join(DATA_DIR, DEFAULT_COMPANY);
+    const dgDb  = path.join(dgDir, 'qc.db');
+    if (fs.existsSync(dgDb)) return;
+    const candidates = [path.join(DATA_DIR, 'qc.db'), LEGACY_DB];
+    const legacy = candidates.find(p => fs.existsSync(p));
+    if (legacy) {
+      fs.mkdirSync(dgDir, { recursive: true });
+      fs.renameSync(legacy, dgDb);
+      console.log('[迁移] 旧版数据库已迁移为东莞兴信库：' + legacy + ' → ' + dgDb);
+    }
+  } catch (e) {
+    console.error('[迁移] 旧版数据库迁移失败：', e.message);
+  }
+}
+
+function getDb(companyId) {
+  if (_dbs.has(companyId)) return _dbs.get(companyId);
+  const dir = path.join(DATA_DIR, companyId);
+  fs.mkdirSync(dir, { recursive: true });
+  const dbPath = path.join(dir, 'qc.db');
+  const db = new DatabaseSync(dbPath);
+  db.exec(SCHEMA_SQL);
+  migrateUsersTable(db);   /* 老库补齐 姓名/部门/权限 列 */
+  // 东莞老库已带数据则无需灌种子；全新厂区只灌账号 + 不良库，不带示例记录
+  seedIfEmpty(db, { includeRecords: companyId === DEFAULT_COMPANY });
+  _dbs.set(companyId, db);
+  console.log('[DB] 厂区「' + companyName(companyId) + '」数据库就绪：' + dbPath);
+  return db;
+}
+
+migrateLegacyDb();
 
 /* ════════ 读取全量（供前端开机预加载）════════ */
-function getBootstrap() {
+function getBootstrap(db) {
   const records = db.prepare('SELECT * FROM records ORDER BY id').all().map(rowToRecord);
   const nextId  = records.reduce((m, r) => Math.max(m, Number(r.id) || 0), 30) + 1;
-  const users   = db.prepare('SELECT * FROM users').all().map(u => Object.assign({}, u, { enabled: !!u.enabled }));
+  const users   = db.prepare('SELECT * FROM users').all().map(u => Object.assign({}, u, {
+    enabled: !!u.enabled,
+    perms: (() => { try { return u.perms ? JSON.parse(u.perms) : null; } catch (e) { return null; } })(),
+  }));
   const defectLib = db.prepare('SELECT * FROM defect_library ORDER BY id').all().map(d => ({
     name: d.name, category: d.category, defaultLevel: d.defaultLevel,
     keywords: (() => { try { return JSON.parse(d.keywords || '[]'); } catch (e) { return []; } })(),
@@ -281,12 +408,12 @@ function isFailRecord(r) {
   return v === 'REJ' || v === 'FAIL';
 }
 
-function getFilteredExportRecords(searchParams) {
+function getFilteredExportRecords(db, searchParams) {
   const search = String(searchParams.get('search') || '').trim().toLowerCase();
   const result = String(searchParams.get('result') || '').trim().toUpperCase();
   const from = String(searchParams.get('dateFrom') || '').trim();
   const to = String(searchParams.get('dateTo') || '').trim();
-  return getBootstrap().records.filter(r => {
+  return getBootstrap(db).records.filter(r => {
     if (search) {
       const haystack = [
         r.supplier, r.productNo, r.productName, r.client, r.orderNo, r.deliveryNo,
@@ -313,7 +440,7 @@ function buildRecordsCsv(records) {
       r.id, r.date, r.inspDate, formatModifiedDate(r.updatedAt), r.supplier, r.client, r.productNo, r.productName,
       r.orderNo, r.type, r.qty, r.sampleQty, r.pass, r.fail, r.defectRate, r.defect, r.result, r.qc, r.remark,
     ].map(csvCell));
-  return '\uFEFF' + [hdr.map(csvCell), ...rows].map(r => r.join(',')).join('\n');
+  return '﻿' + [hdr.map(csvCell), ...rows].map(r => r.join(',')).join('\n'); // 前导 ﻿ = BOM，Excel 正确识别 UTF-8
 }
 
 function buildFactoryExcelHtml(records) {
@@ -403,38 +530,50 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/health' && req.method === 'GET') {
       return sendJson(res, 200, { ok: true, time: new Date().toISOString() });
     }
+    /* ── 厂区清单（登录页用，无需鉴权）── */
+    if (p === '/api/companies' && req.method === 'GET') {
+      return sendJson(res, 200, { companies: COMPANIES });
+    }
+
+    /* ── 数据类路由：解析目标厂区（缺省东莞，兼容旧链接）── */
+    const companyId = resolveCompany(url.searchParams);
+    if (companyId === null) {
+      return sendJson(res, 400, { ok: false, error: '未知厂区：' + String(url.searchParams.get('company')) });
+    }
+    const db = getDb(companyId);
+
     if (p === '/api/bootstrap' && req.method === 'GET') {
-      return sendJson(res, 200, getBootstrap());
+      return sendJson(res, 200, Object.assign({ company: companyId }, getBootstrap(db)));
     }
     if (p === '/api/export/records.csv' && (req.method === 'GET' || req.method === 'HEAD')) {
-      const records = getFilteredExportRecords(url.searchParams);
+      const records = getFilteredExportRecords(db, url.searchParams);
       const body = buildRecordsCsv(records);
-      return sendDownload(req, res, 'text/csv; charset=utf-8', `东莞兴信验货明细_${todayStr()}.csv`, body);
+      return sendDownload(req, res, 'text/csv; charset=utf-8', `${companyName(companyId)}验货明细_${todayStr()}.csv`, body);
     }
     if (p === '/api/export/factory-excel.xls' && (req.method === 'GET' || req.method === 'HEAD')) {
-      const records = getFilteredExportRecords(url.searchParams);
+      const records = getFilteredExportRecords(db, url.searchParams);
       const from = String(url.searchParams.get('dateFrom') || '').trim();
       const to = String(url.searchParams.get('dateTo') || '').trim();
       const span = (from || to) ? `_${from || '起始'}至${to || '今'}` : '_全部';
-      const body = '\uFEFF' + buildFactoryExcelHtml(records);
-      return sendDownload(req, res, 'application/vnd.ms-excel; charset=utf-8', `加工厂品质检验明细统计表${span}.xls`, body);
+      const body = '﻿' + buildFactoryExcelHtml(records);
+      return sendDownload(req, res, 'application/vnd.ms-excel; charset=utf-8', `${companyName(companyId)}品质检验明细统计表${span}.xls`, body);
     }
     if (p === '/api/records' && req.method === 'POST') {
       const body = await readBody(req);
-      replaceRecords(Array.isArray(body.records) ? body.records : []);
+      replaceRecords(db, Array.isArray(body.records) ? body.records : []);
       return sendJson(res, 200, { ok: true, count: db.prepare('SELECT COUNT(*) c FROM records').get().c });
     }
     if (p === '/api/users' && req.method === 'POST') {
       const body = await readBody(req);
-      replaceUsers(Array.isArray(body.users) ? body.users : []);
+      replaceUsers(db, Array.isArray(body.users) ? body.users : []);
       return sendJson(res, 200, { ok: true, count: db.prepare('SELECT COUNT(*) c FROM users').get().c });
     }
     if (p === '/api/defects' && req.method === 'POST') {
       const body = await readBody(req);
-      replaceDefects(Array.isArray(body.defectLib) ? body.defectLib : []);
+      replaceDefects(db, Array.isArray(body.defectLib) ? body.defectLib : []);
       return sendJson(res, 200, { ok: true, count: db.prepare('SELECT COUNT(*) c FROM defect_library').get().c });
     }
-    /* ── AI（阿里百炼）── */
+    /* ── AI（阿里百炼，全局共用，不分厂区）── */
     if (p === '/api/ai/status' && req.method === 'GET') {
       return sendJson(res, 200, { ready: AI.ready, ocrModel: AI.ocrModel, baseURL: AI.baseURL });
     }
@@ -461,12 +600,14 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, '0.0.0.0', () => {
-  const b = getBootstrap();
   console.log('════════════════════════════════════════════');
-  console.log('  兴信 QMS 后端已启动');
+  console.log('  兴信 QMS 后端已启动（多厂区模式）');
   console.log('  本机:   http://localhost:' + PORT + '/index.html');
-  console.log('  DB:     ' + DB_PATH);
-  console.log('  当前库存: 记录 ' + b.records.length + ' 条 / 账号 ' + b.users.length + ' 个 / 不良库 ' + b.defectLib.length + ' 条');
+  console.log('  数据目录: ' + DATA_DIR);
+  for (const c of COMPANIES) {
+    const b = getBootstrap(getDb(c.id));
+    console.log('  厂区「' + c.name + '」: 记录 ' + b.records.length + ' 条 / 账号 ' + b.users.length + ' 个 / 不良库 ' + b.defectLib.length + ' 条');
+  }
   console.log('  AI(百炼): ' + (AI.ready ? ('已就绪, 模型 ' + AI.ocrModel) : '未配置(填 ai-config.json 后调 /api/ai/reload)'));
   console.log('════════════════════════════════════════════');
 });

@@ -44,8 +44,9 @@ const SEED_RECORDS = [
 /* ════════════════════════════════════════
    §1  STATE & STORAGE
 ════════════════════════════════════════ */
-/* 兴信专用 localStorage 前缀，避免与其他 QMS 项目数据混用 */
-const STORAGE_PREFIX = 'xingxin_qms_';
+/* 兴信专用 localStorage 前缀，避免与其他 QMS 项目数据混用；
+   多厂区：qc-backend.js 按当前厂区生成带前缀（如 xingxin_qms_dongguan_），数据天然隔离 */
+const STORAGE_PREFIX = window.__QC_STORAGE_PREFIX || 'xingxin_qms_';
 const STORAGE_KEYS = {
   records:      STORAGE_PREFIX + 'records',
   theme:        STORAGE_PREFIX + 'theme',
@@ -71,26 +72,87 @@ function _hashPwd(str) {
   return (h >>> 0).toString(16);
 }
 
-/* ── 权限表 ── */
-const ROLE_PERMS = {
-  admin: {
-    createRecord:true, editRecord:true, deleteRecord:true, batchDelete:true,
-    importData:true,   exportData:true,  exportPdf:true,   manageUsers:true,
-    manageDefectLib:true,
-  },
-  manager: {
-    createRecord:true, editRecord:true,  deleteRecord:false, batchDelete:false,
-    importData:true,   exportData:true,  exportPdf:true,    manageUsers:false,
-    manageDefectLib:true,
-  },
-  viewer: {
-    createRecord:true,  editRecord:false, deleteRecord:false, batchDelete:false,
-    importData:false,   exportData:true,  exportPdf:true,    manageUsers:false,
-    manageDefectLib:false,
-  },
+/* ── 权限矩阵：菜单 × (查看v / 编辑e / 审核a / 管理m) ──
+   查看=打开页面+导出；编辑=新增记录/条目；审核=修改已有记录；管理=删除/导入/库与账号管理 */
+const PERM_COLS = [
+  { k: 'v', label: '查看' },
+  { k: 'e', label: '编辑' },
+  { k: 'a', label: '审核' },
+  { k: 'm', label: '管理' },
+];
+const PERM_GROUPS = [
+  { group: '检验', menus: [
+    { k: 'dashboard', label: '质量仪表板' },
+    { k: 'records',   label: '验货明细' },
+    { k: 'analysis',  label: '统计分析' },
+    { k: 'suppliers', label: '供应商管理' },
+  ]},
+  { group: '报告', menus: [
+    { k: 'daily',           label: '品质日报' },
+    { k: 'weekly',          label: '品质周报' },
+    { k: 'monthly',         label: '品质月报' },
+    { k: 'yearly',          label: '品质年报' },
+    { k: 'supplier-report', label: '供应商质量报告' },
+  ]},
+  { group: '系统', menus: [
+    { k: 'defectlib', label: '不良描述库' },
+    { k: 'import',    label: '数据导入' },
+    { k: 'users',     label: '账号管理' },
+  ]},
+];
+const PERM_MENU_KEYS = PERM_GROUPS.flatMap(g => g.menus.map(m => m.k));
+
+function _permSet(fill) { const o = {}; PERM_MENU_KEYS.forEach(k => { o[k] = fill(k); }); return o; }
+/* 角色预设（「按角色重置」用） */
+const ROLE_PERM_MATRIX = {
+  admin:   _permSet(() => ({ v:1, e:1, a:1, m:1 })),
+  manager: _permSet(k => ({
+    v: 1,
+    e: ['records','suppliers','defectlib','import'].includes(k) ? 1 : 0,
+    a: k === 'records' ? 1 : 0,
+    m: ['defectlib','import'].includes(k) ? 1 : 0,
+  })),
+  viewer:  _permSet(k => ({
+    v: ['dashboard','records','analysis','suppliers','daily','weekly','monthly','yearly','supplier-report'].includes(k) ? 1 : 0,
+    e: k === 'records' ? 1 : 0,
+    a: 0, m: 0,
+  })),
 };
 
 const ROLE_LABELS = { admin:'主账号', manager:'管理账号', viewer:'查看账号' };
+
+/* 部门选项（账号表单下拉） */
+const DEPT_OPTIONS = ['业务','工程','电子','啤机','喷油','搪胶','车缝','装配','品质','其他'];
+
+/* 旧动作 → 矩阵映射 */
+const ACTION_PERM_MAP = {
+  createRecord:    ['records', 'e'],
+  editRecord:      ['records', 'a'],
+  deleteRecord:    ['records', 'm'],
+  batchDelete:     ['records', 'm'],
+  importData:      ['import', 'v'],
+  manageUsers:     ['users', 'm'],
+  manageDefectLib: ['defectlib', 'm'],
+  /* exportData / exportPdf：能查看即可导出，不单独设卡 */
+};
+
+/* 有效权限 = 角色预设 + 该账号自定义覆盖 */
+function effPerms(user) {
+  const base = JSON.parse(JSON.stringify(ROLE_PERM_MATRIX[user?.role] || ROLE_PERM_MATRIX.viewer));
+  if (user && user.perms && typeof user.perms === 'object') {
+    for (const k of PERM_MENU_KEYS) {
+      if (user.perms[k] && typeof user.perms[k] === 'object') Object.assign(base[k], user.perms[k]);
+    }
+  }
+  return base;
+}
+
+/* 当前登录账号的实时记录（权限改了立即生效） */
+function _liveUser() {
+  const sess = getCurrentUser();
+  if (!sess) return null;
+  return _getUsers().find(x => x.username === sess.username) || sess;
+}
 
 /* ── 初始化账号数据（首次启动自动创建默认主账号 jc / qqwwee）── */
 function initUsers() {
@@ -131,12 +193,116 @@ function _clearSession() {
   localStorage.removeItem(STORAGE_KEYS.session);
 }
 
-/* ── 权限判断 ── */
+/* ── 权限判断（基于权限矩阵；jc 主账号保底全权）── */
 function can(action) {
-  const u = getCurrentUser();
+  const u = _liveUser();
   if (!u) return false;
-  const perms = ROLE_PERMS[u.role];
-  return perms ? (perms[action] === true) : false;
+  if (u.username === 'jc' && u.role === 'admin') return true;
+  const map = ACTION_PERM_MAP[action];
+  if (!map) return true;   /* 未映射的动作（如导出）：登录即可用 */
+  const p = effPerms(u);
+  return !!(p[map[0]] && p[map[0]][map[1]]);
+}
+
+/* 页面可见性（侧边栏按此隐藏） */
+function canView(page) {
+  const u = _liveUser();
+  if (!u) return false;
+  if (u.username === 'jc' && u.role === 'admin') return true;
+  const p = effPerms(u);
+  return !!(p[page] && p[page].v);
+}
+
+/* ── 多厂区/子公司：厂区卡片 → 子公司卡片 → 登录。每家子公司一套独立数据 ── */
+const QC_SITES = [
+  { id: 'dongguan', name: '东莞厂区', color: '#2e6be6' },
+  { id: 'heyuan',   name: '河源厂区', color: '#16a34a' },
+  { id: 'hunan',    name: '湖南厂区', color: '#7c3aed' },
+];
+/* 子公司清单：id 对应服务端 server/data/<id>/qc.db（数据物理隔离）
+   新增子公司 → 在这里加一行 + 服务端 COMPANIES 加一行即可 */
+const QC_COMPANIES = [
+  /* 东莞厂区 */
+  { id: 'dg-xingxin',   site: 'dongguan', name: '东莞兴信' },
+  { id: 'dg-huadeng-a', site: 'dongguan', name: '东莞华登A' },
+  { id: 'dg-huadeng-b', site: 'dongguan', name: '东莞华登B' },
+  { id: 'dg-huajia',    site: 'dongguan', name: '东莞华嘉' },
+  /* 河源厂区 */
+  { id: 'hy-huakang-a', site: 'heyuan', name: '华康A' },
+  { id: 'hy-huakang-b', site: 'heyuan', name: '华康B' },
+  { id: 'hy-huakang-c', site: 'heyuan', name: '华康C' },
+  { id: 'hy-huakang-d', site: 'heyuan', name: '华康D' },
+  { id: 'hy-huadeng',   site: 'heyuan', name: '河源华登' },
+  { id: 'hy-huaxing',   site: 'heyuan', name: '河源华兴' },
+  /* 湖南厂区 */
+  { id: 'sy-huadeng',   site: 'hunan', name: '邵阳华登' },
+  { id: 'sy-xingxin',   site: 'hunan', name: '邵阳兴信' },
+  { id: 'xs-huadeng',   site: 'hunan', name: '新邵华登' },
+];
+let _selSite = null;        /* 卡片浏览时暂选的厂区（不落盘） */
+let _selView = 'form';      /* sites | subs | form */
+
+function getCompany()     { return window.__QC_COMPANY || 'dg-xingxin'; }
+function getCompanyObj()  { return QC_COMPANIES.find(c => c.id === getCompany()) || QC_COMPANIES[0]; }
+function getCompanyName() { return getCompanyObj().name; }
+function getSiteObj(id)   { return QC_SITES.find(s => s.id === id) || QC_SITES[0]; }
+function companiesOf(siteId) { return QC_COMPANIES.filter(c => c.site === siteId); }
+
+function selectSite(siteId) { _selSite = siteId; _selView = 'subs'; renderCompanySelector(); }
+function backToSites()      { _selView = 'sites'; renderCompanySelector(); }
+function pickCompany(id) {
+  if (!QC_COMPANIES.some(c => c.id === id)) return;
+  if (id !== getCompany()) {
+    try { localStorage.setItem(window.__QC_COMPANY_KEY || 'xingxin_qms_company', id); } catch(e) {}
+    location.reload();   /* 换子公司 = 重新加载，bootstrap 拉取该公司的独立数据 */
+    return;
+  }
+  _selView = 'form';
+  renderCompanySelector();
+}
+function _companyCardHtml(item, color, sub) {
+  return `<button type="button" class="company-card" onclick="${item.onclick}" style="--cc:${color}">
+    <div class="company-card-top"></div>
+    <div class="company-card-body">
+      <div class="company-card-icon">🏭</div>
+      <div class="company-card-name">${item.name}</div>
+      <div class="company-card-sub">${sub || ''}</div>
+    </div>
+  </button>`;
+}
+function renderCompanySelector() {
+  const box = document.getElementById('companySelector');
+  if (!box) return;
+  const fields = document.getElementById('loginFields');
+  const cur = getCompanyObj();
+  const curSite = getSiteObj(cur.site);
+
+  if (_selView === 'sites') {
+    if (fields) fields.style.display = 'none';
+    box.innerHTML =
+      `<div class="company-hint">选择厂区</div>` +
+      `<div class="company-cards">` + QC_SITES.map(s =>
+        _companyCardHtml({ name: s.name, onclick: `selectSite('${s.id}')` }, s.color,
+          companiesOf(s.id).length + ' 家子公司')
+      ).join('') + `</div>`;
+    return;
+  }
+  if (_selView === 'subs') {
+    if (fields) fields.style.display = 'none';
+    const site = getSiteObj(_selSite || cur.site);
+    box.innerHTML =
+      `<div class="company-hint"><a href="javascript:backToSites()" class="company-back">‹ 厂区</a> ${site.name} · 选择子公司（数据相互独立）</div>` +
+      `<div class="company-cards">` + companiesOf(site.id).map(c =>
+        _companyCardHtml({ name: c.name, onclick: `pickCompany('${c.id}')` }, site.color,
+          c.id === getCompany() ? '当前登录公司' : '')
+      ).join('') + `</div>`;
+    return;
+  }
+  /* form：直接登录当前公司 */
+  if (fields) fields.style.display = '';
+  box.innerHTML =
+    `<div class="company-hint">当前登录：<b style="color:${curSite.color}">${curSite.name} · ${cur.name}</b>
+      <a href="javascript:backToSites()" class="company-back" style="float:right">切换厂区/子公司</a></div>`;
 }
 
 /* ── 登录 ── */
@@ -189,6 +355,7 @@ function logout() {
 function _showLogin() {
   document.getElementById('loginScreen').style.display  = 'flex';
   document.getElementById('appWrapper').style.display   = 'none';
+  renderCompanySelector();   /* 登录页显示厂区选择并高亮当前厂区 */
   /* 清空输入 */
   const u = document.getElementById('loginUsername');
   const p = document.getElementById('loginPassword');
@@ -218,11 +385,12 @@ function _showApp() {
 
 /* ── 渲染右上角用户徽章 ── */
 function _renderUserBadge() {
-  const u = getCurrentUser();
+  const u = _liveUser();
   const el = document.getElementById('userBadge');
   if (!el || !u) return;
   el.innerHTML =
-    `<span class="user-badge-name">${u.username}</span>` +
+    `<span class="user-badge-company">${getSiteObj(getCompanyObj().site).name} · ${getCompanyName()}</span>` +
+    `<span class="user-badge-name">${u.name || u.username}</span>` +
     `<span class="user-badge-role">${ROLE_LABELS[u.role] || u.role}</span>` +
     `<button class="user-badge-logout" onclick="logout()">退出</button>`;
 }
@@ -231,6 +399,12 @@ function _renderUserBadge() {
 function applyPermissions() {
   const u = getCurrentUser();
   if (!u) return;
+
+  /* 侧边栏菜单：按权限矩阵「查看」列显示/隐藏 */
+  document.querySelectorAll('.nav-item[data-page]').forEach(el => {
+    const page = el.getAttribute('data-page');
+    el.style.display = canView(page) ? '' : 'none';
+  });
 
   /* 新增验货按钮 */
   const canCreate = can('createRecord');
@@ -242,14 +416,6 @@ function applyPermissions() {
   const canDel = can('deleteRecord');
   const batchDelWrap = document.getElementById('batchDelWrap');
   if (batchDelWrap) batchDelWrap.style.display = canDel ? '' : 'none';
-
-  /* 数据导入菜单项 */
-  const importNav = document.querySelector('.nav-item[data-page="import"]');
-  if (importNav) importNav.style.display = can('importData') ? '' : 'none';
-
-  /* 账号管理菜单（仅 admin）*/
-  const usersNav = document.querySelector('.nav-item[data-page="users"]');
-  if (usersNav) usersNav.style.display = can('manageUsers') ? '' : 'none';
 
   /* 新增记录按钮（records 页）*/
   const addRecordBtn = document.getElementById('btnAddRecord');
@@ -291,11 +457,13 @@ function renderUsersPage() {
   <div class="table-wrap" style="margin-top:12px">
     <table style="table-layout:fixed;width:100%">
       <colgroup>
-        <col style="width:130px"/><col style="width:100px"/><col style="width:80px"/>
-        <col style="width:160px"/><col style="width:160px"/><col style="width:180px"/>
+        <col style="width:110px"/><col style="width:100px"/><col style="width:90px"/><col style="width:90px"/>
+        <col style="width:70px"/><col style="width:130px"/><col style="width:140px"/><col style="width:210px"/>
       </colgroup>
       <thead><tr>
         <th style="text-align:left">用户名</th>
+        <th style="text-align:left">姓名</th>
+        <th style="text-align:left">部门</th>
         <th style="text-align:left">角色</th>
         <th style="text-align:center">状态</th>
         <th style="text-align:left">创建时间</th>
@@ -312,12 +480,15 @@ function renderUsersPage() {
           const lastLogin= u.lastLoginAt? u.lastLoginAt.slice(0,16).replace('T',' ') : '从未';
           return `<tr>
             <td style="font-weight:500;color:#e8edf5">${u.username}${isSelf?' <span style="font-size:10px;color:var(--accent)">(我)</span>':''}</td>
+            <td>${u.name||'—'}</td>
+            <td>${u.dept||'—'}</td>
             <td>${ROLE_LABELS[u.role]||u.role}</td>
             <td style="text-align:center">${statusBadge}</td>
             <td style="font-size:11px">${created}</td>
             <td style="font-size:11px">${lastLogin}</td>
             <td style="text-align:center">
               <button class="action-btn" onclick="_openUserModal('${u.username}')">编辑</button>
+              <button class="action-btn" onclick="_openPermModal('${u.username}')">权限</button>
               ${!isSelf ? `<button class="action-btn ${u.enabled?'':'badge-pass'}" onclick="_toggleUser('${u.username}')">${u.enabled?'停用':'启用'}</button>` : ''}
               ${!isSelf ? `<button class="action-btn del" onclick="_deleteUser('${u.username}')">删除</button>` : ''}
             </td>
@@ -336,12 +507,24 @@ function renderUsersPage() {
         <input id="umUsername" class="form-input" placeholder="字母/数字，至少2位" autocomplete="off"/>
       </div>
       <div style="margin-bottom:14px">
+        <label class="form-label">姓名</label>
+        <input id="umName" class="form-input" placeholder="真实姓名" autocomplete="off"/>
+      </div>
+      <div style="margin-bottom:14px">
         <label class="form-label"><span id="umPwdLabel">密码</span> <span id="umPwdHint" style="font-size:10px;color:var(--text-dim)">（留空则不修改）</span></label>
         <input id="umPassword" type="password" class="form-input" placeholder="至少6位" autocomplete="new-password"/>
       </div>
       <div style="margin-bottom:14px">
         <label class="form-label">确认密码</label>
         <input id="umPassword2" type="password" class="form-input" placeholder="再次输入密码" autocomplete="new-password"/>
+      </div>
+      <div style="margin-bottom:14px">
+        <label class="form-label">部门</label>
+        <select id="umDept" class="form-input">${DEPT_OPTIONS.map(d=>`<option value="${d}">${d}</option>`).join('')}</select>
+      </div>
+      <div style="margin-bottom:14px">
+        <label class="form-label">厂区 / 子公司</label>
+        <input class="form-input" value="${getSiteObj(getCompanyObj().site).name} · ${getCompanyName()}" disabled/>
       </div>
       <div style="margin-bottom:20px">
         <label class="form-label">角色</label>
@@ -358,10 +541,27 @@ function renderUsersPage() {
       </div>
     </div>
   </div>
+
+  <!-- 编辑权限矩阵弹框 -->
+  <div id="permModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:2100;align-items:center;justify-content:center">
+    <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:24px 28px;width:660px;max-width:96vw;max-height:88vh;overflow:auto">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;gap:12px">
+        <h3 id="permModalTitle" style="margin:0;color:var(--text-hi);font-size:16px">编辑权限</h3>
+        <button class="btn-secondary" onclick="_permResetRole()">按角色重置</button>
+      </div>
+      <div style="font-size:11px;color:var(--text-dim);margin-bottom:10px">查看=打开页面并导出；编辑=新增记录；审核=修改已有记录；管理=删除 / 导入 / 库与账号管理</div>
+      <div id="permMatrixWrap"></div>
+      <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:18px">
+        <button class="btn-secondary" onclick="_closePermModal()">取消</button>
+        <button class="btn-primary" onclick="_savePerms()">保存权限</button>
+      </div>
+    </div>
+  </div>
   `;
 }
 
 let _editingUsername = null;
+let _permEditing = null, _permMatrix = null;
 
 function _openUserModal(username) {
   _editingUsername = username || null;
@@ -388,6 +588,8 @@ function _openUserModal(username) {
     if (pwdInput)  { pwdInput.value = '';  pwdInput.placeholder = '留空则不修改，填写则至少6位'; }
     if (pwdInput2) { pwdInput2.value = ''; pwdInput2.placeholder = '再次输入新密码'; }
     document.getElementById('umRole').value = u.role;
+    document.getElementById('umName').value = u.name || '';
+    document.getElementById('umDept').value = u.dept || '品质';
   } else {
     /* 新增模式 */
     if (titleEl) titleEl.textContent = '新增账号';
@@ -398,6 +600,8 @@ function _openUserModal(username) {
     if (pwdInput)  { pwdInput.value = '';  pwdInput.placeholder = '至少6位'; }
     if (pwdInput2) { pwdInput2.value = ''; pwdInput2.placeholder = '再次输入密码'; }
     document.getElementById('umRole').value = 'manager';
+    document.getElementById('umName').value = '';
+    document.getElementById('umDept').value = '品质';
   }
   const errEl = document.getElementById('userModalErr');
   if (errEl) { errEl.textContent = ''; errEl.style.display = 'none'; }
@@ -417,6 +621,8 @@ function _saveUser() {
   const pwd    = (document.getElementById('umPassword')?.value||'').trim();
   const pwd2   = (document.getElementById('umPassword2')?.value||'').trim();
   const role   = document.getElementById('umRole')?.value || 'viewer';
+  const name   = (document.getElementById('umName')?.value||'').trim();
+  const dept   = document.getElementById('umDept')?.value || '';
 
   if (!uname || uname.length < 2) { show('用户名至少2位'); return; }
   if (!/^[a-zA-Z0-9_一-龥]+$/.test(uname)) { show('用户名只能含字母、数字、下划线或汉字'); return; }
@@ -433,6 +639,8 @@ function _saveUser() {
       u.password = _hashPwd(pwd);
     }
     u.role = role;
+    u.name = name;
+    u.dept = dept;
     /* 确保至少1个 admin */
     const admins = users.filter(x => x.role === 'admin' && x.enabled);
     if (admins.length === 0) { show('至少保留一个启用的主账号'); return; }
@@ -444,6 +652,8 @@ function _saveUser() {
     if (pwd !== pwd2)   { show('两次密码不一致'); return; }
     users.push({
       username:    uname,
+      name,
+      dept,
       password:    _hashPwd(pwd),
       role,
       enabled:     true,
@@ -455,6 +665,76 @@ function _saveUser() {
   _saveUsers(users);
   _closeUserModal();
   showToast('✓ 账号已保存', 'success');
+  renderUsersPage();
+}
+
+/* ── 权限矩阵弹窗 ── */
+function _renderPermMatrix() {
+  const wrap = document.getElementById('permMatrixWrap');
+  if (!wrap || !_permMatrix) return;
+  const colHead = PERM_COLS.map(c =>
+    `<th style="text-align:center">${c.label}<br/><span style="font-size:10px;font-weight:400">` +
+    `<a href="javascript:void(0)" onclick="_permSetCol('${c.k}',1)" style="color:var(--accent)">全选</a> · ` +
+    `<a href="javascript:void(0)" onclick="_permSetCol('${c.k}',0)" style="color:var(--text-dim)">清空</a></span></th>`
+  ).join('');
+  const rows = PERM_GROUPS.map(g => g.menus.map((m, i) => {
+    const cells = PERM_COLS.map(c => {
+      const on = (_permMatrix[m.k] && _permMatrix[m.k][c.k]) ? 1 : 0;
+      return `<td style="text-align:center"><input type="checkbox" ${on?'checked':''} onchange="_permToggle('${m.k}','${c.k}',this.checked)" style="accent-color:var(--accent);width:15px;height:15px"/></td>`;
+    }).join('');
+    const gcell = i === 0
+      ? `<td rowspan="${g.menus.length}" style="background:rgba(250,204,21,.10);color:#facc15;font-weight:600;text-align:center;vertical-align:middle">${g.group}</td>`
+      : '';
+    return `<tr>${gcell}<td style="white-space:normal;min-width:110px">${m.label}</td>${cells}</tr>`;
+  }).join('')).join('');
+  wrap.innerHTML = `<div class="table-wrap"><table style="table-layout:fixed;width:100%;min-width:0">
+    <colgroup><col style="width:60px"/><col/><col style="width:86px"/><col style="width:86px"/><col style="width:86px"/><col style="width:86px"/></colgroup>
+    <thead><tr><th style="text-align:center">分组</th><th style="text-align:left">菜单</th>${colHead}</tr></thead>
+    <tbody>${rows}</tbody></table></div>`;
+}
+
+function _openPermModal(username) {
+  const u = _getUsers().find(x => x.username === username);
+  if (!u) return;
+  _permEditing = username;
+  _permMatrix  = effPerms(u);          /* 角色预设 + 已有自定义覆盖 */
+  const t = document.getElementById('permModalTitle');
+  if (t) t.textContent = `编辑权限 — ${username}（${ROLE_LABELS[u.role]||u.role}）`;
+  _renderPermMatrix();
+  const m = document.getElementById('permModal');
+  if (m) m.style.display = 'flex';
+}
+function _closePermModal() {
+  const m = document.getElementById('permModal');
+  if (m) m.style.display = 'none';
+  _permEditing = null; _permMatrix = null;
+}
+function _permToggle(menu, col, on) {
+  if (!_permMatrix) return;
+  if (!_permMatrix[menu]) _permMatrix[menu] = { v:0, e:0, a:0, m:0 };
+  _permMatrix[menu][col] = on ? 1 : 0;
+}
+function _permSetCol(col, on) {
+  if (!_permMatrix) return;
+  PERM_MENU_KEYS.forEach(k => { if (_permMatrix[k]) _permMatrix[k][col] = on ? 1 : 0; });
+  _renderPermMatrix();
+}
+function _permResetRole() {
+  const u = _getUsers().find(x => x.username === _permEditing);
+  _permMatrix = JSON.parse(JSON.stringify(ROLE_PERM_MATRIX[u?.role] || ROLE_PERM_MATRIX.viewer));
+  _renderPermMatrix();
+  showToast('已按角色预设重置，保存后生效', 'info');
+}
+function _savePerms() {
+  const users = _getUsers();
+  const u = users.find(x => x.username === _permEditing);
+  if (u) {
+    u.perms = _permMatrix;
+    _saveUsers(users);
+    showToast('✓ 权限已保存', 'success');
+  }
+  _closePermModal();
+  applyPermissions();
   renderUsersPage();
 }
 
@@ -678,8 +958,8 @@ const PAGE_TITLES = {
 };
 
 function showPage(name) {
-  /* 账号管理越权防护：非 admin 调用 users 页面，强制返回仪表板 */
-  if (name === 'users' && !can('manageUsers')) {
+  /* 越权防护：按权限矩阵「查看」列判断，无权访问则强制返回仪表板 */
+  if (!canView(name)) {
     showToast('当前账号无权限访问', 'error');
     name = 'dashboard';
   }
@@ -1733,7 +2013,7 @@ async function refreshRecordsPage() {
 
   try {
     const apiBase = (location.pathname.replace(/[^/]*$/, '') || '/').replace(/\/$/, '');
-    const res = await fetch(apiBase + '/api/bootstrap', { cache: 'no-store' });
+    const res = await fetch(apiBase + '/api/bootstrap?company=' + getCompany(), { cache: 'no-store' });
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const data = await res.json();
     if (!Array.isArray(data.records)) throw new Error('服务器返回数据格式不正确');
@@ -4425,6 +4705,7 @@ function _qcApiBase() {
 
 function _recordsExportQuery() {
   const params = new URLSearchParams();
+  params.set('company', getCompany());   /* 导出当前厂区的数据 */
   const search = getVal('searchInput');
   const result = getVal('filterResult');
   const from = getVal('filterDateFrom');
@@ -4466,7 +4747,7 @@ function exportCSV() {
     const url  = URL.createObjectURL(blob);
     const a    = document.createElement('a');
     a.href = url;
-    a.download = `东莞兴信验货明细_${todayStr()}.csv`;
+    a.download = `${getCompanyName()}验货明细_${todayStr()}.csv`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);

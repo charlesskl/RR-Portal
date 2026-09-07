@@ -16,16 +16,36 @@
   <script src="vendor/jspdf.umd.min.js"></script>
   <script src="vendor/html2canvas.min.js"></script>
   <script src="vendor/tesseract/tesseract.min.js"></script>
+  <style>
+    /* 厂区/子公司卡片（登录页，两级选择） */
+    .company-hint { font-size:12px; color:var(--text-dim); margin-bottom:12px; overflow:hidden; }
+    .company-back { color:var(--accent, #4f8cff); text-decoration:none; font-size:12px; }
+    .company-back:hover { text-decoration:underline; }
+    .company-cards { display:flex; flex-wrap:wrap; gap:12px; margin-bottom:8px; }
+    .company-card { flex:1 1 30%; min-width:118px; padding:0; border:1px solid var(--border); border-radius:12px;
+      overflow:hidden; cursor:pointer; background:var(--bg-card); text-align:center;
+      transition:transform .15s, box-shadow .15s; }
+    .company-card:hover { transform:translateY(-2px); box-shadow:0 6px 18px rgba(0,0,0,.25); }
+    .company-card-top { height:44px; background:var(--cc, #4f8cff); }
+    .company-card-body { padding:12px 8px 14px; }
+    .company-card-icon { font-size:20px; margin-top:-28px; margin-bottom:4px; }
+    .company-card-name { font-size:14px; font-weight:700; color:var(--text-hi); }
+    .company-card-sub { font-size:11px; color:var(--text-muted); margin-top:4px; min-height:14px; }
+    .user-badge-company { margin-right:6px; padding:2px 8px; border-radius:6px; font-size:12px;
+      background:rgba(79,140,255,.15); color:var(--accent, #4f8cff); font-weight:600; }
+  </style>
 </head>
 <body>
 <div id="loginScreen" style="display:flex;align-items:center;justify-content:center;
   min-height:100vh;background:var(--bg-body);padding:20px;box-sizing:border-box">
-  <div style="width:380px;max-width:100%">
+  <div style="width:460px;max-width:100%">
     <div style="text-align:center;margin-bottom:32px">
       <div style="font-size:28px;font-weight:800;color:var(--text-hi);letter-spacing:2px">兴信 QMS</div>
       <div style="font-size:13px;color:var(--text-dim);margin-top:6px">品质管理系统</div>
     </div>
     <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:32px">
+      <div id="companySelector"></div>
+      <div id="loginFields">
       <h3 style="margin:0 0 24px;font-size:16px;color:var(--text-hi);text-align:center">账号登录</h3>
       <div style="margin-bottom:16px">
         <label class="form-label">用户名</label>
@@ -41,9 +61,10 @@
            margin-bottom:12px;padding:8px 12px;background:rgba(255,61,90,.08);border-radius:6px"></div>
       <button class="btn-primary" style="width:100%;padding:11px;font-size:15px"
               onclick="login()">登 录</button>
+      </div>
     </div>
     <div style="text-align:center;margin-top:16px;font-size:11px;color:var(--text-muted)">
-      东莞兴信塑胶制品有限公司 · 品质管理部
+      兴信塑胶 · 品质管理部（东莞 / 河源 / 湖南 · 各子公司数据独立）
     </div>
   </div>
 </div>

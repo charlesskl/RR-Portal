@@ -8,8 +8,9 @@ name: ECS Disk Ops
 #                      云盘 70GiB 但分区只用 40G 时用它把剩余 ~30GB 扩进来
 # 用于 indo-shipping 上线前腾磁盘（需 >=10GB 空闲）。
 #   mode=remove-retired-apps —— 一次性清理已下线系统的服务器残留：
-#                      删除已停止的 penyou/pi-outsource 容器与镜像，以及
-#                      /opt/rr-portal 下两个 app 目录的残留数据（数据库/上传）。
+#                      删除已停止的 penyou/pi-outsource/stitch-cost 容器与镜像、
+#                      /opt/rr-portal 下对应 app 目录的残留数据（数据库/上传），
+#                      并 DROP SCHEMA stitch_cost CASCADE（共享 Postgres 中的库表）。
 #                      不可逆；仅在对应退役 PR 部署完成后执行。
 
 on:
@@ -139,15 +140,15 @@ jobs:
 
             elif [ "$MODE" = "remove-retired-apps" ]; then
               echo "=================== REMOVE-RETIRED-APPS ==================="
-              echo "-- 目标：penyou（喷油部生产管理系统）、pi-outsource（啤机外发系统）--"
+              echo "-- 目标：penyou（喷油部生产管理系统）、pi-outsource（啤机外发系统）、stitch-cost（车缝核价对比系统）--"
               echo "-- 容器现状（部署后应已不存在）--"
-              docker ps -a --format '{{.Names}}\t{{.Status}}' | grep -Ei 'penyou|pi-outsource' || echo "  (无容器残留)"
+              docker ps -a --format '{{.Names}}\t{{.Status}}' | grep -Ei 'penyou|pi-outsource|stitch-cost' || echo "  (无容器残留)"
               echo "-- 删除残留容器（如有）--"
-              docker rm -f rr-portal-penyou-1 rr-portal-pi-outsource-1 2>/dev/null || echo "  (无需删除)"
+              docker rm -f rr-portal-penyou-1 rr-portal-pi-outsource-1 rr-portal-stitch-cost-1 2>/dev/null || echo "  (无需删除)"
               echo "-- 删除残留镜像 --"
-              docker images --format '{{.Repository}}:{{.Tag}}' | grep -Ei 'penyou|pi-outsource' | xargs -r docker rmi -f || true
+              docker images --format '{{.Repository}}:{{.Tag}}' | grep -Ei 'penyou|pi-outsource|stitch-cost' | xargs -r docker rmi -f || true
               echo "-- 删除数据目录（数据库/上传，git pull 只删了跟踪文件，未跟踪的数据还留着）--"
-              for d in "apps/生产部/喷油部生产管理系统" "apps/生产部/啤机外发系统"; do
+              for d in "apps/生产部/喷油部生产管理系统" "apps/生产部/啤机外发系统" "apps/PMC跟仓管/车缝核价对比系统"; do
                 if [ -d "/opt/rr-portal/$d" ]; then
                   du -sh "/opt/rr-portal/$d" 2>/dev/null || true
                   rm -rf "/opt/rr-portal/$d"
@@ -156,9 +157,12 @@ jobs:
                   echo "  /opt/rr-portal/$d 不存在（已干净）"
                 fi
               done
+              echo "-- 删除 stitch_cost schema（共享 Postgres，只动这个 schema）--"
+              docker exec rr-portal-db-1 psql -U rrportal -d rrportal -c "DROP SCHEMA IF EXISTS stitch_cost CASCADE;" && echo "  stitch_cost schema 已删除" || echo "  [WARN] schema 删除失败（db 容器名不符？），请手工核对"
               echo "-- 复核 --"
-              docker ps -a --format '{{.Names}}' | grep -Ei 'penyou|pi-outsource' && echo "[FAIL] 容器仍在" || echo "  容器: 无残留"
-              ls -d /opt/rr-portal/apps/生产部/喷油部生产管理系统 /opt/rr-portal/apps/生产部/啤机外发系统 2>/dev/null && echo "[FAIL] 目录仍在" || echo "  目录: 无残留"
+              docker ps -a --format '{{.Names}}' | grep -Ei 'penyou|pi-outsource|stitch-cost' && echo "[FAIL] 容器仍在" || echo "  容器: 无残留"
+              ls -d /opt/rr-portal/apps/生产部/喷油部生产管理系统 /opt/rr-portal/apps/生产部/啤机外发系统 "/opt/rr-portal/apps/PMC跟仓管/车缝核价对比系统" 2>/dev/null && echo "[FAIL] 目录仍在" || echo "  目录: 无残留"
+              docker exec rr-portal-db-1 psql -U rrportal -d rrportal -tAc "SELECT COUNT(*) FROM information_schema.schemata WHERE schema_name='stitch_cost'" 2>/dev/null | grep -q '^0$' && echo "  schema: 无残留" || echo "  schema: 已删或无法确认"
               echo "[OK] remove-retired-apps 完成"
 
             else

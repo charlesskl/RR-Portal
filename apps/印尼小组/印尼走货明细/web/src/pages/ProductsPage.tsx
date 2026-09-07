@@ -263,6 +263,7 @@ export default function ProductsPage() {
       }
       message.success(`已识别：${r.moldings.length} 个模具 / ${r.materials.length} 个物料 — 检查后点 💾 保存`)
     } catch (e: any) {
+      console.error('工程资料导入失败', e)
       message.error('导入失败: ' + (e?.message ?? e))
     }
   }

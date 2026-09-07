@@ -2,6 +2,7 @@
 // Ported from legacy 印尼走货明细生成系统.html importEngineeringFile() + extractSheetImages().
 
 import JSZip from 'jszip'
+import { Buffer } from 'buffer'
 import type { Material, Molding, MoldingPart } from '../api/client'
 import { translatePartName } from './partTranslate'
 
@@ -160,6 +161,12 @@ export interface EngineeringImportResult {
   materials: Material[]
 }
 
+export function isZipWorkbookBuffer(buffer: ArrayBuffer): boolean {
+  if (buffer.byteLength < 2) return false
+  const signature = new Uint8Array(buffer, 0, 2)
+  return signature[0] === 0x50 && signature[1] === 0x4b
+}
+
 const isValidName = (s: string) => !!s && s.length >= 1 && !/^[\d.\-_+]+$/.test(s) && /[一-鿿A-Za-z]/.test(s)
 
 function stripCodePrefix(s: string, code: string): string {
@@ -207,10 +214,24 @@ export function inferMaterialCategory(s: string): string {
 
 export async function importEngineeringFile(file: File, opts?: { hsDict?: HsDictEntry[] }): Promise<EngineeringImportResult> {
   const hsDict = opts?.hsDict
+  // SheetJS 在浏览器中读取大型 OLE2 工作簿时，默认会把每个字节展开成普通 JS 数组。
+  // 100MB 以上的工程资料会因此触发 `Invalid array length`。提供 Buffer 实现并直接以
+  // 二进制缓冲读取，可保持为紧凑的 Uint8Array，同时也兼容真正的 .xlsx 文件。
+  const runtimeGlobal = globalThis as unknown as {
+    Buffer?: typeof Buffer
+    process?: { versions?: { node?: string } }
+  }
+  if (!runtimeGlobal.Buffer) runtimeGlobal.Buffer = Buffer
+  // SheetJS 0.20 只有在 Buffer 与 process.versions.node 同时存在时才走
+  // Buffer.concat 路径。浏览器没有 process，因此需提供最小运行标记。
+  if (!runtimeGlobal.process?.versions?.node) runtimeGlobal.process = { versions: { node: 'browser' } }
   const XLSX = await import('xlsx')
   const ab = await file.arrayBuffer()
-  const wb = XLSX.read(ab, { type: 'array' })
-  const zip = await JSZip.loadAsync(ab).catch(() => null)  // 用于提取内嵌图片
+  const wb = XLSX.read(Buffer.from(ab), { type: 'buffer' })
+  // 仅 OOXML (.xlsx，PK 开头) 才能按 zip 提取内嵌图片。
+  // 部分 WPS 文件虽然扩展名是 .xlsx，实际仍是 OLE2 (.xls，D0 CF 开头)；
+  // 直接交给 JSZip 会误识别文件内部的 PK 字节，并可能抛出 Invalid array length。
+  const zip = isZipWorkbookBuffer(ab) ? await JSZip.loadAsync(ab).catch(() => null) : null
 
   const findSheet = (kws: string[]) => wb.SheetNames.find(n => kws.some(k => n.includes(k)))
   const snMold = findSheet(['排模'])
@@ -378,7 +399,8 @@ export async function importEngineeringFile(file: File, opts?: { hsDict?: HsDict
 
   // -------- 3. 外购清单 --------
   if (snExt) {
-    const grid = XLSX.utils.sheet_to_json<any[]>(wb.Sheets[snExt], { header: 1, defval: null })
+    // 使用 Excel 显示值读取外购清单，避免 01020100 这类物料编码被当作数字后丢失前导 0。
+    const grid = XLSX.utils.sheet_to_json<any[]>(wb.Sheets[snExt], { header: 1, defval: null, raw: false })
     let hdrIdx = 3
     for (let r = 0; r < Math.min(10, grid.length); r++) {
       const joined = (grid[r] || []).map(c => String(c ?? '').replace(/\s+/g, '')).join('|')
@@ -392,6 +414,7 @@ export async function importEngineeringFile(file: File, opts?: { hsDict?: HsDict
     const cCat      = colOf('类别', 'Jenis')
     const cName     = colOf('物料名称', 'MaterialName')
     const cEn       = colOf('英文名', 'Englishname')
+    const cMaterialCode = colOf('物料编码', 'MaterialCode', 'KodeMaterial')
     const cSpec     = colOf('规格', 'Spesifikasi')
     const cSupplier = colOf('供应商', 'Supplier')
     const cWt       = colOf('单重', 'Berat')
@@ -430,6 +453,7 @@ export async function importEngineeringFile(file: File, opts?: { hsDict?: HsDict
         item_no: code,
         name_zh: fullName,
         name_en: fullEn,
+        material_code: cMaterialCode >= 0 ? String(row[cMaterialCode] ?? '').trim() : '',
         spec: cSpec >= 0 ? String(row[cSpec] ?? '').trim() : '',
         category: cat,
         supplier: cSupplier >= 0 ? String(row[cSupplier] ?? '').trim() : '',

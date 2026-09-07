@@ -7,12 +7,16 @@ name: ECS Disk Ops
 #   mode=grow-disk  —— 把根分区/文件系统撑满整块云盘（growpart + resize2fs/xfs_growfs）
 #                      云盘 70GiB 但分区只用 40G 时用它把剩余 ~30GB 扩进来
 # 用于 indo-shipping 上线前腾磁盘（需 >=10GB 空闲）。
+#   mode=remove-retired-apps —— 一次性清理已下线系统的服务器残留：
+#                      删除已停止的 penyou/pi-outsource 容器与镜像，以及
+#                      /opt/rr-portal 下两个 app 目录的残留数据（数据库/上传）。
+#                      不可逆；仅在对应退役 PR 部署完成后执行。
 
 on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "diagnose / prune-safe / grow-disk / indo-stop(临时停indo腾内存)"
+        description: "diagnose / prune-safe / grow-disk / indo-stop(临时停indo腾内存) / remove-retired-apps(清理已下线系统残留)"
         type: choice
         required: true
         default: diagnose
@@ -21,6 +25,7 @@ on:
           - prune-safe
           - grow-disk
           - indo-stop
+          - remove-retired-apps
 
 permissions:
   contents: read
@@ -131,6 +136,30 @@ jobs:
               sleep 3
               echo "-- 停止后 free --"; free -m | awk '/^Mem:/{print "  available: "$7" MB (需 >=2500 才能过 indo 预检)"}'
               echo "[OK] indo-stop 完成。立即触发一次 Deploy to Cloud，它会重新拉起 indo（含重设密码 + 持久化 transport）。"
+
+            elif [ "$MODE" = "remove-retired-apps" ]; then
+              echo "=================== REMOVE-RETIRED-APPS ==================="
+              echo "-- 目标：penyou（喷油部生产管理系统）、pi-outsource（啤机外发系统）--"
+              echo "-- 容器现状（部署后应已不存在）--"
+              docker ps -a --format '{{.Names}}\t{{.Status}}' | grep -Ei 'penyou|pi-outsource' || echo "  (无容器残留)"
+              echo "-- 删除残留容器（如有）--"
+              docker rm -f rr-portal-penyou-1 rr-portal-pi-outsource-1 2>/dev/null || echo "  (无需删除)"
+              echo "-- 删除残留镜像 --"
+              docker images --format '{{.Repository}}:{{.Tag}}' | grep -Ei 'penyou|pi-outsource' | xargs -r docker rmi -f || true
+              echo "-- 删除数据目录（数据库/上传，git pull 只删了跟踪文件，未跟踪的数据还留着）--"
+              for d in "apps/生产部/喷油部生产管理系统" "apps/生产部/啤机外发系统"; do
+                if [ -d "/opt/rr-portal/$d" ]; then
+                  du -sh "/opt/rr-portal/$d" 2>/dev/null || true
+                  rm -rf "/opt/rr-portal/$d"
+                  echo "  已删除 /opt/rr-portal/$d"
+                else
+                  echo "  /opt/rr-portal/$d 不存在（已干净）"
+                fi
+              done
+              echo "-- 复核 --"
+              docker ps -a --format '{{.Names}}' | grep -Ei 'penyou|pi-outsource' && echo "[FAIL] 容器仍在" || echo "  容器: 无残留"
+              ls -d /opt/rr-portal/apps/生产部/喷油部生产管理系统 /opt/rr-portal/apps/生产部/啤机外发系统 2>/dev/null && echo "[FAIL] 目录仍在" || echo "  目录: 无残留"
+              echo "[OK] remove-retired-apps 完成"
 
             else
               echo "[OK] diagnose 完成（只读，未改动任何东西）"

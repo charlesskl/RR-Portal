@@ -298,36 +298,6 @@ services:
     networks:
       - platform-net
 
-  penyou:
-    build:
-      context: ./apps/生产部/喷油部生产管理系统
-      dockerfile: Dockerfile
-      args:
-        BASE_PATH: /penyou/
-    environment:
-      - PORT=3100
-      - DATA_PATH=/app/data
-      - NODE_ENV=production
-      # 阿里云百炼 (DashScope/Qwen-VL) — AI 订单图片识别用；和 paiji 共用同一把 Bailian key
-      - DASHSCOPE_API_KEY=${PENYOU_BAILIAN_API_KEY:-}
-    volumes:
-      - ./apps/生产部/喷油部生产管理系统/data:/app/data
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3100/api/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-    mem_limit: 512m
-    memswap_limit: 512m
-    restart: unless-stopped
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
-    networks:
-      - platform-net
-
   sprayplan:
     build:
       context: ./apps/喷油部/喷油排期系统
@@ -497,34 +467,6 @@ services:
     networks:
       - platform-net
 
-  pi-outsource:
-    build:
-      context: ./apps/生产部/啤机外发系统
-      dockerfile: Dockerfile
-      args:
-        BASE_PATH: /pi-outsource/
-    environment:
-      - PORT=3010
-      - DATA_PATH=/app/data
-      - NODE_ENV=production
-      - BAILIAN_API_KEY=${PI_OUTSOURCE_BAILIAN_API_KEY:-}
-    volumes:
-      - ./apps/生产部/啤机外发系统/server/data:/app/data
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3010/api/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-    mem_limit: 512m
-    memswap_limit: 512m
-    restart: unless-stopped
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
-    networks:
-      - platform-net
 
   production-plan:
     build:

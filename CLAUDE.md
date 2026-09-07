@@ -38,8 +38,6 @@ RR-Portal/
 │   │   └── 车缝核价对比系统/        — stitch-cost (ASP.NET Core + React + PostgreSQL)
 │   ├── 生产部/
 │   │   ├── 注塑啤机排产系统/        — paiji (Node.js + React)
-│   │   ├── 喷油部生产管理系统/      — penyou (Node.js + React)
-│   │   ├── 啤机外发系统/            — pi-outsource (Node.js + React)
 │   │   ├── 生产计划管理系统/        — production-plan (Node.js + React + Luckysheet)
 │   │   └── 品质管理系统/            — qc (Node.js, 兴信 QMS 来料/成品验货 + AQL + 阿里百炼AI识别, node:sqlite)
 │   ├── 喷油部/
@@ -213,9 +211,7 @@ curl http://localhost:<port>/health
 | zouhuo | Node.js | 3002 | /zouhuo/ |
 | jiangping | Flask | 5001 | /jiangping/ |
 | paiji | Node.js | 3000 | /paiji/ |
-| penyou 喷油部生产管理系统 | Node.js/React | 3100 | /penyou/ |
 | sprayplan 喷油排期系统 | Next.js/ASP.NET Core | 8400 | /sprayplan/ |
-| pi-outsource 啤机外发系统 | Node.js/React | 3010 | /pi-outsource/ |
 | production-plan 生产计划管理系统 | Node.js | 8080 | /production-plan/ |
 | qc 品质管理系统 | Node.js (node:sqlite) | 3400 | /qc/ |
 | zuru-master-schedule (ZURU总排期入单) | Flask | 5003 | /zuru-master/ |
@@ -443,7 +439,7 @@ const data = JSON.parse(fs.readFileSync('data/data.json'));
 
 - [ ] **部门 plugin-list 区块**：在所属部门的 `<div class="plugin-list">` 里加一项 `<div class="plugin-item">`，含 `<div class="plugin-dot gray" id="<svc>Dot">` + `<span class="plugin-name">中文名</span>`
 - [ ] **详情卡片**：在主体加一个 `<div class="detail-plugin-card">` 块（参考已有的 paiji/baojia 写法），含 icon、名称、描述、feature-grid、状态点 `id="<svc>DetailDot"`、`<a href="/<svc>/" target="_blank">打开系统</a>` 按钮
-- [ ] **健康检查 JS 数组**：在 `var checks = [ ... ]` 里加一条 `{ name: '<svc>', url: '/<svc>/health' 或 '/<svc>/api/health', dot: '<svc>Dot', detailDot: '<svc>DetailDot' }`。**先 curl 确认 health URL 是 /health 还是 /api/health**（不同 app 不一样，penyou 是 /api/health，多数其他 app 是 /health）
+- [ ] **健康检查 JS 数组**：在 `var checks = [ ... ]` 里加一条 `{ name: '<svc>', url: '/<svc>/health' 或 '/<svc>/api/health', dot: '<svc>Dot', detailDot: '<svc>DetailDot' }`。**先 curl 确认 health URL 是 /health 还是 /api/health**（不同 app 不一样，qc 是 /api/health，多数其他 app 是 /health）
 - [ ] 部署后用 `curl -sfu 'rr:leo123456' http://8.148.146.194/ | grep <svc>` 确认实际服务的 HTML 里有新内容（不要只信本地文件 —— bind-mount inode 坑见 Learnings 2026-04-23）
 
 ### 7. 数据库 Schema（plugin_sdk 插件）
@@ -472,9 +468,7 @@ const data = JSON.parse(fs.readFileSync('data/data.json'));
 | automation-equipment | 自动化设备统计 | Engineering | Standalone (Node.js + Vite/React) | /automation-equipment/ | (PR #556) |
 | jiangping | 采购订单管理系统 | PMC跟仓管 | Standalone (Python/Flask) | /jiangping/ | https://github.com/fxxaxxx/jiangping |
 | paiji | AI注塑啤机排产系统 | 生产部 | Standalone (Node.js) | /paiji/ | https://github.com/duanlei10/234 |
-| penyou | 喷油部生产管理系统 | 生产部 | Standalone (Node.js/React) | /penyou/ | (PR #100) |
 | sprayplan | 喷油排期系统 | 喷油部 | Standalone (Next.js/ASP.NET Core) | /sprayplan/ | https://github.com/josie-peng/SprayPlan |
-| pi-outsource | 啤机外发系统 | 生产部 | Standalone (Node.js/React) | /pi-outsource/ | (PR #124) |
 | production-plan | 生产计划管理系统 | 生产部 | Standalone (Node.js/React + Luckysheet) | /production-plan/ | (PR #63) |
 | qc | 品质管理系统 (兴信 QMS) | 生产部 | Standalone (Node.js, 内置 node:sqlite + 阿里百炼 qwen-vl AI 识别) | /qc/ | — |
 | zuru-master-schedule | ZURU总排期入单 | 业务部 | Standalone (Python/Flask) | /zuru-master/ | (PR #59) |

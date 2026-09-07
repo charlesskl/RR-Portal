@@ -171,7 +171,6 @@ declare -A PATH_MAP=(
   ["zouhuo"]="/zouhuo/health"
   ["paiji"]="/paiji/health"
   ["peise"]="/peise/health"
-  ["penyou"]="/penyou/api/health"
   ["sprayplan"]="/sprayplan/api/health"
   ["jiangping"]="/jiangping/health"
   ["baojia"]="/baojia/health"
@@ -181,7 +180,6 @@ declare -A PATH_MAP=(
   ["zuru-order-system"]="/zuru-order-system/health"
   ["figure-mold-cost-system"]="/figure-mold-cost-system/health"
   ["huadeng"]="/huadeng/health"
-  ["pi-outsource"]="/pi-outsource/api/health"
   ["production-plan"]="/production-plan/health"
   ["hy-schedule-system"]="/hy-schedule/health"
 )

@@ -208,7 +208,7 @@ jobs:
             echo "[FAIL] ${ep} (HTTP $status after 3 attempts)"
             return 1
           }
-          # Updated 2026-05-20: 补齐新部署 service (penyou/pi-outsource/production-plan/
+          # Updated 2026-05-20: 补齐新部署 service (production-plan/
           # tomy-paiqi/zuru-order-system/zuru-master/peise/huadeng) 的 health endpoint，
           # 之前 missing 这些 → 单 service deploy 挂了也不会被 health-check 抓到。
           for ENDPOINT in \
@@ -227,8 +227,6 @@ jobs:
               /huadeng/health \
               /peise/health \
               /qc/api/health \
-              /penyou/api/health \
-              /pi-outsource/api/health \
               /production-plan/health \
               /shipping/health \
               /factory-review/health \

@@ -39,6 +39,19 @@ const SUBTOTAL_FONT = COLORS.navy;
 // 工具
 const num = (v) => Number(v) || 0;
 const sum = (arr, fn) => arr.reduce((a, r) => a + (fn(r) || 0), 0);
+function matchFreightByName(name) {
+  const text = String(name || '');
+  const isIndo = /印尼|indo|indonesia/i.test(text);
+  const isYT = /盐田|YT/i.test(text);
+  const isHK = /香港|HK/i.test(text);
+  const prefix = isIndo ? 'indo' : (isYT ? 'yt' : (isHK ? 'hk' : null));
+  if (!prefix) return null;
+  if (/40\s*柜|40['"\s]*[尺呎]?|40hq/i.test(text)) return `${prefix}40`;
+  if (/20\s*柜|20['"\s]*[尺呎]?|20hq/i.test(text)) return `${prefix}20`;
+  if (/10\s*吨/.test(text)) return `${prefix}10t`;
+  if (/5\s*吨/.test(text)) return `${prefix}5t`;
+  return null;
+}
 const blowUsage = row => row && row.usage_qty !== undefined && row.usage_qty !== null && row.usage_qty !== ''
   ? num(row.usage_qty)
   : 1;
@@ -532,6 +545,8 @@ async function buildWorkbook({ quote, sections }) {
   const panelStartCol = Math.max(6, ((sales.shipping && sales.shipping.scenarios) || []).length + 3);
   const panelStartRow = row + 1;
   const freightPanelEnd = renderFreightScenarioPanel(ws, panelStartRow, eng, sales, subRefs, panelStartCol);
+  // 侧栏在此时才生成各场景的每 PCS 运费引用，回填后再渲染左侧算价公式。
+  shipOpts.freightCells = subRefs.freightCells;
   const moldPanelEnd = renderMoldCostsPanel(
     ws,
     freightPanelEnd + 2,
@@ -1054,7 +1069,10 @@ function renderShippingBlock(ws, row, shipping, header, fxRH, refs = {}) {
   // 运费场景 freightMap key → 运费场景表行名（供引用 每PCS运费率 E 列）
   const KEY_TO_NAME = { hk40: 'HK 40柜', yt40: 'YT 40柜', hk20: 'HK 20柜', yt20: 'YT 20柜', hk10t: 'HK 10吨车', yt10t: 'YT 10吨车', hk5t: 'HK 5吨车', yt5t: 'YT 5吨车' };
   const fcells = refs.freightCells || {};
-  const rateCellOf = (x) => fcells[KEY_TO_NAME[x._freight_matched]] || null;
+  const rateCellOf = (x) => {
+    const key = x._freight_matched || matchFreightByName(x.name);
+    return fcells[KEY_TO_NAME[key]] || null;
+  };
   // 每行的预计算值（用作公式 fallback result）
   const rows = sc.map(x => {
     // 出货底价：出厂价列 = 码点后价 N(实时)；其他场景 = 出货底价 Q(实时)

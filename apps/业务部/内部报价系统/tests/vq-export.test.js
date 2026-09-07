@@ -35,6 +35,28 @@ test('TOMY VQ converts internal electronic prices from HKD to USD', () => {
   assert.equal(data.electronicItems[0].unit_price_usd, 1);
 });
 
+test('TOMY VQ converts imported RMB and USD supplier prices into HKD', () => {
+  const data = sectionsToData({
+    quote: { id: 332, quote_no: 'TOMY-SUPPLIER-PRICE', product_name: 'Toy', customer: 'TOMY', qty: 5000 },
+    sections: [
+      {
+        dept: 'sales',
+        payload_json: JSON.stringify({ header: { fx_rmb_hkd: 0.85, fx_hkd_usd: 7.8 } }),
+      },
+      {
+        dept: 'engineering',
+        payload_json: JSON.stringify({
+          hardware: [{ name: 'T钉', qty: 1, unit_price_rmb: 23, source_currency: 'RMB' }],
+          packaging_materials: [{ name: '白色尼龙绳', qty: 1, unit_price_usd: 0.5, source_currency: 'USD' }],
+        }),
+      },
+    ],
+  });
+
+  assert.equal(data.bodyAccessories[0].unit_price, 23 / 0.85 * 1.08);
+  assert.equal(data.packagingItems[0].new_price, 0.5 * 7.8 * 1.08);
+});
+
 test('TOMY VQ carries named customer-supplied products into supplemental quote rows', () => {
   const data = sectionsToData({
     quote: {

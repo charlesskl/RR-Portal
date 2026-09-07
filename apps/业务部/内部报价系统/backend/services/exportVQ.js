@@ -28,6 +28,21 @@ const HKD_LABEL_FMT = '"HK$"#,##0.00';
 // ─── Helpers（搬运自报价系统 excel-exporter.js）──────────────────────────────
 
 const num = (v) => Number(v) || 0;
+function hasRmbPrice(row) {
+  return row && row.unit_price_rmb !== undefined && row.unit_price_rmb !== null && row.unit_price_rmb !== '';
+}
+function hasUsdPrice(row) {
+  return row && row.unit_price_usd !== undefined && row.unit_price_usd !== null && row.unit_price_usd !== '';
+}
+function unitPriceHkd(row, fxRH, fxHU) {
+  const rmbHkd = num(fxRH) || 0.85;
+  const usdHkd = num(fxHU) || 7.8;
+  if (hasUsdPrice(row) && (String(row.source_currency || '').toUpperCase() === 'USD' || !hasRmbPrice(row))) {
+    return num(row.unit_price_usd) * usdHkd;
+  }
+  if (hasRmbPrice(row)) return num(row.unit_price_rmb) / rmbHkd;
+  return num(row && row.unit_price);
+}
 const sewingMarkup = (row) => {
   if (!row || row.markup === undefined || row.markup === null || row.markup === '') return SEWING_DEFAULT_MARKUP;
   return num(row.markup) || SEWING_DEFAULT_MARKUP;
@@ -895,7 +910,7 @@ function sectionsToData({ quote, sections }) {
     description: r.name || '',
     eng_name: customerEnglish(r.eng_name || r.name || ''),
     usage_qty: num(r.qty) || 1,
-    unit_price: num(r.unit_price) * SEWING_DEFAULT_MARKUP,
+    unit_price: unitPriceHkd(r, fxRH, fxHU) * SEWING_DEFAULT_MARKUP,
   }));
 
   // 装饰 / 喷油（BCD DECORATION 段）：次数取喷油十工序数量合计，金额取喷油完整港币值。
@@ -979,7 +994,7 @@ function sectionsToData({ quote, sections }) {
     remark_eng: customerEnglish(r.spec_eng || r.note_eng || r.spec || r.note || ''),
     moq: r.moq != null ? num(r.moq) : null,
     quantity: num(r.qty) || 1,
-    new_price: num(r.unit_price) * SEWING_DEFAULT_MARKUP,
+    new_price: unitPriceHkd(r, fxRH, fxHU) * SEWING_DEFAULT_MARKUP,
   }));
   if (!packagingItems.some(i => i.name === 'Accessories')) {
     packagingItems.push({ name: 'Accessories', quantity: 1, new_price: 0.15 });
@@ -1027,7 +1042,7 @@ function sectionsToData({ quote, sections }) {
     moq: item.moq != null ? num(item.moq) : (num(quote.qty) || 2500),
     usage_qty: num(item.qty) || 1,
     // 电池直接使用内部报价的原始 HKD 单价，不乘包装材料 1.08 码点。
-    unit_price: num(item.unit_price),
+    unit_price: unitPriceHkd(item, fxRH, fxHU),
     preserve_unit_price: true,
   }));
   const customerSuppliedVqItems = ((sales.shipping && sales.shipping.customer_supplied_products) || [])

@@ -1242,6 +1242,33 @@ test('freight scenarios and production mold costs are exported beside quotation 
   assert.ok(cells['测试费分摊（总额 USD 2500，按 10000 套分摊）'].row > cells['生产模具名称'].row);
 });
 
+test('shipping export matches freight formulas by scenario name without temporary UI fields', async () => {
+  const workbook = await buildWorkbook({
+    quote: { quote_no: 'SHIP-FORMULA', product_name: '运费公式', qty: 1000, factory_code: 'qingxi' },
+    sections: [{ dept: 'sales', payload_json: JSON.stringify({
+      header: { fx_rmb_hkd: 0.85, fx_hkd_usd: 7.8 },
+      freight_calc: { cap_40: 1980, cap_5t: 750, yt40: 7200, yt5t: 11000 },
+      shipping: {
+        freight_pct: 48,
+        lifting_pct: 52,
+        scenarios: [{ name: '盐田40柜' }, { name: '盐田5吨车' }],
+      },
+    }) }],
+  });
+  const worksheet = workbook.getWorksheet('报价明细');
+  let titleRow = 0;
+  let yt40Row = 0;
+  let yt40Col = 0;
+  worksheet.eachRow(row => row.eachCell(cell => {
+    if (cell.value === '十一、出货价算价（多场景）') titleRow = row.number;
+    if (cell.value === 'YT 40柜') { yt40Row = row.number; yt40Col = cell.col; }
+  }));
+  assert.ok(titleRow && yt40Row && yt40Col);
+  const rateRef = worksheet.getCell(yt40Row, yt40Col + 4).address;
+  assert.equal(worksheet.getCell(titleRow + 3, 3).value.formula, `${rateRef}*48/100`);
+  assert.equal(worksheet.getCell(titleRow + 4, 3).value.formula, `${rateRef}*52/100`);
+});
+
 test('customer-supplied products are named separately and added to exported customer price', async () => {
   const workbook = await buildWorkbook({
     quote: { quote_no: 'CUSTOMER-PRODUCTS', product_name: '客供成品测试', qty: 1000 },

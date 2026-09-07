@@ -2624,6 +2624,21 @@ body.theme-light textarea {
   background: #ffffff !important;
   border-color: #cbd5e1 !important;
 }
+/* 复选框例外：上面 input 通配规则的 !important 会把勾选态蓝底盖成白色，导致白勾隐形，这里强制恢复 */
+body.theme-light input.row-check,
+body.theme-light input.check-all {
+  background: #ffffff !important;
+  border-color: #d1d5db !important;
+}
+body.theme-light input.row-check:checked,
+body.theme-light input.check-all:checked {
+  background: #3b82f6 !important;
+  border-color: #3b82f6 !important;
+}
+body.theme-light input.check-all.indeterminate {
+  background: rgba(59,130,246,.45) !important;
+  border-color: #3b82f6 !important;
+}
 body.theme-light input::placeholder,
 body.theme-light textarea::placeholder {
   color: #9ca3af !important;

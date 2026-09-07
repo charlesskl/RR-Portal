@@ -14,7 +14,22 @@
 (function () {
   'use strict';
 
-  var PREFIX = 'xingxin_qms_';
+  /* ── 多厂区/子公司：当前子公司决定 localStorage 命名空间与 API 目标库 ──
+     每家子公司一套独立数据（服务端 server/data/<companyId>/qc.db）。
+     选择结果存在固定 key（不带公司前缀），切换子公司 = 改这个 key + 刷新页面 */
+  var COMPANY_KEY = 'xingxin_qms_company';
+  var COMPANY = 'dg-xingxin';
+  /* 旧版兼容：早期按厂区名存的值映射到该厂区默认子公司 */
+  var LEGACY = { dongguan: 'dg-xingxin', heyuan: 'hy-huakang-a', hunan: 'sy-huadeng' };
+  try {
+    COMPANY = localStorage.getItem(COMPANY_KEY) || 'dg-xingxin';
+    if (LEGACY[COMPANY]) { COMPANY = LEGACY[COMPANY]; localStorage.setItem(COMPANY_KEY, COMPANY); }
+  } catch (e) {}
+  window.__QC_COMPANY = COMPANY;
+  window.__QC_COMPANY_KEY = COMPANY_KEY;
+  window.__QC_STORAGE_PREFIX = 'xingxin_qms_' + COMPANY + '_';
+
+  var PREFIX = window.__QC_STORAGE_PREFIX;
   var KEY = {
     records:   PREFIX + 'records',
     users:     PREFIX + 'users',
@@ -35,7 +50,7 @@
   function syncBootstrap() {
     try {
       var xhr = new XMLHttpRequest();
-      xhr.open('GET', API_BASE + '/api/bootstrap', false); // 同步请求
+      xhr.open('GET', API_BASE + '/api/bootstrap?company=' + COMPANY, false); // 同步请求
       xhr.send(null);
       if (xhr.status !== 200) throw new Error('HTTP ' + xhr.status);
       var data = JSON.parse(xhr.responseText);
@@ -49,7 +64,7 @@
       if (Array.isArray(data.defectLib)) localStorage.setItem(KEY.defectLib, JSON.stringify(data.defectLib));
 
       window.__QC_BACKEND_OK = true;
-      console.log('[QC后端] 预加载成功：记录', (data.records || []).length,
+      console.log('[QC后端] 预加载成功：公司', COMPANY, '记录', (data.records || []).length,
         '账号', (data.users || []).length, '不良库', (data.defectLib || []).length);
     } catch (e) {
       window.__QC_BACKEND_OK = false;
@@ -84,19 +99,19 @@
   function pushRecords() {
     try {
       var st = JSON.parse(localStorage.getItem(KEY.records) || '{}');
-      return post(API_BASE + '/api/records', { records: st.records || [] });
+      return post(API_BASE + '/api/records?company=' + COMPANY, { records: st.records || [] });
     } catch (e) { console.warn('[QC后端] 读本地记录失败', e); }
     return Promise.resolve(false);
   }
   function pushUsers(users) {
     var u = users;
     if (!Array.isArray(u)) { try { u = JSON.parse(localStorage.getItem(KEY.users) || '[]'); } catch (e) { u = []; } }
-    return post(API_BASE + '/api/users', { users: u });
+    return post(API_BASE + '/api/users?company=' + COMPANY, { users: u });
   }
   function pushDefects(lib) {
     var l = lib;
     if (!Array.isArray(l)) { try { l = JSON.parse(localStorage.getItem(KEY.defectLib) || '[]'); } catch (e) { l = []; } }
-    return post(API_BASE + '/api/defects', { defectLib: l });
+    return post(API_BASE + '/api/defects?company=' + COMPANY, { defectLib: l });
   }
 
   /* ── 劫持 app.js 的三个写入函数（此时 app.js 已解析，函数已挂到 window）── */

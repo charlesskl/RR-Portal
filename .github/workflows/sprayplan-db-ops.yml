@@ -11,16 +11,20 @@ name: SprayPlan DB Ops
 #                     prisma/migrations/*/migration.sql（跳过已应用的特征）→
 #                     重启 + 健康检查 + 复核结构。
 #   mode=rollback —— 从最近一次 sprayplan.db.bak.* 恢复并重启。
+#   mode=sync-to-test —— 把正式版数据复制到测试版实例（sprayplan-test）：
+#                     sqlite3 在线备份正式库（不停正式服务）→ 备份测试版现有
+#                     数据与上传 → 停 sprayplan-test → 替换测试库并覆盖
+#                     storage-test → 重启 + 健康检查 + 两库行数对比。
 
 on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "check(只读) / migrate(备份+补迁移) / rollback(恢复) / query(只读 SELECT)"
+        description: "check(只读) / migrate(备份+补迁移) / rollback(恢复) / query(只读 SELECT) / sync-to-test(正式数据复制到测试版)"
         type: choice
         required: true
         default: check
-        options: [check, migrate, rollback, query]
+        options: [check, migrate, rollback, query, sync-to-test]
       sql:
         description: "mode=query 时执行的 SELECT 语句（仅限只读 SELECT）"
         type: string
@@ -141,6 +145,62 @@ jobs:
               docker compose -f "$COMPOSE" --env-file "$ENVF" up -d --force-recreate --no-deps sprayplan
               echo "-- 恢复后结构 --"; show_state "$DB"
               echo "[OK] rollback 完成（来自 $BAK）"; exit 0
+            fi
+
+            if [ "$MODE" = "sync-to-test" ]; then
+              TS="$(date +%Y%m%d-%H%M%S)"
+              TEST_DB="$APP/data-test/sprayplan.db"
+              [ -f "$DB" ] || { echo "[FAIL] 正式库 $DB 不存在" >&2; exit 1; }
+
+              echo "-- 1/6 sqlite3 在线备份正式库（不停正式服务，拿一致性快照）--"
+              SNAP="$APP/data/sprayplan.db.snapshot.$TS"
+              python3 - "$DB" "$SNAP" <<'PY'
+            import sqlite3, sys
+            src, dst = sys.argv[1], sys.argv[2]
+            s = sqlite3.connect(f"file:{src}?mode=ro", uri=True, timeout=30)
+            d = sqlite3.connect(dst)
+            s.backup(d)
+            d.close(); s.close()
+            print("  快照完成:", dst)
+            PY
+              [ -f "$SNAP" ] || { echo "[FAIL] 快照生成失败" >&2; exit 1; }
+
+              echo "-- 2/6 备份测试版现有数据与上传（可回滚）--"
+              if [ -f "$TEST_DB" ]; then
+                cp "$TEST_DB" "$APP/data-test/sprayplan.db.bak.$TS" && echo "  → data-test/sprayplan.db.bak.$TS"
+              else
+                echo "  (测试库尚不存在，跳过)"
+              fi
+              if [ -d "$APP/storage-test" ] && [ -n "$(ls -A "$APP/storage-test" 2>/dev/null)" ]; then
+                tar -czf "$APP/storage-test.bak.$TS.tar.gz" -C "$APP" storage-test && echo "  → storage-test.bak.$TS.tar.gz"
+              else
+                echo "  (storage-test 为空，跳过)"
+              fi
+
+              echo "-- 3/6 停 sprayplan-test --"
+              docker compose -f "$COMPOSE" --env-file "$ENVF" stop sprayplan-test
+
+              echo "-- 4/6 替换测试库 + 覆盖 storage-test --"
+              cp "$SNAP" "$TEST_DB"
+              rm -f "$TEST_DB-wal" "$TEST_DB-shm"
+              mkdir -p "$APP/storage-test"
+              cp -a "$APP/storage/." "$APP/storage-test/"
+              echo "  正式 storage 文件数: $(find "$APP/storage" -type f | wc -l)，测试 storage-test 文件数: $(find "$APP/storage-test" -type f | wc -l)"
+
+              echo "-- 5/6 重启 sprayplan-test --"
+              docker compose -f "$COMPOSE" --env-file "$ENVF" up -d --force-recreate --no-deps sprayplan-test
+              sleep 15
+              for i in 1 2 3 4 5 6; do
+                code="$(curl -sf -o /dev/null -w '%{http_code}' --max-time 10 "http://127.0.0.1/sprayplan-test/api/health" 2>/dev/null || echo 000)"
+                [ "$code" = "200" ] && { echo "  /sprayplan-test/api/health 200"; break; }
+                echo "  等待健康检查（第 $i 次，HTTP $code）"; sleep 10
+              done
+
+              echo "-- 6/6 两库行数对比 --"
+              echo "  [正式库]"; show_state "$DB"
+              echo "  [测试库]"; show_state "$TEST_DB"
+              echo "[OK] sync-to-test 完成（正式版全程未停机；快照 $SNAP 保留可审计）"
+              exit 0
             fi
 
             # ─── migrate ───

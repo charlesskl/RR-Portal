@@ -104,6 +104,8 @@ const PATH_CAPS: [string, (r: Role) => boolean][] = [
   ['/admin/users', canViewUsers],
 ]
 export function canAccessPath(role: Role, path: string): boolean {
+  // 评分单虽位于 /factories 下，仍属于月度评分；优先按评分权限判断。
+  if (/^\/factories\/[^/]+\/score\/[^/]+\/?$/i.test(path)) return canViewScoring(role)
   for (const [pre, fn] of PATH_CAPS) if (path.startsWith(pre)) return fn(role)
   return true
 }

@@ -1,6 +1,8 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import {
   allowedCrafts,
+  canAccessPath,
+  canApproveScore,
   canApproveStatus,
   canEditOrders,
   canImportOrdersForScope,
@@ -13,6 +15,43 @@ import {
 import { BUYER_CRAFT, isBuyer, ROLE_LABELS } from '../src/constants/roles'
 
 describe('permissions', () => {
+  beforeEach(() => {
+    setPermissionOverrides(null)
+    setAuthorizedCrafts(null)
+  })
+  afterEach(() => {
+    setPermissionOverrides(null)
+    setAuthorizedCrafts(null)
+  })
+  it('allows a general manager to open score sheets with scoring permission alone', () => {
+    setPermissionOverrides({ 'scoring.view': true, 'factories.view': false })
+
+    expect(canAccessPath('gm', '/scoring')).toBe(true)
+    expect(canAccessPath('gm', '/factories/factory123/score/2026-07')).toBe(true)
+    expect(canAccessPath('gm', '/factories/factory123/score/2026-07/')).toBe(true)
+    expect(canAccessPath('gm', '/factories')).toBe(false)
+    expect(canAccessPath('gm', '/factories/factory123')).toBe(false)
+    expect(canAccessPath('gm', '/factories/new')).toBe(false)
+    expect(canAccessPath('gm', '/factories/dept/injection')).toBe(false)
+    expect(canApproveScore('gm')).toBe(false)
+  })
+  it('requires scoring permission for score sheets even when factories are accessible', () => {
+    setPermissionOverrides({ 'scoring.view': false, 'factories.view': true })
+
+    expect(canAccessPath('admin', '/scoring')).toBe(false)
+    expect(canAccessPath('admin', '/factories/factory123/score/2026-07')).toBe(false)
+    expect(canAccessPath('admin', '/factories')).toBe(true)
+    expect(canAccessPath('admin', '/factories/factory123')).toBe(true)
+  })
+  it('keeps default scoring access and limits the exception to score sheet routes', () => {
+    expect(canAccessPath('sc_manager', '/factories/factory123/score/2026-07')).toBe(true)
+    expect(canAccessPath('admin', '/factories/factory123/score/2026-07')).toBe(true)
+    expect(canAccessPath('gm', '/factories/factory123/score/2026-07')).toBe(false)
+
+    setPermissionOverrides({ 'scoring.view': true, 'factories.view': false })
+    expect(canAccessPath('gm', '/factories/factory123/score')).toBe(false)
+    expect(canAccessPath('gm', '/factories/factory123/score/2026-07/edit')).toBe(false)
+  })
   it('supports the electronics buyer role and maps it to the electronics department', () => {
     expect(ROLE_LABELS.buyer_electronics).toBe('电子部采购')
     expect(BUYER_CRAFT.buyer_electronics).toBe('electronics')

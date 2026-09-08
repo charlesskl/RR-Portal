@@ -257,7 +257,10 @@ html, body {
   gap: 16px;
   max-width: 1600px;
   width: 100%;
+  margin: 0 auto;   /* 超宽屏时内容居中，两侧留白对称 */
 }
+/* 验货明细：表格列多，宽屏（尤其菜单收起后）用满可用宽度 */
+#page-records .page-inner { max-width: none; }
 
 /* ── CARDS ── */
 .cards-row {

@@ -156,6 +156,30 @@ services:
       timeout: 10s
       retries: 3
 
+  # 玩具质量管理系统 (ToyQMS)：QA 客诉与 CAP 分析。Next.js 静态导出 + Fastify/node:sqlite 单容器。
+  toyqms:
+    build:
+      context: ./apps/QA部/玩具质量管理系统
+      dockerfile: Dockerfile
+    environment:
+      - PORT=3420
+      - TOYQMS_DATA_DIR=/app/data
+      - TOYQMS_STATIC_DIR=/app/out
+      - NODE_ENV=production
+    volumes:
+      - "./apps/QA部/玩具质量管理系统/server-data:/app/data"
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3420/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
   production-plan:
     build:
       context: ./apps/生产部/生产计划管理系统

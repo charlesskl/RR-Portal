@@ -51,7 +51,8 @@ RR-Portal/
 │   │   └── 印尼走货明细/              — indo-shipping (ASP.NET Core + React + PostgreSQL schema indo_shipping)
 │   ├── QA部/
 │   │   ├── QA测试报告周结系统/      — qa-weekly-report (Node.js + React + exceljs)
-│   │   └── QC成品报告系统/          — qc-report (Python/Flask + SQLite + Redis/RQ)
+│   │   ├── QC成品报告系统/          — qc-report (Python/Flask + SQLite + Redis/RQ)
+│   │   └── 玩具质量管理系统/        — toyqms (Next.js 静态导出 + Fastify, 客诉与 CAP 分析, node:sqlite)
 │   └── task-api/                  — 任务 API (Node.js，仅本地 compose，无部门)
 ├── archived/                      — 下线 / 历史代码，不参与部署
 ├── core/                          — 核心服务 (FastAPI, 用户/权限/插件注册)
@@ -482,6 +483,7 @@ const data = JSON.parse(fs.readFileSync('data/data.json'));
 | baojia | 报价系统 | 业务部 | Standalone (Node.js) | /baojia/ | — |
 | qa-weekly-report | QA测试报告周结系统 | QA部 | Standalone (Node.js/React + exceljs) | /qa-weekly-report/ | — |
 | qc-report | QC成品报告系统 | QA部 | Standalone (Python/Flask + SQLite + Redis/RQ + OpenAI) | /qc-report/ | — |
+| toyqms | 玩具质量管理系统 | QA部 | Standalone (Next.js 静态导出 + Fastify + node:sqlite, 自有账号登录) | /toyqms/ | — |
 | internal-quote | 内部报价系统 | 业务部 | Standalone (Node.js + node:sqlite) | /internal-quote/ | — |
 | indo-shipping | 印尼走货明细 | 印尼小组 | Standalone (ASP.NET Core + React + PostgreSQL schema indo_shipping) | /indo-shipping/ | (PR #268) |
 

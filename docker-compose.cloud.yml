@@ -332,6 +332,34 @@ services:
     networks:
       - platform-net
 
+  # 玩具质量管理系统 (ToyQMS)：QA 客诉与 CAP 分析。Next.js 静态导出 + Fastify/node:sqlite 单容器。
+  toyqms:
+    build:
+      context: ./apps/QA部/玩具质量管理系统
+      dockerfile: Dockerfile
+    environment:
+      - PORT=3420
+      - TOYQMS_DATA_DIR=/app/data
+      - TOYQMS_STATIC_DIR=/app/out
+      - NODE_ENV=production
+    volumes:
+      - ./apps/QA部/玩具质量管理系统/server-data:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3420/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    mem_limit: 512m
+    memswap_limit: 512m
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - platform-net
+
   # 喷油排期系统·测试版：与正式版同代码、独立容器/数据库/上传目录，
   # 供喷油部试用新流程，绝不影响正式数据。basePath=/sprayplan-test。
   sprayplan-test:

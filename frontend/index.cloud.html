@@ -379,6 +379,12 @@
                 <span class="plugin-name">QC 成品报告系统</span>
               </div>
             </div>
+            <div class="plugin-item">
+              <div class="plugin-info">
+                <div class="plugin-dot gray" id="toyqmsDot"></div>
+                <span class="plugin-name">玩具质量管理系统</span>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -1160,6 +1166,28 @@
         <a href="/qc-report/" target="_blank" rel="noopener" class="btn btn-primary">打开系统</a>
       </div>
     </div>
+
+    <div class="detail-plugin-card">
+      <div class="detail-plugin-left">
+        <div class="detail-plugin-icon" style="background:linear-gradient(135deg,#f36b21,#c2410c);">&#129528;</div>
+        <div>
+          <div class="detail-plugin-name">玩具质量管理系统</div>
+          <div class="detail-plugin-desc">ToyQMS 客诉与 CAP 分析 — Excel 客诉导入去重、系列/问题类型统计、翻译确认流、CAP 关联闭环，Fastify + SQLite 后端</div>
+          <div class="feature-grid">
+            <div class="feature-tag">&#128229; Excel 客诉导入</div>
+            <div class="feature-tag">&#128279; 七字段重复检测</div>
+            <div class="feature-tag">&#128202; 系列投诉占比</div>
+            <div class="feature-tag">&#127760; 翻译确认流</div>
+            <div class="feature-tag">&#128296; CAP 闭环</div>
+            <div class="feature-tag">&#128451; SQLite 后端</div>
+          </div>
+        </div>
+      </div>
+      <div class="detail-plugin-right">
+        <div class="detail-plugin-status"><div class="plugin-dot gray" id="toyqmsDetailDot"></div> 检查中...</div>
+        <a href="/toyqms/" target="_blank" rel="noopener" class="btn btn-primary">打开系统</a>
+      </div>
+    </div>
   </div>
 
 </div>
@@ -1197,6 +1225,7 @@ async function checkHealth() {
       { name: 'sprayplan-test', url: '/sprayplan-test/api/health', dot: 'sprayplanTestDot', detailDot: 'sprayplanTestDetailDot' },
       { name: 'productionPlan', url: '/production-plan/health', dot: 'productionPlanDot', detailDot: 'productionPlanDetailDot' },
       { name: 'qc', url: '/qc/api/health', dot: 'qcDot', detailDot: 'qcDetailDot' },
+      { name: 'toyqms', url: '/toyqms/api/health', dot: 'toyqmsDot', detailDot: 'toyqmsDetailDot' },
       { name: 'zuruOrder', url: '/zuru-order-system/health', dot: 'zuruOrderDot', detailDot: 'zuruOrderDetailDot' },
       { name: 'liwenjuan', url: '/liwenjuan/health', dot: 'liwenjuanDot', detailDot: 'liwenjuanDetailDot' },
       { name: 'baojia', url: '/baojia/health', dot: 'baojiaDot', detailDot: 'baojiaDetailDot' },

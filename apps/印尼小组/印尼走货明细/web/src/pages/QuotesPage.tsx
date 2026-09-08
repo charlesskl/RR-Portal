@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { App, Button, Card, Input, InputNumber, Popconfirm, Select, Space, Table, Typography } from 'antd'
 import { api } from '../api/client'
+import './QuotesPage.css'
 
 // Legacy quote shape (from old HTML — settings.quotes blob)
 interface Quote {
@@ -46,6 +47,7 @@ interface FillableCellProps {
 function FillableCell({ rowIndex, field, onFill, children }: FillableCellProps) {
   return (
     <div
+      className="quote-fillable-cell"
       style={{ position: 'relative', paddingRight: 3 }}
       onDragOver={(event) => {
         if (event.dataTransfer.types.includes('application/x-quote-fill')) event.preventDefault()
@@ -60,6 +62,7 @@ function FillableCell({ rowIndex, field, onFill, children }: FillableCellProps) 
     >
       {children}
       <span
+        className="quote-fill-handle"
         draggable
         title="拖动填充相同内容"
         onDragStart={(event) => {

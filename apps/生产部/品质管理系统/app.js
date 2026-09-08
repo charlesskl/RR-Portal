@@ -366,6 +366,7 @@ function _showLogin() {
 }
 
 function _showApp() {
+  _initSidebar();
   document.getElementById('loginScreen').style.display = 'none';
   document.getElementById('appWrapper').style.display  = '';
   _renderUserBadge();
@@ -999,9 +1000,31 @@ function showPage(name) {
   });
 }
 
+const SIDEBAR_KEY = 'xingxin_qms_sidebar_collapsed';
+
+/* 启动时应用侧边栏状态：默认隐藏（用户点 ☰ 打开后会记住） */
+function _initSidebar() {
+  let collapsed = true;   /* 默认隐藏菜单 */
+  try {
+    const v = localStorage.getItem(SIDEBAR_KEY);
+    if (v !== null) collapsed = v === '1';
+  } catch(e) {}
+  const sb = document.getElementById('sidebar');
+  const mw = document.querySelector('.main-wrap');
+  if (!sb || !mw) return;
+  sb.style.transition = 'none';                 /* 避免首次加载时滑出动画 */
+  sb.classList.toggle('collapsed', collapsed);
+  mw.classList.toggle('full', collapsed);
+  requestAnimationFrame(() => { requestAnimationFrame(() => { sb.style.transition = ''; }); });
+}
+
 function toggleSidebar() {
   document.getElementById('sidebar').classList.toggle('collapsed');
   document.querySelector('.main-wrap').classList.toggle('full');
+  try {
+    localStorage.setItem(SIDEBAR_KEY,
+      document.getElementById('sidebar').classList.contains('collapsed') ? '1' : '0');
+  } catch(e) {}
   /* sidebar 收起/展开后图表需要 resize */
   setTimeout(resizeAllCharts, 300);
 }

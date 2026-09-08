@@ -118,6 +118,7 @@ declare -A PATH_TO_SERVICE=(
   ["apps/印尼小组/印尼走货明细/"]="indo-shipping"
   ["apps/QA部/QA测试报告周结系统/"]="qa-weekly-report"
   ["apps/QA部/QC成品报告系统/"]="qc-report qc-report-worker"
+  ["apps/QA部/玩具质量管理系统/"]="toyqms"
   ["apps/task-api/"]="task-api"
 )
 

@@ -11,7 +11,9 @@ COPY package.json package-lock.json ./
 RUN npm ci --no-audit --no-fund --cache /tmp/npm-cache
 
 COPY . .
-RUN npm run build
+# 生产部署在 RR Portal 的 /toyqms/ 子路径：构建时注入 basePath，
+# 静态导出产物会落在 out/toyqms/ 下，由后端在 /toyqms/* 完整路径上托管（nginx 不再剥前缀）。
+RUN NEXT_PUBLIC_BASE_PATH=/toyqms npm run build
 
 # ── 阶段二：运行时（后端 + 静态前端 + SQLite 数据）──
 FROM node:24-alpine AS production

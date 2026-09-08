@@ -34,6 +34,47 @@ function legacyProductCode(notes?: string): string {
   return notes?.match(/(?:^|\/)\s*货号\s*[:：]\s*([^/]+?)\s*$/)?.[1]?.trim() ?? ''
 }
 
+interface FillableCellProps {
+  rowIndex: number
+  field: keyof Quote
+  onFill: (sourceIndex: number, targetIndex: number, field: keyof Quote) => void
+  children: React.ReactNode
+}
+
+// Keep this component outside QuotesPage. Defining it inside the page creates a
+// new component type after every keystroke, which remounts the input and loses focus.
+function FillableCell({ rowIndex, field, onFill, children }: FillableCellProps) {
+  return (
+    <div
+      style={{ position: 'relative', paddingRight: 3 }}
+      onDragOver={(event) => {
+        if (event.dataTransfer.types.includes('application/x-quote-fill')) event.preventDefault()
+      }}
+      onDrop={(event) => {
+        event.preventDefault()
+        try {
+          const payload = JSON.parse(event.dataTransfer.getData('application/x-quote-fill'))
+          if (payload.field === field) onFill(Number(payload.rowIndex), rowIndex, field)
+        } catch { /* 忽略非报价表拖动 */ }
+      }}
+    >
+      {children}
+      <span
+        draggable
+        title="拖动填充相同内容"
+        onDragStart={(event) => {
+          event.dataTransfer.effectAllowed = 'copy'
+          event.dataTransfer.setData('application/x-quote-fill', JSON.stringify({ rowIndex, field }))
+        }}
+        style={{
+          position: 'absolute', right: -2, bottom: -2, width: 9, height: 9,
+          border: '1px solid #1677ff', background: '#fff', cursor: 'crosshair', zIndex: 2,
+        }}
+      />
+    </div>
+  )
+}
+
 export default function QuotesPage() {
   const { message } = App.useApp()
   const [rows, setRows] = useState<Quote[]>([])
@@ -337,42 +378,6 @@ export default function QuotesPage() {
     message.success(`已向${targetPosition > sourcePosition ? '下' : '上'}填充 ${affected.size} 行`)
   }
 
-  function FillableCell({ rowIndex, field, children }: {
-    rowIndex: number
-    field: keyof Quote
-    children: React.ReactNode
-  }) {
-    return (
-      <div
-        style={{ position: 'relative', paddingRight: 3 }}
-        onDragOver={(event) => {
-          if (event.dataTransfer.types.includes('application/x-quote-fill')) event.preventDefault()
-        }}
-        onDrop={(event) => {
-          event.preventDefault()
-          try {
-            const payload = JSON.parse(event.dataTransfer.getData('application/x-quote-fill'))
-            if (payload.field === field) fillVisibleRange(Number(payload.rowIndex), rowIndex, field)
-          } catch { /* 忽略非报价表拖动 */ }
-        }}
-      >
-        {children}
-        <span
-          draggable
-          title="拖动填充相同内容"
-          onDragStart={(event) => {
-            event.dataTransfer.effectAllowed = 'copy'
-            event.dataTransfer.setData('application/x-quote-fill', JSON.stringify({ rowIndex, field }))
-          }}
-          style={{
-            position: 'absolute', right: -2, bottom: -2, width: 9, height: 9,
-            border: '1px solid #1677ff', background: '#fff', cursor: 'crosshair', zIndex: 2,
-          }}
-        />
-      </div>
-    )
-  }
-
   // Tiered-pricing group count
   const tierGroups = useMemo(() => {
     const set = new Set<string>()
@@ -445,15 +450,15 @@ export default function QuotesPage() {
           scroll={{ x: 1360 }}
           columns={[
             { title: '#', width: 50, align: 'center', render: (_v, _r, i) => i + 1 },
-            { title: '供应商', width: 200, render: (_v, r) => <FillableCell rowIndex={r._i} field="supplier"><Input size="small" value={r.q.supplier} onChange={(e) => patch(r._i, 'supplier', e.target.value)} /></FillableCell> },
-            { title: '货号', width: 140, render: (_v, r) => <FillableCell rowIndex={r._i} field="productCode"><Input size="small" value={r.q.productCode} placeholder="具体货号/共用" onChange={(e) => patch(r._i, 'productCode', e.target.value)} /></FillableCell> },
-            { title: '物料名', width: 200, render: (_v, r) => <FillableCell rowIndex={r._i} field="matName"><Input size="small" value={r.q.matName} onChange={(e) => patch(r._i, 'matName', e.target.value)} /></FillableCell> },
-            { title: '规格', width: 160, render: (_v, r) => <FillableCell rowIndex={r._i} field="spec"><Input size="small" value={r.q.spec} onChange={(e) => patch(r._i, 'spec', e.target.value)} /></FillableCell> },
-            { title: '起订量', width: 100, render: (_v, r) => <FillableCell rowIndex={r._i} field="minQty"><InputNumber size="small" min={0} value={r.q.minQty} onChange={(v) => patch(r._i, 'minQty', v ?? 0)} style={{ width: '100%' }} /></FillableCell> },
-            { title: '单价', width: 120, render: (_v, r) => <FillableCell rowIndex={r._i} field="unitPrice"><InputNumber size="small" min={0} step={0.0001} value={r.q.unitPrice} onChange={(v) => patch(r._i, 'unitPrice', v ?? 0)} style={{ width: '100%' }} /></FillableCell> },
-            { title: '币种', width: 110, render: (_v, r) => <FillableCell rowIndex={r._i} field="currency"><Select size="small" value={r.q.currency || '¥'} options={CURR} onChange={(x) => patch(r._i, 'currency', x)} style={{ width: '100%' }} /></FillableCell> },
-            { title: '日期', width: 120, render: (_v, r) => <FillableCell rowIndex={r._i} field="quoteDate"><Input size="small" value={r.q.quoteDate} placeholder="YYYY-MM-DD" onChange={(e) => patch(r._i, 'quoteDate', e.target.value)} /></FillableCell> },
-            { title: '备注', width: 160, render: (_v, r) => <FillableCell rowIndex={r._i} field="notes"><Input size="small" value={r.q.notes} onChange={(e) => patch(r._i, 'notes', e.target.value)} /></FillableCell> },
+            { title: '供应商', width: 200, render: (_v, r) => <FillableCell rowIndex={r._i} field="supplier" onFill={fillVisibleRange}><Input size="small" value={r.q.supplier} onChange={(e) => patch(r._i, 'supplier', e.target.value)} /></FillableCell> },
+            { title: '货号', width: 140, render: (_v, r) => <FillableCell rowIndex={r._i} field="productCode" onFill={fillVisibleRange}><Input size="small" value={r.q.productCode} placeholder="具体货号/共用" onChange={(e) => patch(r._i, 'productCode', e.target.value)} /></FillableCell> },
+            { title: '物料名', width: 200, render: (_v, r) => <FillableCell rowIndex={r._i} field="matName" onFill={fillVisibleRange}><Input size="small" value={r.q.matName} onChange={(e) => patch(r._i, 'matName', e.target.value)} /></FillableCell> },
+            { title: '规格', width: 160, render: (_v, r) => <FillableCell rowIndex={r._i} field="spec" onFill={fillVisibleRange}><Input size="small" value={r.q.spec} onChange={(e) => patch(r._i, 'spec', e.target.value)} /></FillableCell> },
+            { title: '起订量', width: 100, render: (_v, r) => <FillableCell rowIndex={r._i} field="minQty" onFill={fillVisibleRange}><InputNumber size="small" min={0} value={r.q.minQty} onChange={(v) => patch(r._i, 'minQty', v ?? 0)} style={{ width: '100%' }} /></FillableCell> },
+            { title: '单价', width: 120, render: (_v, r) => <FillableCell rowIndex={r._i} field="unitPrice" onFill={fillVisibleRange}><InputNumber size="small" min={0} step={0.0001} value={r.q.unitPrice} onChange={(v) => patch(r._i, 'unitPrice', v ?? 0)} style={{ width: '100%' }} /></FillableCell> },
+            { title: '币种', width: 110, render: (_v, r) => <FillableCell rowIndex={r._i} field="currency" onFill={fillVisibleRange}><Select size="small" value={r.q.currency || '¥'} options={CURR} onChange={(x) => patch(r._i, 'currency', x)} style={{ width: '100%' }} /></FillableCell> },
+            { title: '日期', width: 120, render: (_v, r) => <FillableCell rowIndex={r._i} field="quoteDate" onFill={fillVisibleRange}><Input size="small" value={r.q.quoteDate} placeholder="YYYY-MM-DD" onChange={(e) => patch(r._i, 'quoteDate', e.target.value)} /></FillableCell> },
+            { title: '备注', width: 160, render: (_v, r) => <FillableCell rowIndex={r._i} field="notes" onFill={fillVisibleRange}><Input size="small" value={r.q.notes} onChange={(e) => patch(r._i, 'notes', e.target.value)} /></FillableCell> },
             {
               title: '', width: 50, fixed: 'right',
               render: (_v, r) => (

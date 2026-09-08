@@ -1,8 +1,4 @@
-import * as pdfjs from 'pdfjs-dist'
-import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.mjs?url'
 import { pdfTextRowsToAoa, purchaseOrderPdfItemsToAoa, type PositionedText } from './pdfTableRows'
-
-pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl
 
 type TextItem = {
   str: string
@@ -11,6 +7,11 @@ type TextItem = {
 }
 
 export async function readDeliveryPdfAsAoa(file: File) {
+  const [pdfjs, { default: pdfWorkerUrl }] = await Promise.all([
+    import('pdfjs-dist'),
+    import('pdfjs-dist/build/pdf.worker.mjs?url'),
+  ])
+  pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl
   const data = await file.arrayBuffer()
   const doc = await pdfjs.getDocument({ data }).promise
   const items: PositionedText[] = []

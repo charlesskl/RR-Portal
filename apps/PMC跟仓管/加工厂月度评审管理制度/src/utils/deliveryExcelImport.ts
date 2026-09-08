@@ -1,4 +1,3 @@
-import * as XLSX from 'xlsx'
 import { parseDeliveryImport } from './deliveryStats'
 import { applyCnyTaxPrice } from './orderPricing'
 import { resolveFactoryName } from './factoryName'
@@ -61,6 +60,7 @@ export async function parseDeliveryExcelFiles(
     readFailedFiles: [],
   }
 
+  const XLSX = await import('xlsx')
   for (const file of files) {
     try {
       const wb = XLSX.read(await file.arrayBuffer(), { cellDates: true })

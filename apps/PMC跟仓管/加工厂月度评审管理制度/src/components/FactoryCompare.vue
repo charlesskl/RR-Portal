@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue'
-import XLSX from 'xlsx-js-style'
 import { pb } from '../pb'
 import { useFactoriesStore } from '../stores/factories'
 import { CRAFT_LABELS, type Craft } from '../constants/roles'
@@ -17,6 +16,8 @@ const selectedIds = ref<string[]>([])
 const kw = ref('')
 const open = ref(false)
 const loading = ref(false)
+const exporting = ref(false)
+const exportError = ref('')
 
 type Cell = { factory: Partial<Factory>; stats: FactoryStats; site: SiteStats; grade: string }
 const data = ref<Record<string, Cell>>({})
@@ -171,67 +172,77 @@ function isBest(row: Row, id: string): boolean {
 }
 
 // 导出对比表 Excel（版式与画面一致：指标列 + 各工厂列，分组标题整行合并，最优值绿底标注）
-function exportExcel() {
-  const ids = selectedIds.value
-  if (!ids.length) return
-  const header = ['指标', ...ids.map(nameOf)]
-  const aoa: any[][] = [header]
-  type Meta = { type: 'header' } | { type: 'group'; color: string } | { type: 'metric'; row: Row }
-  const meta: Meta[] = [{ type: 'header' }]
-  const merges: any[] = []
-  for (const g of groups) {
-    const r = aoa.length
-    aoa.push([g.title, ...ids.map(() => '')])
-    merges.push({ s: { r, c: 0 }, e: { r, c: ids.length } })
-    meta.push({ type: 'group', color: g.color })
-    for (const row of g.rows) {
-      aoa.push([row.label, ...ids.map((id) => {
-        const c = data.value[id]
-        if (!c) return '-'
-        const v = row.get(c)
-        return v === '' ? '-' : v
-      })])
-      meta.push({ type: 'metric', row })
-    }
-  }
-  const ws = XLSX.utils.aoa_to_sheet(aoa)
-  ws['!merges'] = merges
-  const cw = (v: any) => { let w = 0; for (const ch of String(v ?? '')) w += /[⺀-￿]/.test(ch) ? 2 : 1; return w }
-  ws['!cols'] = header.map((_, ci) => {
-    let max = 6
-    for (const r of aoa) max = Math.max(max, cw(r[ci]))
-    return { wch: Math.min(max + 2, 40) }
-  })
-
-  const B = { style: 'thin', color: { rgb: 'E5E7EB' } }
-  const border = { top: B, bottom: B, left: B, right: B }
-  const hex = (c: string) => c.replace('#', '').toUpperCase()
-  for (let r = 0; r < aoa.length; r++) {
-    const m = meta[r]
-    for (let c = 0; c < header.length; c++) {
-      const ref = XLSX.utils.encode_cell({ r, c })
-      const cell = ws[ref] || (ws[ref] = { t: 's', v: '' })
-      const s: any = { border, alignment: { vertical: 'center', horizontal: c === 0 ? 'left' : 'center', wrapText: true } }
-      if (m.type === 'header') {
-        s.font = { bold: true, color: { rgb: '1F2533' } }
-        s.fill = { patternType: 'solid', fgColor: { rgb: 'FAFBFF' } }
-      } else if (m.type === 'group') {
-        s.font = { bold: true, color: { rgb: hex(m.color) } }
-        s.fill = { patternType: 'solid', fgColor: { rgb: 'F4F6FF' } }
-      } else if (c === 0) {
-        s.font = { color: { rgb: '1F2533' } }
-        s.fill = { patternType: 'solid', fgColor: { rgb: 'FAFBFF' } }
-      } else if (isBest(m.row, ids[c - 1])) {
-        s.font = { bold: true, color: { rgb: '16A34A' } }
-        s.fill = { patternType: 'solid', fgColor: { rgb: 'E8F7EE' } }
+async function exportExcel() {
+  if (!selectedIds.value.length || loading.value || exporting.value) return
+  exporting.value = true
+  exportError.value = ''
+  try {
+    // 在等待导出库之前固定画面数据和最优值；加载期间切换工厂/月不会改变本次报表。
+    const ids = [...selectedIds.value]
+    const header = ['指标', ...ids.map(nameOf)]
+    const aoa: any[][] = [header]
+    type Meta = { type: 'header' } | { type: 'group'; color: string } | { type: 'metric'; best: boolean[] }
+    const meta: Meta[] = [{ type: 'header' }]
+    const merges: any[] = []
+    for (const g of groups) {
+      const r = aoa.length
+      aoa.push([g.title, ...ids.map(() => '')])
+      merges.push({ s: { r, c: 0 }, e: { r, c: ids.length } })
+      meta.push({ type: 'group', color: g.color })
+      for (const row of g.rows) {
+        aoa.push([row.label, ...ids.map((id) => {
+          const c = data.value[id]
+          if (!c) return '-'
+          const v = row.get(c)
+          return v === '' ? '-' : v
+        })])
+        meta.push({ type: 'metric', best: ids.map((id) => isBest(row, id)) })
       }
-      cell.s = s
     }
-  }
+    const { default: XLSX } = await import('xlsx-js-style')
+    const ws = XLSX.utils.aoa_to_sheet(aoa)
+    ws['!merges'] = merges
+    const cw = (v: any) => { let w = 0; for (const ch of String(v ?? '')) w += /[⺀-￿]/.test(ch) ? 2 : 1; return w }
+    ws['!cols'] = header.map((_, ci) => {
+      let max = 6
+      for (const r of aoa) max = Math.max(max, cw(r[ci]))
+      return { wch: Math.min(max + 2, 40) }
+    })
 
-  const wb = XLSX.utils.book_new()
-  XLSX.utils.book_append_sheet(wb, ws, '工厂对比')
-  XLSX.writeFile(wb, '工厂对比表.xlsx')
+    const B = { style: 'thin', color: { rgb: 'E5E7EB' } }
+    const border = { top: B, bottom: B, left: B, right: B }
+    const hex = (c: string) => c.replace('#', '').toUpperCase()
+    for (let r = 0; r < aoa.length; r++) {
+      const m = meta[r]
+      for (let c = 0; c < header.length; c++) {
+        const ref = XLSX.utils.encode_cell({ r, c })
+        const cell = ws[ref] || (ws[ref] = { t: 's', v: '' })
+        const s: any = { border, alignment: { vertical: 'center', horizontal: c === 0 ? 'left' : 'center', wrapText: true } }
+        if (m.type === 'header') {
+          s.font = { bold: true, color: { rgb: '1F2533' } }
+          s.fill = { patternType: 'solid', fgColor: { rgb: 'FAFBFF' } }
+        } else if (m.type === 'group') {
+          s.font = { bold: true, color: { rgb: hex(m.color) } }
+          s.fill = { patternType: 'solid', fgColor: { rgb: 'F4F6FF' } }
+        } else if (c === 0) {
+          s.font = { color: { rgb: '1F2533' } }
+          s.fill = { patternType: 'solid', fgColor: { rgb: 'FAFBFF' } }
+        } else if (m.best[c - 1]) {
+          s.font = { bold: true, color: { rgb: '16A34A' } }
+          s.fill = { patternType: 'solid', fgColor: { rgb: 'E8F7EE' } }
+        }
+        cell.s = s
+      }
+    }
+
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, '工厂对比')
+    XLSX.writeFile(wb, '工厂对比表.xlsx')
+  } catch {
+    exportError.value = '工厂对比表导出失败，请重试。'
+  } finally {
+    exporting.value = false
+  }
 }
 </script>
 
@@ -239,8 +250,10 @@ function exportExcel() {
   <section class="cmp">
     <div class="cmp-head">
       <h3 class="panel-title">工厂对比 <small>任意选择多家工厂，对比价格/交期/品质/现场管理</small></h3>
-      <button v-if="selectedIds.length" @click="exportExcel">导出 Excel</button>
+      <button v-if="selectedIds.length" :disabled="loading || exporting" @click="exportExcel">{{ exporting ? '导出中…' : '导出 Excel' }}</button>
     </div>
+
+    <p v-if="exportError" role="alert" class="export-error">{{ exportError }}</p>
 
     <!-- 选择器 -->
     <div class="picker">
@@ -288,6 +301,8 @@ function exportExcel() {
 .cmp-head { display: flex; justify-content: space-between; align-items: center; gap: 1rem; margin-bottom: 1rem; }
 .panel-title { margin: 0; font-size: 1rem; color: #1f2533; }
 .panel-title small { font-weight: 400; color: #9aa1ad; font-size: .8rem; margin-left: .5rem; }
+
+.export-error { color: #dc2626; font-size: .9rem; }
 
 .picker { display: flex; flex-wrap: wrap; align-items: center; gap: .45rem; border: 1px solid var(--border); border-radius: 10px; padding: .45rem .55rem; }
 .chip { display: inline-flex; align-items: center; gap: .3rem; background: #eef0ff; color: #4f46e5; font-size: .85rem; padding: .2rem .25rem .2rem .6rem; border-radius: 999px; }

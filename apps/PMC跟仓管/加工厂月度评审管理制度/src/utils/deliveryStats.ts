@@ -1,37 +1,8 @@
-import * as XLSX from 'xlsx'
+import type { DeliveryPricingMode } from './deliveryReportFormat'
+export { DELIVERY_HEADERS, deliveryHeaders, splitSewingContractItemNo, type DeliveryPricingMode } from './deliveryReportFormat'
 import type { Order } from '../types/order'
 import { resolveFactoryName } from './factoryName'
 import { cnyTaxToHkdUntaxed, cnyTaxToUntaxedRmb, DEFAULT_CNY_TO_HKD_RATE } from './orderPricing'
-
-// 报表表头（单行）
-export const DELIVERY_HEADERS = [
-  '范围', '下单PMC', '加工厂', '货号', '模具编号', '订单号', '加工类别', '物料名称', '数量', '下单时间', '下单交货时间', '实际交货时间', '延迟时间',
-  '订单总单数', '延期单数', '占比', '延期平均天数',
-  '核价工价(港币不含税$)', '外发工价(港币不含税$)', '外发工价(人民币含税)', '换算汇率', '占比', '备注',
-]
-
-/** Price columns differ by region: Hunan keeps RMB, while selected Dongguan departments show both FX and tax point. */
-export type DeliveryPricingMode = 'hkd' | 'rmb-tax' | 'hkd-tax'
-
-export function deliveryHeaders(
-  includeMoldNumber = true,
-  includeContractNumber = false,
-  pricingMode: DeliveryPricingMode = includeContractNumber ? 'rmb-tax' : 'hkd',
-) {
-  let headers = DELIVERY_HEADERS.filter((header) => includeMoldNumber || header !== '模具编号')
-  if (includeContractNumber) headers.splice(headers.indexOf('货号'), 0, '合同号')
-  if (pricingMode === 'rmb-tax') {
-    headers = headers.map((header) => {
-      if (header === '核价工价(港币不含税$)') return '核价工价(不含税RMB)'
-      if (header === '外发工价(港币不含税$)') return '外发工价(不含税RMB)'
-      if (header === '换算汇率') return '税点'
-      return header
-    })
-  } else if (pricingMode === 'hkd-tax') {
-    headers.splice(headers.indexOf('换算汇率') + 1, 0, '税点')
-  }
-  return headers
-}
 
 const r1 = (n: number) => Math.round(n * 10) / 10
 const r2 = (n: number) => Math.round(n * 100) / 100
@@ -46,18 +17,6 @@ const orderKey = (o: Order) => (o.order_no?.trim() ? `order:${o.order_no.trim().
 /** 港币外发工价统一固定显示 3 位小数。 */
 export function formatHkdOutPrice(value: number | null | undefined): string {
   return value == null || !Number.isFinite(Number(value)) ? '' : Number(value).toFixed(3)
-}
-
-export function splitSewingContractItemNo(value: unknown): { contractNo: string; itemNo: string } {
-  const text = String(value ?? '').trim()
-  const separator = text.lastIndexOf('/')
-  if (separator <= 0 || separator >= text.length - 1) {
-    return { contractNo: '', itemNo: text }
-  }
-  return {
-    contractNo: text.slice(0, separator).trim(),
-    itemNo: text.slice(separator + 1).trim(),
-  }
 }
 
 export interface Metrics {
@@ -318,80 +277,16 @@ export function buildDeliveryReport(
   return out
 }
 
-// 导出交货延期统计表 Excel(标题行 + 合并单元格)
-export function exportDeliveryExcel(
+// Excel 模块及工作线程仅在用户导出时加载，避免日常页面加载大体积依赖。
+export async function exportDeliveryExcel(
   rows: ReportRow[],
   title: string,
   includeMoldNumber = true,
   includeContractNumber = false,
   pricingMode: DeliveryPricingMode = includeContractNumber ? 'rmb-tax' : 'hkd',
-) {
-  const H = deliveryHeaders(includeMoldNumber, includeContractNumber, pricingMode)
-  const moldColumn = DELIVERY_HEADERS.indexOf('模具编号')
-  const visibleValues = (values: any[], splitItemNumber = true) => {
-    const visible = includeMoldNumber
-      ? [...values]
-      : values.filter((_, index) => index !== moldColumn)
-    let taxPointIndex = 21
-    if (!includeMoldNumber) taxPointIndex--
-    if (includeContractNumber) {
-      const itemColumn = H.indexOf('货号') - 1
-      if (splitItemNumber) {
-        const parts = splitSewingContractItemNo(visible[itemColumn])
-        visible.splice(itemColumn, 1, parts.contractNo, parts.itemNo)
-      } else {
-        visible.splice(itemColumn + 1, 0, '')
-      }
-      taxPointIndex++
-    }
-    if (pricingMode !== 'hkd-tax') visible.splice(taxPointIndex, 1)
-    return visible
-  }
-  const titleRow = new Array(H.length).fill('')
-  titleRow[0] = title
-  const body: any[][] = []
-  const merges: any[] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: H.length - 1 } }]
-  rows.forEach((r, i) => {
-    const rr = 2 + i
-    if (r.kind === 'detail') {
-      body.push(visibleValues([
-        r.rangeSpan ? r.range : '', r.pmcSpan ? r.pmc : '', r.factorySpan ? r.factory : '',
-        r.item_no, r.mold_no, r.order_no, r.category, r.product, r.quantity ?? '',
-        r.order_date, r.delivery_date, r.actual_delivery_date, r.delay_days ?? '',
-        r.orderCount, r.delayedCount, r.delayRatio, r.delayAvg, r.quote, r.outPrice, r.outPriceCnyTax, r.exchangeRate, r.taxPoint ?? '', r.priceRatio, r.notes,
-      ]))
-      if (r.rangeSpan > 1) merges.push({ s: { r: rr, c: 0 }, e: { r: rr + r.rangeSpan - 1, c: 0 } })
-      if (r.pmcSpan > 1) merges.push({ s: { r: rr, c: 1 }, e: { r: rr + r.pmcSpan - 1, c: 1 } })
-      if (r.factorySpan > 1) merges.push({ s: { r: rr, c: 2 }, e: { r: rr + r.factorySpan - 1, c: 2 } })
-    } else {
-      body.push(visibleValues([
-        '', '', '', `${r.factory}-小计`, '', '', '', '', '', '', '', '', '',
-        r.orderCount, r.delayedCount, r.delayRatio, r.delayAvg, r.quote, r.outPrice, r.outPriceCnyTax, '', '', r.priceRatio, '',
-      ], false))
-      merges.push({
-        s: { r: rr, c: 3 },
-        e: { r: rr, c: (includeMoldNumber ? 12 : 11) + (includeContractNumber ? 1 : 0) },
-      })
-    }
-  })
-  const ws = XLSX.utils.aoa_to_sheet([titleRow, H, ...body])
-  ws['!merges'] = merges
-  const hkdOutPriceColumn = pricingMode === 'rmb-tax' ? -1 : H.indexOf('外发工价(港币不含税$)')
-  if (hkdOutPriceColumn >= 0) {
-    for (let row = 2; row < body.length + 2; row++) {
-      const cell = ws[XLSX.utils.encode_cell({ r: row, c: hkdOutPriceColumn })]
-      if (cell?.t === 'n') cell.z = '0.000'
-    }
-  }
-  const cw = (v: any) => { let w = 0; for (const ch of String(v ?? '')) w += /[⺀-￿]/.test(ch) ? 2 : 1; return w }
-  ws['!cols'] = H.map((h, c) => {
-    let max = cw(h)
-    for (const row of body) max = Math.max(max, cw(row[c]))
-    return { wch: Math.min(Math.max(max + 2, 6), 32) }
-  })
-  const wb = XLSX.utils.book_new()
-  XLSX.utils.book_append_sheet(wb, ws, '交货延期统计表')
-  XLSX.writeFile(wb, `${title}.xlsx`)
+): Promise<void> {
+  const { downloadDeliveryExcel } = await import('./deliveryExcelExport')
+  await downloadDeliveryExcel({ rows, title, includeMoldNumber, includeContractNumber, pricingMode })
 }
 
 const compactText = (s: any) => String(s ?? '').replace(/\s+/g, '')

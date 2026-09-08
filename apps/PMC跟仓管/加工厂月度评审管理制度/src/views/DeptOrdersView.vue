@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
-import { useRoute, RouterLink } from 'vue-router'
+import { useRoute, RouterLink, onBeforeRouteLeave, onBeforeRouteUpdate } from 'vue-router'
 import AppLayout from '../components/AppLayout.vue'
 import { useOrdersStore } from '../stores/orders'
 import { useFactoriesStore } from '../stores/factories'
@@ -16,6 +16,7 @@ import { deliveryImportFactoryMap } from '../utils/deliveryImportScope'
 import { isPercentOver100 } from '../utils/percentage'
 import { factoryTaxPointFactors } from '../utils/taxPoint'
 import { orderRegion } from '../utils/orderRegion'
+import { paginateDeliveryReport } from '../utils/deliveryReportPagination'
 import type { Order } from '../types/order'
 
 const route = useRoute()
@@ -28,6 +29,11 @@ const confirmingImport = ref(false)
 const pdfInput = ref<HTMLInputElement | null>(null)
 const savingRowId = ref<string | null>(null)
 const savingAll = ref(false)
+const exportingExcel = ref(false)
+const pageLoading = ref(false)
+const pageLoadError = ref('')
+let pageLoadRequest = 0
+const tableScroll = ref<HTMLDivElement | null>(null)
 const saveToast = ref<{ type: 'success' | 'error'; message: string } | null>(null)
 let saveToastTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -42,6 +48,7 @@ function showSaveToast(type: 'success' | 'error', message: string) {
 
 onUnmounted(() => {
   if (saveToastTimer) clearTimeout(saveToastTimer)
+  pageLoadRequest++
 })
 
 const craft = computed(() => route.params.craft as Craft)
@@ -168,6 +175,15 @@ const reportOrders = computed(() => pricingMode.value === 'rmb-tax'
   : deptOrders.value)
 const rows = computed<ReportRow[]>(() =>
   buildDeliveryReport(reportOrders.value, deptName.value, (o) => o.expand?.factory?.name ?? '', pricingMode.value, (o) => factoryTaxPoint(o.factory)))
+const page = ref(1)
+const pageSize = ref(100)
+const reportPage = computed(() => paginateDeliveryReport(rows.value, page.value, pageSize.value))
+const sourceOrdersById = computed(() => new Map(orders.items.map((order) => [order.id, order])))
+watch([search, dateMode, selectedMonth, rangeStart, rangeEnd, pageSize, craft, region], () => { page.value = 1 })
+watch([() => reportPage.value.page, pageLoading], ([value, loading]) => {
+  if (!loading) page.value = value
+})
+watch([page, pageSize], () => { if (tableScroll.value) tableScroll.value.scrollTop = 0 }, { flush: 'post' })
 const showMoldNumber = computed(() => craft.value === 'injection')
 const showContractNumber = computed(() => craft.value === 'sewing')
 const visibleHeaders = computed(() => deliveryHeaders(showMoldNumber.value, showContractNumber.value, pricingMode.value))
@@ -333,8 +349,28 @@ function columnStyleFor(header: string, occurrence = 0) {
 onMounted(() => {
   restoreFreezePreference()
   restoreColumnVisibility()
-  return Promise.all([orders.fetchAll(), factories.fetchAll()])
 })
+
+async function loadScope(force = false) {
+  const request = ++pageLoadRequest
+  pageLoading.value = true
+  pageLoadError.value = ''
+  try {
+    await Promise.all([
+      orders.fetchForScope(craft.value, region.value, { force }),
+      factories.fetchAll(),
+    ])
+  } catch (error: any) {
+    if (request === pageLoadRequest) pageLoadError.value = error?.message || '订单或工厂资料读取失败，请重试'
+    throw error
+  } finally {
+    if (request === pageLoadRequest) pageLoading.value = false
+  }
+}
+
+watch([craft, region], () => {
+  void loadScope().catch(() => { /* loadScope keeps the error beside the retry button. */ })
+}, { immediate: true })
 
 function subtotalValue(header: string, index: number, row: Extract<ReportRow, { kind: 'subtotal' }>) {
   if (header === '加工厂') return `${row.factory}-小计`
@@ -365,7 +401,22 @@ type RowDraft = {
 }
 const drafts = ref<Record<string, RowDraft>>({})
 const dirtyRowIds = ref<Set<string>>(new Set())
+// Keep the source row for edits hidden by filters or pagination until saved.
+const draftRows = new Map<string, DetailRow>()
 const dirtyRowCount = computed(() => dirtyRowIds.value.size)
+
+function confirmLeaveDrafts() {
+  return !dirtyRowCount.value || confirm(`有 ${dirtyRowCount.value} 条修改尚未保存，确定离开并放弃这些修改？`)
+}
+onBeforeRouteLeave(confirmLeaveDrafts)
+onBeforeRouteUpdate((to, from) => {
+  if (to.params.craft === from.params.craft && to.query.region === from.query.region) return true
+  if (!confirmLeaveDrafts()) return false
+  drafts.value = {}
+  draftRows.clear()
+  dirtyRowIds.value.clear()
+  return true
+})
 
 function convertedOutPrice(cnyTaxPrice: number, exchangeRate: number, taxPoint: number | null): number | undefined {
   if (pricingMode.value === 'rmb-tax') return cnyTaxToUntaxedRmb(cnyTaxPrice, taxPoint ?? exchangeRate)
@@ -400,7 +451,7 @@ async function importRows(aoa: any[][]) {
   for (const p of payloads) {
     try { await orders.create(normalizeDeptPricing({ ...p, region: region.value, created_by: auth.userId ?? undefined }) as any); ok++ } catch { fail++ }
   }
-  await orders.fetchAll()
+  await loadScope(true)
   alert(`导入完成：成功 ${ok} 条` + (fail ? `，失败 ${fail} 条(工厂名对不上或缺物料名称)` : '') + '\n(小计/合计行已自动跳过;加工厂名称需与系统一致)')
 }
 
@@ -468,13 +519,13 @@ async function confirmExcelImport() {
   confirmingImport.value = false
   if (ok === importDraftRows.value.length) {
     closeImportDraft()
-    await orders.fetchAll()
+    await loadScope(true)
     showSaveToast('success', `已正式导入 ${ok} 条记录`)
     return
   }
   importDraftRows.value = failedRows
   importDraftError.value = `已导入 ${ok} 条，下方保留 ${failedRows.length} 条保存失败的草稿：${failedMessages.slice(0, 3).join('；')}`
-  await orders.fetchAll()
+  await loadScope(true)
 }
 
 async function importPdf(ev: Event) {
@@ -520,35 +571,35 @@ function draftFromRow(row: DetailRow): RowDraft {
   }
 }
 
-function syncDrafts() {
-  const next: Record<string, RowDraft> = {}
-  for (const row of rows.value) {
-    if (row.kind !== 'detail') continue
-    next[row.id] = drafts.value[row.id] ?? draftFromRow(row)
-  }
-  drafts.value = next
-  const visibleIds = new Set(Object.keys(next))
-  dirtyRowIds.value = new Set([...dirtyRowIds.value].filter((id) => visibleIds.has(id)))
-}
-
-watch(rows, syncDrafts, { immediate: true })
+const pageDefaults = computed(() => new Map(reportPage.value.rows
+  .filter((row): row is DetailRow & { pageKey: string } => row.kind === 'detail')
+  .map((row) => [row.id, draftFromRow(row)])))
 
 function draftValue(row: DetailRow, field: keyof RowDraft) {
-  if (!drafts.value[row.id]) drafts.value[row.id] = draftFromRow(row)
-  return drafts.value[row.id][field]
+  return (drafts.value[row.id] ?? pageDefaults.value.get(row.id) ?? draftFromRow(row))[field]
 }
 
 function setDraftValue(row: DetailRow, field: keyof RowDraft, value: string) {
-  if (!drafts.value[row.id]) drafts.value[row.id] = draftFromRow(row)
-  drafts.value[row.id][field] = value
-  dirtyRowIds.value = new Set(dirtyRowIds.value).add(row.id)
+  const draft = { ...(drafts.value[row.id] ?? pageDefaults.value.get(row.id) ?? draftFromRow(row)), [field]: value }
   if (field === 'unit_price_cny_tax' || field === 'exchange_rate') {
-    const cnyTaxPrice = Number(drafts.value[row.id].unit_price_cny_tax)
-    const exchangeRate = Number(drafts.value[row.id].exchange_rate)
-    drafts.value[row.id].unit_price = drafts.value[row.id].unit_price_cny_tax.trim() && Number.isFinite(cnyTaxPrice) && Number.isFinite(exchangeRate) && exchangeRate > 0
+    const cnyTaxPrice = Number(draft.unit_price_cny_tax)
+    const exchangeRate = Number(draft.exchange_rate)
+    draft.unit_price = draft.unit_price_cny_tax.trim() && Number.isFinite(cnyTaxPrice) && Number.isFinite(exchangeRate) && exchangeRate > 0
       ? formatHkdOutPrice(convertedOutPrice(cnyTaxPrice, exchangeRate, factoryTaxPoint(sourceOrder(row)?.factory)))
       : ''
   }
+  // Replace just this row's draft so v-memo can reuse all other table rows.
+  drafts.value[row.id] = draft
+  draftRows.set(row.id, row)
+  dirtyRowIds.value.add(row.id)
+}
+
+function clearSavedDraft(id: string, submittedDraft: RowDraft | undefined) {
+  // Edits made while a save request was pending must remain unsaved drafts.
+  if (drafts.value[id] !== submittedDraft) return
+  delete drafts.value[id]
+  draftRows.delete(id)
+  dirtyRowIds.value.delete(id)
 }
 
 function parsePrice(val: string) {
@@ -559,21 +610,29 @@ function parsePrice(val: string) {
 }
 
 function sourceOrder(row: DetailRow) {
-  return orders.items.find((order) => order.id === row.id)
+  return sourceOrdersById.value.get(row.id)
 }
 
 function sewingItemParts(row: DetailRow) {
   return splitSewingContractItemNo(row.item_no)
 }
 
-function exportExcel() {
-  exportDeliveryExcel(
-    rows.value,
-    `${deptName.value}外发加工厂交货延期统计表`,
-    showMoldNumber.value,
-    showContractNumber.value,
-    pricingMode.value,
-  )
+async function exportExcel() {
+  if (exportingExcel.value || pageLoading.value || pageLoadError.value || orders.loading || orders.error || !orderCount.value) return
+  exportingExcel.value = true
+  try {
+    await exportDeliveryExcel(
+      rows.value,
+      `${deptName.value}外发加工厂交货延期统计表`,
+      showMoldNumber.value,
+      showContractNumber.value,
+      pricingMode.value,
+    )
+  } catch (error: any) {
+    showSaveToast('error', `导出失败：${error?.message || '请稍后重试'}`)
+  } finally {
+    exportingExcel.value = false
+  }
 }
 
 function rowUpdateData(row: DetailRow): { data?: Partial<any>; error?: string } {
@@ -635,10 +694,11 @@ async function saveRow(row: DetailRow) {
     return
   }
   savingRowId.value = row.id
+  const submittedDraft = drafts.value[row.id]
   try {
     await orders.update(row.id, update.data)
-    await orders.fetchAll()
-    dirtyRowIds.value = new Set([...dirtyRowIds.value].filter((id) => id !== row.id))
+    clearSavedDraft(row.id, submittedDraft)
+    await loadScope(true)
     showSaveToast('success', '保存成功')
   } catch (error: any) {
     const message = error?.response?.message || error?.message || '未知错误'
@@ -650,12 +710,12 @@ async function saveRow(row: DetailRow) {
 
 async function saveAllRows() {
   if (savingAll.value || savingRowId.value) return
-  const targets = rows.value.filter((row): row is DetailRow => row.kind === 'detail' && dirtyRowIds.value.has(row.id))
+  const targets = [...dirtyRowIds.value].map((id) => draftRows.get(id)).filter((row): row is DetailRow => !!row)
   if (!targets.length) {
     showSaveToast('success', '没有需要保存的修改')
     return
   }
-  const updates = targets.map((row) => ({ row, ...rowUpdateData(row) }))
+  const updates = targets.map((row) => ({ row, draft: drafts.value[row.id], ...rowUpdateData(row) }))
   const invalid = updates.find((update) => !update.data)
   if (invalid) {
     showSaveToast('error', `全部保存失败：${invalid.row.product || invalid.row.item_no || '订单'}－${invalid.error}`)
@@ -670,18 +730,19 @@ async function saveAllRows() {
       try {
         await orders.update(update.row.id, update.data!)
         savedIds.push(update.row.id)
+        clearSavedDraft(update.row.id, update.draft)
       } catch (error: any) {
         errors.push(error?.response?.message || error?.message || '未知错误')
       }
     }
-    await orders.fetchAll()
-    const savedSet = new Set(savedIds)
-    dirtyRowIds.value = new Set([...dirtyRowIds.value].filter((id) => !savedSet.has(id)))
+    await loadScope(true)
     if (errors.length) {
       showSaveToast('error', `全部保存完成：成功 ${savedIds.length} 条，失败 ${errors.length} 条`)
     } else {
       showSaveToast('success', `全部保存成功：共 ${savedIds.length} 条`)
     }
+  } catch (error: any) {
+    showSaveToast('error', `已保存 ${savedIds.length} 条，但刷新失败：${error?.message || '请稍后重试'}`)
   } finally {
     savingAll.value = false
   }
@@ -754,14 +815,16 @@ async function copyRow(row: DetailRow) {
     created_by: auth.userId ?? source.created_by,
   }
   await orders.create(payload)
-  await orders.fetchAll()
+  await loadScope(true)
 }
 
 async function removeRow(row: DetailRow) {
   if (!confirm(`确定删除「${row.product || row.order_no || row.item_no}」这条订单记录？此操作不可恢复。`)) return
   await orders.remove(row.id)
   delete drafts.value[row.id]
-  await orders.fetchAll()
+  draftRows.delete(row.id)
+  dirtyRowIds.value.delete(row.id)
+  await loadScope(true)
 }
 </script>
 <template>
@@ -842,7 +905,7 @@ async function removeRow(row: DetailRow) {
       <div class="toolbar">
         <RouterLink to="/orders" class="back">← 部门</RouterLink>
         <h2 style="margin:0">{{ deptName }} · 货期管理</h2>
-        <span class="muted">共 {{ orderCount }} 单</span>
+        <span class="muted" role="status">{{ pageLoading ? `正在加载…已读取 ${orders.loadedCount} 条` : pageLoadError || orders.error ? '数据加载失败' : `共 ${orderCount} 单` }}</span>
         <RouterLink v-if="canEdit" :to="newLink"><button>+ 新增下单</button></RouterLink>
         <button v-if="canEdit" class="save-all" :disabled="savingAll || !!savingRowId" @click="saveAllRows">
           {{ savingAll ? '全部保存中…' : dirtyRowCount ? `全部保存（${dirtyRowCount}）` : '全部保存' }}
@@ -900,15 +963,26 @@ async function removeRow(row: DetailRow) {
           : showContractNumber
             ? '搜索 工厂/PMC/合同号/货号/订单号/产品'
             : '搜索 工厂/PMC/货号/订单号/产品'" />
-        <button @click="exportExcel">导出 Excel</button>
+        <button :disabled="exportingExcel || pageLoading || !!pageLoadError || orders.loading || !!orders.error || !orderCount" @click="exportExcel">{{ exportingExcel ? '导出中…' : '导出 Excel' }}</button>
       </div>
-      <div class="scroll">
+      <div v-if="pageLoadError || orders.error" class="load-error" role="alert">
+        加载失败：{{ pageLoadError || orders.error }} <button class="ghost mini" :disabled="pageLoading" @click="loadScope(true).catch(() => {})">重试</button>
+      </div>
+      <div class="pagination" aria-label="订单分页">
+        <span>第 {{ reportPage.first }}–{{ reportPage.last }} 条 / 共 {{ reportPage.total }} 条</span>
+        <label>每页 <select v-model.number="pageSize" aria-label="每页订单数"><option :value="50">50</option><option :value="100">100</option><option :value="200">200</option></select> 条</label>
+        <button class="ghost mini" :disabled="reportPage.page <= 1" @click="page--">上一页</button>
+        <span>{{ reportPage.page }} / {{ reportPage.pageCount }} 页</span>
+        <button class="ghost mini" :disabled="reportPage.page >= reportPage.pageCount" @click="page++">下一页</button>
+        <span class="muted">导出包含全部筛选结果，小计为完整分组统计</span>
+      </div>
+      <div ref="tableScroll" class="scroll">
         <table class="report" :class="{ 'sewing-report': showContractNumber, 'injection-report': showMoldNumber }">
           <thead>
             <tr>
               <th
                 v-for="(h, headerIndex) in visibleHeaders"
-                :key="h"
+                :key="headerIndex"
                 :class="columnClass(headerIndex)"
                 :style="columnStyle(headerIndex)"
               >{{ h }}</th>
@@ -916,7 +990,8 @@ async function removeRow(row: DetailRow) {
             </tr>
           </thead>
           <tbody>
-            <template v-for="(r, i) in rows" :key="i">
+            <template v-for="r in reportPage.rows" :key="r.pageKey"
+              v-memo="[r, r.kind === 'detail' && drafts[r.id], canEdit, savingAll, savingRowId, freezeTo, hiddenColumnKeys, visibleHeaders]">
               <tr v-if="r.kind === 'detail'">
                 <td v-if="r.rangeSpan" :rowspan="r.rangeSpan" :class="['grp', columnClassFor('范围')]" :style="columnStyleFor('范围')">{{ r.range }}</td>
                 <td :class="columnClassFor('下单PMC')" :style="columnStyleFor('下单PMC')">
@@ -1018,7 +1093,7 @@ async function removeRow(row: DetailRow) {
                 <td v-if="canEdit"></td>
               </tr>
             </template>
-            <tr v-if="!rows.length"><td :colspan="visibleColumnCount" class="hint" style="text-align:center">没有符合条件的订单</td></tr>
+            <tr v-if="!rows.length"><td :colspan="visibleColumnCount" class="hint" style="text-align:center">{{ pageLoading ? '正在加载订单和工厂资料，请稍候…' : pageLoadError || orders.error ? '数据加载失败，请重试' : '没有符合条件的订单' }}</td></tr>
           </tbody>
         </table>
       </div>
@@ -1036,6 +1111,9 @@ async function removeRow(row: DetailRow) {
   overflow: hidden;
 }
 .back { font-size: .9rem; }
+.pagination { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; flex: 0 0 auto; padding: 0 0 .65rem; font-size: .84rem; }
+.pagination select { padding: .25rem .4rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: white; font: inherit; }
+.load-error { flex: 0 0 auto; padding: .5rem 0; color: #b91c1c; }
 .date-filter { display: flex; align-items: center; gap: .35rem; min-height: 38px; }
 .date-filter select, .date-filter input { height: 38px; padding: .35rem .55rem; font-size: .86rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: white; }
 .date-filter input[type="month"] { width: 138px; }

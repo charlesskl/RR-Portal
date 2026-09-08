@@ -3,6 +3,7 @@ import { ref, onMounted, computed } from 'vue'
 import { RouterLink } from 'vue-router'
 import AppLayout from '../components/AppLayout.vue'
 import { useOrdersStore } from '../stores/orders'
+import type { Order } from '../types/order'
 import { useFactoriesStore } from '../stores/factories'
 import { useAuthStore } from '../stores/auth'
 import { allowedCrafts, canEditOrders, allowedRegions } from '../utils/permissions'
@@ -16,8 +17,13 @@ const factories = useFactoriesStore()
 const auth = useAuthStore()
 const fileInput = ref<HTMLInputElement | null>(null)
 const importingExcel = ref(false)
+const exportingExcel = ref(false)
+const exportError = ref('')
 
-onMounted(() => Promise.all([orders.fetchAll(), factories.fetchAll()]))
+async function loadSummary(force = false) {
+  try { await orders.fetchSummary({ force }) } catch { /* The store provides the retry message. */ }
+}
+onMounted(() => loadSummary())
 
 const DEPTS: { craft: Craft; name: string; icon: string }[] = [
   { craft: 'injection', name: '注塑部', icon: '🧩' },
@@ -35,26 +41,42 @@ const regionBlocks = computed(() =>
     region,
     name: REGION_LABELS[region],
     cards: visibleDepts.value.filter((d) => d.craft !== 'electronics' || region !== 'heyuan').map((d) => {
-      const list = orders.items.filter((o) => orderRegion(o) === region && o.expand?.factory?.craft === d.craft)
+      const list = orders.summaryItems.filter((o) => orderRegion(o) === region && o.expand?.factory?.craft === d.craft)
       return { ...d, count: list.length, ongoing: list.filter((o) => o.status !== 'delivered').length }
     }),
   })),
 )
 
 const fname = (o: any) => o.expand?.factory?.name ?? ''
-function craftRows(craft: Craft): ReportRow[] {
+function craftRows(craft: Craft, source: Order[]): ReportRow[] {
   return buildDeliveryReport(
-    orders.items.filter((o) => o.expand?.factory?.craft === craft),
+    source.filter((o) => o.expand?.factory?.craft === craft),
     CRAFT_LABELS[craft],
     fname,
     craft === 'sewing',
   )
 }
 // craft=null 导出全部(各部门拼接);指定部门只导该部门
-function exportExcel(craft: Craft | null) {
-  if (craft) { exportDeliveryExcel(craftRows(craft), `${CRAFT_LABELS[craft]}外发加工厂交货延期统计表`, craft === 'injection'); return }
-  const all = visibleDepts.value.flatMap((d) => craftRows(d.craft))
-  exportDeliveryExcel(all, '全部-外发加工厂交货延期统计表')
+async function exportExcel(craft: Craft | null) {
+  if (exportingExcel.value || orders.summaryLoading) return
+  exportingExcel.value = true
+  exportError.value = ''
+  try {
+    // Card counts use lightweight records; full details are needed only for export.
+    const exportUserId = auth.userId
+    const source = craft ? await orders.fetchForScope(craft) : await orders.fetchAll()
+    if (auth.userId !== exportUserId) throw new Error('登录账号已变更，请重新导出')
+    if (craft) {
+      await exportDeliveryExcel(craftRows(craft, source), `${CRAFT_LABELS[craft]}外发加工厂交货延期统计表`, craft === 'injection')
+    } else {
+      const all = visibleDepts.value.flatMap((d) => craftRows(d.craft, source))
+      await exportDeliveryExcel(all, '全部-外发加工厂交货延期统计表')
+    }
+  } catch (error) {
+    exportError.value = error instanceof Error ? error.message : '导出失败，请重试'
+  } finally {
+    exportingExcel.value = false
+  }
 }
 function onExportDept(ev: Event) {
   const sel = ev.target as HTMLSelectElement
@@ -63,12 +85,13 @@ function onExportDept(ev: Event) {
 }
 
 async function importExcel(ev: Event) {
-  const fByName: Record<string, string> = {}
-  for (const f of factories.items) fByName[f.name] = f.id
   const files = Array.from((ev.target as HTMLInputElement).files ?? [])
   if (!files.length) return
   importingExcel.value = true
   try {
+    await factories.fetchAll()
+    const fByName: Record<string, string> = {}
+    for (const f of factories.items) fByName[f.name] = f.id
     const parsed = await parseDeliveryExcelFiles(files, fByName)
     let ok = 0, fail = parsed.failedRows
     const saveErrors: string[] = []
@@ -82,7 +105,7 @@ async function importExcel(ev: Event) {
         if (!saveErrors.includes(message)) saveErrors.push(message)
       }
     }
-    await orders.fetchAll()
+    await loadSummary(true)
     const issues = [
       parsed.unrecognizedFiles.length ? `未识别 ${parsed.unrecognizedFiles.length} 个文件` : '',
       parsed.readFailedFiles.length ? `读取失败 ${parsed.readFailedFiles.length} 个文件` : '',
@@ -100,10 +123,10 @@ async function importExcel(ev: Event) {
     <div class="page">
       <div class="toolbar">
         <h2 style="margin:0">货期管理</h2>
-        <span class="muted">共 {{ orders.items.length }} 单 · {{ myRegions.length }} 厂区</span>
+        <span class="muted">{{ orders.summaryLoading ? '正在加载订单数量…' : orders.summaryError ? '订单数量暂不可用' : `共 ${orders.summaryItems.length} 单 · ${myRegions.length} 厂区` }}</span>
         <span class="spacer"></span>
-        <button class="ghost" @click="exportExcel(null)">导出全部</button>
-        <select class="dept-export" @change="onExportDept">
+        <button class="ghost" :disabled="orders.summaryLoading || exportingExcel" @click="exportExcel(null)">{{ exportingExcel ? '正在导出…' : '导出全部' }}</button>
+        <select class="dept-export" :disabled="orders.summaryLoading || exportingExcel" @change="onExportDept">
           <option value="">按部门导出…</option>
           <option v-for="d in visibleDepts" :key="d.craft" :value="d.craft">{{ d.name }}</option>
         </select>
@@ -114,6 +137,9 @@ async function importExcel(ev: Event) {
         <RouterLink v-if="canEdit" to="/orders/new"><button>+ 新增下单</button></RouterLink>
       </div>
 
+      <p v-if="orders.summaryError" role="alert" class="load-error">订单读取失败：{{ orders.summaryError }} <button class="ghost mini" @click="loadSummary(true)">重试</button></p>
+      <p v-if="exportError" role="alert" class="load-error">{{ exportError }}</p>
+      <p v-if="exportingExcel" role="status" class="muted">{{ orders.loading ? `正在读取导出数据 ${orders.loadedCount}${orders.totalCount ? ` / ${orders.totalCount}` : ''} 条…` : '正在生成 Excel 文件，请稍候…' }}</p>
       <section v-for="b in regionBlocks" :key="b.region" class="region-block">
         <h3 class="region-title">{{ b.name }}厂区</h3>
         <div class="dept-grid">
@@ -121,7 +147,9 @@ async function importExcel(ev: Event) {
             <span class="ico">{{ c.icon }}</span>
             <div class="info">
               <span class="name">{{ c.name }}</span>
-              <span class="sub">{{ c.count }} 单<span v-if="c.ongoing" class="ongoing"> · {{ c.ongoing }} 单进行中</span></span>
+              <span v-if="orders.summaryLoading" class="sub">加载中…</span>
+              <span v-else-if="orders.summaryError" class="sub">加载失败，请重试</span>
+              <span v-else class="sub">{{ c.count }} 单<span v-if="c.ongoing" class="ongoing"> · {{ c.ongoing }} 单进行中</span></span>
             </div>
             <span class="arrow">→</span>
           </RouterLink>
@@ -131,6 +159,7 @@ async function importExcel(ev: Event) {
   </AppLayout>
 </template>
 <style scoped>
+.load-error { color: #b91c1c; }
 .dept-export { height: 34px; padding: 0 .6rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); cursor: pointer; }
 .region-block { margin-top: 1.5rem; }
 .region-title { margin: 0 0 .8rem; font-size: 1.05rem; color: #1f2533; padding-left: .6rem; border-left: 4px solid var(--primary, #4f46e5); }

@@ -2095,7 +2095,7 @@ function filterRecords() {
       if (!visibleIds.has(id)) _selectedIds.delete(id);
     }
 
-    wrap.innerHTML = `<table id="recordsTable" style="table-layout:fixed;width:100%">
+    wrap.innerHTML = `<table id="recordsTable" style="table-layout:fixed;width:100%;min-width:1590px">
       <colgroup>
         <col style="width:36px"/>   <!-- 复选框 -->
         <col style="width:44px"/>   <!-- # -->
@@ -2104,7 +2104,7 @@ function filterRecords() {
         <col style="width:110px"/>  <!-- 供应商 -->
         <col style="width:80px"/>   <!-- 客户 -->
         <col style="width:92px"/>   <!-- 货号 -->
-        <col style="width:auto"/>   <!-- 款式名称 -->
+        <col style="width:160px"/>  <!-- 款式名称 -->
         <col style="width:102px"/>  <!-- PO号 -->
         <col style="width:60px"/>   <!-- 类型 -->
         <col style="width:86px"/>   <!-- 来料数 -->

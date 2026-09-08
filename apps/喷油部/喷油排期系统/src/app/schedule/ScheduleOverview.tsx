@@ -184,7 +184,7 @@ export default function ScheduleOverview({ orderFilter, pendingOrderCount = 0, p
                                 onClick={() => setDetail({ date, line: l, item: it })}
                               >
                                 <span className="nm">{it.partName}</span>
-                                <span className="qd">{it.qty.toLocaleString()}<span className="dao">道{it.stepNo}</span></span>
+                                <span className="qd">{it.qty.toLocaleString()}</span>
                               </button>
                             </li>
                           ))}
@@ -213,7 +213,7 @@ export default function ScheduleOverview({ orderFilter, pendingOrderCount = 0, p
             <div className="sc-detail-top">
               <span>{detail.date} · 周{WEEKNAME[parseYmd(detail.date).getDay()]}</span>
               <span>{detail.line.name}</span>
-              <span>{detail.item.craft} · 道{detail.item.stepNo}</span>
+              <span>{detail.item.craft}</span>
             </div>
             <dl className="sc-detail-grid">
               <div><dt>货号</dt><dd>{detail.item.productNo || "-"}</dd></div>
@@ -294,11 +294,10 @@ const CSS = `
   .sc-plan:focus-visible { outline:2px solid #34d399; outline-offset:1px; }
   .sc-plan .nm { color:#374151; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .sc-plan .qd { white-space:nowrap; color:#111827; font-weight:600; font-variant-numeric:tabular-nums; }
-  .sc-plan .dao { font-size:9px; padding:0 4px; border-radius:5px; color:#fff; margin-left:3px; }
-  .sc-spray { background:#ecfdf5; } .sc-spray .dao { background:#34d399; }
-  .sc-print { background:#eff6ff; } .sc-print .dao { background:#60a5fa; }
-  .sc-uv { background:#f5f3ff; } .sc-uv .dao { background:#a78bfa; }
-  .sc-other { background:#f8fafc; } .sc-other .dao { background:#94a3b8; }
+  .sc-spray { background:#ecfdf5; }
+  .sc-print { background:#eff6ff; }
+  .sc-uv { background:#f5f3ff; }
+  .sc-other { background:#f8fafc; }
   .sc-blank { color:#d1d5db; text-align:center; padding:18px 0; font-size:12px; }
   .sc-empty { padding:24px; text-align:center; color:#94a3b8; font-size:13px; }
   .sc-modal { position:fixed; inset:0; background:rgba(15,23,42,.28); z-index:50; display:flex; align-items:center; justify-content:center; padding:18px; }

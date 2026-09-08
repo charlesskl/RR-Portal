@@ -12,7 +12,7 @@ RUN npm ci --no-audit --no-fund --cache /tmp/npm-cache
 
 COPY . .
 # 生产部署在 RR Portal 的 /toyqms/ 子路径：构建时注入 basePath，
-# 静态导出产物会落在 out/toyqms/ 下，由后端在 /toyqms/* 完整路径上托管（nginx 不再剥前缀）。
+# 静态资源 URL 带 /toyqms 前缀，nginx 剥前缀后命中容器内 out/_next/*。
 RUN NEXT_PUBLIC_BASE_PATH=/toyqms npm run build
 
 # ── 阶段二：运行时（后端 + 静态前端 + SQLite 数据）──

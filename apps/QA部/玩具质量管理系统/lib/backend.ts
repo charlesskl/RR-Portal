@@ -9,14 +9,47 @@ const TOKEN_KEY = "toyqms.remote.session.v1";
 
 export const DEFAULT_BACKEND_URL = "http://127.0.0.1:4313";
 
+// Empty url means "same origin": the page was served by the ToyQMS backend
+// itself (single-container / nginx /api proxy deployment).
 export function getBackendSettings(): BackendSettings {
   if (typeof window === "undefined") return { mode: "local", url: DEFAULT_BACKEND_URL };
   try {
-    const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) || "") as Partial<BackendSettings>;
-    return { mode: saved.mode === "remote" ? "remote" : "local", url: (saved.url || DEFAULT_BACKEND_URL).replace(/\/+$/, "") };
+    const raw = localStorage.getItem(SETTINGS_KEY);
+    if (raw === null) return { mode: "local", url: "" };
+    const saved = JSON.parse(raw) as Partial<BackendSettings>;
+    return { mode: saved.mode === "remote" ? "remote" : "local", url: (saved.url ?? "").replace(/\/+$/, "") };
   } catch {
-    return { mode: "local", url: DEFAULT_BACKEND_URL };
+    return { mode: "local", url: "" };
   }
+}
+
+export function hasExplicitBackendSettings(): boolean {
+  if (typeof window === "undefined") return false;
+  return localStorage.getItem(SETTINGS_KEY) !== null;
+}
+
+// Effective base URL for API calls: explicit url, otherwise same origin.
+export function getBackendBaseUrl(): string {
+  const { url } = getBackendSettings();
+  if (url) return url;
+  if (typeof window !== "undefined") return window.location.origin;
+  return DEFAULT_BACKEND_URL;
+}
+
+// When the page is served by the ToyQMS backend (Docker / nginx deployment),
+// probe the same-origin API once and switch to remote mode automatically so
+// every device opening the site shares the same accounts and data.
+export async function autoDetectBackend(): Promise<boolean> {
+  if (typeof window === "undefined" || hasExplicitBackendSettings()) return false;
+  try {
+    const response = await fetch("/api/health");
+    const data = await response.json().catch(() => null);
+    if (response.ok && data?.product === "ToyQMS") {
+      saveBackendSettings({ mode: "remote", url: "" });
+      return true;
+    }
+  } catch { /* no same-origin backend */ }
+  return false;
 }
 
 export function saveBackendSettings(settings: BackendSettings) {
@@ -43,11 +76,11 @@ export class ApiError extends Error {
 }
 
 export async function apiFetch<T>(path: string, options: { method?: string; body?: unknown } = {}): Promise<T> {
-  const { url } = getBackendSettings();
+  const base = getBackendBaseUrl();
   const token = getRemoteToken();
   let response: Response;
   try {
-    response = await fetch(`${url}/api${path}`, {
+    response = await fetch(`${base}/api${path}`, {
       method: options.method || "GET",
       headers: {
         ...(options.body !== undefined ? { "content-type": "application/json" } : {}),
@@ -56,7 +89,7 @@ export async function apiFetch<T>(path: string, options: { method?: string; body
       body: options.body === undefined ? undefined : JSON.stringify(options.body)
     });
   } catch {
-    throw new ApiError(0, `无法连接后端服务（${url}）。请确认 server 已启动，或在系统设置中切回本地模式。`);
+    throw new ApiError(0, `无法连接后端服务（${base}）。请确认 server 已启动，或在系统设置中切回本地模式。`);
   }
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {

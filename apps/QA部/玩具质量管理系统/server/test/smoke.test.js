@@ -188,6 +188,33 @@ const main = async () => {
   const caps = await api("GET", "/caps");
   assert.deepEqual(caps.data[0].complaintIds, [], "CAP complaintIds must be cleaned");
 
+  // bulk user import (local -> remote migration): passwords must survive
+  const encoder = new TextEncoder();
+  const saltBytes = crypto.getRandomValues(new Uint8Array(16));
+  const salt = Buffer.from(saltBytes).toString("base64");
+  const material = await crypto.subtle.importKey("raw", encoder.encode("imported-pass-1"), "PBKDF2", false, ["deriveBits"]);
+  const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", salt: saltBytes, iterations: 120000, hash: "SHA-256" }, material, 256);
+  const hash = Buffer.from(new Uint8Array(bits)).toString("base64");
+  const importedUsers = await api("POST", "/users/import", {
+    users: [{
+      name: "海英", responsibility: "测试", loginName: "ying", category: "all",
+      permissions: ["view_dashboard", "view_complaints", "manage_complaints", "delete_complaints", "view_analysis", "manage_classification", "manage_translation", "import_data", "view_cap", "manage_cap", "view_reports", "export_reports", "manage_users", "manage_settings", "view_audit"],
+      enabled: true, mustChangePassword: false, passwordHash: hash, passwordSalt: salt, createdAt: new Date().toISOString()
+    }]
+  });
+  assert.equal(importedUsers.data.imported, 1);
+  // import clears every session -> old token rejected
+  const stale = await api("GET", "/complaints", undefined, false);
+  assert.equal(stale.status, 401, "sessions must be invalidated after import");
+  // imported user logs in with the original password
+  const login3 = await api("POST", "/auth/login", { loginName: "YING", password: "imported-pass-1" });
+  assert.equal(login3.data.user.name, "海英");
+  assert.equal(login3.data.user.mustChangePassword, false);
+  // re-login as admin for any later checks
+  token = (await api("POST", "/auth/login", { loginName: "JC", password: "12345678" })).data.token;
+  const usersAfterImport = await api("GET", "/users");
+  assert.equal(usersAfterImport.data.length, 3);
+
   console.log("✓ smoke test passed");
   server.kill();
   fs.rmSync(dataDir, { recursive: true, force: true });

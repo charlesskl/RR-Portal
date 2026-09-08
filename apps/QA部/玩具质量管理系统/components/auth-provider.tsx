@@ -2,7 +2,7 @@
 import { createContext,useCallback,useContext,useEffect,useMemo,useState } from "react";
 import { usePathname,useRouter } from "next/navigation";
 import { defaultPermissions,hasPermission,normalizeLoginName,routePermission,type Permission,type PublicUser,type ToyQMSUser,type UserCategory } from "@/lib/auth";
-import { apiFetch,getBackendSettings,getRemoteToken,setRemoteToken } from "@/lib/backend";
+import { apiFetch,autoDetectBackend,getBackendSettings,getRemoteToken,setRemoteToken } from "@/lib/backend";
 
 const USERS_KEY="toyqms.users.v1",SESSION_KEY="toyqms.session.v1",DEFAULT_PASSWORD="12345678";
 const encoder=new TextEncoder();
@@ -21,7 +21,11 @@ function readUsers(){try{return JSON.parse(localStorage.getItem(USERS_KEY)||"[]"
 function writeUsers(users:ToyQMSUser[]){localStorage.setItem(USERS_KEY,JSON.stringify(users))}
 
 export function AuthProvider({children}:{children:React.ReactNode}){
-  const remote=getBackendSettings().mode==="remote";
+  const [remote,setRemote]=useState(()=>getBackendSettings().mode==="remote");
+  // On deployments where the backend serves this page (Docker / nginx),
+  // detect the same-origin API once and switch to remote automatically, so
+  // every device shares the same accounts and data without manual setup.
+  useEffect(()=>{void autoDetectBackend().then(found=>{if(found)setRemote(true)})},[]);
   const [loading,setLoading]=useState(true),[users,setUsers]=useState<PublicUser[]>([]),[user,setUser]=useState<PublicUser|null>(null);
   const refreshUsers=useCallback(()=>{
     if(remote){apiFetch<PublicUser[]>("/users").then(setUsers).catch(()=>setUsers([]));return}

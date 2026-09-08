@@ -248,7 +248,7 @@ test('single entry modal can save and continue entering the next record', () => 
   assert.match(indexSource, /id="btnSaveContinue"[^>]*onclick="saveRecord\(\{ continueEntry: true \}\)"/);
   assert.match(indexSource, /保存并继续录入/);
   assert.match(appSource, /function resetSingleEntryFormForNext\(\)/);
-  assert.match(appSource, /continueEntry \? '记录已添加，可继续录入下一条/);
+  assert.match(appSource, /continueEntry \? '记录已添加并提交审核，可继续录入下一条/);
 });
 
 test('account editor clearly exposes password reset fields', () => {

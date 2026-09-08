@@ -3101,3 +3101,30 @@ body.theme-light #loginPassword {
   width: 100%;
   box-sizing: border-box;
 }
+
+/* ── 审核中心 ── */
+.review-tabs { display: flex; gap: 8px; }
+.review-tabs .mode-tab { padding: 8px 16px; }
+.review-count {
+  display: inline-block; min-width: 18px; padding: 0 5px; margin-left: 4px;
+  border-radius: 9px; background: var(--accent); color: #001018;
+  font-size: 11px; font-weight: 700; text-align: center;
+}
+.review-hint {
+  font-size: 12px; color: var(--text-dim); line-height: 1.6;
+  padding: 10px 14px; background: var(--bg-card);
+  border: 1px solid var(--border); border-radius: var(--radius-lg);
+}
+.nav-badge {
+  display: inline-block; min-width: 18px; padding: 0 5px; margin-left: 6px;
+  border-radius: 9px; background: var(--red); color: #fff;
+  font-size: 10px; font-weight: 700; text-align: center;
+}
+.review-status-badge {
+  display: inline-flex; align-items: center; padding: 2px 9px;
+  border-radius: 10px; font-size: 11px; font-weight: 600;
+}
+.rs-pending  { background: rgba(255,180,0,.15); color: var(--yellow); }
+.rs-rejected { background: rgba(255,80,80,.15);  color: var(--red); }
+.rs-approved { background: rgba(0,220,130,.15);  color: var(--green); }
+.reject-reason-text { font-size: 11px; color: var(--red); margin-top: 3px; }

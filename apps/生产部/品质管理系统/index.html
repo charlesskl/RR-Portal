@@ -88,6 +88,9 @@
     <a class="nav-item" data-page="records" onclick="showPage('records')">
       <span class="nav-icon">☰</span><span>验货明细</span>
     </a>
+    <a class="nav-item" data-page="review" onclick="showPage('review')">
+      <span class="nav-icon">◑</span><span>审核中心</span><span class="nav-badge" id="reviewNavBadge" style="display:none"></span>
+    </a>
     <a class="nav-item" data-page="analysis" onclick="showPage('analysis')">
       <span class="nav-icon">◈</span><span>统计分析</span>
     </a>
@@ -268,6 +271,26 @@
       </div>
 
       <div class="table-wrap" id="recordsTableWrap"></div>
+    </div>
+  </div>
+
+  <!-- PAGE: REVIEW -->
+  <div class="page" id="page-review">
+    <div class="page-inner">
+      <div class="toolbar">
+        <div class="toolbar-left">
+          <div class="review-tabs">
+            <button class="mode-tab active" id="reviewTabPending"  onclick="setReviewTab('pending')">待审核 <span class="review-count" id="reviewCountPending">0</span></button>
+            <button class="mode-tab" id="reviewTabRejected" onclick="setReviewTab('rejected')">已退回 <span class="review-count" id="reviewCountRejected">0</span></button>
+            <button class="mode-tab" id="reviewTabApproved" onclick="setReviewTab('approved')">已审核</button>
+          </div>
+        </div>
+        <div class="toolbar-right">
+          <button class="btn-secondary" onclick="renderReviewPage()" title="重新加载审核列表">↻ 刷新</button>
+        </div>
+      </div>
+      <div class="review-hint">新录入的记录先进入「待审核」，审核通过后才进入验货明细；已审核记录如发现出错，需由审核人「反审核」并填写退回原因，退回修改保存后会重新进入待审核。</div>
+      <div class="table-wrap" id="reviewTableWrap"></div>
     </div>
   </div>
 
@@ -562,6 +585,25 @@
   <div class="page" id="page-users"></div>
 
 </main>
+
+<div class="modal-overlay" id="rejectOverlay" onclick="if(event.target===this)closeRejectModal()">
+  <div class="modal" style="width:min(460px,92vw)">
+    <div class="modal-header">
+      <span>反审核退回</span>
+      <button class="modal-close" onclick="closeRejectModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div id="rejectTargetInfo" style="font-size:12px;color:var(--text-dim);margin-bottom:10px"></div>
+      <label style="font-size:11px;color:var(--text-dim);letter-spacing:.5px">退回原因（必填，录入人据此修改）</label>
+      <textarea id="rejectReasonInput" class="batch-textarea" style="min-height:96px;margin-top:6px"
+                placeholder="例如：货号写错 / 数量与送货单不符 / 判定有误…"></textarea>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-secondary" onclick="closeRejectModal()">取消</button>
+      <button class="btn-primary" onclick="confirmReject()">确认反审核</button>
+    </div>
+  </div>
+</div>
 
 <!-- ═══════════════ MODAL: ADD/EDIT RECORD ═══════════════ -->
 <div class="modal-overlay" id="modalOverlay" onclick="closeModal(event)">

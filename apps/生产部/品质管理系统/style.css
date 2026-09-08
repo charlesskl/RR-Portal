@@ -1857,6 +1857,17 @@ tbody tr.row-selected td {
   border-bottom-color: rgba(0,200,255,.12);
 }
 
+/* 验货明细：锁定列（手动开关，列数可选） */
+#recordsTable th.col-pinned, #recordsTable td.col-pinned {
+  position: sticky; z-index: 4; background: var(--bg-card);
+}
+#recordsTable thead th.col-pinned { z-index: 8; background: var(--bg-hover); }
+#recordsTable tbody tr:hover td.col-pinned { background: var(--bg-hover); }
+#recordsTable tbody tr.row-selected td.col-pinned {
+  background: linear-gradient(rgba(0,200,255,.06), rgba(0,200,255,.06)), var(--bg-card);
+}
+#recordsTable .col-pinned-last { box-shadow: 2px 0 0 var(--border); }
+
 /* ── 批量删除按钮 ── */
 .btn-batch-del {
   border-color: rgba(255,61,90,.3);

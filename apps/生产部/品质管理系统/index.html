@@ -245,6 +245,18 @@
           <span class="selected-count" id="selectedCount" style="display:none"></span>
           <button class="btn-secondary btn-refresh-records" id="btnRefreshRecords"
                   onclick="refreshRecordsPage()" title="从服务器重新加载验货明细">↻ 刷新</button>
+          <button class="btn-secondary" id="btnColLock" onclick="toggleColLock()"
+                  title="冻结/取消冻结左侧列，横向滚动时保持可见">📌 锁定列</button>
+          <select class="filter-select" id="colLockDepth" onchange="onColLockDepthChange()"
+                  title="选择锁定到第几列" disabled>
+            <option value="2">锁到 #</option>
+            <option value="3">锁到 来料日期</option>
+            <option value="4">锁到 修改日期</option>
+            <option value="5" selected>锁到 供应商</option>
+            <option value="6">锁到 客户</option>
+            <option value="7">锁到 货号</option>
+            <option value="8">锁到 款式名称</option>
+          </select>
           <span id="batchDelWrap" style="display:inline-flex;align-items:center;gap:6px">
           <button class="btn-secondary btn-batch-del" id="btnBatchDel"
                   onclick="batchDelete()" disabled>批量删除</button>

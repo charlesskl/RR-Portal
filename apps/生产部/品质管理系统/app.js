@@ -2214,8 +2214,75 @@ function filterRecords() {
 
     _syncCheckAllState();
     _updateBatchBtn();
+    applyColLock();   /* 表格重建后重新应用列锁定 */
   } catch(e) { console.error('[filterRecords]', e); }
 }
+
+/* ════════════════════════════════════════
+   验货明细：手动锁定列（列数用户可选）
+════════════════════════════════════════ */
+const COLLOCK_KEY       = 'xingxin_qms_records_col_lock';
+const COLLOCK_DEPTH_KEY = 'xingxin_qms_records_col_lock_depth';
+const COLLOCK_DEFAULT   = 5;   /* 默认冻结到「供应商」列 */
+let colLockOn    = false;
+let colLockCount = COLLOCK_DEFAULT;
+try {
+  colLockOn = localStorage.getItem(COLLOCK_KEY) === '1';
+  const d = parseInt(localStorage.getItem(COLLOCK_DEPTH_KEY), 10);
+  if (d >= 2 && d <= 8) colLockCount = d;
+} catch(e) {}
+
+/* 用户自选锁定深度（锁到第几列） */
+function onColLockDepthChange() {
+  const sel = document.getElementById('colLockDepth');
+  if (!sel) return;
+  colLockCount = parseInt(sel.value, 10) || COLLOCK_DEFAULT;
+  try { localStorage.setItem(COLLOCK_DEPTH_KEY, String(colLockCount)); } catch(e) {}
+  applyColLock();
+}
+
+function toggleColLock() {
+  colLockOn = !colLockOn;
+  try { localStorage.setItem(COLLOCK_KEY, colLockOn ? '1' : '0'); } catch(e) {}
+  applyColLock();
+}
+
+function applyColLock() {
+  const btn = document.getElementById('btnColLock');
+  if (btn) {
+    btn.classList.toggle('btn-primary',   colLockOn);
+    btn.classList.toggle('btn-secondary', !colLockOn);
+    btn.textContent = colLockOn ? '📌 已锁定' : '📌 锁定列';
+  }
+  const sel = document.getElementById('colLockDepth');
+  if (sel) { sel.value = String(colLockCount); sel.disabled = !colLockOn; }
+  const tbl = document.getElementById('recordsTable');
+  if (!tbl) return;
+  /* 先清除旧状态 */
+  tbl.querySelectorAll('.col-pinned').forEach(c => {
+    c.classList.remove('col-pinned', 'col-pinned-last');
+    c.style.left = '';
+  });
+  if (!colLockOn) return;
+  const headRow = tbl.querySelector('thead tr');
+  if (!headRow || !headRow.children.length) return;
+  /* 页面隐藏时 offsetWidth 为 0，等 showPage 渲染后再应用 */
+  if (headRow.children[0].offsetWidth === 0) return;
+  const n = Math.min(colLockCount, headRow.children.length);
+  let acc = 0;
+  const lefts = [];
+  for (let i = 0; i < n; i++) { lefts.push(acc); acc += headRow.children[i].offsetWidth; }
+  tbl.querySelectorAll('thead tr, tbody tr').forEach(tr => {
+    for (let i = 0; i < n && i < tr.children.length; i++) {
+      const c = tr.children[i];
+      c.classList.add('col-pinned');
+      if (i === n - 1) c.classList.add('col-pinned-last');
+      c.style.left = lefts[i] + 'px';
+    }
+  });
+}
+/* 窗口尺寸变化后表格列宽会变，需要重算冻结位置 */
+window.addEventListener('resize', () => { if (colLockOn) applyColLock(); });
 
 /* ── 全选 checkbox 变化 ── */
 function _onCheckAll(el) {

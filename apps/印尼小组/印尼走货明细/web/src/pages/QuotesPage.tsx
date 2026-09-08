@@ -15,6 +15,14 @@ interface Quote {
   notes?: string
 }
 
+interface QuoteFilters {
+  supplier?: string
+  productCode?: string
+  matName?: string
+  spec?: string
+  currency?: string
+}
+
 const CURR = [
   { value: '¥',   label: '¥ 人民币' },
   { value: 'HK$', label: 'HK$ 港币' },
@@ -30,6 +38,7 @@ export default function QuotesPage() {
   const { message } = App.useApp()
   const [rows, setRows] = useState<Quote[]>([])
   const [filter, setFilter] = useState('')
+  const [fieldFilters, setFieldFilters] = useState<QuoteFilters>({})
   const [loading, setLoading] = useState(false)
   const [dirty, setDirty] = useState(false)
   const [selKeys, setSelKeys] = useState<React.Key[]>([])
@@ -87,6 +96,13 @@ export default function QuotesPage() {
     setRows((r) => r.filter((_, idx) => !sel.has(idx)))
     setSelKeys([])
     setDirty(true)
+  }
+  function clearAll() {
+    if (!rows.length) return
+    setRows([])
+    setSelKeys([])
+    setDirty(true)
+    message.success('已清空（记得点 💾 保存全部 才会写入后端）')
   }
   // 币种归一：把任意写法映射到下拉选项 ¥/HK$/US$/Rp（顺序重要：HK$ 含 $，先判）
   function inferCurrency(text: any): string {
@@ -278,10 +294,84 @@ export default function QuotesPage() {
   const filtered = useMemo(() => rows
     .map((q, _i) => ({ q, _i }))
     .filter(({ q }) => {
+      if (fieldFilters.supplier && q.supplier !== fieldFilters.supplier) return false
+      if (fieldFilters.productCode && q.productCode !== fieldFilters.productCode) return false
+      if (fieldFilters.matName && q.matName !== fieldFilters.matName) return false
+      if (fieldFilters.spec && q.spec !== fieldFilters.spec) return false
+      if (fieldFilters.currency && (q.currency || '¥') !== fieldFilters.currency) return false
       if (!filter) return true
-      const s = filter.toLowerCase()
+      const s = filter.trim().toLowerCase()
       return ((q.supplier || '') + (q.productCode || '') + (q.matName || '') + (q.spec || '') + (q.notes || '')).toLowerCase().includes(s)
-    }), [rows, filter])
+    }), [rows, filter, fieldFilters])
+
+  const filterOptions = useMemo(() => {
+    const optionsFor = (getValue: (quote: Quote) => string | undefined) => Array.from(new Set(
+      rows.map(getValue).map((value) => (value || '').trim()).filter(Boolean),
+    )).sort((a, b) => a.localeCompare(b, 'zh')).map((value) => ({ value, label: value }))
+    return {
+      supplier: optionsFor((q) => q.supplier),
+      productCode: optionsFor((q) => q.productCode),
+      matName: optionsFor((q) => q.matName),
+      spec: optionsFor((q) => q.spec),
+      currency: CURR.filter((option) => rows.some((q) => (q.currency || '¥') === option.value)),
+    }
+  }, [rows])
+
+  const hasActiveFilters = Boolean(filter || Object.values(fieldFilters).some(Boolean))
+  function clearFilters() {
+    setFilter('')
+    setFieldFilters({})
+  }
+
+  function fillVisibleRange(sourceIndex: number, targetIndex: number, field: keyof Quote) {
+    const visibleIndices = filtered.map((row) => row._i)
+    const sourcePosition = visibleIndices.indexOf(sourceIndex)
+    const targetPosition = visibleIndices.indexOf(targetIndex)
+    if (sourcePosition < 0 || targetPosition < 0 || sourcePosition === targetPosition) return
+    const from = Math.min(sourcePosition, targetPosition)
+    const to = Math.max(sourcePosition, targetPosition)
+    const affected = new Set(visibleIndices.slice(from, to + 1))
+    const value = rows[sourceIndex]?.[field]
+    setRows((current) => current.map((quote, index) => affected.has(index) ? { ...quote, [field]: value } : quote))
+    setDirty(true)
+    message.success(`已向${targetPosition > sourcePosition ? '下' : '上'}填充 ${affected.size} 行`)
+  }
+
+  function FillableCell({ rowIndex, field, children }: {
+    rowIndex: number
+    field: keyof Quote
+    children: React.ReactNode
+  }) {
+    return (
+      <div
+        style={{ position: 'relative', paddingRight: 3 }}
+        onDragOver={(event) => {
+          if (event.dataTransfer.types.includes('application/x-quote-fill')) event.preventDefault()
+        }}
+        onDrop={(event) => {
+          event.preventDefault()
+          try {
+            const payload = JSON.parse(event.dataTransfer.getData('application/x-quote-fill'))
+            if (payload.field === field) fillVisibleRange(Number(payload.rowIndex), rowIndex, field)
+          } catch { /* 忽略非报价表拖动 */ }
+        }}
+      >
+        {children}
+        <span
+          draggable
+          title="拖动填充相同内容"
+          onDragStart={(event) => {
+            event.dataTransfer.effectAllowed = 'copy'
+            event.dataTransfer.setData('application/x-quote-fill', JSON.stringify({ rowIndex, field }))
+          }}
+          style={{
+            position: 'absolute', right: -2, bottom: -2, width: 9, height: 9,
+            border: '1px solid #1677ff', background: '#fff', cursor: 'crosshair', zIndex: 2,
+          }}
+        />
+      </div>
+    )
+  }
 
   // Tiered-pricing group count
   const tierGroups = useMemo(() => {
@@ -301,12 +391,21 @@ export default function QuotesPage() {
         }
         extra={
           <Space wrap>
-            <Input.Search allowClear placeholder="搜索 供应商/货号/物料/规格/备注" style={{ width: 280 }}
-              onSearch={setFilter} onChange={(e) => !e.target.value && setFilter('')} />
+            <Input.Search allowClear value={filter} placeholder="搜索 供应商/货号/物料/规格/备注" style={{ width: 280 }}
+              onSearch={setFilter} onChange={(e) => setFilter(e.target.value)} />
             <Button onClick={load} disabled={loading}>🔄 重新加载</Button>
             <Button onClick={add}>➕ 新增</Button>
             <Popconfirm title={`删除选中的 ${selKeys.length} 条?`} onConfirm={delSelected} disabled={!selKeys.length}>
               <Button danger disabled={!selKeys.length}>🗑 批量删除 ({selKeys.length})</Button>
+            </Popconfirm>
+            <Popconfirm
+              title={`清空全部 ${rows.length} 条报价？此操作不可撤销`}
+              okText="清空"
+              okButtonProps={{ danger: true }}
+              onConfirm={clearAll}
+              disabled={!rows.length}
+            >
+              <Button danger disabled={!rows.length}>🗑 清空全部</Button>
             </Popconfirm>
             <Button onClick={() => fileRef.current?.click()}>📥 导入 Excel</Button>
             <input ref={fileRef} type="file" accept=".xlsx,.xls" style={{ display: 'none' }}
@@ -316,6 +415,26 @@ export default function QuotesPage() {
           </Space>
         }
       >
+        <Space wrap style={{ marginBottom: 12 }}>
+          <Typography.Text strong>筛选：</Typography.Text>
+          <Select allowClear showSearch optionFilterProp="label" placeholder="供应商" style={{ width: 220 }}
+            value={fieldFilters.supplier} options={filterOptions.supplier}
+            onChange={(value) => setFieldFilters((current) => ({ ...current, supplier: value }))} />
+          <Select allowClear showSearch optionFilterProp="label" placeholder="货号" style={{ width: 150 }}
+            value={fieldFilters.productCode} options={filterOptions.productCode}
+            onChange={(value) => setFieldFilters((current) => ({ ...current, productCode: value }))} />
+          <Select allowClear showSearch optionFilterProp="label" placeholder="物料名" style={{ width: 180 }}
+            value={fieldFilters.matName} options={filterOptions.matName}
+            onChange={(value) => setFieldFilters((current) => ({ ...current, matName: value }))} />
+          <Select allowClear showSearch optionFilterProp="label" placeholder="规格" style={{ width: 160 }}
+            value={fieldFilters.spec} options={filterOptions.spec}
+            onChange={(value) => setFieldFilters((current) => ({ ...current, spec: value }))} />
+          <Select allowClear placeholder="币种" style={{ width: 130 }}
+            value={fieldFilters.currency} options={filterOptions.currency}
+            onChange={(value) => setFieldFilters((current) => ({ ...current, currency: value }))} />
+          <Button disabled={!hasActiveFilters} onClick={clearFilters}>清除筛选</Button>
+          <Typography.Text type="secondary">显示 {filtered.length} / {rows.length} 条</Typography.Text>
+        </Space>
         <Table
           rowKey={(r) => String(r._i)}
           size="small"
@@ -326,15 +445,15 @@ export default function QuotesPage() {
           scroll={{ x: 1360 }}
           columns={[
             { title: '#', width: 50, align: 'center', render: (_v, _r, i) => i + 1 },
-            { title: '供应商', width: 200, render: (_v, r) => <Input size="small" value={r.q.supplier} onChange={(e) => patch(r._i, 'supplier', e.target.value)} /> },
-            { title: '货号', width: 140, render: (_v, r) => <Input size="small" value={r.q.productCode} placeholder="具体货号/共用" onChange={(e) => patch(r._i, 'productCode', e.target.value)} /> },
-            { title: '物料名', width: 200, render: (_v, r) => <Input size="small" value={r.q.matName} onChange={(e) => patch(r._i, 'matName', e.target.value)} /> },
-            { title: '规格', width: 160, render: (_v, r) => <Input size="small" value={r.q.spec} onChange={(e) => patch(r._i, 'spec', e.target.value)} /> },
-            { title: '起订量', width: 100, render: (_v, r) => <InputNumber size="small" min={0} value={r.q.minQty} onChange={(v) => patch(r._i, 'minQty', v ?? 0)} style={{ width: '100%' }} /> },
-            { title: '单价', width: 120, render: (_v, r) => <InputNumber size="small" min={0} step={0.0001} value={r.q.unitPrice} onChange={(v) => patch(r._i, 'unitPrice', v ?? 0)} style={{ width: '100%' }} /> },
-            { title: '币种', width: 110, render: (_v, r) => <Select size="small" value={r.q.currency || '¥'} options={CURR} onChange={(x) => patch(r._i, 'currency', x)} style={{ width: '100%' }} /> },
-            { title: '日期', width: 120, render: (_v, r) => <Input size="small" value={r.q.quoteDate} placeholder="YYYY-MM-DD" onChange={(e) => patch(r._i, 'quoteDate', e.target.value)} /> },
-            { title: '备注', width: 160, render: (_v, r) => <Input size="small" value={r.q.notes} onChange={(e) => patch(r._i, 'notes', e.target.value)} /> },
+            { title: '供应商', width: 200, render: (_v, r) => <FillableCell rowIndex={r._i} field="supplier"><Input size="small" value={r.q.supplier} onChange={(e) => patch(r._i, 'supplier', e.target.value)} /></FillableCell> },
+            { title: '货号', width: 140, render: (_v, r) => <FillableCell rowIndex={r._i} field="productCode"><Input size="small" value={r.q.productCode} placeholder="具体货号/共用" onChange={(e) => patch(r._i, 'productCode', e.target.value)} /></FillableCell> },
+            { title: '物料名', width: 200, render: (_v, r) => <FillableCell rowIndex={r._i} field="matName"><Input size="small" value={r.q.matName} onChange={(e) => patch(r._i, 'matName', e.target.value)} /></FillableCell> },
+            { title: '规格', width: 160, render: (_v, r) => <FillableCell rowIndex={r._i} field="spec"><Input size="small" value={r.q.spec} onChange={(e) => patch(r._i, 'spec', e.target.value)} /></FillableCell> },
+            { title: '起订量', width: 100, render: (_v, r) => <FillableCell rowIndex={r._i} field="minQty"><InputNumber size="small" min={0} value={r.q.minQty} onChange={(v) => patch(r._i, 'minQty', v ?? 0)} style={{ width: '100%' }} /></FillableCell> },
+            { title: '单价', width: 120, render: (_v, r) => <FillableCell rowIndex={r._i} field="unitPrice"><InputNumber size="small" min={0} step={0.0001} value={r.q.unitPrice} onChange={(v) => patch(r._i, 'unitPrice', v ?? 0)} style={{ width: '100%' }} /></FillableCell> },
+            { title: '币种', width: 110, render: (_v, r) => <FillableCell rowIndex={r._i} field="currency"><Select size="small" value={r.q.currency || '¥'} options={CURR} onChange={(x) => patch(r._i, 'currency', x)} style={{ width: '100%' }} /></FillableCell> },
+            { title: '日期', width: 120, render: (_v, r) => <FillableCell rowIndex={r._i} field="quoteDate"><Input size="small" value={r.q.quoteDate} placeholder="YYYY-MM-DD" onChange={(e) => patch(r._i, 'quoteDate', e.target.value)} /></FillableCell> },
+            { title: '备注', width: 160, render: (_v, r) => <FillableCell rowIndex={r._i} field="notes"><Input size="small" value={r.q.notes} onChange={(e) => patch(r._i, 'notes', e.target.value)} /></FillableCell> },
             {
               title: '', width: 50, fixed: 'right',
               render: (_v, r) => (

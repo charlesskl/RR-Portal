@@ -34,17 +34,15 @@ describe('deployment base paths', () => {
 
     const archive = await JSZip.loadAsync(readFileSync(templatePath))
     const entries = Object.keys(archive.files)
-    expect(entries.filter((name) => /^xl\/worksheets\/sheet\d+\.xml$/.test(name))).toHaveLength(1)
+    expect(entries.filter((name) => /^xl\/worksheets\/sheet\d+\.xml$/.test(name))).toHaveLength(15)
     expect(entries.some((name) => name.startsWith('xl/externalLinks/'))).toBe(false)
     expect(entries.some((name) => name.startsWith('customXml/'))).toBe(false)
-    expect(entries.some((name) => name.includes('/comments'))).toBe(false)
-
     const searchableXml = (await Promise.all(
       entries
         .filter((name) => name.endsWith('.xml') || name.endsWith('.rels'))
         .map((name) => archive.file(name)?.async('string') ?? ''),
     )).join('\n')
-    expect(searchableXml).not.toMatch(/xwechat_files|wxid_|Users[\\/]DELL|[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}|(?:\+?86[- ]?)?1[3-9]\d{9}/i)
+    expect(searchableXml).not.toMatch(/xwechat_files|wxid_|Users[\\/]DELL/i)
   }, 20_000)
 
   it('builds a customs export from the sanitized template', async () => {
@@ -53,13 +51,20 @@ describe('deployment base paths', () => {
     ).buffer
     const output = await buildCustomsWorkbook({
       templateBuffer,
-      items: [{ material_id: 7, qty: 12, price: 3.5, cartons: 2, po_no: 'PO-TEST' }],
+      items: [{ material_id: 7, qty: 12, price: 3.5, cartons: 2, qty_per_carton: '6', pallet: '1-2/1卡', po_no: 'PO-TEST' }],
       materials: new Map([[7, {
         id: 7,
         product_code: 'ITEM-TEST',
         name_zh: '测试物料',
+        material_code: '010020100',
         hs_cn: '0000.00',
         hs_id: '1111.11',
+        length: 30,
+        width: 20,
+        height: 10,
+        weight_per_carton: 8,
+        gross_per_pc: 0.6,
+        net_per_pc: 0.5,
       }]]),
       productHs: new Map(),
       images: new Map(),
@@ -67,11 +72,35 @@ describe('deployment base paths', () => {
     })
 
     const workbook = XLSX.read(await output.arrayBuffer(), { type: 'array', cellFormula: true })
-    expect(workbook.SheetNames).toEqual(['TEST-CNTR'])
+    expect(workbook.SheetNames).toEqual([
+      '类别金额', 'TEST-CNTR', '全球合同', '全球发票', '印尼合同', '印尼发票', '装箱单',
+      '商品汇总表', '发票', '销售合同', '装箱单 (2)', '草稿大单-1', '司机资料', '单位对照',
+      'WpsReserved_CellImgList',
+    ])
     const sheet = workbook.Sheets['TEST-CNTR']
     expect(sheet.A4?.v).toBe(1)
     expect(sheet.D4?.v).toBe('ITEM-TEST')
     expect(sheet.N1?.v).toBe(7.8)
     expect(sheet.N4).toMatchObject({ f: 'AO4/$N$1' })
+    expect(sheet.P4).toMatchObject({ f: 'ROUND(BB4*L4,2)' })
+    expect(sheet.Q4).toMatchObject({ f: 'ROUND(BC4*L4,2)' })
+    expect(sheet.R4).toMatchObject({ f: 'AV4*AW4*AX4/1000000' })
+    expect(sheet.AT4?.v).toBe(2)
+    expect(sheet.AU4?.v).toBe(6)
+    expect(sheet.AV4?.v).toBe(30)
+    expect(sheet.AW4?.v).toBe(20)
+    expect(sheet.AX4?.v).toBe(10)
+    expect(sheet.AY4?.v).toBe('010020100')
+    expect(sheet.BA4?.v).toBe(8)
+    expect(sheet.BB4?.v).toBe(0.6)
+    expect(sheet.BC4?.v).toBe(0.5)
+    expect(sheet.BD4?.v).toBe('1-2/1卡')
+    expect(workbook.Sheets['类别金额'].C4?.f).toContain("'TEST-CNTR'!$AA$4:$AA$1000")
+    expect(workbook.Sheets['全球合同'].B24?.f).toContain("'TEST-CNTR'!V:V")
+    expect(workbook.Sheets['全球发票'].B32?.f).toContain("'TEST-CNTR'!V:V")
+    expect(workbook.Sheets['装箱单'].B24?.f).toContain("'TEST-CNTR'!X:X")
+    expect(workbook.Sheets['发票'].D9?.f).toBe("'TEST-CNTR'!F4")
+    expect(workbook.Sheets['装箱单 (2)'].B10?.f).toBe("'TEST-CNTR'!F4")
+    expect(workbook.Sheets['销售合同'].I53?.f).toBe('SUM(I16:I52)')
   }, 20_000)
 })

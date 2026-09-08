@@ -1,8 +1,8 @@
 // 出口报关明细 Excel 导出（基于模板 template_报关明细.xlsx）
 // 移植自旧 HTML 印尼走货明细生成系统.html 的 buildExcel(6408) / setCell(6395) /
 //   excelDate(6402) / dataUrlToBytes(6588) / injectOoxmlImages(6598)
-// 与旧版保持 1:1：56 列布局、模板公式保留、表头黄底、计算列灰底、报关公司置顶、
-//   产品图片用 JSZip 注入到第 19 列(U)。
+// 与清溪出货样表保持 1:1：56 列布局、模板公式保留、表头黄底、计算列灰底、
+//   产品图片用 JSZip 注入到第 20 列(T)。
 import * as XLSX from 'xlsx-js-style'
 import JSZip from 'jszip'
 import type { Material } from '../api/client'
@@ -93,17 +93,187 @@ function excelDate(d: any): number | string {
   return Math.floor((dt.getTime() - Date.UTC(1899, 11, 30)) / 86400000)
 }
 
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function rewriteSheetReferences(wb: XLSX.WorkBook, oldName: string, newName: string) {
+  if (oldName === newName) return
+  const escaped = escapeRegExp(oldName)
+  const patterns = [
+    new RegExp(`'${escaped.replace(/'/g, "''")}'!`, 'g'),
+    new RegExp(`(?:\\[\\d+\\])?${escaped}!`, 'g'),
+  ]
+  for (const sheetName of wb.SheetNames) {
+    const sheet = wb.Sheets[sheetName]
+    for (const cell of Object.values(sheet) as any[]) {
+      if (!cell || typeof cell !== 'object' || typeof cell.f !== 'string') continue
+      let formula = cell.f
+      for (const pattern of patterns) formula = formula.replace(pattern, `'${newName.replace(/'/g, "''")}'!`)
+      cell.f = formula
+    }
+  }
+}
+
+function replaceTemplateShipmentLiterals(wb: XLSX.WorkBook, form: CustomsExportForm, newName: string) {
+  const replacements: Array<[RegExp, string]> = [
+    [/WHSU7042278/g, newName],
+    [/WHAC079825/g, (form.blNo || '').trim()],
+  ]
+  for (const sheetName of wb.SheetNames) {
+    const sheet = wb.Sheets[sheetName]
+    for (const cell of Object.values(sheet) as any[]) {
+      if (!cell || typeof cell !== 'object' || typeof cell.v !== 'string' || cell.f) continue
+      let value = cell.v
+      for (const [pattern, replacement] of replacements) value = value.replace(pattern, replacement)
+      if (value !== cell.v) {
+        cell.v = value
+        delete cell.w
+      }
+    }
+  }
+}
+
+function setPreservingStyle(ws: XLSX.WorkSheet | undefined, address: string, value: string | number | null, formula = false) {
+  if (!ws) return
+  const existing: any = (ws as any)[address] || {}
+  delete existing.f
+  delete existing.F
+  delete existing.w
+  if (value == null || value === '') {
+    existing.t = 's'
+    existing.v = ''
+  } else if (formula && typeof value === 'string') {
+    existing.t = 'n'
+    existing.v = 0
+    existing.f = value.startsWith('=') ? value.slice(1) : value
+  } else {
+    existing.t = typeof value === 'number' ? 'n' : 's'
+    existing.v = value
+  }
+  ;(ws as any)[address] = existing
+}
+
+function formulaRef(sheetName: string, cell: string) {
+  return `='${sheetName.replace(/'/g, "''")}'!${cell}`
+}
+
+function populateLinkedDocuments(wb: XLSX.WorkBook, mainName: string, sorted: CustomsItem[]) {
+  type Group = { contract: string; invoice: string; indo: boolean; indices: number[] }
+  const groups: Group[] = []
+  const byKey = new Map<string, Group>()
+  sorted.forEach((item, index) => {
+    const contract = (item.contract_no || '').trim()
+    const invoice = (item.invoice_no || '').trim()
+    const head = (item.bl_head || '').trim()
+    const indo = /印尼|INDONESIA|MANUFACTURING/i.test(head)
+    const key = `${contract}\u0000${invoice}\u0000${indo ? 'ID' : 'GLOBAL'}`
+    let group = byKey.get(key)
+    if (!group) {
+      group = { contract, invoice, indo, indices: [] }
+      groups.push(group)
+      byKey.set(key, group)
+    }
+    group.indices.push(index + 1)
+  })
+
+  let globalGroups = groups.filter(g => !g.indo)
+  let indoGroups = groups.filter(g => g.indo)
+  // 旧数据没有维护提单抬头时，沿用参考模板的 3 份全球单据 + 2 份印尼单据容量。
+  if (!indoGroups.length && globalGroups.length > 3) {
+    indoGroups = globalGroups.slice(3)
+    globalGroups = globalGroups.slice(0, 3)
+  }
+
+  const globalSlots = [
+    { contractHeader: 'H5', contractRows: [24, 40], invoiceHeader: 'J9', invoiceContract: 'J13', invoiceRows: [32, 47], packingHeader: 'D9', packingRows: [24, 39] },
+    { contractHeader: 'H59', contractRows: [78, 82], invoiceHeader: 'J64', invoiceContract: 'J68', invoiceRows: [85, 90], packingHeader: 'D51', packingRows: [66, 71] },
+    { contractHeader: 'H101', contractRows: [120, 127], invoiceHeader: 'J103', invoiceContract: 'J107', invoiceRows: [124, 130], packingHeader: 'D84', packingRows: [99, 104] },
+  ]
+  const indoSlots = [
+    { contractHeader: 'H7', contractRows: [26, 32], invoiceHeader: 'J10', invoiceContract: 'J14', invoiceRows: [24, 29], packingHeader: 'D117', packingRows: [132, 137] },
+    { contractHeader: 'H52', contractRows: [71, 86], invoiceHeader: 'J42', invoiceContract: 'J46', invoiceRows: [56, 72], packingHeader: 'D149', packingRows: [164, 180] },
+  ]
+
+  const applyGroup = (group: Group | undefined, slot: typeof globalSlots[number], indo: boolean) => {
+    const contractSheet = wb.Sheets[indo ? '印尼合同' : '全球合同']
+    const invoiceSheet = wb.Sheets[indo ? '印尼发票' : '全球发票']
+    const packingSheet = wb.Sheets['装箱单']
+    setPreservingStyle(contractSheet, slot.contractHeader, group?.contract || '')
+    setPreservingStyle(invoiceSheet, slot.invoiceHeader, group?.invoice || '')
+    setPreservingStyle(invoiceSheet, slot.invoiceContract, group?.contract || '')
+    setPreservingStyle(packingSheet, slot.packingHeader, group?.invoice || '')
+    const fillSerials = (sheet: XLSX.WorkSheet | undefined, [from, to]: number[]) => {
+      for (let row = from; row <= to; row++) {
+        setPreservingStyle(sheet, `A${row}`, group?.indices[row - from] ?? '')
+      }
+    }
+    fillSerials(contractSheet, slot.contractRows)
+    fillSerials(invoiceSheet, slot.invoiceRows)
+    fillSerials(packingSheet, slot.packingRows)
+  }
+  globalSlots.forEach((slot, i) => applyGroup(globalGroups[i], slot, false))
+  indoSlots.forEach((slot, i) => applyGroup(indoGroups[i], slot, true))
+
+  // 通用发票、销售合同、装箱单(2)和草稿大单共用同一套序号及主明细公式。
+  const invoiceSheet = wb.Sheets['发票']
+  const genericInvoiceRows = [...Array.from({ length: 15 }, (_, i) => 9 + i), ...Array.from({ length: 18 }, (_, i) => 25 + i)]
+  genericInvoiceRows.forEach((row, index) => {
+    const mainRow = index + 4
+    const active = index < sorted.length
+    setPreservingStyle(invoiceSheet, `B${row}`, active ? index + 1 : '')
+    const refs: Record<string, string> = {
+      C: `AY${mainRow}`, D: `F${mainRow}`, E: `G${mainRow}`, F: `L${mainRow}`, G: `M${mainRow}`,
+      H: `Z${mainRow}`, I: `AA${mainRow}`, J: `P${mainRow}`, K: `Q${mainRow}`, L: `AT${mainRow}`,
+    }
+    for (const [col, mainCell] of Object.entries(refs)) {
+      setPreservingStyle(invoiceSheet, `${col}${row}`, active ? formulaRef(mainName, mainCell) : '')
+      if (active) setPreservingStyle(invoiceSheet, `${col}${row}`, formulaRef(mainName, mainCell), true)
+    }
+    setPreservingStyle(invoiceSheet, `M${row}`, active ? '箱' : '')
+  })
+
+  const salesSheet = wb.Sheets['销售合同']
+  for (let row = 16; row <= 52; row++) setPreservingStyle(salesSheet, `A${row}`, row - 16 < sorted.length ? row - 15 : '')
+  // 修复参考文件末行原有的 #REF!，使合计仍来自通用发票。
+  setPreservingStyle(salesSheet, 'E52', "='发票'!F43", true)
+  setPreservingStyle(salesSheet, 'F52', "='发票'!G43", true)
+  setPreservingStyle(salesSheet, 'I52', "='发票'!I43", true)
+  setPreservingStyle(salesSheet, 'I53', '=SUM(I16:I52)', true)
+
+  const simplePacking = wb.Sheets['装箱单 (2)']
+  for (let row = 10; row <= 46; row++) {
+    const index = row - 10
+    const mainRow = index + 4
+    const active = index < sorted.length
+    const refs: Record<string, string> = { B: `F${mainRow}`, C: `AT${mainRow}`, E: `L${mainRow}`, G: `P${mainRow}`, H: `Q${mainRow}` }
+    setPreservingStyle(simplePacking, `A${row}`, active ? index + 1 : '')
+    for (const [col, mainCell] of Object.entries(refs)) setPreservingStyle(simplePacking, `${col}${row}`, active ? formulaRef(mainName, mainCell) : '', active)
+    setPreservingStyle(simplePacking, `D${row}`, active ? '箱' : '')
+    setPreservingStyle(simplePacking, `F${row}`, active ? '件' : '')
+  }
+}
+
 export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<Blob> {
   const { templateBuffer, items, materials, productHs, images, form } = input
-  const AUX = new Set(['类别金额', '实业合同', '实业发票', '装箱单', '商品汇总表', '发票',
+  const AUX = new Set(['类别金额', '实业合同', '实业发票', '全球合同', '全球发票', '印尼合同', '印尼发票', '装箱单', '商品汇总表', '发票',
     '出货地址', '销售合同', '装箱单 (2)', '草稿大单-1', '司机资料', '单位对照', 'WpsReserved_CellImgList'])
   const wbObj = XLSX.read(templateBuffer, { type: 'array', cellFormula: true })
   const oldName = wbObj.SheetNames.find(n => !AUX.has(n))!
   const newName = (form.containerNo || '').trim() || oldName
+  rewriteSheetReferences(wbObj, oldName, newName)
+  replaceTemplateShipmentLiterals(wbObj, form, newName)
   wbObj.Sheets[newName] = wbObj.Sheets[oldName]
   if (newName !== oldName) delete wbObj.Sheets[oldName]
   wbObj.SheetNames = wbObj.SheetNames.map(n => n === oldName ? newName : n)
   const ws = wbObj.Sheets[newName]
+
+  // 不允许参考模板里的旧柜数据残留；只保留前三行表头与样式。
+  for (const key of Object.keys(ws)) {
+    if (key.startsWith('!')) continue
+    const pos = XLSX.utils.decode_cell(key)
+    if (pos.r >= 3) delete (ws as any)[key]
+  }
 
   const tf = {
     containerNo: newName,
@@ -137,6 +307,8 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
     return sa.localeCompare(sb, 'zh')
   })
 
+  populateLinkedDocuments(wbObj, newName, sorted)
+
   const floatImages: { rowZeroIdx: number; bytes: Uint8Array; ext: string }[] = []
   sorted.forEach((it, i) => {
     const m = matOf(it)
@@ -161,9 +333,9 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
     setCell(ws, ri, 12, '件', 's')
     setCell(ws, ri, 13, '=AO' + (ri + 1) + '/$N$1', 'n')
     setCell(ws, ri, 14, '=N' + (ri + 1) + '*L' + (ri + 1), 'n')
-    setCell(ws, ri, 15, '=ROUND(BC' + (ri + 1) + '*L' + (ri + 1) + ',2)', 'n')
-    setCell(ws, ri, 16, '=ROUND(BD' + (ri + 1) + '*L' + (ri + 1) + ',2)', 'n')
-    setCell(ws, ri, 17, '=AW' + (ri + 1) + '*AX' + (ri + 1) + '*AY' + (ri + 1) + '/1000000', 'n')
+    setCell(ws, ri, 15, '=ROUND(BB' + (ri + 1) + '*L' + (ri + 1) + ',2)', 'n')
+    setCell(ws, ri, 16, '=ROUND(BC' + (ri + 1) + '*L' + (ri + 1) + ',2)', 'n')
+    setCell(ws, ri, 17, '=AV' + (ri + 1) + '*AW' + (ri + 1) + '*AX' + (ri + 1) + '/1000000', 'n')
     setCell(ws, ri, 18, '=R' + (ri + 1) + '*AT' + (ri + 1), 'n')
     setCell(ws, ri, 20, it.product_use || '', 's')
     setCell(ws, ri, 21, it.contract_no || '', 's')
@@ -200,13 +372,15 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
     setCell(ws, ri, 45, it.cartons || 0, 'n')
     const qpc = it.qty_per_carton != null && it.qty_per_carton !== '' ? it.qty_per_carton : (m?.qty_per_carton ?? 0)
     setCell(ws, ri, 46, qpc, (typeof qpc === 'string' && /[^\d.]/.test(qpc)) ? 's' : 'n')
-    setCell(ws, ri, 47, it.pallet || '', 's')
-    setCell(ws, ri, 48, m?.length || 0, 'n')
-    setCell(ws, ri, 49, m?.width || 0, 'n')
-    setCell(ws, ri, 50, m?.height || 0, 'n')
-    setCell(ws, ri, 53, m?.weight_per_carton || 0, 'n')
-    setCell(ws, ri, 54, m?.gross_per_pc || 0, 'n')
-    setCell(ws, ri, 55, m?.net_per_pc || 0, 'n')
+    setCell(ws, ri, 47, m?.length || 0, 'n')
+    setCell(ws, ri, 48, m?.width || 0, 'n')
+    setCell(ws, ri, 49, m?.height || 0, 'n')
+    setCell(ws, ri, 50, m?.material_code || '', 's')
+    setCell(ws, ri, 51, '', 's')
+    setCell(ws, ri, 52, m?.weight_per_carton || 0, 'n')
+    setCell(ws, ri, 53, m?.gross_per_pc || 0, 'n')
+    setCell(ws, ri, 54, m?.net_per_pc || 0, 'n')
+    setCell(ws, ri, 55, it.pallet || '', 's')
   })
   if (sorted.length) ws['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: 3 + sorted.length - 1, c: 55 } })
 
@@ -243,17 +417,19 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
   }
 
   const COL_WIDTHS = [
-    6, 14, 14, 10, 18, 24, 30, 14, 10, 8, 12, 12, 8,
-    12, 12, 12, 12, 12, 14, 10, 16, 16, 14, 14, 14, 12, 14, 16,
-    18, 14, 16, 14, 14, 24, 14, 14, 16,
-    26, 14, 14, 12, 14, 14, 24, 24,
-    10, 14, 14, 8, 8, 8, 14, 10, 10, 10,
+    10, 17, 16, 18, 18, 19, 25, 25, 12, 9, 19, 18, 8,
+    21, 13, 25, 21, 13, 13, 33, 21, 13, 13, 13, 13, 13, 13, 18,
+    21, 13, 13, 13, 13, 23, 24, 20, 35,
+    32, 17, 26, 19, 16, 16, 35, 34,
+    11, 25, 13, 13, 13, 25, 24, 21, 13, 25, 18,
   ]
-  ws['!cols'] = COL_WIDTHS.map(w => ({ wch: w }))
+  const HIDDEN_COLS = new Set([13, 28, 33, 34, 35, 36, 50, 51, 52, 54])
+  ws['!cols'] = COL_WIDTHS.map((w, c) => ({ wch: w, hidden: HIDDEN_COLS.has(c) }))
   const rows: any[] = []
-  rows[0] = { hpt: 24 }; rows[1] = { hpt: 24 }; rows[2] = { hpt: 36 }
-  for (let i = 0; i < sorted.length; i++) rows[3 + i] = { hpt: 55 }
+  rows[0] = { hpt: 50 }; rows[1] = { hpt: 50 }; rows[2] = { hpt: 104 }
+  for (let i = 0; i < sorted.length; i++) rows[3 + i] = { hpt: 109 }
   ws['!rows'] = rows
+  ws['!autofilter'] = { ref: `A3:BD${Math.max(3, sorted.length + 3)}` }
 
   const out = XLSX.write(wbObj, { type: 'array', bookType: 'xlsx' })
   const outZip = await JSZip.loadAsync(out)

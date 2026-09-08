@@ -3,13 +3,11 @@ import { createContext,useCallback,useContext,useEffect,useMemo,useState } from 
 import { usePathname,useRouter } from "next/navigation";
 import { defaultPermissions,hasPermission,normalizeLoginName,routePermission,type Permission,type PublicUser,type ToyQMSUser,type UserCategory } from "@/lib/auth";
 import { apiFetch,getBackendSettings,getRemoteToken,setRemoteToken } from "@/lib/backend";
+import { hashPasswordCompat,randomId,randomSaltBase64 } from "@/lib/crypto-fallback";
 
 const USERS_KEY="toyqms.users.v1",SESSION_KEY="toyqms.session.v1",DEFAULT_PASSWORD="12345678";
-const encoder=new TextEncoder();
-const bytesToBase64=(bytes:Uint8Array)=>btoa(String.fromCharCode(...bytes));
-const base64ToBytes=(value:string)=>Uint8Array.from(atob(value),char=>char.charCodeAt(0));
-async function hashPassword(password:string,salt:string){const material=await crypto.subtle.importKey("raw",encoder.encode(password),"PBKDF2",false,["deriveBits"]);const bits=await crypto.subtle.deriveBits({name:"PBKDF2",salt:base64ToBytes(salt),iterations:120000,hash:"SHA-256"},material,256);return bytesToBase64(new Uint8Array(bits))}
-async function passwordFields(password:string){const salt=bytesToBase64(crypto.getRandomValues(new Uint8Array(16)));return {passwordSalt:salt,passwordHash:await hashPassword(password,salt)}}
+const hashPassword=hashPasswordCompat;
+async function passwordFields(password:string){const salt=randomSaltBase64();return {passwordSalt:salt,passwordHash:await hashPassword(password,salt)}}
 const publicUser=(user:ToyQMSUser):PublicUser=>{const {passwordHash:_hash,passwordSalt:_salt,...safe}=user;return safe};
 
 type CreateUserInput={name:string;responsibility:string;loginName:string;category:UserCategory;permissions?:Permission[]};
@@ -35,7 +33,7 @@ export function AuthProvider({children}:{children:React.ReactNode}){
       }catch{setUser(null)}
       setLoading(false);return;
     }
-    let stored=readUsers();if(!stored.length){const now=new Date().toISOString();const credentials=await passwordFields(DEFAULT_PASSWORD);stored=[{id:crypto.randomUUID(),name:"JC",responsibility:"质量总监",loginName:"JC",category:"all",permissions:[...defaultPermissions.all],enabled:true,mustChangePassword:true,...credentials,createdAt:now,updatedAt:now,isPrimary:true}];writeUsers(stored)}setUsers(stored.map(publicUser));const sessionId=localStorage.getItem(SESSION_KEY);const active=stored.find(item=>item.id===sessionId&&item.enabled);setUser(active?publicUser(active):null);if(!active)localStorage.removeItem(SESSION_KEY);setLoading(false);
+    let stored=readUsers();if(!stored.length){const now=new Date().toISOString();const credentials=await passwordFields(DEFAULT_PASSWORD);stored=[{id:randomId(),name:"JC",responsibility:"质量总监",loginName:"JC",category:"all",permissions:[...defaultPermissions.all],enabled:true,mustChangePassword:true,...credentials,createdAt:now,updatedAt:now,isPrimary:true}];writeUsers(stored)}setUsers(stored.map(publicUser));const sessionId=localStorage.getItem(SESSION_KEY);const active=stored.find(item=>item.id===sessionId&&item.enabled);setUser(active?publicUser(active):null);if(!active)localStorage.removeItem(SESSION_KEY);setLoading(false);
   })()},[remote]);
   const commit=useCallback((next:ToyQMSUser[])=>{writeUsers(next);setUsers(next.map(publicUser));if(user){const current=next.find(item=>item.id===user.id&&item.enabled);setUser(current?publicUser(current):null);if(!current)localStorage.removeItem(SESSION_KEY)}},[user]);
   const login=useCallback(async(loginName:string,password:string)=>{
@@ -58,7 +56,7 @@ export function AuthProvider({children}:{children:React.ReactNode}){
   const createUser=useCallback(async(input:CreateUserInput)=>{
     requirePermission("manage_users");
     if(remote){await apiFetch("/users",{method:"POST",body:input});refreshUsers();return}
-    const stored=readUsers();const loginName=input.loginName.trim();if(!input.name.trim()||!input.responsibility.trim()||!loginName)throw new Error("请填写名称、职责和登录名称。");if(stored.some(item=>normalizeLoginName(item.loginName)===normalizeLoginName(loginName)))throw new Error("登录名称已存在。");const now=new Date().toISOString();const credentials=await passwordFields(DEFAULT_PASSWORD);stored.push({id:crypto.randomUUID(),name:input.name.trim(),responsibility:input.responsibility.trim(),loginName,category:input.category,permissions:[...(input.permissions??defaultPermissions[input.category])],enabled:true,mustChangePassword:true,...credentials,createdAt:now,updatedAt:now,isPrimary:false});commit(stored);
+    const stored=readUsers();const loginName=input.loginName.trim();if(!input.name.trim()||!input.responsibility.trim()||!loginName)throw new Error("请填写名称、职责和登录名称。");if(stored.some(item=>normalizeLoginName(item.loginName)===normalizeLoginName(loginName)))throw new Error("登录名称已存在。");const now=new Date().toISOString();const credentials=await passwordFields(DEFAULT_PASSWORD);stored.push({id:randomId(),name:input.name.trim(),responsibility:input.responsibility.trim(),loginName,category:input.category,permissions:[...(input.permissions??defaultPermissions[input.category])],enabled:true,mustChangePassword:true,...credentials,createdAt:now,updatedAt:now,isPrimary:false});commit(stored);
   },[remote,requirePermission,commit,refreshUsers]);
   const updateUser=useCallback(async(id:string,input:UpdateUserInput)=>{
     requirePermission("manage_users");

@@ -10,6 +10,7 @@ import {
 } from "@heroicons/react/24/outline";
 import { useComplaintData } from "@/components/data-provider";
 import { useAuth } from "@/components/auth-provider";
+import { randomId } from "@/lib/crypto-fallback";
 import { DataTable, Filters, KpiCard, PageTitle } from "@/components/ui";
 import {
   customerOf,
@@ -840,7 +841,7 @@ export default function Complaints() {
           save={async (input) => {
             const now = new Date().toISOString();
             const record: ComplaintRecord = {
-              id: crypto.randomUUID(),
+              id: randomId(),
               sourceSubmissionId: input.sourceSubmissionId || null,
               sourceFileName: "手工新增",
               sourceWorksheetName: "手工录入",

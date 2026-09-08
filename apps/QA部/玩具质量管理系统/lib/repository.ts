@@ -1,6 +1,7 @@
 import type { CAPInput, CAPRecord, ComplaintRecord, ComplaintUpdate, ComplaintWorkflowStatus, ImportSummary, IssueTypeDefinition, LocalDataBackup, SeriesDefinition, SystemConfig, TranslationImportRow, TranslationImportSummary, TranslationUpdate } from "./types";
 import { duplicateKeyOf, translationSourceHashOf } from "./excel";
 import { getBackendSettings } from "./backend";
+import { randomId } from "./crypto-fallback";
 import { RemoteComplaintRepository } from "./remote-repository";
 
 export interface ComplaintRepository {
@@ -97,7 +98,7 @@ export class LocalStorageComplaintRepository implements ComplaintRepository {
     if(id&&!current)throw new Error("CAP 记录不存在或已被删除。");
     const allowedIds=new Set(records.map(record=>record.id));const complaintIds=[...new Set(input.complaintIds)].filter(item=>allowedIds.has(item));
     const capNumber=current?.capNumber||this.nextCAPNumber(caps);
-    const saved:CAPRecord={...input,complaintIds,id:current?.id||crypto.randomUUID(),capNumber,createdAt:current?.createdAt||now,updatedAt:now};
+    const saved:CAPRecord={...input,complaintIds,id:current?.id||randomId(),capNumber,createdAt:current?.createdAt||now,updatedAt:now};
     const nextCaps=current?caps.map(cap=>cap.id===current.id?saved:cap):[saved,...caps];
     const oldIds=new Set(current?.complaintIds||[]);const newIds=new Set(complaintIds);
     const nextRecords=records.map(record=>{if(!oldIds.has(record.id)&&!newIds.has(record.id))return record;const capIds=new Set(record.capIds||[]);if(newIds.has(record.id))capIds.add(saved.id);else capIds.delete(saved.id);return {...record,capIds:[...capIds],updatedAt:now}});

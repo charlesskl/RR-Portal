@@ -2849,6 +2849,8 @@ function parseBatchInput(text) {
 
   const rows = [], errors = [];
   const today = todayStr();
+  const _meB = _liveUser();
+  const defaultQc = (_meB && (_meB.name || _meB.username)) || '';   /* 检验员缺省=当前登录账号 */
 
   lines.forEach((line, idx) => {
     const delim = line.includes('\t') ? '\t' : ',';
@@ -2889,7 +2891,7 @@ function parseBatchInput(text) {
       sampleQty: smpNum || null,
       pass: passNum, fail: finalFail,
       defectRate: rate, result,
-      defect, qc, remark: '',
+      defect, qc: qc || defaultQc, remark: '',
     });
   });
 
@@ -3136,6 +3138,9 @@ function clearForm() {
   ['f_date','f_inspDate','f_supplier','f_client','f_productNo','f_productName',
    'f_deliveryNo','f_orderNo','f_qty','f_sampleQty','f_pass','f_fail','f_defectRate','f_defect','f_qc','f_remark']
     .forEach(id => setVal(id, ''));
+  /* 检验员：默认当前登录账号（姓名优先，没有再退回用户名），仍可手动改 */
+  const _meQc = _liveUser();
+  if (_meQc) setVal('f_qc', _meQc.name || _meQc.username || '');
   setVal('f_type',   '成品');
   setVal('f_result', 'PASS');
   _loadDefectRows([]);   /* 清空不良明细 */

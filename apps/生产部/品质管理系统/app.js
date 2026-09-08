@@ -2801,6 +2801,7 @@ function applyOcrToForm() {
   if (ocrProductName) setVal('f_productName', ocrProductName);
   if (ocrDeliveryNo)  setVal('f_deliveryNo', ocrDeliveryNo);
   if (ocrOrderNo)     setVal('f_orderNo', ocrOrderNo);
+  _syncOrderNoNA();
   if (ocrQty)         setVal('f_qty', ocrQty);
   if (ocrType)        setVal('f_type', ocrType);
   if (ocrRemark)      setVal('f_remark', ocrRemark);
@@ -3116,6 +3117,7 @@ function openEditModal(id) {
   setVal('f_productName', r.productName || '');
   setVal('f_deliveryNo',  r.deliveryNo || '');
   setVal('f_orderNo',     r.orderNo || '');
+  _syncOrderNoNA();   /* 旧记录 PO 为 NA 时自动勾上 */
   setVal('f_type',        r.type || '成品');
   setVal('f_qty',         r.qty || '');
   /* 编辑旧记录：sampleQty 已有值时设 manualEdit 标记，防止被自动覆盖 */
@@ -3154,6 +3156,7 @@ function clearForm() {
   setVal('f_result', 'PASS');
   _loadDefectRows([]);   /* 清空不良明细 */
   _loadMeasRows([]);     /* 清空测量数据 */
+  _syncOrderNoNA();      /* PO号 NA 勾选复位 */
   /* 新增时清除手动修改标记 */
   const _smpElClear = document.getElementById('f_sampleQty');
   if (_smpElClear) {
@@ -4255,6 +4258,28 @@ function closeModal(e) { if (e.target === document.getElementById('modalOverlay'
 function closeModalDirect() {
   document.getElementById('modalOverlay').classList.remove('show');
   editingId = null;
+}
+
+/* ── PO号 NA 选项 ── */
+function toggleOrderNoNA() {
+  const cb  = document.getElementById('f_orderNoNA');
+  const inp = document.getElementById('f_orderNo');
+  if (!cb || !inp) return;
+  if (cb.checked) { inp.value = 'NA'; inp.disabled = true; }
+  else {
+    inp.disabled = false;
+    if ((inp.value || '').trim().toUpperCase() === 'NA') inp.value = '';
+    inp.focus();
+  }
+}
+/* 根据输入框当前值同步 NA 勾选状态（新增清空 / 编辑载入 / OCR 填入后调用） */
+function _syncOrderNoNA() {
+  const cb  = document.getElementById('f_orderNoNA');
+  const inp = document.getElementById('f_orderNo');
+  if (!cb || !inp) return;
+  const isNA = (inp.value || '').trim().toUpperCase() === 'NA';
+  cb.checked   = isNA;
+  inp.disabled = isNA;
 }
 
 function resetSingleEntryFormForNext() {

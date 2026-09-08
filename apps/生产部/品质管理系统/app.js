@@ -2073,7 +2073,16 @@ function filterRecords() {
       if (dfrom && r.date < dfrom) return false;
       if (dto   && r.date > dto)   return false;
       return true;
-    }).sort((a, b) => b.date.localeCompare(a.date));
+    }).sort((a, b) => {
+      const mode = document.getElementById('filterSort')?.value || 'mod-desc';
+      if (mode === 'date-asc')  return a.date.localeCompare(b.date);
+      if (mode === 'date-desc') return b.date.localeCompare(a.date);
+      const ka = formatModifiedDate(a.updatedAt) || '';
+      const kb = formatModifiedDate(b.updatedAt) || '';
+      /* 修改日期相同再按来料日期，保证同一天录入的明细聚在一起且稳定 */
+      if (ka === kb) return b.date.localeCompare(a.date);
+      return mode === 'mod-asc' ? ka.localeCompare(kb) : kb.localeCompare(ka);
+    });
 
     setText('recordCount', `共 ${filteredRecs.length} 条`);
 

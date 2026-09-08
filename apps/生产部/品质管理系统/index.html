@@ -224,11 +224,17 @@
     <div class="page-inner">
       <div class="toolbar">
         <div class="toolbar-left">
-          <input type="text" class="search-input" id="searchInput" placeholder="🔍 搜索供应商/货号/款式..." oninput="filterRecords()" />
+          <input type="text" class="search-input" id="searchInput" placeholder="🔍 搜索供应商/货号/款式/修改日期..." oninput="filterRecords()" />
           <select class="filter-select" id="filterResult" onchange="filterRecords()">
             <option value="">全部判定</option>
             <option value="PASS">PASS</option>
             <option value="REJ">REJ / FAIL</option>
+          </select>
+          <select class="filter-select" id="filterSort" onchange="filterRecords()" title="排序方式：修改日期=最近录入/修改时间">
+            <option value="date-desc">来料日期 ↓</option>
+            <option value="date-asc">来料日期 ↑</option>
+            <option value="mod-desc" selected>修改日期 ↓</option>
+            <option value="mod-asc">修改日期 ↑</option>
           </select>
           <input type="date" class="filter-date" id="filterDateFrom" onchange="filterRecords()" />
           <span class="date-sep">—</span>

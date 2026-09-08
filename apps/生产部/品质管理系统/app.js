@@ -4246,7 +4246,17 @@ function closeModalDirect() {
 function resetSingleEntryFormForNext() {
   editingId = null;
   setText('modalTitle', '新增验货记录');
+  /* 连续录入：保留 供应商/客户/类型（类似手动批量录入，通常同一批），
+     其余字段清空；检验员由 clearForm 默认当前登录账号 */
+  const _keep = {
+    supplier: getVal('f_supplier'),
+    client:   getVal('f_client'),
+    type:     document.getElementById('f_type')?.value || '成品',
+  };
   clearForm();
+  setVal('f_supplier', _keep.supplier);
+  setVal('f_client',   _keep.client);
+  setVal('f_type',     _keep.type);
   const dateEl     = document.getElementById('f_date');
   const inspDateEl = document.getElementById('f_inspDate');
   if (dateEl)     dateEl.value     = todayStr();

@@ -33,8 +33,11 @@ public class AuthController(AppDbContext db, JwtService jwt) : ControllerBase
         {
             HttpOnly = true,
             SameSite = SameSiteMode.Lax,
-            Secure = false, // 生产环境改 true
+            Secure = Request.IsHttps,
+            IsEssential = true,
             Path = Environment.GetEnvironmentVariable("SPRAYPLAN_BASE_PATH") ?? "/",
+            MaxAge = jwt.Lifetime,
+            Expires = DateTimeOffset.UtcNow.Add(jwt.Lifetime),
         });
 
         // 4. 更新 lastLoginAt（用于后台审计/活跃统计）

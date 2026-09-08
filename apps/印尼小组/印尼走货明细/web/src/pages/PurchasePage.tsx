@@ -143,6 +143,27 @@ function applyAutoSpoilage(item: PoItem): PoItem {
   }
 }
 
+function restoreSavedSpoilage(item: PoItem): PoItem {
+  const materialQty = Math.max(0, Number(item.material_qty ?? 0) || 0)
+  // Existing purchase orders may contain a manually adjusted loss. Only use the
+  // category default for legacy rows where loss was never stored.
+  const hasSavedSpoilage = item.spoilage_qty !== null && item.spoilage_qty !== undefined
+  const spoilageQty = hasSavedSpoilage
+    ? Math.max(0, Number(item.spoilage_qty) || 0)
+    : Math.round(materialQty * spoilageRate(item.category, materialQty) * 100) / 100
+  const hasSavedPurchaseQty = item.purchase_qty !== null && item.purchase_qty !== undefined
+  const purchaseQty = hasSavedPurchaseQty
+    ? Math.max(0, Number(item.purchase_qty) || 0)
+    : Math.round((materialQty + spoilageQty) * 100) / 100
+  return {
+    ...item,
+    material_qty: materialQty,
+    spoilage_qty: spoilageQty,
+    purchase_qty: purchaseQty,
+    qty: purchaseQty,
+  }
+}
+
 function shipQuantity(item: PoItem): number {
   const purchaseQty = Number(item.purchase_qty ?? item.qty ?? 0) || 0
   const unit = String(item.ship_unit || '').trim().toUpperCase()
@@ -667,7 +688,7 @@ export default function PurchasePage() {
           String(it.product_code || '').split(/\s*\/\s*/).includes(String(s.code || ''))
           && (!it.tomy_po || String(it.tomy_po).split(/\s*[;，]\s*/).includes(String(s.orderNo || '')))
         )
-        return applyAutoSpoilage({
+        return restoreSavedSpoilage({
           ...it,
           purchase_unit: wasLegacyUnitLayout ? '个' : (it.purchase_unit || '个'),
           // 走货单位以物料库为准，避免采购单里的旧值（如误存 TNE）覆盖 KGM。

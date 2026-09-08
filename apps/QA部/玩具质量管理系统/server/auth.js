@@ -154,3 +154,63 @@ export function deleteUser(id, actorId) {
   }
   db.prepare("DELETE FROM users WHERE id = ?").run(id);
 }
+
+// ---------- bulk import (local -> remote migration) ----------
+// Accepts full local user objects (including passwordHash/passwordSalt) so
+// accounts keep their existing passwords after moving to the backend.
+// Upserts by normalized login name; existing ids/createdAt/isPrimary survive.
+
+export function importUsers(users) {
+  if (!Array.isArray(users) || users.length === 0) throw new Error("没有可导入的用户。");
+  if (users.length > 200) throw new Error("一次最多导入 200 个用户。");
+  const timestamp = now();
+  const finalById = new Map(readUsers().map((user) => [user.id, user]));
+  const byNorm = new Map([...finalById.values()].map((user) => [normalizeLoginName(user.loginName), user.id]));
+  const seen = new Set();
+  for (const raw of users) {
+    const loginName = String(raw?.loginName || "").trim();
+    const name = String(raw?.name || "").trim();
+    if (!loginName || !name) throw new Error("导入数据无效：用户缺少名称或登录名称。");
+    const norm = normalizeLoginName(loginName);
+    if (seen.has(norm)) throw new Error(`导入数据中登录名称重复：${loginName}`);
+    seen.add(norm);
+    if (typeof raw?.passwordHash !== "string" || !raw.passwordHash || typeof raw?.passwordSalt !== "string" || !raw.passwordSalt) {
+      throw new Error(`用户 ${loginName} 缺少密码摘要，无法导入。`);
+    }
+    const permissions = Array.isArray(raw?.permissions) ? raw.permissions.filter((item) => allPermissions.includes(item)) : [];
+    if (!permissions.length) throw new Error(`用户 ${loginName} 的权限无效。`);
+    const existingId = byNorm.get(norm);
+    if (existingId) {
+      const existing = finalById.get(existingId);
+      finalById.set(existingId, {
+        ...existing,
+        name, responsibility: String(raw?.responsibility || "").trim() || existing.responsibility,
+        loginName, category: defaultPermissions[raw?.category] ? raw.category : existing.category,
+        permissions, enabled: raw?.enabled !== false,
+        mustChangePassword: Boolean(raw?.mustChangePassword),
+        passwordHash: raw.passwordHash, passwordSalt: raw.passwordSalt,
+        updatedAt: timestamp,
+      });
+    } else {
+      const id = crypto.randomUUID();
+      byNorm.set(norm, id);
+      finalById.set(id, {
+        id, name, responsibility: String(raw?.responsibility || "").trim() || "成员",
+        loginName, category: defaultPermissions[raw?.category] ? raw.category : "partial",
+        permissions, enabled: raw?.enabled !== false,
+        mustChangePassword: Boolean(raw?.mustChangePassword),
+        passwordHash: raw.passwordHash, passwordSalt: raw.passwordSalt,
+        createdAt: typeof raw?.createdAt === "string" && raw.createdAt ? raw.createdAt : timestamp,
+        updatedAt: timestamp, isPrimary: false,
+      });
+    }
+  }
+  const finalUsers = [...finalById.values()];
+  if (!finalUsers.some((user) => user.enabled && defaultPermissions.all.every((permission) => user.permissions.includes(permission)))) {
+    throw new Error("导入后系统必须保留至少一个启用中的所有权限账户。");
+  }
+  for (const user of finalUsers) writeUser(user);
+  // Passwords may have changed -> invalidate every session and force re-login.
+  db.prepare("DELETE FROM sessions").run();
+  return users.length;
+}

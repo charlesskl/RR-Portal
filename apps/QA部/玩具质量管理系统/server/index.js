@@ -105,6 +105,15 @@ app.delete("/api/users/:id", handle(async (request, reply) => {
   return { ok: true };
 }));
 
+// Bulk import of full local user records (with password digests) when
+// migrating from browser storage to the backend. Upserts by login name and
+// invalidates all sessions afterwards.
+app.post("/api/users/import", handle(async (request, reply) => {
+  if (!requirePermission(request, reply, "manage_users")) return;
+  const { users } = request.body || {};
+  return { imported: auth.importUsers(users) };
+}));
+
 // ---------- complaints ----------
 
 app.get("/api/complaints", handle(async (request, reply) => {

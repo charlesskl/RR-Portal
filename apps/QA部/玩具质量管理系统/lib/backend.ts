@@ -26,10 +26,12 @@ export function saveBackendSettings(settings: BackendSettings) {
 }
 
 // Effective base URL for API calls: explicit url, otherwise same origin.
+// 同源部署在 /toyqms/ 子路径时（nginx 剥前缀反代），请求必须带上 basePath，
+// 否则会打到站点根路径 /api/*。NEXT_PUBLIC_BASE_PATH 由 Dockerfile 构建时内联。
 export function getBackendBaseUrl(): string {
   const { url } = getBackendSettings();
   if (url) return url;
-  if (typeof window !== "undefined") return window.location.origin;
+  if (typeof window !== "undefined") return window.location.origin + (process.env.NEXT_PUBLIC_BASE_PATH || "");
   return DEFAULT_BACKEND_URL;
 }
 

@@ -22,11 +22,11 @@ function BackendConnection(){
   const [syncing,setSyncing]=useState(false);
   useEffect(()=>{
     setUrl(getBackendSettings().url);
-    setSameOrigin(window.location.origin);
+    setSameOrigin(window.location.origin+(process.env.NEXT_PUBLIC_BASE_PATH||""));
     try{setLocalUsers((JSON.parse(localStorage.getItem("toyqms.users.v1")||"[]") as unknown[]).length)}catch{setLocalUsers(0)}
     try{setLocalComplaints((JSON.parse(localStorage.getItem("toyqms.complaints.v1")||"[]") as unknown[]).length)}catch{setLocalComplaints(0)}
   },[]);
-  const test=async()=>{setChecking(true);setMessage("");const base=url.replace(/\/+$/,"")||window.location.origin;try{const response=await fetch(`${base}/api/health`);const data=await response.json().catch(()=>null);setMessage(response.ok&&data?.product==="ToyQMS"?"连接成功：后端服务正常。":`后端返回异常（HTTP ${response.status}）。`)}catch{setMessage("无法连接：请确认后端已启动（server 目录 npm start），或将后端地址留空使用同源部署。")}finally{setChecking(false)}};
+  const test=async()=>{setChecking(true);setMessage("");const base=url.replace(/\/+$/,"")||window.location.origin+(process.env.NEXT_PUBLIC_BASE_PATH||"");try{const response=await fetch(`${base}/api/health`);const data=await response.json().catch(()=>null);setMessage(response.ok&&data?.product==="ToyQMS"?"连接成功：后端服务正常。":`后端返回异常（HTTP ${response.status}）。`)}catch{setMessage("无法连接：请确认后端已启动（server 目录 npm start），或将后端地址留空使用同源部署。")}finally{setChecking(false)}};
   const save=()=>{saveBackendSettings({mode:"remote",url});window.location.reload()};
   const syncLocal=async()=>{
     if(!window.confirm(`将把本浏览器中的 ${localUsers} 个账户与 ${localComplaints} 条投诉记录同步到后端数据库。同名账户会用本地版本覆盖（含密码），同步后需要重新登录。是否继续？`))return;

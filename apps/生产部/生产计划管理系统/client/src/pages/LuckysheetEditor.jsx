@@ -196,13 +196,26 @@ function ordersToCelldata(orders, columns, newImportedIds) {
         valueToStore = displayVal;
         ct = { t: 's', fa: '@' };   // Excel 文本格式：@ 强制文本
       } else if (col.data === 'production_progress') {
-        // 生产进度固定 = 生产数/数量 百分比（车间要求），显示层直接算，
-        // 不信 DB 里手填的旧值；用户改数量/生产数后钩子里会实时重算
+        // 生产进度：默认 = 生产数/数量 自动算（2026-08-20 车间要求）。
+        // 但生产数为空（还没开始生产）或数量为空算不出时，保留人工手填的进度值
+        // （2026-09-09 车间反馈：手填 30% 保存后刷新变 0.00% —— 因为旧逻辑无条件重算）
         // v 存比率 + 原生百分比格式：渲染/编辑/解析全由 Luckysheet 处理
+        // 注意：DB 里「没填生产数」存的是 0 而不是 null，必须用 > 0 判断「真填了」，
+        // 否则 0 会被当成已填 → 重算出 0% → 手填值照样被吞
+        const hasCount = Number(order.production_count) > 0;
         const p = computeProgress(order.quantity, order.production_count);
-        displayVal = p.text;
-        valueToStore = p.ratio ?? '';
-        ct = p.ratio == null ? { t: 's', fa: '@' } : { t: 'n', fa: '0.00%' };
+        if (hasCount && p.ratio != null) {
+          displayVal = p.text;
+          valueToStore = p.ratio;
+          ct = { t: 'n', fa: '0.00%' };
+        } else {
+          const manual = Number(order.production_progress);
+          const hasManual = order.production_progress !== null && order.production_progress !== undefined
+            && order.production_progress !== '' && !isNaN(manual);
+          displayVal = hasManual ? (Math.round(manual * 10000) / 100) + '%' : '';
+          valueToStore = hasManual ? manual : '';
+          ct = hasManual ? { t: 'n', fa: '0.00%' } : { t: 's', fa: '@' };
+        }
       } else {
         displayVal = val == null ? '' : String(val);
         valueToStore = val ?? '';

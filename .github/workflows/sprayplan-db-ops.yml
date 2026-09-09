@@ -213,11 +213,14 @@ jobs:
             echo "-- 停 sprayplan（释放 SQLite 锁）--"
             docker compose -f "$COMPOSE" --env-file "$ENVF" stop sprayplan
 
-            echo "-- 仅应用 PR #530 的两个迁移（幂等跳过；早期迁移系 db push 时代，不能重放）--"
+            echo "-- 应用白名单迁移（幂等跳过；早期迁移系 db push 时代，不能重放）--"
             python3 - "$DB" "$APP/prisma/migrations" <<'PY'
             import sqlite3, sys, os
             db, mdir = sys.argv[1], sys.argv[2]
-            targets = ["20260817000000_remove_item_layers", "20260817090000_add_actual_inbound_qty"]
+            # PR #530: remove_item_layers + add_actual_inbound_qty
+            # PR #673: add_inbound_applications（成品入库申请单）
+            targets = ["20260817000000_remove_item_layers", "20260817090000_add_actual_inbound_qty",
+                       "20260909090000_add_inbound_applications"]
             con = sqlite3.connect(db, timeout=15); cur = con.cursor()
             tbls = {r[0] for r in cur.execute("select name from sqlite_master where type='table'").fetchall()}
             plans_cols = [r[1] for r in cur.execute("PRAGMA table_info(production_plans)").fetchall()] if "production_plans" in tbls else []
@@ -229,6 +232,8 @@ jobs:
                     print(f"  跳过 {name}（product_items 已不存在，视为已应用）"); continue
                 if "add_actual_inbound_qty" in name and "inboundQty" in plans_cols:
                     print(f"  跳过 {name}（inboundQty 已存在，视为已应用）"); continue
+                if "add_inbound_applications" in name and "inbound_applications" in tbls:
+                    print(f"  跳过 {name}（inbound_applications 已存在，视为已应用）"); continue
                 if "remove_item_layers" in name:
                     # 历史残留（早前某次半成功的手工迁移）会让 CREATE TABLE new_* 直接失败，先清掉
                     cur.execute("DROP TABLE IF EXISTS new_product_parts")

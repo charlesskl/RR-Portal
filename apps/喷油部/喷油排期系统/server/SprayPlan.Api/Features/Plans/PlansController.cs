@@ -222,6 +222,7 @@ public class PlansController(AppDbContext db) : ControllerBase
 
         if (req.InboundQty is not null)
         {
+            var previousInboundQty = p.InboundQty ?? 0;
             p.InboundQty = req.InboundQty.Value;
             p.Status = "recorded";
 
@@ -239,6 +240,35 @@ public class PlansController(AppDbContext db) : ControllerBase
             {
                 var previousInbound = finalStepInbound - req.InboundQty.Value;
                 return BadRequest(new { error = $"实际入库数超过最后工序累计完成数，当前最多可入库 {Math.Max(0, finalStepGood - previousInbound):N0}" });
+            }
+
+            // 本系统库存先由 inboundQty 更新；仅在数值确有变化时，自动生成一张 ERP 可读取的申请单。
+            var inboundDelta = req.InboundQty.Value - previousInboundQty;
+            if (inboundDelta != 0)
+            {
+                var orderInfo = await db.Orders
+                    .Where(o => o.Id == p.OrderId)
+                    .Join(db.Products, o => o.ProductId, product => product.Id,
+                        (o, product) => new { o.ExternalOrderNo, product.ProductNo })
+                    .SingleOrDefaultAsync();
+                if (orderInfo is null)
+                    return BadRequest(new { error = "订单缺少货号，无法生成入库申请单" });
+
+                var now = DateTime.UtcNow;
+                db.InboundApplications.Add(new InboundApplication
+                {
+                    ApplicationNo = $"RK-{now:yyyyMMddHHmmssfff}-{Guid.NewGuid().ToString("N")[..6].ToUpperInvariant()}",
+                    SourcePlanId = p.Id,
+                    ProductionDate = p.PlanDate,
+                    OrderNo = orderInfo.ExternalOrderNo,
+                    ProductNo = orderInfo.ProductNo,
+                    ItemName = p.ItemName,
+                    PartName = p.PartName,
+                    Quantity = inboundDelta,
+                    CreatedBy = CurrentUser(),
+                    CreatedAt = now,
+                    Remark = inboundDelta > 0 ? null : "实际入库数调减自动生成",
+                });
             }
         }
 

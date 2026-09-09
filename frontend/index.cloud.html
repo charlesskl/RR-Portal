@@ -295,6 +295,12 @@
                 <span class="plugin-name">加工厂月度评审管理系统</span>
               </div>
             </div>
+            <div class="plugin-item">
+              <div class="plugin-info">
+                <div class="plugin-dot gray" id="factoryReviewTestDot"></div>
+                <span class="plugin-name">加工厂月度评审管理系统（测试版）</span>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -1032,6 +1038,26 @@
       </div>
     </div>
 
+    <div class="detail-plugin-card">
+      <div class="detail-plugin-left">
+        <div class="detail-plugin-icon" style="background:linear-gradient(135deg,#f59e0b,#d97706);">&#129514;</div>
+        <div>
+          <div class="detail-plugin-name">加工厂月度评审管理系统（测试版）</div>
+          <div class="detail-plugin-desc">与正式版同功能，独立数据库，用于试用新流程/培训练习，数据不影响正式版</div>
+          <div class="feature-grid">
+            <div class="feature-tag">&#127981; 加工厂档案</div>
+            <div class="feature-tag">&#128230; 订单与交付</div>
+            <div class="feature-tag">&#128202; 月度评分</div>
+            <div class="feature-tag">&#9888;&#65039; 测试数据独立</div>
+          </div>
+        </div>
+      </div>
+      <div class="detail-plugin-right">
+        <div class="detail-plugin-status"><div class="plugin-dot gray" id="factoryReviewTestDetailDot"></div> 检查中...</div>
+        <a href="/factory-review-test/" target="_blank" rel="noopener" class="btn btn-primary">打开测试版</a>
+      </div>
+    </div>
+
   </div>
 
 
@@ -1239,6 +1265,7 @@ async function checkHealth() {
       { name: 'cStore', url: '/c-store/health', dot: 'cStoreDot', detailDot: 'cStoreDetailDot' },
       { name: 'cpg', url: '/cpg/health', dot: 'cpgDot', detailDot: 'cpgDetailDot' },
       { name: 'factoryReview', url: '/factory-review/health', dot: 'factoryReviewDot', detailDot: 'factoryReviewDetailDot' },
+      { name: 'factoryReviewTest', url: '/factory-review-test/health', dot: 'factoryReviewTestDot', detailDot: 'factoryReviewTestDetailDot' },
       { name: 'shippingManagement', url: '/shipping/health', dot: 'shippingManagementDot', detailDot: 'shippingManagementDetailDot' },
       { name: 'indoShipping', url: '/indo-shipping/health', dot: 'indoShippingDot', detailDot: 'indoShippingDetailDot' },
       { name: 'qaWeekly', url: '/qa-weekly-report/api/health', dot: 'qaWeeklyDot', detailDot: 'qaWeeklyDetailDot' },

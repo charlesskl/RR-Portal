@@ -1,0 +1,162 @@
+name: Factory Review Test Ops
+
+# 加工厂月度评审·测试版（factory-review-test）数据运维。
+#   mode=check —— 只读：两库 orders 行数与健康状态。
+#   mode=seed  —— 正式库 data.db 在线备份 → 备份测试版现有数据目录 →
+#                 停 factory-review-test → 复制正式 data.db/auxiliary.db 到
+#                 pb_data_test 并裁剪 orders 只留最新 10 条 → 重启 + 健康检查。
+#                 （不上传 storage 附件，测试版打开附件会 404，属预期）
+#   mode=clear —— 备份后清空测试版数据目录（下次启动为全新空库 + 初始管理员）。
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "check(只读) / seed(复制正式库并裁剪到 10 条订单) / clear(清空测试数据)"
+        type: choice
+        required: true
+        default: check
+        options: [check, seed, clear]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-cloud
+  queue: max
+  cancel-in-progress: false
+
+jobs:
+  ops:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Validate SSH host fingerprint
+        shell: bash
+        env:
+          CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]]; then
+            echo 'CLOUD_HOST_FINGERPRINT must be a non-empty OpenSSH SHA256 fingerprint.' >&2
+            exit 1
+          fi
+
+      - name: Factory Review Test ops via SSH
+        env:
+          CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+          OPS_MODE: ${{ inputs.mode }}
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
+        with:
+          host: ${{ secrets.CLOUD_HOST }}
+          username: ${{ secrets.CLOUD_USER }}
+          key: ${{ secrets.CLOUD_SSH_KEY }}
+          fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
+          command_timeout: 12m
+          envs: OPS_MODE
+          script: |
+            set -euo pipefail
+            MODE="${OPS_MODE:-check}"
+            cd /opt/rr-portal
+            APP="apps/PMC跟仓管/加工厂月度评审管理制度"
+            PROD_DIR="$APP/pb_data"
+            TEST_DIR="$APP/pb_data_test"
+            COMPOSE="docker-compose.cloud.yml"
+            ENVF=".env.cloud.production"
+            SVC="factory-review-test"
+            echo "=================== MODE: $MODE ==================="
+
+            show_counts() {
+              python3 - "$1" <<'PY'
+            import sqlite3, sys, os
+            db = os.path.join(sys.argv[1], "data.db")
+            if not os.path.exists(db):
+                print("  (data.db 不存在)"); sys.exit(0)
+            con = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=5)
+            tbls = {r[0] for r in con.execute("select name from sqlite_master where type='table'")}
+            for t in ("orders", "factories", "users", "monthly_scores", "quality_inspections"):
+                if t in tbls:
+                    n = con.execute(f'select count(*) from "{t}"').fetchone()[0]
+                    print(f"    {t}: {n} 行")
+            con.close()
+            PY
+            }
+
+            echo "== 正式库 =="; show_counts "$PROD_DIR"
+            echo "== 测试库 =="; show_counts "$TEST_DIR"
+
+            if [ "$MODE" = "check" ]; then
+              docker ps --filter "name=rr-portal-$SVC-1" --format '  {{.Names}}: {{.Status}}'
+              echo "[OK] check 完成（只读）"
+              exit 0
+            fi
+
+            TS="$(date +%Y%m%d-%H%M%S)"
+
+            if [ "$MODE" = "seed" ]; then
+              [ -f "$PROD_DIR/data.db" ] || { echo "[FAIL] 正式库 $PROD_DIR/data.db 不存在" >&2; exit 1; }
+
+              # 1) 备份测试版现有数据目录（若有）
+              if [ -d "$TEST_DIR" ]; then
+                tar czf "$APP/pb_data_test.bak.$TS.tar.gz" -C "$APP" pb_data_test
+                echo "[OK] 测试版数据已备份: pb_data_test.bak.$TS.tar.gz"
+              fi
+
+              # 2) 停测试版
+              docker compose -f "$COMPOSE" --env-file "$ENVF" stop "$SVC"
+
+              # 3) 在线备份正式库（不停正式服务），再复制到测试目录
+              mkdir -p "$TEST_DIR"
+              python3 - "$PROD_DIR/data.db" "$TEST_DIR/data.db" <<'PY'
+            import sqlite3, sys
+            src, dst = sys.argv[1], sys.argv[2]
+            s = sqlite3.connect(f"file:{src}?mode=ro", uri=True, timeout=30)
+            d = sqlite3.connect(dst, timeout=30)
+            s.backup(d)
+            d.close(); s.close()
+            print("[OK] 正式库已在线备份到测试目录")
+            PY
+              [ -f "$PROD_DIR/auxiliary.db" ] && cp -a "$PROD_DIR/auxiliary.db" "$TEST_DIR/auxiliary.db" || true
+
+              # 4) 裁剪：orders 只留最新 10 条
+              python3 - "$TEST_DIR/data.db" <<'PY'
+            import sqlite3, sys
+            con = sqlite3.connect(sys.argv[1], timeout=30)
+            before = con.execute("select count(*) from orders").fetchone()[0]
+            con.execute("""delete from orders where id not in
+                           (select id from orders order by created desc limit 10)""")
+            con.commit()
+            after = con.execute("select count(*) from orders").fetchone()[0]
+            con.close()
+            print(f"[OK] orders 裁剪: {before} → {after} 条")
+            assert after <= 10
+            PY
+
+              # 5) 重启 + 健康检查
+              docker compose -f "$COMPOSE" --env-file "$ENVF" up -d --no-deps "$SVC"
+              for i in $(seq 1 24); do
+                sleep 5
+                if docker exec rr-portal-$SVC-1 wget -q -O /dev/null http://localhost:8090/api/factory-review/health 2>/dev/null; then
+                  echo "[OK] $SVC 健康检查通过"; break
+                fi
+                [ "$i" = "24" ] && { echo "[FAIL] $SVC 健康检查超时" >&2; exit 1; }
+              done
+              echo "== 裁剪后测试库 =="; show_counts "$TEST_DIR"
+              echo "[OK] seed 完成"
+              exit 0
+            fi
+
+            if [ "$MODE" = "clear" ]; then
+              if [ -d "$TEST_DIR" ]; then
+                tar czf "$APP/pb_data_test.bak.$TS.tar.gz" -C "$APP" pb_data_test
+                echo "[OK] 测试版数据已备份: pb_data_test.bak.$TS.tar.gz"
+              fi
+              docker compose -f "$COMPOSE" --env-file "$ENVF" stop "$SVC"
+              rm -rf "$TEST_DIR"
+              mkdir -p "$TEST_DIR"
+              docker compose -f "$COMPOSE" --env-file "$ENVF" up -d --no-deps "$SVC"
+              echo "[OK] clear 完成（测试版为全新空库，初始管理员随首次健康检查创建）"
+              exit 0
+            fi
+
+            echo "[FAIL] 未知 mode: $MODE" >&2; exit 1

@@ -870,6 +870,39 @@ services:
     networks:
       - platform-net
 
+  # 加工厂月度评审管理系统·测试版：与正式版同代码、独立容器/数据库目录，
+  # 供试用新流程/培训练习，绝不影响正式数据。basePath=/factory-review-test/。
+  factory-review-test:
+    build:
+      context: ./apps/PMC跟仓管/加工厂月度评审管理制度
+      dockerfile: Dockerfile
+      args:
+        VITE_BASE_PATH: /factory-review-test/
+        OCI_REVISION: ${AFTER_COMMIT:-local}
+    environment:
+      - FACTORY_REVIEW_ADMIN_EMAIL=${FACTORY_REVIEW_ADMIN_EMAIL:-admin@rr.local}
+      - FACTORY_REVIEW_ADMIN_PASSWORD=${FACTORY_REVIEW_ADMIN_PASSWORD:-}
+      # 测试版不开集成 API（密钥留空，集成接口一律 401）
+      - INTEGRATION_API_KEY=
+      - TZ=Asia/Shanghai
+    volumes:
+      - ./apps/PMC跟仓管/加工厂月度评审管理制度/pb_data_test:/pb/pb_data
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:8090/api/factory-review/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    mem_limit: 512m
+    memswap_limit: 512m
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - platform-net
+
   huadeng:
     build:
       context: ./apps/PMC跟仓管/华登包材管理

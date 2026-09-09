@@ -25,6 +25,35 @@ export function saveBackendSettings(settings: BackendSettings) {
   localStorage.setItem(SETTINGS_KEY, JSON.stringify({ mode: "remote", url: settings.url.replace(/\/+$/, "") }));
 }
 
+// Remove any manually saved backend address (back to same origin).
+export function resetBackendUrl() {
+  if (typeof window !== "undefined") localStorage.removeItem(SETTINGS_KEY);
+}
+
+async function probe(base: string): Promise<boolean> {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 3000);
+    const response = await fetch(`${base}/api/health`, { signal: controller.signal });
+    clearTimeout(timer);
+    const data = await response.json().catch(() => null);
+    return response.ok && data?.product === "ToyQMS";
+  } catch {
+    return false;
+  }
+}
+
+// A stale manually-saved backend address (e.g. pointing at a server this
+// device cannot reach right now) must not brick the login page: probe it,
+// and when it fails while the same-origin API works, fall back to same origin.
+export async function ensureReachableBackend(): Promise<void> {
+  if (typeof window === "undefined") return;
+  const { url } = getBackendSettings();
+  if (!url) return;
+  if (await probe(url)) return;
+  if (await probe(window.location.origin)) resetBackendUrl();
+}
+
 // Effective base URL for API calls: explicit url, otherwise same origin.
 export function getBackendBaseUrl(): string {
   const { url } = getBackendSettings();

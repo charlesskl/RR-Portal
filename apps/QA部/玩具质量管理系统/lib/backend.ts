@@ -1,7 +1,9 @@
 // Backend connection settings for ToyQMS.
-// Default stays fully local (localStorage); switching to "remote" routes all
-// data + auth through the Fastify/SQLite server in server/.
-export type BackendMode = "local" | "remote";
+// The app ALWAYS talks to the Fastify/SQLite backend - there is no
+// browser-local (localStorage) mode anymore. The only setting is the
+// backend address; empty means "same origin" (the backend serves the
+// page itself: single-container / nginx reverse-proxy deployment).
+export type BackendMode = "remote";
 export interface BackendSettings { mode: BackendMode; url: string; }
 
 const SETTINGS_KEY = "toyqms.backend.v1";
@@ -9,23 +11,18 @@ const TOKEN_KEY = "toyqms.remote.session.v1";
 
 export const DEFAULT_BACKEND_URL = "http://127.0.0.1:4313";
 
-// Empty url means "same origin": the page was served by the ToyQMS backend
-// itself (single-container / nginx /api proxy deployment).
 export function getBackendSettings(): BackendSettings {
-  if (typeof window === "undefined") return { mode: "local", url: DEFAULT_BACKEND_URL };
+  if (typeof window === "undefined") return { mode: "remote", url: "" };
   try {
-    const raw = localStorage.getItem(SETTINGS_KEY);
-    if (raw === null) return { mode: "local", url: "" };
-    const saved = JSON.parse(raw) as Partial<BackendSettings>;
-    return { mode: saved.mode === "remote" ? "remote" : "local", url: (saved.url ?? "").replace(/\/+$/, "") };
+    const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) || "") as Partial<BackendSettings>;
+    return { mode: "remote", url: (saved.url ?? "").replace(/\/+$/, "") };
   } catch {
-    return { mode: "local", url: "" };
+    return { mode: "remote", url: "" };
   }
 }
 
-export function hasExplicitBackendSettings(): boolean {
-  if (typeof window === "undefined") return false;
-  return localStorage.getItem(SETTINGS_KEY) !== null;
+export function saveBackendSettings(settings: BackendSettings) {
+  localStorage.setItem(SETTINGS_KEY, JSON.stringify({ mode: "remote", url: settings.url.replace(/\/+$/, "") }));
 }
 
 // Effective base URL for API calls: explicit url, otherwise same origin.
@@ -36,28 +33,8 @@ export function getBackendBaseUrl(): string {
   return DEFAULT_BACKEND_URL;
 }
 
-// When the page is served by the ToyQMS backend (Docker / nginx deployment),
-// probe the same-origin API once and switch to remote mode automatically so
-// every device opening the site shares the same accounts and data.
-export async function autoDetectBackend(): Promise<boolean> {
-  if (typeof window === "undefined" || hasExplicitBackendSettings()) return false;
-  try {
-    const response = await fetch("/api/health");
-    const data = await response.json().catch(() => null);
-    if (response.ok && data?.product === "ToyQMS") {
-      saveBackendSettings({ mode: "remote", url: "" });
-      return true;
-    }
-  } catch { /* no same-origin backend */ }
-  return false;
-}
-
-export function saveBackendSettings(settings: BackendSettings) {
-  localStorage.setItem(SETTINGS_KEY, JSON.stringify({ mode: settings.mode, url: settings.url.replace(/\/+$/, "") }));
-}
-
 export function isRemoteMode() {
-  return getBackendSettings().mode === "remote";
+  return true;
 }
 
 export function getRemoteToken(): string | null {
@@ -89,7 +66,7 @@ export async function apiFetch<T>(path: string, options: { method?: string; body
       body: options.body === undefined ? undefined : JSON.stringify(options.body)
     });
   } catch {
-    throw new ApiError(0, `无法连接后端服务（${base}）。请确认 server 已启动，或在系统设置中切回本地模式。`);
+    throw new ApiError(0, `无法连接后端服务（${base}）。请确认后端已启动且网络可达，然后刷新页面。`);
   }
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {

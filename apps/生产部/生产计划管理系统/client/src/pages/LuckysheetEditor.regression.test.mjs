@@ -242,6 +242,55 @@ test('editing quantity or production_count recomputes the progress cell live', (
   assert.match(source, /fields\.production_progress = progressValue/);
 });
 
+// ===== 2026-09-09 「手填进度被重算吞掉」修复（B 方案） =====
+
+test('manual progress survives reload when production_count is empty; auto-compute wins once filled', () => {
+  // 车间反馈：生产数还没填时手填 30%，保存成功但刷新后变 0.00% ——
+  // 旧逻辑加载时无条件用 生产数/数量 重算（空/数量=0），把 DB 里的手填值吞了。
+  const start = source.indexOf('const NUMERIC_SUM_FIELDS');
+  const end = source.indexOf('// 从 Luckysheet 单元格对象提取格式');
+  const ctx = { Date, Set };
+  vm.createContext(ctx);
+  vm.runInContext(`${source.slice(start, end)}\nthis.ordersToCelldata = ordersToCelldata;`, ctx);
+  const cols = [{ data: 'production_progress', title: '生产进度' }];
+
+  // 1) 生产数为空 → 保留手填的 30%
+  let cells = ctx.ordersToCelldata([
+    { id: 1, quantity: 2220, production_count: null, production_progress: 0.3 },
+  ], cols, new Set());
+  let cell = cells.find(c => c.r === 1 && c.c === 0);
+  assert.equal(cell.v.v, 0.3, '生产数为空时 v 保留手填比率');
+  assert.equal(cell.v.ct.fa, '0.00%', '手填值也用原生百分比格式');
+
+  // 2) 生产数为 0（DB 里「没填」存的就是 0，真实数据形态）→ 保留手填值
+  cells = ctx.ordersToCelldata([
+    { id: 1, quantity: 2220, production_count: 0, production_progress: 0.3 },
+  ], cols, new Set());
+  cell = cells.find(c => c.r === 1 && c.c === 0);
+  assert.equal(cell.v.v, 0.3, '生产数为 0（未填）时也保留手填比率');
+
+  // 3) 生产数已填 → 自动算胜出，不信手填旧值
+  cells = ctx.ordersToCelldata([
+    { id: 1, quantity: 51072, production_count: 5000, production_progress: 0.3 },
+  ], cols, new Set());
+  cell = cells.find(c => c.r === 1 && c.c === 0);
+  assert.equal(cell.v.v, 0.097901, '生产数已填时按 生产数/数量 自动算');
+
+  // 4) 数量为空算不出 → 回退到手填值（不出 NaN%）
+  cells = ctx.ordersToCelldata([
+    { id: 1, quantity: '', production_count: 100, production_progress: 0.5 },
+  ], cols, new Set());
+  cell = cells.find(c => c.r === 1 && c.c === 0);
+  assert.equal(cell.v.v, 0.5, '数量为空时回退手填比率');
+
+  // 5) 两者都没有 → 空白文本格式
+  cells = ctx.ordersToCelldata([
+    { id: 1, quantity: 2220, production_count: null, production_progress: null },
+  ], cols, new Set());
+  cell = cells.find(c => c.r === 1 && c.c === 0);
+  assert.equal(cell, undefined, '无任何进度时不出单元格');
+});
+
 // ===== 2026-08-21 「走货期填文字保存不了」修复 =====
 
 test('non-date text in date columns is preserved instead of silently dropped', () => {

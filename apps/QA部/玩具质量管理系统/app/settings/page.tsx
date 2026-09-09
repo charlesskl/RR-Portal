@@ -3,7 +3,7 @@ import { useEffect,useRef,useState } from "react";
 import { ArrowDownTrayIcon,ArrowUpTrayIcon } from "@heroicons/react/24/outline";
 import { PageTitle } from "@/components/ui";
 import { useComplaintData } from "@/components/data-provider";
-import { apiFetch,getBackendBaseUrl,getBackendSettings,saveBackendSettings,type BackendSettings } from "@/lib/backend";
+import { apiFetch,getBackendSettings,saveBackendSettings } from "@/lib/backend";
 import { LocalStorageComplaintRepository } from "@/lib/repository";
 import type { LocalDataBackup } from "@/lib/types";
 
@@ -13,8 +13,7 @@ function Setting({title,description,locked}:{title:string;description:string;loc
 }
 
 function BackendConnection(){
-  const [settings,setSettings]=useState<BackendSettings>({mode:"local",url:""});
-  const [persistedMode,setPersistedMode]=useState<BackendSettings["mode"]>("local");
+  const [url,setUrl]=useState("");
   const [sameOrigin,setSameOrigin]=useState("");
   const [message,setMessage]=useState("");
   const [checking,setChecking]=useState(false);
@@ -22,15 +21,13 @@ function BackendConnection(){
   const [localComplaints,setLocalComplaints]=useState(0);
   const [syncing,setSyncing]=useState(false);
   useEffect(()=>{
-    const saved=getBackendSettings();
-    setSettings(saved);
-    setPersistedMode(saved.mode);
+    setUrl(getBackendSettings().url);
     setSameOrigin(window.location.origin);
     try{setLocalUsers((JSON.parse(localStorage.getItem("toyqms.users.v1")||"[]") as unknown[]).length)}catch{setLocalUsers(0)}
     try{setLocalComplaints((JSON.parse(localStorage.getItem("toyqms.complaints.v1")||"[]") as unknown[]).length)}catch{setLocalComplaints(0)}
   },[]);
-  const test=async()=>{setChecking(true);setMessage("");const base=settings.url.replace(/\/+$/,"")||window.location.origin;try{const response=await fetch(`${base}/api/health`);const data=await response.json().catch(()=>null);setMessage(response.ok&&data?.product==="ToyQMS"?"连接成功：后端服务正常。":`后端返回异常（HTTP ${response.status}）。`)}catch{setMessage("无法连接：请确认后端已启动（server 目录 npm start），或将后端地址留空使用同源部署。")}finally{setChecking(false)}};
-  const save=()=>{saveBackendSettings(settings);window.location.reload()};
+  const test=async()=>{setChecking(true);setMessage("");const base=url.replace(/\/+$/,"")||window.location.origin;try{const response=await fetch(`${base}/api/health`);const data=await response.json().catch(()=>null);setMessage(response.ok&&data?.product==="ToyQMS"?"连接成功：后端服务正常。":`后端返回异常（HTTP ${response.status}）。`)}catch{setMessage("无法连接：请确认后端已启动（server 目录 npm start），或将后端地址留空使用同源部署。")}finally{setChecking(false)}};
+  const save=()=>{saveBackendSettings({mode:"remote",url});window.location.reload()};
   const syncLocal=async()=>{
     if(!window.confirm(`将把本浏览器中的 ${localUsers} 个账户与 ${localComplaints} 条投诉记录同步到后端数据库。同名账户会用本地版本覆盖（含密码），同步后需要重新登录。是否继续？`))return;
     setSyncing(true);setMessage("");
@@ -46,13 +43,12 @@ function BackendConnection(){
     }catch(reason){setMessage(reason instanceof Error?reason.message:"同步失败。")}
     finally{setSyncing(false)}
   };
-  return <section className="card mt-5 p-6"><h2 className="text-lg font-bold">后端连接</h2><p className="mt-1 max-w-3xl text-xs leading-5 text-neutral-500">数据与账户互通的前提是连接后端：所有设备打开同一个网址，由 ToyQMS 后端服务（Fastify + SQLite）统一管理数据。以后端部署（Docker）方式打开本页时会自动连接，无需设置。保存后页面会自动刷新。</p>
-    <div className="mt-5 grid gap-4 md:grid-cols-[220px_1fr_auto] md:items-end">
-      <label><span className="label">存储模式</span><select className="field mt-2 w-full" value={settings.mode} onChange={event=>setSettings({...settings,mode:event.target.value as BackendSettings["mode"]})}><option value="local">本地模式（浏览器存储）</option><option value="remote">连接后端（SQLite 数据库）</option></select></label>
-      <label><span className="label">后端地址</span><input className="field mt-2 w-full" value={settings.url} disabled={settings.mode==="local"} onChange={event=>setSettings({...settings,url:event.target.value})} placeholder={`留空＝与网页同源（${sameOrigin}）`}/></label>
-      <div className="flex gap-2"><button type="button" onClick={()=>void test()} disabled={settings.mode==="local"||checking} className="btn-secondary disabled:opacity-50">{checking?"测试中…":"测试连接"}</button><button type="button" onClick={save} className="btn-accent">保存并刷新</button></div>
+  return <section className="card mt-5 p-6"><h2 className="text-lg font-bold">后端连接</h2><p className="mt-1 max-w-3xl text-xs leading-5 text-neutral-500">所有账户与数据统一保存在后端数据库（Fastify + SQLite），每台设备打开同一个网址即可共享，无需任何设置。只有后端部署在其它地址时才需要修改下方地址。</p>
+    <div className="mt-5 grid gap-4 md:grid-cols-[1fr_auto] md:items-end">
+      <label><span className="label">后端地址</span><input className="field mt-2 w-full" value={url} onChange={event=>setUrl(event.target.value)} placeholder={`留空＝与网页同源（${sameOrigin}）`}/></label>
+      <div className="flex gap-2"><button type="button" onClick={()=>void test()} disabled={checking} className="btn-secondary disabled:opacity-50">{checking?"测试中…":"测试连接"}</button><button type="button" onClick={save} className="btn-accent">保存并刷新</button></div>
     </div>
-    {persistedMode==="remote"&&(localUsers>0||localComplaints>0)&&<div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-4"><p className="text-sm text-amber-800">本浏览器还保存着 {localUsers} 个本地账户、{localComplaints} 条本地投诉记录，尚未进入后端数据库。在别的浏览器或设备上登录时看不到这些账户与数据。</p><button type="button" onClick={()=>void syncLocal()} disabled={syncing} className="btn-accent mt-3 disabled:opacity-50">{syncing?"同步中…":"同步本地数据到后端"}</button></div>}
+    {(localUsers>0||localComplaints>0)&&<div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-4"><p className="text-sm text-amber-800">本浏览器还保存着 {localUsers} 个旧本地账户、{localComplaints} 条旧本地投诉记录（早期浏览器版遗留），尚未进入后端数据库。其它设备上看不到这些账户与数据。</p><button type="button" onClick={()=>void syncLocal()} disabled={syncing} className="btn-accent mt-3 disabled:opacity-50">{syncing?"同步中…":"同步本地数据到后端"}</button></div>}
     {message&&<div className="mt-4 rounded-lg bg-neutral-50 p-3 text-sm text-neutral-600">{message}</div>}
   </section>
 }

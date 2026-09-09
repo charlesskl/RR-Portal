@@ -85,6 +85,11 @@
   box-shadow: 1px 0 0 #e8edf4;
 }
 
+/* 明细表以直接录入为主，隐藏数字框自带的上下增减箭头。 */
+.shipment-detail-card .ant-input-number-handler-wrap {
+  display: none;
+}
+
 .shipment-fillable-cell {
   position: relative;
   padding-right: 3px;

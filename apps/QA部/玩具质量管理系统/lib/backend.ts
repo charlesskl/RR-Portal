@@ -25,6 +25,37 @@ export function saveBackendSettings(settings: BackendSettings) {
   localStorage.setItem(SETTINGS_KEY, JSON.stringify({ mode: "remote", url: settings.url.replace(/\/+$/, "") }));
 }
 
+// Remove any manually saved backend address (back to same origin).
+export function resetBackendUrl() {
+  if (typeof window !== "undefined") localStorage.removeItem(SETTINGS_KEY);
+}
+
+async function probe(base: string): Promise<boolean> {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 3000);
+    const response = await fetch(`${base}/api/health`, { signal: controller.signal });
+    clearTimeout(timer);
+    const data = await response.json().catch(() => null);
+    return response.ok && data?.product === "ToyQMS";
+  } catch {
+    return false;
+  }
+}
+
+// A stale manually-saved backend address (e.g. pointing at a server this
+// device cannot reach right now) must not brick the login page: probe it,
+// and when it fails while the same-origin API works, fall back to same origin.
+export async function ensureReachableBackend(): Promise<void> {
+  if (typeof window === "undefined") return;
+  const { url } = getBackendSettings();
+  if (!url) return;
+  if (await probe(url)) return;
+  // 同源探测要带 basePath：生产部署在 /toyqms/ 子路径下，健康检查在 origin/toyqms/api/health。
+  const sameOrigin = window.location.origin + (process.env.NEXT_PUBLIC_BASE_PATH || "");
+  if (await probe(sameOrigin)) resetBackendUrl();
+}
+
 // Effective base URL for API calls: explicit url, otherwise same origin.
 // 同源部署在 /toyqms/ 子路径时（nginx 剥前缀反代），请求必须带上 basePath，
 // 否则会打到站点根路径 /api/*。NEXT_PUBLIC_BASE_PATH 由 Dockerfile 构建时内联。

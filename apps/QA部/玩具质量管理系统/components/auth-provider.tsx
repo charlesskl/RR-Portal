@@ -2,7 +2,7 @@
 import { createContext,useCallback,useContext,useEffect,useMemo,useState } from "react";
 import { usePathname,useRouter } from "next/navigation";
 import { defaultPermissions,hasPermission,normalizeLoginName,routePermission,type Permission,type PublicUser,type ToyQMSUser,type UserCategory } from "@/lib/auth";
-import { apiFetch,getRemoteToken,setRemoteToken } from "@/lib/backend";
+import { apiFetch,ensureReachableBackend,getRemoteToken,setRemoteToken } from "@/lib/backend";
 import { hashPasswordCompat,randomId,randomSaltBase64 } from "@/lib/crypto-fallback";
 
 const USERS_KEY="toyqms.users.v1",SESSION_KEY="toyqms.session.v1",DEFAULT_PASSWORD="12345678";
@@ -29,6 +29,7 @@ export function AuthProvider({children}:{children:React.ReactNode}){
   },[remote]);
   useEffect(()=>{void(async()=>{
     if(remote){
+      await ensureReachableBackend();
       try{
         if(getRemoteToken()){const me=await apiFetch<{user:PublicUser}>("/auth/me");setUser(me.user)}
         try{setUsers(await apiFetch<PublicUser[]>("/users"))}catch{setUsers([])}

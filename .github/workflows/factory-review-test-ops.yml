@@ -123,12 +123,15 @@ jobs:
             import sqlite3, sys
             con = sqlite3.connect(sys.argv[1], timeout=30)
             for table in ("orders", "quality_inspections"):
+                cols = {r[1] for r in con.execute(f"PRAGMA table_info({table})")}
+                # quality_inspections 无 created 列（老库结构），退回 inspect_date/rowid
+                order_col = "created" if "created" in cols else ("inspect_date" if "inspect_date" in cols else "rowid")
                 before = con.execute(f"select count(*) from {table}").fetchone()[0]
-                con.execute(f"""delete from {table} where id not in
-                                (select id from {table} order by created desc limit 10)""")
+                con.execute(f"""delete from {table} where rowid not in
+                                (select rowid from {table} order by {order_col} desc limit 10)""")
                 con.commit()
                 after = con.execute(f"select count(*) from {table}").fetchone()[0]
-                print(f"[OK] {table} 裁剪: {before} → {after} 条")
+                print(f"[OK] {table} 裁剪: {before} → {after} 条（按 {order_col}）")
                 assert after <= 10
             con.close()
             PY

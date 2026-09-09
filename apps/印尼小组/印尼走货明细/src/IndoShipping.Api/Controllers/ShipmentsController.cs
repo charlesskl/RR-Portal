@@ -36,7 +36,14 @@ public class ShipmentsController(ISqlConnectionFactory factory) : ControllerBase
         using var c = factory.Create();
         var sh = await c.QueryFirstOrDefaultAsync("SELECT * FROM shipments WHERE id=@id", new { id });
         if (sh == null) return NotFound(new { error = "not found" });
-        var items = (await c.QueryAsync("SELECT * FROM shipment_items WHERE shipment_id=@id ORDER BY seq, id", new { id })).ToList();
+        var items = (await c.QueryAsync(@"
+            SELECT si.*,
+                   COALESCE(NULLIF(pi.purchase_unit, ''), NULLIF(si.purchase_unit, ''), '个') AS purchase_unit
+            FROM shipment_items si
+            LEFT JOIN outbound o ON o.id=si.outbound_id
+            LEFT JOIN po_items pi ON pi.id=o.po_item_id
+            WHERE si.shipment_id=@id
+            ORDER BY si.seq, si.id", new { id })).ToList();
         var dict = (IDictionary<string, object?>)sh!;
         dict["items"] = items;
         return Ok(dict);
@@ -62,6 +69,7 @@ public class ShipmentsController(ISqlConnectionFactory factory) : ControllerBase
         public decimal? qty { get; set; }
         public int? cartons { get; set; }
         public string? qty_per_carton { get; set; }
+        public string? purchase_unit { get; set; }
         public string? pallet { get; set; }
         public decimal? price { get; set; }
         public string? currency { get; set; }
@@ -112,10 +120,10 @@ RETURNING id",
             {
                 var it = items[i];
                 await c.ExecuteAsync(@"
-INSERT INTO shipment_items(shipment_id, outbound_id, material_id, seq, kg, qty, cartons, qty_per_carton, pallet, price, currency,
+INSERT INTO shipment_items(shipment_id, outbound_id, material_id, seq, kg, qty, cartons, qty_per_carton, purchase_unit, pallet, price, currency,
     po_no, po_date, supplier, customs_company, bl_head, contract_no, contract_date,
     invoice_no, invoice_date, invoice_price, product_use, formula_name)
-VALUES (@id, @outbound_id, @material_id, @seq, @kg, @qty, @cartons, @qty_per_carton, @pallet, @price, @currency,
+VALUES (@id, @outbound_id, @material_id, @seq, @kg, @qty, @cartons, @qty_per_carton, @purchase_unit, @pallet, @price, @currency,
     @po_no, @po_date, @supplier, @customs_company, @bl_head, @contract_no, @contract_date,
     @invoice_no, @invoice_date, @invoice_price, @product_use, @formula_name)",
                     new
@@ -123,6 +131,7 @@ VALUES (@id, @outbound_id, @material_id, @seq, @kg, @qty, @cartons, @qty_per_car
                         id, it.outbound_id, it.material_id, seq = i + 1,
                         kg = it.kg ?? 0, qty = it.qty ?? 0, cartons = it.cartons ?? 0,
                         qty_per_carton = it.qty_per_carton ?? "",
+                        purchase_unit = it.purchase_unit ?? "个",
                         pallet = it.pallet ?? "",
                         price = it.price ?? 0,
                         currency = string.IsNullOrEmpty(it.currency) ? "¥" : it.currency,
@@ -179,10 +188,10 @@ VALUES (@id, @outbound_id, @material_id, @seq, @kg, @qty, @cartons, @qty_per_car
             {
                 var it = items[i];
                 await c.ExecuteAsync(@"
-INSERT INTO shipment_items(shipment_id, outbound_id, material_id, seq, kg, qty, cartons, qty_per_carton, pallet, price, currency,
+INSERT INTO shipment_items(shipment_id, outbound_id, material_id, seq, kg, qty, cartons, qty_per_carton, purchase_unit, pallet, price, currency,
     po_no, po_date, supplier, customs_company, bl_head, contract_no, contract_date,
     invoice_no, invoice_date, invoice_price, product_use, formula_name)
-VALUES (@id, @outbound_id, @material_id, @seq, @kg, @qty, @cartons, @qty_per_carton, @pallet, @price, @currency,
+VALUES (@id, @outbound_id, @material_id, @seq, @kg, @qty, @cartons, @qty_per_carton, @purchase_unit, @pallet, @price, @currency,
     @po_no, @po_date, @supplier, @customs_company, @bl_head, @contract_no, @contract_date,
     @invoice_no, @invoice_date, @invoice_price, @product_use, @formula_name)",
                     new
@@ -190,6 +199,7 @@ VALUES (@id, @outbound_id, @material_id, @seq, @kg, @qty, @cartons, @qty_per_car
                         id, it.outbound_id, it.material_id, seq = i + 1,
                         kg = it.kg ?? 0, qty = it.qty ?? 0, cartons = it.cartons ?? 0,
                         qty_per_carton = it.qty_per_carton ?? "",
+                        purchase_unit = it.purchase_unit ?? "个",
                         pallet = it.pallet ?? "",
                         price = it.price ?? 0,
                         currency = string.IsNullOrEmpty(it.currency) ? "¥" : it.currency,

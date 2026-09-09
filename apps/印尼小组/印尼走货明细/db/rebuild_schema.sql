@@ -239,6 +239,7 @@ CREATE TABLE dbo.shipment_items (
     qty                 DECIMAL(18,4) NULL,
     cartons             INT           NULL,
     qty_per_carton      NVARCHAR(64)  NULL,
+    purchase_unit       NVARCHAR(32)  NOT NULL DEFAULT N'个',
     pallet              NVARCHAR(64)  NULL,
     price               DECIMAL(18,4) NULL,
     currency            NVARCHAR(8)   NOT NULL DEFAULT N'¥',

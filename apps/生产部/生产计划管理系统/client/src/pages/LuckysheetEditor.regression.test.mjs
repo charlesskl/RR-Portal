@@ -104,9 +104,16 @@ test('hook suppression is released even when days batch exits early', () => {
   assert.match(source, /\[天数自动算\] 失败:', e\?\.message\); onDone\?\.\(\); \}/);
 });
 
-test('batch cell writes are chunked to avoid blocking the main thread', () => {
-  const chunks = source.match(/const CHUNK = 30/g) || [];
-  assert.ok(chunks.length >= 2, 'days batch and formula batch should both chunk');
+test('batch cell writes use isRefresh:false + single refresh (no per-cell repaint)', () => {
+  // 打开表格卡 10 秒的根因：逐格 setCellValue 每格两次重绘。
+  // 修复：两个批量任务都必须 isRefresh:false 写入 + 写完一次 refresh()
+  const noRefresh = source.match(/isRefresh: false/g) || [];
+  assert.ok(noRefresh.length >= 2, 'days batch and formula batch should both pass isRefresh:false');
+  const refreshes = source.match(/ls\.refresh && ls\.refresh\(\)/g) || [];
+  assert.ok(refreshes.length >= 2, 'each batch should do one final refresh()');
+  // onDone 必须延迟一拍回调，等异步 cellUpdated 钩子在 suppress 释放前跑完
+  const deferred = source.match(/setTimeout\(\(\) => onDone\?\.\(\), 0\)/g) || [];
+  assert.ok(deferred.length >= 2, 'onDone must be deferred past queued cellUpdated hooks');
 });
 
 test('sheet uses taller default rows and resizes with the container', () => {

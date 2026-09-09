@@ -7,7 +7,7 @@
   <script>
     if (location.protocol === 'file:') location.replace('http://localhost:3211/summary.html');
   </script>
-  <link rel="stylesheet" href="./styles.css?v=20260908-customer-summary-v3" />
+  <link rel="stylesheet" href="./styles.css?v=20260909-customer-total-v11" />
 </head>
 <body>
   <div class="topbar">
@@ -17,7 +17,7 @@
   <main id="summary-app" class="summary-page">
     <section class="card summary-sheet-head">
       <div class="summary-sheet-title"><strong id="summary-year"></strong><h2>各客产品报价汇总表</h2></div>
-      <p class="muted">客价确认后填写实际接单数量，并选择实际生产车间。</p>
+      <p class="muted">各项单价、金额及占比均按减税后成本统计。客价确认后填写实际接单数量，并选择实际生产车间。</p>
     </section>
     <section class="card summary-toolbar">
       <div class="summary-actions">
@@ -30,6 +30,7 @@
     <section class="card summary-table-card">
       <div class="summary-table-wrap">
         <table class="wb-table summary-table">
+          <colgroup id="summary-cols"></colgroup>
           <thead id="summary-head"></thead>
           <tbody id="summary-body"><tr><td class="summary-empty">正在读取…</td></tr></tbody>
         </table>
@@ -47,6 +48,6 @@
       };
     })();
   </script>
-  <script src="./summary.js?v=20260908-customer-summary-v3"></script>
+  <script src="./summary.js?v=20260909-customer-total-v11"></script>
 </body>
 </html>

@@ -39,19 +39,40 @@ function renderStats(rows) {
     <div class="stat-rate"><span>客户确认率</span><strong>${confirmationRate.toFixed(1)}%</strong><span class="summary-rate-track" role="progressbar" aria-valuenow="${confirmationRate.toFixed(1)}" aria-valuemin="0" aria-valuemax="100"><i style="width:${confirmationRate}%"></i></span></div>`;
 }
 
-function totalColumns() { return 6 + state.components.length * 3 + 4; }
+function totalColumns() { return 8 + state.components.length * 4 + 1 + 3; }
+
+function groupedRows(rows) {
+  const groups = new Map();
+  [...rows].sort((a, b) => {
+    const byCustomer = String(a.customer || '').localeCompare(String(b.customer || ''), 'zh-CN');
+    if (byCustomer) return byCustomer;
+    return String(b.created_at || '').localeCompare(String(a.created_at || ''));
+  }).forEach(row => {
+    const customer = row.customer || '未填写';
+    if (!groups.has(customer)) groups.set(customer, []);
+    groups.get(customer).push(row);
+  });
+  return [...groups.entries()].map(([customer, customerRows]) => ({ customer, rows: customerRows }));
+}
 
 function renderHead() {
-  const fixed = ['客名', '货号', '货品名称', '报价日期', '实际接单数量', '货价 (HK$)'];
-  const workflow = ['客价确认', '实际生产车间', '备注', ''];
+  const fixed = ['序号', '客名', '实际生产车间', '货号', '货品名称', '报价日期', '实际接单数量', '货价 (HK$)'];
+  const workflow = ['客价确认', '备注', ''];
+  const widths = [58, 150, 125, 110, 170, 100, 112, 126];
+  state.components.forEach(() => widths.push(92, 92, 96, 78));
+  widths.push(96);
+  widths.push(110, 135, 60);
+  $('summary-cols').innerHTML = widths.map(width => `<col style="width:${width}px">`).join('');
+  $('summary-head').closest('table').style.width = `${widths.reduce((sum, width) => sum + width, 0)}px`;
   $('summary-head').innerHTML = `<tr>
     ${fixed.map(label => `<th>${label}</th>`).join('')}
-    ${state.components.map((item, index) => `<th class="component-unit group-${index % 2}">${esc(item.name)}</th><th class="component-sub group-${index % 2}">${esc(item.name)}金额</th><th class="component-sub group-${index % 2}">${esc(item.name)}占比</th>`).join('')}
+    ${state.components.map((item, index) => `<th class="component-unit group-${index % 2}">${esc(item.name)}</th><th class="component-sub group-${index % 2}">退税后${esc(item.name)}</th><th class="component-sub group-${index % 2}">${esc(item.name)}金额</th><th class="component-sub group-${index % 2}">${esc(item.name)}占比</th>`).join('')}
+    <th class="component-sub component-share-total">各金额<br>占比求和</th>
     ${workflow.map(label => `<th class="workflow-head">${label}</th>`).join('')}
   </tr>`;
 }
 
-function rowHtml(row) {
+function rowHtml(row, serial) {
   const confirmation = row.confirmation || { status: 'pending', workshops: [] };
   const selectedWorkshop = (confirmation.workshops || [])[0] || '';
   const disabled = state.canEdit ? '' : 'disabled';
@@ -62,30 +83,68 @@ function rowHtml(row) {
   const price = confirmation.confirmed_price ?? row.quoted_price;
   const qty = confirmation.confirmed_qty ?? row.qty;
   const componentHtml = state.components.map(item => {
-    const unitPrice = num(row.components?.[item.code]);
-    const amount = unitPrice * num(qty);
-    const share = num(price) ? unitPrice / num(price) : 0;
-    return `<td class="component-value">${money(unitPrice)}</td><td class="component-amount">${money(amount)}</td><td class="component-share">${(share * 100).toFixed(2)}%</td>`;
+    const beforeTax = num(row.components_before_tax?.[item.code]);
+    const afterTax = num(row.components?.[item.code]);
+    const amount = afterTax * num(qty);
+    const share = num(price) ? afterTax / num(price) : 0;
+    return `<td class="component-value">${money(beforeTax)}</td><td class="component-value">${money(afterTax)}</td><td class="component-amount">${money(amount)}</td><td class="component-share">${(share * 100).toFixed(2)}%</td>`;
   }).join('');
+  const shareTotal = state.components.reduce((sum, item) => (
+    sum + (num(price) ? num(row.components?.[item.code]) / num(price) : 0)
+  ), 0);
   return `<tr data-id="${row.id}">
+    <td class="summary-customer-no">${serial}</td>
     <td><b>${esc(row.customer || '未填写')}</b></td>
+    <td>${workshopHtml}</td>
     <td><a href="./quote.html?id=${row.id}"><b>${esc(row.quote_no)}</b></a></td>
     <td><b>${esc(row.product_name)}</b>${row.version ? `<small>${esc(row.version)}</small>` : ''}</td>
     <td>${dateOnly(row.created_at)}</td>
     <td><input class="summary-qty" type="number" min="0" step="1" value="${esc(qty ?? '')}" ${disabled}></td>
     <td><input class="summary-price" type="number" min="0" step="any" value="${esc(price ?? '')}" ${disabled}></td>
     ${componentHtml}
+    <td class="component-share component-share-total">${(shareTotal * 100).toFixed(2)}%</td>
     <td><select class="summary-confirm" ${disabled}><option value="pending" ${confirmation.status !== 'confirmed' ? 'selected' : ''}>待确认</option><option value="confirmed" ${confirmation.status === 'confirmed' ? 'selected' : ''}>已确认</option></select></td>
-    <td>${workshopHtml}</td>
     <td><input class="summary-note" value="${esc(confirmation.note || '')}" placeholder="选填" ${disabled}></td>
     <td>${state.canEdit ? '<button class="save-summary">保存</button>' : ''}</td>
+  </tr>`;
+}
+
+function subtotalHtml(customer, rows) {
+  const qtyTotal = rows.reduce((sum, row) => sum + num(row.confirmation?.confirmed_qty ?? row.qty), 0);
+  const priceTotal = rows.reduce((sum, row) => sum + num(row.confirmation?.confirmed_price ?? row.quoted_price), 0);
+  const componentHtml = state.components.map(item => {
+    const beforeTax = rows.reduce((sum, row) => sum + num(row.components_before_tax?.[item.code]), 0);
+    const afterTax = rows.reduce((sum, row) => sum + num(row.components?.[item.code]), 0);
+    const amount = rows.reduce((sum, row) => {
+      const qty = num(row.confirmation?.confirmed_qty ?? row.qty);
+      return sum + num(row.components?.[item.code]) * qty;
+    }, 0);
+    const share = rows.reduce((sum, row) => {
+      const price = num(row.confirmation?.confirmed_price ?? row.quoted_price);
+      return sum + (price ? num(row.components?.[item.code]) / price : 0);
+    }, 0);
+    return `<td class="component-value">${money(beforeTax)}</td><td class="component-value">${money(afterTax)}</td><td class="component-amount">${money(amount)}</td><td class="component-share">${(share * 100).toFixed(2)}%</td>`;
+  }).join('');
+  const shareTotal = state.components.reduce((sum, item) => {
+    const share = rows.reduce((shareSum, row) => {
+      const price = num(row.confirmation?.confirmed_price ?? row.quoted_price);
+      return shareSum + (price ? num(row.components?.[item.code]) / price : 0);
+    }, 0);
+    return sum + share;
+  }, 0);
+  return `<tr class="summary-customer-total">
+    <td></td><td>${esc(customer)}</td><td></td><td colspan="2">客户总计</td><td></td>
+    <td>${money(qtyTotal)}</td><td>${money(priceTotal)}</td>${componentHtml}<td class="component-share component-share-total">${(shareTotal * 100).toFixed(2)}%</td><td colspan="3"></td>
   </tr>`;
 }
 
 function render() {
   const rows = filteredRows();
   renderStats(rows);
-  $('summary-body').innerHTML = rows.length ? rows.map(rowHtml).join('') : `<tr><td colspan="${totalColumns()}" class="summary-empty">暂无匹配报价</td></tr>`;
+  const groups = groupedRows(rows);
+  $('summary-body').innerHTML = groups.length
+    ? groups.map(group => group.rows.map((row, index) => rowHtml(row, index + 1)).join('') + subtotalHtml(group.customer, group.rows)).join('')
+    : `<tr><td colspan="${totalColumns()}" class="summary-empty">暂无匹配报价</td></tr>`;
   document.querySelectorAll('.save-summary').forEach(button => { button.onclick = () => saveRow(button.closest('tr')); });
 }
 

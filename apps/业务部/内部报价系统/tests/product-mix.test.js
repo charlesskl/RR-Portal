@@ -137,3 +137,19 @@ test('department tabs require save or cancel before leaving dirty edits', () => 
   assert.match(source, /dirtyByDept\.get\(activeDept\)/);
   assert.match(source, /await save\(\)/);
 });
+
+test('summary tab recalculates whenever it is opened or clicked again', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../frontend/workbench.js'), 'utf8');
+  assert.match(source, /targetDept === '__summary__' && summaryPane/);
+  assert.match(source, /renderSummaryPane\(summaryPane, sections, quote, me\)/);
+  assert.match(source, /汇总不缓存/);
+});
+
+test('shipping scenario names use the configured freight type dropdown', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../frontend/workbench.js'), 'utf8');
+  assert.match(source, /const scenarioSelect = \(x, i\)/);
+  assert.match(source, /FREIGHT_TYPES\.map\(type =>/);
+  assert.match(source, /<select class="sc-name"/);
+  assert.match(source, /querySelectorAll\('\.sc-name'\)\.forEach\(inp => inp\.onchange/);
+  assert.match(source, /const nextType = FREIGHT_TYPES\.find/);
+});

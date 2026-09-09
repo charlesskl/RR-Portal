@@ -5162,6 +5162,13 @@ function renderShipping(host, payload, header, canEdit, onChange, freightMap, pr
     const sc = s.scenarios;
     const { rows, target, customerUSD, diffPct } = compute();
     const cellTd = (i, k, r) => `<td class="ro" data-i="${i}" data-k="${k}">${fmt(r[k])}</td>`;
+    const scenarioSelect = (x, i) => {
+      if (x.is_factory) return '<span>出厂价</span>';
+      const matchedKey = matchFreightByName(x.name);
+      const options = FREIGHT_TYPES.map(type =>
+        `<option value="${type.label}" ${matchedKey === type.key ? 'selected' : ''}>${type.label}</option>`).join('');
+      return `<select class="sc-name" data-i="${i}" style="min-width:118px"><option value="" ${matchedKey ? '' : 'selected'}>请选择场景</option>${options}</select>`;
+    };
     const suppliedRows = s.customer_supplied_products.map((item, itemIndex) => `
       <tr class="customer-supplied-row">
         <td>
@@ -5188,7 +5195,7 @@ function renderShipping(host, payload, header, canEdit, onChange, freightMap, pr
       <table class="wb-table ship-table">
         <thead><tr>
           <th style="width:200px">项</th>
-          ${sc.map((x, i) => `<th>${canEdit ? `<div style="display:flex;gap:4px;align-items:center"><input class="sc-name" data-i="${i}" value="${escapeHtml(x.name || '')}" style="flex:1" ${x.is_factory?'disabled':''}>${x.is_factory ? '' : `<button class="mini danger sc-del" data-i="${i}" title="删除该场景" style="padding:2px 7px">×</button>`}</div>` : escapeHtml(x.name || ('场景' + (i+1)))}</th>`).join('')}
+          ${sc.map((x, i) => `<th>${canEdit ? `<div style="display:flex;gap:4px;align-items:center">${scenarioSelect(x, i)}${x.is_factory ? '' : `<button class="mini danger sc-del" data-i="${i}" title="删除该场景" style="padding:2px 7px">×</button>`}</div>` : escapeHtml(x.name || ('场景' + (i+1)))}</th>`).join('')}
           ${canEdit ? '<th style="width:30px"></th>' : ''}
         </tr></thead>
         <tbody>
@@ -5230,7 +5237,7 @@ function renderShipping(host, payload, header, canEdit, onChange, freightMap, pr
       s.scenarios[i][key] = inp.value === '' ? null : Number(inp.value);
       onChange(); refresh();
     });
-    host.querySelectorAll('.sc-name').forEach(inp => inp.oninput = () => {
+    host.querySelectorAll('.sc-name').forEach(inp => inp.onchange = () => {
       const i = +inp.dataset.i;
       s.scenarios[i].name = inp.value;
       onChange(); refresh(); // 名字变了重新匹配运费
@@ -5274,7 +5281,9 @@ function renderShipping(host, payload, header, canEdit, onChange, freightMap, pr
     });
     const addBtn = host.querySelector('#sh-add');
     if (addBtn) addBtn.onclick = () => {
-      s.scenarios.push({ name: '场景' + (s.scenarios.length + 1), base_rmb: 0, mold_share_rmb: 0 });
+      const usedKeys = new Set(s.scenarios.map(item => matchFreightByName(item.name)).filter(Boolean));
+      const nextType = FREIGHT_TYPES.find(type => !usedKeys.has(type.key)) || FREIGHT_TYPES[0];
+      s.scenarios.push({ name: nextType.label, base_rmb: 0, mold_share_rmb: 0 });
       onChange(); build();
     };
   }
@@ -5520,13 +5529,18 @@ async function renderQuotePage() {
   const canSeeSummary = hasPerm(me, '汇总分析', 'view');
   const showTabs = visibleDepts.length > 1 || canSeeSummary;
   const canSeeAll = visibleDepts.length === sections.length;  // 保留旧变量给后续判断用
+  let summaryPane = null;
   if (showTabs) {
     const tabBar = document.createElement('div'); tabBar.className = 'dept-tabs';
     const tabKey = 'activeTab:' + quote.id;
     const savedTab = sessionStorage.getItem(tabKey) || me.dept;
     const switchTab = async targetDept => {
       const activeDept = host.querySelector('.dept-tab.active')?.dataset.dept;
-      if (!activeDept || activeDept === targetDept) return;
+      if (!activeDept) return;
+      if (activeDept === targetDept) {
+        if (targetDept === '__summary__' && summaryPane) renderSummaryPane(summaryPane, sections, quote, me);
+        return;
+      }
       if (dirtyByDept.get(activeDept)) {
         const activeSection = sections.find(section => section.dept === activeDept);
         const action = await requestUnsavedAction(activeSection?.dept_name || DEPT_MENU[activeDept] || activeDept);
@@ -5538,6 +5552,8 @@ async function renderQuotePage() {
           catch (error) { alert(error.message); return; }
         }
       }
+      // 汇总不缓存：每次进入都按当前 sections 中已保存的最新数据重新计算。
+      if (targetDept === '__summary__' && summaryPane) renderSummaryPane(summaryPane, sections, quote, me);
       activateTab(tabKey, targetDept);
     };
     visibleDepts.forEach(s => {
@@ -5560,11 +5576,11 @@ async function renderQuotePage() {
     host.appendChild(tabBar);
 
     if (canSeeSummary) {
-      const sumPane = document.createElement('div'); sumPane.className = 'card section-pane';
-      sumPane.dataset.dept = '__summary__';
-      sumPane.style.display = 'none';
-      renderSummaryPane(sumPane, sections, quote, me);
-      host.appendChild(sumPane);
+      summaryPane = document.createElement('div'); summaryPane.className = 'card section-pane';
+      summaryPane.dataset.dept = '__summary__';
+      summaryPane.style.display = 'none';
+      renderSummaryPane(summaryPane, sections, quote, me);
+      host.appendChild(summaryPane);
     }
   }
 

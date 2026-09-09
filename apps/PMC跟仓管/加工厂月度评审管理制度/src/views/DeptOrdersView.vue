@@ -5,8 +5,9 @@ import AppLayout from '../components/AppLayout.vue'
 import { useOrdersStore } from '../stores/orders'
 import { useFactoriesStore } from '../stores/factories'
 import { useAuthStore } from '../stores/auth'
+import { pb } from '../pb'
 import { CRAFT_LABELS, REGION_LABELS, regionOf, type Craft, type Region } from '../constants/roles'
-import { canEditOrders, canImportOrdersForScope, allowedRegions } from '../utils/permissions'
+import { canEditOrders, canImportOrdersForScope, allowedRegions, canViewCraft } from '../utils/permissions'
 import { buildDeliveryReport, deliveryHeaders, exportDeliveryExcel, formatHkdOutPrice, parseDeliveryImport, splitSewingContractItemNo, type DeliveryPricingMode, type ReportRow, type DetailRow } from '../utils/deliveryStats'
 import { readDeliveryPdfAsAoa } from '../utils/pdfDeliveryImport'
 import { parseDeliveryExcelFiles, UNMATCHED_IMPORT_FACTORY_PREFIX } from '../utils/deliveryExcelImport'
@@ -18,6 +19,7 @@ import { factoryTaxPointFactors } from '../utils/taxPoint'
 import { orderRegion } from '../utils/orderRegion'
 import { paginateDeliveryReport } from '../utils/deliveryReportPagination'
 import type { Order } from '../types/order'
+import { deleteOrdersInBatches } from '../utils/bulkOrderDelete'
 
 const route = useRoute()
 const orders = useOrdersStore()
@@ -29,6 +31,17 @@ const confirmingImport = ref(false)
 const pdfInput = ref<HTMLInputElement | null>(null)
 const savingRowId = ref<string | null>(null)
 const savingAll = ref(false)
+const copyingRowId = ref<string | null>(null)
+const importingPdf = ref(false)
+const deletingOrders = ref(false)
+const deleteCompleted = ref(0)
+const deleteTotal = ref(0)
+const deleteResult = ref<{ error: boolean; message: string } | null>(null)
+const selectedOrderIds = ref(new Set<string>())
+const selectedFactory = ref('')
+let active = true
+const mutationBusy = computed(() => deletingOrders.value || savingAll.value || !!savingRowId.value
+  || !!copyingRowId.value || importingExcel.value || importingPdf.value || confirmingImport.value)
 const exportingExcel = ref(false)
 const pageLoading = ref(false)
 const pageLoadError = ref('')
@@ -47,6 +60,7 @@ function showSaveToast(type: 'success' | 'error', message: string) {
 }
 
 onUnmounted(() => {
+  active = false
   if (saveToastTimer) clearTimeout(saveToastTimer)
   pageLoadRequest++
 })
@@ -140,13 +154,26 @@ const myRegions = computed(() => (auth.role ? allowedRegions(auth.role) : null))
 const scopedFactoryIds = computed(() => new Set(factories.items
   .filter((factory) => factory.craft === craft.value)
   .map((factory) => factory.id)))
+const scopedOrders = computed(() => orders.items
+  // 以当前部门工厂 ID 与订单管理厂区为边界。
+  .filter((o) => scopedFactoryIds.value.has(o.factory))
+  .filter((o) => !region.value || orderRegion(o) === region.value)
+  .filter((o) => !myRegions.value || myRegions.value.includes(orderRegion(o))))
+// Use the order's management region, including factories physically located in another region.
+const factoryOptions = computed(() => {
+  const names = new Map(factories.items.map((factory) => [factory.id, factory.name]))
+  const options = new Map<string, string>()
+  for (const order of scopedOrders.value) options.set(order.factory, names.get(order.factory) || order.expand?.factory?.name || order.factory)
+  // Keep the selected factory label when its last matching order has just been deleted.
+  if (selectedFactory.value && !options.has(selectedFactory.value) && scopedFactoryIds.value.has(selectedFactory.value)) {
+    options.set(selectedFactory.value, names.get(selectedFactory.value) || selectedFactory.value)
+  }
+  return [...options].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'))
+})
 const deptOrders = computed(() => {
   const q = search.value.trim().toLowerCase()
-  return orders.items
-    // 以当前厂区+部门工厂 ID 白名单为唯一边界，不依赖订单 expand 的缓存字段。
-    .filter((o) => scopedFactoryIds.value.has(o.factory))
-    .filter((o) => !region.value || orderRegion(o) === region.value)
-    .filter((o) => !myRegions.value || myRegions.value.includes(orderRegion(o)))
+  return scopedOrders.value
+    .filter((o) => !selectedFactory.value || o.factory === selectedFactory.value)
     .filter((o) => matchesOrderDate(o.order_date, dateFilter.value))
     .filter((o) => {
       if (!q) return true
@@ -179,11 +206,37 @@ const page = ref(1)
 const pageSize = ref(100)
 const reportPage = computed(() => paginateDeliveryReport(rows.value, page.value, pageSize.value))
 const sourceOrdersById = computed(() => new Map(orders.items.map((order) => [order.id, order])))
-watch([search, dateMode, selectedMonth, rangeStart, rangeEnd, pageSize, craft, region], () => { page.value = 1 })
+watch([selectedFactory, search, dateMode, selectedMonth, rangeStart, rangeEnd, pageSize, craft, region], () => { page.value = 1 })
 watch([() => reportPage.value.page, pageLoading], ([value, loading]) => {
   if (!loading) page.value = value
 })
 watch([page, pageSize], () => { if (tableScroll.value) tableScroll.value.scrollTop = 0 }, { flush: 'post' })
+const selectionDisabled = computed(() => !canEdit.value || mutationBusy.value || pageLoading.value || !!pageLoadError.value || orders.loading || !!orders.error)
+const pageOrderIds = computed(() => reportPage.value.rows.filter((row): row is DetailRow & { pageKey: string } => row.kind === 'detail').map((row) => row.id))
+const selectedCount = computed(() => selectedOrderIds.value.size)
+const pageSelectedCount = computed(() => pageOrderIds.value.filter((id) => selectedOrderIds.value.has(id)).length)
+const allPageSelected = computed(() => !!pageOrderIds.value.length && pageSelectedCount.value === pageOrderIds.value.length)
+function selectOrder(id: string, checked: boolean) {
+  if (selectionDisabled.value) return
+  if (checked) selectedOrderIds.value.add(id)
+  else selectedOrderIds.value.delete(id)
+}
+function selectPage(checked: boolean) {
+  if (selectionDisabled.value) return
+  for (const id of pageOrderIds.value) selectOrder(id, checked)
+}
+function selectAllFiltered() {
+  if (!selectionDisabled.value) selectedOrderIds.value = new Set(deptOrders.value.map((order) => order.id))
+}
+watch([selectedFactory, search, dateMode, selectedMonth, rangeStart, rangeEnd, craft, region, () => auth.userId, canEdit], () => {
+  selectedOrderIds.value.clear()
+}, { flush: 'sync' })
+watch([craft, region, () => auth.userId], () => { selectedFactory.value = ''; deleteResult.value = null })
+watch([deptOrders, pageLoading], ([value, loading]) => {
+  if (loading) return
+  const available = new Set(value.map((order) => order.id))
+  selectedOrderIds.value = new Set([...selectedOrderIds.value].filter((id) => available.has(id)))
+})
 const showMoldNumber = computed(() => craft.value === 'injection')
 const showContractNumber = computed(() => craft.value === 'sewing')
 const visibleHeaders = computed(() => deliveryHeaders(showMoldNumber.value, showContractNumber.value, pricingMode.value))
@@ -231,7 +284,7 @@ const columnsReady = ref(false)
 const freezeIndex = computed(() => freezeOptions.value.find((option) => option.key === freezeTo.value)?.index ?? -1)
 const freezeStorageKey = computed(() => `delivery-report-freeze:${craft.value}`)
 const columnStorageKey = computed(() => `delivery-report-hidden-columns:${craft.value}`)
-const visibleColumnCount = computed(() => visibleHeaders.value.filter((_, index) => isColumnVisible(index)).length + (canEdit.value ? 1 : 0))
+const visibleColumnCount = computed(() => visibleHeaders.value.filter((_, index) => isColumnVisible(index)).length + (canEdit.value ? 2 : 0))
 
 function columnKey(index: number) {
   return `${index}:${visibleHeaders.value[index]}`
@@ -337,7 +390,7 @@ function columnStyle(index: number) {
   } else if (index >= 0 && index <= freezeIndex.value) {
     const left = visibleHeaders.value.slice(0, index)
       .reduce((total, header, previousIndex) => total + (isColumnVisible(previousIndex) ? (COLUMN_WIDTHS[header] ?? 120) : 0), 0)
-    style['--freeze-left'] = `${left}px`
+    style['--freeze-left'] = `${left + (canEdit.value ? 52 : 0)}px`
   }
   return style
 }
@@ -406,10 +459,12 @@ const draftRows = new Map<string, DetailRow>()
 const dirtyRowCount = computed(() => dirtyRowIds.value.size)
 
 function confirmLeaveDrafts() {
+  if (deletingOrders.value) { showSaveToast('error', '正在删除订单，请等待完成后再离开'); return false }
   return !dirtyRowCount.value || confirm(`有 ${dirtyRowCount.value} 条修改尚未保存，确定离开并放弃这些修改？`)
 }
 onBeforeRouteLeave(confirmLeaveDrafts)
 onBeforeRouteUpdate((to, from) => {
+  if (deletingOrders.value) return false
   if (to.params.craft === from.params.craft && to.query.region === from.query.region) return true
   if (!confirmLeaveDrafts()) return false
   drafts.value = {}
@@ -443,7 +498,7 @@ function normalizeDeptPricing(payload: Record<string, any>) {
 }
 
 async function importRows(aoa: any[][]) {
-  if (!requireImportPermission()) return
+  if (deletingOrders.value || !requireImportPermission()) return
   const fByName = deliveryImportFactoryMap(factories.items, craft.value, null)
   const { payloads, failed } = parseDeliveryImport(aoa, fByName)
   if (!payloads.length && !failed) { alert('未识别到表头(需含「货号/物料名称」)'); return }
@@ -456,6 +511,7 @@ async function importRows(aoa: any[][]) {
 }
 
 async function importExcel(ev: Event) {
+  if (mutationBusy.value) return
   if (!requireImportPermission()) {
     if (fileInput.value) fileInput.value.value = ''
     return
@@ -485,7 +541,7 @@ async function importExcel(ev: Event) {
 }
 
 async function confirmExcelImport() {
-  if (confirmingImport.value || !importDraftSummary.value) return
+  if (mutationBusy.value || !importDraftSummary.value) return
   const blockingRows = importDraftRows.value.filter((row) => {
     const p = row.payload
     return !importFactoryIsValid(p.factory) || !String(p.product ?? '').trim()
@@ -529,12 +585,14 @@ async function confirmExcelImport() {
 }
 
 async function importPdf(ev: Event) {
+  if (mutationBusy.value) return
   if (!requireImportPermission()) {
     if (pdfInput.value) pdfInput.value.value = ''
     return
   }
   const files = Array.from((ev.target as HTMLInputElement).files ?? []).filter((file) => file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf'))
   if (!files.length) return
+  importingPdf.value = true
   try {
     const merged: any[][] = []
     for (const file of files) {
@@ -548,6 +606,7 @@ async function importPdf(ev: Event) {
     console.error(err)
     alert('PDF 解析失败，请确认文件是文字版表格 PDF，不是扫描图片。')
   } finally {
+    importingPdf.value = false
     if (pdfInput.value) pdfInput.value.value = ''
   }
 }
@@ -618,7 +677,7 @@ function sewingItemParts(row: DetailRow) {
 }
 
 async function exportExcel() {
-  if (exportingExcel.value || pageLoading.value || pageLoadError.value || orders.loading || orders.error || !orderCount.value) return
+  if (deletingOrders.value || exportingExcel.value || pageLoading.value || pageLoadError.value || orders.loading || orders.error || !orderCount.value) return
   exportingExcel.value = true
   try {
     await exportDeliveryExcel(
@@ -687,7 +746,7 @@ function rowUpdateData(row: DetailRow): { data?: Partial<any>; error?: string } 
 }
 
 async function saveRow(row: DetailRow) {
-  if (savingRowId.value || savingAll.value) return
+  if (mutationBusy.value) return
   const update = rowUpdateData(row)
   if (!update.data) {
     showSaveToast('error', `保存失败：${update.error}`)
@@ -709,7 +768,7 @@ async function saveRow(row: DetailRow) {
 }
 
 async function saveAllRows() {
-  if (savingAll.value || savingRowId.value) return
+  if (mutationBusy.value) return
   const targets = [...dirtyRowIds.value].map((id) => draftRows.get(id)).filter((row): row is DetailRow => !!row)
   if (!targets.length) {
     showSaveToast('success', '没有需要保存的修改')
@@ -749,6 +808,7 @@ async function saveAllRows() {
 }
 
 async function copyRow(row: DetailRow) {
+  if (mutationBusy.value) return
   const source = sourceOrder(row)
   if (!source) {
     alert('未找到原订单，无法复制')
@@ -814,18 +874,75 @@ async function copyRow(row: DetailRow) {
     notes: draft.notes.trim(),
     created_by: auth.userId ?? source.created_by,
   }
-  await orders.create(payload)
-  await loadScope(true)
+  copyingRowId.value = row.id
+  try {
+    await orders.create(payload)
+    await loadScope(true)
+  } catch (error: any) {
+    showSaveToast('error', `复制失败：${error?.message || '请稍后重试'}`)
+  } finally {
+    copyingRowId.value = null
+  }
 }
 
-async function removeRow(row: DetailRow) {
-  if (!confirm(`确定删除「${row.product || row.order_no || row.item_no}」这条订单记录？此操作不可恢复。`)) return
-  await orders.remove(row.id)
-  delete drafts.value[row.id]
-  draftRows.delete(row.id)
-  dirtyRowIds.value.delete(row.id)
-  await loadScope(true)
+async function deleteSelectedOrders(ids: string[], description: string) {
+  if (selectionDisabled.value || !auth.userId) return
+  if (pb.authStore.record?.id !== auth.userId) {
+    showSaveToast('error', '账号已变更，请刷新页面后重试')
+    return
+  }
+  const eligible = new Set(deptOrders.value.map((order) => order.id))
+  const targets = [...new Set(ids)].filter((id) => eligible.has(id))
+  if (!targets.length) return
+  const unsaved = targets.filter((id) => dirtyRowIds.value.has(id)).length
+  if (!confirm(`确定删除${description}共 ${targets.length} 条订单记录？此操作不可恢复。${unsaved ? `\n其中 ${unsaved} 条有尚未保存的修改，将一并删除。` : ''}`)) return
+  const owner = auth.userId
+  const token = pb.authStore.token
+  const record = pb.authStore.record
+  const scopeCraft = craft.value
+  const scopeRegion = region.value
+  const sameContext = () => active && auth.userId === owner && pb.authStore.record === record && pb.authStore.token === token
+    && craft.value === scopeCraft && region.value === scopeRegion
+  deletingOrders.value = true
+  deleteCompleted.value = 0
+  deleteTotal.value = targets.length
+  deleteResult.value = null
+  try {
+    const result = await deleteOrdersInBatches(targets, (id) => orders.remove(id), {
+      onProgress: (completed) => { deleteCompleted.value = completed },
+      shouldContinue: () => sameContext() && !!auth.role && canEditOrders(auth.role) && canViewCraft(scopeCraft)
+        && (!scopeRegion || allowedRegions(auth.role).includes(scopeRegion)),
+    })
+    if (!sameContext()) return
+    const deleted = new Set(result.deletedIds)
+    // Remove confirmed successes even if the subsequent refresh fails; failed drafts stay intact.
+    orders.items = orders.items.filter((order) => !deleted.has(order.id))
+    for (const id of deleted) {
+      selectedOrderIds.value.delete(id)
+      delete drafts.value[id]
+      draftRows.delete(id)
+      dirtyRowIds.value.delete(id)
+    }
+    const parts = [`已删除 ${result.deletedIds.length} 条`]
+    if (result.failedIds.length) parts.push(`失败 ${result.failedIds.length} 条，请重试`)
+    if (result.skippedIds.length) parts.push(`已停止，未执行 ${result.skippedIds.length} 条`)
+    if (result.errors.length) parts.push(result.errors.slice(0, 2).join('；'))
+    let refreshFailed = false
+    if (deleted.size) {
+      try { await loadScope(true) } catch { refreshFailed = true; parts.push('列表刷新失败，请点击重试') }
+    }
+    if (sameContext()) deleteResult.value = { error: !!(result.failedIds.length || result.skippedIds.length || refreshFailed), message: parts.join('，') }
+  } finally {
+    deletingOrders.value = false
+  }
 }
+async function removeRow(row: DetailRow) {
+  await deleteSelectedOrders([row.id], `「${row.product || row.order_no || row.item_no}」`)
+}
+async function removeSelectedRows() {
+  await deleteSelectedOrders([...selectedOrderIds.value], `「${deptName.value}」已勾选的`)
+}
+
 </script>
 <template>
   <AppLayout>
@@ -907,23 +1024,27 @@ async function removeRow(row: DetailRow) {
         <h2 style="margin:0">{{ deptName }} · 货期管理</h2>
         <span class="muted" role="status">{{ pageLoading ? `正在加载…已读取 ${orders.loadedCount} 条` : pageLoadError || orders.error ? '数据加载失败' : `共 ${orderCount} 单` }}</span>
         <RouterLink v-if="canEdit" :to="newLink"><button>+ 新增下单</button></RouterLink>
-        <button v-if="canEdit" class="save-all" :disabled="savingAll || !!savingRowId" @click="saveAllRows">
+        <button v-if="canEdit" class="save-all" :disabled="mutationBusy" @click="saveAllRows">
           {{ savingAll ? '全部保存中…' : dirtyRowCount ? `全部保存（${dirtyRowCount}）` : '全部保存' }}
         </button>
         <span class="spacer"></span>
+        <select v-model="selectedFactory" class="factory-filter" aria-label="筛选加工厂" :disabled="deletingOrders || pageLoading" :title="factoryOptions.find((factory) => factory.id === selectedFactory)?.name || '全部加工厂'">
+          <option value="">全部加工厂</option>
+          <option v-for="factory in factoryOptions" :key="factory.id" :value="factory.id">{{ factory.name }}</option>
+        </select>
         <div class="date-filter">
-          <select v-model="dateMode" aria-label="下单日期筛选方式">
+          <select v-model="dateMode" :disabled="deletingOrders" aria-label="下单日期筛选方式">
             <option value="all">全部日期</option>
             <option value="month">按月份</option>
             <option value="range">按时间段</option>
           </select>
-          <input v-if="dateMode === 'month'" v-model="selectedMonth" type="month" aria-label="选择月份" />
+          <input v-if="dateMode === 'month'" v-model="selectedMonth" :disabled="deletingOrders" type="month" aria-label="选择月份" />
           <template v-else-if="dateMode === 'range'">
-            <input v-model="rangeStart" type="date" :max="rangeEnd || undefined" aria-label="开始日期" />
+            <input v-model="rangeStart" :disabled="deletingOrders" type="date" :max="rangeEnd || undefined" aria-label="开始日期" />
             <span class="date-separator">至</span>
-            <input v-model="rangeEnd" type="date" :min="rangeStart || undefined" aria-label="结束日期" />
+            <input v-model="rangeEnd" :disabled="deletingOrders" type="date" :min="rangeStart || undefined" aria-label="结束日期" />
           </template>
-          <button v-if="dateMode !== 'all'" class="ghost date-clear" type="button" title="清除日期筛选"
+          <button v-if="dateMode !== 'all'" class="ghost date-clear" type="button" :disabled="deletingOrders" title="清除日期筛选"
             aria-label="清除日期筛选" @click="clearDateFilter">×</button>
         </div>
         <label class="freeze-control">
@@ -952,21 +1073,25 @@ async function removeRow(row: DetailRow) {
             </label>
           </div>
         </details>
-        <button v-if="canImport" class="ghost" @click="pdfInput?.click()">导入 PDF</button>
+        <button v-if="canImport" class="ghost" :disabled="mutationBusy" @click="pdfInput?.click()">导入 PDF</button>
         <input ref="pdfInput" type="file" accept=".pdf,application/pdf" multiple style="display:none" @change="importPdf" />
-        <button v-if="canImport" class="ghost" :disabled="importingExcel" @click="fileInput?.click()">
+        <button v-if="canImport" class="ghost" :disabled="mutationBusy" @click="fileInput?.click()">
           {{ importingExcel ? '导入中…' : '批量导入 Excel' }}
         </button>
         <input ref="fileInput" type="file" accept=".xlsx,.xls,.csv" multiple style="display:none" @change="importExcel" />
-        <input class="search-box" v-model="search" :placeholder="showMoldNumber
+        <input class="search-box" v-model="search" :disabled="deletingOrders" :placeholder="showMoldNumber
           ? '搜索 工厂/PMC/货号/模具编号/订单号/产品'
           : showContractNumber
             ? '搜索 工厂/PMC/合同号/货号/订单号/产品'
             : '搜索 工厂/PMC/货号/订单号/产品'" />
-        <button :disabled="exportingExcel || pageLoading || !!pageLoadError || orders.loading || !!orders.error || !orderCount" @click="exportExcel">{{ exportingExcel ? '导出中…' : '导出 Excel' }}</button>
+        <button :disabled="deletingOrders || exportingExcel || pageLoading || !!pageLoadError || orders.loading || !!orders.error || !orderCount" @click="exportExcel">{{ exportingExcel ? '导出中…' : '导出 Excel' }}</button>
+        <button v-if="canEdit" class="ghost danger bulk-delete" :disabled="selectionDisabled || !selectedCount" @click="removeSelectedRows">
+          {{ deletingOrders ? `删除中…${deleteCompleted}/${deleteTotal}` : selectedCount ? `批量删除（${selectedCount}）` : '批量删除' }}
+        </button>
       </div>
+      <div v-if="deleteResult" class="delete-result" :class="{ 'has-error': deleteResult.error }" role="status">{{ deleteResult.message }}</div>
       <div v-if="pageLoadError || orders.error" class="load-error" role="alert">
-        加载失败：{{ pageLoadError || orders.error }} <button class="ghost mini" :disabled="pageLoading" @click="loadScope(true).catch(() => {})">重试</button>
+        加载失败：{{ pageLoadError || orders.error }} <button class="ghost mini" :disabled="pageLoading || deletingOrders" @click="loadScope(true).catch(() => {})">重试</button>
       </div>
       <div class="pagination" aria-label="订单分页">
         <span>第 {{ reportPage.first }}–{{ reportPage.last }} 条 / 共 {{ reportPage.total }} 条</span>
@@ -975,11 +1100,20 @@ async function removeRow(row: DetailRow) {
         <span>{{ reportPage.page }} / {{ reportPage.pageCount }} 页</span>
         <button class="ghost mini" :disabled="reportPage.page >= reportPage.pageCount" @click="page++">下一页</button>
         <span class="muted">导出包含全部筛选结果，小计为完整分组统计</span>
+        <template v-if="canEdit && selectedCount">
+          <span class="selection-count">已选择 {{ selectedCount }} 条<span v-if="selectedCount > pageSelectedCount">（其中 {{ selectedCount - pageSelectedCount }} 条在其他页）</span></span>
+          <button v-if="selectedCount < orderCount" class="link-button" :disabled="selectionDisabled" @click="selectAllFiltered">选择全部筛选结果（{{ orderCount }} 条）</button>
+          <button class="link-button" :disabled="deletingOrders" @click="selectedOrderIds.clear()">清空选择</button>
+        </template>
       </div>
       <div ref="tableScroll" class="scroll">
         <table class="report" :class="{ 'sewing-report': showContractNumber, 'injection-report': showMoldNumber }">
           <thead>
             <tr>
+              <th v-if="canEdit" class="select-col">
+                <input type="checkbox" aria-label="选择本页订单" title="选择本页订单" :checked="allPageSelected" :indeterminate="pageSelectedCount > 0 && !allPageSelected"
+                  :disabled="selectionDisabled || !pageOrderIds.length" @change="selectPage(($event.target as HTMLInputElement).checked)" />
+              </th>
               <th
                 v-for="(h, headerIndex) in visibleHeaders"
                 :key="headerIndex"
@@ -991,11 +1125,15 @@ async function removeRow(row: DetailRow) {
           </thead>
           <tbody>
             <template v-for="r in reportPage.rows" :key="r.pageKey"
-              v-memo="[r, r.kind === 'detail' && drafts[r.id], canEdit, savingAll, savingRowId, freezeTo, hiddenColumnKeys, visibleHeaders]">
+              v-memo="[r, r.kind === 'detail' && drafts[r.id], canEdit, savingAll, savingRowId, copyingRowId, deletingOrders, selectionDisabled, r.kind === 'detail' && selectedOrderIds.has(r.id), freezeTo, hiddenColumnKeys, visibleHeaders]">
               <tr v-if="r.kind === 'detail'">
+                <td v-if="canEdit" class="select-col">
+                  <input type="checkbox" class="order-select" :aria-label="`选择订单 ${r.order_no || r.item_no || r.product || r.id}`"
+                    :checked="selectedOrderIds.has(r.id)" :disabled="selectionDisabled" @change="selectOrder(r.id, ($event.target as HTMLInputElement).checked)" />
+                </td>
                 <td v-if="r.rangeSpan" :rowspan="r.rangeSpan" :class="['grp', columnClassFor('范围')]" :style="columnStyleFor('范围')">{{ r.range }}</td>
                 <td :class="columnClassFor('下单PMC')" :style="columnStyleFor('下单PMC')">
-                  <input v-if="canEdit" class="pmc-inp" :value="draftValue(r, 'pmc')"
+                  <input v-if="canEdit" :disabled="deletingOrders" class="pmc-inp" :value="draftValue(r, 'pmc')"
                     @input="setDraftValue(r, 'pmc', ($event.target as HTMLInputElement).value)" />
                   <span v-else>{{ r.pmc || '-' }}</span>
                 </td>
@@ -1007,26 +1145,26 @@ async function removeRow(row: DetailRow) {
                   {{ showContractNumber ? (sewingItemParts(r).itemNo || '-') : (r.item_no || '-') }}
                 </td>
                 <td v-if="showMoldNumber" :class="columnClassFor('模具编号')" :style="columnStyleFor('模具编号')">
-                  <input v-if="canEdit" class="mold-no-inp" :value="draftValue(r, 'mold_no')"
+                  <input v-if="canEdit" :disabled="deletingOrders" class="mold-no-inp" :value="draftValue(r, 'mold_no')"
                     @input="setDraftValue(r, 'mold_no', ($event.target as HTMLInputElement).value)" />
                   <span v-else>{{ r.mold_no || '-' }}</span>
                 </td>
                 <td :class="columnClassFor('订单号')" :style="columnStyleFor('订单号')">{{ r.order_no || '-' }}</td>
                 <td :class="columnClassFor('加工类别')" :style="columnStyleFor('加工类别')">{{ r.category || '-' }}</td>
                 <td :class="columnClassFor('物料名称')" :style="columnStyleFor('物料名称')">
-                  <input v-if="canEdit" class="text-inp" :value="draftValue(r, 'product')"
+                  <input v-if="canEdit" :disabled="deletingOrders" class="text-inp" :value="draftValue(r, 'product')"
                     @input="setDraftValue(r, 'product', ($event.target as HTMLInputElement).value)" />
                   <span v-else>{{ r.product || '-' }}</span>
                 </td>
                 <td :class="columnClassFor('数量')" :style="columnStyleFor('数量')">
-                  <input v-if="canEdit" type="number" class="qty-inp" min="0" :value="draftValue(r, 'quantity')"
+                  <input v-if="canEdit" :disabled="deletingOrders" type="number" class="qty-inp" min="0" :value="draftValue(r, 'quantity')"
                     @input="setDraftValue(r, 'quantity', ($event.target as HTMLInputElement).value)" />
                   <span v-else>{{ r.quantity ?? '-' }}</span>
                 </td>
                 <td :class="columnClassFor('下单时间')" :style="columnStyleFor('下单时间')">{{ r.order_date || '-' }}</td>
                 <td :class="columnClassFor('下单交货时间')" :style="columnStyleFor('下单交货时间')">{{ r.delivery_date || '-' }}</td>
                 <td :class="columnClassFor('实际交货时间')" :style="columnStyleFor('实际交货时间')">
-                  <input v-if="canEdit" type="date" class="date-inp" :value="draftValue(r, 'actual_delivery_date')"
+                  <input v-if="canEdit" :disabled="deletingOrders" type="date" class="date-inp" :value="draftValue(r, 'actual_delivery_date')"
                     @input="setDraftValue(r, 'actual_delivery_date', ($event.target as HTMLInputElement).value)" />
                   <span v-else>{{ r.actual_delivery_date || '-' }}</span>
                 </td>
@@ -1036,26 +1174,26 @@ async function removeRow(row: DetailRow) {
                 <td :class="columnClassFor('占比', 0)" :style="columnStyleFor('占比', 0)">{{ r.delayRatio }}</td>
                 <td :class="columnClassFor('延期平均天数')" :style="columnStyleFor('延期平均天数')">{{ r.delayAvg }}</td>
                 <td :class="columnClassFor(visibleHeaders[columnIndex('核价工价(港币不含税$)')] ? '核价工价(港币不含税$)' : '核价工价(不含税RMB)')" :style="columnStyleFor(visibleHeaders[columnIndex('核价工价(港币不含税$)')] ? '核价工价(港币不含税$)' : '核价工价(不含税RMB)')">
-                  <input v-if="canEdit" type="number" class="price-inp" min="0" step="0.0001"
+                  <input v-if="canEdit" :disabled="deletingOrders" type="number" class="price-inp" min="0" step="0.0001"
                     :value="draftValue(r, 'quote_labor_price')"
                     @input="setDraftValue(r, 'quote_labor_price', ($event.target as HTMLInputElement).value)" />
                   <span v-else>{{ r.quote }}</span>
                 </td>
                 <td :class="columnClassFor(visibleHeaders[columnIndex('外发工价(港币不含税$)')] ? '外发工价(港币不含税$)' : '外发工价(不含税RMB)')" :style="columnStyleFor(visibleHeaders[columnIndex('外发工价(港币不含税$)')] ? '外发工价(港币不含税$)' : '外发工价(不含税RMB)')">
-                  <input v-if="canEdit" type="number" class="price-inp" min="0" step="0.001"
+                  <input v-if="canEdit" :disabled="deletingOrders" type="number" class="price-inp" min="0" step="0.001"
                     :readonly="pricingMode === 'rmb-tax' || pricingMode === 'hkd-tax'"
                     :value="draftValue(r, 'unit_price')"
                     @input="setDraftValue(r, 'unit_price', ($event.target as HTMLInputElement).value)" />
                   <span v-else>{{ pricingMode === 'rmb-tax' ? r.outPrice : formatHkdOutPrice(r.outPrice) }}</span>
                 </td>
                 <td :class="columnClassFor('外发工价(人民币含税)')" :style="columnStyleFor('外发工价(人民币含税)')">
-                  <input v-if="canEdit" type="number" class="price-inp" min="0" step="0.01"
+                  <input v-if="canEdit" :disabled="deletingOrders" type="number" class="price-inp" min="0" step="0.01"
                     :value="draftValue(r, 'unit_price_cny_tax')"
                     @input="setDraftValue(r, 'unit_price_cny_tax', ($event.target as HTMLInputElement).value)" />
                   <span v-else>{{ r.outPriceCnyTax }}</span>
                 </td>
                 <td :class="columnClassFor(pricingMode === 'rmb-tax' ? '税点' : '换算汇率')" :style="columnStyleFor(pricingMode === 'rmb-tax' ? '税点' : '换算汇率')">
-                  <input v-if="canEdit" type="number" class="rate-inp" min="0.0001" step="0.01"
+                  <input v-if="canEdit" :disabled="deletingOrders" type="number" class="rate-inp" min="0.0001" step="0.01"
                     :readonly="pricingMode === 'rmb-tax'"
                     :value="draftValue(r, 'exchange_rate')"
                     @input="setDraftValue(r, 'exchange_rate', ($event.target as HTMLInputElement).value)" />
@@ -1066,22 +1204,23 @@ async function removeRow(row: DetailRow) {
                 </td>
                 <td :class="[columnClassFor('占比', 1), { 'over-limit': isPercentOver100(r.priceRatio) }]" :style="columnStyleFor('占比', 1)">{{ r.priceRatio }}</td>
                 <td :class="columnClassFor('备注')" :style="columnStyleFor('备注')">
-                  <textarea v-if="canEdit" class="notes-inp" rows="2" :value="draftValue(r, 'notes')"
+                  <textarea v-if="canEdit" :disabled="deletingOrders" class="notes-inp" rows="2" :value="draftValue(r, 'notes')"
                     @input="setDraftValue(r, 'notes', ($event.target as HTMLTextAreaElement).value)" />
                   <span v-else>{{ r.notes || '-' }}</span>
                 </td>
 
                 <td v-if="canEdit" class="op-cell">
                   <div class="op-actions">
-                    <button class="ghost mini" :disabled="savingAll || savingRowId === r.id" @click="saveRow(r)">
+                    <button class="ghost mini" :disabled="mutationBusy" @click="saveRow(r)">
                       {{ savingRowId === r.id ? '保存中…' : '保存' }}
                     </button>
-                    <button class="ghost mini" @click="copyRow(r)">复制单</button>
-                    <button class="ghost mini danger" @click="removeRow(r)">删除</button>
+                    <button class="ghost mini" :disabled="mutationBusy" @click="copyRow(r)">复制单</button>
+                    <button class="ghost mini danger" :disabled="selectionDisabled" @click="removeRow(r)">删除</button>
                   </div>
                 </td>
               </tr>
               <tr v-else class="subtotal">
+                <td v-if="canEdit" class="select-col"></td>
                 <td
                   v-for="(header, subtotalIndex) in visibleHeaders.slice(1)"
                   :key="subtotalIndex"
@@ -1114,6 +1253,13 @@ async function removeRow(row: DetailRow) {
 .pagination { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; flex: 0 0 auto; padding: 0 0 .65rem; font-size: .84rem; }
 .pagination select { padding: .25rem .4rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: white; font: inherit; }
 .load-error { flex: 0 0 auto; padding: .5rem 0; color: #b91c1c; }
+.factory-filter { height: 38px; width: 180px; max-width: 100%; padding: .35rem .55rem; font-size: .86rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: white; text-overflow: ellipsis; }
+.delete-result { flex: 0 0 auto; margin-bottom: .65rem; padding: .55rem .75rem; border-radius: var(--radius-sm); background: #f0fdf4; color: #15803d; font-size: .88rem; }
+.delete-result.has-error { background: #fef2f2; color: #b91c1c; }
+.selection-count { color: var(--primary); }
+.report .select-col { position: sticky; left: 0; z-index: 2; box-sizing: border-box; width: 52px; min-width: 52px; max-width: 52px; padding-left: 12px; padding-right: 12px; background: var(--surface); }
+.report thead .select-col { z-index: 6; background: #fafbfc; }
+.select-col input { width: 16px; height: 16px; margin: 0; accent-color: var(--primary); cursor: pointer; }
 .date-filter { display: flex; align-items: center; gap: .35rem; min-height: 38px; }
 .date-filter select, .date-filter input { height: 38px; padding: .35rem .55rem; font-size: .86rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: white; }
 .date-filter input[type="month"] { width: 138px; }

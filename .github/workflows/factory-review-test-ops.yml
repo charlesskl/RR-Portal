@@ -118,18 +118,19 @@ jobs:
             PY
               [ -f "$PROD_DIR/auxiliary.db" ] && cp -a "$PROD_DIR/auxiliary.db" "$TEST_DIR/auxiliary.db" || true
 
-              # 4) 裁剪：orders 只留最新 10 条
+              # 4) 裁剪：orders / quality_inspections 各只留最新 10 条
               python3 - "$TEST_DIR/data.db" <<'PY'
             import sqlite3, sys
             con = sqlite3.connect(sys.argv[1], timeout=30)
-            before = con.execute("select count(*) from orders").fetchone()[0]
-            con.execute("""delete from orders where id not in
-                           (select id from orders order by created desc limit 10)""")
-            con.commit()
-            after = con.execute("select count(*) from orders").fetchone()[0]
+            for table in ("orders", "quality_inspections"):
+                before = con.execute(f"select count(*) from {table}").fetchone()[0]
+                con.execute(f"""delete from {table} where id not in
+                                (select id from {table} order by created desc limit 10)""")
+                con.commit()
+                after = con.execute(f"select count(*) from {table}").fetchone()[0]
+                print(f"[OK] {table} 裁剪: {before} → {after} 条")
+                assert after <= 10
             con.close()
-            print(f"[OK] orders 裁剪: {before} → {after} 条")
-            assert after <= 10
             PY
 
               # 5) 重启 + 健康检查

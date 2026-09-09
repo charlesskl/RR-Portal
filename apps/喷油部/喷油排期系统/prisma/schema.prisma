@@ -261,3 +261,25 @@ model InventoryMove {
   @@index([refOrderId])
   @@map("inventory_moves")
 }
+
+// 成品入库申请单：排期实际入库数变化后自动生成，供库存模块查看及 ERP 只读拉取。
+// quantity 为本次变化量；正数=新增入库，负数=撤销/调减。
+model InboundApplication {
+  id              Int      @id @default(autoincrement())
+  applicationNo   String   @unique
+  sourcePlanId    Int
+  productionDate  DateTime
+  orderNo         String
+  productNo       String
+  itemName        String   @default("")
+  partName        String
+  quantity        Int
+  createdBy       String
+  createdAt       DateTime @default(now())
+  remark          String?
+
+  @@index([createdAt])
+  @@index([orderNo])
+  @@index([productNo])
+  @@map("inbound_applications")
+}

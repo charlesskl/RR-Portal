@@ -20,6 +20,7 @@ public class AppDbContext : DbContext
     public DbSet<ProductionPlan> ProductionPlans => Set<ProductionPlan>();
     public DbSet<Holiday> Holidays => Set<Holiday>();
     public DbSet<InventoryMove> InventoryMoves => Set<InventoryMove>();
+    public DbSet<InboundApplication> InboundApplications => Set<InboundApplication>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -194,6 +195,25 @@ public class AppDbContext : DbContext
         im.Property(x => x.CreatedBy).HasColumnName("createdBy");
         im.Property(x => x.CreatedAt).HasColumnName("createdAt").HasConversion(MsConverter);
         im.Property(x => x.Remark).HasColumnName("remark");
+
+        // ===== 成品入库申请单 inbound_applications =====
+        var ia = b.Entity<InboundApplication>();
+        ia.ToTable("inbound_applications");
+        ia.HasIndex(x => x.ApplicationNo).IsUnique();
+        ia.HasIndex(x => x.CreatedAt);
+        ia.HasIndex(x => x.OrderNo);
+        ia.HasIndex(x => x.ProductNo);
+        ia.Property(x => x.ApplicationNo).HasColumnName("applicationNo");
+        ia.Property(x => x.SourcePlanId).HasColumnName("sourcePlanId");
+        ia.Property(x => x.ProductionDate).HasColumnName("productionDate").HasConversion(MsConverter);
+        ia.Property(x => x.OrderNo).HasColumnName("orderNo");
+        ia.Property(x => x.ProductNo).HasColumnName("productNo");
+        ia.Property(x => x.ItemName).HasColumnName("itemName");
+        ia.Property(x => x.PartName).HasColumnName("partName");
+        ia.Property(x => x.Quantity).HasColumnName("quantity");
+        ia.Property(x => x.CreatedBy).HasColumnName("createdBy");
+        ia.Property(x => x.CreatedAt).HasColumnName("createdAt").HasConversion(MsConverter);
+        ia.Property(x => x.Remark).HasColumnName("remark");
     }
 
     // ⚠️ 关键兼容：Prisma 在 SQLite 把 DateTime 存为 Unix 毫秒整数，EF 默认存 TEXT。

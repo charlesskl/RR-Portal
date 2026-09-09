@@ -85,6 +85,31 @@
   box-shadow: 1px 0 0 #e8edf4;
 }
 
+.shipment-fillable-cell {
+  position: relative;
+  padding-right: 3px;
+}
+
+.shipment-fill-handle {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  z-index: 3;
+  width: 9px;
+  height: 9px;
+  border: 1px solid #1677ff;
+  background: #fff;
+  cursor: crosshair;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
+}
+
+.shipment-fillable-cell:focus-within .shipment-fill-handle {
+  opacity: 1;
+  pointer-events: auto;
+}
+
 @media (max-width: 1200px) {
   .shipment-editor .ant-drawer-header {
     align-items: flex-start;

@@ -250,6 +250,7 @@ CREATE TABLE IF NOT EXISTS shipment_items (
     qty                 DECIMAL(18,4) NULL,
     cartons             INT          NULL,
     qty_per_carton      VARCHAR(64)  NULL,
+    purchase_unit       VARCHAR(32)  NOT NULL DEFAULT '个',
     pallet              VARCHAR(64)  NULL,
     price               DECIMAL(18,4) NULL,
     currency            VARCHAR(8)   NOT NULL DEFAULT '¥',
@@ -332,6 +333,7 @@ END $$;
 CREATE INDEX IF NOT EXISTS "IX_outbound_po_item" ON outbound(po_item_id);
 
 ALTER TABLE shipment_items ADD COLUMN IF NOT EXISTS outbound_id INT;
+ALTER TABLE shipment_items ADD COLUMN IF NOT EXISTS purchase_unit VARCHAR(32) NOT NULL DEFAULT '个';
 
 DO $$
 BEGIN

@@ -25,6 +25,7 @@ public class ShipmentItem
     public decimal? Qty { get; set; }
     public int? Cartons { get; set; }
     public string? QtyPerCarton { get; set; }
+    public string PurchaseUnit { get; set; } = "个";
     public string? Pallet { get; set; }
     public decimal? Price { get; set; }
     public string Currency { get; set; } = "¥";

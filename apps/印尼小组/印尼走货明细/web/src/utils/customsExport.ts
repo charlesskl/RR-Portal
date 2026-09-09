@@ -6,6 +6,7 @@
 import * as XLSX from 'xlsx-js-style'
 import JSZip from 'jszip'
 import type { Material } from '../api/client'
+import { isPaperRope, shipmentGrossPerPc } from './shipmentWeight'
 
 export const CUSTOMS_FIXED = '深圳市华胜益出口贸易有限公司'
 
@@ -16,6 +17,7 @@ export interface CustomsItem {
   qty?: number
   cartons?: number
   qty_per_carton?: string
+  purchase_unit?: string
   pallet?: string
   price?: number
   currency?: string
@@ -330,11 +332,13 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
     setCell(ws, ri, 9, m?.unit_kg || 'KGM', 's')
     setCell(ws, ri, 10, it.kg || 0, 'n')
     setCell(ws, ri, 11, it.qty || 0, 'n')
-    setCell(ws, ri, 12, '件', 's')
+    const paperRope = isPaperRope(m?.name_zh)
+    setCell(ws, ri, 12, it.purchase_unit || (paperRope ? '米' : '个'), 's')
     setCell(ws, ri, 13, '=AO' + (ri + 1) + '/$N$1', 'n')
     setCell(ws, ri, 14, '=N' + (ri + 1) + '*L' + (ri + 1), 'n')
-    setCell(ws, ri, 15, '=ROUND(BB' + (ri + 1) + '*L' + (ri + 1) + ',2)', 'n')
-    setCell(ws, ri, 16, '=ROUND(BC' + (ri + 1) + '*L' + (ri + 1) + ',2)', 'n')
+    const weightDivisor = paperRope ? '/1000' : ''
+    setCell(ws, ri, 15, '=ROUND(BB' + (ri + 1) + '*L' + (ri + 1) + weightDivisor + ',2)', 'n')
+    setCell(ws, ri, 16, '=ROUND(BC' + (ri + 1) + '*L' + (ri + 1) + weightDivisor + ',2)', 'n')
     setCell(ws, ri, 17, '=AV' + (ri + 1) + '*AW' + (ri + 1) + '*AX' + (ri + 1) + '/1000000', 'n')
     setCell(ws, ri, 18, '=R' + (ri + 1) + '*AT' + (ri + 1), 'n')
     setCell(ws, ri, 20, it.product_use || '', 's')
@@ -370,7 +374,7 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
     setCell(ws, ri, 43, it.customs_company || m?.customs_company || tf.exportCompany, 's')
     setCell(ws, ri, 44, it.bl_head || tf.blHead, 's')
     setCell(ws, ri, 45, it.cartons || 0, 'n')
-    const qpc = it.qty_per_carton != null && it.qty_per_carton !== '' ? it.qty_per_carton : (m?.qty_per_carton ?? 0)
+    const qpc = it.qty_per_carton ?? 0
     setCell(ws, ri, 46, qpc, (typeof qpc === 'string' && /[^\d.]/.test(qpc)) ? 's' : 'n')
     setCell(ws, ri, 47, m?.length || 0, 'n')
     setCell(ws, ri, 48, m?.width || 0, 'n')
@@ -378,7 +382,8 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
     setCell(ws, ri, 50, m?.material_code || '', 's')
     setCell(ws, ri, 51, '', 's')
     setCell(ws, ri, 52, m?.weight_per_carton || 0, 'n')
-    setCell(ws, ri, 53, m?.gross_per_pc || 0, 'n')
+    setCell(ws, ri, 53, shipmentGrossPerPc(m?.weight_per_carton, qpc), 'n')
+    ws[XLSX.utils.encode_cell({ r: ri, c: 53 })].f = `IFERROR(IF(AND(BA${ri + 1}>0,AU${ri + 1}>0),BA${ri + 1}/AU${ri + 1},0),0)`
     setCell(ws, ri, 54, m?.net_per_pc || 0, 'n')
     setCell(ws, ri, 55, it.pallet || '', 's')
   })

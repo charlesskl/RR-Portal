@@ -496,7 +496,7 @@ export default function PurchasePage() {
     const picks = selectedSchedRows()
     if (!picks.length) { message.warning('请先勾选排期行'); return }
     const orderDate = dayjs().format('YYYY-MM-DD')
-    // bucket: supplierName -> [{ scheduleRow, material }]
+    // bucket: 来源分区 + supplierName。RRI/RRM 不可因供应商相同而合并到同一张 PO。
     const buckets = new Map<string, { sched: SchedRow; mat: any }[]>()
     let codeCount = 0
     let matCount = 0
@@ -510,8 +510,10 @@ export default function PurchasePage() {
           const sup = (m.supplier || '').trim() || '(无供应商)'
           if (m.active === false) continue
           matCount++
-          if (!buckets.has(sup)) buckets.set(sup, [])
-          buckets.get(sup)!.push({ sched: sr, mat: m })
+          const sourcePartition = (sr.source || '').trim().toUpperCase() === 'RRM' ? 'RRM' : 'RRI'
+          const bucketKey = `${sourcePartition}\u0000${sup}`
+          if (!buckets.has(bucketKey)) buckets.set(bucketKey, [])
+          buckets.get(bucketKey)!.push({ sched: sr, mat: m })
         }
       } catch (e: any) {
         console.warn('load materials failed for', sr.code, e)
@@ -532,10 +534,11 @@ export default function PurchasePage() {
     }
     let ok = 0, fail = 0, suppliers = 0, quoteHits = 0
     const existingNos = rows.map(r => r.po_no || '').concat([])
-    for (const [supplier, lines] of buckets) {
+    for (const [bucketKey, lines] of buckets) {
+      const supplier = bucketKey.split('\u0000', 2)[1]
       // 推断实体：用第一条物料的报关公司
       const customsCompany = lines[0]?.mat?.customs_company || ''
-      const entity = poDetermineEntity(supplier, customsCompany, undefined)
+      const entity = poDetermineEntity(supplier, customsCompany, lines[0]?.sched?.source)
       const po_no = poGenContractNo(existingNos, entity, wcode)
       existingNos.push(po_no)
       // 与旧系统一致：生成时按 货号 + 物料名 + 规格 合并（合并同货号重复行、累加数量、合并订单号），

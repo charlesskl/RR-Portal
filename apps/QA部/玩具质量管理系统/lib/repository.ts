@@ -1,6 +1,5 @@
 import type { CAPInput, CAPRecord, ComplaintRecord, ComplaintUpdate, ComplaintWorkflowStatus, ImportSummary, IssueTypeDefinition, LocalDataBackup, SeriesDefinition, SystemConfig, TranslationImportRow, TranslationImportSummary, TranslationUpdate } from "./types";
 import { duplicateKeyOf, translationSourceHashOf } from "./excel";
-import { getBackendSettings } from "./backend";
 import { RemoteComplaintRepository } from "./remote-repository";
 
 export interface ComplaintRepository {
@@ -121,16 +120,13 @@ export class LocalStorageComplaintRepository implements ComplaintRepository {
   private nextCAPNumber(caps:CAPRecord[]){const year=new Date().getFullYear();const prefix=`CAP-${year}-`;const max=caps.filter(cap=>cap.capNumber.startsWith(prefix)).reduce((value,cap)=>Math.max(value,Number(cap.capNumber.slice(prefix.length))||0),0);return `${prefix}${String(max+1).padStart(3,"0")}`;}
 }
 
-const localRepository = new LocalStorageComplaintRepository();
 let remoteRepository: ComplaintRepository | null = null;
 
-/** Pick local (localStorage) or remote (HTTP backend) storage based on the settings page toggle. */
+/** All data always lives in the backend database; the local repository
+ *  remains only as the source for one-time legacy migration in settings. */
 export function getComplaintRepository(): ComplaintRepository {
-  if (getBackendSettings().mode === "remote") {
-    remoteRepository ??= new RemoteComplaintRepository();
-    return remoteRepository;
-  }
-  return localRepository;
+  remoteRepository ??= new RemoteComplaintRepository();
+  return remoteRepository;
 }
 
 // Backward-compatible handle: existing imports of `complaintRepository` keep

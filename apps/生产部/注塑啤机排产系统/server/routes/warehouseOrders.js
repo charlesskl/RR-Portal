@@ -107,6 +107,26 @@ router.post('/:id/check-in', (req, res) => {
   res.json(row);
 });
 
+// ---- 已完成订单选项（入库单选模用） ----
+// 返回 status='completed' 的订单，供新建入库单时选择哪套模入库
+router.get('/_/completed-orders', (req, res) => {
+  const workshop = req.query.workshop || 'B';
+  const keyword = (req.query.keyword || '').trim();
+  let sql = `SELECT id, product_code, mold_no, mold_name, color, color_powder_no,
+                    material_type, shot_weight, material_kg, quantity_needed, accumulated,
+                    cavity, order_no, packing_qty, order_notes
+             FROM orders
+             WHERE workshop = ? AND status = 'completed'`;
+  const params = [workshop];
+  if (keyword) {
+    sql += ' AND (mold_no LIKE ? OR mold_name LIKE ? OR product_code LIKE ? OR order_no LIKE ?)';
+    const kw = `%${keyword}%`;
+    params.push(kw, kw, kw, kw);
+  }
+  sql += ' ORDER BY created_at DESC, id DESC LIMIT 300';
+  res.json(db.prepare(sql).all(...params));
+});
+
 // ---- PMC 选项（已用过的 + 外发供应商表里有的 PMC） ----
 router.get('/_/pmc-options', (req, res) => {
   const workshop = req.query.workshop || 'B';

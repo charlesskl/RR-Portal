@@ -56,6 +56,133 @@ const TAX_DEDUCTION_RATES = Object.freeze({
   freight: 8.26,
 });
 
+const BASE_SUMMARY_COLUMNS = [
+  ['serial', '序号', 'serial'], ['customer', '客名', 'text'], ['workshop', '实际生产车间', 'workshop'],
+  ['quote_no', '货号', 'link'], ['product_name', '货品名称', 'text'], ['created_at', '报价日期', 'date'],
+  ['qty', '实际接单数量', 'qty'], ['quoted_price', '货价 (HK$)', 'price'],
+];
+
+const SUMMARY_COLUMNS = [];
+function addComponentColumns(key, label, options = {}) {
+  SUMMARY_COLUMNS.push([key, label, 'unit']);
+  if (options.afterTax !== false) SUMMARY_COLUMNS.push([`${key}_after_tax`, `退税后${label}`, 'unit']);
+  if (options.amount !== false) SUMMARY_COLUMNS.push([`${key}_amount`, `${label}金额`, 'amount']);
+  if (options.share !== false) SUMMARY_COLUMNS.push([`${key}_share`, `${label}占比`, 'percent']);
+}
+addComponentColumns('injection_labor', '啤工');
+addComponentColumns('assembly_labor', '装工');
+addComponentColumns('painting_labor', '喷印工');
+SUMMARY_COLUMNS.push(['imp_mat', '料价进口料', 'unit'], ['dom_mat', '料价国内料', 'unit'],
+  ['raw_material_after_tax', '退税后原料', 'unit'], ['raw_material_amount', '原料金额', 'amount'],
+  ['raw_material_share', '原料占比', 'percent'], ['abs_material_cost', 'ABS料价成本', 'unit'],
+  ['abs_material_share', 'ABS占货价%', 'percent'], ['total_purchase_price', '总采购价', 'unit']);
+addComponentColumns('color_box', '彩盒');
+addComponentColumns('libao', '贴纸');
+addComponentColumns('suction', '吸塑');
+addComponentColumns('carton', '纸箱');
+SUMMARY_COLUMNS.push(['plating', '电镀', 'unit']);
+addComponentColumns('electronic', '电子');
+addComponentColumns('battery', '电池');
+addComponentColumns('hardware', '五金');
+addComponentColumns('slush', '搪胶');
+addComponentColumns('sewing_hair', '车发');
+addComponentColumns('sewing_cloth', '车衣');
+addComponentColumns('paint_material', '油漆');
+addComponentColumns('other_buy', '其他外购');
+addComponentColumns('misc', '杂项');
+SUMMARY_COLUMNS.push(['freight', '运费', 'unit'], ['cabinet', '吊柜费', 'unit'],
+  ['freight_after_tax', '退税后运费', 'unit'], ['freight_amount', '运费金额', 'amount'],
+  ['freight_share', '运费占比', 'percent'], ['surtax_04', '附加税0.4%', 'unit'],
+  ['rmb_purchase_cost', '人民币采购成本', 'unit'], ['rmb_purchase_share', '人民币采购成本占比', 'percent'],
+  ['gross_before_tax', '未退税前毛利', 'unit'], ['gross_before_tax_rate', '未退税前毛利率', 'percent'],
+  ['profit_before_tax', '未退税前利润', 'unit'], ['profit_before_tax_rate', '未退税前利润率', 'percent'],
+  ['markup_before_tax', '未退税前码点', 'number'], ['tax_1_cost', '含税1%成本', 'unit'],
+  ['labor_13_cost', '人工类13%成本', 'unit'], ['freight_9_cost', '运费含税9%成本', 'unit'],
+  ['tax_13_cost', '含税13%成本', 'unit'], ['carton_13_cost', '纸箱(含税13%）成本', 'unit'],
+  ['slush_3_cost', '搪胶类3%成本', 'unit'], ['hair_13_cost', '车发类13%成本', 'unit'],
+  ['cloth_13_cost', '车衣类13%成本', 'unit'], ['suction_6_cost', '吸塑类6%成本', 'unit'],
+  ['rebate_reduction', '总退税可减少成本', 'unit'], ['cost_after_rebate', '退税及返点后总成本（含人工）', 'unit'],
+  ['markup_after_tax', '退税后码数', 'number'], ['raw_cost_after_tax', '退税后原料成本', 'unit'],
+  ['labor_cost_after_tax', '退税后人工成本', 'unit'], ['no_labor_cost_after_tax', '退税后不含人工成本', 'unit'],
+  ['gross_after_tax', '退税后毛利', 'unit'], ['gross_after_tax_rate', '退税后毛利率', 'percent'],
+  ['profit_after_tax', '退税后利润', 'unit'], ['profit_after_tax_rate', '退税后利润率', 'percent'],
+  ['production_amount', '总生产金额', 'amount'], ['production_cost', '总生产成本', 'amount'],
+  ['total_gross_before_tax', '总未退税前毛利', 'amount'], ['total_gross_before_tax_rate', '总未退税前毛利率', 'percent'],
+  ['total_profit_before_tax', '总未退税前利润', 'amount'], ['total_profit_before_tax_rate', '总未退税前利润率', 'percent'],
+  ['total_raw_before_tax', '总未退税前料价', 'amount'], ['total_raw_before_tax_share', '总未退税前料价占比', 'percent'],
+  ['total_labor_before_tax', '总未退税人工成本', 'amount'], ['total_labor_before_tax_share', '总未退税人工成本占比', 'percent'],
+  ['total_rmb_purchase', '总人民币结算外购件成本', 'amount'], ['total_rmb_purchase_share', '总人民币结算外购件成本占比', 'percent'],
+  ['total_rebate_reduction', '总退税及返点减少成本金额', 'amount'],
+  ['total_no_labor_after_tax', '退税后不含人工成本', 'amount'], ['total_no_labor_after_tax_share', '退税后不含人工成本占比', 'percent'],
+  ['total_gross_after_tax', '总退税后毛利', 'amount'], ['total_gross_after_tax_rate', '总退税后毛利率', 'percent'],
+  ['total_profit_after_tax', '总退税后利润', 'amount'], ['total_profit_after_tax_rate', '总退税后利润率', 'percent'],
+  ['total_raw_after_tax', '总退税后料成本', 'amount'], ['total_raw_after_tax_share', '总未退税前料成本占比', 'percent'],
+  ['total_labor_after_tax', '总退税后人工成本', 'amount'], ['total_labor_after_tax_share', '总退税后人工成本占比', 'percent'],
+  ['amount_share_total', '各金额占比求和', 'percent']);
+
+const AMOUNT_SHARE_KEYS = [
+  'injection_labor_share', 'assembly_labor_share', 'painting_labor_share', 'raw_material_share',
+  'color_box_share', 'libao_share', 'suction_share', 'carton_share', 'electronic_share', 'battery_share',
+  'hardware_share', 'slush_share', 'sewing_hair_share', 'sewing_cloth_share', 'paint_material_share',
+  'other_buy_share', 'misc_share', 'freight_share',
+];
+
+function calculateSummaryValues(before, after, qty, price, absMaterialCost = 0) {
+  const values = {};
+  const setComponent = key => {
+    values[key] = num(before[key]); values[`${key}_after_tax`] = num(after[key]);
+    values[`${key}_amount`] = values[`${key}_after_tax`] * qty;
+    values[`${key}_share`] = price ? values[`${key}_after_tax`] / price : 0;
+  };
+  ['injection_labor', 'assembly_labor', 'painting_labor', 'color_box', 'libao', 'suction', 'carton',
+    'electronic', 'battery', 'hardware', 'slush', 'sewing_hair', 'sewing_cloth', 'paint_material',
+    'other_buy', 'misc'].forEach(setComponent);
+  values.imp_mat = num(before.imp_mat); values.dom_mat = num(before.dom_mat); values.plating = num(before.plating);
+  values.freight = num(before.freight); values.cabinet = num(before.cabinet);
+  values.raw_material_after_tax = num(after.imp_mat) + num(after.dom_mat);
+  values.raw_material_amount = values.raw_material_after_tax * qty;
+  values.raw_material_share = price ? values.raw_material_after_tax / price : 0;
+  values.abs_material_cost = num(absMaterialCost); values.abs_material_share = price ? values.abs_material_cost / price : 0;
+  values.total_purchase_price = ['color_box','libao','suction','carton','plating','electronic','battery','hardware','slush','sewing_hair','sewing_cloth','paint_material','other_buy','misc'].reduce((s,k)=>s+num(before[k]),0);
+  values.freight_after_tax = num(after.freight) + num(after.cabinet);
+  values.freight_amount = values.freight_after_tax * qty;
+  values.freight_share = price ? values.freight_after_tax / price : 0;
+  values.surtax_04 = price * 0.004;
+  const laborBefore = num(before.injection_labor)+num(before.assembly_labor)+num(before.painting_labor);
+  const totalBefore = Object.values(before).reduce((s,v)=>s+num(v),0);
+  values.rmb_purchase_cost = num(before.misc)+num(before.other_buy)+num(before.paint_material)+num(before.sewing_cloth)+num(before.sewing_hair)+num(before.hardware)+num(before.battery)+num(before.electronic)+num(before.plating)+num(before.carton)+num(before.libao)+num(before.color_box)+num(before.dom_mat);
+  values.rmb_purchase_share = price ? values.rmb_purchase_cost/price : 0;
+  values.gross_before_tax = price-(totalBefore-laborBefore); values.gross_before_tax_rate = price ? values.gross_before_tax/price : 0;
+  values.profit_before_tax = price-totalBefore; values.profit_before_tax_rate = price ? values.profit_before_tax/price : 0;
+  values.markup_before_tax = totalBefore ? price/totalBefore : 0;
+  values.tax_1_cost = num(before.plating); values.labor_13_cost = laborBefore*0.08;
+  values.freight_9_cost = num(before.freight); values.tax_13_cost = num(before.color_box)+num(before.libao)+num(before.hardware)+num(before.battery)+num(before.other_buy)+num(before.paint_material)+num(before.dom_mat);
+  values.carton_13_cost = num(before.carton); values.slush_3_cost = num(before.slush);
+  values.hair_13_cost = num(before.sewing_hair); values.cloth_13_cost = num(before.sewing_cloth); values.suction_6_cost = num(before.suction);
+  values.rebate_reduction = values.tax_1_cost*0.0099 + values.labor_13_cost*0.115 + values.freight_9_cost*0.0826 + values.tax_13_cost*0.115 + values.carton_13_cost/1.1*0.115 + values.slush_3_cost*0.03 + values.hair_13_cost*0.115 + values.cloth_13_cost*0.115 + values.suction_6_cost*0.06;
+  values.cost_after_rebate = totalBefore-values.rebate_reduction;
+  values.markup_after_tax = values.cost_after_rebate ? price/values.cost_after_rebate : 0;
+  values.raw_cost_after_tax = values.raw_material_after_tax;
+  values.labor_cost_after_tax = laborBefore-values.labor_13_cost*0.115;
+  values.no_labor_cost_after_tax = values.cost_after_rebate-values.labor_cost_after_tax;
+  values.gross_after_tax = price-values.no_labor_cost_after_tax; values.gross_after_tax_rate = price ? values.gross_after_tax/price : 0;
+  values.profit_after_tax = price-values.cost_after_rebate; values.profit_after_tax_rate = price ? values.profit_after_tax/price : 0;
+  values.production_amount=price*qty; values.production_cost=totalBefore*qty;
+  values.total_gross_before_tax=values.gross_before_tax*qty; values.total_gross_before_tax_rate=values.gross_before_tax_rate;
+  values.total_profit_before_tax=values.profit_before_tax*qty; values.total_profit_before_tax_rate=values.profit_before_tax_rate;
+  values.total_raw_before_tax=(num(before.imp_mat)+num(before.dom_mat))*qty; values.total_raw_before_tax_share=values.production_amount?values.total_raw_before_tax/values.production_amount:0;
+  values.total_labor_before_tax=laborBefore*qty; values.total_labor_before_tax_share=values.production_amount?values.total_labor_before_tax/values.production_amount:0;
+  values.total_rmb_purchase=values.rmb_purchase_cost*qty; values.total_rmb_purchase_share=values.production_amount?values.total_rmb_purchase/values.production_amount:0;
+  values.total_rebate_reduction=values.rebate_reduction*qty;
+  values.total_no_labor_after_tax=values.no_labor_cost_after_tax*qty; values.total_no_labor_after_tax_share=values.production_amount?values.total_no_labor_after_tax/values.production_amount:0;
+  values.total_gross_after_tax=values.gross_after_tax*qty; values.total_gross_after_tax_rate=values.gross_after_tax_rate;
+  values.total_profit_after_tax=values.profit_after_tax*qty; values.total_profit_after_tax_rate=values.profit_after_tax_rate;
+  values.total_raw_after_tax=values.raw_cost_after_tax*qty; values.total_raw_after_tax_share=values.production_amount?values.total_raw_after_tax/values.production_amount:0;
+  values.total_labor_after_tax=values.labor_cost_after_tax*qty; values.total_labor_after_tax_share=values.production_amount?values.total_labor_after_tax/values.production_amount:0;
+  values.amount_share_total=AMOUNT_SHARE_KEYS.reduce((sum,key)=>sum+num(values[key]),0);
+  return values;
+}
+
 function num(value) {
   const n = Number(value);
   return Number.isFinite(n) ? n : 0;
@@ -105,19 +232,23 @@ function buildQuoteSummary(quote, sections) {
     return [key, calculated.hasSourceData ? num(liveValue) : num(pricing[table]?.[key])];
   }));
   const components = afterTaxComponents(beforeTaxComponents);
+  const qty = num(quote.qty);
+  const quotedPrice = calculated.hasSourceData ? num(calculated.quotedPrice) : num(pricing.t1?.base_price);
   return {
     id: quote.id,
     quote_no: quote.quote_no,
     product_name: quote.product_name,
     customer: quote.customer || '',
-    qty: num(quote.qty),
+    qty,
     version: quote.version || '',
     created_at: quote.created_at,
     quote_status: quote.status,
-    quoted_price: calculated.hasSourceData ? num(calculated.quotedPrice) : num(pricing.t1?.base_price),
+    quoted_price: quotedPrice,
     components_before_tax: beforeTaxComponents,
     components,
     component_basis: 'after_tax',
+    abs_material_cost: num(calculated.components.abs_material),
+    summary_values: calculateSummaryValues(beforeTaxComponents, components, qty, quotedPrice, calculated.components.abs_material),
   };
 }
 
@@ -373,7 +504,134 @@ function buildSummaryWorkbook(rows, filters = {}) {
   return wb;
 }
 
+function buildDetailedSummaryWorkbook(rows, filters = {}) {
+  const wb = new ExcelJS.Workbook();
+  wb.creator = '内部报价系统'; wb.created = new Date();
+  wb.calcProperties.fullCalcOnLoad = true; wb.calcProperties.forceFullCalc = true; wb.calcProperties.calcMode = 'auto';
+  const ws = wb.addWorksheet('各客报价汇总', { views: [{ state: 'frozen', ySplit: 4, xSplit: 3, showGridLines: false }] });
+  const workflow = [['confirmation_status','客价确认'], ['confirmed_by','确认人'], ['confirmed_at','确认时间'], ['note','备注']];
+  const columns = [...BASE_SUMMARY_COLUMNS, ...SUMMARY_COLUMNS, ...workflow];
+  const columnByKey = Object.fromEntries(columns.map(([key], index) => [key, index + 1]));
+  const headerFillFor = (key, index) => {
+    if (index < BASE_SUMMARY_COLUMNS.length) return 'FFFFFFFF';
+    if (workflow.some(([workflowKey]) => workflowKey === key)) return 'FFFFE699';
+    if (/^(injection_labor|assembly_labor|painting_labor)/.test(key)) return 'FFD9EAF7';
+    if (/^(imp_mat|dom_mat|raw_material|abs_material|total_purchase_price)/.test(key)) return 'FFE2F0D9';
+    if (/^(color_box|libao|suction|carton)/.test(key)) return 'FFFFF2CC';
+    if (/^(plating|electronic|battery|hardware)/.test(key)) return 'FFE4DFEC';
+    if (/^(slush|sewing_hair|sewing_cloth|paint_material)/.test(key)) return 'FFFCE4D6';
+    if (/^(other_buy|misc|freight|cabinet|surtax|rmb_purchase)/.test(key)) return 'FFDDEBF7';
+    if (/^(production_|total_)/.test(key)) return 'FFD9EAD3';
+    return 'FFF4CCCC';
+  };
+  const ref = (key, row) => `${ws.getColumn(columnByKey[key]).letter}${row}`;
+  const rawKeys = ['injection_labor','assembly_labor','painting_labor','imp_mat','dom_mat','color_box','libao','suction','carton','plating','electronic','battery','hardware','slush','sewing_hair','sewing_cloth','paint_material','other_buy','misc','freight','cabinet'];
+  const formulaFor = (key, row, source) => {
+    const qty=ref('qty',row), price=ref('quoted_price',row);
+    const rawSum=`SUM(${rawKeys.map(k=>ref(k,row)).join(',')})+${num(source.components_before_tax?.blow)+num(source.components_before_tax?.glue_bag)+num(source.components_before_tax?.motor)}`;
+    const labor=`SUM(${ref('injection_labor',row)},${ref('assembly_labor',row)},${ref('painting_labor',row)})`;
+    const componentAfter = key.match(/^(.+)_after_tax$/);
+    if (componentAfter && columnByKey[componentAfter[1]]) {
+      const base=componentAfter[1], rate=num(TAX_DEDUCTION_RATES[base]);
+      return rate?`${ref(base,row)}*(1-${rate}%)`:ref(base,row);
+    }
+    const componentAmount = key.match(/^(.+)_amount$/);
+    if (componentAmount && columnByKey[`${componentAmount[1]}_after_tax`]) return `${ref(`${componentAmount[1]}_after_tax`,row)}*${qty}`;
+    const componentShare = key.match(/^(.+)_share$/);
+    if (componentShare && columnByKey[`${componentShare[1]}_after_tax`]) return `IF(${price}=0,0,${ref(`${componentShare[1]}_after_tax`,row)}/${price})`;
+    const formulas = {
+      raw_material_after_tax:`${ref('imp_mat',row)}+${ref('dom_mat',row)}*(1-11.5%)`,
+      raw_material_amount:`${ref('raw_material_after_tax',row)}*${qty}`,
+      raw_material_share:`IF(${price}=0,0,${ref('raw_material_after_tax',row)}/${price})`,
+      abs_material_share:`IF(${price}=0,0,${ref('abs_material_cost',row)}/${price})`,
+      total_purchase_price:`SUM(${['color_box','libao','suction','carton','plating','electronic','battery','hardware','slush','sewing_hair','sewing_cloth','paint_material','other_buy','misc'].map(k=>ref(k,row)).join(',')})`,
+      freight_after_tax:`${ref('freight',row)}*(1-8.26%)+${ref('cabinet',row)}`,
+      freight_amount:`${ref('freight_after_tax',row)}*${qty}`,
+      freight_share:`IF(${price}=0,0,${ref('freight_after_tax',row)}/${price})`,
+      surtax_04:`${price}*0.4%`,
+      rmb_purchase_cost:`SUM(${['misc','other_buy','paint_material','sewing_cloth','sewing_hair','hardware','battery','electronic','plating','carton','libao','color_box','dom_mat'].map(k=>ref(k,row)).join(',')})`,
+      rmb_purchase_share:`IF(${price}=0,0,${ref('rmb_purchase_cost',row)}/${price})`,
+      gross_before_tax:`${price}-(${rawSum}-${labor})`, gross_before_tax_rate:`IF(${price}=0,0,${ref('gross_before_tax',row)}/${price})`,
+      profit_before_tax:`${price}-${rawSum}`, profit_before_tax_rate:`IF(${price}=0,0,${ref('profit_before_tax',row)}/${price})`,
+      markup_before_tax:`IF(${rawSum}=0,0,${price}/(${rawSum}))`, tax_1_cost:ref('plating',row), labor_13_cost:`(${labor})*8%`,
+      freight_9_cost:ref('freight',row),
+      tax_13_cost:`SUM(${['color_box','libao','battery','paint_material','dom_mat','hardware','other_buy'].map(k=>ref(k,row)).join(',')})`,
+      carton_13_cost:ref('carton',row), slush_3_cost:ref('slush',row), hair_13_cost:ref('sewing_hair',row), cloth_13_cost:ref('sewing_cloth',row), suction_6_cost:ref('suction',row),
+      rebate_reduction:`${ref('tax_1_cost',row)}*0.99%+${ref('labor_13_cost',row)}*11.5%+${ref('freight_9_cost',row)}*8.26%+${ref('tax_13_cost',row)}*11.5%+${ref('carton_13_cost',row)}/1.1*11.5%+${ref('slush_3_cost',row)}*3%+${ref('hair_13_cost',row)}*11.5%+${ref('cloth_13_cost',row)}*11.5%+${ref('suction_6_cost',row)}*6%`,
+      cost_after_rebate:`${rawSum}-${ref('rebate_reduction',row)}`,
+      markup_after_tax:`IF(${ref('cost_after_rebate',row)}=0,0,${price}/${ref('cost_after_rebate',row)})`,
+      raw_cost_after_tax:ref('raw_material_after_tax',row), labor_cost_after_tax:`${labor}-${ref('labor_13_cost',row)}*11.5%`,
+      no_labor_cost_after_tax:`${ref('cost_after_rebate',row)}-${ref('labor_cost_after_tax',row)}`,
+      gross_after_tax:`${price}-${ref('no_labor_cost_after_tax',row)}`, gross_after_tax_rate:`IF(${price}=0,0,${ref('gross_after_tax',row)}/${price})`,
+      profit_after_tax:`${price}-${ref('cost_after_rebate',row)}`, profit_after_tax_rate:`IF(${price}=0,0,${ref('profit_after_tax',row)}/${price})`,
+      production_amount:`${price}*${qty}`, production_cost:`(${rawSum})*${qty}`,
+      total_gross_before_tax:`${ref('gross_before_tax',row)}*${qty}`, total_gross_before_tax_rate:ref('gross_before_tax_rate',row),
+      total_profit_before_tax:`${ref('profit_before_tax',row)}*${qty}`, total_profit_before_tax_rate:ref('profit_before_tax_rate',row),
+      total_raw_before_tax:`(${ref('imp_mat',row)}+${ref('dom_mat',row)})*${qty}`, total_raw_before_tax_share:`IF(${ref('production_amount',row)}=0,0,${ref('total_raw_before_tax',row)}/${ref('production_amount',row)})`,
+      total_labor_before_tax:`(${labor})*${qty}`, total_labor_before_tax_share:`IF(${ref('production_amount',row)}=0,0,${ref('total_labor_before_tax',row)}/${ref('production_amount',row)})`,
+      total_rmb_purchase:`${ref('rmb_purchase_cost',row)}*${qty}`, total_rmb_purchase_share:`IF(${ref('production_amount',row)}=0,0,${ref('total_rmb_purchase',row)}/${ref('production_amount',row)})`,
+      total_rebate_reduction:`${ref('rebate_reduction',row)}*${qty}`,
+      total_no_labor_after_tax:`${ref('no_labor_cost_after_tax',row)}*${qty}`, total_no_labor_after_tax_share:`IF(${ref('production_amount',row)}=0,0,${ref('total_no_labor_after_tax',row)}/${ref('production_amount',row)})`,
+      total_gross_after_tax:`${ref('gross_after_tax',row)}*${qty}`, total_gross_after_tax_rate:ref('gross_after_tax_rate',row),
+      total_profit_after_tax:`${ref('profit_after_tax',row)}*${qty}`, total_profit_after_tax_rate:ref('profit_after_tax_rate',row),
+      total_raw_after_tax:`${ref('raw_cost_after_tax',row)}*${qty}`, total_raw_after_tax_share:`IF(${ref('production_amount',row)}=0,0,${ref('total_raw_after_tax',row)}/${ref('production_amount',row)})`,
+      total_labor_after_tax:`${ref('labor_cost_after_tax',row)}*${qty}`, total_labor_after_tax_share:`IF(${ref('production_amount',row)}=0,0,${ref('total_labor_after_tax',row)}/${ref('production_amount',row)})`,
+      amount_share_total:`SUM(${AMOUNT_SHARE_KEYS.map(key=>ref(key,row)).join(',')})`,
+    };
+    return formulas[key] || null;
+  };
+  ws.pageSetup = { orientation:'landscape', paperSize:9, fitToPage:true, fitToWidth:1, fitToHeight:0,
+    margins:{left:.2,right:.2,top:.35,bottom:.35,header:.1,footer:.1} };
+  ws.mergeCells(1, 2, 1, columns.length); ws.getCell(1,1).value=`${new Date().getFullYear()}年`;
+  ws.getCell(1,2).value='各客产品报价汇总表'; ws.getCell(1,2).font={bold:true,size:16,name:'Microsoft YaHei'};
+  ws.mergeCells(2,1,2,columns.length); ws.getCell(2,1).value=`客户：${filters.customer||'全部'}    导出日期：${new Date().toLocaleDateString('zh-CN')}`;
+  const border = { top:{style:'thin',color:{argb:'FF94A3B8'}}, left:{style:'thin',color:{argb:'FF94A3B8'}}, bottom:{style:'thin',color:{argb:'FF94A3B8'}}, right:{style:'thin',color:{argb:'FF94A3B8'}} };
+  columns.forEach(([key,label],i)=>{ const c=ws.getCell(4,i+1); c.value=label; c.font={bold:true,color:{argb:'FF153A5B'},name:'Microsoft YaHei'}; c.alignment={horizontal:'center',vertical:'middle',wrapText:true}; c.border=border; c.fill={type:'pattern',pattern:'solid',fgColor:{argb:headerFillFor(key,i)}}; });
+  ws.getRow(4).height=52;
+  let rowNo=5;
+  groupSummaryRows(rows).forEach(group=>{
+    const start=rowNo;
+    group.rows.forEach((row,index)=>{
+      const confirmation=row.confirmation||{};
+      const qty=num(confirmation.confirmed_qty??row.qty), price=num(confirmation.confirmed_price??row.quoted_price);
+      const workshop=(confirmation.workshops||[]).map(code=>(WORKSHOPS.find(x=>x[0]===code)||[,code])[1]).join('、');
+      const base={serial:index+1,customer:row.customer,workshop,quote_no:row.quote_no,product_name:row.product_name,created_at:row.created_at?new Date(row.created_at):'',qty,quoted_price:price,
+        confirmation_status:confirmation.status==='confirmed'?'已确认':'待确认',confirmed_by:confirmation.confirmed_by||'',confirmed_at:confirmation.confirmed_at?new Date(confirmation.confirmed_at):'',note:confirmation.note||''};
+      const values=calculateSummaryValues(row.components_before_tax,row.components,qty,price,row.abs_material_cost);
+      row.summary_values = values;
+      columns.forEach(([key,,type],i)=>{
+        const c=ws.getCell(rowNo,i+1); const value=Object.hasOwn(base,key)?base[key]:values[key];
+        const formula=!Object.hasOwn(base,key) ? formulaFor(key,rowNo,row) : null;
+        c.value=formula?{formula,result:num(value)}:value;
+        c.font={name:'Microsoft YaHei',size:9}; c.alignment={vertical:'middle',wrapText:true}; c.border=border;
+        c.fill={type:'pattern',pattern:'solid',fgColor:{argb:index%2?'FFF7FAFC':'FFFFFFFF'}};
+        if(type==='percent') c.numFmt='0.00%'; else if(['unit','price','number'].includes(type)) c.numFmt='#,##0.0000'; else if(['amount','qty'].includes(type)) c.numFmt='#,##0.00'; else if(type==='date') c.numFmt='yyyy-mm-dd';
+      });
+      const statusCell=ws.getCell(rowNo,columnByKey.confirmation_status);
+      statusCell.fill={type:'pattern',pattern:'solid',fgColor:{argb:confirmation.status==='confirmed'?'FFC6EFCE':'FFFFEB9C'}};
+      statusCell.font={name:'Microsoft YaHei',size:9,bold:true,color:{argb:confirmation.status==='confirmed'?'FF006100':'FF9C6500'}};
+      ws.getRow(rowNo).height=Math.max(24,wrappedLineCount(row.customer,18)*15,wrappedLineCount(row.product_name,22)*15); rowNo++;
+    });
+    const end=rowNo-1, subtotal=rowNo;
+    ws.getCell(subtotal,1).value=''; ws.getCell(subtotal,2).value=group.customer; ws.getCell(subtotal,4).value='客户总计'; ws.mergeCells(subtotal,4,subtotal,5);
+    columns.forEach(([,,type],i)=>{
+      const c=ws.getCell(subtotal,i+1); const letter=ws.getColumn(i+1).letter;
+      if(i>=6 && !['text','date','link','workshop','serial'].includes(type)) {
+        const key=columns[i][0];
+        const result=group.rows.reduce((s,r)=>s+num(key==='qty'?(r.confirmation?.confirmed_qty??r.qty):key==='quoted_price'?(r.confirmation?.confirmed_price??r.quoted_price):(r.summary_values||{})[key]),0);
+        c.value={formula:`SUM(${letter}${start}:${letter}${end})`,result};
+      }
+      c.font={name:'Microsoft YaHei',size:9,bold:true,color:{argb:'FF0B4369'}}; c.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFDDEBFA'}}; c.border=border; c.alignment={vertical:'middle',wrapText:true};
+      if(type==='percent') c.numFmt='0.00%'; else if(['unit','price','number'].includes(type)) c.numFmt='#,##0.0000'; else if(['amount','qty'].includes(type)) c.numFmt='#,##0.00';
+    }); ws.getRow(subtotal).height=Math.max(24,wrappedLineCount(group.customer,18)*15); rowNo++;
+  });
+  columns.forEach(([,,type],i)=>{ ws.getColumn(i+1).width=i===1?20:i===2?16:i===4?22:type==='percent'?12:type==='amount'?15:13; });
+  ws.autoFilter={from:{row:4,column:1},to:{row:Math.max(4,rowNo-1),column:columns.length}};
+  return wb;
+}
+
 module.exports = {
-  WORKSHOPS, QUOTE_COMPONENTS, TAX_DEDUCTION_RATES,
-  afterTaxComponents, groupSummaryRows, buildQuoteSummary, buildSummaryWorkbook, parseJson,
+  WORKSHOPS, QUOTE_COMPONENTS, TAX_DEDUCTION_RATES, BASE_SUMMARY_COLUMNS, SUMMARY_COLUMNS,
+  afterTaxComponents, calculateSummaryValues, groupSummaryRows, buildQuoteSummary,
+  buildSummaryWorkbook: buildDetailedSummaryWorkbook, parseJson,
 };

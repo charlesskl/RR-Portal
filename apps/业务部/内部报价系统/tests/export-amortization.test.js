@@ -133,7 +133,10 @@ test('internal export writes product-ratio weighted injection formulas', async (
   assert.ok(!injectionHeaders.includes('颜色'));
   assert.equal(worksheet.getCell(totalRow, 14).value.formula, `((N${dataStart}+N${dataStart + 1})*2+(N${dataStart + 2})*1)/3`);
   assert.equal(Number(worksheet.getCell(totalRow, 14).value.result.toFixed(4)), 33.3333);
-  assert.equal(worksheet.getCell(totalRow, 15).value.formula, `((O${dataStart}+O${dataStart + 1})*2+(O${dataStart + 2})*1)/3`);
+  assert.equal(worksheet.getCell(titleRow + 1, 15).value, null);
+  assert.equal(worksheet.getCell(dataStart, 15).value, null);
+  assert.equal(worksheet.getCell(totalRow, 15).value.formula, `N${totalRow}*2/100`);
+  assert.equal(worksheet.getCell(totalRow, 15).numFmt, ';;;');
 });
 
 test('internal quotation workbook uses print-friendly layouts on every sheet', async () => {
@@ -161,11 +164,11 @@ test('internal quotation workbook uses print-friendly layouts on every sheet', a
   }
   const mainSheet = workbook.getWorksheet('报价明细');
   assert.equal(mainSheet.pageSetup.printTitlesRow, '1:2');
-  // 顶部标题与资料栏延伸到 Q 列，R 列及后方空白不进入打印区域。
-  assert.equal(mainSheet.pageSetup.printArea, `A1:Q${mainSheet.rowCount}`);
-  assert.equal(mainSheet.getCell('Q1').master.address, 'A1');
-  assert.equal(mainSheet.getCell('Q2').master.address, 'A2');
-  assert.notEqual(mainSheet.getCell('R1').master.address, 'A1');
+  // 顶部标题、资料栏和打印范围均只到 N 列；隐藏辅助公式不撑宽打印区域。
+  assert.equal(mainSheet.pageSetup.printArea, `A1:N${mainSheet.rowCount}`);
+  assert.equal(mainSheet.getCell('N1').master.address, 'A1');
+  assert.equal(mainSheet.getCell('N2').master.address, 'A2');
+  assert.notEqual(mainSheet.getCell('O1').master.address, 'A1');
   assert.equal(mainSheet.getCell(1, 1).font.size, 18);
   assert.ok(mainSheet.getCell(2, 1).font.size >= 12);
   assert.ok(mainSheet.getColumn(6).width >= 18);
@@ -235,7 +238,7 @@ test('carton product dimensions are labeled in inches', async () => {
   const summaryHeaderRow = worksheet.getColumn(1).values.findIndex(value => value === '注塑+吹气');
   assert.ok(summaryHeaderRow > 0);
   assert.equal(
-    worksheet.getCell(summaryHeaderRow + 1, 12).value.formula,
+    worksheet.getCell(summaryHeaderRow + 1, 10).value.formula,
     `(F${titleRow + 3}/MAX(G${titleRow + 3},1)+F${titleRow + 4})`,
   );
   const workbenchSource = fs.readFileSync(path.join(__dirname, '../frontend/workbench.js'), 'utf8');
@@ -244,6 +247,8 @@ test('carton product dimensions are labeled in inches', async () => {
   assert.match(workbenchSource, /产品尺寸（mm 自动换算为英寸）/);
   assert.match(workbenchSource, /id="cc-pl-mm"/);
   assert.match(workbenchSource, /c\[k\] = mm \/ 25\.4/);
+  assert.match(workbenchSource, /const productInchInput = key =>.*toFixed\(2\)/);
+  assert.match(workbenchSource, /el\.value = mmEl\.value === '' \? '' : c\[k\]\.toFixed\(2\)/);
 });
 
 test('carton dimensions accept formulas and preserve them in Excel export', async () => {
@@ -388,7 +393,7 @@ test('USD supplier material keeps USD as source price and converts directly to H
   assert.equal(worksheet.getCell(rawOnlyDataRow, 10).value.result, 31);
 });
 
-test('surtax is stored and exported as a direct HKD amount', async () => {
+test('surtax is stored as HKD and exported only in the shipping calculation block', async () => {
   const args = {
     quote: { quote_no: 'SURTAX-HKD', product_name: '附加税港币', qty: 1000 },
     sections: [{
@@ -396,7 +401,7 @@ test('surtax is stored and exported as a direct HKD amount', async () => {
       payload_json: JSON.stringify({
         header: { fx_rmb_hkd: 0.85, fx_hkd_usd: 7.8 },
         pricing_summary: { surtax: 0.1 },
-        shipping: { scenarios: [] },
+        shipping: { scenarios: [{ name: '出厂价', is_factory: true }] },
       }),
     }],
   };
@@ -413,8 +418,15 @@ test('surtax is stored and exported as a direct HKD amount', async () => {
     if (row.getCell(1).value === '十、合计') summaryRow = row.number + 2;
   });
   assert.ok(summaryRow);
-  assert.equal(worksheet.getCell(summaryRow, 13).value, 0.1);
-  assert.match(worksheet.getCell(summaryRow, 14).value.formula, new RegExp(`\\+M${summaryRow}$`));
+  assert.equal(worksheet.getCell(summaryRow - 1, 11).value, '小计HKD');
+  assert.equal(worksheet.getCell(summaryRow, 11).value.formula, `SUM(A${summaryRow}:J${summaryRow})`);
+  assert.ok(!worksheet.getRow(summaryRow - 1).values.includes('附加税0.4%'));
+  let surtaxRow = 0;
+  worksheet.eachRow(row => {
+    if (row.getCell(1).value === '附加税0.4%') surtaxRow = row.number;
+  });
+  assert.ok(surtaxRow);
+  assert.equal(worksheet.getCell(surtaxRow, 2).numFmt, '0.00');
 });
 
 test('manually adjusted carton price is preserved by the shared paper-rate formula', async () => {
@@ -1078,20 +1090,21 @@ test('export separates electronic and sewing pricing and keeps weighted sewing f
   const labels = [];
   worksheet.eachRow(row => row.eachCell(cell => {
     if (typeof cell.value === 'string') labels.push(cell.value);
-    if (cell.value === '注塑+吹气' && row.values.includes('出货底价 HKD')) summaryHeaderRow = row.number;
+    if (cell.value === '注塑+吹气' && row.values.includes('小计HKD')) summaryHeaderRow = row.number;
   }));
 
   assert.ok(summaryHeaderRow);
   assert.equal(worksheet.getCell(summaryHeaderRow, 2).value, '组装人工');
   assert.equal(worksheet.getCell(summaryHeaderRow, 3).value, '包装/混装人工');
   assert.equal(worksheet.getCell(summaryHeaderRow, 4).value, '二次加工（印喷）');
-  assert.equal(worksheet.getCell(summaryHeaderRow, 5).value, '电子');
-  assert.equal(worksheet.getCell(summaryHeaderRow, 6).value, '五金');
-  assert.equal(worksheet.getCell(summaryHeaderRow, 7).value, '包装材料');
-  assert.equal(worksheet.getCell(summaryHeaderRow, 8).value, '辅助材料');
-  assert.equal(worksheet.getCell(summaryHeaderRow, 11).value, '车缝');
-  assert.equal(worksheet.getCell(summaryHeaderRow, 14).value, '出货底价 HKD');
-  assert.match(worksheet.getCell(summaryHeaderRow + 1, 14).value.formula, /SUM\(A\d+:L\d+\)-E\d+-K\d+\+M\d+/);
+  assert.equal(worksheet.getCell(summaryHeaderRow, 5).value, '五金');
+  assert.equal(worksheet.getCell(summaryHeaderRow, 6).value, '包装材料');
+  assert.equal(worksheet.getCell(summaryHeaderRow, 7).value, '辅助材料');
+  assert.equal(worksheet.getCell(summaryHeaderRow, 10).value, '纸箱');
+  assert.equal(worksheet.getCell(summaryHeaderRow, 11).value, '小计HKD');
+  assert.ok(!worksheet.getRow(summaryHeaderRow).values.includes('电子'));
+  assert.ok(!worksheet.getRow(summaryHeaderRow).values.includes('车缝'));
+  assert.match(worksheet.getCell(summaryHeaderRow + 1, 11).value.formula, /SUM\(A\d+:J\d+\)/);
   assert.ok(labels.includes('车缝'));
   assert.ok(labels.includes('电子'));
   assert.ok(labels.includes('码点 × 1.3'));
@@ -1231,7 +1244,7 @@ test('export combines mold RMB and USD display prices and converts production mo
   worksheet.eachRow(row => row.eachCell(cell => {
     if (cell.value === '测试模具') {
       moldRow = row.number;
-      moldDisplayHkd = worksheet.getCell(row.number, 16).value;
+      moldDisplayHkd = worksheet.getCell(row.number, 14).value;
     }
     if (cell.value === '生产模具' && !productionMoldUsd) {
       const usdCell = worksheet.getCell(row.number, cell.col + 4);
@@ -1241,13 +1254,23 @@ test('export combines mold RMB and USD display prices and converts production mo
   }));
 
   const moldHeaders = worksheet.getRow(moldRow - 1).values.slice(1);
+  assert.ok(worksheet.getCell(1, 14).isMerged);
+  assert.equal(worksheet.getCell(1, 15).isMerged, false);
+  assert.ok(worksheet.getCell(moldRow - 2, 14).isMerged);
+  assert.equal(worksheet.getCell(moldRow - 2, 15).isMerged, false);
   assert.ok(!moldHeaders.includes('颜色'));
+  assert.ok(!moldHeaders.includes('模具结构'));
+  assert.ok(!moldHeaders.includes('净重(g)'));
+  assert.ok(!moldHeaders.includes('备   注'));
   assert.equal(worksheet.getRow(moldRow).height, 32);
-  assert.equal(worksheet.getCell(moldRow, 14).numFmt, '"¥"#,##0');
-  assert.equal(worksheet.getCell(moldRow, 15).numFmt, '"$"#,##0');
-  assert.equal(worksheet.getCell(moldRow, 16).numFmt, '"HK$"#,##0');
+  assert.equal(worksheet.getCell(moldRow - 1, 10).value, '图   片');
+  assert.ok(worksheet.getCell(moldRow - 1, 10).isMerged);
+  assert.ok(worksheet.getCell(moldRow - 1, 11).isMerged);
+  assert.equal(worksheet.getCell(moldRow, 12).numFmt, '"¥"#,##0');
+  assert.equal(worksheet.getCell(moldRow, 13).numFmt, '"$"#,##0');
+  assert.equal(worksheet.getCell(moldRow, 14).numFmt, '"HK$"#,##0');
   assert.equal(moldDisplayHkd.result, 10780);
-  assert.match(moldDisplayHkd.formula, /N\d+\/0\.85\+O\d+\*7\.8/);
+  assert.match(moldDisplayHkd.formula, /L\d+\/0\.85\+M\d+\*7\.8/);
   assert.equal(Number(productionMoldUsd.result.toFixed(2)), 15.18);
   assert.equal(productionMoldUsdFmt, '"$"#,##0.00');
   assert.match(productionMoldUsd.formula, /I\d+\/0\.85\/7\.75/);
@@ -1313,11 +1336,14 @@ test('internal export keeps slush and painting details on separate sheets and on
   assert.ok(!mainValues.includes('喷油件'));
   let unifiedHeader = 0;
   let paintingRow = 0;
+  let slushSummaryRow = 0;
   main.eachRow(row => {
     if (row.getCell(1).value === '序号' && row.getCell(2).value === '类别') unifiedHeader = row.number;
     if (row.getCell(2).value === '印喷') paintingRow = row.number;
+    if (row.getCell(1).value === '二·C、搪胶部分（汇总）') slushSummaryRow = row.number;
   });
   assert.ok(unifiedHeader);
+  assert.equal(unifiedHeader, slushSummaryRow + 5);
   assert.ok(paintingRow > unifiedHeader);
   const sheetIncludes = (sheet, expected) => {
     let found = false;
@@ -1412,11 +1438,9 @@ test('internal export keeps Indonesian freight only in quotation summary', async
     + worksheet.getCell(injectionIndoTotalRow, 15).value.result
     + worksheet.getCell(blowIndoTotalRow, 15).value.result
     + slushWorksheet.getCell(slushIndoRow, 7).value.result;
-  assert.equal(Number(worksheet.getCell(summaryRow, 9).value.result.toFixed(4)), Number(expectedIndoTotal.toFixed(4)));
-  assert.equal(
-    worksheet.getCell(summaryRow, 9).value.formula,
-    `L${unifiedTotalRow}+O${injectionIndoTotalRow}+O${blowIndoTotalRow}+'搪胶明细'!G${slushIndoRow}`
-  );
+  const summaryFreight = worksheet.getCell(summaryRow, 8).value;
+  const summaryFreightValue = typeof summaryFreight === 'object' ? summaryFreight.result : summaryFreight;
+  assert.equal(Number(summaryFreightValue.toFixed(4)), Number(expectedIndoTotal.toFixed(4)));
   assert.ok(unifiedHeaderRow);
   assert.equal(worksheet.getCell(unifiedHeaderRow, 12).value, '印尼运费');
   const icRow = electronicIcRow;
@@ -1484,14 +1508,18 @@ test('shipping export matches freight formulas by scenario name without temporar
   let titleRow = 0;
   let yt40Row = 0;
   let yt40Col = 0;
+  let shippingFreightRow = 0;
+  let shippingLiftRow = 0;
   worksheet.eachRow(row => row.eachCell(cell => {
     if (cell.value === '十一、出货价算价（多场景）') titleRow = row.number;
     if (cell.value === 'YT 40柜') { yt40Row = row.number; yt40Col = cell.col; }
+    if (cell.col === 1 && cell.value === '运费 48%') shippingFreightRow = row.number;
+    if (cell.col === 1 && cell.value === '吊柜费 52%') shippingLiftRow = row.number;
   }));
-  assert.ok(titleRow && yt40Row && yt40Col);
+  assert.ok(titleRow && yt40Row && yt40Col && shippingFreightRow && shippingLiftRow);
   const rateRef = worksheet.getCell(yt40Row, yt40Col + 4).address;
-  assert.equal(worksheet.getCell(titleRow + 3, 3).value.formula, `${rateRef}*48/100`);
-  assert.equal(worksheet.getCell(titleRow + 4, 3).value.formula, `${rateRef}*52/100`);
+  assert.equal(worksheet.getCell(shippingFreightRow, 3).value.formula, `${rateRef}*48/100`);
+  assert.equal(worksheet.getCell(shippingLiftRow, 3).value.formula, `${rateRef}*52/100`);
 });
 
 test('customer-supplied products are named separately and added to exported customer price', async () => {
@@ -1527,7 +1555,7 @@ test('customer-supplied products are named separately and added to exported cust
   assert.equal(worksheet.getCell(cableRow, 3).value, 1.25);
   assert.match(worksheet.getCell(totalUsdRow, 3).value.formula, new RegExp(`C${controllerRow}\\+C${cableRow}`));
   assert.equal(worksheet.getCell(totalUsdRow, 3).value.result, 3.75);
-  assert.match(worksheet.getCell(customerPriceRow, 1).value.result, /报客货价: 3\.7500/);
+  assert.match(worksheet.getCell(customerPriceRow, 1).value.result, /报客货价: 3\.77/);
   const source = fs.readFileSync(path.join(__dirname, '../frontend/workbench.js'), 'utf8');
   assert.match(source, /amount_usd_raw/);
   assert.match(source, /customer-supplied-amount[\s\S]*type="text"/);
@@ -1590,8 +1618,8 @@ test('internal export mirrors UI formulas for slush and each departmental Indone
   });
 
   const injectionHeader = sectionRows['二、注塑部分'] + 1;
-  assert.equal(worksheet.getCell(injectionHeader, 15).value, '印尼运费 2%');
-  assert.equal(worksheet.getCell(injectionHeader + 1, 15).value.formula, `N${injectionHeader + 1}*2/100`);
+  assert.equal(worksheet.getCell(injectionHeader, 15).value, null);
+  assert.equal(worksheet.getCell(injectionHeader + 1, 15).value, null);
 
   const blowHeader = sectionRows['二·B、吹气部分 (HKD)'] + 1;
   const blowRow = blowHeader + 1;
@@ -1599,8 +1627,10 @@ test('internal export mirrors UI formulas for slush and each departmental Indone
   assert.equal(worksheet.getCell(blowRow, 11).value, 3);
   assert.equal(worksheet.getCell(blowRow, 12).value.formula, `I${blowRow}*J${blowRow}*K${blowRow}`);
   assert.equal(worksheet.getCell(blowRow, 12).value.result, 15);
-  assert.equal(worksheet.getCell(blowHeader, 15).value, '印尼运费 2%');
-  assert.equal(worksheet.getCell(blowRow, 15).value.formula, `L${blowRow}*2/100`);
+  assert.equal(worksheet.getCell(blowHeader, 15).value, null);
+  assert.equal(worksheet.getCell(blowRow, 15).value, null);
+  assert.equal(worksheet.getCell(blowRow + 1, 15).value.formula, `L${blowRow + 1}*2/100`);
+  assert.equal(worksheet.getCell(blowRow + 1, 15).numFmt, ';;;');
 
   const slushWorksheet = workbook.getWorksheet('搪胶明细');
   const slushSectionRows = {};

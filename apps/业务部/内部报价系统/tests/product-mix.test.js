@@ -90,6 +90,14 @@ test('molding UI visually separates multiple product groups', () => {
   assert.match(styles, /tbody td\.molding-machine-key input/);
 });
 
+test('mold table hides the unused mold structure column', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../frontend/workbench.js'), 'utf8');
+  const renderMolds = source.match(/function renderMolds\([\s\S]*?\n}\n/);
+  assert.ok(renderMolds);
+  assert.doesNotMatch(renderMolds[0], />模具结构</);
+  assert.doesNotMatch(renderMolds[0], /\['structure', 'text'\]/);
+});
+
 test('molding defaults automatically fill missing material and shot prices without overwriting manual prices', () => {
   const source = fs.readFileSync(path.join(__dirname, '../frontend/workbench.js'), 'utf8');
   assert.match(source, /function applyInjectionReferencePrices\(payload/);
@@ -125,7 +133,8 @@ test('shipping UI supports named customer-supplied products in final USD', () =>
 test('tax summary does not repeat the Indonesian freight field', () => {
   const source = fs.readFileSync(path.join(__dirname, '../frontend/workbench.js'), 'utf8');
   assert.doesNotMatch(source, /id="tk-indo-freight"/);
-  assert.match(source, /misc: num\(sales\.pricing_summary\?\.indo_freight\) \+ surtaxHkd/);
+  assert.match(source, /misc: num\(sales\.pricing_summary\?\.indo_freight\),/);
+  assert.doesNotMatch(source, /misc: num\(sales\.pricing_summary\?\.indo_freight\) \+ surtaxHkd/);
 });
 
 test('department tabs require save or cancel before leaving dirty edits', () => {
@@ -143,6 +152,20 @@ test('summary tab recalculates whenever it is opened or clicked again', () => {
   assert.match(source, /targetDept === '__summary__' && summaryPane/);
   assert.match(source, /renderSummaryPane\(summaryPane, sections, quote, me\)/);
   assert.match(source, /汇总不缓存/);
+});
+
+test('page subtotal hides electronic and sewing while shipping keeps their separate prices', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../frontend/workbench.js'), 'utf8');
+  const subtotalBlock = source.match(/const costCols = \[([\s\S]*?)\n  \];/);
+  assert.ok(subtotalBlock);
+  assert.doesNotMatch(subtotalBlock[1], /\['电子'/);
+  assert.doesNotMatch(subtotalBlock[1], /\['车缝'/);
+  assert.match(source, /\['小计HKD', factoryHkdSum, 'hkd'\]/);
+  assert.doesNotMatch(source, /\['附加税0\.4%', surtaxManual, 'input'\]/);
+  assert.doesNotMatch(source, /id="tot-surtax"/);
+  assert.match(source, /const elecHkdCol = num\(electronicTotal\)/);
+  assert.match(source, /const sewHkdCol = toHkd\(sewingTotalRmb\)/);
+  assert.match(source, /\{ sewing: sewHkdCol, electronic: elecHkdCol \}/);
 });
 
 test('shipping scenario names use the configured freight type dropdown', () => {

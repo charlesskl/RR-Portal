@@ -89,6 +89,7 @@ function calculateQuoteCosts(quote, sections) {
     const material = String(row.material || '').trim();
     return material && !/^(PVC|TPR|TPE)\b/i.test(material) ? materialCost(row) : 0;
   });
+  const absMaterial = weightedInjectionSum(mold, row => /^ABS\b/i.test(String(row.material || '').trim()) ? materialCost(row) : 0);
   const injectionLabor = weightedInjectionSum(mold, row => num(row.shot_price));
   const blow = sum(mold.blow_items, blowTotal);
 
@@ -174,7 +175,7 @@ function calculateQuoteCosts(quote, sections) {
     glue_bag: categoryTotal('胶袋'), color_box: categoryTotal('彩盒/内咭'),
     battery: categoryTotal('电池'), libao: categoryTotal('产品利宝') + categoryTotal('彩盒利宝'),
     plating: categoryTotal('电镀'), other_buy: categoryTotal('其他外购'),
-    carton: cartonHkd, freight, cabinet, misc: indoFreight + surtax,
+    carton: cartonHkd, freight, cabinet, misc: indoFreight, abs_material: absMaterial,
   };
   // 用明细行是否存在判断，而不是用金额是否非零；这样一张明确填写为 0 的新报价
   // 也会清掉旧快照，不会错误回退到历史 pricing_summary。

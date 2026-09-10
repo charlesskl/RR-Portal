@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
+    "dev": "bash scripts/dev.sh",
     "qa:browser": "playwright-cli",
     "test": "node --test tests/test_portal_urls.mjs"
   },

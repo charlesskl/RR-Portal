@@ -91,12 +91,12 @@ class ProductMappingViewSet(viewsets.ModelViewSet):
         response.write('\ufeff')
         writer = csv.writer(response)
         writer.writerow([
-            '客户', '货号', '货名', '每箱个数', '玩具类别', '备注(柜单)',
+            '记录ID', '客户', '货号', '货名', '每箱个数', '玩具类别', '备注(柜单)',
             '每箱毛重(kg)', '每箱净重(kg)', '来源',
         ])
         for item in queryset.iterator(chunk_size=1000):
             writer.writerow([
-                item.customer_name, item.product_code, item.product_name,
+                item.id, item.customer_name, item.product_code, item.product_name,
                 item.qty_per_box if item.qty_per_box is not None else '',
                 item.toy_category, item.factory_short,
                 item.gross_weight_per_box if item.gross_weight_per_box is not None else '',

@@ -7,7 +7,9 @@ import dayjs from 'dayjs'
 import { api } from '../api/client'
 import { publicAsset } from '../deployment'
 import './ShipmentsPage.css'
-import { isPaperRope, shipmentGrossPerPc, shipmentWeightQuantity } from '../utils/shipmentWeight'
+import {
+  isPaperRope, parseShipmentPacking, shipmentCartonCount, shipmentGrossPerPc, shipmentWeightQuantity,
+} from '../utils/shipmentWeight'
 
 interface ShipmentSummary {
   id: number
@@ -616,6 +618,10 @@ export default function ShipmentsPage() {
       if (!(Number(it.kg) > 0)) hard.push(tag + '送货 KG 必须 > 0')
       if (!(Number(it.qty) > 0)) hard.push(tag + '送货数量必须 > 0')
       if (!(Number(it.cartons) > 0)) hard.push(tag + '箱数必须 > 0')
+      const packing = parseShipmentPacking(it.qty_per_carton)
+      if (packing.mode === 'invalid') hard.push(tag + '每箱数量格式不合法（例如“3000”或“1-2/3000 3/4000”）')
+      if (packing.mode === 'ranges' && Number(it.qty) > 0 && Math.abs(packing.totalQty - Number(it.qty)) > 0.0001)
+        warn.push(tag + `每箱数量分段合计 ${packing.totalQty} 与送货数量 ${it.qty} 不一致`)
       if (!(Number(it.price) > 0)) hard.push(tag + '采购单价必须 > 0')
       if (decimals(it.kg) > 4) hard.push(tag + '送货 KG 小数超过 4 位')
       if (it.price && decimals(it.price) > 4) hard.push(tag + '采购单价小数超过 4 位')
@@ -700,15 +706,14 @@ export default function ShipmentsPage() {
     if (unit === 'KGM') return +(((Number(m?.net_per_pc) || 0) * shipmentWeightQuantity(m?.name_zh, it.qty)).toFixed(4))
     return Number(it.qty) || 0
   }
-  // 改 数量 / 每箱数量 时联动：箱数=ceil(数量/每箱数量)，并按单位重算送货KG重量
+  // 改 数量 / 每箱数量 时联动：统一数量按除法算箱数，分段写法按箱号计数。
   function patchQtyOrPack(i: number, k: 'qty' | 'qty_per_carton', v: any) {
     setEditorDirty(true)
     setItems(its => its.map((it, idx) => {
       if (idx !== i) return it
       const next = { ...it, [k]: v }
-      const pc = Number(next.qty_per_carton)
-      const q = Number(next.qty)
-      if (pc > 0 && q > 0) next.cartons = Math.ceil(q / pc)
+      const cartons = shipmentCartonCount(next.qty, next.qty_per_carton)
+      next.cartons = cartons
       next.kg = kgForItem(next, matMap.get(next.material_id!))
       return next
     }))
@@ -742,9 +747,8 @@ export default function ShipmentsPage() {
         if (index <= sourceIndex || index > targetIndex) return item
         const next = { ...item, [field]: value }
         if (field === 'qty' || field === 'qty_per_carton') {
-          const perCarton = Number(next.qty_per_carton)
-          const qty = Number(next.qty)
-          if (perCarton > 0 && qty > 0) next.cartons = Math.ceil(qty / perCarton)
+          const cartons = shipmentCartonCount(next.qty, next.qty_per_carton)
+          next.cartons = cartons
           next.kg = kgForItem(next, matMap.get(next.material_id!))
         } else if (field === 'material_id') {
           next.kg = kgForItem(next, matMap.get(next.material_id!))
@@ -1068,7 +1072,7 @@ export default function ShipmentsPage() {
               { title: '报关出口公司', width: 160, render: (_v, r, i) => fillable(i, 'customs_company', <Input size="small" value={r.customs_company} onChange={(e) => patchItem(i, 'customs_company', e.target.value)} />) },
               { title: '提单抬头', width: 180, render: (_v, r, i) => fillable(i, 'bl_head', <Select size="small" value={r.bl_head || undefined} options={BL_HEAD_LIST.map(v => ({ value: v, label: v }))} onChange={(v) => patchItem(i, 'bl_head', v)} style={{ width: '100%' }} allowClear />) },
               { title: '箱数', width: 70, render: (_v, r, i) => fillable(i, 'cartons', <InputNumber size="small" controls={false} min={0} value={r.cartons} onChange={(v) => patchItem(i, 'cartons', v ?? 0)} style={{ width: '100%' }} />) },
-              { title: '每箱数量', width: 120, render: (_v, r, i) => fillable(i, 'qty_per_carton', <Input size="small" value={r.qty_per_carton} placeholder="200" onChange={(e) => patchQtyOrPack(i, 'qty_per_carton', e.target.value)} />) },
+              { title: '每箱数量', width: 190, render: (_v, r, i) => fillable(i, 'qty_per_carton', <Input size="small" value={r.qty_per_carton} placeholder="3000 或 1-2/3000 3/4000" title="可填统一数量 3000，或按箱号分段：1-2/3000 3/4000" onChange={(e) => patchQtyOrPack(i, 'qty_per_carton', e.target.value)} />) },
               { title: '卡板', width: 110, render: (_v, r, i) => fillable(i, 'pallet', <Input size="small" value={r.pallet} placeholder="1-22/2卡" onChange={(e) => patchItem(i, 'pallet', e.target.value)} />) },
               { title: '长', width: 90, render: (_v, r, i) => fillableMaterial(i, 'length', <InputNumber size="small" controls={false} min={0} step={0.0001} value={matMap.get(r.material_id!)?.length} onChange={(v) => patchMatDim(r.material_id, 'length', v ?? 0)} style={{ width: '100%' }} />) },
               { title: '宽', width: 90, render: (_v, r, i) => fillableMaterial(i, 'width', <InputNumber size="small" controls={false} min={0} step={0.0001} value={matMap.get(r.material_id!)?.width} onChange={(v) => patchMatDim(r.material_id, 'width', v ?? 0)} style={{ width: '100%' }} />) },

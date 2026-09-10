@@ -20,8 +20,8 @@ def login():
     if request.method == 'POST':
         username = request.form.get('username', '').strip()
         password = request.form.get('password', '')
-        if (username == current_app.config['LOGIN_USERNAME']
-                and password == current_app.config['LOGIN_PASSWORD']):
+        accounts = current_app.config.get('LOGIN_ACCOUNTS') or {}
+        if accounts.get(username) is not None and password == accounts.get(username):
             session['logged_in'] = True
             session.permanent = False
             next_url = request.args.get('next') or request.form.get('next')

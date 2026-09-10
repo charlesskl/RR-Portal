@@ -24,11 +24,22 @@ export default function DictionariesPage() {
   async function save() {
     setLoading(true)
     try {
-      await api.put('/dictionaries', { hs, suppliers: sup, translations })
-      message.success(`已保存 (HS ${hs.length} · 供应商 ${sup.length} · 英文翻译 ${translations.length})`)
+      const { data } = await api.put<{ hs_synced?: number }>('/dictionaries', { hs, suppliers: sup, translations })
+      const synced = data?.hs_synced ?? 0
+      message.success(`已保存 (HS ${hs.length} · 供应商 ${sup.length} · 英文翻译 ${translations.length})；同步走货物料 ${synced} 条`)
       setDirty(false)
     } catch (e: any) {
       message.error('保存失败: ' + (e?.message ?? e))
+    } finally { setLoading(false) }
+  }
+
+  async function syncHs() {
+    setLoading(true)
+    try {
+      const { data } = await api.post<{ updated?: number }>('/dictionaries/hs/sync')
+      message.success(`已同步 ${data?.updated ?? 0} 条物料；已有走货资料重新打开后会显示 HS CODE`)
+    } catch (e: any) {
+      message.error('同步失败: ' + (e?.message ?? e))
     } finally { setLoading(false) }
   }
 
@@ -47,7 +58,7 @@ export default function DictionariesPage() {
           items={[
             {
               key: 'hs', label: 'HS 编码字典',
-              children: <HsTable rows={hs} setRows={(r) => { setHs(r); setDirty(true) }} />,
+              children: <HsTable rows={hs} setRows={(r) => { setHs(r); setDirty(true) }} onSync={syncHs} syncing={loading} dirty={dirty} />,
             },
             {
               key: 'sup', label: '供应商字典',
@@ -102,7 +113,13 @@ function TranslationTable({ rows, setRows }: { rows: TranslationDict[]; setRows:
   )
 }
 
-function HsTable({ rows, setRows }: { rows: HsDict[]; setRows: (r: HsDict[]) => void }) {
+function HsTable({ rows, setRows, onSync, syncing, dirty }: {
+  rows: HsDict[]
+  setRows: (r: HsDict[]) => void
+  onSync: () => void
+  syncing: boolean
+  dirty: boolean
+}) {
   const [filter, setFilter] = useState('')
   const filtered = useMemo(() => rows
     .map((q, _i) => ({ q, _i }))
@@ -119,6 +136,8 @@ function HsTable({ rows, setRows }: { rows: HsDict[]; setRows: (r: HsDict[]) => 
         <Input.Search placeholder="搜索关键字 / HS 编码" allowClear style={{ width: 280 }}
           onSearch={setFilter} onChange={(e) => !e.target.value && setFilter('')} />
         <Button onClick={add}>➕ 新增</Button>
+        <Button onClick={onSync} loading={syncing} disabled={dirty}>🔄 同步到物料/走货</Button>
+        {dirty && <span style={{ color: '#8c8c8c' }}>请先保存字典再同步</span>}
       </Space>
       <Table
         rowKey={(_, i) => String(i)}

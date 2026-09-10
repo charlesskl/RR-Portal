@@ -7,7 +7,10 @@ import dayjs from 'dayjs'
 import { api } from '../api/client'
 import { publicAsset } from '../deployment'
 import './ShipmentsPage.css'
-import { isPaperRope, shipmentGrossPerPc, shipmentWeightQuantity } from '../utils/shipmentWeight'
+import {
+  formatShipmentPackingLines, isPaperRope, parseShipmentPacking, shipmentCartonCount,
+  shipmentGrossPerPc, shipmentWeightQuantity,
+} from '../utils/shipmentWeight'
 
 interface ShipmentSummary {
   id: number
@@ -107,9 +110,9 @@ const GRAY = { background: '#f0f3f7' }
 
 interface FillableShipmentCellProps {
   rowIndex: number
-  field: keyof ShipmentItem
-  onFill: (sourceIndex: number, targetIndex: number, field: keyof ShipmentItem) => void
-  onFillToEnd: (sourceIndex: number, field: keyof ShipmentItem) => void
+  field: string
+  onFill: (sourceIndex: number, targetIndex: number, field: string) => void
+  onFillToEnd: (sourceIndex: number, field: string) => void
   children: React.ReactNode
 }
 
@@ -308,7 +311,7 @@ export default function ShipmentsPage() {
   function calc(it: ShipmentItem) {
     const m = it.material_id != null ? matMap.get(it.material_id) : null
     const weightQty = shipmentWeightQuantity(m?.name_zh, it.qty)
-    const grossTotal = shipmentGrossPerPc(m?.weight_per_carton, it.qty_per_carton) * weightQty
+    const grossTotal = shipmentGrossPerPc(m?.weight_per_carton, it.qty_per_carton, m?.name_zh) * weightQty
     const netTotal = num(m?.net_per_pc) * weightQty
     const cbmEach = num(m?.length) * num(m?.width) * num(m?.height) / 1e6
     const cbmTotal = cbmEach * num(it.cartons)
@@ -616,13 +619,17 @@ export default function ShipmentsPage() {
       if (!(Number(it.kg) > 0)) hard.push(tag + '送货 KG 必须 > 0')
       if (!(Number(it.qty) > 0)) hard.push(tag + '送货数量必须 > 0')
       if (!(Number(it.cartons) > 0)) hard.push(tag + '箱数必须 > 0')
+      const packing = parseShipmentPacking(it.qty_per_carton)
+      if (packing.mode === 'invalid') hard.push(tag + '每箱数量格式不合法（例如“3000”或“1-2/3000 3/4000”）')
+      if (packing.mode === 'ranges' && Number(it.qty) > 0 && Math.abs(packing.totalQty - Number(it.qty)) > 0.0001)
+        warn.push(tag + `每箱数量分段合计 ${packing.totalQty} 与送货数量 ${it.qty} 不一致`)
       if (!(Number(it.price) > 0)) hard.push(tag + '采购单价必须 > 0')
       if (decimals(it.kg) > 4) hard.push(tag + '送货 KG 小数超过 4 位')
       if (it.price && decimals(it.price) > 4) hard.push(tag + '采购单价小数超过 4 位')
       if (it.pallet && !/^\d+-\d+\/.+/.test(it.pallet) && !/^\d+-\d+$/.test(it.pallet))
         hard.push(tag + '卡板格式不合法（"1-22/2卡" 或 "1-22"）')
       const m = it.material_id != null ? matById.get(it.material_id) : null
-      if (m && shipmentGrossPerPc(m.weight_per_carton, it.qty_per_carton) > 0 && Number(m.net_per_pc) && shipmentGrossPerPc(m.weight_per_carton, it.qty_per_carton) < Number(m.net_per_pc))
+      if (m && shipmentGrossPerPc(m.weight_per_carton, it.qty_per_carton, m.name_zh) > 0 && Number(m.net_per_pc) && shipmentGrossPerPc(m.weight_per_carton, it.qty_per_carton, m.name_zh) < Number(m.net_per_pc))
         warn.push(tag + '单个毛重 < 单个净重')
       if (!it.supplier) warn.push(tag + '供应商为空')
       if (!it.po_no) warn.push(tag + '采购单号为空')
@@ -700,15 +707,14 @@ export default function ShipmentsPage() {
     if (unit === 'KGM') return +(((Number(m?.net_per_pc) || 0) * shipmentWeightQuantity(m?.name_zh, it.qty)).toFixed(4))
     return Number(it.qty) || 0
   }
-  // 改 数量 / 每箱数量 时联动：箱数=ceil(数量/每箱数量)，并按单位重算送货KG重量
+  // 改 数量 / 每箱数量 时联动：统一数量按除法算箱数，分段写法按箱号计数。
   function patchQtyOrPack(i: number, k: 'qty' | 'qty_per_carton', v: any) {
     setEditorDirty(true)
     setItems(its => its.map((it, idx) => {
       if (idx !== i) return it
       const next = { ...it, [k]: v }
-      const pc = Number(next.qty_per_carton)
-      const q = Number(next.qty)
-      if (pc > 0 && q > 0) next.cartons = Math.ceil(q / pc)
+      const cartons = shipmentCartonCount(next.qty, next.qty_per_carton)
+      next.cartons = cartons
       next.kg = kgForItem(next, matMap.get(next.material_id!))
       return next
     }))
@@ -742,9 +748,8 @@ export default function ShipmentsPage() {
         if (index <= sourceIndex || index > targetIndex) return item
         const next = { ...item, [field]: value }
         if (field === 'qty' || field === 'qty_per_carton') {
-          const perCarton = Number(next.qty_per_carton)
-          const qty = Number(next.qty)
-          if (perCarton > 0 && qty > 0) next.cartons = Math.ceil(qty / perCarton)
+          const cartons = shipmentCartonCount(next.qty, next.qty_per_carton)
+          next.cartons = cartons
           next.kg = kgForItem(next, matMap.get(next.material_id!))
         } else if (field === 'material_id') {
           next.kg = kgForItem(next, matMap.get(next.material_id!))
@@ -761,8 +766,61 @@ export default function ShipmentsPage() {
       <FillableShipmentCell
         rowIndex={i}
         field={field}
-        onFill={fillItemDown}
-        onFillToEnd={(sourceIndex, sourceField) => fillItemDown(sourceIndex, items.length - 1, sourceField)}
+        onFill={(sourceIndex, targetIndex, sourceField) => fillItemDown(sourceIndex, targetIndex, sourceField as keyof ShipmentItem)}
+        onFillToEnd={(sourceIndex, sourceField) => fillItemDown(sourceIndex, items.length - 1, sourceField as keyof ShipmentItem)}
+      >
+        {control}
+      </FillableShipmentCell>
+    )
+  }
+
+  function fillMaterialDown(sourceIndex: number, targetIndex: number, field: string) {
+    if (targetIndex <= sourceIndex) {
+      message.warning('请把复制点向下拖动到目标行')
+      return
+    }
+    const sourceMaterialId = items[sourceIndex]?.material_id
+    if (sourceMaterialId == null) return
+    const materialField = field.replace(/^material:/, '')
+    const value = matMap.get(sourceMaterialId)?.[materialField]
+    const targetMaterialIds = items
+      .slice(sourceIndex + 1, targetIndex + 1)
+      .map(item => item.material_id)
+      .filter((id): id is number => id != null)
+    if (!targetMaterialIds.length) return
+
+    setMatMap(current => {
+      const next = new Map(current)
+      for (const materialId of targetMaterialIds) {
+        next.set(materialId, { ...(next.get(materialId) || {}), [materialField]: value })
+      }
+      return next
+    })
+    setDirtyMatIds(current => {
+      const next = new Set(current)
+      targetMaterialIds.forEach(id => next.add(id))
+      return next
+    })
+    if (materialField === 'unit_kg' || materialField === 'net_per_pc') {
+      const affected = new Set(targetMaterialIds)
+      setItems(current => current.map((item, index) => {
+        if (index <= sourceIndex || index > targetIndex || item.material_id == null || !affected.has(item.material_id)) return item
+        const material = { ...(matMap.get(item.material_id) || {}), [materialField]: value }
+        return { ...item, kg: kgForItem(item, material) }
+      }))
+    }
+    setEditorDirty(true)
+    message.success(`已向下复制 ${targetIndex - sourceIndex} 行`)
+  }
+
+  function fillableMaterial(i: number, field: string, control: React.ReactNode) {
+    const fillField = `material:${field}`
+    return (
+      <FillableShipmentCell
+        rowIndex={i}
+        field={fillField}
+        onFill={fillMaterialDown}
+        onFillToEnd={(sourceIndex, sourceField) => fillMaterialDown(sourceIndex, items.length - 1, sourceField)}
       >
         {control}
       </FillableShipmentCell>
@@ -796,7 +854,7 @@ export default function ShipmentsPage() {
       const m = it.material_id != null ? matMap.get(it.material_id) : null
       cbm += (Number(m?.length) || 0) * (Number(m?.width) || 0) * (Number(m?.height) || 0) / 1e6 * (Number(it.cartons) || 0)
       const weightQty = shipmentWeightQuantity(m?.name_zh, it.qty)
-      gross += shipmentGrossPerPc(m?.weight_per_carton, it.qty_per_carton) * weightQty
+      gross += shipmentGrossPerPc(m?.weight_per_carton, it.qty_per_carton, m?.name_zh) * weightQty
       net += (Number(m?.net_per_pc) || 0) * weightQty
     }
     return {
@@ -991,7 +1049,7 @@ export default function ShipmentsPage() {
               { title: '产品英文名称', width: 160, render: (_v, r) => matMap.get(r.material_id!)?.name_en ?? '' },
               { title: '规格', width: 110, render: (_v, r) => matMap.get(r.material_id!)?.spec ?? '' },
               { title: '类别', width: 90, render: (_v, r) => matMap.get(r.material_id!)?.category ?? '' },
-              { title: '单位', width: 80, render: (_v, r) => <Select size="small" value={matMap.get(r.material_id!)?.unit_kg || 'KGM'} options={UNIT_LIST.map(u => ({ value: u, label: u }))} onChange={(v) => patchMatDim(r.material_id, 'unit_kg', v)} style={{ width: '100%' }} /> },
+              { title: '单位', width: 100, render: (_v, r, i) => fillableMaterial(i, 'unit_kg', <Select size="small" value={matMap.get(r.material_id!)?.unit_kg || 'KGM'} options={UNIT_LIST.map(u => ({ value: u, label: u }))} onChange={(v) => patchMatDim(r.material_id, 'unit_kg', v)} style={{ width: '100%' }} />) },
               { title: '送货KG重量', width: 110, render: (_v, r, i) => { const unit = matMap.get(r.material_id!)?.unit_kg || 'KGM'; return fillable(i, 'kg', <InputNumber size="small" controls={false} min={0} step={0.0001} value={r.kg} onChange={(v) => patchItem(i, 'kg', v ?? 0)} addonAfter={unit === 'KGM' ? 'kg' : unit} style={{ width: '100%' }} />) } },
               { title: '送货数量', width: 90, render: (_v, r, i) => fillable(i, 'qty', <InputNumber size="small" controls={false} min={0} step={0.0001} value={r.qty} onChange={(v) => patchQtyOrPack(i, 'qty', v ?? 0)} style={{ width: '100%' }} />) },
               { title: '单位', width: 60, align: 'center', render: (_v, r) => r.purchase_unit || (isPaperRope(matMap.get(r.material_id!)?.name_zh) ? '米' : '个') },
@@ -1015,14 +1073,14 @@ export default function ShipmentsPage() {
               { title: '报关出口公司', width: 160, render: (_v, r, i) => fillable(i, 'customs_company', <Input size="small" value={r.customs_company} onChange={(e) => patchItem(i, 'customs_company', e.target.value)} />) },
               { title: '提单抬头', width: 180, render: (_v, r, i) => fillable(i, 'bl_head', <Select size="small" value={r.bl_head || undefined} options={BL_HEAD_LIST.map(v => ({ value: v, label: v }))} onChange={(v) => patchItem(i, 'bl_head', v)} style={{ width: '100%' }} allowClear />) },
               { title: '箱数', width: 70, render: (_v, r, i) => fillable(i, 'cartons', <InputNumber size="small" controls={false} min={0} value={r.cartons} onChange={(v) => patchItem(i, 'cartons', v ?? 0)} style={{ width: '100%' }} />) },
-              { title: '每箱数量', width: 120, render: (_v, r, i) => fillable(i, 'qty_per_carton', <Input size="small" value={r.qty_per_carton} placeholder="200" onChange={(e) => patchQtyOrPack(i, 'qty_per_carton', e.target.value)} />) },
-              { title: '卡板', width: 110, render: (_v, r, i) => fillable(i, 'pallet', <Input size="small" value={r.pallet} placeholder="1-22/2卡" onChange={(e) => patchItem(i, 'pallet', e.target.value)} />) },
-              { title: '长', width: 70, render: (_v, r) => <InputNumber size="small" controls={false} min={0} step={0.0001} value={matMap.get(r.material_id!)?.length} onChange={(v) => patchMatDim(r.material_id, 'length', v ?? 0)} style={{ width: '100%' }} /> },
-              { title: '宽', width: 70, render: (_v, r) => <InputNumber size="small" controls={false} min={0} step={0.0001} value={matMap.get(r.material_id!)?.width} onChange={(v) => patchMatDim(r.material_id, 'width', v ?? 0)} style={{ width: '100%' }} /> },
-              { title: '高', width: 70, render: (_v, r) => <InputNumber size="small" controls={false} min={0} step={0.0001} value={matMap.get(r.material_id!)?.height} onChange={(v) => patchMatDim(r.material_id, 'height', v ?? 0)} style={{ width: '100%' }} /> },
-              { title: '每箱重量', width: 80, render: (_v, r) => <InputNumber size="small" controls={false} min={0} step={0.0001} value={matMap.get(r.material_id!)?.weight_per_carton} onChange={(v) => patchMatDim(r.material_id, 'weight_per_carton', v ?? 0)} style={{ width: '100%' }} /> },
-              { title: '单个毛重', width: 80, render: (_v, r) => <InputNumber size="small" min={0} precision={6} readOnly controls={false} title="单个毛重 = 每箱重量 ÷ 每箱数量" value={shipmentGrossPerPc(matMap.get(r.material_id!)?.weight_per_carton, r.qty_per_carton)} style={{ ...GRAY, width: '100%' }} /> },
-              { title: '单个净重', width: 80, render: (_v, r) => <InputNumber size="small" controls={false} min={0} step={0.000001} value={matMap.get(r.material_id!)?.net_per_pc} onChange={(v) => patchMatDim(r.material_id, 'net_per_pc', v ?? 0)} style={{ width: '100%' }} /> },
+              { title: '每箱数量', width: 190, render: (_v, r, i) => fillable(i, 'qty_per_carton', <Input.TextArea size="small" autoSize={{ minRows: 1, maxRows: 4 }} value={r.qty_per_carton} placeholder={'3000 或 1-2/3000\n3/4000'} title="可填统一数量 3000，或按箱号分段：1-2/3000 3/4000" onChange={(e) => patchQtyOrPack(i, 'qty_per_carton', e.target.value)} onBlur={(e) => { const formatted = formatShipmentPackingLines(e.target.value); if (formatted !== e.target.value) patchQtyOrPack(i, 'qty_per_carton', formatted) }} style={{ resize: 'none' }} />) },
+              { title: '卡板', width: 140, render: (_v, r, i) => fillable(i, 'pallet', <Input.TextArea size="small" autoSize={{ minRows: 1, maxRows: 4 }} value={r.pallet} placeholder="1-22/2卡" onChange={(e) => patchItem(i, 'pallet', e.target.value)} style={{ resize: 'none', overflowWrap: 'anywhere' }} />) },
+              { title: '长', width: 90, render: (_v, r, i) => fillableMaterial(i, 'length', <InputNumber size="small" controls={false} min={0} step={0.0001} value={matMap.get(r.material_id!)?.length} onChange={(v) => patchMatDim(r.material_id, 'length', v ?? 0)} style={{ width: '100%' }} />) },
+              { title: '宽', width: 90, render: (_v, r, i) => fillableMaterial(i, 'width', <InputNumber size="small" controls={false} min={0} step={0.0001} value={matMap.get(r.material_id!)?.width} onChange={(v) => patchMatDim(r.material_id, 'width', v ?? 0)} style={{ width: '100%' }} />) },
+              { title: '高', width: 90, render: (_v, r, i) => fillableMaterial(i, 'height', <InputNumber size="small" controls={false} min={0} step={0.0001} value={matMap.get(r.material_id!)?.height} onChange={(v) => patchMatDim(r.material_id, 'height', v ?? 0)} style={{ width: '100%' }} />) },
+              { title: '每箱重量', width: 100, render: (_v, r, i) => fillableMaterial(i, 'weight_per_carton', <InputNumber size="small" controls={false} min={0} step={0.0001} value={matMap.get(r.material_id!)?.weight_per_carton} onChange={(v) => patchMatDim(r.material_id, 'weight_per_carton', v ?? 0)} style={{ width: '100%' }} />) },
+              { title: '单个毛重', width: 100, render: (_v, r) => { const m = matMap.get(r.material_id!); return <InputNumber size="small" min={0} precision={6} readOnly controls={false} title={isPaperRope(m?.name_zh) ? '纸绳单个毛重 = 每箱重量 ÷（每箱数量 ÷ 1000）' : '单个毛重 = 每箱重量 ÷ 每箱数量'} value={shipmentGrossPerPc(m?.weight_per_carton, r.qty_per_carton, m?.name_zh)} style={{ ...GRAY, width: '100%' }} /> } },
+              { title: '单个净重', width: 100, render: (_v, r, i) => fillableMaterial(i, 'net_per_pc', <InputNumber size="small" controls={false} min={0} step={0.000001} value={matMap.get(r.material_id!)?.net_per_pc} onChange={(v) => patchMatDim(r.material_id, 'net_per_pc', v ?? 0)} style={{ width: '100%' }} />) },
               {
                 title: '', width: 44, fixed: 'right',
                 render: (_v, _r, i) => (

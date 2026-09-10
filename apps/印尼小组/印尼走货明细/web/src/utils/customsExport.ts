@@ -6,7 +6,7 @@
 import * as XLSX from 'xlsx-js-style'
 import JSZip from 'jszip'
 import type { Material } from '../api/client'
-import { isPaperRope, shipmentGrossPerPc } from './shipmentWeight'
+import { isPaperRope, parseShipmentPacking, shipmentGrossPerPc } from './shipmentWeight'
 
 export const CUSTOMS_FIXED = '深圳市华胜益出口贸易有限公司'
 
@@ -382,8 +382,15 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
     setCell(ws, ri, 50, m?.material_code || '', 's')
     setCell(ws, ri, 51, '', 's')
     setCell(ws, ri, 52, m?.weight_per_carton || 0, 'n')
-    setCell(ws, ri, 53, shipmentGrossPerPc(m?.weight_per_carton, qpc), 'n')
-    ws[XLSX.utils.encode_cell({ r: ri, c: 53 })].f = `IFERROR(IF(AND(BA${ri + 1}>0,AU${ri + 1}>0),BA${ri + 1}/AU${ri + 1},0),0)`
+    setCell(ws, ri, 53, shipmentGrossPerPc(m?.weight_per_carton, qpc, m?.name_zh), 'n')
+    const packing = parseShipmentPacking(qpc)
+    if (packing.mode === 'ranges') {
+      const qtyDivisor = isPaperRope(m?.name_zh) ? `(${packing.averageQty}/1000)` : String(packing.averageQty)
+      ws[XLSX.utils.encode_cell({ r: ri, c: 53 })].f = `IFERROR(IF(BA${ri + 1}>0,BA${ri + 1}/${qtyDivisor},0),0)`
+    } else {
+      const grossDivisor = isPaperRope(m?.name_zh) ? `(AU${ri + 1}/1000)` : `AU${ri + 1}`
+      ws[XLSX.utils.encode_cell({ r: ri, c: 53 })].f = `IFERROR(IF(AND(BA${ri + 1}>0,AU${ri + 1}>0),BA${ri + 1}/${grossDivisor},0),0)`
+    }
     setCell(ws, ri, 54, m?.net_per_pc || 0, 'n')
     setCell(ws, ri, 55, it.pallet || '', 's')
   })

@@ -93,12 +93,13 @@
 .shipment-fillable-cell {
   position: relative;
   min-width: 0;
+  padding-right: 20px;
 }
 
 .shipment-fill-handle {
   position: absolute;
   right: 1px;
-  bottom: 1px;
+  bottom: 50%;
   z-index: 10;
   display: flex;
   width: 16px;
@@ -117,6 +118,7 @@
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.12s ease;
+  transform: translateY(50%);
 }
 
 .shipment-fillable-cell:hover .shipment-fill-handle,

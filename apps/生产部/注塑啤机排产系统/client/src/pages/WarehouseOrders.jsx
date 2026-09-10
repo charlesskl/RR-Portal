@@ -18,6 +18,8 @@ export default function WarehouseOrders({ workshop = 'B' }) {
   const [pmcOptions, setPmcOptions] = useState([]);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
+  const [completedOrders, setCompletedOrders] = useState([]);
+  const [selectedOrderId, setSelectedOrderId] = useState(null);
   const [form] = Form.useForm();
 
   const fetchList = async () => {
@@ -34,12 +36,47 @@ export default function WarehouseOrders({ workshop = 'B' }) {
     const { data } = await axios.get(`${API}/_/pmc-options`, { params: { workshop } });
     setPmcOptions(data);
   };
+  const fetchCompletedOrders = async () => {
+    try {
+      const { data } = await axios.get(`${API}/_/completed-orders`, { params: { workshop } });
+      setCompletedOrders(data);
+    } catch (e) { /* 选项加载失败不阻塞手填 */ }
+  };
 
   useEffect(() => { fetchList(); }, [workshop, filter]);
-  useEffect(() => { fetchPmcOptions(); }, [workshop]);
+  useEffect(() => { fetchPmcOptions(); fetchCompletedOrders(); }, [workshop]);
+
+  // 从已完成订单选择要入库的模 → 自动带出资料
+  const handlePickCompletedOrder = (orderId) => {
+    setSelectedOrderId(orderId);
+    const o = completedOrders.find(x => x.id === orderId);
+    if (!o) return;
+    // 件数(PCS) = 实际啤数 × 出模数；算不出则退回订单的包装数量
+    const shots = o.accumulated ?? null;
+    const cavityNum = Number(o.cavity);
+    const autoPcs = (shots != null && Number.isFinite(cavityNum) && cavityNum > 0)
+      ? shots * cavityNum
+      : (o.packing_qty ?? null);
+    form.setFieldsValue({
+      order_no: o.order_no || '',
+      mold_no: o.mold_no || o.product_code || '',
+      part_name: o.mold_name || '',
+      color: o.color || '',
+      color_powder_no: o.color_powder_no || '',
+      material_type: o.material_type || '',
+      shot_weight: o.shot_weight ?? null,
+      material_kg: o.material_kg ?? null,
+      order_qty: o.quantity_needed ?? null,
+      delivery_shots: shots,
+      cavity: o.cavity != null ? String(o.cavity) : '',
+      delivery_pcs: autoPcs,
+      notes: o.order_notes || '',
+    });
+  };
 
   const openCreate = () => {
     setEditingId(null);
+    setSelectedOrderId(null);
     form.resetFields();
     form.setFieldsValue({
       delivery_date: dayjs(),
@@ -214,6 +251,24 @@ export default function WarehouseOrders({ workshop = 'B' }) {
         extra={<Space><Button onClick={() => setDrawerOpen(false)}>取消</Button><Button type="primary" onClick={handleSave}>保存</Button></Space>}
       >
         <Form form={form} layout="vertical" size="small">
+          {/* === 从已完成订单选择入库的模（仅新建时显示） === */}
+          {!editingId && (
+            <Form.Item label="选择已完成订单（哪套模入库）" style={{ marginBottom: 12 }}>
+              <Select
+                showSearch
+                allowClear
+                value={selectedOrderId}
+                onChange={v => v ? handlePickCompletedOrder(v) : setSelectedOrderId(null)}
+                placeholder={`搜索货号 / 模号 / 单号（本车间已完成订单 ${completedOrders.length} 条）`}
+                optionFilterProp="label"
+                options={completedOrders.map(o => ({
+                  value: o.id,
+                  label: `${o.mold_no || o.product_code || '-'} · ${o.mold_name || ''} · ${o.color || ''} · 单号 ${o.order_no || '-'}`,
+                }))}
+              />
+            </Form.Item>
+          )}
+
           {/* === 实物入库单字段（兴信塑胶 NO:A...） === */}
           <div style={{ fontWeight: 600, color: '#1677ff', margin: '4px 0 8px' }}>① 实物入库单</div>
 

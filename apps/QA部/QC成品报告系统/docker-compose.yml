@@ -102,7 +102,7 @@ services:
     environment:
       <<: *app-environment
     ports:
-      - "8000:3410"
+      - "8000:8000"
     volumes:
       - qc-storage:/app/storage
 

@@ -12,9 +12,3 @@ output
 tmp
 coverage
 *.log
-*.db
-*.sqlite
-*.sqlite3
-*.pdf
-.env
-.DS_Store

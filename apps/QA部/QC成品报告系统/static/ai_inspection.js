@@ -86,7 +86,9 @@
   const photoCount = (jobs) => jobs.reduce((total, job) => total + (job.files?.length || 0), 0);
 
   const apiUploadUrl = (form) => {
-    return window.QCUrls.apiUrl(form.action, section?.dataset.apiPrefix || '/api');
+    const url = new URL(form.action, window.location.href);
+    if (!url.pathname.startsWith('/api/')) url.pathname = `/api${url.pathname}`;
+    return url.toString();
   };
 
   const createUploadJob = (input) => {
@@ -133,7 +135,7 @@
       throw error;
     }
 
-    if (response.redirected && window.QCUrls.isLoginRedirect(response.url, section?.dataset.loginUrl || '/login')) {
+    if (response.redirected && new URL(response.url).pathname === '/login') {
       const error = new Error('登录已失效；重新登录后可继续上传');
       error.retryable = true;
       throw error;
@@ -242,7 +244,7 @@
       const response = await fetch(section.dataset.runUrl, {method: 'POST', headers: {'X-CSRF-Token': window.CSRF_TOKEN, 'Accept': 'application/json'}});
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || '无法启动 AI 分析');
-      section.dataset.statusUrl = window.QCUrls.analysisStatusUrl(section.dataset.statusBase, data.analysis_run_id);
+      section.dataset.statusUrl = `/api/analysis-runs/${data.analysis_run_id}`;
       window.setTimeout(poll, 500);
     } catch (error) {
       button.disabled = false;

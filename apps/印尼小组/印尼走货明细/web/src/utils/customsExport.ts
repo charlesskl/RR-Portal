@@ -382,8 +382,9 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
     setCell(ws, ri, 50, m?.material_code || '', 's')
     setCell(ws, ri, 51, '', 's')
     setCell(ws, ri, 52, m?.weight_per_carton || 0, 'n')
-    setCell(ws, ri, 53, shipmentGrossPerPc(m?.weight_per_carton, qpc), 'n')
-    ws[XLSX.utils.encode_cell({ r: ri, c: 53 })].f = `IFERROR(IF(AND(BA${ri + 1}>0,AU${ri + 1}>0),BA${ri + 1}/AU${ri + 1},0),0)`
+    setCell(ws, ri, 53, shipmentGrossPerPc(m?.weight_per_carton, qpc, m?.name_zh), 'n')
+    const grossDivisor = isPaperRope(m?.name_zh) ? `(AU${ri + 1}/1000)` : `AU${ri + 1}`
+    ws[XLSX.utils.encode_cell({ r: ri, c: 53 })].f = `IFERROR(IF(AND(BA${ri + 1}>0,AU${ri + 1}>0),BA${ri + 1}/${grossDivisor},0),0)`
     setCell(ws, ri, 54, m?.net_per_pc || 0, 'n')
     setCell(ws, ri, 55, it.pallet || '', 's')
   })

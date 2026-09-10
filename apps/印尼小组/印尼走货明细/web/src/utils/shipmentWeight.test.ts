@@ -19,6 +19,11 @@ describe('走货单个毛重', () => {
   it('小件保留计算精度，避免总毛重累计舍入误差', () => {
     expect(shipmentGrossPerPc(8, '30000') * 30000).toBeCloseTo(8)
   })
+
+  it('纸绳按每 1000 米一卷计算单个毛重', () => {
+    expect(shipmentGrossPerPc(7.9, '20000', '纸绳')).toBeCloseTo(0.395)
+    expect(shipmentGrossPerPc(7.9, '20000', '纸绳') * shipmentWeightQuantity('纸绳', 20000)).toBeCloseTo(7.9)
+  })
 })
 
 describe('纸绳计重数量', () => {

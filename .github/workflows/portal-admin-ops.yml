@@ -1,0 +1,383 @@
+name: Portal Admin Ops
+
+# 门户各系统「超级管理员」账号运维（手动触发）：
+#   在指定系统上创建/重置 admin 账号并赋予该系统全部权限，密码统一从
+#   仓库 Secret PORTAL_ADMIN_PASSWORD 读取（不经 inputs、不回显日志）。
+#   target=all 依次执行全部目标；单个目标失败不中断其他目标，结尾汇总并非零退出。
+#
+# 覆盖范围（12 个有应用内账号体系的系统）：
+#   qc（品质管理系统，13 个子公司库）、huadeng-maorong（华登毛绒仓库）、
+#   cpg（加工管理）、factory-review（加工厂评审，登录名实为邮箱 admin@rr.local）、
+#   zouhuo（A-doc）、figure-mold（模具手办采购）、sprayplan（喷油排期）、
+#   indo-shipping（印尼走货）、toyqms（玩具质量）、internal-quote（内部报价）、
+#   shipping（船务）、peise（配色库存，单账号口令改 env）、
+#   jiangping（采购订单，单账号口令改 env）
+#
+# 不覆盖（无应用内账号体系/字面 admin 需改码）：
+#   qc-report（用 qc-report-user-ops.yml）、paiji（车间共享口令，无账号表）、
+#   production-plan/liwenjuan/baojia/tomy-paiqi/zuru-*/hy-schedule/
+#   automation-equipment/qa-weekly-report（仅 nginx basic auth）、
+#   huadeng（三方 party 账号模型，无单超管概念）、rr-production（PIN 制硬编码名单）
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "目标系统（all=全部 12 个）"
+        type: choice
+        required: true
+        default: all
+        options:
+          - all
+          - qc
+          - huadeng-maorong
+          - cpg
+          - factory-review
+          - zouhuo
+          - figure-mold
+          - sprayplan
+          - indo-shipping
+          - toyqms
+          - internal-quote
+          - shipping
+          - peise
+          - jiangping
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-cloud
+  queue: max
+  cancel-in-progress: false
+
+jobs:
+  admin-ops:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Validate SSH host fingerprint
+        shell: bash
+        env:
+          CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]]; then
+            echo 'CLOUD_HOST_FINGERPRINT must be a non-empty OpenSSH SHA256 fingerprint.' >&2
+            exit 1
+          fi
+
+      - name: Upsert admin accounts via SSH
+        env:
+          CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+          OPS_TARGET: ${{ inputs.target }}
+          PW: ${{ secrets.PORTAL_ADMIN_PASSWORD }}
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
+        with:
+          host: ${{ secrets.CLOUD_HOST }}
+          username: ${{ secrets.CLOUD_USER }}
+          key: ${{ secrets.CLOUD_SSH_KEY }}
+          fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
+          command_timeout: 20m
+          envs: OPS_TARGET,PW
+          script: |
+            set -uo pipefail
+            cd /opt/rr-portal
+            COMPOSE="docker-compose.cloud.yml"
+            ENVF=".env.cloud.production"
+            TS="$(date +%Y%m%d-%H%M%S)"
+            [ -n "${PW:-}" ] || { echo "[FAIL] Secret PORTAL_ADMIN_PASSWORD 未设置"; exit 1; }
+            TARGET="${OPS_TARGET:-all}"
+
+            ctr() { docker ps --format '{{.Names}}' | grep -E "$1" | head -1; }
+            upsert_env() {
+              if grep -qE "^$1=" "$ENVF"; then sed -i "s|^$1=.*|$1=$2|" "$ENVF"; else echo "$1=$2" >> "$ENVF"; fi
+            }
+
+            # ── qc：品质管理系统（node:sqlite，13 个子公司库，djb2 哈希，role=admin）──
+            do_qc() {
+              local CTR; CTR=$(ctr '^rr-portal-qc-[0-9]+$')
+              [ -n "$CTR" ] || { echo "[FAIL] 找不到 qc 容器"; return 1; }
+              for id in dg-xingxin dg-huadeng-a dg-huadeng-b dg-huajia hy-huakang-a hy-huakang-b hy-huakang-c hy-huakang-d hy-huadeng hy-huaxing sy-huadeng sy-xingxin xs-huadeng; do
+                [ -f "apps/生产部/品质管理系统/data/$id/qc.db" ] && cp "apps/生产部/品质管理系统/data/$id/qc.db" "apps/生产部/品质管理系统/data/$id/qc.db.bak.$TS" 2>/dev/null
+              done
+              docker exec -i -e PW="$PW" "$CTR" node <<'JS'
+            const { DatabaseSync } = require("node:sqlite");
+            const fs = require("fs");
+            function h(s){let x=5381;for(let i=0;i<s.length;i++)x=((x<<5)+x)^s.charCodeAt(i);return (x>>>0).toString(16);}
+            const hash = h(process.env.PW);
+            let ok = 0, skip = 0;
+            for (const id of ["dg-xingxin","dg-huadeng-a","dg-huadeng-b","dg-huajia","hy-huakang-a","hy-huakang-b","hy-huakang-c","hy-huakang-d","hy-huadeng","hy-huaxing","sy-huadeng","sy-xingxin","xs-huadeng"]) {
+              const f = "/app/data/" + id + "/qc.db";
+              if (!fs.existsSync(f)) { console.log("  skip(库不存在) " + id); skip++; continue; }
+              const db = new DatabaseSync(f);
+              db.prepare("INSERT INTO users(username,password,role,enabled,createdAt,lastLoginAt,name,dept,perms) VALUES('admin',?,'admin',1,?,NULL,'系统管理员',NULL,NULL) ON CONFLICT(username) DO UPDATE SET password=excluded.password, role='admin', enabled=1, name='系统管理员'").run(hash, new Date().toISOString());
+              const row = db.prepare("SELECT password, role, enabled FROM users WHERE username='admin'").get();
+              db.close();
+              if (!row || row.password !== hash || row.role !== "admin" || row.enabled !== 1) { console.error("  [FAIL] 复核失败 " + id); process.exit(1); }
+              ok++;
+            }
+            console.log("  qc: " + ok + " 个子公司库 upsert 完成" + (skip ? "（" + skip + " 个库不存在跳过）" : ""));
+            JS
+            }
+
+            # ── huadeng-maorong：华登毛绒仓库（SQLite users，加盐 sha256，role=admin）──
+            do_huadeng_maorong() {
+              local CTR; CTR=$(ctr 'maorong')
+              [ -n "$CTR" ] || { echo "[FAIL] 找不到 huadeng-maorong 容器"; return 1; }
+              [ -f "apps/PMC跟仓管/华登毛绒仓库/data/inventory.db" ] && cp "apps/PMC跟仓管/华登毛绒仓库/data/inventory.db" "apps/PMC跟仓管/华登毛绒仓库/data/inventory.db.bak.$TS"
+              docker exec -i -w /app -e PW="$PW" "$CTR" python <<'PY'
+            import os
+            import database as db
+            from auth import hash_password, check_password
+            h = hash_password(os.environ["PW"])
+            with db.db_cursor() as cur:
+                cur.execute("UPDATE users SET password_hash=?, role='admin', display_name='系统管理员' WHERE username='admin'", (h,))
+                if cur.rowcount == 0:
+                    cur.execute("INSERT INTO users (username,password_hash,role,display_name) VALUES ('admin',?,'admin','系统管理员')", (h,))
+            with db.db_cursor() as cur:
+                cur.execute("SELECT password_hash, role FROM users WHERE username='admin'")
+                row = cur.fetchone()
+            assert row and row[1] == "admin" and check_password(os.environ["PW"], row[0]), "复核失败"
+            print("  huadeng-maorong: admin upsert 完成，密码校验通过")
+            PY
+            }
+
+            # ── cpg：加工管理（SQLite users，PBKDF2，role=admin）──
+            do_cpg() {
+              local CTR; CTR=$(ctr '^rr-portal-cpg-[0-9]+$')
+              [ -n "$CTR" ] || { echo "[FAIL] 找不到 cpg 容器"; return 1; }
+              [ -f "apps/PMC跟仓管/加工管理/data/pcba.db" ] && cp "apps/PMC跟仓管/加工管理/data/pcba.db" "apps/PMC跟仓管/加工管理/data/pcba.db.bak.$TS"
+              docker exec -i -w /app -e PW="$PW" "$CTR" python <<'PY'
+            import os
+            from pcba import db
+            from pcba.auth import hash_password, verify_password
+            conn = db.get_conn()
+            h = hash_password(os.environ["PW"])
+            if conn.execute("SELECT id FROM users WHERE username='admin'").fetchone():
+                conn.execute("UPDATE users SET password_hash=?, role='admin', department=NULL WHERE username='admin'", (h,))
+            else:
+                conn.execute("INSERT INTO users(username,password_hash,role) VALUES ('admin',?,'admin')", (h,))
+            conn.commit()
+            chk = conn.execute("SELECT password_hash, role FROM users WHERE username='admin'").fetchone()
+            conn.close()
+            assert chk and chk["role"] == "admin" and verify_password(os.environ["PW"], chk["password_hash"]), "复核失败"
+            print("  cpg: admin upsert 完成，密码校验通过")
+            PY
+            }
+
+            # ── factory-review：加工厂评审（PocketBase；登录名是邮箱 admin@rr.local）──
+            do_factory_review() {
+              local CTR; CTR=$(ctr '^rr-portal-factory-review-[0-9]+$')
+              [ -n "$CTR" ] || { echo "[FAIL] 找不到 factory-review 容器"; return 1; }
+              docker exec "$CTR" /pb/pocketbase superuser upsert ops-tmp@rr.local "$PW" --dir=/pb/pb_data >/dev/null
+              local TOKEN
+              TOKEN=$(docker exec "$CTR" sh -c "wget -q -O- --post-data '{\"identity\":\"ops-tmp@rr.local\",\"password\":\"$PW\"}' --header 'Content-Type: application/json' http://127.0.0.1:8090/api/collections/_superusers/auth-with-password" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
+              [ -n "$TOKEN" ] || { echo "[FAIL] 临时 superuser 登录失败"; return 1; }
+              local ID
+              ID=$(docker exec "$CTR" sh -c "wget -q -O- --header 'Authorization: Bearer $TOKEN' 'http://127.0.0.1:8090/api/collections/users/records?filter=(email%3D%27admin%40rr.local%27)'" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p' | head -1)
+              local BODY="{\"email\":\"admin@rr.local\",\"password\":\"$PW\",\"passwordConfirm\":\"$PW\",\"role\":\"admin\",\"display_name\":\"系统管理员\",\"emailVisibility\":true,\"verified\":true}"
+              if [ -n "$ID" ]; then
+                docker exec "$CTR" sh -c "wget -q -O- --method PATCH --post-data '$BODY' --header 'Content-Type: application/json' --header 'Authorization: Bearer $TOKEN' http://127.0.0.1:8090/api/collections/users/records/$ID" | grep -q '"role":"admin"' || { echo "[FAIL] 重置失败"; return 1; }
+                echo "  factory-review: admin@rr.local 已存在，已重置密码并确保 role=admin"
+              else
+                docker exec "$CTR" sh -c "wget -q -O- --post-data '$BODY' --header 'Content-Type: application/json' --header 'Authorization: Bearer $TOKEN' http://127.0.0.1:8090/api/collections/users/records" | grep -q '"role":"admin"' || { echo "[FAIL] 创建失败"; return 1; }
+                echo "  factory-review: 已创建 admin@rr.local（role=admin）"
+              fi
+              docker exec "$CTR" sh -c "wget -q -O- --post-data '{\"identity\":\"admin@rr.local\",\"password\":\"$PW\"}' --header 'Content-Type: application/json' http://127.0.0.1:8090/api/collections/users/auth-with-password" | grep -q '"token"' || { echo "[FAIL] 登录验证失败"; return 1; }
+              docker exec "$CTR" /pb/pocketbase superuser delete ops-tmp@rr.local --dir=/pb/pb_data >/dev/null 2>&1
+              echo "  factory-review: 登录验证通过（注意：登录框填邮箱 admin@rr.local）"
+            }
+
+            # ── zouhuo：A-doc（JSON users.json，bcryptjs cost 10，role=admin）──
+            do_zouhuo() {
+              local CTR; CTR=$(ctr 'zouhuo')
+              [ -n "$CTR" ] || { echo "[FAIL] 找不到 zouhuo 容器"; return 1; }
+              [ -f "apps/工程部/A-doc生成系統/data/users.json" ] && cp "apps/工程部/A-doc生成系統/data/users.json" "apps/工程部/A-doc生成系統/data/users.json.bak.$TS"
+              docker exec -i -e PW="$PW" "$CTR" node <<'JS'
+            const fs = require("fs"), bcrypt = require("bcryptjs"), crypto = require("crypto");
+            const f = "/app/server/data/users.json";
+            const users = fs.existsSync(f) ? JSON.parse(fs.readFileSync(f, "utf8")) : [];
+            const hash = bcrypt.hashSync(process.env.PW, 10);
+            const now = new Date().toISOString();
+            const i = users.findIndex(u => u.username === "admin");
+            if (i >= 0) users[i] = { ...users[i], password: hash, role: "admin", realName: users[i].realName || "系统管理员", updatedAt: now };
+            else users.push({ _id: crypto.randomBytes(12).toString("hex"), username: "admin", password: hash, role: "admin", realName: "系统管理员", createdAt: now, updatedAt: now });
+            fs.writeFileSync(f, JSON.stringify(users, null, 2), "utf8");
+            const u = JSON.parse(fs.readFileSync(f, "utf8")).find(u => u.username === "admin");
+            if (!u || u.role !== "admin" || !bcrypt.compareSync(process.env.PW, u.password)) { console.error("  [FAIL] 复核失败"); process.exit(1); }
+            console.log("  zouhuo: admin upsert 完成，密码校验通过");
+            JS
+            }
+
+            # ── figure-mold：模具手办采购（SQLite eng_users，bcryptjs，无角色即全权）──
+            do_figure_mold() {
+              local CTR; CTR=$(ctr 'figure-mold')
+              [ -n "$CTR" ] || { echo "[FAIL] 找不到 figure-mold 容器"; return 1; }
+              [ -f "apps/工程部/模具手办采购订单系统/data/app.db" ] && cp "apps/工程部/模具手办采购订单系统/data/app.db" "apps/工程部/模具手办采购订单系统/data/app.db.bak.$TS"
+              docker exec -i -e PW="$PW" "$CTR" node <<'JS'
+            const db = require("better-sqlite3")("/app/data/app.db");
+            const bcrypt = require("bcryptjs");
+            const hash = bcrypt.hashSync(process.env.PW, 10);
+            db.prepare("INSERT INTO eng_users (name, pin) VALUES ('admin', ?) ON CONFLICT(name) DO UPDATE SET pin = excluded.pin").run(hash);
+            const row = db.prepare("SELECT pin FROM eng_users WHERE name='admin'").get();
+            db.close();
+            if (!row || !bcrypt.compareSync(process.env.PW, row.pin)) { console.error("  [FAIL] 复核失败"); process.exit(1); }
+            console.log("  figure-mold: admin upsert 完成，密码校验通过");
+            JS
+            }
+
+            # ── sprayplan：喷油排期（SQLite users，bcrypt cost 10，role=admin，isActive）──
+            do_sprayplan() {
+              local CTR; CTR=$(ctr '^rr-portal-sprayplan-[0-9]+$')
+              [ -n "$CTR" ] || { echo "[FAIL] 找不到 sprayplan 容器"; return 1; }
+              [ -f "apps/喷油部/喷油排期系统/data/sprayplan.db" ] && cp "apps/喷油部/喷油排期系统/data/sprayplan.db" "apps/喷油部/喷油排期系统/data/sprayplan.db.bak.$TS"
+              docker exec -i -w /app -e DATABASE_URL=file:/app/data/sprayplan.db -e PW="$PW" "$CTR" node <<'JS'
+            const { PrismaClient } = require("@prisma/client");
+            const bcrypt = require("bcrypt");
+            (async () => {
+              const p = new PrismaClient();
+              const hash = await bcrypt.hash(process.env.PW, 10);
+              await p.user.upsert({
+                where: { username: "admin" },
+                update: { passwordHash: hash, role: "admin", isActive: true, displayName: "系统管理员" },
+                create: { username: "admin", passwordHash: hash, role: "admin", isActive: true, displayName: "系统管理员" },
+              });
+              const u = await p.user.findUnique({ where: { username: "admin" } });
+              const ok = u && u.role === "admin" && u.isActive && (await bcrypt.compare(process.env.PW, u.passwordHash));
+              await p.$disconnect();
+              if (!ok) { console.error("  [FAIL] 复核失败"); process.exit(1); }
+              console.log("  sprayplan: admin upsert 完成，密码校验通过");
+            })();
+            JS
+            }
+
+            # ── indo-shipping：印尼走货（Postgres indo_shipping."Users"，bcrypt，双位图全 1）──
+            do_indo_shipping() {
+              local IQCTR DBCTR
+              IQCTR=$(ctr 'internal-quote'); DBCTR=$(ctr '^rr-portal-db-[0-9]+$')
+              [ -n "$IQCTR" ] && [ -n "$DBCTR" ] || { echo "[FAIL] 找不到 internal-quote/db 容器"; return 1; }
+              local HASH
+              HASH=$(docker exec -i -e PW="$PW" "$IQCTR" node -e "console.log(require('bcryptjs').hashSync(process.env.PW, 11))")
+              [ -n "$HASH" ] || { echo "[FAIL] 哈希生成失败"; return 1; }
+              docker exec -i -e HASH="$HASH" "$DBCTR" psql -U rrportal -d rrportal -v ON_ERROR_STOP=1 <<'SQL'
+            INSERT INTO indo_shipping."Users" ("Username","PasswordHash","DisplayName","Userbqrpower","Usereditpower","IsActive")
+            VALUES ('admin', :'HASH', '系统管理员', '111111111', '111111111', true)
+            ON CONFLICT ("Username") DO UPDATE SET
+              "PasswordHash" = EXCLUDED."PasswordHash", "DisplayName" = EXCLUDED."DisplayName",
+              "Userbqrpower" = '111111111', "Usereditpower" = '111111111', "IsActive" = true;
+            SQL
+              local VERIFY
+              VERIFY=$(docker exec -i "$DBCTR" psql -U rrportal -d rrportal -tA -c "SELECT \"PasswordHash\" FROM indo_shipping.\"Users\" WHERE \"Username\"='admin'")
+              docker exec -i -e PW="$PW" -e HASH="$VERIFY" "$IQCTR" node -e "process.exit(require('bcryptjs').compareSync(process.env.PW, process.env.HASH) ? 0 : 1)" || { echo "[FAIL] 密码复核失败"; return 1; }
+              echo "  indo-shipping: admin upsert 完成（双位图全 1=全部模块读写+用户管理），密码校验通过"
+            }
+
+            # ── toyqms：玩具质量（SQLite users，PBKDF2-120k，permissions 全 15 项）──
+            do_toyqms() {
+              local CTR; CTR=$(ctr 'toyqms')
+              [ -n "$CTR" ] || { echo "[FAIL] 找不到 toyqms 容器"; return 1; }
+              [ -f "apps/QA部/玩具质量管理系统/server-data/toyqms.db" ] && cp "apps/QA部/玩具质量管理系统/server-data/toyqms.db" "apps/QA部/玩具质量管理系统/server-data/toyqms.db.bak.$TS"
+              echo "  注意：importUsers 会清空全部在线会话（所有用户被登出一次）"
+              docker exec -i -e PW="$PW" "$CTR" node --input-type=module <<'JS'
+            import { importUsers, allPermissions, login } from "/app/server/auth.js";
+            const enc = new TextEncoder();
+            const saltBytes = crypto.getRandomValues(new Uint8Array(16));
+            const material = await crypto.subtle.importKey("raw", enc.encode(process.env.PW), "PBKDF2", false, ["deriveBits"]);
+            const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", salt: saltBytes, iterations: 120000, hash: "SHA-256" }, material, 256);
+            importUsers([{
+              loginName: "admin", name: "系统管理员", responsibility: "超级管理员",
+              category: "all", permissions: [...allPermissions], enabled: true, mustChangePassword: false,
+              passwordHash: Buffer.from(new Uint8Array(bits)).toString("base64"),
+              passwordSalt: Buffer.from(saltBytes).toString("base64"),
+            }]);
+            await login("admin", process.env.PW);
+            console.log("  toyqms: admin upsert 完成（全部 15 项权限），登录验证通过");
+            JS
+            }
+
+            # ── internal-quote：内部报价（Postgres，bcrypt，全菜单 1,1,1,1 + 全客户）──
+            do_internal_quote() {
+              local IQCTR DBCTR
+              IQCTR=$(ctr 'internal-quote'); DBCTR=$(ctr '^rr-portal-db-[0-9]+$')
+              [ -n "$IQCTR" ] && [ -n "$DBCTR" ] || { echo "[FAIL] 找不到 internal-quote/db 容器"; return 1; }
+              local HASH
+              HASH=$(docker exec -i -e PW="$PW" "$IQCTR" node -e "console.log(require('bcryptjs').hashSync(process.env.PW, 8))")
+              [ -n "$HASH" ] || { echo "[FAIL] 哈希生成失败"; return 1; }
+              docker exec -i -e HASH="$HASH" "$DBCTR" psql -U rrportal -d rrportal -v ON_ERROR_STOP=1 <<'SQL'
+            INSERT INTO internal_quote.users (username, password_hash, display_name, dept, role, factory_code)
+            VALUES ('admin', :'HASH', '系统管理员', 'sales', 'admin', 'qingxi')
+            ON CONFLICT (username) DO UPDATE SET password_hash=EXCLUDED.password_hash,
+              display_name=EXCLUDED.display_name, dept=EXCLUDED.dept, role=EXCLUDED.role,
+              factory_code='qingxi', locked_until=NULL, login_fails=0;
+            INSERT INTO internal_quote.user_factories (user_id, factory_code)
+              SELECT id, 'qingxi' FROM internal_quote.users WHERE username='admin' ON CONFLICT DO NOTHING;
+            INSERT INTO internal_quote.user_perms (user_id, menu, can_view, can_edit, can_review, can_admin)
+              SELECT u.id, m.menu, 1, 1, 1, 1 FROM internal_quote.users u
+              CROSS JOIN (SELECT DISTINCT menu FROM internal_quote.user_perms) m
+              WHERE u.username='admin' ON CONFLICT DO NOTHING;
+            INSERT INTO internal_quote.user_customers (user_id, customer)
+              SELECT u.id, c.name FROM internal_quote.users u
+              CROSS JOIN (SELECT DISTINCT customer AS name FROM (
+                SELECT customer FROM internal_quote.quotes WHERE customer IS NOT NULL
+                UNION SELECT customer FROM internal_quote.user_customers) t) c
+              WHERE u.username='admin' ON CONFLICT DO NOTHING;
+            SQL
+              local VERIFY
+              VERIFY=$(docker exec -i "$DBCTR" psql -U rrportal -d rrportal -tA -c "SELECT password_hash FROM internal_quote.users WHERE username='admin'")
+              docker exec -i -e PW="$PW" -e HASH="$VERIFY" "$IQCTR" node -e "process.exit(require('bcryptjs').compareSync(process.env.PW, process.env.HASH) ? 0 : 1)" || { echo "[FAIL] 密码复核失败"; return 1; }
+              echo "  internal-quote: admin upsert 完成（全菜单全权+全客户，锁定已解除），密码校验通过"
+            }
+
+            # ── shipping：船务管理（Django，supervisor+is_superuser；同步 env 防重启回退）──
+            do_shipping() {
+              docker compose -f "$COMPOSE" --env-file "$ENVF" exec -T \
+                -e OPS_PASSWORD="$PW" shipping-management python manage.py shell -c \
+                "import os;from apps.accounts.models import User;u,_=User.objects.get_or_create(username='admin');u.role='supervisor';u.is_superuser=True;u.is_staff=True;u.is_active=True;u.display_name='系统管理员';u.set_password(os.environ['OPS_PASSWORD']);u.save()" || { echo "[FAIL] Django 写库失败"; return 1; }
+              # entrypoint 的 seed_admin 每次启动用 SHIPPING_ADMIN_PASSWORD 强制重置 admin 密码，同步 env 防止重启回退
+              upsert_env SHIPPING_ADMIN_PASSWORD "$PW"
+              local LOGIN
+              LOGIN=$(curl -s -X POST http://localhost/shipping/api/auth/login/ -H 'Content-Type: application/json' -d "{\"username\":\"admin\",\"password\":\"$PW\"}")
+              echo "$LOGIN" | grep -q '"access"' || { echo "[FAIL] 登录验证失败: $LOGIN"; return 1; }
+              echo "  shipping: admin upsert 完成（supervisor+is_superuser，已同步 SHIPPING_ADMIN_PASSWORD 防重启回退），登录验证通过"
+            }
+
+            # ── peise：配色库存（单账号口令模式，改 env + 重建）──
+            do_peise() {
+              upsert_env PEISE_AUTH_USERNAME "admin"
+              upsert_env PEISE_AUTH_PASSWORD "$PW"
+              docker compose -f "$COMPOSE" --env-file "$ENVF" up -d --no-deps --force-recreate peise >/dev/null || { echo "[FAIL] peise 重建失败"; return 1; }
+              sleep 5
+              local GOT
+              GOT=$(docker exec "$(ctr 'peise')" printenv AUTH_USERNAME 2>/dev/null)
+              [ "$GOT" = "admin" ] || { echo "[FAIL] env 未生效（AUTH_USERNAME=$GOT）"; return 1; }
+              echo "  peise: 唯一共享账号已改为 admin（原 ps 账号失效），密码=PORTAL_ADMIN_PASSWORD"
+            }
+
+            # ── jiangping：采购订单（单账号口令模式，改 env + 重建）──
+            do_jiangping() {
+              upsert_env JIANGPING_LOGIN_USERNAME "admin"
+              upsert_env JIANGPING_LOGIN_PASSWORD "$PW"
+              docker compose -f "$COMPOSE" --env-file "$ENVF" up -d --no-deps --force-recreate jiangping >/dev/null || { echo "[FAIL] jiangping 重建失败"; return 1; }
+              sleep 5
+              local GOT
+              GOT=$(docker exec "$(ctr 'jiangping')" printenv LOGIN_USERNAME 2>/dev/null)
+              [ "$GOT" = "admin" ] || { echo "[FAIL] env 未生效（LOGIN_USERNAME=$GOT）"; return 1; }
+              echo "  jiangping: 唯一共享账号已改为 admin（原 jp 账号失效），密码=PORTAL_ADMIN_PASSWORD"
+            }
+
+            if [ "$TARGET" = "all" ]; then
+              LIST="qc huadeng-maorong cpg factory-review zouhuo figure-mold sprayplan indo-shipping toyqms internal-quote shipping peise jiangping"
+            else
+              LIST="$TARGET"
+            fi
+
+            FAILED=""
+            for t in $LIST; do
+              echo "=================== $t ==================="
+              if "do_${t//-/_}"; then echo "[OK] $t"; else echo "[FAIL] $t"; FAILED="$FAILED $t"; fi
+            done
+
+            echo "=================== 汇总 ==================="
+            if [ -n "$FAILED" ]; then echo "[FAIL] 以下目标失败:$FAILED"; exit 1; fi
+            echo "[OK] 全部目标完成（密码=Secret PORTAL_ADMIN_PASSWORD，不回显）"

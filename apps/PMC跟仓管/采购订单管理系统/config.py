@@ -14,6 +14,7 @@ _login_username = os.environ.get('LOGIN_USERNAME', 'jp')
 _login_password = os.environ.get('LOGIN_PASSWORD', 'jp123456')
 
 # 额外登录账号: LOGIN_ACCOUNTS 为 JSON 对象 {"用户名":"密码",...},与主账号并存
+# 注: 非法 JSON 会拒绝启动(FATAL),部署前请确认值是合法 JSON 对象
 try:
     _login_accounts = {
         **{str(k).strip(): str(v) for k, v in json.loads(os.environ.get('LOGIN_ACCOUNTS', '') or '{}').items()},

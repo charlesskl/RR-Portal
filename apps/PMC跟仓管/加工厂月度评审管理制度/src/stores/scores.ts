@@ -8,15 +8,27 @@ import type { Craft } from '../constants/roles'
 export const useScoresStore = defineStore('scores', () => {
   const items = ref<MonthlyScore[]>([])
 
+  function keepViewableCrafts(records: MonthlyScore[]) {
+    return records.filter((item) => {
+      const craft = (item as any).expand?.factory?.craft as Craft | undefined
+      return !craft || canViewCraft(craft)
+    })
+  }
+
   async function fetchByMonth(yearMonth: string) {
     const records = await pb.collection('monthly_scores').getFullList<MonthlyScore>({
       filter: `year_month = "${yearMonth}"`,
       expand: 'factory',
     })
-    items.value = records.filter((item) => {
-      const craft = (item as any).expand?.factory?.craft as Craft | undefined
-      return !craft || canViewCraft(craft)
+    items.value = keepViewableCrafts(records)
+  }
+  async function fetchByRange(startMonth: string, endMonth: string) {
+    const records = await pb.collection('monthly_scores').getFullList<MonthlyScore>({
+      filter: `year_month >= "${startMonth}" && year_month <= "${endMonth}"`,
+      expand: 'factory',
+      sort: 'year_month',
     })
+    items.value = keepViewableCrafts(records)
   }
   async function getOne(factoryId: string, yearMonth: string): Promise<MonthlyScore | null> {
     const r = await pb.collection('monthly_scores').getFullList<MonthlyScore>({
@@ -31,5 +43,5 @@ export const useScoresStore = defineStore('scores', () => {
       factory: factoryId, year_month: yearMonth, status: 'draft', flag: 'none', ...data,
     })
   }
-  return { items, fetchByMonth, getOne, save }
+  return { items, fetchByMonth, fetchByRange, getOne, save }
 })

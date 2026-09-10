@@ -8,6 +8,8 @@ import { useFactoriesStore } from '../stores/factories'
 import { useAuthStore } from '../stores/auth'
 import { canEditQuality, allowedRegions, canViewCraft } from '../utils/permissions'
 import { buildQualityInspectionImportColumns, formatImportedDate, normalizeExcelHeader, resolveQualityInspectionFactory } from '../utils/qualityInspectionImport'
+import { matchesQualityInspectionFilters, qualityInspectionProcessTypes } from '../utils/qualityInspectionFilters'
+import type { OrderDateFilter } from '../utils/orderDateFilter'
 import { REGIONS, REGION_LABELS, regionOf, type Craft, type Region } from '../constants/roles'
 import type { QualityInspection } from '../types/qualityInspection'
 import { useTableColumnPreferences } from '../composables/useTableColumnPreferences'
@@ -17,6 +19,12 @@ const auth = useAuthStore()
 const records = ref<QualityInspection[]>([])
 const myRegions = computed(() => (auth.role ? allowedRegions(auth.role) : REGIONS))
 const regionFilter = ref<Region | ''>((useRoute().query.region as Region) || '')
+const processTypeFilter = ref('')
+const dateMode = ref<'all' | 'day' | 'month' | 'range'>('all')
+const selectedDate = ref(new Date().toISOString().slice(0, 10))
+const selectedMonth = ref(new Date().toISOString().slice(0, 7))
+const rangeStart = ref('')
+const rangeEnd = ref('')
 const search = ref('')
 const factoryName = (r: QualityInspection) => r.expand?.factory?.name ?? '-'
 
@@ -45,12 +53,28 @@ function matchesSearch(r: QualityInspection): boolean {
   ].some((value) => normalizeSearch(value).includes(q))
 }
 
-const filteredRecords = computed(() =>
+const scopedRecords = computed(() =>
   records.value
     .filter((r) => !r.expand?.factory?.craft || canViewCraft(r.expand.factory.craft as Craft))
     .filter((r) => myRegions.value.includes(regionOf(r.expand?.factory)))
-    .filter((r) => !regionFilter.value || regionOf(r.expand?.factory) === regionFilter.value)
+    .filter((r) => !regionFilter.value || regionOf(r.expand?.factory) === regionFilter.value))
+const processTypeOptions = computed(() => qualityInspectionProcessTypes(scopedRecords.value))
+const dateFilter = computed<OrderDateFilter>(() => {
+  if (dateMode.value === 'day') return { mode: 'range', start: selectedDate.value, end: selectedDate.value }
+  if (dateMode.value === 'month') return { mode: 'month', month: selectedMonth.value }
+  if (dateMode.value === 'range') return { mode: 'range', start: rangeStart.value, end: rangeEnd.value }
+  return { mode: 'all' }
+})
+const filteredRecords = computed(() =>
+  scopedRecords.value
+    .filter((r) => matchesQualityInspectionFilters(r, processTypeFilter.value, dateFilter.value))
     .filter(matchesSearch))
+
+function clearDateFilter() {
+  dateMode.value = 'all'
+  rangeStart.value = ''
+  rangeEnd.value = ''
+}
 const showForm = ref(false)
 const fileInput = ref<HTMLInputElement | null>(null)
 const RESULTS = ['PASS', 'FAIL']
@@ -283,6 +307,26 @@ function exportExcel() {
           <option value="">全部厂区</option>
           <option v-for="rg in myRegions" :key="rg" :value="rg">{{ REGION_LABELS[rg] }}厂区</option>
         </select>
+        <select v-model="processTypeFilter" class="filter-sel" aria-label="加工类型筛选">
+          <option value="">全部加工类型</option>
+          <option v-for="processType in processTypeOptions" :key="processType" :value="processType">{{ processType }}</option>
+        </select>
+        <div class="date-filter">
+          <select v-model="dateMode" class="filter-sel" aria-label="品质检验时间段筛选">
+            <option value="all">全部时间</option>
+            <option value="day">按日期</option>
+            <option value="month">按月份</option>
+            <option value="range">自定义时间段</option>
+          </select>
+          <input v-if="dateMode === 'day'" v-model="selectedDate" type="date" aria-label="品质检验日期" />
+          <input v-else-if="dateMode === 'month'" v-model="selectedMonth" type="month" aria-label="品质检验月份" />
+          <template v-else-if="dateMode === 'range'">
+            <input v-model="rangeStart" type="date" :max="rangeEnd || undefined" aria-label="品质检验开始日期" />
+            <span class="date-separator">至</span>
+            <input v-model="rangeEnd" type="date" :min="rangeStart || undefined" aria-label="品质检验结束日期" />
+          </template>
+          <button v-if="dateMode !== 'all'" class="ghost date-clear" type="button" title="清除时间筛选" aria-label="清除品质检验时间筛选" @click="clearDateFilter">×</button>
+        </div>
         <input
           v-model="search"
           class="search-box"
@@ -421,6 +465,11 @@ function exportExcel() {
 <style scoped>
 .wide { max-width: none; }
 .region-sel { height: 34px; padding: 0 .6rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); cursor: pointer; }
+.filter-sel { height: 34px; padding: 0 .6rem; }
+.date-filter { display: flex; align-items: center; gap: .4rem; }
+.date-filter input { width: 138px; height: 34px; padding: 0 .5rem; }
+.date-separator { color: var(--text-soft); white-space: nowrap; }
+.date-clear { width: 34px; height: 34px; padding: 0; color: var(--text-soft); }
 .search-box { width: 280px; height: 34px; padding: 0 .7rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); }
 .form-card { margin-bottom: 1rem; }
 .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: .8rem; }

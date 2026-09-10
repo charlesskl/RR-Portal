@@ -70,6 +70,78 @@ function selectOrder(product: string) {
 }
 
 describe('department delivery table', () => {
+  it('可编辑下单时间和下单交货时间，并按新交货日重算延期', async () => {
+    state.orders.items[0].actual_delivery_date = '2026-09-10'
+    wrapper = mount(DeptOrdersView)
+    await flushPromises()
+
+    await wrapper.findAll('.report .order-date-inp')[0]!.setValue('2026-08-18')
+    await wrapper.findAll('.report .delivery-date-inp')[0]!.setValue('2026-09-08')
+    expect(wrapper.find('.save-all').text()).toBe('全部保存（1）')
+
+    await button('保存').trigger('click')
+    await flushPromises()
+    expect(state.orders.update).toHaveBeenCalledWith('order-0', expect.objectContaining({
+      order_date: '2026-08-18T00:00:00.000Z',
+      delivery_date: '2026-09-08T00:00:00.000Z',
+      delay_days: 2,
+      is_delayed: true,
+    }))
+  })
+
+  it.each(['painting', 'assembly', 'sewing', 'electronics'] as const)(
+    '%s 部只在货号和物料名称同时匹配时自动带出历史核价',
+    async (craft) => {
+      state.route.params.craft = craft
+      state.factories.items[0].craft = craft
+      for (const order of state.orders.items) order.expand!.factory!.craft = craft
+      state.orders.items[0].item_no = craft === 'sewing' ? 'MA-RR-NEW/ITEM-1' : 'ITEM-1'
+      state.orders.items[0].product = '旧物料名称'
+      state.orders.items[0].quote_labor_price = 0.33
+      state.orders.items[1].item_no = craft === 'sewing' ? 'MA-RR-OLD/ITEM-1' : 'ITEM-1'
+      state.orders.items[1].product = '目标物料名称'
+      state.orders.items[1].quote_labor_price = 0.58
+      wrapper = mount(DeptOrdersView)
+      await flushPromises()
+
+      await wrapper.findAll('.report .text-inp')[0]!.setValue('目标物料名称')
+      expect((wrapper.findAll('.report .price-inp')[0]!.element as HTMLInputElement).value).toBe('0.58')
+      expect(wrapper.text()).toContain('已按货号和物料名称自动带出历史核价 0.58')
+    },
+  )
+
+  it('修改注塑模具编号后自动带出最近历史核价', async () => {
+    state.orders.items[0].mold_no = 'OLD-MOLD'
+    state.orders.items[0].quote_labor_price = 0.33
+    state.orders.items[1].mold_no = 'FSMNFS-06M-01'
+    state.orders.items[1].quote_labor_price = 0.58
+    wrapper = mount(DeptOrdersView)
+    await flushPromises()
+
+    await wrapper.findAll('.report .mold-no-inp')[0]!.setValue(' fsmnfs-06m-01 ')
+    expect((wrapper.findAll('.report .price-inp')[0]!.element as HTMLInputElement).value).toBe('0.58')
+    expect(wrapper.text()).toContain('已按模具编号自动带出历史核价 0.58')
+
+    await button('保存').trigger('click')
+    await flushPromises()
+    expect(state.orders.update).toHaveBeenCalledWith('order-0', expect.objectContaining({
+      mold_no: 'fsmnfs-06m-01', quote_labor_price: 0.58,
+    }))
+  })
+
+  it('不覆盖用户本次已手工修改的核价', async () => {
+    state.orders.items[0].mold_no = 'OLD-MOLD'
+    state.orders.items[0].quote_labor_price = 0.33
+    state.orders.items[1].mold_no = 'FSMNFS-06M-01'
+    state.orders.items[1].quote_labor_price = 0.58
+    wrapper = mount(DeptOrdersView)
+    await flushPromises()
+
+    await wrapper.findAll('.report .price-inp')[0]!.setValue('0.61')
+    await wrapper.findAll('.report .mold-no-inp')[0]!.setValue('FSMNFS-06M-01')
+    expect((wrapper.findAll('.report .price-inp')[0]!.element as HTMLInputElement).value).toBe('0.61')
+  })
+
   it('renders only one page, preserves edits across pages and filters, and saves hidden drafts', async () => {
     wrapper = mount(DeptOrdersView)
     await flushPromises()

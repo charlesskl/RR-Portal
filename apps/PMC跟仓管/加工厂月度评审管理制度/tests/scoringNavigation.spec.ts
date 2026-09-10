@@ -11,6 +11,7 @@ vi.mock('../src/views/LoginView.vue', () => ({ default: { template: '<div />' } 
 vi.mock('../src/views/DashboardView.vue', () => ({ default: { template: '<div />' } }))
 vi.mock('../src/views/MonthlyScoringView.vue', () => ({ default: { template: '<div />' } }))
 vi.mock('../src/views/ScoreSheetView.vue', () => ({ default: { template: '<div />' } }))
+vi.mock('../src/views/FactoryMonthlyDataView.vue', () => ({ default: { template: '<div />' } }))
 vi.mock('../src/views/FactoryListView.vue', () => ({ default: { template: '<div />' } }))
 vi.mock('../src/views/FactoryDetailView.vue', () => ({ default: { template: '<div />' } }))
 vi.mock('../src/pb', () => ({
@@ -22,6 +23,7 @@ vi.mock('../src/pb', () => ({
 
 describe('monthly scoring navigation', () => {
   const scorePath = '/factories/factory123/score/2026-07'
+  const monthlyDataPath = '/factories/factory123/monthly-data/2026-07'
   let router: Router
   let auth: ReturnType<typeof import('../src/stores/auth')['useAuthStore']>
   let setPermissionOverrides: typeof import('../src/utils/permissions')['setPermissionOverrides']
@@ -51,9 +53,10 @@ describe('monthly scoring navigation', () => {
 
     await router.push('/scoring')
     expect(router.currentRoute.value.path).toBe('/scoring')
-    await router.push(scorePath)
-
-    expect(router.currentRoute.value.path).toBe(scorePath)
+    for (const path of [scorePath, monthlyDataPath]) {
+      await router.push(path)
+      expect(router.currentRoute.value.path).toBe(path)
+    }
     expect(router.currentRoute.value.redirectedFrom).toBeUndefined()
   })
 
@@ -79,7 +82,7 @@ describe('monthly scoring navigation', () => {
   it('blocks scoring without its permission while preserving ordinary factory access', async () => {
     signIn({ 'scoring.view': false, 'factories.view': true })
 
-    for (const path of ['/scoring', scorePath]) {
+    for (const path of ['/scoring', scorePath, monthlyDataPath]) {
       await router.push(path)
       expect(router.currentRoute.value.path).toBe('/dashboard')
     }
@@ -90,7 +93,7 @@ describe('monthly scoring navigation', () => {
   })
 
   it('redirects an unauthenticated scoring visit to login', async () => {
-    for (const path of ['/scoring', scorePath]) {
+    for (const path of ['/scoring', scorePath, monthlyDataPath]) {
       await router.push(path)
       expect(router.currentRoute.value.path).toBe('/login')
     }

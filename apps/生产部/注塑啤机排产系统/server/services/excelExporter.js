@@ -75,7 +75,8 @@ async function exportScheduleExcel(scheduleId) {
   // ========== Row 1: 标题 ==========
   ws.mergeCells('A1:Y1');
   const titleCell = ws.getCell('A1');
-  const wsName = schedule.workshop === 'A' ? '兴信A' : schedule.workshop === 'C' ? '华登' : '兴信B';
+  const wsNameMap = { A: '兴信A', C: '华登', W: '外发' };
+  const wsName = wsNameMap[schedule.workshop] || '兴信B';
   titleCell.value = `${wsName}注塑部每日排单表`;
   titleCell.font = { size: 22, bold: true, name: '宋体' };
   titleCell.alignment = { horizontal: 'center', vertical: 'middle' };

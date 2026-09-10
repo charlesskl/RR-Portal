@@ -540,7 +540,6 @@ function renderMolds(container, molds, onChange, canEdit, fxRmbHkd, fxHkdUsd) {
     <th style="width:160px">模具名称</th>
     <th style="width:70px">模号</th>
     <th style="width:120px">模胚类型</th>
-    <th style="width:100px">模具结构</th>
     <th style="width:70px">材质</th>
     <th style="width:70px">颜色</th>
     <th style="width:80px">出模数</th>
@@ -561,7 +560,6 @@ function renderMolds(container, molds, onChange, canEdit, fxRmbHkd, fxHkdUsd) {
     ['name', 'textarea'],
     ['mold_no', 'text'],
     ['mold_type', 'textarea'],
-    ['structure', 'text'],
     ['material', 'text'], ['color', 'text'], ['cavity', 'text'], ['sets', 'number'],
     ['weight_g', 'number'],
     ['cycle_sec', 'number'],
@@ -1652,11 +1650,11 @@ function renderSummaryPane(host, sections, quote, me) {
     return s + boxPrice / q + flatSum;
   }, 0) * fxRH;
 
-  // 附加税：用户手填，存到 sales.pricing_summary.surtax
+  // 附加税：历史版本为手填并存到 sales.pricing_summary.surtax；现与导出统一为 0.4% 模型
+  // （TOTAL(USD)×0.4%×码点÷找数），手填值不再参与任何计算，仅保留字段不清理旧数据。
   sales.pricing_summary = sales.pricing_summary || {};
-  const surtaxManual = num(sales.pricing_summary.surtax);
 
-  // cost 包含搪胶/车缝/纸箱；附加税 + 模具分摊 在 markup 外面单独加
+  // cost 包含搪胶/车缝/纸箱；附加税 + 模具分摊在下方出货价算价中单独处理
   const blowRmb = blowTotal * fxRH;
   // 电子/五金/辅助/包装 四表均为港币(HKD)，换算回 RMB 加入成本：×汇率
   // 电子/五金/辅助/包装/二次加工(喷油) 均为港币(HKD)，换算回 RMB：×汇率
@@ -1664,32 +1662,25 @@ function renderSummaryPane(host, sections, quote, me) {
   // 出厂价底价：cost × markups（不含附加税 + 模具分摊）
   const factoryRmb = cost;
   // 注：出厂价(HKD) 改为「成本各列求和」factoryHkdSum（见下方 costCols），不再用 factoryRmb/fxRH 以免舍入差
-  // 出货底价：含附加税 + 模具分摊（盐田40柜/5吨车的底价）
-  const priceRmb = factoryRmb + moldShare + surtaxManual;
-  const priceHkd = priceRmb / fxRH;
   // 九、合计 整行换成 HKD（RMB ÷ 汇率）
   const fxH = fxRH || 0.85;
   const toHkd = (rmb) => num(rmb) / fxH;
   const markupX = (sales.shipping?.markup_x == null) ? 1.2 : num(sales.shipping.markup_x);  // 允许 0；仅空/未设时默认 1.2
   // 成本明细列（HKD）— 出厂价 = 这些列之和（严格等于展示值，避免与 RMB 总额换算的舍入差）
+  // 页面小计不重复显示电子、车缝；它们在下方“出货价算价”中独立计算。
   const costCols = [
-    ['注塑+吹气', toHkd(injTotalRmb + blowTotal * fxRH)], ['二次加工（印喷）', ppTotal], ['电子', electronicTotal], ['五金', hwTotal],
+    ['注塑+吹气', toHkd(injTotalRmb + blowTotal * fxRH)], ['二次加工（印喷）', ppTotal], ['五金', hwTotal],
     ['辅助材料', auxRaw], ['包装材料', pkmatRaw], ['组装人工', asmLaborTotal + asmStepTotal], ['包装/混装人工', pkLaborTotal + pkgStepTotal],
     ['印尼运费', toHkd(shipping)],
-    ['搪胶', toHkd(slushTotalRmb)], ['车缝', toHkd(sewingTotalRmb)], ['纸箱', toHkd(cartonRmb)],
+    ['搪胶', toHkd(slushTotalRmb)], ['纸箱', toHkd(cartonRmb)],
   ];
   // 电子和车缝在出货价算价中独立乘码点、除找数，不承担运费/吊柜费。
-  const baseExclude = new Set(['电子', '车缝']);
-  const elecHkdCol = num((costCols.find(column => column[0] === '电子') || [])[1]);
-  const sewHkdCol = num((costCols.find(column => column[0] === '车缝') || [])[1]);
-  const factoryHkdSum = costCols.reduce((total, column) => total + (baseExclude.has(column[0]) ? 0 : num(column[1])), 0);
-  const afterMarkupHkd = factoryHkdSum * markupX;
-  // 出货底价 = 出厂价（HKD）+ 附加税；码点(×markup)不在此处，移到下方「出货价算价」乘一次；模具分摊也在算价处理
-  const priceHkdMarked = factoryHkdSum + toHkd(surtaxManual);
+  const elecHkdCol = num(electronicTotal);
+  const sewHkdCol = toHkd(sewingTotalRmb);
+  const factoryHkdSum = costCols.reduce((total, column) => total + num(column[1]), 0);
   const totalsCols = [
     ...costCols,
-    ['附加税0.4%', surtaxManual, 'input'],
-    ['出货底价 HKD', priceHkdMarked, 'hkd'],
+    ['小计HKD', factoryHkdSum, 'hkd'],
   ];
 
   host.innerHTML = `
@@ -1698,9 +1689,6 @@ function renderSummaryPane(host, sections, quote, me) {
       <table class="wb-table" style="font-size:12px">
         <thead><tr>${totalsCols.map(([h]) => `<th style="background:#F0DBA1;color:#1F2937;font-weight:600;padding:6px 8px;white-space:nowrap">${h}</th>`).join('')}</tr></thead>
         <tbody><tr>${totalsCols.map(([_, v, level]) => {
-          if (level === 'input') {
-            return `<td style="background:#FDF8E7;padding:4px;text-align:right;white-space:nowrap"><input id="tot-surtax" type="number" step="any" value="${v ?? ''}" style="width:80px;text-align:right;border:1px solid #d1c89f;background:#fff;padding:2px 4px;font-weight:600"/></td>`;
-          }
           const palette = {
             sub:      '#FEF9C3',   // 出厂价 RMB
             'sub-hkd':'#FEF3C7',   // 出厂价 HKD
@@ -1741,8 +1729,6 @@ function renderSummaryPane(host, sections, quote, me) {
   const freightCalcSum = sales.freight_calc;
   const freightMapSum = computeFreightMap(freightCalcSum, eCartonSum);
   const canEditShip = me?.dept === 'sales' || me?.dept === 'engineering';
-  // 九、合计 中的 附加税 + 模具分摊 (都已是 RMB，转 HKD)
-  const surtaxHkd = num(surtaxManual) / fxRH;
   // 模具分摊传美金（与「生产模具费用」表同口径），出货价算价直接在 USD 层加
   // 统一保存业务 section（同步本地缓存，避免重渲染按旧 payload 还原）
   const saveSales = () => {
@@ -1751,19 +1737,13 @@ function renderSummaryPane(host, sections, quote, me) {
       putSection(salesSec, sales, false).catch(() => {});
     }
   };
+  // 第 7 个参数（历史手填附加税 HKD）传 null：附加税已改为 0.4% 模型，不再传入
   const shippingCalc = renderShipping(host.querySelector('#wb-shipping-sum'), sales, salesHeader, canEditShip, saveSales,
-    freightMapSum, factoryHkdSum, surtaxHkd, {
+    freightMapSum, factoryHkdSum, null, {
       mold: moldFeeShareUsd,
       prototype: prototypeShareUsd,
       testing: testingShareUsd,
     }, { sewing: sewHkdCol, electronic: elecHkdCol });
-  const surtaxInp = host.querySelector('#tot-surtax');
-  if (surtaxInp && canEditShip) {
-    surtaxInp.oninput = () => { sales.pricing_summary.surtax = surtaxInp.value === '' ? null : Number(surtaxInp.value); };
-    surtaxInp.onchange = () => { saveSales(); renderSummaryPane(host, sections, quote, me); };  // 失焦持久化 + 刷新显示
-  } else if (surtaxInp) {
-    surtaxInp.disabled = true;
-  }
   // 码点 可编辑（业务/工程）
   const markupInp = host.querySelector('#tot-markup');
   if (markupInp && canEditShip) {
@@ -1856,9 +1836,8 @@ function renderSummaryPane(host, sections, quote, me) {
       const rate = num(yt40._freight_rate);
       return rate * num(sales.shipping?.lifting_pct ?? 52) / 100;
     })(),
-    // 杂项 = 印尼运费(手填 HKD) + 附加税 HKD
-    misc: num(sales.pricing_summary?.indo_freight) + surtaxHkd,
-    surtax_hkd: surtaxHkd,  // 供减税明细里印尼运费输入框重算 misc 用（避免丢附加税）
+    // 杂项只取印尼运费；附加税在出货价算价区单独计算，不进入减税明细。
+    misc: num(sales.pricing_summary?.indo_freight),
     hardware: (hwRaw - _sumByMatch(eng.hardware, isMotor)),  // 五金 HKD（剔除马达项；五金表已 HKD）
     electronic: elecRaw,                                  // 电子 HKD（不识别/剔除马达）
     injection_labor: weightedInjectionSum(mold, r => num(r.shot_price)),  // 啤工按各产品配比加权
@@ -2482,6 +2461,7 @@ function renderCartonCalc(host, c, canEdit, onChange) {
     ? b[`${key}_raw`]
     : (b[key] || '');
   const productMmInput = key => c[`${key}_mm`] || (c[`${key}_cm`] ? num(c[`${key}_cm`]) * 10 : '');
+  const productInchInput = key => c[key] == null || c[key] === '' ? '' : num(c[key]).toFixed(2);
   const cuftOf = (b) => num(b.cl) * num(b.cw) * num(b.ch) / 1728;
   const boxPriceOf = (b) => (num(b.cl) + num(b.cw) + 2) * (num(b.cw) + num(b.ch) + 1) * 2 * rate() / 1000;
   // 平卡 L/W 留空时对应所在纸箱的长/宽
@@ -2555,9 +2535,9 @@ function renderCartonCalc(host, c, canEdit, onChange) {
             </tr>
             <tr>
               <td class="muted">inch</td>
-              <td><input id="cc-pl" type="number" step="any" value="${c.pl || ''}" ${canEdit?'':'disabled'} style="width:80px"/></td>
-              <td><input id="cc-pw" type="number" step="any" value="${c.pw || ''}" ${canEdit?'':'disabled'} style="width:80px"/></td>
-              <td><input id="cc-ph" type="number" step="any" value="${c.ph || ''}" ${canEdit?'':'disabled'} style="width:80px"/></td>
+              <td><input id="cc-pl" type="number" step="0.01" value="${productInchInput('pl')}" ${canEdit?'':'disabled'} style="width:80px"/></td>
+              <td><input id="cc-pw" type="number" step="0.01" value="${productInchInput('pw')}" ${canEdit?'':'disabled'} style="width:80px"/></td>
+              <td><input id="cc-ph" type="number" step="0.01" value="${productInchInput('ph')}" ${canEdit?'':'disabled'} style="width:80px"/></td>
             </tr>
           </tbody>
         </table>
@@ -2589,7 +2569,7 @@ function renderCartonCalc(host, c, canEdit, onChange) {
         c[`${k}_mm`] = mm;
         c[`${k}_cm`] = 0;
         c[k] = mm / 25.4;
-        el.value = mmEl.value === '' ? '' : String(+c[k].toFixed(4));
+        el.value = mmEl.value === '' ? '' : c[k].toFixed(2);
         onChange();
       };
     });
@@ -5039,8 +5019,9 @@ function renderShipping(host, payload, header, canEdit, onChange, freightMap, pr
 
   const compute = () => {
     const totalHkd = num(topData.total_hkd);
-    const surtax = num(topData.surtax);
-    const combined = totalHkd + surtax;  // = 九、合计 出货底价（出厂价 + 附加税）；所有场景统一用它
+    // 出货底价 = 九、合计小计HKD。附加税不再加手填值（历史 pricing_summary.surtax 忽略），
+    // 改为与导出一致的 0.4% 模型，在下方 USD 层计提。
+    const combined = totalHkd;
     topData.combined = +combined.toFixed(4);
 
     s.scenarios.forEach(x => {
@@ -5083,14 +5064,20 @@ function renderShipping(host, payload, header, canEdit, onChange, freightMap, pr
       const testingShareUSD = num(topData.testing_share);
       const customerSuppliedUSD = customerSuppliedTotal();
       const finalUSD = totalUSD + moldShareUSD + prototypeShareUSD + testingShareUSD + customerSuppliedUSD;
+      // 附加税 0.4%（与导出一致）：TOTAL(USD)×0.4% → ×码点 → ÷找数，加回报客货价
+      const surtaxUsd = finalUSD * 0.004;
+      const surtaxMarkup = surtaxUsd * num(s.markup_x);
+      const surtaxDivided = surtaxMarkup / num(s.divisor);
+      const quotedUSD = finalUSD + surtaxDivided;
       return { freight, lifting, afterShip, afterMarkup, afterDivisor, totalHKD, totalRMB, totalUSD, moldShareUSD, prototypeShareUSD, testingShareUSD, customerSuppliedUSD, finalUSD,
+        surtaxUsd, surtaxMarkup, surtaxDivided, quotedUSD,
         mainTotal: afterDivisor, sewBase, sewMarkup, sewDivisor, sewTotal: sewDivisor,
         elecBase, elecMarkup, elecDivisor, elecTotal: elecDivisor };
     });
     const target = num(s.target_usd);
     // 报客货价 = 第一个非"出厂价"场景（默认 盐田40柜）；若全是出厂价则取最小
     const customerIdx = s.scenarios.findIndex(x => !x.is_factory);
-    const customerUSD = (customerIdx >= 0 && rows[customerIdx]) ? rows[customerIdx].finalUSD : (rows.length ? Math.min(...rows.map(r => r.finalUSD)) : 0);
+    const customerUSD = (customerIdx >= 0 && rows[customerIdx]) ? rows[customerIdx].quotedUSD : (rows.length ? Math.min(...rows.map(r => r.quotedUSD)) : 0);
     const customerTotalHkd = (customerIdx >= 0 && rows[customerIdx])
       ? rows[customerIdx].totalHKD
       : (rows.length ? Math.min(...rows.map(r => r.totalHKD)) : 0);
@@ -5105,7 +5092,6 @@ function renderShipping(host, payload, header, canEdit, onChange, freightMap, pr
     // 顶部小汇总刷新
     const setTop = (id, v) => { const e = host.querySelector('#' + id); if (e) e.textContent = v; };
     setTop('sh-top-total', fmt(num(topData.total_hkd)));
-    setTop('sh-top-surtax', fmt(num(topData.surtax)));
     setTop('sh-top-combined', fmt(num(topData.combined)));
     rows.forEach((r, i) => {
       const setC = (k, v) => { const td = host.querySelector(`td[data-i="${i}"][data-k="${k}"]`); if (td) td.textContent = v; };
@@ -5131,6 +5117,10 @@ function renderShipping(host, payload, header, canEdit, onChange, freightMap, pr
       setC('totalRMB', fmt(r.totalRMB));
       setC('totalUSD', fmt(r.totalUSD));
       setC('finalUSD', fmt(r.finalUSD));
+      setC('surtaxUsd', fmt(r.surtaxUsd));
+      setC('surtaxMarkup', fmt(r.surtaxMarkup));
+      setC('surtaxDivided', fmt(r.surtaxDivided));
+      setC('quotedUSD', fmt(r.quotedUSD));
       // 出货底价 input：matched 则同步 + 禁用 + 上色
       const baseInp = host.querySelector(`.sc-base[data-i="${i}"]`);
       if (baseInp) {
@@ -5187,9 +5177,8 @@ function renderShipping(host, payload, header, canEdit, onChange, freightMap, pr
       </tr>`).join('');
     host.innerHTML = `
       <p class="muted" style="font-size:12px;margin:0 0 10px 0">
-        出货底价 = 出厂价 <b id="sh-top-total">${fmt(num(topData.total_hkd))}</b>
-        + 附加税 <b id="sh-top-surtax">${fmt(num(topData.surtax))}</b>
-        = <b style="color:#7c2d12" id="sh-top-combined">${fmt(num(topData.combined))}</b> HK$（= 九、合计 出货底价；各场景统一用它，再 ×码点 ÷找数）
+        出货底价 = 出厂价（九、合计小计） <b style="color:#7c2d12" id="sh-top-total">${fmt(num(topData.total_hkd))}</b> HK$（各场景统一用它，再 ×码点 ÷找数；附加税 0.4% 在下方 USD 层计提）
+        <span id="sh-top-combined" style="display:none">${fmt(num(topData.combined))}</span>
         <span id="sh-top-mold" style="display:none">${fmt(num(topData.mold_share))}</span>
       </p>
       <table class="wb-table ship-table">
@@ -5221,6 +5210,10 @@ function renderShipping(host, payload, header, canEdit, onChange, freightMap, pr
           <tr><td>测试费分摊 (USD)</td>${rows.map((r, i) => cellTd(i, 'testingShareUSD', r)).join('')}${canEdit ? '<td></td>' : ''}</tr>
           ${suppliedRows}
           <tr class="hi"><td>TOTAL (USD)</td>${rows.map((r, i) => cellTd(i, 'finalUSD', r)).join('')}${canEdit ? '<td></td>' : ''}</tr>
+          <tr><td>附加税 (0.4%)</td>${rows.map((r, i) => cellTd(i, 'surtaxUsd', r)).join('')}${canEdit ? '<td></td>' : ''}</tr>
+          <tr><td>码点 × ${s.markup_x}</td>${rows.map((r, i) => cellTd(i, 'surtaxMarkup', r)).join('')}${canEdit ? '<td></td>' : ''}</tr>
+          <tr><td>找数 ÷ ${s.divisor}</td>${rows.map((r, i) => cellTd(i, 'surtaxDivided', r)).join('')}${canEdit ? '<td></td>' : ''}</tr>
+          <tr class="hi" style="background:#FEF3C7;color:#92400E;font-weight:700"><td>报客价 (USD)</td>${rows.map((r, i) => cellTd(i, 'quotedUSD', r)).join('')}${canEdit ? '<td></td>' : ''}</tr>
         </tbody>
       </table>
       <div class="ship-foot">

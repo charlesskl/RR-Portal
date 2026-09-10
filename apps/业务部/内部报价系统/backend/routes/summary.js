@@ -1,7 +1,7 @@
 const express = require('express');
 const db = require('../db');
 const { requireAuth, quoteAccess } = require('../middleware/auth');
-const { WORKSHOPS, QUOTE_COMPONENTS, buildQuoteSummary, buildSummaryWorkbook, parseJson } = require('../services/quoteSummary');
+const { WORKSHOPS, QUOTE_COMPONENTS, SUMMARY_COLUMNS, calculateSummaryValues, buildQuoteSummary, buildSummaryWorkbook, parseJson } = require('../services/quoteSummary');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -35,6 +35,9 @@ async function loadRows(user) {
       ...confirmation,
       workshops: parseJson(confirmation.workshops_json, []).filter(code => allowedWorkshops.has(code)).slice(0, 1),
     } : { status: 'pending', workshops: [] };
+    const qty = summary.confirmation.confirmed_qty ?? summary.qty;
+    const price = summary.confirmation.confirmed_price ?? summary.quoted_price;
+    summary.summary_values = calculateSummaryValues(summary.components_before_tax, summary.components, Number(qty)||0, Number(price)||0, summary.abs_material_cost);
     result.push(summary);
   }
   return result;
@@ -46,6 +49,7 @@ router.get('/', async (req, res) => {
     rows,
     workshops: WORKSHOPS.map(([code, name]) => ({ code, name })),
     components: QUOTE_COMPONENTS.map(([code, name]) => ({ code, name })),
+    summary_columns: SUMMARY_COLUMNS.map(([code, name, format]) => ({ code, name, format })),
     can_edit: req.user.dept === 'sales' || isAdmin(req.user),
   });
 });

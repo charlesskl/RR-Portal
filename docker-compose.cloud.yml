@@ -250,6 +250,8 @@ services:
       - DATA_PATH=/app/data
       - UPLOAD_FOLDER=/app/uploads
       - SECRET_KEY=${JIANGPING_SECRET_KEY:?JIANGPING_SECRET_KEY is required}
+      - LOGIN_USERNAME=${JIANGPING_LOGIN_USERNAME:-jp}
+      - LOGIN_PASSWORD=${JIANGPING_LOGIN_PASSWORD:-jp123456}
     volumes:
       - ./apps/PMC跟仓管/采购订单管理系统/data:/app/data
       - ./apps/PMC跟仓管/采购订单管理系统/uploads:/app/uploads

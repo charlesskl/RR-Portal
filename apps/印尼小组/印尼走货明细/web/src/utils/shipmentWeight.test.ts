@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
-  isPaperRope, parseShipmentPacking, shipmentCartonCount, shipmentGrossPerPc, shipmentWeightQuantity,
+  formatShipmentPackingLines, isPaperRope, parseShipmentPacking, shipmentCartonCount,
+  shipmentGrossPerPc, shipmentWeightQuantity,
 } from './shipmentWeight'
 
 describe('每箱数量分段写法', () => {
@@ -9,6 +10,8 @@ describe('每箱数量分段写法', () => {
       mode: 'ranges', cartons: 3, totalQty: 10000, averageQty: 10000 / 3,
     })
     expect(shipmentCartonCount(10000, '1-2/3000 3/4000')).toBe(3)
+    expect(formatShipmentPackingLines('1-2/3000 3/4000')).toBe('1-2/3000\n3/4000')
+    expect(parseShipmentPacking('1-2/3000\n3/4000').totalQty).toBe(10000)
   })
 
   it('统一数量仍按送货数量计算箱数', () => {

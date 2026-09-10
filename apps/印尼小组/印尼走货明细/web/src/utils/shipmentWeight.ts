@@ -55,6 +55,12 @@ export function shipmentPackingAverageQty(packingValue: unknown): number {
   return parseShipmentPacking(packingValue).averageQty
 }
 
+export function formatShipmentPackingLines(value: unknown): string {
+  const text = String(value ?? '')
+  if (parseShipmentPacking(text).mode !== 'ranges') return text
+  return text.trim().split(/[\s,，;；]+/).filter(Boolean).join('\n')
+}
+
 // 包装数量属于走货行；同一物料在不同行可以使用不同包装数量。
 export function shipmentGrossPerPc(weightPerCarton: unknown, qtyPerCarton: unknown, materialName?: unknown): number {
   const weight = Number(weightPerCarton)

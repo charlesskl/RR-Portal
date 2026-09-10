@@ -8,7 +8,8 @@ import { api } from '../api/client'
 import { publicAsset } from '../deployment'
 import './ShipmentsPage.css'
 import {
-  isPaperRope, parseShipmentPacking, shipmentCartonCount, shipmentGrossPerPc, shipmentWeightQuantity,
+  formatShipmentPackingLines, isPaperRope, parseShipmentPacking, shipmentCartonCount,
+  shipmentGrossPerPc, shipmentWeightQuantity,
 } from '../utils/shipmentWeight'
 
 interface ShipmentSummary {
@@ -1072,7 +1073,7 @@ export default function ShipmentsPage() {
               { title: '报关出口公司', width: 160, render: (_v, r, i) => fillable(i, 'customs_company', <Input size="small" value={r.customs_company} onChange={(e) => patchItem(i, 'customs_company', e.target.value)} />) },
               { title: '提单抬头', width: 180, render: (_v, r, i) => fillable(i, 'bl_head', <Select size="small" value={r.bl_head || undefined} options={BL_HEAD_LIST.map(v => ({ value: v, label: v }))} onChange={(v) => patchItem(i, 'bl_head', v)} style={{ width: '100%' }} allowClear />) },
               { title: '箱数', width: 70, render: (_v, r, i) => fillable(i, 'cartons', <InputNumber size="small" controls={false} min={0} value={r.cartons} onChange={(v) => patchItem(i, 'cartons', v ?? 0)} style={{ width: '100%' }} />) },
-              { title: '每箱数量', width: 190, render: (_v, r, i) => fillable(i, 'qty_per_carton', <Input size="small" value={r.qty_per_carton} placeholder="3000 或 1-2/3000 3/4000" title="可填统一数量 3000，或按箱号分段：1-2/3000 3/4000" onChange={(e) => patchQtyOrPack(i, 'qty_per_carton', e.target.value)} />) },
+              { title: '每箱数量', width: 190, render: (_v, r, i) => fillable(i, 'qty_per_carton', <Input.TextArea size="small" autoSize={{ minRows: 1, maxRows: 4 }} value={r.qty_per_carton} placeholder={'3000 或 1-2/3000\n3/4000'} title="可填统一数量 3000，或按箱号分段：1-2/3000 3/4000" onChange={(e) => patchQtyOrPack(i, 'qty_per_carton', e.target.value)} onBlur={(e) => { const formatted = formatShipmentPackingLines(e.target.value); if (formatted !== e.target.value) patchQtyOrPack(i, 'qty_per_carton', formatted) }} style={{ resize: 'none' }} />) },
               { title: '卡板', width: 110, render: (_v, r, i) => fillable(i, 'pallet', <Input size="small" value={r.pallet} placeholder="1-22/2卡" onChange={(e) => patchItem(i, 'pallet', e.target.value)} />) },
               { title: '长', width: 90, render: (_v, r, i) => fillableMaterial(i, 'length', <InputNumber size="small" controls={false} min={0} step={0.0001} value={matMap.get(r.material_id!)?.length} onChange={(v) => patchMatDim(r.material_id, 'length', v ?? 0)} style={{ width: '100%' }} />) },
               { title: '宽', width: 90, render: (_v, r, i) => fillableMaterial(i, 'width', <InputNumber size="small" controls={false} min={0} step={0.0001} value={matMap.get(r.material_id!)?.width} onChange={(v) => patchMatDim(r.material_id, 'width', v ?? 0)} style={{ width: '100%' }} />) },

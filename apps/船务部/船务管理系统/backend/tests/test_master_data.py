@@ -56,7 +56,7 @@ class ProductMappingTest(TestCase):
         assert pm.product_name == '冰箱迷你球'
 
     def test_export_csv_honors_customer_filter_and_keeps_variants(self):
-        ProductMapping.objects.create(
+        first = ProductMapping.objects.create(
             customer_name='ZURU', product_code='15754', product_name='明星系列4个/箱',
             qty_per_box=4, gross_weight_per_box=1.030, net_weight_per_box=0.500,
         )
@@ -73,7 +73,8 @@ class ProductMappingTest(TestCase):
         content = response.content.decode('utf-8-sig')
 
         assert response.status_code == 200
-        assert '客户,货号,货名,每箱个数' in content
+        assert '记录ID,客户,货号,货名,每箱个数' in content
+        assert str(first.id) in content
         assert '明星系列4个/箱,4' in content
         assert '明星系列8个/箱,8' in content
         assert 'OTHER' not in content

@@ -895,14 +895,24 @@ async function deleteSelectedOrders(ids: string[], description: string) {
   const targets = [...new Set(ids)].filter((id) => eligible.has(id))
   if (!targets.length) return
   const unsaved = targets.filter((id) => dirtyRowIds.value.has(id)).length
-  if (!confirm(`确定删除${description}共 ${targets.length} 条订单记录？此操作不可恢复。${unsaved ? `\n其中 ${unsaved} 条有尚未保存的修改，将一并删除。` : ''}`)) return
   const owner = auth.userId
   const token = pb.authStore.token
-  const record = pb.authStore.record
+  // LocalAuthStore parses storage on every read, so record object identity is not stable.
+  const sessionIdentity = () => {
+    const record = pb.authStore.record
+    return JSON.stringify([record?.id, record?.role, record?.craft, record?.crafts, record?.permissions])
+  }
+  const session = sessionIdentity()
   const scopeCraft = craft.value
   const scopeRegion = region.value
-  const sameContext = () => active && auth.userId === owner && pb.authStore.record === record && pb.authStore.token === token
-    && craft.value === scopeCraft && region.value === scopeRegion
+  const samePage = () => active && auth.userId === owner && craft.value === scopeCraft && region.value === scopeRegion
+  const sameContext = () => samePage() && pb.authStore.record?.id === owner
+    && sessionIdentity() === session && pb.authStore.token === token
+  const showSessionChange = () => {
+    if (samePage()) deleteResult.value = { error: true, message: '登录状态已变化，批量删除已停止。请刷新页面核对结果后重试。' }
+  }
+  if (!confirm(`确定删除${description}共 ${targets.length} 条订单记录？此操作不可恢复。${unsaved ? `\n其中 ${unsaved} 条有尚未保存的修改，将一并删除。` : ''}`)) return
+  if (!sameContext()) { showSessionChange(); return }
   deletingOrders.value = true
   deleteCompleted.value = 0
   deleteTotal.value = targets.length
@@ -913,7 +923,7 @@ async function deleteSelectedOrders(ids: string[], description: string) {
       shouldContinue: () => sameContext() && !!auth.role && canEditOrders(auth.role) && canViewCraft(scopeCraft)
         && (!scopeRegion || allowedRegions(auth.role).includes(scopeRegion)),
     })
-    if (!sameContext()) return
+    if (!sameContext()) { showSessionChange(); return }
     const deleted = new Set(result.deletedIds)
     // Remove confirmed successes even if the subsequent refresh fails; failed drafts stay intact.
     orders.items = orders.items.filter((order) => !deleted.has(order.id))
@@ -932,6 +942,7 @@ async function deleteSelectedOrders(ids: string[], description: string) {
       try { await loadScope(true) } catch { refreshFailed = true; parts.push('列表刷新失败，请点击重试') }
     }
     if (sameContext()) deleteResult.value = { error: !!(result.failedIds.length || result.skippedIds.length || refreshFailed), message: parts.join('，') }
+    else showSessionChange()
   } finally {
     deletingOrders.value = false
   }

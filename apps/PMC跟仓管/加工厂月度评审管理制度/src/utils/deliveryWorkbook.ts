@@ -1,6 +1,6 @@
 import * as XLSX from 'xlsx'
 import type { ReportRow } from './deliveryStats'
-import { DELIVERY_HEADERS, deliveryHeaders, splitSewingContractItemNo, type DeliveryPricingMode } from './deliveryReportFormat'
+import { DELIVERY_HEADERS, deliveryHeaders, isRmbTaxPricingMode, splitSewingContractItemNo, type DeliveryPricingMode } from './deliveryReportFormat'
 
 // 导出交货延期统计表 Excel(标题行 + 合并单元格)
 export function createDeliveryWorkbook(
@@ -29,6 +29,10 @@ export function createDeliveryWorkbook(
       taxPointIndex++
     }
     if (pricingMode !== 'hkd-tax') visible.splice(taxPointIndex, 1)
+    if (pricingMode === 'hunan-rmb-tax') {
+      // Hunan keeps only the tax-inclusive outsource price in both the UI and Excel.
+      visible.splice(H.indexOf('外发工价(人民币含税)'), 1)
+    }
     return visible
   }
   const titleRow = new Array(H.length).fill('')
@@ -60,7 +64,7 @@ export function createDeliveryWorkbook(
   })
   const ws = XLSX.utils.aoa_to_sheet([titleRow, H, ...body])
   ws['!merges'] = merges
-  const hkdOutPriceColumn = pricingMode === 'rmb-tax' ? -1 : H.indexOf('外发工价(港币不含税$)')
+  const hkdOutPriceColumn = isRmbTaxPricingMode(pricingMode) ? -1 : H.indexOf('外发工价(港币不含税$)')
   if (hkdOutPriceColumn >= 0) {
     for (let row = 2; row < body.length + 2; row++) {
       const cell = ws[XLSX.utils.encode_cell({ r: row, c: hkdOutPriceColumn })]

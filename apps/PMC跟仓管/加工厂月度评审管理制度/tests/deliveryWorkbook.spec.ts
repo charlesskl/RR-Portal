@@ -21,7 +21,7 @@ const orders: Order[] = [
 
 describe('delivery workbook', () => {
   it.each([false, true].flatMap((mold) => [false, true].flatMap((contract) =>
-    (['hkd', 'rmb-tax', 'hkd-tax'] as DeliveryPricingMode[]).map((mode) => ({ mold, contract, mode })),
+    (['hkd', 'rmb-tax', 'hunan-rmb-tax', 'hkd-tax'] as DeliveryPricingMode[]).map((mode) => ({ mold, contract, mode })),
   )))('retains column alignment, amounts, and merges ($mold, $contract, $mode)', ({ mold, contract, mode }) => {
     const rows = buildDeliveryReport(orders, '东莞厂区 · 注塑部', () => '工厂甲', mode, () => 1.13)
     const workbook = createDeliveryWorkbook(rows, '交货延期统计', mold, contract, mode)
@@ -62,6 +62,12 @@ describe('delivery workbook', () => {
     if (mode === 'rmb-tax') {
       expect(value(2, '外发工价(不含税RMB)')).toBe(1)
       expect(value(2, '税点')).toBe(1.13)
+      expect(headers).not.toContain('换算汇率')
+    } else if (mode === 'hunan-rmb-tax') {
+      expect(value(2, '核价工价(人民币含税)')).toBe(2)
+      expect(value(2, '外发工价(人民币含税)')).toBe(1.13)
+      expect(value(2, '税点')).toBe(1.13)
+      expect(headers).not.toContain('外发工价(不含税RMB)')
       expect(headers).not.toContain('换算汇率')
     } else {
       const priceColumn = headers.indexOf('外发工价(港币不含税$)')

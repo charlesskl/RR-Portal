@@ -70,6 +70,24 @@ function selectOrder(product: string) {
 }
 
 describe('department delivery table', () => {
+  it('湖南所有部门只显示含税人民币核价和含税外发工价', async () => {
+    state.route.query.region = 'hunan'
+    state.factories.items[0].region = 'hunan'
+    for (const order of state.orders.items) {
+      order.region = 'hunan'
+      order.expand!.factory!.region = 'hunan'
+    }
+    wrapper = mount(DeptOrdersView)
+    await flushPromises()
+
+    const headers = wrapper.findAll('.report thead th').map((header) => header.text())
+    expect(headers).toContain('核价工价(人民币含税)')
+    expect(headers).toContain('外发工价(人民币含税)')
+    expect(headers).not.toContain('核价工价(不含税RMB)')
+    expect(headers).not.toContain('外发工价(不含税RMB)')
+    expect(wrapper.find('.report tbody tr').findAll('td')).toHaveLength(headers.length)
+  })
+
   it('可编辑下单时间和下单交货时间，并按新交货日重算延期', async () => {
     state.orders.items[0].actual_delivery_date = '2026-09-10'
     wrapper = mount(DeptOrdersView)

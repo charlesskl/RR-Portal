@@ -5,8 +5,12 @@ export const DELIVERY_HEADERS = [
   '核价工价(港币不含税$)', '外发工价(港币不含税$)', '外发工价(人民币含税)', '换算汇率', '占比', '备注',
 ]
 
-/** Price columns differ by region: Hunan keeps RMB, while selected Dongguan departments show both FX and tax point. */
-export type DeliveryPricingMode = 'hkd' | 'rmb-tax' | 'hkd-tax'
+/** Price columns differ by region: Hunan uses tax-inclusive RMB, while sewing/electronics retain untaxed RMB. */
+export type DeliveryPricingMode = 'hkd' | 'rmb-tax' | 'hunan-rmb-tax' | 'hkd-tax'
+
+export function isRmbTaxPricingMode(mode: DeliveryPricingMode): boolean {
+  return mode === 'rmb-tax' || mode === 'hunan-rmb-tax'
+}
 
 export function deliveryHeaders(
   includeMoldNumber = true,
@@ -15,13 +19,18 @@ export function deliveryHeaders(
 ) {
   let headers = DELIVERY_HEADERS.filter((header) => includeMoldNumber || header !== '模具编号')
   if (includeContractNumber) headers.splice(headers.indexOf('货号'), 0, '合同号')
-  if (pricingMode === 'rmb-tax') {
+  if (isRmbTaxPricingMode(pricingMode)) {
     headers = headers.map((header) => {
-      if (header === '核价工价(港币不含税$)') return '核价工价(不含税RMB)'
+      if (header === '核价工价(港币不含税$)') {
+        return pricingMode === 'hunan-rmb-tax' ? '核价工价(人民币含税)' : '核价工价(不含税RMB)'
+      }
       if (header === '外发工价(港币不含税$)') return '外发工价(不含税RMB)'
       if (header === '换算汇率') return '税点'
       return header
     })
+    if (pricingMode === 'hunan-rmb-tax') {
+      headers = headers.filter((header) => header !== '外发工价(不含税RMB)')
+    }
   } else if (pricingMode === 'hkd-tax') {
     headers.splice(headers.indexOf('换算汇率') + 1, 0, '税点')
   }

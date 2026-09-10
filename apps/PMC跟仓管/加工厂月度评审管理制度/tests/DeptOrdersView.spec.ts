@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount, flushPromises, type VueWrapper } from '@vue/test-utils'
 import { reactive } from 'vue'
+import { LocalAuthStore } from 'pocketbase'
 import type { Order } from '../src/types/order'
 
 const state = vi.hoisted(() => ({ orders: null as any, factories: null as any, route: null as any, auth: null as any, sdkAuth: null as any, exportExcel: vi.fn(), beforeRouteUpdate: vi.fn(), beforeRouteLeave: vi.fn() }))
@@ -25,10 +26,18 @@ import DeptOrdersView from '../src/views/DeptOrdersView.vue'
 let wrapper: VueWrapper | undefined
 beforeEach(() => {
   vi.clearAllMocks()
-  vi.stubGlobal('localStorage', { getItem: vi.fn().mockReturnValue(null), setItem: vi.fn() })
+  // Every SDK/storage read stays inside this test's in-memory map. Never use
+  // the default PocketBase storage key or any real user's browser storage.
+  const storage = new Map<string, string>()
+  vi.stubGlobal('localStorage', {
+    getItem: vi.fn((key: string) => storage.get(key) ?? null),
+    setItem: vi.fn((key: string, value: string) => { storage.set(key, value) }),
+    removeItem: vi.fn((key: string) => { storage.delete(key) }),
+  })
   state.route = reactive({ params: { craft: 'injection' }, query: { region: 'dongguan' } })
   state.auth = reactive({ role: 'admin', userId: 'admin' })
-  state.sdkAuth = reactive({ record: { id: 'admin' }, token: 'test-token' })
+  state.sdkAuth = new LocalAuthStore('dept-orders-component-test-auth')
+  state.sdkAuth.save('test-token', { id: 'admin', role: 'admin', permissions: {} })
   const items: Order[] = Array.from({ length: 205 }, (_, index) => ({
     id: `order-${index}`, factory: 'factory-1', region: 'dongguan', product: `物料-${index}`,
     pmc: 'PMC', quantity: 10, unit_price: 1, unit_price_cny_tax: 1.11, exchange_rate: 1,
@@ -163,6 +172,55 @@ describe('department delivery table', () => {
 })
 
 describe('factory filters and bulk order deletion', () => {
+  it('deletes all 96 selected records using the real LocalAuthStore session', async () => {
+    const confirm = vi.fn().mockReturnValue(true)
+    vi.stubGlobal('confirm', confirm)
+    state.orders.items = state.orders.items.slice(0, 96)
+    // LocalAuthStore deserializes on every read: equal values, distinct objects.
+    expect(state.sdkAuth.record).toEqual(state.sdkAuth.record)
+    expect(state.sdkAuth.record).not.toBe(state.sdkAuth.record)
+    wrapper = mount(DeptOrdersView)
+    await flushPromises()
+    await wrapper.find('[aria-label="选择本页订单"]').setValue(true)
+    expect(wrapper.find('.bulk-delete').text()).toBe('批量删除（96）')
+    await wrapper.find('.bulk-delete').trigger('click')
+    await flushPromises()
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('96'))
+    expect(state.orders.remove).toHaveBeenCalledTimes(96)
+    expect(new Set(state.orders.remove.mock.calls.map((call: any[]) => call[0])).size).toBe(96)
+    expect(state.orders.items).toHaveLength(0)
+    expect(wrapper.find('.delete-result').text()).toContain('已删除 96 条')
+  })
+
+  it('deletes one row using the real LocalAuthStore session', async () => {
+    vi.stubGlobal('confirm', vi.fn().mockReturnValue(true))
+    wrapper = mount(DeptOrdersView)
+    await flushPromises()
+    await button('删除').trigger('click')
+    await flushPromises()
+    expect(state.orders.remove).toHaveBeenCalledExactlyOnceWith('order-0')
+    expect(state.orders.items).toHaveLength(204)
+    expect(wrapper.find('.delete-result').text()).toContain('已删除 1 条')
+  })
+
+  it.each(['account', 'permissions'] as const)('does not start deletion if SDK %s changes while confirmation is open', async (change) => {
+    vi.stubGlobal('confirm', vi.fn(() => {
+      const record = state.sdkAuth.record
+      state.sdkAuth.save(state.sdkAuth.token, change === 'account'
+        ? { ...record, id: 'another-admin' }
+        : { ...record, permissions: { 'orders.edit': false } })
+      return true
+    }))
+    wrapper = mount(DeptOrdersView)
+    await flushPromises()
+    await selectOrder('物料-0').setValue(true)
+    await wrapper.find('.bulk-delete').trigger('click')
+    await flushPromises()
+    expect(state.orders.remove).not.toHaveBeenCalled()
+    expect(state.orders.items).toHaveLength(205)
+    expect(wrapper.find('.delete-result').text()).toBe('登录状态已变化，批量删除已停止。请刷新页面核对结果后重试。')
+  })
+
   it('uses the order management region for factory choices and exports the complete factory/date/search intersection', async () => {
     // Factory B is based in Hunan, but these orders are managed in Dongguan.
     state.factories.items.push(
@@ -383,7 +441,7 @@ describe('factory filters and bulk order deletion', () => {
     expect(wrapper.find('.delete-result').exists()).toBe(false)
   })
 
-  it.each(['record', 'token'] as const)('stops queued deletions when only the SDK %s changes before Pinia updates', async (changedField) => {
+  it.each(['record', 'token', 'permissions'] as const)('stops queued deletions when only the SDK %s changes before Pinia updates', async (changedField) => {
     vi.stubGlobal('confirm', vi.fn().mockReturnValue(true))
     const finishRequests: Array<() => void> = []
     state.orders.remove.mockImplementation(() => new Promise<boolean>((resolve) => {
@@ -394,8 +452,9 @@ describe('factory filters and bulk order deletion', () => {
     for (let index = 0; index < 6; index++) await selectOrder(`物料-${index}`).setValue(true)
     await wrapper.find('.bulk-delete').trigger('click')
     expect(state.orders.remove.mock.calls.map((call: any[]) => call[0])).toEqual(['order-0', 'order-1', 'order-2'])
-    if (changedField === 'record') state.sdkAuth.record = { id: 'another-admin' }
-    else state.sdkAuth.token = 'another-token'
+    if (changedField === 'record') state.sdkAuth.save(state.sdkAuth.token, { ...state.sdkAuth.record, id: 'another-admin' })
+    else if (changedField === 'token') state.sdkAuth.save('another-token', state.sdkAuth.record)
+    else state.sdkAuth.save(state.sdkAuth.token, { ...state.sdkAuth.record, permissions: { 'orders.edit': false } })
     await flushPromises()
     expect(state.auth.userId).toBe('admin')
     const loadsAfterSdkChange = state.orders.fetchForScope.mock.calls.length
@@ -404,6 +463,6 @@ describe('factory filters and bulk order deletion', () => {
     expect(state.orders.remove).toHaveBeenCalledTimes(3)
     expect(state.orders.remove.mock.calls.some((call: any[]) => ['order-3', 'order-4', 'order-5'].includes(call[0]))).toBe(false)
     expect(state.orders.fetchForScope).toHaveBeenCalledTimes(loadsAfterSdkChange)
-    expect(wrapper.find('.delete-result').exists()).toBe(false)
+    expect(wrapper.find('.delete-result').text()).toBe('登录状态已变化，批量删除已停止。请刷新页面核对结果后重试。')
   })
 })

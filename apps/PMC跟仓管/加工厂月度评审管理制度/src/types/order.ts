@@ -1,6 +1,8 @@
 export type OrderStatus = 'placed' | 'producing' | 'delivered' | 'cancelled' | 'returned'
 export interface Order {
   id: string
+  created?: string
+  updated?: string
   factory: string
   region?: 'dongguan' | 'hunan' | 'heyuan'
   process?: string

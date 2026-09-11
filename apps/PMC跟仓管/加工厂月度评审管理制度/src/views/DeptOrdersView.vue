@@ -8,7 +8,7 @@ import { useAuthStore } from '../stores/auth'
 import { pb } from '../pb'
 import { CRAFT_LABELS, REGION_LABELS, regionOf, type Craft, type Region } from '../constants/roles'
 import { canEditOrders, canImportOrdersForScope, allowedRegions, canViewCraft } from '../utils/permissions'
-import { buildDeliveryReport, deliveryHeaders, exportDeliveryExcel, formatHkdOutPrice, parseDeliveryImport, splitSewingContractItemNo, type DeliveryPricingMode, type ReportRow, type DetailRow } from '../utils/deliveryStats'
+import { buildDeliveryReport, deliveryHeaders, exportDeliveryExcel, formatHkdOutPrice, isRmbTaxPricingMode, parseDeliveryImport, splitSewingContractItemNo, type DeliveryPricingMode, type ReportRow, type DetailRow } from '../utils/deliveryStats'
 import { readDeliveryPdfAsAoa } from '../utils/pdfDeliveryImport'
 import { parseDeliveryExcelFiles, UNMATCHED_IMPORT_FACTORY_PREFIX } from '../utils/deliveryExcelImport'
 import { cnyTaxToHkdUntaxed, cnyTaxToUntaxedRmb, DEFAULT_CNY_TO_HKD_RATE } from '../utils/orderPricing'
@@ -20,6 +20,15 @@ import { orderRegion } from '../utils/orderRegion'
 import { paginateDeliveryReport } from '../utils/deliveryReportPagination'
 import type { Order } from '../types/order'
 import { deleteOrdersInBatches } from '../utils/bulkOrderDelete'
+import {
+  buildLatestQuoteByItemProduct,
+  buildLatestQuoteByMold,
+  historicalQuoteForItemProduct,
+  historicalQuoteForMold,
+  itemProductQuoteKey,
+  needsHistoricalQuote,
+  normalizeMoldNumber,
+} from '../utils/quoteLaborPriceHistory'
 
 const route = useRoute()
 const orders = useOrdersStore()
@@ -77,6 +86,7 @@ const rangeStart = ref('')
 const rangeEnd = ref('')
 const canEdit = computed(() => (auth.role ? canEditOrders(auth.role) : false))
 const canImport = computed(() => !!auth.role && canImportOrdersForScope(auth.role, craft.value, region.value))
+const ITEM_PRODUCT_QUOTE_CRAFTS = new Set<Craft>(['painting', 'assembly', 'sewing', 'electronics'])
 
 function requireImportPermission() {
   if (canImport.value) return true
@@ -159,6 +169,24 @@ const scopedOrders = computed(() => orders.items
   .filter((o) => scopedFactoryIds.value.has(o.factory))
   .filter((o) => !region.value || orderRegion(o) === region.value)
   .filter((o) => !myRegions.value || myRegions.value.includes(orderRegion(o))))
+const historicalQuotes = computed(() => buildLatestQuoteByMold(scopedOrders.value))
+const historicalItemProductQuotes = computed(() => buildLatestQuoteByItemProduct(scopedOrders.value, craft.value === 'sewing'))
+
+function autofillImportQuote(payload: Record<string, any>) {
+  if (!needsHistoricalQuote(payload['quote_labor_price'])) return payload
+  const price = craft.value === 'injection'
+    ? historicalQuoteForMold(historicalQuotes.value, payload['mold_no'])
+    : ITEM_PRODUCT_QUOTE_CRAFTS.has(craft.value)
+      ? historicalQuoteForItemProduct(
+          historicalItemProductQuotes.value,
+          payload['item_no'],
+          payload['product'],
+          craft.value === 'sewing',
+        )
+      : undefined
+  if (price != null) payload['quote_labor_price'] = price
+  return payload
+}
 // Use the order's management region, including factories physically located in another region.
 const factoryOptions = computed(() => {
   const names = new Map(factories.items.map((factory) => [factory.id, factory.name]))
@@ -190,11 +218,11 @@ function factoryTaxPoint(factoryId: string | null | undefined) {
 const isHunan = computed(() => region.value === 'hunan')
 const isDongguanTaxDept = computed(() => region.value === 'dongguan' && ['injection', 'painting', 'assembly'].includes(craft.value))
 const isDongguanRmbDept = computed(() => region.value === 'dongguan' && craft.value === 'electronics')
-// 湖南各部门、车缝部及东莞电子部按人民币未税展示；东莞注塑/喷油/装配保留港币列并同时显示工厂税点。
+// 湖南各部门按人民币含税展示；车缝部及东莞电子部保留人民币未税列。
 const pricingMode = computed<DeliveryPricingMode>(() =>
-  isHunan.value || craft.value === 'sewing' || isDongguanRmbDept.value ? 'rmb-tax' : isDongguanTaxDept.value ? 'hkd-tax' : 'hkd')
+  isHunan.value ? 'hunan-rmb-tax' : craft.value === 'sewing' || isDongguanRmbDept.value ? 'rmb-tax' : isDongguanTaxDept.value ? 'hkd-tax' : 'hkd')
 const usesFactoryTaxPoint = computed(() => pricingMode.value !== 'hkd')
-const reportOrders = computed(() => pricingMode.value === 'rmb-tax'
+const reportOrders = computed(() => isRmbTaxPricingMode(pricingMode.value)
   ? deptOrders.value.map((order) => ({
       ...order,
       exchange_rate: factoryTaxPoint(order.factory) ?? order.exchange_rate,
@@ -240,6 +268,9 @@ watch([deptOrders, pageLoading], ([value, loading]) => {
 const showMoldNumber = computed(() => craft.value === 'injection')
 const showContractNumber = computed(() => craft.value === 'sewing')
 const visibleHeaders = computed(() => deliveryHeaders(showMoldNumber.value, showContractNumber.value, pricingMode.value))
+const quotePriceHeader = computed(() => visibleHeaders.value.find((header) => header.startsWith('核价工价')) ?? '核价工价(港币不含税$)')
+const untaxedOutPriceHeader = computed(() => visibleHeaders.value.find((header) =>
+  header === '外发工价(港币不含税$)' || header === '外发工价(不含税RMB)') ?? '')
 
 const COLUMN_WIDTHS: Record<string, number> = {
   '范围': 140,
@@ -263,6 +294,7 @@ const COLUMN_WIDTHS: Record<string, number> = {
   '核价工价(港币不含税$)': 150,
   '外发工价(港币不含税$)': 150,
   '核价工价(不含税RMB)': 150,
+  '核价工价(人民币含税)': 160,
   '外发工价(不含税RMB)': 150,
   '外发工价(人民币含税)': 150,
   '换算汇率': 100,
@@ -445,6 +477,8 @@ type RowDraft = {
   mold_no: string
   product: string
   quantity: string
+  order_date: string
+  delivery_date: string
   actual_delivery_date: string
   quote_labor_price: string
   unit_price: string
@@ -456,6 +490,8 @@ const drafts = ref<Record<string, RowDraft>>({})
 const dirtyRowIds = ref<Set<string>>(new Set())
 // Keep the source row for edits hidden by filters or pagination until saved.
 const draftRows = new Map<string, DetailRow>()
+const manuallyEditedQuoteRows = new Set<string>()
+const autoFilledQuoteRows = new Map<string, string>()
 const dirtyRowCount = computed(() => dirtyRowIds.value.size)
 
 function confirmLeaveDrafts() {
@@ -470,11 +506,13 @@ onBeforeRouteUpdate((to, from) => {
   drafts.value = {}
   draftRows.clear()
   dirtyRowIds.value.clear()
+  manuallyEditedQuoteRows.clear()
+  autoFilledQuoteRows.clear()
   return true
 })
 
 function convertedOutPrice(cnyTaxPrice: number, exchangeRate: number, taxPoint: number | null): number | undefined {
-  if (pricingMode.value === 'rmb-tax') return cnyTaxToUntaxedRmb(cnyTaxPrice, taxPoint ?? exchangeRate)
+  if (isRmbTaxPricingMode(pricingMode.value)) return cnyTaxToUntaxedRmb(cnyTaxPrice, taxPoint ?? exchangeRate)
   if (pricingMode.value === 'hkd-tax') {
     // 缺税点时不按 0 折算（会静默把工价写成 0），返回 undefined 让校验拦截并提示维护税点
     if (taxPoint == null) return undefined
@@ -486,7 +524,7 @@ function convertedOutPrice(cnyTaxPrice: number, exchangeRate: number, taxPoint: 
 function normalizeDeptPricing(payload: Record<string, any>) {
   const configuredTaxPoint = factoryTaxPoint(payload.factory)
   const cnyTaxPrice = Number(payload.unit_price_cny_tax)
-  if (pricingMode.value === 'rmb-tax' && configuredTaxPoint != null) {
+  if (isRmbTaxPricingMode(pricingMode.value) && configuredTaxPoint != null) {
     payload.exchange_rate = configuredTaxPoint
     if (Number.isFinite(cnyTaxPrice)) payload.unit_price = cnyTaxToUntaxedRmb(cnyTaxPrice, configuredTaxPoint)
   } else if (pricingMode.value === 'hkd-tax' && configuredTaxPoint != null && Number.isFinite(cnyTaxPrice)) {
@@ -504,7 +542,7 @@ async function importRows(aoa: any[][]) {
   if (!payloads.length && !failed) { alert('未识别到表头(需含「货号/物料名称」)'); return }
   let ok = 0, fail = failed
   for (const p of payloads) {
-    try { await orders.create(normalizeDeptPricing({ ...p, region: region.value, created_by: auth.userId ?? undefined }) as any); ok++ } catch { fail++ }
+    try { await orders.create(normalizeDeptPricing(autofillImportQuote({ ...p, region: region.value, created_by: auth.userId ?? undefined })) as any); ok++ } catch { fail++ }
   }
   await loadScope(true)
   alert(`导入完成：成功 ${ok} 条` + (fail ? `，失败 ${fail} 条(工厂名对不上或缺物料名称)` : '') + '\n(小计/合计行已自动跳过;加工厂名称需与系统一致)')
@@ -564,7 +602,7 @@ async function confirmExcelImport() {
     const p = { ...row.payload }
     if (p.quantity !== '' && p.quantity != null) p.quantity = Number(p.quantity)
     try {
-        await orders.create(normalizeDeptPricing({ ...p, region: region.value, created_by: auth.userId ?? undefined }) as any)
+        await orders.create(normalizeDeptPricing(autofillImportQuote({ ...p, region: region.value, created_by: auth.userId ?? undefined })) as any)
       ok++
     } catch (err: any) {
       failedRows.push(row)
@@ -621,9 +659,11 @@ function draftFromRow(row: DetailRow): RowDraft {
     mold_no: row.mold_no || '',
     product: row.product || '',
     quantity: priceInputValue(row.quantity),
+    order_date: row.order_date || '',
+    delivery_date: row.delivery_date || '',
     actual_delivery_date: row.actual_delivery_date || '',
     quote_labor_price: priceInputValue(row.quote),
-    unit_price: pricingMode.value === 'rmb-tax' ? priceInputValue(row.outPrice) : formatHkdOutPrice(row.outPrice),
+    unit_price: isRmbTaxPricingMode(pricingMode.value) ? priceInputValue(row.outPrice) : formatHkdOutPrice(row.outPrice),
     unit_price_cny_tax: priceInputValue(row.outPriceCnyTax),
     exchange_rate: priceInputValue(row.exchangeRate),
     notes: row.notes || '',
@@ -653,12 +693,53 @@ function setDraftValue(row: DetailRow, field: keyof RowDraft, value: string) {
   dirtyRowIds.value.add(row.id)
 }
 
+function setQuoteDraftValue(row: DetailRow, value: string) {
+  manuallyEditedQuoteRows.add(row.id)
+  autoFilledQuoteRows.delete(row.id)
+  setDraftValue(row, 'quote_labor_price', value)
+}
+
+function autofillRowQuote(row: DetailRow) {
+  if (manuallyEditedQuoteRows.has(row.id)) return
+  const draft = drafts.value[row.id] ?? pageDefaults.value.get(row.id) ?? draftFromRow(row)
+  const previousAutoFill = autoFilledQuoteRows.get(row.id)
+  let matchChanged = false
+  let price: number | undefined
+  let matchLabel = ''
+  if (craft.value === 'injection') {
+    matchChanged = normalizeMoldNumber(draft.mold_no) !== normalizeMoldNumber(row.mold_no)
+    price = historicalQuoteForMold(historicalQuotes.value, draft.mold_no)
+    matchLabel = '模具编号'
+  } else if (ITEM_PRODUCT_QUOTE_CRAFTS.has(craft.value)) {
+    const sewing = craft.value === 'sewing'
+    matchChanged = itemProductQuoteKey(row.item_no, draft.product, sewing) !== itemProductQuoteKey(row.item_no, row.product, sewing)
+    price = historicalQuoteForItemProduct(historicalItemProductQuotes.value, row.item_no, draft.product, sewing)
+    matchLabel = '货号和物料名称'
+  } else {
+    return
+  }
+  if (!matchChanged && !needsHistoricalQuote(draft.quote_labor_price) && draft.quote_labor_price !== previousAutoFill) return
+  if (price == null) {
+    if (matchChanged || previousAutoFill != null) {
+      setDraftValue(row, 'quote_labor_price', '')
+      autoFilledQuoteRows.delete(row.id)
+    }
+    return
+  }
+  const value = String(price)
+  setDraftValue(row, 'quote_labor_price', value)
+  autoFilledQuoteRows.set(row.id, value)
+  showSaveToast('success', `已按${matchLabel}自动带出历史核价 ${value}`)
+}
+
 function clearSavedDraft(id: string, submittedDraft: RowDraft | undefined) {
   // Edits made while a save request was pending must remain unsaved drafts.
   if (drafts.value[id] !== submittedDraft) return
   delete drafts.value[id]
   draftRows.delete(id)
   dirtyRowIds.value.delete(id)
+  manuallyEditedQuoteRows.delete(id)
+  autoFilledQuoteRows.delete(id)
 }
 
 function parsePrice(val: string) {
@@ -703,7 +784,7 @@ function rowUpdateData(row: DetailRow): { data?: Partial<any>; error?: string } 
   const unitPriceCnyTax = parsePrice(draft.unit_price_cny_tax)
   const source = sourceOrder(row)
   const taxPoint = factoryTaxPoint(source?.factory)
-  const exchangeRate = pricingMode.value === 'rmb-tax' ? taxPoint : parsePrice(draft.exchange_rate)
+  const exchangeRate = isRmbTaxPricingMode(pricingMode.value) ? taxPoint : parsePrice(draft.exchange_rate)
   const unitPrice = unitPriceCnyTax != null && exchangeRate != null
     ? convertedOutPrice(unitPriceCnyTax, exchangeRate, taxPoint)
     : enteredUnitPrice
@@ -724,6 +805,8 @@ function rowUpdateData(row: DetailRow): { data?: Partial<any>; error?: string } 
     mold_no: draft.mold_no.trim(),
     product,
     quantity,
+    order_date: draft.order_date ? new Date(draft.order_date).toISOString() : '',
+    delivery_date: draft.delivery_date ? new Date(draft.delivery_date).toISOString() : '',
     actual_delivery_date: draft.actual_delivery_date ? new Date(draft.actual_delivery_date).toISOString() : '',
     quote_labor_price: quote,
     unit_price: unitPrice,
@@ -734,8 +817,8 @@ function rowUpdateData(row: DetailRow): { data?: Partial<any>; error?: string } 
       ? null
       : quantity * (unitPriceCnyTax ?? unitPrice!),
   }
-  if (draft.actual_delivery_date && row.delivery_date) {
-    const days = Math.round((new Date(draft.actual_delivery_date).getTime() - new Date(row.delivery_date).getTime()) / 86400000)
+  if (draft.actual_delivery_date && draft.delivery_date) {
+    const days = Math.round((new Date(draft.actual_delivery_date).getTime() - new Date(draft.delivery_date).getTime()) / 86400000)
     data.delay_days = days > 0 ? days : 0
     data.is_delayed = days > 0
   } else {
@@ -821,7 +904,7 @@ async function copyRow(row: DetailRow) {
   const enteredUnitPrice = parsePrice(draft.unit_price)
   const unitPriceCnyTax = parsePrice(draft.unit_price_cny_tax)
   const taxPoint = factoryTaxPoint(source.factory)
-  const exchangeRate = pricingMode.value === 'rmb-tax' ? taxPoint : parsePrice(draft.exchange_rate)
+  const exchangeRate = isRmbTaxPricingMode(pricingMode.value) ? taxPoint : parsePrice(draft.exchange_rate)
   const unitPrice = unitPriceCnyTax != null && exchangeRate != null
     ? convertedOutPrice(unitPriceCnyTax, exchangeRate, taxPoint)
     : enteredUnitPrice
@@ -1157,14 +1240,18 @@ async function removeSelectedRows() {
                 </td>
                 <td v-if="showMoldNumber" :class="columnClassFor('模具编号')" :style="columnStyleFor('模具编号')">
                   <input v-if="canEdit" :disabled="deletingOrders" class="mold-no-inp" :value="draftValue(r, 'mold_no')"
-                    @input="setDraftValue(r, 'mold_no', ($event.target as HTMLInputElement).value)" />
+                    title="修改后会按相同模具编号自动带出最近历史核价"
+                    @input="setDraftValue(r, 'mold_no', ($event.target as HTMLInputElement).value)"
+                    @change="autofillRowQuote(r)" />
                   <span v-else>{{ r.mold_no || '-' }}</span>
                 </td>
                 <td :class="columnClassFor('订单号')" :style="columnStyleFor('订单号')">{{ r.order_no || '-' }}</td>
                 <td :class="columnClassFor('加工类别')" :style="columnStyleFor('加工类别')">{{ r.category || '-' }}</td>
                 <td :class="columnClassFor('物料名称')" :style="columnStyleFor('物料名称')">
                   <input v-if="canEdit" :disabled="deletingOrders" class="text-inp" :value="draftValue(r, 'product')"
-                    @input="setDraftValue(r, 'product', ($event.target as HTMLInputElement).value)" />
+                    :title="ITEM_PRODUCT_QUOTE_CRAFTS.has(craft) ? '修改后会按相同货号和物料名称自动带出最近历史核价' : undefined"
+                    @input="setDraftValue(r, 'product', ($event.target as HTMLInputElement).value)"
+                    @change="autofillRowQuote(r)" />
                   <span v-else>{{ r.product || '-' }}</span>
                 </td>
                 <td :class="columnClassFor('数量')" :style="columnStyleFor('数量')">
@@ -1172,8 +1259,16 @@ async function removeSelectedRows() {
                     @input="setDraftValue(r, 'quantity', ($event.target as HTMLInputElement).value)" />
                   <span v-else>{{ r.quantity ?? '-' }}</span>
                 </td>
-                <td :class="columnClassFor('下单时间')" :style="columnStyleFor('下单时间')">{{ r.order_date || '-' }}</td>
-                <td :class="columnClassFor('下单交货时间')" :style="columnStyleFor('下单交货时间')">{{ r.delivery_date || '-' }}</td>
+                <td :class="columnClassFor('下单时间')" :style="columnStyleFor('下单时间')">
+                  <input v-if="canEdit" :disabled="deletingOrders" type="date" class="date-inp order-date-inp" :value="draftValue(r, 'order_date')"
+                    @input="setDraftValue(r, 'order_date', ($event.target as HTMLInputElement).value)" />
+                  <span v-else>{{ r.order_date || '-' }}</span>
+                </td>
+                <td :class="columnClassFor('下单交货时间')" :style="columnStyleFor('下单交货时间')">
+                  <input v-if="canEdit" :disabled="deletingOrders" type="date" class="date-inp delivery-date-inp" :value="draftValue(r, 'delivery_date')"
+                    @input="setDraftValue(r, 'delivery_date', ($event.target as HTMLInputElement).value)" />
+                  <span v-else>{{ r.delivery_date || '-' }}</span>
+                </td>
                 <td :class="columnClassFor('实际交货时间')" :style="columnStyleFor('实际交货时间')">
                   <input v-if="canEdit" :disabled="deletingOrders" type="date" class="date-inp" :value="draftValue(r, 'actual_delivery_date')"
                     @input="setDraftValue(r, 'actual_delivery_date', ($event.target as HTMLInputElement).value)" />
@@ -1184,18 +1279,18 @@ async function removeSelectedRows() {
                 <td :class="columnClassFor('延期单数')" :style="columnStyleFor('延期单数')">{{ r.delayedCount }}</td>
                 <td :class="columnClassFor('占比', 0)" :style="columnStyleFor('占比', 0)">{{ r.delayRatio }}</td>
                 <td :class="columnClassFor('延期平均天数')" :style="columnStyleFor('延期平均天数')">{{ r.delayAvg }}</td>
-                <td :class="columnClassFor(visibleHeaders[columnIndex('核价工价(港币不含税$)')] ? '核价工价(港币不含税$)' : '核价工价(不含税RMB)')" :style="columnStyleFor(visibleHeaders[columnIndex('核价工价(港币不含税$)')] ? '核价工价(港币不含税$)' : '核价工价(不含税RMB)')">
+                <td :class="columnClassFor(quotePriceHeader)" :style="columnStyleFor(quotePriceHeader)">
                   <input v-if="canEdit" :disabled="deletingOrders" type="number" class="price-inp" min="0" step="0.0001"
                     :value="draftValue(r, 'quote_labor_price')"
-                    @input="setDraftValue(r, 'quote_labor_price', ($event.target as HTMLInputElement).value)" />
+                    @input="setQuoteDraftValue(r, ($event.target as HTMLInputElement).value)" />
                   <span v-else>{{ r.quote }}</span>
                 </td>
-                <td :class="columnClassFor(visibleHeaders[columnIndex('外发工价(港币不含税$)')] ? '外发工价(港币不含税$)' : '外发工价(不含税RMB)')" :style="columnStyleFor(visibleHeaders[columnIndex('外发工价(港币不含税$)')] ? '外发工价(港币不含税$)' : '外发工价(不含税RMB)')">
+                <td v-if="untaxedOutPriceHeader" :class="columnClassFor(untaxedOutPriceHeader)" :style="columnStyleFor(untaxedOutPriceHeader)">
                   <input v-if="canEdit" :disabled="deletingOrders" type="number" class="price-inp" min="0" step="0.001"
-                    :readonly="pricingMode === 'rmb-tax' || pricingMode === 'hkd-tax'"
+                    :readonly="isRmbTaxPricingMode(pricingMode) || pricingMode === 'hkd-tax'"
                     :value="draftValue(r, 'unit_price')"
                     @input="setDraftValue(r, 'unit_price', ($event.target as HTMLInputElement).value)" />
-                  <span v-else>{{ pricingMode === 'rmb-tax' ? r.outPrice : formatHkdOutPrice(r.outPrice) }}</span>
+                  <span v-else>{{ isRmbTaxPricingMode(pricingMode) ? r.outPrice : formatHkdOutPrice(r.outPrice) }}</span>
                 </td>
                 <td :class="columnClassFor('外发工价(人民币含税)')" :style="columnStyleFor('外发工价(人民币含税)')">
                   <input v-if="canEdit" :disabled="deletingOrders" type="number" class="price-inp" min="0" step="0.01"
@@ -1203,9 +1298,9 @@ async function removeSelectedRows() {
                     @input="setDraftValue(r, 'unit_price_cny_tax', ($event.target as HTMLInputElement).value)" />
                   <span v-else>{{ r.outPriceCnyTax }}</span>
                 </td>
-                <td :class="columnClassFor(pricingMode === 'rmb-tax' ? '税点' : '换算汇率')" :style="columnStyleFor(pricingMode === 'rmb-tax' ? '税点' : '换算汇率')">
+                <td :class="columnClassFor(isRmbTaxPricingMode(pricingMode) ? '税点' : '换算汇率')" :style="columnStyleFor(isRmbTaxPricingMode(pricingMode) ? '税点' : '换算汇率')">
                   <input v-if="canEdit" :disabled="deletingOrders" type="number" class="rate-inp" min="0.0001" step="0.01"
-                    :readonly="pricingMode === 'rmb-tax'"
+                    :readonly="isRmbTaxPricingMode(pricingMode)"
                     :value="draftValue(r, 'exchange_rate')"
                     @input="setDraftValue(r, 'exchange_rate', ($event.target as HTMLInputElement).value)" />
                   <span v-else>{{ r.exchangeRate }}</span>

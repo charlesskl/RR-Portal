@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { RouterLink } from 'vue-router'
+import { RouterLink, useRoute } from 'vue-router'
 import AppLayout from '../components/AppLayout.vue'
 import { useFactoriesStore, filterByCraft } from '../stores/factories'
 import { useScoresStore } from '../stores/scores'
@@ -8,6 +8,12 @@ import { useScoreTemplatesStore } from '../stores/scoreTemplates'
 import { useAuthStore } from '../stores/auth'
 import { pb } from '../pb'
 import { filterMonthlyScoringData, mergeAutomaticScores } from '../utils/monthlyAutoScoring'
+import {
+  monthsInScoringRange,
+  resolveScoringRange,
+  summarizeFactoryScores,
+  type ScoringRangeMode,
+} from '../utils/scoringDateRange'
 import { allowedCrafts, allowedRegions } from '../utils/permissions'
 import { CRAFT_LABELS, REGION_LABELS, regionOf, REGIONS, type Craft, type Region } from '../constants/roles'
 import type { MonthlyScore } from '../types/score'
@@ -15,7 +21,9 @@ import type { Order } from '../types/order'
 import type { QualityInspection } from '../types/qualityInspection'
 import type { Quality5sCheck } from '../types/quality5s'
 
-const month = ref(new Date().toISOString().slice(0, 7))
+const route = useRoute()
+const requestedMonth = String(route.query.month ?? '')
+const month = ref(/^\d{4}-\d{2}$/.test(requestedMonth) ? requestedMonth : new Date().toISOString().slice(0, 7))
 const factories = useFactoriesStore()
 const scores = useScoresStore()
 const templates = useScoreTemplatesStore()
@@ -23,6 +31,10 @@ const auth = useAuthStore()
 const deptFilter = ref('')
 const regionFilter = ref<Region | ''>('')
 const search = ref('')
+const rangeMode = ref<ScoringRangeMode>('month')
+const customStart = ref(month.value)
+const customEnd = ref(month.value)
+const loadingScores = ref(false)
 const autoScoring = ref(false)
 const autoProgress = ref('')
 const myRegions = computed(() => (auth.role ? allowedRegions(auth.role) : REGIONS))
@@ -32,10 +44,23 @@ const statusLabel: Record<string, string> = { draft: '草稿', submitted: '已�
 const flagLabel: Record<string, string> = { yellow: '黄牌', red: '红牌' }
 const formatScore = (value: number) => value.toFixed(2)
 
-const scoreByFactory = computed(() => {
+const selectedRange = computed(() => resolveScoringRange(rangeMode.value, month.value, customStart.value, customEnd.value))
+const rangeMonthCount = computed(() => monthsInScoringRange(selectedRange.value))
+const isRange = computed(() => rangeMode.value !== 'month')
+const rangeLabel = computed(() => selectedRange.value.start === selectedRange.value.end
+  ? selectedRange.value.start
+  : `${selectedRange.value.start} 至 ${selectedRange.value.end}`)
+
+const monthlyScoreByFactory = computed(() => {
   const m: Record<string, MonthlyScore> = {}
   for (const s of scores.items) m[s.factory] = s
   return m
+})
+
+const scoreByFactory = computed(() => {
+  const grouped: Record<string, MonthlyScore[]> = {}
+  for (const score of scores.items) (grouped[score.factory] ??= []).push(score)
+  return Object.fromEntries(Object.entries(grouped).map(([factoryId, values]) => [factoryId, summarizeFactoryScores(values)]))
 })
 
 const rows = computed(() => {
@@ -46,8 +71,8 @@ const rows = computed(() => {
   const query = search.value.trim().toLowerCase()
   if (query) list = list.filter((f) => f.name.toLowerCase().includes(query))
   return [...list].sort((a, b) => {
-    const aScore = scoreByFactory.value[a.id]?.total_score
-    const bScore = scoreByFactory.value[b.id]?.total_score
+    const aScore = scoreByFactory.value[a.id]?.totalScore
+    const bScore = scoreByFactory.value[b.id]?.totalScore
     if (aScore == null && bScore == null) return a.name.localeCompare(b.name, 'zh-CN')
     if (aScore == null) return 1
     if (bScore == null) return -1
@@ -56,7 +81,25 @@ const rows = computed(() => {
 })
 
 async function load() {
-  await Promise.all([factories.fetchAll(), scores.fetchByMonth(month.value), templates.fetchAll()])
+  const range = selectedRange.value
+  loadingScores.value = true
+  try {
+    await Promise.all([
+      factories.fetchAll(),
+      range.start === range.end ? scores.fetchByMonth(range.start) : scores.fetchByRange(range.start, range.end),
+      templates.fetchAll(),
+    ])
+  } finally {
+    loadingScores.value = false
+  }
+}
+
+function changeRangeMode() {
+  if (rangeMode.value === 'custom') {
+    customStart.value = selectedRange.value.start
+    customEnd.value = selectedRange.value.end
+  }
+  void load()
 }
 
 async function calculateMonthScores() {
@@ -68,7 +111,7 @@ async function calculateMonthScores() {
       pb.collection('quality_inspections').getFullList<QualityInspection>(),
       pb.collection('quality_5s_checks').getFullList<Quality5sCheck>(),
     ])
-    const existing = scoreByFactory.value
+    const existing = monthlyScoreByFactory.value
     let saved = 0
     let skipped = 0
     for (let index = 0; index < rows.value.length; index += 1) {
@@ -108,7 +151,7 @@ load()
     <div class="page">
       <div class="toolbar">
         <h2 style="margin:0">工厂月度评分</h2>
-        <span class="muted">{{ month }}</span>
+        <span class="muted">{{ rangeLabel }}</span>
         <span class="spacer"></span>
         <input v-model="search" class="factory-search" placeholder="搜索工厂名称" />
         <select v-model="regionFilter">
@@ -119,19 +162,37 @@ load()
           <option value="">全部部门</option>
           <option v-for="craft in allowedCrafts()" :key="craft" :value="craft">{{ CRAFT_LABELS[craft as Craft] }}</option>
         </select>
-        <label>月份 <input v-model="month" type="month" @change="load" /></label>
-        <button class="ghost" :disabled="autoScoring" @click="calculateMonthScores">
+        <select v-model="rangeMode" aria-label="评分时间范围" @change="changeRangeMode">
+          <option value="month">单月</option>
+          <option value="two_months">近2个月</option>
+          <option value="quarter">所在季度</option>
+          <option value="year">所在年度</option>
+          <option value="custom">自定义范围</option>
+        </select>
+        <template v-if="rangeMode === 'custom'">
+          <label class="range-month">从 <input v-model="customStart" type="month" aria-label="开始月份" @change="load" /></label>
+          <span class="muted">至</span>
+          <label class="range-month"><input v-model="customEnd" type="month" aria-label="结束月份" @change="load" /></label>
+        </template>
+        <label v-else>{{ rangeMode === 'month' ? '月份' : '基准月份' }} <input v-model="month" type="month" @change="load" /></label>
+        <button v-if="!isRange" class="ghost" :disabled="autoScoring || loadingScores" @click="calculateMonthScores">
           {{ autoScoring ? '自动评分中...' : '自动计算本月评分' }}
         </button>
       </div>
       <p v-if="autoProgress" class="auto-progress">{{ autoProgress }}</p>
       <table>
-        <thead><tr><th>工厂</th><th>部门</th><th>总分</th><th>等级</th><th>红黄牌</th><th>状态</th><th>操作</th></tr></thead>
+        <thead><tr><th>工厂</th><th>部门</th><th>{{ isRange ? '平均分' : '总分' }}</th><th>{{ isRange ? '综合等级' : '等级' }}</th><th>{{ isRange ? '最高牌级' : '红黄牌' }}</th><th>{{ isRange ? '评分月份' : '状态' }}</th><th>操作</th></tr></thead>
         <tbody>
           <tr v-for="f in rows" :key="f.id">
-            <td>{{ f.name }}</td>
+            <td>
+              <RouterLink
+                class="factory-data-link"
+                :to="`/factories/${f.id}/monthly-data/${selectedRange.end}`"
+                :title="`查看该工厂 ${selectedRange.end} 的货期和品质数据`"
+              >{{ f.name }}</RouterLink>
+            </td>
             <td class="muted">{{ CRAFT_LABELS[f.craft] }}</td>
-            <td><strong v-if="scoreByFactory[f.id]?.total_score != null">{{ formatScore(scoreByFactory[f.id].total_score!) }}</strong><span v-else class="muted">—</span></td>
+            <td><strong v-if="scoreByFactory[f.id]?.totalScore != null">{{ formatScore(scoreByFactory[f.id].totalScore!) }}</strong><span v-else class="muted">—</span></td>
             <td>
               <span v-if="scoreByFactory[f.id]?.grade" class="badge" :class="gradeCls[scoreByFactory[f.id].grade!]">{{ scoreByFactory[f.id].grade }}</span>
               <span v-else class="muted">—</span>
@@ -141,11 +202,14 @@ load()
               <span v-else class="muted">—</span>
             </td>
             <td>
-              <span class="badge" :class="scoreByFactory[f.id]?.status === 'approved' ? 'status-active' : scoreByFactory[f.id]?.status === 'submitted' ? 'badge-B' : 'status-eliminated'">
+              <span v-if="isRange" class="badge range-coverage" :title="`${rangeLabel} 共 ${rangeMonthCount} 个月`">
+                {{ scoreByFactory[f.id]?.monthsScored ?? 0 }}/{{ rangeMonthCount }}个月
+              </span>
+              <span v-else class="badge" :class="scoreByFactory[f.id]?.status === 'approved' ? 'status-active' : scoreByFactory[f.id]?.status === 'submitted' ? 'badge-B' : 'status-eliminated'">
                 {{ statusLabel[scoreByFactory[f.id]?.status ?? 'draft'] }}
               </span>
             </td>
-            <td><RouterLink :to="`/factories/${f.id}/score/${month}`"><button class="ghost mini">评分 →</button></RouterLink></td>
+            <td><RouterLink :to="`/factories/${f.id}/score/${selectedRange.end}`"><button class="ghost mini">{{ isRange ? '末月评分' : '评分' }} →</button></RouterLink></td>
           </tr>
           <tr v-if="!rows.length"><td colspan="7" class="hint" style="text-align:center">暂无工厂</td></tr>
         </tbody>
@@ -157,4 +221,9 @@ load()
 .mini { padding: .25rem .6rem; font-size: .8rem; }
 .auto-progress { margin: .6rem 0; color: var(--text-soft); font-size: .88rem; }
 .factory-search { width: 190px; min-width: 150px; }
+.factory-data-link { color: var(--primary, #4f46e5); font-weight: 600; text-decoration: none; }
+.factory-data-link:hover { text-decoration: underline; }
+.range-month { display: inline-flex; align-items: center; gap: .35rem; }
+.range-month input { width: 138px; }
+.range-coverage { background: #eef2ff; color: #4338ca; white-space: nowrap; }
 </style>

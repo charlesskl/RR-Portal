@@ -12,14 +12,14 @@ function isAdmin(user) {
 
 async function accessibleQuoteRows(user) {
   if (isAdmin(user)) {
-    return db.prepare('SELECT * FROM quotes WHERE factory_code = ? ORDER BY customer, id DESC')
+    return db.prepare('SELECT * FROM quotes WHERE factory_code = ? AND deleted_at IS NULL ORDER BY customer, id DESC')
       .all(user.active_factory_code);
   }
   const customers = (await db.prepare('SELECT customer FROM user_customers WHERE user_id = ?').all(user.id))
     .map(row => row.customer);
   if (!customers.length) return [];
   const placeholders = customers.map(() => '?').join(',');
-  return db.prepare(`SELECT * FROM quotes WHERE factory_code = ? AND customer IN (${placeholders}) ORDER BY customer, id DESC`)
+  return db.prepare(`SELECT * FROM quotes WHERE factory_code = ? AND deleted_at IS NULL AND customer IN (${placeholders}) ORDER BY customer, id DESC`)
     .all(user.active_factory_code, ...customers);
 }
 
@@ -62,13 +62,20 @@ router.put('/:id/confirmation', async (req, res) => {
   const access = await quoteAccess(req.user, id);
   if (access.status !== 200) return res.status(access.status).json({ error: access.status === 404 ? '报价单不存在' : '无权操作该报价单' });
   const body = req.body || {};
-  const status = body.status === 'confirmed' ? 'confirmed' : 'pending';
+  const existing = await db.prepare('SELECT * FROM quote_customer_confirmations WHERE quote_id = ?').get(id);
+  const status = Object.prototype.hasOwnProperty.call(body, 'status')
+    ? (body.status === 'confirmed' ? 'confirmed' : 'pending')
+    : (existing?.status === 'confirmed' ? 'confirmed' : 'pending');
   const allowed = new Set(WORKSHOPS.map(([code]) => code));
-  const requestedWorkshop = typeof body.workshop === 'string' ? body.workshop : (Array.isArray(body.workshops) ? body.workshops[0] : '');
+  const existingWorkshops = parseJson(existing?.workshops_json, []);
+  const requestedWorkshop = typeof body.workshop === 'string' ? body.workshop
+    : (Array.isArray(body.workshops) ? body.workshops[0] : (existingWorkshops[0] || ''));
   const workshops = allowed.has(requestedWorkshop) ? [requestedWorkshop] : [];
-  if (status === 'confirmed' && !workshops.length) return res.status(400).json({ error: '客价确认后请选择实际生产车间' });
-  const confirmedPrice = body.confirmed_price === '' || body.confirmed_price == null ? null : Number(body.confirmed_price);
-  const confirmedQty = body.confirmed_qty === '' || body.confirmed_qty == null ? null : Math.round(Number(body.confirmed_qty));
+  const confirmedPrice = !Object.prototype.hasOwnProperty.call(body, 'confirmed_price') ? existing?.confirmed_price
+    : (body.confirmed_price === '' || body.confirmed_price == null ? null : Number(body.confirmed_price));
+  const confirmedQty = !Object.prototype.hasOwnProperty.call(body, 'confirmed_qty') ? existing?.confirmed_qty
+    : (body.confirmed_qty === '' || body.confirmed_qty == null ? null : Math.round(Number(body.confirmed_qty)));
+  const note = Object.prototype.hasOwnProperty.call(body, 'note') ? String(body.note || '').trim() : String(existing?.note || '');
   if (confirmedPrice != null && (!Number.isFinite(confirmedPrice) || confirmedPrice < 0)) return res.status(400).json({ error: '确认客价格式不正确' });
   if (confirmedQty != null && (!Number.isFinite(confirmedQty) || confirmedQty < 0)) return res.status(400).json({ error: '确认数量格式不正确' });
   await db.prepare(`
@@ -81,7 +88,7 @@ router.put('/:id/confirmation', async (req, res) => {
       note = excluded.note, confirmed_by = excluded.confirmed_by,
       confirmed_at = CASE WHEN excluded.status = 'confirmed' THEN CURRENT_TIMESTAMP ELSE NULL END,
       updated_at = CURRENT_TIMESTAMP
-  `).run(id, status, JSON.stringify(workshops), confirmedPrice, confirmedQty, String(body.note || '').trim(), req.user.name, status);
+  `).run(id, status, JSON.stringify(workshops), confirmedPrice, confirmedQty, note, req.user.name, status);
   await db.prepare(`INSERT INTO audit_log (quote_id, dept, actor, action, detail) VALUES (?, 'sales', ?, 'customer_confirmation', ?)`)
     .run(id, req.user.name, JSON.stringify({ status, workshops, confirmed_price: confirmedPrice, confirmed_qty: confirmedQty }));
   res.json({ ok: true });

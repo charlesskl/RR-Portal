@@ -97,7 +97,7 @@ function rowHtml(row, serial) {
     <td><input class="summary-qty" type="number" min="0" step="1" value="${esc(qty ?? '')}" ${disabled}></td>
     <td><input class="summary-price" type="number" min="0" step="any" value="${esc(price ?? '')}" ${disabled}></td>
     ${componentHtml}
-    <td><select class="summary-confirm" ${disabled}><option value="pending" ${confirmation.status !== 'confirmed' ? 'selected' : ''}>待确认</option><option value="confirmed" ${confirmation.status === 'confirmed' ? 'selected' : ''}>已确认</option></select></td>
+    <td><span class="badge ${confirmation.status === 'confirmed' ? 'b-approved' : 'b-filled'}">${confirmation.status === 'confirmed' ? '已确认' : '待确认'}</span></td>
     <td><input class="summary-note" value="${esc(confirmation.note || '')}" placeholder="选填" ${disabled}></td>
     <td>${state.canEdit ? '<button class="save-summary">保存</button>' : ''}</td>
   </tr>`;
@@ -129,15 +129,11 @@ function render() {
 async function saveRow(tr) {
   const button = tr.querySelector('.save-summary');
   button.disabled = true;
-  const status = tr.querySelector('.summary-confirm').value;
   const workshop = tr.querySelector('.summary-workshop').value;
-  if (status === 'confirmed' && !workshop) {
-    alert('客价确认后请选择实际生产车间'); button.disabled = false; return;
-  }
   try {
     await api(`/quote-summary/${tr.dataset.id}/confirmation`, {
       method: 'PUT', body: JSON.stringify({
-        status, workshop,
+        workshop,
         confirmed_price: tr.querySelector('.summary-price').value,
         confirmed_qty: tr.querySelector('.summary-qty').value,
         note: tr.querySelector('.summary-note').value,

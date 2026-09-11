@@ -62,6 +62,8 @@ async function refreshMe() {
     if (hasPerm(me, '账号管理', 'admin')) $('btn-admin').classList.remove('hidden');
     else $('btn-admin').classList.add('hidden');
     window.__me = me;
+    const canManageTrash = me.dept === 'sales' || me.role === 'admin';
+    $('btn-trash')?.classList.toggle('hidden', !canManageTrash);
     await loadQuotes();
   } catch {
     $('login-card').classList.remove('hidden');
@@ -86,7 +88,7 @@ async function loadQuotes() {
   } catch (e) {
     window.__allQuotes = [];
     const tbody = $('quotes-table').querySelector('tbody');
-    tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;padding:40px;color:#b91c1c">${e.message}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;padding:40px;color:#b91c1c">${e.message}</td></tr>`;
     if ($('search-count')) $('search-count').textContent = '';
     return;
   }
@@ -116,7 +118,8 @@ function renderQuotes() {
   const customer = $('filter-customer')?.value || '';
   const progress = $('filter-progress')?.value || '';
   const status = $('filter-status')?.value || '';
-  const hasFilters = !!(searchText || quoteNo || product || version || customer || progress || status);
+  const confirmation = $('filter-confirmation')?.value || '';
+  const hasFilters = !!(searchText || quoteNo || product || version || customer || progress || status || confirmation);
   const rows = window.__allQuotes.filter(row => {
     const total = row.total_depts || 7;
     const approved = Number(row.approved_count) || 0;
@@ -130,13 +133,15 @@ function renderQuotes() {
     if (customer && String(row.customer || '') !== customer) return false;
     if (progress && progressValue !== progress) return false;
     if (status && row.status !== status) return false;
+    const confirmationValue = row.customer_confirmation_status === 'confirmed' ? 'confirmed' : 'pending';
+    if (confirmation && confirmationValue !== confirmation) return false;
     return true;
   });
   if ($('search-count')) $('search-count').textContent = hasFilters
     ? `匹配 ${rows.length} / ${window.__allQuotes.length}`
     : `共 ${window.__allQuotes.length} 条`;
   if (rows.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="9" class="ro" style="text-align:center;padding:30px;color:#9ca3af">暂无报价单</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="10" class="ro" style="text-align:center;padding:30px;color:#9ca3af">暂无报价单</td></tr>`;
     return;
   }
   const STATUS_LABEL = { drafting: '草拟中', fully_approved: '全部已审', exported: '已导出' };
@@ -154,6 +159,11 @@ function renderQuotes() {
     const nVer = prodCount[String(q.product_name || '').trim()] || 1;
     const verCell = `${q.version ? `<span class="badge b-filled">${esc(q.version)}</span>` : '<span class="muted">—</span>'}`
       + (nVer > 1 ? ` <small class="muted" title="该产品共有 ${nVer} 个报价版本">·同产品${nVer}版</small>` : '');
+    const canConfirm = window.__me && (window.__me.dept === 'sales' || window.__me.role === 'admin');
+    const confirmationStatus = q.customer_confirmation_status === 'confirmed' ? 'confirmed' : 'pending';
+    const confirmationCell = canConfirm
+      ? `<select class="quote-confirm" data-id="${q.id}" data-current="${confirmationStatus}"><option value="pending" ${confirmationStatus === 'pending' ? 'selected' : ''}>待确认</option><option value="confirmed" ${confirmationStatus === 'confirmed' ? 'selected' : ''}>已确认</option></select>`
+      : `<span class="badge ${confirmationStatus === 'confirmed' ? 'b-approved' : 'b-filled'}">${confirmationStatus === 'confirmed' ? '已确认' : '待确认'}</span>`;
     tr.innerHTML = `
       <td class="ro">${rowNo}</td>
       <td><b>${esc(q.quote_no)}</b></td>
@@ -165,25 +175,64 @@ function renderQuotes() {
         <small class="muted">${q.approved_count} / ${total}</small>
       </td>
       <td><span class="badge ${STATUS_CLS[q.status] || 'b-empty'}">${STATUS_LABEL[q.status] || q.status}</span></td>
+      <td>${confirmationCell}</td>
       <td class="ro" style="font-family:ui-monospace,monospace;font-size:12px">${fmtTime(q.created_at)}</td>
-      <td style="display:flex;gap:6px">
-        <a href="./quote.html?id=${q.id}" class="open-btn">打开 →</a>
-        ${window.__me && (window.__me.dept === 'sales' || window.__me.role === 'admin') ? `<button class="mini btn-clone" data-id="${q.id}" data-no="${esc(q.quote_no)}" data-name="${esc(q.product_name)}">📋 复制</button>
-        <button class="mini danger btn-del" data-id="${q.id}" data-no="${esc(q.quote_no)}">🗑 删除</button>` : ''}
+      <td class="quote-actions">
+        <a href="./quote.html?id=${q.id}" class="open-btn"><span>打开报价</span><b aria-hidden="true">→</b></a>
+        ${window.__me && (window.__me.dept === 'sales' || window.__me.role === 'admin') ? `<button class="mini btn-clone" data-id="${q.id}" data-no="${esc(q.quote_no)}" data-name="${esc(q.product_name)}">复制</button>
+        <button class="mini danger btn-del" data-id="${q.id}" data-no="${esc(q.quote_no)}">删除</button>` : ''}
       </td>
     `;
     tbody.appendChild(tr);
   }
   document.querySelectorAll('.btn-clone').forEach(b => b.onclick = () => cloneQuote(b.dataset.id, b.dataset.no, b.dataset.name));
   document.querySelectorAll('.btn-del').forEach(b => b.onclick = () => deleteQuote(b.dataset.id, b.dataset.no));
+  document.querySelectorAll('.quote-confirm').forEach(select => select.onchange = async () => {
+    select.disabled = true;
+    try {
+      await api(`/quote-summary/${select.dataset.id}/confirmation`, {
+        method: 'PUT', body: JSON.stringify({ status: select.value }),
+      });
+      select.dataset.current = select.value;
+      await loadQuotes();
+    } catch (error) {
+      select.value = select.dataset.current;
+      select.disabled = false;
+      alert(error.message);
+    }
+  });
 }
 
 async function deleteQuote(id, no) {
-  if (!confirm(`确认删除报价单 #${id}（货号 ${no || '—'}）？\n\n该操作不可恢复，将连同各部门明细一并删除。`)) return;
+  if (!confirm(`确认将报价单 #${id}（货号 ${no || '—'}）移入回收站？\n\n之后可从回收站恢复，所有部门明细都会保留。`)) return;
   try {
     await api('/quotes/' + id, { method: 'DELETE' });
     await loadQuotes();
   } catch (e) { alert(e.message); }
+}
+
+async function loadTrash() {
+  const rows = await api('/quotes/trash');
+  const body = $('trash-body');
+  body.innerHTML = rows.length ? rows.map(q => {
+    const expiresAt = new Date(new Date(q.deleted_at).getTime() + 30 * 24 * 60 * 60 * 1000).toISOString();
+    return `<tr>
+    <td><b>${esc(q.quote_no)}</b></td><td>${esc(q.product_name)}</td><td>${esc(q.version || '—')}</td>
+    <td>${esc(q.customer || '—')}</td><td>${fmtTime(q.deleted_at)}</td><td>${fmtTime(expiresAt)}</td><td>${esc(q.deleted_by || '—')}</td>
+    <td><button type="button" class="mini btn-restore" data-id="${q.id}" data-no="${esc(q.quote_no)}">↩ 恢复</button></td>
+  </tr>`;
+  }).join('') : '<tr><td colspan="8" class="ro" style="text-align:center;padding:24px">回收站为空</td></tr>';
+  body.querySelectorAll('.btn-restore').forEach(button => button.onclick = async () => {
+    if (!confirm(`确认恢复报价单 ${button.dataset.no}？`)) return;
+    button.disabled = true;
+    try {
+      await api(`/quotes/${button.dataset.id}/restore`, { method: 'POST' });
+      await Promise.all([loadTrash(), loadQuotes()]);
+    } catch (error) {
+      button.disabled = false;
+      alert(error.message);
+    }
+  });
 }
 
 async function cloneQuote(srcId, srcNo, srcName) {
@@ -393,13 +442,18 @@ if ($('search-input')) $('search-input').oninput = () => renderQuotes();
 ['filter-quote-no', 'filter-product', 'filter-version'].forEach(id => {
   if ($(id)) $(id).oninput = () => renderQuotes();
 });
-['filter-customer', 'filter-progress', 'filter-status'].forEach(id => {
+['filter-customer', 'filter-progress', 'filter-status', 'filter-confirmation'].forEach(id => {
   if ($(id)) $(id).onchange = () => renderQuotes();
 });
 if ($('btn-clear-filters')) $('btn-clear-filters').onclick = () => {
-  ['filter-quote-no', 'filter-product', 'filter-version', 'filter-customer', 'filter-progress', 'filter-status']
+  ['filter-quote-no', 'filter-product', 'filter-version', 'filter-customer', 'filter-progress', 'filter-status', 'filter-confirmation']
     .forEach(id => { if ($(id)) $(id).value = ''; });
   renderQuotes();
 };
+if ($('btn-trash')) $('btn-trash').onclick = async () => {
+  $('trash-panel').classList.remove('hidden');
+  await loadTrash().catch(error => alert(error.message));
+};
+if ($('btn-close-trash')) $('btn-close-trash').onclick = () => $('trash-panel').classList.add('hidden');
 
 refreshMe();

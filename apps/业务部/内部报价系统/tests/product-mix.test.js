@@ -128,13 +128,18 @@ test('shipping UI supports named customer-supplied products in final USD', () =>
   assert.match(source, /\+ customerSuppliedUSD/);
   assert.match(source, /customer-supplied-name/);
   assert.match(source, /\+ 客供成品/);
+  assert.match(source, /const surtaxUsd = finalUSD \* 0\.004/);
+  assert.match(source, /const quotedUSD = finalUSD \+ surtaxDivided/);
+  assert.match(source, />附加税0\.4%</);
+  assert.match(source, />TOTAL \(USD\)<\/td>.*cellTd\(i, 'quotedUSD', r\)/);
+  assert.match(source, /cellTd\(i, 'quotedUSD', r\)/);
 });
 
-test('tax summary does not repeat the Indonesian freight field', () => {
+test('tax summary combines Indonesian freight and customer surcharge into misc', () => {
   const source = fs.readFileSync(path.join(__dirname, '../frontend/workbench.js'), 'utf8');
   assert.doesNotMatch(source, /id="tk-indo-freight"/);
-  assert.match(source, /misc: num\(sales\.pricing_summary\?\.indo_freight\),/);
-  assert.doesNotMatch(source, /misc: num\(sales\.pricing_summary\?\.indo_freight\) \+ surtaxHkd/);
+  assert.match(source, /misc: num\(sales\.pricing_summary\?\.indo_freight\) \+ shippingCalc\.customerSurtaxHkd,/);
+  assert.match(source, /customerSurtaxHkd\s*=\s*\(customerIdx >= 0 && rows\[customerIdx\]\)/);
 });
 
 test('department tabs require save or cancel before leaving dirty edits', () => {
@@ -175,4 +180,17 @@ test('shipping scenario names use the configured freight type dropdown', () => {
   assert.match(source, /<select class="sc-name"/);
   assert.match(source, /querySelectorAll\('\.sc-name'\)\.forEach\(inp => inp\.onchange/);
   assert.match(source, /const nextType = FREIGHT_TYPES\.find/);
+});
+
+test('tax deduction detail omits the removed labor 13 percent category', () => {
+  const frontend = fs.readFileSync(path.join(__dirname, '../frontend/workbench.js'), 'utf8');
+  const exporter = fs.readFileSync(path.join(__dirname, '../backend/services/exportXlsx.js'), 'utf8');
+  assert.doesNotMatch(frontend, /\['labor13', '人工类13%'\]/);
+  assert.doesNotMatch(exporter, /\['人工类13%', 'labor13'\]/);
+});
+
+test('internal export saves live UI values before calculating the workbook', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../frontend/workbench.js'), 'utf8');
+  assert.match(source, /for \(const \[dept, dirty\] of dirtyByDept\.entries\(\)\)/);
+  assert.match(source, /if \(save\) await save\(\)/);
 });

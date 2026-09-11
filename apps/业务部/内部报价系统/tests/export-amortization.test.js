@@ -905,15 +905,15 @@ test('tax deduction UI is read-only and export uses formulas for every calculate
     assert.equal(typeof worksheet.getCell(amountRow, col).value, 'object');
   }
   assert.equal(worksheet.getCell(rateRow, 1).value, null);
-  assert.equal(worksheet.getCell(rateRow, 2).value, 0.115);
-  assert.equal(worksheet.getCell(rateRow, 3).value, 0.1);
+  assert.equal(worksheet.getCell(rateRow, 2).value, 0.1);
+  assert.ok(Math.abs(worksheet.getCell(rateRow, 3).value - 0.0099) < 1e-12);
   assert.equal(worksheet.getCell(deductionRow, 1).value, '—');
-  for (let col = 2; col <= 10; col += 1) {
+  for (let col = 2; col <= 9; col += 1) {
     const value = worksheet.getCell(deductionRow, col).value;
     assert.equal(typeof value, 'object');
     assert.match(value.formula, /^[A-J]\d+\*[A-J]\d+$/);
   }
-  assert.match(worksheet.getCell(deductionRow, 11).value.formula, /^SUM\(A\d+:J\d+\)$/);
+  assert.match(worksheet.getCell(deductionRow, 10).value.formula, /^SUM\(A\d+:I\d+\)$/);
 
   const workbenchSource = fs.readFileSync(path.join(__dirname, '../frontend/workbench.js'), 'utf8');
   assert.match(workbenchSource, /class="tk-readout"/);
@@ -1044,9 +1044,9 @@ test('SPIN export keeps shifted tax-summary formulas linked to their real rows',
   let summaryRow = 0;
   let afterCostRow = 0;
   worksheet.eachRow(row => {
-    const deduction = row.getCell(11).value;
+    const deduction = row.getCell(10).value;
     const summary = row.getCell(7).value;
-    if (deduction && typeof deduction === 'object' && /^SUM\(A\d+:J\d+\)$/.test(deduction.formula || '')) {
+    if (deduction && typeof deduction === 'object' && /^SUM\(A\d+:I\d+\)$/.test(deduction.formula || '')) {
       deductionRow = row.number;
     }
     if (row.getCell(1).value === '合计减税' && summary && typeof summary === 'object') summaryRow = row.number;
@@ -1056,8 +1056,8 @@ test('SPIN export keeps shifted tax-summary formulas linked to their real rows',
   assert.ok(deductionRow);
   assert.ok(summaryRow);
   assert.ok(afterCostRow);
-  assert.equal(worksheet.getCell(summaryRow, 7).value.formula, `K${deductionRow}`);
-  assert.match(worksheet.getCell(afterCostRow, 7).value.formula, new RegExp(`-K${deductionRow}$`));
+  assert.equal(worksheet.getCell(summaryRow, 7).value.formula, `J${deductionRow}`);
+  assert.match(worksheet.getCell(afterCostRow, 7).value.formula, new RegExp(`-J${deductionRow}$`));
   for (const rowNumber of [summaryRow, afterCostRow]) {
     const formula = worksheet.getCell(rowNumber, 7).value.formula;
     const refs = [...formula.matchAll(/[A-Z]+(\d+)/g)].map(match => Number(match[1]));
@@ -1546,7 +1546,7 @@ test('customer-supplied products are named separately and added to exported cust
   worksheet.eachRow(row => {
     if (row.getCell(1).value === '客供成品：控制器 (USD)') controllerRow = row.number;
     if (row.getCell(1).value === '客供成品：充电线 (USD)') cableRow = row.number;
-    if (controllerRow && row.number > cableRow && row.getCell(1).value === 'TOTAL (USD)') totalUsdRow = row.number;
+    if (!totalUsdRow && controllerRow && row.number > cableRow && row.getCell(1).value === 'TOTAL (USD)') totalUsdRow = row.number;
     const value = row.getCell(1).value;
     if (value && typeof value === 'object' && String(value.result || '').startsWith('报客货价:')) customerPriceRow = row.number;
   });

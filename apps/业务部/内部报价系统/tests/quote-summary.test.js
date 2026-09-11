@@ -6,6 +6,39 @@ const {
   QUOTE_COMPONENTS, TAX_DEDUCTION_RATES, SUMMARY_COLUMNS, calculateSummaryValues, groupSummaryRows, buildQuoteSummary, buildSummaryWorkbook,
 } = require('../backend/services/quoteSummary');
 
+test('客价确认在报价单列表操作，汇总页只关联显示', () => {
+  const listSource = fs.readFileSync(path.join(__dirname, '../frontend/main.js'), 'utf8');
+  const summarySource = fs.readFileSync(path.join(__dirname, '../frontend/summary.js'), 'utf8');
+  const quotesRoute = fs.readFileSync(path.join(__dirname, '../backend/routes/quotes.js'), 'utf8');
+  const summaryRoute = fs.readFileSync(path.join(__dirname, '../backend/routes/summary.js'), 'utf8');
+  assert.match(quotesRoute, /customer_confirmation_status/);
+  assert.match(listSource, /class="quote-confirm"/);
+  assert.match(listSource, /filter-confirmation/);
+  assert.match(listSource, /confirmationValue !== confirmation/);
+  assert.match(listSource, /quote-summary\/\$\{select\.dataset\.id\}\/confirmation/);
+  assert.doesNotMatch(summarySource, /class="summary-confirm"/);
+  assert.match(summarySource, /confirmation\.status === 'confirmed'/);
+  assert.match(summaryRoute, /hasOwnProperty\.call\(body, 'status'\)/);
+});
+
+test('报价删除进入回收站并可恢复', () => {
+  const listSource = fs.readFileSync(path.join(__dirname, '../frontend/main.js'), 'utf8');
+  const pageSource = fs.readFileSync(path.join(__dirname, '../frontend/index.html'), 'utf8');
+  const quotesRoute = fs.readFileSync(path.join(__dirname, '../backend/routes/quotes.js'), 'utf8');
+  const summaryRoute = fs.readFileSync(path.join(__dirname, '../backend/routes/summary.js'), 'utf8');
+  assert.match(pageSource, /id="btn-trash"/);
+  assert.match(listSource, /api\('\/quotes\/trash'\)/);
+  assert.match(listSource, /\/quotes\/\$\{button\.dataset\.id\}\/restore/);
+  assert.match(quotesRoute, /deleted_at IS NULL/);
+  assert.match(quotesRoute, /UPDATE quotes SET deleted_at = NULL/);
+  assert.doesNotMatch(quotesRoute, /DELETE FROM quotes WHERE id/);
+  assert.match(summaryRoute, /deleted_at IS NULL/);
+  const sqliteDb = fs.readFileSync(path.join(__dirname, '../backend/db/sqlite.js'), 'utf8');
+  const postgresDb = fs.readFileSync(path.join(__dirname, '../backend/db/postgres.js'), 'utf8');
+  assert.match(sqliteDb, /-30 days/);
+  assert.match(postgresDb, /INTERVAL '30 days'/);
+});
+
 test('报价汇总读取报价基本资料和客价', () => {
   const quote = { id: 9, quote_no: 'A-100', product_name: '测试产品', customer: 'ZURU', qty: 5000, status: 'fully_approved' };
   const sections = [

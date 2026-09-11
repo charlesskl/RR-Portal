@@ -49,7 +49,16 @@
         <div class="list-head">
           <h2 style="margin:0">报价单列表 · <span id="factory-list-name"></span></h2>
           <div class="search-box">
-            <a class="summary-link" href="./summary.html">📊 各客报价汇总</a>
+            <nav class="quote-feature-nav" aria-label="报价功能">
+              <a class="quote-feature-link feature-summary" href="./summary.html">
+                <span class="feature-icon" aria-hidden="true">▥</span>
+                <span><strong>报价汇总</strong><small>客户统计与导出</small></span>
+              </a>
+              <button id="btn-trash" type="button" class="quote-feature-link feature-trash hidden">
+                <span class="feature-icon" aria-hidden="true">♲</span>
+                <span><strong>回收站</strong><small>30天内可恢复</small></span>
+              </button>
+            </nav>
             <input id="search-input" type="text" placeholder="🔍 搜索 货号 / 产品 / 客户…" />
             <small id="search-count" class="muted"></small>
           </div>
@@ -85,8 +94,9 @@
               <th style="width:140px">客户</th>
               <th style="width:110px">进度</th>
               <th style="width:110px">状态</th>
+              <th style="width:120px">客价确认</th>
               <th style="width:140px">创建时间</th>
-              <th style="width:90px"></th>
+              <th class="quote-actions-head">操作</th>
             </tr>
             <tr class="quote-filter-row">
               <th></th>
@@ -106,12 +116,22 @@
                 <option value="fully_approved">全部已审</option>
                 <option value="exported">已导出</option>
               </select></th>
+              <th><select id="filter-confirmation" aria-label="筛选客价确认">
+                <option value="">全部确认</option>
+                <option value="pending">待确认</option>
+                <option value="confirmed">已确认</option>
+              </select></th>
               <th></th>
-              <th><button id="btn-clear-filters" type="button" class="mini">清除</button></th>
+              <th class="quote-actions-head"><button id="btn-clear-filters" type="button" class="mini">清除</button></th>
             </tr>
           </thead>
           <tbody></tbody>
         </table>
+        <div id="trash-panel" class="trash-panel hidden">
+          <div class="trash-head"><h3>🗑 报价回收站</h3><button id="btn-close-trash" type="button" class="mini">关闭</button></div>
+          <p class="muted">误删的报价会保留全部部门明细，30天内可恢复，超过30天自动永久删除。</p>
+          <table class="wb-table"><thead><tr><th>货号</th><th>产品</th><th>版本</th><th>客户</th><th>删除时间</th><th>到期时间</th><th>删除人</th><th>操作</th></tr></thead><tbody id="trash-body"></tbody></table>
+        </div>
       </div>
     </section>
   </div>

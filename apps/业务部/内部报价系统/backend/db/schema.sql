@@ -33,6 +33,8 @@ CREATE TABLE IF NOT EXISTS quotes (
   status           TEXT NOT NULL DEFAULT 'drafting',  -- drafting / fully_approved / exported
   version          TEXT,  -- 版本标签：同一产品的不同报价版本（如 V1 / 改色版）
   factory_code     TEXT NOT NULL DEFAULT 'qingxi' REFERENCES factories(code),
+  deleted_at       TEXT,
+  deleted_by       TEXT,
   UNIQUE(factory_code, quote_no)
 );
 

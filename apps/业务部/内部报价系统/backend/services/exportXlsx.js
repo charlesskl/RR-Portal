@@ -558,6 +558,7 @@ async function buildWorkbook({ quote, sections }) {
   // 把"盐田40柜"运费/吊柜费单元格带回 subRefs，供减税明细 表2 直接引用
   subRefs.shipFreightCell = shipOpts.shipFreightCell;
   subRefs.shipCabinetCell = shipOpts.shipCabinetCell;
+  subRefs.shipSurtaxHkdFormula = shipOpts.shipSurtaxHkdFormula;
 
   // ---------- 减税明细 / 成本汇总 ----------
   row = renderTaxSummary(ws, row, sales, { subRefs, fxRH, summaryRow });
@@ -1243,7 +1244,7 @@ function renderShippingBlock(ws, row, shipping, header, fxRH, refs = {}) {
   // 按参考表顺序：小计 → 主体码点 → 车缝 → 电子 → 运吊费 → 含运 → 找数。
   const rBase = row;
   const sumR = refs.summaryRow;
-  writeRow('小计HK$', i => {
+  writeRow('小计 HK$', i => {
     if (sumR) {
       return { formula: `K${sumR}`, result: rows[i].base };
     }
@@ -1346,7 +1347,7 @@ function renderShippingBlock(ws, row, shipping, header, fxRH, refs = {}) {
   writeRow(`找数 ÷ ${shipping.divisor || 1}`, i => ({ formula: `${colLetter(i+2)}${rSurtaxMarkup}/${num(shipping.divisor)}`, result: rows[i].surtaxDivided }),
     { fmt: '0.00' });
   const rQuotedTotal = row;
-  writeRow('TOTAL (HK$)', i => ({ formula: `${colLetter(i+2)}${rFinal}+${colLetter(i+2)}${rSurtaxDivisor}`, result: rows[i].quotedUSD }),
+  writeRow('TOTAL (USD)', i => ({ formula: `${colLetter(i+2)}${rFinal}+${colLetter(i+2)}${rSurtaxDivisor}`, result: rows[i].quotedUSD }),
     { fmt: '0.00', bold: true, fill: 'FFDBEAFE', fontColor: 'FF1E40AF' });
 
   // 报客货价 = 第一个非"出厂价"场景的 finalUSD（默认 盐田40柜）
@@ -1357,6 +1358,9 @@ function renderShippingBlock(ws, row, shipping, header, fxRH, refs = {}) {
   const diffPct = target > 0 ? (customerUSD - target) / target : 0;
   // 引用单元格地址：B 是 第1列(出厂价)，customerIdx >= 0 时 = B + customerIdx
   const custCol = (customerIdx >= 0) ? colLetter(customerIdx + 2) : 'B';
+  // 上方附加税按 USD 展示；减税明细“杂项”按 HKD 汇总。
+  refs.shipSurtaxHkdFormula = `${custCol}${rSurtax}*${fxHU}`;
+  if (refs.sharedRefs) refs.sharedRefs.shipSurtaxHkdFormula = refs.shipSurtaxHkdFormula;
   // 减税明细“货价”取默认报客场景 TOTAL HKD × 找数，还原到找数前。
   refs.customerTotalHkdCell = `${custCol}${rHKD}`;
   if (refs.sharedRefs) refs.sharedRefs.customerTotalHkdCell = refs.customerTotalHkdCell;
@@ -2636,9 +2640,9 @@ function renderTaxSummary(ws, row, sales, extra = {}) {
     battery:   auto('t2', 'battery',   batteryCells,  false),
     libao:     auto('t2', 'libao',     libaoCells,    false),
     plating:   auto('t2', 'plating',   platingCells,  false),
-    // 新列布局：纸箱=J，印尼运费=H；附加税改在下方算价区单独计算。
+    // 纸箱取统一成本汇总；“杂项”汇总印尼运费和附加税，不再单列附加税。
     carton:      refLink('t2', 'carton',      sumR ? `J${sumR}` : null),
-    misc:        refLink('t2', 'misc',        sumR ? `H${sumR}` : null),
+    misc:        refLink('t2', 'misc',        [sumR ? `H${sumR}` : null, subRefs.shipSurtaxHkdFormula].filter(Boolean).join('+') || null),
     // 未减税前码数会在总成本生成后回填为“货价 ÷ 总成本”。
     code_before: null,
     // 运费/吊柜费 = 直接引用 出货价算价 盐田40柜 的 运费/吊柜费 单元格（单一来源）；回退到运费场景率×%
@@ -2781,12 +2785,11 @@ function renderTaxSummary(ws, row, sales, extra = {}) {
 
   // 表 4 减税明细（金额行 + 税率行）
   const t4 = ps.t4 || {};
-  const t4Cols = [['含税13%类成本', 'tax13'], ['人工类13%', 'labor13'], ['纸箱类', 'carton'],
+  const t4Cols = [['含税13%类成本', 'tax13'], ['纸箱类', 'carton'],
     ['含税1%', 'tax1'], ['搪胶类3%', 'slush3'], ['车发类13%', 'sewhair13'], ['车衣类13%', 'sewcloth13'],
     ['吸塑类6%', 'suction6'], ['运费类9%', 'freight9'], ['含税13%类', 'tax13b']];
   const T4_NO_RATE = new Set(['rmb_buy', 'tax13']);  // 含税13%类成本为参考列，不重复参与减税
   const T4_RATE_DEFAULTS = {
-    labor13: 11.5,
     carton: 10,
     tax1: 0.99,
     slush3: 3,
@@ -2817,7 +2820,6 @@ function renderTaxSummary(ws, row, sales, extra = {}) {
   const T4_FORMULA = {
     rmb_buy: rmbBuyFormula,
     tax13: `${tA.dom_mat}+${tA.hardware}+${tA.motor}+${tB.color_box}+${tB.battery}+${tB.libao}+${tB.other_buy}+${T3_PMAT}+${tA.glue_bag}`,
-    labor13: `${T3_INJ}+${T3_PNT}+${T3_ASM}`,
     carton: tB.carton,
     tax1: tB.plating,
     slush3: tA.slush,

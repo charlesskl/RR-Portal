@@ -13,7 +13,7 @@ router.use(requireAuth);
 // GET /api/quotes/:id/export  — 5/5 通过才放行；返回 xlsx 文件
 router.get('/:id/export', async (req, res) => {
   const id = Number(req.params.id);
-  const quote = await db.prepare('SELECT * FROM quotes WHERE id = ?').get(id);
+  const quote = await db.prepare('SELECT * FROM quotes WHERE id = ? AND deleted_at IS NULL').get(id);
   if (!quote) return res.status(404).json({ error: '不存在' });
   // 客户可见范围校验
   const acc = await quoteAccess(req.user, id);
@@ -66,7 +66,7 @@ router.get('/:id/export-department/:dept', async (req, res) => {
   const sheetName = DEPARTMENT_SHEETS[dept];
   if (!sheetName) return res.status(400).json({ error: '该部门不支持单独导出' });
 
-  const quote = await db.prepare('SELECT * FROM quotes WHERE id = ?').get(id);
+  const quote = await db.prepare('SELECT * FROM quotes WHERE id = ? AND deleted_at IS NULL').get(id);
   if (!quote) return res.status(404).json({ error: '不存在' });
   const acc = await quoteAccess(req.user, id);
   if (acc.status !== 200) {
@@ -109,7 +109,7 @@ router.get('/:id/export-department/:dept', async (req, res) => {
 // GET /api/quotes/:id/export-vq — 生成 TOMY / SPIN 客户报客表。
 router.get('/:id/export-vq', async (req, res) => {
   const id = Number(req.params.id);
-  const quote = await db.prepare('SELECT * FROM quotes WHERE id = ?').get(id);
+  const quote = await db.prepare('SELECT * FROM quotes WHERE id = ? AND deleted_at IS NULL').get(id);
   if (!quote) return res.status(404).json({ error: '不存在' });
 
   const acc = await quoteAccess(req.user, id);
@@ -149,7 +149,7 @@ router.get('/:id/export-vq', async (req, res) => {
 // POST /api/quotes/:id/translate-vq — 与「报价系统」一致，自动翻译报客表英文名称。
 router.post('/:id/translate-vq', async (req, res) => {
   const id = Number(req.params.id);
-  const quote = await db.prepare('SELECT * FROM quotes WHERE id = ?').get(id);
+  const quote = await db.prepare('SELECT * FROM quotes WHERE id = ? AND deleted_at IS NULL').get(id);
   if (!quote) return res.status(404).json({ error: '不存在' });
 
   const acc = await quoteAccess(req.user, id);

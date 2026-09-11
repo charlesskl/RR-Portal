@@ -69,6 +69,7 @@ public class ShipmentsController(ISqlConnectionFactory factory) : ControllerBase
         public decimal? qty { get; set; }
         public int? cartons { get; set; }
         public string? qty_per_carton { get; set; }
+        public decimal? weighing_qty { get; set; }
         public string? purchase_unit { get; set; }
         public string? pallet { get; set; }
         public decimal? price { get; set; }
@@ -120,10 +121,10 @@ RETURNING id",
             {
                 var it = items[i];
                 await c.ExecuteAsync(@"
-INSERT INTO shipment_items(shipment_id, outbound_id, material_id, seq, kg, qty, cartons, qty_per_carton, purchase_unit, pallet, price, currency,
+INSERT INTO shipment_items(shipment_id, outbound_id, material_id, seq, kg, qty, cartons, qty_per_carton, weighing_qty, purchase_unit, pallet, price, currency,
     po_no, po_date, supplier, customs_company, bl_head, contract_no, contract_date,
     invoice_no, invoice_date, invoice_price, product_use, formula_name)
-VALUES (@id, @outbound_id, @material_id, @seq, @kg, @qty, @cartons, @qty_per_carton, @purchase_unit, @pallet, @price, @currency,
+VALUES (@id, @outbound_id, @material_id, @seq, @kg, @qty, @cartons, @qty_per_carton, @weighing_qty, @purchase_unit, @pallet, @price, @currency,
     @po_no, @po_date, @supplier, @customs_company, @bl_head, @contract_no, @contract_date,
     @invoice_no, @invoice_date, @invoice_price, @product_use, @formula_name)",
                     new
@@ -131,6 +132,7 @@ VALUES (@id, @outbound_id, @material_id, @seq, @kg, @qty, @cartons, @qty_per_car
                         id, it.outbound_id, it.material_id, seq = i + 1,
                         kg = it.kg ?? 0, qty = it.qty ?? 0, cartons = it.cartons ?? 0,
                         qty_per_carton = it.qty_per_carton ?? "",
+                        weighing_qty = it.weighing_qty ?? 0,
                         purchase_unit = it.purchase_unit ?? "个",
                         pallet = it.pallet ?? "",
                         price = it.price ?? 0,
@@ -188,10 +190,10 @@ VALUES (@id, @outbound_id, @material_id, @seq, @kg, @qty, @cartons, @qty_per_car
             {
                 var it = items[i];
                 await c.ExecuteAsync(@"
-INSERT INTO shipment_items(shipment_id, outbound_id, material_id, seq, kg, qty, cartons, qty_per_carton, purchase_unit, pallet, price, currency,
+INSERT INTO shipment_items(shipment_id, outbound_id, material_id, seq, kg, qty, cartons, qty_per_carton, weighing_qty, purchase_unit, pallet, price, currency,
     po_no, po_date, supplier, customs_company, bl_head, contract_no, contract_date,
     invoice_no, invoice_date, invoice_price, product_use, formula_name)
-VALUES (@id, @outbound_id, @material_id, @seq, @kg, @qty, @cartons, @qty_per_carton, @purchase_unit, @pallet, @price, @currency,
+VALUES (@id, @outbound_id, @material_id, @seq, @kg, @qty, @cartons, @qty_per_carton, @weighing_qty, @purchase_unit, @pallet, @price, @currency,
     @po_no, @po_date, @supplier, @customs_company, @bl_head, @contract_no, @contract_date,
     @invoice_no, @invoice_date, @invoice_price, @product_use, @formula_name)",
                     new
@@ -199,6 +201,7 @@ VALUES (@id, @outbound_id, @material_id, @seq, @kg, @qty, @cartons, @qty_per_car
                         id, it.outbound_id, it.material_id, seq = i + 1,
                         kg = it.kg ?? 0, qty = it.qty ?? 0, cartons = it.cartons ?? 0,
                         qty_per_carton = it.qty_per_carton ?? "",
+                        weighing_qty = it.weighing_qty ?? 0,
                         purchase_unit = it.purchase_unit ?? "个",
                         pallet = it.pallet ?? "",
                         price = it.price ?? 0,

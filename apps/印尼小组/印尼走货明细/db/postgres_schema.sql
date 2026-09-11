@@ -250,6 +250,7 @@ CREATE TABLE IF NOT EXISTS shipment_items (
     qty                 DECIMAL(18,4) NULL,
     cartons             INT          NULL,
     qty_per_carton      VARCHAR(64)  NULL,
+    weighing_qty        DECIMAL(18,4) NULL,
     purchase_unit       VARCHAR(32)  NOT NULL DEFAULT '个',
     pallet              VARCHAR(64)  NULL,
     price               DECIMAL(18,4) NULL,
@@ -271,6 +272,7 @@ CREATE TABLE IF NOT EXISTS shipment_items (
 );
 CREATE INDEX IF NOT EXISTS "IX_shipment_items_shipment" ON shipment_items(shipment_id);
 CREATE INDEX IF NOT EXISTS "IX_shipment_items_po_no"    ON shipment_items(po_no);
+ALTER TABLE shipment_items ADD COLUMN IF NOT EXISTS weighing_qty DECIMAL(18,4) NULL;
 
 -- ============ 设置 ============
 CREATE TABLE IF NOT EXISTS settings (

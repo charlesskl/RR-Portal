@@ -25,14 +25,14 @@ describe('每箱数量分段写法', () => {
 })
 
 describe('走货单个毛重', () => {
-  it('按行包装数量计算，修改数量或箱重后重新计算', () => {
+  it('按称重数量计算，修改称重数量或箱重后重新计算', () => {
     expect(shipmentGrossPerPc(12, '200')).toBe(0.06)
     expect(shipmentGrossPerPc(12, '400')).toBe(0.03)
     expect(shipmentGrossPerPc(20, '400')).toBe(0.05)
   })
 
-  it('混合装箱时按平均每箱数量计算单个毛重', () => {
-    expect(shipmentGrossPerPc(9, '1-2/3000 3/4000')).toBeCloseTo(9 / (10000 / 3))
+  it('称重数量与每箱数量相互独立', () => {
+    expect(shipmentGrossPerPc(9, 2500)).toBeCloseTo(9 / 2500)
   })
 
   it.each([0, '', undefined, -1, '无', Infinity])('无效包装数量 %s 返回 0', quantity => {
@@ -47,9 +47,9 @@ describe('走货单个毛重', () => {
     expect(shipmentGrossPerPc(8, '30000') * 30000).toBeCloseTo(8)
   })
 
-  it('纸绳按每 1000 米一卷计算单个毛重', () => {
-    expect(shipmentGrossPerPc(7.9, '20000', '纸绳')).toBeCloseTo(0.395)
-    expect(shipmentGrossPerPc(7.9, '20000', '纸绳') * shipmentWeightQuantity('纸绳', 20000)).toBeCloseTo(7.9)
+  it('纸绳也直接使用录入的称重数量', () => {
+    expect(shipmentGrossPerPc(7.9, 20)).toBeCloseTo(0.395)
+    expect(shipmentGrossPerPc(7.9, 20) * shipmentWeightQuantity('纸绳', 20000)).toBeCloseTo(7.9)
   })
 })
 

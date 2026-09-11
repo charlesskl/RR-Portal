@@ -48,6 +48,13 @@ public static class DataMigrations
             await ensureTranslations.ExecuteNonQueryAsync();
         }
 
+        // 走货行称重数量：旧数据库启动时幂等补列，避免保存后丢失。
+        await using (var ensureWeighingQty = connection.CreateCommand())
+        {
+            ensureWeighingQty.CommandText = "ALTER TABLE shipment_items ADD COLUMN IF NOT EXISTS weighing_qty DECIMAL(18,4) NULL;";
+            await ensureWeighingQty.ExecuteNonQueryAsync();
+        }
+
         // 历史物料回填只执行一次（settings 一次性标记）：否则用户在字典页删除的条目
         // 会在每次重启后复活，与字典「删除」能力矛盾
         await using (var backfillClaim = connection.CreateCommand())

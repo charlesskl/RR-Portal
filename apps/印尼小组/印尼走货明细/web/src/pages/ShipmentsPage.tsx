@@ -9,7 +9,7 @@ import { publicAsset } from '../deployment'
 import './ShipmentsPage.css'
 import {
   formatShipmentPackingLines, isPaperRope, parseShipmentPacking, shipmentCartonCount,
-  shipmentGrossPerPc, shipmentPackingAverageQty, shipmentWeightQuantity,
+  shipmentGrossPerPc, shipmentKgWeight, shipmentPackingAverageQty, shipmentWeightQuantity,
 } from '../utils/shipmentWeight'
 
 interface ShipmentSummary {
@@ -245,9 +245,7 @@ export default function ShipmentsPage() {
 
   // 公共：物料 + 数量 → 走货明细行（poInfo 来自 buildMatToPo；poNo/productUse 可覆盖）
   function makeItem(m: any, qty: number, opts: { poInfo?: { po: any; it: any }; poNo?: string; productUse?: string; outboundId?: number } = {}): ShipmentItem {
-    const netPerPc = Number(m.net_per_pc) || 0
-    const weightQty = shipmentWeightQuantity(m.name_zh, qty)
-    const kg = (m.unit_kg || 'KGM') === 'KGM' ? weightQty * netPerPc : qty
+    const kg = shipmentKgWeight(m.unit_kg, qty, m.net_per_pc, m.name_zh)
     const qtyPerCarton = Number(m.qty_per_carton) || 0
     const cartons = qtyPerCarton > 0 ? Math.ceil(qty / qtyPerCarton) : 0
     const poInfo = opts.poInfo
@@ -709,11 +707,9 @@ export default function ShipmentsPage() {
     setEditorDirty(true)
     setItems(its => its.map((it, idx) => idx === i ? { ...it, [k]: v } : it))
   }
-  // 送货KG重量按单位：KGM→净重总重(单个净重×数量)；个数单位(PCE/SET/TNE)→送货数量
+  // 送货重量按所选单位：KGM 显示净重 KG，TNE/TON 显示净重吨数。
   function kgForItem(it: ShipmentItem, m: any): number {
-    const unit = m?.unit_kg || 'KGM'
-    if (unit === 'KGM') return +(((Number(m?.net_per_pc) || 0) * shipmentWeightQuantity(m?.name_zh, it.qty)).toFixed(4))
-    return Number(it.qty) || 0
+    return shipmentKgWeight(m?.unit_kg, it.qty, m?.net_per_pc, m?.name_zh)
   }
   // 改 数量 / 每箱数量 时联动：统一数量按除法算箱数，分段写法按箱号计数。
   function patchQtyOrPack(i: number, k: 'qty' | 'qty_per_carton', v: any) {
@@ -1058,7 +1054,7 @@ export default function ShipmentsPage() {
               { title: '规格', width: 110, render: (_v, r) => matMap.get(r.material_id!)?.spec ?? '' },
               { title: '类别', width: 90, render: (_v, r) => matMap.get(r.material_id!)?.category ?? '' },
               { title: '单位', width: 130, render: (_v, r, i) => fillableMaterial(i, 'unit_kg', <Select size="small" value={matMap.get(r.material_id!)?.unit_kg || 'KGM'} options={UNIT_LIST.map(u => ({ value: u, label: u }))} onChange={(v) => patchMatDim(r.material_id, 'unit_kg', v)} style={{ width: '100%' }} />) },
-              { title: '送货KG重量', width: 120, render: (_v, r, i) => fillable(i, 'kg', <InputNumber size="small" controls={false} min={0} step={0.0001} value={r.kg} onChange={(v) => patchItem(i, 'kg', v ?? 0)} style={{ width: '100%' }} />) },
+              { title: '送货重量', width: 120, render: (_v, r, i) => fillable(i, 'kg', <InputNumber size="small" controls={false} min={0} step={0.0001} value={r.kg} onChange={(v) => patchItem(i, 'kg', v ?? 0)} style={{ width: '100%' }} />) },
               { title: '送货数量', width: 90, render: (_v, r, i) => fillable(i, 'qty', <InputNumber size="small" controls={false} min={0} step={0.0001} value={r.qty} onChange={(v) => patchQtyOrPack(i, 'qty', v ?? 0)} style={{ width: '100%' }} />) },
               { title: '单位', width: 60, align: 'center', render: (_v, r) => r.purchase_unit || (isPaperRope(matMap.get(r.material_id!)?.name_zh) ? '米' : '个') },
               { title: '毛重总重', width: 90, align: 'right', onCell: () => ({ style: GRAY }), render: (_v, r) => { const c = calc(r); return c.grossTotal ? c.grossTotal.toFixed(2) : '' } },

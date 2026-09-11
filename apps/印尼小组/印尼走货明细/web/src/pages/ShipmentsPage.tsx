@@ -1029,7 +1029,7 @@ export default function ShipmentsPage() {
             rowKey={(_, i) => String(i)}
             size="small"
             pagination={false}
-            scroll={{ x: 4400, y: drawerFull ? 'calc(100vh - 350px)' : 'calc(100vh - 400px)' }}
+            scroll={{ x: 4600, y: drawerFull ? 'calc(100vh - 350px)' : 'calc(100vh - 400px)' }}
             dataSource={items}
             columns={[
               { title: '序号', dataIndex: 'seq', width: 50, fixed: 'left', align: 'center' },
@@ -1066,10 +1066,10 @@ export default function ShipmentsPage() {
               { title: '立方数/每箱', width: 100, align: 'right', onCell: () => ({ style: GRAY }), render: (_v, r) => { const c = calc(r); return c.cbmEach ? c.cbmEach.toFixed(4) : '' } },
               { title: '总立方数', width: 90, align: 'right', onCell: () => ({ style: GRAY }), render: (_v, r) => { const c = calc(r); return c.cbmTotal ? c.cbmTotal.toFixed(4) : '' } },
               { title: '产品用途', width: 140, render: (_v, r, i) => fillable(i, 'product_use', <Input size="small" value={r.product_use} onChange={(e) => patchItem(i, 'product_use', e.target.value)} />) },
-              { title: '合同号码', width: 130, render: (_v, r, i) => fillable(i, 'contract_no', <Input size="small" value={r.contract_no} onChange={(e) => patchItem(i, 'contract_no', e.target.value)} />) },
-              { title: '合同日期', width: 130, render: (_v, r, i) => fillable(i, 'contract_date', <DatePicker size="small" style={{ width: '100%' }} format="YYYY-MM-DD" value={r.contract_date ? dayjs(r.contract_date) : null} onChange={(v) => patchItem(i, 'contract_date', v ? v.format('YYYY-MM-DD') : '')} />) },
-              { title: '发票号', width: 130, render: (_v, r, i) => fillable(i, 'invoice_no', <Input size="small" value={r.invoice_no} onChange={(e) => patchItem(i, 'invoice_no', e.target.value)} />) },
-              { title: '发票日期', width: 130, render: (_v, r, i) => fillable(i, 'invoice_date', <DatePicker size="small" style={{ width: '100%' }} format="YYYY-MM-DD" value={r.invoice_date ? dayjs(r.invoice_date) : null} onChange={(v) => patchItem(i, 'invoice_date', v ? v.format('YYYY-MM-DD') : '')} />) },
+              { title: '合同号码', width: 180, render: (_v, r, i) => fillable(i, 'contract_no', <Input size="small" value={r.contract_no} onChange={(e) => patchItem(i, 'contract_no', e.target.value)} />) },
+              { title: '合同日期', width: 155, render: (_v, r, i) => fillable(i, 'contract_date', <DatePicker size="small" style={{ width: '100%' }} format="YYYY-MM-DD" value={r.contract_date ? dayjs(r.contract_date) : null} onChange={(v) => patchItem(i, 'contract_date', v ? v.format('YYYY-MM-DD') : '')} />) },
+              { title: '发票号', width: 180, render: (_v, r, i) => fillable(i, 'invoice_no', <Input size="small" value={r.invoice_no} onChange={(e) => patchItem(i, 'invoice_no', e.target.value)} />) },
+              { title: '发票日期', width: 155, render: (_v, r, i) => fillable(i, 'invoice_date', <DatePicker size="small" style={{ width: '100%' }} format="YYYY-MM-DD" value={r.invoice_date ? dayjs(r.invoice_date) : null} onChange={(v) => patchItem(i, 'invoice_date', v ? v.format('YYYY-MM-DD') : '')} />) },
               { title: '发票单价', width: 100, render: (_v, r, i) => fillable(i, 'invoice_price', <InputNumber size="small" controls={false} min={0} step={0.0001} value={r.invoice_price} onChange={(v) => patchItem(i, 'invoice_price', v ?? 0)} style={{ width: '100%' }} />) },
               { title: '金额', width: 90, align: 'right', onCell: () => ({ style: GRAY }), render: (_v, r) => { const c = calc(r); return c.invoiceAmount ? c.invoiceAmount.toFixed(2) : '' } },
               { title: '供应商', width: 160, render: (_v, r, i) => fillable(i, 'supplier', <Input size="small" value={r.supplier} onChange={(e) => patchItem(i, 'supplier', e.target.value)} />) },

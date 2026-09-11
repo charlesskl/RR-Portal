@@ -675,7 +675,8 @@ def create_app(test_config: dict | None = None) -> Flask:
     app = Flask(__name__)
     root = Path(__file__).resolve().parent
     app.config.update(
-        SECRET_KEY=os.getenv("SECRET_KEY", "dev-change-this-secret"),        DATABASE_URL=os.getenv("DATABASE_URL", f"sqlite:///{(root / 'data' / 'qc.db').as_posix()}"),
+        SECRET_KEY=os.getenv("SECRET_KEY", "dev-change-this-secret"),
+        DATABASE_URL=os.getenv("DATABASE_URL", f"sqlite:///{(root / 'data' / 'qc.db').as_posix()}"),
         STORAGE_ROOT=os.getenv("STORAGE_ROOT", str(root / "storage")),
         MAX_CONTENT_LENGTH=int(os.getenv("MAX_UPLOAD_MB", "64")) * 1024 * 1024,
         SESSION_COOKIE_HTTPONLY=True,
@@ -685,13 +686,10 @@ def create_app(test_config: dict | None = None) -> Flask:
         PROXY_PREFIX=os.getenv("PROXY_PREFIX", ""),
         AUTO_CREATE_SCHEMA=os.getenv("AUTO_CREATE_SCHEMA", "true").lower() == "true",
         SEED_DATABASE=os.getenv("SEED_DATABASE", "true").lower() == "true",
-        SEED_SAMPLE_DATA=os.getenv("SEED_SAMPLE_DATA", "false").lower() == "true",
         TESTING=False,
     )
     if test_config:
         app.config.update(test_config)
-    if app.config["TESTING"] and "SEED_SAMPLE_DATA" not in (test_config or {}):
-        app.config["SEED_SAMPLE_DATA"] = True
     # 非测试环境必须使用显式配置的 SECRET_KEY，禁止带已知默认密钥运行
     if app.config["SECRET_KEY"] == "dev-change-this-secret" and not app.config["TESTING"]:
         raise RuntimeError("SECRET_KEY 未配置，拒绝启动（请通过环境变量设置）")
@@ -754,10 +752,7 @@ def create_app(test_config: dict | None = None) -> Flask:
     register_routes(app)
     if app.config["SEED_DATABASE"]:
         with app.app_context():
-            seed_database(
-                app.extensions["db_session"](),
-                include_sample_data=app.config["SEED_SAMPLE_DATA"],
-            )
+            seed_database(app.extensions["db_session"]())
     return app
 
 
@@ -1622,48 +1617,7 @@ def register_routes(app: Flask):
 
     @app.get("/health")
     def health():
-        queue_required = os.getenv("QUEUE_REQUIRED", "false").lower() == "true"
-        checks = {
-            "database": False,
-            "storage": False,
-            "queue": None if not queue_required else False,
-            "ai_configured": bool(os.getenv("OPENAI_API_KEY", "").strip()),
-        }
-        try:
-            g.db.execute(text("SELECT 1"))
-            checks["database"] = True
-        except Exception:
-            pass
-
-        probe = Path(app.config["STORAGE_ROOT"]) / f".health-{uuid.uuid4().hex}"
-        try:
-            probe.write_bytes(b"ok")
-            checks["storage"] = True
-        except OSError:
-            pass
-        finally:
-            try:
-                probe.unlink(missing_ok=True)
-            except OSError:
-                pass
-
-        if queue_required:
-            try:
-                from task_queue import get_queue
-
-                checks["queue"] = get_queue(required=True, check_connection=True) is not None
-            except Exception:
-                checks["queue"] = False
-
-        required_checks = [checks["database"], checks["storage"]]
-        if queue_required:
-            required_checks.append(checks["queue"])
-        healthy = all(required_checks)
-        return jsonify(
-            status="ok" if healthy else "unhealthy",
-            checks=checks,
-            time=utcnow().isoformat(),
-        ), 200 if healthy else 503
+        return jsonify(status="ok", time=utcnow().isoformat())
 
     @app.route("/login", methods=["GET", "POST"])
     def login():
@@ -1678,11 +1632,7 @@ def register_routes(app: Flask):
             session["csrf_token"] = secrets.token_urlsafe(24)
             audit(g.db, "login", "user", user.id)
             g.db.commit()
-            # next 只允许站内相对路径，防开放重定向到钓鱼站
-            next_url = request.args.get("next") or ""
-            if not (next_url.startswith("/") and not next_url.startswith("//")):
-                next_url = url_for("new_report")
-            return redirect(next_url)
+            return redirect(request.args.get("next") or url_for("new_report"))
         return render_template("login.html")
 
     @app.post("/logout")
@@ -3292,42 +3242,32 @@ def register_routes(app: Flask):
         return render_template("audit.html", logs=logs)
 
 
-def seed_database(db, *, include_sample_data: bool = False):
+def seed_database(db):
     try:
         if not db.scalar(select(func.count()).select_from(User)):
-            admin_pw = os.getenv("ADMIN_PASSWORD")
-            qc_pw = os.getenv("QC_PASSWORD")
-            if not admin_pw or not qc_pw:
-                from flask import current_app
-                if current_app.config.get("TESTING"):
-                    admin_pw = admin_pw or "Admin@12345"
-                    qc_pw = qc_pw or "QC@12345"
-                else:
-                    raise RuntimeError("ADMIN_PASSWORD/QC_PASSWORD 未配置，无法初始化账号")
             db.add_all([
-                User(username="admin", name="系统管理员", role="admin", password_hash=generate_password_hash(admin_pw)),
-                User(username="qc", name="QC Inspector", role="qc", password_hash=generate_password_hash(qc_pw)),
+                User(username="admin", name="系统管理员", role="admin", password_hash=generate_password_hash(os.getenv("ADMIN_PASSWORD", "Admin@12345"))),
+                User(username="qc", name="曹维", role="qc", password_hash=generate_password_hash(os.getenv("QC_PASSWORD", "QC@12345"))),
             ])
-        if include_sample_data:
-            customer = db.scalar(select(Customer).where(Customer.name == "Zanzoon"))
-            if not customer:
-                customer = Customer(name="Zanzoon", country="ARGENTINA", address="90 rue de Villiers, 92300 Levallois-Perret, France")
-                db.add(customer)
-                db.flush()
-            product = db.scalar(select(Product).where(Product.item_no == "5226155"))
-            if not product:
-                product = Product(item_no="5226155", description="Pokémon Trainer Expert", size_mm="260 x 70 x 260", net_weight_kg=0.229, gross_weight_kg=0.656, barcode="8431524502305", age_grade="6+", origin="CHINA")
-                db.add(product)
-                db.flush()
-            if not db.scalar(select(PurchaseOrder).where(PurchaseOrder.po_no == "PO-26032401")):
-                db.add(PurchaseOrder(po_no="PO-26032401", customer_id=customer.id, product_id=product.id, quantity=2004, carton_count=334, case_pack=6, date_code="261521ES"))
-            existing_rules = db.scalar(select(func.count()).select_from(AQLRule)) or 0
-            if not existing_rules:
-                db.add_all([
-                    AQLRule(lot_min=1201, lot_max=3200, sample_size=125, severity="critical", aql=0, accept=0, reject=1),
-                    AQLRule(lot_min=1201, lot_max=3200, sample_size=125, severity="major", aql=1.0, accept=3, reject=4),
-                    AQLRule(lot_min=1201, lot_max=3200, sample_size=125, severity="minor", aql=4.0, accept=10, reject=11),
-                ])
+        customer = db.scalar(select(Customer).where(Customer.name == "Zanzoon"))
+        if not customer:
+            customer = Customer(name="Zanzoon", country="ARGENTINA", address="90 rue de Villiers, 92300 Levallois-Perret, France")
+            db.add(customer)
+            db.flush()
+        product = db.scalar(select(Product).where(Product.item_no == "5226155"))
+        if not product:
+            product = Product(item_no="5226155", description="Pokémon Trainer Expert", size_mm="260 x 70 x 260", net_weight_kg=0.229, gross_weight_kg=0.656, barcode="8431524502305", age_grade="6+", origin="CHINA")
+            db.add(product)
+            db.flush()
+        if not db.scalar(select(PurchaseOrder).where(PurchaseOrder.po_no == "PO-26032401")):
+            db.add(PurchaseOrder(po_no="PO-26032401", customer_id=customer.id, product_id=product.id, quantity=2004, carton_count=334, case_pack=6, date_code="261521ES"))
+        existing_rules = db.scalar(select(func.count()).select_from(AQLRule)) or 0
+        if not existing_rules:
+            db.add_all([
+                AQLRule(lot_min=1201, lot_max=3200, sample_size=125, severity="critical", aql=0, accept=0, reject=1),
+                AQLRule(lot_min=1201, lot_max=3200, sample_size=125, severity="major", aql=1.0, accept=3, reject=4),
+                AQLRule(lot_min=1201, lot_max=3200, sample_size=125, severity="minor", aql=4.0, accept=10, reject=11),
+            ])
         if not db.scalar(select(func.count()).select_from(TestTemplate)):
             db.add_all([TestTemplate(name=name, standard=standard, required=required, sort_order=index) for index, (name, standard, required) in enumerate(DEFAULT_TESTS)])
             db.flush()

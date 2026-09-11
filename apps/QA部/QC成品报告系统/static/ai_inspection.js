@@ -133,7 +133,7 @@
       throw error;
     }
 
-    if (response.redirected && window.QCUrls.isLoginRedirect(response.url, section?.dataset.loginUrl || '/login')) {
+    if (response.redirected && new URL(response.url).pathname === '/login') {
       const error = new Error('登录已失效；重新登录后可继续上传');
       error.retryable = true;
       throw error;

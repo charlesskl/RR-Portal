@@ -7,7 +7,6 @@ import socket
 import sys
 
 from rq import Worker
-from rq.serializers import JSONSerializer
 
 from task_queue import QueueUnavailable, get_queue
 
@@ -32,7 +31,7 @@ def main() -> int:
     worker = Worker(
         [queue],
         connection=queue.connection,
-        serializer=JSONSerializer,
+        serializer="json",
         name=worker_name,
     )
     # Required for delayed RQ retry intervals configured by task_queue.enqueue.

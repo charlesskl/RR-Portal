@@ -9,7 +9,6 @@ while [[ $# -gt 0 ]]; do
     --port=*)
       PORT="${1#*=}"; shift ;;
     --host|--host=*)
-      # app.py 固定监听 0.0.0.0，host 参数直接忽略
       shift ;;
     *)
       shift ;;

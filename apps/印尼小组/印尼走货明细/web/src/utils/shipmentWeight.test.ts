@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   formatShipmentPackingLines, isPaperRope, parseShipmentPacking, shipmentCartonCount,
-  shipmentGrossPerPc, shipmentWeightQuantity,
+  shipmentGrossPerPc, shipmentKgWeight, shipmentWeightQuantity,
 } from './shipmentWeight'
 
 describe('每箱数量分段写法', () => {
@@ -61,5 +61,21 @@ describe('纸绳计重数量', () => {
 
   it('其它物料仍按原送货数量计重', () => {
     expect(shipmentWeightQuantity('螺丝', 20000)).toBe(20000)
+  })
+})
+
+describe('送货 KG 重量', () => {
+  it('TNE/TON 按净重 KG ÷ 1000 换算为吨', () => {
+    expect(shipmentKgWeight('TNE', 20000, 0.7, '纸绳')).toBe(0.014)
+    expect(shipmentKgWeight('ton', 1000, 0.5, '螺丝')).toBe(0.5)
+  })
+
+  it('KGM 仍按单个净重和计重数量计算', () => {
+    expect(shipmentKgWeight('KGM', 11000, 0.00021, '螺丝')).toBe(2.31)
+    expect(shipmentKgWeight('KGM', 20000, 0.7, '纸绳')).toBe(14)
+  })
+
+  it('数量单位保持送货数量', () => {
+    expect(shipmentKgWeight('PCE', 25, 0.2)).toBe(25)
   })
 })

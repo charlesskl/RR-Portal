@@ -73,8 +73,8 @@ function loadAiConfig() {
     enabled: false,
     baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     apiKey: '',
-    ocrModel: 'qwen-vl-max',
-    textModel: 'qwen-plus',
+    ocrModel: 'qwen3.5-omni-plus',
+    textModel: 'qwen3.5-omni-plus',
   };
   try { Object.assign(cfg, JSON.parse(fs.readFileSync(AI_CONFIG_PATH, 'utf8'))); }
   catch (e) { console.warn('[AI] config not loaded:', e.message); }
@@ -98,7 +98,7 @@ const OCR_FIELD_PROMPT = [
   '  "deliveryNo": "送货单号（单据右上角 NO. 后的编号）；找不到留空",',
   '  "orderNo": "订单号/PO号；找不到留空",',
   '  "type": "固定为 来料",',
-  '  "items": [ { "productNo": "货号/Item No", "productName": "货名/品名/Description", "qty": "数量(纯数字,去千分位)", "unit": "单位如 KG/PCS/桶" } ]',
+  '  "items": [ { "productNo": "货号/Item No", "productName": "货名/品名/Description", "qty": "送货数量/实送数量（纯数字,去千分位；不要取订单数量）", "unit": "单位如 KG/PCS/桶" } ]',
   '}',
   '要点：supplier 取单据顶部开单公司，绝不要取「寶號/Messrs」后面的收货单位；每一行货品作为 items 的一个元素，可能有多行；只输出 JSON 对象本身。',
 ].join('\n');
@@ -120,13 +120,23 @@ async function aiVisionExtract(dataUrl) {
       ] },
     ],
   };
-  const resp = await fetch(AI.baseURL.replace(/\/$/, '') + '/chat/completions', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + AI.apiKey },
-    body: JSON.stringify(payload),
-  });
-  const raw = await resp.text();
-  if (!resp.ok) { const err = new Error('百炼返回 HTTP ' + resp.status + '：' + raw.slice(0, 600)); err.code = 'UPSTREAM'; throw err; }
+  async function callModel(model) {
+    payload.model = model;
+    const resp = await fetch(AI.baseURL.replace(/\/$/, '') + '/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + AI.apiKey },
+      body: JSON.stringify(payload),
+    });
+    return { status: resp.status, raw: await resp.text() };
+  }
+  let r = await callModel(payload.model);
+  /* 主模型无权限(403 AccessDenied)时自动回退到 qwen3.5-ocr */
+  if (r.status === 403 && /denied|Unpurchased/i.test(r.raw) && payload.model !== 'qwen3.5-ocr') {
+    console.warn('[AI] 模型 %s 无权限，回退 qwen3.5-ocr', payload.model);
+    r = await callModel('qwen3.5-ocr');
+  }
+  const raw = r.raw;
+  if (r.status >= 400) { const err = new Error('百炼返回 HTTP ' + r.status + '：' + raw.slice(0, 600)); err.code = 'UPSTREAM'; throw err; }
   let data; try { data = JSON.parse(raw); } catch (e) { throw new Error('百炼响应非 JSON：' + raw.slice(0, 300)); }
   let content = data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content || '';
   if (Array.isArray(content)) content = content.map(c => (typeof c === 'string' ? c : (c && c.text) || '')).join('');

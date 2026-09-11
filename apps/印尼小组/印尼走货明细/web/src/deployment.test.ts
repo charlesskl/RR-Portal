@@ -52,9 +52,9 @@ describe('deployment base paths', () => {
     const output = await buildCustomsWorkbook({
       templateBuffer,
       items: [
-        { material_id: 7, qty: 12, price: 3.5, cartons: 2, qty_per_carton: '6', pallet: '1-2/1卡', po_no: 'PO-TEST' },
-        { material_id: 8, qty: 20000, price: 0.1, cartons: 1, qty_per_carton: '20000', po_no: 'PO-ROPE' },
-        { material_id: 9, qty: 10000, price: 0.2, cartons: 3, qty_per_carton: '1-2/3000 3/4000', po_no: 'PO-MIXED' },
+        { material_id: 7, qty: 12, price: 3.5, cartons: 2, qty_per_carton: '6', weighing_qty: 6, pallet: '1-2/1卡', po_no: 'PO-TEST' },
+        { material_id: 8, qty: 20000, price: 0.1, cartons: 1, qty_per_carton: '20000', weighing_qty: 20, po_no: 'PO-ROPE' },
+        { material_id: 9, qty: 10000, price: 0.2, cartons: 3, qty_per_carton: '1-2/3000 3/4000', weighing_qty: 2500, po_no: 'PO-MIXED' },
       ],
       materials: new Map([[7, {
         id: 7,
@@ -109,13 +109,13 @@ describe('deployment base paths', () => {
     expect(sheet.AY4?.v).toBe('010020100')
     expect(sheet.BA4?.v).toBe(8)
     expect(sheet.BB4?.v).toBeCloseTo(8 / 6)
-    expect(sheet.BB4?.f).toBe('IFERROR(IF(AND(BA4>0,AU4>0),BA4/AU4,0),0)')
+    expect(sheet.BB4?.f).toBe('IFERROR(IF(BA4>0,BA4/6,0),0)')
     expect(sheet.BB5?.v).toBeCloseTo(0.395)
-    expect(sheet.BB5?.f).toBe('IFERROR(IF(AND(BA5>0,AU5>0),BA5/(AU5/1000),0),0)')
+    expect(sheet.BB5?.f).toBe('IFERROR(IF(BA5>0,BA5/20,0),0)')
     expect(sheet.AT6?.v).toBe(3)
     expect(sheet.AU6?.v).toBe('1-2/3000 3/4000')
-    expect(sheet.BB6?.v).toBeCloseTo(9 / (10000 / 3))
-    expect(sheet.BB6?.f).toBe(`IFERROR(IF(BA6>0,BA6/${10000 / 3},0),0)`)
+    expect(sheet.BB6?.v).toBeCloseTo(9 / 2500)
+    expect(sheet.BB6?.f).toBe('IFERROR(IF(BA6>0,BA6/2500,0),0)')
     expect(sheet.BC4?.v).toBe(0.5)
     expect(sheet.BD4?.v).toBe('1-2/1卡')
     expect(workbook.Sheets['类别金额'].C4?.f).toContain("'TEST-CNTR'!$AA$4:$AA$1000")

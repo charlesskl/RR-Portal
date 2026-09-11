@@ -61,11 +61,10 @@ export function formatShipmentPackingLines(value: unknown): string {
   return text.trim().split(/[\s,，;；]+/).filter(Boolean).join('\n')
 }
 
-// 包装数量属于走货行；同一物料在不同行可以使用不同包装数量。
-export function shipmentGrossPerPc(weightPerCarton: unknown, qtyPerCarton: unknown, materialName?: unknown): number {
+// 称重数量属于走货行；同一物料每次抽取称重的数量可能不同。
+export function shipmentGrossPerPc(weightPerCarton: unknown, weighingQty: unknown): number {
   const weight = Number(weightPerCarton)
-  // 纸绳以米录入装箱数量，但单个毛/净重以每 1000 米（1 卷）为单位。
-  const quantity = shipmentWeightQuantity(materialName, shipmentPackingAverageQty(qtyPerCarton))
+  const quantity = Number(weighingQty)
   if (!Number.isFinite(weight) || !Number.isFinite(quantity) || weight <= 0 || quantity <= 0) return 0
   const gross = weight / quantity
   return Number.isFinite(gross) ? gross : 0

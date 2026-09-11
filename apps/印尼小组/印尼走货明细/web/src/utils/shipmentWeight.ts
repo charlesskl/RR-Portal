@@ -81,7 +81,7 @@ export function shipmentWeightQuantity(materialName: unknown, quantity: unknown)
   return isPaperRope(materialName) ? qty / 1000 : qty
 }
 
-// 送货 KG 重量：重量单位换算为公斤，数量单位则保持历史行为。
+// 送货重量按所选单位显示：KGM 为净重 KG，TNE/TON 为净重 KG ÷ 1000。
 export function shipmentKgWeight(
   unit: unknown,
   shipmentQty: unknown,
@@ -91,11 +91,11 @@ export function shipmentKgWeight(
   const qty = Number(shipmentQty)
   if (!Number.isFinite(qty) || qty <= 0) return 0
   const code = String(unit || 'KGM').trim().toUpperCase()
-  if (code === 'TNE' || code === 'TON') return +(qty * 1000).toFixed(4)
-  if (code === 'KGM' || code === 'KG') {
+  if (code === 'KGM' || code === 'KG' || code === 'TNE' || code === 'TON') {
     const net = Number(netPerPc)
     if (!Number.isFinite(net) || net <= 0) return 0
-    return +(net * shipmentWeightQuantity(materialName, qty)).toFixed(4)
+    const netKg = net * shipmentWeightQuantity(materialName, qty)
+    return +((code === 'TNE' || code === 'TON' ? netKg / 1000 : netKg).toFixed(4))
   }
   return qty
 }

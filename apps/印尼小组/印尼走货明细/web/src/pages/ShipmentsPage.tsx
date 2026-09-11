@@ -707,7 +707,7 @@ export default function ShipmentsPage() {
     setEditorDirty(true)
     setItems(its => its.map((it, idx) => idx === i ? { ...it, [k]: v } : it))
   }
-  // 送货 KG 重量按单位：KGM 按净重计算，TNE/TON 换算为公斤，数量单位保持原数量。
+  // 送货重量按所选单位：KGM 显示净重 KG，TNE/TON 显示净重吨数。
   function kgForItem(it: ShipmentItem, m: any): number {
     return shipmentKgWeight(m?.unit_kg, it.qty, m?.net_per_pc, m?.name_zh)
   }
@@ -1054,7 +1054,7 @@ export default function ShipmentsPage() {
               { title: '规格', width: 110, render: (_v, r) => matMap.get(r.material_id!)?.spec ?? '' },
               { title: '类别', width: 90, render: (_v, r) => matMap.get(r.material_id!)?.category ?? '' },
               { title: '单位', width: 130, render: (_v, r, i) => fillableMaterial(i, 'unit_kg', <Select size="small" value={matMap.get(r.material_id!)?.unit_kg || 'KGM'} options={UNIT_LIST.map(u => ({ value: u, label: u }))} onChange={(v) => patchMatDim(r.material_id, 'unit_kg', v)} style={{ width: '100%' }} />) },
-              { title: '送货KG重量', width: 120, render: (_v, r, i) => fillable(i, 'kg', <InputNumber size="small" controls={false} min={0} step={0.0001} value={r.kg} onChange={(v) => patchItem(i, 'kg', v ?? 0)} style={{ width: '100%' }} />) },
+              { title: '送货重量', width: 120, render: (_v, r, i) => fillable(i, 'kg', <InputNumber size="small" controls={false} min={0} step={0.0001} value={r.kg} onChange={(v) => patchItem(i, 'kg', v ?? 0)} style={{ width: '100%' }} />) },
               { title: '送货数量', width: 90, render: (_v, r, i) => fillable(i, 'qty', <InputNumber size="small" controls={false} min={0} step={0.0001} value={r.qty} onChange={(v) => patchQtyOrPack(i, 'qty', v ?? 0)} style={{ width: '100%' }} />) },
               { title: '单位', width: 60, align: 'center', render: (_v, r) => r.purchase_unit || (isPaperRope(matMap.get(r.material_id!)?.name_zh) ? '米' : '个') },
               { title: '毛重总重', width: 90, align: 'right', onCell: () => ({ style: GRAY }), render: (_v, r) => { const c = calc(r); return c.grossTotal ? c.grossTotal.toFixed(2) : '' } },

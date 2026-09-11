@@ -65,9 +65,9 @@ describe('纸绳计重数量', () => {
 })
 
 describe('送货 KG 重量', () => {
-  it('TNE/TON 按 1 吨 = 1000 千克换算', () => {
-    expect(shipmentKgWeight('TNE', 2.31, 0)).toBe(2310)
-    expect(shipmentKgWeight('ton', 0.5, 0)).toBe(500)
+  it('TNE/TON 按净重 KG ÷ 1000 换算为吨', () => {
+    expect(shipmentKgWeight('TNE', 20000, 0.7, '纸绳')).toBe(0.014)
+    expect(shipmentKgWeight('ton', 1000, 0.5, '螺丝')).toBe(0.5)
   })
 
   it('KGM 仍按单个净重和计重数量计算', () => {

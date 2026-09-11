@@ -144,7 +144,10 @@ function renderQuotes() {
   // 同产品(按产品名)版本数：>1 时在版本列加提示徽标
   const prodCount = {};
   for (const r of window.__allQuotes) { const k = String(r.product_name || '').trim(); if (k) prodCount[k] = (prodCount[k] || 0) + 1; }
+  // 序号列跟随当前筛选结果连续编号（增删报价单后自动重排），不再显示数据库 id
+  let rowNo = 0;
   for (const q of rows) {
+    rowNo += 1;
     const tr = document.createElement('tr');
     const total = q.total_depts || 7;
     const pct = Math.round((q.approved_count / total) * 100);
@@ -152,7 +155,7 @@ function renderQuotes() {
     const verCell = `${q.version ? `<span class="badge b-filled">${esc(q.version)}</span>` : '<span class="muted">—</span>'}`
       + (nVer > 1 ? ` <small class="muted" title="该产品共有 ${nVer} 个报价版本">·同产品${nVer}版</small>` : '');
     tr.innerHTML = `
-      <td class="ro">${q.id}</td>
+      <td class="ro">${rowNo}</td>
       <td><b>${esc(q.quote_no)}</b></td>
       <td>${esc(q.product_name)}</td>
       <td>${verCell}</td>

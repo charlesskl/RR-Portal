@@ -25,6 +25,8 @@ CREATE TABLE IF NOT EXISTS quotes (
   status TEXT NOT NULL DEFAULT 'drafting',
   version TEXT,
   factory_code TEXT NOT NULL DEFAULT 'qingxi' REFERENCES factories(code),
+  deleted_at TIMESTAMPTZ,
+  deleted_by TEXT,
   UNIQUE(factory_code, quote_no)
 );
 

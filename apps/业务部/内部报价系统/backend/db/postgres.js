@@ -187,6 +187,10 @@ const machinePrices = [
 async function initialize() {
   await pool.query(`CREATE SCHEMA IF NOT EXISTS ${dbSchema}`);
   await pool.query(fs.readFileSync(path.join(__dirname, 'schema.postgres.sql'), 'utf8'));
+  await pool.query('ALTER TABLE quotes ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ');
+  await pool.query('ALTER TABLE quotes ADD COLUMN IF NOT EXISTS deleted_by TEXT');
+  await pool.query("DELETE FROM audit_log WHERE quote_id IN (SELECT id FROM quotes WHERE deleted_at IS NOT NULL AND deleted_at < CURRENT_TIMESTAMP - INTERVAL '30 days')");
+  await pool.query("DELETE FROM quotes WHERE deleted_at IS NOT NULL AND deleted_at < CURRENT_TIMESTAMP - INTERVAL '30 days'");
   await migrateLegacySqlite();
   await prepare(`INSERT INTO factory_material_price_managers (factory_code, user_id)
     SELECT factory_code, manager_user_id FROM factory_material_price_control

@@ -1837,8 +1837,8 @@ function renderSummaryPane(host, sections, quote, me) {
       const rate = num(yt40._freight_rate);
       return rate * num(sales.shipping?.lifting_pct ?? 52) / 100;
     })(),
-    // 杂项只取印尼运费；附加税在出货价算价区单独计算，不进入减税明细。
-    misc: num(sales.pricing_summary?.indo_freight),
+    // 杂项 = 印尼运费 + 当前报客场景附加税（附加税由 USD 换算为 HKD）。
+    misc: num(sales.pricing_summary?.indo_freight) + shippingCalc.customerSurtaxHkd,
     hardware: (hwRaw - _sumByMatch(eng.hardware, isMotor)),  // 五金 HKD（剔除马达项；五金表已 HKD）
     electronic: elecRaw,                                  // 电子 HKD（不识别/剔除马达）
     injection_labor: weightedInjectionSum(mold, r => num(r.shot_price)),  // 啤工按各产品配比加权
@@ -1907,7 +1907,6 @@ function renderTaxDeductionBlock(host, salesPayload, salesSec, me, autoFill) {
   const RATE_DEFAULTS = {
     rmb_buy: 0,       // 人民币外购件成本（总额参考，不参与减税）
     tax13: 0,         // 含税13%类成本（成本基数参考，不参与减税；减税在"含税13%类"列）
-    labor13: 11.5,    // 人工类13%
     carton: 10,       // 纸箱类
     tax1: 0.99,       // 含税1%
     slush3: 3,        // 搪胶类3%
@@ -1933,7 +1932,7 @@ function renderTaxDeductionBlock(host, salesPayload, salesSec, me, autoFill) {
     ['carton', '纸箱'], ['freight', '运费'], ['cabinet', '吊柜费'], ['misc', '杂项'],
   ];
   const t4Cols = [
-    ['tax13', '含税13%类成本'], ['labor13', '人工类13%'], ['carton', '纸箱类'],
+    ['tax13', '含税13%类成本'], ['carton', '纸箱类'],
     ['tax1', '含税1%'], ['slush3', '搪胶类3%'], ['sewhair13', '车发类13%'], ['sewcloth13', '车衣类13%'],
     ['suction6', '吸塑类6%'], ['freight9', '运费类9%'], ['tax13b', '含税13%类'],
   ];
@@ -2057,7 +2056,6 @@ function renderTaxDeductionBlock(host, salesPayload, salesSec, me, autoFill) {
     setT4Amt('sewcloth13', num(ps.t1.sewing_cloth));                           // 车衣类13% = 车衣
     setT4Amt('suction6', num(ps.t1.suction));                                  // 吸塑类6% = 吸塑
     setT4Amt('freight9', num(ps.t2.freight));                                  // 运费含税9% = 运费
-    setT4Amt('labor13', num(ps.t3.injection_labor) + num(ps.t3.painting_labor) + num(ps.t3.assembly_labor));// 人工类13% = 啤工 + 喷油工 + 装配工
     setT4Amt('tax1', num(ps.t2.plating));                                      // 含税1% = 电镀
     setT4Amt('tax13b', tax13Cost);                                             // 含税13%类 = 同含税13%类成本
     // 表4：每行 减税额 = 金额 × 税率%；参考列(无税率)不计；填入减税额行 + 合计
@@ -5064,20 +5062,28 @@ function renderShipping(host, payload, header, canEdit, onChange, freightMap, pr
       const testingShareUSD = num(topData.testing_share);
       const customerSuppliedUSD = customerSuppliedTotal();
       const finalUSD = totalUSD + moldShareUSD + prototypeShareUSD + testingShareUSD + customerSuppliedUSD;
+      const surtaxUsd = finalUSD * 0.4 / 100;
+      const surtaxMarkup = surtaxUsd * num(s.markup_x);
+      const surtaxDivided = surtaxMarkup / num(s.divisor);
+      const quotedUSD = finalUSD + surtaxDivided;
       return { freight, lifting, afterShip, afterMarkup, afterDivisor, totalHKD, totalRMB, totalUSD, moldShareUSD, prototypeShareUSD, testingShareUSD, customerSuppliedUSD, finalUSD,
+        surtaxUsd, surtaxMarkup, surtaxDivided, quotedUSD,
         mainTotal: afterDivisor, sewBase, sewMarkup, sewDivisor, sewTotal: sewDivisor,
         elecBase, elecMarkup, elecDivisor, elecTotal: elecDivisor };
     });
     const target = num(s.target_usd);
     // 报客货价 = 第一个非"出厂价"场景（默认 盐田40柜）；若全是出厂价则取最小
     const customerIdx = s.scenarios.findIndex(x => !x.is_factory);
-    const customerUSD = (customerIdx >= 0 && rows[customerIdx]) ? rows[customerIdx].finalUSD : (rows.length ? Math.min(...rows.map(r => r.finalUSD)) : 0);
+    const customerUSD = (customerIdx >= 0 && rows[customerIdx]) ? rows[customerIdx].quotedUSD : (rows.length ? Math.min(...rows.map(r => r.quotedUSD)) : 0);
     const customerTotalHkd = (customerIdx >= 0 && rows[customerIdx])
       ? rows[customerIdx].totalHKD
       : (rows.length ? Math.min(...rows.map(r => r.totalHKD)) : 0);
     const customerBeforeDivisorHkd = customerTotalHkd * num(s.divisor);
+    const customerSurtaxHkd = (customerIdx >= 0 && rows[customerIdx])
+      ? rows[customerIdx].surtaxUsd * fxHU
+      : (rows.length ? Math.min(...rows.map(r => r.surtaxUsd)) * fxHU : 0);
     const diffPct = target > 0 ? (customerUSD - target) / target * 100 : 0;
-    return { rows, target, customerUSD, customerIdx, customerTotalHkd, customerBeforeDivisorHkd, diffPct };
+    return { rows, target, customerUSD, customerIdx, customerTotalHkd, customerBeforeDivisorHkd, customerSurtaxHkd, diffPct };
   };
 
   // 重算并仅刷新计算单元格 / 同步出货底价（不重建 DOM，输入不丢焦）
@@ -5112,6 +5118,10 @@ function renderShipping(host, payload, header, canEdit, onChange, freightMap, pr
       setC('totalRMB', fmt(r.totalRMB));
       setC('totalUSD', fmt(r.totalUSD));
       setC('finalUSD', fmt(r.finalUSD));
+      setC('surtaxUsd', fmt(r.surtaxUsd));
+      setC('surtaxMarkup', fmt(r.surtaxMarkup));
+      setC('surtaxDivided', fmt(r.surtaxDivided));
+      setC('quotedUSD', fmt(r.quotedUSD));
       // 出货底价 input：matched 则同步 + 禁用 + 上色
       const baseInp = host.querySelector(`.sc-base[data-i="${i}"]`);
       if (baseInp) {
@@ -5180,7 +5190,7 @@ function renderShipping(host, payload, header, canEdit, onChange, freightMap, pr
           ${canEdit ? '<th style="width:30px"></th>' : ''}
         </tr></thead>
         <tbody>
-          <tr><td>出货底价 HK$</td>${sc.map((x, i) => `<td><input class="sc-base" data-i="${i}" type="number" step="any" value="${x.base_rmb ?? 0}" ${canEdit && !x._freight_matched ? '' : 'disabled'} style="${x._freight_matched ? 'background:#ecfdf5' : ''}"></td>`).join('')}${canEdit ? '<td></td>' : ''}</tr>
+          <tr><td>小计 HK$</td>${sc.map((x, i) => `<td><input class="sc-base" data-i="${i}" type="number" step="any" value="${x.base_rmb ?? 0}" ${canEdit && !x._freight_matched ? '' : 'disabled'} style="${x._freight_matched ? 'background:#ecfdf5' : ''}"></td>`).join('')}${canEdit ? '<td></td>' : ''}</tr>
           <tr><td>运费 (${canEdit ? `<input id="sh-freight" type="number" step="any" value="${s.freight_pct}" style="width:60px">` : s.freight_pct}%)</td>${rows.map((r, i) => cellTd(i, 'freight', r)).join('')}${canEdit ? '<td></td>' : ''}</tr>
           <tr><td>吊柜费 (${canEdit ? `<input id="sh-lifting" type="number" step="any" value="${s.lifting_pct}" style="width:60px">` : s.lifting_pct}%)</td>${rows.map((r, i) => cellTd(i, 'lifting', r)).join('')}${canEdit ? '<td></td>' : ''}</tr>
           <tr class="hi"><td>含运 HK$</td>${rows.map((r, i) => cellTd(i, 'afterShip', r)).join('')}${canEdit ? '<td></td>' : ''}</tr>
@@ -5201,7 +5211,11 @@ function renderShipping(host, payload, header, canEdit, onChange, freightMap, pr
           <tr><td>手板费分摊 (USD)</td>${rows.map((r, i) => cellTd(i, 'prototypeShareUSD', r)).join('')}${canEdit ? '<td></td>' : ''}</tr>
           <tr><td>测试费分摊 (USD)</td>${rows.map((r, i) => cellTd(i, 'testingShareUSD', r)).join('')}${canEdit ? '<td></td>' : ''}</tr>
           ${suppliedRows}
-          <tr class="hi"><td>TOTAL (USD)</td>${rows.map((r, i) => cellTd(i, 'finalUSD', r)).join('')}${canEdit ? '<td></td>' : ''}</tr>
+          <tr class="usd-total-row"><td>TOTAL (USD)</td>${rows.map((r, i) => cellTd(i, 'finalUSD', r)).join('')}${canEdit ? '<td></td>' : ''}</tr>
+          <tr class="surtax-row"><td>附加税0.4%</td>${rows.map((r, i) => cellTd(i, 'surtaxUsd', r)).join('')}${canEdit ? '<td></td>' : ''}</tr>
+          <tr><td>码点 × ${s.markup_x}</td>${rows.map((r, i) => cellTd(i, 'surtaxMarkup', r)).join('')}${canEdit ? '<td></td>' : ''}</tr>
+          <tr><td>找数 ÷ ${s.divisor}</td>${rows.map((r, i) => cellTd(i, 'surtaxDivided', r)).join('')}${canEdit ? '<td></td>' : ''}</tr>
+          <tr class="hi" style="background:#DBEAFE;color:#1E40AF;font-weight:700"><td>TOTAL (USD)</td>${rows.map((r, i) => cellTd(i, 'quotedUSD', r)).join('')}${canEdit ? '<td></td>' : ''}</tr>
         </tbody>
       </table>
       <div class="ship-foot">
@@ -5764,6 +5778,12 @@ async function renderQuotePage() {
   });
   $('btn-export').onclick = async () => {
     try {
+      // 页面上的印尼运费比例等实时输入必须先同步到后端，导出才能按当前 UI 值计算。
+      for (const [dept, dirty] of dirtyByDept.entries()) {
+        if (!dirty) continue;
+        const save = saveHandlers.get(dept);
+        if (save) await save();
+      }
       const r = await fetch('/api/quotes/' + id + '/export', { credentials: 'include' });
       if (!r.ok) {
         const j = await r.json().catch(() => ({})); throw new Error(j.error || r.statusText);

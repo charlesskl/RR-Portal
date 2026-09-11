@@ -109,6 +109,11 @@ if (quoteHasGlobalNumberUnique) {
   console.log('[migrate] 报价货号唯一约束已调整为按厂区生效');
 }
 db.exec('CREATE INDEX IF NOT EXISTS idx_quotes_factory ON quotes(factory_code)');
+const _softDeleteCols = db.prepare('PRAGMA table_info(quotes)').all().map(c => c.name);
+if (!_softDeleteCols.includes('deleted_at')) db.exec('ALTER TABLE quotes ADD COLUMN deleted_at TEXT');
+if (!_softDeleteCols.includes('deleted_by')) db.exec('ALTER TABLE quotes ADD COLUMN deleted_by TEXT');
+db.prepare("DELETE FROM audit_log WHERE quote_id IN (SELECT id FROM quotes WHERE deleted_at IS NOT NULL AND deleted_at < datetime('now', '-30 days'))").run();
+db.prepare("DELETE FROM quotes WHERE deleted_at IS NOT NULL AND deleted_at < datetime('now', '-30 days')").run();
 db.exec('CREATE INDEX IF NOT EXISTS idx_users_factory ON users(factory_code)');
 db.prepare(`INSERT OR IGNORE INTO factory_material_price_managers (factory_code, user_id)
   SELECT factory_code, manager_user_id FROM factory_material_price_control

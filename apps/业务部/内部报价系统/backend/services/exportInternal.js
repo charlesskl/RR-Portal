@@ -826,7 +826,7 @@ function patchSlush(ws, slush) {
   styleRange(row, 1, 8, { bold: true, fill: EXPORT_COLORS.subtotal, numFmt: HKD4 });
   ws.views = [{ state: 'frozen', ySplit: titleRow - 1 }];
   ws.pageSetup = { orientation: 'portrait', fitToPage: true, fitToWidth: 1, fitToHeight: 0 };
-  return { slush: `G${totalRow}`, slushIndo: `G${row}`, total };
+  return { slush: `G${totalRow}`, slushTotal: `G${totalRow}`, slushIndo: `G${row}`, total };
 }
 
 function patchSewingDetail(workbook, sewing) {
@@ -974,26 +974,27 @@ function indonesiaEntries(payloads, refs, fx) {
   ];
 }
 
-function calculateIndonesiaSummary(workbook, ws, refs) {
+function calculateIndonesiaSummary(workbook, ws, refs, payloads, fx) {
   const terms = [];
-  let total = 0;
   const append = (sheet, cellRef, formulaRef) => {
     if (!sheet || !cellRef || cellRef === '0') return;
-    const value = sheet.getCell(cellRef).value;
     terms.push(formulaRef || cellRef);
-    total += num(value && typeof value === 'object' ? value.result : value);
   };
 
   // 统一成本表已经包含：工程三表、电子（IC 除外）、印喷、车缝物料。
   append(ws, refs.unifiedIndoTotal);
-  // 注塑、吹气与搪胶不在统一成本表中，直接引用各部门已经计算好的运费合计。
-  append(ws, refs['二、注塑部分:indo']);
-  append(ws, refs['二·B、吹气部分 (HKD):indo']);
+  // 注塑、吹气、搪胶直接用可见“合计”×页面百分比，不再绕到右侧隐藏辅助格。
+  const moldingPct = num((payloads.molding || {}).indo_pct);
+  const slushPct = num((payloads.slush || {}).indo_pct);
+  if (refs['二、注塑部分']) terms.push(`${refs['二、注塑部分']}*${moldingPct}/100`);
+  if (refs['二·B、吹气部分 (HKD)']) terms.push(`${refs['二·B、吹气部分 (HKD)']}*${moldingPct}/100`);
   const slushWs = workbook.getWorksheet('搪胶明细');
-  if (slushWs && refs.slushIndo) {
-    append(slushWs, refs.slushIndo, `'搪胶明细'!${refs.slushIndo}`);
-  }
+  if (slushWs && refs.slushTotal) terms.push(`'搪胶明细'!${refs.slushTotal}*${slushPct}/100`);
 
+  // 插入/移动 Excel 行时，部分表格软件会丢失被引用公式的缓存 result。
+  // 总值必须用当前业务数据独立重算，不能把缺失的缓存值误当成 0。
+  const total = indonesiaEntries(payloads, refs, fx)
+    .reduce((sumValue, entry) => sumValue + num(entry.base) * num(entry.rate) / 100, 0);
   return { formula: terms.length ? terms.join('+') : '0', total };
 }
 
@@ -1232,7 +1233,7 @@ function enhanceWorkbook(workbook, { quote, sections }) {
     );
   }
 
-  const indo = calculateIndonesiaSummary(workbook, ws, refs);
+  const indo = calculateIndonesiaSummary(workbook, ws, refs, payloads, fx);
 
   const movedSummaryTitle = findRow(ws, '十、合计');
   if (movedSummaryTitle) {

@@ -31,8 +31,8 @@
           {% if slot.category=='defect' %}<input class="slot-sample-input" placeholder="样品编号，如 #03,#17"><input class="slot-group-input" placeholder="同一缺陷组，如 THREAD-01">{% endif %}
         </div>
         <div class="slot-actions">
-          <form id="camera-{{ slot.id }}" method="post" enctype="multipart/form-data" action="/reports/{{ report.id }}/photo-slots/{{ slot.id }}/photos"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="upload_source" value="camera"><input type="hidden" name="sample_ids"><input type="hidden" name="defect_group"><label class="button camera-button">📷 现场拍照<input class="photo-upload-input" type="file" name="photos" accept="image/*" capture="environment" required></label></form>
-          <form id="gallery-{{ slot.id }}" method="post" enctype="multipart/form-data" action="/reports/{{ report.id }}/photo-slots/{{ slot.id }}/photos"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="upload_source" value="gallery"><input type="hidden" name="sample_ids"><input type="hidden" name="defect_group"><label class="button secondary">▧ 相册 / 文件<input class="photo-upload-input" type="file" name="photos" accept="image/*" multiple required></label></form>
+          <form id="camera-{{ slot.id }}" method="post" enctype="multipart/form-data" action="{{ url_for('upload_slot_photos_form', report_id=report.id, slot_id=slot.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="upload_source" value="camera"><input type="hidden" name="sample_ids"><input type="hidden" name="defect_group"><label class="button camera-button">📷 现场拍照<input class="photo-upload-input" type="file" name="photos" accept="image/*" capture="environment" required></label></form>
+          <form id="gallery-{{ slot.id }}" method="post" enctype="multipart/form-data" action="{{ url_for('upload_slot_photos_form', report_id=report.id, slot_id=slot.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="upload_source" value="gallery"><input type="hidden" name="sample_ids"><input type="hidden" name="defect_group"><label class="button secondary">▧ 相册 / 文件<input class="photo-upload-input" type="file" name="photos" accept="image/*" multiple required></label></form>
         </div>
       </article>
       {% endfor %}
@@ -50,7 +50,7 @@
     </section>
   </form>
 
-  <section class="card section-card ai-review-section" id="ai-review" data-run-url="{{ url_for('start_analysis_run', report_id=report.id) }}" {% if latest_run %}data-status-url="{{ url_for('get_analysis_run', run_id=latest_run.id) }}" data-run-status="{{ latest_run.status }}"{% endif %}>
+  <section class="card section-card ai-review-section" id="ai-review" data-run-url="{{ url_for('start_analysis_run', report_id=report.id) }}" data-api-prefix="{{ request.script_root }}/api" data-status-base="{{ url_for('get_analysis_run', run_id=0)[:-1] }}" {% if latest_run %}data-status-url="{{ url_for('get_analysis_run', run_id=latest_run.id) }}" data-run-status="{{ latest_run.status }}"{% endif %}>
     <div class="section-title"><div><span class="ai-draft-badge">AI DRAFT · 不能自动定稿</span><h2>AI 验货分析与 QC 审核</h2><p>AI 只判断照片中可见、且能由 PO 佐证的问题。QC 必须审核每条建议并填写受影响样品数量。</p></div><button id="start-ai-analysis" class="button" type="button" {% if required_done < required_total or (latest_run and latest_run.status in ['queued','processing']) %}disabled{% endif %}>{{ '重新开始 AI 分析' if latest_run and latest_run.status in ['completed','failed'] else '开始 AI 验货分析' }}</button></div>
     <div id="analysis-message" class="analysis-message {% if latest_run %}{{ latest_run.status }}{% endif %}">
       {% if not latest_run %}<strong>尚未运行</strong><span>必拍照片上传齐全后，由 QC 手动启动。</span>
@@ -114,4 +114,4 @@
   </section>
 </div>
 {% endblock %}
-{% block scripts %}<script src="{{ url_for('static', filename='report.js') }}"></script><script src="{{ url_for('static', filename='ai_inspection.js') }}"></script>{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='report.js') }}"></script><script src="{{ url_for('static', filename='qc_urls.js') }}"></script><script src="{{ url_for('static', filename='ai_inspection.js') }}"></script>{% endblock %}

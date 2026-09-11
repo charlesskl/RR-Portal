@@ -39,6 +39,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     create_engine,
+    event,
     func,
     select,
     text,
@@ -50,6 +51,21 @@ from pdf_service import generate_report_pdf
 
 
 UTC = timezone.utc
+
+
+class TrustedPrefixMiddleware:
+    """Apply the Portal mount prefix only when it exactly matches configuration."""
+
+    def __init__(self, application, trusted_prefix: str):
+        self.application = application
+        self.trusted_prefix = trusted_prefix.rstrip("/")
+
+    def __call__(self, environ, start_response):
+        if environ.get("HTTP_X_FORWARDED_PREFIX", "").rstrip("/") == self.trusted_prefix:
+            environ["SCRIPT_NAME"] = self.trusted_prefix
+        return self.application(environ, start_response)
+
+
 PHOTO_CATEGORIES = {
     "product": "产品照片 / Product",
     "marking": "产品标识 / Marking",
@@ -666,12 +682,20 @@ def create_app(test_config: dict | None = None) -> Flask:
         SESSION_COOKIE_HTTPONLY=True,
         SESSION_COOKIE_SAMESITE="Lax",
         SESSION_COOKIE_SECURE=os.getenv("COOKIE_SECURE", "false").lower() == "true",
+        SESSION_COOKIE_PATH=os.getenv("SESSION_COOKIE_PATH", "/"),
+        PROXY_PREFIX=os.getenv("PROXY_PREFIX", ""),
         AUTO_CREATE_SCHEMA=os.getenv("AUTO_CREATE_SCHEMA", "true").lower() == "true",
         SEED_DATABASE=os.getenv("SEED_DATABASE", "true").lower() == "true",
         TESTING=False,
     )
     if test_config:
         app.config.update(test_config)
+    # 非测试环境必须使用显式配置的 SECRET_KEY，禁止带已知默认密钥运行
+    if app.config["SECRET_KEY"] == "dev-change-this-secret" and not app.config["TESTING"]:
+        raise RuntimeError("SECRET_KEY 未配置，拒绝启动（请通过环境变量设置）")
+
+    if app.config["PROXY_PREFIX"]:
+        app.wsgi_app = TrustedPrefixMiddleware(app.wsgi_app, app.config["PROXY_PREFIX"])
 
     Path(app.config["STORAGE_ROOT"]).mkdir(parents=True, exist_ok=True)
     db_url = app.config["DATABASE_URL"]
@@ -679,8 +703,18 @@ def create_app(test_config: dict | None = None) -> Flask:
         db_url = db_url.replace("postgres://", "postgresql://", 1)
     if db_url.startswith("sqlite:///") and db_url != "sqlite:///:memory:":
         Path(db_url.removeprefix("sqlite:///")).parent.mkdir(parents=True, exist_ok=True)
-    connect_args = {"check_same_thread": False} if db_url.startswith("sqlite") else {}
+    connect_args = {"check_same_thread": False, "timeout": 30} if db_url.startswith("sqlite") else {}
     engine = create_engine(db_url, future=True, pool_pre_ping=True, connect_args=connect_args)
+    if db_url.startswith("sqlite"):
+        @event.listens_for(engine, "connect")
+        def configure_sqlite(connection, _record):
+            cursor = connection.cursor()
+            try:
+                cursor.execute("PRAGMA journal_mode=WAL")
+                cursor.execute("PRAGMA foreign_keys=ON")
+                cursor.execute("PRAGMA busy_timeout=30000")
+            finally:
+                cursor.close()
     app.extensions["db_engine"] = engine
     app.extensions["db_session"] = scoped_session(sessionmaker(bind=engine, autoflush=False, expire_on_commit=False))
     if app.config["AUTO_CREATE_SCHEMA"]:
@@ -1890,7 +1924,7 @@ def register_routes(app: Flask):
             required_done=required_done,
         )
 
-    @app.post("/reports/<int:report_id>/photo-slots/<int:slot_id>/photos")
+    @app.post("/reports/<int:report_id>/photo-slots/<int:slot_id>/photos", endpoint="upload_slot_photos_form")
     @app.post("/api/reports/<int:report_id>/photo-slots/<int:slot_id>/photos")
     @login_required
     def upload_slot_photos(report_id: int, slot_id: int):

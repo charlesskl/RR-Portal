@@ -86,9 +86,7 @@
   const photoCount = (jobs) => jobs.reduce((total, job) => total + (job.files?.length || 0), 0);
 
   const apiUploadUrl = (form) => {
-    const url = new URL(form.action, window.location.href);
-    if (!url.pathname.startsWith('/api/')) url.pathname = `/api${url.pathname}`;
-    return url.toString();
+    return window.QCUrls.apiUrl(form.action, section?.dataset.apiPrefix || '/api');
   };
 
   const createUploadJob = (input) => {
@@ -244,7 +242,7 @@
       const response = await fetch(section.dataset.runUrl, {method: 'POST', headers: {'X-CSRF-Token': window.CSRF_TOKEN, 'Accept': 'application/json'}});
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || '无法启动 AI 分析');
-      section.dataset.statusUrl = `/api/analysis-runs/${data.analysis_run_id}`;
+      section.dataset.statusUrl = window.QCUrls.analysisStatusUrl(section.dataset.statusBase, data.analysis_run_id);
       window.setTimeout(poll, 500);
     } catch (error) {
       button.disabled = false;

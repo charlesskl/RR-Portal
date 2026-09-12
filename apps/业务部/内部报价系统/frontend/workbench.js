@@ -7,6 +7,29 @@ const $ = (id) => document.getElementById(id);
 
 const STATUS_TXT = { empty: '空', filled: '已填', approved: '已审', rejected: '驳回' };
 const STATUS_CLS = { empty: 'b-empty', filled: 'b-filled', approved: 'b-approved', rejected: 'b-rejected' };
+let quoteSaveShortcutHandler = null;
+let saveShortcutToastTimer = null;
+
+function showSaveShortcutStatus(message, isError = false) {
+  let toast = document.getElementById('save-shortcut-toast');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = 'save-shortcut-toast';
+    toast.setAttribute('role', 'status');
+    toast.style.cssText = 'position:fixed;right:20px;bottom:20px;z-index:10001;padding:10px 16px;border-radius:8px;color:#fff;font-weight:600;box-shadow:0 8px 24px rgba(15,23,42,.22)';
+    document.body.appendChild(toast);
+  }
+  toast.textContent = message;
+  toast.style.background = isError ? '#b91c1c' : '#166534';
+  clearTimeout(saveShortcutToastTimer);
+  saveShortcutToastTimer = setTimeout(() => toast.remove(), 2200);
+}
+
+function bindQuoteSaveShortcut(handler) {
+  if (quoteSaveShortcutHandler) window.removeEventListener('keydown', quoteSaveShortcutHandler, true);
+  quoteSaveShortcutHandler = handler;
+  window.addEventListener('keydown', quoteSaveShortcutHandler, { capture: true });
+}
 
 // 权限工具（与 main.js 一致）
 function hasPerm(me, menu, action) {
@@ -5512,6 +5535,36 @@ async function renderQuotePage() {
     const tab = host.querySelector(`.dept-tab[data-dept="${dept}"]`);
     if (tab) tab.title = '';
   };
+  let shortcutSaving = false;
+  bindQuoteSaveShortcut(async event => {
+    const isSaveShortcut = (event.ctrlKey || event.metaKey) && !event.altKey
+      && (event.code === 'KeyS' || event.key.toLowerCase() === 's');
+    if (!isSaveShortcut) return;
+    event.preventDefault();
+    if (shortcutSaving) return;
+
+    const activeDept = host.querySelector('.dept-tab.active')?.dataset.dept || mySec.dept;
+    if (!dirtyByDept.get(activeDept)) {
+      showSaveShortcutStatus('当前没有未保存修改');
+      return;
+    }
+    const save = saveHandlers.get(activeDept);
+    if (!save) {
+      showSaveShortcutStatus('当前页面无法使用快捷键保存', true);
+      return;
+    }
+
+    shortcutSaving = true;
+    showSaveShortcutStatus('保存中…');
+    try {
+      await save();
+      showSaveShortcutStatus('✓ 已保存');
+    } catch (error) {
+      showSaveShortcutStatus(`保存失败：${error.message}`, true);
+    } finally {
+      shortcutSaving = false;
+    }
+  });
   const activateTab = (tabKey, dept) => {
     sessionStorage.setItem(tabKey, dept);
     host.querySelectorAll('.dept-tab').forEach(tab => tab.classList.toggle('active', tab.dataset.dept === dept));
@@ -5582,7 +5635,7 @@ async function renderQuotePage() {
   wb.innerHTML = `<h2>我的工作台 — ${mySec.dept_name} <small class="badge ${STATUS_CLS[mySec.status]}">${STATUS_TXT[mySec.status]}</small></h2>
     <div id="wb-body"></div>
     <div class="wb-bar">
-      ${canEditMine ? `<button id="btn-save">保存草稿</button>
+      ${canEditMine ? `<button id="btn-save" title="快捷键：Ctrl+S / Command+S">保存草稿（Ctrl/⌘+S）</button>
                        <button id="btn-submit">提交审核</button>` : ''}
       ${(me.role === 'supervisor' || me.role === 'admin') && mySec.status === 'filled'
         ? `<button id="btn-approve">审核通过</button>
@@ -5654,7 +5707,7 @@ async function renderQuotePage() {
         ${inEdit ? `<small style="color:#dc2626;font-weight:600;margin-left:8px">⚠️ 编辑模式</small>` : ''}</h2>`;
       const renderBar = () => `<div class="wb-bar">
         ${s.status !== 'approved' && !inEdit ? `<button data-act="enter-edit" class="mini">✏️ 进入编辑</button>` : ''}
-        ${inEdit ? `<button data-act="save">保存草稿</button>
+        ${inEdit ? `<button data-act="save" title="快捷键：Ctrl+S / Command+S">保存草稿（Ctrl/⌘+S）</button>
                     <button data-act="submit">提交审核</button>
                     <button data-act="exit-edit" class="mini">退出编辑（不保存）</button>` : ''}
         ${s.status === 'filled' && !inEdit ? `<button data-act="approve">审核通过</button>

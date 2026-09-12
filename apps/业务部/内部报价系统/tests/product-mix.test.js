@@ -152,6 +152,20 @@ test('department tabs require save or cancel before leaving dirty edits', () => 
   assert.match(source, /await save\(\)/);
 });
 
+test('Ctrl+S and Command+S save the active dirty department', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../frontend/workbench.js'), 'utf8');
+  const quotePage = fs.readFileSync(path.join(__dirname, '../frontend/quote.html'), 'utf8');
+  assert.match(source, /\(event\.ctrlKey \|\| event\.metaKey\)[\s\S]*event\.code === 'KeyS'/);
+  assert.match(source, /event\.preventDefault\(\)/);
+  assert.match(source, /addEventListener\('keydown', quoteSaveShortcutHandler, \{ capture: true \}\)/);
+  assert.match(source, /host\.querySelector\('\.dept-tab\.active'\)\?\.dataset\.dept \|\| mySec\.dept/);
+  assert.match(source, /dirtyByDept\.get\(activeDept\)/);
+  assert.match(source, /const save = saveHandlers\.get\(activeDept\)/);
+  assert.match(source, /showSaveShortcutStatus\('\u2713 已保存'\)/);
+  assert.match(source, /保存草稿（Ctrl\/⌘\+S）/);
+  assert.match(quotePage, /workbench\.js\?v=20260912-save-shortcut/);
+});
+
 test('summary tab recalculates whenever it is opened or clicked again', () => {
   const source = fs.readFileSync(path.join(__dirname, '../frontend/workbench.js'), 'utf8');
   assert.match(source, /targetDept === '__summary__' && summaryPane/);

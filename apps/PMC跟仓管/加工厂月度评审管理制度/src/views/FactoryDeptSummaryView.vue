@@ -11,7 +11,7 @@ import { allowedRegions } from '../utils/permissions'
 import { computeFactoryStats, computeSiteStats, type FactoryStats } from '../utils/factoryStats'
 import type { Factory } from '../types/factory'
 import type { Order } from '../types/order'
-import { FACTORY_SUMMARY_HEADERS, factorySummaryExportRow } from '../utils/factorySummaryExcel'
+import { buildFactorySummaryWorkbook } from '../utils/factorySummaryExcel'
 import { matchesOrderDate, type OrderDateFilter } from '../utils/orderDateFilter'
 
 const route = useRoute()
@@ -81,48 +81,25 @@ function formatNumber(value: number | null, suffix = '') {
 function exportExcel() {
   if (!summaries.value.length || !totalStats.value) return
   const title = `${deptName.value}${dateSummaryLabel.value}加工厂汇总表`
-  const detailRows = summaries.value.map((summary) => factorySummaryExportRow({
-    name: summary.factory.name,
-    grade: summary.grade,
-    ipControl: summary.factory.ip_control || '-',
-    stats: summary.stats,
-    siteScore: summary.siteScore,
-    siteRate: summary.siteRate,
-  }))
-  const totalRow = factorySummaryExportRow({
-    name: `${factoryCount.value} 家加工厂总计`,
-    grade: '-',
-    ipControl: '-',
-    stats: totalStats.value,
-    siteScore: totalSiteScore.value,
-    siteRate: totalSiteRate.value,
-  })
-  const aoa = [[title, ...Array(FACTORY_SUMMARY_HEADERS.length - 1).fill('')], [...FACTORY_SUMMARY_HEADERS], ...detailRows, totalRow]
-  const ws = XLSX.utils.aoa_to_sheet(aoa)
-  const lastRow = aoa.length
-  const lastCol = FACTORY_SUMMARY_HEADERS.length - 1
-  ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: lastCol } }]
-  ws['!autofilter'] = { ref: `A2:${XLSX.utils.encode_col(lastCol)}${lastRow}` }
-  ws['!cols'] = [{ wch: 32 }, { wch: 8 }, { wch: 15 }, { wch: 15 }, { wch: 12 }, { wch: 13 }, { wch: 12 }, { wch: 12 }, { wch: 16 }, { wch: 13 }, { wch: 12 }, { wch: 12 }, { wch: 16 }, { wch: 12 }, { wch: 12 }]
-  ws['!rows'] = [{ hpt: 28 }, { hpt: 24 }]
-  ws.A1.s = { fill: { fgColor: { rgb: 'FFFFFF' } }, font: { bold: true, color: { rgb: '000000' }, sz: 16 }, alignment: { horizontal: 'center', vertical: 'center' } }
-  for (let col = 0; col <= lastCol; col++) {
-    const cell = ws[XLSX.utils.encode_cell({ r: 1, c: col })]
-    cell.s = { fill: { fgColor: { rgb: 'FFFFFF' } }, font: { bold: true, color: { rgb: '000000' } }, alignment: { horizontal: 'center', vertical: 'center', wrapText: true }, border: { bottom: { style: 'medium', color: { rgb: 'D1D5DB' } } } }
-  }
-  for (let row = 2; row < lastRow; row++) {
-    for (let col = 0; col <= lastCol; col++) {
-      const cell = ws[XLSX.utils.encode_cell({ r: row, c: col })]
-      if (!cell) continue
-      cell.s = { fill: { fgColor: { rgb: row === lastRow - 1 ? 'EEF2FF' : (row % 2 ? 'F8FAFC' : 'FFFFFF') } }, font: { bold: row === lastRow - 1 }, alignment: { horizontal: col === 0 ? 'left' : 'right', vertical: 'center' }, border: { bottom: { style: 'thin', color: { rgb: 'E5E7EB' } } } }
-      if ([2, 3].includes(col)) cell.z = '#,##0'
-      else if ([4, 7, 11, 14].includes(col)) cell.z = '0.0%'
-      else if ([5, 6, 9, 10].includes(col)) cell.z = '#,##0'
-      else if ([8, 13].includes(col)) cell.z = '0.00'
-    }
-  }
-  const wb = XLSX.utils.book_new()
-  XLSX.utils.book_append_sheet(wb, ws, '汇总表')
+  const wb = buildFactorySummaryWorkbook([{
+    title,
+    items: summaries.value.map((summary) => ({
+      name: summary.factory.name,
+      grade: summary.grade,
+      ipControl: summary.factory.ip_control || '-',
+      stats: summary.stats,
+      siteScore: summary.siteScore,
+      siteRate: summary.siteRate,
+    })),
+    total: {
+      name: `${factoryCount.value} 家加工厂总计`,
+      grade: '-',
+      ipControl: '-',
+      stats: totalStats.value,
+      siteScore: totalSiteScore.value,
+      siteRate: totalSiteRate.value,
+    },
+  }])
   XLSX.writeFile(wb, `${title}.xlsx`)
 }
 

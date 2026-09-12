@@ -2459,7 +2459,7 @@ function renderCartonCalc(host, c, canEdit, onChange) {
     ? b[`${key}_raw`]
     : (b[key] || '');
   const productMmInput = key => c[`${key}_mm`] || (c[`${key}_cm`] ? num(c[`${key}_cm`]) * 10 : '');
-  const productInchInput = key => c[key] == null || c[key] === '' ? '' : num(c[key]).toFixed(2);
+  const productInchInput = key => c[key] == null || c[key] === '' ? '' : num(c[key]).toFixed(3);
   const cuftOf = (b) => num(b.cl) * num(b.cw) * num(b.ch) / 1728;
   const boxPriceOf = (b) => (num(b.cl) + num(b.cw) + 2) * (num(b.cw) + num(b.ch) + 1) * 2 * rate() / 1000;
   // 平卡 L/W 留空时对应所在纸箱的长/宽
@@ -2533,9 +2533,9 @@ function renderCartonCalc(host, c, canEdit, onChange) {
             </tr>
             <tr>
               <td class="muted">inch</td>
-              <td><input id="cc-pl" type="number" step="0.01" value="${productInchInput('pl')}" ${canEdit?'':'disabled'} style="width:80px"/></td>
-              <td><input id="cc-pw" type="number" step="0.01" value="${productInchInput('pw')}" ${canEdit?'':'disabled'} style="width:80px"/></td>
-              <td><input id="cc-ph" type="number" step="0.01" value="${productInchInput('ph')}" ${canEdit?'':'disabled'} style="width:80px"/></td>
+              <td><input id="cc-pl" type="number" step="0.001" value="${productInchInput('pl')}" ${canEdit?'':'disabled'} style="width:80px"/></td>
+              <td><input id="cc-pw" type="number" step="0.001" value="${productInchInput('pw')}" ${canEdit?'':'disabled'} style="width:80px"/></td>
+              <td><input id="cc-ph" type="number" step="0.001" value="${productInchInput('ph')}" ${canEdit?'':'disabled'} style="width:80px"/></td>
             </tr>
           </tbody>
         </table>
@@ -2567,7 +2567,7 @@ function renderCartonCalc(host, c, canEdit, onChange) {
         c[`${k}_mm`] = mm;
         c[`${k}_cm`] = 0;
         c[k] = mm / 25.4;
-        el.value = mmEl.value === '' ? '' : c[k].toFixed(2);
+        el.value = mmEl.value === '' ? '' : c[k].toFixed(3);
         onChange();
       };
     });

@@ -1,7 +1,7 @@
 // 出口报关明细 Excel 导出（基于模板 template_报关明细.xlsx）
 // 移植自旧 HTML 印尼走货明细生成系统.html 的 buildExcel(6408) / setCell(6395) /
 //   excelDate(6402) / dataUrlToBytes(6588) / injectOoxmlImages(6598)
-// 与清溪出货样表保持 1:1：56 列布局、模板公式保留、表头黄底、计算列灰底、
+// 与清溪出货样表保持 1:1：56 列布局，表格样式从模板继承，
 //   产品图片用 JSZip 注入到第 20 列(T)。
 import * as XLSX from 'xlsx-js-style'
 import JSZip from 'jszip'
@@ -87,6 +87,27 @@ function setCell(ws: XLSX.WorkSheet, r: number, c: number, value: any, type: Cel
   const cell: any = { v: value, t: type }
   if (typeof value === 'string' && value.startsWith('=')) { cell.f = value.substring(1); cell.t = 'n'; cell.v = 0 }
   ;(ws as any)[addr] = cell
+}
+
+function cloneTemplateValue<T>(value: T): T {
+  return value == null ? value : JSON.parse(JSON.stringify(value))
+}
+
+function writableTemplateStyle(style: any) {
+  if (!style) return undefined
+  // xlsx-js-style 读取时会把填充属性直接放在 s 下，写入时需要还原为 fill。
+  if (style.patternType || style.fgColor || style.bgColor) return { fill: cloneTemplateValue(style) }
+  return cloneTemplateValue(style)
+}
+
+function normalizeWorkbookStyles(wb: XLSX.WorkBook) {
+  for (const sheetName of wb.SheetNames) {
+    const sheet = wb.Sheets[sheetName]
+    for (const [address, cell] of Object.entries(sheet) as [string, any][]) {
+      if (address.startsWith('!') || !cell?.s) continue
+      cell.s = writableTemplateStyle(cell.s)
+    }
+  }
 }
 
 function excelDate(d: any): number | string {
@@ -261,7 +282,9 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
   const { templateBuffer, items, materials, productHs, images, form } = input
   const AUX = new Set(['类别金额', '实业合同', '实业发票', '全球合同', '全球发票', '印尼合同', '印尼发票', '装箱单', '商品汇总表', '发票',
     '出货地址', '销售合同', '装箱单 (2)', '草稿大单-1', '司机资料', '单位对照', 'WpsReserved_CellImgList'])
-  const wbObj = XLSX.read(templateBuffer, { type: 'array', cellFormula: true })
+  // cellStyles 必须开启，否则重新写入时无法沿用模板的单元格样式。
+  const wbObj = XLSX.read(templateBuffer, { type: 'array', cellFormula: true, cellStyles: true })
+  normalizeWorkbookStyles(wbObj)
   const oldName = wbObj.SheetNames.find(n => !AUX.has(n))!
   const newName = (form.containerNo || '').trim() || oldName
   rewriteSheetReferences(wbObj, oldName, newName)
@@ -271,12 +294,21 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
   wbObj.SheetNames = wbObj.SheetNames.map(n => n === oldName ? newName : n)
   const ws = wbObj.Sheets[newName]
 
+  // 模板第 4 行是首个明细行；保留每列的样式和数字格式，供新明细行复用。
+  const detailFormat = Array.from({ length: 56 }, (_, c) => {
+    const cell: any = (ws as any)[XLSX.utils.encode_cell({ r: 3, c })]
+    return cell ? { s: writableTemplateStyle(cell.s), z: cell.z } : undefined
+  })
+  const templateDetailRow = cloneTemplateValue((ws['!rows'] || [])[3] || { hpt: 108.75 })
+
   // 不允许参考模板里的旧柜数据残留；只保留前三行表头与样式。
   for (const key of Object.keys(ws)) {
     if (key.startsWith('!')) continue
     const pos = XLSX.utils.decode_cell(key)
     if (pos.r >= 3) delete (ws as any)[key]
   }
+  // 模板样例可能有按相同值合并的旧明细行，新导出中每条明细必须独立。
+  ws['!merges'] = (ws['!merges'] || []).filter(range => range.e.r < 3)
 
   const tf = {
     containerNo: newName,
@@ -391,50 +423,21 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
   })
   if (sorted.length) ws['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: 3 + sorted.length - 1, c: 55 } })
 
-  // 样式
-  const thinBorder = { style: 'thin', color: { rgb: '999999' } }
-  const border = { top: thinBorder, bottom: thinBorder, left: thinBorder, right: thinBorder }
-  const headerStyle = {
-    font: { name: 'Microsoft YaHei', sz: 10, bold: true, color: { rgb: '1A1A2E' } },
-    alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
-    fill: { fgColor: { rgb: 'FFF2CC' } }, border,
-  }
-  const dataStyle = {
-    font: { name: 'Microsoft YaHei', sz: 10 },
-    alignment: { horizontal: 'center', vertical: 'center', wrapText: true }, border,
-  }
-  const computedStyle = {
-    font: { name: 'Microsoft YaHei', sz: 10, color: { rgb: '666666' } },
-    alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
-    fill: { fgColor: { rgb: 'F0F3F7' } }, border,
-  }
-  const COMPUTED_COLS = new Set([13, 14, 15, 16, 17, 18, 26, 27, 41, 42])
-  for (let c = 0; c < 56; c++) {
-    const addr = XLSX.utils.encode_cell({ r: 2, c })
-    if (!(ws as any)[addr]) (ws as any)[addr] = { v: '', t: 's' }
-    ;(ws as any)[addr].s = headerStyle
-  }
+  // 不再用代码重画样式；每个明细单元格都沿用模板第 4 行的对应列格式。
   for (let i = 0; i < sorted.length; i++) {
     const ri = 3 + i
     for (let c = 0; c < 56; c++) {
       const addr = XLSX.utils.encode_cell({ r: ri, c })
       if (!(ws as any)[addr]) (ws as any)[addr] = { v: '', t: 's' }
-      ;(ws as any)[addr].s = COMPUTED_COLS.has(c) ? computedStyle : dataStyle
+      const format = detailFormat[c]
+      if (format?.s) (ws as any)[addr].s = cloneTemplateValue(format.s)
+      if (!(ws as any)[addr].z && format?.z) (ws as any)[addr].z = format.z
     }
   }
 
-  const COL_WIDTHS = [
-    10, 17, 16, 18, 18, 19, 25, 25, 12, 9, 19, 18, 8,
-    21, 13, 25, 21, 13, 13, 33, 21, 13, 13, 13, 13, 13, 13, 18,
-    21, 13, 13, 13, 13, 23, 24, 20, 35,
-    32, 17, 26, 19, 16, 16, 35, 34,
-    11, 25, 13, 13, 13, 25, 24, 21, 13, 25, 18,
-  ]
-  const HIDDEN_COLS = new Set([13, 28, 33, 34, 35, 36, 50, 51, 52, 54])
-  ws['!cols'] = COL_WIDTHS.map((w, c) => ({ wch: w, hidden: HIDDEN_COLS.has(c) }))
-  const rows: any[] = []
-  rows[0] = { hpt: 50 }; rows[1] = { hpt: 50 }; rows[2] = { hpt: 104 }
-  for (let i = 0; i < sorted.length; i++) rows[3 + i] = { hpt: 109 }
+  // 列宽、隐藏列和表头行高均由模板决定，只扩展新明细行的行高。
+  const rows: any[] = ws['!rows'] || []
+  for (let i = 0; i < sorted.length; i++) rows[3 + i] = cloneTemplateValue(templateDetailRow)
   ws['!rows'] = rows
   ws['!autofilter'] = { ref: `A3:BD${Math.max(3, sorted.length + 3)}` }
 

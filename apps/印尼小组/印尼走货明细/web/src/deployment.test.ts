@@ -46,9 +46,10 @@ describe('deployment base paths', () => {
   }, 20_000)
 
   it('builds a customs export from the sanitized template', async () => {
-    const templateBuffer = Uint8Array.from(
-      readFileSync(resolve(projectRoot, 'public', 'template-customs.xlsx')),
-    ).buffer
+    const templateBytes = readFileSync(resolve(projectRoot, 'public', 'template-customs.xlsx'))
+    const templateBuffer = Uint8Array.from(templateBytes).buffer
+    const templateWorkbook = XLSX.read(templateBytes, { type: 'buffer', cellFormula: true, cellStyles: true })
+    const templateSheet = templateWorkbook.Sheets['WHSU6439229']
     const output = await buildCustomsWorkbook({
       templateBuffer,
       items: [
@@ -87,7 +88,7 @@ describe('deployment base paths', () => {
       form: { containerNo: 'TEST-CNTR', rate: 7.8 },
     })
 
-    const workbook = XLSX.read(await output.arrayBuffer(), { type: 'array', cellFormula: true })
+    const workbook = XLSX.read(await output.arrayBuffer(), { type: 'array', cellFormula: true, cellStyles: true })
     expect(workbook.SheetNames).toEqual([
       '类别金额', 'TEST-CNTR', '全球合同', '全球发票', '印尼合同', '印尼发票', '装箱单',
       '商品汇总表', '发票', '销售合同', '装箱单 (2)', '草稿大单-1', '司机资料', '单位对照',
@@ -118,6 +119,13 @@ describe('deployment base paths', () => {
     expect(sheet.BB6?.f).toBe('IFERROR(IF(BA6>0,BA6/2500,0),0)')
     expect(sheet.BC4?.v).toBe(0.5)
     expect(sheet.BD4?.v).toBe('1-2/1卡')
+    expect(sheet.A3?.s?.fgColor?.rgb).toBe(templateSheet.A3?.s?.fgColor?.rgb)
+    expect(sheet.A4?.s?.patternType).toBe(templateSheet.A4?.s?.patternType)
+    expect(sheet.A4?.s?.fgColor?.rgb).toBe(templateSheet.A4?.s?.fgColor?.rgb)
+    expect(sheet.P4?.z).toBe(templateSheet.P4?.z)
+    expect(sheet['!cols']?.[0]?.width).toBe(templateSheet['!cols']?.[0]?.width)
+    expect(sheet['!rows']?.[3]?.hpt).toBe(templateSheet['!rows']?.[3]?.hpt)
+    expect(sheet['!merges']?.some(range => range.e.r >= 3) ?? false).toBe(false)
     expect(workbook.Sheets['类别金额'].C4?.f).toContain("'TEST-CNTR'!$AA$4:$AA$1000")
     expect(workbook.Sheets['全球合同'].B24?.f).toContain("'TEST-CNTR'!V:V")
     expect(workbook.Sheets['全球发票'].B32?.f).toContain("'TEST-CNTR'!V:V")

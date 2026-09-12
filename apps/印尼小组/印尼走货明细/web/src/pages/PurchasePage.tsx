@@ -34,6 +34,7 @@ interface PoSummary {
   item_count?: number
   total_amount?: number
   received_qty?: number
+  spare_qty?: number
   shortage_qty?: number
 }
 
@@ -59,6 +60,7 @@ interface PoItem {
   eta?: string
   tomy_po?: string
   received_qty?: number
+  spare_qty?: number
   shortage_qty?: number
 }
 
@@ -96,6 +98,7 @@ interface ReceiptRecord {
   po_item_id: number
   receipt_date: string
   qty: number
+  spare_qty?: number
   batch_no?: string
   notes?: string
   created_at?: string
@@ -284,6 +287,7 @@ export default function PurchasePage() {
   const [receiptForm] = Form.useForm()
   const [bulkReceiptPo, setBulkReceiptPo] = useState<PoSummary | null>(null)
   const [bulkReceiptQty, setBulkReceiptQty] = useState<Record<number, number>>({})
+  const [bulkReceiptSpareQty, setBulkReceiptSpareQty] = useState<Record<number, number>>({})
   const [bulkReceiptDate, setBulkReceiptDate] = useState(dayjs())
   const [bulkReceiptBatch, setBulkReceiptBatch] = useState('')
   const [bulkReceiptNotes, setBulkReceiptNotes] = useState('')
@@ -318,6 +322,7 @@ export default function PurchasePage() {
     receiptForm.setFieldsValue({
       receipt_date: dayjs(),
       qty: Number(item.shortage_qty ?? 0),
+      spare_qty: 0,
       batch_no: '',
       notes: '',
     })
@@ -332,27 +337,31 @@ export default function PurchasePage() {
       0,
     )
     const nextReceived = Number(receiptItem.received_qty ?? 0) + Number(values.qty ?? 0)
+    const nextSpare = Number(receiptItem.spare_qty ?? 0) + Number(values.spare_qty ?? 0)
     await api.post(`/purchase/items/${receiptItem.id}/receipts`, {
       receipt_date: values.receipt_date?.format('YYYY-MM-DD'),
       qty: values.qty,
+      spare_qty: values.spare_qty,
       batch_no: values.batch_no,
       notes: values.notes,
     })
     message.success('本批入库已登记，欠数已自动更新')
     await load()
     await loadReceipts(receiptItem.id)
-    setReceiptItem({ ...receiptItem, received_qty: nextReceived, shortage_qty: nextShortage })
-    receiptForm.setFieldsValue({ qty: nextShortage, batch_no: '', notes: '' })
+    setReceiptItem({ ...receiptItem, received_qty: nextReceived, spare_qty: nextSpare, shortage_qty: nextShortage })
+    receiptForm.setFieldsValue({ qty: nextShortage, spare_qty: 0, batch_no: '', notes: '' })
   }
 
   async function deleteReceipt(receiptId: number) {
     if (!receiptItem) return
     const deletedQty = Number(receiptRows.find(x => x.id === receiptId)?.qty ?? 0)
+    const deletedSpareQty = Number(receiptRows.find(x => x.id === receiptId)?.spare_qty ?? 0)
     await api.delete(`/purchase/receipts/${receiptId}`)
     message.success('入库记录已删除，欠数已重新计算')
     setReceiptItem({
       ...receiptItem,
       received_qty: Math.max(Number(receiptItem.received_qty ?? 0) - deletedQty, 0),
+      spare_qty: Math.max(Number(receiptItem.spare_qty ?? 0) - deletedSpareQty, 0),
       shortage_qty: Number(receiptItem.shortage_qty ?? 0) + deletedQty,
     })
     await Promise.all([load(), loadReceipts(receiptItem.id)])
@@ -362,6 +371,7 @@ export default function PurchasePage() {
     const poItems = itemRows.filter(x => x.po_id === po.id && Number(x.shortage_qty ?? 0) > 0)
     setBulkReceiptPo(po)
     setBulkReceiptQty(Object.fromEntries(poItems.map(x => [x.id, 0])))
+    setBulkReceiptSpareQty(Object.fromEntries(poItems.map(x => [x.id, 0])))
     setBulkReceiptDate(dayjs())
     setBulkReceiptBatch('')
     setBulkReceiptNotes('')
@@ -370,7 +380,11 @@ export default function PurchasePage() {
   async function saveBulkReceipt() {
     if (!bulkReceiptPo) return
     const items = Object.entries(bulkReceiptQty)
-      .map(([po_item_id, qty]) => ({ po_item_id: Number(po_item_id), qty: Number(qty) || 0 }))
+      .map(([po_item_id, qty]) => ({
+        po_item_id: Number(po_item_id),
+        qty: Number(qty) || 0,
+        spare_qty: Number(bulkReceiptSpareQty[Number(po_item_id)]) || 0,
+      }))
       .filter(x => x.qty > 0)
     if (!items.length) { message.warning('请至少填写一项本批入库数量'); return }
     await api.post(`/purchase/${bulkReceiptPo.id}/receipts/bulk`, {
@@ -1350,6 +1364,7 @@ export default function PurchasePage() {
                     { title: '采购数量', width: 110, align: 'right', render: (_v, r) => Number(r.purchase_qty ?? r.qty ?? 0).toLocaleString() },
                     { title: '单位', dataIndex: 'purchase_unit', width: 70, render: v => v || '个' },
                     { title: '累计入库', dataIndex: 'received_qty', width: 110, align: 'right', render: v => Number(v ?? 0).toLocaleString() },
+                    { title: '累计备品', dataIndex: 'spare_qty', width: 110, align: 'right', render: v => Number(v ?? 0).toLocaleString() },
                     { title: '欠数', dataIndex: 'shortage_qty', width: 100, align: 'right', render: v => Number(v ?? 0) > 0 ? <Typography.Text type="danger">{Number(v).toLocaleString()}</Typography.Text> : <Tag color="success">完成</Tag> },
                     { title: '入库批次', dataIndex: 'receipt_summary', width: 330, render: v => v || <Typography.Text type="secondary">尚未入库</Typography.Text> },
                     { title: '操作', width: 90, render: (_v, r) => <Button size="small" onClick={() => openReceipt(r)}>单项入库</Button> },
@@ -1380,6 +1395,10 @@ export default function PurchasePage() {
             },
             {
               title: '累计入库', dataIndex: 'received_qty', width: 120, align: 'right',
+              render: v => Number(v ?? 0).toLocaleString(),
+            },
+            {
+              title: '累计备品', dataIndex: 'spare_qty', width: 110, align: 'right',
               render: v => Number(v ?? 0).toLocaleString(),
             },
             {
@@ -1536,7 +1555,7 @@ export default function PurchasePage() {
       <Modal
         open={bulkReceiptPo !== null}
         title={`整单统一入库 · ${bulkReceiptPo?.po_no || ''}`}
-        width={1080}
+        width={1180}
         onCancel={() => setBulkReceiptPo(null)}
         onOk={saveBulkReceipt}
         okText="确认本批统一入库"
@@ -1566,7 +1585,7 @@ export default function PurchasePage() {
           <Button onClick={() => setBulkReceiptQty(Object.fromEntries(
             (itemsByPo.get(bulkReceiptPo?.id || 0) || []).map(x => [x.id, Number(x.shortage_qty ?? 0)]),
           ))}>填入全部欠数</Button>
-          <Button onClick={() => setBulkReceiptQty({})}>全部清零</Button>
+          <Button onClick={() => { setBulkReceiptQty({}); setBulkReceiptSpareQty({}) }}>全部清零</Button>
           <Typography.Text type="secondary">只会提交数量大于 0 的物料</Typography.Text>
         </Space>
         <Table
@@ -1589,6 +1608,15 @@ export default function PurchasePage() {
                 max={Number(r.shortage_qty ?? 0)}
                 value={bulkReceiptQty[r.id] || 0}
                 onChange={v => setBulkReceiptQty(q => ({ ...q, [r.id]: Number(v ?? 0) }))}
+                style={{ width: '100%' }}
+              />,
+            },
+            {
+              title: '备品入数', width: 140, fixed: 'right',
+              render: (_v, r) => <InputNumber
+                min={0}
+                value={bulkReceiptSpareQty[r.id] || 0}
+                onChange={v => setBulkReceiptSpareQty(q => ({ ...q, [r.id]: Number(v ?? 0) }))}
                 style={{ width: '100%' }}
               />,
             },
@@ -1621,6 +1649,9 @@ export default function PurchasePage() {
               <Typography.Text strong style={{ fontSize: 20, color: '#1677ff' }}>
                 {Number(receiptItem?.received_qty ?? 0).toLocaleString()}
               </Typography.Text>
+              {Number(receiptItem?.spare_qty ?? 0) > 0 && (
+                <Typography.Text type="secondary"> + 备品 {Number(receiptItem?.spare_qty ?? 0).toLocaleString()}</Typography.Text>
+              )}
             </Card>
           </Col>
           <Col span={8}>
@@ -1636,12 +1667,12 @@ export default function PurchasePage() {
         {Number(receiptItem?.shortage_qty ?? 0) > 0 && (
           <Form form={receiptForm} layout="vertical">
             <Row gutter={12}>
-              <Col span={8}>
+              <Col span={6}>
                 <Form.Item name="receipt_date" label="入库日期" rules={[{ required: true, message: '请选择入库日期' }]}>
                   <DatePicker style={{ width: '100%' }} />
                 </Form.Item>
               </Col>
-              <Col span={8}>
+              <Col span={6}>
                 <Form.Item
                   name="qty"
                   label="本批入库数量"
@@ -1660,7 +1691,12 @@ export default function PurchasePage() {
                   <InputNumber min={0.0001} max={Number(receiptItem?.shortage_qty ?? 0)} style={{ width: '100%' }} />
                 </Form.Item>
               </Col>
-              <Col span={8}>
+              <Col span={6}>
+                <Form.Item name="spare_qty" label="备品入数" initialValue={0}>
+                  <InputNumber min={0} style={{ width: '100%' }} />
+                </Form.Item>
+              </Col>
+              <Col span={6}>
                 <Form.Item name="batch_no" label="批次号">
                   <Input placeholder="可选，例如 2026-07-A" />
                 </Form.Item>
@@ -1685,6 +1721,7 @@ export default function PurchasePage() {
           columns={[
             { title: '入库日期', dataIndex: 'receipt_date', width: 110, render: (v) => dayjs(v).format('YYYY-MM-DD') },
             { title: '数量', dataIndex: 'qty', width: 110, align: 'right', render: (v) => Number(v).toLocaleString() },
+            { title: '备品入数', dataIndex: 'spare_qty', width: 110, align: 'right', render: (v) => Number(v ?? 0).toLocaleString() },
             { title: '批次号', dataIndex: 'batch_no', width: 140, render: (v) => v || '-' },
             { title: '备注', dataIndex: 'notes', ellipsis: true, render: (v) => v || '-' },
             {

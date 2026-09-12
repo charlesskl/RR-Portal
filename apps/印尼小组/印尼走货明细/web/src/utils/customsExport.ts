@@ -10,6 +10,16 @@ import { isPaperRope, shipmentGrossPerPc, shipmentPackingAverageQty, shipmentWei
 
 export const CUSTOMS_FIXED = '深圳市华胜益出口贸易有限公司'
 
+const CUSTOMS_COMPANY_COLORS = [
+  'FFF2CC', // 浅黄
+  'DDEBF7', // 浅蓝
+  'E2F0D9', // 浅绿
+  'FCE4D6', // 浅橙
+  'E4DFEC', // 浅紫
+  'DAEEF3', // 浅青
+  'F4CCCC', // 浅红
+]
+
 // 走货明细行（与 ShipmentsPage 的 ShipmentItem 字段一致，只列导出用到的）
 export interface CustomsItem {
   material_id?: number
@@ -341,6 +351,13 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
     const sb = (b.supplier || matOf(b)?.supplier || '').trim()
     return sa.localeCompare(sb, 'zh')
   })
+  const companyColor = new Map<string, string>()
+  for (const item of sorted) {
+    const company = effCustoms(item)
+    if (company && !companyColor.has(company)) {
+      companyColor.set(company, CUSTOMS_COMPANY_COLORS[companyColor.size % CUSTOMS_COMPANY_COLORS.length])
+    }
+  }
 
   populateLinkedDocuments(wbObj, newName, sorted)
 
@@ -426,12 +443,19 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
   // 不再用代码重画样式；每个明细单元格都沿用模板第 4 行的对应列格式。
   for (let i = 0; i < sorted.length; i++) {
     const ri = 3 + i
+    const color = companyColor.get(effCustoms(sorted[i]))
     for (let c = 0; c < 56; c++) {
       const addr = XLSX.utils.encode_cell({ r: ri, c })
       if (!(ws as any)[addr]) (ws as any)[addr] = { v: '', t: 's' }
       const format = detailFormat[c]
       if (format?.s) (ws as any)[addr].s = cloneTemplateValue(format.s)
       if (!(ws as any)[addr].z && format?.z) (ws as any)[addr].z = format.z
+      if (color) {
+        ;(ws as any)[addr].s = {
+          ...((ws as any)[addr].s || {}),
+          fill: { patternType: 'solid', fgColor: { rgb: color } },
+        }
+      }
     }
   }
 

@@ -295,10 +295,12 @@ CREATE TABLE IF NOT EXISTS po_receipts (
     po_item_id      INT NOT NULL,
     receipt_date    DATE NOT NULL,
     qty             DECIMAL(18,4) NOT NULL,
+    spare_qty       DECIMAL(18,4) NOT NULL DEFAULT 0,
     batch_no        VARCHAR(64),
     notes           TEXT,
     created_at      TIMESTAMP(0) NOT NULL DEFAULT now(),
     CONSTRAINT "CK_po_receipts_qty_positive" CHECK (qty > 0),
+    CONSTRAINT "CK_po_receipts_spare_qty_nonnegative" CHECK (spare_qty >= 0),
     CONSTRAINT "FK_po_receipts_item"
         FOREIGN KEY (po_item_id) REFERENCES po_items(id) ON DELETE CASCADE
 );

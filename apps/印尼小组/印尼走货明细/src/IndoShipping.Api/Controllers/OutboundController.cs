@@ -16,7 +16,7 @@ public class OutboundController(ISqlConnectionFactory factory) : ControllerBase
         var where = string.IsNullOrWhiteSpace(po_no) ? "" : "WHERE o.po_no=@po_no";
         var rows = await c.QueryAsync($@"
             WITH receipt_totals AS (
-                SELECT po_item_id, SUM(qty) AS received_qty
+                SELECT po_item_id, SUM(qty + spare_qty) AS received_qty
                 FROM po_receipts
                 GROUP BY po_item_id
             ),
@@ -59,7 +59,7 @@ public class OutboundController(ISqlConnectionFactory factory) : ControllerBase
         using var c = factory.Create();
         var rows = await c.QueryAsync(@"
             WITH receipt_totals AS (
-                SELECT po_item_id, SUM(qty) AS received_qty
+                SELECT po_item_id, SUM(qty + spare_qty) AS received_qty
                 FROM po_receipts
                 GROUP BY po_item_id
             ),
@@ -144,7 +144,7 @@ public class OutboundController(ISqlConnectionFactory factory) : ControllerBase
             }
 
             var received = await c.ExecuteScalarAsync<decimal>(
-                "SELECT COALESCE(SUM(qty), 0) FROM po_receipts WHERE po_item_id=@poItemId",
+                "SELECT COALESCE(SUM(qty + spare_qty), 0) FROM po_receipts WHERE po_item_id=@poItemId",
                 new { poItemId = item.PoItemId }, tx);
             var alreadyOut = await c.ExecuteScalarAsync<decimal>(
                 "SELECT COALESCE(SUM(qty), 0) FROM outbound WHERE po_item_id=@poItemId",
@@ -204,7 +204,7 @@ public class OutboundController(ISqlConnectionFactory factory) : ControllerBase
                 FOR UPDATE", new { poId = body.po_id, itemIds }, tx);
             var stocks = (await c.QueryAsync<BulkOutboundStock>(@"
                 SELECT i.id AS ""PoItemId"", po.po_no AS ""PoNo"", i.material_id AS ""MaterialId"",
-                       COALESCE((SELECT SUM(r.qty) FROM po_receipts r WHERE r.po_item_id=i.id), 0) AS ""ReceivedQty"",
+                       COALESCE((SELECT SUM(r.qty + r.spare_qty) FROM po_receipts r WHERE r.po_item_id=i.id), 0) AS ""ReceivedQty"",
                        COALESCE((SELECT SUM(o.qty) FROM outbound o WHERE o.po_item_id=i.id), 0) AS ""OutboundQty""
                 FROM po_items i
                 JOIN purchase_orders po ON po.id=i.po_id
@@ -304,7 +304,7 @@ public class OutboundController(ISqlConnectionFactory factory) : ControllerBase
             }
 
             var received = await c.ExecuteScalarAsync<decimal>(
-                "SELECT COALESCE(SUM(qty), 0) FROM po_receipts WHERE po_item_id=@poItemId",
+                "SELECT COALESCE(SUM(qty + spare_qty), 0) FROM po_receipts WHERE po_item_id=@poItemId",
                 new { poItemId = item.PoItemId }, tx);
             var otherOut = await c.ExecuteScalarAsync<decimal>(@"
                 SELECT COALESCE(SUM(qty), 0)
@@ -425,7 +425,7 @@ public class OutboundController(ISqlConnectionFactory factory) : ControllerBase
             WITH movements AS (
                 SELECT 'R-' || r.id AS movement_id, r.po_item_id, r.receipt_date AS movement_date,
                        r.created_at, 'receipt' AS movement_type, r.batch_no AS reference_no,
-                       r.qty AS in_qty, 0::numeric AS out_qty, r.notes
+                       r.qty + r.spare_qty AS in_qty, 0::numeric AS out_qty, r.notes
                 FROM po_receipts r
                 UNION ALL
                 SELECT 'O-' || o.id, o.po_item_id, o.out_date, o.created_at, 'outbound',

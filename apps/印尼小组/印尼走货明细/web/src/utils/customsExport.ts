@@ -11,10 +11,10 @@ import { isPaperRope, shipmentGrossPerPc, shipmentPackingAverageQty, shipmentWei
 export const CUSTOMS_FIXED = '深圳市华胜益出口贸易有限公司'
 
 const CUSTOMS_COMPANY_COLORS = [
-  'C6E0B4', // 浅绿（参考表第 1 组）
-  'F8CBAD', // 浅橙（参考表第 2 组）
-  'B4C6E7', // 浅蓝（参考表第 3 组）
   'FFF2CC', // 浅黄
+  'DDEBF7', // 浅蓝
+  'E2F0D9', // 浅绿
+  'FCE4D6', // 浅橙
   'E4DFEC', // 浅紫
   'DAEEF3', // 浅青
   'F4CCCC', // 浅红
@@ -389,7 +389,7 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
     const weightDivisor = paperRope ? '/1000' : ''
     setCell(ws, ri, 15, '=ROUND(BB' + (ri + 1) + '*L' + (ri + 1) + weightDivisor + ',2)', 'n')
     setCell(ws, ri, 16, '=ROUND(BC' + (ri + 1) + '*L' + (ri + 1) + weightDivisor + ',2)', 'n')
-    setCell(ws, ri, 17, '=AU' + (ri + 1) + '*AV' + (ri + 1) + '*AW' + (ri + 1) + '/1000000', 'n')
+    setCell(ws, ri, 17, '=AV' + (ri + 1) + '*AW' + (ri + 1) + '*AX' + (ri + 1) + '/1000000', 'n')
     setCell(ws, ri, 18, '=R' + (ri + 1) + '*AT' + (ri + 1), 'n')
     setCell(ws, ri, 20, it.product_use || '', 's')
     setCell(ws, ri, 21, it.contract_no || '', 's')
@@ -421,16 +421,16 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
       const addr = XLSX.utils.encode_cell({ r: ri, c: 40 + j })
       if ((ws as any)[addr]) (ws as any)[addr].z = fmt
     })
-    setCell(ws, ri, 43, effCustoms(it) || tf.exportCompany, 's')
+    setCell(ws, ri, 43, it.customs_company || m?.customs_company || tf.exportCompany, 's')
     setCell(ws, ri, 44, it.bl_head || tf.blHead, 's')
     setCell(ws, ri, 45, it.cartons || 0, 'n')
     const qpc = it.qty_per_carton ?? 0
-    setCell(ws, ri, 46, m?.length || 0, 'n')
-    setCell(ws, ri, 47, m?.width || 0, 'n')
-    setCell(ws, ri, 48, m?.height || 0, 'n')
-    setCell(ws, ri, 49, m?.material_code || '', 's')
-    setCell(ws, ri, 50, '', 's')
-    setCell(ws, ri, 51, qpc, (typeof qpc === 'string' && /[^\d.]/.test(qpc)) ? 's' : 'n')
+    setCell(ws, ri, 46, qpc, (typeof qpc === 'string' && /[^\d.]/.test(qpc)) ? 's' : 'n')
+    setCell(ws, ri, 47, m?.length || 0, 'n')
+    setCell(ws, ri, 48, m?.width || 0, 'n')
+    setCell(ws, ri, 49, m?.height || 0, 'n')
+    setCell(ws, ri, 50, m?.material_code || '', 's')
+    setCell(ws, ri, 51, '', 's')
     setCell(ws, ri, 52, m?.weight_per_carton || 0, 'n')
     const weighingQty = it.weighing_qty ?? shipmentWeightQuantity(m?.name_zh, shipmentPackingAverageQty(qpc))
     setCell(ws, ri, 53, shipmentGrossPerPc(m?.weight_per_carton, weighingQty), 'n')
@@ -438,31 +438,6 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
     setCell(ws, ri, 54, m?.net_per_pc || 0, 'n')
     setCell(ws, ri, 55, it.pallet || '', 's')
   })
-
-  // 发票及采购合计按连续的报关公司分组，只在每组首行显示。
-  for (let start = 0; start < sorted.length;) {
-    const company = effCustoms(sorted[start])
-    let end = start
-    while (end + 1 < sorted.length && effCustoms(sorted[end + 1]) === company) end++
-    const firstRow = start + 4
-    const lastRow = end + 4
-    setCell(ws, start + 3, 27, `=SUM(AA${firstRow}:AA${lastRow})`, 'n')
-    setCell(ws, start + 3, 42, `=SUM(AP${firstRow}:AP${lastRow})`, 'n')
-    setCell(ws, start + 3, 43, company || tf.exportCompany, 's')
-    setCell(ws, start + 3, 44, sorted[start].bl_head || tf.blHead, 's')
-    if (end > start) {
-      for (let index = start + 1; index <= end; index++) {
-        setCell(ws, index + 3, 27, '')
-        setCell(ws, index + 3, 42, '')
-        setCell(ws, index + 3, 43, '')
-        setCell(ws, index + 3, 44, '')
-      }
-      for (const column of [27, 42, 43, 44]) {
-        ws['!merges']!.push({ s: { r: start + 3, c: column }, e: { r: end + 3, c: column } })
-      }
-    }
-    start = end + 1
-  }
   if (sorted.length) ws['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: 3 + sorted.length - 1, c: 55 } })
 
   // 不再用代码重画样式；每个明细单元格都沿用模板第 4 行的对应列格式。
@@ -481,23 +456,6 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
           fill: { patternType: 'solid', fgColor: { rgb: color } },
         }
       }
-    }
-  }
-
-
-  // 按字段用途强制数字格式，避免模板样例行的货币格式串列。
-  const fixedFormats: Record<number, string> = {
-    10: '0.0000', 11: '0.0000', 13: '"HK$"#,##0.0000', 14: '"HK$"#,##0.0000',
-    15: '0.00', 16: '0.00', 17: '0.0000', 18: '0.0000',
-    22: 'yyyy/m/d', 24: 'yyyy/m/d', 25: '"US$"#,##0.0000', 26: '"US$"#,##0.0000',
-    27: '"US$"#,##0.0000', 29: 'yyyy/m/d', 31: 'yyyy/m/d', 38: 'yyyy/m/d',
-    45: '0', 46: '0.0000', 47: '0.0000', 48: '0.0000', 52: '0.0000',
-    53: '0.0000', 54: '0.0000',
-  }
-  for (let i = 0; i < sorted.length; i++) {
-    for (const [column, format] of Object.entries(fixedFormats)) {
-      const cell: any = (ws as any)[XLSX.utils.encode_cell({ r: i + 3, c: Number(column) })]
-      if (cell) cell.z = format
     }
   }
 

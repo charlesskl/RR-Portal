@@ -11,10 +11,10 @@ import { isPaperRope, shipmentGrossPerPc, shipmentPackingAverageQty, shipmentWei
 export const CUSTOMS_FIXED = '深圳市华胜益出口贸易有限公司'
 
 const CUSTOMS_COMPANY_COLORS = [
+  'C6E0B4', // 浅绿（参考表第 1 组）
+  'F8CBAD', // 浅橙（参考表第 2 组）
+  'B4C6E7', // 浅蓝（参考表第 3 组）
   'FFF2CC', // 浅黄
-  'DDEBF7', // 浅蓝
-  'E2F0D9', // 浅绿
-  'FCE4D6', // 浅橙
   'E4DFEC', // 浅紫
   'DAEEF3', // 浅青
   'F4CCCC', // 浅红
@@ -448,6 +448,19 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
     const lastRow = end + 4
     setCell(ws, start + 3, 27, `=SUM(AA${firstRow}:AA${lastRow})`, 'n')
     setCell(ws, start + 3, 42, `=SUM(AP${firstRow}:AP${lastRow})`, 'n')
+    setCell(ws, start + 3, 43, company || tf.exportCompany, 's')
+    setCell(ws, start + 3, 44, sorted[start].bl_head || tf.blHead, 's')
+    if (end > start) {
+      for (let index = start + 1; index <= end; index++) {
+        setCell(ws, index + 3, 27, '')
+        setCell(ws, index + 3, 42, '')
+        setCell(ws, index + 3, 43, '')
+        setCell(ws, index + 3, 44, '')
+      }
+      for (const column of [27, 42, 43, 44]) {
+        ws['!merges']!.push({ s: { r: start + 3, c: column }, e: { r: end + 3, c: column } })
+      }
+    }
     start = end + 1
   }
   if (sorted.length) ws['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: 3 + sorted.length - 1, c: 55 } })

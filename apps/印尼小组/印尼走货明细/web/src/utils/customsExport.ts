@@ -132,9 +132,20 @@ function fitCategoryColumn(wb: XLSX.WorkBook) {
     maxWidth = Math.max(maxWidth, width)
   }
   const columns: any[] = sheet['!cols'] || []
-  const width = Math.min(40, Math.max(24, maxWidth + 2))
+  const width = Math.min(32, Math.max(20, maxWidth + 2))
   columns[1] = { ...(columns[1] || {}), width, wch: width }
   sheet['!cols'] = columns
+}
+
+function compactMainColumns(sheet: XLSX.WorkSheet) {
+  if (!sheet['!cols']) return
+  sheet['!cols'] = sheet['!cols'].map((column: any, index: number) => {
+    if (!column || column.hidden || index === 19) return column
+    const original = Number(column.width ?? column.wch)
+    if (!Number.isFinite(original)) return column
+    const width = Math.max(6, Math.round(original * 0.85 * 10) / 10)
+    return { ...column, width, wch: width }
+  })
 }
 
 function excelDate(d: any): number | string {
@@ -381,6 +392,7 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
 
   populateLinkedDocuments(wbObj, newName, sorted)
   fitCategoryColumn(wbObj)
+  compactMainColumns(ws)
 
   const floatImages: { rowZeroIdx: number; bytes: Uint8Array; ext: string }[] = []
   sorted.forEach((it, i) => {
@@ -508,7 +520,7 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
 
   // 按字段用途强制数字格式，避免模板样例行的货币格式串列。
   const fixedFormats: Record<number, string> = {
-    10: '0.0000', 11: '0.0000', 13: '"HK$"#,##0.0000', 14: '"HK$"#,##0.0000',
+    0: '0', 10: '0.0000', 11: '0.0000', 13: '"HK$"#,##0.0000', 14: '"HK$"#,##0.0000',
     15: '0.00', 16: '0.00', 17: '0.0000', 18: '0.0000',
     22: 'yyyy/m/d', 24: 'yyyy/m/d', 25: '"US$"#,##0.0000', 26: '"US$"#,##0.0000',
     27: '"US$"#,##0.0000', 29: 'yyyy/m/d', 31: 'yyyy/m/d', 38: 'yyyy/m/d',

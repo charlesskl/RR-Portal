@@ -481,6 +481,12 @@
                 <span class="plugin-name">船务管理系统</span>
               </div>
             </div>
+            <div class="plugin-item">
+              <div class="plugin-info">
+                <div class="plugin-dot gray" id="voyageplexDot"></div>
+                <span class="plugin-name">VoyagePlex 船务协同系统</span>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -1131,6 +1137,19 @@
         <a href="/shipping/" target="_blank" rel="noopener" class="btn btn-primary">打开系统</a>
       </div>
     </div>
+    <div class="detail-plugin-card">
+      <div class="detail-plugin-left">
+        <div class="detail-plugin-icon" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);">&#9875;</div>
+        <div>
+          <div class="detail-plugin-name">VoyagePlex 船务协同系统</div>
+          <div class="detail-plugin-desc">邮件和表格解析、走柜任务、产品资料与验货映射协同管理</div>
+        </div>
+      </div>
+      <div class="detail-plugin-right">
+        <div class="detail-plugin-status"><div class="plugin-dot gray" id="voyageplexDetailDot"></div> 检查中...</div>
+        <a href="/voyageplex/" target="_blank" rel="noopener" class="btn btn-primary">打开系统</a>
+      </div>
+    </div>
   </div>
 
   <!-- ===== QA 部详情 ===== -->
@@ -1267,6 +1286,7 @@ async function checkHealth() {
       { name: 'factoryReview', url: '/factory-review/health', dot: 'factoryReviewDot', detailDot: 'factoryReviewDetailDot' },
       { name: 'factoryReviewTest', url: '/factory-review-test/health', dot: 'factoryReviewTestDot', detailDot: 'factoryReviewTestDetailDot' },
       { name: 'shippingManagement', url: '/shipping/health', dot: 'shippingManagementDot', detailDot: 'shippingManagementDetailDot' },
+      { name: 'voyageplex', url: '/voyageplex/api/health', dot: 'voyageplexDot', detailDot: 'voyageplexDetailDot' },
       { name: 'indoShipping', url: '/indo-shipping/health', dot: 'indoShippingDot', detailDot: 'indoShippingDetailDot' },
       { name: 'qaWeekly', url: '/qa-weekly-report/api/health', dot: 'qaWeeklyDot', detailDot: 'qaWeeklyDetailDot' },
       { name: 'qcReport', url: '/qc-report/health', dot: 'qcReportDot', detailDot: 'qcReportDetailDot' },

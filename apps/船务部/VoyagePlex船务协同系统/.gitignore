@@ -1,0 +1,17 @@
+node_modules/
+.next/
+out/
+*.log
+.DS_Store
+server/**/bin/
+server/**/obj/
+server/**/*.db
+server/**/*.db-shm
+server/**/*.db-wal
+.next-build/
+services/email-parser/.venv/
+**/__pycache__/
+*.pyc
+
+# 旧 RR-Portal 仅用于阅读和规则参考，绝不能并入当前系统仓库。
+legacy-reference/

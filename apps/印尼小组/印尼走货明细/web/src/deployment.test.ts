@@ -6,11 +6,19 @@ import JSZip from 'jszip'
 import * as XLSX from 'xlsx-js-style'
 import { describe, expect, it } from 'vitest'
 import { apiBase, publicAsset, publicBase } from './deployment'
-import { buildCustomsWorkbook } from './utils/customsExport'
+import { buildCustomsWorkbook, customsFormulaName } from './utils/customsExport'
 
 const projectRoot = fileURLToPath(new URL('..', import.meta.url))
 
 describe('deployment base paths', () => {
+  it('uses product-type prefixes as formula names outside Huashengyi customs', () => {
+    expect(customsFormulaName({ formula_name: '五金配件-钉' }, undefined, '其他报关公司')).toBe('五金配件')
+    expect(customsFormulaName({ formula_name: '塑胶件-透明罩' }, undefined, '其他报关公司')).toBe('塑胶件')
+    expect(customsFormulaName({ formula_name: '搪胶件-公仔' }, undefined, '其他报关公司')).toBe('搪胶件')
+    expect(customsFormulaName({ formula_name: '五金配件-钉' }, undefined, '深圳市华胜益出口贸易有限公司')).toBe('五金配件-钉')
+    expect(customsFormulaName({ formula_name: '彩咭-FSC' }, undefined, '其他报关公司')).toBe('彩咭-FSC')
+  })
+
   it('uses the Vite public base for browser routes', () => {
     expect(publicBase('/indo-shipping/')).toBe('/indo-shipping')
   })

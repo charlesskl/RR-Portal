@@ -20,6 +20,8 @@ const CUSTOMS_COMPANY_COLORS = [
   'F4CCCC', // 浅红
 ]
 
+const FORMULA_NAME_PREFIXES = ['五金配件', '塑胶件', '搪胶件']
+
 const PURCHASE_CURRENCY_FORMATS: Record<string, string> = {
   '¥': '¥#,##0.0000',
   'HK$': '"HK$"#,##0.0000',
@@ -31,6 +33,12 @@ const PURCHASE_CURRENCY_FORMATS: Record<string, string> = {
 
 function purchaseCurrencyFormat(currency?: string) {
   return PURCHASE_CURRENCY_FORMATS[currency || '¥'] || '#,##0.0000'
+}
+
+export function customsFormulaName(item: CustomsItem, material?: Material, customsCompany = '') {
+  const name = item.formula_name || material?.name_zh || material?.item_no || ''
+  if (customsCompany.includes('华胜益')) return name
+  return FORMULA_NAME_PREFIXES.find(prefix => name.startsWith(prefix)) || name
 }
 
 // 走货明细行（与 ShipmentsPage 的 ShipmentItem 字段一致，只列导出用到的）
@@ -422,7 +430,7 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
     setCell(ws, ri, 1, m?.hs_cn || phs?.hsCN || '', 's')
     setCell(ws, ri, 2, m?.hs_id || phs?.hsID || '', 's')
     setCell(ws, ri, 3, m?.product_code || '', 's')
-    setCell(ws, ri, 4, it.formula_name || m?.name_zh || m?.item_no || '', 's')
+    setCell(ws, ri, 4, customsFormulaName(it, m, effCustoms(it)), 's')
     setCell(ws, ri, 5, m?.name_zh || '', 's')
     setCell(ws, ri, 6, m?.name_en || '', 's')
     setCell(ws, ri, 7, m?.spec || '', 's')

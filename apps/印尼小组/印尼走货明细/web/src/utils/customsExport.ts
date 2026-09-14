@@ -20,6 +20,19 @@ const CUSTOMS_COMPANY_COLORS = [
   'F4CCCC', // 浅红
 ]
 
+const PURCHASE_CURRENCY_FORMATS: Record<string, string> = {
+  '¥': '¥#,##0.0000',
+  'HK$': '"HK$"#,##0.0000',
+  'US$': '"US$"#,##0.0000',
+  '€': '"€"#,##0.0000',
+  '£': '"£"#,##0.0000',
+  '¥(JPY)': '"¥"#,##0',
+}
+
+function purchaseCurrencyFormat(currency?: string) {
+  return PURCHASE_CURRENCY_FORMATS[currency || '¥'] || '#,##0.0000'
+}
+
 // 走货明细行（与 ShipmentsPage 的 ShipmentItem 字段一致，只列导出用到的）
 export interface CustomsItem {
   material_id?: number
@@ -118,6 +131,35 @@ function normalizeWorkbookStyles(wb: XLSX.WorkBook) {
       cell.s = writableTemplateStyle(cell.s)
     }
   }
+}
+
+function fitCategoryColumn(wb: XLSX.WorkBook) {
+  const sheet = wb.Sheets['类别金额']
+  if (!sheet) return
+  const range = sheet['!ref'] ? XLSX.utils.decode_range(sheet['!ref']) : { s: { r: 0 }, e: { r: 40 } }
+  let maxWidth = 8
+  for (let row = range.s.r; row <= range.e.r; row++) {
+    const value = (sheet as any)[XLSX.utils.encode_cell({ r: row, c: 1 })]?.v
+    if (value == null) continue
+    const width = Array.from(String(value)).reduce((sum, char) => sum + (char.charCodeAt(0) > 255 ? 2 : 1), 0)
+    maxWidth = Math.max(maxWidth, width)
+  }
+  const columns: any[] = sheet['!cols'] || []
+  const width = Math.min(32, Math.max(20, maxWidth + 2))
+  columns[1] = { ...(columns[1] || {}), width, wch: width }
+  sheet['!cols'] = columns
+}
+
+function compactMainColumns(sheet: XLSX.WorkSheet) {
+  if (!sheet['!cols']) return
+  sheet['!cols'] = sheet['!cols'].map((column: any, index: number) => {
+    if (!column || column.hidden) return column
+    if (index === 19) return { ...column, width: 16, wch: 16 }
+    const original = Number(column.width ?? column.wch)
+    if (!Number.isFinite(original)) return column
+    const width = Math.max(6, Math.round(original * 0.85 * 10) / 10)
+    return { ...column, width, wch: width }
+  })
 }
 
 function excelDate(d: any): number | string {
@@ -304,11 +346,15 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
   wbObj.SheetNames = wbObj.SheetNames.map(n => n === oldName ? newName : n)
   const ws = wbObj.Sheets[newName]
 
+  // 导出文件不显示模板 M3“单位可以选择”的旧式批注提示框。
+  if ((ws as any).M3) delete (ws as any).M3.c
+
   // 模板第 4 行是首个明细行；保留每列的样式和数字格式，供新明细行复用。
   const detailFormat = Array.from({ length: 56 }, (_, c) => {
     const cell: any = (ws as any)[XLSX.utils.encode_cell({ r: 3, c })]
     return cell ? { s: writableTemplateStyle(cell.s), z: cell.z } : undefined
   })
+  const formulaNameFill = cloneTemplateValue((ws as any).E3?.s?.fill)
   const templateDetailRow = cloneTemplateValue((ws['!rows'] || [])[3] || { hpt: 108.75 })
 
   // 不允许参考模板里的旧柜数据残留；只保留前三行表头与样式。
@@ -360,6 +406,8 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
   }
 
   populateLinkedDocuments(wbObj, newName, sorted)
+  fitCategoryColumn(wbObj)
+  compactMainColumns(ws)
 
   const floatImages: { rowZeroIdx: number; bytes: Uint8Array; ext: string }[] = []
   sorted.forEach((it, i) => {
@@ -411,12 +459,7 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
     setCell(ws, ri, 39, it.po_no || '', 's')
     setCell(ws, ri, 40, it.price || 0, 'n')
     setCell(ws, ri, 41, '=AO' + (ri + 1) + '*L' + (ri + 1), 'n')
-    const currency = it.currency || '¥'
-    const fmtMap: Record<string, string> = {
-      '¥': '¥#,##0.0000', 'HK$': '"HK$"#,##0.0000', 'US$': '"US$"#,##0.0000',
-      '€': '"€"#,##0.0000', '£': '"£"#,##0.0000', '¥(JPY)': '"¥"#,##0',
-    }
-    const fmt = fmtMap[currency] || '#,##0.0000'
+    const fmt = purchaseCurrencyFormat(it.currency)
     ;['AO', 'AP'].forEach((_col, j) => {
       const addr = XLSX.utils.encode_cell({ r: ri, c: 40 + j })
       if ((ws as any)[addr]) (ws as any)[addr].z = fmt
@@ -448,6 +491,7 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
     const lastRow = end + 4
     setCell(ws, start + 3, 27, `=SUM(AA${firstRow}:AA${lastRow})`, 'n')
     setCell(ws, start + 3, 42, `=SUM(AP${firstRow}:AP${lastRow})`, 'n')
+    ;(ws as any)[XLSX.utils.encode_cell({ r: start + 3, c: 42 })].z = purchaseCurrencyFormat(sorted[start].currency)
     setCell(ws, start + 3, 43, company || tf.exportCompany, 's')
     setCell(ws, start + 3, 44, sorted[start].bl_head || tf.blHead, 's')
     if (end > start) {
@@ -465,7 +509,29 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
   }
   if (sorted.length) ws['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: 3 + sorted.length - 1, c: 55 } })
 
-  // 不再用代码重画样式；每个明细单元格都沿用模板第 4 行的对应列格式。
+  // xlsx-js-style 读取旧模板时只能还原填充色和数字格式，因此需补回
+  // 模板的字体、对齐、换行和边框，否则表头会被压缩且文字串列。
+  const thinBorder = { style: 'thin', color: { rgb: '999999' } }
+  const border = { top: thinBorder, bottom: thinBorder, left: thinBorder, right: thinBorder }
+  const headerBaseStyle = {
+    font: { name: 'Microsoft YaHei', sz: 10, bold: true, color: { rgb: '1A1A2E' } },
+    alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
+    border,
+  }
+  const detailBaseStyle = {
+    font: { name: 'Microsoft YaHei', sz: 10, color: { rgb: '1A1A2E' } },
+    alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
+    border,
+  }
+  for (let c = 0; c < 56; c++) {
+    const addr = XLSX.utils.encode_cell({ r: 2, c })
+    const cell: any = (ws as any)[addr] || { v: '', t: 's' }
+    const fill = cell.s?.fill
+    cell.s = { ...headerBaseStyle, ...(fill ? { fill: cloneTemplateValue(fill) } : {}) }
+    ;(ws as any)[addr] = cell
+  }
+
+  // 每个明细单元格沿用模板第 4 行的对应列填充色和数字格式。
   for (let i = 0; i < sorted.length; i++) {
     const ri = 3 + i
     const color = companyColor.get(effCustoms(sorted[i]))
@@ -473,9 +539,13 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
       const addr = XLSX.utils.encode_cell({ r: ri, c })
       if (!(ws as any)[addr]) (ws as any)[addr] = { v: '', t: 's' }
       const format = detailFormat[c]
-      if (format?.s) (ws as any)[addr].s = cloneTemplateValue(format.s)
+      const templateFill = c === 4 && formulaNameFill ? formulaNameFill : format?.s?.fill
+      ;(ws as any)[addr].s = {
+        ...detailBaseStyle,
+        ...(templateFill ? { fill: cloneTemplateValue(templateFill) } : {}),
+      }
       if (!(ws as any)[addr].z && format?.z) (ws as any)[addr].z = format.z
-      if (color) {
+      if (color && c !== 4) {
         ;(ws as any)[addr].s = {
           ...((ws as any)[addr].s || {}),
           fill: { patternType: 'solid', fgColor: { rgb: color } },
@@ -487,7 +557,7 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
 
   // 按字段用途强制数字格式，避免模板样例行的货币格式串列。
   const fixedFormats: Record<number, string> = {
-    10: '0.0000', 11: '0.0000', 13: '"HK$"#,##0.0000', 14: '"HK$"#,##0.0000',
+    0: '0', 10: '0.0000', 11: '0.0000', 13: '"HK$"#,##0.0000', 14: '"HK$"#,##0.0000',
     15: '0.00', 16: '0.00', 17: '0.0000', 18: '0.0000',
     22: 'yyyy/m/d', 24: 'yyyy/m/d', 25: '"US$"#,##0.0000', 26: '"US$"#,##0.0000',
     27: '"US$"#,##0.0000', 29: 'yyyy/m/d', 31: 'yyyy/m/d', 38: 'yyyy/m/d',
@@ -501,8 +571,10 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
     }
   }
 
-  // 列宽、隐藏列和表头行高均由模板决定，只扩展新明细行的行高。
+  // 列宽、隐藏列和明细行高沿用模板；缩短顶部两行空白区域。
   const rows: any[] = ws['!rows'] || []
+  rows[0] = { ...(rows[0] || {}), hpt: 24, hpx: 24 }
+  rows[1] = { ...(rows[1] || {}), hpt: 24, hpx: 24 }
   for (let i = 0; i < sorted.length; i++) rows[3 + i] = cloneTemplateValue(templateDetailRow)
   ws['!rows'] = rows
   ws['!autofilter'] = { ref: `A3:BD${Math.max(3, sorted.length + 3)}` }

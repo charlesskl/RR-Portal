@@ -53,7 +53,7 @@ describe('deployment base paths', () => {
     const output = await buildCustomsWorkbook({
       templateBuffer,
       items: [
-        { material_id: 7, qty: 12, price: 3.5, cartons: 2, qty_per_carton: '6', weighing_qty: 6, pallet: '1-2/1卡', po_no: 'PO-TEST', customs_company: 'A 报关公司' },
+        { material_id: 7, qty: 12, price: 3.5, currency: 'US$', cartons: 2, qty_per_carton: '6', weighing_qty: 6, pallet: '1-2/1卡', po_no: 'PO-TEST', customs_company: 'A 报关公司' },
         { material_id: 8, qty: 20000, price: 0.1, cartons: 1, qty_per_carton: '20000', weighing_qty: 20, po_no: 'PO-ROPE', customs_company: 'B 报关公司' },
         { material_id: 9, qty: 10000, price: 0.2, cartons: 3, qty_per_carton: '1-2/3000 3/4000', weighing_qty: 2500, po_no: 'PO-MIXED', customs_company: 'B 报关公司' },
       ],
@@ -95,6 +95,7 @@ describe('deployment base paths', () => {
       'WpsReserved_CellImgList',
     ])
     const sheet = workbook.Sheets['TEST-CNTR']
+    expect(sheet.M3?.c).toBeUndefined()
     expect(sheet.A4?.v).toBe(1)
     expect(sheet.D4?.v).toBe('ITEM-TEST')
     expect(sheet.N1?.v).toBe(7.8)
@@ -121,7 +122,9 @@ describe('deployment base paths', () => {
     expect(sheet.BD4?.v).toBe('1-2/1卡')
     expect(sheet.AB4?.f).toBe('SUM(AA4:AA4)')
     expect(sheet.AQ5?.f).toBe('SUM(AP5:AP6)')
+    expect(sheet.AQ4?.z).toBe('"US$"#,##0.0000')
     expect(sheet.AD4?.z).toBe('yyyy/m/d')
+    expect(sheet.A5?.z).toBe('0')
     expect(sheet.AT4?.z).toBe('0')
     expect(sheet.AU4?.z).toBe('0.0000')
     expect(sheet.BB4?.z).toBe('0.0000')
@@ -130,13 +133,19 @@ describe('deployment base paths', () => {
     expect(sheet.A4?.s?.fgColor?.rgb).toBe('C6E0B4')
     expect(sheet.A4?.s?.fgColor?.rgb).not.toBe(sheet.A5?.s?.fgColor?.rgb)
     expect(sheet.A5?.s?.fgColor?.rgb).toBe(sheet.A6?.s?.fgColor?.rgb)
+    expect(sheet.E4?.s?.fgColor?.rgb).toBe(sheet.E3?.s?.fgColor?.rgb)
+    expect(sheet.E4?.s?.fgColor?.rgb).not.toBe(sheet.A4?.s?.fgColor?.rgb)
     expect(sheet.P4?.z).toBe('0.00')
-    expect(sheet['!cols']?.[0]?.width).toBe(templateSheet['!cols']?.[0]?.width)
+    expect(sheet['!cols']?.[0]?.width).toBeLessThan(templateSheet['!cols']?.[0]?.width || Infinity)
+    expect(sheet['!cols']?.[19]?.width).toBeLessThan(templateSheet['!cols']?.[19]?.width || Infinity)
     expect(sheet['!rows']?.[3]?.hpt).toBe(templateSheet['!rows']?.[3]?.hpt)
+    expect(sheet['!rows']?.[0]?.hpt).toBe(24)
+    expect(sheet['!rows']?.[1]?.hpt).toBe(24)
     expect(sheet['!merges']).toContainEqual({ s: { r: 4, c: 27 }, e: { r: 5, c: 27 } })
     expect(sheet['!merges']).toContainEqual({ s: { r: 4, c: 42 }, e: { r: 5, c: 42 } })
     expect(sheet['!merges']).toContainEqual({ s: { r: 4, c: 43 }, e: { r: 5, c: 43 } })
     expect(workbook.Sheets['类别金额'].C4?.f).toContain("'TEST-CNTR'!$AA$4:$AA$1000")
+    expect(workbook.Sheets['类别金额']['!cols']?.[1]?.wch).toBeGreaterThanOrEqual(19)
     expect(workbook.Sheets['全球合同'].B24?.f).toContain("'TEST-CNTR'!V:V")
     expect(workbook.Sheets['全球发票'].B32?.f).toContain("'TEST-CNTR'!V:V")
     expect(workbook.Sheets['装箱单'].B24?.f).toContain("'TEST-CNTR'!X:X")

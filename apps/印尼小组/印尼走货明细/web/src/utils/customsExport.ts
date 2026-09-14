@@ -498,7 +498,29 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
   }
   if (sorted.length) ws['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: 3 + sorted.length - 1, c: 55 } })
 
-  // 不再用代码重画样式；每个明细单元格都沿用模板第 4 行的对应列格式。
+  // xlsx-js-style 读取旧模板时只能还原填充色和数字格式，因此需补回
+  // 模板的字体、对齐、换行和边框，否则表头会被压缩且文字串列。
+  const thinBorder = { style: 'thin', color: { rgb: '999999' } }
+  const border = { top: thinBorder, bottom: thinBorder, left: thinBorder, right: thinBorder }
+  const headerBaseStyle = {
+    font: { name: 'Microsoft YaHei', sz: 10, bold: true, color: { rgb: '1A1A2E' } },
+    alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
+    border,
+  }
+  const detailBaseStyle = {
+    font: { name: 'Microsoft YaHei', sz: 10, color: { rgb: '1A1A2E' } },
+    alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
+    border,
+  }
+  for (let c = 0; c < 56; c++) {
+    const addr = XLSX.utils.encode_cell({ r: 2, c })
+    const cell: any = (ws as any)[addr] || { v: '', t: 's' }
+    const fill = cell.s?.fill
+    cell.s = { ...headerBaseStyle, ...(fill ? { fill: cloneTemplateValue(fill) } : {}) }
+    ;(ws as any)[addr] = cell
+  }
+
+  // 每个明细单元格沿用模板第 4 行的对应列填充色和数字格式。
   for (let i = 0; i < sorted.length; i++) {
     const ri = 3 + i
     const color = companyColor.get(effCustoms(sorted[i]))
@@ -506,7 +528,11 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
       const addr = XLSX.utils.encode_cell({ r: ri, c })
       if (!(ws as any)[addr]) (ws as any)[addr] = { v: '', t: 's' }
       const format = detailFormat[c]
-      if (format?.s) (ws as any)[addr].s = cloneTemplateValue(format.s)
+      const templateFill = format?.s?.fill
+      ;(ws as any)[addr].s = {
+        ...detailBaseStyle,
+        ...(templateFill ? { fill: cloneTemplateValue(templateFill) } : {}),
+      }
       if (!(ws as any)[addr].z && format?.z) (ws as any)[addr].z = format.z
       if (color) {
         ;(ws as any)[addr].s = {

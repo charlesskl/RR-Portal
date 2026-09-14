@@ -20,7 +20,7 @@ const CUSTOMS_COMPANY_COLORS = [
   'F4CCCC', // 浅红
 ]
 
-const FORMULA_NAME_PREFIXES = ['五金配件', '塑胶件', '搪胶件']
+const FORMULA_NAME_PREFIXES = ['五金配件', '塑胶件', '搪胶件', '毛绒裁片']
 
 const PURCHASE_CURRENCY_FORMATS: Record<string, string> = {
   '¥': '¥#,##0.0000',

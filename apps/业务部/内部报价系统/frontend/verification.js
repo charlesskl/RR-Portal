@@ -858,11 +858,11 @@ function comparisonTargetCells(baselineValue, targetValue, currency = 'HKD', dec
 async function refreshComparison() {
   const resultHost = $('verification-comparison-result');
   if (!resultHost) return;
+  const refreshToken = ++comparisonRefreshToken;
   if (!comparisonState.targets.length) {
     resultHost.innerHTML = '<div class="summary-empty">请至少勾选一个参与对比的版本</div>';
     return;
   }
-  const refreshToken = ++comparisonRefreshToken;
   resultHost.innerHTML = '<div class="verification-preview-empty">正在计算所选版本…</div>';
   try {
     const sources = await Promise.all([comparisonState.baseline, ...comparisonState.targets].map(loadComparisonSource));

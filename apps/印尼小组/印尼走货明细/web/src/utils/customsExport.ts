@@ -560,8 +560,10 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
     }
   }
 
-  // 列宽、隐藏列和表头行高均由模板决定，只扩展新明细行的行高。
+  // 列宽、隐藏列和明细行高沿用模板；缩短顶部两行空白区域。
   const rows: any[] = ws['!rows'] || []
+  rows[0] = { ...(rows[0] || {}), hpt: 24, hpx: 24 }
+  rows[1] = { ...(rows[1] || {}), hpt: 24, hpx: 24 }
   for (let i = 0; i < sorted.length; i++) rows[3 + i] = cloneTemplateValue(templateDetailRow)
   ws['!rows'] = rows
   ws['!autofilter'] = { ref: `A3:BD${Math.max(3, sorted.length + 3)}` }

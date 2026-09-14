@@ -7,7 +7,11 @@ import { useScoresStore } from '../stores/scores'
 import { useScoreTemplatesStore } from '../stores/scoreTemplates'
 import { useAuthStore } from '../stores/auth'
 import { pb } from '../pb'
-import { filterMonthlyScoringData, mergeAutomaticScores } from '../utils/monthlyAutoScoring'
+import {
+  factoryIdsWithOrdersInRange,
+  filterMonthlyScoringData,
+  mergeAutomaticScores,
+} from '../utils/monthlyAutoScoring'
 import {
   monthsInScoringRange,
   resolveScoringRange,
@@ -37,6 +41,7 @@ const customEnd = ref(month.value)
 const loadingScores = ref(false)
 const autoScoring = ref(false)
 const autoProgress = ref('')
+const scoringOrders = ref<Order[]>([])
 const myRegions = computed(() => (auth.role ? allowedRegions(auth.role) : REGIONS))
 
 const gradeCls: Record<string, string> = { A: 'badge-A', B: 'badge-B', C: 'badge-C', D: 'badge-D' }
@@ -50,6 +55,11 @@ const isRange = computed(() => rangeMode.value !== 'month')
 const rangeLabel = computed(() => selectedRange.value.start === selectedRange.value.end
   ? selectedRange.value.start
   : `${selectedRange.value.start} 至 ${selectedRange.value.end}`)
+const factoryIdsWithOrders = computed(() => factoryIdsWithOrdersInRange(
+  scoringOrders.value,
+  selectedRange.value.start,
+  selectedRange.value.end,
+))
 
 const monthlyScoreByFactory = computed(() => {
   const m: Record<string, MonthlyScore> = {}
@@ -65,6 +75,7 @@ const scoreByFactory = computed(() => {
 
 const rows = computed(() => {
   let list = filterByCraft(factories.items, null).filter((f) => allowedCrafts().includes(f.craft))
+  list = list.filter((f) => factoryIdsWithOrders.value.has(f.id))
   list = list.filter((f) => myRegions.value.includes(regionOf(f)))
   if (regionFilter.value) list = list.filter((f) => regionOf(f) === regionFilter.value)
   if (deptFilter.value) list = list.filter((f) => f.craft === deptFilter.value)
@@ -84,11 +95,13 @@ async function load() {
   const range = selectedRange.value
   loadingScores.value = true
   try {
-    await Promise.all([
+    const [, , , orders] = await Promise.all([
       factories.fetchAll(),
       range.start === range.end ? scores.fetchByMonth(range.start) : scores.fetchByRange(range.start, range.end),
       templates.fetchAll(),
+      pb.collection('orders').getFullList<Order>(),
     ])
+    scoringOrders.value = orders
   } finally {
     loadingScores.value = false
   }
@@ -111,6 +124,7 @@ async function calculateMonthScores() {
       pb.collection('quality_inspections').getFullList<QualityInspection>(),
       pb.collection('quality_5s_checks').getFullList<Quality5sCheck>(),
     ])
+    scoringOrders.value = orders
     const existing = monthlyScoreByFactory.value
     let saved = 0
     let skipped = 0
@@ -211,7 +225,11 @@ load()
             </td>
             <td><RouterLink :to="`/factories/${f.id}/score/${selectedRange.end}`"><button class="ghost mini">{{ isRange ? '末月评分' : '评分' }} →</button></RouterLink></td>
           </tr>
-          <tr v-if="!rows.length"><td colspan="7" class="hint" style="text-align:center">暂无工厂</td></tr>
+          <tr v-if="!rows.length">
+            <td colspan="7" class="hint" style="text-align:center">
+              {{ loadingScores ? '正在加载...' : '当前评分范围内暂无订单工厂' }}
+            </td>
+          </tr>
         </tbody>
       </table>
     </div>

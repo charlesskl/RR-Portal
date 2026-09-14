@@ -41,6 +41,20 @@ export function orderMonth(order: Order): string {
   return recordMonth(order.delivery_date || order.actual_delivery_date || order.order_date)
 }
 
+export function factoryIdsWithOrdersInRange(orders: Order[], startMonth: string, endMonth: string): Set<string> {
+  const start = startMonth <= endMonth ? startMonth : endMonth
+  const end = startMonth <= endMonth ? endMonth : startMonth
+  return new Set(
+    orders
+      .filter((order) => {
+        const month = orderMonth(order)
+        return month >= start && month <= end
+      })
+      .map((order) => order.factory)
+      .filter(Boolean),
+  )
+}
+
 export function filterMonthlyScoringData(data: MonthlyScoringData, month: string): MonthlyScoringData {
   return {
     orders: data.orders.filter((order) => orderMonth(order) === month),

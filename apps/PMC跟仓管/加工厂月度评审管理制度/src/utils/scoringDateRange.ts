@@ -1,4 +1,4 @@
-import { gradeFromScore } from './grading'
+import { gradeFromScore, totalFromItems } from './grading'
 import type { Grade } from '../constants/grading'
 import type { MonthlyScore } from '../types/score'
 
@@ -54,9 +54,16 @@ export function monthsInScoringRange({ start, end }: ScoringMonthRange): number 
 }
 
 export function summarizeFactoryScores(scores: MonthlyScore[]): FactoryScoreSummary {
-  const scored = scores.filter((score) => score.total_score != null && Number.isFinite(Number(score.total_score)))
+  const scored = scores
+    .map((score) => ({
+      ...score,
+      calculatedTotal: Array.isArray(score.score_items) && score.score_items.length
+        ? totalFromItems(score.score_items)
+        : score.total_score == null ? Number.NaN : Number(score.total_score),
+    }))
+    .filter((score) => Number.isFinite(score.calculatedTotal))
   const totalScore = scored.length
-    ? Math.round((scored.reduce((sum, score) => sum + Number(score.total_score), 0) / scored.length) * 100) / 100
+    ? Math.round((scored.reduce((sum, score) => sum + score.calculatedTotal, 0) / scored.length) * 100) / 100
     : undefined
   const flag: MonthlyScore['flag'] = scores.some((score) => score.flag === 'red')
     ? 'red'
@@ -64,9 +71,7 @@ export function summarizeFactoryScores(scores: MonthlyScore[]): FactoryScoreSumm
 
   return {
     totalScore,
-    grade: scores.length === 1 && scores[0].grade
-      ? scores[0].grade
-      : totalScore == null ? undefined : gradeFromScore(totalScore),
+    grade: totalScore == null ? undefined : gradeFromScore(totalScore),
     flag,
     monthsScored: new Set(scored.map((score) => score.year_month)).size,
     status: scores.length === 1 ? scores[0].status : undefined,

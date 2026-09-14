@@ -12,7 +12,7 @@ import { buildPriceStatsRows, type PriceStatsRow } from '../utils/priceStats'
 import { isPercentOver100 } from '../utils/percentage'
 import { canEditOrders } from '../utils/permissions'
 import { matchPriceImportRows, parsePriceStatsExcel } from '../utils/priceStatsExcelImport'
-import { taxPointFactor } from '../utils/taxPoint'
+import { factoryTaxPointFactors, taxPointFactor } from '../utils/taxPoint'
 import { useTableColumnPreferences } from '../composables/useTableColumnPreferences'
 import { orderRegion } from '../utils/orderRegion'
 
@@ -31,9 +31,13 @@ const region = computed(() => (route.query.region as Region) || null)
 const deptName = computed(() =>
   (region.value ? REGION_LABELS[region.value] + '厂区 · ' : '') + (CRAFT_LABELS[craft.value] ?? '部门'))
 const isSewing = computed(() => craft.value === 'sewing')
+const isHunan = computed(() => region.value === 'hunan')
+const showTaxPoint = computed(() => isHunan.value || isSewing.value)
 const showMoldNumber = computed(() => craft.value === 'injection')
 
-const priceHeaders = computed(() => isSewing.value
+const priceHeaders = computed(() => isHunan.value
+  ? [isSewing.value ? '核价工价(不含税RMB)' : '核价生产工价', isSewing.value ? '外发工价(人民币含税)' : '外发单价', '税点', '占比']
+  : isSewing.value
   ? ['核价工价(不含税RMB)', '外发工价(人民币含税)', '税点', '扣税点后单价', '占比']
   : ['核价生产工价', '外发单价', '扣税点1.13后单价', '占比'])
 
@@ -46,13 +50,13 @@ const tableColumns = [
   { key: 'product', label: '配件名称/模号', width: 220 },
   { key: 'quotePrice', label: isSewing.value ? '核价工价(不含税RMB)' : '核价生产工价', width: 180 },
   { key: 'unitPrice', label: isSewing.value ? '外发工价(人民币含税)' : '外发单价', width: 180 },
-  ...(isSewing.value ? [{ key: 'taxPoint', label: '税点', width: 100 }] : []),
-  { key: 'afterTax', label: isSewing.value ? '扣税点后单价' : '扣税点1.13后单价', width: 180 },
+  ...(showTaxPoint.value ? [{ key: 'taxPoint', label: '税点', width: 100 }] : []),
+  ...(!isHunan.value ? [{ key: 'afterTax', label: isSewing.value ? '扣税点后单价' : '扣税点1.13后单价', width: 180 }] : []),
   { key: 'ratio', label: '占比', width: 100 },
   { key: 'notes', label: '备注', width: 180 },
 ]
 const { frozenThrough, columnPanelOpen, visibleColumns, isVisible, isFrozen, columnStyle, toggleColumn, showAllColumns } =
-  useTableColumnPreferences(`price-stats-table-columns-${craft.value}`, tableColumns)
+  useTableColumnPreferences(`price-stats-table-columns-${craft.value}${isHunan.value ? '-hunan' : ''}`, tableColumns)
 const visibleColumnCount = computed(() => visibleColumns.value.length)
 
 onMounted(() => Promise.all([orders.fetchAll(), factories.fetchAll()]))
@@ -60,6 +64,7 @@ onMounted(() => Promise.all([orders.fetchAll(), factories.fetchAll()]))
 function linkedFactoryTaxPoint(factoryId: string | null | undefined) {
   return taxPointFactor(factories.items.find((factory) => factory.id === factoryId)?.tax_point)
 }
+const deliveryTaxPoints = computed(() => factoryTaxPointFactors(factories.items))
 
 const rows = computed<PriceStatsRow[]>(() => {
   const keyword = searchKeyword.value.trim().toLocaleLowerCase()
@@ -81,6 +86,7 @@ const rows = computed<PriceStatsRow[]>(() => {
     (o) => o.expand?.factory?.name ?? '',
     isSewing.value,
     (o) => linkedFactoryTaxPoint(o.factory),
+    isHunan.value ? (o) => deliveryTaxPoints.value.get(o.factory) ?? o.exchange_rate ?? null : undefined,
   )
 })
 
@@ -110,8 +116,8 @@ function exportExcel() {
     r.product,
     r.quote_labor_price ?? '',
     r.unit_price ?? '',
-    ...(isSewing.value ? [r.tax_point ?? ''] : []),
-    r.after_tax ?? '',
+    ...(showTaxPoint.value ? [r.tax_point ?? ''] : []),
+    ...(!isHunan.value ? [r.after_tax ?? ''] : []),
     r.ratio_pct == null ? '' : r.ratio_pct + '%',
     r.notes,
   ])
@@ -222,7 +228,12 @@ async function importExcel(event: Event) {
           <thead>
             <tr>
               <th v-for="column in visibleColumns" :key="column.key"
-                :class="{ frozen: isFrozen(column.key), 'freeze-edge': frozenThrough === column.key, 'item-no-col': column.key === 'itemNo' }"
+                :class="{
+                  frozen: isFrozen(column.key),
+                  'freeze-edge': frozenThrough === column.key,
+                  'item-no-col': column.key === 'itemNo',
+                  'wrap-col': column.key === 'product' || column.key === 'notes',
+                }"
                 :style="columnStyle(column.key)">{{ column.label }}</th>
             </tr>
           </thead>
@@ -233,13 +244,13 @@ async function importExcel(event: Event) {
               <td v-if="isVisible('category') && r.categorySpan" :rowspan="r.categorySpan" :class="{ frozen: isFrozen('category'), 'freeze-edge': frozenThrough === 'category' }" :style="columnStyle('category')">{{ r.category || '-' }}</td>
               <td class="item-no-col" :class="{ frozen: isFrozen('itemNo'), 'freeze-edge': frozenThrough === 'itemNo' }" :style="columnStyle('itemNo')">{{ r.item_no || '-' }}</td>
               <td v-if="showMoldNumber && isVisible('moldNo')" :class="{ frozen: isFrozen('moldNo'), 'freeze-edge': frozenThrough === 'moldNo' }" :style="columnStyle('moldNo')">{{ r.mold_no || '-' }}</td>
-              <td v-if="isVisible('product')" :class="{ frozen: isFrozen('product'), 'freeze-edge': frozenThrough === 'product' }" :style="columnStyle('product')">{{ r.product || '-' }}</td>
+              <td v-if="isVisible('product')" class="wrap-col" :class="{ frozen: isFrozen('product'), 'freeze-edge': frozenThrough === 'product' }" :style="columnStyle('product')">{{ r.product || '-' }}</td>
               <td v-if="isVisible('quotePrice')" :class="{ frozen: isFrozen('quotePrice'), 'freeze-edge': frozenThrough === 'quotePrice' }" :style="columnStyle('quotePrice')">{{ num(r.quote_labor_price) }}</td>
               <td v-if="isVisible('unitPrice')" :class="{ frozen: isFrozen('unitPrice'), 'freeze-edge': frozenThrough === 'unitPrice' }" :style="columnStyle('unitPrice')">{{ num(r.unit_price) }}</td>
-              <td v-if="isSewing && isVisible('taxPoint')" :class="{ frozen: isFrozen('taxPoint'), 'freeze-edge': frozenThrough === 'taxPoint' }" :style="columnStyle('taxPoint')">{{ num(r.tax_point) }}</td>
-              <td v-if="isVisible('afterTax')" :class="{ frozen: isFrozen('afterTax'), 'freeze-edge': frozenThrough === 'afterTax' }" :style="columnStyle('afterTax')">{{ num(r.after_tax) }}</td>
+              <td v-if="showTaxPoint && isVisible('taxPoint')" :class="{ frozen: isFrozen('taxPoint'), 'freeze-edge': frozenThrough === 'taxPoint' }" :style="columnStyle('taxPoint')">{{ num(r.tax_point) }}</td>
+              <td v-if="!isHunan && isVisible('afterTax')" :class="{ frozen: isFrozen('afterTax'), 'freeze-edge': frozenThrough === 'afterTax' }" :style="columnStyle('afterTax')">{{ num(r.after_tax) }}</td>
               <td v-if="isVisible('ratio')" :class="{ 'over-limit': isPercentOver100(r.ratio_pct), frozen: isFrozen('ratio'), 'freeze-edge': frozenThrough === 'ratio' }" :style="columnStyle('ratio')">{{ pct(r.ratio_pct) }}</td>
-              <td v-if="isVisible('notes')" :class="{ frozen: isFrozen('notes'), 'freeze-edge': frozenThrough === 'notes' }" :style="columnStyle('notes')">{{ r.notes || '-' }}</td>
+              <td v-if="isVisible('notes')" class="wrap-col" :class="{ frozen: isFrozen('notes'), 'freeze-edge': frozenThrough === 'notes' }" :style="columnStyle('notes')">{{ r.notes || '-' }}</td>
             </tr>
             <tr v-if="!rows.length"><td :colspan="visibleColumnCount" class="hint" style="text-align:center">该部门暂无数据</td></tr>
 
@@ -300,6 +311,12 @@ async function importExcel(event: Event) {
   white-space: normal;
   overflow-wrap: anywhere;
   word-break: break-word;
+}
+.stats .wrap-col {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  line-height: 1.45;
 }
 
 .stats .over-limit { color: #dc2626; font-weight: 600; }

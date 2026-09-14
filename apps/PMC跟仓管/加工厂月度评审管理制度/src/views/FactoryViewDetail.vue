@@ -87,7 +87,7 @@ onMounted(async () => {
               <div class="m-title"><span class="ic">🧹</span>现场管理</div>
               <div class="m-line"><span>现场得分</span><b>{{ site ? site.siteScore : '-' }}</b></div>
               <div class="m-line"><span>折算总达成率</span><b class="hl">{{ site ? site.finalRate : '-' }}</b></div>
-              <div class="m-line"><span>IP管控</span><b>{{ factory.ip_control || '-' }}</b></div>
+              <div class="m-line"><span>IP管控</span><b>{{ site ? site.ipScore : '-' }}</b></div>
             </div>
           </div>
         </div>

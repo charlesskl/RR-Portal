@@ -31,14 +31,18 @@ function parseIP(v?: string): number | null {
   const s = String(v ?? '').trim()
   return (!s || !/^[0-9]+(\.[0-9]+)?$/.test(s)) ? null : Number(s)
 }
-export interface SiteStats { siteScore: number; finalRate: string }
+export interface SiteStats { siteScore: number; finalRate: string; ipScore: string }
 // checks 需按 -check_date 排序,取最新一条;折算总达成率:NA→现场得分/100;适用→(现场得分+IP)/110
 export function computeSiteStats(checks: any[]): SiteStats {
   const c = checks[0]
-  if (!c) return { siteScore: 0, finalRate: '-' }
+  if (!c) return { siteScore: 0, finalRate: '-', ipScore: '-' }
   const s = S5_KEYS.reduce((a, k) => a + (Number(c[k]) || 0), 0)
   const ip = parseIP(c.ip_control)
-  return { siteScore: s, finalRate: ip == null ? s + '%' : Math.round(((s + ip) / 110) * 100) + '%' }
+  return {
+    siteScore: s,
+    finalRate: ip == null ? s + '%' : Math.round(((s + ip) / 110) * 100) + '%',
+    ipScore: ip == null ? 'NA' : String(ip),
+  }
 }
 
 // 单个工厂的价格/交期/品质指标(口径与汇总表一致)

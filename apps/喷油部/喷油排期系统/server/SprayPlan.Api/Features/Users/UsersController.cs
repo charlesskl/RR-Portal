@@ -15,14 +15,15 @@ namespace SprayPlan.Api.Features.Users;
 [Authorize(Roles = "admin")]
 public class UsersController(AppDbContext db) : ControllerBase
 {
-    static readonly string[] ValidRoles = ["admin", "clerk", "viewer"];
+    static readonly string[] ValidRoles = ["admin", "clerk"];
+    static readonly string[] ValidFactories = ["XINGXIN", "HUADENG", "ALL"];
 
     // GET /api/users —— 列出所有用户（不含 passwordHash），按 id 升序
     [HttpGet]
     public async Task<IActionResult> List()
     {
         var users = await db.Users.OrderBy(u => u.Id)
-            .Select(u => new UserListItem(u.Id, u.Username, u.DisplayName, u.Role,
+            .Select(u => new UserListItem(u.Id, u.Username, u.DisplayName, u.Role, u.FactoryId,
                 u.IsActive, u.CreatedAt, u.LastLoginAt))
             .ToListAsync();
         return Ok(users);
@@ -38,6 +39,9 @@ public class UsersController(AppDbContext db) : ControllerBase
 
         if (!ValidRoles.Contains(req.Role))
             return BadRequest(new { error = "角色无效" });
+        var factoryId = req.Role == "admin" ? "ALL" : (string.IsNullOrWhiteSpace(req.FactoryId) ? "XINGXIN" : req.FactoryId);
+        if (!ValidFactories.Contains(factoryId) || (factoryId == "ALL" && req.Role != "admin"))
+            return BadRequest(new { error = "厂区无效；只有主管可选择全部厂区" });
 
         if (await db.Users.AnyAsync(u => u.Username == req.Username))
             return Conflict(new { error = "用户名已存在" });
@@ -49,6 +53,7 @@ public class UsersController(AppDbContext db) : ControllerBase
             PasswordHash = PasswordService.Hash(req.Password),
             DisplayName = req.DisplayName,
             Role = req.Role,
+            FactoryId = factoryId,
             IsActive = true,
             CreatedAt = now,
             UpdatedAt = now,
@@ -56,7 +61,7 @@ public class UsersController(AppDbContext db) : ControllerBase
         db.Users.Add(user);
         await db.SaveChangesAsync();
 
-        return StatusCode(201, new UserItem(user.Id, user.Username, user.DisplayName, user.Role, user.IsActive));
+        return StatusCode(201, new UserItem(user.Id, user.Username, user.DisplayName, user.Role, user.FactoryId, user.IsActive));
     }
 
     // GET /api/users/{id} —— 读单个，不存在 404
@@ -65,7 +70,7 @@ public class UsersController(AppDbContext db) : ControllerBase
     {
         var u = await db.Users.FindAsync(id);
         if (u is null) return NotFound(new { error = "用户不存在" });
-        return Ok(new UserItem(u.Id, u.Username, u.DisplayName, u.Role, u.IsActive));
+        return Ok(new UserItem(u.Id, u.Username, u.DisplayName, u.Role, u.FactoryId, u.IsActive));
     }
 
     // PATCH /api/users/{id} —— 部分更新，只改请求里给了的字段（null=不改）
@@ -82,11 +87,23 @@ public class UsersController(AppDbContext db) : ControllerBase
             u.Role = req.Role;
         }
         if (req.IsActive is not null) u.IsActive = req.IsActive.Value;
+        var finalRole = req.Role ?? u.Role;
+        if (finalRole == "admin")
+        {
+            u.FactoryId = "ALL";
+        }
+        else if (req.FactoryId is not null)
+        {
+            if (req.FactoryId is not "XINGXIN" and not "HUADENG")
+                return BadRequest(new { error = "文员必须选择兴信或华登厂区" });
+            u.FactoryId = req.FactoryId;
+        }
+        else if (u.FactoryId == "ALL") return BadRequest(new { error = "文员必须选择所属厂区" });
         if (!string.IsNullOrEmpty(req.NewPassword)) u.PasswordHash = PasswordService.Hash(req.NewPassword);
         u.UpdatedAt = DateTime.UtcNow;
 
         await db.SaveChangesAsync();
-        return Ok(new UserItem(u.Id, u.Username, u.DisplayName, u.Role, u.IsActive));
+        return Ok(new UserItem(u.Id, u.Username, u.DisplayName, u.Role, u.FactoryId, u.IsActive));
     }
 
     // DELETE /api/users/{id} —— 删除，禁止删自己（避免主管把自己删掉后无人可管）

@@ -63,7 +63,7 @@ public class UsersApiTests : IAsyncLifetime
     {
         await LoginAsync("admin", "admin123");
         var resp = await _client.PostAsJsonAsync("/api/users",
-            new { username = "newbie", password = "pass123", displayName = "新人", role = "viewer" });
+            new { username = "newbie", password = "pass123", displayName = "新人", role = "clerk", factoryId = "HUADENG" });
         Assert.Equal(HttpStatusCode.Created, resp.StatusCode);
     }
 
@@ -90,7 +90,7 @@ public class UsersApiTests : IAsyncLifetime
     {
         await LoginAsync("admin", "admin123");
         var resp = await _client.PostAsJsonAsync("/api/users",
-            new { username = "nopass", password = "", displayName = "缺密码", role = "viewer" });
+            new { username = "nopass", password = "", displayName = "缺密码", role = "clerk" });
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
     }
 

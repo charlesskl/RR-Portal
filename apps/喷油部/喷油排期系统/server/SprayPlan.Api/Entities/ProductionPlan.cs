@@ -11,6 +11,7 @@ public class ProductionPlan
     public DateTime PlanDate { get; set; }
     public string PlanType { get; set; } = "daily";   // daily | weekly
     public int LineId { get; set; }
+    public string FactoryId { get; set; } = "XINGXIN";
 
     // 排的对象（部位级，不分颜色/规格）
     public int OrderId { get; set; }

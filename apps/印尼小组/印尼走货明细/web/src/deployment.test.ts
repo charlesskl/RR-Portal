@@ -15,6 +15,7 @@ describe('deployment base paths', () => {
     expect(customsFormulaName({ formula_name: '五金配件-钉' }, undefined, '其他报关公司')).toBe('五金配件')
     expect(customsFormulaName({ formula_name: '塑胶件-透明罩' }, undefined, '其他报关公司')).toBe('塑胶件')
     expect(customsFormulaName({ formula_name: '搪胶件-公仔' }, undefined, '其他报关公司')).toBe('搪胶件')
+    expect(customsFormulaName({ formula_name: '毛绒裁片-耳朵' }, undefined, '其他报关公司')).toBe('毛绒裁片')
     expect(customsFormulaName({ formula_name: '五金配件-钉' }, undefined, '深圳市华胜益出口贸易有限公司')).toBe('五金配件-钉')
     expect(customsFormulaName({ formula_name: '彩咭-FSC' }, undefined, '其他报关公司')).toBe('彩咭-FSC')
   })

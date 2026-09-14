@@ -208,7 +208,8 @@ let taskState = null;
 let detailMode = 'workflow';
 let activeDepartment = null;
 let sectionDirty = false;
-let comparisonState = { left: 'quote', right: null, dept: 'all', changedOnly: true, query: '' };
+let comparisonState = { quoteId: null, baseline: 'quote', targets: null, dept: 'all', changedOnly: true, query: '' };
+let comparisonRefreshToken = 0;
 const versionCache = new Map();
 
 function filteredList() {
@@ -757,6 +758,16 @@ function comparisonOptions(selected) {
   return options.map(option => `<option value="${esc(option.key)}" ${String(selected) === String(option.key) ? 'selected' : ''}>${esc(option.label)} · ${esc(option.status)}</option>`).join('');
 }
 
+function comparisonTargetOptions(selected, baseline) {
+  const selectedKeys = new Set((selected || []).map(String));
+  const options = [{ key: 'quote', label: `原报价 ${taskState.quote.version || ''}`.trim(), status: '已冻结' }]
+    .concat(taskState.versions.map(version => ({ key: String(version.id), label: versionTitle(version), status: VERSION_STATUS[version.status] })));
+  return options.filter(option => option.key !== String(baseline)).map(option => `<label class="verification-target-option">
+    <input type="checkbox" data-compare-target value="${esc(option.key)}" ${selectedKeys.has(option.key) ? 'checked' : ''}>
+    <span><strong>${esc(option.label)}</strong><small>${esc(option.status)}</small></span>
+  </label>`).join('');
+}
+
 function comparisonRows(source) {
   return source.sections.flatMap(section => {
     const normalized = { ...section, payload: parseJson(section.payload_json, {}) };
@@ -771,17 +782,26 @@ function comparisonRows(source) {
 
 function renderComparison() {
   const host = $('verification-detail-content');
-  const latest = taskState.versions[taskState.versions.length - 1];
-  comparisonState.right = comparisonState.right || String(latest.id);
-  if (comparisonState.left === comparisonState.right) comparisonState.left = 'quote';
+  const versionKeys = taskState.versions.map(version => String(version.id));
+  const validKeys = new Set(['quote', ...versionKeys]);
+  if (Number(comparisonState.quoteId) !== Number(taskState.quote.id)) {
+    comparisonState = { quoteId: taskState.quote.id, baseline: 'quote', targets: null, dept: 'all', changedOnly: true, query: '' };
+  }
+  if (!validKeys.has(String(comparisonState.baseline))) comparisonState.baseline = 'quote';
+  if (comparisonState.targets === null) comparisonState.targets = versionKeys.filter(key => key !== comparisonState.baseline);
+  comparisonState.targets = comparisonState.targets.map(String)
+    .filter((key, index, keys) => validKeys.has(key) && key !== comparisonState.baseline && keys.indexOf(key) === index);
   host.innerHTML = `<article class="card verification-comparison-card">
       <header class="verification-section-head"><div><span class="eyebrow">自定义选择</span><h2>报价 / 核价版本对比</h2>
-        <p>可以选择原报价或任意两个核价版本进行对比</p></div></header>
-      <div class="verification-source-picker">
-        <label>对比基准<select id="verification-source-left">${comparisonOptions(comparisonState.left)}</select></label>
-        <span>对比</span>
-        <label>目标版本<select id="verification-source-right">${comparisonOptions(comparisonState.right)}</select></label>
-        <button id="verification-swap-source" class="mini">⇄ 交换</button>
+        <p>选择一个对比基准，可同时勾选多个核价版本横向对比</p></div></header>
+      <div class="verification-source-picker verification-source-picker-multi">
+        <label>对比基准<select id="verification-source-baseline">${comparisonOptions(comparisonState.baseline)}</select></label>
+        <fieldset class="verification-target-picker">
+          <legend>参与对比的版本（可多选）</legend>
+          <div class="verification-target-options">${comparisonTargetOptions(comparisonState.targets, comparisonState.baseline)}</div>
+          <div class="verification-target-actions"><button id="verification-select-all-targets" type="button" class="mini">全选核价版本</button>
+            <button id="verification-clear-targets" type="button" class="mini">清空</button></div>
+        </fieldset>
       </div>
       <div class="verification-compare-filters">
         <select id="verification-compare-dept"><option value="all">全部部门</option>
@@ -792,22 +812,24 @@ function renderComparison() {
       </div>
       <div id="verification-comparison-result"><div class="verification-preview-empty">正在计算所选版本…</div></div>
     </article>`;
-  const updateSelection = () => {
-    comparisonState.left = $('verification-source-left').value;
-    comparisonState.right = $('verification-source-right').value;
-    if (comparisonState.left === comparisonState.right) {
-      $('verification-comparison-result').innerHTML = '<div class="summary-empty">请选择两个不同的对比对象</div>';
-      return;
-    }
+  $('verification-source-baseline').onchange = event => {
+    comparisonState.baseline = event.target.value;
+    comparisonState.targets = comparisonState.targets.filter(key => key !== comparisonState.baseline);
+    renderComparison();
+  };
+  const updateTargets = () => {
+    comparisonState.targets = [...document.querySelectorAll('[data-compare-target]:checked')].map(input => input.value);
     refreshComparison();
   };
-  $('verification-source-left').onchange = updateSelection;
-  $('verification-source-right').onchange = updateSelection;
-  $('verification-swap-source').onclick = () => {
-    const left = $('verification-source-left').value;
-    $('verification-source-left').value = $('verification-source-right').value;
-    $('verification-source-right').value = left;
-    updateSelection();
+  document.querySelectorAll('[data-compare-target]').forEach(input => { input.onchange = updateTargets; });
+  $('verification-select-all-targets').onclick = () => {
+    const selectableVersions = new Set(versionKeys.filter(key => key !== comparisonState.baseline));
+    document.querySelectorAll('[data-compare-target]').forEach(input => { input.checked = selectableVersions.has(input.value); });
+    updateTargets();
+  };
+  $('verification-clear-targets').onclick = () => {
+    document.querySelectorAll('[data-compare-target]').forEach(input => { input.checked = false; });
+    updateTargets();
   };
   $('verification-compare-dept').onchange = event => {
     comparisonState.dept = event.target.value;
@@ -824,45 +846,46 @@ function renderComparison() {
   refreshComparison();
 }
 
-function comparisonCells(leftValue, rightValue, currency = 'HKD') {
-  const difference = num(rightValue) - num(leftValue);
-  const rate = nearZero(leftValue) ? null : difference / num(leftValue);
+function comparisonTargetCells(baselineValue, targetValue, currency = 'HKD', decimals = 2) {
+  const difference = num(targetValue) - num(baselineValue);
+  const rate = nearZero(baselineValue) ? null : difference / num(baselineValue);
   const klass = difference > 0.00001 ? 'delta-up' : difference < -0.00001 ? 'delta-down' : 'delta-flat';
-  return `<td>${amount(leftValue, currency)}</td><td>${amount(rightValue, currency)}</td>
-    <td class="${klass}">${nearZero(difference) ? '—' : `${difference > 0 ? '+' : ''}${amount(difference, currency)}`}</td>
+  return `<td>${amount(targetValue, currency, decimals)}</td>
+    <td class="${klass}">${nearZero(difference) ? '—' : `${difference > 0 ? '+' : ''}${amount(difference, currency, decimals)}`}</td>
     <td class="${klass}">${rate == null || nearZero(difference) ? '—' : `${rate > 0 ? '+' : ''}${(rate * 100).toFixed(1)}%`}</td>`;
 }
 
 async function refreshComparison() {
   const resultHost = $('verification-comparison-result');
   if (!resultHost) return;
-  if (comparisonState.left === comparisonState.right) {
-    resultHost.innerHTML = '<div class="summary-empty">请选择两个不同的对比对象</div>';
+  if (!comparisonState.targets.length) {
+    resultHost.innerHTML = '<div class="summary-empty">请至少勾选一个参与对比的版本</div>';
     return;
   }
+  const refreshToken = ++comparisonRefreshToken;
   resultHost.innerHTML = '<div class="verification-preview-empty">正在计算所选版本…</div>';
   try {
-    const [left, right] = await Promise.all([
-      loadComparisonSource(comparisonState.left),
-      loadComparisonSource(comparisonState.right),
-    ]);
-    const leftSummary = calculateFinancial(left);
-    const rightSummary = calculateFinancial(right);
-    const leftRows = new Map(comparisonRows(left).map(row => [row.storageKey, row]));
-    const rightRows = new Map(comparisonRows(right).map(row => [row.storageKey, row]));
-    const keys = [...new Set([...leftRows.keys(), ...rightRows.keys()])];
+    const sources = await Promise.all([comparisonState.baseline, ...comparisonState.targets].map(loadComparisonSource));
+    if (refreshToken !== comparisonRefreshToken) return;
+    const [baseline, ...targets] = sources;
+    const summaries = sources.map(calculateFinancial);
+    const rowMaps = sources.map(source => new Map(comparisonRows(source).map(row => [row.storageKey, row])));
+    const keys = [...new Set(rowMaps.flatMap(rows => [...rows.keys()]))];
     const query = comparisonState.query.toLowerCase();
     const rows = keys.map(key => {
-      const leftRow = leftRows.get(key);
-      const rightRow = rightRows.get(key);
-      const row = rightRow || leftRow;
-      const leftValue = leftRow?.value ?? 0;
-      const rightValue = rightRow?.value ?? 0;
+      const sourceRows = rowMaps.map(rowsMap => rowsMap.get(key));
+      const row = sourceRows.find(Boolean);
+      const baselineRow = sourceRows[0];
+      const baselineValue = baselineRow?.value ?? 0;
+      const targetValues = sourceRows.slice(1).map(targetRow => targetRow?.value ?? 0);
+      const changedTargets = sourceRows.slice(1).filter((targetRow, index) => Boolean(baselineRow) !== Boolean(targetRow)
+        || !nearZero(targetValues[index] - baselineValue)).length;
       return {
         ...row,
-        leftValue,
-        rightValue,
-        changeType: !leftRow ? '新增' : !rightRow ? '删除' : nearZero(rightValue - leftValue) ? '一致' : '有差异',
+        baselineValue,
+        targetValues,
+        changedTargets,
+        changeType: changedTargets ? `${changedTargets}/${targets.length} 有变化` : '一致',
       };
     }).filter(row => (comparisonState.dept === 'all' || row.dept === comparisonState.dept)
       && (!comparisonState.changedOnly || row.changeType !== '一致')
@@ -875,42 +898,43 @@ async function refreshComparison() {
       ['纸箱', 'carton'], ['其他外购', 'other_buy'], ['运费', 'freight'], ['杂项', 'misc'],
     ];
     const summaryValue = (summary, key) => key in summary ? summary[key] : summary.fields[key];
-    const draftWarning = [left, right].some(source => source.type === 'version' && source.status !== 'completed')
+    const draftWarning = sources.some(source => source.type === 'version' && source.status !== 'completed')
       ? '<div class="verification-draft-warning">当前对比包含未完成核价版本，结果会随部门填写和审核继续变化。</div>' : '';
     resultHost.innerHTML = `${draftWarning}
-      <div class="verification-comparison-labels"><strong>${esc(left.label)}</strong><span>对比</span><strong>${esc(right.label)}</strong></div>
+      <div class="verification-comparison-labels verification-comparison-labels-multi"><strong>${esc(baseline.label)}（基准）</strong><span>对比</span>
+        ${targets.map(target => `<strong>${esc(target.label)}</strong>`).join('')}</div>
       <section class="verification-comparison-section"><h3>成本汇总对比</h3>
         <div class="verification-table-scroll"><table class="verification-financial-table">
-          <thead><tr><th>项目</th><th>${esc(left.label)}</th><th>${esc(right.label)}</th><th>差异</th><th>差异率</th></tr></thead>
-          <tbody>${summaryRows.map(([label, key]) => `<tr><td>${label}</td>${comparisonCells(summaryValue(leftSummary, key), summaryValue(rightSummary, key))}</tr>`).join('')}</tbody>
+          <thead><tr><th rowspan="2">项目</th><th rowspan="2">${esc(baseline.label)}（基准）</th>
+            ${targets.map(target => `<th colspan="3">${esc(target.label)}</th>`).join('')}</tr>
+            <tr>${targets.map(() => '<th>数值</th><th>差额</th><th>差异率</th>').join('')}</tr></thead>
+          <tbody>${summaryRows.map(([label, key]) => {
+            const baselineValue = summaryValue(summaries[0], key);
+            return `<tr><td>${label}</td><td>${amount(baselineValue)}</td>${summaries.slice(1).map(summary => comparisonTargetCells(baselineValue, summaryValue(summary, key))).join('')}</tr>`;
+          }).join('')}</tbody>
         </table></div>
       </section>
       <section class="verification-comparison-section"><h3>部门明细变化</h3>
         <div class="verification-table-scroll"><table class="verification-comparison-table">
-          <thead><tr><th>部门 / 核价项目</th><th>用量</th><th>币种</th><th>${esc(left.label)}</th><th>${esc(right.label)}</th><th>差异</th><th>差异率</th><th>状态</th></tr></thead>
+          <thead><tr><th rowspan="2">部门 / 核价项目</th><th rowspan="2">用量</th><th rowspan="2">币种</th><th rowspan="2">${esc(baseline.label)}（基准）</th>
+            ${targets.map(target => `<th colspan="3">${esc(target.label)}</th>`).join('')}<th rowspan="2">状态</th></tr>
+            <tr>${targets.map(() => '<th>数值</th><th>差额</th><th>差异率</th>').join('')}</tr></thead>
           <tbody>${rows.length ? rows.map(row => {
-            const difference = row.rightValue - row.leftValue;
-            const rate = nearZero(row.leftValue) ? null : difference / row.leftValue;
-            const klass = difference > 0.00001 ? 'delta-up' : difference < -0.00001 ? 'delta-down' : 'delta-flat';
             return `<tr><td><small>${esc(row.deptName)}</small><strong>${esc(row.label)}</strong></td><td>${esc(row.quantity)}</td><td>${esc(row.currency === 'NUMBER' ? '数值' : row.currency)}</td>
-              <td>${amount(row.leftValue, row.currency, 4)}</td><td>${amount(row.rightValue, row.currency, 4)}</td>
-              <td class="${klass}">${nearZero(difference) ? '—' : `${difference > 0 ? '+' : ''}${amount(difference, row.currency, 4)}`}</td>
-              <td class="${klass}">${rate == null || nearZero(difference) ? '—' : `${rate > 0 ? '+' : ''}${(rate * 100).toFixed(1)}%`}</td>
+              <td>${amount(row.baselineValue, row.currency, 4)}</td>${row.targetValues.map(value => comparisonTargetCells(row.baselineValue, value, row.currency, 4)).join('')}
               <td><span class="verification-row-state ${row.changeType !== '一致' ? 'changed' : ''}">${row.changeType}</span></td></tr>`;
-          }).join('') : '<tr><td colspan="8" class="summary-empty">没有符合条件的变化项目</td></tr>'}</tbody>
+          }).join('') : `<tr><td colspan="${5 + targets.length * 3}" class="summary-empty">没有符合条件的变化项目</td></tr>`}</tbody>
         </table></div>
       </section>
-      ${renderTaxComparison(left, right, leftSummary, rightSummary)}`;
+      ${renderTaxComparison(sources, summaries)}`;
   } catch (error) {
+    if (refreshToken !== comparisonRefreshToken) return;
     resultHost.innerHTML = `<div class="summary-empty">${esc(error.message)}</div>`;
   }
 }
 
-function renderTaxComparison(left, right, leftSummary, rightSummary) {
-  const verificationSources = [
-    left.type === 'version' ? { source: left, summary: leftSummary } : null,
-    right.type === 'version' ? { source: right, summary: rightSummary } : null,
-  ].filter(Boolean);
+function renderTaxComparison(sources, summaries) {
+  const verificationSources = sources.map((source, index) => source.type === 'version' ? { source, summary: summaries[index] } : null).filter(Boolean);
   if (!verificationSources.length) return '';
   if (verificationSources.length === 1) {
     const { source, summary } = verificationSources[0];
@@ -925,21 +949,21 @@ function renderTaxComparison(left, right, leftSummary, rightSummary) {
         <tbody>${rows.map(row => `<tr><td>${esc(row.label)}</td><td>${amount(row.base)}</td><td>${num(row.rate).toFixed(2)}%</td><td>${amount(row.deduction)}</td></tr>`).join('')}</tbody></table>
     </section>`;
   }
-  const [leftTax, rightTax] = verificationSources;
-  const leftRows = new Map(leftTax.summary.taxRows.map(row => [row.key, row]));
-  const rightRows = new Map(rightTax.summary.taxRows.map(row => [row.key, row]));
-  const keys = [...new Set([...leftRows.keys(), ...rightRows.keys()])].filter(key => leftRows.get(key)?.deduction || rightRows.get(key)?.deduction);
+  const taxMaps = verificationSources.map(item => new Map(item.summary.taxRows.map(row => [row.key, row])));
+  const keys = [...new Set(taxMaps.flatMap(rows => [...rows.keys()]))]
+    .filter(key => taxMaps.some(rows => num(rows.get(key)?.base) || num(rows.get(key)?.deduction)));
   return `<section class="verification-tax-card">
-    <div class="verification-section-head"><div><span class="eyebrow">核价版本对比</span><h3>减税差异</h3>
-      <p>两边均为核价版本，因此显示两个版本的减税及差异</p></div></div>
-    <table class="verification-tax-table"><thead><tr><th>减税项目</th><th>${esc(leftTax.source.label)}</th><th>${esc(rightTax.source.label)}</th><th>差异</th></tr></thead>
-      <tbody>${keys.map(key => {
-        const leftRow = leftRows.get(key) || { label: rightRows.get(key).label, deduction: 0 };
-        const rightRow = rightRows.get(key) || { deduction: 0 };
-        return `<tr><td>${esc(leftRow.label)}</td><td>${amount(leftRow.deduction)}</td><td>${amount(rightRow.deduction)}</td><td>${amount(rightRow.deduction - leftRow.deduction)}</td></tr>`;
-      }).join('')}
-      <tr><td><strong>减税后成本</strong></td><td>${amount(leftTax.summary.afterDeduction)}</td><td>${amount(rightTax.summary.afterDeduction)}</td><td>${amount(rightTax.summary.afterDeduction - leftTax.summary.afterDeduction)}</td></tr></tbody>
-    </table>
+    <div class="verification-section-head"><div><span class="eyebrow">多核价版本对比</span><h3>减税汇总</h3>
+      <p>原报价不计算减税；所有已选核价版本在同一张表内并列显示</p></div></div>
+    <div class="verification-table-scroll"><table class="verification-tax-table"><thead><tr><th>减税项目</th>${verificationSources.map(item => `<th>${esc(item.source.label)}</th>`).join('')}</tr></thead>
+      <tbody><tr><td><strong>核价总成本</strong></td>${verificationSources.map(item => `<td>${amount(item.summary.totalCost)}</td>`).join('')}</tr>
+      <tr><td><strong>合计减税</strong></td>${verificationSources.map(item => `<td>${amount(item.summary.totalDeduction)}</td>`).join('')}</tr>
+      <tr><td><strong>减税后成本</strong></td>${verificationSources.map(item => `<td>${amount(item.summary.afterDeduction)}</td>`).join('')}</tr>
+      ${keys.map(key => {
+        const label = taxMaps.map(rows => rows.get(key)?.label).find(Boolean) || key;
+        return `<tr><td>${esc(label)}</td>${taxMaps.map(rows => `<td>${amount(rows.get(key)?.deduction || 0)}</td>`).join('')}</tr>`;
+      }).join('')}</tbody>
+    </table></div>
   </section>`;
 }
 

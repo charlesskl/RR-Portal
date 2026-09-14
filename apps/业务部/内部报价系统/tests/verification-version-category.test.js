@@ -41,3 +41,13 @@ test('verification routes use SQL shared by SQLite and PostgreSQL', () => {
   assert.match(routes, /VALUES \(\?, \?, \?, \?, \?, 'drafting', \?\) RETURNING id/);
   assert.match(routes, /const tx = db\.transaction\(async \(\) =>/);
 });
+
+test('version comparison supports one baseline against multiple selected verification versions', () => {
+  const frontend = read('frontend/verification.js');
+  assert.match(frontend, /targets: null/);
+  assert.match(frontend, /data-compare-target/);
+  assert.match(frontend, /参与对比的版本（可多选）/);
+  assert.match(frontend, /Promise\.all\(\[comparisonState\.baseline, \.\.\.comparisonState\.targets\]/);
+  assert.match(frontend, /targets\.map\(target => `<th colspan="3">/);
+  assert.match(frontend, /renderTaxComparison\(sources, summaries\)/);
+});

@@ -53,7 +53,7 @@ describe('deployment base paths', () => {
     const output = await buildCustomsWorkbook({
       templateBuffer,
       items: [
-        { material_id: 7, qty: 12, price: 3.5, cartons: 2, qty_per_carton: '6', weighing_qty: 6, pallet: '1-2/1卡', po_no: 'PO-TEST', customs_company: 'A 报关公司' },
+        { material_id: 7, qty: 12, price: 3.5, currency: 'US$', cartons: 2, qty_per_carton: '6', weighing_qty: 6, pallet: '1-2/1卡', po_no: 'PO-TEST', customs_company: 'A 报关公司' },
         { material_id: 8, qty: 20000, price: 0.1, cartons: 1, qty_per_carton: '20000', weighing_qty: 20, po_no: 'PO-ROPE', customs_company: 'B 报关公司' },
         { material_id: 9, qty: 10000, price: 0.2, cartons: 3, qty_per_carton: '1-2/3000 3/4000', weighing_qty: 2500, po_no: 'PO-MIXED', customs_company: 'B 报关公司' },
       ],
@@ -122,6 +122,7 @@ describe('deployment base paths', () => {
     expect(sheet.BD4?.v).toBe('1-2/1卡')
     expect(sheet.AB4?.f).toBe('SUM(AA4:AA4)')
     expect(sheet.AQ5?.f).toBe('SUM(AP5:AP6)')
+    expect(sheet.AQ4?.z).toBe('"US$"#,##0.0000')
     expect(sheet.AD4?.z).toBe('yyyy/m/d')
     expect(sheet.A5?.z).toBe('0')
     expect(sheet.AT4?.z).toBe('0')

@@ -20,6 +20,19 @@ const CUSTOMS_COMPANY_COLORS = [
   'F4CCCC', // 浅红
 ]
 
+const PURCHASE_CURRENCY_FORMATS: Record<string, string> = {
+  '¥': '¥#,##0.0000',
+  'HK$': '"HK$"#,##0.0000',
+  'US$': '"US$"#,##0.0000',
+  '€': '"€"#,##0.0000',
+  '£': '"£"#,##0.0000',
+  '¥(JPY)': '"¥"#,##0',
+}
+
+function purchaseCurrencyFormat(currency?: string) {
+  return PURCHASE_CURRENCY_FORMATS[currency || '¥'] || '#,##0.0000'
+}
+
 // 走货明细行（与 ShipmentsPage 的 ShipmentItem 字段一致，只列导出用到的）
 export interface CustomsItem {
   material_id?: number
@@ -444,12 +457,7 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
     setCell(ws, ri, 39, it.po_no || '', 's')
     setCell(ws, ri, 40, it.price || 0, 'n')
     setCell(ws, ri, 41, '=AO' + (ri + 1) + '*L' + (ri + 1), 'n')
-    const currency = it.currency || '¥'
-    const fmtMap: Record<string, string> = {
-      '¥': '¥#,##0.0000', 'HK$': '"HK$"#,##0.0000', 'US$': '"US$"#,##0.0000',
-      '€': '"€"#,##0.0000', '£': '"£"#,##0.0000', '¥(JPY)': '"¥"#,##0',
-    }
-    const fmt = fmtMap[currency] || '#,##0.0000'
+    const fmt = purchaseCurrencyFormat(it.currency)
     ;['AO', 'AP'].forEach((_col, j) => {
       const addr = XLSX.utils.encode_cell({ r: ri, c: 40 + j })
       if ((ws as any)[addr]) (ws as any)[addr].z = fmt
@@ -481,6 +489,7 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
     const lastRow = end + 4
     setCell(ws, start + 3, 27, `=SUM(AA${firstRow}:AA${lastRow})`, 'n')
     setCell(ws, start + 3, 42, `=SUM(AP${firstRow}:AP${lastRow})`, 'n')
+    ;(ws as any)[XLSX.utils.encode_cell({ r: start + 3, c: 42 })].z = purchaseCurrencyFormat(sorted[start].currency)
     setCell(ws, start + 3, 43, company || tf.exportCompany, 's')
     setCell(ws, start + 3, 44, sorted[start].bl_head || tf.blHead, 's')
     if (end > start) {

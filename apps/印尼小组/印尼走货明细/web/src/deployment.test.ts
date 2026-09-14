@@ -138,6 +138,7 @@ describe('deployment base paths', () => {
     expect(sheet['!merges']).toContainEqual({ s: { r: 4, c: 42 }, e: { r: 5, c: 42 } })
     expect(sheet['!merges']).toContainEqual({ s: { r: 4, c: 43 }, e: { r: 5, c: 43 } })
     expect(workbook.Sheets['类别金额'].C4?.f).toContain("'TEST-CNTR'!$AA$4:$AA$1000")
+    expect(workbook.Sheets['类别金额']['!cols']?.[1]?.wch).toBeGreaterThanOrEqual(23)
     expect(workbook.Sheets['全球合同'].B24?.f).toContain("'TEST-CNTR'!V:V")
     expect(workbook.Sheets['全球发票'].B32?.f).toContain("'TEST-CNTR'!V:V")
     expect(workbook.Sheets['装箱单'].B24?.f).toContain("'TEST-CNTR'!X:X")

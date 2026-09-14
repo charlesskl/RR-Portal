@@ -95,6 +95,7 @@ describe('deployment base paths', () => {
       'WpsReserved_CellImgList',
     ])
     const sheet = workbook.Sheets['TEST-CNTR']
+    expect(sheet.M3?.c).toBeUndefined()
     expect(sheet.A4?.v).toBe(1)
     expect(sheet.D4?.v).toBe('ITEM-TEST')
     expect(sheet.N1?.v).toBe(7.8)

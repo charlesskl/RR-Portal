@@ -304,6 +304,9 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
   wbObj.SheetNames = wbObj.SheetNames.map(n => n === oldName ? newName : n)
   const ws = wbObj.Sheets[newName]
 
+  // 导出文件不显示模板 M3“单位可以选择”的旧式批注提示框。
+  if ((ws as any).M3) delete (ws as any).M3.c
+
   // 模板第 4 行是首个明细行；保留每列的样式和数字格式，供新明细行复用。
   const detailFormat = Array.from({ length: 56 }, (_, c) => {
     const cell: any = (ws as any)[XLSX.utils.encode_cell({ r: 3, c })]

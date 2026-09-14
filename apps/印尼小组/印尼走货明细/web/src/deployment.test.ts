@@ -135,6 +135,8 @@ describe('deployment base paths', () => {
     expect(sheet.P4?.z).toBe('0.00')
     expect(sheet['!cols']?.[0]?.width).toBeLessThan(templateSheet['!cols']?.[0]?.width || Infinity)
     expect(sheet['!rows']?.[3]?.hpt).toBe(templateSheet['!rows']?.[3]?.hpt)
+    expect(sheet['!rows']?.[0]?.hpt).toBe(24)
+    expect(sheet['!rows']?.[1]?.hpt).toBe(24)
     expect(sheet['!merges']).toContainEqual({ s: { r: 4, c: 27 }, e: { r: 5, c: 27 } })
     expect(sheet['!merges']).toContainEqual({ s: { r: 4, c: 42 }, e: { r: 5, c: 42 } })
     expect(sheet['!merges']).toContainEqual({ s: { r: 4, c: 43 }, e: { r: 5, c: 43 } })

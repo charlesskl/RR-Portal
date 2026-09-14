@@ -353,6 +353,7 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
     const cell: any = (ws as any)[XLSX.utils.encode_cell({ r: 3, c })]
     return cell ? { s: writableTemplateStyle(cell.s), z: cell.z } : undefined
   })
+  const formulaNameFill = cloneTemplateValue((ws as any).E3?.s?.fill)
   const templateDetailRow = cloneTemplateValue((ws['!rows'] || [])[3] || { hpt: 108.75 })
 
   // 不允许参考模板里的旧柜数据残留；只保留前三行表头与样式。
@@ -537,13 +538,13 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
       const addr = XLSX.utils.encode_cell({ r: ri, c })
       if (!(ws as any)[addr]) (ws as any)[addr] = { v: '', t: 's' }
       const format = detailFormat[c]
-      const templateFill = format?.s?.fill
+      const templateFill = c === 4 && formulaNameFill ? formulaNameFill : format?.s?.fill
       ;(ws as any)[addr].s = {
         ...detailBaseStyle,
         ...(templateFill ? { fill: cloneTemplateValue(templateFill) } : {}),
       }
       if (!(ws as any)[addr].z && format?.z) (ws as any)[addr].z = format.z
-      if (color) {
+      if (color && c !== 4) {
         ;(ws as any)[addr].s = {
           ...((ws as any)[addr].s || {}),
           fill: { patternType: 'solid', fgColor: { rgb: color } },

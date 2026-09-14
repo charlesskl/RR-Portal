@@ -137,6 +137,7 @@ describe('deployment base paths', () => {
     expect(sheet.E4?.s?.fgColor?.rgb).not.toBe(sheet.A4?.s?.fgColor?.rgb)
     expect(sheet.P4?.z).toBe('0.00')
     expect(sheet['!cols']?.[0]?.width).toBeLessThan(templateSheet['!cols']?.[0]?.width || Infinity)
+    expect(sheet['!cols']?.[19]?.width).toBeLessThan(templateSheet['!cols']?.[19]?.width || Infinity)
     expect(sheet['!rows']?.[3]?.hpt).toBe(templateSheet['!rows']?.[3]?.hpt)
     expect(sheet['!rows']?.[0]?.hpt).toBe(24)
     expect(sheet['!rows']?.[1]?.hpt).toBe(24)

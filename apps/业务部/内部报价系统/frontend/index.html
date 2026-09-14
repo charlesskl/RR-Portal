@@ -4,11 +4,15 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>公司内部报价明细系统</title>
-  <link rel="stylesheet" href="./styles.css?v=20260818-quote-filters" />
+  <link rel="stylesheet" href="./styles.css?v=20260914-verification-workflow" />
 </head>
 <body>
-  <div class="topbar">
+  <div class="topbar module-topbar">
     <div class="brand">📋 内部报价明细系统 <small>多部门协同 · 主管审核 · 受控导出</small></div>
+    <nav class="module-switch" aria-label="报价与核价板块">
+      <a class="active" href="./index.html" aria-current="page">报价板块</a>
+      <a href="./verification.html">核价板块</a>
+    </nav>
     <div id="user-chip" class="hidden">
       <span id="factory-chip" class="factory-single-chip"></span>
       <div id="factory-switch" class="factory-switcher hidden" role="group" aria-label="切换厂区"></div>

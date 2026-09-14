@@ -45,6 +45,7 @@ app.use('/api/reviews', require('./routes/reviews'));
 app.use('/api/uploads', require('./routes/uploads'));
 app.use('/api/refs', require('./routes/refs'));
 app.use('/api/admin', require('./routes/admin'));
+app.use('/api/verifications', require('./routes/verifications'));
 
 // nosniff：即使有人上传内容为 HTML/SVG 但扩展名被强制成图片，浏览器也不会嗅探成可执行类型
 app.use('/uploads', express.static(path.join(__dirname, 'uploads'), {

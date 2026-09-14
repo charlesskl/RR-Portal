@@ -5937,4 +5937,16 @@ function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
 }
 
-renderQuotePage();
+window.VerificationWorkbench = {
+  renderSummaryPane,
+  renderEngineering,
+  renderElectronic,
+  renderMolding,
+  renderPainting,
+  renderSlush,
+  renderSewing,
+  renderAssembly,
+  renderSales,
+};
+
+if (!window.__WORKBENCH_EMBED__) renderQuotePage();

@@ -7,6 +7,7 @@ const nearZero = value => Math.abs(num(value)) < 0.00001;
 const parseJson = (value, fallback = {}) => {
   try { return typeof value === 'string' ? JSON.parse(value) : (value || fallback); } catch { return fallback; }
 };
+let authRedirectStarted = false;
 
 async function api(path, options = {}) {
   const response = await fetch('/api' + path, {
@@ -14,6 +15,13 @@ async function api(path, options = {}) {
     headers: { 'Content-Type': 'application/json' },
     ...options,
   });
+  if (response.status === 401) {
+    if (!authRedirectStarted) {
+      authRedirectStarted = true;
+      window.location.replace('./index.html?next=verification');
+    }
+    throw new Error('登录状态已失效，正在返回登录页…');
+  }
   if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || response.statusText);
   return response.json();
 }

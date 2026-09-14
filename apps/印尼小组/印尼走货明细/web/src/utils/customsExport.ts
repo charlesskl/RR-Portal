@@ -153,7 +153,8 @@ function fitCategoryColumn(wb: XLSX.WorkBook) {
 function compactMainColumns(sheet: XLSX.WorkSheet) {
   if (!sheet['!cols']) return
   sheet['!cols'] = sheet['!cols'].map((column: any, index: number) => {
-    if (!column || column.hidden || index === 19) return column
+    if (!column || column.hidden) return column
+    if (index === 19) return { ...column, width: 16, wch: 16 }
     const original = Number(column.width ?? column.wch)
     if (!Number.isFinite(original)) return column
     const width = Math.max(6, Math.round(original * 0.85 * 10) / 10)

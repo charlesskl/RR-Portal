@@ -120,6 +120,23 @@ function normalizeWorkbookStyles(wb: XLSX.WorkBook) {
   }
 }
 
+function fitCategoryColumn(wb: XLSX.WorkBook) {
+  const sheet = wb.Sheets['类别金额']
+  if (!sheet) return
+  const range = sheet['!ref'] ? XLSX.utils.decode_range(sheet['!ref']) : { s: { r: 0 }, e: { r: 40 } }
+  let maxWidth = 8
+  for (let row = range.s.r; row <= range.e.r; row++) {
+    const value = (sheet as any)[XLSX.utils.encode_cell({ r: row, c: 1 })]?.v
+    if (value == null) continue
+    const width = Array.from(String(value)).reduce((sum, char) => sum + (char.charCodeAt(0) > 255 ? 2 : 1), 0)
+    maxWidth = Math.max(maxWidth, width)
+  }
+  const columns: any[] = sheet['!cols'] || []
+  const width = Math.min(40, Math.max(24, maxWidth + 2))
+  columns[1] = { ...(columns[1] || {}), width, wch: width }
+  sheet['!cols'] = columns
+}
+
 function excelDate(d: any): number | string {
   if (!d) return ''
   const dt = (d instanceof Date) ? d : new Date(d)
@@ -363,6 +380,7 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
   }
 
   populateLinkedDocuments(wbObj, newName, sorted)
+  fitCategoryColumn(wbObj)
 
   const floatImages: { rowZeroIdx: number; bytes: Uint8Array; ext: string }[] = []
   sorted.forEach((it, i) => {

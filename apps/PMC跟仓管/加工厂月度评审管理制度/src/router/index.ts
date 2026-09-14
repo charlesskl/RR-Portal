@@ -1,7 +1,7 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
-import { canAccessPath, canViewCraft } from '../utils/permissions'
-import type { Craft } from '../constants/roles'
+import { canAccessPath, canViewCraft, canViewRegion } from '../utils/permissions'
+import type { Craft, Region } from '../constants/roles'
 
 const routes: RouteRecordRaw[] = [
   { path: '/login', component: () => import('../views/LoginView.vue'), meta: { public: true } },
@@ -10,6 +10,7 @@ const routes: RouteRecordRaw[] = [
   { path: '/grade/:month/:grade', component: () => import('../views/GradeDetailView.vue') },
   { path: '/factories', component: () => import('../views/FactoryListView.vue') },
   { path: '/factory-view', component: () => import('../views/FactoryAdminView.vue') },
+  { path: '/factory-view/region/:region/summary', component: () => import('../views/FactoryRegionSummaryView.vue') },
   { path: '/factory-view/dept/:craft/summary', component: () => import('../views/FactoryDeptSummaryView.vue') },
   { path: '/factory-view/dept/:craft', component: () => import('../views/FactoryAdminDeptView.vue') },
   { path: '/factory-view/:id', component: () => import('../views/FactoryViewDetail.vue') },
@@ -47,6 +48,8 @@ router.beforeEach((to) => {
   if (auth.role && !canAccessPath(auth.role, to.path)) return '/dashboard'
   const craft = to.params.craft as Craft | undefined
   if (craft && !canViewCraft(craft)) return '/dashboard'
+  const region = (to.params.region || to.query.region) as Region | undefined
+  if (auth.role && region && !canViewRegion(auth.role, region)) return '/dashboard'
   return true
 })
 

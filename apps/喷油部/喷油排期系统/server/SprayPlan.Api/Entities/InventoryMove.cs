@@ -6,6 +6,7 @@ public class InventoryMove
 {
     public int Id { get; set; }
     public int ProductId { get; set; }
+    public string FactoryId { get; set; } = "XINGXIN";
     public string ItemName { get; set; } = "";
     public string PartName { get; set; } = "";
     public int? OwnerOrderId { get; set; }     // 非空=该订单成品；NULL=无主散件

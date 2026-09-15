@@ -15,6 +15,7 @@ type UserListItemDto = {
   username: string;
   displayName: string;
   role: string;
+  factoryId: string;
   isActive: boolean;
   createdAt: string;
   lastLoginAt: string | null;
@@ -31,7 +32,7 @@ export default async function UsersPage() {
 
   // 角色英文 → 中文显示映射（与 prisma/schema.prisma 中的注释保持一致)
   const ROLE_LABEL: Record<string, string> = {
-    admin: "主管", clerk: "文员/拉长", viewer: "统计组",
+    admin: "管理员/主管", clerk: "文员/拉长",
   };
 
   return (
@@ -52,6 +53,7 @@ export default async function UsersPage() {
             <th className="px-4 py-3 text-left">用户名</th>
             <th className="px-4 py-3 text-left">显示名</th>
             <th className="px-4 py-3 text-left">角色</th>
+            <th className="px-4 py-3 text-left">厂区</th>
             <th className="px-4 py-3 text-left">状态</th>
             <th className="px-4 py-3 text-left">最近登录</th>
             <th className="px-4 py-3 text-left">操作</th>
@@ -63,6 +65,7 @@ export default async function UsersPage() {
               <td className="px-4 py-3 font-mono">{u.username}</td>
               <td className="px-4 py-3">{u.displayName}</td>
               <td className="px-4 py-3">{ROLE_LABEL[u.role] ?? u.role}</td>
+              <td className="px-4 py-3">{{ XINGXIN: "兴信", HUADENG: "华登", ALL: "全部" }[u.factoryId] ?? u.factoryId}</td>
               <td className="px-4 py-3">
                 {u.isActive
                   ? <span className="text-mint-700">✅ 启用</span>

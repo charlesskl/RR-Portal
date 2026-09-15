@@ -1,22 +1,40 @@
 "use client";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import { useState } from "react";
 import { clearClientCache } from "@/lib/clientCache";
 import { apiFetch } from "@/lib/apiFetch";
 
 const NAV_ITEMS = [
-  { href: "/",          label: "仪表盘",     allowed: ["admin", "clerk", "viewer"], ready: true },
+  { href: "/",          label: "仪表盘",     allowed: ["admin", "clerk"], ready: true },
   { href: "/orders",    label: "订单总览",   allowed: ["admin", "clerk"],           ready: true },
   { href: "/schedule",  label: "排期",       allowed: ["admin", "clerk"],           ready: true  },
   { href: "/products",  label: "产品核价表", allowed: ["admin", "clerk"],           ready: true },
-  { href: "/inventory", label: "库存",       allowed: ["admin", "clerk", "viewer"], ready: true },
+  { href: "/inventory", label: "库存",       allowed: ["admin", "clerk"], ready: true },
   { href: "/basic",     label: "基础数据库", allowed: ["admin", "clerk"],           ready: true },
   { href: "/users",     label: "用户管理",   allowed: ["admin"],                    ready: true },
 ];
 
-export default function TopNav({ username, role }: { username: string; role: string }) {
+export default function TopNav({ username, role, factoryId = "XINGXIN" }: { username: string; role: string; factoryId?: string }) {
   const pathname = usePathname();
   const router = useRouter();
+  const [switching, setSwitching] = useState(false);
+
+  async function switchFactory(nextFactory: string) {
+    if (nextFactory === factoryId) return;
+    setSwitching(true);
+    const res = await fetch("/api/auth/factory", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ factoryId: nextFactory }),
+    });
+    if (res.ok) {
+      clearClientCache();
+      window.location.reload();
+      return;
+    }
+    setSwitching(false);
+  }
 
   async function handleLogout() {
     await apiFetch("/api/auth/logout", { method: "POST" });
@@ -67,12 +85,24 @@ export default function TopNav({ username, role }: { username: string; role: str
       </nav>
       {/* 右：用户 */}
       <div className="flex items-center gap-3 shrink-0 ml-auto">
+        {role === "admin" && (
+          <select
+            aria-label="当前厂区"
+            value={factoryId === "HUADENG" ? "HUADENG" : "XINGXIN"}
+            disabled={switching}
+            onChange={(e) => switchFactory(e.target.value)}
+            className="border border-app-border rounded-btn px-3 py-1.5 text-sm bg-white text-text-secondary disabled:opacity-60"
+          >
+            <option value="XINGXIN">兴信厂区</option>
+            <option value="HUADENG">华登厂区</option>
+          </select>
+        )}
         <div className="w-8 h-8 rounded-full bg-mint-400 text-white flex items-center justify-center text-sm font-semibold">
           {username.charAt(0).toUpperCase()}
         </div>
         <div className="text-sm leading-tight">
           <div className="text-text">{username}</div>
-          <div className="text-[11px] text-text-tertiary">{role}</div>
+          <div className="text-[11px] text-text-tertiary">{role} · {{ XINGXIN: "兴信", HUADENG: "华登" }[factoryId] ?? factoryId}</div>
         </div>
         <button
           onClick={handleLogout}

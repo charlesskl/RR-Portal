@@ -63,7 +63,7 @@ export default function BasicDataManager({ lines, machines, holidays, craftAlias
   // ---- 拉别操作 ----
   async function addLine() {
     // capWan(万) 换算成件 dailyCapacityLimit 再提交，capWan 本身不发后端
-    const body = { name: newLine.name, workshop: newLine.workshop, leaderName: newLine.leaderName,
+    const body = { name: newLine.name, leaderName: newLine.leaderName,
       craftType: newLine.craftType, dailyCapacityLimit: wanToPieces(newLine.capWan) };
     if (await send("/api/lines", "POST", body)) { setNewLine({ name: "", workshop: "兴信A", leaderName: "", craftType: "移印", capWan: "30" }); router.refresh(); }
   }
@@ -72,7 +72,7 @@ export default function BasicDataManager({ lines, machines, holidays, craftAlias
     setEditLine({ name: l.name, workshop: l.workshop, leaderName: l.leaderName ?? "", craftType: l.craftType, capWan: piecesToWan(l.dailyCapacityLimit) });
   }
   async function saveLine(id: number) {
-    const body = { name: editLine.name, workshop: editLine.workshop, leaderName: editLine.leaderName,
+    const body = { name: editLine.name, leaderName: editLine.leaderName,
       craftType: editLine.craftType, dailyCapacityLimit: wanToPieces(editLine.capWan) };
     if (await send(`/api/lines/${id}`, "PATCH", body)) { setEditLineId(null); router.refresh(); }
   }
@@ -157,10 +157,6 @@ export default function BasicDataManager({ lines, machines, holidays, craftAlias
           {/* 新增拉别：含工艺类型下拉 */}
           <div className="flex gap-2 mb-4 flex-wrap items-center">
             <input className={INPUT} placeholder="拉别名（如 A拉：自动喷）" value={newLine.name} onChange={(e) => setNewLine({ ...newLine, name: e.target.value })} />
-            <select className={INPUT} value={newLine.workshop} onChange={(e) => setNewLine({ ...newLine, workshop: e.target.value })}>
-              <option value="兴信A">兴信A</option>
-              <option value="华登A">华登A</option>
-            </select>
             <input className={INPUT} placeholder="拉长名（选填）" value={newLine.leaderName} onChange={(e) => setNewLine({ ...newLine, leaderName: e.target.value })} />
             <select className={INPUT} value={newLine.craftType} onChange={(e) => {
               const craft = e.target.value;
@@ -182,11 +178,7 @@ export default function BasicDataManager({ lines, machines, holidays, craftAlias
                 // 行内编辑态
                 <tr key={l.id} className="bg-mint-50">
                   <td className="px-3 py-2"><input className={`${INPUT} w-40`} value={editLine.name} onChange={(e) => setEditLine({ ...editLine, name: e.target.value })} /></td>
-                  <td className="px-3 py-2">
-                    <select className={INPUT} value={editLine.workshop} onChange={(e) => setEditLine({ ...editLine, workshop: e.target.value })}>
-                      <option value="兴信A">兴信A</option><option value="华登A">华登A</option>
-                    </select>
-                  </td>
+                  <td className="px-3 py-2">{l.workshop}</td>
                   <td className="px-3 py-2"><input className={`${INPUT} w-24`} value={editLine.leaderName} onChange={(e) => setEditLine({ ...editLine, leaderName: e.target.value })} /></td>
                   <td className="px-3 py-2">
                     <select className={INPUT} value={editLine.craftType} onChange={(e) => setEditLine({ ...editLine, craftType: e.target.value })}>

@@ -9,6 +9,7 @@ var builder = WebApplication.CreateBuilder(args);
 
 // --- 服务注册 ---
 builder.Services.AddControllers();
+builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<JwtService>();
 builder.Services.AddScoped<SprayPlan.Api.Features.Inventory.InventoryService>();
 // PDF 暂存：单例，落盘目录默认 <ContentRoot>/storage/pdf

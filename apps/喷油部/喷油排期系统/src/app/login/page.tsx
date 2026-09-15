@@ -60,9 +60,6 @@ export default function LoginPage() {
           {loading ? "登录中..." : "登录"}
         </button>
 
-        <div className="mt-6 text-xs text-text-tertiary">
-          默认账号：admin/admin123 · clerk/clerk123 · viewer/viewer123
-        </div>
       </form>
     </main>
   );

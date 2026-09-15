@@ -23,7 +23,8 @@ public class AuthController(AppDbContext db, JwtService jwt) : ControllerBase
             return BadRequest(new { error = "用户名和密码必填" });
 
         // 2. 查用户 + 校验（不区分"不存在/已禁用/密码错"，统一 401，防枚举）
-        var user = await db.Users.FirstOrDefaultAsync(u => u.Username == req.Username);
+        // 登录前还没有厂区 Claim，因此必须只在这一处绕过厂区筛选，再由账号本身确定厂区。
+        var user = await db.Users.IgnoreQueryFilters().FirstOrDefaultAsync(u => u.Username == req.Username);
         if (user is null || !user.IsActive || !PasswordService.Verify(req.Password, user.PasswordHash))
             return Unauthorized(new { error = "用户名或密码错误" });
 
@@ -45,6 +46,6 @@ public class AuthController(AppDbContext db, JwtService jwt) : ControllerBase
         await db.SaveChangesAsync();
 
         // 5. 返回必要信息（不含 passwordHash）
-        return Ok(new LoginResponse(user.Id, user.Username, user.DisplayName, user.Role));
+        return Ok(new LoginResponse(user.Id, user.Username, user.DisplayName, user.Role, user.FactoryId));
     }
 }

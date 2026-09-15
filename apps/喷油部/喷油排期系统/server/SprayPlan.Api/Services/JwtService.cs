@@ -23,6 +23,7 @@ public class JwtService(IConfiguration cfg)
             new Claim("userId", user.Id.ToString()),
             new Claim("username", user.Username),
             new Claim(ClaimTypes.Role, user.Role),
+            new Claim("factoryId", user.FactoryId),
         };
         var token = new JwtSecurityToken(
             issuer: cfg["Jwt:Issuer"],

@@ -40,13 +40,13 @@ public class LinesController(AppDbContext db) : ControllerBase
         return Ok(line);
     }
 
-    // POST /api/lines —— 新建（文员或主管）。name+workshop 必填
+    // POST /api/lines —— 新建（文员或主管）。厂区取顶部当前选择/账号归属，不由表单重复选择。
     [HttpPost]
     [Authorize(Roles = "clerk,admin")]
     public async Task<IActionResult> Create([FromBody] CreateLineRequest req)
     {
-        if (string.IsNullOrWhiteSpace(req.Name) || string.IsNullOrWhiteSpace(req.Workshop))
-            return BadRequest(new { error = "拉别名和车间必填" });
+        if (string.IsNullOrWhiteSpace(req.Name))
+            return BadRequest(new { error = "拉别名必填" });
 
         // 工艺类型：传了就校验合法，没传默认「移印」
         var craft = string.IsNullOrWhiteSpace(req.CraftType) ? "移印" : req.CraftType;
@@ -56,7 +56,7 @@ public class LinesController(AppDbContext db) : ControllerBase
         var line = new ProductionLine
         {
             Name = req.Name,
-            Workshop = req.Workshop,
+            Workshop = db.CurrentFactoryId == "HUADENG" ? "华登" : "兴信",
             LeaderName = string.IsNullOrEmpty(req.LeaderName) ? null : req.LeaderName,
             CraftType = craft,
             IsActive = true,
@@ -76,7 +76,7 @@ public class LinesController(AppDbContext db) : ControllerBase
         if (line is null) return NotFound(new { error = "拉别不存在" });
 
         if (req.Name is not null) line.Name = req.Name;
-        if (req.Workshop is not null) line.Workshop = req.Workshop;
+        // 厂区由数据归属决定，编辑拉别时不可跨厂移动。
         if (req.LeaderName is not null) line.LeaderName = string.IsNullOrEmpty(req.LeaderName) ? null : req.LeaderName;
         if (req.IsActive is not null) line.IsActive = req.IsActive.Value;
         if (req.DailyCapacityLimit is not null) line.DailyCapacityLimit = req.DailyCapacityLimit.Value;  // 每天产能上限（件）

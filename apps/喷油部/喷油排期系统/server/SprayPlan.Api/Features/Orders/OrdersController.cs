@@ -113,7 +113,7 @@ public class OrdersController(AppDbContext db, PdfStorage pdf) : ControllerBase
                 o.Id, o.ExternalOrderNo, o.ProductId, o.OrderDate, o.DeliveryDate,
                 o.Status, o.IsMA, o.IsUrgent, o.Remark, o.CreatedBy,
                 o.Product == null ? null : new OrderProductDto(o.Product.Id, o.Product.ProductNo,
-                    o.Product.Parts.OrderBy(p => p.PartOrder).Select(p => new OrderProductPartDto(p.Id, p.PartName, p.UnitCost, p.LaborPrice, p.PaintCost, p.QuotedPrice)).ToList()),
+                    o.Product.Parts.OrderBy(p => p.PartOrder).Select(p => new OrderProductPartDto(p.Id, p.PartName, p.Craft, p.PartGroupId, p.UnitCost, p.LaborPrice, p.PaintCost, p.QuotedPrice)).ToList()),
                 o.PartQtys.OrderBy(q => q.PartOrder).Select(q => new OrderPartQtyDto(q.Id, q.PartName, q.SourcePartId, q.Qty, q.PartOrder)).ToList(),
                 // 数量可改 = 已接单 且 无未删排期计划（与 PATCH 校验同口径）
                 (o.Status == "draft" || o.Status == "received") && !o.Plans.Any(p => p.DeletedAt == null)))
@@ -255,7 +255,8 @@ public class OrdersController(AppDbContext db, PdfStorage pdf) : ControllerBase
         if (!await db.Products.AnyAsync(p => p.Id == req.ProductId))
             return BadRequest(new { error = "引用的款号不存在" });
 
-        if (await db.Orders.AnyAsync(o => o.ExternalOrderNo == req.ExternalOrderNo))
+        var targetFactory = db.CurrentFactoryId == "ALL" ? "XINGXIN" : db.CurrentFactoryId;
+        if (await db.Orders.IgnoreQueryFilters().AnyAsync(o => o.FactoryId == targetFactory && o.ExternalOrderNo == req.ExternalOrderNo))
             return Conflict(new { error = "该外部订单号已存在" });
 
         var now = DateTime.UtcNow;
@@ -440,7 +441,8 @@ public class OrdersController(AppDbContext db, PdfStorage pdf) : ControllerBase
     [Authorize(Roles = "clerk,admin")]
     public async Task<IActionResult> ImportConfirm([FromBody] ImportConfirmRequest req)
     {
-        if (await db.Orders.AnyAsync(o => o.ExternalOrderNo == req.Head.ExternalOrderNo))
+        var targetFactory = db.CurrentFactoryId == "ALL" ? "XINGXIN" : db.CurrentFactoryId;
+        if (await db.Orders.IgnoreQueryFilters().AnyAsync(o => o.FactoryId == targetFactory && o.ExternalOrderNo == req.Head.ExternalOrderNo))
             return Conflict(new { error = "该订单编号已存在" });
 
         var now = DateTime.UtcNow;
@@ -610,6 +612,8 @@ public class OrdersController(AppDbContext db, PdfStorage pdf) : ControllerBase
             return BadRequest(new { error = "开始日期、工序和每日目标数必须填写完整" });
         if (rows.Any(row => !CraftTypes.IsValid(row.Craft!.Trim())))
             return BadRequest(new { error = "工序无效（手喷/移印/自动喷/UV）" });
+        if (rows.Any(row => row.LaborPrice is < 0))
+            return BadRequest(new { error = "人工价格不能小于 0" });
 
         var order = await db.Orders
             .Include(o => o.PartQtys)
@@ -677,6 +681,7 @@ public class OrdersController(AppDbContext db, PdfStorage pdf) : ControllerBase
                 }
                 rule.Craft = craft;
                 rule.DailyCapacity = row.DailyTarget!.Value;
+                if (row.LaborPrice is not null) rule.LaborPrice = row.LaborPrice.Value;
             }
 
             var passCount = siblings.Select(part => part.Craft.Trim()).Where(craft => craft.Length > 0).Distinct().Count();

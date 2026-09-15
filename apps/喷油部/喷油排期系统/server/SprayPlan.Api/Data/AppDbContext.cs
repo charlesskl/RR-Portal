@@ -6,7 +6,29 @@ namespace SprayPlan.Api.Data;
 
 public class AppDbContext : DbContext
 {
-    public AppDbContext(DbContextOptions<AppDbContext> options) : base(options) { }
+    private readonly IHttpContextAccessor? _http;
+
+    public AppDbContext(DbContextOptions<AppDbContext> options, IHttpContextAccessor? http = null) : base(options)
+        => _http = http;
+
+    // 没有登录上下文（种子/测试）时沿用历史数据所属的兴信厂区。
+    public bool IsAdmin => _http?.HttpContext?.User.IsInRole("admin") == true;
+    public string CurrentFactoryId
+    {
+        get
+        {
+            var claimFactory = _http?.HttpContext?.User.FindFirst("factoryId")?.Value;
+            if (IsAdmin)
+            {
+                var selected = _http?.HttpContext?.Request.Cookies["sprayplan_factory"];
+                if (selected is "XINGXIN" or "HUADENG") return selected;
+                return claimFactory == "HUADENG" ? "HUADENG" : "XINGXIN";
+            }
+            return claimFactory is "XINGXIN" or "HUADENG" ? claimFactory : "XINGXIN";
+        }
+    }
+    // 后台维护/测试没有 HTTP 请求时不做过滤；真实请求严格按当前选择厂区执行。
+    public bool CanSeeAllFactories => _http?.HttpContext is null;
 
     public DbSet<User> Users => Set<User>();
     public DbSet<ProductionLine> ProductionLines => Set<ProductionLine>();
@@ -33,6 +55,7 @@ public class AppDbContext : DbContext
         u.Property(x => x.PasswordHash).HasColumnName("passwordHash");
         u.Property(x => x.DisplayName).HasColumnName("displayName");
         u.Property(x => x.Role).HasColumnName("role");
+        u.Property(x => x.FactoryId).HasColumnName("factoryId");
         u.Property(x => x.IsActive).HasColumnName("isActive");
         u.Property(x => x.CreatedAt).HasColumnName("createdAt").HasConversion(MsConverter);
         u.Property(x => x.UpdatedAt).HasColumnName("updatedAt").HasConversion(MsConverter);
@@ -43,6 +66,7 @@ public class AppDbContext : DbContext
         l.ToTable("production_lines");
         l.Property(x => x.Name).HasColumnName("name");
         l.Property(x => x.Workshop).HasColumnName("workshop");
+        l.Property(x => x.FactoryId).HasColumnName("factoryId");
         l.Property(x => x.LeaderName).HasColumnName("leaderName");
         l.Property(x => x.CraftType).HasColumnName("craftType");
         l.Property(x => x.IsActive).HasColumnName("isActive");
@@ -53,6 +77,7 @@ public class AppDbContext : DbContext
         m.HasIndex(x => new { x.LineId, x.MachineNo }).IsUnique();
         m.Property(x => x.MachineNo).HasColumnName("machineNo");
         m.Property(x => x.LineId).HasColumnName("lineId");
+        m.Property(x => x.FactoryId).HasColumnName("factoryId");
         m.Property(x => x.MachineType).HasColumnName("machineType");
         m.Property(x => x.IsUV).HasColumnName("isUV");
         m.Property(x => x.IsActive).HasColumnName("isActive");
@@ -97,8 +122,9 @@ public class AppDbContext : DbContext
         // ===== 订单 3 表 =====
         var o = b.Entity<Order>();
         o.ToTable("orders");
-        o.HasIndex(x => x.ExternalOrderNo).IsUnique();
+        o.HasIndex(x => new { x.FactoryId, x.ExternalOrderNo }).IsUnique();
         o.Property(x => x.ExternalOrderNo).HasColumnName("externalOrderNo");
+        o.Property(x => x.FactoryId).HasColumnName("factoryId");
         o.Property(x => x.ProductId).HasColumnName("productId");
         o.Property(x => x.OrderDate).HasColumnName("orderDate").HasConversion(MsConverter);
         o.Property(x => x.DeliveryDate).HasColumnName("deliveryDate").HasConversion(NullableMsConverter);
@@ -128,6 +154,7 @@ public class AppDbContext : DbContext
         pl.Property(x => x.PlanDate).HasColumnName("planDate").HasConversion(MsConverter);
         pl.Property(x => x.PlanType).HasColumnName("planType");
         pl.Property(x => x.LineId).HasColumnName("lineId");
+        pl.Property(x => x.FactoryId).HasColumnName("factoryId");
         pl.Property(x => x.OrderId).HasColumnName("orderId");
         pl.Property(x => x.ItemName).HasColumnName("itemName");
         pl.Property(x => x.PartName).HasColumnName("partName");
@@ -186,6 +213,7 @@ public class AppDbContext : DbContext
         im.HasIndex(x => x.OwnerOrderId);
         im.HasIndex(x => x.RefOrderId);
         im.Property(x => x.ProductId).HasColumnName("productId");
+        im.Property(x => x.FactoryId).HasColumnName("factoryId");
         im.Property(x => x.ItemName).HasColumnName("itemName");
         im.Property(x => x.PartName).HasColumnName("partName");
         im.Property(x => x.OwnerOrderId).HasColumnName("ownerOrderId");
@@ -205,6 +233,7 @@ public class AppDbContext : DbContext
         ia.HasIndex(x => x.ProductNo);
         ia.Property(x => x.ApplicationNo).HasColumnName("applicationNo");
         ia.Property(x => x.SourcePlanId).HasColumnName("sourcePlanId");
+        ia.Property(x => x.FactoryId).HasColumnName("factoryId");
         ia.Property(x => x.ProductionDate).HasColumnName("productionDate").HasConversion(MsConverter);
         ia.Property(x => x.OrderNo).HasColumnName("orderNo");
         ia.Property(x => x.ProductNo).HasColumnName("productNo");
@@ -214,6 +243,79 @@ public class AppDbContext : DbContext
         ia.Property(x => x.CreatedBy).HasColumnName("createdBy");
         ia.Property(x => x.CreatedAt).HasColumnName("createdAt").HasConversion(MsConverter);
         ia.Property(x => x.Remark).HasColumnName("remark");
+
+        // 厂区数据隔离统一放在数据库查询层，避免任何接口漏写 Where 条件。
+        // 管理员/主管的用户管理始终显示全部账号，不受当前业务厂区选择影响。
+        u.HasQueryFilter(x => CanSeeAllFactories || IsAdmin || x.FactoryId == CurrentFactoryId);
+        o.HasQueryFilter(x => CanSeeAllFactories || x.FactoryId == CurrentFactoryId);
+        l.HasQueryFilter(x => CanSeeAllFactories || x.FactoryId == CurrentFactoryId);
+        m.HasQueryFilter(x => CanSeeAllFactories || x.FactoryId == CurrentFactoryId);
+        pl.HasQueryFilter(x => CanSeeAllFactories || x.FactoryId == CurrentFactoryId);
+        im.HasQueryFilter(x => CanSeeAllFactories || x.FactoryId == CurrentFactoryId);
+        ia.HasQueryFilter(x => CanSeeAllFactories || x.FactoryId == CurrentFactoryId);
+    }
+
+    public override int SaveChanges()
+    {
+        ApplyFactoryScope();
+        return base.SaveChanges();
+    }
+
+    public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+    {
+        ApplyFactoryScope();
+        return base.SaveChangesAsync(cancellationToken);
+    }
+
+    private void ApplyFactoryScope()
+    {
+        foreach (var entry in ChangeTracker.Entries())
+        {
+            var factory = entry.Entity switch
+            {
+                User x => x.FactoryId,
+                Order x => x.FactoryId,
+                ProductionLine x => x.FactoryId,
+                Machine x => x.FactoryId,
+                ProductionPlan x => x.FactoryId,
+                InventoryMove x => x.FactoryId,
+                InboundApplication x => x.FactoryId,
+                _ => null,
+            };
+            if (factory is null) continue;
+
+            // 登录接口在令牌签发前更新该账号的最后登录时间；此时尚无厂区 Claim。
+            if (entry.Entity is User && _http?.HttpContext?.User.Identity?.IsAuthenticated != true)
+                continue;
+
+            if (entry.State == EntityState.Added && !CanSeeAllFactories)
+            {
+                SetFactory(entry.Entity, CurrentFactoryId);
+                factory = CurrentFactoryId;
+            }
+            else if (entry.State == EntityState.Added && string.IsNullOrWhiteSpace(factory))
+            {
+                SetFactory(entry.Entity, "XINGXIN");
+                factory = "XINGXIN";
+            }
+
+            if (!CanSeeAllFactories && factory != CurrentFactoryId && entry.State is EntityState.Added or EntityState.Modified or EntityState.Deleted)
+                throw new InvalidOperationException("不能修改其他厂区的数据");
+        }
+    }
+
+    private static void SetFactory(object entity, string factoryId)
+    {
+        switch (entity)
+        {
+            case User x: x.FactoryId = factoryId; break;
+            case Order x: x.FactoryId = factoryId; break;
+            case ProductionLine x: x.FactoryId = factoryId; break;
+            case Machine x: x.FactoryId = factoryId; break;
+            case ProductionPlan x: x.FactoryId = factoryId; break;
+            case InventoryMove x: x.FactoryId = factoryId; break;
+            case InboundApplication x: x.FactoryId = factoryId; break;
+        }
     }
 
     // ⚠️ 关键兼容：Prisma 在 SQLite 把 DateTime 存为 Unix 毫秒整数，EF 默认存 TEXT。

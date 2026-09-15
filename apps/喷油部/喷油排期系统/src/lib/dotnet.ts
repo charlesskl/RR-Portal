@@ -9,6 +9,7 @@ import { cookies } from "next/headers";
 const BASE = process.env.DOTNET_API_URL || "http://localhost:5080";
 
 const COOKIE_NAME = "sprayplan_session";
+const FACTORY_COOKIE_NAME = "sprayplan_factory";
 
 export class DotnetHttpError extends Error {
   constructor(public readonly status: number, public readonly path: string) {
@@ -18,10 +19,16 @@ export class DotnetHttpError extends Error {
 
 // GET 请求 .NET 接口并返回解析后的 JSON。失败抛错（让页面的错误边界/日志能感知）。
 export async function dotnetGet<T>(path: string): Promise<T> {
-  const token = cookies().get(COOKIE_NAME)?.value;
+  const cookieStore = cookies();
+  const token = cookieStore.get(COOKIE_NAME)?.value;
+  const factory = cookieStore.get(FACTORY_COOKIE_NAME)?.value;
+  const forwardedCookies = [
+    token ? `${COOKIE_NAME}=${token}` : "",
+    factory ? `${FACTORY_COOKIE_NAME}=${factory}` : "",
+  ].filter(Boolean).join("; ");
   const res = await fetch(`${BASE}${path}`, {
     // 把登录 Cookie 透传给 .NET（服务端到服务端，不经浏览器）
-    headers: token ? { Cookie: `${COOKIE_NAME}=${token}` } : {},
+    headers: forwardedCookies ? { Cookie: forwardedCookies } : {},
     cache: "no-store",
   });
   if (!res.ok) {

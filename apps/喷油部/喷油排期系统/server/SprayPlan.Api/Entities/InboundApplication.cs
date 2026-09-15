@@ -6,6 +6,7 @@ public class InboundApplication
     public int Id { get; set; }
     public string ApplicationNo { get; set; } = "";
     public int SourcePlanId { get; set; }
+    public string FactoryId { get; set; } = "XINGXIN";
     public DateTime ProductionDate { get; set; }
     public string OrderNo { get; set; } = "";
     public string ProductNo { get; set; } = "";

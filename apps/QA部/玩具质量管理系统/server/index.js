@@ -211,7 +211,7 @@ app.post("/api/ai/translate", handle(async (request, reply) => {
         complaintMessageZhFinal: null,
         translationStatus: "translated",
         translationProvider: "moonshot",
-        translationModel: process.env.MOONSHOT_MODEL?.trim() || "kimi-k2-0905-preview",
+        translationModel: ai.modelName(),
       });
       translated += 1;
     } else {

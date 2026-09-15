@@ -6,7 +6,11 @@
 // Configuration (server environment):
 //   MOONSHOT_API_KEY   — required; without it /api/ai/* returns 503
 //   MOONSHOT_BASE_URL  — optional, default https://api.moonshot.cn/v1
+//     (any OpenAI-compatible endpoint works, e.g. OpenRouter:
+//      https://openrouter.ai/api/v1)
 //   MOONSHOT_MODEL     — optional, default kimi-k2-0905-preview
+//     (on OpenRouter use e.g. moonshotai/kimi-k2-0905)
+//   MOONSHOT_MAX_TOKENS — optional, default 8000
 
 const DEFAULT_BASE_URL = "https://api.moonshot.cn/v1";
 const DEFAULT_MODEL = "kimi-k2-0905-preview";
@@ -15,6 +19,10 @@ const REQUEST_TIMEOUT_MS = 90_000;
 
 export function aiConfigured() {
   return Boolean(process.env.MOONSHOT_API_KEY?.trim());
+}
+
+export function modelName() {
+  return process.env.MOONSHOT_MODEL?.trim() || DEFAULT_MODEL;
 }
 
 function config() {
@@ -43,6 +51,7 @@ async function chat(systemPrompt, userPrompt) {
       body: JSON.stringify({
         model,
         temperature: 0.2,
+        max_tokens: Number(process.env.MOONSHOT_MAX_TOKENS || 8000),
         response_format: { type: "json_object" },
         messages: [
           { role: "system", content: systemPrompt },

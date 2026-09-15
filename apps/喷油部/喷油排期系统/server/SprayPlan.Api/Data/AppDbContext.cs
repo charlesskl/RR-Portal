@@ -242,6 +242,8 @@ public class AppDbContext : DbContext
         ia.Property(x => x.Quantity).HasColumnName("quantity");
         ia.Property(x => x.CreatedBy).HasColumnName("createdBy");
         ia.Property(x => x.CreatedAt).HasColumnName("createdAt").HasConversion(MsConverter);
+        ia.Property(x => x.UpdatedAt).HasColumnName("updatedAt").HasConversion(MsConverter);
+        ia.Property(x => x.UpdatedBy).HasColumnName("updatedBy");
         ia.Property(x => x.Remark).HasColumnName("remark");
 
         // 厂区数据隔离统一放在数据库查询层，避免任何接口漏写 Where 条件。

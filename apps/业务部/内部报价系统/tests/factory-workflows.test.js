@@ -14,6 +14,7 @@ test('engineering mold expansion preserves material and color for each part', ()
     product_group_name: '1#产品',
     product_image: 'uploads/mold/product-1.png',
     images: ['uploads/mold/mold.png'],
+    structure: '2个行位',
     material: 'ABS/PP',
     color: 'red/blue',
     detail: { mold_size: '300*400*320' },
@@ -46,6 +47,7 @@ test('engineering mold expansion preserves material and color for each part', ()
     ['uploads/mold/shell.png'],
     ['uploads/mold/mold.png'],
   ]);
+  assert.deepEqual(rows.map(row => row.side_action), ['2个行位', '2个行位']);
 });
 
 function createUserAccessDb() {

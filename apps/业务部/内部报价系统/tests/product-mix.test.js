@@ -99,6 +99,12 @@ test('molding injection table shows engineering images in its first column witho
   assert.doesNotMatch(source, /payload\.injection[^\n]*images:/);
 });
 
+test('molding injection table keeps an editable side-action column on screen only', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../frontend/workbench.js'), 'utf8');
+  assert.match(source, /key: 'side_action', label: '行位'/);
+  assert.match(source, /side_action: m\.side_action \|\| existing\.side_action \|\| ''/);
+});
+
 test('mold table hides the unused mold structure column', () => {
   const source = fs.readFileSync(path.join(__dirname, '../frontend/workbench.js'), 'utf8');
   const renderMolds = source.match(/function renderMolds\([\s\S]*?\n}\n/);
@@ -172,7 +178,7 @@ test('Ctrl+S and Command+S save the active dirty department', () => {
   assert.match(source, /const save = saveHandlers\.get\(activeDept\)/);
   assert.match(source, /showSaveShortcutStatus\('\u2713 已保存'\)/);
   assert.match(source, /保存草稿（Ctrl\/⌘\+S）/);
-  assert.match(quotePage, /workbench\.js\?v=20260915-molding-images/);
+  assert.match(quotePage, /workbench\.js\?v=20260915-molding-slide/);
 });
 
 test('summary tab recalculates whenever it is opened or clicked again', () => {

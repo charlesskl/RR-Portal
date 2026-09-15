@@ -1,9 +1,14 @@
 # 玩具质量管理系统 ToyQMS
 # 两阶段：前端静态导出（Next.js output:export）+ 后端 Fastify/node:sqlite 单容器托管。
-# 后端使用 Node 内置 node:sqlite（需 Node ≥ 22.5，这里用 24），无原生编译依赖。
+# 后端使用 Node 内置 node:sqlite（需 Node ≥ 23.4，这里用 24），无原生编译依赖。
 
 # ── 阶段一：构建前端静态产物 out/ ──
 FROM node:24-alpine AS build
+
+# 生产 ECS 在阿里云内，直连 registry.npmjs.org 会超时；npm 默认
+# replace-registry-host=npmjs，会把 lockfile 里 npmjs.org 的 resolved URL
+# 自动替换成此 registry。仅作用于构建期，不影响运行时。
+ENV npm_config_registry=https://registry.npmmirror.com
 
 WORKDIR /app
 
@@ -11,10 +16,14 @@ COPY package.json package-lock.json ./
 RUN npm ci --no-audit --no-fund --cache /tmp/npm-cache
 
 COPY . .
-RUN npm run build
+# 生产部署在 RR Portal 的 /toyqms/ 子路径：构建时注入 basePath，
+# 静态资源 URL 带 /toyqms 前缀，nginx 剥前缀后命中容器内 out/_next/*。
+RUN NEXT_PUBLIC_BASE_PATH=/toyqms npm run build
 
 # ── 阶段二：运行时（后端 + 静态前端 + SQLite 数据）──
 FROM node:24-alpine AS production
+
+ENV npm_config_registry=https://registry.npmmirror.com
 
 RUN apk add --no-cache tini curl
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup

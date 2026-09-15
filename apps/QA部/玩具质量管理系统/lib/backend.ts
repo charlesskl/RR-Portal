@@ -4,8 +4,11 @@
 // (`npm run dev`), next.config.ts proxies /api to the backend on 4313.
 const TOKEN_KEY = "toyqms.remote.session.v1";
 
+// Effective base URL for API calls: always the same origin as the page.
+// 同源部署在 /toyqms/ 子路径时（nginx 剥前缀反代），请求必须带上 basePath，
+// 否则会打到站点根路径 /api/*。NEXT_PUBLIC_BASE_PATH 由 Dockerfile 构建时内联。
 export function getBackendBaseUrl(): string {
-  if (typeof window !== "undefined") return window.location.origin;
+  if (typeof window !== "undefined") return window.location.origin + (process.env.NEXT_PUBLIC_BASE_PATH || "");
   return "http://127.0.0.1:4313";
 }
 

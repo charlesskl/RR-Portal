@@ -2098,7 +2098,7 @@ function filterRecords() {
     filteredRecs = data.filter(r => {
       if (search) {
         const haystack = [
-          r.supplier, r.productNo, r.productName, r.client, r.orderNo, r.deliveryNo,
+          r.supplier, r.productNo, r.productName, r.client, r.processType, r.orderNo, r.deliveryNo,
           r.defect, r.updatedAt, formatModifiedDate(r.updatedAt),
         ]
           .filter(Boolean).join(' ').toLowerCase();
@@ -2140,7 +2140,7 @@ function filterRecords() {
       if (!visibleIds.has(id)) _selectedIds.delete(id);
     }
 
-    wrap.innerHTML = `<table id="recordsTable" style="table-layout:fixed;width:100%;min-width:1590px">
+    wrap.innerHTML = `<table id="recordsTable" style="table-layout:fixed;width:100%;min-width:1678px">
       <colgroup>
         <col style="width:36px"/>   <!-- 复选框 -->
         <col style="width:44px"/>   <!-- # -->
@@ -2148,6 +2148,7 @@ function filterRecords() {
         <col style="width:98px"/>   <!-- 修改日期 -->
         <col style="width:110px"/>  <!-- 供应商 -->
         <col style="width:80px"/>   <!-- 客户 -->
+        <col style="width:88px"/>   <!-- 加工类型 -->
         <col style="width:92px"/>   <!-- 货号 -->
         <col style="width:160px"/>  <!-- 款式名称 -->
         <col style="width:102px"/>  <!-- PO号 -->
@@ -2171,6 +2172,7 @@ function filterRecords() {
         <th style="text-align:left">修改日期</th>
         <th style="text-align:left">供应商</th>
         <th style="text-align:left">客户</th>
+        <th style="text-align:left">加工类型</th>
         <th style="text-align:left">货号</th>
         <th style="text-align:left">款式名称</th>
         <th style="text-align:left">PO号</th>
@@ -2215,6 +2217,7 @@ function filterRecords() {
           <td style="font-family:var(--font-mono);font-size:11px;white-space:nowrap">${formatModifiedDate(r.updatedAt) || '-'}</td>
           <td style="font-weight:500;color:#e8edf5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${r.supplier}">${r.supplier}</td>
           <td style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${r.client||''}">${r.client||'-'}</td>
+          <td style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${r.processType||''}">${r.processType||'-'}</td>
           <td style="font-family:var(--font-mono);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${r.productNo||''}">${r.productNo||'-'}</td>
           <td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${r.productName||''}">${r.productName||'-'}</td>
           <td style="font-family:var(--font-mono);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${r.orderNo||''}">${r.orderNo||'-'}</td>
@@ -2253,7 +2256,7 @@ let colLockCount = COLLOCK_DEFAULT;
 try {
   colLockOn = localStorage.getItem(COLLOCK_KEY) === '1';
   const d = parseInt(localStorage.getItem(COLLOCK_DEPTH_KEY), 10);
-  if (d >= 2 && d <= 8) colLockCount = d;
+  if (d >= 2 && d <= 9) colLockCount = d;
 } catch(e) {}
 
 /* 用户自选锁定深度（锁到第几列） */
@@ -2496,6 +2499,16 @@ function renderCustomerDatalist() {
   const list = document.getElementById('customerList');
   if (!list) return;
   list.innerHTML = getCustomerOptions()
+    .map(n => `<option value="${n}"></option>`).join('');
+}
+
+/* 加工类型候选：常见工艺 + 历史记录里出现过的值 */
+const DEFAULT_PROCESS_TYPES = ['啤机','印刷','UV','过油','裱纸','烫金','击凸','粘盒'];
+function renderProcessTypeDatalist() {
+  const list = document.getElementById('processTypeList');
+  if (!list) return;
+  const fromData = recs().map(r => r.processType).filter(Boolean);
+  list.innerHTML = [...new Set([...DEFAULT_PROCESS_TYPES, ...fromData])]
     .map(n => `<option value="${n}"></option>`).join('');
 }
 
@@ -3213,6 +3226,7 @@ function openAddModal() {
   if (inspDateEl) inspDateEl.value = todayStr();
   renderSupplierDatalist();
   renderCustomerDatalist();
+  renderProcessTypeDatalist();
   renderInspectorDatalist();
   initDefectLib();
   refreshDefectDescDatalist();
@@ -3235,6 +3249,7 @@ function openEditModal(id) {
   setVal('f_inspDate',    r.inspDate || '');
   setVal('f_supplier',    r.supplier || '');
   setVal('f_client',      r.client || '');
+  setVal('f_processType', r.processType || '');
   setVal('f_productNo',   r.productNo || '');
   setVal('f_productName', r.productName || '');
   setVal('f_deliveryNo',  r.deliveryNo || '');
@@ -3257,6 +3272,7 @@ function openEditModal(id) {
   _loadMeasRows(r.measurements || []); /* 加载已有测量数据 */
   renderSupplierDatalist();
   renderCustomerDatalist();
+  renderProcessTypeDatalist();
   renderInspectorDatalist();
   initDefectLib();
   refreshDefectDescDatalist();
@@ -3268,7 +3284,7 @@ function setVal(id, v) { const el=document.getElementById(id); if(el) el.value=v
 function getVal(id)     { return (document.getElementById(id)?.value || '').trim(); }
 
 function clearForm() {
-  ['f_date','f_inspDate','f_supplier','f_client','f_productNo','f_productName',
+  ['f_date','f_inspDate','f_supplier','f_client','f_processType','f_productNo','f_productName',
    'f_deliveryNo','f_orderNo','f_qty','f_sampleQty','f_pass','f_fail','f_defectRate','f_defect','f_qc','f_remark']
     .forEach(id => setVal(id, ''));
   /* 检验员：默认当前登录账号（姓名优先，没有再退回用户名），仍可手动改 */
@@ -4558,7 +4574,8 @@ function saveRecord(options = {}) {
 
   const rec = {
     date, inspDate: getVal('f_inspDate') || date,
-    supplier, client: getVal('f_client'), productNo: getVal('f_productNo'),
+    supplier, client: getVal('f_client'), processType: getVal('f_processType'),
+    productNo: getVal('f_productNo'),
     productName: getVal('f_productName'), deliveryNo: getVal('f_deliveryNo'),
     orderNo: getVal('f_orderNo'),
     type: getVal('f_type'), qty, sampleQty: sample, pass, fail,
@@ -4599,6 +4616,7 @@ function saveRecord(options = {}) {
   showToast(wasEditing ? (rec.resubmitted ? '记录已重新提交审核 ✓' : '记录已更新 ✓') : (continueEntry ? '记录已添加并提交审核，可继续录入下一条 ✓' : '记录已添加，已提交审核 ✓'), 'success');
   renderSupplierDatalist();   /* 新供应商/客户保存后立即进入下拉选项 */
   renderCustomerDatalist();
+  renderProcessTypeDatalist();
 
   /* 刷新当前页 */
   if (currentPage === 'dashboard') renderDashboard();
@@ -4707,6 +4725,7 @@ function renderReviewPage() {
       <td style="font-family:var(--font-mono);font-size:11px;white-space:nowrap">${_esc(r.date)}</td>
       <td style="font-weight:500;white-space:nowrap">${_esc(r.supplier)}</td>
       <td style="white-space:nowrap">${_esc(r.client||'-')}</td>
+      <td style="white-space:nowrap">${_esc(r.processType||'-')}</td>
       <td style="font-family:var(--font-mono);font-size:11px;white-space:nowrap">${_esc(r.productNo||'-')}</td>
       <td style="white-space:nowrap">${_esc(r.productName||'-')}</td>
       <td style="text-align:center"><span class="badge ${r.type==='成品'?'badge-pass':'badge-hold'}">${_esc(r.type||'-')}</span></td>
@@ -4720,10 +4739,10 @@ function renderReviewPage() {
     </tr>`;
   }).join('');
 
-  wrap.innerHTML = `<table class="data-table" style="min-width:1180px">
+  wrap.innerHTML = `<table class="data-table" style="min-width:1268px">
     <thead><tr>
       <th style="text-align:right">#</th>
-      <th>来料日期</th><th>供应商</th><th>客户</th><th>货号</th><th>款式名称</th>
+      <th>来料日期</th><th>供应商</th><th>客户</th><th>加工类型</th><th>货号</th><th>款式名称</th>
       <th style="text-align:center">类型</th>
       <th style="text-align:right">来料数</th><th style="text-align:right">FAIL</th>
       <th style="text-align:center">判定</th><th style="text-align:center">检验员</th>
@@ -5084,10 +5103,10 @@ function exportCSV() {
   if (_downloadServerExport('records.csv', 'CSV')) return;
   try {
     const data = filteredRecs.length ? filteredRecs : recs();
-    const HDR  = ['ID','来料日期','检验日期','修改日期','供应商','客户','货号','款式名称','PO号','类型',
+    const HDR  = ['ID','来料日期','检验日期','修改日期','供应商','客户','加工类型','货号','款式名称','PO号','类型',
                   '来料数量','抽查数量','PASS数','FAIL数','不良率','不良现象','判定结果','检验员','备注'];
     const rows = data.map(r => [
-      r.id, r.date, r.inspDate, formatModifiedDate(r.updatedAt), r.supplier, r.client, r.productNo, r.productName,
+      r.id, r.date, r.inspDate, formatModifiedDate(r.updatedAt), r.supplier, r.client, r.processType || '', r.productNo, r.productName,
       r.orderNo, r.type, r.qty, r.sampleQty, r.pass, r.fail, r.defectRate, r.defect, r.result, r.qc, r.remark,
     ].map(v => `"${String(v==null?'':v).replace(/"/g,'""')}"`));
     const csv  = '\uFEFF' + [HDR, ...rows].map(r=>r.join(',')).join('\n');
@@ -5126,7 +5145,7 @@ function exportFactoryExcel() {
     const aoa = [[title], headers];
     data.forEach((r, i) => {
       aoa.push([
-        i + 1, r.date || '', r.supplier || '', r.type || '', r.client || '',
+        i + 1, r.date || '', r.supplier || '', r.processType || r.type || '', r.client || '',
         r.deliveryNo || '', r.orderNo || '', r.productNo || '', r.productName || '',
         (r.qty != null && r.qty !== '' ? Number(r.qty) : ''), '',
         r.result || '', r.defect || '', r.qc || '', r.remark || '',
@@ -5372,6 +5391,7 @@ function _backupDoImport(incoming, mode) {
       inspDate:    r.inspDate    || r.date || '',
       supplier:    r.supplier    || r.厂名 || '',
       client:      r.client      || r.客名 || '',
+      processType: r.processType || '',
       productNo:   r.productNo   || r.款号 || '',
       productName: r.productName || r.款式 || '',
       deliveryNo:  r.deliveryNo  || r.单号 || '',
@@ -5515,6 +5535,7 @@ const FIELD_MAP = {
 
   /* ── 客户 / 客名 ── */
   '客名': 'client', '客户': 'client', '品牌': 'client',
+  '加工类型': 'processType', '加工': 'processType',
   '客戶': 'client', '客户名称': 'client',
 
   /* ── 送货单号 ── */

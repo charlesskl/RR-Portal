@@ -658,8 +658,11 @@ export default function ShipmentsPage() {
     try {
       const { buildCustomsWorkbook, customsFileName, dataUrlToBytes } = await import('../utils/customsExport')
       // 1) 模板
-      const tplResp = await fetch(publicAsset(import.meta.env.BASE_URL, 'template-customs.xlsx'))
-      if (!tplResp.ok) throw new Error('模板加载失败 template-customs.xlsx (HTTP ' + tplResp.status + ')')
+      const templateName = String(v.customer || '').toUpperCase().includes('RRI')
+        ? 'template-customs-rri.xlsx'
+        : 'template-customs-rrm.xlsx'
+      const tplResp = await fetch(publicAsset(import.meta.env.BASE_URL, templateName))
+      if (!tplResp.ok) throw new Error(`模板加载失败 ${templateName} (HTTP ${tplResp.status})`)
       const templateBuffer = await tplResp.arrayBuffer()
       // 2) 物料富化：products → materials by code → material_id 映射
       const { data: prods } = await api.get<any[]>('/products')

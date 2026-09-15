@@ -1232,6 +1232,8 @@ static void BackfillConfirmedShipmentTasks(AppDbContext db)
 static void SeedSystemSettings(AppDbContext db, string contentRootPath)
 {
     var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+    // seed JSON 来自旧系统导出，日期是空格分隔格式（2026-09-11 00:31:18.690457），需要宽松解析
+    options.Converters.Add(new LenientDateTimeConverter());
     var seedDirectory = Path.Combine(contentRootPath, "seed");
     if (!db.ProductInfos.Any())
     {

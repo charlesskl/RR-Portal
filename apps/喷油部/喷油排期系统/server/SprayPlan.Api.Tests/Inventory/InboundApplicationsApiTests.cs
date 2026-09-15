@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
 
 namespace SprayPlan.Api.Tests.Inventory;
 
@@ -88,5 +89,30 @@ public class InboundApplicationsApiTests : IAsyncLifetime
         var page = await listResponse.Content.ReadFromJsonAsync<JsonElement>();
         var applicationNo = page.GetProperty("items")[0].GetProperty("applicationNo").GetString();
         Assert.Equal(HttpStatusCode.OK, (await _client.GetAsync($"/api/erp/inbound-applications/{applicationNo}")).StatusCode);
+    }
+
+    // 回归：生产库沿用 prisma 时代的 INTEGER Unix 毫秒日期格式，
+    // 直接插入 INTEGER ms 的行也必须能正常读出（曾因此整页 500）。
+    [Fact]
+    public async Task List_ToleratesLegacyIntegerMillisecondDates()
+    {
+        await LoginAsync();
+        var ms = new DateTimeOffset(2026, 9, 14, 6, 37, 41, TimeSpan.Zero).ToUnixTimeMilliseconds();
+        await _factory.WithDbAsync(db => db.Database.ExecuteSqlRawAsync(
+            """
+            INSERT INTO inbound_applications
+                (applicationNo, sourcePlanId, factoryId, productionDate, orderNo, productNo,
+                 itemName, partName, quantity, createdBy, createdAt, updatedAt, updatedBy, remark)
+            VALUES ({0}, 1, 'XINGXIN', {1}, 'ERP-ORDER-LEGACY', 'ERP-1001',
+                    '兔子', '头', 10, 'clerk', {1}, {1}, NULL, NULL)
+            """, "RK-LEGACY-1", ms));
+
+        var response = await _client.GetAsync("/api/inventory/inbound-applications");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var page = await response.Content.ReadFromJsonAsync<JsonElement>();
+        var item = page.GetProperty("items").EnumerateArray()
+            .Single(x => x.GetProperty("applicationNo").GetString() == "RK-LEGACY-1");
+        Assert.Equal(10, item.GetProperty("quantity").GetInt32());
+        Assert.Equal("2026-09-14T06:37:41Z", item.GetProperty("updatedAt").GetString());
     }
 }

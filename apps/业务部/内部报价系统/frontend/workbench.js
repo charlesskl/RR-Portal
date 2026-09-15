@@ -160,6 +160,7 @@ function renderTable(container, columns, rows, opts = {}) {
     footer = null,
     beforeRow = null,
     rowStyle = null,
+    showRowNumber = true,
   } = opts;
   container.innerHTML = '';
 
@@ -168,7 +169,7 @@ function renderTable(container, columns, rows, opts = {}) {
   const thead = document.createElement('thead');
   const tr = document.createElement('tr');
   const headerRefreshers = [];
-  tr.innerHTML = '<th style="width:36px">#</th>' +
+  tr.innerHTML = (showRowNumber ? '<th style="width:36px">#</th>' : '') +
     columns.map(c => `<th${c.className ? ` class="${c.className}"` : ''}${c.width ? ` style="width:${c.width}"` : ''}>${c.headerInput
       ? `${c.label} <input type="number" step="any" class="th-hinput" data-k="${c.key}" value="${c.headerInput.get() ?? ''}" style="width:56px"${readonly ? ' disabled' : ''}>${c.headerInput.suffix ?? ''}`
       : c.label}</th>`).join('') +
@@ -194,14 +195,14 @@ function renderTable(container, columns, rows, opts = {}) {
         const groupRow = document.createElement('tr');
         groupRow.className = before.className || 'wb-group-row';
         const groupCell = document.createElement('td');
-        groupCell.colSpan = columns.length + 1 + (readonly ? 0 : 1);
+        groupCell.colSpan = columns.length + (showRowNumber ? 1 : 0) + (readonly ? 0 : 1);
         groupCell.innerHTML = before.html || '';
         Object.assign(groupCell.style, before.style || {});
         groupRow.appendChild(groupCell);
         tbody.appendChild(groupRow);
       }
       const tr = document.createElement('tr');
-      tr.innerHTML = `<td>${idx + 1}</td>`;
+      tr.innerHTML = showRowNumber ? `<td>${idx + 1}</td>` : '';
       const calcCells = []; // [{ td, fn }] — 行内所有计算列，用于实时刷新
       const refreshCalcs = () => calcCells.forEach(({ td, fn }) => { td.textContent = formatNum(fn(row)); });
       headerRefreshers.push(refreshCalcs);
@@ -3443,6 +3444,22 @@ function isBlankInjectionPrice(value) {
   return value === null || value === undefined || value === '';
 }
 
+function engineeringMoldSyncKey(row) {
+  return [
+    row?.product_group_id || row?.product_group_name || '',
+    row?.mold_no || '', row?.name || '', row?.mold_part_index ?? 0,
+  ].join('|');
+}
+
+function engineeringImagesForInjection(row, refMolds) {
+  const reference = (refMolds || []).find(mold => engineeringMoldSyncKey(mold) === engineeringMoldSyncKey(row));
+  const detailedImages = Array.isArray(reference?.images) ? reference.images : [];
+  return [...new Set([
+    ...detailedImages,
+    reference?.product_image || row?.product_image || '',
+  ].filter(Boolean))];
+}
+
 // 默认只补齐空白料价/啤价，避免进入页面时覆盖人工调整；按钮手动套价时可传 overwrite=true。
 function applyInjectionReferencePrices(payload, { overwrite = false, material = true, machine = true } = {}) {
   let materialHits = 0;
@@ -3700,13 +3717,9 @@ function renderMolding(host, payload, canEdit, onChange, refMolds, fxRmbHkd, use
     const syncBtn = host.querySelector('#btn-sync-mold');
     if (syncBtn) syncBtn.onclick = () => {
       if (!confirm(`将根据工程已填的 ${refMolds.length} 副模具同步注塑表。已填行（按"模具名称"匹配）会保留其他字段，新增的会追加，工程已删除的会移除。继续？`)) return;
-      const syncKey = row => [
-        row.product_group_id || row.product_group_name || '',
-        row.mold_no || '', row.name || '', row.mold_part_index ?? 0,
-      ].join('|');
-      const byName = new Map(payload.injection.map(r => [syncKey(r), r]));
+      const byName = new Map(payload.injection.map(r => [engineeringMoldSyncKey(r), r]));
       payload.injection = refMolds.map(m => {
-        const existing = byName.get(syncKey(m)) || {};
+        const existing = byName.get(engineeringMoldSyncKey(m)) || {};
         return {
           ...existing,
           product_group_id: m.product_group_id || '',
@@ -3801,6 +3814,16 @@ function renderMolding(host, payload, canEdit, onChange, refMolds, fxRmbHkd, use
   });
 
   const cols = [
+    { key: 'engineering_images', label: '图片', width: '116px', className: 'molding-image-column',
+      renderCell: (td, row) => {
+        const images = engineeringImagesForInjection(row, refMolds);
+        td.classList.add('ro', 'mold-img-cell');
+        if (!images.length) {
+          td.innerHTML = '<span class="muted">—</span>';
+          return;
+        }
+        renderImageCell(td, { images }, false, () => {});
+      } },
     { key: 'product_group_name', label: '产品', readonly: true, width: '110px' },
     { key: 'name', label: '模具名称', type: 'textarea', width: '220px' },
     { key: 'mold_no', label: '模号', width: '70px' },
@@ -3849,6 +3872,7 @@ function renderMolding(host, payload, canEdit, onChange, refMolds, fxRmbHkd, use
   renderTable(host.querySelector('#wb-inj'), cols, payload.injection, {
     readonly: !canEdit,
     onChange: wrappedOnChange,
+    showRowNumber: false,
     beforeRow: showInjectionGroups ? (row, index, allRows) => {
       const key = injectionGroupKey(row);
       const previousKey = index > 0 ? injectionGroupKey(allRows[index - 1]) : '';

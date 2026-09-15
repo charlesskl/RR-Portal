@@ -90,6 +90,15 @@ test('molding UI visually separates multiple product groups', () => {
   assert.match(styles, /tbody td\.molding-machine-key input/);
 });
 
+test('molding injection table shows engineering images in its first column without copying them into costing rows', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../frontend/workbench.js'), 'utf8');
+  assert.match(source, /function engineeringImagesForInjection\(row, refMolds\)/);
+  assert.match(source, /key: 'engineering_images', label: '图片'/);
+  assert.match(source, /renderImageCell\(td, \{ images \}, false/);
+  assert.match(source, /showRowNumber: false/);
+  assert.doesNotMatch(source, /payload\.injection[^\n]*images:/);
+});
+
 test('mold table hides the unused mold structure column', () => {
   const source = fs.readFileSync(path.join(__dirname, '../frontend/workbench.js'), 'utf8');
   const renderMolds = source.match(/function renderMolds\([\s\S]*?\n}\n/);
@@ -163,7 +172,7 @@ test('Ctrl+S and Command+S save the active dirty department', () => {
   assert.match(source, /const save = saveHandlers\.get\(activeDept\)/);
   assert.match(source, /showSaveShortcutStatus\('\u2713 已保存'\)/);
   assert.match(source, /保存草稿（Ctrl\/⌘\+S）/);
-  assert.match(quotePage, /workbench\.js\?v=20260912-save-shortcut/);
+  assert.match(quotePage, /workbench\.js\?v=20260915-molding-images/);
 });
 
 test('summary tab recalculates whenever it is opened or clicked again', () => {

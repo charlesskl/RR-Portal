@@ -449,6 +449,7 @@ function DetailView({ detail }: { detail: ScheduleDetail }) {
       .some(v => String(v ?? '').toLowerCase().includes(s))
   }
   const fRows    = rawRows.filter(match)
+  const fUnplaced = rawRows.filter(r => !isPlaced(r) && match(r))
   const fAdded   = added.filter(match)
   const fRemoved = removed.filter(match)
   const fChanged = changed.filter(c => match(c.to ?? c.from ?? {}))
@@ -466,6 +467,16 @@ function DetailView({ detail }: { detail: ScheduleDetail }) {
               isProductionPlaced={isProductionPlaced} isActualProductionPlaced={isActualProductionPlaced}
               productionDataLoaded={productionDataLoaded} onToggleProductionManual={toggleProductionManual}
               matCostInfo={matCostInfo} matCostTotalUsd={matCostTotalUsd} />,
+          },
+          {
+            key: 'unplaced', label: `未下单 (${fUnplaced.length})`,
+            children: fUnplaced.length === 0
+              ? <Empty description="暂无未下单排期" />
+              : <SchedRowsTable rows={fUnplaced} statusOf={statusOf} changedFields={changedFields}
+                  isPlaced={isPlaced} isAutoPlaced={isAutoPlaced} onToggleManual={toggleManual}
+                  isProductionPlaced={isProductionPlaced} isActualProductionPlaced={isActualProductionPlaced}
+                  productionDataLoaded={productionDataLoaded} onToggleProductionManual={toggleProductionManual}
+                  matCostInfo={matCostInfo} matCostTotalUsd={matCostTotalUsd} />,
           },
           {
             key: 'add', label: `新增 (${fAdded.length})`,

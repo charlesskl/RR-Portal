@@ -34,6 +34,7 @@
     records:   PREFIX + 'records',
     users:     PREFIX + 'users',
     defectLib: PREFIX + 'defect_library',
+    partners:  PREFIX + 'partners',
   };
 
   /* API 基址：从当前页面路径推导，兼容根部署(/) 与子路径部署(/qc/)。
@@ -62,6 +63,7 @@
       }));
       if (Array.isArray(data.users))     localStorage.setItem(KEY.users,     JSON.stringify(data.users));
       if (Array.isArray(data.defectLib)) localStorage.setItem(KEY.defectLib, JSON.stringify(data.defectLib));
+      if (Array.isArray(data.partners))  localStorage.setItem(KEY.partners,  JSON.stringify(data.partners));
 
       window.__QC_BACKEND_OK = true;
       console.log('[QC后端] 预加载成功：公司', COMPANY, '记录', (data.records || []).length,
@@ -108,6 +110,11 @@
     if (!Array.isArray(u)) { try { u = JSON.parse(localStorage.getItem(KEY.users) || '[]'); } catch (e) { u = []; } }
     return post(API_BASE + '/api/users?company=' + COMPANY, { users: u });
   }
+  function pushPartners(list) {
+    var l = list;
+    if (!Array.isArray(l)) { try { l = JSON.parse(localStorage.getItem(KEY.partners) || '[]'); } catch (e) { l = []; } }
+    return post(API_BASE + '/api/partners?company=' + COMPANY, { partners: l });
+  }
   function pushDefects(lib) {
     var l = lib;
     if (!Array.isArray(l)) { try { l = JSON.parse(localStorage.getItem(KEY.defectLib) || '[]'); } catch (e) { l = []; } }
@@ -135,6 +142,16 @@
         return ret;
       };
       window._saveUsers.__qcPatched = true;
+      patched = true;
+    }
+    if (typeof window._savePartners === 'function' && !window._savePartners.__qcPatched) {
+      var origP = window._savePartners;
+      window._savePartners = function (list) {
+        var ret = origP.apply(this, arguments);
+        pushPartners(list);
+        return ret;
+      };
+      window._savePartners.__qcPatched = true;
       patched = true;
     }
     if (typeof window._saveDefectLib === 'function' && !window._saveDefectLib.__qcPatched) {

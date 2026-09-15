@@ -53,6 +53,7 @@ const STORAGE_KEYS = {
   users:        STORAGE_PREFIX + 'users',         /* 账号列表 */
   session:      STORAGE_PREFIX + 'session',        /* 当前登录会话 */
   defectLib:    STORAGE_PREFIX + 'defect_library', /* 不良描述内容库 */
+  partners:     STORAGE_PREFIX + 'partners',       /* 供应商&客户名单 */
 };
 const LS_KEY = STORAGE_KEYS.records;   /* 主数据 key */
 let state        = { records: [], nextId: 31 };
@@ -86,7 +87,7 @@ const PERM_GROUPS = [
     { k: 'records',   label: '验货明细' },
     { k: 'review',    label: '审核中心' },
     { k: 'analysis',  label: '统计分析' },
-    { k: 'suppliers', label: '供应商管理' },
+    { k: 'suppliers', label: '供应商&客户管理' },
   ]},
   { group: '报告', menus: [
     { k: 'daily',           label: '品质日报' },
@@ -134,6 +135,7 @@ const ACTION_PERM_MAP = {
   importData:      ['import', 'v'],
   manageUsers:     ['users', 'm'],
   manageDefectLib: ['defectlib', 'm'],
+  managePartners:  ['suppliers', 'e'],
   reviewRecord:    ['review', 'a'],
   /* exportData / exportPdf：能查看即可导出，不单独设卡 */
 };
@@ -951,7 +953,7 @@ const PAGE_TITLES = {
   records:          '验货明细',
   review:           '审核中心',
   analysis:         '统计分析',
-  suppliers:        '供应商管理',
+  suppliers:        '供应商&客户管理',
   daily:            '品质日报',
   weekly:           '品质周报',
   monthly:          '品质月报',
@@ -1990,6 +1992,9 @@ function renderAnalysis() {
    §10  SUPPLIERS PAGE
 ════════════════════════════════════════ */
 function renderSuppliers() {
+  renderPartners('supplier');
+  renderPartners('customer');
+  renderPartners('processType');
   const data = recs();
   const byS  = groupBy(data, 'supplier');
   const el   = document.getElementById('supplierCards');
@@ -2071,6 +2076,7 @@ async function refreshRecordsPage() {
     localStorage.setItem(LS_KEY, JSON.stringify(state));
     if (Array.isArray(data.users)) localStorage.setItem(STORAGE_KEYS.users, JSON.stringify(data.users));
     if (Array.isArray(data.defectLib)) localStorage.setItem(STORAGE_KEYS.defectLib, JSON.stringify(data.defectLib));
+    if (Array.isArray(data.partners))  localStorage.setItem(STORAGE_KEYS.partners,  JSON.stringify(data.partners));
 
     _selectedIds.clear();
     filterRecords();
@@ -2424,6 +2430,87 @@ function batchDelete() {
 ════════════════════════════════════════ */
 
 /* 默认供应商列表 */
+/* ── 供应商&客户名单（「供应商&客户管理」页维护，写穿透到服务端）── */
+let _partners = null;
+function _loadPartners() {
+  if (_partners === null) {
+    try { _partners = JSON.parse(localStorage.getItem(STORAGE_KEYS.partners) || '[]'); } catch(e) { _partners = []; }
+    if (!Array.isArray(_partners)) _partners = [];
+  }
+  return _partners;
+}
+function _savePartners(p) {
+  _partners = Array.isArray(p) ? p : [];
+  try { localStorage.setItem(STORAGE_KEYS.partners, JSON.stringify(_partners)); } catch(e) {}
+}
+function managedNames(type) {
+  return _loadPartners().filter(p => p.type === type).map(p => p.name).filter(Boolean);
+}
+function canManagePartners() { return can('managePartners'); }
+
+/* 名单维护面板：供应商/客户页签各自渲染 */
+function renderPartners(type) {
+  const wrap = document.getElementById('partnerMgr_' + type);
+  if (!wrap) return;
+  const label  = { supplier:'供应商名单', customer:'客户名单', processType:'加工类型名单' }[type] || type;
+  const manage = canManagePartners();
+  const names  = managedNames(type);
+  wrap.innerHTML = `<div style="flex:1;min-width:280px;border:1px solid var(--border);border-radius:8px;padding:12px;background:var(--bg-card)">
+    <div style="font-weight:600;margin-bottom:8px">${label} <span style="font-size:11px;color:var(--text-dim)">（${names.length} 个）</span></div>
+    ${manage ? `<div style="display:flex;gap:6px;margin-bottom:10px">
+      <input type="text" class="form-input" id="partnerInput_${type}" placeholder="输入名称，回车或点添加" style="flex:1"
+             onkeydown="if(event.key==='Enter'){event.preventDefault();addPartner('${type}')}" />
+      <button class="btn-primary btn-sm" onclick="addPartner('${type}')">＋ 添加</button>
+    </div>` : ''}
+    <div style="max-height:480px;overflow-y:auto;display:flex;flex-wrap:wrap;gap:6px;align-content:flex-start">
+      ${names.length ? names.map(n => `<span class="badge badge-hold" style="display:inline-flex;align-items:center;gap:4px;padding:4px 8px">${_esc(n)}${manage ? `<button data-name="${_esc(n)}" onclick="delPartner('${type}', this.dataset.name)" style="border:none;background:none;color:var(--red);cursor:pointer;padding:0;font-size:12px;line-height:1" title="从名单删除">✕</button>` : ''}</span>`).join('') : '<span style="color:var(--text-muted);font-size:12px">暂无，请在上方添加</span>'}
+    </div>
+  </div>`;
+}
+
+/* 页签切换：供应商（名单+质量档案）/ 客户（仅名单）/ 加工类型（仅名单） */
+function setPartnerTab(tab) {
+  const views = { supplier:'partnerViewSupplier', customer:'partnerViewCustomer', processType:'partnerViewProcess' };
+  const tabs  = { supplier:'partnerTabSupplier',  customer:'partnerTabCustomer',  processType:'partnerTabProcess'  };
+  Object.keys(views).forEach(k => {
+    const v = document.getElementById(views[k]);
+    const t = document.getElementById(tabs[k]);
+    if (v) v.style.display = (k === tab) ? '' : 'none';
+    if (t) t.classList.toggle('active', k === tab);
+  });
+}
+
+function addPartner(type) {
+  if (!canManagePartners()) { showToast('当前账号无权限执行此操作', 'error'); return; }
+  const label = { supplier:'供应商', customer:'客户', processType:'加工类型' }[type] || type;
+  const inp   = document.getElementById('partnerInput_' + type);
+  const name  = (inp && inp.value || '').trim();
+  if (!name) { showToast('请输入' + label + '名称', 'error'); return; }
+  const known = type === 'supplier' ? getSupplierOptions() : type === 'customer' ? getCustomerOptions() : getProcessTypeOptions();
+  if (known.includes(name)) { showToast(label + '「' + name + '」已在名单中', 'info'); return; }
+  const list = _loadPartners().slice();
+  list.push({ name, type, createdAt: nowIso() });
+  _savePartners(list);
+  if (inp) inp.value = '';
+  renderPartners(type);
+  renderSupplierDatalist();
+  renderCustomerDatalist();
+  renderProcessTypeDatalist();
+  showToast(label + '「' + name + '」已添加 ✓', 'success');
+}
+
+function delPartner(type, name) {
+  if (!canManagePartners()) { showToast('当前账号无权限执行此操作', 'error'); return; }
+  const label = { supplier:'供应商', customer:'客户', processType:'加工类型' }[type] || type;
+  if (!confirm('确认从名单删除' + label + '「' + name + '」？\n（不影响已有的验货记录；若历史记录里用过该名称，下拉候选中仍可能出现）')) return;
+  _savePartners(_loadPartners().filter(p => !(p.type === type && p.name === name)));
+  renderPartners(type);
+  renderSupplierDatalist();
+  renderCustomerDatalist();
+  renderProcessTypeDatalist();
+  showToast(label + '「' + name + '」已从名单删除', 'info');
+}
+
 const DEFAULT_SUPPLIERS = [
   '天一','顺景','邵阳厂','邵阳兴信','嘉乐','泰业','美福','华升','瑞升',
   '金麒麟','丰业','方升','鑫鸿','新万利','优可','德雅欣','兴荣','浩鑫',
@@ -2471,8 +2558,8 @@ function aqlJudge(qty, sampleQty, failQty) {
 
 /* 生成供应商选项（历史数据 + 默认列表去重排序） */
 function getSupplierOptions() {
-  const fromData = recs().map(r => r.supplier).filter(Boolean);
-  return [...new Set([...DEFAULT_SUPPLIERS, ...fromData])].sort();
+  const fromData = state.records.map(r => r.supplier).filter(Boolean);
+  return [...new Set([...DEFAULT_SUPPLIERS, ...managedNames('supplier'), ...fromData])].sort();
 }
 
 /* 渲染 datalist */
@@ -2494,8 +2581,8 @@ const DEFAULT_CUSTOMERS = [
 ];
 
 function getCustomerOptions() {
-  const fromData = recs().map(r => r.client).filter(Boolean);
-  return [...new Set([...DEFAULT_CUSTOMERS, ...fromData])].sort();
+  const fromData = state.records.map(r => r.client).filter(Boolean);
+  return [...new Set([...DEFAULT_CUSTOMERS, ...managedNames('customer'), ...fromData])].sort();
 }
 
 function renderCustomerDatalist() {
@@ -2505,13 +2592,16 @@ function renderCustomerDatalist() {
     .map(n => `<option value="${n}"></option>`).join('');
 }
 
-/* 加工类型候选：常见工艺 + 历史记录里出现过的值 */
+/* 加工类型候选：名单 + 内置常见工艺 + 历史记录里出现过的值 */
 const DEFAULT_PROCESS_TYPES = ['啤机','印刷','UV','过油','裱纸','烫金','击凸','粘盒'];
+function getProcessTypeOptions() {
+  const fromData = state.records.map(r => r.processType).filter(Boolean);
+  return [...new Set([...DEFAULT_PROCESS_TYPES, ...managedNames('processType'), ...fromData])].sort();
+}
 function renderProcessTypeDatalist() {
   const list = document.getElementById('processTypeList');
   if (!list) return;
-  const fromData = recs().map(r => r.processType).filter(Boolean);
-  list.innerHTML = [...new Set([...DEFAULT_PROCESS_TYPES, ...fromData])]
+  list.innerHTML = getProcessTypeOptions()
     .map(n => `<option value="${n}"></option>`).join('');
 }
 
@@ -4484,6 +4574,18 @@ function saveRecord(options = {}) {
   const supplier = getVal('f_supplier');
   if (!date)     { showToast('请填写来料日期', 'error'); return; }
   if (!supplier) { showToast('请填写供应商名称', 'error'); return; }
+  /* 名单白名单校验：名单外的供应商/客户不可录入，先到「供应商&客户管理」添加 */
+  if (!getSupplierOptions().includes(supplier)) {
+    showToast('供应商「' + supplier + '」不在名单中，请先到「供应商&客户管理」添加后再录入', 'error'); return;
+  }
+  const clientVal = getVal('f_client');
+  if (clientVal && !getCustomerOptions().includes(clientVal)) {
+    showToast('客户「' + clientVal + '」不在名单中，请先到「供应商&客户管理」添加后再录入', 'error'); return;
+  }
+  const ptVal = getVal('f_processType');
+  if (ptVal && !getProcessTypeOptions().includes(ptVal)) {
+    showToast('加工类型「' + ptVal + '」不在名单中，请先到「供应商&客户管理」添加后再录入', 'error'); return;
+  }
 
   const qty    = parseInt(getVal('f_qty')) || 0;
   let   smpRaw = getVal('f_sampleQty');

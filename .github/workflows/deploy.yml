@@ -233,7 +233,8 @@ jobs:
               /indo-shipping/health \
               /tomy-paiqi/health \
               /zuru-order-system/health \
-              /zuru-master/health; do
+              /zuru-master/health \
+              /voyageplex/api/health; do
             check_endpoint "$ENDPOINT" || FAILED=$((FAILED + 1))
           done
           if [ "$FAILED" -gt 0 ]; then

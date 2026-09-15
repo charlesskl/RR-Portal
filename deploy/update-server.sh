@@ -209,7 +209,11 @@ done <<< "$CHANGED_FILES"
 # 强制全量（环境变量覆盖）
 if [[ "${FORCE_FULL_REBUILD:-0}" == "1" ]]; then
   COMPOSE_CHANGED=1
-  echo "  [FORCED] FORCE_FULL_REBUILD=1，走全量"
+  # 强制全量时一并刷新 nginx：若此前部署在 nginx 配置/前端文件变动后中途失败，
+  # 运行中的 nginx 可能仍挂着旧 inode 的旧配置（#707 三连败后 /voyageplex 路由 401 即此情况），
+  # 而 up -d 不会 recreate 配置不变的 nginx 容器
+  NGINX_CHANGED=1
+  echo "  [FORCED] FORCE_FULL_REBUILD=1，走全量（含 nginx recreate）"
 fi
 
 # 打印决策

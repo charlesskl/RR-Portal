@@ -555,13 +555,13 @@ function getFilteredExportRecords(db, searchParams) {
 }
 
 function buildRecordsCsv(records) {
-  const hdr = ['ID','来料日期','检验日期','修改日期','供应商','客户','加工类型','货号','款式名称','PO号','类型',
+  const hdr = ['ID','来料日期','检验日期','修改日期','供应商','客户','加工类型','送货单号','货号','款式名称','PO号','类型',
     '来料数量','抽查数量','PASS数','FAIL数','不良率','不良现象','判定结果','检验员','备注'];
   const rows = records
     .slice()
     .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')))
     .map(r => [
-      r.id, r.date, r.inspDate, formatModifiedDate(r.updatedAt), r.supplier, r.client, r.processType, r.productNo, r.productName,
+      r.id, r.date, r.inspDate, formatModifiedDate(r.updatedAt), r.supplier, r.client, r.processType, r.deliveryNo, r.productNo, r.productName,
       r.orderNo, r.type, r.qty, r.sampleQty, r.pass, r.fail, r.defectRate, r.defect, r.result, r.qc, r.remark,
     ].map(csvCell));
   return '﻿' + [hdr.map(csvCell), ...rows].map(r => r.join(',')).join('\n'); // 前导 ﻿ = BOM，Excel 正确识别 UTF-8

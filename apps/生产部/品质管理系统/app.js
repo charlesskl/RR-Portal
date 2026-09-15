@@ -2140,7 +2140,7 @@ function filterRecords() {
       if (!visibleIds.has(id)) _selectedIds.delete(id);
     }
 
-    wrap.innerHTML = `<table id="recordsTable" style="table-layout:fixed;width:100%;min-width:1678px">
+    wrap.innerHTML = `<table id="recordsTable" style="table-layout:fixed;width:100%;min-width:1778px">
       <colgroup>
         <col style="width:36px"/>   <!-- 复选框 -->
         <col style="width:44px"/>   <!-- # -->
@@ -2149,6 +2149,7 @@ function filterRecords() {
         <col style="width:110px"/>  <!-- 供应商 -->
         <col style="width:80px"/>   <!-- 客户 -->
         <col style="width:88px"/>   <!-- 加工类型 -->
+        <col style="width:100px"/>  <!-- 送货单号 -->
         <col style="width:92px"/>   <!-- 货号 -->
         <col style="width:160px"/>  <!-- 款式名称 -->
         <col style="width:102px"/>  <!-- PO号 -->
@@ -2173,6 +2174,7 @@ function filterRecords() {
         <th style="text-align:left">供应商</th>
         <th style="text-align:left">客户</th>
         <th style="text-align:left">加工类型</th>
+        <th style="text-align:left">送货单号</th>
         <th style="text-align:left">货号</th>
         <th style="text-align:left">款式名称</th>
         <th style="text-align:left">PO号</th>
@@ -2218,6 +2220,7 @@ function filterRecords() {
           <td style="font-weight:500;color:#e8edf5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${r.supplier}">${r.supplier}</td>
           <td style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${r.client||''}">${r.client||'-'}</td>
           <td style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${r.processType||''}">${r.processType||'-'}</td>
+          <td style="font-family:var(--font-mono);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${r.deliveryNo||''}">${r.deliveryNo||'-'}</td>
           <td style="font-family:var(--font-mono);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${r.productNo||''}">${r.productNo||'-'}</td>
           <td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${r.productName||''}">${r.productName||'-'}</td>
           <td style="font-family:var(--font-mono);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${r.orderNo||''}">${r.orderNo||'-'}</td>
@@ -2256,7 +2259,7 @@ let colLockCount = COLLOCK_DEFAULT;
 try {
   colLockOn = localStorage.getItem(COLLOCK_KEY) === '1';
   const d = parseInt(localStorage.getItem(COLLOCK_DEPTH_KEY), 10);
-  if (d >= 2 && d <= 9) colLockCount = d;
+  if (d >= 2 && d <= 10) colLockCount = d;
 } catch(e) {}
 
 /* 用户自选锁定深度（锁到第几列） */
@@ -4726,6 +4729,7 @@ function renderReviewPage() {
       <td style="font-weight:500;white-space:nowrap">${_esc(r.supplier)}</td>
       <td style="white-space:nowrap">${_esc(r.client||'-')}</td>
       <td style="white-space:nowrap">${_esc(r.processType||'-')}</td>
+      <td style="font-family:var(--font-mono);font-size:11px;white-space:nowrap">${_esc(r.deliveryNo||'-')}</td>
       <td style="font-family:var(--font-mono);font-size:11px;white-space:nowrap">${_esc(r.productNo||'-')}</td>
       <td style="white-space:nowrap">${_esc(r.productName||'-')}</td>
       <td style="text-align:center"><span class="badge ${r.type==='成品'?'badge-pass':'badge-hold'}">${_esc(r.type||'-')}</span></td>
@@ -4739,10 +4743,10 @@ function renderReviewPage() {
     </tr>`;
   }).join('');
 
-  wrap.innerHTML = `<table class="data-table" style="min-width:1268px">
+  wrap.innerHTML = `<table class="data-table" style="min-width:1368px">
     <thead><tr>
       <th style="text-align:right">#</th>
-      <th>来料日期</th><th>供应商</th><th>客户</th><th>加工类型</th><th>货号</th><th>款式名称</th>
+      <th>来料日期</th><th>供应商</th><th>客户</th><th>加工类型</th><th>送货单号</th><th>货号</th><th>款式名称</th>
       <th style="text-align:center">类型</th>
       <th style="text-align:right">来料数</th><th style="text-align:right">FAIL</th>
       <th style="text-align:center">判定</th><th style="text-align:center">检验员</th>
@@ -5103,10 +5107,10 @@ function exportCSV() {
   if (_downloadServerExport('records.csv', 'CSV')) return;
   try {
     const data = filteredRecs.length ? filteredRecs : recs();
-    const HDR  = ['ID','来料日期','检验日期','修改日期','供应商','客户','加工类型','货号','款式名称','PO号','类型',
+    const HDR  = ['ID','来料日期','检验日期','修改日期','供应商','客户','加工类型','送货单号','货号','款式名称','PO号','类型',
                   '来料数量','抽查数量','PASS数','FAIL数','不良率','不良现象','判定结果','检验员','备注'];
     const rows = data.map(r => [
-      r.id, r.date, r.inspDate, formatModifiedDate(r.updatedAt), r.supplier, r.client, r.processType || '', r.productNo, r.productName,
+      r.id, r.date, r.inspDate, formatModifiedDate(r.updatedAt), r.supplier, r.client, r.processType || '', r.deliveryNo || '', r.productNo, r.productName,
       r.orderNo, r.type, r.qty, r.sampleQty, r.pass, r.fail, r.defectRate, r.defect, r.result, r.qc, r.remark,
     ].map(v => `"${String(v==null?'':v).replace(/"/g,'""')}"`));
     const csv  = '\uFEFF' + [HDR, ...rows].map(r=>r.join(',')).join('\n');

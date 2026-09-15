@@ -252,9 +252,6 @@ public class MaterialAlertsController(ISqlConnectionFactory factory) : Controlle
         {
             foreach (var row in doc.RootElement.EnumerateArray())
             {
-                // 新版排期保存整表；源文件中非黄色行已经下单，不再计入物料和生产需求。
-                if (row.TryGetProperty("isOrdered", out var orderedElement)
-                    && orderedElement.ValueKind == JsonValueKind.True) continue;
                 var sourceCode = Text(row, "code");
                 if (string.IsNullOrWhiteSpace(sourceCode)) continue;
                 var code = ResolveCode(sourceCode, knownCodes);

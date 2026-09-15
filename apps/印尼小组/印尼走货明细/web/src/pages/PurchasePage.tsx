@@ -20,7 +20,6 @@ interface SchedRow {
   cartons?: number
   unitPrice?: number
   eta?: string
-  isOrdered?: boolean
 }
 
 interface PoSummary {
@@ -1739,7 +1738,7 @@ export default function PurchasePage() {
 
       <Modal
         open={schedPickerOpen}
-        title={`从排期选 TOMY PO 下单（未下单 ${schedRows.filter(r => r.isOrdered !== true).length} 行 · 已选 ${pickerSelKeys.length} 行）`}
+        title={`从排期选 TOMY PO 下单（未下单 ${schedRows.filter(r => !(r.orderNo && r.code && placedSet.has(`${r.orderNo}|${r.code}`))).length} 行 · 已选 ${pickerSelKeys.length} 行）`}
         width="80vw"
         onCancel={() => { setSchedPickerOpen(false); setPickerSelKeys([]) }}
         footer={null}
@@ -1774,7 +1773,6 @@ export default function PurchasePage() {
             preserveSelectedRowKeys: true,   // 跨搜索/翻页保留勾选，可一次选多个货号的行
           }}
           dataSource={schedRows.map((r, i) => ({ ...r, _origIdx: i })).filter(r => {
-            if (r.isOrdered === true) return false  // 源排期非黄色行已下单，不再重复下单
             if (hidePlaced && r.orderNo && r.code && placedSet.has(`${r.orderNo}|${r.code}`)) return false  // 隐藏已下单
             if (!schedPickerFilter) return true
             const s = schedPickerFilter.toLowerCase()

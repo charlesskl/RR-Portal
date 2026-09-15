@@ -95,7 +95,7 @@
       <span class="nav-icon">◈</span><span>统计分析</span>
     </a>
     <a class="nav-item" data-page="suppliers" onclick="showPage('suppliers')">
-      <span class="nav-icon">◉</span><span>供应商管理</span>
+      <span class="nav-icon">◉</span><span>供应商&客户管理</span>
     </a>
     <div class="nav-group-label">报告中心</div>
     <a class="nav-item" data-page="daily" onclick="showPage('daily')">
@@ -325,10 +325,39 @@
   <!-- PAGE: SUPPLIERS -->
   <div class="page" id="page-suppliers">
     <div class="page-inner">
-      <div class="section-header mb16">
-        <span class="section-title">供应商质量档案</span>
+      <div class="review-tabs" style="margin-bottom:16px">
+        <button class="mode-tab active" id="partnerTabSupplier" onclick="setPartnerTab('supplier')">供应商</button>
+        <button class="mode-tab" id="partnerTabCustomer" onclick="setPartnerTab('customer')">客户</button>
+        <button class="mode-tab" id="partnerTabProcess" onclick="setPartnerTab('processType')">加工类型</button>
       </div>
-      <div id="supplierCards"></div>
+
+      <!-- 供应商视图：名单 + 质量档案 -->
+      <div id="partnerViewSupplier">
+        <div class="section-header mb16">
+          <span class="section-title">供应商名单 <span style="font-size:11px;color:var(--text-dim);font-weight:400">（新增/编辑记录只能录入名单内的供应商）</span></span>
+        </div>
+        <div id="partnerMgr_supplier" style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:24px;max-width:720px"></div>
+        <div class="section-header mb16">
+          <span class="section-title">供应商质量档案</span>
+        </div>
+        <div id="supplierCards"></div>
+      </div>
+
+      <!-- 客户视图：仅名单 -->
+      <div id="partnerViewCustomer" style="display:none">
+        <div class="section-header mb16">
+          <span class="section-title">客户名单 <span style="font-size:11px;color:var(--text-dim);font-weight:400">（新增/编辑记录只能录入名单内的客户）</span></span>
+        </div>
+        <div id="partnerMgr_customer" style="display:flex;gap:16px;flex-wrap:wrap;max-width:720px"></div>
+      </div>
+
+      <!-- 加工类型视图：仅名单 -->
+      <div id="partnerViewProcess" style="display:none">
+        <div class="section-header mb16">
+          <span class="section-title">加工类型名单 <span style="font-size:11px;color:var(--text-dim);font-weight:400">（新增/编辑记录只能录入名单内的加工类型）</span></span>
+        </div>
+        <div id="partnerMgr_processType" style="display:flex;gap:16px;flex-wrap:wrap;max-width:720px"></div>
+      </div>
     </div>
   </div>
 

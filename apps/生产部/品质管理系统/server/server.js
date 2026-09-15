@@ -269,6 +269,10 @@ const SCHEMA_SQL = `
     name TEXT, category TEXT, defaultLevel TEXT,
     keywords TEXT, enabled INTEGER, createdAt TEXT
   );
+  CREATE TABLE IF NOT EXISTS partners (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT, type TEXT, createdAt TEXT
+  );
 `;
 
 const toNum = (v) => (v === '' || v === null || v === undefined || isNaN(Number(v))) ? null : Number(v);
@@ -340,6 +344,17 @@ function ensureSuperAdmin(db) {
       console.log('[保底] jc 主账号被停用/降权，已自动恢复');
     }
   } catch (e) { console.warn('[保底] jc 主账号检查失败：', e.message); }
+}
+
+/* 供应商&客户名单（全量替换） */
+function replacePartners(db, list) {
+  const ins = db.prepare('INSERT INTO partners(name,type,createdAt) VALUES(?,?,?)');
+  db.exec('BEGIN');
+  try {
+    db.prepare('DELETE FROM partners').run();
+    for (const p of list) ins.run(p.name ?? null, p.type ?? null, p.createdAt ?? null);
+    db.exec('COMMIT');
+  } catch (e) { db.exec('ROLLBACK'); throw e; }
 }
 
 function replaceDefects(db, lib) {
@@ -458,7 +473,9 @@ function getBootstrap(db) {
     keywords: (() => { try { return JSON.parse(d.keywords || '[]'); } catch (e) { return []; } })(),
     enabled: !!d.enabled, createdAt: d.createdAt,
   }));
-  return { records, nextId, users, defectLib };
+  const partners = db.prepare('SELECT * FROM partners ORDER BY id').all()
+    .map(p => ({ name: p.name, type: p.type, createdAt: p.createdAt }));
+  return { records, nextId, users, defectLib, partners };
 }
 
 /* ════════ HTTP 工具 ════════ */
@@ -691,6 +708,11 @@ const server = http.createServer(async (req, res) => {
       const body = await readBody(req);
       replaceUsers(db, Array.isArray(body.users) ? body.users : []);
       return sendJson(res, 200, { ok: true, count: db.prepare('SELECT COUNT(*) c FROM users').get().c });
+    }
+    if (p === '/api/partners' && req.method === 'POST') {
+      const body = await readBody(req);
+      replacePartners(db, Array.isArray(body.partners) ? body.partners : []);
+      return sendJson(res, 200, { ok: true, count: db.prepare('SELECT COUNT(*) c FROM partners').get().c });
     }
     if (p === '/api/defects' && req.method === 'POST') {
       const body = await readBody(req);

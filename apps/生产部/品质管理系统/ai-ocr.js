@@ -169,6 +169,7 @@
           throw new Error((res.j && res.j.error) || ('HTTP ' + res.status));
         }
         var n = applyFields(res.j.fields || {});
+        if (res.j.rawText) setV('ocrRawText', res.j.rawText);   // 原文框给完整 OCR 文字，便于人工核对/修改后重新提取
         setT('ocrStatus', 'AI 识别完成' + (n > 1 ? ('（共 ' + n + ' 行货品，已填第 1 行）') : ''));
         toast(n > 1 ? ('识别完成，共 ' + n + ' 行，已填第 1 行') : 'AI 识别完成，请核对字段', 'success');
       })

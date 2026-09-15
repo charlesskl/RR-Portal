@@ -239,7 +239,7 @@ async function aiVisionExtract(dataUrl) {
 
 /* ── 记录表列顺序（写入/读取都按这个顺序）── */
 const RECORD_COLS = [
-  'id', 'date', 'inspDate', 'supplier', 'client', 'productNo', 'productName',
+  'id', 'date', 'inspDate', 'supplier', 'client', 'processType', 'productNo', 'productName',
   'deliveryNo', 'orderNo', 'type', 'qty', 'sampleQty', 'pass', 'fail',
   'defectRate', 'result', 'result2', 'defect', 'defects', 'measurements',
   'qc', 'confirmBy', 'remark', 'orderQty', 'updatedAt',
@@ -248,7 +248,7 @@ const RECORD_COLS = [
 const SCHEMA_SQL = `
   CREATE TABLE IF NOT EXISTS records (
     id INTEGER PRIMARY KEY,
-    date TEXT, inspDate TEXT, supplier TEXT, client TEXT,
+    date TEXT, inspDate TEXT, supplier TEXT, client TEXT, processType TEXT,
     productNo TEXT, productName TEXT, deliveryNo TEXT, orderNo TEXT,
     type TEXT, qty INTEGER, sampleQty INTEGER, pass INTEGER, fail INTEGER,
     defectRate TEXT, result TEXT, result2 TEXT, defect TEXT,
@@ -271,7 +271,7 @@ const j     = (v) => JSON.stringify(Array.isArray(v) ? v : (v ? [v] : []));
 
 function recordValues(r) {
   return [
-    toNum(r.id), r.date ?? null, r.inspDate ?? null, r.supplier ?? null, r.client ?? null,
+    toNum(r.id), r.date ?? null, r.inspDate ?? null, r.supplier ?? null, r.client ?? null, r.processType ?? null,
     r.productNo ?? null, r.productName ?? null, r.deliveryNo ?? null, r.orderNo ?? null,
     r.type ?? null, toNum(r.qty), toNum(r.sampleQty), toNum(r.pass), toNum(r.fail),
     r.defectRate ?? null, r.result ?? null, r.result2 ?? null, r.defect ?? null,
@@ -379,6 +379,17 @@ function migrateUsersTable(db) {
   }
 }
 
+/* 记录表新增字段（加工类型），老库自动补齐 */
+const RECORD_EXTRA_COLS = [
+  { col: 'processType', ddl: "ALTER TABLE records ADD COLUMN processType TEXT" },
+];
+function migrateRecordsTable(db) {
+  const cols = db.prepare("PRAGMA table_info(records)").all().map(c => c.name);
+  for (const c of RECORD_EXTRA_COLS) {
+    if (!cols.includes(c.col)) { try { db.exec(c.ddl); } catch (e) {} }
+  }
+}
+
 /* ════════ 多厂区数据库管理（每厂区一个独立 qc.db，懒加载 + 缓存）════════ */
 const _dbs = new Map();
 
@@ -411,6 +422,7 @@ function getDb(companyId) {
   const db = new DatabaseSync(dbPath);
   db.exec(SCHEMA_SQL);
   migrateUsersTable(db);   /* 老库补齐 姓名/部门/权限 列 */
+  migrateRecordsTable(db); /* 老库补齐 加工类型 列 */
   // 东莞老库已带数据则无需灌种子；全新厂区只灌账号 + 不良库，不带示例记录
   seedIfEmpty(db, { includeRecords: companyId === DEFAULT_COMPANY });
   _dbs.set(companyId, db);
@@ -515,7 +527,7 @@ function getFilteredExportRecords(db, searchParams) {
   return getBootstrap(db).records.filter(r => {
     if (search) {
       const haystack = [
-        r.supplier, r.productNo, r.productName, r.client, r.orderNo, r.deliveryNo,
+        r.supplier, r.productNo, r.productName, r.client, r.processType, r.orderNo, r.deliveryNo,
         r.defect, r.updatedAt, formatModifiedDate(r.updatedAt),
       ]
         .filter(Boolean).join(' ').toLowerCase();
@@ -530,13 +542,13 @@ function getFilteredExportRecords(db, searchParams) {
 }
 
 function buildRecordsCsv(records) {
-  const hdr = ['ID','来料日期','检验日期','修改日期','供应商','客户','货号','款式名称','PO号','类型',
+  const hdr = ['ID','来料日期','检验日期','修改日期','供应商','客户','加工类型','货号','款式名称','PO号','类型',
     '来料数量','抽查数量','PASS数','FAIL数','不良率','不良现象','判定结果','检验员','备注'];
   const rows = records
     .slice()
     .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')))
     .map(r => [
-      r.id, r.date, r.inspDate, formatModifiedDate(r.updatedAt), r.supplier, r.client, r.productNo, r.productName,
+      r.id, r.date, r.inspDate, formatModifiedDate(r.updatedAt), r.supplier, r.client, r.processType, r.productNo, r.productName,
       r.orderNo, r.type, r.qty, r.sampleQty, r.pass, r.fail, r.defectRate, r.defect, r.result, r.qc, r.remark,
     ].map(csvCell));
   return '﻿' + [hdr.map(csvCell), ...rows].map(r => r.join(',')).join('\n'); // 前导 ﻿ = BOM，Excel 正确识别 UTF-8
@@ -565,7 +577,7 @@ function buildFactoryExcelHtml(records) {
     <td>${i + 1}</td>
     <td>${htmlCell(r.date || '')}</td>
     <td>${htmlCell(r.supplier || '')}</td>
-    <td>${htmlCell(r.type || '')}</td>
+    <td>${htmlCell(r.processType || r.type || '')}</td>
     <td>${htmlCell(r.client || '')}</td>
     <td>${htmlCell(r.deliveryNo || '')}</td>
     <td>${htmlCell(r.orderNo || '')}</td>

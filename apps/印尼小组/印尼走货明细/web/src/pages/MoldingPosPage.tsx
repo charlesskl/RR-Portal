@@ -43,6 +43,7 @@ interface SchedRow {
   customerPO?: string
   qty?: number
   eta?: string
+  isOrdered?: boolean
 }
 
 interface Mpo {
@@ -647,6 +648,7 @@ function SchedPickerModal(props: {
   const filtered = props.schedRows
     .map((r, i) => ({ ...r, _i: i }))
     .filter(r => {
+      if (r.isOrdered === true) return false  // 源排期已下单，不再生成生产单
       if (props.hidePlaced && r.orderNo && props.placedOrderNos.has(r.orderNo.trim())) return false
       if (!props.filter) return true
       const s = props.filter.toLowerCase()
@@ -656,7 +658,7 @@ function SchedPickerModal(props: {
   return (
     <Modal
       open={props.open}
-      title={`从排期生成生产单（共 ${props.schedRows.length} 行 · 已选 ${props.selected.length}）`}
+      title={`从排期生成生产单（未下单 ${props.schedRows.filter(r => r.isOrdered !== true).length} 行 · 已选 ${props.selected.length}）`}
       width="80vw"
       onCancel={props.onCancel}
       footer={null}

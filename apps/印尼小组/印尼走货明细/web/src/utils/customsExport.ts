@@ -596,7 +596,8 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
       : isLastCompanyItem
         ? `IFERROR((AO${ri + 1}*1.05+1248/K${ri + 1})/7.2,AO${ri + 1}*1.05/7.2)`
         : `AO${ri + 1}*1.05/7.2`
-    setCell(ws, ri, 26, '=Z' + (ri + 1) + '*L' + (ri + 1), 'n')
+    // 发票金额 = 发票单价 × 送货 KG 重量。
+    setCell(ws, ri, 26, '=Z' + (ri + 1) + '*K' + (ri + 1), 'n')
     setCell(ws, ri, 28, tf.containerNo, 's')
     if (tf.shipDate) setCell(ws, ri, 29, excelDate(tf.shipDate), 'n')
     setCell(ws, ri, 30, tf.blNo, 's')
@@ -609,7 +610,8 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
     else if (it.contract_date) setCell(ws, ri, 38, excelDate(it.contract_date), 'n')
     setCell(ws, ri, 39, it.po_no || '', 's')
     setCell(ws, ri, 40, it.price || 0, 'n')
-    setCell(ws, ri, 41, '=AO' + (ri + 1) + '*L' + (ri + 1), 'n')
+    // 采购金额 = 采购单价 × 送货 KG 重量。
+    setCell(ws, ri, 41, '=AO' + (ri + 1) + '*K' + (ri + 1), 'n')
     const fmt = purchaseCurrencyFormat(it.currency)
     ;['AO', 'AP'].forEach((_col, j) => {
       const addr = XLSX.utils.encode_cell({ r: ri, c: 40 + j })

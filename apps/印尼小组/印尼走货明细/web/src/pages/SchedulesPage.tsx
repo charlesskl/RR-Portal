@@ -4,6 +4,7 @@ import {
 } from 'antd'
 import dayjs from 'dayjs'
 import { api } from '../api/client'
+import { isFullyYellowScheduleRow, scheduleSheetToRawGrid } from '../utils/scheduleImport'
 
 interface ScheduleSummary {
   id: number
@@ -34,6 +35,7 @@ interface SchedRow {
   unitPrice?: number      // 单价 USD
   eta?: string            // PO 走货期
   inspDate?: string       // 验货期
+  isOrdered?: boolean     // 源排期状态：非黄色行=true，整行黄色=false
   [k: string]: any
 }
 interface Diff {
@@ -77,7 +79,7 @@ export default function SchedulesPage() {
     try {
       const XLSX = await import('xlsx')
       const buf = await file.arrayBuffer()
-      const wb = XLSX.read(buf, { type: 'array', cellDates: true })
+      const wb = XLSX.read(buf, { type: 'array', cellDates: true, cellStyles: true })
       // Scan all sheets whose name ends in "总排期" (KIK总排期 / RRM总排期 etc.)
       const targetSheets = wb.SheetNames.filter(n => /总排期$/.test(n))
       if (!targetSheets.length) {
@@ -86,9 +88,12 @@ export default function SchedulesPage() {
       }
       const customerName = 'TOMY'  // legacy default
       const all: SchedRow[] = []
+      let orderedRows = 0
+      let unplacedRows = 0
       for (const sn of targetSheets) {
         const source = sn.replace(/总排期$/, '').trim() || sn
-        const grid = XLSX.utils.sheet_to_json<any[]>(wb.Sheets[sn], { header: 1, defval: null })
+        const ws = wb.Sheets[sn]
+        const grid = scheduleSheetToRawGrid(ws, XLSX.utils)
         // Find header row: contains "货号" and "数量"
         let hdrIdx = 0
         for (let r = 0; r < Math.min(5, grid.length); r++) {
@@ -116,10 +121,16 @@ export default function SchedulesPage() {
           console.warn(`[sched] sheet ${sn} 未找到 货号/数量 列`)
           continue
         }
+        const sheetRange = ws['!ref'] ? XLSX.utils.decode_range(ws['!ref']) : null
+        // 用户排期的业务区域为 A–AP；只有整行黄色才是未下单。
+        const lastStatusCol = Math.min(sheetRange?.e.c ?? 41, 41)
         for (let i = hdrIdx + 1; i < grid.length; i++) {
           const row = grid[i] || []
           const code = String(row[cCode] ?? '').trim()
           if (!code) continue
+          const statusCells = Array.from({ length: lastStatusCol + 1 }, (_, c) => ws[XLSX.utils.encode_cell({ r: i, c })])
+          const isOrdered = !isFullyYellowScheduleRow(statusCells)
+          if (isOrdered) orderedRows++; else unplacedRows++
           all.push({
             source,
             customer: customerName,
@@ -135,13 +146,14 @@ export default function SchedulesPage() {
             unitPrice:   cUnitPrice>= 0 ? (Number(row[cUnitPrice])|| 0) : 0,
             eta:         cEta      >= 0 ? fmtDate(row[cEta])  : '',
             inspDate:    cInsp     >= 0 ? fmtDate(row[cInsp]) : '',
+            isOrdered,
           })
         }
       }
-      if (!all.length) { message.warning('未识别到有效行（需在"XXX总排期"sheet 中含 货号/数量 列）'); return }
+      if (!all.length) { message.warning('未识别到排期资料（需在"XXX总排期"sheet 中含 货号/数量 列）'); return }
       setUploadRows(all)
       if (!weekLabel) setWeekLabel(suggestWeekLabel())
-      message.success(`解析 ${all.length} 行（来自 ${targetSheets.length} 个 sheet）— 检查后点"上传"`)
+      message.success(`已解析整份排期 ${all.length} 条：未下单 ${unplacedRows} 条，已下单 ${orderedRows} 条`)
     } catch (e: any) {
       message.error('解析失败: ' + (e?.message ?? e))
     }
@@ -243,7 +255,7 @@ export default function SchedulesPage() {
               onChange={(e) => { const f = e.target.files?.[0]; if (f) parseFile(f); e.target.value = '' }} />
           </Space>
           <Typography.Text type="secondary">
-            列头自动识别（中英文）：客户/code/品名/订单号/数量/交期
+            导入 KIK/RRM 总排期的全部资料；A–AP 整行黄色标记为未下单，其余标记为已下单。采购、生产及物料需求只使用未下单资料。
           </Typography.Text>
           {uploadRows.length > 0 && (
             <Table
@@ -254,6 +266,10 @@ export default function SchedulesPage() {
               scroll={{ x: 1500, y: 320 }}
               columns={[
                 { title: '#', width: 45, render: (_v, _r, i) => i + 1 },
+                {
+                  title: '下单状态', dataIndex: 'isOrdered', width: 90,
+                  render: (v) => v === true ? <Tag color="success">已下单</Tag> : <Tag color="warning">未下单</Tag>,
+                },
                 { title: '来源', dataIndex: 'source', width: 70 },
                 { title: '国家', dataIndex: 'country', width: 80 },
                 { title: '第三客户', dataIndex: 'endCustomer', width: 130, ellipsis: true },
@@ -386,7 +402,7 @@ function DetailView({ detail }: { detail: ScheduleDetail }) {
   // 已下单：自动(采购单命中) 或 手动标记
   const isAutoPlaced = useCallback((r: SchedRow) => !!(r.orderNo && r.code && placedKeys.has(placedKeyOf(r))), [placedKeys])
   const isManualPlaced = useCallback((r: SchedRow) => manualKeys.has(placedKeyOf(r)), [manualKeys])
-  const isPlaced = useCallback((r: SchedRow) => isAutoPlaced(r) || isManualPlaced(r), [isAutoPlaced, isManualPlaced])
+  const isPlaced = useCallback((r: SchedRow) => r.isOrdered === true || isAutoPlaced(r) || isManualPlaced(r), [isAutoPlaced, isManualPlaced])
   const isActualProductionPlaced = useCallback((r: SchedRow) => !!(r.orderNo && productionPlacedPos.has(r.orderNo.trim())), [productionPlacedPos])
   // 手动覆盖优先；未单独设置时生产状态跟随采购，真实生产单始终为已下。
   const isProductionPlaced = useCallback((r: SchedRow) => {
@@ -533,6 +549,7 @@ function SchedRowsTable({ rows, highlight, statusOf, changedFields, isPlaced, is
           title: '下单状态', width: 380, fixed: 'left' as const,
           render: (_v: any, r: SchedRow) => {
             const auto = isAutoPlaced?.(r)
+            const sourceOrdered = r.isOrdered === true
             const placed = isPlaced(r)
             const productionPlaced = isProductionPlaced?.(r)
             const actualProduction = isActualProductionPlaced?.(r)
@@ -540,9 +557,9 @@ function SchedRowsTable({ rows, highlight, statusOf, changedFields, isPlaced, is
               <Space size={4}>
                 <Space size={2}>
                   {placed
-                    ? <Tag color="success" style={{ margin: 0 }}>采购已下{auto ? '' : '(手动)'}</Tag>
+                    ? <Tag color="success" style={{ margin: 0 }}>采购已下{sourceOrdered || auto ? '' : '(手动)'}</Tag>
                     : <Tag style={{ margin: 0, color: '#bbb' }}>采购未下</Tag>}
-                  {onToggleManual && !auto && <a style={{ fontSize: 12 }} onClick={() => onToggleManual(r)}>{placed ? '取消采购' : '标记采购'}</a>}
+                  {onToggleManual && !sourceOrdered && !auto && <a style={{ fontSize: 12 }} onClick={() => onToggleManual(r)}>{placed ? '取消采购' : '标记采购'}</a>}
                 </Space>
                 <Space size={2}>
                   {productionPlaced

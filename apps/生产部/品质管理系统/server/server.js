@@ -243,6 +243,7 @@ const RECORD_COLS = [
   'deliveryNo', 'orderNo', 'type', 'qty', 'sampleQty', 'pass', 'fail',
   'defectRate', 'result', 'result2', 'defect', 'defects', 'measurements',
   'qc', 'confirmBy', 'remark', 'orderQty', 'updatedAt',
+  'status', 'reviewBy', 'reviewAt', 'rejectReason', 'rejectBy', 'rejectAt',
 ];
 
 const SCHEMA_SQL = `
@@ -253,7 +254,9 @@ const SCHEMA_SQL = `
     type TEXT, qty INTEGER, sampleQty INTEGER, pass INTEGER, fail INTEGER,
     defectRate TEXT, result TEXT, result2 TEXT, defect TEXT,
     defects TEXT, measurements TEXT,
-    qc TEXT, confirmBy TEXT, remark TEXT, orderQty INTEGER, updatedAt TEXT
+    qc TEXT, confirmBy TEXT, remark TEXT, orderQty INTEGER, updatedAt TEXT,
+    status TEXT, reviewBy TEXT, reviewAt TEXT,
+    rejectReason TEXT, rejectBy TEXT, rejectAt TEXT
   );
   CREATE TABLE IF NOT EXISTS users (
     username TEXT PRIMARY KEY, password TEXT, role TEXT,
@@ -278,6 +281,8 @@ function recordValues(r) {
     j(r.defects), j(r.measurements),
     r.qc ?? null, r.confirmBy ?? null, r.remark ?? null, toNum(r.orderQty),
     r.updatedAt || new Date().toISOString(),
+    r.status ?? null, r.reviewBy ?? null, r.reviewAt ?? null,
+    r.rejectReason ?? null, r.rejectBy ?? null, r.rejectAt ?? null,
   ];
 }
 
@@ -381,7 +386,13 @@ function migrateUsersTable(db) {
 
 /* 记录表新增字段（加工类型），老库自动补齐 */
 const RECORD_EXTRA_COLS = [
-  { col: 'processType', ddl: "ALTER TABLE records ADD COLUMN processType TEXT" },
+  { col: 'processType',  ddl: "ALTER TABLE records ADD COLUMN processType TEXT" },
+  { col: 'status',       ddl: "ALTER TABLE records ADD COLUMN status TEXT" },
+  { col: 'reviewBy',     ddl: "ALTER TABLE records ADD COLUMN reviewBy TEXT" },
+  { col: 'reviewAt',     ddl: "ALTER TABLE records ADD COLUMN reviewAt TEXT" },
+  { col: 'rejectReason', ddl: "ALTER TABLE records ADD COLUMN rejectReason TEXT" },
+  { col: 'rejectBy',     ddl: "ALTER TABLE records ADD COLUMN rejectBy TEXT" },
+  { col: 'rejectAt',     ddl: "ALTER TABLE records ADD COLUMN rejectAt TEXT" },
 ];
 function migrateRecordsTable(db) {
   const cols = db.prepare("PRAGMA table_info(records)").all().map(c => c.name);

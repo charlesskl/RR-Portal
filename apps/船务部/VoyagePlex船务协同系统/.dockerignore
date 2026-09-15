@@ -1,0 +1,9 @@
+node_modules
+.next*
+server/**/bin
+server/**/obj
+services/email-parser/.venv
+**/__pycache__
+*.db
+data-runtime/*
+!data-runtime/.gitkeep

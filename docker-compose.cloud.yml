@@ -1079,6 +1079,71 @@ services:
     networks:
       - platform-net
 
+  voyageplex-web:
+    build:
+      context: ./apps/船务部/VoyagePlex船务协同系统
+      dockerfile: Dockerfile.web
+      args:
+        NEXT_PUBLIC_BASE_PATH: /voyageplex
+    environment:
+      NEXT_PUBLIC_BASE_PATH: /voyageplex
+      VOYAGEPLEX_API_BASE_URL: http://voyageplex-api:5088
+      EMAIL_PARSER_BASE_URL: http://voyageplex-parser:8091
+      QC_SYSTEM_API_URL: ${QC_SYSTEM_API_URL:-}
+      QC_SYSTEM_API_TOKEN: ${QC_SYSTEM_API_TOKEN:-}
+    volumes:
+      - ./apps/船务部/VoyagePlex船务协同系统/data-runtime:/app/data
+    depends_on:
+      voyageplex-api:
+        condition: service_healthy
+    mem_limit: 1g
+    healthcheck:
+      test: ["CMD", "wget", "-qO", "/dev/null", "http://127.0.0.1:3000/voyageplex/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - platform-net
+
+  voyageplex-api:
+    build:
+      context: ./apps/船务部/VoyagePlex船务协同系统
+      dockerfile: Dockerfile.api
+    environment:
+      ASPNETCORE_URLS: http://0.0.0.0:5088
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__Default: Data Source=/app/data/voyageplex.db
+      EmailParser__BaseUrl: http://voyageplex-parser:8091
+    volumes:
+      - ./apps/船务部/VoyagePlex船务协同系统/data-runtime:/app/data
+    depends_on:
+      voyageplex-parser:
+        condition: service_healthy
+    mem_limit: 768m
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:5088/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - platform-net
+
+  voyageplex-parser:
+    build:
+      context: ./apps/船务部/VoyagePlex船务协同系统/services/email-parser
+      dockerfile: Dockerfile
+    mem_limit: 512m
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8091/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - platform-net
+
 
 networks:
   platform-net:

@@ -3,6 +3,7 @@
 function expandEngineeringMolds(molds) {
   return (Array.isArray(molds) ? molds : []).flatMap(source => {
     const mold = source && typeof source === 'object' ? source : {};
+    const moldImages = [...new Set((Array.isArray(mold.images) ? mold.images : []).filter(Boolean))];
     const common = {
       mold_no: mold.mold_no || '',
       sets: mold.sets ?? 1,
@@ -19,16 +20,20 @@ function expandEngineeringMolds(molds) {
       product_group_name: mold.product_group_name || '',
       product_group_rows: mold.product_group_rows || [],
       product_image: mold.product_image || '',
+      images: moldImages,
       source_sheet_name: mold._sheet_name || '',
       source_sheet_index: mold._sheet_index ?? null,
       mold_size: mold.mold_size || (mold.detail && mold.detail.mold_size) || '',
+      side_action: mold.side_action || mold.structure || '',
     };
 
     if (Array.isArray(mold.parts) && mold.parts.length) {
       return mold.parts.map((sourcePart, partIndex) => {
         const part = sourcePart && typeof sourcePart === 'object' ? sourcePart : {};
+        const partImages = [...new Set((Array.isArray(part.images) ? part.images : []).filter(Boolean))];
         return {
           ...common,
+          images: partImages.length ? partImages : moldImages,
           name: part.name || '',
           material: part.material || common.material,
           color: part.color || common.color,

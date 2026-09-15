@@ -23,6 +23,11 @@ function hasPerm(me, menu, action) {
   return !!(p && p['can_' + action]);
 }
 
+function requestedPageAfterLogin() {
+  const next = new URLSearchParams(window.location.search).get('next');
+  return next === 'verification' ? './verification.html' : '';
+}
+
 async function refreshMe() {
   try {
     const me = await api('/auth/me');
@@ -65,6 +70,8 @@ async function refreshMe() {
     const canManageTrash = me.dept === 'sales' || me.role === 'admin';
     $('btn-trash')?.classList.toggle('hidden', !canManageTrash);
     await loadQuotes();
+    const requestedPage = requestedPageAfterLogin();
+    if (requestedPage) window.location.replace(requestedPage);
   } catch {
     $('login-card').classList.remove('hidden');
     $('main-card').classList.add('hidden');

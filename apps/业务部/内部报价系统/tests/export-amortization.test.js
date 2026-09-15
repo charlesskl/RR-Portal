@@ -131,6 +131,7 @@ test('internal export writes product-ratio weighted injection formulas', async (
   const injectionHeaders = worksheet.getRow(titleRow + 1).values.slice(1);
   assert.ok(!injectionHeaders.includes('料型'));
   assert.ok(!injectionHeaders.includes('颜色'));
+  assert.ok(!injectionHeaders.includes('行位'));
   assert.equal(worksheet.getCell(totalRow, 14).value.formula, `((N${dataStart}+N${dataStart + 1})*2+(N${dataStart + 2})*1)/3`);
   assert.equal(Number(worksheet.getCell(totalRow, 14).value.result.toFixed(4)), 33.3333);
   assert.equal(worksheet.getCell(titleRow + 1, 15).value, null);

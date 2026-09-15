@@ -780,6 +780,7 @@ h3 .upload-mold-sheet button:hover { background: #334155; }
 .summary-table tbody tr:not(.summary-customer-total) td.component-share { background: #fff; }
 .summary-table .summary-customer-total td.component-amount,
 .summary-table .summary-customer-total td.component-share { background: #dbeafe!important; }
+
 /* 报价 / 核价为两个独立板块；核价使用单表差异账而非复制报价工作台。 */
 .module-topbar { justify-content: flex-start; gap: 28px; }
 .module-topbar .brand { min-width: 250px; }
@@ -1064,9 +1065,14 @@ h3 .upload-mold-sheet button:hover { background: #334155; }
 .verification-source-picker{display:grid;grid-template-columns:minmax(180px,1fr) auto minmax(180px,1fr) auto;align-items:end;gap:12px;padding:18px 24px;background:#eff6ff}
 .verification-source-picker label{display:grid;gap:5px;color:#475569;font-size:12px;font-weight:700}.verification-source-picker select{width:100%;background:#fff}
 .verification-source-picker>span{align-self:center;padding-top:18px;color:#64748b;font-weight:800}
+.verification-source-picker-multi{grid-template-columns:minmax(220px,.55fr) minmax(420px,1.45fr);align-items:stretch}
+.verification-target-picker{min-width:0;margin:0;padding:0;border:0}.verification-target-picker legend{margin-bottom:5px;color:#475569;font-size:12px;font-weight:700}
+.verification-target-options{display:flex;gap:7px;min-height:38px;overflow-x:auto;padding:1px 1px 5px}.verification-target-option{display:flex!important;flex:0 0 auto!important;grid-template-columns:none!important;align-items:center;gap:7px!important;min-width:125px;padding:7px 10px;border:1px solid #bfdbfe;border-radius:9px;background:#fff!important;cursor:pointer}.verification-target-option:has(input:checked){border-color:#2563eb;background:#eff6ff!important;box-shadow:0 0 0 1px #2563eb}.verification-target-option input{width:auto!important;margin:0}.verification-target-option span,.verification-target-option strong,.verification-target-option small{display:block}.verification-target-option strong{color:#1e3a8a;font-size:12px}.verification-target-option small{margin-top:2px;color:#64748b;font-size:10px}
+.verification-target-actions{display:flex;justify-content:flex-end;gap:7px;margin-top:5px}.verification-target-actions button{padding:5px 9px;font-size:11px}
 .verification-compare-filters{display:flex;align-items:center;gap:12px;padding:12px 24px;border-bottom:1px solid #e2e8f0;background:#f8fafc}
 .verification-compare-filters select{min-width:140px}.verification-compare-filters input[type=search]{flex:1}.verification-compare-filters label{display:flex;align-items:center;gap:6px;white-space:nowrap}.verification-compare-filters input[type=checkbox]{width:auto}
 .verification-comparison-labels{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:16px;padding:18px 24px;text-align:center}.verification-comparison-labels strong{padding:10px;border-radius:9px;background:#eff6ff;color:#1d4ed8}.verification-comparison-labels span{color:#94a3b8}
+.verification-comparison-labels-multi{display:flex;overflow-x:auto}.verification-comparison-labels-multi strong{flex:1 0 150px}.verification-comparison-labels-multi span{flex:0 0 auto}
 .verification-comparison-section{padding:0 24px 22px}.verification-comparison-section h3{margin:0;padding:14px 0 9px;color:#0f172a}
 .verification-comparison-table td:first-child small,.verification-comparison-table td:first-child strong{display:block}.verification-comparison-table td:first-child small{margin-bottom:3px;color:#94a3b8}
 .verification-draft-warning{margin:16px 24px 0;padding:11px 13px;border:1px solid #fde68a;border-radius:8px;background:#fffbeb;color:#92400e;font-size:12px}
@@ -1078,7 +1084,7 @@ h3 .upload-mold-sheet button:hover { background: #334155; }
 @media(max-width:950px){
   .verification-detail-head{grid-template-columns:1fr auto}.verification-detail-head>button{grid-column:1/-1;justify-self:start}
   .verification-version-toolbar{align-items:stretch;flex-direction:column}.verification-version-tools,.verification-create-version{justify-content:flex-start}
-  .verification-source-picker{grid-template-columns:1fr 1fr}.verification-source-picker>span{display:none}
+  .verification-source-picker{grid-template-columns:1fr 1fr}.verification-source-picker-multi{grid-template-columns:1fr}.verification-source-picker>span{display:none}
   .verification-dept-tabs{display:flex;overflow-x:auto;overscroll-behavior-x:contain}
   .verification-dept-tabs button{flex:0 0 118px}
 }

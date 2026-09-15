@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
-import { useRoute } from 'vue-router'
+import { RouterLink, useRoute } from 'vue-router'
 import AppLayout from '../components/AppLayout.vue'
 import { useScoresStore } from '../stores/scores'
 import { useScoreTemplatesStore } from '../stores/scoreTemplates'
@@ -36,19 +36,23 @@ const flag = ref<'none' | 'yellow' | 'red'>('none')
 const flagReason = ref('')
 const recalculating = ref(false)
 const autoError = ref('')
+const scoreNotice = ref('')
+const scoreStatus = ref<'draft' | 'submitted' | 'approved'>('draft')
 
 onMounted(async () => {
-  await templates.fetchAll()
-  const f = await factories.get(factoryId)
+  if (!templates.items.length) await templates.fetchAll()
+  const f = factories.items.find((item) => item.id === factoryId) ?? await factories.get(factoryId)
   factory.value = f
   craft.value = f.craft
-  const existing = await scores.getOne(factoryId, month)
-  if (existing?.score_items) for (const it of existing.score_items) itemMap.value[it.template_id] = it
+  const existing = scores.findCached(factoryId, month) ?? await scores.getOne(factoryId, month)
+  if (existing?.score_items) for (const it of existing.score_items) itemMap.value[it.template_id] = { ...it }
   if (existing) {
+    scoreStatus.value = existing.status
     flag.value = existing.flag ?? 'none'
     flagReason.value = existing.flag_reason ?? ''
+    if (existing.score_items?.length) scoreNotice.value = '已加载保存的评分结果'
   }
-  await recalculateAutomaticScores()
+  if (!existing?.score_items?.length && scoreStatus.value === 'draft') await recalculateAutomaticScores()
 })
 
 const applicable = computed(() => templates.applicable(craft.value))
@@ -76,9 +80,10 @@ async function loadMonthlyData(): Promise<MonthlyScoringData> {
 }
 
 async function recalculateAutomaticScores() {
-  if (!factory.value) return
+  if (!factory.value || recalculating.value || scoreStatus.value !== 'draft') return
   recalculating.value = true
   autoError.value = ''
+  scoreNotice.value = ''
   try {
     const data = await loadMonthlyData()
     const merged = mergeAutomaticScores(
@@ -87,7 +92,10 @@ async function recalculateAutomaticScores() {
       factory.value,
       data,
     )
-    for (const item of merged) itemMap.value[item.template_id] = item
+    const saved = await scores.save(factoryId, month, { score_items: merged })
+    for (const item of saved.score_items ?? merged) itemMap.value[item.template_id] = { ...item }
+    scoreStatus.value = saved.status
+    scoreNotice.value = '已重新计算并保存，总分已同步'
   } catch (error) {
     autoError.value = error instanceof Error ? error.message : '自动评分数据读取失败'
   } finally {
@@ -101,7 +109,8 @@ async function submit() {
     score: itemMap.value[t.id]?.score ?? 0,
     notes: itemMap.value[t.id]?.notes ?? '',
   }))
-  await scores.save(factoryId, month, { score_items, status: 'submitted', submitted_by: auth.userId ?? undefined })
+  const saved = await scores.save(factoryId, month, { score_items, status: 'submitted', submitted_by: auth.userId ?? undefined })
+  scoreStatus.value = saved.status
   alert('已提交，总分由服务端核定')
 }
 
@@ -120,10 +129,16 @@ async function saveFlag() {
   <AppLayout>
     <div class="page">
       <div class="score-head">
-        <h2>评分单 — {{ month }}</h2>
-        <button class="ghost" :disabled="recalculating" @click="recalculateAutomaticScores">
-          {{ recalculating ? '计算中...' : '重新计算自动评分' }}
-        </button>
+        <div>
+          <RouterLink :to="{ path: '/scoring', query: { month } }" class="back">← 返回月度评分</RouterLink>
+          <h2>评分单 — {{ month }}</h2>
+        </div>
+        <div class="score-actions">
+          <span v-if="scoreNotice && !recalculating" class="cache-hint">{{ scoreNotice }}</span>
+          <button class="ghost" :disabled="recalculating || scoreStatus !== 'draft'" @click="recalculateAutomaticScores">
+            {{ recalculating ? '计算中...' : '重新计算自动评分' }}
+          </button>
+        </div>
       </div>
       <p v-if="autoError" class="error">自动评分失败：{{ autoError }}</p>
       <table>
@@ -174,6 +189,9 @@ async function saveFlag() {
 .flag-act { display: flex; gap: .5rem; margin-top: .6rem; }
 .score-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
 .score-head h2 { margin: 0; }
+.back { display: inline-block; margin-bottom: .55rem; color: var(--primary); text-decoration: none; }
+.score-actions { display: flex; align-items: center; gap: .75rem; }
+.cache-hint { color: var(--text-soft); font-size: .82rem; }
 .auto-tag { display: inline-block; margin-left: .35rem; padding: .12rem .35rem; border-radius: 4px; background: #eef0ff; color: var(--primary); font-size: .72rem; }
 .basis { min-width: 320px; color: var(--text-soft); font-size: .85rem; line-height: 1.5; }
 .error { color: #dc2626; }

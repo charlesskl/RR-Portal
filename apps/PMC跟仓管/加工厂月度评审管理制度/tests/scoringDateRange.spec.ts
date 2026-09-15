@@ -24,4 +24,27 @@ describe('工厂月度评分时间范围', () => {
     ])
     expect(summary).toMatchObject({ totalScore: 70, grade: 'B', flag: 'red', monthsScored: 2 })
   })
+
+  it('列表总分以已保存评分项合计为准，不使用滞后的服务端总分', () => {
+    const summary = summarizeFactoryScores([
+      score({
+        total_score: 0,
+        grade: 'D',
+        score_items: [
+          { template_id: 'qualification', score: 0 },
+          { template_id: 'delivery', score: 20 },
+        ],
+      }),
+    ])
+
+    expect(summary).toMatchObject({ totalScore: 20, grade: 'D', monthsScored: 1 })
+  })
+
+  it('空总分不作为零分参与多月平均', () => {
+    const summary = summarizeFactoryScores([
+      score({ year_month: '2026-08', total_score: 80 }),
+      score({ year_month: '2026-09', total_score: null as unknown as number }),
+    ])
+    expect(summary).toMatchObject({ totalScore: 80, monthsScored: 1 })
+  })
 })

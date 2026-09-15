@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { RouterLink, useRoute } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 import AppLayout from '../components/AppLayout.vue'
 import { useFactoriesStore, filterByCraft } from '../stores/factories'
 import { useScoresStore } from '../stores/scores'
@@ -26,6 +26,7 @@ import type { QualityInspection } from '../types/qualityInspection'
 import type { Quality5sCheck } from '../types/quality5s'
 
 const route = useRoute()
+const router = useRouter()
 const requestedMonth = String(route.query.month ?? '')
 const month = ref(/^\d{4}-\d{2}$/.test(requestedMonth) ? requestedMonth : new Date().toISOString().slice(0, 7))
 const factories = useFactoriesStore()
@@ -47,7 +48,7 @@ const myRegions = computed(() => (auth.role ? allowedRegions(auth.role) : REGION
 const gradeCls: Record<string, string> = { A: 'badge-A', B: 'badge-B', C: 'badge-C', D: 'badge-D' }
 const statusLabel: Record<string, string> = { draft: '草稿', submitted: '已提交', approved: '已审批' }
 const flagLabel: Record<string, string> = { yellow: '黄牌', red: '红牌' }
-const formatScore = (value: number) => value.toFixed(2)
+const formatScore = (value: number) => String(Math.round(value))
 
 const selectedRange = computed(() => resolveScoringRange(rangeMode.value, month.value, customStart.value, customEnd.value))
 const rangeMonthCount = computed(() => monthsInScoringRange(selectedRange.value))
@@ -91,8 +92,15 @@ const rows = computed(() => {
   })
 })
 
-async function load() {
+async function load(force = false) {
   const range = selectedRange.value
+  if (!force) {
+    const cachedOrders = scores.restoreScoringList(range.start, range.end)
+    if (cachedOrders) {
+      scoringOrders.value = cachedOrders
+      return
+    }
+  }
   loadingScores.value = true
   try {
     const [, , , orders] = await Promise.all([
@@ -102,6 +110,7 @@ async function load() {
       pb.collection('orders').getFullList<Order>(),
     ])
     scoringOrders.value = orders
+    scores.rememberScoringList(range.start, range.end, orders)
   } finally {
     loadingScores.value = false
   }
@@ -112,7 +121,12 @@ function changeRangeMode() {
     customStart.value = selectedRange.value.start
     customEnd.value = selectedRange.value.end
   }
-  void load()
+  void load(true)
+}
+
+async function changeMonth() {
+  await router.replace({ path: '/scoring', query: { ...route.query, month: month.value } })
+  await load(true)
 }
 
 async function calculateMonthScores() {
@@ -126,16 +140,18 @@ async function calculateMonthScores() {
     ])
     scoringOrders.value = orders
     const existing = monthlyScoreByFactory.value
+    // 保存会更新缓存并触发分数排序；本次计算始终遍历固定的工厂列表。
+    const factoriesToScore = [...rows.value]
     let saved = 0
     let skipped = 0
-    for (let index = 0; index < rows.value.length; index += 1) {
-      const factory = rows.value[index]
+    for (let index = 0; index < factoriesToScore.length; index += 1) {
+      const factory = factoriesToScore[index]
       const current = existing[factory.id]
       if (current && current.status !== 'draft') {
         skipped += 1
         continue
       }
-      autoProgress.value = `正在计算 ${index + 1}/${rows.value.length}：${factory.name}`
+      autoProgress.value = `正在计算 ${index + 1}/${factoriesToScore.length}：${factory.name}`
       const monthlyData = filterMonthlyScoringData({
         orders: orders.filter((item) => item.factory === factory.id),
         inspections: inspections.filter((item) => item.factory === factory.id),
@@ -151,6 +167,7 @@ async function calculateMonthScores() {
       saved += 1
     }
     await scores.fetchByMonth(month.value)
+    scores.rememberScoringList(month.value, month.value, orders)
     autoProgress.value = `自动评分完成：更新 ${saved} 家${skipped ? `，跳过已提交/已审批 ${skipped} 家` : ''}`
   } catch (error) {
     autoProgress.value = `自动评分失败：${error instanceof Error ? error.message : '未知错误'}`
@@ -184,11 +201,11 @@ load()
           <option value="custom">自定义范围</option>
         </select>
         <template v-if="rangeMode === 'custom'">
-          <label class="range-month">从 <input v-model="customStart" type="month" aria-label="开始月份" @change="load" /></label>
+          <label class="range-month">从 <input v-model="customStart" type="month" aria-label="开始月份" @change="load(true)" /></label>
           <span class="muted">至</span>
-          <label class="range-month"><input v-model="customEnd" type="month" aria-label="结束月份" @change="load" /></label>
+          <label class="range-month"><input v-model="customEnd" type="month" aria-label="结束月份" @change="load(true)" /></label>
         </template>
-        <label v-else>{{ rangeMode === 'month' ? '月份' : '基准月份' }} <input v-model="month" type="month" @change="load" /></label>
+        <label v-else>{{ rangeMode === 'month' ? '月份' : '基准月份' }} <input v-model="month" type="month" @change="changeMonth" /></label>
         <button v-if="!isRange" class="ghost" :disabled="autoScoring || loadingScores" @click="calculateMonthScores">
           {{ autoScoring ? '自动评分中...' : '自动计算本月评分' }}
         </button>

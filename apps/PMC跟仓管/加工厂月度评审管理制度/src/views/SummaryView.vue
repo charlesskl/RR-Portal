@@ -10,13 +10,57 @@ import { allowedCrafts, allowedRegions } from '../utils/permissions'
 import { REGION_LABELS, regionOf, CRAFT_LABELS, type Region, type Craft } from '../constants/roles'
 import type { Order } from '../types/order'
 import type { Factory } from '../types/factory'
+import type { MonthlyScore } from '../types/score'
+import type { QualityInspection } from '../types/qualityInspection'
+import { matchesOrderDate, type OrderDateFilter } from '../utils/orderDateFilter'
 import { useTableColumnPreferences } from '../composables/useTableColumnPreferences'
 
 const orders = useOrdersStore()
 const factories = useFactoriesStore()
 const auth = useAuthStore()
-const factoryGrade = ref<Record<string, string>>({})
-const qiByFactory = ref<Record<string, any[]>>({}) // 品质检验明细:工厂 → 记录
+const monthlyScores = ref<MonthlyScore[]>([])
+const inspections = ref<QualityInspection[]>([])
+const dateMode = ref<'all' | 'month' | 'range'>('all')
+const today = new Date()
+const currentMonth = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`
+const selectedMonth = ref(currentMonth)
+const rangeStart = ref('')
+const rangeEnd = ref('')
+const dateFilter = computed<OrderDateFilter>(() => {
+  if (dateMode.value === 'month' && selectedMonth.value) return { mode: 'month', month: selectedMonth.value }
+  if (dateMode.value === 'range' && (rangeStart.value || rangeEnd.value)) {
+    const reverse = rangeStart.value && rangeEnd.value && rangeStart.value > rangeEnd.value
+    return { mode: 'range', start: reverse ? rangeEnd.value : rangeStart.value, end: reverse ? rangeStart.value : rangeEnd.value }
+  }
+  return { mode: 'all' }
+})
+const timeLabel = computed(() => {
+  const filter = dateFilter.value
+  if (filter.mode === 'month') return filter.month
+  if (filter.mode === 'range') return `${filter.start || '不限开始'}至${filter.end || '不限结束'}`
+  return '全部时间'
+})
+const factoryGrade = computed(() => {
+  const filter = dateFilter.value
+  const records = monthlyScores.value.filter((score) => {
+    if (filter.mode === 'all') return true
+    if (filter.mode === 'month') return score.year_month === filter.month
+    return (!filter.start || score.year_month >= filter.start.slice(0, 7))
+      && (!filter.end || score.year_month <= filter.end.slice(0, 7))
+  }).sort((a, b) => b.year_month.localeCompare(a.year_month))
+  const grades: Record<string, string> = {}
+  for (const score of records) if (!(score.factory in grades) && score.grade) grades[score.factory] = score.grade
+  return grades
+})
+const qiByFactory = computed(() => {
+  const grouped: Record<string, QualityInspection[]> = {}
+  for (const inspection of inspections.value) {
+    if (inspection.factory && matchesOrderDate(inspection.inspect_date, dateFilter.value)) {
+      (grouped[inspection.factory] ??= []).push(inspection)
+    }
+  }
+  return grouped
+})
 const search = ref<string>('')
 const myRegions = computed(() => (auth.role ? allowedRegions(auth.role) : ['dongguan', 'hunan', 'heyuan'] as Region[]))
 const regionFilter = ref<Region | ''>('')
@@ -25,14 +69,12 @@ const CRAFT_OPTIONS = computed(() => allowedCrafts())
 
 onMounted(async () => {
   await Promise.all([orders.fetchAll(), factories.fetchAll()])
-  const scores = await pb.collection('monthly_scores').getFullList({ sort: '-year_month' })
-  const g: Record<string, string> = {}
-  for (const s of scores as any[]) { if (!(s.factory in g) && s.grade) g[s.factory] = s.grade }
-  factoryGrade.value = g
-  const qis = await pb.collection('quality_inspections').getFullList()
-  const m: Record<string, any[]> = {}
-  for (const q of qis as any[]) { if (q.factory) (m[q.factory] ??= []).push(q) }
-  qiByFactory.value = m
+  const [scores, qis] = await Promise.all([
+    pb.collection('monthly_scores').getFullList<MonthlyScore>({ sort: '-year_month' }),
+    pb.collection('quality_inspections').getFullList<QualityInspection>(),
+  ])
+  monthlyScores.value = scores
+  inspections.value = qis
 })
 
 const sumOf = (arr: Order[], key: keyof Order) => arr.reduce((a, o) => a + (Number(o[key]) || 0), 0)
@@ -106,7 +148,9 @@ const groupFrozen = (keys: string[]) => keys.some(isVisible) && keys.filter(isVi
 
 const rows = computed<Row[]>(() => {
   const byFactory: Record<string, Order[]> = {}
-  for (const o of orders.items) (byFactory[o.factory] ??= []).push(o)
+  for (const o of orders.items) {
+    if (matchesOrderDate(o.order_date, dateFilter.value)) (byFactory[o.factory] ??= []).push(o)
+  }
   const q = search.value.trim().toLowerCase()
   const list = factories.items
     .filter((f) => myRegions.value.includes(regionOf(f)))
@@ -152,6 +196,7 @@ const TITLE = computed(() => {
   const region = regionFilter.value ? REGION_LABELS[regionFilter.value] + '厂区' : '全部厂区'
   const craft = craftFilter.value ? CRAFT_LABELS[craftFilter.value] : ''
   return region + (craft ? '-' + craft : '') + '-外发加工厂管理统计表'
+    + (dateFilter.value.mode === 'all' ? '' : `-${timeLabel.value}`)
 })
 
 function exportExcel() {
@@ -209,6 +254,18 @@ function exportExcel() {
       <div class="toolbar">
         <h2 style="margin:0">加工厂合作跟踪汇总表</h2>
         <span class="muted">共 {{ rows.length }} 家</span>
+        <select v-model="dateMode" class="region-sel" aria-label="汇总时间筛选方式">
+          <option value="all">全部时间</option>
+          <option value="month">按月筛选</option>
+          <option value="range">自定义日期范围</option>
+        </select>
+        <input v-if="dateMode === 'month'" v-model="selectedMonth" type="month" aria-label="汇总月份" />
+        <template v-if="dateMode === 'range'">
+          <input v-model="rangeStart" type="date" aria-label="汇总开始日期" />
+          <span class="muted">至</span>
+          <input v-model="rangeEnd" type="date" aria-label="汇总结束日期" />
+        </template>
+        <button v-if="dateMode !== 'all'" class="ghost" @click="dateMode = 'all'">清除时间筛选</button>
         <select v-model="regionFilter" class="region-sel">
           <option value="">全部厂区</option>
           <option v-for="rg in myRegions" :key="rg" :value="rg">{{ REGION_LABELS[rg] }}厂区</option>
@@ -236,6 +293,9 @@ function exportExcel() {
         <input class="search-box" v-model="search" placeholder="搜索 厂名/联系人/加工类型" />
         <button @click="exportExcel">导出 Excel</button>
       </div>
+      <p v-if="dateMode !== 'all'" class="date-hint">
+        {{ timeLabel }} · 价格、交期按下单日期统计；品质按验货日期统计；评级取范围内最近评分月份（按整月）。
+      </p>
       <div class="scroll" tabindex="0" aria-label="汇总表滚动区域">
         <table class="summary">
           <thead>
@@ -328,6 +388,7 @@ function exportExcel() {
   overflow: hidden;
 }
 .toolbar {
+  flex-wrap: wrap;
   position: relative;
   flex: 0 0 auto;
   z-index: 9;
@@ -344,6 +405,7 @@ function exportExcel() {
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
 }
+.date-hint { flex: 0 0 auto; margin: -.4rem 0 .7rem; color: var(--text-soft); font-size: .82rem; }
 .summary {
   width: max-content;
   min-width: 100%;

@@ -221,8 +221,8 @@ echo "    Compose:           $([ $COMPOSE_CHANGED -eq 1 ] && echo 'changed → F
 echo "    DB init script:    $([ $DB_INIT_CHANGED -eq 1 ] && echo 'changed (manual action may be needed)' || echo 'unchanged')"
 echo "    Plugin SDK:        $([ $PLUGIN_SDK_CHANGED -eq 1 ] && echo 'changed → all SDK plugins would rebuild' || echo 'unchanged')"
 
-# 没有运行时变动，跳过 deploy
-if [[ "$NONRUNTIME_ONLY" -eq 1 ]] && [[ "${#AFFECTED_SERVICES[@]}" -eq 0 ]]; then
+# 没有运行时变动，跳过 deploy（FORCE_FULL_REBUILD=1 除外——手动强制全量时即使无代码变动也要执行）
+if [[ "$NONRUNTIME_ONLY" -eq 1 ]] && [[ "${#AFFECTED_SERVICES[@]}" -eq 0 ]] && [[ "${FORCE_FULL_REBUILD:-0}" != "1" ]]; then
   echo "  [SKIP] 只改了文档/脚本/workflow/*.md，不触发部署。"
   exit 0
 fi

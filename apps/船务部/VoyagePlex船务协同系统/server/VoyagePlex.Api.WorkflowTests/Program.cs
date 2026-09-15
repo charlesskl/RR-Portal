@@ -1,5 +1,6 @@
 using VoyagePlex.Api.Services;
 using VoyagePlex.Api.Entities;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 
 var allowed = new[]
@@ -90,6 +91,16 @@ var normalizedUtcValue = UtcDateTime.Normalize(sqliteUtcValue);
 if (normalizedUtcValue.Kind != DateTimeKind.Utc || !normalizedUtcValue.ToString("O").EndsWith('Z'))
     throw new InvalidOperationException("SQLite 时间没有恢复 UTC 时区标记");
 Console.WriteLine("UTC date normalization tests passed.");
+
+var lenientOptions = new JsonSerializerOptions();
+lenientOptions.Converters.Add(new LenientDateTimeConverter());
+var spaceFormat = JsonSerializer.Deserialize<DateTime>("\"2026-09-11 00:31:18.690457\"", lenientOptions);
+var isoFormat = JsonSerializer.Deserialize<DateTime>("\"2026-09-11T00:31:18.690457Z\"", lenientOptions);
+if (spaceFormat.Kind != DateTimeKind.Utc || spaceFormat != new DateTime(2026, 9, 11, 0, 31, 18, 690, DateTimeKind.Utc).AddTicks(4570))
+    throw new InvalidOperationException("空格分隔日期应能解析为 UTC");
+if (isoFormat != spaceFormat)
+    throw new InvalidOperationException("ISO 8601 与空格格式应解析到同一时刻");
+Console.WriteLine("Lenient date time converter tests passed.");
 
 var deletionTask = new ShipmentTask { Id=8, SourceImportItemId=20, SoNumber="SO-123" };
 var sourceImport = new ImportEmailItem { Id=20, Fingerprint="same", ResultJson="{}" };

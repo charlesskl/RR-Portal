@@ -220,13 +220,16 @@ jobs:
             # PR #530: remove_item_layers + add_actual_inbound_qty
             # PR #673: add_inbound_applications（成品入库申请单）
             # PR #713: add_factory_isolation（多厂区 factoryId 列 + orders 复合唯一索引）
+            # 入库申请单编辑: inbound_application_edit_track（updatedAt/updatedBy，ERP 增量口径改 updatedAt）
             targets = ["20260817000000_remove_item_layers", "20260817090000_add_actual_inbound_qty",
                        "20260909090000_add_inbound_applications",
-                       "20260915000000_add_factory_isolation"]
+                       "20260915000000_add_factory_isolation",
+                       "20260915120000_inbound_application_edit_track"]
             con = sqlite3.connect(db, timeout=15); cur = con.cursor()
             tbls = {r[0] for r in cur.execute("select name from sqlite_master where type='table'").fetchall()}
             plans_cols = [r[1] for r in cur.execute("PRAGMA table_info(production_plans)").fetchall()] if "production_plans" in tbls else []
             users_cols = [r[1] for r in cur.execute("PRAGMA table_info(users)").fetchall()] if "users" in tbls else []
+            inbound_cols = [r[1] for r in cur.execute("PRAGMA table_info(inbound_applications)").fetchall()] if "inbound_applications" in tbls else []
             for name in targets:
                 path = os.path.join(mdir, name, "migration.sql")
                 if not os.path.exists(path):
@@ -239,6 +242,8 @@ jobs:
                     print(f"  跳过 {name}（inbound_applications 已存在，视为已应用）"); continue
                 if "add_factory_isolation" in name and "factoryId" in users_cols:
                     print(f"  跳过 {name}（users.factoryId 已存在，视为已应用）"); continue
+                if "inbound_application_edit_track" in name and "updatedAt" in inbound_cols:
+                    print(f"  跳过 {name}（inbound_applications.updatedAt 已存在，视为已应用）"); continue
                 if "remove_item_layers" in name:
                     # 历史残留（早前某次半成功的手工迁移）会让 CREATE TABLE new_* 直接失败，先清掉
                     cur.execute("DROP TABLE IF EXISTS new_product_parts")

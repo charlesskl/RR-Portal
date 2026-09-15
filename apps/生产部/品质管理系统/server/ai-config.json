@@ -1,8 +1,8 @@
 {
   "enabled": true,
-  "baseURL": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+  "baseURL": "https://openrouter.ai/api/v1",
   "apiKey": "",
-  "ocrModel": "qwen3.5-ocr",
-  "textModel": "qwen3.5-ocr",
-  "_note": "生产环境密钥请用 DASHSCOPE_API_KEY 或 QC_BAILIAN_API_KEY 注入。不要把真实密钥提交到仓库；本地单机调试时才临时填写 apiKey。"
+  "ocrModel": "qwen/qwen3-vl-235b-a22b-instruct",
+  "textModel": "qwen/qwen3-vl-235b-a22b-instruct",
+  "_note": "生产环境密钥请用 DASHSCOPE_API_KEY 或 QC_BAILIAN_API_KEY 环境变量注入，不要把真实密钥提交到仓库；本地单机调试时才临时填写 apiKey。默认走 OpenRouter（OpenAI 兼容），也可改用阿里百炼 dashscope 端点（模型填 qwen3.5-ocr）。"
 }

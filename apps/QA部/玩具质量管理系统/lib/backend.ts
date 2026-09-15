@@ -1,73 +1,15 @@
-// Backend connection settings for ToyQMS.
-// The app ALWAYS talks to the Fastify/SQLite backend - there is no
-// browser-local (localStorage) mode anymore. The only setting is the
-// backend address; empty means "same origin" (the backend serves the
-// page itself: single-container / nginx reverse-proxy deployment).
-export type BackendMode = "remote";
-export interface BackendSettings { mode: BackendMode; url: string; }
-
-const SETTINGS_KEY = "toyqms.backend.v1";
+// ToyQMS always talks to the Fastify/SQLite backend at the SAME ORIGIN as
+// the page (single-container or nginx reverse-proxy deployment). There is
+// no configurable address and no browser-local mode. In local development
+// (`npm run dev`), next.config.ts proxies /api to the backend on 4313.
 const TOKEN_KEY = "toyqms.remote.session.v1";
 
-export const DEFAULT_BACKEND_URL = "http://127.0.0.1:4313";
-
-export function getBackendSettings(): BackendSettings {
-  if (typeof window === "undefined") return { mode: "remote", url: "" };
-  try {
-    const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) || "") as Partial<BackendSettings>;
-    return { mode: "remote", url: (saved.url ?? "").replace(/\/+$/, "") };
-  } catch {
-    return { mode: "remote", url: "" };
-  }
-}
-
-export function saveBackendSettings(settings: BackendSettings) {
-  localStorage.setItem(SETTINGS_KEY, JSON.stringify({ mode: "remote", url: settings.url.replace(/\/+$/, "") }));
-}
-
-// Remove any manually saved backend address (back to same origin).
-export function resetBackendUrl() {
-  if (typeof window !== "undefined") localStorage.removeItem(SETTINGS_KEY);
-}
-
-async function probe(base: string): Promise<boolean> {
-  try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 3000);
-    const response = await fetch(`${base}/api/health`, { signal: controller.signal });
-    clearTimeout(timer);
-    const data = await response.json().catch(() => null);
-    return response.ok && data?.product === "ToyQMS";
-  } catch {
-    return false;
-  }
-}
-
-// A stale manually-saved backend address (e.g. pointing at a server this
-// device cannot reach right now) must not brick the login page: probe it,
-// and when it fails while the same-origin API works, fall back to same origin.
-export async function ensureReachableBackend(): Promise<void> {
-  if (typeof window === "undefined") return;
-  const { url } = getBackendSettings();
-  if (!url) return;
-  if (await probe(url)) return;
-  // 同源探测要带 basePath：生产部署在 /toyqms/ 子路径下，健康检查在 origin/toyqms/api/health。
-  const sameOrigin = window.location.origin + (process.env.NEXT_PUBLIC_BASE_PATH || "");
-  if (await probe(sameOrigin)) resetBackendUrl();
-}
-
-// Effective base URL for API calls: explicit url, otherwise same origin.
+// Effective base URL for API calls: always the same origin as the page.
 // 同源部署在 /toyqms/ 子路径时（nginx 剥前缀反代），请求必须带上 basePath，
 // 否则会打到站点根路径 /api/*。NEXT_PUBLIC_BASE_PATH 由 Dockerfile 构建时内联。
 export function getBackendBaseUrl(): string {
-  const { url } = getBackendSettings();
-  if (url) return url;
   if (typeof window !== "undefined") return window.location.origin + (process.env.NEXT_PUBLIC_BASE_PATH || "");
-  return DEFAULT_BACKEND_URL;
-}
-
-export function isRemoteMode() {
-  return true;
+  return "http://127.0.0.1:4313";
 }
 
 export function getRemoteToken(): string | null {
@@ -99,7 +41,7 @@ export async function apiFetch<T>(path: string, options: { method?: string; body
       body: options.body === undefined ? undefined : JSON.stringify(options.body)
     });
   } catch {
-    throw new ApiError(0, `无法连接后端服务（${base}）。请确认后端已启动且网络可达，然后刷新页面。`);
+    throw new ApiError(0, "无法连接后端服务。请确认服务已启动且网络可达，然后刷新页面。");
   }
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {

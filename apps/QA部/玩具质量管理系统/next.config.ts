@@ -5,5 +5,15 @@ import type { NextConfig } from "next";
 // 前端路由都带上前缀——浏览器请求 /toyqms/_next/*，nginx 剥前缀后正好命中
 // 容器内 out/_next/*。本地 dev 不设置则仍在根路径，行为不变。
 const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
-const nextConfig: NextConfig = { output: "export", trailingSlash: true, basePath };
+const nextConfig: NextConfig = {
+  output:"export",
+  trailingSlash:true,
+  basePath,
+  // Avoid a 308 hop on /api/* (trailingSlash would append "/" before the
+  // rewrite runs); the backend is reached directly.
+  skipTrailingSlashRedirect:true,
+  // Local development only (`next dev`): forward API calls to the backend
+  // so the same-origin contract holds there too. Ignored for `output: export`.
+  async rewrites(){ return [{ source: "/api/:path*", destination: "http://127.0.0.1:4313/api/:path*" }] },
+};
 export default nextConfig;

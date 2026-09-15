@@ -8,6 +8,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as repo from "./repository.js";
 import * as auth from "./auth.js";
+import * as ai from "./ai.js";
 
 const app = Fastify({ logger: process.env.NODE_ENV !== "test" });
 await app.register(cors, { origin: true });
@@ -177,6 +178,62 @@ app.post("/api/translations/confirm", handle(async (request, reply) => {
 app.post("/api/translations/reset-offline", handle(async (request, reply) => {
   if (!requirePermission(request, reply, "manage_translation")) return;
   return { reset: repo.resetOfflineTranslations() };
+}));
+
+// ---------- AI (Moonshot / Kimi) ----------
+// All AI output is a draft: translations land as 待审核, classifications are
+// returned as suggestions and only persisted when a human confirms them.
+
+app.get("/api/ai/status", handle(async (request, reply) => {
+  if (!requireUser(request, reply)) return;
+  return { configured: ai.aiConfigured() };
+}));
+
+app.post("/api/ai/translate", handle(async (request, reply) => {
+  if (!requirePermission(request, reply, "manage_translation")) return;
+  const ids = Array.isArray(request.body?.ids) ? request.body.ids.map(String) : [];
+  if (!ids.length) throw new Error("请先选择要翻译的记录。");
+  if (ids.length > 100) throw new Error("单次最多翻译 100 条，请分批操作。");
+  if (!ai.aiConfigured()) throw new Error("AI 功能未配置：请在服务器环境变量中设置 MOONSHOT_API_KEY 后重启服务。");
+  const wanted = new Set(ids);
+  const targets = repo.getAll().filter((record) =>
+    wanted.has(record.id) &&
+    (record.translationStatus === "pending" || record.translationStatus === "failed") &&
+    record.complaintMessageOriginal?.trim());
+  if (!targets.length) return { translated: 0, failed: 0, skipped: ids.length };
+  const results = await ai.translateBatch(targets);
+  let translated = 0, failed = 0;
+  for (const record of targets) {
+    const result = results.get(record.id);
+    if (result?.translation) {
+      repo.updateComplaintTranslation(record.id, {
+        complaintMessageZhMachine: result.translation,
+        complaintMessageZhFinal: null,
+        translationStatus: "translated",
+        translationProvider: "moonshot",
+        translationModel: ai.modelName(),
+      });
+      translated += 1;
+    } else {
+      failed += 1;
+    }
+  }
+  return { translated, failed, skipped: ids.length - targets.length };
+}));
+
+app.post("/api/ai/classify", handle(async (request, reply) => {
+  if (!requirePermission(request, reply, "manage_classification")) return;
+  const ids = Array.isArray(request.body?.ids) ? request.body.ids.map(String) : [];
+  if (!ids.length) throw new Error("请先选择要分类的记录。");
+  if (ids.length > 100) throw new Error("单次最多分类 100 条，请分批操作。");
+  if (!ai.aiConfigured()) throw new Error("AI 功能未配置：请在服务器环境变量中设置 MOONSHOT_API_KEY 后重启服务。");
+  const wanted = new Set(ids);
+  const targets = repo.getAll().filter((record) => wanted.has(record.id) && !record.issueType && record.complaintMessageOriginal?.trim());
+  if (!targets.length) return { suggestions: [] };
+  const results = await ai.classifyBatch(targets, repo.getIssueTypeDefinitions());
+  return {
+    suggestions: targets.map((record) => ({ id: record.id, ...(results.get(record.id) || { error: "分类失败。" }) })),
+  };
 }));
 
 // ---------- issue types & series ----------

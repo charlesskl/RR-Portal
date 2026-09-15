@@ -161,3 +161,53 @@ CREATE TABLE IF NOT EXISTS factory_material_price_managers (
   user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   PRIMARY KEY (factory_code, user_id)
 );
+CREATE TABLE IF NOT EXISTS quote_verifications (
+  quote_id               INTEGER PRIMARY KEY REFERENCES quotes(id) ON DELETE CASCADE,
+  baseline_json          TEXT NOT NULL,
+  verified_values_json   TEXT NOT NULL DEFAULT '{}',
+  verified_sections_json TEXT NOT NULL DEFAULT '{}',
+  status                 TEXT NOT NULL DEFAULT 'in_progress',
+  note                   TEXT,
+  created_by             TEXT,
+  created_at             TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_by             TEXT,
+  updated_at             TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS quote_verification_versions (
+  id                INTEGER PRIMARY KEY AUTOINCREMENT,
+  quote_id          INTEGER NOT NULL REFERENCES quote_verifications(quote_id) ON DELETE CASCADE,
+  version_no        INTEGER NOT NULL,
+  label             TEXT NOT NULL,
+  category          TEXT,
+  parent_version_id INTEGER REFERENCES quote_verification_versions(id),
+  source_type       TEXT NOT NULL DEFAULT 'quote',
+  status            TEXT NOT NULL DEFAULT 'drafting',
+  note              TEXT,
+  created_by        TEXT,
+  created_at        TEXT NOT NULL DEFAULT (datetime('now')),
+  completed_by      TEXT,
+  completed_at      TEXT,
+  updated_at        TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(quote_id, version_no)
+);
+
+CREATE INDEX IF NOT EXISTS idx_verification_versions_quote
+  ON quote_verification_versions(quote_id, version_no);
+
+CREATE TABLE IF NOT EXISTS quote_verification_sections (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  version_id     INTEGER NOT NULL REFERENCES quote_verification_versions(id) ON DELETE CASCADE,
+  dept           TEXT NOT NULL REFERENCES departments(code),
+  payload_json   TEXT NOT NULL DEFAULT '{}',
+  status         TEXT NOT NULL DEFAULT 'empty',
+  filled_by      TEXT,
+  filled_at      TEXT,
+  reviewed_by    TEXT,
+  reviewed_at    TEXT,
+  review_comment TEXT,
+  UNIQUE(version_id, dept)
+);
+
+CREATE INDEX IF NOT EXISTS idx_verification_sections_version
+  ON quote_verification_sections(version_id, dept, status);

@@ -95,7 +95,8 @@ const migrationTables = [
   'factories', 'departments', 'users', 'quotes', 'quote_sections', 'audit_log',
   'ref_tables', 'app_migrations', 'factory_ref_tables', 'user_factories',
   'user_customers', 'user_perms', 'factory_material_price_control', 'factory_material_price_managers',
-  'quote_customer_confirmations',
+  'quote_customer_confirmations', 'quote_verifications', 'quote_verification_versions',
+  'quote_verification_sections',
 ];
 
 async function migrateLegacySqlite() {
@@ -129,7 +130,7 @@ async function migrateLegacySqlite() {
           .run(...columns.map((column) => row[column]));
       }
     }
-    for (const table of ['quotes', 'quote_sections', 'audit_log', 'users']) {
+    for (const table of ['quotes', 'quote_sections', 'audit_log', 'users', 'quote_verification_versions', 'quote_verification_sections']) {
       await query(`SELECT setval(pg_get_serial_sequence('${table}', 'id'), COALESCE(MAX(id), 1), MAX(id) IS NOT NULL) FROM ${table}`);
     }
   });

@@ -3,6 +3,7 @@ import { getSession } from "@/lib/session";
 import { redirect } from "next/navigation";
 import { dotnetGet } from "@/lib/dotnet";
 import { InventoryTable, type InventoryRow } from "./InventoryTable";
+import Link from "next/link";
 
 export default async function InventoryPage() {
   const session = await getSession();
@@ -16,9 +17,14 @@ export default async function InventoryPage() {
         <h1 className="text-lg font-semibold text-text border-l-4 border-mint-400 pl-3">
           📦 库存查询
         </h1>
-        <span className="text-xs text-text-secondary">
-          半成品=各工序间积压合计；成品=最后工序入库累计；车间存数=最后工序完成未入库
-        </span>
+        <div className="flex items-center gap-4">
+          <span className="text-xs text-text-secondary">
+            半成品=各工序间积压合计；成品=最后工序入库累计；车间存数=最后工序完成未入库
+          </span>
+          <Link href="/inventory/applications" className="rounded-btn bg-mint-400 px-4 py-2 text-sm font-medium text-white hover:bg-mint-700">
+            入库申请单
+          </Link>
+        </div>
       </div>
       <InventoryTable rows={rows} />
     </div>

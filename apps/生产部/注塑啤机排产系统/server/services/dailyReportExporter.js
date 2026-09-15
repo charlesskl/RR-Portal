@@ -37,7 +37,7 @@ function writeShiftBlock(sheet, schedule, items, startRow) {
   const titleRow = sheet.getRow(startRow);
   titleRow.getCell(1).value = titleStr;
   sheet.mergeCells(startRow, 1, startRow, 2);
-  titleRow.getCell(3).value = 'B车间';
+  titleRow.getCell(3).value = `${schedule.workshop || 'B'}车间`;
   titleRow.getCell(4).value = `班别：${schedule.shift === '夜班' ? '夜' : '白'}`;
   titleRow.getCell(5).value = schedule.notes ? '' : ''; // 主管姓名留空（paiji 没存）
   titleRow.font = { bold: true, size: 12 };
@@ -59,15 +59,14 @@ function writeShiftBlock(sheet, schedule, items, startRow) {
 
   // 数据行（按 sort_order）
   let row = startRow + 2;
+  const dataStart = row;
   items.sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
   for (const it of items) {
     const r = sheet.getRow(row);
     const accumulated = it.accumulated || 0;
-    const qualified  = accumulated; // 合格数等于实际啤数（paiji 没单独字段）
+    const qualified  = it.qualified_qty ?? accumulated; // 合格数默认等于实际啤数
     const target24h  = it.target_24h || 0;
-    const target12h  = target24h ? Math.round(target24h / 2) : 0;
-    const target11h  = it.target_11h || (target24h ? Math.round(target24h / 24 * 11) : 0);
-    const overUnder  = accumulated - target11h; // 超欠 = 实际 - 11H 目标
+    const hasWorker  = !!(it.worker_name && String(it.worker_name).trim());
     // 货号/模号分离：mold_name 是 "MOLD-CODE 中文名" 拼接
     const moldName   = it.mold_name || '';
 
@@ -79,26 +78,54 @@ function writeShiftBlock(sheet, schedule, items, startRow) {
     r.getCell(6).value  = it.quantity_needed || 0;
     r.getCell(7).value  = it.color || '';
     r.getCell(8).value  = it.material_type || '';
-    r.getCell(9).value  = target24h || '';
-    r.getCell(10).value = target12h || '';
-    r.getCell(11).value = target11h || '';
-    r.getCell(12).value = it.piece_rate ?? '';             // L 工价
-    r.getCell(13).value = target11h || '';                 // M 实际啤货时间目标数（同 11H）
+
+    if (target24h) {
+      // 套用样表公式：J=I/24*12  K=I/24*11  L=135/K
+      r.getCell(9).value  = target24h;
+      r.getCell(10).value = `=I${row}/24*12`;
+      r.getCell(11).value = `=I${row}/24*11`;
+      r.getCell(12).value = `=135/K${row}`;
+      // M 实际啤货时间目标数 = K/12*T（T 为实际啤货时间）
+      r.getCell(13).value = `=K${row}/12*T${row}`;
+      // P 超欠目标数 = N - M
+      r.getCell(16).value = `=N${row}-M${row}`;
+    } else {
+      r.getCell(9).value  = '';
+      r.getCell(10).value = '';
+      r.getCell(11).value = '';
+      r.getCell(12).value = it.piece_rate ?? '';
+      r.getCell(13).value = '';
+      r.getCell(16).value = '';
+    }
+
     r.getCell(14).value = accumulated;
     r.getCell(15).value = qualified;
-    r.getCell(16).value = overUnder;
-    r.getCell(17).value = it.approved_piece_rate ?? '';    // Q 核价工价
-    r.getCell(18).value = it.output_value ?? '';           // R 产值
+    // R 产值 = 核价工价 Q * 合格数量 O
+    r.getCell(17).value = it.approved_piece_rate ?? '';
+    r.getCell(18).value = `=Q${row}*O${row}`;
     r.getCell(19).value = 12;                              // S 应啤时间
     r.getCell(20).value = it.actual_hours ?? '';           // T 实际啤货时间
-    r.getCell(21).value = it.piece_wage ?? '';             // U 啤货工资
-    r.getCell(22).value = it.hour_wage ?? '';              // V 计时工资
-    r.getCell(23).value = it.day_regular_wage ?? '';       // W 白天正班工资
-    r.getCell(24).value = it.ot_wage_12h ?? '';            // X 加班工资(12h外)
-    r.getCell(25).value = it.encouragement ?? '';          // Y 鼓励奖
-    r.getCell(26).value = it.supper_fee ?? '';             // Z 夜宵费
-    r.getCell(27).value = it.overtime_wage ?? '';          // AA 加班工资
-    r.getCell(28).value = it.total_wage ?? '';             // AB 合计工资
+
+    if (hasWorker) {
+      // 套用样表工资公式（仅有啤工的行）
+      r.getCell(21).value = `=ROUND(N${row}*L${row},2)`;          // U 啤货工资
+      r.getCell(22).value = `=(S${row}-T${row})*9.89`;            // V 计时工资(9.89元/H)
+      r.getCell(23).value = `=ROUND((U${row}+V${row})/12*8,2)`;   // W 白天正班工资
+      r.getCell(24).value = it.ot_wage_12h ?? '';                 // X 加班工资(12h外) 手填
+      r.getCell(25).value = it.encouragement ?? '';               // Y 鼓励奖 手填
+      r.getCell(26).value = it.supper_fee ?? '';                  // Z 夜宵费 手填
+      r.getCell(27).value = `=ROUND(W${row}/8*4*1.5,2)`;          // AA 加班工资
+      r.getCell(28).value = `=W${row}+X${row}+Z${row}+AA${row}+Y${row}`; // AB 合计工资
+    } else {
+      r.getCell(21).value = it.piece_wage ?? '';
+      r.getCell(22).value = it.hour_wage ?? '';
+      r.getCell(23).value = it.day_regular_wage ?? '';
+      r.getCell(24).value = it.ot_wage_12h ?? '';
+      r.getCell(25).value = it.encouragement ?? '';
+      r.getCell(26).value = it.supper_fee ?? '';
+      r.getCell(27).value = it.overtime_wage ?? '';
+      r.getCell(28).value = it.total_wage ?? '';
+    }
     r.getCell(29).value = it.downtime_reason || '';        // AC 停机原因
     r.getCell(30).value = it.pi_ban || '';                 // AD 啤办
 
@@ -152,6 +179,23 @@ async function buildDailyReport({ date, workshop }) {
     `).all(s.id);
     row = writeShiftBlock(sheet, s, items, row);
     row += 2; // 班次间空 2 行
+  }
+
+  // ===== 合计行（套样表第 82 行 SUM 公式；SUM 忽略文本，整列范围即可）=====
+  const lastDataRow = row - 2; // 最后一个数据区结束（含尾部空行无妨）
+  const totalRow = sheet.getRow(row);
+  totalRow.getCell(1).value = '合计';
+  totalRow.font = { bold: true, size: 10 };
+  const SUM_COLS = [9, 10, 11, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28]; // I..AB（L工价不合计）
+  for (const col of SUM_COLS) {
+    const colLetter = sheet.getColumn(col).letter;
+    const c = totalRow.getCell(col);
+    c.value = `=SUM(${colLetter}1:${colLetter}${lastDataRow})`;
+    c.font = { bold: true, size: 10 };
+    c.border = {
+      top: { style: 'thin' }, left: { style: 'thin' },
+      bottom: { style: 'thin' }, right: { style: 'thin' },
+    };
   }
 
   return wb;

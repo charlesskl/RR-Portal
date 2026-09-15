@@ -196,13 +196,26 @@ function ordersToCelldata(orders, columns, newImportedIds) {
         valueToStore = displayVal;
         ct = { t: 's', fa: '@' };   // Excel 文本格式：@ 强制文本
       } else if (col.data === 'production_progress') {
-        // 生产进度固定 = 生产数/数量 百分比（车间要求），显示层直接算，
-        // 不信 DB 里手填的旧值；用户改数量/生产数后钩子里会实时重算
+        // 生产进度：默认 = 生产数/数量 自动算（2026-08-20 车间要求）。
+        // 但生产数为空（还没开始生产）或数量为空算不出时，保留人工手填的进度值
+        // （2026-09-09 车间反馈：手填 30% 保存后刷新变 0.00% —— 因为旧逻辑无条件重算）
         // v 存比率 + 原生百分比格式：渲染/编辑/解析全由 Luckysheet 处理
+        // 注意：DB 里「没填生产数」存的是 0 而不是 null，必须用 > 0 判断「真填了」，
+        // 否则 0 会被当成已填 → 重算出 0% → 手填值照样被吞
+        const hasCount = Number(order.production_count) > 0;
         const p = computeProgress(order.quantity, order.production_count);
-        displayVal = p.text;
-        valueToStore = p.ratio ?? '';
-        ct = p.ratio == null ? { t: 's', fa: '@' } : { t: 'n', fa: '0.00%' };
+        if (hasCount && p.ratio != null) {
+          displayVal = p.text;
+          valueToStore = p.ratio;
+          ct = { t: 'n', fa: '0.00%' };
+        } else {
+          const manual = Number(order.production_progress);
+          const hasManual = order.production_progress !== null && order.production_progress !== undefined
+            && order.production_progress !== '' && !isNaN(manual);
+          displayVal = hasManual ? (Math.round(manual * 10000) / 100) + '%' : '';
+          valueToStore = hasManual ? manual : '';
+          ct = hasManual ? { t: 'n', fa: '0.00%' } : { t: 's', fa: '@' };
+        }
       } else {
         displayVal = val == null ? '' : String(val);
         valueToStore = val ?? '';
@@ -1059,32 +1072,31 @@ function LuckysheetEditor({
         if (!ls?.setCellValue) { onDone?.(); return; }
         suppressHookRef.current = true;
         let applied = 0;
-        // 分块执行，避免大量公式单元格连续 setCellValue 阻塞主线程
-        let rowIdx = 0;
-        const CHUNK = 30;
-        const step = () => {
-          const end = Math.min(rowIdx + CHUNK, dataRef.current.length);
-          for (; rowIdx < end; rowIdx++) {
-            const order = dataRef.current[rowIdx];
-            if (!order?.cell_format) continue;
-            let format = {};
-            try { format = JSON.parse(order.cell_format); } catch { format = {}; }
-            for (const [field, fmt] of Object.entries(format)) {
-              if (!fmt?.f) continue;
-              const colIdx = ORDER_COLUMNS.findIndex(col => col.data === field);
-              if (colIdx < 0) continue;
-              const col = ORDER_COLUMNS[colIdx];
-              const raw = order[field];
-              const display = raw == null ? '' : String(raw);
-              const ct = { t: col.type === 'numeric' || NUMERIC_SUM_FIELDS.has(field) ? 'n' : 'g' };
-              ls.setCellValue(rowIdx + 1, colIdx, { v: raw ?? '', m: display, ct, f: fmt.f });
-              applied++;
-            }
+        // 性能：isRefresh:false 让 setCellValue 跳过「每格深拷贝整表数据 + 每格重绘」，
+        // 全部写完后 refresh() 一次性重绘。旧逻辑每格两次重绘，500+ 格时打开表格
+        // 主线程被占 10 秒以上（滚动重影、操作被吞的根因）。
+        for (let rowIdx = 0; rowIdx < dataRef.current.length; rowIdx++) {
+          const order = dataRef.current[rowIdx];
+          if (!order?.cell_format) continue;
+          let format = {};
+          try { format = JSON.parse(order.cell_format); } catch { format = {}; }
+          for (const [field, fmt] of Object.entries(format)) {
+            if (!fmt?.f) continue;
+            const colIdx = ORDER_COLUMNS.findIndex(col => col.data === field);
+            if (colIdx < 0) continue;
+            const col = ORDER_COLUMNS[colIdx];
+            const raw = order[field];
+            const display = raw == null ? '' : String(raw);
+            const ct = { t: col.type === 'numeric' || NUMERIC_SUM_FIELDS.has(field) ? 'n' : 'g' };
+            ls.setCellValue(rowIdx + 1, colIdx, { v: raw ?? '', m: display, ct, f: fmt.f }, { isRefresh: false });
+            applied++;
           }
-          if (rowIdx < dataRef.current.length) setTimeout(step, 0);
-          else { console.log('[公式恢复] 已恢复 ' + applied + ' 个公式单元格'); onDone?.(); }
-        };
-        step();
+        }
+        try { ls.refresh && ls.refresh(); } catch {}
+        console.log('[公式恢复] 已恢复 ' + applied + ' 个公式单元格');
+        // cellUpdated 钩子是 setTimeout(0) 异步触发的，延迟一拍再回调 onDone，
+        // 确保这批钩子回调跑完时 suppress 还锁着，否则尾部的钩子会被误记成用户改动
+        setTimeout(() => onDone?.(), 0);
       } catch (e) {
         console.warn('[公式恢复] 失败:', e?.message);
         onDone?.();
@@ -1108,31 +1120,23 @@ function LuckysheetEditor({
         if (!sheet?.data) { onDone?.(); return; }
         const t0 = performance.now();
         let applied = 0;
-        // 分块执行：每块 30 行就让出主线程。500+ 行连续 setCellValue（每次都触发
-        // Luckysheet 重绘）会长时间阻塞，浏览器弹「此页面没有响应」
-        let r = 1;
-        const CHUNK = 30;
-        const step = () => {
-          const end = Math.min(r + CHUNK, sheet.data.length - 1);
-          for (; r < end; r++) {
-            const M = sheet.data[r]?.[qtyColIdx]?.v;
-            const AB = sheet.data[r]?.[targetColIdx]?.v;
-            const Mn = Number(M), ABn = Number(AB);
-            if (!isNaN(Mn) && !isNaN(ABn) && ABn !== 0 && M !== '' && M != null && AB !== '' && AB != null) {
-              const days = Math.round((Mn / ABn) * 10000) / 10000;
-              // 同时设 v + m
-              ls.setCellValue(r, daysColIdx, { v: days, m: String(days), ct: { t: 'n' } });
-              applied++;
-            }
+        // 性能：isRefresh:false 批量写完再一次性 refresh()，不再每格重绘
+        // （旧逻辑 500+ 格逐格重绘是打开表格卡 10 秒的根因）
+        for (let r = 1; r < sheet.data.length - 1; r++) {
+          const M = sheet.data[r]?.[qtyColIdx]?.v;
+          const AB = sheet.data[r]?.[targetColIdx]?.v;
+          const Mn = Number(M), ABn = Number(AB);
+          if (!isNaN(Mn) && !isNaN(ABn) && ABn !== 0 && M !== '' && M != null && AB !== '' && AB != null) {
+            const days = Math.round((Mn / ABn) * 10000) / 10000;
+            // 同时设 v + m
+            ls.setCellValue(r, daysColIdx, { v: days, m: String(days), ct: { t: 'n' } }, { isRefresh: false });
+            applied++;
           }
-          if (r < sheet.data.length - 1) {
-            setTimeout(step, 0);
-          } else {
-            console.log('[天数自动算] 已算 ' + applied + ' 行，耗时 ' + Math.round(performance.now() - t0) + 'ms');
-            onDone?.();
-          }
-        };
-        step();
+        }
+        try { ls.refresh && ls.refresh(); } catch {}
+        console.log('[天数自动算] 已算 ' + applied + ' 行，耗时 ' + Math.round(performance.now() - t0) + 'ms');
+        // 同公式恢复：延迟一拍回调，让异步 cellUpdated 钩子在 suppress 释放前跑完
+        setTimeout(() => onDone?.(), 0);
       } catch (e) { console.warn('[天数自动算] 失败:', e?.message); onDone?.(); }
     }, 600);
   }

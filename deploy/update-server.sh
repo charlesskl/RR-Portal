@@ -16,6 +16,14 @@ set -euo pipefail
 # 强制全量部署（调试用）：
 #   FORCE_FULL_REBUILD=1 bash /opt/rr-portal/deploy/update-server.sh
 
+# 禁用 compose bake，强制走经典逐服务构建。
+# 2026-09-15 #707 部署踩坑：compose v2.29+ 默认用 bake 做多目标并行构建，
+# 一次构建多个缺失镜像时 buildx session 报错：
+#   failed to dial gRPC: ... header key "x-docker-expose-session-sharedkey"
+#   contains value with non-printable ASCII characters
+# 单镜像增量构建不触发，多镜像（新服务首次构建/全量）必现。COMPOSE_BAKE=false 回退经典构建。
+export COMPOSE_BAKE=false
+
 INSTALL_DIR="/opt/rr-portal"
 ENV_FILE="${INSTALL_DIR}/.env.cloud.production"
 COMPOSE_FILE="docker-compose.cloud.yml"
@@ -102,7 +110,7 @@ declare -A PATH_TO_SERVICE=(
   ["apps/PMC跟仓管/采购订单管理系统/"]="jiangping"
   ["apps/PMC跟仓管/成品核对系统/"]="liwenjuan"
   ["apps/PMC跟仓管/加工管理/"]="cpg"
-  ["apps/PMC跟仓管/加工厂月度评审管理制度/"]="factory-review"
+  ["apps/PMC跟仓管/加工厂月度评审管理制度/"]="factory-review factory-review-test"
   ["apps/业务部/报价系统/"]="baojia"
   ["apps/业务部/TOMY排期核对系统/"]="tomy-paiqi"
   ["apps/业务部/ZURU接单表入单系统/"]="zuru-order-system"
@@ -114,10 +122,12 @@ declare -A PATH_TO_SERVICE=(
   ["apps/工程部/模具手办采购订单系统/"]="figure-mold-cost-system"
   ["apps/工程部/自动化设备统计/"]="automation-equipment"
   ["apps/船务部/船务管理系统/"]="shipping-management"
+  ["apps/船务部/VoyagePlex船务协同系统/"]="voyageplex-web voyageplex-api voyageplex-parser"
   ["apps/喷油部/喷油排期系统/"]="sprayplan sprayplan-test"
   ["apps/印尼小组/印尼走货明细/"]="indo-shipping"
   ["apps/QA部/QA测试报告周结系统/"]="qa-weekly-report"
   ["apps/QA部/QC成品报告系统/"]="qc-report qc-report-worker"
+  ["apps/QA部/玩具质量管理系统/"]="toyqms"
   ["apps/task-api/"]="task-api"
 )
 
@@ -199,7 +209,11 @@ done <<< "$CHANGED_FILES"
 # 强制全量（环境变量覆盖）
 if [[ "${FORCE_FULL_REBUILD:-0}" == "1" ]]; then
   COMPOSE_CHANGED=1
-  echo "  [FORCED] FORCE_FULL_REBUILD=1，走全量"
+  # 强制全量时一并刷新 nginx：若此前部署在 nginx 配置/前端文件变动后中途失败，
+  # 运行中的 nginx 可能仍挂着旧 inode 的旧配置（#707 三连败后 /voyageplex 路由 401 即此情况），
+  # 而 up -d 不会 recreate 配置不变的 nginx 容器
+  NGINX_CHANGED=1
+  echo "  [FORCED] FORCE_FULL_REBUILD=1，走全量（含 nginx recreate）"
 fi
 
 # 打印决策
@@ -211,8 +225,8 @@ echo "    Compose:           $([ $COMPOSE_CHANGED -eq 1 ] && echo 'changed → F
 echo "    DB init script:    $([ $DB_INIT_CHANGED -eq 1 ] && echo 'changed (manual action may be needed)' || echo 'unchanged')"
 echo "    Plugin SDK:        $([ $PLUGIN_SDK_CHANGED -eq 1 ] && echo 'changed → all SDK plugins would rebuild' || echo 'unchanged')"
 
-# 没有运行时变动，跳过 deploy
-if [[ "$NONRUNTIME_ONLY" -eq 1 ]] && [[ "${#AFFECTED_SERVICES[@]}" -eq 0 ]]; then
+# 没有运行时变动，跳过 deploy（FORCE_FULL_REBUILD=1 除外——手动强制全量时即使无代码变动也要执行）
+if [[ "$NONRUNTIME_ONLY" -eq 1 ]] && [[ "${#AFFECTED_SERVICES[@]}" -eq 0 ]] && [[ "${FORCE_FULL_REBUILD:-0}" != "1" ]]; then
   echo "  [SKIP] 只改了文档/脚本/workflow/*.md，不触发部署。"
   exit 0
 fi
@@ -390,12 +404,29 @@ ensure_service_base_images() {
 # ─── Step 6: 执行部署 ───
 save_state "deploy"
 echo "[6/6] Deploying..."
+docker compose version | sed 's/^/  /' || true
 
 if [[ "$COMPOSE_CHANGED" -eq 1 ]]; then
   # Compose 变动：可能只是 context path 改了（代码没变），也可能加新服务
   # 策略：先 up -d（无 --build），让 docker 用现有 image 只 recreate 容器
   # 这样纯 rename 几乎零成本；如果有新服务或 Dockerfile 变了再用 AFFECTED_SERVICES 做增量 build
   echo "  [COMPOSE] Compose 变动，recreate 容器（不强制 rebuild，避免 OOM 风险）"
+  # 缺失镜像逐服务预构建：compose 新版默认 bake 多目标并行构建，构建上下文含非 ASCII
+  # 路径（如 apps/船务部/VoyagePlex船务协同系统）时必现 buildx session 报错：
+  #   x-docker-expose-session-sharedkey contains value with non-printable ASCII characters
+  # （#707 部署因此三连败）。单目标构建不触发该 bug，故在 up -d 之前把缺失镜像逐个建好，
+  # 让 up -d 的隐式构建无事可做，绕开多目标 bake。
+  mapfile -t CFG_SERVICES < <(docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" config --services 2>/dev/null)
+  mapfile -t CFG_IMAGES < <(docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" config --images 2>/dev/null)
+  for i in "${!CFG_SERVICES[@]}"; do
+    img="${CFG_IMAGES[$i]:-}"
+    [[ -n "$img" ]] || continue
+    if ! docker image inspect "$img" >/dev/null 2>&1; then
+      echo "  [COMPOSE] 镜像缺失 → 逐服务构建 ${CFG_SERVICES[$i]} ($img)"
+      ensure_service_base_images "${CFG_SERVICES[$i]}"
+      docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" build "${CFG_SERVICES[$i]}"
+    fi
+  done
   # --remove-orphans: 删除已从 compose 移除的服务遗留的孤儿容器，
   # 否则被下线/重命名的服务容器会继续运行（crash-loop 时甚至拖垮内存导致全站 OOM）
   docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --remove-orphans

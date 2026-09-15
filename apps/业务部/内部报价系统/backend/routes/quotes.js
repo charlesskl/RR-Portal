@@ -17,9 +17,10 @@ router.get('/', async (req, res) => {
   if (isAdmin) {
     rows = await db.prepare(`
       SELECT q.*, f.name_cn AS factory_name,
-        (SELECT COUNT(*) FROM quote_sections s WHERE s.quote_id=q.id AND s.status='approved') AS approved_count
+        (SELECT COUNT(*) FROM quote_sections s WHERE s.quote_id=q.id AND s.status='approved') AS approved_count,
+        COALESCE((SELECT c.status FROM quote_customer_confirmations c WHERE c.quote_id=q.id), 'pending') AS customer_confirmation_status
       FROM quotes q JOIN factories f ON f.code = q.factory_code
-      WHERE q.factory_code = ?
+      WHERE q.factory_code = ? AND q.deleted_at IS NULL
       ORDER BY q.id DESC
     `).all(req.user.active_factory_code);
   } else {
@@ -30,13 +31,49 @@ router.get('/', async (req, res) => {
     const placeholders = customers.map(() => '?').join(',');
     rows = await db.prepare(`
       SELECT q.*, f.name_cn AS factory_name,
-        (SELECT COUNT(*) FROM quote_sections s WHERE s.quote_id=q.id AND s.status='approved') AS approved_count
+        (SELECT COUNT(*) FROM quote_sections s WHERE s.quote_id=q.id AND s.status='approved') AS approved_count,
+        COALESCE((SELECT c.status FROM quote_customer_confirmations c WHERE c.quote_id=q.id), 'pending') AS customer_confirmation_status
       FROM quotes q JOIN factories f ON f.code = q.factory_code
-      WHERE q.factory_code = ? AND q.customer IN (${placeholders})
+      WHERE q.factory_code = ? AND q.deleted_at IS NULL AND q.customer IN (${placeholders})
       ORDER BY q.id DESC
     `).all(req.user.active_factory_code, ...customers);
   }
   res.json(rows.map(r => ({ ...r, total_depts: totalDepts })));
+});
+
+// GET /api/quotes/trash  回收站 — 仅业务/超级管理员
+router.get('/trash', async (req, res) => {
+  if (req.user.dept !== 'sales' && req.user.role !== 'admin') {
+    return res.status(403).json({ error: '只有业务或超级管理员可以查看回收站' });
+  }
+  const params = [req.user.active_factory_code];
+  let customerSql = '';
+  if (req.user.role !== 'admin') {
+    const customers = (await db.prepare('SELECT customer FROM user_customers WHERE user_id = ?').all(req.user.id)).map(r => r.customer);
+    if (!customers.length) return res.json([]);
+    customerSql = ` AND customer IN (${customers.map(() => '?').join(',')})`;
+    params.push(...customers);
+  }
+  const rows = await db.prepare(`SELECT id, quote_no, product_name, version, customer, deleted_at, deleted_by
+    FROM quotes WHERE factory_code = ? AND deleted_at IS NOT NULL${customerSql}
+    ORDER BY deleted_at DESC`).all(...params);
+  res.json(rows);
+});
+
+// POST /api/quotes/:id/restore  从回收站恢复
+router.post('/:id/restore', async (req, res) => {
+  if (req.user.dept !== 'sales' && req.user.role !== 'admin') {
+    return res.status(403).json({ error: '只有业务或超级管理员可以恢复报价单' });
+  }
+  const id = Number(req.params.id);
+  const acc = await quoteAccess(req.user, id);
+  if (acc.status !== 200) return res.status(acc.status).json({ error: acc.status === 404 ? '报价单不存在' : '无权恢复该报价单' });
+  const quote = await db.prepare('SELECT quote_no FROM quotes WHERE id = ? AND deleted_at IS NOT NULL').get(id);
+  if (!quote) return res.status(404).json({ error: '回收站中没有该报价单' });
+  await db.prepare('UPDATE quotes SET deleted_at = NULL, deleted_by = NULL WHERE id = ?').run(id);
+  await db.prepare(`INSERT INTO audit_log (quote_id, dept, actor, action, detail) VALUES (?, ?, ?, 'restore', ?)`)
+    .run(id, req.user.dept, req.user.name, `恢复报价单 ${quote.quote_no}`);
+  res.json({ ok: true, restored: id });
 });
 
 // 新建报价单时的客户候选；必须放在 /:id 之前，避免 customers 被当成 id。
@@ -110,7 +147,7 @@ router.post('/:id/clone', async (req, res) => {
   if (!quote_no) return res.status(400).json({ error: '缺少 quote_no' });
   const acc = await quoteAccess(req.user, srcId);
   if (acc.status !== 200) return res.status(acc.status).json({ error: acc.status === 404 ? '源报价单不存在' : '无权复制其他厂区的报价单' });
-  const src = await db.prepare('SELECT * FROM quotes WHERE id = ?').get(srcId);
+  const src = await db.prepare('SELECT * FROM quotes WHERE id = ? AND deleted_at IS NULL').get(srcId);
   if (!src) return res.status(404).json({ error: '源报价单不存在' });
 
   const tx = db.transaction(async () => {
@@ -154,7 +191,7 @@ router.post('/:id/clone', async (req, res) => {
   }
 });
 
-// DELETE /api/quotes/:id  删除报价单（连带 section 级联删除）— 仅业务/超级管理员
+// DELETE /api/quotes/:id  移入回收站（保留所有部门明细）— 仅业务/超级管理员
 router.delete('/:id', async (req, res) => {
   if (req.user.dept !== 'sales' && req.user.role !== 'admin') {
     return res.status(403).json({ error: '只有业务或超级管理员可以删除报价单' });
@@ -162,12 +199,11 @@ router.delete('/:id', async (req, res) => {
   const id = Number(req.params.id);
   const acc = await quoteAccess(req.user, id);
   if (acc.status !== 200) return res.status(acc.status).json({ error: acc.status === 404 ? '报价单不存在' : '无权删除该客户的报价单' });
-  const q = await db.prepare('SELECT quote_no FROM quotes WHERE id = ?').get(id);
-  const tx = db.transaction(async () => {
-    await db.prepare('DELETE FROM audit_log WHERE quote_id = ?').run(id);
-    await db.prepare('DELETE FROM quotes WHERE id = ?').run(id);  // quote_sections 经 ON DELETE CASCADE 一并删除
-  });
-  await tx();
+  const q = await db.prepare('SELECT quote_no FROM quotes WHERE id = ? AND deleted_at IS NULL').get(id);
+  if (!q) return res.status(404).json({ error: '报价单不存在或已在回收站' });
+  await db.prepare("UPDATE quotes SET deleted_at = datetime('now'), deleted_by = ? WHERE id = ?").run(req.user.name, id);
+  await db.prepare(`INSERT INTO audit_log (quote_id, dept, actor, action, detail) VALUES (?, ?, ?, 'trash', ?)`)
+    .run(id, req.user.dept, req.user.name, `移入回收站 ${q.quote_no}`);
   res.json({ ok: true, deleted: id, quote_no: q ? q.quote_no : null });
 });
 
@@ -213,7 +249,7 @@ router.put('/:id/header', async (req, res) => {
 // GET /api/quotes/:id  报价单详情 + 所有 section（按可见性过滤）
 router.get('/:id', async (req, res) => {
   const id = Number(req.params.id);
-  const quote = await db.prepare('SELECT q.*, f.name_cn AS factory_name FROM quotes q JOIN factories f ON f.code = q.factory_code WHERE q.id = ?').get(id);
+  const quote = await db.prepare('SELECT q.*, f.name_cn AS factory_name FROM quotes q JOIN factories f ON f.code = q.factory_code WHERE q.id = ? AND q.deleted_at IS NULL').get(id);
   if (!quote) return res.status(404).json({ error: '不存在' });
   // 客户范围检查（admin 跳过；无客户单仅 admin）
   const acc = await quoteAccess(req.user, id);

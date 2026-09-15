@@ -90,6 +90,14 @@ test('molding UI visually separates multiple product groups', () => {
   assert.match(styles, /tbody td\.molding-machine-key input/);
 });
 
+test('mold table hides the unused mold structure column', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../frontend/workbench.js'), 'utf8');
+  const renderMolds = source.match(/function renderMolds\([\s\S]*?\n}\n/);
+  assert.ok(renderMolds);
+  assert.doesNotMatch(renderMolds[0], />模具结构</);
+  assert.doesNotMatch(renderMolds[0], /\['structure', 'text'\]/);
+});
+
 test('molding defaults automatically fill missing material and shot prices without overwriting manual prices', () => {
   const source = fs.readFileSync(path.join(__dirname, '../frontend/workbench.js'), 'utf8');
   assert.match(source, /function applyInjectionReferencePrices\(payload/);
@@ -98,6 +106,12 @@ test('molding defaults automatically fill missing material and shot prices witho
   assert.match(source, /applyInjectionReferencePrices\(payload, \{ overwrite: false \}\)/);
   assert.match(source, /applyInjectionReferencePrices\(payload, \{ overwrite: true, machine: false \}\)/);
   assert.match(source, /applyInjectionReferencePrices\(payload, \{ overwrite: true, material: false \}\)/);
+});
+
+test('molding summary converts HKD to RMB by multiplying the RMB/HKD rate', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../frontend/workbench.js'), 'utf8');
+  assert.match(source, /formatNum\(finishedSum \* fxv\)/);
+  assert.doesNotMatch(source, /formatNum\(finishedSum \/ fxv\)/);
 });
 
 test('electronic IC rows are excluded only from Indonesian freight', () => {
@@ -114,12 +128,18 @@ test('shipping UI supports named customer-supplied products in final USD', () =>
   assert.match(source, /\+ customerSuppliedUSD/);
   assert.match(source, /customer-supplied-name/);
   assert.match(source, /\+ 客供成品/);
+  assert.match(source, /const surtaxUsd = finalUSD \* 0\.004/);
+  assert.match(source, /const quotedUSD = finalUSD \+ surtaxDivided/);
+  assert.match(source, />附加税0\.4%</);
+  assert.match(source, />TOTAL \(USD\)<\/td>.*cellTd\(i, 'quotedUSD', r\)/);
+  assert.match(source, /cellTd\(i, 'quotedUSD', r\)/);
 });
 
-test('tax summary does not repeat the Indonesian freight field', () => {
+test('tax summary combines Indonesian freight and customer surcharge into misc', () => {
   const source = fs.readFileSync(path.join(__dirname, '../frontend/workbench.js'), 'utf8');
   assert.doesNotMatch(source, /id="tk-indo-freight"/);
-  assert.match(source, /misc: num\(sales\.pricing_summary\?\.indo_freight\) \+ surtaxHkd/);
+  assert.match(source, /misc: num\(sales\.pricing_summary\?\.indo_freight\) \+ shippingCalc\.customerSurtaxHkd,/);
+  assert.match(source, /customerSurtaxHkd\s*=\s*\(customerIdx >= 0 && rows\[customerIdx\]\)/);
 });
 
 test('department tabs require save or cancel before leaving dirty edits', () => {
@@ -130,4 +150,61 @@ test('department tabs require save or cancel before leaving dirty edits', () => 
   assert.doesNotMatch(source, /不保存跳转/);
   assert.match(source, /dirtyByDept\.get\(activeDept\)/);
   assert.match(source, /await save\(\)/);
+});
+
+test('Ctrl+S and Command+S save the active dirty department', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../frontend/workbench.js'), 'utf8');
+  const quotePage = fs.readFileSync(path.join(__dirname, '../frontend/quote.html'), 'utf8');
+  assert.match(source, /\(event\.ctrlKey \|\| event\.metaKey\)[\s\S]*event\.code === 'KeyS'/);
+  assert.match(source, /event\.preventDefault\(\)/);
+  assert.match(source, /addEventListener\('keydown', quoteSaveShortcutHandler, \{ capture: true \}\)/);
+  assert.match(source, /host\.querySelector\('\.dept-tab\.active'\)\?\.dataset\.dept \|\| mySec\.dept/);
+  assert.match(source, /dirtyByDept\.get\(activeDept\)/);
+  assert.match(source, /const save = saveHandlers\.get\(activeDept\)/);
+  assert.match(source, /showSaveShortcutStatus\('\u2713 已保存'\)/);
+  assert.match(source, /保存草稿（Ctrl\/⌘\+S）/);
+  assert.match(quotePage, /workbench\.js\?v=20260912-save-shortcut/);
+});
+
+test('summary tab recalculates whenever it is opened or clicked again', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../frontend/workbench.js'), 'utf8');
+  assert.match(source, /targetDept === '__summary__' && summaryPane/);
+  assert.match(source, /renderSummaryPane\(summaryPane, sections, quote, me\)/);
+  assert.match(source, /汇总不缓存/);
+});
+
+test('page subtotal hides electronic and sewing while shipping keeps their separate prices', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../frontend/workbench.js'), 'utf8');
+  const subtotalBlock = source.match(/const costCols = \[([\s\S]*?)\n  \];/);
+  assert.ok(subtotalBlock);
+  assert.doesNotMatch(subtotalBlock[1], /\['电子'/);
+  assert.doesNotMatch(subtotalBlock[1], /\['车缝'/);
+  assert.match(source, /\['小计HKD', factoryHkdSum, 'hkd'\]/);
+  assert.doesNotMatch(source, /\['附加税0\.4%', surtaxManual, 'input'\]/);
+  assert.doesNotMatch(source, /id="tot-surtax"/);
+  assert.match(source, /const elecHkdCol = num\(electronicTotal\)/);
+  assert.match(source, /const sewHkdCol = toHkd\(sewingTotalRmb\)/);
+  assert.match(source, /\{ sewing: sewHkdCol, electronic: elecHkdCol \}/);
+});
+
+test('shipping scenario names use the configured freight type dropdown', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../frontend/workbench.js'), 'utf8');
+  assert.match(source, /const scenarioSelect = \(x, i\)/);
+  assert.match(source, /FREIGHT_TYPES\.map\(type =>/);
+  assert.match(source, /<select class="sc-name"/);
+  assert.match(source, /querySelectorAll\('\.sc-name'\)\.forEach\(inp => inp\.onchange/);
+  assert.match(source, /const nextType = FREIGHT_TYPES\.find/);
+});
+
+test('tax deduction detail omits the removed labor 13 percent category', () => {
+  const frontend = fs.readFileSync(path.join(__dirname, '../frontend/workbench.js'), 'utf8');
+  const exporter = fs.readFileSync(path.join(__dirname, '../backend/services/exportXlsx.js'), 'utf8');
+  assert.doesNotMatch(frontend, /\['labor13', '人工类13%'\]/);
+  assert.doesNotMatch(exporter, /\['人工类13%', 'labor13'\]/);
+});
+
+test('internal export saves live UI values before calculating the workbook', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../frontend/workbench.js'), 'utf8');
+  assert.match(source, /for \(const \[dept, dirty\] of dirtyByDept\.entries\(\)\)/);
+  assert.match(source, /if \(save\) await save\(\)/);
 });

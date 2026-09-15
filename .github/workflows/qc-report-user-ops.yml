@@ -1,0 +1,101 @@
+name: QC Report User Ops
+
+# QC 成品报告系统账号运维（手动触发）：
+#   在 qc-report 容器内用应用自身的 User 模型 upsert 一个账号。
+#   mode=upsert-admin —— 账号不存在则创建；已存在则重置密码、强制 role=admin、
+#                         active=true（用于找回/新建全权限账号）。
+#   密码一律从仓库 Secret QC_REPORT_USER_OPS_PASSWORD 读取，不经 inputs、不回显日志。
+
+on:
+  workflow_dispatch:
+    inputs:
+      username:
+        description: "登录用户名（英文小写；已存在则重置密码并提升为 admin）"
+        type: string
+        required: true
+      display_name:
+        description: "显示姓名（默认与用户名相同）"
+        type: string
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-cloud
+  queue: max
+  cancel-in-progress: false
+
+jobs:
+  user-ops:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Validate SSH host fingerprint
+        shell: bash
+        env:
+          CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]]; then
+            echo 'CLOUD_HOST_FINGERPRINT must be a non-empty OpenSSH SHA256 fingerprint.' >&2
+            exit 1
+          fi
+
+      - name: Upsert admin user via SSH
+        env:
+          CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+          NEW_USERNAME: ${{ inputs.username }}
+          NEW_DISPLAY_NAME: ${{ inputs.display_name }}
+          NEW_PASSWORD: ${{ secrets.QC_REPORT_USER_OPS_PASSWORD }}
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
+        with:
+          host: ${{ secrets.CLOUD_HOST }}
+          username: ${{ secrets.CLOUD_USER }}
+          key: ${{ secrets.CLOUD_SSH_KEY }}
+          fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
+          command_timeout: 5m
+          envs: NEW_USERNAME,NEW_DISPLAY_NAME,NEW_PASSWORD
+          script: |
+            set -euo pipefail
+            [ -n "${NEW_USERNAME:-}" ] || { echo "[FAIL] username 为空"; exit 1; }
+            [ -n "${NEW_PASSWORD:-}" ] || { echo "[FAIL] Secret QC_REPORT_USER_OPS_PASSWORD 未设置"; exit 1; }
+            echo "$NEW_USERNAME" | grep -qE '^[a-z0-9_.-]{2,40}$' || { echo "[FAIL] username 只允许英文小写/数字/_.-，2-40 字符"; exit 1; }
+            CTR="$(docker ps --format '{{.Names}}' | grep 'qc-report' | grep -v worker | head -1)"
+            [ -n "$CTR" ] || { echo "[FAIL] 找不到运行中的 qc-report 容器"; exit 1; }
+            echo "-- 目标容器: $CTR --"
+            docker exec -i \
+              -e QC_SKIP_APP_INIT=true \
+              -e NEW_USERNAME="$NEW_USERNAME" \
+              -e NEW_DISPLAY_NAME="$NEW_DISPLAY_NAME" \
+              -e NEW_PASSWORD="$NEW_PASSWORD" \
+              "$CTR" python - <<'PY'
+            import os
+            from app import create_app, User
+            from sqlalchemy import select
+            from werkzeug.security import generate_password_hash, check_password_hash
+
+            username = os.environ["NEW_USERNAME"].strip().lower()
+            name = os.environ.get("NEW_DISPLAY_NAME", "").strip() or username
+            password = os.environ["NEW_PASSWORD"]
+
+            app = create_app()
+            db = app.extensions["db_session"]()
+            user = db.scalar(select(User).where(User.username == username))
+            if user:
+                user.name = name
+                user.role = "admin"
+                user.active = True
+                user.password_hash = generate_password_hash(password)
+                action = "已重置并提升为 admin"
+            else:
+                db.add(User(username=username, name=name, role="admin",
+                            password_hash=generate_password_hash(password)))
+                action = "已创建 admin 账号"
+            db.commit()
+            check = db.scalar(select(User).where(User.username == username))
+            assert check and check.role == "admin" and check.active, "复核失败"
+            assert check_password_hash(check.password_hash, password), "密码校验失败"
+            print(f"[OK] {action}: {username}（姓名: {check.name}，role=admin，active=True，密码校验通过）")
+            PY

@@ -250,6 +250,10 @@ services:
       - DATA_PATH=/app/data
       - UPLOAD_FOLDER=/app/uploads
       - SECRET_KEY=${JIANGPING_SECRET_KEY:?JIANGPING_SECRET_KEY is required}
+      - LOGIN_USERNAME=${JIANGPING_LOGIN_USERNAME:-jp}
+      - LOGIN_PASSWORD=${JIANGPING_LOGIN_PASSWORD:-jp123456}
+      # 额外登录账号(JSON 对象 {"用户名":"密码"}),与 LOGIN_USERNAME/PASSWORD 并存
+      - LOGIN_ACCOUNTS=${JIANGPING_LOGIN_ACCOUNTS:-}
     volumes:
       - ./apps/PMC跟仓管/采购订单管理系统/data:/app/data
       - ./apps/PMC跟仓管/采购订单管理系统/uploads:/app/uploads
@@ -764,6 +768,8 @@ services:
       # SECRET_KEY 不传,app 会在 instance/.secret_key 自建并持久化
       - AUTH_USERNAME=${PEISE_AUTH_USERNAME:-ps}
       - AUTH_PASSWORD=${PEISE_AUTH_PASSWORD:-ps123456}
+      # 额外登录账号(JSON 对象 {"用户名":"密码"}),与 AUTH_USERNAME/PASSWORD 并存
+      - AUTH_ACCOUNTS=${PEISE_AUTH_ACCOUNTS:-}
     volumes:
       - ./apps/PMC跟仓管/配色库存管理/instance:/app/instance
     healthcheck:
@@ -854,6 +860,39 @@ services:
       - TZ=Asia/Shanghai
     volumes:
       - ./apps/PMC跟仓管/加工厂月度评审管理制度/pb_data:/pb/pb_data
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:8090/api/factory-review/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    mem_limit: 512m
+    memswap_limit: 512m
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - platform-net
+
+  # 加工厂月度评审管理系统·测试版：与正式版同代码、独立容器/数据库目录，
+  # 供试用新流程/培训练习，绝不影响正式数据。basePath=/factory-review-test/。
+  factory-review-test:
+    build:
+      context: ./apps/PMC跟仓管/加工厂月度评审管理制度
+      dockerfile: Dockerfile
+      args:
+        VITE_BASE_PATH: /factory-review-test/
+        OCI_REVISION: ${AFTER_COMMIT:-local}
+    environment:
+      - FACTORY_REVIEW_ADMIN_EMAIL=${FACTORY_REVIEW_ADMIN_EMAIL:-admin@rr.local}
+      - FACTORY_REVIEW_ADMIN_PASSWORD=${FACTORY_REVIEW_ADMIN_PASSWORD:-}
+      # 测试版不开集成 API（密钥留空，集成接口一律 401）
+      - INTEGRATION_API_KEY=
+      - TZ=Asia/Shanghai
+    volumes:
+      - ./apps/PMC跟仓管/加工厂月度评审管理制度/pb_data_test:/pb/pb_data
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:8090/api/factory-review/health"]
       interval: 10s
@@ -1037,6 +1076,71 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+    networks:
+      - platform-net
+
+  voyageplex-web:
+    build:
+      context: ./apps/船务部/VoyagePlex船务协同系统
+      dockerfile: Dockerfile.web
+      args:
+        NEXT_PUBLIC_BASE_PATH: /voyageplex
+    environment:
+      NEXT_PUBLIC_BASE_PATH: /voyageplex
+      VOYAGEPLEX_API_BASE_URL: http://voyageplex-api:5088
+      EMAIL_PARSER_BASE_URL: http://voyageplex-parser:8091
+      QC_SYSTEM_API_URL: ${QC_SYSTEM_API_URL:-}
+      QC_SYSTEM_API_TOKEN: ${QC_SYSTEM_API_TOKEN:-}
+    volumes:
+      - ./apps/船务部/VoyagePlex船务协同系统/data-runtime:/app/data
+    depends_on:
+      voyageplex-api:
+        condition: service_healthy
+    mem_limit: 1g
+    healthcheck:
+      test: ["CMD", "wget", "-qO", "/dev/null", "http://127.0.0.1:3000/voyageplex/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - platform-net
+
+  voyageplex-api:
+    build:
+      context: ./apps/船务部/VoyagePlex船务协同系统
+      dockerfile: Dockerfile.api
+    environment:
+      ASPNETCORE_URLS: http://0.0.0.0:5088
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__Default: Data Source=/app/data/voyageplex.db
+      EmailParser__BaseUrl: http://voyageplex-parser:8091
+    volumes:
+      - ./apps/船务部/VoyagePlex船务协同系统/data-runtime:/app/data
+    depends_on:
+      voyageplex-parser:
+        condition: service_healthy
+    mem_limit: 768m
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:5088/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - platform-net
+
+  voyageplex-parser:
+    build:
+      context: ./apps/船务部/VoyagePlex船务协同系统/services/email-parser
+      dockerfile: Dockerfile
+    mem_limit: 512m
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8091/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
     networks:
       - platform-net
 

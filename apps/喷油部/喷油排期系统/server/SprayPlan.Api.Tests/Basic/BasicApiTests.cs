@@ -61,7 +61,7 @@ public class BasicApiTests : IAsyncLifetime
     public async Task Lines_Create_MissingFields_Returns400()
     {
         await LoginAsync("clerk", "clerk123");
-        var r = await _client.PostAsJsonAsync("/api/lines", new { name = "缺车间" });
+        var r = await _client.PostAsJsonAsync("/api/lines", new { workshop = "兴信A" });
         Assert.Equal(HttpStatusCode.BadRequest, r.StatusCode);
     }
 

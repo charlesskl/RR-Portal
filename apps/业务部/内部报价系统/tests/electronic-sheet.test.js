@@ -46,3 +46,20 @@ test('electronic import detects USD, preserves source values and validates total
   assert.equal(result.extras.mold_fees[0].amount, 354);
   assert.equal(result.validation.ok, true);
 });
+
+test('empty product number in merged metadata does not consume the customer field', async () => {
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet('电子报价');
+  sheet.mergeCells('A1:F1');
+  sheet.getCell('A1').value = '产品名称：LLAMA    产品编号：    客户：兴信/Zuru    报价日期：2025.11.27';
+  sheet.addRow(['零件名称', '规格', '用量', '单价RMB', '合计RMB', '备注']);
+  sheet.addRow(['PCB', '94HB', 1, 0.1, 0.1, '']);
+
+  const result = await parseWorkbook(await workbook.xlsx.writeBuffer());
+
+  assert.equal(result.error, undefined);
+  assert.equal(result.meta.product, 'LLAMA');
+  assert.equal(result.meta.product_no, undefined);
+  assert.equal(result.meta.customer, '兴信/Zuru');
+  assert.equal(result.meta.date, '2025.11.27');
+});

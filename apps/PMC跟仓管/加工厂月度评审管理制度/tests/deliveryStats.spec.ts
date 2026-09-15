@@ -81,6 +81,15 @@ describe('buildDeliveryReport', () => {
     expect(sewingRows[1]).toMatchObject({ kind: 'subtotal', outPrice: 2.57 })
   })
 
+  it('uses tax-inclusive outsource price for the Hunan price ratio', () => {
+    const rows = buildDeliveryReport([order({
+      id: 'hunan-row', quote_labor_price: 2, unit_price_cny_tax: 1.13, exchange_rate: 1.13,
+    })], '湖南厂区 · 注塑部', () => '工厂', 'hunan-rmb-tax', () => 1.13)
+
+    expect(rows[0]).toMatchObject({ kind: 'detail', outPrice: 1, outPriceCnyTax: 1.13, priceRatio: '56.50%' })
+    expect(rows[1]).toMatchObject({ kind: 'subtotal', outPrice: 1, outPriceCnyTax: 1.13, priceRatio: '56.50%' })
+  })
+
   it('uses factory tax point as well as FX rate for Dongguan HKD pricing', () => {
     const rows = buildDeliveryReport([order({
       id: 'hkd-tax-row', unit_price_cny_tax: 6, exchange_rate: 0.87,
@@ -123,6 +132,13 @@ describe('deliveryHeaders', () => {
     const dongguanTax = deliveryHeaders(true, false, 'hkd-tax')
     expect(dongguanTax).toContain('换算汇率')
     expect(dongguanTax).toContain('税点')
+
+    const hunan = deliveryHeaders(true, false, 'hunan-rmb-tax')
+    expect(hunan).toContain('核价工价(人民币含税)')
+    expect(hunan).toContain('外发工价(人民币含税)')
+    expect(hunan).toContain('税点')
+    expect(hunan).not.toContain('核价工价(不含税RMB)')
+    expect(hunan).not.toContain('外发工价(不含税RMB)')
   })
 })
 

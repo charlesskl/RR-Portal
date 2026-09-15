@@ -8,7 +8,8 @@ public class User
     public string Username { get; set; } = "";
     public string PasswordHash { get; set; } = "";
     public string DisplayName { get; set; } = "";
-    public string Role { get; set; } = "";          // 'admin' | 'clerk' | 'viewer'
+    public string Role { get; set; } = "";          // 'admin' | 'clerk'
+    public string FactoryId { get; set; } = "XINGXIN"; // XINGXIN | HUADENG | ALL
     public bool IsActive { get; set; } = true;
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }

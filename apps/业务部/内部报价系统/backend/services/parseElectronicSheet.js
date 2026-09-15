@@ -92,8 +92,9 @@ async function parseWorkbook(buffer) {
     // 标题元数据
     const productMatch = text.match(/产品名称[：:]\s*(.*?)(?=产品编号|客户|报价日期|\|)/);
     if (productMatch && productMatch[1].trim()) meta.product = productMatch[1].trim();
-    const productNoMatch = text.match(/产品编号[：:]\s*([^\s|]+)/);
-    if (productNoMatch) meta.product_no = productNoMatch[1];
+    // 合并单元格会让整行文字重复出现；产品编号为空时不能把后面的“客户”误作编号。
+    const productNoMatch = text.match(/产品编号[：:]\s*(.*?)(?=客户[：:]|报价日期[：:]|\|)/);
+    if (productNoMatch && productNoMatch[1].trim()) meta.product_no = productNoMatch[1].trim();
     const custMatch = text.match(/客户[：:]\s*(.*?)(?=报价日期|\|)/);
     if (custMatch && custMatch[1].trim()) meta.customer = custMatch[1].trim();
     const dateMatch = text.match(/报价日期[：:]\s*([\d.\-/]+)/);

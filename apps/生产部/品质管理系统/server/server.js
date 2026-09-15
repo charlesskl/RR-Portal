@@ -73,8 +73,8 @@ function loadAiConfig() {
     enabled: false,
     baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     apiKey: '',
-    ocrModel: 'qwen-vl-max',
-    textModel: 'qwen-plus',
+    ocrModel: 'qwen3.5-omni-plus',
+    textModel: 'qwen3.5-omni-plus',
   };
   try { Object.assign(cfg, JSON.parse(fs.readFileSync(AI_CONFIG_PATH, 'utf8'))); }
   catch (e) { console.warn('[AI] config not loaded:', e.message); }
@@ -88,73 +88,177 @@ function loadAiConfig() {
 }
 let AI = loadAiConfig();
 
-/* OCR 提取提示词：锁死只输出系统需要的字段 */
-const OCR_FIELD_PROMPT = [
-  '这是一张工厂「送货单/来料单」的照片，可能被旋转、字迹偏淡或带有印章。',
-  '请只提取下列字段，并严格输出 JSON（不要任何解释、不要 markdown 代码块）：',
-  '{',
-  '  "date": "来料/送货日期，格式 YYYY-MM-DD；找不到留空字符串",',
-  '  "supplier": "供应商/送货公司全称（开单抬头的公司，如东莞市XX有限公司，不是收货方兴信）；找不到留空",',
-  '  "deliveryNo": "送货单号（单据右上角 NO. 后的编号）；找不到留空",',
-  '  "orderNo": "订单号/PO号；找不到留空",',
-  '  "type": "固定为 来料",',
-  '  "items": [ { "productNo": "货号/Item No", "productName": "货名/品名/Description", "qty": "数量(纯数字,去千分位)", "unit": "单位如 KG/PCS/桶" } ]',
-  '}',
-  '要点：supplier 取单据顶部开单公司，绝不要取「寶號/Messrs」后面的收货单位；每一行货品作为 items 的一个元素，可能有多行；只输出 JSON 对象本身。',
-].join('\n');
+/* OCR 识别提示词：qwen3.5-ocr 官方全文识别模式。
+   该模型指令遵循能力差（让它直接输出结构化 JSON 会抄 schema/示例），
+   但它按官方提示词做「全文 OCR」非常准。所以：模型只负责把图变文字，
+   字段提取由下面的 parseDeliveryNote() 确定性完成。 */
+const OCR_READ_PROMPT = 'Read all the text in the image.';
 
-/* 调用阿里百炼（OpenAI 兼容）视觉模型，从图片提取字段 */
+/* ── 送货单 OCR 文本 → 结构化字段（确定性解析，不依赖模型指令遵循）── */
+function parseDeliveryNote(text) {
+  const fields = { date: '', supplier: '', deliveryNo: '', orderNo: '', type: '来料', items: [] };
+  const lines = [];
+  for (let s of String(text || '').split('\n')) {
+    s = s.trim();
+    if (!s || /^```/.test(s)) continue;
+    if (/^\|[\s\-:|]+\|$/.test(s)) continue;   // markdown 表格分隔行
+    lines.push(s);
+  }
+  const joined = lines.join('\n');
+
+  /* 日期：发货/送货/来料日期：2026-09-10 | 2026年9月10日 | 2026/9/10 */
+  let m = joined.match(/日期\s*[：:]\s*(\d{4})\s*[-年\/.]\s*(\d{1,2})\s*[-月\/.]\s*(\d{1,2})/);
+  if (m) fields.date = m[1] + '-' + m[2].padStart(2, '0') + '-' + m[3].padStart(2, '0');
+
+  /* 送货单号：送货单号/发货单号/单号/NO. */
+  m = joined.match(/(?:送\s*货\s*单\s*号|发\s*货\s*单\s*号|单\s*号|NO\.?)\s*[：:]\s*([A-Za-z0-9][A-Za-z0-9\-\/]{3,})/i);
+  if (m) fields.deliveryNo = m[1];
+
+  /* 供应商：开头几行里含「公司/厂」且不是收货方/标题/地址的 */
+  for (const ln of lines.slice(0, 8)) {
+    const t = ln.replace(/^#+\s*/, '').trim();
+    if (!t || t === '送货单' || /客户名称|收货|寶號|Messrs|地址|电话| Tel/i.test(t)) continue;
+    if (/公司|工厂|制品厂|纸品厂/.test(t) && t.length >= 6 && t.length <= 40) { fields.supplier = t; break; }
+  }
+
+  /* markdown 表格 → items（列按表头关键词映射）*/
+  const tbl = lines.filter(l => l.startsWith('|'));
+  if (tbl.length >= 2) {
+    const splitRow = l => l.replace(/^\|/, '').replace(/\|$/, '').split('|').map(c => c.trim());
+    const hi = tbl.findIndex(l => /编号|货号|品名|名称|数量|订单/.test(l));
+    if (hi !== -1) {
+      const head = splitRow(tbl[hi]);
+      const find = (re, notRe) => head.findIndex(h => re.test(h) && !(notRe && notRe.test(h)));
+      const cOrder = find(/订单|PO/i, /数量/);
+      const cNo    = find(/编号|货号|Item/i, /订单/);
+      const cName  = find(/品名|名称|货名|规格|Desc/i, /编号/);
+      let   cQty   = find(/送货|实送/);
+      if (cQty === -1) cQty = find(/数量/);
+      const cUnit  = find(/单位/, /数量/);
+      for (const row of tbl.slice(hi + 1)) {
+        const cells = splitRow(row);
+        const get = i => (i >= 0 && i < cells.length ? cells[i] : '');
+        const no = get(cNo), name = get(cName);
+        if (!no && !name) continue;
+        if (/^序$|^NO\.?$/i.test(no)) continue;
+        const qty  = get(cQty).replace(/[^\d.]/g, '');
+        let   unit = get(cUnit);
+        /* 表头合并了「送货数量单位」时，单位在数量右边一格 */
+        if (!unit && cQty >= 0 && cells[cQty + 1] && !/\d/.test(cells[cQty + 1]) && cells[cQty + 1].length <= 4) unit = cells[cQty + 1];
+        if (!fields.orderNo) { const o = get(cOrder); if (o && o !== no && o.length >= 6) fields.orderNo = o; }
+        fields.items.push({ productNo: no, productName: name, qty, unit });
+      }
+    }
+  }
+
+  /* 非 markdown 表格兜底：表头行（品名+数量）之后的行，行尾找「数量+单位」 */
+  if (!fields.items.length) {
+    const hiP = lines.findIndex(l => !l.startsWith('|') && /品名|名称|货名/.test(l) && /数量/.test(l));
+    if (hiP !== -1) {
+      for (const ln of lines.slice(hiP + 1)) {
+        const m2 = ln.match(/^(.*?)\s+(\d{1,3}(?:,\d{3})+|\d{2,})\s+(个|PCS|pcs|件|套|卷|张|桶|KG|kg)(?=\s|$)/);
+        if (!m2) continue;
+        const tokens = m2[1].trim().split(/\s+/);
+        let no = '', name = '';
+        /* 货号：优先选不含中文、长度≥5、含数字、不以 - 结尾（排除单号碎片）的 token */
+        for (const t of tokens) {
+          if (no) break;
+          if (t.endsWith('-')) continue;
+          if (/^[\w#]{5,}$/.test(t) && /\d/.test(t) && t !== m2[2]) no = t;
+        }
+        if (!no) for (const t of tokens) { if (/[A-Za-z#]/.test(t) && t.length >= 4) { no = t; break; } }
+        /* 品名：中文字符≥3 的最长 token（排除规格串） */
+        const cjk = tokens.filter(t => (t.match(/[\u4e00-\u9fff]/g) || []).length >= 3);
+        if (cjk.length) name = cjk.reduce((a, b) => (a.length >= b.length ? a : b));
+        if (!no && !name) continue;
+        fields.items.push({ productNo: no, productName: name, qty: m2[2].replace(/,/g, ''), unit: m2[3] });
+      }
+    }
+  }
+
+  /* 表格外订单号兜底 */
+  if (!fields.orderNo) {
+    m = joined.match(/(?:订\s*单\s*(?:号|编号)|PO\s*号?)\s*[：:]\s*([A-Za-z0-9][A-Za-z0-9\-]{3,})/i);
+    if (m) fields.orderNo = m[1];
+  }
+  return fields;
+}
+
+/* 调用视觉模型（OpenAI 兼容）做全文 OCR，再确定性解析字段 */
 async function aiVisionExtract(dataUrl) {
   if (!AI.ready) {
     const err = new Error('AI 未配置：请在 server/ai-config.json 填入阿里百炼 API Key 后调用 /api/ai/reload');
     err.code = 'NO_AI'; throw err;
   }
   const payload = {
-    model: AI.ocrModel || 'qwen-vl-max',
+    model: AI.ocrModel || 'qwen3.5-ocr',
     temperature: 0,
+    max_tokens: 4096,   /* OpenRouter 按 max_tokens 预扣额度，不设上限易触发 402 */
+
     messages: [
-      { role: 'system', content: '你是工厂 IQC 验货助手，只从送货单图片中提取指定字段并输出严格 JSON。' },
       { role: 'user', content: [
-        { type: 'text', text: OCR_FIELD_PROMPT },
+        { type: 'text', text: OCR_READ_PROMPT },
         { type: 'image_url', image_url: { url: dataUrl } },
       ] },
     ],
   };
-  const resp = await fetch(AI.baseURL.replace(/\/$/, '') + '/chat/completions', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + AI.apiKey },
-    body: JSON.stringify(payload),
-  });
-  const raw = await resp.text();
-  if (!resp.ok) { const err = new Error('百炼返回 HTTP ' + resp.status + '：' + raw.slice(0, 600)); err.code = 'UPSTREAM'; throw err; }
+  async function callModel(model) {
+    payload.model = model;
+    const resp = await fetch(AI.baseURL.replace(/\/$/, '') + '/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + AI.apiKey },
+      body: JSON.stringify(payload),
+    });
+    return { status: resp.status, raw: await resp.text() };
+  }
+  /* 该密钥的模型权限存在随机抖动（同一请求约 40~60% 概率返回 403 AccessDenied），
+     因此对 403 做同模型重试（最多 6 次，间隔 1.5s）；仍失败再回退 qwen3.5-ocr */
+  const sleep = ms => new Promise(res => setTimeout(res, ms));
+  const isDenied = x => x.status === 403 && /denied|Unpurchased/i.test(x.raw);
+  let r = await callModel(payload.model);
+  for (let i = 0; i < 5 && isDenied(r); i++) {
+    console.warn('[AI] 模型 %s 403（第 %d 次），1.5s 后重试', payload.model, i + 1);
+    await sleep(1500);
+    r = await callModel(payload.model);
+  }
+  if (isDenied(r) && payload.model !== 'qwen3.5-ocr') {
+    console.warn('[AI] 模型 %s 持续无权限，回退 qwen3.5-ocr', payload.model);
+    r = await callModel('qwen3.5-ocr');
+    for (let i = 0; i < 2 && isDenied(r); i++) {
+      await sleep(1500);
+      r = await callModel('qwen3.5-ocr');
+    }
+  }
+  const raw = r.raw;
+  if (r.status >= 400) { const err = new Error('百炼返回 HTTP ' + r.status + '：' + raw.slice(0, 600)); err.code = 'UPSTREAM'; throw err; }
   let data; try { data = JSON.parse(raw); } catch (e) { throw new Error('百炼响应非 JSON：' + raw.slice(0, 300)); }
   let content = data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content || '';
   if (Array.isArray(content)) content = content.map(c => (typeof c === 'string' ? c : (c && c.text) || '')).join('');
-  content = String(content).trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
-  let fields = null;
-  try { fields = JSON.parse(content); }
-  catch (e) { const m = content.match(/\{[\s\S]*\}/); if (m) { try { fields = JSON.parse(m[0]); } catch (e2) {} } }
-  if (!fields) throw new Error('AI 输出无法解析为 JSON：' + content.slice(0, 300));
-  return { fields, usage: data.usage || null };
+  content = String(content).trim();
+  const fields = parseDeliveryNote(content);
+  return { fields, usage: data.usage || null, rawText: content };
 }
 
 /* ── 记录表列顺序（写入/读取都按这个顺序）── */
 const RECORD_COLS = [
-  'id', 'date', 'inspDate', 'supplier', 'client', 'productNo', 'productName',
+  'id', 'date', 'inspDate', 'supplier', 'client', 'processType', 'productNo', 'productName',
   'deliveryNo', 'orderNo', 'type', 'qty', 'sampleQty', 'pass', 'fail',
   'defectRate', 'result', 'result2', 'defect', 'defects', 'measurements',
   'qc', 'confirmBy', 'remark', 'orderQty', 'updatedAt',
+  'status', 'reviewBy', 'reviewAt', 'rejectReason', 'rejectBy', 'rejectAt',
 ];
 
 const SCHEMA_SQL = `
   CREATE TABLE IF NOT EXISTS records (
     id INTEGER PRIMARY KEY,
-    date TEXT, inspDate TEXT, supplier TEXT, client TEXT,
+    date TEXT, inspDate TEXT, supplier TEXT, client TEXT, processType TEXT,
     productNo TEXT, productName TEXT, deliveryNo TEXT, orderNo TEXT,
     type TEXT, qty INTEGER, sampleQty INTEGER, pass INTEGER, fail INTEGER,
     defectRate TEXT, result TEXT, result2 TEXT, defect TEXT,
     defects TEXT, measurements TEXT,
-    qc TEXT, confirmBy TEXT, remark TEXT, orderQty INTEGER, updatedAt TEXT
+    qc TEXT, confirmBy TEXT, remark TEXT, orderQty INTEGER, updatedAt TEXT,
+    status TEXT, reviewBy TEXT, reviewAt TEXT,
+    rejectReason TEXT, rejectBy TEXT, rejectAt TEXT
   );
   CREATE TABLE IF NOT EXISTS users (
     username TEXT PRIMARY KEY, password TEXT, role TEXT,
@@ -172,13 +276,15 @@ const j     = (v) => JSON.stringify(Array.isArray(v) ? v : (v ? [v] : []));
 
 function recordValues(r) {
   return [
-    toNum(r.id), r.date ?? null, r.inspDate ?? null, r.supplier ?? null, r.client ?? null,
+    toNum(r.id), r.date ?? null, r.inspDate ?? null, r.supplier ?? null, r.client ?? null, r.processType ?? null,
     r.productNo ?? null, r.productName ?? null, r.deliveryNo ?? null, r.orderNo ?? null,
     r.type ?? null, toNum(r.qty), toNum(r.sampleQty), toNum(r.pass), toNum(r.fail),
     r.defectRate ?? null, r.result ?? null, r.result2 ?? null, r.defect ?? null,
     j(r.defects), j(r.measurements),
     r.qc ?? null, r.confirmBy ?? null, r.remark ?? null, toNum(r.orderQty),
     r.updatedAt || new Date().toISOString(),
+    r.status ?? null, r.reviewBy ?? null, r.reviewAt ?? null,
+    r.rejectReason ?? null, r.rejectBy ?? null, r.rejectAt ?? null,
   ];
 }
 
@@ -280,6 +386,23 @@ function migrateUsersTable(db) {
   }
 }
 
+/* 记录表新增字段（加工类型），老库自动补齐 */
+const RECORD_EXTRA_COLS = [
+  { col: 'processType',  ddl: "ALTER TABLE records ADD COLUMN processType TEXT" },
+  { col: 'status',       ddl: "ALTER TABLE records ADD COLUMN status TEXT" },
+  { col: 'reviewBy',     ddl: "ALTER TABLE records ADD COLUMN reviewBy TEXT" },
+  { col: 'reviewAt',     ddl: "ALTER TABLE records ADD COLUMN reviewAt TEXT" },
+  { col: 'rejectReason', ddl: "ALTER TABLE records ADD COLUMN rejectReason TEXT" },
+  { col: 'rejectBy',     ddl: "ALTER TABLE records ADD COLUMN rejectBy TEXT" },
+  { col: 'rejectAt',     ddl: "ALTER TABLE records ADD COLUMN rejectAt TEXT" },
+];
+function migrateRecordsTable(db) {
+  const cols = db.prepare("PRAGMA table_info(records)").all().map(c => c.name);
+  for (const c of RECORD_EXTRA_COLS) {
+    if (!cols.includes(c.col)) { try { db.exec(c.ddl); } catch (e) {} }
+  }
+}
+
 /* ════════ 多厂区数据库管理（每厂区一个独立 qc.db，懒加载 + 缓存）════════ */
 const _dbs = new Map();
 
@@ -312,6 +435,7 @@ function getDb(companyId) {
   const db = new DatabaseSync(dbPath);
   db.exec(SCHEMA_SQL);
   migrateUsersTable(db);   /* 老库补齐 姓名/部门/权限 列 */
+  migrateRecordsTable(db); /* 老库补齐 加工类型 列 */
   // 东莞老库已带数据则无需灌种子；全新厂区只灌账号 + 不良库，不带示例记录
   seedIfEmpty(db, { includeRecords: companyId === DEFAULT_COMPANY });
   _dbs.set(companyId, db);
@@ -416,7 +540,7 @@ function getFilteredExportRecords(db, searchParams) {
   return getBootstrap(db).records.filter(r => {
     if (search) {
       const haystack = [
-        r.supplier, r.productNo, r.productName, r.client, r.orderNo, r.deliveryNo,
+        r.supplier, r.productNo, r.productName, r.client, r.processType, r.orderNo, r.deliveryNo,
         r.defect, r.updatedAt, formatModifiedDate(r.updatedAt),
       ]
         .filter(Boolean).join(' ').toLowerCase();
@@ -431,13 +555,13 @@ function getFilteredExportRecords(db, searchParams) {
 }
 
 function buildRecordsCsv(records) {
-  const hdr = ['ID','来料日期','检验日期','修改日期','供应商','客户','货号','款式名称','PO号','类型',
+  const hdr = ['ID','来料日期','检验日期','修改日期','供应商','客户','加工类型','送货单号','货号','款式名称','PO号','类型',
     '来料数量','抽查数量','PASS数','FAIL数','不良率','不良现象','判定结果','检验员','备注'];
   const rows = records
     .slice()
     .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')))
     .map(r => [
-      r.id, r.date, r.inspDate, formatModifiedDate(r.updatedAt), r.supplier, r.client, r.productNo, r.productName,
+      r.id, r.date, r.inspDate, formatModifiedDate(r.updatedAt), r.supplier, r.client, r.processType, r.deliveryNo, r.productNo, r.productName,
       r.orderNo, r.type, r.qty, r.sampleQty, r.pass, r.fail, r.defectRate, r.defect, r.result, r.qc, r.remark,
     ].map(csvCell));
   return '﻿' + [hdr.map(csvCell), ...rows].map(r => r.join(',')).join('\n'); // 前导 ﻿ = BOM，Excel 正确识别 UTF-8
@@ -466,7 +590,7 @@ function buildFactoryExcelHtml(records) {
     <td>${i + 1}</td>
     <td>${htmlCell(r.date || '')}</td>
     <td>${htmlCell(r.supplier || '')}</td>
-    <td>${htmlCell(r.type || '')}</td>
+    <td>${htmlCell(r.processType || r.type || '')}</td>
     <td>${htmlCell(r.client || '')}</td>
     <td>${htmlCell(r.deliveryNo || '')}</td>
     <td>${htmlCell(r.orderNo || '')}</td>
@@ -586,7 +710,7 @@ const server = http.createServer(async (req, res) => {
       if (!body || !body.image) return sendJson(res, 400, { ok: false, error: '缺少 image 字段（base64 dataURL）' });
       try {
         const r = await aiVisionExtract(body.image);
-        return sendJson(res, 200, { ok: true, fields: r.fields, usage: r.usage });
+        return sendJson(res, 200, { ok: true, fields: r.fields, usage: r.usage, rawText: r.rawText });
       } catch (e) {
         const code = e.code === 'NO_AI' ? 503 : 502;
         return sendJson(res, code, { ok: false, error: String(e && e.message || e), code: e.code || 'ERR' });

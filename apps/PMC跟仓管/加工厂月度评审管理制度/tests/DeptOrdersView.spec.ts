@@ -1,12 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mount, flushPromises, type VueWrapper } from '@vue/test-utils'
 import { reactive } from 'vue'
+import { LocalAuthStore } from 'pocketbase'
 import type { Order } from '../src/types/order'
 
-const state = vi.hoisted(() => ({ orders: null as any, factories: null as any, route: null as any, exportExcel: vi.fn(), beforeRouteUpdate: vi.fn() }))
+const state = vi.hoisted(() => ({ orders: null as any, factories: null as any, route: null as any, auth: null as any, sdkAuth: null as any, exportExcel: vi.fn(), beforeRouteUpdate: vi.fn(), beforeRouteLeave: vi.fn() }))
 vi.mock('../src/stores/orders', () => ({ useOrdersStore: () => state.orders }))
 vi.mock('../src/stores/factories', () => ({ useFactoriesStore: () => state.factories }))
-vi.mock('../src/stores/auth', () => ({ useAuthStore: () => ({ role: 'admin', userId: 'admin' }) }))
+vi.mock('../src/stores/auth', () => ({ useAuthStore: () => state.auth }))
+vi.mock('../src/pb', () => ({ pb: { get authStore() { return state.sdkAuth } } }))
 vi.mock('../src/utils/pdfDeliveryImport', () => ({ readDeliveryPdfAsAoa: vi.fn() }))
 vi.mock('../src/utils/deliveryStats', async (importOriginal) => ({
   ...await importOriginal<typeof import('../src/utils/deliveryStats')>(),
@@ -15,7 +17,7 @@ vi.mock('../src/utils/deliveryStats', async (importOriginal) => ({
 vi.mock('vue-router', () => ({
   useRoute: () => state.route,
   RouterLink: { template: '<a><slot /></a>' },
-  onBeforeRouteLeave: vi.fn(),
+  onBeforeRouteLeave: state.beforeRouteLeave,
   onBeforeRouteUpdate: state.beforeRouteUpdate,
 }))
 vi.mock('../src/components/AppLayout.vue', () => ({ default: { template: '<main><slot /></main>' } }))
@@ -24,8 +26,18 @@ import DeptOrdersView from '../src/views/DeptOrdersView.vue'
 let wrapper: VueWrapper | undefined
 beforeEach(() => {
   vi.clearAllMocks()
-  vi.stubGlobal('localStorage', { getItem: vi.fn().mockReturnValue(null), setItem: vi.fn() })
+  // Every SDK/storage read stays inside this test's in-memory map. Never use
+  // the default PocketBase storage key or any real user's browser storage.
+  const storage = new Map<string, string>()
+  vi.stubGlobal('localStorage', {
+    getItem: vi.fn((key: string) => storage.get(key) ?? null),
+    setItem: vi.fn((key: string, value: string) => { storage.set(key, value) }),
+    removeItem: vi.fn((key: string) => { storage.delete(key) }),
+  })
   state.route = reactive({ params: { craft: 'injection' }, query: { region: 'dongguan' } })
+  state.auth = reactive({ role: 'admin', userId: 'admin' })
+  state.sdkAuth = new LocalAuthStore('dept-orders-component-test-auth')
+  state.sdkAuth.save('test-token', { id: 'admin', role: 'admin', permissions: {} })
   const items: Order[] = Array.from({ length: 205 }, (_, index) => ({
     id: `order-${index}`, factory: 'factory-1', region: 'dongguan', product: `物料-${index}`,
     pmc: 'PMC', quantity: 10, unit_price: 1, unit_price_cny_tax: 1.11, exchange_rate: 1,
@@ -39,6 +51,10 @@ beforeEach(() => {
       const index = state.orders.items.findIndex((order: Order) => order.id === id)
       state.orders.items[index] = { ...state.orders.items[index], ...data }
     }),
+    remove: vi.fn(async (id: string) => {
+      state.orders.items = state.orders.items.filter((order: Order) => order.id !== id)
+      return true
+    }),
   })
   state.factories = reactive({ items: [{ id: 'factory-1', name: '工厂A', craft: 'injection', region: 'dongguan', tax_point: 1.11 }], fetchAll: vi.fn() })
   state.exportExcel.mockResolvedValue(undefined)
@@ -49,7 +65,101 @@ function button(text: string) {
   return wrapper!.findAll('button').find((item) => item.text() === text)!
 }
 
+function selectOrder(product: string) {
+  return wrapper!.find(`[aria-label="选择订单 ${product}"]`)
+}
+
 describe('department delivery table', () => {
+  it('湖南所有部门只显示含税人民币核价和含税外发工价', async () => {
+    state.route.query.region = 'hunan'
+    state.factories.items[0].region = 'hunan'
+    for (const order of state.orders.items) {
+      order.region = 'hunan'
+      order.expand!.factory!.region = 'hunan'
+    }
+    wrapper = mount(DeptOrdersView)
+    await flushPromises()
+
+    const headers = wrapper.findAll('.report thead th').map((header) => header.text())
+    expect(headers).toContain('核价工价(人民币含税)')
+    expect(headers).toContain('外发工价(人民币含税)')
+    expect(headers).not.toContain('核价工价(不含税RMB)')
+    expect(headers).not.toContain('外发工价(不含税RMB)')
+    expect(wrapper.find('.report tbody tr').findAll('td')).toHaveLength(headers.length)
+  })
+
+  it('可编辑下单时间和下单交货时间，并按新交货日重算延期', async () => {
+    state.orders.items[0].actual_delivery_date = '2026-09-10'
+    wrapper = mount(DeptOrdersView)
+    await flushPromises()
+
+    await wrapper.findAll('.report .order-date-inp')[0]!.setValue('2026-08-18')
+    await wrapper.findAll('.report .delivery-date-inp')[0]!.setValue('2026-09-08')
+    expect(wrapper.find('.save-all').text()).toBe('全部保存（1）')
+
+    await button('保存').trigger('click')
+    await flushPromises()
+    expect(state.orders.update).toHaveBeenCalledWith('order-0', expect.objectContaining({
+      order_date: '2026-08-18T00:00:00.000Z',
+      delivery_date: '2026-09-08T00:00:00.000Z',
+      delay_days: 2,
+      is_delayed: true,
+    }))
+  })
+
+  it.each(['painting', 'assembly', 'sewing', 'electronics'] as const)(
+    '%s 部只在货号和物料名称同时匹配时自动带出历史核价',
+    async (craft) => {
+      state.route.params.craft = craft
+      state.factories.items[0].craft = craft
+      for (const order of state.orders.items) order.expand!.factory!.craft = craft
+      state.orders.items[0].item_no = craft === 'sewing' ? 'MA-RR-NEW/ITEM-1' : 'ITEM-1'
+      state.orders.items[0].product = '旧物料名称'
+      state.orders.items[0].quote_labor_price = 0.33
+      state.orders.items[1].item_no = craft === 'sewing' ? 'MA-RR-OLD/ITEM-1' : 'ITEM-1'
+      state.orders.items[1].product = '目标物料名称'
+      state.orders.items[1].quote_labor_price = 0.58
+      wrapper = mount(DeptOrdersView)
+      await flushPromises()
+
+      await wrapper.findAll('.report .text-inp')[0]!.setValue('目标物料名称')
+      expect((wrapper.findAll('.report .price-inp')[0]!.element as HTMLInputElement).value).toBe('0.58')
+      expect(wrapper.text()).toContain('已按货号和物料名称自动带出历史核价 0.58')
+    },
+  )
+
+  it('修改注塑模具编号后自动带出最近历史核价', async () => {
+    state.orders.items[0].mold_no = 'OLD-MOLD'
+    state.orders.items[0].quote_labor_price = 0.33
+    state.orders.items[1].mold_no = 'FSMNFS-06M-01'
+    state.orders.items[1].quote_labor_price = 0.58
+    wrapper = mount(DeptOrdersView)
+    await flushPromises()
+
+    await wrapper.findAll('.report .mold-no-inp')[0]!.setValue(' fsmnfs-06m-01 ')
+    expect((wrapper.findAll('.report .price-inp')[0]!.element as HTMLInputElement).value).toBe('0.58')
+    expect(wrapper.text()).toContain('已按模具编号自动带出历史核价 0.58')
+
+    await button('保存').trigger('click')
+    await flushPromises()
+    expect(state.orders.update).toHaveBeenCalledWith('order-0', expect.objectContaining({
+      mold_no: 'fsmnfs-06m-01', quote_labor_price: 0.58,
+    }))
+  })
+
+  it('不覆盖用户本次已手工修改的核价', async () => {
+    state.orders.items[0].mold_no = 'OLD-MOLD'
+    state.orders.items[0].quote_labor_price = 0.33
+    state.orders.items[1].mold_no = 'FSMNFS-06M-01'
+    state.orders.items[1].quote_labor_price = 0.58
+    wrapper = mount(DeptOrdersView)
+    await flushPromises()
+
+    await wrapper.findAll('.report .price-inp')[0]!.setValue('0.61')
+    await wrapper.findAll('.report .mold-no-inp')[0]!.setValue('FSMNFS-06M-01')
+    expect((wrapper.findAll('.report .price-inp')[0]!.element as HTMLInputElement).value).toBe('0.61')
+  })
+
   it('renders only one page, preserves edits across pages and filters, and saves hidden drafts', async () => {
     wrapper = mount(DeptOrdersView)
     await flushPromises()
@@ -148,5 +258,301 @@ describe('department delivery table', () => {
     expect(guard(nextRoute, state.route)).toBe(true)
     await flushPromises()
     expect(wrapper.find('.save-all').text()).toBe('全部保存')
+  })
+})
+
+describe('factory filters and bulk order deletion', () => {
+  it('deletes all 96 selected records using the real LocalAuthStore session', async () => {
+    const confirm = vi.fn().mockReturnValue(true)
+    vi.stubGlobal('confirm', confirm)
+    state.orders.items = state.orders.items.slice(0, 96)
+    // LocalAuthStore deserializes on every read: equal values, distinct objects.
+    expect(state.sdkAuth.record).toEqual(state.sdkAuth.record)
+    expect(state.sdkAuth.record).not.toBe(state.sdkAuth.record)
+    wrapper = mount(DeptOrdersView)
+    await flushPromises()
+    await wrapper.find('[aria-label="选择本页订单"]').setValue(true)
+    expect(wrapper.find('.bulk-delete').text()).toBe('批量删除（96）')
+    await wrapper.find('.bulk-delete').trigger('click')
+    await flushPromises()
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('96'))
+    expect(state.orders.remove).toHaveBeenCalledTimes(96)
+    expect(new Set(state.orders.remove.mock.calls.map((call: any[]) => call[0])).size).toBe(96)
+    expect(state.orders.items).toHaveLength(0)
+    expect(wrapper.find('.delete-result').text()).toContain('已删除 96 条')
+  })
+
+  it('deletes one row using the real LocalAuthStore session', async () => {
+    vi.stubGlobal('confirm', vi.fn().mockReturnValue(true))
+    wrapper = mount(DeptOrdersView)
+    await flushPromises()
+    await button('删除').trigger('click')
+    await flushPromises()
+    expect(state.orders.remove).toHaveBeenCalledExactlyOnceWith('order-0')
+    expect(state.orders.items).toHaveLength(204)
+    expect(wrapper.find('.delete-result').text()).toContain('已删除 1 条')
+  })
+
+  it.each(['account', 'permissions'] as const)('does not start deletion if SDK %s changes while confirmation is open', async (change) => {
+    vi.stubGlobal('confirm', vi.fn(() => {
+      const record = state.sdkAuth.record
+      state.sdkAuth.save(state.sdkAuth.token, change === 'account'
+        ? { ...record, id: 'another-admin' }
+        : { ...record, permissions: { 'orders.edit': false } })
+      return true
+    }))
+    wrapper = mount(DeptOrdersView)
+    await flushPromises()
+    await selectOrder('物料-0').setValue(true)
+    await wrapper.find('.bulk-delete').trigger('click')
+    await flushPromises()
+    expect(state.orders.remove).not.toHaveBeenCalled()
+    expect(state.orders.items).toHaveLength(205)
+    expect(wrapper.find('.delete-result').text()).toBe('登录状态已变化，批量删除已停止。请刷新页面核对结果后重试。')
+  })
+
+  it('uses the order management region for factory choices and exports the complete factory/date/search intersection', async () => {
+    // Factory B is based in Hunan, but these orders are managed in Dongguan.
+    state.factories.items.push(
+      { id: 'factory-2', name: '工厂B', craft: 'injection', region: 'hunan', tax_point: 1.11 },
+      { id: 'factory-3', name: '喷油工厂', craft: 'painting', region: 'dongguan', tax_point: 1.11 },
+      { id: 'factory-4', name: '湖南订单工厂', craft: 'injection', region: 'dongguan', tax_point: 1.11 },
+      { id: 'factory-unused', name: '没有订单工厂', craft: 'injection', region: 'dongguan', tax_point: 1.11 },
+    )
+    const template = state.orders.items[0]
+    const extraOrders = Array.from({ length: 125 }, (_, index) => ({
+      ...template, id: `factory2-${index}`, factory: 'factory-2', product: `筛选物料-${index}`, order_date: '2026-08-01',
+      expand: { factory: { name: '工厂B', craft: 'injection', region: 'hunan' } },
+    }))
+    state.orders.items.push(
+      ...extraOrders,
+      { ...extraOrders[0], id: 'factory2-july', order_date: '2026-07-01' },
+      { ...extraOrders[0], id: 'factory2-other-product', product: '另一种物料' },
+      { ...template, id: 'factory1-matching-product', product: '筛选物料-其他工厂', order_date: '2026-08-01' },
+      { ...template, id: 'wrong-craft', factory: 'factory-3', expand: { factory: { name: '喷油工厂', craft: 'painting', region: 'dongguan' } } },
+      { ...template, id: 'wrong-order-region', factory: 'factory-4', region: 'hunan', expand: { factory: { name: '湖南订单工厂', craft: 'injection', region: 'dongguan' } } },
+    )
+    wrapper = mount(DeptOrdersView)
+    await flushPromises()
+    const filter = wrapper.find('[aria-label="筛选加工厂"]')
+    expect(filter.findAll('option').map((option) => option.attributes('value'))).toEqual(['', 'factory-1', 'factory-2'])
+    await button('下一页').trigger('click')
+    await filter.setValue('factory-2')
+    expect(wrapper.find('.pagination').text()).toContain('第 1–100 条 / 共 127 条')
+    await wrapper.find('[aria-label="下单日期筛选方式"]').setValue('month')
+    await wrapper.find('[aria-label="选择月份"]').setValue('2026-08')
+    await wrapper.find('.search-box').setValue('筛选物料')
+    expect(wrapper.find('.pagination').text()).toContain('共 125 条')
+    expect(wrapper.findAll('.report .order-select')).toHaveLength(100)
+    await button('导出 Excel').trigger('click')
+    await flushPromises()
+    const details = state.exportExcel.mock.calls[0]![0].filter((row: any) => row.kind === 'detail')
+    expect(details).toHaveLength(125)
+    expect(details.map((row: any) => row.id)).toEqual(extraOrders.map((order) => order.id))
+  })
+
+  it('selects only page details, retains cross-page selection and supports all filtered records or clearing', async () => {
+    wrapper = mount(DeptOrdersView)
+    await flushPromises()
+    expect(wrapper.find('.bulk-delete').attributes('disabled')).toBeDefined()
+    await wrapper.find('[aria-label="选择本页订单"]').setValue(true)
+    expect(wrapper.findAll('.report .order-select')).toHaveLength(100)
+    expect(wrapper.findAll('.report .order-select').every((checkbox) => (checkbox.element as HTMLInputElement).checked)).toBe(true)
+    expect(wrapper.find('.bulk-delete').text()).toBe('批量删除（100）')
+    await button('下一页').trigger('click')
+    expect(wrapper.findAll('.report .order-select').every((checkbox) => !(checkbox.element as HTMLInputElement).checked)).toBe(true)
+    await selectOrder('物料-100').setValue(true)
+    expect(wrapper.find('.bulk-delete').text()).toBe('批量删除（101）')
+    await button('上一页').trigger('click')
+    expect((wrapper.find('[aria-label="选择本页订单"]').element as HTMLInputElement).checked).toBe(true)
+    await button('选择全部筛选结果（205 条）').trigger('click')
+    expect(wrapper.find('.bulk-delete').text()).toBe('批量删除（205）')
+    await button('下一页').trigger('click')
+    await button('下一页').trigger('click')
+    expect(wrapper.findAll('.report .order-select')).toHaveLength(5)
+    expect(wrapper.findAll('.report tr.subtotal .order-select')).toHaveLength(0)
+    expect((wrapper.find('[aria-label="选择本页订单"]').element as HTMLInputElement).checked).toBe(true)
+    await button('清空选择').trigger('click')
+    expect(wrapper.find('.bulk-delete').text()).toBe('批量删除')
+    expect(wrapper.findAll('.report .order-select').some((checkbox) => (checkbox.element as HTMLInputElement).checked)).toBe(false)
+    await wrapper.find('[aria-label="选择本页订单"]').setValue(true)
+    expect(wrapper.find('.bulk-delete').text()).toBe('批量删除（5）')
+  })
+
+  it.each(['factory', 'search', 'date'] as const)('clears selection when the %s filter changes', async (filter) => {
+    wrapper = mount(DeptOrdersView)
+    await flushPromises()
+    await selectOrder('物料-0').setValue(true)
+    if (filter === 'factory') await wrapper.find('[aria-label="筛选加工厂"]').setValue('factory-1')
+    if (filter === 'search') await wrapper.find('.search-box').setValue('物料-0')
+    if (filter === 'date') await wrapper.find('[aria-label="下单日期筛选方式"]').setValue('month')
+    expect(wrapper.find('.bulk-delete').text()).toBe('批量删除')
+    expect(wrapper.find('.bulk-delete').attributes('disabled')).toBeDefined()
+    expect(wrapper.findAll('.report .order-select').some((checkbox) => (checkbox.element as HTMLInputElement).checked)).toBe(false)
+  })
+
+  it('does not delete or refresh when the user cancels the irreversible-deletion confirmation', async () => {
+    const confirm = vi.fn().mockReturnValue(false)
+    vi.stubGlobal('confirm', confirm)
+    wrapper = mount(DeptOrdersView)
+    await flushPromises()
+    await selectOrder('物料-0').setValue(true)
+    await selectOrder('物料-1').setValue(true)
+    await wrapper.find('.bulk-delete').trigger('click')
+    await flushPromises()
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('2'))
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('不可恢复'))
+    expect(state.orders.remove).not.toHaveBeenCalled()
+    expect(state.orders.fetchForScope).toHaveBeenCalledTimes(1)
+    expect(wrapper.find('.bulk-delete').text()).toBe('批量删除（2）')
+  })
+
+  it('deletes only selected IDs, retains failed selections and drafts, and retries only the failed records', async () => {
+    vi.stubGlobal('confirm', vi.fn().mockReturnValue(true))
+    const remove = state.orders.remove.getMockImplementation()!
+    state.orders.remove.mockImplementationOnce(remove).mockRejectedValueOnce(new Error('临时网络失败'))
+    wrapper = mount(DeptOrdersView)
+    await flushPromises()
+    const inputs = wrapper.findAll('.report .text-inp')
+    await inputs[0]!.setValue('已删除订单的草稿')
+    await inputs[1]!.setValue('失败订单的草稿')
+    await selectOrder('物料-0').setValue(true)
+    await selectOrder('物料-1').setValue(true)
+    // A real forced reload clears the previous store snapshot before its
+    // asynchronous response arrives. Failed selections must survive this gap.
+    let finishRefresh!: () => void
+    state.orders.fetchForScope.mockImplementationOnce(async () => {
+      const remaining = [...state.orders.items]
+      state.orders.loading = true
+      state.orders.items = []
+      await new Promise<void>((resolve) => { finishRefresh = resolve })
+      state.orders.items = remaining
+      state.orders.loading = false
+    })
+    await wrapper.find('.bulk-delete').trigger('click')
+    await flushPromises()
+    expect(state.orders.items).toHaveLength(0)
+    finishRefresh()
+    await flushPromises()
+    expect(state.orders.remove.mock.calls.map((call: any[]) => call[0])).toEqual(['order-0', 'order-1'])
+    expect(state.orders.items.some((order: Order) => order.id === 'order-0')).toBe(false)
+    expect(state.orders.items.some((order: Order) => order.id === 'order-2')).toBe(true)
+    expect(wrapper.find('.bulk-delete').text()).toBe('批量删除（1）')
+    expect(wrapper.find('.save-all').text()).toBe('全部保存（1）')
+    expect((selectOrder('物料-1').element as HTMLInputElement).checked).toBe(true)
+    expect((wrapper.find('.report .text-inp').element as HTMLInputElement).value).toBe('失败订单的草稿')
+    expect(wrapper.text()).toMatch(/失败.*1/)
+    await wrapper.find('.bulk-delete').trigger('click')
+    await flushPromises()
+    expect(state.orders.remove.mock.calls.map((call: any[]) => call[0])).toEqual(['order-0', 'order-1', 'order-1'])
+    expect(wrapper.find('.bulk-delete').text()).toBe('批量删除')
+    expect(wrapper.find('.save-all').text()).toBe('全部保存')
+    expect(state.orders.items).toHaveLength(203)
+  })
+
+  it('shows the completed delete count when refreshing afterward fails and does not reselect deleted records', async () => {
+    vi.stubGlobal('confirm', vi.fn().mockReturnValue(true))
+    wrapper = mount(DeptOrdersView)
+    await flushPromises()
+    await selectOrder('物料-0').setValue(true)
+    state.orders.fetchForScope.mockRejectedValueOnce(new Error('刷新失败'))
+    await wrapper.find('.bulk-delete').trigger('click')
+    await flushPromises()
+    expect(state.orders.remove).toHaveBeenCalledExactlyOnceWith('order-0')
+    expect(wrapper.text()).toMatch(/已删除\s*1\s*条/)
+    expect(wrapper.text()).toContain('刷新失败')
+    expect(wrapper.find('.bulk-delete').text()).toBe('批量删除')
+  })
+
+  it('hides selection and deletion controls for a read-only account while leaving filter and export available', async () => {
+    state.auth.role = 'quality_qc'
+    wrapper = mount(DeptOrdersView)
+    await flushPromises()
+    expect(wrapper.find('[aria-label="筛选加工厂"]').exists()).toBe(true)
+    expect(wrapper.findAll('.order-select')).toHaveLength(0)
+    expect(wrapper.find('[aria-label="选择本页订单"]').exists()).toBe(false)
+    expect(wrapper.find('.bulk-delete').exists()).toBe(false)
+    expect(button('导出 Excel').attributes('disabled')).toBeUndefined()
+    expect(state.orders.remove).not.toHaveBeenCalled()
+  })
+
+  it('prevents repeat deletion, saves, single deletes and navigation until an in-flight bulk delete completes', async () => {
+    vi.stubGlobal('confirm', vi.fn().mockReturnValue(true))
+    let finishDelete!: () => void
+    state.orders.remove.mockImplementationOnce((id: string) => new Promise<boolean>((resolve) => {
+      finishDelete = () => {
+        state.orders.items = state.orders.items.filter((order: Order) => order.id !== id)
+        resolve(true)
+      }
+    }))
+    wrapper = mount(DeptOrdersView)
+    await flushPromises()
+    await selectOrder('物料-0').setValue(true)
+    await wrapper.find('.bulk-delete').trigger('click')
+    expect(wrapper.find('.bulk-delete').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('.save-all').attributes('disabled')).toBeDefined()
+    expect(button('保存').attributes('disabled')).toBeDefined()
+    expect(button('删除').attributes('disabled')).toBeDefined()
+    await wrapper.find('.bulk-delete').trigger('click')
+    await wrapper.find('.save-all').trigger('click')
+    await button('保存').trigger('click')
+    await button('删除').trigger('click')
+    expect(state.orders.remove).toHaveBeenCalledTimes(1)
+    expect(state.orders.update).not.toHaveBeenCalled()
+    expect(state.beforeRouteLeave.mock.calls[0]![0]()).toBe(false)
+    expect(state.beforeRouteUpdate.mock.calls[0]![0]({ params: { craft: 'painting' }, query: { region: 'dongguan' } }, state.route)).toBe(false)
+    finishDelete()
+    await flushPromises()
+    expect(state.beforeRouteLeave.mock.calls[0]![0]()).toBe(true)
+    expect(wrapper.find('.save-all').attributes('disabled')).toBeUndefined()
+    expect(button('删除').attributes('disabled')).toBeUndefined()
+  })
+
+  it('stops starting further deletions when the signed-in account changes during a batch', async () => {
+    vi.stubGlobal('confirm', vi.fn().mockReturnValue(true))
+    const finishRequests: Array<() => void> = []
+    state.orders.remove.mockImplementation(() => new Promise<boolean>((resolve) => {
+      finishRequests.push(() => resolve(true))
+    }))
+    wrapper = mount(DeptOrdersView)
+    await flushPromises()
+    for (let index = 0; index < 6; index++) await selectOrder(`物料-${index}`).setValue(true)
+    await wrapper.find('.bulk-delete').trigger('click')
+    expect(state.orders.remove.mock.calls.map((call: any[]) => call[0])).toEqual(['order-0', 'order-1', 'order-2'])
+    state.auth.userId = 'another-admin'
+    await flushPromises()
+    const loadsAfterAccountChange = state.orders.fetchForScope.mock.calls.length
+    for (const finish of finishRequests) finish()
+    await flushPromises()
+    expect(state.orders.remove).toHaveBeenCalledTimes(3)
+    expect(state.orders.remove.mock.calls.some((call: any[]) => ['order-3', 'order-4', 'order-5'].includes(call[0]))).toBe(false)
+    expect(state.orders.fetchForScope).toHaveBeenCalledTimes(loadsAfterAccountChange)
+    expect(wrapper.find('.bulk-delete').text()).toBe('批量删除')
+    expect(wrapper.find('.delete-result').exists()).toBe(false)
+  })
+
+  it.each(['record', 'token', 'permissions'] as const)('stops queued deletions when only the SDK %s changes before Pinia updates', async (changedField) => {
+    vi.stubGlobal('confirm', vi.fn().mockReturnValue(true))
+    const finishRequests: Array<() => void> = []
+    state.orders.remove.mockImplementation(() => new Promise<boolean>((resolve) => {
+      finishRequests.push(() => resolve(true))
+    }))
+    wrapper = mount(DeptOrdersView)
+    await flushPromises()
+    for (let index = 0; index < 6; index++) await selectOrder(`物料-${index}`).setValue(true)
+    await wrapper.find('.bulk-delete').trigger('click')
+    expect(state.orders.remove.mock.calls.map((call: any[]) => call[0])).toEqual(['order-0', 'order-1', 'order-2'])
+    if (changedField === 'record') state.sdkAuth.save(state.sdkAuth.token, { ...state.sdkAuth.record, id: 'another-admin' })
+    else if (changedField === 'token') state.sdkAuth.save('another-token', state.sdkAuth.record)
+    else state.sdkAuth.save(state.sdkAuth.token, { ...state.sdkAuth.record, permissions: { 'orders.edit': false } })
+    await flushPromises()
+    expect(state.auth.userId).toBe('admin')
+    const loadsAfterSdkChange = state.orders.fetchForScope.mock.calls.length
+    for (const finish of finishRequests) finish()
+    await flushPromises()
+    expect(state.orders.remove).toHaveBeenCalledTimes(3)
+    expect(state.orders.remove.mock.calls.some((call: any[]) => ['order-3', 'order-4', 'order-5'].includes(call[0]))).toBe(false)
+    expect(state.orders.fetchForScope).toHaveBeenCalledTimes(loadsAfterSdkChange)
+    expect(wrapper.find('.delete-result').text()).toBe('登录状态已变化，批量删除已停止。请刷新页面核对结果后重试。')
   })
 })

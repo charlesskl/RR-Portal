@@ -11,6 +11,7 @@ export interface SessionData {
   userId?: number;
   username?: string;
   role?: string;
+  factoryId?: string;
 }
 
 // Cookie 名（与 .NET 后端 AuthController 写入的名字保持一致）
@@ -27,17 +28,24 @@ function secretKey() {
 // 统一入口：读取当前请求的登录态。
 // 未登录 / 令牌缺失 / 验签失败 / 已过期 → 一律返回空对象 {}（调用方判 session.userId 即可）。
 export async function getSession(): Promise<SessionData> {
-  const token = cookies().get(COOKIE_NAME)?.value;
+  const cookieStore = cookies();
+  const token = cookieStore.get(COOKIE_NAME)?.value;
   if (!token) return {};
   try {
     const { payload } = await jwtVerify(token, secretKey(), {
       issuer: process.env.JWT_ISSUER,
     });
+    const role = typeof payload[ROLE_CLAIM] === "string" ? (payload[ROLE_CLAIM] as string) : undefined;
+    const claimFactory = typeof payload.factoryId === "string" ? payload.factoryId : undefined;
+    const selectedFactory = cookieStore.get("sprayplan_factory")?.value;
     return {
       // .NET 把 userId 存成字符串，这里转回数字，跟旧代码的 number 类型保持一致
       userId: payload.userId != null ? Number(payload.userId) : undefined,
       username: typeof payload.username === "string" ? payload.username : undefined,
-      role: typeof payload[ROLE_CLAIM] === "string" ? (payload[ROLE_CLAIM] as string) : undefined,
+      role,
+      factoryId: role === "admin"
+        ? (selectedFactory === "HUADENG" ? "HUADENG" : "XINGXIN")
+        : claimFactory,
     };
   } catch {
     // 验签失败 / 过期 / 被篡改 → 当作未登录

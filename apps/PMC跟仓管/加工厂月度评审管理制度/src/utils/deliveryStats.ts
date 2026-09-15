@@ -1,5 +1,5 @@
-import type { DeliveryPricingMode } from './deliveryReportFormat'
-export { DELIVERY_HEADERS, deliveryHeaders, splitSewingContractItemNo, type DeliveryPricingMode } from './deliveryReportFormat'
+import { isRmbTaxPricingMode, type DeliveryPricingMode } from './deliveryReportFormat'
+export { DELIVERY_HEADERS, deliveryHeaders, isRmbTaxPricingMode, splitSewingContractItemNo, type DeliveryPricingMode } from './deliveryReportFormat'
 import type { Order } from '../types/order'
 import { resolveFactoryName } from './factoryName'
 import { cnyTaxToHkdUntaxed, cnyTaxToUntaxedRmb, DEFAULT_CNY_TO_HKD_RATE } from './orderPricing'
@@ -133,7 +133,7 @@ function metricsOf(
   const quote = r2(os.reduce((a, o) => a + num(o.quote_labor_price), 0))
   const mode = normalizePricingMode(pricingMode)
   const outPriceTotal = os.reduce((a, o) => a + effectiveOutPrice(o, mode, factoryTaxPoint(o)), 0)
-  const outPrice = mode === 'rmb-tax' ? r2(outPriceTotal) : r3(outPriceTotal)
+  const outPrice = isRmbTaxPricingMode(mode) ? r2(outPriceTotal) : r3(outPriceTotal)
   const outPriceCnyTax = r2(os.reduce((a, o) => a + num(o.unit_price_cny_tax), 0))
   return {
     orderCount: orderStats.orderCount,
@@ -148,7 +148,7 @@ function metricsOf(
     quote,
     outPrice,
     outPriceCnyTax,
-    priceRatio: pct2(outPrice, quote),
+    priceRatio: pct2(mode === 'hunan-rmb-tax' ? outPriceCnyTax : outPrice, quote),
   }
 }
 
@@ -156,8 +156,8 @@ function effectiveOutPrice(order: Order, pricingMode: DeliveryPricingMode = 'hkd
   const hkdPrice = num(order.unit_price)
   const cnyTaxPrice = num(order.unit_price_cny_tax)
   const exchangeRate = num(order.exchange_rate) || DEFAULT_CNY_TO_HKD_RATE
-  const taxPoint = factoryTaxPoint ?? (pricingMode === 'rmb-tax' ? exchangeRate : null)
-  if (pricingMode === 'rmb-tax' && cnyTaxPrice) return cnyTaxToUntaxedRmb(cnyTaxPrice, taxPoint ?? 0)
+  const taxPoint = factoryTaxPoint ?? (isRmbTaxPricingMode(pricingMode) ? exchangeRate : null)
+  if (isRmbTaxPricingMode(pricingMode) && cnyTaxPrice) return cnyTaxToUntaxedRmb(cnyTaxPrice, taxPoint ?? 0)
   if (pricingMode === 'hkd-tax' && cnyTaxPrice) {
     // 工厂未维护税点时不能按 0 折算（否则历史数据外发工价全归零）：
     // 回退到手填港币价，其次按默认 1.13 系数折算
@@ -241,7 +241,7 @@ export function buildDeliveryReport(
           delivery_date: o.delivery_date ? o.delivery_date.slice(0, 10) : '',
           actual_delivery_date: o.actual_delivery_date ? o.actual_delivery_date.slice(0, 10) : '',
           delay_days: o.delay_days ?? null,
-          exchangeRate: mode === 'rmb-tax'
+          exchangeRate: isRmbTaxPricingMode(mode)
             ? (taxPoint ?? (num(o.exchange_rate) || DEFAULT_CNY_TO_HKD_RATE))
             : (num(o.exchange_rate) || DEFAULT_CNY_TO_HKD_RATE),
           taxPoint,
@@ -258,7 +258,7 @@ export function buildDeliveryReport(
           quote,
           outPrice,
           outPriceCnyTax,
-          priceRatio: pct2(outPrice, quote),
+          priceRatio: pct2(mode === 'hunan-rmb-tax' ? outPriceCnyTax : outPrice, quote),
           rangeSpan: firstRow ? totalRows : 0,
           pmcSpan: pmcFirst ? block.rows : 0,
           // The factory cell spans detail rows only. The following subtotal row

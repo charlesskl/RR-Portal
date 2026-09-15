@@ -6,6 +6,7 @@ public class Machine
     public int Id { get; set; }
     public string MachineNo { get; set; } = "";        // 机台号（5# / 21# / 38#…），唯一
     public int LineId { get; set; }
+    public string FactoryId { get; set; } = "XINGXIN";
     public string MachineType { get; set; } = "移印";  // 机型（移印 / 自动喷 / UV / 炒货…）
     public bool IsUV { get; set; }
     public bool IsActive { get; set; } = true;

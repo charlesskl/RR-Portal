@@ -28,12 +28,6 @@ $env:AI_MOCK_MODE="true"  # 仅本地演示；生产环境必须为 false
 
 Docker 由 PostgreSQL、Redis、数据库迁移、单次基础数据初始化、Web、RQ Worker 和持久文件存储组成。迁移与初始化成功后 Web 和 Worker 才启动，避免多个 Web 进程同时写入初始数据；Redis 使用 AOF，照片/签名/PDF 使用共享 `qc-storage` 卷。
 
-## RR-Portal 接入
-
-Portal 中的独立服务名为 `qc-report`，内部端口 `3410`，对外路径为 `/qc-report/`。Nginx 删除路径前缀后转发请求，同时传入受信任的 `X-Forwarded-Prefix`；应用只接受与 `PROXY_PREFIX` 完全相同的值。Session Cookie 限定在 `/qc-report/`，不与现有 `/qc/` 品质管理系统共享。
-
-RR-Portal 云端部署使用独立 SQLite 数据库、宿主机持久化目录和 Redis DB 2；`AI_MOCK_MODE` 固定为 `false`。启用前必须在生产环境文件中设置 `QC_REPORT_SECRET_KEY`、`QC_REPORT_ADMIN_PASSWORD` 和 `QC_REPORT_QC_PASSWORD`，OpenAI 凭证使用 `QC_REPORT_OPENAI_API_KEY`。
-
 ## AI 配置
 
 主要服务器环境变量：

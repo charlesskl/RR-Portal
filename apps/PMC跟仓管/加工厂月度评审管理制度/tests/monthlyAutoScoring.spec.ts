@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { calculateAutoScore, filterMonthlyScoringData, mergeAutomaticScores } from '../src/utils/monthlyAutoScoring'
+import {
+  calculateAutoScore,
+  factoryIdsWithOrdersInRange,
+  filterMonthlyScoringData,
+  mergeAutomaticScores,
+} from '../src/utils/monthlyAutoScoring'
 import type { Factory } from '../src/types/factory'
 import type { ScoreTemplate } from '../src/types/score'
 
@@ -9,6 +14,21 @@ const factory = {
 } as Factory
 
 describe('monthly automatic scoring', () => {
+  it('只返回评分范围内有订单的工厂', () => {
+    const orders = [
+      { id: 'july', factory: 'factory-july', product: '甲', delivery_date: '2026-07-31' },
+      { id: 'august', factory: 'factory-august', product: '乙', delivery_date: '2026-08-15' },
+      { id: 'september', factory: 'factory-september', product: '丙', delivery_date: '2026-09-01' },
+      { id: 'august-2', factory: 'factory-august', product: '丁', delivery_date: '2026-08-20' },
+    ]
+
+    expect([...factoryIdsWithOrdersInRange(orders, '2026-08', '2026-08')]).toEqual(['factory-august'])
+    expect([...factoryIdsWithOrdersInRange(orders, '2026-08', '2026-09')]).toEqual([
+      'factory-august',
+      'factory-september',
+    ])
+  })
+
   it('scores qualification and IP control as separate five-point items', () => {
     const emptyData = { orders: [], inspections: [], checks: [] }
     expect(calculateAutoScore('qualification', 5, factory, emptyData)?.score).toBe(5)

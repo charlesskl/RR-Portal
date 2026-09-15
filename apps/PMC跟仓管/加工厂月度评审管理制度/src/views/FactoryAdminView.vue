@@ -39,7 +39,10 @@ const regionBlocks = computed(() =>
         <span class="muted">共 {{ store.items.length }} 家 · 只读总览</span>
       </div>
       <section v-for="b in regionBlocks" :key="b.region" class="region-block">
-        <h3 class="region-title">{{ b.name }}厂区</h3>
+        <div class="region-heading">
+          <h3 class="region-title">{{ b.name }}厂区</h3>
+          <RouterLink :to="`/factory-view/region/${b.region}/summary`"><button class="ghost">厂区汇总</button></RouterLink>
+        </div>
         <div class="dept-grid">
           <RouterLink v-for="c in b.cards" :key="c.craft" class="dept-card" :to="`/factory-view/dept/${c.craft}?region=${b.region}`">
             <span class="ico">{{ c.icon }}</span>
@@ -56,7 +59,10 @@ const regionBlocks = computed(() =>
 </template>
 <style scoped>
 .region-block { margin-top: 1.5rem; }
-.region-title { margin: 0 0 .8rem; font-size: 1.05rem; color: #1f2533; padding-left: .6rem; border-left: 4px solid var(--primary, #4f46e5); }
+.region-heading { display: flex; align-items: center; gap: .75rem; margin-bottom: .8rem; }
+.region-title { margin: 0; font-size: 1.05rem; color: #1f2533; padding-left: .6rem; border-left: 4px solid var(--primary, #4f46e5); }
+.region-heading a { text-decoration: none; }
+.region-heading button { min-width: 88px; padding: .38rem .7rem; font-size: .85rem; }
 .dept-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 1rem; }
 .dept-card {
   display: flex; align-items: center; gap: 1rem; text-decoration: none; color: var(--text);

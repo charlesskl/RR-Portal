@@ -25,9 +25,8 @@ def login():
         username = (request.form.get("username") or "").strip()
         password = (request.form.get("password") or "").strip()
         remember = bool(request.form.get("remember"))
-        expected_user = current_app.config.get("AUTH_USERNAME", "")
-        expected_pass = current_app.config.get("AUTH_PASSWORD", "")
-        if username == expected_user and password == expected_pass:
+        accounts = current_app.config.get("AUTH_ACCOUNTS") or {}
+        if accounts.get(username) is not None and password == accounts.get(username):
             session.clear()
             session["logged_in"] = True
             session.permanent = remember  # True → 7 天; False → 关浏览器失效

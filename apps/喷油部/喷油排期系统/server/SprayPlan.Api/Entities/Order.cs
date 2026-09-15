@@ -5,6 +5,7 @@ public class Order
 {
     public int Id { get; set; }
     public string ExternalOrderNo { get; set; } = "";   // 外部订单号（唯一）
+    public string FactoryId { get; set; } = "XINGXIN";
     public int? ProductId { get; set; }                 // 可空：待补产品订单无款号
     public DateTime OrderDate { get; set; }
     public DateTime? DeliveryDate { get; set; }

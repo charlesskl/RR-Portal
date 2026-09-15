@@ -10,6 +10,11 @@ on:
       - '.gitignore'
       - 'LICENSE'
   workflow_dispatch:
+    inputs:
+      force_full_rebuild:
+        description: '强制全量部署（FORCE_FULL_REBUILD=1，用于补救被跳过的构建）'
+        type: boolean
+        default: false
 
 concurrency:
   group: deploy-cloud
@@ -33,7 +38,7 @@ jobs:
           username: ${{ secrets.CLOUD_USER }}
           key: ${{ secrets.CLOUD_SSH_KEY }}
           command_timeout: 60m
-          envs: BEFORE_COMMIT,AFTER_COMMIT
+          envs: BEFORE_COMMIT,AFTER_COMMIT,FORCE_FULL_REBUILD
           # BEFORE_COMMIT / AFTER_COMMIT 传给 update-server.sh 用于算 diff
           # 脚本自己负责 git pull，不要在这里先 pull（否则 pull 后 HEAD 已经前进，脚本的 BEFORE==AFTER）
           script: |
@@ -44,7 +49,16 @@ jobs:
 
             export BEFORE_COMMIT="${{ github.event.before }}"
             export AFTER_COMMIT="${{ github.event.after }}"
+            # 手动触发且勾选 force_full_rebuild 时强制全量（push 触发时 inputs 为空 → 空字符串，不影响）
+            export FORCE_FULL_REBUILD="${{ inputs.force_full_rebuild && '1' || '' }}"
             cd /opt/rr-portal
+
+            # 手动触发（workflow_dispatch）的 event 没有 before/after，
+            # 取 origin/main 作为 AFTER_COMMIT，否则结尾的 ancestor 校验会把手动部署误判为失败
+            if [ -z "$AFTER_COMMIT" ]; then
+              export AFTER_COMMIT=$(git rev-parse origin/main)
+              echo "[INFO] workflow_dispatch: AFTER_COMMIT 缺省，取 origin/main = ${AFTER_COMMIT:0:7}"
+            fi
 
             # === peise Bailian env guard (2026-06-02) ===
             # 背景: 服务器 .env.cloud.production 缺 PEISE_BAILIAN_API_KEY → 容器里 key 为空 → OCR 不可用。
@@ -233,7 +247,8 @@ jobs:
               /indo-shipping/health \
               /tomy-paiqi/health \
               /zuru-order-system/health \
-              /zuru-master/health; do
+              /zuru-master/health \
+              /voyageplex/api/health; do
             check_endpoint "$ENDPOINT" || FAILED=$((FAILED + 1))
           done
           if [ "$FAILED" -gt 0 ]; then

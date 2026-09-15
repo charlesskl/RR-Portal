@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>各客报价汇总</title>
+  <script>
+    if (location.protocol === 'file:') location.replace('http://localhost:3211/summary.html');
+  </script>
+  <link rel="stylesheet" href="./styles.css?v=20260909-full-summary-v12" />
+</head>
+<body>
+  <div class="topbar">
+    <div class="brand">📊 各客报价汇总 <small>客价确认 · 生产车间登记 · 汇总导出</small></div>
+    <div><a class="summary-back" href="./index.html">← 返回报价单</a></div>
+  </div>
+  <main id="summary-app" class="summary-page">
+    <section class="card summary-sheet-head">
+      <div class="summary-sheet-title"><strong id="summary-year"></strong><h2>各客产品报价汇总表</h2></div>
+      <p class="muted">各项单价、金额及占比均按减税后成本统计。客价确认后填写实际接单数量，并选择实际生产车间。</p>
+    </section>
+    <section class="card summary-toolbar">
+      <div class="summary-actions">
+        <label>客户 <select id="summary-customer"><option value="">全部客户</option></select></label>
+        <label>状态 <select id="summary-status"><option value="">全部</option><option value="pending">待确认</option><option value="confirmed">已确认</option></select></label>
+        <button id="summary-export">⬇️ 导出报价汇总</button>
+      </div>
+    </section>
+    <section class="card summary-stats" id="summary-stats"></section>
+    <section class="card summary-table-card">
+      <div class="summary-table-wrap">
+        <table class="wb-table summary-table">
+          <colgroup id="summary-cols"></colgroup>
+          <thead id="summary-head"></thead>
+          <tbody id="summary-body"><tr><td class="summary-empty">正在读取…</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+  <script>
+    (function () {
+      var base = location.pathname.replace(/\/[^/]*$/, '');
+      if (!base) return;
+      var origFetch = window.fetch.bind(window);
+      window.fetch = function (url, opts) {
+        if (typeof url === 'string' && url.indexOf('/api/') === 0) url = base + url;
+        return origFetch(url, opts);
+      };
+    })();
+  </script>
+  <script src="./summary.js?v=20260909-full-summary-v12"></script>
+</body>
+</html>

@@ -1,0 +1,10 @@
+.quote-fill-handle {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
+}
+
+.quote-fillable-cell:focus-within .quote-fill-handle {
+  opacity: 1;
+  pointer-events: auto;
+}

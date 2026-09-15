@@ -80,8 +80,8 @@ public class OrderPricingAndProcessScheduleTests : IAsyncLifetime
         {
             rows = new[]
             {
-                new { partQtyId, startDate = "2026-08-13", craft = "移印", dailyTarget = 100 },
-                new { partQtyId, startDate = "2026-08-13", craft = "UV", dailyTarget = 125 },
+                new { partQtyId, startDate = "2026-08-13", craft = "移印", dailyTarget = 100, laborPrice = 0.12 },
+                new { partQtyId, startDate = "2026-08-13", craft = "UV", dailyTarget = 125, laborPrice = 0.34 },
             },
         });
         Assert.Equal(HttpStatusCode.Created, scheduleResponse.StatusCode);
@@ -99,6 +99,8 @@ public class OrderPricingAndProcessScheduleTests : IAsyncLifetime
         Assert.Equal(2, savedRules.Count);
         Assert.Equal(100, savedRules.Single(part => part.Craft == "移印").DailyCapacity);
         Assert.Equal(125, savedRules.Single(part => part.Craft == "UV").DailyCapacity);
+        Assert.Equal(0.12, savedRules.Single(part => part.Craft == "移印").LaborPrice, 6);
+        Assert.Equal(0.34, savedRules.Single(part => part.Craft == "UV").LaborPrice, 6);
         Assert.All(savedRules, part => Assert.Equal(2, part.CraftPasses));
         Assert.Equal(0.2, savedRules.Sum(part => part.UnitCost), 6);
     }

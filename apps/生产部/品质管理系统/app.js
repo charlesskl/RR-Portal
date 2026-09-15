@@ -84,6 +84,7 @@ const PERM_GROUPS = [
   { group: '检验', menus: [
     { k: 'dashboard', label: '质量仪表板' },
     { k: 'records',   label: '验货明细' },
+    { k: 'review',    label: '审核中心' },
     { k: 'analysis',  label: '统计分析' },
     { k: 'suppliers', label: '供应商管理' },
   ]},
@@ -109,11 +110,11 @@ const ROLE_PERM_MATRIX = {
   manager: _permSet(k => ({
     v: 1,
     e: ['records','suppliers','defectlib','import'].includes(k) ? 1 : 0,
-    a: k === 'records' ? 1 : 0,
+    a: ['records','review'].includes(k) ? 1 : 0,
     m: ['defectlib','import'].includes(k) ? 1 : 0,
   })),
   viewer:  _permSet(k => ({
-    v: ['dashboard','records','analysis','suppliers','daily','weekly','monthly','yearly','supplier-report'].includes(k) ? 1 : 0,
+    v: ['dashboard','records','review','analysis','suppliers','daily','weekly','monthly','yearly','supplier-report'].includes(k) ? 1 : 0,
     e: k === 'records' ? 1 : 0,
     a: 0, m: 0,
   })),
@@ -133,6 +134,7 @@ const ACTION_PERM_MAP = {
   importData:      ['import', 'v'],
   manageUsers:     ['users', 'm'],
   manageDefectLib: ['defectlib', 'm'],
+  reviewRecord:    ['review', 'a'],
   /* exportData / exportPdf：能查看即可导出，不单独设卡 */
 };
 
@@ -366,6 +368,7 @@ function _showLogin() {
 }
 
 function _showApp() {
+  _initSidebar();
   document.getElementById('loginScreen').style.display = 'none';
   document.getElementById('appWrapper').style.display  = '';
   _renderUserBadge();
@@ -796,7 +799,8 @@ function persist() {
   try { localStorage.setItem(LS_KEY, JSON.stringify(state)); } catch(e) {}
 }
 
-function recs() { return state.records; }
+function recStatus(r) { return r.status || 'approved'; }
+function recs() { return state.records.filter(r => recStatus(r) === 'approved'); }
 
 /* ════════════════════════════════════════
    §2  HELPERS
@@ -945,6 +949,7 @@ setInterval(tickClock, 1000);
 const PAGE_TITLES = {
   dashboard:        '质量仪表板',
   records:          '验货明细',
+  review:           '审核中心',
   analysis:         '统计分析',
   suppliers:        '供应商管理',
   daily:            '品质日报',
@@ -984,6 +989,7 @@ function showPage(name) {
       try {
         if (name === 'dashboard')        renderDashboard();
         if (name === 'records')          renderRecordsTable();
+        if (name === 'review')           renderReviewPage();
         if (name === 'analysis')         renderAnalysis();
         if (name === 'suppliers')        renderSuppliers();
         if (name === 'daily')            renderDailyReport();
@@ -999,9 +1005,31 @@ function showPage(name) {
   });
 }
 
+const SIDEBAR_KEY = 'xingxin_qms_sidebar_collapsed';
+
+/* 启动时应用侧边栏状态：默认隐藏（用户点 ☰ 打开后会记住） */
+function _initSidebar() {
+  let collapsed = true;   /* 默认隐藏菜单 */
+  try {
+    const v = localStorage.getItem(SIDEBAR_KEY);
+    if (v !== null) collapsed = v === '1';
+  } catch(e) {}
+  const sb = document.getElementById('sidebar');
+  const mw = document.querySelector('.main-wrap');
+  if (!sb || !mw) return;
+  sb.style.transition = 'none';                 /* 避免首次加载时滑出动画 */
+  sb.classList.toggle('collapsed', collapsed);
+  mw.classList.toggle('full', collapsed);
+  requestAnimationFrame(() => { requestAnimationFrame(() => { sb.style.transition = ''; }); });
+}
+
 function toggleSidebar() {
   document.getElementById('sidebar').classList.toggle('collapsed');
   document.querySelector('.main-wrap').classList.toggle('full');
+  try {
+    localStorage.setItem(SIDEBAR_KEY,
+      document.getElementById('sidebar').classList.contains('collapsed') ? '1' : '0');
+  } catch(e) {}
   /* sidebar 收起/展开后图表需要 resize */
   setTimeout(resizeAllCharts, 300);
 }
@@ -1032,6 +1060,14 @@ function updateTopKpis() {
     setText('kpiWeekFail',  weekF);
     setText('kpiHighRisk',  hiRisk);
     setText('kpiWeekBatch', weekR.length);
+
+    /* 审核中心：待审核数量导航角标 */
+    const _rb = document.getElementById('reviewNavBadge');
+    if (_rb) {
+      const _pc = state.records.filter(r => recStatus(r) === 'pending').length;
+      _rb.textContent = _pc;
+      _rb.style.display = _pc ? '' : 'none';
+    }
   } catch(e) { console.error('[updateTopKpis]', e); }
 }
 
@@ -2053,7 +2089,7 @@ async function refreshRecordsPage() {
 
 function filterRecords() {
   try {
-    const data   = recs();
+    const data   = recs().concat(state.records.filter(r => recStatus(r) === 'rejected'));
     const search = (document.getElementById('searchInput')?.value || '').trim().toLowerCase();
     const resF   = document.getElementById('filterResult')?.value || '';
     const dfrom  = document.getElementById('filterDateFrom')?.value || '';
@@ -2062,7 +2098,7 @@ function filterRecords() {
     filteredRecs = data.filter(r => {
       if (search) {
         const haystack = [
-          r.supplier, r.productNo, r.productName, r.client, r.orderNo, r.deliveryNo,
+          r.supplier, r.productNo, r.productName, r.client, r.processType, r.orderNo, r.deliveryNo,
           r.defect, r.updatedAt, formatModifiedDate(r.updatedAt),
         ]
           .filter(Boolean).join(' ').toLowerCase();
@@ -2104,7 +2140,7 @@ function filterRecords() {
       if (!visibleIds.has(id)) _selectedIds.delete(id);
     }
 
-    wrap.innerHTML = `<table id="recordsTable" style="table-layout:fixed;width:100%;min-width:1590px">
+    wrap.innerHTML = `<table id="recordsTable" style="table-layout:fixed;width:100%;min-width:1778px">
       <colgroup>
         <col style="width:36px"/>   <!-- 复选框 -->
         <col style="width:44px"/>   <!-- # -->
@@ -2112,6 +2148,8 @@ function filterRecords() {
         <col style="width:98px"/>   <!-- 修改日期 -->
         <col style="width:110px"/>  <!-- 供应商 -->
         <col style="width:80px"/>   <!-- 客户 -->
+        <col style="width:88px"/>   <!-- 加工类型 -->
+        <col style="width:100px"/>  <!-- 送货单号 -->
         <col style="width:92px"/>   <!-- 货号 -->
         <col style="width:160px"/>  <!-- 款式名称 -->
         <col style="width:102px"/>  <!-- PO号 -->
@@ -2135,6 +2173,8 @@ function filterRecords() {
         <th style="text-align:left">修改日期</th>
         <th style="text-align:left">供应商</th>
         <th style="text-align:left">客户</th>
+        <th style="text-align:left">加工类型</th>
+        <th style="text-align:left">送货单号</th>
         <th style="text-align:left">货号</th>
         <th style="text-align:left">款式名称</th>
         <th style="text-align:left">PO号</th>
@@ -2153,11 +2193,21 @@ function filterRecords() {
         const rt       = parseRate(r.defectRate) ?? 0;
         const checked  = _selectedIds.has(r.id) ? 'checked' : '';
         const selCls   = _selectedIds.has(r.id) ? 'row-selected' : '';
-        const editBtn = can('editRecord')
+        const isApproved = recStatus(r) === 'approved';
+        const isRejected = recStatus(r) === 'rejected';
+        const editBtn = (can('editRecord') || (isRejected && can('createRecord'))) && !isApproved
           ? `<button class="action-btn" onclick="openEditModal(${r.id})">编辑</button>`
           : '';
-        const delBtn = can('deleteRecord')
+        const rejBadge = isRejected
+          ? ` <span class="review-status-badge rs-rejected" title="退回原因：${r.rejectReason || ''}${r.rejectBy ? '（' + r.rejectBy + '）' : ''}">已退回</span>`
+          : '';
+        const delBtn = can('deleteRecord') && !isApproved
           ? `<button class="action-btn del" onclick="deleteRecord(${r.id})">删除</button>`
+          : '';
+        const lockBtn = isApproved
+          ? (can('reviewRecord')
+              ? `<button class="action-btn" onclick="openRejectModal(${r.id})" title="反审核退回">🔒 反审核</button>`
+              : `<span title="已通过审核并锁定" style="opacity:.7">🔒</span>`)
           : '';
         return `<tr class="${selCls}" data-id="${r.id}">
           <td class="col-check">
@@ -2169,6 +2219,8 @@ function filterRecords() {
           <td style="font-family:var(--font-mono);font-size:11px;white-space:nowrap">${formatModifiedDate(r.updatedAt) || '-'}</td>
           <td style="font-weight:500;color:#e8edf5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${r.supplier}">${r.supplier}</td>
           <td style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${r.client||''}">${r.client||'-'}</td>
+          <td style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${r.processType||''}">${r.processType||'-'}</td>
+          <td style="font-family:var(--font-mono);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${r.deliveryNo||''}">${r.deliveryNo||'-'}</td>
           <td style="font-family:var(--font-mono);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${r.productNo||''}">${r.productNo||'-'}</td>
           <td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${r.productName||''}">${r.productName||'-'}</td>
           <td style="font-family:var(--font-mono);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${r.orderNo||''}">${r.orderNo||'-'}</td>
@@ -2179,11 +2231,12 @@ function filterRecords() {
           <td style="text-align:right;font-weight:600;color:${rt>=20?'var(--red)':rt>=5?'var(--yellow)':'var(--green)'}">${r.sampleQty != null ? (r.defectRate||'0.00%') : '<span style="color:var(--text-muted);font-weight:400">—</span>'}</td>
           <td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px"
               title="${r.defect||''}">${r.defect||'-'}</td>
-          <td style="text-align:center"><span class="badge ${bc}">${r.result}</span></td>
+          <td style="text-align:center"><span class="badge ${bc}">${r.result}</span>${rejBadge}</td>
           <td style="text-align:center">${r.qc||'-'}</td>
           <td style="text-align:center">
             ${editBtn}
             ${delBtn}
+            ${lockBtn}
             <button class="action-btn iqc" onclick="exportIQCReport(${r.id})" title="导出IQC检验报告">IQC</button>
           </td>
         </tr>`;
@@ -2191,8 +2244,75 @@ function filterRecords() {
 
     _syncCheckAllState();
     _updateBatchBtn();
+    applyColLock();   /* 表格重建后重新应用列锁定 */
   } catch(e) { console.error('[filterRecords]', e); }
 }
+
+/* ════════════════════════════════════════
+   验货明细：手动锁定列（列数用户可选）
+════════════════════════════════════════ */
+const COLLOCK_KEY       = 'xingxin_qms_records_col_lock';
+const COLLOCK_DEPTH_KEY = 'xingxin_qms_records_col_lock_depth';
+const COLLOCK_DEFAULT   = 5;   /* 默认冻结到「供应商」列 */
+let colLockOn    = false;
+let colLockCount = COLLOCK_DEFAULT;
+try {
+  colLockOn = localStorage.getItem(COLLOCK_KEY) === '1';
+  const d = parseInt(localStorage.getItem(COLLOCK_DEPTH_KEY), 10);
+  if (d >= 2 && d <= 10) colLockCount = d;
+} catch(e) {}
+
+/* 用户自选锁定深度（锁到第几列） */
+function onColLockDepthChange() {
+  const sel = document.getElementById('colLockDepth');
+  if (!sel) return;
+  colLockCount = parseInt(sel.value, 10) || COLLOCK_DEFAULT;
+  try { localStorage.setItem(COLLOCK_DEPTH_KEY, String(colLockCount)); } catch(e) {}
+  applyColLock();
+}
+
+function toggleColLock() {
+  colLockOn = !colLockOn;
+  try { localStorage.setItem(COLLOCK_KEY, colLockOn ? '1' : '0'); } catch(e) {}
+  applyColLock();
+}
+
+function applyColLock() {
+  const btn = document.getElementById('btnColLock');
+  if (btn) {
+    btn.classList.toggle('btn-primary',   colLockOn);
+    btn.classList.toggle('btn-secondary', !colLockOn);
+    btn.textContent = colLockOn ? '📌 已锁定' : '📌 锁定列';
+  }
+  const sel = document.getElementById('colLockDepth');
+  if (sel) { sel.value = String(colLockCount); sel.disabled = !colLockOn; }
+  const tbl = document.getElementById('recordsTable');
+  if (!tbl) return;
+  /* 先清除旧状态 */
+  tbl.querySelectorAll('.col-pinned').forEach(c => {
+    c.classList.remove('col-pinned', 'col-pinned-last');
+    c.style.left = '';
+  });
+  if (!colLockOn) return;
+  const headRow = tbl.querySelector('thead tr');
+  if (!headRow || !headRow.children.length) return;
+  /* 页面隐藏时 offsetWidth 为 0，等 showPage 渲染后再应用 */
+  if (headRow.children[0].offsetWidth === 0) return;
+  const n = Math.min(colLockCount, headRow.children.length);
+  let acc = 0;
+  const lefts = [];
+  for (let i = 0; i < n; i++) { lefts.push(acc); acc += headRow.children[i].offsetWidth; }
+  tbl.querySelectorAll('thead tr, tbody tr').forEach(tr => {
+    for (let i = 0; i < n && i < tr.children.length; i++) {
+      const c = tr.children[i];
+      c.classList.add('col-pinned');
+      if (i === n - 1) c.classList.add('col-pinned-last');
+      c.style.left = lefts[i] + 'px';
+    }
+  });
+}
+/* 窗口尺寸变化后表格列宽会变，需要重算冻结位置 */
+window.addEventListener('resize', () => { if (colLockOn) applyColLock(); });
 
 /* ── 全选 checkbox 变化 ── */
 function _onCheckAll(el) {
@@ -2271,6 +2391,14 @@ function batchDelete() {
   if (!confirm(`确认删除已选择的 ${selCount} 条记录？此操作不可撤销。`)) return;
 
   /* 按 id 删除，与筛选/排序状态无关 */
+  /* 已审核记录已锁定，需先由审核人反审核退回 */
+  if (!can('reviewRecord')) {
+    const _locked = state.records.filter(r => _selectedIds.has(r.id) && recStatus(r) === 'approved');
+    if (_locked.length) {
+      showToast(`所选记录中有 ${_locked.length} 条已通过审核并锁定，需先「反审核」退回后才能删除`, 'error');
+      return;
+    }
+  }
   const idsToDelete = new Set(_selectedIds);
   state.records = state.records.filter(r => !idsToDelete.has(r.id));
   persist();
@@ -2374,6 +2502,16 @@ function renderCustomerDatalist() {
   const list = document.getElementById('customerList');
   if (!list) return;
   list.innerHTML = getCustomerOptions()
+    .map(n => `<option value="${n}"></option>`).join('');
+}
+
+/* 加工类型候选：常见工艺 + 历史记录里出现过的值 */
+const DEFAULT_PROCESS_TYPES = ['啤机','印刷','UV','过油','裱纸','烫金','击凸','粘盒'];
+function renderProcessTypeDatalist() {
+  const list = document.getElementById('processTypeList');
+  if (!list) return;
+  const fromData = recs().map(r => r.processType).filter(Boolean);
+  list.innerHTML = [...new Set([...DEFAULT_PROCESS_TYPES, ...fromData])]
     .map(n => `<option value="${n}"></option>`).join('');
 }
 
@@ -2801,6 +2939,7 @@ function applyOcrToForm() {
   if (ocrProductName) setVal('f_productName', ocrProductName);
   if (ocrDeliveryNo)  setVal('f_deliveryNo', ocrDeliveryNo);
   if (ocrOrderNo)     setVal('f_orderNo', ocrOrderNo);
+  _syncOrderNoNA();
   if (ocrQty)         setVal('f_qty', ocrQty);
   if (ocrType)        setVal('f_type', ocrType);
   if (ocrRemark)      setVal('f_remark', ocrRemark);
@@ -3090,6 +3229,7 @@ function openAddModal() {
   if (inspDateEl) inspDateEl.value = todayStr();
   renderSupplierDatalist();
   renderCustomerDatalist();
+  renderProcessTypeDatalist();
   renderInspectorDatalist();
   initDefectLib();
   refreshDefectDescDatalist();
@@ -3098,7 +3238,7 @@ function openAddModal() {
 
 function openEditModal(id) {
   if (!can('editRecord')) { showToast('当前账号无权限执行此操作', 'error'); return; }
-  const r = recs().find(x => x.id === id);
+  const r = state.records.find(x => x.id === id);
   if (!r) return;
   editingId = id;
   setText('modalTitle', '编辑验货记录');
@@ -3112,10 +3252,12 @@ function openEditModal(id) {
   setVal('f_inspDate',    r.inspDate || '');
   setVal('f_supplier',    r.supplier || '');
   setVal('f_client',      r.client || '');
+  setVal('f_processType', r.processType || '');
   setVal('f_productNo',   r.productNo || '');
   setVal('f_productName', r.productName || '');
   setVal('f_deliveryNo',  r.deliveryNo || '');
   setVal('f_orderNo',     r.orderNo || '');
+  _syncOrderNoNA();   /* 旧记录 PO 为 NA 时自动勾上 */
   setVal('f_type',        r.type || '成品');
   setVal('f_qty',         r.qty || '');
   /* 编辑旧记录：sampleQty 已有值时设 manualEdit 标记，防止被自动覆盖 */
@@ -3133,6 +3275,7 @@ function openEditModal(id) {
   _loadMeasRows(r.measurements || []); /* 加载已有测量数据 */
   renderSupplierDatalist();
   renderCustomerDatalist();
+  renderProcessTypeDatalist();
   renderInspectorDatalist();
   initDefectLib();
   refreshDefectDescDatalist();
@@ -3144,7 +3287,7 @@ function setVal(id, v) { const el=document.getElementById(id); if(el) el.value=v
 function getVal(id)     { return (document.getElementById(id)?.value || '').trim(); }
 
 function clearForm() {
-  ['f_date','f_inspDate','f_supplier','f_client','f_productNo','f_productName',
+  ['f_date','f_inspDate','f_supplier','f_client','f_processType','f_productNo','f_productName',
    'f_deliveryNo','f_orderNo','f_qty','f_sampleQty','f_pass','f_fail','f_defectRate','f_defect','f_qc','f_remark']
     .forEach(id => setVal(id, ''));
   /* 检验员：默认当前登录账号（姓名优先，没有再退回用户名），仍可手动改 */
@@ -3154,6 +3297,7 @@ function clearForm() {
   setVal('f_result', 'PASS');
   _loadDefectRows([]);   /* 清空不良明细 */
   _loadMeasRows([]);     /* 清空测量数据 */
+  _syncOrderNoNA();      /* PO号 NA 勾选复位 */
   /* 新增时清除手动修改标记 */
   const _smpElClear = document.getElementById('f_sampleQty');
   if (_smpElClear) {
@@ -4257,6 +4401,28 @@ function closeModalDirect() {
   editingId = null;
 }
 
+/* ── PO号 NA 选项 ── */
+function toggleOrderNoNA() {
+  const cb  = document.getElementById('f_orderNoNA');
+  const inp = document.getElementById('f_orderNo');
+  if (!cb || !inp) return;
+  if (cb.checked) { inp.value = 'NA'; inp.disabled = true; }
+  else {
+    inp.disabled = false;
+    if ((inp.value || '').trim().toUpperCase() === 'NA') inp.value = '';
+    inp.focus();
+  }
+}
+/* 根据输入框当前值同步 NA 勾选状态（新增清空 / 编辑载入 / OCR 填入后调用） */
+function _syncOrderNoNA() {
+  const cb  = document.getElementById('f_orderNoNA');
+  const inp = document.getElementById('f_orderNo');
+  if (!cb || !inp) return;
+  const isNA = (inp.value || '').trim().toUpperCase() === 'NA';
+  cb.checked   = isNA;
+  inp.disabled = isNA;
+}
+
 function resetSingleEntryFormForNext() {
   editingId = null;
   setText('modalTitle', '新增验货记录');
@@ -4411,7 +4577,8 @@ function saveRecord(options = {}) {
 
   const rec = {
     date, inspDate: getVal('f_inspDate') || date,
-    supplier, client: getVal('f_client'), productNo: getVal('f_productNo'),
+    supplier, client: getVal('f_client'), processType: getVal('f_processType'),
+    productNo: getVal('f_productNo'),
     productName: getVal('f_productName'), deliveryNo: getVal('f_deliveryNo'),
     orderNo: getVal('f_orderNo'),
     type: getVal('f_type'), qty, sampleQty: sample, pass, fail,
@@ -4428,22 +4595,36 @@ function saveRecord(options = {}) {
 
   if (editingId !== null) {
     const idx = state.records.findIndex(r => r.id === editingId);
-    if (idx !== -1) state.records[idx] = { ...state.records[idx], ...rec };
+    if (idx !== -1) {
+      const prev = state.records[idx];
+      /* 已退回的记录修改保存后重新进入待审核 */
+      if (recStatus(prev) === 'rejected') {
+        rec.status = 'pending';
+        rec.rejectReason = ''; rec.rejectBy = ''; rec.rejectAt = '';
+        rec.resubmitted = true;
+      } else {
+        rec.status = recStatus(prev);
+      }
+      state.records[idx] = { ...prev, ...rec };
+    }
   } else {
     rec.id = state.nextId++;
+    rec.status = 'pending';   /* 新记录先进入待审核，审核通过后才进验货明细 */
     state.records.push(rec);
   }
 
   persist();
   const wasEditing = editingId !== null;
   if (!continueEntry) closeModalDirect();
-  showToast(wasEditing ? '记录已更新 ✓' : (continueEntry ? '记录已添加，可继续录入下一条 ✓' : '记录已添加 ✓'), 'success');
+  showToast(wasEditing ? (rec.resubmitted ? '记录已重新提交审核 ✓' : '记录已更新 ✓') : (continueEntry ? '记录已添加并提交审核，可继续录入下一条 ✓' : '记录已添加，已提交审核 ✓'), 'success');
   renderSupplierDatalist();   /* 新供应商/客户保存后立即进入下拉选项 */
   renderCustomerDatalist();
+  renderProcessTypeDatalist();
 
   /* 刷新当前页 */
   if (currentPage === 'dashboard') renderDashboard();
   if (currentPage === 'records')   renderRecordsTable();
+  if (currentPage === 'review')    renderReviewPage();
   if (currentPage === 'analysis')  renderAnalysis();
   if (currentPage === 'suppliers') renderSuppliers();
   updateTopKpis();
@@ -4455,6 +4636,10 @@ function saveRecord(options = {}) {
 
 function deleteRecord(id) {
   if (!can('deleteRecord')) { showToast('当前账号无权限执行此操作', 'error'); return; }
+  const _dr = state.records.find(r => r.id === id);
+  if (_dr && recStatus(_dr) === 'approved' && !can('reviewRecord')) {
+    showToast('该记录已通过审核并锁定，需先由审核人「反审核」退回后才能删除', 'error'); return;
+  }
   if (!confirm('确认删除该验货记录？此操作不可撤销。')) return;
   state.records = state.records.filter(r => r.id !== id);
   _selectedIds.delete(id);   /* 清掉已选状态 */
@@ -4465,6 +4650,168 @@ function deleteRecord(id) {
   if (currentPage === 'dashboard') renderDashboard();
   if (currentPage === 'analysis')  renderAnalysis();
   if (currentPage === 'suppliers') renderSuppliers();
+}
+
+/* ════════════════════════════════════════
+   §12.6  REVIEW CENTER (审核中心)
+════════════════════════════════════════ */
+const REVIEW_STATUS_META = {
+  pending:  { label: '待审核', cls: 'rs-pending'  },
+  rejected: { label: '已退回', cls: 'rs-rejected' },
+  approved: { label: '已审核', cls: 'rs-approved' },
+};
+let _reviewTab   = 'pending';
+let _rejectingId = null;
+
+function _esc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+function setReviewTab(tab) {
+  _reviewTab = tab;
+  renderReviewPage();
+}
+
+function _reviewCounts() {
+  const c = { pending: 0, rejected: 0, approved: 0 };
+  state.records.forEach(r => { c[recStatus(r)]++; });
+  return c;
+}
+
+function renderReviewPage() {
+  const wrap = document.getElementById('reviewTableWrap');
+  if (!wrap) return;
+  const counts = _reviewCounts();
+  setText('reviewCountPending',  counts.pending);
+  setText('reviewCountRejected', counts.rejected);
+  const badge = document.getElementById('reviewNavBadge');
+  if (badge) {
+    badge.textContent = counts.pending;
+    badge.style.display = counts.pending ? '' : 'none';
+  }
+  ['pending','rejected','approved'].forEach(t => {
+    const btn = document.getElementById('reviewTab' + t.charAt(0).toUpperCase() + t.slice(1));
+    if (btn) btn.classList.toggle('active', _reviewTab === t);
+  });
+
+  const list = state.records.filter(r => recStatus(r) === _reviewTab);
+  if (_reviewTab === 'approved') list.sort((a,b) => (b.reviewAt||'').localeCompare(a.reviewAt||''));
+  else                           list.sort((a,b) => (b.updatedAt||'').localeCompare(a.updatedAt||''));
+
+  if (!list.length) {
+    const msg = { pending:'暂无待审核记录', rejected:'暂无被退回的记录', approved:'暂无已审核记录' }[_reviewTab];
+    wrap.innerHTML = `<div class="empty-state" style="padding:48px 0">${msg}</div>`;
+    return;
+  }
+
+  const canReview = can('reviewRecord');
+  const canEdit   = can('editRecord') || can('createRecord');
+  const rows = list.map(r => {
+    const st  = recStatus(r);
+    const sm  = REVIEW_STATUS_META[st];
+    const bc  = isPass(r) ? 'badge-pass' : isFail(r) ? 'badge-rej' : r.result==='COND' ? 'badge-cond' : 'badge-hold';
+    let reviewInfo = `<span class="review-status-badge ${sm.cls}">${sm.label}</span>`;
+    if (st === 'rejected' && r.rejectReason) {
+      reviewInfo += `<div class="reject-reason-text" title="${_esc(r.rejectReason)}">原因：${_esc(r.rejectReason)}${r.rejectBy ? '（' + _esc(r.rejectBy) + '）' : ''}</div>`;
+    }
+    if (st === 'approved' && r.reviewBy) {
+      reviewInfo += `<div style="font-size:11px;color:var(--text-dim);margin-top:2px">${_esc(r.reviewBy)} · ${formatModifiedDate(r.reviewAt) || '-'}</div>`;
+    }
+    const ops = [];
+    if (canReview && st !== 'approved') ops.push(`<button class="action-btn" onclick="approveRecord(${r.id})">✓ 通过</button>`);
+    if (canReview)                      ops.push(`<button class="action-btn" onclick="openRejectModal(${r.id})">反审核</button>`);
+    if (canEdit && st !== 'approved')   ops.push(`<button class="action-btn" onclick="openEditModal(${r.id})">编辑</button>`);
+    return `<tr>
+      <td style="text-align:right;color:#3a4858">${r.id}</td>
+      <td style="font-family:var(--font-mono);font-size:11px;white-space:nowrap">${_esc(r.date)}</td>
+      <td style="font-weight:500;white-space:nowrap">${_esc(r.supplier)}</td>
+      <td style="white-space:nowrap">${_esc(r.client||'-')}</td>
+      <td style="white-space:nowrap">${_esc(r.processType||'-')}</td>
+      <td style="font-family:var(--font-mono);font-size:11px;white-space:nowrap">${_esc(r.deliveryNo||'-')}</td>
+      <td style="font-family:var(--font-mono);font-size:11px;white-space:nowrap">${_esc(r.productNo||'-')}</td>
+      <td style="white-space:nowrap">${_esc(r.productName||'-')}</td>
+      <td style="text-align:center"><span class="badge ${r.type==='成品'?'badge-pass':'badge-hold'}">${_esc(r.type||'-')}</span></td>
+      <td style="text-align:right;font-variant-numeric:tabular-nums">${(r.qty||0).toLocaleString()}</td>
+      <td style="text-align:right;font-variant-numeric:tabular-nums">${r.fail||0}</td>
+      <td style="text-align:center"><span class="badge ${bc}">${_esc(r.result)}</span></td>
+      <td style="text-align:center">${_esc(r.qc||'-')}</td>
+      <td style="font-family:var(--font-mono);font-size:11px;white-space:nowrap">${formatModifiedDate(r.updatedAt) || '-'}</td>
+      <td>${reviewInfo}</td>
+      <td style="text-align:center;white-space:nowrap">${ops.join('')}</td>
+    </tr>`;
+  }).join('');
+
+  wrap.innerHTML = `<table class="data-table" style="min-width:1368px">
+    <thead><tr>
+      <th style="text-align:right">#</th>
+      <th>来料日期</th><th>供应商</th><th>客户</th><th>加工类型</th><th>送货单号</th><th>货号</th><th>款式名称</th>
+      <th style="text-align:center">类型</th>
+      <th style="text-align:right">来料数</th><th style="text-align:right">FAIL</th>
+      <th style="text-align:center">判定</th><th style="text-align:center">检验员</th>
+      <th>提交时间</th><th>审核信息</th><th style="text-align:center">操作</th>
+    </tr></thead>
+    <tbody>${rows}</tbody>
+  </table>`;
+}
+
+function approveRecord(id) {
+  if (!can('reviewRecord')) { showToast('当前账号无权限执行此操作', 'error'); return; }
+  const r = state.records.find(x => x.id === id);
+  if (!r) return;
+  const u = _liveUser();
+  r.status   = 'approved';
+  r.reviewBy = (u && (u.name || u.username)) || '';
+  r.reviewAt = nowIso();
+  r.rejectReason = ''; r.rejectBy = ''; r.rejectAt = '';
+  delete r.resubmitted;
+  persist();
+  showToast(`记录 #${id} 已审核通过，进入验货明细 ✓`, 'success');
+  renderReviewPage();
+  if (currentPage === 'records') renderRecordsTable();
+  updateTopKpis();
+}
+
+function openRejectModal(id) {
+  if (!can('reviewRecord')) { showToast('当前账号无权限执行此操作', 'error'); return; }
+  const r = state.records.find(x => x.id === id);
+  if (!r) return;
+  _rejectingId = id;
+  const info = document.getElementById('rejectTargetInfo');
+  if (info) info.textContent = `#${r.id} · ${r.date || ''} · ${r.supplier || ''} · ${r.productNo || '-'}`;
+  const ta = document.getElementById('rejectReasonInput');
+  if (ta) ta.value = '';
+  const ov = document.getElementById('rejectOverlay');
+  if (ov) ov.classList.add('show');
+}
+
+function closeRejectModal() {
+  _rejectingId = null;
+  const ov = document.getElementById('rejectOverlay');
+  if (ov) ov.classList.remove('show');
+}
+
+function confirmReject() {
+  if (!can('reviewRecord')) { showToast('当前账号无权限执行此操作', 'error'); return; }
+  const reason = getVal('rejectReasonInput');
+  if (!reason) { showToast('请填写退回原因', 'error'); return; }
+  const r = state.records.find(x => x.id === _rejectingId);
+  if (!r) { closeRejectModal(); return; }
+  const u = _liveUser();
+  r.status = 'rejected';
+  r.rejectReason = reason;
+  r.rejectBy = (u && (u.name || u.username)) || '';
+  r.rejectAt = nowIso();
+  r.reviewBy = ''; r.reviewAt = '';
+  r.updatedAt  = nowIso();
+  persist();
+  closeRejectModal();
+  showToast(`记录 #${r.id} 已退回，修改保存后将重新进入待审核`, 'info');
+  /* 提交反审核原因后跳到审核中心「已退回」列表 */
+  _reviewTab = 'rejected';
+  showPage('review');
+  updateTopKpis();
 }
 
 /* ════════════════════════════════════════
@@ -4760,10 +5107,10 @@ function exportCSV() {
   if (_downloadServerExport('records.csv', 'CSV')) return;
   try {
     const data = filteredRecs.length ? filteredRecs : recs();
-    const HDR  = ['ID','来料日期','检验日期','修改日期','供应商','客户','货号','款式名称','PO号','类型',
+    const HDR  = ['ID','来料日期','检验日期','修改日期','供应商','客户','加工类型','送货单号','货号','款式名称','PO号','类型',
                   '来料数量','抽查数量','PASS数','FAIL数','不良率','不良现象','判定结果','检验员','备注'];
     const rows = data.map(r => [
-      r.id, r.date, r.inspDate, formatModifiedDate(r.updatedAt), r.supplier, r.client, r.productNo, r.productName,
+      r.id, r.date, r.inspDate, formatModifiedDate(r.updatedAt), r.supplier, r.client, r.processType || '', r.deliveryNo || '', r.productNo, r.productName,
       r.orderNo, r.type, r.qty, r.sampleQty, r.pass, r.fail, r.defectRate, r.defect, r.result, r.qc, r.remark,
     ].map(v => `"${String(v==null?'':v).replace(/"/g,'""')}"`));
     const csv  = '\uFEFF' + [HDR, ...rows].map(r=>r.join(',')).join('\n');
@@ -4802,7 +5149,7 @@ function exportFactoryExcel() {
     const aoa = [[title], headers];
     data.forEach((r, i) => {
       aoa.push([
-        i + 1, r.date || '', r.supplier || '', r.type || '', r.client || '',
+        i + 1, r.date || '', r.supplier || '', r.processType || r.type || '', r.client || '',
         r.deliveryNo || '', r.orderNo || '', r.productNo || '', r.productName || '',
         (r.qty != null && r.qty !== '' ? Number(r.qty) : ''), '',
         r.result || '', r.defect || '', r.qc || '', r.remark || '',
@@ -5048,6 +5395,7 @@ function _backupDoImport(incoming, mode) {
       inspDate:    r.inspDate    || r.date || '',
       supplier:    r.supplier    || r.厂名 || '',
       client:      r.client      || r.客名 || '',
+      processType: r.processType || '',
       productNo:   r.productNo   || r.款号 || '',
       productName: r.productName || r.款式 || '',
       deliveryNo:  r.deliveryNo  || r.单号 || '',
@@ -5191,6 +5539,7 @@ const FIELD_MAP = {
 
   /* ── 客户 / 客名 ── */
   '客名': 'client', '客户': 'client', '品牌': 'client',
+  '加工类型': 'processType', '加工': 'processType',
   '客戶': 'client', '客户名称': 'client',
 
   /* ── 送货单号 ── */

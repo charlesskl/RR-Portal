@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>核价板块</title>
+  <link rel="stylesheet" href="./styles.css?v=20260914-sticky-navigation">
+</head>
+<body>
+  <div class="topbar module-topbar">
+    <div class="brand">核价板块 <small>以已确认报价为基准独立核价</small></div>
+    <nav class="module-switch" aria-label="报价与核价板块">
+      <a href="./index.html">报价板块</a>
+      <a class="active" href="./verification.html" aria-current="page">核价板块</a>
+    </nav>
+    <div id="user-chip"><span id="who-chip"></span></div>
+  </div>
+
+  <main class="verification-page verification-ledger-page">
+    <section id="verification-list" class="card verification-center-card">
+      <header class="verification-center-head">
+        <div class="verification-center-title">
+          <span class="verification-center-icon">核</span>
+          <div><h1>核价任务</h1><p>按部门填写、提交和审核；每次核价形成独立版本</p></div>
+        </div>
+        <div class="verification-center-actions">
+          <button id="verification-records" class="mini">已完成记录</button>
+          <button id="verification-export" class="mini">导出任务清单</button>
+        </div>
+      </header>
+      <div class="verification-toolbar">
+        <input id="verification-search" type="search" placeholder="搜索货号、产品、客户或版本">
+        <select id="verification-status-filter">
+          <option value="">全部状态</option>
+          <option value="drafting">填写中</option>
+          <option value="in_review">审核中</option>
+          <option value="ready">待锁定</option>
+          <option value="completed">已完成</option>
+        </select>
+        <select id="verification-customer-filter"><option value="">全部客户</option></select>
+      </div>
+      <div class="verification-master-detail">
+        <div class="verification-list-pane">
+          <table class="verification-list-table">
+            <thead><tr><th>货号</th><th>产品</th><th>客户</th><th>当前版本</th><th>部门进度</th><th>状态</th></tr></thead>
+            <tbody id="verification-list-body"></tbody>
+          </table>
+        </div>
+        <aside id="verification-preview" class="verification-preview">
+          <div class="verification-preview-empty">选择一张核价任务查看摘要</div>
+        </aside>
+      </div>
+    </section>
+    <section id="verification-detail" class="hidden"></section>
+  </main>
+
+  <script>(function(){var b=location.pathname.replace(/\/[^/]*$/,'');if(!b)return;var f=window.fetch.bind(window);window.fetch=function(u,o){if(typeof u==='string'&&u.indexOf('/api/')===0)u=b+u;return f(u,o)}})();</script>
+  <script>window.__WORKBENCH_EMBED__ = true;</script>
+  <script src="./formula-input.js?v=20260731-fraction-export"></script>
+  <script src="./workbench.js?v=20260914-full-quote-restore"></script>
+  <script type="module" src="./verification.js?v=20260914-editable-version-category"></script>
+</body>
+</html>

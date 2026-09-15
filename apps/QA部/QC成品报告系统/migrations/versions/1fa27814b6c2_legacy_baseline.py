@@ -1,7 +1,7 @@
 """legacy baseline
 
 Revision ID: 1fa27814b6c2
-Revises:
+Revises: 
 Create Date: 2026-07-15 10:22:50.962405
 """
 from typing import Sequence, Union

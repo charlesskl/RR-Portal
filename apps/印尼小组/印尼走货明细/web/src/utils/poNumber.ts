@@ -37,10 +37,12 @@ export const PO_ENTITY_META: Record<PoEntity, PoEntityMeta> = {
 }
 
 export function poDetermineEntity(supplier?: string, customsCompany?: string, source?: string): PoEntity {
+  // 排期来源决定华登采购主体：RRM 必须使用全球单，避免生成 IRRI 实业单。
+  if ((source || '').trim().toUpperCase() === 'RRM') return 'HD_GLOBAL'
   const customs = (customsCompany || '').trim()
   if (/华胜益/.test(customs)) return 'HSY'
   if (customs && customs === (supplier || '').trim()) {
-    return source === 'RRM' ? 'HD_GLOBAL' : 'HD_INDUSTRY'
+    return 'HD_INDUSTRY'
   }
   return 'HD_INDUSTRY'  // 兜底
 }

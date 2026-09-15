@@ -7,7 +7,7 @@ public record CreateOrderRequest(string? ExternalOrderNo, int? ProductId, string
 public record UpdateOrderRequest(string? DeliveryDate, string? Remark, string? Status, bool? IsMA, bool? IsUrgent, string? OrderDate, List<UpdateOrderPartQtyDto>? PartQtys);
 // 明细数量编辑入参：按 partQty 主键 id 改 qty（仅 received 且无排期计划的订单允许，用于修正导入识别错误）
 public record UpdateOrderPartQtyDto(int Id, int Qty);
-public record OrderProcessScheduleRow(string? StartDate, string? Craft, int? DailyTarget, int? PartQtyId = null);
+public record OrderProcessScheduleRow(string? StartDate, string? Craft, int? DailyTarget, int? PartQtyId = null, double? LaborPrice = null);
 public record CreateOrderProcessScheduleRequest(List<OrderProcessScheduleRow>? Rows, List<UpdateOrderPartQtyDto>? PartQtys = null);
 public record CreateOrderProcessScheduleResult(int CreatedPlans, string? StartDate, string? EndDate);
 public record RevokeActualsRequest(string? Scope, string? Date);
@@ -27,7 +27,7 @@ public record OrderIdStatus(int Id, string Status);
 
 // 详情嵌套
 public record OrderPartQtyDto(int Id, string PartName, int? SourcePartId, int Qty, int PartOrder);
-public record OrderProductPartDto(int Id, string PartName, double UnitCost, double LaborPrice, double PaintCost, double QuotedPrice);
+public record OrderProductPartDto(int Id, string PartName, string Craft, int PartGroupId, double UnitCost, double LaborPrice, double PaintCost, double QuotedPrice);
 public record OrderProductDto(int Id, string ProductNo, List<OrderProductPartDto> Parts);
 // QtyEditable：数量是否可改 = 已接单(received) 且 无未删排期计划。前端据此决定明细数量是否可编辑，与后端 PATCH 校验同口径。
 public record OrderDetail(int Id, string ExternalOrderNo, int? ProductId, DateTime OrderDate, DateTime? DeliveryDate, string Status, bool IsMA, bool IsUrgent, string? Remark, string CreatedBy, OrderProductDto? Product, List<OrderPartQtyDto> PartQtys, bool QtyEditable);

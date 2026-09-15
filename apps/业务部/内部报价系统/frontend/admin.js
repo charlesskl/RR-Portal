@@ -111,6 +111,8 @@ $('btn-save-material-manager').onclick = async () => {
 let __allUsers = [];
 async function loadUsers() {
   __allUsers = await api('/admin/users');
+  // 按账号 id 从小到大排序，新建账号不再插到列表最前
+  __allUsers.sort((a, b) => (a.id || 0) - (b.id || 0));
   const box = $('user-search');
   if (box && !box.__wired) { box.oninput = renderUsers; box.__wired = true; }
   renderUsers();

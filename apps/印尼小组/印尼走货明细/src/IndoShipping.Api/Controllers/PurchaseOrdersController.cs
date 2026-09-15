@@ -53,7 +53,7 @@ public class PurchaseOrdersController(ISqlConnectionFactory factory) : Controlle
         using var c = factory.Create();
         var rows = await c.QueryAsync(@"
             WITH receipt_totals AS (
-                SELECT po_item_id, SUM(qty) AS received_qty
+                SELECT po_item_id, SUM(qty) AS received_qty, SUM(spare_qty) AS spare_qty
                 FROM po_receipts
                 GROUP BY po_item_id
             ),
@@ -62,7 +62,8 @@ public class PurchaseOrdersController(ISqlConnectionFactory factory) : Controlle
                        COUNT(i.id) AS item_count,
                        SUM(COALESCE(i.purchase_qty, i.qty, 0) * COALESCE(i.price, 0)) AS total_amount,
                        SUM(COALESCE(i.purchase_qty, i.qty, 0)) AS purchase_qty,
-                       SUM(COALESCE(r.received_qty, 0)) AS received_qty
+                       SUM(COALESCE(r.received_qty, 0)) AS received_qty,
+                       SUM(COALESCE(r.spare_qty, 0)) AS spare_qty
                 FROM po_items i
                 LEFT JOIN receipt_totals r ON r.po_item_id = i.id
                 GROUP BY i.po_id
@@ -71,6 +72,7 @@ public class PurchaseOrdersController(ISqlConnectionFactory factory) : Controlle
                    COALESCE(s.item_count, 0) AS item_count,
                    COALESCE(s.total_amount, 0) AS total_amount,
                    COALESCE(s.received_qty, 0) AS received_qty,
+                   COALESCE(s.spare_qty, 0) AS spare_qty,
                    GREATEST(COALESCE(s.purchase_qty, 0) - COALESCE(s.received_qty, 0), 0) AS shortage_qty
             FROM purchase_orders po
             LEFT JOIN item_stats s ON s.po_id = po.id
@@ -86,9 +88,11 @@ public class PurchaseOrdersController(ISqlConnectionFactory factory) : Controlle
             WITH receipt_totals AS (
                 SELECT po_item_id,
                        SUM(qty) AS received_qty,
+                       SUM(spare_qty) AS spare_qty,
                        STRING_AGG(
                            TO_CHAR(receipt_date, 'MM/DD') || '入库' ||
                            TRIM(TRAILING '.' FROM TRIM(TRAILING '0' FROM qty::text)) ||
+                           CASE WHEN spare_qty > 0 THEN ' + 备品' || TRIM(TRAILING '.' FROM TRIM(TRAILING '0' FROM spare_qty::text)) ELSE '' END ||
                            CASE WHEN COALESCE(batch_no, '') = '' THEN '' ELSE ' [' || batch_no || ']' END,
                            '，' ORDER BY receipt_date, id
                        ) AS receipt_summary
@@ -99,6 +103,7 @@ public class PurchaseOrdersController(ISqlConnectionFactory factory) : Controlle
                    po.po_no, po.supplier, po.status, po.order_date, po.delivery_date,
                    po.notes AS po_notes,
                    COALESCE(r.received_qty, 0) AS received_qty,
+                   COALESCE(r.spare_qty, 0) AS spare_qty,
                    GREATEST(COALESCE(i.purchase_qty, i.qty, 0) - COALESCE(r.received_qty, 0), 0) AS shortage_qty,
                    COALESCE(r.receipt_summary, '') AS receipt_summary
             FROM po_items i
@@ -116,12 +121,13 @@ public class PurchaseOrdersController(ISqlConnectionFactory factory) : Controlle
         if (po == null) return NotFound(new { error = "not found" });
         var items = (await c.QueryAsync(@"
             WITH receipt_totals AS (
-                SELECT po_item_id, SUM(qty) AS received_qty
+                SELECT po_item_id, SUM(qty) AS received_qty, SUM(spare_qty) AS spare_qty
                 FROM po_receipts
                 GROUP BY po_item_id
             )
             SELECT i.*,
                    COALESCE(r.received_qty, 0) AS received_qty,
+                   COALESCE(r.spare_qty, 0) AS spare_qty,
                    GREATEST(COALESCE(i.purchase_qty, i.qty, 0) - COALESCE(r.received_qty, 0), 0) AS shortage_qty
             FROM po_items i
             LEFT JOIN receipt_totals r ON r.po_item_id = i.id
@@ -342,6 +348,7 @@ RETURNING id",
     {
         public DateTime? receipt_date { get; set; }
         public decimal? qty { get; set; }
+        public decimal? spare_qty { get; set; }
         public string? batch_no { get; set; }
         public string? notes { get; set; }
     }
@@ -350,6 +357,7 @@ RETURNING id",
     {
         public int po_item_id { get; set; }
         public decimal? qty { get; set; }
+        public decimal? spare_qty { get; set; }
     }
 
     public class BulkReceiptBody
@@ -371,10 +379,12 @@ RETURNING id",
     [HttpPost("{poId:int}/receipts/bulk")]
     public async Task<IActionResult> CreateBulkReceipt(int poId, [FromBody] BulkReceiptBody body)
     {
+        if ((body.items ?? new()).Any(x => (x.spare_qty ?? 0) < 0))
+            return BadRequest(new { error = "备品入数不能小于 0" });
         var requested = (body.items ?? new())
             .Where(x => x.po_item_id > 0 && (x.qty ?? 0) > 0)
             .GroupBy(x => x.po_item_id)
-            .Select(g => new { PoItemId = g.Key, Qty = g.Sum(x => x.qty ?? 0) })
+            .Select(g => new { PoItemId = g.Key, Qty = g.Sum(x => x.qty ?? 0), SpareQty = g.Sum(x => x.spare_qty ?? 0) })
             .ToList();
         if (requested.Count == 0) return BadRequest(new { error = "请至少填写一项入库数量" });
 
@@ -430,10 +440,10 @@ RETURNING id",
             foreach (var line in requested)
             {
                 var receiptId = await c.ExecuteScalarAsync<int>(@"
-                    INSERT INTO po_receipts(po_item_id, receipt_date, qty, batch_no, notes)
-                    VALUES (@poItemId, @receiptDate, @qty, @batchNo, @notes)
+                    INSERT INTO po_receipts(po_item_id, receipt_date, qty, spare_qty, batch_no, notes)
+                    VALUES (@poItemId, @receiptDate, @qty, @spareQty, @batchNo, @notes)
                     RETURNING id",
-                    new { line.PoItemId, receiptDate, line.Qty, batchNo, notes }, tx);
+                    new { line.PoItemId, receiptDate, line.Qty, spareQty = line.SpareQty, batchNo, notes }, tx);
                 ids.Add(receiptId);
             }
 
@@ -453,11 +463,12 @@ RETURNING id",
                   )", new { poId }, tx);
 
             var totalQty = requested.Sum(x => x.Qty);
+            var totalSpareQty = requested.Sum(x => x.SpareQty);
             await this.WriteAsync(c, tx, "inventory", "bulk_receipt", "purchase_order", poId,
                 $"采购单 {poNo} 统一入库 {requested.Count} 项 / {totalQty:0.####}",
                 new { po_id = poId, po_no = poNo, receipt_date = receiptDate, batch_no = batchNo, items = requested });
             tx.Commit();
-            return Ok(new { ok = true, receipt_ids = ids, item_count = requested.Count, qty = totalQty });
+            return Ok(new { ok = true, receipt_ids = ids, item_count = requested.Count, qty = totalQty, spare_qty = totalSpareQty });
         }
         catch { tx.Rollback(); throw; }
     }
@@ -470,7 +481,7 @@ RETURNING id",
             "SELECT COUNT(*) FROM po_items WHERE id=@itemId", new { itemId });
         if (exists == 0) return NotFound(new { error = "采购明细不存在" });
         var rows = await c.QueryAsync(@"
-            SELECT id, po_item_id, receipt_date, qty, batch_no, notes, created_at
+            SELECT id, po_item_id, receipt_date, qty, spare_qty, batch_no, notes, created_at
             FROM po_receipts
             WHERE po_item_id=@itemId
             ORDER BY receipt_date, id", new { itemId });
@@ -481,7 +492,9 @@ RETURNING id",
     public async Task<IActionResult> CreateReceipt(int itemId, [FromBody] ReceiptBody body)
     {
         var receiptQty = body.qty ?? 0;
+        var spareQty = body.spare_qty ?? 0;
         if (receiptQty <= 0) return BadRequest(new { error = "入库数量必须大于 0" });
+        if (spareQty < 0) return BadRequest(new { error = "备品入数不能小于 0" });
 
         using var c = factory.Create();
         c.Open();
@@ -513,14 +526,15 @@ RETURNING id",
             }
 
             var receiptId = await c.ExecuteScalarAsync<int>(@"
-                INSERT INTO po_receipts(po_item_id, receipt_date, qty, batch_no, notes)
-                VALUES (@itemId, @receiptDate, @qty, @batchNo, @notes)
+                INSERT INTO po_receipts(po_item_id, receipt_date, qty, spare_qty, batch_no, notes)
+                VALUES (@itemId, @receiptDate, @qty, @spareQty, @batchNo, @notes)
                 RETURNING id",
                 new
                 {
                     itemId,
                     receiptDate = body.receipt_date?.Date ?? DateTime.Today,
                     qty = receiptQty,
+                    spareQty,
                     batchNo = body.batch_no?.Trim() ?? "",
                     notes = body.notes?.Trim() ?? ""
                 }, tx);
@@ -553,6 +567,7 @@ RETURNING id",
                     po_item_id = itemId,
                     po_id = item.PoId,
                     qty = receiptQty,
+                    spare_qty = spareQty,
                     receipt_date = body.receipt_date?.Date ?? DateTime.Today,
                     batch_no = body.batch_no?.Trim() ?? "",
                     shortage_qty = remaining
@@ -569,8 +584,8 @@ RETURNING id",
         using var c = factory.Create();
         c.Open();
         using var tx = c.BeginTransaction();
-        var row = await c.QueryFirstOrDefaultAsync<(int PoId, int ReceiptId, int PoItemId, decimal Qty)>(@"
-            SELECT i.po_id AS PoId, r.id AS ReceiptId, r.po_item_id AS PoItemId, r.qty AS Qty
+        var row = await c.QueryFirstOrDefaultAsync<(int PoId, int ReceiptId, int PoItemId, decimal Qty, decimal SpareQty)>(@"
+            SELECT i.po_id AS PoId, r.id AS ReceiptId, r.po_item_id AS PoItemId, r.qty AS Qty, r.spare_qty AS SpareQty
             FROM po_receipts r
             JOIN po_items i ON i.id=r.po_item_id
             WHERE r.id=@receiptId
@@ -584,8 +599,8 @@ RETURNING id",
             "SELECT COALESCE(SUM(qty), 0) FROM outbound WHERE po_item_id=@poItemId",
             new { row.PoItemId }, tx);
         var receivedAfterDelete = await c.ExecuteScalarAsync<decimal>(
-            "SELECT COALESCE(SUM(qty), 0) - @qty FROM po_receipts WHERE po_item_id=@poItemId",
-            new { row.PoItemId, qty = row.Qty }, tx);
+            "SELECT COALESCE(SUM(qty + spare_qty), 0) - @qty FROM po_receipts WHERE po_item_id=@poItemId",
+            new { row.PoItemId, qty = row.Qty + row.SpareQty }, tx);
         if (receivedAfterDelete < totalOut)
         {
             tx.Rollback();

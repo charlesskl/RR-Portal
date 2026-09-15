@@ -257,7 +257,10 @@ html, body {
   gap: 16px;
   max-width: 1600px;
   width: 100%;
+  margin: 0 auto;   /* 超宽屏时内容居中，两侧留白对称 */
 }
+/* 验货明细：表格列多，宽屏（尤其菜单收起后）用满可用宽度 */
+#page-records .page-inner { max-width: none; }
 
 /* ── CARDS ── */
 .cards-row {
@@ -530,6 +533,20 @@ tbody tr:hover { background: var(--bg-hover); }
   backdrop-filter: blur(4px);
 }
 .modal-overlay.show { display: flex; }
+
+/* PO号 NA 勾选 */
+.na-check {
+  display: inline-flex; align-items: center; gap: 4px;
+  margin-left: 8px; font-size: 11px; font-weight: 400;
+  color: var(--text-dim); cursor: pointer; user-select: none;
+  vertical-align: middle;
+}
+/* 抵消移动端 .modal input 的 36px 最小高度，保持小复选框 */
+.na-check input {
+  width: 14px; height: 14px; min-height: 0 !important; padding: 0 !important;
+  margin: 0; cursor: pointer; accent-color: var(--accent); flex-shrink: 0;
+}
+input:disabled { opacity: .55; cursor: not-allowed; }
 .modal {
   background: var(--bg-panel);
   border: 1px solid var(--border-hi);
@@ -1843,6 +1860,17 @@ tbody tr.row-selected td {
   border-bottom-color: rgba(0,200,255,.12);
 }
 
+/* 验货明细：锁定列（手动开关，列数可选） */
+#recordsTable th.col-pinned, #recordsTable td.col-pinned {
+  position: sticky; z-index: 4; background: var(--bg-card);
+}
+#recordsTable thead th.col-pinned { z-index: 8; background: var(--bg-hover); }
+#recordsTable tbody tr:hover td.col-pinned { background: var(--bg-hover); }
+#recordsTable tbody tr.row-selected td.col-pinned {
+  background: linear-gradient(rgba(0,200,255,.06), rgba(0,200,255,.06)), var(--bg-card);
+}
+#recordsTable .col-pinned-last { box-shadow: 2px 0 0 var(--border); }
+
 /* ── 批量删除按钮 ── */
 .btn-batch-del {
   border-color: rgba(255,61,90,.3);
@@ -3073,3 +3101,30 @@ body.theme-light #loginPassword {
   width: 100%;
   box-sizing: border-box;
 }
+
+/* ── 审核中心 ── */
+.review-tabs { display: flex; gap: 8px; }
+.review-tabs .mode-tab { padding: 8px 16px; }
+.review-count {
+  display: inline-block; min-width: 18px; padding: 0 5px; margin-left: 4px;
+  border-radius: 9px; background: var(--accent); color: #001018;
+  font-size: 11px; font-weight: 700; text-align: center;
+}
+.review-hint {
+  font-size: 12px; color: var(--text-dim); line-height: 1.6;
+  padding: 10px 14px; background: var(--bg-card);
+  border: 1px solid var(--border); border-radius: var(--radius-lg);
+}
+.nav-badge {
+  display: inline-block; min-width: 18px; padding: 0 5px; margin-left: 6px;
+  border-radius: 9px; background: var(--red); color: #fff;
+  font-size: 10px; font-weight: 700; text-align: center;
+}
+.review-status-badge {
+  display: inline-flex; align-items: center; padding: 2px 9px;
+  border-radius: 10px; font-size: 11px; font-weight: 600;
+}
+.rs-pending  { background: rgba(255,180,0,.15); color: var(--yellow); }
+.rs-rejected { background: rgba(255,80,80,.15);  color: var(--red); }
+.rs-approved { background: rgba(0,220,130,.15);  color: var(--green); }
+.reject-reason-text { font-size: 11px; color: var(--red); margin-top: 3px; }

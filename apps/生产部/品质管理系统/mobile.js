@@ -85,8 +85,14 @@
       var phone = evalClasses();
       if (phone) { closeSidebar(); }
       else {
-        sidebar.classList.remove('collapsed');
-        if (mainWrap) mainWrap.classList.remove('full');
+        // 桌面端：尊重用户记忆（localStorage），不强制展开；默认隐藏
+        var collapsed = true;
+        try {
+          var v = localStorage.getItem('xingxin_qms_sidebar_collapsed');
+          if (v !== null) collapsed = v === '1';
+        } catch (e) {}
+        sidebar.classList.toggle('collapsed', collapsed);
+        if (mainWrap) mainWrap.classList.toggle('full', collapsed);
         document.body.classList.remove('qc-sidebar-open');
       }
     }

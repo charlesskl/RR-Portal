@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 
 export default function NewUserPage() {
   const router = useRouter();
-  const [form, setForm] = useState({ username: "", password: "", displayName: "", role: "clerk" });
+  const [form, setForm] = useState({ username: "", password: "", displayName: "", role: "clerk", factoryId: "XINGXIN" });
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -43,9 +43,17 @@ export default function NewUserPage() {
             value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}
             className="w-full border border-app-border rounded-btn px-3 py-2"
           >
-            <option value="admin">主管 admin</option>
+            <option value="admin">管理员/主管</option>
             <option value="clerk">文员/拉长 clerk</option>
-            <option value="viewer">统计组 viewer</option>
+          </select>
+        </div>
+        <div>
+          <label className="block text-sm text-text-secondary mb-1" htmlFor="factoryId">所属厂区</label>
+          <select id="factoryId" value={form.role === "admin" ? "ALL" : form.factoryId} disabled={form.role === "admin"} onChange={(e) => setForm({ ...form, factoryId: e.target.value })}
+            className="w-full border border-app-border rounded-btn px-3 py-2">
+            <option value="XINGXIN">兴信</option>
+            <option value="HUADENG">华登</option>
+            <option value="ALL">全部厂区</option>
           </select>
         </div>
         {error && <p className="text-rose text-sm">{error}</p>}

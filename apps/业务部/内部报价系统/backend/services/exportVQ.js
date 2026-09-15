@@ -919,7 +919,13 @@ function sectionsToData({ quote, sections }) {
   ensureExplicitProductGroups(paintingRows);
   const paintOps = weightedRowsSum(painting, paintingRows, row =>
     paintingProcKeys.reduce((total, key) => total + num(row[`${key}_qty`]), 0));
-  const paintDetailAmt = (num(t3.painting_labor) + num(t3.paint_material)) * SEWING_DEFAULT_MARKUP;
+  const paintDetailRaw = weightedRowsSum(painting, paintingRows, row =>
+    paintingProcKeys.reduce((total, key) => total + num(row[`${key}_qty`]) * num(row[`${key}_unit`]), 0));
+  // 报客表应直接读取喷油明细；业务汇总只作旧数据无明细时的兼容回退。
+  const paintBase = paintingRows.length
+    ? paintDetailRaw
+    : num(t3.painting_labor) + num(t3.paint_material);
+  const paintDetailAmt = paintBase * SEWING_DEFAULT_MARKUP;
   const paintingDetail = paintDetailAmt
     ? { total_operations: paintOps || 1, quoted_price_hkd: paintDetailAmt }
     : {};

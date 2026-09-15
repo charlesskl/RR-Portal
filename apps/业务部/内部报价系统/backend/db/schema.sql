@@ -33,6 +33,8 @@ CREATE TABLE IF NOT EXISTS quotes (
   status           TEXT NOT NULL DEFAULT 'drafting',  -- drafting / fully_approved / exported
   version          TEXT,  -- 版本标签：同一产品的不同报价版本（如 V1 / 改色版）
   factory_code     TEXT NOT NULL DEFAULT 'qingxi' REFERENCES factories(code),
+  deleted_at       TEXT,
+  deleted_by       TEXT,
   UNIQUE(factory_code, quote_no)
 );
 
@@ -53,6 +55,19 @@ CREATE TABLE IF NOT EXISTS quote_sections (
 
 CREATE INDEX IF NOT EXISTS idx_sections_quote ON quote_sections(quote_id);
 CREATE INDEX IF NOT EXISTS idx_sections_dept_status ON quote_sections(dept, status);
+
+-- 客价确认与生产车间分派；一张报价单只保留一份最新确认结果。
+CREATE TABLE IF NOT EXISTS quote_customer_confirmations (
+  quote_id         INTEGER PRIMARY KEY REFERENCES quotes(id) ON DELETE CASCADE,
+  status           TEXT NOT NULL DEFAULT 'pending', -- pending / confirmed
+  workshops_json   TEXT NOT NULL DEFAULT '[]',
+  confirmed_price  REAL,
+  confirmed_qty    INTEGER,
+  note             TEXT,
+  confirmed_by     TEXT,
+  confirmed_at     TEXT,
+  updated_at       TEXT NOT NULL DEFAULT (datetime('now'))
+);
 
 CREATE TABLE IF NOT EXISTS audit_log (
   id        INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -146,3 +161,53 @@ CREATE TABLE IF NOT EXISTS factory_material_price_managers (
   user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   PRIMARY KEY (factory_code, user_id)
 );
+CREATE TABLE IF NOT EXISTS quote_verifications (
+  quote_id               INTEGER PRIMARY KEY REFERENCES quotes(id) ON DELETE CASCADE,
+  baseline_json          TEXT NOT NULL,
+  verified_values_json   TEXT NOT NULL DEFAULT '{}',
+  verified_sections_json TEXT NOT NULL DEFAULT '{}',
+  status                 TEXT NOT NULL DEFAULT 'in_progress',
+  note                   TEXT,
+  created_by             TEXT,
+  created_at             TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_by             TEXT,
+  updated_at             TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS quote_verification_versions (
+  id                INTEGER PRIMARY KEY AUTOINCREMENT,
+  quote_id          INTEGER NOT NULL REFERENCES quote_verifications(quote_id) ON DELETE CASCADE,
+  version_no        INTEGER NOT NULL,
+  label             TEXT NOT NULL,
+  category          TEXT,
+  parent_version_id INTEGER REFERENCES quote_verification_versions(id),
+  source_type       TEXT NOT NULL DEFAULT 'quote',
+  status            TEXT NOT NULL DEFAULT 'drafting',
+  note              TEXT,
+  created_by        TEXT,
+  created_at        TEXT NOT NULL DEFAULT (datetime('now')),
+  completed_by      TEXT,
+  completed_at      TEXT,
+  updated_at        TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(quote_id, version_no)
+);
+
+CREATE INDEX IF NOT EXISTS idx_verification_versions_quote
+  ON quote_verification_versions(quote_id, version_no);
+
+CREATE TABLE IF NOT EXISTS quote_verification_sections (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  version_id     INTEGER NOT NULL REFERENCES quote_verification_versions(id) ON DELETE CASCADE,
+  dept           TEXT NOT NULL REFERENCES departments(code),
+  payload_json   TEXT NOT NULL DEFAULT '{}',
+  status         TEXT NOT NULL DEFAULT 'empty',
+  filled_by      TEXT,
+  filled_at      TEXT,
+  reviewed_by    TEXT,
+  reviewed_at    TEXT,
+  review_comment TEXT,
+  UNIQUE(version_id, dept)
+);
+
+CREATE INDEX IF NOT EXISTS idx_verification_sections_version
+  ON quote_verification_sections(version_id, dept, status);

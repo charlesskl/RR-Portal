@@ -11,6 +11,7 @@ const {
   weightedInjectionSum,
   weightedColumnFormula,
 } = require('./productMix');
+const { addElectronicTemplateSheet } = require('./exportElectronicTemplate');
 
 const RMB = '￥#,##0.00';
 const HKD = '"HK$"#,##0.00';
@@ -190,7 +191,7 @@ async function buildWorkbook({ quote, sections }) {
     { width: 18 },  // C 模号 / 规格
     { width: 16 },  // D 模胚类型
     { width: 14 },  // E 模具结构
-    { width: 12 },  // F 材质
+    { width: 18 },  // F 材质 / 合计表金额，避免 HK$ 数值显示为 #######
     { width: 12 },  // G 出模数
     { width: 15 },  // H 套数 / 印尼运费
     { width: 16 },  // I 模具尺寸
@@ -208,7 +209,7 @@ async function buildWorkbook({ quote, sections }) {
   let row = 1;
 
   // 报价单标题
-  ws.mergeCells(row, 1, row, 17);
+  ws.mergeCells(row, 1, row, 14);
   const titleCell = ws.getCell(row, 1);
   titleCell.value = `${quote.quote_no || ''} ${quote.product_name || ''} 内部报价明细`;
   titleCell.font = { bold: true, size: 18, color: { argb: COLORS.white }, name: 'Microsoft YaHei' };
@@ -218,7 +219,7 @@ async function buildWorkbook({ quote, sections }) {
   row += 1;
 
   // 报价单元信息
-  ws.mergeCells(row, 1, row, 17);
+  ws.mergeCells(row, 1, row, 14);
   const subCell = ws.getCell(row, 1);
   subCell.value = `客户: ${quote.customer || '—'}    数量: ${quote.qty || '—'}    创建: ${quote.created_at || ''}`;
   subCell.alignment = { horizontal: 'center', vertical: 'middle' };
@@ -246,14 +247,13 @@ async function buildWorkbook({ quote, sections }) {
   const fxHU = num(sales.header?.fx_hkd_usd) || 7.8;
 
   // ---------- 一、模具部分 ----------
-  // A序号 B名称 C模号 D模胚类型 E模具结构 F材质 G出模数 H套数 I净重(g)
-  // J周期(秒) K模具尺寸 L-M图片(合并) N价格RMB O价格USD P模价HKD Q备注
-  ws.mergeCells(row, 1, row, 17); styleSection(ws.getCell(row, 1));
+  // 导出不显示模具结构、净重和备注：A-I 基本资料，J-K图片，L-N价格。
+  ws.mergeCells(row, 1, row, 14); styleSection(ws.getCell(row, 1));
   ws.getCell(row, 1).value = '一、模具部分';
   row += 1;
-  const moldHeader = ['序号', '模具名称', '模号', '模胚类型', '模具结构', '材质', '出模数', '套数', '净重(g)', '周期(秒)', '模具尺寸', '图   片', '', '模具价格（RMB）', '模具价格（USD）', '模价 HKD', '备   注'];
+  const moldHeader = ['序号', '模具名称', '模号', '模胚类型', '材质', '出模数', '套数', '周期(秒)', '模具尺寸', '图   片', '', '模具价格（RMB）', '模具价格（USD）', '模价 HKD'];
   moldHeader.forEach((h, i) => { ws.getCell(row, i + 1).value = h; styleHeader(ws.getCell(row, i + 1)); });
-  ws.mergeCells(row, 12, row, 13); // 图片列合并(L:M)
+  ws.mergeCells(row, 10, row, 11); // 图片恢复为两列合并(J:K)
   row += 1;
 
   const molds = eng.molds || [];
@@ -268,23 +268,20 @@ async function buildWorkbook({ quote, sections }) {
     ws.getCell(r, 3).value = m.mold_no || '';
     ws.getCell(r, 4).value = m.mold_type || '';
     ws.getCell(r, 4).alignment = { wrapText: true, vertical: 'middle', horizontal: 'center' };
-    ws.getCell(r, 5).value = m.structure || '';
-    ws.getCell(r, 6).value = m.material || '';
-    ws.getCell(r, 7).value = m.cavity || '';
-    ws.getCell(r, 8).value = m.sets ?? 1;
-    ws.getCell(r, 9).value = m.weight_g == null || m.weight_g === '' ? '' : num(m.weight_g);
-    ws.getCell(r, 10).value = m.cycle_sec == null || m.cycle_sec === '' ? '' : num(m.cycle_sec);
-    ws.getCell(r, 11).value = (m.detail && m.detail.mold_size) || '';
-    ws.mergeCells(r, 12, r, 13);
-    ws.getCell(r, 14).value = num(m.price_rmb);
-    ws.getCell(r, 14).numFmt = '"¥"#,##0';
-    ws.getCell(r, 15).value = num(m.price_usd);
-    ws.getCell(r, 15).numFmt = '"$"#,##0';
-    ws.getCell(r, 16).value = { formula: `N${r}/${fxRH}+O${r}*${MOLD_USD_HKD}`,
+    ws.getCell(r, 5).value = m.material || '';
+    ws.getCell(r, 6).value = m.cavity || '';
+    ws.getCell(r, 7).value = m.sets ?? 1;
+    ws.getCell(r, 8).value = m.cycle_sec == null || m.cycle_sec === '' ? '' : num(m.cycle_sec);
+    ws.getCell(r, 9).value = (m.detail && m.detail.mold_size) || '';
+    ws.mergeCells(r, 10, r, 11);
+    ws.getCell(r, 12).value = num(m.price_rmb);
+    ws.getCell(r, 12).numFmt = '"¥"#,##0';
+    ws.getCell(r, 13).value = num(m.price_usd);
+    ws.getCell(r, 13).numFmt = '"$"#,##0';
+    ws.getCell(r, 14).value = { formula: `L${r}/${fxRH}+M${r}*${MOLD_USD_HKD}`,
       result: num(m.price_rmb) / fxRH + num(m.price_usd) * MOLD_USD_HKD };
-    ws.getCell(r, 16).numFmt = '"HK$"#,##0';
-    ws.getCell(r, 17).value = m.note || '';
-    for (let c = 1; c <= 17; c++) styleData(ws.getCell(r, c));
+    ws.getCell(r, 14).numFmt = '"HK$"#,##0';
+    for (let c = 1; c <= 14; c++) styleData(ws.getCell(r, c));
 
     // 嵌入所有图片：2 列 × N 行 网格布局
     const imgs = (m.images || []).filter(Boolean);
@@ -305,10 +302,10 @@ async function buildWorkbook({ quote, sections }) {
           const id = wb.addImage({ filename: abs, extension: ext === 'jpg' ? 'jpeg' : ext });
           const xi = i % perRow;
           const yi = Math.floor(i / perRow);
-          // tl.col: 第一张 → col 12 起始 (idx 11)，第二张 → col 13 起始 (idx 12)
+          // 图片在 J:K 两列中排列，超过两张时继续向下排列。
           // tl.row 用 yi/gridRows 把图均分行高
           ws.addImage(id, {
-            tl: { col: 11 + xi, row: r - 1 + (yi / gridRows) },
+            tl: { col: 9 + xi, row: r - 1 + (yi / gridRows) },
             ext: { width: imgW, height: imgH },
           });
         } catch (e) { /* skip bad image */ }
@@ -319,40 +316,40 @@ async function buildWorkbook({ quote, sections }) {
   // 小计 RMB - SUM 公式（只在数值格上色）
   const moldDataEnd = row - 1;
   const whiteFill = (r) => {
-    for (let c = 1; c <= 17; c++) {
+    for (let c = 1; c <= 14; c++) {
       const cell = ws.getCell(r, c);
       cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFFFF' } };
       cell.border = thinBorder();
       cell.alignment = cell.alignment || { horizontal: 'center', vertical: 'middle' };
     }
   };
-  // 小计：同一行 价格RMB(N) + 价格USD(O) + 模价HKD(P)
-  ws.mergeCells(row, 1, row, 13);
+  // 小计：同一行 价格RMB(L) + 价格USD(M) + 模价HKD(N)
+  ws.mergeCells(row, 1, row, 11);
   ws.getCell(row, 1).value = `小计 (汇率 RMB ${fxRH} · USD ${MOLD_USD_HKD})`;
   ws.getCell(row, 1).alignment = { horizontal: 'right', vertical: 'middle' };
   const moldSubtotal = sum(molds, m => num(m.price_rmb));
   const moldSubtotalUsd = sum(molds, m => num(m.price_usd));
   const moldSubtotalRow = row;
+  ws.getCell(row, 12).value = molds.length
+    ? { formula: `SUM(L${moldDataStart}:L${moldDataEnd})`, result: moldSubtotal }
+    : 0;
+  ws.getCell(row, 12).numFmt = '"¥"#,##0';
+  ws.getCell(row, 13).value = molds.length
+    ? { formula: `SUM(M${moldDataStart}:M${moldDataEnd})`, result: moldSubtotalUsd }
+    : 0;
+  ws.getCell(row, 13).numFmt = '"$"#,##0';
   ws.getCell(row, 14).value = molds.length
-    ? { formula: `SUM(N${moldDataStart}:N${moldDataEnd})`, result: moldSubtotal }
+    ? { formula: `SUM(N${moldDataStart}:N${moldDataEnd})`, result: moldSubtotal / fxRH + moldSubtotalUsd * MOLD_USD_HKD }
     : 0;
-  ws.getCell(row, 14).numFmt = '"¥"#,##0';
-  ws.getCell(row, 15).value = molds.length
-    ? { formula: `SUM(O${moldDataStart}:O${moldDataEnd})`, result: moldSubtotalUsd }
-    : 0;
-  ws.getCell(row, 15).numFmt = '"$"#,##0';
-  ws.getCell(row, 16).value = molds.length
-    ? { formula: `SUM(P${moldDataStart}:P${moldDataEnd})`, result: moldSubtotal / fxRH + moldSubtotalUsd * MOLD_USD_HKD }
-    : 0;
-  ws.getCell(row, 16).numFmt = '"HK$"#,##0';
+  ws.getCell(row, 14).numFmt = '"HK$"#,##0';
   whiteFill(row);
-  styleSubtotal(ws.getCell(row, 14), 'sub');
-  styleSubtotal(ws.getCell(row, 15), 'total');
-  styleSubtotal(ws.getCell(row, 16), 'total');
+  styleSubtotal(ws.getCell(row, 12), 'sub');
+  styleSubtotal(ws.getCell(row, 13), 'total');
+  styleSubtotal(ws.getCell(row, 14), 'total');
   ws.getCell(row, 1).font = { bold: true, color: { argb: 'FF1F2937' }, name: 'Microsoft YaHei' };
+  ws.getCell(row, 12).font = { bold: true, color: { argb: 'FF1F2937' }, name: 'Microsoft YaHei' };
+  ws.getCell(row, 13).font = { bold: true, color: { argb: 'FF1F2937' }, name: 'Microsoft YaHei' };
   ws.getCell(row, 14).font = { bold: true, color: { argb: 'FF1F2937' }, name: 'Microsoft YaHei' };
-  ws.getCell(row, 15).font = { bold: true, color: { argb: 'FF1F2937' }, name: 'Microsoft YaHei' };
-  ws.getCell(row, 16).font = { bold: true, color: { argb: 'FF1F2937' }, name: 'Microsoft YaHei' };
   row += 2;
 
   // 收集各 section 的"合计"单元格地址，供九、合计行用公式引用
@@ -363,10 +360,12 @@ async function buildWorkbook({ quote, sections }) {
 
   // ---------- 二、注塑部分 ----------
   row = renderInjection(ws, row, mold, fxRH, subRefs);
+  addMoldingDetailSheet(wb, mold, fxRH);
   const injSubtotal = injectionSubtotal(mold);
 
   // ---------- 二·B、吹气 / 二·C、搪胶 ----------
   row = renderBlowBlock(ws, row, mold, subRefs);
+  addBlowDetailSheet(wb, mold);
   const slushDetail = addSlushDetailSheet(wb, slush, fxRH);
   row = renderDetailSummary(ws, row, '二·C、搪胶部分（汇总）', slushDetail, subRefs, 'slush');
 
@@ -399,6 +398,8 @@ async function buildWorkbook({ quote, sections }) {
   const pkSubtotal = freeSubtotal(eng.packaging_materials || [], fxRH, fxHU);
   const auxSubtotal = freeSubtotal(eng.aux_materials || [], fxRH, fxHU);
 
+  // 搪胶汇总与统一成本明细之间额外留两行，避免两个区块视觉上贴得太近。
+  row += 2;
   row = renderUnifiedCostTable(ws, row, {
     asm,
     asmDetail,
@@ -423,13 +424,13 @@ async function buildWorkbook({ quote, sections }) {
   // ---------- 纸箱（运费场景稍后放在出货价算价右侧） ----------
   row = renderCartonAndFreight(ws, row, eng, sales, subRefs);
 
-  // ---------- 九、合计（含搪胶/车缝/纸箱/附加税） ----------
-  ws.mergeCells(row, 1, row, 14); styleSection(ws.getCell(row, 1));
+  // ---------- 十、合计（电子和车缝在后面的独立算价区计算） ----------
+  ws.mergeCells(row, 1, row, 11); styleSection(ws.getCell(row, 1));
   ws.getCell(row, 1).value = '十、合计';
   row += 1;
 
   // 整行 HKD（与 UI 一致）；出厂价(=前面成本列之和)/码点/模具分摊 不单列，码点+模具在下方「出货价算价」
-  const totalsHeader = ['注塑+吹气', '组装人工', '包装/混装人工', '二次加工（印喷）', '电子', '五金', '包装材料', '辅助材料', '印尼运费', '搪胶', '车缝', '纸箱', '附加税0.4%', '出货底价 HKD'];
+  const totalsHeader = ['注塑+吹气', '组装人工', '包装/混装人工', '二次加工（印喷）', '五金', '包装材料', '辅助材料', '印尼运费', '搪胶', '纸箱', '小计HKD'];
   totalsHeader.forEach((h, i) => { ws.getCell(row, i + 1).value = h; styleHeader(ws.getCell(row, i + 1)); });
   row += 1;
 
@@ -453,7 +454,7 @@ async function buildWorkbook({ quote, sections }) {
   const sewingWeightedSum = sum(sewing.sewing_groups || [], group =>
     (sum(group.items || [], item => num(item.usage) * num(item.mat_price) * (num(item.markup) || 1)) + sewLaborToAdd(group)) * sewGroupQty(group));
   const sewingTotalRmb = sewingWeightedSum / sewTotalQty(sewing);
-  // 多纸箱 + 多平卡：Σ((箱价i + Σ平卡i_j) / qty_i) × 汇率
+  // 多纸箱 + 多平卡：Σ(箱价i / qty_i + Σ平卡i_j) × 汇率
   const ccx = eng.carton_calc || {};
   const cartonListX = (ccx.cartons && ccx.cartons.length) ? ccx.cartons : (ccx.cl ? [{
     cl: ccx.cl, cw: ccx.cw, ch: ccx.ch, qty: ccx.qty,
@@ -464,7 +465,7 @@ async function buildWorkbook({ quote, sections }) {
     const boxPrice = (num(b.cl) + num(b.cw) + 2) * (num(b.cw) + num(b.ch) + 1) * 2 * cartonRateX / 1000;
     const flatSum = (b.flat_cards || []).reduce((a, f) => a + ((num(f.l) || num(b.cl)) + 1) * ((num(f.w) || num(b.cw)) + 1) * 2 / 1000 * (f.qty == null || f.qty === '' ? 1 : num(f.qty)), 0);
     const q = Math.max(num(b.qty), 1);
-    return s + (boxPrice + flatSum) / q;
+    return s + boxPrice / q + flatSum;
   }, 0) * fxRH;
   // cost 包含 吹气/搪胶/车缝/纸箱
   const blowRmb = sum(mold.blow_items || [], r => {
@@ -479,7 +480,7 @@ async function buildWorkbook({ quote, sections }) {
   const priceRmb = factoryRmb + moldShare + surtax;
   const priceHkd = priceRmb / fxRH;
 
-  // 12 个成本项 A-L + M附加税 + N出货底价；电子(E)、车缝(K)在出货价算价中单独处理。
+  // 10 个小计成本项 A-J + K小计；附加税、电子、车缝在下方算价区单独处理。
   const summaryRow = row;
   const HKD_FMT = '"HK$"#,##0.0000';
   const inputs = [
@@ -495,36 +496,30 @@ async function buildWorkbook({ quote, sections }) {
     subRefs.pkgLabor ? { formula: `${subRefs.pkgLabor}`, result: pklSubtotal } : pklSubtotal,
     // D 二次加工（本身 HKD，不换算）
     subRefs.secondProc ? { formula: `${subRefs.secondProc}`, result: ppSubtotal } : ppSubtotal,
-    // E 电子 / F 五金
-    subRefs.electronic ? { formula: `${subRefs.electronic}`, result: elecOnlySubtotal } : elecOnlySubtotal,
+    // E 五金
     subRefs.hardware ? { formula: `${subRefs.hardware}`, result: hwSubtotal } : hwSubtotal,
-    // G 包装材料 / H 辅助材料（HKD）
+    // F 包装材料 / G 辅助材料（HKD）
     subRefs.packaging ? { formula: `${subRefs.packaging}`, result: pkSubtotal } : pkSubtotal,
     subRefs.aux ? { formula: `${subRefs.aux}`, result: auxSubtotal } : auxSubtotal,
-    // I 运输费 (RMB → HKD)
+    // H 运输费 (RMB → HKD)
     shipping / fxRH,
-    // J 搪胶 (本身就是 HKD)
+    // I 搪胶 (本身就是 HKD)
     subRefs.slush ? { formula: subRefs.slush, result: slushTotalRmb / fxRH } : slushTotalRmb / fxRH,
-    // K 车缝：统一成本表已拆为物料、裁床人工、车缝人工、手工人工四行（HKD）
-    subRefs.sewingHkd
-      ? { formula: `${subRefs.sewingHkd}`, result: sewingTotalRmb / fxRH }
-      : (subRefs.sewing ? { formula: `${subRefs.sewing}/${fxRH}`, result: sewingTotalRmb / fxRH } : sewingTotalRmb / fxRH),
-    // L 纸箱 (HKD)
+    // J 纸箱 (HKD)
     subRefs.cartonHkdPerPcs ? { formula: `(${subRefs.cartonHkdPerPcs})`, result: cartonRmb / fxRH } : cartonRmb / fxRH,
   ];
   inputs.forEach((v, i) => {
     const c = ws.getCell(row, i + 1);
     c.value = v; c.numFmt = HKD_FMT; styleData(c);
   });
-  // M 附加税；N 出货底价 = SUM(A:L)-E(电子)-K(车缝)+M。
-  ws.getCell(row, 13).value = surtax / fxRH; ws.getCell(row, 13).numFmt = HKD_FMT; styleData(ws.getCell(row, 13));
-  const baseHkdMarked = factoryHkd - elecOnlySubtotal - sewingTotalRmb / fxRH + surtax / fxRH;
-  ws.getCell(row, 14).value = { formula: `SUM(A${row}:L${row})-E${row}-K${row}+M${row}`, result: baseHkdMarked };
-  ws.getCell(row, 14).numFmt = HKD_FMT; styleData(ws.getCell(row, 14)); styleSubtotal(ws.getCell(row, 14), 'hkd');
+  // K 小计HKD；附加税只在下方出货价算价区计算。
+  const baseHkdMarked = factoryHkd - elecOnlySubtotal - sewingTotalRmb / fxRH;
+  ws.getCell(row, 11).value = { formula: `SUM(A${row}:J${row})`, result: baseHkdMarked };
+  ws.getCell(row, 11).numFmt = HKD_FMT; styleData(ws.getCell(row, 11)); styleSubtotal(ws.getCell(row, 11), 'hkd');
   ws.getRow(row).font = { bold: true, color: { argb: 'FF1F2937' }, name: 'Microsoft YaHei' };
   row += 2;
 
-  // 出货价算价：所有场景底价统一 = 九、合计 出货底价（出厂价 + 附加税），再在那边 ×码点 ÷找数
+  // 出货价算价：先按成本小计、码点和找数计算，附加税在下方单独计算。
   // 模费按 RMB 计算；手板费和测试费直接按 USD 总额分摊。
   const moldFeeShareUsd = (moldCostSumRmb / 0.85 / moldFx - num(mc.customer_subsidy_usd)) / moldAmortQty;
 
@@ -533,6 +528,8 @@ async function buildWorkbook({ quote, sections }) {
     summaryRow, markedHkd: baseHkdMarked, combinedHkd: baseHkdMarked,
     sewingHkd: sewingTotalRmb / fxRH,
     elecHkd: elecOnlySubtotal,
+    sewingSource: subRefs.sewingHkd ? `${subRefs.sewingHkd}` : (subRefs.sewing ? `${subRefs.sewing}/${fxRH}` : null),
+    electronicSource: subRefs.electronic || null,
     moldShareUsd: moldFeeShareUsd,
     prototypeShareUsd,
     testingShareUsd,
@@ -561,6 +558,7 @@ async function buildWorkbook({ quote, sections }) {
   // 把"盐田40柜"运费/吊柜费单元格带回 subRefs，供减税明细 表2 直接引用
   subRefs.shipFreightCell = shipOpts.shipFreightCell;
   subRefs.shipCabinetCell = shipOpts.shipCabinetCell;
+  subRefs.shipSurtaxHkdFormula = shipOpts.shipSurtaxHkdFormula;
 
   // ---------- 减税明细 / 成本汇总 ----------
   row = renderTaxSummary(ws, row, sales, { subRefs, fxRH, summaryRow });
@@ -592,6 +590,11 @@ function beautifyFonts(wb, name = FONT) {
 
 // 电子明细 — 独立 sheet（按导入的"电子报价单"格式还原）
 function addElectronicDetailSheet(wb, electronic, quote) {
+  return addElectronicTemplateSheet(wb, electronic, quote);
+}
+
+// 保留旧版布局，便于历史文件回退比对。
+function addElectronicDetailSheetLegacy(wb, electronic, quote) {
   const doc = electronic && electronic.electronics_doc;
   if (!doc || !doc.parts || !doc.parts.length) return;
   const sourceCurrency = doc.source_currency || 'RMB';
@@ -599,37 +602,85 @@ function addElectronicDetailSheet(wb, electronic, quote) {
   const sourceUnit = part => part.source_unit_price != null ? num(part.source_unit_price) : num(part.unit_price);
   const ws = wb.addWorksheet('电子明细');
   ws.columns = [
-    { width: 12 },  // A 零件名称
-    { width: 30 },  // B 规格
-    { width: 8 },   // C 用量
-    { width: 12 },  // D 原币单价
-    { width: 12 },  // E 原币合计
-    { width: 14 },  // F 备注
-    { width: 14 },  // G 汇总标签
-    { width: 12 },  // H 汇总值
-    { width: 12 },  // I 注
+    { width: 18 },  // A 零件名称
+    { width: 36 },  // B 规格
+    { width: 10 },  // C 用量
+    { width: 15 },  // D 原币单价
+    { width: 15 },  // E 原币合计
+    { width: 22 },  // F 备注 / 币种说明
   ];
+  const titleFill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0B3A63' } };
+  const headerFill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD9EAF7' } };
+  const alternateFill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF7FAFC' } };
+  const summaryFill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEAF2F8' } };
+  const totalFill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDDEBF7' } };
+  const electronicBorder = {
+    bottom: { style: 'thin', color: { argb: 'FFD6E2EC' } },
+  };
+  const styleElectronicHeader = cell => {
+    cell.font = { bold: true, color: { argb: 'FF17324D' }, size: 11, name: FONT };
+    cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+    cell.fill = headerFill;
+    cell.border = electronicBorder;
+  };
+  const styleElectronicRow = (cell, index) => {
+    cell.font = { color: { argb: 'FF334155' }, size: 11, name: FONT };
+    cell.alignment = {
+      horizontal: index === 1 || index === 2 || index === 6 ? 'left' : 'right',
+      vertical: 'middle',
+      wrapText: index === 2 || index === 6,
+    };
+    cell.border = electronicBorder;
+  };
   let row = 1;
   // 标题
-  ws.mergeCells(row, 1, row, 9);
-  ws.getCell(row, 1).value = `电子报价单（${sourceCurrency}）`;
-  ws.getCell(row, 1).font = { bold: true, size: 16, name: 'Microsoft YaHei' };
+  ws.mergeCells(row, 1, row, 6);
+  ws.getCell(row, 1).value = '电子部报价明细';
+  ws.getCell(row, 1).font = { bold: true, size: 16, color: { argb: 'FFFFFFFF' }, name: FONT };
   ws.getCell(row, 1).alignment = { horizontal: 'center', vertical: 'middle' };
-  ws.getRow(row).height = 28;
-  row += 2;
+  ws.getCell(row, 1).fill = titleFill;
+  ws.getRow(row).height = 32;
+  row += 1;
+  ws.mergeCells(row, 1, row, 6);
+  ws.getCell(row, 1).value = `电子报价单（${sourceCurrency}）`;
+  ws.getCell(row, 1).font = { italic: true, color: { argb: 'FF64748B' }, size: 10, name: FONT };
+  ws.getCell(row, 1).alignment = { horizontal: 'center', vertical: 'middle' };
+  ws.getRow(row).height = 20;
+  row += 1;
   // 元数据
   const meta = doc.meta || {};
-  ws.getCell(row, 1).value = '产品名称：' + (meta.product || (quote && quote.product_name) || '');
-  ws.getCell(row, 3).value = '产品编号：' + (meta.product_no || (quote && quote.quote_no) || '');
-  ws.getCell(row, 5).value = '客户：' + (meta.customer || (quote && quote.customer) || '');
-  ws.getCell(row, 7).value = '报价日期：' + (meta.date || doc.imported_at || '');
-  for (let c = 1; c <= 9; c++) ws.getCell(row, c).font = { name: 'Microsoft YaHei' };
-  row += 2;
+  const metaRows = [
+    [
+      `产品名称：${meta.product || (quote && quote.product_name) || ''}`,
+      `产品编号：${meta.product_no || (quote && quote.quote_no) || ''}`,
+      `客户：${meta.customer || (quote && quote.customer) || ''}`,
+    ],
+    [
+      `报价日期：${meta.date || doc.imported_at || ''}`,
+      `MOQ：${meta.moq || (quote && quote.qty) || ''}`,
+      `价格类型：${meta.tax_label || '未注明'}`,
+    ],
+  ];
+  metaRows.forEach(values => {
+    values.forEach((value, index) => {
+      const start = index * 2 + 1;
+      ws.mergeCells(row, start, row, start + 1);
+      const cell = ws.getCell(row, start);
+      cell.value = value;
+      cell.font = { color: { argb: 'FF475569' }, size: 10, name: FONT };
+      cell.alignment = { horizontal: 'left', vertical: 'middle' };
+      cell.fill = alternateFill;
+    });
+    ws.getRow(row).height = 22;
+    row += 1;
+  });
   // 表头
   const h = ['零件名称', '规格', '用量', `单价${sourceCurrency}`, `合计${sourceCurrency}`, '备注'];
-  h.forEach((v, i) => { ws.getCell(row, i + 1).value = v; styleHeader(ws.getCell(row, i + 1)); });
+  h.forEach((v, i) => { ws.getCell(row, i + 1).value = v; styleElectronicHeader(ws.getCell(row, i + 1)); });
+  ws.getRow(row).height = 28;
   row += 1;
   const dataStart = row;
+  let displayIndex = 0;
   doc.parts.forEach(p => {
     // 父行
     ws.getCell(row, 1).value = p.name || '';
@@ -637,10 +688,17 @@ function addElectronicDetailSheet(wb, electronic, quote) {
     ws.getCell(row, 3).value = num(p.qty);
     ws.getCell(row, 4).value = sourceUnit(p);
     ws.getCell(row, 5).value = { formula: `C${row}*D${row}`, result: num(p.qty) * sourceUnit(p) };
-    ws.getCell(row, 5).numFmt = '0.000';
+    ws.getCell(row, 3).numFmt = '0';
+    ws.getCell(row, 4).numFmt = '#,##0.0000';
+    ws.getCell(row, 5).numFmt = '#,##0.0000';
     ws.getCell(row, 6).value = p.note || '';
-    for (let c = 1; c <= 6; c++) styleData(ws.getCell(row, c));
-    if (p.name) ws.getCell(row, 1).font = { bold: true, name: 'Microsoft YaHei' };
+    displayIndex += 1;
+    for (let c = 1; c <= 6; c++) {
+      styleElectronicRow(ws.getCell(row, c), c);
+      if (displayIndex % 2 === 0) ws.getCell(row, c).fill = alternateFill;
+    }
+    if (p.name) ws.getCell(row, 1).font = { ...ws.getCell(row, 1).font, bold: true };
+    ws.getRow(row).height = 24;
     row += 1;
     // 子项行
     (p.children || []).forEach(c => {
@@ -649,14 +707,23 @@ function addElectronicDetailSheet(wb, electronic, quote) {
       ws.getCell(row, 3).value = num(c.qty);
       ws.getCell(row, 4).value = sourceUnit(c);
       ws.getCell(row, 5).value = { formula: `C${row}*D${row}`, result: num(c.qty) * sourceUnit(c) };
-      ws.getCell(row, 5).numFmt = '0.000';
+      ws.getCell(row, 3).numFmt = '0';
+      ws.getCell(row, 4).numFmt = '#,##0.0000';
+      ws.getCell(row, 5).numFmt = '#,##0.0000';
       ws.getCell(row, 6).value = c.note || '';
-      for (let k = 1; k <= 6; k++) styleData(ws.getCell(row, k));
+      displayIndex += 1;
+      for (let k = 1; k <= 6; k++) {
+        styleElectronicRow(ws.getCell(row, k), k);
+        if (displayIndex % 2 === 0) ws.getCell(row, k).fill = alternateFill;
+      }
+      ws.getRow(row).height = 24;
       row += 1;
     });
   });
   const dataEnd = row - 1;
-  row += 1;
+  ws.autoFilter = { from: `A${dataStart - 1}`, to: `F${dataEnd}` };
+  ws.views = [{ state: 'frozen', ySplit: dataStart - 1, activeCell: `A${dataStart}`, showGridLines: false }];
+  row += 2;
   // 成本汇总
   const ex = sourceExtras;
   const partsCost = sum(doc.parts, p => num(p.qty) * sourceUnit(p)
@@ -669,80 +736,121 @@ function addElectronicDetailSheet(wb, electronic, quote) {
     ['测试费用', num(ex.test_repair), null],
     ['包装运输', num(ex.packing_shipping), null],
   ];
+  ws.mergeCells(row, 1, row, 6);
+  ws.getCell(row, 1).value = '成本汇总';
+  ws.getCell(row, 1).font = { bold: true, color: { argb: 'FF17324D' }, size: 12, name: FONT };
+  ws.getCell(row, 1).fill = headerFill;
+  ws.getCell(row, 1).alignment = { horizontal: 'left', vertical: 'middle' };
+  ws.getRow(row).height = 26;
+  row += 1;
   const summaryStart = row;
   labels.forEach(([lab, val, fml]) => {
-    ws.getCell(row, 7).value = lab + '：';
-    ws.getCell(row, 7).alignment = { horizontal: 'right' };
-    ws.getCell(row, 8).value = fml ? { formula: fml, result: val } : val;
-    ws.getCell(row, 8).numFmt = '0.000';
-    styleData(ws.getCell(row, 7));
-    styleData(ws.getCell(row, 8));
+    ws.mergeCells(row, 1, row, 4);
+    ws.getCell(row, 1).value = lab;
+    ws.getCell(row, 1).alignment = { horizontal: 'right', vertical: 'middle' };
+    ws.getCell(row, 5).value = fml ? { formula: fml, result: val } : val;
+    ws.getCell(row, 5).numFmt = '#,##0.0000';
+    ws.getCell(row, 6).value = sourceCurrency;
+    for (let column = 1; column <= 6; column++) {
+      const cell = ws.getCell(row, column);
+      cell.fill = summaryFill;
+      cell.border = electronicBorder;
+      cell.font = { color: { argb: 'FF334155' }, size: 11, name: FONT };
+    }
+    ws.getCell(row, 5).alignment = { horizontal: 'right', vertical: 'middle' };
+    ws.getCell(row, 6).alignment = { horizontal: 'center', vertical: 'middle' };
     row += 1;
   });
   // 合计成本
-  ws.getCell(row, 7).value = '合计成本：';
-  ws.getCell(row, 7).alignment = { horizontal: 'right' };
-  ws.getCell(row, 7).font = { bold: true, name: 'Microsoft YaHei' };
+  ws.mergeCells(row, 1, row, 4);
+  ws.getCell(row, 1).value = '合计成本';
+  ws.getCell(row, 1).alignment = { horizontal: 'right', vertical: 'middle' };
   const totalCost = partsCost + num(ex.bonding_cost) + num(ex.smt_cost) + num(ex.labor_cost)
     + num(ex.test_repair) + num(ex.packing_shipping);
-  ws.getCell(row, 8).value = { formula: `SUM(H${summaryStart}:H${row - 1})`, result: totalCost };
-  ws.getCell(row, 8).numFmt = '0.000';
-  styleSubtotal(ws.getCell(row, 8), 'sub');
+  ws.getCell(row, 5).value = { formula: `SUM(E${summaryStart}:E${row - 1})`, result: totalCost };
+  ws.getCell(row, 5).numFmt = '#,##0.0000';
+  ws.getCell(row, 6).value = sourceCurrency;
+  for (let column = 1; column <= 6; column++) {
+    ws.getCell(row, column).fill = totalFill;
+    ws.getCell(row, column).border = electronicBorder;
+    ws.getCell(row, column).font = { bold: true, color: { argb: 'FF17324D' }, size: 11, name: FONT };
+  }
+  ws.getCell(row, 5).alignment = { horizontal: 'right', vertical: 'middle' };
+  ws.getCell(row, 6).alignment = { horizontal: 'center', vertical: 'middle' };
   const totalCostRow = row;
   row += 1;
   // 含利润价
   const profitPct = num(ex.profit_pct);
-  ws.getCell(row, 7).value = `含 ${profitPct}% 利润价：`;
-  ws.getCell(row, 7).alignment = { horizontal: 'right' };
-  ws.getCell(row, 7).font = { bold: true, name: 'Microsoft YaHei' };
+  ws.mergeCells(row, 1, row, 4);
+  ws.getCell(row, 1).value = `含 ${profitPct}% 利润价`;
+  ws.getCell(row, 1).alignment = { horizontal: 'right', vertical: 'middle' };
   const profitVal = ex.profit_price != null ? num(ex.profit_price) : totalCost * (1 + profitPct / 100);
-  ws.getCell(row, 8).value = { formula: `H${totalCostRow}*(1+${profitPct}/100)`, result: profitVal };
-  ws.getCell(row, 8).numFmt = '0.000';
-  ws.getCell(row, 9).value = `${sourceCurrency} 不含税价`;
-  styleSubtotal(ws.getCell(row, 8), 'sub');
+  ws.getCell(row, 5).value = { formula: `E${totalCostRow}*(1+${profitPct}/100)`, result: profitVal };
+  ws.getCell(row, 5).numFmt = '#,##0.0000';
+  ws.getCell(row, 6).value = `${sourceCurrency} 不含税价`;
+  for (let column = 1; column <= 6; column++) {
+    ws.getCell(row, column).fill = summaryFill;
+    ws.getCell(row, column).border = electronicBorder;
+    ws.getCell(row, column).font = { bold: true, color: { argb: 'FF17324D' }, size: 11, name: FONT };
+  }
+  ws.getCell(row, 5).alignment = { horizontal: 'right', vertical: 'middle' };
+  ws.getCell(row, 6).alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
   row += 1;
   // 抵税差额
-  ws.getCell(row, 7).value = '抵税差额：';
-  ws.getCell(row, 7).alignment = { horizontal: 'right' };
-  ws.getCell(row, 8).value = num(ex.tax_diff);
-  ws.getCell(row, 8).numFmt = '0.000';
-  styleData(ws.getCell(row, 8));
+  ws.mergeCells(row, 1, row, 4);
+  ws.getCell(row, 1).value = '抵税差额';
+  ws.getCell(row, 5).value = num(ex.tax_diff);
+  ws.getCell(row, 5).numFmt = '#,##0.0000';
+  ws.getCell(row, 6).value = sourceCurrency;
+  for (let column = 1; column <= 6; column++) styleElectronicRow(ws.getCell(row, column), column);
+  ws.getCell(row, 1).alignment = { horizontal: 'right', vertical: 'middle' };
   row += 1;
   // 应交税负
-  ws.getCell(row, 7).value = '应交税负：';
-  ws.getCell(row, 7).alignment = { horizontal: 'right' };
-  ws.getCell(row, 8).value = num(ex.tax_payable);
-  ws.getCell(row, 8).numFmt = '0.000';
-  styleData(ws.getCell(row, 8));
+  ws.mergeCells(row, 1, row, 4);
+  ws.getCell(row, 1).value = '应交税负';
+  ws.getCell(row, 5).value = num(ex.tax_payable);
+  ws.getCell(row, 5).numFmt = '#,##0.0000';
+  ws.getCell(row, 6).value = sourceCurrency;
+  for (let column = 1; column <= 6; column++) styleElectronicRow(ws.getCell(row, column), column);
+  ws.getCell(row, 1).alignment = { horizontal: 'right', vertical: 'middle' };
   row += 1;
   // 含税报价
-  ws.getCell(row, 7).value = '含税报价：';
-  ws.getCell(row, 7).alignment = { horizontal: 'right' };
-  ws.getCell(row, 7).font = { bold: true, name: 'Microsoft YaHei' };
+  ws.mergeCells(row, 1, row, 4);
+  ws.getCell(row, 1).value = '含税报价';
+  ws.getCell(row, 1).alignment = { horizontal: 'right', vertical: 'middle' };
   const taxedVal = ex.taxed_price != null ? num(ex.taxed_price) : profitVal + num(ex.tax_diff) + num(ex.tax_payable);
-  ws.getCell(row, 8).value = taxedVal;
-  ws.getCell(row, 8).numFmt = '0.000';
-  ws.getCell(row, 9).value = `${sourceCurrency} 含税价`;
-  styleSubtotal(ws.getCell(row, 8), 'hkd');
+  ws.getCell(row, 5).value = { formula: `E${row - 3}+E${row - 2}+E${row - 1}`, result: taxedVal };
+  ws.getCell(row, 5).numFmt = '#,##0.0000';
+  ws.getCell(row, 6).value = `${sourceCurrency} 含税价`;
+  for (let column = 1; column <= 6; column++) {
+    ws.getCell(row, column).fill = totalFill;
+    ws.getCell(row, column).border = electronicBorder;
+    ws.getCell(row, column).font = { bold: true, color: { argb: 'FF0B3A63' }, size: 11, name: FONT };
+  }
+  ws.getCell(row, 5).alignment = { horizontal: 'right', vertical: 'middle' };
+  ws.getCell(row, 6).alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
 
   const moldFees = ex.mold_fees || [];
   if (moldFees.length) {
     row += 2;
     ws.getCell(row, 1).value = '模具费用（单独记录，不自动摊入单价）';
     ws.mergeCells(row, 1, row, 6);
-    styleSection(ws.getCell(row, 1));
+    ws.getCell(row, 1).font = { bold: true, color: { argb: 'FF17324D' }, size: 12, name: FONT };
+    ws.getCell(row, 1).fill = headerFill;
+    ws.getCell(row, 1).alignment = { horizontal: 'left', vertical: 'middle' };
     row += 1;
     ['费用名称', '金额', '币种', '备注'].forEach((value, index) => {
       ws.getCell(row, index + 1).value = value;
-      styleHeader(ws.getCell(row, index + 1));
+      styleElectronicHeader(ws.getCell(row, index + 1));
     });
     row += 1;
     moldFees.forEach(fee => {
       ws.getCell(row, 1).value = fee.name || '模费';
       ws.getCell(row, 2).value = num(fee.amount);
+      ws.getCell(row, 2).numFmt = '#,##0.00';
       ws.getCell(row, 3).value = fee.currency || sourceCurrency;
       ws.getCell(row, 4).value = fee.note || '';
-      for (let column = 1; column <= 4; column++) styleData(ws.getCell(row, column));
+      for (let column = 1; column <= 4; column++) styleElectronicRow(ws.getCell(row, column), column);
       row += 1;
     });
   }
@@ -752,11 +860,13 @@ function addElectronicDetailSheet(wb, electronic, quote) {
     row += 2;
     ws.getCell(row, 1).value = '其它费用（总额，不计入单套电子成本）';
     ws.mergeCells(row, 1, row, 6);
-    styleSection(ws.getCell(row, 1));
+    ws.getCell(row, 1).font = { bold: true, color: { argb: 'FF17324D' }, size: 12, name: FONT };
+    ws.getCell(row, 1).fill = headerFill;
+    ws.getCell(row, 1).alignment = { horizontal: 'left', vertical: 'middle' };
     row += 1;
     ['费用名称', '数量', '单价 RMB', '合计 RMB', '备注'].forEach((value, index) => {
       ws.getCell(row, index + 1).value = value;
-      styleHeader(ws.getCell(row, index + 1));
+      styleElectronicHeader(ws.getCell(row, index + 1));
     });
     row += 1;
     const feeStart = row;
@@ -767,14 +877,17 @@ function addElectronicDetailSheet(wb, electronic, quote) {
       ws.getCell(row, 3).value = num(fee.unit_price);
       ws.getCell(row, 4).value = amount;
       ws.getCell(row, 5).value = fee.note || '';
-      for (let column = 1; column <= 5; column++) styleData(ws.getCell(row, column));
+      for (let column = 1; column <= 5; column++) styleElectronicRow(ws.getCell(row, column), column);
       [3, 4].forEach(column => { ws.getCell(row, column).numFmt = '0.00'; });
       row += 1;
     });
     ws.getCell(row, 1).value = '其它费用合计';
     ws.getCell(row, 4).value = { formula: `SUM(D${feeStart}:D${row - 1})`, result: sum(sourceFees, fee => num(fee.amount) || num(fee.qty) * num(fee.unit_price)) };
-    styleSubtotal(ws.getCell(row, 1), 'sub');
-    styleSubtotal(ws.getCell(row, 4), 'sub');
+    for (let column = 1; column <= 5; column++) {
+      ws.getCell(row, column).fill = totalFill;
+      ws.getCell(row, column).border = electronicBorder;
+      ws.getCell(row, column).font = { bold: true, color: { argb: 'FF17324D' }, size: 11, name: FONT };
+    }
     ws.getCell(row, 4).numFmt = '0.00';
   }
 }
@@ -1082,9 +1195,8 @@ function renderShippingBlock(ws, row, shipping, header, fxRH, refs = {}) {
     const rate = num(x._freight_rate);
     const freight = x.is_factory ? 0 : rate * num(shipping.freight_pct) / 100;
     const lifting = x.is_factory ? 0 : rate * num(shipping.lifting_pct) / 100;
-    const afterShip = base + freight + lifting;
-    const afterMarkup = afterShip * markupX;
-    const afterDivisor = afterMarkup / Math.max(num(shipping.divisor), 1e-9);
+    const mainMarkup = base * markupX;
+    const freightMarkup = (freight + lifting) * markupX;
     const divisor = Math.max(num(shipping.divisor), 1e-9);
     const sewBase = num(refs.sewingHkd);
     const elecBase = num(refs.elecHkd);
@@ -1092,13 +1204,19 @@ function renderShippingBlock(ws, row, shipping, header, fxRH, refs = {}) {
     const sewDivisor = sewMarkup / divisor;
     const elecMarkup = elecBase * elecMarkupX;
     const elecDivisor = elecMarkup / divisor;
-    const totalHKD = afterDivisor + sewDivisor + elecDivisor;
+    const combinedHkd = mainMarkup + sewMarkup + elecMarkup + freightMarkup;
+    const totalHKD = combinedHkd / divisor;
     const totalUSD = totalHKD / fxHU;
     const moldShareUSD = num(refs.moldShareUsd);
     const prototypeShareUSD = num(refs.prototypeShareUsd);
     const testingShareUSD = num(refs.testingShareUsd);
     const finalUSD = totalUSD + moldShareUSD + prototypeShareUSD + testingShareUSD + customerSuppliedUSD;
-    return { base, freight, lifting, afterShip, afterMarkup, afterDivisor, totalHKD, totalUSD, moldShareUSD, prototypeShareUSD, testingShareUSD, customerSuppliedUSD, finalUSD,
+    const surtaxUsd = finalUSD * 0.004;
+    const surtaxMarkup = surtaxUsd * markupX;
+    const surtaxDivided = surtaxMarkup / divisor;
+    const quotedUSD = finalUSD + surtaxDivided;
+    return { base, freight, lifting, mainMarkup, freightMarkup, combinedHkd, totalHKD, totalUSD, moldShareUSD, prototypeShareUSD, testingShareUSD, customerSuppliedUSD, finalUSD,
+      surtaxUsd, surtaxMarkup, surtaxDivided, quotedUSD,
       sewBase, sewMarkup, sewDivisor, elecBase, elecMarkup, elecDivisor };
   });
 
@@ -1123,16 +1241,38 @@ function renderShippingBlock(ws, row, shipping, header, fxRH, refs = {}) {
     row += 1;
   };
 
-  // 1. 出货底价：所有场景统一引用合计 N 列。
+  // 按参考表顺序：小计 → 主体码点 → 车缝 → 电子 → 运吊费 → 含运 → 找数。
   const rBase = row;
   const sumR = refs.summaryRow;
-  writeRow('出货底价 HK$', i => {
+  writeRow('小计 HK$', i => {
     if (sumR) {
-      return { formula: `N${sumR}`, result: rows[i].base };
+      return { formula: `K${sumR}`, result: rows[i].base };
     }
     return rows[i].base;
   }, { fmt: '0.00' });
-  // 2. 运费：出厂价列 = 0；其他场景 = 该场景每PCS运费率 × 运费%（引用上方"运费场景"表对应行 E 列）
+  const rMk = row;
+  writeRow(`码点 × ${markupX}`,
+    i => ({ formula: `${colLetter(i+2)}${rBase}*${markupX}`, result: rows[i].mainMarkup }),
+    { fmt: '0.00' });
+  const rMainTotal = row;
+  writeRow('TOTAL (HK$)',
+    i => ({ formula: `${colLetter(i+2)}${rMk}`, result: rows[i].mainMarkup }),
+    { fmt: '0.00', bold: true, fill: SUBTOTAL_FILL, fontColor: SUBTOTAL_FONT });
+  const rSew = row;
+  writeRow('车缝', i => refs.sewingSource ? { formula: refs.sewingSource, result: rows[i].sewBase } : rows[i].sewBase, { fmt: '0.00' });
+  const rSewMarkup = row;
+  writeRow(`码点 × ${sewMarkupX}`, i => ({ formula: `${colLetter(i+2)}${rSew}*${sewMarkupX}`, result: rows[i].sewMarkup }), { fmt: '0.00' });
+  const rSewTotal = row;
+  writeRow('TOTAL (HK$)', i => ({ formula: `${colLetter(i+2)}${rSewMarkup}`, result: rows[i].sewMarkup }),
+    { fmt: '0.00', bold: true, fill: SUBTOTAL_FILL, fontColor: SUBTOTAL_FONT });
+  const rElec = row;
+  writeRow('电子', i => refs.electronicSource ? { formula: refs.electronicSource, result: rows[i].elecBase } : rows[i].elecBase, { fmt: '0.00' });
+  const rElecMarkup = row;
+  writeRow(`码点 × ${elecMarkupX}`, i => ({ formula: `${colLetter(i+2)}${rElec}*${elecMarkupX}`, result: rows[i].elecMarkup }), { fmt: '0.00' });
+  const rElecTotal = row;
+  writeRow('TOTAL (HK$)', i => ({ formula: `${colLetter(i+2)}${rElecMarkup}`, result: rows[i].elecMarkup }),
+    { fmt: '0.00', bold: true, fill: SUBTOTAL_FILL, fontColor: SUBTOTAL_FONT });
+
   const rFre = row;
   const freightRefFn = (pct) => (i) => {
     if (sc[i].is_factory) return 0;
@@ -1141,81 +1281,52 @@ function renderShippingBlock(ws, row, shipping, header, fxRH, refs = {}) {
     return { formula: ref, result: sc[i].is_factory ? 0 : num(sc[i]._freight_rate) * pct / 100 };
   };
   writeRow(`运费 ${shipping.freight_pct || 0}%`, freightRefFn(num(shipping.freight_pct)), { fmt: '0.00' });
-  // 3. 吊柜费：出厂价列 = 0
   const rLift = row;
   writeRow(`吊柜费 ${shipping.lifting_pct || 0}%`, freightRefFn(num(shipping.lifting_pct)), { fmt: '0.00' });
-  // 记录"盐田40柜"(或首个非出厂价)场景的 运费/吊柜费 单元格，供减税明细 表2 直接引用
   const freightColIdx = (() => { const i = sc.findIndex(x => !x.is_factory && /盐田.*40/i.test(x.name || '')); return i >= 0 ? i : sc.findIndex(x => !x.is_factory); })();
   if (freightColIdx >= 0) {
     refs.shipFreightCell = `${colLetter(freightColIdx + 2)}${rFre}`;
     refs.shipCabinetCell = `${colLetter(freightColIdx + 2)}${rLift}`;
   }
-  // 4. 含运 = 底价 + 运费 + 吊柜
-  const rAS = row;
-  writeRow('含运 HK$',
-    i => ({ formula: `${colLetter(i+2)}${rBase}+${colLetter(i+2)}${rFre}+${colLetter(i+2)}${rLift}`, result: rows[i].afterShip }),
-    { fmt: '0.00', bold: true });
-  // 5. 码点 ×
-  const rMk = row;
+  const rFreightMarkup = row;
   writeRow(`码点 × ${markupX}`,
-    i => ({ formula: `${colLetter(i+2)}${rAS}*${markupX}`, result: rows[i].afterMarkup }),
+    i => ({ formula: `(${colLetter(i+2)}${rFre}+${colLetter(i+2)}${rLift})*${markupX}`, result: rows[i].freightMarkup }),
     { fmt: '0.00' });
-  // 6. 找数 ÷
-  const rDiv = row;
-  writeRow(`找数 ÷ ${shipping.divisor || 1}`,
-    i => ({ formula: `${colLetter(i+2)}${rMk}/${num(shipping.divisor)}`, result: rows[i].afterDivisor }),
-    { fmt: '0.00' });
-  // 主体、车缝、电子分别算 TOTAL，最后再相加。
-  const rMainTotal = row;
-  writeRow('TOTAL (HK$)',
-    i => ({ formula: `${colLetter(i+2)}${rDiv}`, result: rows[i].afterDivisor }),
-    { fmt: '0.00', bold: true, fill: SUBTOTAL_FILL, fontColor: SUBTOTAL_FONT });
-  const rSew = row;
-  writeRow('车缝', i => sumR ? { formula: `K${sumR}`, result: rows[i].sewBase } : rows[i].sewBase, { fmt: '0.00' });
-  const rSewMarkup = row;
-  writeRow(`码点 × ${sewMarkupX}`, i => ({ formula: `${colLetter(i+2)}${rSew}*${sewMarkupX}`, result: rows[i].sewMarkup }), { fmt: '0.00' });
-  const rSewDiv = row;
-  writeRow(`找数 ÷ ${shipping.divisor || 1}`, i => ({ formula: `${colLetter(i+2)}${rSewMarkup}/${num(shipping.divisor)}`, result: rows[i].sewDivisor }), { fmt: '0.00' });
-  const rSewTotal = row;
-  writeRow('TOTAL (HK$)', i => ({ formula: `${colLetter(i+2)}${rSewDiv}`, result: rows[i].sewDivisor }),
-    { fmt: '0.00', bold: true, fill: SUBTOTAL_FILL, fontColor: SUBTOTAL_FONT });
-  const rElec = row;
-  writeRow('电子', i => sumR ? { formula: `E${sumR}`, result: rows[i].elecBase } : rows[i].elecBase, { fmt: '0.00' });
-  const rElecMarkup = row;
-  writeRow(`码点 × ${elecMarkupX}`, i => ({ formula: `${colLetter(i+2)}${rElec}*${elecMarkupX}`, result: rows[i].elecMarkup }), { fmt: '0.00' });
-  const rElecDiv = row;
-  writeRow(`找数 ÷ ${shipping.divisor || 1}`, i => ({ formula: `${colLetter(i+2)}${rElecMarkup}/${num(shipping.divisor)}`, result: rows[i].elecDivisor }), { fmt: '0.00' });
-  const rElecTotal = row;
-  writeRow('TOTAL (HK$)', i => ({ formula: `${colLetter(i+2)}${rElecDiv}`, result: rows[i].elecDivisor }),
-    { fmt: '0.00', bold: true, fill: SUBTOTAL_FILL, fontColor: SUBTOTAL_FONT });
+  const rCombined = row;
+  writeRow('含运 HK$', i => ({
+    formula: `${colLetter(i+2)}${rMainTotal}+${colLetter(i+2)}${rSewTotal}+${colLetter(i+2)}${rElecTotal}+${colLetter(i+2)}${rFreightMarkup}`,
+    result: rows[i].combinedHkd,
+  }), { fmt: '0.00', bold: true });
+  const rDivisor = row;
+  writeRow(`找数 ÷ ${shipping.divisor || 1}`, () => num(shipping.divisor), { fmt: '0.00' });
   const rHKD = row;
-  writeRow('TOTAL (HK$)', i => ({ formula: `${colLetter(i+2)}${rMainTotal}+${colLetter(i+2)}${rSewTotal}+${colLetter(i+2)}${rElecTotal}`, result: rows[i].totalHKD }),
+  writeRow('TOTAL (HK$)', i => ({ formula: `${colLetter(i+2)}${rCombined}/${colLetter(i+2)}${rDivisor}`, result: rows[i].totalHKD }),
     { fmt: '0.00', bold: true, fill: 'FFDBEAFE', fontColor: 'FF1E40AF' });
   // 8. USD
   const rUSD = row;
   writeRow(`(USD) = HK$/${fxHU}`,
     i => ({ formula: `${colLetter(i+2)}${rHKD}/${fxHU}`, result: rows[i].totalUSD }),
-    { fmt: '0.0000' });
+    { fmt: '0.00' });
   // 9-11. 三项分摊分别显示并引用「生产模具费用」表。
   const rMold = row;
   writeRow('模具分摊 (USD)',
     i => refs.moldShareUsdCell ? { formula: refs.moldShareUsdCell, result: rows[i].moldShareUSD } : rows[i].moldShareUSD,
-    { fmt: '0.0000' });
+    { fmt: '0.00' });
   const rPrototype = row;
   writeRow('手板费分摊 (USD)',
     i => refs.prototypeShareUsdCell ? { formula: refs.prototypeShareUsdCell, result: rows[i].prototypeShareUSD } : rows[i].prototypeShareUSD,
-    { fmt: '0.0000' });
+    { fmt: '0.00' });
   const rTesting = row;
   writeRow('测试费分摊 (USD)',
     i => refs.testingShareUsdCell ? { formula: refs.testingShareUsdCell, result: rows[i].testingShareUSD } : rows[i].testingShareUSD,
-    { fmt: '0.0000' });
+    { fmt: '0.00' });
   const customerSuppliedRows = customerSuppliedProducts.map(item => {
     const itemRow = row;
     const itemFormula = toExcelFormulaInput(item.amount_usd_raw);
     writeRow(
       `客供成品：${String(item.name || '未命名').trim() || '未命名'} (USD)`,
       () => itemFormula ? { formula: itemFormula, result: num(item.amount_usd) } : num(item.amount_usd),
-      { fmt: '0.0000' }
+      { fmt: '0.00' }
     );
     return itemRow;
   });
@@ -1224,24 +1335,40 @@ function renderShippingBlock(ws, row, shipping, header, fxRH, refs = {}) {
   const finalFormulaRows = [rUSD, rMold, rPrototype, rTesting, ...customerSuppliedRows];
   writeRow('TOTAL (USD)',
     i => ({ formula: finalFormulaRows.map(sourceRow => `${colLetter(i + 2)}${sourceRow}`).join('+'), result: rows[i].finalUSD }),
-    { fmt: '0.0000', bold: true });
+    { fmt: '0.00', bold: true, fill: 'FFDDEBF7', fontColor: 'FF1F4E78' });
+
+  const rSurtax = row;
+  writeRow('附加税0.4%', i => ({ formula: `${colLetter(i+2)}${rFinal}*0.4%`, result: rows[i].surtaxUsd }),
+    { fmt: '0.00', bold: true, fill: 'FFFFF2CC', fontColor: 'FF7F6000' });
+  const rSurtaxMarkup = row;
+  writeRow(`码点 × ${markupX}`, i => ({ formula: `${colLetter(i+2)}${rSurtax}*${markupX}`, result: rows[i].surtaxMarkup }),
+    { fmt: '0.00' });
+  const rSurtaxDivisor = row;
+  writeRow(`找数 ÷ ${shipping.divisor || 1}`, i => ({ formula: `${colLetter(i+2)}${rSurtaxMarkup}/${num(shipping.divisor)}`, result: rows[i].surtaxDivided }),
+    { fmt: '0.00' });
+  const rQuotedTotal = row;
+  writeRow('TOTAL (USD)', i => ({ formula: `${colLetter(i+2)}${rFinal}+${colLetter(i+2)}${rSurtaxDivisor}`, result: rows[i].quotedUSD }),
+    { fmt: '0.00', bold: true, fill: 'FFDBEAFE', fontColor: 'FF1E40AF' });
 
   // 报客货价 = 第一个非"出厂价"场景的 finalUSD（默认 盐田40柜）
   const customerIdx = sc.findIndex(x => !x.is_factory);
-  const customerUSD = (customerIdx >= 0 && rows[customerIdx]) ? rows[customerIdx].finalUSD
-    : (rows.length ? Math.min(...rows.map(r => r.finalUSD)) : 0);
+  const customerUSD = (customerIdx >= 0 && rows[customerIdx]) ? rows[customerIdx].quotedUSD
+    : (rows.length ? Math.min(...rows.map(r => r.quotedUSD)) : 0);
   const target = num(shipping.target_usd);
   const diffPct = target > 0 ? (customerUSD - target) / target : 0;
   // 引用单元格地址：B 是 第1列(出厂价)，customerIdx >= 0 时 = B + customerIdx
   const custCol = (customerIdx >= 0) ? colLetter(customerIdx + 2) : 'B';
+  // 上方附加税按 USD 展示；减税明细“杂项”按 HKD 汇总。
+  refs.shipSurtaxHkdFormula = `${custCol}${rSurtax}*${fxHU}`;
+  if (refs.sharedRefs) refs.sharedRefs.shipSurtaxHkdFormula = refs.shipSurtaxHkdFormula;
   // 减税明细“货价”取默认报客场景 TOTAL HKD × 找数，还原到找数前。
   refs.customerTotalHkdCell = `${custCol}${rHKD}`;
   if (refs.sharedRefs) refs.sharedRefs.customerTotalHkdCell = refs.customerTotalHkdCell;
 
   ws.mergeCells(row, 1, row, cols + 1);
   ws.getCell(row, 1).value = {
-    formula: `"报客货价: "&TEXT(${custCol}${rFinal},"0.0000")&" | 目标: ${target.toFixed(4)} | 相差: "&TEXT((${custCol}${rFinal}-${target})/${target || 1}*100,"0.00")&"%"`,
-    result: `报客货价: ${customerUSD.toFixed(4)} | 目标: ${target.toFixed(4)} | 相差: ${(diffPct * 100).toFixed(2)}%`,
+    formula: `"报客货价: "&TEXT(${custCol}${rQuotedTotal},"0.00")&" | 目标: ${target.toFixed(2)} | 相差: "&TEXT((${custCol}${rQuotedTotal}-${target})/${target || 1}*100,"0.00")&"%"`,
+    result: `报客货价: ${customerUSD.toFixed(2)} | 目标: ${target.toFixed(2)} | 相差: ${(diffPct * 100).toFixed(2)}%`,
   };
   ws.getCell(row, 1).alignment = { horizontal: 'center', vertical: 'middle' };
   ws.getCell(row, 1).font = { bold: true, color: { argb: 'FF1F2937' } };
@@ -1297,9 +1424,9 @@ function renderInjection(ws, row, payload, fxRH, refs) {
     ws.getCell(row, 14).value = { formula: `G${row}+I${row}`, result: finished };
     ws.getCell(row, 14).numFmt = '0.0000';
     for (let c = 1; c <= h.length; c++) styleData(ws.getCell(row, c));
-    // 按材质分进口料/国内料（与前端 workbench.js 同逻辑）：POM/PVC/C-PVC = 国内料；其余非空 = 进口料
+    // 按材质分进口料/国内料（与前端 workbench.js 同逻辑）：PVC/TPR/TPE = 国内料；其余非空 = 进口料
     const _mat = String(r.material || '').toUpperCase().trim();
-    if (/^(POM|PVC|C[- ]?PVC)/.test(_mat)) domMatCells.push(`G${row}`);
+    if (/^(PVC|TPR|TPE)\b/.test(_mat)) domMatCells.push(`G${row}`);
     else if (_mat) impMatCells.push(`G${row}`);
     row += 1;
   });
@@ -1333,6 +1460,35 @@ function renderInjection(ws, row, payload, fxRH, refs) {
   if (refs) { refs.impMatCells = impMatCells; refs.domMatCells = domMatCells; }
   return row;
 }
+
+function addMoldingDetailSheet(wb, payload, fxRH) {
+  const ws = wb.addWorksheet('啤机明细');
+  ws.columns = [12, 24, 14, 14, 14, 15, 16, 14, 16, 10, 14, 12, 12, 18]
+    .map(width => ({ width }));
+  ws.mergeCells(1, 1, 1, 14);
+  ws.getCell(1, 1).value = '啤机部·注塑明细';
+  ws.getCell(1, 1).font = { bold: true, size: 16, color: { argb: 'FFFFFFFF' }, name: 'Microsoft YaHei' };
+  ws.getCell(1, 1).alignment = { horizontal: 'center', vertical: 'middle' };
+  ws.getCell(1, 1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0F3B64' } };
+  ws.getRow(1).height = 30;
+  renderInjection(ws, 3, payload, fxRH, {});
+  return ws;
+}
+
+function addBlowDetailSheet(wb, payload) {
+  const ws = wb.addWorksheet('吹气明细');
+  ws.columns = [24, 16, 18, 16, 16, 16, 14, 14, 14, 12, 12, 16, 12, 18]
+    .map(width => ({ width }));
+  ws.mergeCells(1, 1, 1, 14);
+  ws.getCell(1, 1).value = '啤机部·吹气明细';
+  ws.getCell(1, 1).font = { bold: true, size: 16, color: { argb: 'FFFFFFFF' }, name: 'Microsoft YaHei' };
+  ws.getCell(1, 1).alignment = { horizontal: 'center', vertical: 'middle' };
+  ws.getCell(1, 1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0F3B64' } };
+  ws.getRow(1).height = 30;
+  renderBlowBlock(ws, 3, payload, {});
+  return ws;
+}
+
 function materialCost(r) {
   if (r.material_cost_manual != null && r.material_cost_manual !== '') return num(r.material_cost_manual);
   return num(r.weight_g) / 1000 * num(r.material_unit_price);
@@ -2310,11 +2466,11 @@ function renderCartonAndFreight(ws, row, eng, sales, refs) {
     row += 1;
   }
 
-  // 构造 九、合计 K 列纸箱成本公式：Σ((box_i + Σflat_i_j) / qty_i)
+  // 构造九、合计纸箱成本公式：Σ(box_i / qty_i + Σflat_i_j)
   if (refs && cartonRefs.length) {
     const parts = cartonRefs.map(cr => {
       const flatSum = cr.flatCells.length ? `+${cr.flatCells.join('+')}` : '';
-      return `(${cr.boxCell}${flatSum})/MAX(${cr.qtyCell},1)`;
+      return `${cr.boxCell}/MAX(${cr.qtyCell},1)${flatSum}`;
     });
     refs.cartonHkdPerPcs = parts.join('+');  // HK$/PCS （还没 × 汇率）
   }
@@ -2388,7 +2544,6 @@ function renderTaxSummary(ws, row, sales, extra = {}) {
   const { subRefs = {}, fxRH: fxR = 0.85 } = extra;
   // 表1 部分单元格可关联到上方各部门 / 九、合计 HKD 小计
   const sumR = extra.summaryRow;
-  const ov = ps.overrides || {};  // 用户手填覆盖的项 → 不写公式，保持静态值
 
   // ---- 关键字分类，把减税明细做成引用上方明细的公式 ----
   // ⚠️ 必须与前端 workbench.js 的 autoFill 分类逻辑（_catOf：显式类别优先 + 关键字兜底 及各项来源表）保持一致，
@@ -2422,8 +2577,8 @@ function renderTaxSummary(ws, row, sales, extra = {}) {
     ...(pr.packaging || []).filter(r => _catOf(r, 'packaging') === cat).map(r => r.cell),
     ...(pr.aux       || []).filter(r => _catOf(r, 'aux')       === cat).map(r => r.cell),
   ];
-  // 马达 = 电子 + 五金 行（按关键字，电子/五金表无类别下拉）
-  const motorCells   = [..._pick('electronic', _isMotor), ..._pick('hardware', _isMotor)];
+  // 马达只会在五金明细中出现；电子中的「马达驱动 IC」等仍属于电子。
+  const motorCells = _pick('hardware', _isMotor);
   // 吸塑 = 辅助/包装按类别 + 电子/五金里关键字命中的吸塑行
   const blisterCells = [...byCat('吸塑'), ..._pick('electronic', _isBlister), ..._pick('hardware', _isBlister)];
   const glueBagCells  = byCat('胶袋');
@@ -2432,13 +2587,13 @@ function renderTaxSummary(ws, row, sales, extra = {}) {
   const platingCells  = byCat('电镀');
   const colorBoxCells = byCat('彩盒/内咭');
   const otherBuyCells = byCat('其他外购');
-  // 五金/电子 均剔除马达（与前端一致，避免与「马达」列双算）
-  const hwNonMotorCells   = _pickNot('hardware',   r => _row(_isMotor, r));
-  const elecNonMotorCells = _pickNot('electronic', r => _row(_isMotor, r));
+  // 五金剔除已归入马达的行；电子全部保留。
+  const hwNonMotorCells = _pickNot('hardware', r => _row(_isMotor, r));
+  const electronicCells = (pr.electronic || []).map(r => r.cell);
 
-  // cells → 公式 ref（fx=true 表示 RMB→HKD 除以汇率）；被手填覆盖或无来源则返回 null（回退静态值）
+  // cells → 公式 ref（fx=true 表示 RMB→HKD 除以汇率）；无来源时才回退静态值。
   const auto = (tbl, key, cells, fx) => {
-    if (ov[`${tbl}.${key}`] || !cells || !cells.length) return null;
+    if (!cells || !cells.length) return null;
     const body = cells.join('+');
     return { ref: fx ? `(${body})/${fxR}` : body };
   };
@@ -2448,31 +2603,33 @@ function renderTaxSummary(ws, row, sales, extra = {}) {
   const lPct = num(sales.shipping?.lifting_pct ?? 52);
   const ytRateCell = (subRefs.freightCells || {})['YT 40柜'];
 
-  // 直接引用单元格的项（非关键字累加）：被手填覆盖或无来源则回退静态值
-  const refLink = (tbl, key, ref) => (ref && !ov[`${tbl}.${key}`]) ? { ref } : null;
+  // 直接引用单元格的项（非关键字累加）：无来源时才回退静态值。
+  const refLink = (tbl, key, ref) => ref ? { ref } : null;
 
   const markupValue = sales.shipping?.markup_x;
   const _mk = markupValue == null || markupValue === '' ? 1.2 : num(markupValue);
   // 用逐格相加代替 SUM()：liveResult 只计算纯四则运算，确保 xlsx 缓存值与页面实时值一致。
-  // A-L 中排除 E(电子)、K(车缝)，二者在出货价算价中独立处理。
+  // A-J 已不含电子、车缝，二者在出货价算价中独立处理。
   const divisorValue = sales.shipping?.divisor;
   const _divisor = divisorValue == null || divisorValue === '' ? 0.98 : num(divisorValue);
   const basePriceFormulaRef = subRefs.customerTotalHkdCell
     ? `${subRefs.customerTotalHkdCell}*${_divisor}`
     : (sumR
-      ? `(${['A', 'B', 'C', 'D', 'F', 'G', 'H', 'I', 'J', 'L'].map(col => `${col}${sumR}`).join('+')})*${_mk}`
+      ? `SUM(A${sumR}:J${sumR})*${_mk}`
       : null);
   const linkMap = {
-    // 货价基数排除电子(E)和车缝(K)，二者在出货价算价中独立处理。
+    // 货价基数不含电子和车缝，二者在出货价算价中独立处理。
     base_price: refLink('t1', 'base_price', basePriceFormulaRef),
     blow:     subRefs.blow      ? { ref: subRefs.blow }   : null,  // 吹气 本身就是 HKD
     slush:    subRefs.slush     ? { ref: subRefs.slush }  : null,  // 搪胶 本身就是 HKD
-    electronic: auto('t1', 'electronic', elecNonMotorCells, false),  // 电子已是 HKD（剔除马达）
+    electronic: auto('t1', 'electronic', electronicCells, false),  // 电子已是 HKD，不识别马达
     // 注塑料按材质分（I列原料单价已是 HKD，不除汇率）
     imp_mat: auto('t1', 'imp_mat', subRefs.impMatCells, false),
     dom_mat: auto('t1', 'dom_mat', subRefs.domMatCells, false),
-    sewing_hair:  (subRefs.sewHairRmb && !ov['t1.sewing_hair']) ? { ref: `(${subRefs.sewHairRmb})/${fxR}` } : null,
-    sewing_cloth: (subRefs.sewClothRmb && !ov['t1.sewing_cloth']) ? { ref: `(${subRefs.sewClothRmb})/${fxR}` } : null,
+    sewing_hair:  subRefs.sewHairRmb ? { ref: `(${subRefs.sewHairRmb})/${fxR}` } : null,
+    // 车衣 = 统一成本表全部车缝行 - 车发。这样表 1 直接与上方统一成本表勾稽，
+    // 同时仍保留车发/车衣的分类口径。t1 数据行确定后再回填具体单元格引用。
+    sewing_cloth: subRefs.sewClothRmb ? { ref: `(${subRefs.sewClothRmb})/${fxR}` } : null,
     motor:    auto('t1', 'motor',    motorCells,      false),  // 电子+五金 已 HKD
     suction:  auto('t1', 'suction',  blisterCells,    false),  // 包装+电子+五金 已 HKD
     glue_bag: auto('t1', 'glue_bag', glueBagCells,    false),  // 胶袋：辅助+包装 已 HKD
@@ -2483,9 +2640,9 @@ function renderTaxSummary(ws, row, sales, extra = {}) {
     battery:   auto('t2', 'battery',   batteryCells,  false),
     libao:     auto('t2', 'libao',     libaoCells,    false),
     plating:   auto('t2', 'plating',   platingCells,  false),
-    // 新列布局：纸箱=L，印尼运费=I，附加税=M。
-    carton:      refLink('t2', 'carton',      sumR ? `L${sumR}` : null),
-    misc:        refLink('t2', 'misc',        sumR ? `I${sumR}+M${sumR}` : null),
+    // 纸箱取统一成本汇总；“杂项”汇总印尼运费和附加税，不再单列附加税。
+    carton:      refLink('t2', 'carton',      sumR ? `J${sumR}` : null),
+    misc:        refLink('t2', 'misc',        [sumR ? `H${sumR}` : null, subRefs.shipSurtaxHkdFormula].filter(Boolean).join('+') || null),
     // 未减税前码数会在总成本生成后回填为“货价 ÷ 总成本”。
     code_before: null,
     // 运费/吊柜费 = 直接引用 出货价算价 盐田40柜 的 运费/吊柜费 单元格（单一来源）；回退到运费场景率×%
@@ -2503,11 +2660,14 @@ function renderTaxSummary(ws, row, sales, extra = {}) {
     if (!/^[-+*/().\d\s]+$/.test(expr)) return fallback;  // 只允许纯算术，安全兜底
     try { const r = Function(`return (${expr})`)(); return Number.isFinite(r) ? r : fallback; } catch { return fallback; }
   };
-  // 写一行减税明细：有 link 写公式(result 实时重算)，否则写静态值
+  // 写一行减税明细：有 link 写引用公式；无对应明细时写明确的 =0，
+  // 避免无来源项沿用历史快照或看起来像手工固定值。
   const writeDataRow = (cols, data, dataRow) => cols.forEach((c, i) => {
     const cell = ws.getCell(dataRow, i + 1);
     const link = linkMap[c[1]];
-    cell.value = link ? { formula: link.ref, result: liveResult(link.ref, num(data[c[1]])) } : num(data[c[1]]);
+    cell.value = link
+      ? { formula: link.ref, result: liveResult(link.ref, num(data[c[1]])) }
+      : { formula: '0', result: 0 };
     styleData(cell);
     cell.numFmt = '0.0000';
   });
@@ -2527,6 +2687,10 @@ function renderTaxSummary(ws, row, sales, extra = {}) {
   t1Cols.forEach((c, i) => { ws.getCell(row, i + 1).value = c[0]; styleHeader(ws.getCell(row, i + 1)); });
   row += 1;
   const t1DataRow = row;
+  if (subRefs.sewingHkd) {
+    // 截图上方统一成本表的车缝行合计 - 本行「车发」 = 「车衣」。
+    linkMap.sewing_cloth = { ref: `(${subRefs.sewingHkd})-F${t1DataRow}` };
+  }
   writeDataRow(t1Cols, t1, t1DataRow);
   row += 2;
   // 单元格地址
@@ -2560,19 +2724,16 @@ function renderTaxSummary(ws, row, sales, extra = {}) {
   const t3 = ps.t3 || {};
   const asmRef = (subRefs.asmLabor && subRefs.pkgLabor) ? `${subRefs.asmLabor}+${subRefs.pkgLabor}`
                 : (subRefs.asmLabor || subRefs.pkgLabor || null);
-  const injectionLabor = ov['t3.injection_labor'] ? num(t3.injection_labor)
-    : liveResult(subRefs.injShotSum, num(t3.injection_labor));
-  const paintingLabor = ov['t3.painting_labor'] ? num(t3.painting_labor)
-    : liveResult(subRefs.secondProc ? `${subRefs.secondProc}*0.7` : null, num(t3.painting_labor));
-  const paintMaterial = ov['t3.paint_material'] ? num(t3.paint_material)
-    : liveResult(subRefs.secondProc ? `${subRefs.secondProc}*0.3` : null, num(t3.paint_material));
-  const assemblyLabor = ov['t3.assembly_labor'] ? num(t3.assembly_labor)
-    : liveResult(asmRef, num(t3.assembly_labor));
+  const injectionLabor = liveResult(subRefs.injShotSum, num(t3.injection_labor));
+  const paintingLabor = liveResult(subRefs.secondProc ? `${subRefs.secondProc}*0.7` : null, num(t3.painting_labor));
+  const paintMaterial = liveResult(subRefs.secondProc ? `${subRefs.secondProc}*0.3` : null, num(t3.paint_material));
+  const assemblyLabor = liveResult(asmRef, num(t3.assembly_labor));
   // result 用实时单元格值（不用过期 ps 快照），与 表1/表2 口径一致
   const basePrice = cellVal(t1Addr.base_price);
-  const noLaborCost = noLaborRefs.reduce((s, ref) => s + cellVal(ref), 0)
-                    + injectionLabor + paintingLabor + paintMaterial;
-  const totalCost = noLaborCost + assemblyLabor;
+  // 不含人工成本只含材料/外购项及油漆；啤工、喷油工、装配工在总成本中另行加入。
+  const noLaborCost = noLaborRefs.reduce((s, ref) => s + cellVal(ref), 0) + paintMaterial;
+  const laborCost = injectionLabor + paintingLabor + assemblyLabor;
+  const totalCost = noLaborCost + laborCost;
   const gross = basePrice - noLaborCost;
   const profit = basePrice - totalCost;
 
@@ -2586,18 +2747,18 @@ function renderTaxSummary(ws, row, sales, extra = {}) {
   row += 1;
   const t3Row = row;
   const basePriceRef = t1Addr.base_price;  // 货价
-  // A 啤工 B 喷油工 C 油漆 D 装配工 — 套公式引用来源；被手填覆盖(ov)则保持静态值
+  // A 啤工 B 喷油工 C 油漆 D 装配工 — 有来源时始终套公式引用。
   //   啤工=注塑Σ啤价(K)；喷油工=二次加工合计×0.7；油漆=×0.3；装配工=组装人工+包装人工
-  const t3cell = (key, formula, result) => (ov[`t3.${key}`] || !formula) ? result : { formula, result };
+  const t3cell = (key, formula, result) => formula ? { formula, result } : result;
   ws.getCell(row, 1).value = t3cell('injection_labor', subRefs.injShotSum || null, injectionLabor); ws.getCell(row, 1).numFmt = '0.0000';
   ws.getCell(row, 2).value = t3cell('painting_labor', subRefs.secondProc ? `${subRefs.secondProc}*0.7` : null, paintingLabor); ws.getCell(row, 2).numFmt = '0.0000';
   ws.getCell(row, 3).value = t3cell('paint_material', subRefs.secondProc ? `${subRefs.secondProc}*0.3` : null, paintMaterial); ws.getCell(row, 3).numFmt = '0.0000';
   ws.getCell(row, 4).value = t3cell('assembly_labor', asmRef, assemblyLabor); ws.getCell(row, 4).numFmt = '0.0000';
-  // E 不含人工成本 = 表1(无货价)+表2(成本) + 啤工+喷油工+油漆
-  const noLaborFormula = `${noLaborRefs.join('+')}+A${row}+B${row}+C${row}`;
+  // E 不含人工成本 = 表1(无货价)+表2(成本)+油漆
+  const noLaborFormula = `${noLaborRefs.join('+')}+C${row}`;
   ws.getCell(row, 5).value = { formula: noLaborFormula, result: noLaborCost }; ws.getCell(row, 5).numFmt = '0.0000';
-  // F 人工比例 = 装配工/货价
-  ws.getCell(row, 6).value = { formula: `IFERROR(D${row}/${basePriceRef},0)`, result: basePrice ? assemblyLabor/basePrice : 0 }; ws.getCell(row, 6).numFmt = '0.00%';
+  // F 人工比例 = (啤工+喷油工+装配工)/货价
+  ws.getCell(row, 6).value = { formula: `IFERROR((A${row}+B${row}+D${row})/${basePriceRef},0)`, result: basePrice ? laborCost/basePrice : 0 }; ws.getCell(row, 6).numFmt = '0.00%';
   // G 毛利 = 货价 - 不含人工成本
   ws.getCell(row, 7).value = { formula: `${basePriceRef}-E${row}`, result: gross }; ws.getCell(row, 7).numFmt = '0.0000';
   // H 毛利率
@@ -2606,8 +2767,8 @@ function renderTaxSummary(ws, row, sales, extra = {}) {
   ws.getCell(row, 9).value = { formula: `${basePriceRef}-K${row}`, result: profit }; ws.getCell(row, 9).numFmt = '0.0000';
   // J 利润率
   ws.getCell(row, 10).value = { formula: `IFERROR(I${row}/${basePriceRef},0)`, result: basePrice ? profit/basePrice : 0 }; ws.getCell(row, 10).numFmt = '0.00%';
-  // K 总成本 = 不含人工成本 + 装配工
-  const totalCostFormula = `E${row}+D${row}`;
+  // K 总成本 = 不含人工成本 + 啤工 + 喷油工 + 装配工
+  const totalCostFormula = `E${row}+A${row}+B${row}+D${row}`;
   ws.getCell(row, 11).value = { formula: totalCostFormula, result: totalCost }; ws.getCell(row, 11).numFmt = '0.0000';
   // 未减税前码数(表2) = 货价 / 总成本（总成本到这里才生成，回填前向引用公式）。
   const codeBeforeIdx = t2Cols.findIndex(c => c[1] === 'code_before') + 1;
@@ -2624,10 +2785,20 @@ function renderTaxSummary(ws, row, sales, extra = {}) {
 
   // 表 4 减税明细（金额行 + 税率行）
   const t4 = ps.t4 || {};
-  const t4Cols = [['含税13%类成本', 'tax13'], ['人工类13%', 'labor13'], ['纸箱类', 'carton'],
+  const t4Cols = [['含税13%类成本', 'tax13'], ['纸箱类', 'carton'],
     ['含税1%', 'tax1'], ['搪胶类3%', 'slush3'], ['车发类13%', 'sewhair13'], ['车衣类13%', 'sewcloth13'],
     ['吸塑类6%', 'suction6'], ['运费类9%', 'freight9'], ['含税13%类', 'tax13b']];
-  const T4_NO_RATE = new Set(['rmb_buy', 'tax13', 'labor13']);  // 参考列：无税率、不参与减税
+  const T4_NO_RATE = new Set(['rmb_buy', 'tax13']);  // 含税13%类成本为参考列，不重复参与减税
+  const T4_RATE_DEFAULTS = {
+    carton: 10,
+    tax1: 0.99,
+    slush3: 3,
+    sewhair13: 11.5,
+    sewcloth13: 11.5,
+    suction6: 6,
+    freight9: 8.26,
+    tax13b: 11.5,
+  };
   const sumCol = t4Cols.length + 1;      // 合计减税列 = 紧跟最后一个减税列（随列数自适应）
   const sumColL = colL(sumCol);
   ws.getCell(row, 1).value = '四、减税明细';
@@ -2649,7 +2820,6 @@ function renderTaxSummary(ws, row, sales, extra = {}) {
   const T4_FORMULA = {
     rmb_buy: rmbBuyFormula,
     tax13: `${tA.dom_mat}+${tA.hardware}+${tA.motor}+${tB.color_box}+${tB.battery}+${tB.libao}+${tB.other_buy}+${T3_PMAT}+${tA.glue_bag}`,
-    labor13: `${T3_INJ}+${T3_PNT}+${T3_ASM}`,
     carton: tB.carton,
     tax1: tB.plating,
     slush3: tA.slush,
@@ -2661,6 +2831,7 @@ function renderTaxSummary(ws, row, sales, extra = {}) {
   };
   t4Cols.forEach((c, i) => {
     const e = t4[c[1]] || { amt: 0, rate: 0 };
+    const rate = T4_RATE_DEFAULTS[c[1]] ?? num(e.rate);
     const fml = T4_FORMULA[c[1]];
     // result 实时重算（引用 表1/表2 实时单元格），不用过期 ps
     const amtLive = fml ? liveResult(fml, num(e.amt)) : num(e.amt);
@@ -2668,14 +2839,14 @@ function renderTaxSummary(ws, row, sales, extra = {}) {
     ws.getCell(row, i + 1).value = fml ? { formula: fml, result: amtLive } : amtLive;
     styleData(ws.getCell(row, i + 1));
     ws.getCell(row, i + 1).numFmt = '0.0000';
-    if (!T4_NO_RATE.has(c[1])) totalDed += amtLive * num(e.rate) / 100;  // 参考列不计减税
+    if (!T4_NO_RATE.has(c[1])) totalDed += amtLive * rate / 100;  // 参考列不计减税
   });
   row += 1;
   const t4RateRow = row;
   t4Cols.forEach((c, i) => {
     const e = t4[c[1]] || { amt: 0, rate: 0 };
     if (T4_NO_RATE.has(c[1])) { styleData(ws.getCell(row, i + 1)); return; }  // 参考列无税率
-    ws.getCell(row, i + 1).value = num(e.rate) / 100;
+    ws.getCell(row, i + 1).value = (T4_RATE_DEFAULTS[c[1]] ?? num(e.rate)) / 100;
     ws.getCell(row, i + 1).numFmt = '0.00%';
     styleData(ws.getCell(row, i + 1));
   });
@@ -2689,7 +2860,8 @@ function renderTaxSummary(ws, row, sales, extra = {}) {
     const e = t4[c[1]] || { amt: 0, rate: 0 };
     if (T4_NO_RATE.has(c[1])) { ws.getCell(row, i + 1).value = '—'; styleData(ws.getCell(row, i + 1)); return; }  // 参考列无减税额
     const col = colL(i + 1);
-    ws.getCell(row, i + 1).value = { formula: `${col}${t4AmtRow}*${col}${t4RateRow}`, result: num(t4AmtVals[i]) * num(e.rate) / 100 };
+    const rate = T4_RATE_DEFAULTS[c[1]] ?? num(e.rate);
+    ws.getCell(row, i + 1).value = { formula: `${col}${t4AmtRow}*${col}${t4RateRow}`, result: num(t4AmtVals[i]) * rate / 100 };
     ws.getCell(row, i + 1).numFmt = '0.0000';
     styleData(ws.getCell(row, i + 1));
   });
@@ -2706,15 +2878,15 @@ function renderTaxSummary(ws, row, sales, extra = {}) {
   const totalCostRefExpanded = `K${t3Row}`;  // 表3 总成本 单元格
   const afterCost = totalCost - totalDed;
   const afterGross = basePrice - (noLaborCost - totalDed);
-  const afterProfit = afterGross - assemblyLabor;
+  const afterProfit = afterGross - laborCost;
 
   const summaryRows = [
     ['合计减税', { formula: totalDedRef, result: totalDed }, '0.0000'],
     ['减税后成本', { formula: `(${totalCostRefExpanded})-${totalDedRef}`, result: afterCost }, '0.0000'],
     ['减税后毛利', { formula: `${basePriceRef}-((${noLaborRefExpanded})-${totalDedRef})`, result: afterGross }, '0.0000'],
     ['减税后毛利率', { formula: `IFERROR((${basePriceRef}-((${noLaborRefExpanded})-${totalDedRef}))/${basePriceRef},0)`, result: basePrice ? afterGross/basePrice : 0 }, '0.00%'],
-    ['减税后利润', { formula: `(${basePriceRef}-((${noLaborRefExpanded})-${totalDedRef}))-D${t3Row}`, result: afterProfit }, '0.0000'],
-    ['减税后利润率', { formula: `IFERROR(((${basePriceRef}-((${noLaborRefExpanded})-${totalDedRef}))-D${t3Row})/${basePriceRef},0)`, result: basePrice ? afterProfit/basePrice : 0 }, '0.00%'],
+    ['减税后利润', { formula: `(${basePriceRef}-((${noLaborRefExpanded})-${totalDedRef}))-A${t3Row}-B${t3Row}-D${t3Row}`, result: afterProfit }, '0.0000'],
+    ['减税后利润率', { formula: `IFERROR(((${basePriceRef}-((${noLaborRefExpanded})-${totalDedRef}))-A${t3Row}-B${t3Row}-D${t3Row})/${basePriceRef},0)`, result: basePrice ? afterProfit/basePrice : 0 }, '0.00%'],
   ];
   let afterCostRow = null;
   const summaryValueCol = 7;
@@ -2731,7 +2903,7 @@ function renderTaxSummary(ws, row, sales, extra = {}) {
 
   // 减税后码数(表2) = 货价 / 减税后成本（前向引用：减税后成本 此处才渲染完，回填公式）
   const codeAfterIdx = t2Cols.findIndex(c => c[1] === 'code_after') + 1;
-  if (afterCostRow && codeAfterIdx && !ov['t2.code_after']) {
+  if (afterCostRow && codeAfterIdx) {
     const afterCostRef = `${summaryValueColL}${afterCostRow}`;
     const baseLive = cellVal(basePriceRef), afterLive = cellVal(afterCostRef);
     const cell = ws.getCell(t2DataRow, codeAfterIdx);

@@ -39,6 +39,13 @@ public class DictionariesController(ISqlConnectionFactory factory) : ControllerB
         public bool confirmChanges { get; set; }
     }
 
+    private sealed class HsSyncRow
+    {
+        public string keyword { get; set; } = "";
+        public string hsCN { get; set; } = "";
+        public string hsID { get; set; } = "";
+    }
+
     [HttpGet]
     public async Task<IActionResult> Get()
     {
@@ -49,6 +56,27 @@ public class DictionariesController(ISqlConnectionFactory factory) : ControllerB
             SELECT keyword, english_name AS english, active, source
             FROM dict_translation ORDER BY active DESC, priority, id")).ToList();
         return Ok(new { hs, suppliers = sup, translations });
+    }
+
+    // 将 HS 字典回填到物料主档。走货明细通过 material_id 读取物料 HS，
+    // 因而已有走货资料重新打开后也会显示最新编码。仅补空白值，避免覆盖人工维护内容。
+    [HttpPost("hs/sync")]
+    public async Task<IActionResult> SyncHs()
+    {
+        using var c = factory.Create();
+        c.Open();
+        using var tx = c.BeginTransaction();
+        try
+        {
+            var updated = await SyncHsToMaterials(c, tx);
+            tx.Commit();
+            return Ok(new { ok = true, updated });
+        }
+        catch
+        {
+            tx.Rollback();
+            throw;
+        }
     }
 
     // 货号库保存时同步供应商字典：
@@ -139,7 +167,7 @@ public class DictionariesController(ISqlConnectionFactory factory) : ControllerB
                         id = (int)saved.id,
                         full = supplierChanged ? entry.supplier : savedFull,
                         customs = entry.customs.Length > 0 ? entry.customs : savedCustoms,
-                    }, tx);
+                        }, tx);
             }
 
             tx.Commit();
@@ -209,13 +237,51 @@ public class DictionariesController(ISqlConnectionFactory factory) : ControllerB
                         }, tx);
                 }
             }
+            var hsSynced = await SyncHsToMaterials(c, tx);
             tx.Commit();
-            return Ok(new { ok = true, hs_count = hs.Count, sup_count = sup.Count, translation_count = translations?.Count });
+            return Ok(new { ok = true, hs_count = hs.Count, sup_count = sup.Count, translation_count = translations?.Count, hs_synced = hsSynced });
         }
         catch
         {
             tx.Rollback();
             throw;
         }
+    }
+
+    private static async Task<int> SyncHsToMaterials(System.Data.IDbConnection c, System.Data.IDbTransaction tx)
+    {
+        var dictionary = (await c.QueryAsync<HsSyncRow>(@"
+            SELECT keyword, hs_cn AS ""hsCN"", hs_id AS ""hsID""
+            FROM dict_hs
+            WHERE trim(keyword) <> ''
+            ORDER BY priority, id", transaction: tx)).ToList();
+
+        var updatedMaterialIds = new HashSet<int>();
+        foreach (var entry in dictionary)
+        {
+            var keyword = (entry.keyword ?? "").Trim();
+            var hsCN = (entry.hsCN ?? "").Trim();
+            var hsID = (entry.hsID ?? "").Trim();
+            if (keyword.Length == 0 || (hsCN.Length == 0 && hsID.Length == 0)) continue;
+
+            var ids = await c.QueryAsync<int>(@"
+                UPDATE materials
+                SET hs_cn = CASE
+                        WHEN trim(COALESCE(hs_cn, '')) = '' AND @hsCN <> '' THEN @hsCN
+                        ELSE hs_cn
+                    END,
+                    hs_id = CASE
+                        WHEN trim(COALESCE(hs_id, '')) = '' AND @hsID <> '' THEN @hsID
+                        ELSE hs_id
+                    END
+                WHERE strpos(COALESCE(name_zh, ''), @keyword) > 0
+                  AND ((trim(COALESCE(hs_cn, '')) = '' AND @hsCN <> '')
+                    OR (trim(COALESCE(hs_id, '')) = '' AND @hsID <> ''))
+                RETURNING id", new { keyword, hsCN, hsID }, tx);
+
+            foreach (var id in ids) updatedMaterialIds.Add(id);
+        }
+
+        return updatedMaterialIds.Count;
     }
 }

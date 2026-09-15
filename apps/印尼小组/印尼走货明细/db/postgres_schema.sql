@@ -250,6 +250,8 @@ CREATE TABLE IF NOT EXISTS shipment_items (
     qty                 DECIMAL(18,4) NULL,
     cartons             INT          NULL,
     qty_per_carton      VARCHAR(64)  NULL,
+    weighing_qty        DECIMAL(18,4) NULL,
+    purchase_unit       VARCHAR(32)  NOT NULL DEFAULT '个',
     pallet              VARCHAR(64)  NULL,
     price               DECIMAL(18,4) NULL,
     currency            VARCHAR(8)   NOT NULL DEFAULT '¥',
@@ -270,6 +272,7 @@ CREATE TABLE IF NOT EXISTS shipment_items (
 );
 CREATE INDEX IF NOT EXISTS "IX_shipment_items_shipment" ON shipment_items(shipment_id);
 CREATE INDEX IF NOT EXISTS "IX_shipment_items_po_no"    ON shipment_items(po_no);
+ALTER TABLE shipment_items ADD COLUMN IF NOT EXISTS weighing_qty DECIMAL(18,4) NULL;
 
 -- ============ 设置 ============
 CREATE TABLE IF NOT EXISTS settings (
@@ -292,10 +295,12 @@ CREATE TABLE IF NOT EXISTS po_receipts (
     po_item_id      INT NOT NULL,
     receipt_date    DATE NOT NULL,
     qty             DECIMAL(18,4) NOT NULL,
+    spare_qty       DECIMAL(18,4) NOT NULL DEFAULT 0,
     batch_no        VARCHAR(64),
     notes           TEXT,
     created_at      TIMESTAMP(0) NOT NULL DEFAULT now(),
     CONSTRAINT "CK_po_receipts_qty_positive" CHECK (qty > 0),
+    CONSTRAINT "CK_po_receipts_spare_qty_nonnegative" CHECK (spare_qty >= 0),
     CONSTRAINT "FK_po_receipts_item"
         FOREIGN KEY (po_item_id) REFERENCES po_items(id) ON DELETE CASCADE
 );
@@ -332,6 +337,7 @@ END $$;
 CREATE INDEX IF NOT EXISTS "IX_outbound_po_item" ON outbound(po_item_id);
 
 ALTER TABLE shipment_items ADD COLUMN IF NOT EXISTS outbound_id INT;
+ALTER TABLE shipment_items ADD COLUMN IF NOT EXISTS purchase_unit VARCHAR(32) NOT NULL DEFAULT '个';
 
 DO $$
 BEGIN

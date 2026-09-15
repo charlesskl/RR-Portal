@@ -57,6 +57,23 @@ test('TOMY VQ converts imported RMB and USD supplier prices into HKD', () => {
   assert.equal(data.packagingItems[0].new_price, 0.5 * 7.8 * 1.08);
 });
 
+test('TOMY VQ calculates spraying price directly from painting details', () => {
+  const data = sectionsToData({
+    quote: { id: 333, quote_no: 'TOMY-SPRAY', product_name: 'Painted Toy', customer: 'TOMY', qty: 5000 },
+    sections: [{
+      dept: 'painting',
+      payload_json: JSON.stringify({
+        painting_items: [{ name: '喷油件', spray_qty: 2, spray_unit: 1.5, uv_qty: 1, uv_unit: 0.5 }],
+      }),
+    }],
+  });
+
+  assert.deepEqual(data.paintingDetail, {
+    total_operations: 3,
+    quoted_price_hkd: 3.5 * 1.08,
+  });
+});
+
 test('TOMY VQ carries named customer-supplied products into supplemental quote rows', () => {
   const data = sectionsToData({
     quote: {

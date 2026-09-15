@@ -8,6 +8,12 @@ import { useAuthStore } from '../stores/auth'
 import { CRAFT_LABELS, REGION_LABELS, regionOf, type Craft, type Region } from '../constants/roles'
 import type { Order } from '../types/order'
 import { cnyTaxToHkdUntaxed, cnyTaxToUntaxedRmb, DEFAULT_CNY_TO_HKD_RATE } from '../utils/orderPricing'
+import {
+  buildLatestQuoteByItemProduct,
+  buildLatestQuoteByMold,
+  historicalQuoteForItemProduct,
+  historicalQuoteForMold,
+} from '../utils/quoteLaborPriceHistory'
 
 const route = useRoute()
 const router = useRouter()
@@ -24,6 +30,10 @@ const backTo = computed(() => craft.value
   : '/orders')
 
 const draft = ref<Partial<Order>>({ status: 'placed', exchange_rate: DEFAULT_CNY_TO_HKD_RATE })
+const quoteManuallyEdited = ref(false)
+const autoFilledQuote = ref<number | null>(null)
+const quoteAutofillHint = ref('')
+const ITEM_PRODUCT_QUOTE_CRAFTS = new Set<Craft>(['painting', 'assembly', 'sewing', 'electronics'])
 // 指定部门只列该部门工厂；不限部门(从货期管理落地页进入)则列全部
 const deptFactories = computed(() => factories.items.filter((factory) =>
   (!craft.value || factory.craft === craft.value)
@@ -57,7 +67,50 @@ watch(() => [draft.value.unit_price_cny_tax, draft.value.exchange_rate], ([value
   }
 })
 
-onMounted(() => factories.fetchAll())
+const historicalQuotes = computed(() => buildLatestQuoteByMold(orders.items))
+const historicalItemProductQuotes = computed(() => buildLatestQuoteByItemProduct(orders.items, craft.value === 'sewing'))
+
+function autofillQuoteFromOrderKeys() {
+  if (quoteManuallyEdited.value) return
+  const price = craft.value === 'injection'
+    ? historicalQuoteForMold(historicalQuotes.value, draft.value.mold_no)
+    : craft.value && ITEM_PRODUCT_QUOTE_CRAFTS.has(craft.value)
+      ? historicalQuoteForItemProduct(
+          historicalItemProductQuotes.value,
+          draft.value.item_no,
+          draft.value.product,
+          craft.value === 'sewing',
+        )
+      : undefined
+  if (price == null) {
+    if (autoFilledQuote.value != null && draft.value.quote_labor_price === autoFilledQuote.value) {
+      draft.value.quote_labor_price = undefined
+    }
+    autoFilledQuote.value = null
+    quoteAutofillHint.value = ''
+    return
+  }
+  draft.value.quote_labor_price = price
+  autoFilledQuote.value = price
+  quoteAutofillHint.value = craft.value === 'injection'
+    ? `已按相同模具编号自动带出最近历史核价：${price}`
+    : `已按相同货号和物料名称自动带出最近历史核价：${price}`
+}
+
+function markQuoteAsManual() {
+  quoteManuallyEdited.value = true
+  autoFilledQuote.value = null
+  quoteAutofillHint.value = ''
+}
+
+onMounted(async () => {
+  const needsQuoteHistory = craft.value === 'injection' || (!!craft.value && ITEM_PRODUCT_QUOTE_CRAFTS.has(craft.value))
+  await Promise.all([
+    factories.fetchAll(),
+    needsQuoteHistory ? orders.fetchForScope(craft.value!, region.value ?? null) : Promise.resolve(),
+  ])
+  autofillQuoteFromOrderKeys()
+})
 
 function selectFactory(id: string, name: string) {
   draft.value.factory = id
@@ -85,6 +138,7 @@ async function submit() {
     return
   }
   if (!draft.value.product) { alert('请输入产品名称'); return }
+  autofillQuoteFromOrderKeys()
   await orders.create({ ...draft.value, region: region.value, amount: draftAmount.value, created_by: auth.userId ?? undefined })
   router.push(backTo.value)
 }
@@ -126,13 +180,16 @@ async function submit() {
           <label>下单PMC <input v-model="draft.pmc" placeholder="下单跟单人" /></label>
           <label>工序 <input v-model="draft.process" placeholder="如注塑/喷油" /></label>
           <label>车间 <input v-model="draft.workshop" placeholder="如注塑车间" /></label>
-          <label>货号 <input v-model="draft.item_no" placeholder="货号" /></label>
-          <label>模具编号 <input v-model="draft.mold_no" placeholder="模具编号" /></label>
+          <label>货号 <input v-model="draft.item_no" placeholder="货号" @change="autofillQuoteFromOrderKeys" /></label>
+          <label>模具编号 <input v-model="draft.mold_no" placeholder="模具编号" @change="autofillQuoteFromOrderKeys" /></label>
           <label>订单号 <input v-model="draft.order_no" placeholder="订单号" /></label>
-          <label>产品 <input v-model="draft.product" placeholder="产品名称" required /></label>
+          <label>产品 <input v-model="draft.product" placeholder="产品名称" required @change="autofillQuoteFromOrderKeys" /></label>
           <label>数量 <input v-model.number="draft.quantity" type="number" min="0" /></label>
           <label>加工类别 <input v-model="draft.process_category" placeholder="如塑胶半成品" /></label>
-          <label>核价生产工价 <input v-model.number="draft.quote_labor_price" type="number" min="0" step="0.01" /></label>
+          <label>核价生产工价
+            <input v-model.number="draft.quote_labor_price" type="number" min="0" step="0.0001" @input="markQuoteAsManual" />
+            <small v-if="quoteAutofillHint" class="autofill-hint">{{ quoteAutofillHint }}</small>
+          </label>
           <label>{{ craft === 'sewing' ? '外发工价(不含税RMB)' : '外发单价' }}
             <input v-model.number="draft.unit_price" type="number" min="0" step="0.0001" :readonly="craft === 'sewing'" />
           </label>
@@ -172,5 +229,6 @@ async function submit() {
 }
 .factory-option:hover { background: var(--primary-soft); }
 .factory-empty { padding: .65rem .55rem; color: var(--text-soft); font-size: .9rem; }
+.autofill-hint { color: var(--success, #16803a); font-size: .78rem; }
 .actions { grid-column: 1 / -1; display: flex; gap: .75rem; margin-top: .5rem; }
 </style>

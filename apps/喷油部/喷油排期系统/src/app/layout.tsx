@@ -19,7 +19,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   return (
     <html lang="zh">
       <body>
-        <TopNav username={session.username!} role={session.role!} />
+        <TopNav username={session.username!} role={session.role!} factoryId={session.factoryId ?? "XINGXIN"} />
         <main className="max-w-[1480px] mx-auto px-8 py-8">{children}</main>
       </body>
     </html>

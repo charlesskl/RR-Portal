@@ -1,0 +1,82 @@
+name: Service Logs
+
+# 通用服务日志诊断（手动触发）：查看任意 compose 服务的容器状态、健康检查结果与日志。
+# 背景：2026-09-15 voyageplex 上线时 api 容器 unhealthy，仓库里没有一个能看任意服务日志的
+# 入口，只能靠猜。此 workflow 填补该空缺。
+#   service —— compose 服务名（如 voyageplex-api）；容器名按 rr-portal-<service>-1 推导
+#   tail    —— 日志行数，默认 100
+
+on:
+  workflow_dispatch:
+    inputs:
+      service:
+        description: "compose 服务名（如 voyageplex-api）"
+        type: string
+        required: true
+      tail:
+        description: "日志行数"
+        type: string
+        required: false
+        default: "100"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-cloud
+  queue: max
+  cancel-in-progress: false
+
+jobs:
+  logs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Validate SSH host fingerprint
+        shell: bash
+        env:
+          CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$CLOUD_HOST_FINGERPRINT" =~ ^SHA256:[A-Za-z0-9+/]{43}=?$ ]]; then
+            echo 'CLOUD_HOST_FINGERPRINT must be a non-empty OpenSSH SHA256 fingerprint.' >&2
+            exit 1
+          fi
+
+      - name: Fetch service logs via SSH
+        env:
+          CLOUD_HOST_FINGERPRINT: ${{ secrets.CLOUD_HOST_FINGERPRINT }}
+          OPS_SERVICE: ${{ inputs.service }}
+          OPS_TAIL: ${{ inputs.tail }}
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2
+        with:
+          host: ${{ secrets.CLOUD_HOST }}
+          username: ${{ secrets.CLOUD_USER }}
+          key: ${{ secrets.CLOUD_SSH_KEY }}
+          fingerprint: ${{ env.CLOUD_HOST_FINGERPRINT }}
+          command_timeout: 5m
+          envs: OPS_SERVICE,OPS_TAIL
+          script: |
+            set -euo pipefail
+            # 服务名只允许字母数字和连字符，防止注入
+            if [[ ! "$OPS_SERVICE" =~ ^[a-z0-9-]+$ ]]; then
+              echo "非法服务名: $OPS_SERVICE" >&2
+              exit 1
+            fi
+            [[ "$OPS_TAIL" =~ ^[0-9]+$ ]] || OPS_TAIL=100
+            CTR="rr-portal-${OPS_SERVICE}-1"
+
+            echo "=== 容器状态 ==="
+            docker ps -a --filter "name=^${CTR}$" --format 'table {{.Names}}\t{{.Status}}\t{{.Image}}' || true
+
+            echo ""
+            echo "=== 健康检查最近结果 ==="
+            docker inspect --format '{{json .State.Health}}' "$CTR" 2>/dev/null | head -c 3000 || echo "(无健康检查信息)"
+
+            echo ""
+            echo "=== 最近 ${OPS_TAIL} 行日志 ==="
+            docker logs --tail "$OPS_TAIL" "$CTR" 2>&1 || true
+
+            echo ""
+            echo "=== 重启次数 ==="
+            docker inspect --format 'RestartCount={{.RestartCount}} StartedAt={{.State.StartedAt}}' "$CTR" 2>/dev/null || true

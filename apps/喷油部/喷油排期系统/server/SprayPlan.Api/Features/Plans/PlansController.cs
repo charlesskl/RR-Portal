@@ -267,6 +267,7 @@ public class PlansController(AppDbContext db) : ControllerBase
                     Quantity = inboundDelta,
                     CreatedBy = CurrentUser(),
                     CreatedAt = now,
+                    UpdatedAt = now,
                     Remark = inboundDelta > 0 ? null : "实际入库数调减自动生成",
                 });
             }

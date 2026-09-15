@@ -2,11 +2,13 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/session";
 import { dotnetGet } from "@/lib/dotnet";
+import EditApplicationButton from "./EditApplicationButton";
 
 type Application = {
   applicationNo: string; sourcePlanId: number; productionDate: string;
   orderNo: string; productNo: string; itemName: string; partName: string;
-  quantity: number; createdBy: string; createdAt: string; remark: string | null;
+  quantity: number; createdBy: string; createdAt: string;
+  updatedAt: string; updatedBy: string | null; remark: string | null;
 };
 type ApplicationPage = { items: Application[]; total: number; page: number; pageSize: number };
 
@@ -49,9 +51,13 @@ export default async function InboundApplicationsPage({ searchParams }: {
           <th className="px-3 py-2">申请单号</th><th className="px-3 py-2">生成时间</th><th className="px-3 py-2">生产日期</th>
           <th className="px-3 py-2">订单号</th><th className="px-3 py-2">货号</th><th className="px-3 py-2">子件 / 部位</th>
           <th className="px-3 py-2 text-right">数量</th><th className="px-3 py-2">录入人</th>
+          <th className="px-3 py-2">最后修改</th><th className="px-3 py-2">操作</th>
         </tr></thead>
         <tbody>
-          {data.items.map((row) => <tr key={row.applicationNo} className="odd:bg-[#F9F9F9] hover:bg-[#F0F7FF]">
+          {data.items.map((row) => {
+            // 与后端一致：只有管理员或该单录入人能改
+            const canEdit = session.role === "admin" || session.username === row.createdBy;
+            return <tr key={row.applicationNo} className="odd:bg-[#F9F9F9] hover:bg-[#F0F7FF]">
             <td className="border-b border-app-border px-3 py-2 font-mono font-semibold">{row.applicationNo}</td>
             <td className="border-b border-app-border px-3 py-2 whitespace-nowrap">{dateTime(row.createdAt)}</td>
             <td className="border-b border-app-border px-3 py-2 whitespace-nowrap">{ymd(row.productionDate)}</td>
@@ -60,8 +66,13 @@ export default async function InboundApplicationsPage({ searchParams }: {
             <td className="border-b border-app-border px-3 py-2">{row.itemName || "-"} / {row.partName}</td>
             <td className={`border-b border-app-border px-3 py-2 text-right font-semibold tabular-nums ${row.quantity < 0 ? "text-rose-dark" : ""}`}>{row.quantity.toLocaleString("zh-CN")}</td>
             <td className="border-b border-app-border px-3 py-2">{row.createdBy}</td>
-          </tr>)}
-          {data.items.length === 0 && <tr><td colSpan={8} className="py-10 text-center text-text-secondary">暂无入库申请单</td></tr>}
+            <td className="border-b border-app-border px-3 py-2 whitespace-nowrap text-text-secondary">
+              {row.updatedBy ? `${dateTime(row.updatedAt)} ${row.updatedBy}` : "—"}
+            </td>
+            <td className="border-b border-app-border px-3 py-2">{canEdit && <EditApplicationButton row={row} />}</td>
+          </tr>;
+          })}
+          {data.items.length === 0 && <tr><td colSpan={10} className="py-10 text-center text-text-secondary">暂无入库申请单</td></tr>}
         </tbody>
       </table></div>
     </div>

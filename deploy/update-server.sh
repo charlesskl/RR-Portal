@@ -16,6 +16,14 @@ set -euo pipefail
 # 强制全量部署（调试用）：
 #   FORCE_FULL_REBUILD=1 bash /opt/rr-portal/deploy/update-server.sh
 
+# 禁用 compose bake，强制走经典逐服务构建。
+# 2026-09-15 #707 部署踩坑：compose v2.29+ 默认用 bake 做多目标并行构建，
+# 一次构建多个缺失镜像时 buildx session 报错：
+#   failed to dial gRPC: ... header key "x-docker-expose-session-sharedkey"
+#   contains value with non-printable ASCII characters
+# 单镜像增量构建不触发，多镜像（新服务首次构建/全量）必现。COMPOSE_BAKE=false 回退经典构建。
+export COMPOSE_BAKE=false
+
 INSTALL_DIR="/opt/rr-portal"
 ENV_FILE="${INSTALL_DIR}/.env.cloud.production"
 COMPOSE_FILE="docker-compose.cloud.yml"

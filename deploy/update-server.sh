@@ -400,12 +400,29 @@ ensure_service_base_images() {
 # ─── Step 6: 执行部署 ───
 save_state "deploy"
 echo "[6/6] Deploying..."
+docker compose version | sed 's/^/  /' || true
 
 if [[ "$COMPOSE_CHANGED" -eq 1 ]]; then
   # Compose 变动：可能只是 context path 改了（代码没变），也可能加新服务
   # 策略：先 up -d（无 --build），让 docker 用现有 image 只 recreate 容器
   # 这样纯 rename 几乎零成本；如果有新服务或 Dockerfile 变了再用 AFFECTED_SERVICES 做增量 build
   echo "  [COMPOSE] Compose 变动，recreate 容器（不强制 rebuild，避免 OOM 风险）"
+  # 缺失镜像逐服务预构建：compose 新版默认 bake 多目标并行构建，构建上下文含非 ASCII
+  # 路径（如 apps/船务部/VoyagePlex船务协同系统）时必现 buildx session 报错：
+  #   x-docker-expose-session-sharedkey contains value with non-printable ASCII characters
+  # （#707 部署因此三连败）。单目标构建不触发该 bug，故在 up -d 之前把缺失镜像逐个建好，
+  # 让 up -d 的隐式构建无事可做，绕开多目标 bake。
+  mapfile -t CFG_SERVICES < <(docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" config --services 2>/dev/null)
+  mapfile -t CFG_IMAGES < <(docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" config --images 2>/dev/null)
+  for i in "${!CFG_SERVICES[@]}"; do
+    img="${CFG_IMAGES[$i]:-}"
+    [[ -n "$img" ]] || continue
+    if ! docker image inspect "$img" >/dev/null 2>&1; then
+      echo "  [COMPOSE] 镜像缺失 → 逐服务构建 ${CFG_SERVICES[$i]} ($img)"
+      ensure_service_base_images "${CFG_SERVICES[$i]}"
+      docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" build "${CFG_SERVICES[$i]}"
+    fi
+  done
   # --remove-orphans: 删除已从 compose 移除的服务遗留的孤儿容器，
   # 否则被下线/重命名的服务容器会继续运行（crash-loop 时甚至拖垮内存导致全站 OOM）
   docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --remove-orphans

@@ -193,6 +193,8 @@ async function aiVisionExtract(dataUrl) {
   const payload = {
     model: AI.ocrModel || 'qwen3.5-ocr',
     temperature: 0,
+    max_tokens: 4096,   /* OpenRouter 按 max_tokens 预扣额度，不设上限易触发 402 */
+
     messages: [
       { role: 'user', content: [
         { type: 'text', text: OCR_READ_PROMPT },

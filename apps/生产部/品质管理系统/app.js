@@ -2010,12 +2010,18 @@ function renderSuppliers() {
     return { name, total:arr.length, fail, pass:arr.length-fail, rate, risk, qty, prods, last };
   }).sort((a,b)=>b.rate-a.rate);
 
+  /* 名单内但还没有验货记录的供应商：直接出卡片（0 批次），排在有记录的后面 */
+  const recorded = new Set(Object.keys(byS));
+  managedNames('supplier').filter(n => !recorded.has(n)).forEach(n => {
+    list.push({ name:n, total:0, fail:0, pass:0, rate:0, risk:'low', qty:0, prods:'', last:'-', fresh:true });
+  });
+
   const RL = { low:'正常', mid:'风险', high:'高风险' };
   el.innerHTML = '<div class="supplier-grid">' + list.map(s => `
     <div class="supplier-card risk-${s.risk}">
-      <span class="risk-badge ${s.risk}">${RL[s.risk]}</span>
+      <span class="risk-badge ${s.risk}">${s.fresh ? '新录入' : RL[s.risk]}</span>
       <div class="supplier-name">${s.name}</div>
-      <div style="font-size:11px;color:var(--text-dim);margin-bottom:6px">${s.prods||'多品类'}</div>
+      <div style="font-size:11px;color:var(--text-dim);margin-bottom:6px">${s.fresh ? '暂无验货记录' : (s.prods||'多品类')}</div>
       <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-muted);margin-bottom:8px">
         <span>来料 ${s.qty.toLocaleString()} 件</span>
         <span>最近: ${s.last}</span>
@@ -2023,7 +2029,7 @@ function renderSuppliers() {
       <div class="supplier-stats">
         <div class="stat-item"><div class="stat-num">${s.total}</div><div class="stat-lbl">验货批次</div></div>
         <div class="stat-item"><div class="stat-num" style="color:${s.fail>0?'var(--red)':'var(--green)'}">${s.fail}</div><div class="stat-lbl">FAIL批次</div></div>
-        <div class="stat-item"><div class="stat-num" style="color:${s.risk==='high'?'var(--red)':s.risk==='mid'?'var(--yellow)':'var(--green)'}">${(s.rate*100).toFixed(0)}%</div><div class="stat-lbl">退货率</div></div>
+        <div class="stat-item"><div class="stat-num" style="color:${s.fresh?'var(--text-dim)':s.risk==='high'?'var(--red)':s.risk==='mid'?'var(--yellow)':'var(--green)'}">${s.fresh ? '—' : (s.rate*100).toFixed(0)+'%'}</div><div class="stat-lbl">退货率</div></div>
       </div>
     </div>`).join('') + '</div>';
 }

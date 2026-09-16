@@ -1675,6 +1675,9 @@ function _buildIQCCanvas(r) {
   /* ── 抽查数量（用于备注栏百分比） ── */
   const sampleQtyNum = Number(r.sampleQty != null ? r.sampleQty : 0);
 
+  /* ── 记录级备注（录入时填的「备注」，出报告时放到检验状况第一行的 简介/备注 栏） ── */
+  const recRemark = String(r.remark || '').trim();
+
   /* ── 每行备注：只显示百分比 ── */
   function itemPct(qty) {
     if (!qty || !sampleQtyNum) return '';
@@ -1782,13 +1785,13 @@ function _buildIQCCanvas(r) {
           检&ensp;验&ensp;结&ensp;果
         </td>
       </tr>
-      <!-- 行2：LOT SIZE rowspan=2 | SAMPLE SIZE rowspan=2 | 分组 | 检验结果内容 rowspan=9 -->
+      <!-- 行2：LOT SIZE rowspan=2 | SAMPLE SIZE rowspan=2 | 分组 | 检验结果内容 rowspan=表头2行+全部数据行 -->
       <tr>
         <td rowspan="2" style="background:#ebebeb;font-weight:700;text-align:center;padding:2px 3px;vertical-align:middle;border-right:1px solid #222;border-bottom:1px solid #222">LOT&nbsp;SIZE</td>
         <td rowspan="2" style="background:#ebebeb;font-weight:700;text-align:center;padding:2px 3px;vertical-align:middle;border-right:1px solid #222;border-bottom:1px solid #222">SAMPLE<br/>SIZE</td>
         <td colspan="4" style="background:#ebebeb;font-weight:700;text-align:center;padding:2px 3px;font-size:8.5px;border-right:1px solid #222;border-bottom:1px solid #222">外观 AESTHETIC（AC）</td>
         <td colspan="3" style="background:#ebebeb;font-weight:700;text-align:center;padding:2px 3px;font-size:8.5px;border-right:1px solid #222;border-bottom:1px solid #222">FUNC / 功能</td>
-        <td rowspan="10" style="vertical-align:middle;border-right:1px solid #222;border-bottom:1px solid #222;padding:8px 6px">
+        <td rowspan="${IQC_AQL_TABLE.length + 2}" style="vertical-align:middle;border-right:1px solid #222;border-bottom:1px solid #222;padding:8px 6px">
           <div style="display:flex;flex-direction:column;justify-content:center;gap:8px">
             <div style="text-align:center;font-size:11px;white-space:nowrap;font-weight:${_isP?'900':'600'};${_isP?'background:#000;color:#fff;padding:5px 4px':'color:#4b5563;padding:5px 4px'}">合格</div>
             <div style="text-align:center;font-size:11px;white-space:nowrap;font-weight:${_isR?'900':'600'};${_isR?'background:#000;color:#fff;padding:5px 4px':'color:#4b5563;padding:5px 4px'}">不合格</div>
@@ -1854,8 +1857,9 @@ function _buildIQCCanvas(r) {
           const pctStr = sampleQtyNum > 0 && (d.cr||d.maj||d.maj10||d.min) > 0
             ? ((d.cr||d.maj||d.maj10||d.min) / sampleQtyNum * 100).toFixed(2) + '%'
             : '';
-          if (pctStr && d.remark) return pctStr + ' / ' + d.remark;
-          return pctStr || d.remark || '';
+          let cell = (pctStr && d.remark) ? pctStr + ' / ' + d.remark : (pctStr || d.remark || '');
+          if (i === 0 && recRemark) cell = cell ? cell + ' / ' + recRemark : recRemark;
+          return cell;
         })()}</td>
       </tr>`).join('')}
       <tr class="total-row">

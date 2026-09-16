@@ -5,9 +5,9 @@ const { send } = vi.hoisted(() => ({ send: vi.fn() }))
 vi.mock('../src/pb', () => ({ pb: { send } }))
 vi.mock('vue-router', () => ({ useRoute: () => ({ query: { region: 'heyuan' } }), RouterLink: { template: '<a><slot /></a>' } }))
 vi.mock('../src/components/AppLayout.vue', () => ({ default: { template: '<main><slot /></main>' } }))
-const data = { factories: [{ id: '1', name: '伟创' }, { id: '2', name: '新万利' }], records: [
-  { id: 1, supplier: '伟创', productName: '小熊', inspDate: '2026-09-16', result: 'PASS', fail: 0 },
-  { id: 2, supplier: '新万利', productName: '小猫', inspDate: '2026-09-15', result: 'REJ', fail: 2 },
+const data = { factories: [{ id: '1', name: '东莞市伟创玩具有限公司' }, { id: '2', name: '新万利' }], records: [
+  { id: 1, factoryId: '1', factoryName: '东莞市伟创玩具有限公司', supplier: '伟创', productName: '小熊', inspDate: '2026-09-16', result: 'PASS', fail: 0 },
+  { id: 2, factoryId: '2', factoryName: '新万利', supplier: '新万利', productName: '小猫', inspDate: '2026-09-15', result: 'REJ', fail: 2 },
 ] }
 beforeEach(() => { send.mockReset(); send.mockResolvedValue(data) })
 describe('QMS inspection page', () => {
@@ -17,7 +17,7 @@ describe('QMS inspection page', () => {
     expect(send).toHaveBeenCalledWith('/api/factory-review/qms-inspections', expect.objectContaining({ query: { region: 'heyuan' } }))
     expect(wrapper.text()).toContain('河源厂区')
     expect(wrapper.findAll('tbody tr')).toHaveLength(2)
-    await wrapper.find('select').setValue('伟创')
+    await wrapper.find('select').setValue('1')
     expect(wrapper.find('tbody').text()).toContain('小熊')
     expect(wrapper.find('tbody').text()).not.toContain('小猫')
     await wrapper.find('select').setValue('')
@@ -27,6 +27,8 @@ describe('QMS inspection page', () => {
     expect(wrapper.find('tbody').text()).toContain('暂无匹配')
     await wrapper.findAll('input[type=date]')[1]!.setValue('2026-09-14')
     expect(wrapper.find('[role=alert]').text()).toContain('开始日期不能晚于结束日期')
+    await wrapper.findAll('button').find(b => b.text() === '清除筛选')!.trigger('click')
+    expect(wrapper.findAll('tbody tr')).toHaveLength(2)
   })
   it('shows connection failures and allows refresh to recover', async () => {
     send.mockRejectedValueOnce({ response: { message: '品质管理系统暂时无法连接' } })

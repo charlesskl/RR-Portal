@@ -51,6 +51,29 @@ describe('QMS inspection bridge', () => {
     expect(data.records[0]).toMatchObject({ id: 1, supplier: '伟创', qty: 100 })
     expect(JSON.stringify(data)).not.toMatch(/secret|password|never-return/)
   })
+  it.each([
+    ['东莞市伟创玩具有限公司', '伟创'],
+    ['伟创', '广东省东莞市伟创塑胶制品有限公司'],
+    ['东莞市清溪镇伟创加工厂', '伟创'],
+    ['ＡＢＣ 玩具厂', 'abc'],
+  ])('matches full and short names %s / %s', (name, supplier) => {
+    const data = setup({ factories: [{ id: 'a', name, craft: 'sewing' }], records: [{ id: 1, supplier }] }).invoke()
+    expect(data.records).toHaveLength(2)
+    expect(data.records[0]).toMatchObject({ factoryId: 'a', factoryName: name, supplier })
+  })
+  it('does not resolve an ambiguous alias even when another candidate is outside department permission', () => {
+    const factories = [
+      { id: 'a', name: '伟创玩具厂', craft: 'sewing' },
+      { id: 'b', name: '伟创塑胶厂', craft: 'painting' },
+    ]
+    expect(setup({ factories, records: [{ id: 1, supplier: '伟创' }] }).invoke().records).toEqual([])
+    const exact = setup({ factories, records: [{ id: 1, supplier: '伟创玩具厂' }] }).invoke()
+    expect(exact.records[0].factoryId).toBe('a')
+    expect(setup({ factories, records: [{ id: 1, supplier: '伟创塑胶厂' }] }).invoke().records).toEqual([])
+  })
+  it.each(['伟创二厂', '新伟创', '玩具厂', '有限公司', '伟'])('rejects a different brand or generic alias %s', supplier => {
+    expect(setup({ factories: [{ id: 'a', name: '伟创玩具厂', craft: 'sewing' }], records: [{ id: 1, supplier }] }).invoke().records).toEqual([])
+  })
   it('reads only companies in the requested region and rejects a wrong source', () => {
     const { invoke, send } = setup()
     invoke()

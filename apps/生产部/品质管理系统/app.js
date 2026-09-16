@@ -2502,6 +2502,7 @@ function addPartner(type) {
   renderSupplierDatalist();
   renderCustomerDatalist();
   renderProcessTypeDatalist();
+  if (typeof recheckNameWhitelist === 'function') recheckNameWhitelist();
   showToast(label + '「' + name + '」已添加 ✓', 'success');
 }
 
@@ -2609,6 +2610,46 @@ function renderProcessTypeDatalist() {
   if (!list) return;
   list.innerHTML = getProcessTypeOptions()
     .map(n => `<option value="${n}"></option>`).join('');
+}
+
+/* ── 录入即时校验：供应商/客户/加工类型输入名单外名称时立即提示，不等保存 ── */
+const _NAME_CHECK_FIELDS = {
+  f_supplier:    { label:'供应商',  opts: () => getSupplierOptions() },
+  f_client:      { label:'客户',    opts: () => getCustomerOptions() },
+  f_processType: { label:'加工类型', opts: () => getProcessTypeOptions() },
+};
+function checkNameWhitelist(fieldId, withToast) {
+  const cfg = _NAME_CHECK_FIELDS[fieldId];
+  const inp = document.getElementById(fieldId);
+  if (!cfg || !inp) return true;
+  let hint = inp.parentElement.querySelector('.name-warn');
+  if (!hint) {
+    hint = document.createElement('div');
+    hint.className = 'name-warn';
+    hint.style.cssText = 'color:var(--red);font-size:11px;margin-top:4px;display:none';
+    inp.parentElement.appendChild(hint);
+  }
+  const v   = (inp.value || '').trim();
+  const bad = v && !cfg.opts().includes(v);
+  inp.style.borderColor = bad ? 'var(--red)' : '';
+  hint.style.display    = bad ? '' : 'none';
+  if (bad) {
+    hint.textContent = '⚠ ' + cfg.label + '「' + v + '」不在名单中，请先到「供应商&客户管理」添加';
+    if (withToast) showToast(cfg.label + '「' + v + '」不在名单中，请先到「供应商&客户管理」添加后再录入', 'error');
+  }
+  return !bad;
+}
+function bindNameWhitelistCheck() {
+  Object.keys(_NAME_CHECK_FIELDS).forEach(id => {
+    const inp = document.getElementById(id);
+    if (!inp || inp.dataset.nameCheckBound) return;
+    inp.dataset.nameCheckBound = '1';
+    inp.addEventListener('input',  () => checkNameWhitelist(id, false));
+    inp.addEventListener('change', () => checkNameWhitelist(id, true));
+  });
+}
+function recheckNameWhitelist() {
+  Object.keys(_NAME_CHECK_FIELDS).forEach(id => checkNameWhitelist(id, false));
 }
 
 /* 模式切换（单条 / 批量） */
@@ -3330,6 +3371,8 @@ function openAddModal() {
   initDefectLib();
   refreshDefectDescDatalist();
   initOcrUpload();
+  bindNameWhitelistCheck();
+  recheckNameWhitelist();
 }
 
 function openEditModal(id) {
@@ -3367,6 +3410,7 @@ function openEditModal(id) {
   setVal('f_defect',      r.defect || '');
   setVal('f_qc',          r.qc || '');
   setVal('f_remark',      r.remark || '');
+  bindNameWhitelistCheck();
   _loadDefectRows(r.defects || []);   /* 加载已有不良明细 */
   _loadMeasRows(r.measurements || []); /* 加载已有测量数据 */
   renderSupplierDatalist();

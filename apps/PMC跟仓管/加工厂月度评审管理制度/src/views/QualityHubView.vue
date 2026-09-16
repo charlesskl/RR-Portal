@@ -11,6 +11,7 @@ const myRegions = computed(() => (auth.role ? allowedRegions(auth.role) : REGION
 const cards = [
   { to: '/quality-5s', icon: '🧹', name: '现场品质及5S检查记录', sub: '加工厂现场品质及5S检查记录登记表' },
   { to: '/quality-inspection', icon: '🔍', name: '品质检验明细', sub: '加工厂品质检验明细' },
+  { to: '/quality-qms', icon: '📋', name: '验货明细', sub: '按加工厂名称查看品质管理系统验货数据' },
 ]
 </script>
 <template>
@@ -36,9 +37,12 @@ const cards = [
   </AppLayout>
 </template>
 <style scoped>
+.page { max-width: none; }
 .region-block { margin-top: 1.5rem; }
 .region-title { margin: 0 0 .8rem; font-size: 1.05rem; color: #1f2533; padding-left: .6rem; border-left: 4px solid var(--primary, #4f46e5); }
-.hub-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 1rem; }
+.hub-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; }
+@media (max-width: 1100px) { .hub-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 700px) { .hub-grid { grid-template-columns: 1fr; } }
 .hub-card {
   display: flex; align-items: center; gap: 1rem; text-decoration: none; color: var(--text);
   background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);

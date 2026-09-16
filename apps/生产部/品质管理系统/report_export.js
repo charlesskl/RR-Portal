@@ -1675,6 +1675,9 @@ function _buildIQCCanvas(r) {
   /* ── 抽查数量（用于备注栏百分比） ── */
   const sampleQtyNum = Number(r.sampleQty != null ? r.sampleQty : 0);
 
+  /* ── 记录级备注（录入时填的「备注」，出报告时放到检验状况第一行的 简介/备注 栏） ── */
+  const recRemark = String(r.remark || '').trim();
+
   /* ── 每行备注：只显示百分比 ── */
   function itemPct(qty) {
     if (!qty || !sampleQtyNum) return '';
@@ -1854,8 +1857,9 @@ function _buildIQCCanvas(r) {
           const pctStr = sampleQtyNum > 0 && (d.cr||d.maj||d.maj10||d.min) > 0
             ? ((d.cr||d.maj||d.maj10||d.min) / sampleQtyNum * 100).toFixed(2) + '%'
             : '';
-          if (pctStr && d.remark) return pctStr + ' / ' + d.remark;
-          return pctStr || d.remark || '';
+          let cell = (pctStr && d.remark) ? pctStr + ' / ' + d.remark : (pctStr || d.remark || '');
+          if (i === 0 && recRemark) cell = cell ? cell + ' / ' + recRemark : recRemark;
+          return cell;
         })()}</td>
       </tr>`).join('')}
       <tr class="total-row">

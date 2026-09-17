@@ -59,7 +59,10 @@ async function api(
       body !== undefined ? { "Content-Type": "application/json" } : undefined,
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
-  if (!r.ok) throw new Error(`请求失败（${r.status}）`);
+  if (!r.ok) {
+    const error = await r.json().catch(() => null);
+    throw new Error(error?.error || `请求失败（${r.status}）`);
+  }
   return r.json();
 }
 
@@ -87,6 +90,33 @@ export default function Home() {
   const [showResetPassword, setShowResetPassword] = useState(false);
   const [resetPasswordError, setResetPasswordError] = useState("");
   const [passwordResetNotice, setPasswordResetNotice] = useState("");
+
+  const [recordDialog, setRecordDialog] = useState<{ mode: "edit" | "delete"; record: ProductionRecord } | null>(null);
+  const [recordError, setRecordError] = useState("");
+  const [recordNotice, setRecordNotice] = useState("");
+  const [historyTable, setHistoryTable] = useState(false);
+  const [recordSaving, setRecordSaving] = useState(false);
+
+  async function changeRecord(formData?: FormData) {
+    if (!recordDialog || recordSaving) return;
+    setRecordSaving(true);
+    setRecordError("");
+    try {
+      const updated = await api(`records/${recordDialog.record.id}`, formData ? "PUT" : "DELETE", formData ? {
+        date: String(formData.get("date") || ""),
+        production: Number(formData.get("production")),
+        line: String(formData.get("line") || ""),
+        note: String(formData.get("note") || ""),
+      } : undefined);
+      setState(updated);
+      setRecordNotice(formData ? "记录已更新，汇总已同步。" : "记录已删除，相关产量已从汇总中扣除。");
+      setRecordDialog(null);
+    } catch (error) {
+      setRecordError(error instanceof Error ? error.message : "操作失败，请重试。");
+    } finally {
+      setRecordSaving(false);
+    }
+  }
 
   useEffect(() => {
     api("state")
@@ -615,7 +645,7 @@ export default function Home() {
                       <th>设备名称</th>
                       <th>设备数量</th>
                       <th>总投资 HKD</th>
-                      <th>节省单价</th>
+                      <th>节省单价HKD</th>
                       <th>实际生产数</th>
                       <th>回收状态</th>
                       <th>MA订单（万）</th>
@@ -638,7 +668,7 @@ export default function Home() {
                         </td>
                         <td>{row.qty} 台</td>
                         <td>{row.investment.toFixed(2)} 万</td>
-                        <td>{row.unitSave.toFixed(4)} RMB/件</td>
+                        <td>{row.unitSave.toFixed(4)}</td>
                         <td>{row.orders.toLocaleString()} 万</td>
                         <td>
                           <span
@@ -806,9 +836,13 @@ export default function Home() {
                 <h2>更新记录</h2>
                 <p>查看各部门的生产数据上报和修改痕迹</p>
               </div>
-              <button className="outline-button" onClick={exportRecords}>
-                导出记录
-              </button>
+              <div className="module-actions history-view-actions">
+                <button className={`outline-button history-view-toggle${historyTable ? " selected" : ""}`} aria-pressed={historyTable} aria-controls="history-records" onClick={() => setHistoryTable((current) => !current)}>
+                  <svg width="16" height="16" viewBox="0 0 20 20" fill="none" aria-hidden="true"><rect x="2" y="3" width="16" height="14" rx="2" stroke="currentColor" strokeWidth="1.5"/><path d="M2 8h16M2 12.5h16M7 8v9" stroke="currentColor" strokeWidth="1.5"/></svg>
+                  {historyTable ? "返回列表" : "查看表格"}
+                </button>
+                <button className="outline-button" onClick={exportRecords}>导出记录</button>
+              </div>
             </div>
             <div className="history-summary">
               <div>
@@ -820,15 +854,49 @@ export default function Home() {
                 <span>涉及部门</span>
               </div>
               <div>
-                <strong>
-                  {records
-                    .reduce((s, r) => s + r.production, 0)
-                    .toLocaleString()}
-                </strong>
+                <strong>{records.reduce((s, r) => s + r.production, 0).toLocaleString()}</strong>
                 <span>累计上报产量</span>
               </div>
             </div>
-            <div className="history-list">
+            {recordNotice && <p className="record-notice" role="status">{recordNotice}</p>}
+            {historyTable ? (
+              <div className="record-sheet" id="history-records">
+                <div className="record-sheet-heading">
+                  <div><h3>生产数据明细</h3><p>按条查看每次上报的生产数据</p></div>
+                  <span>共 {records.length} 条记录<span className="sheet-unit">单位：个</span></span>
+                </div>
+                <div className="record-sheet-scroll" role="region" aria-label="生产数据明细表，可横向滚动" tabIndex={0}>
+                  <table className="record-sheet-table">
+                    <caption className="sheet-sr-only">生产数据更新记录明细及产量合计</caption>
+                    <thead><tr>
+                      <th scope="col" className="sheet-index">序号</th><th scope="col">生产日期</th><th scope="col">部门 / 车间</th><th scope="col">设备名称</th><th scope="col">开机线 / 机台</th><th scope="col" className="sheet-number">生产数量（个）</th><th scope="col">上报人</th><th scope="col">备注</th><th scope="col" className="sheet-operations">操作</th>
+                    </tr></thead>
+                    <tbody>
+                      {records.map((record, index) => (
+                        <tr key={record.id}>
+                          <td className="sheet-index">{index + 1}</td>
+                          <td className="sheet-date">{record.date}</td>
+                          <td><span className="sheet-department">{record.factory}</span><span className="sheet-workshop">{record.workshop}</span></td>
+                          <td className="sheet-equipment">{record.equipment}</td>
+                          <td>{record.line}</td>
+                          <td className="sheet-number sheet-production">{record.production.toLocaleString()}</td>
+                          <td>{record.operator}</td>
+                          <td className="sheet-note">{record.note || "—"}</td>
+                          <td className="sheet-operations"><div className="history-actions">
+                            <button className="text-action" aria-label={`编辑${record.equipment}的更新记录`} onClick={() => { setRecordError(""); setRecordNotice(""); setRecordDialog({ mode: "edit", record }); }}>编辑</button>
+                            <button className="text-action danger-action" aria-label={`删除${record.equipment}的更新记录`} onClick={() => { setRecordError(""); setRecordNotice(""); setRecordDialog({ mode: "delete", record }); }}>删除</button>
+                          </div></td>
+                        </tr>
+                      ))}
+                      {records.length === 0 && <tr><td colSpan={9} className="record-empty">暂无更新记录</td></tr>}
+                    </tbody>
+                    <tfoot><tr><th colSpan={5} scope="row">产量合计<span>{records.length} 条记录</span></th><td className="sheet-number">{records.reduce((sum, record) => sum + record.production, 0).toLocaleString()}</td><td colSpan={3}>个</td></tr></tfoot>
+                  </table>
+                </div>
+                <div className="record-sheet-footer"><span className="sheet-tab">生产数据明细</span><span>共 {new Set(records.map((record) => record.factory)).size} 个部门</span></div>
+              </div>
+            ) : <div className="history-list" id="history-records">
+              {records.length === 0 && <p className="record-empty">暂无更新记录</p>}
               {records.map((record) => (
                 <article key={record.id}>
                   <div className="history-date">
@@ -844,16 +912,18 @@ export default function Home() {
                       <strong>{record.equipment}</strong>
                     </div>
                     <p>
-                      {record.line} · 生产{" "}
-                      <b>{record.production.toLocaleString()}</b> 个 ·{" "}
-                      {record.note}
+                      {record.line} · 生产 <b>{record.production.toLocaleString()}</b> 个 · {record.note}
                     </p>
                     <small>由 {record.operator} 上报</small>
                   </div>
-                  <span className="history-status">已计入汇总</span>
+                  <div className="history-actions">
+                    <button className="text-action" aria-label={`编辑${record.equipment}的更新记录`} onClick={() => { setRecordError(""); setRecordNotice(""); setRecordDialog({ mode: "edit", record }); }}>编辑</button>
+                    <button className="text-action danger-action" aria-label={`删除${record.equipment}的更新记录`} onClick={() => { setRecordError(""); setRecordNotice(""); setRecordDialog({ mode: "delete", record }); }}>删除</button>
+                    <span className="history-status">已计入汇总</span>
+                  </div>
                 </article>
               ))}
-            </div>
+            </div>}
           </section>
         )}
         {activeView === "users" && (
@@ -1254,6 +1324,31 @@ export default function Home() {
         )}
         {passwordResetNotice && (
           <div className="success-toast" role="status"><span>✓</span>{passwordResetNotice}<button type="button" onClick={() => setPasswordResetNotice("")}>×</button></div>
+        )}
+        {recordDialog && (
+          <dialog className="record-dialog" aria-labelledby="record-dialog-title" ref={(node) => { if (node && !node.open) node.showModal(); }} onCancel={(event) => { if (recordSaving) event.preventDefault(); else setRecordDialog(null); }}>
+            <form className="entry-modal" action={recordDialog.mode === "edit" ? changeRecord : () => changeRecord()}>
+              <div className="modal-head">
+                <div><small>更新记录</small><h2 id="record-dialog-title">{recordDialog.mode === "edit" ? "编辑更新记录" : "删除更新记录"}</h2></div>
+                <button type="button" aria-label="关闭" disabled={recordSaving} onClick={() => setRecordDialog(null)}>×</button>
+              </div>
+              <p className="record-context">{recordDialog.record.factory} · {recordDialog.record.workshop} · {recordDialog.record.equipment}</p>
+              {recordDialog.mode === "edit" ? <>
+                <div className="form-grid">
+                  <label>生产日期<input name="date" type="date" defaultValue={recordDialog.record.date} required /></label>
+                  <label>开机线 / 机台<input name="line" defaultValue={recordDialog.record.line} /></label>
+                </div>
+                <label>生产数量（个）<input name="production" type="number" min="1" step="1" defaultValue={recordDialog.record.production} required /></label>
+                <label>备注<textarea name="note" defaultValue={recordDialog.record.note} /></label>
+                <div className="formula-note">保存后同步更新设备累计产量、节省金额及结余。</div>
+              </> : <p className="record-delete-note">确定删除 {recordDialog.record.date} 的这条记录吗？对应的 {recordDialog.record.production.toLocaleString()} 个产量和节省金额将从汇总中扣除，此操作无法撤销。</p>}
+              {recordError && <p className="form-error" role="alert">{recordError}</p>}
+              <div className="modal-actions">
+                <button type="button" autoFocus={recordDialog.mode === "delete"} disabled={recordSaving} onClick={() => setRecordDialog(null)}>取消</button>
+                <button type="submit" disabled={recordSaving} className={recordDialog.mode === "edit" ? "primary" : "danger-button"}>{recordSaving ? "处理中…" : recordDialog.mode === "edit" ? "保存修改" : "确认删除"}</button>
+              </div>
+            </form>
+          </dialog>
         )}
         {equipmentDialog?.mode === "view" && (
           <div

@@ -1089,8 +1089,8 @@ services:
       NEXT_PUBLIC_BASE_PATH: /voyageplex
       VOYAGEPLEX_API_BASE_URL: http://voyageplex-api:5088
       EMAIL_PARSER_BASE_URL: http://voyageplex-parser:8091
-      QC_SYSTEM_API_URL: ${QC_SYSTEM_API_URL:-}
-      QC_SYSTEM_API_TOKEN: ${QC_SYSTEM_API_TOKEN:-}
+      QC_SYSTEM_API_URL: ${QC_SYSTEM_API_URL:-http://qc-plan-api:5188/api/integrations/shipping/results}
+      QC_SYSTEM_API_TOKEN: ${QC_PLAN_SHIPPING_API_KEY:-}
     volumes:
       - ./apps/船务部/VoyagePlex船务协同系统/data-runtime:/app/data
     depends_on:
@@ -1141,6 +1141,61 @@ services:
       timeout: 5s
       retries: 5
     restart: unless-stopped
+    networks:
+      - platform-net
+
+  # ─── QC 验货计划系统（QA部）：/qc-plan/ 子路径挂载，模式同 voyageplex ───
+  qc-plan-api:
+    build:
+      context: ./apps/QA部/QC验货计划系统
+      dockerfile: Dockerfile.api
+    environment:
+      QC_JWT_KEY: ${QC_PLAN_JWT_KEY:?QC_PLAN_JWT_KEY is required}
+      QC_SHIPPING_API_KEY: ${QC_PLAN_SHIPPING_API_KEY:?QC_PLAN_SHIPPING_API_KEY is required}
+      # 仅空库首次启动时创建 admin 账号；留空则不创建
+      QC_ADMIN_PASSWORD: ${QC_PLAN_ADMIN_PASSWORD:-}
+      ConnectionStrings__Default: Data Source=/data/qc-inspection.db
+      TZ: Asia/Shanghai
+    volumes:
+      - ./apps/QA部/QC验货计划系统/data:/data
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:5188/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    mem_limit: 768m
+    memswap_limit: 768m
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - platform-net
+
+  qc-plan-web:
+    build:
+      context: ./apps/QA部/QC验货计划系统
+      dockerfile: Dockerfile.web
+      args:
+        NEXT_PUBLIC_BASE_PATH: /qc-plan
+        NEXT_PUBLIC_QC_API_URL: /qc-plan
+    depends_on:
+      qc-plan-api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO", "/dev/null", "http://127.0.0.1:3000/qc-plan"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    mem_limit: 1g
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     networks:
       - platform-net
 

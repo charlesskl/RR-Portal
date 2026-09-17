@@ -42,6 +42,22 @@ if (ShipmentWorkflowRules.ResolvePlannedShipDate("", "", "8/9", "2026-07-20T08:0
 if (ShipmentWorkflowRules.ResolvePlannedShipDate("", "", "20-Jul-2026 22:00", "2026-07-18T08:00:00+08:00") != new DateOnly(2026, 7, 19))
     throw new InvalidOperationException("英文月份格式的 SI 截止日期未正确推算");
 Console.WriteLine("Shipment planned date resolution tests passed.");
+var existingCargo = JsonNode.Parse("""[{"source_file":"packing.xlsx","source_row":6,"product_code":"A1","quantity":99}]""")!.AsArray();
+var reimportedCargo = JsonNode.Parse("""[{"source_file":"packing.xlsx","source_row":6,"product_code":"A1","quantity":10},{"source_file":"packing.xlsx","source_row":7,"product_code":"B1","quantity":20}]""")!.AsArray();
+var mergedCargo = ShipmentImportMerge.AppendNewItems(existingCargo, reimportedCargo);
+if (mergedCargo.Count != 2 || mergedCargo[0]?["quantity"]?.GetValue<int>() != 99 || mergedCargo[1]?["product_code"]?.ToString() != "B1" ||
+    ShipmentImportMerge.AppendNewItems(mergedCargo, reimportedCargo).Count != 2)
+    throw new InvalidOperationException("重复导入应保留手工修改，只补入新来源行且不得重复添加");
+var manuallyRemovedCargo = ShipmentImportMerge.AppendNewItems(new JsonArray(), reimportedCargo,
+    JsonNode.Parse("""[{"source_file":"packing.xlsx","source_row":6,"product_code":"A1","quantity":10}]""")!.AsArray());
+if (manuallyRemovedCargo.Count != 1 || manuallyRemovedCargo[0]?["product_code"]?.ToString() != "B1")
+    throw new InvalidOperationException("重复导入不得恢复用户手工删除的旧货物");
+var existingGroups = JsonNode.Parse("""[{"warehouse":"人工修改的仓库","references":["PL260901360"],"items":[{"source_row":6,"product_code":"A1","quantity":99}]}]""")!.AsArray();
+var incomingGroups = JsonNode.Parse("""[{"warehouse":"待确认仓库","references":["PL260901360"],"items":[{"source_row":6,"product_code":"A1","quantity":10},{"source_row":7,"product_code":"B1","quantity":20}]}]""")!.AsArray();
+var mergedGroups = ShipmentImportMerge.AppendNewGroups(existingGroups, incomingGroups);
+if (mergedGroups.Count != 1 || mergedGroups[0]?["warehouse"]?.ToString() != "人工修改的仓库" || mergedGroups[0]?["items"]?.AsArray().Count != 2)
+    throw new InvalidOperationException("重复导入分组应保留手工修改的仓库并补入新货物");
+Console.WriteLine("Shipment re-import merge tests passed.");
 if (DestinationCountryRules.Infer("WM US ELWOOD;SAVANNAH", "[]") != "美国" ||
     DestinationCountryRules.Infer("YTN-FELIXSTOWE, UK", "[]") != "英国" ||
     DestinationCountryRules.Infer("", "[{\"warehouse\":\"DALLAS, TX, UNITED STATES\"}]") != "美国")

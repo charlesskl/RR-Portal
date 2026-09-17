@@ -89,6 +89,8 @@ app.UseCors();
 if (app.Environment.IsDevelopment()) { app.UseSwagger(); app.UseSwaggerUI(); }
 
 const string sessionCookie = "voyageplex_session";
+var sessionLifetime = TimeSpan.FromDays(7);
+var sessionRenewalWindow = TimeSpan.FromDays(3);
 var validRoles = new[] { "admin", "shipping", "warehouse" };
 
 app.Use(async (context, next) =>
@@ -111,6 +113,12 @@ app.Use(async (context, next) =>
         context.Response.Cookies.Delete(sessionCookie);
         context.Response.StatusCode = StatusCodes.Status401Unauthorized;
         await context.Response.WriteAsJsonAsync(new { error = "登录已失效，请重新登录" }); return;
+    }
+    if (path == "/api/auth/me" && session.ExpiresAt - DateTime.UtcNow <= sessionRenewalWindow)
+    {
+        session.ExpiresAt = DateTime.UtcNow.Add(sessionLifetime);
+        await db.SaveChangesAsync();
+        context.Response.Cookies.Append(sessionCookie, token, new CookieOptions { HttpOnly = true, SameSite = SameSiteMode.Strict, Secure = context.Request.IsHttps, MaxAge = sessionLifetime, Path = "/" });
     }
     context.Items["CurrentUser"] = session.User;
     var role = session.User.Role;
@@ -154,10 +162,10 @@ app.MapPost("/api/auth/login", async (JsonObject payload, HttpContext context, A
     if (user is null || !user.IsActive || !PasswordService.Verify(password, user.PasswordHash))
         return Results.Json(new { error = "账号或密码不正确" }, statusCode: StatusCodes.Status401Unauthorized);
     var rawToken = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
-    db.UserSessions.Add(new UserSession { UserId = user.Id, TokenHash = PasswordService.TokenHash(rawToken), ExpiresAt = DateTime.UtcNow.AddHours(12) });
+    db.UserSessions.Add(new UserSession { UserId = user.Id, TokenHash = PasswordService.TokenHash(rawToken), ExpiresAt = DateTime.UtcNow.Add(sessionLifetime) });
     user.LastLoginAt = DateTime.UtcNow; user.UpdatedAt = DateTime.UtcNow;
     await db.SaveChangesAsync(cancellationToken);
-    context.Response.Cookies.Append(sessionCookie, rawToken, new CookieOptions { HttpOnly = true, SameSite = SameSiteMode.Strict, Secure = context.Request.IsHttps, MaxAge = TimeSpan.FromHours(12), Path = "/" });
+    context.Response.Cookies.Append(sessionCookie, rawToken, new CookieOptions { HttpOnly = true, SameSite = SameSiteMode.Strict, Secure = context.Request.IsHttps, MaxAge = sessionLifetime, Path = "/" });
     return Results.Ok(UserResponse(user));
 });
 
@@ -323,7 +331,8 @@ app.MapPost("/api/imports/email/confirm", async (JsonObject payload, AppDbContex
         var existingTask = await db.ShipmentTasks.FirstOrDefaultAsync(task =>
             task.SourceImportItemId == sourceItemId || (!string.IsNullOrEmpty(incomingSo) && task.SoNumber == incomingSo), cancellationToken);
         var shipmentTask = existingTask ?? new ShipmentTask { SourceImportItemId = sourceItemId };
-        ApplyReviewedEmailToTask(shipmentTask, stored, existingTask is null);
+        var previousPayload = existingTask is null ? null : await PreviousShipmentPayload(db, existingTask, cancellationToken);
+        ApplyReviewedEmailToTask(shipmentTask, stored, existingTask is null, previousPayload);
         if (existingTask is null) db.ShipmentTasks.Add(shipmentTask);
         affectedTasks.Add(shipmentTask);
     }
@@ -367,7 +376,8 @@ app.MapPost("/api/imports/email/{batchId:long}/confirm", async (long batchId, Js
         var existingTask = await db.ShipmentTasks.FirstOrDefaultAsync(task =>
             task.SourceImportItemId == sourceItemId || (!string.IsNullOrEmpty(incomingSo) && task.SoNumber == incomingSo), cancellationToken);
         var shipmentTask = existingTask ?? new ShipmentTask { SourceImportItemId = sourceItemId };
-        ApplyReviewedEmailToTask(shipmentTask, stored, existingTask is null);
+        var previousPayload = existingTask is null ? null : await PreviousShipmentPayload(db, existingTask, cancellationToken);
+        ApplyReviewedEmailToTask(shipmentTask, stored, existingTask is null, previousPayload);
         if (existingTask is null) db.ShipmentTasks.Add(shipmentTask);
         affectedTasks.Add(shipmentTask);
     }
@@ -933,8 +943,31 @@ static object ToShipmentResponse(ShipmentTask task)
     };
 }
 
-static void ApplyReviewedEmailToTask(ShipmentTask task, JsonObject stored, bool initializeStatus = true)
+static async Task<JsonObject?> PreviousShipmentPayload(AppDbContext db, ShipmentTask task, CancellationToken cancellationToken)
 {
+    if (task.SourceImportItemId is not long sourceId) return null;
+    var previousJson = await db.ImportEmailItems.AsNoTracking()
+        .Where(item => item.Id == sourceId).Select(item => item.ResultJson)
+        .FirstOrDefaultAsync(cancellationToken);
+    return string.IsNullOrWhiteSpace(previousJson) ? null : JsonNode.Parse(previousJson)?.AsObject();
+}
+
+static void ApplyReviewedEmailToTask(ShipmentTask task, JsonObject stored, bool initializeStatus = true, JsonObject? previousImport = null)
+{
+    if (!initializeStatus)
+    {
+        // Re-imports add newly parsed cargo without replacing corrections made on the task.
+        task.ItemsJson = ShipmentImportMerge.AppendNewItems(
+            JsonNode.Parse(task.ItemsJson)?.AsArray() ?? new JsonArray(),
+            stored["items"]?.AsArray() ?? new JsonArray(),
+            previousImport?["items"]?.AsArray()).ToJsonString();
+        task.WarehouseGroupsJson = ShipmentImportMerge.AppendNewGroups(
+            JsonNode.Parse(task.WarehouseGroupsJson)?.AsArray() ?? new JsonArray(),
+            stored["warehouse_groups"]?.AsArray() ?? new JsonArray(),
+            previousImport?["warehouse_groups"]?.AsArray()).ToJsonString();
+        task.UpdatedAt = DateTime.UtcNow;
+        return;
+    }
     var fields = stored["fields"]?.AsObject() ?? new JsonObject();
     var message = stored["message"]?.AsObject() ?? new JsonObject();
     var sender = message["sender"]?.GetValue<string>() ?? string.Empty;

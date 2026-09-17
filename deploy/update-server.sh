@@ -417,20 +417,35 @@ if [[ "$COMPOSE_CHANGED" -eq 1 ]]; then
   #   x-docker-expose-session-sharedkey contains value with non-printable ASCII characters
   # （#707 部署因此三连败）。单目标构建不触发该 bug，故在 up -d 之前把缺失镜像逐个建好，
   # 让 up -d 的隐式构建无事可做，绕开多目标 bake。
-  mapfile -t CFG_SERVICES < <(docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" config --services 2>/dev/null)
-  mapfile -t CFG_IMAGES < <(docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" config --images 2>/dev/null)
-  for i in "${!CFG_SERVICES[@]}"; do
-    img="${CFG_IMAGES[$i]:-}"
+  # 2026-09-17 修复配对 bug：config --services 与 config --images 是两个独立排序的
+  # 列表，服务名 ≠ 镜像名后缀（如 cpg→rr-portal-c-store）时下标错位，曾把
+  # hy-schedule-system 误判为缺失 (rr-portal-qc-plan-web) 白建 37 分钟，真正的
+  # qc-plan-api/qc-plan-web 反而没建 → up -d 隐式多目标 bake → 又踩 sharedkey bug。
+  # 改用 config --format json 按服务名精确配对（只处理有 build 的服务）。
+  mapfile -t BUILD_PAIRS < <(docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" config --format json 2>/dev/null | python3 -c "
+import json, sys
+cfg = json.load(sys.stdin)
+for name, svc in sorted((cfg.get('services') or {}).items()):
+    if isinstance(svc, dict) and svc.get('build'):
+        print(name + ' ' + str(svc.get('image') or ''))
+")
+  for pair in "${BUILD_PAIRS[@]}"; do
+    svc="${pair%% *}"
+    img="${pair#* }"
+    # build-only 服务 compose 不会显式给 image 名，按默认 <project>-<service> 兜底
+    [[ -n "$img" ]] || img="$(docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" config --images 2>/dev/null | grep -E -- "-${svc}$" | head -1)"
     [[ -n "$img" ]] || continue
     if ! docker image inspect "$img" >/dev/null 2>&1; then
-      echo "  [COMPOSE] 镜像缺失 → 逐服务构建 ${CFG_SERVICES[$i]} ($img)"
-      ensure_service_base_images "${CFG_SERVICES[$i]}"
-      docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" build "${CFG_SERVICES[$i]}"
+      echo "  [COMPOSE] 镜像缺失 → 逐服务构建 $svc ($img)"
+      ensure_service_base_images "$svc"
+      docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" build "$svc"
     fi
   done
   # --remove-orphans: 删除已从 compose 移除的服务遗留的孤儿容器，
   # 否则被下线/重命名的服务容器会继续运行（crash-loop 时甚至拖垮内存导致全站 OOM）
-  docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --remove-orphans
+  # --no-build: 镜像缺失必须在上面逐服务预构建；隐式多目标 bake 会踩 sharedkey bug，
+  # 宁可报错也不让它触发（预构建覆盖所有 build 服务，非 build 服务走 pull 不受影响）。
+  docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --no-build --remove-orphans
   # 还要 rebuild 那些真的动了源码的服务（incremental）
   for svc in "${AFFECTED_SERVICES[@]}"; do
     echo "  [INCR] Rebuilding $svc (--no-deps)..."

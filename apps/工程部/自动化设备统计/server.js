@@ -6,7 +6,7 @@ const fs = require('fs');
 const crypto = require('crypto');
 
 const PORT = process.env.PORT || 3008;
-const DATA_DIR = path.join(__dirname, 'data');
+const DATA_DIR = process.env.AUTOMATION_DATA_DIR || path.join(__dirname, 'data');
 const DATA_FILE = path.join(DATA_DIR, 'data.json');
 
 // ─── 种子数据（迁移自原 OpenAI Sites 版本 2026-08-15 快照）─────────────────────
@@ -128,6 +128,13 @@ app.put('/api/equipment/:id', (req, res) => {
   const orders = Number(b.orders) || 0;
   const investment = calcInvestment(unitPrice, qty);
   const saved = orders * unitSave;
+  for (const record of data.records) {
+    if (record.factory === eq.factory && record.workshop === eq.workshop && record.equipment === eq.name) {
+      record.factory = b.department ?? eq.factory;
+      record.workshop = b.workshop ?? eq.workshop;
+      record.equipment = b.name ?? eq.name;
+    }
+  }
   Object.assign(eq, {
     factory: b.department ?? eq.factory, workshop: b.workshop ?? eq.workshop,
     name: b.name ?? eq.name, qty, unitPrice, investment,
@@ -159,6 +166,42 @@ app.post('/api/records', (req, res) => {
   saveData(data);
   res.status(201).json(publicState(data));
 });
+
+// 编辑/删除生产记录，按产量差额同步累计；保留历史快照中的原有金额。
+function changeProductionRecord(req, res, deleting) {
+  const data = structuredClone(loadData());
+  const record = data.records.find(r => r.id === Number(req.params.id));
+  if (!record) return res.status(404).json({ error: '更新记录不存在，请刷新后重试' });
+  const b = req.body || {};
+  const production = deleting ? 0 : Number(b.production);
+  const date = deleting ? record.date : b.date;
+  if (!deleting && (!Number.isSafeInteger(production) || production <= 0 ||
+      typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date) ||
+      !Number.isFinite(Date.parse(date)) || new Date(date).toISOString().slice(0, 10) !== date ||
+      (b.line !== undefined && typeof b.line !== 'string') ||
+      (b.note !== undefined && typeof b.note !== 'string'))) {
+    return res.status(400).json({ error: '请填写有效的生产日期和大于 0 的整数产量，机台和备注须为文字' });
+  }
+  const eq = data.equipment.find(e => e.factory === record.factory && e.workshop === record.workshop && e.name === record.equipment);
+  const delta = production - record.production;
+  if (!eq || !Number.isFinite(eq.orders + delta / 10000) || eq.orders + delta / 10000 < -1e-8) {
+    return res.status(409).json({ error: '关联设备或累计产量异常，请先核对设备台账' });
+  }
+  eq.orders = Math.max(0, eq.orders + delta / 10000);
+  eq.saved += delta * eq.unitSave / 10000;
+  eq.balance += delta * eq.unitSave / 10000;
+  eq.update = todayLabel();
+  if (deleting) {
+    data.records = data.records.filter(r => r.id !== record.id);
+  } else {
+    Object.assign(record, { date, production, line: b.line?.trim() || '未填写', note: b.note?.trim() || '' });
+    data.records.sort((a, b) => b.date.localeCompare(a.date));
+  }
+  saveData(data);
+  res.json(publicState(data));
+}
+app.put('/api/records/:id', (req, res) => changeProductionRecord(req, res, false));
+app.delete('/api/records/:id', (req, res) => changeProductionRecord(req, res, true));
 
 // 新增用户
 app.post('/api/users', (req, res) => {
@@ -208,6 +251,9 @@ app.get(/^(?!\/(api|health)(\/|$)).*/, (req, res) => {
   res.sendFile(path.join(DIST_DIR, 'index.html'));
 });
 
-app.listen(PORT, () => {
-  console.log(`自动化设备统计系统已启动: http://localhost:${PORT}`);
-});
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`自动化设备统计系统已启动: http://localhost:${PORT}`);
+  });
+}
+module.exports = app;

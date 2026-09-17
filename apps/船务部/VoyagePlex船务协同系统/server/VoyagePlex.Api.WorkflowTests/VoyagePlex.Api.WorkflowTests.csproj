@@ -12,6 +12,7 @@
     <Compile Include="../VoyagePlex.Api/Services/UtcDateTime.cs" Link="UtcDateTime.cs" />
     <Compile Include="../VoyagePlex.Api/Services/ShipmentDeletionRules.cs" Link="ShipmentDeletionRules.cs" />
     <Compile Include="../VoyagePlex.Api/Services/ShipmentOrderTotals.cs" Link="ShipmentOrderTotals.cs" />
+    <Compile Include="../VoyagePlex.Api/Services/ShipmentImportMerge.cs" Link="ShipmentImportMerge.cs" />
     <Compile Include="../VoyagePlex.Api/Entities/ProductInfo.cs" Link="ProductInfo.cs" />
     <Compile Include="../VoyagePlex.Api/Entities/ShipmentTask.cs" Link="ShipmentTask.cs" />
     <Compile Include="../VoyagePlex.Api/Services/DestinationCountryRules.cs" Link="DestinationCountryRules.cs" />

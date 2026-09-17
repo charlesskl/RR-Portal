@@ -5758,6 +5758,11 @@ async function renderQuotePage() {
         else if (s.dept === 'sewing') renderSewing(body, sectionPayload, inEdit, onChangeOther, fxRate);
         else if (s.dept === 'assembly') renderAssembly(body, sectionPayload, inEdit, onChangeOther, fxRate);
         installDepartmentExport(body, s.dept, id);
+        // 业务/管理员在只读预览中也能看到套啤价入口；已审核时点击仅提示先解除审核。
+        if (s.dept === 'molding' && !inEdit) {
+          body.querySelector('h3')?.insertAdjacentHTML('beforeend',
+            '<small style="margin-left:6px"><button data-act="auto-shot" class="mini" type="button">🔄 自动按机型套啤价</button></small>');
+        }
       };
       saveHandlers.set(s.dept, async () => {
         await putSection(s, sectionPayload, false);
@@ -5777,6 +5782,19 @@ async function renderQuotePage() {
               c.querySelector('.wb-bar').outerHTML = renderBar();
               renderBody();
               bindActs();
+              return;
+            }
+            if (act === 'auto-shot') {
+              if (s.status === 'approved') {
+                alert('啤机部已审核，需先点击页面底部的“解除审核”，再套啤价并重新提交审核。');
+                return;
+              }
+              inEdit = true;
+              c.querySelector('h2').outerHTML = renderHeader();
+              c.querySelector('.wb-bar').outerHTML = renderBar();
+              renderBody();
+              bindActs();
+              body.querySelector('#btn-auto-shot')?.click();
               return;
             }
             if (act === 'exit-edit') {

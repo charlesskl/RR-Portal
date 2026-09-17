@@ -25,6 +25,11 @@ const { createTranslationProvider } = require('./utils/translationProvider');
 
 const app = express();
 
+// 只信任第一跳代理（nginx）。不设时所有请求经 nginx 转发后限流都按
+// nginx 的 IP 计数，等于全部用户共享同一个限流桶（高峰期连部署健康
+// 检查都会 429）；容器不暴露端口、只能经 nginx 访问，信任第一跳是安全的。
+app.set('trust proxy', 1);
+
 const uploadsRoot = process.pkg
   ? path.join(path.dirname(process.execPath), 'uploads')
   : path.join(__dirname, 'uploads');
@@ -73,6 +78,9 @@ app.use(rateLimit({
   max: parseInt(process.env.RATE_LIMIT_MAX) || 200,
   standardHeaders: true,
   legacyHeaders: false,
+  // 健康检查（Docker HEALTHCHECK 每 10s 一次 + 部署检查）不计入限流，
+  // 否则容器自检会白白消耗用户额度，部署健康检查也可能被 429 误判失败。
+  skip: (req) => req.path === '/health',
 }));
 
 app.use(express.json({ limit: '1mb' }));

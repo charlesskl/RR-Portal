@@ -105,6 +105,14 @@ test('molding injection table keeps an editable side-action column on screen onl
   assert.match(source, /side_action: m\.side_action \|\| existing\.side_action \|\| ''/);
 });
 
+test('molding preview exposes the shot-price action and protects approved prices', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../frontend/workbench.js'), 'utf8');
+  assert.match(source, /s\.dept === 'molding' && !inEdit/);
+  assert.match(source, /data-act="auto-shot"/);
+  assert.match(source, /if \(s\.status === 'approved'\) \{[\s\S]*?解除审核[\s\S]*?return;/);
+  assert.match(source, /if \(act === 'auto-shot'\) \{[\s\S]*?inEdit = true;[\s\S]*?body\.querySelector\('#btn-auto-shot'\)\?\.click\(\)/);
+});
+
 test('mold table hides the unused mold structure column', () => {
   const source = fs.readFileSync(path.join(__dirname, '../frontend/workbench.js'), 'utf8');
   const renderMolds = source.match(/function renderMolds\([\s\S]*?\n}\n/);
@@ -178,7 +186,7 @@ test('Ctrl+S and Command+S save the active dirty department', () => {
   assert.match(source, /const save = saveHandlers\.get\(activeDept\)/);
   assert.match(source, /showSaveShortcutStatus\('\u2713 已保存'\)/);
   assert.match(source, /保存草稿（Ctrl\/⌘\+S）/);
-  assert.match(quotePage, /workbench\.js\?v=20260915-molding-slide/);
+  assert.match(quotePage, /workbench\.js\?v=20260917-auto-shot-visible/);
 });
 
 test('summary tab recalculates whenever it is opened or clicked again', () => {

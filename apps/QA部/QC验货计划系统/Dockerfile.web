@@ -10,7 +10,8 @@ RUN npm install -g pnpm@10.26.1
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
 COPY app ./app
-COPY public ./public
+# public/ 目录在 favicon 移入 app/icon.svg 后已为空，git 不跟踪空目录，
+# COPY 不存在的路径会让 docker build 失败（"/public": not found）；以后有静态资源再加回
 COPY next.config.mjs postcss.config.mjs tailwind.config.ts tsconfig.json .eslintrc.json ./
 # 云端子路径部署：/qc-plan（basePath + 同域 API 前缀）；独立部署传空即可
 ARG NEXT_PUBLIC_BASE_PATH=

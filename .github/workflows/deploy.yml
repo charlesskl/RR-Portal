@@ -137,6 +137,32 @@ jobs:
               echo "[GUARD][WARN] GitHub secret FACTORY_REVIEW_ADMIN_PASSWORD is empty, skipping"
             fi
 
+            echo "=== qc-plan secrets env guard ==="
+            # QC 验货计划系统：JWT 密钥 / 船务集成接口密钥 / 首个管理员密码。
+            # 缺 QC_PLAN_JWT_KEY 或 QC_PLAN_SHIPPING_API_KEY 时 compose 直接报错（:? 断言），
+            # 所以缺 secret 就跳过并告警，不要写入空值把部署打挂。
+            sync_qc_plan_secret() {
+              local name="$1" value="$2"
+              if [ -z "$value" ]; then
+                echo "[GUARD][WARN] GitHub secret $name 为空，跳过"
+                return
+              fi
+              if grep -q "^${name}=" .env.cloud.production; then
+                if [ "$(grep "^${name}=" .env.cloud.production | head -1 | cut -d= -f2-)" != "$value" ]; then
+                  sed -i "s|^${name}=.*|${name}=${value}|" .env.cloud.production
+                  echo "[GUARD] $name updated from GitHub secret"
+                else
+                  echo "[GUARD] $name already matches GitHub secret"
+                fi
+              else
+                echo "${name}=${value}" >> .env.cloud.production
+                echo "[GUARD] $name added from GitHub secret"
+              fi
+            }
+            sync_qc_plan_secret QC_PLAN_JWT_KEY '${{ secrets.QC_PLAN_JWT_KEY }}'
+            sync_qc_plan_secret QC_PLAN_SHIPPING_API_KEY '${{ secrets.QC_PLAN_SHIPPING_API_KEY }}'
+            sync_qc_plan_secret QC_PLAN_ADMIN_PASSWORD '${{ secrets.QC_PLAN_ADMIN_PASSWORD }}'
+
             echo "=== Script version check ==="
             git fetch origin main
             DEPLOY_SCRIPT_RUNNER=$(mktemp)
@@ -248,7 +274,8 @@ jobs:
               /tomy-paiqi/health \
               /zuru-order-system/health \
               /zuru-master/health \
-              /voyageplex/api/health; do
+              /voyageplex/api/health \
+              /qc-plan/api/health; do
             check_endpoint "$ENDPOINT" || FAILED=$((FAILED + 1))
           done
           if [ "$FAILED" -gt 0 ]; then

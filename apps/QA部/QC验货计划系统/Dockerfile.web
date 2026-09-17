@@ -6,6 +6,11 @@ RUN pnpm install --frozen-lockfile
 COPY app ./app
 COPY public ./public
 COPY next.config.mjs postcss.config.mjs tailwind.config.ts tsconfig.json .eslintrc.json ./
+# 云端子路径部署：/qc-plan（basePath + 同域 API 前缀）；独立部署传空即可
+ARG NEXT_PUBLIC_BASE_PATH=
+ARG NEXT_PUBLIC_QC_API_URL=
+ENV NEXT_PUBLIC_BASE_PATH=$NEXT_PUBLIC_BASE_PATH
+ENV NEXT_PUBLIC_QC_API_URL=$NEXT_PUBLIC_QC_API_URL
 RUN pnpm build
 ENV NODE_ENV=production
 EXPOSE 3000

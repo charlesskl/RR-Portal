@@ -271,7 +271,13 @@ export function AppShell({ route }: { route: string }) {
   const [authError,setAuthError] = useState("");
   const [setupRequired,setSetupRequired] = useState(false);
   async function loadUser(){setAuthLoading(true);setAuthError("");try{const response=await fetch(apiPath("/api/auth/me"),{cache:"no-store"});if(response.ok){setUser(await response.json());setSetupRequired(false);}else if(response.status===401){setUser(null);const setup=await fetch(apiPath("/api/auth/setup-status"),{cache:"no-store"});if(!setup.ok)throw new Error("无法检查系统初始化状态");setSetupRequired(Boolean((await setup.json()).required));}else{throw new Error("后台暂时无法检查登录状态");}}catch(reason){setAuthError(reason instanceof Error?reason.message:"后台连接失败");}finally{setAuthLoading(false);}}
-  useEffect(()=>{void loadUser();},[]);
+  useEffect(()=>{
+    void loadUser();
+    const renewal = window.setInterval(()=>{
+      if(document.visibilityState === "visible") void fetch(apiPath("/api/auth/me"),{cache:"no-store"}).catch(()=>{});
+    },30*60*1000);
+    return ()=>window.clearInterval(renewal);
+  },[]);
   async function logout(){await fetch(apiPath("/api/auth/logout"),{method:"POST"});setUser(null);window.location.href=basePath+"/";}
   if(authLoading)return <div className="auth-screen"><div className="auth-card"><span className="brand-mark"><Anchor size={19}/></span><h1>VoyagePlex</h1><p>正在检查登录状态…</p></div></div>;
   if(authError)return <div className="auth-screen"><div className="auth-card"><span className="brand-mark"><Anchor size={19}/></span><h1>暂时无法连接后台</h1><p>{authError}，请稍后重试。</p><button className="primary-button" onClick={()=>void loadUser()}>重新连接</button></div></div>;

@@ -89,6 +89,8 @@ app.UseCors();
 if (app.Environment.IsDevelopment()) { app.UseSwagger(); app.UseSwaggerUI(); }
 
 const string sessionCookie = "voyageplex_session";
+var sessionLifetime = TimeSpan.FromDays(7);
+var sessionRenewalWindow = TimeSpan.FromDays(3);
 var validRoles = new[] { "admin", "shipping", "warehouse" };
 
 app.Use(async (context, next) =>
@@ -111,6 +113,12 @@ app.Use(async (context, next) =>
         context.Response.Cookies.Delete(sessionCookie);
         context.Response.StatusCode = StatusCodes.Status401Unauthorized;
         await context.Response.WriteAsJsonAsync(new { error = "登录已失效，请重新登录" }); return;
+    }
+    if (path == "/api/auth/me" && session.ExpiresAt - DateTime.UtcNow <= sessionRenewalWindow)
+    {
+        session.ExpiresAt = DateTime.UtcNow.Add(sessionLifetime);
+        await db.SaveChangesAsync();
+        context.Response.Cookies.Append(sessionCookie, token, new CookieOptions { HttpOnly = true, SameSite = SameSiteMode.Strict, Secure = context.Request.IsHttps, MaxAge = sessionLifetime, Path = "/" });
     }
     context.Items["CurrentUser"] = session.User;
     var role = session.User.Role;
@@ -154,10 +162,10 @@ app.MapPost("/api/auth/login", async (JsonObject payload, HttpContext context, A
     if (user is null || !user.IsActive || !PasswordService.Verify(password, user.PasswordHash))
         return Results.Json(new { error = "账号或密码不正确" }, statusCode: StatusCodes.Status401Unauthorized);
     var rawToken = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
-    db.UserSessions.Add(new UserSession { UserId = user.Id, TokenHash = PasswordService.TokenHash(rawToken), ExpiresAt = DateTime.UtcNow.AddHours(12) });
+    db.UserSessions.Add(new UserSession { UserId = user.Id, TokenHash = PasswordService.TokenHash(rawToken), ExpiresAt = DateTime.UtcNow.Add(sessionLifetime) });
     user.LastLoginAt = DateTime.UtcNow; user.UpdatedAt = DateTime.UtcNow;
     await db.SaveChangesAsync(cancellationToken);
-    context.Response.Cookies.Append(sessionCookie, rawToken, new CookieOptions { HttpOnly = true, SameSite = SameSiteMode.Strict, Secure = context.Request.IsHttps, MaxAge = TimeSpan.FromHours(12), Path = "/" });
+    context.Response.Cookies.Append(sessionCookie, rawToken, new CookieOptions { HttpOnly = true, SameSite = SameSiteMode.Strict, Secure = context.Request.IsHttps, MaxAge = sessionLifetime, Path = "/" });
     return Results.Ok(UserResponse(user));
 });
 

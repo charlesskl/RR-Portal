@@ -1393,9 +1393,9 @@ export default function Home() {
                   </strong>
                 </div>
                 <div>
-                  <small>节省单价</small>
+                  <small>节省单价HKD</small>
                   <strong>
-                    {equipmentDialog.row.unitSave.toFixed(4)} RMB/件
+                    {equipmentDialog.row.unitSave.toFixed(4)}
                   </strong>
                 </div>
                 <div>

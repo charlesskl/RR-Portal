@@ -1,6 +1,8 @@
 FROM node:20-alpine
 WORKDIR /app
-RUN corepack enable && corepack prepare pnpm@10.26.1 --activate
+# node:20-alpine 内置 corepack 太旧，验不了 pnpm 10.x 的签名
+#（Cannot find matching keyid），改用 npm 全局安装，版本与 packageManager 字段一致
+RUN npm install -g pnpm@10.26.1
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
 COPY app ./app

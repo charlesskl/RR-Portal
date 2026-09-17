@@ -2492,7 +2492,7 @@ function addPartner(type) {
   const inp   = document.getElementById('partnerInput_' + type);
   const name  = (inp && inp.value || '').trim();
   if (!name) { showToast('请输入' + label + '名称', 'error'); return; }
-  const known = type === 'supplier' ? getSupplierOptions() : type === 'customer' ? getCustomerOptions() : getProcessTypeOptions();
+  const known = managedNames(type);
   if (known.includes(name)) { showToast(label + '「' + name + '」已在名单中', 'info'); return; }
   const list = _loadPartners().slice();
   list.push({ name, type, createdAt: nowIso() });
@@ -2562,17 +2562,17 @@ function aqlJudge(qty, sampleQty, failQty) {
   return n <= row.m065 ? 'PASS' : 'REJ';
 }
 
-/* 生成供应商选项（历史数据 + 默认列表去重排序） */
+/* 校验池：名单 + 历史记录已用值（旧记录编辑不受影响）；下拉候选只用名单，见 renderSupplierDatalist */
 function getSupplierOptions() {
   const fromData = state.records.map(r => r.supplier).filter(Boolean);
-  return [...new Set([...DEFAULT_SUPPLIERS, ...managedNames('supplier'), ...fromData])].sort();
+  return [...new Set([...managedNames('supplier'), ...fromData])].sort();
 }
 
 /* 渲染 datalist */
 function renderSupplierDatalist() {
   const list = document.getElementById('supplierList');
   if (!list) return;
-  list.innerHTML = getSupplierOptions()
+  list.innerHTML = managedNames('supplier')
     .map(n => `<option value="${n}"></option>`).join('');
 }
 
@@ -2588,26 +2588,26 @@ const DEFAULT_CUSTOMERS = [
 
 function getCustomerOptions() {
   const fromData = state.records.map(r => r.client).filter(Boolean);
-  return [...new Set([...DEFAULT_CUSTOMERS, ...managedNames('customer'), ...fromData])].sort();
+  return [...new Set([...managedNames('customer'), ...fromData])].sort();
 }
 
 function renderCustomerDatalist() {
   const list = document.getElementById('customerList');
   if (!list) return;
-  list.innerHTML = getCustomerOptions()
+  list.innerHTML = managedNames('customer')
     .map(n => `<option value="${n}"></option>`).join('');
 }
 
-/* 加工类型候选：名单 + 内置常见工艺 + 历史记录里出现过的值 */
+/* 加工类型校验池：名单 + 历史记录已用值；下拉候选只用名单，见 renderProcessTypeDatalist */
 const DEFAULT_PROCESS_TYPES = ['啤机','印刷','UV','过油','裱纸','烫金','击凸','粘盒'];
 function getProcessTypeOptions() {
   const fromData = state.records.map(r => r.processType).filter(Boolean);
-  return [...new Set([...DEFAULT_PROCESS_TYPES, ...managedNames('processType'), ...fromData])].sort();
+  return [...new Set([...managedNames('processType'), ...fromData])].sort();
 }
 function renderProcessTypeDatalist() {
   const list = document.getElementById('processTypeList');
   if (!list) return;
-  list.innerHTML = getProcessTypeOptions()
+  list.innerHTML = managedNames('processType')
     .map(n => `<option value="${n}"></option>`).join('');
 }
 

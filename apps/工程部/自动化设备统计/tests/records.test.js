@@ -83,4 +83,37 @@ test('record edits and deletions persist and adjust only the linked equipment', 
     assert.equal((await request('records/3', 'DELETE')).status, 409);
     assert.equal(fs.readFileSync(file, 'utf8'), before);
   });
+  await t.test('cost prices persist, distinguish zero from missing, and preserve omitted values', async () => {
+    const input = { department: '测试部门', workshop: '装配', name: '单价测试设备', quantity: 1, unitPrice: 100, manualPrice: .25, machinePrice: 0, orders: 1 };
+    const created = await request('equipment', 'POST', input);
+    assert.equal(created.status, 201);
+    let eq = created.data.equipment.find(e => e.name === input.name);
+    const id = eq.id;
+    assert.equal(eq.manualPrice, .25);
+    assert.equal(eq.machinePrice, 0);
+    assert.equal(eq.unitSave, .25);
+    const edit = { department: eq.factory, workshop: eq.workshop, name: eq.name, quantity: eq.qty, unitPrice: eq.unitPrice, orders: eq.orders, unitSave: eq.unitSave };
+    let result = await request(`equipment/${id}`, 'PUT', { ...edit, manualPrice: .3, machinePrice: .05 });
+    assert.equal(result.status, 200);
+    result = await request(`equipment/${id}`, 'PUT', edit);
+    eq = result.data.equipment.find(e => e.id === id);
+    assert.equal(eq.manualPrice, .3);
+    assert.equal(eq.machinePrice, .05);
+    await close(); await start();
+    eq = (await request('state')).data.equipment.find(e => e.id === id);
+    assert.equal(eq.manualPrice, .3);
+    assert.equal(eq.machinePrice, .05);
+    const before = fs.readFileSync(path.join(directory, 'data.json'), 'utf8');
+    for (const value of [-1, 'oops', {}, true, ' ']) {
+      assert.equal((await request(`equipment/${id}`, 'PUT', { ...edit, manualPrice: value })).status, 400);
+      assert.equal((await request('equipment', 'POST', { ...input, name: '非法数据', machinePrice: value })).status, 400);
+    }
+    assert.equal(fs.readFileSync(path.join(directory, 'data.json'), 'utf8'), before);
+    result = await request(`equipment/${id}`, 'PUT', { ...edit, manualPrice: null, machinePrice: 0 });
+    eq = result.data.equipment.find(e => e.id === id);
+    assert.equal(eq.manualPrice, null);
+    assert.equal(eq.machinePrice, 0);
+    assert.equal(result.data.equipment.find(e => e.id === 1).manualPrice, undefined);
+  });
+
 });

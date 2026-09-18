@@ -86,6 +86,22 @@ function todayLabel() {
 // investment：RMB → HKD（汇率 0.87），单位万
 function calcInvestment(unitPrice, qty) { return unitPrice * qty / 0.87 / 10000; }
 
+// Missing historical prices remain unknown; never infer them from the savings difference.
+function readCostPrices(body) {
+  const prices = {};
+  for (const key of ['manualPrice', 'machinePrice']) {
+    if (!Object.prototype.hasOwnProperty.call(body, key)) continue;
+    const value = body[key];
+    if (value === null || value === '') { prices[key] = null; continue; }
+    if ((typeof value !== 'number' && typeof value !== 'string') ||
+        (typeof value === 'string' && !value.trim()) || !Number.isFinite(Number(value)) || Number(value) < 0) {
+      throw new Error('人工和机器单价须为大于或等于 0 的数字');
+    }
+    prices[key] = Number(value);
+  }
+  return prices;
+}
+
 const app = express();
 app.use(express.json());
 
@@ -103,14 +119,16 @@ app.post('/api/equipment', (req, res) => {
   }
   const qty = Number(b.quantity) || 1;
   const unitPrice = Number(b.unitPrice) || 0;
-  const unitSave = Math.max(0, (Number(b.manualPrice) || 0) - (Number(b.machinePrice) || 0));
+  let prices;
+  try { prices = readCostPrices(b); } catch (error) { return res.status(400).json({ error: error.message }); }
+  const unitSave = Math.max(0, (prices.manualPrice ?? 0) - (prices.machinePrice ?? 0));
   const orders = Number(b.orders) || 0;
   const investment = calcInvestment(unitPrice, qty);
   const saved = orders * unitSave;
   data.equipment.push({
     id: data.nextId++, factory: b.department, workshop: b.workshop, name: b.name,
     qty, unitPrice, investment, maOrder: Number(b.maOrder) || 0, orders, saved,
-    balance: saved - investment, unitSave, update: todayLabel(),
+    balance: saved - investment, unitSave, ...prices, update: todayLabel(),
   });
   saveData(data);
   res.status(201).json(publicState(data));
@@ -122,6 +140,8 @@ app.put('/api/equipment/:id', (req, res) => {
   const eq = data.equipment.find(e => e.id === +req.params.id);
   if (!eq) return res.status(404).json({ error: '设备不存在' });
   const b = req.body || {};
+  let prices;
+  try { prices = readCostPrices(b); } catch (error) { return res.status(400).json({ error: error.message }); }
   const qty = Number(b.quantity) || 1;
   const unitPrice = Number(b.unitPrice) || 0;
   const unitSave = Number(b.unitSave) || 0;
@@ -136,6 +156,7 @@ app.put('/api/equipment/:id', (req, res) => {
     }
   }
   Object.assign(eq, {
+    ...prices,
     factory: b.department ?? eq.factory, workshop: b.workshop ?? eq.workshop,
     name: b.name ?? eq.name, qty, unitPrice, investment,
     maOrder: Number(b.maOrder) || 0, orders, saved,

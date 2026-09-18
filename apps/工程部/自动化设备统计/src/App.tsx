@@ -13,6 +13,8 @@ type Equipment = {
   saved: number;
   balance: number;
   unitSave: number;
+  manualPrice?: number | null;
+  machinePrice?: number | null;
   update: string;
 };
 type ProductionRecord = {
@@ -266,6 +268,8 @@ export default function Home() {
         quantity: Number(formData.get("quantity")) || 1,
         unitPrice: Number(formData.get("unitPrice")) || 0,
         unitSave: Number(formData.get("unitSave")) || 0,
+        manualPrice: formData.get("manualPrice") === "" ? null : Number(formData.get("manualPrice")),
+        machinePrice: formData.get("machinePrice") === "" ? null : Number(formData.get("machinePrice")),
         maOrder: Number(formData.get("maOrder")) || 0,
         orders: Number(formData.get("orders")) || 0,
       }),
@@ -325,6 +329,8 @@ export default function Home() {
       "设备单价（RMB/台）",
       "投资金额（万HKD）",
       "实际生产数（万）",
+      "原人工单价（RMB/件）",
+      "机器工单价（RMB/件）",
       "已节省成本（万）",
       "当前结余（万）",
       "MA订单（万）",
@@ -338,6 +344,8 @@ export default function Home() {
       row.unitPrice,
       row.investment.toFixed(2),
       row.orders,
+      row.manualPrice == null ? "未填写" : row.manualPrice.toFixed(4),
+      row.machinePrice == null ? "未填写" : row.machinePrice.toFixed(4),
       row.saved.toFixed(2),
       row.balance.toFixed(2),
       row.maOrder,
@@ -534,7 +542,7 @@ export default function Home() {
                   placeholder="搜索设备、部门…"
                 />
               </div>
-              <div className="table-wrap">
+              <div className="table-wrap dashboard-cost-table">
                 <table>
                   <thead>
                     <tr>
@@ -544,6 +552,8 @@ export default function Home() {
                       <th>设备单价</th>
                       <th>投资金额</th>
                       <th>实际生产数</th>
+                      <th>原人工单价<small>RMB/件</small></th>
+                      <th>机器工单价<small>RMB/件</small></th>
                       <th>已节省成本</th>
                       <th>当前结余</th>
                       <th>更新</th>
@@ -566,6 +576,8 @@ export default function Home() {
                         </td>
                         <td>{row.investment.toFixed(2)} 万</td>
                         <td>{row.orders.toLocaleString()} 万</td>
+                        <td className="cost-price">{row.manualPrice == null ? <span className="missing-price">未填写</span> : row.manualPrice.toFixed(4)}</td>
+                        <td className="cost-price">{row.machinePrice == null ? <span className="missing-price">未填写</span> : row.machinePrice.toFixed(4)}</td>
                         <td>{row.saved.toFixed(2)} 万</td>
                         <td>
                           <span
@@ -1520,6 +1532,14 @@ export default function Home() {
                     defaultValue={equipmentDialog.row.unitPrice}
                     required
                   />
+                </label>
+              </div>
+              <div className="form-grid">
+                <label>原人工单价（RMB/件）
+                  <input name="manualPrice" type="number" min="0" step="0.0001" defaultValue={equipmentDialog.row.manualPrice ?? ""} placeholder="未填写" />
+                </label>
+                <label>机器工单价（RMB/件）
+                  <input name="machinePrice" type="number" min="0" step="0.0001" defaultValue={equipmentDialog.row.machinePrice ?? ""} placeholder="未填写" />
                 </label>
               </div>
               <div className="form-grid">

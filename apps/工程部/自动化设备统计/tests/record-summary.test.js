@@ -1,0 +1,20 @@
+const {test}=require('node:test');
+const assert=require('node:assert/strict');
+const fs=require('node:fs');
+const ts=require('typescript');
+const vm=require('node:vm');
+const compiled=ts.transpileModule(fs.readFileSync(require.resolve('../src/record-summary.ts'),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
+const exportsObject={};vm.runInNewContext(compiled,{exports:exportsObject});
+const {summarizeRecords}=exportsObject;
+const r=(id,factory,equipment,date,production)=>({id,factory,equipment,date,production,workshop:'装配',line:'1号机',operator:'测试',note:''});
+test('group by factory, machine and date; preserve raw records and newest date order',()=>{
+ const records=[r(1,'兴信B','NFC','2026-09-01',10),r(2,'兴信B','NFC','2026-09-01',20),r(3,'兴信B','NFC','2026-09-02',5),r(4,'兴信A','NFC','2026-09-01',7),r(5,'兴信B','视觉','2026-09-01',9)];
+ const original=JSON.stringify(records);const groups=summarizeRecords(records);
+ assert.equal(groups.length,4);assert.equal(groups.reduce((s,g)=>s+g.production,0),51);
+ const merged=groups.find(g=>g.factory==='兴信B'&&g.equipment==='NFC'&&g.date==='2026-09-01');
+ assert.equal(merged.production,30);assert.equal(merged.records.length,2);assert.equal(merged.records[0],records[0]);
+ assert.equal(groups.filter(g=>g.factory==='兴信B'&&g.equipment==='NFC')[0].date,'2026-09-02');assert.equal(JSON.stringify(records),original);
+ records[0].production=15;assert.equal(summarizeRecords(records).find(g=>g.key===merged.key).production,35);
+ assert.equal(summarizeRecords(records.filter(r=>r.id!==2)).find(g=>g.key===merged.key).production,15);
+ assert.equal(summarizeRecords([]).length,0);
+});

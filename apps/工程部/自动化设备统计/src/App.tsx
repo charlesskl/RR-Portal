@@ -1,3 +1,5 @@
+import RecordSummary from "./RecordSummary";
+import { summarizeRecords } from "./record-summary";
 import { useEffect, useMemo, useState } from "react";
 
 type Equipment = {
@@ -128,6 +130,7 @@ export default function Home() {
 
   const rows = useMemo(() => state?.equipment ?? [], [state]);
   const records = useMemo(() => state?.records ?? [], [state]);
+  const recordGroups = useMemo(() => summarizeRecords(records), [records]);
   const users = useMemo(() => state?.users ?? [], [state]);
 
   const visible = useMemo(
@@ -280,26 +283,8 @@ export default function Home() {
   function exportRecords() {
     const escapeCell = (value: string | number) =>
       `"${String(value).replaceAll('"', '""')}"`;
-    const header = [
-      "日期",
-      "部门",
-      "车间",
-      "设备名称",
-      "开机线/机台",
-      "生产数量（个）",
-      "上报人",
-      "备注",
-    ];
-    const csvRows = records.map((record) => [
-      record.date,
-      record.factory,
-      record.workshop,
-      record.equipment,
-      record.line,
-      record.production,
-      record.operator,
-      record.note,
-    ]);
+    const header = ["厂区", "机器", "生产日期", "汇总产量（个）", "上报条数"];
+    const csvRows = recordGroups.map(group => [group.factory, group.equipment, group.date, group.production, group.records.length]);
     const csv = [header, ...csvRows]
       .map((row) => row.map(escapeCell).join(","))
       .join("\r\n");
@@ -308,7 +293,7 @@ export default function Home() {
     );
     const link = document.createElement("a");
     link.href = url;
-    link.download = `生产数据更新记录-${new Date().toISOString().slice(0, 10)}.csv`;
+    link.download = `生产数据日汇总-${new Date().toISOString().slice(0, 10)}.csv`;
     document.body.appendChild(link);
     link.click();
     link.remove();
@@ -846,7 +831,7 @@ export default function Home() {
             <div className="module-toolbar">
               <div>
                 <h2>更新记录</h2>
-                <p>查看各部门的生产数据上报和修改痕迹</p>
+                <p>按厂区、机器、日期汇总产量，展开明细可编辑或删除</p>
               </div>
               <div className="module-actions history-view-actions">
                 <button className={`outline-button history-view-toggle${historyTable ? " selected" : ""}`} aria-pressed={historyTable} aria-controls="history-records" onClick={() => setHistoryTable((current) => !current)}>
@@ -858,12 +843,12 @@ export default function Home() {
             </div>
             <div className="history-summary">
               <div>
-                <strong>{records.length}</strong>
-                <span>近期更新</span>
+                <strong>{recordGroups.length}</strong>
+                <span>日汇总组数 · {records.length} 条上报</span>
               </div>
               <div>
                 <strong>{new Set(records.map((r) => r.factory)).size}</strong>
-                <span>涉及部门</span>
+                <span>涉及厂区</span>
               </div>
               <div>
                 <strong>{records.reduce((s, r) => s + r.production, 0).toLocaleString()}</strong>
@@ -871,71 +856,9 @@ export default function Home() {
               </div>
             </div>
             {recordNotice && <p className="record-notice" role="status">{recordNotice}</p>}
-            {historyTable ? (
-              <div className="record-sheet" id="history-records">
-                <div className="record-sheet-heading">
-                  <div><h3>生产数据明细</h3><p>按条查看每次上报的生产数据</p></div>
-                  <span>共 {records.length} 条记录<span className="sheet-unit">单位：个</span></span>
-                </div>
-                <div className="record-sheet-scroll" role="region" aria-label="生产数据明细表，可横向滚动" tabIndex={0}>
-                  <table className="record-sheet-table">
-                    <caption className="sheet-sr-only">生产数据更新记录明细及产量合计</caption>
-                    <thead><tr>
-                      <th scope="col" className="sheet-index">序号</th><th scope="col">生产日期</th><th scope="col">部门 / 车间</th><th scope="col">设备名称</th><th scope="col">开机线 / 机台</th><th scope="col" className="sheet-number">生产数量（个）</th><th scope="col">上报人</th><th scope="col">备注</th><th scope="col" className="sheet-operations">操作</th>
-                    </tr></thead>
-                    <tbody>
-                      {records.map((record, index) => (
-                        <tr key={record.id}>
-                          <td className="sheet-index">{index + 1}</td>
-                          <td className="sheet-date">{record.date}</td>
-                          <td><span className="sheet-department">{record.factory}</span><span className="sheet-workshop">{record.workshop}</span></td>
-                          <td className="sheet-equipment">{record.equipment}</td>
-                          <td>{record.line}</td>
-                          <td className="sheet-number sheet-production">{record.production.toLocaleString()}</td>
-                          <td>{record.operator}</td>
-                          <td className="sheet-note">{record.note || "—"}</td>
-                          <td className="sheet-operations"><div className="history-actions">
-                            <button className="text-action" aria-label={`编辑${record.equipment}的更新记录`} onClick={() => { setRecordError(""); setRecordNotice(""); setRecordDialog({ mode: "edit", record }); }}>编辑</button>
-                            <button className="text-action danger-action" aria-label={`删除${record.equipment}的更新记录`} onClick={() => { setRecordError(""); setRecordNotice(""); setRecordDialog({ mode: "delete", record }); }}>删除</button>
-                          </div></td>
-                        </tr>
-                      ))}
-                      {records.length === 0 && <tr><td colSpan={9} className="record-empty">暂无更新记录</td></tr>}
-                    </tbody>
-                    <tfoot><tr><th colSpan={5} scope="row">产量合计<span>{records.length} 条记录</span></th><td className="sheet-number">{records.reduce((sum, record) => sum + record.production, 0).toLocaleString()}</td><td colSpan={3}>个</td></tr></tfoot>
-                  </table>
-                </div>
-                <div className="record-sheet-footer"><span className="sheet-tab">生产数据明细</span><span>共 {new Set(records.map((record) => record.factory)).size} 个部门</span></div>
-              </div>
-            ) : <div className="history-list" id="history-records">
-              {records.length === 0 && <p className="record-empty">暂无更新记录</p>}
-              {records.map((record) => (
-                <article key={record.id}>
-                  <div className="history-date">
-                    <strong>{record.date.slice(8)}</strong>
-                    <small>{record.date.slice(0, 7)}</small>
-                  </div>
-                  <div className="history-dot" />
-                  <div className="history-main">
-                    <div>
-                      <span className="dept-tag">
-                        {record.factory} · {record.workshop}
-                      </span>
-                      <strong>{record.equipment}</strong>
-                    </div>
-                    <p>
-                      {record.line} · 生产 <b>{record.production.toLocaleString()}</b> 个 · {record.note}
-                    </p>
-                    <small>由 {record.operator} 上报</small>
-                  </div>
-                  <div className="history-actions">
-                    <button className="text-action" aria-label={`编辑${record.equipment}的更新记录`} onClick={() => { setRecordError(""); setRecordNotice(""); setRecordDialog({ mode: "edit", record }); }}>编辑</button>
-                    <button className="text-action danger-action" aria-label={`删除${record.equipment}的更新记录`} onClick={() => { setRecordError(""); setRecordNotice(""); setRecordDialog({ mode: "delete", record }); }}>删除</button>
-                    <span className="history-status">已计入汇总</span>
-                  </div>
-                </article>
-              ))}
-            </div>}
+            <RecordSummary groups={recordGroups} table={historyTable} onAction={(mode, record) => {
+              setRecordError(""); setRecordNotice(""); setRecordDialog({ mode, record });
+            }} />
           </section>
         )}
         {activeView === "users" && (

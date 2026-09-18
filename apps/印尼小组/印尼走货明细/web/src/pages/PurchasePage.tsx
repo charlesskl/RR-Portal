@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import {
   App, Button, Card, Checkbox, Col, DatePicker, Drawer, Form, Input, InputNumber, Modal, Popconfirm,
   Row, Select, Space, Table, Tag, Typography,
@@ -6,6 +6,7 @@ import {
 import dayjs from 'dayjs'
 import { api, type Material } from '../api/client'
 import { numToChinese, poDetermineEntity, poGenContractNo, PO_ENTITY_META, type PoEntity } from '../utils/poNumber'
+import './PurchasePage.css'
 
 interface SchedRow {
   source?: string
@@ -144,6 +145,53 @@ function applyAutoSpoilage(item: PoItem): PoItem {
     purchase_qty: purchaseQty,
     qty: purchaseQty,
   }
+}
+
+function patchPoItem(item: PoItem, field: keyof PoItem, value: any): PoItem {
+  const next: PoItem = { ...item, [field]: value }
+  if (field === 'ordered_qty' || field === 'usage_qty') {
+    next.material_qty = (next.ordered_qty ?? 0) * (next.usage_qty ?? 1)
+    return applyAutoSpoilage(next)
+  }
+  if (field === 'category') return applyAutoSpoilage(next)
+  if (field === 'spoilage_qty') {
+    next.purchase_qty = (next.material_qty ?? 0) + (next.spoilage_qty ?? 0)
+    next.qty = next.purchase_qty
+  }
+  return next
+}
+
+function FillablePurchaseCell({ rowIndex, field, onFill, onFillToEnd, children }: {
+  rowIndex: number
+  field: keyof PoItem
+  onFill: (sourceIndex: number, targetIndex: number, field: keyof PoItem) => void
+  onFillToEnd: (sourceIndex: number, field: keyof PoItem) => void
+  children: ReactNode
+}) {
+  return (
+    <div className="purchase-fillable-cell"
+      onDragOver={event => {
+        if (event.dataTransfer.types.includes('application/x-purchase-fill')) event.preventDefault()
+      }}
+      onDrop={event => {
+        event.preventDefault()
+        try {
+          const payload = JSON.parse(event.dataTransfer.getData('application/x-purchase-fill'))
+          if (payload.field === field) onFill(Number(payload.rowIndex), rowIndex, field)
+        } catch { /* 忽略其它拖动内容 */ }
+      }}
+    >
+      {children}
+      <span className="purchase-fill-handle" draggable role="button" aria-label="复制到下面全部行"
+        title="点击复制到下面全部行；拖动可复制到指定行"
+        onClick={event => { event.preventDefault(); event.stopPropagation(); onFillToEnd(rowIndex, field) }}
+        onDragStart={event => {
+          event.dataTransfer.effectAllowed = 'copy'
+          event.dataTransfer.setData('application/x-purchase-fill', JSON.stringify({ rowIndex, field }))
+        }}
+      >↓</span>
+    </div>
+  )
 }
 
 function restoreSavedSpoilage(item: PoItem): PoItem {
@@ -1111,24 +1159,27 @@ export default function PurchasePage() {
   }
 
   function patchItem(i: number, k: keyof PoItem, v: any) {
-    setItems(its => its.map((it, idx) => {
-      if (idx !== i) return it
-      const next: PoItem = { ...it, [k]: v }
-      // Auto compute material_qty + purchase_qty
-      if (k === 'ordered_qty' || k === 'usage_qty') {
-        const mat = (next.ordered_qty ?? 0) * (next.usage_qty ?? 1)
-        next.material_qty = mat
-        return applyAutoSpoilage(next)
-      }
-      if (k === 'category') {
-        return applyAutoSpoilage(next)
-      }
-      if (k === 'spoilage_qty') {
-        next.purchase_qty = (next.material_qty ?? 0) + (next.spoilage_qty ?? 0)
-        next.qty = next.purchase_qty
-      }
-      return next
-    }))
+    setItems(its => its.map((it, idx) => idx === i ? patchPoItem(it, k, v) : it))
+  }
+  function fillItemDown(sourceIndex: number, targetIndex: number, field: keyof PoItem) {
+    if (!Number.isInteger(sourceIndex) || sourceIndex < 0 || targetIndex <= sourceIndex || targetIndex >= items.length) {
+      message.warning('请把复制点向下拖动到目标行')
+      return
+    }
+    setItems(current => {
+      const value = current[sourceIndex]?.[field]
+      return current.map((item, index) => {
+        if (index <= sourceIndex || index > targetIndex || (field === 'ship_unit' && item.material_id)) return item
+        return patchPoItem(item, field, value)
+      })
+    })
+    message.success(`已向下复制 ${targetIndex - sourceIndex} 行`)
+  }
+  function fillable(i: number, field: keyof PoItem, control: ReactNode) {
+    return <FillablePurchaseCell rowIndex={i} field={field} onFill={fillItemDown}
+      onFillToEnd={(sourceIndex, sourceField) => fillItemDown(sourceIndex, items.length - 1, sourceField)}>
+      {control}
+    </FillablePurchaseCell>
   }
   function addItem() {
     const poNo = String(form.getFieldValue('po_no') || '')
@@ -1505,26 +1556,28 @@ export default function PurchasePage() {
             scroll={{ x: 2500, y: 'calc(100vh - 330px)' }}
             columns={[
               { title: '#', width: 40, fixed: 'left', render: (_v, _r, i) => i + 1 },
-              { title: '货号', width: 100, fixed: 'left', render: (_v, r, i) => <Input size="small" value={r.product_code} onChange={(e) => patchItem(i, 'product_code', e.target.value)} /> },
-              { title: '物料名称', width: 180, fixed: 'left', render: (_v, r, i) => <Input size="small" value={r.material_name} onChange={(e) => patchItem(i, 'material_name', e.target.value)} /> },
-              { title: '类别', width: 80, render: (_v, r, i) => <Input size="small" value={r.category} onChange={(e) => patchItem(i, 'category', e.target.value)} /> },
-              { title: '规格', width: 140, render: (_v, r, i) => <Input size="small" value={r.spec} onChange={(e) => patchItem(i, 'spec', e.target.value)} /> },
-              { title: '用量', width: 80, render: (_v, r, i) => <InputNumber size="small" min={0} step={0.001} value={r.usage_qty} onChange={(v) => patchItem(i, 'usage_qty', v ?? 0)} style={{ width: '100%' }} /> },
-              { title: '订单量', width: 100, render: (_v, r, i) => <InputNumber size="small" min={0} value={r.ordered_qty} onChange={(v) => patchItem(i, 'ordered_qty', v ?? 0)} style={{ width: '100%' }} /> },
+              { title: '货号', width: 120, fixed: 'left', render: (_v, r, i) => fillable(i, 'product_code', <Input size="small" value={r.product_code} onChange={(e) => patchItem(i, 'product_code', e.target.value)} />) },
+              { title: '物料名称', width: 200, fixed: 'left', render: (_v, r, i) => fillable(i, 'material_name', <Input size="small" value={r.material_name} onChange={(e) => patchItem(i, 'material_name', e.target.value)} />) },
+              { title: '类别', width: 100, render: (_v, r, i) => fillable(i, 'category', <Input size="small" value={r.category} onChange={(e) => patchItem(i, 'category', e.target.value)} />) },
+              { title: '规格', width: 160, render: (_v, r, i) => fillable(i, 'spec', <Input size="small" value={r.spec} onChange={(e) => patchItem(i, 'spec', e.target.value)} />) },
+              { title: '用量', width: 100, render: (_v, r, i) => fillable(i, 'usage_qty', <InputNumber size="small" min={0} step={0.001} value={r.usage_qty} onChange={(v) => patchItem(i, 'usage_qty', v ?? 0)} style={{ width: '100%' }} />) },
+              { title: '订单量', width: 120, render: (_v, r, i) => fillable(i, 'ordered_qty', <InputNumber size="small" min={0} value={r.ordered_qty} onChange={(v) => patchItem(i, 'ordered_qty', v ?? 0)} style={{ width: '100%' }} />) },
               { title: '物料量', width: 100, align: 'right', render: (_v, r) => Number(r.material_qty ?? 0).toFixed(2) },
-              { title: '损耗量', width: 90, render: (_v, r, i) => <InputNumber size="small" min={0} value={r.spoilage_qty} onChange={(v) => patchItem(i, 'spoilage_qty', v ?? 0)} style={{ width: '100%' }} /> },
+              { title: '损耗量', width: 110, render: (_v, r, i) => fillable(i, 'spoilage_qty', <InputNumber size="small" min={0} value={r.spoilage_qty} onChange={(v) => patchItem(i, 'spoilage_qty', v ?? 0)} style={{ width: '100%' }} />) },
               { title: '采购量', width: 100, align: 'right', render: (_v, r) => <b style={{ color: '#1677ff' }}>{Number(r.purchase_qty ?? r.qty ?? 0).toFixed(2)}</b> },
-              { title: '单价', width: 110, render: (_v, r, i) => <InputNumber size="small" min={0} step={0.0001} value={r.price} onChange={(v) => patchItem(i, 'price', v ?? 0)} style={{ width: '100%' }} /> },
+              { title: '单价', width: 130, render: (_v, r, i) => fillable(i, 'price', <InputNumber size="small" min={0} step={0.0001} value={r.price} onChange={(v) => patchItem(i, 'price', v ?? 0)} style={{ width: '100%' }} />) },
               { title: '金额', width: 100, align: 'right', render: (_v, r) => <b style={{ color: '#c0392b' }}>{((r.purchase_qty ?? r.qty ?? 0) * (r.price ?? 0)).toFixed(2)}</b> },
-              { title: '采购单位', width: 90, render: (_v, r, i) => (
+              { title: '采购单位', width: 110, render: (_v, r, i) => fillable(i, 'purchase_unit',
                 <Select size="small" value={r.purchase_unit || '个'} style={{ width: '100%' }}
                   options={['个', '只', '米'].map(x => ({ value: x, label: x }))}
                   onChange={(v) => patchItem(i, 'purchase_unit', v)} />
               ) },
-              { title: '走货单位（货号库）', width: 130, render: (_v, r, i) => (
+              { title: '走货单位（货号库）', width: 150, render: (_v, r, i) => r.material_id ? (
+                <Select size="small" value={r.ship_unit || 'PCE'} style={{ width: '100%' }} disabled
+                  options={['PCE', 'KGM', 'MTR', 'SET', 'PAR', 'ROLL', 'TNE'].map(x => ({ value: x, label: x }))} />
+              ) : fillable(i, 'ship_unit',
                 <div title={r.material_id ? '已关联货号库物料，单位跟随货号库' : '手工明细未关联物料库，可自行选择'}>
                   <Select size="small" value={r.ship_unit || 'PCE'} style={{ width: '100%' }}
-                    disabled={!!r.material_id}
                     options={['PCE', 'KGM', 'MTR', 'SET', 'PAR', 'ROLL', 'TNE'].map(x => ({ value: x, label: x }))}
                     onChange={(v) => patchItem(i, 'ship_unit', v)} />
                 </div>
@@ -1536,9 +1589,9 @@ export default function PurchasePage() {
                 return <b style={{ color: '#2878c8' }}>{shipQty > 0 ? (amount / shipQty).toFixed(4) : '0.0000'}</b>
               } },
               { title: '交货时间', width: 110, render: () => deliveryDate || '' },
-              { title: '走货期', width: 110, render: (_v, r, i) => <Input size="small" value={r.eta} onChange={(e) => patchItem(i, 'eta', e.target.value)} /> },
-              { title: '币种', width: 100, render: (_v, r, i) => <Select size="small" value={r.currency || '¥'} options={CURR} onChange={(v) => patchItem(i, 'currency', v)} style={{ width: '100%' }} /> },
-              { title: '备注', width: 180, render: (_v, r, i) => <Input size="small" value={r.notes} onChange={(e) => patchItem(i, 'notes', e.target.value)} /> },
+              { title: '走货期', width: 130, render: (_v, r, i) => fillable(i, 'eta', <Input size="small" value={r.eta} onChange={(e) => patchItem(i, 'eta', e.target.value)} />) },
+              { title: '币种', width: 120, render: (_v, r, i) => fillable(i, 'currency', <Select size="small" value={r.currency || '¥'} options={CURR} onChange={(v) => patchItem(i, 'currency', v)} style={{ width: '100%' }} />) },
+              { title: '备注', width: 200, render: (_v, r, i) => fillable(i, 'notes', <Input size="small" value={r.notes} onChange={(e) => patchItem(i, 'notes', e.target.value)} />) },
               {
                 title: '', width: 50, fixed: 'right',
                 render: (_v, _r, i) => (

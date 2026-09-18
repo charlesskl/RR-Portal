@@ -1134,6 +1134,13 @@ services:
     build:
       context: ./apps/船务部/VoyagePlex船务协同系统/services/email-parser
       dockerfile: Dockerfile
+    environment:
+      # 网易企业邮箱自动收信（IMAP 只读）。空值 = 未配置，/v1/mailbox/poll 返回 configured:false，
+      # 不影响其他解析功能；值由 deploy.yml 从 GitHub secret 同步进 .env.cloud.production
+      VOYAGEPLEX_MAIL_ADDRESS: ${VOYAGEPLEX_MAIL_ADDRESS:-}
+      VOYAGEPLEX_MAIL_AUTH_CODE: ${VOYAGEPLEX_MAIL_AUTH_CODE:-}
+      VOYAGEPLEX_MAIL_IMAP_HOST: ${VOYAGEPLEX_MAIL_IMAP_HOST:-imaphz.qiye.163.com}
+      VOYAGEPLEX_MAIL_FOLDER: ${VOYAGEPLEX_MAIL_FOLDER:-INBOX}
     mem_limit: 512m
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8091/health')"]

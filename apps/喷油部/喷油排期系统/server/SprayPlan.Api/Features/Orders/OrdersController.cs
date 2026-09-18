@@ -18,6 +18,18 @@ public class OrdersController(AppDbContext db, PdfStorage pdf) : ControllerBase
     static readonly string[] OrderStatuses = ["draft", "received", "scheduled", "in_production", "completed", "archived"];
     const string PdfRemarkPrefix = "PDF导入:";   // 待补产品订单把 PDF token 存进 Remark，前缀固定
     string CurrentUser() => User.FindFirst("username")?.Value ?? "unknown";
+    private List<PdfWord> ReadOrderWords(string token)
+    {
+        var extension = Path.GetExtension(token).ToLowerInvariant();
+        if (extension == ".pdf")
+        {
+            using var source = pdf.Open(token);
+            var textWords = PdfWordSource.Extract(source);
+            if (PdfTableExtractor.ExtractRows(textWords).Count > 0) return textWords;
+        }
+        using var image = pdf.Open(token);
+        return OrderImageOcr.Extract(image, extension);
+    }
 
     // GET /api/orders — 列表（聚合 整单总数），id 降序
     [HttpGet]
@@ -29,7 +41,16 @@ public class OrdersController(AppDbContext db, PdfStorage pdf) : ControllerBase
                 o.OrderDate, o.DeliveryDate, o.Status, o.IsMA, o.IsUrgent,
                 o.PartQtys.Sum(q => q.Qty), o.PendingProduct))
             .ToListAsync();
-        return Ok(list);
+        var orderIds = list.Select(order => order.Id).ToList();
+        var productNumbers = await (from qty in db.OrderPartQtys.AsNoTracking()
+            join part in db.ProductParts.AsNoTracking() on qty.SourcePartId equals part.Id
+            join product in db.Products.AsNoTracking() on part.ProductId equals product.Id
+            where orderIds.Contains(qty.OrderId)
+            select new { qty.OrderId, product.ProductNo }).Distinct().ToListAsync();
+        var numbersByOrder = productNumbers.GroupBy(item => item.OrderId)
+            .ToDictionary(group => group.Key, group => string.Join("、", group.Select(item => item.ProductNo)));
+        return Ok(list.Select(item => numbersByOrder.TryGetValue(item.Id, out var numbers)
+            ? item with { ProductNo = numbers } : item).ToList());
     }
 
     // GET /api/orders/overview —— 订单总览的轻量排期汇总。
@@ -116,9 +137,16 @@ public class OrdersController(AppDbContext db, PdfStorage pdf) : ControllerBase
                     o.Product.Parts.OrderBy(p => p.PartOrder).Select(p => new OrderProductPartDto(p.Id, p.PartName, p.Craft, p.PartGroupId, p.UnitCost, p.LaborPrice, p.PaintCost, p.QuotedPrice)).ToList()),
                 o.PartQtys.OrderBy(q => q.PartOrder).Select(q => new OrderPartQtyDto(q.Id, q.PartName, q.SourcePartId, q.Qty, q.PartOrder)).ToList(),
                 // 数量可改 = 已接单 且 无未删排期计划（与 PATCH 校验同口径）
-                (o.Status == "draft" || o.Status == "received") && !o.Plans.Any(p => p.DeletedAt == null)))
+                (o.Status == "draft" || o.Status == "received") && !o.Plans.Any(p => p.DeletedAt == null), null))
             .FirstOrDefaultAsync();
         if (order is null) return NotFound(new { error = "订单不存在" });
+        var sourceIds = order.PartQtys.Where(part => part.SourcePartId.HasValue).Select(part => part.SourcePartId!.Value).ToList();
+        var secondaryProducts = await db.Products.AsNoTracking().Include(product => product.Parts)
+            .Where(product => product.Parts.Any(part => sourceIds.Contains(part.Id)))
+            .ToListAsync();
+        order = order with { Products = secondaryProducts.Select(product => new OrderProductDto(product.Id, product.ProductNo,
+            product.Parts.OrderBy(part => part.PartOrder).Select(part => new OrderProductPartDto(part.Id, part.PartName,
+                part.Craft, part.PartGroupId, part.UnitCost, part.LaborPrice, part.PaintCost, part.QuotedPrice)).ToList())).ToList() };
         return Ok(order);
     }
 
@@ -389,28 +417,69 @@ public class OrdersController(AppDbContext db, PdfStorage pdf) : ControllerBase
             return BadRequest(new { error = "未上传文件" });
 
         // M2：拒绝非 PDF，避免非 PDF 落盘后解析抛 500。
-        var isPdf = file.ContentType == "application/pdf"
-                    || file.FileName.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase);
-        if (!isPdf)
-            return BadRequest(new { error = "请上传 PDF 文件" });
+        var extension = Path.GetExtension(file.FileName).ToLowerInvariant();
+        if (extension is not (".pdf" or ".png" or ".jpg" or ".jpeg"))
+            return BadRequest(new { error = "请上传 PDF、PNG 或 JPG 文件" });
+        if (file.Length > 15 * 1024 * 1024)
+            return BadRequest(new { error = "文件不能超过 15 MB" });
 
         // 1) 落盘暂存，拿 token；之后所有解析都从该文件读，保证草稿/续解析一致。
         string token;
         using (var us = file.OpenReadStream())
-            token = await pdf.SaveAsync(us);
+            token = await pdf.SaveAsync(us, extension);
 
         // 2) PDF → 带坐标词 → 几何还原出明细行/抬头/款号格。
-        var words = PdfWordSource.Extract(pdf.Open(token));
+        List<PdfWord> words;
+        try { words = ReadOrderWords(token); }
+        catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
+        if (words.Count == 0) return BadRequest(new { error = "未识别到订单文字，请上传更清晰的图片或 PDF" });
+        if (words.Any(word => word.Text.Contains("华登")) && db.CurrentFactoryId != "HUADENG")
+            return BadRequest(new { error = "该合同属于华登，请先在页面顶部切换到华登厂区再导入" });
+        var productRows = PdfTableExtractor.ExtractProductRows(words);
         var rows = PdfTableExtractor.ExtractRows(words);
         var pdfHead = PdfTableExtractor.ExtractHead(words);
+        if (productRows.Count == 0 || rows.Count == 0)
+        {
+            var ocr = OcrOrderParser.Extract(words);
+            productRows = ocr.Rows;
+            rows = productRows.Select(row => new PdfImportParse.RawLine(row.ItemRaw, row.Qty, row.UnitPrice)).ToList();
+            pdfHead = ocr.Head;
+        }
+        if (productRows.Count == 0)
+            return BadRequest(new { error = "未能识别订单表格，请上传更清晰的原件或图片" });
+        if (productRows.Select(row => row.ProductNo).Distinct().Skip(1).Any())
+        {
+            var drafts = new List<ImportProductDraft>();
+            foreach (var group in productRows.GroupBy(row => row.ProductNo))
+            {
+                var groupProduct = await db.Products.Include(p => p.Parts)
+                    .FirstOrDefaultAsync(p => p.ProductNo == group.Key && p.Status != "archived");
+                var groupDraftLines = PdfImportParse.BuildDraftLines(group.Select(row =>
+                    new PdfImportParse.RawLine(row.ItemRaw, row.Qty, row.UnitPrice)));
+                var parts = groupProduct?.Parts.Select(part => part.PartName).Distinct().ToList() ?? [];
+                var groupMatched = PdfImportParse.MatchItems(groupDraftLines, parts);
+                drafts.Add(new ImportProductDraft(group.Key, group.Any(row => row.IsMa), groupProduct is not null,
+                    groupMatched.Select(line => new ImportDraftLine(line.PdfItemName, line.TotalQty, line.MergedRows,
+                        groupProduct is null ? PdfImportParse.NormalizeItemName(line.PdfItemName) : line.MatchedItemName, line.UnitPrice,
+                        groupProduct?.Parts.FirstOrDefault(part => part.PartName.Trim() == line.MatchedItemName?.Trim())?.UnitCost)).ToList(),
+                    parts));
+            }
+            var first = drafts[0];
+            return Ok(new ImportDraft(new ImportDraftHead(pdfHead.ExternalOrderNo,
+                    pdfHead.OrderDate == default ? "" : pdfHead.OrderDate.ToString("yyyy-MM-dd"), pdfHead.DeliveryDate?.ToString("yyyy-MM-dd"),
+                    first.ProductNo, drafts.Any(draft => draft.IsMa)),
+                first.ProductFound, null, [], token, [], drafts));
+        }
         var pnCell = PdfTableExtractor.ExtractProductNoCell(words);
-        var pm = PdfImportParse.ParseProductNoAndMa(pnCell);
+        var pm = productRows.Count > 0
+            ? new PdfImportParse.ProductNoMa(productRows[0].ProductNo, productRows[0].IsMa)
+            : PdfImportParse.ParseProductNoAndMa(pnCell);
         var draftLines = PdfImportParse.BuildDraftLines(rows);
 
         // 3) 抬头 DTO（DateTime → yyyy-MM-dd 字符串）。款号/MA 来自款号格解析。
         var head = new ImportDraftHead(
             pdfHead.ExternalOrderNo,
-            pdfHead.OrderDate.ToString("yyyy-MM-dd"),
+            pdfHead.OrderDate == default ? "" : pdfHead.OrderDate.ToString("yyyy-MM-dd"),
             pdfHead.DeliveryDate?.ToString("yyyy-MM-dd"),
             pm.ProductNo, pm.IsMa);
 
@@ -437,6 +506,95 @@ public class OrdersController(AppDbContext db, PdfStorage pdf) : ControllerBase
     }
 
     // POST /api/orders/import-confirm — 确认草稿入库（建订单+明细，或建待补产品订单）。
+    [HttpPost("import-confirm-multi")]
+    [Authorize(Roles = "clerk,admin")]
+    public async Task<IActionResult> ImportConfirmMulti([FromBody] ImportConfirmMultiRequest req)
+    {
+        if (req.Products.Count < 2 || req.Products.Any(p => string.IsNullOrWhiteSpace(p.ProductNo) ||
+            p.Lines.Count == 0 || p.Lines.Any(line => string.IsNullOrWhiteSpace(line.MatchedItemName) || line.TotalQty < 0)))
+            return BadRequest(new { error = "多款号订单明细不完整" });
+        if (req.Products.Select(p => p.ProductNo.Trim()).Distinct().Count() != req.Products.Count)
+            return BadRequest(new { error = "同一款号不能重复提交" });
+        var targetFactory = db.CurrentFactoryId == "ALL" ? "XINGXIN" : db.CurrentFactoryId;
+        if (await db.Orders.IgnoreQueryFilters().AnyAsync(o => o.FactoryId == targetFactory && o.ExternalOrderNo == req.Head.ExternalOrderNo))
+            return Conflict(new { error = "该订单编号已存在" });
+        var now = DateTime.UtcNow;
+        await using var transaction = await db.Database.BeginTransactionAsync();
+        var order = new Order
+        {
+            ExternalOrderNo = req.Head.ExternalOrderNo.Trim(), FactoryId = targetFactory,
+            OrderDate = string.IsNullOrEmpty(req.Head.OrderDate) ? now : DateUtil.ParseUtc(req.Head.OrderDate),
+            DeliveryDate = string.IsNullOrEmpty(req.Head.DeliveryDate) ? null : DateUtil.ParseUtc(req.Head.DeliveryDate),
+            IsMA = req.Products.Any(p => p.IsMa), Status = "draft", CreatedBy = CurrentUser(),
+            CreatedAt = now, UpdatedAt = now,
+        };
+        var partOrder = 0;
+        foreach (var group in req.Products)
+        {
+            var number = group.ProductNo.Trim();
+            var product = await db.Products.Include(p => p.Parts)
+                .FirstOrDefaultAsync(p => p.ProductNo == number && p.Status != "archived");
+            if (product is null)
+            {
+                if (!req.SavePricing) return BadRequest(new { error = $"款号 {number} 不存在，请选择保存订单核价" });
+                var archived = await db.Products.Include(p => p.Parts)
+                    .FirstOrDefaultAsync(p => p.ProductNo == number && p.Status == "archived");
+                if (archived is not null)
+                {
+                    db.ProductParts.RemoveRange(archived.Parts);
+                    archived.Parts = group.Lines.Select((line, index) => new ProductPart
+                    {
+                        PartName = line.MatchedItemName.Trim(), PartOrder = index,
+                        UnitCost = Math.Max(0, line.UnitPrice), PartGroupId = 0,
+                    }).ToList();
+                    archived.Status = "draft";
+                    archived.LastUpdatedBy = CurrentUser();
+                    archived.UpdatedAt = now;
+                    product = archived;
+                }
+                else
+                {
+                    product = new Product
+                    {
+                        ProductNo = number, IterationNo = "V1", Status = "draft", CreatedBy = CurrentUser(),
+                        CreatedAt = now, UpdatedAt = now,
+                        Parts = group.Lines.Select((line, index) => new ProductPart
+                        {
+                            PartName = line.MatchedItemName.Trim(), PartOrder = index,
+                            UnitCost = Math.Max(0, line.UnitPrice), PartGroupId = 0,
+                        }).ToList(),
+                    };
+                    db.Products.Add(product);
+                }
+                await db.SaveChangesAsync();
+                PartProcessRules.AssignGroupIds(product.Parts);
+            }
+            else if (req.SavePricing)
+            {
+                foreach (var line in group.Lines)
+                {
+                    var part = product.Parts.FirstOrDefault(p => p.PartName.Trim() == line.MatchedItemName.Trim());
+                    if (part is not null && line.UnitPrice > 0) part.UnitCost = line.UnitPrice;
+                }
+            }
+            order.ProductId ??= product.Id; // 兼容已有单款号字段；每个部位另有真实 SourcePartId。
+            foreach (var line in group.Lines)
+            {
+                var part = product.Parts.FirstOrDefault(p => p.PartName.Trim() == line.MatchedItemName.Trim());
+                if (part is null) return BadRequest(new { error = $"款号 {number} 中没有部位“{line.MatchedItemName}”" });
+                order.PartQtys.Add(new OrderPartQty
+                {
+                    PartName = $"{number} · {part.PartName}", SourcePartId = part.Id,
+                    Qty = line.TotalQty, PartOrder = partOrder++,
+                });
+            }
+        }
+        db.Orders.Add(order);
+        await db.SaveChangesAsync();
+        await transaction.CommitAsync();
+        return CreatedAtAction(nameof(Get), new { id = order.Id }, new { id = order.Id });
+    }
+
     [HttpPost("import-confirm")]
     [Authorize(Roles = "clerk,admin")]
     public async Task<IActionResult> ImportConfirm([FromBody] ImportConfirmRequest req)
@@ -559,7 +717,9 @@ public class OrdersController(AppDbContext db, PdfStorage pdf) : ControllerBase
         if (product is null) return BadRequest(new { error = "款号不存在或已归档" });
 
         // 重解析原 PDF → 草稿行 → 与新款号子件匹配。
-        var words = PdfWordSource.Extract(pdf.Open(token));
+        List<PdfWord> words;
+        try { words = ReadOrderWords(token); }
+        catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
         var draftLines = PdfImportParse.BuildDraftLines(PdfTableExtractor.ExtractRows(words));
         var matched = PdfImportParse.MatchItems(draftLines,
             product.Parts.Select(p => p.PartName).Distinct());
@@ -640,6 +800,10 @@ public class OrdersController(AppDbContext db, PdfStorage pdf) : ControllerBase
             return BadRequest(new { error = "排期中的部位不属于该订单，请刷新页面后重试" });
 
         var lines = await db.ProductionLines.Where(line => line.IsActive).OrderBy(line => line.Id).ToListAsync();
+        var sourcePartIds = order.PartQtys.Where(part => part.SourcePartId.HasValue)
+            .Select(part => part.SourcePartId!.Value).ToList();
+        var relatedProducts = await db.Products.Include(product => product.Parts)
+            .Where(product => product.Parts.Any(part => sourcePartIds.Contains(part.Id))).ToListAsync();
         var now = DateTime.UtcNow;
         var by = CurrentUser();
         var plans = new List<ProductionPlan>();
@@ -650,12 +814,14 @@ public class OrdersController(AppDbContext db, PdfStorage pdf) : ControllerBase
         {
             var partRows = rows.Where(row => row.PartQtyId is null || row.PartQtyId == orderedPart.Id).ToList();
             if (partRows.Count == 0) continue;
-            var anchor = order.Product.Parts.FirstOrDefault(part => part.Id == orderedPart.SourcePartId)
-                ?? order.Product.Parts.FirstOrDefault(part => PartProcessRules.NameKey(part.PartName) == PartProcessRules.NameKey(orderedPart.PartName));
+            var partProduct = relatedProducts.FirstOrDefault(product => product.Parts.Any(part => part.Id == orderedPart.SourcePartId))
+                ?? order.Product;
+            var anchor = partProduct.Parts.FirstOrDefault(part => part.Id == orderedPart.SourcePartId)
+                ?? partProduct.Parts.FirstOrDefault(part => PartProcessRules.NameKey(part.PartName) == PartProcessRules.NameKey(orderedPart.PartName));
             if (anchor is null)
                 return BadRequest(new { error = $"核价表中找不到部位“{orderedPart.PartName}”，请先补全产品核价" });
 
-            var siblings = PartProcessRules.SameLogicalPart(order.Product.Parts, anchor);
+            var siblings = PartProcessRules.SameLogicalPart(partProduct.Parts, anchor);
             var groupId = anchor.PartGroupId > 0 ? anchor.PartGroupId : anchor.Id;
             foreach (var row in partRows)
             {
@@ -668,14 +834,14 @@ public class OrdersController(AppDbContext db, PdfStorage pdf) : ControllerBase
                     {
                         rule = new ProductPart
                         {
-                            ProductId = order.Product.Id,
+                            ProductId = partProduct.Id,
                             PartGroupId = groupId,
                             PartName = anchor.PartName,
-                            PartOrder = order.Product.Parts.Select(part => part.PartOrder).DefaultIfEmpty(-1).Max() + 1,
+                            PartOrder = partProduct.Parts.Select(part => part.PartOrder).DefaultIfEmpty(-1).Max() + 1,
                             ProductionMode = anchor.ProductionMode,
                             StdMachineCount = anchor.StdMachineCount,
                         };
-                        order.Product.Parts.Add(rule);
+                        partProduct.Parts.Add(rule);
                         siblings.Add(rule);
                     }
                 }
@@ -686,9 +852,9 @@ public class OrdersController(AppDbContext db, PdfStorage pdf) : ControllerBase
 
             var passCount = siblings.Select(part => part.Craft.Trim()).Where(craft => craft.Length > 0).Distinct().Count();
             foreach (var sibling in siblings) sibling.CraftPasses = passCount;
+            partProduct.LastUpdatedBy = by;
+            partProduct.UpdatedAt = now;
         }
-        order.Product.LastUpdatedBy = by;
-        order.Product.UpdatedAt = now;
         foreach (var (row, rowIndex) in rows.Select((value, index) => (value, index)))
         {
             var stepNo = rows.Take(rowIndex + 1).Count(previous => previous.PartQtyId == row.PartQtyId);

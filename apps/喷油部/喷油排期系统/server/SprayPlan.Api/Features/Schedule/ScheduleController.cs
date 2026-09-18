@@ -14,6 +14,15 @@ namespace SprayPlan.Api.Features.Schedule;
 [Authorize]
 public class ScheduleController(AppDbContext db) : ControllerBase
 {
+    private async Task<List<ProductPart>> SourcePartsFor(IEnumerable<Order> orders)
+    {
+        var ids = orders.SelectMany(order => order.PartQtys)
+            .Where(part => part.SourcePartId.HasValue).Select(part => part.SourcePartId!.Value).Distinct().ToList();
+        if (ids.Count == 0) return [];
+        var productIds = await db.ProductParts.AsNoTracking().Where(part => ids.Contains(part.Id))
+            .Select(part => part.ProductId).Distinct().ToListAsync();
+        return await db.ProductParts.AsNoTracking().Where(part => productIds.Contains(part.ProductId)).ToListAsync();
+    }
     // GET /api/schedule?today=YYYY-MM-DD
     [HttpGet]
     public async Task<IActionResult> Get([FromQuery] string? today)
@@ -30,6 +39,7 @@ public class ScheduleController(AppDbContext db) : ControllerBase
             .Include(o => o.PartQtys)
             .Include(o => o.Plans.Where(p => p.DeletedAt == null))
             .ToListAsync();
+        var allParts = await SourcePartsFor(orders);
 
         var result = orders.Select(o =>
         {
@@ -38,7 +48,7 @@ public class ScheduleController(AppDbContext db) : ControllerBase
             var firstPlanDate = ScheduleCalc.OrderFirstPlanDate(activePlans.Select(p => ScheduleCalc.Ymd(p.PlanDate)));
 
             // 展开可排部位清单（含总需求、产能属性）
-            var parts = ScheduleCalc.ExpandOrderParts(o);
+            var parts = ScheduleCalc.ExpandOrderParts(o, allParts);
 
             // 每部位投入资源：优先取对应计划行的资源配置；无计划时机喷用 stdMachineCount、人工喷 1 人
             var load = parts.Select(pt =>
@@ -82,10 +92,11 @@ public class ScheduleController(AppDbContext db) : ControllerBase
             .Include(o => o.PartQtys)
             .Include(o => o.Plans.Where(p => p.DeletedAt == null))
             .ToListAsync();
+        var allParts = await SourcePartsFor(orders);
 
         var result = orders.Select(o => new SchedulableOrder(
             o.Id, o.ExternalOrderNo, o.Product?.ProductNo ?? "待补产品", o.IsMA, o.IsUrgent, o.Plans.Count > 0,
-            ScheduleCalc.ExpandOrderParts(o))).ToList();
+            ScheduleCalc.ExpandOrderParts(o, allParts))).ToList();
 
         return Ok(result);
     }
@@ -141,7 +152,7 @@ public class ScheduleController(AppDbContext db) : ControllerBase
             .Replace("\t", "")
             .ToLowerInvariant();
 
-    private static List<MonthlyScheduleCalc.PartInput> BuildMonthlyParts(Order o)
+    private static List<MonthlyScheduleCalc.PartInput> BuildMonthlyParts(Order o, IReadOnlyList<ProductPart> allParts)
     {
         var result = new List<MonthlyScheduleCalc.PartInput>();
         if (o.Product is null) return result;
@@ -152,7 +163,7 @@ public class ScheduleController(AppDbContext db) : ControllerBase
                 .Select(qty =>
                 {
                     var anchor = qty.SourcePartId is int sid
-                        ? o.Product.Parts.FirstOrDefault(p => p.Id == sid)
+                        ? allParts.FirstOrDefault(p => p.Id == sid)
                         : null;
                     var partName = (anchor?.PartName ?? qty.PartName ?? "").Trim();
                     var key = anchor?.PartGroupId > 0
@@ -172,7 +183,7 @@ public class ScheduleController(AppDbContext db) : ControllerBase
                 var partName = first.PartName;
 
                 var group = first.Anchor is not null
-                    ? PartProcessRules.SameLogicalPart(o.Product.Parts, first.Anchor)
+                    ? PartProcessRules.SameLogicalPart(allParts.Where(part => part.ProductId == first.Anchor.ProductId), first.Anchor)
                     : o.Product.Parts
                         .Where(p => MonthlyPartNameKey(p.PartName) == MonthlyPartNameKey(first.PartName))
                         .OrderBy(p => p.PartOrder)
@@ -234,6 +245,7 @@ public class ScheduleController(AppDbContext db) : ControllerBase
             .Include(o => o.Product!).ThenInclude(p => p.Parts)
             .Include(o => o.PartQtys)
             .ToListAsync();
+        var allParts = await SourcePartsFor(orders);
 
         var skipped = new List<AutoHint>();
         var noCapacity = new List<AutoHint>();
@@ -245,7 +257,7 @@ public class ScheduleController(AppDbContext db) : ControllerBase
                 p.OrderId == o.Id && p.DeletedAt == null &&
                 p.PlanDate >= monthStart && p.PlanDate < monthEnd);
             if (mode == "incremental" && hasPlansInMonth) { skipped.Add(new AutoHint(o.Id, o.ExternalOrderNo, "existing_skipped")); continue; }
-            var parts = BuildMonthlyParts(o);
+            var parts = BuildMonthlyParts(o, allParts);
             // Never silently create a partial order schedule. If any required child part
             // has no usable capacity, show a clear warning and leave the whole order for correction.
             if (parts.Any(p => p.TotalDemand > 0 && ScheduleCalc.PartDailyOutput(p.StdMachineCount, p.DailyCapacity) <= 0))

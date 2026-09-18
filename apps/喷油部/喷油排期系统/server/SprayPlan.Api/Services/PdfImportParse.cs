@@ -17,6 +17,9 @@ public static class PdfImportParse
     /// <summary>PDF 原始明细行：子件名（含后缀）+ 本行数量</summary>
     public record RawLine(string ItemRaw, int Qty, double UnitPrice = 0);
 
+    /// <summary>保留每条合同明细所属款号；同一合同可以包含多个款号。</summary>
+    public record ProductRawLine(string ProductNo, bool IsMa, string ItemRaw, int Qty, double UnitPrice = 0);
+
     /// <summary>按子件合计后的聚合结果</summary>
     public record AggItem(string ItemName, int TotalQty, int MergedRows, double UnitPrice);
 

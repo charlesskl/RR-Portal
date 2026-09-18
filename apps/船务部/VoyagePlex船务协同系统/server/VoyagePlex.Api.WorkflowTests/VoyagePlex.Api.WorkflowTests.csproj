@@ -16,6 +16,7 @@
     <Compile Include="../VoyagePlex.Api/Entities/ProductInfo.cs" Link="ProductInfo.cs" />
     <Compile Include="../VoyagePlex.Api/Entities/ShipmentTask.cs" Link="ShipmentTask.cs" />
     <Compile Include="../VoyagePlex.Api/Services/DestinationCountryRules.cs" Link="DestinationCountryRules.cs" />
+    <Compile Include="../VoyagePlex.Api/Services/MailboxDateRules.cs" Link="MailboxDateRules.cs" />
     <Compile Include="../VoyagePlex.Api/Entities/ImportEmailItem.cs" Link="ImportEmailItem.cs" />
     <Compile Include="../VoyagePlex.Api/Entities/ImportBatch.cs" Link="ImportBatch.cs" />
   </ItemGroup>

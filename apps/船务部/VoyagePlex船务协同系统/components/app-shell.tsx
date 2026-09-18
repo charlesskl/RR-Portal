@@ -32,12 +32,20 @@ type ParsedFields = Record<string, string>;
 type WarehouseGroup = { warehouse: string; references: string[]; items: Array<Record<string, unknown>>; source_files: string[]; container_type?:string; loading_factory?:string };
 type ParsedEmail = {
   import_item_id: number; filename: string; status: string; error?: string;
+  mailbox_received_at?: string;
   duplicate_of_item_id?: number; message?: { subject?: string; sender?: string; received_at?: string };
   fields?: ParsedFields; attachments?: Array<{ filename: string; size: number }>;
   attachment_results?: Array<{ filename: string; kind: string; item_count: number }>;
   items?: Array<Record<string, unknown>>; warehouse_groups?: WarehouseGroup[]; warnings?: string[];
 };
-type EmailBatch = { total: number; parsed: number; failed: number; parser_version?:string; items: ParsedEmail[] };
+type MailboxBatch = { id: number; fileName: string; mailReceivedDate: string; status: string; totalCount: number; parsedCount: number; failedCount: number; createdAt: string };
+type ReadMailItem = { id:number; importBatchId:number; mailSubject:string; mailSender:string; mailReceivedAt:string; mailReceivedDate:string; status:string; error:string };
+type ReadMailPage = { total:number; page:number; pageSize:number; items:ReadMailItem[] };
+const readMailStatus:Record<string,string> = {
+  pending:"待确认", confirmed:"已确认", duplicate:"重复邮件",
+  duplicate_confirmed:"重复已确认", failed:"解析失败",
+};
+type EmailBatch = { import_batch_id?: number; total: number; parsed: number; failed: number; parser_version?:string; items: ParsedEmail[] };
 type SheetItem = { import_item_id: number; filename: string; status: string; error?: string; kind?: string; sheet?: string; rows?: Array<Record<string, unknown>>; warnings?: string[] };
 type SheetBatch = { import_batch_id: number; total: number; parsed: number; failed: number; items: SheetItem[] };
 type InspectionMappingRow = { customer: string; productCode: string; productName: string; owner: string; productionPlace: string; note: string };
@@ -371,25 +379,96 @@ function taskAnomalies(task:ShipmentTaskData){
 }
 
 function ImportCenter() {
-  const [tab, setTab] = useState<"email" | "sheet">("email");
+  const [tab, setTab] = useState<"email" | "history">("email");
   const [emailFiles, setEmailFiles] = useState<File[]>([]);
   const [emailBatch, setEmailBatch] = useState<EmailBatch | null>(null);
-  const [sheetFiles, setSheetFiles] = useState<File[]>([]);
-  const [sheetBatch, setSheetBatch] = useState<SheetBatch | null>(null);
+  const [readMail, setReadMail] = useState<ReadMailPage>({total:0,page:1,pageSize:50,items:[]});
+  const [readSearch, setReadSearch] = useState("");
+  const [readDate, setReadDate] = useState("");
+  const [readPage, setReadPage] = useState(1);
+  const [readVersion, setReadVersion] = useState(0);
+  const [readLoading, setReadLoading] = useState(false);
+  const [readError, setReadError] = useState("");
   const [selectedEmailIndex, setSelectedEmailIndex] = useState(0);
   const [emailError, setEmailError] = useState("");
   const [emailLoading, setEmailLoading] = useState(false);
+  const [mailboxBatches, setMailboxBatches] = useState<MailboxBatch[]>([]);
+  const [mailboxStatus, setMailboxStatus] = useState("");
   const [confirmLoading, setConfirmLoading] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
   const [createdTaskIds, setCreatedTaskIds] = useState<number[]>([]);
   const fileInput = useRef<HTMLInputElement>(null);
   const email = tab === "email";
   const selectedEmail = emailBatch?.items?.[selectedEmailIndex];
-  const selectedSheet = sheetBatch?.items?.[selectedEmailIndex];
   const parsedFields = selectedEmail?.fields;
-  const fields = email
-    ? [["SO号",parsedFields?.so_number || "待识别"],["柜型",parsedFields?.container_type || "待识别"],["计划走货日期",parsedFields?.ship_date || ""],["SI截止",parsedFields?.si_deadline || "待识别"],["截数期",parsedFields?.cutoff_date || "待识别"],["装货港",parsedFields?.port || "待识别"],["收货地",parsedFields?.destination_country || "待确认"],["特殊要求",parsedFields?.special_requirements || "待人工确认"]]
-    : [["资料类型","客户排期表"],["工作表","总排期"],["识别订单","26条"],["新增记录","3条"],["更新记录","18条"],["异常记录","5条"]];
+  const fields = [["SO号",parsedFields?.so_number || "待识别"],["柜型",parsedFields?.container_type || "待识别"],["计划走货日期",parsedFields?.ship_date || ""],["SI截止",parsedFields?.si_deadline || "待识别"],["截数期",parsedFields?.cutoff_date || "待识别"],["装货港",parsedFields?.port || "待识别"],["收货地",parsedFields?.destination_country || "待确认"],["特殊要求",parsedFields?.special_requirements || "待人工确认"]];
+  const todayInChina = new Intl.DateTimeFormat("sv-SE", { timeZone:"Asia/Shanghai", year:"numeric", month:"2-digit", day:"2-digit" }).format(new Date());
+  const mailboxDays = Object.entries(mailboxBatches.reduce<Record<string, MailboxBatch[]>>((days, batch) => {
+    const day = batch.mailReceivedDate || "日期待核对";
+    (days[day] ||= []).push(batch);
+    return days;
+  }, {})).sort(([left], [right]) => right.localeCompare(left));
+
+  async function loadMailbox() {
+    const response = await fetch("/api/imports/email/mailbox", { cache: "no-store" });
+    const result = await readJsonResponse(response);
+    if (!response.ok) throw new Error(result.error || "读取邮箱同步状态失败");
+    setMailboxBatches(result.batches || []);
+    setMailboxStatus(result.lastError ? `同步异常：${result.lastError}`
+      : result.lastSuccessAt ? `上次同步：${new Date(result.lastSuccessAt).toLocaleString("zh-CN")}` : "等待邮箱配置或首次同步");
+  }
+
+  useEffect(() => { loadMailbox().catch(() => setMailboxStatus("暂时无法读取邮箱同步状态")); }, []);
+
+  useEffect(() => {
+    if (tab !== "history") return;
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      setReadLoading(true); setReadError("");
+      try {
+        const query = new URLSearchParams({ page:String(readPage) });
+        if (readSearch.trim()) query.set("q", readSearch.trim());
+        if (readDate) query.set("date", readDate);
+        const response = await fetch(`/api/imports/email/mailbox/items?${query}`, {signal:controller.signal,cache:"no-store"});
+        const result = await readJsonResponse(response);
+        if (!response.ok) throw new Error(result.error || "读取邮件明细失败");
+        if (!controller.signal.aborted) setReadMail(result as ReadMailPage);
+      } catch (error) {
+        if (!controller.signal.aborted) setReadError(error instanceof Error ? error.message : "读取邮件明细失败");
+      } finally { if (!controller.signal.aborted) setReadLoading(false); }
+    }, 250);
+    return () => { window.clearTimeout(timer); controller.abort(); };
+  }, [tab, readSearch, readDate, readPage, readVersion]);
+
+  async function syncMailbox() {
+    setEmailLoading(true); setEmailError("");
+    try {
+      const response = await fetch("/api/imports/email/mailbox/sync", { method: "POST" });
+      const result = await readJsonResponse(response);
+      if (!response.ok) throw new Error(result.error || "邮箱同步失败");
+      setMailboxStatus(result.configured ? `本次新增 ${result.imported} 封邮件` : "邮箱尚未配置，请联系管理员");
+      await loadMailbox();
+      setReadVersion(value => value + 1);
+    } catch (error) { setEmailError(error instanceof Error ? error.message : "邮箱同步失败"); }
+    finally { setEmailLoading(false); }
+  }
+
+  async function openMailboxBatch(batchId: number, itemId?: number) {
+    setEmailLoading(true); setEmailError("");
+    try {
+      const response = await fetch(`/api/imports/email/${batchId}`);
+      const result = await readJsonResponse(response);
+      if (!response.ok) throw new Error(result.error || "读取邮件批次失败");
+      const items = (result.items || []).map((item: { id:number; resultJson:string; duplicateOfItemId?:number }) =>
+        ({ ...JSON.parse(item.resultJson), import_item_id:item.id, duplicate_of_item_id:item.duplicateOfItemId }));
+      setEmailBatch({ import_batch_id:batchId, total:result.totalCount, parsed:result.parsedCount,
+        failed:result.failedCount, items });
+      const selected = itemId ? items.findIndex((item:ParsedEmail) => item.import_item_id === itemId) : 0;
+      setSelectedEmailIndex(Math.max(0, selected)); setConfirmed(result.status === "Confirmed"); setCreatedTaskIds([]);
+      setTab("email");
+    } catch (error) { setEmailError(error instanceof Error ? error.message : "读取邮件批次失败"); }
+    finally { setEmailLoading(false); }
+  }
 
   async function parseSelectedEmails() {
     if (!emailFiles.length) { fileInput.current?.click(); return; }
@@ -402,27 +481,13 @@ function ImportCenter() {
     const data = new FormData();
     emailFiles.forEach(file => data.append("files", file));
     try {
-      const response = await fetch(apiPath("/api/imports/email"), { method: "POST", body: data });
+      const response = await fetch("/api/imports/email", { method: "POST", body: data });
       const result = await readJsonResponse(response);
       if (!response.ok) throw new Error(result.error || "解析服务返回错误");
       setEmailBatch(result as EmailBatch);
     } catch (error) {
       setEmailError(error instanceof Error ? error.message : "邮件解析失败");
     } finally { setEmailLoading(false); }
-  }
-
-  async function parseSelectedSheets() {
-    if (!sheetFiles.length) { fileInput.current?.click(); return; }
-    setEmailLoading(true); setEmailError(""); setSheetBatch(null); setSelectedEmailIndex(0); setConfirmed(false); setCreatedTaskIds([]);
-    const data = new FormData();
-    sheetFiles.forEach(file => data.append("files", file));
-    try {
-      const response = await fetch(apiPath("/api/imports/spreadsheet"), { method: "POST", body: data });
-      const result = await readJsonResponse(response);
-      if (!response.ok) throw new Error(result.error || "表格解析服务返回错误");
-      setSheetBatch(result as SheetBatch);
-    } catch (error) { setEmailError(error instanceof Error ? error.message : "表格解析失败"); }
-    finally { setEmailLoading(false); }
   }
 
   function updateField(key: string, value: string) {
@@ -471,44 +536,58 @@ function ImportCenter() {
   }
 
   async function confirmBatch() {
-    const activeBatch = email ? emailBatch : sheetBatch;
-    if (!activeBatch) return;
+    if (!emailBatch) return;
     setConfirmLoading(true); setEmailError("");
     try {
-      const response = email
-        ? await fetch(apiPath("/api/imports/email/confirm"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(emailBatch) })
-        : await fetch(apiPath(`/api/imports/spreadsheet/${sheetBatch!.import_batch_id}/confirm`), { method: "POST" });
+      const response = await fetch(emailBatch.import_batch_id ? `/api/imports/email/${emailBatch.import_batch_id}/confirm` : "/api/imports/email/confirm", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(emailBatch) });
       const result = await readJsonResponse(response);
       if (!response.ok) throw new Error(result.error || "确认保存失败");
       setConfirmed(true);
-      if (email) setCreatedTaskIds(result.shipment_task_ids || []);
+      setCreatedTaskIds(result.shipment_task_ids || []);
+      await loadMailbox();
+      setReadVersion(value => value + 1);
     } catch (error) {
       setEmailError(error instanceof Error ? error.message : "确认保存失败");
     } finally { setConfirmLoading(false); }
   }
 
   return <div className="content import-center">
-    <div className="tabs"><button className={email ? "active" : ""} onClick={() => setTab("email")}><Inbox size={16} />邮件解析</button><button className={!email ? "active" : ""} onClick={() => setTab("sheet")}><FileSpreadsheet size={16} />表格解析</button></div>
-    <section className="panel import-panel"><div className="compact-upload"><span className="upload-icon">{email ? <Inbox size={23} /> : <FileSpreadsheet size={23} />}</span><div className="upload-copy"><h2>{email ? "导入邮件及附件" : "导入业务表格"}</h2><p>{email ? (emailFiles.length ? `已选择 ${emailFiles.length} 封 EML 邮件` : "支持一次选择多封EML；单封失败不会中断整批") : (sheetFiles.length ? `已选择 ${sheetFiles.length} 个表格` : "支持排期、库存、验货、包装资料等Excel/CSV文件")}</p></div><input ref={fileInput} type="file" accept={email ? ".eml,message/rfc822" : ".xlsx,.xls,.xlsm,.csv"} multiple style={{display:"none"}} onChange={event => email ? setEmailFiles(Array.from(event.target.files || [])) : setSheetFiles(Array.from(event.target.files || []))} /><div className="upload-actions"><button className="primary-button" onClick={() => fileInput.current?.click()}><Upload size={16} />选择文件</button>{(email ? emailFiles.length : sheetFiles.length) > 0 && <button className="secondary-button" disabled={emailLoading} onClick={email ? parseSelectedEmails : parseSelectedSheets}>{emailLoading ? "解析中…" : "开始批量解析"}</button>}</div></div>{emailError && <div className="notice"><span>{emailError}</span></div>}</section>
-    <section className="panel preview-panel"><div className="panel-title"><div><h2>解析结果预览</h2><p>{(email ? emailBatch : sheetBatch) ? `批次共 ${(email ? emailBatch : sheetBatch)!.total} 个：成功 ${(email ? emailBatch : sheetBatch)!.parsed}，失败 ${(email ? emailBatch : sheetBatch)!.failed}` : `选择${email ? "邮件" : "表格"}并解析后，在这里人工核对`}</p></div><b className={`status ${confirmed ? "ok" : (email ? emailBatch : sheetBatch)?.failed ? "danger" : "warn"}`}>{confirmed ? "已确认" : (email ? emailBatch : sheetBatch) ? "待确认" : "未解析"}</b></div>
-      {email && emailBatch && <div className="email-review-layout">
+    <div className="tabs"><button className={email ? "active" : ""} onClick={() => setTab("email")}><Inbox size={16} />邮件解析</button><button className={!email ? "active" : ""} onClick={() => setTab("history")}><ListChecks size={16} />邮箱读取明细</button></div>
+    {email && <section className="panel import-panel"><div className="panel-title"><div><h2>邮箱自动收取</h2><p>{mailboxStatus}；按船务邮箱收件日期（北京时间）归类</p></div><button className="secondary-button" disabled={emailLoading} onClick={syncMailbox}><RefreshCw size={16} />立即同步</button></div>{mailboxDays.map(([day, batches]) => <div key={day} className="review-section"><h3>{day === todayInChina ? `今天 ${day}` : day} · {batches.reduce((sum,batch) => sum + batch.totalCount, 0)} 封</h3><div className="upload-actions">{batches.map(batch => <button key={batch.id} className="secondary-button" onClick={() => openMailboxBatch(batch.id)}>{batch.fileName} · {batch.status === "Confirmed" ? `已确认，解析失败 ${batch.failedCount} 封` : `待确认 ${batch.totalCount} 封${batch.failedCount ? `，失败 ${batch.failedCount} 封` : ""}`}</button>)}</div></div>)}</section>}
+    {email && <section className="panel import-panel"><div className="compact-upload"><span className="upload-icon"><Inbox size={23} /></span><div className="upload-copy"><h2>导入邮件及附件</h2><p>{emailFiles.length ? `已选择 ${emailFiles.length} 封 EML 邮件` : "支持一次选择多封 EML；单封失败不会中断整批"}</p></div><input ref={fileInput} type="file" accept=".eml,message/rfc822" multiple style={{display:"none"}} onChange={event => setEmailFiles(Array.from(event.target.files || []))} /><div className="upload-actions"><button className="primary-button" onClick={() => fileInput.current?.click()}><Upload size={16} />选择文件</button>{emailFiles.length > 0 && <button className="secondary-button" disabled={emailLoading} onClick={parseSelectedEmails}>{emailLoading ? "解析中…" : "开始批量解析"}</button>}</div></div>{emailError && <div className="notice"><span>{emailError}</span></div>}</section>}
+    {email && <section className="panel preview-panel"><div className="panel-title"><div><h2>解析结果预览</h2><p>{emailBatch ? `批次共 ${emailBatch.total} 个：成功 ${emailBatch.parsed}，失败 ${emailBatch.failed}` : "选择邮件并解析后，在这里人工核对"}</p></div><b className={`status ${confirmed ? "ok" : emailBatch?.failed ? "danger" : "warn"}`}>{confirmed ? "已确认" : emailBatch ? "待确认" : "未解析"}</b></div>
+      {emailBatch && <div className="email-review-layout">
         <div className="email-review-list">{emailBatch.items.map((item,index) => <button key={`${item.filename}-${index}`} className={selectedEmailIndex === index ? "active" : ""} onClick={() => setSelectedEmailIndex(index)}><strong>#{index + 1} {item.filename}</strong><small>{item.status === "failed" ? "解析失败" : item.duplicate_of_item_id ? "重复邮件" : item.message?.subject || "无主题"}</small></button>)}</div>
         <div className="email-review-detail">
           {selectedEmail?.error && <div className="notice"><span>{selectedEmail.error}</span></div>}
           {selectedEmail?.duplicate_of_item_id && <div className="notice"><span>该邮件与记录 #{selectedEmail.duplicate_of_item_id} 重复，请确认是否继续保留。</span></div>}
-          <div className="mail-meta"><span><b>主题</b>{selectedEmail?.message?.subject || "—"}</span><span><b>发件人</b>{selectedEmail?.message?.sender || "—"}</span></div>
+          <div className="mail-meta"><span><b>主题</b>{selectedEmail?.message?.subject || "—"}</span><span><b>发件人</b>{selectedEmail?.message?.sender || "—"}</span>{selectedEmail?.mailbox_received_at && <span><b>邮箱收件时间</b>{new Date(selectedEmail.mailbox_received_at).toLocaleString("zh-CN", {timeZone:"Asia/Shanghai"})}</span>}</div>
         <div className="form-grid">{fields.map(([label,value], index) => { const key = ["so_number","container_type","ship_date","si_deadline","cutoff_date","port","destination_country","special_requirements"][index]; const deadline=key==="si_deadline"||key==="cutoff_date"; return <label key={label} className={key === "special_requirements" ? "full-width" : ""}><span>{label}</span>{key === "special_requirements" ? <textarea rows={4} value={String(value)} disabled={confirmed || selectedEmail?.status === "failed"} onChange={event => updateField(key, event.target.value)} /> : <input type={key === "ship_date" ? "date" : deadline ? "datetime-local" : "text"} value={key === "ship_date" ? dateControlValue(String(value)) : deadline ? dateControlValue(String(value),true) : String(value)} disabled={confirmed || selectedEmail?.status === "failed"} onChange={event => updateField(key, event.target.value)} />}</label>; })}</div>
           {!!selectedEmail?.warehouse_groups?.length && <div className="review-section"><h3>分柜/多仓分组</h3><div className="warehouse-grid">{selectedEmail.warehouse_groups.map((group,index) => <article key={`${group.warehouse}-${index}`}><label><span>仓库</span><input value={group.warehouse} disabled={confirmed} onChange={event => updateWarehouse(index,event.target.value)} /></label>{group.container_type&&<small>柜型：{group.container_type}</small>}<small>SO/附件编号：{group.references.join("、")}</small><strong>{group.items.length} 条货物明细</strong></article>)}</div></div>}
           {!!selectedEmail?.items?.length && <div className="review-section"><h3>货物明细 <small>共{selectedEmail.items.length}条，可在确认前修改</small></h3><div className="review-items editable"><div><b>货号</b><b>货名</b><b>规格</b><b>合同号</b><b>客户PO</b><b>数量</b><b>件数</b><b>体积</b><b>卡板</b><b>生产工厂</b></div>{selectedEmail.items.map((item,index) => { const fields = ["product_code","product_name","spec","contract_number","customer_po","quantity","pieces","volume","pallet_count","supplier"]; return <div key={index}>{fields.map(key => {const raw=key==="supplier"?(item.supplier||item.factory_remark):item[key];return key==="spec"||compactNumberFields.has(key)?<EditableItemInput key={key} value={raw} disabled={confirmed} label={`${key}-${index + 1}`} displayValue={value=>key==="spec"?fullSpecification(value):itemDisplayValue(key,value)} onChange={value=>updateEmailItem(index,key,key==="spec"?specificationValue(value):value)}/>:<input key={key} value={itemDisplayValue(key,raw)} disabled={confirmed} aria-label={`${key}-${index + 1}`} onChange={event => updateEmailItem(index,key,event.target.value)} />;})}</div>; })}</div></div>}
           {!!selectedEmail?.warnings?.length && <div className="notice"><span>{selectedEmail.warnings.join("；")}</span></div>}
         </div>
       </div>}
-      {!email && sheetBatch && <div className="email-review-layout"><div className="email-review-list">{sheetBatch.items.map((item,index) => <button key={`${item.filename}-${index}`} className={selectedEmailIndex === index ? "active" : ""} onClick={() => setSelectedEmailIndex(index)}><strong>#{index + 1} {item.filename}</strong><small>{item.status === "failed" ? "解析失败" : `${item.kind || "通用"} · ${item.sheet || ""}`}</small></button>)}</div><div className="email-review-detail">{selectedSheet?.error && <div className="notice"><span>{selectedSheet.error}</span></div>}{!!selectedSheet?.rows?.length && <div className="review-section"><h3>识别明细 <small>共{selectedSheet.rows.length}条，仅展示前20条</small></h3><div className="sheet-review-table"><div><b>货号</b><b>客户PO</b><b>合同号</b><b>数量</b><b>库存</b><b>排期/出货日期</b><b>验货结果</b></div>{selectedSheet.rows.slice(0,20).map((row,index) => <div key={index}><span>{String(row.product_code ?? "—")}</span><span>{String(row.customer_po ?? "—")}</span><span>{String(row.contract_number ?? "—")}</span><span>{String(row.quantity ?? "—")}</span><span>{String(row.inventory_quantity ?? "—")}</span><span>{String(row.planned_date ?? "—")}</span><span>{String(row.inspection_result ?? "—")}</span></div>)}</div></div>}{!!selectedSheet?.warnings?.length && <div className="notice"><span>{selectedSheet.warnings.join("；")}</span></div>}</div></div>}
-      {((email && !emailBatch) || (!email && !sheetBatch)) && <div className="form-grid">{fields.map(([label,value]) => <label key={label}><span>{label}</span><input value={String(value)} readOnly /></label>)}</div>}
-      <div className="notice"><ListChecks size={18} /><span>{email ? "邮件确认后即可创建走柜任务和制表；库存、验货未确认时仅显示提示，不阻断操作。" : "确认后保存表格解析结果，并用于更新对应业务资料。"}</span></div>
-      {confirmed && email && <div className="task-created-result"><span>{createdTaskIds.length ? `已自动创建或更新 ${createdTaskIds.length} 个走柜任务` : "本批邮件未新增任务（重复邮件不会重复创建）"}</span>{createdTaskIds.length === 1 ? <Link href={`/shipments/${createdTaskIds[0]}`}>打开任务</Link> : createdTaskIds.length > 1 ? <Link href="/shipments">查看任务列表</Link> : null}</div>}
-      <div className="panel-actions"><button className="ghost-button" onClick={() => { setEmailBatch(null); setSheetBatch(null); setEmailFiles([]); setSheetFiles([]); setConfirmed(false); setCreatedTaskIds([]); }}>取消本次导入</button><button className="primary-button" disabled={!(email ? emailBatch : sheetBatch) || confirmed || confirmLoading || !!(email ? emailBatch : sheetBatch)?.failed} onClick={confirmBatch}><Check size={16} />{confirmLoading ? "保存中…" : confirmed ? "已确认" : "确认本批次"}</button></div>
-    </section>
+      {!emailBatch && <div className="form-grid">{fields.map(([label,value]) => <label key={label}><span>{label}</span><input value={String(value)} readOnly /></label>)}</div>}
+      <div className="notice"><ListChecks size={18} /><span>邮件确认后即可创建走柜任务和制表；库存、验货未确认时仅显示提示，不阻断操作。</span></div>
+      {confirmed && <div className="task-created-result"><span>{createdTaskIds.length ? `已自动创建或更新 ${createdTaskIds.length} 个走柜任务` : "本批邮件未新增任务（重复邮件不会重复创建）"}</span>{createdTaskIds.length === 1 ? <Link href={`/shipments/${createdTaskIds[0]}`}>打开任务</Link> : createdTaskIds.length > 1 ? <Link href="/shipments">查看任务列表</Link> : null}</div>}
+      <div className="panel-actions"><button className="ghost-button" onClick={() => { setEmailBatch(null); setEmailFiles([]); setConfirmed(false); setCreatedTaskIds([]); }}>取消本次导入</button><button className="primary-button" disabled={!emailBatch || confirmed || confirmLoading || (!!emailBatch.failed && !emailBatch.import_batch_id)} onClick={confirmBatch}><Check size={16} />{confirmLoading ? "保存中…" : confirmed ? "已确认" : "确认本批次"}</button></div>
+    </section>}
+    {!email && <section className="panel mail-read-panel">
+      <div className="panel-title"><div><h2>邮箱读取明细</h2><p>按船务邮箱收件时间（北京时间）归类，共 {readMail.total} 封记录；点击邮件编号可查看解析结果。</p></div></div>
+      <div className="mail-read-filters">
+        <label><span>搜索邮件</span><input type="search" value={readSearch} placeholder="邮件编号、主题或发件人" onChange={event => { setReadSearch(event.target.value); setReadPage(1); }} /></label>
+        <label><span>收件日期</span><input type="date" value={readDate} onChange={event => { setReadDate(event.target.value); setReadPage(1); }} /></label>
+        {(readSearch || readDate) && <button className="secondary-button" onClick={() => { setReadSearch(""); setReadDate(""); setReadPage(1); }}>清除筛选</button>}
+      </div>
+      {readError && <div className="notice"><span>{readError}</span></div>}
+      <div className="mail-read-table-wrap"><table className="mail-read-table"><thead><tr><th>邮件编号</th><th>邮件主题</th><th>发件人</th><th>读取日期</th><th>状态</th></tr></thead><tbody>
+        {!readLoading && readMail.items.map(item => <tr key={item.id}><td><button className="table-action" onClick={() => openMailboxBatch(item.importBatchId,item.id)}>#{item.id}</button></td><td title={item.mailSubject}>{item.mailSubject || "无主题"}</td><td title={item.mailSender}>{item.mailSender || "—"}</td><td>{item.mailReceivedAt ? new Date(item.mailReceivedAt).toLocaleString("zh-CN",{timeZone:"Asia/Shanghai"}) : item.mailReceivedDate || "待核对"}</td><td><b className={`status ${item.status === "failed" ? "danger" : item.status.includes("confirmed") ? "ok" : "warn"}`} title={item.error || undefined}>{readMailStatus[item.status] || item.status}</b></td></tr>)}
+        {!readLoading && readMail.items.length === 0 && <tr><td colSpan={5} className="mail-read-empty">{readSearch || readDate ? "没有符合筛选条件的邮件" : "暂无邮箱读取记录"}</td></tr>}
+        {readLoading && <tr><td colSpan={5} className="mail-read-empty">读取中…</td></tr>}
+      </tbody></table></div>
+      {readMail.total > readMail.pageSize && <div className="mail-read-pagination"><span>第 {readMail.page} 页，共 {Math.ceil(readMail.total / readMail.pageSize)} 页</span><button className="secondary-button" disabled={readPage <= 1 || readLoading} onClick={() => setReadPage(value => value - 1)}>上一页</button><button className="secondary-button" disabled={readPage * readMail.pageSize >= readMail.total || readLoading} onClick={() => setReadPage(value => value + 1)}>下一页</button></div>}
+    </section>}
   </div>;
 }
 

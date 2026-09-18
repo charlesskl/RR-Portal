@@ -7,6 +7,11 @@ public sealed class ImportEmailItem
     public ImportBatch? ImportBatch { get; set; }
     public string FileName { get; set; } = string.Empty;
     public string Fingerprint { get; set; } = string.Empty;
+    public string MailboxKey { get; set; } = string.Empty;
+    public string MailSubject { get; set; } = string.Empty;
+    public string MailSender { get; set; } = string.Empty;
+    public string MailReceivedAt { get; set; } = string.Empty;
+    public string MailReceivedDate { get; set; } = string.Empty;
     public string Status { get; set; } = "Pending";
     public long? DuplicateOfItemId { get; set; }
     public string ResultJson { get; set; } = "{}";

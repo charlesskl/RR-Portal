@@ -28,6 +28,8 @@ builder.Services.AddHttpClient<EmailParserClient>(client =>
     client.BaseAddress = new Uri(builder.Configuration["EmailParser:BaseUrl"] ?? "http://localhost:8091");
     client.Timeout = TimeSpan.FromMinutes(5);
 });
+builder.Services.AddSingleton<MailboxSyncService>();
+builder.Services.AddHostedService(provider => provider.GetRequiredService<MailboxSyncService>());
 builder.Services.AddCors(options => options.AddDefaultPolicy(policy =>
     policy.WithOrigins("http://localhost:3000", "http://127.0.0.1:3000").AllowAnyHeader().AllowAnyMethod()));
 
@@ -36,6 +38,62 @@ using (var scope = app.Services.CreateScope())
 {
     var database = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     database.Database.EnsureCreated();
+    database.Database.ExecuteSqlRaw("""
+        CREATE TABLE IF NOT EXISTS MailSyncStates (
+            Id INTEGER NOT NULL CONSTRAINT PK_MailSyncStates PRIMARY KEY,
+            Address TEXT NOT NULL, UidValidity INTEGER NOT NULL, LastUid INTEGER NOT NULL,
+            LastSuccessAt TEXT NULL, LastError TEXT NOT NULL
+        );
+        """);
+    var mailColumns = new HashSet<string>(StringComparer.Ordinal);
+    using (var command = database.Database.GetDbConnection().CreateCommand())
+    {
+        command.CommandText = "PRAGMA table_info('ImportEmailItems')";
+        database.Database.OpenConnection();
+        using var reader = command.ExecuteReader();
+        while (reader.Read()) mailColumns.Add(reader.GetString(1));
+    }
+    var mailColumnUpdates = new (string Name, string Sql)[]
+    {
+        ("MailboxKey", "ALTER TABLE ImportEmailItems ADD COLUMN MailboxKey TEXT NOT NULL DEFAULT ''"),
+        ("MailSubject", "ALTER TABLE ImportEmailItems ADD COLUMN MailSubject TEXT NOT NULL DEFAULT ''"),
+        ("MailSender", "ALTER TABLE ImportEmailItems ADD COLUMN MailSender TEXT NOT NULL DEFAULT ''"),
+        ("MailReceivedAt", "ALTER TABLE ImportEmailItems ADD COLUMN MailReceivedAt TEXT NOT NULL DEFAULT ''"),
+        ("MailReceivedDate", "ALTER TABLE ImportEmailItems ADD COLUMN MailReceivedDate TEXT NOT NULL DEFAULT ''"),
+    };
+    foreach (var column in mailColumnUpdates)
+        if (!mailColumns.Contains(column.Name)) database.Database.ExecuteSqlRaw(column.Sql);
+    database.Database.ExecuteSqlRaw("CREATE UNIQUE INDEX IF NOT EXISTS IX_ImportEmailItems_MailboxKey ON ImportEmailItems (MailboxKey) WHERE MailboxKey <> ''");
+    database.Database.ExecuteSqlRaw("CREATE INDEX IF NOT EXISTS IX_ImportEmailItems_MailReceivedDate ON ImportEmailItems (MailReceivedDate)");
+    var receivedDateColumnExists = false;
+    using (var command = database.Database.GetDbConnection().CreateCommand())
+    {
+        command.CommandText = "PRAGMA table_info('ImportBatches')";
+        using var reader = command.ExecuteReader();
+        while (reader.Read()) if (reader.GetString(1) == "MailReceivedDate") receivedDateColumnExists = true;
+    }
+    if (!receivedDateColumnExists)
+        database.Database.ExecuteSqlRaw("ALTER TABLE ImportBatches ADD COLUMN MailReceivedDate TEXT NOT NULL DEFAULT ''");
+    var historicalMail = database.ImportEmailItems.Include(item => item.ImportBatch)
+        .Where(item => item.MailboxKey != "" && (item.MailReceivedAt == "" || item.MailReceivedDate == "")).ToList();
+    foreach (var item in historicalMail)
+    {
+        try
+        {
+            var parsed = JsonNode.Parse(item.ResultJson);
+            item.MailSubject = parsed?["message"]?["subject"]?.ToString() ?? "";
+            item.MailSender = parsed?["message"]?["sender"]?.ToString() ?? "";
+            item.MailReceivedAt = parsed?["mailbox_received_at"]?.ToString() ?? "";
+            if (item.MailReceivedAt != "") item.MailReceivedDate = MailboxDateRules.ReceivedDate(item.MailReceivedAt);
+            if (item.ImportBatch is not null && item.ImportBatch.MailReceivedDate == "" && item.MailReceivedAt != "")
+                item.ImportBatch.MailReceivedDate = item.MailReceivedDate;
+        }
+        catch (Exception error) when (error is JsonException or FormatException)
+        {
+            // 历史异常邮件保留原记录，供人工核对。
+        }
+    }
+    if (historicalMail.Count > 0) database.SaveChanges();
     EnsureShipmentTaskSchema(database);
     BackfillConfirmedShipmentTasks(database);
     BackfillShipmentEmailSubjects(database);
@@ -277,6 +335,54 @@ app.MapPost("/api/imports/email", async (HttpRequest request, EmailParserClient 
     return Results.Json(parsed);
 }).DisableAntiforgery();
 
+app.MapGet("/api/imports/email/mailbox", async (AppDbContext db, CancellationToken cancellationToken) =>
+{
+    var state = await db.MailSyncStates.AsNoTracking().FirstOrDefaultAsync(cancellationToken);
+    var batches = await db.ImportBatches.AsNoTracking()
+        .Where(value => value.Kind == "Email" &&
+            (value.Status == "PendingConfirmation" || (value.Status == "Confirmed" && value.FailedCount > 0)))
+        .OrderByDescending(value => value.CreatedAt).Take(30)
+        .Select(value => new { value.Id, value.FileName, value.MailReceivedDate, value.Status, value.TotalCount, value.ParsedCount,
+            value.FailedCount, value.CreatedAt }).ToListAsync(cancellationToken);
+    return Results.Ok(new { state?.Address, state?.LastSuccessAt, state?.LastError, batches });
+});
+
+app.MapGet("/api/imports/email/mailbox/items", async (string? date, string? q, int? page,
+    AppDbContext db, CancellationToken cancellationToken) =>
+{
+    const int pageSize = 50;
+    var pageNumber = Math.Max(1, page ?? 1);
+    if (pageNumber > 10000) return Results.BadRequest(new { error = "页码超出范围" });
+    if (!string.IsNullOrWhiteSpace(date) &&
+        !DateOnly.TryParseExact(date, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out _))
+        return Results.BadRequest(new { error = "日期格式应为 yyyy-MM-dd" });
+    var query = db.ImportEmailItems.AsNoTracking().Where(item => item.MailboxKey != "");
+    if (!string.IsNullOrWhiteSpace(date)) query = query.Where(item => item.MailReceivedDate == date);
+    var keyword = q?.Trim() ?? "";
+    if (keyword.Length > 100) return Results.BadRequest(new { error = "搜索内容过长" });
+    if (keyword != "")
+    {
+        var normalized = keyword.ToLowerInvariant();
+        var number = long.TryParse(keyword.TrimStart('#'), out var id) ? id : 0;
+        query = query.Where(item => item.Id == number ||
+            item.MailSubject.ToLower().Contains(normalized) || item.MailSender.ToLower().Contains(normalized));
+    }
+    var total = await query.CountAsync(cancellationToken);
+    var items = await query.OrderByDescending(item => item.MailReceivedAt).ThenByDescending(item => item.Id)
+        .Skip((pageNumber - 1) * pageSize).Take(pageSize)
+        .Select(item => new { item.Id, item.ImportBatchId, item.MailSubject, item.MailSender,
+            item.MailReceivedAt, item.MailReceivedDate, item.Status, item.Error })
+        .ToListAsync(cancellationToken);
+    return Results.Ok(new { total, page = pageNumber, pageSize, items });
+});
+
+app.MapPost("/api/imports/email/mailbox/sync", async (MailboxSyncService sync, CancellationToken cancellationToken) =>
+{
+    try { return Results.Ok(await sync.SyncAsync(cancellationToken)); }
+    catch (Exception error) when (error is not OperationCanceledException)
+    { return Results.Json(new { error = error.Message }, statusCode: 502); }
+});
+
 app.MapPost("/api/imports/email/confirm", async (JsonObject payload, AppDbContext db, CancellationToken cancellationToken) =>
 {
     var submitted = payload["items"]?.AsArray();
@@ -402,62 +508,6 @@ app.MapGet("/api/imports/email/{batchId:long}", async (long batchId, AppDbContex
         })
     });
 });
-app.MapPost("/api/imports/spreadsheet", async (HttpRequest request, EmailParserClient parser, AppDbContext db, CancellationToken cancellationToken) =>
-{
-    if (!request.HasFormContentType)
-        return Results.BadRequest(new { error = "请上传 Excel 或 CSV 表格" });
-    var form = await request.ReadFormAsync(cancellationToken);
-    var files = form.Files.GetFiles("files");
-    if (files.Count == 0) return Results.BadRequest(new { error = "请选择至少一个表格" });
-    if (files.Count > 20) return Results.BadRequest(new { error = "单批最多上传20个表格" });
-    var allowed = new[] { ".xlsx", ".xlsm", ".xls", ".csv" };
-    if (files.Any(file => !allowed.Contains(Path.GetExtension(file.FileName), StringComparer.OrdinalIgnoreCase)))
-        return Results.BadRequest(new { error = "仅支持 xlsx、xls、csv 表格" });
-
-    var response = await parser.ParseSpreadsheetBatchAsync(files, cancellationToken);
-    if (response.StatusCode is < 200 or >= 300)
-        return Results.Content(response.Body, response.ContentType, statusCode: response.StatusCode);
-    var parsed = JsonNode.Parse(response.Body)?.AsObject();
-    if (parsed is null) return Results.Problem("解析服务返回了无效结果");
-
-    var batch = new ImportBatch {
-        Kind = "Spreadsheet", FileName = $"表格批次 {DateTime.Now:yyyy-MM-dd HH:mm}",
-        Status = (parsed["failed"]?.GetValue<int>() ?? 0) > 0 ? "NeedsAttention" : "PendingConfirmation",
-        TotalCount = parsed["total"]?.GetValue<int>() ?? files.Count,
-        ParsedCount = parsed["parsed"]?.GetValue<int>() ?? 0,
-        FailedCount = parsed["failed"]?.GetValue<int>() ?? 0,
-        ParserVersion = parsed["parser_version"]?.GetValue<string>() ?? string.Empty,
-    };
-    db.ImportBatches.Add(batch);
-    await db.SaveChangesAsync(cancellationToken);
-    foreach (var node in parsed["items"]?.AsArray() ?? []) {
-        var result = node?.AsObject();
-        if (result is null) continue;
-        var entity = new ImportEmailItem {
-            ImportBatchId = batch.Id, FileName = result["filename"]?.GetValue<string>() ?? string.Empty,
-            Status = result["status"]?.GetValue<string>() ?? "failed", ResultJson = result.ToJsonString(),
-            Error = result["error"]?.GetValue<string>() ?? string.Empty,
-        };
-        db.ImportEmailItems.Add(entity);
-        await db.SaveChangesAsync(cancellationToken);
-        result["import_item_id"] = entity.Id;
-    }
-    parsed["import_batch_id"] = batch.Id;
-    return Results.Json(parsed);
-}).DisableAntiforgery();
-
-app.MapPost("/api/imports/spreadsheet/{batchId:long}/confirm", async (long batchId, AppDbContext db, CancellationToken cancellationToken) =>
-{
-    var batch = await db.ImportBatches.Include(value => value.EmailItems)
-        .FirstOrDefaultAsync(value => value.Id == batchId && value.Kind == "Spreadsheet", cancellationToken);
-    if (batch is null) return Results.NotFound(new { error = "表格导入批次不存在" });
-    if (batch.Status == "Confirmed") return Results.Conflict(new { error = "该批次已经确认" });
-    batch.Status = "Confirmed";
-    foreach (var item in batch.EmailItems.Where(value => value.Status != "failed")) item.Status = "confirmed";
-    await db.SaveChangesAsync(cancellationToken);
-    return Results.Ok(new { batch_id = batch.Id, status = batch.Status, confirmed_at = DateTime.UtcNow });
-});
-
 app.MapGet("/api/inspection-mappings", async (AppDbContext db, CancellationToken cancellationToken) =>
     Results.Ok(await db.InspectionMappings.AsNoTracking()
         .OrderBy(value => value.GroupName).ThenBy(value => value.Customer).ThenBy(value => value.ProductCode)

@@ -1,0 +1,300 @@
+{
+  "source": "生产自动化设备投资成本结余统计表1.xlsx",
+  "sheet": "总结余统计表",
+  "items": [
+    {
+      "factories": [
+        "兴信B"
+      ],
+      "workshop": "装配",
+      "names": [
+        "视觉贴标机",
+        "蜘蛛手+视觉贴标机"
+      ],
+      "manualPrice": 0.214,
+      "machinePrice": 0.0721,
+      "sourceRange": "H3:I3"
+    },
+    {
+      "factories": [
+        "兴信B"
+      ],
+      "workshop": "装配",
+      "names": [
+        "蜘蛛手"
+      ],
+      "manualPrice": 0.214,
+      "machinePrice": 0.0721,
+      "sourceRange": "H4:I4"
+    },
+    {
+      "factories": [
+        "兴信B"
+      ],
+      "workshop": "装配",
+      "names": [
+        "NFC检测机"
+      ],
+      "manualPrice": 0.012,
+      "machinePrice": 0.005,
+      "sourceRange": "H5:I5"
+    },
+    {
+      "factories": [
+        "兴信A"
+      ],
+      "workshop": "装配",
+      "names": [
+        "视觉贴标机-单机"
+      ],
+      "manualPrice": 0.06,
+      "machinePrice": 0.017,
+      "sourceRange": "H7:I7"
+    },
+    {
+      "factories": [
+        "兴信A",
+        "湖南"
+      ],
+      "workshop": "装配",
+      "names": [
+        "称重机"
+      ],
+      "manualPrice": 0.01,
+      "machinePrice": 0.005,
+      "sourceRange": "H8:I8"
+    },
+    {
+      "factories": [
+        "兴信A"
+      ],
+      "workshop": "装配",
+      "names": [
+        "半自动贴标机"
+      ],
+      "manualPrice": 0.06,
+      "machinePrice": 0.017,
+      "sourceRange": "H9:I9"
+    },
+    {
+      "factories": [
+        "兴信A"
+      ],
+      "workshop": "喷油",
+      "names": [
+        "蜘蛛手自动移印"
+      ],
+      "manualPrice": 0.07,
+      "machinePrice": 0.015,
+      "sourceRange": "H10:I10"
+    },
+    {
+      "factories": [
+        "兴信A"
+      ],
+      "workshop": "喷油",
+      "names": [
+        "UV蜘蛛手"
+      ],
+      "manualPrice": 0.11,
+      "machinePrice": 0.015,
+      "sourceRange": "H11:I11"
+    },
+    {
+      "factories": [
+        "兴信A"
+      ],
+      "workshop": "喷油",
+      "names": [
+        "Scara机器人"
+      ],
+      "manualPrice": 0.07,
+      "machinePrice": 0.015,
+      "sourceRange": "H12:I12"
+    },
+    {
+      "factories": [
+        "兴信A"
+      ],
+      "workshop": "啤机",
+      "names": [
+        "Scara机器人"
+      ],
+      "manualPrice": 0.24,
+      "machinePrice": 0.04,
+      "sourceRange": "H13:I13"
+    },
+    {
+      "factories": [
+        "兴信A"
+      ],
+      "workshop": "啤机",
+      "names": [
+        "蜘蛛手-分件"
+      ],
+      "manualPrice": 0.005,
+      "machinePrice": 0.0025,
+      "sourceRange": "H14:I14"
+    },
+    {
+      "factories": [
+        "华登"
+      ],
+      "workshop": "喷油",
+      "names": [
+        "蜘蛛手喷油散枪摆盘"
+      ],
+      "manualPrice": 0.085,
+      "machinePrice": 0.022,
+      "sourceRange": "H16:I16"
+    },
+    {
+      "factories": [
+        "华登"
+      ],
+      "workshop": "喷油",
+      "names": [
+        "6轴喷油机器人"
+      ],
+      "manualPrice": 0.1,
+      "machinePrice": 0.035,
+      "sourceRange": "H17:I17"
+    },
+    {
+      "factories": [
+        "华登"
+      ],
+      "workshop": "装配",
+      "names": [
+        "模组摆盘机"
+      ],
+      "manualPrice": 0.68,
+      "machinePrice": 0.44,
+      "sourceRange": "H18:I18"
+    },
+    {
+      "factories": [
+        "华登"
+      ],
+      "workshop": "装配",
+      "names": [
+        "方珠摆盘机"
+      ],
+      "manualPrice": 0.68,
+      "machinePrice": 0.44,
+      "sourceRange": "H19:I19"
+    },
+    {
+      "factories": [
+        "华嘉",
+        "湖南",
+        "河源"
+      ],
+      "workshop": "装配",
+      "names": [
+        "富格乐飞机盒拆盒机"
+      ],
+      "manualPrice": 0.098,
+      "machinePrice": 0.016,
+      "sourceRange": "H21:I21"
+    },
+    {
+      "factories": [
+        "华嘉",
+        "湖南",
+        "河源"
+      ],
+      "workshop": "装配",
+      "names": [
+        "富格乐飞机盒贴标机"
+      ],
+      "manualPrice": 0.065,
+      "machinePrice": 0.016,
+      "sourceRange": "H22:I22"
+    },
+    {
+      "factories": [
+        "华嘉",
+        "湖南",
+        "河源"
+      ],
+      "workshop": "装配",
+      "names": [
+        "自动拆盒粘胶装盒封盒装卡片一体机"
+      ],
+      "manualPrice": 0.28,
+      "machinePrice": 0.11,
+      "sourceRange": "H23:I23"
+    },
+    {
+      "factories": [
+        "华嘉",
+        "湖南",
+        "河源"
+      ],
+      "workshop": "装配",
+      "names": [
+        "半自动四方形贴标机"
+      ],
+      "manualPrice": 0.31,
+      "machinePrice": 0.0516666666666667,
+      "sourceRange": "H24:I24"
+    },
+    {
+      "factories": [
+        "华嘉",
+        "湖南",
+        "河源"
+      ],
+      "workshop": "装配",
+      "names": [
+        "套标+收缩一体机"
+      ],
+      "manualPrice": 0.25,
+      "machinePrice": 0.08,
+      "sourceRange": "H25:I25"
+    },
+    {
+      "factories": [
+        "华嘉",
+        "湖南",
+        "河源"
+      ],
+      "workshop": "装配",
+      "names": [
+        "立式包装机"
+      ],
+      "manualPrice": 0.07,
+      "machinePrice": 0.03,
+      "sourceRange": "H26:I26"
+    },
+    {
+      "factories": [
+        "华嘉",
+        "湖南",
+        "河源"
+      ],
+      "workshop": "装配",
+      "names": [
+        "半自动圆形贴标机"
+      ],
+      "manualPrice": 0.12,
+      "machinePrice": 0.06,
+      "sourceRange": "H27:I27"
+    },
+    {
+      "factories": [
+        "华嘉",
+        "湖南",
+        "河源"
+      ],
+      "workshop": "装配",
+      "names": [
+        "点胶机"
+      ],
+      "manualPrice": 0.62,
+      "machinePrice": 0.28,
+      "sourceRange": "H28:I28"
+    }
+  ]
+}

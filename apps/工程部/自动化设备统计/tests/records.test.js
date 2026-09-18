@@ -113,7 +113,7 @@ test('record edits and deletions persist and adjust only the linked equipment', 
     eq = result.data.equipment.find(e => e.id === id);
     assert.equal(eq.manualPrice, null);
     assert.equal(eq.machinePrice, 0);
-    assert.equal(result.data.equipment.find(e => e.id === 1).manualPrice, undefined);
+    assert.equal(result.data.equipment.find(e => e.id === 1).manualPrice, .214);
   });
 
 });

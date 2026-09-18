@@ -4,6 +4,7 @@ const express = require('express');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
+const { importCostPrices } = require('./cost-price-import');
 
 const PORT = process.env.PORT || 3008;
 const DATA_DIR = process.env.AUTOMATION_DATA_DIR || path.join(__dirname, 'data');
@@ -47,10 +48,12 @@ function loadData() {
   if (_cache) return _cache;
   if (!fs.existsSync(DATA_FILE)) {
     _cache = JSON.parse(JSON.stringify(SEED));
+    importCostPrices(_cache);
     saveData(_cache);
     return _cache;
   }
   _cache = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
+  if (importCostPrices(_cache)) saveData(_cache);
   return _cache;
 }
 function saveData(data) {

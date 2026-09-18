@@ -552,8 +552,8 @@ export default function Home() {
                       <th>设备单价</th>
                       <th>投资金额</th>
                       <th>实际生产数</th>
-                      <th>原人工单价<small>RMB/件</small></th>
-                      <th>机器工单价<small>RMB/件</small></th>
+                      <th>原人工单价</th>
+                      <th>机器工单价</th>
                       <th>已节省成本</th>
                       <th>当前结余</th>
                       <th>更新</th>

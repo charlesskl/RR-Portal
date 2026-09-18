@@ -1,0 +1,40 @@
+.purchase-fillable-cell {
+  position: relative;
+  min-width: 0;
+  padding-right: 20px;
+}
+
+.purchase-fill-handle {
+  position: absolute;
+  right: 1px;
+  bottom: 50%;
+  z-index: 10;
+  display: flex;
+  width: 16px;
+  height: 16px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #fff;
+  border-radius: 4px;
+  background: #1677ff;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 25%);
+  color: #fff;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
+  transform: translateY(50%);
+}
+
+.purchase-fillable-cell:hover .purchase-fill-handle,
+.purchase-fillable-cell:focus-within .purchase-fill-handle {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.purchase-fill-handle:hover {
+  background: #0958d9;
+}

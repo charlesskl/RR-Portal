@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import {
   App, Button, Card, Checkbox, Col, DatePicker, Drawer, Form, Input, InputNumber, Modal, Popconfirm,
   Row, Select, Space, Table, Tag, Typography,
@@ -6,6 +6,7 @@ import {
 import dayjs from 'dayjs'
 import { api, type Material } from '../api/client'
 import { numToChinese, poDetermineEntity, poGenContractNo, PO_ENTITY_META, type PoEntity } from '../utils/poNumber'
+import './PurchasePage.css'
 
 interface SchedRow {
   source?: string
@@ -20,7 +21,6 @@ interface SchedRow {
   cartons?: number
   unitPrice?: number
   eta?: string
-  isOrdered?: boolean
 }
 
 interface PoSummary {
@@ -80,6 +80,49 @@ interface QuoteRow {
 
 interface PoDetail extends PoSummary {
   items?: PoItem[]
+}
+
+type SyncField = 'material_name' | 'category' | 'spec' | 'ship_unit' | 'net_per_pc'
+const SYNC_FIELDS: { field: SyncField; label: string; materialField: keyof Material }[] = [
+  { field: 'material_name', label: '物料名称', materialField: 'name_zh' },
+  { field: 'category', label: '类别', materialField: 'category' },
+  { field: 'spec', label: '规格', materialField: 'spec' },
+  { field: 'ship_unit', label: '走货单位', materialField: 'unit_kg' },
+  { field: 'net_per_pc', label: '单件净重', materialField: 'net_per_pc' },
+]
+
+interface MaterialChange {
+  index: number
+  materialId: number
+  field: SyncField
+  label: string
+  before: string | number | undefined
+  after: string | number
+}
+
+function materialChanges(items: PoItem[], materials: Map<number, Material>): MaterialChange[] {
+  return items.flatMap((item, index) => {
+    const material = item.material_id == null ? undefined : materials.get(Number(item.material_id))
+    if (!material) return []
+    return SYNC_FIELDS.flatMap(({ field, label, materialField }) => {
+      const after = material[materialField]
+      if (after == null || typeof after === 'boolean' || String(item[field] ?? '') === String(after)) return []
+      return [{ index, materialId: Number(item.material_id), field, label, before: item[field], after }]
+    })
+  })
+}
+
+function applyMaterialChanges(items: PoItem[], changes: MaterialChange[]): PoItem[] {
+  const next = items.map(item => ({ ...item }))
+  for (const change of changes) {
+    const item = next[change.index]
+    // 弹窗打开期间若用户已修改明细，不覆盖新的手工输入。
+    if (item?.material_id != null && Number(item.material_id) === change.materialId
+      && String(item[change.field] ?? '') === String(change.before ?? '')) {
+      (item as any)[change.field] = change.after
+    }
+  }
+  return next
 }
 
 interface PurchaseItemRow extends PoItem {
@@ -145,6 +188,53 @@ function applyAutoSpoilage(item: PoItem): PoItem {
     purchase_qty: purchaseQty,
     qty: purchaseQty,
   }
+}
+
+function patchPoItem(item: PoItem, field: keyof PoItem, value: any): PoItem {
+  const next: PoItem = { ...item, [field]: value }
+  if (field === 'ordered_qty' || field === 'usage_qty') {
+    next.material_qty = (next.ordered_qty ?? 0) * (next.usage_qty ?? 1)
+    return applyAutoSpoilage(next)
+  }
+  if (field === 'category') return applyAutoSpoilage(next)
+  if (field === 'spoilage_qty') {
+    next.purchase_qty = (next.material_qty ?? 0) + (next.spoilage_qty ?? 0)
+    next.qty = next.purchase_qty
+  }
+  return next
+}
+
+function FillablePurchaseCell({ rowIndex, field, onFill, onFillToEnd, children }: {
+  rowIndex: number
+  field: keyof PoItem
+  onFill: (sourceIndex: number, targetIndex: number, field: keyof PoItem) => void
+  onFillToEnd: (sourceIndex: number, field: keyof PoItem) => void
+  children: ReactNode
+}) {
+  return (
+    <div className="purchase-fillable-cell"
+      onDragOver={event => {
+        if (event.dataTransfer.types.includes('application/x-purchase-fill')) event.preventDefault()
+      }}
+      onDrop={event => {
+        event.preventDefault()
+        try {
+          const payload = JSON.parse(event.dataTransfer.getData('application/x-purchase-fill'))
+          if (payload.field === field) onFill(Number(payload.rowIndex), rowIndex, field)
+        } catch { /* 忽略其它拖动内容 */ }
+      }}
+    >
+      {children}
+      <span className="purchase-fill-handle" draggable role="button" aria-label="复制到下面全部行"
+        title="点击复制到下面全部行；拖动可复制到指定行"
+        onClick={event => { event.preventDefault(); event.stopPropagation(); onFillToEnd(rowIndex, field) }}
+        onDragStart={event => {
+          event.dataTransfer.effectAllowed = 'copy'
+          event.dataTransfer.setData('application/x-purchase-fill', JSON.stringify({ rowIndex, field }))
+        }}
+      >↓</span>
+    </div>
+  )
 }
 
 function restoreSavedSpoilage(item: PoItem): PoItem {
@@ -677,6 +767,52 @@ export default function PurchasePage() {
     form.resetFields()
     setTimeout(() => form.setFieldsValue({ status: 'draft', order_date: dayjs().format('YYYY-MM-DD') }), 0)
   }
+  async function loadPurchaseMaterials(poItems: PoItem[]) {
+    const codes = [...new Set(poItems.filter(it => it.material_id != null)
+      .map(it => resolveProductCode(String(it.product_code || '').split(/\s*\/\s*/)[0])).filter(Boolean))]
+    const lists = await Promise.all(codes.map(async code => {
+      try {
+        const { data } = await api.get<Material[]>('/materials', { params: { code }, skipErrorToast: true } as any)
+        return Array.isArray(data) ? data : []
+      } catch { return [] }
+    }))
+    return new Map(lists.flat().filter(m => m.id != null).map(m => [Number(m.id), m]))
+  }
+  function promptMaterialSync(poItems: PoItem[], materials: Map<number, Material>) {
+    const changes = materialChanges(poItems, materials)
+    if (!changes.length) { message.info('已与货号库一致，没有需要同步的资料'); return }
+    const affected = new Set(changes.map(change => change.index)).size
+    Modal.confirm({
+      title: `货号库有更新：${affected} 行、${changes.length} 项差异`,
+      width: 760,
+      okText: '同步这些资料',
+      cancelText: '保持采购单原值',
+      content: <>
+        <p>只同步名称、类别、规格、走货单位及单件净重；用量、订单量、单价、金额、损耗与入库记录均保持原值。确认后仍需点击“保存”才会写入采购单。</p>
+        <div style={{ maxHeight: 320, overflow: 'auto' }}>
+          {changes.map((change, i) => <div key={i} style={{ padding: '4px 0', borderBottom: '1px solid #eee' }}>
+            第 {change.index + 1} 行 · {change.label}：{change.before == null || change.before === '' ? '空' : String(change.before)} → {change.after === '' ? '空' : String(change.after)}
+          </div>)}
+        </div>
+      </>,
+      onOk: () => {
+        setItems(current => applyMaterialChanges(current, changes))
+        message.success('已在当前采购单中更新资料，请点击保存以生效')
+      },
+    })
+  }
+  async function checkMaterialSync() {
+    try {
+      const materials = await loadPurchaseMaterials(items)
+      if (!materials.size && items.some(item => item.material_id != null)) {
+        message.warning('未找到关联的货号库物料，请核对货号及物料关联')
+        return
+      }
+      promptMaterialSync(items, materials)
+    } catch (e: any) {
+      message.error('检查货号库失败：' + (e?.message ?? e))
+    }
+  }
   async function openEdit(p: PoSummary) {
     setCreating(false); setEditing(p)
     form.resetFields()
@@ -690,17 +826,10 @@ export default function PurchasePage() {
         notes: data.notes,
       })
       const rawItems = Array.isArray(data.items) ? data.items : []
-      const materialLists = new Map<string, any[]>()
-      const codes = [...new Set(rawItems.map(it => String(it.product_code || '').split(/\s*\/\s*/)[0]).filter(Boolean))]
-      await Promise.all(codes.map(async code => {
-        try {
-          const { data: mats } = await api.get<any[]>('/materials', { params: { code: resolveProductCode(code) } })
-          materialLists.set(code, Array.isArray(mats) ? mats : [])
-        } catch { materialLists.set(code, []) }
-      }))
-      setItems(rawItems.map(it => {
-        const code = String(it.product_code || '').split(/\s*\/\s*/)[0]
-        const mat = (materialLists.get(code) || []).find(m => m.id === it.material_id)
+      // 货号库无法读取时仍可打开采购单，保留已经保存的订单原值。
+      const materials = await loadPurchaseMaterials(rawItems)
+      const openedItems = rawItems.map(it => {
+        const mat = it.material_id == null ? undefined : materials.get(Number(it.material_id))
         const wasLegacyUnitLayout = !it.ship_unit && !!mat?.unit_kg && it.purchase_unit === mat.unit_kg
         const schedule = schedRows.find(s =>
           String(it.product_code || '').split(/\s*\/\s*/).includes(String(s.code || ''))
@@ -709,12 +838,13 @@ export default function PurchasePage() {
         return restoreSavedSpoilage({
           ...it,
           purchase_unit: wasLegacyUnitLayout ? '个' : (it.purchase_unit || '个'),
-          // 走货单位以物料库为准，避免采购单里的旧值（如误存 TNE）覆盖 KGM。
-          ship_unit: mat?.unit_kg || it.ship_unit || 'PCE',
-          net_per_pc: Number(it.net_per_pc) || Number(mat?.net_per_pc) || 0,
+          ship_unit: it.ship_unit || 'PCE',
+          net_per_pc: Number(it.net_per_pc) || 0,
           eta: it.eta || schedule?.eta || '',
         })
-      }))
+      })
+      setItems(openedItems)
+      if (materials.size && materialChanges(openedItems, materials).length) promptMaterialSync(openedItems, materials)
     } catch (e: any) {
       message.error('加载详情失败: ' + (e?.message ?? e))
     }
@@ -729,7 +859,8 @@ export default function PurchasePage() {
     }
     let saveItems = items
     let quoteHits = 0
-    if (v.supplier) {
+    // 已下单采购单的既有单价不因本次同步/保存被最新报价悄悄覆盖。
+    if (creating && v.supplier) {
       try {
         const { data: quotes } = await api.get<QuoteRow[]>('/quotes/blob', { skipErrorToast: true } as any)
         const priced = applyQuotePrices(items, Array.isArray(quotes) ? quotes : [], v.supplier, false)
@@ -1112,24 +1243,27 @@ export default function PurchasePage() {
   }
 
   function patchItem(i: number, k: keyof PoItem, v: any) {
-    setItems(its => its.map((it, idx) => {
-      if (idx !== i) return it
-      const next: PoItem = { ...it, [k]: v }
-      // Auto compute material_qty + purchase_qty
-      if (k === 'ordered_qty' || k === 'usage_qty') {
-        const mat = (next.ordered_qty ?? 0) * (next.usage_qty ?? 1)
-        next.material_qty = mat
-        return applyAutoSpoilage(next)
-      }
-      if (k === 'category') {
-        return applyAutoSpoilage(next)
-      }
-      if (k === 'spoilage_qty') {
-        next.purchase_qty = (next.material_qty ?? 0) + (next.spoilage_qty ?? 0)
-        next.qty = next.purchase_qty
-      }
-      return next
-    }))
+    setItems(its => its.map((it, idx) => idx === i ? patchPoItem(it, k, v) : it))
+  }
+  function fillItemDown(sourceIndex: number, targetIndex: number, field: keyof PoItem) {
+    if (!Number.isInteger(sourceIndex) || sourceIndex < 0 || targetIndex <= sourceIndex || targetIndex >= items.length) {
+      message.warning('请把复制点向下拖动到目标行')
+      return
+    }
+    setItems(current => {
+      const value = current[sourceIndex]?.[field]
+      return current.map((item, index) => {
+        if (index <= sourceIndex || index > targetIndex || (field === 'ship_unit' && item.material_id)) return item
+        return patchPoItem(item, field, value)
+      })
+    })
+    message.success(`已向下复制 ${targetIndex - sourceIndex} 行`)
+  }
+  function fillable(i: number, field: keyof PoItem, control: ReactNode) {
+    return <FillablePurchaseCell rowIndex={i} field={field} onFill={fillItemDown}
+      onFillToEnd={(sourceIndex, sourceField) => fillItemDown(sourceIndex, items.length - 1, sourceField)}>
+      {control}
+    </FillablePurchaseCell>
   }
   function addItem() {
     const poNo = String(form.getFieldValue('po_no') || '')
@@ -1443,6 +1577,7 @@ export default function PurchasePage() {
         extra={
           <Space>
             <Button onClick={() => setSchedPickerOpen(true)}>🔗 从排期选</Button>
+            {!creating && <Button onClick={checkMaterialSync}>🔄 检查货号库更新</Button>}
             <Button onClick={mergeSameName}>🔀 合并同名</Button>
             <Button onClick={undoMerge} disabled={!mergeUndo}>↩ 取消合并</Button>
             <Button onClick={applyQuotes}>💲 套用报价</Button>
@@ -1506,26 +1641,28 @@ export default function PurchasePage() {
             scroll={{ x: 2500, y: 'calc(100vh - 330px)' }}
             columns={[
               { title: '#', width: 40, fixed: 'left', render: (_v, _r, i) => i + 1 },
-              { title: '货号', width: 100, fixed: 'left', render: (_v, r, i) => <Input size="small" value={r.product_code} onChange={(e) => patchItem(i, 'product_code', e.target.value)} /> },
-              { title: '物料名称', width: 180, fixed: 'left', render: (_v, r, i) => <Input size="small" value={r.material_name} onChange={(e) => patchItem(i, 'material_name', e.target.value)} /> },
-              { title: '类别', width: 80, render: (_v, r, i) => <Input size="small" value={r.category} onChange={(e) => patchItem(i, 'category', e.target.value)} /> },
-              { title: '规格', width: 140, render: (_v, r, i) => <Input size="small" value={r.spec} onChange={(e) => patchItem(i, 'spec', e.target.value)} /> },
-              { title: '用量', width: 80, render: (_v, r, i) => <InputNumber size="small" min={0} step={0.001} value={r.usage_qty} onChange={(v) => patchItem(i, 'usage_qty', v ?? 0)} style={{ width: '100%' }} /> },
-              { title: '订单量', width: 100, render: (_v, r, i) => <InputNumber size="small" min={0} value={r.ordered_qty} onChange={(v) => patchItem(i, 'ordered_qty', v ?? 0)} style={{ width: '100%' }} /> },
+              { title: '货号', width: 120, fixed: 'left', render: (_v, r, i) => fillable(i, 'product_code', <Input size="small" value={r.product_code} onChange={(e) => patchItem(i, 'product_code', e.target.value)} />) },
+              { title: '物料名称', width: 200, fixed: 'left', render: (_v, r, i) => fillable(i, 'material_name', <Input size="small" value={r.material_name} onChange={(e) => patchItem(i, 'material_name', e.target.value)} />) },
+              { title: '类别', width: 100, render: (_v, r, i) => fillable(i, 'category', <Input size="small" value={r.category} onChange={(e) => patchItem(i, 'category', e.target.value)} />) },
+              { title: '规格', width: 160, render: (_v, r, i) => fillable(i, 'spec', <Input size="small" value={r.spec} onChange={(e) => patchItem(i, 'spec', e.target.value)} />) },
+              { title: '用量', width: 100, render: (_v, r, i) => fillable(i, 'usage_qty', <InputNumber size="small" min={0} step={0.001} value={r.usage_qty} onChange={(v) => patchItem(i, 'usage_qty', v ?? 0)} style={{ width: '100%' }} />) },
+              { title: '订单量', width: 120, render: (_v, r, i) => fillable(i, 'ordered_qty', <InputNumber size="small" min={0} value={r.ordered_qty} onChange={(v) => patchItem(i, 'ordered_qty', v ?? 0)} style={{ width: '100%' }} />) },
               { title: '物料量', width: 100, align: 'right', render: (_v, r) => Number(r.material_qty ?? 0).toFixed(2) },
-              { title: '损耗量', width: 90, render: (_v, r, i) => <InputNumber size="small" min={0} value={r.spoilage_qty} onChange={(v) => patchItem(i, 'spoilage_qty', v ?? 0)} style={{ width: '100%' }} /> },
+              { title: '损耗量', width: 110, render: (_v, r, i) => fillable(i, 'spoilage_qty', <InputNumber size="small" min={0} value={r.spoilage_qty} onChange={(v) => patchItem(i, 'spoilage_qty', v ?? 0)} style={{ width: '100%' }} />) },
               { title: '采购量', width: 100, align: 'right', render: (_v, r) => <b style={{ color: '#1677ff' }}>{Number(r.purchase_qty ?? r.qty ?? 0).toFixed(2)}</b> },
-              { title: '单价', width: 110, render: (_v, r, i) => <InputNumber size="small" min={0} step={0.0001} value={r.price} onChange={(v) => patchItem(i, 'price', v ?? 0)} style={{ width: '100%' }} /> },
+              { title: '单价', width: 130, render: (_v, r, i) => fillable(i, 'price', <InputNumber size="small" min={0} step={0.0001} value={r.price} onChange={(v) => patchItem(i, 'price', v ?? 0)} style={{ width: '100%' }} />) },
               { title: '金额', width: 100, align: 'right', render: (_v, r) => <b style={{ color: '#c0392b' }}>{((r.purchase_qty ?? r.qty ?? 0) * (r.price ?? 0)).toFixed(2)}</b> },
-              { title: '采购单位', width: 90, render: (_v, r, i) => (
+              { title: '采购单位', width: 110, render: (_v, r, i) => fillable(i, 'purchase_unit',
                 <Select size="small" value={r.purchase_unit || '个'} style={{ width: '100%' }}
                   options={['个', '只', '米'].map(x => ({ value: x, label: x }))}
                   onChange={(v) => patchItem(i, 'purchase_unit', v)} />
               ) },
-              { title: '走货单位（货号库）', width: 130, render: (_v, r, i) => (
+              { title: '走货单位（货号库）', width: 150, render: (_v, r, i) => r.material_id ? (
+                <Select size="small" value={r.ship_unit || 'PCE'} style={{ width: '100%' }} disabled
+                  options={['PCE', 'KGM', 'MTR', 'SET', 'PAR', 'ROLL', 'TNE'].map(x => ({ value: x, label: x }))} />
+              ) : fillable(i, 'ship_unit',
                 <div title={r.material_id ? '已关联货号库物料，单位跟随货号库' : '手工明细未关联物料库，可自行选择'}>
                   <Select size="small" value={r.ship_unit || 'PCE'} style={{ width: '100%' }}
-                    disabled={!!r.material_id}
                     options={['PCE', 'KGM', 'MTR', 'SET', 'PAR', 'ROLL', 'TNE'].map(x => ({ value: x, label: x }))}
                     onChange={(v) => patchItem(i, 'ship_unit', v)} />
                 </div>
@@ -1537,9 +1674,9 @@ export default function PurchasePage() {
                 return <b style={{ color: '#2878c8' }}>{shipQty > 0 ? (amount / shipQty).toFixed(4) : '0.0000'}</b>
               } },
               { title: '交货时间', width: 110, render: () => deliveryDate || '' },
-              { title: '走货期', width: 110, render: (_v, r, i) => <Input size="small" value={r.eta} onChange={(e) => patchItem(i, 'eta', e.target.value)} /> },
-              { title: '币种', width: 100, render: (_v, r, i) => <Select size="small" value={r.currency || '¥'} options={CURR} onChange={(v) => patchItem(i, 'currency', v)} style={{ width: '100%' }} /> },
-              { title: '备注', width: 180, render: (_v, r, i) => <Input size="small" value={r.notes} onChange={(e) => patchItem(i, 'notes', e.target.value)} /> },
+              { title: '走货期', width: 130, render: (_v, r, i) => fillable(i, 'eta', <Input size="small" value={r.eta} onChange={(e) => patchItem(i, 'eta', e.target.value)} />) },
+              { title: '币种', width: 120, render: (_v, r, i) => fillable(i, 'currency', <Select size="small" value={r.currency || '¥'} options={CURR} onChange={(v) => patchItem(i, 'currency', v)} style={{ width: '100%' }} />) },
+              { title: '备注', width: 200, render: (_v, r, i) => fillable(i, 'notes', <Input size="small" value={r.notes} onChange={(e) => patchItem(i, 'notes', e.target.value)} />) },
               {
                 title: '', width: 50, fixed: 'right',
                 render: (_v, _r, i) => (
@@ -1739,7 +1876,7 @@ export default function PurchasePage() {
 
       <Modal
         open={schedPickerOpen}
-        title={`从排期选 TOMY PO 下单（未下单 ${schedRows.filter(r => r.isOrdered !== true).length} 行 · 已选 ${pickerSelKeys.length} 行）`}
+        title={`从排期选 TOMY PO 下单（未下单 ${schedRows.filter(r => !(r.orderNo && r.code && placedSet.has(`${r.orderNo}|${r.code}`))).length} 行 · 已选 ${pickerSelKeys.length} 行）`}
         width="80vw"
         onCancel={() => { setSchedPickerOpen(false); setPickerSelKeys([]) }}
         footer={null}
@@ -1774,7 +1911,6 @@ export default function PurchasePage() {
             preserveSelectedRowKeys: true,   // 跨搜索/翻页保留勾选，可一次选多个货号的行
           }}
           dataSource={schedRows.map((r, i) => ({ ...r, _origIdx: i })).filter(r => {
-            if (r.isOrdered === true) return false  // 源排期非黄色行已下单，不再重复下单
             if (hidePlaced && r.orderNo && r.code && placedSet.has(`${r.orderNo}|${r.code}`)) return false  // 隐藏已下单
             if (!schedPickerFilter) return true
             const s = schedPickerFilter.toLowerCase()

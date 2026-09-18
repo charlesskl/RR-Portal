@@ -3,6 +3,7 @@ node_modules/
 out/
 *.log
 .DS_Store
+.env.local
 server/**/bin/
 server/**/obj/
 server/**/*.db

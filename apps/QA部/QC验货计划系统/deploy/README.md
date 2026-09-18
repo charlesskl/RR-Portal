@@ -23,6 +23,10 @@ Authorization: Bearer <与 QC_SHIPPING_API_KEY 相同的密钥>
 
 RR 仓库现有船务查询代理使用 `QC_SYSTEM_API_URL` 和 `QC_SYSTEM_API_TOKEN`：前者设为本接口完整地址，后者设为与 `QC_SHIPPING_API_KEY` 相同的密钥。接口也兼容 `X-QC-API-Key` 请求头。可按 `contractNumber`（合同号）、`customerPo`（客户 PO）、`itemNumber`（货号）任一字段精确查询，也可组合；可选 `site`（兴信、湖南、华登、待分配）及 `page`。至少提供一个单号字段。只返回已登记结果的记录，每页最多 100 条，按验货日期倒序。响应包含 `total`、`page`、`pageSize`、`totalPages`、`items`；每项包含 `planId`、厂区、验货日期、客户、各单号、产品、内部结果、第三方结果、HOLD/REJ 原因及流程状态。无匹配结果返回 `items: []`；密钥不正确返回 401；未配置密钥返回 503。接口密钥应只在两系统服务端配置，走 HTTPS 或公司受控内网。
 
+多条货物明细使用 `POST /api/integrations/shipping/results/batch`，请求体为 `{"items":[{"contractNumber":"HT123","customerPo":"","itemNumber":"SKU1"}]}`，最多 500 条。认证方式与单条接口相同；非空查询字段均需精确一致，空字段不参与匹配。响应的 `results` 与请求顺序一致，每项包含 `itemIndex`、匹配总数 `total` 和按验货日期排序的最近一条 `latest`；无匹配时 `latest` 为 `null`。原 GET 接口保留。更新云端时先部署 QC，再部署船务；QC 启动时会自动建立查询索引，不修改已有验货数据。
+
+使用 RR 根目录的 `docker-compose.cloud.yml` 部署时，在服务器的根级环境文件中设置 `QC_PLAN_SHIPPING_API_KEY`（至少 32 字符），Compose 会将同一密钥提供给 QC 的 `QC_SHIPPING_API_KEY` 和船务的 `QC_SYSTEM_API_TOKEN`。保持已有 `QC_PLAN_JWT_KEY` 不变；这两个密钥都不要提交到仓库。船务的 `QC_SYSTEM_API_URL` 默认指向同一 Compose 网络内的 `qc-plan-api:5188`。
+
 正式字段映射与船务系统管理员联调时确认；当前接口已经覆盖合同号、客户 PO、货号三种常用匹配方式。
 
 ## 总 QC 系统入口（待对接协议）

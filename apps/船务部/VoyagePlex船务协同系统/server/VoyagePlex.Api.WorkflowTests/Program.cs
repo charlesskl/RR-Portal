@@ -3,6 +3,12 @@ using VoyagePlex.Api.Entities;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
+if (MailboxDateRules.ReceivedDate("2026-09-17T15:59:00+00:00") != "2026-09-17" ||
+    MailboxDateRules.ReceivedDate("2026-09-17T16:00:00+00:00") != "2026-09-18" ||
+    MailboxDateRules.ReceivedDate("2026-09-18T00:30:00+08:00") != "2026-09-18")
+    throw new InvalidOperationException("邮箱邮件未按北京时间收件日期归类");
+Console.WriteLine("Mailbox received-date tests passed.");
+
 var allowed = new[]
 {
     ("PendingReview", "PendingShipment"),

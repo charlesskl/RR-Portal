@@ -10,6 +10,7 @@ public sealed class ImportBatch
     public int ParsedCount { get; set; }
     public int FailedCount { get; set; }
     public string ParserVersion { get; set; } = string.Empty;
+    public string MailReceivedDate { get; set; } = string.Empty;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public List<ImportEmailItem> EmailItems { get; set; } = [];
 }

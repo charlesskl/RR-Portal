@@ -5,6 +5,13 @@ namespace VoyagePlex.Api.Services;
 
 public sealed class EmailParserClient(HttpClient httpClient)
 {
+    public async Task<ParserResponse> PollMailboxAsync(long afterUid, CancellationToken cancellationToken)
+    {
+        using var response = await httpClient.GetAsync($"/v1/mailbox/poll?after_uid={afterUid}", cancellationToken);
+        return new ParserResponse((int)response.StatusCode,
+            response.Content.Headers.ContentType?.ToString() ?? "application/json",
+            await response.Content.ReadAsStringAsync(cancellationToken));
+    }
     public async Task<ParserResponse> ParseBatchAsync(
         IReadOnlyList<IFormFile> files,
         CancellationToken cancellationToken)
@@ -22,22 +29,6 @@ public sealed class EmailParserClient(HttpClient httpClient)
         var body = await response.Content.ReadAsStringAsync(cancellationToken);
         var contentType = response.Content.Headers.ContentType?.ToString() ?? "application/json";
         return new ParserResponse((int)response.StatusCode, contentType, body);
-    }
-
-    public async Task<ParserResponse> ParseSpreadsheetBatchAsync(
-        IReadOnlyList<IFormFile> files, CancellationToken cancellationToken)
-    {
-        using var form = new MultipartFormDataContent();
-        foreach (var file in files)
-        {
-            var content = new StreamContent(file.OpenReadStream());
-            content.Headers.ContentType = new MediaTypeHeaderValue(file.ContentType ?? "application/octet-stream");
-            form.Add(content, "files", file.FileName);
-        }
-        using var response = await httpClient.PostAsync("/v1/spreadsheet-batches/parse", form, cancellationToken);
-        return new ParserResponse((int)response.StatusCode,
-            response.Content.Headers.ContentType?.ToString() ?? "application/json",
-            await response.Content.ReadAsStringAsync(cancellationToken));
     }
 
     public async Task<ParserResponse> ParseInspectionMappingAsync(

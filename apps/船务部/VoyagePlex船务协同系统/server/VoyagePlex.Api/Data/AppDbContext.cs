@@ -8,6 +8,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<ShipmentTask> ShipmentTasks => Set<ShipmentTask>();
     public DbSet<ImportBatch> ImportBatches => Set<ImportBatch>();
     public DbSet<ImportEmailItem> ImportEmailItems => Set<ImportEmailItem>();
+    public DbSet<MailSyncState> MailSyncStates => Set<MailSyncState>();
     public DbSet<InspectionMapping> InspectionMappings => Set<InspectionMapping>();
     public DbSet<ProductInfo> ProductInfos => Set<ProductInfo>();
     public DbSet<ProductNameMapping> ProductNameMappings => Set<ProductNameMapping>();

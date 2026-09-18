@@ -3,6 +3,7 @@ import uuid
 import re
 import os
 import json
+from io import BytesIO
 from datetime import datetime
 from urllib.parse import quote
 from pathlib import Path
@@ -17,9 +18,34 @@ from .spreadsheets import parse_business_spreadsheet
 from .shipment_export import build_completed_shipment_summary_workbook, build_inventory_adjustment_workbook, build_shipment_workbook
 from .inventory_writeback import build_inventory_writeback
 from .destination_country import infer_destination_country
+from .mailbox import fetch_mailbox
 
 PARSER_VERSION = "voyageplex-rules-0.1.2+destination-country"
 app = FastAPI(title="VoyagePlex Email Parser", version=PARSER_VERSION)
+
+
+@app.get("/v1/mailbox/poll")
+async def poll_mailbox(after_uid: int = 0):
+    if after_uid < 0:
+        return Response(content='{"error":"after_uid 无效"}', status_code=400, media_type="application/json")
+    try:
+        mailbox = fetch_mailbox(after_uid)
+        if not mailbox["configured"]:
+            return {"configured": False, "items": []}
+        uploads = [UploadFile(file=BytesIO(entry["raw"]), filename=f'mail-{entry["uid"]}.eml')
+                   for entry in mailbox["messages"] if entry["raw"]]
+        parsed = await parse_email_batch(uploads) if uploads else {"items": []}
+        parsed_by_uid = {int(item["filename"][5:-4]): item for item in parsed["items"]}
+        items = []
+        for entry in mailbox["messages"]:
+            item = parsed_by_uid.get(entry["uid"], {"status": "failed", "error": entry["error"]})
+            items.append({**item, "mailbox_uid": entry["uid"],
+                          "mailbox_received_at": entry["received_at"]})
+        return {"configured": True, "address": mailbox["address"],
+                "uid_validity": mailbox["uid_validity"], "items": items}
+    except Exception:
+        return Response(content='{"error":"邮箱连接或读取失败，请检查账号、授权码和网络"}',
+                        status_code=502, media_type="application/json")
 
 
 def build_warehouse_groups(parsed_attachments: list[dict]) -> list[dict]:
@@ -334,29 +360,6 @@ async def parse_email_batch(files: list[UploadFile] = File(...)):
         "failed": sum(x["status"] == "failed" for x in results),
         "items": results,
     }
-
-
-@app.post("/v1/spreadsheet-batches/parse")
-async def parse_spreadsheet_batch(files: list[UploadFile] = File(...)):
-    results = []
-    with tempfile.TemporaryDirectory(prefix="voyageplex-sheets-") as root:
-        for index, upload in enumerate(files):
-            item = {"index": index, "filename": upload.filename or f"sheet-{index}.xlsx"}
-            try:
-                suffix = Path(item["filename"]).suffix.lower()
-                if suffix not in (".xlsx", ".xlsm", ".xls", ".csv"):
-                    raise ValueError("仅支持 xlsx、xls、csv 表格")
-                data = await upload.read()
-                path = Path(root) / f"{index}{suffix}"
-                path.write_bytes(data)
-                parsed = parse_business_spreadsheet(path, item["filename"])
-                item.update({"status": "parsed", **parsed})
-            except Exception as exc:
-                item.update({"status": "failed", "error": str(exc), "rows": [], "warnings": []})
-            results.append(item)
-    return {"parser_version": PARSER_VERSION, "total": len(results),
-            "parsed": sum(item["status"] == "parsed" for item in results),
-            "failed": sum(item["status"] == "failed" for item in results), "items": results}
 
 
 def _mapping_text(value) -> str:

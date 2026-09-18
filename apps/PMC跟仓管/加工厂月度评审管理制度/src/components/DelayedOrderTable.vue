@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import type { buildDelayedSections } from '../utils/delayedOrders'
+import { delayedHeaders } from '../utils/delayedReportFormat'
 import { paginateDeliveryReport } from '../utils/deliveryReportPagination'
 const props = defineProps<{ section: ReturnType<typeof buildDelayedSections>[number]; regionName: string }>()
 const page = ref(1)
 watch(() => props.section, () => { page.value = 1 })
 const paged = computed(() => paginateDeliveryReport(props.section.rows, page.value, 100))
-const currency = computed(() => props.section.pricingMode === 'hunan-rmb-tax' ? '人民币含税' : props.section.pricingMode === 'rmb-tax' ? '不含税RMB' : '港币不含税$')
-const headers = computed(() => ['范围', '下单PMC', '加工厂', '货号', '订单号', '加工类别', '物料名称', '数量', '下单时间', '下单交货时间', '实际交货时间', '延迟时间', '订单总单数', '延期单数', '占比', '延期平均天数', `核价工价(${currency.value})`, `外发工价(${currency.value})`, '占比', '备注'])
+const headers = computed(() => delayedHeaders(props.section.pricingMode))
 const subtotalQuantities = computed(() => {
   const map = new Map<string, number | null | undefined>()
   let last = ''

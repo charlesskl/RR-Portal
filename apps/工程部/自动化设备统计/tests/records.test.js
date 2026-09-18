@@ -116,4 +116,32 @@ test('record edits and deletions persist and adjust only the linked equipment', 
     assert.equal(result.data.equipment.find(e => e.id === 1).manualPrice, .214);
   });
 
+  await t.test('batch production is atomic, persists each date and updates totals once', async () => {
+    const before = (await request('state')).data;
+    const equipment = before.equipment.find(e => e.id === 1);
+    const body = { department: equipment.factory, workshop: equipment.workshop, equipment: equipment.name, entries: [{ date: '2026-09-17', production: 100 }, { date: '2026-09-18', production: 250 }] };
+    const file = path.join(directory, 'data.json');
+    const snapshot = fs.readFileSync(file, 'utf8');
+    for (const entries of [[], [body.entries[0], { date: '2026-09-18', production: -1 }], [body.entries[0], body.entries[0]], [{ date: '2026-02-30', production: 10 }]]) {
+      assert.equal((await request('records', 'POST', { ...body, entries })).status, 400);
+      assert.equal(fs.readFileSync(file, 'utf8'), snapshot);
+    }
+    assert.equal((await request('records', 'POST', { ...body, equipment: '不存在' })).status, 404);
+    assert.equal(fs.readFileSync(file, 'utf8'), snapshot);
+    const result = await request('records', 'POST', body);
+    assert.equal(result.status, 201);
+    assert.equal(result.data.records.length, before.records.length + 2);
+    const added = result.data.records.filter(r => !before.records.some(old => old.id === r.id));
+    assert.equal(new Set(added.map(r=>r.id)).size, 2);
+    assert.equal(added.find(r=>r.date==='2026-09-17').production,100);
+    assert.equal(added.find(r=>r.date==='2026-09-18').production,250);
+    const updated = result.data.equipment.find(e=>e.id===1);
+    near(updated.orders,equipment.orders + .035);
+    near(updated.saved,equipment.saved + 350 * equipment.unitSave / 10000);
+    near(updated.balance,equipment.balance + 350 * equipment.unitSave / 10000);
+    await close(); await start();
+    assert.deepEqual((await request('state')).data,result.data);
+    assert.equal((await request('records', 'POST', { ...body, entries: undefined, date: '2026-09-16', production: 5 })).status,201);
+  });
+
 });

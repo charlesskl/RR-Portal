@@ -1,6 +1,7 @@
+import ProductionDays from "./ProductionDays";
 import RecordSummary from "./RecordSummary";
 import { summarizeRecords } from "./record-summary";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 type Equipment = {
   id: number;
@@ -157,24 +158,32 @@ export default function Home() {
       .catch((e) => alert(String(e)));
   }
 
-  function submitEntry(formData: FormData) {
-    run(
-      api("records", "POST", {
-        date: String(formData.get("date")),
-        department: String(formData.get("department")),
-        workshop: String(formData.get("workshop")),
-        equipment: String(formData.get("equipment")),
-        line: String(formData.get("line") || ""),
-        production: Number(formData.get("production")) || 0,
+  const [entrySaving, setEntrySaving] = useState(false);
+  const entryPending = useRef(false);
+  const [entryError, setEntryError] = useState("");
+  const [entryVersion, setEntryVersion] = useState(0);
+  async function submitEntry(formData: FormData) {
+    if (entryPending.current) return;
+    const dates = formData.getAll("date").map(String);
+    const quantities = formData.getAll("production").map(Number);
+    if (!dates.length || new Set(dates).size !== dates.length) {
+      setEntryError("请为每行选择不同的生产日期，同一天的产量请合并填写。"); return;
+    }
+    entryPending.current = true; setEntrySaving(true); setEntryError("");
+    try {
+      setState(await api("records", "POST", {
+        department: String(formData.get("department")), workshop: String(formData.get("workshop")),
+        equipment: String(formData.get("equipment")), line: String(formData.get("line") || ""),
         note: String(formData.get("note") || ""),
-      }),
-      () => {
-        setShowEntry(false);
-        setActiveView("history");
-      },
-    );
+        entries: dates.map((date, index) => ({ date, production: quantities[index] })),
+      }));
+      setEntryVersion(value => value + 1);
+      setShowEntry(false); setActiveView("history");
+      setRecordNotice(`已保存 ${dates.length} 个日期的生产数据。`);
+    } catch (error) {
+      setEntryError(error instanceof Error ? error.message : "提交失败，请重试。");
+    } finally { entryPending.current = false; setEntrySaving(false); }
   }
-
   function submitUser(formData: FormData) {
     const password = String(formData.get("password") || "");
     const confirmPassword = String(formData.get("confirmPassword") || "");
@@ -715,7 +724,7 @@ export default function Home() {
               </div>
             </div>
             <div className="entry-layout">
-              <form className="entry-panel" action={submitEntry}>
+              <form className="entry-panel" key={entryVersion} onSubmit={(event) => { event.preventDefault(); void submitEntry(new FormData(event.currentTarget)); }} onReset={(event) => { event.preventDefault(); setEntryVersion(value => value + 1); setEntryError(""); }}>
                 <div className="entry-section">
                   <span>01</span>
                   <div>
@@ -762,15 +771,7 @@ export default function Home() {
                   </select>
                 </label>
                 <div className="form-grid">
-                  <label>
-                    生产日期
-                    <input
-                      name="date"
-                      type="date"
-                      defaultValue={todayStr()}
-                      required
-                    />
-                  </label>
+
                   <label>
                     开机线 / 机台
                     <input name="line" placeholder="例：2号机" />
@@ -780,19 +781,11 @@ export default function Home() {
                   <span>02</span>
                   <div>
                     <h3>填写产量</h3>
-                    <p>填写当日实际完成的合格生产数</p>
+                    <p>按日期填写实际完成的合格生产数</p>
                   </div>
                 </div>
-                <label>
-                  今日生产数量（个）
-                  <input
-                    name="production"
-                    type="number"
-                    min="1"
-                    placeholder="请输入实际产量"
-                    required
-                  />
-                </label>
+                <ProductionDays key={entryVersion} today={todayStr()} disabled={entrySaving} />
+              {entryError && <p role="alert" className="form-error">{entryError}</p>}
                 <label>
                   备注
                   <textarea
@@ -801,9 +794,9 @@ export default function Home() {
                   />
                 </label>
                 <div className="form-submit">
-                  <button type="reset">重置</button>
-                  <button className="primary" type="submit">
-                    提交生产数据
+                  <button type="reset" disabled={entrySaving}>重置</button>
+                  <button className="primary" type="submit" disabled={entrySaving}>
+                    {entrySaving ? "提交中…" : "提交生产数据"}
                   </button>
                 </div>
               </form>
@@ -993,7 +986,7 @@ export default function Home() {
           >
             <form
               className="entry-modal"
-              action={submitEntry}
+              key={entryVersion} onSubmit={(event) => { event.preventDefault(); void submitEntry(new FormData(event.currentTarget)); }} onReset={(event) => { event.preventDefault(); setEntryVersion(value => value + 1); setEntryError(""); }}
               onMouseDown={(e) => e.stopPropagation()}
             >
               <div className="modal-head">
@@ -1044,30 +1037,14 @@ export default function Home() {
                 </select>
               </label>
               <div className="form-grid">
-                <label>
-                  生产日期
-                  <input
-                    name="date"
-                    type="date"
-                    defaultValue={todayStr()}
-                    required
-                  />
-                </label>
+
                 <label>
                   开机线 / 机台
                   <input name="line" placeholder="例：2号机" />
                 </label>
               </div>
-              <label>
-                今日生产数量（个）
-                <input
-                  name="production"
-                  type="number"
-                  min="1"
-                  placeholder="请输入实际产量"
-                  required
-                />
-              </label>
+              <ProductionDays key={entryVersion} today={todayStr()} disabled={entrySaving} />
+              {entryError && <p role="alert" className="form-error">{entryError}</p>}
               <label>
                 备注
                 <textarea
@@ -1083,8 +1060,8 @@ export default function Home() {
                 <button type="button" onClick={() => setShowEntry(false)}>
                   取消
                 </button>
-                <button className="primary" type="submit">
-                  确认提交
+                <button className="primary" type="submit" disabled={entrySaving}>
+                  {entrySaving ? "提交中…" : "确认提交"}
                 </button>
               </div>
             </form>

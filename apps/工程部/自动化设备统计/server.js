@@ -172,21 +172,33 @@ app.put('/api/equipment/:id', (req, res) => {
 // 录入生产数据：追加记录并重算设备累计
 app.post('/api/records', (req, res) => {
   const b = req.body || {};
-  const production = Number(b.production) || 0;
-  if (!b.equipment || !production) return res.status(400).json({ error: '缺少必填字段' });
-  const data = loadData();
-  const eq = data.equipment.find(e => e.factory === b.department && e.workshop === b.workshop && e.name === b.equipment);
-  if (eq) {
-    eq.orders += production / 10000;
-    eq.saved += production * eq.unitSave / 10000;
-    eq.balance += production * eq.unitSave / 10000;
-    eq.update = todayLabel();
+  const entries = b.entries === undefined ? [{ date: b.date || new Date().toISOString().slice(0, 10), production: b.production }] : b.entries;
+  if (!Array.isArray(entries) || !entries.length || entries.length > 366) return res.status(400).json({ error: '请填写 1 至 366 行日期和产量' });
+  const dates = new Set();
+  for (const entry of entries) {
+    if (!entry || typeof entry.date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(entry.date) ||
+        !Number.isFinite(Date.parse(entry.date)) || new Date(entry.date).toISOString().slice(0, 10) !== entry.date ||
+        !Number.isSafeInteger(Number(entry.production)) || Number(entry.production) <= 0 || dates.has(entry.date)) {
+      return res.status(400).json({ error: '每行须填写有效且不重复的日期，以及大于 0 的整数产量' });
+    }
+    dates.add(entry.date);
   }
-  data.records.unshift({
-    id: data.nextId++, date: b.date || new Date().toISOString().slice(0, 10),
-    factory: b.department, workshop: b.workshop, equipment: b.equipment,
-    line: b.line || '未填写', production, operator: '当前负责人', note: b.note || '日常产量上报',
-  });
+  const production = entries.reduce((sum, entry) => sum + Number(entry.production), 0);
+  if (!Number.isSafeInteger(production)) return res.status(400).json({ error: '合计产量超出有效范围' });
+  const data = structuredClone(loadData());
+  const eq = data.equipment.find(e => e.factory === b.department && e.workshop === b.workshop && e.name === b.equipment);
+  if (!eq) return res.status(404).json({ error: '请选择有效的设备' });
+  eq.orders += production / 10000;
+  eq.saved += production * eq.unitSave / 10000;
+  eq.balance += production * eq.unitSave / 10000;
+  eq.update = todayLabel();
+  const additions = entries.map(entry => ({
+    id: data.nextId++, date: entry.date,
+    factory: eq.factory, workshop: eq.workshop, equipment: eq.name,
+    line: String(b.line || '未填写'), production: Number(entry.production), operator: '当前负责人', note: String(b.note || '日常产量上报'),
+  }));
+  data.records.unshift(...additions);
+  data.records.sort((a, b) => b.date.localeCompare(a.date));
   saveData(data);
   res.status(201).json(publicState(data));
 });

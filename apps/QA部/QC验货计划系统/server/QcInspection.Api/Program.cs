@@ -95,6 +95,9 @@ using (var scope = app.Services.CreateScope())
         );
         CREATE UNIQUE INDEX IF NOT EXISTS IX_InspectionRecords_Fingerprint ON InspectionRecords (Fingerprint);
         CREATE INDEX IF NOT EXISTS IX_InspectionRecords_Site_InspectionDate ON InspectionRecords (Site, InspectionDate);
+        CREATE INDEX IF NOT EXISTS IX_InspectionRecords_ContractNumber_ItemNumber_Date ON InspectionRecords (ContractNumber, ItemNumber, InspectionDate DESC, Id DESC);
+        CREATE INDEX IF NOT EXISTS IX_InspectionRecords_CustomerPo_ItemNumber_Date ON InspectionRecords (CustomerPo, ItemNumber, InspectionDate DESC, Id DESC);
+        CREATE INDEX IF NOT EXISTS IX_InspectionRecords_ItemNumber_Date ON InspectionRecords (ItemNumber, InspectionDate DESC, Id DESC);
         CREATE TABLE IF NOT EXISTS ZuruScheduleRecords (
             Id INTEGER NOT NULL CONSTRAINT PK_ZuruScheduleRecords PRIMARY KEY AUTOINCREMENT,
             BusinessKey TEXT NOT NULL, Customer TEXT NOT NULL, Country TEXT NOT NULL, PoNumber TEXT NOT NULL,
@@ -218,6 +221,71 @@ app.MapGet("/api/integrations/shipping/results", async (HttpRequest request, str
             value.InternalResult, value.ThirdPartyResult, value.HoldRejectReason, value.WorkflowStatus })
         .ToListAsync(ct);
     return Results.Ok(new { total, page = number, pageSize = 100, totalPages = Math.Max(1, (total + 99) / 100), items });
+});
+// Resolve one shipping task with one HTTP request; the existing single-result endpoint remains available.
+app.MapPost("/api/integrations/shipping/results/batch", async (HttpRequest request,
+    ShippingBatchRequest payload, AppDbContext db, CancellationToken ct) =>
+{
+    const int maxShippingBatchItems = 500;
+    const int maxLookupValueLength = 100;
+    var configuredKey = builder.Configuration["QC_SHIPPING_API_KEY"];
+    var suppliedKey = request.Headers["X-QC-API-Key"].ToString();
+    if (suppliedKey.Length == 0)
+    {
+        var authorization = request.Headers.Authorization.ToString();
+        if (authorization.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+            suppliedKey = authorization[7..].Trim();
+    }
+    if (string.IsNullOrWhiteSpace(configuredKey) || configuredKey.Length < 32)
+        return Results.Problem("船务查询接口尚未配置", statusCode: 503);
+    if (suppliedKey.Length != configuredKey.Length ||
+        !CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(suppliedKey), Encoding.UTF8.GetBytes(configuredKey)))
+        return Results.Unauthorized();
+    if (payload.Items is null || payload.Items.Length is < 1 or > maxShippingBatchItems)
+        return Results.BadRequest(new { error = "货物明细数量须为 1 至 500 条" });
+    if (payload.Items.Any(item => item is null ||
+        (item.ContractNumber?.Length ?? 0) > maxLookupValueLength ||
+        (item.CustomerPo?.Length ?? 0) > maxLookupValueLength ||
+        (item.ItemNumber?.Length ?? 0) > maxLookupValueLength))
+        return Results.BadRequest(new { error = "合同号、客户PO或货号格式无效" });
+
+    request.HttpContext.Response.Headers.CacheControl = "no-store";
+    var cache = new Dictionary<(string ContractNumber, string CustomerPo, string ItemNumber), (int Total, object? Latest)>();
+    var results = new List<object>(payload.Items.Length);
+    for (var index = 0; index < payload.Items.Length; index++)
+    {
+        var item = payload.Items[index]!;
+        var contractNumber = item.ContractNumber?.Trim() ?? "";
+        var customerPo = item.CustomerPo?.Trim() ?? "";
+        var itemNumber = item.ItemNumber?.Trim() ?? "";
+        var key = (contractNumber, customerPo, itemNumber);
+        if (!cache.TryGetValue(key, out var match))
+        {
+            if (contractNumber.Length == 0 && customerPo.Length == 0 && itemNumber.Length == 0)
+            {
+                match = (0, null);
+            }
+            else
+            {
+                var records = db.InspectionRecords.AsNoTracking().Where(value =>
+                    value.WorkflowStatus == "已完成" || value.WorkflowStatus == "HOLD" ||
+                    value.WorkflowStatus == "REJ" || value.WorkflowStatus == "待复检" || value.WorkflowStatus == "不用验");
+                if (contractNumber.Length > 0) records = records.Where(value => value.ContractNumber == contractNumber);
+                if (customerPo.Length > 0) records = records.Where(value => value.CustomerPo == customerPo);
+                if (itemNumber.Length > 0) records = records.Where(value => value.ItemNumber == itemNumber);
+                var total = await records.CountAsync(ct);
+                var latest = await records.OrderByDescending(value => value.InspectionDate).ThenByDescending(value => value.Id)
+                    .Select(value => new { value.PlanId, value.Site, value.InspectionDate, value.Customer,
+                        value.ContractNumber, value.CustomerPo, value.ItemNumber, value.ProductName,
+                        value.InternalResult, value.ThirdPartyResult, value.HoldRejectReason, value.WorkflowStatus })
+                    .FirstOrDefaultAsync(ct);
+                match = (total, latest);
+            }
+            cache[key] = match;
+        }
+        results.Add(new { itemIndex = index, total = match.Total, latest = match.Latest });
+    }
+    return Results.Ok(new { results });
 });
 app.MapGet("/api/public/results", async (string? q, string? site, int? page, AppDbContext db, CancellationToken ct) =>
 {
@@ -1123,6 +1191,8 @@ public sealed record ScheduleImportConfirmRequest(string[]? SelectedKeys, string
 public sealed record InspectionResultRequest(string? InternalResult, string? ThirdPartyResult, string? HoldRejectReason, string? Note);
 public sealed record ApprovalReviewRequest(bool Approved, string? Comment);
 public sealed record WorkshopMappingRequest(string Workshop, string Supervisor);
+public sealed record ShippingBatchRequest(ShippingLookupItem?[]? Items);
+public sealed record ShippingLookupItem(string? ContractNumber, string? CustomerPo, string? ItemNumber);
 public sealed record InspectionWriteRequest(string Site, DateTime? InspectionDate, string? InspectionLocation,
     string? InspectionParty, string? ThirdPartyOrganization, string? Customer, string? ContractNumber,
     string? CustomerPo, string? ItemNumber, string? ProductName, decimal? Quantity, decimal? Cartons,

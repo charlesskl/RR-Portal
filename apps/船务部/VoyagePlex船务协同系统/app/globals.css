@@ -282,6 +282,11 @@ main { min-width: 0; }
 .shipment-notes.editable label span { display:block; margin-bottom:7px; font-size:14px; font-weight:650; }
 .shipment-notes.editable textarea { width:100%; min-height:68px; padding:9px 10px; border:1px solid #dfe1e7; border-radius:7px; resize:vertical; font:inherit; font-size:13px; }
 .qc-placeholder { display:flex; align-items:center; justify-content:space-between; gap:14px; padding-left:20px; border-left:1px solid var(--line); }
+.qc-result-content { min-width:0; }
+.qc-result-content small { display:block; margin-top:4px; color:var(--muted); font-size:12px; }
+.qc-result-row { display:flex; flex-direction:column; gap:3px; padding:7px 0; border-top:1px solid var(--line); font-size:13px; line-height:1.5; }
+.qc-result-row strong { color:var(--text); }
+.qc-result-row span { color:#555861; overflow-wrap:anywhere; }
 .qc-placeholder button,.shipment-items.editable .panel-title button { display:inline-flex; align-items:center; gap:6px; white-space:nowrap; }
 .qc-placeholder .ghost-button { background:#fff3f2; border-color:#efb8b3; color:#c53f36; font-weight:750; }
 .qc-placeholder .ghost-button:hover { background:#ffe5e2; border-color:#e5968f; color:#ad3028; }
@@ -295,7 +300,14 @@ main { min-width: 0; }
 .shipment-items.editable .panel-title .ghost-button:hover { background:#e1ddff; border-color:#aea5f2; color:#4d40b2; }
 .shipment-items.editable .shipment-item-table > div { grid-template-columns:.6fr .85fr .7fr 1.2fr .55fr .6fr repeat(5,.55fr) .8fr repeat(4,.62fr) .85fr .4fr; min-width:2100px; align-items:center; }
 .shipment-items.editable.warehouse-view .shipment-item-table > div { grid-template-columns:.6fr .85fr .7fr 1.2fr .55fr repeat(5,.55fr) .8fr repeat(3,.62fr) 1fr 1fr 1.35fr .62fr .85fr .4fr; min-width:2420px; }
-.shipment-items.editable.shipping-view .shipment-item-table > div { grid-template-columns:.6fr .85fr .7fr 1.2fr .55fr repeat(5,.55fr) .8fr repeat(4,.62fr) .62fr .85fr .4fr; min-width:2020px; }
+.shipment-items.editable.shipping-view .shipment-item-table > div { grid-template-columns:.6fr .85fr .8fr .7fr 1.2fr .55fr .6fr repeat(5,.55fr) repeat(3,.62fr) .85fr .4fr 1.6fr; min-width:2320px; }
+.shipment-items.editable.warehouse-view .shipment-item-table > div { grid-template-columns:.6fr .85fr .8fr .7fr 1.2fr .55fr .6fr repeat(5,.55fr) repeat(3,.62fr) 1fr 1fr 1.35fr .85fr .4fr 1.6fr; min-width:2740px; }
+.qc-item-result { display:flex; align-items:center; min-width:0; padding:5px 7px; border-radius:4px; font-weight:700; }
+.qc-item-result.pass { color:#277443; background:#eef9f1; }
+.qc-item-result.failed { color:#bf3c36; background:#fff3f2; }
+.qc-item-result.exempt { color:#57708b; background:#edf4fa; }
+.qc-item-result.pending { color:#8a6815; background:#fff8e8; }
+.qc-item-result.missing { color:var(--muted); background:#f7f7fa; }
 .shipment-items.editable .shipment-item-table input { width:100%; min-width:0; height:30px; padding:0 6px; border:1px solid #dfe1e7; border-radius:4px; font-size:13px; }
 .shipment-items.editable .shipment-item-table input:disabled { border-style:dashed; background:#f7f7fa; color:var(--muted); }
 .shipment-items.editable .shipment-item-table input.inventory-match-input:not(:disabled) { background:#eef9f1; border-color:#bfe2c9; color:#277443; font-weight:650; }
@@ -402,8 +414,8 @@ main { min-width: 0; }
 .local-inventory-files > div,.review-items > div,.sheet-review-table > div { min-height:52px; }
 .shipment-item-table > div { min-height:48px; }
 .shipment-items.editable .shipment-item-table input { height:38px; }
-.shipment-items.editable.shipping-view .shipment-item-table > div { min-width:2520px; }
-.shipment-items.editable.warehouse-view .shipment-item-table > div { min-width:2920px; }
+.shipment-items.editable.shipping-view .shipment-item-table > div { min-width:2820px; }
+.shipment-items.editable.warehouse-view .shipment-item-table > div { min-width:3220px; }
 .shipment-table { overflow-x:auto; }
 .shipment-table .data-row { min-width:1250px; }
 .shipment-fields input { height:44px; }

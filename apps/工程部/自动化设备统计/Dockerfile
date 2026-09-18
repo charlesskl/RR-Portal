@@ -28,6 +28,8 @@ COPY package*.json ./
 RUN npm ci --omit=dev
 
 COPY server.js ./
+# server.js 启动时 require 历史单价迁移脚本及其数据文件，缺一不可（否则会 MODULE_NOT_FOUND 崩溃）
+COPY cost-price-import.js cost-prices-from-workbook.json ./
 COPY --from=builder /app/dist ./dist
 
 RUN mkdir -p data && chown -R appuser:appgroup /app

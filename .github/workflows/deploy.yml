@@ -163,6 +163,12 @@ jobs:
             sync_qc_plan_secret QC_PLAN_SHIPPING_API_KEY '${{ secrets.QC_PLAN_SHIPPING_API_KEY }}'
             sync_qc_plan_secret QC_PLAN_ADMIN_PASSWORD '${{ secrets.QC_PLAN_ADMIN_PASSWORD }}'
 
+            # VoyagePlex 邮箱自动收信：网易企业邮箱地址 + 客户端授权码。
+            # secret 为空则跳过（保持 .env 现状），绝不写入空值覆盖已有配置。
+            sync_qc_plan_secret VOYAGEPLEX_MAIL_ADDRESS '${{ secrets.VOYAGEPLEX_MAIL_ADDRESS }}'
+            sync_qc_plan_secret VOYAGEPLEX_MAIL_AUTH_CODE '${{ secrets.VOYAGEPLEX_MAIL_AUTH_CODE }}'
+            sync_qc_plan_secret VOYAGEPLEX_MAIL_FOLDER '${{ secrets.VOYAGEPLEX_MAIL_FOLDER }}'
+
             echo "=== Script version check ==="
             git fetch origin main
             DEPLOY_SCRIPT_RUNNER=$(mktemp)

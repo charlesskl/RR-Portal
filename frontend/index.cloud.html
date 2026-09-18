@@ -391,6 +391,12 @@
                 <span class="plugin-name">玩具质量管理系统</span>
               </div>
             </div>
+            <div class="plugin-item">
+              <div class="plugin-info">
+                <div class="plugin-dot gray" id="qcPlanDot"></div>
+                <span class="plugin-name">QC 验货计划系统</span>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -1233,6 +1239,27 @@
         <a href="/toyqms/" target="_blank" rel="noopener" class="btn btn-primary">打开系统</a>
       </div>
     </div>
+
+    <div class="detail-plugin-card">
+      <div class="detail-plugin-left">
+        <div class="detail-plugin-icon" style="background:linear-gradient(135deg,#2e9eff,#0c79d8);">&#9989;</div>
+        <div>
+          <div class="detail-plugin-name">QC 验货计划系统</div>
+          <div class="detail-plugin-desc">业务排期导入、验货计划、验货结果与系统设置一体化管理，验货结果与船务 VoyagePlex 批量对接</div>
+          <div class="feature-grid">
+            <div class="feature-tag">&#128229; 排期导入</div>
+            <div class="feature-tag">&#128197; 验货计划</div>
+            <div class="feature-tag">&#9989; 验货结果</div>
+            <div class="feature-tag">&#128674; 船务对接</div>
+            <div class="feature-tag">&#9881; 系统设置</div>
+          </div>
+        </div>
+      </div>
+      <div class="detail-plugin-right">
+        <div class="detail-plugin-status"><div class="plugin-dot gray" id="qcPlanDetailDot"></div> 检查中...</div>
+        <a href="/qc-plan" target="_blank" rel="noopener" class="btn btn-primary">打开系统</a>
+      </div>
+    </div>
   </div>
 
 </div>
@@ -1290,6 +1317,7 @@ async function checkHealth() {
       { name: 'indoShipping', url: '/indo-shipping/health', dot: 'indoShippingDot', detailDot: 'indoShippingDetailDot' },
       { name: 'qaWeekly', url: '/qa-weekly-report/api/health', dot: 'qaWeeklyDot', detailDot: 'qaWeeklyDetailDot' },
       { name: 'qcReport', url: '/qc-report/health', dot: 'qcReportDot', detailDot: 'qcReportDetailDot' },
+      { name: 'qcPlan', url: '/qc-plan/api/health', dot: 'qcPlanDot', detailDot: 'qcPlanDetailDot' },
     ];
     var healthy = 0;
     var total = checks.length;

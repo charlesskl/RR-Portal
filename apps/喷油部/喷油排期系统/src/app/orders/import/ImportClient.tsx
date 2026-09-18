@@ -2,7 +2,7 @@
 // PDF 订单导入 · 核对界面（客户端）
 // 流程：上传 PDF → 调 /api/orders/import-pdf 出草稿 → 文员核对(绿/红行手工选) → 确认入库。
 // 货号产品库找不到 → 走「待补产品」（只登记订单头）。
-import { useRef, useState } from "react";
+import { useRef, useState, type DragEvent } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { apiFetch } from "@/lib/apiFetch";
@@ -12,6 +12,7 @@ type DraftLine = { pdfItemName: string; totalQty: number; mergedRows: number; ma
 type Draft = {
   head: DraftHead; productFound: boolean; productId: number | null;
   lines: DraftLine[]; pdfToken: string; availableItems: string[];
+  products?: { productNo: string; isMa: boolean; productFound: boolean; lines: DraftLine[]; availableItems: string[] }[];
 };
 
 const SKIP = "__skip__";
@@ -19,6 +20,9 @@ const SKIP = "__skip__";
 export default function ImportClient() {
   const router = useRouter();
   const fileRef = useRef<HTMLInputElement>(null);
+  const dragDepth = useRef(0);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [dragging, setDragging] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -26,24 +30,51 @@ export default function ImportClient() {
   const [fileName, setFileName] = useState("");
   // 红行的人工处理：行下标 → 选中的产品库子件名，或 SKIP（跳过本行）
   const [picks, setPicks] = useState<Record<number, string>>({});
+  const [newNames, setNewNames] = useState<Record<number, string>>({});
+  const [multiPicks, setMultiPicks] = useState<Record<string, string>>({});
+  const [multiNames, setMultiNames] = useState<Record<string, string>>({});
   const [savePricing, setSavePricing] = useState(false);
 
+  function chooseFile(file: File | null) {
+    setErr("");
+    if (!file) { setSelectedFile(null); return; }
+    if (!/\.(pdf|png|jpe?g)$/i.test(file.name)) {
+      setSelectedFile(null); setErr("仅支持 PDF、PNG、JPG 图片"); return;
+    }
+    if (file.size > 15 * 1024 * 1024) {
+      setSelectedFile(null); setErr("文件不能超过 15 MB"); return;
+    }
+    setSelectedFile(file);
+  }
+
+  function onDropFile(event: DragEvent<HTMLDivElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    dragDepth.current = 0;
+    setDragging(false);
+    if (busy) return;
+    chooseFile(event.dataTransfer.files[0] ?? null);
+  }
+
   async function doUpload() {
-    const f = fileRef.current?.files?.[0];
-    if (!f) { setErr("请先选择 PDF 文件"); return; }
+    const f = selectedFile;
+    if (!f) { setErr("请先选择或拖入 PDF、PNG、JPG 文件"); return; }
     setBusy(true); setErr("");
     const fd = new FormData(); fd.append("file", f);
     try {
       const res = await apiFetch("/api/orders/import-pdf", { method: "POST", body: fd });
       if (!res.ok) { setErr((await res.json().catch(() => ({})))?.error ?? "解析失败，请确认是委托加工合同 PDF"); return; }
       const d: Draft = await res.json();
-      setDraft(d); setHead(d.head); setPicks({}); setSavePricing(!d.productFound); setFileName(f.name);
+      setDraft(d); setHead(d.head); setPicks({}); setNewNames({}); setMultiPicks({}); setMultiNames({});
+      setSavePricing(d.products?.some(product => !product.productFound) ?? !d.productFound);
+      setFileName(f.name);
     } catch { setErr("网络错误，请确认后端服务是否运行后重试"); }
     finally { setBusy(false); }
   }
 
   // 某行最终确定的产品库子件名：绿行=其匹配名；红行=人工选的名（SKIP/未选返回 null）
   function resolved(i: number, ln: DraftLine): string | null {
+    if (draft && !draft.productFound) return (newNames[i] ?? ln.matchedItemName ?? ln.pdfItemName).trim() || null;
     if (ln.matchedItemName) return ln.matchedItemName;
     const p = picks[i];
     return !p || p === SKIP ? null : p;
@@ -71,25 +102,84 @@ export default function ImportClient() {
     finally { setBusy(false); }
   }
 
+  async function doConfirmMulti() {
+    if (!draft?.products || !head) return;
+    if (!head.externalOrderNo.trim() || !head.orderDate) { setErr("请核对订单编号和下单日期"); return; }
+    const products = draft.products.map((product, productIndex) => ({
+      productNo: product.productNo, isMa: product.isMa,
+      lines: product.lines.map((line, lineIndex) => ({
+        matchedItemName: product.productFound
+          ? (line.matchedItemName || multiPicks[`${productIndex}-${lineIndex}`] || "")
+          : (multiNames[`${productIndex}-${lineIndex}`] ?? line.matchedItemName ?? ""),
+        totalQty: line.totalQty, unitPrice: line.unitPrice,
+      })).filter(line => line.matchedItemName && line.matchedItemName !== SKIP),
+    }));
+    if (products.some(product => product.lines.length === 0)) { setErr("每个款号至少保留一条部件明细"); return; }
+    setBusy(true); setErr("");
+    try {
+      const res = await apiFetch("/api/orders/import-confirm-multi", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ head, pdfToken: draft.pdfToken, savePricing, products }),
+      });
+      if (!res.ok) { setErr((await res.json().catch(() => ({})))?.error ?? "导入失败"); return; }
+      router.push("/orders"); router.refresh();
+    } catch { setErr("网络错误，请稍后重试"); }
+    finally { setBusy(false); }
+  }
+
   // ── 阶段一：上传 ──
   if (!draft || !head) {
     return (
-      <Card title="📥 PDF 订单导入" sub="上传委托加工合同 PDF，系统解析后供核对，确认无误再入库">
-        <div className="border-2 border-dashed border-[#d6e3dd] rounded-card bg-[#fbfdfc] p-10 text-center">
+      <Card title="📥 订单导入" sub="上传委托加工合同 PDF 或图片，系统解析后供核对，确认无误再入库">
+        <div
+          onDragEnter={event => { event.preventDefault(); dragDepth.current += 1; setDragging(true); }}
+          onDragOver={event => { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; }}
+          onDragLeave={event => { event.preventDefault(); dragDepth.current -= 1; if (dragDepth.current <= 0) { dragDepth.current = 0; setDragging(false); } }}
+          onDrop={onDropFile}
+          className={`border-2 border-dashed rounded-card p-10 text-center transition-colors ${dragging ? "border-mint-400 bg-mint-50" : "border-[#d6e3dd] bg-[#fbfdfc]"}`}
+        >
           <div className="text-4xl">📄</div>
-          <p className="text-text-secondary text-sm my-3">选择委托加工合同 PDF（要求一张合同一个货号）</p>
-          <input ref={fileRef} type="file" accept=".pdf" className="block mx-auto text-sm" />
+          <p className="text-text-secondary text-sm my-3">将 PDF 或清晰图片拖到这里，或选择文件；识别后请逐项核对</p>
+          <input ref={fileRef} type="file" accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg" className="block mx-auto text-sm" onChange={event => chooseFile(event.target.files?.[0] ?? null)} />
+          {selectedFile && <p className="mt-3 text-sm text-mint-700">已选择：{selectedFile.name}</p>}
           {err && <p className="text-rose text-sm mt-3">{err}</p>}
           <div className="flex justify-center gap-3 mt-5">
             <Link href="/orders" className="text-sm border border-app-border rounded-btn px-4 py-2 text-text-secondary">取消</Link>
-            <button disabled={busy} onClick={doUpload}
+            <button disabled={busy || !selectedFile} onClick={doUpload}
               className="bg-[#fbbf24] hover:brightness-105 text-white px-5 py-2 rounded-btn text-sm font-semibold shadow-[0_2px_8px_rgba(251,191,36,0.30)] disabled:opacity-50">
-              {busy ? "解析中…" : "＋ 解析 PDF"}
+              {busy ? "解析中…" : "＋ 开始解析"}
             </button>
           </div>
         </div>
       </Card>
     );
+  }
+
+  if (draft.products && draft.products.length > 1) {
+    const hasUnknown = draft.products.some(product => !product.productFound);
+    const hasUnmatched = draft.products.some((product, pi) => product.lines.some((line, li) =>
+      product.productFound ? (!line.matchedItemName && !multiPicks[`${pi}-${li}`])
+        : !(multiNames[`${pi}-${li}`] ?? line.matchedItemName ?? "").trim()));
+    return <Card title="📥 多款号订单导入 · 核对" sub={`同一合同号 ${head.externalOrderNo} · ${draft.products.length} 个款号`}>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-5">
+        <Fld label="订单编号"><input className={inp} value={head.externalOrderNo} onChange={e => setHead({ ...head, externalOrderNo: e.target.value })} /></Fld>
+        <Fld label="下单日期"><input className={inp} type="date" value={head.orderDate} onChange={e => setHead({ ...head, orderDate: e.target.value })} /></Fld>
+        <Fld label="交货日期"><input className={inp} type="date" value={head.deliveryDate ?? ""} onChange={e => setHead({ ...head, deliveryDate: e.target.value || null })} /></Fld>
+      </div>
+      {draft.products.map((product, pi) => <div key={product.productNo} className="border border-app-border rounded-btn mb-4 overflow-hidden">
+        <div className="bg-[#f0fdf4] px-4 py-3 font-semibold">款号 {product.productNo}{product.isMa ? " · MA" : ""}
+          {!product.productFound && <span className="ml-3 text-rose text-sm">产品库无此款号，将建立草稿核价</span>}</div>
+        <table className="w-full text-sm"><thead><tr className="text-left text-text-secondary"><th className="px-3 py-2">PDF 部件</th><th className="px-3 py-2">产品库匹配</th><th className="px-3 py-2 text-right">数量</th><th className="px-3 py-2 text-right">单价</th></tr></thead>
+          <tbody>{product.lines.map((line, li) => <tr key={li} className="border-t border-app-border-light"><td className="px-3 py-2">{line.pdfItemName}</td>
+            <td className="px-3 py-2">{!product.productFound ? <input className={inp} aria-label={`${product.productNo} 部件名`} value={multiNames[`${pi}-${li}`] ?? line.matchedItemName ?? ""} onChange={e => setMultiNames(current => ({ ...current, [`${pi}-${li}`]: e.target.value }))} /> : line.matchedItemName ?? <select className={inp} value={multiPicks[`${pi}-${li}`] ?? ""} onChange={e => setMultiPicks(current => ({ ...current, [`${pi}-${li}`]: e.target.value }))}>
+              <option value="">选择对应部件…</option>{product.availableItems.map(item => <option key={item} value={item}>{item}</option>)}<option value={SKIP}>跳过本行</option>
+            </select>}</td><td className="px-3 py-2 text-right">{line.totalQty.toLocaleString("zh-CN")}</td><td className="px-3 py-2 text-right">{line.unitPrice.toFixed(4)}</td></tr>)}</tbody></table>
+      </div>)}
+      <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={savePricing} disabled={hasUnknown} onChange={e => setSavePricing(e.target.checked)} />{hasUnknown ? "建立缺失款号的草稿核价" : "把订单单价更新到产品核价库"}</label>
+      {err && <p className="text-rose text-sm mt-3">{err}</p>}
+      <div className="flex justify-end gap-3 mt-5"><button className="border border-app-border rounded-btn px-4 py-2 text-sm" onClick={() => { setDraft(null); setErr(""); }}>重新上传</button>
+        <button className="bg-mint-400 text-white rounded-btn px-5 py-2 text-sm disabled:opacity-50" disabled={busy || hasUnmatched || !head.externalOrderNo || !head.orderDate || (hasUnknown && !savePricing)} onClick={doConfirmMulti}>{busy ? "保存中…" : "确认导入一张订单"}</button></div>
+    </Card>;
   }
 
   // ── 阶段二：核对 ──
@@ -154,7 +244,7 @@ export default function ImportClient() {
                       <span className={skipped ? "line-through text-text-tertiary" : ""}>{ln.pdfItemName}</span>
                     </td>
                     <td className="px-3 py-2.5">
-                      {!isRed ? (
+                      {!draft.productFound ? <input className={inp} aria-label={`部件 ${i + 1} 名称`} value={newNames[i] ?? ln.matchedItemName ?? ln.pdfItemName} onChange={e => setNewNames(current => ({ ...current, [i]: e.target.value }))} /> : !isRed ? (
                         <span className="text-mint-700 font-medium inline-flex items-center gap-1.5"><span className="text-mint-400">✓</span>{ln.matchedItemName}</span>
                       ) : (
                         <span className="inline-flex items-center gap-2">

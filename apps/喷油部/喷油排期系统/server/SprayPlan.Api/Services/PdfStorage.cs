@@ -18,9 +18,11 @@ public class PdfStorage
     /// <summary>
     /// 将 PDF 流保存到暂存目录，返回 token（格式：32位hex + .pdf）。
     /// </summary>
-    public async Task<string> SaveAsync(Stream pdf)
+    public async Task<string> SaveAsync(Stream pdf, string extension = ".pdf")
     {
-        var token = Guid.NewGuid().ToString("N") + ".pdf";
+        if (extension is not (".pdf" or ".png" or ".jpg" or ".jpeg"))
+            throw new ArgumentException("不支持的文件格式", nameof(extension));
+        var token = Guid.NewGuid().ToString("N") + extension;
         using var fs = File.Create(Path.Combine(_dir, token));
         await pdf.CopyToAsync(fs);
         return token;

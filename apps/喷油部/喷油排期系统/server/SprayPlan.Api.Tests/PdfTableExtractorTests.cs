@@ -7,6 +7,42 @@ namespace SprayPlan.Api.Tests;
 // fixture 路径：bin 输出目录下的 Fixtures/（由 .csproj 拷贝）。
 public class PdfTableExtractorTests
 {
+    [Fact]
+    public void OcrImageSample_WhenProvided_RecognizesTwoProductQuantities()
+    {
+        var path = Environment.GetEnvironmentVariable("SPRAYPLAN_SAMPLE_IMAGE");
+        if (string.IsNullOrWhiteSpace(path)) return;
+        using var source = File.OpenRead(path);
+        var words = OrderImageOcr.Extract(source, Path.GetExtension(path));
+        var parsed = OcrOrderParser.Extract(words);
+        Assert.Equal("CMC2600139", parsed.Head.ExternalOrderNo);
+        Assert.Equal(new DateTime(2026, 9, 18), parsed.Head.OrderDate);
+        Assert.Equal(new DateTime(2026, 9, 28), parsed.Head.DeliveryDate);
+        Assert.Collection(parsed.Rows,
+            first => { Assert.Equal("15792", first.ProductNo); Assert.Equal(417, first.Qty); },
+            second => { Assert.Equal("15783", second.ProductNo); Assert.Equal(21000, second.Qty); });
+    }
+    [Fact]
+    public void ExtractProductRows_HuadengTwoProductsRemainSeparate()
+    {
+        static PdfWord W(string text, double x, double y, double width = 35) =>
+            new(1, text, x, x + width, y - 10, y);
+        var words = new List<PdfWord>
+        {
+            W("款号", 49, 628, 20), W("物料名称", 122, 628, 40), W("用料名称", 199, 628, 40),
+            W("颜色", 256, 628, 20), W("单重G", 289, 628, 25), W("总重KG", 321, 628, 30),
+            W("数量", 366, 628, 20), W("单价", 412, 628, 20), W("金额(HK$)", 456, 628, 45), W("备注", 530, 628, 20),
+            W("15792总MA", 30, 606, 55), W("W-06-04/20MM尾扣", 100, 606, 85),
+            W("(印喷件)", 120, 600, 40), W("417", 365, 606, 28),
+            W("15783总MA", 30, 575, 55), W("E-11-04/35MM眼扣", 100, 575, 85),
+            W("(印喷件)", 120, 569, 40), W("21,000", 365, 575, 30), W("HK$0.14", 405, 575, 35),
+            W("TOTAL：", 410, 500),
+        };
+        var rows = PdfTableExtractor.ExtractProductRows(words);
+        Assert.Collection(rows,
+            first => { Assert.Equal("15792", first.ProductNo); Assert.Equal(417, first.Qty); Assert.True(first.IsMa); },
+            second => { Assert.Equal("15783", second.ProductNo); Assert.Equal(21000, second.Qty); Assert.Equal(0.14, second.UnitPrice, 6); });
+    }
     // 读取 fixture JSON → List<PdfWord>
     private static IReadOnlyList<PdfWord> LoadWords(string fileName)
     {

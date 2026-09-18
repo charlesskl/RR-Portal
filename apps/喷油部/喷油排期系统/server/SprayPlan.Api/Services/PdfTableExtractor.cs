@@ -258,6 +258,50 @@ public static class PdfTableExtractor
         return result;
     }
 
+    /// <summary>
+    /// 按数量列逐行读取款号与部件。合同中款号格可以跨行；空白行沿用上一行款号，
+    /// 但遇到新的款号时必须切换，避免把多个产品合并到订单里的首个产品。
+    /// </summary>
+    public static List<ProductRawLine> ExtractProductRows(IReadOnlyList<PdfWord> words)
+    {
+        var result = new List<ProductRawLine>();
+        string currentProductNo = "";
+        bool currentIsMa = false;
+        foreach (var pageNo in words.Select(w => w.Page).Distinct().OrderBy(x => x))
+        {
+            var pageWords = words.Where(w => w.Page == pageNo).ToList();
+            var geo = BuildGeometry(pageWords);
+            if (geo is null) continue;
+            var body = pageWords.Where(w => InBody(w, geo)).ToList();
+            var anchors = body
+                .Where(w => geo.ColumnOf(w.CenterX) == geo.IdxQty && ParseQty(w.Text) is not null)
+                .OrderByDescending(w => w.Top).ToList();
+            for (var i = 0; i < anchors.Count; i++)
+            {
+                var anchor = anchors[i];
+                var hiTop = i == 0 ? geo.HeaderTop : (anchors[i - 1].Top + anchor.Top) / 2.0;
+                var loTop = i == anchors.Count - 1
+                    ? (geo.FooterTop > 0 ? geo.FooterTop : double.MinValue)
+                    : (anchor.Top + anchors[i + 1].Top) / 2.0;
+                List<PdfWord> Cell(int column) => OrderCellWords(body.Where(w =>
+                    geo.ColumnOf(w.CenterX) == column && w.Top <= hiTop && w.Top > loTop));
+                var productCell = string.Concat(Cell(geo.IdxProductNo).Select(w => w.Text));
+                var parsed = ParseProductNoAndMa(productCell);
+                if (parsed.ProductNo.Length > 0)
+                {
+                    currentProductNo = parsed.ProductNo;
+                    currentIsMa = parsed.IsMa;
+                }
+                var name = string.Concat(Cell(geo.IdxItemName).Select(w => w.Text)).Trim();
+                if (currentProductNo.Length == 0 || name.Length == 0) continue;
+                var price = ParsePrice(string.Concat(Cell(geo.IdxUnitPrice).Select(w => w.Text)));
+                result.Add(new ProductRawLine(currentProductNo, currentIsMa, name,
+                    ParseQty(anchor.Text)!.Value, price));
+            }
+        }
+        return result;
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // ExtractProductNoCell：款号格内容（整单级）。取所有页款号列、表体内的词拼接。
     // ─────────────────────────────────────────────────────────────────────────

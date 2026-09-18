@@ -10,6 +10,39 @@ namespace SprayPlan.Api.Tests.Orders;
 
 public class OrderPricingAndProcessScheduleTests : IAsyncLifetime
 {
+    [Fact]
+    public async Task MultiProductOrder_SchedulesEachProductAgainstItsOwnPricingRules()
+    {
+        var imported = await _client.PostAsJsonAsync("/api/orders/import-confirm-multi", new
+        {
+            head = new { externalOrderNo = "MULTI-1", orderDate = "2026-09-18", deliveryDate = "2026-09-28", productNo = "15792", isMa = true },
+            pdfToken = "multi.pdf", savePricing = true,
+            products = new object[]
+            {
+                new { productNo = "15792", isMa = true, lines = new[] { new { matchedItemName = "尾扣", totalQty = 417, unitPrice = 0.0 } } },
+                new { productNo = "15783", isMa = true, lines = new[] { new { matchedItemName = "眼扣", totalQty = 21000, unitPrice = 0.14 } } },
+            },
+        });
+        imported.EnsureSuccessStatusCode();
+        var orderId = (await imported.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetInt32();
+        var detail = await _client.GetFromJsonAsync<JsonElement>($"/api/orders/{orderId}");
+        Assert.Equal(2, detail.GetProperty("products").GetArrayLength());
+        var parts = detail.GetProperty("partQtys").EnumerateArray().ToArray();
+        var schedule = await _client.PostAsJsonAsync($"/api/orders/{orderId}/process-schedule", new
+        {
+            rows = parts.Select(part => new { partQtyId = part.GetProperty("id").GetInt32(), startDate = "2026-09-20", craft = "移印", dailyTarget = 1000, laborPrice = 0.08 }),
+        });
+        Assert.Equal(HttpStatusCode.Created, schedule.StatusCode);
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var products = await db.Products.Include(product => product.Parts).Where(product => product.ProductNo == "15792" || product.ProductNo == "15783").ToListAsync();
+        Assert.Equal(2, products.Count);
+        Assert.All(products, product => Assert.Equal(0.08, product.Parts.Single(part => part.Craft == "移印").LaborPrice, 6));
+        var plans = await db.ProductionPlans.Where(plan => plan.OrderId == orderId).ToListAsync();
+        Assert.Equal(22, plans.Count);
+        Assert.Equal(2, plans.Select(plan => plan.SourcePartId).Distinct().Count());
+    }
+
     private ApiFactory _factory = null!;
     private HttpClient _client = null!;
 

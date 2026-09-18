@@ -57,17 +57,18 @@ public static class ScheduleCalc
         int CraftPasses, int PartGroupId);
 
     // 把订单展开成「可排部位清单」：每个订单部位一项，需求=该部位订单数量，产能属性来自产品库部位。
-    public static List<SchedulablePart> ExpandOrderParts(Order order)
+    public static List<SchedulablePart> ExpandOrderParts(Order order, IReadOnlyList<ProductPart>? allParts = null)
     {
+        var availableParts = allParts ?? order.Product?.Parts ?? [];
         var outl = new List<SchedulablePart>();
         var processedGroups = new HashSet<int>();
         foreach (var pq in order.PartQtys)
         {
-            var part = order.Product?.Parts.FirstOrDefault(p => p.Id == pq.SourcePartId);
+            var part = availableParts.FirstOrDefault(p => p.Id == pq.SourcePartId);
             if (part is null) continue;
             var groupId = part.PartGroupId > 0 ? part.PartGroupId : part.Id;
             if (!processedGroups.Add(groupId)) continue;
-            var group = PartProcessRules.SameLogicalPart(order.Product!.Parts, part);
+            var group = PartProcessRules.SameLogicalPart(availableParts.Where(p => p.ProductId == part.ProductId), part);
             var passes = group.Select(p => p.CraftPasses).FirstOrDefault(v => v > 0);
             foreach (var process in group)
                 outl.Add(new SchedulablePart(0, "", process.Id, process.PartName,

@@ -40,6 +40,9 @@ RUN dotnet publish SprayPlan.Api.csproj -c Release --no-restore -o /publish
 FROM mcr.microsoft.com/dotnet/aspnet:8.0-bookworm-slim AS runtime
 
 WORKDIR /app
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends poppler-utils tesseract-ocr tesseract-ocr-chi-sim tesseract-ocr-eng \
+    && rm -rf /var/lib/apt/lists/*
 ENV NODE_ENV=production
 ENV NEXT_PUBLIC_BASE_PATH=/sprayplan
 ENV DOTNET_API_URL=http://127.0.0.1:5080

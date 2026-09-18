@@ -15,18 +15,21 @@ export type OrderDetailDto = {
   id: number; externalOrderNo: string; productId: number | null; orderDate: string; deliveryDate: string | null;
   status: string; isMA: boolean; isUrgent: boolean; remark: string | null; createdBy: string;
   product: OrderProductDto | null; partQtys: PartQtyDto[]; qtyEditable: boolean;
+  products?: OrderProductDto[];
 };
 const pad = (n: number) => String(n).padStart(2, "0");
 const ymd = (value: string | null) => { if (!value) return ""; const d = new Date(value); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
 
 export default function OrderDetailEditor({ order, isAdmin }: { order: OrderDetailDto; isAdmin: boolean }) {
   const router = useRouter();
+  const products = order.products?.length ? order.products : (order.product ? [order.product] : []);
   const product = order.product!;
   const laborFor = (partQtyId: number, craft: string) => {
     const orderedPart = order.partQtys.find(part => part.id === partQtyId);
-    const anchor = product.parts.find(part => part.id === orderedPart?.sourcePartId);
+    const partProduct = products.find(item => item.parts.some(part => part.id === orderedPart?.sourcePartId)) ?? product;
+    const anchor = partProduct.parts.find(part => part.id === orderedPart?.sourcePartId);
     if (!anchor) return 0;
-    const samePart = product.parts.find(part =>
+    const samePart = partProduct.parts.find(part =>
       part.partName.trim() === anchor.partName.trim() && part.craft.trim() === craft);
     return samePart?.laborPrice ?? (anchor.craft.trim() === craft || !anchor.craft.trim() ? anchor.laborPrice : 0);
   };
@@ -100,7 +103,14 @@ export default function OrderDetailEditor({ order, isAdmin }: { order: OrderDeta
     setScheduling(false);
   }
   const updateProcessRow = (index: number, patch: Partial<ProcessRow>) => setProcessRows(rows => rows.map((row, i) => i === index ? { ...row, ...patch } : row));
-  const addProcessRow = (partQtyId: number) => setProcessRows(rows => [...rows, { partQtyId, startDate: "", craft: "手喷", laborPrice: laborFor(partQtyId, "手喷"), dailyTarget: 0 }]);
+  const addProcessRow = (partQtyId: number) => setProcessRows(rows => {
+    const lastSamePartIndex = rows.reduce((last, row, index) => row.partQtyId === partQtyId ? index : last, -1);
+    const next = [...rows];
+    next.splice(lastSamePartIndex + 1, 0, {
+      partQtyId, startDate: "", craft: "手喷", laborPrice: laborFor(partQtyId, "手喷"), dailyTarget: 0,
+    });
+    return next;
+  });
 
   return <div className="max-w-6xl">
     <div className="flex justify-between items-center mb-6">
@@ -108,7 +118,7 @@ export default function OrderDetailEditor({ order, isAdmin }: { order: OrderDeta
       <div className="flex items-center gap-3">{isAdmin && <button onClick={openRevokeActuals} className="text-amber-700 border border-amber-400 rounded-btn px-3 py-1 text-sm">撤销实绩</button>}{canUnschedule && <button onClick={unschedule} className="text-rose border border-rose/40 rounded-btn px-3 py-1 text-sm">撤销排期</button>}<span className={`px-3 py-1 rounded-full text-sm ${STATUS_META[order.status]?.cls ?? "bg-gray-100"}`}>{STATUS_META[order.status]?.text ?? order.status}</span></div>
     </div>
     <div className="bg-white p-5 rounded-card border border-app-border mb-6 grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
-      <Field label="款号（不可修改）"><div className="font-mono py-2">{product.productNo}</div></Field>
+      <Field label="款号（不可修改）"><div className="font-mono py-2">{products.map(item => item.productNo).join("、") || product.productNo}</div></Field>
       <Field label="下单日期"><input className={input} type="date" value={orderDate} onChange={e => setOrderDate(e.target.value)} /></Field>
       <Field label="交货日期"><input className={input} type="date" value={deliveryDate} onChange={e => setDeliveryDate(e.target.value)} /></Field>
       <div className="md:col-span-2"><Field label="备注"><input className={input} value={remark} onChange={e => setRemark(e.target.value)} /></Field></div>

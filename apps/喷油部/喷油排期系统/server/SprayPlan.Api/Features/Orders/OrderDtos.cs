@@ -30,4 +30,5 @@ public record OrderPartQtyDto(int Id, string PartName, int? SourcePartId, int Qt
 public record OrderProductPartDto(int Id, string PartName, string Craft, int PartGroupId, double UnitCost, double LaborPrice, double PaintCost, double QuotedPrice);
 public record OrderProductDto(int Id, string ProductNo, List<OrderProductPartDto> Parts);
 // QtyEditable：数量是否可改 = 已接单(received) 且 无未删排期计划。前端据此决定明细数量是否可编辑，与后端 PATCH 校验同口径。
-public record OrderDetail(int Id, string ExternalOrderNo, int? ProductId, DateTime OrderDate, DateTime? DeliveryDate, string Status, bool IsMA, bool IsUrgent, string? Remark, string CreatedBy, OrderProductDto? Product, List<OrderPartQtyDto> PartQtys, bool QtyEditable);
+public record OrderDetail(int Id, string ExternalOrderNo, int? ProductId, DateTime OrderDate, DateTime? DeliveryDate, string Status, bool IsMA, bool IsUrgent, string? Remark, string CreatedBy, OrderProductDto? Product, List<OrderPartQtyDto> PartQtys, bool QtyEditable,
+    List<OrderProductDto>? Products = null);

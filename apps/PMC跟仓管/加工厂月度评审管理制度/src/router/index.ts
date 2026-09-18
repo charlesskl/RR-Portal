@@ -20,6 +20,7 @@ const routes: RouteRecordRaw[] = [
   { path: '/factories/:id', component: () => import('../views/FactoryDetailView.vue') },
   { path: '/factories/:id/score/:month', component: () => import('../views/ScoreSheetView.vue') },
   { path: '/orders', component: () => import('../views/OrdersView.vue') },
+  { path: '/orders/region/:region/delayed', component: () => import('../views/DelayedOrdersView.vue') },
   { path: '/orders/new', component: () => import('../views/OrderFormView.vue') },
   { path: '/orders/dept/:craft', component: () => import('../views/DeptOrdersView.vue') },
   { path: '/orders/dept/:craft/new', component: () => import('../views/OrderFormView.vue') },

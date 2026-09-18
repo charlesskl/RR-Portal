@@ -141,7 +141,7 @@ async function importExcel(ev: Event) {
       <p v-if="exportError" role="alert" class="load-error">{{ exportError }}</p>
       <p v-if="exportingExcel" role="status" class="muted">{{ orders.loading ? `正在读取导出数据 ${orders.loadedCount}${orders.totalCount ? ` / ${orders.totalCount}` : ''} 条…` : '正在生成 Excel 文件，请稍候…' }}</p>
       <section v-for="b in regionBlocks" :key="b.region" class="region-block">
-        <h3 class="region-title">{{ b.name }}厂区</h3>
+        <div class="region-heading"><h3 class="region-title">{{ b.name }}厂区</h3><RouterLink class="delay-summary-link" :to="`/orders/region/${b.region}/delayed`">汇总延期订单</RouterLink></div>
         <div class="dept-grid">
           <RouterLink v-for="c in b.cards" :key="c.craft" class="dept-card" :to="deptHref(c.craft, b.region)">
             <span class="ico">{{ c.icon }}</span>
@@ -162,7 +162,10 @@ async function importExcel(ev: Event) {
 .load-error { color: #b91c1c; }
 .dept-export { height: 34px; padding: 0 .6rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); cursor: pointer; }
 .region-block { margin-top: 1.5rem; }
-.region-title { margin: 0 0 .8rem; font-size: 1.05rem; color: #1f2533; padding-left: .6rem; border-left: 4px solid var(--primary, #4f46e5); }
+.region-heading { display: flex; align-items: center; gap: 18px; margin-bottom: .8rem; flex-wrap: wrap; }
+.delay-summary-link { padding: 6px 12px; border: 1px solid var(--primary, #4f46e5); border-radius: 6px; color: var(--primary, #4f46e5); background: white; font-size: 14px; text-decoration: none; }
+.delay-summary-link:hover { background: var(--primary-soft, #eef0ff); }
+.region-title { margin: 0; font-size: 1.05rem; color: #1f2533; padding-left: .6rem; border-left: 4px solid var(--primary, #4f46e5); }
 .dept-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 1rem; }
 .dept-card {
   display: flex; align-items: center; gap: 1rem; text-decoration: none; color: var(--text);

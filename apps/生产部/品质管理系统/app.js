@@ -2785,10 +2785,12 @@ async function startOcr() {
   try {
     /* 图片预处理：放大2倍+灰度+对比度增强，提高识别准确率（不改变预览，只改变OCR输入）*/
     const ocrInput = await preprocessImageForOcr(_ocrImageFile);
+    /* Worker 内 importScripts 不识别相对路径，必须给绝对 URL */
+    const _ocrBase = location.href.replace(/[^/]*$/, '');
     const result = await Tesseract.recognize(ocrInput, 'chi_sim+eng', {
-      workerPath: 'vendor/tesseract/worker.min.js',
-      corePath: 'vendor/tesseract/core/tesseract-core-simd-lstm.wasm.js',
-      langPath: 'vendor/tesseract/lang',
+      workerPath: _ocrBase + 'vendor/tesseract/worker.min.js',
+      corePath: _ocrBase + 'vendor/tesseract/core/tesseract-core-simd-lstm.wasm.js',
+      langPath: _ocrBase + 'vendor/tesseract/lang',
       logger: () => {} /* 静默，不输出进度日志 */
     });
     const text = (result?.data?.text || '').trim();

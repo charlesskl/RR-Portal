@@ -25,7 +25,7 @@ vi.mock('vue-router', () => ({
   useRouter: () => ({ replace: vi.fn() }),
   RouterLink: { template: '<a><slot /></a>' },
 }))
-vi.mock('../src/stores/auth', () => ({ useAuthStore: () => ({ role: 'admin' }) }))
+vi.mock('../src/stores/auth', () => ({ useAuthStore: () => ({ role: 'admin', userId: 'admin-1' }) }))
 vi.mock('../src/utils/permissions', () => ({
   allowedCrafts: () => ['injection'], allowedRegions: () => ['dongguan'], canViewCraft: () => true,
 }))
@@ -55,12 +55,28 @@ describe('批量自动评分', () => {
     state.update.mockImplementation(async (id, data) => ({ ...records.find((record) => record.id === id), ...data }))
     const wrapper = mount(MonthlyScoringView)
     await flushPromises()
-    await wrapper.findAll('button').find((button) => button.text() === '自动计算本月评分')!.trigger('click')
+    await wrapper.findAll('button').find((button) => button.text() === '自动计算并提交本月评分')!.trigger('click')
     await flushPromises()
     expect(state.update.mock.calls.map(([id]) => id)).toEqual(['score-0', 'score-1'])
+    expect(state.update.mock.calls.every(([, data]) => data.status === 'submitted' && data.submitted_by === 'admin-1')).toBe(true)
     expect(state.update.mock.calls[0][1].score_items[0].score).toBe(0)
     expect(state.update.mock.calls[1][1].score_items[0].score).toBe(20)
-    expect(wrapper.text()).toContain('更新 2 家')
+    expect(wrapper.text()).toContain('已提交 2 家')
     wrapper.unmount()
   })
+  it('批量计算不覆盖已提交或已审批结果', async () => {
+    setActivePinia(createPinia())
+    state.update.mockClear()
+    records[0]!.status = 'submitted'
+    records[1]!.status = 'approved'
+    const wrapper = mount(MonthlyScoringView)
+    try {
+      await flushPromises()
+      await wrapper.findAll('button').find((button) => button.text() === '自动计算并提交本月评分')!.trigger('click')
+      await flushPromises()
+      expect(state.update).not.toHaveBeenCalled()
+      expect(wrapper.text()).toContain('跳过已提交/已审批 2 家')
+    } finally { records.forEach((record) => { record.status = 'draft' }); wrapper.unmount() }
+  })
+
 })

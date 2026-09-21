@@ -88,9 +88,10 @@ describe('评分详情缓存', () => {
     await flushPromises()
 
     expect(state.saveScore).toHaveBeenCalledWith('factory-1', '2026-08', {
+      status: 'submitted', submitted_by: 'admin-1',
       score_items: [expect.objectContaining({ template_id: 'delivery', score: 20 })],
     })
-    expect(wrapper.text()).toContain('已重新计算并保存，总分已同步')
+    expect(wrapper.text()).toContain('已自动计算并提交，总分已同步')
     expect(wrapper.text()).toContain('预估总分 20')
   })
 
@@ -108,4 +109,26 @@ describe('评分详情缓存', () => {
       wrapper.unmount()
     }
   })
+  it('已提交自动评分可人工修改，再提交；保存失败保留修改供重试', async () => {
+    cachedScore.status = 'submitted'
+    const wrapper = mount(ScoreSheetView)
+    try {
+      await flushPromises()
+      const input = wrapper.get('input[type="number"]')
+      expect(input.attributes('disabled')).toBeUndefined()
+      await input.setValue('12')
+      state.saveScore.mockRejectedValueOnce(new Error('网络错误'))
+      const submit = () => wrapper.findAll('button').find((b) => b.text() === '再次提交评分')!
+      await submit().trigger('click')
+      await flushPromises()
+      expect(wrapper.text()).toContain('网络错误')
+      expect((input.element as HTMLInputElement).value).toBe('12')
+      await submit().trigger('click')
+      await flushPromises()
+      expect(state.saveScore).toHaveBeenLastCalledWith('factory-1', '2026-08', expect.objectContaining({ status: 'submitted', score_items: [expect.objectContaining({ score: 12 })] }))
+      expect(cachedScore.score_items[0].score).toBe(18)
+      expect(state.getFullList).not.toHaveBeenCalled()
+    } finally { cachedScore.status = 'draft'; wrapper.unmount() }
+  })
+
 })

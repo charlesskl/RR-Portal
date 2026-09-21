@@ -10,6 +10,7 @@ import { CRAFT_LABELS, CRAFTS, REGION_LABELS, regionOf, type Craft, type Region 
 import { allowedCrafts, allowedRegions } from '../utils/permissions'
 import { computeFactoryStats, computeSiteStats, type FactoryStats } from '../utils/factoryStats'
 import { buildFactorySummaryWorkbook } from '../utils/factorySummaryExcel'
+import { factorySummaryGrades } from '../utils/factorySummaryGrades'
 import { matchesOrderDate, type OrderDateFilter } from '../utils/orderDateFilter'
 import type { Factory } from '../types/factory'
 import type { Order } from '../types/order'
@@ -101,10 +102,7 @@ function refreshSummaries() {
   for (const check of checks) {
     if (!latestCheckByFactory.has(check.factory)) latestCheckByFactory.set(check.factory, check)
   }
-  const gradeByFactory = new Map<string, string>()
-  for (const score of allMonthlyScores.value) {
-    if (!gradeByFactory.has(score.factory) && score.grade) gradeByFactory.set(score.factory, score.grade)
-  }
+  const gradeByFactory = factorySummaryGrades(allMonthlyScores.value, dateFilter.value)
 
   departments.value = visibleCrafts.value.map((craft) => {
     const craftFactories = targetFactories.value.filter((factory) => factory.craft === craft)

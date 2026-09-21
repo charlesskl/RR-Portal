@@ -12,6 +12,7 @@ import { computeFactoryStats, computeSiteStats, type FactoryStats } from '../uti
 import type { Factory } from '../types/factory'
 import type { Order } from '../types/order'
 import { buildFactorySummaryWorkbook } from '../utils/factorySummaryExcel'
+import { factorySummaryGrades } from '../utils/factorySummaryGrades'
 import { matchesOrderDate, type OrderDateFilter } from '../utils/orderDateFilter'
 
 const route = useRoute()
@@ -115,10 +116,7 @@ function refreshSummaries() {
   for (const check of checks) {
     if (!latestCheckByFactory.has(check.factory)) latestCheckByFactory.set(check.factory, check)
   }
-  const gradeByFactory = new Map<string, string>()
-  for (const score of allMonthlyScores.value) {
-    if (!gradeByFactory.has(score.factory) && score.grade) gradeByFactory.set(score.factory, score.grade)
-  }
+  const gradeByFactory = factorySummaryGrades(allMonthlyScores.value, dateFilter.value)
   const deptSiteStats = [...latestCheckByFactory.values()].map((check) => computeSiteStats([check]))
   totalStats.value = computeFactoryStats(orders, inspections)
   totalSiteScore.value = formatNumber(average(deptSiteStats.map((item) => item.siteScore)))

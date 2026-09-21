@@ -415,16 +415,21 @@ app.MapPost("/api/schedule-imports/preview", async (HttpRequest request, string 
         "Sky Castle" => "请上传 Sky Castle 验货安排表（需含“未来三周”Sheet）",
         _ => "没有识别到可导入的未完成产品订单",
     } });
+    var importToday = DateTime.Today;
+    var importWindowEnd = importToday.AddDays(21);
+    var outsideImportWindow = parsed.Rows.Count(row => row.PlannedInspectionDate is not null &&
+        !IsWithinScheduleImportWindow(row.PlannedInspectionDate, importToday));
+    var importRows = parsed.Rows.Where(row => IsWithinScheduleImportWindow(row.PlannedInspectionDate, importToday)).ToArray();
     var candidates = await db.InspectionRecords.AsNoTracking().ToListAsync(cancellationToken);
     var existing = new Dictionary<string, InspectionRecord>();
     var ambiguous = new HashSet<string>();
-    foreach (var row in parsed.Rows)
+    foreach (var row in importRows)
     {
         var current = MatchScheduleRecord(candidates, row, source, out var hasMultiple);
         if (hasMultiple) ambiguous.Add(row.BusinessKey);
         if (current is not null) existing[row.BusinessKey] = current;
     }
-    var preview = parsed.Rows.Select(row =>
+    var preview = importRows.Select(row =>
     {
         existing.TryGetValue(row.BusinessKey, out var current); var changes = current is null ? Array.Empty<string>() : ChangedFields(current, row);
         var issues = ambiguous.Contains(row.BusinessKey) ? row.Issues.Append("现有计划匹配不唯一，请人工核对").ToArray() : row.Issues;
@@ -441,6 +446,7 @@ app.MapPost("/api/schedule-imports/preview", async (HttpRequest request, string 
     if (duplicateSkipped > 0) importTips.Add($"文件内有 {duplicateSkipped} 条重复安排记录，已跳过，请核对订单和货号。");
     var ambiguousSkipped = ruleSkipped.Count(item => item.Row.Issues.Any(issue => issue.Contains("匹配不唯一")));
     if (ambiguousSkipped > 0) importTips.Add($"有 {ambiguousSkipped} 条记录与现有计划匹配不唯一，已跳过，请人工核对。");
+    if (outsideImportWindow > 0) importTips.Add($"有 {outsideImportWindow} 条计划验货期不在 {importToday:yyyy-MM-dd} 至 {importWindowEnd:yyyy-MM-dd}（未来3周）范围内，已跳过。");
     if (parsed.InvalidSkipped > 0) importTips.Add($"另有 {parsed.InvalidSkipped} 条无法识别的记录未进入预览。");
     var batch = new ScheduleImportBatch
     {
@@ -448,7 +454,7 @@ app.MapPost("/api/schedule-imports/preview", async (HttpRequest request, string 
         ParsedCount = preview.Length, NewCount = preview.Count(item => item.Kind == "新增"),
         ChangedCount = preview.Count(item => item.Kind == "变更"), UnchangedCount = preview.Count(item => item.Kind == "无变化"),
         PendingReviewCount = preview.Count(item => item.Kind == "待判断"),
-        CompletedSkippedCount = parsed.CompletedSkipped + preview.Count(item => item.Kind is "已有结果跳过" or "规则跳过"), InvalidSkippedCount = parsed.InvalidSkipped,
+        CompletedSkippedCount = parsed.CompletedSkipped + outsideImportWindow + preview.Count(item => item.Kind is "已有结果跳过" or "规则跳过"), InvalidSkippedCount = parsed.InvalidSkipped,
         PreviewJson = JsonSerializer.Serialize(preview),
     };
     db.ScheduleImportBatches.Add(batch); await db.SaveChangesAsync(cancellationToken);
@@ -486,6 +492,7 @@ app.MapPost("/api/schedule-imports/{id:long}/confirm", async (long id, ScheduleI
     var siteCounts = new Dictionary<string, (int New, int Changed)>();
     foreach (var item in items.Where(item => selected.Contains(item.Row.BusinessKey)))
     {
+        if (!IsWithinScheduleImportWindow(item.Row.PlannedInspectionDate, DateTime.Today)) continue;
         if (newlyAmbiguous.Contains(item.Row.BusinessKey)) continue;
         if (item.Row.Issues.Any(issue => issue.Contains("匹配不唯一") || issue.Contains("重复安排") || issue.Contains("无法核验字体颜色"))) continue;
         if (existing.TryGetValue(item.Row.BusinessKey, out var matched) && HasInspectionResult(matched)) continue;
@@ -751,6 +758,36 @@ app.MapPut("/api/inspections/{id:long}", async (long id, InspectionWriteRequest 
     return Results.Ok(record);
 }).RequireAuthorization("QcWrite");
 
+app.MapPost("/api/inspections/bulk-update", async (InspectionBulkUpdateRequest request, ClaimsPrincipal principal, AppDbContext db, CancellationToken cancellationToken) =>
+{
+    var items = request.Items ?? [];
+    if (items.Length == 0) return Results.BadRequest(new { error = "没有需要保存的修改" });
+    if (items.Length > 100) return Results.BadRequest(new { error = "单次最多保存100条验货计划" });
+    var ids = items.Select(item => item.Id).Distinct().ToArray();
+    if (ids.Length != items.Length) return Results.BadRequest(new { error = "提交内容包含重复的验货计划" });
+    var records = await db.InspectionRecords.Where(record => ids.Contains(record.Id)).ToDictionaryAsync(record => record.Id, cancellationToken);
+    if (records.Count != ids.Length) return Results.NotFound(new { error = "部分验货计划不存在或已删除，请刷新后重试" });
+    foreach (var item in items)
+    {
+        var record = records[item.Id]; var values = item.Values;
+        if (!CanAccessSite(principal, record.Site) || !CanAccessSite(principal, values.Site)) return Results.Forbid();
+        if (values.Site is not ("兴信" or "湖南" or "华登")) return Results.BadRequest(new { error = $"计划 {record.ItemNumber} 尚未选择有效厂区" });
+        if (values.InspectionDate is null) return Results.BadRequest(new { error = $"计划 {record.ItemNumber} 未填写验货日期" });
+        if (string.IsNullOrWhiteSpace(values.ItemNumber) && string.IsNullOrWhiteSpace(values.ContractNumber) && string.IsNullOrWhiteSpace(values.CustomerPo))
+            return Results.BadRequest(new { error = $"计划 {record.Id} 的货号、合同编号和客户PO至少填写一项" });
+        if (values.Quantity is < 0 || values.Cartons is < 0 || values.PackingQuantity is < 0)
+            return Results.BadRequest(new { error = $"计划 {record.ItemNumber} 的数量和箱数不能为负数" });
+        if (record.ImportedAt.ToUniversalTime() != item.ExpectedImportedAt.ToUniversalTime())
+            return Results.Conflict(new { error = $"计划 {record.ItemNumber} 已被其他人修改，请刷新后重新编辑" });
+        if (record.InternalResult != (values.InternalResult?.Trim() ?? "") || record.ThirdPartyResult != (values.ThirdPartyResult?.Trim() ?? "") ||
+            record.HoldRejectReason != (values.HoldRejectReason?.Trim() ?? "") || HasInspectionResult(record) && record.Note != (values.Note?.Trim() ?? ""))
+            return Results.BadRequest(new { error = $"计划 {record.ItemNumber} 的验货结果不能通过表格直接修改" });
+    }
+    foreach (var item in items) ApplyInspectionWrite(records[item.Id], item.Values, db);
+    await db.SaveChangesAsync(cancellationToken);
+    return Results.Ok(new { updated = items.Length });
+}).RequireAuthorization("QcWrite");
+
 app.MapPut("/api/inspections/{id:long}/result", async (long id, InspectionResultRequest request, ClaimsPrincipal principal, AppDbContext db, CancellationToken cancellationToken) =>
 {
     var record = await db.InspectionRecords.FirstOrDefaultAsync(value => value.Id == id, cancellationToken);
@@ -865,6 +902,22 @@ app.MapDelete("/api/inspections/{id:long}", async (long id, ClaimsPrincipal prin
     db.InspectionRecords.Remove(record);
     await db.SaveChangesAsync(cancellationToken);
     return Results.NoContent();
+}).RequireAuthorization("QcWrite");
+app.MapPost("/api/inspections/bulk-delete", async (InspectionBulkDeleteRequest request, ClaimsPrincipal principal, AppDbContext db, CancellationToken cancellationToken) =>
+{
+    var ids = (request.Ids ?? []).Distinct().ToArray();
+    if (ids.Length == 0) return Results.BadRequest(new { error = "请至少选择一条验货计划" });
+    if (ids.Length > 100) return Results.BadRequest(new { error = "单次最多删除100条验货计划" });
+    var records = await db.InspectionRecords.Where(value => ids.Contains(value.Id)).ToListAsync(cancellationToken);
+    if (records.Count != ids.Length) return Results.NotFound(new { error = "部分验货计划不存在或已被删除，请刷新后重试" });
+    if (records.Any(record => !CanAccessSite(principal, record.Site))) return Results.Forbid();
+    if (!principal.IsInRole("管理员") && !principal.IsInRole("Admin") && records.Any(HasInspectionResult))
+        return Results.Forbid();
+    if (await db.InspectionResultApprovals.AnyAsync(value => ids.Contains(value.InspectionRecordId) && value.Status == "待审批", cancellationToken))
+        return Results.Conflict(new { error = "所选计划中存在待审批结果，不能批量删除" });
+    db.InspectionRecords.RemoveRange(records);
+    await db.SaveChangesAsync(cancellationToken);
+    return Results.Ok(new { deleted = records.Count });
 }).RequireAuthorization("QcWrite");
 app.MapGet("/api/users", async (AppDbContext db, CancellationToken cancellationToken) =>
     Results.Ok(await db.Users.AsNoTracking().OrderBy(user => user.Id).Select(user => new
@@ -1130,6 +1183,13 @@ static string ResolveProductionSupervisor(AppDbContext db, string workshop, stri
         .Select(value => value.Supervisor).FirstOrDefault() ?? string.Empty;
 }
 
+static bool IsWithinScheduleImportWindow(DateTime? inspectionDate, DateTime today)
+{
+    if (inspectionDate is null) return true;
+    var date = inspectionDate.Value.Date;
+    return date >= today.Date && date <= today.Date.AddDays(21);
+}
+
 static string[] ChangedFields(InspectionRecord current, ZuruScheduleRow row)
 {
     var changes = new List<string>();
@@ -1189,6 +1249,9 @@ public sealed record PasswordResetRequest(string NewPassword);
 public sealed record ZuruPreviewItem(ZuruScheduleRow Row, string Kind, string[] Changes);
 public sealed record ScheduleImportConfirmRequest(string[]? SelectedKeys, string[]? SelectedPendingKeys);
 public sealed record InspectionResultRequest(string? InternalResult, string? ThirdPartyResult, string? HoldRejectReason, string? Note);
+public sealed record InspectionBulkDeleteRequest(long[]? Ids);
+public sealed record InspectionBulkUpdateItem(long Id, DateTime ExpectedImportedAt, InspectionWriteRequest Values);
+public sealed record InspectionBulkUpdateRequest(InspectionBulkUpdateItem[]? Items);
 public sealed record ApprovalReviewRequest(bool Approved, string? Comment);
 public sealed record WorkshopMappingRequest(string Workshop, string Supervisor);
 public sealed record ShippingBatchRequest(ShippingLookupItem?[]? Items);

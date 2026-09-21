@@ -309,6 +309,48 @@ function renderCompanySelector() {
       <a href="javascript:backToSites()" class="company-back" style="float:right">切换厂区/子公司</a></div>`;
 }
 
+/* ── 登录后切换厂区/子公司（头部徽章点击）── */
+let _swSite = null;
+let _swView = 'subs';
+function openCompanySwitch() {
+  const ov = document.getElementById('companySwitchOverlay');
+  if (!ov) return;
+  _swSite = getCompanyObj().site;
+  _swView = 'subs';   /* 默认直接展开当前厂区的子公司列表 */
+  renderCompanySwitch();
+  ov.classList.add('show');
+}
+function closeCompanySwitch() {
+  const ov = document.getElementById('companySwitchOverlay');
+  if (ov) ov.classList.remove('show');
+}
+function swBackToSites()           { _swView = 'sites'; renderCompanySwitch(); }
+function swSelectSite(siteId)      { _swSite = siteId;  _swView = 'subs'; renderCompanySwitch(); }
+function swPickCompany(id) {
+  if (id === getCompany()) { closeCompanySwitch(); return; }
+  pickCompany(id);   /* 换公司：落盘 + reload，bootstrap 拉新公司数据 */
+}
+function renderCompanySwitch() {
+  const box = document.getElementById('companySwitchBox');
+  if (!box) return;
+  if (_swView === 'sites') {
+    box.innerHTML =
+      `<div class="company-hint">选择厂区</div>` +
+      `<div class="company-cards">` + QC_SITES.map(s =>
+        _companyCardHtml({ name: s.name, onclick: `swSelectSite('${s.id}')` }, s.color,
+          companiesOf(s.id).length + ' 家子公司')
+      ).join('') + `</div>`;
+    return;
+  }
+  const site = getSiteObj(_swSite || getCompanyObj().site);
+  box.innerHTML =
+    `<div class="company-hint"><a href="javascript:swBackToSites()" class="company-back">‹ 厂区</a> ${site.name} · 选择子公司（切换后自动刷新，数据相互独立）</div>` +
+    `<div class="company-cards">` + companiesOf(site.id).map(c =>
+      _companyCardHtml({ name: c.name, onclick: `swPickCompany('${c.id}')` }, site.color,
+        c.id === getCompany() ? '当前公司' : '')
+    ).join('') + `</div>`;
+}
+
 /* ── 登录 ── */
 function login() {
   const unameEl = document.getElementById('loginUsername');
@@ -394,7 +436,7 @@ function _renderUserBadge() {
   const el = document.getElementById('userBadge');
   if (!el || !u) return;
   el.innerHTML =
-    `<span class="user-badge-company">${getSiteObj(getCompanyObj().site).name} · ${getCompanyName()}</span>` +
+    `<span class="user-badge-company" onclick="openCompanySwitch()" style="cursor:pointer" title="点击切换厂区/子公司">${getSiteObj(getCompanyObj().site).name} · ${getCompanyName()}</span>` +
     `<span class="user-badge-name">${u.name || u.username}</span>` +
     `<span class="user-badge-role">${ROLE_LABELS[u.role] || u.role}</span>` +
     `<button class="user-badge-logout" onclick="logout()">退出</button>`;

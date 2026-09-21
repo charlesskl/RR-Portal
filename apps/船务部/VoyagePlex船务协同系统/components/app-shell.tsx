@@ -410,7 +410,7 @@ function ImportCenter() {
   }, {})).sort(([left], [right]) => right.localeCompare(left));
 
   async function loadMailbox() {
-    const response = await fetch("/api/imports/email/mailbox", { cache: "no-store" });
+    const response = await apiFetch("/api/imports/email/mailbox", { cache: "no-store" });
     const result = await readJsonResponse(response);
     if (!response.ok) throw new Error(result.error || "读取邮箱同步状态失败");
     setMailboxBatches(result.batches || []);
@@ -429,7 +429,7 @@ function ImportCenter() {
         const query = new URLSearchParams({ page:String(readPage) });
         if (readSearch.trim()) query.set("q", readSearch.trim());
         if (readDate) query.set("date", readDate);
-        const response = await fetch(`/api/imports/email/mailbox/items?${query}`, {signal:controller.signal,cache:"no-store"});
+        const response = await apiFetch(`/api/imports/email/mailbox/items?${query}`, {signal:controller.signal,cache:"no-store"});
         const result = await readJsonResponse(response);
         if (!response.ok) throw new Error(result.error || "读取邮件明细失败");
         if (!controller.signal.aborted) setReadMail(result as ReadMailPage);
@@ -443,7 +443,7 @@ function ImportCenter() {
   async function syncMailbox() {
     setEmailLoading(true); setEmailError("");
     try {
-      const response = await fetch("/api/imports/email/mailbox/sync", { method: "POST" });
+      const response = await apiFetch("/api/imports/email/mailbox/sync", { method: "POST" });
       const result = await readJsonResponse(response);
       if (!response.ok) throw new Error(result.error || "邮箱同步失败");
       setMailboxStatus(result.configured ? `本次新增 ${result.imported} 封邮件` : "邮箱尚未配置，请联系管理员");
@@ -456,7 +456,7 @@ function ImportCenter() {
   async function openMailboxBatch(batchId: number, itemId?: number) {
     setEmailLoading(true); setEmailError("");
     try {
-      const response = await fetch(`/api/imports/email/${batchId}`);
+      const response = await apiFetch(`/api/imports/email/${batchId}`);
       const result = await readJsonResponse(response);
       if (!response.ok) throw new Error(result.error || "读取邮件批次失败");
       const items = (result.items || []).map((item: { id:number; resultJson:string; duplicateOfItemId?:number }) =>
@@ -481,7 +481,7 @@ function ImportCenter() {
     const data = new FormData();
     emailFiles.forEach(file => data.append("files", file));
     try {
-      const response = await fetch("/api/imports/email", { method: "POST", body: data });
+      const response = await apiFetch("/api/imports/email", { method: "POST", body: data });
       const result = await readJsonResponse(response);
       if (!response.ok) throw new Error(result.error || "解析服务返回错误");
       setEmailBatch(result as EmailBatch);

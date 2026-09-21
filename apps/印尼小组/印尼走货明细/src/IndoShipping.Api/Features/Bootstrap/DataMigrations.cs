@@ -48,6 +48,20 @@ public static class DataMigrations
             await ensureTranslations.ExecuteNonQueryAsync();
         }
 
+        // 供应商汇总直接扩展现有字典记录，历史简称/全称自动保留为档案的中文名称。
+        await using (var ensureSupplierProfiles = connection.CreateCommand())
+        {
+            ensureSupplierProfiles.CommandText = """
+                ALTER TABLE dict_supplier ADD COLUMN IF NOT EXISTS name_en TEXT NOT NULL DEFAULT '';
+                ALTER TABLE dict_supplier ADD COLUMN IF NOT EXISTS address_zh TEXT NOT NULL DEFAULT '';
+                ALTER TABLE dict_supplier ADD COLUMN IF NOT EXISTS address_en TEXT NOT NULL DEFAULT '';
+                ALTER TABLE dict_supplier ADD COLUMN IF NOT EXISTS phone TEXT NOT NULL DEFAULT '';
+                ALTER TABLE dict_supplier ADD COLUMN IF NOT EXISTS email TEXT NOT NULL DEFAULT '';
+                ALTER TABLE dict_supplier ADD COLUMN IF NOT EXISTS contact TEXT NOT NULL DEFAULT '';
+                """;
+            await ensureSupplierProfiles.ExecuteNonQueryAsync();
+        }
+
         // 走货行称重数量：旧数据库启动时幂等补列，避免保存后丢失。
         await using (var ensureWeighingQty = connection.CreateCommand())
         {

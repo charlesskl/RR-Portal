@@ -8,6 +8,7 @@ import { PERMISSION_MODULES, type ModuleKey } from './auth/permissions'
 
 const CustomersPage    = lazy(() => import('./pages/CustomersPage'))
 const DictionariesPage = lazy(() => import('./pages/DictionariesPage'))
+const SupplierSummaryPage = lazy(() => import('./pages/SupplierSummaryPage'))
 const ProductsPage     = lazy(() => import('./pages/ProductsPage'))
 const QuotesPage       = lazy(() => import('./pages/QuotesPage'))
 const PurchasePage     = lazy(() => import('./pages/PurchasePage'))
@@ -54,6 +55,7 @@ export default function App() {
               <Route index element={<HomeRedirect />} />
               <Route path="customers"    element={<ModuleRoute module="customers"><CustomersPage /></ModuleRoute>} />
               <Route path="dictionaries" element={<ModuleRoute module="products"><DictionariesPage /></ModuleRoute>} />
+              <Route path="supplier-summary" element={<ModuleRoute module="products"><SupplierSummaryPage /></ModuleRoute>} />
               <Route path="products"     element={<ModuleRoute module="products"><ProductsPage /></ModuleRoute>} />
               <Route path="quotes"       element={<ModuleRoute module="quotes"><QuotesPage /></ModuleRoute>} />
               <Route path="purchase"     element={<ModuleRoute module="purchase"><PurchasePage /></ModuleRoute>} />

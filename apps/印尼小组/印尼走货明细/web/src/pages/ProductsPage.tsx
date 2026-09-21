@@ -121,9 +121,7 @@ export default function ProductsPage() {
           const previous = m.id != null ? originalById.get(Number(m.id)) : undefined
           return {
             supplier: String(m.supplier || '').trim(),
-            customs: String(m.customs_company || '').trim(),
             previousSupplier: String(previous?.supplier || '').trim(),
-            previousCustoms: String(previous?.customs_company || '').trim(),
           }
         })
       let supplierAdded = 0
@@ -137,10 +135,10 @@ export default function ProductsPage() {
           const supplierConflicts = Array.isArray(supplierSync?.conflicts) ? supplierSync.conflicts : []
           if (supplierConflicts.length) {
             modal.confirm({
-              title: '确认更新供应商字典',
+              title: '确认更新供应商汇总',
               width: 680,
-              okText: '确认并更新字典',
-              cancelText: '仅保存货号，不改字典',
+              okText: '确认并更新汇总',
+              cancelText: '仅保存货号，不改汇总',
               content: (
                 <div style={{ maxHeight: 320, overflow: 'auto' }}>
                   <p style={{ color: '#8c8c8c' }}>检测到 {supplierConflicts.length} 个已有供应商的资料变化：</p>
@@ -148,7 +146,6 @@ export default function ProductsPage() {
                     <div key={`${x.keyword}-${i}`} style={{ marginBottom: 12, padding: 10, background: '#fafafa', borderRadius: 6 }}>
                       <b>{x.keyword || x.savedFull || `供应商 ${i + 1}`}</b>
                       <div>全称：{x.savedFull || '(空)'} → <span style={{ color: '#1677ff' }}>{x.enteredFull || '(空)'}</span></div>
-                      <div>报关公司：{x.savedCustoms || '(空)'} → <span style={{ color: '#1677ff' }}>{x.enteredCustoms || '(空)'}</span></div>
                     </div>
                   ))}
                 </div>
@@ -158,13 +155,13 @@ export default function ProductsPage() {
                   entries: supplierSyncEntries,
                   confirmChanges: true,
                 })
-                message.success(`已确认更新 ${Number(confirmed?.updated) || 0} 条供应商字典`)
+                message.success(`已确认更新 ${Number(confirmed?.updated) || 0} 条供应商汇总资料`)
                 loadDicts()
               },
             })
           }
         } catch {
-          message.warning('货号已保存，但供应商字典同步失败')
+          message.warning('货号已保存，但供应商汇总同步失败')
         }
       }
       const conflicts = Array.isArray(materialSave?.translation_conflicts) ? materialSave.translation_conflicts : []
@@ -176,7 +173,7 @@ export default function ProductsPage() {
       } else if (unitLinksUpdated > 0) {
         message.success(`已保存，并同步 ${unitLinksUpdated} 行采购走货单位`)
       } else {
-        message.success(`已保存${supplierAdded ? `，自动新增 ${supplierAdded} 个供应商字典` : ''}`)
+        message.success(`已保存${supplierAdded ? `，供应商汇总自动新增 ${supplierAdded} 家` : ''}`)
       }
       loadDicts()
       setCreating(false)
@@ -610,21 +607,19 @@ function MaterialsEditor({ rows, onChange, dicts, productCode }: {
   }
   function autoFillSupplier() {
     const dict = dicts.suppliers.filter(d => d.keyword)
-    if (!dict.length) { message.warning('字典里没有供应商关键字'); return }
+    if (!dict.length) { message.warning('供应商汇总里没有可用简称'); return }
     let filled = 0
     const next = rows.map((m) => {
       const sup = (m.supplier || '').trim()
       if (!sup) return m
       const hit = dict.find(d => sup.includes(d.keyword) || d.keyword === sup || (d.full && sup.includes(d.full)))
       const newSup = hit?.full || sup
-      // 报关公司也一并扩展：字典指定优先（可能是华胜益），否则保留原值，再否则默认用供应商本身
-      const newCustoms = hit?.customs || m.customs_company || newSup
-      if (newSup === m.supplier && newCustoms === m.customs_company) return m
+      if (newSup === m.supplier) return m
       filled++
-      return { ...m, supplier: newSup, customs_company: newCustoms }
+      return { ...m, supplier: newSup }
     })
     onChange(next)
-    message.success(`供应商/报关公司自动扩展：${filled} 行`)
+    message.success(`供应商自动扩展：${filled} 行`)
   }
 
   function autoFillEnglish() {
@@ -738,12 +733,10 @@ function MaterialsEditor({ rows, onChange, dicts, productCode }: {
           { title: '报关公司', width: 200, render: (_v, r, i) => {
             const opts = Array.from(new Set([
               CUSTOMS_FIXED,
-              ...(r.supplier ? [r.supplier] : []),
-              ...dicts.suppliers.map(s => s.customs || '').filter(Boolean),
-              ...(r.customs_company ? [r.customs_company] : []),
+              ...rows.map(m => m.customs_company || '').filter(Boolean),
             ])) as string[]
-            return <Select size="small" showSearch allowClear placeholder="选报关公司" style={{ width: '100%' }}
-              value={r.customs_company || undefined}
+            return <AutoComplete size="small" allowClear placeholder="按物料填写报关公司" style={{ width: '100%' }}
+              value={r.customs_company || ''}
               options={opts.map(o => ({ value: o, label: o }))}
               onChange={(v) => patch(i, 'customs_company', v ?? '')} popupMatchSelectWidth={false} />
           } },

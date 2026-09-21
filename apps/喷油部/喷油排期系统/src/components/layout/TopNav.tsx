@@ -23,7 +23,7 @@ export default function TopNav({ username, role, factoryId = "XINGXIN" }: { user
   async function switchFactory(nextFactory: string) {
     if (nextFactory === factoryId) return;
     setSwitching(true);
-    const res = await fetch("/api/auth/factory", {
+    const res = await apiFetch("/api/auth/factory", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ factoryId: nextFactory }),

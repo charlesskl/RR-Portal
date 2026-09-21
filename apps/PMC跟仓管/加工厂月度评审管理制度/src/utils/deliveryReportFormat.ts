@@ -16,6 +16,7 @@ export function deliveryHeaders(
   includeMoldNumber = true,
   includeContractNumber = false,
   pricingMode: DeliveryPricingMode = includeContractNumber ? 'rmb-tax' : 'hkd',
+  includeColor = false,
 ) {
   let headers = DELIVERY_HEADERS.filter((header) => includeMoldNumber || header !== '模具编号')
   if (includeContractNumber) headers.splice(headers.indexOf('货号'), 0, '合同号')
@@ -34,6 +35,7 @@ export function deliveryHeaders(
   } else if (pricingMode === 'hkd-tax') {
     headers.splice(headers.indexOf('换算汇率') + 1, 0, '税点')
   }
+  if (includeColor) headers.splice(headers.indexOf('数量'), 0, '颜色')
   return headers
 }
 

@@ -4,8 +4,8 @@ import type { DeliveryExcelRequest, DeliveryExcelResponse } from './deliveryExce
 
 self.addEventListener('message', (event: MessageEvent<DeliveryExcelRequest>) => {
   try {
-    const { rows, title, includeMoldNumber, includeContractNumber, pricingMode } = event.data
-    const workbook = createDeliveryWorkbook(rows, title, includeMoldNumber, includeContractNumber, pricingMode)
+    const { rows, title, includeMoldNumber, includeContractNumber, pricingMode, includeColor } = event.data
+    const workbook = createDeliveryWorkbook(rows, title, includeMoldNumber, includeContractNumber, pricingMode, includeColor)
     const buffer: ArrayBuffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' })
     const response: DeliveryExcelResponse = { ok: true, buffer }
     self.postMessage(response, { transfer: [buffer] })

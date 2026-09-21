@@ -157,6 +157,7 @@ async function savePrice() {
           <div><dt>车间</dt><dd>{{ order.workshop || '-' }}</dd></div>
           <div><dt>货号</dt><dd>{{ order.item_no || '-' }}</dd></div>
           <div><dt>模具编号</dt><dd>{{ order.mold_no || '-' }}</dd></div>
+          <div v-if="order.expand?.factory?.craft === 'injection'"><dt>颜色</dt><dd>{{ order.color || '-' }}</dd></div>
           <div><dt>产品</dt><dd>{{ order.product }}</dd></div>
           <div><dt>数量</dt><dd>{{ order.quantity ?? '-' }}</dd></div>
           <div><dt>核价生产工价</dt><dd>{{ order.quote_labor_price ?? '-' }}</dd></div>

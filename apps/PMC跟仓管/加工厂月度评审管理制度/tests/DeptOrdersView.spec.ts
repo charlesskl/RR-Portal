@@ -70,6 +70,24 @@ function selectOrder(product: string) {
 }
 
 describe('department delivery table', () => {
+  it.each(['dongguan', 'hunan', 'heyuan'])('注塑颜色列在物料和数量之间，支持保存和导出 (%s)', async (region) => {
+    state.route.query.region = region
+    for (const order of state.orders.items) { order.region = region; order.color = '3556C/红色' }
+    wrapper = mount(DeptOrdersView)
+    await flushPromises()
+    const headers = wrapper.findAll('.report thead th').map((h) => h.text())
+    expect(headers.indexOf('颜色')).toBe(headers.indexOf('物料名称') + 1)
+    expect(headers.indexOf('数量')).toBe(headers.indexOf('颜色') + 1)
+    expect((wrapper.find('[aria-label="颜色"]').element as HTMLInputElement).value).toBe('3556C/红色')
+    await wrapper.find('[aria-label="颜色"]').setValue('紫色2086C')
+    await wrapper.find('.save-all').trigger('click')
+    await flushPromises()
+    expect(state.orders.update).toHaveBeenCalledWith('order-0', expect.objectContaining({ color: '紫色2086C' }))
+    await button('导出 Excel').trigger('click')
+    await flushPromises()
+    expect(state.exportExcel.mock.calls[0]![0][0].color).toBe('紫色2086C')
+  })
+
   it('湖南所有部门只显示含税人民币核价和含税外发工价', async () => {
     state.route.query.region = 'hunan'
     state.factories.items[0].region = 'hunan'
@@ -122,7 +140,7 @@ describe('department delivery table', () => {
       wrapper = mount(DeptOrdersView)
       await flushPromises()
 
-      await wrapper.findAll('.report .text-inp')[0]!.setValue('目标物料名称')
+      await wrapper.findAll('.report .text-inp:not(.color-inp)')[0]!.setValue('目标物料名称')
       expect((wrapper.findAll('.report .price-inp')[0]!.element as HTMLInputElement).value).toBe('0.58')
       expect(wrapper.text()).toContain('已按货号和物料名称自动带出历史核价 0.58')
     },
@@ -166,14 +184,14 @@ describe('department delivery table', () => {
     expect(state.orders.fetchForScope).toHaveBeenCalledTimes(1)
     expect(state.factories.fetchAll).toHaveBeenCalledTimes(1)
     expect(state.orders.fetchForScope).toHaveBeenCalledWith('injection', 'dongguan', { force: false })
-    expect(wrapper.findAll('.report .text-inp')).toHaveLength(100)
-    await wrapper.find('.report .text-inp').setValue('第一页修改')
+    expect(wrapper.findAll('.report .text-inp:not(.color-inp)')).toHaveLength(100)
+    await wrapper.find('.report .text-inp:not(.color-inp)').setValue('第一页修改')
     await button('下一页').trigger('click')
-    await wrapper.find('.report .text-inp').setValue('第二页修改')
+    await wrapper.find('.report .text-inp:not(.color-inp)').setValue('第二页修改')
     await button('上一页').trigger('click')
-    expect((wrapper.find('.report .text-inp').element as HTMLInputElement).value).toBe('第一页修改')
+    expect((wrapper.find('.report .text-inp:not(.color-inp)').element as HTMLInputElement).value).toBe('第一页修改')
     await wrapper.find('.search-box').setValue('物料-204')
-    expect(wrapper.findAll('.report .text-inp')).toHaveLength(1)
+    expect(wrapper.findAll('.report .text-inp:not(.color-inp)')).toHaveLength(1)
     await wrapper.find('.save-all').trigger('click')
     await flushPromises()
     expect(state.orders.update).toHaveBeenCalledTimes(2)
@@ -183,7 +201,7 @@ describe('department delivery table', () => {
     expect(state.orders.fetchForScope).toHaveBeenLastCalledWith('injection', 'dongguan', { force: true })
     expect(state.factories.fetchAll).toHaveBeenCalledTimes(2)
     await wrapper.find('.search-box').setValue('')
-    expect((wrapper.find('.report .text-inp').element as HTMLInputElement).value).toBe('第一页修改')
+    expect((wrapper.find('.report .text-inp:not(.color-inp)').element as HTMLInputElement).value).toBe('第一页修改')
   })
 
   it('resets pagination for page size and date filters and exports every matching record once', async () => {
@@ -191,7 +209,7 @@ describe('department delivery table', () => {
     await flushPromises()
     await button('下一页').trigger('click')
     await wrapper.find('[aria-label="每页订单数"]').setValue('50')
-    expect(wrapper.findAll('.report .text-inp')).toHaveLength(50)
+    expect(wrapper.findAll('.report .text-inp:not(.color-inp)')).toHaveLength(50)
     expect(wrapper.find('.pagination').text()).toContain('第 1–50 条')
     await wrapper.find('[aria-label="下单日期筛选方式"]').setValue('month')
     await wrapper.find('[aria-label="选择月份"]').setValue('2026-08')
@@ -211,15 +229,15 @@ describe('department delivery table', () => {
   it('keeps a newer edit made while an earlier save is in flight', async () => {
     wrapper = mount(DeptOrdersView)
     await flushPromises()
-    await wrapper.find('.report .text-inp').setValue('提交版本')
+    await wrapper.find('.report .text-inp:not(.color-inp)').setValue('提交版本')
     let resolveSave!: () => void
     state.orders.update.mockImplementationOnce(() => new Promise<void>((resolve) => { resolveSave = resolve }))
     await wrapper.find('.save-all').trigger('click')
-    await wrapper.find('.report .text-inp').setValue('后续版本')
+    await wrapper.find('.report .text-inp:not(.color-inp)').setValue('后续版本')
     resolveSave()
     await flushPromises()
     expect(wrapper.find('.save-all').text()).toBe('全部保存（1）')
-    expect((wrapper.find('.report .text-inp').element as HTMLInputElement).value).toBe('后续版本')
+    expect((wrapper.find('.report .text-inp:not(.color-inp)').element as HTMLInputElement).value).toBe('后续版本')
   })
 
   it('waits for fresh factory data before enabling export and retains factory failures until retry succeeds', async () => {
@@ -245,7 +263,7 @@ describe('department delivery table', () => {
   it('blocks a department change when unsaved edits are not discarded', async () => {
     wrapper = mount(DeptOrdersView)
     await flushPromises()
-    await wrapper.find('.report .text-inp').setValue('未保存')
+    await wrapper.find('.report .text-inp:not(.color-inp)').setValue('未保存')
     const guard = state.beforeRouteUpdate.mock.calls[0]![0]
     const nextRoute = { params: { craft: 'painting' }, query: { region: 'dongguan' } }
     const confirm = vi.fn().mockReturnValue(false)
@@ -413,7 +431,7 @@ describe('factory filters and bulk order deletion', () => {
     state.orders.remove.mockImplementationOnce(remove).mockRejectedValueOnce(new Error('临时网络失败'))
     wrapper = mount(DeptOrdersView)
     await flushPromises()
-    const inputs = wrapper.findAll('.report .text-inp')
+    const inputs = wrapper.findAll('.report .text-inp:not(.color-inp)')
     await inputs[0]!.setValue('已删除订单的草稿')
     await inputs[1]!.setValue('失败订单的草稿')
     await selectOrder('物料-0').setValue(true)
@@ -440,7 +458,7 @@ describe('factory filters and bulk order deletion', () => {
     expect(wrapper.find('.bulk-delete').text()).toBe('批量删除（1）')
     expect(wrapper.find('.save-all').text()).toBe('全部保存（1）')
     expect((selectOrder('物料-1').element as HTMLInputElement).checked).toBe(true)
-    expect((wrapper.find('.report .text-inp').element as HTMLInputElement).value).toBe('失败订单的草稿')
+    expect((wrapper.find('.report .text-inp:not(.color-inp)').element as HTMLInputElement).value).toBe('失败订单的草稿')
     expect(wrapper.text()).toMatch(/失败.*1/)
     await wrapper.find('.bulk-delete').trigger('click')
     await flushPromises()

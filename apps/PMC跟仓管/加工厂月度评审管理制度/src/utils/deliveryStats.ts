@@ -44,6 +44,7 @@ export interface DetailRow extends Metrics {
   mold_no: string
   order_no: string
   category: string
+  color?: string
   product: string
   quantity: number | null
   order_date: string
@@ -236,6 +237,7 @@ export function buildDeliveryReport(
           order_no: o.order_no ?? '',
           category: o.process_category ?? '',
           product: o.product ?? '',
+          color: o.expand?.factory?.craft === 'injection' ? (o.color ?? '') : undefined,
           quantity: o.quantity ?? null,
           order_date: o.order_date ? o.order_date.slice(0, 10) : '',
           delivery_date: o.delivery_date ? o.delivery_date.slice(0, 10) : '',
@@ -285,8 +287,9 @@ export async function exportDeliveryExcel(
   includeContractNumber = false,
   pricingMode: DeliveryPricingMode = includeContractNumber ? 'rmb-tax' : 'hkd',
 ): Promise<void> {
+  const includeColor = rows.some((row) => row.kind === 'detail' && row.color !== undefined)
   const { downloadDeliveryExcel } = await import('./deliveryExcelExport')
-  await downloadDeliveryExcel({ rows, title, includeMoldNumber, includeContractNumber, pricingMode })
+  await downloadDeliveryExcel({ rows, title, includeMoldNumber, includeContractNumber, pricingMode, includeColor })
 }
 
 const compactText = (s: any) => String(s ?? '').replace(/\s+/g, '')
@@ -847,6 +850,7 @@ function parseMoldingContractImport(
 ): { payloads: Record<string, any>[]; failed: number } {
   const colOf = (...aliases: string[]) => header.findIndex((cell) => aliases.some((alias) => cell === compactText(alias)))
   const C = {
+      color: header.findIndex((value) => ['颜色', '顏色', '颜色编号', '顏色編號'].includes(value)),
     item_no: colOf('款号', '货号'),
     mold_no: colOf('模具编号'),
     product: colOf('工模名称', '模具名称'),
@@ -883,7 +887,7 @@ function parseMoldingContractImport(
       mold_no: moldNo,
       order_no: orderNo,
       process_category: '啤机',
-      notes: cleanText(cell(row, C.notes)),
+      color: cleanText(cell(row, C.color)), notes: cleanText(cell(row, C.notes)),
       status: 'placed',
       is_delayed: false,
     }
@@ -925,6 +929,7 @@ function parseHunanInjectionPurchaseOrderImport(
     const header = aoa[headerIdx].map(compactText)
     const colContaining = (...aliases: string[]) => header.findIndex((cell) => aliases.some((alias) => cell.includes(compactText(alias))))
     const C = {
+      color: header.findIndex((value) => ['颜色', '顏色', '颜色编号', '顏色編號'].includes(value)),
       item_no: colContaining('货号'), mold_no: colContaining('模号'), product: colContaining('名称'),
       category: colContaining('加工类别'), qty: colContaining('数量'), out: colContaining('外发单价'),
       amount: colContaining('金额'), delivery_date: colContaining('完成交货期', '交货期'), notes: colContaining('备注'),
@@ -947,7 +952,7 @@ function parseHunanInjectionPurchaseOrderImport(
       const amount = parseNumberCell(cell(row, C.amount))
       const payload: Record<string, any> = {
         factory: factoryId, pmc, item_no: itemNo, mold_no: cleanText(cell(row, C.mold_no)), order_no: orderNo,
-        process_category: cleanText(cell(row, C.category)), product, notes: cleanText(cell(row, C.notes)),
+        process_category: cleanText(cell(row, C.category)), product, color: cleanText(cell(row, C.color)), notes: cleanText(cell(row, C.notes)),
         status: 'placed', is_delayed: false,
       }
       if (qty != null) payload.quantity = qty
@@ -1006,6 +1011,7 @@ export function parseDeliveryImport(
     return parseAssemblyContractImport(aoa, headerIdx, header, factoryIdByName)
   }
   const C = {
+    color: colOf('颜色', '顏色', '颜色编号', '顏色編號'),
     pmc: colOf('下单PMC'), factory: colOf('加工厂'), item_no: colOf('货号', '款号'), mold_no: colOf('模具编号'), order_no: colOf('订单号'),
     category: colOf('加工类别'), product: colOf('物料名称', '产品'), qty: colOf('数量'),
     order_date: colOf('下单时间', '下单日期'), delivery_date: colOf('下单交货时间', '交货日期'),
@@ -1034,7 +1040,7 @@ export function parseDeliveryImport(
     const inspect = numv(C.inspect), qualified = numv(C.qualified), out = numv(C.out), qty = numv(C.qty)
     const p: Record<string, any> = {
       factory: factoryId, product: prod, pmc: str(C.pmc), order_no: str(C.order_no),
-      item_no: str(C.item_no), mold_no: str(C.mold_no), process_category: str(C.category), notes: str(C.notes), status: 'placed',
+      color: str(C.color), item_no: str(C.item_no), mold_no: str(C.mold_no), process_category: str(C.category), notes: str(C.notes), status: 'placed',
     }
     if (qty != null) p.quantity = qty
     const od = cell(row, C.order_date); if (od) p.order_date = toDate(od)

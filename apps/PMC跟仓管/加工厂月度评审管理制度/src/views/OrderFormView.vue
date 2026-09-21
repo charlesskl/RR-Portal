@@ -183,6 +183,7 @@ async function submit() {
           <label>货号 <input v-model="draft.item_no" placeholder="货号" @change="autofillQuoteFromOrderKeys" /></label>
           <label>模具编号 <input v-model="draft.mold_no" placeholder="模具编号" @change="autofillQuoteFromOrderKeys" /></label>
           <label>订单号 <input v-model="draft.order_no" placeholder="订单号" /></label>
+          <label v-if="craft === 'injection' || factories.items.find((f) => f.id === draft.factory)?.craft === 'injection'">颜色 <input v-model="draft.color" placeholder="颜色 / 颜色编号" /></label>
           <label>产品 <input v-model="draft.product" placeholder="产品名称" required @change="autofillQuoteFromOrderKeys" /></label>
           <label>数量 <input v-model.number="draft.quantity" type="number" min="0" /></label>
           <label>加工类别 <input v-model="draft.process_category" placeholder="如塑胶半成品" /></label>

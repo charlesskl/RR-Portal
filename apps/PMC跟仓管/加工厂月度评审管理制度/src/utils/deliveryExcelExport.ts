@@ -31,6 +31,7 @@ function snapshotRows(rows: ReportRow[]): ReportRow[] {
       order_no: row.order_no,
       category: row.category,
       product: row.product,
+      color: row.color,
       quantity: row.quantity,
       order_date: row.order_date,
       delivery_date: row.delivery_date,

@@ -270,7 +270,7 @@ watch([deptOrders, pageLoading], ([value, loading]) => {
 })
 const showMoldNumber = computed(() => craft.value === 'injection')
 const showContractNumber = computed(() => craft.value === 'sewing')
-const visibleHeaders = computed(() => deliveryHeaders(showMoldNumber.value, showContractNumber.value, pricingMode.value))
+const visibleHeaders = computed(() => deliveryHeaders(showMoldNumber.value, showContractNumber.value, pricingMode.value, showMoldNumber.value))
 const quotePriceHeader = computed(() => visibleHeaders.value.find((header) => header.startsWith('核价工价')) ?? '核价工价(港币不含税$)')
 const untaxedOutPriceHeader = computed(() => visibleHeaders.value.find((header) =>
   header === '外发工价(港币不含税$)' || header === '外发工价(不含税RMB)') ?? '')
@@ -285,6 +285,7 @@ const COLUMN_WIDTHS: Record<string, number> = {
   '订单号': 140,
   '加工类别': 120,
   '物料名称': 160,
+  '颜色': 160,
   '数量': 110,
   '下单时间': 120,
   '下单交货时间': 130,
@@ -478,6 +479,7 @@ function subtotalValue(header: string, index: number, row: Extract<ReportRow, { 
 type RowDraft = {
   pmc: string
   mold_no: string
+  color: string
   product: string
   quantity: string
   order_date: string
@@ -665,6 +667,7 @@ function draftFromRow(row: DetailRow): RowDraft {
     pmc: row.pmc || '',
     mold_no: row.mold_no || '',
     product: row.product || '',
+    color: row.color || '',
     quantity: priceInputValue(row.quantity),
     order_date: row.order_date || '',
     delivery_date: row.delivery_date || '',
@@ -811,6 +814,7 @@ function rowUpdateData(row: DetailRow): { data?: Partial<any>; error?: string } 
     pmc: draft.pmc.trim(),
     mold_no: draft.mold_no.trim(),
     product,
+    ...(showMoldNumber.value ? { color: draft.color.trim() } : {}),
     quantity,
     order_date: draft.order_date ? new Date(draft.order_date).toISOString() : '',
     delivery_date: draft.delivery_date ? new Date(draft.delivery_date).toISOString() : '',
@@ -933,6 +937,7 @@ async function copyRow(row: DetailRow) {
     item_no: source.item_no,
     mold_no: draft.mold_no.trim(),
     product,
+    ...(showMoldNumber.value ? { color: draft.color.trim() } : {}),
     quantity: quantity ?? undefined,
     supplier_price: source.supplier_price,
     process_category: source.process_category,
@@ -1075,7 +1080,7 @@ async function removeSelectedRows() {
             <table class="import-draft-table">
               <thead><tr>
                 <th>#</th><th>来源</th><th>加工厂 *</th><th>下单PMC</th><th>货号 *</th><th>订单号</th>
-                <th>加工类别</th><th>物料名称 *</th><th>数量</th><th>下单时间</th><th>下单交货时间</th><th>含税工价</th><th>备注</th><th>核对结果</th><th>操作</th>
+                <th>加工类别</th><th>物料名称 *</th><th v-if="showMoldNumber">颜色</th><th>数量</th><th>下单时间</th><th>下单交货时间</th><th>含税工价</th><th>备注</th><th>核对结果</th><th>操作</th>
               </tr></thead>
               <tbody>
                 <tr v-for="(row, index) in importDraftRows" :key="row.key" :class="{ 'draft-row-warning': importRowIssues(row).length }">
@@ -1093,6 +1098,7 @@ async function removeSelectedRows() {
                   <td><input v-model="row.payload.order_no" /></td>
                   <td><input v-model="row.payload.process_category" /></td>
                   <td><input v-model="row.payload.product" :class="{ invalid: !String(row.payload.product ?? '').trim() }" /></td>
+                  <td v-if="showMoldNumber"><input v-model="row.payload.color" /></td>
                   <td><input v-model="row.payload.quantity" type="number" min="0" /></td>
                   <td><input v-model="row.payload.order_date" type="date" /></td>
                   <td><input v-model="row.payload.delivery_date" type="date" /></td>
@@ -1104,7 +1110,7 @@ async function removeSelectedRows() {
                   </td>
                   <td><button class="ghost mini danger" :disabled="confirmingImport" @click="removeImportDraftRow(row.key)">移除</button></td>
                 </tr>
-                <tr v-if="!importDraftRows.length"><td colspan="15" class="hint">没有可预览的记录</td></tr>
+                <tr v-if="!importDraftRows.length"><td :colspan="showMoldNumber ? 16 : 15" class="hint">没有可预览的记录</td></tr>
               </tbody>
             </table>
           </div>
@@ -1261,6 +1267,10 @@ async function removeSelectedRows() {
                     @input="setDraftValue(r, 'product', ($event.target as HTMLInputElement).value)"
                     @change="autofillRowQuote(r)" />
                   <span v-else>{{ r.product || '-' }}</span>
+                </td>
+                <td v-if="showMoldNumber" :class="columnClassFor('颜色')" :style="columnStyleFor('颜色')">
+                  <input v-if="canEdit" :disabled="deletingOrders" class="text-inp color-inp" aria-label="颜色" :value="draftValue(r, 'color')" @input="setDraftValue(r, 'color', ($event.target as HTMLInputElement).value)" />
+                  <span v-else>{{ r.color || '-' }}</span>
                 </td>
                 <td :class="columnClassFor('数量')" :style="columnStyleFor('数量')">
                   <input v-if="canEdit" :disabled="deletingOrders" type="number" class="qty-inp" min="0" :value="draftValue(r, 'quantity')"

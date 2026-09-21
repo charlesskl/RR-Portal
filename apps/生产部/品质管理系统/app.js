@@ -2472,6 +2472,33 @@ function renderPartners(type) {
       ${names.length ? names.map(n => `<span class="badge badge-hold" style="display:inline-flex;align-items:center;gap:4px;padding:4px 8px">${_esc(n)}${manage ? `<button data-name="${_esc(n)}" onclick="delPartner('${type}', this.dataset.name)" style="border:none;background:none;color:var(--red);cursor:pointer;padding:0;font-size:12px;line-height:1" title="从名单删除">✕</button>` : ''}</span>`).join('') : '<span style="color:var(--text-muted);font-size:12px">暂无，请在上方添加</span>'}
     </div>
   </div>`;
+  renderPartnerCards(type);
+}
+
+/* 客户/加工类型档案卡片：名称 + 验货记录数 + 最近日期；名单新加的显示「新录入」 */
+function renderPartnerCards(type) {
+  const conf = { customer:{ el:'customerCards', field:'client' }, processType:{ el:'processTypeCards', field:'processType' } }[type];
+  if (!conf) return;
+  const el = document.getElementById(conf.el);
+  if (!el) return;
+  const list = managedNames(type).map(n => {
+    const arr  = state.records.filter(r => r[conf.field] === n);
+    const last = arr.map(r => r.date).filter(Boolean).sort().reverse()[0] || '-';
+    return { name:n, total:arr.length, last, fresh:arr.length === 0 };
+  }).sort((a,b) => (a.fresh?1:0)-(b.fresh?1:0) || b.total-a.total || a.name.localeCompare(b.name));
+  if (!list.length) {
+    el.innerHTML = '<div style="color:var(--text-muted);font-size:12px">暂无，请先在上方名单添加</div>';
+    return;
+  }
+  el.innerHTML = '<div class="supplier-grid">' + list.map(s => `
+    <div class="supplier-card risk-low">
+      <span class="risk-badge low">${s.fresh ? '新录入' : '正常'}</span>
+      <div class="supplier-name">${s.name}</div>
+      <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-muted);margin-top:6px">
+        <span>${s.total} 条验货记录</span>
+        <span>最近: ${s.last}</span>
+      </div>
+    </div>`).join('') + '</div>';
 }
 
 /* 页签切换：供应商（名单+质量档案）/ 客户（仅名单）/ 加工类型（仅名单） */

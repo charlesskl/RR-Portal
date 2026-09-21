@@ -29,7 +29,7 @@ export function orderScopeFilter(scope: OrderScope, crafts: Craft[], regions: Re
 export const ORDER_SUMMARY_FIELDS = 'id,factory,region,status,expand.factory.name,expand.factory.craft,expand.factory.region'
 // Keep every Order field, but avoid repeating complete factory records on each row.
 export const ORDER_DETAIL_FIELDS = [
-  'id', 'factory', 'region', 'process', 'workshop', 'item_no', 'mold_no', 'product', 'quantity',
+  'id', 'factory', 'region', 'process', 'workshop', 'item_no', 'mold_no', 'product', 'color', 'quantity',
   'supplier_price', 'process_category', 'quote_labor_price', 'unit_price', 'unit_price_cny_tax',
   'exchange_rate', 'amount', 'defect_rate', 'pmc', 'order_no', 'order_date', 'delivery_date',
   'actual_delivery_date', 'return_count', 'status', 'current_product', 'progress', 'is_delayed',

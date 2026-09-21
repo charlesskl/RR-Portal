@@ -9,6 +9,7 @@ export interface Order {
   workshop?: string
   item_no?: string
   mold_no?: string
+  color?: string
   product: string
   quantity?: number
   supplier_price?: number

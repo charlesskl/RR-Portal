@@ -159,7 +159,7 @@ describe('parseDeliveryImport', () => {
     expect(result.payloads).toHaveLength(1)
     expect(result.payloads[0]).toMatchObject({
       factory: 'factory-1', order_no: 'BB2026135-BB124', item_no: '77772', mold_no: 'MNVN-11M-01',
-      product: '耳罩模', process_category: '注塑', quantity: 1836736, unit_price_cny_tax: 0.28,
+      product: '耳罩模', color: '黑色7726', process_category: '注塑', quantity: 1836736, unit_price_cny_tax: 0.28,
       order_date: '2026-07-06', delivery_date: '2026-09-07', pmc: '车浪宇',
     })
   })
@@ -453,6 +453,7 @@ describe('parseDeliveryImport', () => {
       mold_no: 'MNVN-05M-01-2',
       order_no: 'WXH2600140',
       product: '唱片模',
+      color: '梅红/806C',
       process_category: '啤机',
       quantity: 100000,
       order_date: '2026-07-15',

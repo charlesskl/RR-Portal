@@ -6,6 +6,7 @@ export interface DeliveryExcelRequest {
   title: string
   includeMoldNumber: boolean
   includeContractNumber: boolean
+  includeColor?: boolean
   pricingMode: DeliveryPricingMode
 }
 

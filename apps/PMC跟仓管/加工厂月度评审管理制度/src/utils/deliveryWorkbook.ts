@@ -9,6 +9,7 @@ export function createDeliveryWorkbook(
   includeMoldNumber = true,
   includeContractNumber = false,
   pricingMode: DeliveryPricingMode = includeContractNumber ? 'rmb-tax' : 'hkd',
+  includeColor = false,
 ) {
   const H = deliveryHeaders(includeMoldNumber, includeContractNumber, pricingMode)
   const moldColumn = DELIVERY_HEADERS.indexOf('模具编号')
@@ -62,6 +63,13 @@ export function createDeliveryWorkbook(
       })
     }
   })
+  if (includeColor) {
+    const column = H.indexOf('数量')
+    H.splice(column, 0, '颜色')
+    titleRow.push('')
+    body.forEach((row, index) => { const detail = rows[index]; row.splice(column, 0, detail?.kind === 'detail' ? detail.color ?? '' : '') })
+    for (const merge of merges) { if (merge.s.c >= column) merge.s.c++; if (merge.e.c >= column) merge.e.c++ }
+  }
   const ws = XLSX.utils.aoa_to_sheet([titleRow, H, ...body])
   ws['!merges'] = merges
   const hkdOutPriceColumn = isRmbTaxPricingMode(pricingMode) ? -1 : H.indexOf('外发工价(港币不含税$)')

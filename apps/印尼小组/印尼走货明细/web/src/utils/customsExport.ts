@@ -485,6 +485,16 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
   wbObj.SheetNames = wbObj.SheetNames.map(n => n === oldName ? newName : n)
   const ws = wbObj.Sheets[newName]
 
+  // RRI/RRM 模板此区域的列序不同；导出统一采用走货明细抬头与数据列序。
+  const packingHeaders: Record<string, string> = {
+    AU: '长\nLength', AV: '宽\nWidth', AW: '高\nHeight',
+    AX: '物料编码', AY: '每箱数量', AZ: '每箱重量',
+    BA: '单个毛重', BB: '单个净重', BC: '卡板', BD: '',
+  }
+  for (const [column, label] of Object.entries(packingHeaders)) {
+    setPreservingStyle(ws, `${column}3`, label)
+  }
+
   // 导出文件不显示模板 M3“单位可以选择”的旧式批注提示框。
   if ((ws as any).M3) delete (ws as any).M3.c
 
@@ -578,8 +588,8 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
     setCell(ws, ri, 13, '=AO' + (ri + 1) + '/$N$1', 'n')
     setCell(ws, ri, 14, '=N' + (ri + 1) + '*L' + (ri + 1), 'n')
     const weightDivisor = paperRope ? '/1000' : ''
-    setCell(ws, ri, 15, '=ROUND(BB' + (ri + 1) + '*L' + (ri + 1) + weightDivisor + ',2)', 'n')
-    setCell(ws, ri, 16, '=ROUND(BC' + (ri + 1) + '*L' + (ri + 1) + weightDivisor + ',2)', 'n')
+    setCell(ws, ri, 15, '=ROUND(BA' + (ri + 1) + '*L' + (ri + 1) + weightDivisor + ',2)', 'n')
+    setCell(ws, ri, 16, '=ROUND(BB' + (ri + 1) + '*L' + (ri + 1) + weightDivisor + ',2)', 'n')
     setCell(ws, ri, 17, '=AU' + (ri + 1) + '*AV' + (ri + 1) + '*AW' + (ri + 1) + '/1000000', 'n')
     setCell(ws, ri, 18, '=R' + (ri + 1) + '*AT' + (ri + 1), 'n')
     setCell(ws, ri, 20, it.product_use || '', 's')
@@ -625,14 +635,13 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
     setCell(ws, ri, 47, m?.width || 0, 'n')
     setCell(ws, ri, 48, m?.height || 0, 'n')
     setCell(ws, ri, 49, m?.material_code || '', 's')
-    setCell(ws, ri, 50, '', 's')
-    setCell(ws, ri, 51, qpc, (typeof qpc === 'string' && /[^\d.]/.test(qpc)) ? 's' : 'n')
-    setCell(ws, ri, 52, m?.weight_per_carton || 0, 'n')
+    setCell(ws, ri, 50, qpc, (typeof qpc === 'string' && /[^\d.]/.test(qpc)) ? 's' : 'n')
+    setCell(ws, ri, 51, m?.weight_per_carton || 0, 'n')
     const weighingQty = it.weighing_qty ?? shipmentWeightQuantity(m?.name_zh, shipmentPackingAverageQty(qpc))
-    setCell(ws, ri, 53, shipmentGrossPerPc(m?.weight_per_carton, weighingQty), 'n')
-    ws[XLSX.utils.encode_cell({ r: ri, c: 53 })].f = `IFERROR(IF(BA${ri + 1}>0,BA${ri + 1}/${Number(weighingQty) || 0},0),0)`
-    setCell(ws, ri, 54, m?.net_per_pc || 0, 'n')
-    setCell(ws, ri, 55, it.pallet || '', 's')
+    setCell(ws, ri, 52, shipmentGrossPerPc(m?.weight_per_carton, weighingQty), 'n')
+    ws[XLSX.utils.encode_cell({ r: ri, c: 52 })].f = `IFERROR(IF(AZ${ri + 1}>0,AZ${ri + 1}/${Number(weighingQty) || 0},0),0)`
+    setCell(ws, ri, 53, m?.net_per_pc || 0, 'n')
+    setCell(ws, ri, 54, it.pallet || '', 's')
   })
 
   // 发票及采购合计按连续的报关公司分组，只在每组首行显示。
@@ -714,8 +723,8 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
     15: '0.00', 16: '0.00', 17: '0.0000', 18: '0.0000',
     22: 'yyyy/m/d', 24: 'yyyy/m/d', 25: '"US$"#,##0.0000', 26: '"US$"#,##0.0000',
     27: '"US$"#,##0.0000', 29: 'yyyy/m/d', 31: 'yyyy/m/d', 38: 'yyyy/m/d',
-    45: '0', 46: '0.0000', 47: '0.0000', 48: '0.0000', 52: '0.0000',
-    53: '0.0000', 54: '0.0000',
+    45: '0', 46: '0.0000', 47: '0.0000', 48: '0.0000', 50: '0',
+    51: '0.0000', 52: '0.00000', 53: '0.00000',
   }
   for (let i = 0; i < sorted.length; i++) {
     for (const [column, format] of Object.entries(fixedFormats)) {

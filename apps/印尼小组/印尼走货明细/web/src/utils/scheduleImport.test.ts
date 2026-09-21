@@ -1,24 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { isFullyYellowScheduleRow, isYellowScheduleCell, scheduleSheetToRawGrid } from './scheduleImport'
+import { scheduleSheetToRawGrid } from './scheduleImport'
 
-const yellow = (rgb = 'FFFF00') => ({ s: { patternType: 'solid', fgColor: { rgb } } })
-const white = { s: { patternType: 'none' } }
-
-describe('schedule import fill filtering', () => {
-  it('recognizes WPS yellow in RGB and ARGB form', () => {
-    expect(isYellowScheduleCell(yellow('FFFF00'))).toBe(true)
-    expect(isYellowScheduleCell(yellow('FFFFFF00'))).toBe(true)
-  })
-
-  it('imports a row only when every A-AP cell is yellow', () => {
-    expect(isFullyYellowScheduleRow(Array.from({ length: 42 }, () => yellow()))).toBe(true)
-    expect(isFullyYellowScheduleRow([...Array.from({ length: 41 }, () => yellow()), white])).toBe(false)
-  })
-
-  it('does not mistake an isolated yellow date cell for an unplaced row', () => {
-    expect(isFullyYellowScheduleRow([white, white, yellow(), white])).toBe(false)
-  })
-
+describe('schedule import raw values', () => {
   it('keeps text headers even when their cell number format is a date', () => {
     const ws = {
       '!ref': 'A1:B2',

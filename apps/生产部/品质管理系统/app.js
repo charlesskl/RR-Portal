@@ -309,6 +309,55 @@ function renderCompanySelector() {
       <a href="javascript:backToSites()" class="company-back" style="float:right">切换厂区/子公司</a></div>`;
 }
 
+/* ── 登录后切换厂区/子公司（头部徽章点击）── */
+let _swSite = null;
+let _swView = 'subs';
+function openCompanySwitch() {
+  const ov = document.getElementById('companySwitchOverlay');
+  if (!ov) return;
+  _swSite = getCompanyObj().site;
+  _swView = 'subs';   /* 默认直接展开当前厂区的子公司列表 */
+  renderCompanySwitch();
+  ov.classList.add('show');
+}
+function closeCompanySwitch() {
+  const ov = document.getElementById('companySwitchOverlay');
+  if (ov) ov.classList.remove('show');
+}
+function swBackToSites()           { _swView = 'sites'; renderCompanySwitch(); }
+function swSelectSite(siteId)      { _swSite = siteId;  _swView = 'subs'; renderCompanySwitch(); }
+/* 换子公司一次性免登录票据（全局 key，不按公司前缀；用后即焚） */
+const SWITCH_TICKET_KEY = 'xingxin_qms_switch_ticket';
+function swPickCompany(id) {
+  if (id === getCompany()) { closeCompanySwitch(); return; }
+  try {
+    const sess = getCurrentUser();
+    const me   = sess && _getUsers().find(u => u.username === sess.username);
+    if (me) localStorage.setItem(SWITCH_TICKET_KEY, JSON.stringify({ username: me.username, pwd: me.password, ts: Date.now() }));
+  } catch(e) {}
+  pickCompany(id);   /* 换公司：落盘 + reload，bootstrap 拉新公司数据 */
+}
+function renderCompanySwitch() {
+  const box = document.getElementById('companySwitchBox');
+  if (!box) return;
+  if (_swView === 'sites') {
+    box.innerHTML =
+      `<div class="company-hint">选择厂区</div>` +
+      `<div class="company-cards">` + QC_SITES.map(s =>
+        _companyCardHtml({ name: s.name, onclick: `swSelectSite('${s.id}')` }, s.color,
+          companiesOf(s.id).length + ' 家子公司')
+      ).join('') + `</div>`;
+    return;
+  }
+  const site = getSiteObj(_swSite || getCompanyObj().site);
+  box.innerHTML =
+    `<div class="company-hint"><a href="javascript:swBackToSites()" class="company-back">‹ 厂区</a> ${site.name} · 选择子公司（切换后自动刷新，数据相互独立）</div>` +
+    `<div class="company-cards">` + companiesOf(site.id).map(c =>
+      _companyCardHtml({ name: c.name, onclick: `swPickCompany('${c.id}')` }, site.color,
+        c.id === getCompany() ? '当前公司' : '')
+    ).join('') + `</div>`;
+}
+
 /* ── 登录 ── */
 function login() {
   const unameEl = document.getElementById('loginUsername');
@@ -394,7 +443,7 @@ function _renderUserBadge() {
   const el = document.getElementById('userBadge');
   if (!el || !u) return;
   el.innerHTML =
-    `<span class="user-badge-company">${getSiteObj(getCompanyObj().site).name} · ${getCompanyName()}</span>` +
+    `<span class="user-badge-company" onclick="openCompanySwitch()" style="cursor:pointer" title="点击切换厂区/子公司">${getSiteObj(getCompanyObj().site).name} · ${getCompanyName()}</span>` +
     `<span class="user-badge-name">${u.name || u.username}</span>` +
     `<span class="user-badge-role">${ROLE_LABELS[u.role] || u.role}</span>` +
     `<button class="user-badge-logout" onclick="logout()">退出</button>`;
@@ -430,6 +479,16 @@ function applyPermissions() {
 /* ── requireLogin：启动时鉴权 ── */
 function requireLogin() {
   initUsers();
+  /* 换子公司免登录：一次性票据（10 分钟内有效，用后即焚）；
+     目标公司存在同名+同密码+启用中的账号 → 直接进入，否则走正常登录页 */
+  try {
+    const t = JSON.parse(localStorage.getItem(SWITCH_TICKET_KEY) || 'null');
+    localStorage.removeItem(SWITCH_TICKET_KEY);
+    if (t && t.username && t.pwd && Date.now() - (t.ts || 0) < 10 * 60 * 1000) {
+      const u = _getUsers().find(x => x.username === t.username && x.password === t.pwd && x.enabled);
+      if (u) { _saveSession(u); _showApp(); return; }
+    }
+  } catch(e) {}
   const sess = getCurrentUser();
   if (!sess) { _showLogin(); return; }
 

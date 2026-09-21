@@ -343,10 +343,16 @@ app.MapGet("/api/public/plans", async (string site, string? template, string? mo
             return Results.BadRequest(new { error = "结束日期格式应为yyyy-MM-dd" });
         siteQuery = siteQuery.Where(record => record.InspectionDate < end.AddDays(1));
     }
-    var customers = await siteQuery.Where(record => record.Customer != "").Select(record => record.Customer).Distinct().OrderBy(value => value).ToArrayAsync(ct);
+    var customerNames = await siteQuery.Where(record => record.Customer != "").Select(record => record.Customer).Distinct().OrderBy(value => value).ToArrayAsync(ct);
+    var customers = customerNames.Select(value => value.Trim()).Where(value => value != "")
+        .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
     var locations = await siteQuery.Where(record => record.InspectionLocation != "").Select(record => record.InspectionLocation).Distinct().OrderBy(value => value).ToArrayAsync(ct);
     if (!string.IsNullOrWhiteSpace(status)) siteQuery = siteQuery.Where(record => record.WorkflowStatus == status);
-    if (!string.IsNullOrWhiteSpace(customer)) siteQuery = siteQuery.Where(record => record.Customer == customer);
+    if (!string.IsNullOrWhiteSpace(customer))
+    {
+        var customerKey = customer.Trim().ToUpper();
+        siteQuery = siteQuery.Where(record => record.Customer.ToUpper() == customerKey);
+    }
     if (!string.IsNullOrWhiteSpace(location)) siteQuery = siteQuery.Where(record => record.InspectionLocation == location);
     if (!string.IsNullOrWhiteSpace(q))
     {
@@ -651,12 +657,18 @@ app.MapGet("/api/legacy-inspections", async (string site, string? template, stri
         var toExclusive = toDate.AddDays(1);
         query = query.Where(record => record.InspectionDate < toExclusive);
     }
-    var customers = await query.Where(record => record.Customer != "").Select(record => record.Customer)
+    var customerNames = await query.Where(record => record.Customer != "").Select(record => record.Customer)
         .Distinct().OrderBy(value => value).ToArrayAsync(cancellationToken);
+    var customers = customerNames.Select(value => value.Trim()).Where(value => value != "")
+        .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
     var locations = await query.Where(record => record.InspectionLocation != "").Select(record => record.InspectionLocation)
         .Distinct().OrderBy(value => value).ToArrayAsync(cancellationToken);
     if (!string.IsNullOrWhiteSpace(status)) query = query.Where(record => record.WorkflowStatus == status);
-    if (!string.IsNullOrWhiteSpace(customer)) query = query.Where(record => record.Customer == customer);
+    if (!string.IsNullOrWhiteSpace(customer))
+    {
+        var customerKey = customer.Trim().ToUpper();
+        query = query.Where(record => record.Customer.ToUpper() == customerKey);
+    }
     if (!string.IsNullOrWhiteSpace(location)) query = query.Where(record => record.InspectionLocation == location);
     if (!string.IsNullOrWhiteSpace(q))
     {
@@ -708,7 +720,11 @@ app.MapGet("/api/legacy-inspections/export", async (string site, string? templat
         query = query.Where(record => record.InspectionDate < toExclusive);
     }
     if (!string.IsNullOrWhiteSpace(status)) query = query.Where(record => record.WorkflowStatus == status);
-    if (!string.IsNullOrWhiteSpace(customer)) query = query.Where(record => record.Customer == customer);
+    if (!string.IsNullOrWhiteSpace(customer))
+    {
+        var customerKey = customer.Trim().ToUpper();
+        query = query.Where(record => record.Customer.ToUpper() == customerKey);
+    }
     if (!string.IsNullOrWhiteSpace(location)) query = query.Where(record => record.InspectionLocation == location);
     if (!string.IsNullOrWhiteSpace(q))
     {

@@ -130,6 +130,7 @@ async function changeMonth() {
 }
 
 async function calculateMonthScores() {
+  if (autoScoring.value || loadingScores.value) return
   autoScoring.value = true
   autoProgress.value = '读取货期和品质数据...'
   try {
@@ -163,12 +164,12 @@ async function calculateMonthScores() {
         factory,
         monthlyData,
       )
-      await scores.save(factory.id, month.value, { score_items: scoreItems, status: 'draft' })
+      await scores.save(factory.id, month.value, { score_items: scoreItems, status: 'submitted', submitted_by: auth.userId ?? undefined })
       saved += 1
     }
     await scores.fetchByMonth(month.value)
     scores.rememberScoringList(month.value, month.value, orders)
-    autoProgress.value = `自动评分完成：更新 ${saved} 家${skipped ? `，跳过已提交/已审批 ${skipped} 家` : ''}`
+    autoProgress.value = `自动评分完成：已提交 ${saved} 家${skipped ? `，跳过已提交/已审批 ${skipped} 家` : ''}`
   } catch (error) {
     autoProgress.value = `自动评分失败：${error instanceof Error ? error.message : '未知错误'}`
   } finally {
@@ -207,7 +208,7 @@ load()
         </template>
         <label v-else>{{ rangeMode === 'month' ? '月份' : '基准月份' }} <input v-model="month" type="month" @change="changeMonth" /></label>
         <button v-if="!isRange" class="ghost" :disabled="autoScoring || loadingScores" @click="calculateMonthScores">
-          {{ autoScoring ? '自动评分中...' : '自动计算本月评分' }}
+          {{ autoScoring ? '自动评分中...' : '自动计算并提交本月评分' }}
         </button>
       </div>
       <p v-if="autoProgress" class="auto-progress">{{ autoProgress }}</p>

@@ -1,0 +1,13 @@
+FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+WORKDIR /src
+COPY server/QcInspection.Api/QcInspection.Api.csproj server/QcInspection.Api/
+RUN dotnet restore server/QcInspection.Api/QcInspection.Api.csproj
+COPY server/QcInspection.Api/ server/QcInspection.Api/
+RUN dotnet publish server/QcInspection.Api/QcInspection.Api.csproj -c Release --no-restore -o /publish
+
+FROM mcr.microsoft.com/dotnet/aspnet:8.0
+WORKDIR /app
+COPY --from=build /publish .
+ENV ASPNETCORE_URLS=http://0.0.0.0:5188
+EXPOSE 5188
+ENTRYPOINT ["dotnet", "QcInspection.Api.dll"]

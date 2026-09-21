@@ -116,6 +116,12 @@ CREATE TABLE IF NOT EXISTS dict_supplier (
     keyword         VARCHAR(128) NOT NULL,
     full_name       VARCHAR(256) NULL,
     customs_company VARCHAR(256) NULL,
+    name_en         TEXT NOT NULL DEFAULT '',
+    address_zh      TEXT NOT NULL DEFAULT '',
+    address_en      TEXT NOT NULL DEFAULT '',
+    phone           TEXT NOT NULL DEFAULT '',
+    email           TEXT NOT NULL DEFAULT '',
+    contact         TEXT NOT NULL DEFAULT '',
     priority        INT          NOT NULL DEFAULT 100
 );
 CREATE INDEX IF NOT EXISTS "IX_dict_supplier_keyword" ON dict_supplier(keyword);

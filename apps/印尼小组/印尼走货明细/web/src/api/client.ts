@@ -109,6 +109,17 @@ export interface Material {
 }
 
 export interface HsDict      { keyword: string; hsCN?: string; hsID?: string }
-export interface SupplierDict{ keyword: string; full?: string; customs?: string }
+export interface SupplierDict {
+  id?: number
+  keyword: string
+  full?: string
+  customs?: string
+  nameEn?: string
+  addressZh?: string
+  addressEn?: string
+  phone?: string
+  email?: string
+  contact?: string
+}
 export interface TranslationDict { keyword: string; english: string; active?: boolean; source?: string }
 export interface Dictionaries { hs: HsDict[]; suppliers: SupplierDict[]; translations: TranslationDict[] }

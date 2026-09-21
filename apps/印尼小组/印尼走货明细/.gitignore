@@ -3,6 +3,7 @@
 **/node_modules/
 **/dist/
 publish/
+offline-publish/
 logs/
 *.log
 *.user

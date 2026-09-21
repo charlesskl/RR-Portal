@@ -101,6 +101,10 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
+// 云端反向代理会剥离 /indo-shipping；本机直连 5180 时保留该前缀。
+// 同时接受两种入口，避免前端资源在本地直连时返回 404 白屏。
+app.UsePathBase("/indo-shipping");
+app.UseRouting();
 app.UseCors();
 app.UseAuthentication();
 app.UseMiddleware<ApiPermissionMiddleware>();

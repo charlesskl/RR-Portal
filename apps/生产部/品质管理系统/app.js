@@ -326,8 +326,15 @@ function closeCompanySwitch() {
 }
 function swBackToSites()           { _swView = 'sites'; renderCompanySwitch(); }
 function swSelectSite(siteId)      { _swSite = siteId;  _swView = 'subs'; renderCompanySwitch(); }
+/* 换子公司一次性免登录票据（全局 key，不按公司前缀；用后即焚） */
+const SWITCH_TICKET_KEY = 'xingxin_qms_switch_ticket';
 function swPickCompany(id) {
   if (id === getCompany()) { closeCompanySwitch(); return; }
+  try {
+    const sess = getCurrentUser();
+    const me   = sess && _getUsers().find(u => u.username === sess.username);
+    if (me) localStorage.setItem(SWITCH_TICKET_KEY, JSON.stringify({ username: me.username, pwd: me.password, ts: Date.now() }));
+  } catch(e) {}
   pickCompany(id);   /* 换公司：落盘 + reload，bootstrap 拉新公司数据 */
 }
 function renderCompanySwitch() {
@@ -472,6 +479,16 @@ function applyPermissions() {
 /* ── requireLogin：启动时鉴权 ── */
 function requireLogin() {
   initUsers();
+  /* 换子公司免登录：一次性票据（10 分钟内有效，用后即焚）；
+     目标公司存在同名+同密码+启用中的账号 → 直接进入，否则走正常登录页 */
+  try {
+    const t = JSON.parse(localStorage.getItem(SWITCH_TICKET_KEY) || 'null');
+    localStorage.removeItem(SWITCH_TICKET_KEY);
+    if (t && t.username && t.pwd && Date.now() - (t.ts || 0) < 10 * 60 * 1000) {
+      const u = _getUsers().find(x => x.username === t.username && x.password === t.pwd && x.enabled);
+      if (u) { _saveSession(u); _showApp(); return; }
+    }
+  } catch(e) {}
   const sess = getCurrentUser();
   if (!sess) { _showLogin(); return; }
 

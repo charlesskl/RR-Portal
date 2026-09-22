@@ -656,14 +656,20 @@ export default function ShipmentsPage() {
 
     setExporting(true)
     try {
-      const { buildCustomsWorkbook, customsFileName, dataUrlToBytes } = await import('../utils/customsExport')
+      const { buildCustomsWorkbook, customsFileName, dataUrlToBytes, isIndonesiaBlHead } = await import('../utils/customsExport')
       // 1) RRI/RRM 模板本身已按顺序预留多份合同、发票和装箱单；整票只生成一个工作簿。
       const templateName = String(v.customer || '').toUpperCase().includes('RRI')
         ? 'template-customs-rri.xlsx'
         : 'template-customs-rrm.xlsx'
-      const tplResp = await fetch(publicAsset(import.meta.env.BASE_URL, templateName))
+      const [tplResp, indonesiaTplResp] = await Promise.all([
+        fetch(publicAsset(import.meta.env.BASE_URL, templateName)),
+        fetch(publicAsset(import.meta.env.BASE_URL, 'template-customs.xlsx')),
+      ])
       if (!tplResp.ok) throw new Error(`模板加载失败 ${templateName} (HTTP ${tplResp.status})`)
-      const templateBuffer = await tplResp.arrayBuffer()
+      if (!indonesiaTplResp.ok) throw new Error(`印尼单据模板加载失败 (HTTP ${indonesiaTplResp.status})`)
+      const [templateBuffer, indonesiaTemplateBuffer] = await Promise.all([
+        tplResp.arrayBuffer(), indonesiaTplResp.arrayBuffer(),
+      ])
       // 2) 物料富化：products → materials by code → material_id 映射
       const { data: prods } = await api.get<any[]>('/products')
       const productHs = new Map<string, { hsCN?: string; hsID?: string }>()
@@ -692,22 +698,24 @@ export default function ShipmentsPage() {
         customer: v.customer, containerNo: v.container_no, containerCount: v.container_count,
         shipDate: v.ship_date, blNo: v.bl_no, rate: v.rate,
       }
-      const { documentSellerForLine } = await import('../utils/supplierProfiles')
+      const { documentSellerForLine, supplierForLine } = await import('../utils/supplierProfiles')
       const { data: dictionaries } = await api.get<Dictionaries>('/dictionaries')
       const sellerKeys = new Set<string>()
       for (const item of items) {
         const material = materials.get(item.material_id!)
-        const seller = documentSellerForLine(
-          item.supplier || material?.supplier || '',
-          item.customs_company || material?.customs_company || '',
-          dictionaries.suppliers || [],
-        )
+        const seller = isIndonesiaBlHead(item.bl_head)
+          ? supplierForLine(item.supplier || material?.supplier || '', dictionaries.suppliers || [])
+          : documentSellerForLine(
+            item.supplier || material?.supplier || '',
+            item.customs_company || material?.customs_company || '',
+            dictionaries.suppliers || [],
+          )
         if (!seller.id) throw new Error(`供应商「${seller.keyword}」缺少档案编号`)
         sellerKeys.add(String(seller.id))
       }
       const fname = customsFileName(form2)
       const blob = await buildCustomsWorkbook({
-        templateBuffer, items, materials, productHs, images, form: form2,
+        templateBuffer, indonesiaTemplateBuffer, items, materials, productHs, images, form: form2,
         supplierProfiles: dictionaries.suppliers || [],
       })
       const a = document.createElement('a')

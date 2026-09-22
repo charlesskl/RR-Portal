@@ -80,6 +80,12 @@ public class UsersController(AppDbContext db) : ControllerBase
         var u = await db.Users.FindAsync(id);
         if (u is null) return NotFound(new { error = "用户不存在" });
 
+        var currentId = int.Parse(User.FindFirst("userId")!.Value);
+        if (currentId == id && req.Role is not null && req.Role != "admin")
+            return BadRequest(new { error = "不能取消自己的管理员权限" });
+        if (currentId == id && req.IsActive == false)
+            return BadRequest(new { error = "不能停用自己的账号" });
+
         if (req.DisplayName is not null) u.DisplayName = req.DisplayName;
         if (req.Role is not null)
         {

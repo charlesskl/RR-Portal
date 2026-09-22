@@ -80,6 +80,31 @@ public class UsersApiTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Create_Manager_RequiresAndKeepsOneFactory()
+    {
+        await LoginAsync("admin", "admin123");
+        var resp = await _client.PostAsJsonAsync("/api/users",
+            new { username = "huadeng_manager", password = "pass123", displayName = "华登主管", role = "manager", factoryId = "HUADENG" });
+
+        Assert.Equal(HttpStatusCode.Created, resp.StatusCode);
+        var user = await resp.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>();
+        Assert.Equal("manager", user.GetProperty("role").GetString());
+        Assert.Equal("HUADENG", user.GetProperty("factoryId").GetString());
+    }
+
+    [Fact]
+    public async Task Manager_CannotUseGlobalUserManagement()
+    {
+        await LoginAsync("admin", "admin123");
+        (await _client.PostAsJsonAsync("/api/users",
+            new { username = "factory_manager", password = "pass123", displayName = "厂区主管", role = "manager", factoryId = "XINGXIN" })).EnsureSuccessStatusCode();
+        await LoginAsync("factory_manager", "pass123");
+
+        Assert.Equal(HttpStatusCode.Forbidden, (await _client.GetAsync("/api/users")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await _client.GetAsync("/api/orders")).StatusCode);
+    }
+
+    [Fact]
     public async Task Create_DuplicateUsername_Returns409()
     {
         await LoginAsync("admin", "admin123");

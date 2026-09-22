@@ -28,9 +28,13 @@ public class OrderPricingAndProcessScheduleTests : IAsyncLifetime
         var detail = await _client.GetFromJsonAsync<JsonElement>($"/api/orders/{orderId}");
         Assert.Equal(2, detail.GetProperty("products").GetArrayLength());
         var parts = detail.GetProperty("partQtys").EnumerateArray().ToArray();
+        int lineId;
+        using (var lineScope = _factory.Services.CreateScope())
+            lineId = await lineScope.ServiceProvider.GetRequiredService<AppDbContext>().ProductionLines
+                .Where(line => line.CraftType == "移印").Select(line => line.Id).FirstAsync();
         var schedule = await _client.PostAsJsonAsync($"/api/orders/{orderId}/process-schedule", new
         {
-            rows = parts.Select(part => new { partQtyId = part.GetProperty("id").GetInt32(), startDate = "2026-09-20", craft = "移印", dailyTarget = 1000, laborPrice = 0.08 }),
+            rows = parts.Select(part => new { partQtyId = part.GetProperty("id").GetInt32(), startDate = "2026-09-20", lineId, dailyTarget = 1000, laborPrice = 0.08 }),
         });
         Assert.Equal(HttpStatusCode.Created, schedule.StatusCode);
         using var scope = _factory.Services.CreateScope();
@@ -82,14 +86,19 @@ public class OrderPricingAndProcessScheduleTests : IAsyncLifetime
     [Fact]
     public async Task ProcessSchedule_ConcurrentCrafts_CreateIndependentDailyPlans()
     {
+        int uvLineId;
+        int padPrintLineId;
         using (var setupScope = _factory.Services.CreateScope())
         {
             var setupDb = setupScope.ServiceProvider.GetRequiredService<AppDbContext>();
-            setupDb.ProductionLines.Add(new SprayPlan.Api.Entities.ProductionLine
+            var uvLine = new SprayPlan.Api.Entities.ProductionLine
             {
                 Name = "UV拉", Workshop = "测试", CraftType = "UV", IsActive = true,
-            });
+            };
+            setupDb.ProductionLines.Add(uvLine);
             await setupDb.SaveChangesAsync();
+            uvLineId = uvLine.Id;
+            padPrintLineId = await setupDb.ProductionLines.Where(line => line.CraftType == "移印").Select(line => line.Id).FirstAsync();
         }
         var productResponse = await _client.PostAsJsonAsync("/api/products", new
         {
@@ -113,8 +122,8 @@ public class OrderPricingAndProcessScheduleTests : IAsyncLifetime
         {
             rows = new[]
             {
-                new { partQtyId, startDate = "2026-08-13", craft = "移印", dailyTarget = 100, laborPrice = 0.12 },
-                new { partQtyId, startDate = "2026-08-13", craft = "UV", dailyTarget = 125, laborPrice = 0.34 },
+                new { partQtyId, startDate = "2026-08-13", lineId = padPrintLineId, dailyTarget = 100, laborPrice = 0.12 },
+                new { partQtyId, startDate = "2026-08-13", lineId = uvLineId, dailyTarget = 125, laborPrice = 0.34 },
             },
         });
         Assert.Equal(HttpStatusCode.Created, scheduleResponse.StatusCode);
@@ -136,5 +145,50 @@ public class OrderPricingAndProcessScheduleTests : IAsyncLifetime
         Assert.Equal(0.34, savedRules.Single(part => part.Craft == "UV").LaborPrice, 6);
         Assert.All(savedRules, part => Assert.Equal(2, part.CraftPasses));
         Assert.Equal(0.2, savedRules.Sum(part => part.UnitCost), 6);
+    }
+
+    [Fact]
+    public async Task ProcessSchedule_UsesTheExactSelectedLineWhenCraftIsShared()
+    {
+        int firstLineId;
+        int selectedLineId;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            firstLineId = await db.ProductionLines.Where(line => line.CraftType == "移印").Select(line => line.Id).FirstAsync();
+            var second = new SprayPlan.Api.Entities.ProductionLine
+            {
+                Name = "移印B拉", Workshop = "测试", CraftType = "移印", IsActive = true,
+            };
+            db.ProductionLines.Add(second);
+            await db.SaveChangesAsync();
+            selectedLineId = second.Id;
+        }
+        var productResponse = await _client.PostAsJsonAsync("/api/products", new
+        {
+            productNo = "EXACT-LINE-1", parts = new[] { new { partName = "外壳", unitCost = 0.2 } },
+        });
+        productResponse.EnsureSuccessStatusCode();
+        var productId = (await productResponse.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetInt32();
+        var product = await _client.GetFromJsonAsync<JsonElement>($"/api/products/{productId}");
+        var sourcePartId = product.GetProperty("parts")[0].GetProperty("id").GetInt32();
+        var orderResponse = await _client.PostAsJsonAsync("/api/orders", new
+        {
+            externalOrderNo = "EXACT-LINE-ORDER", productId, orderDate = "2026-09-22",
+            partQtys = new[] { new { partName = "外壳", sourcePartId, qty = 100 } },
+        });
+        var orderId = (await orderResponse.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetInt32();
+        var detail = await _client.GetFromJsonAsync<JsonElement>($"/api/orders/{orderId}");
+        var partQtyId = detail.GetProperty("partQtys")[0].GetProperty("id").GetInt32();
+
+        var response = await _client.PostAsJsonAsync($"/api/orders/{orderId}/process-schedule", new
+        {
+            rows = new[] { new { partQtyId, startDate = "2026-09-23", lineId = selectedLineId, dailyTarget = 100, laborPrice = 0.1 } },
+        });
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        using var verifyScope = _factory.Services.CreateScope();
+        var plans = await verifyScope.ServiceProvider.GetRequiredService<AppDbContext>().ProductionPlans.Where(plan => plan.OrderId == orderId).ToListAsync();
+        Assert.All(plans, plan => Assert.Equal(selectedLineId, plan.LineId));
+        Assert.DoesNotContain(plans, plan => plan.LineId == firstLineId);
     }
 }

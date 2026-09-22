@@ -20,9 +20,10 @@ public static class PdfTableExtractor
     public record ImportHead(string ExternalOrderNo, DateTime OrderDate, DateTime? DeliveryDate);
 
     // 表头各列的文本（顺序即从左到右）。用于定位列中心 X。
-    private static readonly string[] HeaderTexts =
+    private static readonly string[][] HeaderTexts =
     {
-        "款号", "物料名称", "用料名称", "颜色", "单重G", "总重KG", "数量", "单价", "金额(HK$)", "备注"
+        ["款号", "货号"], ["物料名称", "货物名称"], ["用料名称", "模具编号"], ["颜色", "颜色编号"],
+        ["单重G", "料型"], ["总重KG"], ["数量", "订单数量PCS"], ["单价", "加工单价"], ["金额(HK$)", "金额"], ["备注"]
     };
 
     // 视觉行聚类容差（同一视觉行的 Top 差不超过此值）。真实行内词 Top 差 < 3。
@@ -112,7 +113,7 @@ public static class PdfTableExtractor
         {
             foreach (var w in pageWords)
             {
-                if (w.Text == HeaderTexts[i])
+                if (HeaderTexts[i].Any(alias => w.Text.Replace(" ", "").Equals(alias, StringComparison.OrdinalIgnoreCase)))
                     candidates.Add((i, w));
             }
         }
@@ -146,7 +147,7 @@ public static class PdfTableExtractor
         double footerTop = 0;
         foreach (var w in pageWords)
         {
-            if (w.Top < geo.HeaderTop && w.Text.Contains("TOTAL"))
+            if (w.Top < geo.HeaderTop && (w.Text.Contains("TOTAL") || w.Text.Contains("合计")))
             {
                 if (w.Top > footerTop) footerTop = w.Top;
             }
@@ -328,7 +329,7 @@ public static class PdfTableExtractor
     // ─────────────────────────────────────────────────────────────────────────
     // ExtractHead：抬头字段（标签近邻取值），从第 1 页抽取。
     // ─────────────────────────────────────────────────────────────────────────
-    private static readonly Regex CnDate = new(@"(\d{4})年(\d{2})月(\d{2})日", RegexOptions.Compiled);
+    private static readonly Regex CnDate = new(@"(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日", RegexOptions.Compiled);
 
     public static ImportHead ExtractHead(IReadOnlyList<PdfWord> words)
     {
@@ -340,15 +341,19 @@ public static class PdfTableExtractor
         // 取标签词右侧（Left 更大）同一行里的首个词。
         PdfWord? RightOf(PdfWord label) =>
             page1
-                .Where(w => Math.Abs(w.Top - label.Top) <= RowClusterTol && w.Left > label.Left)
+                .Where(w => Math.Abs(w.Top - label.Top) <= 8 && w.Left > label.Left)
                 .OrderBy(w => w.Left)
                 .FirstOrDefault();
 
         // 1) 订单编号：标签右侧词
         string externalOrderNo = "";
         var orderNoLabel = page1.FirstOrDefault(w => w.Text.Contains("订单编号"));
-        if (orderNoLabel != null && RightOf(orderNoLabel) is PdfWord onv)
-            externalOrderNo = onv.Text.Trim();
+        if (orderNoLabel != null)
+        {
+            var inline = Regex.Match(orderNoLabel.Text, @"\d{6,}");
+            if (inline.Success) externalOrderNo = inline.Value;
+            else if (RightOf(orderNoLabel) is PdfWord onv) externalOrderNo = onv.Text.Trim();
+        }
 
         // 2) 日期：标签"日 期："可能被拆成多词("日" + "期：")。
         //    先找含"日"且其同行右侧能解析出中文日期的标签行。
@@ -360,12 +365,20 @@ public static class PdfTableExtractor
             && !w.Text.Contains("交货") && !w.Text.Contains("付款"));
         if (qiLabel != null)
         {
-            var dateWord = page1
-                .Where(w => Math.Abs(w.Top - qiLabel.Top) <= RowClusterTol && w.Left > qiLabel.Left)
-                .Select(w => CnDate.Match(w.Text))
-                .FirstOrDefault(m => m.Success);
+            var rowText = string.Concat(page1.Where(w => Math.Abs(w.Top - qiLabel.Top) <= RowClusterTol && w.Left > qiLabel.Left)
+                .OrderBy(w => w.Left).Select(w => w.Text));
+            var dateWord = CnDate.Match(rowText);
             if (dateWord != null && dateWord.Success)
                 orderDate = ToDate(dateWord);
+        }
+
+        // “喷油采购单”把下单日期放在页脚签核时间中，没有传统的“日期”抬头。
+        if (orderDate == default)
+        {
+            var allRows = page1.GroupBy(w => Math.Round(w.Top / RowClusterTol) * RowClusterTol)
+                .Select(group => string.Concat(group.OrderBy(w => w.Left).Select(w => w.Text)));
+            var dates = allRows.Select(text => CnDate.Match(text)).Where(match => match.Success).Select(ToDate).ToList();
+            if (dates.Count > 0) orderDate = dates.Min();
         }
 
         // 3) 交货日期：含"交货日期"标签，其右侧中文日期；
@@ -375,12 +388,28 @@ public static class PdfTableExtractor
         var delLabel = page1.FirstOrDefault(w => w.Text.Contains("交货日期"));
         if (delLabel != null)
         {
-            var m = page1
-                .Where(w => Math.Abs(w.Top - delLabel.Top) <= RowClusterTol)
-                .Select(w => CnDate.Match(w.Text))
-                .FirstOrDefault(x => x.Success);
+            var rowText = string.Concat(page1.Where(w => Math.Abs(w.Top - delLabel.Top) <= RowClusterTol)
+                .OrderBy(w => w.Left).Select(w => w.Text));
+            var m = CnDate.Match(rowText);
             if (m != null && m.Success)
                 deliveryDate = ToDate(m);
+        }
+        if (deliveryDate is null)
+        {
+            var visualRows = new List<List<PdfWord>>();
+            foreach (var word in page1.OrderByDescending(w => w.Top))
+            {
+                var row = visualRows.FirstOrDefault(items => Math.Abs(items[0].Top - word.Top) <= 8);
+                if (row is null) { row = []; visualRows.Add(row); }
+                row.Add(word);
+            }
+            foreach (var row in visualRows)
+            {
+                var text = string.Concat(row.OrderBy(w => w.Left).Select(w => w.Text));
+                if (!text.Contains("交货")) continue;
+                var m = CnDate.Match(text);
+                if (m.Success) { deliveryDate = ToDate(m); break; }
+            }
         }
 
         return new ImportHead(externalOrderNo, orderDate, deliveryDate);

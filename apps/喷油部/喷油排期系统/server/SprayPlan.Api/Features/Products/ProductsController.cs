@@ -84,7 +84,7 @@ public class ProductsController(AppDbContext db) : ControllerBase
     }
 
     [HttpPost]
-    [Authorize(Roles = "clerk,admin")]
+    [Authorize(Roles = "clerk,manager,admin")]
     public async Task<IActionResult> Create([FromBody] CreateProductRequest req)
     {
         if (string.IsNullOrWhiteSpace(req.ProductNo)) return BadRequest(new { error = "货号必填" });
@@ -117,7 +117,7 @@ public class ProductsController(AppDbContext db) : ControllerBase
     }
 
     [HttpPatch("{id:int}")]
-    [Authorize(Roles = "clerk,admin")]
+    [Authorize(Roles = "clerk,manager,admin")]
     public async Task<IActionResult> Update(int id, [FromBody] UpdateProductRequest req)
     {
         var product = await db.Products.FindAsync(id);
@@ -128,7 +128,7 @@ public class ProductsController(AppDbContext db) : ControllerBase
         if (req.Status is not null)
         {
             if (!ProductStatuses.Contains(req.Status)) return BadRequest(new { error = "状态无效" });
-            if (req.Status == "active" && !User.IsInRole("admin")) return StatusCode(403, new { error = "只有管理员能审核通过" });
+            if (req.Status == "active" && !User.IsInRole("admin") && !User.IsInRole("manager")) return StatusCode(403, new { error = "只有管理员或主管能审核通过" });
             product.Status = req.Status;
         }
         product.LastUpdatedBy = CurrentUser();
@@ -138,7 +138,7 @@ public class ProductsController(AppDbContext db) : ControllerBase
     }
 
     [HttpDelete("{id:int}")]
-    [Authorize(Roles = "clerk,admin")]
+    [Authorize(Roles = "clerk,manager,admin")]
     public async Task<IActionResult> Delete(int id)
     {
         var product = await db.Products.FindAsync(id);
@@ -152,7 +152,7 @@ public class ProductsController(AppDbContext db) : ControllerBase
     // DELETE /api/products/recycle-bin — 永久清空核价回收站（主管专属）。
     // 已被订单引用的产品必须保留，避免破坏历史订单；其余产品连同库存流水一起清除。
     [HttpDelete("recycle-bin")]
-    [Authorize(Roles = "admin")]
+    [Authorize(Roles = "manager,admin")]
     public async Task<IActionResult> EmptyRecycleBin()
     {
         var archived = await db.Products.Where(product => product.Status == "archived").ToListAsync();
@@ -177,7 +177,7 @@ public class ProductsController(AppDbContext db) : ControllerBase
     }
 
     [HttpPatch("{id:int}/parts")]
-    [Authorize(Roles = "clerk,admin")]
+    [Authorize(Roles = "clerk,manager,admin")]
     public async Task<IActionResult> SavePricingTable(int id, [FromBody] SavePricingTableRequest req)
     {
         var product = await db.Products.Include(product => product.Parts).FirstOrDefaultAsync(product => product.Id == id);
@@ -213,7 +213,7 @@ public class ProductsController(AppDbContext db) : ControllerBase
     }
 
     [HttpPost("{id:int}/parts")]
-    [Authorize(Roles = "clerk,admin")]
+    [Authorize(Roles = "clerk,manager,admin")]
     public async Task<IActionResult> AddPart(int id, [FromBody] AddPartRequest req)
     {
         if (string.IsNullOrWhiteSpace(req.PartName)) return BadRequest(new { error = "部位名必填" });
@@ -241,7 +241,7 @@ public class ProductsController(AppDbContext db) : ControllerBase
     }
 
     [HttpPatch("{id:int}/parts/{partId:int}")]
-    [Authorize(Roles = "clerk,admin")]
+    [Authorize(Roles = "clerk,manager,admin")]
     public async Task<IActionResult> UpdatePart(int id, int partId, [FromBody] UpdatePartRequest req)
     {
         var product = await db.Products.Include(product => product.Parts).FirstOrDefaultAsync(product => product.Id == id);
@@ -274,7 +274,7 @@ public class ProductsController(AppDbContext db) : ControllerBase
     }
 
     [HttpDelete("{id:int}/parts/{partId:int}")]
-    [Authorize(Roles = "clerk,admin")]
+    [Authorize(Roles = "clerk,manager,admin")]
     public async Task<IActionResult> DeletePart(int id, int partId)
     {
         var part = await db.ProductParts.FirstOrDefaultAsync(part => part.Id == partId && part.ProductId == id);

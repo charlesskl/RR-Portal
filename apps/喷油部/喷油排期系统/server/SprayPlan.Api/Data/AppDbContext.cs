@@ -247,7 +247,7 @@ public class AppDbContext : DbContext
         ia.Property(x => x.Remark).HasColumnName("remark");
 
         // 厂区数据隔离统一放在数据库查询层，避免任何接口漏写 Where 条件。
-        // 管理员/主管的用户管理始终显示全部账号，不受当前业务厂区选择影响。
+        // 管理员的用户管理始终显示全部账号，不受当前业务厂区选择影响。
         u.HasQueryFilter(x => CanSeeAllFactories || IsAdmin || x.FactoryId == CurrentFactoryId);
         o.HasQueryFilter(x => CanSeeAllFactories || x.FactoryId == CurrentFactoryId);
         l.HasQueryFilter(x => CanSeeAllFactories || x.FactoryId == CurrentFactoryId);

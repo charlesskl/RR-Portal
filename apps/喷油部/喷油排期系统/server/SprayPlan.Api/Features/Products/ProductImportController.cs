@@ -13,7 +13,7 @@ namespace SprayPlan.Api.Features.Products;
 // 写权限：文员/主管（与产品其它写操作一致）。
 [ApiController]
 [Route("api/products/import")]
-[Authorize(Roles = "clerk,admin")]
+    [Authorize(Roles = "clerk,manager,admin")]
 public class ProductImportController(AppDbContext db) : ControllerBase
 {
     static readonly string[] ImportFields = { "dailyCapacity", "stdMachineCount", "laborPrice", "unitCost", "paintCost", "quotedPrice", "remark", "craft", "craftDetail" };

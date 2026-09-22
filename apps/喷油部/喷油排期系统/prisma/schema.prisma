@@ -15,14 +15,15 @@ datasource db {
 
 // 用户表：支持后台登录的账号
 // role 取值约定（字符串而非 enum，SQLite + Prisma v6 简化处理）：
-//   - 'admin'  → 主管（拥有全部权限）
+//   - 'admin'  → 管理员（拥有全部厂区权限）
+//   - 'manager' → 主管（拥有所属厂区的管理权限）
 //   - 'clerk'  → 文员 / 拉长（录入与排程）
 model User {
   id           Int       @id @default(autoincrement())
   username     String    @unique
   passwordHash String
   displayName  String
-  role         String // 'admin' | 'clerk'
+  role         String // 'admin' | 'manager' | 'clerk'
   factoryId    String    @default("XINGXIN") // XINGXIN | HUADENG | ALL（总部管理员）
   isActive     Boolean   @default(true)
   createdAt    DateTime  @default(now())

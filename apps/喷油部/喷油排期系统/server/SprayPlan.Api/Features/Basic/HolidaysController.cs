@@ -24,7 +24,7 @@ public class HolidaysController(AppDbContext db) : ControllerBase
     }
 
     [HttpPost]
-    [Authorize(Roles = "clerk,admin")]
+    [Authorize(Roles = "clerk,manager,admin")]
     public async Task<IActionResult> Create([FromBody] CreateHolidayRequest req)
     {
         if (string.IsNullOrWhiteSpace(req.Date)) return BadRequest(new { error = "日期必填" });
@@ -46,7 +46,7 @@ public class HolidaysController(AppDbContext db) : ControllerBase
 
     // PATCH /api/holidays/{id} —— 编辑（文员或主管）：可改日期/类型/备注
     [HttpPatch("{id:int}")]
-    [Authorize(Roles = "clerk,admin")]
+    [Authorize(Roles = "clerk,manager,admin")]
     public async Task<IActionResult> Update(int id, [FromBody] UpdateHolidayRequest req)
     {
         var holiday = await db.Holidays.FindAsync(id);
@@ -74,7 +74,7 @@ public class HolidaysController(AppDbContext db) : ControllerBase
     }
 
     [HttpDelete("{id:int}")]
-    [Authorize(Roles = "clerk,admin")]
+    [Authorize(Roles = "clerk,manager,admin")]
     public async Task<IActionResult> Delete(int id)
     {
         var holiday = await db.Holidays.FindAsync(id);

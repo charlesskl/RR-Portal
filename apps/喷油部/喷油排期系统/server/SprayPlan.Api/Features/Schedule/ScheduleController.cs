@@ -225,7 +225,7 @@ public class ScheduleController(AppDbContext db) : ControllerBase
 
     // POST /api/schedule/auto —— 月排「生成预览」：读库 → 倒排算法 → 返回草稿 + 提示清单，不落库。
     [HttpPost("auto")]
-    [Authorize(Roles = "clerk,admin")]
+    [Authorize(Roles = "clerk,manager,admin")]
     public async Task<IActionResult> AutoGenerate([FromBody] AutoScheduleRequest req)
     {
         if (string.IsNullOrWhiteSpace(req.Month) || string.IsNullOrWhiteSpace(req.Today))
@@ -305,7 +305,7 @@ public class ScheduleController(AppDbContext db) : ControllerBase
     // POST /api/schedule/auto/commit —— 月排「保存/重排」：把草稿写入 production_plans。
     // rebuild 模式先软删本月未录实绩(status=planned)计划行；草稿含真实拉别(由算法分配)，按行写 LineId。
     [HttpPost("auto/commit")]
-    [Authorize(Roles = "clerk,admin")]
+    [Authorize(Roles = "clerk,manager,admin")]
     public async Task<IActionResult> AutoCommit([FromBody] CommitAutoRequest req)
     {
         if (string.IsNullOrWhiteSpace(req.Month) || req.Draft is null || req.Draft.Count == 0)
@@ -392,7 +392,7 @@ public class ScheduleController(AppDbContext db) : ControllerBase
     // 软删该订单全部未删计划行，订单状态退回 received（不删订单）。
     // 已录实绩(recorded)的订单禁止撤销，避免丢实绩数据。
     [HttpPost("orders/{orderId:int}/unschedule")]
-    [Authorize(Roles = "clerk,admin")]
+    [Authorize(Roles = "clerk,manager,admin")]
     public async Task<IActionResult> Unschedule(int orderId)
     {
         var order = await db.Orders.FindAsync(orderId);

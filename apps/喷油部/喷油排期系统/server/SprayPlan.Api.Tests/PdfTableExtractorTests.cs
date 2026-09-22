@@ -8,6 +8,50 @@ namespace SprayPlan.Api.Tests;
 public class PdfTableExtractorTests
 {
     [Fact]
+    public void ExtractHuadengSprayPurchaseOrder_RecognizesTwoProductsAndHead()
+    {
+        static PdfWord W(string text, double x, double y, double width = 40) =>
+            new(1, text, x, x + width, y - 10, y);
+        var words = new List<PdfWord>
+        {
+            W("订单编号：", 610, 500, 70), W("2026092101", 690, 500, 80),
+            W("货号", 45, 400), W("模具编号", 150, 400), W("货物名称", 260, 400), W("颜色编号", 380, 400),
+            W("料型", 500, 400), W("订单数量PCS", 610, 400, 80), W("目标数", 700, 400), W("加工单价", 780, 400), W("金额", 860, 400), W("备注", 940, 400),
+            W("995159", 45, 370), W("TIUK-E73906-S01", 145, 370, 90), W("喷射套装栗宝宝", 255, 370, 90), W("3800", 625, 370), W("0.97", 785, 370),
+            W("096283", 45, 340), W("TIUK-E73907-S02", 145, 340, 90), W("喷射套装蘑菇", 255, 340, 90), W("3400", 625, 340), W("0.55", 785, 340),
+            W("合计", 780, 310),
+            W("1.", 10, 280), W("2026", 30, 280), W("年", 70, 280), W("10月", 90, 280), W("30", 125, 280), W("日前交货", 150, 280),
+            W("时间：", 700, 100), W("2026", 750, 100), W("年", 790, 100), W("9", 810, 100), W("月", 825, 100), W("21", 845, 100), W("日", 870, 100),
+        };
+
+        var rows = PdfTableExtractor.ExtractProductRows(words);
+        Assert.Collection(rows,
+            first => { Assert.Equal("995159", first.ProductNo); Assert.Equal("喷射套装栗宝宝", first.ItemRaw); Assert.Equal(3800, first.Qty); Assert.Equal(0.97, first.UnitPrice, 6); },
+            second => { Assert.Equal("096283", second.ProductNo); Assert.Equal("喷射套装蘑菇", second.ItemRaw); Assert.Equal(3400, second.Qty); Assert.Equal(0.55, second.UnitPrice, 6); });
+        var head = PdfTableExtractor.ExtractHead(words);
+        Assert.Equal("2026092101", head.ExternalOrderNo);
+        Assert.Equal(new DateTime(2026, 9, 21), head.OrderDate);
+        Assert.Equal(new DateTime(2026, 10, 30), head.DeliveryDate);
+    }
+
+    [Fact]
+    public void HuadengSprayPurchaseOrder_RealPdf_WhenProvided()
+    {
+        var path = Environment.GetEnvironmentVariable("SPRAYPLAN_HUADENG_PURCHASE_PDF");
+        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return;
+        using var source = File.OpenRead(path);
+        var words = PdfWordSource.Extract(source);
+        var rows = PdfTableExtractor.ExtractProductRows(words);
+        Assert.Collection(rows,
+            first => { Assert.Equal("995159", first.ProductNo); Assert.Equal(3800, first.Qty); },
+            second => { Assert.Equal("096283", second.ProductNo); Assert.Equal(3400, second.Qty); });
+        var head = PdfTableExtractor.ExtractHead(words);
+        Assert.Equal("2026092101", head.ExternalOrderNo);
+        Assert.Equal(new DateTime(2026, 9, 21), head.OrderDate);
+        Assert.Equal(new DateTime(2026, 10, 30), head.DeliveryDate);
+    }
+
+    [Fact]
     public void OcrImageSample_WhenProvided_RecognizesTwoProductQuantities()
     {
         var path = Environment.GetEnvironmentVariable("SPRAYPLAN_SAMPLE_IMAGE");

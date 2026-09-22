@@ -29,7 +29,7 @@ public class CraftAliasesController(AppDbContext db) : ControllerBase
 
     // POST /api/craft-aliases — 新建一条工序对照
     [HttpPost]
-    [Authorize(Roles = "clerk,admin")]
+    [Authorize(Roles = "clerk,manager,admin")]
     public async Task<IActionResult> Create([FromBody] CreateCraftAliasRequest req)
     {
         // alias 必填校验
@@ -61,7 +61,7 @@ public class CraftAliasesController(AppDbContext db) : ControllerBase
 
     // PATCH /api/craft-aliases/{id} — 编辑（alias 和/或 category 可选传）
     [HttpPatch("{id:int}")]
-    [Authorize(Roles = "clerk,admin")]
+    [Authorize(Roles = "clerk,manager,admin")]
     public async Task<IActionResult> Update(int id, [FromBody] UpdateCraftAliasRequest req)
     {
         var entity = await db.CraftAliases.FindAsync(id);
@@ -95,7 +95,7 @@ public class CraftAliasesController(AppDbContext db) : ControllerBase
 
     // DELETE /api/craft-aliases/{id} — 硬删除
     [HttpDelete("{id:int}")]
-    [Authorize(Roles = "clerk,admin")]
+    [Authorize(Roles = "clerk,manager,admin")]
     public async Task<IActionResult> Delete(int id)
     {
         var entity = await db.CraftAliases.FindAsync(id);

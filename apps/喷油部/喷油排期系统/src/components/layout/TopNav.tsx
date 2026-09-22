@@ -6,12 +6,12 @@ import { clearClientCache } from "@/lib/clientCache";
 import { apiFetch } from "@/lib/apiFetch";
 
 const NAV_ITEMS = [
-  { href: "/",          label: "仪表盘",     allowed: ["admin", "clerk"], ready: true },
-  { href: "/orders",    label: "订单总览",   allowed: ["admin", "clerk"],           ready: true },
-  { href: "/schedule",  label: "排期",       allowed: ["admin", "clerk"],           ready: true  },
-  { href: "/products",  label: "产品核价表", allowed: ["admin", "clerk"],           ready: true },
-  { href: "/inventory", label: "库存",       allowed: ["admin", "clerk"], ready: true },
-  { href: "/basic",     label: "基础数据库", allowed: ["admin", "clerk"],           ready: true },
+  { href: "/",          label: "仪表盘",     allowed: ["admin", "manager", "clerk"], ready: true },
+  { href: "/orders",    label: "订单总览",   allowed: ["admin", "manager", "clerk"], ready: true },
+  { href: "/schedule",  label: "排期",       allowed: ["admin", "manager", "clerk"], ready: true  },
+  { href: "/products",  label: "产品核价表", allowed: ["admin", "manager", "clerk"], ready: true },
+  { href: "/inventory", label: "库存",       allowed: ["admin", "manager", "clerk"], ready: true },
+  { href: "/basic",     label: "基础数据库", allowed: ["admin", "manager", "clerk"], ready: true },
   { href: "/users",     label: "用户管理",   allowed: ["admin"],                    ready: true },
 ];
 

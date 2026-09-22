@@ -15,7 +15,7 @@ namespace SprayPlan.Api.Features.Users;
 [Authorize(Roles = "admin")]
 public class UsersController(AppDbContext db) : ControllerBase
 {
-    static readonly string[] ValidRoles = ["admin", "clerk"];
+    static readonly string[] ValidRoles = ["admin", "manager", "clerk"];
     static readonly string[] ValidFactories = ["XINGXIN", "HUADENG", "ALL"];
 
     // GET /api/users —— 列出所有用户（不含 passwordHash），按 id 升序
@@ -41,7 +41,7 @@ public class UsersController(AppDbContext db) : ControllerBase
             return BadRequest(new { error = "角色无效" });
         var factoryId = req.Role == "admin" ? "ALL" : (string.IsNullOrWhiteSpace(req.FactoryId) ? "XINGXIN" : req.FactoryId);
         if (!ValidFactories.Contains(factoryId) || (factoryId == "ALL" && req.Role != "admin"))
-            return BadRequest(new { error = "厂区无效；只有主管可选择全部厂区" });
+            return BadRequest(new { error = "厂区无效；只有管理员可选择全部厂区" });
 
         if (await db.Users.AnyAsync(u => u.Username == req.Username))
             return Conflict(new { error = "用户名已存在" });
@@ -101,10 +101,10 @@ public class UsersController(AppDbContext db) : ControllerBase
         else if (req.FactoryId is not null)
         {
             if (req.FactoryId is not "XINGXIN" and not "HUADENG")
-                return BadRequest(new { error = "文员必须选择兴信或华登厂区" });
+                return BadRequest(new { error = "主管或文员必须选择兴信或华登厂区" });
             u.FactoryId = req.FactoryId;
         }
-        else if (u.FactoryId == "ALL") return BadRequest(new { error = "文员必须选择所属厂区" });
+        else if (u.FactoryId == "ALL") return BadRequest(new { error = "主管或文员必须选择所属厂区" });
         if (!string.IsNullOrEmpty(req.NewPassword)) u.PasswordHash = PasswordService.Hash(req.NewPassword);
         u.UpdatedAt = DateTime.UtcNow;
 

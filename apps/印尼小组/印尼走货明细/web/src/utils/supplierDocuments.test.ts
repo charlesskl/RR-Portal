@@ -5,6 +5,8 @@ import JSZip from 'jszip'
 import { buildCustomsWorkbook } from './customsExport'
 
 const templateBuffer = Uint8Array.from(readFileSync(new URL('../../public/template-customs.xlsx', import.meta.url))).buffer
+const rriTemplateBuffer = Uint8Array.from(readFileSync(new URL('../../public/template-customs-rri.xlsx', import.meta.url))).buffer
+const rrmTemplateBuffer = Uint8Array.from(readFileSync(new URL('../../public/template-customs-rrm.xlsx', import.meta.url))).buffer
 const seller = {
   keyword: '测试供应商', full: '测试供应商有限公司', nameEn: 'Test Supplier Limited',
   addressZh: '深圳市测试路1号', addressEn: 'No. 1 Test Road, Shenzhen',
@@ -14,6 +16,11 @@ const huashengyiSeller = {
   keyword: '华胜益', full: '深圳市华胜益出口贸易有限公司', nameEn: 'SHENZHEN HUASHENGYI EXPORT TRADING LIMITED',
   addressZh: '深圳市龙华区测试地址', addressEn: 'Test Address, Longhua, Shenzhen',
   phone: '0755-27745367', email: 'test@huashengyi.example', contact: 'Peng Yuqiang',
+}
+const secondSeller = {
+  id: 202, keyword: '乙方供应商', full: '乙方供应商有限公司', nameEn: 'SECOND SUPPLIER LIMITED',
+  addressZh: '东莞市测试路2号', addressEn: 'No. 2 Test Road, Dongguan',
+  phone: '0769-22223333', email: 'sales@second.example', contact: '李小姐',
 }
 
 function tradeTerms(wb: XLSX.WorkBook, sheetNames: string[]) {
@@ -90,6 +97,111 @@ describe('supplier document export', () => {
     expect(new Set(terms)).toEqual(new Set(['FOB IDSRG,Semarang']))
     expect(wb.Sheets['全球合同'].F23.v).toBe('FOB IDSRG,Semarang')
     expect(wb.Sheets['全球发票'].I31.v).toBe('FOB IDSRG,Semarang')
+  })
+
+  it('keeps different sellers in one workbook and lays their documents out in order', async () => {
+    const firstSeller = { ...huashengyiSeller, id: 101 }
+    const items = [
+      {
+        material_id: 1, supplier: secondSeller.keyword, customs_company: '其他报关公司',
+        qty: 1, contract_no: 'C-SECOND', invoice_no: 'I-SECOND',
+      },
+      {
+        material_id: 2, supplier: secondSeller.keyword, customs_company: '深圳市华胜益出口贸易有限公司',
+        qty: 1, contract_no: 'C-HSY', invoice_no: 'I-HSY',
+      },
+    ]
+    const materials = new Map(items.map(item => [item.material_id, {
+      id: item.material_id, supplier: item.supplier, customs_company: item.customs_company,
+      name_zh: `测试物料${item.material_id}`,
+    }]))
+    const file = await buildCustomsWorkbook({
+      templateBuffer: rriTemplateBuffer, items, materials, supplierProfiles: [firstSeller, secondSeller],
+      productHs: new Map(), images: new Map(), form: { customer: 'RRI', containerNo: 'ONE-WORKBOOK' },
+    })
+    const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' })
+
+    expect(wb.Sheets['实业合同'].H5.v).toBe('C-HSY')
+    expect(wb.Sheets['实业合同'].C11.v).toBe(firstSeller.full)
+    expect(wb.Sheets['实业合同'].F23.v).toBe('FOB IDSRG,Semarang')
+    expect(wb.Sheets['实业发票'].B21.v).toBe(firstSeller.full)
+    expect(wb.Sheets['装箱单'].A9.v).toContain('ROYAL REGENT PRODUCTS INDUSTRIES LIMITED')
+    expect(wb.Sheets['装箱单'].A9.v).not.toContain(firstSeller.nameEn)
+
+    expect(wb.Sheets['实业合同'].H50.v).toBe('C-SECOND')
+    expect(wb.Sheets['实业合同'].C56.v).toBe(secondSeller.full)
+    expect(Object.values(wb.Sheets['实业合同']).some((cell: any) => cell?.v === 'CIF IDSRG,Semarang')).toBe(true)
+    expect(wb.Sheets['实业发票'].B65.v).toBe(secondSeller.full)
+    expect(wb.Sheets['装箱单'].A45.v).toContain('ROYAL REGENT PRODUCTS INDUSTRIES LIMITED')
+    expect(wb.Sheets['装箱单'].A45.v).not.toContain(secondSeller.nameEn)
+    expect(wb.SheetNames).toContain('ONE-WORKBOOK')
+    expect(countCellValue(wb, '实业合同', '购销合同\nPurchase Contract')).toBe(2)
+  })
+
+  it('keeps Royal Regent World as the shipper on every RRM packing list', async () => {
+    const items = [
+      { material_id: 1, supplier: seller.keyword, customs_company: '其他报关公司', qty: 1, contract_no: 'RRM-C-1', invoice_no: 'RRM-I-1' },
+      { material_id: 2, supplier: secondSeller.keyword, customs_company: '其他报关公司', qty: 1, contract_no: 'RRM-C-2', invoice_no: 'RRM-I-2' },
+    ]
+    const materials = new Map(items.map(item => [item.material_id, {
+      id: item.material_id, supplier: item.supplier, name_zh: `测试物料${item.material_id}`,
+    }]))
+    const file = await buildCustomsWorkbook({
+      templateBuffer: rrmTemplateBuffer, items, materials, supplierProfiles: [seller, secondSeller],
+      productHs: new Map(), images: new Map(), form: { customer: 'RRM', containerNo: 'RRM-PACKING' },
+    })
+    const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' })
+
+    expect(wb.Sheets['装箱单'].A1.v).toBe('Royal Regent (World) Co. Limited')
+    expect(wb.Sheets['装箱单'].A9.v).toContain('Royal Regent (World) Co. Limited')
+    expect(wb.Sheets['装箱单'].A9.v).not.toContain(seller.nameEn)
+    expect(wb.Sheets['装箱单'].A13.v).toContain('chloe@royalregenthk.com')
+    expect(wb.Sheets['装箱单'].A41.v).toBe('Royal Regent (World) Co. Limited')
+    expect(wb.Sheets['装箱单'].A49.v).toContain('Royal Regent (World) Co. Limited')
+    expect(wb.Sheets['装箱单'].A49.v).not.toContain(secondSeller.nameEn)
+    expect(wb.Sheets['装箱单'].A53.v).toContain('chloe@royalregenthk.com')
+  })
+
+  it('uses Indonesia documents and the actual supplier when the BL header is neither RRI nor RRM', async () => {
+    const item = {
+      material_id: 2,
+      supplier: secondSeller.keyword,
+      customs_company: '深圳市华胜益出口贸易有限公司',
+      bl_head: '东莞市雅洛轩进出口贸易有限公司',
+      qty: 20,
+      kg: 12.5,
+      cartons: 2,
+      contract_no: 'ID-C-1',
+      contract_date: '2026-09-20',
+      invoice_no: 'ID-I-1',
+      invoice_date: '2026-09-21',
+    }
+    const file = await buildCustomsWorkbook({
+      templateBuffer: rrmTemplateBuffer,
+      indonesiaTemplateBuffer: templateBuffer,
+      items: [item],
+      materials: new Map([[2, { id: 2, supplier: secondSeller.keyword, name_zh: '印尼测试物料' }]]),
+      supplierProfiles: [huashengyiSeller, secondSeller],
+      productHs: new Map(), images: new Map(),
+      form: { customer: 'RRM', containerNo: 'INDONESIA-DOCS' },
+    })
+    const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' })
+
+    expect(wb.SheetNames).toContain('印尼合同')
+    expect(wb.SheetNames).toContain('印尼发票')
+    expect(wb.SheetNames).not.toContain('全球合同')
+    expect(wb.SheetNames).not.toContain('全球发票')
+    expect(wb.Sheets['印尼合同'].H7.v).toBe('ID-C-1')
+    expect(XLSX.utils.decode_range(wb.Sheets['印尼合同']['!ref']!).e.r).toBeLessThan(46)
+    expect(wb.Sheets['印尼合同'].C13.v).toBe(secondSeller.full)
+    expect(wb.Sheets['印尼合同'].F25.v).toBe('CIF IDSRG,Semarang')
+    expect(wb.Sheets['印尼发票'].J10.v).toBe('ID-I-1')
+    expect(XLSX.utils.decode_range(wb.Sheets['印尼发票']['!ref']!).e.r).toBeLessThan(39)
+    expect(wb.Sheets['印尼发票'].B10.v).toContain(secondSeller.nameEn)
+    expect(wb.Sheets['印尼发票'].I23.v).toBe('CIF IDSRG,Semarang')
+    expect(wb.Sheets['装箱单'].A1.v).toBe(secondSeller.nameEn)
+    expect(wb.Sheets['装箱单'].A9.v).toContain(secondSeller.nameEn)
+    expect(wb.Sheets['装箱单'].A13.v).toContain(secondSeller.email)
   })
 
   it('exports a main-only combined summary without seller templates', async () => {

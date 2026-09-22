@@ -7,6 +7,7 @@ import * as XLSX from 'xlsx-js-style'
 import JSZip from 'jszip'
 import { DOMParser, XMLSerializer } from '@xmldom/xmldom'
 import type { Material, SupplierDict } from '../api/client'
+import { documentSellerForLine, supplierForLine } from './supplierProfiles'
 import { isPaperRope, shipmentGrossPerPc, shipmentPackingAverageQty, shipmentWeightQuantity } from './shipmentWeight'
 
 export const CUSTOMS_FIXED = '深圳市华胜益出口贸易有限公司'
@@ -106,13 +107,20 @@ export interface CustomsExportForm {
 
 export interface CustomsExportInput {
   templateBuffer: ArrayBuffer
+  indonesiaTemplateBuffer?: ArrayBuffer
   items: CustomsItem[]                              // 已按显示顺序
   materials: Map<number, Material>                  // material_id → 物料主数据
   productHs: Map<string, { hsCN?: string; hsID?: string }> // product_code → 产品级 HS（兜底）
   images: Map<number, { bytes: Uint8Array; ext: string }>  // material_id → 图片
   form: CustomsExportForm
   seller?: SupplierDict
+  supplierProfiles?: SupplierDict[]
   mainOnly?: boolean
+}
+
+export function isIndonesiaBlHead(value?: string) {
+  const head = (value || '').trim()
+  return Boolean(head && !/(?:实业|實業|全球|\bRRI\b|\bRRM\b)/i.test(head))
 }
 
 function fillSeller(wb: XLSX.WorkBook, seller: SupplierDict) {
@@ -169,6 +177,26 @@ function applySellerTradeTerms(wb: XLSX.WorkBook, seller: SupplierDict) {
   put('全球发票', ['I31', 'I84', 'I123'])
   put('印尼合同', ['F25', 'C36', 'F70', 'C91'])
   put('印尼发票', ['I23', 'I55'])
+}
+
+function sellerTradeTerm(seller: SupplierDict) {
+  const names = [seller.keyword, seller.full, seller.nameEn]
+  return names.some(name => /华胜益|HUASHENGYI/i.test(name || '')) ? 'FOB' : 'CIF'
+}
+
+function fillGenericSeller(wb: XLSX.WorkBook, seller: SupplierDict) {
+  const name = seller.full!.trim()
+  const english = seller.nameEn!.trim()
+  const combined = `${name}\n${english}`
+  const address = `${seller.addressZh!.trim()}\n${seller.addressEn!.trim()}\nTEL: ${seller.phone!.trim()}    Email: ${seller.email!.trim()}    ATTN: ${seller.contact!.trim()}`
+  const put = (sheet: string, addresses: string[], value: string) =>
+    addresses.forEach(cell => setPreservingStyle(wb.Sheets[sheet], cell, value))
+  put('发票', ['B1', 'D24', 'D43', 'D45', 'D47'], name)
+  put('发票', ['B2'], `TEL: ${seller.phone!.trim()}    EMAIL: ${seller.email!.trim()}`)
+  put('销售合同', ['B4'], combined)
+  put('销售合同', ['B6'], address)
+  put('装箱单 (2)', ['A3'], `Seller: ${english}    ${seller.phone!.trim()}    ${seller.email!.trim()}`)
+  put('草稿大单-1', ['A6', 'A8'], name)
 }
 
 // 输出文件名：月日+客户+柜数+柜号(报关).xlsx
@@ -278,6 +306,23 @@ function rewriteSheetReferences(wb: XLSX.WorkBook, oldName: string, newName: str
   }
 }
 
+function attachIndonesiaDocumentSheets(wb: XLSX.WorkBook, templateBuffer: ArrayBuffer, mainName: string) {
+  const source = XLSX.read(templateBuffer, { type: 'array', cellFormula: true, cellStyles: true })
+  normalizeWorkbookStyles(source)
+  const sourceMainName = source.SheetNames[1]
+  const sheetNames = ['印尼合同', '印尼发票']
+  const insertAfter = Math.max(wb.SheetNames.indexOf('实业发票'), wb.SheetNames.indexOf('全球发票'))
+  const inserted: string[] = []
+  for (const sheetName of sheetNames) {
+    const sourceSheet = source.Sheets[sheetName]
+    if (!sourceSheet || wb.Sheets[sheetName]) continue
+    wb.Sheets[sheetName] = cloneTemplateValue(sourceSheet)
+    inserted.push(sheetName)
+  }
+  if (inserted.length) wb.SheetNames.splice(insertAfter + 1, 0, ...inserted)
+  if (sourceMainName) rewriteSheetReferences(wb, sourceMainName, mainName)
+}
+
 function replaceTemplateShipmentLiterals(wb: XLSX.WorkBook, form: CustomsExportForm, newName: string) {
   const replacements: Array<[RegExp, string]> = [
     [/WHSU7042278/g, newName],
@@ -352,19 +397,32 @@ function formulaRef(sheetName: string, cell: string) {
   return `='${sheetName.replace(/'/g, "''")}'!${cell}`
 }
 
-function populateLinkedDocuments(wb: XLSX.WorkBook, mainName: string, sorted: CustomsItem[], customer = '') {
-  type Group = { contract: string; contractDate: string; invoice: string; invoiceDate: string; indices: number[] }
+function populateLinkedDocuments(
+  wb: XLSX.WorkBook,
+  mainName: string,
+  sorted: CustomsItem[],
+  customer = '',
+  sellerForItem?: (item: CustomsItem) => SupplierDict | undefined,
+) {
+  type Group = {
+    contract: string; contractDate: string; invoice: string; invoiceDate: string
+    indices: number[]; seller?: SupplierDict; indo: boolean
+  }
   type Slot = {
     contractHeader: string; contractDate: string; contractRows: [number, number]
     invoiceHeader: string; invoiceDate: string; invoiceContract: string; invoiceRows: [number, number]
     packingHeader: string; packingRows: [number, number]
+    contractStart?: number; invoiceStart?: number
   }
   const groups: Group[] = []
   const byKey = new Map<string, Group>()
   sorted.forEach((item, index) => {
     const contract = (item.contract_no || '').trim()
     const invoice = (item.invoice_no || '').trim()
-    const key = `${contract}\u0000${invoice}`
+    const seller = sellerForItem?.(item)
+    const indo = isIndonesiaBlHead(item.bl_head)
+    const sellerKey = seller ? String(seller.id ?? seller.full ?? seller.keyword) : ''
+    const key = `${contract}\u0000${invoice}\u0000${sellerKey}\u0000${indo ? 'ID' : 'PRIMARY'}`
     let group = byKey.get(key)
     if (!group) {
       group = {
@@ -373,6 +431,8 @@ function populateLinkedDocuments(wb: XLSX.WorkBook, mainName: string, sorted: Cu
         invoice,
         invoiceDate: (item.invoice_date || '').trim(),
         indices: [],
+        seller,
+        indo,
       }
       groups.push(group)
       byKey.set(key, group)
@@ -383,6 +443,8 @@ function populateLinkedDocuments(wb: XLSX.WorkBook, mainName: string, sorted: Cu
   const rri = customer.toUpperCase().includes('RRI')
   const contractSheet = wb.Sheets[rri ? '实业合同' : '全球合同']
   const invoiceSheet = wb.Sheets[rri ? '实业发票' : '全球发票']
+  const indonesiaContractSheet = wb.Sheets['印尼合同']
+  const indonesiaInvoiceSheet = wb.Sheets['印尼发票']
   const packingSheet = wb.Sheets['装箱单']
   const slots: Slot[] = rri ? [
     { contractHeader: 'H5', contractDate: 'H9', contractRows: [24, 25], invoiceHeader: 'J9', invoiceDate: 'J11', invoiceContract: 'J13', invoiceRows: [29, 30], packingHeader: 'D9', packingRows: [25, 26] },
@@ -415,20 +477,158 @@ function populateLinkedDocuments(wb: XLSX.WorkBook, mainName: string, sorted: Cu
       packingHeader: `D${v[9]}`, packingRows: [v[10], v[11]] as [number, number],
     })),
   ]
+  const indonesiaSlots: Slot[] = [
+    {
+      contractStart: 2, contractHeader: 'H7', contractDate: 'H11', contractRows: [26, 32],
+      invoiceStart: 1, invoiceHeader: 'J10', invoiceDate: 'J12', invoiceContract: 'J14', invoiceRows: [24, 29],
+      packingHeader: '', packingRows: [0, 0],
+    },
+    {
+      contractStart: 47, contractHeader: 'H52', contractDate: 'H56', contractRows: [71, 86],
+      invoiceStart: 40, invoiceHeader: 'J42', invoiceDate: 'J44', invoiceContract: 'J46', invoiceRows: [56, 72],
+      packingHeader: '', packingRows: [0, 0],
+    },
+  ]
+  const primaryGroups = groups.filter(group => !group.indo)
+  const indonesiaGroups = groups.filter(group => group.indo)
+  if (groups.length > slots.length) throw new Error(`合同或发票数超过装箱单模板容量（最多 ${slots.length} 份）`)
+  if (primaryGroups.length > slots.length) throw new Error(`实业/全球合同数超过模板容量（最多 ${slots.length} 份）`)
+  if (indonesiaGroups.length > indonesiaSlots.length) throw new Error('印尼合同或发票数超过模板容量（最多 2 份）')
+  if (indonesiaGroups.length && (!indonesiaContractSheet || !indonesiaInvoiceSheet)) {
+    throw new Error('缺少印尼合同/印尼发票模板')
+  }
 
-  const applyGroup = (group: Group | undefined, slot: Slot) => {
-    setPreservingStyle(contractSheet, slot.contractHeader, group?.contract || '')
-    setPreservingStyle(contractSheet, slot.contractDate, group?.contractDate ? excelDate(group.contractDate) : '')
-    setPreservingStyle(invoiceSheet, slot.invoiceHeader, group?.invoice || '')
-    setPreservingStyle(invoiceSheet, slot.invoiceDate, group?.invoiceDate ? excelDate(group.invoiceDate) : '')
-    setPreservingStyle(invoiceSheet, slot.invoiceContract, group?.contract || '')
-    setPreservingStyle(packingSheet, slot.packingHeader, group?.invoice || '')
+  const addressRow = (address: string) => Number(address.match(/\d+$/)?.[0] || 0)
+  const sheetLastRow = (sheet: XLSX.WorkSheet | undefined) => sheet?.['!ref']
+    ? XLSX.utils.decode_range(sheet['!ref']).e.r + 1
+    : 1
+  const truncateSheetAtRow = (sheet: XLSX.WorkSheet | undefined, firstRemovedRow: number) => {
+    if (!sheet || firstRemovedRow <= 1) return
+    for (const address of Object.keys(sheet)) {
+      if (address.startsWith('!')) continue
+      if (addressRow(address) >= firstRemovedRow) delete (sheet as any)[address]
+    }
+    sheet['!merges'] = (sheet['!merges'] || []).filter(range => range.e.r < firstRemovedRow - 1)
+    if (sheet['!rows']) sheet['!rows'] = sheet['!rows'].slice(0, firstRemovedRow - 1)
+    if (sheet['!ref']) {
+      const range = XLSX.utils.decode_range(sheet['!ref'])
+      range.e.r = Math.max(range.s.r, firstRemovedRow - 2)
+      sheet['!ref'] = XLSX.utils.encode_range(range)
+    }
+  }
+  const findLabelRow = (
+    sheet: XLSX.WorkSheet | undefined,
+    column: string,
+    start: number,
+    end: number,
+    pattern: RegExp,
+  ) => {
+    for (let row = start; row <= end; row++) {
+      const value = String((sheet as any)?.[`${column}${row}`]?.v || '')
+      if (pattern.test(value)) return row
+    }
+    return 0
+  }
+  const setTradeTerms = (
+    sheet: XLSX.WorkSheet | undefined,
+    start: number,
+    end: number,
+    seller?: SupplierDict,
+  ) => {
+    for (const [address, cell] of Object.entries(sheet || {}) as [string, any][]) {
+      if (address.startsWith('!') || typeof cell?.v !== 'string') continue
+      const row = addressRow(address)
+      if (row >= start && row <= end && /^(?:FOB|CIF)\s+IDSRG\s*,?\s*Semarang$/i.test(cell.v.trim())) {
+        setPreservingStyle(sheet, address, seller ? `${sellerTradeTerm(seller)} IDSRG,Semarang` : '')
+      }
+    }
+  }
+  const fillSlotSeller = (
+    group: Group,
+    slot: Slot,
+    index: number,
+    documentSlots: Slot[],
+    groupContractSheet: XLSX.WorkSheet | undefined,
+    groupInvoiceSheet: XLSX.WorkSheet | undefined,
+    packingSlot: Slot,
+  ) => {
+    const seller = group?.seller
+    const next = documentSlots[index + 1]
+    const contractStart = slot.contractStart || addressRow(slot.contractHeader)
+    const contractEnd = next ? (next.contractStart || addressRow(next.contractHeader)) - 1 : sheetLastRow(groupContractSheet)
+    const invoiceStart = slot.invoiceStart || addressRow(slot.invoiceHeader)
+    const invoiceEnd = next ? (next.invoiceStart || addressRow(next.invoiceHeader)) - 1 : sheetLastRow(groupInvoiceSheet)
+    const name = seller?.full?.trim() || ''
+    const english = seller?.nameEn?.trim() || ''
+    const address = seller
+      ? `${seller.addressZh!.trim()}\n${seller.addressEn!.trim()}\nTEL: ${seller.phone!.trim()}    Email: ${seller.email!.trim()}    ATTN: ${seller.contact!.trim()}`
+      : ''
+    const combined = seller ? `${name}\n${english}` : ''
+
+    const contractSellerRow = findLabelRow(groupContractSheet, 'B', contractStart, slot.contractRows[0] - 1, /卖方|The Sellers/i)
+    if (contractSellerRow) {
+      setPreservingStyle(groupContractSheet, `C${contractSellerRow}`, name)
+      setPreservingStyle(groupContractSheet, `C${contractSellerRow + 1}`, english)
+      setPreservingStyle(groupContractSheet, `C${contractSellerRow + 2}`, address)
+    }
+    const signatureRow = findLabelRow(groupContractSheet, 'D', slot.contractRows[1] + 1, contractEnd, /卖方|The Sellers/i)
+    if (signatureRow) setPreservingStyle(groupContractSheet, `E${signatureRow}`, combined)
+    setTradeTerms(groupContractSheet, contractStart, contractEnd, seller)
+
+    if (group.indo) {
+      const invoiceToRow = findLabelRow(groupInvoiceSheet, 'B', invoiceStart, slot.invoiceRows[0] - 1, /^To[:：]?/i)
+      if (invoiceToRow) {
+        setPreservingStyle(groupInvoiceSheet, `B${invoiceToRow + 1}`, combined)
+        setPreservingStyle(groupInvoiceSheet, `B${invoiceToRow + 2}`, address)
+      }
+    } else {
+      const invoiceSellerRow = findLabelRow(groupInvoiceSheet, 'B', invoiceStart, slot.invoiceRows[0] - 1, /^卖方[:：]?\s*$/i)
+      if (invoiceSellerRow) {
+        setPreservingStyle(groupInvoiceSheet, `B${invoiceSellerRow + 2}`, name)
+        setPreservingStyle(groupInvoiceSheet, `B${invoiceSellerRow + 3}`, english)
+        setPreservingStyle(groupInvoiceSheet, `B${invoiceSellerRow + 4}`, address)
+      }
+    }
+    setTradeTerms(groupInvoiceSheet, invoiceStart, invoiceEnd, seller)
+    for (const [cellAddress, cell] of Object.entries(groupInvoiceSheet || {}) as [string, any][]) {
+      const row = addressRow(cellAddress)
+      if (row >= invoiceStart && row <= invoiceEnd && typeof cell?.v === 'string'
+        && /Beneficiary|Account number|Swift code/i.test(cell.v)) setPreservingStyle(groupInvoiceSheet, cellAddress, '')
+    }
+    if (group.indo) {
+      const packingHeaderRow = addressRow(packingSlot.packingHeader)
+      const packingStart = Math.max(1, packingHeaderRow - 8)
+      setPreservingStyle(packingSheet, `A${packingStart}`, english)
+      setPreservingStyle(packingSheet, `A${packingStart + 1}`, seller?.addressEn?.trim() || '')
+      setPreservingStyle(packingSheet, `A${packingHeaderRow}`, seller ? `${english}\n${seller.addressEn?.trim() || ''}` : '')
+      setPreservingStyle(packingSheet, `A${packingHeaderRow + 3}`, seller ? `TEL: ${seller.phone?.trim() || ''}` : '')
+      setPreservingStyle(packingSheet, `A${packingHeaderRow + 4}`, seller ? `EMAIL: ${seller.email?.trim() || ''}` : '')
+      setPreservingStyle(packingSheet, `A${packingHeaderRow + 5}`, seller ? `Attention: ${seller.contact?.trim() || ''}` : '')
+    }
+    // 实业/全球合同保留 Royal Regent 装箱单抬头；印尼合同改用对应供应商作为 Shipper。
+  }
+
+  const applyGroup = (
+    group: Group,
+    slot: Slot,
+    index: number,
+    documentSlots: Slot[],
+    groupContractSheet: XLSX.WorkSheet | undefined,
+    groupInvoiceSheet: XLSX.WorkSheet | undefined,
+    packingSlot: Slot,
+  ) => {
+    setPreservingStyle(groupContractSheet, slot.contractHeader, group.contract || '')
+    setPreservingStyle(groupContractSheet, slot.contractDate, group.contractDate ? excelDate(group.contractDate) : '')
+    setPreservingStyle(groupInvoiceSheet, slot.invoiceHeader, group.invoice || '')
+    setPreservingStyle(groupInvoiceSheet, slot.invoiceDate, group.invoiceDate ? excelDate(group.invoiceDate) : '')
+    setPreservingStyle(groupInvoiceSheet, slot.invoiceContract, group.contract || '')
+    setPreservingStyle(packingSheet, packingSlot.packingHeader, group.invoice || '')
 
     const fillContractRows = ([from, to]: number[]) => {
       for (let row = from; row <= to; row++) {
         const serial = group?.indices[row - from]
         const mainRow = serial != null ? serial + 3 : null
-        setPreservingStyle(contractSheet, `A${row}`, serial ?? '')
+        setPreservingStyle(groupContractSheet, `A${row}`, serial ?? '')
         const refs: Record<string, string> = mainRow == null ? {} : {
           B: `D${mainRow}`,
           C: `G${mainRow}&'${mainName.replace(/'/g, "''")}'!F${mainRow}`,
@@ -438,10 +638,10 @@ function populateLinkedDocuments(wb: XLSX.WorkBook, mainName: string, sorted: Cu
         }
         for (const col of ['B', 'C', 'D', 'E', 'F']) {
           const mainCell = refs[col]
-          setPreservingStyle(contractSheet, `${col}${row}`, mainCell ? formulaRef(mainName, mainCell) : '', Boolean(mainCell))
+          setPreservingStyle(groupContractSheet, `${col}${row}`, mainCell ? formulaRef(mainName, mainCell) : '', Boolean(mainCell))
         }
-        setPreservingStyle(contractSheet, `G${row}`, mainRow == null ? '' : `=F${row}*D${row}`, mainRow != null)
-        setPreservingStyle(contractSheet, `H${row}`, '')
+        setPreservingStyle(groupContractSheet, `G${row}`, mainRow == null ? '' : `=F${row}*D${row}`, mainRow != null)
+        setPreservingStyle(groupContractSheet, `H${row}`, '')
       }
     }
 
@@ -449,7 +649,7 @@ function populateLinkedDocuments(wb: XLSX.WorkBook, mainName: string, sorted: Cu
       for (let row = from; row <= to; row++) {
         const serial = group?.indices[row - from]
         const mainRow = serial != null ? serial + 3 : null
-        setPreservingStyle(invoiceSheet, `A${row}`, serial ?? '')
+        setPreservingStyle(groupInvoiceSheet, `A${row}`, serial ?? '')
         const refs: Record<string, string> = mainRow == null ? {} : {
           B: `D${mainRow}`,
           C: `G${mainRow}&'${mainName.replace(/'/g, "''")}'!F${mainRow}`,
@@ -462,9 +662,9 @@ function populateLinkedDocuments(wb: XLSX.WorkBook, mainName: string, sorted: Cu
         }
         for (const col of ['B', 'C', 'D', 'E', 'F', 'G', 'H', 'I']) {
           const mainCell = refs[col]
-          setPreservingStyle(invoiceSheet, `${col}${row}`, mainCell ? formulaRef(mainName, mainCell) : '', Boolean(mainCell))
+          setPreservingStyle(groupInvoiceSheet, `${col}${row}`, mainCell ? formulaRef(mainName, mainCell) : '', Boolean(mainCell))
         }
-        setPreservingStyle(invoiceSheet, `J${row}`, mainRow == null ? '' : `=I${row}*G${row}`, mainRow != null)
+        setPreservingStyle(groupInvoiceSheet, `J${row}`, mainRow == null ? '' : `=I${row}*G${row}`, mainRow != null)
       }
     }
 
@@ -494,9 +694,45 @@ function populateLinkedDocuments(wb: XLSX.WorkBook, mainName: string, sorted: Cu
 
     fillContractRows(slot.contractRows)
     fillInvoiceRows(slot.invoiceRows)
-    fillPackingRows(slot.packingRows)
+    fillPackingRows(packingSlot.packingRows)
+    fillSlotSeller(group, slot, index, documentSlots, groupContractSheet, groupInvoiceSheet, packingSlot)
   }
-  slots.forEach((slot, i) => applyGroup(groups[i], slot))
+  let primaryIndex = 0
+  let indonesiaIndex = 0
+  groups.forEach((group, packingIndex) => {
+    const documentSlots = group.indo ? indonesiaSlots : slots
+    const documentIndex = group.indo ? indonesiaIndex++ : primaryIndex++
+    applyGroup(
+      group,
+      documentSlots[documentIndex],
+      documentIndex,
+      documentSlots,
+      group.indo ? indonesiaContractSheet : contractSheet,
+      group.indo ? indonesiaInvoiceSheet : invoiceSheet,
+      slots[packingIndex],
+    )
+  })
+  const removeSheet = (name: string) => {
+    delete wb.Sheets[name]
+    wb.SheetNames = wb.SheetNames.filter(sheetName => sheetName !== name)
+  }
+  const firstUnusedPrimary = slots[primaryGroups.length]
+  if (!primaryGroups.length) {
+    removeSheet(rri ? '实业合同' : '全球合同')
+    removeSheet(rri ? '实业发票' : '全球发票')
+  } else if (firstUnusedPrimary) {
+    truncateSheetAtRow(contractSheet, firstUnusedPrimary.contractStart || Math.max(1, addressRow(firstUnusedPrimary.contractHeader) - 4))
+    truncateSheetAtRow(invoiceSheet, firstUnusedPrimary.invoiceStart || Math.max(1, addressRow(firstUnusedPrimary.invoiceHeader) - 8))
+  }
+  const firstUnusedIndonesia = indonesiaSlots[indonesiaGroups.length]
+  if (firstUnusedIndonesia) {
+    truncateSheetAtRow(indonesiaContractSheet, firstUnusedIndonesia.contractStart || Math.max(1, addressRow(firstUnusedIndonesia.contractHeader) - 4))
+    truncateSheetAtRow(indonesiaInvoiceSheet, firstUnusedIndonesia.invoiceStart || Math.max(1, addressRow(firstUnusedIndonesia.invoiceHeader) - 8))
+  }
+  const firstUnusedPacking = slots[groups.length]
+  if (firstUnusedPacking) truncateSheetAtRow(packingSheet, Math.max(1, addressRow(firstUnusedPacking.packingHeader) - 8))
+  const firstSeller = groups.find(group => group.seller)?.seller
+  if (firstSeller) fillGenericSeller(wb, firstSeller)
 
   // 通用发票、销售合同、装箱单(2)和草稿大单共用同一套序号及主明细公式。
   const genericInvoiceSheet = wb.Sheets['发票']
@@ -560,8 +796,7 @@ function collectDocumentGroups(sorted: CustomsItem[], grouping: DocumentGrouping
   sorted.forEach((item, index) => {
     const contract = (item.contract_no || '').trim()
     const invoice = (item.invoice_no || '').trim()
-    const head = (item.bl_head || '').trim()
-    const indo = /印尼|INDONESIA|MANUFACTURING/i.test(head)
+    const indo = isIndonesiaBlHead(item.bl_head)
     const documentNo = grouping === 'contract' ? contract : invoice
     const key = `${documentNo}\u0000${indo ? 'ID' : 'GLOBAL'}`
     let group = byKey.get(key)
@@ -672,6 +907,7 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
     '出货地址', '销售合同', '装箱单 (2)', '草稿大单-1', '司机资料', '单位对照', 'WpsReserved_CellImgList'])
   // cellStyles 必须开启，否则重新写入时无法沿用模板的单元格样式。
   const wbObj = XLSX.read(templateBuffer, { type: 'array', cellFormula: true, cellStyles: true })
+  const legacyDocuments = Boolean(wbObj.Sheets['印尼合同'])
   normalizeWorkbookStyles(wbObj)
   ;(wbObj as any).Workbook = (wbObj as any).Workbook || {}
   ;(wbObj as any).Workbook.CalcPr = {
@@ -762,9 +998,25 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
     }
   }
 
+  const sellerForItem = input.seller
+    ? () => input.seller
+    : input.supplierProfiles
+      ? (item: CustomsItem) => isIndonesiaBlHead(item.bl_head)
+        ? supplierForLine(item.supplier || matOf(item)?.supplier || '', input.supplierProfiles!)
+        : documentSellerForLine(
+          item.supplier || matOf(item)?.supplier || '',
+          effCustoms(item),
+          input.supplierProfiles!,
+        )
+      : undefined
+
+  if (!legacyDocuments && sorted.some(item => isIndonesiaBlHead(item.bl_head))) {
+    if (!input.indonesiaTemplateBuffer) throw new Error('缺少印尼合同/印尼发票模板')
+    attachIndonesiaDocumentSheets(wbObj, input.indonesiaTemplateBuffer, newName)
+  }
+
   // 旧版单模板（含印尼合同/发票）走供应商单据管线：卖方资料、贸易术语、
   // RRI 主体替换和 OOXML 动态扩行都基于该模板；RRI/RRM 模板走统一栏位管线。
-  const legacyDocuments = Boolean(wbObj.Sheets['印尼合同'])
   if (!input.mainOnly) {
     if (legacyDocuments) {
       populateGlobalIndoLinkedDocuments(wbObj, newName, sorted)
@@ -774,7 +1026,7 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
       }
       applyCustomerDocumentEntity(wbObj, form.customer)
     } else {
-      populateLinkedDocuments(wbObj, newName, sorted, form.customer)
+      populateLinkedDocuments(wbObj, newName, sorted, form.customer, sellerForItem)
     }
   }
   fitCategoryColumn(wbObj)
@@ -1021,6 +1273,9 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
   } else {
     outZip = generatedZip
     await restoreTemplateDocumentStyles(templateBuffer, outZip, oldName, newName, sorted.map(effCustoms), sorted.map(item => item.currency || '¥'))
+    if (input.indonesiaTemplateBuffer && sorted.some(item => isIndonesiaBlHead(item.bl_head))) {
+      await restoreIndonesiaDocumentStyles(input.indonesiaTemplateBuffer, outZip)
+    }
   }
   if (floatImages.length) {
     const mainSheetIdx = wbObj.SheetNames.indexOf(newName) + 1
@@ -1031,12 +1286,15 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
 
 async function workbookSheetParts(zip: JSZip): Promise<Map<string, string>> {
   const parser = new DOMParser()
-  const workbook = parser.parseFromString(await zip.file('xl/workbook.xml')!.async('string'), 'application/xml')
-  const rels = parser.parseFromString(await zip.file('xl/_rels/workbook.xml.rels')!.async('string'), 'application/xml')
-  const targets = new Map(Array.from(rels.getElementsByTagName('Relationship')).map(rel => [rel.getAttribute('Id') || '', rel.getAttribute('Target') || '']))
+  const workbook = parser.parseFromString((await zip.file('xl/workbook.xml')!.async('string')).replace(/^\uFEFF/, ''), 'application/xml')
+  const rels = parser.parseFromString((await zip.file('xl/_rels/workbook.xml.rels')!.async('string')).replace(/^\uFEFF/, ''), 'application/xml')
+  const relationshipNs = 'http://schemas.openxmlformats.org/package/2006/relationships'
+  const officeRelationshipNs = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
+  const relationshipNodes = Array.from(rels.getElementsByTagNameNS(relationshipNs, 'Relationship'))
+  const targets = new Map(relationshipNodes.map(rel => [rel.getAttribute('Id') || '', rel.getAttribute('Target') || '']))
   const parts = new Map<string, string>()
-  for (const sheet of Array.from(workbook.getElementsByTagName('sheet'))) {
-    const target = targets.get(sheet.getAttribute('r:id') || '')
+  for (const sheet of Array.from(workbook.getElementsByTagNameNS(SPREADSHEET_NS, 'sheet'))) {
+    const target = targets.get(sheet.getAttributeNS(officeRelationshipNs, 'id') || sheet.getAttribute('r:id') || '')
     if (target) parts.set(sheet.getAttribute('name') || '', `xl/${target.replace(/^\/?xl\//, '')}`)
   }
   return parts
@@ -1155,6 +1413,150 @@ async function restoreTemplateDocumentStyles(
   }
   rawXfs.setAttribute('count', String(xfNodes.length + derivedStyles.size))
   outputZip.file('xl/styles.xml', serializer.serializeToString(rawStyles))
+}
+
+// “印尼合同/印尼发票”来自旧版完整模板，而 RRI/RRM 主模板拥有另一套样式编号。
+// 将旧模板实际使用的样式追加到当前样式表，并用旧工作表版式承载生成后的内容，
+// 才能同时保住两套单据的字体、边框、行高、合并单元格和打印区域。
+async function restoreIndonesiaDocumentStyles(indonesiaTemplateBuffer: ArrayBuffer, outputZip: JSZip) {
+  const sourceZip = await JSZip.loadAsync(indonesiaTemplateBuffer)
+  const sourceStylesFile = sourceZip.file('xl/styles.xml')
+  const outputStylesFile = outputZip.file('xl/styles.xml')
+  if (!sourceStylesFile || !outputStylesFile) return
+
+  const parser = new DOMParser()
+  const serializer = new XMLSerializer()
+  const sourceStylesDoc = parser.parseFromString(await sourceStylesFile.async('string'), 'application/xml')
+  const outputStylesDoc = parser.parseFromString(await outputStylesFile.async('string'), 'application/xml')
+  const sourceRoot = sourceStylesDoc.documentElement as XmlElement
+  const outputRoot = outputStylesDoc.documentElement as XmlElement
+  const sourceXfs = styleCollection(sourceRoot, 'cellXfs')
+  const outputXfs = styleCollection(outputRoot, 'cellXfs')
+  if (!sourceXfs || !outputXfs) return
+
+  const appendCollection = (name: string) => {
+    const source = styleCollection(sourceRoot, name)
+    const output = styleCollection(outputRoot, name)
+    if (!source || !output) return { offset: 0, sourceCount: 0 }
+    const children = directChildren(source, name === 'fonts' ? 'font' : name === 'fills' ? 'fill' : 'border')
+    const offset = directChildren(output, name === 'fonts' ? 'font' : name === 'fills' ? 'fill' : 'border').length
+    for (const child of children) output.appendChild(outputStylesDoc.importNode(child, true))
+    output.setAttribute('count', String(offset + children.length))
+    return { offset, sourceCount: children.length }
+  }
+
+  const fontInfo = appendCollection('fonts')
+  const fillInfo = appendCollection('fills')
+  const borderInfo = appendCollection('borders')
+
+  const sourceNumFmts = styleCollection(sourceRoot, 'numFmts')
+  let outputNumFmts = styleCollection(outputRoot, 'numFmts')
+  if (!outputNumFmts && sourceNumFmts) {
+    outputNumFmts = outputStylesDoc.createElementNS(SPREADSHEET_NS, 'x:numFmts') as XmlElement
+    outputNumFmts.setAttribute('count', '0')
+    outputRoot.insertBefore(outputNumFmts, outputRoot.firstChild)
+  }
+  const numFmtMap = new Map<string, string>()
+  if (sourceNumFmts && outputNumFmts) {
+    const byCode = new Map<string, string>()
+    let maxId = 163
+    for (const numFmt of directChildren(outputNumFmts, 'numFmt')) {
+      const id = numFmt.getAttribute('numFmtId') || '0'
+      byCode.set(numFmt.getAttribute('formatCode') || '', id)
+      maxId = Math.max(maxId, Number(id) || 0)
+    }
+    for (const numFmt of directChildren(sourceNumFmts, 'numFmt')) {
+      const sourceId = numFmt.getAttribute('numFmtId') || '0'
+      const code = numFmt.getAttribute('formatCode') || ''
+      let targetId = byCode.get(code)
+      if (!targetId) {
+        targetId = String(++maxId)
+        const imported = outputStylesDoc.importNode(numFmt, true) as XmlElement
+        imported.setAttribute('numFmtId', targetId)
+        outputNumFmts.appendChild(imported)
+        byCode.set(code, targetId)
+      }
+      numFmtMap.set(sourceId, targetId)
+    }
+    outputNumFmts.setAttribute('count', String(directChildren(outputNumFmts, 'numFmt').length))
+  }
+
+  const remapXf = (sourceXf: XmlElement) => {
+    const xf = outputStylesDoc.importNode(sourceXf, true) as XmlElement
+    const remapIndex = (attribute: string, offset: number, sourceCount: number) => {
+      const value = Number(xf.getAttribute(attribute) || 0)
+      if (value >= 0 && value < sourceCount) xf.setAttribute(attribute, String(offset + value))
+    }
+    remapIndex('fontId', fontInfo.offset, fontInfo.sourceCount)
+    remapIndex('fillId', fillInfo.offset, fillInfo.sourceCount)
+    remapIndex('borderId', borderInfo.offset, borderInfo.sourceCount)
+    const sourceNumFmtId = xf.getAttribute('numFmtId') || '0'
+    if (Number(sourceNumFmtId) >= 164) xf.setAttribute('numFmtId', numFmtMap.get(sourceNumFmtId) || '0')
+    return xf
+  }
+
+  // 部分水平/垂直对齐定义在 cellStyleXfs，cellXfs 只通过 xfId 继承。
+  // 两层必须一起追加并同步偏移，否则合同抬头会被错误地右对齐。
+  const sourceStyleXfs = styleCollection(sourceRoot, 'cellStyleXfs')
+  const outputStyleXfs = styleCollection(outputRoot, 'cellStyleXfs')
+  const styleXfOffset = outputStyleXfs ? directChildren(outputStyleXfs, 'xf').length : 0
+  const sourceStyleXfList = sourceStyleXfs ? directChildren(sourceStyleXfs, 'xf') : []
+  if (outputStyleXfs) {
+    for (const sourceXf of sourceStyleXfList) outputStyleXfs.appendChild(remapXf(sourceXf))
+    outputStyleXfs.setAttribute('count', String(styleXfOffset + sourceStyleXfList.length))
+  }
+
+  const styleOffset = directChildren(outputXfs, 'xf').length
+  const sourceXfList = directChildren(sourceXfs, 'xf')
+  for (const sourceXf of sourceXfList) {
+    const xf = remapXf(sourceXf)
+    const sourceXfId = Number(xf.getAttribute('xfId') || 0)
+    xf.setAttribute('xfId', outputStyleXfs && sourceXfId < sourceStyleXfList.length
+      ? String(styleXfOffset + sourceXfId)
+      : '0')
+    outputXfs.appendChild(xf)
+  }
+  outputXfs.setAttribute('count', String(styleOffset + sourceXfList.length))
+  outputZip.file('xl/styles.xml', serializer.serializeToString(outputStylesDoc))
+
+  const sourceParts = await workbookSheetParts(sourceZip)
+  const outputParts = await workbookSheetParts(outputZip)
+  for (const name of ['印尼合同', '印尼发票']) {
+    const sourcePath = sourceParts.get(name)
+    const outputPath = outputParts.get(name)
+    const sourceSheet = sourcePath ? sourceZip.file(sourcePath) : null
+    const outputSheet = outputPath ? outputZip.file(outputPath) : null
+    if (!sourceSheet || !outputSheet || !outputPath) continue
+    const sourceDoc = parser.parseFromString(await sourceSheet.async('string'), 'application/xml')
+    const indonesiaCells = Array.from(sourceDoc.getElementsByTagNameNS(SPREADSHEET_NS, 'c')) as XmlElement[]
+    for (const cell of indonesiaCells) {
+      const sourceStyle = Number(cell.getAttribute('s') || 0)
+      cell.setAttribute('s', String(styleOffset + sourceStyle))
+    }
+    const generatedXml = await outputSheet.async('string')
+    const merged = mergeWorksheetXml(
+      serializer.serializeToString(sourceDoc),
+      generatedXml,
+      false,
+    )
+    const mergedDoc = parser.parseFromString(merged, 'application/xml')
+    const generatedDoc = parser.parseFromString(generatedXml, 'application/xml')
+    const mergedRoot = mergedDoc.documentElement as XmlElement
+    const generatedRoot = generatedDoc.documentElement as XmlElement
+    const mergedData = directChild(mergedRoot, 'sheetData')
+    const generatedData = directChild(generatedRoot, 'sheetData')
+    if (mergedData && generatedData) {
+      const maxGeneratedRow = Math.max(1, ...directChildren(generatedData, 'row').map(rowNumber))
+      for (const row of directChildren(mergedData, 'row')) {
+        if (rowNumber(row) > maxGeneratedRow) mergedData.removeChild(row)
+      }
+    }
+    // 生成工作表已经删掉未使用的第二页；同步其有效区域和合并单元格，防止
+    // 旧模板中未启用页面的 LOOKUP 公式重新出现在导出结果中。
+    replaceDirectChild(mergedDoc, mergedRoot, generatedRoot, 'dimension')
+    replaceDirectChild(mergedDoc, mergedRoot, generatedRoot, 'mergeCells')
+    outputZip.file(outputPath, serializer.serializeToString(mergedDoc))
+  }
 }
 
 const SPREADSHEET_NS = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'

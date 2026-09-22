@@ -162,6 +162,48 @@ describe('supplier document export', () => {
     expect(wb.Sheets['装箱单'].A53.v).toContain('chloe@royalregenthk.com')
   })
 
+  it('uses Indonesia documents and the actual supplier when the BL header is neither RRI nor RRM', async () => {
+    const item = {
+      material_id: 2,
+      supplier: secondSeller.keyword,
+      customs_company: '深圳市华胜益出口贸易有限公司',
+      bl_head: '东莞市雅洛轩进出口贸易有限公司',
+      qty: 20,
+      kg: 12.5,
+      cartons: 2,
+      contract_no: 'ID-C-1',
+      contract_date: '2026-09-20',
+      invoice_no: 'ID-I-1',
+      invoice_date: '2026-09-21',
+    }
+    const file = await buildCustomsWorkbook({
+      templateBuffer: rrmTemplateBuffer,
+      indonesiaTemplateBuffer: templateBuffer,
+      items: [item],
+      materials: new Map([[2, { id: 2, supplier: secondSeller.keyword, name_zh: '印尼测试物料' }]]),
+      supplierProfiles: [huashengyiSeller, secondSeller],
+      productHs: new Map(), images: new Map(),
+      form: { customer: 'RRM', containerNo: 'INDONESIA-DOCS' },
+    })
+    const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' })
+
+    expect(wb.SheetNames).toContain('印尼合同')
+    expect(wb.SheetNames).toContain('印尼发票')
+    expect(wb.SheetNames).not.toContain('全球合同')
+    expect(wb.SheetNames).not.toContain('全球发票')
+    expect(wb.Sheets['印尼合同'].H7.v).toBe('ID-C-1')
+    expect(XLSX.utils.decode_range(wb.Sheets['印尼合同']['!ref']!).e.r).toBeLessThan(46)
+    expect(wb.Sheets['印尼合同'].C13.v).toBe(secondSeller.full)
+    expect(wb.Sheets['印尼合同'].F25.v).toBe('CIF IDSRG,Semarang')
+    expect(wb.Sheets['印尼发票'].J10.v).toBe('ID-I-1')
+    expect(XLSX.utils.decode_range(wb.Sheets['印尼发票']['!ref']!).e.r).toBeLessThan(39)
+    expect(wb.Sheets['印尼发票'].B10.v).toContain(secondSeller.nameEn)
+    expect(wb.Sheets['印尼发票'].I23.v).toBe('CIF IDSRG,Semarang')
+    expect(wb.Sheets['装箱单'].A1.v).toBe(secondSeller.nameEn)
+    expect(wb.Sheets['装箱单'].A9.v).toContain(secondSeller.nameEn)
+    expect(wb.Sheets['装箱单'].A13.v).toContain(secondSeller.email)
+  })
+
   it('exports a main-only combined summary without seller templates', async () => {
     const file = await buildCustomsWorkbook({
       templateBuffer, mainOnly: true, items: [{ material_id: 1, supplier: 'A', qty: 1 }],

@@ -7,6 +7,7 @@ import * as XLSX from 'xlsx-js-style'
 import JSZip from 'jszip'
 import { DOMParser, XMLSerializer } from '@xmldom/xmldom'
 import type { Material, SupplierDict } from '../api/client'
+import { documentSellerForLine } from './supplierProfiles'
 import { isPaperRope, shipmentGrossPerPc, shipmentPackingAverageQty, shipmentWeightQuantity } from './shipmentWeight'
 
 export const CUSTOMS_FIXED = '深圳市华胜益出口贸易有限公司'
@@ -112,6 +113,7 @@ export interface CustomsExportInput {
   images: Map<number, { bytes: Uint8Array; ext: string }>  // material_id → 图片
   form: CustomsExportForm
   seller?: SupplierDict
+  supplierProfiles?: SupplierDict[]
   mainOnly?: boolean
 }
 
@@ -169,6 +171,26 @@ function applySellerTradeTerms(wb: XLSX.WorkBook, seller: SupplierDict) {
   put('全球发票', ['I31', 'I84', 'I123'])
   put('印尼合同', ['F25', 'C36', 'F70', 'C91'])
   put('印尼发票', ['I23', 'I55'])
+}
+
+function sellerTradeTerm(seller: SupplierDict) {
+  const names = [seller.keyword, seller.full, seller.nameEn]
+  return names.some(name => /华胜益|HUASHENGYI/i.test(name || '')) ? 'FOB' : 'CIF'
+}
+
+function fillGenericSeller(wb: XLSX.WorkBook, seller: SupplierDict) {
+  const name = seller.full!.trim()
+  const english = seller.nameEn!.trim()
+  const combined = `${name}\n${english}`
+  const address = `${seller.addressZh!.trim()}\n${seller.addressEn!.trim()}\nTEL: ${seller.phone!.trim()}    Email: ${seller.email!.trim()}    ATTN: ${seller.contact!.trim()}`
+  const put = (sheet: string, addresses: string[], value: string) =>
+    addresses.forEach(cell => setPreservingStyle(wb.Sheets[sheet], cell, value))
+  put('发票', ['B1', 'D24', 'D43', 'D45', 'D47'], name)
+  put('发票', ['B2'], `TEL: ${seller.phone!.trim()}    EMAIL: ${seller.email!.trim()}`)
+  put('销售合同', ['B4'], combined)
+  put('销售合同', ['B6'], address)
+  put('装箱单 (2)', ['A3'], `Seller: ${english}    ${seller.phone!.trim()}    ${seller.email!.trim()}`)
+  put('草稿大单-1', ['A6', 'A8'], name)
 }
 
 // 输出文件名：月日+客户+柜数+柜号(报关).xlsx
@@ -352,8 +374,17 @@ function formulaRef(sheetName: string, cell: string) {
   return `='${sheetName.replace(/'/g, "''")}'!${cell}`
 }
 
-function populateLinkedDocuments(wb: XLSX.WorkBook, mainName: string, sorted: CustomsItem[], customer = '') {
-  type Group = { contract: string; contractDate: string; invoice: string; invoiceDate: string; indices: number[] }
+function populateLinkedDocuments(
+  wb: XLSX.WorkBook,
+  mainName: string,
+  sorted: CustomsItem[],
+  customer = '',
+  sellerForItem?: (item: CustomsItem) => SupplierDict | undefined,
+) {
+  type Group = {
+    contract: string; contractDate: string; invoice: string; invoiceDate: string
+    indices: number[]; seller?: SupplierDict
+  }
   type Slot = {
     contractHeader: string; contractDate: string; contractRows: [number, number]
     invoiceHeader: string; invoiceDate: string; invoiceContract: string; invoiceRows: [number, number]
@@ -364,7 +395,9 @@ function populateLinkedDocuments(wb: XLSX.WorkBook, mainName: string, sorted: Cu
   sorted.forEach((item, index) => {
     const contract = (item.contract_no || '').trim()
     const invoice = (item.invoice_no || '').trim()
-    const key = `${contract}\u0000${invoice}`
+    const seller = sellerForItem?.(item)
+    const sellerKey = seller ? String(seller.id ?? seller.full ?? seller.keyword) : ''
+    const key = `${contract}\u0000${invoice}\u0000${sellerKey}`
     let group = byKey.get(key)
     if (!group) {
       group = {
@@ -373,6 +406,7 @@ function populateLinkedDocuments(wb: XLSX.WorkBook, mainName: string, sorted: Cu
         invoice,
         invoiceDate: (item.invoice_date || '').trim(),
         indices: [],
+        seller,
       }
       groups.push(group)
       byKey.set(key, group)
@@ -416,7 +450,107 @@ function populateLinkedDocuments(wb: XLSX.WorkBook, mainName: string, sorted: Cu
     })),
   ]
 
-  const applyGroup = (group: Group | undefined, slot: Slot) => {
+  const addressRow = (address: string) => Number(address.match(/\d+$/)?.[0] || 0)
+  const sheetLastRow = (sheet: XLSX.WorkSheet | undefined) => sheet?.['!ref']
+    ? XLSX.utils.decode_range(sheet['!ref']).e.r + 1
+    : 1
+  const truncateSheetAtRow = (sheet: XLSX.WorkSheet | undefined, firstRemovedRow: number) => {
+    if (!sheet || firstRemovedRow <= 1) return
+    for (const address of Object.keys(sheet)) {
+      if (address.startsWith('!')) continue
+      if (addressRow(address) >= firstRemovedRow) delete (sheet as any)[address]
+    }
+    sheet['!merges'] = (sheet['!merges'] || []).filter(range => range.e.r < firstRemovedRow - 1)
+    if (sheet['!rows']) sheet['!rows'] = sheet['!rows'].slice(0, firstRemovedRow - 1)
+    if (sheet['!ref']) {
+      const range = XLSX.utils.decode_range(sheet['!ref'])
+      range.e.r = Math.max(range.s.r, firstRemovedRow - 2)
+      sheet['!ref'] = XLSX.utils.encode_range(range)
+    }
+  }
+  const findLabelRow = (
+    sheet: XLSX.WorkSheet | undefined,
+    column: string,
+    start: number,
+    end: number,
+    pattern: RegExp,
+  ) => {
+    for (let row = start; row <= end; row++) {
+      const value = String((sheet as any)?.[`${column}${row}`]?.v || '')
+      if (pattern.test(value)) return row
+    }
+    return 0
+  }
+  const setTradeTerms = (
+    sheet: XLSX.WorkSheet | undefined,
+    start: number,
+    end: number,
+    seller?: SupplierDict,
+  ) => {
+    for (const [address, cell] of Object.entries(sheet || {}) as [string, any][]) {
+      if (address.startsWith('!') || typeof cell?.v !== 'string') continue
+      const row = addressRow(address)
+      if (row >= start && row <= end && /^(?:FOB|CIF)\s+IDSRG\s*,?\s*Semarang$/i.test(cell.v.trim())) {
+        setPreservingStyle(sheet, address, seller ? `${sellerTradeTerm(seller)} IDSRG,Semarang` : '')
+      }
+    }
+  }
+  const fillSlotSeller = (group: Group | undefined, slot: Slot, index: number) => {
+    const seller = group?.seller
+    const next = slots[index + 1]
+    const contractStart = addressRow(slot.contractHeader)
+    const contractEnd = next ? addressRow(next.contractHeader) - 1 : sheetLastRow(contractSheet)
+    const invoiceStart = addressRow(slot.invoiceHeader)
+    const invoiceEnd = next ? addressRow(next.invoiceHeader) - 1 : sheetLastRow(invoiceSheet)
+    const packingStart = Math.max(1, addressRow(slot.packingHeader) - 8)
+    const packingEnd = next ? Math.max(packingStart, addressRow(next.packingHeader) - 9) : sheetLastRow(packingSheet)
+    const name = seller?.full?.trim() || ''
+    const english = seller?.nameEn?.trim() || ''
+    const address = seller
+      ? `${seller.addressZh!.trim()}\n${seller.addressEn!.trim()}\nTEL: ${seller.phone!.trim()}    Email: ${seller.email!.trim()}    ATTN: ${seller.contact!.trim()}`
+      : ''
+    const combined = seller ? `${name}\n${english}` : ''
+
+    const contractSellerRow = findLabelRow(contractSheet, 'B', contractStart, slot.contractRows[0] - 1, /卖方|The Sellers/i)
+    if (contractSellerRow) {
+      setPreservingStyle(contractSheet, `C${contractSellerRow}`, name)
+      setPreservingStyle(contractSheet, `C${contractSellerRow + 1}`, english)
+      setPreservingStyle(contractSheet, `C${contractSellerRow + 2}`, address)
+    }
+    const signatureRow = findLabelRow(contractSheet, 'D', slot.contractRows[1] + 1, contractEnd, /卖方|The Sellers/i)
+    if (signatureRow) setPreservingStyle(contractSheet, `E${signatureRow}`, combined)
+    setTradeTerms(contractSheet, contractStart, contractEnd, seller)
+
+    const invoiceSellerRow = findLabelRow(invoiceSheet, 'B', invoiceStart, slot.invoiceRows[0] - 1, /^卖方[:：]?\s*$/i)
+    if (invoiceSellerRow) {
+      setPreservingStyle(invoiceSheet, `B${invoiceSellerRow + 2}`, name)
+      setPreservingStyle(invoiceSheet, `B${invoiceSellerRow + 3}`, english)
+      setPreservingStyle(invoiceSheet, `B${invoiceSellerRow + 4}`, address)
+    }
+    setTradeTerms(invoiceSheet, invoiceStart, invoiceEnd, seller)
+    for (const [cellAddress, cell] of Object.entries(invoiceSheet || {}) as [string, any][]) {
+      const row = addressRow(cellAddress)
+      if (row >= invoiceStart && row <= invoiceEnd && typeof cell?.v === 'string'
+        && /Beneficiary|Account number|Swift code/i.test(cell.v)) setPreservingStyle(invoiceSheet, cellAddress, '')
+    }
+
+    const packingHeaderRow = addressRow(slot.packingHeader)
+    setPreservingStyle(packingSheet, `A${packingStart}`, english)
+    setPreservingStyle(packingSheet, `A${packingStart + 1}`, seller?.addressEn?.trim() || '')
+    setPreservingStyle(packingSheet, `A${packingHeaderRow}`, seller ? `${english}\n${seller.addressEn!.trim()}` : '')
+    setPreservingStyle(packingSheet, `A${packingHeaderRow + 3}`, seller ? `TEL: ${seller.phone!.trim()}` : '')
+    setPreservingStyle(packingSheet, `A${packingHeaderRow + 4}`, seller ? `EMAIL: ${seller.email!.trim()}` : '')
+    setPreservingStyle(packingSheet, `A${packingHeaderRow + 5}`, seller ? `Attention: ${seller.contact!.trim()}` : '')
+    // 防止未使用区块继续带出模板样例卖方。
+    if (!group) {
+      for (let row = packingStart; row <= packingEnd; row++) {
+        const value = String((packingSheet as any)?.[`A${row}`]?.v || '')
+        if (/HUASHENGYI|TOOLMAN|LIMITED|有限公司|@/i.test(value)) setPreservingStyle(packingSheet, `A${row}`, '')
+      }
+    }
+  }
+
+  const applyGroup = (group: Group | undefined, slot: Slot, index: number) => {
     setPreservingStyle(contractSheet, slot.contractHeader, group?.contract || '')
     setPreservingStyle(contractSheet, slot.contractDate, group?.contractDate ? excelDate(group.contractDate) : '')
     setPreservingStyle(invoiceSheet, slot.invoiceHeader, group?.invoice || '')
@@ -495,8 +629,17 @@ function populateLinkedDocuments(wb: XLSX.WorkBook, mainName: string, sorted: Cu
     fillContractRows(slot.contractRows)
     fillInvoiceRows(slot.invoiceRows)
     fillPackingRows(slot.packingRows)
+    fillSlotSeller(group, slot, index)
   }
-  slots.forEach((slot, i) => applyGroup(groups[i], slot))
+  slots.forEach((slot, i) => applyGroup(groups[i], slot, i))
+  const firstUnusedSlot = slots[groups.length]
+  if (firstUnusedSlot) {
+    truncateSheetAtRow(contractSheet, Math.max(1, addressRow(firstUnusedSlot.contractHeader) - 4))
+    truncateSheetAtRow(invoiceSheet, Math.max(1, addressRow(firstUnusedSlot.invoiceHeader) - 8))
+    truncateSheetAtRow(packingSheet, Math.max(1, addressRow(firstUnusedSlot.packingHeader) - 8))
+  }
+  const firstSeller = groups.find(group => group.seller)?.seller
+  if (firstSeller) fillGenericSeller(wb, firstSeller)
 
   // 通用发票、销售合同、装箱单(2)和草稿大单共用同一套序号及主明细公式。
   const genericInvoiceSheet = wb.Sheets['发票']
@@ -762,6 +905,16 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
     }
   }
 
+  const sellerForItem = input.seller
+    ? () => input.seller
+    : input.supplierProfiles
+      ? (item: CustomsItem) => documentSellerForLine(
+        item.supplier || matOf(item)?.supplier || '',
+        effCustoms(item),
+        input.supplierProfiles!,
+      )
+      : undefined
+
   // 旧版单模板（含印尼合同/发票）走供应商单据管线：卖方资料、贸易术语、
   // RRI 主体替换和 OOXML 动态扩行都基于该模板；RRI/RRM 模板走统一栏位管线。
   const legacyDocuments = Boolean(wbObj.Sheets['印尼合同'])
@@ -774,7 +927,7 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
       }
       applyCustomerDocumentEntity(wbObj, form.customer)
     } else {
-      populateLinkedDocuments(wbObj, newName, sorted, form.customer)
+      populateLinkedDocuments(wbObj, newName, sorted, form.customer, sellerForItem)
     }
   }
   fitCategoryColumn(wbObj)

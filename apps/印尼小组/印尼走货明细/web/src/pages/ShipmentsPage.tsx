@@ -657,19 +657,13 @@ export default function ShipmentsPage() {
     setExporting(true)
     try {
       const { buildCustomsWorkbook, customsFileName, dataUrlToBytes } = await import('../utils/customsExport')
-      // 1) 模板：汇总主明细沿用 RRI/RRM 模板；供应商单据（合同/发票/装箱单）基于
-      //    含全球/印尼单据的旧版单模板，卖方资料与动态扩行只在该模板上实现。
+      // 1) RRI/RRM 模板本身已按顺序预留多份合同、发票和装箱单；整票只生成一个工作簿。
       const templateName = String(v.customer || '').toUpperCase().includes('RRI')
         ? 'template-customs-rri.xlsx'
         : 'template-customs-rrm.xlsx'
-      const [tplResp, docTplResp] = await Promise.all([
-        fetch(publicAsset(import.meta.env.BASE_URL, templateName)),
-        fetch(publicAsset(import.meta.env.BASE_URL, 'template-customs.xlsx')),
-      ])
+      const tplResp = await fetch(publicAsset(import.meta.env.BASE_URL, templateName))
       if (!tplResp.ok) throw new Error(`模板加载失败 ${templateName} (HTTP ${tplResp.status})`)
-      if (!docTplResp.ok) throw new Error(`模板加载失败 template-customs.xlsx (HTTP ${docTplResp.status})`)
       const templateBuffer = await tplResp.arrayBuffer()
-      const documentTemplateBuffer = await docTplResp.arrayBuffer()
       // 2) 物料富化：products → materials by code → material_id 映射
       const { data: prods } = await api.get<any[]>('/products')
       const productHs = new Map<string, { hsCN?: string; hsID?: string }>()
@@ -700,7 +694,7 @@ export default function ShipmentsPage() {
       }
       const { documentSellerForLine } = await import('../utils/supplierProfiles')
       const { data: dictionaries } = await api.get<Dictionaries>('/dictionaries')
-      const bySupplier = new Map<number, { seller: NonNullable<Dictionaries['suppliers'][number]>; lines: ShipmentItem[] }>()
+      const sellerKeys = new Set<string>()
       for (const item of items) {
         const material = materials.get(item.material_id!)
         const seller = documentSellerForLine(
@@ -709,33 +703,17 @@ export default function ShipmentsPage() {
           dictionaries.suppliers || [],
         )
         if (!seller.id) throw new Error(`供应商「${seller.keyword}」缺少档案编号`)
-        if (!bySupplier.has(seller.id)) bySupplier.set(seller.id, { seller, lines: [] })
-        bySupplier.get(seller.id)!.lines.push(item)
+        sellerKeys.add(String(seller.id))
       }
       const fname = customsFileName(form2)
-      let blob: Blob
-      let outputName: string
-      if (bySupplier.size === 1) {
-        const { seller, lines } = [...bySupplier.values()][0]
-        blob = await buildCustomsWorkbook({ templateBuffer: documentTemplateBuffer, items: lines, materials, productHs, images, form: form2, seller })
-        outputName = fname
-      } else {
-        const { default: JSZip } = await import('jszip')
-        const zip = new JSZip()
-        const summary = await buildCustomsWorkbook({ templateBuffer, items, materials, productHs, images, form: form2, mainOnly: true })
-        zip.file(`汇总明细_${fname}`, summary)
-        for (const { seller, lines } of bySupplier.values()) {
-          const book = await buildCustomsWorkbook({ templateBuffer: documentTemplateBuffer, items: lines, materials, productHs, images, form: form2, seller })
-          const safeName = (seller.full || seller.keyword).replace(/[\\/:*?"<>|]/g, '_')
-          zip.file(`${safeName}_${fname}`, book)
-        }
-        blob = await zip.generateAsync({ type: 'blob' })
-        outputName = fname.replace(/\.xlsx$/i, '.zip')
-      }
+      const blob = await buildCustomsWorkbook({
+        templateBuffer, items, materials, productHs, images, form: form2,
+        supplierProfiles: dictionaries.suppliers || [],
+      })
       const a = document.createElement('a')
-      a.href = URL.createObjectURL(blob); a.download = outputName; document.body.appendChild(a); a.click()
+      a.href = URL.createObjectURL(blob); a.download = fname; document.body.appendChild(a); a.click()
       setTimeout(() => { URL.revokeObjectURL(a.href); a.remove() }, 1000)
-      message.success(`已按 ${bySupplier.size} 家卖方导出：${outputName}`)
+      message.success(`已生成 1 个工作簿（${sellerKeys.size} 家卖方）：${fname}`)
     } catch (e: any) {
       // 模板 fetch / 生成工作簿 抛的是普通 Error（非 axios），拦截器不覆盖，需自行提示
       message.error('导出失败：' + (e?.response?.data?.error ?? e?.message ?? e))

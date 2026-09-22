@@ -502,8 +502,6 @@ function populateLinkedDocuments(
     const contractEnd = next ? addressRow(next.contractHeader) - 1 : sheetLastRow(contractSheet)
     const invoiceStart = addressRow(slot.invoiceHeader)
     const invoiceEnd = next ? addressRow(next.invoiceHeader) - 1 : sheetLastRow(invoiceSheet)
-    const packingStart = Math.max(1, addressRow(slot.packingHeader) - 8)
-    const packingEnd = next ? Math.max(packingStart, addressRow(next.packingHeader) - 9) : sheetLastRow(packingSheet)
     const name = seller?.full?.trim() || ''
     const english = seller?.nameEn?.trim() || ''
     const address = seller
@@ -533,21 +531,8 @@ function populateLinkedDocuments(
       if (row >= invoiceStart && row <= invoiceEnd && typeof cell?.v === 'string'
         && /Beneficiary|Account number|Swift code/i.test(cell.v)) setPreservingStyle(invoiceSheet, cellAddress, '')
     }
-
-    const packingHeaderRow = addressRow(slot.packingHeader)
-    setPreservingStyle(packingSheet, `A${packingStart}`, english)
-    setPreservingStyle(packingSheet, `A${packingStart + 1}`, seller?.addressEn?.trim() || '')
-    setPreservingStyle(packingSheet, `A${packingHeaderRow}`, seller ? `${english}\n${seller.addressEn!.trim()}` : '')
-    setPreservingStyle(packingSheet, `A${packingHeaderRow + 3}`, seller ? `TEL: ${seller.phone!.trim()}` : '')
-    setPreservingStyle(packingSheet, `A${packingHeaderRow + 4}`, seller ? `EMAIL: ${seller.email!.trim()}` : '')
-    setPreservingStyle(packingSheet, `A${packingHeaderRow + 5}`, seller ? `Attention: ${seller.contact!.trim()}` : '')
-    // 防止未使用区块继续带出模板样例卖方。
-    if (!group) {
-      for (let row = packingStart; row <= packingEnd; row++) {
-        const value = String((packingSheet as any)?.[`A${row}`]?.v || '')
-        if (/HUASHENGYI|TOOLMAN|LIMITED|有限公司|@/i.test(value)) setPreservingStyle(packingSheet, `A${row}`, '')
-      }
-    }
+    // 装箱单抬头与 Shipper 属于客户主体：RRI 保留实业公司模板，RRM 保留全球公司模板。
+    // 供应商资料只进入对应合同与配套发票，不能覆盖装箱单的 Royal Regent 信息。
   }
 
   const applyGroup = (group: Group | undefined, slot: Slot, index: number) => {

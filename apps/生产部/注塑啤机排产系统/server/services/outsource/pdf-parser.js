@@ -35,6 +35,7 @@ async function readPdfPositions(buf) {
         str: it.str.trim(),
         x: Math.round(it.transform[4]),
         y: Math.round(it.transform[5]),
+        w: Math.round(it.width || 0),
         page: p,
       });
     }
@@ -67,6 +68,7 @@ function snapToColumns(items, anchors) {
       const d = Math.abs(it.x - a.x);
       if (d < bestDist) { best = a; bestDist = d; }
     }
+    if (it.preSpace && out[best.key].length) out[best.key].push(' ');
     out[best.key].push(it.str);
   }
   const merged = {};
@@ -306,8 +308,9 @@ function parseB(items, headerText) {
 }
 
 // ============================================================
-// TEMPLATE C: 兴信 委托加工合同 — positional with multi-line cell clustering
+// TEMPLATE C: 兴信/华登 委托加工合同 — 动态列锚点 + 换行单元格归并
 // ============================================================
+// 旧版固定像素锚点（不同供应商的合同列位置不同，仅作动态锚点失败时的回退）
 const TPL_C_ANCHORS = [
   { key: 'goods_no',         x: 50  },
   { key: 'goods_name',       x: 95  },
@@ -323,6 +326,24 @@ const TPL_C_ANCHORS = [
   { key: 'unit_price',       x: 462 },
   { key: 'amount',           x: 495 },
   { key: 'row_note',         x: 555 },
+];
+
+// 表头标签 → 字段（繁简兼容），用于从实际表头行动态取 x 坐标
+const TPL_C_LABEL_TO_KEY = [
+  [/^(貨號|货号)$/,          'goods_no'],
+  [/^(貨物名稱|货物名称)$/,   'goods_name'],
+  [/^(生产单号|生產單號)$/,   'production_no'],
+  [/^(模具编号|模具編號)$/,   'mold_code'],
+  [/^(用料名称|用料名稱)$/,   'material'],
+  [/^单重G?$/,               'shot_weight_g'],
+  [/^(总重量|總重量)$/,       'total_weight_kg'],
+  [/^(颜色|顏色)$/,           'color'],
+  [/^(色粉号|色粉號)$/,       'color_powder'],
+  [/^(数量|數量)$/,           'quantity'],
+  [/^啤数$/,                 'shots'],
+  [/^(單價|单价)/,           'unit_price'],
+  [/^(金額|金额)/,           'amount'],
+  [/^(備註|备注)$/,           'row_note'],
 ];
 
 function parseC_header(items, text) {
@@ -352,13 +373,91 @@ function parseC_header(items, text) {
   };
 }
 
+// 将含 ASCII 空格的合并碎片按字符比例拆成子碎片
+// （pdfjs 常把多列合并成一个碎片，如 "SR800-M15 ABS 750NSW"、"生产单号 模具编号 用料名称"）
+function splitFragments(items) {
+  const out = [];
+  for (const it of items) {
+    if (!it.str.includes(' ') || !it.w) { out.push(it); continue; }
+    const tokens = it.str.split(/ +/).filter(Boolean);
+    if (tokens.length < 2) { out.push(it); continue; }
+    let cursor = 0;
+    for (const tok of tokens) {
+      const off = it.str.indexOf(tok, cursor);
+      cursor = off + tok.length;
+      // preSpace: 非首个子碎片，拼回同列时需补空格（如用料 "PP CI571"）
+      out.push({ ...it, str: tok, x: Math.round(it.x + it.w * (off / it.str.length)), w: 0, preSpace: off > 0 });
+    }
+  }
+  return out;
+}
+
+// 模板 C 专用：不依赖表头文字对齐（部分合同表头与数据列错位），
+// 直接对数据区所有碎片做 x 聚类得到列，再按内容特征 + 固定列序推断每列含义
+const TPL_C_EXPECTED_ORDER = [
+  ['goods_no',        ['alnum']],
+  ['goods_name',      ['cjk']],
+  ['production_no',   ['prod_no', 'alnum']],
+  ['mold_code',       ['alnum', 'prod_no']],
+  ['material',        ['material', 'alnum']],
+  ['shot_weight_g',   ['dec']],
+  ['total_weight_kg', ['dec']],
+  ['color',           ['cjk']],
+  ['color_powder',    ['powder']],
+  ['quantity',        ['int']],
+  ['shots',           ['int']],
+  ['unit_price',      ['dec']],
+  ['amount',          ['dec']],
+  ['row_note',        ['cjk', 'alnum']],
+];
+
+function deriveAnchorsC(rows, fromIdx, toIdx) {
+  const pts = [];
+  for (let i = fromIdx; i < toIdx; i++) pts.push(...rows[i].items);
+  if (!pts.length) return [];
+  pts.sort((a, b) => a.x - b.x);
+  const clusters = [];
+  for (const p of pts) {
+    const c = clusters[clusters.length - 1];
+    if (c && p.x - c.maxX <= 14) {
+      c.items.push(p);
+      c.maxX = Math.max(c.maxX, p.x);
+      c.sum += p.x;
+    } else {
+      clusters.push({ maxX: p.x, sum: p.x, items: [p] });
+    }
+  }
+  const sigOf = (c) => {
+    const ss = c.items.map((i) => i.str);
+    const any = (re) => ss.some((s) => re.test(s));
+    const all = (re) => ss.every((s) => re.test(s));
+    if (any(/-M\d+/i)) return 'prod_no';
+    if (any(/^(PP|PE|ABS|MABS|PC|PA|POM|PVC|TPU|TPE|PMMA|PS|透明)/i) && any(/[A-Za-z]/)) return 'material';
+    if (all(/^\d{5}$/)) return 'powder';
+    if (all(/^-?[\d,]+$/)) return 'int';
+    if (all(/^-?[\d,]*\d(\.\d+)?$/) && any(/\./)) return 'dec';
+    if (any(/[一-鿿]/)) return 'cjk';
+    return 'alnum';
+  };
+  const anchors = [];
+  let e = 0;
+  for (const c of clusters) {
+    const s = sigOf(c);
+    while (e < TPL_C_EXPECTED_ORDER.length && !TPL_C_EXPECTED_ORDER[e][1].includes(s)) e++;
+    if (e >= TPL_C_EXPECTED_ORDER.length) break;
+    anchors.push({ key: TPL_C_EXPECTED_ORDER[e][0], x: Math.round(c.sum / c.items.length) });
+    e++;
+  }
+  return anchors;
+}
+
 function parseC(items, headerText) {
   const header = parseC_header(items, headerText);
-  // Larger yGap to merge wrapped cell lines into one logical row
-  const rows = clusterRows(items, 11);
+  // 先拆合并碎片，再用小间距按物理行聚类
+  const rows = clusterRows(splitFragments(items), 3);
   const headerRowIdx = rows.findIndex((r) => {
     const txt = r.items.map((x) => x.str).join('');
-    return /模具编号/.test(txt) && /啤数/.test(txt);
+    return /模具编号|模具編號/.test(txt) && /啤数/.test(txt);
   });
   if (headerRowIdx < 0) return { header, rows: [] };
 
@@ -368,29 +467,102 @@ function parseC(items, headerText) {
     if (/合計|附送|〖|前交货货送/.test(txt)) { footerIdx = i; break; }
   }
 
-  const out = [];
+  const anchors = deriveAnchorsC(rows, headerRowIdx + 1, footerIdx);
+  const keys = new Set(anchors.map((a) => a.key));
+  const anchorsOk = ['goods_name', 'production_no', 'quantity', 'shots'].every((k) => keys.has(k));
+
+  // ---- 回退路径：列推断失败时用固定像素锚点 + 旧向上归并（兼容旧兴信合同）----
+  if (!anchorsOk) {
+    const isContinuation = (f) => !num(f.quantity) && !num(f.shots) && !f.goods_no;
+    const out = [];
+    for (let i = headerRowIdx + 1; i < footerIdx; i++) {
+      const fields = snapToColumns(rows[i].items, TPL_C_ANCHORS);
+      const hasAny = Object.values(fields).some((v) => v);
+      if (!hasAny) continue;
+      if (isContinuation(fields) && out.length > 0) {
+        const prev = out[out.length - 1];
+        if (fields.goods_name) prev.mold_name = (prev.mold_name || '') + fields.goods_name;
+        if (fields.material)   prev.material = (prev.material || '') + ' ' + fields.material;
+        if (fields.row_note)   prev.row_note = (prev.row_note || '') + ' ' + fields.row_note;
+        continue;
+      }
+      if (!fields.mold_code && !fields.goods_no && !fields.goods_name) continue;
+      out.push({
+        order_no: fields.goods_no || (out.length ? out[out.length - 1].order_no : ''),
+        mold_code: fields.mold_code,
+        mold_name: fields.goods_name,
+        total_sets: num(fields.quantity),
+        shots: num(fields.shots),
+        color: fields.color,
+        color_powder: fields.color_powder,
+        material: fields.material,
+        shot_weight_g: num(fields.shot_weight_g),
+        total_weight_kg: num(fields.total_weight_kg),
+        unit_price: num(fields.unit_price),
+        amount: num(fields.amount),
+        production_no: fields.production_no,
+        row_note: fields.row_note,
+        delivery_date: header.delivery_date,
+      });
+    }
+    return { header, rows: out };
+  }
+
+  // ---- 主路径：数据驱动列锚点 + 换行碎片就近归并 ----
+  const snapped = [];
   for (let i = headerRowIdx + 1; i < footerIdx; i++) {
-    const r = rows[i];
-    const fields = snapToColumns(r.items, TPL_C_ANCHORS);
-    if (!fields.mold_code && !fields.goods_no) continue;
+    const f = snapToColumns(rows[i].items, anchors);
+    if (!Object.values(f).some((v) => v)) continue;
+    snapped.push({ y: rows[i].y, f, isData: num(f.quantity) != null || num(f.shots) != null });
+  }
+  const dataIdxs = [];
+  snapped.forEach((s, idx) => { if (s.isData) dataIdxs.push(idx); });
+
+  // 非数据行（换行碎片）归并到 y 距离最近的数据行：
+  //   在数据行上方 = 品名前缀（如 "C绿色恐龙"），下方 = 后缀（如 "书包"）；用料/备注同理
+  const pre = {}, post = {};
+  snapped.forEach((s, idx) => {
+    if (s.isData || !dataIdxs.length) return;
+    let best = dataIdxs[0];
+    for (const d of dataIdxs) {
+      if (Math.abs(snapped[d].y - s.y) < Math.abs(snapped[best].y - s.y)) best = d;
+    }
+    const bag = best > idx ? (pre[best] = pre[best] || []) : (post[best] = post[best] || []);
+    bag.push(s.f);
+  });
+
+  const out = [];
+  snapped.forEach((s, idx) => {
+    if (!s.isData) return;
+    const f = s.f;
+    const preArr = pre[idx] || [], postArr = post[idx] || [];
+    const name =
+      preArr.map((p) => p.goods_name || '').join('') +
+      (f.goods_name || '') +
+      postArr.map((p) => p.goods_name || '').join('');
+    const material = [...preArr.map((p) => p.material), f.material, ...postArr.map((p) => p.material)]
+      .filter(Boolean).join(' ');
+    const row_note = [f.row_note, ...preArr.map((p) => p.row_note), ...postArr.map((p) => p.row_note)]
+      .filter(Boolean).join(' ');
+    if (!name && !f.mold_code && !f.production_no) return;
     out.push({
-      order_no: fields.goods_no || '',
-      mold_code: fields.mold_code,
-      mold_name: fields.goods_name,
-      total_sets: num(fields.quantity),
-      shots: num(fields.shots),
-      color: fields.color,
-      color_powder: fields.color_powder,
-      material: fields.material,
-      shot_weight_g: num(fields.shot_weight_g),
-      total_weight_kg: num(fields.total_weight_kg),
-      unit_price: num(fields.unit_price),
-      amount: num(fields.amount),
-      production_no: fields.production_no,
-      row_note: fields.row_note,
+      order_no: f.goods_no || (out.length ? out[out.length - 1].order_no : ''),
+      mold_code: f.mold_code || '',
+      mold_name: name,
+      total_sets: num(f.quantity),
+      shots: num(f.shots),
+      color: f.color || '',
+      color_powder: f.color_powder || '',
+      material,
+      shot_weight_g: num(f.shot_weight_g),
+      total_weight_kg: num(f.total_weight_kg),
+      unit_price: num(f.unit_price),
+      amount: num(f.amount),
+      production_no: f.production_no || '',
+      row_note,
       delivery_date: header.delivery_date,
     });
-  }
+  });
   return { header, rows: out };
 }
 

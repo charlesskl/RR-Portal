@@ -343,10 +343,12 @@ app.MapGet("/api/public/plans", async (string site, string? template, string? mo
             return Results.BadRequest(new { error = "结束日期格式应为yyyy-MM-dd" });
         siteQuery = siteQuery.Where(record => record.InspectionDate < end.AddDays(1));
     }
-    var customers = await siteQuery.Where(record => record.Customer != "").Select(record => record.Customer).Distinct().OrderBy(value => value).ToArrayAsync(ct);
+    var customerNames = await siteQuery.Where(record => record.Customer != "").Select(record => record.Customer).Distinct().OrderBy(value => value).ToArrayAsync(ct);
+    var customers = customerNames.Select(CanonicalCustomerName).Where(value => value != "")
+        .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
     var locations = await siteQuery.Where(record => record.InspectionLocation != "").Select(record => record.InspectionLocation).Distinct().OrderBy(value => value).ToArrayAsync(ct);
     if (!string.IsNullOrWhiteSpace(status)) siteQuery = siteQuery.Where(record => record.WorkflowStatus == status);
-    if (!string.IsNullOrWhiteSpace(customer)) siteQuery = siteQuery.Where(record => record.Customer == customer);
+    if (!string.IsNullOrWhiteSpace(customer)) siteQuery = FilterByCustomer(siteQuery, customer);
     if (!string.IsNullOrWhiteSpace(location)) siteQuery = siteQuery.Where(record => record.InspectionLocation == location);
     if (!string.IsNullOrWhiteSpace(q))
     {
@@ -651,12 +653,14 @@ app.MapGet("/api/legacy-inspections", async (string site, string? template, stri
         var toExclusive = toDate.AddDays(1);
         query = query.Where(record => record.InspectionDate < toExclusive);
     }
-    var customers = await query.Where(record => record.Customer != "").Select(record => record.Customer)
+    var customerNames = await query.Where(record => record.Customer != "").Select(record => record.Customer)
         .Distinct().OrderBy(value => value).ToArrayAsync(cancellationToken);
+    var customers = customerNames.Select(CanonicalCustomerName).Where(value => value != "")
+        .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
     var locations = await query.Where(record => record.InspectionLocation != "").Select(record => record.InspectionLocation)
         .Distinct().OrderBy(value => value).ToArrayAsync(cancellationToken);
     if (!string.IsNullOrWhiteSpace(status)) query = query.Where(record => record.WorkflowStatus == status);
-    if (!string.IsNullOrWhiteSpace(customer)) query = query.Where(record => record.Customer == customer);
+    if (!string.IsNullOrWhiteSpace(customer)) query = FilterByCustomer(query, customer);
     if (!string.IsNullOrWhiteSpace(location)) query = query.Where(record => record.InspectionLocation == location);
     if (!string.IsNullOrWhiteSpace(q))
     {
@@ -708,7 +712,7 @@ app.MapGet("/api/legacy-inspections/export", async (string site, string? templat
         query = query.Where(record => record.InspectionDate < toExclusive);
     }
     if (!string.IsNullOrWhiteSpace(status)) query = query.Where(record => record.WorkflowStatus == status);
-    if (!string.IsNullOrWhiteSpace(customer)) query = query.Where(record => record.Customer == customer);
+    if (!string.IsNullOrWhiteSpace(customer)) query = FilterByCustomer(query, customer);
     if (!string.IsNullOrWhiteSpace(location)) query = query.Where(record => record.InspectionLocation == location);
     if (!string.IsNullOrWhiteSpace(q))
     {
@@ -1181,6 +1185,25 @@ static string ResolveProductionSupervisor(AppDbContext db, string workshop, stri
     if (!string.IsNullOrWhiteSpace(supervisor)) return supervisor.Trim();
     return db.WorkshopMappings.AsNoTracking().Where(value => value.Workshop == workshop.Trim())
         .Select(value => value.Supervisor).FirstOrDefault() ?? string.Empty;
+}
+
+static string CanonicalCustomerName(string? customer)
+{
+    var value = customer?.Trim() ?? string.Empty;
+    if (value.StartsWith("JAZWARES", StringComparison.OrdinalIgnoreCase)) return "JAZWARES";
+    if (value.Equals("TOMY", StringComparison.OrdinalIgnoreCase) || value.StartsWith("TOMY ", StringComparison.OrdinalIgnoreCase)) return "TOMY";
+    return value;
+}
+
+static IQueryable<InspectionRecord> FilterByCustomer(IQueryable<InspectionRecord> query, string customer)
+{
+    var customerKey = CanonicalCustomerName(customer).ToUpper();
+    return customerKey switch
+    {
+        "JAZWARES" => query.Where(record => record.Customer.ToUpper().StartsWith("JAZWARES")),
+        "TOMY" => query.Where(record => record.Customer.ToUpper() == "TOMY" || record.Customer.ToUpper().StartsWith("TOMY ")),
+        _ => query.Where(record => record.Customer.ToUpper() == customerKey),
+    };
 }
 
 static bool IsWithinScheduleImportWindow(DateTime? inspectionDate, DateTime today)

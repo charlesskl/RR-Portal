@@ -43,7 +43,26 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             {
                 ctx.Token = ctx.Request.Cookies["sprayplan_session"];
                 return Task.CompletedTask;
-            }
+            },
+            OnTokenValidated = async ctx =>
+            {
+                var userIdText = ctx.Principal?.FindFirst("userId")?.Value;
+                if (!int.TryParse(userIdText, out var userId))
+                {
+                    ctx.Fail("登录状态无效");
+                    return;
+                }
+
+                var db = ctx.HttpContext.RequestServices.GetRequiredService<AppDbContext>();
+                var current = await db.Users.IgnoreQueryFilters().AsNoTracking()
+                    .Where(user => user.Id == userId)
+                    .Select(user => new { user.IsActive, user.Role, user.FactoryId })
+                    .FirstOrDefaultAsync();
+                var tokenRole = ctx.Principal?.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
+                var tokenFactory = ctx.Principal?.FindFirst("factoryId")?.Value;
+                if (current is null || !current.IsActive || current.Role != tokenRole || current.FactoryId != tokenFactory)
+                    ctx.Fail("账号权限已变更，请重新登录");
+            },
         };
     });
 

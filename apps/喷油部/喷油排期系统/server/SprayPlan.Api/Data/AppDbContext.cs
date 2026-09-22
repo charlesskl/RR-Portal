@@ -290,6 +290,12 @@ public class AppDbContext : DbContext
             if (entry.Entity is User && _http?.HttpContext?.User.Identity?.IsAuthenticated != true)
                 continue;
 
+            // 管理员的用户管理是全厂区范围：允许把文员迁移到另一厂区，
+            // 以及把用户提升为管理员（factoryId 会变成 ALL）。
+            // 这里只放开 User，订单、排期、库存等业务数据仍按顶部当前厂区隔离。
+            if (entry.Entity is User && IsAdmin)
+                continue;
+
             if (entry.State == EntityState.Added && !CanSeeAllFactories)
             {
                 SetFactory(entry.Entity, CurrentFactoryId);

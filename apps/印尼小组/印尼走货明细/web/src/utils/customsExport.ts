@@ -1469,6 +1469,8 @@ async function restoreTemplateDocumentStyles(
   const rawStyles = parser.parseFromString(await templateZip.file('xl/styles.xml')!.async('string'), 'application/xml')
   const rawXfs = rawStyles.getElementsByTagName('cellXfs')[0]
   const xfNodes = Array.from(rawXfs.getElementsByTagName('xf'))
+  const rawFonts = rawStyles.getElementsByTagName('fonts')[0]
+  const fontNodes = Array.from(rawFonts.getElementsByTagName('font'))
   const currencyNumFmt = new Map<string, string>()
   for (const node of Array.from(rawStyles.getElementsByTagName('numFmt'))) {
     const code = node.getAttribute('formatCode') || ''
@@ -1476,6 +1478,7 @@ async function restoreTemplateDocumentStyles(
     if (code.includes('HK$') && code.includes('0.000')) currencyNumFmt.set('HK$', node.getAttribute('numFmtId') || '178')
   }
   const derivedStyles = new Map<string, string>()
+  const derivedFonts = new Map<string, string>()
   const styleForCurrency = (baseStyle: string, currency: string) => {
     const numFmtId = currencyNumFmt.get(currency)
     if (!numFmtId) return baseStyle
@@ -1501,6 +1504,34 @@ async function restoreTemplateDocumentStyles(
     const copy = rawStyles.importNode(base, true) as typeof base
     copy.setAttribute('fillId', fillId)
     copy.setAttribute('applyFill', '1')
+    const styleId = String(xfNodes.length + derivedStyles.size)
+    rawXfs.appendChild(copy)
+    derivedStyles.set(key, styleId)
+    return styleId
+  }
+  const styleWithFontSize = (baseStyle: string, size: number) => {
+    const key = `${baseStyle}|font-size:${size}`
+    const cached = derivedStyles.get(key)
+    if (cached) return cached
+    const base = xfNodes[Number(baseStyle)] || xfNodes[0]
+    const baseFontId = Number(base.getAttribute('fontId') || 0)
+    const fontKey = `${baseFontId}|size:${size}`
+    let fontId = derivedFonts.get(fontKey)
+    if (!fontId) {
+      const font = rawStyles.importNode(fontNodes[baseFontId] || fontNodes[0], true) as XmlElement
+      let sizeNode = Array.from(font.childNodes).find(node => (node as XmlElement).localName === 'sz') as XmlElement | undefined
+      if (!sizeNode) {
+        sizeNode = rawStyles.createElementNS(SPREADSHEET_NS, 'sz') as XmlElement
+        font.appendChild(sizeNode)
+      }
+      sizeNode.setAttribute('val', String(size))
+      rawFonts.appendChild(font)
+      fontId = String(fontNodes.length + derivedFonts.size)
+      derivedFonts.set(fontKey, fontId)
+    }
+    const copy = rawStyles.importNode(base, true) as typeof base
+    copy.setAttribute('fontId', fontId)
+    copy.setAttribute('applyFont', '1')
     const styleId = String(xfNodes.length + derivedStyles.size)
     rawXfs.appendChild(copy)
     derivedStyles.set(key, styleId)
@@ -1558,12 +1589,17 @@ async function restoreTemplateDocumentStyles(
           if (rawStyle && ['AO', 'AP', 'AQ'].includes(match[1])) {
             rawStyle = styleForCurrency(rawStyle, outputCurrencies[Number(match[2]) - 4] || '¥')
           }
+          if (rawStyle && match[1] === 'AR') rawStyle = styleWithFontSize(rawStyle, 12)
+          if (rawStyle && match[1] === 'BB') {
+            rawStyle = styleWithFill(rawStyle, rawMainStyles.get(`A${sourceRow}`) || rawStyle)
+          }
         }
       }
       cell.setAttribute('s', rawStyle ?? '0')
     }
     outputZip.file(outputPath, serializer.serializeToString(outputDoc))
   }
+  rawFonts.setAttribute('count', String(fontNodes.length + derivedFonts.size))
   rawXfs.setAttribute('count', String(xfNodes.length + derivedStyles.size))
   outputZip.file('xl/styles.xml', serializer.serializeToString(rawStyles))
 }

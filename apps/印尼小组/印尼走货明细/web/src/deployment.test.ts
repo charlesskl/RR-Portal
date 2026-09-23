@@ -47,6 +47,23 @@ async function cellFillId(bytes: ArrayBuffer, address: string, sheetPath = 'xl/w
   return Number(xf?.getAttribute('fillId') || 0)
 }
 
+async function cellFontSize(bytes: ArrayBuffer, address: string, sheetPath = 'xl/worksheets/sheet2.xml') {
+  const zip = await JSZip.loadAsync(bytes)
+  const parser = new DOMParser()
+  const sheet = parser.parseFromString(await zip.file(sheetPath)!.async('string'), 'application/xml')
+  const styles = parser.parseFromString(await zip.file('xl/styles.xml')!.async('string'), 'application/xml')
+  const elements = (parent: any, localName: string) => Array.from(parent.getElementsByTagName('*'))
+    .filter(node => (node as any).localName === localName) as any[]
+  const children = (parent: any, localName: string) => Array.from(parent?.childNodes || [])
+    .filter(node => (node as any).localName === localName) as any[]
+  const cell = elements(sheet, 'c').find(node => node.getAttribute('r') === address)
+  const styleId = Number(cell?.getAttribute('s') || 0)
+  const xf = children(elements(styles, 'cellXfs')[0], 'xf')[styleId]
+  const fontId = Number(xf?.getAttribute('fontId') || 0)
+  const font = children(elements(styles, 'fonts')[0], 'font')[fontId]
+  return Number(children(font, 'sz')[0]?.getAttribute('val') || 0)
+}
+
 describe('deployment base paths', () => {
   it('uses product-type prefixes as formula names outside Huashengyi customs', () => {
     expect(customsFormulaName({ formula_name: '五金配件-钉' }, undefined, '其他报关公司')).toBe('五金配件')
@@ -256,6 +273,8 @@ describe('deployment base paths', () => {
     expect(sheet.A4?.s?.fgColor?.rgb).toBe(templateSheet.A4?.s?.fgColor?.rgb)
     expect(sheet.A4?.s?.fgColor?.rgb).not.toBe(sheet.A5?.s?.fgColor?.rgb)
     expect(sheet.A5?.s?.fgColor?.rgb).toBe(sheet.A6?.s?.fgColor?.rgb)
+    expect(await cellFillId(outputBytes, 'BB4')).toBe(await cellFillId(outputBytes, 'A4'))
+    expect(await cellFillId(outputBytes, 'BB6')).toBe(await cellFillId(outputBytes, 'A6'))
     expect(sheet.E4?.s?.fgColor?.rgb).toBe(sheet.E3?.s?.fgColor?.rgb)
     expect(sheet.E4?.s?.fgColor?.rgb).not.toBe(sheet.A4?.s?.fgColor?.rgb)
     expect(sheet.P4?.z).toBe(templateSheet.P4?.z)
@@ -273,6 +292,8 @@ describe('deployment base paths', () => {
     expect(mainSheetXml).toContain('<drawing r:id="rIdGenDrawing999"/>')
     expect(mainRelsXml).toContain('Target="../drawings/drawing999.xml"')
     expect(archive.file('xl/media/image100.png')).toBeTruthy()
+    expect(await cellFontSize(outputBytes, 'AR4')).toBe(12)
+    expect(await cellFontSize(outputBytes, 'AR5')).toBe(12)
     expect(sheet['!rows']?.[3]?.hpt).toBe(templateSheet['!rows']?.[3]?.hpt)
     expect(sheet['!rows']?.[0]?.hpt).toBe(24)
     expect(sheet['!rows']?.[1]?.hpt).toBe(24)

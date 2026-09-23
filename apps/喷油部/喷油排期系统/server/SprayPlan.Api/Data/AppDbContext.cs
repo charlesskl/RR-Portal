@@ -247,7 +247,7 @@ public class AppDbContext : DbContext
         ia.Property(x => x.Remark).HasColumnName("remark");
 
         // 厂区数据隔离统一放在数据库查询层，避免任何接口漏写 Where 条件。
-        // 管理员/主管的用户管理始终显示全部账号，不受当前业务厂区选择影响。
+        // 管理员的用户管理始终显示全部账号，不受当前业务厂区选择影响。
         u.HasQueryFilter(x => CanSeeAllFactories || IsAdmin || x.FactoryId == CurrentFactoryId);
         o.HasQueryFilter(x => CanSeeAllFactories || x.FactoryId == CurrentFactoryId);
         l.HasQueryFilter(x => CanSeeAllFactories || x.FactoryId == CurrentFactoryId);
@@ -288,6 +288,12 @@ public class AppDbContext : DbContext
 
             // 登录接口在令牌签发前更新该账号的最后登录时间；此时尚无厂区 Claim。
             if (entry.Entity is User && _http?.HttpContext?.User.Identity?.IsAuthenticated != true)
+                continue;
+
+            // 管理员的用户管理是全厂区范围：允许把文员迁移到另一厂区，
+            // 以及把用户提升为管理员（factoryId 会变成 ALL）。
+            // 这里只放开 User，订单、排期、库存等业务数据仍按顶部当前厂区隔离。
+            if (entry.Entity is User && IsAdmin)
                 continue;
 
             if (entry.State == EntityState.Added && !CanSeeAllFactories)

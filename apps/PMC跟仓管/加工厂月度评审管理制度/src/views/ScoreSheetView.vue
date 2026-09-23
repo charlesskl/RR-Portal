@@ -36,6 +36,8 @@ const flag = ref<'none' | 'yellow' | 'red'>('none')
 const flagReason = ref('')
 const recalculating = ref(false)
 const autoError = ref('')
+const submitting = ref(false)
+const submitError = ref('')
 const scoreNotice = ref('')
 const scoreStatus = ref<'draft' | 'submitted' | 'approved'>('draft')
 
@@ -92,10 +94,10 @@ async function recalculateAutomaticScores() {
       factory.value,
       data,
     )
-    const saved = await scores.save(factoryId, month, { score_items: merged })
+    const saved = await scores.save(factoryId, month, { score_items: merged, status: 'submitted', submitted_by: auth.userId ?? undefined })
     for (const item of saved.score_items ?? merged) itemMap.value[item.template_id] = { ...item }
     scoreStatus.value = saved.status
-    scoreNotice.value = '已重新计算并保存，总分已同步'
+    scoreNotice.value = '已自动计算并提交，总分已同步'
   } catch (error) {
     autoError.value = error instanceof Error ? error.message : '自动评分数据读取失败'
   } finally {
@@ -104,14 +106,25 @@ async function recalculateAutomaticScores() {
 }
 
 async function submit() {
+  if (submitting.value || recalculating.value) return
+  submitError.value = ''
   const score_items = applicable.value.map((t) => ({
     template_id: t.id,
     score: itemMap.value[t.id]?.score ?? 0,
     notes: itemMap.value[t.id]?.notes ?? '',
   }))
-  const saved = await scores.save(factoryId, month, { score_items, status: 'submitted', submitted_by: auth.userId ?? undefined })
-  scoreStatus.value = saved.status
-  alert('已提交，总分由服务端核定')
+  if (score_items.some((item, index) => !Number.isFinite(Number(item.score)) || Number(item.score) < 0 || Number(item.score) > applicable.value[index]!.max_score)) {
+    submitError.value = '得分必须是 0 至对应满分之间的数字'
+    return
+  }
+  submitting.value = true
+  try {
+    const saved = await scores.save(factoryId, month, { score_items, status: 'submitted', submitted_by: auth.userId ?? undefined })
+    scoreStatus.value = saved.status
+    scoreNotice.value = '已提交，总分由服务端核定'
+  } catch (error) {
+    submitError.value = error instanceof Error ? error.message : '提交失败，请重试'
+  } finally { submitting.value = false }
 }
 
 async function saveReason() {
@@ -149,7 +162,7 @@ async function saveFlag() {
             <td>{{ t.max_score }}</td>
             <td>
               <input type="number" :max="t.max_score" min="0"
-                :disabled="isAutoScoreModule(t.module) || !canEditItem(t.scoring_role)"
+                :disabled="recalculating || submitting || !canEditItem(t.scoring_role)"
                 v-model.number="(itemMap[t.id] ??= { template_id: t.id, score: 0 }).score" />
             </td>
             <td>{{ t.scoring_role === 'buyer' ? '采购' : '品质' }}</td>
@@ -162,7 +175,9 @@ async function saveFlag() {
       <span class="badge" :class="'badge-' + liveGrade">{{ liveGrade }} 级</span>
       <span class="hint">最终以服务端核定为准</span>
     </p>
-    <button @click="submit">提交评分</button>
+    <p class="hint">自动计算后直接提交；需要调整时可修改有权限的得分，再次手动提交。</p>
+    <p v-if="submitError" class="error" role="alert">{{ submitError }}</p>
+    <button :disabled="submitting || recalculating" @click="submit">{{ submitting ? '提交中…' : scoreStatus === 'submitted' ? '再次提交评分' : '提交评分' }}</button>
 
     <section class="card flag-box">
       <h3>红黄牌</h3>

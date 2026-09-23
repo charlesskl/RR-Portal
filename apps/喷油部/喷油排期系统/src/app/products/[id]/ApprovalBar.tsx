@@ -10,7 +10,7 @@ export default function ApprovalBar({ productId, status, role }: { productId: nu
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const st = PRODUCT_STATUS_META[status] ?? PRODUCT_STATUS_META.draft;
-  const isAdmin = role === "admin";
+  const isAdmin = role === "admin" || role === "manager";
 
   async function setStatus(next: string, confirmMsg: string) {
     if (!confirm(confirmMsg)) return;

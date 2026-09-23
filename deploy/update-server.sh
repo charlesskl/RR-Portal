@@ -29,8 +29,13 @@ ENV_FILE="${INSTALL_DIR}/.env.cloud.production"
 COMPOSE_FILE="docker-compose.cloud.yml"
 STATE_FILE="${INSTALL_DIR}/deploy/.deploy-state"
 BACKUP_DIR="${INSTALL_DIR}/deploy/backups"
+# 维护模式标志：存在即让 nginx 对所有业务路径返回 503 + 维护页（见 nginx.cloud.conf）
+MAINT_FLAG_DIR="${INSTALL_DIR}/deploy/maintenance"
+MAINT_FLAG="${MAINT_FLAG_DIR}/ON"
 
 cd "$INSTALL_DIR"
+# bind mount 进 nginx 容器，必须保证目录存在（ro mount，容器内只检测不写入）
+mkdir -p "$MAINT_FLAG_DIR"
 
 # ─── State tracking (supports resume) ───
 save_state() { echo "$1" > "$STATE_FILE"; }
@@ -402,6 +407,14 @@ ensure_service_base_images() {
   done
 }
 
+# ─── 维护模式 ON：recreate 窗口期让用户看到维护页，而非 502 / Next.js 错误摘要页 ───
+# 标志文件经 bind mount 进 nginx 容器（/etc/nginx/maintenance/ON），
+# nginx server 级 if (-f ...) 命中即 return 503 + maintenance.html，无需 reload。
+# 失败路径（set -e 中途退出 / 下方健康等待超时）保留标志：此时服务大概率不可用，
+# 维护页比裸错误页更友好；恢复后重跑部署（成功会自动清除）或手动 rm -f 该文件。
+touch "$MAINT_FLAG"
+echo "  [MAINT] 维护模式已开启（$MAINT_FLAG）"
+
 # ─── Step 6: 执行部署 ───
 save_state "deploy"
 echo "[6/6] Deploying..."
@@ -504,6 +517,49 @@ for i in $(seq 1 15); do
   fi
   sleep 2
 done
+
+# ─── 维护模式 OFF：先等受影响容器 healthy，再撤标志 ───
+# 避免「标志撤了但应用还没起」的空窗（up -d 返回只代表容器启动，不代表应用就绪）。
+# /nginx-health 已被 nginx 配置豁免，上面的 nginx 检查不受标志影响；
+# deploy.yml 的各 app 健康检查在本脚本退出后才执行，此时标志已清除，不会被 503 干扰。
+MAINT_WAIT_SERVICES=()
+if [[ "$COMPOSE_CHANGED" -eq 1 ]]; then
+  mapfile -t MAINT_WAIT_SERVICES < <(docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" config --services 2>/dev/null)
+elif [[ "${#AFFECTED_SERVICES[@]}" -gt 0 ]]; then
+  MAINT_WAIT_SERVICES=("${AFFECTED_SERVICES[@]}")
+fi
+
+if [[ "${#MAINT_WAIT_SERVICES[@]}" -gt 0 ]]; then
+  echo "  [MAINT] 等待受影响服务 healthy 后关闭维护模式: ${MAINT_WAIT_SERVICES[*]}"
+  ALL_HEALTHY=0
+  PENDING=""
+  WAIT_DEADLINE=$((SECONDS + 300))
+  while (( SECONDS < WAIT_DEADLINE )); do
+    ALL_HEALTHY=1
+    for svc in "${MAINT_WAIT_SERVICES[@]}"; do
+      CID=$(docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" ps -q "$svc" 2>/dev/null | head -1)
+      if [[ -z "$CID" ]]; then
+        ALL_HEALTHY=0; PENDING="$svc(容器不存在)"; break
+      fi
+      HSTATUS=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$CID" 2>/dev/null || echo "unknown")
+      case "$HSTATUS" in
+        healthy|none) ;;  # 无 healthcheck 的服务（如 autoheal）容器在跑即视为 OK
+        *) ALL_HEALTHY=0; PENDING="$svc($HSTATUS)"; break ;;
+      esac
+    done
+    [[ "$ALL_HEALTHY" -eq 1 ]] && break
+    sleep 5
+  done
+  if [[ "$ALL_HEALTHY" -ne 1 ]]; then
+    echo "  [ERROR] 等待超时（300s），$PENDING 仍未 healthy。"
+    echo "          维护模式保持开启（用户看到维护页而非错误页）。"
+    echo "          排查恢复后重跑部署（成功会自动清除），或手动执行: rm -f $MAINT_FLAG"
+    exit 1
+  fi
+  echo "  [MAINT] 所有受影响服务已 healthy"
+fi
+rm -f "$MAINT_FLAG"
+echo "  [MAINT] 维护模式已关闭"
 
 echo "[OK] Update complete."
 echo "=== Container Status ==="

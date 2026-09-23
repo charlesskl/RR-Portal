@@ -68,6 +68,43 @@ public class UsersApiTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Create_Admin_AssignsAllFactories()
+    {
+        await LoginAsync("admin", "admin123");
+        var resp = await _client.PostAsJsonAsync("/api/users",
+            new { username = "manager2", password = "pass123", displayName = "二号主管", role = "admin", factoryId = "XINGXIN" });
+
+        Assert.Equal(HttpStatusCode.Created, resp.StatusCode);
+        var user = await resp.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>();
+        Assert.Equal("ALL", user.GetProperty("factoryId").GetString());
+    }
+
+    [Fact]
+    public async Task Create_Manager_RequiresAndKeepsOneFactory()
+    {
+        await LoginAsync("admin", "admin123");
+        var resp = await _client.PostAsJsonAsync("/api/users",
+            new { username = "huadeng_manager", password = "pass123", displayName = "华登主管", role = "manager", factoryId = "HUADENG" });
+
+        Assert.Equal(HttpStatusCode.Created, resp.StatusCode);
+        var user = await resp.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>();
+        Assert.Equal("manager", user.GetProperty("role").GetString());
+        Assert.Equal("HUADENG", user.GetProperty("factoryId").GetString());
+    }
+
+    [Fact]
+    public async Task Manager_CannotUseGlobalUserManagement()
+    {
+        await LoginAsync("admin", "admin123");
+        (await _client.PostAsJsonAsync("/api/users",
+            new { username = "factory_manager", password = "pass123", displayName = "厂区主管", role = "manager", factoryId = "XINGXIN" })).EnsureSuccessStatusCode();
+        await LoginAsync("factory_manager", "pass123");
+
+        Assert.Equal(HttpStatusCode.Forbidden, (await _client.GetAsync("/api/users")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await _client.GetAsync("/api/orders")).StatusCode);
+    }
+
+    [Fact]
     public async Task Create_DuplicateUsername_Returns409()
     {
         await LoginAsync("admin", "admin123");
@@ -110,6 +147,59 @@ public class UsersApiTests : IAsyncLifetime
         resp.EnsureSuccessStatusCode();
         var body = await resp.Content.ReadAsStringAsync();
         Assert.Contains("改名文员", body);
+    }
+
+    [Fact]
+    public async Task Update_AsAdmin_CanPromoteClerkToAllFactories()
+    {
+        await LoginAsync("admin", "admin123");
+        var resp = await _client.PatchAsJsonAsync("/api/users/2",
+            new { displayName = "兴信主管", role = "admin", factoryId = "XINGXIN", isActive = true, newPassword = "" });
+
+        resp.EnsureSuccessStatusCode();
+        var user = await resp.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>();
+        Assert.Equal("admin", user.GetProperty("role").GetString());
+        Assert.Equal("ALL", user.GetProperty("factoryId").GetString());
+    }
+
+    [Fact]
+    public async Task Update_AsAdmin_CanMoveClerkToAnotherFactory()
+    {
+        await LoginAsync("admin", "admin123");
+        var resp = await _client.PatchAsJsonAsync("/api/users/2",
+            new { role = "clerk", factoryId = "HUADENG" });
+
+        resp.EnsureSuccessStatusCode();
+        var user = await resp.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>();
+        Assert.Equal("HUADENG", user.GetProperty("factoryId").GetString());
+    }
+
+    [Fact]
+    public async Task Update_Self_CannotRemoveAdminOrDisableAccount()
+    {
+        await LoginAsync("admin", "admin123");
+
+        var demote = await _client.PatchAsJsonAsync("/api/users/1", new { role = "clerk", factoryId = "XINGXIN" });
+        Assert.Equal(HttpStatusCode.BadRequest, demote.StatusCode);
+
+        var disable = await _client.PatchAsJsonAsync("/api/users/1", new { isActive = false });
+        Assert.Equal(HttpStatusCode.BadRequest, disable.StatusCode);
+    }
+
+    [Fact]
+    public async Task Update_DisabledUser_OldSessionBecomesUnauthorized()
+    {
+        using var clerkClient = _factory.CreateClient();
+        var clerkLogin = await clerkClient.PostAsJsonAsync("/api/auth/login",
+            new { username = "clerk", password = "clerk123" });
+        clerkLogin.EnsureSuccessStatusCode();
+
+        await LoginAsync("admin", "admin123");
+        var disable = await _client.PatchAsJsonAsync("/api/users/2", new { isActive = false });
+        disable.EnsureSuccessStatusCode();
+
+        var oldSessionRequest = await clerkClient.GetAsync("/api/orders");
+        Assert.Equal(HttpStatusCode.Unauthorized, oldSessionRequest.StatusCode);
     }
 
     [Fact]

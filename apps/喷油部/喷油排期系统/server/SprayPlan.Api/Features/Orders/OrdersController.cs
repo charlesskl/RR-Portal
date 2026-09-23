@@ -151,7 +151,7 @@ public class OrdersController(AppDbContext db, PdfStorage pdf) : ControllerBase
     }
 
     [HttpGet("{id:int}/actuals-summary")]
-    [Authorize(Roles = "admin")]
+    [Authorize(Roles = "manager,admin")]
     public async Task<IActionResult> ActualsSummary(int id)
     {
         if (!await db.Orders.AnyAsync(o => o.Id == id))
@@ -174,7 +174,7 @@ public class OrdersController(AppDbContext db, PdfStorage pdf) : ControllerBase
     }
 
     [HttpPost("{id:int}/revoke-actuals")]
-    [Authorize(Roles = "admin")]
+    [Authorize(Roles = "manager,admin")]
     public async Task<IActionResult> RevokeActuals(int id, [FromBody] RevokeActualsRequest req)
     {
         var scope = (req.Scope ?? "").Trim().ToLowerInvariant();
@@ -274,7 +274,7 @@ public class OrdersController(AppDbContext db, PdfStorage pdf) : ControllerBase
 
     // POST /api/orders — 嵌套创建（订单→明细行(子件)→部位数量）
     [HttpPost]
-    [Authorize(Roles = "clerk,admin")]
+    [Authorize(Roles = "clerk,manager,admin")]
     public async Task<IActionResult> Create([FromBody] CreateOrderRequest req)
     {
         if (string.IsNullOrWhiteSpace(req.ExternalOrderNo) || req.ProductId is null or 0)
@@ -308,7 +308,7 @@ public class OrdersController(AppDbContext db, PdfStorage pdf) : ControllerBase
 
     // PATCH /api/orders/{id} — 改头部/状态（明细 V2 不改）
     [HttpPatch("{id:int}")]
-    [Authorize(Roles = "clerk,admin")]
+    [Authorize(Roles = "clerk,manager,admin")]
     public async Task<IActionResult> Update(int id, [FromBody] UpdateOrderRequest req)
     {
         // 状态校验在查订单前（对齐旧逻辑：非法状态立即 400，不依赖订单是否存在）
@@ -362,7 +362,7 @@ public class OrdersController(AppDbContext db, PdfStorage pdf) : ControllerBase
 
     // DELETE /api/orders/{id} — 作废（status=archived 软删）
     [HttpDelete("{id:int}")]
-    [Authorize(Roles = "clerk,admin")]
+    [Authorize(Roles = "clerk,manager,admin")]
     public async Task<IActionResult> Delete(int id)
     {
         var o = await db.Orders.FindAsync(id);
@@ -379,7 +379,7 @@ public class OrdersController(AppDbContext db, PdfStorage pdf) : ControllerBase
 
     // DELETE /api/orders/recycle-bin — 永久清空订单回收站（主管专属）
     [HttpDelete("recycle-bin")]
-    [Authorize(Roles = "admin")]
+    [Authorize(Roles = "manager,admin")]
     public async Task<IActionResult> EmptyRecycleBin()
     {
         var orders = await db.Orders.Where(order => order.Status == "archived").ToListAsync();
@@ -410,7 +410,7 @@ public class OrdersController(AppDbContext db, PdfStorage pdf) : ControllerBase
 
     // POST /api/orders/import-pdf — 上传 PDF，解析出抬头+明细草稿（不入库）。
     [HttpPost("import-pdf")]
-    [Authorize(Roles = "clerk,admin")]
+    [Authorize(Roles = "clerk,manager,admin")]
     public async Task<IActionResult> ImportPdf(IFormFile? file)
     {
         if (file is null || file.Length == 0)
@@ -507,7 +507,7 @@ public class OrdersController(AppDbContext db, PdfStorage pdf) : ControllerBase
 
     // POST /api/orders/import-confirm — 确认草稿入库（建订单+明细，或建待补产品订单）。
     [HttpPost("import-confirm-multi")]
-    [Authorize(Roles = "clerk,admin")]
+    [Authorize(Roles = "clerk,manager,admin")]
     public async Task<IActionResult> ImportConfirmMulti([FromBody] ImportConfirmMultiRequest req)
     {
         if (req.Products.Count < 2 || req.Products.Any(p => string.IsNullOrWhiteSpace(p.ProductNo) ||
@@ -596,7 +596,7 @@ public class OrdersController(AppDbContext db, PdfStorage pdf) : ControllerBase
     }
 
     [HttpPost("import-confirm")]
-    [Authorize(Roles = "clerk,admin")]
+    [Authorize(Roles = "clerk,manager,admin")]
     public async Task<IActionResult> ImportConfirm([FromBody] ImportConfirmRequest req)
     {
         var targetFactory = db.CurrentFactoryId == "ALL" ? "XINGXIN" : db.CurrentFactoryId;
@@ -698,7 +698,7 @@ public class OrdersController(AppDbContext db, PdfStorage pdf) : ControllerBase
 
     // POST /api/orders/{id}/continue-parse — 待补产品订单补上款号后，重解析原 PDF 补明细。
     [HttpPost("{id:int}/continue-parse")]
-    [Authorize(Roles = "clerk,admin")]
+    [Authorize(Roles = "clerk,manager,admin")]
     public async Task<IActionResult> ContinueParse(int id, [FromBody] ContinueParseRequest req)
     {
         var order = await db.Orders.Include(o => o.PartQtys).FirstOrDefaultAsync(o => o.Id == id);
@@ -763,15 +763,13 @@ public class OrdersController(AppDbContext db, PdfStorage pdf) : ControllerBase
     }
 
     [HttpPost("{id:int}/process-schedule")]
-    [Authorize(Roles = "clerk,admin")]
+    [Authorize(Roles = "clerk,manager,admin")]
     public async Task<IActionResult> CreateProcessSchedule(int id, [FromBody] CreateOrderProcessScheduleRequest req)
     {
         var rows = req.Rows ?? [];
         if (rows.Count == 0) return BadRequest(new { error = "请至少填写一道工序" });
-        if (rows.Any(row => string.IsNullOrWhiteSpace(row.StartDate) || string.IsNullOrWhiteSpace(row.Craft) || row.DailyTarget is null or <= 0))
-            return BadRequest(new { error = "开始日期、工序和每日目标数必须填写完整" });
-        if (rows.Any(row => !CraftTypes.IsValid(row.Craft!.Trim())))
-            return BadRequest(new { error = "工序无效（手喷/移印/自动喷/UV）" });
+        if (rows.Any(row => string.IsNullOrWhiteSpace(row.StartDate) || row.LineId is null or <= 0 || row.DailyTarget is null or <= 0))
+            return BadRequest(new { error = "开始日期、拉别和每日目标数必须填写完整" });
         if (rows.Any(row => row.LaborPrice is < 0))
             return BadRequest(new { error = "人工价格不能小于 0" });
 
@@ -799,7 +797,11 @@ public class OrdersController(AppDbContext db, PdfStorage pdf) : ControllerBase
         if (unknownPartQtyId is not null)
             return BadRequest(new { error = "排期中的部位不属于该订单，请刷新页面后重试" });
 
-        var lines = await db.ProductionLines.Where(line => line.IsActive).OrderBy(line => line.Id).ToListAsync();
+        var requestedLineIds = rows.Select(row => row.LineId!.Value).Distinct().ToList();
+        var lines = await db.ProductionLines.Where(line => line.IsActive && requestedLineIds.Contains(line.Id)).ToListAsync();
+        if (lines.Count != requestedLineIds.Count)
+            return BadRequest(new { error = "所选拉别不存在、已停用或不属于当前厂区，请刷新页面后重试" });
+        var lineById = lines.ToDictionary(line => line.Id);
         var sourcePartIds = order.PartQtys.Where(part => part.SourcePartId.HasValue)
             .Select(part => part.SourcePartId!.Value).ToList();
         var relatedProducts = await db.Products.Include(product => product.Parts)
@@ -825,7 +827,7 @@ public class OrdersController(AppDbContext db, PdfStorage pdf) : ControllerBase
             var groupId = anchor.PartGroupId > 0 ? anchor.PartGroupId : anchor.Id;
             foreach (var row in partRows)
             {
-                var craft = row.Craft!.Trim();
+                var craft = lineById[row.LineId!.Value].CraftType;
                 var rule = siblings.FirstOrDefault(part => part.Craft.Trim() == craft);
                 if (rule is null)
                 {
@@ -858,9 +860,8 @@ public class OrdersController(AppDbContext db, PdfStorage pdf) : ControllerBase
         foreach (var (row, rowIndex) in rows.Select((value, index) => (value, index)))
         {
             var stepNo = rows.Take(rowIndex + 1).Count(previous => previous.PartQtyId == row.PartQtyId);
-            var craft = row.Craft!.Trim();
-            var line = lines.FirstOrDefault(candidate => candidate.CraftType == craft);
-            if (line is null) return BadRequest(new { error = $"基础数据库中没有启用的“{craft}”拉别" });
+            var line = lineById[row.LineId!.Value];
+            var craft = line.CraftType;
             var start = DateUtil.ParseUtc(row.StartDate!);
             var dailyTarget = row.DailyTarget!.Value;
             var scheduledParts = order.PartQtys.Where(part => part.Qty > 0 && (row.PartQtyId is null || row.PartQtyId == part.Id));

@@ -112,7 +112,7 @@ public class PlansController(AppDbContext db) : ControllerBase
 
     // POST /api/plans —— 批量建计划行；建后把涉及订单从 received 推进到 scheduled
     [HttpPost]
-    [Authorize(Roles = "clerk,admin")]
+    [Authorize(Roles = "clerk,manager,admin")]
     public async Task<IActionResult> Create([FromBody] CreatePlansRequest req)
     {
         var plans = req.Plans;
@@ -164,7 +164,7 @@ public class PlansController(AppDbContext db) : ControllerBase
 
     // PATCH /api/plans/{id} —— 改计划字段 或 录实绩（goodQty→算产值+status recorded+改值留痕）
     [HttpPatch("{id:int}")]
-    [Authorize(Roles = "clerk,admin")]
+    [Authorize(Roles = "clerk,manager,admin")]
     public async Task<IActionResult> Update(int id, [FromBody] UpdatePlanRequest req)
     {
         // 值校验前置（非法立即 400，不依赖记录是否存在，对齐旧逻辑）
@@ -326,7 +326,7 @@ public class PlansController(AppDbContext db) : ControllerBase
 
     // DELETE /api/plans/{id} —— 软删（deletedAt + deletedBy）
     [HttpPost("batch-unschedule")]
-    [Authorize(Roles = "clerk,admin")]
+    [Authorize(Roles = "clerk,manager,admin")]
     public async Task<IActionResult> BatchUnschedule([FromBody] BatchUnscheduleRequest req)
     {
         var ids = (req.PlanIds ?? new()).Distinct().ToList();
@@ -377,7 +377,7 @@ public class PlansController(AppDbContext db) : ControllerBase
     }
 
     [HttpDelete("{id:int}")]
-    [Authorize(Roles = "clerk,admin")]
+    [Authorize(Roles = "clerk,manager,admin")]
     public async Task<IActionResult> Delete(int id)
     {
         var p = await db.ProductionPlans.FindAsync(id);

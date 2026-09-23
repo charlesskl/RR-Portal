@@ -49,6 +49,25 @@ class MailboxTests(unittest.TestCase):
         self.assertEqual(fake.requested, [11, 12])
         self.assertEqual(result["messages"][0]["received_at"], "2026-09-17T16:30:00+00:00")
 
+    def test_single_message_fetch_failure_does_not_abort_batch(self):
+        class FlakyImap(FakeImap):
+            def uid(self, command, *args):
+                if command == "FETCH" and int(args[0]) == 11:
+                    return "NO", [None]
+                return super().uid(command, *args)
+
+        with patch.dict(os.environ, {
+            "VOYAGEPLEX_MAIL_ADDRESS": "shipping@example.com",
+            "VOYAGEPLEX_MAIL_AUTH_CODE": "test-code",
+        }, clear=True), patch("app.mailbox.imaplib.IMAP4_SSL", return_value=FlakyImap()):
+            result = fetch_mailbox(after_uid=10)
+        self.assertEqual([item["uid"] for item in result["messages"]], [11, 12])
+        failed, ok = result["messages"]
+        self.assertIsNone(failed["raw"])
+        self.assertIn("读取邮件 11 失败", failed["error"])
+        self.assertEqual(ok["error"], "")
+        self.assertIsNotNone(ok["raw"])
+
 
 if __name__ == "__main__":
     unittest.main()

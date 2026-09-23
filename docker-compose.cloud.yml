@@ -43,6 +43,9 @@ services:
       - ./frontend/index.cloud.html:/usr/share/nginx/html/index.html:ro
       - ./frontend/logo.png:/usr/share/nginx/html/logo.png:ro
       - ./frontend/favicon.png:/usr/share/nginx/html/favicon.png:ro
+      - ./frontend/maintenance.html:/usr/share/nginx/html/maintenance.html:ro
+      # 维护模式开关目录：部署脚本 touch/rm ON 标志文件，nginx 容器只读检测（if -f）
+      - ./deploy/maintenance:/etc/nginx/maintenance:ro
       # Uncomment for HTTPS after running setup-ssl.sh:
       # - ./ssl:/etc/nginx/ssl:ro
     depends_on:
@@ -1119,7 +1122,9 @@ services:
       - ./apps/船务部/VoyagePlex船务协同系统/data-runtime:/app/data
     depends_on:
       voyageplex-parser:
-        condition: service_healthy
+        # parser 是辅助收信服务，API 对其不可用已有容错（poll 返回 configured:false
+        # 或同步记录错误后台重试）；service_healthy 会让 parser 不健康阻塞整个平台部署
+        condition: service_started
     mem_limit: 768m
     healthcheck:
       test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:5088/api/health"]
@@ -1145,8 +1150,9 @@ services:
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8091/health')"]
       interval: 10s
-      timeout: 5s
-      retries: 5
+      timeout: 15s
+      retries: 3
+      start_period: 30s
     restart: unless-stopped
     networks:
       - platform-net

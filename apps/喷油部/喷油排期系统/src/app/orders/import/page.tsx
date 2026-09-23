@@ -7,6 +7,6 @@ export default async function ImportPage() {
   const session = await getSession();
   if (!session.userId) redirect("/login");
   // 写权限角色（文员/主管）才能导入；viewer 退回订单总览
-  if (session.role !== "clerk" && session.role !== "admin") redirect("/orders");
+  if (session.role !== "clerk" && session.role !== "manager" && session.role !== "admin") redirect("/orders");
   return <ImportClient />;
 }

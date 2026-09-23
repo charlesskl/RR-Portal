@@ -39,6 +39,7 @@ export function canonicalSupplierProfiles(profiles: SupplierDict[]): SupplierDic
 export function supplierCustomsCompany(profile: SupplierDict): string {
   const customs = profile.customs?.trim()
   if (isHuashengyi(customs || '')) return HUASHENGYI_FULL_NAME
+  if (customs) return customs
   return profile.full?.trim() || profile.keyword.trim()
 }
 

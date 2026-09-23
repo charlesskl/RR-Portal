@@ -26,6 +26,13 @@ describe('supplier customs-company linkage', () => {
     expect(linkedCustomsCompany(otherProfile.full, [{ ...otherProfile, customs: HUASHENGYI_FULL_NAME }])).toBe(HUASHENGYI_FULL_NAME)
   })
 
+  it('keeps a manually entered customs-company name', () => {
+    const customs = '东莞市雅洛轩进出口贸易有限公司'
+    const customProfile = { ...otherProfile, customs }
+    expect(supplierCustomsCompany(customProfile)).toBe(customs)
+    expect(linkedCustomsCompany(otherProfile.full, [customProfile])).toBe(customs)
+  })
+
   it('resolves and hides legacy abbreviation-only duplicate rows', () => {
     const legacyAlias = { keyword: '星徽', full: '星徽' }
     const company = { ...otherProfile, keyword: otherProfile.full }

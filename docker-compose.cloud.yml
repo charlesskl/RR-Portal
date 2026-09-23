@@ -43,6 +43,9 @@ services:
       - ./frontend/index.cloud.html:/usr/share/nginx/html/index.html:ro
       - ./frontend/logo.png:/usr/share/nginx/html/logo.png:ro
       - ./frontend/favicon.png:/usr/share/nginx/html/favicon.png:ro
+      - ./frontend/maintenance.html:/usr/share/nginx/html/maintenance.html:ro
+      # 维护模式开关目录：部署脚本 touch/rm ON 标志文件，nginx 容器只读检测（if -f）
+      - ./deploy/maintenance:/etc/nginx/maintenance:ro
       # Uncomment for HTTPS after running setup-ssl.sh:
       # - ./ssl:/etc/nginx/ssl:ro
     depends_on:

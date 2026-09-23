@@ -164,7 +164,10 @@ describe('deployment base paths', () => {
         net_per_pc: 0.002,
       }]]),
       productHs: new Map(),
-      images: new Map(),
+      images: new Map([[7, {
+        bytes: Uint8Array.from(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Zf8AAAAAASUVORK5CYII=', 'base64')),
+        ext: 'png',
+      }]]),
       form: { customer: 'RRM', containerNo: 'TEST-CNTR', blNo: 'TEST-SEAL', rate: 7.8 },
     })
 
@@ -258,6 +261,18 @@ describe('deployment base paths', () => {
     expect(sheet.P4?.z).toBe(templateSheet.P4?.z)
     expect(sheet['!cols']?.[0]?.width).toBeLessThan(templateSheet['!cols']?.[0]?.width || Infinity)
     expect(sheet['!cols']?.[19]?.width).toBeLessThan(templateSheet['!cols']?.[19]?.width || Infinity)
+    for (const column of [13, 14, 28, 29, 30, 31, 32, 33, 34, 35, 36]) {
+      expect(sheet['!cols']?.[column]?.hidden).toBe(true)
+    }
+    const archive = await JSZip.loadAsync(outputBytes)
+    const drawing = await archive.file('xl/drawings/drawing999.xml')?.async('string')
+    const mainSheetXml = await archive.file('xl/worksheets/sheet2.xml')?.async('string')
+    const mainRelsXml = await archive.file('xl/worksheets/_rels/sheet2.xml.rels')?.async('string')
+    expect(drawing).toContain('<xdr:col>19</xdr:col>')
+    expect(drawing).toContain('<xdr:row>3</xdr:row>')
+    expect(mainSheetXml).toContain('<drawing r:id="rIdGenDrawing999"/>')
+    expect(mainRelsXml).toContain('Target="../drawings/drawing999.xml"')
+    expect(archive.file('xl/media/image100.png')).toBeTruthy()
     expect(sheet['!rows']?.[3]?.hpt).toBe(templateSheet['!rows']?.[3]?.hpt)
     expect(sheet['!rows']?.[0]?.hpt).toBe(24)
     expect(sheet['!rows']?.[1]?.hpt).toBe(24)

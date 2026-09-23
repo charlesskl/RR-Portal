@@ -285,8 +285,13 @@ function fitCategoryColumn(wb: XLSX.WorkBook) {
 }
 
 function compactMainColumns(sheet: XLSX.WorkSheet) {
-  if (!sheet['!cols']) return
-  sheet['!cols'] = sheet['!cols'].map((column: any, index: number) => {
+  const columns: any[] = sheet['!cols'] || []
+  // 用户录入时仍保留这些辅助字段，但正式导出不展示：
+  // N:O 为单项毛/净重，AC:AK 为柜号至产品实际运费。
+  for (const index of [13, 14, 28, 29, 30, 31, 32, 33, 34, 35, 36]) {
+    columns[index] = { ...(columns[index] || {}), hidden: true }
+  }
+  sheet['!cols'] = columns.map((column: any, index: number) => {
     if (!column || column.hidden) return column
     if (index === 19) return { ...column, width: 16, wch: 16 }
     const original = Number(column.width ?? column.wch)
@@ -2790,17 +2795,17 @@ async function injectOoxmlImages(
   let relsXml = sheetRelsFile ? await sheetRelsFile.async('string')
     : '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>'
   const newRid = 'rIdGenDrawing999'
-  if (!relsXml.includes(newRid)) {
-    relsXml = relsXml.replace('</Relationships>',
-      `<Relationship Id="${newRid}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" Target="../drawings/drawing${drawingNum}.xml"/></Relationships>`)
-    zip.file(sheetRelsPath, relsXml)
-  }
+  // 模板本身带有样例图片 drawing。正式导出必须完全换成当前物料图片，
+  // 否则旧 drawing 会占用工作表唯一的 drawing 节点，动态图片无法显示。
+  relsXml = relsXml.replace(/<Relationship\b[^>]*\bType="[^"]*\/drawing"[^>]*\/>/g, '')
+  relsXml = relsXml.replace('</Relationships>',
+    `<Relationship Id="${newRid}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" Target="../drawings/drawing${drawingNum}.xml"/></Relationships>`)
+  zip.file(sheetRelsPath, relsXml)
   const sheetPath = 'xl/worksheets/sheet' + mainSheetIdx + '.xml'
   let sheetXml = await zip.file(sheetPath)!.async('string')
-  if (!/<(?:\w+:)?drawing\b/.test(sheetXml)) {
-    sheetXml = sheetXml.replace(/<\/(?:\w+:)?worksheet>/, match => `<x:drawing r:id="${newRid}"/>${match}`)
-    zip.file(sheetPath, sheetXml)
-  }
+  sheetXml = sheetXml.replace(/<(?:\w+:)?drawing\b[^>]*\/>/g, '')
+  sheetXml = sheetXml.replace(/<\/(?:\w+:)?worksheet>/, match => `<drawing r:id="${newRid}"/>${match}`)
+  zip.file(sheetPath, sheetXml)
   let ct = await zip.file('[Content_Types].xml')!.async('string')
   if (!ct.includes('Extension="png"')) {
     ct = ct.replace(/<Types[^>]*>/, m => m + '<Default Extension="png" ContentType="image/png"/><Default Extension="jpeg" ContentType="image/jpeg"/>')

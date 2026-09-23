@@ -214,7 +214,7 @@ describe('deployment base paths', () => {
     expect(sheet.AP4).toMatchObject({ f: 'AO4*K4' })
     expect(sheet.P4).toMatchObject({ f: 'ROUND(BA4*L4,2)' })
     expect(sheet.Q4).toMatchObject({ f: 'ROUND(BB4*L4,2)' })
-    expect(sheet.R4).toMatchObject({ f: 'AU4*AV4*AW4/1000000' })
+    expect(sheet.R4).toMatchObject({ f: 'AU4*AV4*AW4/28316.75*0.0283' })
     expect(['AU', 'AV', 'AW', 'AX', 'AY', 'AZ', 'BA', 'BB', 'BC', 'BD'].map(col => sheet[`${col}3`]?.v)).toEqual([
       '长\nLength', '宽\nWidth', '高\nHeight', '物料编码', '每箱数量',
       '每箱重量', '单个毛重', '单个净重', '卡板', '',

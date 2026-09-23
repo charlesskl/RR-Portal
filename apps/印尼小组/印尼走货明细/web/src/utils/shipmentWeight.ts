@@ -61,6 +61,14 @@ export function formatShipmentPackingLines(value: unknown): string {
   return text.trim().split(/[\s,，;；]+/).filter(Boolean).join('\n')
 }
 
+// 与走货明细导出表保持一致：长 × 宽 × 高先换算为立方英尺，再换算为立方米。
+export function shipmentCbmPerCarton(length: unknown, width: unknown, height: unknown): number {
+  const dimensions = [length, width, height].map(Number)
+  if (dimensions.some(value => !Number.isFinite(value) || value <= 0)) return 0
+  const [l, w, h] = dimensions
+  return l * w * h / 28316.75 * 0.0283
+}
+
 // 称重数量属于走货行；同一物料每次抽取称重的数量可能不同。
 export function shipmentGrossPerPc(weightPerCarton: unknown, weighingQty: unknown): number {
   const weight = Number(weightPerCarton)

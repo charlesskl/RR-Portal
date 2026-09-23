@@ -9,7 +9,7 @@ import { publicAsset } from '../deployment'
 import './ShipmentsPage.css'
 import {
   formatShipmentPackingLines, isPaperRope, parseShipmentPacking, shipmentCartonCount,
-  shipmentGrossPerPc, shipmentKgWeight, shipmentPackingAverageQty, shipmentWeightQuantity,
+  shipmentCbmPerCarton, shipmentGrossPerPc, shipmentKgWeight, shipmentPackingAverageQty, shipmentWeightQuantity,
 } from '../utils/shipmentWeight'
 
 interface ShipmentSummary {
@@ -313,7 +313,7 @@ export default function ShipmentsPage() {
     const weightQty = shipmentWeightQuantity(m?.name_zh, it.qty)
     const grossTotal = shipmentGrossPerPc(m?.weight_per_carton, effectiveWeighingQty(it, m)) * weightQty
     const netTotal = num(m?.net_per_pc) * weightQty
-    const cbmEach = num(m?.length) * num(m?.width) * num(m?.height) / 1e6
+    const cbmEach = shipmentCbmPerCarton(m?.length, m?.width, m?.height)
     const cbmTotal = cbmEach * num(it.cartons)
     const invoiceAmount = num(it.invoice_price) * num(it.qty)
     const purchaseAmount = num(it.price) * num(it.qty)

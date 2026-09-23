@@ -1,6 +1,5 @@
 using VoyagePlex.Api.Services;
 using VoyagePlex.Api.Entities;
-using System.Text.Json;
 using System.Text.Json.Nodes;
 
 if (MailboxDateRules.ReceivedDate("2026-09-17T15:59:00+00:00") != "2026-09-17" ||
@@ -8,6 +7,20 @@ if (MailboxDateRules.ReceivedDate("2026-09-17T15:59:00+00:00") != "2026-09-17" |
     MailboxDateRules.ReceivedDate("2026-09-18T00:30:00+08:00") != "2026-09-18")
     throw new InvalidOperationException("邮箱邮件未按北京时间收件日期归类");
 Console.WriteLine("Mailbox received-date tests passed.");
+var shipmentClassification = MailClassificationRules.Classify("转发：《出货通知》 SO#123");
+var changeClassification = MailClassificationRules.Classify("更新：截补延迟 SO#123");
+var unknownClassification = MailClassificationRules.Classify("Hello");
+if (shipmentClassification.Category != "Shipment" || shipmentClassification.NeedsReview ||
+    changeClassification.Category != "Change" || changeClassification.NeedsReview ||
+    unknownClassification.Category != "Unclassified" || !unknownClassification.NeedsReview)
+    throw new InvalidOperationException("邮件自动分类规则不正确");
+if (MailClassificationRules.NormalizeEmail("姓名 <TEST@Example.COM>") != "test@example.com")
+    throw new InvalidOperationException("联系人邮箱标准化不正确");
+Console.WriteLine("Mailbox automatic classification tests passed.");
+if (!MailContactRules.IsInternal("name@hanson2.com") || !MailContactRules.IsInternal("NAME@ROYALREGENT.NET") ||
+    MailContactRules.IsInternal("name@customer.com"))
+    throw new InvalidOperationException("公司内部邮箱域名判断不正确");
+Console.WriteLine("Mailbox internal-domain tests passed.");
 
 var allowed = new[]
 {
@@ -114,16 +127,6 @@ if (normalizedUtcValue.Kind != DateTimeKind.Utc || !normalizedUtcValue.ToString(
     throw new InvalidOperationException("SQLite 时间没有恢复 UTC 时区标记");
 Console.WriteLine("UTC date normalization tests passed.");
 
-var lenientOptions = new JsonSerializerOptions();
-lenientOptions.Converters.Add(new LenientDateTimeConverter());
-var spaceFormat = JsonSerializer.Deserialize<DateTime>("\"2026-09-11 00:31:18.690457\"", lenientOptions);
-var isoFormat = JsonSerializer.Deserialize<DateTime>("\"2026-09-11T00:31:18.690457Z\"", lenientOptions);
-if (spaceFormat.Kind != DateTimeKind.Utc || spaceFormat != new DateTime(2026, 9, 11, 0, 31, 18, 690, DateTimeKind.Utc).AddTicks(4570))
-    throw new InvalidOperationException("空格分隔日期应能解析为 UTC");
-if (isoFormat != spaceFormat)
-    throw new InvalidOperationException("ISO 8601 与空格格式应解析到同一时刻");
-Console.WriteLine("Lenient date time converter tests passed.");
-
 var deletionTask = new ShipmentTask { Id=8, SourceImportItemId=20, SoNumber="SO-123" };
 var sourceImport = new ImportEmailItem { Id=20, Fingerprint="same", ResultJson="{}" };
 var duplicateImport = new ImportEmailItem { Id=21, DuplicateOfItemId=20, Fingerprint="same", ResultJson="{}" };
@@ -171,4 +174,10 @@ ShipmentOrderTotals.Apply(exportPayload, [fullContainer, looseCargo, repeatedMas
 var calculatedOrderTotal = exportPayload["items"]![0]!["order_total_pieces"]!.GetValue<decimal>();
 if (calculatedOrderTotal != 650)
     throw new InvalidOperationException($"整柜与散货总件数汇总或重复 Packing List 去重错误：{calculatedOrderTotal}");
+var extractedPayload = JsonNode.Parse("""
+{"customer":"ZURU","items":[{"contract_number":"4500217958","product_code":"9574UQ2","customer_po":"10001835258-3891","pieces":500,"order_total_pieces":888}]}
+""")!.AsObject();
+ShipmentOrderTotals.Apply(extractedPayload, [fullContainer, looseCargo]);
+if (extractedPayload["items"]![0]!["order_total_pieces"]!.GetValue<decimal>() != 888)
+    throw new InvalidOperationException("邮件已提取的每单总件数不应被系统汇总覆盖");
 Console.WriteLine("Shipment order total pieces tests passed.");

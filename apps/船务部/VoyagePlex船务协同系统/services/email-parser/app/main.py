@@ -16,6 +16,7 @@ from .rules import classify_email, filter_items_for_email, normalize_deadline, p
 from .attachments import parse_attachment
 from .spreadsheets import parse_business_spreadsheet
 from .shipment_export import build_completed_shipment_summary_workbook, build_inventory_adjustment_workbook, build_shipment_workbook
+from .product_workbook import parse_product_workbook
 from .inventory_writeback import build_inventory_writeback
 from .destination_country import infer_destination_country
 from .mailbox import fetch_mailbox
@@ -51,6 +52,23 @@ async def poll_mailbox(after_uid: int = 0):
                         status_code=502, media_type="application/json")
 
 
+@app.post("/v1/product-workbooks/parse")
+async def parse_product_workbooks(files: list[UploadFile] = File(...)):
+    rows = []
+    for file in files:
+        filename = Path(file.filename or "走柜表.xlsx").name
+        if not filename.lower().endswith(".xlsx"):
+            return Response(content=json.dumps({"error": f"{filename} 只支持 xlsx 文件"}, ensure_ascii=False), status_code=400, media_type="application/json")
+        content = await file.read()
+        if not content or len(content) > 20 * 1024 * 1024:
+            return Response(content=json.dumps({"error": f"{filename} 文件为空或超过 20MB"}, ensure_ascii=False), status_code=400, media_type="application/json")
+        try:
+            rows.extend(parse_product_workbook(content, filename))
+        except ValueError as error:
+            return Response(content=json.dumps({"error": str(error)}, ensure_ascii=False), status_code=400, media_type="application/json")
+    return {"rows": rows}
+
+
 def build_warehouse_groups(parsed_attachments: list[dict]) -> list[dict]:
     """Pair SO/PDF and PKL/Excel by filename number, then aggregate by warehouse."""
     by_reference: dict[str, dict] = {}
@@ -78,6 +96,61 @@ def build_warehouse_groups(parsed_attachments: list[dict]) -> list[dict]:
         group["items"].extend(entry["items"])
         group["source_files"].extend(entry["source_files"])
     return list(grouped.values())
+
+
+def build_amazon_shipment_groups(subject: str, body: str, parsed_attachments: list[dict]) -> list[dict]:
+    booking_match = re.search(r"\b(AMZ[A-Z0-9]+)\b", subject, re.I)
+    if not booking_match:
+        return []
+    booking_number = booking_match.group(1).upper()
+    items = [item for attachment in parsed_attachments if attachment.get("kind") == "amazon_allocation"
+             for item in attachment.get("items", [])
+             if str(item.get("booking_number", "")).strip().upper() == booking_number]
+    if not items:
+        return []
+
+    assignments = []
+    for match in re.finditer(r"(\d+)\s*[*xX]\s*(\d+)\s*'?[ \t]*(HQ|HC|GP)[ \t]+([^\n]{1,30}?)做柜", body, re.I):
+        assignments.extend(
+            (f"{match.group(2)}{match.group(3).upper()}", match.group(4).strip())
+            for _ in range(int(match.group(1)))
+        )
+
+    by_container: dict[str, list[dict]] = {}
+    for item in items:
+        by_container.setdefault(str(item.get("container_assignment", "")).strip(), []).append(item)
+    assignment_positions: dict[str, list[int]] = {}
+    for position, (container_type, _) in enumerate(assignments):
+        assignment_positions.setdefault(container_type, []).append(position)
+
+    def assignment_order(pair):
+        type_match = re.search(r"1\s*[*xX]\s*(\d+)\s*(HQ|HC|GP)", pair[0], re.I)
+        type_key = f"{type_match.group(1)}{type_match.group(2).upper()}" if type_match else ""
+        sequence_match = re.search(r"-(\d+)$", pair[0])
+        sequence = int(sequence_match.group(1)) - 1 if sequence_match else 0
+        positions = assignment_positions.get(type_key, [])
+        return positions[sequence] if sequence < len(positions) else 999
+
+    ordered = sorted(by_container.items(), key=assignment_order)
+    type_offsets: dict[str, int] = {}
+    groups = []
+    for container_assignment, group_items in ordered:
+        type_match = re.search(r"1\s*[*xX]\s*(\d+)\s*(HQ|HC|GP)", container_assignment, re.I)
+        container_type = f"1*{type_match.group(1)}{type_match.group(2).upper()}" if type_match else ""
+        type_key = container_type.removeprefix("1*")
+        factories = [factory for candidate_type, factory in assignments if candidate_type == type_key]
+        offset = type_offsets.get(type_key, 0)
+        loading_factory = factories[offset] if offset < len(factories) else ""
+        type_offsets[type_key] = offset + 1
+        for group_item in group_items:
+            group_item["loading_factory"] = loading_factory
+        groups.append({
+            "group_key": container_assignment,
+            "container_type": container_type,
+            "loading_factory": loading_factory,
+            "items": group_items,
+        })
+    return groups
 
 
 @app.get("/health")
@@ -295,10 +368,11 @@ def parse_email_entries(entries: list[dict]) -> dict:
                         continue
                     if is_supported:
                         successful_attachment_count += 1
-                    parsed_attachment["items"] = filter_items_for_email(
-                        parsed_attachment["items"], shipment_type,
-                        str(parsed_attachment["fields"].get("loading_factory", "")),
-                    )
+                    if parsed_attachment["kind"] != "amazon_allocation":
+                        parsed_attachment["items"] = filter_items_for_email(
+                            parsed_attachment["items"], shipment_type,
+                            str(parsed_attachment["fields"].get("loading_factory", "")),
+                        )
                     attachment_results.append({
                         "filename": attachment["filename"],
                         "kind": parsed_attachment["kind"],
@@ -342,19 +416,39 @@ def parse_email_entries(entries: list[dict]) -> dict:
                         fields[key] = value
                 if supported_attachment_count > 0 and successful_attachment_count == 0:
                     raise ValueError("邮件中的业务附件均无法解析")
-                warehouse_groups = build_warehouse_groups(attachment_details)
+                shipment_groups = build_amazon_shipment_groups(
+                    message["subject"], message["body_text"], attachment_details)
+                if shipment_groups:
+                    items = [group_item for group in shipment_groups for group_item in group["items"]]
+                    fields["container_type"] = "+".join(group["container_type"] for group in shipment_groups)
+                    delivery_address = next((
+                        str(detail.get("fields", {}).get("delivery_address", ""))
+                        for detail in attachment_details if detail.get("fields", {}).get("delivery_address")
+                    ), "待确认仓库")
+                    source_files = [detail["filename"] for detail in attachment_details]
+                    warehouse_groups = [{
+                        "warehouse": delivery_address,
+                        "references": [group["group_key"]],
+                        "items": group["items"],
+                        "source_files": source_files,
+                        "container_type": group["container_type"],
+                        "loading_factory": group["loading_factory"],
+                    } for group in shipment_groups]
+                else:
+                    warehouse_groups = build_warehouse_groups(attachment_details)
                 fields["destination_country"] = infer_destination_country(
                     f'{message["subject"]}\n{message["body_text"]}', attachment_details)
                 item.update({
                     "status": "parsed",
                     "fingerprint": message["fingerprint"],
-                    "message": {k: message[k] for k in ("message_id", "subject", "sender", "received_at")},
+                    "message": {k: message[k] for k in ("message_id", "subject", "sender", "received_at", "body_text")},
                     "attachments": [{k: v for k, v in attachment.items() if k != "stored_path"} for attachment in message["attachments"]],
                     "attachment_results": attachment_results,
                     "fields": fields,
                     "shipment_type": shipment_type,
                     "items": items,
                     "warehouse_groups": warehouse_groups,
+                    "shipment_groups": shipment_groups,
                     "so_numbers": [reference for group in warehouse_groups for reference in group["references"]],
                     "warnings": warnings,
                 })

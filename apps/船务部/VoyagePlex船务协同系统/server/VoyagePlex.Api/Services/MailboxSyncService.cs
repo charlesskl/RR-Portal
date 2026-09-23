@@ -9,19 +9,23 @@ public sealed class MailboxSyncService(IServiceScopeFactory scopeFactory, ILogge
     : BackgroundService
 {
     private static readonly SemaphoreSlim SyncLock = new(1, 1);
-    private static readonly TimeSpan SyncInterval = TimeSpan.FromMinutes(5);
-
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        using var timer = new PeriodicTimer(SyncInterval);
         while (!stoppingToken.IsCancellationRequested)
         {
-            try { await SyncAsync(stoppingToken); }
+            var enabled = true; var intervalMinutes = 5;
+            using (var scope = scopeFactory.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                var setting = await db.MailSystemSettings.AsNoTracking().FirstOrDefaultAsync(value => value.Id == 1, stoppingToken);
+                if (setting is not null) { enabled = setting.SyncEnabled; intervalMinutes = Math.Clamp(setting.SyncIntervalMinutes, 1, 1440); }
+            }
+            try { if (enabled) await SyncAsync(stoppingToken); }
             catch (Exception error) when (error is not OperationCanceledException)
             {
                 logger.LogWarning(error, "邮箱同步失败");
             }
-            if (!await timer.WaitForNextTickAsync(stoppingToken)) break;
+            await Task.Delay(TimeSpan.FromMinutes(intervalMinutes), stoppingToken);
         }
     }
 
@@ -109,13 +113,27 @@ public sealed class MailboxSyncService(IServiceScopeFactory scopeFactory, ILogge
                         };
                         batchesByDate.Add(batchKey, batch);
                     }
+                    var sender = item["message"]?["sender"]?.ToString() ?? "";
+                    var contactEmail = MailClassificationRules.NormalizeEmail(sender);
+                    var contact = contactEmail == "" ? null : await db.MailContacts.FirstOrDefaultAsync(value => value.Email == contactEmail, cancellationToken);
+                    if (contact is null && contactEmail != "")
+                    {
+                        var internalContact = MailContactRules.IsInternal(contactEmail);
+                        contact = new MailContact { Email = contactEmail, DisplayName = sender,
+                            ContactType = internalContact ? "Internal" : "Unknown", IsConfirmed = internalContact };
+                        db.MailContacts.Add(contact);
+                    }
+                    if (contact is not null) { contact.MessageCount++; contact.UpdatedAt = DateTime.UtcNow; }
+                    var subject = item["message"]?["subject"]?.ToString() ?? "";
+                    var classification = MailClassificationRules.Classify(subject);
                     batch.EmailItems.Add(new ImportEmailItem
                     {
                         MailboxKey = key, FileName = item["filename"]?.ToString() ?? $"mail-{uid}.eml",
-                        MailSubject = item["message"]?["subject"]?.ToString() ?? "",
-                        MailSender = item["message"]?["sender"]?.ToString() ?? "",
+                        MailSubject = subject, MailSender = sender,
                         MailReceivedAt = receivedAt,
                         MailReceivedDate = receivedDate,
+                        WorkCategory = classification.Category, ClassificationConfidence = classification.Confidence,
+                        ClassificationSource = classification.Source, NeedsClassificationReview = classification.NeedsReview,
                         Fingerprint = fingerprint, Status = failed ? "failed" : duplicate is null ? "pending" : "duplicate",
                         DuplicateOfItemId = duplicate?.Id, ResultJson = item.ToJsonString(),
                         Error = itemError,

@@ -17,6 +17,7 @@ public sealed class ShipmentTask
     public string WarehouseGroupsJson { get; set; } = "[]";
     public string ItemsJson { get; set; } = "[]";
     public long? SourceImportItemId { get; set; }
+    public string SourceGroupKey { get; set; } = string.Empty;
     public string Status { get; set; } = "PendingReview";
     public DateOnly? CompletedDate { get; set; }
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;

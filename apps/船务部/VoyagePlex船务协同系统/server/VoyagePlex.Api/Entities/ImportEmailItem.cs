@@ -12,6 +12,13 @@ public sealed class ImportEmailItem
     public string MailSender { get; set; } = string.Empty;
     public string MailReceivedAt { get; set; } = string.Empty;
     public string MailReceivedDate { get; set; } = string.Empty;
+    public string WorkCategory { get; set; } = "Unclassified";
+    public string ClassificationSource { get; set; } = "Automatic";
+    public int ClassificationConfidence { get; set; }
+    public bool NeedsClassificationReview { get; set; } = true;
+    public string HandlingStatus { get; set; } = "Pending";
+    public string WorkNote { get; set; } = string.Empty;
+    public DateTime? ReviewedAt { get; set; }
     public string Status { get; set; } = "Pending";
     public long? DuplicateOfItemId { get; set; }
     public string ResultJson { get; set; } = "{}";

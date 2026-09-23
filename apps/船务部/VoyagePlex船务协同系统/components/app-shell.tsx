@@ -3,12 +3,13 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
-  Anchor, ArrowLeft, CalendarDays, Check, ChevronRight, ClipboardCheck, Container,
+  Anchor, ArrowLeft, CalendarDays, Check, ChevronRight, ClipboardCheck, ContactRound, Container,
   Database, FileSpreadsheet, FileUp, Inbox, LayoutDashboard, ListChecks,
-  Download, Map as MappingIcon, Plus, RefreshCw, Search, Settings, Ship, Trash2, Upload, Users,
+  Download, History, Layers3, Map as MappingIcon, Plus, RefreshCw, Search, Settings, Ship, Trash2, Upload, Users,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { qcResultText, qcState, qcSummary, readQcSnapshots, saveQcSnapshots, type QcResult } from "@/lib/qc-display";
+import { ProductWorkbookImport } from "@/components/product-workbook-import";
 
 const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
 const apiPath = (path: string) => `${basePath}${path}`;
@@ -16,6 +17,7 @@ const apiFetch = (path: string, init?: RequestInit) => fetch(apiPath(path), init
 
 const navigation: Array<{href:string;label:string;icon:typeof LayoutDashboard;roles:UserRole[]}> = [
   { href: "/", label: "首页", icon: LayoutDashboard, roles:["admin","shipping","warehouse"] },
+  { href: "/mail", label: "邮件工作台", icon: Inbox, roles:["admin","shipping"] },
   { href: "/imports", label: "信息导入", icon: FileUp, roles:["admin","shipping"] },
   { href: "/shipments", label: "走柜任务", icon: Container, roles:["admin","shipping","warehouse"] },
   { href: "/inventory", label: "库存管理", icon: Database, roles:["admin","warehouse"] },
@@ -24,7 +26,7 @@ const navigation: Array<{href:string;label:string;icon:typeof LayoutDashboard;ro
 ];
 
 const titles: Record<string, string> = {
-  imports: "信息导入", shipments: "走柜任务", inventory: "库存管理",
+  mail: "邮件工作台", imports: "信息导入", shipments: "走柜任务", inventory: "库存管理",
   users:"用户管理", settings: "系统设置",
 };
 
@@ -38,16 +40,16 @@ type ParsedEmail = {
   attachment_results?: Array<{ filename: string; kind: string; item_count: number }>;
   items?: Array<Record<string, unknown>>; warehouse_groups?: WarehouseGroup[]; warnings?: string[];
 };
-type MailboxBatch = { id: number; fileName: string; mailReceivedDate: string; status: string; totalCount: number; parsedCount: number; failedCount: number; createdAt: string };
-type ReadMailItem = { id:number; importBatchId:number; mailSubject:string; mailSender:string; mailReceivedAt:string; mailReceivedDate:string; status:string; error:string };
-type ReadMailPage = { total:number; page:number; pageSize:number; items:ReadMailItem[] };
-const readMailStatus:Record<string,string> = {
-  pending:"待确认", confirmed:"已确认", duplicate:"重复邮件",
-  duplicate_confirmed:"重复已确认", failed:"解析失败",
-};
 type EmailBatch = { import_batch_id?: number; total: number; parsed: number; failed: number; parser_version?:string; items: ParsedEmail[] };
-type SheetItem = { import_item_id: number; filename: string; status: string; error?: string; kind?: string; sheet?: string; rows?: Array<Record<string, unknown>>; warnings?: string[] };
-type SheetBatch = { import_batch_id: number; total: number; parsed: number; failed: number; items: SheetItem[] };
+type MailWorkCategory = "Unclassified"|"Shipment"|"Change"|"FollowUp"|"Other";
+type MailHandlingStatus = "Pending"|"Processed"|"Ignored";
+type MailboxWorkItem = { id:number;mailSubject:string;mailSender:string;mailReceivedAt:string;mailReceivedDate:string;status:string;error:string;workCategory:MailWorkCategory;classificationSource:string;classificationConfidence:number;needsClassificationReview:boolean;handlingStatus:MailHandlingStatus;reviewedAt?:string };
+type MailboxWorkPage = { total:number;page:number;pageSize:number;items:MailboxWorkItem[] };
+type MailboxWorkDetail = MailboxWorkItem & { fileName:string;workNote:string;parsed?:ParsedEmail & { message?:ParsedEmail["message"] & { body_text?:string } } };
+type MailContactType = "Unknown"|"Internal"|"Customer"|"Forwarder"|"Trucker"|"Other";
+type MailContact = {id:number;email:string;displayName:string;contactType:MailContactType;defaultCategory:MailWorkCategory;isConfirmed:boolean;messageCount:number;updatedAt:string};
+type MailCandidate = {id:number;mailSubject:string;mailSender:string;mailReceivedAt:string;workCategory:MailWorkCategory;handlingStatus:MailHandlingStatus;status:string;soNumbers:string[];itemCount:number;warehouseCount:number;fields:Record<string,unknown>;items:Array<Record<string,unknown>>;warehouseGroups:WarehouseGroup[];relatedEmailCount:number;relatedEmailIds:number[];changes:Array<{field:string;label:string;previous:string;current:string}>;canConfirm:boolean;taskIds:number[]};
+type MailSettings = {syncEnabled:boolean;syncIntervalMinutes:number;retentionDays:number;updatedAt:string;address:string;lastSuccessAt?:string;lastError:string;mailCount:number;failedCount:number};
 type InspectionMappingRow = { customer: string; productCode: string; productName: string; owner: string; productionPlace: string; note: string };
 type InspectionMappingGroup = { name: string; inspectionSource: string; description?: string; excluded?: boolean; rows: InspectionMappingRow[] };
 type StoredInspectionMapping = InspectionMappingRow & { id: number; groupName: string; inspectionSource: string; isExcluded: boolean };
@@ -58,6 +60,7 @@ type ShipmentTaskData = {
   cutoffDate:string; siDeadline:string; port:string; destinationCountry:string; transportReference:string; specialRequirements:string;
   status:"PendingReview"|"PendingShipment"|"Completed"|"Cancelled"; completedDate?:string;
   warehouseGroups:WarehouseGroup[]; items:ShipmentItem[]; createdAt?:string; updatedAt?:string;
+  sourceEmails?:Array<{id:number;mailSubject:string;mailSender:string;mailReceivedAt:string;workCategory:MailWorkCategory;relation:string}>;
 };
 type LocalInventoryScan = {folder:string;exists:boolean;scanned_at?:string;total_rows:number;successful_files?:number;error?:string;files:Array<{filename:string;modified_at:string;size:number;status:string;kind:string;sheets:string[];row_count:number;warnings?:string[];error?:string}>};
 type UserRole = "admin" | "shipping" | "warehouse";
@@ -285,15 +288,15 @@ export function AppShell({ route }: { route: string }) {
   const [authLoading,setAuthLoading] = useState(true);
   const [authError,setAuthError] = useState("");
   const [setupRequired,setSetupRequired] = useState(false);
-  async function loadUser(){setAuthLoading(true);setAuthError("");try{const response=await fetch(apiPath("/api/auth/me"),{cache:"no-store"});if(response.ok){setUser(await response.json());setSetupRequired(false);}else if(response.status===401){setUser(null);const setup=await fetch(apiPath("/api/auth/setup-status"),{cache:"no-store"});if(!setup.ok)throw new Error("无法检查系统初始化状态");setSetupRequired(Boolean((await setup.json()).required));}else{throw new Error("后台暂时无法检查登录状态");}}catch(reason){setAuthError(reason instanceof Error?reason.message:"后台连接失败");}finally{setAuthLoading(false);}}
+  async function loadUser(){setAuthLoading(true);setAuthError("");try{const response=await apiFetch("/api/auth/me",{cache:"no-store"});if(response.ok){setUser(await response.json());setSetupRequired(false);}else if(response.status===401){setUser(null);const setup=await apiFetch("/api/auth/setup-status",{cache:"no-store"});if(!setup.ok)throw new Error("无法检查系统初始化状态");setSetupRequired(Boolean((await setup.json()).required));}else{throw new Error("后台暂时无法检查登录状态");}}catch(reason){setAuthError(reason instanceof Error?reason.message:"后台连接失败");}finally{setAuthLoading(false);}}
   useEffect(()=>{
     void loadUser();
     const renewal = window.setInterval(()=>{
-      if(document.visibilityState === "visible") void fetch(apiPath("/api/auth/me"),{cache:"no-store"}).catch(()=>{});
+      if(document.visibilityState === "visible") void apiFetch("/api/auth/me",{cache:"no-store"}).catch(()=>{});
     },30*60*1000);
     return ()=>window.clearInterval(renewal);
   },[]);
-  async function logout(){await fetch(apiPath("/api/auth/logout"),{method:"POST"});setUser(null);window.location.href=basePath+"/";}
+  async function logout(){await apiFetch("/api/auth/logout",{method:"POST"});setUser(null);window.location.href=basePath+"/";}
   if(authLoading)return <div className="auth-screen"><div className="auth-card"><span className="brand-mark"><Anchor size={19}/></span><h1>VoyagePlex</h1><p>正在检查登录状态…</p></div></div>;
   if(authError)return <div className="auth-screen"><div className="auth-card"><span className="brand-mark"><Anchor size={19}/></span><h1>暂时无法连接后台</h1><p>{authError}，请稍后重试。</p><button className="primary-button" onClick={()=>void loadUser()}>重新连接</button></div></div>;
   if(!user)return <AuthScreen setupRequired={setupRequired} onAuthenticated={value=>setUser(value)} />;
@@ -321,7 +324,7 @@ export function AppShell({ route }: { route: string }) {
           <strong className="topbar-title">{titles[page] ?? "首页"}</strong>
           <div className="avatar">{role==="admin"?"管理":role==="warehouse"?"仓务":"船务"}</div><span className="user-name"><b>{user.displayName}</b><small>{roleLabel(role)}</small></span><button className="logout-button" onClick={()=>void logout()}>退出</button>
         </header>
-        {!pageAllowed?<AccessDenied/>:page === "imports" ? <ImportCenter /> : page === "shipments" ? <ShipmentCenter route={route} role={role} /> : page === "inventory" ? <InventoryCenter route={route} role={role} /> : page === "users" ? <UserManagement currentUser={user}/> : page === "settings" ? <SettingsCenter role={role} /> : <Dashboard />}
+        {!pageAllowed?<AccessDenied/>:page === "mail" ? <MailWorkspace route={route} role={role} /> : page === "imports" ? <ImportCenter /> : page === "shipments" ? <ShipmentCenter route={route} role={role} /> : page === "inventory" ? <InventoryCenter route={route} role={role} /> : page === "users" ? <UserManagement currentUser={user}/> : page === "settings" ? <SettingsCenter role={role} /> : <Dashboard />}
       </main>
     </div>
   );
@@ -331,15 +334,150 @@ function roleLabel(role:UserRole){return role==="admin"?"管理员":role==="ware
 
 function AuthScreen({setupRequired,onAuthenticated}:{setupRequired:boolean;onAuthenticated:(user:CurrentUser)=>void}){
   const [username,setUsername]=useState("");const [displayName,setDisplayName]=useState("");const [password,setPassword]=useState("");const [error,setError]=useState("");const [saving,setSaving]=useState(false);
-  async function submit(event:React.FormEvent){event.preventDefault();setSaving(true);setError("");try{if(setupRequired){const setup=await fetch(apiPath("/api/auth/setup"),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({username,displayName,password})});const result=await readJsonResponse(setup);if(!setup.ok)throw new Error(result.error||"初始化失败");}const response=await fetch(apiPath("/api/auth/login"),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({username,password})});const result=await readJsonResponse(response);if(!response.ok)throw new Error(result.error||"登录失败");onAuthenticated(result);}catch(reason){setError(reason instanceof Error?reason.message:"操作失败");}finally{setSaving(false);}}
+  async function submit(event:React.FormEvent){event.preventDefault();setSaving(true);setError("");try{if(setupRequired){const setup=await apiFetch("/api/auth/setup",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({username,displayName,password})});const result=await readJsonResponse(setup);if(!setup.ok)throw new Error(result.error||"初始化失败");}const response=await apiFetch("/api/auth/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({username,password})});const result=await readJsonResponse(response);if(!response.ok)throw new Error(result.error||"登录失败");onAuthenticated(result);}catch(reason){setError(reason instanceof Error?reason.message:"操作失败");}finally{setSaving(false);}}
   return <div className="auth-screen"><form className="auth-card" onSubmit={submit}><span className="brand-mark"><Anchor size={19}/></span><h1>{setupRequired?"初始化管理员":"登录 VoyagePlex"}</h1><p>{setupRequired?"首次使用，请创建系统管理员账号。":"使用系统账号继续。"}</p><label><span>账号</span><input autoFocus autoComplete="username" value={username} onChange={event=>setUsername(event.target.value)} required minLength={3}/></label>{setupRequired&&<label><span>姓名</span><input value={displayName} onChange={event=>setDisplayName(event.target.value)} required maxLength={50}/></label>}<label><span>密码</span><input type="password" autoComplete={setupRequired?"new-password":"current-password"} value={password} onChange={event=>setPassword(event.target.value)} required minLength={8}/></label>{error&&<div className="form-error">{error}</div>}<button className="primary-button" disabled={saving}>{saving?"处理中…":setupRequired?"创建并登录":"登录"}</button></form></div>;
 }
 
 function AccessDenied(){return <div className="content"><section className="empty-state"><div className="empty-icon"><Users/></div><h2>无权访问</h2><p>当前账号没有此模块的使用权限，请联系管理员调整角色。</p></section></div>;}
 
+type MailSection = { key:"workbench"|"contacts"|"initialization"|"candidates"|"settings"; label:string; description:string; icon:typeof Inbox; temporary:boolean; adminOnly?:boolean };
+const mailSections:MailSection[] = [
+  { key:"workbench", label:"邮件工作台", description:"查看、分类并处理邮箱中的业务邮件", icon:Inbox, temporary:false },
+  { key:"contacts", label:"联系人整理", description:"整理内部人员、客户、货代和车行联系人", icon:ContactRound, temporary:false },
+  { key:"initialization", label:"历史初始化", description:"按保守日期分批建立历史资料", icon:History, temporary:true },
+  { key:"candidates", label:"候选任务池", description:"审核、合并并确认系统提取的走柜任务", icon:Layers3, temporary:false },
+  { key:"settings", label:"同步与存储设置", description:"管理邮箱同步、保存期限和运行状态", icon:Settings, temporary:false, adminOnly:true },
+];
+
+function MailWorkspace({route,role}:{route:string;role:UserRole}) {
+  const requested=route.split("/")[1]||"workbench";
+  const available=mailSections.filter(section=>!section.adminOnly||role==="admin");
+  const active=available.find(section=>section.key===requested)??available[0];
+  const ActiveIcon=active.icon;
+  return <div className="content mail-module">
+    <nav className="mail-section-nav" aria-label="邮件工作台功能">
+      {available.map(section=>{const Icon=section.icon;return <Link key={section.key} href={`/mail/${section.key}`} className={section.key===active.key?"active":""}><Icon size={17}/><span>{section.label}</span>{section.temporary&&<small>阶段性</small>}</Link>;})}
+    </nav>
+    {active.key==="workbench"?<MailboxWorkbench route={route}/>:active.key==="contacts"?<MailContactsWorkspace/>:active.key==="candidates"?<MailCandidatesWorkspace/>:active.key==="settings"?<MailSettingsWorkspace/>:<section className="panel mail-foundation-panel">
+      <div className="mail-foundation-heading"><span><ActiveIcon size={22}/></span><div><h2>{active.label}</h2><p>{active.description}</p></div>{active.temporary&&<b>初始化完成后隐藏</b>}</div>
+      <div className="mail-foundation-grid">
+        {active.key==="initialization"&&<><article><strong>容量扫描</strong><p>先统计半年邮件数量、附件大小和重复情况。</p></article><article><strong>基准日</strong><p>基准日前仅归档，基准日后生成候选任务。</p></article><article><strong>分批进度</strong><p>分批读取并保存断点，失败邮件单独重试。</p></article></>}
+      </div>
+    </section>}
+  </div>;
+}
+
+const mailCategoryText:Record<MailWorkCategory,string>={Unclassified:"未分类",Shipment:"走柜资料",Change:"变更补充",FollowUp:"待跟进",Other:"其他"};
+const mailHandlingText:Record<MailHandlingStatus,string>={Pending:"待处理",Processed:"已处理",Ignored:"已忽略"};
+const mailContactTypeText:Record<MailContactType,string>={Unknown:"待确认",Internal:"公司内部",Customer:"客户",Forwarder:"货代",Trucker:"车行",Other:"其他"};
+function mailImportStatus(status:string){return status==="failed"?"读取失败":status==="duplicate"?"重复邮件":"已读取";}
+
+function MailContactsWorkspace(){
+  const [contacts,setContacts]=useState<MailContact[]>([]);const [loading,setLoading]=useState(true);const [savingId,setSavingId]=useState<number>();const [error,setError]=useState("");const [notice,setNotice]=useState("");
+  async function load(){setLoading(true);setError("");try{const response=await apiFetch("/api/mail/contacts",{cache:"no-store"});const result=await readJsonResponse(response);if(!response.ok)throw new Error(result.error||"读取联系人失败");setContacts(result as MailContact[]);}catch(reason){setError(reason instanceof Error?reason.message:"读取联系人失败");}finally{setLoading(false);}}
+  useEffect(()=>{void load();},[]);
+  function update(id:number,changes:Partial<MailContact>){setContacts(current=>current.map(contact=>contact.id===id?{...contact,...changes}:contact));}
+  async function save(contact:MailContact){setSavingId(contact.id);setError("");setNotice("");try{const response=await apiFetch(`/api/mail/contacts/${contact.id}`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({displayName:contact.displayName,contactType:contact.contactType,isConfirmed:true})});const result=await readJsonResponse(response);if(!response.ok)throw new Error(result.error||"保存联系人失败");update(contact.id,result as MailContact);setNotice(`已保存 ${contact.email} 的联系人资料。`);}catch(reason){setError(reason instanceof Error?reason.message:"保存联系人失败");}finally{setSavingId(undefined);}}
+  return <section className="panel mail-contacts-panel"><div className="mail-workbench-head"><div><h2>联系人整理</h2><p>系统从已收邮件自动汇总联系人，只需确认联系人身份；邮件分类由邮件内容自动判断。</p></div><b className="status warn">待确认 {contacts.filter(contact=>!contact.isConfirmed).length}</b></div>{(error||notice)&&<div className={error?"form-error":"notice"}><span>{error||notice}</span></div>}<div className="mail-contact-table"><div className="mail-contact-row head"><span>联系人 / 邮箱</span><span>身份</span><span>邮件数</span><span>操作</span></div>{loading?<div className="mail-workbench-empty">正在汇总联系人…</div>:contacts.map(contact=><div className="mail-contact-row" key={contact.id}><label><input value={contact.displayName} onChange={event=>update(contact.id,{displayName:event.target.value})}/><small>{contact.email}</small></label><select value={contact.contactType} onChange={event=>update(contact.id,{contactType:event.target.value as MailContactType})}>{Object.entries(mailContactTypeText).map(([key,label])=><option value={key} key={key}>{label}</option>)}</select><span>{contact.messageCount} 封</span><button className={contact.isConfirmed?"secondary-button":"primary-button"} disabled={savingId===contact.id} onClick={()=>void save(contact)}>{savingId===contact.id?"保存中…":contact.isConfirmed?"保存修改":"确认联系人"}</button></div>)}</div></section>;
+}
+
+function MailSettingsWorkspace(){
+  const [settings,setSettings]=useState<MailSettings>();const [saving,setSaving]=useState(false);const [error,setError]=useState("");const [notice,setNotice]=useState("");
+  useEffect(()=>{void(async()=>{try{const response=await apiFetch("/api/mail/settings",{cache:"no-store"});const result=await readJsonResponse(response);if(!response.ok)throw new Error(result.error||"读取邮箱设置失败");setSettings(result as MailSettings);}catch(reason){setError(reason instanceof Error?reason.message:"读取邮箱设置失败");}})();},[]);
+  async function save(){if(!settings)return;setSaving(true);setError("");setNotice("");try{const response=await apiFetch("/api/mail/settings",{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({syncEnabled:settings.syncEnabled,syncIntervalMinutes:Number(settings.syncIntervalMinutes),retentionDays:Number(settings.retentionDays)})});const result=await readJsonResponse(response);if(!response.ok)throw new Error(result.error||"保存邮箱设置失败");setSettings({...settings,...result});setNotice("邮箱同步与存储设置已保存，后台将在下一轮同步时应用。");}catch(reason){setError(reason instanceof Error?reason.message:"保存邮箱设置失败");}finally{setSaving(false);}}
+  if(!settings)return <section className="panel mail-settings-panel"><div className="mail-workbench-empty">{error||"正在读取邮箱设置…"}</div></section>;
+  return <section className="panel mail-settings-panel"><div className="mail-workbench-head"><div><h2>同步与存储设置</h2><p>管理邮箱后台同步频率及邮件在线保存期限。</p></div><b className={`status ${settings.lastError?"danger":"ok"}`}>{settings.lastError?"同步异常":"运行正常"}</b></div>{(error||notice)&&<div className={error?"form-error":"notice"}><span>{error||notice}</span></div>}<div className="mail-settings-status"><article><span>邮箱账号</span><b>{settings.address||"尚未连接"}</b></article><article><span>上次成功同步</span><b>{settings.lastSuccessAt?new Date(settings.lastSuccessAt).toLocaleString("zh-CN"):"尚未同步"}</b></article><article><span>已读取邮件</span><b>{settings.mailCount} 封</b></article><article><span>失败邮件</span><b>{settings.failedCount} 封</b></article></div>{settings.lastError&&<div className="mail-setting-error">{settings.lastError}</div>}<div className="mail-settings-form"><label className="mail-switch"><span><b>自动同步邮箱</b><small>关闭后仍可在邮件工作台手工点击立即同步</small></span><input type="checkbox" checked={settings.syncEnabled} onChange={event=>setSettings({...settings,syncEnabled:event.target.checked})}/></label><label><span><b>自动同步间隔</b><small>后台多久检查一次新邮件</small></span><div><input type="number" min={1} max={1440} value={settings.syncIntervalMinutes} onChange={event=>setSettings({...settings,syncIntervalMinutes:Number(event.target.value)})}/><em>分钟</em></div></label><label><span><b>邮件在线保存期限</b><small>用于容量规划；历史初始化和清理功能接入后按此期限执行</small></span><div><input type="number" min={30} max={730} value={settings.retentionDays} onChange={event=>setSettings({...settings,retentionDays:Number(event.target.value)})}/><em>天</em></div></label><button className="primary-button" disabled={saving} onClick={()=>void save()}>{saving?"保存中…":"保存设置"}</button></div></section>;
+}
+
+const candidateFieldLabels:Record<string,string>={customer:"客户",so_number:"SO号",container_type:"柜型",ship_date:"计划走货日期",cutoff_date:"截数期",si_deadline:"SI截止",port:"装货港",destination_country:"收货国家"};
+function MailCandidatesWorkspace(){
+  const [items,setItems]=useState<MailCandidate[]>([]);const [selectedId,setSelectedId]=useState<number>();const [selectedIds,setSelectedIds]=useState<Set<number>>(new Set());const [filter,setFilter]=useState<"Pending"|"Processed"|"Ignored"|"All">("Pending");const [loading,setLoading]=useState(true);const [acting,setActing]=useState(false);const [error,setError]=useState("");const [notice,setNotice]=useState("");
+  async function load(preferredId?:number){setLoading(true);setError("");try{const response=await apiFetch("/api/mail/candidates",{cache:"no-store"});const result=await readJsonResponse(response);if(!response.ok)throw new Error(result.error||"读取候选任务失败");const next=result as MailCandidate[];setItems(next);const visible=filter==="All"?next:next.filter(item=>item.handlingStatus===filter);const id=visible.some(item=>item.id===(preferredId??selectedId))?(preferredId??selectedId):visible[0]?.id;setSelectedId(id);}catch(reason){setError(reason instanceof Error?reason.message:"读取候选任务失败");}finally{setLoading(false);}}
+  useEffect(()=>{void load();},[]);
+  const visible=filter==="All"?items:items.filter(item=>item.handlingStatus===filter);const pendingVisible=visible.filter(item=>item.handlingStatus==="Pending");const selected=items.find(item=>item.id===selectedId);
+  function chooseFilter(value:typeof filter){setFilter(value);const next=value==="All"?items:items.filter(item=>item.handlingStatus===value);if(!next.some(item=>item.id===selectedId))setSelectedId(next[0]?.id);}
+  function updateSelected(changes:Partial<MailCandidate>){if(!selectedId)return;setItems(current=>current.map(item=>item.id===selectedId?{...item,...changes}:item));}
+  function updateField(key:string,value:string){if(!selected)return;const nextFields={...selected.fields,[key]:value};const nextSo=key==="so_number"?value.split(/[,，]/).map(part=>part.trim()).filter(Boolean):selected.soNumbers;updateSelected({fields:nextFields,soNumbers:nextSo});}
+  function updateCargo(index:number,key:string,value:string){if(!selected)return;updateSelected({items:selected.items.map((item,itemIndex)=>itemIndex===index?{...item,[key]:value}:item)});}
+  function updateCandidateWarehouse(index:number,value:string){if(!selected)return;updateSelected({warehouseGroups:selected.warehouseGroups.map((group,groupIndex)=>groupIndex===index?{...group,warehouse:value}:group)});}
+  async function saveCandidate(){if(!selected)return;setActing(true);setError("");setNotice("");try{const response=await apiFetch(`/api/mail/candidates/${selected.id}`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({fields:selected.fields,items:selected.items,warehouseGroups:selected.warehouseGroups})});const result=await readJsonResponse(response);if(!response.ok)throw new Error(result.error||"保存候选资料失败");setNotice("候选资料已保存，可以继续确认生成任务。");await load(selected.id);}catch(reason){setError(reason instanceof Error?reason.message:"保存候选资料失败");}finally{setActing(false);}}
+  async function act(action:"confirm"|"ignore") {if(!selected)return;setActing(true);setError("");setNotice("");try{const response=await apiFetch(`/api/mail/candidates/${selected.id}/${action}`,{method:"POST"});const result=await readJsonResponse(response);if(!response.ok)throw new Error(result.error||(action==="confirm"?"确认任务失败":"忽略失败"));setNotice(action==="confirm"?`已生成或更新 ${result.taskIds?.length||0} 个走柜任务。`:"该候选项已忽略。");await load(selected.id);}catch(reason){setError(reason instanceof Error?reason.message:"操作失败");}finally{setActing(false);}}
+  async function batchAct(action:"confirm"|"ignore"){const ids=Array.from(selectedIds);if(!ids.length)return;setActing(true);setError("");setNotice("");try{const response=await apiFetch(`/api/mail/candidates/batch/${action}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({ids})});const result=await readJsonResponse(response);if(!response.ok)throw new Error(result.error||"批量操作失败");setNotice(`已批量${action==="confirm"?"确认":"忽略"} ${result.processed} 个候选项。`);setSelectedIds(new Set());await load();}catch(reason){setError(reason instanceof Error?reason.message:"批量操作失败");}finally{setActing(false);}}
+  const fields=selected?Object.entries(candidateFieldLabels).map(([key])=>[key,selected.fields?.[key]??""] as [string,unknown]).filter(([,value])=>selected.handlingStatus==="Pending"||String(value||"").trim()):[];
+  return <section className="panel mail-candidates-panel"><div className="mail-workbench-head"><div><h2>候选任务池</h2><p>进入候选池的邮件已经完成解析；请核对基础资料和货物明细，确认后进入走柜任务。</p></div><div className="candidate-summary"><b>待确认 {items.filter(item=>item.handlingStatus==="Pending").length}</b><span>已处理 {items.filter(item=>item.handlingStatus==="Processed").length}</span></div></div><div className="candidate-tabs">{([['Pending','待确认'],['Processed','已处理'],['Ignored','已忽略'],['All','全部']] as const).map(([key,label])=><button className={filter===key?"active":""} key={key} onClick={()=>chooseFilter(key)}>{label}</button>)}</div>{pendingVisible.length>0&&<div className="candidate-batch-bar"><label><input type="checkbox" checked={pendingVisible.every(item=>selectedIds.has(item.id))} onChange={event=>setSelectedIds(previous=>{const next=new Set(previous);pendingVisible.forEach(item=>event.target.checked?next.add(item.id):next.delete(item.id));return next;})}/>选择当前待确认</label><span>已选 {selectedIds.size} 项</span><button className="secondary-button" disabled={acting||selectedIds.size===0} onClick={()=>void batchAct("ignore")}>批量忽略</button><button className="primary-button" disabled={acting||selectedIds.size===0} onClick={()=>void batchAct("confirm")}><Check size={16}/><span>{acting?"处理中…":"批量确认生成任务"}</span></button></div>}{(error||notice)&&<div className={error?"form-error":"notice"}><span>{error||notice}</span></div>}<div className="candidate-layout"><div className="candidate-list">{loading?<div className="mail-workbench-empty">正在生成候选任务…</div>:visible.length?visible.map(item=><div className={`candidate-list-item ${item.id===selectedId?"active":""}`} key={item.id} role="button" tabIndex={0} onClick={()=>setSelectedId(item.id)} onKeyDown={event=>{if(event.key==="Enter"||event.key===" ")setSelectedId(item.id);}}>{item.handlingStatus==="Pending"&&<input className="candidate-select-checkbox" type="checkbox" aria-label={`选择邮件 ${item.id}`} checked={selectedIds.has(item.id)} onClick={event=>event.stopPropagation()} onChange={event=>setSelectedIds(previous=>{const next=new Set(previous);event.target.checked?next.add(item.id):next.delete(item.id);return next;})}/>}<strong>{item.mailSubject||"（无主题）"}</strong><span>{item.soNumbers.length?item.soNumbers.join("、"):"SO号待识别"}</span><small>{mailCategoryText[item.workCategory]} · {item.itemCount} 条货物 · {item.warehouseCount} 个仓库{item.relatedEmailCount>1?` · 同SO ${item.relatedEmailCount}封`:""}</small></div>):<div className="mail-workbench-empty">当前没有候选任务</div>}</div><div className="candidate-detail">{selected?<><div className="mail-detail-heading"><div><h3>{selected.mailSubject}</h3><p>{selected.mailSender} · {new Date(selected.mailReceivedAt).toLocaleString("zh-CN",{timeZone:"Asia/Shanghai"})}</p></div><b className={`status ${selected.handlingStatus==="Processed"?"ok":selected.handlingStatus==="Ignored"?"":"warn"}`}>{mailHandlingText[selected.handlingStatus]}</b></div>{selected.relatedEmailCount>1&&<div className="candidate-related"><strong>同一SO关联 {selected.relatedEmailCount} 封邮件</strong><span>邮件编号：{selected.relatedEmailIds.map(id=>`#${id}`).join("、")}</span>{selected.changes.length>0?<div>{selected.changes.map(change=><p key={change.field}><b>{change.label}</b><del>{change.previous||"空"}</del><i>→</i><ins>{change.current||"空"}</ins></p>)}</div>:<small>与上一封关联邮件相比，基础字段和明细数量没有变化。</small>}</div>}<dl className="candidate-fields">{fields.length?fields.map(([key,value])=><div key={key}><dt>{candidateFieldLabels[key]}</dt><dd>{selected.handlingStatus==="Pending"?<input value={String(value)} onChange={event=>updateField(key,event.target.value)}/>:String(value)}</dd></div>):<div><dt>识别结果</dt><dd>邮件中暂未识别出基础字段</dd></div>}<div><dt>SO号</dt><dd>{selected.soNumbers.join("、")||"待识别"}</dd></div><div><dt>货物明细</dt><dd>{selected.itemCount} 条</dd></div><div><dt>仓库分组</dt><dd>{selected.warehouseCount} 个</dd></div></dl>{selected.warehouseGroups.length>0&&<div className="review-section candidate-review-section"><h3>分柜/多仓分组</h3><div className="warehouse-grid">{selected.warehouseGroups.map((group,index)=><article key={`${group.warehouse}-${index}`}>{selected.handlingStatus==="Pending"?<input className="candidate-warehouse-input" value={group.warehouse||""} placeholder="待确认仓库" onChange={event=>updateCandidateWarehouse(index,event.target.value)}/>:<strong>{group.warehouse||"待确认仓库"}</strong>}{group.container_type&&<small>柜型：{group.container_type}</small>}<small>SO/附件编号：{group.references.join("、")||"待确认"}</small><small>{group.items.length} 条货物明细</small></article>)}</div></div>}{selected.items.length>0&&<div className="review-section candidate-review-section"><h3>货物明细 <small>共 {selected.items.length} 条，已完成解析</small></h3><div className="review-items candidate-cargo-table"><div><b>货号</b><b>货名</b><b>规格</b><b>合同号</b><b>客户PO</b><b>数量</b><b>件数</b><b>体积</b><b>卡板</b><b>生产工厂</b></div>{selected.items.map((item,index)=><div key={index}>{["product_code","product_name","spec","contract_number","customer_po","quantity","pieces","volume","pallet_count","supplier"].map(key=>{const value=String((key==="supplier"?(item.supplier||item.factory_remark):item[key])??"");return selected.handlingStatus==="Pending"?<input key={key} value={value} aria-label={`${key}-${index+1}`} onChange={event=>updateCargo(index,key,event.target.value)}/>:<span key={key}>{value||"—"}</span>;})}</div>)}</div></div>}{selected.handlingStatus==="Pending"&&<div className="candidate-actions"><button className="secondary-button" disabled={acting} onClick={()=>void act("ignore")}>忽略此项</button><button className="secondary-button" disabled={acting} onClick={()=>void saveCandidate()}>保存候选资料</button><button className="primary-button" disabled={acting||!selected.canConfirm} onClick={()=>void act("confirm")}><Check size={16}/><span>{acting?"处理中…":"确认生成任务"}</span></button></div>}{selected.taskIds.length>0&&<div className="candidate-task-links"><span>关联走柜任务：</span>{selected.taskIds.map(id=><Link href={`/shipments/${id}`} key={id}>#{id} 查看任务</Link>)}</div>}{!selected.canConfirm&&<div className="notice"><span>缺少SO号和货物明细，暂时不能生成任务。</span></div>}</>:<div className="mail-workbench-empty">从左侧选择一个候选项</div>}</div></div></section>;
+}
+
+function MailboxWorkbench({route}:{route:string}){
+  const [items,setItems]=useState<MailboxWorkItem[]>([]);
+  const [total,setTotal]=useState(0);
+  const [selectedId,setSelectedId]=useState<number>();
+  const [detail,setDetail]=useState<MailboxWorkDetail>();
+  const [query,setQuery]=useState("");
+  const [search,setSearch]=useState("");
+  const [date,setDate]=useState("");
+  const [category,setCategory]=useState("");
+  const [handling,setHandling]=useState("");
+  const [mailboxStatus,setMailboxStatus]=useState("正在读取同步状态…");
+  const [loading,setLoading]=useState(true);
+  const [syncing,setSyncing]=useState(false);
+  const [saving,setSaving]=useState(false);
+  const [error,setError]=useState("");
+  const [notice,setNotice]=useState("");
+
+  async function loadStatus(){
+    const response=await apiFetch("/api/imports/email/mailbox",{cache:"no-store"});const result=await readJsonResponse(response);
+    if(!response.ok)throw new Error(result.error||"读取邮箱同步状态失败");
+    setMailboxStatus(result.lastError?`同步异常：${result.lastError}`:result.lastSuccessAt?`上次同步：${new Date(result.lastSuccessAt).toLocaleString("zh-CN")}`:"等待邮箱配置或首次同步");
+  }
+  async function loadItems(preferredId?:number){
+    setLoading(true);setError("");
+    try{
+      const params=new URLSearchParams({page:"1",pageSize:"100"});if(search)params.set("q",search);if(date)params.set("date",date);if(category)params.set("category",category);if(handling)params.set("handling",handling);
+      const response=await apiFetch(`/api/imports/email/mailbox/items?${params}`,{cache:"no-store"});const result=await readJsonResponse(response);
+      if(!response.ok)throw new Error(result.error||"读取邮件列表失败");
+      const page=result as MailboxWorkPage;setItems(page.items||[]);setTotal(page.total||0);
+      const nextId=(page.items||[]).some(item=>item.id===(preferredId??selectedId))?(preferredId??selectedId):page.items?.[0]?.id;
+      setSelectedId(nextId);if(!nextId)setDetail(undefined);
+    }catch(reason){setError(reason instanceof Error?reason.message:"读取邮件列表失败");}finally{setLoading(false);}
+  }
+  async function loadDetail(id:number){
+    setError("");try{const response=await apiFetch(`/api/imports/email/mailbox/items/${id}`,{cache:"no-store"});const result=await readJsonResponse(response);if(!response.ok)throw new Error(result.error||"读取邮件详情失败");setDetail(result as MailboxWorkDetail);}catch(reason){setError(reason instanceof Error?reason.message:"读取邮件详情失败");}
+  }
+  // Filters are the only triggers; the loaders intentionally keep the current selected id.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(()=>{const requestedId=Number(route.split("/")[2])||undefined;void Promise.all([loadStatus(),loadItems(requestedId)]).catch(reason=>setError(reason instanceof Error?reason.message:"读取邮件失败"));},[search,date,category,handling,route]);
+  useEffect(()=>{if(selectedId)void loadDetail(selectedId);},[selectedId]);
+  async function syncMailbox(){
+    setSyncing(true);setError("");setNotice("");try{const response=await apiFetch("/api/imports/email/mailbox/sync",{method:"POST"});const result=await readJsonResponse(response);if(!response.ok)throw new Error(result.error||"邮箱同步失败");setNotice(result.configured?`同步完成，本次新增 ${result.imported} 封邮件。`:"邮箱尚未配置，请联系管理员。");await Promise.all([loadStatus(),loadItems()]);}catch(reason){setError(reason instanceof Error?reason.message:"邮箱同步失败");}finally{setSyncing(false);}
+  }
+  async function classifyMailbox(){
+    setSyncing(true);setError("");setNotice("");try{const response=await apiFetch("/api/mail/classify",{method:"POST"});const result=await readJsonResponse(response);if(!response.ok)throw new Error(result.error||"自动分类失败");setNotice(`自动分类完成：${result.automatic} 封已确定，${result.needsReview} 封需要人工判断。`);await loadItems();}catch(reason){setError(reason instanceof Error?reason.message:"自动分类失败");}finally{setSyncing(false);}
+  }
+  async function saveReview(){
+    if(!detail)return;setSaving(true);setError("");setNotice("");try{const response=await apiFetch(`/api/imports/email/mailbox/items/${detail.id}`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({workCategory:detail.workCategory,handlingStatus:detail.handlingStatus,workNote:detail.workNote})});const result=await readJsonResponse(response);if(!response.ok)throw new Error(result.error||"保存失败");setNotice("人工核对结果已保存。");await loadItems(detail.id);await loadDetail(detail.id);}catch(reason){setError(reason instanceof Error?reason.message:"保存失败");}finally{setSaving(false);}
+  }
+  const parsed=detail?.parsed;const body=parsed?.message?.body_text?.trim();const fields=Object.entries(parsed?.fields||{}).filter(([,value])=>String(value||"").trim());
+  const automaticCount=items.filter(item=>!item.needsClassificationReview&&item.classificationSource!=="Manual").length;const reviewCount=items.filter(item=>item.needsClassificationReview).length;
+  return <section className="panel mail-workbench-panel">
+    <div className="mail-workbench-head"><div><h2>收件邮件</h2><p>{mailboxStatus}；当前 {total} 封，自动分类 {automaticCount} 封，需判断 {reviewCount} 封</p></div><div className="mail-head-actions"><button className="secondary-button" disabled={syncing} onClick={()=>void classifyMailbox()}><ListChecks size={16}/>重新自动分类</button><button className="secondary-button" disabled={syncing} onClick={()=>void syncMailbox()}><RefreshCw size={16}/>{syncing?"处理中…":"立即同步"}</button></div></div>
+    <form className="mail-workbench-filters" onSubmit={event=>{event.preventDefault();setSearch(query.trim());}}><label><Search size={16}/><input value={query} onChange={event=>setQuery(event.target.value)} placeholder="搜索主题或发件人"/></label><input type="date" value={date} onChange={event=>setDate(event.target.value)}/><select aria-label="邮件分类" value={category} onChange={event=>setCategory(event.target.value)}><option value="">全部分类</option>{Object.entries(mailCategoryText).map(([key,label])=><option key={key} value={key}>{label}</option>)}</select><select aria-label="处理状态" value={handling} onChange={event=>setHandling(event.target.value)}><option value="">全部状态</option>{Object.entries(mailHandlingText).map(([key,label])=><option key={key} value={key}>{label}</option>)}</select><button className="primary-button">搜索</button></form>
+    {(error||notice)&&<div className={error?"form-error":"notice"}><span>{error||notice}</span></div>}
+    <div className="mail-workbench-layout">
+      <div className="mail-workbench-list" aria-label="邮件列表">{loading?<div className="mail-workbench-empty">正在读取邮件…</div>:items.length?items.map(item=><button key={item.id} className={item.id===selectedId?"active":""} onClick={()=>setSelectedId(item.id)}><span className="mail-list-title"><strong>{item.mailSubject||"（无主题）"}</strong><small>#{item.id}</small></span><span className="mail-list-sender">{item.mailSender||"未知发件人"}</span><span className="mail-list-foot"><small>{item.mailReceivedAt?new Date(item.mailReceivedAt).toLocaleString("zh-CN",{timeZone:"Asia/Shanghai"}):item.mailReceivedDate}</small><span className="mail-list-badges"><i className={item.needsClassificationReview?"mail-status":"mail-status processed"}>{item.needsClassificationReview?"需判断":mailCategoryText[item.workCategory]}</i><i className={`mail-status ${item.handlingStatus.toLowerCase()}`}>{mailHandlingText[item.handlingStatus]}</i></span></span></button>):<div className="mail-workbench-empty">没有符合条件的邮件</div>}</div>
+      <div className="mail-workbench-detail">{detail?<><div className="mail-detail-heading"><div><h3>{detail.mailSubject||"（无主题）"}</h3><p>{detail.mailSender||"未知发件人"}</p></div><b className={detail.status==="failed"?"status danger":"status ok"}>{mailImportStatus(detail.status)}</b></div><dl className="mail-detail-meta"><div><dt>邮件编号</dt><dd>#{detail.id}</dd></div><div><dt>收件日期</dt><dd>{detail.mailReceivedAt?new Date(detail.mailReceivedAt).toLocaleString("zh-CN",{timeZone:"Asia/Shanghai"}):detail.mailReceivedDate||"—"}</dd></div><div><dt>附件</dt><dd>{parsed?.attachments?.length||0} 个</dd></div></dl>
+        <div className="mail-classification-result"><span>{detail.needsClassificationReview?"系统无法确定分类，需要人工判断":detail.classificationSource==="Manual"?"已人工确认分类":`系统已自动分类，可信度 ${detail.classificationConfidence}%`}</span></div><div className="mail-review-controls"><label>邮件分类<select value={detail.workCategory} onChange={event=>setDetail({...detail,workCategory:event.target.value as MailWorkCategory})}>{Object.entries(mailCategoryText).map(([key,label])=><option key={key} value={key}>{label}</option>)}</select></label><label>处理状态<select value={detail.handlingStatus} onChange={event=>setDetail({...detail,handlingStatus:event.target.value as MailHandlingStatus})}>{Object.entries(mailHandlingText).map(([key,label])=><option key={key} value={key}>{label}</option>)}</select></label><label className="mail-note">核对备注<textarea maxLength={500} rows={3} value={detail.workNote||""} onChange={event=>setDetail({...detail,workNote:event.target.value})} placeholder="只在需要补充说明时填写"/></label><button className="primary-button" disabled={saving} onClick={()=>void saveReview()}><Check size={16}/>{saving?"保存中…":"保存人工调整"}</button></div>
+        <section className="mail-detail-section"><h4>邮件正文</h4><div className="mail-body-text">{body||"这封邮件没有可显示的纯文本正文。"}</div></section>
+        <section className="mail-detail-section"><h4>附件</h4>{parsed?.attachments?.length?<ul>{parsed.attachments.map((attachment,index)=><li key={`${attachment.filename}-${index}`}><span>{attachment.filename}</span><small>{Math.max(1,Math.ceil(attachment.size/1024))} KB</small></li>)}</ul>:<p>无附件</p>}</section>
+        {fields.length>0&&<section className="mail-detail-section"><h4>系统识别结果</h4><dl className="mail-extracted-fields">{fields.map(([key,value])=><div key={key}><dt>{key}</dt><dd>{String(value)}</dd></div>)}</dl></section>}
+        {(parsed?.warnings?.length||detail.error)&&<section className="mail-detail-section warning"><h4>需要注意</h4>{detail.error&&<p>{detail.error}</p>}{parsed?.warnings?.map((warning,index)=><p key={index}>{warning}</p>)}</section>}
+      </>:<div className="mail-workbench-empty">从左侧选择一封邮件查看详情</div>}</div>
+    </div>
+  </section>;
+}
+
 function Dashboard() {
   const [tasks,setTasks]=useState<ShipmentTaskData[]>([]);
-  useEffect(()=>{void(async()=>{try{const response=await fetch(apiPath("/api/shipments"),{cache:"no-store"});if(response.ok)setTasks(await response.json());}catch{/* 首页保留空状态，避免影响其他操作 */}})();},[]);
+  useEffect(()=>{void(async()=>{try{const response=await apiFetch("/api/shipments",{cache:"no-store"});if(response.ok)setTasks(await response.json());}catch{/* 首页保留空状态，避免影响其他操作 */}})();},[]);
   const active=tasks.filter(task=>task.status!=="Cancelled");
   const counts={changes:active.filter(hasTaskChange).length,review:active.filter(task=>task.status==="PendingReview").length,shipment:active.filter(task=>task.status==="PendingShipment").length,completed:active.filter(task=>task.status==="Completed").length};
   const anomalies=active.flatMap(task=>taskAnomalies(task).map(anomaly=>({task,...anomaly}))).sort((left,right)=>right.priority-left.priority||left.deadline.localeCompare(right.deadline));
@@ -379,96 +517,18 @@ function taskAnomalies(task:ShipmentTaskData){
 }
 
 function ImportCenter() {
-  const [tab, setTab] = useState<"email" | "history">("email");
   const [emailFiles, setEmailFiles] = useState<File[]>([]);
   const [emailBatch, setEmailBatch] = useState<EmailBatch | null>(null);
-  const [readMail, setReadMail] = useState<ReadMailPage>({total:0,page:1,pageSize:50,items:[]});
-  const [readSearch, setReadSearch] = useState("");
-  const [readDate, setReadDate] = useState("");
-  const [readPage, setReadPage] = useState(1);
-  const [readVersion, setReadVersion] = useState(0);
-  const [readLoading, setReadLoading] = useState(false);
-  const [readError, setReadError] = useState("");
   const [selectedEmailIndex, setSelectedEmailIndex] = useState(0);
   const [emailError, setEmailError] = useState("");
   const [emailLoading, setEmailLoading] = useState(false);
-  const [mailboxBatches, setMailboxBatches] = useState<MailboxBatch[]>([]);
-  const [mailboxStatus, setMailboxStatus] = useState("");
   const [confirmLoading, setConfirmLoading] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
   const [createdTaskIds, setCreatedTaskIds] = useState<number[]>([]);
   const fileInput = useRef<HTMLInputElement>(null);
-  const email = tab === "email";
   const selectedEmail = emailBatch?.items?.[selectedEmailIndex];
   const parsedFields = selectedEmail?.fields;
   const fields = [["SO号",parsedFields?.so_number || "待识别"],["柜型",parsedFields?.container_type || "待识别"],["计划走货日期",parsedFields?.ship_date || ""],["SI截止",parsedFields?.si_deadline || "待识别"],["截数期",parsedFields?.cutoff_date || "待识别"],["装货港",parsedFields?.port || "待识别"],["收货地",parsedFields?.destination_country || "待确认"],["特殊要求",parsedFields?.special_requirements || "待人工确认"]];
-  const todayInChina = new Intl.DateTimeFormat("sv-SE", { timeZone:"Asia/Shanghai", year:"numeric", month:"2-digit", day:"2-digit" }).format(new Date());
-  const mailboxDays = Object.entries(mailboxBatches.reduce<Record<string, MailboxBatch[]>>((days, batch) => {
-    const day = batch.mailReceivedDate || "日期待核对";
-    (days[day] ||= []).push(batch);
-    return days;
-  }, {})).sort(([left], [right]) => right.localeCompare(left));
-
-  async function loadMailbox() {
-    const response = await apiFetch("/api/imports/email/mailbox", { cache: "no-store" });
-    const result = await readJsonResponse(response);
-    if (!response.ok) throw new Error(result.error || "读取邮箱同步状态失败");
-    setMailboxBatches(result.batches || []);
-    setMailboxStatus(result.lastError ? `同步异常：${result.lastError}`
-      : result.lastSuccessAt ? `上次同步：${new Date(result.lastSuccessAt).toLocaleString("zh-CN")}` : "等待邮箱配置或首次同步");
-  }
-
-  useEffect(() => { loadMailbox().catch(() => setMailboxStatus("暂时无法读取邮箱同步状态")); }, []);
-
-  useEffect(() => {
-    if (tab !== "history") return;
-    const controller = new AbortController();
-    const timer = window.setTimeout(async () => {
-      setReadLoading(true); setReadError("");
-      try {
-        const query = new URLSearchParams({ page:String(readPage) });
-        if (readSearch.trim()) query.set("q", readSearch.trim());
-        if (readDate) query.set("date", readDate);
-        const response = await apiFetch(`/api/imports/email/mailbox/items?${query}`, {signal:controller.signal,cache:"no-store"});
-        const result = await readJsonResponse(response);
-        if (!response.ok) throw new Error(result.error || "读取邮件明细失败");
-        if (!controller.signal.aborted) setReadMail(result as ReadMailPage);
-      } catch (error) {
-        if (!controller.signal.aborted) setReadError(error instanceof Error ? error.message : "读取邮件明细失败");
-      } finally { if (!controller.signal.aborted) setReadLoading(false); }
-    }, 250);
-    return () => { window.clearTimeout(timer); controller.abort(); };
-  }, [tab, readSearch, readDate, readPage, readVersion]);
-
-  async function syncMailbox() {
-    setEmailLoading(true); setEmailError("");
-    try {
-      const response = await apiFetch("/api/imports/email/mailbox/sync", { method: "POST" });
-      const result = await readJsonResponse(response);
-      if (!response.ok) throw new Error(result.error || "邮箱同步失败");
-      setMailboxStatus(result.configured ? `本次新增 ${result.imported} 封邮件` : "邮箱尚未配置，请联系管理员");
-      await loadMailbox();
-      setReadVersion(value => value + 1);
-    } catch (error) { setEmailError(error instanceof Error ? error.message : "邮箱同步失败"); }
-    finally { setEmailLoading(false); }
-  }
-
-  async function openMailboxBatch(batchId: number, itemId?: number) {
-    setEmailLoading(true); setEmailError("");
-    try {
-      const response = await apiFetch(`/api/imports/email/${batchId}`);
-      const result = await readJsonResponse(response);
-      if (!response.ok) throw new Error(result.error || "读取邮件批次失败");
-      const items = (result.items || []).map((item: { id:number; resultJson:string; duplicateOfItemId?:number }) =>
-        ({ ...JSON.parse(item.resultJson), import_item_id:item.id, duplicate_of_item_id:item.duplicateOfItemId }));
-      setEmailBatch({ import_batch_id:batchId, total:result.totalCount, parsed:result.parsedCount,
-        failed:result.failedCount, items });
-      const selected = itemId ? items.findIndex((item:ParsedEmail) => item.import_item_id === itemId) : 0;
-      setSelectedEmailIndex(Math.max(0, selected)); setConfirmed(result.status === "Confirmed"); setCreatedTaskIds([]);
-      setTab("email");
-    } catch (error) { setEmailError(error instanceof Error ? error.message : "读取邮件批次失败"); }
-    finally { setEmailLoading(false); }
-  }
 
   async function parseSelectedEmails() {
     if (!emailFiles.length) { fileInput.current?.click(); return; }
@@ -539,23 +599,19 @@ function ImportCenter() {
     if (!emailBatch) return;
     setConfirmLoading(true); setEmailError("");
     try {
-      const response = await fetch(emailBatch.import_batch_id ? `/api/imports/email/${emailBatch.import_batch_id}/confirm` : "/api/imports/email/confirm", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(emailBatch) });
+      const response = await apiFetch(emailBatch.import_batch_id ? `/api/imports/email/${emailBatch.import_batch_id}/confirm` : "/api/imports/email/confirm", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(emailBatch) });
       const result = await readJsonResponse(response);
       if (!response.ok) throw new Error(result.error || "确认保存失败");
       setConfirmed(true);
       setCreatedTaskIds(result.shipment_task_ids || []);
-      await loadMailbox();
-      setReadVersion(value => value + 1);
     } catch (error) {
       setEmailError(error instanceof Error ? error.message : "确认保存失败");
     } finally { setConfirmLoading(false); }
   }
 
   return <div className="content import-center">
-    <div className="tabs"><button className={email ? "active" : ""} onClick={() => setTab("email")}><Inbox size={16} />邮件解析</button><button className={!email ? "active" : ""} onClick={() => setTab("history")}><ListChecks size={16} />邮箱读取明细</button></div>
-    {email && <section className="panel import-panel"><div className="panel-title"><div><h2>邮箱自动收取</h2><p>{mailboxStatus}；按船务邮箱收件日期（北京时间）归类</p></div><button className="secondary-button" disabled={emailLoading} onClick={syncMailbox}><RefreshCw size={16} />立即同步</button></div>{mailboxDays.map(([day, batches]) => <div key={day} className="review-section"><h3>{day === todayInChina ? `今天 ${day}` : day} · {batches.reduce((sum,batch) => sum + batch.totalCount, 0)} 封</h3><div className="upload-actions">{batches.map(batch => <button key={batch.id} className="secondary-button" onClick={() => openMailboxBatch(batch.id)}>{batch.fileName} · {batch.status === "Confirmed" ? `已确认，解析失败 ${batch.failedCount} 封` : `待确认 ${batch.totalCount} 封${batch.failedCount ? `，失败 ${batch.failedCount} 封` : ""}`}</button>)}</div></div>)}</section>}
-    {email && <section className="panel import-panel"><div className="compact-upload"><span className="upload-icon"><Inbox size={23} /></span><div className="upload-copy"><h2>导入邮件及附件</h2><p>{emailFiles.length ? `已选择 ${emailFiles.length} 封 EML 邮件` : "支持一次选择多封 EML；单封失败不会中断整批"}</p></div><input ref={fileInput} type="file" accept=".eml,message/rfc822" multiple style={{display:"none"}} onChange={event => setEmailFiles(Array.from(event.target.files || []))} /><div className="upload-actions"><button className="primary-button" onClick={() => fileInput.current?.click()}><Upload size={16} />选择文件</button>{emailFiles.length > 0 && <button className="secondary-button" disabled={emailLoading} onClick={parseSelectedEmails}>{emailLoading ? "解析中…" : "开始批量解析"}</button>}</div></div>{emailError && <div className="notice"><span>{emailError}</span></div>}</section>}
-    {email && <section className="panel preview-panel"><div className="panel-title"><div><h2>解析结果预览</h2><p>{emailBatch ? `批次共 ${emailBatch.total} 个：成功 ${emailBatch.parsed}，失败 ${emailBatch.failed}` : "选择邮件并解析后，在这里人工核对"}</p></div><b className={`status ${confirmed ? "ok" : emailBatch?.failed ? "danger" : "warn"}`}>{confirmed ? "已确认" : emailBatch ? "待确认" : "未解析"}</b></div>
+    <section className="panel import-panel"><div className="compact-upload"><span className="upload-icon"><Inbox size={23} /></span><div className="upload-copy"><h2>导入邮件及附件</h2><p>{emailFiles.length ? `已选择 ${emailFiles.length} 封 EML 邮件` : "支持一次选择多封 EML；单封失败不会中断整批"}</p></div><input ref={fileInput} type="file" accept=".eml,message/rfc822" multiple style={{display:"none"}} onChange={event => setEmailFiles(Array.from(event.target.files || []))} /><div className="upload-actions"><button className="primary-button" onClick={() => fileInput.current?.click()}><Upload size={16} />选择文件</button>{emailFiles.length > 0 && <button className="secondary-button" disabled={emailLoading} onClick={parseSelectedEmails}>{emailLoading ? "解析中…" : "开始批量解析"}</button>}</div></div>{emailError && <div className="notice"><span>{emailError}</span></div>}</section>
+    <section className="panel preview-panel"><div className="panel-title"><div><h2>解析结果预览</h2><p>{emailBatch ? `批次共 ${emailBatch.total} 个：成功 ${emailBatch.parsed}，失败 ${emailBatch.failed}` : "选择邮件并解析后，在这里人工核对"}</p></div><b className={`status ${confirmed ? "ok" : emailBatch?.failed ? "danger" : "warn"}`}>{confirmed ? "已确认" : emailBatch ? "待确认" : "未解析"}</b></div>
       {emailBatch && <div className="email-review-layout">
         <div className="email-review-list">{emailBatch.items.map((item,index) => <button key={`${item.filename}-${index}`} className={selectedEmailIndex === index ? "active" : ""} onClick={() => setSelectedEmailIndex(index)}><strong>#{index + 1} {item.filename}</strong><small>{item.status === "failed" ? "解析失败" : item.duplicate_of_item_id ? "重复邮件" : item.message?.subject || "无主题"}</small></button>)}</div>
         <div className="email-review-detail">
@@ -572,22 +628,7 @@ function ImportCenter() {
       <div className="notice"><ListChecks size={18} /><span>邮件确认后即可创建走柜任务和制表；库存、验货未确认时仅显示提示，不阻断操作。</span></div>
       {confirmed && <div className="task-created-result"><span>{createdTaskIds.length ? `已自动创建或更新 ${createdTaskIds.length} 个走柜任务` : "本批邮件未新增任务（重复邮件不会重复创建）"}</span>{createdTaskIds.length === 1 ? <Link href={`/shipments/${createdTaskIds[0]}`}>打开任务</Link> : createdTaskIds.length > 1 ? <Link href="/shipments">查看任务列表</Link> : null}</div>}
       <div className="panel-actions"><button className="ghost-button" onClick={() => { setEmailBatch(null); setEmailFiles([]); setConfirmed(false); setCreatedTaskIds([]); }}>取消本次导入</button><button className="primary-button" disabled={!emailBatch || confirmed || confirmLoading || (!!emailBatch.failed && !emailBatch.import_batch_id)} onClick={confirmBatch}><Check size={16} />{confirmLoading ? "保存中…" : confirmed ? "已确认" : "确认本批次"}</button></div>
-    </section>}
-    {!email && <section className="panel mail-read-panel">
-      <div className="panel-title"><div><h2>邮箱读取明细</h2><p>按船务邮箱收件时间（北京时间）归类，共 {readMail.total} 封记录；点击邮件编号可查看解析结果。</p></div></div>
-      <div className="mail-read-filters">
-        <label><span>搜索邮件</span><input type="search" value={readSearch} placeholder="邮件编号、主题或发件人" onChange={event => { setReadSearch(event.target.value); setReadPage(1); }} /></label>
-        <label><span>收件日期</span><input type="date" value={readDate} onChange={event => { setReadDate(event.target.value); setReadPage(1); }} /></label>
-        {(readSearch || readDate) && <button className="secondary-button" onClick={() => { setReadSearch(""); setReadDate(""); setReadPage(1); }}>清除筛选</button>}
-      </div>
-      {readError && <div className="notice"><span>{readError}</span></div>}
-      <div className="mail-read-table-wrap"><table className="mail-read-table"><thead><tr><th>邮件编号</th><th>邮件主题</th><th>发件人</th><th>读取日期</th><th>状态</th></tr></thead><tbody>
-        {!readLoading && readMail.items.map(item => <tr key={item.id}><td><button className="table-action" onClick={() => openMailboxBatch(item.importBatchId,item.id)}>#{item.id}</button></td><td title={item.mailSubject}>{item.mailSubject || "无主题"}</td><td title={item.mailSender}>{item.mailSender || "—"}</td><td>{item.mailReceivedAt ? new Date(item.mailReceivedAt).toLocaleString("zh-CN",{timeZone:"Asia/Shanghai"}) : item.mailReceivedDate || "待核对"}</td><td><b className={`status ${item.status === "failed" ? "danger" : item.status.includes("confirmed") ? "ok" : "warn"}`} title={item.error || undefined}>{readMailStatus[item.status] || item.status}</b></td></tr>)}
-        {!readLoading && readMail.items.length === 0 && <tr><td colSpan={5} className="mail-read-empty">{readSearch || readDate ? "没有符合筛选条件的邮件" : "暂无邮箱读取记录"}</td></tr>}
-        {readLoading && <tr><td colSpan={5} className="mail-read-empty">读取中…</td></tr>}
-      </tbody></table></div>
-      {readMail.total > readMail.pageSize && <div className="mail-read-pagination"><span>第 {readMail.page} 页，共 {Math.ceil(readMail.total / readMail.pageSize)} 页</span><button className="secondary-button" disabled={readPage <= 1 || readLoading} onClick={() => setReadPage(value => value - 1)}>上一页</button><button className="secondary-button" disabled={readPage * readMail.pageSize >= readMail.total || readLoading} onClick={() => setReadPage(value => value + 1)}>下一页</button></div>}
-    </section>}
+    </section>
   </div>;
 }
 
@@ -602,7 +643,7 @@ function ShipmentCenter({ route, role }: { route:string; role:UserRole }) {
   async function loadTasks() {
     setLoading(true); setError("");
     try {
-      const response = await fetch(apiPath("/api/shipments"), { cache:"no-store" });
+      const response = await apiFetch("/api/shipments", { cache:"no-store" });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "读取走柜任务失败");
       setTasks(result);
@@ -610,8 +651,8 @@ function ShipmentCenter({ route, role }: { route:string; role:UserRole }) {
     finally { setLoading(false); }
   }
   useEffect(() => { if (!detailId) void loadTasks(); }, [detailId]);
-  async function createTask(event:React.FormEvent){event.preventDefault();setCreateSaving(true);setError("");try{const response=await fetch(apiPath("/api/shipments"),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(createDraft)});const result=await readJsonResponse(response);if(!response.ok)throw new Error(result.error||"新建任务失败");setCreating(false);router.push(`/shipments/${result.id}`);}catch(reason){setError(reason instanceof Error?reason.message:"新建任务失败");}finally{setCreateSaving(false);}}
-  async function deleteTask(task:ShipmentTaskData){if(!window.confirm(`是否删除任务“${task.customer} / ${task.soNumber||"SO待确认"}”及其邮件解析记录？\n\n删除后可重新导入原邮件，产品信息和产品映射不会删除。`))return;setError("");try{const response=await fetch(apiPath(`/api/shipments/${task.id}`),{method:"DELETE"});const result=await readJsonResponse(response);if(!response.ok)throw new Error(result.error||"删除任务失败");setTasks(current=>current.filter(value=>value.id!==task.id));}catch(reason){setError(reason instanceof Error?reason.message:"删除任务失败");}}
+  async function createTask(event:React.FormEvent){event.preventDefault();setCreateSaving(true);setError("");try{const response=await apiFetch("/api/shipments",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(createDraft)});const result=await readJsonResponse(response);if(!response.ok)throw new Error(result.error||"新建任务失败");setCreating(false);router.push(`/shipments/${result.id}`);}catch(reason){setError(reason instanceof Error?reason.message:"新建任务失败");}finally{setCreateSaving(false);}}
+  async function deleteTask(task:ShipmentTaskData){if(!window.confirm(`是否删除任务“${task.customer} / ${task.soNumber||"SO待确认"}”及其邮件解析记录？\n\n删除后可重新导入原邮件，产品信息和产品映射不会删除。`))return;setError("");try{const response=await apiFetch(`/api/shipments/${task.id}`,{method:"DELETE"});const result=await readJsonResponse(response);if(!response.ok)throw new Error(result.error||"删除任务失败");setTasks(current=>current.filter(value=>value.id!==task.id));}catch(reason){setError(reason instanceof Error?reason.message:"删除任务失败");}}
   if (detailId) return <ShipmentDetail id={detailId} role={role} />;
   return <div className="content">
     <div className="page-heading"><div><p className="eyebrow">核心业务模块</p><h1>走柜任务</h1><p>查看走柜安排、复核制表信息，并在车辆离厂后完成任务。</p></div>{role!=="warehouse"&&<button className="primary-button" onClick={()=>setCreating(true)}><Plus size={16}/>新建走柜任务</button>}</div>
@@ -653,7 +694,7 @@ function TaskBoard({ tasks, completed, onDelete }: { tasks:ShipmentTaskData[]; c
   });
   const total = (key:string) => visible.reduce((sum,task) => sum + task.items.reduce((inner,item) => inner + Number(item[key] || 0),0),0);
   return <section className="panel data-panel"><div className="filters"><label className="filter-input"><Search size={15}/><input value={query} onChange={event => setQuery(event.target.value)} placeholder="搜索客户、SO、PO或货号" /></label>{!completed&&<><select className="filter-select" value={customer} onChange={event => setCustomer(event.target.value)}><option value="">全部客户</option>{customers.map(value => <option key={value}>{value}</option>)}</select><select className="filter-select" value={status} onChange={event => setStatus(event.target.value)}><option value="">全部状态</option><option value="PendingReview">待复核</option><option value="PendingShipment">待走货</option><option value="Cancelled">已取消</option></select></>}<label className="date-range-filter"><span>{completed?"完成日期":"计划日期"}</span><input type="date" value={dateFrom} max={dateTo||undefined} onChange={event=>setDateFrom(event.target.value)}/><i>至</i><input type="date" value={dateTo} min={dateFrom||undefined} onChange={event=>setDateTo(event.target.value)}/></label></div>
-    {completed && <div className="monthly-summary"><span><b>{visible.length}</b> 柜</span><span>总数量 <b>{total("quantity")}</b></span><span>总件数 <b>{total("pieces")}</b></span><span>总体积 <b>{total("volume").toFixed(2)} CBM</b></span><a className="ghost-button action-shipping" href={apiPath(`/api/shipments/completed/summary/export?from=${dateFrom}&to=${dateTo}`)}><Download size={14}/>导出走柜任务汇总</a></div>}
+    {completed && <div className="monthly-summary"><span><b>{visible.length}</b> 柜</span><span>总数量 <b>{total("quantity")}</b></span><span>总件数 <b>{total("pieces")}</b></span><span>总体积 <b>{total("volume").toFixed(2)} CBM</b></span><a className="ghost-button action-shipping" href={`/api/shipments/completed/summary/export?from=${dateFrom}&to=${dateTo}`}><Download size={14}/>导出走柜任务汇总</a></div>}
     <div className={`data-table shipment-table numbered ${completed?"":"with-task-time"}`}><div className="data-row header"><span>编号</span><span>客户 / SO</span><span>{completed ? "完成日期" : "计划日期"}</span><span>柜型</span><span>数量</span><span>件数</span><span>验货结果</span><span>状态</span><span>操作</span>{!completed&&<span>任务时间</span>}</div>{visible.map(task => {const time=taskTimeDisplay(task);return <div className="data-row" key={task.id}><span>#{task.id}</span><span><b>{task.customer}</b><small>{task.soNumber || "SO待确认"}</small></span><span>{completed ? task.completedDate : task.plannedShipDate || "待安排"}</span><span>{task.containerType || "—"}</span><span>{task.items.reduce((sum,item)=>sum+Number(item.quantity||0),0)}</span><span>{task.items.reduce((sum,item)=>sum+Number(item.pieces||0),0)}</span><span><b className="qc-pending">待接入</b></span><span><b className={`status ${task.status === "Completed" ? "ok" : task.status === "Cancelled" ? "danger" : "warn"}`}>{shipmentStatus[task.status]}</b></span><span className="task-row-actions"><Link className="table-action" href={`/shipments/${task.id}`}>打开任务</Link><button className="icon-danger task-delete-icon" title="删除任务" aria-label={`删除任务 ${task.customer} ${task.soNumber||"SO待确认"}`} onClick={()=>void onDelete(task)}><Trash2 size={14}/></button></span>{!completed&&<span className="task-time"><b>{time.label}</b><small>{time.value}</small></span>}</div>})}</div>
     {!visible.length && <div className="shipment-empty">当前条件下没有任务</div>}
   </section>;
@@ -665,8 +706,8 @@ function InventoryCenter({route,role}:{route:string;role:UserRole}) {
   const [from,setFrom]=useState(`${month}-01`); const [to,setTo]=useState(new Date(now.getFullYear(),now.getMonth()+1,0).toISOString().slice(0,10));
   const [tasks,setTasks]=useState<ShipmentTaskData[]>([]); const [error,setError]=useState(""); const [writebackNotice,setWritebackNotice]=useState("");
   const [localScan,setLocalScan]=useState<LocalInventoryScan|null>(null); const [scanning,setScanning]=useState(false); const [writing,setWriting]=useState(false);
-  useEffect(()=>{void(async()=>{try{const response=await fetch(apiPath("/api/shipments"),{cache:"no-store"});const result=await readJsonResponse(response);if(!response.ok)throw new Error(result.error||"读取出库记录失败");setTasks(result);}catch(reason){setError(reason instanceof Error?reason.message:"读取出库记录失败");}})();},[]);
-  async function scanLocalInventory(){setScanning(true);setError("");try{const {handle,files}=await authorizedInventoryFiles(role);const form=new FormData();files.forEach(file=>form.append("files",file,file.name));form.append("folder",handle.name);const response=await fetch(apiPath("/api/inventory/local-files/scan"),{method:"POST",body:form});const result=await readJsonResponse(response);if(!response.ok)throw new Error(result.error||"读取本地库存表失败");setLocalScan(result);}catch(reason){setError(reason instanceof Error?reason.message:"读取本地库存表失败");}finally{setScanning(false);}}
+  useEffect(()=>{void(async()=>{try{const response=await apiFetch("/api/shipments",{cache:"no-store"});const result=await readJsonResponse(response);if(!response.ok)throw new Error(result.error||"读取出库记录失败");setTasks(result);}catch(reason){setError(reason instanceof Error?reason.message:"读取出库记录失败");}})();},[]);
+  async function scanLocalInventory(){setScanning(true);setError("");try{const {handle,files}=await authorizedInventoryFiles(role);const form=new FormData();files.forEach(file=>form.append("files",file,file.name));form.append("folder",handle.name);const response=await apiFetch("/api/inventory/local-files/scan",{method:"POST",body:form});const result=await readJsonResponse(response);if(!response.ok)throw new Error(result.error||"读取本地库存表失败");setLocalScan(result);}catch(reason){setError(reason instanceof Error?reason.message:"读取本地库存表失败");}finally{setScanning(false);}}
   async function writeAllPendingInventory(){
     const eligible=tasks.filter(task=>task.status==="PendingShipment"&&!!task.plannedShipDate&&task.plannedShipDate>=from&&task.plannedShipDate<=to)
       .filter(task=>!task.items.some(item=>String(item.inventory_writeback_task_id||"")===String(task.id))&&!window.localStorage.getItem(`voyageplex-inventory-writeback-${task.id}`))
@@ -685,7 +726,7 @@ function InventoryCenter({route,role}:{route:string;role:UserRole}) {
       eligible.forEach(task=>task.items.forEach((item,itemIndex)=>{flatIndex.set(`${task.id}:${itemIndex}`,flatItems.length);flatItems.push({...item,writeback_task_id:String(task.id),outbound_date:today,outbound_trip:task.transportReference||""});}));
       const form=new FormData();files.forEach(file=>form.append("files",file,file.name));
       form.append("payload",JSON.stringify({task_id:`batch-${Date.now()}`,outbound_date:today,items:flatItems}));
-      const response=await fetch(apiPath("/api/inventory/local-files/writeback"),{method:"POST",body:form});const result=await readJsonResponse(response);
+      const response=await apiFetch("/api/inventory/local-files/writeback",{method:"POST",body:form});const result=await readJsonResponse(response);
       if(!response.ok||result.error)throw new Error(result.error||"批量库存回写失败");
       await applyInventoryWritebackFiles(handle,Array.isArray(result.files)?result.files:[]);
       const writtenAt=new Date().toISOString();const allocations=Array.isArray(result.allocations)?result.allocations:[];
@@ -693,7 +734,7 @@ function InventoryCenter({route,role}:{route:string;role:UserRole}) {
       const savedTasks=new Map<number,ShipmentTaskData>();
       for(const task of eligible){
         const writtenItems=task.items.map((item,itemIndex)=>{const index=flatIndex.get(`${task.id}:${itemIndex}`);return {...item,inventory_writeback_task_id:String(task.id),inventory_writeback_at:writtenAt,inventory_writeback_date:String(result.outbound_date||today),inventory_writeback_allocations:allocations.filter((allocation:Record<string,unknown>)=>Number(allocation.item_index)===index)};});
-        const saveResponse=await fetch(apiPath(`/api/shipments/${task.id}`),{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({items:writtenItems,status:"Completed"})});const saved=await readJsonResponse(saveResponse);
+        const saveResponse=await apiFetch(`/api/shipments/${task.id}`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({items:writtenItems,status:"Completed"})});const saved=await readJsonResponse(saveResponse);
         if(!saveResponse.ok)throw new Error(`库存已写入，但任务 #${task.id} 完成状态保存失败，请联系管理员`);
         savedTasks.set(task.id,saved);
       }
@@ -778,6 +819,7 @@ function ShipmentDetail({ id, role, directoryRole=role, backHref="/shipments", b
   const taskTitle=`${task.customer} · ${task.emailSubject?.trim()||task.soNumber?.trim()||`任务 #${task.id}`}`;
   return <div className="content shipment-detail"><Link className="back-button" href={backHref}><ArrowLeft size={15}/>{backLabel}</Link><div className="page-heading shipment-detail-heading"><div><p className="eyebrow">走柜任务 #{task.id}</p><h1 title={taskTitle}>{taskTitle}</h1></div><div className="heading-status-actions"><select className="heading-status-select" aria-label="任务状态" value={task.status} disabled={saving||warehouseUser||task.status!=="PendingReview"} onChange={event=>void update({status:event.target.value})}><option value={task.status}>{shipmentStatus[task.status]}</option>{task.status==="PendingReview"&&<option value="PendingShipment" disabled={!task.plannedShipDate}>{task.plannedShipDate?"待走货":"待走货（请先填写日期）"}</option>}</select>{!warehouseUser&&(task.status==="PendingReview"||task.status==="PendingShipment")&&<button className="ghost-button action-cancel" disabled={saving} onClick={()=>void cancelTask()}>取消任务</button>}<button className="ghost-button action-delete" disabled={saving} onClick={()=>void deleteTask()}><Trash2 size={14}/>删除任务</button></div></div>{error&&<div className="notice">{error}</div>}
     <section className="panel shipment-core"><div className="shipment-fields"><label className="field-so"><span>SO号</span><input value={task.soNumber||""} disabled={warehouseUser} placeholder="SO待确认" onChange={event=>changeField("soNumber",event.target.value)}/></label><label className="field-container"><span>柜型</span><input value={task.containerType||""} disabled={warehouseUser} placeholder="待确认" onChange={event=>changeField("containerType",event.target.value)}/></label><label className="field-transport"><span>柜号/车次</span><input value={task.transportReference||""} disabled={saving} placeholder="待手工录入" onChange={event=>changeField("transportReference",event.target.value)}/></label><label className="field-date"><span>计划走货日期</span><input type="date" value={task.plannedShipDate||""} disabled={saving||warehouseUser} onChange={event=>changeField("plannedShipDate",event.target.value)}/><small>转为待走货前必须填写</small></label><label className="field-cutoff"><span>截关日期</span><input type="datetime-local" value={dateControlValue(task.cutoffDate,true)} disabled={warehouseUser} onChange={event=>changeField("cutoffDate",event.target.value)}/></label><label className="field-si"><span>SI 截止期</span><input type="datetime-local" value={dateControlValue(task.siDeadline,true)} disabled={warehouseUser} onChange={event=>changeField("siDeadline",event.target.value)}/></label><label className="field-port"><span>装货港</span><input value={task.port||""} disabled={warehouseUser} placeholder="待确认" onChange={event=>changeField("port",event.target.value)}/></label><label className="field-destination"><span>收货地</span><input value={task.destinationCountry||""} disabled={warehouseUser} placeholder="待确认" onChange={event=>changeField("destinationCountry",event.target.value)}/></label>{!warehouseUser&&<div className="shipment-actions field-actions"><div className="shipment-action-buttons"><button className="primary-button" onClick={()=>void saveReview()} disabled={saving}>{saving?"保存中…":"保存核对修改"}</button><button className="ghost-button action-shipping" disabled={saving} onClick={()=>void exportShipment(false)}>生成船务走柜表</button></div></div>}</div>{warehouseUser&&<div className="shipment-actions warehouse-actions"><div className="shipment-action-buttons"><button className="primary-button" onClick={()=>void saveWarehouseQuantities()} disabled={saving||task.status!=="PendingShipment"}>{saving?"保存中…":"保存仓务修改"}</button><button className="ghost-button action-location" onClick={()=>void refreshWarehouseLocations()} disabled={refreshingLocations||task.status!=="PendingShipment"}>{refreshingLocations?"查询中…":"查询/刷新放货区"}</button><button className="ghost-button action-warehouse" disabled={saving} onClick={()=>void exportShipment(true)}>生成仓务走柜表</button><button className="ghost-button action-writeback" disabled={writingBack||Boolean(writebackRecord)||task.status!=="PendingShipment"} onClick={()=>void confirmInventoryWriteback()}>{writingBack?"回写中…":writebackRecord?"今日出库已回写":task.status==="Completed"?"任务已走货完成":"确认今日出库并回写"}</button></div>{locationNotice&&<small className="action-notice">{locationNotice}</small>}</div>}</section>
+    {!!task.sourceEmails?.length&&<section className="panel shipment-source-mails"><div><h2>来源邮件</h2><p>该任务由以下邮件创建、补充或变更。</p></div><div>{task.sourceEmails.map(email=><Link href={`/mail/workbench/${email.id}`} key={email.id}><span><b>{email.relation} · #{email.id}</b><strong>{email.mailSubject||"（无主题）"}</strong><small>{email.mailSender} · {new Date(email.mailReceivedAt).toLocaleString("zh-CN",{timeZone:"Asia/Shanghai"})}</small></span><ChevronRight size={16}/></Link>)}</div></section>}
     <section className="shipment-metrics"><article><span>货物明细</span><b>{task.items.length} 条</b></article><article><span>总体积</span><b>{sum("volume").toFixed(2)} CBM</b></article></section>
     {warehouseUser&&writebackRecord&&<section className="panel writeback-log"><div><h2>库存回写记录</h2><p>任务 #{task.id} 已扣减，系统已拦截重复回写。</p></div><div><b>{String(writebackRecord.inventory_writeback_date||"—")}</b><small>{String(writebackRecord.inventory_writeback_at||"").replace("T"," ").slice(0,19)}</small></div></section>}
     <section className="panel shipment-notes editable"><label><span>制表备注</span><textarea value={task.specialRequirements||""} disabled={warehouseUser} placeholder="无特殊要求" onChange={event=>changeField("specialRequirements",event.target.value)}/></label><div className="qc-placeholder"><div className="qc-result-content"><h2>验货结果</h2>{qcNotice&&<p>{qcNotice}</p>}{qcResults?<><p>{qcSummaryText}</p><small>{qcUnsaved?"查询结果未保存，请点击“保存核对修改”":`已保存 · 查询时间 ${new Date(qcCheckedAt).toLocaleString("zh-CN")}`}</small></>:!qcNotice&&<p>点击查询 QC 验货系统结果</p>}</div>{!warehouseUser&&<button className="ghost-button" disabled={queryingQc} onClick={()=>void queryQcResult()}><RefreshCw size={14}/>{queryingQc?"查询中…":"查询验货结果"}</button>}</div></section>
@@ -788,12 +830,12 @@ function ShipmentDetail({ id, role, directoryRole=role, backHref="/shipments", b
 function UserManagement({currentUser}:{currentUser:CurrentUser}){
   const empty={username:"",displayName:"",role:"shipping" as UserRole,password:""};
   const [users,setUsers]=useState<CurrentUser[]>([]);const [draft,setDraft]=useState(empty);const [editing,setEditing]=useState<CurrentUser|null>(null);const [error,setError]=useState("");const [notice,setNotice]=useState("");const [saving,setSaving]=useState(false);
-  async function load(){const response=await fetch(apiPath("/api/users"),{cache:"no-store"});const result=await readJsonResponse(response);if(!response.ok)throw new Error(result.error||"读取用户失败");setUsers(result);}
+  async function load(){const response=await apiFetch("/api/users",{cache:"no-store"});const result=await readJsonResponse(response);if(!response.ok)throw new Error(result.error||"读取用户失败");setUsers(result);}
   useEffect(()=>{void load().catch(reason=>setError(reason instanceof Error?reason.message:"读取用户失败"));},[]);
-  async function create(event:React.FormEvent){event.preventDefault();setSaving(true);setError("");setNotice("");try{const response=await fetch(apiPath("/api/users"),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(draft)});const result=await readJsonResponse(response);if(!response.ok)throw new Error(result.error||"新增用户失败");setDraft(empty);setNotice("用户已创建");await load();}catch(reason){setError(reason instanceof Error?reason.message:"新增用户失败");}finally{setSaving(false);}}
-  async function saveEdit(event:React.FormEvent){event.preventDefault();if(!editing)return;setSaving(true);setError("");setNotice("");try{const response=await fetch(apiPath(`/api/users/${editing.id}`),{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({displayName:editing.displayName,role:editing.role,isActive:editing.isActive})});const result=await readJsonResponse(response);if(!response.ok)throw new Error(result.error||"保存失败");setEditing(null);setNotice("用户资料已更新");await load();}catch(reason){setError(reason instanceof Error?reason.message:"保存失败");}finally{setSaving(false);}}
-  async function toggle(user:CurrentUser){setError("");setNotice("");const response=await fetch(apiPath(`/api/users/${user.id}`),{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({displayName:user.displayName,role:user.role,isActive:!user.isActive})});const result=await readJsonResponse(response);if(!response.ok){setError(result.error||"操作失败");return;}setNotice(user.isActive?"用户已停用":"用户已启用");await load();}
-  async function resetPassword(user:CurrentUser){const password=window.prompt(`请输入 ${user.displayName} 的新密码（至少8位）`);if(!password)return;setError("");setNotice("");const response=await fetch(apiPath(`/api/users/${user.id}/reset-password`),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({password})});const result=await readJsonResponse(response);if(!response.ok){setError(result.error||"重置密码失败");return;}setNotice("密码已重置，该用户需要重新登录");}
+  async function create(event:React.FormEvent){event.preventDefault();setSaving(true);setError("");setNotice("");try{const response=await apiFetch("/api/users",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(draft)});const result=await readJsonResponse(response);if(!response.ok)throw new Error(result.error||"新增用户失败");setDraft(empty);setNotice("用户已创建");await load();}catch(reason){setError(reason instanceof Error?reason.message:"新增用户失败");}finally{setSaving(false);}}
+  async function saveEdit(event:React.FormEvent){event.preventDefault();if(!editing)return;setSaving(true);setError("");setNotice("");try{const response=await apiFetch(`/api/users/${editing.id}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({displayName:editing.displayName,role:editing.role,isActive:editing.isActive})});const result=await readJsonResponse(response);if(!response.ok)throw new Error(result.error||"保存失败");setEditing(null);setNotice("用户资料已更新");await load();}catch(reason){setError(reason instanceof Error?reason.message:"保存失败");}finally{setSaving(false);}}
+  async function toggle(user:CurrentUser){setError("");setNotice("");const response=await apiFetch(`/api/users/${user.id}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({displayName:user.displayName,role:user.role,isActive:!user.isActive})});const result=await readJsonResponse(response);if(!response.ok){setError(result.error||"操作失败");return;}setNotice(user.isActive?"用户已停用":"用户已启用");await load();}
+  async function resetPassword(user:CurrentUser){const password=window.prompt(`请输入 ${user.displayName} 的新密码（至少8位）`);if(!password)return;setError("");setNotice("");const response=await apiFetch(`/api/users/${user.id}/reset-password`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({password})});const result=await readJsonResponse(response);if(!response.ok){setError(result.error||"重置密码失败");return;}setNotice("密码已重置，该用户需要重新登录");}
   return <div className="content"><PageHeading eyebrow="管理员功能" title="用户管理" description="创建系统账号并按岗位分配使用权限。" />
     <form className="panel user-create-form" onSubmit={create}><div className="panel-title"><div><h2>新增用户</h2><p>账号创建后即可登录系统</p></div></div><div className="user-form-grid"><label><span>登录账号</span><input value={draft.username} onChange={event=>setDraft({...draft,username:event.target.value.toLowerCase()})} placeholder="例如 shipping01" required minLength={3}/></label><label><span>姓名</span><input value={draft.displayName} onChange={event=>setDraft({...draft,displayName:event.target.value})} required/></label><label><span>角色</span><select value={draft.role} onChange={event=>setDraft({...draft,role:event.target.value as UserRole})}><option value="shipping">船务员</option><option value="warehouse">仓库文员</option><option value="admin">管理员</option></select></label><label><span>初始密码</span><input type="password" value={draft.password} onChange={event=>setDraft({...draft,password:event.target.value})} minLength={8} required/></label><button className="primary-button" disabled={saving}>{saving?"创建中…":"新增用户"}</button></div></form>
     {(error||notice)&&<div className={error?"form-error page-message":"form-notice page-message"}>{error||notice}</div>}
@@ -825,19 +867,19 @@ function SettingsCenter({role}:{role:UserRole}) {
 function ProductInfoSettings({onBack}:{onBack:()=>void}) {
   const empty:ProductInfo={id:0,legacyId:0,customer:"",productCode:"",productName:"",quantityPerBox:null,toyCategory:"",factoryRemark:"",grossWeightPerBox:null,netWeightPerBox:null,source:"manual"};
   const [rows,setRows]=useState<ProductInfo[]>([]),[customers,setCustomers]=useState<string[]>([]),[customer,setCustomer]=useState(""),[query,setQuery]=useState(""),[page,setPage]=useState(1),[total,setTotal]=useState(0);
-  const [editing,setEditing]=useState<ProductInfo|null>(null),[loading,setLoading]=useState(true),[message,setMessage]=useState(""); const fileInput=useRef<HTMLInputElement>(null); const pageSize=50;
-  async function load(target=page){setLoading(true);try{const params=new URLSearchParams({page:String(target),pageSize:String(pageSize)});if(query.trim())params.set("query",query.trim());if(customer)params.set("customer",customer);const response=await fetch(apiPath(`/api/product-infos?${params}`),{cache:"no-store"});const result=await readJsonResponse(response);if(!response.ok)throw new Error(result.error||"读取产品资料失败");setRows(result.items);setCustomers(result.customers);setTotal(result.total);setPage(result.page);}catch(reason){setMessage(reason instanceof Error?reason.message:"读取产品资料失败");}finally{setLoading(false);}}
+  const [editing,setEditing]=useState<ProductInfo|null>(null),[workbookOpen,setWorkbookOpen]=useState(false),[loading,setLoading]=useState(true),[message,setMessage]=useState(""); const pageSize=50;
+  async function load(target=page){setLoading(true);try{const params=new URLSearchParams({page:String(target),pageSize:String(pageSize)});if(query.trim())params.set("query",query.trim());if(customer)params.set("customer",customer);const response=await apiFetch(`/api/product-infos?${params}`,{cache:"no-store"});const result=await readJsonResponse(response);if(!response.ok)throw new Error(result.error||"读取产品资料失败");setRows(result.items);setCustomers(result.customers);setTotal(result.total);setPage(result.page);}catch(reason){setMessage(reason instanceof Error?reason.message:"读取产品资料失败");}finally{setLoading(false);}}
   useEffect(()=>{void load(1);},[customer]);
-  async function importCsv(file?:File){if(!file)return;setLoading(true);setMessage("");const body=new FormData();body.append("file",file);try{const response=await fetch(apiPath("/api/product-infos/import"),{method:"POST",body});const result=await readJsonResponse(response);if(!response.ok)throw new Error(result.error||"导入失败");setMessage(`已导入 ${result.imported} 条；跳过 ${result.skippedCrossCustomerCodeCount} 个跨客户货号（${result.skippedCrossCustomerRows} 行），合并 ${result.supersededRows} 条旧版本`);await load(1);}catch(reason){setMessage(reason instanceof Error?reason.message:"导入失败");setLoading(false);}}
-  async function save(event:React.FormEvent){event.preventDefault();if(!editing)return;const response=await fetch(editing.id?apiPath(`/api/product-infos/${editing.id}`):apiPath("/api/product-infos"),{method:editing.id?"PUT":"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(editing)});const result=await readJsonResponse(response);if(!response.ok){setMessage(result.error||"保存失败");return;}setEditing(null);setMessage("产品资料已保存");await load();}
-  async function remove(row:ProductInfo){if(!window.confirm(`确认删除货号 ${row.productCode}？`))return;const response=await fetch(apiPath(`/api/product-infos/${row.id}`),{method:"DELETE"});if(!response.ok){setMessage("删除失败");return;}setMessage(`已删除货号 ${row.productCode}`);await load();}
+  async function save(event:React.FormEvent){event.preventDefault();if(!editing)return;const response=await fetch(editing.id?`/api/product-infos/${editing.id}`:"/api/product-infos",{method:editing.id?"PUT":"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(editing)});const result=await readJsonResponse(response);if(!response.ok){setMessage(result.error||"保存失败");return;}setEditing(null);setMessage("产品资料已保存");await load();}
+  async function remove(row:ProductInfo){if(!window.confirm(`确认删除货号 ${row.productCode}？`))return;const response=await apiFetch(`/api/product-infos/${row.id}`,{method:"DELETE"});if(!response.ok){setMessage("删除失败");return;}setMessage(`已删除货号 ${row.productCode}`);await load();}
   const pages=Math.max(1,Math.ceil(total/pageSize)); const numberValue=(value:string)=>value===""?null:Number(value);
   return <div className="content inspection-mapping-page"><button className="back-button" onClick={onBack}><ArrowLeft size={15}/>返回系统设置</button>
-    <div className="page-heading mapping-heading"><div><p className="eyebrow">产品基础资料</p><h1>产品信息库</h1><p>每个货号可保留不同装箱规格；同规格导入时以旧系统记录ID最大的资料为最新版。</p></div><div className="mapping-actions"><button className="ghost-button" onClick={()=>setEditing({...empty})}><Plus size={15}/>新增产品</button><input ref={fileInput} hidden type="file" accept=".csv" onChange={event=>{void importCsv(event.target.files?.[0]);event.target.value="";}}/><button className="primary-button" disabled={loading} onClick={()=>fileInput.current?.click()}><Upload size={16}/>{loading?"处理中…":"导入旧系统CSV"}</button></div></div>
-    <div className="mapping-summary"><span><b>{total}</b> 条产品规格</span><span><b>{customers.length}</b> 个客户</span><span>资料来源：旧船务系统货号映射</span></div>{message&&<div className="notice mapping-message">{message}</div>}
-    <section className="panel mapping-card"><div className="mapping-card-head"><div><h2>产品资料</h2><p>跨两个或以上非空客户的货号不会导入。</p></div><div className="product-filters"><select value={customer} onChange={event=>setCustomer(event.target.value)}><option value="">全部客户</option>{customers.map(value=><option key={value}>{value}</option>)}</select><div className="mapping-search"><Search size={15}/><input value={query} onChange={event=>setQuery(event.target.value)} onKeyDown={event=>{if(event.key==="Enter")void load(1);}} placeholder="搜索客户、货号或货名"/></div><button className="ghost-button" onClick={()=>void load(1)}>搜索</button></div></div>
+    <div className="page-heading mapping-heading"><div><p className="eyebrow">产品基础资料</p><h1>产品信息库</h1><p>每个货号可保留不同装箱规格；支持从已生成的走柜表提取产品资料。</p></div><div className="mapping-actions"><button className="ghost-button" onClick={()=>setEditing({...empty})}><Plus size={15}/>新增产品</button><button className="primary-button" onClick={()=>setWorkbookOpen(true)}><Upload size={16}/>从走柜表提取</button></div></div>
+    <div className="mapping-summary"><span><b>{total}</b> 条产品规格</span><span><b>{customers.length}</b> 个客户</span></div>{message&&<div className="notice mapping-message">{message}</div>}
+    <section className="panel mapping-card"><div className="mapping-card-head"><div><h2>产品资料</h2><p>相同货号和装箱规格的资料需人工确认后更新。</p></div><div className="product-filters"><select value={customer} onChange={event=>setCustomer(event.target.value)}><option value="">全部客户</option>{customers.map(value=><option key={value}>{value}</option>)}</select><div className="mapping-search"><Search size={15}/><input value={query} onChange={event=>setQuery(event.target.value)} onKeyDown={event=>{if(event.key==="Enter")void load(1);}} placeholder="搜索客户、货号或货名"/></div><button className="ghost-button" onClick={()=>void load(1)}>搜索</button></div></div>
       <div className="mapping-table"><div className="product-row header"><span>客户</span><span>货号</span><span>货名</span><span>每箱个数</span><span>类别</span><span>柜单备注</span><span>毛重kg</span><span>净重kg</span><span>来源</span><span>操作</span></div>{rows.map(row=><div className="product-row" key={row.id}><span>{row.customer||"—"}</span><span className="product-code">{row.productCode}</span><span>{row.productName||"—"}</span><span>{row.quantityPerBox??"默认"}</span><span>{row.toyCategory||"—"}</span><span>{row.factoryRemark||"—"}</span><span>{row.grossWeightPerBox??"—"}</span><span>{row.netWeightPerBox??"—"}</span><span>{row.source||"—"}</span><span className="mapping-row-actions"><button onClick={()=>setEditing({...row})}>编辑</button><button className="delete" onClick={()=>void remove(row)}><Trash2 size={12}/></button></span></div>)}</div>
       {!rows.length&&<div className="mapping-empty">{loading?"正在读取产品资料…":"没有找到符合条件的产品"}</div>}<div className="product-pagination"><span>第 {page} / {pages} 页</span><div><button className="ghost-button" disabled={page<=1||loading} onClick={()=>void load(page-1)}>上一页</button><button className="ghost-button" disabled={page>=pages||loading} onClick={()=>void load(page+1)}>下一页</button></div></div></section>
+    {workbookOpen&&<ProductWorkbookImport onClose={()=>setWorkbookOpen(false)} onSaved={()=>void load(1)}/>}
     {editing&&<div className="mapping-modal-backdrop" onMouseDown={()=>setEditing(null)}><form className="mapping-modal" onSubmit={save} onMouseDown={event=>event.stopPropagation()}><div><h2>{editing.id?"编辑产品资料":"新增产品资料"}</h2><p>货号与每箱个数组合不能重复。</p></div><div className="mapping-form-grid">{[["客户","customer"],["货号","productCode"],["货名","productName"],["玩具类别","toyCategory"],["柜单备注","factoryRemark"],["来源","source"]].map(([label,key])=><label key={key}><span>{label}</span><input required={key==="productCode"} value={String(editing[key as keyof ProductInfo]??"")} onChange={event=>setEditing(current=>current?{...current,[key]:event.target.value}:current)}/></label>)}{[["每箱个数","quantityPerBox"],["每箱毛重(kg)","grossWeightPerBox"],["每箱净重(kg)","netWeightPerBox"]].map(([label,key])=><label key={key}><span>{label}</span><input type="number" min="0.001" step={key==="quantityPerBox"?"1":"0.001"} value={String(editing[key as keyof ProductInfo]??"")} onChange={event=>setEditing(current=>current?{...current,[key]:numberValue(event.target.value)}:current)}/></label>)}</div><div className="panel-actions"><button type="button" className="ghost-button" onClick={()=>setEditing(null)}>取消</button><button className="primary-button">保存</button></div></form></div>}
   </div>;
 }
@@ -861,7 +903,7 @@ function InspectionMappingSettings({ onBack }: { onBack: () => void }) {
   async function loadMappings() {
     setLoading(true);
     try {
-      const response = await fetch(apiPath("/api/inspection-mappings"));
+      const response = await apiFetch("/api/inspection-mappings");
       if (!response.ok) throw new Error("读取验货映射失败");
       const result = await response.json() as StoredInspectionMapping[];
       setMappings(result);
@@ -876,7 +918,7 @@ function InspectionMappingSettings({ onBack }: { onBack: () => void }) {
     setLoading(true); setMessage("");
     const body = new FormData(); body.append("file", file);
     try {
-      const response = await fetch(apiPath("/api/inspection-mappings/import"), { method:"POST", body });
+      const response = await apiFetch("/api/inspection-mappings/import", { method:"POST", body });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "导入失败");
       setActiveGroupName(""); setMessage(`已从 ${result.filename} 更新 ${result.total} 条映射`);
@@ -886,7 +928,7 @@ function InspectionMappingSettings({ onBack }: { onBack: () => void }) {
 
   async function saveMapping(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault(); if (!editing) return;
-    const response = await fetch(editing.id ? apiPath(`/api/inspection-mappings/${editing.id}`) : apiPath("/api/inspection-mappings"), {
+    const response = await fetch(editing.id ? `/api/inspection-mappings/${editing.id}` : "/api/inspection-mappings", {
       method: editing.id ? "PUT" : "POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(editing),
     });
     if (!response.ok) { setMessage("保存失败，请重试"); return; }
@@ -895,7 +937,7 @@ function InspectionMappingSettings({ onBack }: { onBack: () => void }) {
 
   async function deleteMapping(row: StoredInspectionMapping) {
     if (!window.confirm(`确认删除货号 ${row.productCode}？`)) return;
-    const response = await fetch(apiPath(`/api/inspection-mappings/${row.id}`), { method:"DELETE" });
+    const response = await apiFetch(`/api/inspection-mappings/${row.id}`, { method:"DELETE" });
     if (!response.ok) { setMessage("删除失败，请重试"); return; }
     setMessage(`已删除货号 ${row.productCode}`); await loadMappings();
   }

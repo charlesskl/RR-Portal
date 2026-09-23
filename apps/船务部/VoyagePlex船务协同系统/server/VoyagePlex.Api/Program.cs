@@ -5,7 +5,6 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using System.Security.Cryptography;
-using Microsoft.VisualBasic.FileIO;
 using VoyagePlex.Api.Data;
 using VoyagePlex.Api.Entities;
 using VoyagePlex.Api.Services;
@@ -60,11 +59,34 @@ using (var scope = app.Services.CreateScope())
         ("MailSender", "ALTER TABLE ImportEmailItems ADD COLUMN MailSender TEXT NOT NULL DEFAULT ''"),
         ("MailReceivedAt", "ALTER TABLE ImportEmailItems ADD COLUMN MailReceivedAt TEXT NOT NULL DEFAULT ''"),
         ("MailReceivedDate", "ALTER TABLE ImportEmailItems ADD COLUMN MailReceivedDate TEXT NOT NULL DEFAULT ''"),
+        ("WorkCategory", "ALTER TABLE ImportEmailItems ADD COLUMN WorkCategory TEXT NOT NULL DEFAULT 'Unclassified'"),
+        ("ClassificationSource", "ALTER TABLE ImportEmailItems ADD COLUMN ClassificationSource TEXT NOT NULL DEFAULT 'Automatic'"),
+        ("ClassificationConfidence", "ALTER TABLE ImportEmailItems ADD COLUMN ClassificationConfidence INTEGER NOT NULL DEFAULT 0"),
+        ("NeedsClassificationReview", "ALTER TABLE ImportEmailItems ADD COLUMN NeedsClassificationReview INTEGER NOT NULL DEFAULT 1"),
+        ("HandlingStatus", "ALTER TABLE ImportEmailItems ADD COLUMN HandlingStatus TEXT NOT NULL DEFAULT 'Pending'"),
+        ("WorkNote", "ALTER TABLE ImportEmailItems ADD COLUMN WorkNote TEXT NOT NULL DEFAULT ''"),
+        ("ReviewedAt", "ALTER TABLE ImportEmailItems ADD COLUMN ReviewedAt TEXT NULL"),
     };
     foreach (var column in mailColumnUpdates)
         if (!mailColumns.Contains(column.Name)) database.Database.ExecuteSqlRaw(column.Sql);
     database.Database.ExecuteSqlRaw("CREATE UNIQUE INDEX IF NOT EXISTS IX_ImportEmailItems_MailboxKey ON ImportEmailItems (MailboxKey) WHERE MailboxKey <> ''");
     database.Database.ExecuteSqlRaw("CREATE INDEX IF NOT EXISTS IX_ImportEmailItems_MailReceivedDate ON ImportEmailItems (MailReceivedDate)");
+    database.Database.ExecuteSqlRaw("""
+        CREATE TABLE IF NOT EXISTS MailContacts (
+            Id INTEGER NOT NULL CONSTRAINT PK_MailContacts PRIMARY KEY AUTOINCREMENT,
+            Email TEXT NOT NULL, DisplayName TEXT NOT NULL, ContactType TEXT NOT NULL,
+            DefaultCategory TEXT NOT NULL, IsConfirmed INTEGER NOT NULL, MessageCount INTEGER NOT NULL,
+            UpdatedAt TEXT NOT NULL
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS IX_MailContacts_Email ON MailContacts (Email);
+        CREATE TABLE IF NOT EXISTS MailSystemSettings (
+            Id INTEGER NOT NULL CONSTRAINT PK_MailSystemSettings PRIMARY KEY,
+            SyncEnabled INTEGER NOT NULL, SyncIntervalMinutes INTEGER NOT NULL,
+            RetentionDays INTEGER NOT NULL, UpdatedAt TEXT NOT NULL
+        );
+        INSERT OR IGNORE INTO MailSystemSettings (Id, SyncEnabled, SyncIntervalMinutes, RetentionDays, UpdatedAt)
+        VALUES (1, 1, 5, 180, CURRENT_TIMESTAMP);
+        """);
     var receivedDateColumnExists = false;
     using (var command = database.Database.GetDbConnection().CreateCommand())
     {
@@ -94,6 +116,25 @@ using (var scope = app.Services.CreateScope())
         }
     }
     if (historicalMail.Count > 0) database.SaveChanges();
+    var mailboxItems = database.ImportEmailItems.Where(item => item.MailboxKey != "").ToList();
+    var existingContacts = database.MailContacts.ToDictionary(contact => contact.Email, StringComparer.OrdinalIgnoreCase);
+    foreach (var senderGroup in mailboxItems.GroupBy(item => MailClassificationRules.NormalizeEmail(item.MailSender)).Where(group => group.Key != ""))
+    {
+        if (!existingContacts.TryGetValue(senderGroup.Key, out var contact))
+        {
+            contact = new MailContact { Email = senderGroup.Key, DisplayName = senderGroup.First().MailSender };
+            database.MailContacts.Add(contact); existingContacts[senderGroup.Key] = contact;
+        }
+        contact.MessageCount = senderGroup.Count(); contact.UpdatedAt = DateTime.UtcNow;
+        if (MailContactRules.IsInternal(contact.Email)) { contact.ContactType = "Internal"; contact.IsConfirmed = true; }
+    }
+    foreach (var item in mailboxItems.Where(item => item.ClassificationSource != "Manual"))
+    {
+        var classification = MailClassificationRules.Classify(item.MailSubject);
+        item.WorkCategory = classification.Category; item.ClassificationConfidence = classification.Confidence;
+        item.ClassificationSource = classification.Source; item.NeedsClassificationReview = classification.NeedsReview;
+    }
+    if (mailboxItems.Count > 0) database.SaveChanges();
     EnsureShipmentTaskSchema(database);
     BackfillConfirmedShipmentTasks(database);
     BackfillShipmentEmailSubjects(database);
@@ -141,7 +182,6 @@ using (var scope = app.Services.CreateScope())
         CREATE UNIQUE INDEX IF NOT EXISTS IX_UserSessions_TokenHash ON UserSessions (TokenHash);
         CREATE INDEX IF NOT EXISTS IX_UserSessions_UserId ON UserSessions (UserId);
         """);
-    SeedSystemSettings(database, app.Environment.ContentRootPath);
 }
 app.UseCors();
 if (app.Environment.IsDevelopment()) { app.UseSwagger(); app.UseSwaggerUI(); }
@@ -347,7 +387,167 @@ app.MapGet("/api/imports/email/mailbox", async (AppDbContext db, CancellationTok
     return Results.Ok(new { state?.Address, state?.LastSuccessAt, state?.LastError, batches });
 });
 
-app.MapGet("/api/imports/email/mailbox/items", async (string? date, string? q, int? page,
+app.MapGet("/api/mail/contacts", async (AppDbContext db, CancellationToken cancellationToken) =>
+{
+    var contacts = await db.MailContacts.AsNoTracking().OrderByDescending(contact => contact.MessageCount)
+        .ThenBy(contact => contact.Email).ToListAsync(cancellationToken);
+    return Results.Ok(contacts.Select(contact => new { contact.Id, contact.Email, contact.DisplayName,
+        contact.ContactType, contact.DefaultCategory, contact.IsConfirmed, contact.MessageCount, contact.UpdatedAt }));
+});
+
+app.MapPatch("/api/mail/contacts/{contactId:long}", async (long contactId, JsonObject payload, AppDbContext db, CancellationToken cancellationToken) =>
+{
+    var contact = await db.MailContacts.FirstOrDefaultAsync(value => value.Id == contactId, cancellationToken);
+    if (contact is null) return Results.NotFound(new { error = "联系人不存在" });
+    var contactTypes = new[] { "Unknown", "Internal", "Customer", "Forwarder", "Trucker", "Other" };
+    var contactType = payload["contactType"]?.ToString() ?? contact.ContactType;
+    var displayName = payload["displayName"]?.ToString().Trim() ?? contact.DisplayName;
+    var isConfirmed = payload["isConfirmed"]?.GetValue<bool>() ?? contact.IsConfirmed;
+    if (!contactTypes.Contains(contactType)) return Results.BadRequest(new { error = "联系人类型无效" });
+    if (displayName.Length > 100) return Results.BadRequest(new { error = "联系人名称不能超过100字" });
+    contact.ContactType = MailContactRules.IsInternal(contact.Email) ? "Internal" : contactType;
+    contact.DisplayName = displayName; contact.IsConfirmed = isConfirmed; contact.UpdatedAt = DateTime.UtcNow;
+    if (MailContactRules.IsInternal(contact.Email)) contact.IsConfirmed = true;
+    await db.SaveChangesAsync(cancellationToken);
+    return Results.Ok(new { contact.Id, contact.Email, contact.DisplayName, contact.ContactType,
+        contact.DefaultCategory, contact.IsConfirmed, contact.MessageCount, contact.UpdatedAt });
+});
+
+app.MapPost("/api/mail/classify", async (AppDbContext db, CancellationToken cancellationToken) =>
+{
+    var items = await db.ImportEmailItems.Where(item => item.MailboxKey != "" && item.ClassificationSource != "Manual").ToListAsync(cancellationToken);
+    foreach (var item in items)
+    {
+        var classification = MailClassificationRules.Classify(item.MailSubject);
+        item.WorkCategory = classification.Category; item.ClassificationConfidence = classification.Confidence;
+        item.ClassificationSource = classification.Source; item.NeedsClassificationReview = classification.NeedsReview;
+    }
+    await db.SaveChangesAsync(cancellationToken);
+    return Results.Ok(new { total = items.Count, automatic = items.Count(item => !item.NeedsClassificationReview),
+        needsReview = items.Count(item => item.NeedsClassificationReview) });
+});
+
+app.MapGet("/api/mail/settings", async (HttpContext context, AppDbContext db, CancellationToken cancellationToken) =>
+{
+    if (((AppUser)context.Items["CurrentUser"]!).Role != "admin") return Results.Json(new { error = "只有管理员可以查看邮箱设置" }, statusCode: 403);
+    var setting = await db.MailSystemSettings.AsNoTracking().FirstAsync(value => value.Id == 1, cancellationToken);
+    var state = await db.MailSyncStates.AsNoTracking().FirstOrDefaultAsync(cancellationToken);
+    var mailCount = await db.ImportEmailItems.AsNoTracking().CountAsync(item => item.MailboxKey != "", cancellationToken);
+    var failedCount = await db.ImportEmailItems.AsNoTracking().CountAsync(item => item.MailboxKey != "" && item.Error != "", cancellationToken);
+    return Results.Ok(new { setting.SyncEnabled, setting.SyncIntervalMinutes, setting.RetentionDays, setting.UpdatedAt,
+        address = state?.Address ?? "", state?.LastSuccessAt, lastError = state?.LastError ?? "", mailCount, failedCount });
+});
+
+app.MapPatch("/api/mail/settings", async (JsonObject payload, HttpContext context, AppDbContext db, CancellationToken cancellationToken) =>
+{
+    if (((AppUser)context.Items["CurrentUser"]!).Role != "admin") return Results.Json(new { error = "只有管理员可以修改邮箱设置" }, statusCode: 403);
+    var setting = await db.MailSystemSettings.FirstAsync(value => value.Id == 1, cancellationToken);
+    var enabled = payload["syncEnabled"]?.GetValue<bool>() ?? setting.SyncEnabled;
+    var interval = payload["syncIntervalMinutes"]?.GetValue<int>() ?? setting.SyncIntervalMinutes;
+    var retention = payload["retentionDays"]?.GetValue<int>() ?? setting.RetentionDays;
+    if (interval is < 1 or > 1440) return Results.BadRequest(new { error = "同步间隔需为1至1440分钟" });
+    if (retention is < 30 or > 730) return Results.BadRequest(new { error = "在线保存期限需为30至730天" });
+    setting.SyncEnabled = enabled; setting.SyncIntervalMinutes = interval; setting.RetentionDays = retention; setting.UpdatedAt = DateTime.UtcNow;
+    await db.SaveChangesAsync(cancellationToken);
+    return Results.Ok(new { setting.SyncEnabled, setting.SyncIntervalMinutes, setting.RetentionDays, setting.UpdatedAt });
+});
+
+app.MapGet("/api/mail/candidates", async (AppDbContext db, CancellationToken cancellationToken) =>
+{
+    var items = await db.ImportEmailItems.AsNoTracking()
+        .Where(item => item.MailboxKey != "" && item.Status != "failed" &&
+            (item.WorkCategory == "Shipment" || item.WorkCategory == "Change"))
+        .OrderByDescending(item => item.MailReceivedAt).ThenByDescending(item => item.Id).ToListAsync(cancellationToken);
+    var sourceIds = items.Select(item => item.Id).ToHashSet();
+    var tasks = await db.ShipmentTasks.AsNoTracking().Where(task => task.SourceImportItemId != null && sourceIds.Contains(task.SourceImportItemId.Value))
+        .Select(task => new { task.Id, task.SourceImportItemId }).ToListAsync(cancellationToken);
+    var taskIdsBySource = tasks.GroupBy(task => task.SourceImportItemId!.Value).ToDictionary(group => group.Key, group => group.Select(task => task.Id).ToArray());
+    var parsedItems = items.Select(item =>
+    {
+        var parsed = JsonNode.Parse(item.ResultJson)?.AsObject() ?? new JsonObject();
+        var soNumbers = parsed["so_numbers"]?.AsArray()?.Select(value => value?.ToString()).Where(value => !string.IsNullOrWhiteSpace(value)).ToArray() ?? [];
+        return (Item: item, Parsed: parsed, SoNumbers: soNumbers!);
+    }).ToList();
+    var candidates = parsedItems.Select(current =>
+    {
+        var item = current.Item; var parsed = current.Parsed; var soNumbers = current.SoNumbers;
+        var fields = parsed["fields"]?.AsObject() ?? new JsonObject();
+        var itemCount = parsed["items"]?.AsArray()?.Count ?? 0;
+        var warehouseCount = parsed["warehouse_groups"]?.AsArray()?.Count ?? 0;
+        var cargoItems = parsed["items"]?.DeepClone() ?? new JsonArray();
+        var warehouseGroups = parsed["warehouse_groups"]?.DeepClone() ?? new JsonArray();
+        var related = parsedItems.Where(other => other.Item.Id != item.Id && soNumbers.Intersect(other.SoNumbers, StringComparer.OrdinalIgnoreCase).Any()).ToList();
+        var previous = related.Where(other => string.Compare(other.Item.MailReceivedAt, item.MailReceivedAt, StringComparison.Ordinal) < 0)
+            .OrderByDescending(other => other.Item.MailReceivedAt).ThenByDescending(other => other.Item.Id).FirstOrDefault();
+        var changes = previous.Item is null ? new List<object>() : CandidateFieldChanges(previous.Parsed, parsed);
+        taskIdsBySource.TryGetValue(item.Id, out var taskIds);
+        return new { item.Id, item.MailSubject, item.MailSender, item.MailReceivedAt, item.WorkCategory,
+            item.HandlingStatus, item.Status, soNumbers, itemCount, warehouseCount, fields,
+            items = cargoItems, warehouseGroups,
+            relatedEmailCount = related.Count + 1, relatedEmailIds = related.Select(other => other.Item.Id).Append(item.Id).Order().ToArray(), changes,
+            canConfirm = soNumbers.Length > 0 || itemCount > 0, taskIds = taskIds ?? [] };
+    });
+    return Results.Ok(candidates);
+});
+
+app.MapPatch("/api/mail/candidates/{itemId:long}", async (long itemId, JsonObject payload, AppDbContext db, CancellationToken cancellationToken) =>
+{
+    var entity = await db.ImportEmailItems.FirstOrDefaultAsync(item => item.Id == itemId && item.MailboxKey != "", cancellationToken);
+    if (entity is null) return Results.NotFound(new { error = "候选邮件不存在" });
+    if (entity.HandlingStatus != "Pending") return Results.Conflict(new { error = "只有待确认候选项可以修改" });
+    if (payload["fields"] is not JsonObject fields || payload["items"] is not JsonArray cargoItems || payload["warehouseGroups"] is not JsonArray warehouseGroups)
+        return Results.BadRequest(new { error = "候选资料格式无效" });
+    if (cargoItems.Count > 5000 || warehouseGroups.Count > 200) return Results.BadRequest(new { error = "候选资料数量超出范围" });
+    var stored = JsonNode.Parse(entity.ResultJson)?.AsObject() ?? new JsonObject();
+    stored["fields"] = fields.DeepClone(); stored["items"] = cargoItems.DeepClone(); stored["warehouse_groups"] = warehouseGroups.DeepClone();
+    var soNumber = fields["so_number"]?.ToString().Trim() ?? "";
+    if (soNumber != "") stored["so_numbers"] = new JsonArray(soNumber.Split(',', '，').Select(value => value.Trim()).Where(value => value != "").Select(value => (JsonNode?)JsonValue.Create(value)).ToArray());
+    entity.ResultJson = stored.ToJsonString(); entity.ReviewedAt = DateTime.UtcNow;
+    await db.SaveChangesAsync(cancellationToken);
+    return Results.Ok(new { entity.Id, savedAt = entity.ReviewedAt });
+});
+
+app.MapPost("/api/mail/candidates/{itemId:long}/{action}", async (long itemId, string action, AppDbContext db, CancellationToken cancellationToken) =>
+{
+    if (action is not ("confirm" or "ignore")) return Results.BadRequest(new { error = "候选任务操作无效" });
+    var entity = await db.ImportEmailItems.Include(item => item.ImportBatch)
+        .FirstOrDefaultAsync(item => item.Id == itemId && item.MailboxKey != "", cancellationToken);
+    if (entity is null) return Results.NotFound(new { error = "候选邮件不存在" });
+    if (entity.WorkCategory is not ("Shipment" or "Change")) return Results.BadRequest(new { error = "该邮件不是走柜候选资料" });
+    if (action == "ignore")
+    {
+        entity.HandlingStatus = "Ignored"; entity.ReviewedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync(cancellationToken);
+        return Results.Ok(new { entity.Id, entity.HandlingStatus, taskIds = Array.Empty<long>() });
+    }
+    try { var taskIds = await ConfirmMailboxCandidate(entity, db, cancellationToken); return Results.Ok(new { entity.Id, entity.HandlingStatus, taskIds }); }
+    catch (InvalidOperationException error) { return Results.BadRequest(new { error = error.Message }); }
+});
+
+app.MapPost("/api/mail/candidates/batch/{action}", async (string action, JsonObject payload, AppDbContext db, CancellationToken cancellationToken) =>
+{
+    if (action is not ("confirm" or "ignore")) return Results.BadRequest(new { error = "批量操作无效" });
+    var ids = payload["ids"]?.AsArray()?.Select(value => value?.GetValue<long>() ?? 0).Where(value => value > 0).Distinct().ToArray() ?? [];
+    if (ids.Length is < 1 or > 100) return Results.BadRequest(new { error = "请选择1至100个候选项" });
+    var entities = await db.ImportEmailItems.Where(item => ids.Contains(item.Id) && item.MailboxKey != "" && item.HandlingStatus == "Pending" &&
+        (item.WorkCategory == "Shipment" || item.WorkCategory == "Change")).ToListAsync(cancellationToken);
+    if (entities.Count != ids.Length) return Results.BadRequest(new { error = "部分候选项不存在或已处理，请刷新后重试" });
+    var taskIds = new List<long>();
+    await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+    try
+    {
+        foreach (var entity in entities)
+        {
+            if (action == "ignore") { entity.HandlingStatus = "Ignored"; entity.ReviewedAt = DateTime.UtcNow; }
+            else taskIds.AddRange(await ConfirmMailboxCandidate(entity, db, cancellationToken));
+        }
+        await db.SaveChangesAsync(cancellationToken); await transaction.CommitAsync(cancellationToken);
+        return Results.Ok(new { processed = entities.Count, taskIds = taskIds.Distinct().ToArray() });
+    }
+    catch (InvalidOperationException error) { await transaction.RollbackAsync(cancellationToken); return Results.BadRequest(new { error = error.Message }); }
+});
+
+app.MapGet("/api/imports/email/mailbox/items", async (string? date, string? q, string? category, string? handling, int? page,
     AppDbContext db, CancellationToken cancellationToken) =>
 {
     const int pageSize = 50;
@@ -358,6 +558,8 @@ app.MapGet("/api/imports/email/mailbox/items", async (string? date, string? q, i
         return Results.BadRequest(new { error = "日期格式应为 yyyy-MM-dd" });
     var query = db.ImportEmailItems.AsNoTracking().Where(item => item.MailboxKey != "");
     if (!string.IsNullOrWhiteSpace(date)) query = query.Where(item => item.MailReceivedDate == date);
+    if (!string.IsNullOrWhiteSpace(category)) query = query.Where(item => item.WorkCategory == category);
+    if (!string.IsNullOrWhiteSpace(handling)) query = query.Where(item => item.HandlingStatus == handling);
     var keyword = q?.Trim() ?? "";
     if (keyword.Length > 100) return Results.BadRequest(new { error = "搜索内容过长" });
     if (keyword != "")
@@ -371,9 +573,46 @@ app.MapGet("/api/imports/email/mailbox/items", async (string? date, string? q, i
     var items = await query.OrderByDescending(item => item.MailReceivedAt).ThenByDescending(item => item.Id)
         .Skip((pageNumber - 1) * pageSize).Take(pageSize)
         .Select(item => new { item.Id, item.ImportBatchId, item.MailSubject, item.MailSender,
-            item.MailReceivedAt, item.MailReceivedDate, item.Status, item.Error })
+            item.MailReceivedAt, item.MailReceivedDate, item.Status, item.Error,
+            item.WorkCategory, item.ClassificationSource, item.ClassificationConfidence, item.NeedsClassificationReview,
+            item.HandlingStatus, item.ReviewedAt })
         .ToListAsync(cancellationToken);
     return Results.Ok(new { total, page = pageNumber, pageSize, items });
+});
+
+app.MapGet("/api/imports/email/mailbox/items/{itemId:long}", async (long itemId, AppDbContext db, CancellationToken cancellationToken) =>
+{
+    var item = await db.ImportEmailItems.AsNoTracking().FirstOrDefaultAsync(value => value.Id == itemId && value.MailboxKey != "", cancellationToken);
+    if (item is null) return Results.NotFound(new { error = "邮件记录不存在" });
+    JsonNode? parsed = null;
+    try { parsed = JsonNode.Parse(item.ResultJson); } catch (JsonException) { }
+    return Results.Ok(new { item.Id, item.ImportBatchId, item.MailSubject, item.MailSender,
+        item.MailReceivedAt, item.MailReceivedDate, item.Status, item.Error, item.WorkCategory,
+        item.ClassificationSource, item.ClassificationConfidence, item.NeedsClassificationReview,
+        item.HandlingStatus, item.WorkNote, item.ReviewedAt, parsed });
+});
+
+app.MapPatch("/api/imports/email/mailbox/items/{itemId:long}", async (long itemId, JsonObject payload, AppDbContext db, CancellationToken cancellationToken) =>
+{
+    var item = await db.ImportEmailItems.FirstOrDefaultAsync(value => value.Id == itemId && value.MailboxKey != "", cancellationToken);
+    if (item is null) return Results.NotFound(new { error = "邮件记录不存在" });
+    var categories = new[] { "Unclassified", "Shipment", "Change", "FollowUp", "Other" };
+    var handlingStatuses = new[] { "Pending", "Processed", "Ignored" };
+    var category = payload["workCategory"]?.ToString() ?? item.WorkCategory;
+    var handling = payload["handlingStatus"]?.ToString() ?? item.HandlingStatus;
+    var note = payload["workNote"]?.ToString().Trim() ?? item.WorkNote;
+    if (!categories.Contains(category)) return Results.BadRequest(new { error = "邮件分类无效" });
+    if (!handlingStatuses.Contains(handling)) return Results.BadRequest(new { error = "处理状态无效" });
+    if (note.Length > 500) return Results.BadRequest(new { error = "处理备注不能超过500字" });
+    item.WorkCategory = category;
+    item.ClassificationSource = "Manual";
+    item.ClassificationConfidence = 100;
+    item.NeedsClassificationReview = false;
+    item.HandlingStatus = handling;
+    item.WorkNote = note;
+    item.ReviewedAt = DateTime.UtcNow;
+    await db.SaveChangesAsync(cancellationToken);
+    return Results.Ok(new { item.Id, item.WorkCategory, item.HandlingStatus, item.WorkNote, item.ReviewedAt });
 });
 
 app.MapPost("/api/imports/email/mailbox/sync", async (MailboxSyncService sync, CancellationToken cancellationToken) =>
@@ -433,14 +672,18 @@ app.MapPost("/api/imports/email/confirm", async (JsonObject payload, AppDbContex
     foreach (var (entity, stored, isDuplicate) in confirmed.Where(value => value.Entity.Status != "failed"))
     {
         var sourceItemId = isDuplicate ? entity.DuplicateOfItemId ?? entity.Id : entity.Id;
-        var incomingSo = ShipmentSoNumber(stored);
-        var existingTask = await db.ShipmentTasks.FirstOrDefaultAsync(task =>
-            task.SourceImportItemId == sourceItemId || (!string.IsNullOrEmpty(incomingSo) && task.SoNumber == incomingSo), cancellationToken);
-        var shipmentTask = existingTask ?? new ShipmentTask { SourceImportItemId = sourceItemId };
-        var previousPayload = existingTask is null ? null : await PreviousShipmentPayload(db, existingTask, cancellationToken);
-        ApplyReviewedEmailToTask(shipmentTask, stored, existingTask is null, previousPayload);
-        if (existingTask is null) db.ShipmentTasks.Add(shipmentTask);
-        affectedTasks.Add(shipmentTask);
+        foreach (var (groupKey, taskPayload) in ShipmentTaskPayloads(stored))
+        {
+            var incomingSo = ShipmentSoNumber(taskPayload);
+            var existingTask = await db.ShipmentTasks.FirstOrDefaultAsync(task =>
+                (task.SourceImportItemId == sourceItemId && task.SourceGroupKey == groupKey) ||
+                (string.IsNullOrEmpty(groupKey) && !string.IsNullOrEmpty(incomingSo) && task.SoNumber == incomingSo), cancellationToken);
+            var shipmentTask = existingTask ?? new ShipmentTask { SourceImportItemId = sourceItemId, SourceGroupKey = groupKey };
+            var previousPayload = existingTask is null ? null : await PreviousShipmentPayload(db, existingTask, groupKey, cancellationToken);
+            ApplyReviewedEmailToTask(shipmentTask, taskPayload, existingTask is null, previousPayload);
+            if (existingTask is null) db.ShipmentTasks.Add(shipmentTask);
+            affectedTasks.Add(shipmentTask);
+        }
     }
     await db.SaveChangesAsync(cancellationToken);
     await transaction.CommitAsync(cancellationToken);
@@ -478,14 +721,18 @@ app.MapPost("/api/imports/email/{batchId:long}/confirm", async (long batchId, Js
         var isDuplicate = entity.Status == "duplicate";
         entity.Status = isDuplicate ? "duplicate_confirmed" : "confirmed";
         var sourceItemId = isDuplicate ? entity.DuplicateOfItemId ?? entity.Id : entity.Id;
-        var incomingSo = ShipmentSoNumber(stored);
-        var existingTask = await db.ShipmentTasks.FirstOrDefaultAsync(task =>
-            task.SourceImportItemId == sourceItemId || (!string.IsNullOrEmpty(incomingSo) && task.SoNumber == incomingSo), cancellationToken);
-        var shipmentTask = existingTask ?? new ShipmentTask { SourceImportItemId = sourceItemId };
-        var previousPayload = existingTask is null ? null : await PreviousShipmentPayload(db, existingTask, cancellationToken);
-        ApplyReviewedEmailToTask(shipmentTask, stored, existingTask is null, previousPayload);
-        if (existingTask is null) db.ShipmentTasks.Add(shipmentTask);
-        affectedTasks.Add(shipmentTask);
+        foreach (var (groupKey, taskPayload) in ShipmentTaskPayloads(stored))
+        {
+            var incomingSo = ShipmentSoNumber(taskPayload);
+            var existingTask = await db.ShipmentTasks.FirstOrDefaultAsync(task =>
+                (task.SourceImportItemId == sourceItemId && task.SourceGroupKey == groupKey) ||
+                (string.IsNullOrEmpty(groupKey) && !string.IsNullOrEmpty(incomingSo) && task.SoNumber == incomingSo), cancellationToken);
+            var shipmentTask = existingTask ?? new ShipmentTask { SourceImportItemId = sourceItemId, SourceGroupKey = groupKey };
+            var previousPayload = existingTask is null ? null : await PreviousShipmentPayload(db, existingTask, groupKey, cancellationToken);
+            ApplyReviewedEmailToTask(shipmentTask, taskPayload, existingTask is null, previousPayload);
+            if (existingTask is null) db.ShipmentTasks.Add(shipmentTask);
+            affectedTasks.Add(shipmentTask);
+        }
     }
     batch.Status = "Confirmed";
     await db.SaveChangesAsync(cancellationToken);
@@ -499,7 +746,7 @@ app.MapGet("/api/imports/email/{batchId:long}", async (long batchId, AppDbContex
         .FirstOrDefaultAsync(value => value.Id == batchId && value.Kind == "Email", cancellationToken);
     return batch is null ? Results.NotFound() : Results.Ok(new
     {
-        batch.Id, batch.Kind, batch.FileName, batch.Status, batch.TotalCount,
+        batch.Id, batch.Kind, batch.FileName, batch.MailReceivedDate, batch.Status, batch.TotalCount,
         batch.ParsedCount, batch.FailedCount, batch.ParserVersion, batch.CreatedAt,
         Items = batch.EmailItems.Select(item => new
         {
@@ -601,31 +848,97 @@ app.MapGet("/api/product-infos", async (string? query, string? customer, int? pa
     return Results.Ok(new { total, page = currentPage, pageSize = size, customers, items });
 });
 
-app.MapPost("/api/product-infos/import", async (HttpRequest request, AppDbContext db, CancellationToken cancellationToken) =>
+app.MapPost("/api/product-infos/workbooks/preview", async (HttpRequest request, EmailParserClient parser, AppDbContext db, CancellationToken cancellationToken) =>
 {
-    if (!request.HasFormContentType) return Results.BadRequest(new { error = "请选择旧系统导出的 CSV 文件" });
+    if (!request.HasFormContentType) return Results.BadRequest(new { error = "请选择走柜表 Excel 文件" });
     var form = await request.ReadFormAsync(cancellationToken);
-    var file = form.Files.GetFile("file");
-    if (file is null || file.Length == 0) return Results.BadRequest(new { error = "请选择旧系统导出的 CSV 文件" });
-    if (!file.FileName.EndsWith(".csv", StringComparison.OrdinalIgnoreCase)) return Results.BadRequest(new { error = "目前只支持 CSV 文件" });
-    if (file.Length > 20 * 1024 * 1024) return Results.BadRequest(new { error = "CSV 文件不能超过 20MB" });
-    List<ProductInfo> sourceRows;
-    try { await using var stream = file.OpenReadStream(); sourceRows = ParseProductCsv(stream); }
-    catch (InvalidDataException error) { return Results.BadRequest(new { error = error.Message }); }
+    var files = form.Files.GetFiles("files");
+    if (files.Count == 0 || files.Count > 20) return Results.BadRequest(new { error = "请选择 1 至 20 份走柜表" });
+    if (files.Any(file => file.Length == 0 || file.Length > 20 * 1024 * 1024 ||
+        !file.FileName.EndsWith(".xlsx", StringComparison.OrdinalIgnoreCase)))
+        return Results.BadRequest(new { error = "仅支持不超过 20MB 的 xlsx 走柜表" });
+    var response = await parser.ParseProductWorkbooksAsync(files, cancellationToken);
+    if (response.StatusCode is < 200 or >= 300)
+        return Results.Content(response.Body, response.ContentType, statusCode: response.StatusCode);
+    var parsed = JsonSerializer.Deserialize<ProductWorkbookCommitRequest>(response.Body,
+        new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+    var rows = parsed?.Rows ?? [];
+    var existing = await db.ProductInfos.AsNoTracking().ToListAsync(cancellationToken);
+    var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    var batchCustomers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+    foreach (var row in rows)
+    {
+        var key = $"{row.ProductCode.Trim()}\0{row.QuantityPerBox}";
+        if (!seen.Add(key)) row.Warnings.Add("本批次相同货号及规格重复");
+        if (!string.IsNullOrWhiteSpace(row.ProductCode) && !string.IsNullOrWhiteSpace(row.Customer))
+        {
+            var code = row.ProductCode.Trim();
+            if (batchCustomers.TryGetValue(code, out var batchCustomer) && !batchCustomer.Equals(row.Customer.Trim(), StringComparison.OrdinalIgnoreCase))
+                row.Warnings.Add($"本批次同一货号出现不同客户：{batchCustomer}");
+            else batchCustomers[code] = row.Customer.Trim();
+        }
+        var match = existing.FirstOrDefault(value => value.ProductCode.Equals(row.ProductCode.Trim(), StringComparison.OrdinalIgnoreCase)
+            && value.QuantityPerBox == row.QuantityPerBox);
+        row.ExistingId = match?.Id;
+        row.ExistingProduct = match;
+        var otherCustomer = existing.FirstOrDefault(value => value.ProductCode.Equals(row.ProductCode.Trim(), StringComparison.OrdinalIgnoreCase)
+            && !string.IsNullOrWhiteSpace(value.Customer) && !string.IsNullOrWhiteSpace(row.Customer)
+            && !value.Customer.Equals(row.Customer.Trim(), StringComparison.OrdinalIgnoreCase));
+        if (otherCustomer is not null) row.Warnings.Add($"客户与库中记录不一致：{otherCustomer.Customer}");
+    }
+    return Results.Ok(new { rows });
+}).DisableAntiforgery();
 
-    var selection = ProductImportRules.SelectLatest(sourceRows);
-
+app.MapPost("/api/product-infos/workbooks/commit", async (ProductWorkbookCommitRequest request, AppDbContext db, CancellationToken cancellationToken) =>
+{
+    if (request.Rows.Count == 0 || request.Rows.Count > 5000)
+        return Results.BadRequest(new { error = "请选择 1 至 5000 条产品资料" });
+    var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    var batchCustomers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+    foreach (var row in request.Rows)
+    {
+        var candidate = new ProductInfo { ProductCode = row.ProductCode, QuantityPerBox = row.QuantityPerBox,
+            GrossWeightPerBox = row.GrossWeightPerBox, NetWeightPerBox = row.NetWeightPerBox };
+        var error = ValidateProductInfo(candidate);
+        if (error is not null) return Results.BadRequest(new { error = $"{row.Filename} 第 {row.RowNumber} 行：{error}" });
+        var key = $"{row.ProductCode.Trim()}\0{row.QuantityPerBox}";
+        if (!seen.Add(key)) return Results.BadRequest(new { error = "提交的产品中有重复货号和装箱规格" });
+        if (!string.IsNullOrWhiteSpace(row.Customer))
+        {
+            var code = row.ProductCode.Trim();
+            if (batchCustomers.TryGetValue(code, out var batchCustomer) && !batchCustomer.Equals(row.Customer.Trim(), StringComparison.OrdinalIgnoreCase))
+                return Results.BadRequest(new { error = $"货号 {code} 在本批次中属于不同客户" });
+            batchCustomers[code] = row.Customer.Trim();
+        }
+    }
+    var added = 0; var updated = 0; var skipped = 0;
     await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-    await db.ProductInfos.ExecuteDeleteAsync(cancellationToken);
-    db.ProductInfos.AddRange(selection.Items);
+    foreach (var row in request.Rows)
+    {
+        var code = row.ProductCode.Trim();
+        var normalized = code.ToUpper();
+        var existing = await db.ProductInfos.FirstOrDefaultAsync(value => value.ProductCode.ToUpper() == normalized
+            && value.QuantityPerBox == row.QuantityPerBox, cancellationToken);
+        if (row.UpdateExisting && row.ExistingId != existing?.Id)
+            return Results.Conflict(new { error = $"货号 {code} 的库中记录已变化，请重新预览后确认" });
+        if (existing is not null && !row.UpdateExisting) { skipped++; continue; }
+        if (!string.IsNullOrWhiteSpace(row.Customer) && await db.ProductInfos.AnyAsync(value => value.ProductCode.ToUpper() == normalized
+            && value.Customer != "" && value.Customer.ToUpper() != row.Customer.Trim().ToUpper(), cancellationToken))
+            return Results.Conflict(new { error = $"货号 {code} 的客户与产品库不一致，请先人工核对" });
+        var product = existing ?? new ProductInfo { ProductCode = code, LegacyId = 0 };
+        if (existing is null || !string.IsNullOrWhiteSpace(row.Customer)) product.Customer = row.Customer.Trim();
+        if (existing is null || !string.IsNullOrWhiteSpace(row.ProductName)) product.ProductName = row.ProductName.Trim();
+        product.QuantityPerBox = row.QuantityPerBox;
+        if (existing is null || !string.IsNullOrWhiteSpace(row.ToyCategory)) product.ToyCategory = row.ToyCategory.Trim();
+        if (existing is null || row.GrossWeightPerBox.HasValue) product.GrossWeightPerBox = row.GrossWeightPerBox;
+        if (existing is null || row.NetWeightPerBox.HasValue) product.NetWeightPerBox = row.NetWeightPerBox;
+        product.Source = $"走柜表:{Path.GetFileName(row.Filename)}"; product.UpdatedAt = DateTime.UtcNow;
+        if (existing is null) { db.ProductInfos.Add(product); added++; } else updated++;
+    }
     await db.SaveChangesAsync(cancellationToken);
     await transaction.CommitAsync(cancellationToken);
-    return Results.Ok(new {
-        filename = file.FileName, sourceRows = sourceRows.Count, imported = selection.Items.Count,
-        skippedCrossCustomerCodeCount = selection.SkippedCodes.Length, skippedCrossCustomerRows = selection.SkippedRows,
-        supersededRows = selection.SupersededRows, skippedCodes = selection.SkippedCodes,
-    });
-}).DisableAntiforgery();
+    return Results.Ok(new { added, updated, skipped });
+});
 
 app.MapPost("/api/product-infos", async (ProductInfo value, AppDbContext db, CancellationToken cancellationToken) =>
 {
@@ -726,9 +1039,28 @@ app.MapGet("/api/shipments/{id:long}", async (long id, HttpContext context, AppD
     var task = await db.ShipmentTasks.AsNoTracking().FirstOrDefaultAsync(value => value.Id == id, cancellationToken);
     if (task is null) return Results.NotFound(new { error = "走柜任务不存在" });
     var currentUser = (AppUser)context.Items["CurrentUser"]!;
-    return currentUser.Role == "warehouse" && task.Status is not ("PendingShipment" or "Completed")
-        ? Results.Json(new { error = "任务尚未移交仓务" }, statusCode: StatusCodes.Status403Forbidden)
-        : Results.Ok(ToShipmentResponse(task));
+    if (currentUser.Role == "warehouse" && task.Status is not ("PendingShipment" or "Completed"))
+        return Results.Json(new { error = "任务尚未移交仓务" }, statusCode: StatusCodes.Status403Forbidden);
+    var relatedTasks = await db.ShipmentTasks.AsNoTracking()
+        .Where(value => value.Customer == task.Customer).ToListAsync(cancellationToken);
+    var response = JsonNode.Parse(JsonSerializer.Serialize(
+        ToShipmentResponse(task), new JsonSerializerOptions(JsonSerializerDefaults.Web)))!.AsObject();
+    ShipmentOrderTotals.Apply(response, relatedTasks);
+    var sourceEmails = new List<object>();
+    var imports = await db.ImportEmailItems.AsNoTracking().Where(item => item.MailboxKey != "").OrderBy(item => item.MailReceivedAt).ToListAsync(cancellationToken);
+    foreach (var import in imports)
+    {
+        var parsed = JsonNode.Parse(import.ResultJson)?.AsObject();
+        var soNumbers = parsed?["so_numbers"]?.AsArray()?.Select(value => value?.ToString() ?? "").ToArray() ?? [];
+        var fieldSo = parsed?["fields"]?["so_number"]?.ToString() ?? "";
+        var isDirectSource = task.SourceImportItemId == import.Id;
+        var sameSo = !string.IsNullOrWhiteSpace(task.SoNumber) && (soNumbers.Any(value => value.Equals(task.SoNumber, StringComparison.OrdinalIgnoreCase)) || fieldSo.Equals(task.SoNumber, StringComparison.OrdinalIgnoreCase));
+        if (!isDirectSource && !sameSo) continue;
+        sourceEmails.Add(new { import.Id, import.MailSubject, import.MailSender, import.MailReceivedAt,
+            import.WorkCategory, relation = isDirectSource ? "创建来源" : "变更或补充" });
+    }
+    response["sourceEmails"] = JsonSerializer.SerializeToNode(sourceEmails, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+    return Results.Ok(response);
 });
 
 app.MapDelete("/api/shipments/{id:long}", async (long id, AppDbContext db, CancellationToken cancellationToken) =>
@@ -920,43 +1252,6 @@ app.MapPatch("/api/shipments/{id:long}", async (long id, JsonObject payload, Htt
 
 app.Run();
 
-static List<ProductInfo> ParseProductCsv(Stream stream)
-{
-    using var parser = new TextFieldParser(stream, System.Text.Encoding.UTF8, true) { TextFieldType = FieldType.Delimited, HasFieldsEnclosedInQuotes = true, TrimWhiteSpace = false };
-    parser.SetDelimiters(",");
-    var headers = parser.ReadFields()?.Select(value => value.Trim().TrimStart('\ufeff')).ToArray() ?? [];
-    var index = headers.Select((name, position) => (name, position)).ToDictionary(value => value.name, value => value.position);
-    foreach (var required in new[] { "记录ID", "客户", "货号", "货名", "每箱个数", "玩具类别", "备注(柜单)", "每箱毛重(kg)", "每箱净重(kg)", "来源" })
-        if (!index.ContainsKey(required)) throw new InvalidDataException($"CSV 缺少“{required}”列，请让旧系统部署最新版导出功能后重新导出");
-    var result = new List<ProductInfo>(); var line = 1;
-    while (!parser.EndOfData)
-    {
-        line++; var fields = parser.ReadFields() ?? []; string Cell(string name) => index[name] < fields.Length ? fields[index[name]].Trim() : "";
-        if (!long.TryParse(Cell("记录ID"), out var legacyId) || legacyId <= 0) throw new InvalidDataException($"第 {line} 行的记录ID无效");
-        var productCode = Cell("货号"); if (productCode == "") throw new InvalidDataException($"第 {line} 行缺少货号");
-        int? quantity = ParseNullableInt(Cell("每箱个数"), line, "每箱个数");
-        decimal? gross = ParseNullableDecimal(Cell("每箱毛重(kg)"), line, "每箱毛重");
-        decimal? net = ParseNullableDecimal(Cell("每箱净重(kg)"), line, "每箱净重");
-        result.Add(new ProductInfo { LegacyId=legacyId, Customer=Cell("客户"), ProductCode=productCode, ProductName=Cell("货名"), QuantityPerBox=quantity, ToyCategory=Cell("玩具类别"), FactoryRemark=Cell("备注(柜单)"), GrossWeightPerBox=gross, NetWeightPerBox=net, Source=Cell("来源"), UpdatedAt=DateTime.UtcNow });
-    }
-    if (result.Count == 0) throw new InvalidDataException("CSV 中没有产品资料");
-    return result;
-}
-
-static int? ParseNullableInt(string value, int line, string name)
-{
-    if (value == "") return null;
-    if (!int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) || parsed <= 0) throw new InvalidDataException($"第 {line} 行的{name}无效");
-    return parsed;
-}
-
-static decimal? ParseNullableDecimal(string value, int line, string name)
-{
-    if (value == "") return null;
-    if (!decimal.TryParse(value, NumberStyles.Number, CultureInfo.InvariantCulture, out var parsed) || parsed <= 0) throw new InvalidDataException($"第 {line} 行的{name}无效");
-    return parsed;
-}
-
 static string? ValidateProductInfo(ProductInfo value) => string.IsNullOrWhiteSpace(value.ProductCode) ? "货号不能为空" : value.QuantityPerBox is <= 0 ? "每箱个数必须大于0" : value.GrossWeightPerBox is <= 0 || value.NetWeightPerBox is <= 0 ? "毛重和净重必须大于0" : null;
 static Task<bool> ProductInfoExists(AppDbContext db, string productCode, int? quantityPerBox, long? excludedId, CancellationToken cancellationToken)
 {
@@ -993,13 +1288,61 @@ static object ToShipmentResponse(ShipmentTask task)
     };
 }
 
-static async Task<JsonObject?> PreviousShipmentPayload(AppDbContext db, ShipmentTask task, CancellationToken cancellationToken)
+static List<object> CandidateFieldChanges(JsonObject previous, JsonObject current)
+{
+    var labels = new Dictionary<string, string>
+    {
+        ["so_number"]="SO号", ["container_type"]="柜型", ["ship_date"]="计划走货日期",
+        ["cutoff_date"]="截数期", ["si_deadline"]="SI截止", ["port"]="装货港", ["destination_country"]="收货国家",
+    };
+    var before = previous["fields"]?.AsObject() ?? new JsonObject();
+    var after = current["fields"]?.AsObject() ?? new JsonObject();
+    var result = labels.Select(pair => new { field=pair.Key, label=pair.Value,
+        previous=before[pair.Key]?.ToString() ?? "", current=after[pair.Key]?.ToString() ?? "" })
+        .Where(value => value.previous != value.current && (value.previous != "" || value.current != ""))
+        .Cast<object>().ToList();
+    var previousItems = previous["items"]?.AsArray()?.Count ?? 0; var currentItems = current["items"]?.AsArray()?.Count ?? 0;
+    if (previousItems != currentItems) result.Add(new { field="item_count", label="货物明细", previous=$"{previousItems}条", current=$"{currentItems}条" });
+    var previousWarehouses = previous["warehouse_groups"]?.AsArray()?.Count ?? 0; var currentWarehouses = current["warehouse_groups"]?.AsArray()?.Count ?? 0;
+    if (previousWarehouses != currentWarehouses) result.Add(new { field="warehouse_count", label="仓库分组", previous=$"{previousWarehouses}个", current=$"{currentWarehouses}个" });
+    return result;
+}
+
+static async Task<long[]> ConfirmMailboxCandidate(ImportEmailItem entity, AppDbContext db, CancellationToken cancellationToken)
+{
+    var stored = JsonNode.Parse(entity.ResultJson)?.AsObject() ?? new JsonObject();
+    if ((stored["so_numbers"]?.AsArray()?.Count ?? 0) == 0 && (stored["items"]?.AsArray()?.Count ?? 0) == 0)
+        throw new InvalidOperationException($"邮件 #{entity.Id} 没有识别出SO号或货物明细");
+    await EnrichEmailProducts(stored, db, true, cancellationToken);
+    stored["reviewed_at"] = DateTime.UtcNow; entity.ResultJson = stored.ToJsonString();
+    var isDuplicate = entity.Status is "duplicate" or "duplicate_confirmed";
+    entity.Status = isDuplicate ? "duplicate_confirmed" : "confirmed"; entity.HandlingStatus = "Processed"; entity.ReviewedAt = DateTime.UtcNow;
+    var sourceItemId = isDuplicate ? entity.DuplicateOfItemId ?? entity.Id : entity.Id;
+    var affected = new List<ShipmentTask>();
+    foreach (var (groupKey, taskPayload) in ShipmentTaskPayloads(stored))
+    {
+        var incomingSo = ShipmentSoNumber(taskPayload);
+        var existing = await db.ShipmentTasks.FirstOrDefaultAsync(task =>
+            (task.SourceImportItemId == sourceItemId && task.SourceGroupKey == groupKey) ||
+            (string.IsNullOrEmpty(groupKey) && !string.IsNullOrEmpty(incomingSo) && task.SoNumber == incomingSo), cancellationToken);
+        var task = existing ?? new ShipmentTask { SourceImportItemId = sourceItemId, SourceGroupKey = groupKey };
+        var previous = existing is null ? null : await PreviousShipmentPayload(db, existing, groupKey, cancellationToken);
+        ApplyReviewedEmailToTask(task, taskPayload, existing is null, previous);
+        if (existing is null) db.ShipmentTasks.Add(task); affected.Add(task);
+    }
+    await db.SaveChangesAsync(cancellationToken);
+    return affected.Select(task => task.Id).Distinct().ToArray();
+}
+
+static async Task<JsonObject?> PreviousShipmentPayload(AppDbContext db, ShipmentTask task, string groupKey, CancellationToken cancellationToken)
 {
     if (task.SourceImportItemId is not long sourceId) return null;
     var previousJson = await db.ImportEmailItems.AsNoTracking()
         .Where(item => item.Id == sourceId).Select(item => item.ResultJson)
         .FirstOrDefaultAsync(cancellationToken);
-    return string.IsNullOrWhiteSpace(previousJson) ? null : JsonNode.Parse(previousJson)?.AsObject();
+    var previous = string.IsNullOrWhiteSpace(previousJson) ? null : JsonNode.Parse(previousJson)?.AsObject();
+    return previous is null ? null : ShipmentTaskPayloads(previous)
+        .FirstOrDefault(value => value.GroupKey == groupKey).Payload;
 }
 
 static void ApplyReviewedEmailToTask(ShipmentTask task, JsonObject stored, bool initializeStatus = true, JsonObject? previousImport = null)
@@ -1040,6 +1383,40 @@ static void ApplyReviewedEmailToTask(ShipmentTask task, JsonObject stored, bool 
         message["received_at"]?.ToString());
     if (initializeStatus) task.Status = "PendingReview";
     task.UpdatedAt = DateTime.UtcNow;
+}
+
+static List<(string GroupKey, JsonObject Payload)> ShipmentTaskPayloads(JsonObject stored)
+{
+    var groups = stored["shipment_groups"]?.AsArray();
+    if (groups is null || groups.Count == 0) return [(string.Empty, stored)];
+    var result = new List<(string, JsonObject)>();
+    foreach (var node in groups)
+    {
+        if (node is not JsonObject group) continue;
+        var groupKey = group["group_key"]?.ToString() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(groupKey)) continue;
+        var payload = JsonNode.Parse(stored.ToJsonString())!.AsObject();
+        var fields = payload["fields"]?.AsObject() ?? new JsonObject();
+        fields["container_type"] = group["container_type"]?.DeepClone();
+        payload["fields"] = fields;
+        var reviewedItems = payload["items"]?.AsArray() ?? new JsonArray();
+        payload["items"] = new JsonArray(reviewedItems
+            .Where(item => item?["container_assignment"]?.ToString() == groupKey)
+            .Select(item => item!.DeepClone()).ToArray());
+        var matchingWarehouse = payload["warehouse_groups"]?.AsArray()
+            .FirstOrDefault(value => value?["references"]?.AsArray().Any(reference => reference?.ToString() == groupKey) == true);
+        payload["warehouse_groups"] = matchingWarehouse is null
+            ? new JsonArray()
+            : new JsonArray(matchingWarehouse.DeepClone());
+        if (payload["message"] is JsonObject message)
+        {
+            var subject = message["subject"]?.ToString() ?? string.Empty;
+            var factory = group["loading_factory"]?.ToString() ?? string.Empty;
+            message["subject"] = $"{subject} · {groupKey}{(string.IsNullOrWhiteSpace(factory) ? "" : $" · {factory}做柜")}";
+        }
+        result.Add((groupKey, payload));
+    }
+    return result.Count == 0 ? [(string.Empty, stored)] : result;
 }
 
 static string ShipmentSoNumber(JsonObject stored)
@@ -1250,6 +1627,7 @@ static void EnsureShipmentTaskSchema(AppDbContext db)
         ["TransportReference"] = "TEXT NOT NULL DEFAULT ''",
         ["SpecialRequirements"] = "TEXT NOT NULL DEFAULT ''", ["WarehouseGroupsJson"] = "TEXT NOT NULL DEFAULT '[]'",
         ["ItemsJson"] = "TEXT NOT NULL DEFAULT '[]'", ["SourceImportItemId"] = "INTEGER NULL",
+        ["SourceGroupKey"] = "TEXT NOT NULL DEFAULT ''",
         ["CompletedDate"] = "TEXT NULL", ["UpdatedAt"] = "TEXT NOT NULL DEFAULT '0001-01-01 00:00:00'",
     };
     using var connection = db.Database.GetDbConnection();
@@ -1264,7 +1642,8 @@ static void EnsureShipmentTaskSchema(AppDbContext db)
         alter.CommandText = $"ALTER TABLE ShipmentTasks ADD COLUMN {column.Key} {column.Value}";
         alter.ExecuteNonQuery();
     }
-    db.Database.ExecuteSqlRaw("CREATE UNIQUE INDEX IF NOT EXISTS IX_ShipmentTasks_SourceImportItemId ON ShipmentTasks (SourceImportItemId) WHERE SourceImportItemId IS NOT NULL");
+    db.Database.ExecuteSqlRaw("DROP INDEX IF EXISTS IX_ShipmentTasks_SourceImportItemId");
+    db.Database.ExecuteSqlRaw("CREATE UNIQUE INDEX IF NOT EXISTS IX_ShipmentTasks_SourceImportItemId_SourceGroupKey ON ShipmentTasks (SourceImportItemId, SourceGroupKey) WHERE SourceImportItemId IS NOT NULL");
 }
 
 static void BackfillShipmentEmailSubjects(AppDbContext db)
@@ -1301,41 +1680,16 @@ static void BackfillConfirmedShipmentTasks(AppDbContext db)
         var stored = JsonNode.Parse(item.ResultJson)?.AsObject();
         if (stored is null) continue;
         var sourceItemId = item.Status == "duplicate_confirmed" ? item.DuplicateOfItemId ?? item.Id : item.Id;
-        var incomingSo = ShipmentSoNumber(stored);
-        var exists = db.ShipmentTasks.Any(task => task.SourceImportItemId == sourceItemId ||
-            (!string.IsNullOrEmpty(incomingSo) && task.SoNumber == incomingSo));
-        if (exists) continue;
-        var task = new ShipmentTask { SourceImportItemId = sourceItemId };
-        ApplyReviewedEmailToTask(task, stored);
-        db.ShipmentTasks.Add(task);
-    }
-    db.SaveChanges();
-}
-
-static void SeedSystemSettings(AppDbContext db, string contentRootPath)
-{
-    var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
-    // seed JSON 来自旧系统导出，日期是空格分隔格式（2026-09-11 00:31:18.690457），需要宽松解析
-    options.Converters.Add(new LenientDateTimeConverter());
-    var seedDirectory = Path.Combine(contentRootPath, "seed");
-    if (!db.ProductInfos.Any())
-    {
-        var path = Path.Combine(seedDirectory, "product-infos.json");
-        if (File.Exists(path))
+        foreach (var (groupKey, taskPayload) in ShipmentTaskPayloads(stored))
         {
-            var rows = JsonSerializer.Deserialize<List<ProductInfo>>(File.ReadAllText(path), options) ?? [];
-            foreach (var row in rows) row.Id = 0;
-            db.ProductInfos.AddRange(rows);
-        }
-    }
-    if (!db.ProductNameMappings.Any())
-    {
-        var path = Path.Combine(seedDirectory, "product-name-mappings.json");
-        if (File.Exists(path))
-        {
-            var rows = JsonSerializer.Deserialize<List<ProductNameMapping>>(File.ReadAllText(path), options) ?? [];
-            foreach (var row in rows) row.Id = 0;
-            db.ProductNameMappings.AddRange(rows);
+            var incomingSo = ShipmentSoNumber(taskPayload);
+            var exists = db.ShipmentTasks.Any(task =>
+                (task.SourceImportItemId == sourceItemId && task.SourceGroupKey == groupKey) ||
+                (string.IsNullOrEmpty(groupKey) && !string.IsNullOrEmpty(incomingSo) && task.SoNumber == incomingSo));
+            if (exists) continue;
+            var task = new ShipmentTask { SourceImportItemId = sourceItemId, SourceGroupKey = groupKey };
+            ApplyReviewedEmailToTask(task, taskPayload);
+            db.ShipmentTasks.Add(task);
         }
     }
     db.SaveChanges();

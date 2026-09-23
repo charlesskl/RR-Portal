@@ -55,10 +55,12 @@ def parse_attachment(path: Path, original_name: str) -> dict:
 
 
 def parse_excel(path: Path) -> dict:
-    # read_only 模式流式读取单元格值，不加载样式/图形：大附件在 512MB 容器里
-    # 用普通模式加载会把整个工作簿（含 DrawingML）读进内存，既慢又有 OOM 风险。
+    # read_only 模式流式读取单元格值，不加载样式/图形，避免大附件占满容器内存。
     wb = openpyxl.load_workbook(path, data_only=True, read_only=True)
     try:
+        amazon = _parse_amazon_allocation(wb)
+        if amazon:
+            return {"kind": "amazon_allocation", "fields": {}, "items": amazon, "warnings": []}
         yax = _parse_yax(wb)
         if yax:
             return {"kind": "yax", "fields": yax, "items": yax.pop("po_so_mapping", []), "warnings": []}
@@ -200,7 +202,7 @@ def _parse_yax(wb) -> Optional[dict]:
         for row in ws.iter_rows(min_row=1, max_row=min(ws.max_row or 80, 80), values_only=True):
             values.append(["" if value is None else str(value).strip() for value in row])
     flat = "\n".join(" | ".join(row) for row in values)
-    if "YAX" not in flat.upper() and "并柜拖车通知单" not in flat:
+    if not re.search(r"\bYAX\d{5,}\b", flat, re.I) and "并柜拖车通知单" not in flat:
         return None
     fields = {
         "so_number": _first(flat, [r"\b(YAX\d{5,})\b"]),
@@ -217,6 +219,58 @@ def _parse_yax(wb) -> Optional[dict]:
                 cbm = next((_number(value) for value in row[col_index + 1:] if _number(value) is not None), None)
                 fields["po_so_mapping"].append({"customer_po": po, "so_number": cell, "volume": cbm, "source_row": row_index + 1})
     return fields
+
+
+def _parse_amazon_allocation(wb) -> Optional[list[dict]]:
+    """Parse Amazon Edit Line Items sheets carrying per-container allocations."""
+    required = {"spec#", "expected quantity", "total carton", "new booking", "new booking key#"}
+    sheet = None
+    headers = []
+    header_row = 0
+    for candidate in wb.worksheets:
+        for row_index, row in enumerate(candidate.iter_rows(min_row=1, max_row=min(candidate.max_row, 10), values_only=True), 1):
+            values = [re.sub(r"\s+", " ", str(value or "").strip()).lower() for value in row]
+            if required.issubset(set(values)):
+                sheet, headers, header_row = candidate, values, row_index
+                break
+        if sheet is not None:
+            break
+    if sheet is None:
+        return None
+
+    columns = {value: index for index, value in enumerate(headers) if value}
+    items = []
+    for row_index, row in enumerate(sheet.iter_rows(min_row=header_row + 1, values_only=True), header_row + 1):
+        def cell(name: str):
+            index = columns.get(name)
+            return row[index] if index is not None and index < len(row) else None
+
+        booking_number = _text(cell("new booking key#"))
+        container_assignment = _text(cell("new booking"))
+        pieces = _number(cell("total carton"))
+        if not booking_number or not container_assignment or not pieces:
+            continue
+        quantity = _number(cell("expected quantity"))
+        specification = _number(cell("case pack"))
+        items.append({
+            "product_code": _text(cell("spec#")),
+            "product_name": _text(cell("title")),
+            "quantity": quantity,
+            "pieces": pieces,
+            "spec": specification,
+            "volume": _number(cell("total cbm")),
+            "customer_po": _text(cell("po")),
+            "contract_number": _text(cell("45#")),
+            "gross_weight": _number(cell("total g.w")),
+            "net_weight": _number(cell("total n.w")),
+            "supplier": _text(cell("supplier")),
+            "factory_remark": "",
+            "booking_number": booking_number,
+            "container_assignment": container_assignment,
+            "loading_factory_note": _text(cell("note")),
+            "source_row": row_index,
+        })
+    return items
 
 
 def _choose_packing_sheet(wb):

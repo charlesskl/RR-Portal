@@ -45,27 +45,76 @@ public class ProductsController(ISqlConnectionFactory factory) : ControllerBase
         return Ok(dict);
     }
 
-    public record ProductBody(string? name, string? hs_cn, string? hs_id, string? customer, object? moldings);
+    public record ProductBody(string? code, string? name, string? hs_cn, string? hs_id, string? customer, object? moldings);
 
     [HttpPut("{code}")]
     public async Task<IActionResult> Upsert(string code, [FromBody] ProductBody body)
     {
+        var oldCode = code.Trim();
+        var newCode = string.IsNullOrWhiteSpace(body.code) ? oldCode : body.code.Trim();
+
         // 编码会拼进 URL（/api/products/{code}、/api/materials/bulk/{code}）：
         // 斜杠经 nginx 解码后会拆断路径（SPA 回退只对 GET 注册，PUT 命中返回 405），
         // 其余几个字符同样会破坏路由。直连容器 %2F 能到这里，必须拦下，避免写入后前端再也访问不到。
-        if (code.IndexOfAny(['/', '\\', '?', '#', '%']) >= 0)
+        if (string.IsNullOrWhiteSpace(newCode))
+            return BadRequest(new { error = "编码不能为空" });
+        if (newCode.Length > 64)
+            return BadRequest(new { error = "编码不能超过 64 个字符" });
+        if (newCode.IndexOfAny(['/', '\\', '?', '#', '%']) >= 0)
             return BadRequest(new { error = "编码不能包含 / \\ ? # % 等特殊字符（需要斜杠外观请用全角／）" });
 
         var moldings = body.moldings == null ? null : System.Text.Json.JsonSerializer.Serialize(body.moldings);
         using var c = factory.Create();
+        c.Open();
+        using var tx = c.BeginTransaction();
+
+        if (!string.Equals(oldCode, newCode, StringComparison.Ordinal))
+        {
+            var oldExists = await c.ExecuteScalarAsync<bool>(
+                "SELECT EXISTS(SELECT 1 FROM products WHERE code=@oldCode)", new { oldCode }, tx);
+            if (!oldExists)
+                return NotFound(new { error = $"原货号 {oldCode} 不存在" });
+
+            var newExists = await c.ExecuteScalarAsync<bool>(
+                "SELECT EXISTS(SELECT 1 FROM products WHERE code=@newCode)", new { newCode }, tx);
+            if (newExists)
+                return Conflict(new { error = $"货号 {newCode} 已存在，请换一个编码" });
+
+            // 先建立新主档，再迁移外键和各处保存的货号文本，最后删除旧主档。
+            // 这样无需依赖数据库外键是否配置 ON UPDATE CASCADE，旧库同样可以安全改名。
+            await c.ExecuteAsync(@"
+INSERT INTO products(code, name, hs_cn, hs_id, customer, moldings, created_at, updated_at, active)
+SELECT @newCode, @name, @hs_cn, @hs_id, @customer, CAST(@moldings AS jsonb), created_at, now(), active
+FROM products WHERE code=@oldCode;
+
+UPDATE materials SET product_code=@newCode WHERE product_code=@oldCode;
+UPDATE po_items SET product_code=@newCode WHERE product_code=@oldCode;
+UPDATE material_lead_profiles SET product_code=@newCode, product_name=@name, updated_at=now()
+WHERE product_code=@oldCode;
+DELETE FROM products WHERE code=@oldCode;",
+                new
+                {
+                    oldCode,
+                    newCode,
+                    name = body.name ?? "",
+                    hs_cn = body.hs_cn ?? "",
+                    hs_id = body.hs_id ?? "",
+                    customer = body.customer ?? "",
+                    moldings
+                }, tx);
+            tx.Commit();
+            return Ok(new { ok = true, code = newCode, renamed = true });
+        }
+
         await c.ExecuteAsync(@"
 INSERT INTO products(code, name, hs_cn, hs_id, customer, moldings, updated_at)
 VALUES (@code, @name, @hs_cn, @hs_id, @customer, CAST(@moldings AS jsonb), now())
 ON CONFLICT (code) DO UPDATE SET
     name=EXCLUDED.name, hs_cn=EXCLUDED.hs_cn, hs_id=EXCLUDED.hs_id,
     customer=EXCLUDED.customer, moldings=EXCLUDED.moldings, updated_at=now();",
-            new { code, name = body.name ?? "", hs_cn = body.hs_cn ?? "", hs_id = body.hs_id ?? "", customer = body.customer ?? "", moldings });
-        return Ok(new { ok = true });
+            new { code = newCode, name = body.name ?? "", hs_cn = body.hs_cn ?? "", hs_id = body.hs_id ?? "", customer = body.customer ?? "", moldings }, tx);
+        tx.Commit();
+        return Ok(new { ok = true, code = newCode, renamed = false });
     }
 
     [HttpPost("{code}/restore")]

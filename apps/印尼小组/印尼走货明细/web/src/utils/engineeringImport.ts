@@ -239,10 +239,12 @@ export async function importEngineeringFile(file: File, opts?: { hsDict?: HsDict
 
   if (!snMold && !snExt) throw new Error('未找到 "排模表" 或 "外购清单" sheet')
 
-  // -------- 1. read code/name from 排模 sheet header --------
+  // -------- 1. read code/name from 排模或外购 sheet header --------
+  // 有些工程资料只有外购清单，没有排模表；两种表头使用相同的产品/客户字段。
   let code = '', name = '', customer = ''
-  if (snMold) {
-    const grid = XLSX.utils.sheet_to_json<any[]>(wb.Sheets[snMold], { header: 1, defval: null })
+  for (const headerSheet of [snMold, snExt]) {
+    if (!headerSheet) continue
+    const grid = XLSX.utils.sheet_to_json<any[]>(wb.Sheets[headerSheet], { header: 1, defval: null })
     // 关键字按优先级排（产品编号/产品名称 优先；编号/名称 兜底）。
     // 注意：整张抬头常被合并成「单个大字符串」(如 "...文件 编号: HSQR0008 ... 产品编号:46720J ...")，
     // 所以必须「按关键字优先级跨所有行扫描」，否则前面行的 文件编号 会先命中 编号。
@@ -282,19 +284,21 @@ export async function importEngineeringFile(file: File, opts?: { hsDict?: HsDict
     // 取值截断：遇「2+空格(列分隔)」或「下一个标签词」或行尾即止（应对同格多字段且仅单空格分隔）
     const STOP = '(?=\\s{2,}|\\s+(?:客户|产品|编制|审核|批准|日期|版本|文件|页码|PAGE|Product|Customer|No\\.|Revisi|Tgl|Halaman|Nama|Nomer|Disiapkan|Diperiksa|Disetujui|Tanggal)|$)'
     // 货号值：取冒号后连续非空白；名称/客户值：到截断处之前
-    code = findVal(codeKeys, k => new RegExp(`${boundary}${k}\\s*[：:]\\s*(\\S+)`, 'gi'))
+    code ||= findVal(codeKeys, k => new RegExp(`${boundary}${k}\\s*[：:]\\s*(\\S+)`, 'gi'))
     // 客户：跳过英文占位（含 Customer/Name/名称）；取首个真实值（如 TOMY）
     const customerKeys = ['客户名称', '客户', 'Customer', '客户名']
-    customer = findVal(customerKeys,
+    customer ||= findVal(customerKeys,
       k => new RegExp(`${boundary}${k}\\s*[：:]\\s*([^\\s].*?)${STOP}`, 'gi'),
       v => /customer|name|名称/i.test(v))
-    name = findVal(nameKeys, k => new RegExp(`${boundary}${k}\\s*[：:]\\s*([^\\s].*?)${STOP}`, 'gi'))
+    name ||= findVal(nameKeys, k => new RegExp(`${boundary}${k}\\s*[：:]\\s*([^\\s].*?)${STOP}`, 'gi'))
+    if (code && name && customer) break
   }
   if (!code) {
     // Dump first few rows for debugging
-    const grid = XLSX.utils.sheet_to_json<any[]>(wb.Sheets[snMold!], { header: 1, defval: null })
+    const previewSheet = snMold ?? snExt!
+    const grid = XLSX.utils.sheet_to_json<any[]>(wb.Sheets[previewSheet], { header: 1, defval: null })
     const preview = grid.slice(0, 5).map((r, i) => `行${i + 1}: ${(r || []).map(c => String(c ?? '').slice(0, 30)).join(' | ')}`).join('\n')
-    throw new Error(`未在排模表前 10 行找到"产品编号"。试过关键字：${['产品编号', '货号', '产品编码', '编号', 'ItemNo'].join(', ')}\n\n前 5 行预览：\n${preview}`)
+    throw new Error(`未在排模表或外购清单前 10 行找到"产品编号"。试过关键字：${['产品编号', '货号', '产品编码', '编号', 'ItemNo'].join(', ')}\n\n${previewSheet} 前 5 行预览：\n${preview}`)
   }
 
   const moldings: Molding[] = []

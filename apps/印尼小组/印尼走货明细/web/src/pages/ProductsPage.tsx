@@ -5,8 +5,11 @@ import {
 } from 'antd'
 import { api, type Dictionaries, type Material, type Molding, type MoldingPart, type Product, type ProductDetail } from '../api/client'
 import { MATERIAL_CATEGORIES, inferMaterialCategory } from '../utils/engineeringImport'
-import { CUSTOMS_FIXED } from '../utils/customsExport'
 import { resolveMaterialTranslation } from '../utils/materialTranslate'
+import {
+  canonicalSupplierProfiles, HUASHENGYI_FULL_NAME, linkedCustomsCompany,
+  supplierCustomsCompany, supplierProfileForName,
+} from '../utils/supplierProfiles'
 
 interface ProductForm {
   code: string
@@ -18,6 +21,10 @@ const WORKSHOPS = ['兴信A车间', '兴信B车间', '华登']
 
 function translatedMaterialName(nameZh: string, dicts: Dictionaries): string {
   return resolveMaterialTranslation(nameZh, dicts.translations || [])
+}
+
+function materialCustomsCompany(material: Material, dicts: Dictionaries): string {
+  return linkedCustomsCompany(material.supplier || '', dicts.suppliers, material.customs_company || '')
 }
 
 export default function ProductsPage() {
@@ -97,8 +104,8 @@ export default function ProductsPage() {
           materialCode: m.material_code ?? '',
           hsCN: m.hs_cn ?? '',
           hsID: m.hs_id ?? '',
-          supplier: m.supplier ?? '',
-          customsCompany: m.customs_company ?? '',
+          supplier: supplierProfileForName(m.supplier || '', dicts.suppliers)?.full || m.supplier || '',
+          customsCompany: materialCustomsCompany(m, dicts),
           unitKg: m.unit_kg ?? 'KGM',
           grossPerPc: m.gross_per_pc ?? 0,
           netPerPc: m.net_per_pc ?? 0,
@@ -122,6 +129,8 @@ export default function ProductsPage() {
           return {
             supplier: String(m.supplier || '').trim(),
             previousSupplier: String(previous?.supplier || '').trim(),
+            customs: materialCustomsCompany(m, dicts),
+            previousCustoms: previous ? materialCustomsCompany(previous, dicts) : '',
           }
         })
       let supplierAdded = 0
@@ -578,6 +587,15 @@ function MaterialsEditor({ rows, onChange, dicts, productCode }: {
       return { ...m, name_zh: nameZh, name_en: nameEn }
     }))
   }
+  function patchSupplier(i: number, supplier: string) {
+    const profile = supplierProfileForName(supplier, dicts.suppliers)
+    const full = profile?.full?.trim() || supplier
+    onChange(rows.map((material, index) => index === i ? {
+      ...material,
+      supplier: full,
+      customs_company: profile ? supplierCustomsCompany(profile) : '',
+    } : material))
+  }
   function add() {
     onChange([
       ...rows,
@@ -612,19 +630,20 @@ function MaterialsEditor({ rows, onChange, dicts, productCode }: {
   }
   function autoFillSupplier() {
     const dict = dicts.suppliers.filter(d => d.keyword)
-    if (!dict.length) { message.warning('供应商汇总里没有可用简称'); return }
+    if (!dict.length) { message.warning('供应商汇总里没有可用公司资料'); return }
     let filled = 0
     const next = rows.map((m) => {
       const sup = (m.supplier || '').trim()
       if (!sup) return m
       const hit = dict.find(d => sup.includes(d.keyword) || d.keyword === sup || (d.full && sup.includes(d.full)))
       const newSup = hit?.full || sup
-      if (newSup === m.supplier) return m
+      const newCustoms = hit ? supplierCustomsCompany(hit) : m.customs_company
+      if (newSup === m.supplier && newCustoms === m.customs_company) return m
       filled++
-      return { ...m, supplier: newSup }
+      return { ...m, supplier: newSup, customs_company: newCustoms }
     })
     onChange(next)
-    message.success(`供应商自动扩展：${filled} 行`)
+    message.success(`供应商及报关公司已关联：${filled} 行`)
   }
 
   function autoFillEnglish() {
@@ -685,6 +704,11 @@ function MaterialsEditor({ rows, onChange, dicts, productCode }: {
         active: true,
         usage_qty: Number(pick(r, ['用量', 'usage', 'usageqty', 'usage_qty']) ?? 0) || 1,
       }}).filter(m => m.name_zh || m.item_no || m.material_code)
+        .map(material => ({
+          ...material,
+          supplier: supplierProfileForName(material.supplier || '', dicts.suppliers)?.full || material.supplier,
+          customs_company: materialCustomsCompany(material, dicts),
+        }))
       if (!imported.length) { message.warning('没识别到有效行 (需含 中文名 / 料号 列)'); return }
       onChange([...rows, ...imported])
       message.success(`已导入 ${imported.length} 行 — 别忘点 💾 保存`)
@@ -734,16 +758,24 @@ function MaterialsEditor({ rows, onChange, dicts, productCode }: {
               onChange={(v) => patch(i, 'category', v ?? '')} />
           ) },
           { title: '物料编码', width: 130, render: (_v, r, i) => <Input size="small" value={r.material_code} onChange={(e) => patch(i, 'material_code', e.target.value)} /> },
-          { title: '供应商', width: 200, render: (_v, r, i) => <Input size="small" value={r.supplier} onChange={(e) => patch(i, 'supplier', e.target.value)} /> },
-          { title: '报关公司', width: 200, render: (_v, r, i) => {
-            const opts = Array.from(new Set([
-              CUSTOMS_FIXED,
-              ...rows.map(m => m.customs_company || '').filter(Boolean),
-            ])) as string[]
-            return <AutoComplete size="small" allowClear placeholder="按物料填写报关公司" style={{ width: '100%' }}
-              value={r.customs_company || ''}
-              options={opts.map(o => ({ value: o, label: o }))}
-              onChange={(v) => patch(i, 'customs_company', v ?? '')} popupMatchSelectWidth={false} />
+          { title: '供应商', width: 220, render: (_v, r, i) => <Select size="small" showSearch allowClear
+            placeholder="选择公司中文名称" style={{ width: '100%' }}
+            value={supplierProfileForName(r.supplier || '', dicts.suppliers)?.full || r.supplier || undefined}
+            options={canonicalSupplierProfiles(dicts.suppliers).map(supplier => ({
+              value: supplier.full || supplier.keyword,
+              label: supplier.full || supplier.keyword,
+            }))}
+            onChange={(value) => patchSupplier(i, value || '')} /> },
+          { title: '报关公司', width: 200, render: (_v, r) => {
+            const profile = supplierProfileForName(r.supplier || '', dicts.suppliers)
+            const selfCompany = profile?.full?.trim() || r.supplier?.trim() || ''
+            const linked = materialCustomsCompany(r, dicts)
+            const options = [
+              ...(selfCompany ? [{ value: selfCompany, label: selfCompany }] : []),
+              { value: HUASHENGYI_FULL_NAME, label: HUASHENGYI_FULL_NAME },
+            ]
+            return <Select size="small" disabled placeholder="随供应商汇总自动带入" style={{ width: '100%' }}
+              value={linked || undefined} options={options} popupMatchSelectWidth={false} />
           } },
           { title: 'HS (CN)', width: 110, render: (_v, r, i) => <Input size="small" value={r.hs_cn} onChange={(e) => patch(i, 'hs_cn', e.target.value)} /> },
           { title: 'HS (ID)', width: 110, render: (_v, r, i) => <Input size="small" value={r.hs_id} onChange={(e) => patch(i, 'hs_id', e.target.value)} /> },

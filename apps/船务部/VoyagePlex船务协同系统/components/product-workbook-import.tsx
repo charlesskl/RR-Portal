@@ -2,6 +2,9 @@
 
 import { useRef, useState } from "react";
 
+const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
+const apiPath = (path: string) => `${basePath}${path}`;
+
 type Row = {filename:string;rowNumber:number;customer:string;productCode:string;productName:string;quantityPerBox:number|null;toyCategory:string;grossWeightPerBox:number|null;netWeightPerBox:number|null;warnings:string[];existingId:number|null;existingProduct?:{customer:string;productName:string;toyCategory:string;grossWeightPerBox:number|null;netWeightPerBox:number|null};updateExisting:boolean;selected:boolean};
 
 export function ProductWorkbookImport({onClose,onSaved}:{onClose:()=>void;onSaved:()=>void}) {
@@ -11,12 +14,12 @@ export function ProductWorkbookImport({onClose,onSaved}:{onClose:()=>void;onSave
     if(!files?.length)return;
     setBusy(true);setMessage("");setRows([]);
     const body=new FormData();Array.from(files).forEach(file=>body.append("files",file));
-    try {const response=await fetch("/api/product-infos/workbooks/preview",{method:"POST",body});const result=await response.json();if(!response.ok)throw new Error(result.error||"解析失败");setRows((result.rows as Row[]).map(row=>({...row,selected:!row.existingId&&!row.warnings.length,updateExisting:false})));if(!result.rows.length)setMessage("未找到货物明细");}
+    try {const response=await fetch(apiPath("/api/product-infos/workbooks/preview"),{method:"POST",body});const result=await response.json();if(!response.ok)throw new Error(result.error||"解析失败");setRows((result.rows as Row[]).map(row=>({...row,selected:!row.existingId&&!row.warnings.length,updateExisting:false})));if(!result.rows.length)setMessage("未找到货物明细");}
     catch(error){setMessage(error instanceof Error?error.message:"解析失败");}
     finally{setBusy(false);if(input.current)input.current.value="";}
   }
   function change(index:number,values:Partial<Row>){setRows(current=>current.map((row,position)=>position===index?{...row,...values}:row));}
-  async function commit(){const selected=rows.filter(row=>row.selected);if(!selected.length){setMessage("请选择要写入的产品");return;}if(selected.some(row=>!row.productCode.trim()||!row.quantityPerBox||row.quantityPerBox<=0)){setMessage("选中行必须填写货号和每箱个数");return;}setBusy(true);setMessage("");try{const response=await fetch("/api/product-infos/workbooks/commit",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({rows:selected.map(({selected:_selected,...row})=>row)})});const result=await response.json();if(!response.ok)throw new Error(result.error||"保存失败");setMessage(`已新增 ${result.added} 条、更新 ${result.updated} 条、跳过 ${result.skipped} 条`);setRows([]);onSaved();}catch(error){setMessage(error instanceof Error?error.message:"保存失败");}finally{setBusy(false);}}
+  async function commit(){const selected=rows.filter(row=>row.selected);if(!selected.length){setMessage("请选择要写入的产品");return;}if(selected.some(row=>!row.productCode.trim()||!row.quantityPerBox||row.quantityPerBox<=0)){setMessage("选中行必须填写货号和每箱个数");return;}setBusy(true);setMessage("");try{const response=await fetch(apiPath("/api/product-infos/workbooks/commit"),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({rows:selected.map(({selected:_selected,...row})=>row)})});const result=await response.json();if(!response.ok)throw new Error(result.error||"保存失败");setMessage(`已新增 ${result.added} 条、更新 ${result.updated} 条、跳过 ${result.skipped} 条`);setRows([]);onSaved();}catch(error){setMessage(error instanceof Error?error.message:"保存失败");}finally{setBusy(false);}}
   const selectedCount=rows.filter(row=>row.selected).length;
   return <div className="mapping-modal-backdrop" onMouseDown={onClose}><div className="product-workbook-modal" onMouseDown={event=>event.stopPropagation()}>
     <div className="product-workbook-head"><div><h2>从走柜表提取产品信息</h2><p>上传已生成的走柜表，核对后写入；备注不会导入。</p></div><button className="ghost-button" onClick={onClose}>关闭</button></div>

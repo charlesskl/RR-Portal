@@ -58,6 +58,9 @@ public static class DataMigrations
                 ALTER TABLE dict_supplier ADD COLUMN IF NOT EXISTS phone TEXT NOT NULL DEFAULT '';
                 ALTER TABLE dict_supplier ADD COLUMN IF NOT EXISTS email TEXT NOT NULL DEFAULT '';
                 ALTER TABLE dict_supplier ADD COLUMN IF NOT EXISTS contact TEXT NOT NULL DEFAULT '';
+                UPDATE dict_supplier
+                SET customs_company = COALESCE(NULLIF(trim(full_name), ''), trim(keyword))
+                WHERE trim(COALESCE(customs_company, '')) = '';
                 """;
             await ensureSupplierProfiles.ExecuteNonQueryAsync();
         }

@@ -2,7 +2,10 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import * as XLSX from 'xlsx-js-style'
 import JSZip from 'jszip'
+import { DOMParser } from '@xmldom/xmldom'
 import { buildCustomsWorkbook } from './customsExport'
+
+const SPREADSHEET_NS = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
 
 const templateBuffer = Uint8Array.from(readFileSync(new URL('../../public/template-customs.xlsx', import.meta.url))).buffer
 const rriTemplateBuffer = Uint8Array.from(readFileSync(new URL('../../public/template-customs-rri.xlsx', import.meta.url))).buffer
@@ -31,6 +34,32 @@ function tradeTerms(wb: XLSX.WorkBook, sheetNames: string[]) {
 
 function countCellValue(wb: XLSX.WorkBook, sheetName: string, value: string) {
   return Object.values(wb.Sheets[sheetName] || {}).filter((cell: any) => cell?.v === value).length
+}
+
+function sheetHasValue(wb: XLSX.WorkBook, sheetName: string, value: string) {
+  return Object.values(wb.Sheets[sheetName] || {}).some((cell: any) => cell?.v === value)
+}
+
+function sheetContainsText(wb: XLSX.WorkBook, sheetName: string, value: string) {
+  return Object.values(wb.Sheets[sheetName] || {}).some((cell: any) => typeof cell?.v === 'string' && cell.v.includes(value))
+}
+
+function borderEdges(stylesXml: string, sheetXml: string, address: string) {
+  const stylesDoc = new DOMParser().parseFromString(stylesXml, 'application/xml')
+  const sheetDoc = new DOMParser().parseFromString(sheetXml, 'application/xml')
+  const cells = Array.from(sheetDoc.getElementsByTagNameNS(SPREADSHEET_NS, 'c')) as any[]
+  const cell = cells.find(candidate => candidate.getAttribute('r') === address)
+  if (!cell) return []
+  const xfs = Array.from(stylesDoc.getElementsByTagNameNS(SPREADSHEET_NS, 'cellXfs')[0]
+    .getElementsByTagNameNS(SPREADSHEET_NS, 'xf')) as any[]
+  const borders = Array.from(stylesDoc.getElementsByTagNameNS(SPREADSHEET_NS, 'borders')[0]
+    .getElementsByTagNameNS(SPREADSHEET_NS, 'border')) as any[]
+  const xf = xfs[Number(cell.getAttribute('s') || 0)]
+  const border = borders[Number(xf?.getAttribute('borderId') || 0)]
+  return ['top', 'bottom', 'left', 'right'].filter(edge => {
+    const side = border?.getElementsByTagNameNS(SPREADSHEET_NS, edge)[0]
+    return Boolean(side?.getAttribute('style'))
+  })
 }
 
 describe('supplier document export', () => {
@@ -71,6 +100,7 @@ describe('supplier document export', () => {
     ])
     const outputStyles = await outputZip.file('xl/styles.xml')!.async('string')
     const contractXml = await outputZip.file('xl/worksheets/sheet3.xml')!.async('string')
+    const packingXml = await outputZip.file('xl/worksheets/sheet7.xml')!.async('string')
     const templateContractXml = await templateZip.file('xl/worksheets/sheet3.xml')!.async('string')
     const styleCount = Number(outputStyles.match(/<(?:x:)?cellXfs\b[^>]*\bcount="(\d+)"/)?.[1] || 0)
     const maxContractStyle = Math.max(...Array.from(contractXml.matchAll(/<(?:x:)?c\b[^>]*\bs="(\d+)"/g), match => Number(match[1])))
@@ -82,6 +112,16 @@ describe('supplier document export', () => {
     const templateMergeCount = templateContractXml.match(/<x:mergeCell\b/g)?.length || 0
     expect(outputMergeCount).toBeGreaterThan(0)
     expect(outputMergeCount).toBeLessThan(templateMergeCount)
+    // 装箱单抬头、发货人/收货人及右侧资料栏必须形成完整外框；合并单元格
+    // 的右下角也要有实际单元格样式，Excel/WPS 才不会显示缺边。
+    expect(borderEdges(outputStyles, packingXml, 'A1')).toEqual(expect.arrayContaining(['top', 'left']))
+    expect(borderEdges(outputStyles, packingXml, 'K5')).toEqual(expect.arrayContaining(['bottom', 'right']))
+    expect(borderEdges(outputStyles, packingXml, 'A8')).toEqual(expect.arrayContaining(['top', 'left']))
+    expect(borderEdges(outputStyles, packingXml, 'C14')).toEqual(expect.arrayContaining(['bottom', 'right']))
+    expect(borderEdges(outputStyles, packingXml, 'C23')).toEqual(expect.arrayContaining(['bottom', 'right']))
+    expect(borderEdges(outputStyles, packingXml, 'D8')).toEqual(expect.arrayContaining(['top', 'left']))
+    expect(borderEdges(outputStyles, packingXml, 'G9')).toEqual(expect.arrayContaining(['bottom', 'right']))
+    expect(borderEdges(outputStyles, packingXml, 'K23')).toEqual(expect.arrayContaining(['bottom', 'right']))
   })
 
   it('uses FOB for Huashengyi contracts and their paired invoices', async () => {
@@ -128,14 +168,24 @@ describe('supplier document export', () => {
     expect(wb.Sheets['装箱单'].A9.v).toContain('ROYAL REGENT PRODUCTS INDUSTRIES LIMITED')
     expect(wb.Sheets['装箱单'].A9.v).not.toContain(firstSeller.nameEn)
 
-    expect(wb.Sheets['实业合同'].H50.v).toBe('C-SECOND')
-    expect(wb.Sheets['实业合同'].C56.v).toBe(secondSeller.full)
+    expect(sheetHasValue(wb, '实业合同', 'C-SECOND')).toBe(true)
+    expect(sheetHasValue(wb, '实业合同', secondSeller.full)).toBe(true)
     expect(Object.values(wb.Sheets['实业合同']).some((cell: any) => cell?.v === 'CIF IDSRG,Semarang')).toBe(true)
-    expect(wb.Sheets['实业发票'].B65.v).toBe(secondSeller.full)
-    expect(wb.Sheets['装箱单'].A45.v).toContain('ROYAL REGENT PRODUCTS INDUSTRIES LIMITED')
-    expect(wb.Sheets['装箱单'].A45.v).not.toContain(secondSeller.nameEn)
+    expect(sheetHasValue(wb, '实业发票', secondSeller.full)).toBe(true)
+    expect(sheetContainsText(wb, '装箱单', 'ROYAL REGENT PRODUCTS INDUSTRIES LIMITED')).toBe(true)
+    expect(sheetContainsText(wb, '装箱单', secondSeller.nameEn)).toBe(false)
     expect(wb.SheetNames).toContain('ONE-WORKBOOK')
     expect(countCellValue(wb, '实业合同', '购销合同\nPurchase Contract')).toBe(2)
+    expect(wb.Sheets['实业合同'].G34.f).toBe('SUM(G24:G33)')
+    expect(wb.Sheets['实业合同'].G81.f).toBe('SUM(G71:G80)')
+    expect(wb.Sheets['实业发票'].B28.f).toBe("'ONE-WORKBOOK'!D4")
+    expect(wb.Sheets['实业发票'].A29?.v).toBeUndefined()
+    expect(wb.Sheets['实业发票'].I38.f).toBe('SUM(J28:J37)')
+    expect(wb.Sheets['装箱单'].D35.f).toBe('SUM(D25:D34)')
+
+    const outputZip = await JSZip.loadAsync(await file.arrayBuffer())
+    const invoiceXml = await outputZip.file('xl/worksheets/sheet4.xml')!.async('string')
+    expect(invoiceXml).not.toMatch(/<x:(?:c|f|v)\b/)
   })
 
   it('keeps Royal Regent World as the shipper on every RRM packing list', async () => {
@@ -156,10 +206,14 @@ describe('supplier document export', () => {
     expect(wb.Sheets['装箱单'].A9.v).toContain('Royal Regent (World) Co. Limited')
     expect(wb.Sheets['装箱单'].A9.v).not.toContain(seller.nameEn)
     expect(wb.Sheets['装箱单'].A13.v).toContain('chloe@royalregenthk.com')
-    expect(wb.Sheets['装箱单'].A41.v).toBe('Royal Regent (World) Co. Limited')
-    expect(wb.Sheets['装箱单'].A49.v).toContain('Royal Regent (World) Co. Limited')
-    expect(wb.Sheets['装箱单'].A49.v).not.toContain(secondSeller.nameEn)
-    expect(wb.Sheets['装箱单'].A53.v).toContain('chloe@royalregenthk.com')
+    expect(Object.values(wb.Sheets['装箱单']).filter((cell: any) => cell?.v === 'Royal Regent (World) Co. Limited').length).toBeGreaterThanOrEqual(2)
+    expect(sheetContainsText(wb, '装箱单', secondSeller.nameEn)).toBe(false)
+    expect(Object.values(wb.Sheets['装箱单']).filter((cell: any) => typeof cell?.v === 'string' && cell.v.includes('chloe@royalregenthk.com')).length).toBeGreaterThanOrEqual(2)
+    expect(wb.Sheets['全球合同'].G34.f).toBe('SUM(G24:G33)')
+    expect(wb.Sheets['全球合同'].G81.f).toBe('SUM(G71:G80)')
+    expect(wb.Sheets['全球发票'].I42.f).toBe('SUM(J32:J41)')
+    expect(wb.Sheets['装箱单'].D34.f).toBe('SUM(D24:D33)')
+    expect(wb.Sheets['装箱单'].D70.f).toBe('SUM(D60:D69)')
   })
 
   it('uses Indonesia documents and the actual supplier when the BL header is neither RRI nor RRM', async () => {
@@ -192,16 +246,57 @@ describe('supplier document export', () => {
     expect(wb.SheetNames).not.toContain('全球合同')
     expect(wb.SheetNames).not.toContain('全球发票')
     expect(wb.Sheets['印尼合同'].H7.v).toBe('ID-C-1')
-    expect(XLSX.utils.decode_range(wb.Sheets['印尼合同']['!ref']!).e.r).toBeLessThan(46)
+    expect(XLSX.utils.decode_range(wb.Sheets['印尼合同']['!ref']!).e.r).toBeLessThan(49)
     expect(wb.Sheets['印尼合同'].C13.v).toBe(secondSeller.full)
     expect(wb.Sheets['印尼合同'].F25.v).toBe('CIF IDSRG,Semarang')
+    expect(wb.Sheets['印尼合同'].G36.f).toBe('SUM(G26:G35)')
     expect(wb.Sheets['印尼发票'].J10.v).toBe('ID-I-1')
-    expect(XLSX.utils.decode_range(wb.Sheets['印尼发票']['!ref']!).e.r).toBeLessThan(39)
+    expect(XLSX.utils.decode_range(wb.Sheets['印尼发票']['!ref']!).e.r).toBeLessThan(44)
     expect(wb.Sheets['印尼发票'].B10.v).toContain(secondSeller.nameEn)
     expect(wb.Sheets['印尼发票'].I23.v).toBe('CIF IDSRG,Semarang')
-    expect(wb.Sheets['装箱单'].A1.v).toBe(secondSeller.nameEn)
+    expect(wb.Sheets['印尼发票'].I34.f).toBe('SUM(J24:J33)')
+    expect(wb.Sheets['装箱单'].A1.v).toBe('PT. ROYAL REGENT INDONESIA')
     expect(wb.Sheets['装箱单'].A9.v).toContain(secondSeller.nameEn)
-    expect(wb.Sheets['装箱单'].A13.v).toContain(secondSeller.email)
+    expect(wb.Sheets['装箱单'].A12.v).toContain(secondSeller.email)
+  })
+
+  it('uses the Indonesia packing-list header with the actual supplier as shipper inside an RRI workbook', async () => {
+    const firstSeller = { ...huashengyiSeller, id: 101 }
+    const items = [
+      {
+        material_id: 1, supplier: firstSeller.keyword, customs_company: '深圳市华胜益出口贸易有限公司',
+        bl_head: 'RRI', qty: 1, contract_no: 'RRI-C-1', invoice_no: 'RRI-I-1',
+      },
+      {
+        material_id: 2, supplier: secondSeller.keyword, customs_company: '其他报关公司',
+        bl_head: '东莞市雅洛轩进出口贸易有限公司', qty: 1,
+        contract_no: 'ID-C-1', invoice_no: 'ID-I-1',
+      },
+    ]
+    const file = await buildCustomsWorkbook({
+      templateBuffer: rriTemplateBuffer, indonesiaTemplateBuffer: templateBuffer,
+      items,
+      materials: new Map(items.map(item => [item.material_id, {
+        id: item.material_id, supplier: item.supplier, customs_company: item.customs_company,
+        name_zh: `测试物料${item.material_id}`,
+      }])),
+      supplierProfiles: [firstSeller, secondSeller],
+      productHs: new Map(), images: new Map(),
+      form: { customer: 'RRI', containerNo: 'RRI-INDO-PACKING' },
+    })
+    const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' })
+
+    expect(wb.SheetNames).toContain('印尼合同')
+    expect(wb.SheetNames).toContain('印尼发票')
+    expect(wb.SheetNames).not.toContain('出货地址')
+    expect(wb.Sheets['印尼合同'].H6.v).toBe('ID-C-1')
+    expect(wb.Sheets['印尼发票'].J10.v).toBe('ID-I-1')
+    expect(wb.Sheets['印尼发票'].C35).toMatchObject({ f: 'I34', v: 0 })
+    expect(Object.values(wb.Sheets['印尼发票']).some((cell: any) => cell?.v === 4558.43)).toBe(false)
+    expect(countCellValue(wb, '装箱单', 'PT. ROYAL REGENT INDONESIA')).toBeGreaterThanOrEqual(2)
+    expect(sheetContainsText(wb, '装箱单', secondSeller.nameEn)).toBe(true)
+    expect(sheetContainsText(wb, '装箱单', secondSeller.email)).toBe(true)
+    expect(wb.Sheets['装箱单'].A1.v).toBe('ROYAL REGENT PRODUCTS INDUSTRIES LIMITED')
   })
 
   it('exports a main-only combined summary without seller templates', async () => {
@@ -265,6 +360,31 @@ describe('supplier document export', () => {
     expect(wb.Sheets['全球合同'].G36.f).toBe('SUM(G24:G35)')
     expect(wb.Sheets['全球发票'].I44.f).toBe('SUM(J32:J43)')
     expect(wb.Sheets['装箱单'].D36.f).toBe('SUM(D24:D35)')
+  })
+
+  it('expands modern RRI contract, invoice and packing tables beyond ten rows', async () => {
+    const items = Array.from({ length: 12 }, (_, index) => ({
+      material_id: index + 1,
+      supplier: seller.keyword,
+      qty: index + 1,
+      contract_no: 'RRI-LONG-C-1',
+      invoice_no: 'RRI-LONG-I-1',
+    }))
+    const materials = new Map(items.map(item => [item.material_id, {
+      id: item.material_id,
+      supplier: seller.keyword,
+      name_zh: `测试物料${item.material_id}`,
+      material_code: `RRI-M-${item.material_id}`,
+    }]))
+    const file = await buildCustomsWorkbook({
+      templateBuffer: rriTemplateBuffer, seller, items, materials,
+      productHs: new Map(), images: new Map(), form: { customer: 'RRI', containerNo: 'RRI-LONG-TEST' },
+    })
+    const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' })
+    expect(wb.Sheets['实业合同'].B35.f).toBe("'RRI-LONG-TEST'!D15")
+    expect(wb.Sheets['实业合同'].G36.f).toBe('SUM(G24:G35)')
+    expect(wb.Sheets['实业发票'].I40.f).toBe('SUM(J28:J39)')
+    expect(wb.Sheets['装箱单'].D37.f).toBe('SUM(D25:D36)')
   })
 
   it('shows exactly the distinct contracts and their actual invoices', async () => {

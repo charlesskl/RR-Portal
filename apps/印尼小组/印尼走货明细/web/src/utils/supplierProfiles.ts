@@ -7,6 +7,46 @@ function isHuashengyi(name: string): boolean {
   return key === '华胜益' || key === HUASHENGYI_FULL_NAME.toLocaleLowerCase()
 }
 
+export function supplierProfileForName(name: string, profiles: SupplierDict[]): SupplierDict | undefined {
+  const key = name.trim().toLocaleLowerCase()
+  if (!key) return undefined
+  const exactKeyword = profiles.find(profile =>
+    profile.keyword?.trim().toLocaleLowerCase() === key
+    && profile.full?.trim().toLocaleLowerCase() !== key)
+  if (exactKeyword) return exactKeyword
+
+  // 兼容旧资料：历史同步曾把简称另建成 full=keyword 的重复行。
+  // 当“港正”这类简称只对应一个包含它的公司全称时，优先使用公司全称资料。
+  const containingFull = profiles.filter(profile => {
+    const full = profile.full?.trim().toLocaleLowerCase() || ''
+    return full !== key && full.includes(key)
+  })
+  if (containingFull.length === 1) return containingFull[0]
+
+  return profiles.find(profile => [profile.full, profile.keyword]
+    .some(candidate => candidate?.trim().toLocaleLowerCase() === key))
+}
+
+export function canonicalSupplierProfiles(profiles: SupplierDict[]): SupplierDict[] {
+  return profiles.filter(profile => {
+    const full = profile.full?.trim() || ''
+    const keyword = profile.keyword?.trim() || ''
+    if (!full || full !== keyword) return true
+    return supplierProfileForName(full, profiles) === profile
+  })
+}
+
+export function supplierCustomsCompany(profile: SupplierDict): string {
+  const customs = profile.customs?.trim()
+  if (isHuashengyi(customs || '')) return HUASHENGYI_FULL_NAME
+  return profile.full?.trim() || profile.keyword.trim()
+}
+
+export function linkedCustomsCompany(supplierName: string, profiles: SupplierDict[], fallback = ''): string {
+  const profile = supplierProfileForName(supplierName, profiles)
+  return profile ? supplierCustomsCompany(profile) : fallback.trim()
+}
+
 export function supplierForLine(name: string, profiles: SupplierDict[]): SupplierDict {
   const key = name.trim().toLocaleLowerCase()
   if (!key) throw new Error('走货明细有物料未填写供应商，请先补齐卖方')

@@ -4,12 +4,48 @@ import { fileURLToPath } from 'node:url'
 import { resolve } from 'node:path'
 import JSZip from 'jszip'
 import * as XLSX from 'xlsx-js-style'
+import { DOMParser } from '@xmldom/xmldom'
 import { describe, expect, it } from 'vitest'
 import { apiBase, publicAsset, publicBase } from './deployment'
 import { buildCustomsWorkbook, customsFormulaName, customsInvoicePrice, effectiveCustomsCompany } from './utils/customsExport'
 
 const projectRoot = fileURLToPath(new URL('..', import.meta.url))
 const excelSerial = (date: string) => Math.floor((new Date(date).getTime() - Date.UTC(1899, 11, 30)) / 86400000)
+
+async function cellBorderSides(bytes: ArrayBuffer, address: string, sheetPath = 'xl/worksheets/sheet2.xml') {
+  const zip = await JSZip.loadAsync(bytes)
+  const parser = new DOMParser()
+  const sheet = parser.parseFromString(await zip.file(sheetPath)!.async('string'), 'application/xml')
+  const styles = parser.parseFromString(await zip.file('xl/styles.xml')!.async('string'), 'application/xml')
+  const elements = (parent: any, localName: string) => Array.from(parent.getElementsByTagName('*'))
+    .filter(node => (node as any).localName === localName) as any[]
+  const children = (parent: any, localName: string) => Array.from(parent?.childNodes || [])
+    .filter(node => (node as any).localName === localName) as any[]
+  const cell = elements(sheet, 'c').find(node => node.getAttribute('r') === address)
+  const styleId = Number(cell?.getAttribute('s') || 0)
+  const xf = children(elements(styles, 'cellXfs')[0], 'xf')[styleId]
+  const borderId = Number(xf?.getAttribute('borderId') || 0)
+  const border = children(elements(styles, 'borders')[0], 'border')[borderId]
+  return ['left', 'right', 'top', 'bottom'].map(edge => {
+    const side = Array.from(border?.childNodes || []).find(node => (node as any).localName === edge) as any
+    return side?.getAttribute('style')
+  })
+}
+
+async function cellFillId(bytes: ArrayBuffer, address: string, sheetPath = 'xl/worksheets/sheet2.xml') {
+  const zip = await JSZip.loadAsync(bytes)
+  const parser = new DOMParser()
+  const sheet = parser.parseFromString(await zip.file(sheetPath)!.async('string'), 'application/xml')
+  const styles = parser.parseFromString(await zip.file('xl/styles.xml')!.async('string'), 'application/xml')
+  const elements = (parent: any, localName: string) => Array.from(parent.getElementsByTagName('*'))
+    .filter(node => (node as any).localName === localName) as any[]
+  const children = (parent: any, localName: string) => Array.from(parent?.childNodes || [])
+    .filter(node => (node as any).localName === localName) as any[]
+  const cell = elements(sheet, 'c').find(node => node.getAttribute('r') === address)
+  const styleId = Number(cell?.getAttribute('s') || 0)
+  const xf = children(elements(styles, 'cellXfs')[0], 'xf')[styleId]
+  return Number(xf?.getAttribute('fillId') || 0)
+}
 
 describe('deployment base paths', () => {
   it('uses product-type prefixes as formula names outside Huashengyi customs', () => {
@@ -97,9 +133,9 @@ describe('deployment base paths', () => {
     const output = await buildCustomsWorkbook({
       templateBuffer,
       items: [
-        { material_id: 7, qty: 12, price: 3.5, currency: 'US$', cartons: 2, qty_per_carton: '6', weighing_qty: 6, pallet: '1-2/1卡', po_no: 'PO-TEST', contract_date: '2026-09-01', invoice_date: '2026-09-02', customs_company: 'A 报关公司' },
-        { material_id: 8, qty: 20000, price: 0.1, cartons: 1, qty_per_carton: '20000', weighing_qty: 20, po_no: 'PO-ROPE', customs_company: 'B 报关公司' },
-        { material_id: 9, qty: 10000, price: 0.2, cartons: 3, qty_per_carton: '1-2/3000 3/4000', weighing_qty: 2500, po_no: 'PO-MIXED', customs_company: 'B 报关公司' },
+        { material_id: 7, qty: 12, price: 3.5, currency: 'US$', cartons: 2, qty_per_carton: '6', weighing_qty: 6, pallet: '1-2/1卡', po_no: 'PO-TEST', contract_no: 'RWCRRM2600206', contract_date: '2026-09-01', invoice_no: 'RW202600206', invoice_date: '2026-09-02', customs_company: 'A 报关公司' },
+        { material_id: 8, qty: 20000, price: 0.1, cartons: 1, qty_per_carton: '20000', weighing_qty: 20, po_no: 'PO-ROPE', contract_no: 'RWCRRM2600206', invoice_no: 'RW202600206', customs_company: 'B 报关公司' },
+        { material_id: 9, qty: 10000, price: 0.2, cartons: 3, qty_per_carton: '1-2/3000 3/4000', weighing_qty: 2500, po_no: 'PO-MIXED', contract_no: 'RWCRRM2600206', invoice_no: 'RW202600206', customs_company: 'B 报关公司' },
       ],
       materials: new Map([[7, {
         id: 7,
@@ -129,10 +165,11 @@ describe('deployment base paths', () => {
       }]]),
       productHs: new Map(),
       images: new Map(),
-      form: { customer: 'RRM', containerNo: 'TEST-CNTR', rate: 7.8 },
+      form: { customer: 'RRM', containerNo: 'TEST-CNTR', blNo: 'TEST-SEAL', rate: 7.8 },
     })
 
-    const workbook = XLSX.read(await output.arrayBuffer(), { type: 'array', cellFormula: true, cellStyles: true })
+    const outputBytes = await output.arrayBuffer()
+    const workbook = XLSX.read(outputBytes, { type: 'array', cellFormula: true, cellStyles: true })
     expect(workbook.SheetNames).toEqual([
       '类别金额', 'TEST-CNTR', '全球合同', '全球发票', '装箱单',
       '商品汇总表', '发票', '销售合同', '装箱单 (2)', '草稿大单-1', '司机资料', '单位对照',
@@ -178,6 +215,31 @@ describe('deployment base paths', () => {
     expect(sheet.Q8?.f).toBe('SUM(Q4:Q6)')
     expect(sheet.S8?.f).toBe('SUM(S4:S6)')
     expect(sheet.AT8?.f).toBe('SUM(AT4:AT6)')
+    for (const address of ['A4', 'B4', 'AB4', 'AQ4', 'B5', 'AB5', 'AQ5', 'BD6']) {
+      expect(await cellBorderSides(outputBytes, address)).toEqual(['thin', 'thin', 'thin', 'thin'])
+    }
+    for (const column of ['A', 'B', 'L', 'P', 'Q', 'S', 'AT', 'BD']) {
+      expect(await cellBorderSides(outputBytes, `${column}8`)).toEqual(['thin', 'thin', 'thin', 'thin'])
+      expect(await cellFillId(outputBytes, `${column}8`)).toBe(0)
+    }
+    for (const address of ['B22', 'H22', 'B23', 'H23', 'B24', 'H33', 'B34', 'H34']) {
+      expect(await cellBorderSides(outputBytes, address, 'xl/worksheets/sheet3.xml')).toEqual(['thin', 'thin', 'thin', 'thin'])
+    }
+    for (const address of ['B30', 'J30', 'B31', 'J31', 'B32', 'J41', 'B42', 'J42']) {
+      expect(await cellBorderSides(outputBytes, address, 'xl/worksheets/sheet4.xml')).toEqual(['thin', 'thin', 'thin', 'thin'])
+    }
+    for (const address of ['A23', 'K23', 'A24', 'K33', 'A34', 'K34']) {
+      expect(await cellBorderSides(outputBytes, address, 'xl/worksheets/sheet5.xml')).toEqual(['thin', 'thin', 'thin', 'thin'])
+    }
+    for (const column of ['D', 'H', 'I', 'J', 'K']) {
+      expect(await cellFillId(outputBytes, `${column}34`, 'xl/worksheets/sheet5.xml')).toBeGreaterThan(0)
+    }
+    expect(await cellFillId(outputBytes, 'A34', 'xl/worksheets/sheet5.xml')).toBe(0)
+    for (const column of ['E', 'H', 'I', 'J', 'K']) {
+      expect(await cellFillId(outputBytes, `${column}35`, 'xl/worksheets/sheet5.xml')).toBe(0)
+      expect(await cellBorderSides(outputBytes, `${column}35`, 'xl/worksheets/sheet5.xml')).toEqual([null, null, null, null])
+    }
+    expect(sheet.A7?.s?.border).toBeUndefined()
     expect(sheet.AB4?.f).toBe('SUM(AA4:AA4)')
     expect(sheet.AQ5?.f).toBe('SUM(AP5:AP6)')
     expect(sheet.AQ4?.z).toContain('"US$"#,##0.0000')
@@ -210,16 +272,24 @@ describe('deployment base paths', () => {
     expect(workbook.Sheets['全球合同'].B24?.f).toBe("'TEST-CNTR'!D4")
     expect(workbook.Sheets['全球合同'].C24?.f).toBe("'TEST-CNTR'!G4&'TEST-CNTR'!F4")
     expect(workbook.Sheets['全球合同'].G24?.f).toBe('F24*D24')
+    expect(workbook.Sheets['全球合同'].H5?.v).toBe('RWCRRM2600206')
     expect(workbook.Sheets['全球合同'].H9?.v).toBe(excelSerial('2026-09-01'))
-    expect(workbook.Sheets['全球合同'].B27?.v).toBe('')
+    expect(workbook.Sheets['全球合同'].B27?.v || '').toBe('')
     expect(workbook.Sheets['全球合同'].B27?.f).toBeUndefined()
     expect(workbook.Sheets['全球发票'].B32?.f).toBe("'TEST-CNTR'!D4")
     expect(workbook.Sheets['全球发票'].J32?.f).toBe('I32*G32')
+    expect(workbook.Sheets['全球发票'].J9?.v).toBe('RW202600206')
     expect(workbook.Sheets['全球发票'].J11?.v).toBe(excelSerial('2026-09-02'))
-    expect(workbook.Sheets['全球发票'].B35?.v).toBe('')
+    expect(workbook.Sheets['全球发票'].B35?.v || '').toBe('')
     expect(workbook.Sheets['全球发票'].B35?.f).toBeUndefined()
     expect(workbook.Sheets['装箱单'].B24?.f).toBe("'TEST-CNTR'!D4")
-    expect(workbook.Sheets['装箱单'].B27?.v).toBe('')
+    expect(workbook.Sheets['装箱单'].D9?.v).toBe('RW202600206')
+    expect(workbook.Sheets['装箱单'].D11?.v).toBe(excelSerial('2026-09-02'))
+    expect(workbook.Sheets['装箱单'].D13?.v).toBe('RWCRRM2600206')
+    expect(workbook.Sheets['装箱单'].D13?.f).toBeUndefined()
+    expect(workbook.Sheets['装箱单'].D17?.v).toBe('TEST-CNTR')
+    expect(workbook.Sheets['装箱单'].H17?.v).toBe('TEST-SEAL')
+    expect(workbook.Sheets['装箱单'].B27?.v || '').toBe('')
     expect(workbook.Sheets['装箱单'].B27?.f).toBeUndefined()
     for (const name of ['全球合同', '全球发票', '装箱单']) {
       expect(Object.values(workbook.Sheets[name]).some((cell: any) => cell?.f?.includes('LOOKUP('))).toBe(false)
@@ -246,7 +316,7 @@ describe('deployment base paths', () => {
     expect(workbook.Sheets['实业合同'].H5?.v).toBe('RRI-C001')
     expect(workbook.Sheets['实业合同'].B24?.f).toBe("'RRI-CNTR'!D4")
     expect(workbook.Sheets['实业发票'].J9?.v).toBe('RRI-I001')
-    expect(workbook.Sheets['实业发票'].B29?.f).toBe("'RRI-CNTR'!D4")
+    expect(workbook.Sheets['实业发票'].B28?.f).toBe("'RRI-CNTR'!D4")
     expect(workbook.Sheets['全球合同']).toBeUndefined()
     expect(workbook.Sheets['全球发票']).toBeUndefined()
   }, 20_000)

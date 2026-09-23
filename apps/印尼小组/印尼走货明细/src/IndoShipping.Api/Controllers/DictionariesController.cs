@@ -9,6 +9,7 @@ namespace IndoShipping.Api.Controllers;
 [Route("api/dictionaries")]
 public class DictionariesController(ISqlConnectionFactory factory) : ControllerBase
 {
+    private const string HuashengyiFullName = "深圳市华胜益出口贸易有限公司";
     public class HsItem  { public string? keyword { get; set; } public string? hsCN { get; set; } public string? hsID { get; set; } }
     public class SupItem
     {
@@ -63,7 +64,7 @@ public class DictionariesController(ISqlConnectionFactory factory) : ControllerB
     {
         using var c = factory.Create();
         var hs  = (await c.QueryAsync("SELECT keyword, hs_cn AS \"hsCN\", hs_id AS \"hsID\" FROM dict_hs ORDER BY priority, id")).ToList();
-        var sup = (await c.QueryAsync("SELECT id, keyword, full_name AS \"full\", customs_company AS customs, name_en AS \"nameEn\", address_zh AS \"addressZh\", address_en AS \"addressEn\", phone, email, contact FROM dict_supplier ORDER BY priority, id")).ToList();
+        var sup = (await c.QueryAsync("SELECT id, keyword, full_name AS \"full\", COALESCE(NULLIF(trim(customs_company), ''), full_name) AS customs, name_en AS \"nameEn\", address_zh AS \"addressZh\", address_en AS \"addressEn\", phone, email, contact FROM dict_supplier ORDER BY priority, id")).ToList();
         var translations = (await c.QueryAsync(@"
             SELECT keyword, english_name AS english, active, source
             FROM dict_translation ORDER BY active DESC, priority, id")).ToList();
@@ -74,11 +75,14 @@ public class DictionariesController(ISqlConnectionFactory factory) : ControllerB
     public async Task<IActionResult> UpdateSupplierProfile(int id, [FromBody] SupItem profile)
     {
         using var c = factory.Create();
+        var full = (profile.full ?? "").Trim();
+        if (full.Length == 0) return BadRequest(new { error = "公司中文名称不能为空" });
+        var customs = NormalizeCustomsCompany(profile.customs, full);
         var updated = await c.ExecuteAsync(@"
             UPDATE dict_supplier SET full_name=@full, name_en=@nameEn,
                 address_zh=@addressZh, address_en=@addressEn, phone=@phone,
-                email=@email, contact=@contact WHERE id=@id",
-            new { id, full = (profile.full ?? "").Trim(), nameEn = (profile.nameEn ?? "").Trim(),
+                email=@email, contact=@contact, customs_company=@customs WHERE id=@id",
+            new { id, full, customs, nameEn = (profile.nameEn ?? "").Trim(),
                 addressZh = (profile.addressZh ?? "").Trim(), addressEn = (profile.addressEn ?? "").Trim(),
                 phone = (profile.phone ?? "").Trim(), email = (profile.email ?? "").Trim(),
                 contact = (profile.contact ?? "").Trim() });
@@ -88,21 +92,23 @@ public class DictionariesController(ISqlConnectionFactory factory) : ControllerB
     [HttpPost("suppliers")]
     public async Task<IActionResult> CreateSupplier([FromBody] SupItem item)
     {
-        var keyword = (item.keyword ?? "").Trim();
         var full = (item.full ?? "").Trim();
-        if (keyword.Length == 0 || full.Length == 0)
-            return BadRequest(new { error = "供应商简称和公司中文名称不能为空" });
+        if (full.Length == 0)
+            return BadRequest(new { error = "公司中文名称不能为空" });
+        var keyword = (item.keyword ?? "").Trim();
+        if (keyword.Length == 0) keyword = full;
+        var customs = NormalizeCustomsCompany(item.customs, full);
         using var c = factory.Create();
         c.Open();
         using var tx = c.BeginTransaction();
         if (await SupplierNameExists(c, tx, keyword, full))
             return Conflict(new { error = "供应商简称或公司中文名称已存在" });
         var id = await c.ExecuteScalarAsync<int>(@"
-            INSERT INTO dict_supplier(keyword, full_name, name_en, address_zh,
+            INSERT INTO dict_supplier(keyword, full_name, customs_company, name_en, address_zh,
                 address_en, phone, email, contact, priority)
-            VALUES (@keyword, @full, @nameEn, @addressZh, @addressEn, @phone, @email,
+            VALUES (@keyword, @full, @customs, @nameEn, @addressZh, @addressEn, @phone, @email,
                 @contact, (SELECT COALESCE(MAX(priority), 0) + 10 FROM dict_supplier)) RETURNING id",
-            SupplierValues(item, keyword, full), tx);
+            SupplierValues(item, keyword, full, customs), tx);
         tx.Commit();
         return Ok(new { ok = true, id });
     }
@@ -110,25 +116,46 @@ public class DictionariesController(ISqlConnectionFactory factory) : ControllerB
     [HttpPut("suppliers/{id:int}")]
     public async Task<IActionResult> UpdateSupplier(int id, [FromBody] SupItem item)
     {
-        var keyword = (item.keyword ?? "").Trim();
         var full = (item.full ?? "").Trim();
-        if (keyword.Length == 0 || full.Length == 0)
-            return BadRequest(new { error = "供应商简称和公司中文名称不能为空" });
+        if (full.Length == 0)
+            return BadRequest(new { error = "公司中文名称不能为空" });
+        var keyword = (item.keyword ?? "").Trim();
+        if (keyword.Length == 0) keyword = full;
+        var customs = NormalizeCustomsCompany(item.customs, full);
         using var c = factory.Create();
         c.Open();
         using var tx = c.BeginTransaction();
+        var saved = await c.QuerySingleOrDefaultAsync<SupItem>(@"
+            SELECT keyword, full_name AS full, customs_company AS customs
+            FROM dict_supplier WHERE id=@id", new { id }, tx);
+        if (saved is null) return NotFound();
         if (await SupplierNameExists(c, tx, keyword, full, id))
             return Conflict(new { error = "供应商简称或公司中文名称已存在" });
         var updated = await c.ExecuteAsync(@"
             UPDATE dict_supplier SET keyword=@keyword, full_name=@full,
                 name_en=@nameEn, address_zh=@addressZh, address_en=@addressEn, phone=@phone,
-                email=@email, contact=@contact WHERE id=@id",
-            new { id, keyword, full,
+                email=@email, contact=@contact, customs_company=@customs WHERE id=@id",
+            new { id, keyword, full, customs,
                 nameEn = (item.nameEn ?? "").Trim(), addressZh = (item.addressZh ?? "").Trim(),
                 addressEn = (item.addressEn ?? "").Trim(), phone = (item.phone ?? "").Trim(),
                 email = (item.email ?? "").Trim(), contact = (item.contact ?? "").Trim() }, tx);
+        await c.ExecuteAsync(@"
+            UPDATE materials SET customs_company=@customs
+            WHERE lower(trim(COALESCE(supplier, ''))) IN
+                (lower(@oldKeyword), lower(@oldFull), lower(@keyword), lower(@full));
+            UPDATE shipment_items SET customs_company=@customs
+            WHERE lower(trim(COALESCE(supplier, ''))) IN
+                (lower(@oldKeyword), lower(@oldFull), lower(@keyword), lower(@full));",
+            new
+            {
+                customs,
+                oldKeyword = (saved.keyword ?? "").Trim(),
+                oldFull = (saved.full ?? "").Trim(),
+                keyword,
+                full,
+            }, tx);
         tx.Commit();
-        return updated == 0 ? NotFound() : Ok(new { ok = true });
+        return Ok(new { ok = updated > 0 });
     }
 
     [HttpDelete("suppliers/{id:int}")]
@@ -149,9 +176,18 @@ public class DictionariesController(ISqlConnectionFactory factory) : ControllerB
         return Ok(new { ok = true });
     }
 
-    private static object SupplierValues(SupItem item, string keyword, string full) => new
+    private static string NormalizeCustomsCompany(string? customs, string full)
     {
-        keyword, full, nameEn = (item.nameEn ?? "").Trim(),
+        var value = (customs ?? "").Trim();
+        return string.Equals(value, HuashengyiFullName, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(value, "华胜益", StringComparison.OrdinalIgnoreCase)
+            ? HuashengyiFullName
+            : full;
+    }
+
+    private static object SupplierValues(SupItem item, string keyword, string full, string customs) => new
+    {
+        keyword, full, customs, nameEn = (item.nameEn ?? "").Trim(),
         addressZh = (item.addressZh ?? "").Trim(), addressEn = (item.addressEn ?? "").Trim(),
         phone = (item.phone ?? "").Trim(), email = (item.email ?? "").Trim(),
         contact = (item.contact ?? "").Trim(),
@@ -189,7 +225,7 @@ public class DictionariesController(ISqlConnectionFactory factory) : ControllerB
     // 货号库保存时同步供应商汇总：
     // - 新供应商直接加入；
     // - 已有供应商的全称不静默覆盖，第一次请求只返回差异，前端确认后再更新。
-    // 报关公司属于物料/走货资料，不与供应商档案建立一对一关联。
+    // 报关公司由供应商汇总维护；新供应商同步时一并建立默认关联。
     [HttpPost("suppliers/sync")]
     public async Task<IActionResult> SyncSuppliers([FromBody] SupplierSyncBody body)
     {
@@ -198,7 +234,9 @@ public class DictionariesController(ISqlConnectionFactory factory) : ControllerB
             .Select(x => new
             {
                 supplier = (x.supplier ?? "").Trim(),
+                customs = (x.customs ?? "").Trim(),
                 previousSupplier = (x.previousSupplier ?? "").Trim(),
+                previousCustoms = (x.previousCustoms ?? "").Trim(),
             })
             .Where(x => x.supplier.Length > 0)
             .GroupBy(x => $"{x.previousSupplier.ToUpperInvariant()}|{x.supplier.ToUpperInvariant()}")
@@ -240,9 +278,14 @@ public class DictionariesController(ISqlConnectionFactory factory) : ControllerB
                 {
                     var nextPriority = await c.ExecuteScalarAsync<int>("SELECT COALESCE(MAX(priority), 0) + 10 FROM dict_supplier", transaction: tx);
                     added += await c.ExecuteAsync(@"
-                        INSERT INTO dict_supplier(keyword, full_name, priority)
-                        VALUES (@supplier, @supplier, @priority)",
-                        new { entry.supplier, priority = nextPriority }, tx);
+                        INSERT INTO dict_supplier(keyword, full_name, customs_company, priority)
+                        VALUES (@supplier, @supplier, @customs, @priority)",
+                        new
+                        {
+                            entry.supplier,
+                            customs = NormalizeCustomsCompany(entry.customs, entry.supplier),
+                            priority = nextPriority,
+                        }, tx);
                     continue;
                 }
 

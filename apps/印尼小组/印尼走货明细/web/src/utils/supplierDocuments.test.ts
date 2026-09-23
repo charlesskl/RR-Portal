@@ -44,6 +44,11 @@ function sheetContainsText(wb: XLSX.WorkBook, sheetName: string, value: string) 
   return Object.values(wb.Sheets[sheetName] || {}).some((cell: any) => typeof cell?.v === 'string' && cell.v.includes(value))
 }
 
+function countCellsContaining(wb: XLSX.WorkBook, sheetName: string, value: string) {
+  return Object.values(wb.Sheets[sheetName] || {})
+    .filter((cell: any) => typeof cell?.v === 'string' && cell.v.includes(value)).length
+}
+
 function borderEdges(stylesXml: string, sheetXml: string, address: string) {
   const stylesDoc = new DOMParser().parseFromString(stylesXml, 'application/xml')
   const sheetDoc = new DOMParser().parseFromString(sheetXml, 'application/xml')
@@ -137,6 +142,13 @@ describe('supplier document export', () => {
     expect(new Set(terms)).toEqual(new Set(['FOB IDSRG,Semarang']))
     expect(wb.Sheets['全球合同'].F23.v).toBe('FOB IDSRG,Semarang')
     expect(wb.Sheets['全球发票'].I31.v).toBe('FOB IDSRG,Semarang')
+    expect(sheetContainsText(wb, '全球发票', '15668277360001(USD)')).toBe(true)
+    expect(sheetContainsText(wb, '全球发票', '15353466270052 (RMB)')).toBe(true)
+    expect(sheetContainsText(wb, '全球发票', '15602776290037 (HKD)')).toBe(true)
+    expect(sheetContainsText(wb, '全球发票', 'Ping An Bank Co., Ltd')).toBe(true)
+    expect(sheetContainsText(wb, '全球发票', 'SZDBCNBSXXX')).toBe(true)
+    expect(sheetContainsText(wb, '全球发票', 'SHENZHEN  HUASHENGYI  EXPORT  TRADING  LIMITED')).toBe(true)
+    expect(sheetContainsText(wb, '全球发票', 'Room 602, Longsheng Comprehensive Service Building')).toBe(true)
   })
 
   it('keeps different sellers in one workbook and lays their documents out in order', async () => {
@@ -165,6 +177,9 @@ describe('supplier document export', () => {
     expect(wb.Sheets['实业合同'].C11.v).toBe(firstSeller.full)
     expect(wb.Sheets['实业合同'].F23.v).toBe('FOB IDSRG,Semarang')
     expect(wb.Sheets['实业发票'].B21.v).toBe(firstSeller.full)
+    expect(countCellsContaining(wb, '实业发票', '15668277360001(USD)')).toBe(1)
+    expect(countCellsContaining(wb, '实业发票', 'SHENZHEN  HUASHENGYI  EXPORT  TRADING  LIMITED')).toBe(1)
+    expect(countCellsContaining(wb, '实业发票', 'Room 602, Longsheng Comprehensive Service Building')).toBe(1)
     expect(wb.Sheets['装箱单'].A9.v).toContain('ROYAL REGENT PRODUCTS INDUSTRIES LIMITED')
     expect(wb.Sheets['装箱单'].A9.v).not.toContain(firstSeller.nameEn)
 

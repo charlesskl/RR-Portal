@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   formatShipmentPackingLines, isPaperRope, parseShipmentPacking, shipmentCartonCount,
-  shipmentGrossPerPc, shipmentKgWeight, shipmentWeightQuantity,
+  shipmentCbmPerCarton, shipmentGrossPerPc, shipmentKgWeight, shipmentWeightQuantity,
 } from './shipmentWeight'
 
 describe('每箱数量分段写法', () => {
@@ -21,6 +21,21 @@ describe('每箱数量分段写法', () => {
   it('拒绝重叠箱号和非法格式', () => {
     expect(parseShipmentPacking('1-2/3000 2-3/4000').mode).toBe('invalid')
     expect(parseShipmentPacking('1-2:3000').mode).toBe('invalid')
+  })
+})
+
+describe('立方数/每箱', () => {
+  it('使用与导出表一致的长宽高换算公式', () => {
+    expect(shipmentCbmPerCarton(60, 50, 34)).toBeCloseTo(60 * 50 * 34 / 28316.75 * 0.0283)
+  })
+
+  it.each([
+    [0, 50, 34],
+    ['', 50, 34],
+    [60, undefined, 34],
+    [60, 50, -1],
+  ])('任一尺寸无效时返回 0：%s × %s × %s', (length, width, height) => {
+    expect(shipmentCbmPerCarton(length, width, height)).toBe(0)
   })
 })
 

@@ -47,6 +47,23 @@ async function cellFillId(bytes: ArrayBuffer, address: string, sheetPath = 'xl/w
   return Number(xf?.getAttribute('fillId') || 0)
 }
 
+async function cellFontSize(bytes: ArrayBuffer, address: string, sheetPath = 'xl/worksheets/sheet2.xml') {
+  const zip = await JSZip.loadAsync(bytes)
+  const parser = new DOMParser()
+  const sheet = parser.parseFromString(await zip.file(sheetPath)!.async('string'), 'application/xml')
+  const styles = parser.parseFromString(await zip.file('xl/styles.xml')!.async('string'), 'application/xml')
+  const elements = (parent: any, localName: string) => Array.from(parent.getElementsByTagName('*'))
+    .filter(node => (node as any).localName === localName) as any[]
+  const children = (parent: any, localName: string) => Array.from(parent?.childNodes || [])
+    .filter(node => (node as any).localName === localName) as any[]
+  const cell = elements(sheet, 'c').find(node => node.getAttribute('r') === address)
+  const styleId = Number(cell?.getAttribute('s') || 0)
+  const xf = children(elements(styles, 'cellXfs')[0], 'xf')[styleId]
+  const fontId = Number(xf?.getAttribute('fontId') || 0)
+  const font = children(elements(styles, 'fonts')[0], 'font')[fontId]
+  return Number(children(font, 'sz')[0]?.getAttribute('val') || 0)
+}
+
 describe('deployment base paths', () => {
   it('uses product-type prefixes as formula names outside Huashengyi customs', () => {
     expect(customsFormulaName({ formula_name: '五金配件-钉' }, undefined, '其他报关公司')).toBe('五金配件')
@@ -73,8 +90,8 @@ describe('deployment base paths', () => {
     const output = await buildCustomsWorkbook({
       templateBuffer: Uint8Array.from(templateBytes).buffer,
       items: [
-        { material_id: 1, kg: 13.312, qty: 1, cartons: 1, price: 0.04, currency: 'US$', customs_company: '' },
-        { material_id: 2, kg: 0.174, qty: 1, cartons: 1, price: 0.45, currency: 'US$', customs_company: '' },
+        { material_id: 1, kg: 13.312, qty: 1, cartons: 1, price: 0.04, currency: 'US$', supplier: 'Same Supplier', customs_company: '' },
+        { material_id: 2, kg: 0.174, qty: 1, cartons: 1, price: 0.45, currency: 'US$', supplier: 'Same Supplier', customs_company: '' },
       ],
       materials: new Map([
         [1, { id: 1, product_code: '46720J', name_zh: 'PWB螺丝', customs_company: '' }],
@@ -89,6 +106,14 @@ describe('deployment base paths', () => {
     expect(sheet.AR4?.v).toBe('深圳市华胜益出口贸易有限公司')
     expect(sheet.Z4).toMatchObject({ f: 'AO4*1.05/7.2', v: (0.04 * 1.05) / 7.2 })
     expect(sheet.Z5).toMatchObject({ f: 'IFERROR((AO5*1.05+1248/K5)/7.2,AO5*1.05/7.2)', v: (0.45 * 1.05 + 1248 / 0.174) / 7.2 })
+    expect(sheet.AB4?.f).toBe('SUM(AA4:AA5)')
+    expect(sheet.AB5?.f).toBeUndefined()
+    expect(sheet.AB5?.v || '').toBe('')
+    expect(sheet.AQ4?.f).toBe('SUM(AP4:AP5)')
+    expect(sheet.AQ5?.f).toBeUndefined()
+    expect(sheet.AQ5?.v || '').toBe('')
+    expect(sheet['!merges'] || []).toContainEqual({ s: { r: 3, c: 27 }, e: { r: 4, c: 27 } })
+    expect(sheet['!merges'] || []).toContainEqual({ s: { r: 3, c: 42 }, e: { r: 4, c: 42 } })
   })
 
   it('uses the Vite public base for browser routes', () => {
@@ -133,9 +158,9 @@ describe('deployment base paths', () => {
     const output = await buildCustomsWorkbook({
       templateBuffer,
       items: [
-        { material_id: 7, qty: 12, price: 3.5, currency: 'US$', cartons: 2, qty_per_carton: '6', weighing_qty: 6, pallet: '1-2/1卡', po_no: 'PO-TEST', contract_no: 'RWCRRM2600206', contract_date: '2026-09-01', invoice_no: 'RW202600206', invoice_date: '2026-09-02', customs_company: 'A 报关公司' },
-        { material_id: 8, qty: 20000, price: 0.1, cartons: 1, qty_per_carton: '20000', weighing_qty: 20, po_no: 'PO-ROPE', contract_no: 'RWCRRM2600206', invoice_no: 'RW202600206', customs_company: 'B 报关公司' },
-        { material_id: 9, qty: 10000, price: 0.2, cartons: 3, qty_per_carton: '1-2/3000 3/4000', weighing_qty: 2500, po_no: 'PO-MIXED', contract_no: 'RWCRRM2600206', invoice_no: 'RW202600206', customs_company: 'B 报关公司' },
+        { material_id: 7, qty: 12, price: 3.5, currency: 'US$', cartons: 2, qty_per_carton: '6', weighing_qty: 6, pallet: '1-2/1卡', po_no: 'PO-TEST', supplier: 'Shared Supplier', contract_no: 'RWCRRM2600206', contract_date: '2026-09-01', invoice_no: 'RW202600206', invoice_date: '2026-09-02', customs_company: 'A 报关公司' },
+        { material_id: 8, qty: 20000, price: 0.1, cartons: 1, qty_per_carton: '20000', weighing_qty: 20, po_no: 'PO-ROPE', supplier: 'Other Supplier', contract_no: 'RWCRRM2600206', invoice_no: 'RW202600206', customs_company: 'B 报关公司' },
+        { material_id: 9, qty: 10000, price: 0.2, cartons: 3, qty_per_carton: '1-2/3000 3/4000', weighing_qty: 2500, po_no: 'PO-MIXED', supplier: 'Shared Supplier', contract_no: 'RWCRRM2600206', invoice_no: 'RW202600206', customs_company: 'B 报关公司' },
       ],
       materials: new Map([[7, {
         id: 7,
@@ -164,7 +189,10 @@ describe('deployment base paths', () => {
         net_per_pc: 0.002,
       }]]),
       productHs: new Map(),
-      images: new Map(),
+      images: new Map([[7, {
+        bytes: Uint8Array.from(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Zf8AAAAAASUVORK5CYII=', 'base64')),
+        ext: 'png',
+      }]]),
       form: { customer: 'RRM', containerNo: 'TEST-CNTR', blNo: 'TEST-SEAL', rate: 7.8 },
     })
 
@@ -186,7 +214,7 @@ describe('deployment base paths', () => {
     expect(sheet.AP4).toMatchObject({ f: 'AO4*K4' })
     expect(sheet.P4).toMatchObject({ f: 'ROUND(BA4*L4,2)' })
     expect(sheet.Q4).toMatchObject({ f: 'ROUND(BB4*L4,2)' })
-    expect(sheet.R4).toMatchObject({ f: 'AU4*AV4*AW4/1000000' })
+    expect(sheet.R4).toMatchObject({ f: 'AU4*AV4*AW4/28316.75*0.0283' })
     expect(['AU', 'AV', 'AW', 'AX', 'AY', 'AZ', 'BA', 'BB', 'BC', 'BD'].map(col => sheet[`${col}3`]?.v)).toEqual([
       '长\nLength', '宽\nWidth', '高\nHeight', '物料编码', '每箱数量',
       '每箱重量', '单个毛重', '单个净重', '卡板', '',
@@ -240,8 +268,15 @@ describe('deployment base paths', () => {
       expect(await cellBorderSides(outputBytes, `${column}35`, 'xl/worksheets/sheet5.xml')).toEqual([null, null, null, null])
     }
     expect(sheet.A7?.s?.border).toBeUndefined()
-    expect(sheet.AB4?.f).toBe('SUM(AA4:AA4)')
-    expect(sheet.AQ5?.f).toBe('SUM(AP5:AP6)')
+    expect(sheet.AB4?.f).toBe('SUM(AA4:AA6)')
+    expect(sheet.AB5?.f).toBeUndefined()
+    expect(sheet.AB5?.v || '').toBe('')
+    expect(sheet.AB6?.f).toBeUndefined()
+    expect(sheet.AB6?.v || '').toBe('')
+    expect(sheet.AQ4?.f).toBe('SUM(AP4,AP6)')
+    expect(sheet.AQ5?.f).toBe('SUM(AP5)')
+    expect(sheet.AQ6?.f).toBeUndefined()
+    expect(sheet.AQ6?.v || '').toBe('')
     expect(sheet.AQ4?.z).toContain('"US$"#,##0.0000')
     expect(sheet.AD4?.z).toBe(templateSheet.AD4?.z)
     expect(sheet.A5?.z).toBeDefined()
@@ -253,16 +288,34 @@ describe('deployment base paths', () => {
     expect(sheet.A4?.s?.fgColor?.rgb).toBe(templateSheet.A4?.s?.fgColor?.rgb)
     expect(sheet.A4?.s?.fgColor?.rgb).not.toBe(sheet.A5?.s?.fgColor?.rgb)
     expect(sheet.A5?.s?.fgColor?.rgb).toBe(sheet.A6?.s?.fgColor?.rgb)
+    expect(await cellFillId(outputBytes, 'BB4')).toBe(await cellFillId(outputBytes, 'A4'))
+    expect(await cellFillId(outputBytes, 'BB6')).toBe(await cellFillId(outputBytes, 'A6'))
     expect(sheet.E4?.s?.fgColor?.rgb).toBe(sheet.E3?.s?.fgColor?.rgb)
     expect(sheet.E4?.s?.fgColor?.rgb).not.toBe(sheet.A4?.s?.fgColor?.rgb)
     expect(sheet.P4?.z).toBe(templateSheet.P4?.z)
     expect(sheet['!cols']?.[0]?.width).toBeLessThan(templateSheet['!cols']?.[0]?.width || Infinity)
     expect(sheet['!cols']?.[19]?.width).toBeLessThan(templateSheet['!cols']?.[19]?.width || Infinity)
+    for (const column of [13, 14, 28, 29, 30, 31, 32, 33, 34, 35, 36]) {
+      expect(sheet['!cols']?.[column]?.hidden).toBe(true)
+    }
+    const archive = await JSZip.loadAsync(outputBytes)
+    const drawing = await archive.file('xl/drawings/drawing999.xml')?.async('string')
+    const mainSheetXml = await archive.file('xl/worksheets/sheet2.xml')?.async('string')
+    const mainRelsXml = await archive.file('xl/worksheets/_rels/sheet2.xml.rels')?.async('string')
+    expect(drawing).toContain('<xdr:col>19</xdr:col>')
+    expect(drawing).toContain('<xdr:row>3</xdr:row>')
+    expect(mainSheetXml).toContain('<drawing r:id="rIdGenDrawing999"/>')
+    expect(mainRelsXml).toContain('Target="../drawings/drawing999.xml"')
+    expect(archive.file('xl/media/image100.png')).toBeTruthy()
+    expect(await cellFontSize(outputBytes, 'AR4')).toBe(16)
+    expect(await cellFontSize(outputBytes, 'AR5')).toBe(16)
+    expect(await cellFontSize(outputBytes, 'AS4')).toBe(16)
+    expect(await cellFontSize(outputBytes, 'AS5')).toBe(16)
     expect(sheet['!rows']?.[3]?.hpt).toBe(templateSheet['!rows']?.[3]?.hpt)
     expect(sheet['!rows']?.[0]?.hpt).toBe(24)
     expect(sheet['!rows']?.[1]?.hpt).toBe(24)
-    // 发票/采购合计与报关公司不再跨行合并（合并单元格会吞掉明细间横线），逐行保留。
-    expect(sheet['!merges'] || []).not.toContainEqual({ s: { r: 4, c: 27 }, e: { r: 5, c: 27 } })
+    // 连续的合计分组纵向合并；非连续分组和报关公司列不跨行合并。
+    expect(sheet['!merges'] || []).toContainEqual({ s: { r: 3, c: 27 }, e: { r: 5, c: 27 } })
     expect(sheet['!merges'] || []).not.toContainEqual({ s: { r: 4, c: 42 }, e: { r: 5, c: 42 } })
     expect(sheet['!merges'] || []).not.toContainEqual({ s: { r: 4, c: 43 }, e: { r: 5, c: 43 } })
     expect(sheet.AR5?.v).toBe('B 报关公司')

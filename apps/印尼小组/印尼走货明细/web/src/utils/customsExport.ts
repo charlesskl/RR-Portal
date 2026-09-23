@@ -123,6 +123,23 @@ export function isIndonesiaBlHead(value?: string) {
   return Boolean(head && !/(?:实业|實業|全球|\bRRI\b|\bRRM\b)/i.test(head))
 }
 
+const HUASHENGYI_BANK_INFO = [
+  'Beneficiary name :Shenzhen Huashengyi Export Trading Limited',
+  'Account number :',
+  '15668277360001(USD)',
+  '15353466270052 (RMB)',
+  '15602776290037 (HKD)',
+  'Beneficiary Bank: Ping An Bank Co., Ltd',
+  'Swift code : SZDBCNBSXXX',
+].join('\n')
+const HUASHENGYI_BENEFICIARY = 'Beneficiary：SHENZHEN  HUASHENGYI  EXPORT  TRADING  LIMITED'
+const HUASHENGYI_BENEFICIARY_ADDRESS = 'Add: Room 602, Longsheng Comprehensive Service Building, Longsheng Community, Dalang Street, Longhua District, Shenzhen City'
+
+function isHuashengyiSeller(seller?: SupplierDict) {
+  return Boolean(seller && [seller.keyword, seller.full, seller.nameEn]
+    .some(name => /华胜益|HUASHENGYI/i.test(name || '')))
+}
+
 function fillSeller(wb: XLSX.WorkBook, seller: SupplierDict) {
   const name = seller.full!.trim(), english = seller.nameEn!.trim()
   const combined = `${name}\n${english}`
@@ -136,8 +153,10 @@ function fillSeller(wb: XLSX.WorkBook, seller: SupplierDict) {
   put('全球发票', ['B23', 'B78', 'B117'], name)
   put('全球发票', ['B24', 'B79', 'B118'], english)
   put('全球发票', ['B25', 'B80', 'B119'], address)
-  // 参考模板中的银行账户属于样例公司，不得继承为新卖方收款信息。
-  put('全球发票', ['B50', 'G50', 'G52'], '')
+  // 华胜益发票保留其固定收款资料；其他卖方不得继承模板中的样例账户。
+  put('全球发票', ['B50'], isHuashengyiSeller(seller) ? HUASHENGYI_BANK_INFO : '')
+  put('全球发票', ['G50'], isHuashengyiSeller(seller) ? HUASHENGYI_BENEFICIARY : '')
+  put('全球发票', ['G52'], isHuashengyiSeller(seller) ? HUASHENGYI_BENEFICIARY_ADDRESS : '')
   put('印尼合同', ['C13', 'C58'], name)
   put('印尼合同', ['C14', 'C59'], english)
   put('印尼合同', ['C15', 'C60'], address)
@@ -266,8 +285,13 @@ function fitCategoryColumn(wb: XLSX.WorkBook) {
 }
 
 function compactMainColumns(sheet: XLSX.WorkSheet) {
-  if (!sheet['!cols']) return
-  sheet['!cols'] = sheet['!cols'].map((column: any, index: number) => {
+  const columns: any[] = sheet['!cols'] || []
+  // 用户录入时仍保留这些辅助字段，但正式导出不展示：
+  // N:O 为单项毛/净重，AC:AK 为柜号至产品实际运费。
+  for (const index of [13, 14, 28, 29, 30, 31, 32, 33, 34, 35, 36]) {
+    columns[index] = { ...(columns[index] || {}), hidden: true }
+  }
+  sheet['!cols'] = columns.map((column: any, index: number) => {
     if (!column || column.hidden) return column
     if (index === 19) return { ...column, width: 16, wch: 16 }
     const original = Number(column.width ?? column.wch)
@@ -635,10 +659,31 @@ function populateLinkedDocuments(
       }
     }
     setTradeTerms(groupInvoiceSheet, invoiceStart, invoiceEnd, seller)
-    for (const [cellAddress, cell] of Object.entries(groupInvoiceSheet || {}) as [string, any][]) {
-      const row = addressRow(cellAddress)
-      if (row >= invoiceStart && row <= invoiceEnd && typeof cell?.v === 'string'
-        && /Beneficiary|Account number|Swift code/i.test(cell.v)) setPreservingStyle(groupInvoiceSheet, cellAddress, '')
+    const totalAmountRow = findLabelRow(
+      groupInvoiceSheet,
+      'B',
+      slot.invoiceRows[1],
+      invoiceEnd,
+      /总值大写|Total Amount/i,
+    )
+    if (totalAmountRow) {
+      const beneficiaryRow = totalAmountRow + 1
+      const beneficiaryAddressRow = totalAmountRow + 3
+      setPreservingStyle(
+        groupInvoiceSheet,
+        `B${beneficiaryRow}`,
+        isHuashengyiSeller(seller) ? HUASHENGYI_BANK_INFO : '',
+      )
+      setPreservingStyle(
+        groupInvoiceSheet,
+        `G${beneficiaryRow}`,
+        isHuashengyiSeller(seller) ? HUASHENGYI_BENEFICIARY : '',
+      )
+      setPreservingStyle(
+        groupInvoiceSheet,
+        `G${beneficiaryAddressRow}`,
+        isHuashengyiSeller(seller) ? HUASHENGYI_BENEFICIARY_ADDRESS : '',
+      )
     }
     if (group.indo) {
       const packingHeaderRow = addressRow(packingSlot.packingHeader)
@@ -1068,6 +1113,7 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
     // 无明确报关公司的旧数据按华胜益处理，以便套用华胜益的发票单价公式。
     return effectiveCustomsCompany(it, m, tf.exportCompany)
   }
+  const supplierOf = (it: CustomsItem) => (it.supplier || matOf(it)?.supplier || '').trim()
   const sorted = [...items].sort((a, b) => {
     const ca = effCustoms(a), cb = effCustoms(b)
     const wa = ca === CUSTOMS_FIXED ? 0 : (ca ? 1 : 2)
@@ -1075,9 +1121,7 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
     if (wa !== wb) return wa - wb
     const byC = ca.localeCompare(cb, 'zh')
     if (byC !== 0) return byC
-    const sa = (a.supplier || matOf(a)?.supplier || '').trim()
-    const sb = (b.supplier || matOf(b)?.supplier || '').trim()
-    return sa.localeCompare(sb, 'zh')
+    return supplierOf(a).localeCompare(supplierOf(b), 'zh')
   })
   const companyColor = new Map<string, string>()
   for (const item of sorted) {
@@ -1150,7 +1194,7 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
     const weightDivisor = paperRope ? '/1000' : ''
     setCell(ws, ri, 15, '=ROUND(BA' + (ri + 1) + '*L' + (ri + 1) + weightDivisor + ',2)', 'n')
     setCell(ws, ri, 16, '=ROUND(BB' + (ri + 1) + '*L' + (ri + 1) + weightDivisor + ',2)', 'n')
-    setCell(ws, ri, 17, '=AU' + (ri + 1) + '*AV' + (ri + 1) + '*AW' + (ri + 1) + '/1000000', 'n')
+    setCell(ws, ri, 17, '=AU' + (ri + 1) + '*AV' + (ri + 1) + '*AW' + (ri + 1) + '/28316.75*0.0283', 'n')
     setCell(ws, ri, 18, '=R' + (ri + 1) + '*AT' + (ri + 1), 'n')
     setCell(ws, ri, 20, it.product_use || '', 's')
     setCell(ws, ri, 21, it.contract_no || '', 's')
@@ -1204,27 +1248,61 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
     setCell(ws, ri, 54, it.pallet || '', 's')
   })
 
-  // 发票及采购合计按连续的报关公司分组，只在每组首行显示。
-  // 不再跨行合并这些字段：合并单元格会吞掉明细行之间的横向边框，导致导出表格
-  // 出现截图所示的断线。报关公司和提单抬头逐行保留，确保每格四边完整。
-  for (let start = 0; start < sorted.length;) {
-    const company = effCustoms(sorted[start])
-    let end = start
-    while (end + 1 < sorted.length && effCustoms(sorted[end + 1]) === company) end++
-    const firstRow = start + 4
-    const lastRow = end + 4
-    setCell(ws, start + 3, 27, `=SUM(AA${firstRow}:AA${lastRow})`, 'n')
-    setCell(ws, start + 3, 42, `=SUM(AP${firstRow}:AP${lastRow})`, 'n')
-    ;(ws as any)[XLSX.utils.encode_cell({ r: start + 3, c: 42 })].z = purchaseCurrencyFormat(sorted[start].currency)
-    setCell(ws, start + 3, 43, company || tf.exportCompany, 's')
-    setCell(ws, start + 3, 44, sorted[start].bl_head || tf.blHead, 's')
-    if (end > start) {
-      for (let index = start + 1; index <= end; index++) {
-        setCell(ws, index + 3, 27, '')
-        setCell(ws, index + 3, 42, '')
-      }
+  // 合计不再跨行合并：合并单元格会吞掉明细行之间的横向边框。
+  // 将不连续的明细行压缩成 SUM 可接受的单元格/区间引用。
+  const groupedSumFormula = (column: string, indexes: number[]) => {
+    const rows = indexes.map(index => index + 4)
+    const references: string[] = []
+    for (let start = 0; start < rows.length;) {
+      let end = start
+      while (end + 1 < rows.length && rows[end + 1] === rows[end] + 1) end++
+      references.push(start === end ? `${column}${rows[start]}` : `${column}${rows[start]}:${column}${rows[end]}`)
+      start = end + 1
     }
-    start = end + 1
+    return `=SUM(${references.join(',')})`
+  }
+  const mergeGroupedTotal = (column: number, indexes: number[]) => {
+    if (indexes.length < 2) return
+    const contiguous = indexes.every((index, position) => position === 0 || index === indexes[position - 1] + 1)
+    if (!contiguous) return
+    ;(ws['!merges'] ||= []).push({
+      s: { r: indexes[0] + 3, c: column },
+      e: { r: indexes[indexes.length - 1] + 3, c: column },
+    })
+  }
+
+  // 发票金额合计优先按合同号汇总；没有合同号时按报关公司汇总。
+  // 同一分组只在第一次出现的行显示一次合计。
+  const invoiceGroups = new Map<string, number[]>()
+  sorted.forEach((item, index) => {
+    setCell(ws, index + 3, 27, '')
+    const contractNo = String(item.contract_no || '').trim()
+    const key = contractNo ? `contract:${contractNo}` : `customs:${effCustoms(item) || tf.exportCompany}`
+    const indexes = invoiceGroups.get(key) || []
+    indexes.push(index)
+    invoiceGroups.set(key, indexes)
+  })
+  for (const indexes of invoiceGroups.values()) {
+    setCell(ws, indexes[0] + 3, 27, groupedSumFormula('AA', indexes), 'n')
+    mergeGroupedTotal(27, indexes)
+  }
+
+  // 采购总额按供应商汇总，而不是跟随报关公司分组。同一供应商即使分布在
+  // 不同报关公司段，也只在第一次出现的行显示一次合计。
+  const supplierGroups = new Map<string, number[]>()
+  sorted.forEach((item, index) => {
+    setCell(ws, index + 3, 42, '')
+    const supplier = supplierOf(item)
+    const key = supplier || `__blank_supplier_${index}`
+    const indexes = supplierGroups.get(key) || []
+    indexes.push(index)
+    supplierGroups.set(key, indexes)
+  })
+  for (const indexes of supplierGroups.values()) {
+    const firstIndex = indexes[0]
+    setCell(ws, firstIndex + 3, 42, groupedSumFormula('AP', indexes), 'n')
+    ;(ws as any)[XLSX.utils.encode_cell({ r: firstIndex + 3, c: 42 })].z = purchaseCurrencyFormat(sorted[firstIndex].currency)
+    mergeGroupedTotal(42, indexes)
   }
   if (sorted.length) ws['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: 3 + sorted.length - 1, c: 55 } })
 
@@ -1424,6 +1502,8 @@ async function restoreTemplateDocumentStyles(
   const rawStyles = parser.parseFromString(await templateZip.file('xl/styles.xml')!.async('string'), 'application/xml')
   const rawXfs = rawStyles.getElementsByTagName('cellXfs')[0]
   const xfNodes = Array.from(rawXfs.getElementsByTagName('xf'))
+  const rawFonts = rawStyles.getElementsByTagName('fonts')[0]
+  const fontNodes = Array.from(rawFonts.getElementsByTagName('font'))
   const currencyNumFmt = new Map<string, string>()
   for (const node of Array.from(rawStyles.getElementsByTagName('numFmt'))) {
     const code = node.getAttribute('formatCode') || ''
@@ -1431,6 +1511,7 @@ async function restoreTemplateDocumentStyles(
     if (code.includes('HK$') && code.includes('0.000')) currencyNumFmt.set('HK$', node.getAttribute('numFmtId') || '178')
   }
   const derivedStyles = new Map<string, string>()
+  const derivedFonts = new Map<string, string>()
   const styleForCurrency = (baseStyle: string, currency: string) => {
     const numFmtId = currencyNumFmt.get(currency)
     if (!numFmtId) return baseStyle
@@ -1456,6 +1537,34 @@ async function restoreTemplateDocumentStyles(
     const copy = rawStyles.importNode(base, true) as typeof base
     copy.setAttribute('fillId', fillId)
     copy.setAttribute('applyFill', '1')
+    const styleId = String(xfNodes.length + derivedStyles.size)
+    rawXfs.appendChild(copy)
+    derivedStyles.set(key, styleId)
+    return styleId
+  }
+  const styleWithFontSize = (baseStyle: string, size: number) => {
+    const key = `${baseStyle}|font-size:${size}`
+    const cached = derivedStyles.get(key)
+    if (cached) return cached
+    const base = xfNodes[Number(baseStyle)] || xfNodes[0]
+    const baseFontId = Number(base.getAttribute('fontId') || 0)
+    const fontKey = `${baseFontId}|size:${size}`
+    let fontId = derivedFonts.get(fontKey)
+    if (!fontId) {
+      const font = rawStyles.importNode(fontNodes[baseFontId] || fontNodes[0], true) as XmlElement
+      let sizeNode = Array.from(font.childNodes).find(node => (node as XmlElement).localName === 'sz') as XmlElement | undefined
+      if (!sizeNode) {
+        sizeNode = rawStyles.createElementNS(SPREADSHEET_NS, 'sz') as XmlElement
+        font.appendChild(sizeNode)
+      }
+      sizeNode.setAttribute('val', String(size))
+      rawFonts.appendChild(font)
+      fontId = String(fontNodes.length + derivedFonts.size)
+      derivedFonts.set(fontKey, fontId)
+    }
+    const copy = rawStyles.importNode(base, true) as typeof base
+    copy.setAttribute('fontId', fontId)
+    copy.setAttribute('applyFont', '1')
     const styleId = String(xfNodes.length + derivedStyles.size)
     rawXfs.appendChild(copy)
     derivedStyles.set(key, styleId)
@@ -1513,12 +1622,17 @@ async function restoreTemplateDocumentStyles(
           if (rawStyle && ['AO', 'AP', 'AQ'].includes(match[1])) {
             rawStyle = styleForCurrency(rawStyle, outputCurrencies[Number(match[2]) - 4] || '¥')
           }
+          if (rawStyle && ['AR', 'AS'].includes(match[1])) rawStyle = styleWithFontSize(rawStyle, 16)
+          if (rawStyle && match[1] === 'BB') {
+            rawStyle = styleWithFill(rawStyle, rawMainStyles.get(`A${sourceRow}`) || rawStyle)
+          }
         }
       }
       cell.setAttribute('s', rawStyle ?? '0')
     }
     outputZip.file(outputPath, serializer.serializeToString(outputDoc))
   }
+  rawFonts.setAttribute('count', String(fontNodes.length + derivedFonts.size))
   rawXfs.setAttribute('count', String(xfNodes.length + derivedStyles.size))
   outputZip.file('xl/styles.xml', serializer.serializeToString(rawStyles))
 }
@@ -2750,17 +2864,17 @@ async function injectOoxmlImages(
   let relsXml = sheetRelsFile ? await sheetRelsFile.async('string')
     : '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>'
   const newRid = 'rIdGenDrawing999'
-  if (!relsXml.includes(newRid)) {
-    relsXml = relsXml.replace('</Relationships>',
-      `<Relationship Id="${newRid}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" Target="../drawings/drawing${drawingNum}.xml"/></Relationships>`)
-    zip.file(sheetRelsPath, relsXml)
-  }
+  // 模板本身带有样例图片 drawing。正式导出必须完全换成当前物料图片，
+  // 否则旧 drawing 会占用工作表唯一的 drawing 节点，动态图片无法显示。
+  relsXml = relsXml.replace(/<Relationship\b[^>]*\bType="[^"]*\/drawing"[^>]*\/>/g, '')
+  relsXml = relsXml.replace('</Relationships>',
+    `<Relationship Id="${newRid}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" Target="../drawings/drawing${drawingNum}.xml"/></Relationships>`)
+  zip.file(sheetRelsPath, relsXml)
   const sheetPath = 'xl/worksheets/sheet' + mainSheetIdx + '.xml'
   let sheetXml = await zip.file(sheetPath)!.async('string')
-  if (!/<(?:\w+:)?drawing\b/.test(sheetXml)) {
-    sheetXml = sheetXml.replace(/<\/(?:\w+:)?worksheet>/, match => `<x:drawing r:id="${newRid}"/>${match}`)
-    zip.file(sheetPath, sheetXml)
-  }
+  sheetXml = sheetXml.replace(/<(?:\w+:)?drawing\b[^>]*\/>/g, '')
+  sheetXml = sheetXml.replace(/<\/(?:\w+:)?worksheet>/, match => `<drawing r:id="${newRid}"/>${match}`)
+  zip.file(sheetPath, sheetXml)
   let ct = await zip.file('[Content_Types].xml')!.async('string')
   if (!ct.includes('Extension="png"')) {
     ct = ct.replace(/<Types[^>]*>/, m => m + '<Default Extension="png" ContentType="image/png"/><Default Extension="jpeg" ContentType="image/jpeg"/>')

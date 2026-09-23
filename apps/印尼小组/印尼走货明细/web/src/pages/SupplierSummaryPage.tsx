@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Button, Card, Form, Input, Modal, Popconfirm, Select, Space, Table, Tag, message } from 'antd'
+import { AutoComplete, Button, Card, Form, Input, Modal, Popconfirm, Space, Table, Tag, message } from 'antd'
 import { api, type Dictionaries, type SupplierDict } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { canonicalSupplierProfiles, HUASHENGYI_FULL_NAME, supplierCustomsCompany } from '../utils/supplierProfiles'
@@ -58,7 +58,7 @@ export default function SupplierSummaryPage() {
       ...values,
       full,
       keyword: editing?.keyword?.trim() || full,
-      customs: values.customs === HUASHENGYI_FULL_NAME ? HUASHENGYI_FULL_NAME : full,
+      customs: values.customs?.trim() || full,
     }
     setLoading(true)
     try {
@@ -99,10 +99,12 @@ export default function SupplierSummaryPage() {
           { title: '电话', dataIndex: 'phone', width: 140 },
           { title: '邮箱', dataIndex: 'email', width: 210 },
           { title: '联系人', dataIndex: 'contact', width: 140 },
-          { title: '报关公司', width: 190, render: (_: unknown, r: SupplierDict) =>
-            supplierCustomsCompany(r) === HUASHENGYI_FULL_NAME
-              ? <Tag color="blue">华胜益</Tag>
-              : <Tag color="green">本公司</Tag> },
+          { title: '报关公司', width: 240, render: (_: unknown, r: SupplierDict) => {
+            const customs = supplierCustomsCompany(r)
+            if (customs === HUASHENGYI_FULL_NAME) return <Tag color="blue">华胜益</Tag>
+            if (customs === r.full?.trim()) return <Tag color="green">本公司</Tag>
+            return <Tag color="gold">{customs}</Tag>
+          } },
           { title: '资料', width: 100, render: (_: unknown, r: SupplierDict) =>
             profileFields.every(f => String(r[f.name] || '').trim()) ? <Tag color="green">齐全</Tag> : <Tag color="orange">待补充</Tag> },
           { title: '操作', width: 130, fixed: 'right', render: (_: unknown, r: SupplierDict) => <Space size={0}>
@@ -120,9 +122,9 @@ export default function SupplierSummaryPage() {
           rules={f.name === 'full' ? [{ required: true, whitespace: true, message: '请填写' }] : f.name === 'email' ? [{ type: 'email', warningOnly: true }] : undefined}>
           <Input.TextArea autoSize={f.name === 'addressZh' || f.name === 'addressEn' ? { minRows: 2, maxRows: 4 } : { minRows: 1, maxRows: 1 }} />
         </Form.Item>)}
-        <Form.Item name="customs" label="报关公司" rules={[{ required: true, message: '请选择报关公司' }]}
-          extra="物料明细选择该供应商后会自动带入此项。">
-          <Select placeholder="请选择" options={[
+        <Form.Item name="customs" label="报关公司" rules={[{ required: true, whitespace: true, message: '请选择或填写报关公司' }]}
+          extra="可选择快捷项，也可直接输入其他报关公司全称。物料明细选择该供应商后会自动带入此项。">
+          <AutoComplete placeholder="请选择或输入报关公司" options={[
             ...(companyName ? [{ value: companyName, label: `本公司（${companyName}）` }] : []),
             { value: HUASHENGYI_FULL_NAME, label: `华胜益（${HUASHENGYI_FULL_NAME}）` },
           ]} />

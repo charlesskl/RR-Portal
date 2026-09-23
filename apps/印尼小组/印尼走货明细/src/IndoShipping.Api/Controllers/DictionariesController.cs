@@ -179,10 +179,10 @@ public class DictionariesController(ISqlConnectionFactory factory) : ControllerB
     private static string NormalizeCustomsCompany(string? customs, string full)
     {
         var value = (customs ?? "").Trim();
-        return string.Equals(value, HuashengyiFullName, StringComparison.OrdinalIgnoreCase)
-            || string.Equals(value, "华胜益", StringComparison.OrdinalIgnoreCase)
-            ? HuashengyiFullName
-            : full;
+        if (string.Equals(value, HuashengyiFullName, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(value, "华胜益", StringComparison.OrdinalIgnoreCase))
+            return HuashengyiFullName;
+        return value.Length > 0 ? value : full;
     }
 
     private static object SupplierValues(SupItem item, string keyword, string full, string customs) => new

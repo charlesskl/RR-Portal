@@ -106,6 +106,9 @@ describe('deployment base paths', () => {
     expect(sheet.AR4?.v).toBe('深圳市华胜益出口贸易有限公司')
     expect(sheet.Z4).toMatchObject({ f: 'AO4*1.05/7.2', v: (0.04 * 1.05) / 7.2 })
     expect(sheet.Z5).toMatchObject({ f: 'IFERROR((AO5*1.05+1248/K5)/7.2,AO5*1.05/7.2)', v: (0.45 * 1.05 + 1248 / 0.174) / 7.2 })
+    expect(sheet.AB4?.f).toBe('SUM(AA4:AA5)')
+    expect(sheet.AB5?.f).toBeUndefined()
+    expect(sheet.AB5?.v || '').toBe('')
   })
 
   it('uses the Vite public base for browser routes', () => {
@@ -150,9 +153,9 @@ describe('deployment base paths', () => {
     const output = await buildCustomsWorkbook({
       templateBuffer,
       items: [
-        { material_id: 7, qty: 12, price: 3.5, currency: 'US$', cartons: 2, qty_per_carton: '6', weighing_qty: 6, pallet: '1-2/1卡', po_no: 'PO-TEST', contract_no: 'RWCRRM2600206', contract_date: '2026-09-01', invoice_no: 'RW202600206', invoice_date: '2026-09-02', customs_company: 'A 报关公司' },
-        { material_id: 8, qty: 20000, price: 0.1, cartons: 1, qty_per_carton: '20000', weighing_qty: 20, po_no: 'PO-ROPE', contract_no: 'RWCRRM2600206', invoice_no: 'RW202600206', customs_company: 'B 报关公司' },
-        { material_id: 9, qty: 10000, price: 0.2, cartons: 3, qty_per_carton: '1-2/3000 3/4000', weighing_qty: 2500, po_no: 'PO-MIXED', contract_no: 'RWCRRM2600206', invoice_no: 'RW202600206', customs_company: 'B 报关公司' },
+        { material_id: 7, qty: 12, price: 3.5, currency: 'US$', cartons: 2, qty_per_carton: '6', weighing_qty: 6, pallet: '1-2/1卡', po_no: 'PO-TEST', supplier: 'Shared Supplier', contract_no: 'RWCRRM2600206', contract_date: '2026-09-01', invoice_no: 'RW202600206', invoice_date: '2026-09-02', customs_company: 'A 报关公司' },
+        { material_id: 8, qty: 20000, price: 0.1, cartons: 1, qty_per_carton: '20000', weighing_qty: 20, po_no: 'PO-ROPE', supplier: 'Other Supplier', contract_no: 'RWCRRM2600206', invoice_no: 'RW202600206', customs_company: 'B 报关公司' },
+        { material_id: 9, qty: 10000, price: 0.2, cartons: 3, qty_per_carton: '1-2/3000 3/4000', weighing_qty: 2500, po_no: 'PO-MIXED', supplier: 'Shared Supplier', contract_no: 'RWCRRM2600206', invoice_no: 'RW202600206', customs_company: 'B 报关公司' },
       ],
       materials: new Map([[7, {
         id: 7,
@@ -260,8 +263,15 @@ describe('deployment base paths', () => {
       expect(await cellBorderSides(outputBytes, `${column}35`, 'xl/worksheets/sheet5.xml')).toEqual([null, null, null, null])
     }
     expect(sheet.A7?.s?.border).toBeUndefined()
-    expect(sheet.AB4?.f).toBe('SUM(AA4:AA4)')
-    expect(sheet.AQ5?.f).toBe('SUM(AP5:AP6)')
+    expect(sheet.AB4?.f).toBe('SUM(AA4:AA6)')
+    expect(sheet.AB5?.f).toBeUndefined()
+    expect(sheet.AB5?.v || '').toBe('')
+    expect(sheet.AB6?.f).toBeUndefined()
+    expect(sheet.AB6?.v || '').toBe('')
+    expect(sheet.AQ4?.f).toBe('SUM(AP4,AP6)')
+    expect(sheet.AQ5?.f).toBe('SUM(AP5)')
+    expect(sheet.AQ6?.f).toBeUndefined()
+    expect(sheet.AQ6?.v || '').toBe('')
     expect(sheet.AQ4?.z).toContain('"US$"#,##0.0000')
     expect(sheet.AD4?.z).toBe(templateSheet.AD4?.z)
     expect(sheet.A5?.z).toBeDefined()

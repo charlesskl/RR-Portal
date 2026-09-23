@@ -1113,6 +1113,7 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
     // 无明确报关公司的旧数据按华胜益处理，以便套用华胜益的发票单价公式。
     return effectiveCustomsCompany(it, m, tf.exportCompany)
   }
+  const supplierOf = (it: CustomsItem) => (it.supplier || matOf(it)?.supplier || '').trim()
   const sorted = [...items].sort((a, b) => {
     const ca = effCustoms(a), cb = effCustoms(b)
     const wa = ca === CUSTOMS_FIXED ? 0 : (ca ? 1 : 2)
@@ -1120,9 +1121,7 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
     if (wa !== wb) return wa - wb
     const byC = ca.localeCompare(cb, 'zh')
     if (byC !== 0) return byC
-    const sa = (a.supplier || matOf(a)?.supplier || '').trim()
-    const sb = (b.supplier || matOf(b)?.supplier || '').trim()
-    return sa.localeCompare(sb, 'zh')
+    return supplierOf(a).localeCompare(supplierOf(b), 'zh')
   })
   const companyColor = new Map<string, string>()
   for (const item of sorted) {
@@ -1249,27 +1248,50 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
     setCell(ws, ri, 54, it.pallet || '', 's')
   })
 
-  // 发票及采购合计按连续的报关公司分组，只在每组首行显示。
-  // 不再跨行合并这些字段：合并单元格会吞掉明细行之间的横向边框，导致导出表格
-  // 出现截图所示的断线。报关公司和提单抬头逐行保留，确保每格四边完整。
-  for (let start = 0; start < sorted.length;) {
-    const company = effCustoms(sorted[start])
-    let end = start
-    while (end + 1 < sorted.length && effCustoms(sorted[end + 1]) === company) end++
-    const firstRow = start + 4
-    const lastRow = end + 4
-    setCell(ws, start + 3, 27, `=SUM(AA${firstRow}:AA${lastRow})`, 'n')
-    setCell(ws, start + 3, 42, `=SUM(AP${firstRow}:AP${lastRow})`, 'n')
-    ;(ws as any)[XLSX.utils.encode_cell({ r: start + 3, c: 42 })].z = purchaseCurrencyFormat(sorted[start].currency)
-    setCell(ws, start + 3, 43, company || tf.exportCompany, 's')
-    setCell(ws, start + 3, 44, sorted[start].bl_head || tf.blHead, 's')
-    if (end > start) {
-      for (let index = start + 1; index <= end; index++) {
-        setCell(ws, index + 3, 27, '')
-        setCell(ws, index + 3, 42, '')
-      }
+  // 合计不再跨行合并：合并单元格会吞掉明细行之间的横向边框。
+  // 将不连续的明细行压缩成 SUM 可接受的单元格/区间引用。
+  const groupedSumFormula = (column: string, indexes: number[]) => {
+    const rows = indexes.map(index => index + 4)
+    const references: string[] = []
+    for (let start = 0; start < rows.length;) {
+      let end = start
+      while (end + 1 < rows.length && rows[end + 1] === rows[end] + 1) end++
+      references.push(start === end ? `${column}${rows[start]}` : `${column}${rows[start]}:${column}${rows[end]}`)
+      start = end + 1
     }
-    start = end + 1
+    return `=SUM(${references.join(',')})`
+  }
+
+  // 发票金额合计优先按合同号汇总；没有合同号时按报关公司汇总。
+  // 同一分组只在第一次出现的行显示一次合计。
+  const invoiceGroups = new Map<string, number[]>()
+  sorted.forEach((item, index) => {
+    setCell(ws, index + 3, 27, '')
+    const contractNo = String(item.contract_no || '').trim()
+    const key = contractNo ? `contract:${contractNo}` : `customs:${effCustoms(item) || tf.exportCompany}`
+    const indexes = invoiceGroups.get(key) || []
+    indexes.push(index)
+    invoiceGroups.set(key, indexes)
+  })
+  for (const indexes of invoiceGroups.values()) {
+    setCell(ws, indexes[0] + 3, 27, groupedSumFormula('AA', indexes), 'n')
+  }
+
+  // 采购总额按供应商汇总，而不是跟随报关公司分组。同一供应商即使分布在
+  // 不同报关公司段，也只在第一次出现的行显示一次合计。
+  const supplierGroups = new Map<string, number[]>()
+  sorted.forEach((item, index) => {
+    setCell(ws, index + 3, 42, '')
+    const supplier = supplierOf(item)
+    const key = supplier || `__blank_supplier_${index}`
+    const indexes = supplierGroups.get(key) || []
+    indexes.push(index)
+    supplierGroups.set(key, indexes)
+  })
+  for (const indexes of supplierGroups.values()) {
+    const firstIndex = indexes[0]
+    setCell(ws, firstIndex + 3, 42, groupedSumFormula('AP', indexes), 'n')
+    ;(ws as any)[XLSX.utils.encode_cell({ r: firstIndex + 3, c: 42 })].z = purchaseCurrencyFormat(sorted[firstIndex].currency)
   }
   if (sorted.length) ws['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: 3 + sorted.length - 1, c: 55 } })
 

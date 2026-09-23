@@ -39,6 +39,8 @@ public static class ShipmentOrderTotals
         foreach (var node in targetPayload["items"]?.AsArray() ?? [])
         {
             if (node is not JsonObject item) continue;
+            // 邮件或附件已提供每单总件数时保留原值；只有缺失时才使用系统汇总值。
+            if (DecimalValue(item["order_total_pieces"]) is > 0) continue;
             item["order_total_pieces"] = TryKey(targetCustomer, item, out var key) && totals.TryGetValue(key, out var total)
                 ? JsonValue.Create(total)
                 : item["pieces"]?.DeepClone();

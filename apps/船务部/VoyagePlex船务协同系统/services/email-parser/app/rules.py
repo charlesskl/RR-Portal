@@ -220,7 +220,7 @@ def classify_email(subject: str, body: str) -> str:
 
 
 def filter_items_for_email(items: list[dict], shipment_type: str, loading_factory: str = "") -> list[dict]:
-    """Keep every factory's cargo for warehouse delivery or Xingxin loading."""
+    """Keep Xingxin and Huadeng cargo for container work, and all warehouse cargo."""
     if shipment_type == "warehouse":
         return items
     if re.search(r"兴信|新信|hanson", loading_factory, re.I):
@@ -232,6 +232,6 @@ def filter_items_for_email(items: list[dict], shipment_type: str, loading_factor
         # Only fall back to the assembly-factory column when it is absent.
         factory = item.get("supplier") or item.get("factory_remark") or ""
         has_factory_information = has_factory_information or bool(str(factory).strip())
-        if re.search(r"兴信|新信|hanson", str(factory), re.I):
+        if re.search(r"兴信|新信|hanson|华登", str(factory), re.I):
             selected.append(item)
     return selected if has_factory_information else items

@@ -1,0 +1,11 @@
+From: customer@example.com
+To: shipping@example.com
+Subject: Booking confirmation
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+
+SO# SHZ7952680
+1*40HQ
+SI: 3/27 09:00
+YANTIAN
+**拉网**

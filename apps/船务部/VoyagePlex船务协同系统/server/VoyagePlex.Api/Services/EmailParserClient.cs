@@ -44,6 +44,22 @@ public sealed class EmailParserClient(HttpClient httpClient)
             await response.Content.ReadAsStringAsync(cancellationToken));
     }
 
+    public async Task<ParserResponse> ParseProductWorkbooksAsync(
+        IReadOnlyList<IFormFile> files, CancellationToken cancellationToken)
+    {
+        using var form = new MultipartFormDataContent();
+        foreach (var file in files)
+        {
+            var content = new StreamContent(file.OpenReadStream());
+            content.Headers.ContentType = new MediaTypeHeaderValue("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+            form.Add(content, "files", file.FileName);
+        }
+        using var response = await httpClient.PostAsync("/v1/product-workbooks/parse", form, cancellationToken);
+        return new ParserResponse((int)response.StatusCode,
+            response.Content.Headers.ContentType?.ToString() ?? "application/json",
+            await response.Content.ReadAsStringAsync(cancellationToken));
+    }
+
     public async Task<ParserResponse> ScanLocalInventoryAsync(CancellationToken cancellationToken)
     {
         using var response = await httpClient.GetAsync("/v1/local-inventory-scan", cancellationToken);

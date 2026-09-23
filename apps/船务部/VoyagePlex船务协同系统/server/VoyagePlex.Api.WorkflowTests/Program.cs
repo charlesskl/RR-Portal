@@ -8,6 +8,20 @@ if (MailboxDateRules.ReceivedDate("2026-09-17T15:59:00+00:00") != "2026-09-17" |
     MailboxDateRules.ReceivedDate("2026-09-18T00:30:00+08:00") != "2026-09-18")
     throw new InvalidOperationException("邮箱邮件未按北京时间收件日期归类");
 Console.WriteLine("Mailbox received-date tests passed.");
+var shipmentClassification = MailClassificationRules.Classify("转发：《出货通知》 SO#123");
+var changeClassification = MailClassificationRules.Classify("更新：截补延迟 SO#123");
+var unknownClassification = MailClassificationRules.Classify("Hello");
+if (shipmentClassification.Category != "Shipment" || shipmentClassification.NeedsReview ||
+    changeClassification.Category != "Change" || changeClassification.NeedsReview ||
+    unknownClassification.Category != "Unclassified" || !unknownClassification.NeedsReview)
+    throw new InvalidOperationException("邮件自动分类规则不正确");
+if (MailClassificationRules.NormalizeEmail("姓名 <TEST@Example.COM>") != "test@example.com")
+    throw new InvalidOperationException("联系人邮箱标准化不正确");
+Console.WriteLine("Mailbox automatic classification tests passed.");
+if (!MailContactRules.IsInternal("name@hanson2.com") || !MailContactRules.IsInternal("NAME@ROYALREGENT.NET") ||
+    MailContactRules.IsInternal("name@customer.com"))
+    throw new InvalidOperationException("公司内部邮箱域名判断不正确");
+Console.WriteLine("Mailbox internal-domain tests passed.");
 
 var allowed = new[]
 {
@@ -171,4 +185,10 @@ ShipmentOrderTotals.Apply(exportPayload, [fullContainer, looseCargo, repeatedMas
 var calculatedOrderTotal = exportPayload["items"]![0]!["order_total_pieces"]!.GetValue<decimal>();
 if (calculatedOrderTotal != 650)
     throw new InvalidOperationException($"整柜与散货总件数汇总或重复 Packing List 去重错误：{calculatedOrderTotal}");
+var extractedPayload = JsonNode.Parse("""
+{"customer":"ZURU","items":[{"contract_number":"4500217958","product_code":"9574UQ2","customer_po":"10001835258-3891","pieces":500,"order_total_pieces":888}]}
+""")!.AsObject();
+ShipmentOrderTotals.Apply(extractedPayload, [fullContainer, looseCargo]);
+if (extractedPayload["items"]![0]!["order_total_pieces"]!.GetValue<decimal>() != 888)
+    throw new InvalidOperationException("邮件已提取的每单总件数不应被系统汇总覆盖");
 Console.WriteLine("Shipment order total pieces tests passed.");

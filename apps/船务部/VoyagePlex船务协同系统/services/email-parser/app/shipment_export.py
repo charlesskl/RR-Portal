@@ -87,7 +87,16 @@ def _factory_note(item: dict) -> str:
         return "华登"
     if product_code in HUAKANG_PRODUCT_CODES:
         return "华康"
-    return "兴信"
+    return _text(_item_value(item, "supplier", "loading_factory", "factory_remark"))
+
+
+def _container_loading_factory(items: list[dict]) -> str:
+    factories = {_factory_note(item) for item in items}
+    if "兴信" in factories:
+        return "兴信"
+    if factories == {"华登"}:
+        return "华登"
+    return ""
 
 
 def _brand_note_lines(items: list[dict]) -> list[str]:
@@ -162,6 +171,10 @@ def build_shipment_workbook(task: dict) -> tuple[bytes, str]:
     items = list(task.get("items") or [])
     notes = _text(task.get("specialRequirements"))
     top_note, bottom_note = _split_shipment_notes(notes, items)
+    if not notes and _text(task.get("containerType")):
+        loading_factory = _container_loading_factory(items)
+        if loading_factory:
+            top_note = f"{loading_factory}做柜"
 
     wb = Workbook()
     ws = wb.active
@@ -222,13 +235,14 @@ def build_shipment_workbook(task: dict) -> tuple[bytes, str]:
     ws.row_dimensions[5].height = 32
 
     first_item_row = 6
+    destination_country = _text(task.get("destinationCountry") or task.get("destination_country"))
     for offset, item in enumerate(items):
         row = first_item_row + offset
         values = [
             _factory_note(item), offset + 1,
             customer_key, _item_value(item, "contract_number", "contractNumber"),
             _item_value(item, "product_code", "productCode"), _product_name_spec(item),
-            item.get("country", ""), item.get("category", ""), _number(item.get("quantity")),
+            destination_country, item.get("category", ""), _number(item.get("quantity")),
             _number(item.get("pieces")), _number(item.get("gross_weight")), _number(item.get("net_weight")), _number(_item_value(item, "volume", "cbm")),
             _item_value(item, "customer_po", "customerPo"), _number(_item_value(item, "order_total_pieces", "pieces")),
             _number(item.get("gross_weight_per_box")), _number(item.get("net_weight_per_box")),

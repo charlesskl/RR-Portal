@@ -50,4 +50,30 @@ describe('engineering material import', () => {
     expect(result.materials).toHaveLength(1)
     expect(result.materials[0].material_code).toBe('01020100')
   })
+
+  it('imports an external-purchase-only workbook without a molding sheet', async () => {
+    const workbook = XLSX.utils.book_new()
+    const purchaseSheet = XLSX.utils.aoa_to_sheet([
+      ['客户名称', null, 'TOMY', null, '产品编号', '：35874A1J', '产品名称', '：JD装载车+JD自卸车'],
+      [],
+      ['类别', '物料名称', '物料英文名称', '规格', '物料编码', '用量', '单重(g)', '供应商', '生产地'],
+      ['五金', '前/后轮双波花轴1', 'Front/Rear Wheel Double-Groove', '直径3.0*92MM', '01020054', 2, 5.1, '河源市港正五金制造有限公司', '中国'],
+    ])
+    XLSX.utils.book_append_sheet(workbook, purchaseSheet, '外购件清单 Daftar Part Pembelian')
+
+    const bytes = XLSX.write(workbook, { type: 'array', bookType: 'xls' }) as ArrayBuffer
+    const file = { arrayBuffer: async () => bytes } as File
+    const result = await importEngineeringFile(file)
+
+    expect(result.code).toBe('35874A1J')
+    expect(result.name).toBe('JD装载车+JD自卸车')
+    expect(result.customer).toBe('TOMY')
+    expect(result.moldings).toEqual([])
+    expect(result.materials).toHaveLength(1)
+    expect(result.materials[0]).toMatchObject({
+      product_code: '35874A1J',
+      material_code: '01020054',
+      supplier: '河源市港正五金制造有限公司',
+    })
+  })
 })

@@ -1261,6 +1261,15 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
     }
     return `=SUM(${references.join(',')})`
   }
+  const mergeGroupedTotal = (column: number, indexes: number[]) => {
+    if (indexes.length < 2) return
+    const contiguous = indexes.every((index, position) => position === 0 || index === indexes[position - 1] + 1)
+    if (!contiguous) return
+    ;(ws['!merges'] ||= []).push({
+      s: { r: indexes[0] + 3, c: column },
+      e: { r: indexes[indexes.length - 1] + 3, c: column },
+    })
+  }
 
   // 发票金额合计优先按合同号汇总；没有合同号时按报关公司汇总。
   // 同一分组只在第一次出现的行显示一次合计。
@@ -1275,6 +1284,7 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
   })
   for (const indexes of invoiceGroups.values()) {
     setCell(ws, indexes[0] + 3, 27, groupedSumFormula('AA', indexes), 'n')
+    mergeGroupedTotal(27, indexes)
   }
 
   // 采购总额按供应商汇总，而不是跟随报关公司分组。同一供应商即使分布在
@@ -1292,6 +1302,7 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
     const firstIndex = indexes[0]
     setCell(ws, firstIndex + 3, 42, groupedSumFormula('AP', indexes), 'n')
     ;(ws as any)[XLSX.utils.encode_cell({ r: firstIndex + 3, c: 42 })].z = purchaseCurrencyFormat(sorted[firstIndex].currency)
+    mergeGroupedTotal(42, indexes)
   }
   if (sorted.length) ws['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: 3 + sorted.length - 1, c: 55 } })
 
@@ -1611,7 +1622,7 @@ async function restoreTemplateDocumentStyles(
           if (rawStyle && ['AO', 'AP', 'AQ'].includes(match[1])) {
             rawStyle = styleForCurrency(rawStyle, outputCurrencies[Number(match[2]) - 4] || '¥')
           }
-          if (rawStyle && match[1] === 'AR') rawStyle = styleWithFontSize(rawStyle, 12)
+          if (rawStyle && ['AR', 'AS'].includes(match[1])) rawStyle = styleWithFontSize(rawStyle, 16)
           if (rawStyle && match[1] === 'BB') {
             rawStyle = styleWithFill(rawStyle, rawMainStyles.get(`A${sourceRow}`) || rawStyle)
           }

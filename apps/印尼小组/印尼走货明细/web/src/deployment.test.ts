@@ -90,8 +90,8 @@ describe('deployment base paths', () => {
     const output = await buildCustomsWorkbook({
       templateBuffer: Uint8Array.from(templateBytes).buffer,
       items: [
-        { material_id: 1, kg: 13.312, qty: 1, cartons: 1, price: 0.04, currency: 'US$', customs_company: '' },
-        { material_id: 2, kg: 0.174, qty: 1, cartons: 1, price: 0.45, currency: 'US$', customs_company: '' },
+        { material_id: 1, kg: 13.312, qty: 1, cartons: 1, price: 0.04, currency: 'US$', supplier: 'Same Supplier', customs_company: '' },
+        { material_id: 2, kg: 0.174, qty: 1, cartons: 1, price: 0.45, currency: 'US$', supplier: 'Same Supplier', customs_company: '' },
       ],
       materials: new Map([
         [1, { id: 1, product_code: '46720J', name_zh: 'PWB螺丝', customs_company: '' }],
@@ -109,6 +109,11 @@ describe('deployment base paths', () => {
     expect(sheet.AB4?.f).toBe('SUM(AA4:AA5)')
     expect(sheet.AB5?.f).toBeUndefined()
     expect(sheet.AB5?.v || '').toBe('')
+    expect(sheet.AQ4?.f).toBe('SUM(AP4:AP5)')
+    expect(sheet.AQ5?.f).toBeUndefined()
+    expect(sheet.AQ5?.v || '').toBe('')
+    expect(sheet['!merges'] || []).toContainEqual({ s: { r: 3, c: 27 }, e: { r: 4, c: 27 } })
+    expect(sheet['!merges'] || []).toContainEqual({ s: { r: 3, c: 42 }, e: { r: 4, c: 42 } })
   })
 
   it('uses the Vite public base for browser routes', () => {
@@ -302,13 +307,15 @@ describe('deployment base paths', () => {
     expect(mainSheetXml).toContain('<drawing r:id="rIdGenDrawing999"/>')
     expect(mainRelsXml).toContain('Target="../drawings/drawing999.xml"')
     expect(archive.file('xl/media/image100.png')).toBeTruthy()
-    expect(await cellFontSize(outputBytes, 'AR4')).toBe(12)
-    expect(await cellFontSize(outputBytes, 'AR5')).toBe(12)
+    expect(await cellFontSize(outputBytes, 'AR4')).toBe(16)
+    expect(await cellFontSize(outputBytes, 'AR5')).toBe(16)
+    expect(await cellFontSize(outputBytes, 'AS4')).toBe(16)
+    expect(await cellFontSize(outputBytes, 'AS5')).toBe(16)
     expect(sheet['!rows']?.[3]?.hpt).toBe(templateSheet['!rows']?.[3]?.hpt)
     expect(sheet['!rows']?.[0]?.hpt).toBe(24)
     expect(sheet['!rows']?.[1]?.hpt).toBe(24)
-    // 发票/采购合计与报关公司不再跨行合并（合并单元格会吞掉明细间横线），逐行保留。
-    expect(sheet['!merges'] || []).not.toContainEqual({ s: { r: 4, c: 27 }, e: { r: 5, c: 27 } })
+    // 连续的合计分组纵向合并；非连续分组和报关公司列不跨行合并。
+    expect(sheet['!merges'] || []).toContainEqual({ s: { r: 3, c: 27 }, e: { r: 5, c: 27 } })
     expect(sheet['!merges'] || []).not.toContainEqual({ s: { r: 4, c: 42 }, e: { r: 5, c: 42 } })
     expect(sheet['!merges'] || []).not.toContainEqual({ s: { r: 4, c: 43 }, e: { r: 5, c: 43 } })
     expect(sheet.AR5?.v).toBe('B 报关公司')

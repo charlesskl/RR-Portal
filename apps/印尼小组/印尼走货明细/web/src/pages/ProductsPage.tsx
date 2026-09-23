@@ -44,6 +44,7 @@ export default function ProductsPage() {
   const [dicts, setDicts] = useState<Dictionaries>({ hs: [], suppliers: [], translations: [] })
   const [drawerFull, setDrawerFull] = useState(false)
   const [showInactive, setShowInactive] = useState(false)
+  const currentProductCode = Form.useWatch('code', form)
 
   const loadList = useCallback(async () => {
     setLoading(true)
@@ -84,16 +85,19 @@ export default function ProductsPage() {
 
   async function save() {
     const v = await form.validateFields()
-    if (!v.code) return
+    const code = v.code?.trim()
+    if (!code) return
+    const originalCode = editing?.code ?? code
     setSavingDetail(true)
     try {
-      await api.put(`/products/${encodeURIComponent(v.code)}`, {
+      await api.put(`/products/${encodeURIComponent(originalCode)}`, {
+        code,
         name: v.name ?? '',
         customer: v.customer ?? '',
         moldings,
       })
       // Replace materials via bulk PUT. Backend upserts by id; rows removed in UI are soft-removed if referenced, else deleted.
-      const { data: materialSave } = await api.put(`/materials/bulk/${encodeURIComponent(v.code)}`, {
+      const { data: materialSave } = await api.put(`/materials/bulk/${encodeURIComponent(code)}`, {
         materials: materials.map((m) => ({
           ...(m.id != null ? { id: m.id } : {}),
           itemNo: m.item_no ?? '',
@@ -189,13 +193,13 @@ export default function ProductsPage() {
       loadList()
       // 停留在编辑页；重新拉详情回填物料 id（再次保存按 id upsert，不重复新增）
       try {
-        const { data } = await api.get<ProductDetail>(`/products/${encodeURIComponent(v.code)}`)
+        const { data } = await api.get<ProductDetail>(`/products/${encodeURIComponent(code)}`)
         if (Array.isArray(data.materials)) {
           setMaterials(data.materials)
           originalMaterialsRef.current = data.materials.map(m => ({ ...m }))
         }
         if (Array.isArray(data.moldings)) setMoldings(data.moldings)
-        setEditing(prev => prev ?? { code: v.code, name: v.name ?? '', customer: v.customer ?? '' })
+        setEditing(prev => ({ ...(prev ?? {}), code, name: v.name ?? '', customer: v.customer ?? '' }))
       } catch {}
     } catch {
       /* 拦截器已提示 */
@@ -372,8 +376,11 @@ export default function ProductsPage() {
         <Form form={form} layout="vertical">
           <Row gutter={16}>
             <Col span={6}>
-              <Form.Item name="code" label="编码" rules={[{ required: true, message: '必填' }]}>
-                <Input disabled={!creating} placeholder="例如 LDH-23001" />
+              <Form.Item name="code" label="编码" rules={[
+                { required: true, message: '必填' },
+                { pattern: /^[^/\\?#%]+$/, message: '编码不能包含 / \\ ? # %（需要斜杠请用全角／）' },
+              ]}>
+                <Input maxLength={64} placeholder="例如 LDH-23001" />
               </Form.Item>
             </Col>
             <Col span={12}>
@@ -405,7 +412,7 @@ export default function ProductsPage() {
                 rows={materials}
                 onChange={setMaterials}
                 dicts={dicts}
-                productCode={editing?.code ?? form.getFieldValue('code')}
+                productCode={currentProductCode?.trim() || editing?.code}
               />,
             },
           ]}

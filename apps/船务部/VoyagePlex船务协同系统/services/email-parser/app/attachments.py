@@ -55,19 +55,25 @@ def parse_attachment(path: Path, original_name: str) -> dict:
 
 
 def parse_excel(path: Path) -> dict:
-    wb = openpyxl.load_workbook(path, data_only=True, read_only=False)
-    yax = _parse_yax(wb)
-    if yax:
-        return {"kind": "yax", "fields": yax, "items": yax.pop("po_so_mapping", []), "warnings": []}
+    # read_only 模式流式读取单元格值，不加载样式/图形：大附件在 512MB 容器里
+    # 用普通模式加载会把整个工作簿（含 DrawingML）读进内存，既慢又有 OOM 风险。
+    wb = openpyxl.load_workbook(path, data_only=True, read_only=True)
+    try:
+        yax = _parse_yax(wb)
+        if yax:
+            return {"kind": "yax", "fields": yax, "items": yax.pop("po_so_mapping", []), "warnings": []}
 
-    sheet = _choose_packing_sheet(wb)
-    header_row, headers = _find_header(sheet)
+        sheet = _choose_packing_sheet(wb)
+        sheet_title = sheet.title
+        rows = _read_sheet_rows(sheet)
+    finally:
+        wb.close()
+    header_row, headers = _find_header(rows)
     columns = _column_map(headers)
     _apply_measurement_columns(headers, columns)
     items = []
     blank_streak = 0
-    for row_index in range(header_row + 1, sheet.max_row + 1):
-        values = [sheet.cell(row_index, col).value for col in range(1, sheet.max_column + 1)]
+    for row_index, values in enumerate(rows[header_row:], header_row + 1):
         product = _value(values, columns.get("product_code"))
         if not product or _is_non_cargo_label(product):
             blank_streak += 1
@@ -99,8 +105,8 @@ def parse_excel(path: Path) -> dict:
         dims = [_number(_value(values, columns.get(key))) for key in ("length", "width", "height")]
         item["box_dimensions"] = "*".join(_display_number(x) for x in dims) if all(x is not None for x in dims) else ""
         items.append(item)
-    warnings = [] if items else [f"工作表“{sheet.title}”未识别到Packing List明细"]
-    fields = {"loading_factory": "兴信"} if _xingxin_is_loading_factory(sheet) else {}
+    warnings = [] if items else [f"工作表“{sheet_title}”未识别到Packing List明细"]
+    fields = {"loading_factory": "兴信"} if _xingxin_is_loading_factory(rows) else {}
     return {"kind": "packing_list", "fields": fields, "items": items, "warnings": warnings}
 
 
@@ -191,7 +197,7 @@ def parse_word(path: Path) -> dict:
 def _parse_yax(wb) -> Optional[dict]:
     values = []
     for ws in wb.worksheets[:3]:
-        for row in ws.iter_rows(min_row=1, max_row=min(ws.max_row, 80), values_only=True):
+        for row in ws.iter_rows(min_row=1, max_row=min(ws.max_row or 80, 80), values_only=True):
             values.append(["" if value is None else str(value).strip() for value in row])
     flat = "\n".join(" | ".join(row) for row in values)
     if "YAX" not in flat.upper() and "并柜拖车通知单" not in flat:
@@ -218,13 +224,31 @@ def _choose_packing_sheet(wb):
     return candidates[0] if candidates else wb.active
 
 
-def _find_header(ws) -> tuple[int, list]:
-    best = (1, [ws.cell(1, col).value for col in range(1, ws.max_column + 1)], 0)
-    for row in range(1, min(ws.max_row, 40) + 1):
-        headers = [ws.cell(row, col).value for col in range(1, ws.max_column + 1)]
+def _read_sheet_rows(sheet) -> list[list]:
+    """Stream sheet values into a plain list, stopping early on a long run of empty
+    rows so an inflated sheet dimension cannot blow up memory or parse time."""
+    # 部分非 Excel 工具生成的文件 dimension 标记偏小，会截断真实数据，按实际内容流式读取
+    sheet.reset_dimensions()
+    rows = []
+    blank_streak = 0
+    for row in sheet.iter_rows(values_only=True):
+        values = list(row)
+        if any(value is not None for value in values):
+            blank_streak = 0
+        else:
+            blank_streak += 1
+            if blank_streak >= 50:
+                break
+        rows.append(values)
+    return rows
+
+
+def _find_header(rows: list[list]) -> tuple[int, list]:
+    best = (1, rows[0] if rows else [], 0)
+    for index, headers in enumerate(rows[:40]):
         score = len(_column_map(headers))
         if score > best[2]:
-            best = (row, headers, score)
+            best = (index + 1, headers, score)
     return best[0], best[1]
 
 
@@ -259,11 +283,11 @@ def _is_non_cargo_label(value) -> bool:
     }
 
 
-def _xingxin_is_loading_factory(sheet) -> bool:
+def _xingxin_is_loading_factory(rows: list[list]) -> bool:
     """Detect the customer-designated loading factory without exposing it as cargo ownership."""
-    for row in sheet.iter_rows():
-        for cell in row:
-            text = _text(cell.value)
+    for row in rows:
+        for value in row:
+            text = _text(value)
             if re.search(r"(?:兴信|新信|HANSON).{0,12}(?:装柜|做柜|装货|LOADING)", text, re.I):
                 return True
     return False

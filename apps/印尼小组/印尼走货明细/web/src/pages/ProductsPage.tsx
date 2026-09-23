@@ -363,7 +363,12 @@ export default function ProductsPage() {
         <Form form={form} layout="vertical">
           <Row gutter={16}>
             <Col span={6}>
-              <Form.Item name="code" label="编码" rules={[{ required: true, message: '必填' }]}>
+              <Form.Item name="code" label="编码" rules={[
+                { required: true, message: '必填' },
+                // 编码会拼进 URL（/products/{code}）：斜杠经 nginx 解码后会拆断路径导致 405，
+                // 其余几个字符同样会破坏路由。需要斜杠外观时请用全角／（U+FF0F）。
+                { pattern: /^[^/\\?#%]+$/, message: '编码不能包含 / \\ ? # %（需要斜杠请用全角／）' },
+              ]}>
                 <Input disabled={!creating} placeholder="例如 LDH-23001" />
               </Form.Item>
             </Col>

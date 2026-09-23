@@ -123,6 +123,23 @@ export function isIndonesiaBlHead(value?: string) {
   return Boolean(head && !/(?:实业|實業|全球|\bRRI\b|\bRRM\b)/i.test(head))
 }
 
+const HUASHENGYI_BANK_INFO = [
+  'Beneficiary name :Shenzhen Huashengyi Export Trading Limited',
+  'Account number :',
+  '15668277360001(USD)',
+  '15353466270052 (RMB)',
+  '15602776290037 (HKD)',
+  'Beneficiary Bank: Ping An Bank Co., Ltd',
+  'Swift code : SZDBCNBSXXX',
+].join('\n')
+const HUASHENGYI_BENEFICIARY = 'Beneficiary：SHENZHEN  HUASHENGYI  EXPORT  TRADING  LIMITED'
+const HUASHENGYI_BENEFICIARY_ADDRESS = 'Add: Room 602, Longsheng Comprehensive Service Building, Longsheng Community, Dalang Street, Longhua District, Shenzhen City'
+
+function isHuashengyiSeller(seller?: SupplierDict) {
+  return Boolean(seller && [seller.keyword, seller.full, seller.nameEn]
+    .some(name => /华胜益|HUASHENGYI/i.test(name || '')))
+}
+
 function fillSeller(wb: XLSX.WorkBook, seller: SupplierDict) {
   const name = seller.full!.trim(), english = seller.nameEn!.trim()
   const combined = `${name}\n${english}`
@@ -136,8 +153,10 @@ function fillSeller(wb: XLSX.WorkBook, seller: SupplierDict) {
   put('全球发票', ['B23', 'B78', 'B117'], name)
   put('全球发票', ['B24', 'B79', 'B118'], english)
   put('全球发票', ['B25', 'B80', 'B119'], address)
-  // 参考模板中的银行账户属于样例公司，不得继承为新卖方收款信息。
-  put('全球发票', ['B50', 'G50', 'G52'], '')
+  // 华胜益发票保留其固定收款资料；其他卖方不得继承模板中的样例账户。
+  put('全球发票', ['B50'], isHuashengyiSeller(seller) ? HUASHENGYI_BANK_INFO : '')
+  put('全球发票', ['G50'], isHuashengyiSeller(seller) ? HUASHENGYI_BENEFICIARY : '')
+  put('全球发票', ['G52'], isHuashengyiSeller(seller) ? HUASHENGYI_BENEFICIARY_ADDRESS : '')
   put('印尼合同', ['C13', 'C58'], name)
   put('印尼合同', ['C14', 'C59'], english)
   put('印尼合同', ['C15', 'C60'], address)
@@ -635,10 +654,31 @@ function populateLinkedDocuments(
       }
     }
     setTradeTerms(groupInvoiceSheet, invoiceStart, invoiceEnd, seller)
-    for (const [cellAddress, cell] of Object.entries(groupInvoiceSheet || {}) as [string, any][]) {
-      const row = addressRow(cellAddress)
-      if (row >= invoiceStart && row <= invoiceEnd && typeof cell?.v === 'string'
-        && /Beneficiary|Account number|Swift code/i.test(cell.v)) setPreservingStyle(groupInvoiceSheet, cellAddress, '')
+    const totalAmountRow = findLabelRow(
+      groupInvoiceSheet,
+      'B',
+      slot.invoiceRows[1],
+      invoiceEnd,
+      /总值大写|Total Amount/i,
+    )
+    if (totalAmountRow) {
+      const beneficiaryRow = totalAmountRow + 1
+      const beneficiaryAddressRow = totalAmountRow + 3
+      setPreservingStyle(
+        groupInvoiceSheet,
+        `B${beneficiaryRow}`,
+        isHuashengyiSeller(seller) ? HUASHENGYI_BANK_INFO : '',
+      )
+      setPreservingStyle(
+        groupInvoiceSheet,
+        `G${beneficiaryRow}`,
+        isHuashengyiSeller(seller) ? HUASHENGYI_BENEFICIARY : '',
+      )
+      setPreservingStyle(
+        groupInvoiceSheet,
+        `G${beneficiaryAddressRow}`,
+        isHuashengyiSeller(seller) ? HUASHENGYI_BENEFICIARY_ADDRESS : '',
+      )
     }
     if (group.indo) {
       const packingHeaderRow = addressRow(packingSlot.packingHeader)

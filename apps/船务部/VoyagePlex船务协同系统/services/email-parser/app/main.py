@@ -1,9 +1,9 @@
+import asyncio
 import tempfile
 import uuid
 import re
 import os
 import json
-from io import BytesIO
 from datetime import datetime
 from urllib.parse import quote
 from pathlib import Path
@@ -29,12 +29,15 @@ async def poll_mailbox(after_uid: int = 0):
     if after_uid < 0:
         return Response(content='{"error":"after_uid 无效"}', status_code=400, media_type="application/json")
     try:
-        mailbox = fetch_mailbox(after_uid)
+        # IMAP 抓取是阻塞 IO、附件解析（openpyxl/pdfplumber）是 CPU 密集计算，
+        # 二者都必须放到线程里执行：服务以单 worker uvicorn 运行，任何一个阻塞
+        # 事件循环都会让 /health 超时，容器被 autoheal 反复杀死重启。
+        mailbox = await asyncio.to_thread(fetch_mailbox, after_uid)
         if not mailbox["configured"]:
             return {"configured": False, "items": []}
-        uploads = [UploadFile(file=BytesIO(entry["raw"]), filename=f'mail-{entry["uid"]}.eml')
+        entries = [{"filename": f'mail-{entry["uid"]}.eml', "raw": entry["raw"]}
                    for entry in mailbox["messages"] if entry["raw"]]
-        parsed = await parse_email_batch(uploads) if uploads else {"items": []}
+        parsed = await asyncio.to_thread(parse_email_entries, entries) if entries else {"items": []}
         parsed_by_uid = {int(item["filename"][5:-4]): item for item in parsed["items"]}
         items = []
         for entry in mailbox["messages"]:
@@ -244,15 +247,21 @@ async def export_completed_shipment_summary(payload: dict):
 
 @app.post("/v1/email-batches/parse")
 async def parse_email_batch(files: list[UploadFile] = File(...)):
+    entries = [{"filename": file.filename, "raw": await file.read()} for file in files]
+    return await asyncio.to_thread(parse_email_entries, entries)
+
+
+def parse_email_entries(entries: list[dict]) -> dict:
+    """CPU 密集的整批复解析，同步实现，调用方负责用 asyncio.to_thread 移出事件循环。"""
     batch_id = str(uuid.uuid4())
     results = []
     with tempfile.TemporaryDirectory(prefix=f"voyageplex-{batch_id}-") as root:
-        for index, upload in enumerate(files):
-            item = {"index": index, "filename": upload.filename or f"email-{index}.eml"}
+        for index, entry in enumerate(entries):
+            item = {"index": index, "filename": entry.get("filename") or f"email-{index}.eml"}
             try:
                 if not item["filename"].lower().endswith(".eml"):
                     raise ValueError("只支持 .eml 邮件文件")
-                raw = await upload.read()
+                raw = entry.get("raw")
                 if not raw:
                     raise ValueError("文件为空")
                 message = parse_eml(raw, Path(root) / f"item-{index}")

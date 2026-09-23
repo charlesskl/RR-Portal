@@ -82,19 +82,32 @@ public sealed class MailboxSyncService(IServiceScopeFactory scopeFactory, ILogge
                         .AsNoTracking().Where(value => value.Fingerprint == fingerprint)
                         .OrderBy(value => value.Id).FirstOrDefaultAsync(cancellationToken);
                     var failed = item["status"]?.ToString() == "failed";
+                    var itemError = item["error"]?.ToString() ?? "";
                     var receivedAt = item["mailbox_received_at"]?.ToString() ?? "";
                     string receivedDate;
-                    try { receivedDate = MailboxDateRules.ReceivedDate(receivedAt); }
-                    catch (FormatException error) { throw new InvalidOperationException($"邮件 {uid} 缺少有效收件时间", error); }
-                    if (!batchesByDate.TryGetValue(receivedDate, out var batch))
+                    try
+                    {
+                        receivedDate = MailboxDateRules.ReceivedDate(receivedAt);
+                    }
+                    catch (FormatException)
+                    {
+                        // 单封邮件收件时间无效不能中断整批，否则断点永远停在同一 UID 反复重试；
+                        // 记为失败项归入“未知日期”批次，断点照常推进
+                        failed = true;
+                        itemError = string.IsNullOrEmpty(itemError) ? "邮件缺少有效收件时间" : itemError;
+                        receivedDate = "";
+                    }
+                    var batchKey = string.IsNullOrEmpty(receivedDate) ? "未知日期" : receivedDate;
+                    if (!batchesByDate.TryGetValue(batchKey, out var batch))
                     {
                         batch = new ImportBatch
                         {
-                            Kind = "Email", FileName = $"{receivedDate} 收到的邮件",
+                            Kind = "Email",
+                            FileName = string.IsNullOrEmpty(receivedDate) ? "收件时间未知的邮件" : $"{receivedDate} 收到的邮件",
                             MailReceivedDate = receivedDate, Status = "PendingConfirmation",
                             ParserVersion = "mailbox-imap",
                         };
-                        batchesByDate.Add(receivedDate, batch);
+                        batchesByDate.Add(batchKey, batch);
                     }
                     batch.EmailItems.Add(new ImportEmailItem
                     {
@@ -105,7 +118,7 @@ public sealed class MailboxSyncService(IServiceScopeFactory scopeFactory, ILogge
                         MailReceivedDate = receivedDate,
                         Fingerprint = fingerprint, Status = failed ? "failed" : duplicate is null ? "pending" : "duplicate",
                         DuplicateOfItemId = duplicate?.Id, ResultJson = item.ToJsonString(),
-                        Error = item["error"]?.ToString() ?? "",
+                        Error = itemError,
                     });
                     state.LastUid = Math.Max(state.LastUid, uid);
                     imported++;

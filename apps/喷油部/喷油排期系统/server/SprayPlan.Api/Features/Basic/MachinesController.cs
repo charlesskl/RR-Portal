@@ -38,7 +38,7 @@ public class MachinesController(AppDbContext db) : ControllerBase
     // POST /api/machines —— 新建（文员或主管）。校验：必填 → 拉别存在 → 同拉别内机台号不重复
     // 工艺/UV 标记继承所属拉别（整条拉一种工艺），不再由前端单独传
     [HttpPost]
-    [Authorize(Roles = "clerk,admin")]
+    [Authorize(Roles = "clerk,manager,admin")]
     public async Task<IActionResult> Create([FromBody] CreateMachineRequest req)
     {
         if (string.IsNullOrWhiteSpace(req.MachineNo) || req.LineId is null or 0)
@@ -66,7 +66,7 @@ public class MachinesController(AppDbContext db) : ControllerBase
     // POST /api/machines/batch —— 批量录入（文员或主管）。一条拉一次贴一串机台号，
     // 工艺继承拉别；同拉别内已存在的号自动跳过（不报错），返回新建与跳过清单
     [HttpPost("batch")]
-    [Authorize(Roles = "clerk,admin")]
+    [Authorize(Roles = "clerk,manager,admin")]
     public async Task<IActionResult> BatchCreate([FromBody] BatchCreateMachineRequest req)
     {
         if (req.LineId is null or 0) return BadRequest(new { error = "请先选择所属拉别" });
@@ -108,7 +108,7 @@ public class MachinesController(AppDbContext db) : ControllerBase
 
     // PATCH /api/machines/{id} —— 部分更新（文员或主管）
     [HttpPatch("{id:int}")]
-    [Authorize(Roles = "clerk,admin")]
+    [Authorize(Roles = "clerk,manager,admin")]
     public async Task<IActionResult> Update(int id, [FromBody] UpdateMachineRequest req)
     {
         var m = await db.Machines.FindAsync(id);
@@ -143,7 +143,7 @@ public class MachinesController(AppDbContext db) : ControllerBase
 
     // DELETE /api/machines/{id} —— 真删（文员或主管）。机台无外键被引用（排期里机台号是 JSON 文本快照），可硬删
     [HttpDelete("{id:int}")]
-    [Authorize(Roles = "clerk,admin")]
+    [Authorize(Roles = "clerk,manager,admin")]
     public async Task<IActionResult> Delete(int id)
     {
         var m = await db.Machines.FindAsync(id);

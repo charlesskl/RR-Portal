@@ -42,7 +42,7 @@ public class LinesController(AppDbContext db) : ControllerBase
 
     // POST /api/lines —— 新建（文员或主管）。厂区取顶部当前选择/账号归属，不由表单重复选择。
     [HttpPost]
-    [Authorize(Roles = "clerk,admin")]
+    [Authorize(Roles = "clerk,manager,admin")]
     public async Task<IActionResult> Create([FromBody] CreateLineRequest req)
     {
         if (string.IsNullOrWhiteSpace(req.Name))
@@ -69,7 +69,7 @@ public class LinesController(AppDbContext db) : ControllerBase
 
     // PATCH /api/lines/{id} —— 部分更新（文员或主管）
     [HttpPatch("{id:int}")]
-    [Authorize(Roles = "clerk,admin")]
+    [Authorize(Roles = "clerk,manager,admin")]
     public async Task<IActionResult> Update(int id, [FromBody] UpdateLineRequest req)
     {
         var line = await db.ProductionLines.FindAsync(id);
@@ -104,7 +104,7 @@ public class LinesController(AppDbContext db) : ControllerBase
 
     // DELETE /api/lines/{id} —— 软删（文员或主管），isActive=false
     [HttpDelete("{id:int}")]
-    [Authorize(Roles = "clerk,admin")]
+    [Authorize(Roles = "clerk,manager,admin")]
     public async Task<IActionResult> Delete(int id)
     {
         var line = await db.ProductionLines.FindAsync(id);

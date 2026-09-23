@@ -15,7 +15,7 @@ export async function requireAdmin() {
 // 文员或主管可写（工艺模板录入：clerk + admin；viewer 只读 → 拒绝）
 export async function requireClerkOrAdmin() {
   const session = await getSession();
-  if (session.role !== "clerk" && session.role !== "admin") {
+  if (session.role !== "clerk" && session.role !== "manager" && session.role !== "admin") {
     return NextResponse.json({ error: "需要文员或主管权限" }, { status: 403 });
   }
   return null;

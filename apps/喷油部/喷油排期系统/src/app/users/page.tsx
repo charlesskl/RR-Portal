@@ -32,7 +32,7 @@ export default async function UsersPage() {
 
   // 角色英文 → 中文显示映射（与 prisma/schema.prisma 中的注释保持一致)
   const ROLE_LABEL: Record<string, string> = {
-    admin: "管理员/主管", clerk: "文员/拉长",
+    admin: "管理员", manager: "主管", clerk: "文员/拉长",
   };
 
   return (

@@ -46,8 +46,9 @@ export default function NewUserPage() {
             }}
             className="w-full border border-app-border rounded-btn px-3 py-2"
           >
-            <option value="admin">管理员/主管</option>
-            <option value="clerk">文员/拉长 clerk</option>
+            <option value="admin">管理员</option>
+            <option value="manager">主管</option>
+            <option value="clerk">文员/拉长</option>
           </select>
         </div>
         <div>

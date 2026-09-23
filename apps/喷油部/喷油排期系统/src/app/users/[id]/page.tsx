@@ -1,10 +1,10 @@
 "use client";
-import { apiFetch } from "@/lib/apiFetch";
 // 用户编辑页（仅主管 admin 可访问，路由级鉴权由 API 层兜底）
 // 功能：修改显示名 / 角色 / 启用状态 / 重置密码 / 删除用户
 // 设计意图：用户名作为登录主键不可改（避免破坏审计日志一致性），其余字段可改
 import { useEffect, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
+import { apiFetch } from "@/lib/apiFetch";
 
 export default function EditUserPage() {
   const router = useRouter();
@@ -85,8 +85,9 @@ export default function EditUserPage() {
             setForm({ ...form, role, factoryId: role === "admin" ? "ALL" : (form.factoryId === "ALL" ? "XINGXIN" : form.factoryId) });
           }}
             className="w-full border border-app-border rounded-btn px-3 py-2">
-            <option value="admin">管理员/主管</option>
-            <option value="clerk">文员/拉长 clerk</option>
+            <option value="admin">管理员</option>
+            <option value="manager">主管</option>
+            <option value="clerk">文员/拉长</option>
           </select>
         </div>
         <div>

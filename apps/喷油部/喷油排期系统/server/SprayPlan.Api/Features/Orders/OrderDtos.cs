@@ -7,7 +7,7 @@ public record CreateOrderRequest(string? ExternalOrderNo, int? ProductId, string
 public record UpdateOrderRequest(string? DeliveryDate, string? Remark, string? Status, bool? IsMA, bool? IsUrgent, string? OrderDate, List<UpdateOrderPartQtyDto>? PartQtys);
 // 明细数量编辑入参：按 partQty 主键 id 改 qty（仅 received 且无排期计划的订单允许，用于修正导入识别错误）
 public record UpdateOrderPartQtyDto(int Id, int Qty);
-public record OrderProcessScheduleRow(string? StartDate, string? Craft, int? DailyTarget, int? PartQtyId = null, double? LaborPrice = null);
+public record OrderProcessScheduleRow(string? StartDate, int? LineId, int? DailyTarget, int? PartQtyId = null, double? LaborPrice = null);
 public record CreateOrderProcessScheduleRequest(List<OrderProcessScheduleRow>? Rows, List<UpdateOrderPartQtyDto>? PartQtys = null);
 public record CreateOrderProcessScheduleResult(int CreatedPlans, string? StartDate, string? EndDate);
 public record RevokeActualsRequest(string? Scope, string? Date);

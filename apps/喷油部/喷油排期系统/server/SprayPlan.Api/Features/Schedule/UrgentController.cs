@@ -57,7 +57,7 @@ public class UrgentController(AppDbContext db) : ControllerBase
 
     // POST /api/schedule/urgent/preview — 只算不落库
     [HttpPost("preview")]
-    [Authorize(Roles = "clerk,admin")]
+    [Authorize(Roles = "clerk,manager,admin")]
     public async Task<IActionResult> Preview([FromBody] UrgentPreviewRequest req)
     {
         if (req.Rows is null || req.Rows.Count == 0)
@@ -169,7 +169,7 @@ public class UrgentController(AppDbContext db) : ControllerBase
 
     // POST /api/schedule/urgent/commit — 落库：写急单计划行 + 被停单整单顺延
     [HttpPost("commit")]
-    [Authorize(Roles = "clerk,admin")]
+    [Authorize(Roles = "clerk,manager,admin")]
     public async Task<IActionResult> Commit([FromBody] UrgentCommitRequest req)
     {
         if (req.Rows is null || req.Rows.Count == 0)

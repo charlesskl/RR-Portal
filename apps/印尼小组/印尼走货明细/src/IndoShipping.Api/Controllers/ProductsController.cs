@@ -50,6 +50,12 @@ public class ProductsController(ISqlConnectionFactory factory) : ControllerBase
     [HttpPut("{code}")]
     public async Task<IActionResult> Upsert(string code, [FromBody] ProductBody body)
     {
+        // 编码会拼进 URL（/api/products/{code}、/api/materials/bulk/{code}）：
+        // 斜杠经 nginx 解码后会拆断路径（SPA 回退只对 GET 注册，PUT 命中返回 405），
+        // 其余几个字符同样会破坏路由。直连容器 %2F 能到这里，必须拦下，避免写入后前端再也访问不到。
+        if (code.IndexOfAny(['/', '\\', '?', '#', '%']) >= 0)
+            return BadRequest(new { error = "编码不能包含 / \\ ? # % 等特殊字符（需要斜杠外观请用全角／）" });
+
         var moldings = body.moldings == null ? null : System.Text.Json.JsonSerializer.Serialize(body.moldings);
         using var c = factory.Create();
         await c.ExecuteAsync(@"

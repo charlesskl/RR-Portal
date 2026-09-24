@@ -205,7 +205,13 @@ describe('supplier document export', () => {
     expect(wb.Sheets['装箱单'].D32.f).toBe('SUM(D25:D31)')
 
     const outputZip = await JSZip.loadAsync(await file.arrayBuffer())
+    const outputStyles = await outputZip.file('xl/styles.xml')!.async('string')
     const invoiceXml = await outputZip.file('xl/worksheets/sheet4.xml')!.async('string')
+    for (const row of [25, 26, 39]) {
+      for (const column of ['B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J']) {
+        expect(borderEdges(outputStyles, invoiceXml, `${column}${row}`)).toEqual(['top', 'bottom', 'left', 'right'])
+      }
+    }
     expect(invoiceXml).not.toMatch(/<x:(?:c|f|v)\b/)
   })
 

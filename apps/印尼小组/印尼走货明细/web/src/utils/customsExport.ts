@@ -2494,7 +2494,7 @@ async function ensureLinkedTableGrid(
   }
   if (kind === 'contract' || kind === 'invoice') {
     // 合同和发票右侧资料栏使用单元格底边作为填写线。动态复制单据时，
-    // 空值单元格可能不会带出模板样式，因此按各模板的固定相对位置补底边。
+    // 空值单元格可能不会带出模板样式，因此补齐资料字段的底边。
     const underlinedStyles = new Map<string, string>()
     const ensureCell = (rowNo: number, columnIndex: number) => {
       let row = directChildren(sheetData, 'row').find(candidate => rowNumber(candidate) === rowNo)
@@ -2558,17 +2558,25 @@ async function ensureLinkedTableGrid(
     }
 
     const valueColumn = XLSX.utils.decode_col(kind === 'contract' ? 'H' : 'J')
-    const invoiceOffsets = rawSections[0]?.start === 32
-      ? [-23, -21, -19, -16]
-      : rawSections[0]?.start === 28
-        ? [-19, -17, -15, -12]
-        : [-14, -12, -10, -8]
-    const rowOffsets = kind === 'contract' ? [-19, -15, -11] : invoiceOffsets
-    for (const range of ranges) {
-      for (const offset of rowOffsets) {
-        const cell = ensureCell(range.detailStart + offset, valueColumn)
-        cell.setAttribute('s', styleWithBottom(cell.getAttribute('s') || '0'))
-      }
+    // 各张发票的资料区高度不同，不能沿用第一张相对明细区的偏移。
+    // 从已完成行扩展的标签定位填写线，空值字段也保留底边。
+    const sharedStringsFile = zip.file('xl/sharedStrings.xml')
+    const sharedStrings = sharedStringsFile
+      ? Array.from(parser.parseFromString(await sharedStringsFile.async('string'), 'application/xml').getElementsByTagName('si')).map(node => node.textContent || '')
+      : []
+    const fieldRows = kind === 'contract'
+      ? ranges.flatMap(range => [-19, -15, -11].map(offset => range.detailStart + offset))
+      : directChildren(sheetData, 'row').filter(row => {
+        const label = directChildren(row, 'c').find(cell => cellColumn(cell.getAttribute('r') || '') === 'I')
+        if (!label) return false
+        const text = label.getAttribute('t') === 's'
+          ? sharedStrings[Number(directChild(label, 'v')?.textContent)] || ''
+          : directChild(label, 'is')?.textContent || directChild(label, 'v')?.textContent || ''
+        return /号码|日期|合同号|运输方式/.test(text)
+      }).map(rowNumber)
+    for (const rowNo of fieldRows) {
+      const cell = ensureCell(rowNo, valueColumn)
+      cell.setAttribute('s', styleWithBottom(cell.getAttribute('s') || '0'))
     }
     borders.setAttribute('count', String(directChildren(borders, 'border').length))
   }

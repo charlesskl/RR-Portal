@@ -319,6 +319,14 @@ describe('supplier document export', () => {
     expect(wb.Sheets['全球发票'].I42.f).toBe('SUM(J32:J41)')
     expect(wb.Sheets['装箱单'].D31.f).toBe('SUM(D24:D30)')
     expect(wb.Sheets['装箱单'].D64.f).toBe('SUM(D57:D63)')
+    const outputZip = await JSZip.loadAsync(await file.arrayBuffer())
+    const styles = await outputZip.file('xl/styles.xml')!.async('string')
+    const invoiceXml = await worksheetXml(outputZip, '全球发票')
+    // 第二张发票经第一张缩短后，字段在 58/60/62/65 行，而非套用首张偏移。
+    for (const address of ['J9', 'J11', 'J13', 'J16', 'J58', 'J60', 'J62', 'J65']) {
+      expect(borderStyle(styles, invoiceXml, address, 'bottom')).toBe('thin')
+    }
+    expect(borderEdges(styles, invoiceXml, 'J56')).not.toContain('bottom')
   })
 
   it('uses Indonesia documents and the actual supplier when the BL header is neither RRI nor RRM', async () => {

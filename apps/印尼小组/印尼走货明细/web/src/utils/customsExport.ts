@@ -8,6 +8,7 @@ import JSZip from 'jszip'
 import { DOMParser, XMLSerializer } from '@xmldom/xmldom'
 import type { Material, SupplierDict } from '../api/client'
 import { documentSellerForLine, supplierForLine } from './supplierProfiles'
+import { deliveryDeadline, syncedShipmentDeadline } from './shipmentDeadline'
 import { isPaperRope, shipmentGrossPerPc, shipmentPackingAverageQty, shipmentWeightQuantity } from './shipmentWeight'
 
 export const CUSTOMS_FIXED = '深圳市华胜益出口贸易有限公司'
@@ -94,6 +95,7 @@ export interface CustomsExportForm {
   containerNo?: string
   containerCount?: number | string
   shipDate?: string
+  loadDate?: string
   blNo?: string
   rate?: number
   // 旧版隐藏字段，新版暂无 → 默认空/0
@@ -218,13 +220,15 @@ function fillGenericSeller(wb: XLSX.WorkBook, seller: SupplierDict) {
   put('草稿大单-1', ['A6', 'A8'], name)
 }
 
-// 输出文件名：月日+客户+柜数+柜号(报关).xlsx
+// 输出文件名：装柜月日+客户+柜数+柜号.xlsx
 export function customsFileName(form: CustomsExportForm): string {
   const customer = form.customer || '客户'
   const count = form.containerCount != null && form.containerCount !== '' ? String(form.containerCount) : '1'
   const no = (form.containerNo || '').trim()
-  const d = form.shipDate ? new Date(form.shipDate) : new Date()
-  return `${d.getMonth() + 1}月${d.getDate()}日${customer}${count}柜${no}(报关).xlsx`
+  if (!form.loadDate) throw new Error('请先填写装柜时间，用于导出文件命名')
+  const d = new Date(form.loadDate)
+  if (Number.isNaN(d.getTime())) throw new Error('装柜时间格式不正确')
+  return `${d.getMonth() + 1}月${d.getDate()}日${customer}${count}柜${no}.xlsx`
 }
 
 export function dataUrlToBytes(dataUrl: string): { bytes: Uint8Array; ext: string } | null {
@@ -1161,6 +1165,19 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
       applyCustomerDocumentEntity(wbObj, form.customer)
     } else {
       populateLinkedDocuments(wbObj, newName, sorted, form.customer, sellerForItem, form)
+    }
+  }
+  if (!input.mainOnly) {
+    const deadline = form.shipDate ? await syncedShipmentDeadline(form.shipDate) : ''
+    const delivery = deliveryDeadline(deadline)
+    for (const name of wbObj.SheetNames.filter(name => /合同/.test(name))) {
+      const sheet = wbObj.Sheets[name]
+      for (const [address, cell] of Object.entries(sheet)) {
+        if (!/^B\d+$/.test(address)) continue
+        const label = String(cell?.v || '')
+        if (/装运期|Shipment\s*date/i.test(label)) setPreservingStyle(sheet, address.replace(/^B/, 'C'), deadline)
+        else if (/交[货貨]日期|Delivery\s*date/i.test(label)) setPreservingStyle(sheet, address.replace(/^B/, 'C'), delivery)
+      }
     }
   }
   fitCategoryColumn(wbObj)
@@ -2494,7 +2511,7 @@ async function ensureLinkedTableGrid(
   }
   if (kind === 'contract' || kind === 'invoice') {
     // 合同和发票右侧资料栏使用单元格底边作为填写线。动态复制单据时，
-    // 空值单元格可能不会带出模板样式，因此按各模板的固定相对位置补底边。
+    // 空值单元格可能不会带出模板样式，因此补齐资料字段的底边。
     const underlinedStyles = new Map<string, string>()
     const ensureCell = (rowNo: number, columnIndex: number) => {
       let row = directChildren(sheetData, 'row').find(candidate => rowNumber(candidate) === rowNo)
@@ -2558,16 +2575,32 @@ async function ensureLinkedTableGrid(
     }
 
     const valueColumn = XLSX.utils.decode_col(kind === 'contract' ? 'H' : 'J')
-    const invoiceOffsets = rawSections[0]?.start === 32
-      ? [-23, -21, -19, -16]
-      : rawSections[0]?.start === 28
-        ? [-19, -17, -15, -12]
-        : [-14, -12, -10, -8]
-    const rowOffsets = kind === 'contract' ? [-19, -15, -11] : invoiceOffsets
-    for (const range of ranges) {
-      for (const offset of rowOffsets) {
-        const cell = ensureCell(range.detailStart + offset, valueColumn)
-        cell.setAttribute('s', styleWithBottom(cell.getAttribute('s') || '0'))
+    // 各张单据的资料区高度不同，不能沿用第一张相对明细区的偏移。
+    // 从已完成行扩展的标签定位填写线，空值字段也保留底边。
+    const sharedStringsFile = zip.file('xl/sharedStrings.xml')
+    const sharedStrings = sharedStringsFile
+      ? Array.from(parser.parseFromString(await sharedStringsFile.async('string'), 'application/xml').getElementsByTagName('si')).map(node => node.textContent || '')
+      : []
+    const fieldRows = directChildren(sheetData, 'row').filter(row => {
+        const label = directChildren(row, 'c').find(cell => cellColumn(cell.getAttribute('r') || '') === (kind === 'contract' ? 'G' : 'I'))
+        if (!label) return false
+        const text = label.getAttribute('t') === 's'
+          ? sharedStrings[Number(directChild(label, 'v')?.textContent)] || ''
+          : directChild(label, 'is')?.textContent || directChild(label, 'v')?.textContent || ''
+        return (kind === 'contract' ? /合同编码|合同编号|签定日期|签订日期|签定地点|签订地点/ : /号码|日期|合同号|运输方式/).test(text)
+      }).map(rowNumber)
+    const mergedRanges = Array.from(sheetDoc.getElementsByTagName('mergeCell'))
+      .map(cell => XLSX.utils.decode_range(cell.getAttribute('ref') || 'A1'))
+    for (const rowNo of fieldRows) {
+      const cell = ensureCell(rowNo, valueColumn)
+      cell.setAttribute('s', styleWithBottom(cell.getAttribute('s') || '0'))
+      // WPS/Excel 显示合并区域最下沿的边框，不能只给左上角单元格加线。
+      const merged = mergedRanges.find(range => range.s.r === rowNo - 1 && range.s.c === valueColumn)
+      if (merged) {
+        for (let column = merged.s.c; column <= merged.e.c; column++) {
+          const bottomCell = ensureCell(merged.e.r + 1, column)
+          bottomCell.setAttribute('s', styleWithBottom(bottomCell.getAttribute('s') || '0'))
+        }
       }
     }
     borders.setAttribute('count', String(directChildren(borders, 'border').length))

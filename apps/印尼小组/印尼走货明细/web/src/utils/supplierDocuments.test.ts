@@ -303,10 +303,12 @@ describe('supplier document export', () => {
     }]))
     const file = await buildCustomsWorkbook({
       templateBuffer: rrmTemplateBuffer, items, materials, supplierProfiles: [seller, secondSeller],
-      productHs: new Map(), images: new Map(), form: { customer: 'RRM', containerNo: 'RRM-PACKING' },
+      productHs: new Map(), images: new Map(), form: { customer: 'RRM', containerNo: 'RRM-PACKING', blNo: ' SEAL-RRM-123 ', shipDate: '2026-09-28' },
     })
     const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' })
 
+    expect(countCellValue(wb, '全球合同', 'BEFORE September.24,2026')).toBe(2)
+    expect(countCellValue(wb, '全球合同', 'BEFORE September.17,2026')).toBe(2)
     expect(wb.Sheets['装箱单'].A1.v).toBe('Royal Regent (World) Co. Limited')
     expect(wb.Sheets['装箱单'].A9.v).toContain('Royal Regent (World) Co. Limited')
     expect(wb.Sheets['装箱单'].A9.v).not.toContain(seller.nameEn)
@@ -319,6 +321,20 @@ describe('supplier document export', () => {
     expect(wb.Sheets['全球发票'].I42.f).toBe('SUM(J32:J41)')
     expect(wb.Sheets['装箱单'].D31.f).toBe('SUM(D24:D30)')
     expect(wb.Sheets['装箱单'].D64.f).toBe('SUM(D57:D63)')
+    expect(wb.Sheets['装箱单'].H17.v).toBe('SEAL-RRM-123')
+    expect(wb.Sheets['装箱单'].H50.v).toBe('SEAL-RRM-123')
+    const outputZip = await JSZip.loadAsync(await file.arrayBuffer())
+    const styles = await outputZip.file('xl/styles.xml')!.async('string')
+    const invoiceXml = await worksheetXml(outputZip, '全球发票')
+    // 第二张发票经第一张缩短后，字段在 58/60/62/65 行，而非套用首张偏移。
+    for (const address of ['J9', 'J11', 'J13', 'J16', 'J58', 'J60', 'J62', 'J65']) {
+      expect(borderStyle(styles, invoiceXml, address, 'bottom')).toBe('thin')
+    }
+    expect(borderEdges(styles, invoiceXml, 'J56')).not.toContain('bottom')
+    const contractXml = await worksheetXml(outputZip, '全球合同')
+    for (const address of ['H5', 'H10', 'H14', 'H52', 'H57', 'H61']) {
+      expect(borderStyle(styles, contractXml, address, 'bottom')).toBe('thin')
+    }
   })
 
   it('uses Indonesia documents and the actual supplier when the BL header is neither RRI nor RRM', async () => {
@@ -398,7 +414,7 @@ describe('supplier document export', () => {
       }])),
       supplierProfiles: [firstSeller, secondSeller],
       productHs: new Map(), images: new Map(),
-      form: { customer: 'RRI', containerNo: 'RRI-INDO-PACKING' },
+      form: { customer: 'RRI', containerNo: 'RRI-INDO-PACKING', blNo: 'SEAL-RRI-456' },
     })
     const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' })
 
@@ -411,6 +427,8 @@ describe('supplier document export', () => {
     expect(Object.values(wb.Sheets['印尼发票']).some((cell: any) => cell?.v === 4558.43)).toBe(false)
     expect(countCellValue(wb, '装箱单', 'PT. ROYAL REGENT INDONESIA')).toBeGreaterThanOrEqual(2)
     expect(sheetContainsText(wb, '装箱单', secondSeller.nameEn)).toBe(true)
+    expect(wb.Sheets['装箱单'].H17.v).toBe('SEAL-RRI-456')
+    expect(wb.Sheets['装箱单'].H51.v).toBe('SEAL-RRI-456')
     expect(sheetContainsText(wb, '装箱单', secondSeller.email)).toBe(true)
     expect(wb.Sheets['装箱单'].A1.v).toBe('ROYAL REGENT PRODUCTS INDUSTRIES LIMITED')
 

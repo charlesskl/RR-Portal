@@ -327,6 +327,10 @@ describe('supplier document export', () => {
       expect(borderStyle(styles, invoiceXml, address, 'bottom')).toBe('thin')
     }
     expect(borderEdges(styles, invoiceXml, 'J56')).not.toContain('bottom')
+    const contractXml = await worksheetXml(outputZip, '全球合同')
+    for (const address of ['H5', 'H10', 'H14', 'H52', 'H57', 'H61']) {
+      expect(borderStyle(styles, contractXml, address, 'bottom')).toBe('thin')
+    }
   })
 
   it('uses Indonesia documents and the actual supplier when the BL header is neither RRI nor RRM', async () => {

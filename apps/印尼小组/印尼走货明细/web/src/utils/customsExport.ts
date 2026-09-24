@@ -2558,25 +2558,33 @@ async function ensureLinkedTableGrid(
     }
 
     const valueColumn = XLSX.utils.decode_col(kind === 'contract' ? 'H' : 'J')
-    // 各张发票的资料区高度不同，不能沿用第一张相对明细区的偏移。
+    // 各张单据的资料区高度不同，不能沿用第一张相对明细区的偏移。
     // 从已完成行扩展的标签定位填写线，空值字段也保留底边。
     const sharedStringsFile = zip.file('xl/sharedStrings.xml')
     const sharedStrings = sharedStringsFile
       ? Array.from(parser.parseFromString(await sharedStringsFile.async('string'), 'application/xml').getElementsByTagName('si')).map(node => node.textContent || '')
       : []
-    const fieldRows = kind === 'contract'
-      ? ranges.flatMap(range => [-19, -15, -11].map(offset => range.detailStart + offset))
-      : directChildren(sheetData, 'row').filter(row => {
-        const label = directChildren(row, 'c').find(cell => cellColumn(cell.getAttribute('r') || '') === 'I')
+    const fieldRows = directChildren(sheetData, 'row').filter(row => {
+        const label = directChildren(row, 'c').find(cell => cellColumn(cell.getAttribute('r') || '') === (kind === 'contract' ? 'G' : 'I'))
         if (!label) return false
         const text = label.getAttribute('t') === 's'
           ? sharedStrings[Number(directChild(label, 'v')?.textContent)] || ''
           : directChild(label, 'is')?.textContent || directChild(label, 'v')?.textContent || ''
-        return /号码|日期|合同号|运输方式/.test(text)
+        return (kind === 'contract' ? /合同编码|合同编号|签定日期|签订日期|签定地点|签订地点/ : /号码|日期|合同号|运输方式/).test(text)
       }).map(rowNumber)
+    const mergedRanges = Array.from(sheetDoc.getElementsByTagName('mergeCell'))
+      .map(cell => XLSX.utils.decode_range(cell.getAttribute('ref') || 'A1'))
     for (const rowNo of fieldRows) {
       const cell = ensureCell(rowNo, valueColumn)
       cell.setAttribute('s', styleWithBottom(cell.getAttribute('s') || '0'))
+      // WPS/Excel 显示合并区域最下沿的边框，不能只给左上角单元格加线。
+      const merged = mergedRanges.find(range => range.s.r === rowNo - 1 && range.s.c === valueColumn)
+      if (merged) {
+        for (let column = merged.s.c; column <= merged.e.c; column++) {
+          const bottomCell = ensureCell(merged.e.r + 1, column)
+          bottomCell.setAttribute('s', styleWithBottom(bottomCell.getAttribute('s') || '0'))
+        }
+      }
     }
     borders.setAttribute('count', String(directChildren(borders, 'border').length))
   }

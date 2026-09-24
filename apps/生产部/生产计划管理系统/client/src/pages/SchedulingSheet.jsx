@@ -58,8 +58,8 @@ const HEADER_FIELD_MAP = {
   '走货期': 'ship_date',
   '计划出货期': 'ship_date',
   '客PO期': 'ship_date',
-  '验货期': 'ship_date',
-  '计划验货期': 'ship_date',
+  '验货期': 'inspect_date',
+  '计划验货期': 'inspect_date',
   '目标数生产时间': 'target_time',
   '每天目标数': 'daily_target',
   '天数': 'days',
@@ -88,7 +88,7 @@ function mapRowToOrder(rowData) {
     if (field) {
       const num = Number(value);
       // 日期类字段自动转换 Excel 序列号
-      const DATE_FIELDS = ['order_date', 'ship_date', 'inspection_date', 'start_date', 'complete_date', 'plastic_due', 'material_due', 'carton_due', 'packaging_due'];
+      const DATE_FIELDS = ['order_date', 'ship_date', 'inspect_date', 'inspection_date', 'start_date', 'complete_date', 'plastic_due', 'material_due', 'carton_due', 'packaging_due'];
       if (!isNaN(num) && num > 40000 && num < 60000 && DATE_FIELDS.includes(field)) {
         const date = new Date((num - 25569) * 86400 * 1000);
         order[field] = date.toISOString().split('T')[0];

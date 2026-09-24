@@ -50,7 +50,7 @@ const NUMERIC_SUM_FIELDS = new Set([
 // 日期字段：用户自由输入（可填「9/5走」「货期待复」等文字），保存时 parseToISO 尽量归一化日期、
 // 非日期文字按原文保存。不再弹日期选择器拦截编辑。
 const DATE_FIELDS = new Set([
-  'order_date', 'ship_date', 'start_date', 'complete_date', 'inspection_date',
+  'order_date', 'ship_date', 'inspect_date', 'start_date', 'complete_date', 'inspection_date',
 ]);
 
 // 「复期」字段：永远当文本存。用户输入"6/27"被 Luckysheet 自动识别成日期 → 序列号 46197 → 乱码

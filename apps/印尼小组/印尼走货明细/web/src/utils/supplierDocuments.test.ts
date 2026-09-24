@@ -67,6 +67,30 @@ function borderEdges(stylesXml: string, sheetXml: string, address: string) {
   })
 }
 
+async function worksheetXml(zip: JSZip, sheetName: string) {
+  const workbookDoc = new DOMParser().parseFromString(
+    await zip.file('xl/workbook.xml')!.async('string'),
+    'application/xml',
+  )
+  const relsDoc = new DOMParser().parseFromString(
+    await zip.file('xl/_rels/workbook.xml.rels')!.async('string'),
+    'application/xml',
+  )
+  const sheet = (Array.from(workbookDoc.getElementsByTagNameNS(SPREADSHEET_NS, 'sheet')) as any[])
+    .find(candidate => candidate.getAttribute('name') === sheetName)
+  const relationId = sheet?.getAttributeNS(
+    'http://schemas.openxmlformats.org/officeDocument/2006/relationships',
+    'id',
+  )
+  const relation = (Array.from(relsDoc.getElementsByTagNameNS(
+    'http://schemas.openxmlformats.org/package/2006/relationships',
+    'Relationship',
+  )) as any[]).find(candidate => candidate.getAttribute('Id') === relationId)
+  const target = String(relation?.getAttribute('Target') || '').replace(/^\//, '')
+  const path = target.startsWith('xl/') ? target : `xl/${target}`
+  return await zip.file(path)!.async('string')
+}
+
 describe('supplier document export', () => {
   it('fills the seller positions without retaining sample banking details', async () => {
     const file = await buildCustomsWorkbook({
@@ -206,7 +230,14 @@ describe('supplier document export', () => {
 
     const outputZip = await JSZip.loadAsync(await file.arrayBuffer())
     const outputStyles = await outputZip.file('xl/styles.xml')!.async('string')
+    const contractXml = await outputZip.file('xl/worksheets/sheet3.xml')!.async('string')
     const invoiceXml = await outputZip.file('xl/worksheets/sheet4.xml')!.async('string')
+    for (const address of ['H5', 'H9', 'H13']) {
+      expect(borderEdges(outputStyles, contractXml, address)).toContain('bottom')
+    }
+    for (const address of ['J9', 'J11', 'J13', 'J16']) {
+      expect(borderEdges(outputStyles, invoiceXml, address)).toContain('bottom')
+    }
     for (const row of [25, 26, 39]) {
       for (const column of ['B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J']) {
         expect(borderEdges(outputStyles, invoiceXml, `${column}${row}`)).toEqual(['top', 'bottom', 'left', 'right'])
@@ -285,6 +316,17 @@ describe('supplier document export', () => {
     expect(wb.Sheets['装箱单'].A1.v).toBe('PT. ROYAL REGENT INDONESIA')
     expect(wb.Sheets['装箱单'].A9.v).toContain(secondSeller.nameEn)
     expect(wb.Sheets['装箱单'].A12.v).toContain(secondSeller.email)
+
+    const outputZip = await JSZip.loadAsync(await file.arrayBuffer())
+    const outputStyles = await outputZip.file('xl/styles.xml')!.async('string')
+    const contractXml = await worksheetXml(outputZip, '印尼合同')
+    const invoiceXml = await worksheetXml(outputZip, '印尼发票')
+    for (const address of ['H7', 'H11', 'H15']) {
+      expect(borderEdges(outputStyles, contractXml, address)).toContain('bottom')
+    }
+    for (const address of ['J10', 'J12', 'J14', 'J16']) {
+      expect(borderEdges(outputStyles, invoiceXml, address)).toContain('bottom')
+    }
   })
 
   it('uses the Indonesia packing-list header with the actual supplier as shipper inside an RRI workbook', async () => {

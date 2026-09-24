@@ -8,6 +8,7 @@ import JSZip from 'jszip'
 import { DOMParser, XMLSerializer } from '@xmldom/xmldom'
 import type { Material, SupplierDict } from '../api/client'
 import { documentSellerForLine, supplierForLine } from './supplierProfiles'
+import { deliveryDeadline, syncedShipmentDeadline } from './shipmentDeadline'
 import { isPaperRope, shipmentGrossPerPc, shipmentPackingAverageQty, shipmentWeightQuantity } from './shipmentWeight'
 
 export const CUSTOMS_FIXED = '深圳市华胜益出口贸易有限公司'
@@ -1164,6 +1165,19 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
       applyCustomerDocumentEntity(wbObj, form.customer)
     } else {
       populateLinkedDocuments(wbObj, newName, sorted, form.customer, sellerForItem, form)
+    }
+  }
+  if (!input.mainOnly) {
+    const deadline = form.shipDate ? await syncedShipmentDeadline(form.shipDate) : ''
+    const delivery = deliveryDeadline(deadline)
+    for (const name of wbObj.SheetNames.filter(name => /合同/.test(name))) {
+      const sheet = wbObj.Sheets[name]
+      for (const [address, cell] of Object.entries(sheet)) {
+        if (!/^B\d+$/.test(address)) continue
+        const label = String(cell?.v || '')
+        if (/装运期|Shipment\s*date/i.test(label)) setPreservingStyle(sheet, address.replace(/^B/, 'C'), deadline)
+        else if (/交[货貨]日期|Delivery\s*date/i.test(label)) setPreservingStyle(sheet, address.replace(/^B/, 'C'), delivery)
+      }
     }
   }
   fitCategoryColumn(wbObj)

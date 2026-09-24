@@ -303,10 +303,12 @@ describe('supplier document export', () => {
     }]))
     const file = await buildCustomsWorkbook({
       templateBuffer: rrmTemplateBuffer, items, materials, supplierProfiles: [seller, secondSeller],
-      productHs: new Map(), images: new Map(), form: { customer: 'RRM', containerNo: 'RRM-PACKING', blNo: ' SEAL-RRM-123 ' },
+      productHs: new Map(), images: new Map(), form: { customer: 'RRM', containerNo: 'RRM-PACKING', blNo: ' SEAL-RRM-123 ', shipDate: '2026-09-28' },
     })
     const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' })
 
+    expect(countCellValue(wb, '全球合同', 'BEFORE September.24,2026')).toBe(2)
+    expect(countCellValue(wb, '全球合同', 'BEFORE September.17,2026')).toBe(2)
     expect(wb.Sheets['装箱单'].A1.v).toBe('Royal Regent (World) Co. Limited')
     expect(wb.Sheets['装箱单'].A9.v).toContain('Royal Regent (World) Co. Limited')
     expect(wb.Sheets['装箱单'].A9.v).not.toContain(seller.nameEn)

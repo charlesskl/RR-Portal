@@ -303,7 +303,7 @@ describe('supplier document export', () => {
     }]))
     const file = await buildCustomsWorkbook({
       templateBuffer: rrmTemplateBuffer, items, materials, supplierProfiles: [seller, secondSeller],
-      productHs: new Map(), images: new Map(), form: { customer: 'RRM', containerNo: 'RRM-PACKING' },
+      productHs: new Map(), images: new Map(), form: { customer: 'RRM', containerNo: 'RRM-PACKING', blNo: ' SEAL-RRM-123 ' },
     })
     const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' })
 
@@ -319,6 +319,8 @@ describe('supplier document export', () => {
     expect(wb.Sheets['全球发票'].I42.f).toBe('SUM(J32:J41)')
     expect(wb.Sheets['装箱单'].D31.f).toBe('SUM(D24:D30)')
     expect(wb.Sheets['装箱单'].D64.f).toBe('SUM(D57:D63)')
+    expect(wb.Sheets['装箱单'].H17.v).toBe('SEAL-RRM-123')
+    expect(wb.Sheets['装箱单'].H50.v).toBe('SEAL-RRM-123')
     const outputZip = await JSZip.loadAsync(await file.arrayBuffer())
     const styles = await outputZip.file('xl/styles.xml')!.async('string')
     const invoiceXml = await worksheetXml(outputZip, '全球发票')
@@ -410,7 +412,7 @@ describe('supplier document export', () => {
       }])),
       supplierProfiles: [firstSeller, secondSeller],
       productHs: new Map(), images: new Map(),
-      form: { customer: 'RRI', containerNo: 'RRI-INDO-PACKING' },
+      form: { customer: 'RRI', containerNo: 'RRI-INDO-PACKING', blNo: 'SEAL-RRI-456' },
     })
     const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' })
 
@@ -423,6 +425,8 @@ describe('supplier document export', () => {
     expect(Object.values(wb.Sheets['印尼发票']).some((cell: any) => cell?.v === 4558.43)).toBe(false)
     expect(countCellValue(wb, '装箱单', 'PT. ROYAL REGENT INDONESIA')).toBeGreaterThanOrEqual(2)
     expect(sheetContainsText(wb, '装箱单', secondSeller.nameEn)).toBe(true)
+    expect(wb.Sheets['装箱单'].H17.v).toBe('SEAL-RRI-456')
+    expect(wb.Sheets['装箱单'].H51.v).toBe('SEAL-RRI-456')
     expect(sheetContainsText(wb, '装箱单', secondSeller.email)).toBe(true)
     expect(wb.Sheets['装箱单'].A1.v).toBe('ROYAL REGENT PRODUCTS INDUSTRIES LIMITED')
 

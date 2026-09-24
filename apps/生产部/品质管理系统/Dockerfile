@@ -1,6 +1,7 @@
 # 兴信 QMS 品质管理系统
 # 零 npm 依赖：用 Node 内置 node:http + node:sqlite（需 Node ≥ 22.5，这里用 24），
 # 无需 better-sqlite3，省去 alpine 原生编译链。
+# AI 识别：DASHSCOPE_API_KEY 由 compose 从 QC_BAILIAN_API_KEY 注入（deploy.yml 从 GitHub secret 同步）
 FROM node:24-alpine AS production
 
 RUN apk add --no-cache tini curl

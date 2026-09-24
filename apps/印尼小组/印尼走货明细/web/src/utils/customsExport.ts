@@ -2169,6 +2169,12 @@ async function applyGeneratedMainFormats(templateZip: JSZip, generatedZip: JSZip
 }
 
 type LinkedTableKind = 'contract' | 'invoice' | 'packing'
+const desiredLinkedTableRows = (
+  kind: LinkedTableKind,
+  group: DocumentGroup | undefined,
+  templateRows: number,
+) => group ? Math.max(kind === 'packing' ? 7 : 10, group.indices.length) : templateRows
+
 type LinkedTableSection = {
   start: number
   end: number
@@ -2248,9 +2254,11 @@ function resizeLinkedTableXml(
   let runningOffset = 0
   const sections: LinkedTableSection[] = rawSections.map(section => {
     // 未使用的模板区块先保持原行数，稍后再连同整份空合同/发票删除。
-    const desired = section.group
-      ? Math.max(10, section.group.indices.length)
-      : section.end - section.start + 1
+    const desired = desiredLinkedTableRows(
+      kind,
+      section.group,
+      section.end - section.start + 1,
+    )
     const delta = desired - (section.end - section.start + 1)
     const finalStart = section.start + runningOffset
     const finalTotal = finalStart + desired
@@ -2397,7 +2405,11 @@ async function ensureLinkedTableGrid(
   let runningOffset = 0
   const ranges: Array<{ start: number; end: number; detailStart: number }> = []
   for (const section of rawSections) {
-    const desired = section.group ? Math.max(10, section.group.indices.length) : section.end - section.start + 1
+    const desired = desiredLinkedTableRows(
+      kind,
+      section.group,
+      section.end - section.start + 1,
+    )
     const delta = desired - (section.end - section.start + 1)
     const finalStart = section.start + runningOffset
     if (section.group) ranges.push({

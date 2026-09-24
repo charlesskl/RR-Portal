@@ -202,7 +202,7 @@ describe('supplier document export', () => {
     expect(wb.Sheets['实业发票'].B28.f).toBe("'ONE-WORKBOOK'!D4")
     expect(wb.Sheets['实业发票'].A29?.v).toBeUndefined()
     expect(wb.Sheets['实业发票'].I38.f).toBe('SUM(J28:J37)')
-    expect(wb.Sheets['装箱单'].D35.f).toBe('SUM(D25:D34)')
+    expect(wb.Sheets['装箱单'].D32.f).toBe('SUM(D25:D31)')
 
     const outputZip = await JSZip.loadAsync(await file.arrayBuffer())
     const invoiceXml = await outputZip.file('xl/worksheets/sheet4.xml')!.async('string')
@@ -233,8 +233,8 @@ describe('supplier document export', () => {
     expect(wb.Sheets['全球合同'].G34.f).toBe('SUM(G24:G33)')
     expect(wb.Sheets['全球合同'].G81.f).toBe('SUM(G71:G80)')
     expect(wb.Sheets['全球发票'].I42.f).toBe('SUM(J32:J41)')
-    expect(wb.Sheets['装箱单'].D34.f).toBe('SUM(D24:D33)')
-    expect(wb.Sheets['装箱单'].D70.f).toBe('SUM(D60:D69)')
+    expect(wb.Sheets['装箱单'].D31.f).toBe('SUM(D24:D30)')
+    expect(wb.Sheets['装箱单'].D64.f).toBe('SUM(D57:D63)')
   })
 
   it('uses Indonesia documents and the actual supplier when the BL header is neither RRI nor RRM', async () => {
@@ -355,7 +355,7 @@ describe('supplier document export', () => {
     expect(wb.Sheets['实业合同'].B33?.v).toBeUndefined()
     expect(wb.Sheets['实业合同'].G34.f).toBe('SUM(G24:G33)')
     expect(wb.Sheets['实业发票'].I42.f).toBe('SUM(J32:J41)')
-    expect(wb.Sheets['装箱单'].D34.f).toBe('SUM(D24:D33)')
+    expect(wb.Sheets['装箱单'].D31.f).toBe('SUM(D24:D30)')
   })
 
   it('expands linked document tables beyond ten rows', async () => {

@@ -2382,6 +2382,7 @@ function resizeLinkedTableXml(
 
 // 合同、发票和装箱单的空白明细行及合计行在原模板中只有部分单元格
 // 带边框，动态扩展后会留下缺口，因此表头到合计行统一补齐四边。
+// 发票还要覆盖“装运口岸/目的地”分组行和“总值大写”行，避免表格上下两端断线。
 // 装箱单保留模板的紫色表头/合计底色，只清掉合计行之后的模板残留样式。
 async function ensureLinkedTableGrid(
   zip: JSZip,
@@ -2400,8 +2401,8 @@ async function ensureLinkedTableGrid(
     const delta = desired - (section.end - section.start + 1)
     const finalStart = section.start + runningOffset
     if (section.group) ranges.push({
-      start: Math.max(1, finalStart - (kind === 'packing' ? 1 : 2)),
-      end: finalStart + desired,
+      start: Math.max(1, finalStart - (kind === 'packing' ? 1 : kind === 'invoice' ? 3 : 2)),
+      end: finalStart + desired + (kind === 'invoice' ? 1 : 0),
       detailStart: finalStart,
     })
     runningOffset += delta

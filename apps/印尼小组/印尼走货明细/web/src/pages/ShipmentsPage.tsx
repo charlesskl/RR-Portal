@@ -904,7 +904,7 @@ export default function ShipmentsPage() {
         title={`走货明细 — 共 ${rows.length} 票`}
         extra={
           <Space wrap>
-            <Input.Search allowClear placeholder="搜索 客户/集装箱/BL" style={{ width: 220 }}
+            <Input.Search allowClear placeholder="搜索 客户/集装箱/封号" style={{ width: 220 }}
               onSearch={setFilter} onChange={(e) => !e.target.value && setFilter('')} />
             <Select
               value={statusFilter} onChange={setStatusFilter}
@@ -937,7 +937,7 @@ export default function ShipmentsPage() {
             { title: '客户', dataIndex: 'customer', width: 130 },
             { title: '集装箱号', dataIndex: 'container_no', width: 160 },
             { title: '箱数', dataIndex: 'container_count', width: 70, align: 'right' },
-            { title: 'BL 号', dataIndex: 'bl_no', width: 160 },
+            { title: '封号', dataIndex: 'bl_no', width: 160 },
             { title: '汇率', dataIndex: 'rate', width: 90, align: 'right', render: (v) => Number(v ?? 0).toFixed(4) },
             { title: '船期', dataIndex: 'ship_date', width: 120, render: (v) => v ? dayjs(v).format('YYYY-MM-DD') : '' },
             { title: '装柜时间', dataIndex: 'load_date', width: 120, render: (v) => v ? dayjs(v).format('YYYY-MM-DD') : '' },
@@ -999,7 +999,7 @@ export default function ShipmentsPage() {
               <Form.Item name="container_count" label="箱数"><InputNumber min={1} style={{ width: '100%' }} /></Form.Item>
             </Col>
             <Col span={5}>
-              <Form.Item name="bl_no" label="BL 号"><Input /></Form.Item>
+              <Form.Item name="bl_no" label="封号"><Input /></Form.Item>
             </Col>
             <Col span={3}>
               <Form.Item name="rate" label="汇率"><InputNumber min={0} step={0.0001} style={{ width: '100%' }} /></Form.Item>

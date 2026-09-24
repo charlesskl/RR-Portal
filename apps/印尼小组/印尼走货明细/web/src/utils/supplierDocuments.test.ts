@@ -168,13 +168,17 @@ describe('supplier document export', () => {
     expect(borderEdges(outputStyles, packingXml, 'D8')).toEqual(expect.arrayContaining(['top', 'left']))
     expect(borderEdges(outputStyles, packingXml, 'G9')).toEqual(expect.arrayContaining(['bottom', 'right']))
     expect(borderEdges(outputStyles, packingXml, 'K23')).toEqual(expect.arrayContaining(['bottom', 'right']))
-    expect(fillColor(outputStyles, packingXml, 'A1')).toBe('FFCCCCFF')
-    for (const address of ['A2', 'A3', 'A6', 'A7', 'A8', 'D8', 'H8']) {
-      expect(fillColor(outputStyles, packingXml, address)).toBe('FFDBD9F6')
+    for (const address of ['A1', 'A2', 'A3', 'A4', 'A5', 'A6', 'A7', 'A8', 'D8', 'H8']) {
+      expect(fillColor(outputStyles, packingXml, address)).toBe('FFCCCCFF')
     }
-    for (const address of ['A4', 'A5', 'B8', 'E8', 'I8', 'A9', 'D9', 'H9']) {
-      expect(fillColor(outputStyles, packingXml, address)).toBe('FFFEF2DE')
+    for (const address of ['A9', 'D9', 'H9', 'A24', 'K30', 'A31', 'A32', 'K32']) {
+      expect(fillColor(outputStyles, packingXml, address)).toBe('FFFFFFFF')
     }
+    for (const address of ['D10', 'K10', 'D12', 'K12', 'A15', 'C15', 'D16', 'K16', 'D21', 'K21', 'A23', 'K23', 'D31', 'K31']) {
+      expect(fillColor(outputStyles, packingXml, address)).toBe('FFCCCCFF')
+    }
+    expect(borderEdges(outputStyles, packingXml, 'A32')).toEqual(expect.arrayContaining(['top', 'bottom', 'left', 'right']))
+    expect(borderEdges(outputStyles, packingXml, 'K32')).toEqual(expect.arrayContaining(['top', 'bottom', 'left', 'right']))
     // 发票的装运口岸/目的地分组行以及总值大写行也必须完整闭合。
     expect(borderEdges(outputStyles, invoiceXml, 'B29')).toEqual(expect.arrayContaining(['top', 'left']))
     expect(borderEdges(outputStyles, invoiceXml, 'J29')).toEqual(expect.arrayContaining(['top', 'right']))
@@ -389,6 +393,20 @@ describe('supplier document export', () => {
     expect(sheetContainsText(wb, '装箱单', secondSeller.nameEn)).toBe(true)
     expect(sheetContainsText(wb, '装箱单', secondSeller.email)).toBe(true)
     expect(wb.Sheets['装箱单'].A1.v).toBe('ROYAL REGENT PRODUCTS INDUSTRIES LIMITED')
+
+    const outputZip = await JSZip.loadAsync(await file.arrayBuffer())
+    const outputStyles = await outputZip.file('xl/styles.xml')!.async('string')
+    const packingXml = await worksheetXml(outputZip, '装箱单')
+    // RRI 装箱单严格遵循确认稿：顶部与标签条浅紫，资料/明细白底，
+    // 合计仅 D:K 浅紫，合计后的空白行仍保留完整表格线。
+    for (const address of ['A1', 'K7', 'A8', 'K8', 'D10', 'K10', 'D12', 'K12', 'A15', 'C15', 'D16', 'K16', 'D22', 'K22', 'A24', 'K24', 'D32', 'K32']) {
+      expect(fillColor(outputStyles, packingXml, address)).toBe('FFCCCCFF')
+    }
+    for (const address of ['A9', 'K9', 'A25', 'K31', 'A32', 'C32', 'A33', 'K33']) {
+      expect(fillColor(outputStyles, packingXml, address)).toBe('FFFFFFFF')
+    }
+    expect(borderEdges(outputStyles, packingXml, 'A33')).toEqual(expect.arrayContaining(['top', 'bottom', 'left', 'right']))
+    expect(borderEdges(outputStyles, packingXml, 'K33')).toEqual(expect.arrayContaining(['top', 'bottom', 'left', 'right']))
   })
 
   it('exports a main-only combined summary without seller templates', async () => {

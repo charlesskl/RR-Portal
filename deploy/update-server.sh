@@ -308,7 +308,7 @@ for match in re.findall(r'^\s*-\s+\./([^:]+):', content, re.MULTILINE):
 " || true
 
 # ─── Step 5: 备份数据库（只在影响 db 或全量时）───
-if [[ "$COMPOSE_CHANGED" -eq 1 ]] || [[ " ${AFFECTED_SERVICES[*]} " =~ " core " ]] || [[ " ${AFFECTED_SERVICES[*]} " =~ " qc-report " ]] || [[ " ${AFFECTED_SERVICES[*]} " =~ " qc-report-worker " ]] || [[ "$DB_INIT_CHANGED" -eq 1 ]]; then
+if [[ "$COMPOSE_CHANGED" -eq 1 ]] || [[ " ${AFFECTED_SERVICES[*]} " =~ " core " ]] || [[ " ${AFFECTED_SERVICES[*]} " =~ " qc-report " ]] || [[ " ${AFFECTED_SERVICES[*]} " =~ " qc-report-worker " ]] || [[ " ${AFFECTED_SERVICES[*]} " =~ " voyageplex-api " ]] || [[ " ${AFFECTED_SERVICES[*]} " =~ " voyageplex-parser " ]] || [[ "$DB_INIT_CHANGED" -eq 1 ]]; then
   save_state "backup"
   echo "[5/6] Backing up databases (core/db 会被动到)..."
   mkdir -p "$BACKUP_DIR"
@@ -345,10 +345,24 @@ PY
       && echo "  [OK] ${QC_REPORT_STORAGE} → ${QC_STORAGE_BACKUP}" \
       || echo "  [WARN] QC report storage backup failed"
   fi
-  find apps/ plugins/ -path '*/data/*.db' -type f 2>/dev/null | while read -r db_file; do
+  find apps/ plugins/ \( -path '*/data/*.db' -o -path '*/data-runtime/*.db' \) -type f 2>/dev/null | while read -r db_file; do
     [[ "$db_file" == "$QC_REPORT_DB" ]] && continue
     backup_name="$(echo "$db_file" | tr '/' '-')-${BACKUP_TS}"
-    cp "$db_file" "${BACKUP_DIR}/${backup_name}" && echo "  [OK] ${db_file}"
+    # SQLite 在线备份：cp 直接拷贝读写中的库可能得到撕裂副本
+    # （voyageplex.db 每 5 分钟有邮箱同步写入，必须走 backup API）
+    python3 - "$db_file" "${BACKUP_DIR}/${backup_name}" <<'PY'
+import sqlite3
+import sys
+
+source = sqlite3.connect(f"file:{sys.argv[1]}?mode=ro", uri=True)
+destination = sqlite3.connect(sys.argv[2])
+try:
+    source.backup(destination)
+finally:
+    destination.close()
+    source.close()
+PY
+    echo "  [OK] ${db_file}"
   done
   ls -t "$BACKUP_DIR"/postgres-*.sql.gz 2>/dev/null | tail -n +6 | xargs rm -f 2>/dev/null || true
   ls -t "$BACKUP_DIR"/*.db-* 2>/dev/null | tail -n +11 | xargs rm -f 2>/dev/null || true

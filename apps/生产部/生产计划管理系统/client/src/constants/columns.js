@@ -26,6 +26,7 @@ export const ORDER_COLUMNS = [
   { data: 'start_date',     title: '上拉日期',   width: 90 },
   { data: 'complete_date',  title: '完成日期',   width: 90 },
   { data: 'ship_date',      title: '走货期',     width: 90 },
+  { data: 'inspect_date',   title: '验货期',     width: 90 },
   { data: 'target_time',    title: '目标数生产时间', width: 90, type: 'numeric' },
   { data: 'daily_target',   title: '每天目标数', width: 80, type: 'numeric' },
   { data: 'days',           title: '天数',       width: 50, type: 'numeric' },

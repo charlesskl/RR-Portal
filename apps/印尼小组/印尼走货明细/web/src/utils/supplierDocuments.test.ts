@@ -105,6 +105,7 @@ describe('supplier document export', () => {
     ])
     const outputStyles = await outputZip.file('xl/styles.xml')!.async('string')
     const contractXml = await outputZip.file('xl/worksheets/sheet3.xml')!.async('string')
+    const invoiceXml = await outputZip.file('xl/worksheets/sheet4.xml')!.async('string')
     const packingXml = await outputZip.file('xl/worksheets/sheet7.xml')!.async('string')
     const templateContractXml = await templateZip.file('xl/worksheets/sheet3.xml')!.async('string')
     const styleCount = Number(outputStyles.match(/<(?:x:)?cellXfs\b[^>]*\bcount="(\d+)"/)?.[1] || 0)
@@ -127,6 +128,11 @@ describe('supplier document export', () => {
     expect(borderEdges(outputStyles, packingXml, 'D8')).toEqual(expect.arrayContaining(['top', 'left']))
     expect(borderEdges(outputStyles, packingXml, 'G9')).toEqual(expect.arrayContaining(['bottom', 'right']))
     expect(borderEdges(outputStyles, packingXml, 'K23')).toEqual(expect.arrayContaining(['bottom', 'right']))
+    // 发票的装运口岸/目的地分组行以及总值大写行也必须完整闭合。
+    expect(borderEdges(outputStyles, invoiceXml, 'B29')).toEqual(expect.arrayContaining(['top', 'left']))
+    expect(borderEdges(outputStyles, invoiceXml, 'J29')).toEqual(expect.arrayContaining(['top', 'right']))
+    expect(borderEdges(outputStyles, invoiceXml, 'B43')).toEqual(expect.arrayContaining(['bottom', 'left']))
+    expect(borderEdges(outputStyles, invoiceXml, 'J43')).toEqual(expect.arrayContaining(['bottom', 'right']))
   })
 
   it('uses FOB for Huashengyi contracts and their paired invoices', async () => {

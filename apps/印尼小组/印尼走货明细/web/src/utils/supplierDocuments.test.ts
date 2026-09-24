@@ -171,14 +171,16 @@ describe('supplier document export', () => {
     for (const address of ['A1', 'A2', 'A3', 'A4', 'A5', 'A6', 'A7', 'A8', 'D8', 'H8']) {
       expect(fillColor(outputStyles, packingXml, address)).toBe('FFCCCCFF')
     }
-    for (const address of ['A9', 'D9', 'H9', 'A24', 'K30', 'A31', 'A32', 'K32']) {
+    for (const address of ['A9', 'D9', 'H9', 'A24', 'K30', 'A31', 'A32']) {
       expect(fillColor(outputStyles, packingXml, address)).toBe('FFFFFFFF')
     }
-    for (const address of ['D10', 'K10', 'D12', 'K12', 'A15', 'C15', 'D16', 'K16', 'D21', 'K21', 'A23', 'K23', 'D31', 'K31']) {
+    for (const address of ['D10', 'K10', 'D12', 'K12', 'A15', 'C15', 'D16', 'K16', 'D21', 'K21', 'A23', 'K23', 'D31', 'K31', 'K32']) {
       expect(fillColor(outputStyles, packingXml, address)).toBe('FFCCCCFF')
     }
-    expect(borderEdges(outputStyles, packingXml, 'A32')).toEqual(expect.arrayContaining(['top', 'bottom', 'left', 'right']))
-    expect(borderEdges(outputStyles, packingXml, 'K32')).toEqual(expect.arrayContaining(['top', 'bottom', 'left', 'right']))
+    expect(borderEdges(outputStyles, packingXml, 'A32')).toEqual(expect.arrayContaining(['bottom', 'left', 'right']))
+    expect(borderEdges(outputStyles, packingXml, 'A32')).not.toContain('top')
+    expect(borderEdges(outputStyles, packingXml, 'K32')).toEqual(expect.arrayContaining(['bottom', 'left', 'right']))
+    expect(borderEdges(outputStyles, packingXml, 'K32')).not.toContain('top')
     // 发票的装运口岸/目的地分组行以及总值大写行也必须完整闭合。
     expect(borderEdges(outputStyles, invoiceXml, 'B29')).toEqual(expect.arrayContaining(['top', 'left']))
     expect(borderEdges(outputStyles, invoiceXml, 'J29')).toEqual(expect.arrayContaining(['top', 'right']))
@@ -402,11 +404,14 @@ describe('supplier document export', () => {
     for (const address of ['A1', 'K7', 'A8', 'K8', 'D10', 'K10', 'D12', 'K12', 'A15', 'C15', 'D16', 'K16', 'D22', 'K22', 'A24', 'K24', 'D32', 'K32']) {
       expect(fillColor(outputStyles, packingXml, address)).toBe('FFCCCCFF')
     }
-    for (const address of ['A9', 'K9', 'A25', 'K31', 'A32', 'C32', 'A33', 'K33']) {
+    for (const address of ['A9', 'K9', 'A25', 'K31', 'A32', 'C32', 'A33']) {
       expect(fillColor(outputStyles, packingXml, address)).toBe('FFFFFFFF')
     }
-    expect(borderEdges(outputStyles, packingXml, 'A33')).toEqual(expect.arrayContaining(['top', 'bottom', 'left', 'right']))
-    expect(borderEdges(outputStyles, packingXml, 'K33')).toEqual(expect.arrayContaining(['top', 'bottom', 'left', 'right']))
+    expect(fillColor(outputStyles, packingXml, 'K33')).toBe('FFCCCCFF')
+    expect(borderEdges(outputStyles, packingXml, 'A33')).toEqual(expect.arrayContaining(['bottom', 'left', 'right']))
+    expect(borderEdges(outputStyles, packingXml, 'A33')).not.toContain('top')
+    expect(borderEdges(outputStyles, packingXml, 'K33')).toEqual(expect.arrayContaining(['bottom', 'left', 'right']))
+    expect(borderEdges(outputStyles, packingXml, 'K33')).not.toContain('top')
   })
 
   it('exports a main-only combined summary without seller templates', async () => {

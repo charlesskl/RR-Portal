@@ -94,6 +94,7 @@ export interface CustomsExportForm {
   containerNo?: string
   containerCount?: number | string
   shipDate?: string
+  loadDate?: string
   blNo?: string
   rate?: number
   // 旧版隐藏字段，新版暂无 → 默认空/0
@@ -218,12 +219,14 @@ function fillGenericSeller(wb: XLSX.WorkBook, seller: SupplierDict) {
   put('草稿大单-1', ['A6', 'A8'], name)
 }
 
-// 输出文件名：月日+客户+柜数+柜号.xlsx
+// 输出文件名：装柜月日+客户+柜数+柜号.xlsx
 export function customsFileName(form: CustomsExportForm): string {
   const customer = form.customer || '客户'
   const count = form.containerCount != null && form.containerCount !== '' ? String(form.containerCount) : '1'
   const no = (form.containerNo || '').trim()
-  const d = form.shipDate ? new Date(form.shipDate) : new Date()
+  if (!form.loadDate) throw new Error('请先填写装柜时间，用于导出文件命名')
+  const d = new Date(form.loadDate)
+  if (Number.isNaN(d.getTime())) throw new Error('装柜时间格式不正确')
   return `${d.getMonth() + 1}月${d.getDate()}日${customer}${count}柜${no}.xlsx`
 }
 

@@ -696,7 +696,7 @@ export default function ShipmentsPage() {
       // 4) 生成
       const form2 = {
         customer: v.customer, containerNo: v.container_no, containerCount: v.container_count,
-        shipDate: v.ship_date, blNo: v.bl_no, rate: v.rate,
+        shipDate: v.ship_date, loadDate: v.load_date, blNo: v.bl_no, rate: v.rate,
       }
       const { documentSellerForLine, supplierForLine } = await import('../utils/supplierProfiles')
       const { data: dictionaries } = await api.get<Dictionaries>('/dictionaries')
@@ -939,7 +939,7 @@ export default function ShipmentsPage() {
             { title: '箱数', dataIndex: 'container_count', width: 70, align: 'right' },
             { title: '封号', dataIndex: 'bl_no', width: 160 },
             { title: '汇率', dataIndex: 'rate', width: 90, align: 'right', render: (v) => Number(v ?? 0).toFixed(4) },
-            { title: '船期', dataIndex: 'ship_date', width: 120, render: (v) => v ? dayjs(v).format('YYYY-MM-DD') : '' },
+            { title: '截关日期', dataIndex: 'ship_date', width: 120, render: (v) => v ? dayjs(v).format('YYYY-MM-DD') : '' },
             { title: '装柜时间', dataIndex: 'load_date', width: 120, render: (v) => v ? dayjs(v).format('YYYY-MM-DD') : '' },
             {
               title: '状态', dataIndex: 'status', width: 100,
@@ -1010,7 +1010,7 @@ export default function ShipmentsPage() {
               </Form.Item>
             </Col>
             <Col span={5}>
-              <Form.Item name="ship_date" label="船期"
+              <Form.Item name="ship_date" label="截关日期"
                 getValueProps={(v) => ({ value: v ? dayjs(v) : null })}
                 normalize={(v: any) => v ? dayjs(v).format('YYYY-MM-DD') : ''}>
                 <DatePicker style={{ width: '100%' }} format="YYYY-MM-DD" />

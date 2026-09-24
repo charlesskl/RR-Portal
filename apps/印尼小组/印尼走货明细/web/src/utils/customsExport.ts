@@ -218,13 +218,13 @@ function fillGenericSeller(wb: XLSX.WorkBook, seller: SupplierDict) {
   put('草稿大单-1', ['A6', 'A8'], name)
 }
 
-// 输出文件名：月日+客户+柜数+柜号(报关).xlsx
+// 输出文件名：月日+客户+柜数+柜号.xlsx
 export function customsFileName(form: CustomsExportForm): string {
   const customer = form.customer || '客户'
   const count = form.containerCount != null && form.containerCount !== '' ? String(form.containerCount) : '1'
   const no = (form.containerNo || '').trim()
   const d = form.shipDate ? new Date(form.shipDate) : new Date()
-  return `${d.getMonth() + 1}月${d.getDate()}日${customer}${count}柜${no}(报关).xlsx`
+  return `${d.getMonth() + 1}月${d.getDate()}日${customer}${count}柜${no}.xlsx`
 }
 
 export function dataUrlToBytes(dataUrl: string): { bytes: Uint8Array; ext: string } | null {

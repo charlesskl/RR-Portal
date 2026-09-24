@@ -260,7 +260,7 @@ describe('deployment base paths', () => {
       expect(await cellBorderSides(outputBytes, address, 'xl/worksheets/sheet5.xml')).toEqual(['thin', 'thin', 'thin', 'thin'])
     }
     for (const address of ['A24', 'K30', 'A31', 'K31']) {
-      expect(await cellBorderSides(outputBytes, address, 'xl/worksheets/sheet5.xml')).toEqual(['thin', 'thin', null, 'dashed'])
+      expect(await cellBorderSides(outputBytes, address, 'xl/worksheets/sheet5.xml')).toEqual(['thin', 'thin', null, 'thin'])
     }
     for (const column of ['D', 'H', 'I', 'J', 'K']) {
       expect(await cellFillId(outputBytes, `${column}31`, 'xl/worksheets/sheet5.xml')).toBeGreaterThan(0)

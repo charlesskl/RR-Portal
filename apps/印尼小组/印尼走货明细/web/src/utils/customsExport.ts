@@ -2755,13 +2755,12 @@ async function ensureLinkedTableGrid(
       fillRange('A', range.detailStart, 'K', range.end - 1, whiteFillId)
       fillRange('A', range.end, 'C', range.end, whiteFillId)
       fillRange('D', range.end, 'K', range.end, purpleFillId)
-      // 明细区横向分隔线使用虚线，竖向分隔线保持细实线；表头下沿仍由
-      // 表头行提供实线，避免同一条边同时出现实线和虚线。
+      // 明细区横线和竖线均使用连续细实线，与确认的装箱单样式一致。
       for (let rowNo = range.detailStart; rowNo <= range.end; rowNo++) {
         for (let columnIndex = firstColumn; columnIndex <= lastColumn; columnIndex++) {
           const cell = ensureCell(rowNo, columnIndex)
           cell.setAttribute('s', styleWithEdgeStyles(cell.getAttribute('s') || '0', {
-            left: 'thin', right: 'thin', top: null, bottom: 'dashed',
+            left: 'thin', right: 'thin', top: null, bottom: 'thin',
           }))
         }
       }

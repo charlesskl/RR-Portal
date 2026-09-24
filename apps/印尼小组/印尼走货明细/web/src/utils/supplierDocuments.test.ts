@@ -67,6 +67,20 @@ function borderEdges(stylesXml: string, sheetXml: string, address: string) {
   })
 }
 
+function borderStyle(stylesXml: string, sheetXml: string, address: string, edge: string) {
+  const stylesDoc = new DOMParser().parseFromString(stylesXml, 'application/xml')
+  const sheetDoc = new DOMParser().parseFromString(sheetXml, 'application/xml')
+  const cells = Array.from(sheetDoc.getElementsByTagNameNS(SPREADSHEET_NS, 'c')) as any[]
+  const cell = cells.find(candidate => candidate.getAttribute('r') === address)
+  const xfs = Array.from(stylesDoc.getElementsByTagNameNS(SPREADSHEET_NS, 'cellXfs')[0]
+    .getElementsByTagNameNS(SPREADSHEET_NS, 'xf')) as any[]
+  const borders = Array.from(stylesDoc.getElementsByTagNameNS(SPREADSHEET_NS, 'borders')[0]
+    .getElementsByTagNameNS(SPREADSHEET_NS, 'border')) as any[]
+  const xf = xfs[Number(cell?.getAttribute('s') || 0)]
+  const border = borders[Number(xf?.getAttribute('borderId') || 0)]
+  return border?.getElementsByTagNameNS(SPREADSHEET_NS, edge)[0]?.getAttribute('style') || null
+}
+
 function fillColor(stylesXml: string, sheetXml: string, address: string) {
   const stylesDoc = new DOMParser().parseFromString(stylesXml, 'application/xml')
   const sheetDoc = new DOMParser().parseFromString(sheetXml, 'application/xml')
@@ -181,6 +195,10 @@ describe('supplier document export', () => {
     expect(borderEdges(outputStyles, packingXml, 'A32')).not.toContain('top')
     expect(borderEdges(outputStyles, packingXml, 'K32')).toEqual(expect.arrayContaining(['bottom', 'left', 'right']))
     expect(borderEdges(outputStyles, packingXml, 'K32')).not.toContain('top')
+    expect(borderStyle(outputStyles, packingXml, 'A24', 'bottom')).toBe('dashed')
+    expect(borderStyle(outputStyles, packingXml, 'K30', 'bottom')).toBe('dashed')
+    expect(borderStyle(outputStyles, packingXml, 'D31', 'bottom')).toBe('dashed')
+    expect(borderStyle(outputStyles, packingXml, 'K32', 'bottom')).toBe('medium')
     // 发票的装运口岸/目的地分组行以及总值大写行也必须完整闭合。
     expect(borderEdges(outputStyles, invoiceXml, 'B29')).toEqual(expect.arrayContaining(['top', 'left']))
     expect(borderEdges(outputStyles, invoiceXml, 'J29')).toEqual(expect.arrayContaining(['top', 'right']))
@@ -412,6 +430,10 @@ describe('supplier document export', () => {
     expect(borderEdges(outputStyles, packingXml, 'A33')).not.toContain('top')
     expect(borderEdges(outputStyles, packingXml, 'K33')).toEqual(expect.arrayContaining(['bottom', 'left', 'right']))
     expect(borderEdges(outputStyles, packingXml, 'K33')).not.toContain('top')
+    expect(borderStyle(outputStyles, packingXml, 'A25', 'bottom')).toBe('dashed')
+    expect(borderStyle(outputStyles, packingXml, 'K31', 'bottom')).toBe('dashed')
+    expect(borderStyle(outputStyles, packingXml, 'D32', 'bottom')).toBe('dashed')
+    expect(borderStyle(outputStyles, packingXml, 'K33', 'bottom')).toBe('medium')
   })
 
   it('exports a main-only combined summary without seller templates', async () => {

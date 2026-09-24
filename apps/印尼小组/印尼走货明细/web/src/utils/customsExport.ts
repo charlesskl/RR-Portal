@@ -2391,7 +2391,7 @@ function resizeLinkedTableXml(
 // 合同、发票和装箱单的空白明细行及合计行在原模板中只有部分单元格
 // 带边框，动态扩展后会留下缺口，因此表头到合计行统一补齐四边。
 // 发票还要覆盖“装运口岸/目的地”分组行和“总值大写”行，避免表格上下两端断线。
-// 装箱单保留模板的紫色表头/合计底色，只清掉合计行之后的模板残留样式。
+// 装箱单按标准模板补齐顶部资料框、明细表和页尾空白行的颜色与格线。
 async function ensureLinkedTableGrid(
   zip: JSZip,
   sheetPath: string,
@@ -2690,9 +2690,8 @@ async function ensureLinkedTableGrid(
       fills.setAttribute('count', String(directChildren(fills, 'fill').length))
       return String(directChildren(fills, 'fill').length - 1)
     }
-    const titleFillId = solidFill('CCCCFF')
-    const bandFillId = solidFill('DBD9F6')
-    const bodyFillId = solidFill('FEF2DE')
+    const purpleFillId = solidFill('CCCCFF')
+    const whiteFillId = solidFill('FFFFFF')
     const styleWithFill = (baseStyleId: string, fillId: string) => {
       const key = `${baseStyleId}:${fillId}`
       const cached = filledStyles.get(key)
@@ -2736,48 +2735,31 @@ async function ensureLinkedTableGrid(
       frame('D', formStart + 8, 'G', range.detailStart - 2)
       frame('H', formStart + 8, 'K', range.detailStart - 2)
 
-      // 以用户提供的装箱单为准固定顶部配色，避免生成工作簿的空行
-      // 样式错位：抬头深紫，地址/标题带浅紫，资料区米色，标签格浅紫。
-      fillRange('A', topStart, 'K', topStart, titleFillId)
-      fillRange('A', topStart + 1, 'K', topStart + 2, bandFillId)
-      fillRange('A', topStart + 3, 'K', topStart + 4, bodyFillId)
-      fillRange('A', topStart + 5, 'K', topStart + 6, bandFillId)
-      fillRange('A', formStart, 'K', range.detailStart - 2, bodyFillId)
-      for (const [rowOffset, columns] of [
-        [0, ['A', 'D', 'H']],
-        [2, ['D']],
-        [4, ['D', 'H']],
-        [8, ['D', 'H']],
-      ] as Array<[number, string[]]>) {
-        for (const column of columns) fillRange(column, formStart + rowOffset, column, formStart + rowOffset, bandFillId)
+      // 以最终确认的装箱单为准：顶部整块浅紫，资料内容白底，标签行浅紫。
+      fillRange('A', topStart, 'K', formStart - 1, purpleFillId)
+      fillRange('A', formStart, 'K', range.detailStart - 2, whiteFillId)
+      fillRange('A', formStart, 'K', formStart, purpleFillId)
+      fillRange('A', formStart + 7, 'C', formStart + 7, purpleFillId)
+      for (const rowNo of [formStart + 2, formStart + 4, formStart + 8, range.detailStart - 3]) {
+        fillRange('D', rowNo, 'K', rowNo, purpleFillId)
+      }
+
+      // 明细表头和合计数值区为浅紫，明细与页尾空白行保持白底完整格线。
+      fillRange('A', range.detailStart - 1, 'K', range.detailStart - 1, purpleFillId)
+      fillRange('A', range.detailStart, 'K', range.end - 1, whiteFillId)
+      fillRange('A', range.end, 'C', range.end, whiteFillId)
+      fillRange('D', range.end, 'K', range.end, purpleFillId)
+      const spacerRowNo = range.end + 1
+      fillRange('A', spacerRowNo, 'K', spacerRowNo, whiteFillId)
+      for (let columnIndex = firstColumn; columnIndex <= lastColumn; columnIndex++) {
+        const cell = ensureCell(spacerRowNo, columnIndex)
+        cell.setAttribute('s', styleWithEdges(
+          cell.getAttribute('s') || '0',
+          ['top', 'bottom', 'left', 'right'],
+        ))
       }
     }
     borders.setAttribute('count', String(directChildren(borders, 'border').length))
-
-    const clearedStyles = new Map<string, string>()
-    for (const spacerRowNo of ranges.map(range => range.end + 1)) {
-      const spacerRow = directChildren(sheetData, 'row').find(candidate => rowNumber(candidate) === spacerRowNo)
-      if (!spacerRow) continue
-      for (const cell of directChildren(spacerRow, 'c')) {
-        const columnIndex = XLSX.utils.decode_col(cellColumn(cell.getAttribute('r') || 'A'))
-        if (columnIndex < firstColumn || columnIndex > lastColumn) continue
-        const baseStyleId = cell.getAttribute('s') || '0'
-        let styleId = clearedStyles.get(baseStyleId)
-        if (!styleId) {
-          const baseXf = xfList[Number(baseStyleId)] || xfList[0]
-          if (!baseXf) continue
-          const xf = baseXf.cloneNode(true) as XmlElement
-          xf.setAttribute('fillId', '0')
-          xf.setAttribute('applyFill', '1')
-          xf.setAttribute('borderId', '0')
-          xf.setAttribute('applyBorder', '1')
-          xfs.appendChild(xf)
-          styleId = String(directChildren(xfs, 'xf').length - 1)
-          clearedStyles.set(baseStyleId, styleId)
-        }
-        cell.setAttribute('s', styleId)
-      }
-    }
   }
   xfs.setAttribute('count', String(directChildren(xfs, 'xf').length))
   zip.file('xl/styles.xml', serializer.serializeToString(stylesDoc))

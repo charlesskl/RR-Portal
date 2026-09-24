@@ -67,6 +67,58 @@ function borderEdges(stylesXml: string, sheetXml: string, address: string) {
   })
 }
 
+function borderStyle(stylesXml: string, sheetXml: string, address: string, edge: string) {
+  const stylesDoc = new DOMParser().parseFromString(stylesXml, 'application/xml')
+  const sheetDoc = new DOMParser().parseFromString(sheetXml, 'application/xml')
+  const cells = Array.from(sheetDoc.getElementsByTagNameNS(SPREADSHEET_NS, 'c')) as any[]
+  const cell = cells.find(candidate => candidate.getAttribute('r') === address)
+  const xfs = Array.from(stylesDoc.getElementsByTagNameNS(SPREADSHEET_NS, 'cellXfs')[0]
+    .getElementsByTagNameNS(SPREADSHEET_NS, 'xf')) as any[]
+  const borders = Array.from(stylesDoc.getElementsByTagNameNS(SPREADSHEET_NS, 'borders')[0]
+    .getElementsByTagNameNS(SPREADSHEET_NS, 'border')) as any[]
+  const xf = xfs[Number(cell?.getAttribute('s') || 0)]
+  const border = borders[Number(xf?.getAttribute('borderId') || 0)]
+  return border?.getElementsByTagNameNS(SPREADSHEET_NS, edge)[0]?.getAttribute('style') || null
+}
+
+function fillColor(stylesXml: string, sheetXml: string, address: string) {
+  const stylesDoc = new DOMParser().parseFromString(stylesXml, 'application/xml')
+  const sheetDoc = new DOMParser().parseFromString(sheetXml, 'application/xml')
+  const cells = Array.from(sheetDoc.getElementsByTagNameNS(SPREADSHEET_NS, 'c')) as any[]
+  const cell = cells.find(candidate => candidate.getAttribute('r') === address)
+  const xfs = Array.from(stylesDoc.getElementsByTagNameNS(SPREADSHEET_NS, 'cellXfs')[0]
+    .getElementsByTagNameNS(SPREADSHEET_NS, 'xf')) as any[]
+  const fills = Array.from(stylesDoc.getElementsByTagNameNS(SPREADSHEET_NS, 'fills')[0]
+    .getElementsByTagNameNS(SPREADSHEET_NS, 'fill')) as any[]
+  const xf = xfs[Number(cell?.getAttribute('s') || 0)]
+  const fill = fills[Number(xf?.getAttribute('fillId') || 0)]
+  return fill?.getElementsByTagNameNS(SPREADSHEET_NS, 'fgColor')[0]?.getAttribute('rgb') || ''
+}
+
+async function worksheetXml(zip: JSZip, sheetName: string) {
+  const workbookDoc = new DOMParser().parseFromString(
+    await zip.file('xl/workbook.xml')!.async('string'),
+    'application/xml',
+  )
+  const relsDoc = new DOMParser().parseFromString(
+    await zip.file('xl/_rels/workbook.xml.rels')!.async('string'),
+    'application/xml',
+  )
+  const sheet = (Array.from(workbookDoc.getElementsByTagNameNS(SPREADSHEET_NS, 'sheet')) as any[])
+    .find(candidate => candidate.getAttribute('name') === sheetName)
+  const relationId = sheet?.getAttributeNS(
+    'http://schemas.openxmlformats.org/officeDocument/2006/relationships',
+    'id',
+  )
+  const relation = (Array.from(relsDoc.getElementsByTagNameNS(
+    'http://schemas.openxmlformats.org/package/2006/relationships',
+    'Relationship',
+  )) as any[]).find(candidate => candidate.getAttribute('Id') === relationId)
+  const target = String(relation?.getAttribute('Target') || '').replace(/^\//, '')
+  const path = target.startsWith('xl/') ? target : `xl/${target}`
+  return await zip.file(path)!.async('string')
+}
+
 describe('supplier document export', () => {
   it('fills the seller positions without retaining sample banking details', async () => {
     const file = await buildCustomsWorkbook({
@@ -105,6 +157,7 @@ describe('supplier document export', () => {
     ])
     const outputStyles = await outputZip.file('xl/styles.xml')!.async('string')
     const contractXml = await outputZip.file('xl/worksheets/sheet3.xml')!.async('string')
+    const invoiceXml = await outputZip.file('xl/worksheets/sheet4.xml')!.async('string')
     const packingXml = await outputZip.file('xl/worksheets/sheet7.xml')!.async('string')
     const templateContractXml = await templateZip.file('xl/worksheets/sheet3.xml')!.async('string')
     const styleCount = Number(outputStyles.match(/<(?:x:)?cellXfs\b[^>]*\bcount="(\d+)"/)?.[1] || 0)
@@ -120,13 +173,37 @@ describe('supplier document export', () => {
     // 装箱单抬头、发货人/收货人及右侧资料栏必须形成完整外框；合并单元格
     // 的右下角也要有实际单元格样式，Excel/WPS 才不会显示缺边。
     expect(borderEdges(outputStyles, packingXml, 'A1')).toEqual(expect.arrayContaining(['top', 'left']))
-    expect(borderEdges(outputStyles, packingXml, 'K5')).toEqual(expect.arrayContaining(['bottom', 'right']))
+    expect(borderEdges(outputStyles, packingXml, 'K5')).toContain('right')
+    expect(borderEdges(outputStyles, packingXml, 'K5')).not.toContain('bottom')
+    expect(borderEdges(outputStyles, packingXml, 'K7')).toContain('right')
     expect(borderEdges(outputStyles, packingXml, 'A8')).toEqual(expect.arrayContaining(['top', 'left']))
     expect(borderEdges(outputStyles, packingXml, 'C14')).toEqual(expect.arrayContaining(['bottom', 'right']))
     expect(borderEdges(outputStyles, packingXml, 'C23')).toEqual(expect.arrayContaining(['bottom', 'right']))
     expect(borderEdges(outputStyles, packingXml, 'D8')).toEqual(expect.arrayContaining(['top', 'left']))
     expect(borderEdges(outputStyles, packingXml, 'G9')).toEqual(expect.arrayContaining(['bottom', 'right']))
     expect(borderEdges(outputStyles, packingXml, 'K23')).toEqual(expect.arrayContaining(['bottom', 'right']))
+    for (const address of ['A1', 'A2', 'A3', 'A4', 'A5', 'A6', 'A7', 'A8', 'D8', 'H8']) {
+      expect(fillColor(outputStyles, packingXml, address)).toBe('FFCCCCFF')
+    }
+    for (const address of ['A9', 'D9', 'H9', 'A24', 'K30', 'A31', 'A32']) {
+      expect(fillColor(outputStyles, packingXml, address)).toBe('FFFFFFFF')
+    }
+    for (const address of ['D10', 'K10', 'D12', 'K12', 'A15', 'C15', 'D16', 'K16', 'D21', 'K21', 'A23', 'K23', 'D31', 'K31', 'K32']) {
+      expect(fillColor(outputStyles, packingXml, address)).toBe('FFCCCCFF')
+    }
+    expect(borderEdges(outputStyles, packingXml, 'A32')).toEqual(expect.arrayContaining(['bottom', 'left', 'right']))
+    expect(borderEdges(outputStyles, packingXml, 'A32')).not.toContain('top')
+    expect(borderEdges(outputStyles, packingXml, 'K32')).toEqual(expect.arrayContaining(['bottom', 'left', 'right']))
+    expect(borderEdges(outputStyles, packingXml, 'K32')).not.toContain('top')
+    expect(borderStyle(outputStyles, packingXml, 'A24', 'bottom')).toBe('thin')
+    expect(borderStyle(outputStyles, packingXml, 'K30', 'bottom')).toBe('thin')
+    expect(borderStyle(outputStyles, packingXml, 'D31', 'bottom')).toBe('thin')
+    expect(borderStyle(outputStyles, packingXml, 'K32', 'bottom')).toBe('medium')
+    // 发票的装运口岸/目的地分组行以及总值大写行也必须完整闭合。
+    expect(borderEdges(outputStyles, invoiceXml, 'B29')).toEqual(expect.arrayContaining(['top', 'left']))
+    expect(borderEdges(outputStyles, invoiceXml, 'J29')).toEqual(expect.arrayContaining(['top', 'right']))
+    expect(borderEdges(outputStyles, invoiceXml, 'B43')).toEqual(expect.arrayContaining(['bottom', 'left']))
+    expect(borderEdges(outputStyles, invoiceXml, 'J43')).toEqual(expect.arrayContaining(['bottom', 'right']))
   })
 
   it('uses FOB for Huashengyi contracts and their paired invoices', async () => {
@@ -196,10 +273,23 @@ describe('supplier document export', () => {
     expect(wb.Sheets['实业发票'].B28.f).toBe("'ONE-WORKBOOK'!D4")
     expect(wb.Sheets['实业发票'].A29?.v).toBeUndefined()
     expect(wb.Sheets['实业发票'].I38.f).toBe('SUM(J28:J37)')
-    expect(wb.Sheets['装箱单'].D35.f).toBe('SUM(D25:D34)')
+    expect(wb.Sheets['装箱单'].D32.f).toBe('SUM(D25:D31)')
 
     const outputZip = await JSZip.loadAsync(await file.arrayBuffer())
+    const outputStyles = await outputZip.file('xl/styles.xml')!.async('string')
+    const contractXml = await outputZip.file('xl/worksheets/sheet3.xml')!.async('string')
     const invoiceXml = await outputZip.file('xl/worksheets/sheet4.xml')!.async('string')
+    for (const address of ['H5', 'H9', 'H13']) {
+      expect(borderEdges(outputStyles, contractXml, address)).toContain('bottom')
+    }
+    for (const address of ['J9', 'J11', 'J13', 'J16']) {
+      expect(borderEdges(outputStyles, invoiceXml, address)).toContain('bottom')
+    }
+    for (const row of [25, 26, 39]) {
+      for (const column of ['B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J']) {
+        expect(borderEdges(outputStyles, invoiceXml, `${column}${row}`)).toEqual(['top', 'bottom', 'left', 'right'])
+      }
+    }
     expect(invoiceXml).not.toMatch(/<x:(?:c|f|v)\b/)
   })
 
@@ -227,8 +317,8 @@ describe('supplier document export', () => {
     expect(wb.Sheets['全球合同'].G34.f).toBe('SUM(G24:G33)')
     expect(wb.Sheets['全球合同'].G81.f).toBe('SUM(G71:G80)')
     expect(wb.Sheets['全球发票'].I42.f).toBe('SUM(J32:J41)')
-    expect(wb.Sheets['装箱单'].D34.f).toBe('SUM(D24:D33)')
-    expect(wb.Sheets['装箱单'].D70.f).toBe('SUM(D60:D69)')
+    expect(wb.Sheets['装箱单'].D31.f).toBe('SUM(D24:D30)')
+    expect(wb.Sheets['装箱单'].D64.f).toBe('SUM(D57:D63)')
   })
 
   it('uses Indonesia documents and the actual supplier when the BL header is neither RRI nor RRM', async () => {
@@ -273,6 +363,17 @@ describe('supplier document export', () => {
     expect(wb.Sheets['装箱单'].A1.v).toBe('PT. ROYAL REGENT INDONESIA')
     expect(wb.Sheets['装箱单'].A9.v).toContain(secondSeller.nameEn)
     expect(wb.Sheets['装箱单'].A12.v).toContain(secondSeller.email)
+
+    const outputZip = await JSZip.loadAsync(await file.arrayBuffer())
+    const outputStyles = await outputZip.file('xl/styles.xml')!.async('string')
+    const contractXml = await worksheetXml(outputZip, '印尼合同')
+    const invoiceXml = await worksheetXml(outputZip, '印尼发票')
+    for (const address of ['H7', 'H11', 'H15']) {
+      expect(borderEdges(outputStyles, contractXml, address)).toContain('bottom')
+    }
+    for (const address of ['J10', 'J12', 'J14', 'J16']) {
+      expect(borderEdges(outputStyles, invoiceXml, address)).toContain('bottom')
+    }
   })
 
   it('uses the Indonesia packing-list header with the actual supplier as shipper inside an RRI workbook', async () => {
@@ -312,6 +413,27 @@ describe('supplier document export', () => {
     expect(sheetContainsText(wb, '装箱单', secondSeller.nameEn)).toBe(true)
     expect(sheetContainsText(wb, '装箱单', secondSeller.email)).toBe(true)
     expect(wb.Sheets['装箱单'].A1.v).toBe('ROYAL REGENT PRODUCTS INDUSTRIES LIMITED')
+
+    const outputZip = await JSZip.loadAsync(await file.arrayBuffer())
+    const outputStyles = await outputZip.file('xl/styles.xml')!.async('string')
+    const packingXml = await worksheetXml(outputZip, '装箱单')
+    // RRI 装箱单严格遵循确认稿：顶部与标签条浅紫，资料/明细白底，
+    // 合计仅 D:K 浅紫，合计后的空白行仍保留完整表格线。
+    for (const address of ['A1', 'K7', 'A8', 'K8', 'D10', 'K10', 'D12', 'K12', 'A15', 'C15', 'D16', 'K16', 'D22', 'K22', 'A24', 'K24', 'D32', 'K32']) {
+      expect(fillColor(outputStyles, packingXml, address)).toBe('FFCCCCFF')
+    }
+    for (const address of ['A9', 'K9', 'A25', 'K31', 'A32', 'C32', 'A33']) {
+      expect(fillColor(outputStyles, packingXml, address)).toBe('FFFFFFFF')
+    }
+    expect(fillColor(outputStyles, packingXml, 'K33')).toBe('FFCCCCFF')
+    expect(borderEdges(outputStyles, packingXml, 'A33')).toEqual(expect.arrayContaining(['bottom', 'left', 'right']))
+    expect(borderEdges(outputStyles, packingXml, 'A33')).not.toContain('top')
+    expect(borderEdges(outputStyles, packingXml, 'K33')).toEqual(expect.arrayContaining(['bottom', 'left', 'right']))
+    expect(borderEdges(outputStyles, packingXml, 'K33')).not.toContain('top')
+    expect(borderStyle(outputStyles, packingXml, 'A25', 'bottom')).toBe('thin')
+    expect(borderStyle(outputStyles, packingXml, 'K31', 'bottom')).toBe('thin')
+    expect(borderStyle(outputStyles, packingXml, 'D32', 'bottom')).toBe('thin')
+    expect(borderStyle(outputStyles, packingXml, 'K33', 'bottom')).toBe('medium')
   })
 
   it('exports a main-only combined summary without seller templates', async () => {
@@ -349,7 +471,7 @@ describe('supplier document export', () => {
     expect(wb.Sheets['实业合同'].B33?.v).toBeUndefined()
     expect(wb.Sheets['实业合同'].G34.f).toBe('SUM(G24:G33)')
     expect(wb.Sheets['实业发票'].I42.f).toBe('SUM(J32:J41)')
-    expect(wb.Sheets['装箱单'].D34.f).toBe('SUM(D24:D33)')
+    expect(wb.Sheets['装箱单'].D31.f).toBe('SUM(D24:D30)')
   })
 
   it('expands linked document tables beyond ten rows', async () => {

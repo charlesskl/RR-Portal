@@ -256,16 +256,19 @@ describe('deployment base paths', () => {
     for (const address of ['B30', 'J30', 'B31', 'J31', 'B32', 'J41', 'B42', 'J42']) {
       expect(await cellBorderSides(outputBytes, address, 'xl/worksheets/sheet4.xml')).toEqual(['thin', 'thin', 'thin', 'thin'])
     }
-    for (const address of ['A23', 'K23', 'A24', 'K33', 'A34', 'K34']) {
+    for (const address of ['A23', 'K23']) {
       expect(await cellBorderSides(outputBytes, address, 'xl/worksheets/sheet5.xml')).toEqual(['thin', 'thin', 'thin', 'thin'])
     }
-    for (const column of ['D', 'H', 'I', 'J', 'K']) {
-      expect(await cellFillId(outputBytes, `${column}34`, 'xl/worksheets/sheet5.xml')).toBeGreaterThan(0)
+    for (const address of ['A24', 'K30', 'A31', 'K31']) {
+      expect(await cellBorderSides(outputBytes, address, 'xl/worksheets/sheet5.xml')).toEqual(['thin', 'thin', null, 'thin'])
     }
-    expect(await cellFillId(outputBytes, 'A34', 'xl/worksheets/sheet5.xml')).toBe(0)
+    for (const column of ['D', 'H', 'I', 'J', 'K']) {
+      expect(await cellFillId(outputBytes, `${column}31`, 'xl/worksheets/sheet5.xml')).toBeGreaterThan(0)
+    }
+    expect(await cellFillId(outputBytes, 'A31', 'xl/worksheets/sheet5.xml')).toBeGreaterThan(0)
     for (const column of ['E', 'H', 'I', 'J', 'K']) {
-      expect(await cellFillId(outputBytes, `${column}35`, 'xl/worksheets/sheet5.xml')).toBe(0)
-      expect(await cellBorderSides(outputBytes, `${column}35`, 'xl/worksheets/sheet5.xml')).toEqual([null, null, null, null])
+      expect(await cellFillId(outputBytes, `${column}32`, 'xl/worksheets/sheet5.xml')).toBeGreaterThan(0)
+      expect(await cellBorderSides(outputBytes, `${column}32`, 'xl/worksheets/sheet5.xml')).toEqual(['thin', 'thin', null, 'medium'])
     }
     expect(sheet.A7?.s?.border).toBeUndefined()
     expect(sheet.AB4?.f).toBe('SUM(AA4:AA6)')

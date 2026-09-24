@@ -2169,6 +2169,12 @@ async function applyGeneratedMainFormats(templateZip: JSZip, generatedZip: JSZip
 }
 
 type LinkedTableKind = 'contract' | 'invoice' | 'packing'
+const desiredLinkedTableRows = (
+  kind: LinkedTableKind,
+  group: DocumentGroup | undefined,
+  templateRows: number,
+) => group ? Math.max(kind === 'packing' ? 7 : 10, group.indices.length) : templateRows
+
 type LinkedTableSection = {
   start: number
   end: number
@@ -2248,9 +2254,11 @@ function resizeLinkedTableXml(
   let runningOffset = 0
   const sections: LinkedTableSection[] = rawSections.map(section => {
     // 未使用的模板区块先保持原行数，稍后再连同整份空合同/发票删除。
-    const desired = section.group
-      ? Math.max(10, section.group.indices.length)
-      : section.end - section.start + 1
+    const desired = desiredLinkedTableRows(
+      kind,
+      section.group,
+      section.end - section.start + 1,
+    )
     const delta = desired - (section.end - section.start + 1)
     const finalStart = section.start + runningOffset
     const finalTotal = finalStart + desired
@@ -2382,7 +2390,8 @@ function resizeLinkedTableXml(
 
 // 合同、发票和装箱单的空白明细行及合计行在原模板中只有部分单元格
 // 带边框，动态扩展后会留下缺口，因此表头到合计行统一补齐四边。
-// 装箱单保留模板的紫色表头/合计底色，只清掉合计行之后的模板残留样式。
+// 发票还要覆盖“装运口岸/目的地”分组行和“总值大写”行，避免表格上下两端断线。
+// 装箱单按标准模板补齐顶部资料框、明细表和页尾空白行的颜色与格线。
 async function ensureLinkedTableGrid(
   zip: JSZip,
   sheetPath: string,
@@ -2396,12 +2405,16 @@ async function ensureLinkedTableGrid(
   let runningOffset = 0
   const ranges: Array<{ start: number; end: number; detailStart: number }> = []
   for (const section of rawSections) {
-    const desired = section.group ? Math.max(10, section.group.indices.length) : section.end - section.start + 1
+    const desired = desiredLinkedTableRows(
+      kind,
+      section.group,
+      section.end - section.start + 1,
+    )
     const delta = desired - (section.end - section.start + 1)
     const finalStart = section.start + runningOffset
     if (section.group) ranges.push({
-      start: Math.max(1, finalStart - (kind === 'packing' ? 1 : 2)),
-      end: finalStart + desired,
+      start: Math.max(1, finalStart - (kind === 'packing' ? 1 : kind === 'invoice' ? 3 : 2)),
+      end: finalStart + desired + (kind === 'invoice' ? 1 : 0),
       detailStart: finalStart,
     })
     runningOffset += delta
@@ -2415,9 +2428,10 @@ async function ensureLinkedTableGrid(
   const styleRoot = stylesDoc.documentElement as XmlElement
   const sheetRoot = sheetDoc.documentElement as XmlElement
   const xfs = styleCollection(styleRoot, 'cellXfs')
+  const fills = styleCollection(styleRoot, 'fills')
   const borders = styleCollection(styleRoot, 'borders')
   const sheetData = directChild(sheetRoot, 'sheetData')
-  if (!xfs || !borders || !sheetData) return
+  if (!xfs || !fills || !borders || !sheetData) return
 
   const gridBorder = stylesDoc.createElementNS(SPREADSHEET_NS, 'border') as XmlElement
   for (const edge of ['left', 'right', 'top', 'bottom']) {
@@ -2478,6 +2492,86 @@ async function ensureLinkedTableGrid(
       }
     }
   }
+  if (kind === 'contract' || kind === 'invoice') {
+    // 合同和发票右侧资料栏使用单元格底边作为填写线。动态复制单据时，
+    // 空值单元格可能不会带出模板样式，因此按各模板的固定相对位置补底边。
+    const underlinedStyles = new Map<string, string>()
+    const ensureCell = (rowNo: number, columnIndex: number) => {
+      let row = directChildren(sheetData, 'row').find(candidate => rowNumber(candidate) === rowNo)
+      if (!row) {
+        row = sheetDoc.createElementNS(SPREADSHEET_NS, 'row') as XmlElement
+        row.setAttribute('r', String(rowNo))
+        const following = directChildren(sheetData, 'row').find(candidate => rowNumber(candidate) > rowNo)
+        if (following) sheetData.insertBefore(row, following)
+        else sheetData.appendChild(row)
+      }
+      const address = `${XLSX.utils.encode_col(columnIndex)}${rowNo}`
+      let cell = directChildren(row, 'c').find(candidate => candidate.getAttribute('r') === address)
+      if (!cell) {
+        cell = sheetDoc.createElementNS(SPREADSHEET_NS, 'c') as XmlElement
+        cell.setAttribute('r', address)
+        const following = directChildren(row, 'c').find(existing =>
+          XLSX.utils.decode_col(cellColumn(existing.getAttribute('r') || 'A')) > columnIndex,
+        )
+        if (following) row.insertBefore(cell, following)
+        else row.appendChild(cell)
+      }
+      return cell
+    }
+    const styleWithBottom = (baseStyleId: string) => {
+      const cached = underlinedStyles.get(baseStyleId)
+      if (cached) return cached
+      const currentXfs = directChildren(xfs, 'xf')
+      const baseXf = currentXfs[Number(baseStyleId)] || currentXfs[0]
+      if (!baseXf) return baseStyleId
+      const xf = baseXf.cloneNode(true) as XmlElement
+      const borderId = Number(baseXf.getAttribute('borderId') || 0)
+      const baseBorder = directChildren(borders, 'border')[borderId]
+      const border = baseBorder
+        ? baseBorder.cloneNode(true) as XmlElement
+        : stylesDoc.createElementNS(SPREADSHEET_NS, 'border') as XmlElement
+      let bottom = directChild(border, 'bottom')
+      if (!bottom) {
+        bottom = stylesDoc.createElementNS(SPREADSHEET_NS, 'bottom') as XmlElement
+        const diagonal = directChild(border, 'diagonal')
+        if (diagonal) border.insertBefore(bottom, diagonal)
+        else border.appendChild(bottom)
+      }
+      bottom.setAttribute('style', 'thin')
+      let color = directChild(bottom, 'color')
+      if (!color) {
+        color = stylesDoc.createElementNS(SPREADSHEET_NS, 'color') as XmlElement
+        bottom.appendChild(color)
+      }
+      color.setAttribute('rgb', 'FF000000')
+      if (!directChild(border, 'diagonal')) {
+        border.appendChild(stylesDoc.createElementNS(SPREADSHEET_NS, 'diagonal'))
+      }
+      borders.appendChild(border)
+      const nextBorderId = String(directChildren(borders, 'border').length - 1)
+      xf.setAttribute('borderId', nextBorderId)
+      xf.setAttribute('applyBorder', '1')
+      xfs.appendChild(xf)
+      const styleId = String(directChildren(xfs, 'xf').length - 1)
+      underlinedStyles.set(baseStyleId, styleId)
+      return styleId
+    }
+
+    const valueColumn = XLSX.utils.decode_col(kind === 'contract' ? 'H' : 'J')
+    const invoiceOffsets = rawSections[0]?.start === 32
+      ? [-23, -21, -19, -16]
+      : rawSections[0]?.start === 28
+        ? [-19, -17, -15, -12]
+        : [-14, -12, -10, -8]
+    const rowOffsets = kind === 'contract' ? [-19, -15, -11] : invoiceOffsets
+    for (const range of ranges) {
+      for (const offset of rowOffsets) {
+        const cell = ensureCell(range.detailStart + offset, valueColumn)
+        cell.setAttribute('s', styleWithBottom(cell.getAttribute('s') || '0'))
+      }
+    }
+    borders.setAttribute('count', String(directChildren(borders, 'border').length))
+  }
   if (kind === 'packing') {
     // 装箱单表头也属于正式单据的一部分。模板中的合并单元格只有左上角带样式，
     // 导出后在 Excel/WPS 中会出现标题区、Shipper/Consignee 区和右侧资料框缺边。
@@ -2485,6 +2579,7 @@ async function ensureLinkedTableGrid(
     const headerOffset = rawSections[0]?.start === 25 ? 17 : 16
     const topOffset = rawSections[0]?.start === 25 ? 24 : 23
     const framedStyles = new Map<string, string>()
+    const filledStyles = new Map<string, string>()
 
     const ensureRow = (rowNo: number) => {
       let row = directChildren(sheetData, 'row').find(candidate => rowNumber(candidate) === rowNo)
@@ -2512,8 +2607,8 @@ async function ensureLinkedTableGrid(
       }
       return cell
     }
-    const styleWithEdges = (baseStyleId: string, edges: string[]) => {
-      const key = `${baseStyleId}:${[...edges].sort().join(',')}`
+    const styleWithEdgeStyles = (baseStyleId: string, edges: Record<string, string | null>) => {
+      const key = `${baseStyleId}:${Object.entries(edges).sort(([a], [b]) => a.localeCompare(b)).map(([edge, style]) => `${edge}=${style || ''}`).join(',')}`
       const cached = framedStyles.get(key)
       if (cached) return cached
       const currentXfs = directChildren(xfs, 'xf')
@@ -2525,16 +2620,17 @@ async function ensureLinkedTableGrid(
       const border = baseBorder
         ? baseBorder.cloneNode(true) as XmlElement
         : stylesDoc.createElementNS(SPREADSHEET_NS, 'border') as XmlElement
-      for (const edge of edges) {
+      for (const [edge, edgeStyle] of Object.entries(edges)) {
         const current = directChild(border, edge)
         const side = current || stylesDoc.createElementNS(SPREADSHEET_NS, edge) as XmlElement
-        side.setAttribute('style', 'thin')
+        if (edgeStyle) side.setAttribute('style', edgeStyle)
+        else side.removeAttribute('style')
         let color = directChild(side, 'color')
-        if (!color) {
+        if (edgeStyle && !color) {
           color = stylesDoc.createElementNS(SPREADSHEET_NS, 'color') as XmlElement
           side.appendChild(color)
         }
-        color.setAttribute('rgb', 'FF000000')
+        if (edgeStyle) color?.setAttribute('rgb', 'FF000000')
         if (!current) border.appendChild(side)
       }
       if (!directChild(border, 'diagonal')) {
@@ -2549,6 +2645,10 @@ async function ensureLinkedTableGrid(
       framedStyles.set(key, styleId)
       return styleId
     }
+    const styleWithEdges = (baseStyleId: string, edges: string[]) => styleWithEdgeStyles(
+      baseStyleId,
+      Object.fromEntries(edges.map(edge => [edge, 'thin'])),
+    )
     const frame = (startColumn: string, startRow: number, endColumn: string, endRow: number) => {
       const startColumnIndex = XLSX.utils.decode_col(startColumn)
       const endColumnIndex = XLSX.utils.decode_col(endColumn)
@@ -2565,12 +2665,69 @@ async function ensureLinkedTableGrid(
         }
       }
     }
+    const frameOpenBottom = (startColumn: string, startRow: number, endColumn: string, endRow: number) => {
+      const startColumnIndex = XLSX.utils.decode_col(startColumn)
+      const endColumnIndex = XLSX.utils.decode_col(endColumn)
+      for (let rowNo = startRow; rowNo <= endRow; rowNo++) {
+        for (let columnIndex = startColumnIndex; columnIndex <= endColumnIndex; columnIndex++) {
+          const edges: string[] = []
+          if (rowNo === startRow) edges.push('top')
+          if (columnIndex === startColumnIndex) edges.push('left')
+          if (columnIndex === endColumnIndex) edges.push('right')
+          if (!edges.length) continue
+          const cell = ensureCell(rowNo, columnIndex)
+          cell.setAttribute('s', styleWithEdges(cell.getAttribute('s') || '0', edges))
+        }
+      }
+    }
+    const solidFill = (rgb: string) => {
+      const fill = stylesDoc.createElementNS(SPREADSHEET_NS, 'fill') as XmlElement
+      const pattern = stylesDoc.createElementNS(SPREADSHEET_NS, 'patternFill') as XmlElement
+      pattern.setAttribute('patternType', 'solid')
+      const foreground = stylesDoc.createElementNS(SPREADSHEET_NS, 'fgColor') as XmlElement
+      foreground.setAttribute('rgb', `FF${rgb}`)
+      const background = stylesDoc.createElementNS(SPREADSHEET_NS, 'bgColor') as XmlElement
+      background.setAttribute('indexed', '64')
+      pattern.appendChild(foreground)
+      pattern.appendChild(background)
+      fill.appendChild(pattern)
+      fills.appendChild(fill)
+      fills.setAttribute('count', String(directChildren(fills, 'fill').length))
+      return String(directChildren(fills, 'fill').length - 1)
+    }
+    const purpleFillId = solidFill('CCCCFF')
+    const whiteFillId = solidFill('FFFFFF')
+    const styleWithFill = (baseStyleId: string, fillId: string) => {
+      const key = `${baseStyleId}:${fillId}`
+      const cached = filledStyles.get(key)
+      if (cached) return cached
+      const currentXfs = directChildren(xfs, 'xf')
+      const baseXf = currentXfs[Number(baseStyleId)] || currentXfs[0]
+      if (!baseXf) return baseStyleId
+      const xf = baseXf.cloneNode(true) as XmlElement
+      xf.setAttribute('fillId', fillId)
+      xf.setAttribute('applyFill', '1')
+      xfs.appendChild(xf)
+      const styleId = String(directChildren(xfs, 'xf').length - 1)
+      filledStyles.set(key, styleId)
+      return styleId
+    }
+    const fillRange = (startColumn: string, startRow: number, endColumn: string, endRow: number, fillId: string) => {
+      const startColumnIndex = XLSX.utils.decode_col(startColumn)
+      const endColumnIndex = XLSX.utils.decode_col(endColumn)
+      for (let rowNo = startRow; rowNo <= endRow; rowNo++) {
+        for (let columnIndex = startColumnIndex; columnIndex <= endColumnIndex; columnIndex++) {
+          const cell = ensureCell(rowNo, columnIndex)
+          cell.setAttribute('s', styleWithFill(cell.getAttribute('s') || '0', fillId))
+        }
+      }
+    }
 
     for (const range of ranges) {
       const formStart = range.detailStart - headerOffset
       const topStart = range.detailStart - topOffset
-      // 公司抬头区及其下方留白区。
-      frame('A', topStart, 'K', formStart - 3)
+      // 公司抬头区与资料表头相连，中间不应在第 5 行提前封底。
+      frameOpenBottom('A', topStart, 'K', formStart - 1)
       // 左侧发货人和收货人资料框。
       frame('A', formStart, 'C', formStart + 6)
       frame('A', formStart + 7, 'C', range.detailStart - 2)
@@ -2582,33 +2739,42 @@ async function ensureLinkedTableGrid(
       frame('H', formStart + 4, 'K', formStart + 7)
       frame('D', formStart + 8, 'G', range.detailStart - 2)
       frame('H', formStart + 8, 'K', range.detailStart - 2)
-    }
-    borders.setAttribute('count', String(directChildren(borders, 'border').length))
 
-    const clearedStyles = new Map<string, string>()
-    for (const spacerRowNo of ranges.map(range => range.end + 1)) {
-      const spacerRow = directChildren(sheetData, 'row').find(candidate => rowNumber(candidate) === spacerRowNo)
-      if (!spacerRow) continue
-      for (const cell of directChildren(spacerRow, 'c')) {
-        const columnIndex = XLSX.utils.decode_col(cellColumn(cell.getAttribute('r') || 'A'))
-        if (columnIndex < firstColumn || columnIndex > lastColumn) continue
-        const baseStyleId = cell.getAttribute('s') || '0'
-        let styleId = clearedStyles.get(baseStyleId)
-        if (!styleId) {
-          const baseXf = xfList[Number(baseStyleId)] || xfList[0]
-          if (!baseXf) continue
-          const xf = baseXf.cloneNode(true) as XmlElement
-          xf.setAttribute('fillId', '0')
-          xf.setAttribute('applyFill', '1')
-          xf.setAttribute('borderId', '0')
-          xf.setAttribute('applyBorder', '1')
-          xfs.appendChild(xf)
-          styleId = String(directChildren(xfs, 'xf').length - 1)
-          clearedStyles.set(baseStyleId, styleId)
+      // 以最终确认的装箱单为准：顶部整块浅紫，资料内容白底，标签行浅紫。
+      fillRange('A', topStart, 'K', formStart - 1, purpleFillId)
+      fillRange('A', formStart, 'K', range.detailStart - 2, whiteFillId)
+      fillRange('A', formStart, 'K', formStart, purpleFillId)
+      fillRange('A', formStart + 7, 'C', formStart + 7, purpleFillId)
+      for (const rowNo of [formStart + 2, formStart + 4, formStart + 8, range.detailStart - 3]) {
+        fillRange('D', rowNo, 'K', rowNo, purpleFillId)
+      }
+
+      // 明细表头、合计数值区及其下方封底行的数值区为浅紫；封底行沿用
+      // 模板的中粗底边，避免把下一行空白间隔误画成表格。
+      fillRange('A', range.detailStart - 1, 'K', range.detailStart - 1, purpleFillId)
+      fillRange('A', range.detailStart, 'K', range.end - 1, whiteFillId)
+      fillRange('A', range.end, 'C', range.end, whiteFillId)
+      fillRange('D', range.end, 'K', range.end, purpleFillId)
+      // 明细区横线和竖线均使用连续细实线，与确认的装箱单样式一致。
+      for (let rowNo = range.detailStart; rowNo <= range.end; rowNo++) {
+        for (let columnIndex = firstColumn; columnIndex <= lastColumn; columnIndex++) {
+          const cell = ensureCell(rowNo, columnIndex)
+          cell.setAttribute('s', styleWithEdgeStyles(cell.getAttribute('s') || '0', {
+            left: 'thin', right: 'thin', top: null, bottom: 'thin',
+          }))
         }
-        cell.setAttribute('s', styleId)
+      }
+      const spacerRowNo = range.end + 1
+      fillRange('A', spacerRowNo, 'C', spacerRowNo, whiteFillId)
+      fillRange('D', spacerRowNo, 'K', spacerRowNo, purpleFillId)
+      for (let columnIndex = firstColumn; columnIndex <= lastColumn; columnIndex++) {
+        const cell = ensureCell(spacerRowNo, columnIndex)
+        cell.setAttribute('s', styleWithEdgeStyles(cell.getAttribute('s') || '0', {
+          left: 'thin', right: 'thin', top: null, bottom: 'medium',
+        }))
       }
     }
+    borders.setAttribute('count', String(directChildren(borders, 'border').length))
   }
   xfs.setAttribute('count', String(directChildren(xfs, 'xf').length))
   zip.file('xl/styles.xml', serializer.serializeToString(stylesDoc))

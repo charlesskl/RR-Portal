@@ -72,6 +72,11 @@ function saveData(data) {
   fs.renameSync(tmp, DATA_FILE);
 }
 
+// 完成日期（北京时间，如 "2026-9-24"），与现有 completed_date 格式一致
+function cnToday() {
+  return new Date().toLocaleDateString('zh-CN', { timeZone: 'Asia/Shanghai' }).replace(/\//g, '-');
+}
+
 // 月份匹配：容忍 "YYYY-M-D"（completed_date 可能不补零）与 "YYYY-MM" 比较
 function monthMatches(dateStr, month) {
   if (!dateStr || !month) return false;
@@ -168,6 +173,11 @@ function updateOrder(type, id, header, items) {
   const idx = data[`${type}_orders`].findIndex(o => o.id === +id);
   if (idx === -1) return null;
   data[`${type}_orders`][idx] = { ...data[`${type}_orders`][idx], ...header, updated_at: new Date().toISOString() };
+  // 编辑整单也可把状态改为「已完成」（绕过 PATCH /status），此处补记实际完成时间
+  const order = data[`${type}_orders`][idx];
+  if (order.status === '已完成' && !order.completed_date) {
+    order.completed_date = cnToday();
+  }
   if (items !== undefined) {
     data[`${type}_items`] = data[`${type}_items`].filter(i => i.order_id !== +id);
     items.forEach((it, i) => {
@@ -237,6 +247,35 @@ const ALL_MANAGERS = ['易东存'];
     }
   }
   if (changed) saveData(data);
+})();
+
+// 历史已完成喷油单回填实际完成时间：completed_date 字段上线前完成的单没有该值，
+// 用明细工序打勾时间（process_status.done_at / progress_at，均为真实操作时间）的最新一天回填；
+// 完全没有工序时间记录的单不伪造日期，留空。
+(function backfillSprayCompletedDate() {
+  const data = loadData();
+  let changed = false;
+  (data.spray_orders || []).forEach(o => {
+    if (o.status !== '已完成' || o.completed_date) return;
+    const times = (data.spray_items || [])
+      .filter(i => i.order_id === o.id)
+      .flatMap(i => {
+        const ts = [];
+        if (i.progress_at) ts.push(i.progress_at);
+        Object.values(i.process_status || {}).forEach(p => { if (p && p.done_at) ts.push(p.done_at); });
+        return ts;
+      })
+      .map(t => +new Date(t))
+      .filter(t => !isNaN(t));
+    if (!times.length) return;
+    o.completed_date = new Date(Math.max(...times))
+      .toLocaleDateString('zh-CN', { timeZone: 'Asia/Shanghai' }).replace(/\//g, '-');
+    changed = true;
+  });
+  if (changed) {
+    saveData(data);
+    console.log('Backfilled completed_date for historical spray orders');
+  }
 })();
 
 function verifyPin(name, pin, role) {

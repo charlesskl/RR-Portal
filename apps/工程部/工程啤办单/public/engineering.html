@@ -645,7 +645,7 @@ function renderOrderList(orders) {
       const items = o.items || [];
       if (!items.length) {
         rowArr.push(`<tr class="order-row" style="cursor:pointer" onclick="viewOrderDetail(${o.id},'${(o.order_number||'').replace(/'/g,'')}')">
-          <td><strong>${esc(o.order_number||'-')}</strong></td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td>
+          <td><strong>${esc(o.order_number||'-')}</strong></td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>${o.status==='已完成' ? esc(o.completed_date||'-') : ''}</td><td>-</td><td>-</td>
           <td>${statusBadge(o.status)}</td>
           <td class="text-nowrap" onclick="event.stopPropagation()"><div class="btn-group btn-group-sm">
             ${canModifyOrder(o.status) ? `<button class="btn btn-outline-primary" onclick="editOrder(${o.id})" title="编辑"><i class="bi bi-pencil"></i></button>` : ``}
@@ -663,6 +663,7 @@ function renderOrderList(orders) {
           <td>${esc(it.sample_qty||'-')}</td>
           <td>${esc(it.provide_time||'-')}</td>
           <td>${esc(it.eng_complete_time||'-')}</td>
+          <td>${idx===0 ? (o.status==='已完成' ? esc(o.completed_date||'-') : '') : ''}</td>
           <td style="color:#dc3545;font-weight:500">${esc(it.delivery_time||'-')}</td>
           <td>${esc(it.engineer||'-')}</td>
           <td>${idx===0 ? statusBadge(o.status) : ''}</td>
@@ -726,7 +727,7 @@ function renderOrderList(orders) {
         <tr>
           ${isAsm ? `<th>货号</th><th>客名</th><th>夹具数</th><th>申请人</th><th>申请时间</th>` :
             isSpray ? `<th>编号</th><th>客名</th><th>名称</th><th>工序</th><th>样板数量</th>
-            <th>提供胶件时间</th><th>工程需求完成时间</th><th style="color:#fca5a5">喷油收到胶件时间</th><th>工程师</th>` :
+            <th>提供胶件时间</th><th>工程需求完成时间</th><th>实际完成时间</th><th style="color:#fca5a5">喷油收到胶件时间</th><th>工程师</th>` :
             `<th>产品编号</th><th>产品名称</th><th>客名</th><th>日期</th><th>类型</th><th>车间</th><th>主管</th><th>工程师</th><th>原因</th>`}
           <th>状态</th><th>操作</th>
         </tr>

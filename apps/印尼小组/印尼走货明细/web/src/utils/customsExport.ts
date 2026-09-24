@@ -2491,6 +2491,86 @@ async function ensureLinkedTableGrid(
       }
     }
   }
+  if (kind === 'contract' || kind === 'invoice') {
+    // 合同和发票右侧资料栏使用单元格底边作为填写线。动态复制单据时，
+    // 空值单元格可能不会带出模板样式，因此按各模板的固定相对位置补底边。
+    const underlinedStyles = new Map<string, string>()
+    const ensureCell = (rowNo: number, columnIndex: number) => {
+      let row = directChildren(sheetData, 'row').find(candidate => rowNumber(candidate) === rowNo)
+      if (!row) {
+        row = sheetDoc.createElementNS(SPREADSHEET_NS, 'row') as XmlElement
+        row.setAttribute('r', String(rowNo))
+        const following = directChildren(sheetData, 'row').find(candidate => rowNumber(candidate) > rowNo)
+        if (following) sheetData.insertBefore(row, following)
+        else sheetData.appendChild(row)
+      }
+      const address = `${XLSX.utils.encode_col(columnIndex)}${rowNo}`
+      let cell = directChildren(row, 'c').find(candidate => candidate.getAttribute('r') === address)
+      if (!cell) {
+        cell = sheetDoc.createElementNS(SPREADSHEET_NS, 'c') as XmlElement
+        cell.setAttribute('r', address)
+        const following = directChildren(row, 'c').find(existing =>
+          XLSX.utils.decode_col(cellColumn(existing.getAttribute('r') || 'A')) > columnIndex,
+        )
+        if (following) row.insertBefore(cell, following)
+        else row.appendChild(cell)
+      }
+      return cell
+    }
+    const styleWithBottom = (baseStyleId: string) => {
+      const cached = underlinedStyles.get(baseStyleId)
+      if (cached) return cached
+      const currentXfs = directChildren(xfs, 'xf')
+      const baseXf = currentXfs[Number(baseStyleId)] || currentXfs[0]
+      if (!baseXf) return baseStyleId
+      const xf = baseXf.cloneNode(true) as XmlElement
+      const borderId = Number(baseXf.getAttribute('borderId') || 0)
+      const baseBorder = directChildren(borders, 'border')[borderId]
+      const border = baseBorder
+        ? baseBorder.cloneNode(true) as XmlElement
+        : stylesDoc.createElementNS(SPREADSHEET_NS, 'border') as XmlElement
+      let bottom = directChild(border, 'bottom')
+      if (!bottom) {
+        bottom = stylesDoc.createElementNS(SPREADSHEET_NS, 'bottom') as XmlElement
+        const diagonal = directChild(border, 'diagonal')
+        if (diagonal) border.insertBefore(bottom, diagonal)
+        else border.appendChild(bottom)
+      }
+      bottom.setAttribute('style', 'thin')
+      let color = directChild(bottom, 'color')
+      if (!color) {
+        color = stylesDoc.createElementNS(SPREADSHEET_NS, 'color') as XmlElement
+        bottom.appendChild(color)
+      }
+      color.setAttribute('rgb', 'FF000000')
+      if (!directChild(border, 'diagonal')) {
+        border.appendChild(stylesDoc.createElementNS(SPREADSHEET_NS, 'diagonal'))
+      }
+      borders.appendChild(border)
+      const nextBorderId = String(directChildren(borders, 'border').length - 1)
+      xf.setAttribute('borderId', nextBorderId)
+      xf.setAttribute('applyBorder', '1')
+      xfs.appendChild(xf)
+      const styleId = String(directChildren(xfs, 'xf').length - 1)
+      underlinedStyles.set(baseStyleId, styleId)
+      return styleId
+    }
+
+    const valueColumn = XLSX.utils.decode_col(kind === 'contract' ? 'H' : 'J')
+    const invoiceOffsets = rawSections[0]?.start === 32
+      ? [-23, -21, -19, -16]
+      : rawSections[0]?.start === 28
+        ? [-19, -17, -15, -12]
+        : [-14, -12, -10, -8]
+    const rowOffsets = kind === 'contract' ? [-19, -15, -11] : invoiceOffsets
+    for (const range of ranges) {
+      for (const offset of rowOffsets) {
+        const cell = ensureCell(range.detailStart + offset, valueColumn)
+        cell.setAttribute('s', styleWithBottom(cell.getAttribute('s') || '0'))
+      }
+    }
+    borders.setAttribute('count', String(directChildren(borders, 'border').length))
+  }
   if (kind === 'packing') {
     // 装箱单表头也属于正式单据的一部分。模板中的合并单元格只有左上角带样式，
     // 导出后在 Excel/WPS 中会出现标题区、Shipper/Consignee 区和右侧资料框缺边。

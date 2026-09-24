@@ -67,6 +67,20 @@ function borderEdges(stylesXml: string, sheetXml: string, address: string) {
   })
 }
 
+function fillColor(stylesXml: string, sheetXml: string, address: string) {
+  const stylesDoc = new DOMParser().parseFromString(stylesXml, 'application/xml')
+  const sheetDoc = new DOMParser().parseFromString(sheetXml, 'application/xml')
+  const cells = Array.from(sheetDoc.getElementsByTagNameNS(SPREADSHEET_NS, 'c')) as any[]
+  const cell = cells.find(candidate => candidate.getAttribute('r') === address)
+  const xfs = Array.from(stylesDoc.getElementsByTagNameNS(SPREADSHEET_NS, 'cellXfs')[0]
+    .getElementsByTagNameNS(SPREADSHEET_NS, 'xf')) as any[]
+  const fills = Array.from(stylesDoc.getElementsByTagNameNS(SPREADSHEET_NS, 'fills')[0]
+    .getElementsByTagNameNS(SPREADSHEET_NS, 'fill')) as any[]
+  const xf = xfs[Number(cell?.getAttribute('s') || 0)]
+  const fill = fills[Number(xf?.getAttribute('fillId') || 0)]
+  return fill?.getElementsByTagNameNS(SPREADSHEET_NS, 'fgColor')[0]?.getAttribute('rgb') || ''
+}
+
 async function worksheetXml(zip: JSZip, sheetName: string) {
   const workbookDoc = new DOMParser().parseFromString(
     await zip.file('xl/workbook.xml')!.async('string'),
@@ -145,13 +159,22 @@ describe('supplier document export', () => {
     // 装箱单抬头、发货人/收货人及右侧资料栏必须形成完整外框；合并单元格
     // 的右下角也要有实际单元格样式，Excel/WPS 才不会显示缺边。
     expect(borderEdges(outputStyles, packingXml, 'A1')).toEqual(expect.arrayContaining(['top', 'left']))
-    expect(borderEdges(outputStyles, packingXml, 'K5')).toEqual(expect.arrayContaining(['bottom', 'right']))
+    expect(borderEdges(outputStyles, packingXml, 'K5')).toContain('right')
+    expect(borderEdges(outputStyles, packingXml, 'K5')).not.toContain('bottom')
+    expect(borderEdges(outputStyles, packingXml, 'K7')).toContain('right')
     expect(borderEdges(outputStyles, packingXml, 'A8')).toEqual(expect.arrayContaining(['top', 'left']))
     expect(borderEdges(outputStyles, packingXml, 'C14')).toEqual(expect.arrayContaining(['bottom', 'right']))
     expect(borderEdges(outputStyles, packingXml, 'C23')).toEqual(expect.arrayContaining(['bottom', 'right']))
     expect(borderEdges(outputStyles, packingXml, 'D8')).toEqual(expect.arrayContaining(['top', 'left']))
     expect(borderEdges(outputStyles, packingXml, 'G9')).toEqual(expect.arrayContaining(['bottom', 'right']))
     expect(borderEdges(outputStyles, packingXml, 'K23')).toEqual(expect.arrayContaining(['bottom', 'right']))
+    expect(fillColor(outputStyles, packingXml, 'A1')).toBe('FFCCCCFF')
+    for (const address of ['A2', 'A3', 'A6', 'A7', 'A8', 'D8', 'H8']) {
+      expect(fillColor(outputStyles, packingXml, address)).toBe('FFDBD9F6')
+    }
+    for (const address of ['A4', 'A5', 'B8', 'E8', 'I8', 'A9', 'D9', 'H9']) {
+      expect(fillColor(outputStyles, packingXml, address)).toBe('FFFEF2DE')
+    }
     // 发票的装运口岸/目的地分组行以及总值大写行也必须完整闭合。
     expect(borderEdges(outputStyles, invoiceXml, 'B29')).toEqual(expect.arrayContaining(['top', 'left']))
     expect(borderEdges(outputStyles, invoiceXml, 'J29')).toEqual(expect.arrayContaining(['top', 'right']))

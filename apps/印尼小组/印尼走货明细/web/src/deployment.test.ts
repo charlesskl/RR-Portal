@@ -265,7 +265,7 @@ describe('deployment base paths', () => {
     expect(await cellFillId(outputBytes, 'A31', 'xl/worksheets/sheet5.xml')).toBeGreaterThan(0)
     for (const column of ['E', 'H', 'I', 'J', 'K']) {
       expect(await cellFillId(outputBytes, `${column}32`, 'xl/worksheets/sheet5.xml')).toBeGreaterThan(0)
-      expect(await cellBorderSides(outputBytes, `${column}32`, 'xl/worksheets/sheet5.xml')).toEqual(['thin', 'thin', 'thin', 'thin'])
+      expect(await cellBorderSides(outputBytes, `${column}32`, 'xl/worksheets/sheet5.xml')).toEqual(['thin', 'thin', null, 'medium'])
     }
     expect(sheet.A7?.s?.border).toBeUndefined()
     expect(sheet.AB4?.f).toBe('SUM(AA4:AA6)')

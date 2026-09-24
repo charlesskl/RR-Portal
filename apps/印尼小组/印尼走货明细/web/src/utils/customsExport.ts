@@ -2607,8 +2607,8 @@ async function ensureLinkedTableGrid(
       }
       return cell
     }
-    const styleWithEdges = (baseStyleId: string, edges: string[]) => {
-      const key = `${baseStyleId}:${[...edges].sort().join(',')}`
+    const styleWithEdgeStyles = (baseStyleId: string, edges: Record<string, string | null>) => {
+      const key = `${baseStyleId}:${Object.entries(edges).sort(([a], [b]) => a.localeCompare(b)).map(([edge, style]) => `${edge}=${style || ''}`).join(',')}`
       const cached = framedStyles.get(key)
       if (cached) return cached
       const currentXfs = directChildren(xfs, 'xf')
@@ -2620,16 +2620,17 @@ async function ensureLinkedTableGrid(
       const border = baseBorder
         ? baseBorder.cloneNode(true) as XmlElement
         : stylesDoc.createElementNS(SPREADSHEET_NS, 'border') as XmlElement
-      for (const edge of edges) {
+      for (const [edge, edgeStyle] of Object.entries(edges)) {
         const current = directChild(border, edge)
         const side = current || stylesDoc.createElementNS(SPREADSHEET_NS, edge) as XmlElement
-        side.setAttribute('style', 'thin')
+        if (edgeStyle) side.setAttribute('style', edgeStyle)
+        else side.removeAttribute('style')
         let color = directChild(side, 'color')
-        if (!color) {
+        if (edgeStyle && !color) {
           color = stylesDoc.createElementNS(SPREADSHEET_NS, 'color') as XmlElement
           side.appendChild(color)
         }
-        color.setAttribute('rgb', 'FF000000')
+        if (edgeStyle) color?.setAttribute('rgb', 'FF000000')
         if (!current) border.appendChild(side)
       }
       if (!directChild(border, 'diagonal')) {
@@ -2644,6 +2645,10 @@ async function ensureLinkedTableGrid(
       framedStyles.set(key, styleId)
       return styleId
     }
+    const styleWithEdges = (baseStyleId: string, edges: string[]) => styleWithEdgeStyles(
+      baseStyleId,
+      Object.fromEntries(edges.map(edge => [edge, 'thin'])),
+    )
     const frame = (startColumn: string, startRow: number, endColumn: string, endRow: number) => {
       const startColumnIndex = XLSX.utils.decode_col(startColumn)
       const endColumnIndex = XLSX.utils.decode_col(endColumn)
@@ -2744,19 +2749,20 @@ async function ensureLinkedTableGrid(
         fillRange('D', rowNo, 'K', rowNo, purpleFillId)
       }
 
-      // 明细表头和合计数值区为浅紫，明细与页尾空白行保持白底完整格线。
+      // 明细表头、合计数值区及其下方封底行的数值区为浅紫；封底行沿用
+      // 模板的中粗底边，避免把下一行空白间隔误画成表格。
       fillRange('A', range.detailStart - 1, 'K', range.detailStart - 1, purpleFillId)
       fillRange('A', range.detailStart, 'K', range.end - 1, whiteFillId)
       fillRange('A', range.end, 'C', range.end, whiteFillId)
       fillRange('D', range.end, 'K', range.end, purpleFillId)
       const spacerRowNo = range.end + 1
-      fillRange('A', spacerRowNo, 'K', spacerRowNo, whiteFillId)
+      fillRange('A', spacerRowNo, 'C', spacerRowNo, whiteFillId)
+      fillRange('D', spacerRowNo, 'K', spacerRowNo, purpleFillId)
       for (let columnIndex = firstColumn; columnIndex <= lastColumn; columnIndex++) {
         const cell = ensureCell(spacerRowNo, columnIndex)
-        cell.setAttribute('s', styleWithEdges(
-          cell.getAttribute('s') || '0',
-          ['top', 'bottom', 'left', 'right'],
-        ))
+        cell.setAttribute('s', styleWithEdgeStyles(cell.getAttribute('s') || '0', {
+          left: 'thin', right: 'thin', top: null, bottom: 'medium',
+        }))
       }
     }
     borders.setAttribute('count', String(directChildren(borders, 'border').length))

@@ -920,6 +920,8 @@ export default function SchedulingSheet({ workshop, tab, lineName = 'all', lines
         height={sheetHeight}
         newImportedIds={newImportedIds}
         refreshKey={editorRefreshKey}
+        lineName={lineName}
+        orderStatus={STATUS_MAP[tab] || 'active'}
       />
 
       <Modal

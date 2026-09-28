@@ -120,6 +120,184 @@ async function worksheetXml(zip: JSZip, sheetName: string) {
 }
 
 describe('supplier document export', () => {
+  it('displays Chinese invoice units without changing source quantities or units', async () => {
+    const codes = ['KGM', 'PCS', 'SET', 'MTR', '个']
+    const file = await buildCustomsWorkbook({
+      templateBuffer: rrmTemplateBuffer, seller,
+      items: codes.map((_, i) => ({ material_id: i + 1, supplier: seller.keyword, kg: i + 0.25, qty: 100 })),
+      materials: new Map(codes.map((unit, i) => [i + 1, { id: i + 1, name_zh: `测试${i}`, unit_kg: unit, supplier: seller.keyword }])),
+      supplierProfiles: [seller], productHs: new Map(), images: new Map(),
+      form: { customer: 'RRM', containerNo: 'UNIT-TEST' },
+    })
+    const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' })
+    ;['千克', '个', '套', '米', '个'].forEach((unit, i) => {
+      expect(wb.Sheets['发票'][`G${i + 9}`].v).toBe(unit)
+      expect(wb.Sheets['发票'][`G${i + 9}`].f).toContain(`'UNIT-TEST'!J${i + 4}`)
+      expect(wb.Sheets['发票'][`F${i + 9}`].v).toBe(i + 0.25)
+      expect(wb.Sheets['UNIT-TEST'][`J${i + 4}`].v).toBe(codes[i])
+    })
+  })
+  it.each(['legacy', 'RRI', 'RRM'])('uses shipping weight and its unit for generic invoice quantity (%s)', async variant => {
+    const file = await buildCustomsWorkbook({
+      templateBuffer: variant === 'legacy' ? templateBuffer : variant === 'RRI' ? rriTemplateBuffer : rrmTemplateBuffer,
+      seller,
+      items: [
+        { material_id: 1, supplier: seller.keyword, qty: 600, kg: 0.174, purchase_unit: '个' },
+        { material_id: 2, supplier: seller.keyword, qty: 33280, kg: 13.312, purchase_unit: '个' },
+      ],
+      materials: new Map([1, 2].map(id => [id, { id, name_zh: `螺丝${id}`, unit_kg: 'KGM', supplier: seller.keyword }])),
+      supplierProfiles: [seller], productHs: new Map(), images: new Map(),
+      form: { customer: variant === 'RRI' ? 'RRI' : 'RRM', containerNo: 'WEIGHT-TEST' },
+    })
+    const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' })
+    const invoice = wb.Sheets['发票']
+    expect(invoice.F9).toMatchObject({ f: "'WEIGHT-TEST'!K4", v: 0.174 })
+    expect(invoice.F10).toMatchObject({ f: "'WEIGHT-TEST'!K5", v: 13.312 })
+    expect(invoice.G9.v).toBe('千克')
+    expect(invoice.G9.f).toContain("'WEIGHT-TEST'!J4")
+    expect(invoice.G10.v).toBe('千克')
+    expect(invoice.G10.f).toContain("'WEIGHT-TEST'!J5")
+    expect(invoice.F11.f).toBe('SUM(F9:F10)')
+    expect(invoice.F11.v).toBeCloseTo(13.486, 8)
+    expect(invoice.I9.f).toBe('F9*H9')
+    expect(invoice.I10.f).toBe('F10*H10')
+    // 主表送货数量和采购单位保持不变。
+    expect(wb.Sheets['WEIGHT-TEST'].L4.v).toBe(600)
+    expect(wb.Sheets['WEIGHT-TEST'].M4.v).toBe('个')
+  })
+  it.each(['RRI', 'RRM'])('uses catalogue declaration content instead of English names (%s)', async customer => {
+    const file = await buildCustomsWorkbook({
+      seller,
+      templateBuffer: customer === 'RRI' ? rriTemplateBuffer : rrmTemplateBuffer,
+      items: [1, 2].map(id => ({ material_id: id, qty: 1, supplier: seller.keyword })),
+      materials: new Map([
+        [1, { id: 1, name_zh: 'PB螺丝', name_en: 'PB screw', hs_cn: '7318159001' }],
+        [2, { id: 2, name_zh: '不存在的商品', name_en: 'Must not use English', hs_cn: '7318159090' }],
+      ]), supplierProfiles: [seller], productHs: new Map(), images: new Map(),
+      form: { customer, containerNo: 'DECLARATION' },
+    })
+    const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' })
+    const invoice = wb.Sheets['发票']
+    expect(invoice.E9.v).toBe('0|0|铁制|353MPa|无牌|1008|2.0mm-4.0mm')
+    expect(invoice.E9.f).toMatch(/^'商品汇总表'!D\d+$/)
+    expect(wb.Sheets['商品汇总表'][invoice.E9.f!.split('!')[1]].v).toBe(invoice.E9.v)
+    expect(invoice.E10?.v || '').toBe('')
+    expect(invoice.E10?.f).toBeUndefined()
+  })
+  it('groups only the generic invoice by customs company and totals each group', async () => {
+    const items = [
+      { material_id: 1, qty: 2, kg: 2, price: 5, cartons: 1, customs_company: '甲报关公司', supplier: seller.keyword },
+      { material_id: 2, qty: 3, kg: 3, price: 6, cartons: 2, customs_company: '乙报关公司', supplier: seller.keyword },
+      { material_id: 3, qty: 4, kg: 4, price: 7, cartons: 3, customs_company: '甲报关公司', supplier: seller.keyword },
+    ]
+    const materials = new Map(items.map(item => [item.material_id, { id: item.material_id, name_zh: `物料${item.material_id}`, hs_cn: `CN${item.material_id}`, supplier: seller.keyword }]))
+    const file = await buildCustomsWorkbook({ templateBuffer: rrmTemplateBuffer, items, materials,
+      supplierProfiles: [seller], productHs: new Map(), images: new Map(), form: { customer: 'RRM', containerNo: 'GROUP-TEST' } })
+    const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' })
+    const invoice = wb.Sheets['发票']
+    const groupRows = Object.entries(invoice).filter(([address, cell]) => /^D\d+$/.test(address) && /[甲乙]报关公司/.test(String(cell.v)))
+    expect(groupRows).toHaveLength(2)
+    let previous = 8
+    for (const [address, cell] of groupRows) {
+      const totalRow = Number(address.slice(1))
+      const detailRows = Array.from({ length: totalRow - previous - 1 }, (_, i) => previous + i + 1)
+        .filter(row => invoice[`C${row}`]?.f)
+      expect(detailRows).toHaveLength(cell.v === '甲报关公司' ? 2 : 1)
+      for (const row of detailRows) {
+        const mainRow = Number(invoice[`C${row}`].f!.match(/B(\d+)$/)![1])
+        expect(wb.Sheets['GROUP-TEST'][`AR${mainRow}`].v).toBe(cell.v)
+        expect(invoice[`I${row}`].f).toBe(`F${row}*H${row}`)
+        expect(invoice[`I${row}`].v).toBeCloseTo(Number(invoice[`F${row}`].v) * Number(invoice[`H${row}`].v), 8)
+      }
+      expect(invoice[`F${totalRow}`].f).toBe(`SUM(F${detailRows[0]}:F${detailRows.at(-1)})`)
+      previous = totalRow
+    }
+    expect(Object.values(invoice).filter((cell: any) => cell?.f?.match(/'GROUP-TEST'!B\d+/))).toHaveLength(3)
+    const grandTotals = Object.entries(invoice).filter(([, cell]) => cell.v === '总合计')
+    expect(grandTotals).toHaveLength(1)
+    const grandRow = Number(grandTotals[0][0].slice(1))
+    expect(grandRow).toBe(previous + 1)
+    expect(grandRow).toBe(14) // 三条明细、两家公司小计、总合计；无间隔空行。
+    const zip = await JSZip.loadAsync(await file.arrayBuffer())
+    const styles = await zip.file('xl/styles.xml')!.async('string')
+    const xml = await worksheetXml(zip, '发票')
+    // 公司小计整行黄色，空白格也填色。
+    for (const [address] of groupRows) {
+      for (const col of ['B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M']) {
+        expect(fillColor(styles, xml, `${col}${address.slice(1)}`)).toBe(fillColor(styles, xml, `I${previous}`))
+      }
+    }
+    // 单元格必须按列排序，避免 WPS 忽略后补的总合计文字及填色。
+    const document = new DOMParser().parseFromString(xml, 'application/xml')
+    for (const row of Array.from(document.getElementsByTagName('row'))) {
+      const columns = Array.from(row.getElementsByTagName('c')).map(cell => XLSX.utils.decode_cell(cell.getAttribute('r')!).c)
+      expect(columns).toEqual([...columns].sort((a, b) => a - b))
+    }
+    // 明细、公司小计、总合计的所有格子均闭合。
+    for (let row = 9; row <= grandRow; row++) {
+      for (const col of ['B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M']) {
+        expect(borderEdges(styles, xml, `${col}${row}`)).toEqual(expect.arrayContaining(['top', 'bottom', 'left', 'right']))
+      }
+    }
+    // 合并表头竖线连续，上下两行之间不出现横线。
+    for (const col of ['B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M']) {
+      expect(borderEdges(styles, xml, `${col}7`)).toEqual(expect.arrayContaining(['top', 'left', 'right']))
+      expect(borderEdges(styles, xml, `${col}8`)).toEqual(expect.arrayContaining(['bottom', 'left', 'right']))
+      expect(borderEdges(styles, xml, `${col}7`)).not.toContain('bottom')
+      expect(borderEdges(styles, xml, `${col}8`)).not.toContain('top')
+    }
+    for (const col of ['I', 'J', 'K', 'L']) {
+      expect(invoice[`${col}${grandRow}`].f).toBe(`SUM(${groupRows.map(([address]) => `${col}${address.slice(1)}`).join(',')})`)
+      expect(invoice[`${col}${grandRow}`].v).toBeCloseTo(groupRows.reduce((sum, [address]) => sum + Number(invoice[`${col}${address.slice(1)}`].v), 0), 8)
+    }
+    for (const col of ['B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L']) {
+      expect(fillColor(styles, xml, `${col}${grandRow}`)).toBe(fillColor(styles, xml, `I${previous}`))
+      expect(borderEdges(styles, xml, `${col}${grandRow}`)).toEqual(expect.arrayContaining(['top', 'bottom', 'left', 'right']))
+    }
+    expect(invoice[`F${grandRow}`]?.v || '').toBe('')
+    expect(invoice[`I${grandRow}`].v).toBe(56)
+    expect(invoice[`L${grandRow}`].v).toBe(6)
+    expect(invoice['!ref']).toBe(`B1:M${grandRow}`)
+  }, 20000)
+  it.each(['legacy', 'RRI', 'RRM'])('links generic invoice commodity numbers to Chinese HS codes (%s)', async variant => {
+    const items = [1, 2, 3].map(id => ({ material_id: id, qty: 1, supplier: seller.keyword }))
+    const materials = new Map(items.map(item => [item.material_id, {
+      id: item.material_id, supplier: seller.keyword, name_zh: '测试物料',
+      product_code: `P${item.material_id}`, hs_cn: item.material_id === 1 ? '0123456789' : '', hs_id: '99999999',
+    }]))
+    const file = await buildCustomsWorkbook({
+      templateBuffer: variant === 'legacy' ? templateBuffer : variant === 'RRI' ? rriTemplateBuffer : rrmTemplateBuffer,
+      items, materials, seller, supplierProfiles: [seller],
+      productHs: new Map([['P2', { hsCN: '4819200000', hsID: '88888888' }]]),
+      images: new Map(), form: { customer: variant === 'RRI' ? 'RRI' : 'RRM', containerNo: 'HS-TEST' },
+    })
+    const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' })
+    for (let i = 0; i < 3; i++) expect(wb.Sheets['发票'][`C${9 + i}`].f).toBe(`'HS-TEST'!B${4 + i}`)
+    expect(wb.Sheets['HS-TEST'].B4.v).toBe('0123456789')
+    expect(wb.Sheets['HS-TEST'].B5.v).toBe('4819200000')
+    expect(wb.Sheets['HS-TEST'].B6?.v || '').toBe('')
+  })
+  it.each(['RRI', 'RRM'])('adds Hengxinchang beneficiary details only to its own invoices (%s)', async customer => {
+    const hengxinchang = { ...seller, keyword: '恒新昌', full: '东莞市恒新昌彩印有限公司', nameEn: 'Dongguan Hengxinchang Printing Co.,Ltd.' }
+    const items = [hengxinchang, hengxinchang, secondSeller].map((profile, index) => ({
+      material_id: index + 1, supplier: profile.keyword, customs_company: profile.full,
+      qty: 1, contract_no: `C-${index}`, invoice_no: `I-${index}`,
+    }))
+    const materials = new Map(items.map(item => [item.material_id, { id: item.material_id, supplier: item.supplier, name_zh: '测试物料' }]))
+    const file = await buildCustomsWorkbook({
+      templateBuffer: customer === 'RRI' ? rriTemplateBuffer : rrmTemplateBuffer,
+      items, materials, supplierProfiles: [hengxinchang, secondSeller],
+      productHs: new Map(), images: new Map(), form: { customer, containerNo: 'HXC-TEST' },
+    })
+    const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' })
+    const sheetName = customer === 'RRI' ? '实业发票' : '全球发票'
+    for (const account of ['8110914014201724067(USD)', '8110901012301719910 (RMB)', '8110913013901724078 (HKD)']) {
+      expect(countCellsContaining(wb, sheetName, account)).toBe(2)
+    }
+    expect(countCellsContaining(wb, sheetName, 'Beneficiary: Dongguan shengcheng Import and Export Co., Ltd.')).toBe(2)
+    expect(countCellsContaining(wb, sheetName, 'Room 603, No. 39, HongLi Road Dongcheng')).toBe(2)
+    expect(countCellsContaining(wb, sheetName, '15668277360001')).toBe(0)
+  })
   it('fills the seller positions without retaining sample banking details', async () => {
     const file = await buildCustomsWorkbook({
       templateBuffer, seller,
@@ -135,7 +313,7 @@ describe('supplier document export', () => {
     expect(wb.Sheets['装箱单'].A9.v).toContain(seller.nameEn)
     expect(Object.values(wb.Sheets['装箱单']).some((cell: any) => cell?.v === seller.nameEn)).toBe(true)
     expect(wb.Sheets['销售合同'].B4.v).toContain(seller.nameEn)
-    expect(wb.Sheets['发票'].B1.v).toBe(seller.full)
+    expect(wb.Sheets['发票'].B1.v).toBe('深圳市华胜益出口贸易有限公司')
     const terms = tradeTerms(wb, ['全球合同', '全球发票', '印尼合同', '印尼发票'])
     expect(terms.length).toBe(3)
     expect(new Set(terms)).toEqual(new Set(['CIF IDSRG,Semarang']))
@@ -144,8 +322,8 @@ describe('supplier document export', () => {
     expect(countCellValue(wb, '印尼合同', '购销合同\nPurchase Contract')).toBe(0)
     expect(countCellValue(wb, '印尼发票', 'COMMERCIAL INVOICE')).toBe(0)
     // 主明细的报关公司列按设计回退为华胜益（见 deployment.test.ts 的 effectiveCustomsCompany
-    // 用例），不属于卖方样例残留；其余单据页不得带出模板里的样例公司。
-    const remnants = wb.SheetNames.filter(sheet => sheet !== 'TEST-SELLER').flatMap(sheet => Object.entries(wb.Sheets[sheet])
+    // 用例），通用发票也按该报关公司分组，不属于卖方样例残留。
+    const remnants = wb.SheetNames.filter(sheet => sheet !== 'TEST-SELLER' && sheet !== '发票').flatMap(sheet => Object.entries(wb.Sheets[sheet])
       .filter(([cell, value]) => !cell.startsWith('!') && typeof value?.v === 'string'
         && /华胜益|HUASHENGYI|雅洛轩|Yaluo Xuan|骏盈|Junying|林丰|Linfeng/i.test(value.v))
       .map(([cell]) => `${sheet}!${cell}`))

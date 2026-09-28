@@ -137,6 +137,22 @@ const HUASHENGYI_BANK_INFO = [
 const HUASHENGYI_BENEFICIARY = 'Beneficiary：SHENZHEN  HUASHENGYI  EXPORT  TRADING  LIMITED'
 const HUASHENGYI_BENEFICIARY_ADDRESS = 'Add: Room 602, Longsheng Comprehensive Service Building, Longsheng Community, Dalang Street, Longhua District, Shenzhen City'
 
+// 恒新昌发票按客户提供的收款资料显示，收款公司与卖方名称不同。
+const HENGXINCHANG_BANK_INFO = [
+  'Beneficiary name :Dongguan shengcheng Import and Export Co., Ltd.',
+  'Account number :',
+  '8110914014201724067(USD)',
+  '8110901012301719910 (RMB)',
+  '8110913013901724078 (HKD)',
+].join('\n')
+const HENGXINCHANG_BENEFICIARY = 'Beneficiary: Dongguan shengcheng Import and Export Co., Ltd.'
+const HENGXINCHANG_BENEFICIARY_ADDRESS = 'Add: Room 603, No. 39, HongLi Road Dongcheng, Dongcheng Street, Dongguan City, Guangdong province'
+
+function isHengxinchangSeller(seller?: SupplierDict) {
+  return Boolean(seller && [seller.keyword, seller.full, seller.nameEn]
+    .some(name => /恒新昌|Heng\s*xin\s*chang/i.test(name || '')))
+}
+
 function isHuashengyiSeller(seller?: SupplierDict) {
   return Boolean(seller && [seller.keyword, seller.full, seller.nameEn]
     .some(name => /华胜益|HUASHENGYI/i.test(name || '')))
@@ -676,17 +692,17 @@ function populateLinkedDocuments(
       setPreservingStyle(
         groupInvoiceSheet,
         `B${beneficiaryRow}`,
-        isHuashengyiSeller(seller) ? HUASHENGYI_BANK_INFO : '',
+        isHuashengyiSeller(seller) ? HUASHENGYI_BANK_INFO : isHengxinchangSeller(seller) ? HENGXINCHANG_BANK_INFO : '',
       )
       setPreservingStyle(
         groupInvoiceSheet,
         `G${beneficiaryRow}`,
-        isHuashengyiSeller(seller) ? HUASHENGYI_BENEFICIARY : '',
+        isHuashengyiSeller(seller) ? HUASHENGYI_BENEFICIARY : isHengxinchangSeller(seller) ? HENGXINCHANG_BENEFICIARY : '',
       )
       setPreservingStyle(
         groupInvoiceSheet,
         `G${beneficiaryAddressRow}`,
-        isHuashengyiSeller(seller) ? HUASHENGYI_BENEFICIARY_ADDRESS : '',
+        isHuashengyiSeller(seller) ? HUASHENGYI_BENEFICIARY_ADDRESS : isHengxinchangSeller(seller) ? HENGXINCHANG_BENEFICIARY_ADDRESS : '',
       )
     }
     if (group.indo) {
@@ -873,7 +889,7 @@ function populateLinkedDocuments(
     const active = index < sorted.length
     setPreservingStyle(genericInvoiceSheet, `B${row}`, active ? index + 1 : '')
     const refs: Record<string, string> = {
-      C: `AY${mainRow}`, D: `F${mainRow}`, E: `G${mainRow}`, F: `L${mainRow}`, G: `M${mainRow}`,
+      C: `B${mainRow}`, D: `F${mainRow}`, E: `G${mainRow}`, F: `L${mainRow}`, G: `M${mainRow}`,
       H: `Z${mainRow}`, I: `AA${mainRow}`, J: `P${mainRow}`, K: `Q${mainRow}`, L: `AT${mainRow}`,
     }
     for (const [col, mainCell] of Object.entries(refs)) {
@@ -1005,7 +1021,7 @@ function populateGlobalIndoLinkedDocuments(wb: XLSX.WorkBook, mainName: string, 
     const active = index < sorted.length
     setPreservingStyle(invoiceSheet, `B${row}`, active ? index + 1 : '')
     const refs: Record<string, string> = {
-      C: `AY${mainRow}`, D: `F${mainRow}`, E: `G${mainRow}`, F: `L${mainRow}`, G: `M${mainRow}`,
+      C: `B${mainRow}`, D: `F${mainRow}`, E: `G${mainRow}`, F: `L${mainRow}`, G: `M${mainRow}`,
       H: `Z${mainRow}`, I: `AA${mainRow}`, J: `P${mainRow}`, K: `Q${mainRow}`, L: `AT${mainRow}`,
     }
     for (const [col, mainCell] of Object.entries(refs)) {
@@ -1480,11 +1496,289 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
     await resizeModernLinkedDocumentTables(outZip, newName, linkedDocumentGroups, String(form.customer || '').toUpperCase().includes('RRI'))
   }
   await ensureMainTableGrid(outZip, newName, mainTotalRow)
+  if (!input.mainOnly) await groupGenericInvoice(outZip, newName, sorted.map(effCustoms), ws, wbObj.Sheets['商品汇总表'])
   if (floatImages.length) {
     const mainSheetIdx = wbObj.SheetNames.indexOf(newName) + 1
     await injectOoxmlImages(outZip, mainSheetIdx, floatImages)
   }
   return await outZip.generateAsync({ type: 'blob' })
+}
+
+// 仅重排通用“发票”，不改变主明细及其他单据的顺序。
+async function groupGenericInvoice(zip: JSZip, mainName: string, companies: string[], main: XLSX.WorkSheet, catalogue?: XLSX.WorkSheet) {
+  const parts = await workbookSheetParts(zip)
+  const path = parts.get('发票')
+  if (!path) return
+  const parser = new DOMParser()
+  const serializer = new XMLSerializer()
+  const doc = parser.parseFromString(await zip.file(path)!.async('string'), 'application/xml')
+  const data = doc.getElementsByTagNameNS(SPREADSHEET_NS, 'sheetData')[0]
+  const rows = Array.from(data.getElementsByTagNameNS(SPREADSHEET_NS, 'row'))
+  const detail = rows.find(row => row.getAttribute('r') === '9')
+  const subtotal = rows.find(row => row.getAttribute('r') === '23')
+  if (!detail || !subtotal) throw new Error('发票模板缺少明细或合计行')
+  const oldRows = new Map<number, number>()
+  for (const row of rows) {
+    const seq = Array.from(row.getElementsByTagNameNS(SPREADSHEET_NS, 'c')).find(c => c.getAttribute('r') === `B${row.getAttribute('r')}`)
+    const value = Number(seq?.getElementsByTagNameNS(SPREADSHEET_NS, 'v')[0]?.textContent)
+    if (value > 0 && value <= companies.length) oldRows.set(Number(row.getAttribute('r')), value - 1)
+  }
+  for (const row of rows) if (Number(row.getAttribute('r')) >= 9) data.removeChild(row)
+  const groups = new Map<string, number[]>()
+  companies.forEach((company, index) => {
+    const key = company.trim() || CUSTOMS_FIXED
+    if (!groups.has(key)) groups.set(key, [])
+    groups.get(key)!.push(index)
+  })
+  const refs: Record<string, string> = { C: 'B', D: 'F', E: 'G', F: 'K', G: 'J', H: 'Z', I: 'AA', J: 'P', K: 'Q', L: 'AT' }
+  const normalizeName = (value: unknown) => String(value ?? '').trim().replace(/\s+/g, '').normalize('NFKC')
+  const catalogueRows = new Map<string, number[]>()
+  if (catalogue) {
+    for (const address of Object.keys(catalogue)) {
+      if (!/^B\d+$/.test(address) || address === 'B1') continue
+      const name = normalizeName(catalogue[address]?.v)
+      if (!name) continue
+      catalogueRows.set(name, [...(catalogueRows.get(name) || []), Number(address.slice(1))])
+    }
+  }
+  const declaration = (index: number) => {
+    const row = index + 4
+    const candidates = catalogueRows.get(normalizeName(main[`F${row}`]?.v)) || []
+    const hs = String(main[`B${row}`]?.v ?? '').trim()
+    const sameHs = candidates.filter(r => String(catalogue?.[`A${r}`]?.v ?? '').trim() === hs)
+    const matches = sameHs.length ? sameHs : candidates
+    // 不按 HS 单独匹配，也不猜测相近品名；重名且内容冲突时保持空白。
+    if (!matches.length || new Set(matches.map(r => String(catalogue?.[`D${r}`]?.v ?? ''))).size !== 1) return undefined
+    const match = matches[0]
+    const value = String(catalogue?.[`D${match}`]?.v ?? '')
+    return value ? { value, formula: `'商品汇总表'!D${match}` } : undefined
+  }
+  // 主表公式尚未经过 Excel 重算，金额/重量的缓存需按同一规则计算。
+  const sourceValue = (source: string, index: number): string | number => {
+    const row = index + 4
+    const number = (col: string) => Number(main[`${col}${row}`]?.v) || 0
+    if (source === 'AA') return number('Z') * number('K')
+    if (source === 'P' || source === 'Q') {
+      const divisor = isPaperRope(String(main[`F${row}`]?.v || '')) ? 1000 : 1
+      return Math.round(number(source === 'P' ? 'BA' : 'BB') * number('L') / divisor * 100) / 100
+    }
+    return main[`${source}${row}`]?.v ?? ''
+  }
+  const makeRow = (source: XmlElement, number: number) => {
+    const row = source.cloneNode(true) as XmlElement
+    row.setAttribute('r', String(number))
+    for (const cell of Array.from(row.getElementsByTagNameNS(SPREADSHEET_NS, 'c')) as XmlElement[]) {
+      cell.setAttribute('r', (cell.getAttribute('r') || '').replace(/\d+$/, String(number)))
+      while (cell.firstChild) cell.removeChild(cell.firstChild)
+      cell.removeAttribute('t')
+    }
+    data.appendChild(row)
+    return row
+  }
+  const put = (row: XmlElement, col: string, value: string | number, formula?: string) => {
+    const ref = `${col}${row.getAttribute('r')}`
+    let cell = (Array.from(row.getElementsByTagNameNS(SPREADSHEET_NS, 'c')) as XmlElement[]).find(c => c.getAttribute('r') === ref)
+    if (!cell) {
+      cell = doc.createElementNS(SPREADSHEET_NS, 'c')
+      cell.setAttribute('r', ref)
+      const following = (Array.from(row.getElementsByTagNameNS(SPREADSHEET_NS, 'c')) as XmlElement[])
+        .find(existing => XLSX.utils.decode_cell(existing.getAttribute('r')!).c > XLSX.utils.decode_col(col))
+      if (following) row.insertBefore(cell, following)
+      else row.appendChild(cell)
+    }
+    while (cell.firstChild) cell.removeChild(cell.firstChild)
+    cell.setAttribute('t', typeof value === 'number' ? 'n' : formula ? 'str' : 'inlineStr')
+    if (formula) { const f = doc.createElementNS(SPREADSHEET_NS, 'f'); f.textContent = formula; cell.appendChild(f) }
+    const node = doc.createElementNS(SPREADSHEET_NS, typeof value === 'string' && !formula ? 'is' : 'v')
+    if (typeof value === 'string' && !formula) { const text = doc.createElementNS(SPREADSHEET_NS, 't'); text.textContent = value; node.appendChild(text) }
+    else node.textContent = String(value)
+    cell.appendChild(node)
+  }
+  let next = 9
+  const yellowStyle = (Array.from(subtotal.getElementsByTagNameNS(SPREADSHEET_NS, 'c')) as XmlElement[])
+    .find(cell => cell.getAttribute('r') === 'I23')?.getAttribute('s')
+  const subtotalRows: number[] = []
+  const newRows = new Map<number, number>()
+  for (const [company, indices] of groups) {
+    const start = next
+    for (const index of indices) {
+      const row = makeRow(detail, next)
+      newRows.set(index, next++)
+      put(row, 'B', index + 1)
+      for (const [col, source] of Object.entries(refs)) {
+        if (col === 'G') {
+          const unitRef = formulaRef(mainName, `J${index + 4}`).replace(/^=/, '')
+          const unit = String(sourceValue('J', index)).trim()
+          const units: Array<[string[], string]> = [
+            [['KGM', 'KG', 'KGS', '公斤', '千克'], '千克'],
+            [['PCE', 'PCS', 'PC', '个'], '个'],
+            [['SET', 'SETS', '套'], '套'],
+            [['M', 'MTR', '米'], '米'],
+          ]
+          const value = units.find(([codes]) => codes.includes(unit.toUpperCase()))?.[1] || unit
+          const formula = units.reduceRight((fallback, [codes, label]) =>
+            `IF(OR(${codes.map(code => `UPPER(TRIM(${unitRef}))="${code}"`).join(',')}),"${label}",${fallback})`, unitRef)
+          put(row, col, value, formula)
+          continue
+        }
+        if (col === 'I') {
+          const rowNo = row.getAttribute('r')
+          put(row, col, sourceValue('AA', index), `F${rowNo}*H${rowNo}`)
+          continue
+        }
+        if (col === 'E') {
+          const match = declaration(index)
+          put(row, col, match?.value || '', match?.formula)
+          continue
+        }
+        const address = `${source}${index + 4}`
+        put(row, col, sourceValue(source, index), formulaRef(mainName, address).replace(/^=/, ''))
+      }
+      put(row, 'M', '箱')
+    }
+    subtotalRows.push(next)
+    const total = makeRow(subtotal, next++)
+    for (const col of ['B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M']) {
+      put(total, col, '')
+      const cell = (Array.from(total.getElementsByTagNameNS(SPREADSHEET_NS, 'c')) as XmlElement[])
+        .find(cell => cell.getAttribute('r') === `${col}${next - 1}`)!
+      if (yellowStyle && col !== 'D') cell.setAttribute('s', yellowStyle)
+    }
+    put(total, 'D', company)
+    for (const col of ['F', 'I', 'J', 'K', 'L']) {
+      const amount = indices.reduce((sum, index) => sum + (Number(sourceValue(refs[col], index)) || 0), 0)
+      put(total, col, amount, `SUM(${col}${start}:${col}${next - 2})`)
+    }
+  }
+  // 总合计紧接最后一家小计，仅累加小计，避免明细重复计入。
+  const lastRow = next
+  const grandTotal = makeRow(subtotal, lastRow)
+  for (const col of ['B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L']) {
+    put(grandTotal, col, col === 'E' ? '总合计' : '')
+    const cell = (Array.from(grandTotal.getElementsByTagNameNS(SPREADSHEET_NS, 'c')) as XmlElement[])
+      .find(cell => cell.getAttribute('r') === `${col}${lastRow}`)!
+    if (yellowStyle) cell.setAttribute('s', yellowStyle)
+    if (['I', 'J', 'K', 'L'].includes(col)) {
+      while (cell.firstChild) cell.removeChild(cell.firstChild)
+      const amount = companies.reduce((sum, _, index) => sum + (Number(sourceValue(refs[col], index)) || 0), 0)
+      put(grandTotal, col, amount, subtotalRows.length ? `SUM(${subtotalRows.map(row => `${col}${row}`).join(',')})` : '0')
+    }
+  }
+  // 页头不能继续使用第一家供应商的名称、电话。
+  for (const row of rows.filter(r => ['1', '2'].includes(r.getAttribute('r') || ''))) {
+    for (const cell of Array.from(row.getElementsByTagNameNS(SPREADSHEET_NS, 'c'))) while (cell.firstChild) cell.removeChild(cell.firstChild)
+    put(row, 'B', row.getAttribute('r') === '1' ? [...groups.keys()].join(' / ') : '')
+  }
+  for (const merge of Array.from(doc.getElementsByTagNameNS(SPREADSHEET_NS, 'mergeCell'))) {
+    if (Number((merge.getAttribute('ref') || '').match(/\d+/)?.[0]) >= 9) merge.parentNode?.removeChild(merge)
+  }
+  const merges = doc.getElementsByTagNameNS(SPREADSHEET_NS, 'mergeCells')[0]
+  if (merges) merges.setAttribute('count', String(merges.getElementsByTagNameNS(SPREADSHEET_NS, 'mergeCell').length))
+  doc.getElementsByTagNameNS(SPREADSHEET_NS, 'dimension')[0]?.setAttribute('ref', `B1:M${lastRow}`)
+  zip.file(path, serializer.serializeToString(doc))
+  await ensureGenericInvoiceGrid(zip, path, lastRow)
+  const workbook = parser.parseFromString(await zip.file('xl/workbook.xml')!.async('string'), 'application/xml')
+  const sheetIndex = Array.from(workbook.getElementsByTagNameNS(SPREADSHEET_NS, 'sheet')).findIndex(sheet => sheet.getAttribute('name') === '发票')
+  for (const defined of Array.from(workbook.getElementsByTagNameNS(SPREADSHEET_NS, 'definedName'))) {
+    if (defined.getAttribute('name') === '_xlnm.Print_Area' && defined.getAttribute('localSheetId') === String(sheetIndex)) {
+      defined.textContent = `'发票'!$B$1:$M$${lastRow}`
+    }
+  }
+  zip.file('xl/workbook.xml', serializer.serializeToString(workbook))
+  // 其他单据直接引用旧发票行时同步引用地址，保持其内容和布局不变。
+  for (const [name, otherPath] of parts) {
+    if (name === '发票') continue
+    const other = parser.parseFromString(await zip.file(otherPath)!.async('string'), 'application/xml')
+    let changed = false
+    for (const f of Array.from(other.getElementsByTagNameNS(SPREADSHEET_NS, 'f'))) {
+      const before = f.textContent || ''
+      const after = before.replace(/('发票'|发票)!(\$?[A-M]\$?)(\d+)/g, (match, sheet, col, row) => {
+        const index = oldRows.get(Number(row))
+        return index == null ? match : `${sheet}!${col}${newRows.get(index)}`
+      })
+      if (after !== before) { f.textContent = after; changed = true }
+    }
+    if (changed) zip.file(otherPath, serializer.serializeToString(other))
+  }
+}
+
+// 通用“发票”的空白格也必须有边框；合并表头只画外围，不能在中间加横线。
+async function ensureGenericInvoiceGrid(zip: JSZip, path: string, lastRow: number) {
+  const parser = new DOMParser()
+  const serializer = new XMLSerializer()
+  const styles = parser.parseFromString(await zip.file('xl/styles.xml')!.async('string'), 'application/xml')
+  const sheet = parser.parseFromString(await zip.file(path)!.async('string'), 'application/xml')
+  const xfs = styleCollection(styles.documentElement as XmlElement, 'cellXfs')!
+  const borders = styleCollection(styles.documentElement as XmlElement, 'borders')!
+  const baseXfs = directChildren(xfs, 'xf')
+  const data = directChild(sheet.documentElement as XmlElement, 'sheetData')!
+  const merges = Array.from(sheet.getElementsByTagNameNS(SPREADSHEET_NS, 'mergeCell'))
+    .map(merge => XLSX.utils.decode_range(merge.getAttribute('ref')!))
+  const borderIds = new Map<string, string>()
+  const styleIds = new Map<string, string>()
+  for (let r = 7; r <= lastRow; r++) {
+    let row = directChildren(data, 'row').find(candidate => rowNumber(candidate) === r)
+    if (!row) {
+      row = sheet.createElementNS(SPREADSHEET_NS, 'row') as XmlElement
+      row.setAttribute('r', String(r))
+      const following = directChildren(data, 'row').find(candidate => rowNumber(candidate) > r)
+      if (following) data.insertBefore(row, following)
+      else data.appendChild(row)
+    }
+    for (let c = 1; c <= 12; c++) {
+      const address = `${XLSX.utils.encode_col(c)}${r}`
+      let cell = directChildren(row, 'c').find(candidate => candidate.getAttribute('r') === address)
+      if (!cell) {
+        cell = sheet.createElementNS(SPREADSHEET_NS, 'c') as XmlElement
+        cell.setAttribute('r', address)
+        const following = directChildren(row, 'c').find(candidate => XLSX.utils.decode_cell(candidate.getAttribute('r')!).c > c)
+        if (following) row.insertBefore(cell, following)
+        else row.appendChild(cell)
+      }
+      const merge = merges.find(range => r - 1 >= range.s.r && r - 1 <= range.e.r && c >= range.s.c && c <= range.e.c)
+      const edges = { left: !merge || c === merge.s.c, right: !merge || c === merge.e.c,
+        top: !merge || r - 1 === merge.s.r, bottom: !merge || r - 1 === merge.e.r }
+      // 部分模板并未真正合并 7:8，而是将标题放在第 8 行；同样按两行表头画外框。
+      if (r === 7 || r === 8) {
+        edges.top = r === 7
+        edges.bottom = r === 8
+      }
+      const edgeKey = JSON.stringify(edges)
+      let borderId = borderIds.get(edgeKey)
+      if (!borderId) {
+        const border = styles.createElementNS(SPREADSHEET_NS, 'border')
+        for (const [edge, enabled] of Object.entries(edges)) {
+          const side = styles.createElementNS(SPREADSHEET_NS, edge)
+          if (enabled) {
+            side.setAttribute('style', 'thin')
+            const color = styles.createElementNS(SPREADSHEET_NS, 'color')
+            color.setAttribute('rgb', 'FF000000')
+            side.appendChild(color)
+          }
+          border.appendChild(side)
+        }
+        borderId = String(directChildren(borders, 'border').length)
+        borders.appendChild(border)
+        borderIds.set(edgeKey, borderId)
+      }
+      const baseId = cell.getAttribute('s') || '0'
+      const key = `${baseId}:${borderId}`
+      let styleId = styleIds.get(key)
+      if (!styleId) {
+        const xf = (baseXfs[Number(baseId)] || baseXfs[0]).cloneNode(true) as XmlElement
+        xf.setAttribute('borderId', borderId)
+        xf.setAttribute('applyBorder', '1')
+        styleId = String(directChildren(xfs, 'xf').length)
+        xfs.appendChild(xf)
+        styleIds.set(key, styleId)
+      }
+      cell.setAttribute('s', styleId)
+    }
+  }
+  borders.setAttribute('count', String(directChildren(borders, 'border').length))
+  xfs.setAttribute('count', String(directChildren(xfs, 'xf').length))
+  zip.file('xl/styles.xml', serializer.serializeToString(styles))
+  zip.file(path, serializer.serializeToString(sheet))
 }
 
 async function workbookSheetParts(zip: JSZip): Promise<Map<string, string>> {

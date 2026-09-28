@@ -29,3 +29,12 @@ V0.1项目骨架，面向公司局域网部署。
 
 邮件解析服务：参见 `services/email-parser/README.md`。该服务与
 `legacy-reference/READ_ONLY_RR_PORTAL/` 旧系统参考代码完全隔离。
+
+## 邮箱自动收信
+
+- 凭据只配置在邮件解析服务（email-parser），通过环境变量注入：
+  `VOYAGEPLEX_MAIL_ADDRESS`（邮箱地址）、`VOYAGEPLEX_MAIL_AUTH_CODE`（客户端授权码）、
+  `VOYAGEPLEX_MAIL_IMAP_HOST`（默认 `imaphz.qiye.163.com`）、`VOYAGEPLEX_MAIL_FOLDER`（默认 `INBOX`）。
+- 首次同步读取最近 7 天邮件，每次最多 50 封，后台每 5 分钟续同步；断点续取。
+- 历史初始化：管理员在“信息导入 → 邮件解析”页面预览起始日期（当前 2026-08-01）之后的邮件，
+  分批确认入库；清理操作不影响已关联走柜任务的邮件。

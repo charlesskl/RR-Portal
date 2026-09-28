@@ -6,7 +6,7 @@ set -euo pipefail
 # 策略：根据本次 push 变动的文件路径，只 rebuild 影响到的服务。
 # 对比老版本（全量 docker compose up --build）的优势：
 #   - 改 paiji 不会把其他 16 个服务也 recreate / IP 重洗
-#   - 改 nginx.conf 只 hot reload，零停机（而非 restart nginx）
+#   - 改 nginx.conf 只 recreate nginx 容器刷新 bind mount（约 3s 停机），不动其他服务
 #   - 改非部署文件（docs/scripts/markdown）跳过 deploy
 #   - fallback：docker-compose.cloud.yml 变动时仍走全量
 #
@@ -161,14 +161,14 @@ while IFS= read -r file; do
     continue
   fi
 
-  # nginx 配置 = hot reload，不 rebuild
+  # nginx 配置 = recreate nginx 容器刷新 bind mount，不 rebuild
   if [[ "$file" == nginx/* ]]; then
     NGINX_CHANGED=1
     NONRUNTIME_ONLY=0
     continue
   fi
 
-  # frontend 静态文件 = nginx 会重新读（bind mount），reload 触发
+  # frontend 静态文件 = recreate nginx 容器刷新 bind mount inode
   if [[ "$file" == frontend/* ]]; then
     FRONTEND_CHANGED=1
     NONRUNTIME_ONLY=0
@@ -219,14 +219,24 @@ if [[ "${FORCE_FULL_REBUILD:-0}" == "1" ]]; then
   # 运行中的 nginx 可能仍挂着旧 inode 的旧配置（#707 三连败后 /voyageplex 路由 401 即此情况），
   # 而 up -d 不会 recreate 配置不变的 nginx 容器
   NGINX_CHANGED=1
-  echo "  [FORCED] FORCE_FULL_REBUILD=1，走全量（含 nginx recreate）"
+  # 无代码变动时 AFFECTED_SERVICES 为空，下面的 compose 分支只会 recreate 旧镜像，
+  # 被跳过构建的服务（如 #800 部署中途失败后的 voyageplex）永远补不上。
+  # 把所有 build 服务纳入构建列表，让强制全量真正重建镜像。
+  mapfile -t AFFECTED_SERVICES < <(docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" config --format json 2>/dev/null | python3 -c "
+import json, sys
+cfg = json.load(sys.stdin)
+for name, svc in sorted((cfg.get('services') or {}).items()):
+    if isinstance(svc, dict) and svc.get('build'):
+        print(name)
+")
+  echo "  [FORCED] FORCE_FULL_REBUILD=1，走全量（重建全部 build 服务 + nginx recreate）"
 fi
 
 # 打印决策
 echo "  Decision:"
 echo "    Affected services: ${AFFECTED_SERVICES[*]:-<none>}"
-echo "    Nginx config:      $([ $NGINX_CHANGED -eq 1 ] && echo 'changed → will reload' || echo 'unchanged')"
-echo "    Frontend static:   $([ $FRONTEND_CHANGED -eq 1 ] && echo 'changed → will trigger nginx reload' || echo 'unchanged')"
+echo "    Nginx config:      $([ $NGINX_CHANGED -eq 1 ] && echo 'changed → will recreate nginx' || echo 'unchanged')"
+echo "    Frontend static:   $([ $FRONTEND_CHANGED -eq 1 ] && echo 'changed → will recreate nginx' || echo 'unchanged')"
 echo "    Compose:           $([ $COMPOSE_CHANGED -eq 1 ] && echo 'changed → FULL RECREATE' || echo 'unchanged')"
 echo "    DB init script:    $([ $DB_INIT_CHANGED -eq 1 ] && echo 'changed (manual action may be needed)' || echo 'unchanged')"
 echo "    Plugin SDK:        $([ $PLUGIN_SDK_CHANGED -eq 1 ] && echo 'changed → all SDK plugins would rebuild' || echo 'unchanged')"
@@ -501,22 +511,29 @@ elif [[ "${#AFFECTED_SERVICES[@]}" -gt 0 ]]; then
   echo "  [INFO] nginx 用动态 resolver，无需 restart（10 秒内自动感知新 IP）"
 fi
 
-# nginx 配置/前端文件变动 → recreate 容器（文件级 bind mount inode 必换）+ reload
+# nginx 配置/前端文件变动 → recreate 容器（文件级 bind mount inode 必换）
 # nginx.cloud.conf / frontend/*.html / logo.png 都是文件级 bind mount，绑定的是 inode。
 # git pull 会删旧文件新建（新 inode），容器内 mount 仍指向旧 inode，
-# nginx -s reload 读的是旧内容 → 必须 recreate 容器刷新 mount 再 reload。
+# nginx -s reload 读的是旧内容 → 必须 recreate 容器刷新 mount。
 if [[ "$NGINX_CHANGED" -eq 1 ]] || [[ "$FRONTEND_CHANGED" -eq 1 ]]; then
   echo "  [NGINX] config/frontend 文件变动，recreate 容器以刷新 bind mount inode（约 3s 停机）"
   docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --force-recreate --no-deps nginx
 
-  echo "  [NGINX] hot reload（零停机）"
-  _NGINX_TEST=$(docker exec rr-portal-nginx-1 nginx -t 2>&1 || true)
-  if echo "$_NGINX_TEST" | grep -q "syntax is ok"; then
-    docker exec rr-portal-nginx-1 nginx -s reload
-    echo "  [OK] nginx reloaded"
-  else
-    echo "  [ERROR] nginx -t 失败，拒绝 reload（保持旧配置运行）"
-    echo "$_NGINX_TEST"
+  echo "  [NGINX] 等待新容器就绪..."
+  # 刚 recreate 的容器启动时已加载新配置，无需再 reload。旧实现 recreate 后立刻
+  # nginx -s reload，会踩 master 进程 PID 文件尚未写好的竞态（invalid PID number ""），
+  # 把部署打挂在最后一步并遗留维护模式（#802 后手动全量重建即此情况）。改为等就绪。
+  NGINX_READY=0
+  for i in $(seq 1 15); do
+    if curl -sf http://localhost/nginx-health > /dev/null 2>&1; then
+      NGINX_READY=1
+      echo "  [OK] nginx ready (${i}x2s)"
+      break
+    fi
+    sleep 2
+  done
+  if [[ "$NGINX_READY" -eq 0 ]]; then
+    echo "  [ERROR] nginx recreate 后 30s 未就绪，请检查 nginx 配置与容器日志"
     exit 1
   fi
 fi

@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using VoyagePlex.Api.Data;
 using VoyagePlex.Api.Entities;
@@ -37,12 +38,14 @@ public sealed class MailboxSyncService(IServiceScopeFactory scopeFactory, ILogge
             using var scope = scopeFactory.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             var parser = scope.ServiceProvider.GetRequiredService<EmailParserClient>();
+            var setting = await db.MailSystemSettings.AsNoTracking().FirstAsync(value => value.Id == 1, cancellationToken);
+            var startDate = setting.StartDate;
             var state = await db.MailSyncStates.FirstOrDefaultAsync(cancellationToken);
             state ??= new MailSyncState();
             if (db.Entry(state).State == EntityState.Detached) db.MailSyncStates.Add(state);
             try
             {
-                var response = await parser.PollMailboxAsync(state.LastUid, cancellationToken);
+                var response = await parser.PollMailboxAsync(state.LastUid, startDate, cancellationToken);
                 if (response.StatusCode is < 200 or >= 300)
                     throw new InvalidOperationException("邮箱连接或读取失败");
                 var payload = JsonNode.Parse(response.Body)?.AsObject()
@@ -60,7 +63,7 @@ public sealed class MailboxSyncService(IServiceScopeFactory scopeFactory, ILogge
                     state.LastUid = 0;
                     if (hadCursor)
                     {
-                        response = await parser.PollMailboxAsync(0, cancellationToken);
+                        response = await parser.PollMailboxAsync(0, startDate, cancellationToken);
                         if (response.StatusCode is < 200 or >= 300) throw new InvalidOperationException("邮箱读取失败");
                         payload = JsonNode.Parse(response.Body)?.AsObject()
                             ?? throw new InvalidOperationException("邮箱服务返回了无效数据");
@@ -69,6 +72,7 @@ public sealed class MailboxSyncService(IServiceScopeFactory scopeFactory, ILogge
 
                 var incoming = payload["items"]?.AsArray() ?? new JsonArray();
                 var batchesByDate = new Dictionary<string, ImportBatch>();
+                var contactsByEmail = new Dictionary<string, MailContact>(StringComparer.OrdinalIgnoreCase);
                 var imported = 0;
                 foreach (var node in incoming)
                 {
@@ -101,6 +105,11 @@ public sealed class MailboxSyncService(IServiceScopeFactory scopeFactory, ILogge
                         itemError = string.IsNullOrEmpty(itemError) ? "邮件缺少有效收件时间" : itemError;
                         receivedDate = "";
                     }
+                    if (receivedDate != "" && string.CompareOrdinal(receivedDate, startDate) < 0)
+                    {
+                        state.LastUid = Math.Max(state.LastUid, uid);
+                        continue;
+                    }
                     var batchKey = string.IsNullOrEmpty(receivedDate) ? "未知日期" : receivedDate;
                     if (!batchesByDate.TryGetValue(batchKey, out var batch))
                     {
@@ -115,13 +124,19 @@ public sealed class MailboxSyncService(IServiceScopeFactory scopeFactory, ILogge
                     }
                     var sender = item["message"]?["sender"]?.ToString() ?? "";
                     var contactEmail = MailClassificationRules.NormalizeEmail(sender);
-                    var contact = contactEmail == "" ? null : await db.MailContacts.FirstOrDefaultAsync(value => value.Email == contactEmail, cancellationToken);
+                    MailContact? contact = null;
+                    if (contactEmail != "" && !contactsByEmail.TryGetValue(contactEmail, out contact))
+                    {
+                        contact = await db.MailContacts.FirstOrDefaultAsync(value => value.Email == contactEmail, cancellationToken);
+                        if (contact is not null) contactsByEmail[contactEmail] = contact;
+                    }
                     if (contact is null && contactEmail != "")
                     {
                         var internalContact = MailContactRules.IsInternal(contactEmail);
                         contact = new MailContact { Email = contactEmail, DisplayName = sender,
                             ContactType = internalContact ? "Internal" : "Unknown", IsConfirmed = internalContact };
                         db.MailContacts.Add(contact);
+                        contactsByEmail[contactEmail] = contact;
                     }
                     if (contact is not null) { contact.MessageCount++; contact.UpdatedAt = DateTime.UtcNow; }
                     var subject = item["message"]?["subject"]?.ToString() ?? "";
@@ -152,11 +167,14 @@ public sealed class MailboxSyncService(IServiceScopeFactory scopeFactory, ILogge
             }
             catch (Exception error) when (error is not OperationCanceledException)
             {
+                logger.LogError(error, "邮箱同步写入失败，内部错误：{InnerError}", error.GetBaseException().Message);
                 db.ChangeTracker.Clear();
                 var errorState = await db.MailSyncStates.FirstOrDefaultAsync(cancellationToken);
                 errorState ??= new MailSyncState();
                 if (db.Entry(errorState).State == EntityState.Detached) db.MailSyncStates.Add(errorState);
-                errorState.LastError = error.Message;
+                errorState.LastError = error.GetBaseException() is SqliteException sqlite
+                    ? $"数据库写入失败（SQLite {sqlite.SqliteErrorCode}）：{sqlite.Message}"
+                    : error.Message;
                 await db.SaveChangesAsync(cancellationToken);
                 throw;
             }

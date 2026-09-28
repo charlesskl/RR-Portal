@@ -6,5 +6,6 @@ public sealed class MailSystemSetting
     public bool SyncEnabled { get; set; } = true;
     public int SyncIntervalMinutes { get; set; } = 5;
     public int RetentionDays { get; set; } = 180;
+    public string StartDate { get; set; } = "2026-08-01";
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }

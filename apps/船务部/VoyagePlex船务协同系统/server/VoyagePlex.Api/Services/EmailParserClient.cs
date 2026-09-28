@@ -5,9 +5,9 @@ namespace VoyagePlex.Api.Services;
 
 public sealed class EmailParserClient(HttpClient httpClient)
 {
-    public async Task<ParserResponse> PollMailboxAsync(long afterUid, CancellationToken cancellationToken)
+    public async Task<ParserResponse> PollMailboxAsync(long afterUid, string startDate, CancellationToken cancellationToken)
     {
-        using var response = await httpClient.GetAsync($"/v1/mailbox/poll?after_uid={afterUid}", cancellationToken);
+        using var response = await httpClient.GetAsync($"/v1/mailbox/poll?after_uid={afterUid}&start_date={Uri.EscapeDataString(startDate)}", cancellationToken);
         return new ParserResponse((int)response.StatusCode,
             response.Content.Headers.ContentType?.ToString() ?? "application/json",
             await response.Content.ReadAsStringAsync(cancellationToken));

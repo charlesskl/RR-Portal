@@ -18,7 +18,7 @@ VALID_EML = b"Subject: shipment notice\r\nFrom: factory@example.com\r\n\r\nhello
 BASE_URL = "http://127.0.0.1:18099"
 
 
-def slow_fetch_mailbox(after_uid=0):
+def slow_fetch_mailbox(after_uid=0, start_date="2026-08-01"):
     time.sleep(SLOW_SECONDS)
     return {"configured": True, "address": "shipping@example.com", "uid_validity": 123,
             "messages": [{"uid": 11, "received_at": "2026-09-17T16:30:00+00:00",

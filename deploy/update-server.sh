@@ -349,8 +349,10 @@ PY
     [[ "$db_file" == "$QC_REPORT_DB" ]] && continue
     backup_name="$(echo "$db_file" | tr '/' '-')-${BACKUP_TS}"
     # SQLite 在线备份：cp 直接拷贝读写中的库可能得到撕裂副本
-    # （voyageplex.db 每 5 分钟有邮箱同步写入，必须走 backup API）
-    python3 - "$db_file" "${BACKUP_DIR}/${backup_name}" <<'PY'
+    # （voyageplex.db 每 5 分钟有邮箱同步写入，必须走 backup API）。
+    # 个别 *.db 不是 SQLite 格式（如 JSON/空文件），备份失败不能打挂部署：
+    # 回退 cp 原样拷贝，再失败只告警跳过。
+    if python3 - "$db_file" "${BACKUP_DIR}/${backup_name}" <<'PY'
 import sqlite3
 import sys
 
@@ -362,7 +364,14 @@ finally:
     destination.close()
     source.close()
 PY
-    echo "  [OK] ${db_file}"
+    then
+      echo "  [OK] ${db_file}"
+    else
+      rm -f "${BACKUP_DIR}/${backup_name}"
+      cp "$db_file" "${BACKUP_DIR}/${backup_name}" \
+        && echo "  [OK] ${db_file}（非 SQLite，原样拷贝）" \
+        || echo "  [WARN] 备份失败（已跳过，不影响部署）: ${db_file}"
+    fi
   done
   ls -t "$BACKUP_DIR"/postgres-*.sql.gz 2>/dev/null | tail -n +6 | xargs rm -f 2>/dev/null || true
   ls -t "$BACKUP_DIR"/*.db-* 2>/dev/null | tail -n +11 | xargs rm -f 2>/dev/null || true

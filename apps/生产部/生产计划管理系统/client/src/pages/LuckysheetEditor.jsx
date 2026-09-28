@@ -371,6 +371,8 @@ function LuckysheetEditor({
   containerId = 'luckysheet-container',
   newImportedIds,
   refreshKey = 0,
+  lineName = 'all',
+  orderStatus = 'active',
 }, ref) {
   const rowMapRef = useRef([]);
   const initializedRef = useRef(false);
@@ -766,6 +768,45 @@ function LuckysheetEditor({
       if (Object.keys(fields).length > 0) updates.push({ id: orderId, fields });
     }
 
+    // 4.5 粘贴产生的新行：rowMap 里没有订单 id 的行（复制订单到其他拉的场景）
+    // 老毛病：这些行以前被静默跳过 → 保存后目标拉没有；粘贴位置盖住已有行时，
+    // 还会把已有订单的拉名一起覆盖 → 单子“跑回”原来的拉。
+    // 现在：有货号的无 id 行 = 新订单，POST /api/orders 真正建单。
+    const newOrders = [];
+    try {
+      const sheetData = (sheet && sheet.data) || [];
+      for (let rowIdx = 1; rowIdx < sheetData.length; rowIdx++) {
+        if (rowMapRef.current[rowIdx - 1]) continue;   // 已有订单的行
+        const row = sheetData[rowIdx];
+        if (!row) continue;
+        const rawCell = (c) => {
+          const cell = row[c];
+          if (cell == null) return '';
+          return typeof cell === 'object' ? (cell.v ?? '') : cell;
+        };
+        if (String(rawCell(0)).trim() === '合计') continue;   // 跳过合计行
+        const fields = {};
+        for (let c = 0; c < ORDER_COLUMNS.length; c++) {
+          const col = ORDER_COLUMNS[c];
+          if (!col.data || col.data === 'quantity_sum') continue;
+          const cellObj = typeof row[c] === 'object' && row[c] !== null ? row[c] : { v: row[c] };
+          // 公式格子存计算值，不存公式串
+          const val = getCellFormula(cellObj) ? getFormulaComputedValue(cellObj) : cellObj.v;
+          if (val === undefined || val === '' || val == null) continue;
+          writeFieldValue(fields, col.data, col, val);
+        }
+        if (!fields.item_no || !String(fields.item_no).trim()) continue;   // 没货号不算新订单
+        // 拉名：当前按某条拉过滤时，以当前拉为准（复制到 B 拉就该进 B 拉）
+        if (lineName && lineName !== 'all') fields.line_name = lineName;
+        fields.workshop = workshop;
+        fields.status = orderStatus || 'active';
+        newOrders.push(fields);
+      }
+      if (newOrders.length > 0) dbg('[saveAll] 检测到粘贴新行', newOrders.length, '条:', JSON.stringify(newOrders.slice(0, 2)));
+    } catch (e) {
+      console.warn('[saveAll] new-row scan failed:', e?.message);
+    }
+
     // 5. 列宽/行高/冻结/合并/边框（不是 cell 级变化）
     const settings = buildSheetSettings(sheet);
 
@@ -781,6 +822,9 @@ function LuckysheetEditor({
       if (updates.length > 0) {
         calls.push(axios.post('/api/orders/batch-update', { updates }));
       }
+      if (newOrders.length > 0) {
+        calls.push(axios.post('/api/orders', newOrders));
+      }
       const results = await Promise.all(calls);
       lastLayoutJsonRef.current = JSON.stringify(settings);
       dbg('[saveAll] 后端返回:', results.map(r => r?.data));
@@ -795,16 +839,21 @@ function LuckysheetEditor({
       console.log('[saveAll-钩子版]',
         '钩子命中 =', hookHits,
         '| 实际入库订单数 =', updates.length,
+        '| 新建订单数 =', newOrders.length,
         '| 自动转完成 =', rowsCompleted,
         '| 样例:', updates.slice(0, 3));
 
-      if (updates.length === 0) {
+      if (updates.length === 0 && newOrders.length === 0) {
         message.info('无单元格改动；列宽/行高等布局已保存', 3);
       } else {
-        message.success(`已保存 ${updates.length} 条订单${rowsCompleted > 0 ? '，其中 ' + rowsCompleted + ' 条转完成' : ''}`);
+        message.success(
+          (updates.length > 0 ? `已保存 ${updates.length} 条订单${rowsCompleted > 0 ? '，其中 ' + rowsCompleted + ' 条转完成' : ''}` : '')
+          + (newOrders.length > 0 ? `${updates.length > 0 ? '；' : ''}新建 ${newOrders.length} 条订单` : '')
+        );
       }
-      if (rowsCompleted > 0 && onRefreshData) onRefreshData();
-      return { saved: updates.length };
+      // 新建订单后必须刷新数据：让新行拿到订单 id（否则再点保存会重复建单）
+      if ((rowsCompleted > 0 || newOrders.length > 0) && onRefreshData) onRefreshData();
+      return { saved: updates.length, created: newOrders.length };
     } catch (e) {
       console.error('[saveAll] 失败:', e, e.response?.data);
       message.error('保存失败：' + (e.response?.data?.message || e.message));
@@ -820,7 +869,7 @@ function LuckysheetEditor({
   };
 
   // 暴露保存与脏状态给父组件，避免筛选或外部刷新静默丢失编辑
-  useImperativeHandle(ref, () => ({ saveAll, hasPendingChanges }), [workshop, data]);
+  useImperativeHandle(ref, () => ({ saveAll, hasPendingChanges }), [workshop, data, lineName, orderStatus]);
 
   useEffect(() => {
     // 等待 sheetSettings 加载完成后才初始化

@@ -121,6 +121,8 @@ main { min-width: 0; }
 .mail-foundation-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; margin-top:22px; }
 .mail-foundation-grid article { min-height:126px; padding:17px; border:1px solid var(--line); border-radius:9px; background:#fafaff; }
 .mail-foundation-grid strong { font-size:15px; }
+.mail-initialization-actions { display:flex; flex-wrap:wrap; gap:10px; margin-top:20px; }
+.mail-initialization-actions .secondary-button { display:inline-flex; align-items:center; justify-content:center; white-space:nowrap; text-decoration:none; }
 .mail-foundation-grid p { margin:9px 0 0; color:var(--muted); font-size:14px; line-height:1.65; }
 .mail-workbench-panel { padding:0; overflow:hidden; }
 .mail-workbench-head { display:flex; align-items:center; justify-content:space-between; gap:18px; padding:20px 22px 14px; }

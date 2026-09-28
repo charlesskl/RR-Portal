@@ -1,7 +1,7 @@
 import imaplib
 import os
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 
 MAX_MESSAGES = 50
@@ -19,7 +19,8 @@ def received_at_from_fetch(parts: list) -> str:
     return received.astimezone(timezone.utc).isoformat()
 
 
-def fetch_mailbox(after_uid: int = 0) -> dict:
+def fetch_mailbox(after_uid: int = 0, start_date: str = "2026-08-01") -> dict:
+    first_day = date.fromisoformat(start_date)
     address = os.environ.get("VOYAGEPLEX_MAIL_ADDRESS", "").strip()
     secret = os.environ.get("VOYAGEPLEX_MAIL_AUTH_CODE", "")
     if not address or not secret:
@@ -35,7 +36,7 @@ def fetch_mailbox(after_uid: int = 0) -> dict:
             raise RuntimeError("无法读取指定邮箱文件夹")
         status, response = client.response("UIDVALIDITY")
         validity = int(response[0]) if status == "UIDVALIDITY" and response and response[0] else 0
-        since = (datetime.now(timezone.utc) - timedelta(days=LOOKBACK_DAYS)).strftime("%d-%b-%Y")
+        since = (first_day - timedelta(days=1)).strftime("%d-%b-%Y")
         status, found = client.uid("SEARCH", None, "SINCE", since)
         if status != "OK":
             raise RuntimeError("邮箱搜索失败")

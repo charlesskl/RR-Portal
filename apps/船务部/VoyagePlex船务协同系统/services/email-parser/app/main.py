@@ -26,14 +26,14 @@ app = FastAPI(title="VoyagePlex Email Parser", version=PARSER_VERSION)
 
 
 @app.get("/v1/mailbox/poll")
-async def poll_mailbox(after_uid: int = 0):
+async def poll_mailbox(after_uid: int = 0, start_date: str = "2026-08-01"):
     if after_uid < 0:
         return Response(content='{"error":"after_uid 无效"}', status_code=400, media_type="application/json")
     try:
         # IMAP 抓取是阻塞 IO、附件解析（openpyxl/pdfplumber）是 CPU 密集计算，
         # 二者都必须放到线程里执行：服务以单 worker uvicorn 运行，任何一个阻塞
         # 事件循环都会让 /health 超时，容器被 autoheal 反复杀死重启。
-        mailbox = await asyncio.to_thread(fetch_mailbox, after_uid)
+        mailbox = await asyncio.to_thread(fetch_mailbox, after_uid, start_date)
         if not mailbox["configured"]:
             return {"configured": False, "items": []}
         entries = [{"filename": f'mail-{entry["uid"]}.eml', "raw": entry["raw"]}

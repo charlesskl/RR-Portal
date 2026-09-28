@@ -8,6 +8,13 @@ if (MailboxDateRules.ReceivedDate("2026-09-17T15:59:00+00:00") != "2026-09-17" |
     MailboxDateRules.ReceivedDate("2026-09-18T00:30:00+08:00") != "2026-09-18")
     throw new InvalidOperationException("邮箱邮件未按北京时间收件日期归类");
 Console.WriteLine("Mailbox received-date tests passed.");
+var initializationToday = new DateOnly(2026, 9, 28);
+if (MailInitializationRules.SafeSo("""{"so_numbers":["SO123"],"fields":{"ship_date":"2026-09-28"}}""", initializationToday) != "SO123" ||
+    MailInitializationRules.SafeSo("""{"so_numbers":["SO123"],"fields":{"ship_date":"2026-09-27"}}""", initializationToday) is not null ||
+    MailInitializationRules.SafeSo("""{"so_numbers":["SO123","SO124"],"fields":{"ship_date":"2026-09-29"}}""", initializationToday) is not null ||
+    MailInitializationRules.SafeSo("""{"so_numbers":["SO123"],"fields":{"ship_date":""}}""", initializationToday) is not null)
+    throw new InvalidOperationException("历史初始化只能自动确认明确的未来单 SO 任务");
+Console.WriteLine("Mailbox initialization safety tests passed.");
 var shipmentClassification = MailClassificationRules.Classify("转发：《出货通知》 SO#123");
 var changeClassification = MailClassificationRules.Classify("更新：截补延迟 SO#123");
 var unknownClassification = MailClassificationRules.Classify("Hello");

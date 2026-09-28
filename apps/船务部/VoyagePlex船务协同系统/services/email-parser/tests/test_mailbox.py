@@ -69,5 +69,24 @@ class MailboxTests(unittest.TestCase):
         self.assertIsNotNone(ok["raw"])
 
 
+    def test_search_starts_one_day_before_china_boundary(self):
+        fake = FakeImap()
+        original_uid = fake.uid
+        searches = []
+
+        def capture_uid(command, *args):
+            if command == "SEARCH":
+                searches.append(args)
+            return original_uid(command, *args)
+
+        fake.uid = capture_uid
+        with patch.dict(os.environ, {
+            "VOYAGEPLEX_MAIL_ADDRESS": "shipping@example.com",
+            "VOYAGEPLEX_MAIL_AUTH_CODE": "test-code",
+        }, clear=True), patch("app.mailbox.imaplib.IMAP4_SSL", return_value=fake):
+            fetch_mailbox(after_uid=12, start_date="2026-08-01")
+        self.assertEqual(searches, [(None, "SINCE", "31-Jul-2026")])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -84,8 +84,19 @@ using (var scope = app.Services.CreateScope())
             SyncEnabled INTEGER NOT NULL, SyncIntervalMinutes INTEGER NOT NULL,
             RetentionDays INTEGER NOT NULL, UpdatedAt TEXT NOT NULL
         );
-        INSERT OR IGNORE INTO MailSystemSettings (Id, SyncEnabled, SyncIntervalMinutes, RetentionDays, UpdatedAt)
-        VALUES (1, 1, 5, 180, CURRENT_TIMESTAMP);
+        """);
+    var settingColumns = new HashSet<string>(StringComparer.Ordinal);
+    using (var command = database.Database.GetDbConnection().CreateCommand())
+    {
+        command.CommandText = "PRAGMA table_info('MailSystemSettings')";
+        using var reader = command.ExecuteReader();
+        while (reader.Read()) settingColumns.Add(reader.GetString(1));
+    }
+    if (!settingColumns.Contains("StartDate"))
+        database.Database.ExecuteSqlRaw("ALTER TABLE MailSystemSettings ADD COLUMN StartDate TEXT NOT NULL DEFAULT '2026-08-01'");
+    database.Database.ExecuteSqlRaw("""
+        INSERT OR IGNORE INTO MailSystemSettings (Id, SyncEnabled, SyncIntervalMinutes, RetentionDays, StartDate, UpdatedAt)
+        VALUES (1, 1, 5, 180, '2026-08-01', CURRENT_TIMESTAMP);
         """);
     var receivedDateColumnExists = false;
     using (var command = database.Database.GetDbConnection().CreateCommand())
@@ -434,7 +445,7 @@ app.MapGet("/api/mail/settings", async (HttpContext context, AppDbContext db, Ca
     var state = await db.MailSyncStates.AsNoTracking().FirstOrDefaultAsync(cancellationToken);
     var mailCount = await db.ImportEmailItems.AsNoTracking().CountAsync(item => item.MailboxKey != "", cancellationToken);
     var failedCount = await db.ImportEmailItems.AsNoTracking().CountAsync(item => item.MailboxKey != "" && item.Error != "", cancellationToken);
-    return Results.Ok(new { setting.SyncEnabled, setting.SyncIntervalMinutes, setting.RetentionDays, setting.UpdatedAt,
+    return Results.Ok(new { setting.SyncEnabled, setting.SyncIntervalMinutes, setting.RetentionDays, setting.StartDate, setting.UpdatedAt,
         address = state?.Address ?? "", state?.LastSuccessAt, lastError = state?.LastError ?? "", mailCount, failedCount });
 });
 
@@ -442,14 +453,144 @@ app.MapPatch("/api/mail/settings", async (JsonObject payload, HttpContext contex
 {
     if (((AppUser)context.Items["CurrentUser"]!).Role != "admin") return Results.Json(new { error = "只有管理员可以修改邮箱设置" }, statusCode: 403);
     var setting = await db.MailSystemSettings.FirstAsync(value => value.Id == 1, cancellationToken);
+    var previousStartDate = setting.StartDate;
     var enabled = payload["syncEnabled"]?.GetValue<bool>() ?? setting.SyncEnabled;
     var interval = payload["syncIntervalMinutes"]?.GetValue<int>() ?? setting.SyncIntervalMinutes;
     var retention = payload["retentionDays"]?.GetValue<int>() ?? setting.RetentionDays;
+    var startDate = payload["startDate"]?.ToString() ?? setting.StartDate;
     if (interval is < 1 or > 1440) return Results.BadRequest(new { error = "同步间隔需为1至1440分钟" });
     if (retention is < 30 or > 730) return Results.BadRequest(new { error = "在线保存期限需为30至730天" });
+    if (!DateOnly.TryParseExact(startDate, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out _))
+        return Results.BadRequest(new { error = "读取起始日期格式应为 yyyy-MM-dd" });
     setting.SyncEnabled = enabled; setting.SyncIntervalMinutes = interval; setting.RetentionDays = retention; setting.UpdatedAt = DateTime.UtcNow;
+    setting.StartDate = startDate;
+    if (string.CompareOrdinal(startDate, previousStartDate) < 0)
+    {
+        var state = await db.MailSyncStates.FirstOrDefaultAsync(cancellationToken);
+        if (state is not null) state.LastUid = 0;
+    }
     await db.SaveChangesAsync(cancellationToken);
-    return Results.Ok(new { setting.SyncEnabled, setting.SyncIntervalMinutes, setting.RetentionDays, setting.UpdatedAt });
+    return Results.Ok(new { setting.SyncEnabled, setting.SyncIntervalMinutes, setting.RetentionDays, setting.StartDate, setting.UpdatedAt });
+});
+
+app.MapGet("/api/mail/initialization", async (AppDbContext db, CancellationToken cancellationToken) =>
+{
+    var setting = await db.MailSystemSettings.AsNoTracking().FirstAsync(value => value.Id == 1, cancellationToken);
+    var mail = await db.ImportEmailItems.AsNoTracking().Where(item => item.MailboxKey != "")
+        .Select(item => new { item.Id, item.MailReceivedDate, item.WorkCategory, item.HandlingStatus, item.Status })
+        .ToListAsync(cancellationToken);
+    var linkedIds = (await db.ShipmentTasks.AsNoTracking().Where(task => task.SourceImportItemId != null)
+        .Select(task => task.SourceImportItemId!.Value).ToListAsync(cancellationToken)).ToHashSet();
+    foreach (var duplicate in await db.ImportEmailItems.AsNoTracking()
+        .Where(item => item.DuplicateOfItemId != null)
+        .Select(item => new { item.DuplicateOfItemId, item.MailReceivedDate }).ToListAsync(cancellationToken))
+        if (string.CompareOrdinal(duplicate.MailReceivedDate, setting.StartDate) >= 0)
+            linkedIds.Add(duplicate.DuplicateOfItemId!.Value);
+    var earlier = mail.Where(item => item.MailReceivedDate != "" && string.CompareOrdinal(item.MailReceivedDate, setting.StartDate) < 0).ToList();
+    var before = earlier.Count;
+    var unlinkedBefore = earlier.Count(item => !linkedIds.Contains(item.Id));
+    var missingDate = mail.Count(item => item.MailReceivedDate == "");
+    var recent = mail.Where(item => string.CompareOrdinal(item.MailReceivedDate, setting.StartDate) >= 0).ToList();
+    var retained = recent.Count;
+    var categories = recent.GroupBy(item => item.WorkCategory)
+        .Select(group => new { category = group.Key, count = group.Count() }).ToList();
+    var candidates = recent.Count(item => item.HandlingStatus == "Pending" &&
+        (item.WorkCategory == "Shipment" || item.WorkCategory == "Change"));
+    var failed = recent.Count(item => item.Status == "failed");
+    var todayInChina = DateOnly.FromDateTime(DateTime.UtcNow.AddHours(8));
+    var pendingShipments = await db.ImportEmailItems.AsNoTracking()
+        .Where(item => item.MailboxKey != "" && item.WorkCategory == "Shipment" &&
+            item.HandlingStatus == "Pending" && item.Status == "pending" && !item.NeedsClassificationReview)
+        .Select(item => new { item.Id, item.MailReceivedDate, item.ResultJson }).ToListAsync(cancellationToken);
+    var existingSo = (await db.ShipmentTasks.AsNoTracking().Where(task => task.SoNumber != null && task.SoNumber != "")
+        .Select(task => task.SoNumber!).ToListAsync(cancellationToken)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+    var eligible = 0;
+    foreach (var item in pendingShipments.OrderBy(item => item.Id))
+    {
+        if (string.CompareOrdinal(item.MailReceivedDate, setting.StartDate) < 0) continue;
+        if (MailInitializationRules.SafeSo(item.ResultJson, todayInChina) is not string so || !existingSo.Add(so)) continue;
+        eligible++;
+    }
+    return Results.Ok(new { setting.StartDate, before, unlinkedBefore, linkedBefore = before - unlinkedBefore,
+        missingDate, retained, candidates, eligible, failed, categories });
+});
+
+app.MapPost("/api/mail/initialization/confirm", async (JsonObject payload, HttpContext context, AppDbContext db, CancellationToken cancellationToken) =>
+{
+    if (((AppUser)context.Items["CurrentUser"]!).Role != "admin")
+        return Results.Json(new { error = "只有管理员可以确认历史初始化" }, statusCode: 403);
+    var setting = await db.MailSystemSettings.AsNoTracking().FirstAsync(value => value.Id == 1, cancellationToken);
+    if (payload["startDate"]?.ToString() != setting.StartDate)
+        return Results.Conflict(new { error = "起始日期已变化，请重新查看预览" });
+    var todayInChina = DateOnly.FromDateTime(DateTime.UtcNow.AddHours(8));
+    var existingSo = (await db.ShipmentTasks.AsNoTracking().Where(task => task.SoNumber != null && task.SoNumber != "")
+        .Select(task => task.SoNumber!).ToListAsync(cancellationToken)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+    var pending = await db.ImportEmailItems.Where(item => item.MailboxKey != "" && item.WorkCategory == "Shipment" &&
+        item.HandlingStatus == "Pending" && item.Status == "pending" && !item.NeedsClassificationReview)
+        .OrderBy(item => item.Id).ToListAsync(cancellationToken);
+    var selected = new List<ImportEmailItem>();
+    foreach (var item in pending)
+    {
+        if (string.CompareOrdinal(item.MailReceivedDate, setting.StartDate) < 0) continue;
+        if (MailInitializationRules.SafeSo(item.ResultJson, todayInChina) is not string so || !existingSo.Add(so)) continue;
+        selected.Add(item);
+    }
+    if (payload["eligible"]?.GetValue<int>() != selected.Count)
+        return Results.Conflict(new { error = "可确认数量已变化，请刷新预览后再确认" });
+    var batch = selected.Take(50).ToList();
+    await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+    var taskIds = new List<long>();
+    try
+    {
+        foreach (var item in batch) taskIds.AddRange(await ConfirmMailboxCandidate(item, db, cancellationToken));
+        await transaction.CommitAsync(cancellationToken);
+    }
+    catch (Exception error) when (error is not OperationCanceledException)
+    {
+        await transaction.RollbackAsync(cancellationToken);
+        return Results.BadRequest(new { error = $"初始化确认失败：{error.GetBaseException().Message}" });
+    }
+    return Results.Ok(new { confirmed = batch.Count, remaining = selected.Count - batch.Count,
+        taskIds = taskIds.Distinct().ToArray() });
+});
+
+app.MapPost("/api/mail/initialization/cleanup", async (JsonObject payload, HttpContext context, AppDbContext db, CancellationToken cancellationToken) =>
+{
+    if (((AppUser)context.Items["CurrentUser"]!).Role != "admin")
+        return Results.Json(new { error = "只有管理员可以清理起始日期之前的邮件" }, statusCode: 403);
+    var setting = await db.MailSystemSettings.AsNoTracking().FirstAsync(value => value.Id == 1, cancellationToken);
+    if (payload["startDate"]?.ToString() != setting.StartDate)
+        return Results.Conflict(new { error = "起始日期已变化，请重新查看预览" });
+    await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+    var removed = await db.Database.ExecuteSqlInterpolatedAsync($"""
+        DELETE FROM ImportEmailItems
+        WHERE MailboxKey <> '' AND MailReceivedDate <> '' AND MailReceivedDate < {setting.StartDate}
+          AND NOT EXISTS (SELECT 1 FROM ShipmentTasks WHERE ShipmentTasks.SourceImportItemId = ImportEmailItems.Id)
+          AND NOT EXISTS (SELECT 1 FROM ImportEmailItems AS duplicates
+              WHERE duplicates.DuplicateOfItemId = ImportEmailItems.Id AND duplicates.MailReceivedDate >= {setting.StartDate})
+        """, cancellationToken);
+    await db.Database.ExecuteSqlRawAsync("""
+        UPDATE ImportBatches
+        SET TotalCount = (SELECT COUNT(*) FROM ImportEmailItems WHERE ImportBatchId = ImportBatches.Id),
+            ParsedCount = (SELECT COUNT(*) FROM ImportEmailItems WHERE ImportBatchId = ImportBatches.Id AND Status <> 'failed'),
+            FailedCount = (SELECT COUNT(*) FROM ImportEmailItems WHERE ImportBatchId = ImportBatches.Id AND Status = 'failed')
+        WHERE Kind = 'Email'
+        """, cancellationToken);
+    await db.ImportBatches.Where(batch => batch.Kind == "Email" && !batch.EmailItems.Any())
+        .ExecuteDeleteAsync(cancellationToken);
+    var counts = await db.ImportEmailItems.AsNoTracking().Where(item => item.MailboxKey != "" && item.MailSender != "")
+        .Select(item => item.MailSender).ToListAsync(cancellationToken);
+    var countByEmail = counts.GroupBy(MailClassificationRules.NormalizeEmail)
+        .ToDictionary(group => group.Key, group => group.Count(), StringComparer.OrdinalIgnoreCase);
+    var contacts = await db.MailContacts.ToListAsync(cancellationToken);
+    foreach (var contact in contacts)
+    {
+        contact.MessageCount = countByEmail.GetValueOrDefault(contact.Email);
+        contact.UpdatedAt = DateTime.UtcNow;
+    }
+    await db.SaveChangesAsync(cancellationToken);
+    await transaction.CommitAsync(cancellationToken);
+    return Results.Ok(new { removed });
 });
 
 app.MapGet("/api/mail/candidates", async (AppDbContext db, CancellationToken cancellationToken) =>
@@ -619,7 +760,7 @@ app.MapPost("/api/imports/email/mailbox/sync", async (MailboxSyncService sync, C
 {
     try { return Results.Ok(await sync.SyncAsync(cancellationToken)); }
     catch (Exception error) when (error is not OperationCanceledException)
-    { return Results.Json(new { error = error.Message }, statusCode: 502); }
+    { return Results.Json(new { error = error.GetBaseException().Message }, statusCode: 502); }
 });
 
 app.MapPost("/api/imports/email/confirm", async (JsonObject payload, AppDbContext db, CancellationToken cancellationToken) =>

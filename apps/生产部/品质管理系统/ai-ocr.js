@@ -31,6 +31,12 @@
     if (typeof window.showToast === 'function') window.showToast(msg, type || 'info');
   }
 
+  /* 识别出的公司全称 → 名单简称（app.js 提供 matchManagedName） */
+  function canonName(type, v) {
+    if (!v) return v;
+    return (typeof window.matchManagedName === 'function') ? window.matchManagedName(type, v) : v;
+  }
+
   function checkAiStatus(force) {
     if (statusPromise && !force) return statusPromise;
     statusPromise = fetch(API_BASE + '/api/ai/status', { cache: 'no-store' })
@@ -93,6 +99,13 @@
 
   function applyFields(fields) {
     fields = fields || {};
+    if (fields.supplier) {
+      var matched = canonName('supplier', fields.supplier);
+      if (matched !== fields.supplier) {
+        toast('供应商全称已自动匹配为名单中的「' + matched + '」', 'info');
+        fields.supplier = matched;
+      }
+    }
     var items = Array.isArray(fields.items) ? fields.items : [];
     var first = items[0] || {};
 

@@ -181,6 +181,28 @@ function parseDeliveryNote(text) {
     m = joined.match(/(?:订\s*单\s*(?:号|编号)|PO\s*号?)\s*[：:]\s*([A-Za-z0-9][A-Za-z0-9\-]{3,})/i);
     if (m) fields.orderNo = m[1];
   }
+
+  /* 模型偶发「复读」：把同一行明细输出多次，甚至整份单据重复 N 遍。
+     两级去重：完全相同的行只留一条；品名+数量+单位仍重复的行只保留第一次出现
+     （复读时碎片行的货号会不同，如把条码当成货号，第一次出现的完整行最可靠）。 */
+  if (fields.items.length > 1) {
+    const seen = new Set();
+    fields.items = fields.items.filter(it => {
+      const k = [it.productNo, it.productName, it.qty, it.unit].join('|');
+      if (seen.has(k)) return false;
+      seen.add(k); return true;
+    });
+    /* 品名做 OCR 易混字符归一（1/I/l、0/O、5/S）再合并：
+       复读时同一行可能被识别成「1L」和「IL」两个版本 */
+    const normName = n => String(n || '').replace(/[Il|]/g, '1').replace(/[Oo]/g, '0').replace(/[Ss]/g, '5').replace(/\s+/g, '');
+    const seenLoose = new Set();
+    fields.items = fields.items.filter(it => {
+      if (!it.productName || !it.qty) return true;   /* 信息不全的行不参与合并 */
+      const k = [normName(it.productName), it.qty, it.unit].join('|');
+      if (seenLoose.has(k)) return false;
+      seenLoose.add(k); return true;
+    });
+  }
   return fields;
 }
 

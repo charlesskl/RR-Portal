@@ -2320,7 +2320,7 @@ function filterRecords() {
 }
 
 /* ════════════════════════════════════════
-   验货明细：手动锁定列（列数用户可选）
+   验货明细：手动锁定列（冻结前 N 列）
 ════════════════════════════════════════ */
 const COLLOCK_KEY       = 'xingxin_qms_records_col_lock';
 const COLLOCK_DEPTH_KEY = 'xingxin_qms_records_col_lock_depth';
@@ -2511,9 +2511,36 @@ function _savePartners(p) {
 function managedNames(type) {
   return _loadPartners().filter(p => p.type === type).map(p => p.name).filter(Boolean);
 }
+
+/* 全称→名单简称匹配：送货单上通常是公司全称（如「东莞市鸿誉包装制品有限公司」），
+   名单里登记的是简称（如「鸿誉」）。识别结果应用前自动归一到名单名称；
+   匹配不到则原样返回（仍会触发名单外警示）。 */
+function matchManagedName(type, raw) {
+  const v = String(raw || '').trim();
+  if (!v) return v;
+  const names = managedNames(type);
+  if (!names.length) return v;
+  const norm  = s => String(s || '').replace(/[\s　()（）【】\[\],，.。·\-—_]/g, '').toLowerCase();
+  const strip = s => norm(s).replace(/(有限责任公司|股份有限公司|有限公司|分公司|公司|工厂|厂)$/g, '');
+  const nv = norm(v), sv = strip(v);
+  /* 1. 完全相等 */
+  for (const n of names) if (norm(n) === nv) return n;
+  /* 2. 去掉公司后缀后相等 */
+  for (const n of names) { const sn = strip(n); if (sn && sn === sv) return n; }
+  /* 3. 包含匹配（取名单中最长的命中，避免短名误匹配） */
+  let best = '';
+  for (const n of names) {
+    const nn = norm(n), sn = strip(n);
+    const hit = (nn.length >= 2 && (nv.includes(nn) || nn.includes(nv)))
+             || (sn.length >= 2 && sn !== sv && (sv.includes(sn) || sn.includes(sv)));
+    if (hit && n.length > best.length) best = n;
+  }
+  return best || v;
+}
+window.matchManagedName = matchManagedName;
 function canManagePartners() { return can('managePartners'); }
 
-/* 名单维护面板：供应商/客户页签各自渲染 */
+/* 名单维护面板：供应商管理 / 客户管理 两个页面各自调用 */
 function renderPartners(type) {
   const wrap = document.getElementById('partnerMgr_' + type);
   if (!wrap) return;
@@ -2588,6 +2615,7 @@ function addPartner(type) {
   renderSupplierDatalist();
   renderCustomerDatalist();
   renderProcessTypeDatalist();
+  if (typeof recheckNameWhitelist === 'function') recheckNameWhitelist();
   showToast(label + '「' + name + '」已添加 ✓', 'success');
 }
 
@@ -2695,6 +2723,46 @@ function renderProcessTypeDatalist() {
   if (!list) return;
   list.innerHTML = managedNames('processType')
     .map(n => `<option value="${n}"></option>`).join('');
+}
+
+/* ── 录入即时校验：供应商/客户/加工类型输入名单外名称时立即提示，不等保存 ── */
+const _NAME_CHECK_FIELDS = {
+  f_supplier:    { label:'供应商',  opts: () => getSupplierOptions() },
+  f_client:      { label:'客户',    opts: () => getCustomerOptions() },
+  f_processType: { label:'加工类型', opts: () => getProcessTypeOptions() },
+};
+function checkNameWhitelist(fieldId, withToast) {
+  const cfg = _NAME_CHECK_FIELDS[fieldId];
+  const inp = document.getElementById(fieldId);
+  if (!cfg || !inp) return true;
+  let hint = inp.parentElement.querySelector('.name-warn');
+  if (!hint) {
+    hint = document.createElement('div');
+    hint.className = 'name-warn';
+    hint.style.cssText = 'color:var(--red);font-size:11px;margin-top:4px;display:none';
+    inp.parentElement.appendChild(hint);
+  }
+  const v   = (inp.value || '').trim();
+  const bad = v && !cfg.opts().includes(v);
+  inp.style.borderColor = bad ? 'var(--red)' : '';
+  hint.style.display    = bad ? '' : 'none';
+  if (bad) {
+    hint.textContent = '⚠ ' + cfg.label + '「' + v + '」不在名单中，请先到「供应商&客户管理」添加';
+    if (withToast) showToast(cfg.label + '「' + v + '」不在名单中，请先到「供应商&客户管理」添加后再录入', 'error');
+  }
+  return !bad;
+}
+function bindNameWhitelistCheck() {
+  Object.keys(_NAME_CHECK_FIELDS).forEach(id => {
+    const inp = document.getElementById(id);
+    if (!inp || inp.dataset.nameCheckBound) return;
+    inp.dataset.nameCheckBound = '1';
+    inp.addEventListener('input',  () => checkNameWhitelist(id, false));
+    inp.addEventListener('change', () => checkNameWhitelist(id, true));
+  });
+}
+function recheckNameWhitelist() {
+  Object.keys(_NAME_CHECK_FIELDS).forEach(id => checkNameWhitelist(id, false));
 }
 
 /* 模式切换（单条 / 批量） */
@@ -3118,7 +3186,7 @@ function applyOcrToForm() {
   /* f_client、f_inspDate 不写入，由用户手动填写 */
 
   if (ocrDate)        setVal('f_date', ocrDate);
-  if (ocrSupplier)    setVal('f_supplier', ocrSupplier);
+  if (ocrSupplier)    setVal('f_supplier', matchManagedName('supplier', ocrSupplier));
   if (ocrProductNo)   setVal('f_productNo', ocrProductNo);
   if (ocrProductName) setVal('f_productName', ocrProductName);
   if (ocrDeliveryNo)  setVal('f_deliveryNo', ocrDeliveryNo);
@@ -3418,6 +3486,8 @@ function openAddModal() {
   initDefectLib();
   refreshDefectDescDatalist();
   initOcrUpload();
+  bindNameWhitelistCheck();
+  recheckNameWhitelist();
 }
 
 function openEditModal(id) {
@@ -3455,6 +3525,7 @@ function openEditModal(id) {
   setVal('f_defect',      r.defect || '');
   setVal('f_qc',          r.qc || '');
   setVal('f_remark',      r.remark || '');
+  bindNameWhitelistCheck();
   _loadDefectRows(r.defects || []);   /* 加载已有不良明细 */
   _loadMeasRows(r.measurements || []); /* 加载已有测量数据 */
   renderSupplierDatalist();

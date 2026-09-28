@@ -1497,11 +1497,91 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
   }
   await ensureMainTableGrid(outZip, newName, mainTotalRow)
   if (!input.mainOnly) await groupGenericInvoice(outZip, newName, sorted.map(effCustoms), ws, wbObj.Sheets['商品汇总表'])
+  if (!input.mainOnly) await formatHengxinchangInvoiceFooters(outZip)
   if (floatImages.length) {
     const mainSheetIdx = wbObj.SheetNames.indexOf(newName) + 1
     await injectOoxmlImages(outZip, mainSheetIdx, floatImages)
   }
   return await outZip.generateAsync({ type: 'blob' })
+}
+
+// 最终行扩展完成后单独排版恒新昌收款资料，避免继承其他模板槽位的合并范围。
+async function formatHengxinchangInvoiceFooters(zip: JSZip) {
+  const parser = new DOMParser()
+  const serializer = new XMLSerializer()
+  const styles = parser.parseFromString(await zip.file('xl/styles.xml')!.async('string'), 'application/xml')
+  const xfs = styleCollection(styles.documentElement as XmlElement, 'cellXfs')!
+  const fonts = styleCollection(styles.documentElement as XmlElement, 'fonts')!
+  const sharedFile = zip.file('xl/sharedStrings.xml')
+  const shared = sharedFile ? Array.from(parser.parseFromString(await sharedFile.async('string'), 'application/xml').getElementsByTagName('si')).map(si => si.textContent || '') : []
+  let footerStyle: string | undefined
+  for (const [name, path] of await workbookSheetParts(zip)) {
+    if (!['全球发票', '实业发票', '印尼发票'].includes(name)) continue
+    const doc = parser.parseFromString(await zip.file(path)!.async('string'), 'application/xml')
+    const root = doc.documentElement as XmlElement
+    const data = directChild(root, 'sheetData')!
+    const starts = directChildren(data, 'row').filter(row => directChildren(row, 'c').some(cell => {
+      if (!/^B\d+$/.test(cell.getAttribute('r') || '')) return false
+      const value = cell.getAttribute('t') === 's' ? shared[Number(directChild(cell, 'v')?.textContent)] : cell.textContent || ''
+      return value?.includes('8110914014201724067')
+    })).map(rowNumber)
+    if (!starts.length) continue
+    if (!footerStyle) {
+      const font = styles.createElementNS(SPREADSHEET_NS, 'font')
+      const size = styles.createElementNS(SPREADSHEET_NS, 'sz'); size.setAttribute('val', '12'); font.appendChild(size)
+      const family = styles.createElementNS(SPREADSHEET_NS, 'name'); family.setAttribute('val', 'Arial'); font.appendChild(family)
+      const color = styles.createElementNS(SPREADSHEET_NS, 'color'); color.setAttribute('rgb', 'FF000000'); font.appendChild(color)
+      const fontId = String(directChildren(fonts, 'font').length); fonts.appendChild(font)
+      const xf = styles.createElementNS(SPREADSHEET_NS, 'xf')
+      for (const [key, value] of Object.entries({ numFmtId: '0', fontId, fillId: '0', borderId: '0', xfId: '0', applyFont: '1', applyAlignment: '1', applyBorder: '1', applyFill: '1' })) xf.setAttribute(key, value)
+      const align = styles.createElementNS(SPREADSHEET_NS, 'alignment')
+      align.setAttribute('horizontal', 'left'); align.setAttribute('vertical', 'top'); align.setAttribute('wrapText', '1'); xf.appendChild(align)
+      footerStyle = String(directChildren(xfs, 'xf').length); xfs.appendChild(xf)
+    }
+    let merges = directChild(root, 'mergeCells')
+    if (!merges) { merges = doc.createElementNS(SPREADSHEET_NS, 'mergeCells') as XmlElement; root.insertBefore(merges, data.nextSibling) }
+    for (const start of starts) {
+      for (const merge of directChildren(merges, 'mergeCell')) {
+        const range = XLSX.utils.decode_range(merge.getAttribute('ref')!)
+        if (range.s.r <= start + 3 && range.e.r >= start - 1 && range.s.c <= 9 && range.e.c >= 1) merges.removeChild(merge)
+      }
+      const lines = HENGXINCHANG_BANK_INFO.split('\n')
+      for (let offset = 0; offset < 5; offset++) {
+        const r = start + offset
+        let row = directChildren(data, 'row').find(node => rowNumber(node) === r)
+        if (!row) {
+          row = doc.createElementNS(SPREADSHEET_NS, 'row') as XmlElement; row.setAttribute('r', String(r))
+          const after = directChildren(data, 'row').find(node => rowNumber(node) > r)
+          if (after) data.insertBefore(row, after); else data.appendChild(row)
+        }
+        row.setAttribute('ht', '22'); row.setAttribute('customHeight', '1')
+        for (let c = 1; c <= 9; c++) {
+          const address = `${XLSX.utils.encode_col(c)}${r}`
+          let cell = directChildren(row, 'c').find(node => node.getAttribute('r') === address)
+          if (!cell) {
+            cell = doc.createElementNS(SPREADSHEET_NS, 'c') as XmlElement; cell.setAttribute('r', address)
+            const after = directChildren(row, 'c').find(node => XLSX.utils.decode_cell(node.getAttribute('r')!).c > c)
+            if (after) row.insertBefore(cell, after); else row.appendChild(cell)
+          }
+          while (cell.firstChild) cell.removeChild(cell.firstChild)
+          cell.setAttribute('s', footerStyle); cell.setAttribute('t', 'inlineStr')
+          const value = c === 1 ? lines[offset] || '' : c === 6 && offset === 0 ? HENGXINCHANG_BENEFICIARY : c === 6 && offset === 2 ? HENGXINCHANG_BENEFICIARY_ADDRESS : ''
+          const inline = doc.createElementNS(SPREADSHEET_NS, 'is'); const text = doc.createElementNS(SPREADSHEET_NS, 't'); text.textContent = value; inline.appendChild(text); cell.appendChild(inline)
+        }
+        const merge = doc.createElementNS(SPREADSHEET_NS, 'mergeCell'); merge.setAttribute('ref', `B${r}:F${r}`); merges.appendChild(merge)
+      }
+      for (const ref of [`G${start}:J${start + 1}`, `G${start + 2}:J${start + 4}`]) {
+        const merge = doc.createElementNS(SPREADSHEET_NS, 'mergeCell'); merge.setAttribute('ref', ref); merges.appendChild(merge)
+      }
+    }
+    merges.setAttribute('count', String(directChildren(merges, 'mergeCell').length))
+    zip.file(path, serializer.serializeToString(doc))
+  }
+  if (footerStyle) {
+    fonts.setAttribute('count', String(directChildren(fonts, 'font').length))
+    xfs.setAttribute('count', String(directChildren(xfs, 'xf').length))
+    zip.file('xl/styles.xml', serializer.serializeToString(styles))
+  }
 }
 
 // 仅重排通用“发票”，不改变主明细及其他单据的顺序。
@@ -2934,8 +3014,8 @@ async function ensureLinkedTableGrid(
       }
       return cell
     }
-    const styleWithEdgeStyles = (baseStyleId: string, edges: Record<string, string | null>) => {
-      const key = `${baseStyleId}:${Object.entries(edges).sort(([a], [b]) => a.localeCompare(b)).map(([edge, style]) => `${edge}=${style || ''}`).join(',')}`
+    const styleWithEdgeStyles = (baseStyleId: string, edges: Record<string, string | null>, edgeColors: Record<string, string> = {}) => {
+      const key = `${baseStyleId}:${Object.entries(edges).sort(([a], [b]) => a.localeCompare(b)).map(([edge, style]) => `${edge}=${style || ''}:${edgeColors[edge] || 'FF000000'}`).join(',')}`
       const cached = framedStyles.get(key)
       if (cached) return cached
       const currentXfs = directChildren(xfs, 'xf')
@@ -2957,7 +3037,10 @@ async function ensureLinkedTableGrid(
           color = stylesDoc.createElementNS(SPREADSHEET_NS, 'color') as XmlElement
           side.appendChild(color)
         }
-        if (edgeStyle) color?.setAttribute('rgb', 'FF000000')
+        if (edgeStyle) {
+          for (const attr of ['indexed', 'theme', 'tint', 'auto']) color?.removeAttribute(attr)
+          color?.setAttribute('rgb', edgeColors[edge] || 'FF000000')
+        }
         if (!current) border.appendChild(side)
       }
       if (!directChild(border, 'diagonal')) {
@@ -3082,13 +3165,14 @@ async function ensureLinkedTableGrid(
       fillRange('A', range.detailStart, 'K', range.end - 1, whiteFillId)
       fillRange('A', range.end, 'C', range.end, whiteFillId)
       fillRange('D', range.end, 'K', range.end, purpleFillId)
-      // 明细区横线和竖线均使用连续细实线，与确认的装箱单样式一致。
+      // 参考装箱单：黑色竖线、浅灰细横线；紫色合计区跨两行，不在中间划线。
       for (let rowNo = range.detailStart; rowNo <= range.end; rowNo++) {
         for (let columnIndex = firstColumn; columnIndex <= lastColumn; columnIndex++) {
           const cell = ensureCell(rowNo, columnIndex)
           cell.setAttribute('s', styleWithEdgeStyles(cell.getAttribute('s') || '0', {
-            left: 'thin', right: 'thin', top: null, bottom: 'thin',
-          }))
+            left: 'thin', right: 'thin', top: null,
+            bottom: rowNo === range.end && columnIndex >= 3 ? null : 'thin',
+          }, { bottom: 'FFE0E0E0' }))
         }
       }
       const spacerRowNo = range.end + 1

@@ -46,7 +46,7 @@ const ORDER_COLUMNS = [
   'product_name','version','quantity','work_type',
   'production_count','production_progress','special_notes',
   'plastic_due','material_due','carton_due','packaging_due','sticker',
-  'start_date','complete_date','ship_date',
+  'start_date','complete_date','ship_date','inspect_date',
   'target_time','daily_target','days','unit_price','process_value',
   'inspection_date','month','warehouse_record','output_value','process_price','remark',
   'cell_format','row_color','sort_order',

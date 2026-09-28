@@ -27,6 +27,7 @@ const COLUMNS = [
   { key: 'start_date',     header: '上拉日期',   width: 10 },
   { key: 'complete_date',  header: '完成日期',   width: 10 },
   { key: 'ship_date',      header: '走货期',     width: 10 },
+  { key: 'inspect_date',   header: '验货期',     width: 10 },
   { key: 'inspection_date', header: '行Q期',     width: 8 },
   { key: 'month',          header: '月份',       width: 6 },
 ];

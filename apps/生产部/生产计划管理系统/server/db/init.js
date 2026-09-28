@@ -37,6 +37,7 @@ function initDatabase() {
       start_date TEXT,
       complete_date TEXT,
       ship_date TEXT,
+      inspect_date TEXT,
 
       target_time REAL,
       daily_target INTEGER,
@@ -101,6 +102,10 @@ function initDatabase() {
     // 手动行排序（剪切/粘贴行）：NULL = 未手动排过，仍按走货期排
     if (!cols.includes('sort_order')) {
       db.exec('ALTER TABLE orders ADD COLUMN sort_order REAL');
+    }
+    // 验货期（独立于走货期）
+    if (!cols.includes('inspect_date')) {
+      db.exec('ALTER TABLE orders ADD COLUMN inspect_date TEXT');
     }
   } catch {}
 

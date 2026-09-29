@@ -1666,6 +1666,20 @@ function _buildIQCCanvas(r) {
     defRows.push({ desc:'', category:'', cr:0, maj:0, maj10:0, min:0, remark:'' });
   }
 
+  /* ── AQL 表联动高亮：录入不良明细选了哪个等级，AQL 表对应列头和
+     当前 LOT SIZE 行的 Ac 值就填色标注（黄色，打印友好）── */
+  const usedLv = {
+    CR:     defRows.some(d => (d.cr    || 0) > 0),
+    MAJ065: defRows.some(d => (d.maj   || 0) > 0),
+    MAJ10:  defRows.some(d => (d.maj10 || 0) > 0),
+    MIN25:  defRows.some(d => (d.min   || 0) > 0),
+    FUNC:   defRows.some(d => d.category === '功能'
+                          && ((d.cr||0) + (d.maj||0) + (d.maj10||0) + (d.min||0)) > 0),
+  };
+  const AQL_HL = '#ffd54d';
+  const aqlHdStyle = on =>
+    `background:${on ? AQL_HL : '#ebebeb'};font-weight:700;text-align:center;padding:2px 2px;font-size:8px;border-right:1px solid #222;border-bottom:1px solid #222`;
+
   const sumCR    = defRows.reduce((s,d) => s+(d.cr||0), 0);
   const sumMAJ   = defRows.reduce((s,d) => s+(d.maj||0), 0);
   const sumMAJ10 = defRows.reduce((s,d) => s+(d.maj10||0), 0);
@@ -1801,13 +1815,13 @@ function _buildIQCCanvas(r) {
       </tr>
       <!-- 行3：列头 CR/MAJ/MIN -->
       <tr>
-        <td style="background:#ebebeb;font-weight:700;text-align:center;padding:2px 2px;font-size:8px;border-right:1px solid #222;border-bottom:1px solid #222">CR</td>
-        <td style="background:#ebebeb;font-weight:700;text-align:center;padding:2px 2px;font-size:8px;border-right:1px solid #222;border-bottom:1px solid #222">MAJ<br/>0.65</td>
-        <td style="background:#ebebeb;font-weight:700;text-align:center;padding:2px 2px;font-size:8px;border-right:1px solid #222;border-bottom:1px solid #222">MAJ<br/>1.0</td>
-        <td style="background:#ebebeb;font-weight:700;text-align:center;padding:2px 2px;font-size:8px;border-right:1px solid #222;border-bottom:1px solid #222">MIN<br/>2.5</td>
-        <td style="background:#ebebeb;font-weight:700;text-align:center;padding:2px 2px;font-size:8px;border-right:1px solid #222;border-bottom:1px solid #222">SMPL</td>
-        <td style="background:#ebebeb;font-weight:700;text-align:center;padding:2px 2px;font-size:8px;border-right:1px solid #222;border-bottom:1px solid #222">MAJ</td>
-        <td style="background:#ebebeb;font-weight:700;text-align:center;padding:2px 2px;font-size:8px;border-right:1px solid #222;border-bottom:1px solid #222">RE</td>
+        <td style="${aqlHdStyle(usedLv.CR)}">CR</td>
+        <td style="${aqlHdStyle(usedLv.MAJ065)}">MAJ<br/>0.65</td>
+        <td style="${aqlHdStyle(usedLv.MAJ10)}">MAJ<br/>1.0</td>
+        <td style="${aqlHdStyle(usedLv.MIN25)}">MIN<br/>2.5</td>
+        <td style="${aqlHdStyle(false)}">SMPL</td>
+        <td style="${aqlHdStyle(usedLv.FUNC)}">MAJ</td>
+        <td style="${aqlHdStyle(false)}">RE</td>
       </tr>
       <!-- 行4-11：数据行 -->
       ${IQC_AQL_TABLE.map(row => {
@@ -1820,15 +1834,16 @@ function _buildIQCCanvas(r) {
           ? `<span style="color:#ffffff;font-weight:700;opacity:1;filter:none;mix-blend-mode:normal;white-space:nowrap">✓ ${row.range}</span>`
           : row.range;
         const dB = active ? 'background:#fff;font-weight:600' : 'background:#fff;font-weight:400';
+        const cellHl = used => (active && used) ? `background:${AQL_HL};font-weight:700` : dB;
         return `<tr>
           <td style="${lotStyle}">${lotContent}</td>
           <td style="${base};${dB}">${row.sample}</td>
-          <td style="${base};${dB}">${row.cr}</td>
-          <td style="${base};${dB}">${row.maj065}</td>
-          <td style="${base};${dB}">${row.maj10}</td>
-          <td style="${base};${dB}">${row.min25}</td>
+          <td style="${base};${cellHl(usedLv.CR)}">${row.cr}</td>
+          <td style="${base};${cellHl(usedLv.MAJ065)}">${row.maj065}</td>
+          <td style="${base};${cellHl(usedLv.MAJ10)}">${row.maj10}</td>
+          <td style="${base};${cellHl(usedLv.MIN25)}">${row.min25}</td>
           <td style="${base};${dB}">${row.func_sample}</td>
-          <td style="${base};${dB}">${row.m065}</td>
+          <td style="${base};${cellHl(usedLv.FUNC)}">${row.m065}</td>
           <td style="${base};${dB}">${row.m065+1}</td>
         </tr>`;
       }).join('')}

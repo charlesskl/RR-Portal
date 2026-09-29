@@ -353,6 +353,45 @@ describe('supplier document export', () => {
     const sheet = wb.Sheets[customer === 'RRI' ? '实业发票' : '全球发票']
     const titles = Object.entries(sheet).filter(([address, cell]) => /^B\d+$/.test(address) && cell.v === 'COMMERCIAL INVOICE').map(([address]) => Number(address.slice(1)))
     expect(titles).toHaveLength(capacity)
+    const packing = wb.Sheets['装箱单']
+    const grandAddress = Object.keys(packing).find(address => /^C\d+$/.test(address) && packing[address]?.v === '总合计')!
+    expect(grandAddress).toBeTruthy()
+    const grandRow = Number(grandAddress.slice(1))
+    const subtotals = Object.entries(packing).filter(([address, cell]) => /^D\d+$/.test(address) && /^SUM\(/.test(cell.f || '') && Number(address.slice(1)) < grandRow).map(([address]) => Number(address.slice(1))).sort((a, b) => a - b)
+    expect(subtotals).toHaveLength(capacity)
+    for (const column of ['D', 'H', 'I', 'J', 'K']) {
+      expect(packing[`${column}${grandRow}`].f).toBe(`SUM(${subtotals.map(row => `${column}${row}`).join(',')})`)
+    }
+    expect(grandRow).toBeGreaterThan(subtotals[subtotals.length - 1])
+    expect(packing[`C${grandRow + 1}`].v).toBe('主明细合计')
+    for (const [column, source] of Object.entries({ D: 'K', H: 'P', I: 'Q', J: 'AT', K: 'S' })) {
+      expect(packing[`${column}${grandRow + 1}`].f).toBe(`'ALL-HEADERS'!${source}${capacity + 5}`)
+      expect(wb.Sheets['ALL-HEADERS'][`${source}${capacity + 5}`].f).toBe(`SUM(${source}4:${source}${capacity + 3})`)
+    }
+    const zip = await JSZip.loadAsync(await file.arrayBuffer())
+    const packingXml = await worksheetXml(zip, '装箱单')
+    const packingStyles = await zip.file('xl/styles.xml')!.async('string')
+    for (const column of ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K']) {
+      expect(borderEdges(packingStyles, packingXml, `${column}${grandRow}`)).toEqual([])
+      expect(fillColor(packingStyles, packingXml, `${column}${grandRow}`)).not.toBe('FFCCCCFF')
+      expect(borderEdges(packingStyles, packingXml, `${column}${grandRow + 1}`)).toEqual([])
+      expect(fillColor(packingStyles, packingXml, `${column}${grandRow + 1}`)).not.toBe('FFCCCCFF')
+    }
+    expect(fillColor(packingStyles, packingXml, `D${subtotals[0]}`)).toBe('FFCCCCFF')
+    const doc = new DOMParser().parseFromString(await worksheetXml(zip, customer === 'RRI' ? '实业发票' : '全球发票'), 'application/xml')
+    const rows = new Map(Array.from(doc.getElementsByTagName('row')).map(row => [Number(row.getAttribute('r')), row]))
+    const totals = Object.entries(sheet).filter(([address, cell]) => /^B\d+$/.test(address) && /总值大写/.test(String(cell.v))).map(([address]) => Number(address.slice(1)))
+    for (let index = 1; index < titles.length; index++) {
+      const headerStart = titles[index] - 5
+      const previousTotal = Math.max(...totals.filter(row => row < headerStart))
+      let visibleHeight = 0
+      for (let row = previousTotal + 1; row < headerStart; row++) {
+        const node = rows.get(row)
+        if (node?.getAttribute('hidden') !== '1') visibleHeight += Number(node?.getAttribute('ht') || 15)
+      }
+      expect(visibleHeight).toBeLessThanOrEqual(12)
+      expect(rows.get(headerStart)?.getAttribute('hidden')).not.toBe('1')
+    }
     const normalize = (value: unknown) => String(value || '').replace(/\s+/g, '').toUpperCase()
     for (const title of titles) {
       for (let offset = 0; offset < 6; offset++) {

@@ -1435,7 +1435,7 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
       ;(ws as any)[addr] = cell
     }
     setCell(ws, totalRi, 0, '合计', 's')
-    for (const column of ['L', 'P', 'Q', 'S', 'AT']) {
+    for (const column of ['K', 'L', 'P', 'Q', 'S', 'AT']) {
       const columnIndex = XLSX.utils.decode_col(column)
       setCell(ws, totalRi, columnIndex, `=SUM(${column}${firstDataRow}:${column}${lastDataRow})`, 'n')
       const cell: any = (ws as any)[`${column}${mainTotalRow}`]
@@ -1514,11 +1514,137 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
   await ensureMainTableGrid(outZip, newName, mainTotalRow)
   if (!input.mainOnly) await groupGenericInvoice(outZip, newName, sorted.map(effCustoms), ws, wbObj.Sheets['商品汇总表'])
   if (!input.mainOnly) await formatHengxinchangInvoiceFooters(outZip)
+  if (!input.mainOnly) await compactEmptyInvoiceFooters(outZip)
+  if (!input.mainOnly) await addPackingGrandTotal(outZip, newName, mainTotalRow)
   if (floatImages.length) {
     const mainSheetIdx = wbObj.SheetNames.indexOf(newName) + 1
     await injectOoxmlImages(outZip, mainSheetIdx, floatImages)
   }
   return await outZip.generateAsync({ type: 'blob' })
+}
+
+async function addPackingGrandTotal(zip: JSZip, mainName: string, mainTotalRow?: number) {
+  const parts = await workbookSheetParts(zip)
+  const path = parts.get('装箱单')
+  if (!path) return
+  const parser = new DOMParser()
+  const serializer = new XMLSerializer()
+  const doc = parser.parseFromString(await zip.file(path)!.async('string'), 'application/xml')
+  const root = doc.documentElement as XmlElement
+  const data = directChild(root, 'sheetData')!
+  const columns = ['D', 'H', 'I', 'J', 'K']
+  const totals = directChildren(data, 'row').filter(row => columns.every(column => {
+    const cell = directChildren(row, 'c').find(cell => cellColumn(cell.getAttribute('r') || '') === column)
+    return /^SUM\(/i.test(cell ? directChild(cell, 'f')?.textContent || '' : '')
+  }))
+  if (!totals.length) return
+  const last = totals[totals.length - 1]
+  const number = Math.max(rowNumber(last) + 4, ...directChildren(data, 'row').map(row => rowNumber(row) + 1))
+  const grand = last.cloneNode(true) as XmlElement
+  setXmlRowNumber(grand, number)
+  grand.setAttribute('ht', '24'); grand.setAttribute('customHeight', '1')
+  grand.removeAttribute('hidden')
+  for (const cell of directChildren(grand, 'c')) clearXmlCell(cell)
+  for (const column of columns) setXmlFormula(doc, grand, column, `SUM(${totals.map(row => `${column}${rowNumber(row)}`).join(',')})`)
+  const label = ensureXmlCell(doc, grand, 'C')
+  label.setAttribute('t', 'inlineStr')
+  const inline = doc.createElementNS(SPREADSHEET_NS, 'is')
+  const text = doc.createElementNS(SPREADSHEET_NS, 't'); text.textContent = '总合计'
+  inline.appendChild(text); label.appendChild(inline)
+  // Keep each column's number format, but display the grand total without a grid.
+  const styles = parser.parseFromString(await zip.file('xl/styles.xml')!.async('string'), 'application/xml')
+  const xfs = styleCollection(styles.documentElement as XmlElement, 'cellXfs')!
+  const plainStyles = new Map<string, string>()
+  for (const cell of directChildren(grand, 'c')) {
+    const base = cell.getAttribute('s') || '0'
+    let plain = plainStyles.get(base)
+    if (!plain) {
+      const xf = directChildren(xfs, 'xf')[Number(base)].cloneNode(true) as XmlElement
+      xf.setAttribute('fillId', '0'); xf.setAttribute('borderId', '0')
+      xf.setAttribute('applyFill', '1'); xf.setAttribute('applyBorder', '1')
+      plain = String(directChildren(xfs, 'xf').length)
+      xfs.appendChild(xf); plainStyles.set(base, plain)
+    }
+    cell.setAttribute('s', plain)
+  }
+  xfs.setAttribute('count', String(directChildren(xfs, 'xf').length))
+  zip.file('xl/styles.xml', serializer.serializeToString(styles))
+  data.appendChild(grand)
+  const mainTotal = grand.cloneNode(true) as XmlElement
+  setXmlRowNumber(mainTotal, number + 1)
+  const mainLabel = ensureXmlCell(doc, mainTotal, 'C')
+  directChild(directChild(mainLabel, 'is')!, 't')!.textContent = '主明细合计'
+  const escapedMain = mainName.replace(/'/g, "''")
+  for (const [column, source] of Object.entries({ D: 'K', H: 'P', I: 'Q', J: 'AT', K: 'S' })) {
+    setXmlFormula(doc, mainTotal, column, mainTotalRow ? `'${escapedMain}'!${source}${mainTotalRow}` : '0')
+  }
+  data.appendChild(mainTotal)
+  directChild(root, 'dimension')?.setAttribute('ref', `A1:K${number + 1}`)
+  zip.file(path, serializer.serializeToString(doc))
+  const workbook = parser.parseFromString(await zip.file('xl/workbook.xml')!.async('string'), 'application/xml')
+  const sheetIndex = Array.from(workbook.getElementsByTagName('sheet')).findIndex(sheet => sheet.getAttribute('name') === '装箱单')
+  for (const defined of Array.from(workbook.getElementsByTagName('definedName'))) {
+    if (defined.getAttribute('name') === '_xlnm.Print_Area' && defined.getAttribute('localSheetId') === String(sheetIndex)) defined.textContent = `'装箱单'!$A$1:$K$${number + 1}`
+  }
+  zip.file('xl/workbook.xml', serializer.serializeToString(workbook))
+}
+
+// Hide unused banking space without shifting formulas, print areas, or later headers.
+async function compactEmptyInvoiceFooters(zip: JSZip) {
+  const parser = new DOMParser()
+  const serializer = new XMLSerializer()
+  const sharedFile = zip.file('xl/sharedStrings.xml')
+  const shared = sharedFile ? Array.from(parser.parseFromString(await sharedFile.async('string'), 'application/xml').getElementsByTagName('si')).map(si => si.textContent || '') : []
+  const text = (cell: XmlElement) => cell.getAttribute('t') === 's'
+    ? shared[Number(directChild(cell, 'v')?.textContent)] || '' : cell.textContent || ''
+  for (const [name, path] of await workbookSheetParts(zip)) {
+    if (!['全球发票', '实业发票', '印尼发票'].includes(name)) continue
+    const doc = parser.parseFromString(await zip.file(path)!.async('string'), 'application/xml')
+    const root = doc.documentElement as XmlElement
+    const data = directChild(root, 'sheetData')!
+    const rows = directChildren(data, 'row').sort((a, b) => rowNumber(a) - rowNumber(b))
+    const merges = directChild(root, 'mergeCells')
+    for (let i = 0; i < rows.length; i++) {
+      if (!directChildren(rows[i], 'c').some(cell => cellColumn(cell.getAttribute('r') || '') === 'B' && /总值大写|Total Amount/i.test(text(cell)))) continue
+      const blankRows: XmlElement[] = []
+      let end = rowNumber(rows[rows.length - 1]) + 1
+      for (let j = i + 1; j < rows.length; j++) {
+        if (directChildren(rows[j], 'c').some(cell => directChild(cell, 'f') || text(cell).trim())) {
+          end = rowNumber(rows[j])
+          break
+        }
+      }
+      for (let number = rowNumber(rows[i]) + 1; number < end; number++) {
+        let row = rows.find(row => rowNumber(row) === number)
+        if (!row) {
+          row = doc.createElementNS(SPREADSHEET_NS, 'row') as XmlElement
+          row.setAttribute('r', String(number))
+          const following = rows.find(row => rowNumber(row) > number)
+          if (following) data.insertBefore(row, following)
+          else data.appendChild(row)
+        }
+        blankRows.push(row)
+      }
+      if (!blankRows.length) continue
+      // A populated bank footer stops the scan immediately and is left unchanged.
+      blankRows.forEach((row, index) => {
+        row.setAttribute('ht', index === 0 ? '12' : '0')
+        row.setAttribute('customHeight', '1')
+        if (index) row.setAttribute('hidden', '1')
+        else row.removeAttribute('hidden')
+      })
+      if (merges) {
+        const first = rowNumber(blankRows[0]) - 1
+        const last = rowNumber(blankRows[blankRows.length - 1]) - 1
+        for (const merge of directChildren(merges, 'mergeCell')) {
+          const range = XLSX.utils.decode_range(merge.getAttribute('ref')!)
+          if (range.s.r >= first && range.e.r <= last) merges.removeChild(merge)
+        }
+      }
+    }
+    if (merges) merges.setAttribute('count', String(directChildren(merges, 'mergeCell').length))
+    zip.file(path, serializer.serializeToString(doc))
+  }
 }
 
 // 最终行扩展完成后单独排版恒新昌收款资料，避免继承其他模板槽位的合并范围。

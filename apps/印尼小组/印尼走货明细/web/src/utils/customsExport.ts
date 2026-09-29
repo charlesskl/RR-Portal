@@ -689,24 +689,36 @@ function populateLinkedDocuments(
     if (totalAmountRow) {
       const beneficiaryRow = totalAmountRow + 1
       const beneficiaryAddressRow = totalAmountRow + 3
-      setPreservingStyle(
-        groupInvoiceSheet,
-        `B${beneficiaryRow}`,
-        isHuashengyiSeller(seller) ? HUASHENGYI_BANK_INFO : isHengxinchangSeller(seller) ? HENGXINCHANG_BANK_INFO : '',
-      )
-      setPreservingStyle(
-        groupInvoiceSheet,
-        `G${beneficiaryRow}`,
-        isHuashengyiSeller(seller) ? HUASHENGYI_BENEFICIARY : isHengxinchangSeller(seller) ? `${HENGXINCHANG_BENEFICIARY}\n\n${HENGXINCHANG_BENEFICIARY_ADDRESS}` : '',
-      )
-      if (!isHengxinchangSeller(seller)) setPreservingStyle(
-        groupInvoiceSheet,
-        `G${beneficiaryAddressRow}`,
-        isHuashengyiSeller(seller) ? HUASHENGYI_BENEFICIARY_ADDRESS : '',
-      )
-      else if (/^\s*Add[:：]/i.test(String(groupInvoiceSheet?.[`G${beneficiaryAddressRow}`]?.v || ''))) {
-        // Remove the template's old banking address, without touching the next header.
-        setPreservingStyle(groupInvoiceSheet, `G${beneficiaryAddressRow}`, '')
+      const hasBankDetails = isHuashengyiSeller(seller) || isHengxinchangSeller(seller)
+      // Some template sections have no footer gap at all: totalAmountRow + 1
+      // is already the next invoice's Chinese company name. Only clear actual
+      // sample banking text for sellers without banking details.
+      if (!hasBankDetails) {
+        for (const address of [`B${beneficiaryRow}`, `G${beneficiaryRow}`, `G${beneficiaryAddressRow}`]) {
+          if (/^\s*(?:Beneficiary|Account number|Add[:：])/i.test(String(groupInvoiceSheet?.[address]?.v || ''))) {
+            setPreservingStyle(groupInvoiceSheet, address, '')
+          }
+        }
+      } else {
+        setPreservingStyle(
+          groupInvoiceSheet,
+          `B${beneficiaryRow}`,
+          isHuashengyiSeller(seller) ? HUASHENGYI_BANK_INFO : HENGXINCHANG_BANK_INFO,
+        )
+        setPreservingStyle(
+          groupInvoiceSheet,
+          `G${beneficiaryRow}`,
+          isHuashengyiSeller(seller) ? HUASHENGYI_BENEFICIARY : `${HENGXINCHANG_BENEFICIARY}\n\n${HENGXINCHANG_BENEFICIARY_ADDRESS}`,
+        )
+        if (!isHengxinchangSeller(seller)) setPreservingStyle(
+          groupInvoiceSheet,
+          `G${beneficiaryAddressRow}`,
+          HUASHENGYI_BENEFICIARY_ADDRESS,
+        )
+        else if (/^\s*Add[:：]/i.test(String(groupInvoiceSheet?.[`G${beneficiaryAddressRow}`]?.v || ''))) {
+          // Remove the template's old banking address, without touching the next header.
+          setPreservingStyle(groupInvoiceSheet, `G${beneficiaryAddressRow}`, '')
+        }
       }
     }
     if (group.indo) {
@@ -1532,8 +1544,10 @@ async function formatHengxinchangInvoiceFooters(zip: JSZip) {
     if (!starts.length) continue
     if (!footerStyle) {
       const font = styles.createElementNS(SPREADSHEET_NS, 'font')
-      const size = styles.createElementNS(SPREADSHEET_NS, 'sz'); size.setAttribute('val', '12'); font.appendChild(size)
-      const family = styles.createElementNS(SPREADSHEET_NS, 'name'); family.setAttribute('val', 'Arial'); font.appendChild(family)
+      font.appendChild(styles.createElementNS(SPREADSHEET_NS, 'b'))
+      const size = styles.createElementNS(SPREADSHEET_NS, 'sz'); size.setAttribute('val', '13'); font.appendChild(size)
+      const family = styles.createElementNS(SPREADSHEET_NS, 'name'); family.setAttribute('val', '等线'); font.appendChild(family)
+      const charset = styles.createElementNS(SPREADSHEET_NS, 'charset'); charset.setAttribute('val', '134'); font.appendChild(charset)
       const color = styles.createElementNS(SPREADSHEET_NS, 'color'); color.setAttribute('rgb', 'FF000000'); font.appendChild(color)
       const fontId = String(directChildren(fonts, 'font').length); fonts.appendChild(font)
       const xf = styles.createElementNS(SPREADSHEET_NS, 'xf')

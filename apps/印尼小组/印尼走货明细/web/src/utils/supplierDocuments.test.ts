@@ -331,11 +331,35 @@ describe('supplier document export', () => {
           const cell = Array.from(doc.getElementsByTagName('c')).find(cell => cell.getAttribute('r') === `${col}${row}`)!
           const xf = footerXfs[Number(cell.getAttribute('s'))]
           const font = footerFonts[Number(xf.getAttribute('fontId'))]
-          expect(font.getElementsByTagName('sz')[0].getAttribute('val')).toBe('12')
+          expect(font.getElementsByTagName('sz')[0].getAttribute('val')).toBe('13')
+          expect(font.getElementsByTagName('name')[0].getAttribute('val')).toBe('等线')
+          expect(font.getElementsByTagName('b')).toHaveLength(1)
         }
       }
     }
   })
+  it.each(['RRI', 'RRM'])('preserves complete letterheads across every invoice slot (%s)', async customer => {
+    const capacity = customer === 'RRI' ? 14 : 15
+    const items = Array.from({ length: capacity }, (_, index) => ({
+      material_id: 1, supplier: seller.keyword, customs_company: seller.full,
+      qty: 1, contract_no: `ALL-C-${index}`, invoice_no: `ALL-I-${index}`,
+    }))
+    const file = await buildCustomsWorkbook({
+      templateBuffer: customer === 'RRI' ? rriTemplateBuffer : rrmTemplateBuffer,
+      items, materials: new Map([[1, { id: 1, supplier: seller.keyword, name_zh: '测试物料' }]]),
+      supplierProfiles: [seller], productHs: new Map(), images: new Map(), form: { customer, containerNo: 'ALL-HEADERS' },
+    })
+    const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' })
+    const sheet = wb.Sheets[customer === 'RRI' ? '实业发票' : '全球发票']
+    const titles = Object.entries(sheet).filter(([address, cell]) => /^B\d+$/.test(address) && cell.v === 'COMMERCIAL INVOICE').map(([address]) => Number(address.slice(1)))
+    expect(titles).toHaveLength(capacity)
+    const normalize = (value: unknown) => String(value || '').replace(/\s+/g, '').toUpperCase()
+    for (const title of titles) {
+      for (let offset = 0; offset < 6; offset++) {
+        expect(normalize(sheet[`B${title - 5 + offset}`]?.v), `header at row ${title - 5 + offset}`).toBe(normalize(sheet[`B${offset + 1}`]?.v))
+      }
+    }
+  }, 60000)
   it('fills the seller positions without retaining sample banking details', async () => {
     const file = await buildCustomsWorkbook({
       templateBuffer, seller,

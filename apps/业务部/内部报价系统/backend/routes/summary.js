@@ -78,6 +78,13 @@ router.put('/:id/confirmation', async (req, res) => {
   const note = Object.prototype.hasOwnProperty.call(body, 'note') ? String(body.note || '').trim() : String(existing?.note || '');
   if (confirmedPrice != null && (!Number.isFinite(confirmedPrice) || confirmedPrice < 0)) return res.status(400).json({ error: '确认客价格式不正确' });
   if (confirmedQty != null && (!Number.isFinite(confirmedQty) || confirmedQty < 0)) return res.status(400).json({ error: '确认数量格式不正确' });
+  if (status === 'confirmed') {
+    const mixedSections = await db.prepare('SELECT * FROM quote_sections WHERE quote_id = ?').all(id);
+    try {
+      const mixedQuote = await db.prepare('SELECT * FROM quotes WHERE id = ?').get(id);
+      require('../services/mixedQuotation').calculateMixedQuote(mixedQuote, mixedSections, { strict: true });
+    } catch (e) { return res.status(400).json({ error: e.message }); }
+  }
   await db.prepare(`
     INSERT INTO quote_customer_confirmations
       (quote_id, status, workshops_json, confirmed_price, confirmed_qty, note, confirmed_by, confirmed_at, updated_at)

@@ -81,7 +81,9 @@ router.get('/:id/export-department/:dept', async (req, res) => {
 
   try {
     let wb;
-    if (dept === 'sewing') {
+    if (require('../services/mixedQuotation').getConfig(sections)?.enabled) {
+      wb = await require('../services/exportMixedQuotation').buildMixedWorkbook({ quote, sections, dept });
+    } else if (dept === 'sewing') {
       wb = await buildSewingTemplateWorkbook({ quote, sections });
     } else {
       wb = await buildWorkbook({ quote, sections });

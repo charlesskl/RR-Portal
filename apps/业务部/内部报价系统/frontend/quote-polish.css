@@ -1,0 +1,48 @@
+/* Quotation workspace: compact, consistent surfaces and readable cost grids. */
+body{background:#f2f5f9;color:#243247;-webkit-font-smoothing:antialiased}
+.topbar{background:#183553;padding:12px 24px;box-shadow:none;gap:16px}
+.topbar .brand{font-size:16px;letter-spacing:0}.topbar .brand small{font-size:12px}
+#app{max-width:1800px;padding:22px 24px 40px}#app>h1{font-size:24px;letter-spacing:-.5px;margin-bottom:10px}
+#status-bar{gap:6px;margin-bottom:18px}#status-bar .badge{font-size:11px;padding:4px 9px;border:1px solid #e0e6ed;background:#fff;color:#64748b}
+.card{border-color:#dfe6ee;border-radius:12px;padding:20px;margin:14px 0;box-shadow:0 2px 6px #20354f04}
+h2{font-size:18px;color:#1f3650;margin-bottom:14px}h3{font-size:15px;color:#263d57;margin:18px 0 10px}p{line-height:1.65}.muted{color:#6b7c90;font-size:12px}
+.dept-tabs{padding:5px;gap:3px;border-color:#dfe6ee;border-radius:10px;box-shadow:0 2px 8px #16324f08;flex-wrap:nowrap;overflow-x:auto;scrollbar-width:thin}
+.dept-tab{padding:9px 13px;font-size:13px;flex-shrink:0;border-radius:7px;white-space:nowrap;color:#5b6e84}
+.dept-tab.active{background:#e9f0fb;color:#2059a2;box-shadow:inset 0 -2px #3973bd}.dept-tab.active .badge{background:#d8e6f8;color:#2059a2}.dept-tab .badge{font-size:10px;padding:2px 6px}
+button{border-radius:7px;font-size:12px;padding:8px 13px;box-shadow:none}button:disabled{opacity:.55}button:focus-visible,summary:focus-visible{outline:3px solid #a8c8f2;outline-offset:2px}
+input,select,textarea{border-color:#d6dfea;border-radius:6px;font-size:13px;padding:7px 9px}input[type=number]{font-variant-numeric:tabular-nums}
+.mixed-switch,.mixed-config,.mixed-mold-card{background:#f8fafc;border:1px solid #dfe6ee;border-radius:8px;padding:12px 14px;margin:12px 0;gap:10px}
+.mixed-switch{border-left:3px solid #527eb7}.mixed-switch select{min-width:240px;max-width:100%}.mixed-tag{background:#e7effa;color:#375f93;font-size:11px;padding:3px 7px;margin-right:4px}
+.mixed-help{font-size:12px;color:#738197;line-height:1.6}.mixed-fields{gap:10px 16px}.mixed-fields label{font-size:12px;min-width:160px;margin:3px 0}
+.mixed-note,.mixed-injection-allocation{padding:10px 14px;font-size:12px;background:#f3f7fc;color:#436284;border:1px solid #e0e9f5;border-radius:8px}
+.mixed-scroll{border:1px solid #dce4ed;border-radius:8px;margin:12px 0;scrollbar-width:thin;scrollbar-color:#bdc9d7 #f1f5f9}
+.mixed-scroll table{font-size:12px}.mixed-scroll th,.mixed-scroll td{padding:9px 11px;border-right:1px solid #e1e7ee;border-bottom:1px solid #e1e7ee;line-height:1.5}.mixed-scroll th:last-child,.mixed-scroll td:last-child{border-right:0}
+.mixed-scroll thead th{background:#edf2f8;color:#405773;font-weight:600}.mixed-scroll tbody tr:last-child td{border-bottom:0}.mixed-scroll tbody td{font-variant-numeric:tabular-nums}
+.mixed-cost-matrix{max-height:62vh}.mixed-cost-matrix thead th{background:#edf2f8}.mixed-cost-matrix tbody th{color:#284c75;min-width:80px;border-right:1px solid #e1e7ee}
+.mixed-cost-matrix .mixed-cost-total{background:#f5f7fa;color:#233f60}.mixed-cost-matrix .mixed-average-row td,.mixed-cost-matrix .mixed-average-row th{background:#f0f4f9;border-top:2px solid #b9c9dc}.mixed-cost-matrix .mixed-common-row{border-top:2px solid #b9c9dc}
+.mixed-totals{gap:12px;margin:18px 0}.mixed-totals>div{background:#fff;border:1px solid #dce5ef;border-radius:9px;padding:14px 16px;gap:6px}.mixed-totals strong{font-size:25px;letter-spacing:-.4px;color:#203e61}.mixed-totals span{font-size:12px;color:#6a7d93}.mixed-totals>div:last-child{background:#edf4fc;border-color:#bfd3ec;color:#234f85}.mixed-totals>div:last-child strong{color:#205797}.mixed-totals>div:last-child span{color:#476e9b}
+[data-mixed-shipping]{margin-top:24px}[data-mixed-shipping] .mixed-scroll{max-width:1000px}[data-mixed-shipping] td:first-child{width:310px}[data-mixed-shipping] td:nth-child(2){text-align:right;font-weight:600;color:#254a75;min-width:135px}[data-mixed-shipping] td:last-child{color:#728196;font-size:11px}[data-mixed-shipping] tbody tr:last-child{background:#eff5fc}[data-mixed-shipping] input{margin-left:6px;text-align:right}
+.mixed-pricing-detail{margin:18px 0;border:1px solid #dfe6ee;border-radius:8px;padding:11px 14px}.mixed-pricing-detail summary{cursor:pointer;font-size:13px;color:#416184;font-weight:600}.mixed-tax-summary{margin-top:24px;padding-top:14px;border-top:1px solid #e0e7ef}.mixed-tax-summary h2{font-size:17px}
+.mixed-tax-summary .tk-table th,.mixed-tax-summary .tk-table td{border-color:#dfe6ee;padding:8px!important;background:#fff!important;color:#405773!important}.mixed-tax-summary .tk-table th{background:#edf2f8!important}.mixed-tax-summary .tk-title{font-size:13px;color:#426080}.mixed-tax-summary .tk-readout{min-width:64px}.mixed-tax-summary .tk-sum{font-weight:700}
+.wb-table thead th{padding:9px 10px;border-right:1px solid #e3e9f0;border-bottom:1px solid #cad6e4}.wb-table tbody td{padding:7px 9px;border-right:1px solid #e3e9f0;border-bottom:1px solid #e3e9f0;font-size:12px}.wb-table tbody tr:last-child td{border-bottom:1px solid #e3e9f0}.wb-table{border:1px solid #dce4ed}.wb-table td:last-child,.wb-table th:last-child{border-right:0}
+.mixed-upload-card{box-shadow:none}.mixed-upload-card h3{margin:0;font-size:14px}
+@media(max-width:800px){#app{padding:16px 12px 28px}.topbar{padding:11px 14px;flex-wrap:wrap}.topbar .brand small{display:none}.card{padding:14px}.mixed-totals{grid-template-columns:repeat(3,minmax(0,1fr));gap:7px}.mixed-totals>div{padding:11px}.mixed-totals strong{font-size:20px}.mixed-switch select{min-width:180px}.dept-tab{padding:8px 10px}.mixed-scroll th,.mixed-scroll td{padding:8px}}
+@media(max-width:480px){.mixed-totals{grid-template-columns:1fr}.topbar #user-chip{flex-wrap:wrap;font-size:11px!important}.mixed-switch select{width:100%}}
+@media(max-width:800px){.dept-tabs{flex-wrap:wrap;overflow:visible}.dept-tab{padding:7px 9px;font-size:12px}.dept-tab .badge{font-size:9px}}
+
+/* Compact mold import toolbar. */
+.mixed-upload-card { gap: 5px 12px; padding: 8px 12px; margin: 8px 0 12px; border-radius: 7px; }
+.mixed-upload-card .mixed-upload-top { gap: 12px; }
+.mixed-upload-card .mixed-upload-title { gap: 7px; }
+.mixed-upload-card .mixed-upload-icon { width: 24px; height: 24px; border-radius: 5px; }
+.mixed-upload-card .mixed-upload-icon svg { width: 16px; height: 16px; }
+.mixed-upload-card h3 { font-size: 12px; line-height: 1.4; margin: 0; }
+.mixed-upload-card .mixed-upload-button { min-height: 0; padding: 4px 9px; font-size: 11px; line-height: 18px; gap: 4px; }
+.mixed-upload-card .mixed-upload-button svg { width: 14px; height: 14px; }
+.mixed-upload-card .mixed-upload-meta { font-size: 11px; gap: 5px; }
+.mixed-upload-card .mixed-upload-format { font-size: 9px; padding: 2px 4px; }
+.mixed-upload-card .mixed-upload-footnote { flex-basis: auto; margin: 0; font-size: 10px; line-height: 1.4; }
+@media (max-width: 640px) {
+  .mixed-upload-card .mixed-upload-meta,
+  .mixed-upload-card .mixed-upload-footnote { margin-left: 31px; }
+}

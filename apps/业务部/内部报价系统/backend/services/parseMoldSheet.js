@@ -27,8 +27,9 @@ const FIELD_KEYWORDS = {
   product_size:   ['产品尺寸'],
   machine:        ['机型(TON)', '机台大小', 'INJECTIONMACHINETYPE', '机型'],
   weight:         ['净重', '重量', '料重', '克重', '零件重量', '零件重', 'PARTWEIGHT'],
+  daily_capacity: ['预计产品日产能', '日产能', 'DAILYCAP', 'PCS/DAY'],
   cycle:          ['周期', 'CYCLETIME', 'CYCLE'],   // 注塑生产周期(秒)
-  target:         ['模具预计日啤数', '日产能', '目标数', 'CYCLES/DAY', 'CYCLESDAY'],
+  target:         ['模具预计日啤数', '目标数', 'CYCLES/DAY', 'CYCLESDAY'],
   shot_price:     ['啤工价', '啤工', '啤价HK$/啤', '啤价'],
   structure:      ['滑块', '斜顶', '模具结构', '加工内容', 'SLIDE', '行位'],
   price_hkd:      ['模价HKD', 'HKD模价', '港币模价', '模价港币'],
@@ -415,6 +416,7 @@ function tryParseSheet(wb, sheetName) {
     }
     const cyc = parseNumber(cell(r, 'cycle')); if (cyc != null && current.cycle == null) current.cycle = cyc;
     const machine = normalizeMachine(cell(r, 'machine'), machineHeader); if (machine && !current.machine) current.machine = machine;
+    const capacity = parseNumber(cell(r, 'daily_capacity')); if (capacity != null && current.daily_capacity == null) current.daily_capacity = capacity;
     const target = parseNumber(cell(r, 'target')); if (target != null && current.target == null) current.target = target;
     const shotPrice = parseNumber(cell(r, 'shot_price')); if (shotPrice != null && current.shot_price == null) current.shot_price = shotPrice;
     const mm = cell(r, 'mold_material'); if (mm && !current.mold_material) current.mold_material = mm;
@@ -477,6 +479,7 @@ function tryParseSheet(wb, sheetName) {
       machine: g.machine,
       machine_model: machineTonToModel(g.machine, machineHeader),
       target: g.target,
+      daily_capacity: g.daily_capacity,
       shot_price: g.shot_price,
       price_rmb: g.price_rmb,
       price_usd: g.price_usd,
@@ -525,6 +528,8 @@ function buildPartDetailMolds(dataRows, cell, machineHeader = '') {
     if (setsCell != null) state.sets = setsCell;
     const cycleCell = parseNumber(cell(r, 'cycle'));
     if (cycleCell != null) state.cycle = cycleCell;
+    const capacityCell = parseNumber(cell(r, 'daily_capacity'));
+    if (capacityCell != null) state.daily_capacity = capacityCell;
     const targetCell = parseNumber(cell(r, 'target'));
     if (targetCell != null) state.target = targetCell;
     const shotPriceCell = parseNumber(cell(r, 'shot_price'));
@@ -564,6 +569,7 @@ function buildPartDetailMolds(dataRows, cell, machineHeader = '') {
         mold_size: moldSize,
         machine,
         target: state.target ?? null,
+        daily_capacity: state.daily_capacity ?? null,
         shot_price: state.shot_price ?? null,
         parent_name: groupName,
         parts: [],
@@ -629,10 +635,12 @@ function buildPartDetailMolds(dataRows, cell, machineHeader = '') {
         machine: g.machine,
         machine_model: machineModel,
         target: g.target,
+      daily_capacity: g.daily_capacity,
       },
       machine: g.machine,
       machine_model: machineModel,
       target: g.target,
+      daily_capacity: g.daily_capacity,
       shot_price: g.shot_price,
       note: [...new Set(g.notes)].join('；'),
       _rows: [g.rowStart, g.rowEnd],

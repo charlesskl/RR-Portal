@@ -5,6 +5,7 @@ const { expandEngineeringMolds } = require('../services/engineeringMolds');
 
 const router = express.Router();
 router.use(requireAuth);
+router.use(require('./mixedQuotes'));
 
 const DEPT_CODES = ['sales', 'engineering', 'electronic', 'molding', 'painting', 'slush', 'sewing', 'assembly'];
 
@@ -121,6 +122,12 @@ router.post('/', async (req, res) => {
     const id = info.lastInsertRowid;
     const ins = db.prepare(`INSERT INTO quote_sections (quote_id, dept) VALUES (?, ?)`);
     for (const d of DEPT_CODES) await ins.run(id, d);
+    if (req.body.quote_type === 'mixed') {
+      const mixed_quote = { enabled: true, version: 1, mode: 'equal', units_per_pack: 1,
+        products: [{ id: 'p1', code: 'P1', name: '小产品 1', ratio: 1 }, { id: 'p2', code: 'P2', name: '小产品 2', ratio: 1 }] };
+      await db.prepare("UPDATE quote_sections SET payload_json = ? WHERE quote_id = ? AND dept = 'sales'")
+        .run(JSON.stringify({ mixed_quote }), id);
+    }
     await db.prepare(`INSERT INTO audit_log (quote_id, dept, actor, action) VALUES (?, ?, ?, 'create')`)
       .run(id, req.user.dept, req.user.name);
     return id;
@@ -149,6 +156,13 @@ router.post('/:id/clone', async (req, res) => {
   if (acc.status !== 200) return res.status(acc.status).json({ error: acc.status === 404 ? '源报价单不存在' : '无权复制其他厂区的报价单' });
   const src = await db.prepare('SELECT * FROM quotes WHERE id = ? AND deleted_at IS NULL').get(srcId);
   if (!src) return res.status(404).json({ error: '源报价单不存在' });
+  const clonedCustomer = String(customer != null ? customer : src.customer || '').trim();
+  if (!clonedCustomer) return res.status(400).json({ error: '客户不能为空' });
+  if (req.user.role !== 'admin') {
+    const allowedCustomer = await db.prepare('SELECT 1 FROM user_customers WHERE user_id = ? AND customer = ?')
+      .get(req.user.id, clonedCustomer);
+    if (!allowedCustomer) return res.status(403).json({ error: '该客户不在当前账号的授权范围内' });
+  }
 
   const tx = db.transaction(async () => {
     const info = await db.prepare(`
@@ -157,7 +171,7 @@ router.post('/:id/clone', async (req, res) => {
     `).run(
       quote_no,
       product_name || src.product_name,
-      customer != null ? customer : src.customer,
+      clonedCustomer,
       qty != null ? qty : src.qty,
       version != null ? version : src.version,
       req.user.name,
@@ -170,11 +184,6 @@ router.post('/:id/clone', async (req, res) => {
     for (const s of srcSecs) await ins.run(newId, s.dept, s.payload_json || '{}');
     await db.prepare(`INSERT INTO audit_log (quote_id, dept, actor, action, detail) VALUES (?, 'sales', ?, 'clone', ?)`)
       .run(newId, req.user.name, `from #${srcId} (${src.quote_no})`);
-    const clonedCustomer = customer != null ? customer : src.customer;
-    if (clonedCustomer && req.user.role !== 'admin') {
-      await db.prepare('INSERT INTO user_customers (user_id, customer) VALUES (?, ?) ON CONFLICT DO NOTHING')
-        .run(req.user.id, clonedCustomer);
-    }
     return newId;
   });
 
@@ -299,7 +308,15 @@ router.get('/:id', async (req, res) => {
     } catch {}
   }
 
-  res.json({ quote, sections: filtered, engineering_molds });
+  const mixed_quote = require('../services/mixedQuotation').getConfig(sections);
+  const salesHeader = JSON.parse(sections.find(s => s.dept === 'sales')?.payload_json || '{}').header || {};
+  const quotation_rates = { fx_rmb_hkd: salesHeader.fx_rmb_hkd ?? .85, fx_hkd_usd: salesHeader.fx_hkd_usd ?? 7.8 };
+  const engPayload = JSON.parse(engSection?.payload_json || '{}');
+  const mixed_engineering_molds = mixed_quote?.enabled ? Object.fromEntries([
+    ...mixed_quote.products.map(p => [p.id, expandEngineeringMolds(engPayload.mixed_products?.[p.id]?.molds)]),
+    ['__shared__', expandEngineeringMolds(engPayload.mixed_shared?.molds)],
+  ]) : {};
+  res.json({ quote, sections: filtered, engineering_molds, mixed_quote, mixed_engineering_molds, quotation_rates });
 });
 
 // GET /api/quotes/:id/audit-log  返回该报价单全部动作时间线（最新在前）

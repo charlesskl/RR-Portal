@@ -1,0 +1,46 @@
+.mixed-config,.mixed-switch,.mixed-mold-card{border:1px solid #cbd5e1;border-radius:10px;padding:18px;margin:14px 0;background:#f8fafc}
+.mixed-switch{border-left:4px solid #2563eb;display:flex;flex-wrap:wrap;align-items:center;gap:12px}.mixed-switch select{min-width:280px;max-width:100%}.mixed-help{flex-basis:100%;margin:0}.mixed-tag{background:#dbeafe;color:#1e40af;border-radius:5px;padding:4px 8px;margin-right:12px;font-size:12px}
+.mixed-fields{display:flex;flex-wrap:wrap;align-items:end;gap:14px;margin:12px 0}.mixed-fields label{display:grid;gap:6px;min-width:170px}.mixed-fields input{max-width:250px}.mixed-scroll{overflow-x:auto;margin:14px 0}.mixed-scroll table{width:100%;border-collapse:collapse}.mixed-scroll th,.mixed-scroll td{padding:10px;border-bottom:1px solid #dbe3ed;text-align:left;white-space:nowrap}.mixed-scroll th{background:#e8eef7;color:#163253}.mixed-scroll input{min-width:80px;width:100%;max-width:220px}.mixed-scroll select{min-width:150px}
+.mixed-error{background:#fff1f2;color:#9f1239;padding:12px;border-radius:8px}.mixed-note{background:#eff6ff;color:#1e40af;padding:12px;border-radius:8px}.mixed-totals{display:grid;grid-template-columns:repeat(3,minmax(180px,1fr));gap:16px;margin:22px 0}.mixed-totals>div{background:#edf2f8;border-radius:10px;padding:18px;display:grid;gap:12px}.mixed-totals>div:last-child{background:#143863;color:white}.mixed-totals strong{font-size:30px;font-variant-numeric:tabular-nums}.mixed-totals span{font-size:13px}.mixed-component-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px}.mixed-component-grid span{display:flex;justify-content:space-between;padding:10px;background:#f8fafc}.mixed-summary-table td:nth-child(n+3){text-align:right;font-variant-numeric:tabular-nums}
+@media(max-width:760px){.mixed-totals{grid-template-columns:1fr}.mixed-fields label{width:100%}}
+.mixed-injection-allocation{border:1px solid #bfdbfe;border-radius:10px;padding:16px;margin:16px 0;background:#f8fbff}.mixed-injection-allocation h4{margin:0;display:flex;align-items:center;flex-wrap:wrap;gap:12px}.mixed-injection-allocation p{margin:8px 0 0}.mixed-injection-allocation .mixed-scroll{margin:12px 0}.mixed-injection-allocation small{color:#64748b}.mixed-injection-allocation td:last-child{color:#1d4ed8;font-variant-numeric:tabular-nums}
+
+.mixed-cost-matrix{max-height:70vh;border:1px solid #cbd5e1;border-radius:8px}.mixed-cost-matrix table{font-size:13px}.mixed-cost-matrix thead th{position:sticky;top:0;z-index:2;background:#dbe7f5}.mixed-cost-matrix tbody th{position:sticky;left:0;background:#fff;z-index:1;min-width:95px}.mixed-cost-matrix td:nth-child(n+3){text-align:right;font-variant-numeric:tabular-nums}.mixed-cost-matrix .mixed-cost-total{font-weight:700;background:#edf2f8}.mixed-cost-matrix .mixed-common-row{border-top:3px solid #94a3b8}.mixed-cost-matrix tbody tr:hover td{background:#eef6ff}
+
+/* Compact mold quotation upload toolbar. */
+.mixed-upload-card{display:flex;align-items:center;flex-wrap:wrap;gap:8px 18px;margin:12px 0 18px;padding:12px 16px;border:1px solid #dce4ef;border-radius:9px;background:#fff;color:#24334a}
+.mixed-upload-top{display:flex;align-items:center;gap:18px}.mixed-upload-title{display:flex;align-items:center;gap:9px;min-width:0}.mixed-upload-icon{display:grid;place-items:center;flex-shrink:0;width:32px;height:32px;border-radius:7px;color:#2563eb;background:#edf4ff}.mixed-upload-icon svg{width:19px;height:19px}.mixed-upload-card h3{font-size:14px;line-height:1.5;margin:0;font-weight:650}.mixed-upload-title p,.mixed-upload-steps{display:none}
+.mixed-upload-button{position:relative;display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:7px 12px;background:#2563eb;border:1px solid #2563eb;border-radius:6px;color:#fff;font-size:12px;font-weight:600;white-space:nowrap;cursor:pointer;overflow:hidden}.mixed-upload-button:hover{background:#1d4ed8}.mixed-upload-button:focus-within{outline:3px solid #bfdbfe;outline-offset:3px}.mixed-upload-button input[type=file]{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer;margin:0;max-width:none}
+.mixed-upload-meta{display:flex;align-items:center;gap:7px;margin:0;color:#718096;font-size:12px;min-width:0;max-width:350px}.mixed-upload-meta [data-file-name]{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.mixed-upload-format{background:#f1f5f9;border-radius:4px;padding:3px 6px;color:#53657c;font-size:10px;font-weight:600;white-space:nowrap}.mixed-upload-footnote{flex-basis:100%;margin:0 0 0 41px;font-size:11px;color:#8793a5;line-height:1.5}.mixed-upload-card [data-preview]:empty{display:none}.mixed-upload-card [data-preview]:not(:empty){flex-basis:100%;min-width:0;margin-top:6px;padding-top:12px;border-top:1px solid #edf1f6}.mixed-upload-card [data-preview] button{margin-right:8px}
+@media(max-width:640px){.mixed-upload-card{padding:10px 12px;gap:8px}.mixed-upload-top{flex-wrap:wrap;gap:10px}.mixed-upload-meta{max-width:100%;margin-left:41px}.mixed-upload-footnote{margin-left:41px}}
+
+.mixed-cost-matrix .mixed-average-row th,.mixed-cost-matrix .mixed-average-row td{border-top:1px solid #94a3b8;font-weight:600;background:#f8fafc}.mixed-average-row td:nth-child(2){min-width:180px}
+
+/* Compact row actions for the engineering mold editor. */
+.mixed-mold-actions { width: 112px; min-width: 112px; padding: 6px 10px !important; }
+.mixed-mold-action-buttons { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+.mixed-mold-action-buttons button { min-width: 0; min-height: 28px; margin: 0; padding: 4px 8px; border: 1px solid #d4dfeb; border-radius: 5px; background: #f4f7fb; color: #315d89; font-size: 12px; line-height: 18px; font-weight: 500; box-shadow: none; }
+.mixed-mold-action-buttons button:hover { background: #e7eff8; border-color: #9db8d4; }
+.mixed-mold-action-buttons button[data-remove] { color: #bc3b3b; background: transparent; border-color: transparent; }
+.mixed-mold-action-buttons button[data-remove]:hover { background: #fff0f0; border-color: #efcaca; }
+.mixed-mold-action-buttons button:focus-visible { outline: 2px solid #4a80bc; outline-offset: 2px; }
+
+/* Machine setup columns. */
+table[aria-label="统一零件编辑"] th.mixed-machine-column { background: #fff0bf; color: #87541d; }
+table[aria-label="统一零件编辑"] td.mixed-machine-column { background: #fffaeb; }
+table[aria-label="统一零件编辑"] td.mixed-machine-column input { border-color: #e5d5a8; }
+
+/* Keep the NA average, common costs and their sum visually distinct. */
+.mixed-cost-matrix .mixed-na-average-row > th,.mixed-cost-matrix .mixed-na-average-row > td{background:#e8f2ff;color:#1e4975}
+.mixed-cost-matrix .mixed-common-row > th,.mixed-cost-matrix .mixed-common-row > td{background:#fff5dc;color:#75531e}
+.mixed-cost-matrix .mixed-combined-row > th,.mixed-cost-matrix .mixed-combined-row > td{background:#e4f4ea;color:#165a38;font-weight:700;border-top:2px solid #86b99a}
+
+.ship-table .mixed-usd-subtotal > td{background:#dcebf7;color:#245378;font-weight:700}
+.ship-table .mixed-surtax-row > td{background:#fff3cd;color:#856000;font-weight:700}
+.mixed-ship-foot{display:flex;align-items:center;flex-wrap:wrap;gap:16px;margin:16px 0}
+.mixed-ship-foot label{display:flex;align-items:center;gap:8px}
+
+/* Keep the part name visible while scrolling the injection catalog horizontally. */
+.mixed-scroll table[aria-label="统一零件编辑"] [data-catalog-cell="name"],
+.mixed-scroll table[aria-label="统一零件编辑"] [data-catalog-header="name"]{position:sticky;left:0;z-index:2;background:#fff;box-shadow:2px 0 0 #dbe3ed}
+.mixed-scroll table[aria-label="统一零件编辑"] [data-catalog-header="name"]{z-index:3;background:#e8eef7}

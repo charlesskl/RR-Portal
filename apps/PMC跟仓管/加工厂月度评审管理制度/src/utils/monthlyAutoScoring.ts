@@ -33,6 +33,10 @@ export function isAutoScoreModule(module: ScoreModule): boolean {
   return AUTO_MODULES.has(module)
 }
 
+export function defaultScoreItem(template: ScoreTemplate): ScoreItem {
+  return { template_id: template.id, score: template.module === 'cooperation' ? 10 : 0, notes: '' }
+}
+
 export function recordMonth(value?: string): string {
   return text(value).slice(0, 7)
 }
@@ -186,7 +190,7 @@ export function mergeAutomaticScores(
 ): ScoreItem[] {
   const existing = new Map(existingItems.map((item) => [item.template_id, item]))
   return templates.map((template) => {
-    const current = existing.get(template.id) ?? { template_id: template.id, score: 0, notes: '' }
+    const current = existing.get(template.id) ?? defaultScoreItem(template)
     const automatic = calculateAutoScore(template.module, template.max_score, factory, data)
     return automatic ? { template_id: template.id, ...automatic } : current
   })

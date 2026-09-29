@@ -1,3 +1,4 @@
+import { summarizeFactoryScores } from './scoringDateRange'
 import type { Factory } from '../types/factory'
 import type { MonthlyScore } from '../types/score'
 import type { MonthlyOutput } from '../types/output'
@@ -7,8 +8,16 @@ import type { Craft } from '../constants/roles'
 export function summarizeByCraft(
   factories: Factory[], scores: MonthlyScore[], outputs: MonthlyOutput[],
 ): Record<Craft, CraftSummary> {
-  const scoreByFactory = new Map(scores.map((s) => [s.factory, s]))
-  const outputByFactory = new Map(outputs.map((o) => [o.factory, o]))
+  const scoresByFactory = new Map<string, MonthlyScore[]>()
+  for (const score of scores) {
+    const group = scoresByFactory.get(score.factory) ?? []
+    group.push(score)
+    scoresByFactory.set(score.factory, group)
+  }
+  const outputByFactory = new Map<string, number>()
+  for (const output of outputs) {
+    outputByFactory.set(output.factory, (outputByFactory.get(output.factory) ?? 0) + (output.monthly_amount ?? 0))
+  }
   const result = {} as Record<Craft, CraftSummary>
 
   for (const f of factories) {
@@ -18,9 +27,11 @@ export function summarizeByCraft(
     }
     const bucket = result[c]
     bucket.factory_count++
-    const s = scoreByFactory.get(f.id)
+    const records = scoresByFactory.get(f.id) ?? []
+    const period = records.length > 1 ? summarizeFactoryScores(records) : undefined
+    const s = period ? { grade: period.grade, total_score: period.totalScore } : records[0]
     if (s?.grade) bucket.grade_dist[s.grade]++
-    bucket.total_output += outputByFactory.get(f.id)?.monthly_amount ?? 0
+    bucket.total_output += outputByFactory.get(f.id) ?? 0
     bucket.avg_score += s?.total_score ?? 0
   }
   for (const c of Object.keys(result) as Craft[]) {

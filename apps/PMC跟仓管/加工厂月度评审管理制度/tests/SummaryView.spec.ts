@@ -20,8 +20,8 @@ vi.mock('../src/stores/orders', () => ({ useOrdersStore: () => ({
 }) }))
 vi.mock('../src/pb', () => ({ pb: { collection: (name: string) => ({ getFullList: vi.fn(async () =>
   name === 'monthly_scores' ? [
-    { factory: 'factory-1', year_month: '2026-09', grade: 'A' },
-    { factory: 'factory-1', year_month: '2026-08', grade: 'B' },
+    { factory: 'factory-1', year_month: '2026-09', grade: 'D', total_score: 0, score_items: [{ template_id: 'score', score: 90 }] },
+    { factory: 'factory-1', year_month: '2026-08', grade: 'D', total_score: 0, score_items: [{ template_id: 'score', score: 70 }] },
   ] : [
     { factory: 'factory-1', inspect_date: '2026-08-01', internal_result: 'PASS' },
     { factory: 'factory-1', inspect_date: '2026-08-31', internal_result: 'FAIL' },
@@ -37,7 +37,7 @@ describe('汇总表时间筛选', () => {
     await flushPromises()
     const cells = () => wrapper.findAll('tbody tr')[0].findAll('td').map((cell) => cell.text())
     expect(cells()[13]).toBe('4')
-    expect(cells()[21]).toBe('A')
+    expect(cells()[21]).toBe('B')
 
     await wrapper.get('[aria-label="汇总时间筛选方式"]').setValue('month')
     await wrapper.get('[aria-label="汇总月份"]').setValue('2026-08')
@@ -64,7 +64,13 @@ describe('汇总表时间筛选', () => {
     expect(cells()[13]).toBe('2')
     expect(cells()[14]).toBe('0')
     expect(cells()[17]).toBe('2')
-    expect(cells()[21]).toBe('A')
+    expect(cells()[21]).toBe('B')
+
+    // 跨月平均分为 80（B），不采用最近月份 90（A）或滞后的已存等级 D。
+    await wrapper.findAll('button').find((button) => button.text() === '导出 Excel')!.trigger('click')
+    const rangeWorkbook = state.writeFile.mock.calls.at(-1)![0]
+    const rangeData = XLSX.utils.sheet_to_json(rangeWorkbook.Sheets['外发加工厂管理统计表'], { header: 1 }) as unknown[][]
+    expect(rangeData[4][21]).toBe('B')
 
     await wrapper.get('[aria-label="汇总开始日期"]').setValue('2026-10-01')
     await wrapper.get('[aria-label="汇总结束日期"]').setValue('2026-10-31')
@@ -73,7 +79,7 @@ describe('汇总表时间筛选', () => {
     expect(cells()[21]).toBe('-')
     await wrapper.findAll('button').find((button) => button.text() === '清除时间筛选')!.trigger('click')
     expect(cells()[13]).toBe('4')
-    expect(cells()[21]).toBe('A')
+    expect(cells()[21]).toBe('B')
     wrapper.unmount()
   })
 })

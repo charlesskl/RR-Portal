@@ -100,6 +100,8 @@ export default function Home() {
   const [recordError, setRecordError] = useState("");
   const [recordNotice, setRecordNotice] = useState("");
   const [historyTable, setHistoryTable] = useState(false);
+  const [historyFactory, setHistoryFactory] = useState("");
+  const [historyMachine, setHistoryMachine] = useState("");
   const [recordSaving, setRecordSaving] = useState(false);
 
   async function changeRecord(formData?: FormData) {
@@ -131,7 +133,16 @@ export default function Home() {
 
   const rows = useMemo(() => state?.equipment ?? [], [state]);
   const records = useMemo(() => state?.records ?? [], [state]);
-  const recordGroups = useMemo(() => summarizeRecords(records), [records]);
+  const historyFactories = [...new Set([...rows.map(row => row.factory), ...records.map(record => record.factory)])];
+  const historyMachines = [...new Set([
+    ...rows.filter(row => !historyFactory || row.factory === historyFactory).map(row => row.name),
+    ...records.filter(record => !historyFactory || record.factory === historyFactory).map(record => record.equipment),
+  ])];
+  const filteredRecords = useMemo(() => records.filter(record =>
+    (!historyFactory || record.factory === historyFactory) &&
+    (!historyMachine || record.equipment === historyMachine)
+  ), [records, historyFactory, historyMachine]);
+  const recordGroups = useMemo(() => summarizeRecords(filteredRecords), [filteredRecords]);
   const users = useMemo(() => state?.users ?? [], [state]);
 
   const visible = useMemo(
@@ -148,6 +159,7 @@ export default function Home() {
   );
   const total = visible.reduce((sum, r) => sum + r.investment, 0);
   const recovered = visible.reduce((sum, r) => sum + r.saved, 0);
+  const currentBalance = rows.reduce((sum, r) => sum + r.balance, 0);
 
   function run(action: Promise<AppState>, after?: () => void) {
     action
@@ -492,12 +504,12 @@ export default function Home() {
               </article>
               <article>
                 <div className="metric-icon jade">↗</div>
-                <p>已节省成本</p>
+                <p>当前结余</p>
                 <strong>
-                  {recovered.toFixed(1)}
+                  {currentBalance.toFixed(1)}
                   <em>万 HKD</em>
                 </strong>
-                <small>来自实际生产数</small>
+                <small>全部机器结余合计（不受筛选影响）</small>
               </article>
               <article>
                 <div className="metric-icon amber">◔</div>
@@ -823,7 +835,20 @@ export default function Home() {
           <section className="module-view">
             <div className="module-toolbar">
               <div>
-                <h2>更新记录</h2>
+                <div className="history-heading-filters">
+                  <h2>更新记录</h2>
+                  <select aria-label="按厂区筛选" value={historyFactory} onChange={(event) => {
+                    setHistoryFactory(event.target.value);
+                    setHistoryMachine("");
+                  }}>
+                    <option value="">全部厂区</option>
+                    {historyFactories.map(item => <option key={item} value={item}>{item}</option>)}
+                  </select>
+                  <select aria-label="按机器筛选" value={historyMachine} onChange={(event) => setHistoryMachine(event.target.value)}>
+                    <option value="">全部机器</option>
+                    {historyMachines.map(item => <option key={item} value={item}>{item}</option>)}
+                  </select>
+                </div>
                 <p>按厂区、机器、日期汇总产量，展开明细可编辑或删除</p>
               </div>
               <div className="module-actions history-view-actions">
@@ -837,14 +862,14 @@ export default function Home() {
             <div className="history-summary">
               <div>
                 <strong>{recordGroups.length}</strong>
-                <span>日汇总组数 · {records.length} 条上报</span>
+                <span>日汇总组数 · {filteredRecords.length} 条上报</span>
               </div>
               <div>
-                <strong>{new Set(records.map((r) => r.factory)).size}</strong>
+                <strong>{new Set(filteredRecords.map((r) => r.factory)).size}</strong>
                 <span>涉及厂区</span>
               </div>
               <div>
-                <strong>{records.reduce((s, r) => s + r.production, 0).toLocaleString()}</strong>
+                <strong>{filteredRecords.reduce((s, r) => s + r.production, 0).toLocaleString()}</strong>
                 <span>累计上报产量</span>
               </div>
             </div>

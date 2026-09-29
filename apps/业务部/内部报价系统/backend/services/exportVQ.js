@@ -1091,6 +1091,10 @@ function sectionsToData({ quote, sections }) {
 // ─── 对外入口 ────────────────────────────────────────────────────────────────
 
 async function exportVQ({ quote, sections }) {
+  if (require('./mixedQuotation').getConfig(sections)?.enabled) {
+    const wb = await require('./exportMixedQuotation').buildMixedWorkbook({ quote, sections, customerOnly: true });
+    return wb.xlsx.writeBuffer();
+  }
   const client = vqCustomerProfile(quote.customer);
   if (client === 'SPIN') {
     return exportSpin({ quote, sections });

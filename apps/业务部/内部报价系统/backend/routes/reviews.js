@@ -24,6 +24,15 @@ router.post('/:section_id', async (req, res) => {
   }
 
   const newStatus = action === 'approve' ? 'approved' : 'rejected';
+  if (action === 'approve') {
+    const all = await db.prepare('SELECT * FROM quote_sections WHERE quote_id = ?').all(sec.quote_id);
+    if (sec.dept === 'sales' || all.every(s => s.id === sec.id || s.status === 'approved')) {
+      try {
+        const quote = await db.prepare('SELECT * FROM quotes WHERE id = ?').get(sec.quote_id);
+        require('../services/mixedQuotation').calculateMixedQuote(quote, all, { strict: true });
+      } catch (e) { return res.status(400).json({ error: e.message }); }
+    }
+  }
   await db.prepare(`
     UPDATE quote_sections
     SET status = ?, reviewed_by = ?, reviewed_at = datetime('now'), review_comment = ?

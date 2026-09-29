@@ -1416,6 +1416,7 @@ function renderInjection(ws, row, payload, fxRH, refs) {
     ws.getCell(row, 9).value = (sp && num(r.sets) > 0 && num(r.target) > 0)
       ? { formula: `${+machinePrice.toFixed(2)}/J${row}/L${row}`, result: sp }
       : sp;
+    ws.getCell(row, 9).numFmt = '0.0000';
     ws.getCell(row, 10).value = r.sets ?? 1;
     ws.getCell(row, 11).value = r.machine_model || '';
     ws.getCell(row, 12).value = num(r.target);

@@ -1250,6 +1250,9 @@ function enhanceWorkbook(workbook, { quote, sections }) {
 }
 
 async function buildWorkbook(args) {
+  if (require('./mixedQuotation').getConfig(args.sections)?.enabled) {
+    return require('./exportMixedQuotation').buildMixedWorkbook(args);
+  }
   const workbook = await buildBaseWorkbook(adaptSurtaxForBase(args));
   return enhanceWorkbook(workbook, args);
 }

@@ -293,7 +293,7 @@ if ($('btn-create')) $('btn-create').onclick = async () => {
   if (!productName) { alert('请填写产品名称'); $('q-product').focus(); return; }
   if (!customer) { alert('请选择或填写客户'); $('q-customer').focus(); return; }
   try {
-    await api('/quotes', {
+    const created = await api('/quotes', {
       method: 'POST',
       body: JSON.stringify({
         quote_no: quoteNo,
@@ -301,8 +301,10 @@ if ($('btn-create')) $('btn-create').onclick = async () => {
         version: $('q-version').value.trim() || null,
         customer,
         qty: Number($('q-qty').value) || null,
+        quote_type: $('q-type')?.value || 'single',
       }),
     });
+    if ($('q-type')?.value === 'mixed') { location.href = './quote.html?id=' + created.id; return; }
     $('q-no').value = $('q-product').value = $('q-version').value = $('q-customer').value = $('q-qty').value = '';
     $('q-customer-clear')?.classList.add('hidden');
     await loadQuotes();

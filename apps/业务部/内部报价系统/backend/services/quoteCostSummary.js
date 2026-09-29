@@ -59,7 +59,7 @@ function sewingLaborToAdd(group) {
   return laborInItems > 0 ? 0 : num(group && group.labor_amount);
 }
 
-function calculateQuoteCosts(quote, sections) {
+function calculateSingleQuoteCosts(quote, sections) {
   const payloads = parseSections(sections);
   const eng = payloads.engineering || {};
   const mold = payloads.molding || {};
@@ -191,7 +191,14 @@ function calculateQuoteCosts(quote, sections) {
   const sewingMarkup = hasValue(sales.shipping, 'sew_markup_x') ? num(sales.shipping.sew_markup_x) : markup;
   const electronicMarkup = hasValue(sales.shipping, 'elec_markup_x') ? num(sales.shipping.elec_markup_x) : markup;
   const quotedPrice = (mainBase + freight + cabinet) * markup + (sewingHair + sewingCloth) * sewingMarkup + electronicTotal * electronicMarkup;
-  return { components, quotedPrice: hasSourceData ? +quotedPrice.toFixed(4) : 0, hasSourceData };
+  return { components, quotedPrice: hasSourceData ? +quotedPrice.toFixed(4) : 0, hasSourceData,
+    rawQuotedPrice: hasSourceData ? quotedPrice : 0 };
 }
 
-module.exports = { calculateQuoteCosts };
+function calculateQuoteCosts(quote, sections) {
+  if (parseSections(sections).sales?.mixed_quote?.enabled) {
+    return require('./mixedQuotation').calculateMixedQuote(quote, sections);
+  }
+  return calculateSingleQuoteCosts(quote, sections);
+}
+module.exports = { calculateQuoteCosts, calculateSingleQuoteCosts };

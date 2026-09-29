@@ -44,7 +44,7 @@ const DEPT_MENU = {
 
 async function api(p, opts = {}) {
   const r = await fetch('/api' + p, { credentials: 'include', headers: { 'Content-Type': 'application/json' }, ...opts });
-  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.statusText);
+  if (!r.ok) { const error = new Error((await r.json().catch(() => ({}))).error || r.statusText); error.status = r.status; throw error; }
   return r.json();
 }
 
@@ -107,7 +107,7 @@ function requestUnsavedAction(deptName) {
   });
 }
 
-// 保存 section（带轻量并发提醒）：带上加载时的 filled_at；后端若发现被别人改过会回 conflict
+// 保存时携带版本；后端拒绝覆盖已被其他窗口更新的资料。
 // 不挡保存，仅弹一次提示；成功后更新本地 filled_at 作为新基线（避免自己的后续保存误报）
 async function putSection(sec, payload, submit) {
   const r = await api('/sections/' + sec.id, {
@@ -2703,6 +2703,7 @@ function renderEngineering(host, payload, canEdit, onChange, fxRmbHkd, fxHkdUsd,
     </h3>
     <div id="mold-sheet-preview"></div>
     <div id="wb-molds"></div>
+    <div id="wb-molds-shared"></div>
 
     <h3>生产模具费用</h3>
     <div id="wb-mold-costs"></div>
@@ -2738,6 +2739,7 @@ function renderEngineering(host, payload, canEdit, onChange, fxRmbHkd, fxHkdUsd,
   `;
 
   renderMolds(host.querySelector('#wb-molds'), payload.molds, onChange, canEdit, fxRmbHkd, fxHkdUsd);
+  window.MixedQuotation?.renderEngineeringSharedMolds(host.querySelector('#wb-molds-shared'), payload);
   renderMoldCosts(host.querySelector('#wb-mold-costs'), payload.mold_costs, onChange, canEdit);
 
   // 上传模具报价单 → 解析 → 预览 → 应用
@@ -3402,28 +3404,25 @@ function lookupMachinePrice(model, prices) {
 }
 
 // 啤机部料价表默认值（HK$/Lb，2026 年）
-const DEFAULT_MATERIAL_PRICES = [
-  { name: 'ABS', model: '750SW', price: 8.50 },
-  { name: 'ABS', model: '抽粒料', price: 4.60 },
-  { name: '透明ABS', model: 'TR558/920', price: 12.50 },
-  { name: 'HIPS', model: 'HI425', price: 7.80 },
-  { name: 'GP', model: 'MW-1', price: 7.80 },
-  { name: '1#PP', model: 'JM350/K8009', price: 6.80 },
-  { name: '1#PP', model: '7032 E3', price: 6.80 },
-  { name: '透明PP', model: '5090T', price: 7.80 },
-  { name: 'POM', model: 'F3003/M9044', price: 16.50 },
-  { name: 'POM', model: 'PM820/DM220', price: 21.50 },
-  { name: 'PVC', model: '普通透明', price: 9.00 },
-  { name: 'PVC', model: '普通本白', price: 8.00 },
-  { name: 'LDPE', model: 'G812', price: 7.80 },
-  { name: 'HDPE', model: 'HMA016', price: 8.00 },
-  { name: 'TPR', model: '本白橡胶料', price: 15.00 },
-  { name: 'TPR', model: '透明橡胶料', price: 17.00 },
-  { name: 'K料', model: 'KR-03NW', price: 15.00 },
-  { name: 'PC料', model: '2605', price: 12.50 },
+const DEFAULT_MATERIAL_PRICES = window.MixedMolds?.DEFAULT_MATERIAL_PRICES || [
+  { name: 'ABS', model: '750SW', price: 6.50 },
+  { name: '透明ABS', model: 'TR558/920', price: 10.00 },
+  { name: 'HIPS', model: 'HI425', price: 6.00 },
+  { name: 'GP', model: 'MW-1', price: 6.80 },
+  { name: '1#PP', model: 'JM350/K8009', price: 5.80 },
+  { name: '1#PP', model: '7032 E3', price: 5.80 },
+  { name: '透明PP', model: '5090T', price: 6.50 },
+  { name: 'POM', model: 'F3003/M9044', price: 13.50 },
+  { name: 'POM', model: 'PM820/DM220', price: 18.00 },
+  { name: 'PVC', model: '普通透明', price: 7.20 },
+  { name: 'PVC', model: '普通本白', price: 6.20 },
+  { name: 'LDPE', model: 'G812', price: 6.50 },
+  { name: 'HDPE', model: 'HMA016', price: 6.90 },
+  { name: 'TPR', model: '本白橡胶料', price: 13.80 },
+  { name: 'TPR', model: '透明橡胶料', price: 16.10 },
+  { name: 'K料', model: 'KR-03NW', price: 12.50 },
+  { name: 'PC料', model: '2605', price: 10.80 },
 ];
-
-// 料型列在注塑主表中隐藏：有料型时优先精确匹配；无匹配时按材质取参考表首条默认价。
 function lookupMaterialPrice(material, grade, prices) {
   if (!prices || !prices.length) return null;
   if (!material) return null;
@@ -3609,7 +3608,7 @@ function renderMolding(host, payload, canEdit, onChange, refMolds, fxRmbHkd, use
     applyInjectionReferencePrices(payload, { overwrite: false });
   }
 
-  const canEditPrices = canEdit;
+  const canEditPrices = canEdit || payload.mixed_reference_editable === true;
   host.innerHTML = `
     <h3>二、注塑部分 <small>料损耗 %
       <input id="inj-loss" type="number" step="any" style="width:60px" value="${payload.injection_loss_pct ?? 3}" ${canEdit ? '' : 'disabled'} />
@@ -3619,6 +3618,7 @@ function renderMolding(host, payload, canEdit, onChange, refMolds, fxRmbHkd, use
     ${canEdit ? `<small style="margin-left:6px"><button id="btn-auto-shot" class="mini" type="button">🔄 自动按机型套啤价</button></small>` : ''}
     </h3>
     <div id="wb-inj"></div>
+    <div id="wb-inj-shared"></div>
     <div id="wb-inj-summary"></div>
 
     <h3 id="blow-heading">二·B、吹气部分 <small class="muted">(单价含港币)</small>
@@ -3843,7 +3843,7 @@ function renderMolding(host, payload, canEdit, onChange, refMolds, fxRmbHkd, use
     { key: 'raw_unit', label: '原料单价 HK$', readonly: true, width: '100px',
       calc: r => num(r.weight_g) * (1 + num(payload.injection_loss_pct ?? 3)/100) * num(r.material_unit_price) },
     { key: 'machine', label: '机台', width: '90px', className: 'molding-machine-key' },
-    { key: 'shot_price', label: '啤价(HK$/啤)', type: 'number', width: '100px' },
+    { key: 'shot_price', label: payload.injection.some(r => r.catalog_raw_weight != null) ? '零件啤工(HK$/件)' : '啤价(HK$/啤)', type: 'number', width: '100px' },
     { key: 'cavity', label: '出模数', width: '80px' },
     { key: 'side_action', label: '行位', width: '90px' },
     { key: 'sets', label: '套数', type: 'number', width: '70px' },
@@ -3904,6 +3904,25 @@ function renderMolding(host, payload, canEdit, onChange, refMolds, fxRmbHkd, use
     } : null,
   });
 
+  if (payload.mixed_group_by_mold && !canEdit) {
+    const table = host.querySelector('#wb-inj table');
+    const headers = [...table.querySelectorAll('thead th')];
+    const column = headers.findIndex(th => th.textContent.trim() === '模号');
+    const rows = [...table.querySelectorAll('tbody tr')].filter(row => row.cells.length === headers.length);
+    if (column >= 0 && rows.length === payload.injection.length) {
+      for (let start = 0; start < rows.length;) {
+        const code = String(payload.injection[start].mold_no || '').trim();
+        let end = start + 1;
+        while (code && end < rows.length && String(payload.injection[end].mold_no || '').trim() === code) end++;
+        const cell = rows[start].cells[column];
+        cell.rowSpan = end - start;
+        cell.style.cssText += ';vertical-align:middle;font-weight:600;background:#eaf0f8;white-space:nowrap';
+        for (let i = start + 1; i < end; i++) rows[i].deleteCell(column);
+        start = end;
+      }
+    }
+  }
+
   // 二、注塑 成本汇总 — 分项求和：原料单价 / 啤价 / 成品金额
   const injCard = host.querySelector('#wb-inj-summary');
   const paintInj = () => {
@@ -3911,8 +3930,12 @@ function renderMolding(host, payload, canEdit, onChange, refMolds, fxRmbHkd, use
     const rows = payload.injection || [];
     const lossM = 1 + num(payload.injection_loss_pct ?? 3) / 100;  // 料损耗（默认3%）
     const rawSum = weightedInjectionSum(payload, r => num(r.weight_g) * lossM * num(r.material_unit_price));
-    const shotSum = weightedInjectionSum(payload, r => num(r.shot_price));
+    const allocation = window.MixedQuotation?.renderMoldingAllocation(host.querySelector('#wb-inj-shared'), payload) || { amount: 0 };
+    // Read-only allocation is included here but not saved as another injection row.
+    const directShotSum = weightedInjectionSum(payload, r => num(r.shot_price));
+    const shotSum = directShotSum + allocation.amount;
     const finishedSum = rawSum + shotSum;
+    const formatTotal = value => allocation.error ? '待完善' : formatNum(value);
     const groups = injectionProductGroups(payload);
     const hasMultipleProducts = groups.length > 1;
     const totalRatio = sum(groups, group => productMixRatio(payload, group.key));
@@ -3934,9 +3957,10 @@ function renderMolding(host, payload, canEdit, onChange, refMolds, fxRmbHkd, use
       <div class="ls-title">二、注塑 成本汇总</div>
       ${groupCards}
       <div class="ls-row"><span class="ls-label">原料单价 ${hasMultipleProducts ? '加权平均' : '总'}</span><span class="ls-val">${formatNum(rawSum)}</span></div>
-      <div class="ls-row"><span class="ls-label">啤价 ${hasMultipleProducts ? '加权平均' : '总'}</span><span class="ls-val">${formatNum(shotSum)}</span></div>
-      <div class="ls-row hi"><span class="ls-label">成品金额 ${hasMultipleProducts ? `加权平均（总配比 ${formatNum(totalRatio)}）` : '总'} HK$</span><span class="ls-val">${formatNum(finishedSum)}</span></div>
-      <div class="ls-row hi"><span class="ls-label">合计 RMB</span><span class="ls-val">${formatNum(finishedSum * fxv)} <small class="muted">(汇率 ${fxv})</small></span></div>
+      ${allocation.hasRows ? `<div class="ls-row"><span class="ls-label">本款明细啤价</span><span class="ls-val">${formatNum(directShotSum)}</span></div><div class="ls-row"><span class="ls-label">共模分摊啤价</span><span class="ls-val">${formatTotal(allocation.amount)}</span></div>` : ''}
+      <div class="ls-row"><span class="ls-label">啤价 ${hasMultipleProducts ? '加权平均' : '总'}</span><span class="ls-val">${formatTotal(shotSum)}</span></div>
+      <div class="ls-row hi"><span class="ls-label">成品金额 ${hasMultipleProducts ? `加权平均（总配比 ${formatNum(totalRatio)}）` : '总'} HK$</span><span class="ls-val">${formatTotal(finishedSum)}</span></div>
+      <div class="ls-row hi"><span class="ls-label">合计 RMB</span><span class="ls-val">${formatTotal(finishedSum * fxv)} <small class="muted">(汇率 ${fxv})</small></span></div>
     `;
     injCard.querySelectorAll('.product-mix-ratio').forEach(input => {
       input.onchange = () => {
@@ -5526,7 +5550,7 @@ async function renderQuotePage() {
     try { authorizedCustomers = (await api('/quotes/customers')).customers || []; }
     catch { authorizedCustomers = []; }
   }
-  window.__data = { quote, sections, me };
+  window.__data = { quote, sections, me, mixed_quote: data.mixed_quote, mixed_engineering_molds: data.mixed_engineering_molds };
   // 从业务 section 读税率，给所有 loss-summary 用
   const salesSecForTax = sections.find(s => s.dept === 'sales');
   if (salesSecForTax && salesSecForTax.payload_json) {
@@ -5593,6 +5617,7 @@ async function renderQuotePage() {
     }
   });
   const activateTab = (tabKey, dept) => {
+    if (dept === 'engineering') window.MixedQuotation?.refreshEngineeringSharedMolds(host);
     sessionStorage.setItem(tabKey, dept);
     host.querySelectorAll('.dept-tab').forEach(tab => tab.classList.toggle('active', tab.dataset.dept === dept));
     host.querySelectorAll('.section-pane').forEach(pane => { pane.style.display = pane.dataset.dept === dept ? '' : 'none'; });
@@ -5691,7 +5716,7 @@ async function renderQuotePage() {
     });
   } else {
     const salesSec = sections.find(x => x.dept === 'sales');
-    const salesHdr = salesSec && salesSec.payload_json ? (JSON.parse(salesSec.payload_json).header || {}) : {};
+    const salesHdr = salesSec && salesSec.payload_json ? (JSON.parse(salesSec.payload_json).header || {}) : (data.quotation_rates || {});
     const fx = num(salesHdr.fx_rmb_hkd) || 0.85;
     const fxHU = num(salesHdr.fx_hkd_usd) || 7.8;
     if (me.dept === 'engineering') {
@@ -5715,7 +5740,7 @@ async function renderQuotePage() {
   if (visibleDepts.length > 1) {
     const others = visibleDepts.filter(s => s.dept !== me.dept);
     const salesSecForFx = sections.find(x => x.dept === 'sales');
-    const salesHdrOther = salesSecForFx && salesSecForFx.payload_json ? (JSON.parse(salesSecForFx.payload_json).header || {}) : {};
+    const salesHdrOther = salesSecForFx && salesSecForFx.payload_json ? (JSON.parse(salesSecForFx.payload_json).header || {}) : (data.quotation_rates || {});
     const fxRate = num(salesHdrOther.fx_rmb_hkd) || 0.85;
     const fxRateUsd = num(salesHdrOther.fx_hkd_usd) || 7.8;
 
@@ -5811,7 +5836,18 @@ async function renderQuotePage() {
             }
             try {
               if (act === 'save' || act === 'submit') {
-                if (!confirm(`确认保存到 ${s.dept_name} section？该部门已有数据会被覆盖。`)) return;
+                // 页面按钮已明确指定部门和操作；不依赖内置浏览器可能拦截的原生确认框。
+                if (btn.disabled) return;
+                btn.disabled = true;
+                let status = c.querySelector('[data-section-save-status]');
+                if (!status) {
+                  status = document.createElement('p');
+                  status.dataset.sectionSaveStatus = '';
+                  status.setAttribute('role', 'status');
+                  c.querySelector('.wb-bar').insertAdjacentElement('afterend', status);
+                }
+                status.textContent = act === 'submit' ? '正在提交审核…' : '正在保存草稿…';
+                status.style.color = '#475569';
                 await putSection(s, sectionPayload, act === 'submit');
                 s.payload_json = JSON.stringify(sectionPayload);
                 clearDirty(s.dept);
@@ -5825,7 +5861,11 @@ async function renderQuotePage() {
                 await api('/reviews/' + s.id + '/reopen', { method: 'POST', body: JSON.stringify({ reason }) });
               }
               renderQuotePage();
-            } catch (e) { alert(e.message); }
+            } catch (e) {
+              const status = c.querySelector('[data-section-save-status]');
+              if (status) { status.textContent = e.message; status.style.color = '#b91c1c'; }
+              else showSaveShortcutStatus(e.message, true);
+            } finally { btn.disabled = false; }
           };
         });
       };
@@ -5982,6 +6022,20 @@ function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
 }
 
+if (window.MixedQuotation && !window.__WORKBENCH_EMBED__) {
+  renderEngineering = window.MixedQuotation.wrap(renderEngineering, 'engineering');
+  renderElectronic = window.MixedQuotation.wrap(renderElectronic, 'electronic');
+  renderMolding = window.MixedQuotation.wrap(renderMolding, 'molding');
+  renderPainting = window.MixedQuotation.wrap(renderPainting, 'painting');
+  renderSlush = window.MixedQuotation.wrap(renderSlush, 'slush');
+  renderSewing = window.MixedQuotation.wrap(renderSewing, 'sewing');
+  renderAssembly = window.MixedQuotation.wrap(renderAssembly, 'assembly');
+  const originalSales = renderSales;
+  renderSales = function (host, payload, quote, headerEdit, pricingEdit, sections, onChange, onHeaderChange) {
+    originalSales(host, payload, quote, headerEdit, pricingEdit, sections, onChange, onHeaderChange);
+    window.MixedQuotation.salesPanel(host, payload, quote, pricingEdit, sections, onChange);
+  };
+}
 window.VerificationWorkbench = {
   renderSummaryPane,
   renderEngineering,
@@ -5994,4 +6048,17 @@ window.VerificationWorkbench = {
   renderSales,
 };
 
-if (!window.__WORKBENCH_EMBED__) renderQuotePage();
+if (!window.__WORKBENCH_EMBED__) renderQuotePage().catch(error => {
+  const host = document.getElementById('app') || document.body;
+  const panel = document.createElement('section');
+  panel.style.cssText = 'margin:24px 0;padding:24px;border:1px solid #d6e1eb;border-radius:12px;background:white';
+  panel.setAttribute('role', 'alert');
+  const message = document.createElement('p');
+  const signedOut = error.status === 401;
+  message.textContent = signedOut ? '登录已失效，请重新登录后打开此报价单。已保存的数据不受影响。' : '报价内容加载失败：' + error.message;
+  const action = document.createElement('a');
+  action.textContent = signedOut ? '重新登录' : '重新加载';
+  action.href = signedOut ? './index.html' : location.href;
+  action.style.cssText = 'display:inline-block;padding:10px 20px;background:#2563eb;color:white;border-radius:8px;text-decoration:none';
+  panel.append(message, action);host.appendChild(panel);
+});

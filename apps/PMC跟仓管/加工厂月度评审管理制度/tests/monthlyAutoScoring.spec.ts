@@ -74,6 +74,16 @@ describe('monthly automatic scoring', () => {
     expect(merged[1]).toMatchObject({ score: 8, notes: '人工评价' })
   })
 
+  it('defaults cooperation to 10 and preserves saved manual scores including zero', () => {
+    const templates = [{ id: 'manual', module: 'cooperation', max_score: 10 }] as ScoreTemplate[]
+    const data = { orders: [], inspections: [], checks: [] }
+    expect(mergeAutomaticScores(templates, [], factory, data)[0]?.score).toBe(10)
+    for (const score of [0, 7, 10]) {
+      expect(mergeAutomaticScores(templates, [{ template_id: 'manual', score }], factory, data)[0]?.score).toBe(score)
+    }
+    expect(calculateAutoScore('cooperation', 10, factory, data)).toBeNull()
+  })
+
   it('scores craft-specific items from defect rate and 5S scores', () => {
     const data = {
       orders: [],

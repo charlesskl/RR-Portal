@@ -13,6 +13,7 @@ import type { Factory } from '../types/factory'
 import type { MonthlyScore } from '../types/score'
 import type { QualityInspection } from '../types/qualityInspection'
 import { matchesOrderDate, type OrderDateFilter } from '../utils/orderDateFilter'
+import { summarizeFactoryScores } from '../utils/scoringDateRange'
 import { useTableColumnPreferences } from '../composables/useTableColumnPreferences'
 
 const orders = useOrdersStore()
@@ -47,9 +48,14 @@ const factoryGrade = computed(() => {
     if (filter.mode === 'month') return score.year_month === filter.month
     return (!filter.start || score.year_month >= filter.start.slice(0, 7))
       && (!filter.end || score.year_month <= filter.end.slice(0, 7))
-  }).sort((a, b) => b.year_month.localeCompare(a.year_month))
+  })
+  const grouped: Record<string, MonthlyScore[]> = {}
+  for (const score of records) (grouped[score.factory] ??= []).push(score)
   const grades: Record<string, string> = {}
-  for (const score of records) if (!(score.factory in grades) && score.grade) grades[score.factory] = score.grade
+  for (const [factoryId, items] of Object.entries(grouped)) {
+    const { grade } = summarizeFactoryScores(items)
+    if (grade) grades[factoryId] = grade
+  }
   return grades
 })
 const qiByFactory = computed(() => {
@@ -294,7 +300,7 @@ function exportExcel() {
         <button @click="exportExcel">导出 Excel</button>
       </div>
       <p v-if="dateMode !== 'all'" class="date-hint">
-        {{ timeLabel }} · 价格、交期按下单日期统计；品质按验货日期统计；评级取范围内最近评分月份（按整月）。
+        {{ timeLabel }} · 价格、交期按下单日期统计；品质按验货日期统计；评级与工厂月度评分一致：单月按评分明细合计，跨月按已评分月份平均分评级（按整月）；无有效评分显示“-”。
       </p>
       <div class="scroll" tabindex="0" aria-label="汇总表滚动区域">
         <table class="summary">

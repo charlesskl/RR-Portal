@@ -9,6 +9,7 @@ import { useAuthStore } from '../stores/auth'
 import { totalFromItems, gradeFromScore } from '../utils/grading'
 import { pb } from '../pb'
 import {
+  defaultScoreItem,
   filterMonthlyScoringData,
   isAutoScoreModule,
   mergeAutomaticScores,
@@ -67,7 +68,7 @@ const canEditItem = (scoringRole: string) =>
 const isManager = computed(() => auth.role === 'sc_manager' || auth.role === 'admin')
 
 const liveTotal = computed(() =>
-  totalFromItems(applicable.value.map((t) => itemMap.value[t.id] ?? { template_id: t.id, score: 0 })),
+  totalFromItems(applicable.value.map((t) => itemMap.value[t.id] ?? defaultScoreItem(t))),
 )
 const liveGrade = computed(() => gradeFromScore(liveTotal.value))
 
@@ -110,7 +111,7 @@ async function submit() {
   submitError.value = ''
   const score_items = applicable.value.map((t) => ({
     template_id: t.id,
-    score: itemMap.value[t.id]?.score ?? 0,
+    score: itemMap.value[t.id]?.score ?? defaultScoreItem(t).score,
     notes: itemMap.value[t.id]?.notes ?? '',
   }))
   if (score_items.some((item, index) => !Number.isFinite(Number(item.score)) || Number(item.score) < 0 || Number(item.score) > applicable.value[index]!.max_score)) {
@@ -163,7 +164,7 @@ async function saveFlag() {
             <td>
               <input type="number" :max="t.max_score" min="0"
                 :disabled="recalculating || submitting || !canEditItem(t.scoring_role)"
-                v-model.number="(itemMap[t.id] ??= { template_id: t.id, score: 0 }).score" />
+                v-model.number="(itemMap[t.id] ??= defaultScoreItem(t)).score" />
             </td>
             <td>{{ t.scoring_role === 'buyer' ? '采购' : '品质' }}</td>
             <td class="basis">{{ itemMap[t.id]?.notes || '人工评分' }}</td>

@@ -118,7 +118,7 @@ async function save(factoryId: string) {
           <td>{{ f.name }}</td>
           <td class="muted">{{ REGION_LABELS[regionOf(f)] }}</td>
           <td class="muted">{{ CRAFT_LABELS[f.craft] }}</td>
-          <td><span class="amount">{{ (outputByFactory[f.id] ?? 0).toLocaleString() }}</span></td>
+          <td><span class="amount">{{ (outputByFactory[f.id] ?? 0).toLocaleString('zh-CN', { maximumFractionDigits: 0 }) }}</span></td>
           <td><input v-model="(drafts[f.id] ??= {}).source_doc" placeholder="对账单号" /></td>
           <td><button @click="save(f.id)">保存</button></td>
         </tr>

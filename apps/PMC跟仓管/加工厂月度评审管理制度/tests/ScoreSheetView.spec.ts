@@ -95,6 +95,37 @@ describe('评分详情缓存', () => {
     expect(wrapper.text()).toContain('预估总分 20')
   })
 
+  it('未评分的配合度默认 10 分，可编辑并在重算和提交时保留', async () => {
+    templates.push({
+      id: 'cooperation', name: '整改响应配合度', module: 'cooperation', max_score: 10,
+      scoring_role: 'buyer', craft_filter: '', is_active: true, sort_order: 2,
+    })
+    state.getFullList.mockResolvedValue([])
+    const alert = vi.spyOn(window, 'alert').mockImplementation(() => {})
+    const wrapper = mount(ScoreSheetView)
+    try {
+      await flushPromises()
+      const input = wrapper.findAll('input[type="number"]')[1]!
+      expect((input.element as HTMLInputElement).value).toBe('10')
+      expect((input.element as HTMLInputElement).disabled).toBe(false)
+      expect(wrapper.text()).toContain('预估总分 28')
+      await input.setValue('7')
+      await wrapper.get('button.ghost').trigger('click')
+      await flushPromises()
+      expect((input.element as HTMLInputElement).value).toBe('7')
+      await wrapper.findAll('button').find((button) => button.text() === '再次提交评分')!.trigger('click')
+      await flushPromises()
+      expect(state.saveScore).toHaveBeenLastCalledWith('factory-1', '2026-08', expect.objectContaining({
+        status: 'submitted',
+        score_items: expect.arrayContaining([expect.objectContaining({ template_id: 'cooperation', score: 7 })]),
+      }))
+    } finally {
+      templates.pop()
+      alert.mockRestore()
+      wrapper.unmount()
+    }
+  })
+
   it('编辑未提交的得分不会修改列表缓存中的评分项', async () => {
     templates[0].module = 'cooperation'
     const wrapper = mount(ScoreSheetView)

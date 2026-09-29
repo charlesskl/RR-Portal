@@ -17,12 +17,12 @@ function setup() {
   const sections = [{ dept: 'sales', payload_json: JSON.stringify({ mixed_quote: cfg }) },
     { dept: 'molding', payload_json: JSON.stringify(molding) }];
   const element = () => ({ innerHTML: '', textContent: '', children: [], nodes: {},
-    appendChild(node) { this.children.push(node); }, prepend(node) { this.children.unshift(node); },
+    appendChild(node) { this.children.push(node); }, append(...nodes) { this.children.push(...nodes); }, setAttribute(key,value) { this[key]=value; }, prepend(node) { this.children.unshift(node); },
     querySelector(selector) { return this.nodes[selector] ||= element(); },
   });
   const window = { MixedMolds, __data: { quote: { id: 3, qty: 2000 }, mixed_quote: cfg, sections } };
   vm.runInNewContext(fs.readFileSync(require.resolve('../frontend/mixed-quotation.js'), 'utf8'), {
-    window, document: { createElement: element }, sessionStorage: { getItem() { return null; }, setItem() {} },
+    window, document: { createElement: element }, sessionStorage: { getItem() { return 'a'; }, setItem() {} },
   });
   return { api: window.MixedQuotation, element, molding, sections };
 }

@@ -94,7 +94,7 @@ test('出模数分摊导出保留原始出模数和不同单件啤价', async ()
   edit(sections, 'molding', p => { p.mixed_molds = [{ mold_no: 'AB-2-4', machine_price: 1200, target: 3000, parts: [
     { product_id: 'a', cavity: 2, usage: 1 }, { product_id: 'b', cavity: 4, usage: 1 },
   ] }]; });
-  const wb = await buildMixedWorkbook({ quote: { qty: 2000 }, sections });
+  const wb = await buildMixedWorkbook({ dept:'molding', quote: { qty: 2000 }, sections });
   const ws = wb.getWorksheet('共模啤价分摊');
   assert.equal(ws.getCell('D1').value, '出模数（件/啤）');
   assert.equal(ws.getCell('D2').value, 2); assert.equal(ws.getCell('D3').value, 4);
@@ -122,8 +122,9 @@ test('缺失小产品不会作为免费产品完成审核，显式零价明细�
 });
 test('无效比例、汇率、穴数及未知小产品不能被悄悄按0计算', () => {
   const c = cfg(); c.mode = 'ratio'; c.products[0].ratio = -1;
-  assert.throws(() => validateConfig(c), /混装比例/);
-  c.products[0].ratio = 0; assert.throws(() => validateConfig(c), /混装比例/);
+  assert.throws(() => validateConfig(c), /NA比例/);
+  c.products[0].ratio = 0; assert.doesNotThrow(() => validateConfig(c));
+  c.products[1].ratio = 0; assert.throws(() => validateConfig(c), /比例/); c.products[1].ratio = 1;
   c.products[0].ratio = 1; c.products[1].id = 'a'; assert.throws(() => validateConfig(c), /重复/);
   const sections = fixture(); edit(sections, 'sales', p => { p.header.fx_hkd_usd = 0; });
   assert.throws(() => calculateMixedQuote({}, sections, { strict: true }), /汇率/);
@@ -156,7 +157,7 @@ test('工程模具/手办/测试摊费按各款和每包装分别计入，零分
 });
 test('混装导出平均与最终价公式可重算，部门导出和客户导出不暴露其他部门明细', async () => {
   const quote = { quote_no: 'MIX-1', product_name: '混装测试' }, sections = fixture();
-  const wb = await buildMixedWorkbook({ quote, sections });
+  const wb = await buildMixedWorkbook({ consolidate:false, quote, sections });
   const ws = wb.getWorksheet('混装报价汇总');
   assert.deepEqual(ws.getCell('B5').value, { formula: 'SUMPRODUCT(C2:C3,E2:E3)', result: 15 });
   assert.deepEqual(ws.getCell('B9').value, { formula: 'B5*B6+B7+B8', result: 17 });

@@ -46,11 +46,11 @@ test('统一模具上传、产品组成、共享改价、用量、审核及导�
   const eng={mixed_imported_molds:parsed.molds,mixed_imported_parts:parts,mixed_part_selections:{p1:[{part_id:'part0',usage:1},{part_id:'part1',usage:1}],p2:[{part_id:'part0',usage:1},{part_id:'part2',usage:2}],__shared__:[{part_id:'part3',usage:1}]}};
   await api('/sections/'+section('engineering').id,'PUT',{payload:eng});
   await api('/sections/'+section('sales').id,'PUT',{payload:sales});
-  let mold={mixed_products:{},mixed_shared:{},parts_catalog:{version:1,parts:parts.map((p,i)=>({...p,material_unit_price:[.1,.2,.1,.1][i],shot_price:[.1,.2,.3,.1][i]})),selections:eng.mixed_part_selections}};
+  let mold={mixed_products:{},mixed_shared:{},parts_catalog:{version:1,parts:parts.map((p,i)=>({...p,material_unit_price:[.1,.2,.1,.1][i],shot_price:999,machine_price:[.1,.2,.3,.1][i]*100*Number(p.cavity),target:'',production_demand:100})),selections:eng.mixed_part_selections}};
   await api('/sections/'+section('molding').id,'PUT',{payload:mold});
-  assert.equal((await api('/quotes/'+created.id+'/mixed')).valid,false,'上传未核价不得完成报价');
+  assert.equal((await api('/quotes/'+created.id+'/mixed')).valid,false,'上传缺少日产啤次不得完成报价');
   await api('/sections/'+section('sales').id,'PUT',{payload:sales,submit:true},400);
-  mold.parts_catalog.parts.forEach(p=>p.price_pending=false);
+  mold.parts_catalog.parts.forEach(p=>{p.price_pending=false;p.target=100;});
   await api('/sections/'+section('molding').id,'PUT',{payload:mold});
   const near=(a,b)=>assert.ok(Math.abs(a-b)<1e-9,`${a} != ${b}`);
   const expectedA=.206+.1+.206+.2,expectedB=.206+.1+(.309+.3)*2,common=.5+.1;
@@ -59,7 +59,7 @@ test('统一模具上传、产品组成、共享改价、用量、审核及导�
   near(result.final_usd,(expectedA+expectedB+common)*1.1/.99/7.75);
   const baseline=result;
   // Unified edit propagates to both owners once, without double charging common shell.
-  mold.parts_catalog.parts[0].shot_price=.2;
+  mold.parts_catalog.parts[0].machine_price*=2;
   await api('/sections/'+section('molding').id,'PUT',{payload:mold});
   result=await api('/quotes/'+created.id+'/mixed');near(result.products[0].price_hkd-baseline.products[0].price_hkd,.1*1.1/.99);near(result.products[1].price_hkd-baseline.products[1].price_hkd,.1*1.1/.99);near(result.common_usd,baseline.common_usd);
   eng.mixed_part_selections.p2[1].usage=1;
@@ -69,7 +69,7 @@ test('统一模具上传、产品组成、共享改价、用量、审核及导�
   await api('/sections/'+section('engineering').id,'PUT',{payload:eng});result=await api('/quotes/'+created.id+'/mixed');near(result.products[0].price_hkd,.406*1.1/.99);
   const bad=structuredClone(eng);bad.mixed_part_selections.p1=[{part_id:'missing',usage:1}];await api('/sections/'+section('engineering').id,'PUT',{payload:bad},400);
   // Restore scenario, then submit and review every department.
-  eng.mixed_part_selections.p1=[{part_id:'part0',usage:1},{part_id:'part1',usage:1}];eng.mixed_part_selections.p2[1].usage=2;mold.parts_catalog.parts[0].shot_price=.1;
+  eng.mixed_part_selections.p1=[{part_id:'part0',usage:1},{part_id:'part1',usage:1}];eng.mixed_part_selections.p2[1].usage=2;mold.parts_catalog.parts[0].machine_price/=2;
   await api('/sections/'+section('engineering').id,'PUT',{payload:eng});await api('/sections/'+section('molding').id,'PUT',{payload:mold});
   data=await api('/quotes/'+created.id);
   for(const s of data.sections){await api('/sections/'+s.id,'PUT',{payload:JSON.parse(s.payload_json||'{}'),submit:true});await api('/reviews/'+s.id,'POST',{action:'approve'});}

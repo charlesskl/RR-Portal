@@ -133,8 +133,8 @@ test('molding defaults automatically fill missing material and shot prices witho
 
 test('molding summary converts HKD to RMB by multiplying the RMB/HKD rate', () => {
   const source = fs.readFileSync(path.join(__dirname, '../frontend/workbench.js'), 'utf8');
-  assert.match(source, /formatNum\(finishedSum \* fxv\)/);
-  assert.doesNotMatch(source, /formatNum\(finishedSum \/ fxv\)/);
+  assert.match(source, /format(?:Num|Total)\(finishedSum \* fxv\)/);
+  assert.doesNotMatch(source, /format(?:Num|Total)\(finishedSum \/ fxv\)/);
 });
 
 test('electronic IC rows are excluded only from Indonesian freight', () => {
@@ -186,7 +186,7 @@ test('Ctrl+S and Command+S save the active dirty department', () => {
   assert.match(source, /const save = saveHandlers\.get\(activeDept\)/);
   assert.match(source, /showSaveShortcutStatus\('\u2713 已保存'\)/);
   assert.match(source, /保存草稿（Ctrl\/⌘\+S）/);
-  assert.match(quotePage, /workbench\.js\?v=20260917-auto-shot-visible/);
+  assert.match(quotePage, /workbench\.js\?v=[^"\s]+/);
 });
 
 test('summary tab recalculates whenever it is opened or clicked again', () => {

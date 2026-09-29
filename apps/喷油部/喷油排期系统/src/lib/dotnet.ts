@@ -4,6 +4,7 @@
 //   2. cache: "no-store" 关闭缓存，保证每次都拿最新数据（排期/实绩等数据会频繁变）。
 // 用法：const lines = await dotnetGet<DotnetLine[]>("/api/lines");
 import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
 
 // .NET 后端地址（开发默认 5080；部署用环境变量 DOTNET_API_URL 覆盖）。
 const BASE = process.env.DOTNET_API_URL || "http://localhost:5080";
@@ -31,6 +32,12 @@ export async function dotnetGet<T>(path: string): Promise<T> {
     headers: forwardedCookies ? { Cookie: forwardedCookies } : {},
     cache: "no-store",
   });
+  if (res.status === 401) {
+    // .NET 逐请求校验（账号停用/角色/厂区变更）会让旧 JWT 立刻失效；
+    // SSR 场景 401 应引导重新登录，而不是让整页崩成「应用程序错误」。
+    // 跳登录页后旧 Cookie 会在下次登录成功时被新令牌覆盖。
+    redirect("/login");
+  }
   if (!res.ok) {
     throw new DotnetHttpError(res.status, path);
   }

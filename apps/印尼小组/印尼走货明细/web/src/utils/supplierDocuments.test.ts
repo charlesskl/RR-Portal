@@ -299,7 +299,17 @@ describe('supplier document export', () => {
     expect(countCellsContaining(wb, sheetName, 'Beneficiary: Dongguan shengcheng Import and Export Co., Ltd.')).toBe(2)
     expect(countCellsContaining(wb, sheetName, 'Room 603, No. 39, HongLi Road Dongcheng')).toBe(2)
     expect(countCellsContaining(wb, sheetName, '15668277360001')).toBe(0)
+    expect(countCellsContaining(wb, sheetName, 'Add: Room 602')).toBe(0)
     const sheet = wb.Sheets[sheetName]
+    // Every invoice after a banking footer must retain all six letterhead lines.
+    const titleRows = Object.entries(sheet).filter(([address, cell]) => /^B\d+$/.test(address) && cell.v === 'COMMERCIAL INVOICE').map(([address]) => Number(address.slice(1)))
+    expect(titleRows).toHaveLength(3)
+    const normalizeHeader = (value: unknown) => String(value || '').replace(/\s+/g, '').toUpperCase()
+    for (const titleRow of titleRows) {
+      for (let offset = 0; offset < 6; offset++) {
+        expect(normalizeHeader(sheet[`B${titleRow - 5 + offset}`]?.v)).toBe(normalizeHeader(sheet[`B${offset + 1}`]?.v))
+      }
+    }
     const starts = Object.entries(sheet).filter(([address, cell]) => /^B\d+$/.test(address) && String(cell.v).startsWith('Beneficiary name :Dongguan shengcheng')).map(([address]) => Number(address.slice(1)))
     expect(starts).toHaveLength(2)
     const merges = (sheet['!merges'] || []).map(range => XLSX.utils.encode_range(range))
@@ -310,17 +320,13 @@ describe('supplier document export', () => {
     const footerXfs = footerStyles.getElementsByTagName('cellXfs')[0].getElementsByTagName('xf')
     const footerFonts = footerStyles.getElementsByTagName('fonts')[0].getElementsByTagName('font')
     for (const start of starts) {
-      expect(sheet[`B${start + 1}`].v).toBe('Account number :')
-      expect(sheet[`B${start + 2}`].v).toBe('8110914014201724067(USD)')
-      expect(sheet[`B${start + 3}`].v).toBe('8110901012301719910 (RMB)')
-      expect(sheet[`B${start + 4}`].v).toBe('8110913013901724078 (HKD)')
-      expect(sheet[`G${start + 2}`].v).toContain('Room 603')
-      expect(merges).toContain(`G${start}:J${start + 1}`)
-      expect(merges).toContain(`G${start + 2}:J${start + 4}`)
-      for (let row = start; row < start + 5; row++) {
+      expect(String(sheet[`B${start}`].v).split('\n').slice(1)).toEqual(['Account number :', '8110914014201724067(USD)', '8110901012301719910 (RMB)', '8110913013901724078 (HKD)'])
+      expect(sheet[`G${start}`].v).toContain('Room 603')
+      expect(merges).toContain(`G${start}:J${start}`)
+      for (const row of [start]) {
         expect(merges).toContain(`B${row}:F${row}`)
         const node = Array.from(doc.getElementsByTagName('row')).find(node => node.getAttribute('r') === String(row))
-        expect(Number(node?.getAttribute('ht'))).toBeGreaterThanOrEqual(22)
+        expect(Number(node?.getAttribute('ht'))).toBeGreaterThanOrEqual(110)
         for (const col of ['B', 'G']) {
           const cell = Array.from(doc.getElementsByTagName('c')).find(cell => cell.getAttribute('r') === `${col}${row}`)!
           const xf = footerXfs[Number(cell.getAttribute('s'))]

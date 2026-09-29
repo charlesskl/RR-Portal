@@ -697,13 +697,17 @@ function populateLinkedDocuments(
       setPreservingStyle(
         groupInvoiceSheet,
         `G${beneficiaryRow}`,
-        isHuashengyiSeller(seller) ? HUASHENGYI_BENEFICIARY : isHengxinchangSeller(seller) ? HENGXINCHANG_BENEFICIARY : '',
+        isHuashengyiSeller(seller) ? HUASHENGYI_BENEFICIARY : isHengxinchangSeller(seller) ? `${HENGXINCHANG_BENEFICIARY}\n\n${HENGXINCHANG_BENEFICIARY_ADDRESS}` : '',
       )
-      setPreservingStyle(
+      if (!isHengxinchangSeller(seller)) setPreservingStyle(
         groupInvoiceSheet,
         `G${beneficiaryAddressRow}`,
-        isHuashengyiSeller(seller) ? HUASHENGYI_BENEFICIARY_ADDRESS : isHengxinchangSeller(seller) ? HENGXINCHANG_BENEFICIARY_ADDRESS : '',
+        isHuashengyiSeller(seller) ? HUASHENGYI_BENEFICIARY_ADDRESS : '',
       )
+      else if (/^\s*Add[:：]/i.test(String(groupInvoiceSheet?.[`G${beneficiaryAddressRow}`]?.v || ''))) {
+        // Remove the template's old banking address, without touching the next header.
+        setPreservingStyle(groupInvoiceSheet, `G${beneficiaryAddressRow}`, '')
+      }
     }
     if (group.indo) {
       const packingHeaderRow = addressRow(packingSlot.packingHeader)
@@ -1543,18 +1547,19 @@ async function formatHengxinchangInvoiceFooters(zip: JSZip) {
     for (const start of starts) {
       for (const merge of directChildren(merges, 'mergeCell')) {
         const range = XLSX.utils.decode_range(merge.getAttribute('ref')!)
-        if (range.s.r <= start + 3 && range.e.r >= start - 1 && range.s.c <= 9 && range.e.c >= 1) merges.removeChild(merge)
+        if (range.s.r <= start - 1 && range.e.r >= start - 1 && range.s.c <= 9 && range.e.c >= 1) merges.removeChild(merge)
       }
-      const lines = HENGXINCHANG_BANK_INFO.split('\n')
-      for (let offset = 0; offset < 5; offset++) {
-        const r = start + offset
+      // Some slots have only one footer row before the next company header.
+      // Keep multiline banking text in that row instead of overwriting five rows.
+      {
+        const r = start
         let row = directChildren(data, 'row').find(node => rowNumber(node) === r)
         if (!row) {
           row = doc.createElementNS(SPREADSHEET_NS, 'row') as XmlElement; row.setAttribute('r', String(r))
           const after = directChildren(data, 'row').find(node => rowNumber(node) > r)
           if (after) data.insertBefore(row, after); else data.appendChild(row)
         }
-        row.setAttribute('ht', '22'); row.setAttribute('customHeight', '1')
+        row.setAttribute('ht', '110'); row.setAttribute('customHeight', '1')
         for (let c = 1; c <= 9; c++) {
           const address = `${XLSX.utils.encode_col(c)}${r}`
           let cell = directChildren(row, 'c').find(node => node.getAttribute('r') === address)
@@ -1565,12 +1570,12 @@ async function formatHengxinchangInvoiceFooters(zip: JSZip) {
           }
           while (cell.firstChild) cell.removeChild(cell.firstChild)
           cell.setAttribute('s', footerStyle); cell.setAttribute('t', 'inlineStr')
-          const value = c === 1 ? lines[offset] || '' : c === 6 && offset === 0 ? HENGXINCHANG_BENEFICIARY : c === 6 && offset === 2 ? HENGXINCHANG_BENEFICIARY_ADDRESS : ''
+          const value = c === 1 ? HENGXINCHANG_BANK_INFO : c === 6 ? `${HENGXINCHANG_BENEFICIARY}\n\n${HENGXINCHANG_BENEFICIARY_ADDRESS}` : ''
           const inline = doc.createElementNS(SPREADSHEET_NS, 'is'); const text = doc.createElementNS(SPREADSHEET_NS, 't'); text.textContent = value; inline.appendChild(text); cell.appendChild(inline)
         }
         const merge = doc.createElementNS(SPREADSHEET_NS, 'mergeCell'); merge.setAttribute('ref', `B${r}:F${r}`); merges.appendChild(merge)
       }
-      for (const ref of [`G${start}:J${start + 1}`, `G${start + 2}:J${start + 4}`]) {
+      for (const ref of [`G${start}:J${start}`]) {
         const merge = doc.createElementNS(SPREADSHEET_NS, 'mergeCell'); merge.setAttribute('ref', ref); merges.appendChild(merge)
       }
     }

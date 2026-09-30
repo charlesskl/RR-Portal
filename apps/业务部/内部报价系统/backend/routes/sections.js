@@ -87,9 +87,9 @@ router.put('/:id', async (req, res) => {
     UPDATE quote_sections
     SET payload_json = ?, status = CASE WHEN ? = 1 THEN 'filled' ELSE status END,
         filled_by = ?, filled_at = ?
-    WHERE id = ? AND COALESCE(filled_at, '') = ? AND payload_json = ? AND status = ?
+    WHERE id = ? AND filled_at IS NOT DISTINCT FROM ? AND payload_json = ? AND status = ?
   `).run(JSON.stringify(payload), submit ? 1 : 0, req.user.name, nextFilledAt, id,
-    sec.filled_at || '', sec.payload_json, sec.status);
+    sec.filled_at || null, sec.payload_json, sec.status);
   if (!saved.changes) return res.status(409).json({ error: '保存期间资料或审核状态已更新，本次未覆盖，请刷新核对。' });
   const conflict = false;
 

@@ -241,10 +241,9 @@ export function customsFileName(form: CustomsExportForm): string {
   const customer = form.customer || '客户'
   const count = form.containerCount != null && form.containerCount !== '' ? String(form.containerCount) : '1'
   const no = (form.containerNo || '').trim()
-  if (!form.loadDate) throw new Error('请先填写装柜时间，用于导出文件命名')
-  const d = new Date(form.loadDate)
-  if (Number.isNaN(d.getTime())) throw new Error('装柜时间格式不正确')
-  return `${d.getMonth() + 1}月${d.getDate()}日${customer}${count}柜${no}.xlsx`
+  const d = form.loadDate ? new Date(form.loadDate) : null
+  const date = d && !Number.isNaN(d.getTime()) ? `${d.getMonth() + 1}月${d.getDate()}日` : '未填装柜日期'
+  return `${date}${customer}${count}柜${no}.xlsx`
 }
 
 export function dataUrlToBytes(dataUrl: string): { bytes: Uint8Array; ext: string } | null {
@@ -1171,11 +1170,12 @@ export async function buildCustomsWorkbook(input: CustomsExportInput): Promise<B
     ? () => input.seller
     : input.supplierProfiles
       ? (item: CustomsItem) => isIndonesiaBlHead(item.bl_head)
-        ? supplierForLine(item.supplier || matOf(item)?.supplier || '', input.supplierProfiles!)
+        ? supplierForLine(item.supplier || matOf(item)?.supplier || '', input.supplierProfiles!, true)
         : documentSellerForLine(
           item.supplier || matOf(item)?.supplier || '',
           effCustoms(item),
           input.supplierProfiles!,
+          true,
         )
       : undefined
   const linkedDocumentGroups = legacyDocuments ? [] : collectLinkedDocumentGroups(sorted, sellerForItem)

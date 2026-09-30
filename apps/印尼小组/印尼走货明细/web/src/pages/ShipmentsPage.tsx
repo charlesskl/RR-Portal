@@ -599,13 +599,14 @@ export default function ShipmentsPage() {
 
   // ============ 出口报关明细 Excel 导出（基于模板，移植自旧版 buildExcel） ============
   const [exporting, setExporting] = useState(false)
-  // 数据核对：完全对齐旧系统 runValidation —— 硬性拦截 + 警告不拦截。返回 {hard,warn}
+  // 数据核对只作提醒，不拦截导出。返回 {hard,warn} 以区分问题级别。
   const decimals = (n: any) => { const s = String(n ?? ''); const i = s.indexOf('.'); return i < 0 ? 0 : s.length - i - 1 }
   async function computeValidation(): Promise<{ hard: string[]; warn: string[] }> {
     const v = form.getFieldsValue()
     const hard: string[] = [], warn: string[] = []
     if (!(v.container_no || '').trim()) hard.push('整柜信息：柜号必填')
     if (!v.ship_date) hard.push('整柜信息：走柜日期必填')
+    if (!v.load_date) warn.push('整柜信息：未填写装柜日期，导出文件名将标注“未填装柜日期”')
     if (!v.rate || v.rate <= 0) hard.push('整柜信息：汇率必须 > 0')
     if (!items.length) warn.push('没有任何明细行（对应旧系统“未勾选需填物料”）')
     const parts = new Set(items.map(it => partitionOf(it.po_no)).filter(Boolean))
@@ -649,10 +650,12 @@ export default function ShipmentsPage() {
   }
   async function exportShipmentExcel() {
     if (!editing) { message.warning('请先打开一票走货'); return }
-    if (!items.length) { message.warning('没有明细行'); return }
     const v = form.getFieldsValue()
     const rep = await computeValidation()
-    if (rep.hard.length) { setValReport(rep); setValOpen(true); message.error(`核对未通过：硬性问题 ${rep.hard.length} 项`); return }
+    if (rep.hard.length || rep.warn.length) {
+      setValReport(rep)
+      message.warning(`发现 ${rep.hard.length + rep.warn.length} 项待核对问题，仍将导出；正式报关前请运行核对`)
+    }
 
     setExporting(true)
     try {
@@ -704,14 +707,14 @@ export default function ShipmentsPage() {
       for (const item of items) {
         const material = materials.get(item.material_id!)
         const seller = isIndonesiaBlHead(item.bl_head)
-          ? supplierForLine(item.supplier || material?.supplier || '', dictionaries.suppliers || [])
+          ? supplierForLine(item.supplier || material?.supplier || '', dictionaries.suppliers || [], true)
           : documentSellerForLine(
             item.supplier || material?.supplier || '',
             item.customs_company || material?.customs_company || '',
             dictionaries.suppliers || [],
+            true,
           )
-        if (!seller.id) throw new Error(`供应商「${seller.keyword}」缺少档案编号`)
-        sellerKeys.add(String(seller.id))
+        sellerKeys.add(String(seller.id || seller.full || seller.keyword || '未填卖方'))
       }
       const fname = customsFileName(form2)
       const blob = await buildCustomsWorkbook({
@@ -1271,13 +1274,13 @@ export default function ShipmentsPage() {
         footer={<Button onClick={() => setValOpen(false)}>关闭</Button>}
       >
         <div style={{ marginBottom: 10 }}>
-          硬性问题：<b style={{ color: '#cf1322' }}>{valReport.hard.length}</b>
+          待修正问题：<b style={{ color: '#cf1322' }}>{valReport.hard.length}</b>
           警告：<b style={{ color: '#b8860b' }}>{valReport.warn.length}</b>
-          {valReport.hard.length === 0 && <span style={{ marginLeft: 10, color: '#389e0d', fontWeight: 600 }}>✓ 硬性项全部通过，可以导出</span>}
+          <span style={{ marginLeft: 10 }}>以上问题不阻止导出，正式报关前请核实</span>
         </div>
         {valReport.hard.length > 0 && (
           <div style={{ marginBottom: 10 }}>
-            <div style={{ color: '#cf1322', fontWeight: 600, marginBottom: 4 }}>硬性问题（必须修正）</div>
+            <div style={{ color: '#cf1322', fontWeight: 600, marginBottom: 4 }}>待修正问题（不阻止导出）</div>
             <ul style={{ margin: 0, paddingLeft: 20, color: '#cf1322', maxHeight: 200, overflow: 'auto' }}>
               {valReport.hard.map((s, i) => <li key={i} style={{ fontSize: 13 }}>{s}</li>)}
             </ul>

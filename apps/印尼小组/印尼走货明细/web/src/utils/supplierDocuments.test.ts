@@ -122,6 +122,39 @@ async function worksheetXml(zip: JSZip, sheetName: string) {
 }
 
 describe('supplier document export', () => {
+  it.each(['RRI', 'RRM'])('keeps column formats consistent across many customs companies (%s)', async customer => {
+    const items = Array.from({ length: 10 }, (_, i) => ({
+      material_id: i + 1, supplier: seller.keyword, customs_company: `公司${i}`,
+      kg: 1, qty: 2, invoice_date: '2026-09-18', contract_date: '2026-09-18', currency: 'US$',
+    }))
+    const file = await buildCustomsWorkbook({
+      templateBuffer: customer === 'RRI' ? rriTemplateBuffer : rrmTemplateBuffer,
+      seller, items, materials: new Map(), productHs: new Map(), images: new Map(),
+      form: { customer, containerNo: 'STYLE-TEST' },
+    })
+    const zip = await JSZip.loadAsync(await file.arrayBuffer())
+    const parser = new DOMParser()
+    const styles = parser.parseFromString(await zip.file('xl/styles.xml')!.async('string'), 'application/xml')
+    const xfs = styles.getElementsByTagName('cellXfs')[0].getElementsByTagName('xf')
+    const sheet = parser.parseFromString(await worksheetXml(zip, 'STYLE-TEST'), 'application/xml')
+    const cells = new Map(Array.from(sheet.getElementsByTagNameNS(SPREADSHEET_NS, 'c')).map(c => [c.getAttribute('r'), c]))
+    const xf = (address: string) => xfs[Number(cells.get(address)?.getAttribute('s') || 0)]
+    for (let row = 4; row < 14; row++) {
+      for (const column of ['F', 'K', 'W', 'Y', 'AR', 'AS', 'AO', 'AP']) {
+        for (const attribute of ['fontId', 'numFmtId']) {
+          expect(xf(`${column}${row}`).getAttribute(attribute), `${column}${row} ${attribute}`)
+            .toBe(xf(`${column}4`).getAttribute(attribute))
+        }
+        expect(xf(`${column}${row}`).getElementsByTagName('alignment')[0]?.toString())
+          .toBe(xf(`${column}4`).getElementsByTagName('alignment')[0]?.toString())
+      }
+      expect(xf(`F${row}`).getAttribute('fillId')).not.toBe('0')
+      expect(xf(`Y${row}`).getAttribute('numFmtId')).not.toBe('0')
+    }
+    expect(xf('F4').getAttribute('fillId')).not.toBe(xf('F5').getAttribute('fillId'))
+    const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' })
+    for (let row = 4; row < 14; row++) expect(wb.Sheets['STYLE-TEST'][`Y${row}`].v).toBe(46283)
+  })
   it('exports with no loading date using an explicit filename placeholder', () => {
     expect(customsFileName({ customer: 'RRM', containerNo: '1523' })).toContain('未填装柜日期')
     expect(customsFileName({ loadDate: 'invalid' })).toContain('未填装柜日期')

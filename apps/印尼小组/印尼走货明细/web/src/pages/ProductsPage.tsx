@@ -6,6 +6,8 @@ import {
 import { api, type Dictionaries, type Material, type Molding, type MoldingPart, type Product, type ProductDetail } from '../api/client'
 import { MATERIAL_CATEGORIES, inferMaterialCategory } from '../utils/engineeringImport'
 import { resolveMaterialTranslation } from '../utils/materialTranslate'
+import { mergeImportedMaterials, recommendMaterialChoices, resolveMaterialImport, type ImportChoice } from '../utils/materialImportMerge'
+import { MaterialImportReview } from '../components/MaterialImportReview'
 import {
   canonicalSupplierProfiles, HUASHENGYI_FULL_NAME, linkedCustomsCompany,
   supplierCustomsCompany, supplierProfileForName,
@@ -246,17 +248,32 @@ export default function ProductsPage() {
       if (existing) {
         try {
           const { data } = await api.get<ProductDetail>(`/products/${encodeURIComponent(r.code)}`)
-          // Merge: imported overrides matching names; existing extras stay
+          // 工程资料也按编码、规格和名称识别旧物料；歧义项不直接追加。
           const existingMats = Array.isArray(data.materials) ? data.materials : []
           originalMaterialsRef.current = existingMats.map(m => ({ ...m }))
-          const merged = [...existingMats]
-          for (const m of r.materials) {
-            const dupe = merged.find(x => x.name_zh === m.name_zh)
-            // image_id 以本次导入为准：BOM 匹配到则用新图，未匹配则清空（避免保留旧的错图）
-            if (dupe) Object.assign(dupe, { ...m, id: dupe.id, active: dupe.active, image_id: (m as any).image_id ?? undefined })
-            else merged.push(m)
+          const merged = mergeImportedMaterials(existingMats, r.materials, true)
+          setMaterials(merged.rows)
+          message.info(`物料匹配：更新 ${merged.updated} 行，新增 ${merged.added} 行，待核对 ${merged.conflicts.length} 行`)
+          if (merged.pending.length) {
+            const reviewRows = merged.rows.slice(0, existingMats.length)
+            const recommended = recommendMaterialChoices(reviewRows, merged.pending)
+            let choices: ImportChoice[] = [...recommended]
+            modal.confirm({
+              title: '核对后，一键确认导入', width: 850,
+              okText: '确认并应用', cancelText: '本次待核对项全部跳过', maskClosable: false,
+              content: <MaterialImportReview rows={reviewRows} pending={merged.pending} recommended={recommended} onChange={next => { choices = next }} />,
+              onOk: () => {
+                try {
+                  const resolved = resolveMaterialImport(merged.rows, merged.pending, choices, existingMats.length)
+                  setMaterials(resolved)
+                  message.success('选择已应用，请检查物料后点击保存')
+                } catch (error: any) {
+                  message.error(error.message)
+                  return Promise.reject(error)
+                }
+              },
+            })
           }
-          setMaterials(merged)
           // moldings: replace if same moldId/moldName; else append
           const existingMoldings = Array.isArray(data.moldings) ? data.moldings : []
           const mergedMoldings = [...existingMoldings]
@@ -266,7 +283,7 @@ export default function ProductsPage() {
             else mergedMoldings.push(m)
           }
           setMoldings(mergedMoldings)
-        } catch {}
+        } catch (error) { throw error }
       } else {
         originalMaterialsRef.current = []
         setMoldings(r.moldings); setMaterials(r.materials)
@@ -681,39 +698,52 @@ function MaterialsEditor({ rows, onChange, dicts, productCode }: {
         return undefined
       }
       const imported: Material[] = arr.map((r) => {
+        const number = (names: string[]) => {
+          const value = pick(r, names)
+          if (value == null || String(value).trim() === '') return undefined
+          const result = Number(value)
+          if (!Number.isFinite(result)) throw new Error(`${names[0]}不是有效数值：${value}`)
+          return result
+        }
         const nameZh = String(pick(r, ['中文名', '名称', 'namezh', 'name_zh']) ?? '')
         const importedNameEn = String(pick(r, ['英文名', 'nameen', 'name_en']) ?? '')
         return {
         product_code: productCode,
         item_no:        String(pick(r, ['料号', 'itemno', 'item_no']) ?? ''),
         name_zh:        nameZh,
-        name_en:        importedNameEn || translatedMaterialName(nameZh, dicts),
+        name_en:        importedNameEn,
         spec:           String(pick(r, ['规格', 'spec']) ?? ''),
-        category:       inferMaterialCategory(`${pick(r, ['类别', 'category']) ?? ''} ${pick(r, ['中文名', '名称', 'namezh', 'name_zh']) ?? ''} ${pick(r, ['规格', 'spec']) ?? ''}`),
+        category:       String(pick(r, ['类别', 'category']) ?? ''),
         material_code:  String(pick(r, ['物料编码', 'materialcode', 'material_code']) ?? ''),
         supplier:       String(pick(r, ['供应商', 'supplier']) ?? ''),
         customs_company:String(pick(r, ['报关公司', 'customs', 'customscompany', 'customs_company']) ?? ''),
         hs_cn:          String(pick(r, ['HSCN', '中国HS', 'hs_cn']) ?? ''),
         hs_id:          String(pick(r, ['HSID', '印尼HS', 'hs_id']) ?? ''),
-        unit_kg:        String(pick(r, ['单位', 'unit', 'unitkg', 'unit_kg']) ?? 'KGM'),
-        gross_per_pc:   Number(pick(r, ['毛重/件', '毛重', 'grossperpc']) ?? 0) || 0,
-        net_per_pc:     Number(pick(r, ['净重/件', '净重', 'netperpc']) ?? 0) || 0,
-        length:         Number(pick(r, ['长', 'length']) ?? 0) || 0,
-        width:          Number(pick(r, ['宽', 'width']) ?? 0) || 0,
-        height:         Number(pick(r, ['高', 'height']) ?? 0) || 0,
-        qty_per_carton: Number(pick(r, ['件/箱', '装箱量', 'qtypercarton']) ?? 0) || 0,
-        weight_per_carton: Number(pick(r, ['箱重', 'weightpercarton']) ?? 0) || 0,
+        unit_kg:        String(pick(r, ['单位', 'unit', 'unitkg', 'unit_kg']) ?? ''),
+        gross_per_pc:   number(['毛重/件', '毛重', 'grossperpc']),
+        net_per_pc:     number(['净重/件', '净重', 'netperpc']),
+        length:         number(['长', 'length']),
+        width:          number(['宽', 'width']),
+        height:         number(['高', 'height']),
+        qty_per_carton: number(['件/箱', '装箱量', 'qtypercarton']),
+        weight_per_carton: number(['箱重', 'weightpercarton']),
         active: true,
-        usage_qty: Number(pick(r, ['用量', 'usage', 'usageqty', 'usage_qty']) ?? 0) || 1,
+        usage_qty: number(['用量', 'usage', 'usageqty', 'usage_qty']),
       }}).filter(m => m.name_zh || m.item_no || m.material_code)
         .map(material => ({
           ...material,
           supplier: supplierProfileForName(material.supplier || '', dicts.suppliers)?.full || material.supplier,
-          customs_company: materialCustomsCompany(material, dicts),
+          customs_company: material.customs_company || (material.supplier ? materialCustomsCompany(material, dicts) : ''),
         }))
       if (!imported.length) { message.warning('没识别到有效行 (需含 中文名 / 料号 列)'); return }
-      onChange([...rows, ...imported])
-      message.success(`已导入 ${imported.length} 行 — 别忘点 💾 保存`)
+      const result = mergeImportedMaterials(rows, imported)
+      onChange(result.rows.map(material => ({
+        ...material,
+        name_en: material.name_en || translatedMaterialName(material.name_zh || '', dicts),
+        category: material.category || inferMaterialCategory(`${material.name_zh || ''} ${material.spec || ''}`),
+      })))
+      message.success(`已更新 ${result.updated} 行，新增 ${result.added} 行 — 别忘点 💾 保存`)
+      if (result.conflicts.length) message.warning(`有 ${result.conflicts.length} 行匹配到多个已有物料，已跳过：${result.conflicts.join('、')}`, 10)
     } catch (e: any) {
       message.error('导入失败: ' + (e?.message ?? e))
     }

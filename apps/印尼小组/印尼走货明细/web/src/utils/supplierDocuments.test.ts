@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import * as XLSX from 'xlsx-js-style'
 import JSZip from 'jszip'
 import { DOMParser } from '@xmldom/xmldom'
-import { buildCustomsWorkbook } from './customsExport'
+import { buildCustomsWorkbook, customsFileName } from './customsExport'
 
 const SPREADSHEET_NS = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
 
@@ -122,6 +122,24 @@ async function worksheetXml(zip: JSZip, sheetName: string) {
 }
 
 describe('supplier document export', () => {
+  it('exports with no loading date using an explicit filename placeholder', () => {
+    expect(customsFileName({ customer: 'RRM', containerNo: '1523' })).toContain('未填装柜日期')
+    expect(customsFileName({ loadDate: 'invalid' })).toContain('未填装柜日期')
+  })
+  it.each(['RRI', 'RRM'])('exports incomplete and empty shipment drafts (%s)', async customer => {
+    for (const items of [[{ material_id: 999, supplier: '未建档供应商', customs_company: '未建档供应商' }], []]) {
+      const file = await buildCustomsWorkbook({
+        templateBuffer: customer === 'RRI' ? rriTemplateBuffer : rrmTemplateBuffer,
+        items, materials: new Map(), supplierProfiles: [], productHs: new Map(), images: new Map(),
+        form: { customer, containerNo: 'DRAFT' },
+      })
+      const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' })
+      expect(wb.Sheets['DRAFT']).toBeDefined()
+      if (items.length) {
+        expect(sheetHasValue(wb, customer === 'RRI' ? '实业发票' : '全球发票', '未建档供应商')).toBe(true)
+      }
+    }
+  })
   it('displays Chinese invoice units without changing source quantities or units', async () => {
     const codes = ['KGM', 'PCS', 'SET', 'MTR', '个']
     const file = await buildCustomsWorkbook({

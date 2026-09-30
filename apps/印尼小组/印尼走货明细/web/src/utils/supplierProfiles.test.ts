@@ -42,6 +42,13 @@ describe('supplier customs-company linkage', () => {
 })
 
 describe('supplierForLine', () => {
+  it('allows incomplete export profiles without guessing missing company data', () => {
+    expect(supplierForLine('新供应商', [], true)).toMatchObject({ full: '新供应商', addressEn: '', email: '' })
+    expect(supplierForLine('', [], true)).toMatchObject({ full: '', nameEn: '', contact: '' })
+    expect(supplierForLine('华胜益', [{ ...profile, email: '' }], true)).toMatchObject({ full: profile.full, email: '' })
+    expect(supplierForLine('华胜益', [profile, { ...profile, id: 2 }], true).addressEn).toBe('')
+    expect(documentSellerForLine('未知供应商', '', [], true).full).toBe('未知供应商')
+  })
   it('matches the exact abbreviation or full name', () => {
     expect(supplierForLine(' 华胜益 ', [profile])).toEqual(profile)
     expect(supplierForLine(profile.full, [profile])).toEqual(profile)

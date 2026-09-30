@@ -48,8 +48,15 @@ export function linkedCustomsCompany(supplierName: string, profiles: SupplierDic
   return profile ? supplierCustomsCompany(profile) : fallback.trim()
 }
 
-export function supplierForLine(name: string, profiles: SupplierDict[]): SupplierDict {
+export function supplierForLine(name: string, profiles: SupplierDict[], allowIncomplete = false): SupplierDict {
   const key = name.trim().toLocaleLowerCase()
+  if (allowIncomplete) {
+    const matches = profiles.filter(p => [p.keyword, p.full].some(n => n?.trim().toLocaleLowerCase() === key))
+    const profile = key && matches.length === 1 ? matches[0] : undefined
+    return { ...profile, keyword: profile?.keyword || name.trim(), full: profile?.full || name.trim(),
+      nameEn: profile?.nameEn || '', addressZh: profile?.addressZh || '', addressEn: profile?.addressEn || '',
+      phone: profile?.phone || '', email: profile?.email || '', contact: profile?.contact || '' }
+  }
   if (!key) throw new Error('走货明细有物料未填写供应商，请先补齐卖方')
   const matches = profiles.filter(p => [p.keyword, p.full].some(n => n?.trim().toLocaleLowerCase() === key))
   if (matches.length !== 1) throw new Error(matches.length
@@ -67,6 +74,6 @@ export function supplierForLine(name: string, profiles: SupplierDict[]): Supplie
 
 // 合同/发票卖方规则：仅当报关公司明确为华胜益时改用华胜益档案；
 // 其他报关公司（含空值）均不参与卖方判断，仍使用该行供应商档案。
-export function documentSellerForLine(supplierName: string, customsCompany: string, profiles: SupplierDict[]): SupplierDict {
-  return supplierForLine(isHuashengyi(customsCompany) ? HUASHENGYI_FULL_NAME : supplierName, profiles)
+export function documentSellerForLine(supplierName: string, customsCompany: string, profiles: SupplierDict[], allowIncomplete = false): SupplierDict {
+  return supplierForLine(isHuashengyi(customsCompany) ? HUASHENGYI_FULL_NAME : supplierName, profiles, allowIncomplete)
 }

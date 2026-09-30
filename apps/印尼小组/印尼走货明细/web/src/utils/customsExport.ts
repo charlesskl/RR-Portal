@@ -2054,7 +2054,7 @@ async function restoreTemplateDocumentStyles(
     const key = `${baseStyle}|${numFmtId}`
     const cached = derivedStyles.get(key)
     if (cached) return cached
-    const base = xfNodes[Number(baseStyle)] || xfNodes[0]
+    const base = rawXfs.getElementsByTagName('xf')[Number(baseStyle)] || xfNodes[0]
     const copy = rawStyles.importNode(base, true) as typeof base
     copy.setAttribute('numFmtId', numFmtId)
     copy.setAttribute('applyNumberFormat', '1')
@@ -2069,7 +2069,7 @@ async function restoreTemplateDocumentStyles(
     const key = `${baseStyle}|fill:${fillId}`
     const cached = derivedStyles.get(key)
     if (cached) return cached
-    const base = xfNodes[Number(baseStyle)] || xfNodes[0]
+    const base = rawXfs.getElementsByTagName('xf')[Number(baseStyle)] || xfNodes[0]
     const copy = rawStyles.importNode(base, true) as typeof base
     copy.setAttribute('fillId', fillId)
     copy.setAttribute('applyFill', '1')
@@ -2082,7 +2082,7 @@ async function restoreTemplateDocumentStyles(
     const key = `${baseStyle}|font-size:${size}`
     const cached = derivedStyles.get(key)
     if (cached) return cached
-    const base = xfNodes[Number(baseStyle)] || xfNodes[0]
+    const base = rawXfs.getElementsByTagName('xf')[Number(baseStyle)] || xfNodes[0]
     const baseFontId = Number(base.getAttribute('fontId') || 0)
     const fontKey = `${baseFontId}|size:${size}`
     let fontId = derivedFonts.get(fontKey)
@@ -2122,6 +2122,8 @@ async function restoreTemplateDocumentStyles(
     if (!match || Number(match[1]) < 4) continue
     const style = cell.getAttribute('s') || '0'
     const fillId = xfNodes[Number(style)]?.getAttribute('fillId') || style
+    // 无填充的尾部空白行不是公司配色样板。
+    if (fillId === '0') continue
     if (!seenRowStyles.has(fillId)) {
       seenRowStyles.add(fillId)
       colorRows.push(Number(match[1]))
@@ -2152,8 +2154,11 @@ async function restoreTemplateDocumentStyles(
           // 模板 AQ（采购总额）曾误设为人民币；与 AP 一样使用采购币种格式，
           // 美金数据必须显示 US$，不能再显示 ¥。
           const sourceColumn = match[1]
-          rawStyle = rawMainStyles.get(`${sourceColumn}${sourceRow}`) ?? rawMainStyles.get(`${sourceColumn}4`)
-          if (rawStyle && match[1] === 'E') rawStyle = styleWithFill(rawStyle, rawMainStyles.get('E3') || rawStyle)
+          // 所有公司都沿用第 4 行的列格式，仅替换分组底色，避免样板行
+          // 自带的字体、对齐和 General 日期格式污染导出明细。
+          rawStyle = rawMainStyles.get(`${sourceColumn}4`)
+          if (rawStyle) rawStyle = styleWithFill(rawStyle,
+            rawMainStyles.get(sourceColumn === 'E' ? 'E3' : `A${sourceRow}`) || rawStyle)
           if (rawStyle && ['Z', 'AA', 'AB'].includes(match[1])) rawStyle = styleForCurrency(rawStyle, 'US$')
           if (rawStyle && ['AO', 'AP', 'AQ'].includes(match[1])) {
             rawStyle = styleForCurrency(rawStyle, outputCurrencies[Number(match[2]) - 4] || '¥')

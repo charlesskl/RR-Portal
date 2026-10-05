@@ -157,6 +157,15 @@
         </select>
       </label>
       <button class="btn-icon" onclick="exportPDF()" title="导出PDF">⬇ PDF</button>
+      <div id="sysSwitch" style="position:relative;display:inline-block">
+        <button class="btn-icon" onclick="event.stopPropagation();document.getElementById('sysSwitchMenu').hidden=!document.getElementById('sysSwitchMenu').hidden" title="切换系统">⇄ 切换系统 ▾</button>
+        <div id="sysSwitchMenu" hidden style="position:absolute;right:0;top:110%;z-index:60;background:#fff;color:#1f2937;border-radius:12px;box-shadow:0 12px 30px rgba(0,0,0,.25);overflow:hidden;min-width:180px;text-align:left">
+          <a href="http://localhost:3000/#/jump?app=qc-report" style="display:block;padding:10px 14px;font-size:14px;color:#1f2937;text-decoration:none">QC成品报告系统</a>
+          <a href="http://localhost:3000/#/jump?app=toyqms" style="display:block;padding:10px 14px;font-size:14px;color:#1f2937;text-decoration:none">玩具质量管理系统</a>
+          <a href="http://localhost:3000/#/jump?app=voyageplex" style="display:block;padding:10px 14px;font-size:14px;color:#1f2937;text-decoration:none">VoyagePlex船务协同</a>
+          <a href="http://localhost:3000/" style="display:block;padding:10px 14px;font-size:14px;color:#475569;text-decoration:none;border-top:1px solid #e5e7eb">← 返回门户首页</a>
+        </div>
+      </div>
       <div id="userBadge" style="display:inline-flex;align-items:center;gap:6px;margin-right:4px"></div>
       <button class="btn-icon btn-add" onclick="openAddModal()" title="新增记录">＋ 新增验货</button>
     </div>
@@ -890,11 +899,19 @@
 <!-- TOAST -->
 <div class="toast" id="toast"></div>
 
+<script src="sso.js"></script><!-- 门户SSO免登：必须在 qc-backend.js / app.js 之前 -->
 <script src="report_export.js"></script>
 <script src="qc-backend.js?v=20260709-sync"></script><!-- 后端同步层：必须在 app.js 之前 -->
 <script src="app.js?v=20260702-heatmap"></script>
 <script src="ai-ocr.js?v=20260706-ocr-dispatch"></script><!-- AI(百炼)识别，劫持 startOcr -->
 <script src="mobile.js"></script><!-- 移动端侧栏抽屉交互 -->
+<script>
+/* 切换系统下拉：点击页面其它位置时收起 */
+document.addEventListener('click', function () {
+  var menu = document.getElementById('sysSwitchMenu');
+  if (menu) menu.hidden = true;
+});
+</script>
 </div><!-- /appWrapper -->
 
 </body>

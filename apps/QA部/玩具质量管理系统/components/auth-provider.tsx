@@ -32,6 +32,17 @@ export function AuthProvider({children}:{children:React.ReactNode}){
   useEffect(()=>{void(async()=>{
     if(remote){
       try{
+        // 门户免登：网址带 sso_ticket 时先换会话令牌
+        const url=new URL(window.location.href);
+        const ticket=url.searchParams.get("sso_ticket");
+        if(ticket){
+          try{
+            const result=await apiFetch<{token:string;user:PublicUser}>("/auth/sso",{method:"POST",body:{ticket}});
+            setRemoteToken(result.token);
+            url.searchParams.delete("sso_ticket");
+            window.history.replaceState(null,"",url.toString());
+          }catch{/* 免登失败则回落到账号密码登录 */}
+        }
         if(getRemoteToken()){const me=await apiFetch<{user:PublicUser}>("/auth/me");setUser(me.user)}
         try{setUsers(await apiFetch<PublicUser[]>("/users"))}catch{setUsers([])}
       }catch{setUser(null)}

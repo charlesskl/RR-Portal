@@ -89,6 +89,32 @@ export async function login(loginName, password) {
   return match;
 }
 
+// 门户免登：按登录名称找或建账号（新建给全部权限，密码随机不可猜）
+// permissions 存在时（门户票据下发），每次登录都同步为该权限清单
+export async function ssoLogin(loginName, displayName, permissions) {
+  const trimmed = String(loginName || "").trim();
+  if (!trimmed) throw new Error("免登票据缺少账号。");
+  let user = readUsers().find((item) => normalizeLoginName(item.loginName) === normalizeLoginName(trimmed));
+  if (!user) {
+    const timestamp = now();
+    const credentials = await passwordFields(crypto.randomUUID());
+    user = {
+      id: crypto.randomUUID(), name: String(displayName || trimmed).trim() || trimmed,
+      responsibility: "门户用户", loginName: trimmed,
+      category: permissions ? "partial" : "all",
+      permissions: permissions ? [...permissions] : [...defaultPermissions.all],
+      enabled: true, mustChangePassword: false,
+      ...credentials, createdAt: timestamp, updatedAt: timestamp, isPrimary: false
+    };
+    writeUser(user);
+  } else if (permissions) {
+    user = { ...user, category: "partial", permissions: [...permissions], updatedAt: now() };
+    writeUser(user);
+  }
+  if (!user.enabled) throw new Error("账号已停用。");
+  return user;
+}
+
 export async function changeOwnPassword(user, currentPassword, newPassword) {
   if (newPassword.length < 8) throw new Error("新密码至少需要 8 个字符。");
   if (await hashPassword(currentPassword, user.passwordSalt) !== user.passwordHash) throw new Error("当前密码不正确。");

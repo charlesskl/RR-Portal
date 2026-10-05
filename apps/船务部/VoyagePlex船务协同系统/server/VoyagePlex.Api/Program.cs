@@ -205,7 +205,7 @@ var validRoles = new[] { "admin", "shipping", "warehouse" };
 app.Use(async (context, next) =>
 {
     var path = context.Request.Path.Value ?? "";
-    var anonymous = path is "/api/health" or "/api/auth/login" or "/api/auth/setup-status" or "/api/auth/setup" ||
+    var anonymous = path is "/api/health" or "/api/auth/login" or "/api/auth/setup-status" or "/api/auth/setup" or "/api/auth/sso" ||
         (app.Environment.IsDevelopment() && path.StartsWith("/swagger", StringComparison.Ordinal));
     if (anonymous) { await next(); return; }
 
@@ -277,6 +277,65 @@ app.MapPost("/api/auth/login", async (JsonObject payload, HttpContext context, A
     context.Response.Cookies.Append(sessionCookie, rawToken, new CookieOptions { HttpOnly = true, SameSite = SameSiteMode.Strict, Secure = context.Request.IsHttps, MaxAge = sessionLifetime, Path = "/" });
     return Results.Ok(UserResponse(user));
 });
+
+app.MapPost("/api/auth/sso", async (JsonObject payload, HttpContext context, AppDbContext db, CancellationToken cancellationToken) =>
+{
+    var ticket = payload["ticket"]?.ToString() ?? "";
+    var secret = Environment.GetEnvironmentVariable("SSO_SECRET") ?? "dev-sso-secret-change-me";
+    string username; string displayName;
+    try
+    {
+        var parts = ticket.Split('.');
+        if (parts.Length != 3) return Results.Json(new { error = "免登票据格式不正确" }, statusCode: StatusCodes.Status401Unauthorized);
+        using var hmac = new HMACSHA256(System.Text.Encoding.UTF8.GetBytes(secret));
+        var expected = hmac.ComputeHash(System.Text.Encoding.UTF8.GetBytes(parts[0] + "." + parts[1]));
+        var actual = Base64UrlDecodeBytes(parts[2]);
+        if (actual is null || !CryptographicOperations.FixedTimeEquals(expected, actual))
+            return Results.Json(new { error = "免登票据校验失败" }, statusCode: StatusCodes.Status401Unauthorized);
+        var ticketPayload = JsonNode.Parse(System.Text.Encoding.UTF8.GetString(Base64UrlDecodeBytes(parts[1])!));
+        var exp = ticketPayload?["exp"]?.GetValue<long>() ?? 0;
+        if (exp <= 0 || DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() > exp)
+            return Results.Json(new { error = "免登票据已过期" }, statusCode: StatusCodes.Status401Unauthorized);
+        if (ticketPayload?["app"]?.ToString() != "voyageplex")
+            return Results.Json(new { error = "免登票据不属于本系统" }, statusCode: StatusCodes.Status401Unauthorized);
+        username = (ticketPayload?["sub"]?.ToString() ?? "").Trim().ToLowerInvariant();
+        displayName = ticketPayload?["name"]?.ToString().Trim() ?? "";
+        if (username.Length == 0) return Results.Json(new { error = "免登票据缺少账号" }, statusCode: StatusCodes.Status401Unauthorized);
+        if (displayName.Length == 0) displayName = username;
+    }
+    catch (Exception)
+    {
+        return Results.Json(new { error = "免登票据无效" }, statusCode: StatusCodes.Status401Unauthorized);
+    }
+    var user = await db.Users.FirstOrDefaultAsync(value => value.Username == username, cancellationToken);
+    if (user is null)
+    {
+        user = new AppUser { Username = username, DisplayName = displayName, Role = "admin", PasswordHash = PasswordService.Hash(Convert.ToBase64String(RandomNumberGenerator.GetBytes(24))) };
+        db.Users.Add(user);
+        await db.SaveChangesAsync(cancellationToken);
+    }
+    else if (!user.IsActive)
+    {
+        return Results.Json(new { error = "账号已停用" }, statusCode: StatusCodes.Status403Forbidden);
+    }
+    var rawToken = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
+    db.UserSessions.Add(new UserSession { UserId = user.Id, TokenHash = PasswordService.TokenHash(rawToken), ExpiresAt = DateTime.UtcNow.Add(sessionLifetime) });
+    user.LastLoginAt = DateTime.UtcNow; user.UpdatedAt = DateTime.UtcNow;
+    await db.SaveChangesAsync(cancellationToken);
+    context.Response.Cookies.Append(sessionCookie, rawToken, new CookieOptions { HttpOnly = true, SameSite = SameSiteMode.Strict, Secure = context.Request.IsHttps, MaxAge = sessionLifetime, Path = "/" });
+    return Results.Ok(UserResponse(user));
+});
+
+static byte[]? Base64UrlDecodeBytes(string value)
+{
+    try
+    {
+        var text = value.Replace('-', '+').Replace('_', '/');
+        switch (text.Length % 4) { case 2: text += "=="; break; case 3: text += "="; break; case 0: break; default: return null; }
+        return Convert.FromBase64String(text);
+    }
+    catch (FormatException) { return null; }
+}
 
 app.MapGet("/api/auth/me", (HttpContext context) => Results.Ok(UserResponse((AppUser)context.Items["CurrentUser"]!)));
 app.MapPost("/api/auth/logout", async (HttpContext context, AppDbContext db, CancellationToken cancellationToken) =>

@@ -123,6 +123,7 @@ declare -A PATH_TO_SERVICE=(
   ["apps/业务部/ZURU河源排期入单/"]="hy-schedule-system"
   ["apps/业务部/内部报价系统/"]="internal-quote"
   ["apps/工程部/A-doc生成系統/"]="zouhuo"
+  ["apps/工程部/工程资料管理系统/"]="gongcheng-ziliao"
   ["apps/工程部/工程啤办单/"]="rr-production"
   ["apps/工程部/模具手办采购订单系统/"]="figure-mold-cost-system"
   ["apps/工程部/自动化设备统计/"]="automation-equipment"

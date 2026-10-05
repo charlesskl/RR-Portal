@@ -120,7 +120,7 @@
     let resolved = new Map(), error = '';
     try { resolved = window.MixedMolds.catalogRows(root, cfg, window.__data.quote.qty).resolved; } catch (e) { error = e.message; }
     const selectionMode = productId && productId !== '__catalog__';
-    const fields = [['name','零件名称','text'],['images','图片','images'],['mold_no','模号','text'],['material','材质','text'],['weight_g','单份净重 g'],['loss_pct','料损 %'],['material_unit_price','料价 HKD/g'],['machine_model','机型','text'],['machine','机台'],['machine_price','机台日费用 HKD'],['target','日产啤次'],['cavity','出模数'],['production_demand','生产需求量（手填）']];
+    const fields = [['name','零件名称','text'],['images','图片','images'],['mold_no','模号','text'],['material','材质','text'],['weight_g','单份净重 g'],['loss_pct','料损 %'],['material_unit_price','料价 HKD/g'],['machine_model','机型','text'],['machine','机台'],['machine_price','机台日费用 HKD'],['target','日产啤次'],['cavity','出模数'],['production_demand','生产需求量（导入/手填）']];
     const lossRates = [...new Set(catalog.parts.map(p => Number(p.loss_pct ?? 3)))];
     const uniformLoss = lossRates.length === 1 ? lossRates[0] : catalog.parts.length ? '' : (root.catalog_loss_pct ?? 3);
     const selection = catalog.selections[productId] || [];

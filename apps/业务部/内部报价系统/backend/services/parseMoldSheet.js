@@ -27,6 +27,7 @@ const FIELD_KEYWORDS = {
   product_size:   ['产品尺寸'],
   machine:        ['机型(TON)', '机台大小', 'INJECTIONMACHINETYPE', '机型'],
   weight:         ['净重', '重量', '料重', '克重', '零件重量', '零件重', 'PARTWEIGHT'],
+  production_demand: ['日产能要求', '生产需求量', 'PRODUCTIONDEMAND'],
   daily_capacity: ['预计产品日产能', '日产能', 'DAILYCAP', 'PCS/DAY'],
   cycle:          ['周期', 'CYCLETIME', 'CYCLE'],   // 注塑生产周期(秒)
   target:         ['模具预计日啤数', '目标数', 'CYCLES/DAY', 'CYCLESDAY'],
@@ -416,6 +417,7 @@ function tryParseSheet(wb, sheetName) {
     }
     const cyc = parseNumber(cell(r, 'cycle')); if (cyc != null && current.cycle == null) current.cycle = cyc;
     const machine = normalizeMachine(cell(r, 'machine'), machineHeader); if (machine && !current.machine) current.machine = machine;
+    const demand = parseNumber(cell(r, 'production_demand')); if (demand != null && current.production_demand == null) current.production_demand = demand;
     const capacity = parseNumber(cell(r, 'daily_capacity')); if (capacity != null && current.daily_capacity == null) current.daily_capacity = capacity;
     const target = parseNumber(cell(r, 'target')); if (target != null && current.target == null) current.target = target;
     const shotPrice = parseNumber(cell(r, 'shot_price')); if (shotPrice != null && current.shot_price == null) current.shot_price = shotPrice;
@@ -480,6 +482,7 @@ function tryParseSheet(wb, sheetName) {
       machine_model: machineTonToModel(g.machine, machineHeader),
       target: g.target,
       daily_capacity: g.daily_capacity,
+      production_demand: g.production_demand ?? null,
       shot_price: g.shot_price,
       price_rmb: g.price_rmb,
       price_usd: g.price_usd,
@@ -581,6 +584,7 @@ function buildPartDetailMolds(dataRows, cell, machineHeader = '') {
     const g = groups.get(key);
     g.parts.push({
       name: partName,
+      production_demand: parseNumber(cell(r, 'production_demand')),
       name_en: partNameEn,
       name_cn: partNameCn,
       material,
@@ -641,6 +645,7 @@ function buildPartDetailMolds(dataRows, cell, machineHeader = '') {
       machine_model: machineModel,
       target: g.target,
       daily_capacity: g.daily_capacity,
+      production_demand: g.production_demand ?? null,
       shot_price: g.shot_price,
       note: [...new Set(g.notes)].join('；'),
       _rows: [g.rowStart, g.rowEnd],

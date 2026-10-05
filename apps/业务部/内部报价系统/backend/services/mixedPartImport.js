@@ -42,7 +42,7 @@ function importParts(config, engineering, molds, { replacePlaceholders = false, 
   validateConfig(next);
   root.mixed_imported_parts ||= []; root.mixed_imported_molds ||= []; root.mixed_part_selections ||= {};
   const known = new Map([...existingParts, ...root.mixed_imported_parts].map(p => [identity(p),p]));
-  let added = 0, assigned = 0;
+  let added = 0, assigned = 0, demandsFilled = 0;
   for (const part of importedParts(molds)) {
     const key = identity(part);
     let stored = known.get(key);
@@ -51,6 +51,10 @@ function importParts(config, engineering, molds, { replacePlaceholders = false, 
       if ([...known.values()].some(p => p.id === id)) throw new Error('零件标识冲突');
       stored = {...part, id, source_file:sourceFile, material_unit_price:null, shot_price:0, loss_pct:3};
       root.mixed_imported_parts.push(stored); known.set(key,stored); added++;
+    }
+    if ((stored.production_demand == null || stored.production_demand === '') && part.production_demand != null) {
+      stored.production_demand = part.production_demand; demandsFilled++;
+      if (!root.mixed_imported_parts.some(p => p.id === stored.id)) root.mixed_imported_parts.push({...stored});
     }
     for (const code of productNumbers(part.name)) {
       const product = next.products.find(p => canonical(p.code) === code);
@@ -62,6 +66,6 @@ function importParts(config, engineering, molds, { replacePlaceholders = false, 
     if (!root.mixed_imported_molds.some(m => JSON.stringify(m) === JSON.stringify({...mold,source_file:sourceFile}))) root.mixed_imported_molds.push({...mold,source_file:sourceFile});
   }
   root.mixed_import_summary = {...summary, source_file:sourceFile};
-  return { config:next, engineering:root, summary:{...summary,added,assigned,total_products:next.products.length} };
+  return { config:next, engineering:root, summary:{...summary,added,assigned,demands_filled:demandsFilled,total_products:next.products.length} };
 }
 module.exports = { productNumbers, summarize, importParts };

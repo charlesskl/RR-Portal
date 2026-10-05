@@ -230,7 +230,7 @@ function lookupMaterialPrice(material, grade, prices) {
             machine_price: price, demand: 0, direct_labor: true });
           return null;
         }
-        if (specified === '' || specified == null) throw new Error(part.name + ' 未填写生产需求量；请在啤机部手填生产需求量');
+        if (specified === '' || specified == null) throw new Error(part.name + ' 未填写生产需求量；请导入日产能要求或在啤机部填写生产需求量');
         const demand = number(specified, part.name + ' 生产需求量', true);
         return { part, price, target, cavity, demand, cycles: demand / cavity, total: 0 };
       }).filter(Boolean);
@@ -286,7 +286,7 @@ function lookupMaterialPrice(material, grade, prices) {
   }
   function inheritMoldFields(part, mold) {
     const result = {...part, note: cleanImportedMoldNote(part.note)};
-    for (const key of ['sets','cycle_sec','machine','machine_model','target','daily_capacity','mold_type','mold_size','price_rmb','price_usd']) {
+    for (const key of ['sets','cycle_sec','machine','machine_model','target','daily_capacity','production_demand','mold_type','mold_size','price_rmb','price_usd']) {
       if (result[key] == null || result[key] === '') result[key] = mold?.[key] ?? mold?.detail?.[key] ?? result[key];
     }
     return result;

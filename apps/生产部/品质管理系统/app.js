@@ -3522,6 +3522,8 @@ function openEditModal(id) {
   setVal('f_fail',        r.fail || '');
   setVal('f_defectRate',  r.defectRate || '');
   setVal('f_result',      r.result || 'PASS');
+  setVal('f_aqlLevel',    r.aqlLevel || 'MAJ 0.65');
+  syncAqlLevelPills();
   setVal('f_defect',      r.defect || '');
   setVal('f_qc',          r.qc || '');
   setVal('f_remark',      r.remark || '');
@@ -3550,6 +3552,8 @@ function clearForm() {
   if (_meQc) setVal('f_qc', _meQc.name || _meQc.username || '');
   setVal('f_type',   '成品');
   setVal('f_result', 'PASS');
+  setVal('f_aqlLevel', 'MAJ 0.65');   /* AQL档位默认 MAJ 0.65（无不良时报告也高亮表头） */
+  syncAqlLevelPills();
   _loadDefectRows([]);   /* 清空不良明细 */
   _loadMeasRows([]);     /* 清空测量数据 */
   _syncOrderNoNA();      /* PO号 NA 勾选复位 */
@@ -4668,6 +4672,22 @@ function toggleOrderNoNA() {
     inp.focus();
   }
 }
+/* ── AQL 档位多选（pill 按钮）：值存隐藏框 f_aqlLevel，逗号分隔 ── */
+function toggleAqlLevel(btn) {
+  btn.classList.toggle('on');
+  const hid = document.getElementById('f_aqlLevel');
+  if (!hid) return;
+  const on = [...document.querySelectorAll('#aqlLevelPills .aql-lvl-btn.on')].map(b => b.dataset.lv);
+  hid.value = on.join(',');
+}
+function syncAqlLevelPills() {
+  const hid  = document.getElementById('f_aqlLevel');
+  const vals = (hid ? hid.value : '').split(',').map(s => s.trim()).filter(Boolean);
+  document.querySelectorAll('#aqlLevelPills .aql-lvl-btn').forEach(b => {
+    b.classList.toggle('on', vals.includes(b.dataset.lv));
+  });
+}
+
 /* 根据输入框当前值同步 NA 勾选状态（新增清空 / 编辑载入 / OCR 填入后调用） */
 function _syncOrderNoNA() {
   const cb  = document.getElementById('f_orderNoNA');
@@ -4687,11 +4707,14 @@ function resetSingleEntryFormForNext() {
     supplier: getVal('f_supplier'),
     client:   getVal('f_client'),
     type:     document.getElementById('f_type')?.value || '成品',
+    aqlLevel: getVal('f_aqlLevel'),
   };
   clearForm();
   setVal('f_supplier', _keep.supplier);
   setVal('f_client',   _keep.client);
   setVal('f_type',     _keep.type);
+  setVal('f_aqlLevel', _keep.aqlLevel || 'MAJ 0.65');
+  syncAqlLevelPills();
   const dateEl     = document.getElementById('f_date');
   const inspDateEl = document.getElementById('f_inspDate');
   if (dateEl)     dateEl.value     = todayStr();
@@ -4845,6 +4868,7 @@ function saveRecord(options = {}) {
   const rec = {
     date, inspDate: getVal('f_inspDate') || date,
     supplier, client: getVal('f_client'), processType: getVal('f_processType'),
+    aqlLevel: getVal('f_aqlLevel'),
     productNo: getVal('f_productNo'),
     productName: getVal('f_productName'), deliveryNo: getVal('f_deliveryNo'),
     orderNo: getVal('f_orderNo'),

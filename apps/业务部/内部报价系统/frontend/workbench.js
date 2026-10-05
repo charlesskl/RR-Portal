@@ -108,17 +108,29 @@ function requestUnsavedAction(deptName) {
 }
 
 // 保存时携带版本；后端拒绝覆盖已被其他窗口更新的资料。
-// 不挡保存，仅弹一次提示；成功后更新本地 filled_at 作为新基线（避免自己的后续保存误报）
-async function putSection(sec, payload, submit) {
-  const r = await api('/sections/' + sec.id, {
-    method: 'PUT',
-    body: JSON.stringify({ payload, submit: !!submit, base_filled_at: sec.filled_at || null }),
+// 同一部门的保存串行执行，避免快捷键、页面按钮或失焦保存同时发出时，
+// 后发请求携带旧 filled_at 而被误判为其他人覆盖。
+const sectionSaveQueues = new Map();
+function putSection(sec, payload, submit) {
+  const sectionId = sec.id;
+  const previous = sectionSaveQueues.get(sectionId) || Promise.resolve();
+  const current = previous.catch(() => {}).then(async () => {
+    const r = await api('/sections/' + sectionId, {
+      method: 'PUT',
+      body: JSON.stringify({ payload, submit: !!submit, base_filled_at: sec.filled_at || null }),
+    });
+    if (r) {
+      if (r.filled_at) sec.filled_at = r.filled_at;
+      if (r.conflict) alert(`⚠️ 该部分在你打开后已被「${r.last_by || '他人'}」修改过（${r.last_at || ''}），你的保存已覆盖它。\n请刷新核对，必要时让对方重填。`);
+    }
+    return r;
   });
-  if (r) {
-    if (r.filled_at) sec.filled_at = r.filled_at;
-    if (r.conflict) alert(`⚠️ 该部分在你打开后已被「${r.last_by || '他人'}」修改过（${r.last_at || ''}），你的保存已覆盖它。\n请刷新核对，必要时让对方重填。`);
-  }
-  return r;
+  sectionSaveQueues.set(sectionId, current);
+  const release = () => {
+    if (sectionSaveQueues.get(sectionId) === current) sectionSaveQueues.delete(sectionId);
+  };
+  current.then(release, release);
+  return current;
 }
 
 // ==================== 通用可编辑表格 ====================

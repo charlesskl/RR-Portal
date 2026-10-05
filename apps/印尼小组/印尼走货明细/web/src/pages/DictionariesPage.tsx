@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Button, Card, Input, InputNumber, Popconfirm, Space, Switch, Table, Tabs, Tag, message } from 'antd'
 import { api, type Dictionaries, type HsDict, type TranslationDict } from '../api/client'
+import { sortedTranslations } from '../utils/translationSort'
 
 export default function DictionariesPage() {
   const [hs,  setHs]  = useState<HsDict[]>([])
@@ -71,10 +72,7 @@ export default function DictionariesPage() {
 
 function TranslationTable({ rows, setRows }: { rows: TranslationDict[]; setRows: (r: TranslationDict[]) => void }) {
   const [filter, setFilter] = useState('')
-  const filtered = useMemo(() => rows
-    .map((q, _i) => ({ q, _i }))
-    .filter(({ q }) => !filter || `${q.keyword || ''}${q.english || ''}`.toLowerCase().includes(filter.toLowerCase())),
-    [rows, filter])
+  const filtered = useMemo(() => sortedTranslations(rows, filter), [rows, filter])
   function patch(i: number, k: keyof TranslationDict, v: string | boolean) {
     setRows(rows.map((q, idx) => idx === i ? { ...q, [k]: v } : q))
   }
@@ -86,10 +84,10 @@ function TranslationTable({ rows, setRows }: { rows: TranslationDict[]; setRows:
         <Input.Search placeholder="搜索中文名 / 英文名" allowClear style={{ width: 320 }}
           onSearch={setFilter} onChange={(e) => !e.target.value && setFilter('')} />
         <Button onClick={add}>➕ 新增翻译</Button>
-        <span style={{ color: '#8c8c8c' }}>精确匹配中文名；停用后不再自动带出</span>
+        <span style={{ color: '#8c8c8c' }}>中文名拼音 A–Z 排序；精确匹配，停用后不再自动带出</span>
       </Space>
       <Table
-        rowKey={(_, i) => String(i)} size="small" dataSource={filtered}
+        rowKey={r => String(r._i)} size="small" dataSource={filtered}
         pagination={{ defaultPageSize: 50, showSizeChanger: true }}
         columns={[
           { title: '#', width: 50, render: (_v, _r, i) => i + 1 },

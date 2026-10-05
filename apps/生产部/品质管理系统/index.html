@@ -157,15 +157,6 @@
         </select>
       </label>
       <button class="btn-icon" onclick="exportPDF()" title="导出PDF">⬇ PDF</button>
-      <div id="sysSwitch" style="position:relative;display:inline-block">
-        <button class="btn-icon" onclick="event.stopPropagation();document.getElementById('sysSwitchMenu').hidden=!document.getElementById('sysSwitchMenu').hidden" title="切换系统">⇄ 切换系统 ▾</button>
-        <div id="sysSwitchMenu" hidden style="position:absolute;right:0;top:110%;z-index:60;background:#fff;color:#1f2937;border-radius:12px;box-shadow:0 12px 30px rgba(0,0,0,.25);overflow:hidden;min-width:180px;text-align:left">
-          <a href="http://localhost:3000/#/jump?app=qc-report" style="display:block;padding:10px 14px;font-size:14px;color:#1f2937;text-decoration:none">QC成品报告系统</a>
-          <a href="http://localhost:3000/#/jump?app=toyqms" style="display:block;padding:10px 14px;font-size:14px;color:#1f2937;text-decoration:none">玩具质量管理系统</a>
-          <a href="http://localhost:3000/#/jump?app=voyageplex" style="display:block;padding:10px 14px;font-size:14px;color:#1f2937;text-decoration:none">VoyagePlex船务协同</a>
-          <a href="http://localhost:3000/" style="display:block;padding:10px 14px;font-size:14px;color:#475569;text-decoration:none;border-top:1px solid #e5e7eb">← 返回门户首页</a>
-        </div>
-      </div>
       <div id="userBadge" style="display:inline-flex;align-items:center;gap:6px;margin-right:4px"></div>
       <button class="btn-icon btn-add" onclick="openAddModal()" title="新增记录">＋ 新增验货</button>
     </div>
@@ -633,6 +624,7 @@
 
 </main>
 
+<!-- ═══════════════ MODAL: REJECT (反审核退回) ═══════════════ -->
 <div class="modal-overlay" id="rejectOverlay" onclick="if(event.target===this)closeRejectModal()">
   <div class="modal" style="width:min(460px,92vw)">
     <div class="modal-header">
@@ -774,7 +766,17 @@
           <div class="form-group full" id="defectsPanel">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
               <label style="margin:0">不良明细 <span style="font-size:10px;color:var(--text-dim)">（用于 IQC 报告自动填充 CR/MAJ/MIN 栏位）</span></label>
-              <button type="button" class="btn-secondary btn-sm" id="btnAddDefectRow">＋ 添加一行</button>
+              <span style="display:flex;align-items:center;gap:8px">
+                <span style="font-size:11px;color:var(--text-dim);white-space:nowrap">AQL档位：</span>
+                <input type="hidden" id="f_aqlLevel" value="MAJ 0.65" />
+                <span id="aqlLevelPills" style="display:flex;gap:4px" title="可多选；无不良时 IQC 报告 AQL 表也高亮选中的列表头">
+                  <button type="button" class="aql-lvl-btn" data-lv="CR" onclick="toggleAqlLevel(this)">CR</button>
+                  <button type="button" class="aql-lvl-btn" data-lv="MAJ 0.65" onclick="toggleAqlLevel(this)">MAJ 0.65</button>
+                  <button type="button" class="aql-lvl-btn" data-lv="MAJ 1.0" onclick="toggleAqlLevel(this)">MAJ 1.0</button>
+                  <button type="button" class="aql-lvl-btn" data-lv="MIN 2.5" onclick="toggleAqlLevel(this)">MIN 2.5</button>
+                </span>
+                <button type="button" class="btn-secondary btn-sm" id="btnAddDefectRow">＋ 添加一行</button>
+              </span>
             </div>
             <div id="defectsRowsWrap"
                  style="border:1px solid var(--border);border-radius:6px;padding:8px;
@@ -899,19 +901,11 @@
 <!-- TOAST -->
 <div class="toast" id="toast"></div>
 
-<script src="sso.js"></script><!-- 门户SSO免登：必须在 qc-backend.js / app.js 之前 -->
 <script src="report_export.js"></script>
 <script src="qc-backend.js?v=20260709-sync"></script><!-- 后端同步层：必须在 app.js 之前 -->
 <script src="app.js?v=20260702-heatmap"></script>
 <script src="ai-ocr.js?v=20260706-ocr-dispatch"></script><!-- AI(百炼)识别，劫持 startOcr -->
 <script src="mobile.js"></script><!-- 移动端侧栏抽屉交互 -->
-<script>
-/* 切换系统下拉：点击页面其它位置时收起 */
-document.addEventListener('click', function () {
-  var menu = document.getElementById('sysSwitchMenu');
-  if (menu) menu.hidden = true;
-});
-</script>
 </div><!-- /appWrapper -->
 
 </body>

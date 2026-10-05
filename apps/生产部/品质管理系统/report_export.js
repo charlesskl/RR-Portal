@@ -1473,7 +1473,8 @@ async function exportIQCReport(recordId) {
       allowTaint:      true,
       backgroundColor: '#ffffff',
       logging:         false,
-      windowWidth:     canvas.offsetWidth,
+      /* 有表格微量溢出（max-content > 794）时按 scrollWidth 截取，避免右侧被裁 */
+      windowWidth:     Math.max(canvas.offsetWidth, canvas.scrollWidth),
       windowHeight:    canvas.offsetHeight,
       scrollX: 0, scrollY: 0, x: 0, y: 0,
     });
@@ -1668,13 +1669,23 @@ function _buildIQCCanvas(r) {
 
   /* ── AQL 表联动高亮：录入不良明细选了哪个等级，AQL 表对应列头和
      当前 LOT SIZE 行的 Ac 值就填色标注（黄色，打印友好）── */
-  const usedLv = {
+  /* 不良明细实际用到的等级（有数量才算）：表头和 Ac 数值格都高亮 */
+  const defectLv = {
     CR:     defRows.some(d => (d.cr    || 0) > 0),
     MAJ065: defRows.some(d => (d.maj   || 0) > 0),
     MAJ10:  defRows.some(d => (d.maj10 || 0) > 0),
     MIN25:  defRows.some(d => (d.min   || 0) > 0),
     FUNC:   defRows.some(d => d.category === '功能'
                           && ((d.cr||0) + (d.maj||0) + (d.maj10||0) + (d.min||0)) > 0),
+  };
+  /* 手动选择的 AQL 档位（可多选，逗号分隔）：没填不良数量时只高亮表头，Ac 数值格不填色 */
+  const manualLvs = String(r.aqlLevel || '').split(',').map(s => _nl(s)).filter(Boolean);
+  const usedLv = {
+    CR:     defectLv.CR     || manualLvs.includes('CR'),
+    MAJ065: defectLv.MAJ065 || manualLvs.includes('MAJ065'),
+    MAJ10:  defectLv.MAJ10  || manualLvs.includes('MAJ10'),
+    MIN25:  defectLv.MIN25  || manualLvs.includes('MIN25'),
+    FUNC:   defectLv.FUNC,
   };
   const AQL_HL = '#ffd54d';
   const aqlHdStyle = on =>
@@ -1838,12 +1849,12 @@ function _buildIQCCanvas(r) {
         return `<tr>
           <td style="${lotStyle}">${lotContent}</td>
           <td style="${base};${dB}">${row.sample}</td>
-          <td style="${base};${cellHl(usedLv.CR)}">${row.cr}</td>
-          <td style="${base};${cellHl(usedLv.MAJ065)}">${row.maj065}</td>
-          <td style="${base};${cellHl(usedLv.MAJ10)}">${row.maj10}</td>
-          <td style="${base};${cellHl(usedLv.MIN25)}">${row.min25}</td>
+          <td style="${base};${cellHl(defectLv.CR)}">${row.cr}</td>
+          <td style="${base};${cellHl(defectLv.MAJ065)}">${row.maj065}</td>
+          <td style="${base};${cellHl(defectLv.MAJ10)}">${row.maj10}</td>
+          <td style="${base};${cellHl(defectLv.MIN25)}">${row.min25}</td>
           <td style="${base};${dB}">${row.func_sample}</td>
-          <td style="${base};${cellHl(usedLv.FUNC)}">${row.m065}</td>
+          <td style="${base};${cellHl(defectLv.FUNC)}">${row.m065}</td>
           <td style="${base};${dB}">${row.m065+1}</td>
         </tr>`;
       }).join('')}

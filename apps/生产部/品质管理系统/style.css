@@ -1860,7 +1860,8 @@ tbody tr.row-selected td {
   border-bottom-color: rgba(0,200,255,.12);
 }
 
-/* 验货明细：锁定列（手动开关，列数可选） */
+
+/* 验货明细：锁定列（手动开关，冻结前 5 列到「供应商」） */
 #recordsTable th.col-pinned, #recordsTable td.col-pinned {
   position: sticky; z-index: 4; background: var(--bg-card);
 }
@@ -3128,3 +3129,16 @@ body.theme-light #loginPassword {
 .rs-rejected { background: rgba(255,80,80,.15);  color: var(--red); }
 .rs-approved { background: rgba(0,220,130,.15);  color: var(--green); }
 .reject-reason-text { font-size: 11px; color: var(--red); margin-top: 3px; }
+
+/* AQL 档位多选按钮（新增记录·不良明细标题行） */
+.aql-lvl-btn {
+  padding: 2px 8px; font-size: 11px; line-height: 1.5;
+  border: 1px solid var(--border); border-radius: 10px;
+  background: transparent; color: var(--text-dim); cursor: pointer;
+}
+.aql-lvl-btn:hover { border-color: var(--accent); color: var(--text); }
+.aql-lvl-btn.on {
+  background: var(--accent); border-color: var(--accent);
+  color: #001018; font-weight: 700;
+}
+

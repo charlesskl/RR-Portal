@@ -91,8 +91,8 @@ router.post('/:id/mixed/import-molds', async (req, res) => {
       for (const [section,payload] of [[engineering,imported.engineering],[sales,salesPayload]]) {
         const now = new Date(Math.max(Date.now(), (Date.parse(section.filled_at || '') || 0)+1)).toISOString();
         const saved = await db.prepare(`UPDATE quote_sections SET payload_json = ?, status = 'empty', filled_by = ?, filled_at = ?
-          WHERE id = ? AND payload_json = ? AND status = ? AND COALESCE(filled_at,'') = ?`)
-          .run(JSON.stringify(payload),req.user.name,now,section.id,section.payload_json,section.status,section.filled_at || '');
+          WHERE id = ? AND payload_json = ? AND status = ? AND filled_at IS NOT DISTINCT FROM ?`)
+          .run(JSON.stringify(payload),req.user.name,now,section.id,section.payload_json,section.status,section.filled_at || null);
         if (!saved.changes) throw new Error('资料已被更新，本次未覆盖，请刷新重试');
       }
       await db.prepare("UPDATE quotes SET status = 'drafting' WHERE id = ?").run(id);

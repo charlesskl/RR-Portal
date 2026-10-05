@@ -169,6 +169,9 @@ jobs:
             sync_qc_plan_secret VOYAGEPLEX_MAIL_AUTH_CODE '${{ secrets.VOYAGEPLEX_MAIL_AUTH_CODE }}'
             sync_qc_plan_secret VOYAGEPLEX_MAIL_FOLDER '${{ secrets.VOYAGEPLEX_MAIL_FOLDER }}'
 
+            # 门户 SSO 免登票据密钥（品质管理 qc / 玩具质量 toyqms / VoyagePlex voyageplex-api 共用）
+            sync_qc_plan_secret SSO_SECRET '${{ secrets.SSO_SECRET }}'
+
             echo "=== Script version check ==="
             git fetch origin main
             DEPLOY_SCRIPT_RUNNER=$(mktemp)

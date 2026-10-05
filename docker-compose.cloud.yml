@@ -349,6 +349,7 @@ services:
       - TOYQMS_DATA_DIR=/app/data
       - TOYQMS_STATIC_DIR=/app/out
       - NODE_ENV=production
+      - SSO_SECRET=${SSO_SECRET:?SSO_SECRET is required}
     volumes:
       - ./apps/QA部/玩具质量管理系统/server-data:/app/data
     healthcheck:
@@ -413,6 +414,7 @@ services:
       - NODE_ENV=production
       # 阿里云百炼 (DashScope/Qwen-VL) — 送货单 AI 识别用；复用同一把 Bailian key
       - DASHSCOPE_API_KEY=${QC_BAILIAN_API_KEY:-}
+      - SSO_SECRET=${SSO_SECRET:?SSO_SECRET is required}
     volumes:
       - ./apps/生产部/品质管理系统/data:/app/data
     healthcheck:
@@ -1118,6 +1120,7 @@ services:
       ASPNETCORE_ENVIRONMENT: Production
       ConnectionStrings__Default: Data Source=/app/data/voyageplex.db
       EmailParser__BaseUrl: http://voyageplex-parser:8091
+      SSO_SECRET: ${SSO_SECRET:?SSO_SECRET is required}
     volumes:
       - ./apps/船务部/VoyagePlex船务协同系统/data-runtime:/app/data
     depends_on:

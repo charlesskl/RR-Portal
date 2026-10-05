@@ -54,3 +54,20 @@ test('报价和核价入口加载最新的保存队列脚本', () => {
     assert.match(html, /workbench\.js\?v=20261005-save-queue/);
   }
 });
+
+
+test('PostgreSQL 保存版本保留微秒，JSON 往返不会造成虚假冲突', () => {
+  const source = fs.readFileSync(path.join(root, 'backend', 'db', 'postgres.js'), 'utf8');
+  const registrations = source.slice(source.indexOf('types.setTypeParser'), source.indexOf('if (!process.env.DATABASE_URL)'));
+  const parsers = new Map();
+  vm.runInNewContext(registrations, { types: { setTypeParser: (oid, parser) => parsers.set(oid, parser) } });
+  const parse = parsers.get(1184);
+  assert.equal(typeof parse, 'function');
+  const stored = '2026-10-05 12:28:47.757123+00';
+  const read = parse(stored);
+  const request = JSON.parse(JSON.stringify({ base_filled_at: read }));
+  assert.equal(request.base_filled_at, stored);
+  assert.notEqual(parse('2026-10-05 12:28:47.757124+00'), read, '同毫秒内的新版本仍须检测为冲突');
+  assert.equal(Date.parse(read), Date.parse('2026-10-05T12:28:47.757Z'), '仍兼容现有时间显示及递增逻辑');
+  assert.equal(parse('2026-10-05 12:28:47+00'), '2026-10-05 12:28:47+00');
+});

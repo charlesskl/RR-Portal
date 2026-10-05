@@ -7,6 +7,10 @@ const { Pool, types } = require('pg');
 // PostgreSQL COUNT(*) 是 int8；本系统数量规模在 JS 安全整数范围内，保持原 API 返回 number。
 types.setTypeParser(20, (value) => Number(value));
 
+// Keep PostgreSQL microseconds: JS Date truncates them and breaks exact save-version checks.
+// TIMESTAMPTZ strings round-trip through JSON and SQL without losing precision.
+types.setTypeParser(1184, (value) => value);
+
 if (!process.env.DATABASE_URL) {
   throw new Error('缺少 DATABASE_URL；生产环境必须配置 PostgreSQL 连接串');
 }

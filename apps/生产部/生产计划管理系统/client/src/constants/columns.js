@@ -13,7 +13,6 @@ export const ORDER_COLUMNS = [
   { data: 'product_name',   title: '产品名称',   width: 115 },
   { data: 'version',        title: '版本',       width: 70 },
   { data: 'quantity',       title: '数量',       width: 70, type: 'numeric' },
-  { data: 'quantity_sum',   title: '合计',       width: 80, type: 'numeric', readOnly: true },
   { data: 'work_type',      title: '做工名称',   width: 70 },
   { data: 'production_count', title: '生产数',   width: 70, type: 'numeric' },
   { data: 'production_progress', title: '生产进度', width: 70, type: 'numeric' },

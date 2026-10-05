@@ -47,3 +47,10 @@ test('PostgreSQL 和 SQLite 使用兼容的空时间版本比较', () => {
   assert.match(route, /filled_at IS NOT DISTINCT FROM \?/);
   assert.doesNotMatch(route, /COALESCE\(filled_at, ''\)/);
 });
+
+test('报价和核价入口加载最新的保存队列脚本', () => {
+  for (const page of ['quote.html', 'verification.html']) {
+    const html = fs.readFileSync(path.join(root, 'frontend', page), 'utf8');
+    assert.match(html, /workbench\.js\?v=20261005-save-queue/);
+  }
+});

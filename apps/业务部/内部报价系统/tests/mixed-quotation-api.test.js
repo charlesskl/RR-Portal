@@ -171,4 +171,27 @@ test('混装报价：新建、保存、拆价、权限、审核锁、确认锁�
     const allowed = await api('/quotes/' + customerQuotes.TOMY + '/clone', 'POST', { quote_no: 'AUTHORIZED-CLONE', customer: ' TOMY ' });
     assert.equal((await api('/quotes/' + allowed.id)).quote.customer, 'TOMY');
   });
+  await t.test('序号导入原子保存、多款归属、重复导入及并发审核锁', async () => {
+    const q = await api('/quotes','POST',{quote_no:'NUMBERED',product_name:'按配件序号',customer:'TOMY',qty:100,quote_type:'mixed'});
+    const molds=[{mold_no:'M1',parts:[{name:'52、53、54-瓶盖',cavity:4},{name:'52-瓶身',cavity:2}]}];
+    const initial=await api('/quotes/'+q.id);
+    const request=data=>({molds,source_file:'numbered.xlsx',engineering:JSON.parse(data.sections.find(s=>s.dept==='engineering').payload_json || '{}'),base_filled_at:data.sections.find(s=>s.dept==='engineering').filled_at,expected_config:data.mixed_quote});
+    const before=request(initial);
+    const saved=await api('/quotes/'+q.id+'/mixed/import-molds','POST',before);
+    assert.equal(saved.product_count,3);assert.equal(saved.total_products,3);assert.equal(saved.added,2);
+    let current=await api('/quotes/'+q.id);
+    const eng=JSON.parse(current.sections.find(s=>s.dept==='engineering').payload_json);
+    const shared=eng.mixed_imported_parts.find(p=>p.name.includes('瓶盖'));
+    for(const product of current.mixed_quote.products) assert.ok(eng.mixed_part_selections[product.id].some(r=>r.part_id===shared.id));
+    await api('/quotes/'+q.id+'/mixed/import-molds','POST',before,409);
+    const again=await api('/quotes/'+q.id+'/mixed/import-molds','POST',request(current));
+    assert.equal(again.added,0);assert.equal(again.assigned,0);
+    current=await api('/quotes/'+q.id);
+    const db=new DatabaseSync(path.join(temporary,'test.db'));
+    db.prepare("UPDATE quote_sections SET status='approved' WHERE quote_id=? AND dept='engineering'").run(q.id);db.close();
+    await api('/quotes/'+q.id+'/mixed/import-molds','POST',request(current),409);
+    const after=await api('/quotes/'+q.id);
+    assert.deepEqual(after.mixed_quote,current.mixed_quote);
+  });
+
 });

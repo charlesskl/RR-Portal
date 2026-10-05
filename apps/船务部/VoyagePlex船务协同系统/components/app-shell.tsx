@@ -290,7 +290,19 @@ export function AppShell({ route }: { route: string }) {
   const [setupRequired,setSetupRequired] = useState(false);
   async function loadUser(){setAuthLoading(true);setAuthError("");try{const response=await apiFetch("/api/auth/me",{cache:"no-store"});if(response.ok){setUser(await response.json());setSetupRequired(false);}else if(response.status===401){setUser(null);const setup=await apiFetch("/api/auth/setup-status",{cache:"no-store"});if(!setup.ok)throw new Error("无法检查系统初始化状态");setSetupRequired(Boolean((await setup.json()).required));}else{throw new Error("后台暂时无法检查登录状态");}}catch(reason){setAuthError(reason instanceof Error?reason.message:"后台连接失败");}finally{setAuthLoading(false);}}
   useEffect(()=>{
-    void loadUser();
+    void (async()=>{
+      // 门户免登：网址带 sso_ticket 时先换登录会话，再进入正常登录检查
+      const url=new URL(window.location.href);
+      const ticket=url.searchParams.get("sso_ticket");
+      if(ticket){
+        try{
+          await apiFetch("/api/auth/sso",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({ticket})});
+          url.searchParams.delete("sso_ticket");
+          window.history.replaceState(null,"",url.toString());
+        }catch{/* 失败则回落到账号密码登录 */}
+      }
+      await loadUser();
+    })();
     const renewal = window.setInterval(()=>{
       if(document.visibilityState === "visible") void apiFetch("/api/auth/me",{cache:"no-store"}).catch(()=>{});
     },30*60*1000);
@@ -322,6 +334,7 @@ export function AppShell({ route }: { route: string }) {
       <main>
         <header className="topbar">
           <strong className="topbar-title">{titles[page] ?? "首页"}</strong>
+          <SystemSwitcher />
           <div className="avatar">{role==="admin"?"管理":role==="warehouse"?"仓务":"船务"}</div><span className="user-name"><b>{user.displayName}</b><small>{roleLabel(role)}</small></span><button className="logout-button" onClick={()=>void logout()}>退出</button>
         </header>
         {!pageAllowed?<AccessDenied/>:page === "mail" ? <MailWorkspace route={route} role={role} /> : page === "imports" ? <ImportCenter /> : page === "shipments" ? <ShipmentCenter route={route} role={role} /> : page === "inventory" ? <InventoryCenter route={route} role={role} /> : page === "users" ? <UserManagement currentUser={user}/> : page === "settings" ? <SettingsCenter role={role} /> : <Dashboard />}
@@ -331,6 +344,34 @@ export function AppShell({ route }: { route: string }) {
 }
 
 function roleLabel(role:UserRole){return role==="admin"?"管理员":role==="warehouse"?"仓库文员":"船务员";}
+
+// 门户系统切换器：跳到门户中转页签发免登票据后直达目标系统
+const SWITCH_LINKS=[
+  {href:"http://localhost:3000/#/jump?app=qc-report",label:"QC成品报告系统"},
+  {href:"http://localhost:3000/#/jump?app=toyqms",label:"玩具质量管理系统"},
+  {href:"http://localhost:3000/#/jump?app=xingxin-qms",label:"品质管理系统"},
+];
+function SystemSwitcher(){
+  const [open,setOpen]=useState(false);
+  const ref=useRef<HTMLDivElement>(null);
+  useEffect(()=>{
+    if(!open)return;
+    const close=(e:MouseEvent)=>{if(ref.current&&!ref.current.contains(e.target as Node))setOpen(false);};
+    document.addEventListener("click",close);
+    return ()=>document.removeEventListener("click",close);
+  },[open]);
+  return (
+    <div ref={ref} style={{position:"relative"}}>
+      <button type="button" className="logout-button" onClick={()=>setOpen(v=>!v)}>⇄ 切换系统 ▾</button>
+      {open&&(
+        <div style={{position:"absolute",right:0,top:"110%",zIndex:50,background:"#fff",borderRadius:12,boxShadow:"0 12px 30px rgba(0,0,0,.18)",overflow:"hidden",minWidth:180}}>
+          {SWITCH_LINKS.map(l=><a key={l.href} href={l.href} style={{display:"block",padding:"10px 14px",fontSize:14,color:"#1f2937",textDecoration:"none"}}>{l.label}</a>)}
+          <a href="http://localhost:3000/" style={{display:"block",padding:"10px 14px",fontSize:14,color:"#475569",textDecoration:"none",borderTop:"1px solid #e5e7eb"}}>← 返回门户首页</a>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function AuthScreen({setupRequired,onAuthenticated}:{setupRequired:boolean;onAuthenticated:(user:CurrentUser)=>void}){
   const [username,setUsername]=useState("");const [displayName,setDisplayName]=useState("");const [password,setPassword]=useState("");const [error,setError]=useState("");const [saving,setSaving]=useState(false);

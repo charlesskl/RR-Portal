@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { backendFetch, proxyResponse } from "@/lib/backend-proxy";
 
 export const dynamic = "force-dynamic";
-const allowed = new Set(["setup-status", "setup", "login", "me", "logout"]);
+const allowed = new Set(["setup-status", "setup", "login", "sso", "me", "logout"]);
 
 async function forward(request: NextRequest, context: { params: Promise<{ action: string }> }) {
   const { action } = await context.params;

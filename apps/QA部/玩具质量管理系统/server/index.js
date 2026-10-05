@@ -6,6 +6,7 @@ import fastifyStatic from "@fastify/static";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { createHmac, timingSafeEqual } from "node:crypto";
 import * as repo from "./repository.js";
 import * as auth from "./auth.js";
 import * as ai from "./ai.js";
@@ -49,6 +50,58 @@ const handle = (fn) => async (request, reply) => {
 app.get("/api/health", () => ({ ok: true, product: "ToyQMS", version: "0.4.0" }));
 
 // ---------- auth & users ----------
+
+// 门户免登票据（HS256 JWT）校验
+function verifyPortalTicket(ticket) {
+  const parts = String(ticket || "").split(".");
+  if (parts.length !== 3) throw new Error("免登票据格式不正确。");
+  const secret = process.env.SSO_SECRET || "dev-sso-secret-change-me";
+  const expected = createHmac("sha256", secret).update(`${parts[0]}.${parts[1]}`).digest();
+  const actual = Buffer.from(parts[2].replace(/-/g, "+").replace(/_/g, "/"), "base64");
+  if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) {
+    throw new Error("免登票据校验失败。");
+  }
+  let payload;
+  try {
+    payload = JSON.parse(Buffer.from(parts[1].replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf8"));
+  } catch {
+    throw new Error("免登票据无效。");
+  }
+  if (!payload.exp || Date.now() > payload.exp) throw new Error("免登票据已过期。");
+  if (payload.app !== "toyqms") throw new Error("免登票据不属于本系统。");
+  if (!payload.sub) throw new Error("免登票据缺少账号。");
+  return payload;
+}
+
+// 门户功能权限（none/view/full）→ 本系统权限键的映射
+const PORTAL_FEATURE_PERMS = {
+  dashboard: { view: ["view_dashboard"], full: ["view_dashboard"] },
+  complaints: { view: ["view_complaints"], full: ["view_complaints", "manage_complaints", "delete_complaints"] },
+  cap: { view: ["view_cap"], full: ["view_cap", "manage_cap"] },
+  reports: { view: ["view_reports"], full: ["view_reports", "export_reports"] },
+  "series-analysis": { view: ["view_analysis"], full: ["view_analysis"] },
+  "quality-intelligence": { view: ["view_analysis"], full: ["view_analysis"] },
+  import: { view: [], full: ["import_data"] },
+  "issue-types": { view: [], full: ["manage_classification", "manage_translation"] },
+  users: { view: [], full: ["manage_users"] },
+  settings: { view: [], full: ["manage_settings", "view_audit"] }
+};
+function permissionsFromTicket(perms) {
+  const granted = new Set();
+  for (const [feature, levels] of Object.entries(PORTAL_FEATURE_PERMS)) {
+    const level = perms?.[feature] ?? "full";
+    if (level === "none") continue;
+    for (const p of (level === "full" ? levels.full : levels.view)) granted.add(p);
+  }
+  return [...granted];
+}
+
+app.post("/api/auth/sso", handle(async (request) => {
+  const claims = verifyPortalTicket(request.body?.ticket);
+  const user = await auth.ssoLogin(claims.sub, claims.name, permissionsFromTicket(claims.perms));
+  const token = auth.createSession(user.id);
+  return { token, user: auth.publicUser(user) };
+}));
 
 app.post("/api/auth/login", handle(async (request) => {
   const { loginName, password } = request.body || {};

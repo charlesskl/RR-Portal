@@ -71,6 +71,7 @@ test('混装报价：新建、保存、拆价、权限、审核锁、确认锁�
   const adminCookie = cookie; cookie = '';
   await api('/quotes/' + created.id + '/mixed', 'GET', undefined, 401);
   await api('/auth/login', 'POST', { username: 'mold-test', password: 'mixed-staff-only' });
+  await api('/uploads/mold-sheet', 'POST', {}, 403);
   const restricted = await api('/quotes/' + created.id);
   assert.equal(restricted.sections.find(s => s.dept === 'sales').payload_json, null);
   assert.equal(restricted.mixed_quote.enabled, true);
@@ -133,6 +134,23 @@ test('混装报价：新建、保存、拆价、权限、审核锁、确认锁�
   accounts.prepare('INSERT INTO user_factories (user_id,factory_code) VALUES (?,?)').run(salesUser, 'qingxi');
   accounts.close(); cookie = '';
   await api('/auth/login', 'POST', { username: 'customer-scope', password: 'customer-scope-only' });
+  await t.test('业务可上传并解析模具报价表', async () => {
+    const ExcelJS = require('exceljs');
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet('模具报价');
+    sheet.addRow(['模号', '零件名称', '材质', '出模数', '套数', '净重(g)', '模价RMB']);
+    sheet.addRow(['M1', '共用盒子', 'PP', 4, 4, 2, 1000]);
+    const form = new FormData();
+    form.append('file', new Blob([await workbook.xlsx.writeBuffer()]), 'molds.xlsx');
+    const response = await fetch(`http://127.0.0.1:${port}/api/uploads/mold-sheet`, {
+      method: 'POST', headers: { Cookie: cookie }, body: form,
+    });
+    assert.equal(response.status, 200);
+    const parsed = await response.json();
+    assert.equal(parsed.molds.length, 1);
+    assert.equal(parsed.molds[0].mold_no, 'M1');
+  });
+
   await t.test('客户权限：选择、列表、汇总、详情、导出、新建和修改表头均限定授权客户', async () => {
     assert.deepEqual((await api('/quotes/customers')).customers, ['TOMY']);
     assert.ok((await api('/quotes')).every(q => q.customer === 'TOMY'));

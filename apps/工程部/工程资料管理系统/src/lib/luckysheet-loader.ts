@@ -11,7 +11,7 @@ declare global {
   }
 }
 
-const BASE = "/luckysheet";
+const BASE = "luckysheet";
 
 let loadingPromise: Promise<void> | null = null;
 

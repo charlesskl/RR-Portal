@@ -233,6 +233,12 @@
                 <span class="plugin-name">自动化设备统计</span>
               </div>
             </div>
+            <div class="plugin-item">
+              <div class="plugin-info">
+                <div class="plugin-dot gray" id="gczlDot"></div>
+                <span class="plugin-name">工程资料管理系统</span>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -512,7 +518,7 @@
       <div class="dept-icon engineering" style="width:40px;height:40px;font-size:18px;">&#9881;</div>
       工程部
     </div>
-    <div class="page-subtitle">工程啤办单 · A-doc生成 · 新产品排期 · 模具手办采购 · 自动化设备统计</div>
+    <div class="page-subtitle">工程啤办单 · A-doc生成 · 新产品排期 · 模具手办采购 · 自动化设备统计 · 工程资料管理</div>
 
     <div class="detail-plugin-card">
       <div class="detail-plugin-left">
@@ -593,6 +599,26 @@
       <div class="detail-plugin-right">
         <div class="detail-plugin-status"><div class="plugin-dot gray" id="automationDetailDot"></div> 检查中...</div>
         <a href="/automation-equipment/" target="_blank" class="btn btn-primary">打开系统</a>
+      </div>
+    </div>
+
+    <div class="detail-plugin-card">
+      <div class="detail-plugin-left">
+        <div class="detail-plugin-icon" style="background:linear-gradient(135deg,#7c3aed,#a78bfa);">&#128194;</div>
+        <div>
+          <div class="detail-plugin-name">工程资料管理系统</div>
+          <div class="detail-plugin-desc">客户/年度/项目三级工程资料管理，浏览器内直接做资料：模板一键新建、网页在线编辑Excel、保存冲突检测、回收站与批量下载</div>
+          <div class="feature-grid">
+            <div class="feature-tag">&#128193; 客户项目归档</div>
+            <div class="feature-tag">&#10133; 模板一键新建</div>
+            <div class="feature-tag">&#9998; 网页在线做表</div>
+            <div class="feature-tag">&#128229; 批量下载</div>
+          </div>
+        </div>
+      </div>
+      <div class="detail-plugin-right">
+        <div class="detail-plugin-status"><div class="plugin-dot gray" id="gczlDetailDot"></div> 检查中...</div>
+        <a href="/gongcheng-ziliao/" target="_blank" class="btn btn-primary">打开系统</a>
       </div>
     </div>
   </div>
@@ -1291,6 +1317,7 @@ async function checkHealth() {
       { name: 'zouhuo', url: '/zouhuo/health', dot: 'zouhuoDot', detailDot: 'zouhuoDetailDot' },
       { name: 'figureMold', url: '/figure-mold-cost-system/health', dot: 'figureMoldDot', detailDot: 'figureMoldDetailDot' },
       { name: 'automation', url: '/automation-equipment/health', dot: 'automationDot', detailDot: 'automationDetailDot' },
+      { name: 'gczl', url: '/gongcheng-ziliao/health', dot: 'gczlDot', detailDot: 'gczlDetailDot' },
       { name: 'jiangping', url: '/jiangping/health', dot: 'jiangpingDot', detailDot: 'jiangpingDetailDot' },
       { name: 'paiji', url: '/paiji/health', dot: 'paijiDot', detailDot: 'paijiDetailDot' },
       { name: 'sprayplan', url: '/sprayplan/api/health', dot: 'sprayplanDot', detailDot: 'sprayplanDetailDot' },

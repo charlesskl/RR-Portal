@@ -215,6 +215,26 @@ services:
     networks:
       - platform-net
 
+  gongcheng-ziliao:
+    build:
+      context: ./apps/工程部/工程资料管理系统
+      dockerfile: Dockerfile
+    volumes:
+      - ./apps/工程部/工程资料管理系统/资料库存储:/data
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3100/"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - platform-net
+
   zouhuo:
     build:
       context: ./apps/工程部/A-doc生成系統

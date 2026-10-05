@@ -334,7 +334,7 @@ function tryParseSheet(wb, sheetName) {
     if (/^(小计|合计|总计|大写|说明|备注|以下空白|客户确认|签名|损耗)/.test(norm(r[0]))) continue;
     if (/以下空白|客户确认|确认签名|付款方式|完成时间|交货地点|交货时间|交货期|不含税|不含报价|不包含报价|请回电|协商|此单有问题|交付后|工作日完成|甲方|乙方|签字|盖章|改图|抄数费用|模具寿命|消耗品|本报价单|影印件|特别说明|蚀纹|温控箱|订金|首款|尾款|中款|另计/.test(rowText)) continue;
     // 条款可能位于任意列；检查首个非空单元格，而不是固定检查 B 列。
-    if (/^NOTE\s*[:：]?/i.test(firstNonEmpty)) continue;
+    if (/^NOTE\s*[:：]?/i.test(firstNonEmpty) || /^(制表|审核|批准|签名)\s*[:：]?$/.test(firstNonEmpty)) continue;
     if (/^\d+\s*[.:：、，,]/.test(firstNonEmpty) && firstNonEmpty.length > 12) continue;
     if (/[一二三四五六七八九十]、/.test(String(r[0] || ''))) continue;
     // 页脚/签名/条款（如 "Authorized signature"）；英文条款

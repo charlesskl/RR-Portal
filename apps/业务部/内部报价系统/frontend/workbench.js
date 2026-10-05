@@ -2753,6 +2753,7 @@ function renderEngineering(host, payload, canEdit, onChange, fxRmbHkd, fxHkdUsd,
       const r = await fetch('/api/uploads/mold-sheet', { method: 'POST', credentials: 'include', body: fd });
       const j = await r.json();
       if (!r.ok) throw new Error(j.error || '解析失败');
+      if (window.MixedQuotation?.previewNumberedImport(preview, j, f, payload)) return;
       // 港币模板先按当前 RMB→HKD 汇率换算成系统存储的 RMB，确保只读“模价 HKD”显示原报价。
       const preferUsd = String(quoteCustomer || '').trim().toUpperCase() === 'TOMY';
       const importedMolds = () => j.molds.map(m => {

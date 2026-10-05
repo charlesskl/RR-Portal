@@ -239,6 +239,40 @@
     });
     host.querySelector('[data-add]')?.addEventListener('click', () => { catalog.parts.push({ id: `part_${Date.now()}`, name: '新零件', mold_no: '', material: 'PVC', weight_g: 0, material_unit_price: 0, shot_price: 0, loss_pct: root.catalog_loss_pct ?? 3, cavity: 1 }); changed(); redraw(); });
   }
+  function showNumberedImport(preview, result, file, root) {
+    const groups = result.product_groups;
+    if (!groups?.product_count || !config()?.enabled) return false;
+    preview.innerHTML = `<section class="mixed-config"><h4>按配件序号识别到 ${groups.product_count} 个小产品、${groups.part_count} 个配件</h4>
+      <p>多个序号的配件同时分到对应小产品，每款默认用量为 1，可在产品组成中调整。产品名称暂用序号命名，可随后修改。</p>
+      <div class="mixed-scroll"><table><thead><tr><th>小产品序号</th><th>所需配件</th><th>配件数</th></tr></thead><tbody>${groups.products.map(p=>`<tr><td>${esc(p.code)}</td><td>${p.parts.map(esc).join('、')}</td><td>${p.parts.length}</td></tr>`).join('')}</tbody></table></div>
+      ${groups.unmatched.length ? `<p class="mixed-error">未识别归属，保留为待分配配件：${groups.unmatched.map(esc).join('、')}</p>` : ''}
+      <p>导入将保存当前工程草稿并更新小产品配置；已有配件数值和用量保留，重复上传不重复添加。包装数量及现有比例不变。</p>
+      <button type="button" data-numbered-apply>导入并按序号分配</button> <button type="button" data-numbered-cancel>取消</button><p data-numbered-status role="status"></p></section>`;
+    preview.querySelector('[data-numbered-cancel]').onclick = () => {preview.innerHTML='';};
+    preview.querySelector('[data-numbered-apply]').onclick = async event => {
+      const status = preview.querySelector('[data-numbered-status]');
+      const dirty = [...document.querySelectorAll('.dept-tab[title="有未保存修改"]')].some(tab=>tab.dataset.dept!=='engineering');
+      if (dirty) {status.textContent='请先保存其他部门的修改，再执行导入。';return;}
+      const button = event.currentTarget; button.disabled = true;
+      try {
+        const section = window.__data.sections.find(s=>s.dept==='engineering');
+        const response = await fetch(`./api/quotes/${window.__data.quote.id}/mixed/import-molds`, {
+          method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({molds:result.molds,source_file:file.name,engineering:root,base_filled_at:section.filled_at,expected_config:config()}),
+        });
+        const imported = await response.json();
+        if (!response.ok) throw new Error(imported.error || '保存失败');
+        status.textContent=`已保存：共 ${imported.total_products} 个小产品，新增 ${imported.added} 个配件、${imported.assigned} 个引用。`;
+        location.reload();
+      } catch(error) {status.textContent=error.message;button.disabled=false;}
+    };
+    return true;
+  }
+  function previewNumberedImport(preview, result, file, payload) {
+    const context = engineeringContexts.get(payload);
+    return context ? showNumberedImport(preview,result,file,context.root) : false;
+  }
+
   function unifiedMoldUpload(host, root, edit, changed, redraw) {
     if (!edit) return;
     const box = document.createElement('section'); box.className = 'mixed-upload-card';
@@ -253,6 +287,7 @@
         const response = await fetch('./api/uploads/mold-sheet', { method: 'POST', credentials: 'include', body: fd });
         const result = await response.json(); if (!response.ok) throw new Error(result.error || '解析失败');
         if (!result.molds?.length) throw new Error('没有识别到模具明细');
+        if (showNumberedImport(preview,result,file,root)) return;
         preview.innerHTML = `<p>识别到 ${result.molds.length} 行模具资料（${esc(result.sheet_used || file.name)}）</p><div class="mixed-scroll"><table><thead><tr><th>模号</th><th>名称</th><th>零件数</th><th>模价 RMB</th><th>模价 USD</th><th>模价 HKD</th></tr></thead><tbody>${result.molds.map(m => `<tr><td>${esc(m.mold_no)}</td><td>${esc(m.name)}</td><td>${m.parts?.length || 1}</td><td>${esc(m.price_rmb ?? '—')}</td><td>${esc(m.price_usd ?? '—')}</td><td>${esc(m.price_hkd ?? '—')}</td></tr>`).join('')}</tbody></table></div><button type="button" data-apply>追加到统一模具与零件</button><button type="button" data-cancel>取消</button>`;
         preview.querySelector('[data-cancel]').onclick = () => { preview.innerHTML = ''; };
         preview.querySelector('[data-apply]').onclick = () => {
@@ -388,7 +423,7 @@
       }
       if (!fixedProductId && dept !== 'molding') options.unshift(['__overall__', '整体资料 · 全部小产品']);
       if (!options.some(([id]) => id === selected)) selected = cfg.products[0].id;
-      host.innerHTML = `<div class="mixed-switch"><div><span class="mixed-tag">混装款</span><strong>当前报价对象</strong></div>
+      host.innerHTML = `<div class="mixed-switch"><div><span class="mixed-tag">混装款</span><strong>当前报价对象（共 ${cfg.products.length} 个小产品）</strong></div>
         <select aria-label="选择小产品">${options.map(([id, label]) => `<option value="${esc(id)}" ${id === selected ? 'selected' : ''}>${esc(label)}</option>`).join('')}</select>
         <p class="muted mixed-help"></p></div><div class="mixed-detail"></div>`;
       if (fixedProductId) host.querySelector('.mixed-switch').hidden = true;
@@ -496,8 +531,7 @@
           else moldingContexts.set(payload, { cfg, root, productId: selected });
         }
         if (dept === 'engineering') {
-          if (selected === '__shared__') engineeringContexts.delete(payload);
-          else engineeringContexts.set(payload, { cfg, productId: selected });
+          engineeringContexts.set(payload, { cfg, root, productId: selected });
         }
         if (dept === 'engineering') {
           const moldingRoot = window.MixedMolds.engineeringCatalog(JSON.parse(window.__data.sections.find(s => s.dept === 'molding')?.payload_json || '{}'), root);
@@ -817,5 +851,5 @@
     } catch (error) { host.innerHTML = `<p class="mixed-error">混装汇总失败：${esc(error.message)}</p>`; }
   }
   const componentNames = { injection_labor: '啤工', assembly_labor: '装配人工', painting_labor: '喷油人工', paint_material: '油料', imp_mat: '进口塑胶', dom_mat: '国产塑胶', blow: '吹气', slush: '搪胶', sewing_hair: '车发', sewing_cloth: '车衣', hardware: '五金', electronic: '电子', motor: '马达', suction: '吸塑', glue_bag: '胶袋', color_box: '彩盒/内咭', battery: '电池', libao: '利宝', plating: '电镀', other_buy: '其他外购', carton: '纸箱', freight: '运费', cabinet: '吊柜', misc: '印尼运费', abs_material: '其中 ABS 材料' };
-  window.MixedQuotation = { wrap, salesPanel, summary, componentNames, renderMoldingAllocation, renderEngineeringSharedMolds, refreshEngineeringSharedMolds };
+  window.MixedQuotation = { previewNumberedImport, wrap, salesPanel, summary, componentNames, renderMoldingAllocation, renderEngineeringSharedMolds, refreshEngineeringSharedMolds };
 })();

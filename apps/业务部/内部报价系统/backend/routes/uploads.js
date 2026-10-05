@@ -119,6 +119,7 @@ router.post('/mold-sheet', requireAuth, memUpload.single('file'), async (req, re
     } else {
       result.images_hint = '当前文件是 .xls 旧二进制格式，图片无法自动抽取。请在 WPS/Excel 里"另存为 → .xlsx"后重新上传即可自动识图。';
     }
+    result.product_groups = require('../services/mixedPartImport').summarize(result.molds);
     res.json(result);
   } catch (e) {
     res.status(500).json({ error: '解析失败: ' + e.message });

@@ -68,7 +68,7 @@ const memUpload = multer({
 const { parseWorkbook } = require('../services/parseMoldSheet');
 const { extractImagesByRow } = require('../services/extractXlsxImages');
 router.post('/mold-sheet', requireAuth, memUpload.single('file'), async (req, res) => {
-  if (req.user.dept !== 'engineering' && req.user.role !== 'admin') return res.status(403).json({ error: '仅工程或超级管理员可上传' });
+  if (!['engineering', 'sales'].includes(req.user.dept) && req.user.role !== 'admin') return res.status(403).json({ error: '仅工程、业务或超级管理员可上传' });
   if (!req.file) return res.status(400).json({ error: '缺少文件' });
   if (!/\.(xls|xlsx)$/i.test(req.file.originalname)) {
     return res.status(400).json({ error: '当前只支持 .xls/.xlsx（PDF/图片待后续支持）' });

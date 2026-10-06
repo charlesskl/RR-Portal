@@ -92,15 +92,15 @@ let AI = loadAiConfig();
    该模型指令遵循能力差（让它直接输出结构化 JSON 会抄 schema/示例），
    但它按官方提示词做「全文 OCR」非常准。所以：模型只负责把图变文字，
    字段提取由下面的 parseDeliveryNote() 确定性完成。 */
-const OCR_READ_PROMPT = 'Read all the text in the image.';
+const OCR_READ_PROMPT = 'Read all the text in the image, including the company name, title, serial number, date, customer, and all text outside the table, then the table contents.';
 
 /* ── 送货单 OCR 文本 → 结构化字段（确定性解析，不依赖模型指令遵循）── */
 function parseDeliveryNote(text) {
   const fields = { date: '', supplier: '', deliveryNo: '', orderNo: '', type: '来料', items: [] };
   const lines = [];
   for (let s of String(text || '').split('\n')) {
-    s = s.trim();
-    if (!s || /^```/.test(s)) continue;
+    s = s.trim().replace(/\*\*/g, '');
+    if (!s || /^```/.test(s) || /^-{3,}$/.test(s)) continue;
     if (/^\|[\s\-:|]+\|$/.test(s)) continue;   // markdown 表格分隔行
     lines.push(s);
   }
@@ -109,16 +109,38 @@ function parseDeliveryNote(text) {
   /* 日期：发货/送货/来料日期：2026-09-10 | 2026年9月10日 | 2026/9/10 */
   let m = joined.match(/日期\s*[：:]\s*(\d{4})\s*[-年\/.]\s*(\d{1,2})\s*[-月\/.]\s*(\d{1,2})/);
   if (m) fields.date = m[1] + '-' + m[2].padStart(2, '0') + '-' + m[3].padStart(2, '0');
+  /* 无标签日期兜底：开头区域独立出现的「2026年10月5日」 */
+  if (!fields.date) {
+    m = lines.slice(0, 15).join('\n').match(/(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日/);
+    if (m) fields.date = m[1] + '-' + m[2].padStart(2, '0') + '-' + m[3].padStart(2, '0');
+  }
 
   /* 送货单号：送货单号/发货单号/单号/NO. */
   m = joined.match(/(?:送\s*货\s*单\s*号|发\s*货\s*单\s*号|单\s*号|NO\.?)\s*[：:]\s*([A-Za-z0-9][A-Za-z0-9\-\/]{3,})/i);
   if (m) fields.deliveryNo = m[1];
+  /* 无标签单号兜底：开头独立成行的 4-8 位流水号（排除年份，进表格即停） */
+  if (!fields.deliveryNo) {
+    for (const ln of lines.slice(0, 12)) {
+      const t = ln.trim();
+      if (t.startsWith('|')) break;
+      if (/^\d{4,8}$/.test(t) && !/^(19|20)\d{2}$/.test(t)) { fields.deliveryNo = t; break; }
+    }
+  }
 
   /* 供应商：开头几行里含「公司/厂」且不是收货方/标题/地址的 */
   for (const ln of lines.slice(0, 8)) {
     const t = ln.replace(/^#+\s*/, '').trim();
-    if (!t || t === '送货单' || /客户名称|收货|寶號|Messrs|地址|电话| Tel/i.test(t)) continue;
+    if (!t || t === '送货单' || /客户|收货|寶號|Messrs|地址|电话| Tel/i.test(t)) continue;
     if (/公司|工厂|制品厂|纸品厂/.test(t) && t.length >= 6 && t.length <= 40) { fields.supplier = t; break; }
+  }
+  /* 无「公司」字样兜底：开头第一个有意义的行（如「攀登」） */
+  if (!fields.supplier) {
+    for (const ln of lines.slice(0, 6)) {
+      const t = ln.replace(/^#+\s*/, '').trim();
+      if (!t || t === '送货单' || t.startsWith('|')) continue;
+      if (/客户|收货|日期|单号|NO\.?|地址|电话| Tel|^\d/i.test(t)) continue;
+      if (t.length <= 20) { fields.supplier = t; break; }
+    }
   }
 
   /* markdown 表格 → items（列按表头关键词映射）*/
@@ -132,20 +154,29 @@ function parseDeliveryNote(text) {
       const cOrder = find(/订单|PO/i, /数量/);
       const cNo    = find(/编号|货号|Item/i, /订单/);
       const cName  = find(/品名|名称|货名|规格|Desc/i, /编号/);
-      let   cQty   = find(/送货|实送/);
-      if (cQty === -1) cQty = find(/数量/);
+      let   cQty   = head.findIndex(h => /^数\s*量$/.test(h));
+      if (cQty === -1) cQty = find(/送货数量|实送数量/);
+      if (cQty === -1) cQty = find(/送货|实送/, /欠|总/);
+      if (cQty === -1) cQty = find(/数量/, /欠|总/);
       const cUnit  = find(/单位/, /数量/);
+      let lastNo = '';
       for (const row of tbl.slice(hi + 1)) {
         const cells = splitRow(row);
         const get = i => (i >= 0 && i < cells.length ? cells[i] : '');
-        const no = get(cNo), name = get(cName);
+        let no = get(cNo), name = get(cName);
         if (!no && !name) continue;
         if (/^序$|^NO\.?$/i.test(no)) continue;
-        const qty  = get(cQty).replace(/[^\d.]/g, '');
+        if (/[：:]/.test(no) || /[：:]/.test(name)) continue;   /* 表尾标签行（胶箱：/收货人：/Q.C: 等） */
+        /* 货号/品名错位互换：货号格是中文、品名格是编号串时对调 */
+        if (/[一-鿿]/.test(no) && /^[A-Za-z0-9#+\-.]+$/.test(name)) { const tmp = no; no = name; name = tmp; }
+        if (!no) no = lastNo;   /* 合并单元格：货号向下继承 */
+        if (no) lastNo = no;
+        const qty  = get(cQty).split('/')[0].replace(/[^\d.]/g, '');
+        if (!qty && !name) continue;   /* 无数量又无品名，不是明细行 */
         let   unit = get(cUnit);
         /* 表头合并了「送货数量单位」时，单位在数量右边一格 */
         if (!unit && cQty >= 0 && cells[cQty + 1] && !/\d/.test(cells[cQty + 1]) && cells[cQty + 1].length <= 4) unit = cells[cQty + 1];
-        if (!fields.orderNo) { const o = get(cOrder); if (o && o !== no && o.length >= 6) fields.orderNo = o; }
+        if (!fields.orderNo) { const o = get(cOrder).replace(/\s+/g, ''); if (o && o !== no && o.length >= 6) fields.orderNo = o; }
         fields.items.push({ productNo: no, productName: name, qty, unit });
       }
     }
@@ -155,11 +186,18 @@ function parseDeliveryNote(text) {
   if (!fields.items.length) {
     const hiP = lines.findIndex(l => !l.startsWith('|') && /品名|名称|货名/.test(l) && /数量/.test(l));
     if (hiP !== -1) {
+      let lastNoP = '';
       for (const ln of lines.slice(hiP + 1)) {
         const m2 = ln.match(/^(.*?)\s+(\d{1,3}(?:,\d{3})+|\d{2,})\s+(个|PCS|pcs|件|套|卷|张|桶|KG|kg)(?=\s|$)/);
         if (!m2) continue;
         const tokens = m2[1].trim().split(/\s+/);
         let no = '', name = '';
+        /* 订单号样式 token（字母+数字+横杠，如 BB2026116-BN008），排除出货号候选 */
+        if (!fields.orderNo) {
+          for (const t of tokens) {
+            if (/[A-Za-z]/.test(t) && /\d/.test(t) && t.includes('-') && t.length >= 6) { fields.orderNo = t; break; }
+          }
+        }
         /* 货号：优先选不含中文、长度≥5、含数字、不以 - 结尾（排除单号碎片）的 token */
         for (const t of tokens) {
           if (no) break;
@@ -167,9 +205,11 @@ function parseDeliveryNote(text) {
           if (/^[\w#]{5,}$/.test(t) && /\d/.test(t) && t !== m2[2]) no = t;
         }
         if (!no) for (const t of tokens) { if (/[A-Za-z#]/.test(t) && t.length >= 4) { no = t; break; } }
-        /* 品名：中文字符≥3 的最长 token（排除规格串） */
-        const cjk = tokens.filter(t => (t.match(/[\u4e00-\u9fff]/g) || []).length >= 3);
+        /* 品名：中文字符≥2 的最长 token（排除颜色等数字开头的规格串，如「7726黑色」） */
+        const cjk = tokens.filter(t => (t.match(/[\u4e00-\u9fff]/g) || []).length >= 2 && !/^\d/.test(t));
         if (cjk.length) name = cjk.reduce((a, b) => (a.length >= b.length ? a : b));
+        if (!no) no = lastNoP;   /* 合并单元格：货号向下继承 */
+        if (no) lastNoP = no;
         if (!no && !name) continue;
         fields.items.push({ productNo: no, productName: name, qty: m2[2].replace(/,/g, ''), unit: m2[3] });
       }

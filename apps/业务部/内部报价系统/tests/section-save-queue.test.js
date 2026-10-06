@@ -51,7 +51,7 @@ test('PostgreSQL 和 SQLite 使用兼容的空时间版本比较', () => {
 test('报价和核价入口加载最新的保存队列脚本', () => {
   for (const page of ['quote.html', 'verification.html']) {
     const html = fs.readFileSync(path.join(root, 'frontend', page), 'utf8');
-    assert.match(html, /workbench\.js\?v=20261005-save-queue/);
+    assert.match(html, /workbench\.js\?v=20261006-electronic-append-v2/);
   }
 });
 

@@ -369,6 +369,10 @@ function tryParseSheet(wb, sheetName) {
   const groups = [];
   let current = null;
   for (const { r, ri } of dataRows) {
+    // Footer labels are not parts; filter before inheriting the previous mold.
+    const first = r.find(v => String(v ?? '').trim());
+    if (/^(制表|审核|批准|签名)\s*[:：]?$/.test(String(first || '').trim())) continue;
+    if (['part_name', 'part_name_cn', 'name'].some(k => /^(制表|审核|批准|签名)\s*[:：]?$/.test(cell(r, k)))) continue;
     const moldNo = hasMoldNoCol ? cell(r, 'mold_no') : '';
     const isNew = !hasMoldNoCol || /^P?\w/.test(moldNo);
 
@@ -515,6 +519,10 @@ function buildPartDetailMolds(dataRows, cell, machineHeader = '') {
   };
 
   for (const { r, ri } of dataRows) {
+    // Footer labels are not parts; filter before inheriting the previous mold.
+    const first = r.find(v => String(v ?? '').trim());
+    if (/^(制表|审核|批准|签名)\s*[:：]?$/.test(String(first || '').trim())) continue;
+    if (['part_name', 'part_name_cn', 'name'].some(k => /^(制表|审核|批准|签名)\s*[:：]?$/.test(cell(r, k)))) continue;
     const moldNo = keep('mold_no', cell(r, 'mold_no'));
     const groupName = keep('group_name', cell(r, 'name'));
     const partNameEn = cell(r, 'part_name');

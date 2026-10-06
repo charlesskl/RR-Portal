@@ -18,7 +18,26 @@
 const http = require('node:http');
 const fs   = require('node:fs');
 const path = require('node:path');
+const crypto = require('node:crypto');
 const { DatabaseSync } = require('node:sqlite');
+
+/* ── 门户 SSO 票据（HS256 JWT）校验：与门户 SSO_SECRET 一致 ── */
+function verifyPortalTicket(ticket) {
+  const parts = String(ticket || '').split('.');
+  if (parts.length !== 3) throw new Error('票据格式不正确');
+  const secret = process.env.SSO_SECRET || 'dev-sso-secret-change-me';
+  const expected = crypto.createHmac('sha256', secret).update(parts[0] + '.' + parts[1]).digest();
+  const actual = Buffer.from(parts[2].replace(/-/g, '+').replace(/_/g, '/'), 'base64');
+  if (actual.length !== expected.length || !crypto.timingSafeEqual(actual, expected)) throw new Error('票据校验失败');
+  let payload;
+  try {
+    payload = JSON.parse(Buffer.from(parts[1].replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8'));
+  } catch (e) { throw new Error('票据无效'); }
+  if (!payload.exp || Date.now() > payload.exp) throw new Error('票据已过期');
+  if (payload.app !== 'xingxin-qms') throw new Error('票据不属于本系统');
+  if (!payload.sub) throw new Error('票据缺少账号');
+  return payload;
+}
 
 const ROOT      = path.join(__dirname, '..');           // 前端静态根目录
 const DATA_DIR  = process.env.DATA_PATH || path.join(__dirname, 'data');
@@ -739,6 +758,27 @@ const server = http.createServer(async (req, res) => {
     /* ── 厂区清单（登录页用，无需鉴权）── */
     if (p === '/api/companies' && req.method === 'GET') {
       return sendJson(res, 200, { companies: COMPANIES });
+    }
+
+    /* ── 门户 SSO 验票（免登，无需鉴权，不分厂区）── */
+    if (p === '/api/sso-verify' && req.method === 'POST') {
+      const body = await readBody(req);
+      try {
+        const claims = verifyPortalTicket(body && body.ticket);
+        return sendJson(res, 200, {
+          ok: true,
+          user: {
+            username: String(claims.sub),
+            name: String(claims.name || claims.sub),
+            dept: String(claims.dept || ''),
+            role: 'admin',
+            perms: claims.perms || null,
+          },
+          companies: Array.isArray(claims.companies) ? claims.companies : null,
+        });
+      } catch (e) {
+        return sendJson(res, 401, { ok: false, error: String(e && e.message || e) });
+      }
     }
 
     /* ── 数据类路由：解析目标厂区（缺省东莞，兼容旧链接）── */

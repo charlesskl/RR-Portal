@@ -388,6 +388,31 @@ services:
     networks:
       - platform-net
 
+  # ─── 品质集中门户（品制管理部）：Vite 静态构建 + nginx 托管，/portal/ 子路径 ───
+  # SSO_SECRET 在构建时注入前端包（门户在浏览器端签发 JWT），必须与各系统后端的 SSO_SECRET 一致；
+  # 更换 SSO_SECRET 后需要重新构建本镜像。
+  quality-portal:
+    build:
+      context: ./apps/品制管理部/品质集中门户
+      dockerfile: Dockerfile
+      args:
+        VITE_SSO_SECRET: ${SSO_SECRET:?SSO_SECRET is required}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO /dev/null http://127.0.0.1:80/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    mem_limit: 256m
+    memswap_limit: 256m
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - platform-net
+
   # 喷油排期系统·测试版：与正式版同代码、独立容器/数据库/上传目录，
   # 供喷油部试用新流程，绝不影响正式数据。basePath=/sprayplan-test。
   sprayplan-test:

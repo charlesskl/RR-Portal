@@ -134,6 +134,7 @@ declare -A PATH_TO_SERVICE=(
   ["apps/QA部/QA测试报告周结系统/"]="qa-weekly-report"
   ["apps/QA部/QC成品报告系统/"]="qc-report qc-report-worker"
   ["apps/QA部/玩具质量管理系统/"]="toyqms"
+  ["apps/品制管理部/品质集中门户/"]="quality-portal"
   ["apps/QA部/QC验货计划系统/"]="qc-plan-api qc-plan-web"
   ["apps/task-api/"]="task-api"
 )

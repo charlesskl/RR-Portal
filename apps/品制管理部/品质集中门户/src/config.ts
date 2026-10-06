@@ -22,13 +22,17 @@ export interface PortalUser {
   department: string
 }
 
-// 3 个真实业务系统（本地运行地址，部署到内网后替换为服务器地址）
+// 运行环境判断：本机开发用 localhost 端口；部署到服务器后走 nginx 子路径
+const IS_LOCAL =
+  typeof window !== 'undefined' && ['localhost', '127.0.0.1'].includes(window.location.hostname)
+
+// 4 个真实业务系统（本地 = localhost 端口；服务器 = 同源子路径，由 nginx 反代）
 export const APPS: PortalApp[] = [
   {
     id: 'qc-report',
     name: 'QC成品报告系统',
     description: '上传 PO、AI 辅助验货、按 AQL 生成英文正式报告',
-    url: 'http://localhost:8000',
+    url: IS_LOCAL ? 'http://localhost:8000' : '/qc-report/',
     icon: 'clipboard-check',
     color: 'from-emerald-500 to-emerald-600',
     allowedRoles: ['admin', 'employee'],
@@ -38,7 +42,7 @@ export const APPS: PortalApp[] = [
     id: 'toyqms',
     name: '玩具质量管理系统',
     description: '客诉处理、CAP 纠正措施、系列分析与质量情报',
-    url: 'http://localhost:3200',
+    url: IS_LOCAL ? 'http://localhost:3200' : '/toyqms/',
     icon: 'puzzle',
     color: 'from-blue-500 to-blue-600',
     allowedRoles: ['admin', 'employee'],
@@ -48,7 +52,7 @@ export const APPS: PortalApp[] = [
     id: 'xingxin-qms',
     name: '品质管理系统',
     description: '兴信 QMS：多厂区多子公司品质数据与 AI-OCR 报告导出',
-    url: 'http://localhost:8765',
+    url: IS_LOCAL ? 'http://localhost:8765' : '/qc/',
     icon: 'shield-check',
     color: 'from-violet-500 to-violet-600',
     allowedRoles: ['admin', 'employee'],
@@ -58,7 +62,7 @@ export const APPS: PortalApp[] = [
     id: 'voyageplex',
     name: 'VoyagePlex船务协同',
     description: '走柜任务、验货结果补录、订单信息库与船务协同',
-    url: 'http://localhost:3400',
+    url: IS_LOCAL ? 'http://localhost:3400' : '/voyageplex/',
     icon: 'ship',
     color: 'from-cyan-500 to-blue-600',
     allowedRoles: ['admin', 'employee'],
@@ -74,10 +78,11 @@ export const USERS: PortalUser[] = [
 ]
 
 // ============================================================
-// SSO 配置：门户与三个系统共享同一个密钥（正式环境务必更换并保密）
+// SSO 配置：门户与各系统共享同一个密钥
+// 服务器部署：Docker 构建时通过 VITE_SSO_SECRET 注入（与后端 SSO_SECRET 一致）
 // 票据格式：JWT（HS256），payload 带该账号对目标系统的功能权限
 // ============================================================
-export const SSO_SECRET = 'dev-sso-secret-change-me'
+export const SSO_SECRET: string = import.meta.env.VITE_SSO_SECRET || 'dev-sso-secret-change-me'
 
 // 功能级权限档位：none 无权限 / view 仅查看 / full 全部操作
 export type FeatureLevel = 'none' | 'view' | 'full'

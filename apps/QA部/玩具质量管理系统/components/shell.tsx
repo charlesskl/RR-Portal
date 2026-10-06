@@ -11,10 +11,12 @@ const nav=[["/dashboard","仪表盘",RectangleGroupIcon],["/complaints","投诉�
 const pageTitles:Record<string,string>={"/dashboard":"质量仪表盘","/complaints":"投诉数据","/series-analysis":"系列分析","/quality-intelligence":"质量情报","/ai-classification":"AI 分类","/translation":"翻译中心","/import":"导入中心","/cap":"CAP 管理","/reports":"报告中心","/series-management":"系列管理","/issue-types":"问题类型","/users":"用户管理","/settings":"系统设置","/audit-log":"操作日志"};
 
 // 门户系统切换器：跳到门户中转页签发免登票据后直达目标系统
+// 服务器部署时门户在 /portal/ 子路径（nginx 同源反代），本地开发仍在 localhost:3000
+const portalBase=(typeof window!=="undefined"&&["localhost","127.0.0.1"].includes(window.location.hostname))?"http://localhost:3000":"/portal";
 const switchLinks=[
-  {href:"http://localhost:3000/#/jump?app=qc-report",label:"QC成品报告系统"},
-  {href:"http://localhost:3000/#/jump?app=xingxin-qms",label:"品质管理系统"},
-  {href:"http://localhost:3000/#/jump?app=voyageplex",label:"VoyagePlex船务协同"},
+  {href:`${portalBase}/#/jump?app=qc-report`,label:"QC成品报告系统"},
+  {href:`${portalBase}/#/jump?app=xingxin-qms`,label:"品质管理系统"},
+  {href:`${portalBase}/#/jump?app=voyageplex`,label:"VoyagePlex船务协同"},
 ];
 function SystemSwitcher(){
   const [open,setOpen]=useState(false);
@@ -29,7 +31,7 @@ function SystemSwitcher(){
     <button type="button" onClick={()=>setOpen(v=>!v)} className="rounded-lg border border-line px-2.5 py-1.5 text-xs font-semibold text-neutral-600 hover:bg-neutral-50">⇄ 切换系统 ▾</button>
     {open&&<div className="absolute right-0 top-[110%] z-50 min-w-[180px] overflow-hidden rounded-xl bg-white shadow-[0_12px_30px_rgba(0,0,0,.18)]">
       {switchLinks.map(l=><a key={l.href} href={l.href} className="block px-3.5 py-2.5 text-sm text-neutral-800 hover:bg-neutral-50">{l.label}</a>)}
-      <a href="http://localhost:3000/" className="block border-t border-line px-3.5 py-2.5 text-sm text-neutral-500 hover:bg-neutral-50">← 返回门户首页</a>
+      <a href={`${portalBase}/`} className="block border-t border-line px-3.5 py-2.5 text-sm text-neutral-500 hover:bg-neutral-50">← 返回门户首页</a>
     </div>}
   </div>;
 }

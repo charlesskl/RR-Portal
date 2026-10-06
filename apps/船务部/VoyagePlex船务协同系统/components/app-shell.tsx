@@ -346,10 +346,12 @@ export function AppShell({ route }: { route: string }) {
 function roleLabel(role:UserRole){return role==="admin"?"管理员":role==="warehouse"?"仓库文员":"船务员";}
 
 // 门户系统切换器：跳到门户中转页签发免登票据后直达目标系统
+// 服务器部署时门户在 /portal/ 子路径（nginx 同源反代），本地开发仍在 localhost:3000
+const portalBase=(typeof window!=="undefined"&&["localhost","127.0.0.1"].includes(window.location.hostname))?"http://localhost:3000":"/portal";
 const SWITCH_LINKS=[
-  {href:"http://localhost:3000/#/jump?app=qc-report",label:"QC成品报告系统"},
-  {href:"http://localhost:3000/#/jump?app=toyqms",label:"玩具质量管理系统"},
-  {href:"http://localhost:3000/#/jump?app=xingxin-qms",label:"品质管理系统"},
+  {href:`${portalBase}/#/jump?app=qc-report`,label:"QC成品报告系统"},
+  {href:`${portalBase}/#/jump?app=toyqms`,label:"玩具质量管理系统"},
+  {href:`${portalBase}/#/jump?app=xingxin-qms`,label:"品质管理系统"},
 ];
 function SystemSwitcher(){
   const [open,setOpen]=useState(false);
@@ -366,7 +368,7 @@ function SystemSwitcher(){
       {open&&(
         <div style={{position:"absolute",right:0,top:"110%",zIndex:50,background:"#fff",borderRadius:12,boxShadow:"0 12px 30px rgba(0,0,0,.18)",overflow:"hidden",minWidth:180}}>
           {SWITCH_LINKS.map(l=><a key={l.href} href={l.href} style={{display:"block",padding:"10px 14px",fontSize:14,color:"#1f2937",textDecoration:"none"}}>{l.label}</a>)}
-          <a href="http://localhost:3000/" style={{display:"block",padding:"10px 14px",fontSize:14,color:"#475569",textDecoration:"none",borderTop:"1px solid #e5e7eb"}}>← 返回门户首页</a>
+          <a href={`${portalBase}/`} style={{display:"block",padding:"10px 14px",fontSize:14,color:"#475569",textDecoration:"none",borderTop:"1px solid #e5e7eb"}}>← 返回门户首页</a>
         </div>
       )}
     </div>

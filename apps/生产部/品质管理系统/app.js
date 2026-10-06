@@ -4672,8 +4672,16 @@ function toggleOrderNoNA() {
     inp.focus();
   }
 }
-/* ── AQL 档位多选（pill 按钮）：值存隐藏框 f_aqlLevel，逗号分隔 ── */
+/* ── AQL 档位多选（pill 按钮）：值存隐藏框 f_aqlLevel，逗号分隔；最多选 2 个 ── */
 function toggleAqlLevel(btn) {
+  const turningOn = !btn.classList.contains('on');
+  if (turningOn) {
+    const onCount = document.querySelectorAll('#aqlLevelPills .aql-lvl-btn.on').length;
+    if (onCount >= 2) {
+      if (typeof showToast === 'function') showToast('AQL档位最多选择 2 个');
+      return;
+    }
+  }
   btn.classList.toggle('on');
   const hid = document.getElementById('f_aqlLevel');
   if (!hid) return;

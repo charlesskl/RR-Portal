@@ -79,3 +79,24 @@ test('separate images and blank divider rows stay as one product without explici
   assert.deepEqual(result.product_groups, []);
   assert.equal(result.items.some(item => item.product_group_id), false);
 });
+
+
+test('部门导出控件保留喷油导入按钮和文件框，其他部门继续隐藏导入', () => {
+  const vm = require('node:vm');
+  const source = require('node:fs').readFileSync(require('node:path').join(__dirname, '../frontend/workbench.js'), 'utf8');
+  const start = source.indexOf('function installDepartmentExport(');
+  const end = source.indexOf('// 按产品分组的人工表', start);
+  const context = { DEPARTMENT_EXPORT_NAMES: { painting:'喷油部', molding:'啤机部', electronic:'电子部' } };
+  vm.runInNewContext(source.slice(start, end), context);
+  for (const dept of ['painting', 'molding', 'electronic']) {
+    const removed = [];
+    const host = {
+      querySelectorAll: selector => selector === 'button'
+        ? [{ textContent:'导入报价', remove:()=>removed.push('button') }]
+        : [{ remove:()=>removed.push('file') }],
+      querySelector: () => ({}), _departmentExportObserver: true,
+    };
+    context.installDepartmentExport(host, dept, 9);
+    assert.equal(removed.length, dept === 'painting' ? 0 : 2);
+  }
+});

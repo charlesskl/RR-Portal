@@ -81,7 +81,7 @@ test('separate images and blank divider rows stay as one product without explici
 });
 
 
-test('部门导出控件保留喷油导入按钮和文件框，其他部门继续隐藏导入', () => {
+test('部门导出控件保留喷油、电子导入按钮和文件框，其他部门继续隐藏导入', () => {
   const vm = require('node:vm');
   const source = require('node:fs').readFileSync(require('node:path').join(__dirname, '../frontend/workbench.js'), 'utf8');
   const start = source.indexOf('function installDepartmentExport(');
@@ -97,6 +97,6 @@ test('部门导出控件保留喷油导入按钮和文件框，其他部门继�
       querySelector: () => ({}), _departmentExportObserver: true,
     };
     context.installDepartmentExport(host, dept, 9);
-    assert.equal(removed.length, dept === 'painting' ? 0 : 2);
+    assert.equal(removed.length, ['painting', 'electronic'].includes(dept) ? 0 : 2);
   }
 });

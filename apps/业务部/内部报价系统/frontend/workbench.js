@@ -1031,6 +1031,18 @@ function buildElectronicSummaryRows(split, taxLabel) {
   return icRows;
 }
 
+// Only replace an untouched, previously generated summary. Existing rows without
+// a baseline are conservatively preserved because their edit history is unknown.
+function syncElectronicDetailSummary(payload, freshRows) {
+  const rows = payload.electronics || [];
+  if (rows.length && (payload.electronics_summary_manual
+    || JSON.stringify(rows) !== payload.electronics_summary_baseline)) return false;
+  payload.electronics = freshRows;
+  payload.electronics_summary_baseline = JSON.stringify(freshRows);
+  payload.electronics_summary_manual = false;
+  return true;
+}
+
 function isDerivedElectronicSummary(rows) {
   return Array.isArray(rows) && rows.length >= 1
     && /PACB/i.test(rows[rows.length - 1].name || '')
@@ -3085,12 +3097,13 @@ function renderElectronic(host, payload, canEdit, onChange, fxRmbHkd, fxHkdUsd) 
   ['profit_pct', 'tax_diff', 'tax_payable'].forEach(k => { if (payload.electronics_extra[k] == null) payload.electronics_extra[k] = k === 'profit_pct' ? 10 : 0; });
   if (payload.electronics_doc && payload.electronics_doc.parts) {
     payload.electronics_doc.parts_count = elecDetailRowCount(payload.electronics_doc.parts);
-    upgradeLegacyElecSplit(payload, fxRmbHkd);
+    // Existing summary edits must survive detail editing and re-imports.
   }
 
   host.innerHTML = `
     <h3>电子部分
     ${canEdit ? '<button class="mini" id="el-import" type="button" style="margin-left:10px">📄 导入登信报价单</button><input id="el-file" type="file" accept=".xls,.xlsx" style="display:none"/><button class="mini" id="el-import-lianxiang" type="button" style="margin-left:6px">📄 导入联翔报价单</button><input id="el-file-lianxiang" type="file" accept=".xls,.xlsx" style="display:none"/>' : ''}
+    ${canEdit ? '<button class="mini" id="el-detail-add" type="button" style="margin-left:6px">+ 手动新增明细</button>' : ''}
     ${canEdit && payload.electronics_doc ? '<button class="mini" id="el-summarize" type="button" style="margin-left:6px">🔄 由明细汇总成 逐项IC + PACB</button>' : ''}
     ${payload.electronics_doc ? `<small style="margin-left:8px;color:#16a34a">✓ 已导入 ${payload.electronics_doc.parts_count} 行 · 原币 ${payload.electronics_doc.source_currency || 'RMB'} (${payload.electronics_doc.imported_at || ''})</small>` : ''}
     </h3>
@@ -3103,7 +3116,9 @@ function renderElectronic(host, payload, canEdit, onChange, fxRmbHkd, fxHkdUsd) 
   `;
   const refreshes = [];
   const wrappedOnChange = () => { refreshes.forEach(f => f()); onChange(); };
-  renderHierElectronics(host.querySelector('#wb-elec'), payload.electronics, wrappedOnChange, canEdit, fxRmbHkd, payload, fxHkdUsd);
+  const summaryWasAutomatic = !payload.electronics_summary_manual && JSON.stringify(payload.electronics) === payload.electronics_summary_baseline;
+  renderHierElectronics(host.querySelector('#wb-elec'), payload.electronics, () => { payload.electronics_summary_manual = true; wrappedOnChange(); }, canEdit, fxRmbHkd, payload, fxHkdUsd);
+  if (summaryWasAutomatic) payload.electronics_summary_baseline = JSON.stringify(payload.electronics);
   // 总表 小计 卡片（仅 IC + PACB电子 等当前 electronics 数组的合计）
   const sumHost = document.createElement('div');
   host.querySelector('#wb-elec').appendChild(sumHost);
@@ -3130,7 +3145,7 @@ function renderElectronic(host, payload, canEdit, onChange, fxRmbHkd, fxHkdUsd) 
     detailHost.innerHTML = `
       <details style="margin-top:14px" ${doc._open ? 'open' : ''}>
         <summary style="cursor:pointer;color:#475569;font-weight:600;padding:6px 0">
-          📋 细表（导入的 ${doc.parts_count} 行明细 · 原币 ${sourceCurrency} — 会写进 电子明细 sheet）
+          📋 细表（${doc.parts_count} 行明细 · 原币 ${sourceCurrency} — 会写进 电子明细 sheet）
         </summary>
         <table class="wb-table" style="margin-top:8px;font-size:13px">
           <thead><tr>
@@ -3193,18 +3208,14 @@ function renderElectronic(host, payload, canEdit, onChange, fxRmbHkd, fxHkdUsd) 
     });
     if (canEdit) {
       // 总表仍是「逐项 IC + PACB电子」（由明细汇总出来的）时，细表改动自动联动。
-      const isDerivedSummary = () => isDerivedElectronicSummary(payload.electronics);
+      const isDerivedSummary = () => !payload.electronics_summary_manual && (!(payload.electronics || []).length || JSON.stringify(payload.electronics) === payload.electronics_summary_baseline);
       const autoResummarize = () => {
         if (!isDerivedSummary()) return;
         const fxH = num((payload._fx_rmb_hkd) || fxRmbHkd) || 0.85;
         const sp = elecImportedSummaryRows(doc, payload.electronics_extra || doc.extras || {}, fxH);
         const taxLabel = payload.electronics[0]?.tax_label || (doc.meta && doc.meta.tax_label) || '含税';
         const freshRows = buildElectronicSummaryRows(sp, taxLabel);
-        if (freshRows.length === payload.electronics.length) {
-          freshRows.forEach((row, index) => Object.assign(payload.electronics[index], row));
-        } else {
-          payload.electronics = freshRows;
-        }
+        syncElectronicDetailSummary(payload, freshRows);
         paintSummarySubtotal();
       };
       tbody.querySelectorAll('input').forEach(inp => {
@@ -3226,14 +3237,12 @@ function renderElectronic(host, payload, canEdit, onChange, fxRmbHkd, fxHkdUsd) 
             const tr = inp.closest('tr');
             if (tr && tr.children[5]) tr.children[5].textContent = formatNum(num(target.qty) * num(target.source_unit_price));
             if (isForeignSource && tr && tr.children[6]) tr.children[6].textContent = formatNum(electronicSourceToHkd(num(target.qty) * num(target.source_unit_price), sourceCurrency, fxRmbHkd, fxHkdUsd));
-            autoResummarize();
           }
+          autoResummarize();
           onChange();
         };
         // 失焦时整表重渲染，同步总表行单价/金额 + 成本汇总
-        if (inp.dataset.k === 'qty' || inp.dataset.k === 'unit_price' || inp.dataset.k === 'source_unit_price') {
-          inp.onchange = () => { if (isDerivedSummary()) renderElectronic(host, payload, canEdit, onChange, fxRmbHkd, fxHkdUsd); };
-        }
+        inp.onchange = () => renderElectronic(host, payload, canEdit, onChange, fxRmbHkd, fxHkdUsd);
       });
       tbody.querySelectorAll('.el-detail-del').forEach(btn => {
         btn.onclick = () => {
@@ -3257,7 +3266,7 @@ function renderElectronic(host, payload, canEdit, onChange, fxRmbHkd, fxHkdUsd) 
       detailHost.querySelector('details').ontoggle = (e) => { doc._open = e.target.open; };
     }
   } else {
-    detailHost.innerHTML = '<p class="muted" style="margin-top:10px;font-size:13px">尚未导入电子细表 — 点上方"📄 导入电子报价单"</p>';
+    detailHost.innerHTML = '<p class="muted" style="margin-top:10px;font-size:13px">尚无电子细表 — 可手动新增明细，或导入电子报价单</p>';
   }
   const feeHost = host.querySelector('#wb-elec-fees');
   const sourceFees = payload.electronics_doc?.extras?.other_fees || [];
@@ -3286,17 +3295,29 @@ function renderElectronic(host, payload, canEdit, onChange, fxRmbHkd, fxHkdUsd) 
   }
   renderElecExtra(host.querySelector('#wb-elec-extra'), payload, wrappedOnChange, canEdit, fxRmbHkd, fxHkdUsd);
   if (canEdit) {
+    host.querySelector('#el-detail-add').onclick = () => {
+      const doc = payload.electronics_doc ||= { source_currency: 'RMB', parts: [], extras: {}, meta: {} };
+      doc.parts ||= [];
+      doc.parts.push({ name: '', spec: '', qty: 1, source_unit_price: 0, unit_price: 0, note: '' });
+      doc.parts_count = elecDetailRowCount(doc.parts);
+      doc._open = true;
+      const split = elecImportedSummaryRows(doc, payload.electronics_extra || {}, num(fxRmbHkd) || 0.85);
+      syncElectronicDetailSummary(payload, buildElectronicSummaryRows(split, doc.meta?.tax_label || '含税'));
+      onChange();
+      renderElectronic(host, payload, canEdit, onChange, fxRmbHkd, fxHkdUsd);
+    };
     // 由明细一键汇总成逐项 IC + PACB电子。
     const sumBtn = host.querySelector('#el-summarize');
     if (sumBtn) sumBtn.onclick = () => {
       const doc = payload.electronics_doc;
       if (!doc || !doc.parts) { alert('没有导入的明细数据'); return; }
-      if (payload.electronics && payload.electronics.length > 1 && !isDerivedElectronicSummary(payload.electronics)
-        && !confirm('当前总表有 ' + payload.electronics.length + ' 行，确认重置为逐项 IC + PACB电子（手填数据会丢失）？')) return;
       const fxHere = num((payload._fx_rmb_hkd) || fxRmbHkd) || 0.85;
       const sp = elecImportedSummaryRows(doc, payload.electronics_extra || doc.extras || {}, fxHere);
       const taxLabel = (doc.meta && doc.meta.tax_label) || '含税';
-      payload.electronics = buildElectronicSummaryRows(sp, taxLabel);
+      if (!syncElectronicDetailSummary(payload, buildElectronicSummaryRows(sp, taxLabel))) {
+        alert('上方总表已有编辑或历史数据，已保留，不覆盖。明细已保存到当前草稿。');
+        return;
+      }
       onChange();
       renderElectronic(host, payload, canEdit, onChange, fxRmbHkd, fxHkdUsd);
     };
@@ -3353,7 +3374,7 @@ function renderElectronic(host, payload, canEdit, onChange, fxRmbHkd, fxHkdUsd) 
             const normalized = normalizeElectronicImport(j, fx, fxHkdUsd);
             const sp = elecImportedSummaryRows(normalized, normalized.extras || {}, fx);
             const taxLabel = (normalized.meta && normalized.meta.tax_label) || '含税';
-            payload.electronics = buildElectronicSummaryRows(sp, taxLabel);
+            syncElectronicDetailSummary(payload, buildElectronicSummaryRows(sp, taxLabel));
             if (normalized.extras) {
               payload.electronics_extra = payload.electronics_extra || {};
               ['test_repair', 'packing_shipping', 'profit_pct', 'tax_diff', 'tax_payable', 'bonding_cost', 'smt_cost', 'labor_cost'].forEach(k => {

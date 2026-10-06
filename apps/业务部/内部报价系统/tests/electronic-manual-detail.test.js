@@ -4,26 +4,28 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
 const source = fs.readFileSync(path.join(__dirname, '../frontend/workbench.js'), 'utf8');
-const start = source.indexOf('function syncElectronicDetailSummary');
+const start = source.indexOf('function electronicDetailFingerprint');
 const end = source.indexOf('function isDerivedElectronicSummary', start);
 const context = {};
 vm.runInNewContext(source.slice(start,end),context);
 const sync=context.syncElectronicDetailSummary;
-test('空总表可由明细创建，后续汇总及保存重载继续同步',()=>{
- const p={electronics:[]};
- assert.equal(sync(p,[{name:'IC',qty:1,unit_price:2}]),true);
- const restored=JSON.parse(JSON.stringify(p));
- assert.equal(sync(restored,[{name:'IC',qty:2,unit_price:3}]),true);
- assert.equal(restored.electronics[0].qty,2);
+const fresh = price => [{name:'IC',qty:1,unit_price_rmb:price,_electronic_summary_role:'ic'},
+ {name:'PACB电子',qty:1,unit_price_rmb:2,_electronic_summary_role:'pacb'}];
+test('保留手填总表并追加；反复汇总不重复，自动行继续更新',()=>{
+ const p={electronics:[{name:'PACB',qty:1,unit_price_rmb:1}]};
+ sync(p,fresh(3));sync(p,fresh(4));
+ assert.equal(p.electronics.length,3);assert.equal(p.electronics[0].unit_price_rmb,1);
+ assert.equal(p.electronics[1].unit_price_rmb,4);
 });
-test('手动编辑总表或已有历史数据不被汇总覆盖',()=>{
- for(const manual of [false,true]) {
-  const p={electronics:[]};sync(p,[{name:'IC',qty:1,unit_price:2}]);
-  if(manual)p.electronics_summary_manual=true;else p.electronics[0].unit_price=9;
-  const before=JSON.stringify(p.electronics);
-  assert.equal(sync(p,[{name:'PACB',unit_price:4}]),false);
-  assert.equal(JSON.stringify(p.electronics),before);
- }
- const old={electronics:[{name:'旧总表',unit_price:8}]};
- assert.equal(sync(old,[]),false);assert.equal(old.electronics[0].unit_price,8);
+test('追加行手改后不覆盖；保存重载及明细删除仍保留手填行',()=>{
+ const p={electronics:[{name:'手填',qty:1,unit_price_rmb:99}]};sync(p,fresh(3));
+ p.electronics[1].unit_price_rmb=88;
+ const restored=JSON.parse(JSON.stringify(p));sync(restored,fresh(5));
+ assert.equal(restored.electronics.length,3);assert.equal(restored.electronics[1].unit_price_rmb,88);
+ sync(restored,[]);assert.equal(restored.electronics.length,2);assert.equal(restored.electronics[0].unit_price_rmb,99);
+});
+test('空总表可汇总，旧版未改自动总表迁移不重复',()=>{
+ const rows=fresh(3);const p={electronics:rows,electronics_summary_baseline:JSON.stringify(rows)};
+ sync(p,fresh(4));assert.equal(p.electronics.length,2);assert.equal(p.electronics[0].unit_price_rmb,4);
+ const empty={};sync(empty,fresh(3));assert.equal(empty.electronics.length,2);
 });

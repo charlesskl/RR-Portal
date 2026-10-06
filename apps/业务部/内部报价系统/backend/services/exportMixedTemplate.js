@@ -99,7 +99,7 @@ async function addTemplateDetails(wb,args,result){
      if(/^(模费按|手板费分摊|测试费分摊)/.test(label) && row.getCell(10).value?.formula) amortRefs.push(ref(main.name,row.getCell(10).address));
      const a=row.getCell(1).value;
      const mapping=a==='货价'?{imp_mat:2,dom_mat:3,blow:4,slush:5,sewing_hair:6,sewing_cloth:7,hardware:8,electronic:9,motor:10,suction:11,glue_bag:12}
-       :a==='彩盒/内咭'?{color_box:1,battery:4,libao:5,plating:6,other_buy:7,carton:8,misc:11}
+       :a==='彩盒/内咭'?{color_box:1,battery:4,libao:5,plating:6,flocking:7,other_buy:8,carton:9,misc:12}
        :a==='啤工'?{injection_labor:1,painting_labor:2,paint_material:3,assembly_labor:4}:null;
      if(mapping)for(const [key,col] of Object.entries(mapping))cells[key]=ref(main.name,main.getCell(row.number+1,col).address);
    });

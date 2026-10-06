@@ -1,9 +1,9 @@
 'use strict';
 const ExcelJS = require('exceljs');
 const { calculateMixedQuote } = require('./mixedQuotation');
-const labels = { injection_labor: '啤工', assembly_labor: '装配人工', painting_labor: '喷油人工', paint_material: '油料', imp_mat: '进口塑胶', dom_mat: '国产塑胶', blow: '吹气', slush: '搪胶', sewing_hair: '车发', sewing_cloth: '车衣', hardware: '五金', electronic: '电子', motor: '马达', suction: '吸塑', glue_bag: '胶袋', color_box: '彩盒/内咭', battery: '电池', libao: '利宝', plating: '电镀', other_buy: '其他外购', carton: '纸箱', freight: '运费', cabinet: '吊柜', misc: '印尼运费', abs_material: '其中 ABS（不重复相加）' };
+const labels = { injection_labor: '啤工', assembly_labor: '装配人工', painting_labor: '喷油人工', paint_material: '油料', imp_mat: '进口塑胶', dom_mat: '国产塑胶', blow: '吹气', slush: '搪胶', sewing_hair: '车发', sewing_cloth: '车衣', hardware: '五金', electronic: '电子', motor: '马达', suction: '吸塑', glue_bag: '胶袋', color_box: '彩盒/内咭', battery: '电池', libao: '利宝', plating: '电镀', flocking: '植绒', other_buy: '其他外购', carton: '纸箱', freight: '运费', cabinet: '吊柜', misc: '印尼运费', abs_material: '其中 ABS（不重复相加）' };
 const deptKeys = {
-  engineering: ['hardware', 'motor', 'suction', 'glue_bag', 'color_box', 'battery', 'libao', 'plating', 'other_buy', 'carton'],
+  engineering: ['hardware', 'motor', 'suction', 'glue_bag', 'color_box', 'battery', 'libao', 'plating', 'flocking', 'other_buy', 'carton'],
   molding: ['injection_labor', 'imp_mat', 'dom_mat', 'blow'], blow: ['blow'],
   electronic: ['electronic'], painting: ['painting_labor', 'paint_material'],
   slush: ['slush'], sewing: ['sewing_hair', 'sewing_cloth'], assembly: ['assembly_labor'],

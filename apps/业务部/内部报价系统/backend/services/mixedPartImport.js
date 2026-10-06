@@ -25,11 +25,26 @@ function summarize(molds) {
     products: [...groups].sort(([a],[b]) => a.localeCompare(b, 'en', {numeric:true})).map(([code,names]) => ({code, parts:names})) };
 }
 const identity = part => JSON.stringify([part.mold_no || '', part.name || '', part.material || '', part.color || '']);
-function importParts(config, engineering, molds, { replacePlaceholders = false, sourceFile = '', existingParts = [] } = {}) {
+// Only remove untouched legacy placeholders; shared catalogs and real products survive.
+function unusedPlaceholders(config, payloads) {
+  const empty = value => value == null || value === '' || (typeof value === 'object' && Object.values(value).every(empty));
+  return config.products.filter(p => /^p[12]$/.test(p.id) && p.code === p.id.toUpperCase()
+    && p.name === `小产品 ${p.id.slice(1)}` && Number(p.ratio) === 1 && p.na_ratio == null
+    && payloads.every(root => empty(root.mixed_products?.[p.id])
+      && empty(root.mixed_part_selections?.[p.id]) && empty(root.parts_catalog?.selections?.[p.id])
+      && empty(root.mixed_pricing?.[p.id])
+      && !(root.mixed_molds || []).some(m => m.parts?.some(part => part.product_id === p.id))))
+    .map(p => p.id);
+}
+function importParts(config, engineering, molds, { replacePlaceholders = false, sourceFile = '', existingParts = [], placeholderIds = [] } = {}) {
   const summary = summarize(molds);
   if (!summary.product_count) throw new Error('没有识别到配件名称前的产品序号');
   const next = structuredClone(config), root = structuredClone(engineering);
-  if (replacePlaceholders && summary.product_count >= 2) { for (const p of next.products) { delete root.mixed_products?.[p.id]; delete root.mixed_part_selections?.[p.id]; } next.products = []; }
+  if (summary.product_count >= 2) {
+    const removed = new Set(replacePlaceholders ? next.products.map(p => p.id) : placeholderIds);
+    for (const id of removed) { delete root.mixed_products?.[id]; delete root.mixed_part_selections?.[id]; }
+    next.products = next.products.filter(p => !removed.has(p.id));
+  }
   for (const group of summary.products) {
     const matches = next.products.filter(p => canonical(p.code) === group.code);
     if (matches.length > 1) throw new Error(`序号 ${group.code} 对应多个现有小产品，请先整理货号`);
@@ -68,4 +83,4 @@ function importParts(config, engineering, molds, { replacePlaceholders = false, 
   root.mixed_import_summary = {...summary, source_file:sourceFile};
   return { config:next, engineering:root, summary:{...summary,added,assigned,demands_filled:demandsFilled,total_products:next.products.length} };
 }
-module.exports = { productNumbers, summarize, importParts };
+module.exports = { productNumbers, summarize, importParts, unusedPlaceholders };

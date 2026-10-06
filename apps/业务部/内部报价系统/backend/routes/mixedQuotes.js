@@ -34,22 +34,29 @@ router.put('/:id/mixed', async (req, res) => {
       const previous = getConfig(sections);
       if (JSON.stringify(previous) !== JSON.stringify(req.body.expected_config ?? null)) throw new Error('混装配置已被其他人更新，请刷新后重试');
       const nextIds = new Set(config.products.map(p => p.id));
-      for (const section of sections) {
-        const payload = JSON.parse(section.payload_json || '{}');
-        for (const product of previous?.products || []) {
-          if (!nextIds.has(product.id) && (Object.keys(payload.mixed_products?.[product.id] || {}).length
-            || (payload.mixed_molds || []).some(m => m.parts?.some(p => p.product_id === product.id)))) {
-            throw new Error(`${product.code} 已有部门明细或共模零件，不能移除`);
-          }
+      const removed = (previous?.products || []).filter(p => !nextIds.has(p.id));
+      if (removed.length) {
+        const confirmed = new Set(req.body.confirmed_removed_ids || []);
+        if (removed.some(p => !confirmed.has(p.id))) throw new Error('请确认删除小产品及其部门明细后重试');
+        for (const section of sections.filter(s => s.dept !== 'sales')) {
+          if (!req.body.expected_sections || req.body.expected_sections[section.id] !== (section.filled_at || ''))
+            throw new Error('部门资料已更新，请刷新核对后再删除');
         }
+        await db.prepare("INSERT INTO audit_log (quote_id, dept, actor, action, detail) VALUES (?, ?, ?, 'mixed_product_delete_backup', ?)")
+          .run(id, req.user.dept, req.user.name, JSON.stringify({removed, sections}));
+      }
+      for (const section of sections) {
+        const payload = require('../services/removeMixedProducts').removeMixedProducts(JSON.parse(section.payload_json || '{}'), removed.map(p => p.id));
         if (section.dept === 'sales') payload.mixed_quote = config;
         else if (!previous?.enabled) {
           // 既有单品完整归入首款，原始根数据留存，但混装计算只读取新结构。
           payload.mixed_products = { [config.products[0].id]: JSON.parse(section.payload_json || '{}') };
           payload.mixed_shared = {};
         }
-        await db.prepare("UPDATE quote_sections SET payload_json = ?, status = 'empty', filled_at = datetime('now'), filled_by = ? WHERE id = ?")
-          .run(JSON.stringify(payload), req.user.name, section.id);
+        const now = new Date(Math.max(Date.now(), (Date.parse(section.filled_at || '') || 0) + 1)).toISOString();
+        const updated = await db.prepare("UPDATE quote_sections SET payload_json = ?, status = 'empty', filled_at = ?, filled_by = ? WHERE id = ? AND payload_json = ? AND status = ? AND COALESCE(filled_at,'') = ?")
+          .run(JSON.stringify(payload), now, req.user.name, section.id, section.payload_json, section.status, section.filled_at || '');
+        if (!updated.changes) throw new Error('部门资料已更新，本次未覆盖，请刷新后重试');
       }
       await db.prepare("UPDATE quotes SET status = 'drafting' WHERE id = ?").run(id);
       await db.prepare("INSERT INTO audit_log (quote_id, dept, actor, action, detail) VALUES (?, ?, ?, 'mixed_config', ?)")
@@ -85,14 +92,14 @@ router.post('/:id/mixed/import-molds', async (req, res) => {
       const molding = require('../../frontend/mixed-molds').engineeringCatalog(payloads[sections.findIndex(s=>s.dept==='molding')] || {}, root);
       const prepared = {...root, mixed_part_selections:root.mixed_part_selections || molding.parts_catalog?.selections || {}};
       const imported = require('../services/mixedPartImport').importParts(config, prepared, req.body.molds, {
-        replacePlaceholders:pristine, sourceFile:String(req.body.source_file || ''), existingParts:molding.parts_catalog?.parts || [],
+        placeholderIds:require('../services/mixedPartImport').unusedPlaceholders(config, [...payloads, root]), replacePlaceholders:pristine, sourceFile:String(req.body.source_file || ''), existingParts:molding.parts_catalog?.parts || [],
       });
       const salesPayload = JSON.parse(sales.payload_json || '{}'); salesPayload.mixed_quote = imported.config;
       for (const [section,payload] of [[engineering,imported.engineering],[sales,salesPayload]]) {
         const now = new Date(Math.max(Date.now(), (Date.parse(section.filled_at || '') || 0)+1)).toISOString();
         const saved = await db.prepare(`UPDATE quote_sections SET payload_json = ?, status = 'empty', filled_by = ?, filled_at = ?
-          WHERE id = ? AND payload_json = ? AND status = ? AND filled_at IS NOT DISTINCT FROM ?`)
-          .run(JSON.stringify(payload),req.user.name,now,section.id,section.payload_json,section.status,section.filled_at || null);
+          WHERE id = ? AND payload_json = ? AND status = ? AND COALESCE(filled_at,'') = ?`)
+          .run(JSON.stringify(payload),req.user.name,now,section.id,section.payload_json,section.status,section.filled_at || '');
         if (!saved.changes) throw new Error('资料已被更新，本次未覆盖，请刷新重试');
       }
       await db.prepare("UPDATE quotes SET status = 'drafting' WHERE id = ?").run(id);

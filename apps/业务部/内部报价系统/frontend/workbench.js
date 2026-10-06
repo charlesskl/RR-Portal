@@ -374,7 +374,7 @@ function renderTable(container, columns, rows, opts = {}) {
 }
 
 // 辅助/包装材料 类别 — 减税明细各外购项按此类别统计
-const MAT_CATEGORIES = ['吸塑', '胶袋', '彩盒/内咭', '电池', '产品利宝', '彩盒利宝', '电镀', '其他外购'];
+const MAT_CATEGORIES = ['吸塑', '胶袋', '彩盒/内咭', '电池', '产品利宝', '彩盒利宝', '电镀', '植绒', '其他外购'];
 
 // 车缝：人工若已作为明细行(名称含"人工")计入，则不再额外加 labor_amount，避免双算
 function sewLaborToAdd(g) {
@@ -1891,6 +1891,7 @@ function renderSummaryPane(host, sections, quote, me) {
     other_buy: otherBuyRmb,                  // 其他外购 = 辅助材料剩余 HKD（辅助已 HKD）
     battery: batteryRmb,                     // 电池 HKD（包装已 HKD）
     libao: libaoRmb,                         // 利宝 HKD（辅助已 HKD）
+    flocking: _catSum('植绒'),
     plating: platingRmb,                     // 电镀 HKD（包装已 HKD）
     carton: toHkd(cartonRmb),                // 纸箱 HKD（来自工程纸箱计算）
     // 运费 / 吊柜费 → 盐田40柜 场景对应值（HKD）
@@ -1951,6 +1952,7 @@ function renderTaxDeductionBlock(host, salesPayload, salesSec, me, autoFill) {
   applyAuto('t2', 'battery', autoFill.battery);
   applyAuto('t2', 'libao', autoFill.libao);
   applyAuto('t2', 'plating', autoFill.plating);
+  applyAuto('t2', 'flocking', autoFill.flocking);
   applyAuto('t2', 'other_buy', autoFill.other_buy);
   applyAuto('t2', 'carton', autoFill.carton);
   applyAuto('t2', 'freight', autoFill.freight);
@@ -1963,7 +1965,7 @@ function renderTaxDeductionBlock(host, salesPayload, salesSec, me, autoFill) {
   // 表1 出厂货价核
   ps.t1 = ps.t1 || { base_price: 0, imp_mat: 0, dom_mat: 0, blow: 0, slush: 0, sewing_hair: 0, sewing_cloth: 0, hardware: 0, electronic: 0, motor: 0, suction: 0, glue_bag: 0 };
   // 表2 包装/外购
-  ps.t2 = ps.t2 || { color_box: 0, inner_card: 0, code_before: 0, code_after: 0, battery: 0, libao: 0, plating: 0, other_buy: 0, carton: 0, freight: 0, cabinet: 0, misc: 0 };
+  ps.t2 = ps.t2 || { color_box: 0, inner_card: 0, code_before: 0, code_after: 0, battery: 0, libao: 0, plating: 0, flocking: 0, other_buy: 0, carton: 0, freight: 0, cabinet: 0, misc: 0 };
   // 旧数据迁移：彩盒 + 内咭 合并到 color_box，inner_card 清零
   if (ps.t2.inner_card) {
     ps.t2.color_box = num(ps.t2.color_box) + num(ps.t2.inner_card);
@@ -1997,7 +1999,7 @@ function renderTaxDeductionBlock(host, salesPayload, salesSec, me, autoFill) {
   ];
   const t2Cols = [
     ['color_box', '彩盒/内咭'], ['code_before', '未减税前码数'], ['code_after', '减税后码数'],
-    ['battery', '电池'], ['libao', '利宝'], ['plating', '电镀'], ['other_buy', '其他外购'],
+    ['battery', '电池'], ['libao', '利宝'], ['plating', '电镀'], ['flocking', '植绒'], ['other_buy', '其他外购'],
     ['carton', '纸箱'], ['freight', '运费'], ['cabinet', '吊柜费'], ['misc', '杂项'],
   ];
   const t4Cols = [
@@ -2092,7 +2094,7 @@ function renderTaxDeductionBlock(host, salesPayload, salesSec, me, autoFill) {
       num(ps.t1.dom_mat) + num(ps.t1.sewing_hair) + num(ps.t1.sewing_cloth)
       + num(ps.t1.hardware) + num(ps.t1.electronic) + num(ps.t1.motor)
       + num(ps.t2.color_box) + num(ps.t2.battery) + num(ps.t2.libao)
-      + num(ps.t2.plating) + num(ps.t2.other_buy) + num(ps.t2.carton) + num(ps.t2.misc)
+      + num(ps.t2.plating) + num(ps.t2.flocking) + num(ps.t2.other_buy) + num(ps.t2.carton) + num(ps.t2.misc)
       + num(ps.t1.glue_bag)
       + num(ps.t3.paint_material);
     const laborCost = num(ps.t3.injection_labor) + num(ps.t3.painting_labor) + num(ps.t3.assembly_labor);
@@ -2116,7 +2118,7 @@ function renderTaxDeductionBlock(host, salesPayload, salesSec, me, autoFill) {
     setT4Amt('rmb_buy', rmbBuyCost);                                           // 人民币外购件成本
     // 含税13%类成本 = 国内料 + 五金 + 马达 + 彩盒/内咭 + 电池 + 利宝 + 其他外购 + 油漆 + 胶袋
     const tax13Cost = num(ps.t1.dom_mat) + num(ps.t1.hardware) + num(ps.t1.motor)
-      + num(ps.t2.color_box) + num(ps.t2.battery) + num(ps.t2.libao) + num(ps.t2.other_buy)
+      + num(ps.t2.color_box) + num(ps.t2.battery) + num(ps.t2.libao) + num(ps.t2.flocking) + num(ps.t2.other_buy)
       + num(ps.t3.paint_material) + num(ps.t1.glue_bag);
     setT4Amt('tax13', tax13Cost);
     setT4Amt('carton', num(ps.t2.carton));                                     // 纸箱类 = 纸箱

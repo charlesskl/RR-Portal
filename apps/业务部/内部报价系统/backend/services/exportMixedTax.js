@@ -11,7 +11,7 @@ function addMixedTax(ws,result,refs,priceRef,options={}){
  const select=entries=>entries.map(([label,key])=>[label,components[key],key]);
  section('减税明细 / 成本汇总');
  const a=block('一、出厂货价核',[['货价',make(priceRef,result.final_hkd),'price'],...select([['进口料','imp_mat'],['国内料','dom_mat'],['吹气','blow'],['搪胶','slush'],['车发','sewing_hair'],['车衣','sewing_cloth'],['五金','hardware'],['电子','electronic'],['马达','motor'],['吸塑','suction'],['胶袋','glue_bag']])]);
- const b=block('二、包装 / 外购',[['彩盒/内咭',components.color_box,'color_box'],['未减税前码数',0,'before'],['减税后码数',0,'after'],...select([['电池','battery'],['利宝','libao'],['电镀','plating'],['其他外购','other_buy'],['纸箱','carton'],['运费','freight'],['吊柜费','cabinet'],['杂项','misc']])]);
+ const b=block('二、包装 / 外购',[['彩盒/内咭',components.color_box,'color_box'],['未减税前码数',0,'before'],['减税后码数',0,'after'],...select([['电池','battery'],['利宝','libao'],['电镀','plating'],['植绒','flocking'],['其他外购','other_buy'],['纸箱','carton'],['运费','freight'],['吊柜费','cabinet'],['杂项','misc']])]);
  const laborKeys=['injection_labor','painting_labor','assembly_labor'];
  const all=Object.keys(components), cost=all.reduce((n,k)=>n+components[k].result,0),labor=laborKeys.reduce((n,k)=>n+val(k),0),non=cost-labor,price=result.final_hkd;
  const nonRefs=all.filter(k=>!laborKeys.includes(k)).map(k=>'('+components[k].formula+')').join('+');
@@ -30,7 +30,7 @@ function addMixedTax(ws,result,refs,priceRef,options={}){
  ws.getCell(c.profitRate.ref).value=make(`IFERROR(${c.profit.ref}/${a.price.ref},0)`,price?(price-cost)/price:0);
  for(const k of ['laborRate','grossRate','profitRate'])ws.getCell(c[k].ref).numFmt='0.00%';
  ws.getCell(b.before.ref).value=make(`IFERROR(${a.price.ref}/${c.cost.ref},0)`,cost?price/cost:0);
- const taxable=['dom_mat','hardware','motor','color_box','battery','libao','other_buy','paint_material','glue_bag'];
+ const taxable=['dom_mat','hardware','motor','color_box','battery','libao','flocking','other_buy','paint_material','glue_bag'];
  const visible={...a,...b,...c};
  const amount=k=>make(visible[k].ref,components[k].result);
  const tax13=make(taxable.map(k=>visible[k].ref).join('+'),taxable.reduce((n,k)=>n+components[k].result,0));

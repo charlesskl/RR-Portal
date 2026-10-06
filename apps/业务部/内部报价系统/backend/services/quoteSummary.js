@@ -20,6 +20,7 @@ const QUOTE_COMPONENTS = [
   ['suction', '吸塑', 't1'],
   ['carton', '纸箱', 't2'],
   ['plating', '电镀', 't2'],
+  ['flocking', '植绒', 't2'],
   ['electronic', '电子', 't1'],
   ['motor', '马达', 't1'],
   ['battery', '电池', 't2'],
@@ -51,6 +52,7 @@ const TAX_DEDUCTION_RATES = Object.freeze({
   battery: 11.5,
   libao: 11.5,
   plating: 0.99,
+  flocking: 11.5,
   other_buy: 11.5,
   carton: 11.5,
   freight: 8.26,
@@ -81,6 +83,7 @@ addComponentColumns('libao', '贴纸');
 addComponentColumns('suction', '吸塑');
 addComponentColumns('carton', '纸箱');
 SUMMARY_COLUMNS.push(['plating', '电镀', 'unit']);
+SUMMARY_COLUMNS.push(['flocking', '植绒', 'unit']);
 addComponentColumns('electronic', '电子');
 addComponentColumns('battery', '电池');
 addComponentColumns('hardware', '五金');
@@ -137,26 +140,26 @@ function calculateSummaryValues(before, after, qty, price, absMaterialCost = 0) 
   ['injection_labor', 'assembly_labor', 'painting_labor', 'color_box', 'libao', 'suction', 'carton',
     'electronic', 'battery', 'hardware', 'slush', 'sewing_hair', 'sewing_cloth', 'paint_material',
     'other_buy', 'misc'].forEach(setComponent);
-  values.imp_mat = num(before.imp_mat); values.dom_mat = num(before.dom_mat); values.plating = num(before.plating);
+  values.imp_mat = num(before.imp_mat); values.dom_mat = num(before.dom_mat); values.plating = num(before.plating); values.flocking = num(before.flocking);
   values.freight = num(before.freight); values.cabinet = num(before.cabinet);
   values.raw_material_after_tax = num(after.imp_mat) + num(after.dom_mat);
   values.raw_material_amount = values.raw_material_after_tax * qty;
   values.raw_material_share = price ? values.raw_material_after_tax / price : 0;
   values.abs_material_cost = num(absMaterialCost); values.abs_material_share = price ? values.abs_material_cost / price : 0;
-  values.total_purchase_price = ['color_box','libao','suction','carton','plating','electronic','battery','hardware','slush','sewing_hair','sewing_cloth','paint_material','other_buy','misc'].reduce((s,k)=>s+num(before[k]),0);
+  values.total_purchase_price = ['color_box','libao','suction','carton','plating','flocking','electronic','battery','hardware','slush','sewing_hair','sewing_cloth','paint_material','other_buy','misc'].reduce((s,k)=>s+num(before[k]),0);
   values.freight_after_tax = num(after.freight) + num(after.cabinet);
   values.freight_amount = values.freight_after_tax * qty;
   values.freight_share = price ? values.freight_after_tax / price : 0;
   values.surtax_04 = price * 0.004;
   const laborBefore = num(before.injection_labor)+num(before.assembly_labor)+num(before.painting_labor);
   const totalBefore = Object.values(before).reduce((s,v)=>s+num(v),0);
-  values.rmb_purchase_cost = num(before.misc)+num(before.other_buy)+num(before.paint_material)+num(before.sewing_cloth)+num(before.sewing_hair)+num(before.hardware)+num(before.battery)+num(before.electronic)+num(before.plating)+num(before.carton)+num(before.libao)+num(before.color_box)+num(before.dom_mat);
+  values.rmb_purchase_cost = num(before.misc)+num(before.other_buy)+num(before.paint_material)+num(before.sewing_cloth)+num(before.sewing_hair)+num(before.hardware)+num(before.battery)+num(before.electronic)+num(before.plating)+num(before.flocking)+num(before.carton)+num(before.libao)+num(before.color_box)+num(before.dom_mat);
   values.rmb_purchase_share = price ? values.rmb_purchase_cost/price : 0;
   values.gross_before_tax = price-(totalBefore-laborBefore); values.gross_before_tax_rate = price ? values.gross_before_tax/price : 0;
   values.profit_before_tax = price-totalBefore; values.profit_before_tax_rate = price ? values.profit_before_tax/price : 0;
   values.markup_before_tax = totalBefore ? price/totalBefore : 0;
   values.tax_1_cost = num(before.plating); values.labor_13_cost = laborBefore*0.08;
-  values.freight_9_cost = num(before.freight); values.tax_13_cost = num(before.color_box)+num(before.libao)+num(before.hardware)+num(before.battery)+num(before.other_buy)+num(before.paint_material)+num(before.dom_mat);
+  values.freight_9_cost = num(before.freight); values.tax_13_cost = num(before.color_box)+num(before.libao)+num(before.hardware)+num(before.battery)+num(before.flocking)+num(before.other_buy)+num(before.paint_material)+num(before.dom_mat);
   values.carton_13_cost = num(before.carton); values.slush_3_cost = num(before.slush);
   values.hair_13_cost = num(before.sewing_hair); values.cloth_13_cost = num(before.sewing_cloth); values.suction_6_cost = num(before.suction);
   values.rebate_reduction = values.tax_1_cost*0.0099 + values.labor_13_cost*0.115 + values.freight_9_cost*0.0826 + values.tax_13_cost*0.115 + values.carton_13_cost/1.1*0.115 + values.slush_3_cost*0.03 + values.hair_13_cost*0.115 + values.cloth_13_cost*0.115 + values.suction_6_cost*0.06;
@@ -247,7 +250,8 @@ function buildQuoteSummary(quote, sections) {
     components_before_tax: beforeTaxComponents,
     components,
     component_basis: 'after_tax',
-    abs_material_cost: num(calculated.components.abs_material),
+    abs_material_cost: calculated.hasSourceData
+      ? num(calculated.components.abs_material) : num(pricing.t3?.abs_cost),
     summary_values: calculateSummaryValues(beforeTaxComponents, components, qty, quotedPrice, calculated.components.abs_material),
   };
 }
@@ -525,7 +529,7 @@ function buildDetailedSummaryWorkbook(rows, filters = {}) {
     return 'FFF4CCCC';
   };
   const ref = (key, row) => `${ws.getColumn(columnByKey[key]).letter}${row}`;
-  const rawKeys = ['injection_labor','assembly_labor','painting_labor','imp_mat','dom_mat','color_box','libao','suction','carton','plating','electronic','battery','hardware','slush','sewing_hair','sewing_cloth','paint_material','other_buy','misc','freight','cabinet'];
+  const rawKeys = ['injection_labor','assembly_labor','painting_labor','imp_mat','dom_mat','color_box','libao','suction','carton','plating','flocking','electronic','battery','hardware','slush','sewing_hair','sewing_cloth','paint_material','other_buy','misc','freight','cabinet'];
   const formulaFor = (key, row, source) => {
     const qty=ref('qty',row), price=ref('quoted_price',row);
     const rawSum=`SUM(${rawKeys.map(k=>ref(k,row)).join(',')})+${num(source.components_before_tax?.blow)+num(source.components_before_tax?.glue_bag)+num(source.components_before_tax?.motor)}`;
@@ -544,18 +548,18 @@ function buildDetailedSummaryWorkbook(rows, filters = {}) {
       raw_material_amount:`${ref('raw_material_after_tax',row)}*${qty}`,
       raw_material_share:`IF(${price}=0,0,${ref('raw_material_after_tax',row)}/${price})`,
       abs_material_share:`IF(${price}=0,0,${ref('abs_material_cost',row)}/${price})`,
-      total_purchase_price:`SUM(${['color_box','libao','suction','carton','plating','electronic','battery','hardware','slush','sewing_hair','sewing_cloth','paint_material','other_buy','misc'].map(k=>ref(k,row)).join(',')})`,
+      total_purchase_price:`SUM(${['color_box','libao','suction','carton','plating','flocking','electronic','battery','hardware','slush','sewing_hair','sewing_cloth','paint_material','other_buy','misc'].map(k=>ref(k,row)).join(',')})`,
       freight_after_tax:`${ref('freight',row)}*(1-8.26%)+${ref('cabinet',row)}`,
       freight_amount:`${ref('freight_after_tax',row)}*${qty}`,
       freight_share:`IF(${price}=0,0,${ref('freight_after_tax',row)}/${price})`,
       surtax_04:`${price}*0.4%`,
-      rmb_purchase_cost:`SUM(${['misc','other_buy','paint_material','sewing_cloth','sewing_hair','hardware','battery','electronic','plating','carton','libao','color_box','dom_mat'].map(k=>ref(k,row)).join(',')})`,
+      rmb_purchase_cost:`SUM(${['misc','other_buy','paint_material','sewing_cloth','sewing_hair','hardware','battery','electronic','plating','flocking','carton','libao','color_box','dom_mat'].map(k=>ref(k,row)).join(',')})`,
       rmb_purchase_share:`IF(${price}=0,0,${ref('rmb_purchase_cost',row)}/${price})`,
       gross_before_tax:`${price}-(${rawSum}-${labor})`, gross_before_tax_rate:`IF(${price}=0,0,${ref('gross_before_tax',row)}/${price})`,
       profit_before_tax:`${price}-${rawSum}`, profit_before_tax_rate:`IF(${price}=0,0,${ref('profit_before_tax',row)}/${price})`,
       markup_before_tax:`IF(${rawSum}=0,0,${price}/(${rawSum}))`, tax_1_cost:ref('plating',row), labor_13_cost:`(${labor})*8%`,
       freight_9_cost:ref('freight',row),
-      tax_13_cost:`SUM(${['color_box','libao','battery','paint_material','dom_mat','hardware','other_buy'].map(k=>ref(k,row)).join(',')})`,
+      tax_13_cost:`SUM(${['color_box','libao','battery','paint_material','dom_mat','hardware','flocking','other_buy'].map(k=>ref(k,row)).join(',')})`,
       carton_13_cost:ref('carton',row), slush_3_cost:ref('slush',row), hair_13_cost:ref('sewing_hair',row), cloth_13_cost:ref('sewing_cloth',row), suction_6_cost:ref('suction',row),
       rebate_reduction:`${ref('tax_1_cost',row)}*0.99%+${ref('labor_13_cost',row)}*11.5%+${ref('freight_9_cost',row)}*8.26%+${ref('tax_13_cost',row)}*11.5%+${ref('carton_13_cost',row)}/1.1*11.5%+${ref('slush_3_cost',row)}*3%+${ref('hair_13_cost',row)}*11.5%+${ref('cloth_13_cost',row)}*11.5%+${ref('suction_6_cost',row)}*6%`,
       cost_after_rebate:`${rawSum}-${ref('rebate_reduction',row)}`,

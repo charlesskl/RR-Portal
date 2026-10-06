@@ -124,7 +124,7 @@ router.post('/', async (req, res) => {
     for (const d of DEPT_CODES) await ins.run(id, d);
     if (req.body.quote_type === 'mixed') {
       const mixed_quote = { enabled: true, version: 1, mode: 'equal', units_per_pack: 1,
-        products: [{ id: 'p1', code: 'P1', name: '小产品 1', ratio: 1 }, { id: 'p2', code: 'P2', name: '小产品 2', ratio: 1 }] };
+        products: [] };
       await db.prepare("UPDATE quote_sections SET payload_json = ? WHERE quote_id = ? AND dept = 'sales'")
         .run(JSON.stringify({ mixed_quote }), id);
     }

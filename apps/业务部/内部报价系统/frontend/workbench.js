@@ -4136,8 +4136,8 @@ function renderPainting(host, payload, canEdit, onChange, fxRmbHkd) {
 
   host.innerHTML = `
     <h3 style="display:flex;align-items:center;gap:10px">三、二次加工（印喷报价）
-      ${canEdit ? `<button class="mini" id="pp-import" type="button">📄 导入喷油核价表</button>
-      <input id="pp-file" type="file" accept=".xls,.xlsx" style="display:none"/>` : ''}
+      <button class="mini" id="pp-import" type="button" ${canEdit ? '' : 'disabled title="请先进入编辑模式"'}>📄 导入喷油核价表</button>
+      ${canEdit ? '<input id="pp-file" type="file" accept=".xls,.xlsx" style="display:none"/>' : '<small class="muted">进入编辑后可导入 Excel</small>'}
     </h3>
     <div id="pp-import-preview"></div>
     <div id="wb-pp"></div>
@@ -4798,10 +4798,13 @@ function createDepartmentExportButton(dept, quoteId) {
 function installDepartmentExport(host, dept, quoteId) {
   if (!host || !DEPARTMENT_EXPORT_NAMES[dept]) return;
   const sanitize = () => {
-    host.querySelectorAll('button').forEach(button => {
-      if (/导入/.test(button.textContent || '') || /上传.*报价/.test(button.textContent || '')) button.remove();
-    });
-    host.querySelectorAll('input[type="file"][accept*=".xls"]').forEach(input => input.remove());
+    // 喷油部保留原有报价导入入口，其余部门沿用手动填写模式。
+    if (dept !== 'painting') {
+      host.querySelectorAll('button').forEach(button => {
+        if (/导入/.test(button.textContent || '') || /上传.*报价/.test(button.textContent || '')) button.remove();
+      });
+      host.querySelectorAll('input[type="file"][accept*=".xls"]').forEach(input => input.remove());
+    }
     if (!host.querySelector(`[data-department-export="${dept}"]`)) {
       const heading = host.querySelector('h3') || host;
       heading.appendChild(createDepartmentExportButton(dept, quoteId));

@@ -2,7 +2,7 @@
 
 const { ensureExplicitProductGroups, weightedRowsSum, weightedInjectionSum } = require('./productMix');
 
-const MAT_CATEGORIES = ['吸塑', '胶袋', '彩盒/内咭', '电池', '产品利宝', '彩盒利宝', '电镀', '其他外购'];
+const MAT_CATEGORIES = ['吸塑', '胶袋', '彩盒/内咭', '电池', '产品利宝', '彩盒利宝', '电镀', '植绒', '其他外购'];
 const PAINT_KEYS = ['clamp', 'pad', 'roast', 'spray', 'edge', 'color', 'dip', 'oil', 'pp_water', 'uv'];
 
 function num(value) {
@@ -174,7 +174,7 @@ function calculateSingleQuoteCosts(quote, sections) {
     hardware: hardwareTotal - motor, electronic: electronicTotal, motor, suction,
     glue_bag: categoryTotal('胶袋'), color_box: categoryTotal('彩盒/内咭'),
     battery: categoryTotal('电池'), libao: categoryTotal('产品利宝') + categoryTotal('彩盒利宝'),
-    plating: categoryTotal('电镀'), other_buy: categoryTotal('其他外购'),
+    plating: categoryTotal('电镀'), flocking: categoryTotal('植绒'), other_buy: categoryTotal('其他外购'),
     carton: cartonHkd, freight, cabinet, misc: indoFreight, abs_material: absMaterial,
   };
   // 用明细行是否存在判断，而不是用金额是否非零；这样一张明确填写为 0 的新报价

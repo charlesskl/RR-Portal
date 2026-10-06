@@ -363,11 +363,11 @@ function lookupMaterialPrice(material, grade, prices) {
       : row.unit_price_rmb != null ? Number(row.unit_price_rmb) / (rates.fx_rmb_hkd || .85) : Number(row.unit_price || 0);
     const amount = row => row.is_subtotal ? Number(row.amount || 0) : row.children?.length
       ? row.children.reduce((sum, child) => sum + Number(child.qty || 0) * unit(child), 0) : Number(row.qty || 0) * unit(row);
-    const categoryLabels = {hardware:'五金', motor:'马达', suction:'吸塑', glue_bag:'胶袋', color_box:'彩盒/内咭', battery:'电池', product_libao:'产品利宝', box_libao:'彩盒利宝', plating:'电镀', other_buy:'其他外购', carton:'纸箱', electronic:'电子', blow:'吹气', slush:'搪胶', sewing_hair:'车发', sewing_cloth:'车衣'};
+    const categoryLabels = {hardware:'五金', motor:'马达', suction:'吸塑', glue_bag:'胶袋', color_box:'彩盒/内咭', battery:'电池', product_libao:'产品利宝', box_libao:'彩盒利宝', plating:'电镀', flocking:'植绒', other_buy:'其他外购', carton:'纸箱', electronic:'电子', blow:'吹气', slush:'搪胶', sewing_hair:'车发', sewing_cloth:'车衣'};
     // 金额直接取与算价一致的分类成本；利宝按明细分类拆开，合计保持不变。
     let boxLibao = 0;
     for (const row of [...(engineering?.packaging_materials || []), ...(engineering?.aux_materials || [])]) {
-      const valid = ['吸塑','胶袋','彩盒/内咭','电池','产品利宝','彩盒利宝','电镀','其他外购','利宝'];
+      const valid = ['吸塑','胶袋','彩盒/内咭','电池','产品利宝','彩盒利宝','电镀','植绒','其他外购','利宝'];
       const text = String(row.name || '') + ' ' + String(row.spec || '');
       const category = valid.includes(row.category) ? row.category
         : /吸塑|blister|胶袋|胶代|poly\s?bag|pe\s?bag|opp\s?bag|电池|battery/i.test(text) ? ''

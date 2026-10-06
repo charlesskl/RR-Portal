@@ -422,7 +422,7 @@
         if (['__molds__', '__all_molds__'].includes(selected)) selected = '__catalog__';
       }
       if (!fixedProductId && dept !== 'molding') options.unshift(['__overall__', '整体资料 · 全部小产品']);
-      if (!options.some(([id]) => id === selected)) selected = cfg.products[0].id;
+      if (!options.some(([id]) => id === selected)) selected = options[0][0];
       host.innerHTML = `<div class="mixed-switch"><div><span class="mixed-tag">混装款</span><strong>当前报价对象（共 ${cfg.products.length} 个小产品）</strong></div>
         <select aria-label="选择小产品">${options.map(([id, label]) => `<option value="${esc(id)}" ${id === selected ? 'selected' : ''}>${esc(label)}</option>`).join('')}</select>
         <p class="muted mixed-help"></p></div><div class="mixed-detail"></div>`;
@@ -614,16 +614,16 @@
   function salesPanel(host, payload, quote, edit, sections, changed) {
     const saved = payload.mixed_quote || null;
     const cfg = JSON.parse(JSON.stringify(saved || { enabled: true, version: 1, mode: 'equal', units_per_pack: 1,
-      products: [{ id: 'p1', code: 'P1', name: quote.product_name || '小产品 1', ratio: 1 }, { id: 'p2', code: 'P2', name: '小产品 2', ratio: 1 }] }));
+      products: [] }));
     const panel = document.createElement('section'); panel.className = 'mixed-config'; host.appendChild(panel);
     let expanded = !!saved?.enabled;
     const locked = sections.some(s => s.status === 'approved');
     function draw() {
       panel.innerHTML = `<h3>${saved?.enabled ? '混装产品配置' : '报价类型：单品报价'}</h3>${!expanded ? `<p>支持多个小产品独立报价、共用模具拆价及混装平均价。</p>${edit && !locked ? '<button type="button" class="mixed-enable">设置为混装报价</button>' : '<p class="muted">解除审核后可设置混装报价。</p>'}` : `
-        <p class="muted">在此维护小产品和每包装数量。啤工需求量在啤机部手填，报价NA比例在汇总页填写。</p>
+        <p class="muted">不预设小产品；可在工程/业务导入模具报价单，按配件序号建立小产品，也可手动添加。在此维护小产品和每包装数量。啤工需求量在啤机部手填，报价NA比例在汇总页填写。</p>
         <div class="mixed-fields"><label>每包装小产品数量${input('units_per_pack', cfg.units_per_pack, edit && !locked)}</label></div>
         <div class="mixed-scroll"><table><thead><tr><th>小产品货号</th><th>小产品名称</th><th></th></tr></thead><tbody>${cfg.products.map((p, i) => `<tr data-product="${i}"><td>${input('code', p.code, edit && !locked, 'text')}</td><td>${input('name', p.name, edit && !locked, 'text')}</td><td>${edit && !locked ? '<button type="button" class="mini mixed-remove">移除</button>' : ''}</td></tr>`).join('')}</tbody></table></div>
-        ${edit && !locked ? `<div class="wb-bar"><button type="button" class="mini mixed-add">＋ 添加小产品</button><button type="button" class="mixed-save-config">${saved ? '保存混装配置并刷新' : '保存并启用（现有明细归入首款）'}</button></div><p class="muted">修改配置后，各部门需重新提交审核。已有明细的小产品不能移除。</p>` : '<p class="muted">修改混装构成前请先解除各部门审核。</p>'}<p class="mixed-message" role="status"></p>`}`;
+        ${edit && !locked ? `<div class="wb-bar"><button type="button" class="mini mixed-add">＋ 添加小产品</button><button type="button" class="mixed-save-config">${saved ? '保存混装配置并刷新' : '保存并启用（现有明细归入首款）'}</button></div><p class="muted">修改配置后，各部门需重新提交审核。移除小产品后保存时需确认，将一并删除该产品的部门明细与零件选用关系，保留共用零件和其他小产品。</p>` : '<p class="muted">修改混装构成前请先解除各部门审核。</p>'}<p class="mixed-message" role="status"></p>`}`;
       panel.querySelector('.mixed-enable')?.addEventListener('click', () => { expanded = true; draw(); });
       panel.querySelector('[data-field="units_per_pack"]')?.addEventListener('input', event => { cfg.units_per_pack = Number(event.target.value); });
       panel.querySelectorAll('[data-product]').forEach(row => {
@@ -636,10 +636,13 @@
         const button = event.target, message = panel.querySelector('.mixed-message');
         try {
           window.MixedMolds.validateConfig(cfg);
+          const removed = (saved?.products || []).filter(p => !cfg.products.some(next => next.id === p.id));
+          if (removed.length && [...document.querySelectorAll('.dept-tab[title="有未保存修改"]')].some(tab => tab.dataset.dept !== 'sales')) throw new Error('请先保存其他部门的修改，再删除小产品');
+          if (removed.length && !window.confirm(`确认删除 ${removed.map(p => p.code).join('、')}？\n将删除这些小产品的全部部门明细和零件选用关系。共用零件及其他小产品会保留。`)) return;
           button.disabled = true;
           const section = sections.find(s => s.dept === 'sales');
           await request('/sections/' + section.id, { method: 'PUT', body: JSON.stringify({ payload, submit: false, base_filled_at: section.filled_at }) });
-          await request(`/quotes/${quote.id}/mixed`, { method: 'PUT', body: JSON.stringify({ config: cfg, expected_config: saved }) });
+          await request(`/quotes/${quote.id}/mixed`, { method: 'PUT', body: JSON.stringify({ config: cfg, expected_config: saved, confirmed_removed_ids: removed.map(p => p.id), expected_sections: Object.fromEntries(sections.filter(s => s.dept !== 'sales').map(s => [s.id, s.filled_at || ''])) }) });
           location.reload();
         } catch (error) { message.textContent = error.message; message.className = 'mixed-message mixed-error'; button.disabled = false; }
       });
@@ -850,6 +853,6 @@
       }
     } catch (error) { host.innerHTML = `<p class="mixed-error">混装汇总失败：${esc(error.message)}</p>`; }
   }
-  const componentNames = { injection_labor: '啤工', assembly_labor: '装配人工', painting_labor: '喷油人工', paint_material: '油料', imp_mat: '进口塑胶', dom_mat: '国产塑胶', blow: '吹气', slush: '搪胶', sewing_hair: '车发', sewing_cloth: '车衣', hardware: '五金', electronic: '电子', motor: '马达', suction: '吸塑', glue_bag: '胶袋', color_box: '彩盒/内咭', battery: '电池', libao: '利宝', plating: '电镀', other_buy: '其他外购', carton: '纸箱', freight: '运费', cabinet: '吊柜', misc: '印尼运费', abs_material: '其中 ABS 材料' };
+  const componentNames = { injection_labor: '啤工', assembly_labor: '装配人工', painting_labor: '喷油人工', paint_material: '油料', imp_mat: '进口塑胶', dom_mat: '国产塑胶', blow: '吹气', slush: '搪胶', sewing_hair: '车发', sewing_cloth: '车衣', hardware: '五金', electronic: '电子', motor: '马达', suction: '吸塑', glue_bag: '胶袋', color_box: '彩盒/内咭', battery: '电池', libao: '利宝', plating: '电镀', flocking: '植绒', other_buy: '其他外购', carton: '纸箱', freight: '运费', cabinet: '吊柜', misc: '印尼运费', abs_material: '其中 ABS 材料' };
   window.MixedQuotation = { previewNumberedImport, wrap, salesPanel, summary, componentNames, renderMoldingAllocation, renderEngineeringSharedMolds, refreshEngineeringSharedMolds };
 })();

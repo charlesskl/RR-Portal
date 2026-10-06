@@ -130,7 +130,7 @@ test('报价汇总项目按参考表顺序排列，系统新增项目插入同�
   assert.deepEqual(QUOTE_COMPONENTS.map(([key]) => key), [
     'injection_labor', 'assembly_labor', 'painting_labor',
     'imp_mat', 'dom_mat', 'blow',
-    'color_box', 'glue_bag', 'suction', 'carton', 'plating',
+    'color_box', 'glue_bag', 'suction', 'carton', 'plating', 'flocking',
     'electronic', 'motor', 'battery', 'libao', 'hardware',
     'slush', 'sewing_hair', 'sewing_cloth', 'paint_material',
     'other_buy', 'misc', 'freight', 'cabinet',

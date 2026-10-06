@@ -19,7 +19,7 @@ const HKD4 = '"HK$"#,##0.0000';
 const PCT = '0.00%';
 const FONT = 'Microsoft YaHei';  // 全表统一字体
 // 辅助/包装材料 类别 — 减税明细各外购项按此类别统计（须与前端 workbench.js MAT_CATEGORIES 一致）
-const MAT_CATEGORIES = ['吸塑', '胶袋', '彩盒/内咭', '电池', '产品利宝', '彩盒利宝', '电镀', '其他外购'];
+const MAT_CATEGORIES = ['吸塑', '胶袋', '彩盒/内咭', '电池', '产品利宝', '彩盒利宝', '电镀', '植绒', '其他外购'];
 const MOLD_USD_HKD = 7.8;
 const COLORS = {
   navy: 'FF17365D',
@@ -2641,6 +2641,7 @@ function renderTaxSummary(ws, row, sales, extra = {}) {
     battery:   auto('t2', 'battery',   batteryCells,  false),
     libao:     auto('t2', 'libao',     libaoCells,    false),
     plating:   auto('t2', 'plating',   platingCells,  false),
+    flocking: auto('t2', 'flocking', byCat('植绒'), false),
     // 纸箱取统一成本汇总；“杂项”汇总印尼运费和附加税，不再单列附加税。
     carton:      refLink('t2', 'carton',      sumR ? `J${sumR}` : null),
     misc:        refLink('t2', 'misc',        [sumR ? `H${sumR}` : null, subRefs.shipSurtaxHkdFormula].filter(Boolean).join('+') || null),
@@ -2702,7 +2703,7 @@ function renderTaxSummary(ws, row, sales, extra = {}) {
   const t2 = ps.t2 || {};
   // 与前端 UI 一致：彩盒/内咭 合并为一列（inner_card 为已废弃字段，前端已并入 color_box）
   const t2Cols = [['彩盒/内咭', 'color_box'], ['未减税前码数', 'code_before'], ['减税后码数', 'code_after'],
-    ['电池', 'battery'], ['利宝', 'libao'], ['电镀', 'plating'], ['其他外购', 'other_buy'],
+    ['电池', 'battery'], ['利宝', 'libao'], ['电镀', 'plating'], ['植绒', 'flocking'], ['其他外购', 'other_buy'],
     ['纸箱', 'carton'], ['运费', 'freight'], ['吊柜费', 'cabinet'], ['杂项', 'misc']];
   ws.getCell(row, 1).value = '二、包装 / 外购';
   ws.mergeCells(row, 1, row, 13);
@@ -2817,10 +2818,10 @@ function renderTaxSummary(ws, row, sales, extra = {}) {
   const T3_INJ = `A${t3Row}`, T3_PNT = `B${t3Row}`, T3_PMAT = `C${t3Row}`, T3_ASM = `D${t3Row}`;
   const rmbBuyFormula =
     `${tA.dom_mat}+${tA.sewing_hair}+${tA.sewing_cloth}+${tA.hardware}+${tA.electronic}+${tA.motor}`
-    + `+${tB.color_box}+${tB.battery}+${tB.libao}+${tB.plating}+${tB.other_buy}+${tB.carton}+${tB.misc}+${tA.glue_bag}+${T3_PMAT}`;
+    + `+${tB.color_box}+${tB.battery}+${tB.libao}+${tB.plating}+${tB.flocking}+${tB.other_buy}+${tB.carton}+${tB.misc}+${tA.glue_bag}+${T3_PMAT}`;
   const T4_FORMULA = {
     rmb_buy: rmbBuyFormula,
-    tax13: `${tA.dom_mat}+${tA.hardware}+${tA.motor}+${tB.color_box}+${tB.battery}+${tB.libao}+${tB.other_buy}+${T3_PMAT}+${tA.glue_bag}`,
+    tax13: `${tA.dom_mat}+${tA.hardware}+${tA.motor}+${tB.color_box}+${tB.battery}+${tB.libao}+${tB.flocking}+${tB.other_buy}+${T3_PMAT}+${tA.glue_bag}`,
     carton: tB.carton,
     tax1: tB.plating,
     slush3: tA.slush,
@@ -2828,7 +2829,7 @@ function renderTaxSummary(ws, row, sales, extra = {}) {
     sewcloth13: tA.sewing_cloth,
     suction6: tA.suction,
     freight9: tB.freight,
-    tax13b: `${tA.dom_mat}+${tA.hardware}+${tA.motor}+${tB.color_box}+${tB.battery}+${tB.libao}+${tB.other_buy}+${T3_PMAT}+${tA.glue_bag}`,
+    tax13b: `${tA.dom_mat}+${tA.hardware}+${tA.motor}+${tB.color_box}+${tB.battery}+${tB.libao}+${tB.flocking}+${tB.other_buy}+${T3_PMAT}+${tA.glue_bag}`,
   };
   t4Cols.forEach((c, i) => {
     const e = t4[c[1]] || { amt: 0, rate: 0 };

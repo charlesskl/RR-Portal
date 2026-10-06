@@ -35,8 +35,10 @@ test('混装报价：新建、保存、拆价、权限、审核锁、确认锁�
   assert.equal(data.mixed_quote.enabled, true);
   const sales = data.sections.find(s => s.dept === 'sales'), eng = data.sections.find(s => s.dept === 'engineering'), molding = data.sections.find(s => s.dept === 'molding');
   await api('/sections/' + sales.id, 'PUT', { payload: {}, submit: false }, 409);
-  await api('/quotes/' + created.id + '/mixed', 'PUT', { config: data.mixed_quote, expected_config: null }, 409);
+  assert.deepEqual(data.mixed_quote.products, []);
   const next = structuredClone(data.mixed_quote); next.units_per_pack = 6;
+  next.products = [1,2].map(n => ({id:`p${n}`,code:`P${n}`,name:`小产品 ${n}`,ratio:1}));
+  await api('/quotes/' + created.id + '/mixed', 'PUT', { config: next, expected_config: null }, 409);
   await api('/quotes/' + created.id + '/mixed', 'PUT', { config: next, expected_config: data.mixed_quote });
   data = await api('/quotes/' + created.id);
   assert.equal(data.mixed_quote.units_per_pack, 6);

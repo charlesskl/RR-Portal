@@ -13,6 +13,22 @@ const STATUS_MAP = {
   cancel2: 'cancelled',
 };
 
+// 导入预览可选做工（多选）：一个排期行按步骤生成多条订单，如 半成品+包装+混装
+const WORK_TYPE_OPTIONS = ['半成品', '包装', '混装', '成品'];
+
+// 做工值归一化为数组：兼容字符串（老映射格式）/ 数组 / 空
+const normWtListLoose = (v) => (Array.isArray(v) ? v : (v ? [v] : [])).map(String).filter(Boolean);
+
+// 归一化 + 兜底：空 → ['成品']；按 WORK_TYPE_OPTIONS 顺序排列，保证展开稳定
+const normWtList = (v) => {
+  const clean = normWtListLoose(v);
+  if (clean.length === 0) return ['成品'];
+  return WORK_TYPE_OPTIONS.filter(o => clean.includes(o)).concat(clean.filter(x => !WORK_TYPE_OPTIONS.includes(x)));
+};
+
+// 展开行的 key：第一个做工沿用原 key（保持勾选状态），其余加后缀
+const wtRowKey = (key, wt, wts) => (wt === wts[0] ? key : `${key}__${wt}`);
+
 const HEADER_FIELD_MAP = {
   '主管': 'supervisor',
   '拉名': 'line_name',
@@ -268,7 +284,7 @@ export default function SchedulingSheet({ workshop, tab, lineName = 'all', lines
   const [uploadVisible, setUploadVisible] = useState(false);
   const [fileList, setFileList] = useState([]);
   const [parsing, setParsing] = useState(false);
-  // 导入预览里每行选的做工：{ [_key]: '成品' | '半成品' }
+  // 导入预览里每行选的做工（数组，可多选）：{ [_key]: ['半成品', '包装', ...] }
   const [previewWorkType, setPreviewWorkType] = useState({});
   // 导入预览里每行选的拉：{ [_key]: 拉编号 }
   const [previewLine, setPreviewLine] = useState({});
@@ -388,7 +404,8 @@ export default function SchedulingSheet({ workshop, tab, lineName = 'all', lines
       }
       const withKeys = results.map((r, i) => ({ ...r, _key: i }));
 
-      // 取货号→做工映射，给每行预填做工：半成品 sheet → 半成品；映射命中 → 映射值；否则 → 成品
+      // 取货号→做工映射，给每行预填做工：半成品 sheet → [半成品]；映射命中 → 映射值；否则 → [成品]
+      // （映射值兼容老格式：可能是字符串或数组）
       let wtMap = {};
       try {
         const mapRes = await axios.get('/api/orders/work-type-map');
@@ -397,10 +414,11 @@ export default function SchedulingSheet({ workshop, tab, lineName = 'all', lines
       const wtDefaults = {};
       for (const r of withKeys) {
         if (r.sheet && r.sheet.includes('半成品')) {
-          wtDefaults[r._key] = '半成品';
+          wtDefaults[r._key] = ['半成品'];
         } else {
           const itemNo = getItemNo(r);
-          wtDefaults[r._key] = (itemNo && wtMap[itemNo]) || '成品';
+          const hit = itemNo ? normWtListLoose(wtMap[itemNo]) : [];
+          wtDefaults[r._key] = hit.length ? hit : ['成品'];
         }
       }
       setPreviewWorkType(wtDefaults);
@@ -431,7 +449,7 @@ export default function SchedulingSheet({ workshop, tab, lineName = 'all', lines
     }
     setImporting(true);
     try {
-      // 每条订单展开：成品 → 1 条；半成品 → 2 条（半成品 + 自动配对的成品）
+      // 每条订单按选的做工（可多选）展开：每个做工各生成一条订单（如 半成品+包装+混装 → 3 条）
       const orders = [];
       const lineEntries = [];   // 货号→拉 映射，导入后存盘
       for (const r of selected) {
@@ -443,40 +461,34 @@ export default function SchedulingSheet({ workshop, tab, lineName = 'all', lines
         const itemNo = getItemNo(r);
         // 用统一口径的货号覆盖 mapRowToOrder 的结果（避免系统货号盖掉 ITEM#）
         if (itemNo) base.item_no = itemNo;
-        const wt = previewWorkType[r._key] || '成品';
-        const makeOrder = (work_type, line) => ({
-          ...base,
-          work_type,
-          line_name: line || base.line_name || '',
-          workshop,
-          status: 'active',
-          row_color: r.type === 'modified' ? 'blue' : (r.type === 'new' ? 'yellow' : null),
-        });
-        // 主订单：用预览里选的拉
-        const mainLine = rowLine(r);
-        orders.push(makeOrder(wt, mainLine));
-        // 「待定」是临时挂单位置，不写进 (货号+做工)→拉 记忆（服务端也会再拦一道）
-        if (mainLine && mainLine !== '待定') lineEntries.push({ item_no: itemNo, work_type: wt, line: mainLine });
-        // 半成品自动配一条一样的成品订单（拉用配对成品行选的）
-        if (wt === '半成品') {
-          const pairLine = rowLine({ ...r, _key: r._key + '__pair', _pairOf: r._key });
-          orders.push(makeOrder('成品', pairLine));
-          if (pairLine && pairLine !== '待定') lineEntries.push({ item_no: itemNo, work_type: '成品', line: pairLine });
+        const wts = normWtList(previewWorkType[r._key]);
+        for (const wt of wts) {
+          const line = rowLine({ ...r, _key: wtRowKey(r._key, wt, wts), _wt: wt });
+          orders.push({
+            ...base,
+            work_type: wt,
+            line_name: line || base.line_name || '',
+            workshop,
+            status: 'active',
+            row_color: r.type === 'modified' ? 'blue' : (r.type === 'new' ? 'yellow' : null),
+          });
+          // 「待定」是临时挂单位置，不写进 (货号+做工)→拉 记忆（服务端也会再拦一道）
+          if (line && line !== '待定') lineEntries.push({ item_no: itemNo, work_type: wt, line });
         }
       }
       const res2 = await axios.post('/api/orders', orders);
       const ids = res2.data.ids || [];
       setNewImportedIds(prev => new Set([...prev, ...ids]));
 
-      // 保存货号→做工映射，下次同货号自动带出
+      // 保存货号→做工映射，下次同货号自动带出（多选时存数组）
       const entries = [];
       const seen = new Set();
       for (const r of selected) {
         const itemNo = getItemNo(r);
-        const wt = previewWorkType[r._key];
-        if (itemNo && wt && !seen.has(itemNo)) {
+        const wts = normWtList(previewWorkType[r._key]);
+        if (itemNo && wts.length && !seen.has(itemNo)) {
           seen.add(itemNo);
-          entries.push({ item_no: itemNo, work_type: wt });
+          entries.push({ item_no: itemNo, work_type: wts });
         }
       }
       if (entries.length > 0) {
@@ -707,30 +719,31 @@ export default function SchedulingSheet({ workshop, tab, lineName = 'all', lines
     { title: '状态', dataIndex: 'riskText', width: 100, render: (_, r) => { const colorMap = { danger: 'red', warning: 'orange', tight: 'gold', ok: 'green', missing: 'default' }; return <Tag color={colorMap[r.risk] || 'default'}>{r.riskText}</Tag>; } },
   ];
 
-  // 展开显示：原始行 + 半成品的配对成品行（配对行 key = 原 key + '__pair'）
+  // 展开显示：每个原始行按选的做工（可多选）展开，一个做工一行（如 半成品+包装+混装 → 3 行）
+  // 第一个做工沿用原 key（保持勾选），其余加后缀 '__做工'
   const displayRows = useMemo(() => {
     const out = [];
     for (const r of previewData) {
-      out.push(r);
-      if (previewWorkType[r._key] === '半成品') {
-        out.push({ ...r, _key: r._key + '__pair', _pairOf: r._key });
+      const wts = normWtList(previewWorkType[r._key]);
+      for (const wt of wts) {
+        out.push({ ...r, _key: wtRowKey(r._key, wt, wts), _wt: wt });
       }
     }
     return out;
   }, [previewData, previewWorkType]);
 
-  // 显示用选中键：选中的原始行 + 它们的配对成品行
+  // 显示用选中键：选中的原始行展开后的所有做工行
   const displaySelectedKeys = useMemo(() => {
     const out = [];
     for (const k of selectedRowKeys) {
-      out.push(k);
-      if (previewWorkType[k] === '半成品') out.push(k + '__pair');
+      const wts = normWtList(previewWorkType[k]);
+      for (const wt of wts) out.push(wtRowKey(k, wt, wts));
     }
     return out;
   }, [selectedRowKeys, previewWorkType]);
 
-  // 取某预览行的做工（原始行用选的，配对成品行固定成品）
-  const rowWorkType = (r) => (r._pairOf != null ? '成品' : (previewWorkType[r._key] || '成品'));
+  // 取某预览行的做工（展开行用自带的 _wt）
+  const rowWorkType = (r) => r._wt || normWtList(previewWorkType[r._key])[0];
   // 取某预览行的拉：用户选过用选的，否则按 (货号+做工) 查记忆映射
   const rowLine = (r) => {
     if (previewLine[r._key] !== undefined) return previewLine[r._key];
@@ -738,31 +751,32 @@ export default function SchedulingSheet({ workshop, tab, lineName = 'all', lines
     return itemLineMap[key] || '';
   };
 
-  // 选拉联动：同 Sheet + 同做工 的行一起跟着跳（成品和半成品分开，可去不同拉）
+  // 选拉联动：同 Sheet + 同做工 的行一起跟着跳（不同做工分开，可去不同拉）
   const handleLineChange = (row, value) => {
     const sheet = row.sheet;
-    const targetWt = rowWorkType(row);   // 配对成品行 → 成品
+    const targetWt = rowWorkType(row);
     const v = value || '';
     setPreviewLine(prev => {
       const next = { ...prev };
       for (const r of previewData) {
         if (r.sheet !== sheet) continue;
-        const rWt = previewWorkType[r._key] || '成品';
-        if (rWt === targetWt) next[r._key] = v;
-        // 半成品原始行的「配对成品行」做工是成品：目标是成品时跟跳
-        if (rWt === '半成品' && targetWt === '成品') next[r._key + '__pair'] = v;
+        const wts = normWtList(previewWorkType[r._key]);
+        for (const wt of wts) {
+          if (wt === targetWt) next[wtRowKey(r._key, wt, wts)] = v;
+        }
       }
       return next;
     });
   };
 
-  // 选做工联动：同一个 Excel Sheet 的所有行一起改成同样的做工
-  const handleWorkTypeChange = (row, value) => {
+  // 选做工联动：同一个 Excel Sheet 的所有行一起改成同样的做工组合（多选）
+  const handleWorkTypeChange = (row, values) => {
     const sheet = row.sheet;
+    const wts = normWtList(values);   // 清空时兜底 ['成品']
     setPreviewWorkType(prev => {
       const next = { ...prev };
       for (const r of previewData) {
-        if (r.sheet === sheet) next[r._key] = value;
+        if (r.sheet === sheet) next[r._key] = wts;
       }
       return next;
     });
@@ -772,7 +786,6 @@ export default function SchedulingSheet({ workshop, tab, lineName = 'all', lines
     {
       title: '类型', dataIndex: 'type', width: 90,
       render: (t, r) => {
-        if (r._pairOf != null) return <Tag color="green">配对成品</Tag>;
         return t === 'new'
           ? <Tag color="gold">新单</Tag>
           : t === 'modified'
@@ -784,22 +797,21 @@ export default function SchedulingSheet({ workshop, tab, lineName = 'all', lines
     { title: 'Sheet', dataIndex: 'sheet', width: 110 },
     { title: '行号', dataIndex: 'row', width: 60 },
     {
-      title: '做工', key: 'work_type', width: 110,
+      title: '做工', key: 'work_type', width: 170,
       render: (_, r) => {
-        // 配对成品行：固定成品，不可改（它是半成品行自动带出来的）
-        if (r._pairOf != null) {
-          return <Tag color="green">成品</Tag>;
+        // 展开出来的后续做工行：固定不可改（增删步骤在第一个做工行上操作，同 Sheet 联动）
+        if (r._wt && String(r._key).includes('__')) {
+          return <Tag color="green">{r._wt}</Tag>;
         }
         return (
           <Select
+            mode="multiple"
             size="small"
-            style={{ width: 90 }}
-            value={previewWorkType[r._key] || '成品'}
+            style={{ width: 158 }}
+            placeholder="选做工"
+            value={normWtList(previewWorkType[r._key])}
             onChange={v => handleWorkTypeChange(r, v)}
-            options={[
-              { value: '成品', label: '成品' },
-              { value: '半成品', label: '半成品' },
-            ]}
+            options={WORK_TYPE_OPTIONS.map(o => ({ value: o, label: o }))}
           />
         );
       },
@@ -836,7 +848,7 @@ export default function SchedulingSheet({ workshop, tab, lineName = 'all', lines
     const keys = selectedRowKeys.length > 0 ? selectedRowKeys : previewData.map(r => r._key);
     setPreviewWorkType(prev => {
       const next = { ...prev };
-      for (const k of keys) next[k] = wt;
+      for (const k of keys) next[k] = [wt];
       return next;
     });
   };
@@ -1020,7 +1032,7 @@ export default function SchedulingSheet({ workshop, tab, lineName = 'all', lines
       >
         <Alert
           style={{ marginBottom: 12 }}
-          message={`新单: ${previewData.filter(r => r.type === 'new').length} 条, 修改单: ${previewData.filter(r => r.type === 'modified').length} 条 · 选半成品会自动配一条成品（共导入 ${displaySelectedKeys.length} 条）`}
+          message={`新单: ${previewData.filter(r => r.type === 'new').length} 条, 修改单: ${previewData.filter(r => r.type === 'modified').length} 条 · 做工可多选，每个做工各生成一条订单（共导入 ${displaySelectedKeys.length} 条）`}
           type="info"
           showIcon
         />
@@ -1038,7 +1050,7 @@ export default function SchedulingSheet({ workshop, tab, lineName = 'all', lines
           />
         </div>
         <div style={{ marginBottom: 12 }}>
-          <span style={{ fontSize: 12, color: '#999' }}>选做工：同 Sheet 全部联动 · 选拉：同 Sheet 同做工联动（成品/半成品分开选拉）· 选半成品自动配「成品」行</span>
+          <span style={{ fontSize: 12, color: '#999' }}>选做工：同 Sheet 全部联动，可多选（如 半成品+包装+混装），每个做工各生成一条订单 · 选拉：同 Sheet 同做工联动</span>
         </div>
         <Table
           rowKey="_key"
@@ -1049,8 +1061,8 @@ export default function SchedulingSheet({ workshop, tab, lineName = 'all', lines
           pagination={false}
           rowSelection={{
             selectedRowKeys: displaySelectedKeys,
-            onChange: (keys) => setSelectedRowKeys(keys.filter(k => !String(k).endsWith('__pair'))),
-            getCheckboxProps: (r) => ({ disabled: r._pairOf != null }),
+            onChange: (keys) => setSelectedRowKeys(keys.filter(k => !String(k).includes('__'))),
+            getCheckboxProps: (r) => ({ disabled: String(r._key).includes('__') }),
           }}
         />
       </Modal>

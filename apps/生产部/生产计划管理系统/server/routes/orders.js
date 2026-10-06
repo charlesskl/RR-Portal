@@ -211,6 +211,7 @@ router.get('/work-type-map', (req, res) => {
 
 // PUT /api/orders/work-type-map — 批量保存货号→做工映射
 // body: { entries: [{ item_no, work_type }, ...] }
+// work_type 支持字符串（老格式）或数组（多步骤，如 ["半成品","包装","混装"]）
 router.put('/work-type-map', (req, res) => {
   const { entries } = req.body;
   if (!Array.isArray(entries)) return res.status(400).json({ message: 'entries must be array' });
@@ -220,7 +221,13 @@ router.put('/work-type-map', (req, res) => {
     if (!e || !e.item_no || !e.work_type) continue;
     const key = String(e.item_no).trim();
     if (!key) continue;
-    map[key] = String(e.work_type).trim();
+    if (Array.isArray(e.work_type)) {
+      const arr = [...new Set(e.work_type.map(w => String(w).trim()).filter(Boolean))];
+      if (arr.length === 0) continue;
+      map[key] = arr;
+    } else {
+      map[key] = String(e.work_type).trim();
+    }
     n++;
   }
   saveWorkTypeMap(map);

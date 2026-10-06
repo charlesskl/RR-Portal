@@ -3126,11 +3126,15 @@ function renderElectronic(host, payload, canEdit, onChange, fxRmbHkd, fxHkdUsd) 
 
   host.innerHTML = `
     <h3>电子部分
+    <button class="mini" id="el-import" type="button" ${canEdit ? '' : 'disabled title="请先进入编辑模式"'}>📄 导入登信报价单</button>
+    <button class="mini" id="el-import-lianxiang" type="button" ${canEdit ? '' : 'disabled title="请先进入编辑模式"'}>📄 导入联翔报价单</button>
+    ${canEdit ? '<input id="el-file" type="file" accept=".xls,.xlsx" hidden/><input id="el-file-lianxiang" type="file" accept=".xls,.xlsx" hidden/>' : '<small class="muted">进入编辑后可导入 Excel</small>'}
     ${canEdit ? '<button class="mini" id="el-detail-add" type="button" style="margin-left:6px">+ 手动新增明细</button>' : ''}
     ${canEdit && payload.electronics_doc ? '<button class="mini" id="el-summarize" type="button" style="margin-left:6px">🔄 汇总明细并追加到总表</button>' : ''}
     ${payload.electronics_doc ? `<small style="margin-left:8px;color:#16a34a">✓ 明细 ${payload.electronics_doc.parts_count} 行 · 原币 ${payload.electronics_doc.source_currency || 'RMB'} (${payload.electronics_doc.imported_at || ''})</small>` : ''}
     </h3>
     <h4 style="margin-top:14px;color:#475569">总表（报价明细 用）</h4>
+    <div id="el-import-preview"></div>
     <div id="wb-elec"></div>
     <div id="wb-elec-detail"></div>
     <div id="wb-elec-fees"></div>
@@ -3340,6 +3344,82 @@ function renderElectronic(host, payload, canEdit, onChange, fxRmbHkd, fxHkdUsd) 
       onChange();
       renderElectronic(host, payload, canEdit, onChange, fxRmbHkd, fxHkdUsd);
     };
+    // 导入
+    const impPreview = host.querySelector('#el-import-preview');
+    const importers = [
+      { button: '#el-import', file: '#el-file', endpoint: '/api/uploads/electronic-sheet', label: '登信' },
+      { button: '#el-import-lianxiang', file: '#el-file-lianxiang', endpoint: '/api/uploads/electronic-lianxiang-sheet', label: '联翔' },
+    ];
+    importers.forEach(importer => {
+      const impBtn = host.querySelector(importer.button);
+      const impFile = host.querySelector(importer.file);
+      if (!impBtn || !impFile) return;
+      impBtn.onclick = () => impFile.click();
+      impFile.onchange = async (e) => {
+        const f = e.target.files[0]; if (!f) return;
+        impPreview.innerHTML = '<i class="muted" style="padding:8px;display:block">正在解析…</i>';
+        try {
+          const fd = new FormData(); fd.append('file', f);
+          const r = await fetch(importer.endpoint, { method: 'POST', credentials: 'include', body: fd });
+          const j = await r.json();
+          if (!r.ok) throw new Error(j.error || '解析失败');
+          const detectedCurrency = j.source_currency || 'RMB';
+          const validation = j.validation || {};
+          const validationText = validation.ok === true ? '✓ 金额校验通过'
+            : (validation.ok === false ? '⚠ 金额校验不一致，请核对源表公式' : '未提供金额校验');
+          const validationColor = validation.ok === false ? '#b91c1c' : '#15803d';
+          const moldFees = (j.extras && j.extras.mold_fees) || [];
+          impPreview.innerHTML = `
+            <div class="card" style="background:#f0fdf4;border:1px solid #86efac;margin-top:10px">
+              <p><b>${importer.label}</b>格式：从 <b>${escapeHtml(j.sheet_used || '')}</b> 解析到 <b>${j.count}</b> 个零件（${(j.parts || []).reduce((a, p) => a + 1 + (p.children || []).length, 0)} 行明细）</p>
+              <p><b>识别币种：</b>
+                <select id="el-source-currency" style="width:90px"><option value="RMB" ${detectedCurrency === 'RMB' ? 'selected' : ''}>RMB</option><option value="USD" ${detectedCurrency === 'USD' ? 'selected' : ''}>USD</option><option value="HKD" ${detectedCurrency === 'HKD' ? 'selected' : ''}>HKD</option></select>
+                <span class="muted">${escapeHtml(((j.currency_detection && j.currency_detection.signals) || []).join('、'))}</span>
+                · <span style="color:${validationColor};font-weight:600">${validationText}</span>
+              </p>
+              ${j.meta && j.meta.product ? `<p class="muted">产品: ${escapeHtml(j.meta.product)}${j.meta.customer ? ' · 客户: ' + escapeHtml(j.meta.customer) : ''}${j.meta.date ? ' · 日期: ' + escapeHtml(j.meta.date) : ''}</p>` : ''}
+              ${j.source_format === 'lianxiang' ? `<p class="muted">联翔报价 RMB ${formatNum(j.extras && j.extras.total_price_rmb)} / 套（已含 OTP 芯片 RMB ${formatNum(j.extras && j.extras.otp_price_rmb)}） · 其它费用 ${(j.extras && j.extras.other_fees || []).length} 项</p>` : ''}
+              ${moldFees.length ? `<p class="muted">模具费用：${moldFees.map(fee => `${escapeHtml(fee.name || '模费')} ${escapeHtml(fee.currency || detectedCurrency)} ${formatNum(fee.amount)}`).join('；')}（单独记录，不自动摊入单价）</p>` : ''}
+              ${j.meta && j.meta.moq ? `<p class="muted">MOQ：${formatNum(j.meta.moq)}（作为报价条件保存，不自动摊销）</p>` : ''}
+              <p class="muted">换算汇率：1 USD = ${fxHkdUsd} HKD；1 RMB = ${formatNum(1 / (num(fxRmbHkd) || 0.85))} HKD。</p>
+              <p class="muted">应用后替换下方细表及费用参数；上方总表手动编辑的行会保留，自动汇总行按明细更新；导出 Excel 时会附加“电子明细”分表。</p>
+              <div style="margin-top:10px;display:flex;gap:8px">
+                <button id="el-imp-apply">应用</button>
+                <button id="el-imp-cancel" class="mini danger">取消</button>
+              </div>
+            </div>`;
+          impPreview.querySelector('#el-imp-apply').onclick = () => {
+            if (payload.electronics_doc?.parts?.length && !confirm('应用导入将替换现有电子细表及费用参数，保留总表中手动编辑的行。是否继续？')) return;
+            // 明细是 RMB，总表单价是 HKD：单价 HKD = RMB ÷ 汇率（与税点下拉/由明细汇总按钮口径一致）
+            const fx = num(fxRmbHkd) || 0.85;
+            j.source_currency = impPreview.querySelector('#el-source-currency').value;
+            const normalized = normalizeElectronicImport(j, fx, fxHkdUsd);
+            const sp = elecImportedSummaryRows(normalized, normalized.extras || {}, fx);
+            const taxLabel = (normalized.meta && normalized.meta.tax_label) || '含税';
+            syncElectronicDetailSummary(payload, buildElectronicSummaryRows(sp, taxLabel));
+            if (normalized.extras) {
+              payload.electronics_extra = payload.electronics_extra || {};
+              ['test_repair', 'packing_shipping', 'profit_pct', 'tax_diff', 'tax_payable', 'bonding_cost', 'smt_cost', 'labor_cost'].forEach(k => {
+                if (normalized.extras[k] != null) payload.electronics_extra[k] = normalized.extras[k];
+              });
+            }
+            // 保存原始 parts/extras 供导出
+            payload.electronics_doc = {
+              ...normalized,
+              source_format: normalized.source_format || 'dengxin',
+              parts_count: elecDetailRowCount(normalized.parts || []),
+              imported_at: new Date().toISOString().slice(0, 10),
+            };
+            impPreview.innerHTML = ''; impFile.value = '';
+            onChange();
+            renderElectronic(host, payload, canEdit, onChange, fxRmbHkd, fxHkdUsd);
+          };
+          impPreview.querySelector('#el-imp-cancel').onclick = () => { impPreview.innerHTML = ''; impFile.value = ''; };
+        } catch (err) {
+          impPreview.innerHTML = `<div class="card" style="background:#fef2f2;border:1px solid #fecaca;margin-top:10px">解析失败：${escapeHtml(err.message)}</div>`;
+        }
+      };
+    });
 
 
   }
@@ -4800,8 +4880,8 @@ function createDepartmentExportButton(dept, quoteId) {
 function installDepartmentExport(host, dept, quoteId) {
   if (!host || !DEPARTMENT_EXPORT_NAMES[dept]) return;
   const sanitize = () => {
-    // 喷油部保留原有报价导入入口，其余部门沿用手动填写模式。
-    if (dept !== 'painting') {
+    // 喷油部和电子部保留报价导入入口，其余部门沿用手动填写模式。
+    if (!['painting', 'electronic'].includes(dept)) {
       host.querySelectorAll('button').forEach(button => {
         if (/导入/.test(button.textContent || '') || /上传.*报价/.test(button.textContent || '')) button.remove();
       });

@@ -1,0 +1,14 @@
+{
+  "name": "printlink-integrated",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "start": "node start.mjs",
+    "cloud": "node start.mjs --cloud-only",
+    "collector": "node collector/agent.mjs",
+    "test": "node --test tests/*.test.mjs production/tests/*.test.js"
+  }
+}

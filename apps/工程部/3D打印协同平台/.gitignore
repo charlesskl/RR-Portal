@@ -1,0 +1,10 @@
+data/
+*.log
+.env
+collector/*.local.json
+backups/
+recovery/
+
+runtime/
+node_modules/
+*.sqlite*

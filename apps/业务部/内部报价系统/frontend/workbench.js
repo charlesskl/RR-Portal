@@ -2374,7 +2374,8 @@ function renderSewing(host, payload, canEdit, onChange, fxRmbHkd) {
   function render() {
     host.innerHTML = `<h3>车缝产品报价（按产品分组）
       ${canEdit ? '<button class="mini" id="sw-add-group" style="margin-left:10px">+ 新增产品组</button>' : ''}
-      ${canEdit ? '<button class="mini" id="sw-import" type="button" style="margin-left:6px">📄 导入车缝报价单</button><input id="sw-file" type="file" accept=".xls,.xlsx" style="display:none"/>' : ''}
+      <button class="mini" id="sw-import" type="button" style="margin-left:6px" ${canEdit ? '' : 'disabled title="请先进入编辑模式"'}>📄 导入车缝报价单</button>
+      ${canEdit ? '<input id="sw-file" type="file" accept=".xls,.xlsx" style="display:none"/>' : '<small class="muted">进入编辑后可导入 Excel</small>'}
     </h3>
     <div id="sw-import-preview"></div>
     <div id="sw-groups"></div>`;
@@ -4880,8 +4881,8 @@ function createDepartmentExportButton(dept, quoteId) {
 function installDepartmentExport(host, dept, quoteId) {
   if (!host || !DEPARTMENT_EXPORT_NAMES[dept]) return;
   const sanitize = () => {
-    // 喷油部和电子部保留报价导入入口，其余部门沿用手动填写模式。
-    if (!['painting', 'electronic'].includes(dept)) {
+    // 喷油部、电子部和车缝部保留报价导入入口，其余部门沿用手动填写模式。
+    if (!['painting', 'electronic', 'sewing'].includes(dept)) {
       host.querySelectorAll('button').forEach(button => {
         if (/导入/.test(button.textContent || '') || /上传.*报价/.test(button.textContent || '')) button.remove();
       });

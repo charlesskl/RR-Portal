@@ -11,7 +11,7 @@ public static class LegacyInspectionParser
 {
     private static readonly HashSet<string> Sites = ["兴信", "湖南", "华登"];
 
-    public static IReadOnlyList<InspectionRecord> Parse(Stream stream, string site, string fileName, string? template = null)
+    public static IReadOnlyList<InspectionRecord> Parse(Stream stream, string site, string fileName, string? template = null, List<LegacyImportIssue>? issues = null)
     {
         if (!Sites.Contains(site)) throw new InvalidDataException("厂区必须是兴信、湖南或华登");
         Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
@@ -20,6 +20,7 @@ public static class LegacyInspectionParser
         {
             ConfigureDataTable = _ => new ExcelDataTableConfiguration { UseHeaderRow = false },
         });
+        var problems = issues ?? new List<LegacyImportIssue>();
         var records = new List<InspectionRecord>();
         foreach (DataTable sheet in dataSet.Tables)
         {
@@ -31,11 +32,13 @@ public static class LegacyInspectionParser
             for (var rowIndex = headerRow + 1; rowIndex < sheet.Rows.Count; rowIndex++)
             {
                 var row = sheet.Rows[rowIndex];
-                var record = MapRow(site, fileName, sheet.TableName, rowIndex + 1, headers, row);
-                if (record is not null) records.Add(record);
+                var problemCount = problems.Count;
+                var record = MapRow(site, fileName, sheet.TableName, rowIndex + 1, headers, row, problems);
+                if (record is not null && problemCount == problems.Count) records.Add(record);
             }
         }
-        if (records.Count == 0) throw new InvalidDataException($"没有在{site}模板中识别到可导入的验货记录");
+        if (issues is null && problems.Count > 0) throw new InvalidDataException(string.Join("；", problems.Select(problem => $"{problem.Sheet} 第{problem.Row}行：{problem.Reason}")));
+        if (records.Count == 0 && problems.Count == 0) throw new InvalidDataException($"没有在{site}模板中识别到可导入的验货记录");
         return records;
     }
 
@@ -79,7 +82,7 @@ public static class LegacyInspectionParser
     }
 
     private static InspectionRecord? MapRow(string site, string fileName, string sheetName, int sourceRow,
-        Dictionary<string, int> headers, DataRow row)
+        Dictionary<string, int> headers, DataRow row, List<LegacyImportIssue> issues)
     {
         string Get(params string[] names)
         {
@@ -128,6 +131,40 @@ public static class LegacyInspectionParser
             SourceSheet = sheetName,
             SourceRow = sourceRow,
         };
+        // Missing columns preserve system values; present empty cells clear them.
+        var columns = new Dictionary<string, string[]>
+        {
+            ["InspectionDate"] = ["日期", "第三方验货时间"],
+            ["InspectionLocation"] = ["验货地点", "验货地址"],
+            ["InspectionParty"] = site == "华登" ? ["验货客户"] : ["备注"],
+            ["ThirdPartyOrganization"] = ["第三方"], ["Customer"] = ["客户名称", "现PO号"],
+            ["ContractNumber"] = isJaz ? ["现PO号"] : ["合同编号"],
+            ["CustomerPo"] = ["客户/PO", "客户PO", "现PO号"], ["ItemNumber"] = ["货号"],
+            ["ProductName"] = ["产品名称", "名称"], ["Quantity"] = ["数量"],
+            ["InspectedQuantity"] = ["实际验货数量", "本次实际验货数量", "实检数量"],
+            ["Cartons"] = ["箱数", "总箱数"], ["InternalResult"] = ["洋行结果", "结果"],
+            ["ThirdPartyResult"] = ["第三方结果"], ["HoldRejectReason"] = ["HOLD/REJ原因"],
+            ["ProductionWorkshop"] = ["生产车间"], ["ProductionSupervisor"] = ["责任主管", "生产主管", "生产车间"],
+            ["ResponsibleLineLeader"] = ["责任拉长"], ["ProblemSource"] = ["问题源头"],
+            ["HandlingResult"] = ["处理结果"], ["TestScrap"] = ["测试报废"],
+            ["PackagingSpec"] = ["包装"], ["PackingQuantity"] = ["装箱数"],
+            ["ThirdPartyInspectionLocation"] = ["验货地点#2"], ["Note"] = ["备注"],
+        };
+        record.ImportFields = columns.Where(pair => pair.Value.Any(name => headers.ContainsKey(NormalizeHeader(name))))
+            .Select(pair => pair.Key).ToHashSet();
+        foreach (var field in new[] { "Quantity", "Cartons", "PackingQuantity", "InspectedQuantity" })
+        {
+            var value = Get(columns[field]);
+            if (!string.IsNullOrWhiteSpace(value) && Number(value) is null)
+                issues.Add(LegacyImportIssue.From(record, $"{columns[field][0]}格式无效：{value}"));
+        }
+        record.InspectedQuantity = Number(Get(columns["InspectedQuantity"]));
+        if (record.Quantity is < 0 || record.Cartons is < 0 || record.PackingQuantity is < 0 ||
+            record.InspectedQuantity is < 0 || record.InspectedQuantity > record.Quantity)
+            issues.Add(LegacyImportIssue.From(record, "数量不能为负数，实检数量不能超过计划数量"));
+        if (date is null || string.IsNullOrWhiteSpace(record.ItemNumber) ||
+            string.IsNullOrWhiteSpace(record.ContractNumber) && string.IsNullOrWhiteSpace(record.CustomerPo))
+            issues.Add(LegacyImportIssue.From(record, "请填写有效验货日期、货号及合同号或客户PO"));
         record.Fingerprint = Fingerprint(record);
         return record;
     }

@@ -2,6 +2,9 @@ namespace QcInspection.Api.Entities;
 
 public sealed class InspectionRecord
 {
+    [System.ComponentModel.DataAnnotations.Schema.NotMapped]
+    public HashSet<string> ImportFields { get; set; } = [];
+
     public long Id { get; set; }
     public string PlanId { get; set; } = string.Empty;
     public string ScheduleKey { get; set; } = string.Empty;
@@ -19,6 +22,7 @@ public sealed class InspectionRecord
     public string ItemNumber { get; set; } = string.Empty;
     public string ProductName { get; set; } = string.Empty;
     public decimal? Quantity { get; set; }
+    public decimal? InspectedQuantity { get; set; }
     public decimal? Cartons { get; set; }
     public DateTime? PlannedShipDate { get; set; }
     public string InternalResult { get; set; } = string.Empty;

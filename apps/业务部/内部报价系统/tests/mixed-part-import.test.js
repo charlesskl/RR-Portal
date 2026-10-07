@@ -32,7 +32,7 @@ test('保留已有产品名称和比例；同名不同模具保持独立；拒�
  assert.throws(()=>importParts({...cfg,products:[...cfg.products,{id:'c',code:'052',name:'重复'}]}, {}, molds),/多个现有小产品/);
 });
 
-test('日产能要求逐零件导入，不混用预计产能或日产啤次；重导只补空值',()=>{
+test('日产能要求逐零件导入，不混用预计产能或日产啤次；重导以新文件刷新工程字段',()=>{
  const XLSX=require('xlsx'),{parseWorkbook}=require('../backend/services/parseMoldSheet');
  const wb=XLSX.utils.book_new();
  XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet([
@@ -48,8 +48,8 @@ test('日产能要求逐零件导入，不混用预计产能或日产啤次；�
  first.engineering.mixed_imported_parts[0].production_demand=999;
  first.engineering.mixed_imported_parts[1].production_demand='';
  const second=importParts(first.config,first.engineering,parsed.molds);
- assert.deepEqual(second.engineering.mixed_imported_parts.map(p=>p.production_demand),[999,5560,null]);
- assert.equal(second.summary.demands_filled,1);
+ // 新语义：工程来源字段（含生产需求量）随最新文件刷新；文件留空的不清空已有值
+ assert.deepEqual(second.engineering.mixed_imported_parts.map(p=>p.production_demand),[3890,5560,null]);
  const merged=require('../frontend/mixed-molds').engineeringCatalog({parts_catalog:{version:1,parts:[{...first.engineering.mixed_imported_parts[1],production_demand:''}],selections:{}}},second.engineering);
  assert.equal(merged.parts_catalog.parts[0].production_demand,5560);
 });

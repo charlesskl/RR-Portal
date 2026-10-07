@@ -172,6 +172,9 @@ jobs:
             # 门户 SSO 免登票据密钥（品质管理 qc / 玩具质量 toyqms / VoyagePlex voyageplex-api 共用）
             sync_qc_plan_secret SSO_SECRET '${{ secrets.SSO_SECRET }}'
 
+            # PrintLink 3D 打印协同平台：首次启动的初始管理员密码（仅首次初始化生效）
+            sync_qc_plan_secret PRINTLINK_ADMIN_PASSWORD '${{ secrets.PRINTLINK_ADMIN_PASSWORD }}'
+
             echo "=== Script version check ==="
             git fetch origin main
             DEPLOY_SCRIPT_RUNNER=$(mktemp)

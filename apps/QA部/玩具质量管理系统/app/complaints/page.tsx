@@ -21,6 +21,7 @@ import {
   type ComplaintFilters,
 } from "@/lib/stats";
 import { duplicateKeyOf, translationSourceHashOf } from "@/lib/excel";
+import { randomId } from "@/lib/crypto-fallback";
 import type {
   ComplaintRecord,
   ComplaintUpdate,
@@ -840,7 +841,7 @@ export default function Complaints() {
           save={async (input) => {
             const now = new Date().toISOString();
             const record: ComplaintRecord = {
-              id: crypto.randomUUID(),
+              id: randomId(),
               sourceSubmissionId: input.sourceSubmissionId || null,
               sourceFileName: "手工新增",
               sourceWorksheetName: "手工录入",

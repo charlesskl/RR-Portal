@@ -1,5 +1,6 @@
 import * as XLSX from "xlsx";
 import type { ComplaintRecord, DuplicateImportRow, ImportPreview, InvalidImportRow, RawExcelRow } from "./types";
+import { randomId } from "./crypto-fallback";
 
 const required = ["Contact Date", "Product SKU", "Complaint Message", "Country"] as const;
 const fieldNames:Record<string,string>={"Contact Date":"联络日期","Product SKU":"产品 SKU","Complaint Message":"投诉内容","Country":"国家"};
@@ -27,7 +28,7 @@ export function duplicateKeyOf(input:Pick<ComplaintRecord,"contactDate"|"product
 
 export async function parseExcelFile(file:File, existing:ComplaintRecord[]):Promise<ImportPreview> {
   const workbook=XLSX.read(await file.arrayBuffer(), {type:"array", cellDates:true});
-  const batchId=crypto.randomUUID(); const now=new Date().toISOString();
+  const batchId=randomId(); const now=new Date().toISOString();
   const known=new Map(existing.map(r=>[r.duplicateKey,r])); const withinFile=new Map<string,ComplaintRecord>();
   const newRows:ComplaintRecord[]=[]; const duplicateRows:DuplicateImportRow[]=[]; const invalidRows:InvalidImportRow[]=[];
   let totalRows=0;
@@ -42,7 +43,7 @@ export async function parseExcelFile(file:File, existing:ComplaintRecord[]):Prom
       const existingTranslation=importedTranslation(rawData);
       const originalMessage=text(value(rawData,"Complaint Message"));
       const record:ComplaintRecord={
-        id:crypto.randomUUID(), sourceSubmissionId:text(value(rawData,"Submission ID"))||null, sourceFileName:file.name,
+        id:randomId(), sourceSubmissionId:text(value(rawData,"Submission ID"))||null, sourceFileName:file.name,
         sourceWorksheetName:worksheet, sourceRowNumber:index+2, importBatchId:batchId, primarySeries:worksheet,
         secondarySeries:text(value(rawData,"Range Name","rangeName"))||null, contactDate,
         productSku:text(value(rawData,"Product SKU")), productName:text(value(rawData,"Product Name"))||null,

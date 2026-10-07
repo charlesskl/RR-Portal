@@ -1,0 +1,9 @@
+{
+  "mode": "live",
+  "cloudUrl": "https://YOUR-DOMAIN.example",
+  "token": "REPLACE_WITH_STATION_TOKEN",
+  "bindingsFile": "/ABSOLUTE/PATH/bindings.json",
+  "bambuPrinters": [],
+  "flashForgePrinters": [],
+  "consolePort": 3103
+}

@@ -1,0 +1,4 @@
+[
+  {"id":"qingxi","name":"清溪采集站","factories":["清溪"],"machines":["1","2"],"token":"REPLACE_WITH_UNIQUE_32_BYTE_RANDOM_TOKEN"},
+  {"id":"hunan","name":"湖南采集站","factories":["湖南"],"machines":["3","4"],"token":"REPLACE_WITH_ANOTHER_UNIQUE_RANDOM_TOKEN"}
+]

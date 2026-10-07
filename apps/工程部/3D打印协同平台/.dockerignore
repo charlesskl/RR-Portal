@@ -1,0 +1,6 @@
+data
+collector
+.env
+*.log
+docs
+production/tests

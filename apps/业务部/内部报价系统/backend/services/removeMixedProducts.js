@@ -4,6 +4,7 @@ function removeMixedProducts(payload, ids) {
   const next = structuredClone(payload), removed = new Set(ids);
   for (const id of removed) {
     delete next.mixed_products?.[id];
+    delete next.mixed_pricing?.[id];
     delete next.mixed_part_selections?.[id];
     delete next.parts_catalog?.selections?.[id];
   }

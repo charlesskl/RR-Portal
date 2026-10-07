@@ -120,6 +120,12 @@
     let resolved = new Map(), error = '';
     try { resolved = window.MixedMolds.catalogRows(root, cfg, window.__data.quote.qty).resolved; } catch (e) { error = e.message; }
     const selectionMode = productId && productId !== '__catalog__';
+    const materialPrices = root.material_prices?.length ? root.material_prices : (window.__refs?.material_prices?.length ? window.__refs.material_prices : window.MixedMolds.DEFAULT_MATERIAL_PRICES);
+    const materialSelect = part => {
+      const current = String(part.material || '');
+      const choices = [...new Set([current, ...materialPrices.map(p => String(p.name || '').trim())].filter(Boolean))];
+      return `<select data-field="material" aria-label="${esc(part.name)} 材质" ${edit ? '' : 'disabled'}><option value="">请选择</option>${choices.map(value => `<option value="${esc(value)}" ${value === current ? 'selected' : ''}>${esc(value)}</option>`).join('')}</select>`;
+    };
     const fields = [['name','零件名称','text'],['images','图片','images'],['mold_no','模号','text'],['material','材质','text'],['weight_g','单份净重 g'],['loss_pct','料损 %'],['material_unit_price','料价 HKD/g'],['machine_model','机型','text'],['machine','机台'],['machine_price','机台日费用 HKD'],['target','日产啤次'],['cavity','出模数'],['production_demand','生产需求量（导入/手填）']];
     const lossRates = [...new Set(catalog.parts.map(p => Number(p.loss_pct ?? 3)))];
     const uniformLoss = lossRates.length === 1 ? lossRates[0] : catalog.parts.length ? '' : (root.catalog_loss_pct ?? 3);
@@ -130,7 +136,7 @@
       const x = moldKey(a), y = moldKey(b);
       return !x ? (!y ? 0 : 1) : !y ? -1 : x.localeCompare(y, 'zh', { numeric: true });
     });
-    host.innerHTML = `<h3>${selectionMode ? '选择本款包含的零件' : '统一填写注塑零件'}</h3><p class="muted">${selectionMode ? '勾选零件并填写每款用量，材料和啤工一起乘用量。共有费用按每包装计一次。' : '按模号填写零件，关联小产品自动同步。'} 完成后保存草稿。</p>${selectionMode ? '' : `<details style="margin:0 0 12px"><summary class="muted" style="cursor:pointer">计算说明</summary><ul class="muted"><li>每行独立填写机型和日产啤次；搜索时保留整模。</li><li>每啤价＝机台日费用÷日产啤次；按出模数分摊，达到需求量后封穴，后续费用由仍在生产的零件分摊。原表啤价不参与计算。</li><li>小产品零件的生产需求量使用手填或导入值；仅用于共有费用的零件，啤工＝机台日费用÷日产啤次÷出模数，不需要生产需求量。</li><li>料价留空时匹配料价表，HKD/磅÷454，保留5位小数；已有单价保留，可重新套用料价表。</li><li>机台费用留空时按机型价表取值。</li></ul></details>`}${error ? `<p class="mixed-error">${esc(error)}</p>` : ''}${edit && !selectionMode ? '<button type="button" data-material-reference>重新套用料价表</button>' : ''}<label>查找零件或模号 <input type="search" data-part-search placeholder="输入名称或模号"></label><div class="mixed-scroll"><table aria-label="统一零件编辑"><thead><tr>${selectionMode ? '<th>选用</th><th>每款用量</th>' : ''}${fields.map(([key,label]) => key === 'loss_pct' ? `<th><label style="display:flex;align-items:center;gap:4px;white-space:nowrap">料损 <input type="number" data-catalog-loss aria-label="统一料损百分比" min="0" step="any" value="${uniformLoss}" placeholder="多种" style="width:65px;min-width:0;padding:4px 6px" ${edit && !selectionMode ? '' : 'disabled'}> %</label><small class="muted">含料损重量 g</small></th>` : `<th data-catalog-header="${key}" class="${['machine','machine_model','target'].includes(key) ? 'mixed-machine-column' : ''}">${esc(label)}</th>`).join('')}<th>计算方式</th><th>每啤价 HKD</th><th>零件啤工 HKD/件</th>${selectionMode ? '' : '<th>选用产品</th><th></th>'}</tr></thead><tbody>${orderedParts.map((part, index) => {
+    host.innerHTML = `<h3>${selectionMode ? '选择本款包含的零件' : '统一填写注塑零件'}</h3><p class="muted">${selectionMode ? '勾选零件并填写每款用量，材料和啤工一起乘用量。共有费用按每包装计一次。' : '按模号填写零件，关联小产品自动同步。'} 完成后保存草稿。</p>${selectionMode ? '' : `<details style="margin:0 0 12px"><summary class="muted" style="cursor:pointer">计算说明</summary><ul class="muted"><li>每行独立填写机型和日产啤次；搜索时保留整模。</li><li>每啤价＝机台日费用÷日产啤次；按出模数分摊，达到需求量后封穴，后续费用由仍在生产的零件分摊。原表啤价不参与计算。</li><li>小产品零件的生产需求量使用手填或导入值；仅用于共有费用的零件，啤工＝机台日费用÷日产啤次÷出模数，不需要生产需求量。</li><li>料价留空时匹配料价表，HKD/磅÷454，保留5位小数；已有单价保留，可重新套用料价表。</li><li>机台费用留空时按机型价表取值。</li></ul></details>`}${error ? `<p class="mixed-error">${esc(error)}</p>` : ''}${edit && !selectionMode ? '<button type="button" data-material-reference>重新套用料价表</button>' : ''}<label>查找零件或模号 <input type="search" data-part-search placeholder="输入名称或模号"></label><div class="mixed-scroll mixed-injection-parts" role="region" aria-label="啤机部零件明细，可上下左右滚动" tabindex="0"><table aria-label="统一零件编辑"><thead><tr>${selectionMode ? '<th>选用</th><th>每款用量</th>' : ''}${fields.map(([key,label]) => key === 'loss_pct' ? `<th><label style="display:flex;align-items:center;gap:4px;white-space:nowrap">料损 <input type="number" data-catalog-loss aria-label="统一料损百分比" min="0" step="any" value="${uniformLoss}" placeholder="多种" style="width:65px;min-width:0;padding:4px 6px" ${edit && !selectionMode ? '' : 'disabled'}> %</label><small class="muted">含料损重量 g</small></th>` : `<th data-catalog-header="${key}" class="${['machine','machine_model','target'].includes(key) ? 'mixed-machine-column' : ''}">${esc(label)}</th>`).join('')}<th>计算方式</th><th>每啤价 HKD</th><th>零件啤工 HKD/件</th>${selectionMode ? '' : '<th>选用产品</th><th></th>'}</tr></thead><tbody>${orderedParts.map((part, index) => {
       const ref = selection.find(r => r.part_id === part.id);
       const owners = Object.entries(catalog.selections).filter(([,rows]) => rows.some(r => r.part_id === part.id)).map(([id]) => id === '__shared__' ? '共有费用' : cfg.products.find(p => p.id === id)?.code || id);
       const group = orderedParts.filter(p => moldKey(p) === moldKey(part));
@@ -138,7 +144,7 @@
       const models = [...new Set(group.map(p => String(p.machine_model || '待填')))];
       const targets = [...new Set(group.map(p => String(p.target || '待填')))];
       const heading = groupStart ? `<tr data-mold-heading="${esc(moldKey(part))}"><th colspan="${fields.length + 5}" style="text-align:left;background:#edf3fa;padding:10px 12px">${esc(moldKey(part) || '未填写模号')} · ${group.length} 个零件　<span style="font-weight:normal">机型：${esc(models.join(' / '))}　日产啤次：${esc(targets.join(' / '))}${moldKey(part) && (models.length > 1 || targets.length > 1) ? '　⚠ 同模参数不一致，请核对' : ''}</span></th></tr>` : '';
-      return `${heading}<tr data-part-id="${esc(part.id)}">${selectionMode ? `<td><input type="checkbox" aria-label="选用 ${esc(part.name)}" data-pick ${ref ? 'checked' : ''} ${edit ? '' : 'disabled'}></td><td><input type="number" aria-label="${esc(part.name)} 用量" data-usage min="0.000001" step="any" value="${esc(ref?.usage ?? 1)}" ${edit && ref ? '' : 'disabled'}></td>` : ''}${fields.map(([key,,type]) => `<td data-catalog-cell="${key}" class="${['machine','machine_model','target'].includes(key) ? 'mixed-machine-column' : ''}">${key === 'images' ? '<div data-catalog-images></div>' : key === 'machine' ? esc(window.MixedMolds.catalogMachineReference(root, part)?.normal || part.machine || '—') : key === 'loss_pct' ? `<span data-loss-weight title="净重 ×（1＋${Number(part.loss_pct ?? 3)}%）">${fmt(Number(part.weight_g || 0) * (1 + Number(part.loss_pct ?? 3) / 100))}</span>` : key === 'machine_price' && (part.machine_price == null || part.machine_price === '') ? `<span>${window.MixedMolds.catalogMachinePrice(root, part) != null ? fmt(window.MixedMolds.catalogMachinePrice(root, part)) : '待补机型'}</span><small class="muted">（自动）</small>` : selectionMode ? esc(part[key] ?? '—') : input(key, key === 'production_demand' ? window.MixedMolds.productionDemand(root, part) : key === 'material_unit_price' ? window.MixedMolds.catalogMaterialPrice(root, part) : (part[key] ?? ''), edit, type || 'number')}</td>`).join('')}<td>${resolved.get(part.id)?.direct_labor ? '直接计算' : '完成后封穴'}</td><td data-shot-cost>${resolved.has(part.id) ? fmt(resolved.get(part.id).shot_cost) : '待补参数'}</td><td data-shot-price>${resolved.has(part.id) ? fmt(resolved.get(part.id).shot_price) : '待补参数'}</td>${selectionMode ? '' : `<td>${esc(owners.join('、') || '未选用')}</td><td>${edit ? '<button type="button" data-delete>删除</button>' : ''}</td>`}</tr>`;
+      return `${heading}<tr data-part-id="${esc(part.id)}">${selectionMode ? `<td><input type="checkbox" aria-label="选用 ${esc(part.name)}" data-pick ${ref ? 'checked' : ''} ${edit ? '' : 'disabled'}></td><td><input type="number" aria-label="${esc(part.name)} 用量" data-usage min="0.000001" step="any" value="${esc(ref?.usage ?? 1)}" ${edit && ref ? '' : 'disabled'}></td>` : ''}${fields.map(([key,,type]) => `<td data-catalog-cell="${key}" class="${['machine','machine_model','target'].includes(key) ? 'mixed-machine-column' : ''}">${key === 'images' ? '<div data-catalog-images></div>' : key === 'machine' ? esc(window.MixedMolds.catalogMachineReference(root, part)?.normal || part.machine || '—') : key === 'loss_pct' ? `<span data-loss-weight title="净重 ×（1＋${Number(part.loss_pct ?? 3)}%）">${fmt(Number(part.weight_g || 0) * (1 + Number(part.loss_pct ?? 3) / 100))}</span>` : key === 'machine_price' && (part.machine_price == null || part.machine_price === '') ? `<span>${window.MixedMolds.catalogMachinePrice(root, part) != null ? fmt(window.MixedMolds.catalogMachinePrice(root, part)) : '待补机型'}</span><small class="muted">（自动）</small>` : selectionMode ? esc(part[key] ?? '—') : key === 'material' ? materialSelect(part) : input(key, key === 'production_demand' ? window.MixedMolds.productionDemand(root, part) : key === 'material_unit_price' ? window.MixedMolds.catalogMaterialPrice(root, part) : (part[key] ?? ''), edit, type || 'number')}</td>`).join('')}<td>${resolved.get(part.id)?.direct_labor ? '直接计算' : '完成后封穴'}</td><td data-shot-cost>${resolved.has(part.id) ? fmt(resolved.get(part.id).shot_cost) : '待补参数'}</td><td data-shot-price>${resolved.has(part.id) ? fmt(resolved.get(part.id).shot_price) : '待补参数'}</td>${selectionMode ? '' : `<td>${esc(owners.join('、') || '未选用')}</td><td>${edit ? '<button type="button" data-delete>删除</button>' : ''}</td>`}</tr>`;
     }).join('')}</tbody></table></div>${edit && !selectionMode ? '<button type="button" data-add>＋ 新增零件</button>' : ''}`;
     host.querySelectorAll('[data-part-id]').forEach(row => {
       const part = catalog.parts.find(p => p.id === row.dataset.partId);
@@ -224,7 +230,21 @@
     };
     host.querySelectorAll('[data-part-id]').forEach(row => {
       const part = catalog.parts.find(p => p.id === row.dataset.partId);
-      row.querySelectorAll('[data-field]').forEach(el => el.oninput = () => { part[el.dataset.field] = el.type === 'number' ? (el.value === '' ? '' : Number(el.value)) : el.value; changed(); refreshCalculations(); });
+      row.querySelectorAll('[data-field]').forEach(el => {
+        const update = () => {
+          const key = el.dataset.field;
+          part[key] = el.type === 'number' ? (el.value === '' ? '' : Number(el.value)) : el.value;
+          if (key === 'material') {
+            part.material_grade = '';
+            const match = window.MixedMolds.lookupMaterialPrice(part.material, part.material_grade, materialPrices);
+            part.material_unit_price = match ? window.MixedMolds.materialPricePerGram(match) : null;
+            if (match) part.material_grade = match.model || '';
+            changed(); redraw();
+          } else { changed(); refreshCalculations(); }
+        };
+        if (el.tagName === 'SELECT') el.onchange = update;
+        else el.oninput = update;
+      });
       row.querySelector('[data-pick]')?.addEventListener('change', event => {
         catalog.selections[productId] ||= [];
         if (event.target.checked) catalog.selections[productId].push({ part_id: part.id, usage: 1 });
@@ -239,6 +259,23 @@
     });
     host.querySelector('[data-add]')?.addEventListener('click', () => { catalog.parts.push({ id: `part_${Date.now()}`, name: '新零件', mold_no: '', material: 'PVC', weight_g: 0, material_unit_price: 0, shot_price: 0, loss_pct: root.catalog_loss_pct ?? 3, cavity: 1 }); changed(); redraw(); });
   }
+  function moldImportMode(numbered = false) {
+    const name = `mold-import-${crypto.randomUUID()}`;
+    return `<fieldset class="mixed-import-options"><legend>选择导入方式</legend><div class="mixed-import-choices">
+      <label class="mixed-import-choice"><input type="radio" name="${name}" data-import-mode value="append" checked><span><strong>追加 / 更新同名零件 <small>默认</small></strong><span>保留旧零件；同模号、同名称的零件更新工程资料，保留啤机价格和已有用量。</span></span></label>
+      <label class="mixed-import-choice"><input type="radio" name="${name}" data-import-mode value="replace"><span><strong>完全替换模具与零件</strong><span>移除全部旧模具、零件及选用关系，按本次文件重新建立。${numbered ? '小产品清单同步更新；新文件中没有的产品及其部门明细将移除。' : ''}</span></span></label>
+      </div><p class="muted">${numbered ? '追加保留原产品；完全替换保留同编号产品资料，移除其余产品明细并保存备份。' : '保留小产品清单、包装资料及其他部门资料。'}选择后点击下方按钮确认导入。</p></fieldset>`;
+  }
+  function bindMoldImportMode(preview, buttonSelector, numbered = false) {
+    const button = preview.querySelector(buttonSelector);
+    const update = () => {
+      const replace = preview.querySelector('[data-import-mode]:checked').value === 'replace';
+      button.textContent = `${replace ? '完全替换' : '追加更新'}${numbered ? '并按编号分配' : '模具与零件'}`;
+      button.classList.toggle('mixed-import-replace', replace);
+    };
+    preview.querySelectorAll('[data-import-mode]').forEach(input => input.addEventListener('change', update));
+    update();
+  }
   function showNumberedImport(preview, result, file, root) {
     const groups = result.product_groups;
     if (!groups?.product_count || !config()?.enabled) return false;
@@ -246,11 +283,18 @@
       <p>多个序号的配件同时分到对应小产品，每款默认用量为 1，可在产品组成中调整。产品名称暂用序号命名，可随后修改。</p>
       <div class="mixed-scroll"><table><thead><tr><th>小产品序号</th><th>所需配件</th><th>配件数</th></tr></thead><tbody>${groups.products.map(p=>`<tr><td>${esc(p.code)}</td><td>${p.parts.map(esc).join('、')}</td><td>${p.parts.length}</td></tr>`).join('')}</tbody></table></div>
       ${groups.unmatched.length ? `<p class="mixed-error">未识别归属，保留为待分配配件：${groups.unmatched.map(esc).join('、')}</p>` : ''}
-      <p>导入将保存当前工程草稿并更新小产品配置；已有配件数值和用量保留，重复上传不重复添加。包装数量及现有比例不变。</p>
-      <button type="button" data-numbered-apply>导入并按序号分配</button> <button type="button" data-numbered-cancel>取消</button><p data-numbered-status role="status"></p></section>`;
+      <p>导入将保存当前工程草稿，并按配件名称前的编号建立小产品归属。包装数量及现有比例不变。</p>
+      ${moldImportMode(true)}<button type="button" data-numbered-apply>导入并按序号分配</button> <button type="button" data-numbered-cancel>取消</button><p data-numbered-status role="status"></p></section>`;
+    bindMoldImportMode(preview, '[data-numbered-apply]', true);
     preview.querySelector('[data-numbered-cancel]').onclick = () => {preview.innerHTML='';};
     preview.querySelector('[data-numbered-apply]').onclick = async event => {
       const status = preview.querySelector('[data-numbered-status]');
+      const mode = preview.querySelector('[data-import-mode]:checked').value;
+      if (mode === 'replace') {
+        const codes = new Set(groups.products.map(p => String(p.code)));
+        const removed = config().products.filter(p => !codes.has(String(p.code)));
+        if (!confirm(`完全替换全部模具和零件，并按文件重建为 ${groups.product_count} 个小产品？\n将移除 ${removed.length} 个旧产品及其各部门明细${removed.length ? '：' + removed.map(p => p.code).join('、') : ''}。\n同编号产品资料保留；移除前保存备份。`)) return;
+      }
       const dirty = [...document.querySelectorAll('.dept-tab[title="有未保存修改"]')].some(tab=>tab.dataset.dept!=='engineering');
       if (dirty) {status.textContent='请先保存其他部门的修改，再执行导入。';return;}
       const button = event.currentTarget; button.disabled = true;
@@ -258,7 +302,7 @@
         const section = window.__data.sections.find(s=>s.dept==='engineering');
         const response = await fetch(`./api/quotes/${window.__data.quote.id}/mixed/import-molds`, {
           method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},
-          body:JSON.stringify({molds:result.molds,source_file:file.name,engineering:root,base_filled_at:section.filled_at,expected_config:config()}),
+          body:JSON.stringify({mode,expected_sections:Object.fromEntries(window.__data.sections.map(s => [s.id,s.filled_at || ''])),molds:result.molds,source_file:file.name,engineering:root,base_filled_at:section.filled_at,expected_config:config()}),
         });
         const imported = await response.json();
         if (!response.ok) throw new Error(imported.error || '保存失败');
@@ -288,12 +332,17 @@
         const result = await response.json(); if (!response.ok) throw new Error(result.error || '解析失败');
         if (!result.molds?.length) throw new Error('没有识别到模具明细');
         if (showNumberedImport(preview,result,file,root)) return;
-        preview.innerHTML = `<p>识别到 ${result.molds.length} 行模具资料（${esc(result.sheet_used || file.name)}）</p><div class="mixed-scroll"><table><thead><tr><th>模号</th><th>名称</th><th>零件数</th><th>模价 RMB</th><th>模价 USD</th><th>模价 HKD</th></tr></thead><tbody>${result.molds.map(m => `<tr><td>${esc(m.mold_no)}</td><td>${esc(m.name)}</td><td>${m.parts?.length || 1}</td><td>${esc(m.price_rmb ?? '—')}</td><td>${esc(m.price_usd ?? '—')}</td><td>${esc(m.price_hkd ?? '—')}</td></tr>`).join('')}</tbody></table></div><button type="button" data-apply>追加到统一模具与零件</button><button type="button" data-cancel>取消</button>`;
+        preview.innerHTML = `<p>识别到 ${result.molds.length} 行模具资料（${esc(result.sheet_used || file.name)}）</p><div class="mixed-scroll"><table><thead><tr><th>模号</th><th>名称</th><th>零件数</th><th>模价 RMB</th><th>模价 USD</th><th>模价 HKD</th></tr></thead><tbody>${result.molds.map(m => `<tr><td>${esc(m.mold_no)}</td><td>${esc(m.name)}</td><td>${m.parts?.length || 1}</td><td>${esc(m.price_rmb ?? '—')}</td><td>${esc(m.price_usd ?? '—')}</td><td>${esc(m.price_hkd ?? '—')}</td></tr>`).join('')}</tbody></table></div>${moldImportMode()}<button type="button" data-apply>确认导入模具与零件</button><button type="button" data-cancel>取消</button>`;
+        bindMoldImportMode(preview, '[data-apply]');
         preview.querySelector('[data-cancel]').onclick = () => { preview.innerHTML = ''; };
         preview.querySelector('[data-apply]').onclick = () => {
           let molding = JSON.parse(window.__data.sections.find(s => s.dept === 'molding')?.payload_json || '{}');
           molding = window.MixedMolds.engineeringCatalog(molding, root);
-          const existing = molding.parts_catalog?.parts || [];
+          const mode = preview.querySelector('[data-import-mode]:checked').value;
+          if (mode === 'replace' && !confirm('完全替换当前全部模具和零件？保存工程草稿后生效，旧零件选用关系将移除。')) return;
+          const previousParts = molding.parts_catalog?.parts || [];
+          Object.assign(root, window.MixedMolds.prepareMoldImport(root, previousParts, mode));
+          const existing = mode === 'replace' ? [] : previousParts;
           root.mixed_imported_parts ||= []; root.mixed_imported_molds ||= [];
           let added = 0;
           for (const mold of result.molds) {
@@ -313,7 +362,7 @@
           }
           root.mixed_part_selections ||= JSON.parse(JSON.stringify(molding.parts_catalog?.selections || {}));
           changed(); redraw();
-          const notice = document.createElement('p'); notice.className = 'mixed-note'; notice.textContent = `已追加 ${added} 个可选零件；同模号同名称的零件已更新工程资料，保留啤机价格。请保存工程草稿后到啤机部填写价格。`; host.prepend(notice);
+          const notice = document.createElement('p'); notice.className = 'mixed-note'; notice.textContent = `已${mode === 'replace' ? '替换为' : '追加'} ${added} 个可选零件；同模号同名称的零件已更新工程资料，保留啤机价格。请保存工程草稿后到啤机部填写价格。`; host.prepend(notice);
         };
       } catch (e) { preview.textContent = `导入失败：${e.message}`; }
     };
@@ -324,7 +373,7 @@
     const moldHkd = part => (Number(part.price_rmb) || 0) / rmbRate + (Number(part.price_usd) || 0) * usdRate;
     const parts = [...(catalogRoot.parts_catalog?.parts || [])].sort((a,b) => String(a.mold_no || '').localeCompare(String(b.mold_no || ''), 'zh', {numeric:true}));
     const fields = [['mold_no','模号'],['name','零件名称'],['images','图片','images'],['material','材质'],['mold_type','模胚类型'],['cavity','出模数','number'],['sets','套数','number'],['weight_g','净重 g','number'],['cycle_sec','周期 秒','number'],['target','日产啤次','number'],['daily_capacity','日产能 件','number'],['machine','机台'],['mold_size','模具尺寸'],['price_rmb','模价 RMB','number'],['price_usd','模价 USD','number'],['price_hkd','模价 HKD','calculated'],['note','备注']];
-    host.innerHTML = `<p class="muted">可直接填写、增删零件；保存工程草稿后同步啤机部。删除零件会同时移除其产品选用关系。模价按业务部报价参数汇率自动换算：HKD＝RMB ÷ ${rmbRate} ＋ USD × ${usdRate}。</p><div class="mixed-scroll"><table><thead><tr>${fields.map(f=>`<th>${f[1]}</th>`).join('')}<th>操作</th></tr></thead><tbody>${parts.map(p=>`<tr data-engineering-part="${esc(p.id)}">${fields.map(([key,,type])=>`<td>${type === 'images' ? '<div data-mold-images></div>' : type === 'calculated' ? `<span data-mold-hkd>${fmt(moldHkd(p))}</span>` : input(key,p[key] ?? '',true,type || 'text')}</td>`).join('')}<td class="mixed-mold-actions"><div class="mixed-mold-action-buttons"><button type="button" data-copy-part>复制</button><button type="button" data-remove>删除</button></div></td></tr>`).join('')}</tbody></table></div><button type="button" data-new>＋ 新增模具零件</button>`;
+    host.innerHTML = `<p class="muted">可直接填写、增删零件；保存工程草稿后同步啤机部。删除零件会同时移除其产品选用关系。模价按业务部报价参数汇率自动换算：HKD＝RMB ÷ ${rmbRate} ＋ USD × ${usdRate}。</p><div class="mixed-scroll mixed-engineering-molds" role="region" aria-label="全部模具明细，可上下左右滚动" tabindex="0"><table><thead><tr>${fields.map(f=>`<th>${f[1]}</th>`).join('')}<th>操作</th></tr></thead><tbody>${parts.map(p=>`<tr data-engineering-part="${esc(p.id)}">${fields.map(([key,,type])=>`<td>${type === 'images' ? '<div data-mold-images></div>' : type === 'calculated' ? `<span data-mold-hkd>${fmt(moldHkd(p))}</span>` : input(key,p[key] ?? '',true,type || 'text')}</td>`).join('')}<td class="mixed-mold-actions"><div class="mixed-mold-action-buttons"><button type="button" data-copy-part>复制</button><button type="button" data-remove>删除</button></div></td></tr>`).join('')}</tbody></table></div><button type="button" data-new>＋ 新增模具零件</button>`;
     host.querySelectorAll('[data-engineering-part]').forEach(row=>{
       const id=row.dataset.engineeringPart;
       const imagePart = {...parts.find(p=>p.id===id)};
@@ -421,7 +470,12 @@
       root.mixed_shared ||= {};
       const key = `mixed:${window.__data.quote.id}:${dept}:overall-v1${fixedProductId ? ':' + fixedProductId : ''}`;
       let selected = fixedProductId || sessionStorage.getItem(key) || (dept === 'molding' ? '__catalog__' : '__overall__');
-      const options = cfg.products.map(p => [p.id, `${p.code} · ${p.name}`]);
+      const savedEngineering = JSON.parse(window.__data.sections.find(s => s.dept === 'engineering')?.payload_json || '{}');
+      const importSummary = (dept === 'engineering' ? root : savedEngineering).mixed_import_summary;
+      const importedCodes = new Set((importSummary?.products || []).map(p => String(p.code)));
+      const importedProducts = cfg.products.filter(p => importedCodes.has(String(p.code)));
+      const existingProducts = cfg.products.filter(p => !importedCodes.has(String(p.code)));
+      const options = [...importedProducts, ...existingProducts].map(p => [p.id, `${p.code} · ${p.name}`]);
       options.push(['__shared__', '每包装共有费用（计一次）']);
       if (dept === 'engineering') options.unshift(['__all_molds__', '全部模具 · 按模号查看']);
       if (dept === 'molding') {
@@ -430,12 +484,18 @@
       }
       if (!fixedProductId && dept !== 'molding') options.unshift(['__overall__', '整体资料 · 全部小产品']);
       if (!options.some(([id]) => id === selected)) selected = options[0][0];
+      const optionHtml = ([id, label]) => `<option value="${esc(id)}" ${id === selected ? 'selected' : ''}>${esc(label)}</option>`;
+      const productIds = new Set(cfg.products.map(p => p.id));
+      const groupedOptions = importedProducts.length ?
+        options.filter(([id]) => !productIds.has(id) && id !== '__shared__').map(optionHtml).join('') +
+        `<optgroup label="本次导入 · ${importedProducts.length} 个小产品">${options.filter(([id]) => importedProducts.some(p => p.id === id)).map(optionHtml).join('')}</optgroup>` +
+        (existingProducts.length ? `<optgroup label="已有产品 · ${existingProducts.length} 个（保留原资料）">${options.filter(([id]) => existingProducts.some(p => p.id === id)).map(optionHtml).join('')}</optgroup>` : '') +
+        options.filter(([id]) => id === '__shared__').map(optionHtml).join('') : options.map(optionHtml).join('');
       host.innerHTML = `<div class="mixed-switch"><div><span class="mixed-tag">混装款</span><strong>当前报价对象（共 ${cfg.products.length} 个小产品）</strong></div>
-        <select aria-label="选择小产品">${options.map(([id, label]) => `<option value="${esc(id)}" ${id === selected ? 'selected' : ''}>${esc(label)}</option>`).join('')}</select>
+        <select aria-label="选择小产品">${groupedOptions}</select>
         <p class="muted mixed-help"></p></div><div class="mixed-detail"></div>`;
       if (fixedProductId) host.querySelector('.mixed-switch').hidden = true;
       const detail = host.querySelector('.mixed-detail');
-      const savedEngineering = JSON.parse(window.__data.sections.find(s => s.dept === 'engineering')?.payload_json || '{}');
       if (dept === 'molding') { const merged = window.MixedMolds.engineeringCatalog(root, savedEngineering); if (merged.parts_catalog) root.parts_catalog = merged.parts_catalog; }
       function draw() {
         sessionStorage.setItem(key, selected);

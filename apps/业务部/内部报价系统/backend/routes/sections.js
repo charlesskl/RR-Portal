@@ -21,6 +21,11 @@ router.put('/:id', async (req, res) => {
 
   let payload = req.body && typeof req.body.payload === 'object' ? req.body.payload : {};
   const submit = !!(req.body && req.body.submit);
+  if (sec.dept === 'painting') {
+    try { require('../services/paintingFormula').normalize(payload); }
+    catch (error) { return res.status(400).json({error:error.message}); }
+  }
+
   if (sec.dept === 'sales') {
     const previous = JSON.parse(sec.payload_json || '{}');
     if (JSON.stringify(previous.mixed_quote || null) !== JSON.stringify(payload?.mixed_quote || null)) {

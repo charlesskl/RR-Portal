@@ -293,19 +293,28 @@ function lookupMaterialPrice(material, grade, prices) {
   }
   // Classify explicit section labels only; a plastic part may contain “弹簧” in its name.
   function isNonMoldPart(part) {
+    if (['mold_no','name'].some(key => /^(?:模具标准(?:一览表|表)?|模具制作标准|制定\s*Prepared\s*by\s*[:：]?)$/i.test(String(part[key] || '').trim()))) return true;
+    const footer = /^(制表|审核|批准|签名)\s*[:：]?$/;
+    if (['name', 'name_cn', 'name_en'].some(key => footer.test(String(part[key] || '').trim()))) return true;
     return /^(五金|五金件|五金部分|外购五金|包装|辅料|电子)(?:部分|配件)?$/.test(String(part.mold_no || '').trim());
   }
   const ENGINEERING_FIELDS = ['name','mold_no','material','color','weight_g','cavity','sets','cycle_sec','machine','machine_model','target','daily_capacity','production_demand','mold_type','mold_size','price_rmb','price_usd','images','note','source_file'];
   function updateEngineeringFields(existing, incoming) {
     const result = {...existing};
-    // 新文件里缺失/留空的字段不清空已有值（缺失 ≠ 删除）；空串也不覆盖。
-    for (const key of ENGINEERING_FIELDS) {
-      if (!Object.prototype.hasOwnProperty.call(incoming, key)) continue;
-      const value = incoming[key];
-      if (value == null || value === '') continue;
-      result[key] = value;
-    }
+    for (const key of ENGINEERING_FIELDS) if (Object.prototype.hasOwnProperty.call(incoming, key)) result[key] = incoming[key];
     return result;
+  }
+  function prepareMoldImport(engineering, existingParts, mode = 'append') {
+    if (!['append','replace'].includes(mode)) throw new Error('无效的模具导入方式');
+    const root = JSON.parse(JSON.stringify(engineering));
+    if (mode === 'replace') {
+      root.mixed_deleted_part_ids = [...new Set([...(root.mixed_deleted_part_ids || []), ...(existingParts || []).map(p => p.id), ...(root.mixed_imported_parts || []).map(p => p.id)])];
+      root.mixed_imported_parts = [];
+      root.mixed_imported_molds = [];
+      root.mixed_part_edits = {};
+      root.mixed_part_selections = {};
+    }
+    return root;
   }
   function engineeringCatalog(root, engineering) {
     const copy = JSON.parse(JSON.stringify(root));
@@ -322,6 +331,15 @@ function lookupMaterialPrice(material, grade, prices) {
       if (engineering?.mixed_part_selections) copy.parts_catalog.selections = JSON.parse(JSON.stringify(engineering.mixed_part_selections));
       const deleted = new Set(engineering?.mixed_deleted_part_ids || []);
       const sourceIds = new Set((engineering?.mixed_imported_parts || []).map(p => p.id));
+      // 旧导入保留了附录标题时，只清理同来源后续的序号说明行。
+      const appendixSources = new Set();
+      for (const p of copy.parts_catalog.parts) {
+        const source = p.source_file || '';
+        const moldNo = String(p.mold_no || '').trim();
+        if (/^模具标准(?:一览表|表)?$/.test(moldNo) || /^模具标准(?:一览表|表)?$/.test(String(p.name || '').trim())) appendixSources.add(source);
+        if (appendixSources.has(source) && (/^(?:序号|\d+)$/.test(moldNo) || isNonMoldPart(p))) deleted.add(p.id);
+      }
+
       for (const p of copy.parts_catalog.parts) {
         const owned = p.engineering_source || /^(numbered_|upload_)/.test(p.id || '');
         if (isNonMoldPart({...p, ...(engineering?.mixed_part_edits?.[p.id] || {})}) ||
@@ -406,5 +424,5 @@ function lookupMaterialPrice(material, grade, prices) {
     if (Math.abs(columns.other) < 1e-10) columns.other = 0;
     return { columns, labels, total: base.total };
   }
-  return { isNonMoldPart, updateEngineeringFields, pricingWeights, ratioValue, catalogMachineReference, DEFAULT_MACHINE_PRICES, catalogMachinePrice, inheritMoldFields, engineeringCatalogRows, DEFAULT_MATERIAL_PRICES, lookupMaterialPrice, materialPricePerGram, catalogMaterialPrice, productionDemand, automaticCatalogLabor, validateConfig, weights, calculate, number, enableCatalog, catalogRows, applyCatalog, engineeringCatalog, costBreakdown, dynamicCostBreakdown };
+  return { prepareMoldImport, isNonMoldPart, updateEngineeringFields, pricingWeights, ratioValue, catalogMachineReference, DEFAULT_MACHINE_PRICES, catalogMachinePrice, inheritMoldFields, engineeringCatalogRows, DEFAULT_MATERIAL_PRICES, lookupMaterialPrice, materialPricePerGram, catalogMaterialPrice, productionDemand, automaticCatalogLabor, validateConfig, weights, calculate, number, enableCatalog, catalogRows, applyCatalog, engineeringCatalog, costBreakdown, dynamicCostBreakdown };
 });

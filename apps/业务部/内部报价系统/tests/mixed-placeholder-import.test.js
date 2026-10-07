@@ -31,3 +31,38 @@ test('removing a product keeps other mold ownership and shared catalog definitio
  assert.deepEqual(after.mixed_molds,[{mold_no:'shared',parts:[{product_id:'p2'}]}]);
  assert.equal(data.mixed_molds[0].parts.length,2);
 });
+
+test('P-prefixed names group matching parts and shared parts by product code',()=>{
+ const {productNumbers,summarize}=require('../backend/services/mixedPartImport');
+ assert.deepEqual(productNumbers('P66水瓶'),['P66']);
+ assert.deepEqual(productNumbers('ｐ０９-瓶盖'),['P09']);
+ assert.deepEqual(productNumbers('P25大披萨盒子/P51鸡蛋盒子'),['P25','P51']);
+ assert.deepEqual(productNumbers('04、21-共用盖'),['04','21']);
+ assert.deepEqual(productNumbers('PP塑料'),[]);
+ const input=[{mold_no:'MNFRG-03M-01',parts:[{name:'P62康普茶'},{name:'P48千层饼上件'},{name:'P48千层饼下件'}]}];
+ assert.equal(summarize(input).product_count,2);
+ const first=importParts({...config(),products:[]},{},input);
+ const product=first.config.products.find(p=>p.code==='P48');
+ assert.equal(first.engineering.mixed_part_selections[product.id].length,2);
+ const again=importParts(first.config,first.engineering,input);
+ assert.equal(again.summary.added,0);
+ assert.equal(again.summary.assigned,0);
+ assert.equal(again.config.products.length,2);
+});
+
+test('replace rebuilds products by file codes, preserving matching product data; append keeps old products',()=>{
+ const cfg={...config(),products:[{id:'old',code:'01',name:'旧款',ratio:1},{id:'keep',code:'P48',name:'千层饼',ratio:1}]};
+ const engineering={mixed_products:{old:{packaging:[{name:'旧包装'}]},keep:{note:'保留'}},mixed_pricing:{old:{price:3}}};
+ const input=[{mold_no:'03M',parts:[{name:'P48千层饼上件'},{name:'P48千层饼下件'},{name:'P66水瓶'}]}];
+ const result=importParts(cfg,engineering,input,{mode:'replace'});
+ assert.deepEqual(result.config.products.map(p=>p.code),['P48','P66']);
+ assert.equal(result.config.products[0].id,'keep');
+ assert.deepEqual(result.engineering.mixed_products,{keep:{note:'保留'}});
+ assert.deepEqual(result.engineering.mixed_pricing,{});
+ assert.deepEqual(result.summary.removed_product_ids,['old']);
+ assert.equal(result.engineering.mixed_part_selections.keep.length,2);
+ const append=importParts(cfg,engineering,input,{mode:'append'});
+ assert.equal(append.config.products.length,3);
+ assert.deepEqual(append.summary.removed_product_ids,[]);
+ assert.ok(engineering.mixed_products.old);
+});

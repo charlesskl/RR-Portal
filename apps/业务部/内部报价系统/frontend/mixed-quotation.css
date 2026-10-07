@@ -44,3 +44,27 @@ table[aria-label="统一零件编辑"] td.mixed-machine-column input { border-co
 .mixed-scroll table[aria-label="统一零件编辑"] [data-catalog-cell="name"],
 .mixed-scroll table[aria-label="统一零件编辑"] [data-catalog-header="name"]{position:sticky;left:0;z-index:2;background:#fff;box-shadow:2px 0 0 #dbe3ed}
 .mixed-scroll table[aria-label="统一零件编辑"] [data-catalog-header="name"]{z-index:3;background:#e8eef7}
+
+/* Keep long engineering and injection lists inside a bounded scroll area. */
+.mixed-engineering-molds,.mixed-injection-parts{height:min(65vh,640px);max-width:100%;overflow:auto;scrollbar-gutter:stable;border:1px solid #dbe3ed;border-radius:8px}
+.mixed-engineering-molds table,.mixed-injection-parts table{margin:0}
+.mixed-engineering-molds thead th,.mixed-injection-parts thead th{position:sticky;top:0;z-index:3;background:#e8eef7;box-shadow:0 1px 0 #cbd5e1}
+.mixed-engineering-molds:focus-visible,.mixed-injection-parts:focus-visible{outline:2px solid #2563eb;outline-offset:2px}
+@media print{.mixed-engineering-molds,.mixed-injection-parts{height:auto;overflow:visible}.mixed-engineering-molds thead th,.mixed-injection-parts thead th{position:static}}
+
+.mixed-injection-parts thead th.mixed-machine-column{background:#fff0bf}
+.mixed-injection-parts table[aria-label="统一零件编辑"] [data-catalog-header="name"]{z-index:4}
+
+.mixed-import-options{margin:18px 0;padding:0;border:0;min-width:0}
+.mixed-import-options legend{font-weight:600;margin-bottom:10px;color:#243b53}
+.mixed-import-choices{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.mixed-import-choice{display:flex;align-items:flex-start;gap:10px;padding:16px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;cursor:pointer}
+.mixed-import-choice:has(input:checked){border-color:#2563eb;background:#eff6ff;box-shadow:0 0 0 1px #2563eb}
+.mixed-import-choice:focus-within{outline:2px solid #93c5fd;outline-offset:2px}
+.mixed-import-choice input{width:18px;min-width:18px;height:18px;margin:3px 0 0;accent-color:#2563eb}
+.mixed-import-choice strong{display:block;margin-bottom:8px;color:#243b53}
+.mixed-import-choice strong small{font-size:11px;padding:2px 6px;border-radius:4px;background:#dbeafe;color:#1d4ed8}
+.mixed-import-choice span span{display:block;color:#64748b;font-size:13px;line-height:1.6}
+.mixed-import-options>p{font-size:12px;line-height:1.6;margin:10px 0 0}
+button.mixed-import-replace{background:#b45309;border-color:#b45309}
+@media(max-width:640px){.mixed-import-choices{grid-template-columns:1fr}}

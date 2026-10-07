@@ -240,6 +240,12 @@
                 <span class="plugin-name">工程资料管理系统</span>
               </div>
             </div>
+            <div class="plugin-item">
+              <div class="plugin-info">
+                <div class="plugin-dot gray" id="printlinkDot"></div>
+                <span class="plugin-name">3D打印协同平台</span>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -539,7 +545,7 @@
       <div class="dept-icon engineering" style="width:40px;height:40px;font-size:18px;">&#9881;</div>
       工程部
     </div>
-    <div class="page-subtitle">工程啤办单 · A-doc生成 · 新产品排期 · 模具手办采购 · 自动化设备统计 · 工程资料管理</div>
+    <div class="page-subtitle">工程啤办单 · A-doc生成 · 新产品排期 · 模具手办采购 · 自动化设备统计 · 工程资料管理 · 3D打印协同</div>
 
     <div class="detail-plugin-card">
       <div class="detail-plugin-left">
@@ -640,6 +646,27 @@
       <div class="detail-plugin-right">
         <div class="detail-plugin-status"><div class="plugin-dot gray" id="gczlDetailDot"></div> 检查中...</div>
         <a href="/gongcheng-ziliao/" target="_blank" class="btn btn-primary">打开系统</a>
+      </div>
+    </div>
+
+    <div class="detail-plugin-card">
+      <div class="detail-plugin-left">
+        <div class="detail-plugin-icon" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);">&#128424;</div>
+        <div>
+          <div class="detail-plugin-name">3D打印协同平台（PrintLink）</div>
+          <div class="detail-plugin-desc">清溪、湖南、河源、印尼在线下单，清溪集中生产：订单与附件、排产、人工质检、耗材入账、交付反馈；清溪 Windows 采集桥接只读打印机状态，不控制设备</div>
+          <div class="feature-grid">
+            <div class="feature-tag">&#127760; 四厂区下单</div>
+            <div class="feature-tag">&#128197; 排产</div>
+            <div class="feature-tag">&#9989; 质检扣库存</div>
+            <div class="feature-tag">&#128230; 耗材入账</div>
+            <div class="feature-tag">&#128279; 采集桥接</div>
+          </div>
+        </div>
+      </div>
+      <div class="detail-plugin-right">
+        <div class="detail-plugin-status"><div class="plugin-dot gray" id="printlinkDetailDot"></div> 检查中...</div>
+        <a href="#" onclick="window.open(location.protocol + '//' + location.hostname + ':3100/', '_blank'); return false;" class="btn btn-primary">打开系统</a>
       </div>
     </div>
   </div>
@@ -1376,6 +1403,7 @@ async function checkHealth() {
       { name: 'figureMold', url: '/figure-mold-cost-system/health', dot: 'figureMoldDot', detailDot: 'figureMoldDetailDot' },
       { name: 'automation', url: '/automation-equipment/health', dot: 'automationDot', detailDot: 'automationDetailDot' },
       { name: 'gczl', url: '/gongcheng-ziliao/health', dot: 'gczlDot', detailDot: 'gczlDetailDot' },
+      { name: 'printlink', url: '/printlink-health', dot: 'printlinkDot', detailDot: 'printlinkDetailDot' },
       { name: 'jiangping', url: '/jiangping/health', dot: 'jiangpingDot', detailDot: 'jiangpingDetailDot' },
       { name: 'paiji', url: '/paiji/health', dot: 'paijiDot', detailDot: 'paijiDetailDot' },
       { name: 'sprayplan', url: '/sprayplan/api/health', dot: 'sprayplanDot', detailDot: 'sprayplanDetailDot' },

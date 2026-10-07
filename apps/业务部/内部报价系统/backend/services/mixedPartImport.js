@@ -1,6 +1,6 @@
 'use strict';
 const { createHash } = require('node:crypto');
-const { inheritMoldFields, validateConfig } = require('../../frontend/mixed-molds');
+const { inheritMoldFields, validateConfig, isNonMoldPart, updateEngineeringFields } = require('../../frontend/mixed-molds');
 const canonical = value => /^\d+$/.test(String(value).trim()) ? String(Number(value)).padStart(2, '0') : String(value).trim();
 function productNumbers(name) {
   const text = String(name || '').normalize('NFKC').trim();
@@ -12,7 +12,7 @@ function importedParts(molds) {
   return molds.flatMap(mold => (mold.parts?.length ? mold.parts : [mold]).map(part => ({
     ...inheritMoldFields(part, mold), name: String(part.name || mold.name || '').trim(),
     mold_no: String(mold.mold_no || part.mold_no || ''), material: part.material || mold.material || '',
-  }))).filter(part => part.name && !/^(制表|审核|批准|签名)\s*[:：]?$/.test(part.name));
+  }))).filter(part => !isNonMoldPart(part) && part.name && !/^(制表|审核|批准|签名)\s*[:：]?$/.test(part.name));
 }
 function summarize(molds) {
   const parts = importedParts(molds), groups = new Map(), unmatched = [];
@@ -62,10 +62,21 @@ function importParts(config, engineering, molds, { replacePlaceholders = false, 
     const key = identity(part);
     let stored = known.get(key);
     if (!stored) {
+      const matches = [...known.values()].filter(p => p.mold_no === part.mold_no && p.name === part.name && (!sourceFile || !p.source_file || p.source_file === sourceFile));
+      if (matches.length === 1) stored = matches[0];
+    }
+    if (!stored) {
       const id = 'numbered_' + createHash('sha256').update(key).digest('hex').slice(0,24);
       if ([...known.values()].some(p => p.id === id)) throw new Error('零件标识冲突');
       stored = {...part, id, source_file:sourceFile, material_unit_price:null, shot_price:0, loss_pct:3};
       root.mixed_imported_parts.push(stored); known.set(key,stored); added++;
+    }
+    else {
+      const updated = updateEngineeringFields(stored, {...part, source_file:sourceFile});
+      Object.assign(stored, updated);
+      const index = root.mixed_imported_parts.findIndex(p => p.id === stored.id);
+      if (index < 0) root.mixed_imported_parts.push({...stored});
+      else root.mixed_imported_parts[index] = {...stored};
     }
     if ((stored.production_demand == null || stored.production_demand === '') && part.production_demand != null) {
       stored.production_demand = part.production_demand; demandsFilled++;

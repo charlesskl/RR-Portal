@@ -15,7 +15,11 @@ async function workshopOptions(factoryCode) {
   const options = WORKSHOPS.map(([code, name]) => ({code, name}));
   for (const row of saved) {
     const item = parseJson(row.data_json, null);
-    if (item?.code && item?.name && !options.some(o => o.code === item.code || o.name === item.name)) options.push(item);
+    if (item?.code && item?.name) {
+      const index = options.findIndex(o => o.code === item.code);
+      if (index < 0) options.push(item);
+      else options[index] = item;
+    }
   }
   return options;
 }
@@ -33,6 +37,21 @@ router.post('/workshops', async (req, res) => {
     .run(req.user.active_factory_code,key,JSON.stringify(item),req.user.name);
   const saved = await db.prepare('SELECT data_json FROM factory_ref_tables WHERE factory_code = ? AND key = ?').get(req.user.active_factory_code,key);
   res.json(parseJson(saved.data_json, item));
+});
+
+router.put('/workshops', async (req, res) => {
+  if (req.user.dept !== 'sales' && !isAdmin(req.user)) return res.status(403).json({error:'只有业务或管理员可编辑车间'});
+  const code = req.body?.code;
+  const name = typeof req.body?.name === 'string' ? req.body.name.normalize('NFKC').trim() : '';
+  if (!name || name.length > 40 || /[\x00-\x1f\x7f]/.test(name)) return res.status(400).json({error:'请输入1–40个字符的车间名称'});
+  const options = await workshopOptions(req.user.active_factory_code);
+  if (!options.some(o => o.code === code)) return res.status(404).json({error:'车间不存在'});
+  if (options.some(o => o.code !== code && (o.name.toLowerCase() === name.toLowerCase() || o.code.toLowerCase() === name.toLowerCase()))) return res.status(409).json({error:'车间名称已存在'});
+  const key = 'quote_workshop:' + require('node:crypto').createHash('sha256').update(code.toLowerCase()).digest('hex');
+  const item = {code, name};
+  await db.prepare('INSERT INTO factory_ref_tables (factory_code,key,data_json,updated_by) VALUES (?,?,?,?) ON CONFLICT(factory_code,key) DO UPDATE SET data_json=excluded.data_json, updated_by=excluded.updated_by')
+    .run(req.user.active_factory_code,key,JSON.stringify(item),req.user.name);
+  res.json(item);
 });
 
 async function accessibleQuoteRows(user) {
@@ -132,6 +151,8 @@ router.get('/export/xlsx', async (req, res) => {
   const status = String(req.query.status || '').trim();
   if (customer) rows = rows.filter(row => row.customer === customer);
   if (status) rows = rows.filter(row => row.confirmation.status === status);
+  const workshops = await workshopOptions(req.user.active_factory_code);
+  rows.forEach(row => { row.workshop_names = Object.fromEntries(workshops.map(w => [w.code, w.name])); });
   const workbook = buildSummaryWorkbook(rows, { customer, status });
   const buffer = await workbook.xlsx.writeBuffer();
   const customerName = customer || '全部客户';

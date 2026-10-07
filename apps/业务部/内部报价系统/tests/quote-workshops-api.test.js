@@ -44,4 +44,18 @@ test('报价车间：新增、去重、持久化及选用', { timeout: 30000 }, 
   await api('/quote-summary/'+created.id+'/confirmation','PUT',{workshop:custom.code});
   summary=await api('/quote-summary');
   assert.deepEqual(summary.rows.find(r=>r.id===created.id).confirmation.workshops,[custom.code]);
+  await api('/quote-summary/workshops','PUT',{code:custom.code,name:'新车间名称'});
+  await api('/quote-summary/workshops','PUT',{code:'rri_id',name:'RRI新名称'});
+  await api('/quote-summary/workshops','PUT',{code:custom.code,name:'RRI新名称'},409);
+  await api('/quote-summary/workshops','PUT',{code:custom.code,name:' '},400);
+  await api('/quote-summary/workshops','PUT',{code:'missing',name:'不存在'},404);
+  summary=await api('/quote-summary');
+  assert.equal(summary.workshops.find(w=>w.code===custom.code).name,'新车间名称');
+  assert.equal(summary.workshops.find(w=>w.code==='rri_id').name,'RRI新名称');
+  assert.deepEqual(summary.rows.find(r=>r.id===created.id).confirmation.workshops,[custom.code]);
+  const workbook=new (require('exceljs').Workbook)();
+  await workbook.xlsx.load(await api('/quote-summary/export/xlsx'));
+  const cells=[];workbook.eachSheet(ws=>ws.eachRow(row=>row.eachCell(cell=>cells.push(cell.value))));
+  assert.ok(cells.includes('新车间名称'));
+
 });

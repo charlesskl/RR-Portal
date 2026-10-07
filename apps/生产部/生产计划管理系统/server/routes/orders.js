@@ -75,7 +75,7 @@ router.get('/', (req, res) => {
 
 // 车间拉配置（2026-05-22 更新：key=拉名/编号，name=拉长，worker_count=人数）
 const WORKSHOP_CONFIG = {
-  A: { supervisor: '吴其雄', factory_area: '兴信A', worker_count: 50,
+  A: { supervisor: '刘荣华', factory_area: '兴信A', worker_count: 50,
     lines: [
       { key: 'A1', name: '杨胜去', worker_count: 70 },
       { key: 'A2', name: '贾帅傅', worker_count: 55 },

@@ -316,17 +316,17 @@ test('internal export keeps editable spray-product ratios and a weighted-average
   const totalRow = secondSummary + 1;
   assert.ok(firstSummary && secondSummary);
   assert.equal(worksheet.getCell(totalRow, 1).value, '合计 HKD');
-  assert.equal(worksheet.getCell(firstSummary, 23).value, 2);
-  assert.equal(worksheet.getCell(secondSummary, 23).value, 1);
-  assert.equal(worksheet.getCell(firstSummary, 24).value.result, 30);
-  assert.equal(worksheet.getCell(secondSummary, 24).value.result, 60);
+  assert.equal(worksheet.getCell(firstSummary, 25).value, 2);
+  assert.equal(worksheet.getCell(secondSummary, 25).value, 1);
+  assert.equal(worksheet.getCell(firstSummary, 26).value.result, 30);
+  assert.equal(worksheet.getCell(secondSummary, 26).value.result, 60);
   assert.equal(
-    worksheet.getCell(totalRow, 24).value.formula,
-    `(IFERROR(SUMPRODUCT(W${firstSummary}:W${secondSummary},X${firstSummary}:X${secondSummary})/SUM(W${firstSummary}:W${secondSummary}),0))`,
+    worksheet.getCell(totalRow, 26).value.formula,
+    `(IFERROR(SUMPRODUCT(Y${firstSummary}:Y${secondSummary},Z${firstSummary}:Z${secondSummary})/SUM(Y${firstSummary}:Y${secondSummary}),0))`,
   );
-  assert.equal(worksheet.getCell(totalRow, 24).value.result, 40);
-  assert.equal(worksheet.getCell(totalRow, 25).value.formula, `X${totalRow}*30%*5/100`);
-  assert.equal(worksheet.getCell(totalRow, 25).value.result, 0.6);
+  assert.equal(worksheet.getCell(totalRow, 26).value.result, 40);
+  assert.equal(worksheet.getCell(totalRow, 27).value.formula, `Z${totalRow}*30%*5/100`);
+  assert.equal(worksheet.getCell(totalRow, 27).value.result, 0.6);
 });
 
 test('empty department Indonesian freight totals do not create circular references', async () => {
@@ -1278,7 +1278,7 @@ test('export combines mold RMB and USD display prices and converts production mo
   assert.match(productionMoldUsd.formula, /I\d+\/0\.85\/7\.75/);
 });
 
-test('export includes UV in painting detail and total quotation formula', async () => {
+test('export includes UV and heat transfer in painting detail and total quotation formula', async () => {
   const workbook = await buildWorkbook({
     quote: { quote_no: 'PAINT-UV', product_name: 'UV喷油测试', qty: 1000, factory_code: 'qingxi' },
     sections: [
@@ -1288,6 +1288,8 @@ test('export includes UV in painting detail and total quotation formula', async 
           position: '正面',
           uv_qty: 2,
           uv_unit: 1.25,
+          heat_transfer_qty: 3,
+          heat_transfer_unit: 0.5,
         }],
       }) },
       { dept: 'sales', payload_json: JSON.stringify({
@@ -1299,14 +1301,18 @@ test('export includes UV in painting detail and total quotation formula', async 
 
   const worksheet = workbook.getWorksheet('喷油明细');
   let uvHeaderFound = false;
+  let heatHeaderFound = false;
   let uvQuoteCell;
   worksheet.eachRow(row => row.eachCell(cell => {
+    if (cell.value === '热转印') heatHeaderFound = true;
     if (cell.value === 'UV') uvHeaderFound = true;
-    if (cell.value === 'UV测试件') uvQuoteCell = worksheet.getCell(row.number, 24).value;
+    if (cell.value === 'UV测试件') uvQuoteCell = worksheet.getCell(row.number, 26).value;
   }));
 
   assert.equal(uvHeaderFound, true);
-  assert.equal(uvQuoteCell.result, 2.5);
+  assert.equal(heatHeaderFound, true);
+  assert.match(uvQuoteCell.formula, /X\d+\*Y\d+/);
+  assert.equal(uvQuoteCell.result, 4);
   assert.match(uvQuoteCell.formula, /V\d+\*W\d+/);
 });
 
@@ -1662,11 +1668,27 @@ test('internal export mirrors UI formulas for slush and each departmental Indone
     if (typeof value === 'string') paintingSectionRows[value] = row.number;
   });
   const paintingHeader = paintingSectionRows['五、二次加工（印喷报价）'] + 1;
-  assert.equal(paintingWorksheet.getCell(paintingHeader, 25).value, '印尼运费 6%');
-  assert.equal(paintingWorksheet.getCell(paintingHeader + 2, 25).value.formula, `X${paintingHeader + 2}*30%*6/100`);
+  assert.equal(paintingWorksheet.getCell(paintingHeader, 27).value, '印尼运费 6%');
+  assert.equal(paintingWorksheet.getCell(paintingHeader + 2, 27).value.formula, `Z${paintingHeader + 2}*30%*6/100`);
 
   const sewingDetail = workbook.getWorksheet('车缝明细');
   assert.equal(sewingDetail.getCell(3, 12).value, '印尼运费 4%');
   assert.equal(sewingDetail.getCell(4, 12).value.formula, 'J4*4/100');
   assert.equal(sewingDetail.getCell(5, 12).value, 0);
+});
+
+test('single export uses independent surtax markup without changing main markup', async()=>{
+ const workbook=await buildWorkbook({quote:{quote_no:'SURTAX',qty:1000},sections:[
+  {dept:'sales',payload_json:JSON.stringify({header:{fx_hkd_usd:7.8,fx_rmb_hkd:.85},shipping:{markup_x:1.2,surtax_markup_x:1.6,divisor:.98,scenarios:[{name:"出厂价",is_factory:true,base_rmb:10}]}})},
+  {dept:'painting',payload_json:JSON.stringify({painting_items:[{pad_qty:1,pad_unit:10}]})}
+ ]});
+ let found=false,main=false;
+ workbook.eachSheet(ws=>ws.eachRow(row=>{
+  if(row.getCell(1).value==='码点 × 1.2') main=true;
+  if(row.getCell(1).value==='码点 × 1.6') {
+   found=true;
+   assert.match(row.getCell(2).value.formula,/\*1\.6$/);
+  }
+ }));
+ assert.equal(found,true);assert.equal(main,true);
 });

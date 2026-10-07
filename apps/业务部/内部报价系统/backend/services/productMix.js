@@ -50,6 +50,7 @@ function productGroups(payload, rows) {
         key,
         name: row.product_group_name || (key === '__ungrouped__' ? '未分组产品' : key),
         ratio: productRatio(payload, key),
+        direct: payload?.product_mix_modes?.[key] === 'direct',
         rows: [],
       });
     }
@@ -66,12 +67,12 @@ function weightedRowsSum(payload, rows, getter) {
   const sourceRows = rows || [];
   const groups = productGroups(payload, sourceRows);
   if (groups.length <= 1) return sourceRows.reduce((total, row, index) => total + num(getter(row, index)), 0);
-  const totalRatio = groups.reduce((total, group) => total + group.ratio, 0);
-  if (totalRatio <= 0) return 0;
+  const averaged = groups.filter(group => !group.direct);
+  const totalRatio = averaged.reduce((total, group) => total + group.ratio, 0);
   return groups.reduce((total, group) => {
     const subtotal = group.rows.reduce((value, item) => value + num(getter(item.row, item.index)), 0);
-    return total + subtotal * group.ratio;
-  }, 0) / totalRatio;
+    return total + (group.direct ? subtotal : (totalRatio > 0 ? subtotal * group.ratio / totalRatio : 0));
+  }, 0);
 }
 
 function weightedInjectionSum(payload, getter) {
@@ -84,13 +85,13 @@ function weightedRowsFormula(payload, rows, dataStartRow, columnLetter) {
   if (!sourceRows.length) return '0';
   const groups = productGroups(payload, sourceRows);
   if (groups.length <= 1) return `SUM(${columnLetter}${dataStartRow}:${columnLetter}${dataStartRow + sourceRows.length - 1})`;
-  const totalRatio = groups.reduce((total, group) => total + group.ratio, 0);
-  if (totalRatio <= 0) return '0';
-  const terms = groups.map(group => {
-    const cells = group.rows.map(item => `${columnLetter}${dataStartRow + item.index}`);
-    return `(${cells.join('+')})*${group.ratio}`;
-  });
-  return `(${terms.join('+')})/${totalRatio}`;
+  const averaged = groups.filter(group => !group.direct);
+  const totalRatio = averaged.reduce((total, group) => total + group.ratio, 0);
+  const cellsOf = group => group.rows.map(item => `${columnLetter}${dataStartRow + item.index}`).join('+');
+  const terms = averaged.map(group => `(${cellsOf(group)})*${group.ratio}`);
+  const direct = groups.filter(group => group.direct).map(group => `(${cellsOf(group)})`);
+  const average = totalRatio > 0 ? `(${terms.join('+')})/${totalRatio}` : '0';
+  return [average, ...direct].join('+');
 }
 
 function weightedColumnFormula(payload, dataStartRow, columnLetter) {

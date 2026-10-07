@@ -521,36 +521,32 @@ function ensurePaintingProductGroups(payload) {
     row.product_group_name = current.name;
   });
 }
+function directProductGroup(payload, key) {
+  return payload.product_mix_modes?.[key] === 'direct';
+}
+function productModeSelect(payload, key, canEdit) {
+  const direct = directProductGroup(payload, key);
+  return `<select class="product-mix-mode" data-group="${escapeHtml(key)}" aria-label="计算方式" ${canEdit ? '' : 'disabled'}><option value="average" ${direct ? '' : 'selected'}>参与配比平均</option><option value="direct" ${direct ? 'selected' : ''}>直接累加</option></select>`;
+}
+function weightedProductRows(payload, rows, getter) {
+  const groups = rowProductGroups(payload, rows);
+  if (groups.length <= 1) return sum(rows, getter);
+  const totalRatio = sum(groups.filter(g => !directProductGroup(payload, g.key)), g => productMixRatio(payload, g.key));
+  return sum(groups, g => {
+    const subtotal = sum(g.rows, item => getter(item.row, item.index));
+    return directProductGroup(payload, g.key) ? subtotal : (totalRatio > 0 ? subtotal * productMixRatio(payload, g.key) / totalRatio : 0);
+  });
+}
 function weightedInjectionSum(payload, getter) {
-  const groups = injectionProductGroups(payload);
-  if (groups.length <= 1) return sum(payload.injection || [], getter);
-  const totalRatio = sum(groups, group => productMixRatio(payload, group.key));
-  if (totalRatio <= 0) return 0;
-  return sum(groups, group =>
-    sum(group.rows, item => getter(item.row, item.index)) * productMixRatio(payload, group.key)
-  ) / totalRatio;
+  return weightedProductRows(payload, payload.injection || [], getter);
 }
 function weightedPaintingSum(payload) {
   ensurePaintingProductGroups(payload);
-  const rows = payload.painting_items || [];
-  const groups = rowProductGroups(payload, rows);
-  if (groups.length <= 1) return sum(rows, paintingRowAmount);
-  const totalRatio = sum(groups, group => productMixRatio(payload, group.key));
-  if (totalRatio <= 0) return 0;
-  return sum(groups, group =>
-    sum(group.rows, item => paintingRowAmount(item.row)) * productMixRatio(payload, group.key)
-  ) / totalRatio;
+  return weightedProductRows(payload, payload.painting_items || [], paintingRowAmount);
 }
 function weightedPaintingProcSum(payload, procKey) {
   ensurePaintingProductGroups(payload);
-  const rows = payload.painting_items || [];
-  const groups = rowProductGroups(payload, rows);
-  if (groups.length <= 1) return sum(rows, row => num(row[procKey + '_qty']));
-  const totalRatio = sum(groups, group => productMixRatio(payload, group.key));
-  if (totalRatio <= 0) return 0;
-  return sum(groups, group =>
-    sum(group.rows, item => num(item.row[procKey + '_qty'])) * productMixRatio(payload, group.key)
-  ) / totalRatio;
+  return weightedProductRows(payload, payload.painting_items || [], row => num(row[procKey + '_qty']));
 }
 
 // ==================== 工程：模具部分（表格布局，对齐 sheet1 / 导出格式） ====================
@@ -566,6 +562,26 @@ function syncMoldFromParts(mold) {
   const weights = parts.map(p => p.weight_g).filter(v => v !== null && v !== '' && Number.isFinite(Number(v)));
   mold.weight_g = weights.length ? +weights.reduce((a, v) => a + Number(v), 0).toFixed(4) : null;
   mold.images = [...new Set(parts.flatMap(p => p.images || []).filter(Boolean))];
+}
+
+function addManualMoldGroup(molds, name) {
+  name = String(name || '').trim();
+  if (!name) throw new Error('请填写产品名称');
+  if (molds.some(m => String(m.product_group_name || '').trim() === name)) {
+    throw new Error('产品分组已存在，请在该组内增加模具');
+  }
+  const row = { images: [], product_group_id: 'manual-product-' + crypto.randomUUID(), product_group_name: name };
+  molds.push(row);
+  return row;
+}
+
+function addMoldToProductGroup(molds, groupId) {
+  const leader = molds.find(m => m.product_group_id === groupId);
+  if (!leader) throw new Error('产品分组不存在');
+  const lastIndex = molds.reduce((last, m, i) => m.product_group_id === groupId ? i : last, -1);
+  const row = { images: [], product_group_id: groupId, product_group_name: leader.product_group_name, product_image: leader.product_image || '' };
+  molds.splice(lastIndex + 1, 0, row);
+  return row;
 }
 
 function renderMolds(container, molds, onChange, canEdit, fxRmbHkd, fxHkdUsd) {
@@ -640,6 +656,15 @@ function renderMolds(container, molds, onChange, canEdit, fxRmbHkd, fxHkdUsd) {
       trGroup.appendChild(tdGroup);
       tbody.appendChild(trGroup);
       if (canEdit) {
+        const addToGroup = document.createElement('button');
+        addToGroup.className = 'mini';
+        addToGroup.textContent = '＋ 本组增加模具';
+        addToGroup.onclick = () => {
+          addMoldToProductGroup(molds, groupId);
+          renderMolds(container, molds, onChange, canEdit, fxRmbHkd, fxHkdUsd);
+          onChange();
+        };
+        tdGroup.firstElementChild.appendChild(addToGroup);
         const groupNameInput = tdGroup.querySelector('[data-product-group-name]');
         groupNameInput.oninput = () => {
           groupMolds.forEach(item => { item.product_group_name = groupNameInput.value; });
@@ -800,6 +825,27 @@ function renderMolds(container, molds, onChange, canEdit, fxRmbHkd, fxHkdUsd) {
     add.style.marginTop = '8px';
     add.onclick = () => { molds.push({ images: [] }); renderMolds(container, molds, onChange, canEdit, fxRmbHkd, fxHkdUsd); onChange(); };
     container.appendChild(add);
+    const addGroup = document.createElement('button');
+    addGroup.className = 'mini';
+    addGroup.textContent = '＋ 添加产品分组';
+    addGroup.style.marginLeft = '8px';
+    container.appendChild(addGroup);
+    const form = document.createElement('div');
+    form.hidden = true;
+    form.style.marginTop = '10px';
+    form.innerHTML = '<input aria-label="新产品分组名称" placeholder="产品名称，如 1#产品" style="width:200px"/> <button class="mini" type="button">添加</button> <span class="muted">配比在啤机部填写</span>';
+    container.appendChild(form);
+    addGroup.onclick = () => { form.hidden = !form.hidden; if (!form.hidden) form.querySelector('input').focus(); };
+    const nameInput = form.querySelector('input');
+    nameInput.oninput = () => nameInput.setCustomValidity('');
+    const createGroup = () => {
+      try { addManualMoldGroup(molds, nameInput.value); }
+      catch (error) { nameInput.setCustomValidity(error.message); nameInput.reportValidity(); return; }
+      renderMolds(container, molds, onChange, canEdit, fxRmbHkd, fxHkdUsd);
+      onChange();
+    };
+    form.querySelector('button').onclick = createGroup;
+    nameInput.onkeydown = event => { if (event.key === 'Enter') { event.preventDefault(); createGroup(); } };
   }
 }
 
@@ -3672,7 +3718,7 @@ function renderMolding(host, payload, canEdit, onChange, refMolds, fxRmbHkd, use
     <h3>二、注塑部分 <small>料损耗 %
       <input id="inj-loss" type="number" step="any" style="width:60px" value="${payload.injection_loss_pct ?? 3}" ${canEdit ? '' : 'disabled'} />
     </small>
-    ${canEdit && refMolds && refMolds.length ? `<small style="margin-left:12px"><button id="btn-sync-mold" class="mini" type="button">📥 从工程拉取/同步模具 (${refMolds.length})</button></small>` : ''}
+    ${canEdit ? `<small style="margin-left:12px"><button id="btn-sync-mold" class="mini" type="button">📥 从工程拉取/同步模具 (${refMolds?.length || 0})</button></small>` : ''}
     ${canEdit ? `<small style="margin-left:8px"><button id="btn-auto-price" class="mini" type="button">🔄 自动按材质套料价</button></small>` : ''}
     ${canEdit ? `<small style="margin-left:6px"><button id="btn-auto-shot" class="mini" type="button">🔄 自动按机型套啤价</button></small>` : ''}
     </h3>
@@ -3775,8 +3821,20 @@ function renderMolding(host, payload, canEdit, onChange, refMolds, fxRmbHkd, use
 
   if (canEdit) {
     const syncBtn = host.querySelector('#btn-sync-mold');
-    if (syncBtn) syncBtn.onclick = () => {
-      if (!confirm(`将根据工程已填的 ${refMolds.length} 副模具同步注塑表。已填行（按"模具名称"匹配）会保留其他字段，新增的会追加，工程已删除的会移除。继续？`)) return;
+    if (syncBtn) syncBtn.onclick = async () => {
+      syncBtn.disabled = true;
+      try {
+        const quoteId = window.__data?.quote?.id;
+        if (quoteId) {
+          const latest = await api('/quotes/' + quoteId);
+          refMolds = latest.engineering_molds || [];
+        }
+      } catch (error) {
+        alert('读取工程模具失败：' + error.message);
+        return;
+      } finally { syncBtn.disabled = false; }
+      if (!refMolds?.length) { alert('工程部分尚无已保存的模具，请先保存工程模具草稿。'); return; }
+      if (!confirm(`将根据工程已填的 ${refMolds.length} 副模具同步注塑表。已填行（按产品组、模号及名称匹配）会保留其他字段，新增的会追加，工程已删除的会移除。继续？`)) return;
       const byName = new Map(payload.injection.map(r => [engineeringMoldSyncKey(r), r]));
       payload.injection = refMolds.map(m => {
         const existing = byName.get(engineeringMoldSyncKey(m)) || {};
@@ -3997,14 +4055,14 @@ function renderMolding(host, payload, canEdit, onChange, refMolds, fxRmbHkd, use
     const formatTotal = value => allocation.error ? '待完善' : formatNum(value);
     const groups = injectionProductGroups(payload);
     const hasMultipleProducts = groups.length > 1;
-    const totalRatio = sum(groups, group => productMixRatio(payload, group.key));
+    const totalRatio = sum(groups.filter(g => !directProductGroup(payload, g.key)), group => productMixRatio(payload, group.key));
     const groupCards = groups.map(group => {
       const groupRaw = sum(group.rows, item => num(item.row.weight_g) * lossM * num(item.row.material_unit_price));
       const groupShot = sum(group.rows, item => num(item.row.shot_price));
       const groupFinished = groupRaw + groupShot;
       return `<div class="ls-row" style="background:#f0f9ff;color:#075985">
         <span class="ls-label">${escapeHtml(group.name)} 小计（${group.rows.length} 行）</span>
-        <span class="ls-val">HK$ ${formatNum(groupFinished)} ${hasMultipleProducts ? `× 配比
+        <span class="ls-val">HK$ ${formatNum(groupFinished)} ${productModeSelect(payload, group.key, canEdit)} ${hasMultipleProducts && !directProductGroup(payload, group.key) ? `× 配比
           <input class="product-mix-ratio" data-group="${escapeHtml(group.key)}" type="number" min="0" step="any"
             value="${productMixRatio(payload, group.key)}" ${canEdit ? '' : 'disabled'} style="width:72px;margin:0 6px">` : ''}
           <small class="muted">原料 ${formatNum(groupRaw)} + 啤价 ${formatNum(groupShot)}</small>
@@ -4018,9 +4076,15 @@ function renderMolding(host, payload, canEdit, onChange, refMolds, fxRmbHkd, use
       <div class="ls-row"><span class="ls-label">原料单价 ${hasMultipleProducts ? '加权平均' : '总'}</span><span class="ls-val">${formatNum(rawSum)}</span></div>
       ${allocation.hasRows ? `<div class="ls-row"><span class="ls-label">本款明细啤价</span><span class="ls-val">${formatNum(directShotSum)}</span></div><div class="ls-row"><span class="ls-label">共模分摊啤价</span><span class="ls-val">${formatTotal(allocation.amount)}</span></div>` : ''}
       <div class="ls-row"><span class="ls-label">啤价 ${hasMultipleProducts ? '加权平均' : '总'}</span><span class="ls-val">${formatTotal(shotSum)}</span></div>
-      <div class="ls-row hi"><span class="ls-label">成品金额 ${hasMultipleProducts ? `加权平均（总配比 ${formatNum(totalRatio)}）` : '总'} HK$</span><span class="ls-val">${formatTotal(finishedSum)}</span></div>
+      <div class="ls-row hi"><span class="ls-label">成品金额 ${hasMultipleProducts ? `配比平均 + 直接累加（总配比 ${formatNum(totalRatio)}）` : '总'} HK$</span><span class="ls-val">${formatTotal(finishedSum)}</span></div>
       <div class="ls-row hi"><span class="ls-label">合计 RMB</span><span class="ls-val">${formatTotal(finishedSum * fxv)} <small class="muted">(汇率 ${fxv})</small></span></div>
     `;
+    injCard.querySelectorAll('.product-mix-mode').forEach(input => {
+      input.onchange = () => {
+        (payload.product_mix_modes ||= {})[input.dataset.group] = input.value;
+        paintInj(); onChange();
+      };
+    });
     injCard.querySelectorAll('.product-mix-ratio').forEach(input => {
       input.onchange = () => {
         payload.product_mix_ratios[input.dataset.group] = Math.max(0, num(input.value));
@@ -4291,6 +4355,7 @@ const PAINTING_PROCS = [
   { key: 'oil',    label: '抹油' },
   { key: 'pp_water', label: '擦PP水' },
   { key: 'uv', label: 'UV' },
+  { key: 'heat_transfer', label: '热转印' },
 ];
 
 function currentFactoryCode() {
@@ -4315,8 +4380,35 @@ function paintingRowAmount(r) {
   return PAINTING_PROCS.reduce((s, p) => s + num(r[p.key + '_qty']) * num(r[p.key + '_unit']), 0);
 }
 
-function renderPaintingTable(container, payload, onChange, canEdit) {
+function renamePaintingProductGroup(payload, groupKey, name) {
+  name = String(name || '').trim();
+  if (!name) throw new Error('请填写产品名称');
   const rows = payload.painting_items || [];
+  const keyOf = row => String(row.product_group_id || row.product_group_name || '__ungrouped__');
+  const members = rows.filter(row => keyOf(row) === groupKey);
+  if (!members.length) throw new Error('产品分组不存在');
+  if (rows.some(row => keyOf(row) !== groupKey && row.product_group_name === name))
+    throw new Error('该产品名称已存在，请使用其他名称');
+  const id = members[0].product_group_id || 'manual-product-' + crypto.randomUUID();
+  payload.product_mix_ratios ||= {};
+  const ratio = payload.product_mix_ratios[groupKey] ?? 1;
+  for (const row of members) {
+    const oldName = row.product_group_name || '';
+    row.product_group_id = id;
+    row.product_group_name = name;
+    if (!row.name || row.name === oldName) row.name = name;
+  }
+  if (id !== groupKey) delete payload.product_mix_ratios[groupKey];
+  payload.product_mix_ratios[id] = ratio;
+  if (id !== groupKey && payload.product_mix_modes?.[groupKey]) {
+    payload.product_mix_modes[id] = payload.product_mix_modes[groupKey];
+    delete payload.product_mix_modes[groupKey];
+  }
+}
+
+function renderPaintingTable(container, payload, onChange, canEdit) {
+  const rows = payload.painting_items ||= [];
+  payload.product_mix_ratios ||= {};
   const groups = rowProductGroups(payload, rows);
   const hasMultipleProducts = groups.length > 1;
   const groupByKey = new Map(groups.map(group => [group.key, group]));
@@ -4345,24 +4437,49 @@ function renderPaintingTable(container, payload, onChange, canEdit) {
     const previousKey = idx > 0
       ? String(rows[idx - 1].product_group_id || rows[idx - 1].product_group_name || '__ungrouped__')
       : '';
-    if (hasMultipleProducts && groupKey !== previousKey) {
+    if (groups.length && groupKey !== previousKey) {
       const group = groupByKey.get(groupKey);
       const subtotal = group ? sum(group.rows, item => paintingRowAmount(item.row)) : 0;
       const colspan = 4 + PAINTING_PROCS.length * 2 + 2 + (canEdit ? 1 : 0);
       const groupRow = document.createElement('tr');
       groupRow.className = 'product-group-row';
+      groupRow.dataset.paintingGroup = groupKey;
       groupRow.innerHTML = `<td colspan="${colspan}" style="background:#e0f2fe;font-weight:700;text-align:left">
-        ${escapeHtml(group?.name || '未分组产品')} · 小计 HK$ ${formatNum(subtotal)} · 配比
-        ${canEdit
+        ${canEdit ? `<input data-painting-group-name aria-label="产品分组名称" maxlength="100" value="${escapeHtml(group?.name || '未分组产品')}" style="width:170px;margin-right:6px">` : escapeHtml(group?.name || '未分组产品')} · 小计 HK$ <span data-group-subtotal>${formatNum(subtotal)}</span> ${productModeSelect(payload, groupKey, canEdit)} ${directProductGroup(payload, groupKey) ? '' : ' · 配比'}
+        ${directProductGroup(payload, groupKey) ? '' : canEdit
           ? `<input class="painting-product-mix-ratio" data-group="${escapeHtml(groupKey)}" type="number" min="0" step="any" value="${productMixRatio(payload, groupKey)}" style="width:80px;margin-left:6px">`
           : formatNum(productMixRatio(payload, groupKey))}
       </td>`;
+      const nameInput = groupRow.querySelector('[data-painting-group-name]');
+      if (nameInput) {
+        nameInput.oninput = () => nameInput.setCustomValidity('');
+        nameInput.onchange = () => {
+          try { renamePaintingProductGroup(payload, groupKey, nameInput.value); }
+          catch (error) { nameInput.setCustomValidity(error.message); nameInput.reportValidity(); return; }
+          renderPaintingTable(container, payload, onChange, canEdit); onChange();
+        };
+      }
+      const modeInput = groupRow.querySelector('.product-mix-mode');
+      if (canEdit) modeInput.onchange = () => {
+        (payload.product_mix_modes ||= {})[groupKey] = modeInput.value;
+        renderPaintingTable(container, payload, onChange, canEdit); onChange();
+      };
       const ratioInput = groupRow.querySelector('.painting-product-mix-ratio');
       if (ratioInput) ratioInput.onchange = () => {
         payload.product_mix_ratios[groupKey] = Math.max(0, num(ratioInput.value));
         renderPaintingTable(container, payload, onChange, canEdit);
         onChange();
       };
+      if (canEdit) {
+        const add = document.createElement('button'); add.type = 'button'; add.className = 'mini';
+        add.textContent = '＋ 本组增加行'; add.style.marginLeft = '12px';
+        add.onclick = () => {
+          const lastIndex = rows.reduce((last, item, i) => String(item.product_group_id || item.product_group_name || '__ungrouped__') === groupKey ? i : last, -1);
+          rows.splice(lastIndex + 1, 0, {name:group?.name || '',images:[],product_group_id:row.product_group_id || '',product_group_name:row.product_group_name || ''});
+          renderPaintingTable(container,payload,onChange,canEdit); onChange();
+        };
+        groupRow.cells[0].appendChild(add);
+      }
       tbody.appendChild(groupRow);
     }
     row.images = row.images || [];
@@ -4386,6 +4503,10 @@ function renderPaintingTable(container, payload, onChange, canEdit) {
     const tdAmt = document.createElement('td'); tdAmt.className = 'ro';
     const refreshAmt = () => {
       tdAmt.textContent = formatNum(paintingRowAmount(row));
+      table.querySelectorAll('[data-painting-group]').forEach(header => {
+        const members = rows.filter(item => String(item.product_group_id || item.product_group_name || '__ungrouped__') === header.dataset.paintingGroup);
+        header.querySelector('[data-group-subtotal]').textContent = formatNum(sum(members, paintingRowAmount));
+      });
       const footer = table.querySelector('[data-painting-total]');
       if (footer) {
         PAINTING_PROCS.forEach((proc, i) => { footer.cells[1+i*2].textContent = formatNum(weightedPaintingProcSum(payload, proc.key)); });
@@ -4413,8 +4534,8 @@ function renderPaintingTable(container, payload, onChange, canEdit) {
   const totals = PAINTING_PROCS.map(p => weightedPaintingProcSum(payload, p.key));
   const totalAmt = weightedPaintingSum(payload);
   const tr = document.createElement('tr'); tr.className = 'hi'; tr.dataset.paintingTotal = '';
-  const totalRatio = sum(groups, group => productMixRatio(payload, group.key));
-  let html = `<td colspan="4" style="text-align:right">${hasMultipleProducts ? `配比加权平均（总配比 ${formatNum(totalRatio)}）` : '合计'}</td>`;
+  const totalRatio = sum(groups.filter(g => !directProductGroup(payload, g.key)), group => productMixRatio(payload, group.key));
+  let html = `<td colspan="4" style="text-align:right">${hasMultipleProducts ? `配比平均 + 直接累加（总配比 ${formatNum(totalRatio)}）` : '合计'}</td>`;
   PAINTING_PROCS.forEach((p, i) => { html += `<td>${formatNum(totals[i])}</td><td></td>`; });
   html += `<td>${formatNum(totalAmt)}</td><td></td>${canEdit ? '<td></td>' : ''}`;
   tr.innerHTML = html;
@@ -4429,6 +4550,25 @@ function renderPaintingTable(container, payload, onChange, canEdit) {
       renderPaintingTable(container, payload, onChange, canEdit); onChange();
     };
     container.appendChild(btn);
+    const addGroup = document.createElement('button'); addGroup.type = 'button'; addGroup.className = 'mini';
+    addGroup.textContent = '＋ 添加产品分组'; addGroup.style.marginLeft = '8px';
+    const form = document.createElement('div'); form.hidden = true;
+    form.style.cssText = 'margin-top:12px;padding:14px;border:1px solid #cbd5e1;border-radius:8px;background:#f8fafc';
+    form.innerHTML = '<label>产品名称 <input data-group-name placeholder="例如：2#公仔" maxlength="100"></label> <label>配比 <input data-group-ratio type="number" min="0" step="any" value="1" style="width:90px"></label> <button type="button" data-create-group>添加</button> <button type="button" data-cancel-group>取消</button><p data-group-error role="status" style="color:#b91c1c"></p>';
+    addGroup.onclick = () => { form.hidden = false; form.querySelector('[data-group-name]').focus(); };
+    form.querySelector('[data-cancel-group]').onclick = () => { form.hidden = true; };
+    form.querySelector('[data-create-group]').onclick = () => {
+      const name = form.querySelector('[data-group-name]').value.trim();
+      const raw = form.querySelector('[data-group-ratio]').value, ratio = Number(raw);
+      const error = form.querySelector('[data-group-error]');
+      if (!name || raw === '' || !Number.isFinite(ratio) || ratio < 0) { error.textContent = '请填写产品名称和大于等于 0 的配比。'; return; }
+      if (groups.some(group => group.name === name)) { error.textContent = '该产品分组已存在，请使用“本组增加行”。'; return; }
+      const id = 'manual-product-' + crypto.randomUUID();
+      rows.push({name,images:[],product_group_id:id,product_group_name:name});
+      payload.product_mix_ratios[id] = ratio;
+      renderPaintingTable(container,payload,onChange,canEdit); onChange();
+    };
+    container.appendChild(addGroup); container.appendChild(form);
   }
 }
 
@@ -5224,7 +5364,7 @@ function renderShipping(host, payload, header, canEdit, onChange, freightMap, pr
       const finalUSD = totalUSD + moldShareUSD + prototypeShareUSD + testingShareUSD + customerSuppliedUSD;
       // 附加税 0.4%（与导出一致）：TOTAL(USD)×0.4% → ×码点 → ÷找数，加回报客货价
       const surtaxUsd = finalUSD * 0.004;
-      const surtaxMarkup = surtaxUsd * num(s.markup_x);
+      const surtaxMarkup = surtaxUsd * num(s.surtax_markup_x ?? s.markup_x);
       const surtaxDivided = surtaxMarkup / num(s.divisor);
       const quotedUSD = finalUSD + surtaxDivided;
       return { freight, lifting, afterShip, afterMarkup, afterDivisor, totalHKD, totalRMB, totalUSD, moldShareUSD, prototypeShareUSD, testingShareUSD, customerSuppliedUSD, finalUSD,
@@ -5372,7 +5512,7 @@ function renderShipping(host, payload, header, canEdit, onChange, freightMap, pr
           ${suppliedRows}
           <tr class="usd-total-row"><td>TOTAL (USD)</td>${rows.map((r, i) => cellTd(i, 'finalUSD', r)).join('')}${canEdit ? '<td></td>' : ''}</tr>
           <tr class="surtax-row"><td>附加税0.4%</td>${rows.map((r, i) => cellTd(i, 'surtaxUsd', r)).join('')}${canEdit ? '<td></td>' : ''}</tr>
-          <tr><td>码点 × ${s.markup_x}</td>${rows.map((r, i) => cellTd(i, 'surtaxMarkup', r)).join('')}${canEdit ? '<td></td>' : ''}</tr>
+          <tr><td>码点 × ${canEdit ? `<input id="sh-surtax-markup" aria-label="附加税码点" type="number" min="0" step="any" value="${s.surtax_markup_x ?? s.markup_x}" style="width:80px">` : (s.surtax_markup_x ?? s.markup_x)}</td>${rows.map((r, i) => cellTd(i, 'surtaxMarkup', r)).join('')}${canEdit ? '<td></td>' : ''}</tr>
           <tr><td>找数 ÷ ${s.divisor}</td>${rows.map((r, i) => cellTd(i, 'surtaxDivided', r)).join('')}${canEdit ? '<td></td>' : ''}</tr>
           <tr class="hi" style="background:#DBEAFE;color:#1E40AF;font-weight:700"><td>TOTAL (USD)</td>${rows.map((r, i) => cellTd(i, 'quotedUSD', r)).join('')}${canEdit ? '<td></td>' : ''}</tr>
         </tbody>
@@ -5888,6 +6028,16 @@ async function renderQuotePage() {
           btn.onclick = async () => {
             const act = btn.dataset.act;
             if (act === 'enter-edit') {
+              if (s.dept === 'molding') {
+                btn.disabled = true;
+                try {
+                  const latest = await api('/quotes/' + id);
+                  data.engineering_molds = latest.engineering_molds || [];
+                } catch (error) {
+                  alert('读取工程模具失败：' + error.message);
+                  return;
+                } finally { btn.disabled = false; }
+              }
               inEdit = true;
               c.querySelector('h2').outerHTML = renderHeader();
               c.querySelector('.wb-bar').outerHTML = renderBar();

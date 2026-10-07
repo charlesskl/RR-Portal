@@ -914,7 +914,7 @@ function sectionsToData({ quote, sections }) {
   }));
 
   // 装饰 / 喷油（BCD DECORATION 段）：次数取喷油十工序数量合计，金额取喷油完整港币值。
-  const paintingProcKeys = ['clamp', 'pad', 'roast', 'spray', 'edge', 'color', 'dip', 'oil', 'pp_water', 'uv'];
+  const paintingProcKeys = ['clamp', 'pad', 'roast', 'spray', 'edge', 'color', 'dip', 'oil', 'pp_water', 'uv', 'heat_transfer'];
   const paintingRows = painting.painting_items || painting.second_proc || [];
   ensureExplicitProductGroups(paintingRows);
   const paintOps = weightedRowsSum(painting, paintingRows, row =>

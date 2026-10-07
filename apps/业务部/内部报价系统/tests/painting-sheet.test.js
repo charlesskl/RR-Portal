@@ -100,3 +100,23 @@ test('部门导出控件保留喷油、电子导入按钮和文件框，其他�
     assert.equal(removed.length, ['painting', 'electronic'].includes(dept) ? 0 : 2);
   }
 });
+
+test('heat transfer imports quantity and price and participates in painting cost', async () => {
+ const workbook = new ExcelJS.Workbook();
+ const sheet = workbook.addWorksheet('喷油');
+ sheet.addRow(['名称','位置','热转印','热转印单价','备注']);
+ sheet.addRow(['转印件','正面',3,0.25,'测试']);
+ const result = await parseWorkbook(await workbook.xlsx.writeBuffer());
+ assert.equal(result.error,undefined);
+ assert.equal(result.items[0].heat_transfer_qty,3);
+ assert.equal(result.items[0].heat_transfer_unit,0.25);
+ const source = fs.readFileSync(path.join(__dirname,'../frontend/workbench.js'),'utf8');
+ const vm = require('node:vm');
+ const start=source.indexOf('const PAINTING_PROCS =');
+ const end=source.indexOf('];',start)+2;
+ const fnStart=source.indexOf('function paintingRowAmount(');
+ const fnEnd=source.indexOf('function renamePaintingProductGroup(',fnStart);
+ const context=vm.createContext({num:v=>Number(v)||0});
+ vm.runInContext(source.slice(start,end)+'\n'+source.slice(fnStart,fnEnd),context);
+ assert.equal(context.paintingRowAmount(result.items[0]),0.75);
+});

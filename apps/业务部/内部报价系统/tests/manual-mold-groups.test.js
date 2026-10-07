@@ -1,0 +1,26 @@
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const vm = require('node:vm');
+const path = require('node:path');
+const source = fs.readFileSync(path.join(__dirname, '../frontend/workbench.js'), 'utf8');
+const ctx = vm.createContext({ crypto: require('node:crypto') });
+vm.runInContext(source.slice(source.indexOf('function addManualMoldGroup('), source.indexOf('function renderMolds(')), ctx);
+test('manual mold groups keep separate identities and add rows within the selected product', () => {
+  const molds = [];
+  const a = ctx.addManualMoldGroup(molds, '1#产品');
+  a.name = '头'; a.mold_no = 'M01'; a.price_rmb = 100;
+  const b = ctx.addManualMoldGroup(molds, '2#产品');
+  b.name = '头'; b.mold_no = 'M01';
+  const added = ctx.addMoldToProductGroup(molds, a.product_group_id);
+  assert.equal(molds[1], added);
+  assert.equal(molds[2], b);
+  assert.equal(added.product_group_name, '1#产品');
+  assert.equal(added.product_group_id, a.product_group_id);
+  assert.notEqual(a.product_group_id, b.product_group_id);
+  assert.equal(a.price_rmb, 100);
+  assert.equal(added.price_rmb, undefined);
+  assert.equal(added.product_mix_ratios, undefined);
+  assert.throws(() => ctx.addManualMoldGroup(molds, ' 1#产品 '), /已存在/);
+  assert.throws(() => ctx.addManualMoldGroup(molds, ''), /请填写/);
+});

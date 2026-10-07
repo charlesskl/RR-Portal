@@ -17,6 +17,7 @@ const PROCS = [
   { key: 'oil',   label: '抹油' },
   { key: 'pp_water', label: '擦PP水' },
   { key: 'uv', label: 'UV' },
+  { key: 'heat_transfer', label: '热转印' },
 ];
 
 function toStr(v) {
@@ -35,7 +36,7 @@ function toNum(v) {
 
 function isHeaderRow(values) {
   const j = values.map(toStr).join('|');
-  return /位置/.test(j) && /(夹模|移印|散枪|边模|抹油)/.test(j);
+  return /位置/.test(j) && /(夹模|移印|散枪|边模|抹油|热转印)/.test(j);
 }
 
 // 只有“1#公仔 / 2#产品”这类明确编号才视为产品边界。

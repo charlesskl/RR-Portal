@@ -764,8 +764,8 @@
   function shippingSummary(host, result, sales, salesSection, quote, me) {
     const p = result.pricing, c = result.components;
     const editable = ['sales', 'engineering'].includes(me?.dept) && salesSection?.status !== 'approved';
-    const fields = { markup_x: p.markup, sew_markup_x: sales.shipping?.sew_markup_x ?? p.markup, elec_markup_x: sales.shipping?.elec_markup_x ?? p.markup, divisor: p.divisor, fx_hkd_usd: p.fx, amortization_usd: Number(sales.mixed_pricing?.amortization_usd || 0), surtax_pct: p.surtax_pct, target_usd: Number(sales.shipping?.target_usd || 0) };
-    const nonnegative = new Set(['amortization_usd', 'surtax_pct', 'target_usd']);
+    const fields = { surtax_markup_x: sales.shipping?.surtax_markup_x ?? p.markup, markup_x: p.markup, sew_markup_x: sales.shipping?.sew_markup_x ?? p.markup, elec_markup_x: sales.shipping?.elec_markup_x ?? p.markup, divisor: p.divisor, fx_hkd_usd: p.fx, amortization_usd: Number(sales.mixed_pricing?.amortization_usd || 0), surtax_pct: p.surtax_pct, target_usd: Number(sales.shipping?.target_usd || 0) };
+    const nonnegative = new Set(['amortization_usd', 'surtax_pct', 'surtax_markup_x', 'target_usd']);
     const validFields = () => Object.entries(fields).every(([key, value]) => Number.isFinite(value) && (nonnegative.has(key) ? value >= 0 : value > 0));
     const field = (key, label) => `${label} <input aria-label="${label}" data-price-key="${key}" type="number" min="${nonnegative.has(key) ? 0 : 0.000001}" step="any" value="${esc(fields[key])}" ${editable ? '' : 'disabled'} style="width:84px">`;
     const sewing = (c.sewing_hair || 0) + (c.sewing_cloth || 0), electronic = c.electronic || 0;
@@ -794,7 +794,7 @@
       ${row('电子','electronic')}${row(field('elec_markup_x','码点 ×'),'elecMarked')}${row('TOTAL 电子 (HK$)','elecMarked','hi')}
       ${row('码点后合计 (HK$)','markedTotal','hi')}${row(field('divisor','统一找数 ÷'),'hkd')}${row('TOTAL (HK$)','hkd','hi')}${row(field('fx_hkd_usd','(USD)＝HK$ ÷'),'usd')}
       ${row('模具、手办及测试摊费 (USD)','engineeringAmortization')}${row(field('amortization_usd','额外摊费 (USD)'),'extraAmortization')}
-      ${row('TOTAL (USD)','before','mixed-usd-subtotal')}${row(field('surtax_pct','附加税 %'),'taxBase','mixed-surtax-row')}${row('码点 × <span data-tax-markup></span>','taxMarked')}${row('找数 ÷ <span data-tax-divisor></span>','surcharge')}${row('TOTAL (USD)','final','hi')}
+      ${row('TOTAL (USD)','before','mixed-usd-subtotal')}${row(field('surtax_pct','附加税 %'),'taxBase','mixed-surtax-row')}${row(field('surtax_markup_x','附加税码点 ×'),'taxMarked')}${row('找数 ÷ <span data-tax-divisor></span>','surcharge')}${row('TOTAL (USD)','final','hi')}
       </tbody></table></div><div class="ship-foot mixed-ship-foot"><label>报客货价 (USD) <input data-customer-price disabled style="width:110px;background:#f0f9ff;font-weight:600"></label><label>${field('target_usd','目标价 (USD)')}</label><label>相差 % <input data-target-diff disabled style="width:100px;background:#fff3cd"></label></div>${editable ? '<button type="button" data-save-price style="margin-top:12px">保存算价参数并更新汇总</button>' : ''}<p data-price-status role="status" class="muted"></p>`;
     host.querySelector('[data-container]').onchange = event => { containerKey = event.target.value; recalc(); };
     const status = host.querySelector('[data-price-status]');
@@ -816,7 +816,6 @@
     syncCompareOptions();
 
     function recalc() {
-      host.querySelector('[data-tax-markup]').textContent = fields.markup_x;
       host.querySelector('[data-tax-divisor]').textContent = fields.divisor;
       host.querySelector('[data-customer-price]').value = '—';
       host.querySelector('[data-target-diff]').value = '—';
@@ -835,7 +834,7 @@
         const sewPrice = sewMarked / fields.divisor, elecPrice = elecMarked / fields.divisor;
         const markedTotal = marked + sewMarked + elecMarked;
         const hkd = markedTotal / fields.divisor, usd = hkd / fields.fx_hkd_usd, before = usd + updatedAmortization;
-        const taxBase = before * fields.surtax_pct / 100, taxMarked = taxBase * fields.markup_x, surcharge = taxMarked / fields.divisor;
+        const taxBase = before * fields.surtax_pct / 100, taxMarked = taxBase * fields.surtax_markup_x, surcharge = taxMarked / fields.divisor;
         const values = { main, transport, cabinet, withFreight, marked, mainPrice, sewing, sewMarked, sewPrice, electronic, elecMarked, elecPrice, markedTotal, hkd, usd,
           engineeringAmortization: updatedAmortization - fields.amortization_usd, extraAmortization: fields.amortization_usd, before, taxBase, taxMarked, surcharge, final: before + surcharge };
         cells.forEach(cell => cell.textContent = fmt(values[cell.dataset.priceValue]));

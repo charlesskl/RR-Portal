@@ -187,3 +187,16 @@ test('附加税4%只按比例计收，忽略旧固定金额且支持税率修改
   edit(sections, 'sales', p => { p.mixed_pricing.surtax_pct = 0; });
   near(calculateMixedQuote({}, sections, { strict: true }).surcharge_usd, 0);
 });
+
+test('independent surtax markup leaves mixed product base pricing unchanged',()=>{
+ const sections=fixture();
+ edit(sections,'sales',p=>{p.shipping.markup_x=1.2;p.mixed_pricing.surtax_pct=0.4;});
+ const first=calculateMixedQuote({qty:1000},sections);
+ edit(sections,'sales',p=>{p.shipping.surtax_markup_x=2;});
+ const next=calculateMixedQuote({qty:1000},sections);
+ assert.equal(next.before_surtax_usd,first.before_surtax_usd);
+ assert.equal(next.pricing.markup,1.2);
+ near(next.surcharge_usd,first.surcharge_usd*2/1.2);
+ edit(sections,'sales',p=>{p.shipping.surtax_markup_x=0;});
+ assert.equal(calculateMixedQuote({qty:1000},sections).surcharge_usd,0);
+});

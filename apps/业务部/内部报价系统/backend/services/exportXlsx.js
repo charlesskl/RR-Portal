@@ -196,7 +196,7 @@ async function buildWorkbook({ quote, sections }) {
     { width: 15 },  // H 套数 / 印尼运费
     { width: 16 },  // I 模具尺寸
     { width: 14 },  // J 图片(左) / 总计 RMB
-    { width: 14 },  // K 图片(右) / 报客 HKD
+    { width: 20 },  // K 图片(右) / 报客 HKD / 小计金额
     { width: 18 },  // L 价格 / 总计 RMB
     { width: 16 },  // M 价格/报价 / 报客 HKD
     { width: 14 },  // N
@@ -2540,8 +2540,8 @@ function renderFreightScenarioPanel(ws, row, eng, sales, refs, startCol) {
 }
 
 function renderTaxSummary(ws, row, sales, extra = {}) {
-  const ps = sales.pricing_summary;
-  if (!ps) return row;
+  // Generate formulas from detail references even before the summary is saved.
+  const ps = sales.pricing_summary || {};
   const { subRefs = {}, fxRH: fxR = 0.85 } = extra;
   // 表1 部分单元格可关联到上方各部门 / 九、合计 HKD 小计
   const sumR = extra.summaryRow;

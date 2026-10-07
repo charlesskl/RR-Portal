@@ -149,6 +149,7 @@ async function load(showLoading = true) {
   if (showLoading) $('summary-body').innerHTML = `<tr><td colspan="${totalColumns()}" class="summary-empty">正在读取…</td></tr>`;
   const data = await api('/quote-summary');
   state.rows = data.rows || []; state.workshops = data.workshops || []; state.components = data.components || []; state.summaryColumns = data.summary_columns || []; state.canEdit = Boolean(data.can_edit);
+  $('summary-add-workshop').hidden = !state.canEdit;
   renderHead();
   const selected = $('summary-customer').value;
   const customers = [...new Set(state.rows.map(row => row.customer).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'zh-CN'));
@@ -196,3 +197,17 @@ $('summary-export').onclick = async () => {
   }
 };
 load().catch(error => { $('summary-body').innerHTML = `<tr><td colspan="${totalColumns()}" class="summary-empty summary-negative">${esc(error.message)}</td></tr>`; });
+
+$('summary-add-workshop').onclick = async () => {
+  const name = prompt('输入要添加的车间名称（最多40个字符）');
+  if (name == null) return;
+  const button = $('summary-add-workshop'); button.disabled = true;
+  try {
+    const added = await api('/quote-summary/workshops', {method:'POST',body:JSON.stringify({name})});
+    if (!state.workshops.some(item => item.code === added.code)) state.workshops.push(added);
+    document.querySelectorAll('.summary-workshop').forEach(select => {
+      if (![...select.options].some(o => o.value === added.code)) select.add(new Option(added.name, added.code));
+    });
+  } catch (error) { alert(error.message); }
+  finally { button.disabled = false; }
+};

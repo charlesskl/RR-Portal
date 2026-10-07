@@ -10,6 +10,31 @@ function isAdmin(user) {
   return user.role === 'admin' || Boolean(user.perms?.['账号管理']?.can_admin);
 }
 
+async function workshopOptions(factoryCode) {
+  const saved = await db.prepare("SELECT data_json FROM factory_ref_tables WHERE factory_code = ? AND key LIKE 'quote_workshop:%' ORDER BY key").all(factoryCode);
+  const options = WORKSHOPS.map(([code, name]) => ({code, name}));
+  for (const row of saved) {
+    const item = parseJson(row.data_json, null);
+    if (item?.code && item?.name && !options.some(o => o.code === item.code || o.name === item.name)) options.push(item);
+  }
+  return options;
+}
+
+router.post('/workshops', async (req, res) => {
+  if (req.user.dept !== 'sales' && !isAdmin(req.user)) return res.status(403).json({error:'只有业务或管理员可添加车间'});
+  const name = typeof req.body?.name === 'string' ? req.body.name.trim().normalize('NFKC') : '';
+  if (!name || name.length > 40 || /[\x00-\x1f\x7f]/.test(name)) return res.status(400).json({error:'请输入1–40个字符的车间名称'});
+  const options = await workshopOptions(req.user.active_factory_code);
+  const existing = options.find(o => o.name.toLowerCase() === name.toLowerCase() || o.code.toLowerCase() === name.toLowerCase());
+  if (existing) return res.json(existing);
+  const key = 'quote_workshop:' + require('node:crypto').createHash('sha256').update(name.toLowerCase()).digest('hex');
+  const item = {code:name, name};
+  await db.prepare('INSERT INTO factory_ref_tables (factory_code,key,data_json,updated_by) VALUES (?,?,?,?) ON CONFLICT(factory_code,key) DO NOTHING')
+    .run(req.user.active_factory_code,key,JSON.stringify(item),req.user.name);
+  const saved = await db.prepare('SELECT data_json FROM factory_ref_tables WHERE factory_code = ? AND key = ?').get(req.user.active_factory_code,key);
+  res.json(parseJson(saved.data_json, item));
+});
+
 async function accessibleQuoteRows(user) {
   if (isAdmin(user)) {
     return db.prepare('SELECT * FROM quotes WHERE factory_code = ? AND deleted_at IS NULL ORDER BY customer, id DESC')
@@ -26,7 +51,7 @@ async function accessibleQuoteRows(user) {
 async function loadRows(user) {
   const quotes = await accessibleQuoteRows(user);
   const result = [];
-  const allowedWorkshops = new Set(WORKSHOPS.map(([code]) => code));
+  const allowedWorkshops = new Set((await workshopOptions(user.active_factory_code)).map(item => item.code));
   for (const quote of quotes) {
     const sections = await db.prepare('SELECT dept, payload_json, status FROM quote_sections WHERE quote_id = ?').all(quote.id);
     const summary = buildQuoteSummary(quote, sections);
@@ -47,7 +72,7 @@ router.get('/', async (req, res) => {
   const rows = await loadRows(req.user);
   res.json({
     rows,
-    workshops: WORKSHOPS.map(([code, name]) => ({ code, name })),
+    workshops: await workshopOptions(req.user.active_factory_code),
     components: QUOTE_COMPONENTS.map(([code, name]) => ({ code, name })),
     summary_columns: SUMMARY_COLUMNS.map(([code, name, format]) => ({ code, name, format })),
     can_edit: req.user.dept === 'sales' || isAdmin(req.user),
@@ -66,14 +91,14 @@ router.put('/:id/confirmation', async (req, res) => {
   const status = Object.prototype.hasOwnProperty.call(body, 'status')
     ? (body.status === 'confirmed' ? 'confirmed' : 'pending')
     : (existing?.status === 'confirmed' ? 'confirmed' : 'pending');
-  const allowed = new Set(WORKSHOPS.map(([code]) => code));
+  const allowed = new Set((await workshopOptions(req.user.active_factory_code)).map(item => item.code));
   const existingWorkshops = parseJson(existing?.workshops_json, []);
   const requestedWorkshop = typeof body.workshop === 'string' ? body.workshop
     : (Array.isArray(body.workshops) ? body.workshops[0] : (existingWorkshops[0] || ''));
   const workshops = allowed.has(requestedWorkshop) ? [requestedWorkshop] : [];
-  const confirmedPrice = !Object.prototype.hasOwnProperty.call(body, 'confirmed_price') ? existing?.confirmed_price
+  const confirmedPrice = !Object.prototype.hasOwnProperty.call(body, 'confirmed_price') ? (existing?.confirmed_price ?? null)
     : (body.confirmed_price === '' || body.confirmed_price == null ? null : Number(body.confirmed_price));
-  const confirmedQty = !Object.prototype.hasOwnProperty.call(body, 'confirmed_qty') ? existing?.confirmed_qty
+  const confirmedQty = !Object.prototype.hasOwnProperty.call(body, 'confirmed_qty') ? (existing?.confirmed_qty ?? null)
     : (body.confirmed_qty === '' || body.confirmed_qty == null ? null : Math.round(Number(body.confirmed_qty)));
   const note = Object.prototype.hasOwnProperty.call(body, 'note') ? String(body.note || '').trim() : String(existing?.note || '');
   if (confirmedPrice != null && (!Number.isFinite(confirmedPrice) || confirmedPrice < 0)) return res.status(400).json({ error: '确认客价格式不正确' });

@@ -6,6 +6,8 @@ const WORKSHOPS = [
   ['xingxin_b', '兴信B'],
   ['huadeng', '华登'],
   ['heyuan', '河源'],
+  ['rri_id', 'RRI-印'],
+  ['rrm_id', 'RRM-印'],
 ];
 
 const QUOTE_COMPONENTS = [

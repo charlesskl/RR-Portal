@@ -150,6 +150,7 @@ async function load(showLoading = true) {
   const data = await api('/quote-summary');
   state.rows = data.rows || []; state.workshops = data.workshops || []; state.components = data.components || []; state.summaryColumns = data.summary_columns || []; state.canEdit = Boolean(data.can_edit);
   $('summary-add-workshop').hidden = !state.canEdit;
+  $('summary-edit-workshop').hidden = !state.canEdit;
   renderHead();
   const selected = $('summary-customer').value;
   const customers = [...new Set(state.rows.map(row => row.customer).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'zh-CN'));
@@ -210,4 +211,30 @@ $('summary-add-workshop').onclick = async () => {
     });
   } catch (error) { alert(error.message); }
   finally { button.disabled = false; }
+};
+
+
+$('summary-edit-workshop').onclick = () => {
+  const dialog = document.createElement('dialog');
+  dialog.innerHTML = '<form><h3>编辑车间</h3><p><label>车间 <select name="code"></select></label></p><p><label>名称 <input name="name" maxlength="40" required></label></p><p data-error role="alert"></p><button type="submit">保存名称</button> <button type="button" data-cancel>取消</button></form>';
+  const select = dialog.querySelector('select'), input = dialog.querySelector('input');
+  state.workshops.forEach(w => select.add(new Option(w.name, w.code)));
+  const selected = () => { input.value = state.workshops.find(w => w.code === select.value)?.name || ''; };
+  select.onchange = selected; selected();
+  dialog.querySelector('[data-cancel]').onclick = () => dialog.close();
+  dialog.onclose = () => dialog.remove();
+  dialog.querySelector('form').onsubmit = async event => {
+    event.preventDefault();
+    const button = dialog.querySelector('[type=submit]'); button.disabled = true;
+    try {
+      const updated = await api('/quote-summary/workshops', {method:'PUT',body:JSON.stringify({code:select.value,name:input.value})});
+      Object.assign(state.workshops.find(w => w.code === updated.code), updated);
+      document.querySelectorAll('.summary-workshop option').forEach(option => {
+        if (option.value === updated.code) option.textContent = updated.name;
+      });
+      dialog.close();
+    } catch (error) { dialog.querySelector('[data-error]').textContent = error.message; }
+    finally { button.disabled = false; }
+  };
+  document.body.append(dialog); dialog.showModal();
 };

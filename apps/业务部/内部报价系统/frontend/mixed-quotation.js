@@ -300,13 +300,20 @@
             root.mixed_imported_molds.push({ ...mold, source_file: file.name });
             for (const part of mold.parts?.length ? mold.parts : [mold]) {
               const name = part.name || mold.name || '未命名零件', moldNo = mold.mold_no || part.mold_no || '';
-              if ([...existing, ...root.mixed_imported_parts].some(p => p.name === name && p.mold_no === moldNo)) continue;
+              const previous = [...root.mixed_imported_parts, ...existing].find(p => p.name === name && p.mold_no === moldNo);
+              if (previous) {
+                const updated = window.MixedMolds.updateEngineeringFields(previous, {...window.MixedMolds.inheritMoldFields(part, mold), name, mold_no:moldNo, source_file:file.name});
+                const index = root.mixed_imported_parts.findIndex(p => p.id === previous.id);
+                if (index < 0) root.mixed_imported_parts.push(updated);
+                else root.mixed_imported_parts[index] = updated;
+                continue;
+              }
               root.mixed_imported_parts.push({ ...window.MixedMolds.inheritMoldFields(part, mold), source_file: file.name, id: `upload_${Date.now()}_${root.mixed_imported_parts.length}`, name, mold_no: moldNo, material: part.material || mold.material || '', weight_g: Number(part.weight_g || 0), cavity: Number(part.cavity || 1), material_unit_price: null, shot_price: 0, loss_pct: 3, note: part.note || '' }); added++;
             }
           }
           root.mixed_part_selections ||= JSON.parse(JSON.stringify(molding.parts_catalog?.selections || {}));
           changed(); redraw();
-          const notice = document.createElement('p'); notice.className = 'mixed-note'; notice.textContent = `已追加 ${added} 个可选零件；同模号同名称的已有零件保留原值。请保存工程草稿后到啤机部填写价格。`; host.prepend(notice);
+          const notice = document.createElement('p'); notice.className = 'mixed-note'; notice.textContent = `已追加 ${added} 个可选零件；同模号同名称的零件已更新工程资料，保留啤机价格。请保存工程草稿后到啤机部填写价格。`; host.prepend(notice);
         };
       } catch (e) { preview.textContent = `导入失败：${e.message}`; }
     };

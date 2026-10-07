@@ -325,6 +325,8 @@ function tryParseSheet(wb, sheetName) {
     const firstNonEmpty = r.map(c => String(c ?? '').trim()).find(Boolean) || '';
     // 边界：再遇到 "X、XXX部分" 章节标题 → 停止
     if (/[一二三四五六七八九十]、.+部分/.test(rowText)) break;
+    // 同一工作表的五金/包装区不是注塑模具，不能继承上一模具参数。
+    if (/^(?:[一二三四五六七八九十]+[、.．]\s*)?(?:五金|包装|辅料|电子)(?:部分|配件|明细)?$/.test(firstNonEmpty)) break;
     // 模具明细后的总套数/总价行表示数据区结束，后面通常是付款与交期条款。
     if (/^共\s*\d+\s*套.*模/.test(firstNonEmpty) || /合计\s*[（(]?\s*RMB\s*[）)]?\s*[:：]/i.test(rowText)) break;
     // 边界：再遇到 header-like 行（高密度关键字）→ 停止

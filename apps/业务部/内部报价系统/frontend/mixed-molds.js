@@ -291,6 +291,16 @@ function lookupMaterialPrice(material, grade, prices) {
     }
     return result;
   }
+  // Classify explicit section labels only; a plastic part may contain “弹簧” in its name.
+  function isNonMoldPart(part) {
+    return /^(五金|五金件|五金部分|外购五金|包装|辅料|电子)(?:部分|配件)?$/.test(String(part.mold_no || '').trim());
+  }
+  const ENGINEERING_FIELDS = ['name','mold_no','material','color','weight_g','cavity','sets','cycle_sec','machine','machine_model','target','daily_capacity','production_demand','mold_type','mold_size','price_rmb','price_usd','images','note','source_file'];
+  function updateEngineeringFields(existing, incoming) {
+    const result = {...existing};
+    for (const key of ENGINEERING_FIELDS) if (Object.prototype.hasOwnProperty.call(incoming, key)) result[key] = incoming[key];
+    return result;
+  }
   function engineeringCatalog(root, engineering) {
     const copy = JSON.parse(JSON.stringify(root));
     if (!copy.parts_catalog && engineering?.mixed_imported_parts?.length) copy.parts_catalog = { version: 1, parts: [], selections: {} };
@@ -300,10 +310,17 @@ function lookupMaterialPrice(material, grade, prices) {
         const inherited = inheritMoldFields(part, mold);
         const existing = copy.parts_catalog.parts.find(p => p.id === part.id);
         if (!existing) copy.parts_catalog.parts.push(JSON.parse(JSON.stringify(inherited)));
-        else Object.assign(existing, inheritMoldFields(existing, inherited));
+        else Object.assign(existing, updateEngineeringFields(existing, inherited));
+        (existing || copy.parts_catalog.parts[copy.parts_catalog.parts.length - 1]).engineering_source = true;
       }
       if (engineering?.mixed_part_selections) copy.parts_catalog.selections = JSON.parse(JSON.stringify(engineering.mixed_part_selections));
       const deleted = new Set(engineering?.mixed_deleted_part_ids || []);
+      const sourceIds = new Set((engineering?.mixed_imported_parts || []).map(p => p.id));
+      for (const p of copy.parts_catalog.parts) {
+        const owned = p.engineering_source || /^(numbered_|upload_)/.test(p.id || '');
+        if (isNonMoldPart({...p, ...(engineering?.mixed_part_edits?.[p.id] || {})}) ||
+            (Array.isArray(engineering?.mixed_imported_parts) && owned && !sourceIds.has(p.id))) deleted.add(p.id);
+      }
       copy.parts_catalog.parts = copy.parts_catalog.parts.filter(p => !deleted.has(p.id)).map(p => ({...p, ...(engineering?.mixed_part_edits?.[p.id] || {})}));
       copy.parts_catalog.parts.forEach(p => { p.note = cleanImportedMoldNote(p.note); });
       for (const id of Object.keys(copy.parts_catalog.selections || {})) copy.parts_catalog.selections[id] = copy.parts_catalog.selections[id].filter(r => !deleted.has(r.part_id));
@@ -383,5 +400,5 @@ function lookupMaterialPrice(material, grade, prices) {
     if (Math.abs(columns.other) < 1e-10) columns.other = 0;
     return { columns, labels, total: base.total };
   }
-  return { pricingWeights, ratioValue, catalogMachineReference, DEFAULT_MACHINE_PRICES, catalogMachinePrice, inheritMoldFields, engineeringCatalogRows, DEFAULT_MATERIAL_PRICES, lookupMaterialPrice, materialPricePerGram, catalogMaterialPrice, productionDemand, automaticCatalogLabor, validateConfig, weights, calculate, number, enableCatalog, catalogRows, applyCatalog, engineeringCatalog, costBreakdown, dynamicCostBreakdown };
+  return { isNonMoldPart, updateEngineeringFields, pricingWeights, ratioValue, catalogMachineReference, DEFAULT_MACHINE_PRICES, catalogMachinePrice, inheritMoldFields, engineeringCatalogRows, DEFAULT_MATERIAL_PRICES, lookupMaterialPrice, materialPricePerGram, catalogMaterialPrice, productionDemand, automaticCatalogLabor, validateConfig, weights, calculate, number, enableCatalog, catalogRows, applyCatalog, engineeringCatalog, costBreakdown, dynamicCostBreakdown };
 });

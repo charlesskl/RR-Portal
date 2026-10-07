@@ -334,6 +334,7 @@ function buildSummaryWorkbook(rows, filters = {}) {
     group.rows.forEach((row, index) => {
     const confirmation = row.confirmation || {};
     const workshopNames = (confirmation.workshops || []).map(code => {
+      if (row.workshop_names?.[code]) return row.workshop_names[code];
       const match = WORKSHOPS.find(item => item[0] === code);
       return match ? match[1] : code;
     }).join('、');
@@ -600,7 +601,7 @@ function buildDetailedSummaryWorkbook(rows, filters = {}) {
     group.rows.forEach((row,index)=>{
       const confirmation=row.confirmation||{};
       const qty=num(confirmation.confirmed_qty??row.qty), price=num(confirmation.confirmed_price??row.quoted_price);
-      const workshop=(confirmation.workshops||[]).map(code=>(WORKSHOPS.find(x=>x[0]===code)||[,code])[1]).join('、');
+      const workshop=(confirmation.workshops||[]).map(code=>(row.workshop_names?.[code] || (WORKSHOPS.find(x=>x[0]===code)||[,code])[1])).join('、');
       const base={serial:index+1,customer:row.customer,workshop,quote_no:row.quote_no,product_name:row.product_name,created_at:row.created_at?new Date(row.created_at):'',qty,quoted_price:price,
         confirmation_status:confirmation.status==='confirmed'?'已确认':'待确认',confirmed_by:confirmation.confirmed_by||'',confirmed_at:confirmation.confirmed_at?new Date(confirmation.confirmed_at):'',note:confirmation.note||''};
       const values=calculateSummaryValues(row.components_before_tax,row.components,qty,price,row.abs_material_cost);

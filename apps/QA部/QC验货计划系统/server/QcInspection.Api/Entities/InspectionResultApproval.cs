@@ -11,6 +11,7 @@ public sealed class InspectionResultApproval
     public string RequestedThirdPartyResult { get; set; } = string.Empty;
     public string RequestedHoldRejectReason { get; set; } = string.Empty;
     public string RequestedNote { get; set; } = string.Empty;
+    public decimal? RequestedInspectedQuantity { get; set; }
     public string Status { get; set; } = "待审批";
     public string RequestedBy { get; set; } = string.Empty;
     public DateTime RequestedAt { get; set; } = DateTime.UtcNow;

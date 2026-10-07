@@ -150,6 +150,9 @@ using (var scope = app.Services.CreateScope())
     if (!inspectionColumns.Contains("ScheduleKey")) db.Database.ExecuteSqlRaw("ALTER TABLE InspectionRecords ADD COLUMN ScheduleKey TEXT NOT NULL DEFAULT ''");
     if (!inspectionColumns.Contains("ScheduleSource")) db.Database.ExecuteSqlRaw("ALTER TABLE InspectionRecords ADD COLUMN ScheduleSource TEXT NOT NULL DEFAULT ''");
     if (!inspectionColumns.Contains("ScheduleCreatedBatchId")) db.Database.ExecuteSqlRaw("ALTER TABLE InspectionRecords ADD COLUMN ScheduleCreatedBatchId INTEGER NULL");
+    if (!inspectionColumns.Contains("InspectedQuantity")) db.Database.ExecuteSqlRaw("ALTER TABLE InspectionRecords ADD COLUMN InspectedQuantity TEXT NULL");
+    var approvalColumns = db.Database.SqlQueryRaw<string>("SELECT name AS Value FROM pragma_table_info('InspectionResultApprovals')").ToHashSet();
+    if (!approvalColumns.Contains("RequestedInspectedQuantity")) db.Database.ExecuteSqlRaw("ALTER TABLE InspectionResultApprovals ADD COLUMN RequestedInspectedQuantity TEXT NULL");
     db.Database.ExecuteSqlRaw("CREATE INDEX IF NOT EXISTS IX_InspectionRecords_ScheduleCreatedBatchId ON InspectionRecords (ScheduleCreatedBatchId)");
     if (!inspectionColumns.Contains("Country")) db.Database.ExecuteSqlRaw("ALTER TABLE InspectionRecords ADD COLUMN Country TEXT NOT NULL DEFAULT ''");
     if (!inspectionColumns.Contains("PlannedShipDate")) db.Database.ExecuteSqlRaw("ALTER TABLE InspectionRecords ADD COLUMN PlannedShipDate TEXT NULL");
@@ -314,7 +317,7 @@ app.MapGet("/api/public/overview", async (AppDbContext db, CancellationToken ct)
         .Select(group => new { site = group.Key, count = group.Count() })
         .ToDictionaryAsync(value => value.site, value => value.count, ct),
 }));
-app.MapGet("/api/public/plans", async (string site, string? template, string? month, string? from, string? to,
+app.MapGet("/api/public/plans", async (string site, string? template, string? month, string? from, string? to, string? view,
     int? page, string? q, string? status, string? customer, string? location, AppDbContext db, CancellationToken ct) =>
 {
     if (site is not ("兴信" or "湖南" or "华登" or "待分配")) return Results.BadRequest(new { error = "厂区无效" });
@@ -323,6 +326,8 @@ app.MapGet("/api/public/plans", async (string site, string? template, string? mo
         siteQuery = siteQuery.Where(record => record.ScheduleSource == "JAZ/JWC" || EF.Functions.Like(record.Customer, "%JAZ%") || EF.Functions.Like(record.InspectionParty, "%JAZ%"));
     else if (site == "华登" && template == "普通验货")
         siteQuery = siteQuery.Where(record => record.ScheduleSource != "JAZ/JWC" && !EF.Functions.Like(record.Customer, "%JAZ%") && !EF.Functions.Like(record.InspectionParty, "%JAZ%"));
+    if (view is not (null or "all" or "week" or "unfinished")) return Results.BadRequest(new { error = "计划视图无效" });
+    siteQuery = FilterInspectionPlanView(siteQuery, view);
     var dates = await siteQuery.Where(record => record.InspectionDate != null).Select(record => record.InspectionDate!.Value).Distinct().ToListAsync(ct);
     var months = dates.Select(date => date.ToString("yyyy-MM")).Distinct().OrderByDescending(value => value).ToArray();
     if (!string.IsNullOrWhiteSpace(month))
@@ -569,52 +574,97 @@ app.MapPost("/api/legacy-inspections/import", async (HttpRequest request, string
     if (extension is not (".xlsx" or ".xls" or ".xlsm")) return Results.BadRequest(new { error = "仅支持xlsx、xls和xlsm文件" });
 
     IReadOnlyList<InspectionRecord> incoming;
+    var issues = new List<LegacyImportIssue>();
     try
     {
         await using var stream = file.OpenReadStream();
-        incoming = LegacyInspectionParser.Parse(stream, site, Path.GetFileName(file.FileName), template);
+        incoming = LegacyInspectionParser.Parse(stream, site, Path.GetFileName(file.FileName), template, issues);
     }
     catch (Exception error) when (error is InvalidDataException or NotSupportedException)
     {
         return Results.BadRequest(new { error = error.Message });
     }
 
-    // QC结果表允许认领由排期建立、尚未分配厂区的计划。
-    var existingRecords = await db.InspectionRecords.ToListAsync(cancellationToken);
-    var existing = existingRecords.GroupBy(InspectionOrderKey).ToDictionary(group => group.Key, group => group.OrderByDescending(value => value.Id).First());
+    // All matching and conflict checks finish before any mutation; one save commits the complete file.
+    await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+    var existingRecords = await db.InspectionRecords.Where(value => value.Site == site).ToListAsync(cancellationToken);
+    var entries = LegacyInspectionImport.Plan(incoming, existingRecords, site, issues);
+    if (issues.Count > 0)
+        return Results.Conflict(new
+        {
+            error = $"发现 {issues.Select(issue => (issue.Sheet, issue.Row)).Distinct().Count()} 行有问题，共 {issues.Count} 个问题；本次整批未写入，请查看问题清单并修正Excel。",
+            issues = issues.OrderBy(issue => issue.Sheet).ThenBy(issue => issue.Row),
+        });
+    var ids = entries.Where(entry => entry.Current is not null).Select(entry => entry.Current!.Id).ToArray();
+    var pending = await db.InspectionResultApprovals.Where(value => ids.Contains(value.InspectionRecordId) && value.Status == "待审批")
+        .ToListAsync(cancellationToken);
+    var reinspectionAlerts = await db.InspectionAlerts.Where(value => ids.Contains(value.InspectionRecordId) &&
+        value.Status == "待处理" && value.Type == "待复检").ToListAsync(cancellationToken);
     var inserted = 0;
     var updated = 0;
-    foreach (var record in incoming.GroupBy(InspectionOrderKey).Select(group => group.Last()))
+    var resultChanged = 0;
+    foreach (var entry in entries)
     {
-        var key = InspectionOrderKey(record);
-        if (!existing.TryGetValue(key, out var current))
-        {
-            var partialMatches = existingRecords.Where(value => value.ContractNumber.Trim().Equals(record.ContractNumber.Trim(), StringComparison.OrdinalIgnoreCase)
-                && value.ItemNumber.Trim().Equals(record.ItemNumber.Trim(), StringComparison.OrdinalIgnoreCase)).ToArray();
-            if (partialMatches.Length > 1)
-                return Results.Conflict(new { error = $"{record.ContractNumber} / {record.ItemNumber} 对应多条计划，请先人工核对，未写入本次验货结果" });
-            if (partialMatches.Length == 1) current = partialMatches[0];
-        }
+        var record = entry.Incoming;
+        var current = entry.Current;
         if (current is null)
         {
             record.PlanId = $"PLAN-{Guid.NewGuid():N}";
             record.WorkflowStatus = ResultStatus(record.InternalResult, record.ThirdPartyResult);
             db.InspectionRecords.Add(record);
-            existing[key] = record;
             inserted++;
             continue;
         }
-        if (string.IsNullOrWhiteSpace(current.CustomerPo)) current.CustomerPo = record.CustomerPo;
-        AddImportAlerts(db, current, record);
-        ApplyImportedRecord(current, record);
-        current.Site = site;
+        var before = new { current.InternalResult, current.ThirdPartyResult, current.HoldRejectReason, current.InspectedQuantity };
+        var oldDate = current.InspectionDate;
+        LegacyInspectionImport.Apply(current, record);
+        var after = new { current.InternalResult, current.ThirdPartyResult, current.HoldRejectReason, current.InspectedQuantity };
+        if (!Equals(before, after))
+        {
+            db.InspectionAlerts.Add(new InspectionAlert
+            {
+                InspectionRecordId = current.Id, Site = site, Type = "验货结果变更",
+                Summary = $"{current.ContractNumber}/{current.CustomerPo}/{current.ItemNumber}（{current.InspectionDate:yyyy-MM-dd}）：洋行 {before.InternalResult} → {after.InternalResult}；第三方 {before.ThirdPartyResult} → {after.ThirdPartyResult}；原因 {before.HoldRejectReason} → {after.HoldRejectReason}；实检 {before.InspectedQuantity?.ToString() ?? "空"} → {after.InspectedQuantity?.ToString() ?? "空"}",
+                BeforeJson = JsonSerializer.Serialize(before), AfterJson = JsonSerializer.Serialize(after),
+            });
+            resultChanged++;
+        }
+        if (oldDate?.Date != current.InspectionDate?.Date)
+            db.InspectionAlerts.Add(new InspectionAlert
+            {
+                InspectionRecordId = current.Id, Site = site, Type = "验货期变更",
+                Summary = $"{current.ContractNumber}/{current.ItemNumber}：{oldDate:yyyy-MM-dd} → {current.InspectionDate:yyyy-MM-dd}",
+                BeforeJson = JsonSerializer.Serialize(new { InspectionDate = oldDate }),
+                AfterJson = JsonSerializer.Serialize(new { current.InspectionDate }),
+            });
+        foreach (var approval in pending.Where(value => value.InspectionRecordId == current.Id))
+        {
+            approval.Status = "已驳回"; approval.ReviewedBy = principal.Identity?.Name ?? "Excel导入";
+            approval.ReviewedAt = DateTime.UtcNow; approval.ReviewComment = "以Excel验货表为准，旧申请由导入替代";
+        }
+        current.WorkflowStatus = ResultStatus(current.InternalResult, current.ThirdPartyResult);
+        if (current.WorkflowStatus == "待复检") AddReinspectionAlert(db, current);
+        else foreach (var alert in reinspectionAlerts.Where(value => value.InspectionRecordId == current.Id))
+        {
+            alert.Status = "已处理"; alert.HandledBy = principal.Identity?.Name ?? "Excel导入";
+            alert.HandledAt = DateTime.UtcNow;
+        }
         updated++;
     }
-    await db.SaveChangesAsync(cancellationToken);
-    return Results.Ok(new { site, fileName = file.FileName, parsed = incoming.Count, inserted, updated, total = existingRecords.Count + inserted });
+    try
+    {
+        await db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+    }
+    catch (DbUpdateException)
+    {
+        return Results.Conflict(new { error = "记录重复或导入期间数据发生变化，本次未写入，请刷新后核对并重试" });
+    }
+    return Results.Ok(new { site, fileName = file.FileName, parsed = incoming.Count, inserted, updated,
+        duplicatesSkipped = incoming.Count - entries.Count, resultChanged, total = existingRecords.Count + inserted });
 }).DisableAntiforgery().RequireAuthorization("QcWrite");
 
-app.MapGet("/api/legacy-inspections", async (string site, string? template, string? month, string? from, string? to, int? page, string? q, string? status, string? customer, string? location, ClaimsPrincipal principal, AppDbContext db, CancellationToken cancellationToken) =>
+app.MapGet("/api/legacy-inspections", async (string site, string? template, string? month, string? from, string? to, string? view, int? page, string? q, string? status, string? customer, string? location, ClaimsPrincipal principal, AppDbContext db, CancellationToken cancellationToken) =>
 {
     if (!CanAccessSite(principal, site)) return Results.Forbid();
     if (site is not ("兴信" or "湖南" or "华登" or "待分配")) return Results.BadRequest(new { error = "厂区必须是兴信、湖南、华登或待分配" });
@@ -625,6 +675,8 @@ app.MapGet("/api/legacy-inspections", async (string site, string? template, stri
         siteQuery = siteQuery.Where(record => record.ScheduleSource == "JAZ/JWC" || EF.Functions.Like(record.Customer, "%JAZ%") || EF.Functions.Like(record.InspectionParty, "%JAZ%"));
     else if (site == "华登" && template == "普通验货")
         siteQuery = siteQuery.Where(record => record.ScheduleSource != "JAZ/JWC" && !EF.Functions.Like(record.Customer, "%JAZ%") && !EF.Functions.Like(record.InspectionParty, "%JAZ%"));
+    if (view is not (null or "all" or "week" or "unfinished")) return Results.BadRequest(new { error = "计划视图无效" });
+    siteQuery = FilterInspectionPlanView(siteQuery, view);
     var dates = await siteQuery.Where(record => record.InspectionDate != null)
         .Select(record => record.InspectionDate!.Value).Distinct().ToListAsync(cancellationToken);
     var months = dates.Select(date => date.ToString("yyyy-MM")).Distinct().OrderByDescending(value => value).ToArray();
@@ -680,7 +732,7 @@ app.MapGet("/api/legacy-inspections", async (string site, string? template, stri
 }).RequireAuthorization("QcRead");
 
 app.MapGet("/api/legacy-inspections/export", async (string site, string? template, string? month, string? from,
-    string? to, string? q, string? status, string? customer, string? location, ClaimsPrincipal principal, AppDbContext db, CancellationToken cancellationToken) =>
+    string? to, string? view, string? q, string? status, string? customer, string? location, ClaimsPrincipal principal, AppDbContext db, CancellationToken cancellationToken) =>
 {
     if (!CanAccessSite(principal, site)) return Results.Forbid();
     if (site is not ("兴信" or "湖南" or "华登")) return Results.BadRequest(new { error = "厂区必须是兴信、湖南或华登" });
@@ -690,6 +742,8 @@ app.MapGet("/api/legacy-inspections/export", async (string site, string? templat
         query = query.Where(record => record.ScheduleSource == "JAZ/JWC" || EF.Functions.Like(record.Customer, "%JAZ%") || EF.Functions.Like(record.InspectionParty, "%JAZ%"));
     else if (site == "华登")
         query = query.Where(record => record.ScheduleSource != "JAZ/JWC" && !EF.Functions.Like(record.Customer, "%JAZ%") && !EF.Functions.Like(record.InspectionParty, "%JAZ%"));
+    if (view is not (null or "all" or "week" or "unfinished")) return Results.BadRequest(new { error = "计划视图无效" });
+    query = FilterInspectionPlanView(query, view);
 
     if (!string.IsNullOrWhiteSpace(month))
     {
@@ -799,10 +853,15 @@ app.MapPut("/api/inspections/{id:long}/result", async (long id, InspectionResult
     if (!CanAccessSite(principal, record.Site)) return Results.Forbid();
     var requestedInternal = request.InternalResult?.Trim() ?? string.Empty;
     var requestedThirdParty = request.ThirdPartyResult?.Trim() ?? string.Empty;
+    if (request.InspectedQuantity is < 0 || request.InspectedQuantity > record.Quantity)
+        return Results.BadRequest(new { error = "本次实际验货数量不能小于0或超过本次计划数量" });
+    if ((IsFinalInspectionResult(requestedInternal) || IsFinalInspectionResult(requestedThirdParty)) && request.InspectedQuantity is null)
+        return Results.BadRequest(new { error = "填写验货结果时，请填写本次实际验货数量" });
     if (record.WorkflowStatus == "待审批") return Results.Conflict(new { error = "该记录已有待审批的结果修改" });
     var hasExistingResult = HasInspectionResult(record);
     var resultChanged = record.InternalResult != requestedInternal || record.ThirdPartyResult != requestedThirdParty ||
-        record.HoldRejectReason != (request.HoldRejectReason?.Trim() ?? "") || record.Note != (request.Note?.Trim() ?? "");
+        record.HoldRejectReason != (request.HoldRejectReason?.Trim() ?? "") || record.Note != (request.Note?.Trim() ?? "") ||
+        record.InspectedQuantity != request.InspectedQuantity;
     if (hasExistingResult && resultChanged)
     {
         var existingPending = await db.InspectionResultApprovals.FirstOrDefaultAsync(value => value.InspectionRecordId == id && value.Status == "待审批", cancellationToken);
@@ -812,7 +871,8 @@ app.MapPut("/api/inspections/{id:long}/result", async (long id, InspectionResult
             InspectionRecordId = id, Site = record.Site, PreviousInternalResult = record.InternalResult,
             PreviousThirdPartyResult = record.ThirdPartyResult, RequestedInternalResult = requestedInternal,
             RequestedThirdPartyResult = requestedThirdParty, RequestedHoldRejectReason = request.HoldRejectReason?.Trim() ?? string.Empty,
-            RequestedNote = request.Note?.Trim() ?? string.Empty, RequestedBy = principal.Identity?.Name ?? "未知用户",
+            RequestedNote = request.Note?.Trim() ?? string.Empty, RequestedInspectedQuantity = request.InspectedQuantity,
+            RequestedBy = principal.Identity?.Name ?? "未知用户",
         });
         record.WorkflowStatus = "待审批";
         await db.SaveChangesAsync(cancellationToken);
@@ -822,6 +882,7 @@ app.MapPut("/api/inspections/{id:long}/result", async (long id, InspectionResult
     record.ThirdPartyResult = requestedThirdParty;
     record.HoldRejectReason = request.HoldRejectReason?.Trim() ?? string.Empty;
     record.Note = request.Note?.Trim() ?? string.Empty;
+    record.InspectedQuantity = request.InspectedQuantity;
     record.WorkflowStatus = ResultStatus(record.InternalResult, record.ThirdPartyResult);
     if (record.WorkflowStatus == "待复检") AddReinspectionAlert(db, record);
     await db.SaveChangesAsync(cancellationToken);
@@ -887,6 +948,7 @@ app.MapPost("/api/inspection-approvals/{id:long}/review", async (long id, Approv
     {
         record.InternalResult = approval.RequestedInternalResult; record.ThirdPartyResult = approval.RequestedThirdPartyResult;
         record.HoldRejectReason = approval.RequestedHoldRejectReason; record.Note = approval.RequestedNote;
+        record.InspectedQuantity = approval.RequestedInspectedQuantity;
         record.WorkflowStatus = ResultStatus(record.InternalResult, record.ThirdPartyResult);
         if (record.WorkflowStatus == "待复检") AddReinspectionAlert(db, record);
     }
@@ -1073,27 +1135,6 @@ static InspectionRecord? MatchScheduleRecord(IEnumerable<InspectionRecord> recor
     return null;
 }
 
-static void AddImportAlerts(AppDbContext db, InspectionRecord current, InspectionRecord incoming)
-{
-    if (current.InspectionDate?.Date != incoming.InspectionDate?.Date)
-        db.InspectionAlerts.Add(new InspectionAlert
-        {
-            InspectionRecordId = current.Id, Site = current.Site, Type = "验货期变更",
-            Summary = $"{current.ItemNumber}：{current.InspectionDate:yyyy-MM-dd} → {incoming.InspectionDate:yyyy-MM-dd}",
-            BeforeJson = JsonSerializer.Serialize(new { current.InspectionDate }),
-            AfterJson = JsonSerializer.Serialize(new { incoming.InspectionDate }),
-        });
-    var before = new { current.Customer, current.ProductName, current.Quantity, current.Cartons };
-    var after = new { incoming.Customer, incoming.ProductName, incoming.Quantity, incoming.Cartons };
-    if (!Equals(current.Customer, incoming.Customer) || !Equals(current.ProductName, incoming.ProductName) || current.Quantity != incoming.Quantity || current.Cartons != incoming.Cartons)
-        db.InspectionAlerts.Add(new InspectionAlert
-        {
-            InspectionRecordId = current.Id, Site = current.Site, Type = "订单信息变更",
-            Summary = $"{current.ItemNumber}：客户、产品、数量或箱数发生变化",
-            BeforeJson = JsonSerializer.Serialize(before), AfterJson = JsonSerializer.Serialize(after),
-        });
-}
-
 static string ResultStatus(string internalResult, string thirdPartyResult)
 {
     var values = new[] { internalResult?.Trim() ?? string.Empty, thirdPartyResult?.Trim() ?? string.Empty };
@@ -1128,25 +1169,6 @@ static void AddReinspectionAlert(AppDbContext db, InspectionRecord record)
         InspectionRecordId = record.Id, Site = record.Site, Type = "待复检", Summary = $"{record.ItemNumber} 需要安排复检",
         BeforeJson = "{}", AfterJson = JsonSerializer.Serialize(new { record.InternalResult, record.ThirdPartyResult }),
     });
-}
-
-static void ApplyImportedRecord(InspectionRecord target, InspectionRecord source)
-{
-    // Order fields refresh; existing manually-entered QC values remain authoritative.
-    target.InspectionDate = source.InspectionDate; target.Customer = source.Customer;
-    target.ProductName = source.ProductName; target.Quantity = source.Quantity; target.Cartons = source.Cartons;
-    if (string.IsNullOrWhiteSpace(target.InspectionLocation)) target.InspectionLocation = source.InspectionLocation;
-    if (string.IsNullOrWhiteSpace(target.InspectionParty)) target.InspectionParty = source.InspectionParty;
-    if (string.IsNullOrWhiteSpace(target.ThirdPartyOrganization)) target.ThirdPartyOrganization = source.ThirdPartyOrganization;
-    if (string.IsNullOrWhiteSpace(target.InternalResult)) target.InternalResult = source.InternalResult;
-    if (string.IsNullOrWhiteSpace(target.ThirdPartyResult)) target.ThirdPartyResult = source.ThirdPartyResult;
-    if (string.IsNullOrWhiteSpace(target.HoldRejectReason)) target.HoldRejectReason = source.HoldRejectReason;
-    if (string.IsNullOrWhiteSpace(target.Note)) target.Note = source.Note;
-    if (target.WorkflowStatus != "待审批") target.WorkflowStatus = ResultStatus(target.InternalResult, target.ThirdPartyResult);
-    target.SourceFile = source.SourceFile;
-    target.SourceSheet = source.SourceSheet;
-    target.SourceRow = source.SourceRow;
-    target.ImportedAt = DateTime.UtcNow;
 }
 
 static void ApplyInspectionWrite(InspectionRecord target, InspectionWriteRequest source, AppDbContext db)
@@ -1206,6 +1228,19 @@ static IQueryable<InspectionRecord> FilterByCustomer(IQueryable<InspectionRecord
     };
 }
 
+static IQueryable<InspectionRecord> FilterInspectionPlanView(IQueryable<InspectionRecord> query, string? view)
+{
+    var today = DateTime.Today;
+    var weekStart = today.AddDays(-((int)today.DayOfWeek + 6) % 7);
+    return view switch
+    {
+        "week" => query.Where(record => record.InspectionDate >= weekStart && record.InspectionDate < weekStart.AddDays(7)),
+        "unfinished" => query.Where(record => record.InspectionDate < today &&
+            (record.WorkflowStatus == "待验货" || record.WorkflowStatus == "日期变更")),
+        _ => query,
+    };
+}
+
 static bool IsWithinScheduleImportWindow(DateTime? inspectionDate, DateTime today)
 {
     if (inspectionDate is null) return true;
@@ -1259,7 +1294,7 @@ static string? ValidateUserScope(string role, string scope)
 {
     if (role is "管理员" && scope != "全部厂区及系统设置") return "管理员应使用全部厂区及系统设置范围";
     if (role is "排期员" && scope != "排期导入与记录") return "排期员应使用排期导入与记录范围";
-    if (role is "QC主管" or "QC文员" && scope is not ("兴信、湖南" or "华登" or "全部厂区及系统设置"))
+    if (role is "QC主管" or "QC文员" && scope is not ("兴信" or "湖南" or "华登" or "全部厂区及系统设置"))
         return "请选择QC可管理的厂区范围";
     return null;
 }
@@ -1271,7 +1306,7 @@ public sealed record UserStatusRequest(bool IsActive);
 public sealed record PasswordResetRequest(string NewPassword);
 public sealed record ZuruPreviewItem(ZuruScheduleRow Row, string Kind, string[] Changes);
 public sealed record ScheduleImportConfirmRequest(string[]? SelectedKeys, string[]? SelectedPendingKeys);
-public sealed record InspectionResultRequest(string? InternalResult, string? ThirdPartyResult, string? HoldRejectReason, string? Note);
+public sealed record InspectionResultRequest(string? InternalResult, string? ThirdPartyResult, string? HoldRejectReason, string? Note, decimal? InspectedQuantity);
 public sealed record InspectionBulkDeleteRequest(long[]? Ids);
 public sealed record InspectionBulkUpdateItem(long Id, DateTime ExpectedImportedAt, InspectionWriteRequest Values);
 public sealed record InspectionBulkUpdateRequest(InspectionBulkUpdateItem[]? Items);

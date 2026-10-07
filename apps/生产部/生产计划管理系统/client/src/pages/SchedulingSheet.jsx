@@ -452,6 +452,7 @@ export default function SchedulingSheet({ workshop, tab, lineName = 'all', lines
       // 每条订单按选的做工（可多选）展开：每个做工各生成一条订单（如 半成品+包装+混装 → 3 条）
       const orders = [];
       const lineEntries = [];   // 货号→拉 映射，导入后存盘
+      const lineSeq = {};       // 每条拉的行序号：按 Excel 行序写 sort_order，导入后保持排期表调好的顺序
       for (const r of selected) {
         const base = mapRowToOrder(r.data);
         // 从服务端提取的客名
@@ -464,10 +465,13 @@ export default function SchedulingSheet({ workshop, tab, lineName = 'all', lines
         const wts = normWtList(previewWorkType[r._key]);
         for (const wt of wts) {
           const line = rowLine({ ...r, _key: wtRowKey(r._key, wt, wts), _wt: wt });
+          const effLine = line || base.line_name || '';
+          lineSeq[effLine] = (lineSeq[effLine] || 0) + 1;
           orders.push({
             ...base,
             work_type: wt,
-            line_name: line || base.line_name || '',
+            line_name: effLine,
+            sort_order: lineSeq[effLine],
             workshop,
             status: 'active',
             row_color: r.type === 'modified' ? 'blue' : (r.type === 'new' ? 'yellow' : null),
